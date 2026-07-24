@@ -44,7 +44,13 @@ export default function ProfileEditor({ onClose }: { onClose: () => void }) {
         <label className="pe-label">Persona</label>
         <textarea className="pe-textarea" rows={5} value={persona} onChange={e => setPersona(e.target.value)} placeholder="系统提示词..."/>
         <label className="pe-label">Model</label>
-        <input className="pe-input" value={model} onChange={e => setModel(e.target.value)}/>
+        <select className="pe-input" value={model} onChange={e => setModel(e.target.value)}>
+          <option value="deepseek-v4-flash">deepseek-v4-flash</option>
+          <option value="deepseek-v4-pro">deepseek-v4-pro</option>
+          <option value="deepseek-v4">deepseek-v4</option>
+          <option value="qwen2.5:1.5b">qwen2.5:1.5b (Ollama)</option>
+          <option value="deepseek-r1">deepseek-r1</option>
+        </select>
         <div className="pe-actions">
           <button className="pe-btn" onClick={onClose}>Cancel</button>
           <button className="pe-btn primary" onClick={save}>Save</button>
