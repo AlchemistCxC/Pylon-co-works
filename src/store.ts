@@ -1,7 +1,7 @@
 import { create } from 'zustand'
 
 export interface Profile { id: string; name: string; avatar?: string; persona: string; model: string }
-export interface Session { id: string; periId?: string; name: string; source: string; profileId: string }
+export interface Session { id: string; periId?: string; name: string; source: string; profileId: string; createdAt: number; lastActiveAt: number }
 export interface UserMapping { id: string; name: string; avatar?: string }
 
 export interface ThemeSettings {
@@ -76,7 +76,8 @@ export const useStore = create<ThemeState>((set, get) => ({
   addProfile: (p) => set(s => ({ profiles: [...s.profiles.filter(x => x.id !== p.id), p] })),
   addSession: (name) => {
     const profileId = get().activeProfileId
-    const s = { id: 's' + Date.now().toString(36), name, source: 'local:' + name, profileId }
+    const now = Date.now()
+    const s: Session = { id: 's' + now.toString(36), name, source: 'local:' + name, profileId, createdAt: now, lastActiveAt: now }
     set(state => {
       const sessions = [...state.sessions, s]
       localStorage.setItem('prism-sessions', JSON.stringify(sessions))

@@ -49,6 +49,12 @@ details[open] > .group-header::before { content:'▾'; }
 .profile-edit { background:none; border:none; color:var(--text-dim); cursor:pointer; font-size:14px; padding:4px 6px; border-radius:4px; margin-left:auto; }
 .profile-edit:hover { background:var(--bg-hover); color:var(--text); }
 
+.session-rename-input {
+  background:var(--bg-input); border:1px solid var(--accent);
+  border-radius:4px; padding:2px 6px; font-size:var(--sidebar-name-size,14px);
+  color:var(--text); width:100%; outline:none; font-weight:500;
+}
+
 /* collapsed */
 .sidebar.collapsed { width:48px; min-width:48px; }
 .sidebar.collapsed .search-input,

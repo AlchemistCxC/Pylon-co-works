@@ -21,6 +21,7 @@ export default function InputBar({ sessionId }: Props) {
   const [value, setValue] = useState('')
   const [cmdIdx, setCmdIdx] = useState(0)
   const [sendError, setSendError] = useState('')
+  const lastMsg = useRef('')
   const ref = useRef<HTMLTextAreaElement>(null)
   const activeProfileId = useStore(s => s.activeProfileId)
   const profiles = useStore(s => s.profiles)
@@ -90,6 +91,7 @@ export default function InputBar({ sessionId }: Props) {
 
     try { await invoke('send_message', { source: sessionId, content: text, persona }) }
     catch (e) { setSendError(String(e)); setTimeout(() => setSendError(''), 4000) }
+    lastMsg.current = text
     setValue('')
   }
 
@@ -108,6 +110,7 @@ export default function InputBar({ sessionId }: Props) {
   }
 
   const onKey = (e: KeyboardEvent) => {
+    if (e.ctrlKey && e.key === 'ArrowUp') { e.preventDefault(); if (lastMsg.current) setValue(lastMsg.current) }
     if (isCmd && filtered.length > 0) {
       if (e.key === 'Tab') { e.preventDefault(); setCmdIdx(i => (i + 1) % filtered.length); return }
       if (e.key === 'ArrowDown') { e.preventDefault(); setCmdIdx(i => Math.min(i + 1, filtered.length - 1)); return }

@@ -164,6 +164,12 @@ export default function Settings() {
             <Row label="字号"><Num value={t.inputFontSize} onChange={v=>u({inputFontSize:v})} min={12} max={22}/></Row>
             <Row label="最小高度"><Num value={t.inputMinHeight} onChange={v=>u({inputMinHeight:v})} min={36} max={120}/></Row>
           </Group>
+          <Group title="CLI 风格">
+            <Row label="模式"><Sel value={t.inputMode} onChange={v=>u({inputMode:v})} options={['default','cli']}/></Row>
+            <Row label="横线宽度"><Num value={t.cliLineWidth} onChange={v=>u({cliLineWidth:v})} min={1} max={6}/></Row>
+            <Row label="横线颜色"><Swatch value={t.cliLineColor} onChange={v=>u({cliLineColor:v})}/></Row>
+            <Row label="文字颜色"><Swatch value={t.cliTextColor} onChange={v=>u({cliTextColor:v})}/></Row>
+          </Group>
         </>}
 
         {sec === 'status' && <>

@@ -3,6 +3,15 @@ import { invoke } from '@tauri-apps/api/core'
 import { useStore, Session } from '../store'
 import './Sidebar.css'
 
+function formatTime(ts: number | undefined): string {
+  if (!ts) return ''
+  const diff = Date.now() - ts
+  if (diff < 60_000) return '刚刚'
+  if (diff < 3_600_000) return `${Math.floor(diff/60000)}m ago`
+  if (diff < 86_400_000) return `${Math.floor(diff/3600000)}h ago`
+  return `${Math.floor(diff/86400000)}d ago`
+}
+
 interface Props {
   activeSession: string | null
   onSelectSession: (id: string | null) => void
@@ -12,6 +21,8 @@ interface Props {
 export default function Sidebar({ activeSession, onSelectSession, onProfileEdit }: Props) {
   const [collapsed, setCollapsed] = useState(false)
   const [search, setSearch] = useState('')
+  const [renaming, setRenaming] = useState<string | null>(null)
+  const [renameValue, setRenameValue] = useState('')
   const profiles = useStore(s => s.profiles)
   const activeProfileId = useStore(s => s.activeProfileId)
   const setActiveProfile = useStore(s => s.setActiveProfile)
@@ -92,11 +103,31 @@ export default function Sidebar({ activeSession, onSelectSession, onProfileEdit 
               <summary className="group-header">{group}</summary>
               {items.map(s => (
                 <div key={s.id} className={`session-item ${activeSession === s.id ? 'active' : ''}`}
-                  onClick={() => handleSelect(s.id)}>
+                  onClick={() => handleSelect(s.id)}
+                  onDoubleClick={(e) => { e.stopPropagation(); setRenaming(s.id); setRenameValue(s.name) }}>
                   <span className="session-dot" style={s.periId ? { background: 'var(--tool-ok,#1e9646)' } : {}} />
                   <div className="session-info">
-                    <div className="session-name">{s.name}</div>
-                    <div className="session-meta">{s.source.replace(/^.*:/, '')}</div>
+                    {renaming === s.id ? (
+                      <input className="session-rename-input" value={renameValue}
+                        onChange={e => setRenameValue(e.target.value)}
+                        onKeyDown={e => {
+                          if (e.key === 'Enter') {
+                            const sessions = useStore.getState().sessions.map(ss =>
+                              ss.id === s.id ? { ...ss, name: renameValue } : ss)
+                            useStore.setState({ sessions })
+                            localStorage.setItem('prism-sessions', JSON.stringify(sessions))
+                            setRenaming(null)
+                          }
+                          if (e.key === 'Escape') setRenaming(null)
+                        }}
+                        onBlur={() => setRenaming(null)}
+                        autoFocus
+                        onClick={e => e.stopPropagation()}
+                      />
+                    ) : (
+                      <div className="session-name">{s.name}</div>
+                    )}
+                    <div className="session-meta">{formatTime(s.lastActiveAt || s.createdAt)}</div>
                   </div>
                   <button className="session-del" onClick={e => { e.stopPropagation(); handleDelete(s.id) }}>✕</button>
                 </div>

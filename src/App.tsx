@@ -71,6 +71,10 @@ export default function App() {
     '--input-focus': theme.inputFocusBorder,
     '--input-font-size': `${theme.inputFontSize}px`,
     '--input-min-h': `${theme.inputMinHeight}px`,
+    // cli
+    '--cli-line-width': `${theme.cliLineWidth}px`,
+    '--cli-line-color': theme.cliLineColor || undefined,
+    '--cli-text-color': theme.cliTextColor || undefined,
     // status
     '--status-bg': theme.statusBg,
     '--status-bg-image': theme.statusBgImage ? `url(${theme.statusBgImage})` : 'none',

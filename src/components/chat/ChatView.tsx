@@ -232,6 +232,8 @@ export default function ChatView({ sessionId }: Props) {
         {!generating && summary && <div className="term-summary">{summary}</div>}
         <div ref={bottomRef} />
       </div>
+      <button className="scroll-bottom-btn" onClick={() => bottomRef.current?.scrollIntoView({ behavior: 'smooth' })}
+        style={{ opacity: messages.length > 4 ? 1 : 0 }}>↓</button>
     </div>
   )
 }
@@ -239,8 +241,14 @@ export default function ChatView({ sessionId }: Props) {
 // ── Sub-components ──
 
 function AssistantContent({ text }: { text: string }) {
+  const [copied, setCopied] = useState(false)
+  const copy = () => {
+    navigator.clipboard.writeText(text)
+    setCopied(true); setTimeout(() => setCopied(false), 2000)
+  }
   return (
     <div className="term-assistant">
+      <button className="copy-btn" onClick={copy}>{copied ? '✓' : '⎘'}</button>
       <ReactMarkdown remarkPlugins={[remarkGfm]} components={{
         code({ className, children, ...props }) {
           const match = /language-(\w+)/.exec(className || '')

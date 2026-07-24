@@ -13,7 +13,14 @@
 .term-user-tag { background:var(--user-tag-bg,rgba(0,0,0,0.03)); color:var(--user-tag-text,var(--accent)); font-weight:600; margin-right:8px; padding:2px 8px; border-radius:4px; font-family:var(--font); }
 .term-user .term-p { display:inline; margin:0; }
 
-.term-assistant { padding:2px 0; white-space:pre-wrap; }
+.term-assistant { position:relative; padding:2px 0; white-space:pre-wrap; }
+.term-assistant .copy-btn {
+  position:absolute; top:0; right:-40px;
+  opacity:0; background:var(--bg-panel); border:1px solid var(--border);
+  border-radius:4px; padding:2px 8px; font-size:12px; cursor:pointer;
+  color:var(--text-dim); transition:opacity 0.15s;
+}
+.term-assistant:hover .copy-btn { opacity:1; }
 
 .term-reasoning { padding:4px 0; }
 .term-reasoning-head { cursor:pointer; color:var(--text-dim); font-style:italic; font-size:0.93em; user-select:none; }
@@ -92,3 +99,13 @@
 /* chat header */
 .chat-header { display:flex; align-items:center; justify-content:space-between; padding:0 0 8px 0; border-bottom:1px solid var(--border); margin-bottom:4px; }
 .chat-title { font-weight:600; font-size:0.95em; color:var(--text); }
+
+.scroll-bottom-btn {
+  position:absolute; bottom:80px; right:24px;
+  width:32px; height:32px; border-radius:50%;
+  background:var(--bg-panel); border:1px solid var(--border);
+  color:var(--text-dim); cursor:pointer; font-size:16px;
+  display:flex; align-items:center; justify-content:center;
+  transition:opacity 0.2s; z-index:5;
+}
+.scroll-bottom-btn:hover { background:var(--bg-hover); }
