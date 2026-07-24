@@ -35,7 +35,7 @@ pub struct RawMessage {
 
 impl AcpClient {
     /// Spawn `peri.exe acp`, perform initialize handshake, start reader + stderr threads.
-    pub fn spawn(peri_exe: &str, cwd: &str, model: &str) -> Result<Self, String> {
+    pub async fn spawn(peri_exe: &str, cwd: &str, model: &str) -> Result<Self, String> {
         let mut child = Command::new(peri_exe)
             .args(["acp", "--cwd", cwd, "--model", model])
             .stdin(Stdio::piped())
@@ -110,7 +110,7 @@ impl AcpClient {
             }
         });
 
-        let mut client = AcpClient {
+        let client = AcpClient {
             child,
             stdin,
             next_id: AtomicU64::new(1),
@@ -120,11 +120,11 @@ impl AcpClient {
         };
 
         // ACP initialize
-        let response = client.call_sync("initialize", serde_json::json!({
+        let response = client.call_async("initialize", serde_json::json!({
             "protocolVersion": 1,
             "capabilities": {},
             "clientInfo": {"name": "prism-desktop", "version": "0.1.0"}
-        }))?;
+        })).await?;
 
         let server = response.get("serverInfo").and_then(|s| s.get("name"))
             .and_then(|n| n.as_str()).unwrap_or("unknown");
@@ -133,10 +133,16 @@ impl AcpClient {
         Ok(client)
     }
 
-    /// Send a JSON-RPC request and wait for the matching response (synchronous — used for
-    /// initialize, session/new, set_mode — not for streaming prompts).
-    fn call_sync(&self, method: &str, params: serde_json::Value) -> Result<serde_json::Value, String> {
+    /// Send a JSON-RPC request and wait for the matching response.
+    async fn call_async(&self, method: &str, params: serde_json::Value) -> Result<serde_json::Value, String> {
         let id = self.next_id.fetch_add(1, Ordering::Relaxed);
+
+        // Register oneshot BEFORE writing to stdin
+        let (tx, rx) = oneshot::channel();
+        {
+            let mut pending = self.pending.lock().map_err(|e| e.to_string())?;
+            pending.insert(id, tx);
+        }
 
         let req = serde_json::json!({
             "jsonrpc": "2.0",
@@ -154,15 +160,7 @@ impl AcpClient {
             stdin.flush().map_err(|e| format!("flush failed: {}", e))?;
         }
 
-        let (tx, rx) = oneshot::channel();
-        {
-            let mut pending = self.pending.lock().map_err(|e| e.to_string())?;
-            pending.insert(id, tx);
-        }
-
-        let msg = tokio::runtime::Handle::current()
-            .block_on(rx)
-            .map_err(|_| "ACP connection closed".to_string())?;
+        let msg = rx.await.map_err(|_| "ACP connection closed".to_string())?;
 
         if let Some(err) = msg.error {
             return Err(format!("RPC error: {}", err));
@@ -172,21 +170,27 @@ impl AcpClient {
     }
 
     /// Create a new session. Returns the session ID.
-    pub fn new_session(&self, cwd: &str) -> Result<String, String> {
-        let result = self.call_sync("session/new", serde_json::json!({
+    pub async fn new_session(&self, cwd: &str) -> Result<String, String> {
+        let result = self.call_async("session/new", serde_json::json!({
             "cwd": cwd,
             "mcpServers": {}
-        }))?;
+        })).await?;
         result.get("sessionId")
             .and_then(|v| v.as_str())
             .map(|s| s.to_string())
             .ok_or_else(|| format!("invalid session/new response: {}", result))
     }
 
-    /// Send a prompt. Returns a request_id that can be used to correlate streaming
-    /// notifications. The caller should use `wait_for_prompt` or read from a shared channel.
-    pub fn send_prompt(&self, session_id: &str, text: &str) -> Result<u64, String> {
+    /// Atomic: allocate ID, register oneshot, then send prompt. No timing hole.
+    pub fn send_prompt_atomic(&self, session_id: &str, text: &str) -> Result<(u64, oneshot::Receiver<RawMessage>), String> {
         let id = self.next_id.fetch_add(1, Ordering::Relaxed);
+
+        // Register oneshot BEFORE writing to stdin
+        let (tx, rx) = oneshot::channel();
+        {
+            let mut pending = self.pending.lock().map_err(|e| e.to_string())?;
+            pending.insert(id, tx);
+        }
 
         let req = serde_json::json!({
             "jsonrpc": "2.0",
@@ -207,24 +211,14 @@ impl AcpClient {
             stdin.flush().map_err(|e| format!("flush failed: {}", e))?;
         }
 
-        Ok(id)
-    }
-
-    /// Register a oneshot for a given request_id. The reader thread will deliver the final
-    /// response to this channel. Notifications are NOT delivered here — those go through
-    /// the shared notification path.
-    pub fn register_response(&self, request_id: u64) -> Result<oneshot::Receiver<RawMessage>, String> {
-        let (tx, rx) = oneshot::channel();
-        let mut pending = self.pending.lock().map_err(|e| e.to_string())?;
-        pending.insert(request_id, tx);
-        Ok(rx)
+        Ok((id, rx))
     }
 
     /// Set session mode.
-    pub fn set_mode(&self, session_id: &str, mode: &str) -> Result<serde_json::Value, String> {
-        self.call_sync("session/set_mode", serde_json::json!({
+    pub async fn set_mode(&self, session_id: &str, mode: &str) -> Result<serde_json::Value, String> {
+        self.call_async("session/set_mode", serde_json::json!({
             "sessionId": session_id,
             "mode": mode
-        }))
+        })).await
     }
 }

@@ -10,12 +10,15 @@ import Anser from 'anser'
 import './ChatView.css'
 
 // ── Peri spinner ──
-const SPARKLES = ['✳','✴','✵','✶','✷','✸','✹','✺','✻','✼','❃','❊']
+const SPARKLES = '✳✴✵✶✷✸✹✺✻✼❃❊'.split('')
 const IDIOMS = [
   '格物致知','见微知著','大道至简','慎思明辨','融会贯通','温故知新','举一反三',
   '水滴石穿','千里之行','厚积薄发','锲而不舍','知行合一','日拱一卒','功不唐捐','学以致用',
   '精益求精','大巧若拙','返璞归真','独具匠心','无中生有',
   '上善若水','海纳百川','虚怀若谷','心无旁骛','宁静致远','道法自然',
+  // extra
+  '聚沙成塔','积微成著','抽丝剥茧','庖丁解牛','百川归海','星火燎原','闻一知十',
+  '窥斑见豹','穷工极巧','妙手偶得','含英咀华','钩深致远','探赜索隐','研精覃思',
 ]
 
 function fmtTokens(n: number) {
@@ -25,12 +28,14 @@ function fmtTokens(n: number) {
 
 function Spinner({ tokenCount, startTime }: { tokenCount: number; startTime: number }) {
   const [, tick] = useState(0)
-  const idiom = useMemo(() => IDIOMS[Math.floor(Math.random() * IDIOMS.length)], [])
   useEffect(() => {
-    const id = setInterval(() => tick(t => t + 1), 100)
+    const id = setInterval(() => tick(t => t + 1), 120)
     return () => clearInterval(id)
   }, [])
-  const frame = SPARKLES[Math.floor((Date.now() - startTime) / 100) % SPARKLES.length]
+  const tickIdx = Math.floor((Date.now() - startTime) / 120)
+  const frame = SPARKLES[tickIdx % SPARKLES.length]
+  // Rotate idiom every 4 ticks (~0.5s)
+  const idiom = IDIOMS[Math.floor(tickIdx / 4) % IDIOMS.length]
   const elapsed = Math.floor((Date.now() - startTime) / 1000)
   const elapsedStr = elapsed >= 60 ? `${Math.floor(elapsed/60)}m ${elapsed%60}s` : `${elapsed}s`
   const parts = [elapsedStr]

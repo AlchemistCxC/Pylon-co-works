@@ -5,6 +5,7 @@
 *, *::before, *::after { margin:0; padding:0; box-sizing:border-box; }
 
 :root {
+  --accent: #3b82f6;
   --bg-panel: rgba(0,0,0,0.03);
   --bg-hover: rgba(0,0,0,0.06);
   --bg-active: rgba(0,0,0,0.10);
