@@ -184,6 +184,18 @@ export default function Settings() {
           <Group title="其他">
             <Row label="Prism ON 色"><Swatch value={t.prismOnColor} onChange={v=>u({prismOnColor:v})}/></Row>
           </Group>
+          <Group title="心电图样式">
+            <Row label="基线宽度"><Num value={t.ekgLineWidth} onChange={v=>u({ekgLineWidth:v})} min={2} max={20}/></Row>
+            <Row label="最大振幅"><Num value={t.ekgAmplitudeMax} onChange={v=>u({ekgAmplitudeMax:v})} min={5} max={30}/></Row>
+            <Row label="基础波速"><Num value={t.ekgSpeedBase} onChange={v=>u({ekgSpeedBase:v})} min={0} max={3}/></Row>
+            <Row label="最大波速"><Num value={t.ekgSpeedMax} onChange={v=>u({ekgSpeedMax:v})} min={0} max={5}/></Row>
+            <Row label="定端点颜色"><Swatch value={t.ekgLeftColor} onChange={v=>u({ekgLeftColor:v})}/></Row>
+            <Row label="动端点颜色"><Swatch value={t.ekgMovingColor} onChange={v=>u({ekgMovingColor:v})}/></Row>
+            <Row label="消耗区颜色"><Swatch value={t.ekgConsumedColor} onChange={v=>u({ekgConsumedColor:v})}/></Row>
+          </Group>
+          <Group title="上下文显示">
+            <Row label="显示模式"><Sel value={t.tokenDisplay} onChange={v=>u({tokenDisplay:v})} options={['ekg','numeric']}/></Row>
+          </Group>
         </>}
 
         {sec === 'right' && <>

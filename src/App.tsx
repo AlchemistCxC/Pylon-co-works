@@ -74,6 +74,15 @@ export default function App() {
     '--pill-bg': theme.pillBg,
     '--pill-text': theme.pillText,
     '--prism-on': theme.prismOnColor,
+    // ekg style
+    '--ekg-line-width': `${theme.ekgLineWidth}px`,
+    '--ekg-amp-max': `${theme.ekgAmplitudeMax}px`,
+    '--ekg-speed-base': theme.ekgSpeedBase,
+    '--ekg-speed-max': theme.ekgSpeedMax,
+    '--ekg-left': theme.ekgLeftColor,
+    '--ekg-moving': theme.ekgMovingColor,
+    '--ekg-consumed': theme.ekgConsumedColor,
+    '--token-display': theme.tokenDisplay,
     // right
     '--right-bg': theme.rightBg,
     '--right-bg-image': theme.rightBgImage ? `url(${theme.rightBgImage})` : 'none',
