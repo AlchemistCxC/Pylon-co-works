@@ -21,6 +21,7 @@ export interface ThemeSettings {
   toolIndicator: string; sparkles: string
   msgStyle: string; msgFont: string; msgTextColor: string; msgLineHeight: number
   ccHeight: number; ccBgHeight: number
+  ccStyle: string
 }
 
 type ThemeState = ThemeSettings & {
@@ -66,6 +67,7 @@ const DEFAULTS: ThemeSettings = {
   toolIndicator: '●', sparkles: '✳✴✵✶✷✸✹✺✻✼❃❊',
   msgStyle: 'terminal', msgFont: 'mono', msgTextColor: '', msgLineHeight: 1.8,
   ccHeight: 120, ccBgHeight: 120,
+  ccStyle: 'wave',
 }
 
 export const useStore = create<ThemeState>((set, get) => ({

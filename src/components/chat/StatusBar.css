@@ -1,5 +1,18 @@
 .status-bar { display:flex; align-items:center; gap:10px; padding:6px 0; cursor:pointer; user-select:none; background:var(--status-bg,transparent); }
-.ekg-svg { width:var(--ekg-w,240px); height:30px; flex-shrink:0; }
+.ekg-svg { width:var(--ekg-w,150px); height:30px; }
+.ekg-bar {
+  position:relative; width:var(--ekg-w,150px); height:10px;
+  margin:10px 0; border-radius:5px; overflow:hidden;
+}
+.ekg-bar-track {
+  position:absolute; inset:0; background:var(--pill-bg,rgba(0,0,0,0.04));
+  border-radius:5px;
+}
+.ekg-bar-fill {
+  position:absolute; left:0; top:0; bottom:0;
+  width:var(--bar-fill,0%); background:var(--bar-color,var(--ekg-green));
+  border-radius:5px; transition:width 0.3s;
+}
 .ekg-pulse { animation: ekg-shift 0.5s linear infinite; }
 @keyframes ekg-shift {
   0% { opacity: 0.7; }

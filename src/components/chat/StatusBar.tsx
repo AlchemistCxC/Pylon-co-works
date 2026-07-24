@@ -62,6 +62,7 @@ export default function StatusBar() {
   const [modelOpen, setModelOpen] = useState(false)
   const activeProfile = useStore(s => s.profiles.find(x => x.id === s.activeProfileId))
   const model = activeProfile?.model || 'deepseek-v4-flash'
+  const ccStyle = useStore(s => s.ccStyle) || 'wave'
   const tokenDisplay = useStore(s => s.tokenDisplay)
 
   useEffect(() => {
@@ -93,7 +94,16 @@ export default function StatusBar() {
 
   return (
     <div className="status-bar">
-      {tokenDisplay !== 'numeric' && (
+      {ccStyle === 'bar' && (
+        <div className="ekg-bar" style={{
+          '--bar-fill': `${pct}%`,
+          '--bar-color': color,
+        } as React.CSSProperties}>
+          <div className="ekg-bar-fill" />
+          <div className="ekg-bar-track" />
+        </div>
+      )}
+      {ccStyle !== 'bar' && ccStyle !== 'numeric' && tokenDisplay !== 'numeric' && (
         <svg viewBox={`0 0 ${W} ${H}`} className="ekg-svg" preserveAspectRatio="none">
           <defs>
             <linearGradient id="baseline-grad" x1="0" y1="0" x2="1" y2="0">

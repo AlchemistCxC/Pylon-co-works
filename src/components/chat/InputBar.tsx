@@ -144,6 +144,7 @@ export default function InputBar({ sessionId }: Props) {
         </div>
       )}
       <div className="input-row">
+        {useStore.getState().inputMode === 'cli' && <span className="cli-prefix">&gt;</span>}
         <button className="input-btn attach" onClick={attachFile} title="Attach file (Ctrl+O)">
           <Paperclip size={16} />
         </button>
