@@ -1,11 +1,12 @@
 import { useState } from 'react'
 import { useStore, Session } from '../store'
 
-interface Props { sessionId: string; onClose: () => void }
+interface Props { sessionId: string; onClose: () => void; onDeleted?: () => void }
 
-export default function SessionSettings({ sessionId, onClose }: Props) {
+export default function SessionSettings({ sessionId, onClose, onDeleted }: Props) {
   const sessions = useStore(s => s.sessions)
-  const s = sessions.find(s => s.id === sessionId)!
+  const s = sessions.find(s => s.id === sessionId)
+  if (!s) return null  // session deleted, close gracefully
   const [name, setName] = useState(s.name)
   const [platform, setPlatform] = useState(s.platform || 'local')
   const [workdir, setWorkdir] = useState(s.workdir || '')
@@ -30,6 +31,7 @@ export default function SessionSettings({ sessionId, onClose }: Props) {
     useStore.setState({ sessions: updated })
     localStorage.setItem('pylon-sessions', JSON.stringify(updated))
     onClose()
+    onDeleted?.()
   }
 
   return (

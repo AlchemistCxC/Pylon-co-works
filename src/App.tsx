@@ -138,7 +138,7 @@ export default function App() {
         </div>
         {rightOpen && <RightPanel onClose={() => setRightOpen(false)} />}
         {showProfileEdit && <ProfileEditor onClose={() => setShowProfileEdit(false)} />}
-        {sessionSettingsId && <SessionSettings sessionId={sessionSettingsId} onClose={() => setSessionSettingsId(null)} />}
+        {sessionSettingsId && <SessionSettings sessionId={sessionSettingsId} onClose={() => setSessionSettingsId(null)} onDeleted={() => setActiveSession(null)} />}
       </div>
     </div>
     </ErrorBoundary>

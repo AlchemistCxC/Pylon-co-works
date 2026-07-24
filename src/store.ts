@@ -76,7 +76,18 @@ export const useStore = create<ThemeState>((set, get) => ({
     { id: 'serina', name: 'Serina', persona: '你是 Serina，TRPG 叙世引擎 GM。', model: 'deepseek-v4-flash' },
   ],
   activeProfileId: 'riccati',
-  sessions: (() => { try { const r = localStorage.getItem('pylon-sessions'); return r ? JSON.parse(r) : []; } catch { return []; } })(),
+  sessions: (() => {
+    try {
+      const raw = localStorage.getItem('pylon-sessions') ?? localStorage.getItem('prism-sessions')
+      if (raw) {
+        const parsed = JSON.parse(raw)
+        localStorage.setItem('pylon-sessions', JSON.stringify(parsed))
+        localStorage.removeItem('prism-sessions')
+        return parsed
+      }
+    } catch { }
+    return []
+  })(),
   users: [
     { id: 'qq:user:14CE', name: '14CE' },
     { id: 'qq:user:unknown', name: '访客' },
