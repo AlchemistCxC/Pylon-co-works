@@ -4,20 +4,16 @@ import { useStore } from '../store'
 import type { ThemeSettings } from '../store'
 import './Settings.css'
 
-type Section = 'global'|'sidebar'|'chat'|'tools'|'input'|'status'|'right'|'agent'|'user'|'msg'|'session'
+type Section = 'global'|'sidebar'|'cc'|'terminal'|'right'|'agent'|'session'
 
 const NAV: { key: Section; label: string }[] = [
   { key:'global', label:'全局' },
   { key:'sidebar', label:'左栏' },
-  { key:'chat', label:'终端' },
-  { key:'tools', label:'工具' },
-  { key:'input', label:'输入栏' },
-  { key:'status', label:'状态栏' },
+  { key:'cc', label:'中控区' },
+  { key:'terminal', label:'终端' },
   { key:'right', label:'右栏' },
-  { key:'user', label:'用户' },
-  { key:'msg', label:'消息栏' },
-  { key:'session', label:'会话' },
   { key:'agent', label:'Agent' },
+  { key:'session', label:'会话' },
 ]
 
 // ── helpers ──
@@ -93,6 +89,11 @@ export default function Settings() {
       <div className="settings-body">
         {sec === 'global' && <>
           <h3>全局外观</h3>
+          <Group title="用户信息">
+            <Row label="显示名"><Txt value={t.userName} onChange={v=>u({userName:v})}/></Row>
+            <Row label="前缀"><Txt value={t.userPrefix} onChange={v=>u({userPrefix:v})}/></Row>
+            <Row label="名字颜色"><Swatch value={t.userColor} onChange={v=>u({userColor:v})}/></Row>
+          </Group>
           <Group title="玻璃效果">
             <Row label="背景图"><Txt value={t.globalBgImage||''} onChange={v=>u({globalBgImage:v})}/></Row>
             <Row label="透明度"><Slider value={t.transparency} onChange={v=>u({transparency:v})} min={0} max={1}/><span className="set-val">{Math.round(t.transparency*100)}%</span></Row>
@@ -122,7 +123,7 @@ export default function Settings() {
           </Group>
         </>}
 
-        {sec === 'chat' && <>
+        {sec === 'terminal' && <>
           <h3>终端（聊天区）</h3>
           <Group title="外观">
             <Row label="背景色"><Swatch value={t.chatBg} onChange={v=>u({chatBg:v})}/></Row>
@@ -144,7 +145,7 @@ export default function Settings() {
           </Group>
         </>}
 
-        {sec === 'tools' && <>
+        {sec === 'terminal' && <>
           <h3>工具调用 & 用户标签</h3>
           <Group title="工具指示器">
             <Row label="完成 ●"><Swatch value={t.toolOk} onChange={v=>u({toolOk:v})}/></Row>
@@ -165,7 +166,7 @@ export default function Settings() {
           </Group>
         </>}
 
-        {sec === 'input' && <>
+        {sec === 'cc' && <>
           <h3>输入栏</h3>
           <Group title="外观">
             <Row label="背景色"><Swatch value={t.inputBg} onChange={v=>u({inputBg:v})}/></Row>
@@ -187,7 +188,7 @@ export default function Settings() {
           </Group>
         </>}
 
-        {sec === 'status' && <>
+        {sec === 'cc' && <>
           <h3>状态栏 & 心电图</h3>
           <Group title="外观">
             <Row label="背景色"><Swatch value={t.statusBg} onChange={v=>u({statusBg:v})}/></Row>
@@ -217,6 +218,7 @@ export default function Settings() {
             <Row label="消耗区颜色"><Swatch value={t.ekgConsumedColor} onChange={v=>u({ekgConsumedColor:v})}/></Row>
           </Group>
           <Group title="上下文显示">
+            <Row label="仪表样式"><Sel value={t.ccStyle} onChange={v=>u({ccStyle:v})} options={['wave','bar','numeric']}/></Row>
             <Row label="显示模式"><Sel value={t.tokenDisplay} onChange={v=>u({tokenDisplay:v})} options={['ekg','numeric']}/></Row>
           </Group>
         </>}
@@ -260,15 +262,6 @@ export default function Settings() {
           </div>
         </>}
 
-        {sec === 'user' && <>
-          <h3>用户显示</h3>
-          <Group title="自定义用户">
-            <Row label="显示名"><Txt value={t.userName} onChange={v=>u({userName:v})}/></Row>
-            <Row label="前缀"><Txt value={t.userPrefix} onChange={v=>u({userPrefix:v})}/></Row>
-            <Row label="名字颜色"><Swatch value={t.userColor} onChange={v=>u({userColor:v})}/></Row>
-          </Group>
-        </>}
-
         {sec === 'session' && <>
           <h3>当前会话设置</h3>
           <Group title="会话 Prompt（覆盖 Profile persona）">
@@ -278,7 +271,7 @@ export default function Settings() {
           </Group>
         </>}
 
-        {sec === 'msg' && <>
+        {sec === 'terminal' && <>
           <h3>消息栏</h3>
           <Group title="风格">
             <Row label="风格"><Sel value={t.msgStyle} onChange={v=>u({msgStyle:v})} options={['terminal','bubble']}/></Row>
