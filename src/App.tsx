@@ -42,12 +42,16 @@ export default function App() {
     '--sidebar-bg': theme.sidebarBg,
     '--sidebar-bg-image': theme.sidebarBgImage ? `url(${theme.sidebarBgImage})` : 'none',
     '--sidebar-width': `${theme.sidebarWidth}px`,
+    '--sidebar-transparency': theme.sidebarTransparency,
+    '--sidebar-blur': `${theme.sidebarBlur}px`,
     '--sidebar-text': theme.sidebarTextColor,
     '--sidebar-name-size': `${theme.sidebarNameSize}px`,
     '--sidebar-group-size': `${theme.sidebarGroupSize}px`,
     // chat
     '--chat-bg': theme.chatBg,
     '--chat-bg-image': theme.chatBgImage ? `url(${theme.chatBgImage})` : 'none',
+    '--chat-transparency': theme.chatTransparency,
+    '--chat-blur': `${theme.chatBlur}px`,
     '--chat-font': theme.chatFont === 'mono' ? 'var(--mono)' : 'var(--font)',
     '--chat-font-size': `${theme.chatFontSize}px`,
     '--chat-line-height': theme.chatLineHeight,
@@ -99,6 +103,8 @@ export default function App() {
     '--right-bg': theme.rightBg,
     '--right-bg-image': theme.rightBgImage ? `url(${theme.rightBgImage})` : 'none',
     '--right-width': `${theme.rightWidth}px`,
+    '--right-transparency': theme.rightTransparency,
+    '--right-blur': `${theme.rightBlur}px`,
   } as React.CSSProperties), [theme])
 
   return (

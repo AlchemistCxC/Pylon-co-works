@@ -28,6 +28,7 @@ function fmtTokens(n: number) {
 }
 
 function Spinner({ tokenCount, startTime }: { tokenCount: number; startTime: number }) {
+  const frames = useStore(s => s.sparkles) || '✳✴✵✶✷✸✹✺✻✼❃❊'
   const [, tick] = useState(0)
   useEffect(() => {
     const id = setInterval(() => tick(t => t + 1), 120)
@@ -306,6 +307,7 @@ function formatToolInput(name: string, rawInput: any): string {
 
 function ToolCard({ name, input, output, outputLines }: { name: string; input?: string; output?: string; outputLines?: number }) {
   const [open, setOpen] = useState(false)
+  const indicator = useStore(s => s.toolIndicator) || '●'
   const done = !!output
   const status = done ? 'ok' : 'run'
   let suffix = ''
@@ -321,7 +323,7 @@ function ToolCard({ name, input, output, outputLines }: { name: string; input?: 
   return (
     <div className="term-tool">
       <div className="term-tool-head" onClick={() => setOpen(!open)}>
-        <span className={`term-tool-indicator ${status}`}>●</span>
+        <span className={`term-tool-indicator ${status}`}>{indicator}</span>
         <span className="term-tool-name">{name}</span>
         {input && <span className="term-tool-summary"> ({input.length > 60 ? input.slice(0, 60) + '...' : input})</span>}
         {suffix && <span className="term-tool-suffix">{suffix}</span>}
@@ -339,12 +341,15 @@ function ToolCard({ name, input, output, outputLines }: { name: string; input?: 
 
 function UserLine({ sender, content }: { sender: string; content: string }) {
   const getUser = useStore(s => s.getUser)
+  const storeUser = useStore(s => s.userName)
+  const prefix = useStore(s => s.userPrefix) || '❯'
+  const userColor = useStore(s => s.userColor)
   const user = getUser(sender)
-  const name = user?.name || sender.replace(/^.*:/, '')
+  const name = storeUser || user?.name || sender.replace(/^.*:/, '')
   return (
     <div className="term-user">
-      <span className="term-user-prefix">{'\u276f'}</span>
-      <span className="term-user-name">{name}</span>
+      <span className="term-user-prefix" style={userColor ? { color: userColor } : {}}>{prefix}</span>
+      <span className="term-user-name" style={userColor ? { color: userColor } : {}}>{name}</span>
       <ReactMarkdown remarkPlugins={[remarkGfm]}>{content}</ReactMarkdown>
     </div>
   )

@@ -4,16 +4,18 @@ import { useStore } from '../store'
 import type { ThemeSettings } from '../store'
 import './Settings.css'
 
-type Section = 'global'|'sidebar'|'chat'|'tools'|'input'|'status'|'right'|'agent'
+type Section = 'global'|'sidebar'|'chat'|'tools'|'input'|'status'|'right'|'agent'|'user'|'msg'
 
 const NAV: { key: Section; label: string }[] = [
   { key:'global', label:'全局' },
   { key:'sidebar', label:'左栏' },
   { key:'chat', label:'终端' },
-  { key:'tools', label:'工具颜色' },
+  { key:'tools', label:'工具' },
   { key:'input', label:'输入栏' },
   { key:'status', label:'状态栏' },
   { key:'right', label:'右栏' },
+  { key:'user', label:'用户' },
+  { key:'msg', label:'消息栏' },
   { key:'agent', label:'Agent' },
 ]
 
@@ -108,6 +110,10 @@ export default function Settings() {
             <Row label="背景图"><Txt value={t.sidebarBgImage} onChange={v=>u({sidebarBgImage:v})}/></Row>
             <Row label="栏宽"><Num value={t.sidebarWidth} onChange={v=>u({sidebarWidth:v})} min={160} max={400}/></Row>
           </Group>
+          <Group title="玻璃效果">
+            <Row label="透明度"><Slider value={t.sidebarTransparency} onChange={v=>u({sidebarTransparency:v})} min={0} max={1}/><span className="set-val">{Math.round(t.sidebarTransparency*100)}%</span></Row>
+            <Row label="模糊"><Slider value={t.sidebarBlur} onChange={v=>u({sidebarBlur:v})} min={0} max={40} step={2}/><span className="set-val">{t.sidebarBlur}px</span></Row>
+          </Group>
           <Group title="文字">
             <Row label="文字颜色"><Swatch value={t.sidebarTextColor} onChange={v=>u({sidebarTextColor:v})}/></Row>
             <Row label="会话名字号"><Num value={t.sidebarNameSize} onChange={v=>u({sidebarNameSize:v})} min={11} max={20}/></Row>
@@ -131,6 +137,10 @@ export default function Settings() {
             <Row label="内联代码"><Swatch value={t.chatCodeColor} onChange={v=>u({chatCodeColor:v})}/></Row>
             <Row label="代码块背景"><Swatch value={t.chatCodeBg} onChange={v=>u({chatCodeBg:v})}/></Row>
           </Group>
+          <Group title="玻璃效果">
+            <Row label="透明度"><Slider value={t.chatTransparency} onChange={v=>u({chatTransparency:v})} min={0} max={1}/><span className="set-val">{Math.round(t.chatTransparency*100)}%</span></Row>
+            <Row label="模糊"><Slider value={t.chatBlur} onChange={v=>u({chatBlur:v})} min={0} max={40} step={2}/><span className="set-val">{t.chatBlur}px</span></Row>
+          </Group>
         </>}
 
         {sec === 'tools' && <>
@@ -147,6 +157,10 @@ export default function Settings() {
           <Group title="用户标签">
             <Row label="标签背景"><Swatch value={t.userTagBg} onChange={v=>u({userTagBg:v})}/></Row>
             <Row label="标签文字"><Swatch value={t.userTagText} onChange={v=>u({userTagText:v})}/></Row>
+          </Group>
+          <Group title="指示器形状">
+            <Row label="形状"><Sel value={t.toolIndicator} onChange={v=>u({toolIndicator:v})} options={['●','◆','■','▲','▶']}/></Row>
+            <Row label="Spinner 字符集"><Txt value={t.sparkles} onChange={v=>u({sparkles:v})}/></Row>
           </Group>
         </>}
 
@@ -213,6 +227,10 @@ export default function Settings() {
             <Row label="背景图"><Txt value={t.rightBgImage||''} onChange={v=>u({rightBgImage:v})}/></Row>
             <Row label="宽度"><Num value={t.rightWidth} onChange={v=>u({rightWidth:v})} min={200} max={400}/></Row>
           </Group>
+          <Group title="玻璃效果">
+            <Row label="透明度"><Slider value={t.rightTransparency} onChange={v=>u({rightTransparency:v})} min={0} max={1}/><span className="set-val">{Math.round(t.rightTransparency*100)}%</span></Row>
+            <Row label="模糊"><Slider value={t.rightBlur} onChange={v=>u({rightBlur:v})} min={0} max={40} step={2}/><span className="set-val">{t.rightBlur}px</span></Row>
+          </Group>
         </>}
 
         {sec === 'agent' && <>
@@ -239,6 +257,25 @@ export default function Settings() {
           <div style={{ marginTop:16, fontSize:12, color:'var(--text-dim)' }}>
             切换 Agent 后需重启 Prism Desktop 生效。
           </div>
+        </>}
+
+        {sec === 'user' && <>
+          <h3>用户显示</h3>
+          <Group title="自定义用户">
+            <Row label="显示名"><Txt value={t.userName} onChange={v=>u({userName:v})}/></Row>
+            <Row label="前缀"><Txt value={t.userPrefix} onChange={v=>u({userPrefix:v})}/></Row>
+            <Row label="名字颜色"><Swatch value={t.userColor} onChange={v=>u({userColor:v})}/></Row>
+          </Group>
+        </>}
+
+        {sec === 'msg' && <>
+          <h3>消息栏</h3>
+          <Group title="风格">
+            <Row label="风格"><Sel value={t.msgStyle} onChange={v=>u({msgStyle:v})} options={['terminal','bubble']}/></Row>
+            <Row label="字体"><Sel value={t.msgFont} onChange={v=>u({msgFont:v})} options={['mono','system']}/></Row>
+            <Row label="文字颜色"><Swatch value={t.msgTextColor} onChange={v=>u({msgTextColor:v})}/></Row>
+            <Row label="行间距"><Num value={t.msgLineHeight} onChange={v=>u({msgLineHeight:v})} min={1.2} max={2.5}/></Row>
+          </Group>
         </>}
 
         <div className="set-presets">

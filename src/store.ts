@@ -16,6 +16,10 @@ export interface ThemeSettings {
   ekgLineWidth: number; ekgAmplitudeMax: number; ekgSpeedBase: number; ekgSpeedMax: number
   ekgLeftColor: string; ekgMovingColor: string; ekgConsumedColor: string; tokenDisplay: string
   rightBg: string; rightBgImage: string; rightWidth: number
+  sidebarTransparency: number; sidebarBlur: number; chatTransparency: number; chatBlur: number; rightTransparency: number; rightBlur: number
+  userName: string; userPrefix: string; userColor: string
+  toolIndicator: string; sparkles: string
+  msgStyle: string; msgFont: string; msgTextColor: string; msgLineHeight: number
 }
 
 type ThemeState = ThemeSettings & {
@@ -56,6 +60,10 @@ const DEFAULTS: ThemeSettings = {
   ekgLineWidth: 3, ekgAmplitudeMax: 10, ekgSpeedBase: 0.5, ekgSpeedMax: 2.0,
   ekgLeftColor: 'rgba(0,0,0,0.35)', ekgMovingColor: '', ekgConsumedColor: 'rgba(0,0,0,0.08)', tokenDisplay: 'ekg',
   rightBg: 'rgba(0,0,0,0.02)', rightBgImage: '', rightWidth: 260,
+  sidebarTransparency: 1, sidebarBlur: 0, chatTransparency: 1, chatBlur: 0, rightTransparency: 1, rightBlur: 0,
+  userName: '', userPrefix: '❯', userColor: '',
+  toolIndicator: '●', sparkles: '✳✴✵✶✷✸✹✺✻✼❃❊',
+  msgStyle: 'terminal', msgFont: 'mono', msgTextColor: '', msgLineHeight: 1.8,
 }
 
 export const useStore = create<ThemeState>((set, get) => ({

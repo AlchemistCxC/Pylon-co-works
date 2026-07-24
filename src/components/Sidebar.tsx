@@ -91,11 +91,11 @@ export default function Sidebar({ activeSession, onSelectSession, onProfileEdit 
   return (
     <aside className={`sidebar ${collapsed ? 'collapsed' : ''}`}>
       <div className="sidebar-header">
-        {!collapsed && <input className="search-input" placeholder="搜索会话..." value={search} onChange={e => setSearch(e.target.value)} />}
-        <button className="sidebar-action" onClick={newSession} title="New Session">+</button>
         <button className="sidebar-action" onClick={() => setCollapsed(!collapsed)} title={collapsed ? '展开' : '收起'}>
           {collapsed ? '▸' : '▾'}
         </button>
+        {!collapsed && <input className="search-input" placeholder="搜索会话..." value={search} onChange={e => setSearch(e.target.value)} />}
+        <button className="sidebar-action" onClick={newSession} title="New Session">+</button>
       </div>
       {!collapsed && (
         <div className="session-list">

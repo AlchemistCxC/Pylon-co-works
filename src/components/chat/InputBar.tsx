@@ -21,6 +21,7 @@ export default function InputBar({ sessionId }: Props) {
   const [value, setValue] = useState('')
   const [cmdIdx, setCmdIdx] = useState(0)
   const [sendError, setSendError] = useState('')
+  const [attached, setAttached] = useState<{path:string;name:string;size:number}[]>([])
   const lastMsg = useRef('')
   const ref = useRef<HTMLTextAreaElement>(null)
   const activeProfileId = useStore(s => s.activeProfileId)
@@ -89,24 +90,21 @@ export default function InputBar({ sessionId }: Props) {
       return
     }
 
-    try { await invoke('send_message', { source: sessionId, content: text, persona }) }
+    try { await invoke('send_message', { source: sessionId, content: text, persona, attachments: attached.map(a => a.path) }) }
     catch (e) { setSendError(String(e)); setTimeout(() => setSendError(''), 4000) }
     lastMsg.current = text
     setValue('')
+    setAttached([])
   }
 
   const attachFile = async () => {
-    const MAX = 512 * 1024
     try {
-      const selected = await open({ multiple: false, filters: [{ name: 'All', extensions: ['*'] }] })
+      const selected = await open({ multiple: false })
       if (!selected) return
-      let content = await readTextFile(selected as string)
-      if (content.length > MAX) {
-        content = content.slice(0, MAX) + `\n... (truncated at ${(MAX/1024).toFixed(0)}KB)`
-      }
-      const fname = String(selected).replace(/^.*[\\/]/, '')
-      setValue(prev => prev + `\n\`\`\`${fname}\n${content}\n\`\`\``)
-    } catch (e) { /* cancelled or binary */ }
+      const path = selected as string
+      const name = path.replace(/^.*[\\\\/]/, '')
+      setAttached(prev => [...prev, { path, name, size: 0 }])
+    } catch (e) { /* cancelled */ }
   }
 
   const onKey = (e: KeyboardEvent) => {
@@ -122,6 +120,15 @@ export default function InputBar({ sessionId }: Props) {
   return (
     <div className={`input-bar ${useStore.getState().inputMode === 'cli' ? 'cli-mode' : ''}`}>
       {sendError && <div className="input-error">{sendError}</div>}
+      {attached.length > 0 && (
+        <div className="attached-files">
+          {attached.map((f, i) => (
+            <span key={i} className="attached-chip" onClick={() => setAttached(prev => prev.filter((_, j) => j !== i))}>
+              📎 {f.name} ✕
+            </span>
+          ))}
+        </div>
+      )}
       {isCmd && filtered.length > 0 && (
         <div className="command-palette">
           {filtered.map((c: typeof COMMANDS[number], i: number) => (

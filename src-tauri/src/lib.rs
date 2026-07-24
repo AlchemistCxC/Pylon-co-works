@@ -42,6 +42,7 @@ async fn send_message(
     source: String,
     content: String,
     persona: String,
+    attachments: Option<Vec<String>>,
 ) -> Result<String, String> {
     // Look up or create session — drop lock before any .await
     let (peri_id, is_first) = 'session: {
@@ -61,10 +62,17 @@ async fn send_message(
         (peri_id, true)
     };
 
+    // Prepend attachment labels if any
+    let attach_prefix = attachments.unwrap_or_default().iter().fold(String::new(), |mut acc, p| {
+        let name = std::path::Path::new(p).file_name().and_then(|n| n.to_str()).unwrap_or(p);
+        acc.push_str(&format!("[Attached: {}]\n", name));
+        acc
+    });
+
     let prompt_content = if is_first && !persona.is_empty() && !content.starts_with('/') {
-        format!("{}\n\n---\n\n{}", persona, content)
+        format!("{}{}\n\n---\n\n{}", attach_prefix, persona, content)
     } else {
-        content.clone()
+        format!("{}{}", attach_prefix, content)
     };
 
     let user_content = content.clone();
