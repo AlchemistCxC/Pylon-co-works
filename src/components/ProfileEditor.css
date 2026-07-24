@@ -1,0 +1,16 @@
+.profile-editor-overlay { position:fixed; inset:0; z-index:100; display:flex; align-items:center; justify-content:center; background:rgba(0,0,0,0.3); backdrop-filter:blur(4px); }
+.profile-editor { background:rgba(255,255,255,0.97); border:1px solid var(--border); border-radius:10px; width:420px; max-height:80vh; overflow-y:auto; box-shadow:0 12px 40px rgba(0,0,0,0.15); }
+.pe-header { display:flex; justify-content:space-between; align-items:center; padding:14px 18px; border-bottom:1px solid var(--border); font-size:14px; font-weight:600; }
+.pe-header button { background:none; border:none; color:var(--text-dim); font-size:16px; cursor:pointer; }
+.pe-header button:hover { color:var(--text); }
+.pe-body { padding:18px; display:flex; flex-direction:column; gap:10px; }
+.pe-label { font-size:12px; color:var(--text-dim); text-transform:uppercase; letter-spacing:0.5px; }
+.pe-input { background:var(--bg-input); border:1px solid var(--border); border-radius:6px; padding:8px 12px; color:var(--text); font-size:14px; outline:none; }
+.pe-input:focus { border-color:var(--border-focus); }
+.pe-textarea { background:var(--bg-input); border:1px solid var(--border); border-radius:6px; padding:8px 12px; color:var(--text); font-size:14px; outline:none; resize:vertical; font-family:var(--font); line-height:1.5; }
+.pe-textarea:focus { border-color:var(--border-focus); }
+.pe-actions { display:flex; justify-content:flex-end; gap:8px; margin-top:8px; }
+.pe-cancel { padding:7px 18px; border:1px solid var(--border); border-radius:6px; background:var(--bg-panel); color:var(--text-dim); font-size:13px; cursor:pointer; }
+.pe-cancel:hover { background:var(--bg-hover); }
+.pe-save { padding:7px 18px; border:none; border-radius:6px; background:var(--accent); color:white; font-size:13px; cursor:pointer; }
+.pe-save:hover { opacity:0.85; }

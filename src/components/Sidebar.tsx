@@ -1,9 +1,9 @@
 import { useStore } from '../store'
 import './Sidebar.css'
 
-interface Props { activeSession: string | null; onSelectSession: (id: string | null) => void }
+interface Props { activeSession: string | null; onSelectSession: (id: string | null) => void; onProfileEdit: () => void }
 
-export default function Sidebar({ activeSession, onSelectSession }: Props) {
+export default function Sidebar({ activeSession, onSelectSession, onProfileEdit }: Props) {
   const { sessions, profiles, activeProfileId, setActiveProfile } = useStore()
   const groups = {
     'QQ 群聊': sessions.filter(s => s.platform === 'qq-group'),
@@ -45,6 +45,7 @@ export default function Sidebar({ activeSession, onSelectSession }: Props) {
           </button>
         ))}
         <button className="profile-avatar add" title="New Profile">+</button>
+        <button className="profile-edit" title="Edit Profile" onClick={onProfileEdit}>&#9998;</button>
       </div>
     </aside>
   )

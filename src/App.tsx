@@ -4,13 +4,20 @@ import ChatView from './components/chat/ChatView'
 import InputBar from './components/chat/InputBar'
 import StatusBar from './components/chat/StatusBar'
 import RightPanel from './components/RightPanel'
+import Settings from './components/Settings'
 import { useStore } from './store'
 import './App.css'
+
+import ProfileEditor from './components/ProfileEditor'
+
+import PrismSheet from './components/PrismSheet'
 
 export default function App() {
   const [activeSession, setActiveSession] = useState<string | null>(null)
   const [showSettings, setShowSettings] = useState(false)
   const [rightOpen, setRightOpen] = useState(false)
+  const [showProfileEdit, setShowProfileEdit] = useState(false)
+  const [activeTab, setActiveTab] = useState<'peri' | 'prism'>('peri')
   const theme = useStore()
 
   const cssVars = useMemo(() => ({
@@ -83,13 +90,13 @@ export default function App() {
       </div>
 
       <div className="layout">
-        <Sidebar activeSession={activeSession} onSelectSession={setActiveSession} />
+        <Sidebar activeSession={activeSession} onSelectSession={setActiveSession} onProfileEdit={() => setShowProfileEdit(true)} />
         <div className="main">
-          {showSettings ? <Settings /> : <>
-            <div className="tabbar">
-              <button className="tab active">Peri</button>
-              <button className="tab">Prism</button>
-            </div>
+          <div className="tabbar">
+            <button className={`tab ${activeTab === 'peri' ? 'active' : ''}`} onClick={() => setActiveTab('peri')}>Peri</button>
+            <button className={`tab ${activeTab === 'prism' ? 'active' : ''}`} onClick={() => setActiveTab('prism')}>Prism</button>
+          </div>
+          {showSettings ? <Settings /> : activeTab === 'prism' ? <PrismSheet /> : <>
             <div className="main-body">
               <ChatView sessionId={activeSession} />
               <div className="bottom-area">
@@ -99,17 +106,8 @@ export default function App() {
             </div>
           </>}
         </div>
-        {rightOpen && (
-          <aside className="right-panel">
-            <div className="right-header">
-              <span>Panel</span>
-              <button onClick={() => setRightOpen(false)}>✕</button>
-            </div>
-            <div className="right-body">
-              <div className="right-placeholder">预留区域</div>
-            </div>
-          </aside>
-        )}
+        {rightOpen && <RightPanel onClose={() => setRightOpen(false)} />}
+        {showProfileEdit && <ProfileEditor onClose={() => setShowProfileEdit(false)} />}
       </div>
     </div>
   )

@@ -27,6 +27,13 @@
 .panel-stat strong { color:var(--text); }
 .panel-badge { font-size:11px; padding:1px 8px; border-radius:3px; font-weight:600; }
 .panel-badge.on { background:rgba(30,150,70,0.1); color:var(--success); }
+.panel-stat.mt { margin-top:6px; }
+
+.panel-block-list { display:flex; flex-direction:column; gap:2px; }
+.panel-block-item { display:flex; align-items:center; gap:6px; font-size:12px; padding:2px 0; font-family:var(--mono); }
+.panel-block-item.dim { opacity:0.4; }
+.block-idx { width:18px; height:18px; border-radius:3px; background:var(--bg-active); display:flex; align-items:center; justify-content:center; font-size:10px; color:var(--text-dim); }
+.block-label { color:var(--text-dim); font-family:var(--font); }
 
 .panel-empty { text-align:center; padding:40px 20px; color:var(--text-dim); font-size:13px; line-height:1.8; }
 .panel-empty-icon { font-size:32px; margin-bottom:8px; }

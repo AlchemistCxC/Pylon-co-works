@@ -1,4 +1,5 @@
 import { useState, useRef, KeyboardEvent } from 'react'
+import { open } from '@tauri-apps/plugin-dialog'
 import './InputBar.css'
 
 interface Props { sessionId: string | null }
@@ -16,6 +17,10 @@ export default function InputBar({ sessionId }: Props) {
   const filtered = value.startsWith('/') ? cmds.filter(c => c.cmd.startsWith(value.split(' ')[0])) : []
 
   const send = () => { if (!value.trim()) return; console.log('send:', value); setValue(''); setShowCmds(false) }
+  const pickFile = async () => {
+    const path = await open({ multiple: false })
+    if (path) setValue(v => v + (v ? ' ' : '') + path)
+  }
   const onKey = (e: KeyboardEvent) => {
     if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); send() }
     if (e.key === 'Escape') setShowCmds(false)
@@ -34,7 +39,7 @@ export default function InputBar({ sessionId }: Props) {
         </div>
       )}
       <div className="input-row">
-        <button className="attach-btn" title="Attach file">
+        <button className="attach-btn" title="Attach file" onClick={pickFile}>
           <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round">
             <path d="M21.44 11.05l-9.19 9.19a6 6 0 01-8.49-8.49l9.19-9.19a4 4 0 015.66 5.66l-9.2 9.19a2 2 0 01-2.83-2.83l8.49-8.48"/>
           </svg>

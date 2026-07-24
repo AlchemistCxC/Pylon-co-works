@@ -1,14 +1,13 @@
 import { useState } from 'react'
-import { useStore } from '../store'
 import './RightPanel.css'
 
 type Tab = 'files' | 'prism' | 'rag' | 'logs'
 
 const TABS: { key: Tab; label: string }[] = [
-  { key: 'files', label: '文件' },
+  { key: 'files', label: 'Files' },
   { key: 'prism', label: 'Prism' },
   { key: 'rag', label: 'RAG' },
-  { key: 'logs', label: '日志' },
+  { key: 'logs', label: 'Logs' },
 ]
 
 export default function RightPanel({ onClose }: { onClose: () => void }) {
@@ -55,16 +54,30 @@ function PrismTab() {
   return (
     <div className="panel-tab">
       <div className="panel-section">
-        <div className="panel-section-title">激活 Blocks</div>
-        <div className="panel-item"><span className="panel-dot ok"/> 角色卡 <span className="panel-meta">sys · +520t</span></div>
-        <div className="panel-item"><span className="panel-dot ok"/> 场景: 酒馆 <span className="panel-meta">sys · +180t</span></div>
-        <div className="panel-item"><span className="panel-dot ok"/> NPC对话规则 <span className="panel-meta">sys · +90t</span></div>
+        <div className="panel-section-title">场景</div>
+        <div className="panel-badge on">TRPG 战役</div>
       </div>
+
       <div className="panel-section">
-        <div className="panel-section-title">注入统计</div>
-        <div className="panel-stat">当前注入 <strong>790</strong> tokens</div>
-        <div className="panel-stat">Gate 命中 <strong>3</strong> 条</div>
-        <div className="panel-stat">Prism <span className="panel-badge on">ON</span></div>
+        <div className="panel-section-title">激活源</div>
+        <div className="panel-item"><span className="panel-dot ok"/> TRPG 战役 <span className="panel-meta">4 entries</span></div>
+        <div className="panel-item"><span className="panel-dot ok"/> 默认 <span className="panel-meta">2 entries</span></div>
+      </div>
+
+      <div className="panel-section">
+        <div className="panel-section-title">Block 序列</div>
+        <div className="panel-block-list">
+          <div className="panel-block-item"><span className="block-idx">1</span> system <span className="block-label">角色卡</span></div>
+          <div className="panel-block-item"><span className="block-idx">2</span> system <span className="block-label">场景设定</span></div>
+          <div className="panel-block-item"><span className="block-idx">3</span> system <span className="block-label">NPC对话规则</span></div>
+          <div className="panel-block-item dim"><span className="block-idx">4</span> hidden <span className="block-label">注入日志</span></div>
+        </div>
+      </div>
+
+      <div className="panel-section">
+        <div className="panel-section-title">当前注入</div>
+        <div className="panel-stat">Tokens <strong>790</strong> / Gate 命中 <strong>3</strong></div>
+        <div className="panel-stat mt">Prism <span className="panel-badge on">ON</span></div>
       </div>
     </div>
   )
@@ -75,9 +88,9 @@ function RagTab() {
     <div className="panel-tab">
       <div className="panel-empty">
         <div className="panel-empty-icon">📚</div>
-        <div>知识库检索</div>
+        <div>RAG 知识库</div>
         <div className="panel-empty-hint">接入 ChromaDB / bge-m3 后</div>
-        <div className="panel-empty-hint">显示匹配的知识库片段</div>
+        <div className="panel-empty-hint">在此检索知识库片段</div>
       </div>
     </div>
   )
