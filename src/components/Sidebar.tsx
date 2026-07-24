@@ -17,10 +17,10 @@ interface Props {
   onSelectSession: (id: string | null) => void
   onProfileEdit: () => void
   onSessionSettings: (id: string) => void
+  collapsed: boolean
 }
 
-export default function Sidebar({ activeSession, onSelectSession, onProfileEdit, onSessionSettings }: Props) {
-  const [collapsed, setCollapsed] = useState(false)
+export default function Sidebar({ activeSession, onSelectSession, onProfileEdit, onSessionSettings, collapsed }: Props) {
   const [search, setSearch] = useState('')
   const [renaming, setRenaming] = useState<string | null>(null)
   const [renameValue, setRenameValue] = useState('')
@@ -93,9 +93,6 @@ export default function Sidebar({ activeSession, onSelectSession, onProfileEdit,
   return (
     <aside className={`sidebar ${collapsed ? 'collapsed' : ''}`}>
       <div className="sidebar-header">
-        <button className="sidebar-action" onClick={() => setCollapsed(!collapsed)} title={collapsed ? '展开' : '收起'}>
-          {collapsed ? '▸' : '▾'}
-        </button>
         {!collapsed && <input className="search-input" placeholder="搜索会话..." value={search} onChange={e => setSearch(e.target.value)} />}
         <button className="sidebar-action" onClick={newSession} title="New Session">+</button>
       </div>

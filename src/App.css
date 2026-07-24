@@ -7,7 +7,7 @@
 .titlebar-controls button:hover { background:var(--bg-hover); color:var(--text); }
 .titlebar-controls .close:hover { background:rgba(190,40,40,0.15); color:var(--danger); }
 
-.layout { display:flex; flex:1; overflow:hidden; }
+.layout { display:flex; flex:1; overflow:hidden; position:relative; }
 .main { flex:1; display:flex; flex-direction:column; min-width:0; }
 
 .tabbar { display:flex; gap:0; padding:0 16px; border-bottom:1px solid var(--border); background:rgba(0,0,0,0.02); }

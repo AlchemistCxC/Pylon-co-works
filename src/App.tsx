@@ -22,6 +22,7 @@ export default function App() {
   const [rightOpen, setRightOpen] = useState(false)
   const [showProfileEdit, setShowProfileEdit] = useState(false)
   const [sessionSettingsId, setSessionSettingsId] = useState<string | null>(null)
+  const [sidebarCollapsed, setSidebarCollapsed] = useState(false)
 
   useEffect(() => {
     invoke('list_agents').then((list: any) => {
@@ -123,7 +124,11 @@ export default function App() {
       </div>
 
       <div className="layout">
-        <Sidebar activeSession={activeSession} onSelectSession={setActiveSession} onProfileEdit={() => setShowProfileEdit(true)} onSessionSettings={setSessionSettingsId} />
+        <button className="sidebar-toggle-float" onClick={() => setSidebarCollapsed(!sidebarCollapsed)}
+          title={sidebarCollapsed ? '展开左栏' : '收起左栏'}>
+          {sidebarCollapsed ? '▸' : '▾'}
+        </button>
+        <Sidebar activeSession={activeSession} onSelectSession={setActiveSession} onProfileEdit={() => setShowProfileEdit(true)} onSessionSettings={setSessionSettingsId} collapsed={sidebarCollapsed} />
         <div className="main">
           <div className="tabbar">
             <button className={`tab ${activeTab === 'peri' ? 'active' : ''}`} onClick={() => setActiveTab('peri')}>Peri</button>
