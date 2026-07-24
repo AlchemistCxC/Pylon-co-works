@@ -24,18 +24,18 @@ export default function InputBar({ sessionId }: Props) {
   const activeProfileId = useStore(s => s.activeProfileId)
   const profiles = useStore(s => s.profiles)
   const addSession = useStore(s => s.addSession)
-  const liveCommands = useStore(s => (s as any).liveCommands || [])
+  const liveCommands: {name:string; input_hint?:string; description?:string}[] = useStore(s => (s as any).liveCommands || [])
 
   const activeProfile = profiles.find(p => p.id === activeProfileId)
   const persona = activeProfile?.persona || ''
 
   // Dynamic commands: peri > fallback
   const COMMANDS = liveCommands.length > 0
-    ? liveCommands.map((c: any) => ({ cmd: '/' + c.name, args: c.input_hint ? ' ' + c.input_hint : '', info: c.description || '' }))
+    ? liveCommands.map((c: {name: string; input_hint?: string; description?: string}) => ({ cmd: '/' + c.name, args: c.input_hint ? ' ' + c.input_hint : '', info: c.description || '' }))
     : FALLBACK_COMMANDS
 
   const isCmd = value.startsWith('/')
-  const filtered = isCmd ? COMMANDS.filter(c => c.cmd.startsWith(value.split(' ')[0])) : []
+  const filtered = isCmd ? COMMANDS.filter((c: typeof COMMANDS[number]) => c.cmd.startsWith(value.split(' ')[0])) : []
 
   // Auto-resize textarea
   useEffect(() => {
@@ -119,7 +119,7 @@ export default function InputBar({ sessionId }: Props) {
     <div className="input-bar">
       {isCmd && filtered.length > 0 && (
         <div className="command-palette">
-          {filtered.map((c, i) => (
+          {filtered.map((c: typeof COMMANDS[number], i: number) => (
             <div key={c.cmd} className={`cmd-item ${i === cmdIdx ? 'active' : ''}`}
               onClick={() => { setValue(c.cmd + c.args + ' '); ref.current?.focus() }}>
               <span className="cmd-name">{c.cmd}{c.args}</span>
