@@ -91,7 +91,7 @@ export default function ChatView({ sessionId }: Props) {
           const autoName = content.slice(0, 30)
           const updated = sessions.map(ss => ss.id === s.id ? { ...ss, autoName, name: autoName } : ss)
           useStore.setState({ sessions: updated })
-          localStorage.setItem('prism-sessions', JSON.stringify(updated))
+          localStorage.setItem('pylon-sessions', JSON.stringify(updated))
         }
         // Clear running flags on all previous messages
         setMessages(prev => prev.map(m => ({ ...m, running: false })))

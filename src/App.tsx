@@ -12,6 +12,7 @@ import './App.css'
 import ProfileEditor from './components/ProfileEditor'
 
 import PrismSheet from './components/PrismSheet'
+import SessionSettings from './components/SessionSettings'
 
 import { getCurrentWindow } from '@tauri-apps/api/window'
 import { invoke } from '@tauri-apps/api/core'
@@ -21,6 +22,7 @@ export default function App() {
   const [showSettings, setShowSettings] = useState(false)
   const [rightOpen, setRightOpen] = useState(false)
   const [showProfileEdit, setShowProfileEdit] = useState(false)
+  const [sessionSettingsId, setSessionSettingsId] = useState<string | null>(null)
 
   useEffect(() => {
     invoke('list_agents').then((list: any) => {
@@ -122,7 +124,7 @@ export default function App() {
       </div>
 
       <div className="layout">
-        <Sidebar activeSession={activeSession} onSelectSession={setActiveSession} onProfileEdit={() => setShowProfileEdit(true)} />
+        <Sidebar activeSession={activeSession} onSelectSession={setActiveSession} onProfileEdit={() => setShowProfileEdit(true)} onSessionSettings={setSessionSettingsId} />
         <div className="main">
           <div className="tabbar">
             <button className={`tab ${activeTab === 'peri' ? 'active' : ''}`} onClick={() => setActiveTab('peri')}>Peri</button>
@@ -168,6 +170,7 @@ export default function App() {
         </div>
         {rightOpen && <RightPanel onClose={() => setRightOpen(false)} />}
         {showProfileEdit && <ProfileEditor onClose={() => setShowProfileEdit(false)} />}
+        {sessionSettingsId && <SessionSettings sessionId={sessionSettingsId} onClose={() => setSessionSettingsId(null)} />}
       </div>
     </div>
     </ErrorBoundary>

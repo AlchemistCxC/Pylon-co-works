@@ -16,9 +16,10 @@ interface Props {
   activeSession: string | null
   onSelectSession: (id: string | null) => void
   onProfileEdit: () => void
+  onSessionSettings: (id: string) => void
 }
 
-export default function Sidebar({ activeSession, onSelectSession, onProfileEdit }: Props) {
+export default function Sidebar({ activeSession, onSelectSession, onProfileEdit, onSessionSettings }: Props) {
   const [collapsed, setCollapsed] = useState(false)
   const [search, setSearch] = useState('')
   const [renaming, setRenaming] = useState<string | null>(null)
@@ -117,7 +118,7 @@ export default function Sidebar({ activeSession, onSelectSession, onProfileEdit 
                             const sessions = useStore.getState().sessions.map(ss =>
                               ss.id === s.id ? { ...ss, name: renameValue, lastActiveAt: Date.now() } : ss)
                             useStore.setState({ sessions })
-                            localStorage.setItem('prism-sessions', JSON.stringify(sessions))
+                            localStorage.setItem('pylon-sessions', JSON.stringify(sessions))
                             setRenaming(null)
                           }
                           if (e.key === 'Escape') setRenaming(null)
@@ -131,6 +132,7 @@ export default function Sidebar({ activeSession, onSelectSession, onProfileEdit 
                     )}
                     <div className="session-meta">{formatTime(s.lastActiveAt || s.createdAt)}</div>
                   </div>
+                  <button className="session-gear" onClick={e => { e.stopPropagation(); onSessionSettings(s.id) }} title="会话设置">⚙</button>
                   <button className="session-del" onClick={e => { e.stopPropagation(); handleDelete(s.id) }}>✕</button>
                 </div>
               ))}

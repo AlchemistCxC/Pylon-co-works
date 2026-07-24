@@ -74,7 +74,7 @@ export const useStore = create<ThemeState>((set, get) => ({
     { id: 'serina', name: 'Serina', persona: '你是 Serina，TRPG 叙世引擎 GM。', model: 'deepseek-v4-flash' },
   ],
   activeProfileId: 'riccati',
-  sessions: (() => { try { const r = localStorage.getItem('prism-sessions'); return r ? JSON.parse(r) : []; } catch { return []; } })(),
+  sessions: (() => { try { const r = localStorage.getItem('pylon-sessions'); return r ? JSON.parse(r) : []; } catch { return []; } })(),
   users: [
     { id: 'qq:user:14CE', name: '14CE' },
     { id: 'qq:user:unknown', name: '访客' },
@@ -88,23 +88,23 @@ export const useStore = create<ThemeState>((set, get) => ({
     const s: Session = { id: 's' + now.toString(36), name, source: 'local:' + name, profileId, createdAt: now, lastActiveAt: now, platform: 'local', workdir: '', sessionPrompt: '', skills: [], hooks: [], autoName: '' }
     set(state => {
       const sessions = [...state.sessions, s]
-      localStorage.setItem('prism-sessions', JSON.stringify(sessions))
+      localStorage.setItem('pylon-sessions', JSON.stringify(sessions))
       return { sessions }
     })
   },
   removeSession: (id) => set(s => {
     const sessions = s.sessions.filter(x => x.id !== id)
-    localStorage.setItem('prism-sessions', JSON.stringify(sessions))
+    localStorage.setItem('pylon-sessions', JSON.stringify(sessions))
     return { sessions }
   }),
   setSessionPeriId: (id, periId) => set(s => {
     const sessions = s.sessions.map(ss => ss.id === id ? { ...ss, periId } : ss)
-    localStorage.setItem('prism-sessions', JSON.stringify(sessions))
+    localStorage.setItem('pylon-sessions', JSON.stringify(sessions))
     return { sessions }
   }),
   restoreSessions: () => {
     try {
-      const raw = localStorage.getItem('prism-sessions')
+      const raw = localStorage.getItem('pylon-sessions')
       if (raw) return JSON.parse(raw) as Session[]
     } catch {}
     return []
