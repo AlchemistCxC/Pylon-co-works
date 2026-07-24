@@ -48,3 +48,10 @@ details[open] > .group-header::before { content:'▾'; }
 .profile-avatar img { width:100%; height:100%; object-fit:cover; border-radius:4px; }
 .profile-edit { background:none; border:none; color:var(--text-dim); cursor:pointer; font-size:14px; padding:4px 6px; border-radius:4px; margin-left:auto; }
 .profile-edit:hover { background:var(--bg-hover); color:var(--text); }
+
+/* collapsed */
+.sidebar.collapsed { width:48px; min-width:48px; }
+.sidebar.collapsed .search-input,
+.sidebar.collapsed .session-list,
+.sidebar.collapsed .profile-avatar:not(.active),
+.sidebar.collapsed .profile-edit { display:none; }

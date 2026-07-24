@@ -120,6 +120,19 @@ export default function App() {
                   const p = useStore.getState().profiles.find(x => x.id === useStore.getState().activeProfileId)
                   if (p) useStore.getState().addProfile({ ...p, model: m })
                 }}
+                onCompact={() => {
+                  if (activeSession) {
+                    const persona = useStore.getState().profiles.find(
+                      p => p.id === useStore.getState().activeProfileId
+                    )?.persona || ''
+                    invoke('send_message', { source: activeSession, content: '/compact', persona }).catch(() => {})
+                  }
+                }}
+                onPrismToggle={() => {
+                  useStore.getState().setLiveStats({
+                    livePrismOn: !useStore.getState().livePrismOn
+                  })
+                }}
               />
               </div>
             </div>
