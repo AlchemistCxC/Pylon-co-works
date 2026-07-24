@@ -150,6 +150,7 @@ export default function ChatView({ sessionId }: Props) {
             break
           }
           case 'usage_update': {
+            console.log('[usage_update]', upd.value, upd.size, upd._meta)
             const used = upd.value || (upd._meta?.inputTokens || 0) + (upd._meta?.outputTokens || 0)
             const max = upd.size || 131072
             tokenCount.current = used

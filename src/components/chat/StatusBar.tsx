@@ -2,7 +2,7 @@ import { useMemo, useState, useEffect } from 'react'
 import { useStore } from '../../store'
 import './StatusBar.css'
 
-function wave(w: number, h: number, intensity: number, offset: number, ampMax: number, speedMax: number): string {
+function wave(w: number, h: number, intensity: number, offset: number, ampMax: number, speedMax: number, noiseScale: number): string {
   const mid = h / 2
   const amp = 3 + intensity * ampMax
   const pts = [`0,${mid}`]
@@ -30,6 +30,7 @@ function wave(w: number, h: number, intensity: number, offset: number, ampMax: n
           case 's': y = mid + amp * 0.5 + Math.sin(t * Math.PI) * amp * 1.2; break
           case 't': y = mid - Math.sin(t * Math.PI) * amp * 0.6; break
         }
+        y += (Math.random() - 0.5) * 2 * noiseScale
         pts.push(`${x.toFixed(1)},${y.toFixed(2)}`)
       }
     }
@@ -83,7 +84,8 @@ export default function StatusBar({
   const cut = Math.max(4, W * Math.max(0, Math.min(1, 1 - used)))
   const offsetSpeed = (useStore(s => s.ekgSpeedBase) || 0.5) + intensity * speedMax
   const offset = (tick * offsetSpeed) % (W * 0.5)
-  const wfAnimated = useMemo(() => wave(W, H, intensity, offset, ampMax, speedMax), [intensity, tick, ampMax, speedMax])
+  const noiseScale = 0.1 + intensity * 0.5
+  const wfAnimated = useMemo(() => wave(W, H, intensity, offset, ampMax, speedMax, noiseScale), [intensity, tick, ampMax, speedMax])
 
   const cycleMode = () => {
     const idx = MODES.indexOf(mode as Mode)

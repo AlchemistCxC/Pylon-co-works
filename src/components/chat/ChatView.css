@@ -101,8 +101,8 @@
 .chat-title { font-weight:600; font-size:0.95em; color:var(--text); }
 
 .scroll-bottom-btn {
-  position:absolute; bottom:80px; right:24px;
-  width:32px; height:32px; border-radius:50%;
+  position:fixed; bottom:100px; right:24px;
+  width:36px; height:36px; border-radius:50%;
   background:var(--bg-panel); border:1px solid var(--border);
   color:var(--text-dim); cursor:pointer; font-size:16px;
   display:flex; align-items:center; justify-content:center;

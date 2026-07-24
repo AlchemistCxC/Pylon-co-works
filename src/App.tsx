@@ -110,7 +110,7 @@ export default function App() {
           <button onClick={() => setRightOpen(!rightOpen)} title="Panel">&#9776;</button>
           <button onClick={() => setShowSettings(!showSettings)} title="Settings">&#9881;</button>
           <button onClick={() => appWindow.minimize()}>─</button>
-          <button onClick={() => appWindow.toggleMaximize()}>⛶</button>
+          <button onClick={() => appWindow.isFullscreen().then(f => appWindow.setFullscreen(!f))}>⛶</button>
           <button className="close" onClick={() => appWindow.destroy()}>✕</button>
         </div>
       </div>
