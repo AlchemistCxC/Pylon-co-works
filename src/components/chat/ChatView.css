@@ -28,7 +28,11 @@
 .term-reasoning-body { padding:4px 0 4px 12px; }
 .term-reasoning-line { color:var(--text-dim); font-style:italic; font-size:0.93em; line-height:1.6; white-space:pre-wrap; }
 
-.term-tool { padding:2px 0; }
+.term-tool { padding:2px 0; position:relative; }
+.term-tool + .term-tool::before {
+  content:''; position:absolute; left:3px; top:-6px; bottom:50%;
+  width:2px; background:var(--border);
+}
 .term-tool-head { cursor:pointer; font-size:inherit; line-height:inherit; }
 .term-tool-head:hover { opacity:0.8; }
 .term-tool-indicator { margin-right:6px; }

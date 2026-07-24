@@ -83,6 +83,7 @@ export default function Sidebar({ activeSession, onSelectSession, onProfileEdit 
   }
 
   const handleDelete = (id: string) => {
+    if (!window.confirm('删除会话？')) return
     removeSession(id)
     if (activeSession === id) onSelectSession(null)
   }
