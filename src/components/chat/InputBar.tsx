@@ -90,7 +90,10 @@ export default function InputBar({ sessionId }: Props) {
       return
     }
 
-    try { await invoke('send_message', { source: sessionId, content: text, persona, attachments: attached.map(a => a.path) }) }
+    const s = useStore.getState().sessions.find(s => s.source === sessionId)
+    const sessionPrompt = s?.sessionPrompt || ''
+
+    try { await invoke('send_message', { source: sessionId, content: text, persona, sessionPrompt, attachments: attached.map(a => a.path) }) }
     catch (e) { setSendError(String(e)); setTimeout(() => setSendError(''), 4000) }
     lastMsg.current = text
     setValue('')

@@ -44,10 +44,11 @@ export default function Sidebar({ activeSession, onSelectSession, onProfileEdit 
   const profileSessions = sessions.filter(s => s.profileId === activeProfileId)
 
   const groups = new Map<string, typeof profileSessions>()
+  const PLATFORM_LABELS: Record<string, string> = { local: '本地', 'qq-group': 'QQ 群聊', 'qq-dm': 'QQ 私聊', terminal: '终端' }
   profileSessions.forEach(s => {
-    const key = s.source.replace(/^local:/, '本地').replace(/^qq:group:/, 'QQ群 ').replace(/^qq:user:/, 'QQ私聊 ')
-    if (!groups.has(key)) groups.set(key, [])
-    groups.get(key)!.push(s)
+    const label = PLATFORM_LABELS[s.platform] || s.platform || '其他'
+    if (!groups.has(label)) groups.set(label, [])
+    groups.get(label)!.push(s)
   })
 
   const filteredGroups = search

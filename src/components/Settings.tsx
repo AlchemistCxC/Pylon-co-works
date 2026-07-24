@@ -4,7 +4,7 @@ import { useStore } from '../store'
 import type { ThemeSettings } from '../store'
 import './Settings.css'
 
-type Section = 'global'|'sidebar'|'chat'|'tools'|'input'|'status'|'right'|'agent'|'user'|'msg'
+type Section = 'global'|'sidebar'|'chat'|'tools'|'input'|'status'|'right'|'agent'|'user'|'msg'|'session'
 
 const NAV: { key: Section; label: string }[] = [
   { key:'global', label:'全局' },
@@ -16,6 +16,7 @@ const NAV: { key: Section; label: string }[] = [
   { key:'right', label:'右栏' },
   { key:'user', label:'用户' },
   { key:'msg', label:'消息栏' },
+  { key:'session', label:'会话' },
   { key:'agent', label:'Agent' },
 ]
 
@@ -265,6 +266,15 @@ export default function Settings() {
             <Row label="显示名"><Txt value={t.userName} onChange={v=>u({userName:v})}/></Row>
             <Row label="前缀"><Txt value={t.userPrefix} onChange={v=>u({userPrefix:v})}/></Row>
             <Row label="名字颜色"><Swatch value={t.userColor} onChange={v=>u({userColor:v})}/></Row>
+          </Group>
+        </>}
+
+        {sec === 'session' && <>
+          <h3>当前会话设置</h3>
+          <Group title="会话 Prompt（覆盖 Profile persona）">
+            <Row label="Prompt"><textarea className="set-textarea"
+              defaultValue={useStore.getState().sessions[0]?.sessionPrompt || ''}
+              placeholder="留空则使用 Profile persona..." /></Row>
           </Group>
         </>}
 

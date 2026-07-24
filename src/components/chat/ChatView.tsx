@@ -84,6 +84,15 @@ export default function ChatView({ sessionId }: Props) {
       listen<{ source: string; content: string }>('peri:user', (event) => {
         if (event.payload.source !== sessionRef.current) return
         const { source, content } = event.payload
+        // Auto-name: if session name is still default ID, use first 30 chars
+        const sessions = useStore.getState().sessions
+        const s = sessions.find(s => s.source === source)
+        if (s?.name.startsWith('session-') && s.name === s.id.replace('s', 'session-')) {
+          const autoName = content.slice(0, 30)
+          const updated = sessions.map(ss => ss.id === s.id ? { ...ss, autoName, name: autoName } : ss)
+          useStore.setState({ sessions: updated })
+          localStorage.setItem('prism-sessions', JSON.stringify(updated))
+        }
         // Clear running flags on all previous messages
         setMessages(prev => prev.map(m => ({ ...m, running: false })))
         setGenerating(true); genStart.current = Date.now(); tokenCount.current = 0; setSummary('')

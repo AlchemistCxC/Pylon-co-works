@@ -42,6 +42,7 @@ async fn send_message(
     source: String,
     content: String,
     persona: String,
+    session_prompt: Option<String>,
     attachments: Option<Vec<String>>,
 ) -> Result<String, String> {
     // Look up or create session — drop lock before any .await
@@ -69,8 +70,10 @@ async fn send_message(
         acc
     });
 
-    let prompt_content = if is_first && !persona.is_empty() && !content.starts_with('/') {
-        format!("{}{}\n\n---\n\n{}", attach_prefix, persona, content)
+    let effective_persona = session_prompt.unwrap_or(persona);
+
+    let prompt_content = if is_first && !effective_persona.is_empty() && !content.starts_with('/') {
+        format!("{}{}\n\n---\n\n{}", attach_prefix, effective_persona, content)
     } else {
         format!("{}{}", attach_prefix, content)
     };
