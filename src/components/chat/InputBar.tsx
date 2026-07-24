@@ -8,7 +8,7 @@ import './InputBar.css'
 
 interface Props { sessionId: string | null }
 
-const COMMANDS = [
+const FALLBACK_COMMANDS = [
   { cmd: '/model', args: ' <name>', info: '切换模型' },
   { cmd: '/compact', args: '', info: '压缩上下文' },
   { cmd: '/new', args: '', info: '新会话' },
@@ -24,9 +24,15 @@ export default function InputBar({ sessionId }: Props) {
   const activeProfileId = useStore(s => s.activeProfileId)
   const profiles = useStore(s => s.profiles)
   const addSession = useStore(s => s.addSession)
+  const liveCommands = useStore(s => (s as any).liveCommands || [])
 
   const activeProfile = profiles.find(p => p.id === activeProfileId)
   const persona = activeProfile?.persona || ''
+
+  // Dynamic commands: peri > fallback
+  const COMMANDS = liveCommands.length > 0
+    ? liveCommands.map((c: any) => ({ cmd: '/' + c.name, args: c.input_hint ? ' ' + c.input_hint : '', info: c.description || '' }))
+    : FALLBACK_COMMANDS
 
   const isCmd = value.startsWith('/')
   const filtered = isCmd ? COMMANDS.filter(c => c.cmd.startsWith(value.split(' ')[0])) : []
@@ -57,6 +63,13 @@ export default function InputBar({ sessionId }: Props) {
       }
       case '/new': addSession(`session-${Date.now().toString(36)}`); break
       case '/compact': await invoke('send_message', { source: sessionId, content: '/compact', persona }); break
+      case '/export': {
+        const s = useStore.getState().sessions.find(x => x.source === sessionId)
+        if (s?.periId) {
+          await invoke('export_session', { periId: s.periId, format: 'markdown', outputPath: `session-${s.periId}.md` })
+        }
+        break
+      }
       case '/clear': window.dispatchEvent(new CustomEvent('peri:clear')); break
     }
     setValue('')

@@ -35,7 +35,7 @@ type ThemeState = ThemeSettings & {
   liveCacheHit: number
   liveMode: string
   livePrismOn: boolean
-  setLiveStats: (stats: Partial<{liveTokensUsed:number,liveTokensMax:number,liveCacheHit:number,liveMode:string,livePrismOn:boolean}>) => void
+  setLiveStats: (stats: Partial<{liveTokensUsed:number,liveTokensMax:number,liveCacheHit:number,liveMode:string,livePrismOn:boolean,liveCommands:any[]}>) => void
   resetTheme: () => void
 }
 

@@ -161,6 +161,11 @@ export default function ChatView({ sessionId }: Props) {
             })
             break
           }
+          case 'available_commands_update': {
+            const commands = upd.commands || []
+            useStore.getState().setLiveStats({ liveCommands: commands } as any)
+            break
+          }
         }
       }),
 
