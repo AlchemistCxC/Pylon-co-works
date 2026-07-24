@@ -7,6 +7,9 @@ description = "Prism Desktop - AI Agent GUI"
 [package.metadata]
 authors = ["宫木云"]
 
+[package.metadata.tauri-winres]
+FileDescription = "Prism Desktop"
+
 [dependencies]
 tauri = { version = "2", features = [] }
 tauri-plugin-shell = "2"
