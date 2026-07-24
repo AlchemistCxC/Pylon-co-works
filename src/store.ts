@@ -38,6 +38,10 @@ type ThemeState = ThemeSettings & {
   liveCommands: { name: string; input_hint?: string; description?: string }[]
   setLiveStats: (stats: Partial<{liveTokensUsed:number,liveTokensMax:number,liveCacheHit:number,liveMode:string,livePrismOn:boolean,liveCommands:any[]}>) => void
   resetTheme: () => void
+  agents: { id: string; name: string }[]
+  activeAgent: string
+  setAgents: (a: { id: string; name: string }[]) => void
+  setActiveAgent: (id: string) => void
 }
 
 const DEFAULTS: ThemeSettings = {
@@ -101,4 +105,8 @@ export const useStore = create<ThemeState>((set, get) => ({
   setLiveStats: (stats) => set(stats),
   liveCommands: [],
   resetTheme: () => set(DEFAULTS),
+  agents: [],
+  activeAgent: 'peri',
+  setAgents: (a) => set({ agents: a }),
+  setActiveAgent: (id) => set({ activeAgent: id }),
 }))

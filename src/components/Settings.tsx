@@ -1,9 +1,10 @@
 import { useState, useRef } from 'react'
+import { invoke } from '@tauri-apps/api/core'
 import { useStore } from '../store'
 import type { ThemeSettings } from '../store'
 import './Settings.css'
 
-type Section = 'global'|'sidebar'|'chat'|'tools'|'input'|'status'|'right'
+type Section = 'global'|'sidebar'|'chat'|'tools'|'input'|'status'|'right'|'agent'
 
 const NAV: { key: Section; label: string }[] = [
   { key:'global', label:'全局' },
@@ -13,6 +14,7 @@ const NAV: { key: Section; label: string }[] = [
   { key:'input', label:'输入栏' },
   { key:'status', label:'状态栏' },
   { key:'right', label:'右栏' },
+  { key:'agent', label:'Agent' },
 ]
 
 // ── helpers ──
@@ -205,6 +207,32 @@ export default function Settings() {
             <Row label="背景图"><Txt value={t.rightBgImage||''} onChange={v=>u({rightBgImage:v})}/></Row>
             <Row label="宽度"><Num value={t.rightWidth} onChange={v=>u({rightWidth:v})} min={200} max={400}/></Row>
           </Group>
+        </>}
+
+        {sec === 'agent' && <>
+          <h3>Agent</h3>
+          <Group title="当前 Agent">
+            <div style={{ padding:'8px 0', fontFamily:'var(--mono)', fontSize:14, color:'var(--accent)' }}>
+              {useStore.getState().activeAgent || 'peri'}
+            </div>
+          </Group>
+          <Group title="切换 Agent（需重启）">
+            {useStore.getState().agents.map((a: any) => (
+              <Row key={a.id} label={a.name}>
+                <button className={`ps-btn sm ${a.id === useStore.getState().activeAgent ? 'primary' : ''}`}
+                  onClick={() => {
+                    invoke('switch_agent', { name: a.id }).then(() => {
+                      useStore.getState().setActiveAgent(a.id)
+                    }).catch(() => {})
+                  }}>
+                  {a.id === useStore.getState().activeAgent ? '当前' : '切换'}
+                </button>
+              </Row>
+            ))}
+          </Group>
+          <div style={{ marginTop:16, fontSize:12, color:'var(--text-dim)' }}>
+            切换 Agent 后需重启 Prism Desktop 生效。
+          </div>
         </>}
 
         <div className="set-presets">

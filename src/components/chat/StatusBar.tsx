@@ -122,6 +122,10 @@ export default function StatusBar({
       <span className="pill-mono">{fmtSize(tokensUsed)}/{fmtSize(tokensMax)}</span>
       {cacheHit > 0 && <span className="pill-mono" style={{ color: '#34d399' }}>{cacheHit}% hit</span>}
 
+      <span className="pill-mono" style={{ color: 'var(--accent)' }}>
+        {useStore.getState().activeAgent || 'peri'}
+      </span>
+
       <button className={`prism-tag ${prismOn ? 'on' : 'off'}`}
         onClick={e => { e.stopPropagation(); onPrismToggle?.() }}>
         Prism {prismOn ? 'ON' : 'OFF'}

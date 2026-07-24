@@ -1,4 +1,4 @@
-import { useState, useMemo } from 'react'
+import { useState, useMemo, useEffect } from 'react'
 import ErrorBoundary from './components/ErrorBoundary'
 import Sidebar from './components/Sidebar'
 import ChatView from './components/chat/ChatView'
@@ -21,6 +21,13 @@ export default function App() {
   const [showSettings, setShowSettings] = useState(false)
   const [rightOpen, setRightOpen] = useState(false)
   const [showProfileEdit, setShowProfileEdit] = useState(false)
+
+  useEffect(() => {
+    invoke('list_agents').then((list: any) => {
+      useStore.getState().setAgents(list)
+    }).catch(() => {})
+  }, [])
+
   const [activeTab, setActiveTab] = useState<'peri' | 'prism'>('peri')
   const theme = useStore()
   const appWindow = getCurrentWindow()
