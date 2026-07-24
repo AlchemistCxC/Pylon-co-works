@@ -207,11 +207,12 @@ async fn export_session(
 pub fn run() {
     let agents = agent_config::load();
     let default_agent_id = agents.keys().next().expect("no agents in agents.yaml").clone();
-    let default_agent = agents.get(&default_agent_id).expect("default agent not found");
+    let default_agent = agents.get(&default_agent_id).expect("default agent not found").clone();
+    let agents_for_state = agents;
 
     let rt = tokio::runtime::Runtime::new().expect("failed to create tokio runtime");
     rt.block_on(async {
-        let acp = Arc::new(AcpClient::connect(default_agent).await.expect("failed to connect ACP agent"));
+        let acp = Arc::new(AcpClient::connect(&default_agent).await.expect("failed to connect ACP agent"));
 
         // tauri.run() blocks until window closes; runtime not dropped until then (no leak)
         tauri::Builder::default()
@@ -220,7 +221,7 @@ pub fn run() {
             .plugin(tauri_plugin_fs::init())
             .manage(AppState {
                 acp,
-                agents,
+                agents: agents_for_state,
                 active_agent: Mutex::new(default_agent_id),
                 sessions: Mutex::new(HashMap::new()),
             })

@@ -247,9 +247,10 @@ impl AcpClient {
 
                 // Drain stderr
                 let stderr = child.stderr.take().ok_or("no stderr")?;
+                let agent_name = agent.name.clone();
                 std::thread::spawn(move || {
                     for line in BufReader::new(stderr).lines() {
-                        if let Ok(l) = line { if !l.is_empty() { log::error!("{} stderr: {}", agent.name, l); } }
+                        if let Ok(l) = line { if !l.is_empty() { log::error!("{} stderr: {}", agent_name, l); } }
                     }
                 });
 
