@@ -59,7 +59,7 @@ details[open] > .group-header::before { content:'▾'; }
 }
 
 /* collapsed */
-.sidebar.collapsed { width:48px; min-width:48px; }
+.sidebar.collapsed { width:48px; min-width:48px; overflow:hidden; background-image:none !important; }
 .sidebar.collapsed .search-input,
 .sidebar.collapsed .session-list,
 .sidebar.collapsed .profile-avatar:not(.active),

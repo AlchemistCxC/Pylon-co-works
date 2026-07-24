@@ -105,16 +105,18 @@ export default function StatusBar({
             </linearGradient>
           </defs>
           {/* Layer 1: gradient baseline */}
-          <line x1="0" y1={mid} x2={W} y2={mid} stroke="url(#baseline-grad)" strokeWidth="3" />
+          <line x1="0" y1={mid} x2={W} y2={mid} stroke="url(#baseline-grad)" strokeWidth="5" />
           {/* Layer 2: clipped wave */}
           <clipPath id="active"><rect x="0" y="0" width={cut} height={H}/></clipPath>
           <polyline points={wfAnimated} fill="none" stroke={color} strokeWidth="2.2"
             strokeLinecap="round" strokeLinejoin="round" clipPath="url(#active)"
             style={{ filter: `drop-shadow(0 0 4px ${color}99)` } as any}/>
-          {/* Layer 3: left fixed endpoint */}
-          <line x1="0" y1={mid-8} x2="0" y2={mid+8} stroke="rgba(0,0,0,0.35)" strokeWidth="2.5"/>
-          {/* Layer 4: right fixed endpoint */}
-          <line x1={W} y1={mid-8} x2={W} y2={mid+8} stroke="rgba(0,0,0,0.35)" strokeWidth="2.5"/>
+          {/* Layer 3: left dual endpoint */}
+          <line x1="0" y1={mid-10} x2="0" y2={mid+10} stroke="rgba(0,0,0,0.35)" strokeWidth="2"/>
+          <line x1="3" y1={mid-10} x2="3" y2={mid+10} stroke="rgba(0,0,0,0.35)" strokeWidth="2"/>
+          {/* Layer 4: right dual endpoint */}
+          <line x1={W} y1={mid-10} x2={W} y2={mid+10} stroke="rgba(0,0,0,0.35)" strokeWidth="2"/>
+          <line x1={W-3} y1={mid-10} x2={W-3} y2={mid+10} stroke="rgba(0,0,0,0.35)" strokeWidth="2"/>
           {/* Layer 5: moving endpoint */}
           <line x1={cut} y1={mid-10} x2={cut} y2={mid+10} stroke={color} strokeWidth="3"/>
         </svg>
