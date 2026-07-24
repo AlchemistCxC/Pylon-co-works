@@ -202,7 +202,7 @@ impl AcpClient {
                 let client = AcpClient { child, stdin, next_id: AtomicU64::new(1), pending, rx, tx };
                 // Initialize
                 client.call_async("initialize", serde_json::json!({
-                    "protocolVersion": 1, "capabilities": {},
+                    "protocolVersion": 1, "capabilities": {"tokenStats": true},
                     "clientInfo": {"name": "prism-desktop", "version": "0.1.0"}
                 })).await?;
                 Ok(client)
