@@ -20,6 +20,7 @@ const FALLBACK_COMMANDS = [
 export default function InputBar({ sessionId }: Props) {
   const [value, setValue] = useState('')
   const [cmdIdx, setCmdIdx] = useState(0)
+  const [sendError, setSendError] = useState('')
   const ref = useRef<HTMLTextAreaElement>(null)
   const activeProfileId = useStore(s => s.activeProfileId)
   const profiles = useStore(s => s.profiles)
@@ -88,7 +89,7 @@ export default function InputBar({ sessionId }: Props) {
     }
 
     try { await invoke('send_message', { source: sessionId, content: text, persona }) }
-    catch (e) { console.error('send failed:', e) }
+    catch (e) { setSendError(String(e)); setTimeout(() => setSendError(''), 4000) }
     setValue('')
   }
 

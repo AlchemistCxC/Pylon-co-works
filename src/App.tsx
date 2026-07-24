@@ -1,4 +1,5 @@
 import { useState, useMemo } from 'react'
+import ErrorBoundary from './components/ErrorBoundary'
 import Sidebar from './components/Sidebar'
 import ChatView from './components/chat/ChatView'
 import InputBar from './components/chat/InputBar'
@@ -90,6 +91,7 @@ export default function App() {
   } as React.CSSProperties), [theme])
 
   return (
+    <ErrorBoundary>
     <div className="app" style={cssVars}>
       <div className="titlebar" data-tauri-drag-region>
         <span className="titlebar-text">Prism Desktop</span>
@@ -151,5 +153,6 @@ export default function App() {
         {showProfileEdit && <ProfileEditor onClose={() => setShowProfileEdit(false)} />}
       </div>
     </div>
+    </ErrorBoundary>
   )
 }
