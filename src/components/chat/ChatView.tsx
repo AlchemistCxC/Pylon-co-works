@@ -72,9 +72,12 @@ export default function ChatView({ sessionId }: Props) {
   const tokenCount = useRef(0)
   const [summary, setSummary] = useState('')
   const sessionRef = useRef(sessionId)
-  useEffect(() => { sessionRef.current = sessionId }, [sessionId])
-
-  useEffect(() => { setMessages([]); setGenerating(false) }, [sessionId])
+  const prevSessionRef = useRef(sessionId)
+  useEffect(() => {
+    sessionRef.current = sessionId
+    if (sessionId && sessionId !== prevSessionRef.current) { setMessages([]); setGenerating(false); setSummary('') }
+    prevSessionRef.current = sessionId
+  }, [sessionId])
 
   useEffect(() => {
     const unlisten = Promise.all([
@@ -212,7 +215,11 @@ export default function ChatView({ sessionId }: Props) {
   return (
     <div className="chat-view">
       <div className="chat-header">
-        <span className="chat-title">{useStore.getState().sessions.find(s => s.source === sessionId)?.name || sessionId}</span>
+        <span className="chat-title">{(() => {
+          const s = useStore.getState().sessions.find(s => s.source === sessionId)
+          if (!s) return sessionId
+          return s.name.startsWith('session-') ? `新会话 · ${formatTime(s.createdAt)}` : s.name
+        })()}</span>
       </div>
       <div className="term">
         <AnimatePresence initial={false}>
@@ -241,6 +248,15 @@ export default function ChatView({ sessionId }: Props) {
 }
 
 // ── Sub-components ──
+
+function formatTime(ts: number | undefined): string {
+  if (!ts) return ''
+  const diff = Date.now() - ts
+  if (diff < 60_000) return '刚刚'
+  if (diff < 3_600_000) return `${Math.floor(diff/60000)}m ago`
+  if (diff < 86_400_000) return `${Math.floor(diff/3600000)}h ago`
+  return `${Math.floor(diff/86400000)}d ago`
+}
 
 function AssistantContent({ text }: { text: string }) {
   const [copied, setCopied] = useState(false)
