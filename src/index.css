@@ -23,13 +23,16 @@
   --mono: 'JetBrains Mono', 'Cascadia Code', 'Consolas', monospace;
 }
 
-html, body, #root { height:100%; width:100%; overflow:hidden; font-family:var(--font); font-size:16px; color:var(--text); }
+html, body, #root { height:100%; width:100%; overflow:hidden; font-family:var(--font); font-size:18px; color:var(--text); }
 
-body { background:#e8e8ec url('/bg.png') center/cover fixed; }
+body {
+  background: #e8e8ec center/cover fixed;
+  background-image: var(--global-bg-image,none);
+}
 body::before {
   content:''; position:fixed; inset:0;
-  background:rgba(240,240,245,0.55);
-  backdrop-filter:blur(16px); -webkit-backdrop-filter:blur(16px);
+  background:rgba(240,240,245,var(--t,0.55));
+  backdrop-filter:blur(var(--blur,16px)); -webkit-backdrop-filter:blur(var(--blur,16px));
   z-index:-1;
 }
 #root { background:transparent; position:relative; z-index:1; }
