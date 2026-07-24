@@ -24,7 +24,7 @@ export default function InputBar({ sessionId }: Props) {
   const activeProfileId = useStore(s => s.activeProfileId)
   const profiles = useStore(s => s.profiles)
   const addSession = useStore(s => s.addSession)
-  const liveCommands: {name:string; input_hint?:string; description?:string}[] = useStore(s => (s as any).liveCommands || [])
+  const liveCommands = useStore(s => s.liveCommands || [])
 
   const activeProfile = profiles.find(p => p.id === activeProfileId)
   const persona = activeProfile?.persona || ''

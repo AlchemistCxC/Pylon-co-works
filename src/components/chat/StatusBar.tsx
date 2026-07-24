@@ -77,7 +77,8 @@ export default function StatusBar({
   const ampMax = useStore(s => s.ekgAmplitudeMax) || 10
   const speedMax = useStore(s => s.ekgSpeedMax) || 2.0
 
-  const W = 240, H = 30, mid = H / 2
+  const W = useStore(s => s.ekgWidth) || 150
+  const H = 30, mid = H / 2
   // V3: left=remaining(color), right=consumed(gray)
   const cut = Math.max(4, W * Math.max(0, Math.min(1, 1 - used)))
   const offsetSpeed = (useStore(s => s.ekgSpeedBase) || 0.5) + intensity * speedMax

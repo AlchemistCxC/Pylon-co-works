@@ -150,7 +150,6 @@ export default function ChatView({ sessionId }: Props) {
             break
           }
           case 'usage_update': {
-            console.log('[P0-1 DEBUG usage_update]', JSON.stringify(upd))
             const used = upd.value || (upd._meta?.inputTokens || 0) + (upd._meta?.outputTokens || 0)
             const max = upd.size || 131072
             tokenCount.current = used
@@ -185,9 +184,17 @@ export default function ChatView({ sessionId }: Props) {
           content: '\u26a0\ufe0f ' + event.payload, time: new Date().toLocaleTimeString()
         }])
       }),
+
+      // /clear listener (not a promise — outside Promise.all)
     ])
 
-    return () => { unlisten.then(fns => fns.forEach(f => f())) }
+    const handleClear = () => { setMessages([]); setSummary('') }
+    window.addEventListener('peri:clear', handleClear)
+
+    return () => {
+      unlisten.then(fns => fns.forEach(f => f()))
+      window.removeEventListener('peri:clear', handleClear)
+    }
   }, [])
 
   useEffect(() => { bottomRef.current?.scrollIntoView({ behavior: 'smooth' }) }, [messages, generating])

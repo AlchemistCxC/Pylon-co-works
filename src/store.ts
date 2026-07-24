@@ -35,6 +35,7 @@ type ThemeState = ThemeSettings & {
   liveCacheHit: number
   liveMode: string
   livePrismOn: boolean
+  liveCommands: { name: string; input_hint?: string; description?: string }[]
   setLiveStats: (stats: Partial<{liveTokensUsed:number,liveTokensMax:number,liveCacheHit:number,liveMode:string,livePrismOn:boolean,liveCommands:any[]}>) => void
   resetTheme: () => void
 }
@@ -45,7 +46,7 @@ const DEFAULTS: ThemeSettings = {
   chatBg: '', chatBgImage: '', chatFont: 'mono', chatFontSize: 15, chatLineHeight: 1.8, chatTextColor: 'rgba(0,0,0,0.85)', chatCodeColor: '#b47814', chatCodeBg: 'rgba(0,0,0,0.03)',
   toolOk: '#1e9646', toolRun: '#3b82f6', toolErr: '#be2828', toolNameColor: 'rgba(0,0,0,0.85)', toolSummaryColor: 'rgba(0,0,0,0.40)', userTagBg: 'rgba(168,85,247,0.08)', userTagText: '#a855f7',
   inputBg: 'rgba(0,0,0,0.02)', inputBgImage: '', inputTextColor: 'rgba(0,0,0,0.85)', inputPlaceholder: 'rgba(0,0,0,0.28)', inputSendBg: 'rgba(0,0,0,0.10)', inputFocusBorder: 'rgba(0,0,0,0.22)', inputFontSize: 17, inputMinHeight: 56,
-  statusBg: 'rgba(0,0,0,0.02)', statusBgImage: '', ekgWidth: 240, ekgFontSize: 16, ekgGreen: '#1e9646', ekgYellow: '#b47814', ekgRed: '#be2828', pillBg: 'rgba(0,0,0,0.04)', pillText: 'rgba(0,0,0,0.65)', prismOnColor: '#1e9646',
+  statusBg: 'rgba(0,0,0,0.02)', statusBgImage: '', ekgWidth: 150, ekgFontSize: 16, ekgGreen: '#1e9646', ekgYellow: '#b47814', ekgRed: '#be2828', pillBg: 'rgba(0,0,0,0.04)', pillText: 'rgba(0,0,0,0.65)', prismOnColor: '#1e9646',
   ekgLineWidth: 3, ekgAmplitudeMax: 10, ekgSpeedBase: 0.5, ekgSpeedMax: 2.0,
   ekgLeftColor: 'rgba(0,0,0,0.35)', ekgMovingColor: '', ekgConsumedColor: 'rgba(0,0,0,0.08)', tokenDisplay: 'ekg',
   rightBg: 'rgba(0,0,0,0.02)', rightBgImage: '', rightWidth: 260,
@@ -98,5 +99,6 @@ export const useStore = create<ThemeState>((set, get) => ({
 
   liveTokensUsed: 0, liveTokensMax: 131072, liveCacheHit: 0, liveMode: 'auto', livePrismOn: true,
   setLiveStats: (stats) => set(stats),
+  liveCommands: [],
   resetTheme: () => set(DEFAULTS),
 }))
