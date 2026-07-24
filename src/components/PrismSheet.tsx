@@ -151,6 +151,7 @@ function BlocksTab() {
     {id:'npc_rule',header:'NPC对话',data:{type:'text',content:'NPC 保持角色性格一致'}},
     {id:'weather',header:'天气',data:{type:'file',path:'data/weather.txt',file_format:'plain',tail:1}},
     {id:'api_check',header:'状态检查',data:{type:'external',url:'http://localhost:9337/health',method:'GET'}},
+    {id:'build',header:'构建',data:{type:'script',command:'cargo build',args:['--release'],timeout:60}},
   ]
 
   function summary(b:typeof blocks[0]):string {

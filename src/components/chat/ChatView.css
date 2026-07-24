@@ -8,10 +8,18 @@
 .term { flex:1; padding:20px 24px; font-family:var(--chat-font,var(--mono)); font-size:var(--chat-font-size,15px); line-height:var(--chat-line-height,1.8); color:var(--chat-text,var(--text)); background:var(--chat-bg,transparent); background-image:var(--chat-bg-image,none); background-size:cover; background-position:center; }
 
 .term-user { padding:2px 0; }
+.term-user-prefix { color:var(--accent); font-weight:700; margin-right:6px; }
+.term-user-name { font-weight:700; color:var(--accent); margin-right:8px; }
 .term-user-tag { background:var(--user-tag-bg,rgba(0,0,0,0.03)); color:var(--user-tag-text,var(--accent)); font-weight:600; margin-right:8px; padding:2px 8px; border-radius:4px; font-family:var(--font); }
 .term-user .term-p { display:inline; margin:0; }
 
 .term-assistant { padding:2px 0; white-space:pre-wrap; }
+
+.term-reasoning { padding:4px 0; }
+.term-reasoning-head { cursor:pointer; color:var(--text-dim); font-style:italic; font-size:0.93em; user-select:none; }
+.term-reasoning-head:hover { color:var(--text); }
+.term-reasoning-body { padding:4px 0 4px 12px; }
+.term-reasoning-line { color:var(--text-dim); font-style:italic; font-size:0.93em; line-height:1.6; white-space:pre-wrap; }
 
 .term-tool { padding:2px 0; }
 .term-tool-head { cursor:pointer; font-size:inherit; line-height:inherit; }
@@ -22,6 +30,7 @@
 .term-tool-indicator.run { color:var(--tool-run,#3b82f6); }
 .term-tool-name { font-weight:700; color:var(--tool-name,inherit); }
 .term-tool-summary { color:var(--tool-summary,var(--text-dim)); font-size:inherit; }
+.term-tool-suffix { color:var(--text-dim); font-size:inherit; }
 .term-tool-body { padding:0 0 6px 18px; }
 .term-tool-body pre { font-size:inherit; background:var(--chat-code-bg,rgba(0,0,0,0.02)); padding:6px 12px; border-radius:4px; overflow-x:auto; white-space:pre-wrap; margin:0; }
 .term-tool-body code { font-size:inherit; }
@@ -36,3 +45,46 @@
 .term-code { margin:4px 0; background:var(--chat-code-bg,rgba(0,0,0,0.03)); border:1px solid var(--border); border-radius:4px; overflow:hidden; }
 .term-code pre { padding:10px 14px; margin:0; overflow-x:auto; }
 .term-code code { font-size:inherit; line-height:1.6; }
+
+/* ── starry-night syntax highlight (maps to CSS custom properties) ── */
+.term-code .pl-k  { color:var(--syn-kw,var(--accent)); }          /* keyword */
+.term-code .pl-s  { color:var(--syn-str,var(--chat-code-color,#b47814)); } /* string */
+.term-code .pl-c  { color:var(--syn-cmt,var(--text-dim)); font-style:italic; } /* comment */
+.term-code .pl-c1 { color:var(--syn-lit,var(--text-dim)); }       /* literal */
+.term-code .pl-ent { color:var(--syn-ent,var(--text)); }          /* entity */
+.term-code .pl-en { color:var(--syn-fn,var(--accent)); }          /* function */
+.term-code .pl-v  { color:var(--syn-var,var(--text)); }           /* variable */
+.term-code .pl-pds { color:var(--syn-str,var(--chat-code-color,#b47814)); } /* punctuation-string */
+.term-code .pl-smi { color:var(--syn-prop,var(--text)); }         /* property */
+.term-code .pl-sr { color:var(--syn-re,var(--tool-err,#be2828)); } /* regex */
+.term-code .pl-mh { color:var(--syn-lit,var(--text-dim)); }       /* markup-heading */
+.term-code .pl-cor { color:var(--syn-lit,var(--text-dim)); }      /* co-reference */
+
+/* ── streaming cursor ── */
+.term-cursor { display:inline; color:var(--text-dim); font-style:italic; animation:blink 1.2s step-end infinite; }
+@keyframes blink { 0%,100%{opacity:1} 50%{opacity:0.2} }
+
+.term-streaming { display:inline; }
+
+/* ── blockquote ── */
+.term-blockquote { margin:4px 0; padding:2px 0 2px 12px; border-left:3px solid var(--border); color:var(--text-dim); }
+
+/* ── table ── */
+.term-table-wrap { margin:4px 0; overflow-x:auto; }
+.term-table { border-collapse:collapse; font-size:0.93em; }
+.term-table th, .term-table td { padding:2px 10px; border:1px solid var(--border); text-align:left; }
+.term-table th { font-weight:600; background:var(--bg-panel); }
+
+/* ── link ── */
+.term-link { color:var(--accent); text-decoration:underline; }
+
+/* ── ANSI terminal output (anser) ── */
+.term-ansi { font-family:var(--mono); font-size:0.93em; line-height:1.6; white-space:pre-wrap; padding:6px 0; }
+
+/* ── Peri spinner ── */
+.term-spinner { padding:6px 0; display:flex; align-items:center; gap:6px; font-size:0.93em; }
+.spinner-frame { color:var(--accent); }
+.spinner-verb { color:var(--text); font-weight:500; }
+.spinner-meta { color:var(--text-dim); }
+
+.term-summary { padding:4px 0; color:var(--text-dim); font-size:0.93em; }

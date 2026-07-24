@@ -23,7 +23,7 @@
   --mono: 'JetBrains Mono', 'Cascadia Code', 'Consolas', monospace;
 }
 
-html, body, #root { height:100%; width:100%; overflow:hidden; font-family:var(--font); font-size:18px; color:var(--text); }
+html, body, #root { height:100%; width:100%; overflow:hidden; font-family:var(--font); font-size:var(--global-font-size,18px); color:var(--text); }
 
 body {
   background: #e8e8ec center/cover fixed;

@@ -67,10 +67,10 @@ function PrismTab() {
       <div className="panel-section">
         <div className="panel-section-title">Block 序列</div>
         <div className="panel-block-list">
-          <div className="panel-block-item"><span className="block-idx">1</span> system <span className="block-label">角色卡</span></div>
-          <div className="panel-block-item"><span className="block-idx">2</span> system <span className="block-label">场景设定</span></div>
-          <div className="panel-block-item"><span className="block-idx">3</span> system <span className="block-label">NPC对话规则</span></div>
-          <div className="panel-block-item dim"><span className="block-idx">4</span> hidden <span className="block-label">注入日志</span></div>
+          <div className="panel-block-item"><span className="block-idx">1</span> gate <span className="block-label">角色卡</span></div>
+          <div className="panel-block-item"><span className="block-idx">2</span> file <span className="block-label">场景设定</span></div>
+          <div className="panel-block-item"><span className="block-idx">3</span> text <span className="block-label">NPC对话规则</span></div>
+          <div className="panel-block-item dim"><span className="block-idx">4</span> external <span className="block-label">状态检查</span></div>
         </div>
       </div>
 

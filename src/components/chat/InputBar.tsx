@@ -1,54 +1,132 @@
-import { useState, useRef, KeyboardEvent } from 'react'
+import { useState, useRef, KeyboardEvent, useEffect } from 'react'
+import { invoke } from '@tauri-apps/api/core'
 import { open } from '@tauri-apps/plugin-dialog'
+import { readTextFile } from '@tauri-apps/plugin-fs'
+import { useStore } from '../../store'
+import { Paperclip, ArrowUp } from 'lucide-react'
 import './InputBar.css'
 
 interface Props { sessionId: string | null }
 
+const COMMANDS = [
+  { cmd: '/model', args: ' <name>', info: '切换模型' },
+  { cmd: '/compact', args: '', info: '压缩上下文' },
+  { cmd: '/new', args: '', info: '新会话' },
+  { cmd: '/export', args: '', info: '导出记录' },
+  { cmd: '/clear', args: '', info: '清屏' },
+  { cmd: '/mode', args: ' <default|edit|auto|bypass>', info: '切换权限模式' },
+]
+
 export default function InputBar({ sessionId }: Props) {
   const [value, setValue] = useState('')
-  const [showCmds, setShowCmds] = useState(false)
+  const [cmdIdx, setCmdIdx] = useState(0)
   const ref = useRef<HTMLTextAreaElement>(null)
+  const activeProfileId = useStore(s => s.activeProfileId)
+  const profiles = useStore(s => s.profiles)
+  const addSession = useStore(s => s.addSession)
 
-  const cmds = [
-    { cmd: '/model', desc: '切换模型' }, { cmd: '/compact', desc: '压缩会话' },
-    { cmd: '/new', desc: '新建会话' }, { cmd: '/clear', desc: '清空视图' },
-    { cmd: '/export', desc: '导出会话' },
-  ]
-  const filtered = value.startsWith('/') ? cmds.filter(c => c.cmd.startsWith(value.split(' ')[0])) : []
+  const activeProfile = profiles.find(p => p.id === activeProfileId)
+  const persona = activeProfile?.persona || ''
 
-  const send = () => { if (!value.trim()) return; console.log('send:', value); setValue(''); setShowCmds(false) }
-  const pickFile = async () => {
-    const path = await open({ multiple: false })
-    if (path) setValue(v => v + (v ? ' ' : '') + path)
+  const isCmd = value.startsWith('/')
+  const filtered = isCmd ? COMMANDS.filter(c => c.cmd.startsWith(value.split(' ')[0])) : []
+
+  // Auto-resize textarea
+  useEffect(() => {
+    if (ref.current) {
+      ref.current.style.height = 'auto'
+      ref.current.style.height = Math.min(ref.current.scrollHeight, 200) + 'px'
+    }
+  }, [value])
+
+  const execCommand = async (cmd: string, rest: string) => {
+    switch (cmd) {
+      case '/model': {
+        const m = rest.trim() || 'deepseek-v4-flash'
+        const p = profiles.find(x => x.id === activeProfileId)
+        if (p) useStore.getState().addProfile({ ...p, model: m })
+        break
+      }
+      case '/mode': {
+        const m = rest.trim()
+        if (m && sessionId) {
+          useStore.getState().setLiveStats({ liveMode: m })
+          invoke('set_mode', { source: sessionId, mode: m }).catch(() => {})
+        }
+        break
+      }
+      case '/new': addSession(`session-${Date.now().toString(36)}`); break
+      case '/compact': await invoke('send_message', { source: sessionId, content: '/compact', persona }); break
+      case '/clear': window.dispatchEvent(new CustomEvent('peri:clear')); break
+    }
+    setValue('')
+    setCmdIdx(0)
   }
+
+  const send = async () => {
+    const text = value.trim()
+    if (!text || !sessionId) return
+
+    if (isCmd && filtered.length > 0) {
+      const parts = text.split(/\s+/)
+      const rest = parts.slice(1).join(' ')
+      await execCommand(parts[0], rest)
+      return
+    }
+
+    try { await invoke('send_message', { source: sessionId, content: text, persona }) }
+    catch (e) { console.error('send failed:', e) }
+    setValue('')
+  }
+
+  const attachFile = async () => {
+    const MAX = 512 * 1024
+    try {
+      const selected = await open({ multiple: false, filters: [{ name: 'All', extensions: ['*'] }] })
+      if (!selected) return
+      let content = await readTextFile(selected as string)
+      if (content.length > MAX) {
+        content = content.slice(0, MAX) + `\n... (truncated at ${(MAX/1024).toFixed(0)}KB)`
+      }
+      const fname = String(selected).replace(/^.*[\\/]/, '')
+      setValue(prev => prev + `\n\`\`\`${fname}\n${content}\n\`\`\``)
+    } catch (e) { /* cancelled or binary */ }
+  }
+
   const onKey = (e: KeyboardEvent) => {
+    if (isCmd && filtered.length > 0) {
+      if (e.key === 'Tab') { e.preventDefault(); setCmdIdx(i => (i + 1) % filtered.length); return }
+      if (e.key === 'ArrowDown') { e.preventDefault(); setCmdIdx(i => Math.min(i + 1, filtered.length - 1)); return }
+      if (e.key === 'ArrowUp') { e.preventDefault(); setCmdIdx(i => Math.max(i - 1, 0)); return }
+    }
     if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); send() }
-    if (e.key === 'Escape') setShowCmds(false)
   }
 
   return (
     <div className="input-bar">
-      {showCmds && filtered.length > 0 && (
+      {isCmd && filtered.length > 0 && (
         <div className="command-palette">
-          {filtered.map(c => (
-            <div key={c.cmd} className="command-item" onClick={() => { setValue(c.cmd + ' '); setShowCmds(false); ref.current?.focus() }}>
-              <span className="command-name">{c.cmd}</span>
-              <span className="command-desc">{c.desc}</span>
+          {filtered.map((c, i) => (
+            <div key={c.cmd} className={`cmd-item ${i === cmdIdx ? 'active' : ''}`}
+              onClick={() => { setValue(c.cmd + c.args + ' '); ref.current?.focus() }}>
+              <span className="cmd-name">{c.cmd}{c.args}</span>
+              <span className="cmd-info">{c.info}</span>
             </div>
           ))}
         </div>
       )}
       <div className="input-row">
-        <button className="attach-btn" title="Attach file" onClick={pickFile}>
-          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round">
-            <path d="M21.44 11.05l-9.19 9.19a6 6 0 01-8.49-8.49l9.19-9.19a4 4 0 015.66 5.66l-9.2 9.19a2 2 0 01-2.83-2.83l8.49-8.48"/>
-          </svg>
+        <button className="input-btn attach" onClick={attachFile} title="Attach file (Ctrl+O)">
+          <Paperclip size={16} />
         </button>
         <textarea ref={ref} className="input-textarea" value={value}
-          onChange={e => { setValue(e.target.value); if (e.target.value.startsWith('/')) setShowCmds(true) }}
-          onKeyDown={onKey} placeholder="Message (Enter 发送，Shift+Enter 换行，/ 命令)" rows={1}
-        />
-        <button className="send-btn" disabled={!value.trim()} onClick={send}>⏎</button>
+          onChange={e => { setValue(e.target.value); setCmdIdx(0) }}
+          onKeyDown={onKey}
+          placeholder="输入消息...（Enter 发送，Shift+Enter 换行，/ 命令）"
+          rows={1} />
+        <button className="input-btn send" onClick={send} title="Send (Enter)">
+          <ArrowUp size={18} />
+        </button>
       </div>
     </div>
   )

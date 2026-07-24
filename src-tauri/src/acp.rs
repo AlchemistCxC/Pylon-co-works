@@ -35,9 +35,9 @@ pub struct RawMessage {
 
 impl AcpClient {
     /// Spawn `peri.exe acp`, perform initialize handshake, start reader + stderr threads.
-    pub fn spawn(peri_exe: &str, cwd: &str, _model: &str) -> Result<Self, String> {
+    pub fn spawn(peri_exe: &str, cwd: &str, model: &str) -> Result<Self, String> {
         let mut child = Command::new(peri_exe)
-            .args(["acp", "--cwd", cwd])
+            .args(["acp", "--cwd", cwd, "--model", model])
             .stdin(Stdio::piped())
             .stdout(Stdio::piped())
             .stderr(Stdio::piped())

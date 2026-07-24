@@ -12,6 +12,9 @@ import ProfileEditor from './components/ProfileEditor'
 
 import PrismSheet from './components/PrismSheet'
 
+import { getCurrentWindow } from '@tauri-apps/api/window'
+import { invoke } from '@tauri-apps/api/core'
+
 export default function App() {
   const [activeSession, setActiveSession] = useState<string | null>(null)
   const [showSettings, setShowSettings] = useState(false)
@@ -19,6 +22,7 @@ export default function App() {
   const [showProfileEdit, setShowProfileEdit] = useState(false)
   const [activeTab, setActiveTab] = useState<'peri' | 'prism'>('peri')
   const theme = useStore()
+  const appWindow = getCurrentWindow()
 
   const cssVars = useMemo(() => ({
     '--t': theme.transparency,
@@ -83,9 +87,9 @@ export default function App() {
         <div className="titlebar-controls">
           <button onClick={() => setRightOpen(!rightOpen)} title="Panel">&#9776;</button>
           <button onClick={() => setShowSettings(!showSettings)} title="Settings">&#9881;</button>
-          <button onClick={() => (window as any).__TAURI__?.window?.minimize()}>─</button>
-          <button onClick={() => (window as any).__TAURI__?.window?.toggleMaximize()}>⛶</button>
-          <button className="close" onClick={() => (window as any).__TAURI__?.window?.close()}>✕</button>
+          <button onClick={() => appWindow.minimize()}>─</button>
+          <button onClick={() => appWindow.toggleMaximize()}>⛶</button>
+          <button className="close" onClick={() => appWindow.destroy()}>✕</button>
         </div>
       </div>
 
@@ -101,7 +105,22 @@ export default function App() {
               <ChatView sessionId={activeSession} />
               <div className="bottom-area">
                 <InputBar sessionId={activeSession} />
-                <StatusBar ekgGreen={theme.ekgGreen} ekgYellow={theme.ekgYellow} ekgRed={theme.ekgRed} />
+                <StatusBar
+                tokensUsed={theme.liveTokensUsed || 0}
+                tokensMax={theme.liveTokensMax || 128}
+                cacheHit={theme.liveCacheHit || 0}
+                mode={theme.liveMode as any || 'auto'}
+                prismOn={theme.livePrismOn}
+                ekgGreen={theme.ekgGreen} ekgYellow={theme.ekgYellow} ekgRed={theme.ekgRed}
+                onMode={(m) => {
+                  useStore.getState().setLiveStats({ liveMode: m })
+                  if (activeSession) invoke('set_mode', { source: activeSession, mode: m }).catch(() => {})
+                }}
+                onSelectModel={(m) => {
+                  const p = useStore.getState().profiles.find(x => x.id === useStore.getState().activeProfileId)
+                  if (p) useStore.getState().addProfile({ ...p, model: m })
+                }}
+              />
               </div>
             </div>
           </>}

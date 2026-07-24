@@ -36,6 +36,9 @@ details[open] > .group-header::before { content:'▾'; }
 .session-name { font-size:var(--sidebar-name-size,14px); white-space:nowrap; overflow:hidden; text-overflow:ellipsis; font-weight:500; color:var(--sidebar-text,var(--text)); }
 .session-item.active .session-name { font-weight:600; }
 .session-meta { font-size:12px; color:var(--text-dim); margin-top:1px; }
+.session-del { opacity:0; background:none; border:none; color:var(--danger); cursor:pointer; font-size:14px; padding:2px 4px; transition:opacity 0.15s; flex-shrink:0; }
+.session-item:hover .session-del { opacity:1; }
+.session-del:hover { background:rgba(190,40,40,0.08); border-radius:3px; }
 
 .profile-bar { display:flex; align-items:center; gap:6px; padding:10px 14px; border-top:1px solid var(--border); }
 .profile-avatar { width:32px; height:32px; border-radius:6px; border:2px solid transparent; background:var(--bg-panel); cursor:pointer; display:flex; align-items:center; justify-content:center; font-size:15px; font-weight:600; color:var(--text-dim); transition:border-color 0.15s; }
