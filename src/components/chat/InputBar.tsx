@@ -117,7 +117,8 @@ export default function InputBar({ sessionId }: Props) {
   }
 
   return (
-    <div className="input-bar">
+    <div className={`input-bar ${useStore.getState().inputMode === 'cli' ? 'cli-mode' : ''}`}>
+      {sendError && <div className="input-error">{sendError}</div>}
       {isCmd && filtered.length > 0 && (
         <div className="command-palette">
           {filtered.map((c: typeof COMMANDS[number], i: number) => (
