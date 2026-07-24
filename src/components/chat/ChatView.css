@@ -25,7 +25,7 @@
 .term-reasoning { padding:4px 0; }
 .term-reasoning-head { cursor:pointer; color:var(--text-dim); font-style:italic; font-size:0.93em; user-select:none; }
 .term-reasoning-head:hover { color:var(--text); }
-.term-reasoning-body { padding:4px 0 4px 12px; }
+.term-reasoning-body { padding:4px 0 4px 18px; }
 .term-reasoning-line { color:var(--text-dim); font-style:italic; font-size:0.93em; line-height:1.6; white-space:pre-wrap; }
 
 .term-tool { padding:2px 0; position:relative; }
