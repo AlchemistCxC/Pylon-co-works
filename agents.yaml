@@ -1,0 +1,13 @@
+agents:
+  peri:
+    name: Peri
+    transport: subprocess
+    exe: F:\A-I\Agent\Peri\target\release\peri.exe
+    args: ["acp", "--model", "deepseek-v4-flash"]
+    cwd: G:\Project\prism
+  hermes:
+    name: Hermes
+    transport: subprocess
+    exe: hermes
+    args: ["acp"]
+    cwd: .

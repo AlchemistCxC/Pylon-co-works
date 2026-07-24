@@ -1,6 +1,6 @@
-import { useState } from 'react'
+import { useState, useEffect } from 'react'
 import { invoke } from '@tauri-apps/api/core'
-import { useStore } from '../store'
+import { useStore, Session } from '../store'
 import './Sidebar.css'
 
 interface Props {
@@ -19,12 +19,19 @@ export default function Sidebar({ activeSession, onSelectSession, onProfileEdit 
   const addSession = useStore(s => s.addSession)
   const removeSession = useStore(s => s.removeSession)
   const setSessionPeriId = useStore(s => s.setSessionPeriId)
+  const restoreSessions = useStore(s => s.restoreSessions)
   const activeProfile = profiles.find(p => p.id === activeProfileId)
 
-  // Filter sessions by active profile
+  // Restore sessions from localStorage on mount
+  useEffect(() => {
+    const saved = restoreSessions()
+    if (saved.length > 0) {
+      useStore.setState({ sessions: saved })
+    }
+  }, [])
+
   const profileSessions = sessions.filter(s => s.profileId === activeProfileId)
 
-  // Group sessions by source
   const groups = new Map<string, typeof profileSessions>()
   profileSessions.forEach(s => {
     const key = s.source.replace(/^local:/, '本地').replace(/^qq:group:/, 'QQ群 ').replace(/^qq:user:/, 'QQ私聊 ')
@@ -40,11 +47,23 @@ export default function Sidebar({ activeSession, onSelectSession, onProfileEdit 
 
   const handleSelect = async (id: string) => {
     onSelectSession(id)
-    // Auto-create Peri session if not yet created
     const s = sessions.find(x => x.id === id)
-    if (s && !s.periId && activeProfile) {
+    if (!s || !activeProfile) return
+    if (s.periId) {
+      // P1: Load persisted session
       try {
-        const periId = await invoke<string>('new_session', { source: id, persona: activeProfile.persona })
+        await invoke('load_persisted_session', { source: s.source, periId: s.periId })
+      } catch (e) {
+        console.error('load session failed:', e)
+        // Fallback: create new
+        try {
+          const periId = await invoke<string>('new_session', { source: s.source, persona: activeProfile.persona })
+          setSessionPeriId(id, periId)
+        } catch {}
+      }
+    } else {
+      try {
+        const periId = await invoke<string>('new_session', { source: s.source, persona: activeProfile.persona })
         setSessionPeriId(id, periId)
       } catch (e) {
         console.error('create session failed:', e)
@@ -63,7 +82,7 @@ export default function Sidebar({ activeSession, onSelectSession, onProfileEdit 
         {!collapsed && <input className="search-input" placeholder="搜索会话..." value={search} onChange={e => setSearch(e.target.value)} />}
         <button className="sidebar-action" onClick={newSession} title="New Session">+</button>
         <button className="sidebar-action" onClick={() => setCollapsed(!collapsed)} title={collapsed ? '展开' : '收起'}>
-          {collapsed ? '\u25b8' : '\u25be'}
+          {collapsed ? '▸' : '▾'}
         </button>
       </div>
       {!collapsed && (
@@ -79,7 +98,7 @@ export default function Sidebar({ activeSession, onSelectSession, onProfileEdit 
                     <div className="session-name">{s.name}</div>
                     <div className="session-meta">{s.source.replace(/^.*:/, '')}</div>
                   </div>
-                  <button className="session-del" onClick={e => { e.stopPropagation(); handleDelete(s.id) }}>\u2715</button>
+                  <button className="session-del" onClick={e => { e.stopPropagation(); handleDelete(s.id) }}>✕</button>
                 </div>
               ))}
             </details>
@@ -96,7 +115,7 @@ export default function Sidebar({ activeSession, onSelectSession, onProfileEdit 
             {p.avatar ? <img src={p.avatar} alt={p.name} /> : p.name[0]}
           </button>
         ))}
-        <button className="profile-edit" title="Edit Profile" onClick={onProfileEdit}>\u270e</button>
+        <button className="profile-edit" title="Edit Profile" onClick={onProfileEdit}>✎</button>
       </div>
     </aside>
   )

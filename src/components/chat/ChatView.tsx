@@ -1,5 +1,6 @@
 import { useRef, useEffect, useState, useMemo, useCallback } from 'react'
 import { listen } from '@tauri-apps/api/event'
+import { invoke } from '@tauri-apps/api/core'
 import { useStore } from '../../store'
 import ReactMarkdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
@@ -34,8 +35,8 @@ function Spinner({ tokenCount, startTime }: { tokenCount: number; startTime: num
   }, [])
   const tickIdx = Math.floor((Date.now() - startTime) / 120)
   const frame = SPARKLES[tickIdx % SPARKLES.length]
-  // Rotate idiom every 4 ticks (~0.5s)
-  const idiom = IDIOMS[Math.floor(tickIdx / 4) % IDIOMS.length]
+  // Rotate idiom every 8 ticks (~1s)
+  const idiom = IDIOMS[Math.floor(tickIdx / 8) % IDIOMS.length]
   const elapsed = Math.floor((Date.now() - startTime) / 1000)
   const elapsedStr = elapsed >= 60 ? `${Math.floor(elapsed/60)}m ${elapsed%60}s` : `${elapsed}s`
   const parts = [elapsedStr]
@@ -126,9 +127,9 @@ export default function ChatView({ sessionId }: Props) {
           }
           case 'tool_call': {
             const rawInput = upd.rawInput
-            const inputStr = typeof rawInput === 'string' ? rawInput : JSON.stringify(rawInput)
+            const inputStr = formatToolInput(upd.title, rawInput) || (typeof rawInput === 'string' ? rawInput.slice(0, 80) : '')
             setMessages(prev => [...prev, {
-              id: 'tool-' + Date.now(), role: 'tool', sender: 'tool:' + (upd.title || '?'),
+              id: 'tool-' + upd.toolCallId, role: 'tool', sender: 'tool:' + (upd.title || '?'),
               content: '', time: new Date().toLocaleTimeString(),
               toolName: upd.title,
               toolInput: inputStr,
@@ -139,14 +140,13 @@ export default function ChatView({ sessionId }: Props) {
           case 'tool_call_update': {
             const rawOutput = upd.rawOutput
             const outputStr = typeof rawOutput === 'string' ? rawOutput : JSON.stringify(rawOutput, null, 2)
-            const lines = outputStr ? outputStr.split('\n').filter((l: string) => l.trim()).length : 0
-            setMessages(prev => {
-              const lastIdx = prev.length - 1
-              if (lastIdx >= 0 && prev[lastIdx].role === 'tool' && prev[lastIdx].running) {
-                return prev.map((m, i) => i === lastIdx ? { ...m, toolOutput: outputStr, toolOutputLines: lines, running: false } : m)
+            const lines = outputStr ? outputStr.split(/\n/).filter((l: string) => l.trim()).length : 0
+            setMessages(prev => prev.map(m => {
+              if (m.id === 'tool-' + upd.toolCallId && m.running) {
+                return { ...m, toolOutput: outputStr, toolOutputLines: lines, running: false }
               }
-              return prev
-            })
+              return m
+            }))
             break
           }
           case 'usage_update': {
@@ -196,6 +196,9 @@ export default function ChatView({ sessionId }: Props) {
 
   return (
     <div className="chat-view">
+      <div className="chat-header">
+        <span className="chat-title">{useStore.getState().sessions.find(s => s.source === sessionId)?.name || sessionId}</span>
+      </div>
       <div className="term">
         <AnimatePresence initial={false}>
           {messages.map((msg) => (
@@ -263,6 +266,20 @@ function ReasoningBlock({ text }: { text: string }) {
       {open && <div className="term-reasoning-body">{text.split('\n').map((line, i) => <div key={i} className="term-reasoning-line">{line || '\u00a0'}</div>)}</div>}
     </div>
   )
+}
+
+function formatToolInput(name: string, rawInput: any): string {
+  if (typeof rawInput !== 'object' || !rawInput) return ''
+  // Extract the most meaningful field per tool type
+  if (name === 'Bash') return rawInput.command || rawInput.cmd || ''
+  if (name === 'Read' || name === 'Write' || name === 'Edit') return rawInput.path || rawInput.file_path || rawInput.filePath || ''
+  if (name === 'Grep' || name === 'Glob') return rawInput.pattern || rawInput.regex || rawInput.glob || ''
+  if (name === 'Task') return rawInput.description || rawInput.prompt || rawInput.goal || ''
+  // Fallback: show first meaningful string value
+  for (const v of Object.values(rawInput)) {
+    if (typeof v === 'string' && v.length > 0 && v.length < 200) return v
+  }
+  return ''
 }
 
 function ToolCard({ name, input, output, outputLines }: { name: string; input?: string; output?: string; outputLines?: number }) {

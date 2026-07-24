@@ -25,6 +25,7 @@ type ThemeState = ThemeSettings & {
   addSession: (name: string) => void
   removeSession: (id: string) => void
   setSessionPeriId: (id: string, periId: string) => void
+  restoreSessions: () => Session[]
   getUser: (source: string) => UserMapping | undefined
   updateTheme: (partial: Partial<ThemeSettings>) => void
   liveTokensUsed: number
@@ -64,12 +65,30 @@ export const useStore = create<ThemeState>((set, get) => ({
   addProfile: (p) => set(s => ({ profiles: [...s.profiles.filter(x => x.id !== p.id), p] })),
   addSession: (name) => {
     const profileId = get().activeProfileId
-    set(s => ({ sessions: [...s.sessions, { id: 's' + Date.now().toString(36), name, source: 'local:' + name, profileId }] }))
+    const s = { id: 's' + Date.now().toString(36), name, source: 'local:' + name, profileId }
+    set(state => {
+      const sessions = [...state.sessions, s]
+      localStorage.setItem('prism-sessions', JSON.stringify(sessions))
+      return { sessions }
+    })
   },
-  removeSession: (id) => set(s => ({ sessions: s.sessions.filter(x => x.id !== id) })),
-  setSessionPeriId: (id, periId) => set(s => ({
-    sessions: s.sessions.map(ss => ss.id === id ? { ...ss, periId } : ss),
-  })),
+  removeSession: (id) => set(s => {
+    const sessions = s.sessions.filter(x => x.id !== id)
+    localStorage.setItem('prism-sessions', JSON.stringify(sessions))
+    return { sessions }
+  }),
+  setSessionPeriId: (id, periId) => set(s => {
+    const sessions = s.sessions.map(ss => ss.id === id ? { ...ss, periId } : ss)
+    localStorage.setItem('prism-sessions', JSON.stringify(sessions))
+    return { sessions }
+  }),
+  restoreSessions: () => {
+    try {
+      const raw = localStorage.getItem('prism-sessions')
+      if (raw) return JSON.parse(raw) as Session[]
+    } catch {}
+    return []
+  },
   getUser: (source) => get().users.find(u => u.id === source),
   updateTheme: (partial) => set(partial),
 

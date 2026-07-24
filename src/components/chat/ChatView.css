@@ -88,3 +88,7 @@
 .spinner-meta { color:var(--text-dim); }
 
 .term-summary { padding:4px 0; color:var(--text-dim); font-size:0.93em; }
+
+/* chat header */
+.chat-header { display:flex; align-items:center; justify-content:space-between; padding:0 0 8px 0; border-bottom:1px solid var(--border); margin-bottom:4px; }
+.chat-title { font-weight:600; font-size:0.95em; color:var(--text); }

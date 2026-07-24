@@ -1,13 +1,17 @@
 mod acp;
+mod agent_config;
 
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 use tauri::{Emitter, Manager};
 use acp::AcpClient;
+use agent_config::AgentDef;
 
 struct AppState {
     acp: Arc<AcpClient>,
+    agents: HashMap<String, AgentDef>,
+    active_agent: Mutex<String>,
     sessions: Mutex<HashMap<String, SessionInfo>>,
 }
 
@@ -23,7 +27,9 @@ async fn new_session(
     source: String,
     persona: String,
 ) -> Result<String, String> {
-    let peri_id = state.acp.new_session("G:\\Project\\prism").await?;
+    let agent = { let aa = state.active_agent.lock().map_err(|e| e.to_string())?; state.agents.get(&*aa).ok_or("no active agent")?.clone() };
+    let cwd = agent.cwd.as_deref().unwrap_or(".");
+    let peri_id = state.acp.new_session(cwd).await?;
     state.sessions.lock().map_err(|e| e.to_string())?
         .insert(source.clone(), SessionInfo { peri_id: peri_id.clone(), persona, has_first_prompt: false });
     Ok(peri_id)
@@ -47,14 +53,14 @@ async fn send_message(
                 break 'session (s.peri_id.clone(), first);
             }
         }
-        // Lock dropped — safe to .await
-        let peri_id = state.acp.new_session("G:\\Project\\prism").await?;
+        let agent = { let aa = state.active_agent.lock().map_err(|e| e.to_string())?; state.agents.get(&*aa).ok_or("no active agent")?.clone() };
+        let cwd = agent.cwd.as_deref().unwrap_or(".");
+        let peri_id = state.acp.new_session(cwd).await?;
         state.sessions.lock().map_err(|e| e.to_string())?
             .insert(source.clone(), SessionInfo { peri_id: peri_id.clone(), persona: persona.clone(), has_first_prompt: true });
         (peri_id, true)
     };
 
-    // Skip persona injection for slash commands
     let prompt_content = if is_first && !persona.is_empty() && !content.starts_with('/') {
         format!("{}\n\n---\n\n{}", persona, content)
     } else {
@@ -62,53 +68,33 @@ async fn send_message(
     };
 
     let user_content = content.clone();
-
-    // Subscribe to broadcast BEFORE sending prompt (no missed streaming events)
     let mut broadcast = state.acp.rx.resubscribe();
-
-    // Atomic: register oneshot before writing to stdin (no timing hole)
     let (_request_id, mut rx) = state.acp.send_prompt_atomic(&peri_id, &prompt_content)?;
-
-    // Echo user message
-    let _ = window.emit("peri:user", serde_json::json!({
-        "source": source,
-        "content": user_content,
-    }));
+    let _ = window.emit("peri:user", serde_json::json!({ "source": source, "content": user_content }));
 
     let win = window.clone();
     let src = source.clone();
-
-    // Read streaming notifications + final response with timeout
     let result = tokio::time::timeout(Duration::from_secs(300), async move {
         loop {
             tokio::select! {
-                // Response from oneshot
                 msg = &mut rx => {
                     match msg {
                         Ok(raw) => {
                             if let Some(params) = raw.result {
-                                let _ = win.emit("peri:done", serde_json::json!({
-                                    "source": src,
-                                    "data": params,
-                                }));
+                                let _ = win.emit("peri:done", serde_json::json!({"source": src, "data": params}));
                             }
                             if let Some(err) = raw.error {
-                                let _ = win.emit("peri:error", serde_json::json!({
-                                    "source": src,
-                                    "error": err.to_string(),
-                                }));
+                                let _ = win.emit("peri:error", serde_json::json!({"source": src, "error": err.to_string()}));
                             }
                             return Ok(());
                         }
                         Err(_) => return Err("ACP connection closed".to_string()),
                     }
                 }
-                // Streaming notifications from broadcast
                 notif = broadcast.recv() => {
                     match notif {
                         Ok(raw) => {
                             if raw.method.as_deref() == Some("session/update") {
-                                // Inject source into the params (which already has {sessionId, update})
                                 let mut payload = raw.params.unwrap_or(serde_json::Value::Null);
                                 if let serde_json::Value::Object(ref mut map) = payload {
                                     map.insert("source".to_string(), serde_json::Value::String(src.clone()));
@@ -131,21 +117,14 @@ async fn send_message(
         Ok(Ok(())) => Ok(peri_id),
         Ok(Err(e)) => Err(e),
         Err(_) => {
-            let _ = window.emit("peri:error", serde_json::json!({
-                "source": source,
-                "error": "Request timed out after 300s",
-            }));
+            let _ = window.emit("peri:error", serde_json::json!({"source": source, "error": "timed out after 300s"}));
             Err("timeout".to_string())
         }
     }
 }
 
 #[tauri::command]
-async fn set_mode(
-    state: tauri::State<'_, AppState>,
-    source: String,
-    mode: String,
-) -> Result<(), String> {
+async fn set_mode(state: tauri::State<'_, AppState>, source: String, mode: String) -> Result<(), String> {
     let peri_id = {
         let sessions = state.sessions.lock().map_err(|e| e.to_string())?;
         sessions.get(&source).map(|s| s.peri_id.clone()).ok_or("no session")?
@@ -155,26 +134,84 @@ async fn set_mode(
 }
 
 #[tauri::command]
-async fn load_sessions(
-    state: tauri::State<'_, AppState>,
-) -> Result<Vec<serde_json::Value>, String> {
-    use serde_json::json;
+async fn load_sessions(state: tauri::State<'_, AppState>) -> Result<Vec<serde_json::Value>, String> {
     let sessions = state.sessions.lock().map_err(|e| e.to_string())?;
     Ok(sessions.iter().map(|(source, info)| {
-        json!({"source": source, "periId": info.peri_id, "persona": info.persona})
+        serde_json::json!({"source": source, "periId": info.peri_id, "persona": info.persona})
     }).collect())
+}
+
+// ── P0: Agent Registry commands ──
+
+#[tauri::command]
+async fn list_agents(state: tauri::State<'_, AppState>) -> Result<Vec<serde_json::Value>, String> {
+    Ok(state.agents.iter().map(|(id, a)| {
+        serde_json::json!({"id": id, "name": a.name, "transport": a.transport})
+    }).collect())
+}
+
+#[tauri::command]
+async fn switch_agent(state: tauri::State<'_, AppState>, name: String) -> Result<(), String> {
+    let agents = state.agents.clone();
+    if !agents.contains_key(&name) {
+        return Err(format!("unknown agent: {}", name));
+    }
+    *state.active_agent.lock().map_err(|e| e.to_string())? = name;
+    Ok(())
+}
+
+// ── P1: Session persistence commands ──
+
+#[tauri::command]
+async fn load_persisted_session(
+    state: tauri::State<'_, AppState>,
+    source: String,
+    peri_id: String,
+) -> Result<(), String> {
+    let agent = { let aa = state.active_agent.lock().map_err(|e| e.to_string())?; state.agents.get(&*aa).ok_or("no active agent")?.clone() };
+    let cwd = agent.cwd.as_deref().unwrap_or(".");
+    state.acp.load_session(&peri_id, cwd).await?;
+    // Register in local sessions map
+    state.sessions.lock().map_err(|e| e.to_string())?
+        .insert(source, SessionInfo { peri_id: peri_id.clone(), persona: String::new(), has_first_prompt: true });
+    Ok(())
+}
+
+#[tauri::command]
+async fn list_persisted_sessions(state: tauri::State<'_, AppState>) -> Result<serde_json::Value, String> {
+    let agent = { let aa = state.active_agent.lock().map_err(|e| e.to_string())?; state.agents.get(&*aa).ok_or("no active agent")?.clone() };
+    let cwd = agent.cwd.as_deref();
+    state.acp.list_persisted(cwd).await
+}
+
+// ── P2: Export command ──
+
+#[tauri::command]
+async fn export_session(
+    state: tauri::State<'_, AppState>,
+    peri_id: String,
+    format: String,
+    output_path: String,
+) -> Result<(), String> {
+    let agent = { let aa = state.active_agent.lock().map_err(|e| e.to_string())?; state.agents.get(&*aa).ok_or("no active agent")?.clone() };
+    let cwd = agent.cwd.as_deref().unwrap_or(".");
+    // Load session to get message history, then format and write
+    // For now, load and capture all session/update events, then format
+    state.acp.load_session(&peri_id, cwd).await?;
+    std::fs::write(&output_path, format!("# Session {}\n\n_exported_{}_format_placeholder_\n", peri_id, format))
+        .map_err(|e| format!("write failed: {}", e))?;
+    Ok(())
 }
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
-    // Outer runtime for async initialization (tauri.run() creates its own runtime internally)
+    let agents = agent_config::load();
+    let default_agent_id = agents.keys().next().expect("no agents in agents.yaml").clone();
+    let default_agent = agents.get(&default_agent_id).expect("default agent not found");
+
     let rt = tokio::runtime::Runtime::new().expect("failed to create tokio runtime");
     rt.block_on(async {
-        let acp = Arc::new(AcpClient::spawn(
-            "F:\\A-I\\Agent\\Peri\\target\\release\\peri.exe",
-            "G:\\Project\\prism",
-            "deepseek-v4-flash",
-        ).await.expect("failed to start peri ACP"));
+        let acp = Arc::new(AcpClient::connect(default_agent).await.expect("failed to connect ACP agent"));
 
         // tauri.run() blocks until window closes; runtime not dropped until then (no leak)
         tauri::Builder::default()
@@ -183,9 +220,16 @@ pub fn run() {
             .plugin(tauri_plugin_fs::init())
             .manage(AppState {
                 acp,
+                agents,
+                active_agent: Mutex::new(default_agent_id),
                 sessions: Mutex::new(HashMap::new()),
             })
-            .invoke_handler(tauri::generate_handler![new_session, send_message, set_mode, load_sessions])
+            .invoke_handler(tauri::generate_handler![
+                new_session, send_message, set_mode, load_sessions,
+                list_agents, switch_agent,
+                load_persisted_session, list_persisted_sessions,
+                export_session,
+            ])
             .setup(|app| {
                 app.get_webview_window("main").unwrap().set_title("Prism Desktop").ok();
                 Ok(())

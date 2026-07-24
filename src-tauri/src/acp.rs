@@ -221,4 +221,96 @@ impl AcpClient {
             "mode": mode
         })).await
     }
+
+    /// Connect from AgentDef (P0: replaces hardcoded spawn)
+    pub async fn connect(agent: &crate::agent_config::AgentDef) -> Result<Self, String> {
+        match agent.transport.as_str() {
+            "subprocess" => {
+                let mut cmd = Command::new(&agent.exe);
+                cmd.args(&agent.args)
+                   .stdin(Stdio::piped())
+                   .stdout(Stdio::piped())
+                   .stderr(Stdio::piped());
+                if let Some(cwd) = &agent.cwd {
+                    cmd.current_dir(cwd);
+                }
+                for (k, v) in &agent.env {
+                    cmd.env(k, v);
+                }
+                let mut child = cmd.spawn()
+                    .map_err(|e| format!("spawn {} failed: {}", &agent.exe, e))?;
+
+                let stdin = Arc::new(Mutex::new(BufWriter::new(
+                    child.stdin.take().ok_or("no stdin")?
+                )));
+                let stdout = BufReader::new(child.stdout.take().ok_or("no stdout")?);
+
+                // Drain stderr
+                let stderr = child.stderr.take().ok_or("no stderr")?;
+                std::thread::spawn(move || {
+                    for line in BufReader::new(stderr).lines() {
+                        if let Ok(l) = line { if !l.is_empty() { log::error!("{} stderr: {}", agent.name, l); } }
+                    }
+                });
+
+                let pending: Arc<Mutex<Pending>> = Arc::new(Mutex::new(HashMap::new()));
+                let (tx, rx) = broadcast::channel(256);
+
+                let pending_clone = pending.clone();
+                let tx_clone = tx.clone();
+                std::thread::spawn(move || {
+                    for line in stdout.lines() {
+                        let line = match line { Ok(l) => l, Err(_) => break };
+                        let line = line.trim().to_string();
+                        if line.is_empty() { continue; }
+                        let msg_val: serde_json::Value = match serde_json::from_str(&line) {
+                            Ok(v) => v,
+                            Err(e) => { log::error!("ACP parse: {} — {}", e, &line[..100.min(line.len())]); continue; }
+                        };
+                        let raw = RawMessage {
+                            id: msg_val.get("id").and_then(|v| v.as_u64()),
+                            method: msg_val.get("method").and_then(|v| v.as_str()).map(|s| s.to_string()),
+                            result: msg_val.get("result").cloned(),
+                            params: msg_val.get("params").cloned(),
+                            error: msg_val.get("error").cloned(),
+                        };
+                        if raw.method.is_none() && raw.id.is_some() {
+                            if let Some(id) = raw.id {
+                                let mut p = pending_clone.lock().unwrap();
+                                if let Some(tx) = p.remove(&id) { let _ = tx.send(raw.clone()); }
+                            }
+                        }
+                        let _ = tx_clone.send(raw);
+                    }
+                });
+
+                let client = AcpClient { child, stdin, next_id: AtomicU64::new(1), pending, rx, tx };
+                // Initialize
+                client.call_async("initialize", serde_json::json!({
+                    "protocolVersion": 1, "capabilities": {},
+                    "clientInfo": {"name": "prism-desktop", "version": "0.1.0"}
+                })).await?;
+                Ok(client)
+            }
+            other => Err(format!("unsupported transport: {}", other)),
+        }
+    }
+
+    /// P1: Load a persisted session — Peri replays history via session/update
+    pub async fn load_session(&self, session_id: &str, cwd: &str) -> Result<(), String> {
+        self.call_async("session/load", serde_json::json!({
+            "sessionId": session_id,
+            "cwd": cwd,
+        })).await?;
+        Ok(())
+    }
+
+    /// P1: List persisted sessions from ThreadStore
+    pub async fn list_persisted(&self, cwd: Option<&str>) -> Result<serde_json::Value, String> {
+        let mut params = serde_json::json!({});
+        if let Some(c) = cwd {
+            params["cwd"] = serde_json::Value::String(c.to_string());
+        }
+        self.call_async("session/list", params).await
+    }
 }
