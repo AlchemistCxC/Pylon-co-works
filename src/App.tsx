@@ -2,8 +2,7 @@ import { useState, useMemo, useEffect } from 'react'
 import ErrorBoundary from './components/ErrorBoundary'
 import Sidebar from './components/Sidebar'
 import ChatView from './components/chat/ChatView'
-import InputBar from './components/chat/InputBar'
-import StatusBar from './components/chat/StatusBar'
+import ControlCenter from './components/ControlCenter'
 import RightPanel from './components/RightPanel'
 import Settings from './components/Settings'
 import { useStore } from './store'
@@ -133,38 +132,7 @@ export default function App() {
           {showSettings ? <Settings /> : activeTab === 'prism' ? <PrismSheet /> : <>
             <div className="main-body">
               <ChatView sessionId={activeSession} />
-              <div className="bottom-area">
-                <InputBar sessionId={activeSession} />
-                <StatusBar
-                tokensUsed={theme.liveTokensUsed || 0}
-                tokensMax={theme.liveTokensMax || 128}
-                cacheHit={theme.liveCacheHit || 0}
-                mode={theme.liveMode as any || 'auto'}
-                prismOn={theme.livePrismOn}
-                ekgGreen={theme.ekgGreen} ekgYellow={theme.ekgYellow} ekgRed={theme.ekgRed}
-                onMode={(m) => {
-                  useStore.getState().setLiveStats({ liveMode: m })
-                  if (activeSession) invoke('set_mode', { source: activeSession, mode: m }).catch(() => {})
-                }}
-                onSelectModel={(m) => {
-                  const p = useStore.getState().profiles.find(x => x.id === useStore.getState().activeProfileId)
-                  if (p) useStore.getState().addProfile({ ...p, model: m })
-                }}
-                onCompact={() => {
-                  if (activeSession) {
-                    const persona = useStore.getState().profiles.find(
-                      p => p.id === useStore.getState().activeProfileId
-                    )?.persona || ''
-                    invoke('send_message', { source: activeSession, content: '/compact', persona }).catch(() => {})
-                  }
-                }}
-                onPrismToggle={() => {
-                  useStore.getState().setLiveStats({
-                    livePrismOn: !useStore.getState().livePrismOn
-                  })
-                }}
-              />
-              </div>
+              <ControlCenter sessionId={activeSession} />
             </div>
           </>}
         </div>

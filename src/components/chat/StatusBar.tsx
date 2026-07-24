@@ -1,5 +1,6 @@
 import { useMemo, useState, useEffect } from 'react'
 import { useStore } from '../../store'
+import { invoke } from '@tauri-apps/api/core'
 import './StatusBar.css'
 
 function wave(w: number, h: number, intensity: number, offset: number, ampMax: number, speedMax: number, noiseScale: number): string {
@@ -48,18 +49,15 @@ function fmtSize(n: number) {
   return `${n}`
 }
 
-export default function StatusBar({
-  tokensUsed = 0, tokensMax = 0, cacheHit = 0,
-  mode = 'auto', prismOn = true,
-  ekgGreen, ekgYellow, ekgRed,
-  onCompact, onMode, onPrismToggle, onSelectModel,
-}: {
-  tokensUsed?: number; tokensMax?: number; cacheHit?: number
-  mode?: string; prismOn?: boolean
-  ekgGreen?: string; ekgYellow?: string; ekgRed?: string
-  onCompact?: () => void; onMode?: (m: string) => void; onPrismToggle?: () => void
-  onSelectModel?: (model: string) => void
-}) {
+export default function StatusBar() {
+  const tokensUsed = useStore(s => s.liveTokensUsed) || 0
+  const tokensMax = useStore(s => s.liveTokensMax) || 128
+  const cacheHit = useStore(s => s.liveCacheHit) || 0
+  const mode = useStore(s => s.liveMode) || 'auto'
+  const prismOn = useStore(s => s.livePrismOn)
+  const ekgGreen = useStore(s => s.ekgGreen)
+  const ekgYellow = useStore(s => s.ekgYellow)
+  const ekgRed = useStore(s => s.ekgRed)
   const [tick, setTick] = useState(0)
   const [modelOpen, setModelOpen] = useState(false)
   const activeProfile = useStore(s => s.profiles.find(x => x.id === s.activeProfileId))
@@ -89,11 +87,12 @@ export default function StatusBar({
 
   const cycleMode = () => {
     const idx = MODES.indexOf(mode as Mode)
-    onMode?.(MODES[(idx + 1) % MODES.length])
+    const next = MODES[(idx + 1) % MODES.length]
+    useStore.getState().setLiveStats({ liveMode: next })
   }
 
   return (
-    <div className="status-bar" onClick={onCompact}>
+    <div className="status-bar">
       {tokenDisplay !== 'numeric' && (
         <svg viewBox={`0 0 ${W} ${H}`} className="ekg-svg" preserveAspectRatio="none">
           <defs>
@@ -134,7 +133,7 @@ export default function StatusBar({
           <div className="model-menu">
             {MODELS.map(m => (
               <div key={m} className={`model-item ${m === model ? 'active' : ''}`}
-                onClick={() => { onSelectModel?.(m); setModelOpen(false) }}>
+                onClick={() => { useStore.getState().addProfile({ ...(activeProfile || { id: '', name: '', persona: '', model: '' }), model: m }); setModelOpen(false) }}>
                 {m}
               </div>
             ))}
