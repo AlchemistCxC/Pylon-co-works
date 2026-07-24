@@ -5,6 +5,11 @@
   "permissions": [
     "core:default",
     "core:window:default",
+    "core:window:allow-close",
+    "core:window:allow-minimize",
+    "core:window:allow-maximize",
+    "core:window:allow-unmaximize",
+    "core:window:allow-destroy",
     "core:event:default",
     "shell:default",
     "dialog:default",
