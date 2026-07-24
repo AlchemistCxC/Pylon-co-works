@@ -2,9 +2,9 @@ import { useMemo, useState, useEffect } from 'react'
 import { useStore } from '../../store'
 import './StatusBar.css'
 
-function wave(w: number, h: number, intensity: number, offset: number): string {
+function wave(w: number, h: number, intensity: number, offset: number, ampMax: number, speedMax: number): string {
   const mid = h / 2
-  const amp = 3 + intensity * 8
+  const amp = 3 + intensity * ampMax
   const pts = [`0,${mid}`]
   const cycleW = 70 + (1 - intensity) * 40
   const cycles = Math.max(2, Math.ceil(w / cycleW * 2)) * 2
@@ -61,11 +61,9 @@ export default function StatusBar({
 }) {
   const [tick, setTick] = useState(0)
   const [modelOpen, setModelOpen] = useState(false)
-  const activeProfile = useStore(s => {
-    const p = s.profiles.find(x => x.id === s.activeProfileId)
-    return p
-  })
+  const activeProfile = useStore(s => s.profiles.find(x => x.id === s.activeProfileId))
   const model = activeProfile?.model || 'deepseek-v4-flash'
+  const tokenDisplay = useStore(s => s.tokenDisplay)
 
   useEffect(() => {
     const id = setInterval(() => setTick(p => p + 1), 30)
@@ -74,13 +72,17 @@ export default function StatusBar({
 
   const used = Math.max(0, Math.min(1, tokensMax > 0 ? tokensUsed / tokensMax : 0))
   const pct = Math.round(used * 100)
-  const color = used < 0.50 ? (ekgGreen||'#34d399') : used < 0.75 ? (ekgYellow||'#fbbf24') : (ekgRed||'#f87171')
+  const color = used < 0.50 ? (ekgGreen||'#34d399') : used < 0.80 ? (ekgYellow||'#fbbf24') : (ekgRed||'#f87171')
   const intensity = Math.min(1, used * 1.5)
+  const ampMax = useStore(s => s.ekgAmplitudeMax) || 10
+  const speedMax = useStore(s => s.ekgSpeedMax) || 2.0
 
   const W = 240, H = 30, mid = H / 2
-  const cut = Math.max(4, W * used)
-  const offset = (tick * 0.5) % (W * 0.5)
-  const wfAnimated = useMemo(() => wave(W, H, intensity, offset), [intensity, tick])
+  // V3: left=remaining(color), right=consumed(gray)
+  const cut = Math.max(4, W * Math.max(0, Math.min(1, 1 - used)))
+  const offsetSpeed = (useStore(s => s.ekgSpeedBase) || 0.5) + intensity * speedMax
+  const offset = (tick * offsetSpeed) % (W * 0.5)
+  const wfAnimated = useMemo(() => wave(W, H, intensity, offset, ampMax, speedMax), [intensity, tick, ampMax, speedMax])
 
   const cycleMode = () => {
     const idx = MODES.indexOf(mode as Mode)
@@ -89,19 +91,31 @@ export default function StatusBar({
 
   return (
     <div className="status-bar" onClick={onCompact}>
-      <svg viewBox={`0 0 ${W} ${H}`} className="ekg-svg" preserveAspectRatio="none">
-        <line x1="0" y1={mid} x2={W} y2={mid} stroke="rgba(0,0,0,0.06)" strokeWidth="2.5"/>
-        <line x1="0" y1={mid-7} x2="0" y2={mid+7} stroke="rgba(0,0,0,0.35)" strokeWidth="2.5"/>
-        <line x1={W} y1={mid-7} x2={W} y2={mid+7} stroke="rgba(0,0,0,0.35)" strokeWidth="2.5"/>
-        <line x1="0" y1={mid} x2={cut} y2={mid} stroke={color} strokeWidth="2.5" strokeOpacity="0.6"/>
-        <line x1={cut} y1={mid} x2={W} y2={mid} stroke="rgba(0,0,0,0.06)" strokeWidth="2.5"/>
-        <line x1={cut} y1={mid-7} x2={cut} y2={mid+7} stroke={color} strokeWidth="3"/>
-        <clipPath id="active"><rect x="0" y="0" width={cut} height={H}/></clipPath>
-        <polyline points={wfAnimated} fill="none" stroke={color} strokeWidth="2.2"
-          strokeLinecap="round" strokeLinejoin="round" clipPath="url(#active)"
-          className="ekg-pulse"
-          style={{ filter: `drop-shadow(0 0 4px ${color}99)` } as any}/>
-      </svg>
+      {tokenDisplay !== 'numeric' && (
+        <svg viewBox={`0 0 ${W} ${H}`} className="ekg-svg" preserveAspectRatio="none">
+          <defs>
+            <linearGradient id="baseline-grad" x1="0" y1="0" x2="1" y2="0">
+              <stop offset="0" stopColor={color} />
+              <stop offset={cut / W} stopColor={color} />
+              <stop offset={cut / W} stopColor="rgba(0,0,0,0.08)" />
+              <stop offset="1" stopColor="rgba(0,0,0,0.08)" />
+            </linearGradient>
+          </defs>
+          {/* Layer 1: gradient baseline */}
+          <line x1="0" y1={mid} x2={W} y2={mid} stroke="url(#baseline-grad)" strokeWidth="3" />
+          {/* Layer 2: clipped wave */}
+          <clipPath id="active"><rect x="0" y="0" width={cut} height={H}/></clipPath>
+          <polyline points={wfAnimated} fill="none" stroke={color} strokeWidth="2.2"
+            strokeLinecap="round" strokeLinejoin="round" clipPath="url(#active)"
+            style={{ filter: `drop-shadow(0 0 4px ${color}99)` } as any}/>
+          {/* Layer 3: left fixed endpoint */}
+          <line x1="0" y1={mid-8} x2="0" y2={mid+8} stroke="rgba(0,0,0,0.35)" strokeWidth="2.5"/>
+          {/* Layer 4: right fixed endpoint */}
+          <line x1={W} y1={mid-8} x2={W} y2={mid+8} stroke="rgba(0,0,0,0.35)" strokeWidth="2.5"/>
+          {/* Layer 5: moving endpoint */}
+          <line x1={cut} y1={mid-10} x2={cut} y2={mid+10} stroke={color} strokeWidth="3"/>
+        </svg>
+      )}
 
       <span className="ekg-pct" style={{ color }}>{pct}%</span>
       <span className="pill-mono">{fmtSize(tokensUsed)}/{fmtSize(tokensMax)}</span>
