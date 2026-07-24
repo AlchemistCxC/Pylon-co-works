@@ -113,7 +113,7 @@ export default function Sidebar({ activeSession, onSelectSession, onProfileEdit 
                         onKeyDown={e => {
                           if (e.key === 'Enter') {
                             const sessions = useStore.getState().sessions.map(ss =>
-                              ss.id === s.id ? { ...ss, name: renameValue } : ss)
+                              ss.id === s.id ? { ...ss, name: renameValue, lastActiveAt: Date.now() } : ss)
                             useStore.setState({ sessions })
                             localStorage.setItem('prism-sessions', JSON.stringify(sessions))
                             setRenaming(null)
