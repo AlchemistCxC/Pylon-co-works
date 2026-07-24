@@ -195,11 +195,41 @@ async fn export_session(
 ) -> Result<(), String> {
     let agent = { let aa = state.active_agent.lock().map_err(|e| e.to_string())?; state.agents.get(&*aa).ok_or("no active agent")?.clone() };
     let cwd = agent.cwd.as_deref().unwrap_or(".");
-    // Load session to get message history, then format and write
-    // For now, load and capture all session/update events, then format
+    // Subscribe to broadcast before loading, capture all session/update events
+    let mut broadcast = state.acp.rx.resubscribe();
+    let messages: Arc<Mutex<Vec<serde_json::Value>>> = Arc::new(Mutex::new(Vec::new()));
+    let msgs = messages.clone();
+    let handle = tokio::spawn(async move {
+        while let Ok(raw) = broadcast.recv().await {
+            if raw.method.as_deref() == Some("session/update") {
+                if let Some(params) = raw.params {
+                    msgs.lock().unwrap().push(params);
+                }
+            }
+        }
+    });
     state.acp.load_session(&peri_id, cwd).await?;
-    std::fs::write(&output_path, format!("# Session {}\n\n_exported_{}_format_placeholder_\n", peri_id, format))
-        .map_err(|e| format!("write failed: {}", e))?;
+    handle.abort();
+    let msgs = messages.lock().map_err(|e| e.to_string())?;
+    let content = match format.as_str() {
+        "markdown" => {
+            let mut md = format!("# Session {}\n\n", peri_id);
+            for msg in msgs.iter() {
+                if let Some(update) = msg.get("update") {
+                    if let Some(chunk) = update.get("agent_message_chunk") {
+                        if let Some(text) = chunk.get("content").and_then(|c| c.get("text")).and_then(|v| v.as_str()) {
+                            md.push_str(text);
+                        }
+                    }
+                }
+            }
+            md
+        }
+        _ => {
+            serde_json::to_string_pretty(&messages).unwrap_or_default()
+        }
+    };
+    std::fs::write(&output_path, content).map_err(|e| format!("write failed: {}", e))?;
     Ok(())
 }
 

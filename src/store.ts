@@ -55,7 +55,7 @@ export const useStore = create<ThemeState>((set, get) => ({
     { id: 'serina', name: 'Serina', persona: '你是 Serina，TRPG 叙世引擎 GM。', model: 'deepseek-v4-flash' },
   ],
   activeProfileId: 'riccati',
-  sessions: [],
+  sessions: (() => { try { const r = localStorage.getItem('prism-sessions'); return r ? JSON.parse(r) : []; } catch { return []; } })(),
   users: [
     { id: 'qq:user:14CE', name: '14CE' },
     { id: 'qq:user:unknown', name: '访客' },
