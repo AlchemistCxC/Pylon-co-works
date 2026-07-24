@@ -1,6 +1,6 @@
 {
   "$schema": "https://raw.githubusercontent.com/tauri-apps/tauri/dev/crates/tauri-config-schema/schema.json",
-  "productName": "Prism Desktop",
+  "productName": "Pylon",
   "version": "0.1.0",
   "identifier": "com.prism.desktop",
   "build": {

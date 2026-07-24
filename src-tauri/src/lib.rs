@@ -273,7 +273,7 @@ pub fn run() {
                 export_session,
             ])
             .setup(|app| {
-                app.get_webview_window("main").unwrap().set_title("Prism Desktop").ok();
+                app.get_webview_window("main").unwrap().set_title("Pylon").ok();
                 Ok(())
             })
             .run(tauri::generate_context!())
