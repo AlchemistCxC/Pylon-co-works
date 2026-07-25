@@ -147,6 +147,19 @@ async fn set_mode(state: tauri::State<'_, AppState>, source: String, mode: Strin
 }
 
 #[tauri::command]
+async fn close_session(state: tauri::State<'_, AppState>, source: String) -> Result<(), String> {
+    let peri_id = {
+        let mut sessions = state.sessions.lock().map_err(|e| e.to_string())?;
+        sessions.remove(&source).map(|s| s.peri_id.clone()).ok_or("no session")?
+    };
+    // Best-effort: notify agent, but don't fail if agent already gone
+    if let Err(e) = state.acp.lock().await.close_session(&peri_id).await {
+        log::warn!("close_session ACP: {}", e);
+    }
+    Ok(())
+}
+
+#[tauri::command]
 async fn load_sessions(state: tauri::State<'_, AppState>) -> Result<Vec<serde_json::Value>, String> {
     let sessions = state.sessions.lock().map_err(|e| e.to_string())?;
     Ok(sessions.iter().map(|(source, info)| {
@@ -303,7 +316,7 @@ pub fn run() {
                 sessions: Mutex::new(HashMap::new()),
             })
             .invoke_handler(tauri::generate_handler![
-                new_session, send_message, set_mode, load_sessions,
+                new_session, send_message, set_mode, close_session, load_sessions,
                 list_agents, switch_agent,
                 load_persisted_session, list_persisted_sessions,
                 export_session,

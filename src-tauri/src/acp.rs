@@ -130,6 +130,14 @@ impl AcpClient {
         })).await
     }
 
+    /// Close a session, releasing agent-side resources (ThreadStore, cancel tokens).
+    pub async fn close_session(&self, session_id: &str) -> Result<(), String> {
+        self.call_async("session/close", serde_json::json!({
+            "sessionId": session_id
+        })).await?;
+        Ok(())
+    }
+
     /// Connect from AgentDef (P0: replaces hardcoded spawn)
     pub async fn connect(agent: &crate::agent_config::AgentDef) -> Result<Self, String> {
         match agent.transport.as_str() {
