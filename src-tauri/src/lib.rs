@@ -12,7 +12,7 @@ use error::PylonError;
 
 struct AppState {
     acp: Arc<tokio::sync::Mutex<AcpClient>>,
-    agents: HashMap<String, AgentDef>,
+    agents: Mutex<HashMap<String, AgentDef>>,
     active_agent: Mutex<String>,
     sessions: Arc<Mutex<HashMap<String, SessionInfo>>>,
 }
@@ -35,12 +35,12 @@ struct SessionInfo {
 impl AppState {
     fn get_active_agent(&self) -> Result<AgentDef, PylonError> {
         let name = self.active_agent.lock().map_err(|e| PylonError::Acp(e.to_string()))?;
-        self.agents.get(&*name).cloned().ok_or(PylonError::NoActiveAgent)
+        self.agents.lock().map_err(|e| PylonError::Acp(e.to_string()))?.get(&*name).cloned().ok_or(PylonError::NoActiveAgent)
     }
 
     fn agent_cwd(&self) -> String {
         self.active_agent.lock().ok()
-            .and_then(|name| self.agents.get(&*name))
+            .and_then(|name| self.agents.lock().ok()?.get(&*name).cloned())
             .and_then(|a| a.cwd.clone())
             .unwrap_or_else(|| ".".to_string())
     }
@@ -278,14 +278,14 @@ async fn load_sessions(state: tauri::State<'_, AppState>) -> Result<Vec<serde_js
 
 #[tauri::command]
 async fn list_agents(state: tauri::State<'_, AppState>) -> Result<Vec<serde_json::Value>, String> {
-    Ok(state.agents.iter().map(|(id, a)| {
+    Ok(state.agents.lock().map_err(|e| e.to_string())?.iter().map(|(id, a)| {
         serde_json::json!({"id": id, "name": a.name, "transport": a.transport})
     }).collect())
 }
 
 #[tauri::command]
 async fn switch_agent(state: tauri::State<'_, AppState>, name: String) -> Result<(), String> {
-    let agent = state.agents.get(&name).ok_or_else(|| format!("unknown agent: {}", name))?.clone();
+    let agent = state.agents.lock().map_err(|e| e.to_string())?.get(&name).ok_or_else(|| format!("unknown agent: {}", name))?.clone();
     // Kill old agent process before connecting new one (prevents orphans on Windows)
     if let Err(e) = state.acp.lock().await.kill() {
         log::warn!("kill old agent: {}", e);
@@ -319,6 +319,14 @@ async fn agent_status(state: tauri::State<'_, AppState>) -> Result<serde_json::V
     let crashed = state.acp.lock().await.is_crashed();
     let agent_name = state.get_active_agent().map(|a| a.name).unwrap_or_default();
     Ok(serde_json::json!({"agent": agent_name, "crashed": crashed}))
+}
+
+#[tauri::command]
+async fn reload_agents(state: tauri::State<'_, AppState>) -> Result<(), String> {
+    let new_agents = agent_config::load();
+    let mut agents = state.agents.lock().map_err(|e| e.to_string())?;
+    *agents = new_agents;
+    Ok(())
 }
 
 // ── Session persistence commands ──
@@ -431,13 +439,13 @@ pub fn run() {
             .plugin(tauri_plugin_fs::init())
             .manage(AppState {
                 acp,
-                agents: agents_for_state,
+                agents: Mutex::new(agents_for_state),
                 active_agent: Mutex::new(default_agent_id),
                 sessions: Arc::new(Mutex::new(HashMap::new())),
             })
             .invoke_handler(tauri::generate_handler![
                 new_session, send_message, set_mode, set_config_option, close_session, cancel_prompt, load_sessions,
-                list_agents, switch_agent, reconnect_agent, agent_status,
+                list_agents, switch_agent, reconnect_agent, agent_status, reload_agents,
                 load_persisted_session, list_persisted_sessions,
                 export_session,
             ])
