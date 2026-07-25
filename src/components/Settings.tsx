@@ -358,7 +358,7 @@ export default function Settings({ onClose }: { onClose?: () => void }) {
 }
 
 const defaults: Partial<ThemeSettings> = {
-  transparency:0.55, bgBlur:16, globalFont:'system', globalFontSize:18,
+  transparency:0.85, bgBlur:16, globalFont:'system', globalFontSize:18,
   sidebarBg:'rgba(0,0,0,0.02)', sidebarWidth:250, sidebarTextColor:'rgba(0,0,0,0.85)', sidebarNameSize:14, sidebarGroupSize:12,
   chatBg:'transparent', chatFont:'mono', chatFontSize:15, chatLineHeight:1.8,
   chatTextColor:'rgba(0,0,0,0.85)', chatCodeColor:'#b47814', chatCodeBg:'rgba(0,0,0,0.03)',

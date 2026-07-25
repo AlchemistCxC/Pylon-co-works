@@ -1,17 +1,15 @@
 import { useState, useEffect } from 'react'
-import ErrorBoundary from './components/ErrorBoundary'
 import Sidebar from './components/Sidebar'
 import ChatView from './components/chat/ChatView'
 import ControlCenter from './components/ControlCenter'
 import RightPanel from './components/RightPanel'
 import Settings from './components/Settings'
-import { useStore } from './store'
-import './App.css'
-
 import ProfileEditor from './components/ProfileEditor'
-
 import PrismSheet from './components/PrismSheet'
 import SessionSettings from './components/SessionSettings'
+import { useStore } from './store'
+import { useShallow } from 'zustand/react/shallow'
+import './App.css'
 
 import { getCurrentWindow } from '@tauri-apps/api/window'
 import { invoke } from '@tauri-apps/api/core'
@@ -23,6 +21,7 @@ export default function App() {
   const [showProfileEdit, setShowProfileEdit] = useState(false)
   const [sessionSettingsId, setSessionSettingsId] = useState<string | null>(null)
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false)
+  const [activeTab, setActiveTab] = useState<'peri' | 'prism'>('peri')
 
   useEffect(() => {
     invoke('list_agents').then((list: any) => {
@@ -30,11 +29,40 @@ export default function App() {
     }).catch(() => {})
   }, [])
 
-  const [activeTab, setActiveTab] = useState<'peri' | 'prism'>('peri')
   const activeAgent = useStore(s => s.activeAgent) || 'peri'
   const agentLabel = activeAgent.charAt(0).toUpperCase() + activeAgent.slice(1)
-  // P1: select only cssVars fields, not sessions/profiles/agents/live*
-  const cssVars = useStore(s => ({
+
+  const s = useStore(useShallow(s => ({
+    transparency: s.transparency, bgBlur: s.bgBlur,
+    globalBgImage: s.globalBgImage, globalFont: s.globalFont, globalFontSize: s.globalFontSize,
+    sidebarBg: s.sidebarBg, sidebarBgImage: s.sidebarBgImage, sidebarWidth: s.sidebarWidth,
+    sidebarTransparency: s.sidebarTransparency, sidebarBlur: s.sidebarBlur,
+    sidebarTextColor: s.sidebarTextColor, sidebarNameSize: s.sidebarNameSize, sidebarGroupSize: s.sidebarGroupSize,
+    chatBg: s.chatBg, chatBgImage: s.chatBgImage,
+    chatTransparency: s.chatTransparency, chatBlur: s.chatBlur,
+    chatFont: s.chatFont, chatFontSize: s.chatFontSize, chatLineHeight: s.chatLineHeight,
+    chatTextColor: s.chatTextColor, chatCodeColor: s.chatCodeColor, chatCodeBg: s.chatCodeBg,
+    toolOk: s.toolOk, toolRun: s.toolRun, toolErr: s.toolErr,
+    toolNameColor: s.toolNameColor, toolSummaryColor: s.toolSummaryColor,
+    userTagBg: s.userTagBg, userTagText: s.userTagText,
+    inputBg: s.inputBg, inputBgImage: s.inputBgImage,
+    inputTextColor: s.inputTextColor, inputPlaceholder: s.inputPlaceholder,
+    inputSendBg: s.inputSendBg, inputFocusBorder: s.inputFocusBorder,
+    inputFontSize: s.inputFontSize, inputMinHeight: s.inputMinHeight,
+    cliLineWidth: s.cliLineWidth, cliLineColor: s.cliLineColor, cliTextColor: s.cliTextColor,
+    statusBg: s.statusBg, statusBgImage: s.statusBgImage,
+    ekgWidth: s.ekgWidth, ekgFontSize: s.ekgFontSize,
+    ekgGreen: s.ekgGreen, ekgYellow: s.ekgYellow, ekgRed: s.ekgRed,
+    pillBg: s.pillBg, pillText: s.pillText, prismOnColor: s.prismOnColor,
+    ekgLineWidth: s.ekgLineWidth, ekgAmplitudeMax: s.ekgAmplitudeMax,
+    ekgSpeedBase: s.ekgSpeedBase, ekgSpeedMax: s.ekgSpeedMax,
+    ekgLeftColor: s.ekgLeftColor, ekgMovingColor: s.ekgMovingColor,
+    ekgConsumedColor: s.ekgConsumedColor, tokenDisplay: s.tokenDisplay,
+    rightBg: s.rightBg, rightBgImage: s.rightBgImage, rightWidth: s.rightWidth,
+    rightTransparency: s.rightTransparency, rightBlur: s.rightBlur,
+  })))
+
+  const cssVars = {
     '--t': s.transparency,
     '--blur': `${s.bgBlur}px`,
     '--global-bg-image': s.globalBgImage ? `url(${s.globalBgImage})` : 'none',
@@ -85,11 +113,11 @@ export default function App() {
     '--right-width': `${s.rightWidth}px`,
     '--right-transparency': s.rightTransparency,
     '--right-blur': `${s.rightBlur}px`,
-  } as React.CSSProperties))
-  const appWindow = getCurrentWindow()
+  } as React.CSSProperties
+
+  const appWindow = (() => { try { return getCurrentWindow() } catch { return { minimize() {}, isFullscreen() { return Promise.resolve(false) }, setFullscreen(_v: boolean) { return Promise.resolve() }, destroy() {} } } })()
 
   return (
-    <ErrorBoundary>
     <div className="app" style={cssVars}>
       <div className="titlebar" data-tauri-drag-region>
         <button className="titlebar-toggle" onClick={() => setSidebarCollapsed(!sidebarCollapsed)}
@@ -124,6 +152,5 @@ export default function App() {
         {sessionSettingsId && <SessionSettings sessionId={sessionSettingsId} open={!!sessionSettingsId} onClose={() => setSessionSettingsId(null)} onDeleted={() => setActiveSession(null)} />}
       </div>
     </div>
-    </ErrorBoundary>
   )
 }

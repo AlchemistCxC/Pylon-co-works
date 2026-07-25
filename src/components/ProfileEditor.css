@@ -14,3 +14,7 @@
 .pe-cancel:hover { background:var(--bg-hover); }
 .pe-save { padding:7px 18px; border:none; border-radius:6px; background:var(--accent); color:white; font-size:13px; cursor:pointer; }
 .pe-save:hover { opacity:0.85; }
+.pe-btn { padding:7px 18px; border:1px solid var(--border); border-radius:6px; background:var(--bg-panel); color:var(--text-dim); font-size:13px; cursor:pointer; }
+.pe-btn:hover { background:var(--bg-hover); }
+.pe-btn.primary { border:none; background:var(--accent); color:white; }
+.pe-btn.primary:hover { opacity:0.85; }

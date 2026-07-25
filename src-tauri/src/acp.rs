@@ -11,12 +11,32 @@ use std::sync::{Arc, Mutex};
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use tokio::sync::{broadcast, mpsc, oneshot};
 
+// ── Constants ──
+
+/// JSON-RPC method names used by the ACP protocol.
+pub const METHOD_INITIALIZE: &str = "initialize";
+pub const METHOD_SESSION_NEW: &str = "session/new";
+pub const METHOD_SESSION_PROMPT: &str = "session/prompt";
+pub const METHOD_SESSION_CLOSE: &str = "session/close";
+pub const METHOD_SESSION_LOAD: &str = "session/load";
+pub const METHOD_SESSION_LIST: &str = "session/list";
+pub const METHOD_SESSION_SET_MODE: &str = "session/set_mode";
+pub const METHOD_SESSION_CANCEL: &str = "session/cancel";
+pub const NOTIF_SESSION_UPDATE: &str = "session/update";
+
+/// Broadcast channel capacity for ACP message fan-out.
+pub const BROADCAST_CAP: usize = 256;
+/// mpsc channel capacity for stdin writes — bounded to provide backpressure.
+pub const WRITE_CHAN_CAP: usize = 256;
+/// Default prompt timeout in seconds.
+pub const PROMPT_TIMEOUT_SECS: u64 = 300;
+
 type Pending = HashMap<u64, oneshot::Sender<RawMessage>>;
 
 pub struct AcpClient {
     child: Child,
     /// mpsc channel for writing JSON-RPC lines to stdin. Single consumer = no lock contention.
-    write_tx: mpsc::UnboundedSender<String>,
+    write_tx: mpsc::Sender<String>,
     next_id: AtomicU64,
     pending: Arc<Mutex<Pending>>,
     /// Broadcast channel for all received messages (responses + notifications).
@@ -60,7 +80,7 @@ impl AcpClient {
         let line = serde_json::to_string(&req)
             .map_err(|e| format!("serialize failed: {}", e))?;
 
-        self.write_tx.send(line).map_err(|_| "ACP connection closed".to_string())?;
+        self.write_tx.send(line).await.map_err(|_| "ACP connection closed".to_string())?;
 
         let msg = rx.await.map_err(|_| "ACP connection closed".to_string())?;
 
@@ -73,7 +93,7 @@ impl AcpClient {
 
     /// Create a new session. Returns the session ID.
     pub async fn new_session(&self, cwd: &str) -> Result<String, String> {
-        let result = self.call_async("session/new", serde_json::json!({
+        let result = self.call_async(METHOD_SESSION_NEW, serde_json::json!({
             "cwd": cwd,
             "mcpServers": []
         })).await?;
@@ -84,7 +104,7 @@ impl AcpClient {
     }
 
     /// Atomic: allocate ID, register oneshot, then send prompt. No timing hole.
-    pub fn send_prompt_atomic(&self, session_id: &str, text: &str) -> Result<(u64, oneshot::Receiver<RawMessage>), String> {
+    pub async fn send_prompt_atomic(&self, session_id: &str, text: &str) -> Result<(u64, oneshot::Receiver<RawMessage>), String> {
         let id = self.next_id.fetch_add(1, Ordering::Relaxed);
 
         // Register oneshot BEFORE writing to stdin
@@ -97,7 +117,7 @@ impl AcpClient {
         let req = serde_json::json!({
             "jsonrpc": "2.0",
             "id": id,
-            "method": "session/prompt",
+            "method": METHOD_SESSION_PROMPT,
             "params": {
                 "sessionId": session_id,
                 "prompt": [{"type": "text", "text": text}]
@@ -107,7 +127,7 @@ impl AcpClient {
         let line = serde_json::to_string(&req)
             .map_err(|e| format!("serialize failed: {}", e))?;
 
-        self.write_tx.send(line).map_err(|_| "ACP connection closed".to_string())?;
+        self.write_tx.send(line).await.map_err(|_| "ACP connection closed".to_string())?;
 
         Ok((id, rx))
     }
@@ -126,7 +146,7 @@ impl AcpClient {
 
     /// Set session mode.
     pub async fn set_mode(&self, session_id: &str, mode: &str) -> Result<serde_json::Value, String> {
-        self.call_async("session/set_mode", serde_json::json!({
+        self.call_async(METHOD_SESSION_SET_MODE, serde_json::json!({
             "sessionId": session_id,
             "mode": mode
         })).await
@@ -134,27 +154,27 @@ impl AcpClient {
 
     /// Close a session, releasing agent-side resources (ThreadStore, cancel tokens).
     pub async fn close_session(&self, session_id: &str) -> Result<(), String> {
-        self.call_async("session/close", serde_json::json!({
+        self.call_async(METHOD_SESSION_CLOSE, serde_json::json!({
             "sessionId": session_id
         })).await?;
         Ok(())
     }
 
     /// Send a fire-and-forget notification (no id, no response expected).
-    pub fn send_notification(&self, method: &str, params: serde_json::Value) -> Result<(), String> {
+    pub async fn send_notification(&self, method: &str, params: serde_json::Value) -> Result<(), String> {
         let req = serde_json::json!({
             "jsonrpc": "2.0",
             "method": method,
             "params": params,
         });
         let line = serde_json::to_string(&req).map_err(|e| format!("serialize failed: {}", e))?;
-        self.write_tx.send(line).map_err(|_| "ACP connection closed".to_string())?;
+        self.write_tx.send(line).await.map_err(|_| "ACP connection closed".to_string())?;
         Ok(())
     }
 
     /// Cancel a running prompt. Fire-and-forget notification.
     pub fn cancel_session(&self, session_id: &str) -> Result<(), String> {
-        self.send_notification("session/cancel", serde_json::json!({
+        self.send_notification(METHOD_SESSION_CANCEL, serde_json::json!({
             "sessionId": session_id
         }))
     }
@@ -178,7 +198,7 @@ impl AcpClient {
                     .map_err(|e| format!("spawn {} failed: {}", &agent.exe, e))?;
 
                 let stdin = child.stdin.take().ok_or("no stdin")?;
-                let (write_tx, mut write_rx) = mpsc::unbounded_channel::<String>();
+                let (write_tx, mut write_rx) = mpsc::channel::<String>(WRITE_CHAN_CAP);
                 // Spawn single-consumer writer task — writes JSON-RPC lines to stdin, with newline
                 std::thread::spawn(move || {
                     let mut writer = BufWriter::new(stdin);
@@ -199,7 +219,7 @@ impl AcpClient {
                 });
 
                 let pending: Arc<Mutex<Pending>> = Arc::new(Mutex::new(HashMap::new()));
-                let (tx, rx) = broadcast::channel(256);
+                let (tx, rx) = broadcast::channel(BROADCAST_CAP);
                 let crashed = Arc::new(AtomicBool::new(false));
 
                 let pending_clone = pending.clone();
@@ -241,7 +261,7 @@ impl AcpClient {
                     agent_cwd: agent.cwd.clone(),
                 };
                 // Initialize
-                client.call_async("initialize", serde_json::json!({
+                client.call_async(METHOD_INITIALIZE, serde_json::json!({
                     "protocolVersion": 1, "capabilities": {"tokenStats": true},
                     "clientInfo": {"name": "prism-desktop", "version": "0.1.0"}
                 })).await?;
@@ -253,7 +273,7 @@ impl AcpClient {
 
     /// P1: Load a persisted session — Peri replays history via session/update
     pub async fn load_session(&self, session_id: &str, cwd: &str) -> Result<(), String> {
-        self.call_async("session/load", serde_json::json!({
+        self.call_async(METHOD_SESSION_LOAD, serde_json::json!({
             "sessionId": session_id,
             "cwd": cwd,
         })).await?;
@@ -266,6 +286,6 @@ impl AcpClient {
         if let Some(c) = cwd {
             params["cwd"] = serde_json::Value::String(c.to_string());
         }
-        self.call_async("session/list", params).await
+        self.call_async(METHOD_SESSION_LIST, params).await
     }
 }

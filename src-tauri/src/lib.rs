@@ -94,7 +94,7 @@ async fn send_message(
     let pid = peri_id.clone();
     let win = window.clone();
     let src = source.clone();
-    let result = tokio::time::timeout(Duration::from_secs(300), async move {
+    let result = tokio::time::timeout(Duration::from_secs(acp::PROMPT_TIMEOUT_SECS), async move {
         loop {
             tokio::select! {
                 msg = &mut rx => {
@@ -114,7 +114,7 @@ async fn send_message(
                 notif = broadcast.recv() => {
                     match notif {
                         Ok(raw) => {
-                            if raw.method.as_deref() == Some("session/update") {
+                            if raw.method.as_deref() == Some(acp::NOTIF_SESSION_UPDATE) {
                                 let payload = raw.params.unwrap_or(serde_json::Value::Null);
                                 // R3: filter by sessionId
                                 if payload.get("sessionId").and_then(|v| v.as_str()) != Some(&pid) { continue; }

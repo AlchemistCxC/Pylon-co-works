@@ -1,4 +1,4 @@
-import { useState, useEffect, useMemo } from 'react'
+import { useState, useMemo } from 'react'
 import { useStore } from '../store'
 import { formatTime } from '../utils'
 import './Sidebar.css'
@@ -23,15 +23,7 @@ export default function Sidebar({ activeSession, onSelectSession, onProfileEdit,
   const sessions = useStore(s => s.sessions)
   const addSession = useStore(s => s.addSession)
   const removeSession = useStore(s => s.removeSession)
-  const restoreSessions = useStore(s => s.restoreSessions)
   const activeProfile = profiles.find(p => p.id === activeProfileId)
-
-  useEffect(() => {
-    const saved = restoreSessions()
-    if (saved.length > 0) {
-      useStore.setState({ sessions: saved })
-    }
-  }, [])
 
   const profileSessions = sessions.filter(s => s.profileId === activeProfileId)
 
