@@ -87,7 +87,7 @@ impl AcpClient {
     pub async fn new_session(&self, cwd: &str) -> Result<String, String> {
         let result = self.call_async("session/new", serde_json::json!({
             "cwd": cwd,
-            "mcpServers": {}
+            "mcpServers": []
         })).await?;
         result.get("sessionId")
             .and_then(|v| v.as_str())

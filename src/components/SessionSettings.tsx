@@ -1,5 +1,6 @@
 import { useState } from 'react'
 import { useStore, Session } from '../store'
+import './SessionSettings.css'
 
 interface Props { sessionId: string; onClose: () => void; onDeleted?: () => void }
 

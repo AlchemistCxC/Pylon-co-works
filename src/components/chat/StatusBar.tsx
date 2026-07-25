@@ -23,7 +23,9 @@ function wave(w: number, h: number, intensity: number, offset: number, ampMax: n
       const steps = Math.max(2, Math.floor((ph.end - ph.start) * cycleW / 3))
       for (let s = 0; s <= steps; s++) {
         const t = s / Math.max(1, steps)
-        const phaseT = ph.start + t * (ph.end - ph.start)
+        // Phase jitter: every heartbeat has unique P-QRS-T timing
+        const jitter = (Math.random() - 0.5) * 2 * noiseScale * 0.02
+        const phaseT = ph.start + jitter + t * ((ph.end + jitter * 0.5) - (ph.start + jitter))
         // x: from left of viewport, continuously shifting right with offset
         const x = (ci + phaseT) / (cycles * 0.7) * totalW - w + offset
         let y = mid
