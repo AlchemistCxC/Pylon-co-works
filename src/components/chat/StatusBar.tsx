@@ -86,7 +86,7 @@ export default function StatusBar() {
   const tokenDisplay = useStore(s => s.tokenDisplay)
 
   useEffect(() => {
-    const id = setInterval(() => setTick(p => p + 1), 30)
+    const id = setInterval(() => setTick(p => p + 1), 50)
     return () => clearInterval(id)
   }, [])
 

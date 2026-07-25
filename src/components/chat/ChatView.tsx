@@ -74,10 +74,29 @@ const ChatView = React.memo(function ChatView({ sessionId }: Props) {
   const sessionRef = useRef<string | null>(null)
   const prevSessionRef = useRef(sessionId)
   useEffect(() => {
-    const s = useStore.getState().sessions.find(s => s.id === sessionId)
-    sessionRef.current = s?.source || null
-    if (sessionId && sessionId !== prevSessionRef.current) { setMessages([]); setGenerating(false); setSummary('') }
+    if (!sessionId || sessionId === prevSessionRef.current) return
+    setMessages([]); setGenerating(false); setSummary('')
     prevSessionRef.current = sessionId
+
+    const s = useStore.getState().sessions.find(s => s.id === sessionId)
+    if (!s) return
+    sessionRef.current = s.source  // set BEFORE async, so incoming events match
+
+    const profile = useStore.getState().profiles.find(p => p.id === s.profileId)
+    const persona = profile?.persona || ''
+
+    if (s.periId) {
+      invoke('load_persisted_session', { source: s.source, periId: s.periId }).catch(() => {
+        // Fallback: create new
+        invoke<string>('new_session', { source: s.source, persona }).then(periId => {
+          useStore.getState().setSessionPeriId(s.id, periId)
+        }).catch(() => {})
+      })
+    } else {
+      invoke<string>('new_session', { source: s.source, persona }).then(periId => {
+        useStore.getState().setSessionPeriId(s.id, periId)
+      }).catch(() => {})
+    }
   }, [sessionId])
 
   useEffect(() => {

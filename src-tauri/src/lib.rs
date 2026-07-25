@@ -9,7 +9,7 @@ use acp::AcpClient;
 use agent_config::AgentDef;
 
 struct AppState {
-    acp: Arc<AcpClient>,
+    acp: Arc<Mutex<AcpClient>>,
     agents: HashMap<String, AgentDef>,
     active_agent: Mutex<String>,
     sessions: Mutex<HashMap<String, SessionInfo>>,
@@ -29,7 +29,7 @@ async fn new_session(
 ) -> Result<String, String> {
     let agent = { let aa = state.active_agent.lock().map_err(|e| e.to_string())?; state.agents.get(&*aa).ok_or("no active agent")?.clone() };
     let cwd = agent.cwd.as_deref().unwrap_or(".");
-    let peri_id = state.acp.new_session(cwd).await?;
+    let peri_id = state.acp.lock().map_err(|e| e.to_string())?.new_session(cwd).await?;
     state.sessions.lock().map_err(|e| e.to_string())?
         .insert(source.clone(), SessionInfo { peri_id: peri_id.clone(), persona, has_first_prompt: false });
     Ok(peri_id)
@@ -45,7 +45,6 @@ async fn send_message(
     session_prompt: Option<String>,
     attachments: Option<Vec<String>>,
 ) -> Result<String, String> {
-    // Look up or create session — drop lock before any .await
     let (peri_id, is_first) = 'session: {
         {
             let mut sessions = state.sessions.lock().map_err(|e| e.to_string())?;
@@ -57,13 +56,12 @@ async fn send_message(
         }
         let agent = { let aa = state.active_agent.lock().map_err(|e| e.to_string())?; state.agents.get(&*aa).ok_or("no active agent")?.clone() };
         let cwd = agent.cwd.as_deref().unwrap_or(".");
-        let peri_id = state.acp.new_session(cwd).await?;
+        let peri_id = state.acp.lock().map_err(|e| e.to_string())?.new_session(cwd).await?;
         state.sessions.lock().map_err(|e| e.to_string())?
             .insert(source.clone(), SessionInfo { peri_id: peri_id.clone(), persona: persona.clone(), has_first_prompt: true });
         (peri_id, true)
     };
 
-    // Prepend attachment labels if any
     let attach_prefix = attachments.unwrap_or_default().iter().fold(String::new(), |mut acc, p| {
         let name = std::path::Path::new(p).file_name().and_then(|n| n.to_str()).unwrap_or(p);
         acc.push_str(&format!("[Attached: {}]\n", name));
@@ -79,10 +77,14 @@ async fn send_message(
     };
 
     let user_content = content.clone();
-    let mut broadcast = state.acp.rx.resubscribe();
-    let (_request_id, mut rx) = state.acp.send_prompt_atomic(&peri_id, &prompt_content)?;
+    let mut broadcast = { state.acp.lock().map_err(|e| e.to_string())?.rx.resubscribe() };
+    let (_request_id, mut rx) = {
+        let acp = state.acp.lock().map_err(|e| e.to_string())?;
+        acp.send_prompt_atomic(&peri_id, &prompt_content)?
+    };
     let _ = window.emit("peri:user", serde_json::json!({ "source": source, "content": user_content }));
 
+    let pid = peri_id.clone();
     let win = window.clone();
     let src = source.clone();
     let result = tokio::time::timeout(Duration::from_secs(300), async move {
@@ -106,7 +108,10 @@ async fn send_message(
                     match notif {
                         Ok(raw) => {
                             if raw.method.as_deref() == Some("session/update") {
-                                let mut payload = raw.params.unwrap_or(serde_json::Value::Null);
+                                let payload = raw.params.unwrap_or(serde_json::Value::Null);
+                                // R3: filter by sessionId
+                                if payload.get("sessionId").and_then(|v| v.as_str()) != Some(&pid) { continue; }
+                                let mut payload = payload;
                                 if let serde_json::Value::Object(ref mut map) = payload {
                                     map.insert("source".to_string(), serde_json::Value::String(src.clone()));
                                 }
@@ -140,7 +145,7 @@ async fn set_mode(state: tauri::State<'_, AppState>, source: String, mode: Strin
         let sessions = state.sessions.lock().map_err(|e| e.to_string())?;
         sessions.get(&source).map(|s| s.peri_id.clone()).ok_or("no session")?
     };
-    state.acp.set_mode(&peri_id, &mode).await?;
+    state.acp.lock().map_err(|e| e.to_string())?.set_mode(&peri_id, &mode).await?;
     Ok(())
 }
 
@@ -152,7 +157,7 @@ async fn load_sessions(state: tauri::State<'_, AppState>) -> Result<Vec<serde_js
     }).collect())
 }
 
-// ── P0: Agent Registry commands ──
+// ── Agent Registry commands ──
 
 #[tauri::command]
 async fn list_agents(state: tauri::State<'_, AppState>) -> Result<Vec<serde_json::Value>, String> {
@@ -163,15 +168,19 @@ async fn list_agents(state: tauri::State<'_, AppState>) -> Result<Vec<serde_json
 
 #[tauri::command]
 async fn switch_agent(state: tauri::State<'_, AppState>, name: String) -> Result<(), String> {
-    let agents = state.agents.clone();
-    if !agents.contains_key(&name) {
-        return Err(format!("unknown agent: {}", name));
-    }
+    let agent = state.agents.get(&name).ok_or_else(|| format!("unknown agent: {}", name))?.clone();
+    // R4: reconnect AcpClient
+    let new_acp = AcpClient::connect(&agent).await?;
+    let mut acp = state.acp.lock().map_err(|e| e.to_string())?;
+    *acp = new_acp;
+    drop(acp);
     *state.active_agent.lock().map_err(|e| e.to_string())? = name;
+    // Clear all sessions (old peri process is gone)
+    state.sessions.lock().map_err(|e| e.to_string())?.clear();
     Ok(())
 }
 
-// ── P1: Session persistence commands ──
+// ── Session persistence commands ──
 
 #[tauri::command]
 async fn load_persisted_session(
@@ -181,14 +190,17 @@ async fn load_persisted_session(
     peri_id: String,
 ) -> Result<(), String> {
     let agent = { let aa = state.active_agent.lock().map_err(|e| e.to_string())?; state.agents.get(&*aa).ok_or("no active agent")?.clone() };
-    // Start broadcast listener BEFORE loading — captures replayed history
-    let mut broadcast = state.acp.rx.resubscribe();
+    let mut broadcast = { state.acp.lock().map_err(|e| e.to_string())?.rx.resubscribe() };
     let src = source.clone();
+    let pid = peri_id.clone();
     let win = window.clone();
-    tokio::spawn(async move {
+    let handle = tokio::spawn(async move {
         while let Ok(raw) = broadcast.recv().await {
             if raw.method.as_deref() == Some("session/update") {
-                let mut payload = raw.params.unwrap_or(serde_json::Value::Null);
+                let payload = raw.params.unwrap_or(serde_json::Value::Null);
+                // R3: filter by sessionId
+                if payload.get("sessionId").and_then(|v| v.as_str()) != Some(&pid) { continue; }
+                let mut payload = payload;
                 if let serde_json::Value::Object(ref mut map) = payload {
                     map.insert("source".to_string(), serde_json::Value::String(src.clone()));
                 }
@@ -197,8 +209,8 @@ async fn load_persisted_session(
         }
     });
     let cwd = agent.cwd.as_deref().unwrap_or(".");
-    state.acp.load_session(&peri_id, cwd).await?;
-    // Register in local sessions map
+    state.acp.lock().map_err(|e| e.to_string())?.load_session(&peri_id, cwd).await?;
+    handle.abort();  // R2: prevent task leak
     state.sessions.lock().map_err(|e| e.to_string())?
         .insert(source, SessionInfo { peri_id: peri_id.clone(), persona: String::new(), has_first_prompt: true });
     Ok(())
@@ -208,10 +220,10 @@ async fn load_persisted_session(
 async fn list_persisted_sessions(state: tauri::State<'_, AppState>) -> Result<serde_json::Value, String> {
     let agent = { let aa = state.active_agent.lock().map_err(|e| e.to_string())?; state.agents.get(&*aa).ok_or("no active agent")?.clone() };
     let cwd = agent.cwd.as_deref();
-    state.acp.list_persisted(cwd).await
+    state.acp.lock().map_err(|e| e.to_string())?.list_persisted(cwd).await
 }
 
-// ── P2: Export command ──
+// ── Export command ──
 
 #[tauri::command]
 async fn export_session(
@@ -222,8 +234,7 @@ async fn export_session(
 ) -> Result<(), String> {
     let agent = { let aa = state.active_agent.lock().map_err(|e| e.to_string())?; state.agents.get(&*aa).ok_or("no active agent")?.clone() };
     let cwd = agent.cwd.as_deref().unwrap_or(".");
-    // Subscribe to broadcast before loading, capture all session/update events
-    let mut broadcast = state.acp.rx.resubscribe();
+    let mut broadcast = { state.acp.lock().map_err(|e| e.to_string())?.rx.resubscribe() };
     let messages: Arc<Mutex<Vec<serde_json::Value>>> = Arc::new(Mutex::new(Vec::new()));
     let msgs = messages.clone();
     let handle = tokio::spawn(async move {
@@ -235,16 +246,17 @@ async fn export_session(
             }
         }
     });
-    state.acp.load_session(&peri_id, cwd).await?;
+    state.acp.lock().map_err(|e| e.to_string())?.load_session(&peri_id, cwd).await?;
     handle.abort();
     let msgs = messages.lock().map_err(|e| e.to_string())?;
     let content = match format.as_str() {
         "markdown" => {
             let mut md = format!("# Session {}\n\n", peri_id);
             for msg in msgs.iter() {
+                // R1: use sessionUpdate value comparison, content is at same level
                 if let Some(update) = msg.get("update") {
-                    if let Some(chunk) = update.get("agent_message_chunk") {
-                        if let Some(text) = chunk.get("content").and_then(|c| c.get("text")).and_then(|v| v.as_str()) {
+                    if update.get("sessionUpdate").and_then(|v| v.as_str()) == Some("agentMessageChunk") {
+                        if let Some(text) = update.get("content").and_then(|c| c.get("text")).and_then(|v| v.as_str()) {
                             md.push_str(text);
                         }
                     }
@@ -263,15 +275,16 @@ async fn export_session(
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     let agents = agent_config::load();
-    let default_agent_id = agents.keys().next().expect("no agents in agents.yaml").clone();
+    // R4 fix: use BTreeMap for deterministic default agent selection
+    let agents_sorted: std::collections::BTreeMap<_, _> = agents.iter().collect();
+    let default_agent_id = agents_sorted.keys().next().expect("no agents in agents.yaml").to_string();
     let default_agent = agents.get(&default_agent_id).expect("default agent not found").clone();
     let agents_for_state = agents;
 
     let rt = tokio::runtime::Runtime::new().expect("failed to create tokio runtime");
     rt.block_on(async {
-        let acp = Arc::new(AcpClient::connect(&default_agent).await.expect("failed to connect ACP agent"));
+        let acp = Arc::new(Mutex::new(AcpClient::connect(&default_agent).await.expect("failed to connect ACP agent")));
 
-        // tauri.run() blocks until window closes; runtime not dropped until then (no leak)
         tauri::Builder::default()
             .plugin(tauri_plugin_shell::init())
             .plugin(tauri_plugin_dialog::init())

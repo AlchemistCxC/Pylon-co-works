@@ -27,6 +27,7 @@ export default function InputBar({ sessionId }: Props) {
   const profiles = useStore(s => s.profiles)
   const addSession = useStore(s => s.addSession)
   const liveCommands = useStore(s => s.liveCommands || [])
+  const inputMode = useStore(s => s.inputMode)
 
   const activeProfile = profiles.find(p => p.id === activeProfileId)
   const persona = activeProfile?.persona || ''
@@ -66,7 +67,7 @@ export default function InputBar({ sessionId }: Props) {
       case '/new': addSession(`session-${Date.now().toString(36)}`); break
       case '/compact': await invoke('send_message', { source: sessionId, content: '/compact', persona }); break
       case '/export': {
-        const s = useStore.getState().sessions.find(x => x.source === sessionId)
+        const s = useStore.getState().sessions.find(x => x.id === sessionId)
         if (s?.periId) {
           await invoke('export_session', { periId: s.periId, format: 'markdown', outputPath: `session-${s.periId}.md` })
         }
@@ -120,7 +121,7 @@ export default function InputBar({ sessionId }: Props) {
   }
 
   return (
-    <div className={`input-bar ${useStore.getState().inputMode === 'cli' ? 'cli-mode' : ''}`}>
+    <div className={`input-bar ${inputMode === 'cli' ? 'cli-mode' : ''}`}>
       {sendError && <div className="input-error">{sendError}</div>}
       {attached.length > 0 && (
         <div className="attached-files">
@@ -143,7 +144,7 @@ export default function InputBar({ sessionId }: Props) {
         </div>
       )}
       <div className="input-row">
-        {useStore.getState().inputMode === 'cli' && <span className="cli-prefix">&gt;</span>}
+        {inputMode === 'cli' && <span className="cli-prefix">&gt;</span>}
         <button className="input-btn attach" onClick={attachFile} title="Attach file (Ctrl+O)">
           <Paperclip size={16} />
         </button>

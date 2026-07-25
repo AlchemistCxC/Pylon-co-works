@@ -1,4 +1,4 @@
-import { useState, useMemo, useEffect } from 'react'
+import { useState, useEffect } from 'react'
 import ErrorBoundary from './components/ErrorBoundary'
 import Sidebar from './components/Sidebar'
 import ChatView from './components/chat/ChatView'
@@ -33,83 +33,60 @@ export default function App() {
   const [activeTab, setActiveTab] = useState<'peri' | 'prism'>('peri')
   const activeAgent = useStore(s => s.activeAgent) || 'peri'
   const agentLabel = activeAgent.charAt(0).toUpperCase() + activeAgent.slice(1)
-  const theme = useStore()
+  // P1: select only cssVars fields, not sessions/profiles/agents/live*
+  const cssVars = useStore(s => ({
+    '--t': s.transparency,
+    '--blur': `${s.bgBlur}px`,
+    '--global-bg-image': s.globalBgImage ? `url(${s.globalBgImage})` : 'none',
+    '--global-font': s.globalFont === 'mono' ? 'var(--mono)' : 'var(--font)',
+    '--global-font-size': `${s.globalFontSize}px`,
+    '--sidebar-bg': s.sidebarBg,
+    '--sidebar-bg-image': s.sidebarBgImage ? `url(${s.sidebarBgImage})` : 'none',
+    '--sidebar-width': `${s.sidebarWidth}px`,
+    '--sidebar-transparency': s.sidebarTransparency,
+    '--sidebar-blur': `${s.sidebarBlur}px`,
+    '--sidebar-text': s.sidebarTextColor,
+    '--sidebar-name-size': `${s.sidebarNameSize}px`,
+    '--sidebar-group-size': `${s.sidebarGroupSize}px`,
+    '--chat-bg': s.chatBg,
+    '--chat-bg-image': s.chatBgImage ? `url(${s.chatBgImage})` : 'none',
+    '--chat-transparency': s.chatTransparency,
+    '--chat-blur': `${s.chatBlur}px`,
+    '--chat-font': s.chatFont === 'mono' ? 'var(--mono)' : 'var(--font)',
+    '--chat-font-size': `${s.chatFontSize}px`,
+    '--chat-line-height': s.chatLineHeight,
+    '--chat-text': s.chatTextColor,
+    '--chat-code-color': s.chatCodeColor,
+    '--chat-code-bg': s.chatCodeBg,
+    '--tool-ok': s.toolOk, '--tool-run': s.toolRun, '--tool-err': s.toolErr,
+    '--tool-name': s.toolNameColor, '--tool-summary': s.toolSummaryColor,
+    '--user-tag-bg': s.userTagBg, '--user-tag-text': s.userTagText,
+    '--input-bg': s.inputBg,
+    '--input-bg-image': s.inputBgImage ? `url(${s.inputBgImage})` : 'none',
+    '--input-text': s.inputTextColor, '--input-placeholder': s.inputPlaceholder,
+    '--input-send': s.inputSendBg, '--input-focus': s.inputFocusBorder,
+    '--input-font-size': `${s.inputFontSize}px`, '--input-min-h': `${s.inputMinHeight}px`,
+    '--cli-line-width': `${s.cliLineWidth}px`,
+    '--cli-line-color': s.cliLineColor || undefined,
+    '--cli-text-color': s.cliTextColor || undefined,
+    '--status-bg': s.statusBg,
+    '--status-bg-image': s.statusBgImage ? `url(${s.statusBgImage})` : 'none',
+    '--ekg-w': `${s.ekgWidth}px`, '--ekg-font': `${s.ekgFontSize}px`,
+    '--ekg-green': s.ekgGreen, '--ekg-yellow': s.ekgYellow, '--ekg-red': s.ekgRed,
+    '--pill-bg': s.pillBg, '--pill-text': s.pillText,
+    '--prism-on': s.prismOnColor,
+    '--ekg-line-width': `${s.ekgLineWidth}px`,
+    '--ekg-amp-max': `${s.ekgAmplitudeMax}px`,
+    '--ekg-speed-base': s.ekgSpeedBase, '--ekg-speed-max': s.ekgSpeedMax,
+    '--ekg-left': s.ekgLeftColor, '--ekg-moving': s.ekgMovingColor,
+    '--ekg-consumed': s.ekgConsumedColor, '--token-display': s.tokenDisplay,
+    '--right-bg': s.rightBg,
+    '--right-bg-image': s.rightBgImage ? `url(${s.rightBgImage})` : 'none',
+    '--right-width': `${s.rightWidth}px`,
+    '--right-transparency': s.rightTransparency,
+    '--right-blur': `${s.rightBlur}px`,
+  } as React.CSSProperties))
   const appWindow = getCurrentWindow()
-
-  const cssVars = useMemo(() => ({
-    '--t': theme.transparency,
-    '--blur': `${theme.bgBlur}px`,
-    '--global-bg-image': theme.globalBgImage ? `url(${theme.globalBgImage})` : 'none',
-    '--global-font': theme.globalFont === 'mono' ? 'var(--mono)' : 'var(--font)',
-    '--global-font-size': `${theme.globalFontSize}px`,
-    // sidebar
-    '--sidebar-bg': theme.sidebarBg,
-    '--sidebar-bg-image': theme.sidebarBgImage ? `url(${theme.sidebarBgImage})` : 'none',
-    '--sidebar-width': `${theme.sidebarWidth}px`,
-    '--sidebar-transparency': theme.sidebarTransparency,
-    '--sidebar-blur': `${theme.sidebarBlur}px`,
-    '--sidebar-text': theme.sidebarTextColor,
-    '--sidebar-name-size': `${theme.sidebarNameSize}px`,
-    '--sidebar-group-size': `${theme.sidebarGroupSize}px`,
-    // chat
-    '--chat-bg': theme.chatBg,
-    '--chat-bg-image': theme.chatBgImage ? `url(${theme.chatBgImage})` : 'none',
-    '--chat-transparency': theme.chatTransparency,
-    '--chat-blur': `${theme.chatBlur}px`,
-    '--chat-font': theme.chatFont === 'mono' ? 'var(--mono)' : 'var(--font)',
-    '--chat-font-size': `${theme.chatFontSize}px`,
-    '--chat-line-height': theme.chatLineHeight,
-    '--chat-text': theme.chatTextColor,
-    '--chat-code-color': theme.chatCodeColor,
-    '--chat-code-bg': theme.chatCodeBg,
-    // tools
-    '--tool-ok': theme.toolOk,
-    '--tool-run': theme.toolRun,
-    '--tool-err': theme.toolErr,
-    '--tool-name': theme.toolNameColor,
-    '--tool-summary': theme.toolSummaryColor,
-    '--user-tag-bg': theme.userTagBg,
-    '--user-tag-text': theme.userTagText,
-    // input
-    '--input-bg': theme.inputBg,
-    '--input-bg-image': theme.inputBgImage ? `url(${theme.inputBgImage})` : 'none',
-    '--input-text': theme.inputTextColor,
-    '--input-placeholder': theme.inputPlaceholder,
-    '--input-send': theme.inputSendBg,
-    '--input-focus': theme.inputFocusBorder,
-    '--input-font-size': `${theme.inputFontSize}px`,
-    '--input-min-h': `${theme.inputMinHeight}px`,
-    // cli
-    '--cli-line-width': `${theme.cliLineWidth}px`,
-    '--cli-line-color': theme.cliLineColor || undefined,
-    '--cli-text-color': theme.cliTextColor || undefined,
-    // status
-    '--status-bg': theme.statusBg,
-    '--status-bg-image': theme.statusBgImage ? `url(${theme.statusBgImage})` : 'none',
-    '--ekg-w': `${theme.ekgWidth}px`,
-    '--ekg-font': `${theme.ekgFontSize}px`,
-    '--ekg-green': theme.ekgGreen,
-    '--ekg-yellow': theme.ekgYellow,
-    '--ekg-red': theme.ekgRed,
-    '--pill-bg': theme.pillBg,
-    '--pill-text': theme.pillText,
-    '--prism-on': theme.prismOnColor,
-    // ekg style
-    '--ekg-line-width': `${theme.ekgLineWidth}px`,
-    '--ekg-amp-max': `${theme.ekgAmplitudeMax}px`,
-    '--ekg-speed-base': theme.ekgSpeedBase,
-    '--ekg-speed-max': theme.ekgSpeedMax,
-    '--ekg-left': theme.ekgLeftColor,
-    '--ekg-moving': theme.ekgMovingColor,
-    '--ekg-consumed': theme.ekgConsumedColor,
-    '--token-display': theme.tokenDisplay,
-    // right
-    '--right-bg': theme.rightBg,
-    '--right-bg-image': theme.rightBgImage ? `url(${theme.rightBgImage})` : 'none',
-    '--right-width': `${theme.rightWidth}px`,
-    '--right-transparency': theme.rightTransparency,
-    '--right-blur': `${theme.rightBlur}px`,
-  } as React.CSSProperties), [theme])
 
   return (
     <ErrorBoundary>

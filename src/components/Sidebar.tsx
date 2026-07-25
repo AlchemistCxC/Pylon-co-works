@@ -1,9 +1,9 @@
-import { useState, useEffect } from 'react'
-import { invoke } from '@tauri-apps/api/core'
-import { useStore, Session } from '../store'
+import { useState, useEffect, useMemo } from 'react'
+import { useStore } from '../store'
 import { formatTime } from '../utils'
 import './Sidebar.css'
 
+const PLATFORM_LABELS: Record<string, string> = { local: '本地', 'qq-group': 'QQ 群聊', 'qq-dm': 'QQ 私聊', terminal: '终端' }
 
 interface Props {
   activeSession: string | null
@@ -23,11 +23,9 @@ export default function Sidebar({ activeSession, onSelectSession, onProfileEdit,
   const sessions = useStore(s => s.sessions)
   const addSession = useStore(s => s.addSession)
   const removeSession = useStore(s => s.removeSession)
-  const setSessionPeriId = useStore(s => s.setSessionPeriId)
   const restoreSessions = useStore(s => s.restoreSessions)
   const activeProfile = profiles.find(p => p.id === activeProfileId)
 
-  // Restore sessions from localStorage on mount
   useEffect(() => {
     const saved = restoreSessions()
     if (saved.length > 0) {
@@ -37,13 +35,15 @@ export default function Sidebar({ activeSession, onSelectSession, onProfileEdit,
 
   const profileSessions = sessions.filter(s => s.profileId === activeProfileId)
 
-  const groups = new Map<string, typeof profileSessions>()
-  const PLATFORM_LABELS: Record<string, string> = { local: '本地', 'qq-group': 'QQ 群聊', 'qq-dm': 'QQ 私聊', terminal: '终端' }
-  profileSessions.forEach(s => {
-    const label = PLATFORM_LABELS[s.platform] || s.platform || '其他'
-    if (!groups.has(label)) groups.set(label, [])
-    groups.get(label)!.push(s)
-  })
+  const groups = useMemo(() => {
+    const map = new Map<string, typeof profileSessions>()
+    profileSessions.forEach(s => {
+      const label = PLATFORM_LABELS[s.platform] || s.platform || '其他'
+      if (!map.has(label)) map.set(label, [])
+      map.get(label)!.push(s)
+    })
+    return map
+  }, [profileSessions])
 
   const filteredGroups = search
     ? [...groups].filter(([,items]) => items.some(s => s.name.toLowerCase().includes(search.toLowerCase())))
@@ -51,36 +51,23 @@ export default function Sidebar({ activeSession, onSelectSession, onProfileEdit,
 
   const newSession = () => addSession(`session-${Date.now().toString(36)}`)
 
-  const handleSelect = async (id: string) => {
+  const handleSelect = (id: string) => {
     onSelectSession(id)
-    const s = sessions.find(x => x.id === id)
-    if (!s || !activeProfile) return
-    if (s.periId) {
-      // P1: Load persisted session
-      try {
-        await invoke('load_persisted_session', { source: s.source, periId: s.periId })
-      } catch (e) {
-        console.error('load session failed:', e)
-        // Fallback: create new
-        try {
-          const periId = await invoke<string>('new_session', { source: s.source, persona: activeProfile.persona })
-          setSessionPeriId(id, periId)
-        } catch {}
-      }
-    } else {
-      try {
-        const periId = await invoke<string>('new_session', { source: s.source, persona: activeProfile.persona })
-        setSessionPeriId(id, periId)
-      } catch (e) {
-        console.error('create session failed:', e)
-      }
-    }
   }
 
   const handleDelete = (id: string) => {
     if (!window.confirm('删除会话？')) return
     removeSession(id)
     if (activeSession === id) onSelectSession(null)
+  }
+
+  const saveRename = (id: string) => {
+    if (!renameValue.trim()) { setRenaming(null); return }
+    const updated = useStore.getState().sessions.map(ss =>
+      ss.id === id ? { ...ss, name: renameValue.trim(), lastActiveAt: Date.now() } : ss)
+    useStore.setState({ sessions: updated })
+    localStorage.setItem('pylon-sessions', JSON.stringify(updated))
+    setRenaming(null)
   }
 
   return (
@@ -104,13 +91,7 @@ export default function Sidebar({ activeSession, onSelectSession, onProfileEdit,
                       <input className="session-rename-input" value={renameValue}
                         onChange={e => setRenameValue(e.target.value)}
                         onKeyDown={e => {
-                          if (e.key === 'Enter') {
-                            const sessions = useStore.getState().sessions.map(ss =>
-                              ss.id === s.id ? { ...ss, name: renameValue, lastActiveAt: Date.now() } : ss)
-                            useStore.setState({ sessions })
-                            localStorage.setItem('pylon-sessions', JSON.stringify(sessions))
-                            setRenaming(null)
-                          }
+                          if (e.key === 'Enter') saveRename(s.id)
                           if (e.key === 'Escape') setRenaming(null)
                         }}
                         onBlur={() => setRenaming(null)}
