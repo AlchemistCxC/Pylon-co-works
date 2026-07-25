@@ -8,7 +8,7 @@ use std::collections::HashMap;
 use std::io::{BufRead, BufReader, BufWriter, Write};
 use std::process::{Child, Command, Stdio};
 use std::sync::{Arc, Mutex};
-use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use tokio::sync::{broadcast, oneshot};
 
 type Pending = HashMap<u64, oneshot::Sender<RawMessage>>;
@@ -22,6 +22,11 @@ pub struct AcpClient {
     /// send_message subscribers filter by request_id or method.
     pub rx: broadcast::Receiver<RawMessage>,
     tx: broadcast::Sender<RawMessage>,
+    /// Set when the child process exits unexpectedly.
+    pub crashed: Arc<AtomicBool>,
+    /// Agent config for reconnect.
+    agent_name: String,
+    agent_cwd: Option<String>,
 }
 
 #[derive(Debug, Clone)]
@@ -122,6 +127,11 @@ impl AcpClient {
         Ok(())
     }
 
+    /// Check if the child process has exited unexpectedly.
+    pub fn is_crashed(&self) -> bool {
+        self.crashed.load(Ordering::Relaxed)
+    }
+
     /// Set session mode.
     pub async fn set_mode(&self, session_id: &str, mode: &str) -> Result<serde_json::Value, String> {
         self.call_async("session/set_mode", serde_json::json!({
@@ -163,18 +173,20 @@ impl AcpClient {
 
                 // Drain stderr
                 let stderr = child.stderr.take().ok_or("no stderr")?;
-                let agent_name = agent.name.clone();
+                let agent_name_stderr = agent.name.clone();
                 std::thread::spawn(move || {
                     for line in BufReader::new(stderr).lines() {
-                        if let Ok(l) = line { if !l.is_empty() { log::error!("{} stderr: {}", agent_name, l); } }
+                        if let Ok(l) = line { if !l.is_empty() { log::error!("{} stderr: {}", agent_name_stderr, l); } }
                     }
                 });
 
                 let pending: Arc<Mutex<Pending>> = Arc::new(Mutex::new(HashMap::new()));
                 let (tx, rx) = broadcast::channel(256);
+                let crashed = Arc::new(AtomicBool::new(false));
 
                 let pending_clone = pending.clone();
                 let tx_clone = tx.clone();
+                let crashed_reader = crashed.clone();
                 std::thread::spawn(move || {
                     for line in stdout.lines() {
                         let line = match line { Ok(l) => l, Err(_) => break };
@@ -199,9 +211,17 @@ impl AcpClient {
                         }
                         let _ = tx_clone.send(raw);
                     }
+                    // stdout closed → child process exited
+                    crashed_reader.store(true, Ordering::Relaxed);
+                    log::error!("ACP: child process stdout closed (agent crashed)");
                 });
 
-                let client = AcpClient { child, stdin, next_id: AtomicU64::new(1), pending, rx, tx };
+                let client = AcpClient {
+                    child, stdin, next_id: AtomicU64::new(1), pending, rx, tx,
+                    crashed,
+                    agent_name: agent.name.clone(),
+                    agent_cwd: agent.cwd.clone(),
+                };
                 // Initialize
                 client.call_async("initialize", serde_json::json!({
                     "protocolVersion": 1, "capabilities": {"tokenStats": true},

@@ -45,6 +45,12 @@ async fn send_message(
     session_prompt: Option<String>,
     attachments: Option<Vec<String>>,
 ) -> Result<String, String> {
+    // Guard: if agent crashed, notify frontend immediately
+    if state.acp.lock().await.is_crashed() {
+        let _ = window.emit("peri:error", serde_json::json!({"source": source, "error": "agent process crashed"}));
+        return Err("agent crashed".to_string());
+    }
+
     let (peri_id, is_first) = 'session: {
         {
             let mut sessions = state.sessions.lock().map_err(|e| e.to_string())?;
@@ -193,6 +199,28 @@ async fn switch_agent(state: tauri::State<'_, AppState>, name: String) -> Result
     Ok(())
 }
 
+#[tauri::command]
+async fn reconnect_agent(state: tauri::State<'_, AppState>, window: tauri::Window) -> Result<(), String> {
+    let agent_name = { state.active_agent.lock().map_err(|e| e.to_string())?.clone() };
+    let agent = state.agents.get(&agent_name).ok_or("no active agent")?.clone();
+    // Kill old (may already be dead)
+    let _ = state.acp.lock().await.kill();
+    let new_acp = AcpClient::connect(&agent).await.map_err(|e| format!("reconnect failed: {}", e))?;
+    {
+        let mut acp = state.acp.lock().await;
+        *acp = new_acp;
+    }
+    let _ = window.emit("peri:agent-status", serde_json::json!({"status": "connected"}));
+    Ok(())
+}
+
+#[tauri::command]
+async fn agent_status(state: tauri::State<'_, AppState>) -> Result<serde_json::Value, String> {
+    let crashed = state.acp.lock().await.is_crashed();
+    let agent_name = { state.active_agent.lock().map_err(|e| e.to_string())?.clone() };
+    Ok(serde_json::json!({"agent": agent_name, "crashed": crashed}))
+}
+
 // ── Session persistence commands ──
 
 #[tauri::command]
@@ -317,7 +345,7 @@ pub fn run() {
             })
             .invoke_handler(tauri::generate_handler![
                 new_session, send_message, set_mode, close_session, load_sessions,
-                list_agents, switch_agent,
+                list_agents, switch_agent, reconnect_agent, agent_status,
                 load_persisted_session, list_persisted_sessions,
                 export_session,
             ])
