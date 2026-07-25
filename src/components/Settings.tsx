@@ -427,8 +427,8 @@ export default function Settings({ onClose }: { onClose?: () => void }) {
                 <BgImageRow label="背景图" value={t.ccBgImage||''} onChange={v=>onSettingChange({ccBgImage:v})}/>
                 <div style={{marginTop:8}}>
                   <button className="ps-btn primary"
-                    onClick={() => { u({ ccEditMode: true } as any); if (typeof onClose === 'function') onClose?.() }}>
-                    进入自定义编辑器
+                    onClick={() => { u({ ccEditMode: !t.ccEditMode } as any); if (typeof onClose === 'function') onClose?.() }}>
+                    {useStore.getState().ccEditMode ? '退出自定义编辑器' : '进入自定义编辑器'}
                   </button>
                   <span style={{fontSize:12,color:'var(--text-dim)',marginLeft:8}}>
                     位置/大小/类型/颜色/显隐 全部在编辑器中调整

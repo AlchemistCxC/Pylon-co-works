@@ -38,8 +38,8 @@
   content:''; position:absolute; left:0; right:0;
   height:var(--cli-line-width,2px); background:var(--cli-line-color,var(--accent));
 }
-.input-bar.cli-mode .input-row::before { top:0; opacity:0.5; }
-.input-bar.cli-mode .input-row::after { bottom:0; opacity:0.8; }
+.input-bar.cli-mode .input-row::before { top:0; }
+.input-bar.cli-mode .input-row::after { bottom:0; }
 .input-bar.cli-mode .input-textarea {
   background:transparent; border:none; resize:none; height:auto; min-height:auto;
   color:var(--cli-text-color,var(--text)); font-family:var(--mono);
