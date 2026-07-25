@@ -200,28 +200,80 @@ function TypeToggle({ id }: { id: string }) {
 
 function PropertyPanel({ id }: { id: string }) {
   const pos = useStore(s => s.ccPositions[id]) || { x:0,y:0,w:10,h:10 }
-  const u = useStore(s => s.updateTheme)
   const all = useStore(s => s.ccPositions) || {}
-  const labels: Record<string,string> = { input:'输入栏', context:'心电图', model:'模型', mode:'模式', send:'发送', attach:'附件' }
+  const u = useStore(s => s.updateTheme)
+  const theme = useStore() as any
+  const labels: Record<string,string> = { input:'输入栏', context:'上下文', model:'模型', mode:'模式', send:'发送', attach:'附件' }
+
   return (
     <div className="cc-prop-panel">
       <div className="cc-prop-title">{labels[id] || id}</div>
-      <div className="cc-prop-row"><span>X</span>
-        <input type="number" value={pos.x} onChange={e => u({ ccPositions: {...all, [id]:{...pos, x:+e.target.value}} } as any)} />
-        <span>%</span>
-      </div>
-      <div className="cc-prop-row"><span>Y</span>
-        <input type="number" value={pos.y} onChange={e => u({ ccPositions: {...all, [id]:{...pos, y:+e.target.value}} } as any)} />
-        <span>%</span>
-      </div>
-      <div className="cc-prop-row"><span>W</span>
-        <input type="number" value={pos.w} onChange={e => u({ ccPositions: {...all, [id]:{...pos, w:Math.max(5,+e.target.value)}} } as any)} />
-        <span>%</span>
-      </div>
-      <div className="cc-prop-row"><span>H</span>
-        <input type="number" value={pos.h} onChange={e => u({ ccPositions: {...all, [id]:{...pos, h:Math.max(5,+e.target.value)}} } as any)} />
-        <span>%</span>
-      </div>
+
+      {/* Position & size (all widgets) */}
+      <div className="cc-prop-section">位置 & 大小</div>
+      <div className="cc-prop-row"><span>X</span><input type="number" value={pos.x} onChange={v=>u({ccPositions:{...all,[id]:{...pos,x:+v.target.value}}} as any)}/><span>%</span></div>
+      <div className="cc-prop-row"><span>Y</span><input type="number" value={pos.y} onChange={v=>u({ccPositions:{...all,[id]:{...pos,y:+v.target.value}}} as any)}/><span>%</span></div>
+      <div className="cc-prop-row"><span>W</span><input type="number" value={pos.w} onChange={v=>u({ccPositions:{...all,[id]:{...pos,w:Math.max(5,+v.target.value)}}} as any)}/><span>%</span></div>
+      <div className="cc-prop-row"><span>H</span><input type="number" value={pos.h} onChange={v=>u({ccPositions:{...all,[id]:{...pos,h:Math.max(5,+v.target.value)}}} as any)}/><span>%</span></div>
+
+      {/* Input bar settings */}
+      {id === 'input' && <>
+        <div className="cc-prop-section">输入栏</div>
+        <div className="cc-prop-row"><span>背景</span><input type="color" value={theme.inputBg} onChange={v=>u({inputBg:v.target.value} as any)}/></div>
+        <div className="cc-prop-row"><span>文字色</span><input type="color" value={theme.inputTextColor} onChange={v=>u({inputTextColor:v.target.value} as any)}/></div>
+        <div className="cc-prop-row"><span>字号</span><input type="number" value={theme.inputFontSize} onChange={v=>u({inputFontSize:+v.target.value} as any)} min={12} max={22}/></div>
+        <div className="cc-prop-row"><span>最小高</span><input type="number" value={theme.inputMinHeight} onChange={v=>u({inputMinHeight:+v.target.value} as any)} min={36} max={120}/></div>
+        <div className="cc-prop-row"><span>模式</span>
+          <select value={theme.inputMode} onChange={v=>u({inputMode:v.target.value} as any)}>
+            <option value="default">输入框</option><option value="cli">CLI</option>
+          </select>
+        </div>
+        {theme.inputMode==='cli' && <>
+          <div className="cc-prop-row"><span>线宽</span><input type="number" value={theme.cliLineWidth} onChange={v=>u({cliLineWidth:+v.target.value} as any)} min={1} max={6}/></div>
+          <div className="cc-prop-row"><span>线色</span><input type="color" value={theme.cliLineColor} onChange={v=>u({cliLineColor:v.target.value} as any)}/></div>
+        </>}
+      </>}
+
+      {/* Context / status bar settings */}
+      {id === 'context' && <>
+        <div className="cc-prop-section">上下文</div>
+        <div className="cc-prop-row"><span>背景</span><input type="color" value={theme.statusBg} onChange={v=>u({statusBg:v.target.value} as any)}/></div>
+        <div className="cc-prop-row"><span>仪表</span>
+          <select value={theme.ccStyle} onChange={v=>u({ccStyle:v.target.value} as any)}>
+            <option value="wave">心电图</option><option value="bar">柱状图</option><option value="numeric">数值</option>
+          </select>
+        </div>
+        <div className="cc-prop-row"><span>宽</span><input type="number" value={theme.ekgWidth} onChange={v=>u({ekgWidth:+v.target.value} as any)} min={120} max={400}/></div>
+        <div className="cc-prop-row"><span>字号</span><input type="number" value={theme.ekgFontSize} onChange={v=>u({ekgFontSize:+v.target.value} as any)} min={12} max={22}/></div>
+        {theme.ccStyle==='wave' && <>
+          <div className="cc-prop-row"><span>绿</span><input type="color" value={theme.ekgGreen} onChange={v=>u({ekgGreen:v.target.value} as any)}/></div>
+          <div className="cc-prop-row"><span>黄</span><input type="color" value={theme.ekgYellow} onChange={v=>u({ekgYellow:v.target.value} as any)}/></div>
+          <div className="cc-prop-row"><span>红</span><input type="color" value={theme.ekgRed} onChange={v=>u({ekgRed:v.target.value} as any)}/></div>
+          <div className="cc-prop-row"><span>线宽</span><input type="number" value={theme.ekgLineWidth} onChange={v=>u({ekgLineWidth:+v.target.value} as any)} min={2} max={20}/></div>
+          <div className="cc-prop-row"><span>振幅</span><input type="number" value={theme.ekgAmplitudeMax} onChange={v=>u({ekgAmplitudeMax:+v.target.value} as any)} min={5} max={30}/></div>
+        </>}
+        <div className="cc-prop-row"><span>显示</span>
+          <select value={theme.tokenDisplay} onChange={v=>u({tokenDisplay:v.target.value} as any)}>
+            <option value="ekg">ECG波形</option><option value="numeric">数字</option>
+          </select>
+        </div>
+      </>}
+
+      {/* Model widget */}
+      {id === 'model' && <>
+        <div className="cc-prop-section">模型</div>
+        <div className="cc-prop-row"><span>胶囊BG</span><input type="color" value={theme.pillBg} onChange={v=>u({pillBg:v.target.value} as any)}/></div>
+        <div className="cc-prop-row"><span>胶囊TXT</span><input type="color" value={theme.pillText} onChange={v=>u({pillText:v.target.value} as any)}/></div>
+        <div className="cc-prop-row"><span>PrismON</span><input type="color" value={theme.prismOnColor} onChange={v=>u({prismOnColor:v.target.value} as any)}/></div>
+      </>}
+
+      {/* Mode widget */}
+      {id === 'mode' && <>
+        <div className="cc-prop-section">权限模式</div>
+        <div style={{fontSize:12,color:'var(--text-dim)',padding:'4px 0'}}>
+          当前: {theme.inputMode || 'default'}
+        </div>
+      </>}
     </div>
   )
 }
