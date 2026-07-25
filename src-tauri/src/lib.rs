@@ -88,7 +88,7 @@ async fn send_message(
 
     let user_content = content.clone();
     let mut broadcast = state.acp.lock().await.rx.resubscribe();
-    let (_request_id, mut rx) = state.acp.lock().await.send_prompt_atomic(&peri_id, &prompt_content)?;
+    let (_request_id, mut rx) = state.acp.lock().await.send_prompt_atomic(&peri_id, &prompt_content).await?;
     let _ = window.emit("peri:user", serde_json::json!({ "source": source, "content": user_content }));
 
     let pid = peri_id.clone();
@@ -185,7 +185,7 @@ async fn cancel_prompt(state: tauri::State<'_, AppState>, source: String) -> Res
         sessions.get(&source).map(|s| s.peri_id.clone()).ok_or("no session")?
     };
     // Fire-and-forget notification — Peri will respond with stopReason=cancelled
-    state.acp.lock().await.cancel_session(&peri_id)
+    state.acp.lock().await.cancel_session(&peri_id).await
 }
 
 #[tauri::command]

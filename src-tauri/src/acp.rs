@@ -173,10 +173,10 @@ impl AcpClient {
     }
 
     /// Cancel a running prompt. Fire-and-forget notification.
-    pub fn cancel_session(&self, session_id: &str) -> Result<(), String> {
+    pub async fn cancel_session(&self, session_id: &str) -> Result<(), String> {
         self.send_notification(METHOD_SESSION_CANCEL, serde_json::json!({
             "sessionId": session_id
-        }))
+        })).await
     }
 
     /// Connect from AgentDef (P0: replaces hardcoded spawn)
