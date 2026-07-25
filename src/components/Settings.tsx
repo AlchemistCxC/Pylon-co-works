@@ -26,25 +26,20 @@ function Swatch({ value, onChange }: { value:string; onChange:(v:string)=>void }
   </>
 }
 
-function ColorPopover({ value, onChange }: { value:string; onChange:(v:string)=>void }) {
-  const [open, setOpen] = useState(false)
-  const ref = useRef<HTMLDivElement>(null)
+function ColorPopover({ value, onChange, chips }: { value:string; onChange:(v:string)=>void; chips?:boolean }) {
   const pickerRef = useRef<HTMLInputElement>(null)
-
   return (
-    <div className="set-color-wrap" ref={ref}>
-      <div className="set-swatch" style={{background:value}} onClick={() => setOpen(!open)}/>
-      {open && <>
-        <div className="set-color-popover">
+    <div className="set-color-inline">
+      <div className="set-swatch" style={{background:value}} onClick={() => pickerRef.current?.click()}/>
+      {chips !== false && (
+        <div className="set-color-chips">
           {COLOR_CHIPS.map(c => (
             <div key={c} className={`set-color-chip ${value === c ? 'active' : ''}`}
-              style={{background:c}} onClick={() => { onChange(c); setOpen(false) }} />
+              style={{background:c}} onClick={() => onChange(c)} />
           ))}
-          <button className="set-color-custom" onClick={() => pickerRef.current?.click()}>自定义</button>
         </div>
-        <div className="set-color-backdrop" onClick={() => setOpen(false)}/>
-      </>}
-      <input ref={pickerRef} type="color" value={value} onChange={e => { onChange(e.target.value); setOpen(false) }} className="set-swatch-input"/>
+      )}
+      <input ref={pickerRef} type="color" value={value} onChange={e => onChange(e.target.value)} className="set-swatch-input"/>
     </div>
   )
 }
@@ -395,11 +390,11 @@ export default function Settings({ onClose }: { onClose?: () => void }) {
               <Group title="颜色">
                 <div className="set-compact-row">
                   <span className="set-compact-label">文字</span>
-                  <ColorPopover value={t.chatTextColor} onChange={v=>onSettingChange({chatTextColor:v})}/>
+                  <ColorPopover value={t.chatTextColor} onChange={v=>onSettingChange({chatTextColor:v})} chips={false}/>
                   <span className="set-compact-label">内联代码</span>
-                  <ColorPopover value={t.chatCodeColor} onChange={v=>onSettingChange({chatCodeColor:v})}/>
+                  <ColorPopover value={t.chatCodeColor} onChange={v=>onSettingChange({chatCodeColor:v})} chips={false}/>
                   <span className="set-compact-label">代码背景</span>
-                  <ColorPopover value={t.chatCodeBg} onChange={v=>onSettingChange({chatCodeBg:v})}/>
+                  <ColorPopover value={t.chatCodeBg} onChange={v=>onSettingChange({chatCodeBg:v})} chips={false}/>
                 </div>
               </Group>
               <Group title="玻璃效果">
@@ -411,25 +406,25 @@ export default function Settings({ onClose }: { onClose?: () => void }) {
               <Group title="指示器">
                 <div className="set-compact-row">
                   <span className="set-compact-label">完成</span>
-                  <ColorPopover value={t.toolOk} onChange={v=>onSettingChange({toolOk:v})}/>
+                  <ColorPopover value={t.toolOk} onChange={v=>onSettingChange({toolOk:v})} chips={false}/>
                   <span className="set-compact-label">运行中</span>
-                  <ColorPopover value={t.toolRun} onChange={v=>onSettingChange({toolRun:v})}/>
+                  <ColorPopover value={t.toolRun} onChange={v=>onSettingChange({toolRun:v})} chips={false}/>
                   <span className="set-compact-label">错误</span>
-                  <ColorPopover value={t.toolErr} onChange={v=>onSettingChange({toolErr:v})}/>
+                  <ColorPopover value={t.toolErr} onChange={v=>onSettingChange({toolErr:v})} chips={false}/>
                 </div>
               </Group>
               <Group title="文字 & 标签">
                 <div className="set-compact-row">
                   <span className="set-compact-label">工具名</span>
-                  <ColorPopover value={t.toolNameColor} onChange={v=>onSettingChange({toolNameColor:v})}/>
+                  <ColorPopover value={t.toolNameColor} onChange={v=>onSettingChange({toolNameColor:v})} chips={false}/>
                   <span className="set-compact-label">摘要</span>
-                  <ColorPopover value={t.toolSummaryColor} onChange={v=>onSettingChange({toolSummaryColor:v})}/>
+                  <ColorPopover value={t.toolSummaryColor} onChange={v=>onSettingChange({toolSummaryColor:v})} chips={false}/>
                 </div>
                 <div className="set-compact-row" style={{marginTop:4}}>
                   <span className="set-compact-label">标签背景</span>
-                  <ColorPopover value={t.userTagBg} onChange={v=>onSettingChange({userTagBg:v})}/>
+                  <ColorPopover value={t.userTagBg} onChange={v=>onSettingChange({userTagBg:v})} chips={false}/>
                   <span className="set-compact-label">标签文字</span>
-                  <ColorPopover value={t.userTagText} onChange={v=>onSettingChange({userTagText:v})}/>
+                  <ColorPopover value={t.userTagText} onChange={v=>onSettingChange({userTagText:v})} chips={false}/>
                 </div>
               </Group>
               <Group title="指示器 & Spinner">
@@ -439,7 +434,7 @@ export default function Settings({ onClose }: { onClose?: () => void }) {
                 ]}/></Row>
                 <div className="set-compact-row">
                   <span className="set-compact-label">颜色</span>
-                  <ColorPopover value={t.spinnerColor} onChange={v=>onSettingChange({spinnerColor:v})}/>
+                  <ColorPopover value={t.spinnerColor} onChange={v=>onSettingChange({spinnerColor:v})} chips={false}/>
                   <span className="set-compact-label">大小</span>
                   <Num value={t.spinnerSize} onChange={v=>onSettingChange({spinnerSize:v})} min={10} max={32}/>
                 </div>
@@ -451,7 +446,7 @@ export default function Settings({ onClose }: { onClose?: () => void }) {
                 <Row label="字体"><Sel value={t.msgFont} onChange={v=>onSettingChange({msgFont:v})} options={['mono','system']}/></Row>
                 <div className="set-compact-row">
                   <span className="set-compact-label">文字颜色</span>
-                  <ColorPopover value={t.msgTextColor} onChange={v=>onSettingChange({msgTextColor:v})}/>
+                  <ColorPopover value={t.msgTextColor} onChange={v=>onSettingChange({msgTextColor:v})} chips={false}/>
                   <span className="set-compact-label">行间距</span>
                   <Num value={t.msgLineHeight} onChange={v=>onSettingChange({msgLineHeight:v})} min={1.2} max={2.5}/>
                 </div>
