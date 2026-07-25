@@ -1,11 +1,11 @@
-import { useRef } from 'react'
+import { useRef, useState } from 'react'
 import * as Tabs from '@radix-ui/react-tabs'
 import { invoke } from '@tauri-apps/api/core'
 import { useStore } from '../store'
 import type { ThemeSettings } from '../store'
 import PresetRow from './PresetRow'
 import {
-  DndContext, closestCenter, PointerSensor, useSensor, useSensors,
+  DndContext, closestCenter, PointerSensor, useSensor, useSensors, useDraggable,
   type DragEndEvent,
 } from '@dnd-kit/core'
 import {
@@ -73,8 +73,8 @@ function SortableWidget({ id }: { id: string }) {
     opacity: isDragging ? 0.5 : 1,
   }
   return (
-    <div ref={setNodeRef} style={style} className="set-row">
-      <span {...attributes} {...listeners} className="cc-drag-handle" style={{ cursor:'grab', color:'var(--text-dim)', fontSize:14, userSelect:'none' }}>☰</span>
+    <div ref={setNodeRef} style={style} className="set-row" {...attributes}>
+      <span {...listeners} className="cc-drag-handle" style={{ cursor:'grab', color:'var(--text-dim)', fontSize:14, userSelect:'none' }}>☰</span>
       <span className="set-row-label">{WIDGET_LABELS[id] || id}</span>
       <label className="cc-vis-toggle">
         <input type="checkbox" checked={!hidden} onChange={() => {
@@ -232,6 +232,11 @@ export default function Settings({ onClose }: { onClose?: () => void }) {
             </SortableContext>
           </DndContext>
 
+          <h3>Widget 位置</h3>
+          <Group title="拖拽调整 — 画布映射中控区">
+            <PositionEditor />
+          </Group>
+
           <Group title="布局">
             <Row label="高度">
               <Num value={t.ccHeight} onChange={v=>u({ccHeight:v})} min={80} max={400}/>
@@ -353,6 +358,115 @@ export default function Settings({ onClose }: { onClose?: () => void }) {
         </div>
       </div>
       </Tabs.Root>
+    </div>
+  )
+}
+
+// ── CC position editor ──
+
+const WIDGET_IDS = ['input', 'context', 'model', 'mode'] as const
+const WIDGET_COLORS: Record<string, string> = { input: '#3b82f6', context: '#1e9646', model: '#a855f7', mode: '#f59e0b' }
+const WIDGET_LABELS_FULL: Record<string, string> = { input: '输入栏', context: '心电图', model: '模型', mode: '模式' }
+const CANVAS_MAX_W = 360, CANVAS_H = 132
+
+function PositionEditor() {
+  const positions = useStore(s => s.ccPositions) || {}
+  const ccHeight = useStore(s => s.ccHeight) || 120
+  const u = useStore(s => s.updateTheme)
+  const [deltas, setDeltas] = useState<Record<string, {x:number,y:number}>>({})
+  const [resizing, setResizing] = useState<string | null>(null)
+  const [resizeStart, setResizeStart] = useState<{x:number,y:number,w:number,h:number} | null>(null)
+
+  const sensors = useSensors(useSensor(PointerSensor, { activationConstraint: { distance: 3 } }))
+
+  const toPx = (pct: number, dim: number) => (pct / 100) * dim
+  const toPct = (px: number, dim: number) => Math.round(Math.max(0, Math.min(100, (px / dim) * 100)))
+
+  const handleDragEnd = (event: DragEndEvent) => {
+    const { active, delta } = event
+    const id = active.id as string
+    if (id.endsWith('-resize')) {
+      setResizing(null); setResizeStart(null); return
+    }
+    const cur = positions[id] || { x: 0, y: 0, w: 10, h: 10 }
+    const x = Math.max(0, Math.min(100 - cur.w, cur.x + toPct(delta.x, CANVAS_MAX_W)))
+    const y = Math.max(0, Math.min(100 - cur.h, cur.y + toPct(delta.y, CANVAS_H)))
+    u({ ccPositions: { ...positions, [id]: { ...cur, x, y } } } as any)
+    setDeltas({})
+  }
+
+  const handleDragMove = (event: any) => {
+    const { active, delta } = event
+    const id = active.id as string
+    if (id.endsWith('-resize')) return
+    setDeltas(prev => ({ ...prev, [id]: { x: delta.x, y: delta.y } }))
+  }
+
+  const startResize = (id: string, e: React.MouseEvent) => {
+    e.stopPropagation()
+    const pos = positions[id] || { x: 0, y: 0, w: 10, h: 10 }
+    setResizing(id)
+    setResizeStart({ x: e.clientX, y: e.clientY, w: pos.w, h: pos.h })
+  }
+
+  const onResizeMove = (e: React.MouseEvent) => {
+    if (!resizing || !resizeStart) return
+    const dx = e.clientX - resizeStart.x
+    const dy = e.clientY - resizeStart.y
+    const pos = positions[resizing] || { x: 0, y: 0, w: 10, h: 10 }
+    const cw = (CANVAS_MAX_W / 100)
+    const ch = (CANVAS_H / 100)
+    const w = Math.max(5, Math.min(100 - pos.x, resizeStart.w + toPct(dx, CANVAS_MAX_W)))
+    const h = Math.max(5, Math.min(100 - pos.y, resizeStart.h + toPct(dy, CANVAS_H)))
+    u({ ccPositions: { ...positions, [resizing]: { ...pos, w, h } } } as any)
+    setResizeStart({ x: e.clientX, y: e.clientY, w, h })
+  }
+
+  const endResize = () => { setResizing(null); setResizeStart(null) }
+
+  const getStyle = (id: string): React.CSSProperties => {
+    const pos = positions[id] || { x: 0, y: 0, w: 10, h: 10 }
+    const d = deltas[id] || { x: 0, y: 0 }
+    return {
+      left: `${pos.x}%`, top: `${pos.y}%`,
+      width: `${pos.w}%`, height: `${pos.h}%`,
+      transform: d.x || d.y ? `translate(${d.x}px, ${d.y}px)` : undefined,
+    }
+  }
+
+  return (
+    <div onMouseMove={onResizeMove} onMouseUp={endResize} onMouseLeave={endResize}>
+      <DndContext sensors={sensors} onDragMove={handleDragMove} onDragEnd={handleDragEnd}>
+        <div className="cc-pos-canvas" style={{ width: CANVAS_MAX_W, height: CANVAS_H }}>
+          {WIDGET_IDS.map(id => (
+            <PosChip key={id} id={id} style={getStyle(id)} color={WIDGET_COLORS[id]}
+              onResizeStart={(e: React.MouseEvent) => startResize(id, e)} />
+          ))}
+        </div>
+      </DndContext>
+      <div className="set-pos-info">
+        <span>画布高度 = 中控区 {ccHeight}px</span>
+      </div>
+    </div>
+  )
+}
+
+function PosChip({ id, style, color, onResizeStart }: { id: string; style: React.CSSProperties; color: string; onResizeStart: (e: React.MouseEvent) => void }) {
+  const { attributes, listeners, setNodeRef, transform, isDragging } = useDraggable({ id })
+  const isInput = id === 'input'
+  return (
+    <div ref={setNodeRef} {...listeners} {...attributes} className="cc-pos-chip" style={{
+      ...style,
+      background: `${color}11`, borderColor: color,
+      transform: transform ? `translate(${transform.x}px, ${transform.y}px)` : style.transform,
+      opacity: isDragging ? 0.7 : 1, zIndex: isDragging ? 10 : 1,
+    }}>
+      <span className="cc-pos-chip-label" style={{ color }}>
+        <span className="cc-pos-dot" style={{ background: color }} />
+        {WIDGET_LABELS_FULL[id]}
+      </span>
+      {isInput && <span className="cc-pos-chip-hint" style={{ fontSize: 7, color: 'var(--text-dim)' }}>···</span>}
+      <div className="cc-pos-resize" onMouseDown={onResizeStart} />
     </div>
   )
 }

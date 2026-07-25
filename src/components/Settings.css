@@ -58,3 +58,14 @@
 .cc-drag-handle:active { cursor:grabbing; }
 .cc-vis-toggle { display:flex; align-items:center; gap:4px; cursor:pointer; }
 .cc-vis-toggle input { accent-color:var(--accent); }
+
+/* position editor */
+.cc-pos-canvas { position:relative; border:1px solid var(--border); border-radius:8px; background:var(--bg-input); overflow:hidden; margin-top:8px; }
+.cc-pos-chip { position:absolute; display:flex; flex-direction:column; justify-content:center; border-radius:4px; border:1px solid var(--border); font-size:10px; cursor:grab; user-select:none; overflow:hidden; }
+.cc-pos-chip:active { cursor:grabbing; }
+.cc-pos-chip-label { display:flex; align-items:center; gap:3px; padding:0 4px; }
+.cc-pos-dot { width:6px; height:6px; border-radius:50%; flex-shrink:0; }
+.cc-pos-chip-hint { padding:0 4px 2px; }
+.cc-pos-resize { position:absolute; right:0; bottom:0; width:10px; height:10px; cursor:se-resize; background:linear-gradient(135deg, transparent 50%, var(--border) 50%, transparent 55%); }
+.cc-pos-resize:hover { background:linear-gradient(135deg, transparent 50%, var(--accent) 50%, transparent 55%); }
+.set-pos-info { font-size:11px; color:var(--text-dim); margin-top:4px; }

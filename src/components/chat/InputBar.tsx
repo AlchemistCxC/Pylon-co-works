@@ -1,11 +1,11 @@
-import { useState, useRef, KeyboardEvent, useEffect } from 'react'
+import { useState, useRef, KeyboardEvent, useEffect, forwardRef, useImperativeHandle } from 'react'
 import { invoke } from '@tauri-apps/api/core'
 import { open } from '@tauri-apps/plugin-dialog'
 import { useStore } from '../../store'
 import { Paperclip, ArrowUp } from 'lucide-react'
 import './InputBar.css'
 
-interface Props { sessionId: string | null }
+interface Props { sessionId: string | null; split?: boolean }
 
 const FALLBACK_COMMANDS = [
   { cmd: '/model', args: ' <name>', info: '切换模型' },
@@ -16,13 +16,13 @@ const FALLBACK_COMMANDS = [
   { cmd: '/mode', args: ' <default|edit|auto|bypass>', info: '切换权限模式' },
 ]
 
-export default function InputBar({ sessionId }: Props) {
+export default forwardRef<{ send: () => void; attachFile: () => void }, Props>(function InputBar({ sessionId, split }, ref) {
   const [value, setValue] = useState('')
   const [cmdIdx, setCmdIdx] = useState(0)
   const [sendError, setSendError] = useState('')
   const [attached, setAttached] = useState<{path:string;name:string;size:number}[]>([])
   const lastMsg = useRef('')
-  const ref = useRef<HTMLTextAreaElement>(null)
+  const textareaRef = useRef<HTMLTextAreaElement>(null)
   const activeProfileId = useStore(s => s.activeProfileId)
   const profiles = useStore(s => s.profiles)
   const addSession = useStore(s => s.addSession)
@@ -32,7 +32,6 @@ export default function InputBar({ sessionId }: Props) {
   const activeProfile = profiles.find(p => p.id === activeProfileId)
   const persona = activeProfile?.persona || ''
 
-  // Dynamic commands: peri > fallback
   const COMMANDS = liveCommands.length > 0
     ? liveCommands.map((c: {name: string; input_hint?: string; description?: string}) => ({ cmd: '/' + c.name, args: c.input_hint ? ' ' + c.input_hint : '', info: c.description || '' }))
     : FALLBACK_COMMANDS
@@ -40,11 +39,10 @@ export default function InputBar({ sessionId }: Props) {
   const isCmd = value.startsWith('/')
   const filtered = isCmd ? COMMANDS.filter((c: typeof COMMANDS[number]) => c.cmd.startsWith(value.split(' ')[0])) : []
 
-  // Auto-resize textarea
   useEffect(() => {
-    if (ref.current) {
-      ref.current.style.height = 'auto'
-      ref.current.style.height = Math.min(ref.current.scrollHeight, 200) + 'px'
+    if (textareaRef.current) {
+      textareaRef.current.style.height = 'auto'
+      textareaRef.current.style.height = Math.min(textareaRef.current.scrollHeight, 200) + 'px'
     }
   }, [value])
 
@@ -110,6 +108,8 @@ export default function InputBar({ sessionId }: Props) {
     } catch (e) { /* cancelled */ }
   }
 
+  useImperativeHandle(ref, () => ({ send, attachFile }), [value, attached, sessionId, isCmd, filtered])
+
   const onKey = (e: KeyboardEvent) => {
     if (e.ctrlKey && e.key === 'ArrowUp') { e.preventDefault(); if (lastMsg.current) setValue(lastMsg.current) }
     if (isCmd && filtered.length > 0) {
@@ -136,7 +136,7 @@ export default function InputBar({ sessionId }: Props) {
         <div className="command-palette">
           {filtered.map((c: typeof COMMANDS[number], i: number) => (
             <div key={c.cmd} className={`cmd-item ${i === cmdIdx ? 'active' : ''}`}
-              onClick={() => { setValue(c.cmd + c.args + ' '); ref.current?.focus() }}>
+              onClick={() => { setValue(c.cmd + c.args + ' '); textareaRef.current?.focus() }}>
               <span className="cmd-name">{c.cmd}{c.args}</span>
               <span className="cmd-info">{c.info}</span>
             </div>
@@ -145,18 +145,22 @@ export default function InputBar({ sessionId }: Props) {
       )}
       <div className="input-row">
         {inputMode === 'cli' && <span className="cli-prefix">&gt;</span>}
-        <button className="input-btn attach" onClick={attachFile} title="Attach file (Ctrl+O)">
-          <Paperclip size={16} />
-        </button>
-        <textarea ref={ref} className="input-textarea" value={value}
+        {!split && (
+          <button className="input-btn attach" onClick={attachFile} title="Attach file (Ctrl+O)">
+            <Paperclip size={16} />
+          </button>
+        )}
+        <textarea ref={textareaRef} className="input-textarea" value={value}
           onChange={e => { setValue(e.target.value); setCmdIdx(0) }}
           onKeyDown={onKey}
           placeholder="输入消息...（Enter 发送，Shift+Enter 换行，/ 命令）"
           rows={1} />
-        <button className="input-btn send" onClick={send} title="Send (Enter)">
-          <ArrowUp size={18} />
-        </button>
+        {!split && (
+          <button className="input-btn send" onClick={send} title="Send (Enter)">
+            <ArrowUp size={18} />
+          </button>
+        )}
       </div>
     </div>
   )
-}
+})

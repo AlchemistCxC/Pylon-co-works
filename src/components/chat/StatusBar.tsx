@@ -1,6 +1,5 @@
 import { useMemo, useState, useEffect } from 'react'
 import { useStore } from '../../store'
-import * as DropdownMenu from '@radix-ui/react-dropdown-menu'
 import './StatusBar.css'
 
 function hash(seed: number): number {
@@ -18,23 +17,20 @@ function wave(w: number, h: number, intensity: number, offset: number, ampMax: n
     { start:0.45, end:0.65, type:'t' }, { start:0.65, end:1.00, type:'flat' },
   ]
 
-  // Use while loop instead of firstCycle/lastCycle estimation
   const pts: string[] = []
   let cycleIndex = Math.floor((-w - offset) / baseCycleW)
 
   while (true) {
-    // RRI modulation — each heartbeat gets its own cycleW
     const rri = Math.sin(cycleIndex * 0.7 + offset * 0.015) * 12
     const cycleW = baseCycleW + rri
-    const xStart = cycleIndex * baseCycleW + offset  // base start of this heartbeat
+    const xStart = cycleIndex * baseCycleW + offset
 
-    if (xStart > w + baseCycleW * 2) break  // far enough past viewport
+    if (xStart > w + baseCycleW * 2) break
 
     for (const ph of phases) {
       const steps = Math.max(2, Math.floor((ph.end - ph.start) * cycleW / 3))
       for (let s = 0; s <= steps; s++) {
         const t = s / Math.max(1, steps)
-        // Use x-coordinate-based hash for deterministic, frame-stable jitter
         const phT = ph.start + t * (ph.end - ph.start)
         const x = xStart + phT * cycleW
         if (x < -10 || x > w + 10) continue
@@ -61,10 +57,6 @@ function wave(w: number, h: number, intensity: number, offset: number, ampMax: n
   return pts.join(' ')
 }
 
-const MODELS = ['deepseek-v4-flash', 'deepseek-v4-pro'] as const
-const MODES = ['default', 'edit', 'auto', 'bypass'] as const
-type Mode = typeof MODES[number]
-
 function fmtSize(n: number) {
   if (n >= 1_000_000) { const m = n / 1_000_000; return m >= 10 ? `${Math.round(m)}M` : `${m.toFixed(1)}M` }
   if (n >= 1_000) { const k = n / 1_000; return k >= 10 ? `${Math.round(k)}K` : `${k.toFixed(1)}K` }
@@ -75,13 +67,10 @@ export default function StatusBar() {
   const tokensUsed = useStore(s => s.liveTokensUsed) || 0
   const tokensMax = useStore(s => s.liveTokensMax) || 128
   const cacheHit = useStore(s => s.liveCacheHit) || 0
-  const mode = useStore(s => s.liveMode) || 'auto'
   const ekgGreen = useStore(s => s.ekgGreen)
   const ekgYellow = useStore(s => s.ekgYellow)
   const ekgRed = useStore(s => s.ekgRed)
   const [tick, setTick] = useState(0)
-  const activeProfile = useStore(s => s.profiles.find(x => x.id === s.activeProfileId))
-  const model = activeProfile?.model || 'deepseek-v4-flash'
   const ccStyle = useStore(s => s.ccStyle) || 'wave'
   const tokenDisplay = useStore(s => s.tokenDisplay)
 
@@ -99,23 +88,15 @@ export default function StatusBar() {
 
   const W = useStore(s => s.ekgWidth) || 150
   const H = 30, mid = H / 2
-  // V3: left=remaining(color), right=consumed(gray)
   const cut = Math.max(4, W * Math.max(0, Math.min(1, 1 - used)))
   const offsetSpeed = (useStore(s => s.ekgSpeedBase) || 0.5) + intensity * speedMax
-  const offset = tick * offsetSpeed  // perpetual, no modulo
-  // Segmented noise: green micro-breath, yellow jitter, red tremble
+  const offset = tick * offsetSpeed
   const noiseScale = used < 0.50
     ? 0.1 + Math.sin(tick * 0.1) * 0.05
     : used < 0.80
       ? 0.3 + intensity * 0.8
       : 0.6 + intensity * 1.5
   const wfAnimated = useMemo(() => wave(W, H, intensity, offset, ampMax, noiseScale), [intensity, tick, ampMax, noiseScale])
-
-  const cycleMode = () => {
-    const idx = MODES.indexOf(mode as Mode)
-    const next = MODES[(idx + 1) % MODES.length]
-    useStore.getState().setLiveStats({ liveMode: next })
-  }
 
   return (
     <div className="status-bar">
@@ -138,20 +119,15 @@ export default function StatusBar() {
               <stop offset="1" stopColor="rgba(0,0,0,0.08)" />
             </linearGradient>
           </defs>
-          {/* Layer 1: gradient baseline */}
           <line x1="0" y1={mid} x2={W} y2={mid} stroke="url(#baseline-grad)" strokeWidth="5" />
-          {/* Layer 2: clipped wave */}
           <clipPath id="active"><rect x="0" y="0" width={cut} height={H}/></clipPath>
           <polyline points={wfAnimated} fill="none" stroke={color} strokeWidth="2.2"
             strokeLinecap="round" strokeLinejoin="round" clipPath="url(#active)"
             style={{ filter: `drop-shadow(0 0 4px ${color}99)` } as any}/>
-          {/* Layer 3: left dual endpoint */}
           <line x1="0" y1={mid-10} x2="0" y2={mid+10} stroke="rgba(0,0,0,0.35)" strokeWidth="2"/>
           <line x1="3" y1={mid-10} x2="3" y2={mid+10} stroke="rgba(0,0,0,0.35)" strokeWidth="2"/>
-          {/* Layer 4: right dual endpoint */}
           <line x1={W} y1={mid-10} x2={W} y2={mid+10} stroke="rgba(0,0,0,0.35)" strokeWidth="2"/>
           <line x1={W-3} y1={mid-10} x2={W-3} y2={mid+10} stroke="rgba(0,0,0,0.35)" strokeWidth="2"/>
-          {/* Layer 5: moving endpoint */}
           <line x1={cut} y1={mid-10} x2={cut} y2={mid+10} stroke={color} strokeWidth="3"/>
         </svg>
       )}
@@ -159,29 +135,6 @@ export default function StatusBar() {
       <span className="ekg-pct" style={{ color }}>{pct}%</span>
       <span className="pill-mono">{fmtSize(tokensUsed)}/{fmtSize(tokensMax)}</span>
       {cacheHit > 0 && <span className="pill-mono" style={{ color: '#34d399' }}>{cacheHit}% hit</span>}
-
-      <span style={{ marginLeft:'auto' }} />
-
-      <div className="model-dropdown" onClick={e => e.stopPropagation()}>
-        <DropdownMenu.Root>
-          <DropdownMenu.Trigger className="model-tag">{model} ▾</DropdownMenu.Trigger>
-          <DropdownMenu.Portal>
-            <DropdownMenu.Content className="model-menu" sideOffset={4}>
-              {MODELS.map(m => (
-                <DropdownMenu.Item key={m} className={`model-item ${m === model ? 'active' : ''}`}
-                  onClick={() => { useStore.getState().addProfile({ ...(activeProfile || { id: '', name: '', persona: '', model: '' }), model: m }) }}>
-                  {m}
-                </DropdownMenu.Item>
-              ))}
-            </DropdownMenu.Content>
-          </DropdownMenu.Portal>
-        </DropdownMenu.Root>
-      </div>
-
-      <div className="mode-switch" onClick={e => { e.stopPropagation(); cycleMode() }}>
-        <span className="mode-label">{mode}</span>
-        <span className="mode-cycle">↻</span>
-      </div>
     </div>
   )
 }

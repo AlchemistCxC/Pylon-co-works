@@ -40,3 +40,8 @@
 .model-item { padding:6px 14px; font-size:13px; font-family:var(--mono); color:var(--text-dim); cursor:pointer; }
 .model-item:hover { background:var(--bg-hover); color:var(--text); }
 .model-item.active { color:var(--accent); font-weight:600; }
+
+/* split widgets: context / model / mode */
+.cc-model-widget { display:flex; align-items:center; }
+.cc-mode-widget { display:flex; align-items:center; gap:5px; background:var(--bg-panel); border-radius:6px; padding:4px 12px; border:1px solid var(--border); cursor:pointer; transition:all 0.15s; }
+.cc-mode-widget:hover { background:var(--bg-hover); }

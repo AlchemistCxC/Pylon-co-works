@@ -13,11 +13,34 @@
   z-index:0;
 }
 .cc-body {
-  position:relative; z-index:1;
-  display:flex; flex-direction:column;
-  padding:0 24px;
+  position:relative; z-index:1; height:100%;
+  overflow:hidden;
 }
+.cc-widget { position:absolute; overflow:hidden; }
 
 /* CLI mode: transparent bg, full-width lines */
 .control-center.cli-mode .cc-bg { background:transparent; }
 .control-center.cli-mode .cc-body { padding:0 12px; }
+
+/* edit mode */
+.control-center.cc-editing { outline:2px dashed var(--accent); outline-offset:-2px; z-index:20; }
+.control-center.cc-editing .cc-body { overflow:visible; }
+.control-center.cc-editing .cc-bg { opacity:0.5; }
+.cc-edit-hdr { position:absolute; top:-18px; left:0; right:0; height:20px; z-index:25; cursor:ns-resize; display:flex; align-items:center; justify-content:center; }
+.cc-edit-hdr-bar { width:40px; height:4px; border-radius:2px; background:var(--accent); opacity:0.6; }
+.cc-edit-hdr-label { font-size:10px; color:var(--accent); margin-left:6px; }
+.cc-widget.cc-edit { outline:1px dashed var(--border); cursor:move; }
+.cc-widget.cc-edit:hover { outline-color:var(--accent); outline-width:2px; }
+.cc-edit-rsz { position:absolute; right:0; bottom:0; width:12px; height:12px; cursor:se-resize; z-index:5; }
+.cc-edit-rsz::after { content:''; position:absolute; right:1px; bottom:1px; width:7px; height:7px; border-right:2px solid var(--accent); border-bottom:2px solid var(--accent); opacity:0.6; }
+.cc-edit-rsz:hover::after { opacity:1; }
+.cc-edit-vis { position:absolute; top:2px; right:2px; width:16px; height:16px; font-size:11px; color:var(--text-dim); cursor:pointer; display:flex; align-items:center; justify-content:center; border-radius:3px; z-index:5; background:var(--bg-panel); border:1px solid var(--border); }
+.cc-edit-vis:hover { color:var(--text); border-color:var(--accent); }
+.cc-widget.cc-hidden { opacity:0.25; }
+.cc-widget.cc-hidden:hover { opacity:0.6; }
+
+/* blur for non-CC in edit mode */
+.cc-editing-app .sidebar { filter:blur(3px); opacity:0.35; pointer-events:none; }
+.cc-editing-app .main .chat-view { filter:blur(4px); opacity:0.4; pointer-events:none; }
+.cc-editing-app .main .chat-empty { filter:blur(4px); opacity:0.4; }
+.cc-edit-overlay { position:fixed; inset:0; z-index:15; pointer-events:none; background:transparent; }
