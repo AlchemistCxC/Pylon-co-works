@@ -42,13 +42,18 @@
 .cc-widget.cc-hidden:hover { opacity:0.6; }
 
 .cc-widget.cc-selected { outline:2px solid var(--accent) !important; }
-.cc-prop-panel { position:fixed; left:0; top:32px; bottom:0; width:250px; background:var(--bg-panel); border-right:1px solid var(--border); padding:16px; font-size:12px; z-index:80; box-shadow:4px 0 16px rgba(0,0,0,0.15); overflow-y:auto; }
-.cc-prop-title { font-weight:700; font-size:15px; margin-bottom:12px; padding-bottom:8px; border-bottom:1px solid var(--border); color:var(--text); }
-.cc-prop-section { font-size:11px; font-weight:600; color:var(--text-dim); text-transform:uppercase; letter-spacing:0.5px; margin:12px 0 6px; }
-.cc-prop-row { display:flex; align-items:center; gap:6px; margin:5px 0; }
-.cc-prop-row span { color:var(--text-dim); font-size:10px; width:12px; }
-.cc-prop-row input { width:50px; background:var(--bg-input); border:1px solid var(--border); border-radius:3px; padding:2px 4px; font-size:11px; color:var(--text); text-align:right; font-family:var(--mono); }
-.cc-prop-row input:focus { border-color:var(--accent); outline:none; }
+.cc-prop-panel { position:fixed; left:0; top:32px; bottom:0; width:250px; background:var(--bg-panel); border-right:1px solid var(--border); z-index:80; box-shadow:4px 0 16px rgba(0,0,0,0.15); display:flex; flex-direction:column; }
+.cc-prop-header { display:flex; align-items:center; justify-content:space-between; padding:14px 16px; border-bottom:1px solid var(--border); }
+.cc-prop-header span { font-size:15px; font-weight:700; color:var(--text); }
+.cc-prop-header button { background:none; border:none; color:var(--text-dim); font-size:16px; cursor:pointer; padding:2px 6px; }
+.cc-prop-header button:hover { color:var(--text); }
+.cc-prop-body { flex:1; overflow-y:auto; padding:16px; }
+.cc-prop-sec { font-size:11px; font-weight:600; color:var(--text-dim); text-transform:uppercase; letter-spacing:0.5px; margin:16px 0 8px; padding-top:12px; border-top:1px solid var(--border); }
+.cc-prop-sec:first-child { border-top:none; padding-top:0; margin-top:0; }
+.cc-prop-field { display:flex; align-items:center; gap:8px; padding:5px 0; }
+.cc-prop-field label { font-size:13px; color:var(--text); width:60px; flex-shrink:0; }
+.cc-prop-field .set-num { width:64px; }
+.cc-prop-field .set-preset-row { flex:1; }
 
 .cc-edit-toolbar { position:absolute; bottom:8px; right:12px; z-index:10; display:flex; gap:6px; }
 .cc-edit-toolbar .ps-btn { background:var(--bg-panel); border:1px solid var(--border); color:var(--text); padding:5px 14px; border-radius:6px; cursor:pointer; font-size:13px; }

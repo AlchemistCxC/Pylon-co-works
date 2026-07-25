@@ -2,8 +2,18 @@
 //!
 //! Dual-axis growth: token volume → body size, tool successes → tentacle count.
 //! Cute naming: 小豆豆 → 豆豆酱 → 豆豆师傅 → 老豆豆.
+//! Random speech bubbles on event triggers.
 
 use serde::Serialize;
+use std::sync::atomic::{AtomicU64, Ordering};
+
+static SEED: AtomicU64 = AtomicU64::new(0);
+
+/// Simple deterministic-ish random picker. Not crypto-secure.
+fn pick(items: &[&str]) -> &'static str {
+    let n = SEED.fetch_add(1, Ordering::Relaxed);
+    items[n as usize % items.len()]
+}
 
 #[derive(Debug, Clone, Serialize)]
 pub struct PetState {
@@ -14,6 +24,8 @@ pub struct PetState {
     pub total_tokens: u64,               // cumulative token usage (from usageUpdate)
     pub tools_succeeded: u64,            // completed tool calls (from toolCallUpdate)
     pub name: String,                    // user-set base name
+    #[serde(skip)]
+    pub msg: Option<&'static str>,       // current speech bubble (consumed on read)
 }
 
 impl Default for PetState {
