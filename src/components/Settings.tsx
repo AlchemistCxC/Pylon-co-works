@@ -27,19 +27,23 @@ function Swatch({ value, onChange }: { value:string; onChange:(v:string)=>void }
 }
 
 function ColorPopover({ value, onChange, chips }: { value:string; onChange:(v:string)=>void; chips?:boolean }) {
+  const [open, setOpen] = useState(false)
   const pickerRef = useRef<HTMLInputElement>(null)
+  if (chips === false) return <Swatch value={value} onChange={onChange} />
   return (
-    <div className="set-color-inline">
-      <div className="set-swatch" style={{background:value}} onClick={() => pickerRef.current?.click()}/>
-      {chips !== false && (
-        <div className="set-color-chips">
+    <div className="set-color-wrap">
+      <div className="set-swatch" style={{background:value}} onClick={() => setOpen(!open)}/>
+      {open && <>
+        <div className="set-color-popover">
           {COLOR_CHIPS.map(c => (
             <div key={c} className={`set-color-chip ${value === c ? 'active' : ''}`}
-              style={{background:c}} onClick={() => onChange(c)} />
+              style={{background:c}} onClick={() => { onChange(c); setOpen(false) }} />
           ))}
+          <button className="set-color-custom" onClick={() => pickerRef.current?.click()}>自定义</button>
         </div>
-      )}
-      <input ref={pickerRef} type="color" value={value} onChange={e => onChange(e.target.value)} className="set-swatch-input"/>
+        <div className="set-color-backdrop" onClick={() => setOpen(false)}/>
+      </>}
+      <input ref={pickerRef} type="color" value={value} onChange={e => { onChange(e.target.value); setOpen(false) }} className="set-swatch-input"/>
     </div>
   )
 }
