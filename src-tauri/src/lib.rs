@@ -166,11 +166,15 @@ async fn list_agents(state: tauri::State<'_, AppState>) -> Result<Vec<serde_json
 #[tauri::command]
 async fn switch_agent(state: tauri::State<'_, AppState>, name: String) -> Result<(), String> {
     let agent = state.agents.get(&name).ok_or_else(|| format!("unknown agent: {}", name))?.clone();
-    // R4: reconnect AcpClient
+    // Kill old agent process before connecting new one (prevents orphans on Windows)
+    if let Err(e) = state.acp.lock().await.kill() {
+        log::warn!("kill old agent: {}", e);
+    }
     let new_acp = AcpClient::connect(&agent).await?;
-    let mut acp = state.acp.lock().await;
-    *acp = new_acp;
-    drop(acp);
+    {
+        let mut acp = state.acp.lock().await;
+        *acp = new_acp;
+    }
     *state.active_agent.lock().map_err(|e| e.to_string())? = name;
     state.sessions.lock().map_err(|e| e.to_string())?.clear();
     Ok(())
@@ -233,10 +237,13 @@ async fn export_session(
     let mut broadcast = state.acp.lock().await.rx.resubscribe();
     let messages: Arc<Mutex<Vec<serde_json::Value>>> = Arc::new(Mutex::new(Vec::new()));
     let msgs = messages.clone();
+    let pid = peri_id.clone();
     let handle = tokio::spawn(async move {
         while let Ok(raw) = broadcast.recv().await {
             if raw.method.as_deref() == Some("session/update") {
                 if let Some(params) = raw.params {
+                    // Filter by sessionId to avoid mixing messages from other sessions
+                    if params.get("sessionId").and_then(|v| v.as_str()) != Some(&*pid) { continue; }
                     msgs.lock().unwrap().push(params);
                 }
             }
