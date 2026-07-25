@@ -461,7 +461,14 @@ export default function Settings({ onClose }: { onClose?: () => void }) {
 
             {/* ═══ 中控区 ═══ */}
             <Tabs.Content value="cc">
-              <PresetRow area="cc" />
+              <Group title="局部预设">
+                <div className="set-preset-row">
+                  {GLOBAL_PRESETS.map(p => (
+                    <button key={p.name} className="set-preset-chip"
+                      onClick={() => u(pickPresetFields(p.theme, CC_FIELDS) as any)}>{p.label}</button>
+                  ))}
+                </div>
+              </Group>
 
               <Group title="控件排序">
                 <DndContext sensors={sensors} collisionDetection={closestCenter} onDragEnd={handleDragEnd}>
@@ -494,10 +501,12 @@ export default function Settings({ onClose }: { onClose?: () => void }) {
               <Group title="外观">
                 <Row label="背景色"><ColorPopover value={t.inputBg} onChange={v=>onSettingChange({inputBg:v})}/></Row>
                 <BgImageRow label="背景图" value={t.inputBgImage||''} onChange={v=>onSettingChange({inputBgImage:v})}/>
-                <Row label="文字颜色"><ColorPopover value={t.inputTextColor} onChange={v=>onSettingChange({inputTextColor:v})}/></Row>
-                <Row label="占位符颜色"><ColorPopover value={t.inputPlaceholder} onChange={v=>onSettingChange({inputPlaceholder:v})}/></Row>
-                <Row label="发送按钮色"><ColorPopover value={t.inputSendBg} onChange={v=>onSettingChange({inputSendBg:v})}/></Row>
-                <Row label="聚焦边框"><ColorPopover value={t.inputFocusBorder} onChange={v=>onSettingChange({inputFocusBorder:v})}/></Row>
+                <div className="set-compact-row">
+                  <span className="set-compact-label">文字</span><ColorPopover value={t.inputTextColor} onChange={v=>onSettingChange({inputTextColor:v})} chips={false}/>
+                  <span className="set-compact-label">占位符</span><ColorPopover value={t.inputPlaceholder} onChange={v=>onSettingChange({inputPlaceholder:v})} chips={false}/>
+                  <span className="set-compact-label">发送</span><ColorPopover value={t.inputSendBg} onChange={v=>onSettingChange({inputSendBg:v})} chips={false}/>
+                  <span className="set-compact-label">聚焦</span><ColorPopover value={t.inputFocusBorder} onChange={v=>onSettingChange({inputFocusBorder:v})} chips={false}/>
+                </div>
               </Group>
               <Group title="尺寸">
                 <Row label="字号"><Num value={t.inputFontSize} onChange={v=>onSettingChange({inputFontSize:v})} min={12} max={22}/></Row>
@@ -518,25 +527,29 @@ export default function Settings({ onClose }: { onClose?: () => void }) {
                 <Row label="心电图字号"><Num value={t.ekgFontSize} onChange={v=>onSettingChange({ekgFontSize:v})} min={12} max={22}/></Row>
               </Group>
               <Group title="心电图颜色">
-                <Row label="绿色"><ColorPopover value={t.ekgGreen} onChange={v=>onSettingChange({ekgGreen:v})}/></Row>
-                <Row label="黄色"><ColorPopover value={t.ekgYellow} onChange={v=>onSettingChange({ekgYellow:v})}/></Row>
-                <Row label="红色"><ColorPopover value={t.ekgRed} onChange={v=>onSettingChange({ekgRed:v})}/></Row>
+                <div className="set-compact-row">
+                  <span className="set-compact-label">绿色</span><ColorPopover value={t.ekgGreen} onChange={v=>onSettingChange({ekgGreen:v})} chips={false}/>
+                  <span className="set-compact-label">黄色</span><ColorPopover value={t.ekgYellow} onChange={v=>onSettingChange({ekgYellow:v})} chips={false}/>
+                  <span className="set-compact-label">红色</span><ColorPopover value={t.ekgRed} onChange={v=>onSettingChange({ekgRed:v})} chips={false}/>
+                </div>
               </Group>
-              <Group title="胶囊" defaultOpen={false}>
-                <Row label="背景"><ColorPopover value={t.pillBg} onChange={v=>onSettingChange({pillBg:v})}/></Row>
-                <Row label="文字"><ColorPopover value={t.pillText} onChange={v=>onSettingChange({pillText:v})}/></Row>
-              </Group>
-              <Group title="其他" defaultOpen={false}>
-                <Row label="Prism ON 色"><ColorPopover value={t.prismOnColor} onChange={v=>onSettingChange({prismOnColor:v})}/></Row>
+              <Group title="胶囊 & 其他">
+                <div className="set-compact-row">
+                  <span className="set-compact-label">胶囊背景</span><ColorPopover value={t.pillBg} onChange={v=>onSettingChange({pillBg:v})} chips={false}/>
+                  <span className="set-compact-label">胶囊文字</span><ColorPopover value={t.pillText} onChange={v=>onSettingChange({pillText:v})} chips={false}/>
+                  <span className="set-compact-label">Prism ON</span><ColorPopover value={t.prismOnColor} onChange={v=>onSettingChange({prismOnColor:v})} chips={false}/>
+                </div>
               </Group>
               <Group title="心电图样式" defaultOpen={false}>
                 <Row label="基线宽度"><Num value={t.ekgLineWidth} onChange={v=>onSettingChange({ekgLineWidth:v})} min={2} max={20}/></Row>
                 <Row label="最大振幅"><Num value={t.ekgAmplitudeMax} onChange={v=>onSettingChange({ekgAmplitudeMax:v})} min={5} max={30}/></Row>
                 <Row label="基础波速"><Num value={t.ekgSpeedBase} onChange={v=>onSettingChange({ekgSpeedBase:v})} min={0} max={3}/></Row>
                 <Row label="最大波速"><Num value={t.ekgSpeedMax} onChange={v=>onSettingChange({ekgSpeedMax:v})} min={0} max={5}/></Row>
-                <Row label="定端点颜色"><ColorPopover value={t.ekgLeftColor} onChange={v=>onSettingChange({ekgLeftColor:v})}/></Row>
-                <Row label="动端点颜色"><ColorPopover value={t.ekgMovingColor} onChange={v=>onSettingChange({ekgMovingColor:v})}/></Row>
-                <Row label="消耗区颜色"><ColorPopover value={t.ekgConsumedColor} onChange={v=>onSettingChange({ekgConsumedColor:v})}/></Row>
+                <div className="set-compact-row">
+                  <span className="set-compact-label">定端</span><ColorPopover value={t.ekgLeftColor} onChange={v=>onSettingChange({ekgLeftColor:v})} chips={false}/>
+                  <span className="set-compact-label">动端</span><ColorPopover value={t.ekgMovingColor} onChange={v=>onSettingChange({ekgMovingColor:v})} chips={false}/>
+                  <span className="set-compact-label">消耗</span><ColorPopover value={t.ekgConsumedColor} onChange={v=>onSettingChange({ekgConsumedColor:v})} chips={false}/>
+                </div>
               </Group>
               <Group title="上下文显示" defaultOpen={false}>
                 <Row label="仪表样式"><Sel value={t.ccStyle} onChange={v=>onSettingChange({ccStyle:v})} options={['wave','bar','numeric']}/></Row>
