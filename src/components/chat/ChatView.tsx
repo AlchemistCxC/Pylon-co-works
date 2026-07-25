@@ -227,7 +227,7 @@ export default function ChatView({ sessionId }: Props) {
         <span className="chat-title">{(() => {
           const s = useStore.getState().sessions.find(s => s.source === sessionId)
           if (!s) return sessionId
-          return s.name.startsWith('session-') ? `新会话 · ${formatTime(s.createdAt)}` : s.name
+          return s.autoName || (s.name.startsWith('session-') ? `新会话 · ${formatTime(s.createdAt)}` : s.name)
         })()}</span>
       </div>
       <div className="term">

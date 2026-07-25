@@ -3,25 +3,29 @@ import { useStore } from '../../store'
 import { invoke } from '@tauri-apps/api/core'
 import './StatusBar.css'
 
-function wave(w: number, h: number, intensity: number, offset: number, ampMax: number, speedMax: number, noiseScale: number): string {
+function wave(w: number, h: number, intensity: number, offset: number, ampMax: number, noiseScale: number): string {
   const mid = h / 2
   const amp = 3 + intensity * ampMax
-  const pts = [`0,${mid}`]
+  const totalW = w * 2
+  const pts = [] as string[]
   const cycleW = 70 + (1 - intensity) * 40
-  const cycles = Math.max(2, Math.ceil(w / cycleW * 2)) * 2
+  const cycles = Math.max(4, Math.ceil(totalW / cycleW * 2)) * 2
   const phases = [
     { start:0.00, end:0.08, type:'p' }, { start:0.08, end:0.20, type:'flat' },
     { start:0.20, end:0.23, type:'q' }, { start:0.23, end:0.26, type:'r' },
     { start:0.26, end:0.30, type:'s' }, { start:0.30, end:0.45, type:'flat' },
     { start:0.45, end:0.65, type:'t' }, { start:0.65, end:1.00, type:'flat' },
   ]
+  // Start from the beginning to ensure smooth initial render
+  pts.push(`0,${mid}`)
   for (let ci = -2; ci < cycles; ci++) {
     for (const ph of phases) {
       const steps = Math.max(2, Math.floor((ph.end - ph.start) * cycleW / 3))
       for (let s = 0; s <= steps; s++) {
         const t = s / Math.max(1, steps)
         const phaseT = ph.start + t * (ph.end - ph.start)
-        const x = (ci + phaseT) / (cycles * 0.7) * w * 1.5 + offset
+        // x: from left of viewport, continuously shifting right with offset
+        const x = (ci + phaseT) / (cycles * 0.7) * totalW - w + offset
         let y = mid
         switch (ph.type) {
           case 'p': y = mid - Math.sin(t * Math.PI) * amp * 0.35; break
@@ -31,7 +35,6 @@ function wave(w: number, h: number, intensity: number, offset: number, ampMax: n
           case 's': y = mid + amp * 0.5 + Math.sin(t * Math.PI) * amp * 1.2; break
           case 't': y = mid - Math.sin(t * Math.PI) * amp * 0.6; break
         }
-        y += (Math.random() - 0.5) * 2 * noiseScale
         pts.push(`${x.toFixed(1)},${y.toFixed(2)}`)
       }
     }
@@ -82,9 +85,14 @@ export default function StatusBar() {
   // V3: left=remaining(color), right=consumed(gray)
   const cut = Math.max(4, W * Math.max(0, Math.min(1, 1 - used)))
   const offsetSpeed = (useStore(s => s.ekgSpeedBase) || 0.5) + intensity * speedMax
-  const offset = (tick * offsetSpeed) % (W * 0.5)
-  const noiseScale = 0.1 + intensity * 0.5
-  const wfAnimated = useMemo(() => wave(W, H, intensity, offset, ampMax, speedMax, noiseScale), [intensity, tick, ampMax, speedMax])
+  const offset = (tick * offsetSpeed) % (W * 4)
+  // Segmented noise: green micro-breath, yellow jitter, red tremble
+  const noiseScale = used < 0.50
+    ? 0.1 + Math.sin(tick * 0.1) * 0.05
+    : used < 0.80
+      ? 0.3 + intensity * 0.8
+      : 0.6 + intensity * 1.5
+  const wfAnimated = useMemo(() => wave(W, H, intensity, offset, ampMax, noiseScale), [intensity, tick, ampMax, noiseScale])
 
   const cycleMode = () => {
     const idx = MODES.indexOf(mode as Mode)
