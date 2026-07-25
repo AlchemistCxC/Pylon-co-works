@@ -24,6 +24,35 @@ struct SessionInfo {
     has_first_prompt: bool,
 }
 
+// ── AppState helpers ──
+
+impl AppState {
+    fn get_active_agent(&self) -> Result<AgentDef, PylonError> {
+        let name = self.active_agent.lock().map_err(|e| PylonError::Acp(e.to_string()))?;
+        self.agents.get(&*name).cloned().ok_or(PylonError::NoActiveAgent)
+    }
+
+    fn agent_cwd(&self) -> String {
+        self.get_active_agent().ok()
+            .and_then(|a| a.cwd)
+            .unwrap_or_else(|| ".".to_string())
+    }
+
+    fn get_peri_id(&self, source: &str) -> Result<String, PylonError> {
+        let sessions = self.sessions.lock().map_err(|e| PylonError::Acp(e.to_string()))?;
+        sessions.get(source)
+            .map(|s| s.peri_id.clone())
+            .ok_or_else(|| PylonError::SessionNotFound(source.to_string()))
+    }
+
+    fn remove_session(&self, source: &str) -> Result<String, PylonError> {
+        let mut sessions = self.sessions.lock().map_err(|e| PylonError::Acp(e.to_string()))?;
+        sessions.remove(source)
+            .map(|s| s.peri_id.clone())
+            .ok_or_else(|| PylonError::SessionNotFound(source.to_string()))
+    }
+}
+
 #[tauri::command]
 async fn new_session(
     state: tauri::State<'_, AppState>,
@@ -31,8 +60,7 @@ async fn new_session(
     persona: String,
     cwd: Option<String>,
 ) -> Result<String, String> {
-    let agent = { let aa = state.active_agent.lock().map_err(|e| e.to_string())?; state.agents.get(&*aa).ok_or("no active agent")?.clone() };
-    let session_cwd = cwd.unwrap_or_else(|| agent.cwd.clone().unwrap_or_else(|| ".".to_string()));
+    let session_cwd = cwd.unwrap_or_else(|| state.agent_cwd());
     let peri_id = state.acp.lock().await.new_session(&session_cwd).await?;
     state.sessions.lock().map_err(|e| e.to_string())?
         .insert(source.clone(), SessionInfo { peri_id: peri_id.clone(), persona, cwd: session_cwd, has_first_prompt: false });
@@ -64,8 +92,7 @@ async fn send_message(
                 break 'session (s.peri_id.clone(), first);
             }
         }
-        let agent = { let aa = state.active_agent.lock().map_err(|e| e.to_string())?; state.agents.get(&*aa).ok_or("no active agent")?.clone() };
-        let session_cwd = agent.cwd.clone().unwrap_or_else(|| ".".to_string());
+        let session_cwd = state.agent_cwd();
         let peri_id = state.acp.lock().await.new_session(&session_cwd).await?;
         state.sessions.lock().map_err(|e| e.to_string())?
             .insert(source.clone(), SessionInfo { peri_id: peri_id.clone(), persona: persona.clone(), cwd: session_cwd, has_first_prompt: true });
@@ -157,20 +184,14 @@ async fn send_message(
 
 #[tauri::command]
 async fn set_mode(state: tauri::State<'_, AppState>, source: String, mode: String) -> Result<(), String> {
-    let peri_id = {
-        let sessions = state.sessions.lock().map_err(|e| e.to_string())?;
-        sessions.get(&source).map(|s| s.peri_id.clone()).ok_or("no session")?
-    };
+    let peri_id = state.get_peri_id(&source).map_err(|e| e.to_string())?;
     state.acp.lock().await.set_mode(&peri_id, &mode).await?;
     Ok(())
 }
 
 #[tauri::command]
 async fn close_session(state: tauri::State<'_, AppState>, source: String) -> Result<(), String> {
-    let peri_id = {
-        let mut sessions = state.sessions.lock().map_err(|e| e.to_string())?;
-        sessions.remove(&source).map(|s| s.peri_id.clone()).ok_or("no session")?
-    };
+    let peri_id = state.remove_session(&source).map_err(|e| e.to_string())?;
     // Best-effort: notify agent, but don't fail if agent already gone
     if let Err(e) = state.acp.lock().await.close_session(&peri_id).await {
         log::warn!("close_session ACP: {}", e);
@@ -180,10 +201,7 @@ async fn close_session(state: tauri::State<'_, AppState>, source: String) -> Res
 
 #[tauri::command]
 async fn cancel_prompt(state: tauri::State<'_, AppState>, source: String) -> Result<(), String> {
-    let peri_id = {
-        let sessions = state.sessions.lock().map_err(|e| e.to_string())?;
-        sessions.get(&source).map(|s| s.peri_id.clone()).ok_or("no session")?
-    };
+    let peri_id = state.get_peri_id(&source).map_err(|e| e.to_string())?;
     // Fire-and-forget notification — Peri will respond with stopReason=cancelled
     state.acp.lock().await.cancel_session(&peri_id).await
 }
@@ -224,8 +242,7 @@ async fn switch_agent(state: tauri::State<'_, AppState>, name: String) -> Result
 
 #[tauri::command]
 async fn reconnect_agent(state: tauri::State<'_, AppState>, window: tauri::Window) -> Result<(), String> {
-    let agent_name = { state.active_agent.lock().map_err(|e| e.to_string())?.clone() };
-    let agent = state.agents.get(&agent_name).ok_or("no active agent")?.clone();
+    let agent = state.get_active_agent().map_err(|e| e.to_string())?;
     // Kill old (may already be dead)
     let _ = state.acp.lock().await.kill();
     let new_acp = AcpClient::connect(&agent).await.map_err(|e| format!("reconnect failed: {}", e))?;
@@ -240,7 +257,7 @@ async fn reconnect_agent(state: tauri::State<'_, AppState>, window: tauri::Windo
 #[tauri::command]
 async fn agent_status(state: tauri::State<'_, AppState>) -> Result<serde_json::Value, String> {
     let crashed = state.acp.lock().await.is_crashed();
-    let agent_name = { state.active_agent.lock().map_err(|e| e.to_string())?.clone() };
+    let agent_name = state.get_active_agent().map(|a| a.name).unwrap_or_default();
     Ok(serde_json::json!({"agent": agent_name, "crashed": crashed}))
 }
 
@@ -253,14 +270,14 @@ async fn load_persisted_session(
     window: tauri::Window,
     peri_id: String,
 ) -> Result<(), String> {
-    let agent = { let aa = state.active_agent.lock().map_err(|e| e.to_string())?; state.agents.get(&*aa).ok_or("no active agent")?.clone() };
+    let cwd = state.agent_cwd();
     let mut broadcast = state.acp.lock().await.rx.resubscribe();
     let src = source.clone();
     let pid = peri_id.clone();
     let win = window.clone();
     let handle = tokio::spawn(async move {
         while let Ok(raw) = broadcast.recv().await {
-            if raw.method.as_deref() == Some("session/update") {
+            if raw.method.as_deref() == Some(acp::NOTIF_SESSION_UPDATE) {
                 let payload = raw.params.unwrap_or(serde_json::Value::Null);
                 // R3: filter by sessionId
                 if payload.get("sessionId").and_then(|v| v.as_str()) != Some(&pid) { continue; }
@@ -272,19 +289,17 @@ async fn load_persisted_session(
             }
         }
     });
-    let cwd = agent.cwd.as_deref().unwrap_or(".");
-    state.acp.lock().await.load_session(&peri_id, cwd).await?;
+    state.acp.lock().await.load_session(&peri_id, &cwd).await?;
     handle.abort();  // R2: prevent task leak
     state.sessions.lock().map_err(|e| e.to_string())?
-        .insert(source, SessionInfo { peri_id: peri_id.clone(), persona: String::new(), cwd: cwd.to_string(), has_first_prompt: true });
+        .insert(source, SessionInfo { peri_id: peri_id.clone(), persona: String::new(), cwd, has_first_prompt: true });
     Ok(())
 }
 
 #[tauri::command]
 async fn list_persisted_sessions(state: tauri::State<'_, AppState>) -> Result<serde_json::Value, String> {
-    let agent = { let aa = state.active_agent.lock().map_err(|e| e.to_string())?; state.agents.get(&*aa).ok_or("no active agent")?.clone() };
-    let cwd = agent.cwd.as_deref();
-    state.acp.lock().await.list_persisted(cwd).await
+    let cwd = state.get_active_agent().ok().and_then(|a| a.cwd);
+    state.acp.lock().await.list_persisted(cwd.as_deref()).await
 }
 
 // ── Export command ──
@@ -296,15 +311,14 @@ async fn export_session(
     format: String,
     output_path: String,
 ) -> Result<(), String> {
-    let agent = { let aa = state.active_agent.lock().map_err(|e| e.to_string())?; state.agents.get(&*aa).ok_or("no active agent")?.clone() };
-    let cwd = agent.cwd.as_deref().unwrap_or(".");
+    let cwd = state.agent_cwd();
     let mut broadcast = state.acp.lock().await.rx.resubscribe();
     let messages: Arc<Mutex<Vec<serde_json::Value>>> = Arc::new(Mutex::new(Vec::new()));
     let msgs = messages.clone();
     let pid = peri_id.clone();
     let handle = tokio::spawn(async move {
         while let Ok(raw) = broadcast.recv().await {
-            if raw.method.as_deref() == Some("session/update") {
+            if raw.method.as_deref() == Some(acp::NOTIF_SESSION_UPDATE) {
                 if let Some(params) = raw.params {
                     // Filter by sessionId to avoid mixing messages from other sessions
                     if params.get("sessionId").and_then(|v| v.as_str()) != Some(&*pid) { continue; }
@@ -313,7 +327,7 @@ async fn export_session(
             }
         }
     });
-    state.acp.lock().await.load_session(&peri_id, cwd).await?;
+    state.acp.lock().await.load_session(&peri_id, &cwd).await?;
     handle.abort();
     let msgs = messages.lock().map_err(|e| e.to_string())?;
     let content = match format.as_str() {

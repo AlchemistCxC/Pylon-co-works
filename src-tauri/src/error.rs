@@ -45,3 +45,29 @@ impl From<PylonError> for String {
         e.to_string()
     }
 }
+
+// ── Auto-conversion from std/third-party errors ──
+
+impl From<std::io::Error> for PylonError {
+    fn from(e: std::io::Error) -> Self {
+        PylonError::Io(e.to_string())
+    }
+}
+
+impl From<serde_json::Error> for PylonError {
+    fn from(e: serde_json::Error) -> Self {
+        PylonError::Serialize(e.to_string())
+    }
+}
+
+impl From<tokio::sync::oneshot::error::RecvError> for PylonError {
+    fn from(_: tokio::sync::oneshot::error::RecvError) -> Self {
+        PylonError::Protocol("ACP connection closed".into())
+    }
+}
+
+impl From<tokio::sync::broadcast::error::RecvError> for PylonError {
+    fn from(e: tokio::sync::broadcast::error::RecvError) -> Self {
+        PylonError::Protocol(format!("broadcast: {e}"))
+    }
+}
