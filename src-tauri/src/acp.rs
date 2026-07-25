@@ -33,13 +33,14 @@ pub const WRITE_CHAN_CAP: usize = 256;
 pub const PROMPT_TIMEOUT_SECS: u64 = 300;
 
 type Pending = HashMap<u64, oneshot::Sender<RawMessage>>;
+const PENDING_SHARDS: usize = 16;
 
 pub struct AcpClient {
     child: Child,
     /// mpsc channel for writing JSON-RPC lines to stdin. Single consumer = no lock contention.
-    write_tx: mpsc::Sender<String>,
+    pub(crate) write_tx: mpsc::Sender<String>,
     next_id: AtomicU64,
-    pending: Arc<Mutex<Pending>>,
+    pending: Arc<[Mutex<Pending>; PENDING_SHARDS]>,
     /// Broadcast channel for all received messages (responses + notifications).
     pub rx: broadcast::Receiver<RawMessage>,
     tx: broadcast::Sender<RawMessage>,
@@ -57,6 +58,9 @@ pub struct RawMessage {
 }
 
 impl AcpClient {
+    fn pending_shard(&self, id: u64) -> &Mutex<Pending> {
+        &self.pending[id as usize % PENDING_SHARDS]
+    }
     /// Send a JSON-RPC request and wait for the matching response.
     async fn call_async(&self, method: &str, params: serde_json::Value) -> Result<serde_json::Value, String> {
         let id = self.next_id.fetch_add(1, Ordering::Relaxed);
@@ -64,7 +68,7 @@ impl AcpClient {
         // Register oneshot BEFORE writing to stdin
         let (tx, rx) = oneshot::channel();
         {
-            let mut pending = self.pending.lock().map_err(|e| e.to_string())?;
+            let mut pending = self.pending_shard(id).lock().map_err(|e| e.to_string())?;
             pending.insert(id, tx);
         }
 
@@ -117,14 +121,13 @@ impl AcpClient {
         })).await
     }
 
-    /// Atomic: allocate ID, register oneshot, then send prompt. No timing hole.
-    pub async fn send_prompt_atomic(&self, session_id: &str, text: &str) -> Result<(u64, oneshot::Receiver<RawMessage>), String> {
+    /// Prepare a prompt request without writing to stdin. Returns (id, serialized_line, response_rx).
+    /// Caller must send the line via write_tx after releasing the outer lock.
+    pub fn prepare_prompt(&self, session_id: &str, text: &str) -> Result<(u64, String, oneshot::Receiver<RawMessage>), String> {
         let id = self.next_id.fetch_add(1, Ordering::Relaxed);
-
-        // Register oneshot BEFORE writing to stdin
         let (tx, rx) = oneshot::channel();
         {
-            let mut pending = self.pending.lock().map_err(|e| e.to_string())?;
+            let mut pending = self.pending_shard(id).lock().map_err(|e| e.to_string())?;
             pending.insert(id, tx);
         }
 
@@ -141,9 +144,7 @@ impl AcpClient {
         let line = serde_json::to_string(&req)
             .map_err(|e| format!("serialize failed: {}", e))?;
 
-        self.write_tx.send(line).await.map_err(|_| "ACP connection closed".to_string())?;
-
-        Ok((id, rx))
+        Ok((id, line, rx))
     }
 
     /// Kill the child process. Called before switching agents to prevent orphans.
@@ -232,7 +233,8 @@ impl AcpClient {
                     }
                 });
 
-                let pending: Arc<Mutex<Pending>> = Arc::new(Mutex::new(HashMap::new()));
+                let pending: Arc<[Mutex<Pending>; PENDING_SHARDS]> =
+                    Arc::new(std::array::from_fn(|_| Mutex::new(HashMap::new())));
                 let (tx, rx) = broadcast::channel(BROADCAST_CAP);
                 let crashed = Arc::new(AtomicBool::new(false));
 
@@ -257,13 +259,13 @@ impl AcpClient {
                         };
                         if raw.method.is_none() && raw.id.is_some() {
                             if let Some(id) = raw.id {
-                                let mut p = pending_clone.lock().unwrap();
+                                let shard = &pending_clone[id as usize % PENDING_SHARDS];
+                                let mut p = shard.lock().unwrap();
                                 if let Some(tx) = p.remove(&id) { let _ = tx.send(raw.clone()); }
                             }
                         }
                         let _ = tx_clone.send(raw);
                     }
-                    // stdout closed → child process exited
                     crashed_reader.store(true, Ordering::Relaxed);
                     log::error!("ACP: child process stdout closed (agent crashed)");
                 });

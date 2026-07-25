@@ -60,6 +60,8 @@ impl AppState {
     }
 }
 
+const MAX_SESSIONS: usize = 100;
+
 #[tauri::command]
 async fn new_session(
     state: tauri::State<'_, AppState>,
@@ -67,6 +69,10 @@ async fn new_session(
     persona: String,
     cwd: Option<String>,
 ) -> Result<serde_json::Value, String> {
+    {
+        let sessions = state.sessions.lock().map_err(|e| e.to_string())?;
+        if sessions.len() >= MAX_SESSIONS { return Err("max sessions reached".to_string()); }
+    }
     let session_cwd = cwd.unwrap_or_else(|| state.agent_cwd());
     let response = state.acp.lock().await.new_session(&session_cwd).await?;
     let peri_id = AcpClient::session_id_from(&response)?;
@@ -103,6 +109,10 @@ async fn send_message(
         if let Some(result) = found {
             result
         } else {
+            {
+                let sessions = state.sessions.lock().map_err(|e| e.to_string())?;
+                if sessions.len() >= MAX_SESSIONS { return Err("max sessions reached".to_string()); }
+            }
             let session_cwd = state.agent_cwd();
             let response = state.acp.lock().await.new_session(&session_cwd).await?;
             let pid = AcpClient::session_id_from(&response)?;
@@ -127,10 +137,13 @@ async fn send_message(
     };
 
     let user_content = content.clone();
-    let (mut broadcast, (_request_id, mut rx)) = {
+    let (mut broadcast, write_tx, (_id, prompt_line, mut rx)) = {
         let acp = state.acp.lock().await;
-        (acp.rx.resubscribe(), acp.send_prompt_atomic(&peri_id, &prompt_content).await?)
+        let tx = acp.write_tx.clone();
+        let prompt = acp.prepare_prompt(&peri_id, &prompt_content)?;
+        (acp.rx.resubscribe(), tx, prompt)
     };
+    write_tx.send(prompt_line).await.map_err(|_| "ACP connection closed".to_string())?;
     let _ = window.emit("peri:user", serde_json::json!({ "source": source, "content": user_content }));
 
     let pid = peri_id.clone();
