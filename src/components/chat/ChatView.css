@@ -5,7 +5,7 @@
 
 .chat-view { flex:1; display:flex; flex-direction:column; min-height:0; overflow-y:auto; overflow-x:hidden; }
 
-.term { flex:1; padding:16px 24px; font-family:var(--chat-font,var(--mono)); font-size:var(--chat-font-size,15px); line-height:var(--chat-line-height,1.8); color:var(--chat-text,var(--text)); background:var(--chat-bg,transparent); background-image:var(--chat-bg-image,none); background-size:cover; background-position:center; opacity:var(--chat-transparency,1); backdrop-filter:blur(var(--chat-blur,0px)); -webkit-font-smoothing:antialiased; text-rendering:optimizeLegibility; font-kerning:none; }
+.term { flex:1; padding:16px 24px; font-family:var(--chat-font,var(--mono)); font-size:var(--chat-font-size,15px); font-weight:350; letter-spacing:-0.2px; line-height:var(--chat-line-height,1.8); color:var(--chat-text,var(--text)); background:var(--chat-bg,transparent); background-image:var(--chat-bg-image,none); background-size:cover; background-position:center; opacity:var(--chat-transparency,1); backdrop-filter:blur(var(--chat-blur,0px)); font-feature-settings:\"calt\" off; -webkit-font-smoothing:auto; text-rendering:optimizeLegibility; font-kerning:none; }
 
 .term-user { padding:2px 0; }
 .term-user-prefix { color:var(--accent); font-weight:700; margin-right:6px; }
