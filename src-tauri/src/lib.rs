@@ -33,8 +33,9 @@ impl AppState {
     }
 
     fn agent_cwd(&self) -> String {
-        self.get_active_agent().ok()
-            .and_then(|a| a.cwd)
+        self.active_agent.lock().ok()
+            .and_then(|name| self.agents.get(&*name))
+            .and_then(|a| a.cwd.clone())
             .unwrap_or_else(|| ".".to_string())
     }
 
@@ -120,8 +121,10 @@ async fn send_message(
     };
 
     let user_content = content.clone();
-    let mut broadcast = state.acp.lock().await.rx.resubscribe();
-    let (_request_id, mut rx) = state.acp.lock().await.send_prompt_atomic(&peri_id, &prompt_content).await?;
+    let (mut broadcast, (_request_id, mut rx)) = {
+        let acp = state.acp.lock().await;
+        (acp.rx.resubscribe(), acp.send_prompt_atomic(&peri_id, &prompt_content).await?)
+    };
     let _ = window.emit("peri:user", serde_json::json!({ "source": source, "content": user_content }));
 
     let pid = peri_id.clone();
