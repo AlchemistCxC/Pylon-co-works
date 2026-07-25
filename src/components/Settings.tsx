@@ -68,7 +68,7 @@ function Group({ title, children }: { title:string; children:React.ReactNode }) 
 
 // ── main ──
 
-export default function Settings() {
+export default function Settings({ onClose }: { onClose?: () => void }) {
   const t = useStore() as ThemeSettings
   const u = useStore(s => s.updateTheme)
   const reset = useStore(s => s.resetTheme)
@@ -76,6 +76,7 @@ export default function Settings() {
 
   return (
     <div className="settings">
+      {onClose && <button className="settings-close" onClick={onClose}>✕</button>}
       <nav className="settings-nav">
         <input className="set-search" placeholder="Search..."/>
         {NAV.map(n => (

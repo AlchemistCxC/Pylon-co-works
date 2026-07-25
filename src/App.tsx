@@ -132,13 +132,14 @@ export default function App() {
       <div className="layout">
         <Sidebar activeSession={activeSession} onSelectSession={setActiveSession} onProfileEdit={() => setShowProfileEdit(true)} onSessionSettings={setSessionSettingsId} collapsed={sidebarCollapsed} />
         <div className="main">
-          {showSettings ? <Settings /> : activeTab === 'prism' ? <PrismSheet /> : <>
+          {activeTab === 'prism' ? <PrismSheet /> : <>
             <div className="main-body">
               <ChatView sessionId={activeSession} />
               <ControlCenter sessionId={activeSession} />
             </div>
           </>}
         </div>
+        {showSettings && <Settings onClose={() => setShowSettings(false)} />}
         {rightOpen && <RightPanel onClose={() => setRightOpen(false)} />}
         {showProfileEdit && <ProfileEditor onClose={() => setShowProfileEdit(false)} />}
         {sessionSettingsId && <SessionSettings sessionId={sessionSettingsId} onClose={() => setSessionSettingsId(null)} onDeleted={() => setActiveSession(null)} />}
