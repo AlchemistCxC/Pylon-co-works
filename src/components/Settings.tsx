@@ -393,13 +393,10 @@ export default function Settings({ onClose }: { onClose?: () => void }) {
                 <div className="set-compact-row">
                   <span className="set-compact-label">文字</span>
                   <Swatch value={t.chatTextColor} onChange={v=>onSettingChange({chatTextColor:v})}/>
-                  <ColorChips value={t.chatTextColor} onChange={v=>onSettingChange({chatTextColor:v})}/>
                   <span className="set-compact-label">内联代码</span>
                   <Swatch value={t.chatCodeColor} onChange={v=>onSettingChange({chatCodeColor:v})}/>
-                  <ColorChips value={t.chatCodeColor} onChange={v=>onSettingChange({chatCodeColor:v})}/>
                   <span className="set-compact-label">代码背景</span>
                   <Swatch value={t.chatCodeBg} onChange={v=>onSettingChange({chatCodeBg:v})}/>
-                  <ColorChips value={t.chatCodeBg} onChange={v=>onSettingChange({chatCodeBg:v})}/>
                 </div>
               </Group>
               <Group title="玻璃效果">
