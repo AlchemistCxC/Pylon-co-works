@@ -19,8 +19,8 @@
   --warn: rgba(180,120,20,0.70);
   --danger: rgba(190,40,40,0.75);
   --radius: 8px;
-  --font: -apple-system, 'Segoe UI', 'PingFang SC', 'Microsoft YaHei', sans-serif;
-  --mono: 'Cascadia Code', 'Consolas', 'JetBrains Mono', monospace;
+  --font: 'Sarasa UI SC', -apple-system, 'Segoe UI', 'PingFang SC', 'Microsoft YaHei', sans-serif;
+  --mono: 'Sarasa Mono SC', 'Cascadia Code', 'Consolas', monospace;
 }
 
 html, body, #root { height:100%; width:100%; overflow:hidden; font-family:var(--font); font-size:var(--global-font-size,18px); color:var(--text); }

@@ -71,10 +71,11 @@ const ChatView = React.memo(function ChatView({ sessionId }: Props) {
   const genStart = useRef(Date.now())
   const tokenCount = useRef(0)
   const [summary, setSummary] = useState('')
-  const sessionRef = useRef(sessionId)
+  const sessionRef = useRef<string | null>(null)
   const prevSessionRef = useRef(sessionId)
   useEffect(() => {
-    sessionRef.current = sessionId
+    const s = useStore.getState().sessions.find(s => s.id === sessionId)
+    sessionRef.current = s?.source || null
     if (sessionId && sessionId !== prevSessionRef.current) { setMessages([]); setGenerating(false); setSummary('') }
     prevSessionRef.current = sessionId
   }, [sessionId])
