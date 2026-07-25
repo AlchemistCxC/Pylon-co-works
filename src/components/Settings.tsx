@@ -3,7 +3,6 @@ import * as Tabs from '@radix-ui/react-tabs'
 import { invoke } from '@tauri-apps/api/core'
 import { useStore } from '../store'
 import type { ThemeSettings } from '../store'
-import PresetRow from './PresetRow'
 import {
   DndContext, closestCenter, PointerSensor, useSensor, useSensors,
   type DragEndEvent,
@@ -560,6 +559,14 @@ export default function Settings({ onClose }: { onClose?: () => void }) {
             {/* ═══ 右栏 ═══ */}
             <Tabs.Content value="right">
               <h3>右侧栏</h3>
+              <Group title="局部预设">
+                <div className="set-preset-row">
+                  {GLOBAL_PRESETS.map(p => (
+                    <button key={p.name} className="set-preset-chip"
+                      onClick={() => u(pickPresetFields(p.theme, RIGHT_FIELDS) as any)}>{p.label}</button>
+                  ))}
+                </div>
+              </Group>
               <Group title="外观">
                 <Row label="背景色"><ColorPopover value={t.rightBg} onChange={v=>onSettingChange({rightBg:v})}/></Row>
                 <BgImageRow label="背景图" value={t.rightBgImage||''} onChange={v=>onSettingChange({rightBgImage:v})}/>
