@@ -4,7 +4,6 @@ import { listen } from '@tauri-apps/api/event'
 import { invoke } from '@tauri-apps/api/core'
 import { useStore } from '../../store'
 import ReactMarkdown from 'react-markdown'
-import { formatTime } from '../../utils'
 import remarkGfm from 'remark-gfm'
 import { createStarryNight, all } from '@wooorm/starry-night'
 import { toHtml } from 'hast-util-to-html'
@@ -212,12 +211,6 @@ const ChatView = React.memo(function ChatView({ sessionId }: Props) {
     }
   }, [])
 
-  const headerTitle = useStore(s => {
-    const session = s.sessions.find(ss => ss.id === sessionId)
-    if (!session) return '新会话'
-    return session.autoName || (session.name.startsWith('session-') ? `新会话 · ${formatTime(session.createdAt)}` : session.name)
-  })
-
   useEffect(() => { bottomRef.current?.scrollIntoView({ behavior: 'smooth' }) }, [messages, generating])
 
   if (!sessionId) return (
@@ -230,9 +223,6 @@ const ChatView = React.memo(function ChatView({ sessionId }: Props) {
 
   return (
     <div className="chat-view">
-      <div className="chat-header">
-        <span className="chat-title">{headerTitle}</span>
-      </div>
       <div className="term">
         <AnimatePresence initial={false}>
           {messages.map((msg) => (

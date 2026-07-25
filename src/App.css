@@ -1,15 +1,35 @@
 .app { display:flex; flex-direction:column; height:100%; position:relative; z-index:1; }
 
-.titlebar { height:32px; display:flex; align-items:center; justify-content:space-between; padding:0 12px; background:rgba(0,0,0,0.04); -webkit-app-region:drag; border-bottom:1px solid var(--border); }
-.titlebar-text { font-size:13px; color:var(--text-dim); letter-spacing:0.5px; }
-.titlebar-toggle { -webkit-app-region:no-drag; background:none; border:none; color:var(--text-dim); cursor:pointer; font-size:16px; padding:0 8px; }
+.titlebar {
+  height:32px; display:flex; align-items:center;
+  padding:0 8px; gap:4px;
+  background:var(--titlebar-bg, rgba(0,0,0,0.02));
+  border-bottom:1px solid var(--border);
+  -webkit-app-region:drag;
+}
+.titlebar-toggle {
+  -webkit-app-region:no-drag; background:none; border:none;
+  color:var(--text-dim); cursor:pointer; font-size:15px; padding:0 6px;
+  flex-shrink:0;
+}
 .titlebar-toggle:hover { color:var(--text); }
-.titlebar-tabs { display:flex; gap:4px; margin-left:12px; -webkit-app-region:no-drag; }
-.titlebar-tabs .tab { padding:2px 12px; border-radius:4px; border:none; background:transparent; color:var(--text-dim); cursor:pointer; font-size:13px; }
+.titlebar-tabs {
+  display:flex; gap:2px; -webkit-app-region:no-drag; flex-shrink:0;
+}
+.titlebar-tabs .tab {
+  padding:3px 14px; border-radius:4px; border:none; background:transparent;
+  color:var(--text-dim); cursor:pointer; font-size:12px; font-family:var(--font);
+  -webkit-app-region:no-drag;
+}
 .titlebar-tabs .tab.active { background:var(--bg-panel); color:var(--text); }
 .titlebar-tabs .tab:hover { background:var(--bg-hover); }
-.titlebar-controls { display:flex; }
-.titlebar-controls button { -webkit-app-region:no-drag; background:none; border:none; color:var(--text-dim); width:28px; height:28px; font-size:14px; cursor:pointer; border-radius:4px; }
+.titlebar-spacer { flex:1; -webkit-app-region:drag; }
+.titlebar-controls { display:flex; gap:2px; -webkit-app-region:no-drag; flex-shrink:0; }
+.titlebar-controls button {
+  -webkit-app-region:no-drag; background:none; border:none;
+  color:var(--text-dim); width:28px; height:28px; font-size:14px;
+  cursor:pointer; border-radius:4px;
+}
 .titlebar-controls button:hover { background:var(--bg-hover); color:var(--text); }
 .titlebar-controls .close:hover { background:rgba(190,40,40,0.15); color:var(--danger); }
 
@@ -23,4 +43,3 @@
   min-height: 0;
   overflow: hidden;
 }
-

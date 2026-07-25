@@ -31,6 +31,8 @@ export default function App() {
   }, [])
 
   const [activeTab, setActiveTab] = useState<'peri' | 'prism'>('peri')
+  const activeAgent = useStore(s => s.activeAgent) || 'peri'
+  const agentLabel = activeAgent.charAt(0).toUpperCase() + activeAgent.slice(1)
   const theme = useStore()
   const appWindow = getCurrentWindow()
 
@@ -115,11 +117,11 @@ export default function App() {
       <div className="titlebar" data-tauri-drag-region>
         <button className="titlebar-toggle" onClick={() => setSidebarCollapsed(!sidebarCollapsed)}
           title={sidebarCollapsed ? '展开左栏' : '收起左栏'}>☰</button>
-        <span className="titlebar-text">Pylon</span>
         <div className="titlebar-tabs">
-          <button className={`tab ${activeTab === 'peri' ? 'active' : ''}`} onClick={() => setActiveTab('peri')}>Peri</button>
+          <button className={`tab ${activeTab === 'peri' ? 'active' : ''}`} onClick={() => setActiveTab('peri')}>{agentLabel}</button>
           <button className={`tab ${activeTab === 'prism' ? 'active' : ''}`} onClick={() => setActiveTab('prism')}>Prism</button>
         </div>
+        <div className="titlebar-spacer" />
         <div className="titlebar-controls">
           <button onClick={() => setRightOpen(!rightOpen)} title="Panel">&#9776;</button>
           <button onClick={() => setShowSettings(!showSettings)} title="Settings">&#9881;</button>
