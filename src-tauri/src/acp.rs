@@ -80,7 +80,9 @@ impl AcpClient {
 
         self.write_tx.send(line).await.map_err(|_| "ACP connection closed".to_string())?;
 
-        let msg = rx.await.map_err(|_| "ACP connection closed".to_string())?;
+        let msg = tokio::time::timeout(std::time::Duration::from_secs(30), rx).await
+            .map_err(|_| "RPC timeout after 30s".to_string())?
+            .map_err(|_| "ACP connection closed".to_string())?;
 
         if let Some(err) = msg.error {
             return Err(format!("RPC error: {}", err));

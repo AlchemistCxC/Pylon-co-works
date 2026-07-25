@@ -79,27 +79,30 @@ async fn send_message(
     session_prompt: Option<String>,
     attachments: Option<Vec<String>>,
 ) -> Result<String, String> {
-    // Guard: if agent crashed, notify frontend immediately
     if state.acp.lock().await.is_crashed() {
         let _ = window.emit("peri:error", serde_json::json!({"source": source, "error": PylonError::AgentCrashed.to_string()}));
         return Err(PylonError::AgentCrashed.into());
     }
 
-    let (peri_id, is_first) = 'session: {
-        {
+    let (peri_id, is_first) = {
+        let found = {
             let mut sessions = state.sessions.lock().map_err(|e| e.to_string())?;
-            if let Some(s) = sessions.get_mut(&source) {
+            sessions.get_mut(&source).map(|s| {
                 let first = !s.has_first_prompt;
                 if first { s.has_first_prompt = true; }
-                break 'session (s.peri_id.clone(), first);
-            }
+                (s.peri_id.clone(), first)
+            })
+        };
+        if let Some(result) = found {
+            result
+        } else {
+            let session_cwd = state.agent_cwd();
+            let response = state.acp.lock().await.new_session(&session_cwd).await?;
+            let pid = AcpClient::session_id_from(&response)?;
+            state.sessions.lock().map_err(|e| e.to_string())?
+                .insert(source.clone(), SessionInfo { peri_id: pid.clone(), persona: persona.clone(), cwd: session_cwd, has_first_prompt: true });
+            (pid, true)
         }
-        let session_cwd = state.agent_cwd();
-        let response = state.acp.lock().await.new_session(&session_cwd).await?;
-        let peri_id = AcpClient::session_id_from(&response)?;
-        state.sessions.lock().map_err(|e| e.to_string())?
-            .insert(source.clone(), SessionInfo { peri_id: peri_id.clone(), persona: persona.clone(), cwd: session_cwd, has_first_prompt: true });
-        (peri_id, true)
     };
 
     let attach_prefix = attachments.unwrap_or_default().iter().fold(String::new(), |mut acc, p| {
