@@ -4,6 +4,14 @@
 
 *, *::before, *::after { margin:0; padding:0; box-sizing:border-box; }
 
+@font-face {
+  font-family: 'Pylon Term';
+  src: url('/resources/fonts/SGr-IosevkaTermSS18-Regular.ttf') format('truetype');
+  font-weight: 400;
+  font-style: normal;
+  font-display: block;
+}
+
 :root {
   --accent: #3b82f6;
   --bg-panel: rgba(0,0,0,0.03);
@@ -20,7 +28,7 @@
   --danger: rgba(190,40,40,0.75);
   --radius: 8px;
   --font: 'Sarasa UI SC', -apple-system, 'Segoe UI', 'PingFang SC', 'Microsoft YaHei', sans-serif;
-  --mono: 'Cascadia Code', 'Consolas', monospace;
+  --mono: 'Pylon Term', 'Cascadia Code', 'Consolas', monospace;
 }
 
 html, body, #root { height:100%; width:100%; overflow:hidden; font-family:var(--font); font-size:var(--global-font-size,18px); color:var(--text); }
