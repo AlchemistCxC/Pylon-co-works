@@ -23,6 +23,7 @@ export interface ThemeSettings {
   msgStyle: string; msgFont: string; msgTextColor: string; msgLineHeight: number
   ccHeight: number; ccBgHeight: number; ccBg: string
   ccStyle: string
+  ccLayout: string[]; ccHidden: string[]; ccSizes: Record<string, number>
   presets: Record<string, { name: string; colors: Record<string,string>; fonts: Record<string,string|number> }[]>
   activePreset: Record<string, string>
 }
@@ -72,6 +73,7 @@ const DEFAULTS: ThemeSettings = {
   msgStyle: 'terminal', msgFont: 'mono', msgTextColor: '', msgLineHeight: 1.8,
   ccHeight: 120, ccBgHeight: 120, ccBg: 'transparent',
   ccStyle: 'wave',
+  ccLayout: ['input', 'context', 'model', 'mode'], ccHidden: [], ccSizes: {},
   presets: {}, activePreset: {},
 }
 

@@ -4,6 +4,14 @@ import { invoke } from '@tauri-apps/api/core'
 import { useStore } from '../store'
 import type { ThemeSettings } from '../store'
 import PresetRow from './PresetRow'
+import {
+  DndContext, closestCenter, PointerSensor, useSensor, useSensors,
+  type DragEndEvent,
+} from '@dnd-kit/core'
+import {
+  SortableContext, verticalListSortingStrategy, useSortable,
+} from '@dnd-kit/sortable'
+import { CSS } from '@dnd-kit/utilities'
 import './Settings.css'
 
 // ── helpers ──
@@ -47,12 +55,57 @@ function Group({ title, children }: { title:string; children:React.ReactNode }) 
   </div>
 }
 
+// ── CC widget drag-to-reorder ──
+
+const WIDGET_LABELS: Record<string, string> = {
+  input: '输入栏', context: '上下文仪表', model: '模型选择', mode: '模式切换',
+}
+
+function SortableWidget({ id }: { id: string }) {
+  const u = useStore(s => s.updateTheme)
+  const hidden = (useStore(s => s.ccHidden) || []).includes(id)
+  const {
+    attributes, listeners, setNodeRef, transform, transition, isDragging,
+  } = useSortable({ id })
+  const style: React.CSSProperties = {
+    transform: CSS.Transform.toString(transform),
+    transition,
+    opacity: isDragging ? 0.5 : 1,
+  }
+  return (
+    <div ref={setNodeRef} style={style} className="set-row">
+      <span {...attributes} {...listeners} className="cc-drag-handle" style={{ cursor:'grab', color:'var(--text-dim)', fontSize:14, userSelect:'none' }}>☰</span>
+      <span className="set-row-label">{WIDGET_LABELS[id] || id}</span>
+      <label className="cc-vis-toggle">
+        <input type="checkbox" checked={!hidden} onChange={() => {
+          const h = useStore.getState().ccHidden || []
+          u({ ccHidden: hidden ? h.filter(x => x !== id) : [...h, id] } as any)
+        }} />
+        <span style={{ fontSize:11, color: hidden ? 'var(--text-dim)' : 'var(--success)' }}>{hidden ? '隐藏' : '显示'}</span>
+      </label>
+    </div>
+  )
+}
+
 // ── main ──
 
 export default function Settings({ onClose }: { onClose?: () => void }) {
   const t = useStore() as ThemeSettings
   const u = useStore(s => s.updateTheme)
   const reset = useStore(s => s.resetTheme)
+
+  const sensors = useSensors(useSensor(PointerSensor, { activationConstraint: { distance: 5 } }))
+  const handleDragEnd = (event: DragEndEvent) => {
+    const { active, over } = event
+    if (!over || active.id === over.id) return
+    const layout = [...(t.ccLayout || ['input', 'context', 'model', 'mode'])]
+    const oldIdx = layout.indexOf(active.id as string)
+    const newIdx = layout.indexOf(over.id as string)
+    if (oldIdx === -1 || newIdx === -1) return
+    layout.splice(oldIdx, 1)
+    layout.splice(newIdx, 0, active.id as string)
+    u({ ccLayout: layout } as any)
+  }
 
   return (
     <div className="settings">
@@ -169,6 +222,26 @@ export default function Settings({ onClose }: { onClose?: () => void }) {
         {/* ═══ 中控区（合并 input + status bar + ECG） ═══ */}
         <Tabs.Content value="cc">
           <PresetRow area="cc" />
+
+          <h3>控件排序</h3>
+          <DndContext sensors={sensors} collisionDetection={closestCenter} onDragEnd={handleDragEnd}>
+            <SortableContext items={t.ccLayout || ['input', 'context', 'model', 'mode']} strategy={verticalListSortingStrategy}>
+              {(t.ccLayout || ['input', 'context', 'model', 'mode']).map(id => (
+                <SortableWidget key={id} id={id} />
+              ))}
+            </SortableContext>
+          </DndContext>
+
+          <Group title="布局">
+            <Row label="高度">
+              <Num value={t.ccHeight} onChange={v=>u({ccHeight:v})} min={80} max={400}/>
+              <span className="set-val">px</span>
+            </Row>
+            <Row label="背景色">
+              <Swatch value={t.ccBg} onChange={v=>u({ccBg:v})}/>
+            </Row>
+          </Group>
+
           <h3>输入栏</h3>
           <Group title="外观">
             <Row label="背景色"><Swatch value={t.inputBg} onChange={v=>u({inputBg:v})}/></Row>
