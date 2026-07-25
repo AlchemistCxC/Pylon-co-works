@@ -41,10 +41,14 @@
 .set-swatch:hover { transform:scale(1.1); transition:transform 0.15s; }
 .set-swatch-input { display:none; }
 
-.set-color-chips { display:flex; gap:4px; flex-wrap:wrap; }
-.set-color-chip { width:18px; height:18px; border-radius:50%; cursor:pointer; border:2px solid transparent; transition:all 0.15s; }
+.set-color-wrap { position:relative; flex-shrink:0; }
+.set-color-popover { position:absolute; top:28px; left:0; z-index:60; background:var(--bg-panel); border:1px solid var(--border); border-radius:8px; padding:8px; display:flex; flex-wrap:wrap; gap:4px; box-shadow:0 8px 24px rgba(0,0,0,0.12); }
+.set-color-chip { width:20px; height:20px; border-radius:50%; cursor:pointer; border:2px solid transparent; transition:all 0.15s; }
 .set-color-chip:hover { transform:scale(1.15); }
-.set-color-chip.active { border-color:var(--accent); box-shadow:0 0 0 1px var(--accent); }
+.set-color-chip.active { border-color:var(--accent); }
+.set-color-custom { width:100%; margin-top:4px; padding:3px 0; border:1px solid var(--border); border-radius:4px; background:none; color:var(--text-dim); font-size:11px; cursor:pointer; }
+.set-color-custom:hover { background:var(--bg-hover); color:var(--text); }
+.set-color-backdrop { position:fixed; inset:0; z-index:59; }
 .set-bg-preview { width:28px; height:28px; border-radius:4px; background-size:cover; background-position:center; border:1px solid var(--border); cursor:pointer; flex-shrink:0; }
 .set-bg-preview:hover { border-color:var(--danger); opacity:0.8; }
 .set-compact-row { display:flex; align-items:center; gap:6px; flex-wrap:wrap; padding:4px 0; }

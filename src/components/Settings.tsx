@@ -24,14 +24,26 @@ function Swatch({ value, onChange }: { value:string; onChange:(v:string)=>void }
   </>
 }
 
-function ColorChips({ value, onChange }: { value:string; onChange:(v:string)=>void }) {
+function ColorPopover({ value, onChange }: { value:string; onChange:(v:string)=>void }) {
+  const [open, setOpen] = useState(false)
+  const ref = useRef<HTMLDivElement>(null)
+  const pickerRef = useRef<HTMLInputElement>(null)
   const chips = ['#a855f7','#3b82f6','#34d399','#f59e0b','#ef4444','#ec4899','#6366f1','#14b8a6','#f97316','#ffffff']
+
   return (
-    <div className="set-color-chips">
-      {chips.map(c => (
-        <div key={c} className={`set-color-chip ${value === c ? 'active' : ''}`}
-          style={{background:c}} onClick={() => onChange(c)} />
-      ))}
+    <div className="set-color-wrap" ref={ref}>
+      <div className="set-swatch" style={{background:value}} onClick={() => setOpen(!open)}/>
+      {open && <>
+        <div className="set-color-popover">
+          {chips.map(c => (
+            <div key={c} className={`set-color-chip ${value === c ? 'active' : ''}`}
+              style={{background:c}} onClick={() => { onChange(c); setOpen(false) }} />
+          ))}
+          <button className="set-color-custom" onClick={() => pickerRef.current?.click()}>自定义</button>
+        </div>
+        <div className="set-color-backdrop" onClick={() => setOpen(false)}/>
+      </>}
+      <input ref={pickerRef} type="color" value={value} onChange={e => { onChange(e.target.value); setOpen(false) }} className="set-swatch-input"/>
     </div>
   )
 }
@@ -289,10 +301,7 @@ export default function Settings({ onClose }: { onClose?: () => void }) {
                 <Row label="显示名"><Txt value={t.userName} onChange={v=>onSettingChange({userName:v})}/></Row>
                 <Row label="前缀"><Txt value={t.userPrefix} onChange={v=>onSettingChange({userPrefix:v})}/></Row>
                 <Row label="名字颜色">
-                  <div style={{display:'flex',alignItems:'center',gap:8}}>
-                    <Swatch value={t.userColor} onChange={v=>onSettingChange({userColor:v})}/>
-                    <ColorChips value={t.userColor} onChange={v=>onSettingChange({userColor:v})}/>
-                  </div>
+                  <ColorPopover value={t.userColor} onChange={v=>onSettingChange({userColor:v})}/>
                 </Row>
               </Group>
 
@@ -339,10 +348,7 @@ export default function Settings({ onClose }: { onClose?: () => void }) {
               </Group>
               <Group title="背景">
                 <Row label="背景色">
-                  <div style={{display:'flex',alignItems:'center',gap:8}}>
-                    <Swatch value={t.sidebarBg} onChange={v=>onSettingChange({sidebarBg:v})}/>
-                    <ColorChips value={t.sidebarBg} onChange={v=>onSettingChange({sidebarBg:v})}/>
-                  </div>
+                  <ColorPopover value={t.sidebarBg} onChange={v=>onSettingChange({sidebarBg:v})}/>
                 </Row>
                 <BgImageRow label="背景图" value={t.sidebarBgImage} onChange={v=>onSettingChange({sidebarBgImage:v})}/>
               </Group>
@@ -355,10 +361,7 @@ export default function Settings({ onClose }: { onClose?: () => void }) {
               </Group>
               <Group title="文字">
                 <Row label="文字颜色">
-                  <div style={{display:'flex',alignItems:'center',gap:8}}>
-                    <Swatch value={t.sidebarTextColor} onChange={v=>onSettingChange({sidebarTextColor:v})}/>
-                    <ColorChips value={t.sidebarTextColor} onChange={v=>onSettingChange({sidebarTextColor:v})}/>
-                  </div>
+                  <ColorPopover value={t.sidebarTextColor} onChange={v=>onSettingChange({sidebarTextColor:v})}/>
                 </Row>
                 <Row label="会话名字号"><Num value={t.sidebarNameSize} onChange={v=>onSettingChange({sidebarNameSize:v})} min={11} max={20}/></Row>
                 <Row label="分组标题字号"><Num value={t.sidebarGroupSize} onChange={v=>onSettingChange({sidebarGroupSize:v})} min={10} max={16}/></Row>
@@ -379,8 +382,7 @@ export default function Settings({ onClose }: { onClose?: () => void }) {
               <h3>聊天区</h3>
               <Group title="背景">
                 <Row label="背景色">
-                  <Swatch value={t.chatBg} onChange={v=>onSettingChange({chatBg:v})}/>
-                  <ColorChips value={t.chatBg} onChange={v=>onSettingChange({chatBg:v})}/>
+                  <ColorPopover value={t.chatBg} onChange={v=>onSettingChange({chatBg:v})}/>
                 </Row>
                 <BgImageRow label="背景图" value={t.chatBgImage} onChange={v=>onSettingChange({chatBgImage:v})}/>
               </Group>
