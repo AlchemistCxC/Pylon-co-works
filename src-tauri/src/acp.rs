@@ -34,19 +34,6 @@ pub struct RawMessage {
 }
 
 impl AcpClient {
-    /// Backward-compatible spawn: delegates to connect()
-    pub async fn spawn(peri_exe: &str, cwd: &str, model: &str) -> Result<Self, String> {
-        let agent = crate::agent_config::AgentDef {
-            name: "peri".into(),
-            transport: "subprocess".into(),
-            exe: peri_exe.into(),
-            args: vec!["acp".into(), "--cwd".into(), cwd.into(), "--model".into(), model.into()],
-            cwd: Some(cwd.into()),
-            env: Default::default(),
-        };
-        Self::connect(&agent).await
-    }
-
     /// Send a JSON-RPC request and wait for the matching response.
     async fn call_async(&self, method: &str, params: serde_json::Value) -> Result<serde_json::Value, String> {
         let id = self.next_id.fetch_add(1, Ordering::Relaxed);
@@ -126,6 +113,13 @@ impl AcpClient {
         }
 
         Ok((id, rx))
+    }
+
+    /// Kill the child process. Called before switching agents to prevent orphans.
+    pub fn kill(&mut self) -> Result<(), String> {
+        self.child.kill().map_err(|e| format!("kill failed: {}", e))?;
+        self.child.wait().map_err(|e| format!("wait failed: {}", e))?;
+        Ok(())
     }
 
     /// Set session mode.
