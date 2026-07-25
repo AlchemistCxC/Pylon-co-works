@@ -22,6 +22,7 @@ export interface ThemeSettings {
   spinnerColor: string; spinnerSize: number
   msgStyle: string; msgFont: string; msgTextColor: string; msgLineHeight: number
   ccHeight: number; ccBgHeight: number; ccBg: string
+ ccBgImage: string
   ccStyle: string
   ccLayout: string[]; ccHidden: string[]; ccSizes: Record<string, number>
   ccPositions: Record<string, {x: number, y: number, w: number, h: number}>
@@ -73,7 +74,7 @@ const DEFAULTS: ThemeSettings = {
   toolIndicator: '●', sparkles: '✳✴✵✶✷✸✹✺✻✼❃❊',
   spinnerColor: '', spinnerSize: 14,
   msgStyle: 'terminal', msgFont: 'mono', msgTextColor: '', msgLineHeight: 1.8,
-  ccHeight: 120, ccBgHeight: 120, ccBg: 'transparent',
+  ccHeight: 120, ccBgHeight: 120, ccBg: 'transparent', ccBgImage: '',
   ccStyle: 'wave',
   ccLayout: ['input', 'context', 'model', 'mode'], ccHidden: [], ccSizes: {},
   ccPositions: { input:{x:5,y:55,w:90,h:40}, context:{x:5,y:5,w:50,h:20}, model:{x:60,y:5,w:20,h:12}, mode:{x:82,y:5,w:15,h:12}, send:{x:88,y:75,w:8,h:8}, attach:{x:81,y:75,w:6,h:8} },
