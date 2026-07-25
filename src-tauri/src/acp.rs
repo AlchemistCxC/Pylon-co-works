@@ -21,6 +21,7 @@ pub const METHOD_SESSION_CLOSE: &str = "session/close";
 pub const METHOD_SESSION_LOAD: &str = "session/load";
 pub const METHOD_SESSION_LIST: &str = "session/list";
 pub const METHOD_SESSION_SET_MODE: &str = "session/set_mode";
+pub const METHOD_SESSION_SET_CONFIG_OPTION: &str = "session/set_config_option";
 pub const METHOD_SESSION_CANCEL: &str = "session/cancel";
 pub const NOTIF_SESSION_UPDATE: &str = "session/update";
 
@@ -91,16 +92,29 @@ impl AcpClient {
         Ok(msg.result.unwrap_or(serde_json::Value::Null))
     }
 
-    /// Create a new session. Returns the session ID.
-    pub async fn new_session(&self, cwd: &str) -> Result<String, String> {
-        let result = self.call_async(METHOD_SESSION_NEW, serde_json::json!({
+    /// Create a new session. Returns full Peri response (sessionId, modes, configOptions).
+    pub async fn new_session(&self, cwd: &str) -> Result<serde_json::Value, String> {
+        self.call_async(METHOD_SESSION_NEW, serde_json::json!({
             "cwd": cwd,
             "mcpServers": []
-        })).await?;
-        result.get("sessionId")
+        })).await
+    }
+
+    /// Extract sessionId from a session/new response.
+    pub fn session_id_from(response: &serde_json::Value) -> Result<String, String> {
+        response.get("sessionId")
             .and_then(|v| v.as_str())
             .map(|s| s.to_string())
-            .ok_or_else(|| format!("invalid session/new response: {}", result))
+            .ok_or_else(|| format!("invalid session/new response: {response}"))
+    }
+
+    /// Set a session config option (model, etc.). Returns the configOptionUpdate notification.
+    pub async fn set_config_option(&self, session_id: &str, key: &str, value: &str) -> Result<serde_json::Value, String> {
+        self.call_async(METHOD_SESSION_SET_CONFIG_OPTION, serde_json::json!({
+            "sessionId": session_id,
+            "key": key,
+            "value": value,
+        })).await
     }
 
     /// Atomic: allocate ID, register oneshot, then send prompt. No timing hole.

@@ -59,12 +59,14 @@ async fn new_session(
     source: String,
     persona: String,
     cwd: Option<String>,
-) -> Result<String, String> {
+) -> Result<serde_json::Value, String> {
     let session_cwd = cwd.unwrap_or_else(|| state.agent_cwd());
-    let peri_id = state.acp.lock().await.new_session(&session_cwd).await?;
+    let response = state.acp.lock().await.new_session(&session_cwd).await?;
+    let peri_id = AcpClient::session_id_from(&response)?;
     state.sessions.lock().map_err(|e| e.to_string())?
         .insert(source.clone(), SessionInfo { peri_id: peri_id.clone(), persona, cwd: session_cwd, has_first_prompt: false });
-    Ok(peri_id)
+    // Return full response so frontend gets modes + configOptions + sessionId
+    Ok(response)
 }
 
 #[tauri::command]
@@ -93,7 +95,8 @@ async fn send_message(
             }
         }
         let session_cwd = state.agent_cwd();
-        let peri_id = state.acp.lock().await.new_session(&session_cwd).await?;
+        let response = state.acp.lock().await.new_session(&session_cwd).await?;
+        let peri_id = AcpClient::session_id_from(&response)?;
         state.sessions.lock().map_err(|e| e.to_string())?
             .insert(source.clone(), SessionInfo { peri_id: peri_id.clone(), persona: persona.clone(), cwd: session_cwd, has_first_prompt: true });
         (peri_id, true)
@@ -187,6 +190,32 @@ async fn set_mode(state: tauri::State<'_, AppState>, source: String, mode: Strin
     let peri_id = state.get_peri_id(&source).map_err(|e| e.to_string())?;
     state.acp.lock().await.set_mode(&peri_id, &mode).await?;
     Ok(())
+}
+
+#[tauri::command]
+async fn set_config_option(state: tauri::State<'_, AppState>, source: String, key: String, value: String) -> Result<serde_json::Value, String> {
+    let peri_id = state.get_peri_id(&source).map_err(|e| e.to_string())?;
+    // Pre-subscribe to catch the configOptionUpdate notification that Peri sends after
+    let mut broadcast = state.acp.lock().await.rx.resubscribe();
+    let _result = state.acp.lock().await.set_config_option(&peri_id, &key, &value).await?;
+    // Collect configOptionUpdate notification for up to 500ms
+    let config_update = tokio::time::timeout(Duration::from_millis(500), async {
+        while let Ok(raw) = broadcast.recv().await {
+            if raw.method.as_deref() == Some(acp::NOTIF_SESSION_UPDATE) {
+                if let Some(payload) = &raw.params {
+                    if payload.get("sessionId").and_then(|v| v.as_str()) == Some(&*peri_id) {
+                        if let Some(update) = payload.get("update") {
+                            if update.get("sessionUpdate").and_then(|v| v.as_str()) == Some("configOptionUpdate") {
+                                return update.clone();
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        serde_json::Value::Null
+    }).await.unwrap_or(serde_json::Value::Null);
+    Ok(config_update)
 }
 
 #[tauri::command]
@@ -381,7 +410,7 @@ pub fn run() {
                 sessions: Mutex::new(HashMap::new()),
             })
             .invoke_handler(tauri::generate_handler![
-                new_session, send_message, set_mode, close_session, cancel_prompt, load_sessions,
+                new_session, send_message, set_mode, set_config_option, close_session, cancel_prompt, load_sessions,
                 list_agents, switch_agent, reconnect_agent, agent_status,
                 load_persisted_session, list_persisted_sessions,
                 export_session,
