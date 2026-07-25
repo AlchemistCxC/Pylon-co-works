@@ -148,6 +148,27 @@ impl AcpClient {
         Ok(())
     }
 
+    /// Send a fire-and-forget notification (no id, no response expected).
+    pub fn send_notification(&self, method: &str, params: serde_json::Value) -> Result<(), String> {
+        let req = serde_json::json!({
+            "jsonrpc": "2.0",
+            "method": method,
+            "params": params,
+        });
+        let line = serde_json::to_string(&req).map_err(|e| format!("serialize failed: {}", e))?;
+        let mut stdin = self.stdin.lock().map_err(|e| e.to_string())?;
+        writeln!(stdin, "{}", line).map_err(|e| format!("write failed: {}", e))?;
+        stdin.flush().map_err(|e| format!("flush failed: {}", e))?;
+        Ok(())
+    }
+
+    /// Cancel a running prompt. Fire-and-forget notification.
+    pub fn cancel_session(&self, session_id: &str) -> Result<(), String> {
+        self.send_notification("session/cancel", serde_json::json!({
+            "sessionId": session_id
+        }))
+    }
+
     /// Connect from AgentDef (P0: replaces hardcoded spawn)
     pub async fn connect(agent: &crate::agent_config::AgentDef) -> Result<Self, String> {
         match agent.transport.as_str() {

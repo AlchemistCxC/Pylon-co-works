@@ -166,6 +166,16 @@ async fn close_session(state: tauri::State<'_, AppState>, source: String) -> Res
 }
 
 #[tauri::command]
+async fn cancel_prompt(state: tauri::State<'_, AppState>, source: String) -> Result<(), String> {
+    let peri_id = {
+        let sessions = state.sessions.lock().map_err(|e| e.to_string())?;
+        sessions.get(&source).map(|s| s.peri_id.clone()).ok_or("no session")?
+    };
+    // Fire-and-forget notification — Peri will respond with stopReason=cancelled
+    state.acp.lock().await.cancel_session(&peri_id)
+}
+
+#[tauri::command]
 async fn load_sessions(state: tauri::State<'_, AppState>) -> Result<Vec<serde_json::Value>, String> {
     let sessions = state.sessions.lock().map_err(|e| e.to_string())?;
     Ok(sessions.iter().map(|(source, info)| {
@@ -344,7 +354,7 @@ pub fn run() {
                 sessions: Mutex::new(HashMap::new()),
             })
             .invoke_handler(tauri::generate_handler![
-                new_session, send_message, set_mode, close_session, load_sessions,
+                new_session, send_message, set_mode, close_session, cancel_prompt, load_sessions,
                 list_agents, switch_agent, reconnect_agent, agent_status,
                 load_persisted_session, list_persisted_sessions,
                 export_session,
