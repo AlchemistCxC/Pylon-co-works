@@ -1,4 +1,5 @@
 import { useState, useRef } from 'react'
+import * as Tabs from '@radix-ui/react-tabs'
 import { invoke } from '@tauri-apps/api/core'
 import { useStore } from '../store'
 import type { ThemeSettings } from '../store'
@@ -78,15 +79,16 @@ export default function Settings({ onClose }: { onClose?: () => void }) {
   return (
     <div className="settings">
       {onClose && <button className="settings-close" onClick={onClose}>✕</button>}
-      <nav className="settings-nav">
-        <input className="set-search" placeholder="Search..."/>
-        {NAV.map(n => (
-          <button key={n.key} className={`set-nav-btn ${sec===n.key?'active':''}`}
-            onClick={() => setSec(n.key)}>{n.label}</button>
-        ))}
-        <hr className="set-nav-hr"/>
-        <button className="set-nav-btn" onClick={reset}>Reset</button>
-      </nav>
+      <Tabs.Root value={sec} onValueChange={(v) => setSec(v as Section)} className="settings-tabs-root" orientation="vertical">
+        <Tabs.List className="settings-nav">
+          {NAV.map(n => (
+            <Tabs.Trigger key={n.key} value={n.key} className="set-nav-btn">
+              {n.label}
+            </Tabs.Trigger>
+          ))}
+          <hr className="set-nav-hr"/>
+          <button className="set-nav-btn" onClick={reset}>Reset</button>
+        </Tabs.List>
 
       <div className="settings-body">
         {sec === 'global' && <>
@@ -297,6 +299,7 @@ export default function Settings({ onClose }: { onClose?: () => void }) {
           <span style={{color:'var(--text-dim)',fontSize:12,alignSelf:'center'}}>Export / Import coming soon</span>
         </div>
       </div>
+      </Tabs.Root>
     </div>
   )
 }

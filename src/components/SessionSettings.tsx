@@ -1,10 +1,11 @@
 import { useState } from 'react'
+import * as Dialog from '@radix-ui/react-dialog'
 import { useStore, Session } from '../store'
 import './SessionSettings.css'
 
-interface Props { sessionId: string; onClose: () => void; onDeleted?: () => void }
+interface Props { sessionId: string; open: boolean; onClose: () => void; onDeleted?: () => void }
 
-export default function SessionSettings({ sessionId, onClose, onDeleted }: Props) {
+export default function SessionSettings({ sessionId, open, onClose, onDeleted }: Props) {
   const sessions = useStore(s => s.sessions)
   const s = sessions.find(s => s.id === sessionId)
   if (!s) return null  // session deleted, close gracefully
@@ -36,12 +37,14 @@ export default function SessionSettings({ sessionId, onClose, onDeleted }: Props
   }
 
   return (
-    <div className="modal-overlay" onClick={onClose}>
-      <div className="modal-content session-settings" onClick={e => e.stopPropagation()}>
-        <div className="modal-header">
-          <h3>会话设置</h3>
-          <button className="modal-close" onClick={onClose}>✕</button>
-        </div>
+    <Dialog.Root open={open} onOpenChange={(o) => { if (!o) onClose() }}>
+      <Dialog.Portal>
+        <Dialog.Overlay className="dialog-overlay" />
+        <Dialog.Content className="dialog-content session-settings">
+          <Dialog.Title className="modal-header">
+            <h3>会话设置</h3>
+            <Dialog.Close className="modal-close" onClick={onClose}>✕</Dialog.Close>
+          </Dialog.Title>
 
         <div className="sess-field">
           <label>名称</label>
@@ -100,7 +103,8 @@ export default function SessionSettings({ sessionId, onClose, onDeleted }: Props
           <button className="ps-btn" onClick={onClose}>取消</button>
           <button className="ps-btn danger" onClick={del}>删除会话</button>
         </div>
-      </div>
-    </div>
+        </Dialog.Content>
+      </Dialog.Portal>
+    </Dialog.Root>
   )
 }
