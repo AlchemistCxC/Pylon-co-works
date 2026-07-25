@@ -35,10 +35,12 @@ function ColorPopover({ value, onChange, chips }: { value:string; onChange:(v:st
       <div className="set-swatch" style={{background:value}} onClick={() => setOpen(!open)}/>
       {open && <>
         <div className="set-color-popover">
-          {COLOR_CHIPS.map(c => (
-            <div key={c} className={`set-color-chip ${value === c ? 'active' : ''}`}
-              style={{background:c}} onClick={() => { onChange(c); setOpen(false) }} />
-          ))}
+          <div className="set-color-row">
+            {COLOR_CHIPS.map(c => (
+              <div key={c} className={`set-color-chip ${value === c ? 'active' : ''}`}
+                style={{background:c}} onClick={() => { onChange(c); setOpen(false) }} />
+            ))}
+          </div>
           <button className="set-color-custom" onClick={() => pickerRef.current?.click()}>自定义</button>
         </div>
         <div className="set-color-backdrop" onClick={() => setOpen(false)}/>
