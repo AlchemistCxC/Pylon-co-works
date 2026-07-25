@@ -1,22 +1,10 @@
-import { useState, useRef } from 'react'
+import { useRef } from 'react'
 import * as Tabs from '@radix-ui/react-tabs'
 import { invoke } from '@tauri-apps/api/core'
 import { useStore } from '../store'
 import type { ThemeSettings } from '../store'
 import PresetRow from './PresetRow'
 import './Settings.css'
-
-type Section = 'global'|'sidebar'|'cc'|'terminal'|'right'|'agent'|'session'
-
-const NAV: { key: Section; label: string }[] = [
-  { key:'global', label:'全局' },
-  { key:'sidebar', label:'左栏' },
-  { key:'cc', label:'中控区' },
-  { key:'terminal', label:'终端' },
-  { key:'right', label:'右栏' },
-  { key:'agent', label:'Agent' },
-  { key:'session', label:'会话' },
-]
 
 // ── helpers ──
 
@@ -52,15 +40,6 @@ function Txt({ value, onChange }: { value:string; onChange:(v:string)=>void }) {
   return <input type="text" value={value} onChange={e => onChange(e.target.value)} className="set-input" style={{width:'140px'}}/>
 }
 
-function PresetBtns({ value, onChange, options }: { value:number; onChange:(v:number)=>void; options:number[] }) {
-  return <div className="set-preset-row">
-    {options.map(o => (
-      <button key={o} className={`set-preset-chip ${value === o ? 'active' : ''}`}
-        onClick={() => onChange(o)}>{Math.round(o*100)}%</button>
-    ))}
-  </div>
-}
-
 function Group({ title, children }: { title:string; children:React.ReactNode }) {
   return <div className="set-group">
     <div className="set-group-title">{title}</div>
@@ -74,24 +53,28 @@ export default function Settings({ onClose }: { onClose?: () => void }) {
   const t = useStore() as ThemeSettings
   const u = useStore(s => s.updateTheme)
   const reset = useStore(s => s.resetTheme)
-  const [sec, setSec] = useState<Section>('global')
 
   return (
     <div className="settings">
       {onClose && <button className="settings-close" onClick={onClose}>✕</button>}
-      <Tabs.Root value={sec} onValueChange={(v) => setSec(v as Section)} className="settings-tabs-root" orientation="vertical">
+      <Tabs.Root defaultValue="global" orientation="vertical" className="settings-tabs-root">
         <Tabs.List className="settings-nav">
-          {NAV.map(n => (
-            <Tabs.Trigger key={n.key} value={n.key} className="set-nav-btn">
-              {n.label}
-            </Tabs.Trigger>
-          ))}
+          <Tabs.Trigger value="global" className="set-nav-btn">全局</Tabs.Trigger>
+          <Tabs.Trigger value="sidebar" className="set-nav-btn">左栏</Tabs.Trigger>
+          <Tabs.Trigger value="terminal" className="set-nav-btn">终端</Tabs.Trigger>
+          <Tabs.Trigger value="cc" className="set-nav-btn">中控区</Tabs.Trigger>
+          <Tabs.Trigger value="right" className="set-nav-btn">右栏</Tabs.Trigger>
+          <Tabs.Trigger value="agent" className="set-nav-btn">Agent</Tabs.Trigger>
+          <Tabs.Trigger value="session" className="set-nav-btn">会话</Tabs.Trigger>
           <hr className="set-nav-hr"/>
           <button className="set-nav-btn" onClick={reset}>Reset</button>
         </Tabs.List>
 
       <div className="settings-body">
-        {sec === 'global' && <>
+
+        {/* ═══ 全局 ═══ */}
+        <Tabs.Content value="global">
+          <PresetRow area="app" />
           <h3>全局外观</h3>
           <Group title="用户信息">
             <Row label="显示名"><Txt value={t.userName} onChange={v=>u({userName:v})}/></Row>
@@ -107,9 +90,10 @@ export default function Settings({ onClose }: { onClose?: () => void }) {
             <Row label="字体"><Sel value={t.globalFont} onChange={v=>u({globalFont:v})} options={['system','mono']}/></Row>
             <Row label="基础字号"><Num value={t.globalFontSize} onChange={v=>u({globalFontSize:v})} min={12} max={24}/></Row>
           </Group>
-        </>}
+        </Tabs.Content>
 
-        {sec === 'sidebar' && <>
+        {/* ═══ 左栏 ═══ */}
+        <Tabs.Content value="sidebar">
           <h3>左侧栏</h3>
           <Group title="外观">
             <Row label="背景色"><Swatch value={t.sidebarBg} onChange={v=>u({sidebarBg:v})}/></Row>
@@ -125,11 +109,12 @@ export default function Settings({ onClose }: { onClose?: () => void }) {
             <Row label="会话名字号"><Num value={t.sidebarNameSize} onChange={v=>u({sidebarNameSize:v})} min={11} max={20}/></Row>
             <Row label="分组标题字号"><Num value={t.sidebarGroupSize} onChange={v=>u({sidebarGroupSize:v})} min={10} max={16}/></Row>
           </Group>
-        </>}
+        </Tabs.Content>
 
-        {sec === 'terminal' && <>
+        {/* ═══ 终端（合并 chat + tools + message bar） ═══ */}
+        <Tabs.Content value="terminal">
           <PresetRow area="terminal" />
-          <h3>终端（聊天区）</h3>
+          <h3>聊天区</h3>
           <Group title="外观">
             <Row label="背景色"><Swatch value={t.chatBg} onChange={v=>u({chatBg:v})}/></Row>
             <Row label="背景图"><Txt value={t.chatBgImage} onChange={v=>u({chatBgImage:v})}/></Row>
@@ -148,10 +133,7 @@ export default function Settings({ onClose }: { onClose?: () => void }) {
             <Row label="透明度"><Slider value={t.chatTransparency} onChange={v=>u({chatTransparency:v})} min={0} max={1}/><span className="set-val">{Math.round(t.chatTransparency*100)}%</span></Row>
             <Row label="模糊"><Slider value={t.chatBlur} onChange={v=>u({chatBlur:v})} min={0} max={40} step={2}/><span className="set-val">{t.chatBlur}px</span></Row>
           </Group>
-        </>}
 
-        {sec === 'terminal' && <>
-          <PresetRow area="terminal" />
           <h3>工具调用 & 用户标签</h3>
           <Group title="工具指示器">
             <Row label="完成 ●"><Swatch value={t.toolOk} onChange={v=>u({toolOk:v})}/></Row>
@@ -174,9 +156,18 @@ export default function Settings({ onClose }: { onClose?: () => void }) {
             <Row label="Spinner 颜色"><Swatch value={t.spinnerColor} onChange={v=>u({spinnerColor:v})}/></Row>
             <Row label="Spinner 大小"><Num value={t.spinnerSize} onChange={v=>u({spinnerSize:v})} min={10} max={32}/></Row>
           </Group>
-        </>}
 
-        {sec === 'cc' && <>
+          <h3>消息栏</h3>
+          <Group title="风格">
+            <Row label="风格"><Sel value={t.msgStyle} onChange={v=>u({msgStyle:v})} options={['terminal','bubble']}/></Row>
+            <Row label="字体"><Sel value={t.msgFont} onChange={v=>u({msgFont:v})} options={['mono','system']}/></Row>
+            <Row label="文字颜色"><Swatch value={t.msgTextColor} onChange={v=>u({msgTextColor:v})}/></Row>
+            <Row label="行间距"><Num value={t.msgLineHeight} onChange={v=>u({msgLineHeight:v})} min={1.2} max={2.5}/></Row>
+          </Group>
+        </Tabs.Content>
+
+        {/* ═══ 中控区（合并 input + status bar + ECG） ═══ */}
+        <Tabs.Content value="cc">
           <PresetRow area="cc" />
           <h3>输入栏</h3>
           <Group title="外观">
@@ -197,10 +188,7 @@ export default function Settings({ onClose }: { onClose?: () => void }) {
             <Row label="横线颜色"><Swatch value={t.cliLineColor} onChange={v=>u({cliLineColor:v})}/></Row>
             <Row label="文字颜色"><Swatch value={t.cliTextColor} onChange={v=>u({cliTextColor:v})}/></Row>
           </Group>
-        </>}
 
-        {sec === 'cc' && <>
-          <PresetRow area="cc" />
           <h3>状态栏 & 心电图</h3>
           <Group title="外观">
             <Row label="背景色"><Swatch value={t.statusBg} onChange={v=>u({statusBg:v})}/></Row>
@@ -233,9 +221,10 @@ export default function Settings({ onClose }: { onClose?: () => void }) {
             <Row label="仪表样式"><Sel value={t.ccStyle} onChange={v=>u({ccStyle:v})} options={['wave','bar','numeric']}/></Row>
             <Row label="显示模式"><Sel value={t.tokenDisplay} onChange={v=>u({tokenDisplay:v})} options={['ekg','numeric']}/></Row>
           </Group>
-        </>}
+        </Tabs.Content>
 
-        {sec === 'right' && <>
+        {/* ═══ 右栏 ═══ */}
+        <Tabs.Content value="right">
           <h3>右侧栏</h3>
           <Group title="外观">
             <Row label="背景色"><Swatch value={t.rightBg} onChange={v=>u({rightBg:v})}/></Row>
@@ -246,9 +235,10 @@ export default function Settings({ onClose }: { onClose?: () => void }) {
             <Row label="透明度"><Slider value={t.rightTransparency} onChange={v=>u({rightTransparency:v})} min={0} max={1}/><span className="set-val">{Math.round(t.rightTransparency*100)}%</span></Row>
             <Row label="模糊"><Slider value={t.rightBlur} onChange={v=>u({rightBlur:v})} min={0} max={40} step={2}/><span className="set-val">{t.rightBlur}px</span></Row>
           </Group>
-        </>}
+        </Tabs.Content>
 
-        {sec === 'agent' && <>
+        {/* ═══ Agent ═══ */}
+        <Tabs.Content value="agent">
           <h3>Agent</h3>
           <Group title="当前 Agent">
             <div style={{ padding:'8px 0', fontFamily:'var(--mono)', fontSize:14, color:'var(--accent)' }}>
@@ -272,27 +262,17 @@ export default function Settings({ onClose }: { onClose?: () => void }) {
           <div style={{ marginTop:16, fontSize:12, color:'var(--text-dim)' }}>
             切换 Agent 后需重启 Prism Desktop 生效。
           </div>
-        </>}
+        </Tabs.Content>
 
-        {sec === 'session' && <>
+        {/* ═══ 会话 ═══ */}
+        <Tabs.Content value="session">
           <h3>当前会话设置</h3>
           <Group title="会话 Prompt（覆盖 Profile persona）">
             <Row label="Prompt"><textarea className="set-textarea"
               defaultValue={useStore.getState().sessions[0]?.sessionPrompt || ''}
               placeholder="留空则使用 Profile persona..." /></Row>
           </Group>
-        </>}
-
-        {sec === 'terminal' && <>
-          <PresetRow area="terminal" />
-          <h3>消息栏</h3>
-          <Group title="风格">
-            <Row label="风格"><Sel value={t.msgStyle} onChange={v=>u({msgStyle:v})} options={['terminal','bubble']}/></Row>
-            <Row label="字体"><Sel value={t.msgFont} onChange={v=>u({msgFont:v})} options={['mono','system']}/></Row>
-            <Row label="文字颜色"><Swatch value={t.msgTextColor} onChange={v=>u({msgTextColor:v})}/></Row>
-            <Row label="行间距"><Num value={t.msgLineHeight} onChange={v=>u({msgLineHeight:v})} min={1.2} max={2.5}/></Row>
-          </Group>
-        </>}
+        </Tabs.Content>
 
         <div className="set-presets">
           <button className="set-preset-btn" onClick={() => u({...defaults})}>Default</button>
