@@ -41,6 +41,14 @@
 .cc-widget.cc-hidden { opacity:0.25; }
 .cc-widget.cc-hidden:hover { opacity:0.6; }
 
+.cc-widget.cc-selected { outline:2px solid var(--accent) !important; }
+.cc-prop-panel { position:absolute; right:-166px; top:0; width:150px; background:var(--bg-panel); border:1px solid var(--border); border-radius:8px; padding:10px; z-index:30; font-size:12px; box-shadow:0 4px 16px rgba(0,0,0,0.1); }
+.cc-prop-title { font-weight:600; color:var(--accent); margin-bottom:8px; font-size:13px; }
+.cc-prop-row { display:flex; align-items:center; gap:4px; margin-bottom:4px; }
+.cc-prop-row span { color:var(--text-dim); font-size:10px; width:12px; }
+.cc-prop-row input { width:50px; background:var(--bg-input); border:1px solid var(--border); border-radius:3px; padding:2px 4px; font-size:11px; color:var(--text); text-align:right; font-family:var(--mono); }
+.cc-prop-row input:focus { border-color:var(--accent); outline:none; }
+
 /* blur for non-CC in edit mode */
 .cc-editing-app .sidebar { filter:blur(3px); opacity:0.35; pointer-events:none; }
 .cc-editing-app .main .chat-view { filter:blur(4px); opacity:0.4; pointer-events:none; }

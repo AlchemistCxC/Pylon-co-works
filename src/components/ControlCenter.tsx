@@ -23,6 +23,7 @@ export default function ControlCenter({ sessionId }: Props) {
 
   const inputRef = useRef<{ send: () => void; attachFile: () => void }>(null)
   const isSplit = editMode && (!!positions['send'] || !!positions['attach'])
+  const [selected, setSelected] = useState<string | null>(null)
 
   const renderWidget = (id: string) => {
     if (!editMode && hidden.includes(id)) return null
@@ -51,7 +52,8 @@ export default function ControlCenter({ sessionId }: Props) {
     }
     if (!pos) return null
     return (
-      <EditableWidget key={id} id={id} pos={pos} editMode={editMode} hidden={hidden.includes(id)} bodyRef={ccBodyRef}>
+      <EditableWidget key={id} id={id} pos={pos} editMode={editMode} hidden={hidden.includes(id)} bodyRef={ccBodyRef}
+        selected={selected} onSelect={() => setSelected(id)}>
         {widget}
       </EditableWidget>
     )
@@ -81,15 +83,17 @@ export default function ControlCenter({ sessionId }: Props) {
       <div className="cc-body" ref={ccBodyRef}>
         {(editMode ? ALL_WIDGETS : ['input', 'context', 'model', 'mode']).map(renderWidget)}
       </div>
+      {editMode && selected && <PropertyPanel id={selected} />}
     </div>
   )
 }
 
 // ── EditableWidget: drag + resize in edit mode ──
 
-function EditableWidget({ id, pos, editMode, hidden: isHidden, children, bodyRef }: {
+function EditableWidget({ id, pos, editMode, hidden: isHidden, children, bodyRef, selected, onSelect }: {
   id: string; pos: {x:number;y:number;w:number;h:number}; editMode: boolean; hidden: boolean;
-  children: React.ReactNode; bodyRef: React.RefObject<HTMLDivElement | null>
+  children: React.ReactNode; bodyRef: React.RefObject<HTMLDivElement | null>;
+  selected: string | null; onSelect: () => void;
 }) {
   const u = useStore(s => s.updateTheme)
   const positions = useStore(s => s.ccPositions) || {}
@@ -138,9 +142,9 @@ function EditableWidget({ id, pos, editMode, hidden: isHidden, children, bodyRef
   }
 
   return (
-    <div className={`cc-widget ${editMode ? 'cc-edit' : ''} ${editMode && isHidden ? 'cc-hidden' : ''}`}
+    <div className={`cc-widget ${editMode ? 'cc-edit' : ''} ${editMode && isHidden ? 'cc-hidden' : ''} ${selected === id ? 'cc-selected' : ''}`}
       style={{ left: `${pos.x}%`, top: `${pos.y}%`, width: `${pos.w}%`, height: `${pos.h}%` }}
-      onMouseDown={onWidgetMouseDown}>
+      onMouseDown={editMode ? (e) => { onWidgetMouseDown(e); onSelect() } : undefined}>
       {children}
       {editMode && <>
         <div className="cc-edit-rsz" onMouseDown={onResizeMouseDown} />
@@ -187,4 +191,32 @@ function TypeToggle({ id }: { id: string }) {
     )
   }
   return null
+}
+
+function PropertyPanel({ id }: { id: string }) {
+  const pos = useStore(s => s.ccPositions[id]) || { x:0,y:0,w:10,h:10 }
+  const u = useStore(s => s.updateTheme)
+  const all = useStore(s => s.ccPositions) || {}
+  const labels: Record<string,string> = { input:'输入栏', context:'心电图', model:'模型', mode:'模式', send:'发送', attach:'附件' }
+  return (
+    <div className="cc-prop-panel">
+      <div className="cc-prop-title">{labels[id] || id}</div>
+      <div className="cc-prop-row"><span>X</span>
+        <input type="number" value={pos.x} onChange={e => u({ ccPositions: {...all, [id]:{...pos, x:+e.target.value}} } as any)} />
+        <span>%</span>
+      </div>
+      <div className="cc-prop-row"><span>Y</span>
+        <input type="number" value={pos.y} onChange={e => u({ ccPositions: {...all, [id]:{...pos, y:+e.target.value}} } as any)} />
+        <span>%</span>
+      </div>
+      <div className="cc-prop-row"><span>W</span>
+        <input type="number" value={pos.w} onChange={e => u({ ccPositions: {...all, [id]:{...pos, w:Math.max(5,+e.target.value)}} } as any)} />
+        <span>%</span>
+      </div>
+      <div className="cc-prop-row"><span>H</span>
+        <input type="number" value={pos.h} onChange={e => u({ ccPositions: {...all, [id]:{...pos, h:Math.max(5,+e.target.value)}} } as any)} />
+        <span>%</span>
+      </div>
+    </div>
+  )
 }

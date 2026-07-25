@@ -133,8 +133,6 @@ export default function App() {
         <div className="titlebar-controls">
           <button onClick={() => setRightOpen(!rightOpen)} title="Panel">&#9776;</button>
           <button onClick={() => setShowSettings(!showSettings)} title="Settings">&#9881;</button>
-          <button onClick={() => u({ ccEditMode: !ccEditMode } as any)}
-            title="自定义中控区" style={ccEditMode ? { color: 'var(--accent)', fontWeight: 700 } : {}}>⟐</button>
           <button onClick={() => appWindow.minimize()}>─</button>
           <button onClick={() => appWindow.isFullscreen().then(f => appWindow.setFullscreen(!f))}>⛶</button>
           <button className="close" onClick={() => appWindow.destroy()}>✕</button>
