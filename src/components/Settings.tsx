@@ -144,6 +144,20 @@ const GLOBAL_PRESETS: { name: string; label: string; theme: Partial<ThemeSetting
   },
 ]
 
+// ── local preset helper ──
+
+const SIDEBAR_FIELDS = ['sidebarBg','sidebarBgImage','sidebarWidth','sidebarTransparency','sidebarBlur','sidebarTextColor','sidebarNameSize','sidebarGroupSize'] as const
+type SidebarFields = typeof SIDEBAR_FIELDS[number]
+const TERMINAL_FIELDS = ['chatBg','chatBgImage','chatTransparency','chatBlur','chatFont','chatFontSize','chatLineHeight','chatTextColor','chatCodeColor','chatCodeBg','toolOk','toolRun','toolErr','toolNameColor','toolSummaryColor','userTagBg','userTagText','toolIndicator','sparkles','spinnerColor','spinnerSize','msgStyle','msgFont','msgTextColor','msgLineHeight'] as const
+const CC_FIELDS = ['ccHeight','ccBgHeight','ccBg','inputBg','inputBgImage','inputTextColor','inputPlaceholder','inputSendBg','inputFocusBorder','inputFontSize','inputMinHeight','inputMode','cliLineWidth','cliLineColor','cliTextColor','statusBg','statusBgImage','ekgWidth','ekgFontSize','ekgGreen','ekgYellow','ekgRed','pillBg','pillText','prismOnColor','ekgLineWidth','ekgAmplitudeMax','ekgSpeedBase','ekgSpeedMax','ekgLeftColor','ekgMovingColor','ekgConsumedColor','tokenDisplay','ccStyle'] as const
+const RIGHT_FIELDS = ['rightBg','rightBgImage','rightWidth','rightTransparency','rightBlur'] as const
+
+function pickPresetFields(preset: Partial<ThemeSettings>, fields: readonly string[]): Partial<ThemeSettings> {
+  const out: any = {}
+  for (const f of fields) if (f in preset) out[f] = (preset as any)[f]
+  return out
+}
+
 // ── CC widget drag-to-reorder ──
 
 const WIDGET_LABELS: Record<string, string> = {
@@ -295,9 +309,24 @@ export default function Settings({ onClose }: { onClose?: () => void }) {
             {/* ═══ 左栏 ═══ */}
             <Tabs.Content value="sidebar">
               <h3>左侧栏</h3>
-              <Group title="外观">
-                <Row label="背景色"><Swatch value={t.sidebarBg} onChange={v=>onSettingChange({sidebarBg:v})}/></Row>
+              <Group title="局部预设">
+                <div className="set-preset-row">
+                  {GLOBAL_PRESETS.map(p => (
+                    <button key={p.name} className={`set-preset-chip`}
+                      onClick={() => u(pickPresetFields(p.theme, SIDEBAR_FIELDS) as any)}>{p.label}</button>
+                  ))}
+                </div>
+              </Group>
+              <Group title="背景">
+                <Row label="背景色">
+                  <div style={{display:'flex',alignItems:'center',gap:8}}>
+                    <Swatch value={t.sidebarBg} onChange={v=>onSettingChange({sidebarBg:v})}/>
+                    <ColorChips value={t.sidebarBg} onChange={v=>onSettingChange({sidebarBg:v})}/>
+                  </div>
+                </Row>
                 <Row label="背景图"><Txt value={t.sidebarBgImage} onChange={v=>onSettingChange({sidebarBgImage:v})}/></Row>
+              </Group>
+              <Group title="布局">
                 <Row label="栏宽"><Num value={t.sidebarWidth} onChange={v=>onSettingChange({sidebarWidth:v})} min={160} max={400}/></Row>
               </Group>
               <Group title="玻璃效果">
@@ -305,7 +334,12 @@ export default function Settings({ onClose }: { onClose?: () => void }) {
                 <Row label="模糊"><Slider value={t.sidebarBlur} onChange={v=>onSettingChange({sidebarBlur:v})} min={0} max={40} step={2}/><span className="set-val">{t.sidebarBlur}px</span></Row>
               </Group>
               <Group title="文字">
-                <Row label="文字颜色"><Swatch value={t.sidebarTextColor} onChange={v=>onSettingChange({sidebarTextColor:v})}/></Row>
+                <Row label="文字颜色">
+                  <div style={{display:'flex',alignItems:'center',gap:8}}>
+                    <Swatch value={t.sidebarTextColor} onChange={v=>onSettingChange({sidebarTextColor:v})}/>
+                    <ColorChips value={t.sidebarTextColor} onChange={v=>onSettingChange({sidebarTextColor:v})}/>
+                  </div>
+                </Row>
                 <Row label="会话名字号"><Num value={t.sidebarNameSize} onChange={v=>onSettingChange({sidebarNameSize:v})} min={11} max={20}/></Row>
                 <Row label="分组标题字号"><Num value={t.sidebarGroupSize} onChange={v=>onSettingChange({sidebarGroupSize:v})} min={10} max={16}/></Row>
               </Group>
