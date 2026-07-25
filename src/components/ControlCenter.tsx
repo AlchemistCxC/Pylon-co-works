@@ -83,8 +83,8 @@ export default function ControlCenter({ sessionId }: Props) {
       <div className="cc-body" ref={ccBodyRef}>
         {(editMode ? ALL_WIDGETS : ['input', 'context', 'model', 'mode']).map(renderWidget)}
       </div>
-      {editMode && selected && <PropertyPanel id={selected} onClose={() => setSelected(null)} />}
-      {editMode && (
+      {editMode && selected && <PropertyPanel id={selected} onClose={() => setSelected(null)} onExit={() => u({ ccEditMode: false } as any)} />}
+      {editMode && !selected && (
         <div className="cc-edit-toolbar">
           <button className="ps-btn sm" onClick={() => u({ ccEditMode: false } as any)}>退出</button>
         </div>
@@ -206,7 +206,7 @@ function ColorSwatch({ value, onChange }: { value:string; onChange:(v:string)=>v
   </>
 }
 
-function PropertyPanel({ id, onClose }: { id: string; onClose: () => void }) {
+function PropertyPanel({ id, onClose, onExit }: { id: string; onClose: () => void; onExit: () => void }) {
   const pos = useStore(s => s.ccPositions[id]) || { x:0,y:0,w:10,h:10 }
   const all = useStore(s => s.ccPositions) || {}
   const u = useStore(s => s.updateTheme)
@@ -295,6 +295,9 @@ function PropertyPanel({ id, onClose }: { id: string; onClose: () => void }) {
             模式切换由 Agent 控制
           </div>
         </>}
+      </div>
+      <div className="cc-prop-footer">
+        <button className="ps-btn sm" onClick={onExit}>退出自定义</button>
       </div>
     </div>
   )
