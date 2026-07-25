@@ -290,6 +290,7 @@ pub fn run() {
     let rt = tokio::runtime::Runtime::new().expect("failed to create tokio runtime");
     rt.block_on(async {
         let acp = Arc::new(tokio::sync::Mutex::new(AcpClient::connect(&default_agent).await.expect("failed to connect ACP agent")));
+        let acp_for_shutdown = acp.clone();
 
         tauri::Builder::default()
             .plugin(tauri_plugin_shell::init())
@@ -310,6 +311,18 @@ pub fn run() {
             .setup(|app| {
                 app.get_webview_window("main").unwrap().set_title("Pylon").ok();
                 Ok(())
+            })
+            .on_window_event(move |_window, event| {
+                if let tauri::WindowEvent::CloseRequested { .. } = event {
+                    // Kill child process on close to prevent orphans on Windows
+                    let acp = acp_for_shutdown.clone();
+                    let rt = tokio::runtime::Handle::current();
+                    rt.block_on(async {
+                        if let Err(e) = acp.lock().await.kill() {
+                            log::warn!("shutdown kill: {}", e);
+                        }
+                    });
+                }
             })
             .run(tauri::generate_context!())
             .expect("error while running tauri application");
