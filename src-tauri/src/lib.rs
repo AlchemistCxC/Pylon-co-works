@@ -1,6 +1,7 @@
 mod acp;
 mod agent_config;
 mod error;
+mod pet;
 
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
@@ -15,6 +16,7 @@ struct AppState {
     agents: Mutex<HashMap<String, AgentDef>>,
     active_agent: Mutex<String>,
     sessions: Arc<Mutex<HashMap<String, SessionInfo>>>,
+    pet: Arc<Mutex<pet::PetState>>,
 }
 
 struct SessionInfo {
@@ -144,27 +146,36 @@ async fn send_message(
         (acp.rx.resubscribe(), tx, prompt)
     };
     write_tx.send(prompt_line).await.map_err(|_| "ACP connection closed".to_string())?;
+    state.pet.lock().map(|mut p| pet::on_user_sent(&mut p)).ok();
     let _ = window.emit("peri:user", serde_json::json!({ "source": source, "content": user_content }));
 
     let pid = peri_id.clone();
     let win = window.clone();
     let src = source.clone();
     let sessions = state.sessions.clone();
+    let pet = state.pet.clone();
     let result = tokio::time::timeout(Duration::from_secs(acp::PROMPT_TIMEOUT_SECS), async move {
         loop {
             tokio::select! {
                 msg = &mut rx => {
                     match msg {
                         Ok(raw) => {
-                            if let Some(params) = raw.result {
+                            let has_error = raw.error.is_some();
+                            if let Some(ref params) = raw.result {
                                 let _ = win.emit("peri:done", serde_json::json!({"source": src, "data": params}));
                             }
-                            if let Some(err) = raw.error {
-                                let _ = win.emit("peri:error", serde_json::json!({"source": src, "error": err.to_string()}));
+                            if has_error {
+                                let _ = win.emit("peri:error", serde_json::json!({"source": src, "error": raw.error.unwrap_or_default().to_string()}));
+                                let _ = pet.lock().map(|mut p| pet::on_error(&mut p));
+                            } else {
+                                let _ = pet.lock().map(|mut p| pet::on_done(&mut p, 300));
                             }
                             return Ok(());
                         }
-                        Err(_) => return Err("ACP connection closed".to_string()),
+                        Err(_) => {
+                            let _ = pet.lock().map(|mut p| pet::on_error(&mut p));
+                            return Err("ACP connection closed".to_string());
+                        }
                     }
                 }
                 notif = broadcast.recv() => {
@@ -180,6 +191,10 @@ async fn send_message(
                                             let _ = win.emit("peri:user", serde_json::json!({"source": src, "content": text}));
                                             continue;
                                         }
+                                    }
+                                    // First agent chunk → pet gets curious
+                                    if update.get("sessionUpdate").and_then(|v| v.as_str()) == Some("agentMessageChunk") {
+                                        let _ = pet.lock().map(|mut p| pet::on_first_chunk(&mut p));
                                     }
                                 }
                                 // Update session metadata from notifications
@@ -342,6 +357,25 @@ async fn reload_agents(state: tauri::State<'_, AppState>) -> Result<(), String> 
     Ok(())
 }
 
+#[tauri::command]
+async fn get_pet(state: tauri::State<'_, AppState>) -> Result<serde_json::Value, String> {
+    let pet = state.pet.lock().map_err(|e| e.to_string())?;
+    Ok(serde_json::to_value(&*pet).map_err(|e| e.to_string())?)
+}
+
+#[tauri::command]
+async fn pet_action(state: tauri::State<'_, AppState>, action: String) -> Result<serde_json::Value, String> {
+    let mut pet = state.pet.lock().map_err(|e| e.to_string())?;
+    match action.as_str() {
+        "poke" => { pet::on_poke(&mut pet); }
+        "feed" => { pet::on_feed(&mut pet); }
+        "daily" => { pet::daily_decay(&mut pet); }
+        "sleepy" => { pet::check_sleepy(&mut pet); }
+        _ => { return Err(format!("unknown action: {}", action)); }
+    }
+    Ok(serde_json::to_value(&*pet).map_err(|e| e.to_string())?)
+}
+
 // ── Session persistence commands ──
 
 #[tauri::command]
@@ -455,10 +489,12 @@ pub fn run() {
                 agents: Mutex::new(agents_for_state),
                 active_agent: Mutex::new(default_agent_id),
                 sessions: Arc::new(Mutex::new(HashMap::new())),
+                pet: Arc::new(Mutex::new(pet::PetState::default())),
             })
             .invoke_handler(tauri::generate_handler![
                 new_session, send_message, set_mode, set_config_option, close_session, cancel_prompt, load_sessions,
                 list_agents, switch_agent, reconnect_agent, agent_status, reload_agents,
+                get_pet, pet_action,
                 load_persisted_session, list_persisted_sessions,
                 export_session,
             ])
