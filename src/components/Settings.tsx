@@ -61,7 +61,7 @@ function BgImageRow({ label, value, onChange }: { label:string; value:string; on
   return (
     <Row label={label}>
       <div style={{display:'flex',alignItems:'center',gap:6,flex:1}}>
-        <input type="text" value={value} onChange={e => onChange(e.target.value)} className="set-input" style={{flex:1}} placeholder="路径或 URL" />
+        <input type="text" value={value} onChange={e => onChange(e.target.value)} className="set-input" style={{width:'220px'}} placeholder="路径或 URL" />
         <button className="ps-btn sm" onClick={openFile}>选择</button>
       </div>
       {value && <div className="set-bg-preview" style={{backgroundImage:`url(${value})`}}
