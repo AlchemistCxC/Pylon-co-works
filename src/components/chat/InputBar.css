@@ -34,8 +34,8 @@
 .input-bar.cli-mode { border:none; background:transparent; padding-top:0; }
 .input-bar.cli-mode .input-row {
   position:relative; padding:8px 0; display:flex; align-items:center; gap:4px; width:100%;
-  border-top:2px solid var(--accent,#6366f1) !important;
-  border-bottom:2px solid var(--accent,#6366f1) !important;
+  border-top:var(--cli-line-width,2px) solid var(--cli-line-color,var(--accent,#6366f1)) !important;
+  border-bottom:var(--cli-line-width,2px) solid var(--cli-line-color,var(--accent,#6366f1)) !important;
 }
 .input-bar.cli-mode .input-textarea {
   background:transparent; border:none; resize:none; height:auto; min-height:auto;
