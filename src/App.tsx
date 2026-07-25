@@ -112,6 +112,11 @@ export default function App() {
   return (
     <ErrorBoundary>
     <div className="app" style={cssVars}>
+      <button className="sidebar-toggle-float" onClick={() => setSidebarCollapsed(!sidebarCollapsed)}
+        style={{ position:'fixed', left: sidebarCollapsed ? 8 : 'var(--sidebar-width,250px)', top:'50%', transform:'translateY(-50%)', zIndex:100 } as React.CSSProperties}
+        title={sidebarCollapsed ? '展开左栏' : '收起左栏'}>
+        {sidebarCollapsed ? '▸' : '▾'}
+      </button>
       <div className="titlebar" data-tauri-drag-region>
         <span className="titlebar-text">Pylon</span>
         <div className="titlebar-controls">
@@ -126,10 +131,6 @@ export default function App() {
       <div className="layout">
         <Sidebar activeSession={activeSession} onSelectSession={setActiveSession} onProfileEdit={() => setShowProfileEdit(true)} onSessionSettings={setSessionSettingsId} collapsed={sidebarCollapsed} />
         <div className="main">
-          <button className="sidebar-toggle-float" onClick={() => setSidebarCollapsed(!sidebarCollapsed)}
-            title={sidebarCollapsed ? '展开左栏' : '收起左栏'}>
-            {sidebarCollapsed ? '▸' : '▾'}
-          </button>
           <div className="tabbar">
             <button className={`tab ${activeTab === 'peri' ? 'active' : ''}`} onClick={() => setActiveTab('peri')}>Peri</button>
             <button className={`tab ${activeTab === 'prism' ? 'active' : ''}`} onClick={() => setActiveTab('prism')}>Prism</button>

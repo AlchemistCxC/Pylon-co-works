@@ -19,7 +19,7 @@ export default function ControlCenter({ sessionId }: Props) {
       <div className="cc-bg" />
       <div className="cc-body">
         <InputBar sessionId={sessionId} />
-        <StatusBar />
+        {sessionId && <StatusBar />}
       </div>
     </div>
   )

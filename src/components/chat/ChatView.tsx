@@ -1,4 +1,5 @@
 import { useRef, useEffect, useState, useMemo, useCallback } from 'react'
+import React from 'react'
 import { listen } from '@tauri-apps/api/event'
 import { invoke } from '@tauri-apps/api/core'
 import { useStore } from '../../store'
@@ -64,7 +65,7 @@ interface Message {
   toolOutputLines?: number; running?: boolean
 }
 
-export default function ChatView({ sessionId }: Props) {
+const ChatView = React.memo(function ChatView({ sessionId }: Props) {
   const bottomRef = useRef<HTMLDivElement>(null)
   const [messages, setMessages] = useState<Message[]>([])
   const [generating, setGenerating] = useState(false)
@@ -163,6 +164,7 @@ export default function ChatView({ sessionId }: Props) {
             break
           }
           case 'usage_update': {
+            console.log('[usage_update]', upd.value, upd.size)
             const used = upd.value || (upd._meta?.inputTokens || 0) + (upd._meta?.outputTokens || 0)
             const max = upd.size || 131072
             tokenCount.current = used
@@ -224,8 +226,8 @@ export default function ChatView({ sessionId }: Props) {
     <div className="chat-view">
       <div className="chat-header">
         <span className="chat-title">{(() => {
-          const s = useStore.getState().sessions.find(s => s.source === sessionId)
-          if (!s) return sessionId
+          const s = useStore.getState().sessions.find(s => s.id === sessionId)
+          if (!s) return '新会话'
           return s.autoName || (s.name.startsWith('session-') ? `新会话 · ${formatTime(s.createdAt)}` : s.name)
         })()}</span>
       </div>
@@ -253,7 +255,7 @@ export default function ChatView({ sessionId }: Props) {
         style={{ opacity: messages.length > 4 ? 1 : 0 }}>↓</button>
     </div>
   )
-}
+})
 
 // ── Sub-components ──
 
@@ -370,3 +372,5 @@ function UserLine({ sender, content }: { sender: string; content: string }) {
     </div>
   )
 }
+
+export default ChatView
