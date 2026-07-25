@@ -42,7 +42,7 @@
 .set-swatch-input { display:none; }
 
 .set-color-wrap { position:relative; flex-shrink:0; }
-.set-color-popover { position:absolute; top:28px; left:0; z-index:60; background:var(--bg-panel); border:1px solid var(--border); border-radius:8px; padding:8px; display:flex; flex-direction:column; gap:5px; box-shadow:0 8px 24px rgba(0,0,0,0.12); animation:pop-in 0.15s ease-out; }
+.set-color-popover { position:absolute; top:28px; left:0; z-index:60; background:var(--bg-panel); border:1px solid var(--border); border-radius:8px; padding:8px; display:flex; flex-wrap:wrap; gap:5px; box-shadow:0 8px 24px rgba(0,0,0,0.12); animation:pop-in 0.15s ease-out; }
 .set-color-chip { width:20px; height:20px; border-radius:50%; cursor:pointer; border:2px solid transparent; transition:all 0.15s; }
 .set-color-chip:hover { transform:scale(1.2); }
 .set-color-chip.active { border-color:var(--accent); }
