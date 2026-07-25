@@ -118,6 +118,15 @@ async fn send_message(
                                 let payload = raw.params.unwrap_or(serde_json::Value::Null);
                                 // R3: filter by sessionId
                                 if payload.get("sessionId").and_then(|v| v.as_str()) != Some(&pid) { continue; }
+                                // Check for userMessageChunk (history replay) → emit as user message
+                                if let Some(update) = payload.get("update") {
+                                    if update.get("sessionUpdate").and_then(|v| v.as_str()) == Some("userMessageChunk") {
+                                        if let Some(text) = update.get("content").and_then(|c| c.get("text")).and_then(|v| v.as_str()) {
+                                            let _ = win.emit("peri:user", serde_json::json!({"source": src, "content": text}));
+                                            continue;
+                                        }
+                                    }
+                                }
                                 let mut payload = payload;
                                 if let serde_json::Value::Object(ref mut map) = payload {
                                     map.insert("source".to_string(), serde_json::Value::String(src.clone()));
