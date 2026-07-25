@@ -223,7 +223,15 @@ async fn send_message(
                                                     }
                                                 }
                                                 Some("sessionInfoUpdate") => {
-                                                    if let Some(t) = update.get("title").and_then(|v| v.as_str()) { s.title = t.to_string(); }
+                                                    if let Some(t) = update.get("title").and_then(|v| v.as_str()) {
+                                                        s.title = t.to_string();
+                                                        // Pet memory: capture every 100th message's session title
+                                                        let _ = pet.lock().map(|mut p| {
+                                                            if p.messages > 0 && p.messages % 100 == 0 {
+                                                                pet::add_memory(&mut p, t.to_string());
+                                                            }
+                                                        });
+                                                    }
                                                 }
                                                 Some("configOptionUpdate") => {
                                                     if let Some(opts) = update.get("configOptions").and_then(|v| v.as_array()) {
@@ -383,6 +391,11 @@ async fn pet_action(state: tauri::State<'_, AppState>, action: String, value: Op
         "rename" => { if let Some(v) = value { pet.name = v; } }
         "daily" => { pet::daily_decay(&mut pet); }
         "sleepy" => { pet::check_sleepy(&mut pet); }
+        "nostalgia" => {
+            if let Some((prefix, mem)) = pet::recall_memory(&mut pet) {
+                pet.msg = Some(Box::leak(format!("{prefix} {mem}").into_boxed_str())); // lives 'static
+            }
+        }
         _ => { return Err(format!("unknown action: {}", action)); }
     }
     let msg = pet.msg.take();

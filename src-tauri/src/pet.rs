@@ -26,6 +26,7 @@ pub struct PetState {
     pub name: String,                    // user-set base name
     #[serde(skip)]
     pub msg: Option<&'static str>,       // current speech bubble (consumed on read)
+    pub memories: Vec<String>,           // up to 10 remembered moments
 }
 
 impl Default for PetState {
@@ -39,6 +40,7 @@ impl Default for PetState {
             tools_succeeded: 0,
             name: "豆豆".into(),
             msg: None,
+            memories: Vec::new(),
         }
     }
 }
@@ -113,13 +115,34 @@ const SLEEPY_MSGS: &[&str] = &[
     "我先眯一会…", "都快长蘑菇了", "⌁﹏⌁",
 ];
 
+const NIGHT_MSGS: &[&str] = &[
+    "都几点了…", "(打哈欠)", "还不睡？", "我帮你看着，你先睡吧",
+    "凌晨代码最香了…才怪", "生产队的驴也该歇了", "⌁_⌁ zzZ",
+    "你是不是又在修bug", "真的不困吗", "明天再看也一样啦",
+];
+
+const MEMORY_MSGS: &[&str] = &[
+    "还记得吗——", "突然想起一件事：", "说起来，之前",
+    "我好像记得…", "很久以前，", "翻开旧账本：",
+];
+
+/// Hour in UTC+8. Returns true if it's 2am-6am (night owl hours).
+pub fn is_night() -> bool {
+    let total_secs = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_secs();
+    let hour = ((total_secs / 3600 + 8) % 24) as u8;
+    hour >= 2 && hour < 6
+}
+
 // ── Mood transitions ──
 
 pub fn on_user_sent(state: &mut PetState) -> &'static str {
     state.messages += 1;
     state.first_chunk_at_ms = None;
     state.mood = "curious";
-    state.msg = Some(pick(USER_SENT));
+    state.msg = Some(if is_night() { pick(NIGHT_MSGS) } else { pick(USER_SENT) });
     state.mood
 }
 
@@ -168,6 +191,22 @@ pub fn on_usage_update(state: &mut PetState, total: u64) {
 
 pub fn on_tool_success(state: &mut PetState) {
     state.tools_succeeded += 1;
+}
+
+// ── Memories ──
+
+/// Store a memory snippet. Keeps at most 10.
+pub fn add_memory(state: &mut PetState, snippet: String) {
+    if state.memories.len() >= 10 { state.memories.remove(0); }
+    state.memories.push(snippet);
+}
+
+/// Recall a random memory. Returns (prefix, memory) or None if no memories.
+pub fn recall_memory(state: &mut PetState) -> Option<(&'static str, String)> {
+    if state.memories.is_empty() { return None; }
+    let n = SEED.fetch_add(1, Ordering::Relaxed) as usize % state.memories.len();
+    let mem = state.memories[n].clone();
+    Some((pick(MEMORY_MSGS), mem))
 }
 
 pub fn check_sleepy(state: &mut PetState) -> bool {
