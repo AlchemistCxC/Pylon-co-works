@@ -1,17 +1,19 @@
 //! Terminal Crab — ASCII pet companion.
 //!
-//! Lives in the Pylon chat view. Reacts to ACP events passively.
-//! State is persisted via localStorage on the frontend side;
-//! the backend only provides the event triggers and a status command.
+//! Dual-axis growth: token volume → body size, tool successes → tentacle count.
+//! Cute naming: 小豆豆 → 豆豆酱 → 豆豆师傅 → 老豆豆.
 
 use serde::Serialize;
 
 #[derive(Debug, Clone, Serialize)]
 pub struct PetState {
-    pub mood: &'static str,       // idle | curious | excited | sleepy | error | happy
-    pub happiness: u8,            // 0-100
+    pub mood: &'static str,              // idle|curious|excited|sleepy|error|happy
+    pub happiness: u8,                   // 0-100
     pub first_chunk_at_ms: Option<u64>,  // timestamp for sleepy detection
-    pub messages: u64,            // total messages sent (for milestones)
+    pub messages: u64,                   // total messages sent
+    pub total_tokens: u64,               // cumulative token usage (from usageUpdate)
+    pub tools_succeeded: u64,            // completed tool calls (from toolCallUpdate)
+    pub name: String,                    // user-set base name
 }
 
 impl Default for PetState {
@@ -21,12 +23,48 @@ impl Default for PetState {
             happiness: 50,
             first_chunk_at_ms: None,
             messages: 0,
+            total_tokens: 0,
+            tools_succeeded: 0,
+            name: "豆豆".into(),
         }
     }
 }
 
-/// Pet mood transitions triggered by ACP events.
-/// Returns the new mood (may be same as old).
+/// Growth tier (0-3). Tokens OR tools crossing threshold → level up.
+pub fn growth_stage(tokens: u64, tools: u64) -> u8 {
+    let token_tier = match tokens {
+        t if t > 5_000_000 => 3,
+        t if t > 500_000 => 2,
+        t if t > 50_000 => 1,
+        _ => 0,
+    };
+    let tool_tier = match tools {
+        t if t > 300 => 3,
+        t if t > 100 => 2,
+        t if t > 20 => 1,
+        _ => 0,
+    };
+    token_tier.max(tool_tier)
+}
+
+/// Cute display name based on growth stage.
+pub fn display_name(base: &str, stage: u8) -> String {
+    match stage {
+        0 => format!("小{base}"),
+        1 => format!("{base}酱"),
+        2 => format!("{base}师傅"),
+        _ => format!("老{base}"),
+    }
+}
+
+/// Generate full display name from state.
+pub fn full_name(state: &PetState) -> String {
+    let stage = growth_stage(state.total_tokens, state.tools_succeeded);
+    display_name(&state.name, stage)
+}
+
+// ── Mood transitions ──
+
 pub fn on_user_sent(state: &mut PetState) -> &'static str {
     state.messages += 1;
     state.first_chunk_at_ms = None;
@@ -40,14 +78,10 @@ pub fn on_first_chunk(state: &mut PetState) -> &'static str {
     state.mood
 }
 
-pub fn on_done(state: &mut PetState, response_len: usize) -> &'static str {
+pub fn on_done(state: &mut PetState) -> &'static str {
     state.first_chunk_at_ms = None;
-    if response_len > 200 {
-        state.mood = "excited";
-        state.happiness = state.happiness.saturating_add(2).min(100);
-    } else {
-        state.mood = "happy";
-    }
+    state.mood = "excited";
+    state.happiness = state.happiness.saturating_add(2).min(100);
     state.mood
 }
 
@@ -70,9 +104,16 @@ pub fn on_feed(state: &mut PetState) -> &'static str {
     state.mood
 }
 
-/// Check if the pet should switch to sleepy.
-/// Called periodically by the frontend timer.
-/// Returns true if the pet is now sleepy.
+// ── Growth hooks (called from notification loop) ──
+
+pub fn on_usage_update(state: &mut PetState, total: u64) {
+    state.total_tokens = total;
+}
+
+pub fn on_tool_success(state: &mut PetState) {
+    state.tools_succeeded += 1;
+}
+
 pub fn check_sleepy(state: &mut PetState) -> bool {
     if state.mood == "error" || state.mood == "excited" || state.mood == "happy" {
         return false;
@@ -86,7 +127,6 @@ pub fn check_sleepy(state: &mut PetState) -> bool {
     false
 }
 
-/// Daily happiness decay.
 pub fn daily_decay(state: &mut PetState) {
     state.happiness = state.happiness.saturating_sub(5);
 }

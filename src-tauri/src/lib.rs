@@ -168,7 +168,7 @@ async fn send_message(
                                 let _ = win.emit("peri:error", serde_json::json!({"source": src, "error": raw.error.unwrap_or_default().to_string()}));
                                 let _ = pet.lock().map(|mut p| pet::on_error(&mut p));
                             } else {
-                                let _ = pet.lock().map(|mut p| pet::on_done(&mut p, 300));
+                                let _ = pet.lock().map(|mut p| pet::on_done(&mut p));
                             }
                             return Ok(());
                         }
@@ -213,6 +213,14 @@ async fn send_message(
                                                         if let Some(m) = meta.get("model").and_then(|v| v.as_str()) { s.model = m.to_string(); }
                                                     }
                                                     s.context_size = update.get("size").and_then(|v| v.as_u64()).unwrap_or(0);
+                                                    // Pet growth: track cumulative tokens
+                                                    let _ = pet.lock().map(|mut p| pet::on_usage_update(&mut p, s.tokens_total));
+                                                }
+                                                Some("toolCallUpdate") => {
+                                                    // Pet growth: count successful tool calls
+                                                    if update.get("status").and_then(|v| v.as_str()) == Some("completed") {
+                                                        let _ = pet.lock().map(|mut p| pet::on_tool_success(&mut p));
+                                                    }
                                                 }
                                                 Some("sessionInfoUpdate") => {
                                                     if let Some(t) = update.get("title").and_then(|v| v.as_str()) { s.title = t.to_string(); }
@@ -364,11 +372,12 @@ async fn get_pet(state: tauri::State<'_, AppState>) -> Result<serde_json::Value,
 }
 
 #[tauri::command]
-async fn pet_action(state: tauri::State<'_, AppState>, action: String) -> Result<serde_json::Value, String> {
+async fn pet_action(state: tauri::State<'_, AppState>, action: String, value: Option<String>) -> Result<serde_json::Value, String> {
     let mut pet = state.pet.lock().map_err(|e| e.to_string())?;
     match action.as_str() {
         "poke" => { pet::on_poke(&mut pet); }
         "feed" => { pet::on_feed(&mut pet); }
+        "rename" => { if let Some(v) = value { pet.name = v; } }
         "daily" => { pet::daily_decay(&mut pet); }
         "sleepy" => { pet::check_sleepy(&mut pet); }
         _ => { return Err(format!("unknown action: {}", action)); }
