@@ -9,17 +9,17 @@ use std::io::{BufRead, BufReader, BufWriter, Write};
 use std::process::{Child, Command, Stdio};
 use std::sync::{Arc, Mutex};
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
-use tokio::sync::{broadcast, oneshot};
+use tokio::sync::{broadcast, mpsc, oneshot};
 
 type Pending = HashMap<u64, oneshot::Sender<RawMessage>>;
 
 pub struct AcpClient {
     child: Child,
-    stdin: Arc<Mutex<BufWriter<std::process::ChildStdin>>>,
+    /// mpsc channel for writing JSON-RPC lines to stdin. Single consumer = no lock contention.
+    write_tx: mpsc::UnboundedSender<String>,
     next_id: AtomicU64,
     pending: Arc<Mutex<Pending>>,
     /// Broadcast channel for all received messages (responses + notifications).
-    /// send_message subscribers filter by request_id or method.
     pub rx: broadcast::Receiver<RawMessage>,
     tx: broadcast::Sender<RawMessage>,
     /// Set when the child process exits unexpectedly.
@@ -60,11 +60,7 @@ impl AcpClient {
         let line = serde_json::to_string(&req)
             .map_err(|e| format!("serialize failed: {}", e))?;
 
-        {
-            let mut stdin = self.stdin.lock().map_err(|e| e.to_string())?;
-            writeln!(stdin, "{}", line).map_err(|e| format!("write failed: {}", e))?;
-            stdin.flush().map_err(|e| format!("flush failed: {}", e))?;
-        }
+        self.write_tx.send(line).map_err(|_| "ACP connection closed".to_string())?;
 
         let msg = rx.await.map_err(|_| "ACP connection closed".to_string())?;
 
@@ -111,11 +107,7 @@ impl AcpClient {
         let line = serde_json::to_string(&req)
             .map_err(|e| format!("serialize failed: {}", e))?;
 
-        {
-            let mut stdin = self.stdin.lock().map_err(|e| e.to_string())?;
-            writeln!(stdin, "{}", line).map_err(|e| format!("write failed: {}", e))?;
-            stdin.flush().map_err(|e| format!("flush failed: {}", e))?;
-        }
+        self.write_tx.send(line).map_err(|_| "ACP connection closed".to_string())?;
 
         Ok((id, rx))
     }
@@ -156,9 +148,7 @@ impl AcpClient {
             "params": params,
         });
         let line = serde_json::to_string(&req).map_err(|e| format!("serialize failed: {}", e))?;
-        let mut stdin = self.stdin.lock().map_err(|e| e.to_string())?;
-        writeln!(stdin, "{}", line).map_err(|e| format!("write failed: {}", e))?;
-        stdin.flush().map_err(|e| format!("flush failed: {}", e))?;
+        self.write_tx.send(line).map_err(|_| "ACP connection closed".to_string())?;
         Ok(())
     }
 
@@ -187,9 +177,16 @@ impl AcpClient {
                 let mut child = cmd.spawn()
                     .map_err(|e| format!("spawn {} failed: {}", &agent.exe, e))?;
 
-                let stdin = Arc::new(Mutex::new(BufWriter::new(
-                    child.stdin.take().ok_or("no stdin")?
-                )));
+                let stdin = child.stdin.take().ok_or("no stdin")?;
+                let (write_tx, mut write_rx) = mpsc::unbounded_channel::<String>();
+                // Spawn single-consumer writer task — writes JSON-RPC lines to stdin, with newline
+                std::thread::spawn(move || {
+                    let mut writer = BufWriter::new(stdin);
+                    while let Some(line) = write_rx.blocking_recv() {
+                        if writeln!(writer, "{}", line).is_err() { break; }
+                        if writer.flush().is_err() { break; }
+                    }
+                });
                 let stdout = BufReader::new(child.stdout.take().ok_or("no stdout")?);
 
                 // Drain stderr
@@ -238,7 +235,7 @@ impl AcpClient {
                 });
 
                 let client = AcpClient {
-                    child, stdin, next_id: AtomicU64::new(1), pending, rx, tx,
+                    child, write_tx, next_id: AtomicU64::new(1), pending, rx, tx,
                     crashed,
                     agent_name: agent.name.clone(),
                     agent_cwd: agent.cwd.clone(),
