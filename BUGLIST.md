@@ -1,69 +1,60 @@
 # Pylon Bug 清单
 
-> 宫木云汇报，Riccati 记录。
+> 宫木云汇报，Riccati 记录。**V9 审计发现两个编译级严重 bug。**
 
 ---
 
-## B1 — mcpServers 格式不兼容（🔴 P0）
+## 🔴 C1 — send_message 重复 window 参数（编译错误）
 
-**症状**：连 Peri 时报 `Invalid params: Input should be a valid list`。
+**位置**：`lib.rs` L42-43
 
-**根因**：`acp.rs` L88-91 `session/new` 传 `"mcpServers": {}`。ACP 标准类型是 list。Peri Rust 端宽松接受 `{}`，但某层 Python/Pydantic 校验拒绝对象。
-
-**修复**：改为 `"mcpServers": []`。
-
----
-
-## B2 — chat header 显示 raw session ID（🟡 P1）
-
-**症状**：会话左上角一直显示 `smrzv7udx` 或类似字符串。
-
-**根因**：ChatView 在 autoName 为空且 name 不以 `session-` 开头时 fallback 到 sessionId。新会话第一条消息到达前无 autoName。
-
-**修复**：首次渲染显示"新会话 · 时间"，收到首条消息后替换为 autoName。
-
----
-
-## B3 — 左侧栏折叠按钮找不到（🟡 P1）
-
-**修复**：移到中间栏（ChatView + ControlCenter 交界处左上角），常驻浮动按钮。
-
----
-
-## B4 — 心电图波形循环重复（🟡 P1）
-
-**症状**：波移动但像固定动画循环。
-
-**根因**：每周期 P-Q-R-S-T 相位时长硬编码。Math.random() 噪声只加在 y 值，相位时间不变 → 所有心跳时间结构相同。
-
-**修复**：每周期对相位加时序 jitter：
-
-```typescript
-const jitter = (Math.random() - 0.5) * 2 * noiseScale * 0.02
-const phStart = ph.start + jitter
-const phEnd = ph.end + jitter * 0.5
+```rust
+async fn send_message(
+    state: tauri::State<'_, AppState>,
+    window: tauri::Window,
+    window: tauri::Window,       // ← 重名，Rust 不合法
 ```
 
-每个心跳的 P 波时长、QRS 宽度都不同 → 永不重复。
+**修复**：删掉一行。
 
 ---
 
-## B5 — 历史会话无记录（🔴 P0）
+## 🔴 C2 — export_session 重复 broadcast + 误粘代码
 
-**症状**：点击有 periId 的会话无历史消息。
+**位置**：`lib.rs` L229-255
 
-**根因**：`session/load` 重放 history 的 `session/update` 事件，source 字段不匹配当前 session。
+问题 1：L229 和 L242 各一个 `resubscribe()`，L242 的 shadow 掉 L229。L232 的 `handle` 从第一个 broadcast 读，但 L256 `load_session` 后 handle 读到的是旧 channel 的锁。
 
-**验证**：console.log 看 `peri:update` 是否到达、source 是否正确。
+问题 2：L242-255 是从 `load_persisted_session` 误复制过来的——引用了 `source` 变量但 `export_session` 的参数里没有 `source`（这个函数只有 `peri_id`、`format`、`output_path`）。**直接编译失败。**
 
----
-
-## B6 — 会话设置 UI 难看（🟡 P1）
-
-**修复**：重组 CSS——平台下拉/prompt textarea/skills/hooks 标签行需要更好间距和排版。
+**修复**：删 L242-255（整段误粘），只保留 L229-241 的 broadcast + handle 收集逻辑。
 
 ---
 
-## B7 — 删除按钮不在左栏最右侧（🟡 P1）
+## B1 — mcpServers 格式不兼容（已修 ✅）
 
-**修复**：`.session-del { margin-left: auto; }`
+---
+
+## B2 — chat header 显示 raw session ID
+
+---
+
+## B3 — 左侧栏折叠按钮找不到
+
+---
+
+## B4 — 心电图波形循环重复（已修 ✅）
+
+---
+
+## B5 — 历史会话无记录
+
+**状态**：`load_persisted_session` 逻辑正确（L179-207）。需端到端验证。
+
+---
+
+## B6 — 会话设置 UI 难看（已修 ✅）
+
+---
+
+## B7 — 删除按钮不在左栏最右侧（已修 ✅）

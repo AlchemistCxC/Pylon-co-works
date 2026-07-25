@@ -177,9 +177,25 @@ async fn switch_agent(state: tauri::State<'_, AppState>, name: String) -> Result
 async fn load_persisted_session(
     state: tauri::State<'_, AppState>,
     source: String,
+    window: tauri::Window,
     peri_id: String,
 ) -> Result<(), String> {
     let agent = { let aa = state.active_agent.lock().map_err(|e| e.to_string())?; state.agents.get(&*aa).ok_or("no active agent")?.clone() };
+    // Start broadcast listener BEFORE loading — captures replayed history
+    let mut broadcast = state.acp.rx.resubscribe();
+    let src = source.clone();
+    let win = window.clone();
+    tokio::spawn(async move {
+        while let Ok(raw) = broadcast.recv().await {
+            if raw.method.as_deref() == Some("session/update") {
+                let mut payload = raw.params.unwrap_or(serde_json::Value::Null);
+                if let serde_json::Value::Object(ref mut map) = payload {
+                    map.insert("source".to_string(), serde_json::Value::String(src.clone()));
+                }
+                let _ = win.emit("peri:update", payload);
+            }
+        }
+    });
     let cwd = agent.cwd.as_deref().unwrap_or(".");
     state.acp.load_session(&peri_id, cwd).await?;
     // Register in local sessions map

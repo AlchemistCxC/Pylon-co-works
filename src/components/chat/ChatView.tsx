@@ -87,7 +87,7 @@ export default function ChatView({ sessionId }: Props) {
         // Auto-name: if session name is still default ID, use first 30 chars
         const sessions = useStore.getState().sessions
         const s = sessions.find(s => s.source === source)
-        if (s?.name.startsWith('session-') && s.name === s.id.replace('s', 'session-')) {
+        if (s?.name.startsWith('session-')) {
           const autoName = content.slice(0, 30)
           const updated = sessions.map(ss => ss.id === s.id ? { ...ss, autoName, name: autoName } : ss)
           useStore.setState({ sessions: updated })
