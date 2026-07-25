@@ -1,5 +1,6 @@
 import { useMemo, useState, useEffect } from 'react'
 import { useStore } from '../../store'
+import * as DropdownMenu from '@radix-ui/react-dropdown-menu'
 import { invoke } from '@tauri-apps/api/core'
 import './StatusBar.css'
 
@@ -158,17 +159,19 @@ export default function StatusBar() {
       <span style={{ marginLeft:'auto' }} />
 
       <div className="model-dropdown" onClick={e => e.stopPropagation()}>
-        <button className="model-tag" onClick={() => setModelOpen(!modelOpen)}>{model} ▾</button>
-        {modelOpen && (
-          <div className="model-menu">
-            {MODELS.map(m => (
-              <div key={m} className={`model-item ${m === model ? 'active' : ''}`}
-                onClick={() => { useStore.getState().addProfile({ ...(activeProfile || { id: '', name: '', persona: '', model: '' }), model: m }); setModelOpen(false) }}>
-                {m}
-              </div>
-            ))}
-          </div>
-        )}
+        <DropdownMenu.Root>
+          <DropdownMenu.Trigger className="model-tag">{model} ▾</DropdownMenu.Trigger>
+          <DropdownMenu.Portal>
+            <DropdownMenu.Content className="model-menu" sideOffset={4}>
+              {MODELS.map(m => (
+                <DropdownMenu.Item key={m} className={`model-item ${m === model ? 'active' : ''}`}
+                  onClick={() => { useStore.getState().addProfile({ ...(activeProfile || { id: '', name: '', persona: '', model: '' }), model: m }) }}>
+                  {m}
+                </DropdownMenu.Item>
+              ))}
+            </DropdownMenu.Content>
+          </DropdownMenu.Portal>
+        </DropdownMenu.Root>
       </div>
 
       <div className="mode-switch" onClick={e => { e.stopPropagation(); cycleMode() }}>
