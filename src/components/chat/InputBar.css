@@ -31,14 +31,12 @@
 .input-textarea::placeholder { color:var(--input-placeholder,var(--text-placeholder)); }
 
 /* CLI mode */
-.input-bar.cli-mode .input-row { position:relative; padding:14px 0; display:flex; width:100%; }
-.input-bar.cli-mode .input-row::before,
-.input-bar.cli-mode .input-row::after {
-  content:'' !important; position:absolute !important; left:0 !important; right:0 !important; display:block !important;
-  height:2px !important; background:var(--cli-line-color,var(--accent,#6366f1)) !important; z-index:1;
+.input-bar.cli-mode { border:none; background:transparent; padding-top:0; }
+.input-bar.cli-mode .input-row {
+  position:relative; padding:14px 0; display:flex; width:100%;
+  border-top:2px solid var(--cli-line-color,var(--accent,#6366f1));
+  border-bottom:2px solid var(--cli-line-color,var(--accent,#6366f1));
 }
-.input-bar.cli-mode .input-row::before { top:0; }
-.input-bar.cli-mode .input-row::after { bottom:0; }
 .input-bar.cli-mode .input-textarea {
   background:transparent; border:none; resize:none; height:auto; min-height:auto;
   color:var(--cli-text-color,var(--text)); font-family:var(--mono);
