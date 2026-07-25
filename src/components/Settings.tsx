@@ -163,7 +163,11 @@ export default function Settings({ onClose }: { onClose?: () => void }) {
           </Group>
           <Group title="指示器形状">
             <Row label="形状"><Sel value={t.toolIndicator} onChange={v=>u({toolIndicator:v})} options={['●','◆','■','▲','▶']}/></Row>
-            <Row label="Spinner 字符集"><Txt value={t.sparkles} onChange={v=>u({sparkles:v})}/></Row>
+            <Row label="Spinner 字符集"><Sel value={t.sparkles} onChange={v=>u({sparkles:v})} options={[
+              '✳✴✵✶✷✸✹✺✻✼❃❊','◴◷◶◵','·○◎●◉◎○','←↖↑↗→↘↓↙','▖▗▘▝▗▖▝▘','▁▂▃▄▅▆▇█▇▆▅▄▃','┌┐┘└','⠁⠂⠄⡀⢀⠠⠐⠈'
+            ]}/></Row>
+            <Row label="Spinner 颜色"><Swatch value={t.spinnerColor} onChange={v=>u({spinnerColor:v})}/></Row>
+            <Row label="Spinner 大小"><Num value={t.spinnerSize} onChange={v=>u({spinnerSize:v})} min={10} max={32}/></Row>
           </Group>
         </>}
 

@@ -93,7 +93,7 @@
 .term-ansi { font-family:var(--mono); font-size:0.93em; line-height:1.6; white-space:pre-wrap; padding:6px 0; }
 
 /* ── Peri spinner ── */
-.term-spinner { padding:8px 0; display:flex; align-items:center; gap:8px; font-size:1em; }
+.term-spinner { padding:8px 0; display:flex; align-items:center; gap:8px; font-size:var(--spinner-size,14px); color:var(--spinner-color,var(--text-dim)); }
 .spinner-frame { color:var(--accent); font-size:1.15em; }
 .spinner-verb { color:var(--accent); font-weight:500; opacity:0.85; }
 .spinner-meta { color:var(--text-dim); }

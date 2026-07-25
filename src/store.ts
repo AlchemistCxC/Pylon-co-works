@@ -19,6 +19,7 @@ export interface ThemeSettings {
   sidebarTransparency: number; sidebarBlur: number; chatTransparency: number; chatBlur: number; rightTransparency: number; rightBlur: number
   userName: string; userPrefix: string; userColor: string
   toolIndicator: string; sparkles: string
+  spinnerColor: string; spinnerSize: number
   msgStyle: string; msgFont: string; msgTextColor: string; msgLineHeight: number
   ccHeight: number; ccBgHeight: number; ccBg: string
   ccStyle: string
@@ -65,6 +66,7 @@ const DEFAULTS: ThemeSettings = {
   sidebarTransparency: 1, sidebarBlur: 0, chatTransparency: 1, chatBlur: 0, rightTransparency: 1, rightBlur: 0,
   userName: '', userPrefix: '❯', userColor: '',
   toolIndicator: '●', sparkles: '✳✴✵✶✷✸✹✺✻✼❃❊',
+  spinnerColor: '', spinnerSize: 14,
   msgStyle: 'terminal', msgFont: 'mono', msgTextColor: '', msgLineHeight: 1.8,
   ccHeight: 120, ccBgHeight: 120, ccBg: 'transparent',
   ccStyle: 'wave',
