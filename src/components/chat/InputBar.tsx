@@ -1,7 +1,6 @@
 import { useState, useRef, KeyboardEvent, useEffect } from 'react'
 import { invoke } from '@tauri-apps/api/core'
 import { open } from '@tauri-apps/plugin-dialog'
-import { readTextFile } from '@tauri-apps/plugin-fs'
 import { useStore } from '../../store'
 import { Paperclip, ArrowUp } from 'lucide-react'
 import './InputBar.css'

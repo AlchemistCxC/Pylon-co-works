@@ -1,7 +1,6 @@
 import { useMemo, useState, useEffect } from 'react'
 import { useStore } from '../../store'
 import * as DropdownMenu from '@radix-ui/react-dropdown-menu'
-import { invoke } from '@tauri-apps/api/core'
 import './StatusBar.css'
 
 function hash(seed: number): number {
@@ -70,12 +69,10 @@ export default function StatusBar() {
   const tokensMax = useStore(s => s.liveTokensMax) || 128
   const cacheHit = useStore(s => s.liveCacheHit) || 0
   const mode = useStore(s => s.liveMode) || 'auto'
-  const prismOn = useStore(s => s.livePrismOn)
   const ekgGreen = useStore(s => s.ekgGreen)
   const ekgYellow = useStore(s => s.ekgYellow)
   const ekgRed = useStore(s => s.ekgRed)
   const [tick, setTick] = useState(0)
-  const [modelOpen, setModelOpen] = useState(false)
   const activeProfile = useStore(s => s.profiles.find(x => x.id === s.activeProfileId))
   const model = activeProfile?.model || 'deepseek-v4-flash'
   const ccStyle = useStore(s => s.ccStyle) || 'wave'
