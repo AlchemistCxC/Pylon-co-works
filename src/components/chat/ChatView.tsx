@@ -1,12 +1,10 @@
-import { useRef, useEffect, useState, useMemo, useCallback } from 'react'
+import { useRef, useEffect, useState, useMemo } from 'react'
 import React from 'react'
 import { listen } from '@tauri-apps/api/event'
 import { invoke } from '@tauri-apps/api/core'
 import { useStore } from '../../store'
 import ReactMarkdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
-import { createStarryNight, all } from '@wooorm/starry-night'
-import { toHtml } from 'hast-util-to-html'
 import { AnimatePresence, motion } from 'motion/react'
 import Anser from 'anser'
 import './ChatView.css'
@@ -50,10 +48,6 @@ function Spinner({ tokenCount, startTime }: { tokenCount: number; startTime: num
     </div>
   )
 }
-
-// ── starry-night ──
-let snPromise: ReturnType<typeof createStarryNight> | null = null
-function getStarryNight() { if (!snPromise) snPromise = createStarryNight(all); return snPromise }
 
 interface Props { sessionId: string | null }
 
@@ -297,18 +291,12 @@ function AssistantContent({ text }: { text: string }) {
 }
 
 function CodeBlock({ language, code }: { language?: string; code: string }) {
-  const [html, setHtml] = useState('')
-  useEffect(() => {
-    let cancelled = false
-    getStarryNight().then(sn => {
-      if (cancelled) return
-      const scope = language ? sn.flagToScope(language) : undefined
-      const tree = sn.highlight(code, scope || '')
-      setHtml(toHtml(tree))
-    })
-    return () => { cancelled = true }
-  }, [language, code])
-  return html ? <div className="term-code" dangerouslySetInnerHTML={{ __html: html }} /> : <div className="term-code"><pre><code>{code}</code></pre></div>
+  return (
+    <div className="term-code">
+      {language && <div className="term-tool-label">{language}</div>}
+      <pre><code>{code}</code></pre>
+    </div>
+  )
 }
 
 function ReasoningBlock({ text }: { text: string }) {
