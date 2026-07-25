@@ -16,7 +16,7 @@ import './Settings.css'
 
 // ── helpers ──
 
-const COLOR_CHIPS = ['#a855f7','#3b82f6','#34d399','#f59e0b','#ef4444','#ec4899','#6366f1','#14b8a6','#f97316','#ffffff']
+const COLOR_CHIPS = ['#a855f7','#3b82f6','#34d399','#f59e0b','#ef4444','#ec4899','#6366f1']
 
 function Swatch({ value, onChange }: { value:string; onChange:(v:string)=>void }) {
   const ref = useRef<HTMLInputElement>(null)
