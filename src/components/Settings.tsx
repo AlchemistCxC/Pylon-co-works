@@ -16,6 +16,8 @@ import './Settings.css'
 
 // ── helpers ──
 
+const COLOR_CHIPS = ['#a855f7','#3b82f6','#34d399','#f59e0b','#ef4444','#ec4899','#6366f1','#14b8a6','#f97316','#ffffff']
+
 function Swatch({ value, onChange }: { value:string; onChange:(v:string)=>void }) {
   const ref = useRef<HTMLInputElement>(null)
   return <>
@@ -28,14 +30,13 @@ function ColorPopover({ value, onChange }: { value:string; onChange:(v:string)=>
   const [open, setOpen] = useState(false)
   const ref = useRef<HTMLDivElement>(null)
   const pickerRef = useRef<HTMLInputElement>(null)
-  const chips = ['#a855f7','#3b82f6','#34d399','#f59e0b','#ef4444','#ec4899','#6366f1','#14b8a6','#f97316','#ffffff']
 
   return (
     <div className="set-color-wrap" ref={ref}>
       <div className="set-swatch" style={{background:value}} onClick={() => setOpen(!open)}/>
       {open && <>
         <div className="set-color-popover">
-          {chips.map(c => (
+          {COLOR_CHIPS.map(c => (
             <div key={c} className={`set-color-chip ${value === c ? 'active' : ''}`}
               style={{background:c}} onClick={() => { onChange(c); setOpen(false) }} />
           ))}
@@ -394,11 +395,11 @@ export default function Settings({ onClose }: { onClose?: () => void }) {
               <Group title="颜色">
                 <div className="set-compact-row">
                   <span className="set-compact-label">文字</span>
-                  <Swatch value={t.chatTextColor} onChange={v=>onSettingChange({chatTextColor:v})}/>
+                  <ColorPopover value={t.chatTextColor} onChange={v=>onSettingChange({chatTextColor:v})}/>
                   <span className="set-compact-label">内联代码</span>
-                  <Swatch value={t.chatCodeColor} onChange={v=>onSettingChange({chatCodeColor:v})}/>
+                  <ColorPopover value={t.chatCodeColor} onChange={v=>onSettingChange({chatCodeColor:v})}/>
                   <span className="set-compact-label">代码背景</span>
-                  <Swatch value={t.chatCodeBg} onChange={v=>onSettingChange({chatCodeBg:v})}/>
+                  <ColorPopover value={t.chatCodeBg} onChange={v=>onSettingChange({chatCodeBg:v})}/>
                 </div>
               </Group>
               <Group title="玻璃效果">
@@ -410,25 +411,25 @@ export default function Settings({ onClose }: { onClose?: () => void }) {
               <Group title="指示器">
                 <div className="set-compact-row">
                   <span className="set-compact-label">完成</span>
-                  <Swatch value={t.toolOk} onChange={v=>onSettingChange({toolOk:v})}/>
+                  <ColorPopover value={t.toolOk} onChange={v=>onSettingChange({toolOk:v})}/>
                   <span className="set-compact-label">运行中</span>
-                  <Swatch value={t.toolRun} onChange={v=>onSettingChange({toolRun:v})}/>
+                  <ColorPopover value={t.toolRun} onChange={v=>onSettingChange({toolRun:v})}/>
                   <span className="set-compact-label">错误</span>
-                  <Swatch value={t.toolErr} onChange={v=>onSettingChange({toolErr:v})}/>
+                  <ColorPopover value={t.toolErr} onChange={v=>onSettingChange({toolErr:v})}/>
                 </div>
               </Group>
               <Group title="文字 & 标签">
                 <div className="set-compact-row">
                   <span className="set-compact-label">工具名</span>
-                  <Swatch value={t.toolNameColor} onChange={v=>onSettingChange({toolNameColor:v})}/>
+                  <ColorPopover value={t.toolNameColor} onChange={v=>onSettingChange({toolNameColor:v})}/>
                   <span className="set-compact-label">摘要</span>
-                  <Swatch value={t.toolSummaryColor} onChange={v=>onSettingChange({toolSummaryColor:v})}/>
+                  <ColorPopover value={t.toolSummaryColor} onChange={v=>onSettingChange({toolSummaryColor:v})}/>
                 </div>
                 <div className="set-compact-row" style={{marginTop:4}}>
                   <span className="set-compact-label">标签背景</span>
-                  <Swatch value={t.userTagBg} onChange={v=>onSettingChange({userTagBg:v})}/>
+                  <ColorPopover value={t.userTagBg} onChange={v=>onSettingChange({userTagBg:v})}/>
                   <span className="set-compact-label">标签文字</span>
-                  <Swatch value={t.userTagText} onChange={v=>onSettingChange({userTagText:v})}/>
+                  <ColorPopover value={t.userTagText} onChange={v=>onSettingChange({userTagText:v})}/>
                 </div>
               </Group>
               <Group title="指示器 & Spinner">
@@ -438,7 +439,7 @@ export default function Settings({ onClose }: { onClose?: () => void }) {
                 ]}/></Row>
                 <div className="set-compact-row">
                   <span className="set-compact-label">颜色</span>
-                  <Swatch value={t.spinnerColor} onChange={v=>onSettingChange({spinnerColor:v})}/>
+                  <ColorPopover value={t.spinnerColor} onChange={v=>onSettingChange({spinnerColor:v})}/>
                   <span className="set-compact-label">大小</span>
                   <Num value={t.spinnerSize} onChange={v=>onSettingChange({spinnerSize:v})} min={10} max={32}/>
                 </div>
@@ -450,7 +451,7 @@ export default function Settings({ onClose }: { onClose?: () => void }) {
                 <Row label="字体"><Sel value={t.msgFont} onChange={v=>onSettingChange({msgFont:v})} options={['mono','system']}/></Row>
                 <div className="set-compact-row">
                   <span className="set-compact-label">文字颜色</span>
-                  <Swatch value={t.msgTextColor} onChange={v=>onSettingChange({msgTextColor:v})}/>
+                  <ColorPopover value={t.msgTextColor} onChange={v=>onSettingChange({msgTextColor:v})}/>
                   <span className="set-compact-label">行间距</span>
                   <Num value={t.msgLineHeight} onChange={v=>onSettingChange({msgLineHeight:v})} min={1.2} max={2.5}/>
                 </div>
@@ -485,17 +486,17 @@ export default function Settings({ onClose }: { onClose?: () => void }) {
 
               <Group title="布局">
                 <Row label="高度"><Num value={t.ccHeight} onChange={v=>onSettingChange({ccHeight:v})} min={80} max={400}/><span className="set-val">px</span></Row>
-                <Row label="背景色"><Swatch value={t.ccBg} onChange={v=>onSettingChange({ccBg:v})}/></Row>
+                <Row label="背景色"><ColorPopover value={t.ccBg} onChange={v=>onSettingChange({ccBg:v})}/></Row>
               </Group>
 
               <h3>输入栏</h3>
               <Group title="外观">
-                <Row label="背景色"><Swatch value={t.inputBg} onChange={v=>onSettingChange({inputBg:v})}/></Row>
+                <Row label="背景色"><ColorPopover value={t.inputBg} onChange={v=>onSettingChange({inputBg:v})}/></Row>
                 <BgImageRow label="背景图" value={t.inputBgImage||''} onChange={v=>onSettingChange({inputBgImage:v})}/>
-                <Row label="文字颜色"><Swatch value={t.inputTextColor} onChange={v=>onSettingChange({inputTextColor:v})}/></Row>
-                <Row label="占位符颜色"><Swatch value={t.inputPlaceholder} onChange={v=>onSettingChange({inputPlaceholder:v})}/></Row>
-                <Row label="发送按钮色"><Swatch value={t.inputSendBg} onChange={v=>onSettingChange({inputSendBg:v})}/></Row>
-                <Row label="聚焦边框"><Swatch value={t.inputFocusBorder} onChange={v=>onSettingChange({inputFocusBorder:v})}/></Row>
+                <Row label="文字颜色"><ColorPopover value={t.inputTextColor} onChange={v=>onSettingChange({inputTextColor:v})}/></Row>
+                <Row label="占位符颜色"><ColorPopover value={t.inputPlaceholder} onChange={v=>onSettingChange({inputPlaceholder:v})}/></Row>
+                <Row label="发送按钮色"><ColorPopover value={t.inputSendBg} onChange={v=>onSettingChange({inputSendBg:v})}/></Row>
+                <Row label="聚焦边框"><ColorPopover value={t.inputFocusBorder} onChange={v=>onSettingChange({inputFocusBorder:v})}/></Row>
               </Group>
               <Group title="尺寸">
                 <Row label="字号"><Num value={t.inputFontSize} onChange={v=>onSettingChange({inputFontSize:v})} min={12} max={22}/></Row>
@@ -504,37 +505,37 @@ export default function Settings({ onClose }: { onClose?: () => void }) {
               <Group title="CLI 风格" defaultOpen={false}>
                 <Row label="模式"><Sel value={t.inputMode} onChange={v=>onSettingChange({inputMode:v})} options={['default','cli']}/></Row>
                 <Row label="横线宽度"><Num value={t.cliLineWidth} onChange={v=>onSettingChange({cliLineWidth:v})} min={1} max={6}/></Row>
-                <Row label="横线颜色"><Swatch value={t.cliLineColor} onChange={v=>onSettingChange({cliLineColor:v})}/></Row>
-                <Row label="文字颜色"><Swatch value={t.cliTextColor} onChange={v=>onSettingChange({cliTextColor:v})}/></Row>
+                <Row label="横线颜色"><ColorPopover value={t.cliLineColor} onChange={v=>onSettingChange({cliLineColor:v})}/></Row>
+                <Row label="文字颜色"><ColorPopover value={t.cliTextColor} onChange={v=>onSettingChange({cliTextColor:v})}/></Row>
               </Group>
 
               <h3>状态栏 & 心电图</h3>
               <Group title="外观">
-                <Row label="背景色"><Swatch value={t.statusBg} onChange={v=>onSettingChange({statusBg:v})}/></Row>
+                <Row label="背景色"><ColorPopover value={t.statusBg} onChange={v=>onSettingChange({statusBg:v})}/></Row>
                 <BgImageRow label="背景图" value={t.statusBgImage||''} onChange={v=>onSettingChange({statusBgImage:v})}/>
                 <Row label="心电图宽度"><Num value={t.ekgWidth} onChange={v=>onSettingChange({ekgWidth:v})} min={120} max={400}/></Row>
                 <Row label="心电图字号"><Num value={t.ekgFontSize} onChange={v=>onSettingChange({ekgFontSize:v})} min={12} max={22}/></Row>
               </Group>
               <Group title="心电图颜色">
-                <Row label="绿色"><Swatch value={t.ekgGreen} onChange={v=>onSettingChange({ekgGreen:v})}/></Row>
-                <Row label="黄色"><Swatch value={t.ekgYellow} onChange={v=>onSettingChange({ekgYellow:v})}/></Row>
-                <Row label="红色"><Swatch value={t.ekgRed} onChange={v=>onSettingChange({ekgRed:v})}/></Row>
+                <Row label="绿色"><ColorPopover value={t.ekgGreen} onChange={v=>onSettingChange({ekgGreen:v})}/></Row>
+                <Row label="黄色"><ColorPopover value={t.ekgYellow} onChange={v=>onSettingChange({ekgYellow:v})}/></Row>
+                <Row label="红色"><ColorPopover value={t.ekgRed} onChange={v=>onSettingChange({ekgRed:v})}/></Row>
               </Group>
               <Group title="胶囊" defaultOpen={false}>
-                <Row label="背景"><Swatch value={t.pillBg} onChange={v=>onSettingChange({pillBg:v})}/></Row>
-                <Row label="文字"><Swatch value={t.pillText} onChange={v=>onSettingChange({pillText:v})}/></Row>
+                <Row label="背景"><ColorPopover value={t.pillBg} onChange={v=>onSettingChange({pillBg:v})}/></Row>
+                <Row label="文字"><ColorPopover value={t.pillText} onChange={v=>onSettingChange({pillText:v})}/></Row>
               </Group>
               <Group title="其他" defaultOpen={false}>
-                <Row label="Prism ON 色"><Swatch value={t.prismOnColor} onChange={v=>onSettingChange({prismOnColor:v})}/></Row>
+                <Row label="Prism ON 色"><ColorPopover value={t.prismOnColor} onChange={v=>onSettingChange({prismOnColor:v})}/></Row>
               </Group>
               <Group title="心电图样式" defaultOpen={false}>
                 <Row label="基线宽度"><Num value={t.ekgLineWidth} onChange={v=>onSettingChange({ekgLineWidth:v})} min={2} max={20}/></Row>
                 <Row label="最大振幅"><Num value={t.ekgAmplitudeMax} onChange={v=>onSettingChange({ekgAmplitudeMax:v})} min={5} max={30}/></Row>
                 <Row label="基础波速"><Num value={t.ekgSpeedBase} onChange={v=>onSettingChange({ekgSpeedBase:v})} min={0} max={3}/></Row>
                 <Row label="最大波速"><Num value={t.ekgSpeedMax} onChange={v=>onSettingChange({ekgSpeedMax:v})} min={0} max={5}/></Row>
-                <Row label="定端点颜色"><Swatch value={t.ekgLeftColor} onChange={v=>onSettingChange({ekgLeftColor:v})}/></Row>
-                <Row label="动端点颜色"><Swatch value={t.ekgMovingColor} onChange={v=>onSettingChange({ekgMovingColor:v})}/></Row>
-                <Row label="消耗区颜色"><Swatch value={t.ekgConsumedColor} onChange={v=>onSettingChange({ekgConsumedColor:v})}/></Row>
+                <Row label="定端点颜色"><ColorPopover value={t.ekgLeftColor} onChange={v=>onSettingChange({ekgLeftColor:v})}/></Row>
+                <Row label="动端点颜色"><ColorPopover value={t.ekgMovingColor} onChange={v=>onSettingChange({ekgMovingColor:v})}/></Row>
+                <Row label="消耗区颜色"><ColorPopover value={t.ekgConsumedColor} onChange={v=>onSettingChange({ekgConsumedColor:v})}/></Row>
               </Group>
               <Group title="上下文显示" defaultOpen={false}>
                 <Row label="仪表样式"><Sel value={t.ccStyle} onChange={v=>onSettingChange({ccStyle:v})} options={['wave','bar','numeric']}/></Row>
@@ -546,7 +547,7 @@ export default function Settings({ onClose }: { onClose?: () => void }) {
             <Tabs.Content value="right">
               <h3>右侧栏</h3>
               <Group title="外观">
-                <Row label="背景色"><Swatch value={t.rightBg} onChange={v=>onSettingChange({rightBg:v})}/></Row>
+                <Row label="背景色"><ColorPopover value={t.rightBg} onChange={v=>onSettingChange({rightBg:v})}/></Row>
                 <BgImageRow label="背景图" value={t.rightBgImage||''} onChange={v=>onSettingChange({rightBgImage:v})}/>
                 <Row label="宽度"><Num value={t.rightWidth} onChange={v=>onSettingChange({rightWidth:v})} min={200} max={400}/></Row>
               </Group>
