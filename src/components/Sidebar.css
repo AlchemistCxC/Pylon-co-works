@@ -67,12 +67,4 @@ details[open] > .group-header::before { content:'▾'; }
 .sidebar.collapsed .profile-avatar:not(.active),
 .sidebar.collapsed .profile-edit { display:none; }
 
-.sidebar-toggle-float {
-  width:20px; height:48px;
-  background:var(--bg-panel); border:1px solid var(--border);
-  border-radius:0 6px 6px 0;
-  color:var(--text-dim); cursor:pointer; font-size:12px;
-  display:flex; align-items:center; justify-content:center;
-  padding:0; transition:left 0.25s;
-}
 .sidebar-toggle-float:hover { color:var(--text); }
