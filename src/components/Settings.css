@@ -47,6 +47,8 @@
 .set-color-chip.active { border-color:var(--accent); box-shadow:0 0 0 1px var(--accent); }
 .set-bg-preview { width:28px; height:28px; border-radius:4px; background-size:cover; background-position:center; border:1px solid var(--border); cursor:pointer; flex-shrink:0; }
 .set-bg-preview:hover { border-color:var(--danger); opacity:0.8; }
+.set-compact-row { display:flex; align-items:center; gap:6px; flex-wrap:wrap; padding:4px 0; }
+.set-compact-label { font-size:11px; color:var(--text-dim); flex-shrink:0; }
 .set-range { width:120px; height:4px; accent-color:var(--accent); flex-shrink:0; }
 .set-num { width:56px; background:var(--bg-input); border:1px solid var(--border); border-radius:4px; padding:3px 8px; color:var(--text); font-size:13px; text-align:right; font-family:var(--mono); }
 .set-num:focus { border-color:var(--border-focus); outline:none; }

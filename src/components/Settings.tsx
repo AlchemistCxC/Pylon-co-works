@@ -367,10 +367,21 @@ export default function Settings({ onClose }: { onClose?: () => void }) {
 
             {/* ═══ 终端 ═══ */}
             <Tabs.Content value="terminal">
-              <PresetRow area="terminal" />
+              <Group title="局部预设">
+                <div className="set-preset-row">
+                  {GLOBAL_PRESETS.map(p => (
+                    <button key={p.name} className="set-preset-chip"
+                      onClick={() => u(pickPresetFields(p.theme, TERMINAL_FIELDS) as any)}>{p.label}</button>
+                  ))}
+                </div>
+              </Group>
+
               <h3>聊天区</h3>
-              <Group title="外观">
-                <Row label="背景色"><Swatch value={t.chatBg} onChange={v=>onSettingChange({chatBg:v})}/></Row>
+              <Group title="背景">
+                <Row label="背景色">
+                  <Swatch value={t.chatBg} onChange={v=>onSettingChange({chatBg:v})}/>
+                  <ColorChips value={t.chatBg} onChange={v=>onSettingChange({chatBg:v})}/>
+                </Row>
                 <BgImageRow label="背景图" value={t.chatBgImage} onChange={v=>onSettingChange({chatBgImage:v})}/>
               </Group>
               <Group title="字体">
@@ -379,44 +390,71 @@ export default function Settings({ onClose }: { onClose?: () => void }) {
                 <Row label="行高"><Num value={t.chatLineHeight} onChange={v=>onSettingChange({chatLineHeight:v})} min={1.2} max={2.5}/></Row>
               </Group>
               <Group title="颜色">
-                <Row label="文字颜色"><Swatch value={t.chatTextColor} onChange={v=>onSettingChange({chatTextColor:v})}/></Row>
-                <Row label="内联代码"><Swatch value={t.chatCodeColor} onChange={v=>onSettingChange({chatCodeColor:v})}/></Row>
-                <Row label="代码块背景"><Swatch value={t.chatCodeBg} onChange={v=>onSettingChange({chatCodeBg:v})}/></Row>
+                <div className="set-compact-row">
+                  <span className="set-compact-label">文字</span>
+                  <Swatch value={t.chatTextColor} onChange={v=>onSettingChange({chatTextColor:v})}/>
+                  <ColorChips value={t.chatTextColor} onChange={v=>onSettingChange({chatTextColor:v})}/>
+                  <span className="set-compact-label">内联代码</span>
+                  <Swatch value={t.chatCodeColor} onChange={v=>onSettingChange({chatCodeColor:v})}/>
+                  <ColorChips value={t.chatCodeColor} onChange={v=>onSettingChange({chatCodeColor:v})}/>
+                  <span className="set-compact-label">代码背景</span>
+                  <Swatch value={t.chatCodeBg} onChange={v=>onSettingChange({chatCodeBg:v})}/>
+                  <ColorChips value={t.chatCodeBg} onChange={v=>onSettingChange({chatCodeBg:v})}/>
+                </div>
               </Group>
               <Group title="玻璃效果">
                 <Row label="透明度"><Slider value={t.chatTransparency} onChange={v=>onSettingChange({chatTransparency:v})} min={0} max={1}/><span className="set-val">{Math.round(t.chatTransparency*100)}%</span></Row>
                 <Row label="模糊"><Slider value={t.chatBlur} onChange={v=>onSettingChange({chatBlur:v})} min={0} max={40} step={2}/><span className="set-val">{t.chatBlur}px</span></Row>
               </Group>
 
-              <h3>工具调用 & 用户标签</h3>
-              <Group title="工具指示器" defaultOpen={false}>
-                <Row label="完成 ●"><Swatch value={t.toolOk} onChange={v=>onSettingChange({toolOk:v})}/></Row>
-                <Row label="运行中 ●"><Swatch value={t.toolRun} onChange={v=>onSettingChange({toolRun:v})}/></Row>
-                <Row label="错误 ●"><Swatch value={t.toolErr} onChange={v=>onSettingChange({toolErr:v})}/></Row>
+              <h3>工具调用</h3>
+              <Group title="指示器">
+                <div className="set-compact-row">
+                  <span className="set-compact-label">完成</span>
+                  <Swatch value={t.toolOk} onChange={v=>onSettingChange({toolOk:v})}/>
+                  <span className="set-compact-label">运行中</span>
+                  <Swatch value={t.toolRun} onChange={v=>onSettingChange({toolRun:v})}/>
+                  <span className="set-compact-label">错误</span>
+                  <Swatch value={t.toolErr} onChange={v=>onSettingChange({toolErr:v})}/>
+                </div>
               </Group>
-              <Group title="工具文字" defaultOpen={false}>
-                <Row label="工具名颜色"><Swatch value={t.toolNameColor} onChange={v=>onSettingChange({toolNameColor:v})}/></Row>
-                <Row label="摘要颜色"><Swatch value={t.toolSummaryColor} onChange={v=>onSettingChange({toolSummaryColor:v})}/></Row>
+              <Group title="文字 & 标签">
+                <div className="set-compact-row">
+                  <span className="set-compact-label">工具名</span>
+                  <Swatch value={t.toolNameColor} onChange={v=>onSettingChange({toolNameColor:v})}/>
+                  <span className="set-compact-label">摘要</span>
+                  <Swatch value={t.toolSummaryColor} onChange={v=>onSettingChange({toolSummaryColor:v})}/>
+                </div>
+                <div className="set-compact-row" style={{marginTop:4}}>
+                  <span className="set-compact-label">标签背景</span>
+                  <Swatch value={t.userTagBg} onChange={v=>onSettingChange({userTagBg:v})}/>
+                  <span className="set-compact-label">标签文字</span>
+                  <Swatch value={t.userTagText} onChange={v=>onSettingChange({userTagText:v})}/>
+                </div>
               </Group>
-              <Group title="用户标签" defaultOpen={false}>
-                <Row label="标签背景"><Swatch value={t.userTagBg} onChange={v=>onSettingChange({userTagBg:v})}/></Row>
-                <Row label="标签文字"><Swatch value={t.userTagText} onChange={v=>onSettingChange({userTagText:v})}/></Row>
-              </Group>
-              <Group title="指示器形状" defaultOpen={false}>
+              <Group title="指示器 & Spinner">
                 <Row label="形状"><Sel value={t.toolIndicator} onChange={v=>onSettingChange({toolIndicator:v})} options={['●','◆','■','▲','▶']}/></Row>
-                <Row label="Spinner 字符集"><Sel value={t.sparkles} onChange={v=>onSettingChange({sparkles:v})} options={[
+                <Row label="字符集"><Sel value={t.sparkles} onChange={v=>onSettingChange({sparkles:v})} options={[
                   '✳✴✵✶✷✸✹✺✻✼❃❊','◴◷◶◵','·○◎●◉◎○','←↖↑↗→↘↓↙','▖▗▘▝▗▖▝▘','▁▂▃▄▅▆▇█▇▆▅▄▃','┌┐┘└','⠁⠂⠄⡀⢀⠠⠐⠈'
                 ]}/></Row>
-                <Row label="Spinner 颜色"><Swatch value={t.spinnerColor} onChange={v=>onSettingChange({spinnerColor:v})}/></Row>
-                <Row label="Spinner 大小"><Num value={t.spinnerSize} onChange={v=>onSettingChange({spinnerSize:v})} min={10} max={32}/></Row>
+                <div className="set-compact-row">
+                  <span className="set-compact-label">颜色</span>
+                  <Swatch value={t.spinnerColor} onChange={v=>onSettingChange({spinnerColor:v})}/>
+                  <span className="set-compact-label">大小</span>
+                  <Num value={t.spinnerSize} onChange={v=>onSettingChange({spinnerSize:v})} min={10} max={32}/>
+                </div>
               </Group>
 
-              <h3>消息栏</h3>
-              <Group title="风格" defaultOpen={false}>
+              <h3>消息渲染</h3>
+              <Group title="风格">
                 <Row label="风格"><Sel value={t.msgStyle} onChange={v=>onSettingChange({msgStyle:v})} options={['terminal','bubble']}/></Row>
                 <Row label="字体"><Sel value={t.msgFont} onChange={v=>onSettingChange({msgFont:v})} options={['mono','system']}/></Row>
-                <Row label="文字颜色"><Swatch value={t.msgTextColor} onChange={v=>onSettingChange({msgTextColor:v})}/></Row>
-                <Row label="行间距"><Num value={t.msgLineHeight} onChange={v=>onSettingChange({msgLineHeight:v})} min={1.2} max={2.5}/></Row>
+                <div className="set-compact-row">
+                  <span className="set-compact-label">文字颜色</span>
+                  <Swatch value={t.msgTextColor} onChange={v=>onSettingChange({msgTextColor:v})}/>
+                  <span className="set-compact-label">行间距</span>
+                  <Num value={t.msgLineHeight} onChange={v=>onSettingChange({msgLineHeight:v})} min={1.2} max={2.5}/>
+                </div>
               </Group>
             </Tabs.Content>
 
