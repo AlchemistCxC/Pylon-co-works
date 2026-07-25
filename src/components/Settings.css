@@ -45,6 +45,8 @@
 .set-color-chip { width:18px; height:18px; border-radius:50%; cursor:pointer; border:2px solid transparent; transition:all 0.15s; }
 .set-color-chip:hover { transform:scale(1.15); }
 .set-color-chip.active { border-color:var(--accent); box-shadow:0 0 0 1px var(--accent); }
+.set-bg-preview { width:28px; height:28px; border-radius:4px; background-size:cover; background-position:center; border:1px solid var(--border); cursor:pointer; flex-shrink:0; }
+.set-bg-preview:hover { border-color:var(--danger); opacity:0.8; }
 .set-range { width:120px; height:4px; accent-color:var(--accent); flex-shrink:0; }
 .set-num { width:56px; background:var(--bg-input); border:1px solid var(--border); border-radius:4px; padding:3px 8px; color:var(--text); font-size:13px; text-align:right; font-family:var(--mono); }
 .set-num:focus { border-color:var(--border-focus); outline:none; }

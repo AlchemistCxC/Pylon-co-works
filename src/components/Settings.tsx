@@ -36,6 +36,26 @@ function ColorChips({ value, onChange }: { value:string; onChange:(v:string)=>vo
   )
 }
 
+function BgImageRow({ label, value, onChange }: { label:string; value:string; onChange:(v:string)=>void }) {
+  const openFile = async () => {
+    try {
+      const { open } = await import('@tauri-apps/plugin-dialog')
+      const selected = await open({ multiple: false, filters: [{ name: 'Images', extensions: ['png','jpg','jpeg','gif','webp','bmp'] }] })
+      if (selected) onChange(selected as string)
+    } catch { /* browser fallback */ }
+  }
+  return (
+    <Row label={label}>
+      <div style={{display:'flex',alignItems:'center',gap:6,flex:1}}>
+        <input type="text" value={value} onChange={e => onChange(e.target.value)} className="set-input" style={{flex:1}} placeholder="路径或 URL" />
+        <button className="ps-btn sm" onClick={openFile}>选择</button>
+      </div>
+      {value && <div className="set-bg-preview" style={{backgroundImage:`url(${value})`}}
+        onClick={() => onChange('')} title="点击清除" />}
+    </Row>
+  )
+}
+
 function Row({ label, children }: { label:string; children:React.ReactNode }) {
   return <div className="set-row"><span className="set-row-label">{label}</span>{children}</div>
 }
@@ -293,7 +313,7 @@ export default function Settings({ onClose }: { onClose?: () => void }) {
               </Group>
 
               <Group title="玻璃效果">
-                <Row label="背景图"><Txt value={t.globalBgImage||''} onChange={v=>onSettingChange({globalBgImage:v})}/></Row>
+                <BgImageRow label="背景图" value={t.globalBgImage||''} onChange={v=>onSettingChange({globalBgImage:v})}/>
                 <Row label="透明度"><Slider value={t.transparency} onChange={v=>onSettingChange({transparency:v})} min={0} max={1}/>
                   <span className="set-val">{Math.round(t.transparency*100)}%</span></Row>
                 <Row label="模糊"><Slider value={t.bgBlur} onChange={v=>onSettingChange({bgBlur:v})} min={0} max={40} step={2}/>
@@ -324,7 +344,7 @@ export default function Settings({ onClose }: { onClose?: () => void }) {
                     <ColorChips value={t.sidebarBg} onChange={v=>onSettingChange({sidebarBg:v})}/>
                   </div>
                 </Row>
-                <Row label="背景图"><Txt value={t.sidebarBgImage} onChange={v=>onSettingChange({sidebarBgImage:v})}/></Row>
+                <BgImageRow label="背景图" value={t.sidebarBgImage} onChange={v=>onSettingChange({sidebarBgImage:v})}/>
               </Group>
               <Group title="布局">
                 <Row label="栏宽"><Num value={t.sidebarWidth} onChange={v=>onSettingChange({sidebarWidth:v})} min={160} max={400}/></Row>
@@ -351,7 +371,7 @@ export default function Settings({ onClose }: { onClose?: () => void }) {
               <h3>聊天区</h3>
               <Group title="外观">
                 <Row label="背景色"><Swatch value={t.chatBg} onChange={v=>onSettingChange({chatBg:v})}/></Row>
-                <Row label="背景图"><Txt value={t.chatBgImage} onChange={v=>onSettingChange({chatBgImage:v})}/></Row>
+                <BgImageRow label="背景图" value={t.chatBgImage} onChange={v=>onSettingChange({chatBgImage:v})}/>
               </Group>
               <Group title="字体">
                 <Row label="字体"><Sel value={t.chatFont} onChange={v=>onSettingChange({chatFont:v})} options={['mono','system']}/></Row>
@@ -434,7 +454,7 @@ export default function Settings({ onClose }: { onClose?: () => void }) {
               <h3>输入栏</h3>
               <Group title="外观">
                 <Row label="背景色"><Swatch value={t.inputBg} onChange={v=>onSettingChange({inputBg:v})}/></Row>
-                <Row label="背景图"><Txt value={t.inputBgImage||''} onChange={v=>onSettingChange({inputBgImage:v})}/></Row>
+                <BgImageRow label="背景图" value={t.inputBgImage||''} onChange={v=>onSettingChange({inputBgImage:v})}/>
                 <Row label="文字颜色"><Swatch value={t.inputTextColor} onChange={v=>onSettingChange({inputTextColor:v})}/></Row>
                 <Row label="占位符颜色"><Swatch value={t.inputPlaceholder} onChange={v=>onSettingChange({inputPlaceholder:v})}/></Row>
                 <Row label="发送按钮色"><Swatch value={t.inputSendBg} onChange={v=>onSettingChange({inputSendBg:v})}/></Row>
@@ -454,7 +474,7 @@ export default function Settings({ onClose }: { onClose?: () => void }) {
               <h3>状态栏 & 心电图</h3>
               <Group title="外观">
                 <Row label="背景色"><Swatch value={t.statusBg} onChange={v=>onSettingChange({statusBg:v})}/></Row>
-                <Row label="背景图"><Txt value={t.statusBgImage||''} onChange={v=>onSettingChange({statusBgImage:v})}/></Row>
+                <BgImageRow label="背景图" value={t.statusBgImage||''} onChange={v=>onSettingChange({statusBgImage:v})}/>
                 <Row label="心电图宽度"><Num value={t.ekgWidth} onChange={v=>onSettingChange({ekgWidth:v})} min={120} max={400}/></Row>
                 <Row label="心电图字号"><Num value={t.ekgFontSize} onChange={v=>onSettingChange({ekgFontSize:v})} min={12} max={22}/></Row>
               </Group>
@@ -490,7 +510,7 @@ export default function Settings({ onClose }: { onClose?: () => void }) {
               <h3>右侧栏</h3>
               <Group title="外观">
                 <Row label="背景色"><Swatch value={t.rightBg} onChange={v=>onSettingChange({rightBg:v})}/></Row>
-                <Row label="背景图"><Txt value={t.rightBgImage||''} onChange={v=>onSettingChange({rightBgImage:v})}/></Row>
+                <BgImageRow label="背景图" value={t.rightBgImage||''} onChange={v=>onSettingChange({rightBgImage:v})}/>
                 <Row label="宽度"><Num value={t.rightWidth} onChange={v=>onSettingChange({rightWidth:v})} min={200} max={400}/></Row>
               </Group>
               <Group title="玻璃效果">
