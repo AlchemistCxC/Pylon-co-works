@@ -153,7 +153,7 @@ export default forwardRef<{ send: () => void; attachFile: () => void }, Props>(f
         <textarea ref={textareaRef} className="input-textarea" value={value}
           onChange={e => { setValue(e.target.value); setCmdIdx(0) }}
           onKeyDown={onKey}
-          placeholder="输入消息...（Enter 发送，Shift+Enter 换行，/ 命令）"
+          placeholder={inputMode === 'cli' ? '' : '输入消息...（Enter 发送，Shift+Enter 换行，/ 命令）'}
           rows={1} />
         {!split && (
           <button className="input-btn send" onClick={send} title="Send (Enter)">
