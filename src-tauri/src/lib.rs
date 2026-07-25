@@ -367,8 +367,11 @@ async fn reload_agents(state: tauri::State<'_, AppState>) -> Result<(), String> 
 
 #[tauri::command]
 async fn get_pet(state: tauri::State<'_, AppState>) -> Result<serde_json::Value, String> {
-    let pet = state.pet.lock().map_err(|e| e.to_string())?;
-    Ok(serde_json::to_value(&*pet).map_err(|e| e.to_string())?)
+    let mut pet = state.pet.lock().map_err(|e| e.to_string())?;
+    let msg = pet.msg.take();
+    let mut v = serde_json::to_value(&*pet).map_err(|e| e.to_string())?;
+    if let Some(m) = msg { v["msg"] = serde_json::Value::String(m.to_string()); }
+    Ok(v)
 }
 
 #[tauri::command]
@@ -382,7 +385,10 @@ async fn pet_action(state: tauri::State<'_, AppState>, action: String, value: Op
         "sleepy" => { pet::check_sleepy(&mut pet); }
         _ => { return Err(format!("unknown action: {}", action)); }
     }
-    Ok(serde_json::to_value(&*pet).map_err(|e| e.to_string())?)
+    let msg = pet.msg.take();
+    let mut v = serde_json::to_value(&*pet).map_err(|e| e.to_string())?;
+    if let Some(m) = msg { v["msg"] = serde_json::Value::String(m.to_string()); }
+    Ok(v)
 }
 
 // ── Session persistence commands ──

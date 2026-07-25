@@ -10,7 +10,7 @@ use std::sync::atomic::{AtomicU64, Ordering};
 static SEED: AtomicU64 = AtomicU64::new(0);
 
 /// Simple deterministic-ish random picker. Not crypto-secure.
-fn pick(items: &[&str]) -> &'static str {
+fn pick(items: &'static [&'static str]) -> &'static str {
     let n = SEED.fetch_add(1, Ordering::Relaxed);
     items[n as usize % items.len()]
 }
@@ -38,6 +38,7 @@ impl Default for PetState {
             total_tokens: 0,
             tools_succeeded: 0,
             name: "豆豆".into(),
+            msg: None,
         }
     }
 }
@@ -75,18 +76,57 @@ pub fn full_name(state: &PetState) -> String {
     display_name(&state.name, stage)
 }
 
+// ── Speech bubble pools ──
+
+const USER_SENT: &[&str] = &[
+    "交给我！", "看着呢~", "加油！", "冲冲冲！", "好！", "来了来了！",
+    "又有活干了", "让我瞧瞧", "(竖钳)", "(探头)", "⌁⌁⌁",
+];
+
+const FIRST_CHUNK: &[&str] = &[
+    "哦？", "有意思", "让我康康", "嗯嗯", "在想了在想了",
+    "(眼睛亮了)", "这个我知道！", "等我一下…", "翻文档中…",
+];
+
+const DONE_MSGS: &[&str] = &[
+    "搞定啦！", "怎么样~", "厉害吧", "轻轻松松", "完工！",
+    "(叉腰)", "下一题！", "还行吧？", "⌁✧⌁", "呼——",
+];
+
+const ERROR_MSGS: &[&str] = &[
+    "哎呀", "疼疼疼", "翻车了…", "(炸毛)", "不是我干的！",
+    "它又崩了", "呜呜", "要不要重启一下", "⌁✕⌁", "救命",
+];
+
+const POKE_MSGS: &[&str] = &[
+    "嘿嘿", "别闹~", "痒！", "人家在工作呢", "(蹭)", "⌁♥⌁",
+    "再来一下？", "干嘛呀", "(翻肚皮)", "啾",
+];
+
+const FEED_MSGS: &[&str] = &[
+    "好吃！", "还有吗", "(嚼嚼)", "谢谢投喂~", "饱了饱了",
+    "能量+1", "这什么好吃的", "(眼睛发光)", "⌁♡⌁", "嗝",
+];
+
+const SLEEPY_MSGS: &[&str] = &[
+    "好慢啊…", "zzz", "快睡着了", "(打哈欠)", "还没好？",
+    "我先眯一会…", "都快长蘑菇了", "⌁﹏⌁",
+];
+
 // ── Mood transitions ──
 
 pub fn on_user_sent(state: &mut PetState) -> &'static str {
     state.messages += 1;
     state.first_chunk_at_ms = None;
     state.mood = "curious";
+    state.msg = Some(pick(USER_SENT));
     state.mood
 }
 
 pub fn on_first_chunk(state: &mut PetState) -> &'static str {
     state.first_chunk_at_ms = Some(now_ms());
     state.mood = "curious";
+    state.msg = Some(pick(FIRST_CHUNK));
     state.mood
 }
 
@@ -94,6 +134,7 @@ pub fn on_done(state: &mut PetState) -> &'static str {
     state.first_chunk_at_ms = None;
     state.mood = "excited";
     state.happiness = state.happiness.saturating_add(2).min(100);
+    state.msg = Some(pick(DONE_MSGS));
     state.mood
 }
 
@@ -101,18 +142,21 @@ pub fn on_error(state: &mut PetState) -> &'static str {
     state.first_chunk_at_ms = None;
     state.mood = "error";
     state.happiness = state.happiness.saturating_sub(10);
+    state.msg = Some(pick(ERROR_MSGS));
     state.mood
 }
 
 pub fn on_poke(state: &mut PetState) -> &'static str {
     state.mood = "happy";
     state.happiness = (state.happiness + 5).min(100);
+    state.msg = Some(pick(POKE_MSGS));
     state.mood
 }
 
 pub fn on_feed(state: &mut PetState) -> &'static str {
     state.happiness = (state.happiness + 15).min(100);
     state.mood = "happy";
+    state.msg = Some(pick(FEED_MSGS));
     state.mood
 }
 
@@ -133,6 +177,7 @@ pub fn check_sleepy(state: &mut PetState) -> bool {
     if let Some(start) = state.first_chunk_at_ms {
         if now_ms().saturating_sub(start) > 30_000 {
             state.mood = "sleepy";
+            state.msg = Some(pick(SLEEPY_MSGS));
             return true;
         }
     }
