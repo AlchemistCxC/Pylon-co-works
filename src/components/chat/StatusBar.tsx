@@ -8,8 +8,8 @@ function hash(seed: number): number {
 }
 
 function wave(w: number, h: number, intensity: number, offset: number, ampMax: number, noiseScale: number): string {
-  const mid = h / 2, amp = 3 + intensity * ampMax
-  const pts = [] as string[]
+  const mid = h / 2
+  const amp = 3 + intensity * ampMax
   const baseCycleW = 70 + (1 - intensity) * 40
   const phases = [
     { start:0.00, end:0.08, type:'p' }, { start:0.08, end:0.20, type:'flat' },
@@ -18,23 +18,29 @@ function wave(w: number, h: number, intensity: number, offset: number, ampMax: n
     { start:0.45, end:0.65, type:'t' }, { start:0.65, end:1.00, type:'flat' },
   ]
 
-  // Find which cycles overlap with [0, W]
-  const firstCycle = Math.floor((-w - offset) / baseCycleW) - 2
-  const lastCycle = Math.ceil((w * 2 - offset) / baseCycleW) + 2
+  // Use while loop instead of firstCycle/lastCycle estimation
+  const pts: string[] = []
+  let cycleIndex = Math.floor((-w - offset) / baseCycleW)
 
-  pts.push(`0,${mid}`)
-  for (let ci = firstCycle; ci <= lastCycle; ci++) {
-    // RRI modulation
-    const rri = Math.sin(ci * 0.7 + offset * 0.015) * 12
+  while (true) {
+    // RRI modulation — each heartbeat gets its own cycleW
+    const rri = Math.sin(cycleIndex * 0.7 + offset * 0.015) * 12
     const cycleW = baseCycleW + rri
+    const xStart = cycleIndex * baseCycleW + offset  // base start of this heartbeat
+
+    if (xStart > w + baseCycleW * 2) break  // far enough past viewport
+
     for (const ph of phases) {
       const steps = Math.max(2, Math.floor((ph.end - ph.start) * cycleW / 3))
       for (let s = 0; s <= steps; s++) {
         const t = s / Math.max(1, steps)
-        const jitter = (hash(ci * 100 + s) - 0.5) * 2 * noiseScale * 0.02
-        const phaseT = ph.start + jitter + t * ((ph.end + jitter * 0.5) - (ph.start + jitter))
-        const x = (ci + phaseT) / 1.0 * cycleW + offset
-        if (x < -10 || x > w + 10) continue  // skip points outside viewport
+        // Use x-coordinate-based hash for deterministic, frame-stable jitter
+        const phT = ph.start + t * (ph.end - ph.start)
+        const x = xStart + phT * cycleW
+        if (x < -10 || x > w + 10) continue
+        const jitter = (hash(Math.floor(x * 100)) - 0.5) * 2 * noiseScale * 0.02
+        const xJittered = x + jitter
+        if (xJittered < -10 || xJittered > w + 10) continue
         let y = mid
         switch (ph.type) {
           case 'p': y = mid - Math.pow(t, 2) * Math.pow(1 - t, 0.6) * amp * 0.8; break
@@ -47,9 +53,10 @@ function wave(w: number, h: number, intensity: number, offset: number, ampMax: n
           case 's': y = mid + amp * 0.5 + Math.sin(t * Math.PI) * amp * 1.2; break
           case 't': y = mid - Math.pow(t, 0.7) * Math.pow(1 - t, 1.5) * amp * 1.2; break
         }
-        pts.push(`${x.toFixed(1)},${y.toFixed(2)}`)
+        pts.push(`${xJittered.toFixed(1)},${y.toFixed(2)}`)
       }
     }
+    cycleIndex++
   }
   return pts.join(' ')
 }
