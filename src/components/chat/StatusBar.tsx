@@ -3,39 +3,49 @@ import { useStore } from '../../store'
 import { invoke } from '@tauri-apps/api/core'
 import './StatusBar.css'
 
+function hash(seed: number): number {
+  return ((Math.sin(seed * 127.1) * 43758.5453) % 1 + 1) % 1
+}
+
 function wave(w: number, h: number, intensity: number, offset: number, ampMax: number, noiseScale: number): string {
-  const mid = h / 2
-  const amp = 3 + intensity * ampMax
-  const totalW = w * 2
+  const mid = h / 2, amp = 3 + intensity * ampMax
   const pts = [] as string[]
-  const cycleW = 70 + (1 - intensity) * 40
-  const cycles = Math.max(4, Math.ceil(totalW / cycleW * 2)) * 2
+  const baseCycleW = 70 + (1 - intensity) * 40
   const phases = [
     { start:0.00, end:0.08, type:'p' }, { start:0.08, end:0.20, type:'flat' },
     { start:0.20, end:0.23, type:'q' }, { start:0.23, end:0.26, type:'r' },
     { start:0.26, end:0.30, type:'s' }, { start:0.30, end:0.45, type:'flat' },
     { start:0.45, end:0.65, type:'t' }, { start:0.65, end:1.00, type:'flat' },
   ]
-  // Start from the beginning to ensure smooth initial render
+
+  // Find which cycles overlap with [0, W]
+  const firstCycle = Math.floor((-w - offset) / baseCycleW) - 2
+  const lastCycle = Math.ceil((w * 2 - offset) / baseCycleW) + 2
+
   pts.push(`0,${mid}`)
-  for (let ci = -2; ci < cycles; ci++) {
+  for (let ci = firstCycle; ci <= lastCycle; ci++) {
+    // RRI modulation
+    const rri = Math.sin(ci * 0.7 + offset * 0.015) * 12
+    const cycleW = baseCycleW + rri
     for (const ph of phases) {
       const steps = Math.max(2, Math.floor((ph.end - ph.start) * cycleW / 3))
       for (let s = 0; s <= steps; s++) {
         const t = s / Math.max(1, steps)
-        // Phase jitter: every heartbeat has unique P-QRS-T timing
-        const jitter = (Math.random() - 0.5) * 2 * noiseScale * 0.02
+        const jitter = (hash(ci * 100 + s) - 0.5) * 2 * noiseScale * 0.02
         const phaseT = ph.start + jitter + t * ((ph.end + jitter * 0.5) - (ph.start + jitter))
-        // x: from left of viewport, continuously shifting right with offset
-        const x = (ci + phaseT) / (cycles * 0.7) * totalW - w + offset
+        const x = (ci + phaseT) / 1.0 * cycleW + offset
+        if (x < -10 || x > w + 10) continue  // skip points outside viewport
         let y = mid
         switch (ph.type) {
-          case 'p': y = mid - Math.sin(t * Math.PI) * amp * 0.35; break
+          case 'p': y = mid - Math.pow(t, 2) * Math.pow(1 - t, 0.6) * amp * 0.8; break
           case 'flat': y = mid; break
           case 'q': y = mid + t * amp * 0.5; break
-          case 'r': y = mid + amp * 0.5 - Math.sin(t * Math.PI) * amp * 1.8; break
+          case 'r':
+            if (t < 0.5) y = mid + t * 2 * amp * 2.0
+            else         y = mid + (1 - t) * 2 * amp * 1.6
+            break
           case 's': y = mid + amp * 0.5 + Math.sin(t * Math.PI) * amp * 1.2; break
-          case 't': y = mid - Math.sin(t * Math.PI) * amp * 0.6; break
+          case 't': y = mid - Math.pow(t, 0.7) * Math.pow(1 - t, 1.5) * amp * 1.2; break
         }
         pts.push(`${x.toFixed(1)},${y.toFixed(2)}`)
       }
@@ -87,7 +97,7 @@ export default function StatusBar() {
   // V3: left=remaining(color), right=consumed(gray)
   const cut = Math.max(4, W * Math.max(0, Math.min(1, 1 - used)))
   const offsetSpeed = (useStore(s => s.ekgSpeedBase) || 0.5) + intensity * speedMax
-  const offset = (tick * offsetSpeed) % (W * 4)
+  const offset = tick * offsetSpeed  // perpetual, no modulo
   // Segmented noise: green micro-breath, yellow jitter, red tremble
   const noiseScale = used < 0.50
     ? 0.1 + Math.sin(tick * 0.1) * 0.05

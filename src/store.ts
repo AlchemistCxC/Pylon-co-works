@@ -20,7 +20,7 @@ export interface ThemeSettings {
   userName: string; userPrefix: string; userColor: string
   toolIndicator: string; sparkles: string
   msgStyle: string; msgFont: string; msgTextColor: string; msgLineHeight: number
-  ccHeight: number; ccBgHeight: number
+  ccHeight: number; ccBgHeight: number; ccBg: string
   ccStyle: string
 }
 
@@ -66,7 +66,7 @@ const DEFAULTS: ThemeSettings = {
   userName: '', userPrefix: '❯', userColor: '',
   toolIndicator: '●', sparkles: '✳✴✵✶✷✸✹✺✻✼❃❊',
   msgStyle: 'terminal', msgFont: 'mono', msgTextColor: '', msgLineHeight: 1.8,
-  ccHeight: 120, ccBgHeight: 120,
+  ccHeight: 120, ccBgHeight: 120, ccBg: 'transparent',
   ccStyle: 'wave',
 }
 
