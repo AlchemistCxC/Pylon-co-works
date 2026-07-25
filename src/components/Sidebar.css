@@ -68,7 +68,7 @@ details[open] > .group-header::before { content:'▾'; }
 .sidebar.collapsed .profile-edit { display:none; }
 
 .sidebar-toggle-float {
-  position:absolute; left:0; top:50%; transform:translateY(-50%);
+  position:absolute; left:-16px; top:50%; transform:translateY(-50%);
   z-index:20; width:20px; height:48px;
   background:var(--bg-panel); border:1px solid var(--border);
   border-left:none; border-radius:0 6px 6px 0;

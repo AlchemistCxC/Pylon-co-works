@@ -1,60 +1,71 @@
-# Pylon Bug 清单
-
-> 宫木云汇报，Riccati 记录。**V9 审计发现两个编译级严重 bug。**
+# Pylon Bug 清单（核验版 + 方案）
 
 ---
 
-## 🔴 C1 — send_message 重复 window 参数（编译错误）
+## 🟡 P1 — 待修
 
-**位置**：`lib.rs` L42-43
+### B3 — 折叠按钮被侧栏遮挡
 
-```rust
-async fn send_message(
-    state: tauri::State<'_, AppState>,
-    window: tauri::Window,
-    window: tauri::Window,       // ← 重名，Rust 不合法
+**修复**：`sidebar-toggle-float` 移到 `.main` 内部左上角，或改 `left` 为 `-20px` 浮在侧栏边缘外侧。或改为在 ChatView 左上角渲染。
+
+```tsx
+// App.tsx — 移到 main 内部
+<div className="main">
+  <button className="sidebar-toggle-float" ... />
+  ...
+</div>
 ```
 
-**修复**：删掉一行。
+CSS 改为 `position:absolute; left:-16px; z-index:20;`
 
 ---
 
-## 🔴 C2 — export_session 重复 broadcast + 误粘代码
+### B8 — console.log 残留
 
-**位置**：`lib.rs` L229-255
-
-问题 1：L229 和 L242 各一个 `resubscribe()`，L242 的 shadow 掉 L229。L232 的 `handle` 从第一个 broadcast 读，但 L256 `load_session` 后 handle 读到的是旧 channel 的锁。
-
-问题 2：L242-255 是从 `load_persisted_session` 误复制过来的——引用了 `source` 变量但 `export_session` 的参数里没有 `source`（这个函数只有 `peri_id`、`format`、`output_path`）。**直接编译失败。**
-
-**修复**：删 L242-255（整段误粘），只保留 L229-241 的 broadcast + handle 收集逻辑。
+**修复**：删 `ChatView.tsx` L166 整行。
 
 ---
 
-## B1 — mcpServers 格式不兼容（已修 ✅）
+### B9 — sparkles 自定义不生效
+
+**修复**：`ChatView.tsx` L38 改为用 store 值：
+
+```typescript
+// 删 L14 的模块级 SPARKLES 常量
+// L31 改名为 sparkles
+const sparkles = (useStore(s => s.sparkles) || '✳✴✵✶✷✸✹✺✻✼❃❊').split('')
+// L38 改为
+const frame = sparkles[tickIdx % sparkles.length]
+```
 
 ---
 
-## B2 — chat header 显示 raw session ID
+### B10 — Empty state "Prism Desktop"
+
+**修复**：`ChatView.tsx` L219 → `Pylon`。
 
 ---
 
-## B3 — 左侧栏折叠按钮找不到
+### B11 — formatTime 重复定义
+
+**修复**：新建 `src/utils.ts`，导出一份。Sidebar 和 ChatView 均 import：
+
+```typescript
+// utils.ts
+export function formatTime(ts: number | undefined): string {
+  if (!ts) return ''
+  const diff = Date.now() - ts
+  if (diff < 60_000) return '刚刚'
+  if (diff < 3_600_000) return `${Math.floor(diff/60000)}m ago`
+  if (diff < 86_400_000) return `${Math.floor(diff/3600000)}h ago`
+  return `${Math.floor(diff/86400000)}d ago`
+}
+```
+
+Sidebar.tsx 和 ChatView.tsx 删各自定义，改 `import { formatTime } from '../../utils'`。
 
 ---
 
-## B4 — 心电图波形循环重复（已修 ✅）
+### B12 — Titlebar "Prism Desktop"
 
----
-
-## B5 — 历史会话无记录
-
-**状态**：`load_persisted_session` 逻辑正确（L179-207）。需端到端验证。
-
----
-
-## B6 — 会话设置 UI 难看（已修 ✅）
-
----
-
-## B7 — 删除按钮不在左栏最右侧（已修 ✅）
+**修复**：`App.tsx` L116 → `Pylon`。

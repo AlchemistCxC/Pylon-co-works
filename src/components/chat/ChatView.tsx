@@ -3,6 +3,7 @@ import { listen } from '@tauri-apps/api/event'
 import { invoke } from '@tauri-apps/api/core'
 import { useStore } from '../../store'
 import ReactMarkdown from 'react-markdown'
+import { formatTime } from '../../utils'
 import remarkGfm from 'remark-gfm'
 import { createStarryNight, all } from '@wooorm/starry-night'
 import { toHtml } from 'hast-util-to-html'
@@ -11,7 +12,6 @@ import Anser from 'anser'
 import './ChatView.css'
 
 // ── Peri spinner ──
-const SPARKLES = '✳✴✵✶✷✸✹✺✻✼❃❊'.split('')
 const IDIOMS = [
   '格物致知','见微知著','大道至简','慎思明辨','融会贯通','温故知新','举一反三',
   '水滴石穿','千里之行','厚积薄发','锲而不舍','知行合一','日拱一卒','功不唐捐','学以致用',
@@ -28,14 +28,14 @@ function fmtTokens(n: number) {
 }
 
 function Spinner({ tokenCount, startTime }: { tokenCount: number; startTime: number }) {
-  const frames = useStore(s => s.sparkles) || '✳✴✵✶✷✸✹✺✻✼❃❊'
+  const frames = (useStore(s => s.sparkles) || '✳✴✵✶✷✸✹✺✻✼❃❊').split('')
   const [, tick] = useState(0)
   useEffect(() => {
     const id = setInterval(() => tick(t => t + 1), 120)
     return () => clearInterval(id)
   }, [])
   const tickIdx = Math.floor((Date.now() - startTime) / 120)
-  const frame = SPARKLES[tickIdx % SPARKLES.length]
+  const frame = frames[tickIdx % frames.length]
   // Rotate idiom every 8 ticks (~1s)
   const idiom = IDIOMS[Math.floor(tickIdx / 8) % IDIOMS.length]
   const elapsed = Math.floor((Date.now() - startTime) / 1000)
@@ -163,7 +163,6 @@ export default function ChatView({ sessionId }: Props) {
             break
           }
           case 'usage_update': {
-            console.log('[usage_update]', upd.value, upd.size, upd._meta)
             const used = upd.value || (upd._meta?.inputTokens || 0) + (upd._meta?.outputTokens || 0)
             const max = upd.size || 131072
             tokenCount.current = used
@@ -216,7 +215,7 @@ export default function ChatView({ sessionId }: Props) {
   if (!sessionId) return (
     <div className="chat-empty">
       <div className="empty-icon">◆</div>
-      <div className="empty-title">Prism Desktop</div>
+      <div className="empty-title">Pylon</div>
       <div className="empty-sub">选择一个会话开始</div>
     </div>
   )
@@ -258,14 +257,6 @@ export default function ChatView({ sessionId }: Props) {
 
 // ── Sub-components ──
 
-function formatTime(ts: number | undefined): string {
-  if (!ts) return ''
-  const diff = Date.now() - ts
-  if (diff < 60_000) return '刚刚'
-  if (diff < 3_600_000) return `${Math.floor(diff/60000)}m ago`
-  if (diff < 86_400_000) return `${Math.floor(diff/3600000)}h ago`
-  return `${Math.floor(diff/86400000)}d ago`
-}
 
 function AssistantContent({ text }: { text: string }) {
   const [copied, setCopied] = useState(false)

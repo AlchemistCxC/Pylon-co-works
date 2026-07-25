@@ -113,7 +113,7 @@ export default function App() {
     <ErrorBoundary>
     <div className="app" style={cssVars}>
       <div className="titlebar" data-tauri-drag-region>
-        <span className="titlebar-text">Prism Desktop</span>
+        <span className="titlebar-text">Pylon</span>
         <div className="titlebar-controls">
           <button onClick={() => setRightOpen(!rightOpen)} title="Panel">&#9776;</button>
           <button onClick={() => setShowSettings(!showSettings)} title="Settings">&#9881;</button>
@@ -124,12 +124,12 @@ export default function App() {
       </div>
 
       <div className="layout">
-        <button className="sidebar-toggle-float" onClick={() => setSidebarCollapsed(!sidebarCollapsed)}
-          title={sidebarCollapsed ? '展开左栏' : '收起左栏'}>
-          {sidebarCollapsed ? '▸' : '▾'}
-        </button>
         <Sidebar activeSession={activeSession} onSelectSession={setActiveSession} onProfileEdit={() => setShowProfileEdit(true)} onSessionSettings={setSessionSettingsId} collapsed={sidebarCollapsed} />
         <div className="main">
+          <button className="sidebar-toggle-float" onClick={() => setSidebarCollapsed(!sidebarCollapsed)}
+            title={sidebarCollapsed ? '展开左栏' : '收起左栏'}>
+            {sidebarCollapsed ? '▸' : '▾'}
+          </button>
           <div className="tabbar">
             <button className={`tab ${activeTab === 'peri' ? 'active' : ''}`} onClick={() => setActiveTab('peri')}>Peri</button>
             <button className={`tab ${activeTab === 'prism' ? 'active' : ''}`} onClick={() => setActiveTab('prism')}>Prism</button>
