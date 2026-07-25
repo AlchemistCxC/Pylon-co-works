@@ -83,10 +83,10 @@ export default function ControlCenter({ sessionId }: Props) {
       <div className="cc-body" ref={ccBodyRef}>
         {(editMode ? ALL_WIDGETS : ['input', 'context', 'model', 'mode']).map(renderWidget)}
       </div>
-      {editMode && selected && <PropertyPanel id={selected} onClose={() => setSelected(null)} onExit={() => u({ ccEditMode: false } as any)} />}
+      {editMode && selected && <PropertyPanel id={selected} onClose={() => setSelected(null)} onExit={() => { useStore.setState({ ccEditMode: false } as any); setSelected(null) }} />}
       {editMode && !selected && (
         <div className="cc-edit-toolbar">
-          <button className="ps-btn sm" onClick={() => u({ ccEditMode: false } as any)}>退出</button>
+          <button className="ps-btn" onClick={() => useStore.setState({ ccEditMode: false } as any)}>退出</button>
         </div>
       )}
     </div>
