@@ -1,5 +1,6 @@
 .control-center {
   position:relative;
+  flex-shrink:0;
   height:var(--cc-height,120px);
   min-height:80px;
   margin-top:auto;
