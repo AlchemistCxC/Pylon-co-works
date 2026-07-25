@@ -18,6 +18,7 @@ struct AppState {
 struct SessionInfo {
     peri_id: String,
     persona: String,
+    cwd: String,
     has_first_prompt: bool,
 }
 
@@ -26,12 +27,13 @@ async fn new_session(
     state: tauri::State<'_, AppState>,
     source: String,
     persona: String,
+    cwd: Option<String>,
 ) -> Result<String, String> {
     let agent = { let aa = state.active_agent.lock().map_err(|e| e.to_string())?; state.agents.get(&*aa).ok_or("no active agent")?.clone() };
-    let cwd = agent.cwd.as_deref().unwrap_or(".");
-    let peri_id = state.acp.lock().await.new_session(cwd).await?;
+    let session_cwd = cwd.unwrap_or_else(|| agent.cwd.clone().unwrap_or_else(|| ".".to_string()));
+    let peri_id = state.acp.lock().await.new_session(&session_cwd).await?;
     state.sessions.lock().map_err(|e| e.to_string())?
-        .insert(source.clone(), SessionInfo { peri_id: peri_id.clone(), persona, has_first_prompt: false });
+        .insert(source.clone(), SessionInfo { peri_id: peri_id.clone(), persona, cwd: session_cwd, has_first_prompt: false });
     Ok(peri_id)
 }
 
@@ -61,10 +63,10 @@ async fn send_message(
             }
         }
         let agent = { let aa = state.active_agent.lock().map_err(|e| e.to_string())?; state.agents.get(&*aa).ok_or("no active agent")?.clone() };
-        let cwd = agent.cwd.as_deref().unwrap_or(".");
-        let peri_id = state.acp.lock().await.new_session(cwd).await?;
+        let session_cwd = agent.cwd.clone().unwrap_or_else(|| ".".to_string());
+        let peri_id = state.acp.lock().await.new_session(&session_cwd).await?;
         state.sessions.lock().map_err(|e| e.to_string())?
-            .insert(source.clone(), SessionInfo { peri_id: peri_id.clone(), persona: persona.clone(), has_first_prompt: true });
+            .insert(source.clone(), SessionInfo { peri_id: peri_id.clone(), persona: persona.clone(), cwd: session_cwd, has_first_prompt: true });
         (peri_id, true)
     };
 
@@ -179,7 +181,7 @@ async fn cancel_prompt(state: tauri::State<'_, AppState>, source: String) -> Res
 async fn load_sessions(state: tauri::State<'_, AppState>) -> Result<Vec<serde_json::Value>, String> {
     let sessions = state.sessions.lock().map_err(|e| e.to_string())?;
     Ok(sessions.iter().map(|(source, info)| {
-        serde_json::json!({"source": source, "periId": info.peri_id, "persona": info.persona})
+        serde_json::json!({"source": source, "periId": info.peri_id, "persona": info.persona, "cwd": info.cwd})
     }).collect())
 }
 
@@ -263,7 +265,7 @@ async fn load_persisted_session(
     state.acp.lock().await.load_session(&peri_id, cwd).await?;
     handle.abort();  // R2: prevent task leak
     state.sessions.lock().map_err(|e| e.to_string())?
-        .insert(source, SessionInfo { peri_id: peri_id.clone(), persona: String::new(), has_first_prompt: true });
+        .insert(source, SessionInfo { peri_id: peri_id.clone(), persona: String::new(), cwd: cwd.to_string(), has_first_prompt: true });
     Ok(())
 }
 
