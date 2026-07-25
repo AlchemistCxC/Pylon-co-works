@@ -42,10 +42,10 @@
 .cc-widget.cc-hidden:hover { opacity:0.6; }
 
 .cc-widget.cc-selected { outline:2px solid var(--accent) !important; }
-.cc-prop-panel { position:absolute; right:0; top:0; bottom:0; width:180px; background:var(--bg-panel); border-left:1px solid var(--border); padding:12px; font-size:11px; z-index:10; box-shadow:-4px 0 16px rgba(0,0,0,0.1); overflow-y:auto; }
-.cc-prop-title { font-weight:600; font-size:13px; margin-bottom:10px; padding-bottom:6px; border-bottom:1px solid var(--border); color:var(--text); }
-.cc-prop-section { font-size:10px; font-weight:600; color:var(--text-dim); text-transform:uppercase; letter-spacing:0.5px; margin:10px 0 4px; }
-.cc-prop-row { display:flex; align-items:center; gap:4px; margin:4px 0; }
+.cc-prop-panel { position:fixed; left:0; top:32px; bottom:0; width:250px; background:var(--bg-panel); border-right:1px solid var(--border); padding:16px; font-size:12px; z-index:80; box-shadow:4px 0 16px rgba(0,0,0,0.15); overflow-y:auto; }
+.cc-prop-title { font-weight:700; font-size:15px; margin-bottom:12px; padding-bottom:8px; border-bottom:1px solid var(--border); color:var(--text); }
+.cc-prop-section { font-size:11px; font-weight:600; color:var(--text-dim); text-transform:uppercase; letter-spacing:0.5px; margin:12px 0 6px; }
+.cc-prop-row { display:flex; align-items:center; gap:6px; margin:5px 0; }
 .cc-prop-row span { color:var(--text-dim); font-size:10px; width:12px; }
 .cc-prop-row input { width:50px; background:var(--bg-input); border:1px solid var(--border); border-radius:3px; padding:2px 4px; font-size:11px; color:var(--text); text-align:right; font-family:var(--mono); }
 .cc-prop-row input:focus { border-color:var(--accent); outline:none; }
