@@ -1,4 +1,4 @@
-import { useRef, useState, useMemo } from 'react'
+import { useRef, useState } from 'react'
 import * as Tabs from '@radix-ui/react-tabs'
 import { invoke } from '@tauri-apps/api/core'
 import { useStore } from '../store'
@@ -24,8 +24,20 @@ function Swatch({ value, onChange }: { value:string; onChange:(v:string)=>void }
   </>
 }
 
+function ColorChips({ value, onChange }: { value:string; onChange:(v:string)=>void }) {
+  const chips = ['#a855f7','#3b82f6','#34d399','#f59e0b','#ef4444','#ec4899','#6366f1','#14b8a6','#f97316','#ffffff']
+  return (
+    <div className="set-color-chips">
+      {chips.map(c => (
+        <div key={c} className={`set-color-chip ${value === c ? 'active' : ''}`}
+          style={{background:c}} onClick={() => onChange(c)} />
+      ))}
+    </div>
+  )
+}
+
 function Row({ label, children }: { label:string; children:React.ReactNode }) {
-  return <div className="set-row" data-search-label={label}><span className="set-row-label">{label}</span>{children}</div>
+  return <div className="set-row"><span className="set-row-label">{label}</span>{children}</div>
 }
 
 function Slider({ value, onChange, min, max, step }: { value:number; onChange:(v:number)=>void; min:number; max:number; step?:number }) {
@@ -48,12 +60,89 @@ function Txt({ value, onChange }: { value:string; onChange:(v:string)=>void }) {
   return <input type="text" value={value} onChange={e => onChange(e.target.value)} className="set-input" style={{width:'140px'}}/>
 }
 
-function Group({ title, children }: { title:string; children:React.ReactNode }) {
-  return <div className="set-group">
-    <div className="set-group-title">{title}</div>
-    {children}
-  </div>
+function Group({ title, children, defaultOpen }: { title:string; children:React.ReactNode; defaultOpen?:boolean }) {
+  const [open, setOpen] = useState(defaultOpen ?? true)
+  return (
+    <div className="set-group">
+      <div className="set-group-title" onClick={() => setOpen(!open)}>
+        <span className="set-group-arrow">{open ? '▾' : '▸'}</span>
+        {title}
+      </div>
+      {open && children}
+    </div>
+  )
 }
+
+// ── global presets ──
+
+const GLOBAL_PRESETS: { name: string; label: string; theme: Partial<ThemeSettings> }[] = [
+  {
+    name: 'claude', label: 'Claude Code',
+    theme: {
+      transparency: 0.95, bgBlur: 8, globalFont: 'mono', globalFontSize: 16,
+      sidebarBg: '#16162a', sidebarWidth: 250, sidebarTextColor: '#a0a0c0', sidebarNameSize: 14, sidebarGroupSize: 12,
+      chatBg: '#1a1a2e', chatFont: 'mono', chatFontSize: 15, chatLineHeight: 1.6, chatTextColor: '#cdd6f4', chatCodeColor: '#f9c74f', chatCodeBg: 'rgba(255,255,255,0.05)',
+      toolOk: '#4ade80', toolRun: '#60a5fa', toolErr: '#f87171', toolNameColor: '#cdd6f4', toolSummaryColor: 'rgba(205,214,244,0.4)',
+      userTagBg: 'rgba(168,85,247,0.12)', userTagText: '#c4b5fd',
+      inputBg: 'rgba(255,255,255,0.04)', inputTextColor: '#cdd6f4', inputPlaceholder: 'rgba(205,214,244,0.28)', inputSendBg: 'rgba(205,214,244,0.1)', inputFocusBorder: 'rgba(96,165,250,0.4)', inputFontSize: 17, inputMinHeight: 56,
+      inputMode: 'default', cliLineWidth: 2, cliLineColor: '#60a5fa', cliTextColor: '#cdd6f4',
+      statusBg: 'rgba(22,22,42,0.8)', ekgWidth: 150, ekgFontSize: 16, ekgGreen: '#4ade80', ekgYellow: '#f9c74f', ekgRed: '#f87171',
+      pillBg: 'rgba(255,255,255,0.04)', pillText: 'rgba(205,214,244,0.65)', prismOnColor: '#4ade80',
+      ekgLineWidth: 3, ekgAmplitudeMax: 10, ekgSpeedBase: 0.5, ekgSpeedMax: 2,
+      ekgLeftColor: 'rgba(205,214,244,0.35)', ekgMovingColor: '', ekgConsumedColor: 'rgba(205,214,244,0.08)', tokenDisplay: 'ekg',
+      rightBg: 'rgba(22,22,42,0.8)', rightWidth: 260,
+      sidebarTransparency: 1, sidebarBlur: 0, chatTransparency: 1, chatBlur: 0, rightTransparency: 1, rightBlur: 0,
+      ccHeight: 120, ccBgHeight: 120, ccBg: 'transparent', ccStyle: 'wave',
+      userName: '', userPrefix: '❯', userColor: '',
+      toolIndicator: '●', sparkles: '✳✴✵✶✷✸✹✺✻✼❃❊', spinnerColor: '', spinnerSize: 14,
+      msgStyle: 'terminal', msgFont: 'mono', msgTextColor: '', msgLineHeight: 1.8,
+    }
+  },
+  {
+    name: 'glass', label: 'Glass Light',
+    theme: {
+      transparency: 0.85, bgBlur: 16, globalFont: 'system', globalFontSize: 18,
+      sidebarBg: 'rgba(0,0,0,0.02)', sidebarWidth: 250, sidebarTextColor: 'rgba(0,0,0,0.85)', sidebarNameSize: 14, sidebarGroupSize: 12,
+      chatBg: '', chatFont: 'mono', chatFontSize: 15, chatLineHeight: 1.4, chatTextColor: 'rgba(0,0,0,0.85)', chatCodeColor: '#b47814', chatCodeBg: 'rgba(0,0,0,0.03)',
+      toolOk: '#1e9646', toolRun: '#3b82f6', toolErr: '#be2828', toolNameColor: 'rgba(0,0,0,0.85)', toolSummaryColor: 'rgba(0,0,0,0.4)',
+      userTagBg: 'rgba(168,85,247,0.08)', userTagText: '#a855f7',
+      inputBg: 'rgba(0,0,0,0.02)', inputTextColor: 'rgba(0,0,0,0.85)', inputPlaceholder: 'rgba(0,0,0,0.28)', inputSendBg: 'rgba(0,0,0,0.10)', inputFocusBorder: 'rgba(0,0,0,0.22)', inputFontSize: 17, inputMinHeight: 56,
+      inputMode: 'default', cliLineWidth: 2, cliLineColor: '', cliTextColor: '',
+      statusBg: 'rgba(0,0,0,0.02)', ekgWidth: 150, ekgFontSize: 16, ekgGreen: '#1e9646', ekgYellow: '#b47814', ekgRed: '#be2828',
+      pillBg: 'rgba(0,0,0,0.04)', pillText: 'rgba(0,0,0,0.65)', prismOnColor: '#1e9646',
+      ekgLineWidth: 3, ekgAmplitudeMax: 10, ekgSpeedBase: 0.5, ekgSpeedMax: 2,
+      ekgLeftColor: 'rgba(0,0,0,0.35)', ekgMovingColor: '', ekgConsumedColor: 'rgba(0,0,0,0.08)', tokenDisplay: 'ekg',
+      rightBg: 'rgba(0,0,0,0.02)', rightWidth: 260,
+      sidebarTransparency: 1, sidebarBlur: 0, chatTransparency: 1, chatBlur: 0, rightTransparency: 1, rightBlur: 0,
+      ccHeight: 120, ccBgHeight: 120, ccBg: 'transparent', ccStyle: 'wave',
+      userName: '', userPrefix: '❯', userColor: '',
+      toolIndicator: '●', sparkles: '✳✴✵✶✷✸✹✺✻✼❃❊', spinnerColor: '', spinnerSize: 14,
+      msgStyle: 'terminal', msgFont: 'mono', msgTextColor: '', msgLineHeight: 1.8,
+    }
+  },
+  {
+    name: 'nord', label: 'Nord Frost',
+    theme: {
+      transparency: 0.95, bgBlur: 8, globalFont: 'system', globalFontSize: 17,
+      sidebarBg: '#2e3440', sidebarWidth: 250, sidebarTextColor: '#d8dee9', sidebarNameSize: 14, sidebarGroupSize: 12,
+      chatBg: '#242933', chatFont: 'mono', chatFontSize: 15, chatLineHeight: 1.6, chatTextColor: '#d8dee9', chatCodeColor: '#ebcb8b', chatCodeBg: 'rgba(255,255,255,0.04)',
+      toolOk: '#a3be8c', toolRun: '#81a1c1', toolErr: '#bf616a', toolNameColor: '#d8dee9', toolSummaryColor: 'rgba(216,222,233,0.4)',
+      userTagBg: 'rgba(180,142,173,0.15)', userTagText: '#b48ead',
+      inputBg: 'rgba(255,255,255,0.04)', inputTextColor: '#d8dee9', inputPlaceholder: 'rgba(216,222,233,0.28)', inputSendBg: 'rgba(216,222,233,0.1)', inputFocusBorder: 'rgba(136,192,208,0.4)', inputFontSize: 17, inputMinHeight: 56,
+      inputMode: 'default', cliLineWidth: 2, cliLineColor: '#88c0d0', cliTextColor: '#d8dee9',
+      statusBg: '#2e3440', ekgWidth: 150, ekgFontSize: 16, ekgGreen: '#a3be8c', ekgYellow: '#ebcb8b', ekgRed: '#bf616a',
+      pillBg: 'rgba(255,255,255,0.04)', pillText: 'rgba(216,222,233,0.65)', prismOnColor: '#a3be8c',
+      ekgLineWidth: 3, ekgAmplitudeMax: 10, ekgSpeedBase: 0.5, ekgSpeedMax: 2,
+      ekgLeftColor: 'rgba(216,222,233,0.35)', ekgMovingColor: '', ekgConsumedColor: 'rgba(216,222,233,0.08)', tokenDisplay: 'ekg',
+      rightBg: '#2e3440', rightWidth: 260,
+      sidebarTransparency: 1, sidebarBlur: 0, chatTransparency: 1, chatBlur: 0, rightTransparency: 1, rightBlur: 0,
+      ccHeight: 120, ccBgHeight: 120, ccBg: 'transparent', ccStyle: 'wave',
+      userName: '', userPrefix: '❯', userColor: '',
+      toolIndicator: '●', sparkles: '✳✴✵✶✷✸✹✺✻✼❃❊', spinnerColor: '', spinnerSize: 14,
+      msgStyle: 'terminal', msgFont: 'mono', msgTextColor: '', msgLineHeight: 1.8,
+    }
+  },
+]
 
 // ── CC widget drag-to-reorder ──
 
@@ -64,16 +153,11 @@ const WIDGET_LABELS: Record<string, string> = {
 function SortableWidget({ id }: { id: string }) {
   const u = useStore(s => s.updateTheme)
   const hidden = (useStore(s => s.ccHidden) || []).includes(id)
-  const {
-    attributes, listeners, setNodeRef, transform, transition, isDragging,
-  } = useSortable({ id })
-  const style: React.CSSProperties = {
-    transform: CSS.Transform.toString(transform),
-    transition,
-    opacity: isDragging ? 0.5 : 1,
-  }
+  const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({ id })
   return (
-    <div ref={setNodeRef} style={style} className="set-row" {...attributes}>
+    <div ref={setNodeRef} style={{
+      transform: CSS.Transform.toString(transform), transition, opacity: isDragging ? 0.5 : 1,
+    }} className="set-row" {...attributes}>
       <span {...listeners} className="cc-drag-handle" style={{ cursor:'grab', color:'var(--text-dim)', fontSize:14, userSelect:'none' }}>☰</span>
       <span className="set-row-label">{WIDGET_LABELS[id] || id}</span>
       <label className="cc-vis-toggle">
@@ -87,14 +171,9 @@ function SortableWidget({ id }: { id: string }) {
   )
 }
 
-// ── nav categories ──
+// ── nav ──
 
-const CATEGORIES: { key: string; label: string; tabs: string[] }[] = [
-  { key: 'appearance', label: '外观', tabs: ['global', 'sidebar', 'terminal', 'cc', 'right'] },
-  { key: 'agent', label: 'Agent', tabs: ['agent'] },
-  { key: 'session', label: '会话', tabs: ['session'] },
-]
-
+const TABS = ['global', 'sidebar', 'terminal', 'cc', 'right', 'agent', 'session'] as const
 const TAB_LABELS: Record<string, string> = {
   global: '全局', sidebar: '左栏', terminal: '终端', cc: '中控区', right: '右栏',
   agent: 'Agent', session: '会话',
@@ -108,7 +187,7 @@ export default function Settings({ onClose }: { onClose?: () => void }) {
   const reset = useStore(s => s.resetTheme)
   const [search, setSearch] = useState('')
   const [activeTab, setActiveTab] = useState('global')
-  const [expanded, setExpanded] = useState<Record<string, boolean>>({ appearance: true, agent: true, session: true })
+  const [globalPreset, setGlobalPreset] = useState(useStore.getState().activePreset?.global || '')
 
   const sensors = useSensors(useSensor(PointerSensor, { activationConstraint: { distance: 5 } }))
   const handleDragEnd = (event: DragEndEvent) => {
@@ -123,9 +202,28 @@ export default function Settings({ onClose }: { onClose?: () => void }) {
     u({ ccLayout: layout } as any)
   }
 
-  const toggle = (cat: string) => setExpanded(e => ({ ...e, [cat]: !e[cat] }))
+  const applyGlobalPreset = (name: string) => {
+    const preset = GLOBAL_PRESETS.find(p => p.name === name)
+    if (!preset) return
+    u(preset.theme as any)
+    setGlobalPreset(name)
+    useStore.setState(s => ({ activePreset: { ...s.activePreset, global: name } }))
+  }
 
-  const searchFiltered = search.trim().toLowerCase()
+  const onSettingChange = (partial: Partial<ThemeSettings>) => {
+    u(partial)
+    if (globalPreset && GLOBAL_PRESETS.some(p => p.name === globalPreset)) {
+      // switched away from built-in preset → custom
+      const existing = Object.keys(useStore.getState().presets || {})
+      let n = 1
+      while (existing.includes(`custom-${n}`)) n++
+      const cn = `custom-${n}`
+      setGlobalPreset(cn)
+      useStore.setState(s => ({ activePreset: { ...s.activePreset, global: cn } }))
+    }
+  }
+
+  const s = search.trim().toLowerCase()
 
   return (
     <div className="settings">
@@ -136,19 +234,11 @@ export default function Settings({ onClose }: { onClose?: () => void }) {
       </div>
       <div className="settings-tabs-root">
         <div className="settings-nav">
-          {CATEGORIES.map(cat => (
-            <div key={cat.key}>
-              <div className="set-nav-cat" onClick={() => toggle(cat.key)}>
-                <span className="set-nav-cat-arrow">{expanded[cat.key] ? '▾' : '▸'}</span>
-                {cat.label}
-              </div>
-              {expanded[cat.key] && cat.tabs.map(tab => (
-                <div key={tab}
-                  className={`set-nav-btn ${activeTab === tab ? 'active' : ''} ${searchFiltered && !TAB_LABELS[tab].toLowerCase().includes(searchFiltered) ? 'dim' : ''}`}
-                  onClick={() => { setActiveTab(tab); setSearch('') }}>
-                  {TAB_LABELS[tab]}
-                </div>
-              ))}
+          {TABS.map(tab => (
+            <div key={tab}
+              className={`set-nav-btn ${activeTab === tab ? 'active' : ''} ${s && !TAB_LABELS[tab].toLowerCase().includes(s) ? 'dim' : ''}`}
+              onClick={() => { setActiveTab(tab); setSearch('') }}>
+              {TAB_LABELS[tab]}
             </div>
           ))}
           <hr className="set-nav-hr"/>
@@ -157,23 +247,48 @@ export default function Settings({ onClose }: { onClose?: () => void }) {
 
         <div className="settings-body">
           <Tabs.Root value={activeTab} orientation="vertical" onValueChange={setActiveTab}>
+
             {/* ═══ 全局 ═══ */}
             <Tabs.Content value="global">
-              <PresetRow area="app" />
-              <h3>全局外观</h3>
-              <Group title="用户信息">
-                <Row label="显示名"><Txt value={t.userName} onChange={v=>u({userName:v})}/></Row>
-                <Row label="前缀"><Txt value={t.userPrefix} onChange={v=>u({userPrefix:v})}/></Row>
-                <Row label="名字颜色"><Swatch value={t.userColor} onChange={v=>u({userColor:v})}/></Row>
+              <h3>用户信息</h3>
+              <Group title="个人信息">
+                <Row label="显示名"><Txt value={t.userName} onChange={v=>onSettingChange({userName:v})}/></Row>
+                <Row label="前缀"><Txt value={t.userPrefix} onChange={v=>onSettingChange({userPrefix:v})}/></Row>
+                <Row label="名字颜色">
+                  <div style={{display:'flex',alignItems:'center',gap:8}}>
+                    <Swatch value={t.userColor} onChange={v=>onSettingChange({userColor:v})}/>
+                    <ColorChips value={t.userColor} onChange={v=>onSettingChange({userColor:v})}/>
+                  </div>
+                </Row>
               </Group>
+
+              <h3>外观</h3>
+              <Group title="全局预设">
+                <div className="set-preset-row">
+                  {GLOBAL_PRESETS.map(p => (
+                    <button key={p.name} className={`set-preset-chip ${globalPreset === p.name ? 'active' : ''}`}
+                      onClick={() => applyGlobalPreset(p.name)}>{p.label}</button>
+                  ))}
+                  {globalPreset && !GLOBAL_PRESETS.some(p => p.name === globalPreset) && (
+                    <button className="set-preset-chip active">{globalPreset}</button>
+                  )}
+                </div>
+                <div style={{fontSize:11,color:'var(--text-dim)',marginTop:4}}>
+                  选择预设后修改任意外观参数，自动切换为自定义
+                </div>
+              </Group>
+
               <Group title="玻璃效果">
-                <Row label="背景图"><Txt value={t.globalBgImage||''} onChange={v=>u({globalBgImage:v})}/></Row>
-                <Row label="透明度"><Slider value={t.transparency} onChange={v=>u({transparency:v})} min={0} max={1}/><span className="set-val">{Math.round(t.transparency*100)}%</span></Row>
-                <Row label="模糊"><Slider value={t.bgBlur} onChange={v=>u({bgBlur:v})} min={0} max={40} step={2}/><span className="set-val">{t.bgBlur}px</span></Row>
+                <Row label="背景图"><Txt value={t.globalBgImage||''} onChange={v=>onSettingChange({globalBgImage:v})}/></Row>
+                <Row label="透明度"><Slider value={t.transparency} onChange={v=>onSettingChange({transparency:v})} min={0} max={1}/>
+                  <span className="set-val">{Math.round(t.transparency*100)}%</span></Row>
+                <Row label="模糊"><Slider value={t.bgBlur} onChange={v=>onSettingChange({bgBlur:v})} min={0} max={40} step={2}/>
+                  <span className="set-val">{t.bgBlur}px</span></Row>
               </Group>
+
               <Group title="字体">
-                <Row label="字体"><Sel value={t.globalFont} onChange={v=>u({globalFont:v})} options={['system','mono']}/></Row>
-                <Row label="基础字号"><Num value={t.globalFontSize} onChange={v=>u({globalFontSize:v})} min={12} max={24}/></Row>
+                <Row label="字体"><Sel value={t.globalFont} onChange={v=>onSettingChange({globalFont:v})} options={['system','mono']}/></Row>
+                <Row label="基础字号"><Num value={t.globalFontSize} onChange={v=>onSettingChange({globalFontSize:v})} min={12} max={24}/></Row>
               </Group>
             </Tabs.Content>
 
@@ -181,18 +296,18 @@ export default function Settings({ onClose }: { onClose?: () => void }) {
             <Tabs.Content value="sidebar">
               <h3>左侧栏</h3>
               <Group title="外观">
-                <Row label="背景色"><Swatch value={t.sidebarBg} onChange={v=>u({sidebarBg:v})}/></Row>
-                <Row label="背景图"><Txt value={t.sidebarBgImage} onChange={v=>u({sidebarBgImage:v})}/></Row>
-                <Row label="栏宽"><Num value={t.sidebarWidth} onChange={v=>u({sidebarWidth:v})} min={160} max={400}/></Row>
+                <Row label="背景色"><Swatch value={t.sidebarBg} onChange={v=>onSettingChange({sidebarBg:v})}/></Row>
+                <Row label="背景图"><Txt value={t.sidebarBgImage} onChange={v=>onSettingChange({sidebarBgImage:v})}/></Row>
+                <Row label="栏宽"><Num value={t.sidebarWidth} onChange={v=>onSettingChange({sidebarWidth:v})} min={160} max={400}/></Row>
               </Group>
               <Group title="玻璃效果">
-                <Row label="透明度"><Slider value={t.sidebarTransparency} onChange={v=>u({sidebarTransparency:v})} min={0} max={1}/><span className="set-val">{Math.round(t.sidebarTransparency*100)}%</span></Row>
-                <Row label="模糊"><Slider value={t.sidebarBlur} onChange={v=>u({sidebarBlur:v})} min={0} max={40} step={2}/><span className="set-val">{t.sidebarBlur}px</span></Row>
+                <Row label="透明度"><Slider value={t.sidebarTransparency} onChange={v=>onSettingChange({sidebarTransparency:v})} min={0} max={1}/><span className="set-val">{Math.round(t.sidebarTransparency*100)}%</span></Row>
+                <Row label="模糊"><Slider value={t.sidebarBlur} onChange={v=>onSettingChange({sidebarBlur:v})} min={0} max={40} step={2}/><span className="set-val">{t.sidebarBlur}px</span></Row>
               </Group>
               <Group title="文字">
-                <Row label="文字颜色"><Swatch value={t.sidebarTextColor} onChange={v=>u({sidebarTextColor:v})}/></Row>
-                <Row label="会话名字号"><Num value={t.sidebarNameSize} onChange={v=>u({sidebarNameSize:v})} min={11} max={20}/></Row>
-                <Row label="分组标题字号"><Num value={t.sidebarGroupSize} onChange={v=>u({sidebarGroupSize:v})} min={10} max={16}/></Row>
+                <Row label="文字颜色"><Swatch value={t.sidebarTextColor} onChange={v=>onSettingChange({sidebarTextColor:v})}/></Row>
+                <Row label="会话名字号"><Num value={t.sidebarNameSize} onChange={v=>onSettingChange({sidebarNameSize:v})} min={11} max={20}/></Row>
+                <Row label="分组标题字号"><Num value={t.sidebarGroupSize} onChange={v=>onSettingChange({sidebarGroupSize:v})} min={10} max={16}/></Row>
               </Group>
             </Tabs.Content>
 
@@ -201,53 +316,53 @@ export default function Settings({ onClose }: { onClose?: () => void }) {
               <PresetRow area="terminal" />
               <h3>聊天区</h3>
               <Group title="外观">
-                <Row label="背景色"><Swatch value={t.chatBg} onChange={v=>u({chatBg:v})}/></Row>
-                <Row label="背景图"><Txt value={t.chatBgImage} onChange={v=>u({chatBgImage:v})}/></Row>
+                <Row label="背景色"><Swatch value={t.chatBg} onChange={v=>onSettingChange({chatBg:v})}/></Row>
+                <Row label="背景图"><Txt value={t.chatBgImage} onChange={v=>onSettingChange({chatBgImage:v})}/></Row>
               </Group>
               <Group title="字体">
-                <Row label="字体"><Sel value={t.chatFont} onChange={v=>u({chatFont:v})} options={['mono','system']}/></Row>
-                <Row label="字号"><Num value={t.chatFontSize} onChange={v=>u({chatFontSize:v})} min={12} max={22}/></Row>
-                <Row label="行高"><Num value={t.chatLineHeight} onChange={v=>u({chatLineHeight:v})} min={1.2} max={2.5}/></Row>
+                <Row label="字体"><Sel value={t.chatFont} onChange={v=>onSettingChange({chatFont:v})} options={['mono','system']}/></Row>
+                <Row label="字号"><Num value={t.chatFontSize} onChange={v=>onSettingChange({chatFontSize:v})} min={12} max={22}/></Row>
+                <Row label="行高"><Num value={t.chatLineHeight} onChange={v=>onSettingChange({chatLineHeight:v})} min={1.2} max={2.5}/></Row>
               </Group>
               <Group title="颜色">
-                <Row label="文字颜色"><Swatch value={t.chatTextColor} onChange={v=>u({chatTextColor:v})}/></Row>
-                <Row label="内联代码"><Swatch value={t.chatCodeColor} onChange={v=>u({chatCodeColor:v})}/></Row>
-                <Row label="代码块背景"><Swatch value={t.chatCodeBg} onChange={v=>u({chatCodeBg:v})}/></Row>
+                <Row label="文字颜色"><Swatch value={t.chatTextColor} onChange={v=>onSettingChange({chatTextColor:v})}/></Row>
+                <Row label="内联代码"><Swatch value={t.chatCodeColor} onChange={v=>onSettingChange({chatCodeColor:v})}/></Row>
+                <Row label="代码块背景"><Swatch value={t.chatCodeBg} onChange={v=>onSettingChange({chatCodeBg:v})}/></Row>
               </Group>
               <Group title="玻璃效果">
-                <Row label="透明度"><Slider value={t.chatTransparency} onChange={v=>u({chatTransparency:v})} min={0} max={1}/><span className="set-val">{Math.round(t.chatTransparency*100)}%</span></Row>
-                <Row label="模糊"><Slider value={t.chatBlur} onChange={v=>u({chatBlur:v})} min={0} max={40} step={2}/><span className="set-val">{t.chatBlur}px</span></Row>
+                <Row label="透明度"><Slider value={t.chatTransparency} onChange={v=>onSettingChange({chatTransparency:v})} min={0} max={1}/><span className="set-val">{Math.round(t.chatTransparency*100)}%</span></Row>
+                <Row label="模糊"><Slider value={t.chatBlur} onChange={v=>onSettingChange({chatBlur:v})} min={0} max={40} step={2}/><span className="set-val">{t.chatBlur}px</span></Row>
               </Group>
 
               <h3>工具调用 & 用户标签</h3>
-              <Group title="工具指示器">
-                <Row label="完成 ●"><Swatch value={t.toolOk} onChange={v=>u({toolOk:v})}/></Row>
-                <Row label="运行中 ●"><Swatch value={t.toolRun} onChange={v=>u({toolRun:v})}/></Row>
-                <Row label="错误 ●"><Swatch value={t.toolErr} onChange={v=>u({toolErr:v})}/></Row>
+              <Group title="工具指示器" defaultOpen={false}>
+                <Row label="完成 ●"><Swatch value={t.toolOk} onChange={v=>onSettingChange({toolOk:v})}/></Row>
+                <Row label="运行中 ●"><Swatch value={t.toolRun} onChange={v=>onSettingChange({toolRun:v})}/></Row>
+                <Row label="错误 ●"><Swatch value={t.toolErr} onChange={v=>onSettingChange({toolErr:v})}/></Row>
               </Group>
-              <Group title="工具文字">
-                <Row label="工具名颜色"><Swatch value={t.toolNameColor} onChange={v=>u({toolNameColor:v})}/></Row>
-                <Row label="摘要颜色"><Swatch value={t.toolSummaryColor} onChange={v=>u({toolSummaryColor:v})}/></Row>
+              <Group title="工具文字" defaultOpen={false}>
+                <Row label="工具名颜色"><Swatch value={t.toolNameColor} onChange={v=>onSettingChange({toolNameColor:v})}/></Row>
+                <Row label="摘要颜色"><Swatch value={t.toolSummaryColor} onChange={v=>onSettingChange({toolSummaryColor:v})}/></Row>
               </Group>
-              <Group title="用户标签">
-                <Row label="标签背景"><Swatch value={t.userTagBg} onChange={v=>u({userTagBg:v})}/></Row>
-                <Row label="标签文字"><Swatch value={t.userTagText} onChange={v=>u({userTagText:v})}/></Row>
+              <Group title="用户标签" defaultOpen={false}>
+                <Row label="标签背景"><Swatch value={t.userTagBg} onChange={v=>onSettingChange({userTagBg:v})}/></Row>
+                <Row label="标签文字"><Swatch value={t.userTagText} onChange={v=>onSettingChange({userTagText:v})}/></Row>
               </Group>
-              <Group title="指示器形状">
-                <Row label="形状"><Sel value={t.toolIndicator} onChange={v=>u({toolIndicator:v})} options={['●','◆','■','▲','▶']}/></Row>
-                <Row label="Spinner 字符集"><Sel value={t.sparkles} onChange={v=>u({sparkles:v})} options={[
+              <Group title="指示器形状" defaultOpen={false}>
+                <Row label="形状"><Sel value={t.toolIndicator} onChange={v=>onSettingChange({toolIndicator:v})} options={['●','◆','■','▲','▶']}/></Row>
+                <Row label="Spinner 字符集"><Sel value={t.sparkles} onChange={v=>onSettingChange({sparkles:v})} options={[
                   '✳✴✵✶✷✸✹✺✻✼❃❊','◴◷◶◵','·○◎●◉◎○','←↖↑↗→↘↓↙','▖▗▘▝▗▖▝▘','▁▂▃▄▅▆▇█▇▆▅▄▃','┌┐┘└','⠁⠂⠄⡀⢀⠠⠐⠈'
                 ]}/></Row>
-                <Row label="Spinner 颜色"><Swatch value={t.spinnerColor} onChange={v=>u({spinnerColor:v})}/></Row>
-                <Row label="Spinner 大小"><Num value={t.spinnerSize} onChange={v=>u({spinnerSize:v})} min={10} max={32}/></Row>
+                <Row label="Spinner 颜色"><Swatch value={t.spinnerColor} onChange={v=>onSettingChange({spinnerColor:v})}/></Row>
+                <Row label="Spinner 大小"><Num value={t.spinnerSize} onChange={v=>onSettingChange({spinnerSize:v})} min={10} max={32}/></Row>
               </Group>
 
               <h3>消息栏</h3>
-              <Group title="风格">
-                <Row label="风格"><Sel value={t.msgStyle} onChange={v=>u({msgStyle:v})} options={['terminal','bubble']}/></Row>
-                <Row label="字体"><Sel value={t.msgFont} onChange={v=>u({msgFont:v})} options={['mono','system']}/></Row>
-                <Row label="文字颜色"><Swatch value={t.msgTextColor} onChange={v=>u({msgTextColor:v})}/></Row>
-                <Row label="行间距"><Num value={t.msgLineHeight} onChange={v=>u({msgLineHeight:v})} min={1.2} max={2.5}/></Row>
+              <Group title="风格" defaultOpen={false}>
+                <Row label="风格"><Sel value={t.msgStyle} onChange={v=>onSettingChange({msgStyle:v})} options={['terminal','bubble']}/></Row>
+                <Row label="字体"><Sel value={t.msgFont} onChange={v=>onSettingChange({msgFont:v})} options={['mono','system']}/></Row>
+                <Row label="文字颜色"><Swatch value={t.msgTextColor} onChange={v=>onSettingChange({msgTextColor:v})}/></Row>
+                <Row label="行间距"><Num value={t.msgLineHeight} onChange={v=>onSettingChange({msgLineHeight:v})} min={1.2} max={2.5}/></Row>
               </Group>
             </Tabs.Content>
 
@@ -255,17 +370,17 @@ export default function Settings({ onClose }: { onClose?: () => void }) {
             <Tabs.Content value="cc">
               <PresetRow area="cc" />
 
-              <h3>控件排序</h3>
-              <DndContext sensors={sensors} collisionDetection={closestCenter} onDragEnd={handleDragEnd}>
-                <SortableContext items={t.ccLayout || ['input', 'context', 'model', 'mode']} strategy={verticalListSortingStrategy}>
-                  {(t.ccLayout || ['input', 'context', 'model', 'mode']).map(id => (
-                    <SortableWidget key={id} id={id} />
-                  ))}
-                </SortableContext>
-              </DndContext>
+              <Group title="控件排序">
+                <DndContext sensors={sensors} collisionDetection={closestCenter} onDragEnd={handleDragEnd}>
+                  <SortableContext items={t.ccLayout || ['input', 'context', 'model', 'mode']} strategy={verticalListSortingStrategy}>
+                    {(t.ccLayout || ['input', 'context', 'model', 'mode']).map(id => (
+                      <SortableWidget key={id} id={id} />
+                    ))}
+                  </SortableContext>
+                </DndContext>
+              </Group>
 
-              <h3>Widget 位置</h3>
-              <Group title="1:1 所见即所得编辑器">
+              <Group title="Widget 位置">
                 <div style={{ display:'flex', gap:8 }}>
                   <button className="ps-btn primary"
                     onClick={() => { u({ ccEditMode: !t.ccEditMode } as any); if (typeof onClose === 'function') onClose?.() }}>
@@ -278,66 +393,61 @@ export default function Settings({ onClose }: { onClose?: () => void }) {
               </Group>
 
               <Group title="布局">
-                <Row label="高度">
-                  <Num value={t.ccHeight} onChange={v=>u({ccHeight:v})} min={80} max={400}/>
-                  <span className="set-val">px</span>
-                </Row>
-                <Row label="背景色">
-                  <Swatch value={t.ccBg} onChange={v=>u({ccBg:v})}/>
-                </Row>
+                <Row label="高度"><Num value={t.ccHeight} onChange={v=>onSettingChange({ccHeight:v})} min={80} max={400}/><span className="set-val">px</span></Row>
+                <Row label="背景色"><Swatch value={t.ccBg} onChange={v=>onSettingChange({ccBg:v})}/></Row>
               </Group>
 
               <h3>输入栏</h3>
               <Group title="外观">
-                <Row label="背景色"><Swatch value={t.inputBg} onChange={v=>u({inputBg:v})}/></Row>
-                <Row label="背景图"><Txt value={t.inputBgImage||''} onChange={v=>u({inputBgImage:v})}/></Row>
-                <Row label="文字颜色"><Swatch value={t.inputTextColor} onChange={v=>u({inputTextColor:v})}/></Row>
-                <Row label="占位符颜色"><Swatch value={t.inputPlaceholder} onChange={v=>u({inputPlaceholder:v})}/></Row>
-                <Row label="发送按钮色"><Swatch value={t.inputSendBg} onChange={v=>u({inputSendBg:v})}/></Row>
-                <Row label="聚焦边框"><Swatch value={t.inputFocusBorder} onChange={v=>u({inputFocusBorder:v})}/></Row>
+                <Row label="背景色"><Swatch value={t.inputBg} onChange={v=>onSettingChange({inputBg:v})}/></Row>
+                <Row label="背景图"><Txt value={t.inputBgImage||''} onChange={v=>onSettingChange({inputBgImage:v})}/></Row>
+                <Row label="文字颜色"><Swatch value={t.inputTextColor} onChange={v=>onSettingChange({inputTextColor:v})}/></Row>
+                <Row label="占位符颜色"><Swatch value={t.inputPlaceholder} onChange={v=>onSettingChange({inputPlaceholder:v})}/></Row>
+                <Row label="发送按钮色"><Swatch value={t.inputSendBg} onChange={v=>onSettingChange({inputSendBg:v})}/></Row>
+                <Row label="聚焦边框"><Swatch value={t.inputFocusBorder} onChange={v=>onSettingChange({inputFocusBorder:v})}/></Row>
               </Group>
               <Group title="尺寸">
-                <Row label="字号"><Num value={t.inputFontSize} onChange={v=>u({inputFontSize:v})} min={12} max={22}/></Row>
-                <Row label="最小高度"><Num value={t.inputMinHeight} onChange={v=>u({inputMinHeight:v})} min={36} max={120}/></Row>
+                <Row label="字号"><Num value={t.inputFontSize} onChange={v=>onSettingChange({inputFontSize:v})} min={12} max={22}/></Row>
+                <Row label="最小高度"><Num value={t.inputMinHeight} onChange={v=>onSettingChange({inputMinHeight:v})} min={36} max={120}/></Row>
               </Group>
-              <Group title="CLI 风格">
-                <Row label="模式"><Sel value={t.inputMode} onChange={v=>u({inputMode:v})} options={['default','cli']}/></Row>
-                <Row label="横线宽度"><Num value={t.cliLineWidth} onChange={v=>u({cliLineWidth:v})} min={1} max={6}/></Row>
-                <Row label="横线颜色"><Swatch value={t.cliLineColor} onChange={v=>u({cliLineColor:v})}/></Row>
-                <Row label="文字颜色"><Swatch value={t.cliTextColor} onChange={v=>u({cliTextColor:v})}/></Row>
+              <Group title="CLI 风格" defaultOpen={false}>
+                <Row label="模式"><Sel value={t.inputMode} onChange={v=>onSettingChange({inputMode:v})} options={['default','cli']}/></Row>
+                <Row label="横线宽度"><Num value={t.cliLineWidth} onChange={v=>onSettingChange({cliLineWidth:v})} min={1} max={6}/></Row>
+                <Row label="横线颜色"><Swatch value={t.cliLineColor} onChange={v=>onSettingChange({cliLineColor:v})}/></Row>
+                <Row label="文字颜色"><Swatch value={t.cliTextColor} onChange={v=>onSettingChange({cliTextColor:v})}/></Row>
               </Group>
 
               <h3>状态栏 & 心电图</h3>
               <Group title="外观">
-                <Row label="背景色"><Swatch value={t.statusBg} onChange={v=>u({statusBg:v})}/></Row>
-                <Row label="背景图"><Txt value={t.statusBgImage||''} onChange={v=>u({statusBgImage:v})}/></Row>
-                <Row label="心电图宽度"><Num value={t.ekgWidth} onChange={v=>u({ekgWidth:v})} min={120} max={400}/></Row>
-                <Row label="心电图字号"><Num value={t.ekgFontSize} onChange={v=>u({ekgFontSize:v})} min={12} max={22}/></Row>
+                <Row label="背景色"><Swatch value={t.statusBg} onChange={v=>onSettingChange({statusBg:v})}/></Row>
+                <Row label="背景图"><Txt value={t.statusBgImage||''} onChange={v=>onSettingChange({statusBgImage:v})}/></Row>
+                <Row label="心电图宽度"><Num value={t.ekgWidth} onChange={v=>onSettingChange({ekgWidth:v})} min={120} max={400}/></Row>
+                <Row label="心电图字号"><Num value={t.ekgFontSize} onChange={v=>onSettingChange({ekgFontSize:v})} min={12} max={22}/></Row>
               </Group>
               <Group title="心电图颜色">
-                <Row label="绿色"><Swatch value={t.ekgGreen} onChange={v=>u({ekgGreen:v})}/></Row>
-                <Row label="黄色"><Swatch value={t.ekgYellow} onChange={v=>u({ekgYellow:v})}/></Row>
-                <Row label="红色"><Swatch value={t.ekgRed} onChange={v=>u({ekgRed:v})}/></Row>
+                <Row label="绿色"><Swatch value={t.ekgGreen} onChange={v=>onSettingChange({ekgGreen:v})}/></Row>
+                <Row label="黄色"><Swatch value={t.ekgYellow} onChange={v=>onSettingChange({ekgYellow:v})}/></Row>
+                <Row label="红色"><Swatch value={t.ekgRed} onChange={v=>onSettingChange({ekgRed:v})}/></Row>
               </Group>
-              <Group title="胶囊">
-                <Row label="背景"><Swatch value={t.pillBg} onChange={v=>u({pillBg:v})}/></Row>
-                <Row label="文字"><Swatch value={t.pillText} onChange={v=>u({pillText:v})}/></Row>
+              <Group title="胶囊" defaultOpen={false}>
+                <Row label="背景"><Swatch value={t.pillBg} onChange={v=>onSettingChange({pillBg:v})}/></Row>
+                <Row label="文字"><Swatch value={t.pillText} onChange={v=>onSettingChange({pillText:v})}/></Row>
               </Group>
-              <Group title="其他">
-                <Row label="Prism ON 色"><Swatch value={t.prismOnColor} onChange={v=>u({prismOnColor:v})}/></Row>
+              <Group title="其他" defaultOpen={false}>
+                <Row label="Prism ON 色"><Swatch value={t.prismOnColor} onChange={v=>onSettingChange({prismOnColor:v})}/></Row>
               </Group>
-              <Group title="心电图样式">
-                <Row label="基线宽度"><Num value={t.ekgLineWidth} onChange={v=>u({ekgLineWidth:v})} min={2} max={20}/></Row>
-                <Row label="最大振幅"><Num value={t.ekgAmplitudeMax} onChange={v=>u({ekgAmplitudeMax:v})} min={5} max={30}/></Row>
-                <Row label="基础波速"><Num value={t.ekgSpeedBase} onChange={v=>u({ekgSpeedBase:v})} min={0} max={3}/></Row>
-                <Row label="最大波速"><Num value={t.ekgSpeedMax} onChange={v=>u({ekgSpeedMax:v})} min={0} max={5}/></Row>
-                <Row label="定端点颜色"><Swatch value={t.ekgLeftColor} onChange={v=>u({ekgLeftColor:v})}/></Row>
-                <Row label="动端点颜色"><Swatch value={t.ekgMovingColor} onChange={v=>u({ekgMovingColor:v})}/></Row>
-                <Row label="消耗区颜色"><Swatch value={t.ekgConsumedColor} onChange={v=>u({ekgConsumedColor:v})}/></Row>
+              <Group title="心电图样式" defaultOpen={false}>
+                <Row label="基线宽度"><Num value={t.ekgLineWidth} onChange={v=>onSettingChange({ekgLineWidth:v})} min={2} max={20}/></Row>
+                <Row label="最大振幅"><Num value={t.ekgAmplitudeMax} onChange={v=>onSettingChange({ekgAmplitudeMax:v})} min={5} max={30}/></Row>
+                <Row label="基础波速"><Num value={t.ekgSpeedBase} onChange={v=>onSettingChange({ekgSpeedBase:v})} min={0} max={3}/></Row>
+                <Row label="最大波速"><Num value={t.ekgSpeedMax} onChange={v=>onSettingChange({ekgSpeedMax:v})} min={0} max={5}/></Row>
+                <Row label="定端点颜色"><Swatch value={t.ekgLeftColor} onChange={v=>onSettingChange({ekgLeftColor:v})}/></Row>
+                <Row label="动端点颜色"><Swatch value={t.ekgMovingColor} onChange={v=>onSettingChange({ekgMovingColor:v})}/></Row>
+                <Row label="消耗区颜色"><Swatch value={t.ekgConsumedColor} onChange={v=>onSettingChange({ekgConsumedColor:v})}/></Row>
               </Group>
-              <Group title="上下文显示">
-                <Row label="仪表样式"><Sel value={t.ccStyle} onChange={v=>u({ccStyle:v})} options={['wave','bar','numeric']}/></Row>
-                <Row label="显示模式"><Sel value={t.tokenDisplay} onChange={v=>u({tokenDisplay:v})} options={['ekg','numeric']}/></Row>
+              <Group title="上下文显示" defaultOpen={false}>
+                <Row label="仪表样式"><Sel value={t.ccStyle} onChange={v=>onSettingChange({ccStyle:v})} options={['wave','bar','numeric']}/></Row>
+                <Row label="显示模式"><Sel value={t.tokenDisplay} onChange={v=>onSettingChange({tokenDisplay:v})} options={['ekg','numeric']}/></Row>
               </Group>
             </Tabs.Content>
 
@@ -345,13 +455,13 @@ export default function Settings({ onClose }: { onClose?: () => void }) {
             <Tabs.Content value="right">
               <h3>右侧栏</h3>
               <Group title="外观">
-                <Row label="背景色"><Swatch value={t.rightBg} onChange={v=>u({rightBg:v})}/></Row>
-                <Row label="背景图"><Txt value={t.rightBgImage||''} onChange={v=>u({rightBgImage:v})}/></Row>
-                <Row label="宽度"><Num value={t.rightWidth} onChange={v=>u({rightWidth:v})} min={200} max={400}/></Row>
+                <Row label="背景色"><Swatch value={t.rightBg} onChange={v=>onSettingChange({rightBg:v})}/></Row>
+                <Row label="背景图"><Txt value={t.rightBgImage||''} onChange={v=>onSettingChange({rightBgImage:v})}/></Row>
+                <Row label="宽度"><Num value={t.rightWidth} onChange={v=>onSettingChange({rightWidth:v})} min={200} max={400}/></Row>
               </Group>
               <Group title="玻璃效果">
-                <Row label="透明度"><Slider value={t.rightTransparency} onChange={v=>u({rightTransparency:v})} min={0} max={1}/><span className="set-val">{Math.round(t.rightTransparency*100)}%</span></Row>
-                <Row label="模糊"><Slider value={t.rightBlur} onChange={v=>u({rightBlur:v})} min={0} max={40} step={2}/><span className="set-val">{t.rightBlur}px</span></Row>
+                <Row label="透明度"><Slider value={t.rightTransparency} onChange={v=>onSettingChange({rightTransparency:v})} min={0} max={1}/><span className="set-val">{Math.round(t.rightTransparency*100)}%</span></Row>
+                <Row label="模糊"><Slider value={t.rightBlur} onChange={v=>onSettingChange({rightBlur:v})} min={0} max={40} step={2}/><span className="set-val">{t.rightBlur}px</span></Row>
               </Group>
             </Tabs.Content>
 
