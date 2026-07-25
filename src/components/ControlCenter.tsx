@@ -84,6 +84,11 @@ export default function ControlCenter({ sessionId }: Props) {
         {(editMode ? ALL_WIDGETS : ['input', 'context', 'model', 'mode']).map(renderWidget)}
       </div>
       {editMode && selected && <PropertyPanel id={selected} />}
+      {editMode && (
+        <div className="cc-edit-toolbar">
+          <button className="ps-btn sm" onClick={() => u({ ccEditMode: false } as any)}>退出</button>
+        </div>
+      )}
     </div>
   )
 }
