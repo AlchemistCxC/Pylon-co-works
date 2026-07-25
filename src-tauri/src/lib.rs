@@ -1,5 +1,6 @@
 mod acp;
 mod agent_config;
+mod error;
 
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
@@ -7,6 +8,7 @@ use std::time::Duration;
 use tauri::{Emitter, Manager};
 use acp::AcpClient;
 use agent_config::AgentDef;
+use error::PylonError;
 
 struct AppState {
     acp: Arc<tokio::sync::Mutex<AcpClient>>,
@@ -49,8 +51,8 @@ async fn send_message(
 ) -> Result<String, String> {
     // Guard: if agent crashed, notify frontend immediately
     if state.acp.lock().await.is_crashed() {
-        let _ = window.emit("peri:error", serde_json::json!({"source": source, "error": "agent process crashed"}));
-        return Err("agent crashed".to_string());
+        let _ = window.emit("peri:error", serde_json::json!({"source": source, "error": PylonError::AgentCrashed.to_string()}));
+        return Err(PylonError::AgentCrashed.into());
     }
 
     let (peri_id, is_first) = 'session: {
