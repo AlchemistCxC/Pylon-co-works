@@ -421,79 +421,115 @@ export default function Settings({ onClose }: { onClose?: () => void }) {
                 </div>
               </Group>
 
-              <Group title="Widget 位置">
-                <div style={{ display:'flex', gap:8 }}>
-                  <button className="ps-btn primary"
-                    onClick={() => { u({ ccEditMode: !t.ccEditMode } as any); if (typeof onClose === 'function') onClose?.() }}>
-                    {useStore.getState().ccEditMode ? '退出自定义' : '进入自定义'}
-                  </button>
-                  <span style={{ fontSize:12, color:'var(--text-dim)', alignSelf:'center' }}>
-                    实时拖拽 widget 位置/大小
-                  </span>
-                </div>
-              </Group>
-
-              <Group title="布局">
+              <Group title="自定义">
                 <Row label="高度"><Num value={t.ccHeight} onChange={v=>onSettingChange({ccHeight:v})} min={80} max={400}/><span className="set-val">px</span></Row>
                 <Row label="背景色"><ColorPopover value={t.ccBg} onChange={v=>onSettingChange({ccBg:v})}/></Row>
                 <BgImageRow label="背景图" value={t.ccBgImage||''} onChange={v=>onSettingChange({ccBgImage:v})}/>
+                <div style={{marginTop:6}}>
+                  <button className="ps-btn primary"
+                    onClick={() => { u({ ccEditMode: !t.ccEditMode } as any); if (typeof onClose === 'function') onClose?.() }}>
+                    {useStore.getState().ccEditMode ? '退出自定义' : '进入 1:1 自定义'}
+                  </button>
+                </div>
               </Group>
 
               <h3>输入栏</h3>
-              <Group title="外观">
-                <Row label="背景色"><ColorPopover value={t.inputBg} onChange={v=>onSettingChange({inputBg:v})}/></Row>
-                <div className="set-compact-row">
-                  <span className="set-compact-label">文字</span><ColorPopover value={t.inputTextColor} onChange={v=>onSettingChange({inputTextColor:v})} chips={false}/>
-                  <span className="set-compact-label">占位符</span><ColorPopover value={t.inputPlaceholder} onChange={v=>onSettingChange({inputPlaceholder:v})} chips={false}/>
-                  <span className="set-compact-label">发送</span><ColorPopover value={t.inputSendBg} onChange={v=>onSettingChange({inputSendBg:v})} chips={false}/>
-                  <span className="set-compact-label">聚焦</span><ColorPopover value={t.inputFocusBorder} onChange={v=>onSettingChange({inputFocusBorder:v})} chips={false}/>
+              <Group title="类型">
+                <div className="set-preset-row">
+                  <button className={`set-preset-chip ${t.inputMode==='default'?'active':''}`}
+                    onClick={()=>onSettingChange({inputMode:'default'})}>输入框</button>
+                  <button className={`set-preset-chip ${t.inputMode==='cli'?'active':''}`}
+                    onClick={()=>onSettingChange({inputMode:'cli'})}>CLI</button>
                 </div>
               </Group>
               <Group title="尺寸">
                 <Row label="字号"><Num value={t.inputFontSize} onChange={v=>onSettingChange({inputFontSize:v})} min={12} max={22}/></Row>
                 <Row label="最小高度"><Num value={t.inputMinHeight} onChange={v=>onSettingChange({inputMinHeight:v})} min={36} max={120}/></Row>
               </Group>
-              <Group title="CLI 风格" defaultOpen={false}>
-                <Row label="模式"><Sel value={t.inputMode} onChange={v=>onSettingChange({inputMode:v})} options={['default','cli']}/></Row>
-                <Row label="横线宽度"><Num value={t.cliLineWidth} onChange={v=>onSettingChange({cliLineWidth:v})} min={1} max={6}/></Row>
-                <Row label="横线颜色"><ColorPopover value={t.cliLineColor} onChange={v=>onSettingChange({cliLineColor:v})}/></Row>
-                <Row label="文字颜色"><ColorPopover value={t.cliTextColor} onChange={v=>onSettingChange({cliTextColor:v})}/></Row>
-              </Group>
 
-              <h3>状态栏 & 心电图</h3>
-              <Group title="外观">
-                <Row label="背景色"><ColorPopover value={t.statusBg} onChange={v=>onSettingChange({statusBg:v})}/></Row>
-                <Row label="心电图宽度"><Num value={t.ekgWidth} onChange={v=>onSettingChange({ekgWidth:v})} min={120} max={400}/></Row>
-                <Row label="心电图字号"><Num value={t.ekgFontSize} onChange={v=>onSettingChange({ekgFontSize:v})} min={12} max={22}/></Row>
-              </Group>
-              <Group title="心电图颜色">
-                <div className="set-compact-row">
-                  <span className="set-compact-label">绿色</span><ColorPopover value={t.ekgGreen} onChange={v=>onSettingChange({ekgGreen:v})} chips={false}/>
-                  <span className="set-compact-label">黄色</span><ColorPopover value={t.ekgYellow} onChange={v=>onSettingChange({ekgYellow:v})} chips={false}/>
-                  <span className="set-compact-label">红色</span><ColorPopover value={t.ekgRed} onChange={v=>onSettingChange({ekgRed:v})} chips={false}/>
+              {t.inputMode !== 'cli' && (
+                <Group title="输入框设置">
+                  <Row label="背景色"><ColorPopover value={t.inputBg} onChange={v=>onSettingChange({inputBg:v})}/></Row>
+                  <div className="set-compact-row">
+                    <span className="set-compact-label">文字</span><ColorPopover value={t.inputTextColor} onChange={v=>onSettingChange({inputTextColor:v})} chips={false}/>
+                    <span className="set-compact-label">占位符</span><ColorPopover value={t.inputPlaceholder} onChange={v=>onSettingChange({inputPlaceholder:v})} chips={false}/>
+                    <span className="set-compact-label">发送</span><ColorPopover value={t.inputSendBg} onChange={v=>onSettingChange({inputSendBg:v})} chips={false}/>
+                    <span className="set-compact-label">聚焦</span><ColorPopover value={t.inputFocusBorder} onChange={v=>onSettingChange({inputFocusBorder:v})} chips={false}/>
+                  </div>
+                </Group>
+              )}
+
+              {t.inputMode === 'cli' && (
+                <Group title="CLI 设置">
+                  <Row label="横线宽度"><Num value={t.cliLineWidth} onChange={v=>onSettingChange({cliLineWidth:v})} min={1} max={6}/></Row>
+                  <Row label="横线颜色"><ColorPopover value={t.cliLineColor} onChange={v=>onSettingChange({cliLineColor:v})}/></Row>
+                  <Row label="CLI 文字色"><ColorPopover value={t.cliTextColor} onChange={v=>onSettingChange({cliTextColor:v})}/></Row>
+                </Group>
+              )}
+
+              <h3>上下文信息</h3>
+              <Group title="显示类型">
+                <div className="set-preset-row">
+                  {(['wave','bar','numeric'] as const).map(s => (
+                    <button key={s} className={`set-preset-chip ${t.ccStyle===s?'active':''}`}
+                      onClick={()=>onSettingChange({ccStyle:s})}>
+                      {s==='wave'?'心电图':s==='bar'?'柱状图':'数值'}
+                    </button>
+                  ))}
                 </div>
               </Group>
-              <Group title="胶囊 & 其他">
+              <Group title="外观">
+                <Row label="背景色"><ColorPopover value={t.statusBg} onChange={v=>onSettingChange({statusBg:v})}/></Row>
+                <div className="set-compact-row">
+                  <span className="set-compact-label">宽度</span><Num value={t.ekgWidth} onChange={v=>onSettingChange({ekgWidth:v})} min={120} max={400}/>
+                  <span className="set-compact-label">字号</span><Num value={t.ekgFontSize} onChange={v=>onSettingChange({ekgFontSize:v})} min={12} max={22}/>
+                </div>
+              </Group>
+
+              {t.ccStyle === 'wave' && (
+                <>
+                  <Group title="心电图颜色">
+                    <div className="set-compact-row">
+                      <span className="set-compact-label">绿色</span><ColorPopover value={t.ekgGreen} onChange={v=>onSettingChange({ekgGreen:v})} chips={false}/>
+                      <span className="set-compact-label">黄色</span><ColorPopover value={t.ekgYellow} onChange={v=>onSettingChange({ekgYellow:v})} chips={false}/>
+                      <span className="set-compact-label">红色</span><ColorPopover value={t.ekgRed} onChange={v=>onSettingChange({ekgRed:v})} chips={false}/>
+                    </div>
+                  </Group>
+                  <Group title="线型 & 动画">
+                    <div className="set-compact-row">
+                      <span className="set-compact-label">线宽</span><Num value={t.ekgLineWidth} onChange={v=>onSettingChange({ekgLineWidth:v})} min={2} max={20}/>
+                      <span className="set-compact-label">振幅</span><Num value={t.ekgAmplitudeMax} onChange={v=>onSettingChange({ekgAmplitudeMax:v})} min={5} max={30}/>
+                    </div>
+                    <div className="set-compact-row">
+                      <span className="set-compact-label">基础波速</span><Num value={t.ekgSpeedBase} onChange={v=>onSettingChange({ekgSpeedBase:v})} min={0} max={3}/>
+                      <span className="set-compact-label">最大波速</span><Num value={t.ekgSpeedMax} onChange={v=>onSettingChange({ekgSpeedMax:v})} min={0} max={5}/>
+                    </div>
+                    <div className="set-compact-row">
+                      <span className="set-compact-label">定端</span><ColorPopover value={t.ekgLeftColor} onChange={v=>onSettingChange({ekgLeftColor:v})} chips={false}/>
+                      <span className="set-compact-label">动端</span><ColorPopover value={t.ekgMovingColor} onChange={v=>onSettingChange({ekgMovingColor:v})} chips={false}/>
+                      <span className="set-compact-label">消耗</span><ColorPopover value={t.ekgConsumedColor} onChange={v=>onSettingChange({ekgConsumedColor:v})} chips={false}/>
+                    </div>
+                  </Group>
+                </>
+              )}
+
+              <Group title="显示模式">
+                <div className="set-preset-row">
+                  {(['ekg','numeric'] as const).map(m => (
+                    <button key={m} className={`set-preset-chip ${t.tokenDisplay===m?'active':''}`}
+                      onClick={()=>onSettingChange({tokenDisplay:m})}>
+                      {m==='ekg'?'ECG 波形':'数字'}
+                    </button>
+                  ))}
+                </div>
+              </Group>
+
+              <Group title="胶囊 & 指示">
                 <div className="set-compact-row">
                   <span className="set-compact-label">胶囊背景</span><ColorPopover value={t.pillBg} onChange={v=>onSettingChange({pillBg:v})} chips={false}/>
                   <span className="set-compact-label">胶囊文字</span><ColorPopover value={t.pillText} onChange={v=>onSettingChange({pillText:v})} chips={false}/>
                   <span className="set-compact-label">Prism ON</span><ColorPopover value={t.prismOnColor} onChange={v=>onSettingChange({prismOnColor:v})} chips={false}/>
                 </div>
-              </Group>
-              <Group title="心电图样式" defaultOpen={false}>
-                <Row label="基线宽度"><Num value={t.ekgLineWidth} onChange={v=>onSettingChange({ekgLineWidth:v})} min={2} max={20}/></Row>
-                <Row label="最大振幅"><Num value={t.ekgAmplitudeMax} onChange={v=>onSettingChange({ekgAmplitudeMax:v})} min={5} max={30}/></Row>
-                <Row label="基础波速"><Num value={t.ekgSpeedBase} onChange={v=>onSettingChange({ekgSpeedBase:v})} min={0} max={3}/></Row>
-                <Row label="最大波速"><Num value={t.ekgSpeedMax} onChange={v=>onSettingChange({ekgSpeedMax:v})} min={0} max={5}/></Row>
-                <div className="set-compact-row">
-                  <span className="set-compact-label">定端</span><ColorPopover value={t.ekgLeftColor} onChange={v=>onSettingChange({ekgLeftColor:v})} chips={false}/>
-                  <span className="set-compact-label">动端</span><ColorPopover value={t.ekgMovingColor} onChange={v=>onSettingChange({ekgMovingColor:v})} chips={false}/>
-                  <span className="set-compact-label">消耗</span><ColorPopover value={t.ekgConsumedColor} onChange={v=>onSettingChange({ekgConsumedColor:v})} chips={false}/>
-                </div>
-              </Group>
-              <Group title="上下文显示" defaultOpen={false}>
-                <Row label="仪表样式"><Sel value={t.ccStyle} onChange={v=>onSettingChange({ccStyle:v})} options={['wave','bar','numeric']}/></Row>
-                <Row label="显示模式"><Sel value={t.tokenDisplay} onChange={v=>onSettingChange({tokenDisplay:v})} options={['ekg','numeric']}/></Row>
               </Group>
             </Tabs.Content>
 
