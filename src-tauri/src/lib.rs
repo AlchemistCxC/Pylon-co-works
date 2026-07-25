@@ -14,7 +14,7 @@ struct AppState {
     acp: Arc<tokio::sync::Mutex<AcpClient>>,
     agents: HashMap<String, AgentDef>,
     active_agent: Mutex<String>,
-    sessions: Mutex<HashMap<String, SessionInfo>>,
+    sessions: Arc<Mutex<HashMap<String, SessionInfo>>>,
 }
 
 struct SessionInfo {
@@ -22,6 +22,12 @@ struct SessionInfo {
     persona: String,
     cwd: String,
     has_first_prompt: bool,
+    title: String,
+    model: String,
+    tokens_in: u64,
+    tokens_out: u64,
+    tokens_total: u64,
+    context_size: u64,
 }
 
 // ── AppState helpers ──
@@ -65,7 +71,7 @@ async fn new_session(
     let response = state.acp.lock().await.new_session(&session_cwd).await?;
     let peri_id = AcpClient::session_id_from(&response)?;
     state.sessions.lock().map_err(|e| e.to_string())?
-        .insert(source.clone(), SessionInfo { peri_id: peri_id.clone(), persona, cwd: session_cwd, has_first_prompt: false });
+        .insert(source.clone(), SessionInfo { peri_id: peri_id.clone(), persona, cwd: session_cwd, has_first_prompt: false, title: String::new(), model: String::new(), tokens_in: 0, tokens_out: 0, tokens_total: 0, context_size: 0 });
     // Return full response so frontend gets modes + configOptions + sessionId
     Ok(response)
 }
@@ -101,7 +107,7 @@ async fn send_message(
             let response = state.acp.lock().await.new_session(&session_cwd).await?;
             let pid = AcpClient::session_id_from(&response)?;
             state.sessions.lock().map_err(|e| e.to_string())?
-                .insert(source.clone(), SessionInfo { peri_id: pid.clone(), persona: persona.clone(), cwd: session_cwd, has_first_prompt: true });
+                .insert(source.clone(), SessionInfo { peri_id: pid.clone(), persona: persona.clone(), cwd: session_cwd, has_first_prompt: true, title: String::new(), model: String::new(), tokens_in: 0, tokens_out: 0, tokens_total: 0, context_size: 0 });
             (pid, true)
         }
     };
@@ -130,6 +136,7 @@ async fn send_message(
     let pid = peri_id.clone();
     let win = window.clone();
     let src = source.clone();
+    let sessions = state.sessions.clone();
     let result = tokio::time::timeout(Duration::from_secs(acp::PROMPT_TIMEOUT_SECS), async move {
         loop {
             tokio::select! {
@@ -152,7 +159,6 @@ async fn send_message(
                         Ok(raw) => {
                             if raw.method.as_deref() == Some(acp::NOTIF_SESSION_UPDATE) {
                                 let payload = raw.params.unwrap_or(serde_json::Value::Null);
-                                // R3: filter by sessionId
                                 if payload.get("sessionId").and_then(|v| v.as_str()) != Some(&pid) { continue; }
                                 // Check for userMessageChunk (history replay) → emit as user message
                                 if let Some(update) = payload.get("update") {
@@ -160,6 +166,42 @@ async fn send_message(
                                         if let Some(text) = update.get("content").and_then(|c| c.get("text")).and_then(|v| v.as_str()) {
                                             let _ = win.emit("peri:user", serde_json::json!({"source": src, "content": text}));
                                             continue;
+                                        }
+                                    }
+                                }
+                                // Update session metadata from notifications
+                                {
+                                    let payload_ref = &payload;
+                                    let update = match payload_ref.get("update") { Some(u) => u, None => unreachable!() };
+                                    let variant = update.get("sessionUpdate").and_then(|v| v.as_str());
+                                    if let Ok(mut sessions) = sessions.lock() {
+                                        if let Some(s) = sessions.get_mut(&src) {
+                                            match variant {
+                                                Some("usageUpdate") => {
+                                                    s.tokens_total = update.get("value").and_then(|v| v.as_u64()).unwrap_or(0);
+                                                    if let Some(meta) = update.get("_meta") {
+                                                        s.tokens_in = meta.get("inputTokens").and_then(|v| v.as_u64()).unwrap_or(0);
+                                                        s.tokens_out = meta.get("outputTokens").and_then(|v| v.as_u64()).unwrap_or(0);
+                                                        if let Some(m) = meta.get("model").and_then(|v| v.as_str()) { s.model = m.to_string(); }
+                                                    }
+                                                    s.context_size = update.get("size").and_then(|v| v.as_u64()).unwrap_or(0);
+                                                }
+                                                Some("sessionInfoUpdate") => {
+                                                    if let Some(t) = update.get("title").and_then(|v| v.as_str()) { s.title = t.to_string(); }
+                                                }
+                                                Some("configOptionUpdate") => {
+                                                    if let Some(opts) = update.get("configOptions").and_then(|v| v.as_array()) {
+                                                        for opt in opts {
+                                                            if opt.get("configId").and_then(|v| v.as_str()) == Some("model") {
+                                                                if let Some(vid) = opt.get("valueId").and_then(|v| v.get("value")).and_then(|v| v.as_str()) {
+                                                                    s.model = vid.to_string();
+                                                                }
+                                                            }
+                                                        }
+                                                    }
+                                                }
+                                                _ => {}
+                                            }
                                         }
                                     }
                                 }
@@ -226,7 +268,9 @@ async fn cancel_prompt(state: tauri::State<'_, AppState>, source: String) -> Res
 async fn load_sessions(state: tauri::State<'_, AppState>) -> Result<Vec<serde_json::Value>, String> {
     let sessions = state.sessions.lock().map_err(|e| e.to_string())?;
     Ok(sessions.iter().map(|(source, info)| {
-        serde_json::json!({"source": source, "periId": info.peri_id, "persona": info.persona, "cwd": info.cwd})
+        serde_json::json!({"source": source, "periId": info.peri_id, "persona": info.persona, "cwd": info.cwd,
+            "title": info.title, "model": info.model, "tokensIn": info.tokens_in, "tokensOut": info.tokens_out,
+            "tokensTotal": info.tokens_total, "contextSize": info.context_size})
     }).collect())
 }
 
@@ -308,7 +352,7 @@ async fn load_persisted_session(
     state.acp.lock().await.load_session(&peri_id, &cwd).await?;
     handle.abort();  // R2: prevent task leak
     state.sessions.lock().map_err(|e| e.to_string())?
-        .insert(source, SessionInfo { peri_id: peri_id.clone(), persona: String::new(), cwd, has_first_prompt: true });
+        .insert(source, SessionInfo { peri_id: peri_id.clone(), persona: String::new(), cwd, has_first_prompt: true, title: String::new(), model: String::new(), tokens_in: 0, tokens_out: 0, tokens_total: 0, context_size: 0 });
     Ok(())
 }
 
@@ -389,7 +433,7 @@ pub fn run() {
                 acp,
                 agents: agents_for_state,
                 active_agent: Mutex::new(default_agent_id),
-                sessions: Mutex::new(HashMap::new()),
+                sessions: Arc::new(Mutex::new(HashMap::new())),
             })
             .invoke_handler(tauri::generate_handler![
                 new_session, send_message, set_mode, set_config_option, close_session, cancel_prompt, load_sessions,
