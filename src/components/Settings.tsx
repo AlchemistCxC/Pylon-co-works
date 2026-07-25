@@ -2,6 +2,7 @@ import { useState, useRef } from 'react'
 import { invoke } from '@tauri-apps/api/core'
 import { useStore } from '../store'
 import type { ThemeSettings } from '../store'
+import PresetRow from './PresetRow'
 import './Settings.css'
 
 type Section = 'global'|'sidebar'|'cc'|'terminal'|'right'|'agent'|'session'
@@ -125,6 +126,7 @@ export default function Settings({ onClose }: { onClose?: () => void }) {
         </>}
 
         {sec === 'terminal' && <>
+          <PresetRow area="terminal" />
           <h3>终端（聊天区）</h3>
           <Group title="外观">
             <Row label="背景色"><Swatch value={t.chatBg} onChange={v=>u({chatBg:v})}/></Row>
@@ -147,6 +149,7 @@ export default function Settings({ onClose }: { onClose?: () => void }) {
         </>}
 
         {sec === 'terminal' && <>
+          <PresetRow area="terminal" />
           <h3>工具调用 & 用户标签</h3>
           <Group title="工具指示器">
             <Row label="完成 ●"><Swatch value={t.toolOk} onChange={v=>u({toolOk:v})}/></Row>
@@ -172,6 +175,7 @@ export default function Settings({ onClose }: { onClose?: () => void }) {
         </>}
 
         {sec === 'cc' && <>
+          <PresetRow area="cc" />
           <h3>输入栏</h3>
           <Group title="外观">
             <Row label="背景色"><Swatch value={t.inputBg} onChange={v=>u({inputBg:v})}/></Row>
@@ -194,6 +198,7 @@ export default function Settings({ onClose }: { onClose?: () => void }) {
         </>}
 
         {sec === 'cc' && <>
+          <PresetRow area="cc" />
           <h3>状态栏 & 心电图</h3>
           <Group title="外观">
             <Row label="背景色"><Swatch value={t.statusBg} onChange={v=>u({statusBg:v})}/></Row>
@@ -277,6 +282,7 @@ export default function Settings({ onClose }: { onClose?: () => void }) {
         </>}
 
         {sec === 'terminal' && <>
+          <PresetRow area="terminal" />
           <h3>消息栏</h3>
           <Group title="风格">
             <Row label="风格"><Sel value={t.msgStyle} onChange={v=>u({msgStyle:v})} options={['terminal','bubble']}/></Row>

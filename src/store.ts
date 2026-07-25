@@ -23,6 +23,8 @@ export interface ThemeSettings {
   msgStyle: string; msgFont: string; msgTextColor: string; msgLineHeight: number
   ccHeight: number; ccBgHeight: number; ccBg: string
   ccStyle: string
+  presets: Record<string, { name: string; colors: Record<string,string>; fonts: Record<string,string|number> }[]>
+  activePreset: Record<string, string>
 }
 
 type ThemeState = ThemeSettings & {
@@ -70,6 +72,7 @@ const DEFAULTS: ThemeSettings = {
   msgStyle: 'terminal', msgFont: 'mono', msgTextColor: '', msgLineHeight: 1.8,
   ccHeight: 120, ccBgHeight: 120, ccBg: 'transparent',
   ccStyle: 'wave',
+  presets: {}, activePreset: {},
 }
 
 export const useStore = create<ThemeState>((set, get) => ({
@@ -133,6 +136,8 @@ export const useStore = create<ThemeState>((set, get) => ({
   setLiveStats: (stats) => set(stats),
   liveCommands: [],
   resetTheme: () => set(DEFAULTS),
+  presets: {},
+  activePreset: {},
   agents: [],
   activeAgent: 'peri',
   setAgents: (a) => set({ agents: a }),
