@@ -1,7 +1,7 @@
 mod acp;
 mod agent_config;
 
-use std::collections::{BTreeMap, HashMap};
+use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 use tauri::{Emitter, Manager};
@@ -271,8 +271,12 @@ async fn export_session(
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     let agents = agent_config::load();
-    let agents_sorted: BTreeMap<_, _> = agents.iter().collect();
-    let default_agent_id = agents_sorted.keys().next().expect("no agents in agents.yaml").to_string();
+    // Pick 'peri' as default if available, else first agent
+    let default_agent_id = if agents.contains_key("peri") {
+        "peri".to_string()
+    } else {
+        agents.keys().next().expect("no agents in agents.yaml").clone()
+    };
     let default_agent = agents.get(&default_agent_id).expect("default agent not found").clone();
     let agents_for_state = agents;
 
