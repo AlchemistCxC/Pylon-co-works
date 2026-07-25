@@ -36,6 +36,8 @@
 .cc-edit-rsz:hover::after { opacity:1; }
 .cc-edit-vis { position:absolute; top:2px; right:2px; width:16px; height:16px; font-size:11px; color:var(--text-dim); cursor:pointer; display:flex; align-items:center; justify-content:center; border-radius:3px; z-index:5; background:var(--bg-panel); border:1px solid var(--border); }
 .cc-edit-vis:hover { color:var(--text); border-color:var(--accent); }
+.cc-edit-type { position:absolute; top:2px; right:20px; height:16px; padding:0 5px; font-size:10px; color:var(--text-dim); cursor:pointer; display:flex; align-items:center; border-radius:3px; z-index:5; background:var(--bg-panel); border:1px solid var(--border); font-family:var(--mono); }
+.cc-edit-type:hover { color:var(--accent); border-color:var(--accent); }
 .cc-widget.cc-hidden { opacity:0.25; }
 .cc-widget.cc-hidden:hover { opacity:0.6; }
 

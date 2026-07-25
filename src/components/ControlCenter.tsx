@@ -145,6 +145,7 @@ function EditableWidget({ id, pos, editMode, hidden: isHidden, children, bodyRef
       {editMode && <>
         <div className="cc-edit-rsz" onMouseDown={onResizeMouseDown} />
         <VisibilityToggle id={id} />
+        <TypeToggle id={id} />
       </>}
     </div>
   )
@@ -161,4 +162,29 @@ function VisibilityToggle({ id }: { id: string }) {
       {hidden ? '⊙' : '⊘'}
     </div>
   )
+}
+
+function TypeToggle({ id }: { id: string }) {
+  const inputMode = useStore(s => s.inputMode)
+  const ccStyle = useStore(s => s.ccStyle)
+  const u = useStore(s => s.updateTheme)
+  if (id === 'input') {
+    const label = inputMode === 'cli' ? 'CLI' : 'Def'
+    return (
+      <div className="cc-edit-type" onClick={e => { e.stopPropagation()
+        u({ inputMode: inputMode === 'cli' ? 'default' : 'cli' } as any)
+      }} title="切换输入风格">{label}</div>
+    )
+  }
+  if (id === 'context') {
+    const styles = ['wave', 'bar', 'numeric']
+    const idx = styles.indexOf(ccStyle || 'wave')
+    const next = styles[(idx + 1) % styles.length]
+    return (
+      <div className="cc-edit-type" onClick={e => { e.stopPropagation()
+        u({ ccStyle: next } as any)
+      }} title="切换显示类型">{ccStyle || 'wave'}</div>
+    )
+  }
+  return null
 }

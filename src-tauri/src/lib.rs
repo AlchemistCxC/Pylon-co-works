@@ -195,27 +195,8 @@ async fn set_mode(state: tauri::State<'_, AppState>, source: String, mode: Strin
 #[tauri::command]
 async fn set_config_option(state: tauri::State<'_, AppState>, source: String, key: String, value: String) -> Result<serde_json::Value, String> {
     let peri_id = state.get_peri_id(&source).map_err(|e| e.to_string())?;
-    // Pre-subscribe to catch the configOptionUpdate notification that Peri sends after
-    let mut broadcast = state.acp.lock().await.rx.resubscribe();
-    let _result = state.acp.lock().await.set_config_option(&peri_id, &key, &value).await?;
-    // Collect configOptionUpdate notification for up to 500ms
-    let config_update = tokio::time::timeout(Duration::from_millis(500), async {
-        while let Ok(raw) = broadcast.recv().await {
-            if raw.method.as_deref() == Some(acp::NOTIF_SESSION_UPDATE) {
-                if let Some(payload) = &raw.params {
-                    if payload.get("sessionId").and_then(|v| v.as_str()) == Some(&*peri_id) {
-                        if let Some(update) = payload.get("update") {
-                            if update.get("sessionUpdate").and_then(|v| v.as_str()) == Some("configOptionUpdate") {
-                                return update.clone();
-                            }
-                        }
-                    }
-                }
-            }
-        }
-        serde_json::Value::Null
-    }).await.unwrap_or(serde_json::Value::Null);
-    Ok(config_update)
+    // Peri returns full configOptions in the response body — no pre-subscribe needed
+    state.acp.lock().await.set_config_option(&peri_id, &key, &value).await
 }
 
 #[tauri::command]

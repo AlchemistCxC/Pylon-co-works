@@ -108,12 +108,13 @@ impl AcpClient {
             .ok_or_else(|| format!("invalid session/new response: {response}"))
     }
 
-    /// Set a session config option (model, etc.). Returns the configOptionUpdate notification.
+    /// Set a session config option (model, thinking_effort, context_1m, mode).
+    /// Returns Peri's full configOptionUpdate from the response body.
     pub async fn set_config_option(&self, session_id: &str, key: &str, value: &str) -> Result<serde_json::Value, String> {
         self.call_async(METHOD_SESSION_SET_CONFIG_OPTION, serde_json::json!({
             "sessionId": session_id,
-            "key": key,
-            "value": value,
+            "configId": key,
+            "value": {"valueId": {"value": value}}
         })).await
     }
 
@@ -276,8 +277,16 @@ impl AcpClient {
                 };
                 // Initialize
                 client.call_async(METHOD_INITIALIZE, serde_json::json!({
-                    "protocolVersion": 1, "capabilities": {"tokenStats": true},
-                    "clientInfo": {"name": "prism-desktop", "version": "0.1.0"}
+                    "protocolVersion": 1,
+                    "capabilities": {
+                        "tokenStats": true,
+                        "_meta": {
+                            "peri.tokenStats": true,
+                            "peri.skillNames": true,
+                            "peri.replay": true
+                        }
+                    },
+                    "clientInfo": {"name": "Pylon", "version": "0.1.0"}
                 })).await?;
                 Ok(client)
             }
