@@ -45,9 +45,6 @@ pub struct AcpClient {
     tx: broadcast::Sender<RawMessage>,
     /// Set when the child process exits unexpectedly.
     pub crashed: Arc<AtomicBool>,
-    /// Agent config for reconnect.
-    agent_name: String,
-    agent_cwd: Option<String>,
 }
 
 #[derive(Debug, Clone)]
@@ -272,8 +269,6 @@ impl AcpClient {
                 let client = AcpClient {
                     child, write_tx, next_id: AtomicU64::new(1), pending, rx, tx,
                     crashed,
-                    agent_name: agent.name.clone(),
-                    agent_cwd: agent.cwd.clone(),
                 };
                 // Initialize
                 client.call_async(METHOD_INITIALIZE, serde_json::json!({

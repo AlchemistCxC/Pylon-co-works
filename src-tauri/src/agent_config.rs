@@ -17,6 +17,8 @@ pub struct AgentDef {
     pub cwd: Option<String>,
     #[serde(default)]
     pub env: HashMap<String, String>,
+    #[serde(default)]
+    pub default: bool,
 }
 
 pub fn load() -> HashMap<String, AgentDef> {
@@ -24,4 +26,11 @@ pub fn load() -> HashMap<String, AgentDef> {
     let config: AgentConfigFile = serde_yaml::from_str(content)
         .expect("failed to parse agents.yaml");
     config.agents
+}
+
+/// Returns the first agent with `default: true`, or the first agent in the map.
+pub fn default_agent(agents: &HashMap<String, AgentDef>) -> &AgentDef {
+    agents.values().find(|a| a.default)
+        .or_else(|| agents.values().next())
+        .expect("no agents in agents.yaml")
 }

@@ -366,12 +366,7 @@ async fn export_session(
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     let agents = agent_config::load();
-    // Pick 'peri' as default if available, else first agent
-    let default_agent_id = if agents.contains_key("peri") {
-        "peri".to_string()
-    } else {
-        agents.keys().next().expect("no agents in agents.yaml").clone()
-    };
+    let default_agent_id = agent_config::default_agent(&agents).name.clone();
     let default_agent = agents.get(&default_agent_id).expect("default agent not found").clone();
     let agents_for_state = agents;
 
