@@ -17,6 +17,7 @@
   overflow:hidden;
 }
 .cc-widget { position:absolute; overflow:hidden; }
+.cc-widget:has(.cli-mode) { overflow:visible !important; }
 
 /* CLI mode: transparent bg, full-width lines */
 .control-center.cli-mode .cc-bg { background:transparent; }
