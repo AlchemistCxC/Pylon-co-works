@@ -29,7 +29,8 @@
 .cc-widget:not(.cc-natural) > * { flex:1; min-width:0; height:100%; display:flex; align-items:center; }
 /* naturalSize 控件：解除 container-type:size（它阻止被子内容撑开），宽度取内容 */
 .cc-widget.cc-natural { container-type:normal; width:max-content !important; height:auto !important; min-width:0 !important; }
-.cc-widget.cc-natural > * { flex:none; width:auto; }
+.cc-widget.cc-natural > * { flex:none; }
+.cc-widget.cc-natural .ekg-bar { width:var(--ekg-w,140px) !important; flex:none; }
 
 /* ── CLI mode ── */
 .control-center.cli-mode .cc-bg { background:transparent; }
