@@ -112,7 +112,7 @@
 
 /* ── 右：实时预览面板 ── */
 .settings-preview-pane {
-  flex:1; min-width:420px; max-width:70%;
+  flex:1; min-width:480px; max-width:80%;
   border-left:1px solid var(--border);
   background:rgba(0,0,0,0.015);
   display:flex; flex-direction:column;
