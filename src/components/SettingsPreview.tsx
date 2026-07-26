@@ -3,63 +3,48 @@ import { useStore } from '../store'
 /**
  * SettingsPreview — 设置页右侧实时预览
  *
- * 使用 CSS transform: scale() 缩放真实布局的 mock —
- * 渲染一个全宽容器（700px），通过 scale 压入 440px 预览栏，
- * 视觉效果远比固定尺寸 mock 更接近真实。
+ * 渲染 900px 宽的完整应用 mock，通过 CSS scale 压入预览栏（约 508px）
+ * scale = 508 / 900 ≈ 0.564
+ *
+ * 高亮当前编辑 zone（outline），与左侧设置项对应。
  */
 
 interface Props { zone: string }
 
-const SCALE_W = 700   // 模拟宽度（模拟屏幕截面）
-const SCALE_H = 460   // 模拟高度
+const MOCK_W = 900
+const MOCK_H = 540
 
 export default function SettingsPreview({ zone }: Props) {
   const t = useStore() as any
+  const isDark = (t.uiScheme || 'light') === 'dark'
   const bgColor = t.globalBgColor || '#e8e8ec'
-  const scheme = t.uiScheme || 'light'
-  const isDark = scheme === 'dark'
 
-  const uiTokens = isDark ? {
-    bg: 'rgba(255,255,255,0.04)',
-    bgHover: 'rgba(255,255,255,0.08)',
-    border: 'rgba(255,255,255,0.12)',
-    text: 'rgba(255,255,255,0.9)',
-    textDim: 'rgba(255,255,255,0.45)',
+  const ui = isDark ? {
+    bg: 'rgba(255,255,255,0.05)', bgHover: 'rgba(255,255,255,0.10)',
+    border: 'rgba(255,255,255,0.13)', text: 'rgba(255,255,255,0.90)',
+    textDim: 'rgba(255,255,255,0.45)', input: 'rgba(255,255,255,0.07)',
   } : {
-    bg: 'rgba(0,0,0,0.03)',
-    bgHover: 'rgba(0,0,0,0.06)',
-    border: 'rgba(0,0,0,0.10)',
-    text: 'rgba(0,0,0,0.85)',
-    textDim: 'rgba(0,0,0,0.40)',
+    bg: 'rgba(0,0,0,0.03)', bgHover: 'rgba(0,0,0,0.06)',
+    border: 'rgba(0,0,0,0.10)', text: 'rgba(0,0,0,0.85)',
+    textDim: 'rgba(0,0,0,0.40)', input: 'rgba(0,0,0,0.03)',
   }
 
   return (
     <div className="set-preview-wrap">
-      <ScaledPreview width={SCALE_W} height={SCALE_H}>
-        <AppMock t={t} bgColor={bgColor} ui={uiTokens} zone={zone} />
-      </ScaledPreview>
-    </div>
-  )
-}
-
-// ── Scale wrapper ──────────────────────────────────────────────
-function ScaledPreview({ width, height, children }: { width:number; height:number; children:React.ReactNode }) {
-  // 容器由 CSS 控制宽度（在父元素里撑满），scale 动态适配
-  return (
-    <div className="set-preview-scaler-outer" style={{ height: 0, paddingBottom: `${(height / width) * 100}%`, position: 'relative', overflow: 'hidden', borderRadius: 8, border: '1px solid var(--border)' }}>
-      <div style={{
-        position: 'absolute', inset: 0,
-        overflow: 'hidden',
-        borderRadius: 8,
-      }}>
-        <div className="set-preview-scaler-inner" style={{
-          width, height,
-          transformOrigin: 'top left',
-          // scale 通过 CSS container query 不可用，用 inline var
-          transform: `scale(var(--preview-scale, 0.6))`,
-        }}>
-          {children}
+      {/* padding-bottom trick: aspect ratio box */}
+      <div style={{ height: 0, paddingBottom: `${(MOCK_H / MOCK_W) * 100}%`, position: 'relative', borderRadius: 10, overflow: 'hidden', border: `1px solid ${ui.border}`, boxShadow: '0 4px 20px rgba(0,0,0,0.12)' }}>
+        <div style={{ position: 'absolute', inset: 0, overflow: 'hidden', borderRadius: 10 }}>
+          <div style={{
+            width: MOCK_W, height: MOCK_H,
+            transformOrigin: 'top left',
+            transform: `scale(var(--preview-scale, 0.56))`,
+          }}>
+            <AppMock t={t} bgColor={bgColor} ui={ui} zone={zone} />
+          </div>
         </div>
+      </div>
+      <div style={{ marginTop: 8, fontSize: 11, color: 'var(--text-dim)', opacity: 0.7, textAlign: 'center', fontFamily: 'var(--mono)' }}>
+        {zone} · 实时预览
       </div>
     </div>
   )
@@ -67,127 +52,169 @@ function ScaledPreview({ width, height, children }: { width:number; height:numbe
 
 // ── 完整应用 mock ──────────────────────────────────────────────
 function AppMock({ t, bgColor, ui, zone }: { t:any; bgColor:string; ui:any; zone:string }) {
-  const font = t.globalFont === 'mono' ? "'Cascadia Code','Consolas',monospace" : "system-ui,sans-serif"
-  const chatFont = t.chatFont === 'mono' ? "'Cascadia Code','Consolas',monospace" : "system-ui,sans-serif"
-  const sidebarW = t.sidebarWidth || 250
+  const font = t.globalFont === 'mono' ? "'Cascadia Code','JetBrains Mono','Consolas',monospace" : "system-ui,-apple-system,sans-serif"
+  const chatFont = t.chatFont === 'mono' ? "'Cascadia Code','JetBrains Mono','Consolas',monospace" : "system-ui,sans-serif"
+  const sw = Math.min(t.sidebarWidth || 250, 280)
+  const ccH = t.ccHeight || 110
+  const isCli = t.inputMode === 'cli'
+  const cliColor = t.cliLineColor || '#D77757'
+  const cliPad = t.cliLinePadding ?? 6
+  const cliW = t.cliLineWidth || 2
+  const connMode = t.toolConnectorMode || 'none'
+
+  // 3 连续 tool calls 模拟连接线
+  const tools = [
+    { name: 'Read', input: 'src/main.ts', done: true, color: t.toolOk || '#4ade80' },
+    { name: 'Bash', input: 'npm run build', done: true, color: t.toolOk || '#4ade80' },
+    { name: 'Edit', input: 'src/main.ts', done: false, color: t.toolRun || '#60a5fa' },
+  ]
+
+  const indicator = t.toolIndicator || '●'
+  const glow = t.toolIndicatorGlow || 0
 
   return (
-    <div style={{
-      width: '100%', height: '100%',
-      display: 'flex', flexDirection: 'column',
-      background: bgColor,
-      fontFamily: font,
-      fontSize: t.globalFontSize || 16,
-      color: ui.text,
-      overflow: 'hidden',
-    }}>
+    <div style={{ width: MOCK_W, height: MOCK_H, display: 'flex', flexDirection: 'column', background: bgColor, fontFamily: font, fontSize: t.globalFontSize || 16, color: ui.text, overflow: 'hidden' }}>
       {/* Titlebar */}
-      <div style={{
-        height: 30, display: 'flex', alignItems: 'center',
-        padding: '0 10px', gap: 6, flexShrink: 0,
-        background: 'rgba(0,0,0,0.03)',
-        borderBottom: `1px solid ${ui.border}`,
-      }}>
-        <span style={{ fontSize: 12, opacity: 0.5 }}>☰</span>
-        <span style={{ fontSize: 12, padding: '2px 10px', background: ui.bg, borderRadius: 4 }}>Peri</span>
+      <div style={{ height: 32, display: 'flex', alignItems: 'center', padding: '0 12px', gap: 8, flexShrink: 0, borderBottom: `1px solid ${ui.border}`, background: 'rgba(0,0,0,0.02)', outline: zone === 'global' ? '2px solid var(--accent,#3b82f6)' : undefined, outlineOffset: '-1px' }}>
+        <span style={{ opacity: 0.5, fontSize: 13 }}>☰</span>
+        <span style={{ fontSize: 12, padding: '2px 12px', background: ui.bg, borderRadius: 4 }}>Peri</span>
         <span style={{ fontSize: 12, opacity: 0.4 }}>Prism</span>
       </div>
 
       {/* Body */}
       <div style={{ flex: 1, display: 'flex', overflow: 'hidden' }}>
+
         {/* Sidebar */}
         <div style={{
-          width: sidebarW, flexShrink: 0,
+          width: sw, flexShrink: 0, display: 'flex', flexDirection: 'column',
           background: t.sidebarBg || ui.bg,
           borderRight: `1px solid ${ui.border}`,
-          display: 'flex', flexDirection: 'column',
-          padding: '8px 0',
           color: t.sidebarTextColor || ui.text,
           fontFamily: chatFont,
+          padding: '6px 0',
+          outline: zone === 'sidebar' ? '2px solid var(--accent,#3b82f6)' : undefined,
+          outlineOffset: '-1px',
         }}>
-          <div style={{ padding: '4px 12px 8px', fontSize: 10, opacity: 0.5, textTransform: 'uppercase', letterSpacing: '0.5px' }}>本地</div>
-          {['会话 A', '会话 B'].map((n, i) => (
-            <div key={n} style={{
-              display: 'flex', alignItems: 'center', gap: 6,
-              padding: '6px 12px',
-              background: i === 0 ? ui.bgHover : 'transparent',
-              fontSize: t.sidebarNameSize || 14,
-            }}>
-              <span style={{ width: 5, height: 5, borderRadius: '50%', background: i === 0 ? '#4ade80' : ui.textDim, flexShrink: 0, display: 'inline-block' }} />
+          <div style={{ padding: '4px 12px 6px', fontSize: 10, opacity: 0.45, textTransform: 'uppercase', letterSpacing: '0.6px', fontFamily: chatFont }}>本地</div>
+          {['会话 A', '会话 B', '会话 C'].map((n, i) => (
+            <div key={n} style={{ display: 'flex', alignItems: 'center', gap: 7, padding: `${(t.sidebarNameSize || 14) * 0.35}px 12px`, background: i === 0 ? ui.bgHover : 'transparent', fontSize: t.sidebarNameSize || 14 }}>
+              <span style={{ width: 5, height: 5, borderRadius: '50%', background: i === 0 ? (t.toolOk || '#4ade80') : ui.textDim, flexShrink: 0, display: 'inline-block', boxShadow: i === 0 ? `0 0 4px ${t.toolOk || '#4ade80'}` : undefined }} />
               {n}
             </div>
           ))}
+          <div style={{ flex: 1 }} />
+          <div style={{ display: 'flex', gap: 6, padding: '8px 12px', borderTop: `1px solid ${ui.border}` }}>
+            {['R', 'S'].map(l => (
+              <div key={l} style={{ width: 28, height: 28, borderRadius: 6, background: ui.bg, border: `1px solid ${ui.border}`, display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 13, fontWeight: 600 }}>{l}</div>
+            ))}
+          </div>
         </div>
 
         {/* Main */}
         <div style={{ flex: 1, display: 'flex', flexDirection: 'column', overflow: 'hidden', minWidth: 0 }}>
-          {/* Chat area — highlight if zone=chat */}
+
+          {/* Chat */}
           <div style={{
-            flex: 1, overflowY: 'hidden',
-            padding: '12px 20px',
-            background: t.chatBg || 'transparent',
-            fontFamily: chatFont,
-            fontSize: t.chatFontSize || 15,
+            flex: 1, overflow: 'hidden',
+            padding: '14px 22px 6px',
+            background: t.chatBg && t.chatBg !== '' ? t.chatBg : 'transparent',
+            fontFamily: chatFont, fontSize: t.chatFontSize || 15,
             lineHeight: t.chatLineHeight || 1.5,
             color: t.chatTextColor || ui.text,
-            outline: zone === 'chat' ? `2px solid var(--accent,#3b82f6)` : undefined,
+            outline: zone === 'chat' ? '2px solid var(--accent,#3b82f6)' : undefined,
             outlineOffset: zone === 'chat' ? '-2px' : undefined,
           }}>
             {/* User line */}
-            <div style={{ marginBottom: 8 }}>
-              <span style={{ color: t.userColor || '#a855f7', fontWeight: 700 }}>{t.userPrefix || '❯'} </span>
-              <span style={{ color: t.userColor || '#a855f7', fontWeight: 700 }}>user </span>
-              <span>帮我看一下这段代码</span>
+            <div style={{ marginBottom: 10, display: 'flex', alignItems: 'baseline', gap: 6 }}>
+              <span style={{ color: t.userColor || t.userTagText || '#a855f7', fontWeight: 700, fontFamily: chatFont }}>{t.userPrefix || '❯'}</span>
+              <span style={{ color: t.userColor || '#a855f7', fontWeight: 700 }}>{t.userName || 'user'}</span>
+              <span>帮我检查一下这段代码</span>
             </div>
 
-            {/* Tool calls */}
-            {[
-              { name: 'Read', input: 'src/main.ts', done: true },
-              { name: 'Bash', input: 'npm run build', done: false },
-            ].map((tool, i) => (
-              <div key={i} style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 4, fontSize: t.chatFontSize ? t.chatFontSize - 1 : 14, fontFamily: "'Cascadia Code',monospace" }}>
-                <span style={{ color: tool.done ? (t.toolOk || '#4ade80') : (t.toolRun || '#60a5fa') }}>●</span>
-                <span style={{ color: t.toolNameColor || ui.text, fontWeight: 700 }}>{tool.name}</span>
-                <span style={{ color: t.toolSummaryColor || ui.textDim }}> ({tool.input})</span>
-              </div>
-            ))}
+            {/* Tool calls 连续调用，带竖线 */}
+            <div style={{ marginBottom: 8 }}>
+              {tools.map((tool, i) => {
+                const connColor = connMode === 'none' ? 'transparent'
+                  : connMode === 'follow' ? tool.color
+                  : (t.toolConnectorColor || 'rgba(128,128,128,0.3)')
+                const glowStyle = glow > 0
+                  ? { textShadow: `0 0 ${glow}px ${tool.color}` }
+                  : undefined
+                return (
+                  <div key={i} style={{ position: 'relative', padding: `2px 0`, display: 'flex', alignItems: 'center', gap: 6, fontFamily: chatFont, fontSize: (t.chatFontSize || 15) - 1 }}>
+                    {/* 竖线连接 */}
+                    {i > 0 && connMode !== 'none' && (
+                      <div style={{ position: 'absolute', left: 5, top: -8, width: 2, height: 12, background: connColor, borderRadius: 1 }} />
+                    )}
+                    <span style={{ color: tool.color, ...glowStyle, flexShrink: 0 }}>{indicator}</span>
+                    <span style={{ color: t.toolNameColor || ui.text, fontWeight: 700 }}>{tool.name}</span>
+                    <span style={{ color: t.toolSummaryColor || ui.textDim }}>({tool.input})</span>
+                    {tool.done && <span style={{ color: t.toolSummaryColor || ui.textDim, fontSize: (t.chatFontSize || 15) - 2 }}>— 12 lines</span>}
+                  </div>
+                )
+              })}
+            </div>
 
             {/* Assistant response */}
-            <div style={{ marginTop: 8 }}>
-              好的，我来分析这段代码。<code style={{ color: t.chatCodeColor || '#b47814', background: t.chatCodeBg || 'rgba(0,0,0,0.04)', padding: '1px 4px', borderRadius: 3, fontFamily: 'inherit' }}>main()</code> 函数有一处问题。
+            <div style={{ color: t.chatTextColor || ui.text }}>
+              好的，我来分析一下。
+              <code style={{ color: t.chatCodeColor || '#b47814', background: t.chatCodeBg || 'rgba(0,0,0,0.04)', padding: '0 4px', borderRadius: 3, fontFamily: chatFont }}>main()</code>
+              {' '}里有一处类型错误需要修正：
+            </div>
+            <div style={{ margin: '6px 0', background: t.chatCodeBg || 'rgba(0,0,0,0.04)', border: `1px solid ${ui.border}`, borderRadius: 4, padding: '6px 10px', fontFamily: chatFont, fontSize: (t.chatFontSize || 15) - 1, color: t.chatTextColor || ui.text }}>
+              <span style={{ color: t.chatCodeColor || '#b47814' }}>const</span> <span>result = await fetch(url)</span>
             </div>
           </div>
 
           {/* Control center */}
           <div style={{
-            height: t.ccHeight || 110, flexShrink: 0,
-            background: t.ccBg && t.ccBg !== 'transparent' ? t.ccBg : 'rgba(0,0,0,0.02)',
+            height: ccH, flexShrink: 0,
+            background: t.ccBg && t.ccBg !== 'transparent' ? t.ccBg : ui.input,
             borderTop: `1px solid ${ui.border}`,
             display: 'flex', flexDirection: 'column', justifyContent: 'center',
-            padding: '6px 12px',
-            outline: zone === 'cc' ? `2px solid var(--accent,#3b82f6)` : undefined,
+            padding: '8px 14px',
+            position: 'relative',
+            outline: zone === 'cc' ? '2px solid var(--accent,#3b82f6)' : undefined,
             outlineOffset: zone === 'cc' ? '-2px' : undefined,
           }}>
-            {/* Input */}
-            <div style={{
-              display: 'flex', alignItems: 'center', gap: 6,
-              borderLeft: t.inputMode === 'cli' ? `${t.cliLineWidth || 2}px solid ${t.cliLineColor || '#D77757'}` : undefined,
-              border: t.inputMode !== 'cli' ? `1px solid ${ui.border}` : undefined,
-              background: t.inputMode !== 'cli' ? (t.inputBg || 'transparent') : 'transparent',
-              borderRadius: t.inputMode !== 'cli' ? 6 : undefined,
-              padding: t.inputMode === 'cli' ? '4px 0 4px 8px' : '6px 10px',
-              marginBottom: 6,
-            }}>
-              {t.inputMode === 'cli' && <span style={{ color: t.cliTextColor || ui.textDim, fontFamily: 'monospace' }}>❯</span>}
-              <span style={{ color: t.inputPlaceholder || ui.textDim, fontSize: t.inputFontSize || 15, fontFamily: 'monospace' }}>输入消息...</span>
-            </div>
-            {/* Status */}
-            <div style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 12, fontFamily: 'monospace' }}>
-              <span style={{ color: t.ekgGreen || '#4ade80' }}>
-                ▂▃▅▆▇▆▅▃▂ 0%
-              </span>
-              <span style={{ color: t.pillText || ui.textDim }}>{t.modelVariant === 'minimal' ? 'deepseek-v4-flash' : '▾ deepseek-v4-flash'}</span>
-              <span style={{ color: '#FFC107' }}>auto</span>
+            {/* Input — CLI or default */}
+            {isCli ? (
+              <div style={{
+                borderTop: `${cliW}px solid ${cliColor}`,
+                borderBottom: `${cliW}px solid ${cliColor}`,
+                padding: `${cliPad}px 0`,
+                display: 'flex', alignItems: 'center', gap: 6,
+                marginBottom: 6,
+              }}>
+                <span style={{ color: t.cliTextColor || ui.textDim, fontFamily: chatFont, fontSize: t.inputFontSize || 15 }}>❯</span>
+                <span style={{ color: t.inputPlaceholder || ui.textDim, fontFamily: chatFont, fontSize: t.inputFontSize || 15 }}>输入消息...</span>
+              </div>
+            ) : (
+              <div style={{
+                display: 'flex', alignItems: 'center', gap: 8,
+                border: `1px solid ${ui.border}`,
+                background: t.inputBg || ui.input,
+                borderRadius: 8, padding: '8px 12px', marginBottom: 6,
+                minHeight: Math.min(t.inputMinHeight || 52, 52),
+              }}>
+                <span style={{ color: t.inputPlaceholder || ui.textDim, fontFamily: chatFont, fontSize: t.inputFontSize || 15, flex: 1 }}>输入消息...</span>
+                <div style={{ width: 28, height: 28, borderRadius: '50%', background: t.inputSendBg || ui.bg, border: `1px solid ${ui.border}`, display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 14, color: ui.textDim }}>↑</div>
+              </div>
+            )}
+            {/* Status bar */}
+            <div style={{ display: 'flex', alignItems: 'center', gap: 10, fontSize: 12, fontFamily: chatFont }}>
+              {/* EKG mini */}
+              <svg width="80" height="18" viewBox="0 0 80 18" style={{ flexShrink: 0 }}>
+                <line x1="0" y1="9" x2="80" y2="9" stroke={t.ekgGreen || '#4ade80'} strokeWidth="1.5" opacity="0.4"/>
+                <polyline points="0,9 10,9 14,4 18,14 22,9 26,9 30,9 36,4 40,9 44,9 80,9" fill="none" stroke={t.ekgGreen || '#4ade80'} strokeWidth="1.5" strokeLinecap="round" style={{ filter: `drop-shadow(0 0 2px ${t.ekgGreen || '#4ade80'})` }}/>
+                <line x1="1" y1="4" x2="1" y2="14" stroke={t.ekgGreen || '#4ade80'} strokeWidth="1.5"/>
+                <line x1="4" y1="4" x2="4" y2="14" stroke={t.ekgGreen || '#4ade80'} strokeWidth="1.5"/>
+                <line x1="80" y1="4" x2="80" y2="14" stroke={t.ekgGreen || '#4ade80'} strokeWidth="2"/>
+              </svg>
+              <span style={{ color: t.ekgGreen || '#4ade80' }}>0%</span>
+              <span style={{ color: t.pillText || ui.textDim }}> · 0/131K</span>
+              <span style={{ color: t.pillText || ui.textDim }}> · deepseek-v4-flash</span>
+              <span style={{ color: '#FFC107' }}> · auto</span>
             </div>
           </div>
         </div>

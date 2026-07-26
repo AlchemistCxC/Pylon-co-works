@@ -25,18 +25,45 @@
   --mono: 'Cascadia Code', 'JetBrains Mono', 'Consolas', 'Sarasa Mono SC', 'Sarasa Term SC', 'Maple Mono', 'PingFang SC', 'Microsoft YaHei', monospace;
 }
 
-/* ── 暗色 UI scheme：整套 token 反色，暗底预设（Claude/Nord）用 ── */
+/* ── 暗色 UI scheme ── */
 .app[data-ui-scheme="dark"],
 body[data-ui-scheme="dark"] {
   --bg-panel: rgba(255,255,255,0.04);
-  --bg-hover: rgba(255,255,255,0.08);
-  --bg-active: rgba(255,255,255,0.12);
-  --bg-input: rgba(255,255,255,0.05);
-  --border: rgba(255,255,255,0.12);
-  --border-focus: rgba(255,255,255,0.28);
+  --bg-hover: rgba(255,255,255,0.10);
+  --bg-active: rgba(255,255,255,0.14);
+  --bg-input: rgba(255,255,255,0.08);
+  --border: rgba(255,255,255,0.14);
+  --border-focus: rgba(255,255,255,0.30);
   --text: rgba(255,255,255,0.90);
-  --text-dim: rgba(255,255,255,0.45);
-  --text-placeholder: rgba(255,255,255,0.30);
+  --text-dim: rgba(255,255,255,0.48);
+  --text-placeholder: rgba(255,255,255,0.32);
+}
+/* 暗色下 form 控件需要实底 — 否则 select/input 几乎不可见 */
+.app[data-ui-scheme="dark"] .set-select,
+.app[data-ui-scheme="dark"] .set-input,
+.app[data-ui-scheme="dark"] .set-num,
+.app[data-ui-scheme="dark"] .set-search,
+.app[data-ui-scheme="dark"] .set-textarea {
+  background: rgba(255,255,255,0.10) !important;
+  border-color: rgba(255,255,255,0.18) !important;
+  color: rgba(255,255,255,0.90) !important;
+}
+/* 色块弹窗需实底 */
+.app[data-ui-scheme="dark"] .set-color-popover {
+  background: #1e1e2e !important;
+  border-color: rgba(255,255,255,0.15) !important;
+}
+/* preset chip 暗色下可读 */
+.app[data-ui-scheme="dark"] .set-preset-chip,
+.app[data-ui-scheme="dark"] .preset-chip {
+  background: rgba(255,255,255,0.06);
+  color: rgba(255,255,255,0.65);
+  border-color: rgba(255,255,255,0.14);
+}
+.app[data-ui-scheme="dark"] .set-preset-chip:hover,
+.app[data-ui-scheme="dark"] .preset-chip:hover {
+  background: rgba(255,255,255,0.12);
+  color: rgba(255,255,255,0.9);
 }
 
 html, body, #root { height:100%; width:100%; overflow:hidden; font-family:var(--global-font,var(--font)); font-size:var(--global-font-size,18px); color:var(--text); background:var(--global-bg-color,#e8e8ec); }

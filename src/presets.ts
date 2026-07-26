@@ -110,7 +110,7 @@ export const GLOBAL_PRESETS: GlobalPreset[] = [
       inputTextColor: '#cdd6f4', inputPlaceholder: 'rgba(205,214,244,0.2)',
       inputSendBg: 'rgba(96,165,250,0.12)', inputFocusBorder: 'rgba(96,165,250,0.3)',
       inputFontSize: 14, inputMinHeight: 52,
-      inputMode: 'cli', cliLineWidth: 2, cliLineColor: '#3b4a6b', cliTextColor: '#cdd6f4',
+      inputMode: 'cli', cliLineWidth: 2, cliLineColor: '#3b4a6b', cliTextColor: '#cdd6f4', cliLinePadding: 2,
       statusBg: 'transparent', statusBgImage: '',
       ekgWidth: 140, ekgFontSize: 13,
       ekgGreen: '#4ade80', ekgYellow: '#fbbf24', ekgRed: '#f87171',

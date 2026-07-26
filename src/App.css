@@ -43,3 +43,7 @@
   min-height: 0;
   overflow: hidden;
 }
+/* 编辑模式下放开 overflow，让工具栏能浮出中控区上方 */
+.cc-editing-app .main-body {
+  overflow: visible;
+}

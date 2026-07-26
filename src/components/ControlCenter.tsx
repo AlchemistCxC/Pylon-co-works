@@ -87,8 +87,16 @@ export default function ControlCenter({ sessionId }: Props) {
     if (!def) return null
     if (!editMode && hidden.includes(id)) return null
 
+    // 独立 send/attach widget 是否已启用（在画布上且未隐藏）→ 决定 InputBar 是否隐藏自带按钮
+    const hasExternalSend = !hidden.includes('send')
+    const hasExternalAttach = !hidden.includes('attach')
+    const inputSplit = hasExternalSend || hasExternalAttach
+
     let body: React.ReactNode
     switch (id) {
+      case 'input':
+        body = <InputBar ref={inputRef} sessionId={sessionId} split={inputSplit} />
+        break
       case 'send':
         body = <SendWidget onClick={() => inputRef.current?.send()} />
         break
@@ -343,6 +351,7 @@ function PropertyPanel({ id, onClose, onExit }: { id: string; onClose: () => voi
           {theme.inputMode === 'cli' && <>
             <div className="cc-prop-field"><label>线宽</label><input type="number" value={theme.cliLineWidth} onChange={v => up('cliLineWidth', +v.target.value)} className="set-num" min={1} max={6} /></div>
             <div className="cc-prop-field"><label>线色</label><ColorPopover value={theme.cliLineColor || ''} onChange={v => up('cliLineColor', v)} /></div>
+            <div className="cc-prop-field"><label>行距</label><input type="number" value={(theme as any).cliLinePadding ?? 6} onChange={v => up('cliLinePadding', +v.target.value)} className="set-num" min={0} max={24} /></div>
           </>}
         </>}
 

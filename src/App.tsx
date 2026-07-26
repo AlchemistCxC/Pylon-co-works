@@ -99,6 +99,7 @@ export default function App() {
     '--cli-line-width': `${s.cliLineWidth}px`,
     '--cli-line-color': s.cliLineColor || undefined,
     '--cli-text-color': s.cliTextColor || undefined,
+    '--cli-line-padding': `${(s as any).cliLinePadding ?? 6}px`,
     '--status-bg': s.statusBg,
     '--status-bg-image': s.statusBgImage ? `url(${s.statusBgImage})` : 'none',
     '--ekg-w': `${s.ekgWidth}px`, '--ekg-font': `${s.ekgFontSize}px`,

@@ -14,7 +14,7 @@ export interface ThemeSettings {
   toolIndicatorGlow: number; toolIndicatorGlowColor: string
   toolConnectorMode: string; toolConnectorColor: string
   inputBg: string; inputBgImage: string; inputTextColor: string; inputPlaceholder: string; inputSendBg: string; inputFocusBorder: string; inputFontSize: number; inputMinHeight: number
-  inputMode: string; cliLineWidth: number; cliLineColor: string; cliTextColor: string
+  inputMode: string; cliLineWidth: number; cliLineColor: string; cliTextColor: string; cliLinePadding: number
   statusBg: string; statusBgImage: string; ekgWidth: number; ekgFontSize: number; ekgGreen: string; ekgYellow: string; ekgRed: string; pillBg: string; pillText: string; prismOnColor: string
   ekgLineWidth: number; ekgAmplitudeMax: number; ekgSpeedBase: number; ekgSpeedMax: number
   ekgLeftColor: string; ekgMovingColor: string; ekgConsumedColor: string; tokenDisplay: string
@@ -74,7 +74,7 @@ const DEFAULTS: ThemeSettings = {
   toolIndicatorGlow: 0, toolIndicatorGlowColor: '',
   toolConnectorMode: 'none', toolConnectorColor: 'rgba(0,0,0,0.12)',
   inputBg: 'rgba(0,0,0,0.02)', inputBgImage: '', inputTextColor: 'rgba(0,0,0,0.85)', inputPlaceholder: 'rgba(0,0,0,0.28)', inputSendBg: 'rgba(0,0,0,0.10)', inputFocusBorder: 'rgba(0,0,0,0.22)', inputFontSize: 17, inputMinHeight: 56,
-  inputMode: 'cli', cliLineWidth: 2, cliLineColor: '', cliTextColor: '',
+  inputMode: 'cli', cliLineWidth: 2, cliLineColor: '', cliTextColor: '', cliLinePadding: 6,
   statusBg: 'transparent', statusBgImage: '', ekgWidth: 150, ekgFontSize: 16, ekgGreen: '#4EBA65', ekgYellow: '#FFC107', ekgRed: '#FF6B80', pillBg: '#373737', pillText: '#999999', prismOnColor: '#4EBA65',
   ekgLineWidth: 3, ekgAmplitudeMax: 10, ekgSpeedBase: 0.5, ekgSpeedMax: 2.0,
   ekgLeftColor: 'rgba(0,0,0,0.35)', ekgMovingColor: '', ekgConsumedColor: 'rgba(0,0,0,0.08)', tokenDisplay: 'ekg',
