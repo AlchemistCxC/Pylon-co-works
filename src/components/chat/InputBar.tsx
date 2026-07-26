@@ -144,7 +144,7 @@ export default forwardRef<{ send: () => void; attachFile: () => void }, Props>(f
         </div>
       )}
       <div className="input-row">
-        {inputMode === 'cli' && <span className="cli-prefix">&gt;</span>}
+        {inputMode === 'cli' && <span className="cli-prefix">❯</span>}
         {!split && (
           <button className="input-btn attach" onClick={attachFile} title="Attach file (Ctrl+O)">
             <Paperclip size={16} />

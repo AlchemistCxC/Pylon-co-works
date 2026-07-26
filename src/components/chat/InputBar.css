@@ -47,5 +47,5 @@
 .input-bar.cli-mode .input-btn { display:none; }
 .input-bar.cli-mode .cli-prefix {
   color:var(--accent,#6366f1); font-family:var(--mono); font-size:var(--input-font-size,17px);
-  font-weight:600; margin-right:4px; line-height:1.4;
+  font-weight:600; padding:0 4px; line-height:1.4;
 }
