@@ -44,9 +44,9 @@
 .term-tool-name { font-weight:700; color:var(--tool-name,inherit); }
 .term-tool-summary { color:var(--tool-summary,var(--text-dim)); font-size:inherit; }
 .term-tool-suffix { color:var(--text-dim); font-size:inherit; }
-.term-tool-body { padding:0 0 6px 18px; }
-.term-tool-body pre { font-size:inherit; background:var(--chat-code-bg,rgba(0,0,0,0.02)); padding:6px 12px; border-radius:4px; overflow-x:auto; white-space:pre-wrap; margin:0; }
-.term-tool-body code { font-size:inherit; }
+.term-tool-body { padding:0 0 6px 18px; font-family:var(--mono); }
+.term-tool-body pre { font-size:inherit; font-family:inherit; background:var(--chat-code-bg,rgba(0,0,0,0.02)); padding:6px 12px; border-radius:4px; overflow-x:auto; white-space:pre-wrap; margin:0; }
+.term-tool-body code { font-size:inherit; font-family:inherit; }
 .term-tool-label { font-size:12px; color:var(--text-dim); text-transform:uppercase; display:block; margin:4px 0 2px; }
 
 .term-h2 { font-size:1.1em; font-weight:600; margin:6px 0 2px; }

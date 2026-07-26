@@ -100,7 +100,7 @@ const DEFAULTS: ThemeSettings = {
   toolIndicator: '●', sparkles: '✳✴✵✶✷✸✹✺✻✼❃❊',
   spinnerColor: '', spinnerSize: 14,
   msgStyle: 'terminal', msgFont: 'mono', msgTextColor: '', msgLineHeight: 1.8,
-  ccHeight: 120, ccBgHeight: 120, ccBg: 'transparent', ccBgImage: '',
+  ccHeight: 150, ccBgHeight: 150, ccBg: 'transparent', ccBgImage: '',
   ccStyle: 'wave',
   ccVariant: 'terminal',
   modelVariant: 'dropdown', modeVariant: 'pill', sendVariant: 'icon', attachVariant: 'icon',

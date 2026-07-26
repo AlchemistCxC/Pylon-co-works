@@ -96,7 +96,7 @@ export const GLOBAL_PRESETS: GlobalPreset[] = [
       msgStyle: 'terminal', msgFont: 'mono', msgTextColor: '', msgLineHeight: 1.7,
 
       // cc
-      ccHeight: 130, ccBgHeight: 130, ccBg: 'rgba(13,13,20,0.92)', ccBgImage: '',
+      ccHeight: 150, ccBgHeight: 150, ccBg: 'rgba(13,13,20,0.92)', ccBgImage: '',
       ccStyle: 'bar', ccVariant: 'terminal',
       barTrackColor: '#353117', barFillColor: '#4EBA65', barFillFollow: true, barHeight: 10,
       ccPositions: {
