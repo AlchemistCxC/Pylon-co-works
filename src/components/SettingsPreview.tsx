@@ -1,32 +1,44 @@
+import { useState, useEffect, useRef } from 'react'
 import ControlCenter from './ControlCenter'
 import { useStore } from '../store'
 
 /**
- * SettingsPreview — 设置页右侧实时预览（去 Mock 化）
+ * SettingsPreview — 设置页右侧实时预览
  *
- * 复用真实 CSS 类（.titlebar/.sidebar/.term）+ 直接渲染真实 ControlCenter 组件。
- * CSS 变量从外层 .app 天然继承 → 改任意设置立即在预览中真实生效。
- * ControlCenter 里的 EKG 会实时动画、所有 widget 真实呈现。
+ * 画布尺寸跟随实际窗口（window.innerWidth × innerHeight-32px标题栏），
+ * 保证 CC widget 百分比定位与真实界面一致。
+ * 预览面板自适应宽度，内容等比缩放填入。
  *
  * pointer-events:none：预览只读，点击不会误触发交互 / 污染 store。
  */
 
 interface Props { zone: string }
 
-const MOCK_W = 1200
-const MOCK_H = 720
-
 export default function SettingsPreview({ zone }: Props) {
+  const [dims, setDims] = useState({ w: window.innerWidth, h: window.innerHeight - 32 })
+  const wrapRef = useRef<HTMLDivElement>(null)
+
+  useEffect(() => {
+    const update = () => setDims({ w: window.innerWidth, h: window.innerHeight - 32 })
+    window.addEventListener('resize', update)
+    return () => window.removeEventListener('resize', update)
+  }, [])
+
+  const { w, h } = dims
+  // 动态缩放：预览面板宽 / 画布宽
+  const wrapW = wrapRef.current?.clientWidth ?? w
+  const scale = Math.min(1, wrapW / w)
+
   return (
-    <div className="set-preview-wrap">
-      <div className="set-preview-frame" style={{ height: 0, paddingBottom: `${(MOCK_H / MOCK_W) * 100}%` }}>
+    <div className="set-preview-wrap" ref={wrapRef}>
+      <div className="set-preview-frame" style={{ height: 0, paddingBottom: `${(h / w) * 100}%` }}>
         <div className="set-preview-clip">
-          <div className="set-preview-scaled" style={{ width: MOCK_W, height: MOCK_H }}>
+          <div className="set-preview-scaled" style={{ width: w, height: h, transform: `scale(${scale})` }}>
             <PreviewApp zone={zone} />
           </div>
         </div>
       </div>
-      <div className="set-preview-caption">{zone} · 实时预览（真实渲染）</div>
+      <div className="set-preview-caption">{zone} · 实时预览（{w}×{h}）</div>
     </div>
   )
 }

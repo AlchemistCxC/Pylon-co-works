@@ -112,19 +112,19 @@
 
 /* ── 右：实时预览面板 ── */
 .settings-preview-pane {
-  width:1200px; flex-shrink:0;
+  flex:1; min-width:300px; max-width:50%;
   border-left:1px solid var(--border);
   background:rgba(0,0,0,0.015);
   display:flex; flex-direction:column;
   padding:16px 18px;
-  overflow-y:auto;
+  overflow:hidden;
 }
 .settings-preview-label {
   font-size:12px; font-weight:600; text-transform:uppercase;
   letter-spacing:0.8px; color:var(--text-dim); margin-bottom:12px;
 }
 /* 预览栏内容宽 ≈ 1200 - 36(padding) = 1164；mock 宽 1200 → scale ≈ 0.97（近真实） */
-.set-preview-wrap { width:100%; --preview-scale:0.97; }
+.set-preview-wrap { width:100%; }
 .set-preview-frame { position:relative; overflow:hidden; border-radius:10px; border:1px solid var(--border); box-shadow:0 4px 20px rgba(0,0,0,0.12); }
 .set-preview-clip { position:absolute; inset:0; overflow:hidden; border-radius:10px; }
 .set-preview-scaled { transform-origin:top left; transform:scale(var(--preview-scale,0.97)); }
