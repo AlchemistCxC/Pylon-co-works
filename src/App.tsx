@@ -59,6 +59,7 @@ export default function App() {
     ekgSpeedBase: s.ekgSpeedBase, ekgSpeedMax: s.ekgSpeedMax,
     ekgLeftColor: s.ekgLeftColor, ekgMovingColor: s.ekgMovingColor,
     ekgConsumedColor: s.ekgConsumedColor, tokenDisplay: s.tokenDisplay, ccVariant: s.ccVariant,
+    spinnerColor: s.spinnerColor, spinnerSize: s.spinnerSize,
     rightBg: s.rightBg, rightBgImage: s.rightBgImage, rightWidth: s.rightWidth,
     rightTransparency: s.rightTransparency, rightBlur: s.rightBlur,
   })))
@@ -112,6 +113,7 @@ export default function App() {
     '--ekg-left': s.ekgLeftColor, '--ekg-moving': s.ekgMovingColor,
     '--ekg-consumed': s.ekgConsumedColor, '--token-display': s.tokenDisplay,
     '--cc-variant': s.ccVariant,
+    '--spinner-color': s.spinnerColor || undefined, '--spinner-size': `${s.spinnerSize}px`,
     '--right-bg': s.rightBg,
     '--right-bg-image': s.rightBgImage ? `url(${s.rightBgImage})` : 'none',
     '--right-width': `${s.rightWidth}px`,
