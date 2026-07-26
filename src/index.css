@@ -20,7 +20,7 @@
   --danger: rgba(190,40,40,0.75);
   --radius: 8px;
   --font: -apple-system, 'Segoe UI', 'PingFang SC', 'Microsoft YaHei', sans-serif;
-  --mono: 'Pylon Term', 'Cascadia Code', 'Consolas', monospace;
+  --mono: 'Cascadia Code', 'Sarasa Mono SC', 'Consolas', 'JetBrains Mono', monospace;
 }
 
 html, body, #root { height:100%; width:100%; overflow:hidden; font-family:var(--font); font-size:var(--global-font-size,18px); color:var(--text); background:#e8e8ec; }

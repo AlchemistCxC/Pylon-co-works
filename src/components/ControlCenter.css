@@ -46,8 +46,8 @@
 .cc-edit-hdr-label { font-size:10px; color:var(--accent); margin-left:6px; }
 .cc-widget.cc-edit { outline:1px dashed var(--border); cursor:move; }
 .cc-widget.cc-edit:hover { outline-color:var(--accent); outline-width:2px; }
-.cc-edit-rsz { position:absolute; right:0; bottom:0; width:12px; height:12px; cursor:se-resize; z-index:5; }
-.cc-edit-rsz::after { content:''; position:absolute; right:1px; bottom:1px; width:7px; height:7px; border-right:2px solid var(--accent); border-bottom:2px solid var(--accent); opacity:0.6; }
+.cc-edit-rsz { position:absolute; right:-4px; bottom:-4px; width:14px; height:14px; cursor:nwse-resize; z-index:5; }
+.cc-edit-rsz::after { content:''; position:absolute; right:1px; bottom:1px; width:8px; height:8px; border-right:2px solid var(--accent,#D77757); border-bottom:2px solid var(--accent,#D77757); opacity:0.8; }
 .cc-edit-rsz:hover::after { opacity:1; }
 .cc-edit-vis { position:absolute; top:2px; right:2px; width:16px; height:16px; font-size:11px; color:var(--text-dim); cursor:pointer; display:flex; align-items:center; justify-content:center; border-radius:3px; z-index:5; background:var(--bg-panel); border:1px solid var(--border); }
 .cc-edit-vis:hover { color:var(--text); border-color:var(--accent); }

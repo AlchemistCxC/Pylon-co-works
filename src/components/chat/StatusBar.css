@@ -6,14 +6,14 @@
 .ekg-pulse { animation: ekg-shift 0.5s linear infinite; }
 @keyframes ekg-shift { 0% { opacity:0.7; } 50% { opacity:1; } 100% { opacity:0.7; } }
 .ekg-pct { font-size:var(--ekg-font,16px); font-weight:400; font-family:var(--mono); min-width:44px; transition:color 0.3s; }
-.pill-mono { font-size:12px; color:var(--pill-text,#999999); padding:2px 8px; border-radius:0; background:var(--pill-bg,#373737); font-family:var(--mono); border-left:2px solid #D77757; }
+.pill-mono { font-size:12px; color:#999999; padding:0 8px; border-radius:0; background:transparent; font-family:var(--mono); border-left:2px solid #D77757; }
 
-.prism-tag { font-size:12px; font-weight:400; padding:2px 8px; border-radius:0; border:1px solid #505050; cursor:pointer; transition:all 0.15s; background:transparent; color:var(--text-dim); font-family:var(--mono); }
-.prism-tag.on { border-color:var(--prism-on,#4EBA65); color:var(--prism-on,#4EBA65); }
+.prism-tag { font-size:12px; font-weight:400; padding:0; border-radius:0; border:none; cursor:pointer; background:transparent; color:var(--text-dim); font-family:var(--mono); }
+.prism-tag.on { color:var(--prism-on,#4EBA65); }
 .prism-tag.off { color:var(--text-dim); }
-.prism-tag:hover { background:rgba(255,255,255,0.04); }
+.prism-tag:hover { text-decoration:underline; }
 
-.model-tag { font-size:12px; color:#D77757; padding:0; border-radius:0; border:none; background:transparent; cursor:pointer; font-family:var(--mono); }
+.model-tag { font-size:12px; color:#D77757; padding:0; border:none; background:transparent; cursor:pointer; font-family:var(--mono); }
 .model-tag:hover { text-decoration:underline; }
 
 .model-dropdown { position:relative; }
