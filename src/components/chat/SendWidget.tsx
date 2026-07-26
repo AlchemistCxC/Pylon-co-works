@@ -11,12 +11,13 @@ interface Props { onClick: () => void }
  */
 export default function SendWidget({ onClick }: Props) {
   const variant = useStore(s => s.sendVariant) || 'icon'
+  const ccScale = useStore(s => s.ccScale) || 100
   const cls = variant === 'minimal' ? 'cc-send-minimal'
             : variant === 'square'  ? 'cc-send-square'
             :                         'cc-send-icon'
   return (
     <button className={cls} onClick={onClick} title="Send (Enter)"
-      style={{ width:'100%', height:'100%' }}>
+      style={{ width:'100%', height:'100%', fontSize: `${ccScale}%` }}>
       <ArrowUp size={16} />
     </button>
   )

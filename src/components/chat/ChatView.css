@@ -119,3 +119,19 @@
 
 .term-summary { padding:4px 0; color:var(--text-dim); font-size:0.93em; }
 
+/* ── 回底按钮（Peri ⌄ 风格）── */
+.scroll-bottom-btn {
+  position:sticky; bottom:4px; float:right;
+  width:28px; height:20px; display:flex; align-items:center; justify-content:center;
+  background:var(--bg-panel); border:1px solid var(--border); border-radius:4px;
+  color:var(--text-dim); cursor:pointer; font-size:12px; opacity:0.6;
+  z-index:5; margin-right:4px;
+}
+.scroll-bottom-btn:hover { opacity:1; color:var(--text); }
+
+/* ── 滚动条增强 ── */
+.chat-view::-webkit-scrollbar { width:6px; }
+.chat-view::-webkit-scrollbar-track { background:transparent; }
+.chat-view::-webkit-scrollbar-thumb { background:var(--border); border-radius:3px; }
+.chat-view::-webkit-scrollbar-thumb:hover { background:var(--border-focus); }
+

@@ -92,6 +92,13 @@ function PreviewApp({ zone }: { zone: string }) {
                     <PvTool {...tl} />
                   </div>
                 ))}
+                <div className="term-spinner-row">
+                  <div className="term-spinner">
+                    <span className="spinner-frame">✳</span>
+                    <span className="spinner-verb">格物致知</span>
+                    <span className="spinner-meta">(3s · ↓ 1.2K tokens)</span>
+                  </div>
+                </div>
                 <div className="term-assistant">
                   好的，我来分析一下。<code className="term-inline-code">main()</code> 里有一处类型错误需要修正。
                 <div className="term-code-block">
@@ -121,15 +128,21 @@ function PvTool({ name, input, done }: { name: string; input: string; done: bool
   const connColor = useStore(s => s.toolConnectorColor) || 'rgba(128,128,128,0.3)'
   const toolOk = useStore(s => s.toolOk)
   const toolRun = useStore(s => s.toolRun)
+  const indicator = useStore(s => s.toolIndicator) || '●'
+  const glow = useStore(s => s.toolIndicatorGlow) || 0
+  const glowColor = useStore(s => s.toolIndicatorGlowColor) || ''
   const statusColor = done ? toolOk : toolRun
   const conn = connMode === 'none' ? 'transparent'
     : connMode === 'follow' ? statusColor
     : connColor
+  const glowCss = glow > 0
+    ? { textShadow: `0 0 ${glow}px ${glowColor || statusColor || 'currentColor'}` }
+    : undefined
   return (
     <div className="term-tool" data-status={done ? 'ok' : 'run'}
       style={{ '--tool-conn': conn } as React.CSSProperties}>
       <div className="term-tool-head">
-        <span className={`term-tool-indicator ${done ? 'ok' : 'run'}`}>●</span>
+        <span className={`term-tool-indicator ${done ? 'ok' : 'run'}`} style={glowCss}>{indicator}</span>
         <span className="term-tool-name">{name}</span>
         <span className="term-tool-summary"> ({input})</span>
         {done && <span className="term-tool-suffix"> — 12 lines</span>}

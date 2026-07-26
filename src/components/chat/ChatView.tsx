@@ -322,6 +322,8 @@ const ChatView = React.memo(function ChatView({ sessionId }: Props) {
         {!generating && summary && <div className="term-summary">{summary}</div>}
         <div ref={bottomRef} />
       </div>
+      <button className="scroll-bottom-btn" onClick={() => bottomRef.current?.scrollIntoView({ behavior: 'smooth' })}
+        title="回到底端">▼</button>
     </div>
   )
 })

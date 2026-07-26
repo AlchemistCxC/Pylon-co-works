@@ -13,6 +13,7 @@ interface Props { sessionSource?: string }
 
 export default function ModeWidget({ sessionSource }: Props) {
   const variant = useStore(s => s.modeVariant) || 'pill'
+  const ccScale = useStore(s => s.ccScale) || 100
   const mode = useStore(s => s.liveMode) || 'auto'
 
   const cycle = () => {
@@ -24,7 +25,8 @@ export default function ModeWidget({ sessionSource }: Props) {
 
   if (variant === 'badge') {
     return (
-      <span className="cc-mode-badge" data-mode={mode} onClick={e => { e.stopPropagation(); cycle() }} title="点击切换">
+      <span className="cc-mode-badge" data-mode={mode} onClick={e => { e.stopPropagation(); cycle() }} title="点击切换"
+        style={{ fontSize: `${ccScale}%` }}>
         [{mode}]
       </span>
     )

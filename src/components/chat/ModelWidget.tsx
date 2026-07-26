@@ -18,6 +18,7 @@ interface Props { sessionSource?: string }
 
 export default function ModelWidget({ sessionSource }: Props) {
   const variant = useStore(s => s.modelVariant) || 'dropdown'
+  const ccScale = useStore(s => s.ccScale) || 100
   const cfg = useStore(s => (sessionSource ? s.sessionConfig[sessionSource] : undefined))
   // 降级：无后端配置时读 profile.model（历史行为）
   const activeProfile = useStore(s => s.profiles.find(x => x.id === s.activeProfileId))
@@ -45,7 +46,8 @@ export default function ModelWidget({ sessionSource }: Props) {
     const idx = models.indexOf(model)
     const next = models[(idx + 1) % models.length]
     return (
-      <span className="cc-model-minimal" onClick={() => setModel(next)} title="点击切换模型">
+      <span className="cc-model-minimal" onClick={() => setModel(next)} title="点击切换模型"
+        style={{ fontSize: `${ccScale}%` }}>
         {model}
       </span>
     )
