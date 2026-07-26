@@ -499,7 +499,7 @@ async fn export_session(
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     let agents = agent_config::load();
-    let default_agent_id = agent_config::default_agent(&agents).name.clone();
+    let default_agent_id = agent_config::default_agent_id(&agents).to_string();
     let default_agent = agents.get(&default_agent_id).expect("default agent not found").clone();
     let agents_for_state = agents;
 

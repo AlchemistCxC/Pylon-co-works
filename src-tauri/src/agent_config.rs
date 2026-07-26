@@ -28,9 +28,10 @@ pub fn load() -> HashMap<String, AgentDef> {
     config.agents
 }
 
-/// Returns the first agent with `default: true`, or the first agent in the map.
-pub fn default_agent(agents: &HashMap<String, AgentDef>) -> &AgentDef {
-    agents.values().find(|a| a.default)
-        .or_else(|| agents.values().next())
+/// Returns the id (key) of the first agent with `default: true`, or the first agent in the map.
+pub fn default_agent_id(agents: &HashMap<String, AgentDef>) -> &str {
+    agents.iter().find(|(_, a)| a.default)
+        .or_else(|| agents.iter().next())
+        .map(|(k, _)| k.as_str())
         .expect("no agents in agents.yaml")
 }
