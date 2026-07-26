@@ -7,6 +7,7 @@ import SendWidget from './chat/SendWidget'
 import AttachWidget from './chat/AttachWidget'
 import ColorPopover from './ColorPopover'
 import './ControlCenter.css'
+import './chat/StatusBar.css'  // model/mode/send/attach widget 样式
 
 interface Props { sessionId: string | null }
 
@@ -33,7 +34,7 @@ function EkgWidget() {
   return (
     <div className="ekg-bar" style={{
       '--bar-fill': `${pct}%`, '--bar-color': barFill,
-      '--bar-track': barTrackColor || 'rgba(0,0,0,0.18)', '--bar-h': '100%',
+      '--bar-track': barTrackColor || 'rgba(0,0,0,0.18)',
     } as React.CSSProperties}>
       <div className="ekg-bar-track" />
       <div className="ekg-bar-fill" />
