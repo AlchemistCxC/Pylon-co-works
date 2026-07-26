@@ -54,7 +54,7 @@
 .term-li { margin:1px 0 1px 16px; }
 .term-li::before { content:'- '; color:var(--text-dim); }
 .term-p { margin:2px 0; }
-.term-inline-code { color:var(--chat-code-color,#b47814); font-size:inherit; }
+.term-inline-code { font-family:var(--mono); color:var(--chat-code-color,#b47814); font-size:inherit; }
 .term-code { margin:4px 0; background:var(--chat-code-bg,rgba(0,0,0,0.03)); border:1px solid var(--border); border-radius:4px; overflow:hidden; }
 .term-code pre { padding:10px 14px; margin:0; overflow-x:auto; }
 .term-code code { font-size:inherit; line-height:1.6; }
