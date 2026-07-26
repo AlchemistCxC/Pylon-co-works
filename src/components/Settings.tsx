@@ -108,7 +108,6 @@ export default function Settings({ onClose }: { onClose?: () => void }) {
   const agents = useStore(s => s.agents)
   const activeAgent = useStore(s => s.activeAgent)
   const setActiveAgent = useStore(s => s.setActiveAgent)
-  const [search, setSearch] = useState('')
   const [activeTab, setActiveTab] = useState('global')
 
   // 应用全局预设
@@ -136,22 +135,17 @@ export default function Settings({ onClose }: { onClose?: () => void }) {
     applyZonePreset(zone, presetName, sub)
   }
 
-  const s = search.trim().toLowerCase()
   const previewZone = TAB_PREVIEW[activeTab]
 
   return (
     <div className="settings">
       {onClose && <button className="settings-close" onClick={onClose}>✕</button>}
-      <div className="settings-search-bar">
-        <input className="set-search" placeholder="搜索设置..." value={search}
-          onChange={e => setSearch(e.target.value)} />
-      </div>
       <div className="settings-tabs-root">
         <div className="settings-nav">
           {TABS.map(tab => (
             <div key={tab}
-              className={`set-nav-btn ${activeTab === tab ? 'active' : ''} ${s && !TAB_LABELS[tab].toLowerCase().includes(s) ? 'dim' : ''}`}
-              onClick={() => { setActiveTab(tab); setSearch('') }}>
+              className={`set-nav-btn ${activeTab === tab ? 'active' : ''}`}
+              onClick={() => setActiveTab(tab)}>
               {TAB_LABELS[tab]}
             </div>
           ))}

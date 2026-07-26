@@ -22,7 +22,7 @@
   --global-bg-color: #e8e8ec;
   --font: -apple-system, 'Segoe UI', 'PingFang SC', 'Microsoft YaHei', sans-serif;
   /* 终端等宽栈：西文等宽 + CJK 等宽 fallback（Sarasa/更纱 → 微软雅黑 → 系统） */
-  --mono: 'Cascadia Code', 'JetBrains Mono', 'Consolas', 'Sarasa Mono SC', 'Sarasa Term SC', 'Maple Mono', 'PingFang SC', 'Microsoft YaHei', monospace;
+  --mono: 'JetBrains Mono', 'Cascadia Code', 'Consolas', 'Sarasa Mono SC', 'Sarasa Term SC', 'Maple Mono', 'PingFang SC', 'Microsoft YaHei', monospace;
 }
 
 /* ── 暗色 UI scheme ── */

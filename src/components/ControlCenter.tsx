@@ -28,12 +28,12 @@ const WIDGET_REGISTRY: WidgetDef[] = [
   },
   {
     id: 'context', label: '上下文',
-    defaultPos: { x: 2, y: 64, w: 56, h: 16 },
+    defaultPos: { x: 2, y: 66, w: 46, h: 13 },
     render: () => <StatusBar />,
   },
   {
     id: 'model', label: '模型',
-    defaultPos: { x: 60, y: 64, w: 26, h: 16 },
+    defaultPos: { x: 50, y: 66, w: 16, h: 13 },
     render: (sid) => {
       const s = useStore.getState().sessions.find(s => s.id === sid)
       return <ModelWidget sessionSource={s?.source} />
@@ -41,7 +41,7 @@ const WIDGET_REGISTRY: WidgetDef[] = [
   },
   {
     id: 'mode', label: '权限模式',
-    defaultPos: { x: 88, y: 64, w: 10, h: 16 },
+    defaultPos: { x: 68, y: 66, w: 9, h: 13 },
     render: (sid) => {
       const s = useStore.getState().sessions.find(s => s.id === sid)
       return <ModeWidget sessionSource={s?.source} />
@@ -117,10 +117,10 @@ export default function ControlCenter({ sessionId }: Props) {
     // CLI 模式下强制修正布局：input 占满整宽，status/model/mode 对齐到下方
     // 不依赖 localStorage 旧值 — 旧值可能是 non-CLI 的预设
     const CLI_OVERRIDES: Record<string, { x:number;y:number;w:number;h:number }> = {
-      input:   { x: 1,  y: 1,  w: 98, h: 60 },
-      context: { x: 1,  y: 68, w: 54, h: 16 },
-      model:   { x: 57, y: 68, w: 28, h: 16 },
-      mode:    { x: 87, y: 68, w: 12, h: 16 },
+      input:   { x: 1,  y: 2,  w: 98, h: 58 },
+      context: { x: 1,  y: 70, w: 46, h: 13 },
+      model:   { x: 49, y: 70, w: 16, h: 13 },
+      mode:    { x: 67, y: 70, w: 9,  h: 13 },
     }
     // CLI 默认布局仅在用户从未手动调整过时套用；用户拖动/缩放过则尊重其自定义值
     const pos = (!editMode && inputMode === 'cli' && !cliCustomized && CLI_OVERRIDES[id])

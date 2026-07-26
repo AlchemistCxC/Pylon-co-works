@@ -115,17 +115,18 @@
 .cc-prop-field .set-preset-row { flex:1; }
 
 /* ── Widget toolbar (NEW) ── */
-/* 编辑工具栏固定在应用顶部（titlebar 下方），不再紧贴中控区 */
+/* 编辑工具栏浮在屏幕中央（居中弹窗式），不紧贴中控区也不在顶部 */
 .cc-edit-toolbar {
-  position:fixed; top:44px; left:12px; right:12px;
-  z-index:60; display:flex; align-items:center; gap:6px;
-  background:var(--bg-panel,rgba(255,255,255,0.92));
+  position:fixed; top:50%; left:50%; transform:translate(-50%,-50%);
+  max-width:min(680px, 90vw);
+  z-index:60; display:flex; align-items:center; justify-content:center; gap:6px;
+  background:var(--bg-panel,rgba(255,255,255,0.94));
   border:1px solid var(--border);
-  padding:6px 12px; border-radius:8px;
-  box-shadow:0 4px 16px rgba(0,0,0,0.18);
+  padding:10px 16px; border-radius:12px;
+  box-shadow:0 8px 32px rgba(0,0,0,0.24);
   font-family:var(--mono);
   flex-wrap:wrap;
-  backdrop-filter:blur(12px);
+  backdrop-filter:blur(16px);
 }
 .cc-edit-toolbar-label { font-size:11px; color:var(--text-dim); margin-right:4px; }
 .cc-edit-toolbar-chip {
@@ -141,9 +142,9 @@
   font-size:11px; padding:3px 9px;
   background:transparent; border:1px solid var(--border);
   border-radius:4px; cursor:pointer;
-  color:var(--text); margin-left:auto;
+  color:var(--text);
 }
-.cc-edit-toolbar-btn:first-of-type { margin-left:auto; }
+
 .cc-edit-toolbar-btn:hover { border-color:var(--accent); color:var(--accent); }
 .cc-edit-toolbar-btn.danger:hover { border-color:var(--tool-err,#FF6B80); color:var(--tool-err,#FF6B80); }
 
