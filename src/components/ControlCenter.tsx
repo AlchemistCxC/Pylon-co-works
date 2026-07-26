@@ -103,9 +103,20 @@ function EditableWidget({ id, pos, editMode, hidden: isHidden, children, bodyRef
 }) {
   const u = useStore(s => s.updateTheme)
   const livePos = useStore(useShallow(s => s.ccPositions?.[id] || pos))
+  const px = useRef<{w:number,h:number}>({w:0,h:0})
 
   const dragStart = useRef<{ x: number; y: number; sx: number; sy: number } | null>(null)
   const resizeStart = useRef<{ x: number; y: number; sw: number; sh: number } | null>(null)
+
+  // compute pixel size from percentage for edit mode
+  const el = bodyRef.current
+  if (el && editMode) {
+    const r = el.getBoundingClientRect()
+    px.current = { w: Math.round((pos.w / 100) * r.width), h: Math.round((pos.h / 100) * r.height) }
+  }
+  const widgetStyle = editMode
+    ? { left: `${pos.x}%`, top: `${pos.y}%`, width: `${px.current.w}px`, height: `${px.current.h}px` }
+    : { left: `${pos.x}%`, top: `${pos.y}%`, width: `${pos.w}%`, height: `${pos.h}%` }
 
   const onWidgetMouseDown = (e: React.MouseEvent) => {
     if (!editMode || (e.target as HTMLElement).classList.contains('cc-edit-rsz')) return
@@ -152,7 +163,7 @@ function EditableWidget({ id, pos, editMode, hidden: isHidden, children, bodyRef
 
   return (
     <div className={`cc-widget ${editMode ? 'cc-edit' : ''} ${editMode && isHidden ? 'cc-hidden' : ''} ${selected === id ? 'cc-selected' : ''}`}
-      style={{ left: `${livePos.x}%`, top: `${livePos.y}%`, width: `${livePos.w}%`, height: `${livePos.h}%` }}
+      style={widgetStyle}
       onMouseDown={editMode ? (e) => {
         const isHandle = (e.target as HTMLElement).classList.contains('cc-edit-rsz')
           || (e.target as HTMLElement).closest('.cc-edit-rsz, .cc-edit-vis, .cc-edit-type')
