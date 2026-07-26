@@ -86,11 +86,13 @@ export default function ControlCenter({ sessionId }: Props) {
     const def = WIDGET_REGISTRY.find(w => w.id === id)
     if (!def) return null
     if (!editMode && hidden.includes(id)) return null
+    // CLI 模式下 send/attach 无意义（InputBar 通过 Enter 发送）— 非编辑状态自动隐藏
+    if (!editMode && inputMode === 'cli' && (id === 'send' || id === 'attach')) return null
 
     // 独立 send/attach widget 是否已启用（在画布上且未隐藏）→ 决定 InputBar 是否隐藏自带按钮
-    const hasExternalSend = !hidden.includes('send')
-    const hasExternalAttach = !hidden.includes('attach')
-    const inputSplit = hasExternalSend || hasExternalAttach
+    // CLI 模式下独立按钮自动隐藏，此时 split=false（InputBar 的 CLI CSS 已隐藏自带按钮）
+    const externalBtns = inputMode !== 'cli' && (!hidden.includes('send') || !hidden.includes('attach'))
+    const inputSplit = externalBtns
 
     let body: React.ReactNode
     switch (id) {

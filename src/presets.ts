@@ -38,7 +38,7 @@ export const ZONE_FIELDS: Record<string, (keyof ThemeSettings)[]> = {
   ],
   cc: [
     'ccHeight', 'ccBgHeight', 'ccBg', 'ccBgImage',
-    'ccStyle', 'ccVariant', 'ccPositions',
+    'ccStyle', 'ccVariant', 'ccPositions', 'ccHidden',
     'inputBg', 'inputBgImage', 'inputTextColor', 'inputPlaceholder',
     'inputSendBg', 'inputFocusBorder', 'inputFontSize', 'inputMinHeight',
     'inputMode', 'cliLineWidth', 'cliLineColor', 'cliTextColor',
@@ -111,6 +111,7 @@ export const GLOBAL_PRESETS: GlobalPreset[] = [
       inputSendBg: 'rgba(96,165,250,0.12)', inputFocusBorder: 'rgba(96,165,250,0.3)',
       inputFontSize: 14, inputMinHeight: 52,
       inputMode: 'cli', cliLineWidth: 2, cliLineColor: '#3b4a6b', cliTextColor: '#cdd6f4', cliLinePadding: 2,
+      ccHidden: ['send', 'attach'],
       statusBg: 'transparent', statusBgImage: '',
       ekgWidth: 140, ekgFontSize: 13,
       ekgGreen: '#4ade80', ekgYellow: '#fbbf24', ekgRed: '#f87171',

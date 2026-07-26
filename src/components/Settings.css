@@ -9,7 +9,7 @@
 }
 .settings-close:hover { color:var(--text); }
 
-.settings-search-bar { padding:10px 18px 8px; border-bottom:1px solid var(--border); flex-shrink:0; }
+.settings-search-bar { padding:10px 52px 8px 18px; border-bottom:1px solid var(--border); flex-shrink:0; }
 .settings-search-bar .set-search { width:100%; margin:0; }
 
 /* ── 三列布局：nav | body | preview ── */
@@ -110,7 +110,7 @@
 
 /* ── 右：实时预览面板 ── */
 .settings-preview-pane {
-  width:560px; flex-shrink:0;
+  width:900px; flex-shrink:0;
   border-left:1px solid var(--border);
   background:rgba(0,0,0,0.015);
   display:flex; flex-direction:column;
@@ -121,6 +121,6 @@
   font-size:12px; font-weight:600; text-transform:uppercase;
   letter-spacing:0.8px; color:var(--text-dim); margin-bottom:12px;
 }
-/* 预览栏内容宽 ≈ 560 - 36(padding) = 524；mock 宽 900 → scale ≈ 0.582 */
-.set-preview-wrap { width:100%; --preview-scale:0.582; }
+/* 预览栏内容宽 ≈ 900 - 36(padding) = 864；mock 宽 900 → scale ≈ 0.96（近 1:1） */
+.set-preview-wrap { width:100%; --preview-scale:0.96; }
 .set-preview-none { padding:24px; text-align:center; color:var(--text-dim); font-size:13px; }
