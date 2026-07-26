@@ -9,6 +9,9 @@
   position:absolute; bottom:0; left:0; right:0;
   height:var(--cc-bg-height, var(--cc-height, 120px));
   background:var(--cc-bg, transparent);
+  background-image:var(--cc-bg-image, none);
+  background-size:cover;
+  background-position:center;
   backdrop-filter:blur(var(--cc-blur, 0px));
   z-index:0;
 }
@@ -21,7 +24,7 @@
 
 /* CLI mode: transparent bg, full-width lines */
 .control-center.cli-mode .cc-bg { background:transparent; }
-.control-center.cli-mode .cc-body { padding:0 12px; }
+.control-center.cli-mode .cc-body { padding:0; }
 
 /* ── ccVariant styles ── */
 /* terminal (default): inherits StatusBar.css Peri flat styling — nothing extra */
@@ -46,9 +49,10 @@
 .cc-edit-hdr-label { font-size:10px; color:var(--accent); margin-left:6px; }
 .cc-widget.cc-edit { box-shadow:inset 0 0 0 1px var(--accent,#D77757); cursor:move; background:rgba(215,119,87,0.05); overflow:visible !important; }
 .cc-widget.cc-edit:hover { box-shadow:inset 0 0 0 2px var(--accent,#D77757); }
-.cc-edit-rsz { position:absolute; right:-4px; bottom:-4px; width:14px; height:14px; cursor:nwse-resize; z-index:5; }
-.cc-edit-rsz::after { content:''; position:absolute; right:1px; bottom:1px; width:8px; height:8px; border-right:2px solid var(--accent,#D77757); border-bottom:2px solid var(--accent,#D77757); opacity:0.8; }
-.cc-edit-rsz:hover::after { opacity:1; }
+.cc-edit-rsz { position:absolute; right:-6px; bottom:-6px; width:20px; height:20px; cursor:nwse-resize; z-index:5; border-radius:0 0 2px 0; }
+.cc-edit-rsz::after { content:''; position:absolute; right:2px; bottom:2px; width:10px; height:10px; border-right:2px solid var(--accent,#D77757); border-bottom:2px solid var(--accent,#D77757); opacity:0.6; }
+.cc-edit-rsz:hover { background:rgba(215,119,87,0.12); }
+.cc-edit-rsz:hover::after { opacity:1; border-width:3px; }
 .cc-edit-vis { position:absolute; top:2px; right:2px; width:16px; height:16px; font-size:11px; color:var(--text-dim); cursor:pointer; display:flex; align-items:center; justify-content:center; border-radius:3px; z-index:5; background:var(--bg-panel); border:1px solid var(--border); }
 .cc-edit-vis:hover { color:var(--text); border-color:var(--accent); }
 .cc-edit-type { position:absolute; top:2px; right:20px; height:16px; padding:0 5px; font-size:10px; color:var(--text-dim); cursor:pointer; display:flex; align-items:center; border-radius:3px; z-index:5; background:var(--bg-panel); border:1px solid var(--border); font-family:var(--mono); }

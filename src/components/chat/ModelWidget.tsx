@@ -16,7 +16,9 @@ export default function ModelWidget() {
             {MODELS.map(m => (
               <DropdownMenu.Item key={m} className={`model-item ${m === model ? 'active' : ''}`}
                 onClick={() => {
-                  useStore.getState().addProfile({ ...(activeProfile || { id: '', name: '', persona: '', model: '' }), model: m })
+                  const profile = useStore.getState().profiles.find(x => x.id === useStore.getState().activeProfileId)
+                  if (!profile) return
+                  useStore.getState().addProfile({ ...profile, model: m })
                 }}>
                 {m}
               </DropdownMenu.Item>

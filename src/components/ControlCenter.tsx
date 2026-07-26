@@ -1,4 +1,4 @@
-import { useRef, useState, useCallback } from 'react'
+import { useRef, useState, useCallback, useEffect } from 'react'
 import { useStore } from '../store'
 import InputBar from './chat/InputBar'
 import StatusBar from './chat/StatusBar'
@@ -19,6 +19,9 @@ export default function ControlCenter({ sessionId }: Props) {
   const hidden = useStore(s => s.ccHidden || [])
   const positions = useStore(s => s.ccPositions) || {}
   const editMode = useStore(s => s.ccEditMode)
+  const ccVariant = useStore(s => s.ccVariant) || 'terminal'
+  const ccBg = useStore(s => s.ccBg) || 'transparent'
+  const ccBgImage = useStore(s => s.ccBgImage) || ''
 
   const inputRef = useRef<{ send: () => void; attachFile: () => void }>(null)
   const isSplit = editMode && (!!positions['send'] || !!positions['attach'])
@@ -28,11 +31,14 @@ export default function ControlCenter({ sessionId }: Props) {
     if (!editMode && hidden.includes(id)) return null
     const pos = positions[id]
     let widget: React.ReactNode = null
+    // Resolve session source for backend invoke in ModeWidget
+    const s = useStore.getState().sessions.find(s => s.id === sessionId)
+    const sessionSource = s?.source
     switch (id) {
       case 'input': widget = <InputBar ref={inputRef} sessionId={sessionId} split={isSplit} />; break
       case 'context': widget = <StatusBar />; break
       case 'model': widget = <ModelWidget />; break
-      case 'mode': widget = <ModeWidget />; break
+      case 'mode': widget = <ModeWidget sessionSource={sessionSource} />; break
       case 'send': widget = <SendWidget onClick={() => inputRef.current?.send()} />; break
       case 'attach': widget = <AttachWidget onClick={() => inputRef.current?.attachFile()} />; break
       default: return null
@@ -57,9 +63,22 @@ export default function ControlCenter({ sessionId }: Props) {
     document.addEventListener('mouseup', onUp)
   }, [ccHeight])
 
+  // Escape to exit edit mode / deselect widget
+  useEffect(() => {
+    if (!editMode) return
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') {
+        if (selected) setSelected(null)
+        else useStore.setState({ ccEditMode: false } as any)
+      }
+    }
+    window.addEventListener('keydown', onKey)
+    return () => window.removeEventListener('keydown', onKey)
+  }, [editMode, selected])
+
   return (
-    <div className={`control-center ${inputMode === 'cli' ? 'cli-mode' : ''} ${editMode ? 'cc-editing' : ''} cc-variant-${useStore.getState().ccVariant || 'terminal'}`}
-      style={{ '--cc-height': `${ccHeight}px`, '--cc-bg-height': `${ccBgHeight}px` } as React.CSSProperties}>
+    <div className={`control-center ${inputMode === 'cli' ? 'cli-mode' : ''} ${editMode ? 'cc-editing' : ''} cc-variant-${ccVariant}`}
+      style={{ '--cc-height': `${ccHeight}px`, '--cc-bg-height': `${ccBgHeight}px`, '--cc-bg': ccBg, '--cc-bg-image': ccBgImage ? `url(${ccBgImage})` : 'none' } as React.CSSProperties}>
       {editMode && (
         <div className="cc-edit-hdr" onMouseDown={onHeightDrag}>
           <div className="cc-edit-hdr-bar" />
@@ -73,6 +92,9 @@ export default function ControlCenter({ sessionId }: Props) {
       {editMode && selected && <PropertyPanel id={selected} onClose={() => setSelected(null)} onExit={() => { useStore.setState({ ccEditMode: false } as any); setSelected(null) }} />}
       {editMode && !selected && (
         <div className="cc-edit-toolbar">
+          <button className="ps-btn" onClick={() => {
+            useStore.setState({ ccPositions: { input:{x:3,y:3,w:94,h:55}, context:{x:3,y:65,w:58,h:14}, model:{x:63,y:65,w:24,h:18}, mode:{x:88,y:65,w:10,h:18}, send:{x:86,y:24,w:6,h:12}, attach:{x:93,y:24,w:5,h:12} } } as any)
+          }}>重置布局</button>
           <button className="ps-btn" onClick={() => useStore.setState({ ccEditMode: false } as any)}>退出</button>
         </div>
       )}
@@ -191,9 +213,9 @@ function ColorSwatch({ value, onChange }: { value:string; onChange:(v:string)=>v
 
 function PropertyPanel({ id, onClose, onExit }: { id: string; onClose: () => void; onExit: () => void }) {
   const pos = useStore(s => s.ccPositions[id]) || { x:0,y:0,w:10,h:10 }
-  const all = useStore(s => s.ccPositions) || {}
+  const all = useStore.getState().ccPositions || {}
   const u = useStore(s => s.updateTheme)
-  const theme = useStore() as any
+  const theme = useStore.getState() as any
   const labels: Record<string,string> = { input:'输入栏', context:'上下文信息', model:'模型选择', mode:'权限模式', send:'发送按钮', attach:'附件按钮' }
 
   const up = (k: string, v: any) => u({ [k]: v } as any)
@@ -265,9 +287,9 @@ function PropertyPanel({ id, onClose, onExit }: { id: string; onClose: () => voi
         </>}
 
         {id === 'model' && <>
-          <div className="cc-prop-sec">模型胶囊</div>
-          <div className="cc-prop-field"><label>胶囊背景</label><ColorSwatch value={theme.pillBg||''} onChange={v=>up('pillBg',v)}/></div>
-          <div className="cc-prop-field"><label>胶囊文字</label><ColorSwatch value={theme.pillText||''} onChange={v=>up('pillText',v)}/></div>
+          <div className="cc-prop-sec">状态指示器</div>
+          <div className="cc-prop-field"><label>Pill 背景</label><ColorSwatch value={theme.pillBg||''} onChange={v=>up('pillBg',v)}/></div>
+          <div className="cc-prop-field"><label>Pill 文字</label><ColorSwatch value={theme.pillText||''} onChange={v=>up('pillText',v)}/></div>
           <div className="cc-prop-field"><label>Prism ON</label><ColorSwatch value={theme.prismOnColor||''} onChange={v=>up('prismOnColor',v)}/></div>
         </>}
 
