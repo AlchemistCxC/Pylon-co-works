@@ -239,7 +239,7 @@ Agent 在 prompt 处理过程中发送通知。
 
 ```json
 {
-  "sessionUpdate": "availableCommandsUpdate",
+  "sessionUpdate": "available_commands_update",
   "commands": [
     { "name": "compact", "description": "压缩上下文" },
     { "name": "model", "description": "切换模型", "input_hint": "model name" }
@@ -274,7 +274,7 @@ Agent 在 prompt 处理过程中发送通知。
 
 ```json
 {
-  "sessionUpdate": "toolCall",
+  "sessionUpdate": "tool_call",
   "title": "Bash",
   "toolCallId": "tc_001",
   "rawInput": { "command": "ls -la" }
@@ -285,7 +285,7 @@ Agent 在 prompt 处理过程中发送通知。
 
 ```json
 {
-  "sessionUpdate": "toolCallUpdate",
+  "sessionUpdate": "tool_call_update",
   "toolCallId": "tc_001",
   "status": "completed",
   "rawOutput": "total 42\ndrwxr-xr-x ..."

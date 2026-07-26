@@ -29,7 +29,7 @@
 | `periId` | `string` | Agent 端 session ID，用于 load/export 等操作 |
 | `persona` | `string` | 创建时传入的 persona 文本 |
 | `cwd` | `string` | 会话工作目录 |
-| `title` | `string` | 会话标题（来自 `sessionInfoUpdate` 通知） |
+| `title` | `string` | 会话标题（来自 `session_info_update` 通知） |
 | `model` | `string` | 当前模型名 |
 | `tokensIn` | `number` | 输入 token 累计 |
 | `tokensOut` | `number` | 输出 token 累计 |
@@ -135,7 +135,7 @@ invoke('set_config_option', {
   source: string,
   key: string,     // 如 "model"、"thinking_effort"、"context_1m"
   value: string,   // 配置值
-}): Promise<object>  // 返回 agent 的完整 configOptionUpdate
+}): Promise<object>  // 返回 agent 的完整 config_option_update
 ```
 
 - 常用 key：`model`、`thinking_effort`、`context_1m`、`mode`
@@ -243,7 +243,7 @@ invoke('load_persisted_session', {
 }): Promise<void>
 ```
 
-- Agent 会通过 `peri:update` 重放历史消息（`userMessageChunk` + `agentMessageChunk`）
+- Agent 会通过 `peri:update` 重放历史消息（`user_message_chunk` + `agent_message_chunk`）
 - 加载完成后 session 状态为 `hasFirstPrompt: true`
 
 ### 16. list_persisted_sessions — 列出持久化会话
@@ -264,7 +264,7 @@ invoke('export_session', {
 }): Promise<void>
 ```
 
-- `"markdown"` 格式：提取所有 `agentMessageChunk` 拼接为 Markdown
+- `"markdown"` 格式：提取所有 `agent_message_chunk` 拼接为 Markdown
 - `"json"` 格式：所有 session/update 消息 JSON prettified
 
 ---
@@ -292,21 +292,21 @@ listen('peri:update', (event) => {
 
 | sessionUpdate | 关键字段 | 说明 |
 |:--------------|:---------|:-----|
-| `agentMessageChunk` | `content: { text: string }` | AI 回复文本流（delta） |
-| `agentThoughtChunk` | `content: { text: string }` | AI 思考过程（cot） |
-| `userMessageChunk` | `content: { text: string }` | 用户消息回显（load 重放时） |
-| `toolCall` | `title, toolCallId, rawInput` | 工具调用开始 |
-| `toolCallUpdate` | `toolCallId, rawOutput, status` | 工具调用结果（status: "completed"/"error"） |
-| `usageUpdate` | `value, size, _meta: { inputTokens, outputTokens, model, ... }` | Token 使用统计 |
-| `sessionInfoUpdate` | `title, cwd, updatedAt` | 会话元数据（标题等） |
-| `configOptionUpdate` | `key, value` 或 `configOptions[]` | 配置变更 |
-| `availableCommandsUpdate` | `commands: [{ name, description, input_hint }]` | 可用命令列表 |
+| `agent_message_chunk` | `content: { text: string }` | AI 回复文本流（delta） |
+| `agent_thought_chunk` | `content: { text: string }` | AI 思考过程（cot） |
+| `user_message_chunk` | `content: { text: string }` | 用户消息回显（load 重放时） |
+| `tool_call` | `title, toolCallId, rawInput` | 工具调用开始 |
+| `tool_call_update` | `toolCallId, rawOutput, status` | 工具调用结果（status: "completed"/"error"） |
+| `usage_update` | `value, size, _meta: { inputTokens, outputTokens, model, ... }` | Token 使用统计 |
+| `session_info_update` | `title, cwd, updatedAt` | 会话元数据（标题等） |
+| `config_option_update` | `key, value` 或 `configOptions[]` | 配置变更 |
+| `available_commands_update` | `commands: [{ name, description, input_hint }]` | 可用命令列表 |
 | `plan` | `title, steps` | 计划模式输出 |
 
 **注意**：
 - 每条 `peri:update` 都带 `source` 字段（后端注入），前端按 `source` 路由到对应 tab
-- `agentMessageChunk` 是**增量**文本，前端自行拼接
-- `usageUpdate` 的 `value` 是**累计** token，`size` 是上下文窗口上限
+- `agent_message_chunk` 是**增量**文本，前端自行拼接
+- `usage_update` 的 `value` 是**累计** token，`size` 是上下文窗口上限
 
 ### peri:done — Prompt 回复完成
 
@@ -391,7 +391,7 @@ new_session(tabId, persona, cwd) → 获取 modes + configOptions
 ```
 send_message(tabId, text, persona)
 → 立即收到 peri:user（回显）
-→ 多次 peri:update（流式 agentMessageChunk + usageUpdate + toolCall...）
+→ 多次 peri:update（流式 agent_message_chunk + usage_update + tool_call...）
 → 最终 peri:done
 ```
 
@@ -400,7 +400,7 @@ send_message(tabId, text, persona)
 ```
 list_persisted_sessions()                     → 选一个 sessionId
 load_persisted_session(newTabId, sessionId)   → 触发 replay
-→ peri:update 流（userMessageChunk + agentMessageChunk 交替出现，重建对话）
+→ peri:update 流（user_message_chunk + agent_message_chunk 交替出现，重建对话）
 ```
 
 ### 5. 导出会话

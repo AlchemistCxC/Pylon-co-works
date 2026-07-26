@@ -479,7 +479,7 @@ async fn export_session(
             for msg in msgs.iter() {
                 // R1: use sessionUpdate value comparison, content is at same level
                 if let Some(update) = msg.get("update") {
-                    if update.get("sessionUpdate").and_then(|v| v.as_str()) == Some("agentMessageChunk") {
+                    if update.get("sessionUpdate").and_then(|v| v.as_str()) == Some("agent_message_chunk") {
                         if let Some(text) = update.get("content").and_then(|c| c.get("text")).and_then(|v| v.as_str()) {
                             md.push_str(text);
                         }
