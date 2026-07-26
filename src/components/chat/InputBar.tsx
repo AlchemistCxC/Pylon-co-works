@@ -112,11 +112,12 @@ export default forwardRef<{ send: () => void; attachFile: () => void; cancel: ()
     const source = s?.source || sessionId
     const sessionPrompt = s?.sessionPrompt || ''
 
-    try { await invoke('send_message', { source, content: text, persona, sessionPrompt, attachments: attached.map(a => a.path) }) }
-    catch (e) { setSendError(String(e)); setTimeout(() => setSendError(''), 4000) }
+    // 先清输入框再发——send_message 后端不返回直到回复完成（最长300s）
     lastMsg.current = text
     setValue('')
     setAttached([])
+    try { await invoke('send_message', { source, content: text, persona, sessionPrompt, attachments: attached.map(a => a.path) }) }
+    catch (e) { setSendError(String(e)); setTimeout(() => setSendError(''), 4000) }
   }
 
   // 取消正在运行的 prompt。后端 fire-and-forget，Peri 以 stopReason=cancelled 结束 → 触发 peri:done 清 liveGenerating
