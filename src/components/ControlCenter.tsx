@@ -325,8 +325,13 @@ function PropertyPanel({ id, onClose, onExit }: { id: string; onClose: () => voi
 
   const up = (k: string, v: any) => u({ [k]: v } as any)
   const upPos = (k: string, v: number) => {
-    const patch: any = { ccPositions: { ...all, [id]: { ...pos, [k]: v } } }
-    // 面板里手动改位置/尺寸 → CLI 模式下同样标记为已自定义
+    const clipped = Math.max(3, v)
+    // 等比锁定：改 W 自动算 H，改 H 自动算 W
+    const ratio = pos.h / pos.w
+    const next = k === 'w' ? { w: clipped, h: Math.round(clipped * ratio) }
+               : k === 'h' ? { h: clipped, w: Math.round(clipped / ratio) }
+               : { [k]: clipped }
+    const patch: any = { ccPositions: { ...all, [id]: { ...pos, ...next } } }
     if (useStore.getState().inputMode === 'cli' && !useStore.getState().ccCliCustomized) patch.ccCliCustomized = true
     u(patch)
   }
