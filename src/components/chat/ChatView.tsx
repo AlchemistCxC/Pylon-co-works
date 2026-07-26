@@ -25,6 +25,26 @@ function fmtTokens(n: number) {
   return `${n}`
 }
 
+/**
+ * 从后端 configOptions 里提取 model 选项。
+ * 文档未固定 ConfigOption 字段，做防御性解析——兼容常见形态：
+ *   { key:'model', value:'x', options:['a','b'] }
+ *   { key:'model', value:'x', choices:[{value:'a'},{value:'b'}] }
+ *   { id:'model', current:'x', values:[...] }
+ */
+function extractModelConfig(configOptions: any): { model?: string; models?: string[] } {
+  if (!Array.isArray(configOptions)) return {}
+  const opt = configOptions.find((o: any) => (o?.key || o?.id || o?.name) === 'model')
+  if (!opt) return {}
+  const model = opt.value ?? opt.current ?? opt.selected
+  const rawList = opt.options ?? opt.choices ?? opt.values ?? opt.available
+  let models: string[] | undefined
+  if (Array.isArray(rawList)) {
+    models = rawList.map((c: any) => (typeof c === 'string' ? c : (c?.value ?? c?.id ?? c?.name))).filter(Boolean)
+  }
+  return { model, models }
+}
+
 function Spinner({ tokenCount, startTime }: { tokenCount: number; startTime: number }) {
   const frames = (useStore(s => s.sparkles) || '✳✴✵✶✷✸✹✺✻✼❃❊').split('')
   const [, tick] = useState(0)
@@ -79,17 +99,22 @@ const ChatView = React.memo(function ChatView({ sessionId }: Props) {
     const profile = useStore.getState().profiles.find(p => p.id === s.profileId)
     const persona = profile?.persona || ''
 
+    // new_session 返回可能是 string(periId) 或 { sessionId, configOptions } — 兼容处理
+    const createSession = () => {
+      invoke<any>('new_session', { source: s.source, persona }).then(res => {
+        const periId = typeof res === 'string' ? res : (res?.sessionId ?? res?.periId)
+        if (periId) useStore.getState().setSessionPeriId(s.id, periId)
+        const cfg = extractModelConfig(res?.configOptions)
+        if (cfg.model || cfg.models) useStore.getState().setSessionConfig(s.source, { ...cfg, raw: res?.configOptions })
+      }).catch(() => {})
+    }
+
     if (s.periId) {
       invoke('load_persisted_session', { source: s.source, periId: s.periId }).catch(() => {
-        // Fallback: create new
-        invoke<string>('new_session', { source: s.source, persona }).then(periId => {
-          useStore.getState().setSessionPeriId(s.id, periId)
-        }).catch(() => {})
+        createSession()  // Fallback
       })
     } else {
-      invoke<string>('new_session', { source: s.source, persona }).then(periId => {
-        useStore.getState().setSessionPeriId(s.id, periId)
-      }).catch(() => {})
+      createSession()
     }
   }, [sessionId])
 
@@ -190,6 +215,17 @@ const ChatView = React.memo(function ChatView({ sessionId }: Props) {
           case 'available_commands_update': {
             const commands = upd.commands || []
             useStore.getState().setLiveStats({ liveCommands: commands } as any)
+            break
+          }
+          case 'config_option_update': {
+            // 后端配置变更（含 model）— 单条 {key,value} 或整包 configOptions[]
+            const src = event.payload.source
+            if (Array.isArray(upd.configOptions)) {
+              const cfg = extractModelConfig(upd.configOptions)
+              if (cfg.model || cfg.models) useStore.getState().setSessionConfig(src, { ...cfg, raw: upd.configOptions })
+            } else if (upd.key === 'model' && upd.value != null) {
+              useStore.getState().setSessionConfig(src, { model: String(upd.value) })
+            }
             break
           }
         }

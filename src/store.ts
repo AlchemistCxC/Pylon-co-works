@@ -2,6 +2,15 @@ import { create } from 'zustand'
 import { persist } from 'zustand/middleware'
 
 export interface Profile { id: string; name: string; avatar?: string; persona: string; model: string }
+// 后端配置选项（来自 new_session 返回 & config_option_update 事件）
+export interface ConfigOptionChoice { value: string; label?: string }
+export interface SessionConfig {
+  model?: string           // 当前 model 值
+  models?: string[]        // 可选 model 列表
+  thinkingEffort?: string
+  context1m?: boolean
+  raw?: any                // 原始 configOptions（兜底/调试）
+}
 export interface Session { id: string; periId?: string; name: string; source: string; profileId: string; createdAt: number; lastActiveAt: number; platform: string; workdir: string; sessionPrompt: string; skills: string[]; hooks: string[]; autoName: string }
 export interface UserMapping { id: string; name: string; avatar?: string }
 
@@ -56,6 +65,9 @@ type ThemeState = ThemeSettings & {
   livePrismOn: boolean
   liveCommands: { name: string; input_hint?: string; description?: string }[]
   setLiveStats: (stats: Partial<{liveTokensUsed:number,liveTokensMax:number,liveCacheHit:number,liveMode:string,livePrismOn:boolean,liveCommands:any[]}>) => void
+  // 每会话的后端配置选项（model 列表/当前值等），key = session source
+  sessionConfig: Record<string, SessionConfig>
+  setSessionConfig: (source: string, cfg: Partial<SessionConfig>) => void
   resetTheme: () => void
   applyZonePreset: (zone: string, presetName: string, presetTheme: Partial<ThemeSettings>) => void
   setZoneField: (zone: string, partial: Partial<ThemeSettings>) => void
@@ -156,6 +168,10 @@ export const useStore = create<ThemeState>()(persist(
   liveTokensUsed: 0, liveTokensMax: 131072, liveCacheHit: 0, liveMode: 'auto', livePrismOn: true,
   setLiveStats: (stats) => set(stats),
   liveCommands: [],
+  sessionConfig: {},
+  setSessionConfig: (source, cfg) => set(s => ({
+    sessionConfig: { ...s.sessionConfig, [source]: { ...s.sessionConfig[source], ...cfg } }
+  })),
   resetTheme: () => set(DEFAULTS),
 
   /**
@@ -206,6 +222,6 @@ export const useStore = create<ThemeState>()(persist(
   setActiveAgent: (id) => set({ activeAgent: id }),
 }),
 { name: 'pylon-theme', partialize: (state) => {
-  const { profiles, sessions, users, setActiveProfile, addProfile, addSession, removeSession, setSessionPeriId, restoreSessions, getUser, updateTheme, setLiveStats, liveCommands, agents, setAgents, setActiveAgent, applyZonePreset, setZoneField, setGlobalPreset, presets, dirty, ...theme } = state as any
+  const { profiles, sessions, users, setActiveProfile, addProfile, addSession, removeSession, setSessionPeriId, restoreSessions, getUser, updateTheme, setLiveStats, liveCommands, sessionConfig, setSessionConfig, liveTokensUsed, liveTokensMax, liveCacheHit, liveMode, livePrismOn, agents, setAgents, setActiveAgent, applyZonePreset, setZoneField, setGlobalPreset, presets, dirty, ...theme } = state as any
   return theme
 }}))

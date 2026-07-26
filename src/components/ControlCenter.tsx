@@ -34,7 +34,10 @@ const WIDGET_REGISTRY: WidgetDef[] = [
   {
     id: 'model', label: '模型',
     defaultPos: { x: 60, y: 64, w: 26, h: 16 },
-    render: () => <ModelWidget />,
+    render: (sid) => {
+      const s = useStore.getState().sessions.find(s => s.id === sid)
+      return <ModelWidget sessionSource={s?.source} />
+    },
   },
   {
     id: 'mode', label: '权限模式',

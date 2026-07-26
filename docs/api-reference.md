@@ -1,403 +1,423 @@
-# Pylon Backend API Reference
+# Pylon 后端 API 参考文档
 
-> 17 Tauri commands + 5 frontend events + 2 JSON-RPC method groups
+> 面向前端开发者（React/TypeScript）。后端是 Tauri v2 Rust 应用，通过 `invoke()` 调用命令，通过 `listen()` 接收事件。
 
 ---
 
-## 一、Tauri Commands（invoke）
+## 架构概览
 
-### 1.1 会话核心
-
-#### `new_session`
-
-创建新的 ACP 会话。
-
-| 参数 | 类型 | 必填 | 说明 |
-|:--|:--|:--|:--|
-| `source` | `String` | ✅ | 前端 tab/session 唯一标识 |
-| `persona` | `String` | ✅ | 系统提示词/人设 |
-| `cwd` | `Option<String>` | ❌ | 工作目录，不传则用 agent 默认 cwd |
-
-**返回**：Peri `session/new` 的完整 JSON 响应
-```json
-{
-  "sessionId": "smrzv7udx",
-  "modes": {
-    "modes": ["default", "accept_edit", "auto", "bypass"]
-  },
-  "configOptions": [
-    {"configId": "model", "valueId": {"value": "opus"}, ...},
-    {"configId": "mode", "valueId": {"value": "default"}, ...},
-    {"configId": "thinking_effort", "valueId": {"value": "medium"}, ...}
-  ]
-}
+```
+┌─────────┐  invoke()   ┌──────────────┐  stdin/stdout   ┌──────────┐
+│  React  │ ◄─────────► │ Rust Backend │ ◄─────────────► │ Peri.exe │
+│  前端   │  listen()   │  (Pylon)     │  JSON-RPC 2.0   │ (ACP)    │
+└─────────┘             └──────────────┘                 └──────────┘
 ```
 
----
-
-#### `send_message`
-
-发送消息到当前会话，流式返回。
-
-| 参数 | 类型 | 必填 | 说明 |
-|:--|:--|:--|:--|
-| `source` | `String` | ✅ | 会话标识 |
-| `content` | `String` | ✅ | 用户消息文本 |
-| `persona` | `String` | ✅ | 人设（仅首次发送时注入 system prompt） |
-| `sessionPrompt` | `Option<String>` | ❌ | 覆盖本次的人设 |
-| `attachments` | `Option<Vec<String>>` | ❌ | 附件文件路径列表 |
-
-**返回**：`peri_id: String` — session ID
-
-**副作用**：
-- `emit("peri:user", {source, content})` — 回显用户消息
-- `emit("peri:update", {...})` — 流式推送（每 chunk/N条）
-- `emit("peri:done", {source, data: {stopReason}})` — 完成
-- `emit("peri:error", {source, error})` — 超时/崩溃/连接断开
-- 自动更新 `PetState` 情绪（curious→excited/error）
-- 自动更新 `SessionInfo` 元数据（title/model/tokens）
+- 后端是**薄桥接层**：只翻译 Tauri invoke → ACP JSON-RPC，不做业务逻辑
+- 一个 Rust 进程管理多个 session（map 以 `source` 为 key）
+- 每次 invoke 可以触发多个 event 推送回前端
 
 ---
 
-#### `set_mode`
+## 数据类型
 
-切换会话权限模式。
+### SessionInfo（前端可见字段）
 
-| 参数 | 类型 | 说明 |
-|:--|:--|:--|
-| `source` | `String` | 会话标识 |
-| `mode` | `String` | `default` / `accept_edit` / `auto` / `bypass` |
+| 字段 | 类型 | 说明 |
+|:-----|:-----|:-----|
+| `source` | `string` | 前端指定的 session 唯一标识（如 tab id） |
+| `periId` | `string` | Agent 端 session ID，用于 load/export 等操作 |
+| `persona` | `string` | 创建时传入的 persona 文本 |
+| `cwd` | `string` | 会话工作目录 |
+| `title` | `string` | 会话标题（来自 `sessionInfoUpdate` 通知） |
+| `model` | `string` | 当前模型名 |
+| `tokensIn` | `number` | 输入 token 累计 |
+| `tokensOut` | `number` | 输出 token 累计 |
+| `tokensTotal` | `number` | total token 累计 |
+| `contextSize` | `number` | 模型上下文窗口上限 |
 
-**返回**：`()` — 无返回值。Peri 随后推送 `configOptionUpdate` 通知。
+### AgentDef
 
----
+| 字段 | 类型 | 说明 |
+|:-----|:-----|:-----|
+| `id` | `string` | agent key（如 `"peri"`） |
+| `name` | `string` | 显示名（如 `"Peri"`） |
+| `transport` | `string` | 传输方式，目前固定 `"subprocess"` |
 
-#### `close_session`
+### PersistedSession
 
-关闭会话，通知 Peri 释放资源。
+| 字段 | 类型 | 说明 |
+|:-----|:-----|:-----|
+| `sessionId` | `string` | session ID |
+| `cwd` | `string` | 工作目录 |
+| `title` | `string` | 会话标题 |
+| `updatedAt` | `string` | ISO 时间戳 |
 
-| 参数 | 类型 | 说明 |
-|:--|:--|:--|
-| `source` | `String` | 会话标识 |
+### PetState
 
-**返回**：`()`
-
----
-
-#### `cancel_prompt`
-
-取消正在运行的 prompt。
-
-| 参数 | 类型 | 说明 |
-|:--|:--|:--|
-| `source` | `String` | 会话标识 |
-
-**返回**：`()`
-
----
-
-#### `set_config_option`
-
-切换会话配置（模型/思考深度/上下文）。
-
-| 参数 | 类型 | 说明 |
-|:--|:--|:--|
-| `source` | `String` | 会话标识 |
-| `key` | `String` | `model` / `mode` / `thinking_effort` / `context_1m` |
-| `value` | `String` | 对应值 |
-
-**返回**：Peri `set_config_option` 的完整 JSON 响应（含 `configOptions` 列表）
+| 字段 | 类型 | 说明 |
+|:-----|:-----|:-----|
+| `mood` | `string` | 心情：`idle`/`curious`/`excited`/`sleepy`/`error`/`happy` |
+| `happiness` | `number` | 0-100 |
+| `messages` | `number` | 总消息数 |
+| `totalTokens` | `number` | 累计 token |
+| `toolsSucceeded` | `number` | 成功工具调用次数 |
+| `name` | `string` | 名字（默认 `"豆豆"`） |
+| `msg` | `string?` | 一次性气泡消息，读取后清空 |
+| `memories` | `string[]` | 记忆片段（最多 10 条） |
 
 ---
 
-### 1.2 会话列表与持久化
+## Tauri Commands
 
-#### `load_sessions`
+通过 `invoke('command_name', { ... })` 调用，返回 Promise。
 
-获取当前活跃会话列表（内存中）。
+### 1. new_session — 创建新会话
 
-**无参数**
-
-**返回**：
-```json
-[{
-  "source": "tab-1",
-  "periId": "smrzv7udx",
-  "persona": "You are a helpful assistant",
-  "cwd": "G:\\Project\\prism",
-  "title": "重构 ACP 协议",
-  "model": "opus",
-  "tokensIn": 12000,
-  "tokensOut": 345,
-  "tokensTotal": 12345,
-  "contextSize": 131072
-}]
+```
+invoke('new_session', {
+  source: string,    // 前端会话标识（如 tab id）
+  persona: string,   // persona/soul 内容
+  cwd?: string,      // 工作目录，默认取当前 agent 的 cwd
+}): Promise<{
+  sessionId: string,
+  modes: { modes: string[] },
+  configOptions: ConfigOption[],
+}>
 ```
 
----
+- 内部调用 ACP `session/new`
+- 返回完整的 Peri response（含 modes + configOptions）
+- session 上限 100 个
 
-#### `load_persisted_session`
+### 2. send_message — 发送消息并等待回复
 
-从 ThreadStore 加载历史会话。
-
-| 参数 | 类型 | 说明 |
-|:--|:--|:--|
-| `source` | `String` | 前端会话标识 |
-| `periId` | `String` | Peri session ID |
-
-**返回**：`()`
-**副作用**：`emit("peri:update", ...)` — 重放历史消息
-
----
-
-#### `list_persisted_sessions`
-
-列出 Peri ThreadStore 中持久化的会话。
-
-**无参数**
-
-**返回**：
-```json
-{
-  "sessions": [
-    {
-      "sessionId": "smrzv7udx",
-      "cwd": "G:\\Project\\prism",
-      "title": "重构 ACP 协议",
-      "updatedAt": "2026-07-26T02:15:00Z"
-    }
-  ]
-}
+```
+invoke('send_message', {
+  source: string,            // 会话标识
+  content: string,           // 用户输入文本
+  persona: string,           // persona 文本（用于自动创建 session 时）
+  sessionPrompt?: string,    // 首条消息前插入的 persona/soul（优先级高于 persona 字段）
+  attachments?: string[],    // 附件文件路径数组
+}): Promise<string>          // 返回 peri session ID
 ```
 
----
+**行为细节**：
 
-#### `export_session`
+- 如果 `source` 对应的 session 不存在，自动调用 `new_session` 创建
+- **首条消息**且非 `/` 命令开头时，persona 自动前置到消息开头：`{persona}\n\n---\n\n{content}`
+- `sessionPrompt` 优先级高于 `persona`——传了 sessionPrompt 就用它，忽略 persona
+- attachments 以 `[Attached: 文件名]\n` 前缀注入
+- 超时 300 秒后返回 error
 
-导出会话历史为 Markdown 或 JSON。
+**事件流**（按顺序）：
 
-| 参数 | 类型 | 说明 |
-|:--|:--|:--|
-| `periId` | `String` | Peri session ID |
-| `format` | `String` | `markdown` 或 `json` |
-| `outputPath` | `String` | 输出文件绝对路径 |
-
-**返回**：`()`
-
----
-
-### 1.3 Agent 管理
-
-#### `list_agents`
-
-列出 `agents.yaml` 中注册的所有 agent。
-
-**无参数**
-
-**返回**：
-```json
-[{"id": "peri", "name": "Peri", "transport": "subprocess"}]
+```
+peri:user     → { source, content }                     // 用户消息回显
+peri:update   → 多次，见下方「事件」章节
+peri:done     → { source, data: stopResult }            // 回复完成
+peri:error    → { source, error }                       // 仅在出错时
 ```
 
----
+### 3. set_mode — 切换会话模式
 
-#### `switch_agent`
-
-切换到指定 agent（kill 旧子进程 + 连接新子进程）。
-
-| 参数 | 类型 | 说明 |
-|:--|:--|:--|
-| `name` | `String` | agent ID（对应 agents.yaml 的 key） |
-
-**返回**：`()`
-**副作用**：清空全部活跃会话
-
----
-
-#### `reconnect_agent`
-
-重新连接当前 agent（崩溃后恢复）。
-
-**无参数**
-
-**返回**：`()`
-**副作用**：`emit("peri:agent-status", {status: "connected"})`
-
----
-
-#### `agent_status`
-
-查询 agent 连接状态。
-
-**无参数**
-
-**返回**：
-```json
-{"agent": "peri", "crashed": false}
+```
+invoke('set_mode', {
+  source: string,
+  mode: string,  // 如 "default" | "edit" | "auto" | "bypass"
+}): Promise<void>
 ```
 
----
+### 4. set_config_option — 修改配置选项
 
-#### `reload_agents`
-
-重新加载 `agents.yaml`（热加载，无需重启）。
-
-**无参数**
-
-**返回**：`()`
-
----
-
-### 1.4 宠物系统
-
-#### `get_pet`
-
-获取宠物当前状态。
-
-**无参数**
-
-**返回**：
-```json
-{
-  "mood": "curious",
-  "happiness": 65,
-  "first_chunk_at_ms": 1751467812345,
-  "messages": 523,
-  "totalTokens": 142000,
-  "toolsSucceeded": 87,
-  "name": "豆豆",
-  "memories": ["重构 ACP 协议", "修复 sessionId 过滤"],
-  "msg": "在想了在想了"   // 当前气泡文本，取后即清空
-}
+```
+invoke('set_config_option', {
+  source: string,
+  key: string,     // 如 "model"、"thinking_effort"、"context_1m"
+  value: string,   // 配置值
+}): Promise<object>  // 返回 agent 的完整 configOptionUpdate
 ```
 
-`msg` 仅在宠物有新发言时存在。取后前端显示气泡 3-5 秒。
+- 常用 key：`model`、`thinking_effort`、`context_1m`、`mode`
 
----
+### 5. close_session — 关闭会话
 
-#### `pet_action`
-
-触发宠物互动。
-
-| 参数 | 类型 | 说明 |
-|:--|:--|:--|
-| `action` | `String` | 见下表 |
-| `value` | `Option<String>` | 仅 `rename` 需要 |
-
-**action 类型**：
-
-| action | 效果 | value |
-|:--|:--|:--|
-| `poke` | 点击/逗宠物 → mood=happy, happiness+5 | — |
-| `feed` | 喂食 → mood=happy, happiness+15 | — |
-| `rename` | 改名 | 新名字 |
-| `daily` | 每日衰减 happiness-5 | — |
-| `sleepy` | 检查是否发呆超 30s | — |
-| `nostalgia` | 随机回溯一条记忆 → msg=前缀+记忆内容 | — |
-
-**返回**：同 `get_pet` 的完整 JSON（含可能新产生的 `msg`）
-
----
-
-### 1.5 事件 emit（后端推送）
-
-| 事件名 | 触发时机 | payload |
-|:--|:--|:--|
-| `peri:user` | 用户消息已发送 / load 重放的 userMessageChunk | `{source, content}` |
-| `peri:update` | ACP 通知（agentMessageChunk, toolCall, usageUpdate, plan, sessionInfoUpdate, configOptionUpdate, availableCommandsUpdate 等） | `{sessionId, update: {sessionUpdate: "...", ...}, source}` |
-| `peri:done` | prompt 完成 | `{source, data: {stopReason}}` |
-| `peri:error` | prompt 超时(300s) / ACP 连接断开 / agent 崩溃 | `{source, error}` |
-| `peri:agent-status` | agent 重连成功 | `{status: "connected"}` |
-
-`peri:update` 的 `update.sessionUpdate` 变体列表：
-
-| 变体 | 关键字段 |
-|:--|:--|
-| `agentMessageChunk` | `content.text` |
-| `agentThoughtChunk` | `content.text` |
-| `userMessageChunk` | `content.text`（load 重放） |
-| `toolCall` | `toolCallId`, `title`, `rawInput` |
-| `toolCallUpdate` | `toolCallId`, `rawOutput`, `status` |
-| `usageUpdate` | `value`, `size`, `_meta.{inputTokens,outputTokens,model}` |
-| `plan` | `entries: [{content, priority, status}]` |
-| `sessionInfoUpdate` | `title`, `updatedAt` |
-| `configOptionUpdate` | `configOptions` |
-| `availableCommandsUpdate` | `commands: [{name, description}]` |
-
----
-
-## 二、ACP JSON-RPC 方法
-
-所有 ACP 调用由 Rust 后端代理，前端不直接调用。仅供理解数据流。
-
-| 方法 | 方向 | 说明 |
-|:--|:--|:--|
-| `initialize` | → | 能力协商（tokenStats, skillNames, replay） |
-| `session/new` | → | 创建会话 |
-| `session/prompt` | → | 发送消息 |
-| `session/load` | → | 加载历史会话 |
-| `session/list` | → | 列出持久化会话 |
-| `session/set_mode` | → | 切换权限模式 |
-| `session/set_config_option` | → | 切换模型/配置 |
-| `session/close` | → | 关闭会话 |
-| `session/cancel` | → | 取消正在运行的 prompt（notification，无 id） |
-| `session/update` | ← | 通知（所有流式事件） |
-
----
-
-## 三、agents.yaml 格式
-
-```yaml
-agents:
-  peri:
-    name: Peri
-    transport: subprocess
-    exe: F:\A-I\Agent\Peri\target\release\peri.exe
-    args: ["acp", "--model", "deepseek-v4-flash"]
-    cwd: G:\Project\prism
-    default: true         # 标记为默认 agent
-  hermes:
-    name: Hermes
-    transport: subprocess
-    exe: hermes
-    args: ["acp"]
-    cwd: .
+```
+invoke('close_session', {
+  source: string,
+}): Promise<void>
 ```
 
+- 关闭前端 session 并通知 agent 释放资源（ThreadStore、cancel tokens）
+- 失败不抛错（best-effort）
+
+### 6. cancel_prompt — 取消正在运行的 prompt
+
+```
+invoke('cancel_prompt', {
+  source: string,
+}): Promise<void>
+```
+
+- Fire-and-forget：agent 收到后以 `stopReason: "cancelled"` 结束当前 prompt
+
+### 7. load_sessions — 获取当前所有 session 列表
+
+```
+invoke('load_sessions'): Promise<SessionInfo[]>
+```
+
+### 8. list_agents — 列出可用 agent
+
+```
+invoke('list_agents'): Promise<AgentDef[]>
+```
+
+### 9. switch_agent — 切换 agent
+
+```
+invoke('switch_agent', {
+  name: string,  // agent id（如 "peri"）
+}): Promise<void>
+```
+
+- **会杀死当前 agent 进程**，启动新 agent
+- **清空所有 session**（前端需重新创建 session）
+
+### 10. reconnect_agent — 重连当前 agent
+
+```
+invoke('reconnect_agent'): Promise<void>
+```
+
+- 杀死旧进程，重新 spawn
+- 成功后 emit `peri:agent-status` 事件
+
+### 11. agent_status — 查询 agent 状态
+
+```
+invoke('agent_status'): Promise<{
+  agent: string,
+  crashed: boolean,
+}>
+```
+
+### 12. reload_agents — 重新加载 agents.yaml
+
+```
+invoke('reload_agents'): Promise<void>
+```
+
+### 13. get_pet — 获取电子宠物状态
+
+```
+invoke('get_pet'): Promise<PetState>
+```
+
+- `msg` 字段是一次性的：读取后清零
+
+### 14. pet_action — 宠物交互
+
+```
+invoke('pet_action', {
+  action: string,    // "poke" | "feed" | "rename" | "daily" | "sleepy" | "nostalgia"
+  value?: string,    // 仅 rename 时需要（新名字）
+}): Promise<PetState>
+```
+
+| action | 效果 |
+|:-------|:-----|
+| `poke` | happiness +5，mood → happy |
+| `feed` | happiness +15，mood → happy |
+| `rename` | 改名字，需传 value |
+| `daily` | happiness -5（每日衰减） |
+| `sleepy` | 检测是否超过 30s 无响应 → mood 变 sleepy |
+| `nostalgia` | 随机回忆一条记忆 |
+
+### 15. load_persisted_session — 加载持久化会话
+
+```
+invoke('load_persisted_session', {
+  source: string,    // 前端新建的 session 标识
+  periId: string,    // 从 list_persisted_sessions 取到的 sessionId
+}): Promise<void>
+```
+
+- Agent 会通过 `peri:update` 重放历史消息（`userMessageChunk` + `agentMessageChunk`）
+- 加载完成后 session 状态为 `hasFirstPrompt: true`
+
+### 16. list_persisted_sessions — 列出持久化会话
+
+```
+invoke('list_persisted_sessions'): Promise<{
+  sessions: PersistedSession[],
+}>
+```
+
+### 17. export_session — 导出会话
+
+```
+invoke('export_session', {
+  periId: string,       // session ID
+  format: string,       // "markdown" | "json"
+  outputPath: string,   // 输出文件路径（绝对路径）
+}): Promise<void>
+```
+
+- `"markdown"` 格式：提取所有 `agentMessageChunk` 拼接为 Markdown
+- `"json"` 格式：所有 session/update 消息 JSON prettified
+
 ---
 
-## 四、宠物 `get_pet` / `pet_action` 返回的完整字段定义
+## 事件（Events）
+
+前端通过 `listen('event_name', callback)` 订阅。所有事件 payload 均为 JSON 对象。
+
+### peri:update — 会话状态更新（核心事件）
 
 ```typescript
-interface PetState {
-  mood: "idle" | "curious" | "excited" | "sleepy" | "error" | "happy";
-  happiness: number;        // 0-100
-  first_chunk_at_ms: number | null;  // Unix ms 时间戳，用于前端发呆检测
-  messages: number;          // 总发送消息数
-  totalTokens: number;       // 累计 token 用量
-  toolsSucceeded: number;    // 完成工具调用次数
-  name: string;              // 基础名（默认"豆豆"）
-  memories: string[];        // 最多 10 条记忆片段
-  msg?: string;              // 当前气泡文本（可选，取后清空）
-}
+listen('peri:update', (event) => {
+  const payload: {
+    source: string,       // 由后端注入
+    sessionId: string,
+    update: {
+      sessionUpdate: string,  // 变体名（见下表）
+      // ... 变体特定字段
+    }
+  }
+})
+```
 
-// 成长阶段（前端可本地计算）
-type GrowthStage = 0 | 1 | 2 | 3;
-// 0: 小{name}  1: {name}酱  2: {name}师傅  3: 老{name}
+**变体一览**：
 
-// Token 阈值: <50K → 0, 50K-500K → 1, 500K-5M → 2, >5M → 3
-// Tool 阈值:  <20 → 0,  20-100  → 1, 100-300 → 2, >300 → 3
-// 最终阶段 = max(token_tier, tool_tier)
+| sessionUpdate | 关键字段 | 说明 |
+|:--------------|:---------|:-----|
+| `agentMessageChunk` | `content: { text: string }` | AI 回复文本流（delta） |
+| `agentThoughtChunk` | `content: { text: string }` | AI 思考过程（cot） |
+| `userMessageChunk` | `content: { text: string }` | 用户消息回显（load 重放时） |
+| `toolCall` | `title, toolCallId, rawInput` | 工具调用开始 |
+| `toolCallUpdate` | `toolCallId, rawOutput, status` | 工具调用结果（status: "completed"/"error"） |
+| `usageUpdate` | `value, size, _meta: { inputTokens, outputTokens, model, ... }` | Token 使用统计 |
+| `sessionInfoUpdate` | `title, cwd, updatedAt` | 会话元数据（标题等） |
+| `configOptionUpdate` | `key, value` 或 `configOptions[]` | 配置变更 |
+| `availableCommandsUpdate` | `commands: [{ name, description, input_hint }]` | 可用命令列表 |
+| `plan` | `title, steps` | 计划模式输出 |
+
+**注意**：
+- 每条 `peri:update` 都带 `source` 字段（后端注入），前端按 `source` 路由到对应 tab
+- `agentMessageChunk` 是**增量**文本，前端自行拼接
+- `usageUpdate` 的 `value` 是**累计** token，`size` 是上下文窗口上限
+
+### peri:done — Prompt 回复完成
+
+```typescript
+listen('peri:done', (event) => {
+  const payload: {
+    source: string,
+    data: {
+      stopReason: string,  // "end_turn" | "cancelled" | "max_tokens" | ...
+    }
+  }
+})
+```
+
+- 每条 prompt 只触发一次
+- 收到此事件后，该 prompt 的所有 `peri:update` 已发送完毕
+
+### peri:error — 错误事件
+
+```typescript
+listen('peri:error', (event) => {
+  const payload: {
+    source: string,
+    error: string,  // 错误描述
+  }
+})
+```
+
+触发场景：
+- Agent 进程崩溃（`"agent process crashed"`）
+- Prompt 超时（`"timed out after 300s"`）
+- ACP 连接断开
+
+### peri:user — 用户消息回显
+
+```typescript
+listen('peri:user', (event) => {
+  const payload: {
+    source: string,
+    content: string,  // 用户输入文本
+  }
+})
+```
+
+- `send_message` 调用时立即发送
+- `load_persisted_session` 重放历史时也会发送
+
+### peri:agent-status — Agent 连接状态
+
+```typescript
+listen('peri:agent-status', (event) => {
+  const payload: {
+    status: string,  // 目前只有 "connected"
+  }
+})
+```
+
+- 仅 `reconnect_agent` 成功后发送
+
+---
+
+## 前端典型工作流
+
+### 1. 应用启动
+
+```
+list_agents()        → 获取可用 agent 列表
+agent_status()       → 确认连接状态
+get_pet()            → 获取宠物初始状态
+list_persisted_sessions() → 获取历史会话列表
+```
+
+### 2. 创建新 Chat Tab
+
+```
+new_session(tabId, persona, cwd) → 获取 modes + configOptions
+开始监听 peri:update / peri:done / peri:error / peri:user
+```
+
+### 3. 发送消息
+
+```
+send_message(tabId, text, persona)
+→ 立即收到 peri:user（回显）
+→ 多次 peri:update（流式 agentMessageChunk + usageUpdate + toolCall...）
+→ 最终 peri:done
+```
+
+### 4. 恢复历史会话
+
+```
+list_persisted_sessions()                     → 选一个 sessionId
+load_persisted_session(newTabId, sessionId)   → 触发 replay
+→ peri:update 流（userMessageChunk + agentMessageChunk 交替出现，重建对话）
+```
+
+### 5. 导出会话
+
+```
+export_session(periId, "markdown", "C:\\Users\\...\\export.md")
 ```
 
 ---
 
-## 五、常量
+## 注意事项
 
-| 常量 | 值 | 说明 |
-|:--|:--|:--|
-| `PROMPT_TIMEOUT_SECS` | 300 | prompt 超时 |
-| `MAX_SESSIONS` | 100 | 活跃会话上限 |
-| `BROADCAST_CAP` | 256 | ACP 广播通道容量 |
-| `WRITE_CHAN_CAP` | 256 | stdin 写通道容量 |
-| `PENDING_SHARDS` | 16 | oneshot 响应分片数（降低锁竞争） |
+1. **`source` 是前端定义的**：不一定是 tab id，只要能唯一标识即可，后端只做 map key
+2. **Mutex 锁**：后端用 `std::sync::Mutex`（不是 tokio），所以每个 invoke **同步执行**，不会并发修改 session map
+3. **session 上限 100**：超出返回 `"max sessions reached"`
+4. **agent crash**：如果 agent 进程意外退出，`agent_status()` 会返回 `crashed: true`，前端应调用 `reconnect_agent()`
+5. **ACP 协议**：后端是薄封装——更多协议细节见 `ACP-SPEC.md`
+6. **宠物自动更新**：宠物在 send_message / usageUpdate / toolCall 时自动更新状态，前端可定时调 `get_pet()` 拉取最新
+7. **`pet_action("sleepy")`**：前端可定时（如每秒）调用来检测发呆状态；如果首条 agent chunk 后 30s 无响应，mood 变 sleepy
+8. **Tauri 窗口**：无边框（`decorations: false`）、透明背景（`transparent: true`），前端需自行实现窗口拖拽和关闭按钮
