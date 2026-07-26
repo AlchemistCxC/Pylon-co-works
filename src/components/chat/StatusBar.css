@@ -13,8 +13,8 @@
 .prism-tag.off { color:var(--text-dim); }
 .prism-tag:hover { background:rgba(255,255,255,0.04); }
 
-.model-tag { font-size:12px; color:#999999; padding:2px 8px; border-radius:0; border:1px solid #505050; background:transparent; cursor:pointer; font-family:var(--mono); transition:all 0.15s; }
-.model-tag:hover { color:#D77757; border-color:#D77757; }
+.model-tag { font-size:12px; color:#D77757; padding:0; border-radius:0; border:none; background:transparent; cursor:pointer; font-family:var(--mono); }
+.model-tag:hover { text-decoration:underline; }
 
 .model-dropdown { position:relative; }
 .model-menu { position:absolute; bottom:100%; left:0; margin-bottom:4px; background:#000; border:1px solid #505050; border-radius:0; overflow:hidden; min-width:180px; z-index:100; }
@@ -30,5 +30,5 @@
 .mode-cycle { display:none; }
 
 .cc-model-widget { display:flex; align-items:center; }
+.cc-model-widget::after { content:' · '; color:#505050; font-size:12px; font-family:var(--mono); }
 .cc-mode-widget { display:flex; align-items:center; background:transparent; border:none; padding:0; cursor:pointer; }
-.cc-mode-widget:hover .mode-label { filter:brightness(1.2); }
