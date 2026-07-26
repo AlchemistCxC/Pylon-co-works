@@ -26,7 +26,8 @@
 }
 
 /* ── 暗色 UI scheme：整套 token 反色，暗底预设（Claude/Nord）用 ── */
-.app[data-ui-scheme="dark"] {
+.app[data-ui-scheme="dark"],
+body[data-ui-scheme="dark"] {
   --bg-panel: rgba(255,255,255,0.04);
   --bg-hover: rgba(255,255,255,0.08);
   --bg-active: rgba(255,255,255,0.12);

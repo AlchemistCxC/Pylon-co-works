@@ -175,12 +175,13 @@ export default function StatusBar() {
       {showWave && (
         <svg viewBox={`0 0 ${W} ${H}`} className="ekg-svg" preserveAspectRatio="none">
           <defs>
-            {/* 基线渐变：左端（已消耗）= 灰，右端（健康区）= 全色 */}
+            {/* 基线渐变：健康区 [0,cut] = 全色，消耗区 [cut,W] = 灰
+               cut = 剩余比例 × W，用量增加 → 右动端点左移 → 健康区缩短 */}
             <linearGradient id="baseline-grad" x1="0" y1="0" x2="1" y2="0">
-              <stop offset="0" stopColor="rgba(255,255,255,0.04)" />
-              <stop offset={cut / W} stopColor="rgba(255,255,255,0.04)" />
+              <stop offset="0" stopColor={color} />
               <stop offset={cut / W} stopColor={color} />
-              <stop offset="1" stopColor={color} />
+              <stop offset={cut / W} stopColor="var(--ekg-consumed, rgba(128,128,128,0.15))" />
+              <stop offset="1" stopColor="var(--ekg-consumed, rgba(128,128,128,0.15))" />
             </linearGradient>
             {/* 波形 clip：只渲染到 cut 处（已消耗区的"幽灵轨迹"被截断） */}
             <clipPath id="ekg-active"><rect x="0" y="0" width={cut} height={H}/></clipPath>
@@ -206,14 +207,7 @@ export default function StatusBar() {
       )}
 
       <span className="ekg-pct" style={{ color }}>{pct}%</span>
-
-      {showNumeric && (
-        <span className="pill-mono">{fmtSize(tokensUsed)}/{fmtSize(tokensMax)}</span>
-      )}
-      {!showNumeric && (
-        <span className="pill-mono">{fmtSize(tokensUsed)}/{fmtSize(tokensMax)}</span>
-      )}
-
+      <span className="pill-mono">{fmtSize(tokensUsed)}/{fmtSize(tokensMax)}</span>
       {cacheHit > 0 && <span className="pill-mono" style={{ color: '#34d399' }}>{cacheHit}% hit</span>}
     </div>
   )

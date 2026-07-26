@@ -121,6 +121,17 @@ export default function App() {
   const ccEditMode = useStore(s => s.ccEditMode)
   const u = useStore(s => s.updateTheme)
 
+  // body::before 玻璃层挂在 <body> 上，读不到 .app 子元素的 CSS 变量 —
+  // 把全局背景相关变量 + scheme 提到 <html>(:root) 与 <body>，让玻璃层生效
+  useEffect(() => {
+    const root = document.documentElement
+    root.style.setProperty('--global-bg-color', s.globalBgColor || '#e8e8ec')
+    root.style.setProperty('--global-bg-image', s.globalBgImage ? `url(${s.globalBgImage})` : 'none')
+    root.style.setProperty('--t', String(s.transparency))
+    root.style.setProperty('--blur', `${s.bgBlur}px`)
+    document.body.dataset.uiScheme = s.uiScheme || 'light'
+  }, [s.globalBgColor, s.globalBgImage, s.transparency, s.bgBlur, s.uiScheme])
+
   const appWindow = (() => { try { return getCurrentWindow() } catch { return { minimize() {}, isFullscreen() { return Promise.resolve(false) }, setFullscreen(_v: boolean) { return Promise.resolve() }, destroy() {} } } })()
 
   return (
