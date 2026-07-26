@@ -64,7 +64,7 @@ export default function ControlCenter({ sessionId }: Props) {
     e.preventDefault()
     const startY = e.clientY
     const startH = ccHeight
-    const onMove = (ev: MouseEvent) => { u({ ccHeight: Math.max(80, Math.min(400, startH + startY - ev.clientY)) } as any) }
+    const onMove = (ev: MouseEvent) => { useStore.setState({ ccHeight: Math.max(80, Math.min(400, startH + startY - ev.clientY)) } as any) }
     const onUp = () => { document.removeEventListener('mousemove', onMove); document.removeEventListener('mouseup', onUp) }
     document.addEventListener('mousemove', onMove)
     document.addEventListener('mouseup', onUp)
@@ -119,7 +119,7 @@ function EditableWidget({ id, pos, editMode, hidden: isHidden, children, bodyRef
       const cpw = cp[id] || pos
       const nx = Math.max(0, Math.min(100 - cpw.w, d.sx + dx))
       const ny = Math.max(0, Math.min(100 - cpw.h, d.sy + dy))
-      u({ ccPositions: { ...cp, [id]: { ...cpw, x: Math.round(nx), y: Math.round(ny) } } } as any)
+      useStore.setState({ ccPositions: { ...cp, [id]: { ...cpw, x: Math.round(nx), y: Math.round(ny) } } } as any)
     }
     const onUp = () => { dragStart.current = null; document.removeEventListener('mousemove', onMove); document.removeEventListener('mouseup', onUp) }
     document.addEventListener('mousemove', onMove)
@@ -140,7 +140,7 @@ function EditableWidget({ id, pos, editMode, hidden: isHidden, children, bodyRef
       const cpw = cp[id] || pos
       const nw = Math.max(5, Math.min(100 - cpw.x, d.sw + dw))
       const nh = Math.max(5, Math.min(100 - cpw.y, d.sh + dh))
-      u({ ccPositions: { ...cp, [id]: { ...cpw, w: Math.round(nw), h: Math.round(nh) } } } as any)
+      useStore.setState({ ccPositions: { ...cp, [id]: { ...cpw, w: Math.round(nw), h: Math.round(nh) } } } as any)
     }
     const onUp = () => { resizeStart.current = null; document.removeEventListener('mousemove', onMove); document.removeEventListener('mouseup', onUp) }
     document.addEventListener('mousemove', onMove)
