@@ -422,6 +422,14 @@ export default function Settings({ onClose }: { onClose?: () => void }) {
               </Group>
 
               <Group title="1:1 自定义">
+                <Row label="外观风格">
+                  <div className="set-preset-row">
+                    {(['terminal','glass','pill'] as const).map(v => (
+                      <button key={v} className={`set-preset-chip ${t.ccVariant===v?'active':''}`}
+                        onClick={()=>onSettingChange({ccVariant:v})}>{v==='terminal'?'终端':v==='glass'?'玻璃':'胶囊'}</button>
+                    ))}
+                  </div>
+                </Row>
                 <Row label="高度"><Num value={t.ccHeight} onChange={v=>onSettingChange({ccHeight:v})} min={80} max={400}/><span className="set-val">px</span></Row>
                 <Row label="背景色"><ColorPopover value={t.ccBg} onChange={v=>onSettingChange({ccBg:v})}/></Row>
                 <BgImageRow label="背景图" value={t.ccBgImage||''} onChange={v=>onSettingChange({ccBgImage:v})}/>

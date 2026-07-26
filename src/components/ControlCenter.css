@@ -23,6 +23,31 @@
 .control-center.cli-mode .cc-bg { background:transparent; }
 .control-center.cli-mode .cc-body { padding:0 12px; }
 
+/* ── ccVariant styles ── */
+/* terminal: flat, monospace, square */
+.cc-variant-terminal .cc-widget .pill,
+.cc-variant-terminal .cc-widget button,
+.cc-variant-terminal .cc-widget .mode-switcher {
+  border-radius:0 !important; font-family:var(--mono) !important; font-size:12px !important;
+  background:transparent !important; border:1px solid var(--border) !important; color:var(--text-dim) !important;
+}
+.cc-variant-terminal .cc-widget .pill:hover,
+.cc-variant-terminal .cc-widget button:hover { color:var(--accent) !important; border-color:var(--accent) !important; }
+
+/* glass: translucent frosted */
+.cc-variant-glass .cc-widget .pill,
+.cc-variant-glass .cc-widget button,
+.cc-variant-glass .cc-widget .mode-switcher {
+  backdrop-filter:blur(8px); background:rgba(255,255,255,0.08) !important;
+  color:var(--text) !important; border:1px solid rgba(255,255,255,0.1) !important;
+}
+
+/* pill: current default — rounded */
+.cc-variant-pill .cc-widget .pill,
+.cc-variant-pill .cc-widget button {
+  border-radius:999px; font-size:13px;
+}
+
 /* edit mode */
 .control-center.cc-editing { outline:2px dashed var(--accent); outline-offset:-2px; z-index:20; }
 .control-center.cc-editing .cc-body { overflow:visible; }
