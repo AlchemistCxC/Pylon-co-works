@@ -101,6 +101,7 @@ function EditableWidget({ id, pos, editMode, hidden: isHidden, children, bodyRef
   selected: string | null; onSelect: () => void;
 }) {
   const u = useStore(s => s.updateTheme)
+  const livePos = useStore(s => s.ccPositions?.[id]) || pos
 
   const dragStart = useRef<{ x: number; y: number; sx: number; sy: number } | null>(null)
   const resizeStart = useRef<{ x: number; y: number; sw: number; sh: number } | null>(null)
@@ -150,7 +151,7 @@ function EditableWidget({ id, pos, editMode, hidden: isHidden, children, bodyRef
 
   return (
     <div className={`cc-widget ${editMode ? 'cc-edit' : ''} ${editMode && isHidden ? 'cc-hidden' : ''} ${selected === id ? 'cc-selected' : ''}`}
-      style={{ left: `${pos.x}%`, top: `${pos.y}%`, width: `${pos.w}%`, height: `${pos.h}%` }}
+      style={{ left: `${livePos.x}%`, top: `${livePos.y}%`, width: `${livePos.w}%`, height: `${livePos.h}%` }}
       onMouseDown={editMode ? (e) => {
         const isHandle = (e.target as HTMLElement).classList.contains('cc-edit-rsz')
           || (e.target as HTMLElement).closest('.cc-edit-rsz, .cc-edit-vis, .cc-edit-type')
