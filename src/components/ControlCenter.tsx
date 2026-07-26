@@ -421,8 +421,8 @@ function PropertyPanel({ id, onClose, onExit }: { id: string; onClose: () => voi
       </div>
       <div className="cc-prop-body">
         <div className="cc-prop-sec">位置 & 大小</div>
-        <div className="cc-prop-field"><label>X 坐标</label><input type="number" value={Math.round(pos.x)} onChange={v => upPos('x', +v.target.value)} step={0.1} className="set-num" /><span>%</span></div>
-        <div className="cc-prop-field"><label>Y 坐标</label><input type="number" value={Math.round(pos.y)} onChange={v => upPos('y', +v.target.value)} step={0.1} className="set-num" /><span>%</span></div>
+        <div className="cc-prop-field"><label>X 坐标</label><input type="number" value={Math.round(pos.x)} onChange={v => upPos('x', +v.target.value)} step={1} className="set-num" /><span>%</span></div>
+        <div className="cc-prop-field"><label>Y 坐标</label><input type="number" value={Math.round(pos.y)} onChange={v => upPos('y', +v.target.value)} step={1} className="set-num" /><span>%</span></div>
         {id === 'input' && <>
           <div className="cc-prop-field"><label>宽度</label><input type="number" value={Math.round(pos.w)} onChange={v => upPos('w', Math.max(3, +v.target.value))} step={0.1} className="set-num" /><span>%</span></div>
           <div className="cc-prop-field"><label>高度</label><input type="number" value={Math.round(pos.h)} onChange={v => upPos('h', Math.max(3, +v.target.value))} step={0.1} className="set-num" /><span>%</span></div>
@@ -431,7 +431,7 @@ function PropertyPanel({ id, onClose, onExit }: { id: string; onClose: () => voi
           <div className="cc-prop-field"><label>缩放</label>
             <input type="number" value={(theme.ccScale || {})[id] ?? 100}
               onChange={v => up('ccScale', { ...(theme.ccScale || {}), [id]: Math.max(50, Math.min(200, +v.target.value)) })}
-              step={0.1} className="set-num" min={50} max={200} /><span>%</span>
+              step={5} className="set-num" min={50} max={200} /><span>%</span>
           </div>
         )}
 

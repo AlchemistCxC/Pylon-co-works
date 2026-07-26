@@ -1,8 +1,9 @@
 .settings {
   position:fixed; inset:32px 0 0 0; z-index:50;
-  background:var(--bg-panel); backdrop-filter:blur(20px);
+  background:rgba(255,255,255,0.94); backdrop-filter:blur(var(--blur,16px));
   display:flex; flex-direction:column;
 }
+.app[data-ui-scheme="dark"] .settings { background:rgba(13,13,20,0.94); }
 .settings-close {
   position:absolute; top:12px; right:16px; z-index:51;
   background:none; border:none; color:var(--text-dim); font-size:18px; cursor:pointer;
