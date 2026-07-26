@@ -1,6 +1,5 @@
-import { useRef, useState, useCallback, useEffect } from 'react'
+import { useRef, useState, useCallback } from 'react'
 import { useStore } from '../store'
-import { useShallow } from 'zustand/react/shallow'
 import InputBar from './chat/InputBar'
 import StatusBar from './chat/StatusBar'
 import ModelWidget from './chat/ModelWidget'
@@ -20,9 +19,6 @@ export default function ControlCenter({ sessionId }: Props) {
   const hidden = useStore(s => s.ccHidden || [])
   const positions = useStore(s => s.ccPositions) || {}
   const editMode = useStore(s => s.ccEditMode)
-  const u = useStore(s => s.updateTheme)
-
-  if (editMode) console.log('CC RENDER', positions['model']?.h)
 
   const inputRef = useRef<{ send: () => void; attachFile: () => void }>(null)
   const isSplit = editMode && (!!positions['send'] || !!positions['attach'])
@@ -33,24 +29,12 @@ export default function ControlCenter({ sessionId }: Props) {
     const pos = positions[id]
     let widget: React.ReactNode = null
     switch (id) {
-      case 'input':
-        widget = <InputBar ref={inputRef} sessionId={sessionId} split={isSplit} />
-        break
-      case 'context':
-        widget = <StatusBar />
-        break
-      case 'model':
-        widget = <ModelWidget />
-        break
-      case 'mode':
-        widget = <ModeWidget />
-        break
-      case 'send':
-        widget = <SendWidget onClick={() => inputRef.current?.send()} />
-        break
-      case 'attach':
-        widget = <AttachWidget onClick={() => inputRef.current?.attachFile()} />
-        break
+      case 'input': widget = <InputBar ref={inputRef} sessionId={sessionId} split={isSplit} />; break
+      case 'context': widget = <StatusBar />; break
+      case 'model': widget = <ModelWidget />; break
+      case 'mode': widget = <ModeWidget />; break
+      case 'send': widget = <SendWidget onClick={() => inputRef.current?.send()} />; break
+      case 'attach': widget = <AttachWidget onClick={() => inputRef.current?.attachFile()} />; break
       default: return null
     }
     if (!pos) return null
@@ -71,10 +55,10 @@ export default function ControlCenter({ sessionId }: Props) {
     const onUp = () => { document.removeEventListener('mousemove', onMove); document.removeEventListener('mouseup', onUp) }
     document.addEventListener('mousemove', onMove)
     document.addEventListener('mouseup', onUp)
-  }, [ccHeight, u])
+  }, [ccHeight])
 
   return (
-    <div className={`control-center ${inputMode === 'cli' ? 'cli-mode' : ''} ${editMode ? 'cc-editing' : ''} cc-variant-${useStore.getState().ccVariant || 'pill'}`}
+    <div className={`control-center ${inputMode === 'cli' ? 'cli-mode' : ''} ${editMode ? 'cc-editing' : ''} cc-variant-${useStore.getState().ccVariant || 'terminal'}`}
       style={{ '--cc-height': `${ccHeight}px`, '--cc-bg-height': `${ccBgHeight}px` } as React.CSSProperties}>
       {editMode && (
         <div className="cc-edit-hdr" onMouseDown={onHeightDrag}>
@@ -103,31 +87,11 @@ function EditableWidget({ id, pos, editMode, hidden: isHidden, children, bodyRef
   children: React.ReactNode; bodyRef: React.RefObject<HTMLDivElement | null>;
   selected: string | null; onSelect: () => void;
 }) {
-  const u = useStore(s => s.updateTheme)
-  const livePos = useStore(useShallow(s => s.ccPositions?.[id] || pos))
-
-  // imperative subscription to bypass React render batching
-  const [forcePos, setForcePos] = useState(pos)
-  useEffect(() => {
-    const unsub = useStore.subscribe((s) => {
-      const np = s.ccPositions?.[id]
-      if (np) setForcePos({...np})
-    })
-    return unsub
-  }, [id])
-  const curPos = editMode ? forcePos : pos
-
   const dragStart = useRef<{ x: number; y: number; sx: number; sy: number } | null>(null)
   const resizeStart = useRef<{ x: number; y: number; sw: number; sh: number } | null>(null)
 
-  // pixel dimensions for edit mode
-  const eb = bodyRef.current
-  const epx = eb ? { w: Math.round((curPos.w/100)*eb.getBoundingClientRect().width), h: Math.round((curPos.h/100)*eb.getBoundingClientRect().height) } : { w:0, h:0 }
-
-  if (editMode) console.log('RENDER', id, 'pos.h=', pos.h, 'epx=', epx.h)
-
   const onWidgetMouseDown = (e: React.MouseEvent) => {
-    if (!editMode || (e.target as HTMLElement).classList.contains('cc-edit-rsz')) return
+    if (!editMode || (e.target as HTMLElement).closest('.cc-edit-rsz, .cc-edit-vis, .cc-edit-type')) return
     e.stopPropagation()
     const el = bodyRef.current; if (!el) return
     const rect = el.getBoundingClientRect()
@@ -138,9 +102,7 @@ function EditableWidget({ id, pos, editMode, hidden: isHidden, children, bodyRef
       const dy = ((ev.clientY - d.y) / rect.height) * 100
       const cp = useStore.getState().ccPositions || {}
       const cpw = cp[id] || pos
-      const nx = Math.max(0, Math.min(100 - cpw.w, d.sx + dx))
-      const ny = Math.max(0, Math.min(100 - cpw.h, d.sy + dy))
-      useStore.setState({ ccPositions: { ...cp, [id]: { ...cpw, x: nx, y: ny } } } as any)
+      useStore.setState({ ccPositions: { ...cp, [id]: { ...cpw, x: Math.max(0, Math.min(100 - cpw.w, d.sx + dx)), y: Math.max(0, Math.min(100 - cpw.h, d.sy + dy)) } } } as any)
     }
     const onUp = () => { dragStart.current = null; document.removeEventListener('mousemove', onMove); document.removeEventListener('mouseup', onUp) }
     document.addEventListener('mousemove', onMove)
@@ -159,10 +121,7 @@ function EditableWidget({ id, pos, editMode, hidden: isHidden, children, bodyRef
       const dh = ((ev.clientY - d.y) / rect.height) * 100
       const cp = useStore.getState().ccPositions || {}
       const cpw = cp[id] || pos
-      const nw = Math.max(3, Math.min(100 - cpw.x, d.sw + dw))
-      const nh = Math.max(3, Math.min(100 - cpw.y, d.sh + dh))
-      console.log('resize', id, {dh, nh, rectH:rect.height, posY:cpw.y, sw:d.sw, nw, pos})
-      useStore.setState({ ccPositions: { ...cp, [id]: { ...cpw, w: nw, h: nh } } } as any)
+      useStore.setState({ ccPositions: { ...cp, [id]: { ...cpw, w: Math.max(3, Math.min(100 - cpw.x, d.sw + dw)), h: Math.max(3, Math.min(100 - cpw.y, d.sh + dh)) } } } as any)
     }
     const onUp = () => { resizeStart.current = null; document.removeEventListener('mousemove', onMove); document.removeEventListener('mouseup', onUp) }
     document.addEventListener('mousemove', onMove)
@@ -171,13 +130,9 @@ function EditableWidget({ id, pos, editMode, hidden: isHidden, children, bodyRef
 
   return (
     <div className={`cc-widget ${editMode ? 'cc-edit' : ''} ${editMode && isHidden ? 'cc-hidden' : ''} ${selected === id ? 'cc-selected' : ''}`}
-      style={editMode
-        ? { left: `${curPos.x}%`, top: `${curPos.y}%`, width: `${epx.w}px`, height: `${epx.h}px`, '--widget-h': epx.h } as React.CSSProperties
-        : { left: `${pos.x}%`, top: `${pos.y}%`, width: `${pos.w}%`, height: `${pos.h}%` }}
+      style={{ left: `${pos.x}%`, top: `${pos.y}%`, width: `${pos.w}%`, height: `${pos.h}%` }}
       onMouseDown={editMode ? (e) => {
-        const isHandle = (e.target as HTMLElement).classList.contains('cc-edit-rsz')
-          || (e.target as HTMLElement).closest('.cc-edit-rsz, .cc-edit-vis, .cc-edit-type')
-        if (!isHandle) onSelect()
+        if (!(e.target as HTMLElement).closest('.cc-edit-rsz, .cc-edit-vis, .cc-edit-type')) onSelect()
         onWidgetMouseDown(e)
       } : undefined}>
       {children}
@@ -208,20 +163,18 @@ function TypeToggle({ id }: { id: string }) {
   const ccStyle = useStore(s => s.ccStyle)
   const u = useStore(s => s.updateTheme)
   if (id === 'input') {
-    const label = inputMode === 'cli' ? 'CLI' : 'Def'
     return (
       <div className="cc-edit-type" onClick={e => { e.stopPropagation()
         u({ inputMode: inputMode === 'cli' ? 'default' : 'cli' } as any)
-      }} title="切换输入风格">{label}</div>
+      }} title="切换输入风格">{inputMode === 'cli' ? 'CLI' : 'Def'}</div>
     )
   }
   if (id === 'context') {
     const styles = ['wave', 'bar', 'numeric']
     const idx = styles.indexOf(ccStyle || 'wave')
-    const next = styles[(idx + 1) % styles.length]
     return (
       <div className="cc-edit-type" onClick={e => { e.stopPropagation()
-        u({ ccStyle: next } as any)
+        u({ ccStyle: styles[(idx + 1) % styles.length] } as any)
       }} title="切换显示类型">{ccStyle || 'wave'}</div>
     )
   }
@@ -244,7 +197,7 @@ function PropertyPanel({ id, onClose, onExit }: { id: string; onClose: () => voi
   const labels: Record<string,string> = { input:'输入栏', context:'上下文信息', model:'模型选择', mode:'权限模式', send:'发送按钮', attach:'附件按钮' }
 
   const up = (k: string, v: any) => u({ [k]: v } as any)
-  const upPos = (k: string, v: number) => useStore.setState({ ccPositions: { ...all, [id]: { ...pos, [k]: v } } } as any)
+  const upPos = (k: string, v: number) => u({ ccPositions: { ...all, [id]: { ...pos, [k]: v } } } as any)
 
   return (
     <div className="cc-prop-panel">
@@ -252,13 +205,12 @@ function PropertyPanel({ id, onClose, onExit }: { id: string; onClose: () => voi
         <span>{labels[id] || id}</span>
         <button onClick={onClose}>✕</button>
       </div>
-
       <div className="cc-prop-body">
         <div className="cc-prop-sec">位置 & 大小</div>
         <div className="cc-prop-field"><label>X 坐标</label><input type="number" value={pos.x} onChange={v=>upPos('x',+v.target.value)} className="set-num"/><span>%</span></div>
         <div className="cc-prop-field"><label>Y 坐标</label><input type="number" value={pos.y} onChange={v=>upPos('y',+v.target.value)} className="set-num"/><span>%</span></div>
-        <div className="cc-prop-field"><label>宽度</label><input type="number" value={pos.w} onChange={v=>upPos('w',Math.max(5,+v.target.value))} className="set-num"/><span>%</span></div>
-        <div className="cc-prop-field"><label>高度</label><input type="number" value={pos.h} onChange={v=>upPos('h',Math.max(5,+v.target.value))} className="set-num"/><span>%</span></div>
+        <div className="cc-prop-field"><label>宽度</label><input type="number" value={pos.w} onChange={v=>upPos('w',Math.max(3,+v.target.value))} className="set-num"/><span>%</span></div>
+        <div className="cc-prop-field"><label>高度</label><input type="number" value={pos.h} onChange={v=>upPos('h',Math.max(3,+v.target.value))} className="set-num"/><span>%</span></div>
 
         {id === 'input' && <>
           <div className="cc-prop-sec">输入栏设置</div>
@@ -323,7 +275,6 @@ function PropertyPanel({ id, onClose, onExit }: { id: string; onClose: () => voi
           <div className="cc-prop-sec">模式</div>
           <div className="cc-prop-field"><label>当前</label><span style={{fontSize:13,color:theme.liveMode==='bypass'?'#FF6B80':theme.liveMode==='auto'?'#FFC107':theme.liveMode==='edit'?'#A2A9E4':'#999999'}}>{theme.liveMode||'default'}</span></div>
         </>}
-        {(id === 'send' || id === 'attach') && null}
       </div>
       <div className="cc-prop-footer">
         <button className="ps-btn sm" onClick={onExit}>退出自定义</button>
