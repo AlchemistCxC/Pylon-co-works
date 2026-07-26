@@ -157,12 +157,11 @@ export default function App() {
       <div className={`layout ${ccEditMode ? 'cc-editing-app' : ''}`}>
         <Sidebar activeSession={activeSession} onSelectSession={setActiveSession} onProfileEdit={() => setShowProfileEdit(true)} onSessionSettings={setSessionSettingsId} collapsed={sidebarCollapsed} />
         <div className="main">
-          {activeTab === 'prism' ? <PrismSheet /> : <>
-            <div className={`main-body ${ccEditMode ? 'blur-bg' : ''}`}>
-              <ChatView sessionId={activeSession} />
-              <ControlCenter sessionId={activeSession} />
-            </div>
-          </>}
+          <div style={{ display: activeTab === 'prism' ? 'flex' : 'none' }}><PrismSheet /></div>
+          <div className={`main-body ${ccEditMode ? 'blur-bg' : ''}`} style={{ display: activeTab === 'prism' ? 'none' : 'flex' }}>
+            <ChatView sessionId={activeSession} />
+            <ControlCenter sessionId={activeSession} />
+          </div>
           {ccEditMode && <div className="cc-edit-overlay" />}
         </div>
         {showSettings && <Settings onClose={() => setShowSettings(false)} />}
