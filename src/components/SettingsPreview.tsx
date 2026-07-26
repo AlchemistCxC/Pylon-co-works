@@ -79,9 +79,7 @@ function PreviewApp({ zone }: { zone: string }) {
             <div className="chat-view" style={z('chat')}>
               <div className="term">
                 <div className="term-user">
-                  <span className="term-user-prefix">❯</span>
-                  <span className="term-user-name">user</span>
-                  <span>帮我检查一下这段代码</span>
+                  <PvUser />
                 </div>
                 {[
                   { name: 'Read', input: 'src/main.ts', done: true },
@@ -92,13 +90,7 @@ function PreviewApp({ zone }: { zone: string }) {
                     <PvTool {...tl} />
                   </div>
                 ))}
-                <div className="term-spinner-row">
-                  <div className="term-spinner">
-                    <span className="spinner-frame">✳</span>
-                    <span className="spinner-verb">格物致知</span>
-                    <span className="spinner-meta">(3s · ↓ 1.2K tokens)</span>
-                  </div>
-                </div>
+                <PvSpinner />
                 <div className="term-assistant">
                   好的，我来分析一下。<code className="term-inline-code">main()</code> 里有一处类型错误需要修正。
                 <div className="term-code-block">
@@ -117,6 +109,38 @@ function PreviewApp({ zone }: { zone: string }) {
             </div>
           </div>
         </div>
+      </div>
+    </div>
+  )
+}
+
+// 预览用户行 — 读 store（userName/userPrefix/userColor）
+function PvUser() {
+  const userName = useStore(s => s.userName) || 'user'
+  const prefix = useStore(s => s.userPrefix) || '❯'
+  const userColor = useStore(s => s.userColor)
+  const cs = userColor ? { color: userColor } : undefined
+  return (
+    <>
+      <span className="term-user-prefix" style={cs}>{prefix}</span>
+      <span className="term-user-name" style={cs}>{userName}</span>
+      <span>帮我检查一下这段代码</span>
+    </>
+  )
+}
+
+// 预览 spinner — 读 store（sparkles/spinnerColor/spinnerSize）
+function PvSpinner() {
+  const sparkles = useStore(s => s.sparkles) || '✳✴✵✶✷✸✹✺✻✼❃❊'
+  const spinnerColor = useStore(s => s.spinnerColor)
+  const spinnerSize = useStore(s => s.spinnerSize) || 14
+  const frames = sparkles.split('')
+  return (
+    <div className="term-spinner-row">
+      <div className="term-spinner" style={{ fontSize: spinnerSize, color: spinnerColor || undefined } as React.CSSProperties}>
+        <span className="spinner-frame">{frames[0]}</span>
+        <span className="spinner-verb">格物致知</span>
+        <span className="spinner-meta">(3s · ↓ 1.2K tokens)</span>
       </div>
     </div>
   )
