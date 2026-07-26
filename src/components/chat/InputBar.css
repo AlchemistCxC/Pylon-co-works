@@ -20,6 +20,11 @@
 .input-btn svg { opacity:0.4; }
 .input-btn:hover { background:var(--bg-hover); border-color:var(--border-focus); }
 .input-btn:hover svg { opacity:0.7; }
+/* 停止生成按钮：红色系，图标常亮 */
+.input-btn.stop { border-color:var(--tool-err,#FF6B80); }
+.input-btn.stop svg { opacity:0.85; color:var(--tool-err,#FF6B80); }
+.input-btn.stop:hover { background:rgba(255,107,128,0.12); border-color:var(--tool-err,#FF6B80); }
+.input-btn.stop:hover svg { opacity:1; }
 
 .input-textarea {
   flex:1; background:var(--input-bg,var(--bg-input)); border:1px solid var(--border);
@@ -46,6 +51,11 @@
 }
 .input-bar.cli-mode .input-textarea:focus { outline:none; border:none; box-shadow:none; }
 .input-bar.cli-mode .input-btn { display:none; }
+/* CLI 模式生成中仍显示停止按钮（否则只能靠 Esc）——小尺寸内联样式 */
+.input-bar.cli-mode .input-btn.stop {
+  display:flex; width:auto; height:auto; padding:2px 6px;
+  background:transparent; border:none; margin-left:6px;
+}
 .input-bar.cli-mode .cli-prefix {
   color:var(--cli-text-color,#999); font-family:var(--mono); font-size:var(--input-font-size,17px);
   font-weight:400; padding:0 6px 0 2px; line-height:1.4;

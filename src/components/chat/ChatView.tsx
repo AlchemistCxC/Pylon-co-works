@@ -135,6 +135,7 @@ const ChatView = React.memo(function ChatView({ sessionId }: Props) {
         // Clear running flags on all previous messages
         setMessages(prev => prev.map(m => ({ ...m, running: false })))
         setGenerating(true); genStart.current = Date.now(); tokenCount.current = 0; setSummary('')
+        useStore.getState().setLiveStats({ liveGenerating: source })  // 跨组件：标记该 session 正在生成
         setMessages(prev => [...prev, {
           id: 'user-' + Date.now(), role: 'user', sender: source,
           content, time: new Date().toLocaleTimeString()
@@ -241,11 +242,13 @@ const ChatView = React.memo(function ChatView({ sessionId }: Props) {
         const elapsedStr = elapsed >= 60 ? `${Math.floor(elapsed/60)}m ${elapsed%60}s` : `${elapsed}s`
         setSummary(`✻  处理耗时 ${elapsedStr}`)
         setGenerating(false)
+        if (useStore.getState().liveGenerating === event.payload.source) useStore.getState().setLiveStats({ liveGenerating: null })
         setMessages(prev => prev.map(m => ({ ...m, running: false })))
       }),
 
       listen<any>('peri:error', (event) => {
         setGenerating(false)
+        useStore.getState().setLiveStats({ liveGenerating: null })
         setMessages(prev => [...prev, {
           id: 'err-' + Date.now(), role: 'assistant', sender: 'system',
           content: '\u26a0\ufe0f ' + event.payload, time: new Date().toLocaleTimeString()

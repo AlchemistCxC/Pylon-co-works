@@ -80,8 +80,10 @@ export default function ControlCenter({ sessionId }: Props) {
   const ccVariant = useStore(s => s.ccVariant) || 'terminal'
   const ccBg = useStore(s => s.ccBg) || 'transparent'
   const ccBgImage = useStore(s => s.ccBgImage) || ''
+  // 当前 session 是否正在生成（sessionId 即 source）→ send widget 切"停止"
+  const ccGenerating = useStore(s => s.liveGenerating === sessionId && sessionId != null)
 
-  const inputRef = useRef<{ send: () => void; attachFile: () => void }>(null)
+  const inputRef = useRef<{ send: () => void; attachFile: () => void; cancel: () => void }>(null)
   const [selected, setSelected] = useState<string | null>(null)
 
   // 把 inputRef 转给 SendWidget / AttachWidget
@@ -103,7 +105,9 @@ export default function ControlCenter({ sessionId }: Props) {
         body = <InputBar ref={inputRef} sessionId={sessionId} split={inputSplit} />
         break
       case 'send':
-        body = <SendWidget onClick={() => inputRef.current?.send()} />
+        body = <SendWidget
+          generating={ccGenerating}
+          onClick={() => ccGenerating ? inputRef.current?.cancel() : inputRef.current?.send()} />
         break
       case 'attach':
         body = <AttachWidget onClick={() => inputRef.current?.attachFile()} />

@@ -63,8 +63,9 @@ type ThemeState = ThemeSettings & {
   liveCacheHit: number
   liveMode: string
   livePrismOn: boolean
+  liveGenerating: string | null  // 正在生成回复的 session source（null=空闲）；用于跨组件显示"停止"按钮
   liveCommands: { name: string; input_hint?: string; description?: string }[]
-  setLiveStats: (stats: Partial<{liveTokensUsed:number,liveTokensMax:number,liveCacheHit:number,liveMode:string,livePrismOn:boolean,liveCommands:any[]}>) => void
+  setLiveStats: (stats: Partial<{liveTokensUsed:number,liveTokensMax:number,liveCacheHit:number,liveMode:string,livePrismOn:boolean,liveGenerating:string|null,liveCommands:any[]}>) => void
   // 每会话的后端配置选项（model 列表/当前值等），key = session source
   sessionConfig: Record<string, SessionConfig>
   setSessionConfig: (source: string, cfg: Partial<SessionConfig>) => void
@@ -165,7 +166,7 @@ export const useStore = create<ThemeState>()(persist(
   getUser: (source) => get().users.find(u => u.id === source),
   updateTheme: (partial) => set(partial),
 
-  liveTokensUsed: 0, liveTokensMax: 131072, liveCacheHit: 0, liveMode: 'auto', livePrismOn: true,
+  liveTokensUsed: 0, liveTokensMax: 131072, liveCacheHit: 0, liveMode: 'auto', livePrismOn: true, liveGenerating: null,
   setLiveStats: (stats) => set(stats),
   liveCommands: [],
   sessionConfig: {},
@@ -222,6 +223,6 @@ export const useStore = create<ThemeState>()(persist(
   setActiveAgent: (id) => set({ activeAgent: id }),
 }),
 { name: 'pylon-theme', partialize: (state) => {
-  const { profiles, sessions, users, setActiveProfile, addProfile, addSession, removeSession, setSessionPeriId, restoreSessions, getUser, updateTheme, setLiveStats, liveCommands, sessionConfig, setSessionConfig, liveTokensUsed, liveTokensMax, liveCacheHit, liveMode, livePrismOn, agents, setAgents, setActiveAgent, applyZonePreset, setZoneField, setGlobalPreset, presets, dirty, ...theme } = state as any
+  const { profiles, sessions, users, setActiveProfile, addProfile, addSession, removeSession, setSessionPeriId, restoreSessions, getUser, updateTheme, setLiveStats, liveCommands, sessionConfig, setSessionConfig, liveTokensUsed, liveTokensMax, liveCacheHit, liveMode, livePrismOn, liveGenerating, agents, setAgents, setActiveAgent, applyZonePreset, setZoneField, setGlobalPreset, presets, dirty, ...theme } = state as any
   return theme
 }}))

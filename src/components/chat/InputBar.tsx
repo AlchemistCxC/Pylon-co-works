@@ -2,7 +2,7 @@ import { useState, useRef, KeyboardEvent, useEffect, forwardRef, useImperativeHa
 import { invoke } from '@tauri-apps/api/core'
 import { open } from '@tauri-apps/plugin-dialog'
 import { useStore } from '../../store'
-import { Paperclip, ArrowUp } from 'lucide-react'
+import { Paperclip, ArrowUp, Square } from 'lucide-react'
 import './InputBar.css'
 
 interface Props { sessionId: string | null; split?: boolean }
@@ -16,7 +16,7 @@ const FALLBACK_COMMANDS = [
   { cmd: '/mode', args: ' <default|edit|auto|bypass>', info: '切换权限模式' },
 ]
 
-export default forwardRef<{ send: () => void; attachFile: () => void }, Props>(function InputBar({ sessionId, split }, ref) {
+export default forwardRef<{ send: () => void; attachFile: () => void; cancel: () => void }, Props>(function InputBar({ sessionId, split }, ref) {
   const [value, setValue] = useState('')
   const [cmdIdx, setCmdIdx] = useState(0)
   const [sendError, setSendError] = useState('')
@@ -28,6 +28,8 @@ export default forwardRef<{ send: () => void; attachFile: () => void }, Props>(f
   const addSession = useStore(s => s.addSession)
   const liveCommands = useStore(s => s.liveCommands || [])
   const inputMode = useStore(s => s.inputMode)
+  // 当前 session 是否正在生成（用于把发送按钮切成"停止"）
+  const generating = useStore(s => s.liveGenerating === sessionId && sessionId != null)
 
   const activeProfile = profiles.find(p => p.id === activeProfileId)
   const persona = activeProfile?.persona || ''
@@ -98,6 +100,12 @@ export default forwardRef<{ send: () => void; attachFile: () => void }, Props>(f
     setAttached([])
   }
 
+  // 取消正在运行的 prompt。后端 fire-and-forget，Peri 以 stopReason=cancelled 结束 → 触发 peri:done 清 liveGenerating
+  const cancel = () => {
+    if (!sessionId) return
+    invoke('cancel_prompt', { source: sessionId }).catch(() => {})
+  }
+
   const attachFile = async () => {
     try {
       const selected = await open({ multiple: false })
@@ -108,9 +116,10 @@ export default forwardRef<{ send: () => void; attachFile: () => void }, Props>(f
     } catch (e) { /* cancelled */ }
   }
 
-  useImperativeHandle(ref, () => ({ send, attachFile }), [value, attached, sessionId, isCmd, filtered])
+  useImperativeHandle(ref, () => ({ send, attachFile, cancel }), [value, attached, sessionId, isCmd, filtered])
 
   const onKey = (e: KeyboardEvent) => {
+    if (e.key === 'Escape' && generating) { e.preventDefault(); cancel(); return }
     if (e.ctrlKey && e.key === 'ArrowUp') { e.preventDefault(); if (lastMsg.current) setValue(lastMsg.current) }
     if (isCmd && filtered.length > 0) {
       if (e.key === 'Tab') { e.preventDefault(); setCmdIdx(i => (i + 1) % filtered.length); return }
@@ -156,9 +165,13 @@ export default forwardRef<{ send: () => void; attachFile: () => void }, Props>(f
           placeholder={inputMode === 'cli' ? '' : '输入消息...（Enter 发送，Shift+Enter 换行，/ 命令）'}
           rows={1} />
         {!split && (
-          <button className="input-btn send" onClick={send} title="Send (Enter)">
-            <ArrowUp size={18} />
-          </button>
+          generating
+            ? <button className="input-btn stop" onClick={cancel} title="停止生成 (Esc)">
+                <Square size={15} />
+              </button>
+            : <button className="input-btn send" onClick={send} title="Send (Enter)">
+                <ArrowUp size={18} />
+              </button>
         )}
       </div>
     </div>
