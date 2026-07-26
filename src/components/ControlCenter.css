@@ -16,7 +16,8 @@
   position:relative; z-index:1; height:100%;
   overflow:hidden;
 }
-.cc-widget { position:absolute; overflow:hidden; }
+.cc-widget { position:absolute; overflow:hidden; font-size:calc(var(--widget-h, 14) * 0.8px); }
+.cc-widget-inner { width:100%; height:100%; }
 .cc-widget:has(.cli-mode) { overflow:visible !important; }
 
 /* CLI mode: transparent bg, full-width lines */

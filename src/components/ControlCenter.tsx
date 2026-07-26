@@ -172,7 +172,7 @@ function EditableWidget({ id, pos, editMode, hidden: isHidden, children, bodyRef
   return (
     <div className={`cc-widget ${editMode ? 'cc-edit' : ''} ${editMode && isHidden ? 'cc-hidden' : ''} ${selected === id ? 'cc-selected' : ''}`}
       style={editMode
-        ? { left: `${curPos.x}%`, top: `${curPos.y}%`, width: `${epx.w}px`, height: `${epx.h}px` }
+        ? { left: `${curPos.x}%`, top: `${curPos.y}%`, width: `${epx.w}px`, height: `${epx.h}px`, '--widget-h': epx.h } as React.CSSProperties
         : { left: `${pos.x}%`, top: `${pos.y}%`, width: `${pos.w}%`, height: `${pos.h}%` }}
       onMouseDown={editMode ? (e) => {
         const isHandle = (e.target as HTMLElement).classList.contains('cc-edit-rsz')
