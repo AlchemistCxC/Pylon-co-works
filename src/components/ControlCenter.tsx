@@ -77,6 +77,7 @@ export default function ControlCenter({ sessionId }: Props) {
   const rawPositions = useStore(s => s.ccPositions)
   const positions = useMemo(() => ensurePositions(rawPositions), [rawPositions])
   const editMode = useStore(s => s.ccEditMode)
+  const cliCustomized = useStore(s => s.ccCliCustomized)
   const ccVariant = useStore(s => s.ccVariant) || 'terminal'
   const ccBg = useStore(s => s.ccBg) || 'transparent'
   const ccBgImage = useStore(s => s.ccBgImage) || ''
@@ -121,7 +122,8 @@ export default function ControlCenter({ sessionId }: Props) {
       model:   { x: 57, y: 68, w: 28, h: 16 },
       mode:    { x: 87, y: 68, w: 12, h: 16 },
     }
-    const pos = (!editMode && inputMode === 'cli' && CLI_OVERRIDES[id])
+    // CLI 默认布局仅在用户从未手动调整过时套用；用户拖动/缩放过则尊重其自定义值
+    const pos = (!editMode && inputMode === 'cli' && !cliCustomized && CLI_OVERRIDES[id])
       ? CLI_OVERRIDES[id]
       : rawPos
     return (
@@ -223,7 +225,10 @@ function EditableWidget({ id, pos, editMode, isHidden, children, bodyRef, select
       const cur = cp[id] || start
       const nx = Math.max(0, Math.min(100 - cur.w, start.x + dxPct))
       const ny = Math.max(0, Math.min(100 - cur.h, start.y + dyPct))
-      useStore.setState({ ccPositions: { ...cp, [id]: { ...cur, x: nx, y: ny } } } as any)
+      const patch: any = { ccPositions: { ...cp, [id]: { ...cur, x: nx, y: ny } } }
+      // CLI 模式下手动调整过 → 标记，之后不再套用 CLI 默认布局
+      if (useStore.getState().inputMode === 'cli' && !useStore.getState().ccCliCustomized) patch.ccCliCustomized = true
+      useStore.setState(patch)
     }
     const onUp = () => {
       window.removeEventListener('pointermove', onMove)
@@ -248,7 +253,9 @@ function EditableWidget({ id, pos, editMode, isHidden, children, bodyRef, select
       const cur = cp[id] || start
       const nw = Math.max(3, Math.min(100 - cur.x, start.w + dwPct))
       const nh = Math.max(3, Math.min(100 - cur.y, start.h + dhPct))
-      useStore.setState({ ccPositions: { ...cp, [id]: { ...cur, w: nw, h: nh } } } as any)
+      const patch: any = { ccPositions: { ...cp, [id]: { ...cur, w: nw, h: nh } } }
+      if (useStore.getState().inputMode === 'cli' && !useStore.getState().ccCliCustomized) patch.ccCliCustomized = true
+      useStore.setState(patch)
     }
     const onUp = () => {
       window.removeEventListener('pointermove', onMove)
@@ -337,7 +344,12 @@ function PropertyPanel({ id, onClose, onExit }: { id: string; onClose: () => voi
   }
 
   const up = (k: string, v: any) => u({ [k]: v } as any)
-  const upPos = (k: string, v: number) => u({ ccPositions: { ...all, [id]: { ...pos, [k]: v } } } as any)
+  const upPos = (k: string, v: number) => {
+    const patch: any = { ccPositions: { ...all, [id]: { ...pos, [k]: v } } }
+    // 面板里手动改位置/尺寸 → CLI 模式下同样标记为已自定义
+    if (useStore.getState().inputMode === 'cli' && !useStore.getState().ccCliCustomized) patch.ccCliCustomized = true
+    u(patch)
+  }
 
   return (
     <div className="cc-prop-panel">

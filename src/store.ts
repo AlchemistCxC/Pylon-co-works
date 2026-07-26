@@ -41,6 +41,7 @@ export interface ThemeSettings {
   ccLayout: string[]; ccHidden: string[]; ccSizes: Record<string, number>
   ccPositions: Record<string, {x: number, y: number, w: number, h: number}>
   ccEditMode: boolean
+  ccCliCustomized: boolean  // 用户是否在 CLI 模式手动调过 widget 位置/尺寸；true 时不再套用 CLI 默认布局
   activePreset: Record<string, string>
   dirty: Record<string, boolean>
 }
@@ -104,6 +105,7 @@ const DEFAULTS: ThemeSettings = {
   ccLayout: ['input', 'context', 'model', 'mode'], ccHidden: [], ccSizes: {},
   ccPositions: { input:{x:3,y:3,w:94,h:55}, context:{x:3,y:65,w:58,h:14}, model:{x:63,y:65,w:24,h:18}, mode:{x:88,y:65,w:10,h:18}, send:{x:86,y:24,w:6,h:12}, attach:{x:93,y:24,w:5,h:12} },
   ccEditMode: false,
+  ccCliCustomized: false,
   activePreset: { global: '', sidebar: '', chat: '', cc: '', right: '' },
   dirty: { global: false, sidebar: false, chat: false, cc: false, right: false },
 }
@@ -213,6 +215,8 @@ export const useStore = create<ThemeState>()(persist(
    */
   setGlobalPreset: (name, theme) => set(_ => ({
     ...theme,
+    // 预设显式带 ccPositions → 视为已指定布局，不再套 CLI 硬编码默认；否则重置让 CLI 默认生效
+    ccCliCustomized: !!(theme as any).ccPositions,
     activePreset: { global: name, sidebar: name, chat: name, cc: name, right: name },
     dirty: { global: false, sidebar: false, chat: false, cc: false, right: false },
   })),
