@@ -5,7 +5,7 @@
 
 .chat-view { flex:1; display:flex; flex-direction:column; min-height:0; overflow-y:auto; overflow-x:hidden; }
 
-.term { flex:1; padding:16px 24px; font-family:var(--chat-font,var(--mono)); font-size:var(--chat-font-size,15px); line-height:var(--chat-line-height,1.4); color:var(--chat-text,var(--text)); background:var(--chat-bg,transparent); background-image:var(--chat-bg-image,none); background-size:cover; background-position:center; opacity:var(--chat-transparency,1); backdrop-filter:blur(var(--chat-blur,0px)); text-rendering:optimizeLegibility; }
+.term { flex:1; padding:16px 24px; font-family:var(--chat-font,var(--mono)); font-size:var(--chat-font-size,15px); line-height:var(--chat-line-height,1.4); color:var(--chat-text,var(--text)); background:var(--chat-bg,transparent); background-image:var(--chat-bg-image,none); background-size:cover; background-position:center; opacity:var(--chat-transparency,1); backdrop-filter:blur(var(--chat-blur,0px)); text-rendering:optimizeLegibility; letter-spacing:0.01em; font-variant-ligatures:contextual; -webkit-font-smoothing:antialiased; font-feature-settings:'calt' 1,'liga' 1; }
 
 .term-user { padding:2px 0; }
 .term-user-prefix { color:var(--accent); font-weight:700; margin-right:6px; }
@@ -32,7 +32,7 @@
 /* 连续 ToolCard 竖线相连 — 从上一个 tool 的标志物延伸到本 tool 标志物
    颜色由 --tool-conn 驱动（none=transparent / fixed / follow） */
 .term-row-tool + .term-row-tool .term-tool::before {
-  content:''; position:absolute; left:6px; top:-8px; height:14px;
+  content:''; position:absolute; left:3px; top:-8px; height:14px;
   width:2px; background:var(--tool-conn, transparent);
 }
 .term-tool-head { cursor:pointer; font-size:inherit; line-height:inherit; display:flex; align-items:baseline; }
@@ -116,12 +116,3 @@
 
 .term-summary { padding:4px 0; color:var(--text-dim); font-size:0.93em; }
 
-.scroll-bottom-btn {
-  position:fixed; bottom:100px; right:24px;
-  width:36px; height:36px; border-radius:50%;
-  background:var(--bg-panel); border:1px solid var(--border);
-  color:var(--text-dim); cursor:pointer; font-size:16px;
-  display:flex; align-items:center; justify-content:center;
-  transition:opacity 0.2s; z-index:5;
-}
-.scroll-bottom-btn:hover { background:var(--bg-hover); }
