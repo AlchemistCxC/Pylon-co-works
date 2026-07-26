@@ -220,7 +220,7 @@ function PropertyPanel({ id, onClose, onExit }: { id: string; onClose: () => voi
   const labels: Record<string,string> = { input:'输入栏', context:'上下文信息', model:'模型选择', mode:'权限模式', send:'发送按钮', attach:'附件按钮' }
 
   const up = (k: string, v: any) => u({ [k]: v } as any)
-  const upPos = (k: string, v: number) => u({ ccPositions: { ...all, [id]: { ...pos, [k]: v } } } as any)
+  const upPos = (k: string, v: number) => useStore.setState({ ccPositions: { ...all, [id]: { ...pos, [k]: v } } } as any)
 
   return (
     <div className="cc-prop-panel">
