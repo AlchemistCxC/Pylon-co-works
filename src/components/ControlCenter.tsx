@@ -1,7 +1,6 @@
 import { useRef, useState, useCallback, useEffect, useMemo } from 'react'
 import { useStore } from '../store'
 import InputBar from './chat/InputBar'
-import StatusBar from './chat/StatusBar'
 import ModelWidget from './chat/ModelWidget'
 import ModeWidget from './chat/ModeWidget'
 import SendWidget from './chat/SendWidget'
@@ -10,6 +9,61 @@ import ColorPopover from './ColorPopover'
 import './ControlCenter.css'
 
 interface Props { sessionId: string | null }
+
+// ── 微型上下文组件（从 StatusBar 拆出——独立 widget）────────────
+function formatTokenSize(n: number) {
+  if (n >= 1_000_000) { const m = n / 1_000_000; return m >= 10 ? `${Math.round(m)}M` : `${m.toFixed(1)}M` }
+  if (n >= 1_000) { const k = n / 1_000; return k >= 10 ? `${Math.round(k)}K` : `${k.toFixed(1)}K` }
+  return `${n}`
+}
+
+function EkgWidget() {
+  const tokensUsed = useStore(s => s.liveTokensUsed) || 0
+  const tokensMax = useStore(s => s.liveTokensMax) || 128
+  const used = Math.max(0, Math.min(1, tokensMax > 0 ? tokensUsed / tokensMax : 0))
+  const pct = Math.round(used * 100)
+  const barTrackColor = useStore(s => s.barTrackColor)
+  const barFillColor = useStore(s => s.barFillColor)
+  const barFillFollow = useStore(s => s.barFillFollow)
+  const ekgGreen = useStore(s => s.ekgGreen)
+  const ekgYellow = useStore(s => s.ekgYellow)
+  const ekgRed = useStore(s => s.ekgRed)
+  const color = used < 0.50 ? (ekgGreen || '#34d399') : used < 0.80 ? (ekgYellow || '#fbbf24') : (ekgRed || '#f87171')
+  const barFill = (barFillFollow !== false) ? color : (barFillColor || color)
+  return (
+    <div className="ekg-bar" style={{
+      '--bar-fill': `${pct}%`, '--bar-color': barFill,
+      '--bar-track': barTrackColor || 'rgba(0,0,0,0.18)', '--bar-h': '100%',
+    } as React.CSSProperties}>
+      <div className="ekg-bar-track" />
+      <div className="ekg-bar-fill" />
+    </div>
+  )
+}
+
+function PctWidget() {
+  const tokensUsed = useStore(s => s.liveTokensUsed) || 0
+  const tokensMax = useStore(s => s.liveTokensMax) || 128
+  const used = Math.max(0, Math.min(1, tokensMax > 0 ? tokensUsed / tokensMax : 0))
+  const pct = Math.round(used * 100)
+  const ekgGreen = useStore(s => s.ekgGreen)
+  const ekgYellow = useStore(s => s.ekgYellow)
+  const ekgRed = useStore(s => s.ekgRed)
+  const color = used < 0.50 ? (ekgGreen || '#34d399') : used < 0.80 ? (ekgYellow || '#fbbf24') : (ekgRed || '#f87171')
+  return <span className="ekg-pct" style={{ color, fontSize: 'inherit' }}>{pct}%</span>
+}
+
+function TokensWidget() {
+  const tokensUsed = useStore(s => s.liveTokensUsed) || 0
+  const tokensMax = useStore(s => s.liveTokensMax) || 128
+  const cacheHit = useStore(s => s.liveCacheHit) || 0
+  return (
+    <span className="pill-mono" style={{ borderLeft: 'none', padding: 0 }}>
+      {formatTokenSize(tokensUsed)}/{formatTokenSize(tokensMax)}
+      {cacheHit > 0 && <span style={{ color: '#34d399', marginLeft: 4 }}>{cacheHit}% hit</span>}
+    </span>
+  )
+}
 
 // ── Widget 注册表：单一真实源 ──────────────────────────────────
 // 新增 widget：在这里加一项即可，画布 + 工具栏自动出现
@@ -23,17 +77,27 @@ interface WidgetDef {
 const WIDGET_REGISTRY: WidgetDef[] = [
   {
     id: 'input', label: '输入栏',
-    defaultPos: { x: 2, y: 2, w: 96, h: 55 },
+    defaultPos: { x: 0, y: 0, w: 100, h: 52 },
     render: (sid) => <InputBar sessionId={sid} />,
   },
   {
-    id: 'context', label: '上下文',
-    defaultPos: { x: 2, y: 66, w: 46, h: 13 },
-    render: () => <StatusBar />,
+    id: 'ekg', label: '用量条',
+    defaultPos: { x: 0, y: 65, w: 30, h: 28 },
+    render: () => <EkgWidget />,
+  },
+  {
+    id: 'pct', label: '百分比',
+    defaultPos: { x: 32, y: 69, w: 8, h: 20 },
+    render: () => <PctWidget />,
+  },
+  {
+    id: 'tokens', label: 'Token数',
+    defaultPos: { x: 41, y: 69, w: 16, h: 20 },
+    render: () => <TokensWidget />,
   },
   {
     id: 'model', label: '模型',
-    defaultPos: { x: 50, y: 66, w: 16, h: 13 },
+    defaultPos: { x: 58, y: 69, w: 18, h: 20 },
     render: (sid) => {
       const s = useStore.getState().sessions.find(s => s.id === sid)
       return <ModelWidget sessionSource={s?.source} />
@@ -41,7 +105,7 @@ const WIDGET_REGISTRY: WidgetDef[] = [
   },
   {
     id: 'mode', label: '权限模式',
-    defaultPos: { x: 68, y: 66, w: 9, h: 13 },
+    defaultPos: { x: 77, y: 69, w: 10, h: 20 },
     render: (sid) => {
       const s = useStore.getState().sessions.find(s => s.id === sid)
       return <ModeWidget sessionSource={s?.source} />
@@ -49,13 +113,12 @@ const WIDGET_REGISTRY: WidgetDef[] = [
   },
   {
     id: 'send', label: '发送按钮',
-    defaultPos: { x: 87, y: 24, w: 6, h: 12 },
-    // 由 renderWidget switch 注入 inputRef — 这里不需要 render
+    defaultPos: { x: 89, y: 69, w: 5, h: 20 },
     render: () => null,
   },
   {
     id: 'attach', label: '附件按钮',
-    defaultPos: { x: 94, y: 24, w: 4, h: 12 },
+    defaultPos: { x: 95, y: 69, w: 4, h: 20 },
     render: () => null,
   },
 ]
@@ -118,9 +181,11 @@ export default function ControlCenter({ sessionId }: Props) {
     // 不依赖 localStorage 旧值 — 旧值可能是 non-CLI 的预设
     const CLI_OVERRIDES: Record<string, { x:number;y:number;w:number;h:number }> = {
       input:   { x: 1,  y: 2,  w: 98, h: 58 },
-      context: { x: 1,  y: 70, w: 46, h: 13 },
-      model:   { x: 49, y: 70, w: 16, h: 13 },
-      mode:    { x: 67, y: 70, w: 9,  h: 13 },
+      ekg:     { x: 1,  y: 70, w: 28, h: 16 },
+      pct:     { x: 31, y: 73, w: 8,  h: 12 },
+      tokens:  { x: 40, y: 73, w: 15, h: 12 },
+      model:   { x: 56, y: 73, w: 16, h: 12 },
+      mode:    { x: 73, y: 73, w: 10, h: 12 },
     }
     // CLI 默认布局仅在用户从未手动调整过时套用；用户拖动/缩放过则尊重其自定义值
     const pos = (!editMode && inputMode === 'cli' && !cliCustomized && CLI_OVERRIDES[id])
@@ -319,8 +384,8 @@ function PropertyPanel({ id, onClose, onExit }: { id: string; onClose: () => voi
   const u = useStore(s => s.updateTheme)
   const theme = useStore(s => s as any)
   const labels: Record<string, string> = {
-    input: '输入栏', context: '上下文', model: '模型',
-    mode: '权限模式', send: '发送按钮', attach: '附件按钮',
+    input: '输入栏', ekg: '用量条', pct: '百分比', tokens: 'Token数',
+    model: '模型', mode: '权限模式', send: '发送按钮', attach: '附件按钮',
   }
 
   const up = (k: string, v: any) => u({ [k]: v } as any)
@@ -368,9 +433,8 @@ function PropertyPanel({ id, onClose, onExit }: { id: string; onClose: () => voi
           </>}
         </>}
 
-        {id === 'context' && <>
-          <div className="cc-prop-sec">上下文显示</div>
-          <div className="cc-prop-field"><label>背景色</label><ColorPopover value={theme.statusBg || ''} onChange={v => up('statusBg', v)} /></div>
+        {id === 'ekg' && <>
+          <div className="cc-prop-sec">用量条显示</div>
           <div className="cc-prop-field"><label>仪表类型</label>
             <div className="set-preset-row">
               {(['wave', 'bar', 'numeric'] as const).map(s => (
@@ -507,7 +571,7 @@ function TypeToggle({ id }: { id: string }) {
       }} title="切换输入风格">{inputMode === 'cli' ? 'CLI' : 'Def'}</div>
     )
   }
-  if (id === 'context') {
+  if (id === 'ekg') {
     const styles = ['wave', 'bar', 'numeric']
     const idx = styles.indexOf(ccStyle || 'wave')
     return (

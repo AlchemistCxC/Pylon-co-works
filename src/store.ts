@@ -105,7 +105,7 @@ const DEFAULTS: ThemeSettings = {
   ccVariant: 'terminal',
   modelVariant: 'dropdown', modeVariant: 'pill', sendVariant: 'icon', attachVariant: 'icon',
   ccLayout: ['input', 'context', 'model', 'mode'], ccHidden: [], ccSizes: {},
-  ccPositions: { input:{x:2,y:2,w:96,h:55}, context:{x:2,y:66,w:46,h:13}, model:{x:50,y:66,w:16,h:13}, mode:{x:68,y:66,w:9,h:13}, send:{x:86,y:24,w:6,h:12}, attach:{x:93,y:24,w:5,h:12} },
+  ccPositions: { input:{x:0,y:0,w:100,h:52}, ekg:{x:0,y:65,w:30,h:28}, pct:{x:32,y:69,w:8,h:20}, tokens:{x:41,y:69,w:16,h:20}, model:{x:58,y:69,w:18,h:20}, mode:{x:77,y:69,w:10,h:20}, send:{x:89,y:69,w:5,h:20}, attach:{x:95,y:69,w:4,h:20} },
   ccEditMode: false,
   ccCliCustomized: false,
   activePreset: { global: '', sidebar: '', chat: '', cc: '', right: '' },
