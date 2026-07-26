@@ -1,4 +1,5 @@
 import ControlCenter from './ControlCenter'
+import { useStore } from '../store'
 
 /**
  * SettingsPreview — 设置页右侧实时预览（去 Mock 化）
@@ -111,8 +112,17 @@ function PreviewApp({ zone }: { zone: string }) {
 
 // 复用真实 ToolCard 的类，让竖线连接 / 辉光 / 颜色全部由真实 CSS 驱动
 function PvTool({ name, input, done }: { name: string; input: string; done: boolean }) {
+  const connMode = useStore(s => s.toolConnectorMode) || 'none'
+  const connColor = useStore(s => s.toolConnectorColor) || 'rgba(128,128,128,0.3)'
+  const toolOk = useStore(s => s.toolOk)
+  const toolRun = useStore(s => s.toolRun)
+  const statusColor = done ? toolOk : toolRun
+  const conn = connMode === 'none' ? 'transparent'
+    : connMode === 'follow' ? statusColor
+    : connColor
   return (
-    <div className="term-tool" data-status={done ? 'ok' : 'run'}>
+    <div className="term-tool" data-status={done ? 'ok' : 'run'}
+      style={{ '--tool-conn': conn } as React.CSSProperties}>
       <div className="term-tool-head">
         <span className={`term-tool-indicator ${done ? 'ok' : 'run'}`}>●</span>
         <span className="term-tool-name">{name}</span>

@@ -109,7 +109,18 @@ export default function ControlCenter({ sessionId }: Props) {
         body = def.render(sessionId)
     }
 
-    const pos = positions[id] || def.defaultPos
+    const rawPos = positions[id] || def.defaultPos
+    // CLI 模式下强制修正布局：input 占满整宽，status/model/mode 对齐到下方
+    // 不依赖 localStorage 旧值 — 旧值可能是 non-CLI 的预设
+    const CLI_OVERRIDES: Record<string, { x:number;y:number;w:number;h:number }> = {
+      input:   { x: 1,  y: 1,  w: 98, h: 60 },
+      context: { x: 1,  y: 68, w: 54, h: 16 },
+      model:   { x: 57, y: 68, w: 28, h: 16 },
+      mode:    { x: 87, y: 68, w: 12, h: 16 },
+    }
+    const pos = (!editMode && inputMode === 'cli' && CLI_OVERRIDES[id])
+      ? CLI_OVERRIDES[id]
+      : rawPos
     return (
       <EditableWidget
         key={id} id={id} pos={pos} editMode={editMode}
