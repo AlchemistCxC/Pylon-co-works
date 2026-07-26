@@ -1,6 +1,6 @@
 # Pylon Backend API Reference
 
-> 18 Tauri commands + 8 frontend events + 2 JSON-RPC method groups
+> 17 Tauri commands + 5 frontend events + 2 JSON-RPC method groups
 
 ---
 
@@ -261,6 +261,7 @@
 {
   "mood": "curious",
   "happiness": 65,
+  "first_chunk_at_ms": 1751467812345,
   "messages": 523,
   "totalTokens": 142000,
   "toolsSucceeded": 87,
@@ -371,6 +372,7 @@ agents:
 interface PetState {
   mood: "idle" | "curious" | "excited" | "sleepy" | "error" | "happy";
   happiness: number;        // 0-100
+  first_chunk_at_ms: number | null;  // Unix ms 时间戳，用于前端发呆检测
   messages: number;          // 总发送消息数
   totalTokens: number;       // 累计 token 用量
   toolsSucceeded: number;    // 完成工具调用次数
@@ -398,3 +400,4 @@ type GrowthStage = 0 | 1 | 2 | 3;
 | `MAX_SESSIONS` | 100 | 活跃会话上限 |
 | `BROADCAST_CAP` | 256 | ACP 广播通道容量 |
 | `WRITE_CHAN_CAP` | 256 | stdin 写通道容量 |
+| `PENDING_SHARDS` | 16 | oneshot 响应分片数（降低锁竞争） |
