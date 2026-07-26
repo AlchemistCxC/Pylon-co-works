@@ -11,7 +11,7 @@ interface Props { onClick: () => void }
  */
 export default function AttachWidget({ onClick }: Props) {
   const variant = useStore(s => s.attachVariant) || 'icon'
-  const ccScale = useStore(s => s.ccScale) || 100
+  const ccScale = useStore(s => (s.ccScale || {})['attach'] ?? 100)
   const cls = variant === 'minimal' ? 'cc-attach-minimal'
             : variant === 'square'  ? 'cc-attach-square'
             :                         'cc-attach-icon'

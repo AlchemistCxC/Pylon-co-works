@@ -31,16 +31,28 @@ function EkgWidget() {
   const ekgRed = useStore(s => s.ekgRed)
   const color = used < 0.50 ? (ekgGreen || '#34d399') : used < 0.80 ? (ekgYellow || '#fbbf24') : (ekgRed || '#f87171')
   const barFill = (barFillFollow !== false) ? color : (barFillColor || color)
-  const ccScale = useStore(s => s.ccScale) || 100
+  const ccScale = useStore(s => (s.ccScale || {})['ekg'] ?? 100)
+  const ccStyle = useStore(s => s.ccStyle) || 'bar'
+  // 柱状条
+  if (ccStyle === 'bar' || ccStyle === 'numeric') {
+    return (
+      <div className="ekg-bar" style={{
+        '--bar-fill': `${pct}%`, '--bar-color': barFill,
+        '--bar-track': barTrackColor || 'rgba(0,0,0,0.18)',
+        fontSize: `${ccScale}%`,
+      } as React.CSSProperties}>
+        <div className="ekg-bar-track" />
+        <div className="ekg-bar-fill" />
+      </div>
+    )
+  }
+  // wave — 简化版 SVG
   return (
-    <div className="ekg-bar" style={{
-      '--bar-fill': `${pct}%`, '--bar-color': barFill,
-      '--bar-track': barTrackColor || 'rgba(0,0,0,0.18)',
-      fontSize: `${ccScale}%`,
-    } as React.CSSProperties}>
-      <div className="ekg-bar-track" />
-      <div className="ekg-bar-fill" />
-    </div>
+    <svg viewBox="0 0 140 30" className="ekg-svg" preserveAspectRatio="none"
+      style={{ fontSize: `${ccScale}%` } as React.CSSProperties}>
+      <rect x={0} y={12} width={140 * (1 - used)} height={6} rx={3} fill={color} opacity={0.3} />
+      <rect x={140 * (1 - used)} y={12} width={140 * used} height={6} rx={3} fill="var(--ekg-consumed,rgba(128,128,128,0.15))" />
+    </svg>
   )
 }
 
@@ -53,7 +65,7 @@ function PctWidget() {
   const ekgYellow = useStore(s => s.ekgYellow)
   const ekgRed = useStore(s => s.ekgRed)
   const color = used < 0.50 ? (ekgGreen || '#34d399') : used < 0.80 ? (ekgYellow || '#fbbf24') : (ekgRed || '#f87171')
-  const ccScale = useStore(s => s.ccScale) || 100
+  const ccScale = useStore(s => (s.ccScale || {})['pct'] ?? 100)
   return <span className="ekg-pct" style={{ color, fontSize: `${ccScale}%` }}>{pct}%</span>
 }
 
@@ -61,7 +73,7 @@ function TokensWidget() {
   const tokensUsed = useStore(s => s.liveTokensUsed) || 0
   const tokensMax = useStore(s => s.liveTokensMax) || 128
   const cacheHit = useStore(s => s.liveCacheHit) || 0
-  const ccScale = useStore(s => s.ccScale) || 100
+  const ccScale = useStore(s => (s.ccScale || {})['tokens'] ?? 100)
   return (
     <span className="pill-mono" style={{ borderLeft: 'none', padding: 0, fontSize: `${ccScale}%` }}>
       {formatTokenSize(tokensUsed)}/{formatTokenSize(tokensMax)}
@@ -416,7 +428,11 @@ function PropertyPanel({ id, onClose, onExit }: { id: string; onClose: () => voi
           <div className="cc-prop-field"><label>高度</label><input type="number" value={Math.round(pos.h)} onChange={v => upPos('h', Math.max(3, +v.target.value))} className="set-num" /><span>%</span></div>
         </>}
         {id !== 'input' && (
-          <div className="cc-prop-field"><label>缩放</label><input type="number" value={theme.ccScale ?? 100} onChange={v => up('ccScale', Math.max(50, Math.min(200, +v.target.value)))} className="set-num" min={50} max={200} /><span>%</span></div>
+          <div className="cc-prop-field"><label>缩放</label>
+            <input type="number" value={(theme.ccScale || {})[id] ?? 100}
+              onChange={v => up('ccScale', { ...(theme.ccScale || {}), [id]: Math.max(50, Math.min(200, +v.target.value)) })}
+              className="set-num" min={50} max={200} /><span>%</span>
+          </div>
         )}
 
         {id === 'input' && <>

@@ -11,7 +11,7 @@ interface Props { onClick: () => void }
  */
 export default function SendWidget({ onClick }: Props) {
   const variant = useStore(s => s.sendVariant) || 'icon'
-  const ccScale = useStore(s => s.ccScale) || 100
+  const ccScale = useStore(s => (s.ccScale || {})['send'] ?? 100)
   const cls = variant === 'minimal' ? 'cc-send-minimal'
             : variant === 'square'  ? 'cc-send-square'
             :                         'cc-send-icon'

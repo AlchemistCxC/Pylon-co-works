@@ -18,7 +18,7 @@ interface Props { sessionSource?: string }
 
 export default function ModelWidget({ sessionSource }: Props) {
   const variant = useStore(s => s.modelVariant) || 'dropdown'
-  const ccScale = useStore(s => s.ccScale) || 100
+  const ccScale = useStore(s => (s.ccScale || {})['model'] ?? 100)
   const cfg = useStore(s => (sessionSource ? s.sessionConfig[sessionSource] : undefined))
   // 降级：无后端配置时读 profile.model（历史行为）
   const activeProfile = useStore(s => s.profiles.find(x => x.id === s.activeProfileId))
