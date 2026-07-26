@@ -101,7 +101,6 @@ function EditableWidget({ id, pos, editMode, hidden: isHidden, children, bodyRef
   selected: string | null; onSelect: () => void;
 }) {
   const u = useStore(s => s.updateTheme)
-  const positions = useStore(s => s.ccPositions) || {}
 
   const dragStart = useRef<{ x: number; y: number; sx: number; sy: number } | null>(null)
   const resizeStart = useRef<{ x: number; y: number; sw: number; sh: number } | null>(null)
@@ -116,10 +115,11 @@ function EditableWidget({ id, pos, editMode, hidden: isHidden, children, bodyRef
       const d = dragStart.current!; if (!d) return
       const dx = ((ev.clientX - d.x) / rect.width) * 100
       const dy = ((ev.clientY - d.y) / rect.height) * 100
-      const nx = Math.max(0, Math.min(100 - pos.w, d.sx + dx))
-      const ny = Math.max(0, Math.min(100 - pos.h, d.sy + dy))
-      const all = positions || {}
-      u({ ccPositions: { ...all, [id]: { ...all[id], x: Math.round(nx), y: Math.round(ny) } } } as any)
+      const cp = useStore.getState().ccPositions || {}
+      const cpw = cp[id] || pos
+      const nx = Math.max(0, Math.min(100 - cpw.w, d.sx + dx))
+      const ny = Math.max(0, Math.min(100 - cpw.h, d.sy + dy))
+      u({ ccPositions: { ...cp, [id]: { ...cpw, x: Math.round(nx), y: Math.round(ny) } } } as any)
     }
     const onUp = () => { dragStart.current = null; document.removeEventListener('mousemove', onMove); document.removeEventListener('mouseup', onUp) }
     document.addEventListener('mousemove', onMove)
@@ -136,10 +136,11 @@ function EditableWidget({ id, pos, editMode, hidden: isHidden, children, bodyRef
       const d = resizeStart.current!; if (!d) return
       const dw = ((ev.clientX - d.x) / rect.width) * 100
       const dh = ((ev.clientY - d.y) / rect.height) * 100
-      const nw = Math.max(5, Math.min(100 - pos.x, d.sw + dw))
-      const nh = Math.max(5, Math.min(100 - pos.y, d.sh + dh))
-      const all = positions || {}
-      u({ ccPositions: { ...all, [id]: { ...all[id], w: Math.round(nw), h: Math.round(nh) } } } as any)
+      const cp = useStore.getState().ccPositions || {}
+      const cpw = cp[id] || pos
+      const nw = Math.max(5, Math.min(100 - cpw.x, d.sw + dw))
+      const nh = Math.max(5, Math.min(100 - cpw.y, d.sh + dh))
+      u({ ccPositions: { ...cp, [id]: { ...cpw, w: Math.round(nw), h: Math.round(nh) } } } as any)
     }
     const onUp = () => { resizeStart.current = null; document.removeEventListener('mousemove', onMove); document.removeEventListener('mouseup', onUp) }
     document.addEventListener('mousemove', onMove)
