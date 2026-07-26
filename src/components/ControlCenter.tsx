@@ -191,8 +191,8 @@ export default function ControlCenter({ sessionId }: Props) {
     const pos = (!editMode && inputMode === 'cli' && !cliCustomized && CLI_OVERRIDES[id])
       ? CLI_OVERRIDES[id]
       : rawPos
-    // send/attach 是纯图标按钮，不需要尺寸调，宽度自动贴合；model/mode 保留 % 可调
-    const isNatural = id === 'send' || id === 'attach'
+    // 小控件用 naturalSize（宽高由内容决定，盒子紧贴）— 仅 input 保留 % 尺寸
+    const isNatural = id !== 'input'
     return (
       <EditableWidget
         key={id} id={id} pos={pos} editMode={editMode}
@@ -411,8 +411,10 @@ function PropertyPanel({ id, onClose, onExit }: { id: string; onClose: () => voi
         <div className="cc-prop-sec">位置 & 大小</div>
         <div className="cc-prop-field"><label>X 坐标</label><input type="number" value={Math.round(pos.x)} onChange={v => upPos('x', +v.target.value)} className="set-num" /><span>%</span></div>
         <div className="cc-prop-field"><label>Y 坐标</label><input type="number" value={Math.round(pos.y)} onChange={v => upPos('y', +v.target.value)} className="set-num" /><span>%</span></div>
-        <div className="cc-prop-field"><label>宽度</label><input type="number" value={Math.round(pos.w)} onChange={v => upPos('w', Math.max(3, +v.target.value))} className="set-num" /><span>%</span></div>
-        <div className="cc-prop-field"><label>高度</label><input type="number" value={Math.round(pos.h)} onChange={v => upPos('h', Math.max(3, +v.target.value))} className="set-num" /><span>%</span></div>
+        {id === 'input' && <>
+          <div className="cc-prop-field"><label>宽度</label><input type="number" value={Math.round(pos.w)} onChange={v => upPos('w', Math.max(3, +v.target.value))} className="set-num" /><span>%</span></div>
+          <div className="cc-prop-field"><label>高度</label><input type="number" value={Math.round(pos.h)} onChange={v => upPos('h', Math.max(3, +v.target.value))} className="set-num" /><span>%</span></div>
+        </>}
 
         {id === 'input' && <>
           <div className="cc-prop-sec">输入栏设置</div>
