@@ -123,7 +123,15 @@ const ChatView = React.memo(function ChatView({ sessionId }: Props) {
     }
 
     if (s.periId) {
-      invoke('load_persisted_session', { source: s.source, periId: s.periId }).catch(() => {
+      invoke('load_persisted_session', { source: s.source, periId: s.periId }).then(() => {
+        // load 成功但 Peri 不一定返回 configOptions，用 fallback 兜底
+        if (!useStore.getState().sessionConfig[s.source]) {
+          useStore.getState().setSessionConfig(s.source, {
+            model: profile?.model || 'deepseek-v4-flash',
+            models: ['deepseek-v4-flash', 'deepseek-v4-pro', 'deepseek-v4'],
+          })
+        }
+      }).catch(() => {
         createSession()  // Fallback
       })
     } else {
