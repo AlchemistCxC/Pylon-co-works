@@ -421,17 +421,17 @@ function PropertyPanel({ id, onClose, onExit }: { id: string; onClose: () => voi
       </div>
       <div className="cc-prop-body">
         <div className="cc-prop-sec">位置 & 大小</div>
-        <div className="cc-prop-field"><label>X 坐标</label><input type="number" value={Math.round(pos.x)} onChange={v => upPos('x', +v.target.value)} className="set-num" /><span>%</span></div>
-        <div className="cc-prop-field"><label>Y 坐标</label><input type="number" value={Math.round(pos.y)} onChange={v => upPos('y', +v.target.value)} className="set-num" /><span>%</span></div>
+        <div className="cc-prop-field"><label>X 坐标</label><input type="number" value={Math.round(pos.x)} onChange={v => upPos('x', +v.target.value)} step={0.1} className="set-num" /><span>%</span></div>
+        <div className="cc-prop-field"><label>Y 坐标</label><input type="number" value={Math.round(pos.y)} onChange={v => upPos('y', +v.target.value)} step={0.1} className="set-num" /><span>%</span></div>
         {id === 'input' && <>
-          <div className="cc-prop-field"><label>宽度</label><input type="number" value={Math.round(pos.w)} onChange={v => upPos('w', Math.max(3, +v.target.value))} className="set-num" /><span>%</span></div>
-          <div className="cc-prop-field"><label>高度</label><input type="number" value={Math.round(pos.h)} onChange={v => upPos('h', Math.max(3, +v.target.value))} className="set-num" /><span>%</span></div>
+          <div className="cc-prop-field"><label>宽度</label><input type="number" value={Math.round(pos.w)} onChange={v => upPos('w', Math.max(3, +v.target.value))} step={0.1} className="set-num" /><span>%</span></div>
+          <div className="cc-prop-field"><label>高度</label><input type="number" value={Math.round(pos.h)} onChange={v => upPos('h', Math.max(3, +v.target.value))} step={0.1} className="set-num" /><span>%</span></div>
         </>}
         {id !== 'input' && (
           <div className="cc-prop-field"><label>缩放</label>
             <input type="number" value={(theme.ccScale || {})[id] ?? 100}
               onChange={v => up('ccScale', { ...(theme.ccScale || {}), [id]: Math.max(50, Math.min(200, +v.target.value)) })}
-              className="set-num" min={50} max={200} /><span>%</span>
+              step={0.1} className="set-num" min={50} max={200} /><span>%</span>
           </div>
         )}
 
@@ -439,8 +439,8 @@ function PropertyPanel({ id, onClose, onExit }: { id: string; onClose: () => voi
           <div className="cc-prop-sec">输入栏设置</div>
           <div className="cc-prop-field"><label>背景色</label><ColorPopover value={theme.inputBg || ''} onChange={v => up('inputBg', v)} /></div>
           <div className="cc-prop-field"><label>文字色</label><ColorPopover value={theme.inputTextColor || ''} onChange={v => up('inputTextColor', v)} /></div>
-          <div className="cc-prop-field"><label>字号</label><input type="number" value={theme.inputFontSize} onChange={v => up('inputFontSize', +v.target.value)} className="set-num" min={12} max={22} /></div>
-          <div className="cc-prop-field"><label>最小高</label><input type="number" value={theme.inputMinHeight} onChange={v => up('inputMinHeight', +v.target.value)} className="set-num" min={36} max={120} /></div>
+          <div className="cc-prop-field"><label>字号</label><input type="number" value={theme.inputFontSize} onChange={v => up('inputFontSize', +v.target.value)} step={0.1} className="set-num" min={12} max={22} /></div>
+          <div className="cc-prop-field"><label>最小高</label><input type="number" value={theme.inputMinHeight} onChange={v => up('inputMinHeight', +v.target.value)} step={0.1} className="set-num" min={36} max={120} /></div>
           <div className="cc-prop-field"><label>模式</label>
             <div className="set-preset-row">
               <button className={`set-preset-chip ${theme.inputMode === 'default' ? 'active' : ''}`} onClick={() => up('inputMode', 'default')}>默认</button>
@@ -448,9 +448,9 @@ function PropertyPanel({ id, onClose, onExit }: { id: string; onClose: () => voi
             </div>
           </div>
           {theme.inputMode === 'cli' && <>
-            <div className="cc-prop-field"><label>线宽</label><input type="number" value={theme.cliLineWidth} onChange={v => up('cliLineWidth', +v.target.value)} className="set-num" min={1} max={6} /></div>
+            <div className="cc-prop-field"><label>线宽</label><input type="number" value={theme.cliLineWidth} onChange={v => up('cliLineWidth', +v.target.value)} step={0.1} className="set-num" min={1} max={6} /></div>
             <div className="cc-prop-field"><label>线色</label><ColorPopover value={theme.cliLineColor || ''} onChange={v => up('cliLineColor', v)} /></div>
-            <div className="cc-prop-field"><label>行距</label><input type="number" value={(theme as any).cliLinePadding ?? 6} onChange={v => up('cliLinePadding', +v.target.value)} className="set-num" min={0} max={24} /></div>
+            <div className="cc-prop-field"><label>行距</label><input type="number" value={(theme as any).cliLinePadding ?? 6} onChange={v => up('cliLinePadding', +v.target.value)} step={0.1} className="set-num" min={0} max={24} /></div>
           </>}
         </>}
 
@@ -465,20 +465,20 @@ function PropertyPanel({ id, onClose, onExit }: { id: string; onClose: () => voi
               ))}
             </div>
           </div>
-          <div className="cc-prop-field"><label>宽度</label><input type="number" value={theme.ekgWidth} onChange={v => up('ekgWidth', +v.target.value)} className="set-num" min={80} max={400} /></div>
-          <div className="cc-prop-field"><label>字号</label><input type="number" value={theme.ekgFontSize} onChange={v => up('ekgFontSize', +v.target.value)} className="set-num" min={12} max={22} /></div>
+          <div className="cc-prop-field"><label>宽度</label><input type="number" value={theme.ekgWidth} onChange={v => up('ekgWidth', +v.target.value)} step={0.1} className="set-num" min={80} max={400} /></div>
+          <div className="cc-prop-field"><label>字号</label><input type="number" value={theme.ekgFontSize} onChange={v => up('ekgFontSize', +v.target.value)} step={0.1} className="set-num" min={12} max={22} /></div>
           {theme.ccStyle === 'wave' && <>
             <div className="cc-prop-field"><label>绿色</label><ColorPopover value={theme.ekgGreen || ''} onChange={v => up('ekgGreen', v)} /></div>
             <div className="cc-prop-field"><label>黄色</label><ColorPopover value={theme.ekgYellow || ''} onChange={v => up('ekgYellow', v)} /></div>
             <div className="cc-prop-field"><label>红色</label><ColorPopover value={theme.ekgRed || ''} onChange={v => up('ekgRed', v)} /></div>
-            <div className="cc-prop-field"><label>线宽</label><input type="number" value={theme.ekgLineWidth} onChange={v => up('ekgLineWidth', +v.target.value)} className="set-num" min={2} max={20} /></div>
-            <div className="cc-prop-field"><label>振幅</label><input type="number" value={theme.ekgAmplitudeMax} onChange={v => up('ekgAmplitudeMax', +v.target.value)} className="set-num" min={5} max={30} /></div>
-            <div className="cc-prop-field"><label>波速基</label><input type="number" value={theme.ekgSpeedBase} onChange={v => up('ekgSpeedBase', +v.target.value)} className="set-num" min={0} max={3} step={0.1} /></div>
-            <div className="cc-prop-field"><label>波速最</label><input type="number" value={theme.ekgSpeedMax} onChange={v => up('ekgSpeedMax', +v.target.value)} className="set-num" min={0} max={5} step={0.1} /></div>
+            <div className="cc-prop-field"><label>线宽</label><input type="number" value={theme.ekgLineWidth} onChange={v => up('ekgLineWidth', +v.target.value)} step={0.1} className="set-num" min={2} max={20} /></div>
+            <div className="cc-prop-field"><label>振幅</label><input type="number" value={theme.ekgAmplitudeMax} onChange={v => up('ekgAmplitudeMax', +v.target.value)} step={0.1} className="set-num" min={5} max={30} /></div>
+            <div className="cc-prop-field"><label>波速基</label><input type="number" value={theme.ekgSpeedBase} onChange={v => up('ekgSpeedBase', +v.target.value)} step={0.1} className="set-num" min={0} max={3} /></div>
+            <div className="cc-prop-field"><label>波速最</label><input type="number" value={theme.ekgSpeedMax} onChange={v => up('ekgSpeedMax', +v.target.value)} step={0.1} className="set-num" min={0} max={5} /></div>
           </>}
           {theme.ccStyle === 'bar' && <>
             <div className="cc-prop-field"><label>外壳背景</label><ColorPopover value={theme.barTrackColor || ''} onChange={v => up('barTrackColor', v)} /></div>
-            <div className="cc-prop-field"><label>高度</label><input type="number" value={theme.barHeight ?? 10} onChange={v => up('barHeight', +v.target.value)} className="set-num" min={4} max={40} /></div>
+            <div className="cc-prop-field"><label>高度</label><input type="number" value={theme.barHeight ?? 10} onChange={v => up('barHeight', +v.target.value)} step={0.1} className="set-num" min={4} max={40} /></div>
             <div className="cc-prop-field"><label>柱子跟随用量</label>
               <div className="set-preset-row">
                 <button className={`set-preset-chip ${theme.barFillFollow !== false ? 'active' : ''}`} onClick={() => up('barFillFollow', true)}>三段色</button>

@@ -102,8 +102,8 @@
 .term-spinner-row { display:flex; align-items:center; gap:10px; }
 .term-spinner-row .term-spinner { flex:1; min-width:0; }
 .term-spinner { padding:8px 0; display:flex; align-items:center; gap:8px; font-size:var(--spinner-size,14px); color:var(--spinner-color,var(--text-dim)); }
-.spinner-frame { color:var(--accent); font-size:1.15em; }
-.spinner-verb { color:var(--accent); font-weight:500; opacity:0.85; }
+.spinner-frame { color:inherit; font-size:1.15em; }
+.spinner-verb { color:inherit; font-weight:500; opacity:0.85; }
 .spinner-meta { color:var(--text-dim); }
 /* 停止按钮：小尺寸、低调、右对齐，不抢视觉 */
 .spinner-stop-btn {
@@ -121,13 +121,13 @@
 
 /* ── 回底按钮（Peri ⌄ 风格）── */
 .scroll-bottom-btn {
-  position:sticky; bottom:4px; float:right;
-  width:28px; height:20px; display:flex; align-items:center; justify-content:center;
-  background:var(--bg-panel); border:1px solid var(--border); border-radius:4px;
-  color:var(--text-dim); cursor:pointer; font-size:12px; opacity:0.6;
-  z-index:5; margin-right:4px;
+  position:absolute; bottom:calc(var(--cc-height, 130px) + 8px); right:8px;
+  width:24px; height:24px; display:flex; align-items:center; justify-content:center;
+  background:transparent; border:none;
+  color:#fff; cursor:pointer; font-size:14px; opacity:0.35;
+  z-index:5; transition:opacity 0.15s; mix-blend-mode:difference;
 }
-.scroll-bottom-btn:hover { opacity:1; color:var(--text); }
+.scroll-bottom-btn:hover { opacity:0.8; color:#fff; }
 
 /* ── 滚动条增强 ── */
 .chat-view::-webkit-scrollbar { width:6px; }

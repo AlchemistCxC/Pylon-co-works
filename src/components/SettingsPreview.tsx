@@ -137,9 +137,9 @@ function PvSpinner() {
   const frames = sparkles.split('')
   return (
     <div className="term-spinner-row">
-      <div className="term-spinner" style={{ fontSize: spinnerSize, color: spinnerColor || undefined } as React.CSSProperties}>
-        <span className="spinner-frame">{frames[0]}</span>
-        <span className="spinner-verb">格物致知</span>
+      <div className="term-spinner" style={{ fontSize: spinnerSize } as React.CSSProperties}>
+        <span className="spinner-frame" style={{ color: spinnerColor || 'var(--accent)' }}>{frames[0]}</span>
+        <span className="spinner-verb" style={{ color: spinnerColor || 'var(--accent)' }}>格物致知</span>
         <span className="spinner-meta">(3s · ↓ 1.2K tokens)</span>
       </div>
     </div>

@@ -38,7 +38,7 @@ function Slider({ value, onChange, min, max, step }: { value:number; onChange:(v
 }
 
 function Num({ value, onChange, min, max }: { value:number; onChange:(v:number)=>void; min?:number; max?:number }) {
-  return <input type="number" min={min} max={max} value={value}
+  return <input type="number" min={min} max={max} value={value} step={0.1}
     onChange={e => onChange(+e.target.value)} className="set-num"/>
 }
 
