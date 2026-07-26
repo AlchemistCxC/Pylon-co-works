@@ -42,6 +42,26 @@
   font-size:clamp(9px, 42cqh, 22px) !important;
 }
 
+/* ── 容器缩放：所有 widget 内容随容器宽高等比变化 ── */
+/* input */
+.cc-widget .input-textarea { font-size:clamp(8px, 10cqh, 28px) !important; }
+.cc-widget .cli-prefix { font-size:clamp(8px, 10cqh, 28px) !important; }
+.cc-widget .input-btn { width:clamp(20px, 35cqh, 56px) !important; height:clamp(20px, 35cqh, 56px) !important; }
+/* EKG / 柱状图 */
+.cc-widget .ekg-svg { width:100% !important; height:auto !important; }
+.cc-widget .ekg-bar { width:100% !important; }
+.cc-widget .ekg-pct { font-size:clamp(7px, 7cqh, 20px) !important; }
+.cc-widget .pill-mono { font-size:clamp(6px, 5cqh, 14px) !important; }
+/* send/attach 图标按钮 */
+.cc-widget .cc-send-icon, .cc-widget .cc-send-square, .cc-widget .cc-send-minimal,
+.cc-widget .cc-attach-icon, .cc-widget .cc-attach-square, .cc-widget .cc-attach-minimal {
+  font-size:clamp(8px, 8cqh, 22px) !important;
+}
+.cc-widget .cc-send-icon svg, .cc-widget .cc-send-square svg, .cc-widget .cc-send-minimal svg,
+.cc-widget .cc-attach-icon svg, .cc-widget .cc-attach-square svg, .cc-widget .cc-attach-minimal svg {
+  width:clamp(8px, 5cqh, 18px) !important; height:clamp(8px, 5cqh, 18px) !important;
+}
+
 /* CLI mode */
 .control-center.cli-mode .cc-bg { background:transparent; }
 .control-center.cli-mode .cc-body { padding:0; }
