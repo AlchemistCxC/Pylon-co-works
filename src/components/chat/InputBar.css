@@ -33,9 +33,9 @@
 /* CLI mode */
 .input-bar.cli-mode { border:none; background:transparent; padding-top:0; }
 .input-bar.cli-mode .input-row {
-  position:relative; padding:8px 0; display:flex; align-items:center; gap:4px; width:100%;
-  border-top:var(--cli-line-width,2px) solid var(--cli-line-color,var(--accent,#6366f1)) !important;
-  border-bottom:var(--cli-line-width,2px) solid var(--cli-line-color,var(--accent,#6366f1)) !important;
+  position:relative; padding:8px 0; display:flex; align-items:center; gap:0; width:100%;
+  border-top:var(--cli-line-width,1px) solid #505050 !important;
+  border-bottom:var(--cli-line-width,1px) solid #505050 !important;
 }
 .input-bar.cli-mode .input-textarea {
   background:transparent; border:none; resize:none; height:auto; min-height:auto;
@@ -46,6 +46,6 @@
 .input-bar.cli-mode .input-textarea:focus { outline:none; border:none; box-shadow:none; }
 .input-bar.cli-mode .input-btn { display:none; }
 .input-bar.cli-mode .cli-prefix {
-  color:var(--accent,#6366f1); font-family:var(--mono); font-size:var(--input-font-size,17px);
-  font-weight:600; padding:0 4px; line-height:1.4;
+  color:#999999; font-family:var(--mono); font-size:var(--input-font-size,17px);
+  font-weight:400; padding:0 6px 0 2px; line-height:1.4;
 }
