@@ -8,6 +8,7 @@ import remarkGfm from 'remark-gfm'
 import { AnimatePresence, motion } from 'motion/react'
 import Anser from 'anser'
 import { Square } from 'lucide-react'
+import { toHtml } from 'hast-util-to-html'
 import './ChatView.css'
 
 // ── Peri spinner ──
@@ -353,10 +354,26 @@ function AssistantContent({ text }: { text: string }) {
 }
 
 function CodeBlock({ language, code }: { language?: string; code: string }) {
+  const [html, setHtml] = useState<string | null>(null)
+  useEffect(() => {
+    let cancelled = false
+    const lang = language || 'text'
+    import('@wooorm/starry-night').then(async ({ common, createStarryNight }) => {
+      const starry = await createStarryNight(common)
+      const scope = starry.flagToScope(lang)
+      if (scope && !cancelled) {
+        const root = starry.highlight(code, scope)
+        setHtml(toHtml(root as any))
+      }
+    }).catch(() => {})
+    return () => { cancelled = true }
+  }, [language, code])
   return (
     <div className="term-code">
       {language && <div className="term-tool-label">{language}</div>}
-      <pre><code>{code}</code></pre>
+      {html
+        ? <pre className="term-highlighted" dangerouslySetInnerHTML={{ __html: html }} />
+        : <pre><code>{code}</code></pre>}
     </div>
   )
 }
