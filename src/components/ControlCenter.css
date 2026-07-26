@@ -19,8 +19,20 @@
   position:relative; z-index:1; height:100%;
   overflow:hidden;
 }
-.cc-widget { position:absolute; overflow:hidden; }
+.cc-widget { position:absolute; overflow:hidden; container-type:size; }
 .cc-widget:has(.cli-mode) { overflow:visible !important; }
+
+/* ── 缩放 widget box 时内部字号随高度自适应（container query 单位 cqh）──
+   仅对文字型 widget（model/mode）生效；上下文(context)有独立宽度/字号控件不强加。
+   clamp 防止极端尺寸下过大/过小。 */
+.cc-widget .cc-model-minimal,
+.cc-widget .cc-model-badge,
+.cc-widget .model-tag,
+.cc-widget .cc-mode-minimal,
+.cc-widget .cc-mode-badge,
+.cc-widget .mode-pill {
+  font-size:clamp(9px, 42cqh, 22px) !important;
+}
 
 /* CLI mode */
 .control-center.cli-mode .cc-bg { background:transparent; }

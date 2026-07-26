@@ -1,5 +1,11 @@
 .input-bar { position:relative; width:100%; }
-.input-error { color:var(--danger); font-size:13px; padding:4px 0; }
+/* 错误浮层：绝对定位，不占布局流（否则出现/消失会把 CLI 输入栏上下推移） */
+.input-error {
+  position:absolute; bottom:100%; left:0; right:0; margin-bottom:6px;
+  color:var(--danger,#FF6B80); font-size:13px; padding:6px 10px;
+  background:rgba(255,107,128,0.1); border:1px solid rgba(255,107,128,0.3);
+  border-radius:6px; backdrop-filter:blur(8px); z-index:11;
+}
 .attached-files { display:flex; flex-wrap:wrap; gap:4px; padding:4px 0; }
 .attached-chip { display:inline-flex; align-items:center; gap:4px; padding:2px 10px; background:var(--bg-panel); border:1px solid var(--border); border-radius:4px; font-size:12px; color:var(--text); cursor:pointer; }
 .attached-chip:hover { background:var(--bg-hover); }

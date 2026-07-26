@@ -147,7 +147,7 @@ export const GLOBAL_PRESETS: GlobalPreset[] = [
       toolNameColor: 'rgba(0,0,0,0.85)', toolSummaryColor: 'rgba(0,0,0,0.4)',
       userTagBg: 'rgba(168,85,247,0.08)', userTagText: '#a855f7',
       toolIndicator: '●', toolIndicatorGlow: 0, toolIndicatorGlowColor: '',
-      toolConnectorMode: 'none', toolConnectorColor: 'rgba(0,0,0,0.12)',
+      toolConnectorMode: 'follow', toolConnectorColor: 'rgba(0,0,0,0.25)',
       sparkles: '✳✴✵✶✷✸✹✺✻✼❃❊', spinnerColor: '', spinnerSize: 14,
       msgStyle: 'terminal', msgFont: 'mono', msgTextColor: '', msgLineHeight: 1.8,
 

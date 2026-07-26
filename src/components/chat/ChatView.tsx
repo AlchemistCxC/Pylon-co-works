@@ -79,9 +79,20 @@ interface Message {
   toolOutputLines?: number; running?: boolean
 }
 
+// dev/浏览器 mock：无 Tauri 后端时（预览调样式用）展示的演示对话
+const IS_TAURI = typeof (window as any).__TAURI_INTERNALS__ !== 'undefined' || typeof (window as any).__TAURI__ !== 'undefined'
+const MOCK_MESSAGES: Message[] = [
+  { id: 'm1', role: 'user', sender: 'local:demo', content: '帮我看看 main.ts 有没有类型错误', time: '10:24' },
+  { id: 'm2', role: 'reasoning', sender: 'peri', content: '先读源码定位类型问题，再跑一次 build 验证，然后修正。', time: '10:24' },
+  { id: 'm3', role: 'tool', sender: 'tool:Read', content: '', toolName: 'Read', toolInput: 'src/main.ts', toolOutput: 'export function main(url: string) {\n  const r = await fetch(url)\n  return r.json()\n}', toolOutputLines: 4, time: '10:24' },
+  { id: 'm4', role: 'tool', sender: 'tool:Grep', content: '', toolName: 'Grep', toolInput: 'async', toolOutput: 'src/main.ts:2:  const r = await fetch(url)', toolOutputLines: 1, time: '10:24' },
+  { id: 'm5', role: 'tool', sender: 'tool:Edit', content: '', toolName: 'Edit', toolInput: 'src/main.ts', toolOutput: 'async function main', toolOutputLines: 1, time: '10:24' },
+  { id: 'm6', role: 'assistant', sender: 'peri', content: '找到问题了：`main` 用了 `await` 却没标 `async`。\n\n```ts\nexport async function main(url: string) {\n  const r = await fetch(url)\n  return r.json()\n}\n```\n\n已修正，`build` 通过。', time: '10:25' },
+]
+
 const ChatView = React.memo(function ChatView({ sessionId }: Props) {
   const bottomRef = useRef<HTMLDivElement>(null)
-  const [messages, setMessages] = useState<Message[]>([])
+  const [messages, setMessages] = useState<Message[]>(!IS_TAURI ? MOCK_MESSAGES : [])
   const [generating, setGenerating] = useState(false)
   const genStart = useRef(Date.now())
   const tokenCount = useRef(0)
@@ -270,7 +281,8 @@ const ChatView = React.memo(function ChatView({ sessionId }: Props) {
 
   useEffect(() => { bottomRef.current?.scrollIntoView({ behavior: 'smooth' }) }, [messages, generating])
 
-  if (!sessionId) return (
+  // dev/浏览器模式（无 Tauri）即使无 session 也渲染 mock 对话，方便调样式
+  if (!sessionId && IS_TAURI) return (
     <div className="chat-empty">
       <div className="empty-icon">◆</div>
       <div className="empty-title">Pylon</div>
