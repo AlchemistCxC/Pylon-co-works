@@ -34,11 +34,13 @@ export default function SettingsPreview({ zone }: Props) {
 function GlobalPreview({ t }: { t: any }) {
   const font = t.globalFont === 'mono' ? 'var(--mono)' : 'var(--font)'
   return (
-    <div className="pv-window" style={{
+    <div className="pv-window" data-scheme={t.uiScheme || 'light'} style={{
       fontFamily: font,
-      fontSize: Math.max(10, (t.globalFontSize || 16) * 0.7),
+      fontSize: Math.max(10, (t.globalFontSize || 16) * 0.75),
+      background: t.globalBgColor || '#e8e8ec',
       backgroundImage: t.globalBgImage ? `url(${t.globalBgImage})` : undefined,
       backgroundSize: 'cover',
+      color: t.uiScheme === 'dark' ? 'rgba(255,255,255,0.9)' : 'rgba(0,0,0,0.85)',
     }}>
       <div className="pv-glass" style={{
         background: `rgba(240,240,245,${1 - (t.transparency ?? 0.85)})`,

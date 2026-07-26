@@ -16,6 +16,7 @@ import type { ThemeSettings } from './store'
 export const ZONE_FIELDS: Record<string, (keyof ThemeSettings)[]> = {
   global: [
     'transparency', 'bgBlur', 'globalFont', 'globalFontSize', 'globalBgImage',
+    'globalBgColor', 'uiScheme',
     'userName', 'userPrefix', 'userColor',
   ],
   sidebar: [
@@ -74,13 +75,13 @@ export const GLOBAL_PRESETS: GlobalPreset[] = [
     theme: {
       // global
       transparency: 0.97, bgBlur: 4, globalFont: 'mono', globalFontSize: 15,
-      globalBgImage: '',
+      globalBgImage: '', globalBgColor: '#0d0d14', uiScheme: 'dark',
       userName: '', userPrefix: '❯', userColor: '#60a5fa',
 
-      // sidebar
+      // sidebar — 深色，字体明确用浅色
       sidebarBg: '#161622', sidebarBgImage: '', sidebarWidth: 240,
       sidebarTransparency: 1, sidebarBlur: 0,
-      sidebarTextColor: '#8b8ba8', sidebarNameSize: 13, sidebarGroupSize: 11,
+      sidebarTextColor: '#a0a8c0', sidebarNameSize: 13, sidebarGroupSize: 11,
 
       // chat
       chatBg: 'transparent', chatBgImage: '', chatTransparency: 1, chatBlur: 0,
@@ -131,7 +132,7 @@ export const GLOBAL_PRESETS: GlobalPreset[] = [
     label: 'Glass Light',
     theme: {
       transparency: 0.85, bgBlur: 16, globalFont: 'system', globalFontSize: 18,
-      globalBgImage: '',
+      globalBgImage: '', globalBgColor: '#e8e8ec', uiScheme: 'light',
       userName: '', userPrefix: '❯', userColor: '',
 
       sidebarBg: 'rgba(0,0,0,0.02)', sidebarBgImage: '', sidebarWidth: 250,
@@ -184,7 +185,7 @@ export const GLOBAL_PRESETS: GlobalPreset[] = [
     label: 'Nord Frost',
     theme: {
       transparency: 0.95, bgBlur: 8, globalFont: 'system', globalFontSize: 17,
-      globalBgImage: '',
+      globalBgImage: '', globalBgColor: '#242933', uiScheme: 'dark',
       userName: '', userPrefix: '❯', userColor: '',
 
       sidebarBg: '#2e3440', sidebarBgImage: '', sidebarWidth: 250,

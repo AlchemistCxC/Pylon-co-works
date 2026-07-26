@@ -19,20 +19,35 @@
   --warn: rgba(180,120,20,0.70);
   --danger: rgba(190,40,40,0.75);
   --radius: 8px;
+  --global-bg-color: #e8e8ec;
   --font: -apple-system, 'Segoe UI', 'PingFang SC', 'Microsoft YaHei', sans-serif;
   /* 终端等宽栈：西文等宽 + CJK 等宽 fallback（Sarasa/更纱 → 微软雅黑 → 系统） */
   --mono: 'Cascadia Code', 'JetBrains Mono', 'Consolas', 'Sarasa Mono SC', 'Sarasa Term SC', 'Maple Mono', 'PingFang SC', 'Microsoft YaHei', monospace;
 }
 
-html, body, #root { height:100%; width:100%; overflow:hidden; font-family:var(--global-font,var(--font)); font-size:var(--global-font-size,18px); color:var(--text); background:#e8e8ec; }
+/* ── 暗色 UI scheme：整套 token 反色，暗底预设（Claude/Nord）用 ── */
+.app[data-ui-scheme="dark"] {
+  --bg-panel: rgba(255,255,255,0.04);
+  --bg-hover: rgba(255,255,255,0.08);
+  --bg-active: rgba(255,255,255,0.12);
+  --bg-input: rgba(255,255,255,0.05);
+  --border: rgba(255,255,255,0.12);
+  --border-focus: rgba(255,255,255,0.28);
+  --text: rgba(255,255,255,0.90);
+  --text-dim: rgba(255,255,255,0.45);
+  --text-placeholder: rgba(255,255,255,0.30);
+}
+
+html, body, #root { height:100%; width:100%; overflow:hidden; font-family:var(--global-font,var(--font)); font-size:var(--global-font-size,18px); color:var(--text); background:var(--global-bg-color,#e8e8ec); }
 
 body {
-  background: #e8e8ec center/cover fixed;
+  background: var(--global-bg-color,#e8e8ec) center/cover fixed;
   background-image: var(--global-bg-image,none);
 }
 body::before {
   content:''; position:fixed; inset:0;
-  background:rgba(240,240,245, calc(1 - var(--t, 0.55)));
+  background:var(--global-bg-color,#e8e8ec);
+  opacity: calc(1 - var(--t, 0.55));
   backdrop-filter:blur(var(--blur,16px)); -webkit-backdrop-filter:blur(var(--blur,16px));
   z-index:-1;
 }

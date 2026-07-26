@@ -195,6 +195,16 @@ export default function Settings({ onClose }: { onClose?: () => void }) {
 
               <Group title="玻璃效果">
                 <BgImageRow label="背景图" value={t.globalBgImage||''} onChange={v=>onSettingChange({globalBgImage:v})}/>
+                <Row label="背景底色">
+                  <ColorPopover value={(t as any).globalBgColor||'#e8e8ec'} onChange={v=>onSettingChange({globalBgColor:v} as any)}/>
+                  <span className="set-hint" style={{marginLeft:8}}>终端/桌面背景模拟色</span>
+                </Row>
+                <Row label="UI 配色">
+                  <div className="set-preset-row">
+                    <button className={`set-preset-chip ${(t as any).uiScheme === 'light' ? 'active' : ''}`} onClick={()=>onSettingChange({uiScheme:'light'} as any)}>浅色</button>
+                    <button className={`set-preset-chip ${(t as any).uiScheme === 'dark' ? 'active' : ''}`} onClick={()=>onSettingChange({uiScheme:'dark'} as any)}>深色</button>
+                  </div>
+                </Row>
                 <Row label="透明度"><Slider value={t.transparency} onChange={v=>onSettingChange({transparency:v})} min={0} max={1}/>
                   <span className="set-val">{Math.round(t.transparency*100)}%</span></Row>
                 <Row label="模糊"><Slider value={t.bgBlur} onChange={v=>onSettingChange({bgBlur:v})} min={0} max={40} step={2}/>

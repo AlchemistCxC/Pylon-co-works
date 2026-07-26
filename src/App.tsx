@@ -34,7 +34,8 @@ export default function App() {
 
   const s = useStore(useShallow(s => ({
     transparency: s.transparency, bgBlur: s.bgBlur,
-    globalBgImage: s.globalBgImage, globalFont: s.globalFont, globalFontSize: s.globalFontSize,
+    globalBgImage: s.globalBgImage, globalBgColor: s.globalBgColor, uiScheme: s.uiScheme,
+    globalFont: s.globalFont, globalFontSize: s.globalFontSize,
     sidebarBg: s.sidebarBg, sidebarBgImage: s.sidebarBgImage, sidebarWidth: s.sidebarWidth,
     sidebarTransparency: s.sidebarTransparency, sidebarBlur: s.sidebarBlur,
     sidebarTextColor: s.sidebarTextColor, sidebarNameSize: s.sidebarNameSize, sidebarGroupSize: s.sidebarGroupSize,
@@ -66,6 +67,7 @@ export default function App() {
     '--t': s.transparency,
     '--blur': `${s.bgBlur}px`,
     '--global-bg-image': s.globalBgImage ? `url(${s.globalBgImage})` : 'none',
+    '--global-bg-color': (s as any).globalBgColor || '#e8e8ec',
     '--global-font': s.globalFont === 'mono' ? 'var(--mono)' : 'var(--font)',
     '--global-font-size': `${s.globalFontSize}px`,
     '--sidebar-bg': s.sidebarBg,
@@ -122,7 +124,7 @@ export default function App() {
   const appWindow = (() => { try { return getCurrentWindow() } catch { return { minimize() {}, isFullscreen() { return Promise.resolve(false) }, setFullscreen(_v: boolean) { return Promise.resolve() }, destroy() {} } } })()
 
   return (
-    <div className="app" style={cssVars}>
+    <div className="app" data-ui-scheme={s.uiScheme || 'light'} style={cssVars}>
       <div className="titlebar" data-tauri-drag-region>
         <button className="titlebar-toggle" onClick={() => setSidebarCollapsed(!sidebarCollapsed)}
           title={sidebarCollapsed ? '展开左栏' : '收起左栏'}>☰</button>
