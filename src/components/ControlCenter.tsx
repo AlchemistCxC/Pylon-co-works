@@ -318,18 +318,13 @@ function EditableWidget({ id, pos, editMode, isHidden, children, bodyRef, select
       onPointerDown={editMode ? handleWidgetPointerDown : undefined}
     >
       {children}
-      {editMode && <>
-        <VisibilityToggle id={id} />
-        <TypeToggle id={id} />
-      </>}
     </div>
   )
 }
 
-// 编辑控件上的 handle（resize/visibility/type）跳过 widget 拖拽
-function isControlHandle(el: HTMLElement | null): boolean {
-  if (!el) return false
-  return !!el.closest('.cc-edit-vis, .cc-edit-type')
+// 编辑控件上的 handle 跳过 widget 拖拽
+function isControlHandle(_el: HTMLElement | null): boolean {
+  return false  // 迷你控件已移除，box 上仅有位置移动功能
 }
 
 // ───────────────────────────────────────────────────────────────
@@ -536,92 +531,4 @@ function PropertyPanel({ id, onClose, onExit }: { id: string; onClose: () => voi
       </div>
     </div>
   )
-}
-
-// ───────────────────────────────────────────────────────────────
-// 内嵌控件：单 widget 上的显隐 / 类型切换
-// ───────────────────────────────────────────────────────────────
-
-function VisibilityToggle({ id }: { id: string }) {
-  const hidden = useStore(s => (s.ccHidden || []).includes(id))
-  const u = useStore(s => s.updateTheme)
-  return (
-    <div className="cc-edit-vis" onClick={e => {
-      e.stopPropagation()
-      const h = useStore.getState().ccHidden || []
-      u({ ccHidden: hidden ? h.filter(x => x !== id) : [...h, id] } as any)
-    }} title={hidden ? '显示' : '隐藏'}>
-      {hidden ? '⊙' : '⊘'}
-    </div>
-  )
-}
-
-function TypeToggle({ id }: { id: string }) {
-  const inputMode = useStore(s => s.inputMode)
-  const ccStyle = useStore(s => s.ccStyle)
-  const modelVariant = useStore(s => s.modelVariant) || 'dropdown'
-  const modeVariant = useStore(s => s.modeVariant) || 'pill'
-  const sendVariant = useStore(s => s.sendVariant) || 'icon'
-  const attachVariant = useStore(s => s.attachVariant) || 'icon'
-  const u = useStore(s => s.updateTheme)
-
-  if (id === 'input') {
-    return (
-      <div className="cc-edit-type" onClick={e => {
-        e.stopPropagation()
-        u({ inputMode: inputMode === 'cli' ? 'default' : 'cli' } as any)
-      }} title="切换输入风格">{inputMode === 'cli' ? 'CLI' : 'Def'}</div>
-    )
-  }
-  if (id === 'ekg') {
-    const styles = ['wave', 'bar', 'numeric']
-    const idx = styles.indexOf(ccStyle || 'wave')
-    return (
-      <div className="cc-edit-type" onClick={e => {
-        e.stopPropagation()
-        u({ ccStyle: styles[(idx + 1) % styles.length] } as any)
-      }} title="切换显示类型">{ccStyle || 'wave'}</div>
-    )
-  }
-  if (id === 'model') {
-    const variants = ['dropdown', 'minimal', 'badge']
-    const idx = variants.indexOf(modelVariant)
-    return (
-      <div className="cc-edit-type" onClick={e => {
-        e.stopPropagation()
-        u({ modelVariant: variants[(idx + 1) % variants.length] } as any)
-      }} title="切换外观">{modelVariant}</div>
-    )
-  }
-  if (id === 'mode') {
-    const variants = ['pill', 'badge', 'minimal']
-    const idx = variants.indexOf(modeVariant)
-    return (
-      <div className="cc-edit-type" onClick={e => {
-        e.stopPropagation()
-        u({ modeVariant: variants[(idx + 1) % variants.length] } as any)
-      }} title="切换外观">{modeVariant}</div>
-    )
-  }
-  if (id === 'send') {
-    const variants = ['icon', 'square', 'minimal']
-    const idx = variants.indexOf(sendVariant)
-    return (
-      <div className="cc-edit-type" onClick={e => {
-        e.stopPropagation()
-        u({ sendVariant: variants[(idx + 1) % variants.length] } as any)
-      }} title="切换外观">{sendVariant}</div>
-    )
-  }
-  if (id === 'attach') {
-    const variants = ['icon', 'square', 'minimal']
-    const idx = variants.indexOf(attachVariant)
-    return (
-      <div className="cc-edit-type" onClick={e => {
-        e.stopPropagation()
-        u({ attachVariant: variants[(idx + 1) % variants.length] } as any)
-      }} title="切换外观">{attachVariant}</div>
-    )
-  }
-  return null
 }
