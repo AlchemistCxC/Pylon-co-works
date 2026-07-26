@@ -1,5 +1,6 @@
 import { useRef, useState, useCallback } from 'react'
 import { useStore } from '../store'
+import { useShallow } from 'zustand/react/shallow'
 import InputBar from './chat/InputBar'
 import StatusBar from './chat/StatusBar'
 import ModelWidget from './chat/ModelWidget'
@@ -101,7 +102,7 @@ function EditableWidget({ id, pos, editMode, hidden: isHidden, children, bodyRef
   selected: string | null; onSelect: () => void;
 }) {
   const u = useStore(s => s.updateTheme)
-  const livePos = useStore(s => s.ccPositions?.[id]) || pos
+  const livePos = useStore(useShallow(s => s.ccPositions?.[id] || pos))
 
   const dragStart = useRef<{ x: number; y: number; sx: number; sy: number } | null>(null)
   const resizeStart = useRef<{ x: number; y: number; sw: number; sh: number } | null>(null)
