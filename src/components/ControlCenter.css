@@ -24,28 +24,40 @@
 .control-center.cli-mode .cc-body { padding:0 12px; }
 
 /* ── ccVariant styles ── */
-/* terminal: flat, monospace, square */
+/* terminal (Peri default): flat, monospace, accent-blue */
 .cc-variant-terminal .cc-widget .pill,
 .cc-variant-terminal .cc-widget button,
-.cc-variant-terminal .cc-widget .mode-switcher {
+.cc-variant-terminal .cc-widget .mode-switcher,
+.cc-variant-terminal .cc-widget [class*="pill"] {
   border-radius:0 !important; font-family:var(--mono) !important; font-size:12px !important;
-  background:transparent !important; border:1px solid var(--border) !important; color:var(--text-dim) !important;
+  background:transparent !important; border:1px solid var(--border) !important;
+  color:var(--text-dim) !important;
 }
 .cc-variant-terminal .cc-widget .pill:hover,
-.cc-variant-terminal .cc-widget button:hover { color:var(--accent) !important; border-color:var(--accent) !important; }
-
-/* glass: translucent frosted */
-.cc-variant-glass .cc-widget .pill,
-.cc-variant-glass .cc-widget button,
-.cc-variant-glass .cc-widget .mode-switcher {
-  backdrop-filter:blur(8px); background:rgba(255,255,255,0.08) !important;
-  color:var(--text) !important; border:1px solid rgba(255,255,255,0.1) !important;
+.cc-variant-terminal .cc-widget button:hover {
+  color:var(--accent,#6366f1) !important; border-color:var(--accent,#6366f1) !important;
 }
 
-/* pill: current default — rounded */
+/* glass: frosted pastel — pink/cyan accent */
+.cc-variant-glass .cc-widget .pill,
+.cc-variant-glass .cc-widget button,
+.cc-variant-glass .cc-widget .mode-switcher,
+.cc-variant-glass .cc-widget [class*="pill"] {
+  backdrop-filter:blur(10px); background:rgba(255,255,255,0.06) !important;
+  color:rgba(255,255,255,0.85) !important; border:1px solid rgba(255,255,255,0.08) !important;
+  border-radius:8px !important; font-size:12px !important;
+}
+.cc-variant-glass .cc-widget .pill:hover,
+.cc-variant-glass .cc-widget button:hover {
+  background:rgba(255,255,255,0.12) !important; color:#fff !important;
+}
+
+/* pill: rounded soft — purple/violet accent */
 .cc-variant-pill .cc-widget .pill,
-.cc-variant-pill .cc-widget button {
-  border-radius:999px; font-size:13px;
+.cc-variant-pill .cc-widget button,
+.cc-variant-pill .cc-widget .mode-switcher,
+.cc-variant-pill .cc-widget [class*="pill"] {
+  border-radius:999px !important; font-size:13px !important;
 }
 
 /* edit mode */
