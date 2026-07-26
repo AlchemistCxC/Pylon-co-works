@@ -1,4 +1,4 @@
-import { useRef, useState, useCallback } from 'react'
+import { useRef, useState, useCallback, useEffect } from 'react'
 import { useStore } from '../store'
 import { useShallow } from 'zustand/react/shallow'
 import InputBar from './chat/InputBar'
@@ -21,6 +21,8 @@ export default function ControlCenter({ sessionId }: Props) {
   const positions = useStore(s => s.ccPositions) || {}
   const editMode = useStore(s => s.ccEditMode)
   const u = useStore(s => s.updateTheme)
+
+  if (editMode) console.log('CC RENDER', positions['model']?.h)
 
   const inputRef = useRef<{ send: () => void; attachFile: () => void }>(null)
   const isSplit = editMode && (!!positions['send'] || !!positions['attach'])
@@ -104,12 +106,25 @@ function EditableWidget({ id, pos, editMode, hidden: isHidden, children, bodyRef
   const u = useStore(s => s.updateTheme)
   const livePos = useStore(useShallow(s => s.ccPositions?.[id] || pos))
 
+  // imperative subscription to bypass React render batching
+  const [forcePos, setForcePos] = useState(pos)
+  useEffect(() => {
+    const unsub = useStore.subscribe((s) => {
+      const np = s.ccPositions?.[id]
+      if (np) setForcePos({...np})
+    })
+    return unsub
+  }, [id])
+  const curPos = editMode ? forcePos : pos
+
   const dragStart = useRef<{ x: number; y: number; sx: number; sy: number } | null>(null)
   const resizeStart = useRef<{ x: number; y: number; sw: number; sh: number } | null>(null)
 
   // pixel dimensions for edit mode
   const eb = bodyRef.current
-  const epx = eb ? { w: Math.round((pos.w/100)*eb.getBoundingClientRect().width), h: Math.round((pos.h/100)*eb.getBoundingClientRect().height) } : { w:0, h:0 }
+  const epx = eb ? { w: Math.round((curPos.w/100)*eb.getBoundingClientRect().width), h: Math.round((curPos.h/100)*eb.getBoundingClientRect().height) } : { w:0, h:0 }
+
+  if (editMode) console.log('RENDER', id, 'pos.h=', pos.h, 'epx=', epx.h)
 
   const onWidgetMouseDown = (e: React.MouseEvent) => {
     if (!editMode || (e.target as HTMLElement).classList.contains('cc-edit-rsz')) return
@@ -157,7 +172,7 @@ function EditableWidget({ id, pos, editMode, hidden: isHidden, children, bodyRef
   return (
     <div className={`cc-widget ${editMode ? 'cc-edit' : ''} ${editMode && isHidden ? 'cc-hidden' : ''} ${selected === id ? 'cc-selected' : ''}`}
       style={editMode
-        ? { left: `${pos.x}%`, top: `${pos.y}%`, width: `${epx.w}px`, height: `${epx.h}px` }
+        ? { left: `${curPos.x}%`, top: `${curPos.y}%`, width: `${epx.w}px`, height: `${epx.h}px` }
         : { left: `${pos.x}%`, top: `${pos.y}%`, width: `${pos.w}%`, height: `${pos.h}%` }}
       onMouseDown={editMode ? (e) => {
         const isHandle = (e.target as HTMLElement).classList.contains('cc-edit-rsz')
