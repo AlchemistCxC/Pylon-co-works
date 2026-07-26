@@ -186,14 +186,14 @@ async fn send_message(
                                 if payload.get("sessionId").and_then(|v| v.as_str()) != Some(&pid) { continue; }
                                 // Check for userMessageChunk (history replay) → emit as user message
                                 if let Some(update) = payload.get("update") {
-                                    if update.get("sessionUpdate").and_then(|v| v.as_str()) == Some("userMessageChunk") {
+                                    if update.get("sessionUpdate").and_then(|v| v.as_str()) == Some("user_message_chunk") {
                                         if let Some(text) = update.get("content").and_then(|c| c.get("text")).and_then(|v| v.as_str()) {
                                             let _ = win.emit("peri:user", serde_json::json!({"source": src, "content": text}));
                                             continue;
                                         }
                                     }
                                     // First agent chunk → pet gets curious
-                                    if update.get("sessionUpdate").and_then(|v| v.as_str()) == Some("agentMessageChunk") {
+                                    if update.get("sessionUpdate").and_then(|v| v.as_str()) == Some("agent_message_chunk") {
                                         let _ = pet.lock().map(|mut p| pet::on_first_chunk(&mut p));
                                     }
                                 }
@@ -205,7 +205,7 @@ async fn send_message(
                                     if let Ok(mut sessions) = sessions.lock() {
                                         if let Some(s) = sessions.get_mut(&src) {
                                             match variant {
-                                                Some("usageUpdate") => {
+                                                Some("usage_update") => {
                                                     s.tokens_total = update.get("value").and_then(|v| v.as_u64()).unwrap_or(0);
                                                     if let Some(meta) = update.get("_meta") {
                                                         s.tokens_in = meta.get("inputTokens").and_then(|v| v.as_u64()).unwrap_or(0);
@@ -216,13 +216,13 @@ async fn send_message(
                                                     // Pet growth: track cumulative tokens
                                                     let _ = pet.lock().map(|mut p| pet::on_usage_update(&mut p, s.tokens_total));
                                                 }
-                                                Some("toolCallUpdate") => {
+                                                Some("tool_call_update") => {
                                                     // Pet growth: count successful tool calls
                                                     if update.get("status").and_then(|v| v.as_str()) == Some("completed") {
                                                         let _ = pet.lock().map(|mut p| pet::on_tool_success(&mut p));
                                                     }
                                                 }
-                                                Some("sessionInfoUpdate") => {
+                                                Some("session_info_update") => {
                                                     if let Some(t) = update.get("title").and_then(|v| v.as_str()) {
                                                         s.title = t.to_string();
                                                         // Pet memory: capture every 100th message's session title
@@ -233,7 +233,7 @@ async fn send_message(
                                                         });
                                                     }
                                                 }
-                                                Some("configOptionUpdate") => {
+                                                Some("config_option_update") => {
                                                     if let Some(opts) = update.get("configOptions").and_then(|v| v.as_array()) {
                                                         for opt in opts {
                                                             if opt.get("configId").and_then(|v| v.as_str()) == Some("model") {

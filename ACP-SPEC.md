@@ -203,22 +203,22 @@ Agent 在 prompt 处理过程中发送通知。
 
 | 变体 | 关键字段 | 说明 |
 |:--|:--|:--|
-| `agentMessageChunk` | `content.text` | AI 回复文本流 |
-| `agentThoughtChunk` | `content.text` | AI 思考过程 |
-| `userMessageChunk` | `content.text` | 用户消息回显（load 重放时） |
-| `toolCall` | `title`, `toolCallId`, `rawInput` | 工具调用开始 |
-| `toolCallUpdate` | `toolCallId`, `rawOutput`, `status` | 工具调用结果 |
-| `usageUpdate` | `value`, `size`, `_meta` | Token 使用统计 |
-| `availableCommandsUpdate` | `commands: [{name, description, input_hint}]` | 可用命令列表 |
-| `sessionInfoUpdate` | `cwd`, `title`, `updatedAt` | 会话元数据（Peri 缺 cwd/title） |
-| `configOptionUpdate` | `key`, `value` | 配置变更通知 |
+| `agent_message_chunk` | `content.text` | AI 回复文本流 |
+| `agent_thought_chunk` | `content.text` | AI 思考过程 |
+| `user_message_chunk` | `content.text` | 用户消息回显（load 重放时） |
+| `tool_call` | `title`, `toolCallId`, `rawInput` | 工具调用开始 |
+| `tool_call_update` | `toolCallId`, `rawOutput`, `status` | 工具调用结果 |
+| `usage_update` | `value`, `size`, `_meta` | Token 使用统计 |
+| `available_commands_update` | `commands: [{name, description, input_hint}]` | 可用命令列表 |
+| `session_info_update` | `cwd`, `title`, `updatedAt` | 会话元数据（Peri 缺 cwd/title） |
+| `config_option_update` | `key`, `value` | 配置变更通知 |
 | `plan` | `title`, `steps` | 计划模式输出 |
 
 ### 4.3 usageUpdate 详解
 
 ```json
 {
-  "sessionUpdate": "usageUpdate",
+  "sessionUpdate": "usage_update",
   "value": 12345,
   "size": 131072,
   "_meta": {

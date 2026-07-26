@@ -27,20 +27,20 @@ function fmtTokens(n: number) {
 
 /**
  * 从后端 configOptions 里提取 model 选项。
- * 文档未固定 ConfigOption 字段，做防御性解析——兼容常见形态：
- *   { key:'model', value:'x', options:['a','b'] }
- *   { key:'model', value:'x', choices:[{value:'a'},{value:'b'}] }
- *   { id:'model', current:'x', values:[...] }
+ * 实测 Peri 真实结构（2026-07）：
+ *   { id:'model', type:'select', currentValue:'sonnet', options:[{id,name},...] }
+ * 仍保留 key/value/choices 等兜底字段以防协议演进。
  */
 function extractModelConfig(configOptions: any): { model?: string; models?: string[] } {
   if (!Array.isArray(configOptions)) return {}
-  const opt = configOptions.find((o: any) => (o?.key || o?.id || o?.name) === 'model')
+  const opt = configOptions.find((o: any) => (o?.id || o?.key || o?.name) === 'model')
   if (!opt) return {}
-  const model = opt.value ?? opt.current ?? opt.selected
+  const model = opt.currentValue ?? opt.value ?? opt.current ?? opt.selected
   const rawList = opt.options ?? opt.choices ?? opt.values ?? opt.available
   let models: string[] | undefined
   if (Array.isArray(rawList)) {
-    models = rawList.map((c: any) => (typeof c === 'string' ? c : (c?.value ?? c?.id ?? c?.name))).filter(Boolean)
+    // 值用 id（后端以 id 匹配），字符串项直接用
+    models = rawList.map((c: any) => (typeof c === 'string' ? c : (c?.id ?? c?.value ?? c?.name))).filter(Boolean)
   }
   return { model, models }
 }
@@ -218,13 +218,17 @@ const ChatView = React.memo(function ChatView({ sessionId }: Props) {
             break
           }
           case 'config_option_update': {
-            // 后端配置变更（含 model）— 单条 {key,value} 或整包 configOptions[]
+            // 后端配置变更（含 model）— 整包 configOptions[] 或单条 {id/key, currentValue/value}
             const src = event.payload.source
             if (Array.isArray(upd.configOptions)) {
               const cfg = extractModelConfig(upd.configOptions)
               if (cfg.model || cfg.models) useStore.getState().setSessionConfig(src, { ...cfg, raw: upd.configOptions })
-            } else if (upd.key === 'model' && upd.value != null) {
-              useStore.getState().setSessionConfig(src, { model: String(upd.value) })
+            } else {
+              const key = upd.id ?? upd.key
+              const val = upd.currentValue ?? upd.value
+              if (key === 'model' && val != null) {
+                useStore.getState().setSessionConfig(src, { model: String(val) })
+              }
             }
             break
           }
