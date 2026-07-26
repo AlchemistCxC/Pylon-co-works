@@ -79,7 +79,7 @@ const DEFAULTS: ThemeSettings = {
   ccStyle: 'wave',
   ccVariant: 'terminal',
   ccLayout: ['input', 'context', 'model', 'mode'], ccHidden: [], ccSizes: {},
-  ccPositions: { input:{x:3,y:52,w:94,h:45}, context:{x:3,y:3,w:70,h:22}, model:{x:75,y:3,w:14,h:11}, mode:{x:90,y:3,w:8,h:11}, send:{x:86,y:68,w:5,h:12}, attach:{x:92,y:68,w:5,h:12} },
+  ccPositions: { input:{x:3,y:38,w:94,h:58}, context:{x:3,y:3,w:58,h:16}, model:{x:63,y:3,w:20,h:16}, mode:{x:84,y:3,w:14,h:16}, send:{x:86,y:68,w:6,h:12}, attach:{x:93,y:68,w:5,h:12} },
   ccEditMode: false,
   presets: {}, activePreset: {},
 }
