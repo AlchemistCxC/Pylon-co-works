@@ -20,10 +20,15 @@
   overflow:hidden;
 }
 .cc-widget { position:absolute; overflow:hidden; container-type:size; display:flex; align-items:center; }
+/* 文字型控件（model/mode/send/attach）宽高随内容自适应 */
+.cc-widget.cc-natural { width:fit-content; height:auto; }
 .cc-widget:has(.cli-mode) { overflow:visible !important; }
 /* box 内容子节点填满 box（紧包，消除描边与控件间空隙）；编辑 mini controls 除外 */
 /* 文字居中，避免只占 box 一侧导致视觉上"内容只有 box 1/3 宽" */
 .cc-widget > *:not(.cc-edit-vis):not(.cc-edit-type) { flex:1; min-width:0; height:100%; display:flex; align-items:center; justify-content:center; text-align:center; }
+/* naturalSize 控件：解除 container-type:size（它阻止被子内容撑开），宽度取内容 */
+.cc-widget.cc-natural { container-type:normal; width:max-content !important; height:auto !important; min-width:0 !important; }
+.cc-widget.cc-natural > *:not(.cc-edit-vis):not(.cc-edit-type) { flex:none; width:auto; }
 
 /* ── 缩放 widget box 时内部字号随高度自适应（container query 单位 cqh）──
    仅对文字型 widget（model/mode）生效；上下文(context)有独立宽度/字号控件不强加。

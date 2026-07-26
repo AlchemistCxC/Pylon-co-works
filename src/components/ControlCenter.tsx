@@ -126,9 +126,11 @@ export default function ControlCenter({ sessionId }: Props) {
     const pos = (!editMode && inputMode === 'cli' && !cliCustomized && CLI_OVERRIDES[id])
       ? CLI_OVERRIDES[id]
       : rawPos
+    const isNatural = id === 'model' || id === 'mode' || id === 'send' || id === 'attach'
     return (
       <EditableWidget
         key={id} id={id} pos={pos} editMode={editMode}
+        naturalSize={isNatural}
         isHidden={hidden.includes(id)}
         bodyRef={ccBodyRef}
         selected={selected === id}
@@ -195,7 +197,7 @@ export default function ControlCenter({ sessionId }: Props) {
 // EditableWidget：单一职责，干净指针事件
 // ───────────────────────────────────────────────────────────────
 
-function EditableWidget({ id, pos, editMode, isHidden, children, bodyRef, selected, onSelect }: {
+function EditableWidget({ id, pos, editMode, isHidden, children, bodyRef, selected, onSelect, naturalSize }: {
   id: string
   pos: { x: number; y: number; w: number; h: number }
   editMode: boolean
@@ -204,6 +206,8 @@ function EditableWidget({ id, pos, editMode, isHidden, children, bodyRef, select
   bodyRef: React.RefObject<HTMLDivElement | null>
   selected: boolean
   onSelect: () => void
+  // 文字型控件(model/mode/send/attach)用 naturalSize=true — 宽高随内容自适应，不锁死%值
+  naturalSize?: boolean
 }) {
   // 拖拽 / 缩放 — 使用 Pointer Events（统一鼠标+触屏）
   // 直接读 store.getState() 拿最新 pos，避免闭包过期
@@ -240,8 +244,11 @@ function EditableWidget({ id, pos, editMode, isHidden, children, bodyRef, select
 
   return (
     <div
-      className={`cc-widget ${editMode ? 'cc-edit' : ''} ${editMode && isHidden ? 'cc-hidden' : ''} ${selected ? 'cc-selected' : ''}`}
-      style={{ left: `${pos.x}%`, top: `${pos.y}%`, width: `${pos.w}%`, height: `${pos.h}%` }}
+      className={`cc-widget ${editMode ? 'cc-edit' : ''} ${editMode && isHidden ? 'cc-hidden' : ''} ${selected ? 'cc-selected' : ''} ${naturalSize ? 'cc-natural' : ''}`}
+      style={naturalSize
+        ? { left: `${pos.x}%`, top: `${pos.y}%` }
+        : { left: `${pos.x}%`, top: `${pos.y}%`, width: `${pos.w}%`, height: `${pos.h}%` }
+      }
       onPointerDown={editMode ? handleWidgetPointerDown : undefined}
     >
       {children}
