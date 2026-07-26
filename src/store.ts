@@ -77,7 +77,7 @@ const DEFAULTS: ThemeSettings = {
   ccHeight: 120, ccBgHeight: 120, ccBg: 'transparent', ccBgImage: '',
   ccStyle: 'wave',
   ccLayout: ['input', 'context', 'model', 'mode'], ccHidden: [], ccSizes: {},
-  ccPositions: { input:{x:5,y:50,w:90,h:50}, context:{x:5,y:5,w:50,h:20}, model:{x:60,y:5,w:20,h:12}, mode:{x:82,y:5,w:15,h:12}, send:{x:88,y:72,w:8,h:8}, attach:{x:81,y:72,w:6,h:8} },
+  ccPositions: { input:{x:3,y:52,w:94,h:45}, context:{x:3,y:3,w:70,h:22}, model:{x:75,y:3,w:14,h:11}, mode:{x:90,y:3,w:8,h:11}, send:{x:86,y:68,w:5,h:12}, attach:{x:92,y:68,w:5,h:12} },
   ccEditMode: false,
   presets: {}, activePreset: {},
 }
