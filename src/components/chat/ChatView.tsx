@@ -354,26 +354,56 @@ function AssistantContent({ text }: { text: string }) {
 }
 
 function CodeBlock({ language, code }: { language?: string; code: string }) {
-  const [html, setHtml] = useState<string | null>(null)
+  const lines = code.split('\n')
+  const isMultiLine = lines.length > 1
+  const [highlighted, setHighlighted] = useState<{ html: string; lang: string } | null>(null)
+
   useEffect(() => {
+    if (!isMultiLine) return
     let cancelled = false
     const lang = language || 'text'
     import('@wooorm/starry-night').then(async ({ common, createStarryNight }) => {
       const starry = await createStarryNight(common)
       const scope = starry.flagToScope(lang)
       if (scope && !cancelled) {
+        // 整体高亮后用 CSS 拆行——避免逐行高亮丢失跨行 token 上下文
         const root = starry.highlight(code, scope)
-        setHtml(toHtml(root as any))
+        const html = toHtml(root as any)
+        if (!cancelled) setHighlighted({ html, lang })
       }
     }).catch(() => {})
     return () => { cancelled = true }
-  }, [language, code])
+  }, [language, code, isMultiLine])
+
+  // 单行 → 内联代码风格（无 gutter）
+  if (!isMultiLine) {
+    return <code className="term-inline-code">{code}</code>
+  }
+
+  // 多行 → │ gutter 风格（对齐 Peri TUI code_block_lines）
+  // 将 starry-night 输出的 HTML 按 \n 拆行，每行包 gutter
+  const renderLines = () => {
+    if (!highlighted) {
+      return lines.map((line, i) => (
+        <div key={i} className="term-code-line">
+          <span className="term-code-gutter">│ </span>
+          <span>{line || '\u00a0'}</span>
+        </div>
+      ))
+    }
+    // starry-night 输出的是完整 HTML 字符串，内含 \n 分隔各行
+    const htmlLines = highlighted.html.split('\n')
+    return htmlLines.map((html, i) => (
+      <div key={i} className="term-code-line">
+        <span className="term-code-gutter">│ </span>
+        <span dangerouslySetInnerHTML={{ __html: html || '&nbsp;' }} />
+      </div>
+    ))
+  }
+
   return (
-    <div className="term-code">
-      {language && <div className="term-tool-label">{language}</div>}
-      {html
-        ? <pre className="term-highlighted" dangerouslySetInnerHTML={{ __html: html }} />
-        : <pre><code>{code}</code></pre>}
+    <div className="term-code-block">
+      {renderLines()}
     </div>
   )
 }

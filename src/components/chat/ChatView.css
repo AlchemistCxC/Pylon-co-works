@@ -55,23 +55,26 @@
 .term-li::before { content:'- '; color:var(--text-dim); }
 .term-p { margin:2px 0; }
 .term-inline-code { font-family:var(--mono); color:var(--chat-code-color,#b47814); font-size:inherit; }
-.term-code { margin:4px 0; background:var(--chat-code-bg,rgba(0,0,0,0.03)); border:1px solid var(--border); border-radius:4px; overflow:hidden; }
-.term-code pre { padding:10px 14px; margin:0; overflow-x:auto; }
-.term-code code { font-size:inherit; line-height:1.6; }
 
-/* ── starry-night syntax highlight (maps to CSS custom properties) ── */
-.term-code .pl-k  { color:var(--syn-kw,var(--accent)); }          /* keyword */
-.term-code .pl-s  { color:var(--syn-str,var(--chat-code-color,#b47814)); } /* string */
-.term-code .pl-c  { color:var(--syn-cmt,var(--text-dim)); font-style:italic; } /* comment */
-.term-code .pl-c1 { color:var(--syn-lit,var(--text-dim)); }       /* literal */
-.term-code .pl-ent { color:var(--syn-ent,var(--text)); }          /* entity */
-.term-code .pl-en { color:var(--syn-fn,var(--accent)); }          /* function */
-.term-code .pl-v  { color:var(--syn-var,var(--text)); }           /* variable */
-.term-code .pl-pds { color:var(--syn-str,var(--chat-code-color,#b47814)); } /* punctuation-string */
-.term-code .pl-smi { color:var(--syn-prop,var(--text)); }         /* property */
-.term-code .pl-sr { color:var(--syn-re,var(--tool-err,#be2828)); } /* regex */
-.term-code .pl-mh { color:var(--syn-lit,var(--text-dim)); }       /* markup-heading */
-.term-code .pl-cor { color:var(--syn-lit,var(--text-dim)); }      /* co-reference */
+/* ── 代码块（│ gutter 风格 — 对齐 Peri TUI code_block_lines）── */
+.term-code-block { margin:2px 0; }
+.term-code-line { display:flex; align-items:flex-start; min-height:1.5em; }
+.term-code-gutter { flex-shrink:0; color:var(--text-dim); opacity:0.45; user-select:none; margin-right:8px; }
+
+/* ── starry-night 语法高亮（Peri base16-ocean.dark 配色）── */
+.term-code-block .pl-k  { color:var(--syn-kw,#b48ead); }           /* keyword — mauve */
+.term-code-block .pl-s  { color:var(--syn-str,#96b5b4); }           /* string — teal */
+.term-code-block .pl-c  { color:var(--syn-cmt,#65737e); font-style:italic; } /* comment */
+.term-code-block .pl-c1 { color:var(--syn-lit,#d08770); }            /* literal/number — orange */
+.term-code-block .pl-ent { color:var(--syn-ent,#ebcb8b); }           /* entity/type — yellow */
+.term-code-block .pl-en { color:var(--syn-fn,#8fa1b3); }            /* function — blue-gray */
+.term-code-block .pl-v  { color:var(--syn-var,#c0c5ce); }           /* variable */
+.term-code-block .pl-pds { color:var(--syn-str,#96b5b4); }           /* punctuation string */
+.term-code-block .pl-smi { color:var(--syn-prop,#c0c5ce); }          /* property */
+.term-code-block .pl-sr { color:var(--syn-re,#d08770); }            /* regex */
+.term-code-block .pl-mh { color:var(--syn-lit,#65737e); }           /* markup heading */
+.term-code-block .pl-cor { color:var(--syn-lit,#65737e); }           /* co-reference */
+.term-code-block .pl-s1 { color:var(--syn-support,#8fa1b3); }       /* support/module — blue-gray */
 
 /* ── streaming cursor ── */
 .term-cursor { display:inline; color:var(--text-dim); font-style:italic; animation:blink 1.2s step-end infinite; }

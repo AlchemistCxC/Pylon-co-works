@@ -134,4 +134,4 @@
 .pv-app { display:flex; flex-direction:column; height:100%; overflow:hidden; }
 .pv-app .layout { flex:1; overflow:hidden; display:flex; }
 /* 预览代码块去边框，更简洁 */
-.pv-app .term-code { border:none; border-radius:0; background:var(--chat-code-bg,transparent); margin:2px 0; }
+.pv-app .term-code-block { margin:2px 0; }

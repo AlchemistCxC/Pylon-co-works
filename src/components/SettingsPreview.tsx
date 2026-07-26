@@ -94,7 +94,12 @@ function PreviewApp({ zone }: { zone: string }) {
                 ))}
                 <div className="term-assistant">
                   好的，我来分析一下。<code className="term-inline-code">main()</code> 里有一处类型错误需要修正。
-                  <div className="term-code"><pre><code>const result = await fetch(url)</code></pre></div>
+                <div className="term-code-block">
+                  <div className="term-code-line">
+                    <span className="term-code-gutter">│ </span>
+                    <span>const result = await fetch(url)</span>
+                  </div>
+                </div>
                 </div>
               </div>
             </div>
