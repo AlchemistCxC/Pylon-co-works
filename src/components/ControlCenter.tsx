@@ -149,7 +149,12 @@ function EditableWidget({ id, pos, editMode, hidden: isHidden, children, bodyRef
   return (
     <div className={`cc-widget ${editMode ? 'cc-edit' : ''} ${editMode && isHidden ? 'cc-hidden' : ''} ${selected === id ? 'cc-selected' : ''}`}
       style={{ left: `${pos.x}%`, top: `${pos.y}%`, width: `${pos.w}%`, height: `${pos.h}%` }}
-      onMouseDown={editMode ? (e) => { onWidgetMouseDown(e); onSelect() } : undefined}>
+      onMouseDown={editMode ? (e) => {
+        const isHandle = (e.target as HTMLElement).classList.contains('cc-edit-rsz')
+          || (e.target as HTMLElement).closest('.cc-edit-rsz, .cc-edit-vis, .cc-edit-type')
+        if (!isHandle) onSelect()
+        onWidgetMouseDown(e)
+      } : undefined}>
       {children}
       {editMode && <>
         <div className="cc-edit-rsz" onMouseDown={onResizeMouseDown} />
@@ -290,11 +295,10 @@ function PropertyPanel({ id, onClose, onExit }: { id: string; onClose: () => voi
         </>}
 
         {id === 'mode' && <>
-          <div className="cc-prop-sec">权限</div>
-          <div style={{fontSize:13,color:'var(--text-dim)',padding:'6px 0'}}>
-            模式切换由 Agent 控制
-          </div>
+          <div className="cc-prop-sec">模式</div>
+          <div className="cc-prop-field"><label>当前</label><span style={{fontSize:13,color:theme.liveMode==='bypass'?'#FF6B80':theme.liveMode==='auto'?'#FFC107':theme.liveMode==='edit'?'#A2A9E4':'#999999'}}>{theme.liveMode||'default'}</span></div>
         </>}
+        {(id === 'send' || id === 'attach') && null}
       </div>
       <div className="cc-prop-footer">
         <button className="ps-btn sm" onClick={onExit}>退出自定义</button>

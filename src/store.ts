@@ -1,4 +1,5 @@
 import { create } from 'zustand'
+import { persist } from 'zustand/middleware'
 
 export interface Profile { id: string; name: string; avatar?: string; persona: string; model: string }
 export interface Session { id: string; periId?: string; name: string; source: string; profileId: string; createdAt: number; lastActiveAt: number; platform: string; workdir: string; sessionPrompt: string; skills: string[]; hooks: string[]; autoName: string }
@@ -84,7 +85,8 @@ const DEFAULTS: ThemeSettings = {
   presets: {}, activePreset: {},
 }
 
-export const useStore = create<ThemeState>((set, get) => ({
+export const useStore = create<ThemeState>()(persist(
+  (set, get) => ({
   ...DEFAULTS,
 
   profiles: [
@@ -151,4 +153,8 @@ export const useStore = create<ThemeState>((set, get) => ({
   activeAgent: 'peri',
   setAgents: (a) => set({ agents: a }),
   setActiveAgent: (id) => set({ activeAgent: id }),
-}))
+}),
+{ name: 'pylon-theme', partialize: (state) => {
+  const { profiles, sessions, users, setActiveProfile, addProfile, addSession, removeSession, setSessionPeriId, restoreSessions, getUser, updateTheme, setLiveStats, liveCommands, presets, activePreset, agents, setAgents, setActiveAgent, ...theme } = state as any
+  return theme
+}}))
