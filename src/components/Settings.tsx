@@ -3,6 +3,7 @@ import * as Tabs from '@radix-ui/react-tabs'
 import { invoke } from '@tauri-apps/api/core'
 import { useStore } from '../store'
 import type { ThemeSettings } from '../store'
+import { GLOBAL_PRESETS, ZONE_FIELDS, pickZoneFields } from '../presets'
 import './Settings.css'
 
 // ── helpers ──
@@ -98,90 +99,7 @@ function Group({ title, children, defaultOpen }: { title:string; children:React.
   )
 }
 
-// ── global presets ──
-
-const GLOBAL_PRESETS: { name: string; label: string; theme: Partial<ThemeSettings> }[] = [
-  {
-    name: 'claude', label: 'Claude Code',
-    theme: {
-      transparency: 0.95, bgBlur: 8, globalFont: 'mono', globalFontSize: 16,
-      sidebarBg: '#16162a', sidebarWidth: 250, sidebarTextColor: '#a0a0c0', sidebarNameSize: 14, sidebarGroupSize: 12,
-      chatBg: '#1a1a2e', chatFont: 'mono', chatFontSize: 15, chatLineHeight: 1.6, chatTextColor: '#cdd6f4', chatCodeColor: '#f9c74f', chatCodeBg: 'rgba(255,255,255,0.05)',
-      toolOk: '#4ade80', toolRun: '#60a5fa', toolErr: '#f87171', toolNameColor: '#cdd6f4', toolSummaryColor: 'rgba(205,214,244,0.4)',
-      userTagBg: 'rgba(168,85,247,0.12)', userTagText: '#c4b5fd',
-      inputBg: 'rgba(255,255,255,0.04)', inputTextColor: '#cdd6f4', inputPlaceholder: 'rgba(205,214,244,0.28)', inputSendBg: 'rgba(205,214,244,0.1)', inputFocusBorder: 'rgba(96,165,250,0.4)', inputFontSize: 17, inputMinHeight: 56,
-      inputMode: 'default', cliLineWidth: 2, cliLineColor: '#60a5fa', cliTextColor: '#cdd6f4',
-      statusBg: 'rgba(22,22,42,0.8)', ekgWidth: 150, ekgFontSize: 16, ekgGreen: '#4ade80', ekgYellow: '#f9c74f', ekgRed: '#f87171',
-      pillBg: 'rgba(255,255,255,0.04)', pillText: 'rgba(205,214,244,0.65)', prismOnColor: '#4ade80',
-      ekgLineWidth: 3, ekgAmplitudeMax: 10, ekgSpeedBase: 0.5, ekgSpeedMax: 2,
-      ekgLeftColor: 'rgba(205,214,244,0.35)', ekgMovingColor: '', ekgConsumedColor: 'rgba(205,214,244,0.08)', tokenDisplay: 'ekg',
-      rightBg: 'rgba(22,22,42,0.8)', rightWidth: 260,
-      sidebarTransparency: 1, sidebarBlur: 0, chatTransparency: 1, chatBlur: 0, rightTransparency: 1, rightBlur: 0,
-      ccHeight: 120, ccBgHeight: 120, ccBg: 'transparent', ccStyle: 'wave',
-      userName: '', userPrefix: '❯', userColor: '',
-      toolIndicator: '●', sparkles: '✳✴✵✶✷✸✹✺✻✼❃❊', spinnerColor: '', spinnerSize: 14,
-      msgStyle: 'terminal', msgFont: 'mono', msgTextColor: '', msgLineHeight: 1.8,
-    }
-  },
-  {
-    name: 'glass', label: 'Glass Light',
-    theme: {
-      transparency: 0.85, bgBlur: 16, globalFont: 'system', globalFontSize: 18,
-      sidebarBg: 'rgba(0,0,0,0.02)', sidebarWidth: 250, sidebarTextColor: 'rgba(0,0,0,0.85)', sidebarNameSize: 14, sidebarGroupSize: 12,
-      chatBg: '', chatFont: 'mono', chatFontSize: 15, chatLineHeight: 1.4, chatTextColor: 'rgba(0,0,0,0.85)', chatCodeColor: '#b47814', chatCodeBg: 'rgba(0,0,0,0.03)',
-      toolOk: '#1e9646', toolRun: '#3b82f6', toolErr: '#be2828', toolNameColor: 'rgba(0,0,0,0.85)', toolSummaryColor: 'rgba(0,0,0,0.4)',
-      userTagBg: 'rgba(168,85,247,0.08)', userTagText: '#a855f7',
-      inputBg: 'rgba(0,0,0,0.02)', inputTextColor: 'rgba(0,0,0,0.85)', inputPlaceholder: 'rgba(0,0,0,0.28)', inputSendBg: 'rgba(0,0,0,0.10)', inputFocusBorder: 'rgba(0,0,0,0.22)', inputFontSize: 17, inputMinHeight: 56,
-      inputMode: 'default', cliLineWidth: 2, cliLineColor: '', cliTextColor: '',
-      statusBg: 'rgba(0,0,0,0.02)', ekgWidth: 150, ekgFontSize: 16, ekgGreen: '#1e9646', ekgYellow: '#b47814', ekgRed: '#be2828',
-      pillBg: 'rgba(0,0,0,0.04)', pillText: 'rgba(0,0,0,0.65)', prismOnColor: '#1e9646',
-      ekgLineWidth: 3, ekgAmplitudeMax: 10, ekgSpeedBase: 0.5, ekgSpeedMax: 2,
-      ekgLeftColor: 'rgba(0,0,0,0.35)', ekgMovingColor: '', ekgConsumedColor: 'rgba(0,0,0,0.08)', tokenDisplay: 'ekg',
-      rightBg: 'rgba(0,0,0,0.02)', rightWidth: 260,
-      sidebarTransparency: 1, sidebarBlur: 0, chatTransparency: 1, chatBlur: 0, rightTransparency: 1, rightBlur: 0,
-      ccHeight: 120, ccBgHeight: 120, ccBg: 'transparent', ccStyle: 'wave',
-      userName: '', userPrefix: '❯', userColor: '',
-      toolIndicator: '●', sparkles: '✳✴✵✶✷✸✹✺✻✼❃❊', spinnerColor: '', spinnerSize: 14,
-      msgStyle: 'terminal', msgFont: 'mono', msgTextColor: '', msgLineHeight: 1.8,
-    }
-  },
-  {
-    name: 'nord', label: 'Nord Frost',
-    theme: {
-      transparency: 0.95, bgBlur: 8, globalFont: 'system', globalFontSize: 17,
-      sidebarBg: '#2e3440', sidebarWidth: 250, sidebarTextColor: '#d8dee9', sidebarNameSize: 14, sidebarGroupSize: 12,
-      chatBg: '#242933', chatFont: 'mono', chatFontSize: 15, chatLineHeight: 1.6, chatTextColor: '#d8dee9', chatCodeColor: '#ebcb8b', chatCodeBg: 'rgba(255,255,255,0.04)',
-      toolOk: '#a3be8c', toolRun: '#81a1c1', toolErr: '#bf616a', toolNameColor: '#d8dee9', toolSummaryColor: 'rgba(216,222,233,0.4)',
-      userTagBg: 'rgba(180,142,173,0.15)', userTagText: '#b48ead',
-      inputBg: 'rgba(255,255,255,0.04)', inputTextColor: '#d8dee9', inputPlaceholder: 'rgba(216,222,233,0.28)', inputSendBg: 'rgba(216,222,233,0.1)', inputFocusBorder: 'rgba(136,192,208,0.4)', inputFontSize: 17, inputMinHeight: 56,
-      inputMode: 'default', cliLineWidth: 2, cliLineColor: '#88c0d0', cliTextColor: '#d8dee9',
-      statusBg: '#2e3440', ekgWidth: 150, ekgFontSize: 16, ekgGreen: '#a3be8c', ekgYellow: '#ebcb8b', ekgRed: '#bf616a',
-      pillBg: 'rgba(255,255,255,0.04)', pillText: 'rgba(216,222,233,0.65)', prismOnColor: '#a3be8c',
-      ekgLineWidth: 3, ekgAmplitudeMax: 10, ekgSpeedBase: 0.5, ekgSpeedMax: 2,
-      ekgLeftColor: 'rgba(216,222,233,0.35)', ekgMovingColor: '', ekgConsumedColor: 'rgba(216,222,233,0.08)', tokenDisplay: 'ekg',
-      rightBg: '#2e3440', rightWidth: 260,
-      sidebarTransparency: 1, sidebarBlur: 0, chatTransparency: 1, chatBlur: 0, rightTransparency: 1, rightBlur: 0,
-      ccHeight: 120, ccBgHeight: 120, ccBg: 'transparent', ccStyle: 'wave',
-      userName: '', userPrefix: '❯', userColor: '',
-      toolIndicator: '●', sparkles: '✳✴✵✶✷✸✹✺✻✼❃❊', spinnerColor: '', spinnerSize: 14,
-      msgStyle: 'terminal', msgFont: 'mono', msgTextColor: '', msgLineHeight: 1.8,
-    }
-  },
-]
-
-// ── local preset helper ──
-
-const SIDEBAR_FIELDS = ['sidebarBg','sidebarBgImage','sidebarWidth','sidebarTransparency','sidebarBlur','sidebarTextColor','sidebarNameSize','sidebarGroupSize'] as const
-type SidebarFields = typeof SIDEBAR_FIELDS[number]
-const TERMINAL_FIELDS = ['chatBg','chatBgImage','chatTransparency','chatBlur','chatFont','chatFontSize','chatLineHeight','chatTextColor','chatCodeColor','chatCodeBg','toolOk','toolRun','toolErr','toolNameColor','toolSummaryColor','userTagBg','userTagText','toolIndicator','sparkles','spinnerColor','spinnerSize','msgStyle','msgFont','msgTextColor','msgLineHeight'] as const
-const CC_FIELDS = ['ccHeight','ccBgHeight','ccBg','ccBgImage','inputBg','inputBgImage','inputTextColor','inputPlaceholder','inputSendBg','inputFocusBorder','inputFontSize','inputMinHeight','inputMode','cliLineWidth','cliLineColor','cliTextColor','statusBg','statusBgImage','ekgWidth','ekgFontSize','ekgGreen','ekgYellow','ekgRed','pillBg','pillText','prismOnColor','ekgLineWidth','ekgAmplitudeMax','ekgSpeedBase','ekgSpeedMax','ekgLeftColor','ekgMovingColor','ekgConsumedColor','tokenDisplay','ccStyle'] as const
-const RIGHT_FIELDS = ['rightBg','rightBgImage','rightWidth','rightTransparency','rightBlur'] as const
-
-function pickPresetFields(preset: Partial<ThemeSettings>, fields: readonly string[]): Partial<ThemeSettings> {
-  const out: any = {}
-  for (const f of fields) if (f in preset) out[f] = (preset as any)[f]
-  return out
-}
+// ── helpers (ZONE_FIELDS / pickZoneFields live in presets.ts) ──
 
 // ── nav ──
 
@@ -197,29 +115,37 @@ export default function Settings({ onClose }: { onClose?: () => void }) {
   const t = useStore() as ThemeSettings
   const u = useStore(s => s.updateTheme)
   const reset = useStore(s => s.resetTheme)
+  const setGlobalPreset = useStore(s => s.setGlobalPreset)
+  const setZoneField = useStore(s => s.setZoneField)
+  const applyZonePreset = useStore(s => s.applyZonePreset)
+  const activePreset = useStore(s => s.activePreset)
+  const dirty = useStore(s => s.dirty)
   const [search, setSearch] = useState('')
   const [activeTab, setActiveTab] = useState('global')
-  const [globalPreset, setGlobalPreset] = useState(useStore.getState().activePreset?.global || '')
 
+  // 应用全局预设
   const applyGlobalPreset = (name: string) => {
     const preset = GLOBAL_PRESETS.find(p => p.name === name)
     if (!preset) return
-    u(preset.theme as any)
-    setGlobalPreset(name)
-    useStore.setState(s => ({ activePreset: { ...s.activePreset, global: name } }))
+    setGlobalPreset(name, preset.theme as any)
   }
 
+  // 改单个字段 — 标记当前 tab 对应的 zone 为 dirty
+  const tabZoneMap: Record<string, string> = {
+    global: 'global', sidebar: 'sidebar', terminal: 'chat',
+    cc: 'cc', right: 'right',
+  }
   const onSettingChange = (partial: Partial<ThemeSettings>) => {
-    u(partial)
-    if (globalPreset && GLOBAL_PRESETS.some(p => p.name === globalPreset)) {
-      // switched away from built-in preset → custom
-      const existing = Object.keys(useStore.getState().presets || {})
-      let n = 1
-      while (existing.includes(`custom-${n}`)) n++
-      const cn = `custom-${n}`
-      setGlobalPreset(cn)
-      useStore.setState(s => ({ activePreset: { ...s.activePreset, global: cn } }))
-    }
+    const zone = tabZoneMap[activeTab] || 'global'
+    setZoneField(zone, partial)
+  }
+
+  // 局部预设（zone 级别）
+  const applyLocalPreset = (zone: string, presetName: string) => {
+    const preset = GLOBAL_PRESETS.find(p => p.name === presetName)
+    if (!preset) return
+    const sub = pickZoneFields(preset.theme as any, zone)
+    applyZonePreset(zone, presetName, sub)
   }
 
   const s = search.trim().toLowerCase()
@@ -262,15 +188,17 @@ export default function Settings({ onClose }: { onClose?: () => void }) {
               <Group title="全局预设">
                 <div className="set-preset-row">
                   {GLOBAL_PRESETS.map(p => (
-                    <button key={p.name} className={`set-preset-chip ${globalPreset === p.name ? 'active' : ''}`}
+                    <button key={p.name} className={`set-preset-chip ${activePreset.global === p.name ? 'active' : ''}`}
                       onClick={() => applyGlobalPreset(p.name)}>{p.label}</button>
                   ))}
-                  {globalPreset && !GLOBAL_PRESETS.some(p => p.name === globalPreset) && (
-                    <button className="set-preset-chip active">{globalPreset}</button>
+                  {activePreset.global && !GLOBAL_PRESETS.some(p => p.name === activePreset.global) && (
+                    <button className="set-preset-chip active">{activePreset.global}</button>
                   )}
                 </div>
                 <div style={{fontSize:11,color:'var(--text-dim)',marginTop:4}}>
-                  选择预设后修改任意外观参数，自动切换为自定义
+                  {dirty.global
+                    ? '当前为自定义 — 切换预设可恢复'
+                    : '选择预设后修改任意外观参数，自动切换为自定义'}
                 </div>
               </Group>
 
@@ -294,9 +222,10 @@ export default function Settings({ onClose }: { onClose?: () => void }) {
               <Group title="局部预设">
                 <div className="set-preset-row">
                   {GLOBAL_PRESETS.map(p => (
-                    <button key={p.name} className={`set-preset-chip`}
-                      onClick={() => u(pickPresetFields(p.theme, SIDEBAR_FIELDS) as any)}>{p.label}</button>
+                    <button key={p.name} className={`set-preset-chip ${activePreset.sidebar === p.name && !dirty.sidebar ? 'active' : ''}`}
+                      onClick={() => applyLocalPreset('sidebar', p.name)}>{p.label}</button>
                   ))}
+                  {dirty.sidebar && <span className="set-preset-chip active">自定义</span>}
                 </div>
               </Group>
               <Group title="背景">
@@ -326,9 +255,10 @@ export default function Settings({ onClose }: { onClose?: () => void }) {
               <Group title="局部预设">
                 <div className="set-preset-row">
                   {GLOBAL_PRESETS.map(p => (
-                    <button key={p.name} className="set-preset-chip"
-                      onClick={() => u(pickPresetFields(p.theme, TERMINAL_FIELDS) as any)}>{p.label}</button>
+                    <button key={p.name} className={`set-preset-chip ${activePreset.chat === p.name && !dirty.chat ? 'active' : ''}`}
+                      onClick={() => applyLocalPreset('chat', p.name)}>{p.label}</button>
                   ))}
+                  {dirty.chat && <span className="set-preset-chip active">自定义</span>}
                 </div>
               </Group>
 
@@ -415,9 +345,10 @@ export default function Settings({ onClose }: { onClose?: () => void }) {
               <Group title="局部预设">
                 <div className="set-preset-row">
                   {GLOBAL_PRESETS.map(p => (
-                    <button key={p.name} className="set-preset-chip"
-                      onClick={() => u(pickPresetFields(p.theme, CC_FIELDS) as any)}>{p.label}</button>
+                    <button key={p.name} className={`set-preset-chip ${activePreset.cc === p.name && !dirty.cc ? 'active' : ''}`}
+                      onClick={() => applyLocalPreset('cc', p.name)}>{p.label}</button>
                   ))}
+                  {dirty.cc && <span className="set-preset-chip active">自定义</span>}
                 </div>
               </Group>
 
@@ -455,9 +386,10 @@ export default function Settings({ onClose }: { onClose?: () => void }) {
               <Group title="局部预设">
                 <div className="set-preset-row">
                   {GLOBAL_PRESETS.map(p => (
-                    <button key={p.name} className="set-preset-chip"
-                      onClick={() => u(pickPresetFields(p.theme, RIGHT_FIELDS) as any)}>{p.label}</button>
+                    <button key={p.name} className={`set-preset-chip ${activePreset.right === p.name && !dirty.right ? 'active' : ''}`}
+                      onClick={() => applyLocalPreset('right', p.name)}>{p.label}</button>
                   ))}
+                  {dirty.right && <span className="set-preset-chip active">自定义</span>}
                 </div>
               </Group>
               <Group title="外观">
@@ -510,25 +442,11 @@ export default function Settings({ onClose }: { onClose?: () => void }) {
           </Tabs.Root>
 
           <div className="set-presets">
-            <button className="set-preset-btn" onClick={() => u({...defaults})}>Default</button>
+            <button className="set-preset-btn" onClick={reset}>Reset</button>
             <span style={{color:'var(--text-dim)',fontSize:12,alignSelf:'center'}}>Export / Import coming soon</span>
           </div>
         </div>
       </div>
     </div>
   )
-}
-
-const defaults: Partial<ThemeSettings> = {
-  transparency:0.85, bgBlur:16, globalFont:'system', globalFontSize:18,
-  sidebarBg:'rgba(0,0,0,0.02)', sidebarWidth:250, sidebarTextColor:'rgba(0,0,0,0.85)', sidebarNameSize:14, sidebarGroupSize:12,
-  chatBg:'transparent', chatFont:'mono', chatFontSize:15, chatLineHeight:1.8,
-  chatTextColor:'rgba(0,0,0,0.85)', chatCodeColor:'#b47814', chatCodeBg:'rgba(0,0,0,0.03)',
-  toolOk:'#1e9646', toolRun:'#3b82f6', toolErr:'#be2828', toolNameColor:'var(--text)', toolSummaryColor:'rgba(0,0,0,0.4)',
-  userTagBg:'rgba(0,0,0,0.03)', userTagText:'rgba(0,0,0,0.65)',
-  inputBg:'rgba(0,0,0,0.03)', inputTextColor:'rgba(0,0,0,0.85)', inputPlaceholder:'rgba(0,0,0,0.28)',
-  inputSendBg:'rgba(0,0,0,0.10)', inputFocusBorder:'rgba(0,0,0,0.22)', inputFontSize:17, inputMinHeight:56,
-  statusBg:'rgba(0,0,0,0.02)', ekgWidth:240, ekgFontSize:16, ekgGreen:'#1e9646', ekgYellow:'#b47814', ekgRed:'#be2828',
-  pillBg:'rgba(0,0,0,0.03)', pillText:'rgba(0,0,0,0.4)', prismOnColor:'#1e9646',
-  rightBg:'rgba(0,0,0,0.02)', rightWidth:260,
 }

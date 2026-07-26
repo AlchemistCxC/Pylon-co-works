@@ -11,6 +11,8 @@ export interface ThemeSettings {
   sidebarBg: string; sidebarBgImage: string; sidebarWidth: number; sidebarTextColor: string; sidebarNameSize: number; sidebarGroupSize: number
   chatBg: string; chatBgImage: string; chatFont: string; chatFontSize: number; chatLineHeight: number; chatTextColor: string; chatCodeColor: string; chatCodeBg: string
   toolOk: string; toolRun: string; toolErr: string; toolNameColor: string; toolSummaryColor: string; userTagBg: string; userTagText: string
+  toolIndicatorGlow: number; toolIndicatorGlowColor: string
+  toolConnectorMode: string; toolConnectorColor: string
   inputBg: string; inputBgImage: string; inputTextColor: string; inputPlaceholder: string; inputSendBg: string; inputFocusBorder: string; inputFontSize: number; inputMinHeight: number
   inputMode: string; cliLineWidth: number; cliLineColor: string; cliTextColor: string
   statusBg: string; statusBgImage: string; ekgWidth: number; ekgFontSize: number; ekgGreen: string; ekgYellow: string; ekgRed: string; pillBg: string; pillText: string; prismOnColor: string
@@ -26,11 +28,12 @@ export interface ThemeSettings {
  ccBgImage: string
   ccStyle: string
   ccVariant: string
+  modelVariant: string; modeVariant: string; sendVariant: string; attachVariant: string
   ccLayout: string[]; ccHidden: string[]; ccSizes: Record<string, number>
   ccPositions: Record<string, {x: number, y: number, w: number, h: number}>
   ccEditMode: boolean
-  presets: Record<string, { name: string; colors: Record<string,string>; fonts: Record<string,string|number> }[]>
   activePreset: Record<string, string>
+  dirty: Record<string, boolean>
 }
 
 type ThemeState = ThemeSettings & {
@@ -54,6 +57,9 @@ type ThemeState = ThemeSettings & {
   liveCommands: { name: string; input_hint?: string; description?: string }[]
   setLiveStats: (stats: Partial<{liveTokensUsed:number,liveTokensMax:number,liveCacheHit:number,liveMode:string,livePrismOn:boolean,liveCommands:any[]}>) => void
   resetTheme: () => void
+  applyZonePreset: (zone: string, presetName: string, presetTheme: Partial<ThemeSettings>) => void
+  setZoneField: (zone: string, partial: Partial<ThemeSettings>) => void
+  setGlobalPreset: (name: string, theme: Partial<ThemeSettings>) => void
   agents: { id: string; name: string }[]
   activeAgent: string
   setAgents: (a: { id: string; name: string }[]) => void
@@ -65,6 +71,8 @@ const DEFAULTS: ThemeSettings = {
   sidebarBg: 'rgba(0,0,0,0.02)', sidebarBgImage: '', sidebarWidth: 250, sidebarTextColor: 'rgba(0,0,0,0.85)', sidebarNameSize: 14, sidebarGroupSize: 12,
   chatBg: '', chatBgImage: '', chatFont: 'mono', chatFontSize: 15, chatLineHeight: 1.4, chatTextColor: 'rgba(0,0,0,0.85)', chatCodeColor: '#b47814', chatCodeBg: 'rgba(0,0,0,0.03)',
   toolOk: '#4EBA65', toolRun: '#93A5FF', toolErr: '#FF6B80', toolNameColor: 'rgba(0,0,0,0.85)', toolSummaryColor: 'rgba(0,0,0,0.40)', userTagBg: 'rgba(168,85,247,0.08)', userTagText: '#a855f7',
+  toolIndicatorGlow: 0, toolIndicatorGlowColor: '',
+  toolConnectorMode: 'none', toolConnectorColor: 'rgba(0,0,0,0.12)',
   inputBg: 'rgba(0,0,0,0.02)', inputBgImage: '', inputTextColor: 'rgba(0,0,0,0.85)', inputPlaceholder: 'rgba(0,0,0,0.28)', inputSendBg: 'rgba(0,0,0,0.10)', inputFocusBorder: 'rgba(0,0,0,0.22)', inputFontSize: 17, inputMinHeight: 56,
   inputMode: 'cli', cliLineWidth: 2, cliLineColor: '', cliTextColor: '',
   statusBg: 'transparent', statusBgImage: '', ekgWidth: 150, ekgFontSize: 16, ekgGreen: '#4EBA65', ekgYellow: '#FFC107', ekgRed: '#FF6B80', pillBg: '#373737', pillText: '#999999', prismOnColor: '#4EBA65',
@@ -79,10 +87,12 @@ const DEFAULTS: ThemeSettings = {
   ccHeight: 120, ccBgHeight: 120, ccBg: 'transparent', ccBgImage: '',
   ccStyle: 'wave',
   ccVariant: 'terminal',
+  modelVariant: 'dropdown', modeVariant: 'pill', sendVariant: 'icon', attachVariant: 'icon',
   ccLayout: ['input', 'context', 'model', 'mode'], ccHidden: [], ccSizes: {},
   ccPositions: { input:{x:3,y:3,w:94,h:55}, context:{x:3,y:65,w:58,h:14}, model:{x:63,y:65,w:24,h:18}, mode:{x:88,y:65,w:10,h:18}, send:{x:86,y:24,w:6,h:12}, attach:{x:93,y:24,w:5,h:12} },
   ccEditMode: false,
-  presets: {}, activePreset: {},
+  activePreset: { global: '', sidebar: '', chat: '', cc: '', right: '' },
+  dirty: { global: false, sidebar: false, chat: false, cc: false, right: false },
 }
 
 export const useStore = create<ThemeState>()(persist(
@@ -147,14 +157,55 @@ export const useStore = create<ThemeState>()(persist(
   setLiveStats: (stats) => set(stats),
   liveCommands: [],
   resetTheme: () => set(DEFAULTS),
-  presets: {},
-  activePreset: {},
+
+  /**
+   * 应用某个 zone 的预设（来自全局预设的子集）
+   * 1. 写入该 zone 的所有字段
+   * 2. 记录 activePreset[zone] = presetName
+   * 3. 清除 dirty[zone]
+   * 4. 不影响其他 zone
+   */
+  applyZonePreset: (zone, presetName, presetTheme) => set(state => ({
+    ...presetTheme,
+    activePreset: { ...state.activePreset, [zone]: presetName },
+    dirty: { ...state.dirty, [zone]: false },
+  })),
+
+  /**
+   * 用户改动了某个 zone 内的单个字段
+   * 1. 写入字段
+   * 2. 标记 dirty[zone] = true
+   * 3. 如果该 zone 当前指向的是内建预设（activePreset[zone] 非空且匹配预设名），
+   *    整局变 custom：activePreset[zone] = 'custom'，dirty[global] = true（但不影响其他 zone 的 preset）
+   */
+  setZoneField: (zone, partial) => set(state => {
+    const currentName = state.activePreset[zone] || ''
+    const newName = currentName === '' || currentName === 'custom' ? 'custom' : 'custom'
+    return {
+      ...partial,
+      activePreset: { ...state.activePreset, [zone]: newName },
+      dirty: { ...state.dirty, [zone]: true },
+    }
+  }),
+
+  /**
+   * 切换全局预设
+   * 1. 把全局预设的全部字段写入 store
+   * 2. 把每个 zone 的 activePreset 设为同名的 zone-preset（即该 zone 的子集应用）
+   * 3. 所有 zone 的 dirty 清零
+   */
+  setGlobalPreset: (name, theme) => set(_ => ({
+    ...theme,
+    activePreset: { global: name, sidebar: name, chat: name, cc: name, right: name },
+    dirty: { global: false, sidebar: false, chat: false, cc: false, right: false },
+  })),
+
   agents: [],
   activeAgent: 'peri',
   setAgents: (a) => set({ agents: a }),
   setActiveAgent: (id) => set({ activeAgent: id }),
 }),
 { name: 'pylon-theme', partialize: (state) => {
-  const { profiles, sessions, users, setActiveProfile, addProfile, addSession, removeSession, setSessionPeriId, restoreSessions, getUser, updateTheme, setLiveStats, liveCommands, presets, activePreset, agents, setAgents, setActiveAgent, ...theme } = state as any
+  const { profiles, sessions, users, setActiveProfile, addProfile, addSession, removeSession, setSessionPeriId, restoreSessions, getUser, updateTheme, setLiveStats, liveCommands, agents, setAgents, setActiveAgent, applyZonePreset, setZoneField, setGlobalPreset, presets, dirty, ...theme } = state as any
   return theme
 }}))
