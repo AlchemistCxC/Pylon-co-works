@@ -48,6 +48,22 @@ export default forwardRef<{ send: () => void; attachFile: () => void; cancel: ()
     }
   }, [value])
 
+  // 全局取消：焦点不在输入框（如阅读长回复）时，Esc / Ctrl+C 也能中断生成
+  useEffect(() => {
+    const onGlobalKey = (e: globalThis.KeyboardEvent) => {
+      if (!sessionId) return
+      if (useStore.getState().liveGenerating !== sessionId) return
+      const isEsc = e.key === 'Escape'
+      const isCtrlC = e.ctrlKey && (e.key === 'c' || e.key === 'C') && !window.getSelection()?.toString()
+      if (isEsc || isCtrlC) {
+        e.preventDefault()
+        invoke('cancel_prompt', { source: sessionId }).catch(() => {})
+      }
+    }
+    window.addEventListener('keydown', onGlobalKey)
+    return () => window.removeEventListener('keydown', onGlobalKey)
+  }, [sessionId])
+
   const execCommand = async (cmd: string, rest: string) => {
     switch (cmd) {
       case '/model': {
@@ -120,6 +136,11 @@ export default forwardRef<{ send: () => void; attachFile: () => void; cancel: ()
 
   const onKey = (e: KeyboardEvent) => {
     if (e.key === 'Escape' && generating) { e.preventDefault(); cancel(); return }
+    // Ctrl+C 取消生成 — 但若有选中文本则让浏览器复制优先，不拦截
+    if (e.ctrlKey && (e.key === 'c' || e.key === 'C') && generating) {
+      const hasSelection = !!window.getSelection()?.toString()
+      if (!hasSelection) { e.preventDefault(); cancel(); return }
+    }
     if (e.ctrlKey && e.key === 'ArrowUp') { e.preventDefault(); if (lastMsg.current) setValue(lastMsg.current) }
     if (isCmd && filtered.length > 0) {
       if (e.key === 'Tab') { e.preventDefault(); setCmdIdx(i => (i + 1) % filtered.length); return }
