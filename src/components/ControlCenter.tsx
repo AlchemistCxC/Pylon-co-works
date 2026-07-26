@@ -119,7 +119,7 @@ function EditableWidget({ id, pos, editMode, hidden: isHidden, children, bodyRef
       const cpw = cp[id] || pos
       const nx = Math.max(0, Math.min(100 - cpw.w, d.sx + dx))
       const ny = Math.max(0, Math.min(100 - cpw.h, d.sy + dy))
-      useStore.setState({ ccPositions: { ...cp, [id]: { ...cpw, x: Math.round(nx), y: Math.round(ny) } } } as any)
+      useStore.setState({ ccPositions: { ...cp, [id]: { ...cpw, x: nx, y: ny } } } as any)
     }
     const onUp = () => { dragStart.current = null; document.removeEventListener('mousemove', onMove); document.removeEventListener('mouseup', onUp) }
     document.addEventListener('mousemove', onMove)
@@ -138,9 +138,9 @@ function EditableWidget({ id, pos, editMode, hidden: isHidden, children, bodyRef
       const dh = ((ev.clientY - d.y) / rect.height) * 100
       const cp = useStore.getState().ccPositions || {}
       const cpw = cp[id] || pos
-      const nw = Math.max(5, Math.min(100 - cpw.x, d.sw + dw))
-      const nh = Math.max(5, Math.min(100 - cpw.y, d.sh + dh))
-      useStore.setState({ ccPositions: { ...cp, [id]: { ...cpw, w: Math.round(nw), h: Math.round(nh) } } } as any)
+      const nw = Math.max(3, Math.min(100 - cpw.x, d.sw + dw))
+      const nh = Math.max(3, Math.min(100 - cpw.y, d.sh + dh))
+      useStore.setState({ ccPositions: { ...cp, [id]: { ...cpw, w: nw, h: nh } } } as any)
     }
     const onUp = () => { resizeStart.current = null; document.removeEventListener('mousemove', onMove); document.removeEventListener('mouseup', onUp) }
     document.addEventListener('mousemove', onMove)
