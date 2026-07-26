@@ -3,44 +3,12 @@ import * as Tabs from '@radix-ui/react-tabs'
 import { invoke } from '@tauri-apps/api/core'
 import { useStore } from '../store'
 import type { ThemeSettings } from '../store'
-import { GLOBAL_PRESETS, ZONE_FIELDS, pickZoneFields } from '../presets'
+import { GLOBAL_PRESETS, pickZoneFields } from '../presets'
+import ColorPopover from './ColorPopover'
+import SettingsPreview from './SettingsPreview'
 import './Settings.css'
 
 // ── helpers ──
-
-const COLOR_CHIPS = ['#a855f7','#3b82f6','#34d399','#f59e0b','#ef4444','#ec4899','#6366f1']
-
-function Swatch({ value, onChange }: { value:string; onChange:(v:string)=>void }) {
-  const ref = useRef<HTMLInputElement>(null)
-  return <>
-    <div className="set-swatch" style={{background:value}} onClick={() => ref.current?.click()}/>
-    <input ref={ref} type="color" value={value} onChange={e => onChange(e.target.value)} className="set-swatch-input"/>
-  </>
-}
-
-function ColorPopover({ value, onChange, chips }: { value:string; onChange:(v:string)=>void; chips?:boolean }) {
-  const [open, setOpen] = useState(false)
-  const pickerRef = useRef<HTMLInputElement>(null)
-  if (chips === false) return <Swatch value={value} onChange={onChange} />
-  return (
-    <div className="set-color-wrap">
-      <div className="set-swatch" style={{background:value}} onClick={() => setOpen(!open)}/>
-      {open && <>
-        <div className="set-color-popover">
-          <div className="set-color-row">
-            {COLOR_CHIPS.map(c => (
-              <div key={c} className={`set-color-chip ${value === c ? 'active' : ''}`}
-                style={{background:c}} onClick={() => { onChange(c); setOpen(false) }} />
-            ))}
-          </div>
-          <button className="set-color-custom" onClick={() => pickerRef.current?.click()}>自定义</button>
-        </div>
-        <div className="set-color-backdrop" onClick={() => setOpen(false)}/>
-      </>}
-      <input ref={pickerRef} type="color" value={value} onChange={e => { onChange(e.target.value); setOpen(false) }} className="set-swatch-input"/>
-    </div>
-  )
-}
 
 function BgImageRow({ label, value, onChange }: { label:string; value:string; onChange:(v:string)=>void }) {
   const openFile = async () => {
@@ -53,7 +21,7 @@ function BgImageRow({ label, value, onChange }: { label:string; value:string; on
   return (
     <Row label={label}>
       <div style={{display:'flex',alignItems:'center',gap:6,flex:1}}>
-        <input type="text" value={value} onChange={e => onChange(e.target.value)} className="set-input" style={{width:'220px'}} placeholder="路径或 URL" />
+        <input type="text" value={value} onChange={e => onChange(e.target.value)} className="set-input" style={{flex:1}} placeholder="路径或 URL" />
         <button className="ps-btn sm" onClick={openFile}>选择</button>
       </div>
       {value && <div className="set-bg-preview" style={{backgroundImage:`url(${value})`}}
@@ -68,7 +36,7 @@ function Row({ label, children }: { label:string; children:React.ReactNode }) {
 
 function Slider({ value, onChange, min, max, step }: { value:number; onChange:(v:number)=>void; min:number; max:number; step?:number }) {
   return <input type="range" min={min} max={max} step={step||0.05} value={value}
-    onChange={e => onChange(+e.target.value)} className="set-range" style={{width:'120px'}}/>
+    onChange={e => onChange(+e.target.value)} className="set-range"/>
 }
 
 function Num({ value, onChange, min, max }: { value:number; onChange:(v:number)=>void; min?:number; max?:number }) {
@@ -83,7 +51,7 @@ function Sel({ value, onChange, options }: { value:string; onChange:(v:string)=>
 }
 
 function Txt({ value, onChange }: { value:string; onChange:(v:string)=>void }) {
-  return <input type="text" value={value} onChange={e => onChange(e.target.value)} className="set-input" style={{width:'140px'}}/>
+  return <input type="text" value={value} onChange={e => onChange(e.target.value)} className="set-input"/>
 }
 
 function Group({ title, children, defaultOpen }: { title:string; children:React.ReactNode; defaultOpen?:boolean }) {
@@ -99,7 +67,22 @@ function Group({ title, children, defaultOpen }: { title:string; children:React.
   )
 }
 
-// ── helpers (ZONE_FIELDS / pickZoneFields live in presets.ts) ──
+// 局部预设 chip 行 — 复用于每个 zone
+function ZonePresetRow({ zone, activeName, isDirty, onApply }: {
+  zone: string; activeName: string; isDirty: boolean; onApply: (zone: string, name: string) => void
+}) {
+  return (
+    <Group title="局部预设">
+      <div className="set-preset-row">
+        {GLOBAL_PRESETS.map(p => (
+          <button key={p.name} className={`set-preset-chip ${activeName === p.name && !isDirty ? 'active' : ''}`}
+            onClick={() => onApply(zone, p.name)}>{p.label}</button>
+        ))}
+        {isDirty && <span className="set-preset-chip active">自定义</span>}
+      </div>
+    </Group>
+  )
+}
 
 // ── nav ──
 
@@ -107,6 +90,10 @@ const TABS = ['global', 'sidebar', 'terminal', 'cc', 'right', 'agent', 'session'
 const TAB_LABELS: Record<string, string> = {
   global: '全局', sidebar: '左栏', terminal: '终端', cc: '中控区', right: '右栏',
   agent: 'Agent', session: '会话',
+}
+// tab → 预览 zone（agent/session 无预览）
+const TAB_PREVIEW: Record<string, string> = {
+  global: 'global', sidebar: 'sidebar', terminal: 'chat', cc: 'cc', right: 'right',
 }
 
 // ── main ──
@@ -120,6 +107,9 @@ export default function Settings({ onClose }: { onClose?: () => void }) {
   const applyZonePreset = useStore(s => s.applyZonePreset)
   const activePreset = useStore(s => s.activePreset)
   const dirty = useStore(s => s.dirty)
+  const agents = useStore(s => s.agents)
+  const activeAgent = useStore(s => s.activeAgent)
+  const setActiveAgent = useStore(s => s.setActiveAgent)
   const [search, setSearch] = useState('')
   const [activeTab, setActiveTab] = useState('global')
 
@@ -149,6 +139,7 @@ export default function Settings({ onClose }: { onClose?: () => void }) {
   }
 
   const s = search.trim().toLowerCase()
+  const previewZone = TAB_PREVIEW[activeTab]
 
   return (
     <div className="settings">
@@ -195,7 +186,7 @@ export default function Settings({ onClose }: { onClose?: () => void }) {
                     <button className="set-preset-chip active">{activePreset.global}</button>
                   )}
                 </div>
-                <div style={{fontSize:11,color:'var(--text-dim)',marginTop:4}}>
+                <div className="set-hint">
                   {dirty.global
                     ? '当前为自定义 — 切换预设可恢复'
                     : '选择预设后修改任意外观参数，自动切换为自定义'}
@@ -219,15 +210,7 @@ export default function Settings({ onClose }: { onClose?: () => void }) {
             {/* ═══ 左栏 ═══ */}
             <Tabs.Content value="sidebar">
               <h3>左侧栏</h3>
-              <Group title="局部预设">
-                <div className="set-preset-row">
-                  {GLOBAL_PRESETS.map(p => (
-                    <button key={p.name} className={`set-preset-chip ${activePreset.sidebar === p.name && !dirty.sidebar ? 'active' : ''}`}
-                      onClick={() => applyLocalPreset('sidebar', p.name)}>{p.label}</button>
-                  ))}
-                  {dirty.sidebar && <span className="set-preset-chip active">自定义</span>}
-                </div>
-              </Group>
+              <ZonePresetRow zone="sidebar" activeName={activePreset.sidebar} isDirty={dirty.sidebar} onApply={applyLocalPreset}/>
               <Group title="背景">
                 <Row label="背景色">
                   <ColorPopover value={t.sidebarBg} onChange={v=>onSettingChange({sidebarBg:v})}/>
@@ -252,17 +235,8 @@ export default function Settings({ onClose }: { onClose?: () => void }) {
 
             {/* ═══ 终端 ═══ */}
             <Tabs.Content value="terminal">
-              <Group title="局部预设">
-                <div className="set-preset-row">
-                  {GLOBAL_PRESETS.map(p => (
-                    <button key={p.name} className={`set-preset-chip ${activePreset.chat === p.name && !dirty.chat ? 'active' : ''}`}
-                      onClick={() => applyLocalPreset('chat', p.name)}>{p.label}</button>
-                  ))}
-                  {dirty.chat && <span className="set-preset-chip active">自定义</span>}
-                </div>
-              </Group>
-
               <h3>聊天区</h3>
+              <ZonePresetRow zone="chat" activeName={activePreset.chat} isDirty={dirty.chat} onApply={applyLocalPreset}/>
               <Group title="背景">
                 <Row label="背景色">
                   <ColorPopover value={t.chatBg} onChange={v=>onSettingChange({chatBg:v})}/>
@@ -314,8 +288,14 @@ export default function Settings({ onClose }: { onClose?: () => void }) {
                   <ColorPopover value={t.userTagText} onChange={v=>onSettingChange({userTagText:v})} chips={false}/>
                 </div>
               </Group>
-              <Group title="指示器 & Spinner">
-                <Row label="形状"><Sel value={t.toolIndicator} onChange={v=>onSettingChange({toolIndicator:v})} options={['●','◆','■','▲','▶']}/></Row>
+              <Group title="指示器 & 连接线">
+                <Row label="形状"><Sel value={t.toolIndicator} onChange={v=>onSettingChange({toolIndicator:v})} options={['●','◆','■','▲','▶','○','◉']}/></Row>
+                <Row label="辉光"><Slider value={t.toolIndicatorGlow} onChange={v=>onSettingChange({toolIndicatorGlow:v})} min={0} max={20} step={1}/><span className="set-val">{t.toolIndicatorGlow}px</span></Row>
+                <Row label="辉光色"><ColorPopover value={t.toolIndicatorGlowColor} onChange={v=>onSettingChange({toolIndicatorGlowColor:v})}/></Row>
+                <Row label="连接线"><Sel value={t.toolConnectorMode} onChange={v=>onSettingChange({toolConnectorMode:v})} options={['none','fixed','follow']}/></Row>
+                {t.toolConnectorMode==='fixed' && <Row label="线色"><ColorPopover value={t.toolConnectorColor} onChange={v=>onSettingChange({toolConnectorColor:v})}/></Row>}
+              </Group>
+              <Group title="Spinner">
                 <Row label="字符集"><Sel value={t.sparkles} onChange={v=>onSettingChange({sparkles:v})} options={[
                   '✳✴✵✶✷✸✹✺✻✼❃❊','◴◷◶◵','·○◎●◉◎○','←↖↑↗→↘↓↙','▖▗▘▝▗▖▝▘','▁▂▃▄▅▆▇█▇▆▅▄▃','┌┐┘└','⠁⠂⠄⡀⢀⠠⠐⠈'
                 ]}/></Row>
@@ -342,18 +322,10 @@ export default function Settings({ onClose }: { onClose?: () => void }) {
 
             {/* ═══ 中控区 ═══ */}
             <Tabs.Content value="cc">
-              <Group title="局部预设">
-                <div className="set-preset-row">
-                  {GLOBAL_PRESETS.map(p => (
-                    <button key={p.name} className={`set-preset-chip ${activePreset.cc === p.name && !dirty.cc ? 'active' : ''}`}
-                      onClick={() => applyLocalPreset('cc', p.name)}>{p.label}</button>
-                  ))}
-                  {dirty.cc && <span className="set-preset-chip active">自定义</span>}
-                </div>
-              </Group>
-
-              <Group title="1:1 自定义">
-                <Row label="外观风格">
+              <h3>中控区</h3>
+              <ZonePresetRow zone="cc" activeName={activePreset.cc} isDirty={dirty.cc} onApply={applyLocalPreset}/>
+              <Group title="外观风格">
+                <Row label="整体风格">
                   <div className="set-preset-row">
                     {(['terminal','glass','pill'] as const).map(v => (
                       <button key={v} className={`set-preset-chip ${t.ccVariant===v?'active':''}`}
@@ -364,34 +336,32 @@ export default function Settings({ onClose }: { onClose?: () => void }) {
                 <Row label="高度"><Num value={t.ccHeight} onChange={v=>onSettingChange({ccHeight:v})} min={80} max={400}/><span className="set-val">px</span></Row>
                 <Row label="背景色"><ColorPopover value={t.ccBg} onChange={v=>onSettingChange({ccBg:v})}/></Row>
                 <BgImageRow label="背景图" value={t.ccBgImage||''} onChange={v=>onSettingChange({ccBgImage:v})}/>
-                <div style={{marginTop:8}}>
-                  <button className="ps-btn primary"
-                    onClick={() => {
-                      const cur = useStore.getState().ccEditMode
-                      u({ ccEditMode: !cur } as any)
-                      if (typeof onClose === 'function') onClose?.()
-                    }}>
-                    {t.ccEditMode ? '退出自定义编辑器' : '进入自定义编辑器'}
-                  </button>
-                  <span style={{fontSize:12,color:'var(--text-dim)',marginLeft:8}}>
-                    位置/大小/类型/颜色/显隐 全部在编辑器中调整
-                  </span>
-                </div>
+              </Group>
+              <Group title="控件样式">
+                <Row label="输入栏"><Sel value={t.inputMode} onChange={v=>onSettingChange({inputMode:v})} options={['cli','default']}/></Row>
+                <Row label="上下文"><Sel value={t.ccStyle} onChange={v=>onSettingChange({ccStyle:v})} options={['wave','bar','numeric']}/></Row>
+                <Row label="模型"><Sel value={t.modelVariant} onChange={v=>onSettingChange({modelVariant:v})} options={['dropdown','minimal','badge']}/></Row>
+                <Row label="模式"><Sel value={t.modeVariant} onChange={v=>onSettingChange({modeVariant:v})} options={['pill','badge','minimal']}/></Row>
+                <Row label="发送"><Sel value={t.sendVariant} onChange={v=>onSettingChange({sendVariant:v})} options={['icon','square','minimal']}/></Row>
+                <Row label="附件"><Sel value={t.attachVariant} onChange={v=>onSettingChange({attachVariant:v})} options={['icon','square','minimal']}/></Row>
+              </Group>
+              <Group title="布局编辑">
+                <button className="ps-btn primary"
+                  onClick={() => {
+                    const cur = useStore.getState().ccEditMode
+                    u({ ccEditMode: !cur } as any)
+                    if (typeof onClose === 'function') onClose?.()
+                  }}>
+                  {t.ccEditMode ? '退出布局编辑器' : '进入布局编辑器'}
+                </button>
+                <div className="set-hint">位置 / 大小 / 显隐 在编辑器中拖拽调整</div>
               </Group>
             </Tabs.Content>
 
             {/* ═══ 右栏 ═══ */}
             <Tabs.Content value="right">
               <h3>右侧栏</h3>
-              <Group title="局部预设">
-                <div className="set-preset-row">
-                  {GLOBAL_PRESETS.map(p => (
-                    <button key={p.name} className={`set-preset-chip ${activePreset.right === p.name && !dirty.right ? 'active' : ''}`}
-                      onClick={() => applyLocalPreset('right', p.name)}>{p.label}</button>
-                  ))}
-                  {dirty.right && <span className="set-preset-chip active">自定义</span>}
-                </div>
-              </Group>
+              <ZonePresetRow zone="right" activeName={activePreset.right} isDirty={dirty.right} onApply={applyLocalPreset}/>
               <Group title="外观">
                 <Row label="背景色"><ColorPopover value={t.rightBg} onChange={v=>onSettingChange({rightBg:v})}/></Row>
                 <BgImageRow label="背景图" value={t.rightBgImage||''} onChange={v=>onSettingChange({rightBgImage:v})}/>
@@ -408,24 +378,24 @@ export default function Settings({ onClose }: { onClose?: () => void }) {
               <h3>Agent</h3>
               <Group title="当前 Agent">
                 <div style={{ padding:'8px 0', fontFamily:'var(--mono)', fontSize:14, color:'var(--accent)' }}>
-                  {useStore.getState().activeAgent || 'peri'}
+                  {activeAgent || 'peri'}
                 </div>
               </Group>
               <Group title="切换 Agent（需重启）">
-                {useStore.getState().agents.map((a: any) => (
+                {agents.map((a) => (
                   <Row key={a.id} label={a.name}>
-                    <button className={`ps-btn sm ${a.id === useStore.getState().activeAgent ? 'primary' : ''}`}
+                    <button className={`ps-btn sm ${a.id === activeAgent ? 'primary' : ''}`}
                       onClick={() => {
                         invoke('switch_agent', { name: a.id }).then(() => {
-                          useStore.getState().setActiveAgent(a.id)
+                          setActiveAgent(a.id)
                         }).catch(() => {})
                       }}>
-                      {a.id === useStore.getState().activeAgent ? '当前' : '切换'}
+                      {a.id === activeAgent ? '当前' : '切换'}
                     </button>
                   </Row>
                 ))}
               </Group>
-              <div style={{ marginTop:16, fontSize:12, color:'var(--text-dim)' }}>
+              <div className="set-hint" style={{marginTop:16}}>
                 切换 Agent 后需重启 Prism Desktop 生效。
               </div>
             </Tabs.Content>
@@ -440,12 +410,14 @@ export default function Settings({ onClose }: { onClose?: () => void }) {
               </Group>
             </Tabs.Content>
           </Tabs.Root>
-
-          <div className="set-presets">
-            <button className="set-preset-btn" onClick={reset}>Reset</button>
-            <span style={{color:'var(--text-dim)',fontSize:12,alignSelf:'center'}}>Export / Import coming soon</span>
-          </div>
         </div>
+
+        {previewZone && (
+          <div className="settings-preview-pane">
+            <div className="settings-preview-label">实时预览</div>
+            <SettingsPreview zone={previewZone} />
+          </div>
+        )}
       </div>
     </div>
   )
