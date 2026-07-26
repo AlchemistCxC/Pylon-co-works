@@ -68,10 +68,10 @@ export interface GlobalPreset {
 }
 
 export const GLOBAL_PRESETS: GlobalPreset[] = [
-  // ── Claude Code ──────────────────────────────────────────────
+  // ── Claude 风格 ──────────────────────────────────────────────
   {
     name: 'claude',
-    label: 'Claude Code',
+    label: 'Claude 风格',
     theme: {
       // global
       transparency: 0.97, bgBlur: 4, globalFont: 'mono', globalFontSize: 15,
@@ -101,11 +101,11 @@ export const GLOBAL_PRESETS: GlobalPreset[] = [
       barTrackColor: '#353117', barFillColor: '#4EBA65', barFillFollow: true, barHeight: 10,
       ccPositions: {
         input:   { x: 0,  y: 0,  w: 100, h: 52 },
-        ekg:     { x: 0,  y: 65, w: 30, h: 28 },
-        pct:     { x: 32, y: 69, w: 8,  h: 20 },
-        tokens:  { x: 41, y: 69, w: 16, h: 20 },
-        model:   { x: 58, y: 69, w: 18, h: 20 },
-        mode:    { x: 77, y: 69, w: 10, h: 20 },
+        ekg:     { x: 0,  y: 59, w: 30, h: 28 },
+        pct:     { x: 14, y: 55, w: 8,  h: 20 },
+        tokens:  { x: 9,  y: 55, w: 16, h: 20 },
+        model:   { x: 17, y: 55, w: 18, h: 20 },
+        mode:    { x: 29, y: 54, w: 10, h: 20 },
         send:    { x: 89, y: 69, w: 5,  h: 20 },
         attach:  { x: 95, y: 69, w: 4,  h: 20 },
       },
