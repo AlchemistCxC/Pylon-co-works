@@ -46,6 +46,6 @@
 .input-bar.cli-mode .input-textarea:focus { outline:none; border:none; box-shadow:none; }
 .input-bar.cli-mode .input-btn { display:none; }
 .input-bar.cli-mode .cli-prefix {
-  color:var(--cli-line-color,var(--accent,#6366f1)); font-family:var(--mono); font-size:var(--input-font-size,17px);
-  font-weight:600; margin-right:6px; line-height:1.4;
+  color:var(--accent,#6366f1); font-family:var(--mono); font-size:var(--input-font-size,17px);
+  font-weight:600; margin-right:4px; line-height:1.4;
 }
