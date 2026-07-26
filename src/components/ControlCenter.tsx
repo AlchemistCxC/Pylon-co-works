@@ -406,6 +406,19 @@ function PropertyPanel({ id, onClose, onExit }: { id: string; onClose: () => voi
             <div className="cc-prop-field"><label>波速基</label><input type="number" value={theme.ekgSpeedBase} onChange={v => up('ekgSpeedBase', +v.target.value)} className="set-num" min={0} max={3} step={0.1} /></div>
             <div className="cc-prop-field"><label>波速最</label><input type="number" value={theme.ekgSpeedMax} onChange={v => up('ekgSpeedMax', +v.target.value)} className="set-num" min={0} max={5} step={0.1} /></div>
           </>}
+          {theme.ccStyle === 'bar' && <>
+            <div className="cc-prop-field"><label>外壳背景</label><ColorPopover value={theme.barTrackColor || ''} onChange={v => up('barTrackColor', v)} /></div>
+            <div className="cc-prop-field"><label>高度</label><input type="number" value={theme.barHeight ?? 10} onChange={v => up('barHeight', +v.target.value)} className="set-num" min={4} max={40} /></div>
+            <div className="cc-prop-field"><label>柱子跟随用量</label>
+              <div className="set-preset-row">
+                <button className={`set-preset-chip ${theme.barFillFollow !== false ? 'active' : ''}`} onClick={() => up('barFillFollow', true)}>三段色</button>
+                <button className={`set-preset-chip ${theme.barFillFollow === false ? 'active' : ''}`} onClick={() => up('barFillFollow', false)}>固定色</button>
+              </div>
+            </div>
+            {theme.barFillFollow === false && (
+              <div className="cc-prop-field"><label>柱子颜色</label><ColorPopover value={theme.barFillColor || ''} onChange={v => up('barFillColor', v)} /></div>
+            )}
+          </>}
           <div className="cc-prop-field"><label>显示模式</label>
             <div className="set-preset-row">
               <button className={`set-preset-chip ${theme.tokenDisplay === 'ekg' ? 'active' : ''}`} onClick={() => up('tokenDisplay', 'ekg')}>ECG</button>

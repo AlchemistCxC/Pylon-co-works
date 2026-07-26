@@ -160,12 +160,26 @@ export default function StatusBar() {
   const showBar = ccStyle === 'bar'
   const showNumeric = ccStyle === 'numeric' || tokenDisplay === 'numeric'
 
+  // 柱状图专属：外壳背景 / 柱子色（跟随用量三段色 or 固定色）/ 高度
+  const barTrackColor = useStore(s => s.barTrackColor)
+  const barFillColor = useStore(s => s.barFillColor)
+  const barFillFollow = useStore(s => s.barFillFollow)
+  const barHeight = useStore(s => s.barHeight)
+  const barFill = (barFillFollow !== false) ? color : (barFillColor || color)
+
+  const ekgFontSize = useStore(s => s.ekgFontSize) || 16
+
   return (
-    <div className="status-bar">
+    <div className="status-bar" style={{
+      '--ekg-w': `${W}px`,
+      '--ekg-font': `${ekgFontSize}px`,
+    } as React.CSSProperties}>
       {showBar && (
         <div className="ekg-bar" style={{
           '--bar-fill': `${pct}%`,
-          '--bar-color': color,
+          '--bar-color': barFill,
+          '--bar-track': barTrackColor || 'rgba(0,0,0,0.18)',
+          '--bar-h': `${barHeight || 10}px`,
         } as React.CSSProperties}>
           <div className="ekg-bar-track" />
           <div className="ekg-bar-fill" />
