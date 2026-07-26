@@ -1,20 +1,111 @@
-.profile-editor-overlay { position:fixed; inset:0; z-index:100; display:flex; align-items:center; justify-content:center; background:rgba(0,0,0,0.3); backdrop-filter:blur(4px); }
-.profile-editor { background:rgba(255,255,255,0.97); border:1px solid var(--border); border-radius:10px; width:420px; max-height:80vh; overflow-y:auto; box-shadow:0 12px 40px rgba(0,0,0,0.15); }
-.pe-header { display:flex; justify-content:space-between; align-items:center; padding:14px 18px; border-bottom:1px solid var(--border); font-size:14px; font-weight:600; }
-.pe-header button { background:none; border:none; color:var(--text-dim); font-size:16px; cursor:pointer; }
-.pe-header button:hover { color:var(--text); }
-.pe-body { padding:18px; display:flex; flex-direction:column; gap:10px; }
-.pe-label { font-size:12px; color:var(--text-dim); text-transform:uppercase; letter-spacing:0.5px; }
-.pe-input { background:var(--bg-input); border:1px solid var(--border); border-radius:6px; padding:8px 12px; color:var(--text); font-size:14px; outline:none; }
-.pe-input:focus { border-color:var(--border-focus); }
-.pe-textarea { background:var(--bg-input); border:1px solid var(--border); border-radius:6px; padding:8px 12px; color:var(--text); font-size:14px; outline:none; resize:vertical; font-family:var(--font); line-height:1.5; }
-.pe-textarea:focus { border-color:var(--border-focus); }
-.pe-actions { display:flex; justify-content:flex-end; gap:8px; margin-top:8px; }
-.pe-cancel { padding:7px 18px; border:1px solid var(--border); border-radius:6px; background:var(--bg-panel); color:var(--text-dim); font-size:13px; cursor:pointer; }
-.pe-cancel:hover { background:var(--bg-hover); }
-.pe-save { padding:7px 18px; border:none; border-radius:6px; background:var(--accent); color:white; font-size:13px; cursor:pointer; }
-.pe-save:hover { opacity:0.85; }
-.pe-btn { padding:7px 18px; border:1px solid var(--border); border-radius:6px; background:var(--bg-panel); color:var(--text-dim); font-size:13px; cursor:pointer; }
-.pe-btn:hover { background:var(--bg-hover); }
-.pe-btn.primary { border:none; background:var(--accent); color:white; }
-.pe-btn.primary:hover { opacity:0.85; }
+.profile-editor-overlay {
+  position:fixed; inset:0; z-index:100;
+  display:flex; align-items:center; justify-content:center;
+  background:rgba(0,0,0,0.4); backdrop-filter:blur(6px);
+}
+
+.profile-editor {
+  width:460px; max-height:82vh; overflow-y:auto;
+  border-radius:12px;
+  box-shadow:0 16px 48px rgba(0,0,0,0.24);
+  display:flex; flex-direction:column;
+  /* 跟随 uiScheme — 浅色/深色各自写死，不依赖没定义的 CSS 变量 */
+  background:#ffffff; border:1px solid rgba(0,0,0,0.08); color:rgba(0,0,0,0.85);
+}
+.app[data-ui-scheme="dark"] .profile-editor {
+  background:#1a1a2e; border-color:rgba(255,255,255,0.08); color:rgba(255,255,255,0.88);
+}
+
+/* ── 头部 ── */
+.pe-header {
+  display:flex; align-items:center; justify-content:space-between;
+  padding:16px 22px;
+  border-bottom:1px solid rgba(0,0,0,0.06);
+}
+.app[data-ui-scheme="dark"] .pe-header { border-bottom-color:rgba(255,255,255,0.06); }
+
+.pe-header h3 { font-size:15px; font-weight:600; margin:0; }
+
+.pe-close {
+  background:none; border:none; font-size:18px; cursor:pointer; padding:0 4px;
+  color:rgba(0,0,0,0.35); transition:color 0.15s;
+}
+.pe-close:hover { color:rgba(0,0,0,0.75); }
+.app[data-ui-scheme="dark"] .pe-close { color:rgba(255,255,255,0.3); }
+.app[data-ui-scheme="dark"] .pe-close:hover { color:rgba(255,255,255,0.75); }
+
+/* ── 表单区 ── */
+.pe-body {
+  padding:20px 22px;
+  display:flex; flex-direction:column; gap:16px;
+}
+
+.pe-field { display:flex; flex-direction:column; gap:5px; }
+
+.pe-label {
+  font-size:12px; font-weight:500; text-transform:uppercase; letter-spacing:0.4px;
+  color:rgba(0,0,0,0.45);
+}
+.app[data-ui-scheme="dark"] .pe-label { color:rgba(255,255,255,0.4); }
+
+.pe-input, .pe-select {
+  padding:9px 13px; border-radius:7px; font-size:14px; outline:none; width:100%; box-sizing:border-box;
+  background:rgba(0,0,0,0.03); border:1px solid rgba(0,0,0,0.10);
+  color:rgba(0,0,0,0.85); font-family:var(--font); transition:border-color 0.15s;
+}
+.pe-input:focus, .pe-select:focus { border-color:rgba(59,130,246,0.5); }
+.pe-input::placeholder { color:rgba(0,0,0,0.25); }
+
+.app[data-ui-scheme="dark"] .pe-input,
+.app[data-ui-scheme="dark"] .pe-select {
+  background:rgba(255,255,255,0.05); border-color:rgba(255,255,255,0.10);
+  color:rgba(255,255,255,0.88);
+}
+.app[data-ui-scheme="dark"] .pe-input:focus,
+.app[data-ui-scheme="dark"] .pe-select:focus { border-color:rgba(96,165,250,0.5); }
+.app[data-ui-scheme="dark"] .pe-input::placeholder { color:rgba(255,255,255,0.2); }
+
+/* select option 暗色模式可读 */
+.pe-select option { background:#fff; color:#000; }
+.app[data-ui-scheme="dark"] .pe-select option { background:#1e1e2e; color:rgba(255,255,255,0.9); }
+
+.pe-textarea {
+  padding:9px 13px; border-radius:7px; font-size:14px; outline:none; width:100%; box-sizing:border-box;
+  resize:vertical; line-height:1.6; font-family:var(--font);
+  background:rgba(0,0,0,0.03); border:1px solid rgba(0,0,0,0.10);
+  color:rgba(0,0,0,0.85); transition:border-color 0.15s;
+}
+.pe-textarea:focus { border-color:rgba(59,130,246,0.5); }
+.pe-textarea::placeholder { color:rgba(0,0,0,0.25); }
+
+.app[data-ui-scheme="dark"] .pe-textarea {
+  background:rgba(255,255,255,0.05); border-color:rgba(255,255,255,0.10);
+  color:rgba(255,255,255,0.88);
+}
+.app[data-ui-scheme="dark"] .pe-textarea:focus { border-color:rgba(96,165,250,0.5); }
+.app[data-ui-scheme="dark"] .pe-textarea::placeholder { color:rgba(255,255,255,0.2); }
+
+/* ── 底部按钮 ── */
+.pe-footer {
+  display:flex; justify-content:flex-end; gap:8px;
+  padding:14px 22px;
+  border-top:1px solid rgba(0,0,0,0.06);
+}
+.app[data-ui-scheme="dark"] .pe-footer { border-top-color:rgba(255,255,255,0.06); }
+
+.pe-btn {
+  padding:8px 20px; border-radius:7px; font-size:13px; cursor:pointer; transition:all 0.15s;
+  border:1px solid rgba(0,0,0,0.10); background:rgba(0,0,0,0.03); color:rgba(0,0,0,0.65);
+}
+.pe-btn:hover { background:rgba(0,0,0,0.06); color:rgba(0,0,0,0.85); }
+
+.app[data-ui-scheme="dark"] .pe-btn {
+  background:rgba(255,255,255,0.04); border-color:rgba(255,255,255,0.08); color:rgba(255,255,255,0.6);
+}
+.app[data-ui-scheme="dark"] .pe-btn:hover { background:rgba(255,255,255,0.08); color:rgba(255,255,255,0.85); }
+
+.pe-btn.primary {
+  border:none; background:var(--accent,#3b82f6); color:#fff; font-weight:500;
+}
+.pe-btn.primary:hover { opacity:0.88; }
+.pe-btn.primary:disabled { opacity:0.35; cursor:not-allowed; }
