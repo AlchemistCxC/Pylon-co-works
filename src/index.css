@@ -20,10 +20,11 @@
   --danger: rgba(190,40,40,0.75);
   --radius: 8px;
   --font: -apple-system, 'Segoe UI', 'PingFang SC', 'Microsoft YaHei', sans-serif;
-  --mono: 'Cascadia Code', 'Sarasa Mono SC', 'Consolas', 'JetBrains Mono', monospace;
+  /* 终端等宽栈：西文等宽 + CJK 等宽 fallback（Sarasa/更纱 → 微软雅黑 → 系统） */
+  --mono: 'Cascadia Code', 'JetBrains Mono', 'Consolas', 'Sarasa Mono SC', 'Sarasa Term SC', 'Maple Mono', 'PingFang SC', 'Microsoft YaHei', monospace;
 }
 
-html, body, #root { height:100%; width:100%; overflow:hidden; font-family:var(--font); font-size:var(--global-font-size,18px); color:var(--text); background:#e8e8ec; }
+html, body, #root { height:100%; width:100%; overflow:hidden; font-family:var(--global-font,var(--font)); font-size:var(--global-font-size,18px); color:var(--text); background:#e8e8ec; }
 
 body {
   background: #e8e8ec center/cover fixed;

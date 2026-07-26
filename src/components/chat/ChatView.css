@@ -29,11 +29,13 @@
 .term-reasoning-line { color:var(--text-dim); font-style:italic; font-size:0.93em; line-height:1.6; white-space:pre-wrap; }
 
 .term-tool { padding:2px 0; position:relative; }
-.term-tool + .term-tool::before {
-  content:''; position:absolute; left:3px; top:-6px; bottom:50%;
-  width:2px; background:var(--border);
+/* 连续 ToolCard 竖线相连 — 从上一个 tool 的标志物延伸到本 tool 标志物
+   颜色由 --tool-conn 驱动（none=transparent / fixed / follow） */
+.term-row-tool + .term-row-tool .term-tool::before {
+  content:''; position:absolute; left:6px; top:-8px; height:14px;
+  width:2px; background:var(--tool-conn, transparent);
 }
-.term-tool-head { cursor:pointer; font-size:inherit; line-height:inherit; }
+.term-tool-head { cursor:pointer; font-size:inherit; line-height:inherit; display:flex; align-items:baseline; }
 .term-tool-head:hover { opacity:0.8; }
 .term-tool-indicator { margin-right:6px; }
 .term-tool-indicator.ok { color:var(--tool-ok,#1e9646); }

@@ -241,6 +241,7 @@ const ChatView = React.memo(function ChatView({ sessionId }: Props) {
           {messages.map((msg) => (
             <motion.div
               key={msg.id}
+              className={`term-row term-row-${msg.role}`}
               initial={{ opacity: 0, y: 8 }}
               animate={{ opacity: 1, y: 0 }}
               transition={{ duration: 0.25, ease: [0.2, 0, 0, 1] }}
@@ -325,8 +326,24 @@ function formatToolInput(name: string, rawInput: any): string {
 function ToolCard({ name, input, output, outputLines }: { name: string; input?: string; output?: string; outputLines?: number }) {
   const [open, setOpen] = useState(false)
   const indicator = useStore(s => s.toolIndicator) || '●'
+  const glow = useStore(s => s.toolIndicatorGlow) || 0
+  const glowColor = useStore(s => s.toolIndicatorGlowColor) || ''
+  const toolOk = useStore(s => s.toolOk)
+  const toolRun = useStore(s => s.toolRun)
+  const toolErr = useStore(s => s.toolErr)
+  const connectorMode = useStore(s => s.toolConnectorMode) || 'none'
+  const connectorColor = useStore(s => s.toolConnectorColor) || 'rgba(0,0,0,0.12)'
   const done = !!output
   const status = done ? 'ok' : 'run'
+  // 标志物辉光：颜色跟随状态色，或用户指定
+  const statusColor = status === 'ok' ? toolOk : toolRun
+  const glowCss = glow > 0
+    ? { textShadow: `0 0 ${glow}px ${glowColor || statusColor || 'currentColor'}` }
+    : undefined
+  // 竖线连接：none 关闭；fixed 固定色；follow 跟随本 tool 状态色
+  const connCss: React.CSSProperties = connectorMode === 'none'
+    ? { ['--tool-conn' as any]: 'transparent' }
+    : { ['--tool-conn' as any]: connectorMode === 'follow' ? (statusColor || connectorColor) : connectorColor }
   let suffix = ''
   if (done && outputLines !== undefined && outputLines > 0) {
     if (name === 'Grep' || name === 'Glob') suffix = ` — ${outputLines} matches`
@@ -338,9 +355,9 @@ function ToolCard({ name, input, output, outputLines }: { name: string; input?: 
     return new Anser().ansiToHtml(output)
   }, [output, name])
   return (
-    <div className="term-tool">
+    <div className="term-tool" data-status={status} style={connCss}>
       <div className="term-tool-head" onClick={() => setOpen(!open)}>
-        <span className={`term-tool-indicator ${status}`}>{indicator}</span>
+        <span className={`term-tool-indicator ${status}`} style={glowCss}>{indicator}</span>
         <span className="term-tool-name">{name}</span>
         {input && <span className="term-tool-summary"> ({input.length > 60 ? input.slice(0, 60) + '...' : input})</span>}
         {suffix && <span className="term-tool-suffix">{suffix}</span>}
