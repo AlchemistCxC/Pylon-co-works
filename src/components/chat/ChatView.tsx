@@ -7,6 +7,7 @@ import ReactMarkdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
 import { AnimatePresence, motion } from 'motion/react'
 import Anser from 'anser'
+import { Square } from 'lucide-react'
 import './ChatView.css'
 
 // ── Peri spinner ──
@@ -296,7 +297,15 @@ const ChatView = React.memo(function ChatView({ sessionId }: Props) {
             </motion.div>
           ))}
         </AnimatePresence>
-        {generating && <Spinner tokenCount={tokenCount.current} startTime={genStart.current} />}
+        {generating && (
+          <div className="term-spinner-row">
+            <Spinner tokenCount={tokenCount.current} startTime={genStart.current} />
+            <button className="spinner-stop-btn" title="停止生成 (Esc / Ctrl+C)"
+              onClick={() => { if (sessionRef.current) invoke('cancel_prompt', { source: sessionRef.current }).catch(() => {}) }}>
+              <Square size={11} /> 停止
+            </button>
+          </div>
+        )}
         {!generating && summary && <div className="term-summary">{summary}</div>}
         <div ref={bottomRef} />
       </div>

@@ -95,10 +95,24 @@
 .term-ansi { font-family:var(--mono); font-size:0.93em; line-height:1.6; white-space:pre-wrap; padding:6px 0; }
 
 /* ── Peri spinner ── */
+/* spinner 行：左 spinner，右侧最右小停止按钮 */
+.term-spinner-row { display:flex; align-items:center; gap:10px; }
+.term-spinner-row .term-spinner { flex:1; min-width:0; }
 .term-spinner { padding:8px 0; display:flex; align-items:center; gap:8px; font-size:var(--spinner-size,14px); color:var(--spinner-color,var(--text-dim)); }
 .spinner-frame { color:var(--accent); font-size:1.15em; }
 .spinner-verb { color:var(--accent); font-weight:500; opacity:0.85; }
 .spinner-meta { color:var(--text-dim); }
+/* 停止按钮：小尺寸、低调、右对齐，不抢视觉 */
+.spinner-stop-btn {
+  display:inline-flex; align-items:center; gap:3px; flex-shrink:0;
+  padding:2px 8px; font-size:11px; line-height:1.4;
+  color:var(--text-dim); background:transparent;
+  border:1px solid var(--border); border-radius:5px;
+  cursor:pointer; font-family:var(--mono); transition:all 0.15s;
+}
+.spinner-stop-btn:hover { color:var(--tool-err,#FF6B80); border-color:var(--tool-err,#FF6B80); background:rgba(255,107,128,0.08); }
+.spinner-stop-btn svg { opacity:0.7; }
+.spinner-stop-btn:hover svg { opacity:1; }
 
 .term-summary { padding:4px 0; color:var(--text-dim); font-size:0.93em; }
 

@@ -2,7 +2,7 @@ import { useState, useRef, KeyboardEvent, useEffect, forwardRef, useImperativeHa
 import { invoke } from '@tauri-apps/api/core'
 import { open } from '@tauri-apps/plugin-dialog'
 import { useStore } from '../../store'
-import { Paperclip, ArrowUp, Square } from 'lucide-react'
+import { Paperclip, ArrowUp } from 'lucide-react'
 import './InputBar.css'
 
 interface Props { sessionId: string | null; split?: boolean }
@@ -186,13 +186,9 @@ export default forwardRef<{ send: () => void; attachFile: () => void; cancel: ()
           placeholder={inputMode === 'cli' ? '' : '输入消息...（Enter 发送，Shift+Enter 换行，/ 命令）'}
           rows={1} />
         {!split && (
-          generating
-            ? <button className="input-btn stop" onClick={cancel} title="停止生成 (Esc)">
-                <Square size={15} />
-              </button>
-            : <button className="input-btn send" onClick={send} title="Send (Enter)">
-                <ArrowUp size={18} />
-              </button>
+          <button className="input-btn send" onClick={send} title="Send (Enter)">
+            <ArrowUp size={18} />
+          </button>
         )}
       </div>
     </div>

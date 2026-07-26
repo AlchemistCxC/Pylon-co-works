@@ -67,9 +67,6 @@
   background:transparent; color:var(--text-dim); border-radius:0;
 }
 .cc-send-minimal:hover, .cc-attach-minimal:hover { color:var(--text); }
-/* 停止生成态：红色系，覆盖 icon/square/minimal 背景 */
-.cc-send-stop { background:rgba(255,107,128,0.15) !important; color:var(--tool-err,#FF6B80) !important; }
-.cc-send-stop:hover { background:rgba(255,107,128,0.28) !important; }
 
 /* ── cc widget separators (controlled by cc layout in ControlCenter) ── */
 .cc-model-widget { display:flex; align-items:center; }
