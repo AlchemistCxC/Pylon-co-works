@@ -95,9 +95,6 @@ export default function ControlCenter({ sessionId }: Props) {
 
 // ── EditableWidget: drag + resize in edit mode ──
 
-// base heights for scale calculation (percentage values)
-const BASE_H: Record<string, number> = { input: 55, context: 14, model: 18, mode: 18, send: 12, attach: 12 }
-
 function EditableWidget({ id, pos, editMode, hidden: isHidden, children, bodyRef, selected, onSelect }: {
   id: string; pos: {x:number;y:number;w:number;h:number}; editMode: boolean; hidden: boolean;
   children: React.ReactNode; bodyRef: React.RefObject<HTMLDivElement | null>;
@@ -107,9 +104,6 @@ function EditableWidget({ id, pos, editMode, hidden: isHidden, children, bodyRef
 
   const dragStart = useRef<{ x: number; y: number; sx: number; sy: number } | null>(null)
   const resizeStart = useRef<{ x: number; y: number; sw: number; sh: number } | null>(null)
-
-  const scale = pos.h / (BASE_H[id] || 18)
-  const wrapperStyle = editMode && scale !== 1 ? { transform: `scale(${scale})`, transformOrigin: 'top left' } : undefined
 
   const onWidgetMouseDown = (e: React.MouseEvent) => {
     if (!editMode || (e.target as HTMLElement).classList.contains('cc-edit-rsz')) return
@@ -163,9 +157,7 @@ function EditableWidget({ id, pos, editMode, hidden: isHidden, children, bodyRef
         if (!isHandle) onSelect()
         onWidgetMouseDown(e)
       } : undefined}>
-      <div style={wrapperStyle} className="cc-widget-inner">
-        {children}
-      </div>
+      {children}
       {editMode && <>
         <div className="cc-edit-rsz" onMouseDown={onResizeMouseDown} />
         <VisibilityToggle id={id} />
