@@ -68,49 +68,50 @@ export interface GlobalPreset {
 }
 
 export const GLOBAL_PRESETS: GlobalPreset[] = [
-  // ── Claude Code CLI ──────────────────────────────────────────
+  // ── Claude Code ──────────────────────────────────────────────
   {
     name: 'claude',
     label: 'Claude Code',
     theme: {
       // global
       transparency: 0.97, bgBlur: 4, globalFont: 'mono', globalFontSize: 15,
-      globalBgImage: '', globalBgColor: '#0d0d14', uiScheme: 'dark',
+      globalBgImage: '', globalBgColor: '#121111', uiScheme: 'dark',
       userName: '', userPrefix: '❯', userColor: '#60a5fa',
 
-      // sidebar — 深色，字体明确用浅色
+      // sidebar
       sidebarBg: '#161622', sidebarBgImage: '', sidebarWidth: 240,
       sidebarTransparency: 1, sidebarBlur: 0,
       sidebarTextColor: '#a0a8c0', sidebarNameSize: 13, sidebarGroupSize: 11,
 
       // chat
       chatBg: 'transparent', chatBgImage: '', chatTransparency: 1, chatBlur: 0,
-      chatFont: 'mono', chatFontSize: 14, chatLineHeight: 1.6,
+      chatFont: 'mono', chatFontSize: 16.5, chatLineHeight: 1.7,
       chatTextColor: '#cdd6f4', chatCodeColor: '#f9c74f', chatCodeBg: 'rgba(255,255,255,0.04)',
       toolOk: '#4ade80', toolRun: '#60a5fa', toolErr: '#f87171',
       toolNameColor: '#94a3b8', toolSummaryColor: 'rgba(148,163,184,0.5)',
       userTagBg: 'rgba(96,165,250,0.10)', userTagText: '#93c5fd',
       toolIndicator: '●', toolIndicatorGlow: 4, toolIndicatorGlowColor: '',
       toolConnectorMode: 'follow', toolConnectorColor: '#334155',
-      sparkles: '⠁⠂⠄⡀⢀⠠⠐⠈', spinnerColor: '#60a5fa', spinnerSize: 13,
+      sparkles: '✳✴✵✶✷✸✹✺✻✼❃❊', spinnerColor: '#f4b915', spinnerSize: 13,
       msgStyle: 'terminal', msgFont: 'mono', msgTextColor: '', msgLineHeight: 1.7,
 
       // cc
       ccHeight: 130, ccBgHeight: 130, ccBg: 'rgba(13,13,20,0.92)', ccBgImage: '',
-      ccStyle: 'wave', ccVariant: 'terminal',
+      ccStyle: 'bar', ccVariant: 'terminal',
+      barTrackColor: '#353117', barFillColor: '#4EBA65', barFillFollow: true, barHeight: 10,
       ccPositions: {
-        input:   { x: 1,  y: 2,  w: 98, h: 58 },
-        context: { x: 1,  y: 68, w: 54, h: 16 },
-        model:   { x: 57, y: 68, w: 28, h: 16 },
-        mode:    { x: 87, y: 68, w: 12, h: 16 },
-        send:    { x: 87, y: 24, w: 6,  h: 12 },
-        attach:  { x: 94, y: 24, w: 4,  h: 12 },
+        input:   { x: 0,  y: 0,  w: 100, h: 55 },
+        context: { x: 0,  y: 49, w: 19,  h: 25 },
+        model:   { x: 19, y: 45, w: 18,  h: 33 },
+        mode:    { x: 38, y: 45, w: 9,   h: 32 },
+        send:    { x: 87, y: 24, w: 6,   h: 12 },
+        attach:  { x: 94, y: 24, w: 4,   h: 12 },
       },
       inputBg: 'rgba(255,255,255,0.03)', inputBgImage: '',
       inputTextColor: '#cdd6f4', inputPlaceholder: 'rgba(205,214,244,0.2)',
       inputSendBg: 'rgba(96,165,250,0.12)', inputFocusBorder: 'rgba(96,165,250,0.3)',
       inputFontSize: 14, inputMinHeight: 52,
-      inputMode: 'cli', cliLineWidth: 2, cliLineColor: '#3b4a6b', cliTextColor: '#cdd6f4', cliLinePadding: 2,
+      inputMode: 'cli', cliLineWidth: 2, cliLineColor: '#d0880b', cliTextColor: '#cdd6f4', cliLinePadding: 2,
       ccHidden: ['send', 'attach'],
       statusBg: 'transparent', statusBgImage: '',
       ekgWidth: 140, ekgFontSize: 13,

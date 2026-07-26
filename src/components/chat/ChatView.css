@@ -57,9 +57,9 @@
 .term-inline-code { font-family:var(--mono); color:var(--chat-code-color,#b47814); font-size:inherit; }
 
 /* ── 代码块（│ gutter 风格 — 对齐 Peri TUI code_block_lines）── */
-.term-code-block { margin:2px 0; }
-.term-code-line { display:flex; align-items:flex-start; min-height:1.5em; }
-.term-code-gutter { flex-shrink:0; color:var(--text-dim); opacity:0.45; user-select:none; margin-right:8px; }
+.term-code-block { margin:2px 0; font-family:var(--mono); }
+.term-code-line { display:flex; align-items:stretch; line-height:1.25; }
+.term-code-gutter { flex-shrink:0; color:var(--text-dim); opacity:0.45; user-select:none; margin-right:8px; white-space:pre; }
 
 /* ── starry-night 语法高亮（Peri base16-ocean.dark 配色）── */
 .term-code-block .pl-k  { color:var(--syn-kw,#b48ead); }           /* keyword — mauve */
