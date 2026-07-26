@@ -13,7 +13,7 @@ export default function ModeWidget() {
 
   return (
     <div className="cc-mode-widget" onClick={e => { e.stopPropagation(); cycle() }}>
-      <span className="mode-label">{mode}</span>
+      <span className="mode-label" data-mode={mode}>{mode}</span>
       <span className="mode-cycle">↻</span>
     </div>
   )
