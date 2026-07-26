@@ -126,7 +126,8 @@ export default function ControlCenter({ sessionId }: Props) {
     const pos = (!editMode && inputMode === 'cli' && !cliCustomized && CLI_OVERRIDES[id])
       ? CLI_OVERRIDES[id]
       : rawPos
-    const isNatural = id === 'model' || id === 'mode' || id === 'send' || id === 'attach'
+    // send/attach 是纯图标按钮，不需要尺寸调，宽度自动贴合；model/mode 保留 % 可调
+    const isNatural = id === 'send' || id === 'attach'
     return (
       <EditableWidget
         key={id} id={id} pos={pos} editMode={editMode}
