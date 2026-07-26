@@ -433,9 +433,11 @@ async fn load_persisted_session(
         }
     });
     state.acp.lock().await.load_session(&peri_id, &cwd).await?;
-    handle.abort();  // R2: prevent task leak
+    // 等 Peri 推送完重放消息（session/update 通知在 RPC 返回后异步到达）
+    tokio::time::sleep(std::time::Duration::from_millis(1500)).await;
+    handle.abort();
     state.sessions.lock().map_err(|e| e.to_string())?
-        .insert(source, SessionInfo { peri_id: peri_id.clone(), persona: String::new(), cwd, has_first_prompt: true, title: String::new(), model: String::new(), tokens_in: 0, tokens_out: 0, tokens_total: 0, context_size: 0 });
+        .insert(source, SessionInfo { peri_id: peri_id.clone(), persona: String::new(), cwd, has_first_prompt: false, title: String::new(), model: String::new(), tokens_in: 0, tokens_out: 0, tokens_total: 0, context_size: 0 });
     Ok(())
 }
 
@@ -471,6 +473,8 @@ async fn export_session(
         }
     });
     state.acp.lock().await.load_session(&peri_id, &cwd).await?;
+    // 等 Peri 推送完重放消息
+    tokio::time::sleep(std::time::Duration::from_millis(1500)).await;
     handle.abort();
     let msgs = messages.lock().map_err(|e| e.to_string())?;
     let content = match format.as_str() {
