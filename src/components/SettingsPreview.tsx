@@ -11,8 +11,8 @@ import { useStore } from '../store'
 
 interface Props { zone: string }
 
-const MOCK_W = 900
-const MOCK_H = 540
+const MOCK_W = 1200
+const MOCK_H = 680
 
 export default function SettingsPreview({ zone }: Props) {
   const t = useStore() as any

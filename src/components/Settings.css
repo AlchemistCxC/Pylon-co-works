@@ -110,7 +110,7 @@
 
 /* ── 右：实时预览面板 ── */
 .settings-preview-pane {
-  width:900px; flex-shrink:0;
+  width:1200px; flex-shrink:0;
   border-left:1px solid var(--border);
   background:rgba(0,0,0,0.015);
   display:flex; flex-direction:column;
@@ -121,6 +121,6 @@
   font-size:12px; font-weight:600; text-transform:uppercase;
   letter-spacing:0.8px; color:var(--text-dim); margin-bottom:12px;
 }
-/* 预览栏内容宽 ≈ 900 - 36(padding) = 864；mock 宽 900 → scale ≈ 0.96（近 1:1） */
-.set-preview-wrap { width:100%; --preview-scale:0.96; }
+/* 预览栏内容宽 ≈ 1200 - 36(padding) = 1164；mock 宽 1200 → scale ≈ 0.97（近真实） */
+.set-preview-wrap { width:100%; --preview-scale:0.97; }
 .set-preview-none { padding:24px; text-align:center; color:var(--text-dim); font-size:13px; }
