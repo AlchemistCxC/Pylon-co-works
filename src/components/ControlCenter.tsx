@@ -238,33 +238,6 @@ function EditableWidget({ id, pos, editMode, isHidden, children, bodyRef, select
     window.addEventListener('pointerup', onUp)
   }
 
-  const handleResizePointerDown = (e: React.PointerEvent) => {
-    if (!editMode) return
-    e.stopPropagation()
-    e.preventDefault()
-    const body = bodyRef.current; if (!body) return
-    const rect = body.getBoundingClientRect()
-    const startX = e.clientX, startY = e.clientY
-    const start = useStore.getState().ccPositions?.[id] || pos
-    const onMove = (ev: PointerEvent) => {
-      const dwPct = ((ev.clientX - startX) / rect.width) * 100
-      const dhPct = ((ev.clientY - startY) / rect.height) * 100
-      const cp = useStore.getState().ccPositions || {}
-      const cur = cp[id] || start
-      const nw = Math.max(3, Math.min(100 - cur.x, start.w + dwPct))
-      const nh = Math.max(3, Math.min(100 - cur.y, start.h + dhPct))
-      const patch: any = { ccPositions: { ...cp, [id]: { ...cur, w: nw, h: nh } } }
-      if (useStore.getState().inputMode === 'cli' && !useStore.getState().ccCliCustomized) patch.ccCliCustomized = true
-      useStore.setState(patch)
-    }
-    const onUp = () => {
-      window.removeEventListener('pointermove', onMove)
-      window.removeEventListener('pointerup', onUp)
-    }
-    window.addEventListener('pointermove', onMove)
-    window.addEventListener('pointerup', onUp)
-  }
-
   return (
     <div
       className={`cc-widget ${editMode ? 'cc-edit' : ''} ${editMode && isHidden ? 'cc-hidden' : ''} ${selected ? 'cc-selected' : ''}`}
@@ -273,7 +246,6 @@ function EditableWidget({ id, pos, editMode, isHidden, children, bodyRef, select
     >
       {children}
       {editMode && <>
-        <div className="cc-edit-rsz" onPointerDown={handleResizePointerDown} />
         <VisibilityToggle id={id} />
         <TypeToggle id={id} />
       </>}
@@ -284,7 +256,7 @@ function EditableWidget({ id, pos, editMode, isHidden, children, bodyRef, select
 // 编辑控件上的 handle（resize/visibility/type）跳过 widget 拖拽
 function isControlHandle(el: HTMLElement | null): boolean {
   if (!el) return false
-  return !!el.closest('.cc-edit-rsz, .cc-edit-vis, .cc-edit-type')
+  return !!el.closest('.cc-edit-vis, .cc-edit-type')
 }
 
 // ───────────────────────────────────────────────────────────────

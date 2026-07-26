@@ -19,8 +19,10 @@
   position:relative; z-index:1; height:100%;
   overflow:hidden;
 }
-.cc-widget { position:absolute; overflow:hidden; container-type:size; }
+.cc-widget { position:absolute; overflow:hidden; container-type:size; display:flex; align-items:center; }
 .cc-widget:has(.cli-mode) { overflow:visible !important; }
+/* box 内容子节点填满 box（紧包，消除描边与控件间空隙）；编辑 mini controls 除外 */
+.cc-widget > *:not(.cc-edit-vis):not(.cc-edit-type) { flex:1; min-width:0; height:100%; display:flex; align-items:center; }
 
 /* ── 缩放 widget box 时内部字号随高度自适应（container query 单位 cqh）──
    仅对文字型 widget（model/mode）生效；上下文(context)有独立宽度/字号控件不强加。
@@ -72,23 +74,6 @@
 .cc-widget.cc-selected { outline:2px solid var(--accent) !important; outline-offset:2px; }
 .cc-widget.cc-hidden { opacity:0.18; }
 .cc-widget.cc-hidden:hover { opacity:0.5; }
-
-/* ── Resize handle (right-bottom corner) ── */
-.cc-edit-rsz {
-  position:absolute; right:-6px; bottom:-6px;
-  width:20px; height:20px; cursor:nwse-resize; z-index:5;
-  border-radius:0 0 2px 0;
-  touch-action:none;
-}
-.cc-edit-rsz::after {
-  content:''; position:absolute; right:2px; bottom:2px;
-  width:10px; height:10px;
-  border-right:2px solid var(--accent,#D77757);
-  border-bottom:2px solid var(--accent,#D77757);
-  opacity:0.6;
-}
-.cc-edit-rsz:hover { background:rgba(215,119,87,0.18); }
-.cc-edit-rsz:hover::after { opacity:1; border-width:3px; }
 
 /* ── In-widget mini controls ── */
 .cc-edit-vis {
