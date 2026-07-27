@@ -9,11 +9,12 @@
 .attached-files { display:flex; flex-wrap:wrap; gap:4px; padding:4px 0; }
 .attached-chip { display:inline-flex; align-items:center; gap:4px; padding:2px 10px; background:var(--bg-panel); border:1px solid var(--border); border-radius:4px; font-size:12px; color:var(--text); cursor:pointer; }
 .attached-chip:hover { background:var(--bg-hover); }
-.command-palette { position:absolute; bottom:100%; left:0; right:0; background:rgba(255,255,255,0.96); border:1px solid var(--border); border-radius:6px; margin-bottom:8px; overflow:hidden; backdrop-filter:blur(12px); box-shadow:0 4px 16px rgba(0,0,0,0.08); z-index:10; }
+.command-palette { position:absolute; bottom:100%; left:0; right:0; background:var(--command-bg,#fff); color:var(--text); border:1px solid var(--border); border-radius:6px; margin-bottom:8px; overflow:hidden; backdrop-filter:blur(12px); box-shadow:0 4px 16px rgba(0,0,0,0.18); z-index:10; }
 .cmd-item { display:flex; justify-content:space-between; align-items:center; padding:7px 14px; cursor:pointer; font-size:14px; }
 .cmd-item:hover, .cmd-item.active { background:var(--bg-hover); }
 .cmd-name { font-weight:600; color:var(--text); font-family:var(--mono); }
 .cmd-info { color:var(--text-dim); font-size:13px; }
+.app[data-ui-scheme="dark"] .command-palette { --command-bg:#1e1e2e; }
 
 .input-row { display:flex; align-items:flex-end; gap:8px; }
 
