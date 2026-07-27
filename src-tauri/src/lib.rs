@@ -321,6 +321,7 @@ async fn list_agents(state: tauri::State<'_, AppState>) -> Result<Vec<serde_json
 
 #[tauri::command]
 async fn switch_agent(state: tauri::State<'_, AppState>, window: tauri::WebviewWindow, name: String) -> Result<(), String> {
+    let _lifecycle_guard = state.session_creation.lock().await;
     let agent = state.agents.lock().map_err(|e| e.to_string())?.get(&name).ok_or_else(|| format!("unknown agent: {}", name))?.clone();
     // Kill old agent process before connecting new one (prevents orphans on Windows)
     if let Err(e) = state.acp.lock().await.kill() {
@@ -339,6 +340,7 @@ async fn switch_agent(state: tauri::State<'_, AppState>, window: tauri::WebviewW
 
 #[tauri::command]
 async fn reconnect_agent(state: tauri::State<'_, AppState>, window: tauri::WebviewWindow) -> Result<(), String> {
+    let _lifecycle_guard = state.session_creation.lock().await;
     let agent = state.get_active_agent().map_err(|e| e.to_string())?;
     // Kill old (may already be dead)
     let _ = state.acp.lock().await.kill();
@@ -347,6 +349,7 @@ async fn reconnect_agent(state: tauri::State<'_, AppState>, window: tauri::Webvi
         let mut acp = state.acp.lock().await;
         *acp = new_acp;
     }
+    state.sessions.lock().map_err(|e| e.to_string())?.clear();
     start_notification_dispatcher(state.inner(), window.clone());
     let _ = window.emit("peri:agent-status", serde_json::json!({"status": "connected"}));
     Ok(())
