@@ -15,6 +15,7 @@ struct AppState {
     acp: Arc<tokio::sync::Mutex<AcpClient>>,
     notification_task: Mutex<Option<tokio::task::JoinHandle<()>>>,
     session_creation: Arc<tokio::sync::Mutex<()>>,
+    agent_lifecycle: Arc<tokio::sync::Mutex<()>>,
     prompt_locks: Arc<tokio::sync::Mutex<HashMap<String, Arc<tokio::sync::Mutex<()>>>>>,
     agents: Mutex<HashMap<String, AgentDef>>,
     active_agent: Mutex<String>,
@@ -392,38 +393,45 @@ async fn list_agents(state: tauri::State<'_, AppState>) -> Result<Vec<serde_json
     }).collect())
 }
 
-#[tauri::command]
-async fn switch_agent(state: tauri::State<'_, AppState>, window: tauri::WebviewWindow, name: String) -> Result<(), String> {
-    let _lifecycle_guard = state.session_creation.lock().await;
-    let agent = state.agents.lock().map_err(|e| e.to_string())?.get(&name).ok_or_else(|| format!("unknown agent: {}", name))?.clone();
-    // Kill old agent process before connecting new one (prevents orphans on Windows)
-    if let Err(e) = state.acp.lock().await.kill() {
-        log::warn!("kill old agent: {}", e);
-    }
-    let new_acp = AcpClient::connect(&agent).await?;
-    {
+async fn replace_agent_client(
+    state: &AppState,
+    agent_id: Option<String>,
+    new_acp: AcpClient,
+    window: tauri::WebviewWindow,
+) -> Result<(), String> {
+    let mut old_acp = {
         let mut acp = state.acp.lock().await;
-        *acp = new_acp;
+        std::mem::replace(&mut *acp, new_acp)
+    };
+    if let Some(agent_id) = agent_id {
+        *state.active_agent.lock().map_err(|error| error.to_string())? = agent_id;
     }
-    *state.active_agent.lock().map_err(|e| e.to_string())? = name;
-    state.sessions.lock().map_err(|e| e.to_string())?.clear();
-    start_notification_dispatcher(state.inner(), window);
+    state.sessions.lock().map_err(|error| error.to_string())?.clear();
+    start_notification_dispatcher(state, window);
+    if let Err(error) = old_acp.kill() {
+        log::warn!("kill replaced agent: {}", error);
+    }
     Ok(())
 }
 
 #[tauri::command]
+async fn switch_agent(state: tauri::State<'_, AppState>, window: tauri::WebviewWindow, name: String) -> Result<(), String> {
+    let _lifecycle_guard = state.agent_lifecycle.lock().await;
+    let agent = state.agents.lock().map_err(|error| error.to_string())?
+        .get(&name)
+        .ok_or_else(|| format!("unknown agent: {}", name))?
+        .clone();
+    let new_acp = AcpClient::connect(&agent).await?;
+    replace_agent_client(state.inner(), Some(name), new_acp, window).await
+}
+
+#[tauri::command]
 async fn reconnect_agent(state: tauri::State<'_, AppState>, window: tauri::WebviewWindow) -> Result<(), String> {
-    let _lifecycle_guard = state.session_creation.lock().await;
-    let agent = state.get_active_agent().map_err(|e| e.to_string())?;
-    // Kill old (may already be dead)
-    let _ = state.acp.lock().await.kill();
-    let new_acp = AcpClient::connect(&agent).await.map_err(|e| format!("reconnect failed: {}", e))?;
-    {
-        let mut acp = state.acp.lock().await;
-        *acp = new_acp;
-    }
-    state.sessions.lock().map_err(|e| e.to_string())?.clear();
-    start_notification_dispatcher(state.inner(), window.clone());
+    let _lifecycle_guard = state.agent_lifecycle.lock().await;
+    let agent = state.get_active_agent().map_err(|error| error.to_string())?;
+    let new_acp = AcpClient::connect(&agent).await
+        .map_err(|error| format!("reconnect failed: {}", error))?;
+    replace_agent_client(state.inner(), None, new_acp, window.clone()).await?;
     let _ = window.emit("peri:agent-status", serde_json::json!({"status": "connected"}));
     Ok(())
 }
@@ -574,6 +582,7 @@ pub fn run() {
                 acp,
                 notification_task: Mutex::new(None),
                 session_creation: Arc::new(tokio::sync::Mutex::new(())),
+                agent_lifecycle: Arc::new(tokio::sync::Mutex::new(())),
                 prompt_locks: Arc::new(tokio::sync::Mutex::new(HashMap::new())),
                 agents: Mutex::new(agents_for_state),
                 active_agent: Mutex::new(default_agent_id),
