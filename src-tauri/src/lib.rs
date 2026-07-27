@@ -365,16 +365,21 @@ async fn send_message(
 
 #[tauri::command]
 async fn set_mode(state: tauri::State<'_, AppState>, source: String, mode: String) -> Result<(), String> {
+    let generation = state.current_generation();
     let peri_id = state.get_peri_id(&source).map_err(|e| e.to_string())?;
     state.acp.lock().await.set_mode(&peri_id, &mode).await?;
+    state.ensure_generation(generation)?;
     Ok(())
 }
 
 #[tauri::command]
 async fn set_config_option(state: tauri::State<'_, AppState>, source: String, key: String, value: String) -> Result<serde_json::Value, String> {
+    let generation = state.current_generation();
     let peri_id = state.get_peri_id(&source).map_err(|e| e.to_string())?;
     // Peri returns full configOptions in the response body — no pre-subscribe needed
-    state.acp.lock().await.set_config_option(&peri_id, &key, &value).await
+    let response = state.acp.lock().await.set_config_option(&peri_id, &key, &value).await?;
+    state.ensure_generation(generation)?;
+    Ok(response)
 }
 
 #[tauri::command]
