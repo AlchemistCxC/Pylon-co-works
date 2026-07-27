@@ -7,10 +7,20 @@ use std::collections::HashMap;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
-use tauri::{Emitter, Manager};
+use tauri::{Emitter, Manager, Runtime};
 use acp::{AcpClient, PromptWaitOutcome};
 use agent_config::AgentDef;
 use error::PylonError;
+
+fn emit_event<R, W>(window: &W, event: &str, payload: serde_json::Value)
+where
+    R: Runtime,
+    W: Emitter<R>,
+{
+    if let Err(error) = window.emit(event, payload) {
+        log::warn!("emit {event} failed: {error}");
+    }
+}
 
 struct AppState {
     acp: Arc<tokio::sync::Mutex<AcpClient>>,
@@ -85,7 +95,7 @@ fn start_notification_dispatcher(state: &AppState, window: tauri::WebviewWindow)
                     .unwrap_or(false);
                 if variant == Some("user_message_chunk") {
                     if let Some(text) = update.get("content").and_then(|c| c.get("text")).and_then(|v| v.as_str()) {
-                        let _ = window.emit("peri:user", serde_json::json!({
+                        emit_event(&window, "peri:user", serde_json::json!({
                             "source": source,
                             "content": text,
                             "replay": is_replay,
@@ -134,7 +144,7 @@ fn start_notification_dispatcher(state: &AppState, window: tauri::WebviewWindow)
                 if let serde_json::Value::Object(ref mut map) = payload {
                     map.insert("source".to_string(), serde_json::Value::String(source));
                 }
-                let _ = window.emit("peri:update", payload);
+                emit_event(&window, "peri:update", payload);
             }
         }));
     }
@@ -231,7 +241,7 @@ async fn send_message(
     let _prompt_guard = prompt_lock.lock().await;
 
     if state.acp.lock().await.is_crashed() {
-        let _ = window.emit("peri:error", serde_json::json!({"source": source, "error": PylonError::AgentCrashed.to_string()}));
+        emit_event(&window, "peri:error", serde_json::json!({"source": source, "error": PylonError::AgentCrashed.to_string()}));
         return Err(PylonError::AgentCrashed.into());
     }
 
@@ -273,7 +283,7 @@ async fn send_message(
     let prompt_blocks = AcpClient::prompt_blocks(prompt_content, &attachment_paths)?;
 
     state.pet.lock().map(|mut p| pet::on_user_sent(&mut p)).ok();
-    let _ = window.emit("peri:user", serde_json::json!({ "source": source, "content": content }));
+    emit_event(&window, "peri:user", serde_json::json!({ "source": source, "content": content }));
     let (request_id, write_tx, prompt_line, mut rx) = {
         let acp = state.acp.lock().await;
         let (id, line, rx) = acp.prepare_prompt(&peri_id, prompt_blocks)?;
@@ -298,13 +308,13 @@ async fn send_message(
         PromptWaitOutcome::Response(raw) => {
             if let Some(error) = raw.error {
                 let error = error.to_string();
-                let _ = window.emit("peri:error", serde_json::json!({"source": source, "error": error}));
+                emit_event(&window, "peri:error", serde_json::json!({"source": source, "error": error}));
                 let _ = state.pet.lock().map(|mut p| pet::on_error(&mut p));
                 Err(error)
             } else {
                 let data = raw.result.unwrap_or(serde_json::Value::Null);
                 AcpClient::prompt_stop_reason(&data).map_err(|error| {
-                    let _ = window.emit("peri:error", serde_json::json!({"source": source, "error": error}));
+                    emit_event(&window, "peri:error", serde_json::json!({"source": source, "error": error}));
                     let _ = state.pet.lock().map(|mut pet| pet::on_error(&mut pet));
                     error
                 })?;
@@ -315,7 +325,7 @@ async fn send_message(
                         }
                     }
                 }
-                let _ = window.emit("peri:done", serde_json::json!({"source": source, "data": data}));
+                emit_event(&window, "peri:done", serde_json::json!({"source": source, "data": data}));
                 let _ = state.pet.lock().map(|mut p| pet::on_done(&mut p));
                 Ok(peri_id)
             }
@@ -347,7 +357,7 @@ async fn send_message(
                 }
             }
             let error = "timed out after 300s";
-            let _ = window.emit("peri:error", serde_json::json!({"source": source, "error": error}));
+            emit_event(&window, "peri:error", serde_json::json!({"source": source, "error": error}));
             Err(error.to_string())
         }
     }
@@ -445,7 +455,7 @@ async fn reconnect_agent(state: tauri::State<'_, AppState>, window: tauri::Webvi
     let new_acp = AcpClient::connect(&agent).await
         .map_err(|error| format!("reconnect failed: {}", error))?;
     replace_agent_client(state.inner(), None, new_acp, window.clone()).await?;
-    let _ = window.emit("peri:agent-status", serde_json::json!({"status": "connected"}));
+    emit_event(&window, "peri:agent-status", serde_json::json!({"status": "connected"}));
     Ok(())
 }
 
@@ -707,7 +717,7 @@ pub fn run() {
             ])
             .setup(|app| {
                 let window = app.get_webview_window("main").ok_or("main window not found")?;
-                window.set_title("Pylon").ok();
+                if let Err(error) = window.set_title("Pylon") { log::warn!("set window title failed: {error}"); }
                 start_notification_dispatcher(app.state::<AppState>().inner(), window);
                 Ok(())
             })
