@@ -5,6 +5,8 @@ agents:
     exe: F:\A-I\Agent\Peri\target\release\peri.exe
     args: ["acp", "--model", "deepseek-v4-flash"]
     cwd: G:\Project\prism
+    env:
+      DEEPSEEK_API_KEY: "sk-your-key-here"
   hermes:
     name: Hermes
     transport: subprocess

@@ -54,6 +54,10 @@
 .term-li { margin:1px 0 1px 16px; }
 .term-li::before { content:'- '; color:var(--text-dim); }
 .term-p { margin:2px 0; }
+/* ReactMarkdown 列表缩进 */
+.term-assistant ol { padding-left:2em; margin:4px 0; }
+.term-assistant ul { padding-left:1.5em; margin:4px 0; }
+.term-assistant li { margin:2px 0; }
 .term-inline-code { font-family:var(--mono); color:var(--chat-code-color,#b47814); font-size:inherit; }
 
 /* ── 代码块（│ gutter 风格 — 对齐 Peri TUI code_block_lines）── */
@@ -102,7 +106,7 @@
 .term-spinner-row { display:flex; align-items:center; gap:10px; }
 .term-spinner-row .term-spinner { flex:1; min-width:0; }
 .term-spinner { padding:8px 0; display:flex; align-items:center; gap:8px; font-size:var(--spinner-size,14px); color:var(--spinner-color,var(--text-dim)); }
-.spinner-frame { color:inherit; font-size:1.15em; }
+.spinner-frame { color:inherit; font-size:1.15em; min-width:1.15em; text-align:center; display:inline-block; }
 .spinner-verb { color:inherit; font-weight:500; opacity:0.85; }
 .spinner-meta { color:var(--text-dim); }
 /* 停止按钮：小尺寸、低调、右对齐，不抢视觉 */
