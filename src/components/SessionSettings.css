@@ -8,12 +8,8 @@
 }
 .sess-field input:focus, .sess-field select:focus, .sess-field textarea:focus { border-color:var(--border-focus); }
 .sess-field textarea { resize:vertical; min-height:80px; line-height:1.5; }
-.chip-row { display:flex; flex-wrap:wrap; gap:6px; margin-bottom:8px; }
-.chip { display:inline-flex; align-items:center; gap:4px; background:var(--bg-panel); border:1px solid var(--border); border-radius:4px; padding:2px 10px; font-size:13px; color:var(--text); }
-.chip button { background:none; border:none; color:var(--text-dim); cursor:pointer; font-size:14px; padding:0 2px; }
-.chip button:hover { color:var(--danger); }
-.chip-add { display:flex; gap:6px; }
-.chip-add input { flex:1; padding:4px 10px; font-size:13px; }
-.chip-add button { background:var(--bg-panel); border:1px solid var(--border); border-radius:4px; padding:4px 12px; color:var(--accent); cursor:pointer; font-size:14px; }
+.sess-unavailable { padding:12px; border:1px dashed var(--border); border-radius:6px; background:var(--bg-panel); }
+.sess-unavailable strong { display:block; color:var(--text); font-size:13px; margin-bottom:4px; }
+.sess-unavailable p { margin:0; color:var(--text-dim); font-size:12px; line-height:1.5; }
 .sess-actions { display:flex; gap:8px; margin-top:20px; padding-top:16px; border-top:1px solid var(--border); }
 .sess-actions .danger { margin-left:auto; background:none; color:var(--danger); border-color:transparent; }

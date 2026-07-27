@@ -5,6 +5,7 @@ import { useStore } from '../../store'
 import { setSessionModel } from './sessionModel'
 import { setSessionMode } from './sessionMode'
 import { runSendTransaction } from './sendTransaction'
+import { buildSendMessagePayload } from './sessionRuntime'
 import { Paperclip, ArrowUp } from 'lucide-react'
 import './InputBar.css'
 
@@ -163,17 +164,18 @@ export default forwardRef<{ send: () => void; attachFile: () => void; cancel: ()
     }
 
     const s = useStore.getState().sessions.find(s => s.id === sessionId || s.source === sessionId)
-    const source = sessionSource || s?.source || sessionId
-    const sessionPrompt = s?.sessionPrompt || ''
+    if (!s) {
+      setSendError('当前会话不可用')
+      return
+    }
 
     await runSendTransaction({
-      send: () => invoke('send_message', {
-        source,
+      send: () => invoke('send_message', buildSendMessagePayload({
+        session: s,
         content: text,
         persona,
-        sessionPrompt,
         attachments: attached.map(file => file.path),
-      }),
+      })),
       onSuccess: () => {
         lastMsg.current = text
         setValue('')

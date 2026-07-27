@@ -414,7 +414,7 @@ export default function Settings({ onClose }: { onClose?: () => void }) {
             {/* ═══ 会话 ═══ */}
             <Tabs.Content value="session">
               <h3>当前会话设置</h3>
-              <div className="set-hint">请在左栏会话右侧的设置按钮中编辑工作目录、Prompt、Skills 与 Hooks。</div>
+              <div className="set-hint">请在左栏会话右侧的设置按钮中编辑工作目录与 Prompt。会话级 Skills / Hooks 尚未接入运行时。</div>
             </Tabs.Content>
           </Tabs.Root>
         </div>

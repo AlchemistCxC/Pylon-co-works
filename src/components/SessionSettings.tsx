@@ -13,16 +13,12 @@ export default function SessionSettings({ sessionId, open, onClose, onDeleted }:
   const [platform, setPlatform] = useState(s?.platform || 'local')
   const [workdir, setWorkdir] = useState(s?.workdir || '')
   const [sessionPrompt, setSessionPrompt] = useState(s?.sessionPrompt || '')
-  const [skills, setSkills] = useState(s?.skills || [])
-  const [hooks, setHooks] = useState(s?.hooks || [])
-  const [newSkill, setNewSkill] = useState('')
-  const [newHook, setNewHook] = useState('')
 
   if (!s) return null
 
   const save = () => {
     const updated = sessions.map(ss => ss.id === sessionId ? {
-      ...ss, name, platform, workdir, sessionPrompt, skills, hooks, lastActiveAt: Date.now()
+      ...ss, name, platform, workdir, sessionPrompt, lastActiveAt: Date.now()
     } : ss)
     useStore.setState({ sessions: updated })
     localStorage.setItem('pylon-sessions', JSON.stringify(updated))
@@ -76,30 +72,10 @@ export default function SessionSettings({ sessionId, open, onClose, onDeleted }:
             placeholder="留空使用 Profile persona..." rows={4} />
         </div>
 
-        <div className="sess-field">
-          <label>Skills</label>
-          <div className="chip-row">
-            {skills.map((sk, i) => (
-              <span key={i} className="chip">{sk} <button onClick={() => setSkills(skills.filter((_, j) => j !== i))}>✕</button></span>
-            ))}
-          </div>
-          <div className="chip-add">
-            <input value={newSkill} onChange={e => setNewSkill(e.target.value)} placeholder="/command" />
-            <button onClick={() => { if(newSkill.trim()) { setSkills([...skills, newSkill.trim()]); setNewSkill('') } }}>+</button>
-          </div>
-        </div>
-
-        <div className="sess-field">
-          <label>Hooks</label>
-          <div className="chip-row">
-            {hooks.map((h, i) => (
-              <span key={i} className="chip">{h} <button onClick={() => setHooks(hooks.filter((_, j) => j !== i))}>✕</button></span>
-            ))}
-          </div>
-          <div className="chip-add">
-            <input value={newHook} onChange={e => setNewHook(e.target.value)} placeholder="hook 名" />
-            <button onClick={() => { if(newHook.trim()) { setHooks([...hooks, newHook.trim()]); setNewHook('') } }}>+</button>
-          </div>
+        <div className="sess-field sess-unavailable" role="status">
+          <label>Skills / Hooks</label>
+          <strong>未接入运行时</strong>
+          <p>当前后端尚未提供会话级 Skills / Hooks 链路，因此此处不提供编辑，也不会把已有历史配置发送给 Agent。</p>
         </div>
 
         <div className="sess-actions">
