@@ -163,7 +163,7 @@ impl AcpClient {
     pub async fn set_mode(&self, session_id: &str, mode: &str) -> Result<serde_json::Value, String> {
         self.call_async(METHOD_SESSION_SET_MODE, serde_json::json!({
             "sessionId": session_id,
-            "mode": mode
+            "modeId": mode
         })).await
     }
 
