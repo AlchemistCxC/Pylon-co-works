@@ -24,6 +24,12 @@ export default function App() {
   const [activeTab, setActiveTab] = useState<'peri' | 'prism'>('peri')
 
   useEffect(() => {
+    const clearActiveSession = () => setActiveSession(null)
+    window.addEventListener('pylon:agent-switched', clearActiveSession)
+    return () => window.removeEventListener('pylon:agent-switched', clearActiveSession)
+  }, [])
+
+  useEffect(() => {
     invoke('list_agents').then((list: any) => {
       useStore.getState().setAgents(list)
     }).catch(() => {})

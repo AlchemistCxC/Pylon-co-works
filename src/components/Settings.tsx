@@ -389,6 +389,14 @@ export default function Settings({ onClose }: { onClose?: () => void }) {
                     <button className={`ps-btn sm ${a.id === activeAgent ? 'primary' : ''}`}
                       onClick={() => {
                         invoke('switch_agent', { name: a.id }).then(() => {
+                          useStore.setState({
+                            activeAgent: a.id,
+                            sessions: [],
+                            sessionConfig: {},
+                            liveGenerating: null,
+                          })
+                          localStorage.setItem('pylon-sessions', '[]')
+                          window.dispatchEvent(new CustomEvent('pylon:agent-switched'))
                           setActiveAgent(a.id)
                         }).catch(() => {})
                       }}>
