@@ -390,7 +390,7 @@ async fn pet_action(state: tauri::State<'_, AppState>, action: String, value: Op
         "sleepy" => { pet::check_sleepy(&mut pet); }
         "nostalgia" => {
             if let Some((prefix, mem)) = pet::recall_memory(&mut pet) {
-                pet.msg = Some(Box::leak(format!("{prefix} {mem}").into_boxed_str())); // lives 'static
+                pet.msg = Some(format!("{prefix} {mem}"));
             }
         }
         _ => { return Err(format!("unknown action: {}", action)); }

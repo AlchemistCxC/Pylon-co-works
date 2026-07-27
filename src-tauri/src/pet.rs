@@ -25,7 +25,7 @@ pub struct PetState {
     pub tools_succeeded: u64,            // completed tool calls (from toolCallUpdate)
     pub name: String,                    // user-set base name
     #[serde(skip)]
-    pub msg: Option<&'static str>,       // current speech bubble (consumed on read)
+    pub msg: Option<String>,             // current speech bubble (consumed on read)
     pub memories: Vec<String>,           // up to 10 remembered moments
 }
 
@@ -142,14 +142,14 @@ pub fn on_user_sent(state: &mut PetState) -> &'static str {
     state.messages += 1;
     state.first_chunk_at_ms = None;
     state.mood = "curious";
-    state.msg = Some(if is_night() { pick(NIGHT_MSGS) } else { pick(USER_SENT) });
+    state.msg = Some(if is_night() { pick(NIGHT_MSGS) } else { pick(USER_SENT) }.to_string());
     state.mood
 }
 
 pub fn on_first_chunk(state: &mut PetState) -> &'static str {
     state.first_chunk_at_ms = Some(now_ms());
     state.mood = "curious";
-    state.msg = Some(pick(FIRST_CHUNK));
+    state.msg = Some(pick(FIRST_CHUNK).to_string());
     state.mood
 }
 
@@ -157,7 +157,7 @@ pub fn on_done(state: &mut PetState) -> &'static str {
     state.first_chunk_at_ms = None;
     state.mood = "excited";
     state.happiness = state.happiness.saturating_add(2).min(100);
-    state.msg = Some(pick(DONE_MSGS));
+    state.msg = Some(pick(DONE_MSGS).to_string());
     state.mood
 }
 
@@ -165,21 +165,21 @@ pub fn on_error(state: &mut PetState) -> &'static str {
     state.first_chunk_at_ms = None;
     state.mood = "error";
     state.happiness = state.happiness.saturating_sub(10);
-    state.msg = Some(pick(ERROR_MSGS));
+    state.msg = Some(pick(ERROR_MSGS).to_string());
     state.mood
 }
 
 pub fn on_poke(state: &mut PetState) -> &'static str {
     state.mood = "happy";
     state.happiness = (state.happiness + 5).min(100);
-    state.msg = Some(pick(POKE_MSGS));
+    state.msg = Some(pick(POKE_MSGS).to_string());
     state.mood
 }
 
 pub fn on_feed(state: &mut PetState) -> &'static str {
     state.happiness = (state.happiness + 15).min(100);
     state.mood = "happy";
-    state.msg = Some(pick(FEED_MSGS));
+    state.msg = Some(pick(FEED_MSGS).to_string());
     state.mood
 }
 
@@ -216,7 +216,7 @@ pub fn check_sleepy(state: &mut PetState) -> bool {
     if let Some(start) = state.first_chunk_at_ms {
         if now_ms().saturating_sub(start) > 30_000 {
             state.mood = "sleepy";
-            state.msg = Some(pick(SLEEPY_MSGS));
+            state.msg = Some(pick(SLEEPY_MSGS).to_string());
             return true;
         }
     }
