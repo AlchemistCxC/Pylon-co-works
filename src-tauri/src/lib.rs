@@ -7,7 +7,7 @@ use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 use tauri::{Emitter, Manager};
-use acp::AcpClient;
+use acp::{AcpClient, PromptWaitOutcome};
 use agent_config::AgentDef;
 use error::PylonError;
 
@@ -15,10 +15,22 @@ struct AppState {
     acp: Arc<tokio::sync::Mutex<AcpClient>>,
     notification_task: Mutex<Option<tokio::task::JoinHandle<()>>>,
     session_creation: Arc<tokio::sync::Mutex<()>>,
+    prompt_locks: Arc<tokio::sync::Mutex<HashMap<String, Arc<tokio::sync::Mutex<()>>>>>,
     agents: Mutex<HashMap<String, AgentDef>>,
     active_agent: Mutex<String>,
     sessions: Arc<Mutex<HashMap<String, SessionInfo>>>,
     pet: Arc<Mutex<pet::PetState>>,
+}
+
+async fn prompt_lock_for(
+    locks: &Arc<tokio::sync::Mutex<HashMap<String, Arc<tokio::sync::Mutex<()>>>>>,
+    source: &str,
+) -> Arc<tokio::sync::Mutex<()>> {
+    let mut locks = locks.lock().await;
+    locks
+        .entry(source.to_string())
+        .or_insert_with(|| Arc::new(tokio::sync::Mutex::new(())))
+        .clone()
 }
 
 fn start_notification_dispatcher(state: &AppState, window: tauri::WebviewWindow) {
@@ -64,9 +76,17 @@ fn start_notification_dispatcher(state: &AppState, window: tauri::WebviewWindow)
                     continue;
                 };
                 let variant = update.get("sessionUpdate").and_then(|v| v.as_str());
+                let is_replay = update.get("_meta")
+                    .and_then(|meta| meta.get("periReplay"))
+                    .and_then(|value| value.as_bool())
+                    .unwrap_or(false);
                 if variant == Some("user_message_chunk") {
                     if let Some(text) = update.get("content").and_then(|c| c.get("text")).and_then(|v| v.as_str()) {
-                        let _ = window.emit("peri:user", serde_json::json!({"source": source, "content": text}));
+                        let _ = window.emit("peri:user", serde_json::json!({
+                            "source": source,
+                            "content": text,
+                            "replay": is_replay,
+                        }));
                     }
                     continue;
                 }
@@ -198,22 +218,23 @@ async fn send_message(
     session_prompt: Option<String>,
     attachments: Option<Vec<String>>,
 ) -> Result<String, String> {
+    let prompt_lock = prompt_lock_for(&state.prompt_locks, &source).await;
+    let _prompt_guard = prompt_lock.lock().await;
+
     if state.acp.lock().await.is_crashed() {
         let _ = window.emit("peri:error", serde_json::json!({"source": source, "error": PylonError::AgentCrashed.to_string()}));
         return Err(PylonError::AgentCrashed.into());
     }
 
-    let _creation_guard = state.session_creation.lock().await;
     let (peri_id, is_first) = {
-        let found = {
-            let mut sessions = state.sessions.lock().map_err(|e| e.to_string())?;
-            sessions.get_mut(&source).map(|s| {
-                let first = !s.has_first_prompt;
-                if first { s.has_first_prompt = true; }
-                (s.peri_id.clone(), first)
+        let _creation_guard = state.session_creation.lock().await;
+        let existing = {
+            let sessions = state.sessions.lock().map_err(|e| e.to_string())?;
+            sessions.get(&source).map(|session| {
+                (session.peri_id.clone(), !session.has_first_prompt)
             })
         };
-        if let Some(result) = found {
+        if let Some(result) = existing {
             result
         } else {
             {
@@ -224,7 +245,7 @@ async fn send_message(
             let response = state.acp.lock().await.new_session(&session_cwd).await?;
             let pid = AcpClient::session_id_from(&response)?;
             state.sessions.lock().map_err(|e| e.to_string())?
-                .insert(source.clone(), SessionInfo { peri_id: pid.clone(), persona: persona.clone(), cwd: session_cwd, has_first_prompt: true, title: String::new(), model: String::new(), tokens_in: 0, tokens_out: 0, tokens_total: 0, context_size: 0 });
+                .insert(source.clone(), SessionInfo { peri_id: pid.clone(), persona: persona.clone(), cwd: session_cwd, has_first_prompt: false, title: String::new(), model: String::new(), tokens_in: 0, tokens_out: 0, tokens_total: 0, context_size: 0 });
             (pid, true)
         }
     };
@@ -235,7 +256,9 @@ async fn send_message(
         acc
     });
 
-    let effective_persona = session_prompt.unwrap_or(persona);
+    let effective_persona = session_prompt
+        .filter(|value| !value.trim().is_empty())
+        .unwrap_or(persona);
 
     let prompt_content = if is_first && !effective_persona.is_empty() && !content.starts_with('/') {
         format!("{}{}\n\n---\n\n{}", attach_prefix, effective_persona, content)
@@ -245,7 +268,7 @@ async fn send_message(
 
     state.pet.lock().map(|mut p| pet::on_user_sent(&mut p)).ok();
     let _ = window.emit("peri:user", serde_json::json!({ "source": source, "content": content }));
-    let (request_id, write_tx, prompt_line, rx) = {
+    let (request_id, write_tx, prompt_line, mut rx) = {
         let acp = state.acp.lock().await;
         let (id, line, rx) = acp.prepare_prompt(&peri_id, &prompt_content)?;
         (id, acp.write_tx.clone(), line, rx)
@@ -254,25 +277,64 @@ async fn send_message(
         state.acp.lock().await.remove_pending(request_id);
         return Err("ACP connection closed".to_string());
     }
-    let result = tokio::time::timeout(Duration::from_secs(acp::PROMPT_TIMEOUT_SECS), rx).await;
+    let acp_for_cancel = state.acp.clone();
+    let peri_id_for_cancel = peri_id.clone();
+    let result = acp::wait_prompt_with_cancel(
+        &mut rx,
+        Duration::from_secs(acp::PROMPT_TIMEOUT_SECS),
+        Duration::from_secs(acp::CANCEL_SETTLE_TIMEOUT_SECS),
+        move || async move {
+            acp_for_cancel.lock().await.cancel_session(&peri_id_for_cancel).await
+        },
+    ).await;
 
     match result {
-        Ok(Ok(raw)) => {
+        PromptWaitOutcome::Response(raw) => {
             if let Some(error) = raw.error {
                 let error = error.to_string();
                 let _ = window.emit("peri:error", serde_json::json!({"source": source, "error": error}));
                 let _ = state.pet.lock().map(|mut p| pet::on_error(&mut p));
                 Err(error)
             } else {
+                if is_first {
+                    if let Ok(mut sessions) = state.sessions.lock() {
+                        if let Some(session) = sessions.get_mut(&source) {
+                            session.has_first_prompt = true;
+                        }
+                    }
+                }
                 let data = raw.result.unwrap_or(serde_json::Value::Null);
                 let _ = window.emit("peri:done", serde_json::json!({"source": source, "data": data}));
                 let _ = state.pet.lock().map(|mut p| pet::on_done(&mut p));
                 Ok(peri_id)
             }
         }
-        Ok(Err(_)) => Err("ACP connection closed".to_string()),
-        Err(_) => {
+        PromptWaitOutcome::ConnectionClosed => Err("ACP connection closed".to_string()),
+        PromptWaitOutcome::CancelledAfterTimeout { response, cancel_error } => {
             state.acp.lock().await.remove_pending(request_id);
+            if let Some(cancel_error) = cancel_error {
+                log::warn!("cancel timed-out prompt {}: {}", peri_id, cancel_error);
+            }
+            if response.is_none() {
+                let removed = {
+                    let mut sessions = state.sessions.lock().map_err(|e| e.to_string())?;
+                    if sessions.get(&source).map(|session| session.peri_id.as_str()) == Some(peri_id.as_str()) {
+                        sessions.remove(&source)
+                    } else {
+                        None
+                    }
+                };
+                if removed.is_some() {
+                    log::error!(
+                        "cancelled prompt {} did not settle within {}s; removed local session mapping",
+                        peri_id,
+                        acp::CANCEL_SETTLE_TIMEOUT_SECS
+                    );
+                    if let Err(close_error) = state.acp.lock().await.close_session(&peri_id).await {
+                        log::warn!("close unsettled prompt session {}: {}", peri_id, close_error);
+                    }
+                }
+            }
             let error = "timed out after 300s";
             let _ = window.emit("peri:error", serde_json::json!({"source": source, "error": error}));
             Err(error.to_string())
@@ -420,15 +482,17 @@ async fn load_persisted_session(
     source: String,
     peri_id: String,
     cwd: Option<String>,
-) -> Result<(), String> {
+) -> Result<serde_json::Value, String> {
     let cwd = cwd.unwrap_or_else(|| state.agent_cwd());
     state.sessions.lock().map_err(|e| e.to_string())?
         .insert(source.clone(), SessionInfo { peri_id: peri_id.clone(), persona: String::new(), cwd: cwd.clone(), has_first_prompt: true, title: String::new(), model: String::new(), tokens_in: 0, tokens_out: 0, tokens_total: 0, context_size: 0 });
-    if let Err(error) = state.acp.lock().await.load_session(&peri_id, &cwd).await {
-        state.sessions.lock().map_err(|e| e.to_string())?.remove(&source);
-        return Err(error);
+    match state.acp.lock().await.load_session(&peri_id, &cwd).await {
+        Ok(response) => Ok(response),
+        Err(error) => {
+            state.sessions.lock().map_err(|e| e.to_string())?.remove(&source);
+            Err(error)
+        }
     }
-    Ok(())
 }
 
 #[tauri::command]
@@ -510,6 +574,7 @@ pub fn run() {
                 acp,
                 notification_task: Mutex::new(None),
                 session_creation: Arc::new(tokio::sync::Mutex::new(())),
+                prompt_locks: Arc::new(tokio::sync::Mutex::new(HashMap::new())),
                 agents: Mutex::new(agents_for_state),
                 active_agent: Mutex::new(default_agent_id),
                 sessions: Arc::new(Mutex::new(HashMap::new())),

@@ -5,6 +5,7 @@
 //! stderr is drained in a background thread to prevent pipe buffer deadlock.
 
 use std::collections::HashMap;
+use std::future::Future;
 use std::io::{BufRead, BufReader, BufWriter, Write};
 use std::process::{Child, Command, Stdio};
 use std::sync::{Arc, Mutex};
@@ -31,6 +32,8 @@ pub const BROADCAST_CAP: usize = 256;
 pub const WRITE_CHAN_CAP: usize = 256;
 /// Default prompt timeout in seconds.
 pub const PROMPT_TIMEOUT_SECS: u64 = 300;
+/// Maximum time to wait for Peri's final prompt response after sending cancel.
+pub const CANCEL_SETTLE_TIMEOUT_SECS: u64 = 30;
 
 type Pending = HashMap<u64, oneshot::Sender<RawMessage>>;
 const PENDING_SHARDS: usize = 16;
@@ -54,6 +57,45 @@ pub struct RawMessage {
     pub result: Option<serde_json::Value>,
     pub params: Option<serde_json::Value>,
     pub error: Option<serde_json::Value>,
+}
+
+#[derive(Debug)]
+pub enum PromptWaitOutcome {
+    Response(RawMessage),
+    CancelledAfterTimeout {
+        response: Option<RawMessage>,
+        cancel_error: Option<String>,
+    },
+    ConnectionClosed,
+}
+
+/// Wait for a prompt response. On timeout, send session/cancel and keep the
+/// response receiver alive until Peri confirms the cancelled turn has settled.
+pub async fn wait_prompt_with_cancel<F, Fut>(
+    rx: &mut oneshot::Receiver<RawMessage>,
+    prompt_timeout: std::time::Duration,
+    cancel_settle_timeout: std::time::Duration,
+    cancel: F,
+) -> PromptWaitOutcome
+where
+    F: FnOnce() -> Fut,
+    Fut: Future<Output = Result<(), String>>,
+{
+    match tokio::time::timeout(prompt_timeout, &mut *rx).await {
+        Ok(Ok(raw)) => PromptWaitOutcome::Response(raw),
+        Ok(Err(_)) => PromptWaitOutcome::ConnectionClosed,
+        Err(_) => {
+            let cancel_error = cancel().await.err();
+            let response = match tokio::time::timeout(cancel_settle_timeout, &mut *rx).await {
+                Ok(Ok(raw)) => Some(raw),
+                Ok(Err(_)) | Err(_) => None,
+            };
+            PromptWaitOutcome::CancelledAfterTimeout {
+                response,
+                cancel_error,
+            }
+        }
+    }
 }
 
 impl AcpClient {
@@ -84,8 +126,13 @@ impl AcpClient {
             "params": params,
         });
 
-        let line = serde_json::to_string(&req)
-            .map_err(|e| format!("serialize failed: {}", e))?;
+        let line = match serde_json::to_string(&req) {
+            Ok(line) => line,
+            Err(error) => {
+                self.remove_pending(id);
+                return Err(format!("serialize failed: {}", error));
+            }
+        };
 
         if self.write_tx.send(line).await.is_err() {
             self.remove_pending(id);
@@ -154,8 +201,13 @@ impl AcpClient {
             },
         });
 
-        let line = serde_json::to_string(&req)
-            .map_err(|e| format!("serialize failed: {}", e))?;
+        let line = match serde_json::to_string(&req) {
+            Ok(line) => line,
+            Err(error) => {
+                self.remove_pending(id);
+                return Err(format!("serialize failed: {}", error));
+            }
+        };
 
         Ok((id, line, rx))
     }
@@ -319,13 +371,12 @@ impl AcpClient {
         }
     }
 
-    /// P1: Load a persisted session — Peri replays history via session/update
-    pub async fn load_session(&self, session_id: &str, cwd: &str) -> Result<(), String> {
+    /// Load a persisted session. Peri replays history before returning the response.
+    pub async fn load_session(&self, session_id: &str, cwd: &str) -> Result<serde_json::Value, String> {
         self.call_async(METHOD_SESSION_LOAD, serde_json::json!({
             "sessionId": session_id,
             "cwd": cwd,
-        })).await?;
-        Ok(())
+        })).await
     }
 
     /// P1: List persisted sessions from ThreadStore
@@ -335,5 +386,74 @@ impl AcpClient {
             params["cwd"] = serde_json::Value::String(c.to_string());
         }
         self.call_async(METHOD_SESSION_LIST, params).await
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::sync::atomic::{AtomicBool, Ordering};
+
+    fn response() -> RawMessage {
+        RawMessage {
+            id: Some(1),
+            method: None,
+            result: Some(serde_json::json!({"stopReason": "cancelled"})),
+            params: None,
+            error: None,
+        }
+    }
+
+    #[tokio::test]
+    async fn timeout_sends_cancel_and_waits_for_final_response() {
+        let (tx, mut rx) = oneshot::channel();
+        let cancel_called = Arc::new(AtomicBool::new(false));
+        let cancel_called_for_task = cancel_called.clone();
+
+        let outcome = wait_prompt_with_cancel(
+            &mut rx,
+            std::time::Duration::from_millis(10),
+            std::time::Duration::from_millis(200),
+            move || async move {
+                cancel_called_for_task.store(true, Ordering::SeqCst);
+                tx.send(response()).map_err(|_| "receiver closed".to_string())
+            },
+        )
+        .await;
+
+        assert!(cancel_called.load(Ordering::SeqCst));
+        match outcome {
+            PromptWaitOutcome::CancelledAfterTimeout { response, cancel_error } => {
+                assert!(cancel_error.is_none());
+                assert_eq!(
+                    response.and_then(|raw| raw.result)
+                        .and_then(|value| value.get("stopReason").cloned()),
+                    Some(serde_json::json!("cancelled"))
+                );
+            }
+            other => panic!("unexpected outcome: {other:?}"),
+        }
+    }
+
+    #[tokio::test]
+    async fn response_before_timeout_does_not_send_cancel() {
+        let (tx, mut rx) = oneshot::channel();
+        tx.send(response()).expect("receiver must be open");
+        let cancel_called = Arc::new(AtomicBool::new(false));
+        let cancel_called_for_task = cancel_called.clone();
+
+        let outcome = wait_prompt_with_cancel(
+            &mut rx,
+            std::time::Duration::from_secs(1),
+            std::time::Duration::from_millis(10),
+            move || async move {
+                cancel_called_for_task.store(true, Ordering::SeqCst);
+                Ok(())
+            },
+        )
+        .await;
+
+        assert!(!cancel_called.load(Ordering::SeqCst));
+        assert!(matches!(outcome, PromptWaitOutcome::Response(_)));
     }
 }
