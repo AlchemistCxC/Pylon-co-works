@@ -20,6 +20,7 @@ function EkgWidget() {
   const barTrackColor = useStore(s => s.barTrackColor)
   const barFillColor = useStore(s => s.barFillColor)
   const barFillFollow = useStore(s => s.barFillFollow)
+  const barHeight = useStore(s => s.barHeight) || 10
   const ekgGreen = useStore(s => s.ekgGreen)
   const ekgYellow = useStore(s => s.ekgYellow)
   const ekgRed = useStore(s => s.ekgRed)
@@ -28,11 +29,15 @@ function EkgWidget() {
   const ccScale = useStore(s => (s.ccScale || {})['ekg'] ?? 100)
   const ccStyle = useStore(s => s.ccStyle) || 'bar'
   // 柱状条
-  if (ccStyle === 'bar' || ccStyle === 'numeric') {
+  if (ccStyle === 'numeric') {
+    return <span className="ekg-pct" style={{ color, fontSize: `${ccScale}%` }}>{pct}%</span>
+  }
+  if (ccStyle === 'bar') {
     return (
       <div className="ekg-bar" style={{
         '--bar-fill': `${pct}%`, '--bar-color': barFill,
         '--bar-track': barTrackColor || 'rgba(0,0,0,0.18)',
+        '--bar-h': `${barHeight}px`,
         fontSize: `${ccScale}%`,
       } as React.CSSProperties}>
         <div className="ekg-bar-track" />
@@ -483,12 +488,6 @@ function PropertyPanel({ id, onClose, onExit }: { id: string; onClose: () => voi
               <div className="cc-prop-field"><label>柱子颜色</label><ColorPopover value={theme.barFillColor || ''} onChange={v => up('barFillColor', v)} /></div>
             )}
           </>}
-          <div className="cc-prop-field"><label>显示模式</label>
-            <div className="set-preset-row">
-              <button className={`set-preset-chip ${theme.tokenDisplay === 'ekg' ? 'active' : ''}`} onClick={() => up('tokenDisplay', 'ekg')}>ECG</button>
-              <button className={`set-preset-chip ${theme.tokenDisplay === 'numeric' ? 'active' : ''}`} onClick={() => up('tokenDisplay', 'numeric')}>数字</button>
-            </div>
-          </div>
         </>}
 
         {id === 'model' && <>
