@@ -391,9 +391,12 @@ async fn close_session(state: tauri::State<'_, AppState>, source: String) -> Res
 
 #[tauri::command]
 async fn cancel_prompt(state: tauri::State<'_, AppState>, source: String) -> Result<(), String> {
+    let generation = state.current_generation();
     let peri_id = state.get_peri_id(&source).map_err(|e| e.to_string())?;
     // Fire-and-forget notification — Peri will respond with stopReason=cancelled
-    state.acp.lock().await.cancel_session(&peri_id).await
+    state.acp.lock().await.cancel_session(&peri_id).await?;
+    state.ensure_generation(generation)?;
+    Ok(())
 }
 
 #[tauri::command]
