@@ -11,7 +11,10 @@
 3. 汇报给我，等我确认后再动手修
 
 项目根目录：`G:\Project\prism-desktop`
-ACP 协议文档：`ACP-SPEC.md`
+ACP 协议以 Peri 源码为准——**ACP-SPEC.md 可能是错的，不要参考。** 直接看 Peri 源码：
+- `F:\A-I\Agent\Peri\peri-tui\src\acp_stdio\` — ACP stdin/stdout 服务端（session/create、prompt、config、notification）
+- `F:\A-I\Agent\Peri\peri-tui\src\acp_server\` — 请求路由 + 通知发送
+- `F:\A-I\Agent\Peri\acp-hub\` — ACP hub/router
 前后端 API 契约：`docs/api-reference.md`
 
 下面是我已知的问题清单（可能不完整，你审计后补充）：
