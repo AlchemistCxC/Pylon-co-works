@@ -43,7 +43,6 @@ pub struct AcpClient {
     pending: Arc<[Mutex<Pending>; PENDING_SHARDS]>,
     /// Broadcast channel for all received messages (responses + notifications).
     pub rx: broadcast::Receiver<RawMessage>,
-    tx: broadcast::Sender<RawMessage>,
     /// Set when the child process exits unexpectedly.
     pub crashed: Arc<AtomicBool>,
 }
@@ -298,7 +297,7 @@ impl AcpClient {
                 });
 
                 let client = AcpClient {
-                    child, write_tx, next_id: AtomicU64::new(1), pending, rx, tx,
+                    child, write_tx, next_id: AtomicU64::new(1), pending, rx,
                     crashed,
                 };
                 // Initialize
