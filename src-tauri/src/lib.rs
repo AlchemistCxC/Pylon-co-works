@@ -458,7 +458,7 @@ async fn agent_status(state: tauri::State<'_, AppState>) -> Result<serde_json::V
 
 #[tauri::command]
 async fn reload_agents(state: tauri::State<'_, AppState>) -> Result<(), String> {
-    let new_agents = agent_config::load();
+    let new_agents = agent_config::load()?;
     let mut agents = state.agents.lock().map_err(|e| e.to_string())?;
     *agents = new_agents;
     Ok(())
@@ -648,14 +648,38 @@ async fn export_session(
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
-    let agents = agent_config::load();
-    let default_agent_id = agent_config::default_agent_id(&agents).to_string();
-    let default_agent = agents.get(&default_agent_id).expect("default agent not found").clone();
+    let agents = match agent_config::load() {
+        Ok(agents) => agents,
+        Err(error) => {
+            eprintln!("Pylon agent configuration error: {error}");
+            HashMap::new()
+        }
+    };
+    let default_agent_id = agent_config::default_agent_id(&agents).unwrap_or("").to_string();
+    let default_agent = agents.get(&default_agent_id).cloned();
     let agents_for_state = agents;
 
-    let rt = tokio::runtime::Runtime::new().expect("failed to create tokio runtime");
+    let rt = match tokio::runtime::Runtime::new() {
+        Ok(rt) => rt,
+        Err(error) => {
+            eprintln!("Pylon runtime initialization failed: {error}");
+            return;
+        }
+    };
     rt.block_on(async {
-        let acp = Arc::new(tokio::sync::Mutex::new(AcpClient::connect(&default_agent).await.expect("failed to connect ACP agent")));
+        let acp = Arc::new(tokio::sync::Mutex::new(match default_agent {
+            Some(agent) => match AcpClient::connect(&agent).await {
+                Ok(client) => client,
+                Err(error) => {
+                    eprintln!("Pylon ACP agent unavailable: {error}");
+                    AcpClient::disconnected()
+                }
+            },
+            None => {
+                eprintln!("Pylon has no configured Agent; start in disconnected mode");
+                AcpClient::disconnected()
+            }
+        }));
         let acp_for_shutdown = acp.clone();
 
         tauri::Builder::default()
@@ -700,6 +724,6 @@ pub fn run() {
                 }
             })
             .run(tauri::generate_context!())
-            .expect("error while running tauri application");
+            .unwrap_or_else(|error| eprintln!("error while running tauri application: {error}"));
     });
 }

@@ -48,6 +48,10 @@ struct ManagedChild {
 }
 
 impl ManagedChild {
+    fn empty() -> Self {
+        Self { child: None }
+    }
+
     fn new(child: Child) -> Self {
         Self { child: Some(child) }
     }
@@ -158,6 +162,20 @@ where
 }
 
 impl AcpClient {
+    pub fn disconnected() -> Self {
+        let (write_tx, write_rx) = mpsc::channel(1);
+        drop(write_rx);
+        let (_tx, rx) = broadcast::channel(BROADCAST_CAP);
+        Self {
+            child: ManagedChild::empty(),
+            write_tx,
+            next_id: AtomicU64::new(1),
+            pending: Arc::new(std::array::from_fn(|_| Mutex::new(HashMap::new()))),
+            rx,
+            crashed: Arc::new(AtomicBool::new(true)),
+        }
+    }
+
     pub fn remove_pending(&self, id: u64) {
         if let Ok(mut pending) = self.pending_shard(id).lock() {
             pending.remove(&id);
