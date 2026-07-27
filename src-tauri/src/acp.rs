@@ -135,8 +135,24 @@ impl AcpClient {
         })).await
     }
 
-    /// Prepare a prompt request without writing to stdin. Returns (id, serialized_line, response_rx).
-    /// Caller must send the line via write_tx after releasing the outer lock.
+    /// Send a prompt request and guarantee pending cleanup on every exit path.
+    pub async fn prompt(&self, session_id: &str, text: &str) -> Result<RawMessage, String> {
+        let (id, line, rx) = self.prepare_prompt(session_id, text)?;
+        if self.write_tx.send(line).await.is_err() {
+            self.remove_pending(id);
+            return Err("ACP connection closed".to_string());
+        }
+        match tokio::time::timeout(std::time::Duration::from_secs(PROMPT_TIMEOUT_SECS), rx).await {
+            Ok(Ok(raw)) => Ok(raw),
+            Ok(Err(_)) => Err("ACP connection closed".to_string()),
+            Err(_) => {
+                self.remove_pending(id);
+                Err(format!("prompt timeout after {}s", PROMPT_TIMEOUT_SECS))
+            }
+        }
+    }
+
+    /// Prepare a prompt request without writing to stdin.
     pub fn prepare_prompt(&self, session_id: &str, text: &str) -> Result<(u64, String, oneshot::Receiver<RawMessage>), String> {
         let id = self.next_id.fetch_add(1, Ordering::Relaxed);
         let (tx, rx) = oneshot::channel();

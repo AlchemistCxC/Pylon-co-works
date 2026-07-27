@@ -243,43 +243,29 @@ async fn send_message(
         format!("{}{}", attach_prefix, content)
     };
 
-    let user_content = content.clone();
-    let (write_tx, (_id, prompt_line, rx)) = {
-        let acp = state.acp.lock().await;
-        let tx = acp.write_tx.clone();
-        let prompt = acp.prepare_prompt(&peri_id, &prompt_content)?;
-        (tx, prompt)
-    };
-    write_tx.send(prompt_line).await.map_err(|_| "ACP connection closed".to_string())?;
     state.pet.lock().map(|mut p| pet::on_user_sent(&mut p)).ok();
-    let _ = window.emit("peri:user", serde_json::json!({ "source": source, "content": user_content }));
-
-    let src = source.clone();
-    let pet = state.pet.clone();
-    let result = tokio::time::timeout(Duration::from_secs(acp::PROMPT_TIMEOUT_SECS), rx).await;
+    let _ = window.emit("peri:user", serde_json::json!({ "source": source, "content": content }));
+    let result = state.acp.lock().await.prompt(&peri_id, &prompt_content).await;
 
     match result {
-        Ok(Ok(raw)) => {
+        Ok(raw) => {
             if let Some(error) = raw.error {
                 let error = error.to_string();
-                let _ = window.emit("peri:error", serde_json::json!({"source": src, "error": error}));
-                let _ = pet.lock().map(|mut p| pet::on_error(&mut p));
+                let _ = window.emit("peri:error", serde_json::json!({"source": source, "error": error}));
+                let _ = state.pet.lock().map(|mut p| pet::on_error(&mut p));
                 Err(error)
             } else {
                 let data = raw.result.unwrap_or(serde_json::Value::Null);
-                let _ = window.emit("peri:done", serde_json::json!({"source": src, "data": data}));
-                let _ = pet.lock().map(|mut p| pet::on_done(&mut p));
+                let _ = window.emit("peri:done", serde_json::json!({"source": source, "data": data}));
+                let _ = state.pet.lock().map(|mut p| pet::on_done(&mut p));
                 Ok(peri_id)
             }
         }
-        Ok(Err(_)) => {
-            let _ = pet.lock().map(|mut p| pet::on_error(&mut p));
-            Err("ACP connection closed".to_string())
+        Err(error) if error.starts_with("prompt timeout") => {
+            let _ = window.emit("peri:error", serde_json::json!({"source": source, "error": error}));
+            Err(error)
         }
-        Err(_) => {
-            let _ = window.emit("peri:error", serde_json::json!({"source": source, "error": "timed out after 300s"}));
-            Err("timeout".to_string())
-        }
+        Err(error) => Err(error),
     }
 }
 
