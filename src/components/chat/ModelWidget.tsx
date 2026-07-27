@@ -1,5 +1,5 @@
 import { useStore } from '../../store'
-import { invoke } from '@tauri-apps/api/core'
+import { setSessionModel } from './sessionModel'
 import * as DropdownMenu from '@radix-ui/react-dropdown-menu'
 
 // 无后端 session 时的降级列表（预览/未连接）
@@ -29,11 +29,8 @@ export default function ModelWidget({ sessionSource }: Props) {
   const setModel = (m: string) => {
     if (m === model) return
     if (sessionSource) {
-      // 主路径：通知后端 + 乐观更新本地 sessionConfig
-      useStore.getState().setSessionConfig(sessionSource, { model: m })
-      invoke('set_config_option', { source: sessionSource, key: 'model', value: m }).catch(() => {
-        // 失败回滚
-        useStore.getState().setSessionConfig(sessionSource, { model })
+      setSessionModel(sessionSource, m).catch(error => {
+        window.dispatchEvent(new CustomEvent('pylon:model-error', { detail: String(error) }))
       })
     } else {
       // 降级：无 session（预览等），只改 profile

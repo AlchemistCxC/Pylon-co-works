@@ -2,6 +2,7 @@ import { useState, useRef, KeyboardEvent, useEffect, forwardRef, useImperativeHa
 import { invoke } from '@tauri-apps/api/core'
 import { open, save } from '@tauri-apps/plugin-dialog'
 import { useStore } from '../../store'
+import { setSessionModel } from './sessionModel'
 import { Paperclip, ArrowUp } from 'lucide-react'
 import './InputBar.css'
 
@@ -52,6 +53,15 @@ export default forwardRef<{ send: () => void; attachFile: () => void; cancel: ()
     }
   }, [value])
 
+  useEffect(() => {
+    const onModelError = (event: Event) => {
+      const message = (event as CustomEvent<string>).detail
+      setSendError(message || '模型切换失败')
+    }
+    window.addEventListener('pylon:model-error', onModelError)
+    return () => window.removeEventListener('pylon:model-error', onModelError)
+  }, [])
+
   // 全局取消：焦点不在输入框（如阅读长回复）时，Esc / Ctrl+C 也能中断生成
   useEffect(() => {
     const onGlobalKey = (e: globalThis.KeyboardEvent) => {
@@ -73,9 +83,21 @@ export default forwardRef<{ send: () => void; attachFile: () => void; cancel: ()
   const execCommand = async (cmd: string, rest: string) => {
     switch (cmd) {
       case '/model': {
-        const m = rest.trim() || 'deepseek-v4-flash'
-        const p = profiles.find(x => x.id === activeProfileId)
-        if (p) useStore.getState().addProfile({ ...p, model: m })
+        const model = rest.trim()
+        if (!model) {
+          setSendError('请输入模型名称')
+          return false
+        }
+        if (!sessionSource) {
+          setSendError('当前会话不可用')
+          return false
+        }
+        try {
+          await setSessionModel(sessionSource, model)
+        } catch (error) {
+          setSendError(String(error))
+          return false
+        }
         break
       }
       case '/mode': {
@@ -105,6 +127,7 @@ export default forwardRef<{ send: () => void; attachFile: () => void; cancel: ()
     }
     setValue('')
     setCmdIdx(0)
+    return true
   }
 
   const send = async () => {
