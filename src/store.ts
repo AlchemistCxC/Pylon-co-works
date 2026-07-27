@@ -53,6 +53,7 @@ type ThemeState = ThemeSettings & {
   profiles: Profile[]
   activeProfileId: string
   sessions: Session[]
+  sessionsHydrated: boolean
   users: UserMapping[]
   setActiveProfile: (id: string) => void
   addProfile: (p: Profile) => void
@@ -62,6 +63,7 @@ type ThemeState = ThemeSettings & {
   replaceSessions: (sessions: Session[]) => void
   setSessionPeriId: (id: string, periId: string) => void
   restoreSessions: () => Session[]
+  hydrateSessions: () => void
   getUser: (source: string) => UserMapping | undefined
   updateTheme: (partial: Partial<ThemeSettings>) => void
   liveTokensUsed: number
@@ -131,14 +133,16 @@ export const useStore = create<ThemeState>()(persist(
 
   profiles: DEFAULT_PROFILES,
   activeProfileId: DEFAULT_PROFILES[0].id,
-  sessions: (() => {
+  sessions: [],
+  sessionsHydrated: false,
+  hydrateSessions: () => {
     try {
-      return loadSessions(localStorage, DEFAULT_PROFILES)
+      set({ sessions: loadSessions(localStorage, get().profiles), sessionsHydrated: true })
     } catch (error) {
       console.error('Session 持久化读取失败', error)
+      set({ sessions: [], sessionsHydrated: true })
     }
-    return []
-  })(),
+  },
   users: [
     { id: 'qq:user:14CE', name: '14CE' },
     { id: 'qq:user:unknown', name: '访客' },
@@ -264,6 +268,6 @@ export const useStore = create<ThemeState>()(persist(
   )
   return { ...state, ...normalized } as ThemeState
 }, partialize: (state) => {
-  const { sessions, users, setActiveProfile, addProfile, addSession, removeSession, updateSession, replaceSessions, setSessionPeriId, restoreSessions, getUser, updateTheme, setLiveStats, liveCommands, sessionConfig, setSessionConfig, sessionModes, setSessionMode, liveTokensUsed, liveTokensMax, liveCacheReadTokens, liveMode, livePrismOn, liveGenerating, liveGeneratingSources, agents, setAgents, setActiveAgent, applyZonePreset, setZoneField, setGlobalPreset, presets, dirty, ...persisted } = state as any
+  const { sessions, sessionsHydrated, users, setActiveProfile, addProfile, addSession, removeSession, updateSession, replaceSessions, setSessionPeriId, restoreSessions, hydrateSessions, getUser, updateTheme, setLiveStats, liveCommands, sessionConfig, setSessionConfig, sessionModes, setSessionMode, liveTokensUsed, liveTokensMax, liveCacheReadTokens, liveMode, livePrismOn, liveGenerating, liveGeneratingSources, agents, setAgents, setActiveAgent, applyZonePreset, setZoneField, setGlobalPreset, presets, dirty, ...persisted } = state as any
   return persisted
-}}))
+}, onRehydrateStorage: () => state => state?.hydrateSessions()}))
