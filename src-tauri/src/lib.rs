@@ -404,8 +404,9 @@ async fn load_persisted_session(
     state: tauri::State<'_, AppState>,
     source: String,
     peri_id: String,
+    cwd: Option<String>,
 ) -> Result<(), String> {
-    let cwd = state.agent_cwd();
+    let cwd = cwd.unwrap_or_else(|| state.agent_cwd());
     state.acp.lock().await.load_session(&peri_id, &cwd).await?;
     state.sessions.lock().map_err(|e| e.to_string())?
         .insert(source, SessionInfo { peri_id: peri_id.clone(), persona: String::new(), cwd, has_first_prompt: true, title: String::new(), model: String::new(), tokens_in: 0, tokens_out: 0, tokens_total: 0, context_size: 0 });

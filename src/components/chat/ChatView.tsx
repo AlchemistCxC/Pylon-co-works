@@ -120,7 +120,7 @@ const ChatView = React.memo(function ChatView({ sessionId }: Props) {
 
     // new_session 返回可能是 string(periId) 或 { sessionId, configOptions } — 兼容处理
     const createSession = () => {
-      invoke<any>('new_session', { source: s.source, persona }).then(res => {
+      invoke<any>('new_session', { source: s.source, persona, cwd: s.workdir || undefined }).then(res => {
         const periId = typeof res === 'string' ? res : (res?.sessionId ?? res?.periId)
         if (periId) useStore.getState().setSessionPeriId(s.id, periId)
         const cfg = extractModelConfig(res?.configOptions)
@@ -129,7 +129,7 @@ const ChatView = React.memo(function ChatView({ sessionId }: Props) {
     }
 
     if (s.periId) {
-      invoke('load_persisted_session', { source: s.source, periId: s.periId }).then(() => {
+      invoke('load_persisted_session', { source: s.source, periId: s.periId, cwd: s.workdir || undefined }).then(() => {
         // load 成功但 Peri 不一定返回 configOptions，用 fallback 兜底
         if (!useStore.getState().sessionConfig[s.source]) {
           useStore.getState().setSessionConfig(s.source, {

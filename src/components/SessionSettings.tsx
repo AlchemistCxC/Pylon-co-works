@@ -1,6 +1,7 @@
 import { useState } from 'react'
 import * as Dialog from '@radix-ui/react-dialog'
-import { useStore, Session } from '../store'
+import { invoke } from '@tauri-apps/api/core'
+import { useStore } from '../store'
 import './SessionSettings.css'
 
 interface Props { sessionId: string; open: boolean; onClose: () => void; onDeleted?: () => void }
@@ -8,15 +9,16 @@ interface Props { sessionId: string; open: boolean; onClose: () => void; onDelet
 export default function SessionSettings({ sessionId, open, onClose, onDeleted }: Props) {
   const sessions = useStore(s => s.sessions)
   const s = sessions.find(s => s.id === sessionId)
-  if (!s) return null  // session deleted, close gracefully
-  const [name, setName] = useState(s.name)
-  const [platform, setPlatform] = useState(s.platform || 'local')
-  const [workdir, setWorkdir] = useState(s.workdir || '')
-  const [sessionPrompt, setSessionPrompt] = useState(s.sessionPrompt || '')
-  const [skills, setSkills] = useState(s.skills || [])
-  const [hooks, setHooks] = useState(s.hooks || [])
+  const [name, setName] = useState(s?.name || '')
+  const [platform, setPlatform] = useState(s?.platform || 'local')
+  const [workdir, setWorkdir] = useState(s?.workdir || '')
+  const [sessionPrompt, setSessionPrompt] = useState(s?.sessionPrompt || '')
+  const [skills, setSkills] = useState(s?.skills || [])
+  const [hooks, setHooks] = useState(s?.hooks || [])
   const [newSkill, setNewSkill] = useState('')
   const [newHook, setNewHook] = useState('')
+
+  if (!s) return null
 
   const save = () => {
     const updated = sessions.map(ss => ss.id === sessionId ? {
@@ -29,9 +31,11 @@ export default function SessionSettings({ sessionId, open, onClose, onDeleted }:
 
   const del = () => {
     if (!window.confirm('删除会话？')) return
+    invoke('close_session', { source: s.source }).catch(() => {})
     const updated = sessions.filter(ss => ss.id !== sessionId)
     useStore.setState({ sessions: updated })
     localStorage.setItem('pylon-sessions', JSON.stringify(updated))
+    localStorage.removeItem('pylon-msgs-' + sessionId)
     onClose()
     onDeleted?.()
   }
