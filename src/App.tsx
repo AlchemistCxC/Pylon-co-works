@@ -8,6 +8,7 @@ import ProfileEditor from './components/ProfileEditor'
 import PrismSheet from './components/PrismSheet'
 import SessionSettings from './components/SessionSettings'
 import { useStore } from './store'
+import { belongsToProfile } from './components/chat/sessionProfile'
 import { useShallow } from 'zustand/react/shallow'
 import './App.css'
 
@@ -22,12 +23,18 @@ export default function App() {
   const [sessionSettingsId, setSessionSettingsId] = useState<string | null>(null)
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false)
   const [activeTab, setActiveTab] = useState<'peri' | 'prism'>('peri')
+  const activeProfileId = useStore(s => s.activeProfileId)
+  const sessions = useStore(s => s.sessions)
 
   useEffect(() => {
     const clearActiveSession = () => setActiveSession(null)
     window.addEventListener('pylon:agent-switched', clearActiveSession)
     return () => window.removeEventListener('pylon:agent-switched', clearActiveSession)
   }, [])
+
+  useEffect(() => {
+    if (!belongsToProfile(activeSession, activeProfileId, sessions)) setActiveSession(null)
+  }, [activeProfileId, activeSession, sessions])
 
   useEffect(() => {
     invoke('list_agents').then((list: any) => {

@@ -6,6 +6,7 @@ import { setSessionModel } from './sessionModel'
 import { setSessionMode } from './sessionMode'
 import { runSendTransaction } from './sendTransaction'
 import { buildSendMessagePayload } from './sessionRuntime'
+import { resolveSessionProfile } from './sessionProfile'
 import { Paperclip, ArrowUp } from 'lucide-react'
 import './InputBar.css'
 
@@ -27,8 +28,8 @@ export default forwardRef<{ send: () => void; attachFile: () => void; cancel: ()
   const [attached, setAttached] = useState<{path:string;name:string;size:number}[]>([])
   const lastMsg = useRef('')
   const textareaRef = useRef<HTMLTextAreaElement>(null)
-  const activeProfileId = useStore(s => s.activeProfileId)
   const profiles = useStore(s => s.profiles)
+  const sessions = useStore(s => s.sessions)
   const addSession = useStore(s => s.addSession)
   const liveCommands = useStore(s => s.liveCommands || [])
   const inputMode = useStore(s => s.inputMode)
@@ -39,8 +40,8 @@ export default forwardRef<{ send: () => void; attachFile: () => void; cancel: ()
   // 当前 session 是否正在生成（用于把发送按钮切成"停止"）
   const generating = useStore(s => sessionSource != null && (s.liveGeneratingSources || []).includes(sessionSource))
 
-  const activeProfile = profiles.find(p => p.id === activeProfileId)
-  const persona = activeProfile?.persona || ''
+  const sessionProfile = resolveSessionProfile(sessionId, sessions, profiles)
+  const persona = sessionProfile?.persona || ''
 
   const COMMANDS = liveCommands.length > 0
     ? liveCommands.map((c: {name: string; input_hint?: string; description?: string}) => ({ cmd: '/' + c.name, args: c.input_hint ? ' ' + c.input_hint : '', info: c.description || '' }))
