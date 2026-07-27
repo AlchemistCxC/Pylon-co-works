@@ -28,8 +28,12 @@ export default forwardRef<{ send: () => void; attachFile: () => void; cancel: ()
   const addSession = useStore(s => s.addSession)
   const liveCommands = useStore(s => s.liveCommands || [])
   const inputMode = useStore(s => s.inputMode)
+  const sessionSource = useStore(s => {
+    if (!sessionId) return null
+    return s.sessions.find(session => session.id === sessionId || session.source === sessionId)?.source ?? sessionId
+  })
   // 当前 session 是否正在生成（用于把发送按钮切成"停止"）
-  const generating = useStore(s => s.liveGenerating === sessionId && sessionId != null)
+  const generating = useStore(s => sessionSource != null && s.liveGenerating === sessionSource)
 
   const activeProfile = profiles.find(p => p.id === activeProfileId)
   const persona = activeProfile?.persona || ''
@@ -76,16 +80,16 @@ export default forwardRef<{ send: () => void; attachFile: () => void; cancel: ()
       }
       case '/mode': {
         const m = rest.trim()
-        if (m && sessionId) {
+        if (m && sessionSource) {
           useStore.getState().setLiveStats({ liveMode: m })
-          invoke('set_mode', { source: sessionId, mode: m }).catch(() => {})
+          invoke('set_mode', { source: sessionSource, mode: m }).catch(() => {})
         }
         break
       }
       case '/new': addSession(`session-${Date.now().toString(36)}`); break
-      case '/compact': await invoke('send_message', { source: sessionId, content: '/compact', persona }); break
+      case '/compact': await invoke('send_message', { source: sessionSource || sessionId, content: '/compact', persona }); break
       case '/export': {
-        const s = useStore.getState().sessions.find(x => x.id === sessionId)
+        const s = useStore.getState().sessions.find(x => x.id === sessionId || x.source === sessionId)
         if (s?.periId) {
           await invoke('export_session', { periId: s.periId, format: 'markdown', outputPath: `session-${s.periId}.md` })
         }
@@ -109,7 +113,7 @@ export default forwardRef<{ send: () => void; attachFile: () => void; cancel: ()
     }
 
     const s = useStore.getState().sessions.find(s => s.id === sessionId || s.source === sessionId)
-    const source = s?.source || sessionId
+    const source = sessionSource || s?.source || sessionId
     const sessionPrompt = s?.sessionPrompt || ''
 
     try { await invoke('send_message', { source, content: text, persona, sessionPrompt, attachments: attached.map(a => a.path) }) }
@@ -121,9 +125,7 @@ export default forwardRef<{ send: () => void; attachFile: () => void; cancel: ()
 
   const cancel = () => {
     if (!sessionId) return
-    const s = useStore.getState().sessions.find(s => s.id === sessionId || s.source === sessionId)
-    const source = s?.source || sessionId
-    invoke('cancel_prompt', { source }).catch(() => {})
+    invoke('cancel_prompt', { source: sessionSource || sessionId }).catch(() => {})
   }
 
   const attachFile = async () => {
@@ -136,7 +138,7 @@ export default forwardRef<{ send: () => void; attachFile: () => void; cancel: ()
     } catch (e) { /* cancelled */ }
   }
 
-  useImperativeHandle(ref, () => ({ send, attachFile, cancel }), [value, attached, sessionId, isCmd, filtered])
+  useImperativeHandle(ref, () => ({ send, attachFile, cancel }), [value, attached, sessionId, sessionSource, isCmd, filtered])
 
   const onKey = (e: KeyboardEvent) => {
     if (e.key === 'Escape' && generating) { e.preventDefault(); cancel(); return }
