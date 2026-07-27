@@ -8,12 +8,12 @@ import remarkGfm from 'remark-gfm'
 import { AnimatePresence, motion } from 'motion/react'
 import Anser from 'anser'
 import { Square } from 'lucide-react'
-import { toHtml } from 'hast-util-to-html'
 import { resolveLoadedMessages, serializeLoadedMessages, shouldStartLiveGeneration } from './replayState'
 import { canPersistMessages } from './messagePersistence'
 import { addGeneratingSource, removeGeneratingSource, updateSourceState } from './sessionEventState'
 import { resolveToolVisualStatus } from './toolStatus'
 import { extractMode, extractModelConfig, sessionResponseObject, type PeriDonePayload, type PeriUpdatePayload, type SessionResponse } from './acpTypes'
+import { highlightCode } from './codeHighlight'
 import './ChatView.css'
 
 // ── Peri spinner ──
@@ -445,15 +445,8 @@ function CodeBlock({ language, code }: { language?: string; code: string }) {
     if (!isMultiLine) return
     let cancelled = false
     const lang = language || 'text'
-    import('@wooorm/starry-night').then(async ({ common, createStarryNight }) => {
-      const starry = await createStarryNight(common)
-      const scope = starry.flagToScope(lang)
-      if (scope && !cancelled) {
-        // 整体高亮后用 CSS 拆行——避免逐行高亮丢失跨行 token 上下文
-        const root = starry.highlight(code, scope)
-        const html = toHtml(root as any)
-        if (!cancelled) setHighlighted({ html, lang })
-      }
+    highlightCode(lang, code).then(html => {
+      if (html && !cancelled) setHighlighted({ html, lang })
     }).catch(() => {})
     return () => { cancelled = true }
   }, [language, code, isMultiLine])
