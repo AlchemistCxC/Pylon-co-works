@@ -305,7 +305,7 @@ const ChatView = React.memo(function ChatView({ sessionId }: Props) {
             const max = upd.size || 131072
             if (sessionRef.current === source) {
               tokenCount.current = used
-              useStore.getState().setLiveStats({ liveTokensUsed: used, liveTokensMax: max, liveCacheHit: upd._meta?.cacheReadTokens || 0 })
+              useStore.getState().setLiveStats({ liveTokensUsed: used, liveTokensMax: max, liveCacheReadTokens: upd._meta?.cacheReadTokens || 0 })
             }
             break
           }

@@ -6,17 +6,11 @@ import ModeWidget from './chat/ModeWidget'
 import SendWidget from './chat/SendWidget'
 import AttachWidget from './chat/AttachWidget'
 import ColorPopover from './ColorPopover'
+import { formatCacheReadTokens, formatTokenCount } from '../tokenFormat'
 import './ControlCenter.css'
 import './chat/StatusBar.css'  // model/mode/send/attach widget 样式
 
 interface Props { sessionId: string | null }
-
-// ── 微型上下文组件（从 StatusBar 拆出——独立 widget）────────────
-function formatTokenSize(n: number) {
-  if (n >= 1_000_000) { const m = n / 1_000_000; return m >= 10 ? `${Math.round(m)}M` : `${m.toFixed(1)}M` }
-  if (n >= 1_000) { const k = n / 1_000; return k >= 10 ? `${Math.round(k)}K` : `${k.toFixed(1)}K` }
-  return `${n}`
-}
 
 function EkgWidget() {
   const tokensUsed = useStore(s => s.liveTokensUsed) || 0
@@ -72,12 +66,12 @@ function PctWidget() {
 function TokensWidget() {
   const tokensUsed = useStore(s => s.liveTokensUsed) || 0
   const tokensMax = useStore(s => s.liveTokensMax) || 128
-  const cacheHit = useStore(s => s.liveCacheHit) || 0
+  const cacheHit = useStore(s => s.liveCacheReadTokens) || 0
   const ccScale = useStore(s => (s.ccScale || {})['tokens'] ?? 100)
   return (
     <span className="pill-mono" style={{ borderLeft: 'none', padding: 0, fontSize: `${ccScale}%` }}>
-      {formatTokenSize(tokensUsed)}/{formatTokenSize(tokensMax)}
-      {cacheHit > 0 && <span style={{ color: '#34d399', marginLeft: 4 }}>{cacheHit}% hit</span>}
+      {formatTokenCount(tokensUsed)}/{formatTokenCount(tokensMax)}
+      {cacheHit > 0 && <span style={{ color: '#34d399', marginLeft: 4 }}>{formatCacheReadTokens(cacheHit)}</span>}
     </span>
   )
 }

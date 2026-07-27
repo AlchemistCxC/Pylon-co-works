@@ -64,7 +64,7 @@ type ThemeState = ThemeSettings & {
   updateTheme: (partial: Partial<ThemeSettings>) => void
   liveTokensUsed: number
   liveTokensMax: number
-  liveCacheHit: number
+  liveCacheReadTokens: number
   liveMode: string
   livePrismOn: boolean
   liveGenerating: string | null  // 兼容旧状态：最近开始生成的 session source
@@ -72,7 +72,7 @@ type ThemeState = ThemeSettings & {
   sessionModes: Record<string, string>
   setSessionMode: (source: string, mode?: string) => void
   liveCommands: { name: string; input_hint?: string; description?: string }[]
-  setLiveStats: (stats: Partial<{liveTokensUsed:number,liveTokensMax:number,liveCacheHit:number,liveMode:string,livePrismOn:boolean,liveGenerating:string|null,liveGeneratingSources:string[],liveCommands:any[]}>) => void
+  setLiveStats: (stats: Partial<{liveTokensUsed:number,liveTokensMax:number,liveCacheReadTokens:number,liveMode:string,livePrismOn:boolean,liveGenerating:string|null,liveGeneratingSources:string[],liveCommands:any[]}>) => void
   // 每会话的后端配置选项（model 列表/当前值等），key = session source
   sessionConfig: Record<string, SessionConfig>
   setSessionConfig: (source: string, cfg: Partial<SessionConfig>) => void
@@ -182,7 +182,7 @@ export const useStore = create<ThemeState>()(persist(
   getUser: (source) => get().users.find(u => u.id === source),
   updateTheme: (partial) => set(partial),
 
-  liveTokensUsed: 0, liveTokensMax: 131072, liveCacheHit: 0, liveMode: 'auto', livePrismOn: true, liveGenerating: null, liveGeneratingSources: [],
+  liveTokensUsed: 0, liveTokensMax: 131072, liveCacheReadTokens: 0, liveMode: 'auto', livePrismOn: true, liveGenerating: null, liveGeneratingSources: [],
   sessionModes: {},
   setSessionMode: (source, mode) => set(state => {
     const sessionModes = { ...state.sessionModes }
@@ -256,6 +256,6 @@ export const useStore = create<ThemeState>()(persist(
   )
   return { ...state, ...normalized } as ThemeState
 }, partialize: (state) => {
-  const { sessions, users, setActiveProfile, addProfile, addSession, removeSession, setSessionPeriId, restoreSessions, getUser, updateTheme, setLiveStats, liveCommands, sessionConfig, setSessionConfig, sessionModes, setSessionMode, liveTokensUsed, liveTokensMax, liveCacheHit, liveMode, livePrismOn, liveGenerating, liveGeneratingSources, agents, setAgents, setActiveAgent, applyZonePreset, setZoneField, setGlobalPreset, presets, dirty, ...persisted } = state as any
+  const { sessions, users, setActiveProfile, addProfile, addSession, removeSession, setSessionPeriId, restoreSessions, getUser, updateTheme, setLiveStats, liveCommands, sessionConfig, setSessionConfig, sessionModes, setSessionMode, liveTokensUsed, liveTokensMax, liveCacheReadTokens, liveMode, livePrismOn, liveGenerating, liveGeneratingSources, agents, setAgents, setActiveAgent, applyZonePreset, setZoneField, setGlobalPreset, presets, dirty, ...persisted } = state as any
   return persisted
 }}))

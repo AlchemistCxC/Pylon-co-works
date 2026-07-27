@@ -1,5 +1,6 @@
 import { useMemo, useState, useEffect } from 'react'
 import { useStore } from '../../store'
+import { formatCacheReadTokens, formatTokenCount } from '../../tokenFormat'
 import './StatusBar.css'
 
 /**
@@ -100,16 +101,10 @@ function wave(
   return pts.join(' ')
 }
 
-function fmtSize(n: number) {
-  if (n >= 1_000_000) { const m = n / 1_000_000; return m >= 10 ? `${Math.round(m)}M` : `${m.toFixed(1)}M` }
-  if (n >= 1_000) { const k = n / 1_000; return k >= 10 ? `${Math.round(k)}K` : `${k.toFixed(1)}K` }
-  return `${n}`
-}
-
 export default function StatusBar() {
   const tokensUsed = useStore(s => s.liveTokensUsed) || 0
   const tokensMax = useStore(s => s.liveTokensMax) || 128
-  const cacheHit = useStore(s => s.liveCacheHit) || 0
+  const cacheHit = useStore(s => s.liveCacheReadTokens) || 0
   const ekgGreen = useStore(s => s.ekgGreen)
   const ekgYellow = useStore(s => s.ekgYellow)
   const ekgRed = useStore(s => s.ekgRed)
@@ -221,8 +216,8 @@ export default function StatusBar() {
       )}
 
       <span className="ekg-pct" style={{ color }}>{pct}%</span>
-      <span className="pill-mono">{fmtSize(tokensUsed)}/{fmtSize(tokensMax)}</span>
-      {cacheHit > 0 && <span className="pill-mono" style={{ color: '#34d399' }}>{cacheHit}% hit</span>}
+      <span className="pill-mono">{formatTokenCount(tokensUsed)}/{formatTokenCount(tokensMax)}</span>
+      {cacheHit > 0 && <span className="pill-mono" style={{ color: '#34d399' }}>{formatCacheReadTokens(cacheHit)}</span>}
     </div>
   )
 }
