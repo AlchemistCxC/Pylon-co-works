@@ -45,38 +45,6 @@ impl Default for PetState {
     }
 }
 
-/// Growth tier (0-3). Tokens OR tools crossing threshold → level up.
-pub fn growth_stage(tokens: u64, tools: u64) -> u8 {
-    let token_tier = match tokens {
-        t if t > 5_000_000 => 3,
-        t if t > 500_000 => 2,
-        t if t > 50_000 => 1,
-        _ => 0,
-    };
-    let tool_tier = match tools {
-        t if t > 300 => 3,
-        t if t > 100 => 2,
-        t if t > 20 => 1,
-        _ => 0,
-    };
-    token_tier.max(tool_tier)
-}
-
-/// Cute display name based on growth stage.
-pub fn display_name(base: &str, stage: u8) -> String {
-    match stage {
-        0 => format!("小{base}"),
-        1 => format!("{base}酱"),
-        2 => format!("{base}师傅"),
-        _ => format!("老{base}"),
-    }
-}
-
-/// Generate full display name from state.
-pub fn full_name(state: &PetState) -> String {
-    let stage = growth_stage(state.total_tokens, state.tools_succeeded);
-    display_name(&state.name, stage)
-}
 
 // ── Speech bubble pools ──
 
@@ -195,11 +163,6 @@ pub fn on_tool_success(state: &mut PetState) {
 
 // ── Memories ──
 
-/// Store a memory snippet. Keeps at most 10.
-pub fn add_memory(state: &mut PetState, snippet: String) {
-    if state.memories.len() >= 10 { state.memories.remove(0); }
-    state.memories.push(snippet);
-}
 
 /// Recall a random memory. Returns (prefix, memory) or None if no memories.
 pub fn recall_memory(state: &mut PetState) -> Option<(&'static str, String)> {
