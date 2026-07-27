@@ -220,13 +220,12 @@ const ChatView = React.memo(function ChatView({ sessionId }: Props) {
           setSummary('')
         }
 
-        const sessions = useStore.getState().sessions
+        const store = useStore.getState()
+        const sessions = store.sessions
         const s = sessions.find(s => s.source === source)
         if (s?.name.startsWith('session-')) {
           const autoName = content.slice(0, 30)
-          const updated = sessions.map(ss => ss.id === s.id ? { ...ss, autoName, name: autoName } : ss)
-          useStore.setState({ sessions: updated })
-          localStorage.setItem('pylon-sessions', JSON.stringify(updated))
+          store.updateSession(s.id, { autoName, name: autoName })
         }
       }),
 

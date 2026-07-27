@@ -8,6 +8,8 @@ interface Props { sessionId: string; open: boolean; onClose: () => void; onDelet
 
 export default function SessionSettings({ sessionId, open, onClose, onDeleted }: Props) {
   const sessions = useStore(s => s.sessions)
+  const updateSession = useStore(s => s.updateSession)
+  const removeSession = useStore(s => s.removeSession)
   const s = sessions.find(s => s.id === sessionId)
   const [name, setName] = useState(s?.name || '')
   const [platform, setPlatform] = useState(s?.platform || 'local')
@@ -17,20 +19,14 @@ export default function SessionSettings({ sessionId, open, onClose, onDeleted }:
   if (!s) return null
 
   const save = () => {
-    const updated = sessions.map(ss => ss.id === sessionId ? {
-      ...ss, name, platform, workdir, sessionPrompt, lastActiveAt: Date.now()
-    } : ss)
-    useStore.setState({ sessions: updated })
-    localStorage.setItem('pylon-sessions', JSON.stringify(updated))
+    updateSession(sessionId, { name, platform, workdir, sessionPrompt, lastActiveAt: Date.now() })
     onClose()
   }
 
   const del = () => {
     if (!window.confirm('删除会话？')) return
     invoke('close_session', { source: s.source }).catch(() => {})
-    const updated = sessions.filter(ss => ss.id !== sessionId)
-    useStore.setState({ sessions: updated })
-    localStorage.setItem('pylon-sessions', JSON.stringify(updated))
+    removeSession(sessionId)
     localStorage.removeItem('pylon-msgs-' + sessionId)
     onClose()
     onDeleted?.()

@@ -1,6 +1,7 @@
 import { create } from 'zustand'
 import { persist } from 'zustand/middleware'
 import { normalizeProfileState, PROFILE_SCHEMA_VERSION } from './profilePersistence'
+import { loadSessions, persistSessions } from './sessionPersistence'
 
 export interface Profile { id: string; name: string; avatar?: string; persona: string; model: string }
 // 后端配置选项（来自 new_session 返回 & config_option_update 事件）
@@ -57,6 +58,8 @@ type ThemeState = ThemeSettings & {
   addProfile: (p: Profile) => void
   addSession: (name: string) => void
   removeSession: (id: string) => void
+  updateSession: (id: string, partial: Partial<Session>) => void
+  replaceSessions: (sessions: Session[]) => void
   setSessionPeriId: (id: string, periId: string) => void
   restoreSessions: () => Session[]
   getUser: (source: string) => UserMapping | undefined
@@ -130,14 +133,10 @@ export const useStore = create<ThemeState>()(persist(
   activeProfileId: DEFAULT_PROFILES[0].id,
   sessions: (() => {
     try {
-      const raw = localStorage.getItem('pylon-sessions') ?? localStorage.getItem('prism-sessions')
-      if (raw) {
-        const parsed = JSON.parse(raw)
-        localStorage.setItem('pylon-sessions', JSON.stringify(parsed))
-        localStorage.removeItem('prism-sessions')
-        return parsed
-      }
-    } catch { }
+      return loadSessions(localStorage, DEFAULT_PROFILES)
+    } catch (error) {
+      console.error('Session 持久化读取失败', error)
+    }
     return []
   })(),
   users: [
@@ -157,25 +156,35 @@ export const useStore = create<ThemeState>()(persist(
     const s: Session = { id: 's' + now.toString(36), name, source: 'local:' + name, profileId, createdAt: now, lastActiveAt: now, platform: 'local', workdir: '', sessionPrompt: '', skills: [], hooks: [], autoName: '' }
     set(state => {
       const sessions = [...state.sessions, s]
-      localStorage.setItem('pylon-sessions', JSON.stringify(sessions))
+      persistSessions(localStorage, sessions)
       return { sessions }
     })
   },
   removeSession: (id) => set(s => {
     const sessions = s.sessions.filter(x => x.id !== id)
-    localStorage.setItem('pylon-sessions', JSON.stringify(sessions))
+    persistSessions(localStorage, sessions)
+    return { sessions }
+  }),
+  updateSession: (id, partial) => set(s => {
+    const sessions = s.sessions.map(session => session.id === id ? { ...session, ...partial } : session)
+    persistSessions(localStorage, sessions)
+    return { sessions }
+  }),
+  replaceSessions: (sessions) => set(() => {
+    persistSessions(localStorage, sessions)
     return { sessions }
   }),
   setSessionPeriId: (id, periId) => set(s => {
     const sessions = s.sessions.map(ss => ss.id === id ? { ...ss, periId } : ss)
-    localStorage.setItem('pylon-sessions', JSON.stringify(sessions))
+    persistSessions(localStorage, sessions)
     return { sessions }
   }),
   restoreSessions: () => {
     try {
-      const raw = localStorage.getItem('pylon-sessions')
-      if (raw) return JSON.parse(raw) as Session[]
-    } catch {}
+      return loadSessions(localStorage, get().profiles)
+    } catch (error) {
+      console.error('Session 持久化恢复失败', error)
+    }
     return []
   },
   getUser: (source) => get().users.find(u => u.id === source),
@@ -255,6 +264,6 @@ export const useStore = create<ThemeState>()(persist(
   )
   return { ...state, ...normalized } as ThemeState
 }, partialize: (state) => {
-  const { sessions, users, setActiveProfile, addProfile, addSession, removeSession, setSessionPeriId, restoreSessions, getUser, updateTheme, setLiveStats, liveCommands, sessionConfig, setSessionConfig, sessionModes, setSessionMode, liveTokensUsed, liveTokensMax, liveCacheReadTokens, liveMode, livePrismOn, liveGenerating, liveGeneratingSources, agents, setAgents, setActiveAgent, applyZonePreset, setZoneField, setGlobalPreset, presets, dirty, ...persisted } = state as any
+  const { sessions, users, setActiveProfile, addProfile, addSession, removeSession, updateSession, replaceSessions, setSessionPeriId, restoreSessions, getUser, updateTheme, setLiveStats, liveCommands, sessionConfig, setSessionConfig, sessionModes, setSessionMode, liveTokensUsed, liveTokensMax, liveCacheReadTokens, liveMode, livePrismOn, liveGenerating, liveGeneratingSources, agents, setAgents, setActiveAgent, applyZonePreset, setZoneField, setGlobalPreset, presets, dirty, ...persisted } = state as any
   return persisted
 }}))

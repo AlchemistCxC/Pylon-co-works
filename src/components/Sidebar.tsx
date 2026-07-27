@@ -24,6 +24,7 @@ export default function Sidebar({ activeSession, onSelectSession, onProfileEdit,
   const sessions = useStore(s => s.sessions)
   const addSession = useStore(s => s.addSession)
   const removeSession = useStore(s => s.removeSession)
+  const updateSession = useStore(s => s.updateSession)
   const activeProfile = profiles.find(p => p.id === activeProfileId)
 
   const profileSessions = sessions.filter(s => s.profileId === activeProfileId)
@@ -66,10 +67,7 @@ export default function Sidebar({ activeSession, onSelectSession, onProfileEdit,
 
   const saveRename = (id: string) => {
     if (!renameValue.trim()) { setRenaming(null); return }
-    const updated = useStore.getState().sessions.map(ss =>
-      ss.id === id ? { ...ss, name: renameValue.trim(), lastActiveAt: Date.now() } : ss)
-    useStore.setState({ sessions: updated })
-    localStorage.setItem('pylon-sessions', JSON.stringify(updated))
+    updateSession(id, { name: renameValue.trim(), lastActiveAt: Date.now() })
     setRenaming(null)
   }
 

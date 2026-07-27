@@ -391,12 +391,11 @@ export default function Settings({ onClose }: { onClose?: () => void }) {
                         invoke('switch_agent', { name: a.id }).then(() => {
                           useStore.setState({
                             activeAgent: a.id,
-                            sessions: [],
                             sessionConfig: {},
                             liveGenerating: null,
                             liveGeneratingSources: [],
                           })
-                          localStorage.setItem('pylon-sessions', '[]')
+                          useStore.getState().replaceSessions([])
                           window.dispatchEvent(new CustomEvent('pylon:agent-switched'))
                           setActiveAgent(a.id)
                         }).catch(() => {})
