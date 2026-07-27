@@ -635,6 +635,7 @@ async fn export_session(
     format: String,
     output_path: String,
 ) -> Result<(), String> {
+    let generation = state.current_generation();
     let cwd = state.agent_cwd();
     let mut broadcast = state.acp.lock().await.rx.resubscribe();
     let messages: Arc<Mutex<Vec<serde_json::Value>>> = Arc::new(Mutex::new(Vec::new()));
@@ -665,6 +666,7 @@ async fn export_session(
         }
     });
     state.acp.lock().await.load_session(&peri_id, &cwd).await?;
+    state.ensure_generation(generation)?;
     handle.abort();
     if let Some(error) = replay_error.lock().map_err(|lock_error| lock_error.to_string())?.take() {
         return Err(error);
