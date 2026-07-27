@@ -187,13 +187,6 @@ impl AppState {
             .map(|s| s.peri_id.clone())
             .ok_or_else(|| PylonError::SessionNotFound(source.to_string()))
     }
-
-    fn remove_session(&self, source: &str) -> Result<String, PylonError> {
-        let mut sessions = self.sessions.lock().map_err(|e| PylonError::Acp(e.to_string()))?;
-        sessions.remove(source)
-            .map(|s| s.peri_id.clone())
-            .ok_or_else(|| PylonError::SessionNotFound(source.to_string()))
-    }
 }
 
 const MAX_SESSIONS: usize = 100;
@@ -376,10 +369,12 @@ async fn set_config_option(state: tauri::State<'_, AppState>, source: String, ke
 
 #[tauri::command]
 async fn close_session(state: tauri::State<'_, AppState>, source: String) -> Result<(), String> {
-    let peri_id = state.remove_session(&source).map_err(|e| e.to_string())?;
-    // Best-effort: notify agent, but don't fail if agent already gone
-    if let Err(e) = state.acp.lock().await.close_session(&peri_id).await {
-        log::warn!("close_session ACP: {}", e);
+    let _creation_guard = state.session_creation.lock().await;
+    let peri_id = state.get_peri_id(&source).map_err(|e| e.to_string())?;
+    state.acp.lock().await.close_session(&peri_id).await?;
+    let mut sessions = state.sessions.lock().map_err(|e| e.to_string())?;
+    if sessions.get(&source).map(|session| session.peri_id.as_str()) == Some(peri_id.as_str()) {
+        sessions.remove(&source);
     }
     Ok(())
 }
