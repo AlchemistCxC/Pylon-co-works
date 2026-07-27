@@ -263,7 +263,9 @@ async fn send_message(
                 if sessions.len() >= MAX_SESSIONS { return Err("max sessions reached".to_string()); }
             }
             let session_cwd = state.agent_cwd();
+            let generation = state.current_generation();
             let response = state.acp.lock().await.new_session(&session_cwd).await?;
+            state.ensure_generation(generation)?;
             let pid = AcpClient::session_id_from(&response)?;
             state.sessions.lock().map_err(|e| e.to_string())?
                 .insert(source.clone(), SessionInfo { peri_id: pid.clone(), persona: persona.clone(), cwd: session_cwd, has_first_prompt: false, title: String::new(), model: String::new(), tokens_in: 0, tokens_out: 0, tokens_total: 0, context_size: 0 });
