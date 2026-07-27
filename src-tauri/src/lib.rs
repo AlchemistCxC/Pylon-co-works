@@ -47,9 +47,14 @@ fn start_notification_dispatcher(state: &AppState, window: tauri::WebviewWindow)
                     Some(id) => id.to_string(),
                     None => { log::warn!("ACP session/update missing sessionId"); continue; }
                 };
-                let source = sessions.lock().ok().and_then(|items| items.iter()
-                    .find(|(_, info)| info.peri_id == peri_id)
-                    .map(|(source, _)| source.clone()));
+                let mut source = None;
+                for _ in 0..20 {
+                    source = sessions.lock().ok().and_then(|items| items.iter()
+                        .find(|(_, info)| info.peri_id == peri_id)
+                        .map(|(source, _)| source.clone()));
+                    if source.is_some() { break; }
+                    tokio::time::sleep(Duration::from_millis(5)).await;
+                }
                 let Some(source) = source else {
                     log::warn!("ACP notification for unknown session {}", peri_id);
                     continue;
@@ -329,7 +334,7 @@ async fn list_agents(state: tauri::State<'_, AppState>) -> Result<Vec<serde_json
 }
 
 #[tauri::command]
-async fn switch_agent(state: tauri::State<'_, AppState>, name: String) -> Result<(), String> {
+async fn switch_agent(state: tauri::State<'_, AppState>, window: tauri::WebviewWindow, name: String) -> Result<(), String> {
     let agent = state.agents.lock().map_err(|e| e.to_string())?.get(&name).ok_or_else(|| format!("unknown agent: {}", name))?.clone();
     // Kill old agent process before connecting new one (prevents orphans on Windows)
     if let Err(e) = state.acp.lock().await.kill() {
@@ -342,11 +347,12 @@ async fn switch_agent(state: tauri::State<'_, AppState>, name: String) -> Result
     }
     *state.active_agent.lock().map_err(|e| e.to_string())? = name;
     state.sessions.lock().map_err(|e| e.to_string())?.clear();
+    start_notification_dispatcher(state.inner(), window);
     Ok(())
 }
 
 #[tauri::command]
-async fn reconnect_agent(state: tauri::State<'_, AppState>, window: tauri::Window) -> Result<(), String> {
+async fn reconnect_agent(state: tauri::State<'_, AppState>, window: tauri::WebviewWindow) -> Result<(), String> {
     let agent = state.get_active_agent().map_err(|e| e.to_string())?;
     // Kill old (may already be dead)
     let _ = state.acp.lock().await.kill();
@@ -355,6 +361,7 @@ async fn reconnect_agent(state: tauri::State<'_, AppState>, window: tauri::Windo
         let mut acp = state.acp.lock().await;
         *acp = new_acp;
     }
+    start_notification_dispatcher(state.inner(), window.clone());
     let _ = window.emit("peri:agent-status", serde_json::json!({"status": "connected"}));
     Ok(())
 }
