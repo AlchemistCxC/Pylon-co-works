@@ -274,6 +274,7 @@ async fn send_message(
     };
 
     let attachment_paths = attachments.unwrap_or_default();
+    let prompt_generation = state.current_generation();
 
     let effective_persona = session_prompt
         .filter(|value| !value.trim().is_empty())
@@ -322,6 +323,7 @@ async fn send_message(
                     let _ = state.pet.lock().map(|mut pet| pet::on_error(&mut pet));
                     error
                 })?;
+                state.ensure_generation(prompt_generation)?;
                 if is_first {
                     if let Ok(mut sessions) = state.sessions.lock() {
                         if let Some(session) = sessions.get_mut(&source) {
