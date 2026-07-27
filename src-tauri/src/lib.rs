@@ -245,10 +245,19 @@ async fn send_message(
 
     state.pet.lock().map(|mut p| pet::on_user_sent(&mut p)).ok();
     let _ = window.emit("peri:user", serde_json::json!({ "source": source, "content": content }));
-    let result = state.acp.lock().await.prompt(&peri_id, &prompt_content).await;
+    let (request_id, write_tx, prompt_line, rx) = {
+        let acp = state.acp.lock().await;
+        let (id, line, rx) = acp.prepare_prompt(&peri_id, &prompt_content)?;
+        (id, acp.write_tx.clone(), line, rx)
+    };
+    if write_tx.send(prompt_line).await.is_err() {
+        state.acp.lock().await.remove_pending(request_id);
+        return Err("ACP connection closed".to_string());
+    }
+    let result = tokio::time::timeout(Duration::from_secs(acp::PROMPT_TIMEOUT_SECS), rx).await;
 
     match result {
-        Ok(raw) => {
+        Ok(Ok(raw)) => {
             if let Some(error) = raw.error {
                 let error = error.to_string();
                 let _ = window.emit("peri:error", serde_json::json!({"source": source, "error": error}));
@@ -261,11 +270,13 @@ async fn send_message(
                 Ok(peri_id)
             }
         }
-        Err(error) if error.starts_with("prompt timeout") => {
+        Ok(Err(_)) => Err("ACP connection closed".to_string()),
+        Err(_) => {
+            state.acp.lock().await.remove_pending(request_id);
+            let error = "timed out after 300s";
             let _ = window.emit("peri:error", serde_json::json!({"source": source, "error": error}));
-            Err(error)
+            Err(error.to_string())
         }
-        Err(error) => Err(error),
     }
 }
 
