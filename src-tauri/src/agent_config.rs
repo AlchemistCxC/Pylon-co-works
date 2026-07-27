@@ -1,5 +1,5 @@
 use std::collections::HashMap;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use serde::Deserialize;
 
 #[derive(Debug, Clone, Deserialize)]
@@ -20,6 +20,27 @@ pub struct AgentDef {
     pub env: HashMap<String, String>,
     #[serde(default)]
     pub default: bool,
+}
+
+impl AgentDef {
+    pub fn resolve_paths(&self, base_dir: &Path) -> Self {
+        let mut resolved = self.clone();
+        let exe = Path::new(&resolved.exe);
+        if exe.components().count() > 1 && exe.is_relative() {
+            resolved.exe = base_dir.join(exe).to_string_lossy().into_owned();
+        }
+        if let Some(cwd) = resolved.cwd.as_deref() {
+            let cwd = Path::new(cwd);
+            if cwd.is_relative() {
+                resolved.cwd = Some(base_dir.join(cwd).to_string_lossy().into_owned());
+            }
+        }
+        resolved
+    }
+}
+
+pub fn config_path() -> Option<PathBuf> {
+    std::env::var_os("PYLON_AGENTS_CONFIG").map(PathBuf::from)
 }
 
 fn parse(content: &str) -> Result<HashMap<String, AgentDef>, String> {
@@ -85,5 +106,16 @@ mod tests {
         let agents = load_from_path(&path).expect("load runtime agent config");
         std::fs::remove_file(&path).ok();
         assert!(agents.contains_key("runtime"));
+    }
+
+    #[test]
+    fn resolves_relative_paths_against_config_directory() {
+        let mut relative = agent(false);
+        relative.exe = "bin/agent.exe".to_string();
+        relative.cwd = Some("workspace".to_string());
+        let resolved = relative.resolve_paths(Path::new("C:/portable/pylon"));
+        assert!(resolved.exe.contains("portable"));
+        assert!(resolved.exe.ends_with("bin/agent.exe") || resolved.exe.ends_with("bin\\agent.exe"));
+        assert!(resolved.cwd.unwrap().contains("portable"));
     }
 }

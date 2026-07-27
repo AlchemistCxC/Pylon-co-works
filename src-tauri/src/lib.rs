@@ -469,7 +469,7 @@ async fn agent_status(state: tauri::State<'_, AppState>) -> Result<serde_json::V
 #[tauri::command]
 async fn reload_agents(state: tauri::State<'_, AppState>, config_path: Option<String>) -> Result<(), String> {
     let path = config_path
-        .or_else(|| std::env::var("PYLON_AGENTS_CONFIG").ok())
+        .or_else(|| agent_config::config_path().map(|path| path.to_string_lossy().into_owned()))
         .ok_or_else(|| "reload_agents requires configPath or PYLON_AGENTS_CONFIG".to_string())?;
     let new_agents = agent_config::load_from_path(std::path::Path::new(&path))?;
     let mut agents = state.agents.lock().map_err(|e| e.to_string())?;

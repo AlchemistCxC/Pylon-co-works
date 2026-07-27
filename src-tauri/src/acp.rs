@@ -397,6 +397,14 @@ impl AcpClient {
 
     /// Connect from AgentDef (P0: replaces hardcoded spawn)
     pub async fn connect(agent: &crate::agent_config::AgentDef) -> Result<Self, String> {
+        let resolved_agent;
+        let agent = if let Some(config_path) = crate::agent_config::config_path() {
+            let base_dir = config_path.parent().unwrap_or_else(|| std::path::Path::new("."));
+            resolved_agent = agent.resolve_paths(base_dir);
+            &resolved_agent
+        } else {
+            agent
+        };
         match agent.transport.as_str() {
             "subprocess" => {
                 let mut cmd = Command::new(&agent.exe);
