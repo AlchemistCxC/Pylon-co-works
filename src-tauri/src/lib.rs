@@ -416,8 +416,10 @@ async fn load_persisted_session(
     let cwd = state.agent_cwd();
     let mut broadcast = state.acp.lock().await.rx.resubscribe();
     let src = source.clone();
+    let src2 = src.clone();  // spawn 后 emit peri:done 用
     let pid = peri_id.clone();
     let win = window.clone();
+    let win2 = window.clone();  // 给 spawn 外用
     let handle = tokio::spawn(async move {
         while let Ok(raw) = broadcast.recv().await {
             if raw.method.as_deref() == Some(acp::NOTIF_SESSION_UPDATE) {
@@ -446,7 +448,7 @@ async fn load_persisted_session(
     tokio::time::sleep(std::time::Duration::from_millis(1500)).await;
     handle.abort();
     // 标记重放完成
-    let _ = win.emit("peri:done", serde_json::json!({"source": src}));
+    let _ = win2.emit("peri:done", serde_json::json!({"source": src2}));
     state.sessions.lock().map_err(|e| e.to_string())?
         .insert(source, SessionInfo { peri_id: peri_id.clone(), persona: String::new(), cwd, has_first_prompt: false, title: String::new(), model: String::new(), tokens_in: 0, tokens_out: 0, tokens_total: 0, context_size: 0 });
     Ok(())
