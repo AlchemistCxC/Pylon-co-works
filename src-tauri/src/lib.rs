@@ -424,6 +424,15 @@ async fn load_persisted_session(
                 let payload = raw.params.unwrap_or(serde_json::Value::Null);
                 // R3: filter by sessionId
                 if payload.get("sessionId").and_then(|v| v.as_str()) != Some(&pid) { continue; }
+                // 重放中的 user_message_chunk → peri:user；其余 → peri:update
+                if let Some(update) = payload.get("update") {
+                    if update.get("sessionUpdate").and_then(|v| v.as_str()) == Some("user_message_chunk") {
+                        if let Some(text) = update.get("content").and_then(|c| c.get("text")).and_then(|v| v.as_str()) {
+                            let _ = win.emit("peri:user", serde_json::json!({"source": src, "content": text}));
+                        }
+                        continue;
+                    }
+                }
                 let mut payload = payload;
                 if let serde_json::Value::Object(ref mut map) = payload {
                     map.insert("source".to_string(), serde_json::Value::String(src.clone()));
@@ -436,6 +445,8 @@ async fn load_persisted_session(
     // 等 Peri 推送完重放消息（session/update 通知在 RPC 返回后异步到达）
     tokio::time::sleep(std::time::Duration::from_millis(1500)).await;
     handle.abort();
+    // 标记重放完成
+    let _ = win.emit("peri:done", serde_json::json!({"source": src}));
     state.sessions.lock().map_err(|e| e.to_string())?
         .insert(source, SessionInfo { peri_id: peri_id.clone(), persona: String::new(), cwd, has_first_prompt: false, title: String::new(), model: String::new(), tokens_in: 0, tokens_out: 0, tokens_total: 0, context_size: 0 });
     Ok(())
