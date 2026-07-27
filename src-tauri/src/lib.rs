@@ -552,8 +552,11 @@ async fn load_persisted_session(
 
 #[tauri::command]
 async fn list_persisted_sessions(state: tauri::State<'_, AppState>) -> Result<serde_json::Value, String> {
+    let generation = state.current_generation();
     let cwd = state.get_active_agent().ok().and_then(|a| a.cwd);
-    state.acp.lock().await.list_persisted(cwd.as_deref()).await
+    let response = state.acp.lock().await.list_persisted(cwd.as_deref()).await?;
+    state.ensure_generation(generation)?;
+    Ok(response)
 }
 
 fn format_export_markdown(peri_id: &str, messages: &[serde_json::Value]) -> String {
