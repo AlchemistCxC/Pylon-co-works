@@ -1,4 +1,4 @@
-import { useRef, useState } from 'react'
+import { useState } from 'react'
 import * as Tabs from '@radix-ui/react-tabs'
 import { invoke } from '@tauri-apps/api/core'
 import { useStore } from '../store'
@@ -413,11 +413,7 @@ export default function Settings({ onClose }: { onClose?: () => void }) {
             {/* ═══ 会话 ═══ */}
             <Tabs.Content value="session">
               <h3>当前会话设置</h3>
-              <Group title="会话 Prompt（覆盖 Profile persona）">
-                <Row label="Prompt"><textarea className="set-textarea"
-                  defaultValue={useStore.getState().sessions[0]?.sessionPrompt || ''}
-                  placeholder="留空则使用 Profile persona..." /></Row>
-              </Group>
+              <div className="set-hint">请在左栏会话右侧的设置按钮中编辑工作目录、Prompt、Skills 与 Hooks。</div>
             </Tabs.Content>
           </Tabs.Root>
         </div>
