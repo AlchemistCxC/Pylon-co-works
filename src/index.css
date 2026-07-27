@@ -87,7 +87,8 @@ body::before {
 
 /* ── Radix Dialog ── */
 .dialog-overlay { position:fixed; inset:0; z-index:90; background:rgba(0,0,0,0.3); backdrop-filter:blur(4px); }
-.dialog-content { position:fixed; top:50%; left:50%; transform:translate(-50%,-50%); z-index:91; background:rgba(255,255,255,0.97); border:1px solid var(--border); border-radius:10px; box-shadow:0 12px 40px rgba(0,0,0,0.15); padding:0; min-width:400px; max-width:90vw; }
+.dialog-content { position:fixed; top:50%; left:50%; transform:translate(-50%,-50%); z-index:91; background:var(--dialog-bg,rgba(255,255,255,0.97)); color:var(--text); border:1px solid var(--border); border-radius:10px; box-shadow:0 12px 40px rgba(0,0,0,0.15); padding:0; min-width:400px; max-width:90vw; }
+.app[data-ui-scheme="dark"] .dialog-content { --dialog-bg:#1a1a2e; }
 .modal-header { display:flex; justify-content:space-between; align-items:center; padding:14px 18px; border-bottom:1px solid var(--border); }
 .modal-header h3 { font-size:14px; font-weight:600; margin:0; }
 .modal-close { background:none; border:none; color:var(--text-dim); font-size:16px; cursor:pointer; }

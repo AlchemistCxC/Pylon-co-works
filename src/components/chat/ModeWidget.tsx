@@ -25,25 +25,25 @@ export default function ModeWidget({ sessionSource }: Props) {
 
   if (variant === 'badge') {
     return (
-      <span className="cc-mode-badge" data-mode={mode} onClick={e => { e.stopPropagation(); cycle() }} title="点击切换"
+      <button className="cc-mode-badge" type="button" data-mode={mode} onClick={e => { e.stopPropagation(); cycle() }} title="点击切换"
         style={{ fontSize: `${ccScale}%` }}>
         [{mode}]
-      </span>
+      </button>
     )
   }
 
   if (variant === 'minimal') {
     return (
-      <span className="cc-mode-minimal" data-mode={mode} onClick={e => { e.stopPropagation(); cycle() }}>
+      <button className="cc-mode-minimal" type="button" data-mode={mode} onClick={e => { e.stopPropagation(); cycle() }} style={{ fontSize: `${ccScale}%` }}>
         {mode}
-      </span>
+      </button>
     )
   }
 
   // default: 'pill'
   return (
-    <div className="cc-mode-widget" onClick={e => { e.stopPropagation(); cycle() }} title="点击切换">
+    <button className="cc-mode-widget" type="button" onClick={e => { e.stopPropagation(); cycle() }} title="点击切换" style={{ fontSize: `${ccScale}%` }}>
       <span className="mode-pill" data-mode={mode}>{mode}</span>
-    </div>
+    </button>
   )
 }

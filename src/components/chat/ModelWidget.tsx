@@ -46,23 +46,23 @@ export default function ModelWidget({ sessionSource }: Props) {
     const idx = models.indexOf(model)
     const next = models[(idx + 1) % models.length]
     return (
-      <span className="cc-model-minimal" onClick={() => setModel(next)} title="点击切换模型"
+      <button className="cc-model-minimal" type="button" onClick={() => setModel(next)} title="点击切换模型"
         style={{ fontSize: `${ccScale}%` }}>
         {model}
-      </span>
+      </button>
     )
   }
 
   if (variant === 'badge') {
     return (
-      <span className="cc-model-badge">{model}</span>
+      <span className="cc-model-badge" style={{ fontSize: `${ccScale}%` }}>{model}</span>
     )
   }
 
   // default: 'dropdown'
   return (
     <DropdownMenu.Root>
-      <DropdownMenu.Trigger className="model-tag">{model} ▾</DropdownMenu.Trigger>
+      <DropdownMenu.Trigger className="model-tag" style={{ fontSize: `${ccScale}%` }}>{model} ▾</DropdownMenu.Trigger>
       <DropdownMenu.Portal>
         <DropdownMenu.Content className="model-menu" sideOffset={4}>
           {models.map(m => (

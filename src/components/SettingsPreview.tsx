@@ -16,6 +16,7 @@ interface Props { zone: string }
 
 export default function SettingsPreview({ zone }: Props) {
   const [dims, setDims] = useState({ w: window.innerWidth, h: window.innerHeight - 32 })
+  const [wrapWidth, setWrapWidth] = useState(window.innerWidth)
   const wrapRef = useRef<HTMLDivElement>(null)
 
   useEffect(() => {
@@ -24,10 +25,17 @@ export default function SettingsPreview({ zone }: Props) {
     return () => window.removeEventListener('resize', update)
   }, [])
 
+  useEffect(() => {
+    const element = wrapRef.current
+    if (!element) return
+    const observer = new ResizeObserver(([entry]) => setWrapWidth(entry.contentRect.width))
+    observer.observe(element)
+    return () => observer.disconnect()
+  }, [])
+
   const { w, h } = dims
   // 动态缩放：预览面板宽 / 画布宽
-  const wrapW = wrapRef.current?.clientWidth ?? w
-  const scale = Math.min(1, wrapW / w)
+  const scale = Math.min(1, wrapWidth / w)
 
   return (
     <div className="set-preview-wrap" ref={wrapRef}>
