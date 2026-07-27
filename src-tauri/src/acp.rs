@@ -38,8 +38,62 @@ pub const CANCEL_SETTLE_TIMEOUT_SECS: u64 = 30;
 type Pending = HashMap<u64, oneshot::Sender<RawMessage>>;
 const PENDING_SHARDS: usize = 16;
 
+struct ManagedChild {
+    child: Option<Child>,
+}
+
+impl ManagedChild {
+    fn new(child: Child) -> Self {
+        Self { child: Some(child) }
+    }
+
+    fn take_stdin(&mut self) -> Result<std::process::ChildStdin, String> {
+        self.child
+            .as_mut()
+            .and_then(|child| child.stdin.take())
+            .ok_or_else(|| "no stdin".to_string())
+    }
+
+    fn take_stdout(&mut self) -> Result<std::process::ChildStdout, String> {
+        self.child
+            .as_mut()
+            .and_then(|child| child.stdout.take())
+            .ok_or_else(|| "no stdout".to_string())
+    }
+
+    fn take_stderr(&mut self) -> Result<std::process::ChildStderr, String> {
+        self.child
+            .as_mut()
+            .and_then(|child| child.stderr.take())
+            .ok_or_else(|| "no stderr".to_string())
+    }
+
+    fn kill_and_wait(&mut self) -> Result<(), String> {
+        let Some(mut child) = self.child.take() else {
+            return Ok(());
+        };
+        match child.try_wait() {
+            Ok(Some(_)) => Ok(()),
+            Ok(None) => {
+                child.kill().map_err(|error| format!("kill failed: {error}"))?;
+                child.wait().map_err(|error| format!("wait failed: {error}"))?;
+                Ok(())
+            }
+            Err(error) => Err(format!("try_wait failed: {error}")),
+        }
+    }
+}
+
+impl Drop for ManagedChild {
+    fn drop(&mut self) {
+        if let Err(error) = self.kill_and_wait() {
+            log::warn!("cleanup ACP child: {}", error);
+        }
+    }
+}
+
 pub struct AcpClient {
-    child: Child,
+    child: ManagedChild,
     /// mpsc channel for writing JSON-RPC lines to stdin. Single consumer = no lock contention.
     pub(crate) write_tx: mpsc::Sender<String>,
     next_id: AtomicU64,
@@ -214,9 +268,7 @@ impl AcpClient {
 
     /// Kill the child process. Called before switching agents to prevent orphans.
     pub fn kill(&mut self) -> Result<(), String> {
-        self.child.kill().map_err(|e| format!("kill failed: {}", e))?;
-        self.child.wait().map_err(|e| format!("wait failed: {}", e))?;
-        Ok(())
+        self.child.kill_and_wait()
     }
 
     /// Check if the child process has exited unexpectedly.
@@ -274,10 +326,11 @@ impl AcpClient {
                 for (k, v) in &agent.env {
                     cmd.env(k, v);
                 }
-                let mut child = cmd.spawn()
+                let child = cmd.spawn()
                     .map_err(|e| format!("spawn {} failed: {}", &agent.exe, e))?;
+                let mut child = ManagedChild::new(child);
 
-                let stdin = child.stdin.take().ok_or("no stdin")?;
+                let stdin = child.take_stdin()?;
                 let (write_tx, mut write_rx) = mpsc::channel::<String>(WRITE_CHAN_CAP);
                 // Spawn single-consumer writer task — writes JSON-RPC lines to stdin, with newline
                 std::thread::spawn(move || {
@@ -287,10 +340,10 @@ impl AcpClient {
                         if writer.flush().is_err() { break; }
                     }
                 });
-                let stdout = BufReader::new(child.stdout.take().ok_or("no stdout")?);
+                let stdout = BufReader::new(child.take_stdout()?);
 
                 // Drain stderr
-                let stderr = child.stderr.take().ok_or("no stderr")?;
+                let stderr = child.take_stderr()?;
                 let agent_name_stderr = agent.name.clone();
                 std::thread::spawn(move || {
                     for line in BufReader::new(stderr).lines() {
