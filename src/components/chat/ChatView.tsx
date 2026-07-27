@@ -109,6 +109,12 @@ const ChatView = React.memo(function ChatView({ sessionId }: Props) {
     if (!s) return
     sessionRef.current = s.source  // set BEFORE async, so incoming events match
 
+    // 先从 localStorage 恢复消息（Peri 重放可能失败）
+    const stored = localStorage.getItem('pylon-msgs-' + s.id)
+    if (stored) {
+      try { setMessages(JSON.parse(stored)) } catch {}
+    }
+
     const profile = useStore.getState().profiles.find(p => p.id === s.profileId)
     const persona = profile?.persona || ''
 
@@ -289,6 +295,12 @@ const ChatView = React.memo(function ChatView({ sessionId }: Props) {
   }, [])
 
   useEffect(() => { bottomRef.current?.scrollIntoView({ behavior: 'smooth' }) }, [messages, generating])
+
+  // 消息持久化到 localStorage（Peri 进程重启后恢复用）
+  useEffect(() => {
+    if (!sessionId || messages.length === 0) return
+    try { localStorage.setItem('pylon-msgs-' + sessionId, JSON.stringify(messages)) } catch {}
+  }, [messages, sessionId])
 
   // dev/浏览器模式（无 Tauri）即使无 session 也渲染 mock 对话，方便调样式
   if (!sessionId && IS_TAURI) return (
