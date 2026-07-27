@@ -9,6 +9,7 @@ import { AnimatePresence, motion } from 'motion/react'
 import Anser from 'anser'
 import { Square } from 'lucide-react'
 import { toHtml } from 'hast-util-to-html'
+import { canPersistMessages } from './messagePersistence'
 import './ChatView.css'
 
 // ── Peri spinner ──
@@ -100,15 +101,20 @@ const ChatView = React.memo(function ChatView({ sessionId }: Props) {
   const tokenCount = useRef(0)
   const [summary, setSummary] = useState('')
   const sessionRef = useRef<string | null>(null)
+  const messageOwnerRef = useRef<string | null>(null)
   const prevSessionRef = useRef(sessionId)
   useEffect(() => {
-    if (!sessionId || sessionId === prevSessionRef.current) return
-    setMessages([]); setGenerating(false); setSummary('')
+    if (sessionId === prevSessionRef.current) return
     prevSessionRef.current = sessionId
+    sessionRef.current = null
+    messageOwnerRef.current = null
+    setMessages([]); setGenerating(false); setSummary('')
+    if (!sessionId) return
 
     const s = useStore.getState().sessions.find(s => s.id === sessionId)
     if (!s) return
     sessionRef.current = s.source  // set BEFORE async, so incoming events match
+    messageOwnerRef.current = s.id
 
     // 先从 localStorage 恢复消息（Peri 重放可能失败）
     const stored = localStorage.getItem('pylon-msgs-' + s.id)
@@ -303,10 +309,12 @@ const ChatView = React.memo(function ChatView({ sessionId }: Props) {
 
   useEffect(() => { bottomRef.current?.scrollIntoView({ behavior: 'smooth' }) }, [messages, generating])
 
-  // 消息持久化到 localStorage（Peri 进程重启后恢复用）
+  // 仅当消息 owner 与当前 render 会话一致时持久化，避免切换瞬间串写
   useEffect(() => {
-    if (!sessionId || messages.length === 0) return
-    try { localStorage.setItem('pylon-msgs-' + sessionId, JSON.stringify(messages)) } catch {}
+    const ownerId = messageOwnerRef.current
+    const source = sessionRef.current
+    if (!canPersistMessages({ ownerId, source, renderedSessionId: sessionId }) || messages.length === 0) return
+    try { localStorage.setItem('pylon-msgs-' + ownerId, JSON.stringify(messages)) } catch {}
   }, [messages, sessionId])
 
   // dev/浏览器模式（无 Tauri）即使无 session 也渲染 mock 对话，方便调样式
