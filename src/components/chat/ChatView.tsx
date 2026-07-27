@@ -13,6 +13,7 @@ import { resolveLoadedMessages, serializeLoadedMessages, shouldStartLiveGenerati
 import { canPersistMessages } from './messagePersistence'
 import { addGeneratingSource, removeGeneratingSource, updateSourceState } from './sessionEventState'
 import { resolveToolVisualStatus } from './toolStatus'
+import { extractMode, extractModelConfig, sessionResponseObject, type PeriDonePayload, type PeriUpdatePayload, type SessionResponse } from './acpTypes'
 import './ChatView.css'
 
 // ── Peri spinner ──
@@ -31,25 +32,6 @@ function fmtTokens(n: number) {
   return `${n}`
 }
 
-/**
- * 从后端 configOptions 里提取 model 选项。
- * 实测 Peri 真实结构（2026-07）：
- *   { id:'model', type:'select', currentValue:'sonnet', options:[{id,name},...] }
- * 仍保留 key/value/choices 等兜底字段以防协议演进。
- */
-function extractModelConfig(configOptions: any): { model?: string; models?: string[] } {
-  if (!Array.isArray(configOptions)) return {}
-  const opt = configOptions.find((o: any) => (o?.id || o?.key || o?.name) === 'model')
-  if (!opt) return {}
-  const model = opt.currentValue ?? opt.value ?? opt.current ?? opt.selected
-  const rawList = opt.options ?? opt.choices ?? opt.values ?? opt.available
-  let models: string[] | undefined
-  if (Array.isArray(rawList)) {
-    // 值用 id（后端以 id 匹配），字符串项直接用
-    models = rawList.map((c: any) => (typeof c === 'string' ? c : (c?.id ?? c?.value ?? c?.name))).filter(Boolean)
-  }
-  return { model, models }
-}
 
 function Spinner({ tokenCount, startTime }: { tokenCount: number; startTime: number }) {
   const frames = (useStore(s => s.sparkles) || '✳✴✵✶✷✸✹✺✻✼❃❊').split('')
@@ -142,18 +124,15 @@ const ChatView = React.memo(function ChatView({ sessionId }: Props) {
     const persona = profile?.persona || ''
 
     // new_session 返回可能是 string(periId) 或 { sessionId, configOptions } — 兼容处理
-    const syncMode = (source: string, res: any) => {
-      const configOptions = Array.isArray(res?.configOptions) ? res.configOptions : []
-      const modeOption = configOptions.find((option: any) => (option?.id || option?.key) === 'mode')
-      const configMode = modeOption?.currentValue ?? modeOption?.value
-      const modes = res?.modes
-      const currentMode = modes?.currentModeId ?? modes?.currentMode ?? modes?.current ?? configMode
+    const syncMode = (source: string, res: ReturnType<typeof sessionResponseObject>) => {
+      const currentMode = extractMode(res)
       if (currentMode != null) useStore.getState().setSessionMode(source, String(currentMode))
     }
 
     const createSession = () => {
-      invoke<any>('new_session', { source: s.source, persona, cwd: s.workdir || undefined }).then(res => {
-        const periId = typeof res === 'string' ? res : (res?.sessionId ?? res?.periId)
+      invoke<SessionResponse>('new_session', { source: s.source, persona, cwd: s.workdir || undefined }).then(response => {
+        const res = sessionResponseObject(response)
+        const periId = res.sessionId ?? res.periId
         if (periId) useStore.getState().setSessionPeriId(s.id, periId)
         const cfg = extractModelConfig(res?.configOptions)
         if (cfg.model || cfg.models) useStore.getState().setSessionConfig(s.source, { ...cfg, raw: res?.configOptions })
@@ -165,7 +144,8 @@ const ChatView = React.memo(function ChatView({ sessionId }: Props) {
       const loadGeneration = (loadGenerationRef.current[s.source] || 0) + 1
       loadGenerationRef.current[s.source] = loadGeneration
       replayingSourcesRef.current[s.source] = []
-      invoke<any>('load_persisted_session', { source: s.source, periId: s.periId, cwd: s.workdir || undefined }).then(res => {
+      invoke<SessionResponse>('load_persisted_session', { source: s.source, periId: s.periId, cwd: s.workdir || undefined }).then(response => {
+        const res = sessionResponseObject(response)
         if (loadGenerationRef.current[s.source] !== loadGeneration) return
         const replayed = replayingSourcesRef.current[s.source] || []
         const resolved = resolveLoadedMessages({ loadSucceeded: true, cached, replayed })
@@ -250,7 +230,7 @@ const ChatView = React.memo(function ChatView({ sessionId }: Props) {
         }
       }),
 
-      listen<any>('peri:update', (event) => {
+      listen<PeriUpdatePayload>('peri:update', (event) => {
         const source = event.payload.source
         const upd = event.payload?.update
         if (!source || !upd) return
@@ -284,10 +264,11 @@ const ChatView = React.memo(function ChatView({ sessionId }: Props) {
           }
           case 'tool_call': {
             const rawInput = upd.rawInput
-            const inputStr = formatToolInput(upd.title, rawInput) || (typeof rawInput === 'string' ? rawInput.slice(0, 80) : '')
+            const title = upd.title || '?'
+            const inputStr = formatToolInput(title, rawInput) || (typeof rawInput === 'string' ? rawInput.slice(0, 80) : '')
             updateSourceMessages(source, prev => [...prev, {
-              id: 'tool-' + upd.toolCallId, role: 'tool', sender: 'tool:' + (upd.title || '?'), content: '', time: new Date().toLocaleTimeString(),
-              toolName: upd.title, toolInput: inputStr, running: true,
+              id: 'tool-' + upd.toolCallId, role: 'tool', sender: 'tool:' + title, content: '', time: new Date().toLocaleTimeString(),
+              toolName: title, toolInput: inputStr, running: true,
             }], replay)
             break
           }
@@ -316,7 +297,7 @@ const ChatView = React.memo(function ChatView({ sessionId }: Props) {
             if (Array.isArray(upd.configOptions)) {
               const cfg = extractModelConfig(upd.configOptions)
               if (cfg.model || cfg.models) useStore.getState().setSessionConfig(source, { ...cfg, raw: upd.configOptions })
-              const modeOption = upd.configOptions.find((option: any) => (option?.id || option?.key) === 'mode')
+              const modeOption = upd.configOptions.find(option => (option.id || option.key) === 'mode')
               const mode = modeOption?.currentValue ?? modeOption?.value
               if (mode != null) useStore.getState().setSessionMode(source, String(mode))
             } else {
@@ -330,7 +311,7 @@ const ChatView = React.memo(function ChatView({ sessionId }: Props) {
         }
       }),
 
-      listen<any>('peri:done', (event) => {
+      listen<PeriDonePayload>('peri:done', (event) => {
         const source = event.payload.source
         if (!source) return
         stopGenerating(source)
@@ -520,15 +501,17 @@ function ReasoningBlock({ text }: { text: string }) {
   )
 }
 
-function formatToolInput(name: string, rawInput: any): string {
+function formatToolInput(name: string, rawInput: unknown): string {
   if (typeof rawInput !== 'object' || !rawInput) return ''
+  const input = rawInput as Record<string, unknown>
   // Extract the most meaningful field per tool type
-  if (name === 'Bash') return rawInput.command || rawInput.cmd || ''
-  if (name === 'Read' || name === 'Write' || name === 'Edit') return rawInput.path || rawInput.file_path || rawInput.filePath || ''
-  if (name === 'Grep' || name === 'Glob') return rawInput.pattern || rawInput.regex || rawInput.glob || ''
-  if (name === 'Task') return rawInput.description || rawInput.prompt || rawInput.goal || ''
+  const firstString = (...values: unknown[]) => values.find((value): value is string => typeof value === 'string') || ''
+  if (name === 'Bash') return firstString(input.command, input.cmd)
+  if (name === 'Read' || name === 'Write' || name === 'Edit') return firstString(input.path, input.file_path, input.filePath)
+  if (name === 'Grep' || name === 'Glob') return firstString(input.pattern, input.regex, input.glob)
+  if (name === 'Task') return firstString(input.description, input.prompt, input.goal)
   // Fallback: show first meaningful string value
-  for (const v of Object.values(rawInput)) {
+  for (const v of Object.values(input)) {
     if (typeof v === 'string' && v.length > 0 && v.length < 200) return v
   }
   return ''
