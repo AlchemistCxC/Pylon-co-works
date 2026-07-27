@@ -45,7 +45,10 @@ details[open] > .group-header::before { content:'▾'; }
 .session-del { opacity:0; background:none; border:none; color:var(--danger); cursor:pointer; font-size:14px; padding:2px 4px; transition:opacity 0.15s; flex-shrink:0; margin-left:auto; }
 .session-gear { opacity:0; background:none; border:none; color:var(--text-dim); cursor:pointer; font-size:13px; padding:2px 4px; transition:opacity 0.15s; flex-shrink:0; }
 .session-item:hover .session-del,
-.session-item:hover .session-gear { opacity:1; }
+.session-item:hover .session-gear,
+.session-item:focus-within .session-del,
+.session-item:focus-within .session-gear { opacity:1; }
+.session-del:focus-visible, .session-gear:focus-visible, .sidebar-action:focus-visible, .profile-avatar:focus-visible, .profile-edit:focus-visible { opacity:1; outline:2px solid var(--accent); outline-offset:2px; }
 .session-del:hover { background:rgba(190,40,40,0.08); border-radius:3px; }
 
 .profile-bar { display:flex; align-items:center; gap:6px; padding:10px 14px; border-top:1px solid var(--border); }

@@ -56,10 +56,10 @@ function Group({ title, children, defaultOpen }: { title:string; children:React.
   const [open, setOpen] = useState(defaultOpen ?? true)
   return (
     <div className="set-group">
-      <div className="set-group-title" onClick={() => setOpen(!open)}>
+      <button type="button" className="set-group-title" aria-expanded={open} onClick={() => setOpen(!open)}>
         <span className="set-group-arrow">{open ? '▾' : '▸'}</span>
         {title}
-      </div>
+      </button>
       {open && children}
     </div>
   )
@@ -143,11 +143,11 @@ export default function Settings({ onClose }: { onClose?: () => void }) {
       <div className="settings-tabs-root">
         <div className="settings-nav">
           {TABS.map(tab => (
-            <div key={tab}
+            <button type="button" key={tab}
               className={`set-nav-btn ${activeTab === tab ? 'active' : ''}`}
               onClick={() => setActiveTab(tab)}>
               {TAB_LABELS[tab]}
-            </div>
+            </button>
           ))}
           <hr className="set-nav-hr"/>
           <button className="set-nav-btn reset" onClick={reset}>Reset</button>

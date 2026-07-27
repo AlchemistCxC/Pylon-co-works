@@ -43,6 +43,7 @@
 }
 .set-group { margin-bottom:14px; }
 .set-group-title {
+  width:100%; padding:0; border:0; background:none; text-align:left;
   font-size:11px; text-transform:uppercase; letter-spacing:1px;
   color:var(--text-dim); margin-bottom:6px; cursor:pointer;
   display:flex; align-items:center; gap:4px; user-select:none;
@@ -66,7 +67,8 @@
 .set-color-chip.active { border-color:var(--accent); }
 .set-color-custom { padding:3px 6px; border:1px solid var(--border); border-radius:4px; background:none; color:var(--text-dim); font-size:11px; cursor:pointer; }
 .set-color-custom:hover { background:var(--bg-hover); color:var(--text); }
-.set-color-backdrop { position:fixed; inset:0; z-index:59; }
+.set-color-backdrop { position:fixed; inset:0; z-index:59; border:0; background:transparent; padding:0; }
+.set-group-title:focus-visible, .set-nav-btn:focus-visible, .set-swatch:focus-visible, .set-color-chip:focus-visible { outline:2px solid var(--accent); outline-offset:2px; }
 
 @keyframes pop-in { from { opacity:0; transform:translateY(-4px); } to { opacity:1; transform:translateY(0); } }
 
