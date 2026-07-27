@@ -3,6 +3,7 @@ import { invoke } from '@tauri-apps/api/core'
 import { open, save } from '@tauri-apps/plugin-dialog'
 import { useStore } from '../../store'
 import { setSessionModel } from './sessionModel'
+import { runSendTransaction } from './sendTransaction'
 import { Paperclip, ArrowUp } from 'lucide-react'
 import './InputBar.css'
 
@@ -145,11 +146,22 @@ export default forwardRef<{ send: () => void; attachFile: () => void; cancel: ()
     const source = sessionSource || s?.source || sessionId
     const sessionPrompt = s?.sessionPrompt || ''
 
-    try { await invoke('send_message', { source, content: text, persona, sessionPrompt, attachments: attached.map(a => a.path) }) }
-    catch (e) { setSendError(String(e)); setTimeout(() => setSendError(''), 4000) }
-    lastMsg.current = text
-    setValue('')
-    setAttached([])
+    await runSendTransaction({
+      send: () => invoke('send_message', {
+        source,
+        content: text,
+        persona,
+        sessionPrompt,
+        attachments: attached.map(file => file.path),
+      }),
+      onSuccess: () => {
+        lastMsg.current = text
+        setValue('')
+        setAttached([])
+        setSendError('')
+      },
+      onError: error => setSendError(String(error)),
+    })
   }
 
   const cancel = () => {
