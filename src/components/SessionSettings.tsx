@@ -2,6 +2,8 @@ import { useState } from 'react'
 import * as Dialog from '@radix-ui/react-dialog'
 import { invoke } from '@tauri-apps/api/core'
 import { useStore } from '../store'
+import { reportRuntimeError } from '../runtimeError'
+import { runCloseSessionTransaction } from './chat/closeSessionTransaction'
 import './SessionSettings.css'
 
 interface Props { sessionId: string; open: boolean; onClose: () => void; onDeleted?: () => void }
@@ -23,9 +25,14 @@ export default function SessionSettings({ sessionId, open, onClose, onDeleted }:
     onClose()
   }
 
-  const del = () => {
+  const del = async () => {
     if (!window.confirm('删除会话？')) return
-    invoke('close_session', { source: s.source }).catch(() => {})
+    const closed = await runCloseSessionTransaction({
+      close: () => invoke('close_session', { source: s.source }),
+      onSuccess: () => {},
+      onError: error => reportRuntimeError('关闭会话', error),
+    })
+    if (!closed) return
     removeSession(sessionId)
     localStorage.removeItem('pylon-msgs-' + sessionId)
     onClose()

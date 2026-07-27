@@ -2,6 +2,8 @@ import { useState, useMemo } from 'react'
 import { invoke } from '@tauri-apps/api/core'
 import { useStore } from '../store'
 import { formatTime } from '../utils'
+import { reportRuntimeError } from '../runtimeError'
+import { runCloseSessionTransaction } from './chat/closeSessionTransaction'
 import './Sidebar.css'
 
 const PLATFORM_LABELS: Record<string, string> = { local: '本地', 'qq-group': 'QQ 群聊', 'qq-dm': 'QQ 私聊', terminal: '终端' }
@@ -49,13 +51,16 @@ export default function Sidebar({ activeSession, onSelectSession, onProfileEdit,
     onSelectSession(id)
   }
 
-  const handleDelete = (id: string) => {
+  const handleDelete = async (id: string) => {
     if (!window.confirm('删除会话？')) return
-    // 通知后端释放 session 资源（ThreadStore / cancel tokens），避免后端 session 泄漏（上限 100）
-    // best-effort：不 await、失败不阻塞前端删除（后端 remove_session 找不到会返 Err，被吞掉）
     const s = sessions.find(x => x.id === id)
     if (s) {
-      invoke('close_session', { source: s.source }).catch(() => {})
+      const closed = await runCloseSessionTransaction({
+        close: () => invoke('close_session', { source: s.source }),
+        onSuccess: () => {},
+        onError: error => reportRuntimeError('关闭会话', error),
+      })
+      if (!closed) return
       // 清理该会话的前端配置残留
       const cfg = { ...useStore.getState().sessionConfig }
       if (cfg[s.source]) { delete cfg[s.source]; useStore.setState({ sessionConfig: cfg }) }

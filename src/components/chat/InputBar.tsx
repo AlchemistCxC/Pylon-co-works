@@ -7,6 +7,7 @@ import { setSessionMode } from './sessionMode'
 import { runSendTransaction } from './sendTransaction'
 import { buildSendMessagePayload } from './sessionRuntime'
 import { resolveSessionProfile } from './sessionProfile'
+import { reportRuntimeError } from '../../runtimeError'
 import { Paperclip, ArrowUp } from 'lucide-react'
 import './InputBar.css'
 
@@ -86,7 +87,10 @@ export default forwardRef<{ send: () => void; attachFile: () => void; cancel: ()
         e.preventDefault()
         const s = useStore.getState().sessions.find(s => s.id === sessionId || s.source === sessionId)
         const src = s?.source || sessionId
-        invoke('cancel_prompt', { source: src }).catch(() => {})
+        invoke('cancel_prompt', { source: src }).catch(error => {
+          const detail = reportRuntimeError('取消生成', error)
+          setSendError(detail.message)
+        })
       }
     }
     window.addEventListener('keydown', onGlobalKey)
@@ -187,9 +191,14 @@ export default forwardRef<{ send: () => void; attachFile: () => void; cancel: ()
     })
   }
 
-  const cancel = () => {
+  const cancel = async () => {
     if (!sessionId) return
-    invoke('cancel_prompt', { source: sessionSource || sessionId }).catch(() => {})
+    try {
+      await invoke('cancel_prompt', { source: sessionSource || sessionId })
+    } catch (error) {
+      const detail = reportRuntimeError('取消生成', error)
+      setSendError(detail.message)
+    }
   }
 
   const attachFile = async () => {

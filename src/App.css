@@ -43,6 +43,17 @@
   min-height: 0;
   overflow: hidden;
 }
+.runtime-error-banner {
+  position:fixed; top:42px; left:50%; transform:translateX(-50%); z-index:200;
+  display:flex; align-items:center; gap:10px; max-width:min(720px,calc(100vw - 32px));
+  padding:9px 12px; border:1px solid color-mix(in srgb,var(--danger) 55%,transparent);
+  border-radius:7px; background:color-mix(in srgb,var(--danger) 16%,var(--bg-panel));
+  color:var(--text); box-shadow:0 8px 24px rgba(0,0,0,0.22); backdrop-filter:blur(12px);
+}
+.runtime-error-banner strong { color:var(--danger); white-space:nowrap; }
+.runtime-error-banner span { min-width:0; overflow-wrap:anywhere; }
+.runtime-error-banner button { margin-left:auto; border:0; background:none; color:var(--text-dim); cursor:pointer; }
+
 /* 编辑模式下放开 overflow，让工具栏能浮出中控区上方 */
 .cc-editing-app .main-body {
   overflow: visible;

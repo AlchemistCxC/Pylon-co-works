@@ -6,6 +6,7 @@ import type { ThemeSettings } from '../store'
 import { GLOBAL_PRESETS, pickZoneFields } from '../presets'
 import ColorPopover from './ColorPopover'
 import SettingsPreview from './SettingsPreview'
+import { reportRuntimeError } from '../runtimeError'
 import './Settings.css'
 
 // ── helpers ──
@@ -398,7 +399,7 @@ export default function Settings({ onClose }: { onClose?: () => void }) {
                           useStore.getState().replaceSessions([])
                           window.dispatchEvent(new CustomEvent('pylon:agent-switched'))
                           setActiveAgent(a.id)
-                        }).catch(() => {})
+                        }).catch(error => reportRuntimeError('切换 Agent', error))
                       }}>
                       {a.id === activeAgent ? '当前' : '切换'}
                     </button>

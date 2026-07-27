@@ -14,6 +14,7 @@ import './App.css'
 
 import { getCurrentWindow } from '@tauri-apps/api/window'
 import { invoke } from '@tauri-apps/api/core'
+import { reportRuntimeError, type RuntimeErrorDetail } from './runtimeError'
 
 export default function App() {
   const [activeSession, setActiveSession] = useState<string | null>(null)
@@ -23,6 +24,7 @@ export default function App() {
   const [sessionSettingsId, setSessionSettingsId] = useState<string | null>(null)
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false)
   const [activeTab, setActiveTab] = useState<'peri' | 'prism'>('peri')
+  const [runtimeError, setRuntimeError] = useState<RuntimeErrorDetail | null>(null)
   const activeProfileId = useStore(s => s.activeProfileId)
   const sessions = useStore(s => s.sessions)
 
@@ -33,13 +35,19 @@ export default function App() {
   }, [])
 
   useEffect(() => {
+    const onRuntimeError = (event: Event) => setRuntimeError((event as CustomEvent<RuntimeErrorDetail>).detail)
+    window.addEventListener('pylon:runtime-error', onRuntimeError)
+    return () => window.removeEventListener('pylon:runtime-error', onRuntimeError)
+  }, [])
+
+  useEffect(() => {
     if (!belongsToProfile(activeSession, activeProfileId, sessions)) setActiveSession(null)
   }, [activeProfileId, activeSession, sessions])
 
   useEffect(() => {
     invoke('list_agents').then((list: any) => {
       useStore.getState().setAgents(list)
-    }).catch(() => {})
+    }).catch(error => reportRuntimeError('读取 Agent 列表', error))
   }, [])
 
   const activeAgent = useStore(s => s.activeAgent) || 'peri'
@@ -172,6 +180,14 @@ export default function App() {
           <button className="close" onClick={() => appWindow.destroy()}>✕</button>
         </div>
       </div>
+
+      {runtimeError && (
+        <div className="runtime-error-banner" role="alert">
+          <strong>{runtimeError.action}失败</strong>
+          <span>{runtimeError.message}</span>
+          <button type="button" onClick={() => setRuntimeError(null)} aria-label="关闭错误提示">✕</button>
+        </div>
+      )}
 
       <div className={`layout ${ccEditMode ? 'cc-editing-app' : ''}`}>
         <Sidebar activeSession={activeSession} onSelectSession={setActiveSession} onProfileEdit={() => setShowProfileEdit(true)} onSessionSettings={setSessionSettingsId} collapsed={sidebarCollapsed} />

@@ -14,6 +14,7 @@ import { addGeneratingSource, removeGeneratingSource, updateSourceState } from '
 import { resolveToolVisualStatus } from './toolStatus'
 import { extractMode, extractModelConfig, sessionResponseObject, type PeriDonePayload, type PeriUpdatePayload, type SessionResponse } from './acpTypes'
 import { highlightCode } from './codeHighlight'
+import { reportRuntimeError } from '../../runtimeError'
 import './ChatView.css'
 
 // ── Peri spinner ──
@@ -137,7 +138,7 @@ const ChatView = React.memo(function ChatView({ sessionId }: Props) {
         const cfg = extractModelConfig(res?.configOptions)
         if (cfg.model || cfg.models) useStore.getState().setSessionConfig(s.source, { ...cfg, raw: res?.configOptions })
         syncMode(s.source, res)
-      }).catch(() => {})
+      }).catch(error => reportRuntimeError('创建会话', error))
     }
 
     if (s.periId) {
@@ -160,7 +161,8 @@ const ChatView = React.memo(function ChatView({ sessionId }: Props) {
         const cfg = extractModelConfig(res?.configOptions)
         if (cfg.model || cfg.models) useStore.getState().setSessionConfig(s.source, { ...cfg, raw: res?.configOptions })
         syncMode(s.source, res)
-      }).catch(() => {
+      }).catch(error => {
+        reportRuntimeError('恢复会话', error)
         if (loadGenerationRef.current[s.source] !== loadGeneration) return
         delete replayingSourcesRef.current[s.source]
         createSession()  // Fallback
@@ -394,7 +396,7 @@ const ChatView = React.memo(function ChatView({ sessionId }: Props) {
           <div className="term-spinner-row">
             <Spinner tokenCount={tokenCount.current} startTime={genStart.current} />
             <button className="spinner-stop-btn" title="停止生成 (Esc / Ctrl+C)"
-              onClick={() => { if (sessionRef.current) invoke('cancel_prompt', { source: sessionRef.current }).catch(() => {}) }}>
+              onClick={() => { if (sessionRef.current) invoke('cancel_prompt', { source: sessionRef.current }).catch(error => reportRuntimeError('取消生成', error)) }}>
               <Square size={11} /> 停止
             </button>
           </div>
