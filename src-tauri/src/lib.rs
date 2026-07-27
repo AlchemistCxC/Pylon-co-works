@@ -391,8 +391,10 @@ async fn set_config_option(state: tauri::State<'_, AppState>, source: String, ke
 #[tauri::command]
 async fn close_session(state: tauri::State<'_, AppState>, source: String) -> Result<(), String> {
     let _creation_guard = state.session_creation.lock().await;
+    let generation = state.current_generation();
     let peri_id = state.get_peri_id(&source).map_err(|e| e.to_string())?;
     state.acp.lock().await.close_session(&peri_id).await?;
+    state.ensure_generation(generation)?;
     let mut sessions = state.sessions.lock().map_err(|e| e.to_string())?;
     if sessions.get(&source).map(|session| session.peri_id.as_str()) == Some(peri_id.as_str()) {
         sessions.remove(&source);
