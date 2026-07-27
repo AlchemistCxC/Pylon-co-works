@@ -13,10 +13,102 @@ use error::PylonError;
 
 struct AppState {
     acp: Arc<tokio::sync::Mutex<AcpClient>>,
+    notification_task: Mutex<Option<tokio::task::JoinHandle<()>>>,
     agents: Mutex<HashMap<String, AgentDef>>,
     active_agent: Mutex<String>,
     sessions: Arc<Mutex<HashMap<String, SessionInfo>>>,
     pet: Arc<Mutex<pet::PetState>>,
+}
+
+fn start_notification_dispatcher(state: &AppState, window: tauri::WebviewWindow) {
+    if let Ok(mut task) = state.notification_task.lock() {
+        if let Some(handle) = task.take() { handle.abort(); }
+        let acp = state.acp.clone();
+        let sessions = state.sessions.clone();
+        let pet = state.pet.clone();
+        *task = Some(tokio::spawn(async move {
+            let mut rx = acp.lock().await.rx.resubscribe();
+            loop {
+                let raw = match rx.recv().await {
+                    Ok(raw) => raw,
+                    Err(tokio::sync::broadcast::error::RecvError::Lagged(n)) => {
+                        log::warn!("notification dispatcher lagged by {} messages", n);
+                        continue;
+                    }
+                    Err(tokio::sync::broadcast::error::RecvError::Closed) => break,
+                };
+                if raw.method.as_deref() != Some(acp::NOTIF_SESSION_UPDATE) { continue; }
+                let mut payload = match raw.params {
+                    Some(serde_json::Value::Object(map)) => serde_json::Value::Object(map),
+                    _ => { log::warn!("ACP session/update missing object params"); continue; }
+                };
+                let peri_id = match payload.get("sessionId").and_then(|v| v.as_str()) {
+                    Some(id) => id.to_string(),
+                    None => { log::warn!("ACP session/update missing sessionId"); continue; }
+                };
+                let source = sessions.lock().ok().and_then(|items| items.iter()
+                    .find(|(_, info)| info.peri_id == peri_id)
+                    .map(|(source, _)| source.clone()));
+                let Some(source) = source else {
+                    log::warn!("ACP notification for unknown session {}", peri_id);
+                    continue;
+                };
+                let Some(update) = payload.get("update") else {
+                    log::warn!("ACP session/update missing update payload");
+                    continue;
+                };
+                let variant = update.get("sessionUpdate").and_then(|v| v.as_str());
+                if variant == Some("user_message_chunk") {
+                    if let Some(text) = update.get("content").and_then(|c| c.get("text")).and_then(|v| v.as_str()) {
+                        let _ = window.emit("peri:user", serde_json::json!({"source": source, "content": text}));
+                    }
+                    continue;
+                }
+                if variant == Some("agent_message_chunk") {
+                    let _ = pet.lock().map(|mut p| pet::on_first_chunk(&mut p));
+                }
+                if let Ok(mut items) = sessions.lock() {
+                    if let Some(session) = items.get_mut(&source) {
+                        match variant {
+                            Some("usage_update") => {
+                                session.tokens_total = update.get("value").and_then(|v| v.as_u64()).unwrap_or(0);
+                                if let Some(meta) = update.get("_meta") {
+                                    session.tokens_in = meta.get("inputTokens").and_then(|v| v.as_u64()).unwrap_or(0);
+                                    session.tokens_out = meta.get("outputTokens").and_then(|v| v.as_u64()).unwrap_or(0);
+                                    if let Some(model) = meta.get("model").and_then(|v| v.as_str()) { session.model = model.to_string(); }
+                                }
+                                session.context_size = update.get("size").and_then(|v| v.as_u64()).unwrap_or(0);
+                                let _ = pet.lock().map(|mut p| pet::on_usage_update(&mut p, session.tokens_total));
+                            }
+                            Some("tool_call_update") if update.get("status").and_then(|v| v.as_str()) == Some("completed") => {
+                                let _ = pet.lock().map(|mut p| pet::on_tool_success(&mut p));
+                            }
+                            Some("session_info_update") => {
+                                if let Some(title) = update.get("title").and_then(|v| v.as_str()) { session.title = title.to_string(); }
+                            }
+                            Some("config_option_update") => {
+                                if let Some(options) = update.get("configOptions").and_then(|v| v.as_array()) {
+                                    for option in options {
+                                        if option.get("id").or_else(|| option.get("configId")).and_then(|v| v.as_str()) == Some("model") {
+                                            if let Some(model) = option.get("currentValue").and_then(|v| v.as_str())
+                                                .or_else(|| option.get("valueId").and_then(|v| v.get("value")).and_then(|v| v.as_str())) {
+                                                session.model = model.to_string();
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                            _ => {}
+                        }
+                    }
+                }
+                if let serde_json::Value::Object(ref mut map) = payload {
+                    map.insert("source".to_string(), serde_json::Value::String(source));
+                }
+                let _ = window.emit("peri:update", payload);
+            }
+        }));
+    }
 }
 
 struct SessionInfo {
@@ -139,137 +231,38 @@ async fn send_message(
     };
 
     let user_content = content.clone();
-    let (mut broadcast, write_tx, (_id, prompt_line, mut rx)) = {
+    let (write_tx, (_id, prompt_line, rx)) = {
         let acp = state.acp.lock().await;
         let tx = acp.write_tx.clone();
         let prompt = acp.prepare_prompt(&peri_id, &prompt_content)?;
-        (acp.rx.resubscribe(), tx, prompt)
+        (tx, prompt)
     };
     write_tx.send(prompt_line).await.map_err(|_| "ACP connection closed".to_string())?;
     state.pet.lock().map(|mut p| pet::on_user_sent(&mut p)).ok();
     let _ = window.emit("peri:user", serde_json::json!({ "source": source, "content": user_content }));
 
-    let pid = peri_id.clone();
-    let win = window.clone();
     let src = source.clone();
-    let sessions = state.sessions.clone();
     let pet = state.pet.clone();
-    let result = tokio::time::timeout(Duration::from_secs(acp::PROMPT_TIMEOUT_SECS), async move {
-        loop {
-            tokio::select! {
-                msg = &mut rx => {
-                    match msg {
-                        Ok(raw) => {
-                            let has_error = raw.error.is_some();
-                            if let Some(ref params) = raw.result {
-                                let _ = win.emit("peri:done", serde_json::json!({"source": src, "data": params}));
-                            }
-                            if has_error {
-                                let _ = win.emit("peri:error", serde_json::json!({"source": src, "error": raw.error.unwrap_or_default().to_string()}));
-                                let _ = pet.lock().map(|mut p| pet::on_error(&mut p));
-                            } else {
-                                let _ = pet.lock().map(|mut p| pet::on_done(&mut p));
-                            }
-                            return Ok(());
-                        }
-                        Err(_) => {
-                            let _ = pet.lock().map(|mut p| pet::on_error(&mut p));
-                            return Err("ACP connection closed".to_string());
-                        }
-                    }
-                }
-                notif = broadcast.recv() => {
-                    match notif {
-                        Ok(raw) => {
-                            if raw.method.as_deref() == Some(acp::NOTIF_SESSION_UPDATE) {
-                                let payload = raw.params.unwrap_or(serde_json::Value::Null);
-                                if payload.get("sessionId").and_then(|v| v.as_str()) != Some(&pid) { continue; }
-                                // Check for userMessageChunk (history replay) → emit as user message
-                                if let Some(update) = payload.get("update") {
-                                    if update.get("sessionUpdate").and_then(|v| v.as_str()) == Some("user_message_chunk") {
-                                        if let Some(text) = update.get("content").and_then(|c| c.get("text")).and_then(|v| v.as_str()) {
-                                            let _ = win.emit("peri:user", serde_json::json!({"source": src, "content": text}));
-                                            continue;
-                                        }
-                                    }
-                                    // First agent chunk → pet gets curious
-                                    if update.get("sessionUpdate").and_then(|v| v.as_str()) == Some("agent_message_chunk") {
-                                        let _ = pet.lock().map(|mut p| pet::on_first_chunk(&mut p));
-                                    }
-                                }
-                                // Update session metadata from notifications
-                                {
-                                    let payload_ref = &payload;
-                                    let update = match payload_ref.get("update") { Some(u) => u, None => unreachable!() };
-                                    let variant = update.get("sessionUpdate").and_then(|v| v.as_str());
-                                    if let Ok(mut sessions) = sessions.lock() {
-                                        if let Some(s) = sessions.get_mut(&src) {
-                                            match variant {
-                                                Some("usage_update") => {
-                                                    s.tokens_total = update.get("value").and_then(|v| v.as_u64()).unwrap_or(0);
-                                                    if let Some(meta) = update.get("_meta") {
-                                                        s.tokens_in = meta.get("inputTokens").and_then(|v| v.as_u64()).unwrap_or(0);
-                                                        s.tokens_out = meta.get("outputTokens").and_then(|v| v.as_u64()).unwrap_or(0);
-                                                        if let Some(m) = meta.get("model").and_then(|v| v.as_str()) { s.model = m.to_string(); }
-                                                    }
-                                                    s.context_size = update.get("size").and_then(|v| v.as_u64()).unwrap_or(0);
-                                                    // Pet growth: track cumulative tokens
-                                                    let _ = pet.lock().map(|mut p| pet::on_usage_update(&mut p, s.tokens_total));
-                                                }
-                                                Some("tool_call_update") => {
-                                                    // Pet growth: count successful tool calls
-                                                    if update.get("status").and_then(|v| v.as_str()) == Some("completed") {
-                                                        let _ = pet.lock().map(|mut p| pet::on_tool_success(&mut p));
-                                                    }
-                                                }
-                                                Some("session_info_update") => {
-                                                    if let Some(t) = update.get("title").and_then(|v| v.as_str()) {
-                                                        s.title = t.to_string();
-                                                        // Pet memory: capture every 100th message's session title
-                                                        let _ = pet.lock().map(|mut p| {
-                                                            if p.messages > 0 && p.messages % 100 == 0 {
-                                                                pet::add_memory(&mut p, t.to_string());
-                                                            }
-                                                        });
-                                                    }
-                                                }
-                                                Some("config_option_update") => {
-                                                    if let Some(opts) = update.get("configOptions").and_then(|v| v.as_array()) {
-                                                        for opt in opts {
-                                                            if opt.get("configId").and_then(|v| v.as_str()) == Some("model") {
-                                                                if let Some(vid) = opt.get("valueId").and_then(|v| v.get("value")).and_then(|v| v.as_str()) {
-                                                                    s.model = vid.to_string();
-                                                                }
-                                                            }
-                                                        }
-                                                    }
-                                                }
-                                                _ => {}
-                                            }
-                                        }
-                                    }
-                                }
-                                let mut payload = payload;
-                                if let serde_json::Value::Object(ref mut map) = payload {
-                                    map.insert("source".to_string(), serde_json::Value::String(src.clone()));
-                                }
-                                let _ = win.emit("peri:update", payload);
-                            }
-                        }
-                        Err(e) => {
-                            if let tokio::sync::broadcast::error::RecvError::Lagged(n) = e {
-                                log::warn!("broadcast lagged by {} messages", n);
-                            }
-                        }
-                    }
-                }
-            }
-        }
-    }).await;
+    let result = tokio::time::timeout(Duration::from_secs(acp::PROMPT_TIMEOUT_SECS), rx).await;
 
     match result {
-        Ok(Ok(())) => Ok(peri_id),
-        Ok(Err(e)) => Err(e),
+        Ok(Ok(raw)) => {
+            if let Some(error) = raw.error {
+                let error = error.to_string();
+                let _ = window.emit("peri:error", serde_json::json!({"source": src, "error": error}));
+                let _ = pet.lock().map(|mut p| pet::on_error(&mut p));
+                Err(error)
+            } else {
+                let data = raw.result.unwrap_or(serde_json::Value::Null);
+                let _ = window.emit("peri:done", serde_json::json!({"source": src, "data": data}));
+                let _ = pet.lock().map(|mut p| pet::on_done(&mut p));
+                Ok(peri_id)
+            }
+        }
+        Ok(Err(_)) => {
+            let _ = pet.lock().map(|mut p| pet::on_error(&mut p));
+            Err("ACP connection closed".to_string())
+        }
         Err(_) => {
             let _ = window.emit("peri:error", serde_json::json!({"source": source, "error": "timed out after 300s"}));
             Err("timeout".to_string())
@@ -496,6 +489,7 @@ pub fn run() {
             .plugin(tauri_plugin_fs::init())
             .manage(AppState {
                 acp,
+                notification_task: Mutex::new(None),
                 agents: Mutex::new(agents_for_state),
                 active_agent: Mutex::new(default_agent_id),
                 sessions: Arc::new(Mutex::new(HashMap::new())),
@@ -509,7 +503,9 @@ pub fn run() {
                 export_session,
             ])
             .setup(|app| {
-                app.get_webview_window("main").unwrap().set_title("Pylon").ok();
+                let window = app.get_webview_window("main").ok_or("main window not found")?;
+                window.set_title("Pylon").ok();
+                start_notification_dispatcher(app.state::<AppState>().inner(), window);
                 Ok(())
             })
             .on_window_event(move |_window, event| {
