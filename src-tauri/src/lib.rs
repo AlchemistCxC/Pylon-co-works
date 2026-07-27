@@ -14,6 +14,7 @@ use error::PylonError;
 struct AppState {
     acp: Arc<tokio::sync::Mutex<AcpClient>>,
     notification_task: Mutex<Option<tokio::task::JoinHandle<()>>>,
+    session_creation: Arc<tokio::sync::Mutex<()>>,
     agents: Mutex<HashMap<String, AgentDef>>,
     active_agent: Mutex<String>,
     sessions: Arc<Mutex<HashMap<String, SessionInfo>>>,
@@ -163,6 +164,7 @@ async fn new_session(
     persona: String,
     cwd: Option<String>,
 ) -> Result<serde_json::Value, String> {
+    let _creation_guard = state.session_creation.lock().await;
     {
         let sessions = state.sessions.lock().map_err(|e| e.to_string())?;
         if sessions.len() >= MAX_SESSIONS { return Err("max sessions reached".to_string()); }
@@ -170,8 +172,13 @@ async fn new_session(
     let session_cwd = cwd.unwrap_or_else(|| state.agent_cwd());
     let response = state.acp.lock().await.new_session(&session_cwd).await?;
     let peri_id = AcpClient::session_id_from(&response)?;
-    state.sessions.lock().map_err(|e| e.to_string())?
+    let replaced = state.sessions.lock().map_err(|e| e.to_string())?
         .insert(source.clone(), SessionInfo { peri_id: peri_id.clone(), persona, cwd: session_cwd, has_first_prompt: false, title: String::new(), model: String::new(), tokens_in: 0, tokens_out: 0, tokens_total: 0, context_size: 0 });
+    if let Some(old) = replaced {
+        if let Err(error) = state.acp.lock().await.close_session(&old.peri_id).await {
+            log::warn!("close replaced session: {}", error);
+        }
+    }
     // Return full response so frontend gets modes + configOptions + sessionId
     Ok(response)
 }
@@ -191,6 +198,7 @@ async fn send_message(
         return Err(PylonError::AgentCrashed.into());
     }
 
+    let _creation_guard = state.session_creation.lock().await;
     let (peri_id, is_first) = {
         let found = {
             let mut sessions = state.sessions.lock().map_err(|e| e.to_string())?;
@@ -491,6 +499,7 @@ pub fn run() {
             .manage(AppState {
                 acp,
                 notification_task: Mutex::new(None),
+                session_creation: Arc::new(tokio::sync::Mutex::new(())),
                 agents: Mutex::new(agents_for_state),
                 active_agent: Mutex::new(default_agent_id),
                 sessions: Arc::new(Mutex::new(HashMap::new())),
