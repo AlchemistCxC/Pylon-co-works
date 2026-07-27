@@ -33,7 +33,7 @@ export default forwardRef<{ send: () => void; attachFile: () => void; cancel: ()
     return s.sessions.find(session => session.id === sessionId || session.source === sessionId)?.source ?? sessionId
   })
   // 当前 session 是否正在生成（用于把发送按钮切成"停止"）
-  const generating = useStore(s => sessionSource != null && s.liveGenerating === sessionSource)
+  const generating = useStore(s => sessionSource != null && (s.liveGeneratingSources || []).includes(sessionSource))
 
   const activeProfile = profiles.find(p => p.id === activeProfileId)
   const persona = activeProfile?.persona || ''
@@ -55,8 +55,8 @@ export default forwardRef<{ send: () => void; attachFile: () => void; cancel: ()
   // 全局取消：焦点不在输入框（如阅读长回复）时，Esc / Ctrl+C 也能中断生成
   useEffect(() => {
     const onGlobalKey = (e: globalThis.KeyboardEvent) => {
-      if (!sessionId) return
-      if (useStore.getState().liveGenerating !== sessionSource) return
+      if (!sessionId || !sessionSource) return
+      if (!(useStore.getState().liveGeneratingSources || []).includes(sessionSource)) return
       const isEsc = e.key === 'Escape'
       const isCtrlC = e.ctrlKey && (e.key === 'c' || e.key === 'C') && !window.getSelection()?.toString()
       if (isEsc || isCtrlC) {

@@ -10,6 +10,7 @@ import Anser from 'anser'
 import { Square } from 'lucide-react'
 import { toHtml } from 'hast-util-to-html'
 import { canPersistMessages } from './messagePersistence'
+import { addGeneratingSource, removeGeneratingSource, updateSourceState } from './sessionEventState'
 import './ChatView.css'
 
 // ── Peri spinner ──
@@ -102,6 +103,8 @@ const ChatView = React.memo(function ChatView({ sessionId }: Props) {
   const [summary, setSummary] = useState('')
   const sessionRef = useRef<string | null>(null)
   const messageOwnerRef = useRef<string | null>(null)
+  const messagesBySourceRef = useRef<Record<string, Message[]>>({})
+  const generationStartRef = useRef<Record<string, number>>({})
   const prevSessionRef = useRef(sessionId)
   useEffect(() => {
     if (sessionId === prevSessionRef.current) return
@@ -116,14 +119,20 @@ const ChatView = React.memo(function ChatView({ sessionId }: Props) {
     sessionRef.current = s.source  // set BEFORE async, so incoming events match
     messageOwnerRef.current = s.id
 
-    // 先从 localStorage 恢复消息（Peri 重放可能失败）
-    const stored = localStorage.getItem('pylon-msgs-' + s.id)
-    if (stored) {
+    const cached = messagesBySourceRef.current[s.source] ?? (() => {
+      const stored = localStorage.getItem('pylon-msgs-' + s.id)
+      if (!stored) return []
       try {
-        const restored = (JSON.parse(stored) as Message[]).map(message => ({ ...message, running: false }))
-        setMessages(restored)
-      } catch {}
-    }
+        return (JSON.parse(stored) as Message[]).map(message => ({ ...message, running: false }))
+      } catch {
+        return []
+      }
+    })()
+    messagesBySourceRef.current[s.source] = cached
+    setMessages(cached)
+    const sourceGenerating = (useStore.getState().liveGeneratingSources || []).includes(s.source)
+    setGenerating(sourceGenerating)
+    if (sourceGenerating) genStart.current = generationStartRef.current[s.source] || Date.now()
 
     const profile = useStore.getState().profiles.find(p => p.id === s.profileId)
     const persona = profile?.persona || ''
@@ -156,11 +165,49 @@ const ChatView = React.memo(function ChatView({ sessionId }: Props) {
   }, [sessionId])
 
   useEffect(() => {
+    const updateSourceMessages = (source: string, updater: (prev: Message[]) => Message[]) => {
+      const next = updateSourceState(messagesBySourceRef.current, source, updater)
+      const session = useStore.getState().sessions.find(item => item.source === source)
+      if (session) {
+        try { localStorage.setItem('pylon-msgs-' + session.id, JSON.stringify(next)) } catch {}
+      }
+      if (sessionRef.current === source) setMessages(next)
+    }
+    const startGenerating = (source: string) => {
+      const current = useStore.getState().liveGeneratingSources || []
+      const next = addGeneratingSource(current, source)
+      if (next !== current) {
+        useStore.getState().setLiveStats({
+          liveGeneratingSources: next,
+          liveGenerating: source,
+        })
+      }
+    }
+    const stopGenerating = (source: string) => {
+      const next = removeGeneratingSource(useStore.getState().liveGeneratingSources || [], source)
+      useStore.getState().setLiveStats({
+        liveGeneratingSources: next,
+        liveGenerating: next[next.length - 1] || null,
+      })
+    }
+
     const unlisten = Promise.all([
       listen<{ source: string; content: string }>('peri:user', (event) => {
-        if (event.payload.source !== sessionRef.current) return
         const { source, content } = event.payload
-        // Auto-name: if session name is still default ID, use first 30 chars
+        const update = (prev: Message[]) => [
+          ...prev.map(m => ({ ...m, running: false })),
+          { id: 'user-' + Date.now(), role: 'user' as const, sender: source, content, time: new Date().toLocaleTimeString() },
+        ]
+        updateSourceMessages(source, update)
+        generationStartRef.current[source] = Date.now()
+        startGenerating(source)
+        if (sessionRef.current === source) {
+          genStart.current = generationStartRef.current[source]
+          tokenCount.current = 0
+          setGenerating(true)
+          setSummary('')
+        }
+
         const sessions = useStore.getState().sessions
         const s = sessions.find(s => s.source === source)
         if (s?.name.startsWith('session-')) {
@@ -169,61 +216,44 @@ const ChatView = React.memo(function ChatView({ sessionId }: Props) {
           useStore.setState({ sessions: updated })
           localStorage.setItem('pylon-sessions', JSON.stringify(updated))
         }
-        // Clear running flags on all previous messages
-        setMessages(prev => prev.map(m => ({ ...m, running: false })))
-        setGenerating(true); genStart.current = Date.now(); tokenCount.current = 0; setSummary('')
-        useStore.getState().setLiveStats({ liveGenerating: source })  // 跨组件：标记该 session 正在生成
-        setMessages(prev => [...prev, {
-          id: 'user-' + Date.now(), role: 'user', sender: source,
-          content, time: new Date().toLocaleTimeString()
-        }])
       }),
 
       listen<any>('peri:update', (event) => {
-        if (event.payload.source !== sessionRef.current) return
+        const source = event.payload.source
         const upd = event.payload?.update
-        if (!upd) return
+        if (!source || !upd) return
         const variant = upd.sessionUpdate
         switch (variant) {
           case 'agent_message_chunk': {
             const text = upd.content?.text || ''
             if (!text) return
-            setMessages(prev => {
+            updateSourceMessages(source, prev => {
               const last = prev[prev.length - 1]
               if (last?.role === 'assistant' && last.running) {
                 return prev.map((m, i) => i === prev.length - 1 ? { ...m, content: m.content + text } : m)
               }
-              return [...prev, {
-                id: 'msg-' + Date.now(), role: 'assistant', sender: 'peri',
-                content: text, time: new Date().toLocaleTimeString(), running: true
-              }]
+              return [...prev, { id: 'msg-' + Date.now(), role: 'assistant', sender: 'peri', content: text, time: new Date().toLocaleTimeString(), running: true }]
             })
             break
           }
           case 'agent_thought_chunk': {
             const text = upd.content?.text || ''
             if (!text) return
-            setMessages(prev => {
+            updateSourceMessages(source, prev => {
               const last = prev[prev.length - 1]
               if (last?.role === 'reasoning' && last.running) {
                 return prev.map((m, i) => i === prev.length - 1 ? { ...m, content: m.content + text } : m)
               }
-              return [...prev, {
-                id: 'thought-' + Date.now(), role: 'reasoning', sender: 'peri',
-                content: text, time: new Date().toLocaleTimeString(), running: true
-              }]
+              return [...prev, { id: 'thought-' + Date.now(), role: 'reasoning', sender: 'peri', content: text, time: new Date().toLocaleTimeString(), running: true }]
             })
             break
           }
           case 'tool_call': {
             const rawInput = upd.rawInput
             const inputStr = formatToolInput(upd.title, rawInput) || (typeof rawInput === 'string' ? rawInput.slice(0, 80) : '')
-            setMessages(prev => [...prev, {
-              id: 'tool-' + upd.toolCallId, role: 'tool', sender: 'tool:' + (upd.title || '?'),
-              content: '', time: new Date().toLocaleTimeString(),
-              toolName: upd.title,
-              toolInput: inputStr,
-              running: true
+            updateSourceMessages(source, prev => [...prev, {
+              id: 'tool-' + upd.toolCallId, role: 'tool', sender: 'tool:' + (upd.title || '?'), content: '', time: new Date().toLocaleTimeString(),
+              toolName: upd.title, toolInput: inputStr, running: true,
             }])
             break
           }
@@ -231,42 +261,31 @@ const ChatView = React.memo(function ChatView({ sessionId }: Props) {
             const rawOutput = upd.rawOutput
             const outputStr = typeof rawOutput === 'string' ? rawOutput : JSON.stringify(rawOutput, null, 2)
             const lines = outputStr ? outputStr.split(/\n/).filter((l: string) => l.trim()).length : 0
-            setMessages(prev => prev.map(m => {
-              if (m.id === 'tool-' + upd.toolCallId && m.running) {
-                return { ...m, toolOutput: outputStr, toolOutputLines: lines, toolStatus: upd.status, running: false }
-              }
-              return m
-            }))
+            updateSourceMessages(source, prev => prev.map(m => m.id === 'tool-' + upd.toolCallId && m.running
+              ? { ...m, toolOutput: outputStr, toolOutputLines: lines, toolStatus: upd.status, running: false }
+              : m))
             break
           }
           case 'usage_update': {
             const used = upd.value || (upd._meta?.inputTokens || 0) + (upd._meta?.outputTokens || 0)
             const max = upd.size || 131072
-            tokenCount.current = used
-            useStore.getState().setLiveStats({
-              liveTokensUsed: used,
-              liveTokensMax: max,
-              liveCacheHit: upd._meta?.cacheReadTokens || 0,
-            })
+            if (sessionRef.current === source) {
+              tokenCount.current = used
+              useStore.getState().setLiveStats({ liveTokensUsed: used, liveTokensMax: max, liveCacheHit: upd._meta?.cacheReadTokens || 0 })
+            }
             break
           }
-          case 'available_commands_update': {
-            const commands = upd.commands || []
-            useStore.getState().setLiveStats({ liveCommands: commands } as any)
+          case 'available_commands_update':
+            if (sessionRef.current === source) useStore.getState().setLiveStats({ liveCommands: upd.commands || [] } as any)
             break
-          }
           case 'config_option_update': {
-            // 后端配置变更（含 model）— 整包 configOptions[] 或单条 {id/key, currentValue/value}
-            const src = event.payload.source
             if (Array.isArray(upd.configOptions)) {
               const cfg = extractModelConfig(upd.configOptions)
-              if (cfg.model || cfg.models) useStore.getState().setSessionConfig(src, { ...cfg, raw: upd.configOptions })
+              if (cfg.model || cfg.models) useStore.getState().setSessionConfig(source, { ...cfg, raw: upd.configOptions })
             } else {
               const key = upd.id ?? upd.key
               const val = upd.currentValue ?? upd.value
-              if (key === 'model' && val != null) {
-                useStore.getState().setSessionConfig(src, { model: String(val) })
-              }
+              if (key === 'model' && val != null) useStore.getState().setSessionConfig(source, { model: String(val) })
             }
             break
           }
@@ -274,31 +293,36 @@ const ChatView = React.memo(function ChatView({ sessionId }: Props) {
       }),
 
       listen<any>('peri:done', (event) => {
-        if (event.payload.source !== sessionRef.current) return
-        const elapsed = Math.floor((Date.now() - genStart.current) / 1000)
-        const elapsedStr = elapsed >= 60 ? `${Math.floor(elapsed/60)}m ${elapsed%60}s` : `${elapsed}s`
-        setSummary(`✻  处理耗时 ${elapsedStr}`)
-        setGenerating(false)
-        if (useStore.getState().liveGenerating === event.payload.source) useStore.getState().setLiveStats({ liveGenerating: null })
-        setMessages(prev => prev.map(m => ({ ...m, running: false })))
+        const source = event.payload.source
+        if (!source) return
+        stopGenerating(source)
+        if (sessionRef.current === source) {
+          const start = generationStartRef.current[source] || genStart.current
+          const elapsed = Math.floor((Date.now() - start) / 1000)
+          const elapsedStr = elapsed >= 60 ? `${Math.floor(elapsed/60)}m ${elapsed%60}s` : `${elapsed}s`
+          setSummary(`✻  处理耗时 ${elapsedStr}`)
+          setGenerating(false)
+        }
+        updateSourceMessages(source, prev => prev.map(m => ({ ...m, running: false })))
       }),
 
       listen<{ source: string; error: string }>('peri:error', (event) => {
-        if (event.payload.source !== sessionRef.current) return
-        setGenerating(false)
-        if (useStore.getState().liveGenerating === event.payload.source) {
-          useStore.getState().setLiveStats({ liveGenerating: null })
-        }
-        setMessages(prev => [...prev, {
-          id: 'err-' + Date.now(), role: 'assistant', sender: 'system',
-          content: event.payload.error, time: new Date().toLocaleTimeString()
+        const { source, error } = event.payload
+        if (!source) return
+        stopGenerating(source)
+        updateSourceMessages(source, prev => [...prev.map(m => ({ ...m, running: false })), {
+          id: 'err-' + Date.now(), role: 'assistant', sender: 'system', content: error, time: new Date().toLocaleTimeString(),
         }])
+        if (sessionRef.current === source) setGenerating(false)
       }),
-
-      // /clear listener (not a promise — outside Promise.all)
     ])
 
-    const handleClear = () => { setMessages([]); setSummary('') }
+    const handleClear = () => {
+      if (!sessionRef.current) return
+      messagesBySourceRef.current[sessionRef.current] = []
+      setMessages([])
+      setSummary('')
+    }
     window.addEventListener('peri:clear', handleClear)
 
     return () => {
@@ -309,12 +333,15 @@ const ChatView = React.memo(function ChatView({ sessionId }: Props) {
 
   useEffect(() => { bottomRef.current?.scrollIntoView({ behavior: 'smooth' }) }, [messages, generating])
 
-  // 仅当消息 owner 与当前 render 会话一致时持久化，避免切换瞬间串写
+  // 当前可见会话的消息同步到 localStorage；后台会话在事件入口直接持久化
   useEffect(() => {
     const ownerId = messageOwnerRef.current
     const source = sessionRef.current
     if (!canPersistMessages({ ownerId, source, renderedSessionId: sessionId }) || messages.length === 0) return
-    try { localStorage.setItem('pylon-msgs-' + ownerId, JSON.stringify(messages)) } catch {}
+    const ownedSource = source as string
+    const ownedSessionId = ownerId as string
+    messagesBySourceRef.current[ownedSource] = messages
+    try { localStorage.setItem('pylon-msgs-' + ownedSessionId, JSON.stringify(messages)) } catch {}
   }, [messages, sessionId])
 
   // dev/浏览器模式（无 Tauri）即使无 session 也渲染 mock 对话，方便调样式

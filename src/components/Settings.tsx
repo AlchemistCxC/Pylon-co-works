@@ -394,6 +394,7 @@ export default function Settings({ onClose }: { onClose?: () => void }) {
                             sessions: [],
                             sessionConfig: {},
                             liveGenerating: null,
+                            liveGeneratingSources: [],
                           })
                           localStorage.setItem('pylon-sessions', '[]')
                           window.dispatchEvent(new CustomEvent('pylon:agent-switched'))

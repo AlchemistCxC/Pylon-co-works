@@ -66,9 +66,10 @@ type ThemeState = ThemeSettings & {
   liveCacheHit: number
   liveMode: string
   livePrismOn: boolean
-  liveGenerating: string | null  // 正在生成回复的 session source（null=空闲）；用于跨组件显示"停止"按钮
+  liveGenerating: string | null  // 兼容旧状态：最近开始生成的 session source
+  liveGeneratingSources: string[] // 当前所有正在生成的 session source
   liveCommands: { name: string; input_hint?: string; description?: string }[]
-  setLiveStats: (stats: Partial<{liveTokensUsed:number,liveTokensMax:number,liveCacheHit:number,liveMode:string,livePrismOn:boolean,liveGenerating:string|null,liveCommands:any[]}>) => void
+  setLiveStats: (stats: Partial<{liveTokensUsed:number,liveTokensMax:number,liveCacheHit:number,liveMode:string,livePrismOn:boolean,liveGenerating:string|null,liveGeneratingSources:string[],liveCommands:any[]}>) => void
   // 每会话的后端配置选项（model 列表/当前值等），key = session source
   sessionConfig: Record<string, SessionConfig>
   setSessionConfig: (source: string, cfg: Partial<SessionConfig>) => void
@@ -172,7 +173,7 @@ export const useStore = create<ThemeState>()(persist(
   getUser: (source) => get().users.find(u => u.id === source),
   updateTheme: (partial) => set(partial),
 
-  liveTokensUsed: 0, liveTokensMax: 131072, liveCacheHit: 0, liveMode: 'auto', livePrismOn: true, liveGenerating: null,
+  liveTokensUsed: 0, liveTokensMax: 131072, liveCacheHit: 0, liveMode: 'auto', livePrismOn: true, liveGenerating: null, liveGeneratingSources: [],
   setLiveStats: (stats) => set(stats),
   liveCommands: [],
   sessionConfig: {},
