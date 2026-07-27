@@ -52,9 +52,14 @@ fn start_notification_dispatcher(state: &AppState, window: tauri::WebviewWindow)
         let acp = state.acp.clone();
         let sessions = state.sessions.clone();
         let pet = state.pet.clone();
+        let generation = state.current_generation();
+        let client_generation = state.client_generation.clone();
         *task = Some(tokio::spawn(async move {
             let mut rx = acp.lock().await.rx.resubscribe();
             loop {
+                if client_generation.load(Ordering::Acquire) != generation {
+                    break;
+                }
                 let raw = match rx.recv().await {
                     Ok(raw) => raw,
                     Err(tokio::sync::broadcast::error::RecvError::Lagged(n)) => {
@@ -63,6 +68,9 @@ fn start_notification_dispatcher(state: &AppState, window: tauri::WebviewWindow)
                     }
                     Err(tokio::sync::broadcast::error::RecvError::Closed) => break,
                 };
+                if client_generation.load(Ordering::Acquire) != generation {
+                    break;
+                }
                 if raw.method.as_deref() != Some(acp::NOTIF_SESSION_UPDATE) { continue; }
                 let mut payload = match raw.params {
                     Some(serde_json::Value::Object(map)) => serde_json::Value::Object(map),
