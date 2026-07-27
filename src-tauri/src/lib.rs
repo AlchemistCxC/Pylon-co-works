@@ -4,6 +4,7 @@ mod error;
 mod pet;
 
 use std::collections::HashMap;
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 use tauri::{Emitter, Manager};
@@ -16,6 +17,7 @@ struct AppState {
     notification_task: Mutex<Option<tokio::task::JoinHandle<()>>>,
     session_creation: Arc<tokio::sync::Mutex<()>>,
     agent_lifecycle: Arc<tokio::sync::Mutex<()>>,
+    client_generation: Arc<AtomicU64>,
     prompt_locks: Arc<tokio::sync::Mutex<HashMap<String, Arc<tokio::sync::Mutex<()>>>>>,
     agents: Mutex<HashMap<String, AgentDef>>,
     active_agent: Mutex<String>,
@@ -154,6 +156,19 @@ struct SessionInfo {
 // ── AppState helpers ──
 
 impl AppState {
+    fn current_generation(&self) -> u64 {
+        self.client_generation.load(Ordering::Acquire)
+    }
+
+    fn ensure_generation(&self, expected: u64) -> Result<(), String> {
+        let current = self.current_generation();
+        if current == expected {
+            Ok(())
+        } else {
+            Err(format!("stale ACP client generation: expected {expected}, current {current}"))
+        }
+    }
+
     fn get_active_agent(&self) -> Result<AgentDef, PylonError> {
         let name = self.active_agent.lock().map_err(|e| PylonError::Acp(e.to_string()))?;
         self.agents.lock().map_err(|e| PylonError::Acp(e.to_string()))?.get(&*name).cloned().ok_or(PylonError::NoActiveAgent)
@@ -403,6 +418,7 @@ async fn replace_agent_client(
         let mut acp = state.acp.lock().await;
         std::mem::replace(&mut *acp, new_acp)
     };
+    state.client_generation.fetch_add(1, Ordering::AcqRel);
     if let Some(agent_id) = agent_id {
         *state.active_agent.lock().map_err(|error| error.to_string())? = agent_id;
     }
@@ -491,13 +507,26 @@ async fn load_persisted_session(
     peri_id: String,
     cwd: Option<String>,
 ) -> Result<serde_json::Value, String> {
+    let generation = state.current_generation();
     let cwd = cwd.unwrap_or_else(|| state.agent_cwd());
     state.sessions.lock().map_err(|e| e.to_string())?
         .insert(source.clone(), SessionInfo { peri_id: peri_id.clone(), persona: String::new(), cwd: cwd.clone(), has_first_prompt: true, title: String::new(), model: String::new(), tokens_in: 0, tokens_out: 0, tokens_total: 0, context_size: 0 });
     match state.acp.lock().await.load_session(&peri_id, &cwd).await {
-        Ok(response) => Ok(response),
+        Ok(response) => {
+            if let Err(error) = state.ensure_generation(generation) {
+                let mut sessions = state.sessions.lock().map_err(|lock_error| lock_error.to_string())?;
+                if sessions.get(&source).map(|session| session.peri_id.as_str()) == Some(peri_id.as_str()) {
+                    sessions.remove(&source);
+                }
+                return Err(error);
+            }
+            Ok(response)
+        }
         Err(error) => {
-            state.sessions.lock().map_err(|e| e.to_string())?.remove(&source);
+            let mut sessions = state.sessions.lock().map_err(|lock_error| lock_error.to_string())?;
+            if sessions.get(&source).map(|session| session.peri_id.as_str()) == Some(peri_id.as_str()) {
+                sessions.remove(&source);
+            }
             Err(error)
         }
     }
@@ -583,6 +612,7 @@ pub fn run() {
                 notification_task: Mutex::new(None),
                 session_creation: Arc::new(tokio::sync::Mutex::new(())),
                 agent_lifecycle: Arc::new(tokio::sync::Mutex::new(())),
+                client_generation: Arc::new(AtomicU64::new(0)),
                 prompt_locks: Arc::new(tokio::sync::Mutex::new(HashMap::new())),
                 agents: Mutex::new(agents_for_state),
                 active_agent: Mutex::new(default_agent_id),
