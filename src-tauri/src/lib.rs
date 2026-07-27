@@ -410,47 +410,12 @@ async fn pet_action(state: tauri::State<'_, AppState>, action: String, value: Op
 async fn load_persisted_session(
     state: tauri::State<'_, AppState>,
     source: String,
-    window: tauri::Window,
     peri_id: String,
 ) -> Result<(), String> {
     let cwd = state.agent_cwd();
-    let mut broadcast = state.acp.lock().await.rx.resubscribe();
-    let src = source.clone();
-    let src2 = src.clone();  // spawn 后 emit peri:done 用
-    let pid = peri_id.clone();
-    let win = window.clone();
-    let win2 = window.clone();  // 给 spawn 外用
-    let handle = tokio::spawn(async move {
-        while let Ok(raw) = broadcast.recv().await {
-            if raw.method.as_deref() == Some(acp::NOTIF_SESSION_UPDATE) {
-                let payload = raw.params.unwrap_or(serde_json::Value::Null);
-                // R3: filter by sessionId
-                if payload.get("sessionId").and_then(|v| v.as_str()) != Some(&pid) { continue; }
-                // 重放中的 user_message_chunk → peri:user；其余 → peri:update
-                if let Some(update) = payload.get("update") {
-                    if update.get("sessionUpdate").and_then(|v| v.as_str()) == Some("user_message_chunk") {
-                        if let Some(text) = update.get("content").and_then(|c| c.get("text")).and_then(|v| v.as_str()) {
-                            let _ = win.emit("peri:user", serde_json::json!({"source": src, "content": text}));
-                        }
-                        continue;
-                    }
-                }
-                let mut payload = payload;
-                if let serde_json::Value::Object(ref mut map) = payload {
-                    map.insert("source".to_string(), serde_json::Value::String(src.clone()));
-                }
-                let _ = win.emit("peri:update", payload);
-            }
-        }
-    });
     state.acp.lock().await.load_session(&peri_id, &cwd).await?;
-    // 等 Peri 推送完重放消息（session/update 通知在 RPC 返回后异步到达）
-    tokio::time::sleep(std::time::Duration::from_millis(1500)).await;
-    handle.abort();
-    // 标记重放完成
-    let _ = win2.emit("peri:done", serde_json::json!({"source": src2}));
     state.sessions.lock().map_err(|e| e.to_string())?
-        .insert(source, SessionInfo { peri_id: peri_id.clone(), persona: String::new(), cwd, has_first_prompt: false, title: String::new(), model: String::new(), tokens_in: 0, tokens_out: 0, tokens_total: 0, context_size: 0 });
+        .insert(source, SessionInfo { peri_id: peri_id.clone(), persona: String::new(), cwd, has_first_prompt: true, title: String::new(), model: String::new(), tokens_in: 0, tokens_out: 0, tokens_total: 0, context_size: 0 });
     Ok(())
 }
 
