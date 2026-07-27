@@ -540,6 +540,65 @@ async fn list_persisted_sessions(state: tauri::State<'_, AppState>) -> Result<se
     state.acp.lock().await.list_persisted(cwd.as_deref()).await
 }
 
+fn format_export_markdown(peri_id: &str, messages: &[serde_json::Value]) -> String {
+    let mut markdown = format!("# Session {peri_id}\n\n");
+    for message in messages {
+        let Some(update) = message.get("update") else { continue };
+        let variant = update.get("sessionUpdate").and_then(|value| value.as_str());
+        match variant {
+            Some("user_message_chunk") => {
+                if let Some(text) = update.get("content").and_then(|content| content.get("text")).and_then(|value| value.as_str()) {
+                    markdown.push_str("## User\n\n");
+                    markdown.push_str(text);
+                    markdown.push_str("\n\n");
+                }
+            }
+            Some("agent_thought_chunk") => {
+                if let Some(text) = update.get("content").and_then(|content| content.get("text")).and_then(|value| value.as_str()) {
+                    markdown.push_str("## Reasoning\n\n");
+                    markdown.push_str(text);
+                    markdown.push_str("\n\n");
+                }
+            }
+            Some("agent_message_chunk") => {
+                if let Some(text) = update.get("content").and_then(|content| content.get("text")).and_then(|value| value.as_str()) {
+                    markdown.push_str("## Assistant\n\n");
+                    markdown.push_str(text);
+                    markdown.push_str("\n\n");
+                }
+            }
+            Some("tool_call") => {
+                let title = update.get("title").or_else(|| update.get("name"))
+                    .and_then(|value| value.as_str()).unwrap_or("Tool");
+                markdown.push_str(&format!("## Tool: {title}\n\n"));
+                if let Some(input) = update.get("rawInput") {
+                    markdown.push_str("```json\n");
+                    markdown.push_str(&serde_json::to_string_pretty(input).unwrap_or_else(|_| input.to_string()));
+                    markdown.push_str("\n```\n\n");
+                }
+            }
+            Some("tool_call_update") => {
+                let status = update.get("status").and_then(|value| value.as_str()).unwrap_or("unknown");
+                markdown.push_str(&format!("### Tool result ({status})\n\n"));
+                if let Some(output) = update.get("rawOutput") {
+                    match output.as_str() {
+                        Some(text) => markdown.push_str(text),
+                        None => markdown.push_str(&serde_json::to_string_pretty(output).unwrap_or_else(|_| output.to_string())),
+                    }
+                    markdown.push_str("\n\n");
+                }
+            }
+            Some("usage_update" | "session_info_update" | "config_option_update") => {
+                markdown.push_str("<details><summary>Metadata</summary>\n\n```json\n");
+                markdown.push_str(&serde_json::to_string_pretty(update).unwrap_or_else(|_| update.to_string()));
+                markdown.push_str("\n```\n\n</details>\n\n");
+            }
+            _ => {}
+        }
+    }
+    markdown
+}
+
 // ── Export command ──
 
 #[tauri::command]
@@ -552,40 +611,41 @@ async fn export_session(
     let cwd = state.agent_cwd();
     let mut broadcast = state.acp.lock().await.rx.resubscribe();
     let messages: Arc<Mutex<Vec<serde_json::Value>>> = Arc::new(Mutex::new(Vec::new()));
+    let replay_error: Arc<Mutex<Option<String>>> = Arc::new(Mutex::new(None));
     let msgs = messages.clone();
+    let replay_error_for_task = replay_error.clone();
     let pid = peri_id.clone();
     let handle = tokio::spawn(async move {
-        while let Ok(raw) = broadcast.recv().await {
-            if raw.method.as_deref() == Some(acp::NOTIF_SESSION_UPDATE) {
-                if let Some(params) = raw.params {
-                    // Filter by sessionId to avoid mixing messages from other sessions
-                    if params.get("sessionId").and_then(|v| v.as_str()) != Some(&*pid) { continue; }
-                    msgs.lock().unwrap().push(params);
+        loop {
+            match broadcast.recv().await {
+                Ok(raw) => {
+                    if raw.method.as_deref() == Some(acp::NOTIF_SESSION_UPDATE) {
+                        if let Some(params) = raw.params {
+                            if params.get("sessionId").and_then(|value| value.as_str()) != Some(&*pid) { continue; }
+                            msgs.lock().unwrap().push(params);
+                        }
+                    }
+                }
+                Err(tokio::sync::broadcast::error::RecvError::Lagged(count)) => {
+                    *replay_error_for_task.lock().unwrap() = Some(format!("export replay lagged by {count} messages"));
+                    break;
+                }
+                Err(tokio::sync::broadcast::error::RecvError::Closed) => {
+                    *replay_error_for_task.lock().unwrap() = Some("ACP notification stream closed during export".to_string());
+                    break;
                 }
             }
         }
     });
     state.acp.lock().await.load_session(&peri_id, &cwd).await?;
     handle.abort();
+    if let Some(error) = replay_error.lock().map_err(|lock_error| lock_error.to_string())?.take() {
+        return Err(error);
+    }
     let msgs = messages.lock().map_err(|e| e.to_string())?;
     let content = match format.as_str() {
-        "markdown" => {
-            let mut md = format!("# Session {}\n\n", peri_id);
-            for msg in msgs.iter() {
-                // R1: use sessionUpdate value comparison, content is at same level
-                if let Some(update) = msg.get("update") {
-                    if update.get("sessionUpdate").and_then(|v| v.as_str()) == Some("agent_message_chunk") {
-                        if let Some(text) = update.get("content").and_then(|c| c.get("text")).and_then(|v| v.as_str()) {
-                            md.push_str(text);
-                        }
-                    }
-                }
-            }
-            md
-        }
-        _ => {
-            serde_json::to_string_pretty(&messages).unwrap_or_default()
-        }
+        "markdown" => format_export_markdown(&peri_id, &msgs),
+        _ => serde_json::to_string_pretty(&*msgs).map_err(|error| format!("serialize export failed: {error}"))?,
     };
     std::fs::write(&output_path, content).map_err(|e| format!("write failed: {}", e))?;
     Ok(())
