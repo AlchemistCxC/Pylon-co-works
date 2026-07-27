@@ -113,7 +113,10 @@ const ChatView = React.memo(function ChatView({ sessionId }: Props) {
     // 先从 localStorage 恢复消息（Peri 重放可能失败）
     const stored = localStorage.getItem('pylon-msgs-' + s.id)
     if (stored) {
-      try { setMessages(JSON.parse(stored)) } catch {}
+      try {
+        const restored = (JSON.parse(stored) as Message[]).map(message => ({ ...message, running: false }))
+        setMessages(restored)
+      } catch {}
     }
 
     const profile = useStore.getState().profiles.find(p => p.id === s.profileId)

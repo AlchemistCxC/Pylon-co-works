@@ -60,6 +60,7 @@ export default function Sidebar({ activeSession, onSelectSession, onProfileEdit,
       if (cfg[s.source]) { delete cfg[s.source]; useStore.setState({ sessionConfig: cfg }) }
     }
     removeSession(id)
+    localStorage.removeItem('pylon-msgs-' + id)
     if (activeSession === id) onSelectSession(null)
   }
 
