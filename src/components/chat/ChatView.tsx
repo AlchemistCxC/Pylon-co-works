@@ -12,6 +12,7 @@ import { toHtml } from 'hast-util-to-html'
 import { resolveLoadedMessages, serializeLoadedMessages, shouldStartLiveGeneration } from './replayState'
 import { canPersistMessages } from './messagePersistence'
 import { addGeneratingSource, removeGeneratingSource, updateSourceState } from './sessionEventState'
+import { resolveToolVisualStatus } from './toolStatus'
 import './ChatView.css'
 
 // ── Peri spinner ──
@@ -543,8 +544,8 @@ function ToolCard({ name, input, output, outputLines, status: toolStatus }: { na
   const toolErr = useStore(s => s.toolErr)
   const connectorMode = useStore(s => s.toolConnectorMode) || 'none'
   const connectorColor = useStore(s => s.toolConnectorColor) || 'rgba(0,0,0,0.12)'
-  const done = toolStatus === 'completed' || toolStatus === 'error' || output !== undefined
-  const status = toolStatus === 'error' ? 'err' : done ? 'ok' : 'run'
+  const done = toolStatus === 'completed' || toolStatus === 'failed' || toolStatus === 'error' || output !== undefined
+  const status = resolveToolVisualStatus(toolStatus, output !== undefined)
   // 标志物辉光：颜色跟随状态色，或用户指定
   const statusColor = status === 'ok' ? toolOk : status === 'err' ? toolErr : toolRun
   const glowCss = glow > 0
