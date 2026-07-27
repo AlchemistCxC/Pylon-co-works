@@ -14,6 +14,19 @@
 .term-user .term-p { display:inline; margin:0; }
 
 .term-assistant { position:relative; padding:2px 0; white-space:pre-wrap; }
+.term-row-user, .term-row-assistant, .term-row-reasoning {
+  font-family:var(--msg-font,var(--chat-font,var(--mono)));
+  color:var(--msg-text,var(--chat-text,var(--text)));
+  line-height:var(--msg-line-height,var(--chat-line-height,1.4));
+}
+.app[data-msg-style="bubble"] .term-row-user,
+.app[data-msg-style="bubble"] .term-row-assistant,
+.app[data-msg-style="bubble"] .term-row-reasoning {
+  width:fit-content; max-width:min(82%,900px); padding:8px 12px; margin:6px 0;
+  border:1px solid var(--border); border-radius:10px; background:var(--bg-panel);
+}
+.app[data-msg-style="bubble"] .term-row-user { margin-left:auto; background:var(--user-tag-bg,var(--bg-panel)); }
+.app[data-msg-style="bubble"] .term-row-assistant .copy-btn { right:-34px; }
 .term-assistant .copy-btn {
   position:absolute; top:0; right:-40px;
   opacity:0; background:var(--bg-panel); border:1px solid var(--border);

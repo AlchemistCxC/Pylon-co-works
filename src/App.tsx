@@ -56,6 +56,7 @@ export default function App() {
     chatTransparency: s.chatTransparency, chatBlur: s.chatBlur,
     chatFont: s.chatFont, chatFontSize: s.chatFontSize, chatLineHeight: s.chatLineHeight,
     chatTextColor: s.chatTextColor, chatCodeColor: s.chatCodeColor, chatCodeBg: s.chatCodeBg,
+    msgStyle: s.msgStyle, msgFont: s.msgFont, msgTextColor: s.msgTextColor, msgLineHeight: s.msgLineHeight,
     toolOk: s.toolOk, toolRun: s.toolRun, toolErr: s.toolErr,
     toolNameColor: s.toolNameColor, toolSummaryColor: s.toolSummaryColor,
     userTagBg: s.userTagBg, userTagText: s.userTagText,
@@ -102,6 +103,9 @@ export default function App() {
     '--chat-text': s.chatTextColor,
     '--chat-code-color': s.chatCodeColor,
     '--chat-code-bg': s.chatCodeBg,
+    '--msg-font': s.msgFont === 'mono' ? 'var(--mono)' : 'var(--font)',
+    '--msg-text': s.msgTextColor || 'var(--chat-text,var(--text))',
+    '--msg-line-height': s.msgLineHeight,
     '--tool-ok': s.toolOk, '--tool-run': s.toolRun, '--tool-err': s.toolErr,
     '--tool-name': s.toolNameColor, '--tool-summary': s.toolSummaryColor,
     '--user-tag-bg': s.userTagBg, '--user-tag-text': s.userTagText,
@@ -151,7 +155,7 @@ export default function App() {
   const appWindow = (() => { try { return getCurrentWindow() } catch { return { minimize() {}, isFullscreen() { return Promise.resolve(false) }, setFullscreen(_v: boolean) { return Promise.resolve() }, destroy() {} } } })()
 
   return (
-    <div className="app" data-ui-scheme={s.uiScheme || 'light'} style={cssVars}>
+    <div className="app" data-ui-scheme={s.uiScheme || 'light'} data-msg-style={s.msgStyle || 'terminal'} style={cssVars}>
       <div className="titlebar" data-tauri-drag-region>
         <button className="titlebar-toggle" onClick={() => setSidebarCollapsed(!sidebarCollapsed)}
           title={sidebarCollapsed ? '展开左栏' : '收起左栏'}>☰</button>
