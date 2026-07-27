@@ -78,6 +78,7 @@ interface Message {
   sender: string; content: string; time: string
   toolName?: string; toolInput?: string; toolOutput?: string
   toolOutputLines?: number; running?: boolean
+  toolStatus?: string
 }
 
 // dev/浏览器 mock：无 Tauri 后端时（预览调样式用）展示的演示对话
@@ -223,7 +224,7 @@ const ChatView = React.memo(function ChatView({ sessionId }: Props) {
             const lines = outputStr ? outputStr.split(/\n/).filter((l: string) => l.trim()).length : 0
             setMessages(prev => prev.map(m => {
               if (m.id === 'tool-' + upd.toolCallId && m.running) {
-                return { ...m, toolOutput: outputStr, toolOutputLines: lines, running: false }
+                return { ...m, toolOutput: outputStr, toolOutputLines: lines, toolStatus: upd.status, running: false }
               }
               return m
             }))
@@ -326,7 +327,7 @@ const ChatView = React.memo(function ChatView({ sessionId }: Props) {
               animate={{ opacity: 1, y: 0 }}
               transition={{ duration: 0.25, ease: [0.2, 0, 0, 1] }}
             >
-              {msg.role === 'tool' && <ToolCard name={msg.toolName!} input={msg.toolInput} output={msg.toolOutput} outputLines={msg.toolOutputLines} />}
+              {msg.role === 'tool' && <ToolCard name={msg.toolName!} input={msg.toolInput} output={msg.toolOutput} outputLines={msg.toolOutputLines} status={msg.toolStatus} />}
               {msg.role === 'user' && <UserLine sender={msg.sender} content={msg.content} />}
               {msg.role === 'reasoning' && <ReasoningBlock text={msg.content} />}
               {msg.role === 'assistant' && <AssistantContent text={msg.content} />}
@@ -437,7 +438,7 @@ function ReasoningBlock({ text }: { text: string }) {
   const [open, setOpen] = useState(false)
   return (
     <div className="term-reasoning">
-      <div className="term-reasoning-head" onClick={() => setOpen(!open)}>Thought for {text.length} chars</div>
+      <button className="term-reasoning-head" type="button" onClick={() => setOpen(!open)}>Thought for {text.length} chars</button>
       {open && <div className="term-reasoning-body">{text.split('\n').map((line, i) => <div key={i} className="term-reasoning-line">{line || '\u00a0'}</div>)}</div>}
     </div>
   )
@@ -457,7 +458,7 @@ function formatToolInput(name: string, rawInput: any): string {
   return ''
 }
 
-function ToolCard({ name, input, output, outputLines }: { name: string; input?: string; output?: string; outputLines?: number }) {
+function ToolCard({ name, input, output, outputLines, status: toolStatus }: { name: string; input?: string; output?: string; outputLines?: number; status?: string }) {
   const [open, setOpen] = useState(false)
   const indicator = useStore(s => s.toolIndicator) || '●'
   const glow = useStore(s => s.toolIndicatorGlow) || 0
@@ -467,10 +468,10 @@ function ToolCard({ name, input, output, outputLines }: { name: string; input?: 
   const toolErr = useStore(s => s.toolErr)
   const connectorMode = useStore(s => s.toolConnectorMode) || 'none'
   const connectorColor = useStore(s => s.toolConnectorColor) || 'rgba(0,0,0,0.12)'
-  const done = !!output
-  const status = done ? 'ok' : 'run'
+  const done = toolStatus === 'completed' || toolStatus === 'error' || output !== undefined
+  const status = toolStatus === 'error' ? 'err' : done ? 'ok' : 'run'
   // 标志物辉光：颜色跟随状态色，或用户指定
-  const statusColor = status === 'ok' ? toolOk : toolRun
+  const statusColor = status === 'ok' ? toolOk : status === 'err' ? toolErr : toolRun
   const glowCss = glow > 0
     ? { textShadow: `0 0 ${glow}px ${glowColor || statusColor || 'currentColor'}` }
     : undefined
@@ -490,12 +491,12 @@ function ToolCard({ name, input, output, outputLines }: { name: string; input?: 
   }, [output, name])
   return (
     <div className="term-tool" data-status={status} style={connCss}>
-      <div className="term-tool-head" onClick={() => setOpen(!open)}>
+      <button className="term-tool-head" type="button" onClick={() => setOpen(!open)}>
         <span className={`term-tool-indicator ${status}`} style={glowCss}>{indicator}</span>
         <span className="term-tool-name">{name}</span>
         {input && <span className="term-tool-summary"> ({input.length > 60 ? input.slice(0, 60) + '...' : input})</span>}
         {suffix && <span className="term-tool-suffix">{suffix}</span>}
-      </div>
+      </button>
       {open && output && (
         <div className="term-tool-body">
           {name === 'Bash' && outputHtml

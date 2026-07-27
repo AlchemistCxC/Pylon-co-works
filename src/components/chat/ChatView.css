@@ -23,7 +23,7 @@
 .term-assistant:hover .copy-btn { opacity:1; }
 
 .term-reasoning { padding:4px 0; }
-.term-reasoning-head { cursor:pointer; color:var(--text-dim); font-style:italic; font-size:0.93em; user-select:none; }
+.term-reasoning-head { display:block; width:100%; border:0; padding:0; background:transparent; text-align:left; font:inherit; cursor:pointer; color:var(--text-dim); font-style:italic; font-size:0.93em; user-select:none; }
 .term-reasoning-head:hover { color:var(--text); }
 .term-reasoning-body { padding:4px 0 4px 18px; }
 .term-reasoning-line { color:var(--text-dim); font-style:italic; font-size:0.93em; line-height:1.6; white-space:pre-wrap; }
@@ -35,7 +35,7 @@
   content:''; position:absolute; left:3px; top:-8px; height:14px;
   width:2px; background:var(--tool-conn, transparent);
 }
-.term-tool-head { cursor:pointer; font-size:inherit; line-height:inherit; display:flex; align-items:baseline; }
+.term-tool-head { width:100%; padding:0; border:0; background:transparent; color:inherit; font:inherit; text-align:left; cursor:pointer; font-size:inherit; line-height:inherit; display:flex; align-items:baseline; }
 .term-tool-head:hover { opacity:0.8; }
 .term-tool-indicator { margin-right:6px; }
 .term-tool-indicator.ok { color:var(--tool-ok,#1e9646); }
