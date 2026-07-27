@@ -26,6 +26,7 @@ export default function RightPanel({ onClose }: { onClose: () => void }) {
       </div>
 
       <div className="right-body">
+        <div className="panel-demo-notice" role="status">演示数据，尚未接入真实 API。</div>
         {tab === 'files' && <FilesTab />}
         {tab === 'prism' && <PrismTab />}
         {tab === 'rag' && <RagTab />}

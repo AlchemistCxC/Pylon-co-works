@@ -13,6 +13,7 @@ export default function PrismSheet() {
   return <div className="prism-sheet">
     <nav className="ps-nav">{NAV.map(n=><button key={n.key} className={`ps-nav-btn ${tab===n.key?'active':''}`} onClick={()=>setTab(n.key)}>{n.label}</button>)}</nav>
     <div className="ps-body">
+      <div className="ps-demo-notice" role="status">演示预览：尚未接入 Prism API，所有管理操作已禁用。</div>
       {tab==='bots'&&<BotsTab/>}{tab==='scenarios'&&<ScenariosTab/>}
       {tab==='worldbook'&&<WorldBookTab/>}{tab==='blocks'&&<BlocksTab/>}
       {tab==='debug'&&<DebugTab/>}{tab==='system'&&<SystemTab/>}
