@@ -1,6 +1,6 @@
 import { useState, useRef, KeyboardEvent, useEffect, forwardRef, useImperativeHandle } from 'react'
 import { invoke } from '@tauri-apps/api/core'
-import { open } from '@tauri-apps/plugin-dialog'
+import { open, save } from '@tauri-apps/plugin-dialog'
 import { useStore } from '../../store'
 import { Paperclip, ArrowUp } from 'lucide-react'
 import './InputBar.css'
@@ -56,7 +56,7 @@ export default forwardRef<{ send: () => void; attachFile: () => void; cancel: ()
   useEffect(() => {
     const onGlobalKey = (e: globalThis.KeyboardEvent) => {
       if (!sessionId) return
-      if (useStore.getState().liveGenerating !== sessionId) return
+      if (useStore.getState().liveGenerating !== sessionSource) return
       const isEsc = e.key === 'Escape'
       const isCtrlC = e.ctrlKey && (e.key === 'c' || e.key === 'C') && !window.getSelection()?.toString()
       if (isEsc || isCtrlC) {
@@ -68,7 +68,7 @@ export default forwardRef<{ send: () => void; attachFile: () => void; cancel: ()
     }
     window.addEventListener('keydown', onGlobalKey)
     return () => window.removeEventListener('keydown', onGlobalKey)
-  }, [sessionId])
+  }, [sessionId, sessionSource])
 
   const execCommand = async (cmd: string, rest: string) => {
     switch (cmd) {
@@ -91,7 +91,13 @@ export default forwardRef<{ send: () => void; attachFile: () => void; cancel: ()
       case '/export': {
         const s = useStore.getState().sessions.find(x => x.id === sessionId || x.source === sessionId)
         if (s?.periId) {
-          await invoke('export_session', { periId: s.periId, format: 'markdown', outputPath: `session-${s.periId}.md` })
+          const outputPath = await save({
+            defaultPath: `session-${s.periId}.md`,
+            filters: [{ name: 'Markdown', extensions: ['md'] }],
+          })
+          if (outputPath) {
+            await invoke('export_session', { periId: s.periId, format: 'markdown', outputPath })
+          }
         }
         break
       }
