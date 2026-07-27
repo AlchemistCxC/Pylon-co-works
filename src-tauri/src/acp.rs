@@ -58,6 +58,12 @@ pub struct RawMessage {
 }
 
 impl AcpClient {
+    fn remove_pending(&self, id: u64) {
+        if let Ok(mut pending) = self.pending_shard(id).lock() {
+            pending.remove(&id);
+        }
+    }
+
     fn pending_shard(&self, id: u64) -> &Mutex<Pending> {
         &self.pending[id as usize % PENDING_SHARDS]
     }
@@ -82,11 +88,19 @@ impl AcpClient {
         let line = serde_json::to_string(&req)
             .map_err(|e| format!("serialize failed: {}", e))?;
 
-        self.write_tx.send(line).await.map_err(|_| "ACP connection closed".to_string())?;
+        if self.write_tx.send(line).await.is_err() {
+            self.remove_pending(id);
+            return Err("ACP connection closed".to_string());
+        }
 
-        let msg = tokio::time::timeout(std::time::Duration::from_secs(30), rx).await
-            .map_err(|_| "RPC timeout after 30s".to_string())?
-            .map_err(|_| "ACP connection closed".to_string())?;
+        let msg = match tokio::time::timeout(std::time::Duration::from_secs(30), rx).await {
+            Ok(Ok(msg)) => msg,
+            Ok(Err(_)) => return Err("ACP connection closed".to_string()),
+            Err(_) => {
+                self.remove_pending(id);
+                return Err("RPC timeout after 30s".to_string());
+            }
+        };
 
         if let Some(err) = msg.error {
             return Err(format!("RPC error: {}", err));
@@ -248,7 +262,7 @@ impl AcpClient {
                         if line.is_empty() { continue; }
                         let msg_val: serde_json::Value = match serde_json::from_str(&line) {
                             Ok(v) => v,
-                            Err(e) => { log::error!("ACP parse: {} — {}", e, &line[..100.min(line.len())]); continue; }
+                            Err(e) => { log::error!("ACP parse: {} — {}", e, line.chars().take(100).collect::<String>()); continue; }
                         };
                         let raw = RawMessage {
                             id: msg_val.get("id").and_then(|v| v.as_u64()),
@@ -267,6 +281,19 @@ impl AcpClient {
                         let _ = tx_clone.send(raw);
                     }
                     crashed_reader.store(true, Ordering::Relaxed);
+                    pending_clone.iter().for_each(|shard| {
+                        if let Ok(mut pending) = shard.lock() {
+                            for (_, tx) in pending.drain() {
+                                let _ = tx.send(RawMessage {
+                                    id: None,
+                                    method: None,
+                                    result: None,
+                                    params: None,
+                                    error: Some(serde_json::json!("ACP connection closed")),
+                                });
+                            }
+                        }
+                    });
                     log::error!("ACP: child process stdout closed (agent crashed)");
                 });
 
