@@ -3,6 +3,7 @@ import { invoke } from '@tauri-apps/api/core'
 import { open, save } from '@tauri-apps/plugin-dialog'
 import { useStore } from '../../store'
 import { setSessionModel } from './sessionModel'
+import { setSessionMode } from './sessionMode'
 import { runSendTransaction } from './sendTransaction'
 import { Paperclip, ArrowUp } from 'lucide-react'
 import './InputBar.css'
@@ -63,6 +64,15 @@ export default forwardRef<{ send: () => void; attachFile: () => void; cancel: ()
     return () => window.removeEventListener('pylon:model-error', onModelError)
   }, [])
 
+  useEffect(() => {
+    const onModeError = (event: Event) => {
+      const message = (event as CustomEvent<string>).detail
+      setSendError(message || '权限模式切换失败')
+    }
+    window.addEventListener('pylon:mode-error', onModeError)
+    return () => window.removeEventListener('pylon:mode-error', onModeError)
+  }, [])
+
   // 全局取消：焦点不在输入框（如阅读长回复）时，Esc / Ctrl+C 也能中断生成
   useEffect(() => {
     const onGlobalKey = (e: globalThis.KeyboardEvent) => {
@@ -102,10 +112,20 @@ export default forwardRef<{ send: () => void; attachFile: () => void; cancel: ()
         break
       }
       case '/mode': {
-        const m = rest.trim()
-        if (m && sessionSource) {
-          useStore.getState().setLiveStats({ liveMode: m })
-          invoke('set_mode', { source: sessionSource, mode: m }).catch(() => {})
+        const mode = rest.trim()
+        if (!mode) {
+          setSendError('请输入权限模式')
+          return false
+        }
+        if (!sessionSource) {
+          setSendError('当前会话不可用')
+          return false
+        }
+        try {
+          await setSessionMode(sessionSource, mode)
+        } catch (error) {
+          setSendError(String(error))
+          return false
         }
         break
       }

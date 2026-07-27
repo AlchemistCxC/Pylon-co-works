@@ -1,5 +1,5 @@
 import { useStore } from '../../store'
-import { invoke } from '@tauri-apps/api/core'
+import { setSessionMode } from './sessionMode'
 
 const MODES = ['default', 'edit', 'auto', 'bypass'] as const
 
@@ -14,13 +14,16 @@ interface Props { sessionSource?: string }
 export default function ModeWidget({ sessionSource }: Props) {
   const variant = useStore(s => s.modeVariant) || 'pill'
   const ccScale = useStore(s => (s.ccScale || {})['mode'] ?? 100)
-  const mode = useStore(s => s.liveMode) || 'auto'
+  const mode = useStore(s => sessionSource ? (s.sessionModes[sessionSource] || 'auto') : 'auto')
 
   const cycle = () => {
     const idx = MODES.indexOf(mode as typeof MODES[number])
     const next = MODES[(idx + 1) % MODES.length]
-    useStore.getState().setLiveStats({ liveMode: next })
-    if (sessionSource) invoke('set_mode', { source: sessionSource, mode: next }).catch(() => {})
+    if (sessionSource) {
+      setSessionMode(sessionSource, next).catch(error => {
+        window.dispatchEvent(new CustomEvent('pylon:mode-error', { detail: String(error) }))
+      })
+    }
   }
 
   if (variant === 'badge') {

@@ -141,12 +141,22 @@ const ChatView = React.memo(function ChatView({ sessionId }: Props) {
     const persona = profile?.persona || ''
 
     // new_session 返回可能是 string(periId) 或 { sessionId, configOptions } — 兼容处理
+    const syncMode = (source: string, res: any) => {
+      const configOptions = Array.isArray(res?.configOptions) ? res.configOptions : []
+      const modeOption = configOptions.find((option: any) => (option?.id || option?.key) === 'mode')
+      const configMode = modeOption?.currentValue ?? modeOption?.value
+      const modes = res?.modes
+      const currentMode = modes?.currentModeId ?? modes?.currentMode ?? modes?.current ?? configMode
+      if (currentMode != null) useStore.getState().setSessionMode(source, String(currentMode))
+    }
+
     const createSession = () => {
       invoke<any>('new_session', { source: s.source, persona, cwd: s.workdir || undefined }).then(res => {
         const periId = typeof res === 'string' ? res : (res?.sessionId ?? res?.periId)
         if (periId) useStore.getState().setSessionPeriId(s.id, periId)
         const cfg = extractModelConfig(res?.configOptions)
         if (cfg.model || cfg.models) useStore.getState().setSessionConfig(s.source, { ...cfg, raw: res?.configOptions })
+        syncMode(s.source, res)
       }).catch(() => {})
     }
 
@@ -168,6 +178,7 @@ const ChatView = React.memo(function ChatView({ sessionId }: Props) {
         if (sessionRef.current === s.source) setMessages(resolved)
         const cfg = extractModelConfig(res?.configOptions)
         if (cfg.model || cfg.models) useStore.getState().setSessionConfig(s.source, { ...cfg, raw: res?.configOptions })
+        syncMode(s.source, res)
       }).catch(() => {
         if (loadGenerationRef.current[s.source] !== loadGeneration) return
         delete replayingSourcesRef.current[s.source]
@@ -304,10 +315,14 @@ const ChatView = React.memo(function ChatView({ sessionId }: Props) {
             if (Array.isArray(upd.configOptions)) {
               const cfg = extractModelConfig(upd.configOptions)
               if (cfg.model || cfg.models) useStore.getState().setSessionConfig(source, { ...cfg, raw: upd.configOptions })
+              const modeOption = upd.configOptions.find((option: any) => (option?.id || option?.key) === 'mode')
+              const mode = modeOption?.currentValue ?? modeOption?.value
+              if (mode != null) useStore.getState().setSessionMode(source, String(mode))
             } else {
               const key = upd.id ?? upd.key
               const val = upd.currentValue ?? upd.value
               if (key === 'model' && val != null) useStore.getState().setSessionConfig(source, { model: String(val) })
+              if (key === 'mode' && val != null) useStore.getState().setSessionMode(source, String(val))
             }
             break
           }

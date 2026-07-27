@@ -69,6 +69,8 @@ type ThemeState = ThemeSettings & {
   livePrismOn: boolean
   liveGenerating: string | null  // 兼容旧状态：最近开始生成的 session source
   liveGeneratingSources: string[] // 当前所有正在生成的 session source
+  sessionModes: Record<string, string>
+  setSessionMode: (source: string, mode?: string) => void
   liveCommands: { name: string; input_hint?: string; description?: string }[]
   setLiveStats: (stats: Partial<{liveTokensUsed:number,liveTokensMax:number,liveCacheHit:number,liveMode:string,livePrismOn:boolean,liveGenerating:string|null,liveGeneratingSources:string[],liveCommands:any[]}>) => void
   // 每会话的后端配置选项（model 列表/当前值等），key = session source
@@ -181,6 +183,13 @@ export const useStore = create<ThemeState>()(persist(
   updateTheme: (partial) => set(partial),
 
   liveTokensUsed: 0, liveTokensMax: 131072, liveCacheHit: 0, liveMode: 'auto', livePrismOn: true, liveGenerating: null, liveGeneratingSources: [],
+  sessionModes: {},
+  setSessionMode: (source, mode) => set(state => {
+    const sessionModes = { ...state.sessionModes }
+    if (mode) sessionModes[source] = mode
+    else delete sessionModes[source]
+    return { sessionModes }
+  }),
   setLiveStats: (stats) => set(stats),
   liveCommands: [],
   sessionConfig: {},
@@ -247,6 +256,6 @@ export const useStore = create<ThemeState>()(persist(
   )
   return { ...state, ...normalized } as ThemeState
 }, partialize: (state) => {
-  const { sessions, users, setActiveProfile, addProfile, addSession, removeSession, setSessionPeriId, restoreSessions, getUser, updateTheme, setLiveStats, liveCommands, sessionConfig, setSessionConfig, liveTokensUsed, liveTokensMax, liveCacheHit, liveMode, livePrismOn, liveGenerating, liveGeneratingSources, agents, setAgents, setActiveAgent, applyZonePreset, setZoneField, setGlobalPreset, presets, dirty, ...persisted } = state as any
+  const { sessions, users, setActiveProfile, addProfile, addSession, removeSession, setSessionPeriId, restoreSessions, getUser, updateTheme, setLiveStats, liveCommands, sessionConfig, setSessionConfig, sessionModes, setSessionMode, liveTokensUsed, liveTokensMax, liveCacheHit, liveMode, livePrismOn, liveGenerating, liveGeneratingSources, agents, setAgents, setActiveAgent, applyZonePreset, setZoneField, setGlobalPreset, presets, dirty, ...persisted } = state as any
   return persisted
 }}))
