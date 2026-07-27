@@ -2321,6 +2321,8 @@ dependencies = [
 name = "pylon"
 version = "0.1.0"
 dependencies = [
+ "base64 0.22.1",
+ "infer",
  "log",
  "serde",
  "serde_json",

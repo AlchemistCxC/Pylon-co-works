@@ -4,6 +4,7 @@
 //! to per-session channels. No lock contention between concurrent sessions.
 //! stderr is drained in a background thread to prevent pipe buffer deadlock.
 
+use base64::Engine;
 use std::collections::HashMap;
 use std::future::Future;
 use std::io::{BufRead, BufReader, BufWriter, Write};
@@ -34,6 +35,10 @@ pub const WRITE_CHAN_CAP: usize = 256;
 pub const PROMPT_TIMEOUT_SECS: u64 = 300;
 /// Maximum time to wait for Peri's final prompt response after sending cancel.
 pub const CANCEL_SETTLE_TIMEOUT_SECS: u64 = 30;
+/// Maximum size for a single attachment.
+pub const MAX_ATTACHMENT_BYTES: u64 = 10 * 1024 * 1024;
+/// Maximum number of attachments in one prompt.
+pub const MAX_ATTACHMENTS: usize = 8;
 
 type Pending = HashMap<u64, oneshot::Sender<RawMessage>>;
 const PENDING_SHARDS: usize = 16;
@@ -252,8 +257,53 @@ impl AcpClient {
     }
 
 
+    pub fn prompt_blocks(text: String, attachments: &[String]) -> Result<Vec<serde_json::Value>, String> {
+        if attachments.len() > MAX_ATTACHMENTS {
+            return Err(format!("too many attachments: maximum is {MAX_ATTACHMENTS}"));
+        }
+        let mut blocks = vec![serde_json::json!({"type": "text", "text": text})];
+        for raw_path in attachments {
+            let path = std::path::Path::new(raw_path);
+            let metadata = std::fs::metadata(path)
+                .map_err(|error| format!("attachment metadata failed for {}: {error}", path.display()))?;
+            if !metadata.is_file() {
+                return Err(format!("attachment is not a file: {}", path.display()));
+            }
+            if metadata.len() > MAX_ATTACHMENT_BYTES {
+                return Err(format!(
+                    "attachment too large: {} is {} bytes, maximum is {} bytes",
+                    path.display(), metadata.len(), MAX_ATTACHMENT_BYTES
+                ));
+            }
+            let bytes = std::fs::read(path)
+                .map_err(|error| format!("attachment read failed for {}: {error}", path.display()))?;
+            let mime = infer::get(&bytes).map(|kind| kind.mime_type());
+            match mime {
+                Some(mime) if matches!(mime, "image/png" | "image/jpeg" | "image/gif" | "image/webp") => {
+                    blocks.push(serde_json::json!({
+                        "type": "image",
+                        "mimeType": mime,
+                        "data": base64::engine::general_purpose::STANDARD.encode(bytes),
+                    }));
+                }
+                Some(mime) if mime.starts_with("text/") => {
+                    let content = String::from_utf8(bytes)
+                        .map_err(|error| format!("attachment is not valid UTF-8 text {}: {error}", path.display()))?;
+                    blocks.push(serde_json::json!({"type": "text", "text": content}));
+                }
+                None => {
+                    let content = String::from_utf8(bytes)
+                        .map_err(|_| format!("unsupported attachment type: {}", path.display()))?;
+                    blocks.push(serde_json::json!({"type": "text", "text": content}));
+                }
+                Some(mime) => return Err(format!("unsupported attachment MIME {mime}: {}", path.display())),
+            }
+        }
+        Ok(blocks)
+    }
+
     /// Prepare a prompt request without writing to stdin.
-    pub fn prepare_prompt(&self, session_id: &str, text: &str) -> Result<(u64, String, oneshot::Receiver<RawMessage>), String> {
+    pub fn prepare_prompt(&self, session_id: &str, prompt: Vec<serde_json::Value>) -> Result<(u64, String, oneshot::Receiver<RawMessage>), String> {
         let id = self.next_id.fetch_add(1, Ordering::Relaxed);
         let (tx, rx) = oneshot::channel();
         {
@@ -267,7 +317,7 @@ impl AcpClient {
             "method": METHOD_SESSION_PROMPT,
             "params": {
                 "sessionId": session_id,
-                "prompt": [{"type": "text", "text": text}]
+                "prompt": prompt
             },
         });
 

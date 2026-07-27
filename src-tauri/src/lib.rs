@@ -266,27 +266,24 @@ async fn send_message(
         }
     };
 
-    let attach_prefix = attachments.unwrap_or_default().iter().fold(String::new(), |mut acc, p| {
-        let name = std::path::Path::new(p).file_name().and_then(|n| n.to_str()).unwrap_or(p);
-        acc.push_str(&format!("[Attached: {}]\n", name));
-        acc
-    });
+    let attachment_paths = attachments.unwrap_or_default();
 
     let effective_persona = session_prompt
         .filter(|value| !value.trim().is_empty())
         .unwrap_or(persona);
 
     let prompt_content = if is_first && !effective_persona.is_empty() && !content.starts_with('/') {
-        format!("{}{}\n\n---\n\n{}", attach_prefix, effective_persona, content)
+        format!("{}\n\n---\n\n{}", effective_persona, content)
     } else {
-        format!("{}{}", attach_prefix, content)
+        content.clone()
     };
+    let prompt_blocks = AcpClient::prompt_blocks(prompt_content, &attachment_paths)?;
 
     state.pet.lock().map(|mut p| pet::on_user_sent(&mut p)).ok();
     let _ = window.emit("peri:user", serde_json::json!({ "source": source, "content": content }));
     let (request_id, write_tx, prompt_line, mut rx) = {
         let acp = state.acp.lock().await;
-        let (id, line, rx) = acp.prepare_prompt(&peri_id, &prompt_content)?;
+        let (id, line, rx) = acp.prepare_prompt(&peri_id, prompt_blocks)?;
         (id, acp.write_tx.clone(), line, rx)
     };
     if write_tx.send(prompt_line).await.is_err() {
