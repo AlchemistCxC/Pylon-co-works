@@ -9,6 +9,7 @@ import { AnimatePresence, motion } from 'motion/react'
 import Anser from 'anser'
 import { Square } from 'lucide-react'
 import { toHtml } from 'hast-util-to-html'
+import { resolveLoadedMessages, serializeLoadedMessages, shouldStartLiveGeneration } from './replayState'
 import { canPersistMessages } from './messagePersistence'
 import { addGeneratingSource, removeGeneratingSource, updateSourceState } from './sessionEventState'
 import './ChatView.css'
@@ -105,6 +106,8 @@ const ChatView = React.memo(function ChatView({ sessionId }: Props) {
   const messageOwnerRef = useRef<string | null>(null)
   const messagesBySourceRef = useRef<Record<string, Message[]>>({})
   const generationStartRef = useRef<Record<string, number>>({})
+  const replayingSourcesRef = useRef<Record<string, Message[]>>({})
+  const loadGenerationRef = useRef<Record<string, number>>({})
   const prevSessionRef = useRef(sessionId)
   useEffect(() => {
     if (sessionId === prevSessionRef.current) return
@@ -148,25 +151,40 @@ const ChatView = React.memo(function ChatView({ sessionId }: Props) {
     }
 
     if (s.periId) {
-      invoke('load_persisted_session', { source: s.source, periId: s.periId, cwd: s.workdir || undefined }).then(() => {
-        // load 成功但 Peri 不一定返回 configOptions，用 fallback 兜底
-        if (!useStore.getState().sessionConfig[s.source]) {
-          useStore.getState().setSessionConfig(s.source, {
-            model: profile?.model || 'deepseek-v4-flash',
-            models: ['deepseek-v4-flash', 'deepseek-v4-pro', 'deepseek-v4'],
-          })
-        }
+      const loadGeneration = (loadGenerationRef.current[s.source] || 0) + 1
+      loadGenerationRef.current[s.source] = loadGeneration
+      replayingSourcesRef.current[s.source] = []
+      invoke<any>('load_persisted_session', { source: s.source, periId: s.periId, cwd: s.workdir || undefined }).then(res => {
+        if (loadGenerationRef.current[s.source] !== loadGeneration) return
+        const replayed = replayingSourcesRef.current[s.source] || []
+        const resolved = resolveLoadedMessages({ loadSucceeded: true, cached, replayed })
+        delete replayingSourcesRef.current[s.source]
+        messagesBySourceRef.current[s.source] = resolved
+        const serialized = serializeLoadedMessages(resolved)
+        try {
+          if (serialized) localStorage.setItem('pylon-msgs-' + s.id, serialized)
+          else localStorage.removeItem('pylon-msgs-' + s.id)
+        } catch {}
+        if (sessionRef.current === s.source) setMessages(resolved)
+        const cfg = extractModelConfig(res?.configOptions)
+        if (cfg.model || cfg.models) useStore.getState().setSessionConfig(s.source, { ...cfg, raw: res?.configOptions })
       }).catch(() => {
+        if (loadGenerationRef.current[s.source] !== loadGeneration) return
+        delete replayingSourcesRef.current[s.source]
         createSession()  // Fallback
       })
     } else {
+      delete replayingSourcesRef.current[s.source]
       createSession()
     }
   }, [sessionId])
 
   useEffect(() => {
-    const updateSourceMessages = (source: string, updater: (prev: Message[]) => Message[]) => {
-      const next = updateSourceState(messagesBySourceRef.current, source, updater)
+    const updateSourceMessages = (source: string, updater: (prev: Message[]) => Message[], replay = false) => {
+      const next = replay
+        ? updateSourceState(replayingSourcesRef.current, source, updater)
+        : updateSourceState(messagesBySourceRef.current, source, updater)
+      if (replay) return
       const session = useStore.getState().sessions.find(item => item.source === source)
       if (session) {
         try { localStorage.setItem('pylon-msgs-' + session.id, JSON.stringify(next)) } catch {}
@@ -192,13 +210,15 @@ const ChatView = React.memo(function ChatView({ sessionId }: Props) {
     }
 
     const unlisten = Promise.all([
-      listen<{ source: string; content: string }>('peri:user', (event) => {
-        const { source, content } = event.payload
+      listen<{ source: string; content: string; replay?: boolean }>('peri:user', (event) => {
+        const { source, content, replay = false } = event.payload
         const update = (prev: Message[]) => [
           ...prev.map(m => ({ ...m, running: false })),
           { id: 'user-' + Date.now(), role: 'user' as const, sender: source, content, time: new Date().toLocaleTimeString() },
         ]
-        updateSourceMessages(source, update)
+        if (replay && !replayingSourcesRef.current[source]) replayingSourcesRef.current[source] = []
+        updateSourceMessages(source, update, replay)
+        if (!shouldStartLiveGeneration({ replay })) return
         generationStartRef.current[source] = Date.now()
         startGenerating(source)
         if (sessionRef.current === source) {
@@ -223,6 +243,8 @@ const ChatView = React.memo(function ChatView({ sessionId }: Props) {
         const upd = event.payload?.update
         if (!source || !upd) return
         const variant = upd.sessionUpdate
+        const replay = upd._meta?.periReplay === true
+        if (replay && !replayingSourcesRef.current[source]) replayingSourcesRef.current[source] = []
         switch (variant) {
           case 'agent_message_chunk': {
             const text = upd.content?.text || ''
@@ -232,8 +254,8 @@ const ChatView = React.memo(function ChatView({ sessionId }: Props) {
               if (last?.role === 'assistant' && last.running) {
                 return prev.map((m, i) => i === prev.length - 1 ? { ...m, content: m.content + text } : m)
               }
-              return [...prev, { id: 'msg-' + Date.now(), role: 'assistant', sender: 'peri', content: text, time: new Date().toLocaleTimeString(), running: true }]
-            })
+              return [...prev, { id: 'msg-' + Date.now(), role: 'assistant', sender: 'peri', content: text, time: new Date().toLocaleTimeString(), running: !replay }]
+            }, replay)
             break
           }
           case 'agent_thought_chunk': {
@@ -244,8 +266,8 @@ const ChatView = React.memo(function ChatView({ sessionId }: Props) {
               if (last?.role === 'reasoning' && last.running) {
                 return prev.map((m, i) => i === prev.length - 1 ? { ...m, content: m.content + text } : m)
               }
-              return [...prev, { id: 'thought-' + Date.now(), role: 'reasoning', sender: 'peri', content: text, time: new Date().toLocaleTimeString(), running: true }]
-            })
+              return [...prev, { id: 'thought-' + Date.now(), role: 'reasoning', sender: 'peri', content: text, time: new Date().toLocaleTimeString(), running: !replay }]
+            }, replay)
             break
           }
           case 'tool_call': {
@@ -254,7 +276,7 @@ const ChatView = React.memo(function ChatView({ sessionId }: Props) {
             updateSourceMessages(source, prev => [...prev, {
               id: 'tool-' + upd.toolCallId, role: 'tool', sender: 'tool:' + (upd.title || '?'), content: '', time: new Date().toLocaleTimeString(),
               toolName: upd.title, toolInput: inputStr, running: true,
-            }])
+            }], replay)
             break
           }
           case 'tool_call_update': {
@@ -263,7 +285,7 @@ const ChatView = React.memo(function ChatView({ sessionId }: Props) {
             const lines = outputStr ? outputStr.split(/\n/).filter((l: string) => l.trim()).length : 0
             updateSourceMessages(source, prev => prev.map(m => m.id === 'tool-' + upd.toolCallId && m.running
               ? { ...m, toolOutput: outputStr, toolOutputLines: lines, toolStatus: upd.status, running: false }
-              : m))
+              : m), replay)
             break
           }
           case 'usage_update': {
