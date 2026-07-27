@@ -273,12 +273,15 @@ const ChatView = React.memo(function ChatView({ sessionId }: Props) {
         setMessages(prev => prev.map(m => ({ ...m, running: false })))
       }),
 
-      listen<any>('peri:error', (event) => {
+      listen<{ source: string; error: string }>('peri:error', (event) => {
+        if (event.payload.source !== sessionRef.current) return
         setGenerating(false)
-        useStore.getState().setLiveStats({ liveGenerating: null })
+        if (useStore.getState().liveGenerating === event.payload.source) {
+          useStore.getState().setLiveStats({ liveGenerating: null })
+        }
         setMessages(prev => [...prev, {
           id: 'err-' + Date.now(), role: 'assistant', sender: 'system',
-          content: '\u26a0\ufe0f ' + event.payload, time: new Date().toLocaleTimeString()
+          content: event.payload.error, time: new Date().toLocaleTimeString()
         }])
       }),
 
