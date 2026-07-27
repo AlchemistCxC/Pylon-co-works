@@ -566,8 +566,6 @@ async fn export_session(
         }
     });
     state.acp.lock().await.load_session(&peri_id, &cwd).await?;
-    // 等 Peri 推送完重放消息
-    tokio::time::sleep(std::time::Duration::from_millis(1500)).await;
     handle.abort();
     let msgs = messages.lock().map_err(|e| e.to_string())?;
     let content = match format.as_str() {

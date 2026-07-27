@@ -441,14 +441,14 @@ impl AcpClient {
                             params: msg_val.get("params").cloned(),
                             error: msg_val.get("error").cloned(),
                         };
+                        let _ = tx_clone.send(raw.clone());
                         if raw.method.is_none() && raw.id.is_some() {
                             if let Some(id) = raw.id {
                                 let shard = &pending_clone[id as usize % PENDING_SHARDS];
                                 let mut p = shard.lock().unwrap();
-                                if let Some(tx) = p.remove(&id) { let _ = tx.send(raw.clone()); }
+                                if let Some(tx) = p.remove(&id) { let _ = tx.send(raw); }
                             }
                         }
-                        let _ = tx_clone.send(raw);
                     }
                     crashed_reader.store(true, Ordering::Relaxed);
                     pending_clone.iter().for_each(|shard| {
