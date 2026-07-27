@@ -26,15 +26,8 @@ export default function ProfileEditor({ onClose }: { onClose: () => void }) {
   const save = () => {
     if (!name.trim()) return
     const id = (profile && profiles.includes(profile)) ? profile.id : Date.now().toString(36)
-    if (profile && profiles.includes(profile)) {
-      useStore.setState(s => ({
-        profiles: s.profiles.map(p => p.id === id ? { id, name, avatar, persona, model } : p),
-        activeProfileId: id,
-      }))
-    } else {
-      addProfile({ id, name, avatar, persona, model })
-      setActiveProfile(id)
-    }
+    addProfile({ id, name, avatar, persona, model })
+    setActiveProfile(id)
     onClose()
   }
 

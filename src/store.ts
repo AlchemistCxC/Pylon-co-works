@@ -1,5 +1,6 @@
 import { create } from 'zustand'
 import { persist } from 'zustand/middleware'
+import { normalizeProfileState, PROFILE_SCHEMA_VERSION } from './profilePersistence'
 
 export interface Profile { id: string; name: string; avatar?: string; persona: string; model: string }
 // 后端配置选项（来自 new_session 返回 & config_option_update 事件）
@@ -115,15 +116,17 @@ const DEFAULTS: ThemeSettings = {
   dirty: { global: false, sidebar: false, chat: false, cc: false, right: false },
 }
 
+const DEFAULT_PROFILES: Profile[] = [
+  { id: 'riccati', name: 'Riccati', persona: '你是 Riccati，宫木云的全栈开发助手。说话直接，不废话。', model: 'deepseek-v4-flash' },
+  { id: 'serina', name: 'Serina', persona: '你是 Serina，TRPG 叙世引擎 GM。', model: 'deepseek-v4-flash' },
+]
+
 export const useStore = create<ThemeState>()(persist(
   (set, get) => ({
   ...DEFAULTS,
 
-  profiles: [
-    { id: 'riccati', name: 'Riccati', persona: '你是 Riccati，宫木云的全栈开发助手。说话直接，不废话。', model: 'deepseek-v4-flash' },
-    { id: 'serina', name: 'Serina', persona: '你是 Serina，TRPG 叙世引擎 GM。', model: 'deepseek-v4-flash' },
-  ],
-  activeProfileId: 'riccati',
+  profiles: DEFAULT_PROFILES,
+  activeProfileId: DEFAULT_PROFILES[0].id,
   sessions: (() => {
     try {
       const raw = localStorage.getItem('pylon-sessions') ?? localStorage.getItem('prism-sessions')
@@ -141,7 +144,11 @@ export const useStore = create<ThemeState>()(persist(
     { id: 'qq:user:unknown', name: '访客' },
   ],
 
-  setActiveProfile: (id) => set({ activeProfileId: id }),
+  setActiveProfile: (id) => set(state => ({
+    activeProfileId: state.profiles.some(profile => profile.id === id)
+      ? id
+      : state.activeProfileId,
+  })),
   addProfile: (p) => set(s => ({ profiles: [...s.profiles.filter(x => x.id !== p.id), p] })),
   addSession: (name) => {
     const profileId = get().activeProfileId
@@ -231,7 +238,15 @@ export const useStore = create<ThemeState>()(persist(
   setAgents: (a) => set({ agents: a }),
   setActiveAgent: (id) => set({ activeAgent: id }),
 }),
-{ name: 'pylon-theme', partialize: (state) => {
-  const { profiles, sessions, users, setActiveProfile, addProfile, addSession, removeSession, setSessionPeriId, restoreSessions, getUser, updateTheme, setLiveStats, liveCommands, sessionConfig, setSessionConfig, liveTokensUsed, liveTokensMax, liveCacheHit, liveMode, livePrismOn, liveGenerating, agents, setAgents, setActiveAgent, applyZonePreset, setZoneField, setGlobalPreset, presets, dirty, ...theme } = state as any
-  return theme
+{ name: 'pylon-theme', version: PROFILE_SCHEMA_VERSION, migrate: persisted => {
+  const state = (persisted || {}) as Partial<ThemeState>
+  const normalized = normalizeProfileState(
+    Array.isArray(state.profiles) ? state.profiles : [],
+    typeof state.activeProfileId === 'string' ? state.activeProfileId : '',
+    DEFAULT_PROFILES,
+  )
+  return { ...state, ...normalized } as ThemeState
+}, partialize: (state) => {
+  const { sessions, users, setActiveProfile, addProfile, addSession, removeSession, setSessionPeriId, restoreSessions, getUser, updateTheme, setLiveStats, liveCommands, sessionConfig, setSessionConfig, liveTokensUsed, liveTokensMax, liveCacheHit, liveMode, livePrismOn, liveGenerating, liveGeneratingSources, agents, setAgents, setActiveAgent, applyZonePreset, setZoneField, setGlobalPreset, presets, dirty, ...persisted } = state as any
+  return persisted
 }}))
