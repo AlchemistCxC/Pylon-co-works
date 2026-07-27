@@ -217,12 +217,28 @@ impl AcpClient {
         })).await
     }
 
-    /// Extract sessionId from a session/new response.
+    /// Extract and validate sessionId from a session/new response.
     pub fn session_id_from(response: &serde_json::Value) -> Result<String, String> {
-        response.get("sessionId")
-            .and_then(|v| v.as_str())
-            .map(|s| s.to_string())
-            .ok_or_else(|| format!("invalid session/new response: {response}"))
+        let session_id = response.get("sessionId")
+            .and_then(|value| value.as_str())
+            .ok_or_else(|| format!("invalid session/new response: {response}"))?
+            .trim();
+        if session_id.is_empty() || session_id.eq_ignore_ascii_case("error") {
+            return Err(format!("session/new failed: invalid sessionId {session_id:?}"));
+        }
+        Ok(session_id.to_string())
+    }
+
+    /// Validate a session/prompt response and return its stop reason.
+    pub fn prompt_stop_reason(response: &serde_json::Value) -> Result<&str, String> {
+        let stop_reason = response.get("stopReason")
+            .and_then(|value| value.as_str())
+            .ok_or_else(|| format!("invalid session/prompt response: {response}"))?;
+        match stop_reason {
+            "end_turn" | "max_turn_requests" => Ok(stop_reason),
+            "cancelled" => Err("prompt cancelled".to_string()),
+            other => Err(format!("unsupported prompt stopReason: {other}")),
+        }
     }
 
     /// Set a session config option (model, thinking_effort, context_1m, mode).
@@ -455,6 +471,24 @@ mod tests {
             params: None,
             error: None,
         }
+    }
+
+    #[test]
+    fn rejects_empty_and_error_session_ids() {
+        for session_id in ["", "   ", "error", "ERROR"] {
+            let response = serde_json::json!({"sessionId": session_id});
+            assert!(AcpClient::session_id_from(&response).is_err());
+        }
+    }
+
+    #[test]
+    fn validates_prompt_stop_reasons() {
+        assert_eq!(
+            AcpClient::prompt_stop_reason(&serde_json::json!({"stopReason": "end_turn"})),
+            Ok("end_turn")
+        );
+        assert!(AcpClient::prompt_stop_reason(&serde_json::json!({"stopReason": "cancelled"})).is_err());
+        assert!(AcpClient::prompt_stop_reason(&serde_json::json!({})).is_err());
     }
 
     #[tokio::test]

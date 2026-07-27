@@ -312,6 +312,12 @@ async fn send_message(
                 let _ = state.pet.lock().map(|mut p| pet::on_error(&mut p));
                 Err(error)
             } else {
+                let data = raw.result.unwrap_or(serde_json::Value::Null);
+                AcpClient::prompt_stop_reason(&data).map_err(|error| {
+                    let _ = window.emit("peri:error", serde_json::json!({"source": source, "error": error}));
+                    let _ = state.pet.lock().map(|mut pet| pet::on_error(&mut pet));
+                    error
+                })?;
                 if is_first {
                     if let Ok(mut sessions) = state.sessions.lock() {
                         if let Some(session) = sessions.get_mut(&source) {
@@ -319,7 +325,6 @@ async fn send_message(
                         }
                     }
                 }
-                let data = raw.result.unwrap_or(serde_json::Value::Null);
                 let _ = window.emit("peri:done", serde_json::json!({"source": source, "data": data}));
                 let _ = state.pet.lock().map(|mut p| pet::on_done(&mut p));
                 Ok(peri_id)
