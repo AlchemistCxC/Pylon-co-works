@@ -57,9 +57,7 @@ export default forwardRef<{ send: () => void; attachFile: () => void; cancel: ()
       const isCtrlC = e.ctrlKey && (e.key === 'c' || e.key === 'C') && !window.getSelection()?.toString()
       if (isEsc || isCtrlC) {
         e.preventDefault()
-        const s = useStore.getState().sessions.find(s => s.id === sessionId || s.source === sessionId)
-        const source = s?.source || sessionId
-        invoke('cancel_prompt', { source }).catch(() => {})
+        invoke('cancel_prompt', { source: sessionId }).catch(() => {})
       }
     }
     window.addEventListener('keydown', onGlobalKey)
@@ -108,24 +106,20 @@ export default forwardRef<{ send: () => void; attachFile: () => void; cancel: ()
       return
     }
 
-    const s = useStore.getState().sessions.find(s => s.id === sessionId || s.source === sessionId)
-    const source = s?.source || sessionId
+    const s = useStore.getState().sessions.find(s => s.source === sessionId)
     const sessionPrompt = s?.sessionPrompt || ''
 
-    // 先清输入框再发——send_message 后端不返回直到回复完成（最长300s）
+    try { await invoke('send_message', { source: sessionId, content: text, persona, sessionPrompt, attachments: attached.map(a => a.path) }) }
+    catch (e) { setSendError(String(e)); setTimeout(() => setSendError(''), 4000) }
     lastMsg.current = text
     setValue('')
     setAttached([])
-    try { await invoke('send_message', { source, content: text, persona, sessionPrompt, attachments: attached.map(a => a.path) }) }
-    catch (e) { setSendError(String(e)); setTimeout(() => setSendError(''), 4000) }
   }
 
   // 取消正在运行的 prompt。后端 fire-and-forget，Peri 以 stopReason=cancelled 结束 → 触发 peri:done 清 liveGenerating
   const cancel = () => {
     if (!sessionId) return
-    const s = useStore.getState().sessions.find(s => s.id === sessionId || s.source === sessionId)
-    const source = s?.source || sessionId
-    invoke('cancel_prompt', { source }).catch(() => {})
+    invoke('cancel_prompt', { source: sessionId }).catch(() => {})
   }
 
   const attachFile = async () => {
