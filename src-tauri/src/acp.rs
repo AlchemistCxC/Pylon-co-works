@@ -277,7 +277,7 @@ impl AcpClient {
                 // Initialize
                 client.call_async(METHOD_INITIALIZE, serde_json::json!({
                     "protocolVersion": 1,
-                    "capabilities": {
+                    "clientCapabilities": {
                         "tokenStats": true,
                         "_meta": {
                             "peri.tokenStats": true,
