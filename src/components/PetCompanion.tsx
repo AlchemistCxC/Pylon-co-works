@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { invoke } from '@tauri-apps/api/core'
 import { advanceCodeEatingBehavior, getCodeComment, shouldStartCodeEating, shouldStartTabletCoding, type PetBehavior } from './petBehavior'
-import { choosePetDestination, clampPetPosition } from './petMotion'
+import { classifyPetPointerGesture, choosePetDestination, clampPetPosition, resolvePetClick } from './petMotion'
 import { useStore } from '../store'
 import './PetCompanion.css'
 
@@ -44,6 +44,15 @@ interface PetState {
 }
 
 interface Position { x: number; y: number }
+interface PointerSession {
+  pointerId: number
+  startX: number
+  startY: number
+  startedAt: number
+  dx: number
+  dy: number
+  wasWanderEnabled: boolean
+}
 
 const STORAGE_KEY = 'pylon-pet-v3'
 const POSITION_KEY = `${STORAGE_KEY}:position`
@@ -129,9 +138,14 @@ export default function PetCompanion({ rightOpen = false, rightWidth = 0 }: { ri
   const [comment, setComment] = useState('')
   const [tabletCoding, setTabletCoding] = useState(false)
   const [dragging, setDragging] = useState(false)
+  const [poking, setPoking] = useState(false)
   const [error, setError] = useState('')
   const shellRef = useRef<HTMLElement>(null)
-  const dragRef = useRef<{ dx: number; dy: number } | null>(null)
+  const pointerRef = useRef<PointerSession | null>(null)
+  const positionRef = useRef<Position | null>(position)
+  const lastClickAtRef = useRef<number | null>(null)
+  const singleClickTimerRef = useRef<number | null>(null)
+  const pokeTimerRef = useRef<number | null>(null)
   const wasGeneratingRef = useRef(false)
   const generating = useStore(s => (s.liveGeneratingSources || []).length > 0)
 
@@ -160,6 +174,15 @@ export default function PetCompanion({ rightOpen = false, rightWidth = 0 }: { ri
     }, 12_000)
     return () => window.clearInterval(timer)
   }, [save])
+
+  useEffect(() => {
+    positionRef.current = position
+  }, [position])
+
+  useEffect(() => () => {
+    if (singleClickTimerRef.current != null) window.clearTimeout(singleClickTimerRef.current)
+    if (pokeTimerRef.current != null) window.clearTimeout(pokeTimerRef.current)
+  }, [])
 
   useEffect(() => {
     if (!wanderEnabled || dragging) return
@@ -248,30 +271,101 @@ export default function PetCompanion({ rightOpen = false, rightWidth = 0 }: { ri
     const shell = shellRef.current
     if (!shell) return
     const rect = shell.getBoundingClientRect()
-    dragRef.current = { dx: event.clientX - rect.left, dy: event.clientY - rect.top }
-    setWanderEnabled(false)
-    setDragging(true)
+    pointerRef.current = {
+      pointerId: event.pointerId,
+      startX: event.clientX,
+      startY: event.clientY,
+      startedAt: Date.now(),
+      dx: event.clientX - rect.left,
+      dy: event.clientY - rect.top,
+      wasWanderEnabled: wanderEnabled,
+    }
     shell.setPointerCapture(event.pointerId)
   }
 
   const onPointerMove = (event: React.PointerEvent) => {
-    if (!dragRef.current || !shellRef.current?.parentElement) return
-    const host = shellRef.current.parentElement.getBoundingClientRect()
-    const x = Math.max(0, Math.min(host.width - shellRef.current.offsetWidth, event.clientX - host.left - dragRef.current.dx))
-    const y = Math.max(0, Math.min(host.height - shellRef.current.offsetHeight, event.clientY - host.top - dragRef.current.dy))
-    setPosition({ x, y })
-  }
-
-  const onPointerUp = () => {
-    dragRef.current = null
-    setDragging(false)
-    if (position) localStorage.setItem(POSITION_KEY, JSON.stringify(position))
+    const pointer = pointerRef.current
+    const shell = shellRef.current
+    const host = shell?.parentElement
+    if (!pointer || pointer.pointerId !== event.pointerId || !shell || !host) return
+    const gesture = classifyPetPointerGesture({
+      startX: pointer.startX,
+      startY: pointer.startY,
+      endX: event.clientX,
+      endY: event.clientY,
+      durationMs: Date.now() - pointer.startedAt,
+    })
+    if (gesture !== 'drag') return
+    setWanderEnabled(false)
+    const hostRect = host.getBoundingClientRect()
+    const next = clampPetPosition({
+      x: event.clientX - hostRect.left - pointer.dx,
+      y: event.clientY - hostRect.top - pointer.dy,
+    }, { width: hostRect.width, height: hostRect.height }, { width: shell.offsetWidth, height: shell.offsetHeight }, rightOpen ? rightWidth : 0)
+    positionRef.current = next
+    setPosition(next)
+    setDragging(true)
   }
 
   const resumeWander = () => {
     localStorage.removeItem(POSITION_KEY)
+    positionRef.current = null
     setPosition(null)
     setWanderEnabled(true)
+  }
+
+  const poke = () => {
+    setPoking(true)
+    setComment('嗯？')
+    if (pokeTimerRef.current != null) window.clearTimeout(pokeTimerRef.current)
+    pokeTimerRef.current = window.setTimeout(() => {
+      setPoking(false)
+      setComment('')
+    }, 1200)
+    if (IS_TAURI) {
+      invoke<PetState>('pet_action', { action: 'poke' })
+        .then(save)
+        .catch(cause => setError(String(cause)))
+    }
+  }
+
+  const onPointerUp = (event: React.PointerEvent) => {
+    const pointer = pointerRef.current
+    const shell = shellRef.current
+    if (!pointer || pointer.pointerId !== event.pointerId) return
+    const gesture = classifyPetPointerGesture({
+      startX: pointer.startX,
+      startY: pointer.startY,
+      endX: event.clientX,
+      endY: event.clientY,
+      durationMs: Date.now() - pointer.startedAt,
+    })
+    const finalPosition = positionRef.current
+    pointerRef.current = null
+    setDragging(false)
+    if (shell?.hasPointerCapture(event.pointerId)) shell.releasePointerCapture(event.pointerId)
+    if (gesture === 'drag') {
+      if (finalPosition) localStorage.setItem(POSITION_KEY, JSON.stringify(finalPosition))
+      return
+    }
+    if (gesture !== 'click') {
+      setWanderEnabled(pointer.wasWanderEnabled)
+      return
+    }
+    const currentClickAt = Date.now()
+    const click = resolvePetClick({ lastClickAt: lastClickAtRef.current, currentClickAt })
+    lastClickAtRef.current = click.nextLastClickAt
+    if (click.kind === 'double') {
+      if (singleClickTimerRef.current != null) window.clearTimeout(singleClickTimerRef.current)
+      resumeWander()
+      return
+    }
+    if (singleClickTimerRef.current != null) window.clearTimeout(singleClickTimerRef.current)
+    singleClickTimerRef.current = window.setTimeout(() => {
+      lastClickAtRef.current = null
+      singleClickTimerRef.current = null
+      poke()
+    }, 300)
   }
 
   const style = useMemo(() => position
@@ -281,7 +375,7 @@ export default function PetCompanion({ rightOpen = false, rightWidth = 0 }: { ri
   if (!pet) return error ? <div className="pet-load-error">宠物加载失败：{error}</div> : null
 
   return (
-    <section ref={shellRef} className={`pet-companion ${dragging ? 'dragging' : ''} ${perched ? 'perched' : ''} ${tabletCoding ? 'tablet-coding' : ''} behavior-${behavior}`}
+    <section ref={shellRef} className={`pet-companion ${dragging ? 'dragging' : ''} ${poking ? 'poking' : ''} ${perched ? 'perched' : ''} ${tabletCoding ? 'tablet-coding' : ''} behavior-${behavior}`}
       style={style} aria-label="长期陪伴宠物" onPointerDown={onPointerDown} onPointerMove={onPointerMove} onPointerUp={onPointerUp}>
       {behavior === 'spitting-fragment' && <span className="pet-code-fragment" aria-hidden="true">{'{}'}</span>}
       {comment && <div className="pet-speech-bubble" role="status">{comment}</div>}
@@ -289,8 +383,8 @@ export default function PetCompanion({ rightOpen = false, rightWidth = 0 }: { ri
         <span className="pet-tablet-screen"><i /><i /><i /></span>
         <span className="pet-tablet-keyboard" />
       </div>}
-      <div className="pet-creature-hitbox" onDoubleClick={resumeWander}
-        title={`${pet.name}：拖拽固定位置，双击恢复自主漫游`}>
+      <div className="pet-creature-hitbox"
+        title={`${pet.name}：单击互动，拖拽固定位置，双击恢复自主漫游`}>
         <PixelCreature stage={pet.stage} mood={pet.mood} walking={walking} />
       </div>
     </section>

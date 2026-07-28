@@ -2,6 +2,49 @@ export interface PetPoint { x: number; y: number }
 export interface PetSize { width: number; height: number }
 export interface PetRect extends PetSize { left: number; top: number }
 export type PetDestinationKind = 'perched' | 'wander' | 'edge'
+export type PetPointerGesture = 'click' | 'drag' | 'none'
+export type PetClickResolution = 'pending-single' | 'double'
+
+interface PetPointerGestureOptions {
+  startX: number
+  startY: number
+  endX: number
+  endY: number
+  durationMs: number
+  dragThreshold?: number
+  clickMaxDurationMs?: number
+}
+
+interface PetClickOptions {
+  lastClickAt: number | null
+  currentClickAt: number
+  doubleClickWindowMs?: number
+}
+
+export function classifyPetPointerGesture({
+  startX,
+  startY,
+  endX,
+  endY,
+  durationMs,
+  dragThreshold = 6,
+  clickMaxDurationMs = 500,
+}: PetPointerGestureOptions): PetPointerGesture {
+  const distance = Math.hypot(endX - startX, endY - startY)
+  if (distance >= dragThreshold) return 'drag'
+  return durationMs <= clickMaxDurationMs ? 'click' : 'none'
+}
+
+export function resolvePetClick({
+  lastClickAt,
+  currentClickAt,
+  doubleClickWindowMs = 300,
+}: PetClickOptions): { kind: PetClickResolution; nextLastClickAt: number | null } {
+  if (lastClickAt != null && currentClickAt - lastClickAt <= doubleClickWindowMs) {
+    return { kind: 'double', nextLastClickAt: null }
+  }
+  return { kind: 'pending-single', nextLastClickAt: currentClickAt }
+}
 
 interface DestinationOptions {
   host: PetRect
