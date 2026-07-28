@@ -38,15 +38,16 @@ export const ZONE_FIELDS: Record<string, (keyof ThemeSettings)[]> = {
   ],
   cc: [
     'ccHeight', 'ccBgHeight', 'ccBg', 'ccBgImage',
-    'ccStyle', 'ccVariant', 'ccPositions', 'ccHidden',
+    'ccStyle', 'ccVariant', 'ccPositions', 'ccHidden', 'ccScale', 'ccCliCustomized', 'ccLayoutVersion',
     'inputBg', 'inputBgImage', 'inputTextColor', 'inputPlaceholder',
     'inputSendBg', 'inputFocusBorder', 'inputFontSize', 'inputMinHeight',
-    'inputMode', 'cliLineWidth', 'cliLineColor', 'cliTextColor',
+    'inputMode', 'cliLineWidth', 'cliLineColor', 'cliTextColor', 'cliLinePadding',
     'statusBg', 'statusBgImage',
     'ekgWidth', 'ekgFontSize',
     'ekgGreen', 'ekgYellow', 'ekgRed',
     'ekgLineWidth', 'ekgAmplitudeMax', 'ekgSpeedBase', 'ekgSpeedMax',
     'ekgLeftColor', 'ekgMovingColor', 'ekgConsumedColor',
+    'barTrackColor', 'barFillColor', 'barFillFollow', 'barHeight',
     'tokenDisplay',
     'pillBg', 'pillText', 'prismOnColor',
     'modelVariant', 'modeVariant', 'sendVariant', 'attachVariant',
@@ -71,7 +72,7 @@ export const GLOBAL_PRESETS: GlobalPreset[] = [
   // ── Claude 风格 ──────────────────────────────────────────────
   {
     name: 'claude',
-    label: 'Claude 风格',
+    label: 'Claude Code',
     theme: {
       // global
       transparency: 0.97, bgBlur: 4, globalFont: 'mono', globalFontSize: 15,
@@ -115,6 +116,7 @@ export const GLOBAL_PRESETS: GlobalPreset[] = [
       inputFontSize: 18, inputMinHeight: 56,
       inputMode: 'cli', cliLineWidth: 2, cliLineColor: '#d0880b', cliTextColor: '#cdd6f4', cliLinePadding: 8,
       ccHidden: ['send', 'attach'],
+      ccScale: { ekg: 90, pct: 90, tokens: 90, model: 90, mode: 90 }, ccCliCustomized: false,
       statusBg: 'transparent', statusBgImage: '',
       ekgWidth: 140, ekgFontSize: 13,
       ekgGreen: '#4ade80', ekgYellow: '#fbbf24', ekgRed: '#f87171',
@@ -158,9 +160,9 @@ export const GLOBAL_PRESETS: GlobalPreset[] = [
       sparkles: '◴◷◶◵', spinnerColor: '#f59e0b', spinnerSize: 14,
       msgStyle: 'terminal', msgFont: 'system', msgTextColor: '', msgLineHeight: 1.75,
 
-      // cc — 玻璃中控区（布局同 Claude 风格）
+      // cc — 亮色玻璃工作台
       ccHeight: 150, ccBgHeight: 150, ccBg: 'rgba(255,255,255,0.20)', ccBgImage: '',
-      ccStyle: 'bar', ccVariant: 'terminal',
+      ccStyle: 'numeric', ccVariant: 'pill',
       barTrackColor: 'rgba(0,0,0,0.06)', barFillColor: '#22c55e', barFillFollow: true, barHeight: 10,
       ccPositions: {
         input:   { x: 0,  y: 0,  w: 100, h: 52 },
@@ -178,6 +180,7 @@ export const GLOBAL_PRESETS: GlobalPreset[] = [
       inputFontSize: 16, inputMinHeight: 52,
       inputMode: 'cli', cliLineWidth: 2, cliLineColor: '#6366f1', cliTextColor: 'rgba(0,0,0,0.80)',
       ccHidden: ['send', 'attach'],
+      ccScale: { ekg: 105, pct: 105, tokens: 100, model: 100, mode: 100 }, ccCliCustomized: false,
       statusBg: 'transparent', statusBgImage: '',
       ekgWidth: 130, ekgFontSize: 13,
       ekgGreen: '#22c55e', ekgYellow: '#f59e0b', ekgRed: '#ef4444',
@@ -185,7 +188,7 @@ export const GLOBAL_PRESETS: GlobalPreset[] = [
       ekgLeftColor: 'rgba(0,0,0,0.25)', ekgMovingColor: '', ekgConsumedColor: 'rgba(0,0,0,0.05)',
       tokenDisplay: 'ekg',
       pillBg: 'rgba(0,0,0,0.04)', pillText: 'rgba(0,0,0,0.50)', prismOnColor: '#22c55e',
-      modelVariant: 'dropdown', modeVariant: 'pill', sendVariant: 'icon', attachVariant: 'icon',
+      modelVariant: 'badge', modeVariant: 'pill', sendVariant: 'icon', attachVariant: 'icon',
 
       // right
       rightBg: 'rgba(245,245,250,0.55)', rightBgImage: '', rightWidth: 250,
@@ -221,7 +224,7 @@ export const GLOBAL_PRESETS: GlobalPreset[] = [
       sparkles: '←↖↑↗→↘↓↙', spinnerColor: '#88c0d0', spinnerSize: 13,
       msgStyle: 'terminal', msgFont: 'mono', msgTextColor: '', msgLineHeight: 1.7,
 
-      // cc — 冰蓝终端中控（布局同 Claude 风格）
+      // cc — 冰蓝开发终端
       ccHeight: 150, ccBgHeight: 150, ccBg: '#252838', ccBgImage: '',
       ccStyle: 'bar', ccVariant: 'terminal',
       barTrackColor: 'rgba(136,192,208,0.10)', barFillColor: '#88c0d0', barFillFollow: true, barHeight: 10,
@@ -241,6 +244,7 @@ export const GLOBAL_PRESETS: GlobalPreset[] = [
       inputFontSize: 16, inputMinHeight: 52,
       inputMode: 'cli', cliLineWidth: 2, cliLineColor: '#88c0d0', cliTextColor: '#e5e9f0',
       ccHidden: ['send', 'attach'],
+      ccScale: { ekg: 100, pct: 95, tokens: 95, model: 95, mode: 95 }, ccCliCustomized: false,
       statusBg: 'transparent', statusBgImage: '',
       ekgWidth: 140, ekgFontSize: 13,
       ekgGreen: '#a3be8c', ekgYellow: '#ebcb8b', ekgRed: '#bf616a',
