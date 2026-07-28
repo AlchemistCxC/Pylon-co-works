@@ -8,6 +8,7 @@ import ColorPopover from './ColorPopover'
 import SettingsPreview from './SettingsPreview'
 import { reportRuntimeError } from '../runtimeError'
 import { resolveBackgroundImage } from '../backgroundImage'
+import { runAgentSwitchTransaction } from './agentSwitchTransaction'
 import './Settings.css'
 
 // ── helpers ──
@@ -121,6 +122,7 @@ export default function Settings({ onClose }: { onClose?: () => void }) {
   const removeCustomPreset = useStore(s => s.removeCustomPreset)
   const [activeTab, setActiveTab] = useState('global')
   const [customPresetName, setCustomPresetName] = useState('')
+  const [switchingAgentId, setSwitchingAgentId] = useState<string | null>(null)
 
   // 应用全局预设
   const applyGlobalPreset = (name: string) => {
@@ -148,6 +150,28 @@ export default function Settings({ onClose }: { onClose?: () => void }) {
   }
 
   const previewZone = TAB_PREVIEW[activeTab]
+
+  const switchAgent = async (agentId: string) => {
+    if (switchingAgentId || agentId === activeAgent) return
+    setSwitchingAgentId(agentId)
+    await runAgentSwitchTransaction({
+      switchAgent: () => invoke('switch_agent', { name: agentId }),
+      onSuccess: () => {
+        useStore.setState({
+          sessionConfig: {},
+          sessionModes: {},
+          sessionLiveStats: {},
+          liveGenerating: null,
+          liveGeneratingSources: [],
+        })
+        useStore.getState().replaceSessions([])
+        setActiveAgent(agentId)
+        window.dispatchEvent(new CustomEvent('pylon:agent-switched'))
+      },
+      onError: error => reportRuntimeError('切换 Agent', error),
+    })
+    setSwitchingAgentId(null)
+  }
 
   return (
     <div className="settings">
@@ -415,20 +439,10 @@ export default function Settings({ onClose }: { onClose?: () => void }) {
                 {agents.map((a) => (
                   <Row key={a.id} label={a.name}>
                     <button className={`ps-btn sm ${a.id === activeAgent ? 'primary' : ''}`}
-                      onClick={() => {
-                        invoke('switch_agent', { name: a.id }).then(() => {
-                          useStore.setState({
-                            activeAgent: a.id,
-                            sessionConfig: {},
-                            liveGenerating: null,
-                            liveGeneratingSources: [],
-                          })
-                          useStore.getState().replaceSessions([])
-                          window.dispatchEvent(new CustomEvent('pylon:agent-switched'))
-                          setActiveAgent(a.id)
-                        }).catch(error => reportRuntimeError('切换 Agent', error))
-                      }}>
-                      {a.id === activeAgent ? '当前' : '切换'}
+                      disabled={switchingAgentId !== null || a.id === activeAgent}
+                      aria-busy={switchingAgentId === a.id}
+                      onClick={() => switchAgent(a.id)}>
+                      {switchingAgentId === a.id ? '连接中…' : a.id === activeAgent ? '当前' : '切换'}
                     </button>
                   </Row>
                 ))}
