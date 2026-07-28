@@ -1,6 +1,8 @@
 import { useState, useEffect, useRef } from 'react'
 import ControlCenter from './ControlCenter'
 import { useStore } from '../store'
+import GenerationFooter from './chat/GenerationFooter'
+import { splitSpinnerFrames } from './chat/spinnerFrames'
 
 /**
  * SettingsPreview — 设置页右侧实时预览
@@ -152,17 +154,13 @@ function PvUser() {
 // 预览 spinner — 读 store（sparkles/spinnerColor/spinnerSize）
 function PvSpinner() {
   const sparkles = useStore(s => s.sparkles) || '✳✴✵✶✷✸✹✺✻✼❃❊'
-  const spinnerColor = useStore(s => s.spinnerColor)
-  const spinnerSize = useStore(s => s.spinnerSize) || 14
-  const frames = sparkles.split('')
+  const frames = splitSpinnerFrames(sparkles)
   return (
-    <div className="term-spinner-row">
-      <div className="term-spinner" style={{ fontSize: spinnerSize } as React.CSSProperties}>
-        <span className="spinner-frame" style={{ color: spinnerColor || 'var(--accent)' }}>{frames[0]}</span>
-        <span className="spinner-verb" style={{ color: spinnerColor || 'var(--accent)' }}>格物致知</span>
-        <span className="spinner-meta">(3s · ↓ 1.2K tokens)</span>
-      </div>
-    </div>
+    <>
+      <GenerationFooter running frames={frames} tokenCount={1200} startTime={Date.now() - 3000} summary={null} />
+      <GenerationFooter running={false} frames={frames} tokenCount={1200} startTime={Date.now() - 3000}
+        summary={{ elapsedMs: 3000, tokenCount: 1200, completedFrame: frames[0], reason: 'done' }} />
+    </>
   )
 }
 

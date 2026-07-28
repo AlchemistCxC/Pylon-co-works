@@ -7,7 +7,8 @@ import ReactMarkdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
 import { AnimatePresence, motion } from 'motion/react'
 import Anser from 'anser'
-import { Square } from 'lucide-react'
+import GenerationFooter, { type GenerationSummary } from './GenerationFooter'
+import { completionFrame, splitSpinnerFrames } from './spinnerFrames'
 import { resolveLoadedMessages, serializeLoadedMessages, shouldStartLiveGeneration } from './replayState'
 import { canPersistMessages } from './messagePersistence'
 import { addGeneratingSource, removeGeneratingSource, updateSourceState } from './sessionEventState'
@@ -17,46 +18,6 @@ import { highlightCode } from './codeHighlight'
 import { reportRuntimeError } from '../../runtimeError'
 import './ChatView.css'
 
-// ── Peri spinner ──
-const IDIOMS = [
-  '格物致知','见微知著','大道至简','慎思明辨','融会贯通','温故知新','举一反三',
-  '水滴石穿','千里之行','厚积薄发','锲而不舍','知行合一','日拱一卒','功不唐捐','学以致用',
-  '精益求精','大巧若拙','返璞归真','独具匠心','无中生有',
-  '上善若水','海纳百川','虚怀若谷','心无旁骛','宁静致远','道法自然',
-  // extra
-  '聚沙成塔','积微成著','抽丝剥茧','庖丁解牛','百川归海','星火燎原','闻一知十',
-  '窥斑见豹','穷工极巧','妙手偶得','含英咀华','钩深致远','探赜索隐','研精覃思',
-]
-
-function fmtTokens(n: number) {
-  if (n >= 1000) { const k = n / 1000; return k >= 10 ? `${Math.round(k)}k` : `${k.toFixed(1)}k` }
-  return `${n}`
-}
-
-
-function Spinner({ tokenCount, startTime }: { tokenCount: number; startTime: number }) {
-  const frames = (useStore(s => s.sparkles) || '✳✴✵✶✷✸✹✺✻✼❃❊').split('')
-  const [, tick] = useState(0)
-  useEffect(() => {
-    const id = setInterval(() => tick(t => t + 1), 120)
-    return () => clearInterval(id)
-  }, [])
-  const tickIdx = Math.floor((Date.now() - startTime) / 120)
-  const frame = frames[tickIdx % frames.length]
-  // Rotate idiom every 8 ticks (~1s)
-  const idiom = IDIOMS[Math.floor(tickIdx / 8) % IDIOMS.length]
-  const elapsed = Math.floor((Date.now() - startTime) / 1000)
-  const elapsedStr = elapsed >= 60 ? `${Math.floor(elapsed/60)}m ${elapsed%60}s` : `${elapsed}s`
-  const parts = [elapsedStr]
-  if (tokenCount > 0) parts.push(`↓ ${fmtTokens(tokenCount)} tokens`)
-  return (
-    <div className="term-spinner">
-      <span className="spinner-frame">{frame}</span>
-      <span className="spinner-verb">{idiom}</span>
-      <span className="spinner-meta">({parts.join(' · ')})</span>
-    </div>
-  )
-}
 
 interface Props { sessionId: string | null; rightOpen?: boolean; rightWidth?: number }
 
@@ -85,11 +46,12 @@ const ChatView = React.memo(function ChatView({ sessionId, rightOpen = false, ri
   const [generating, setGenerating] = useState(false)
   const genStart = useRef(Date.now())
   const tokenCount = useRef(0)
-  const [summary, setSummary] = useState('')
+  const [summary, setSummary] = useState<GenerationSummary | null>(null)
   const sessionRef = useRef<string | null>(null)
   const messageOwnerRef = useRef<string | null>(null)
   const messagesBySourceRef = useRef<Record<string, Message[]>>({})
   const generationStartRef = useRef<Record<string, number>>({})
+  const generationFramesRef = useRef<Record<string, string[]>>({})
   const replayingSourcesRef = useRef<Record<string, Message[]>>({})
   const loadGenerationRef = useRef<Record<string, number>>({})
   const prevSessionRef = useRef(sessionId)
@@ -98,7 +60,7 @@ const ChatView = React.memo(function ChatView({ sessionId, rightOpen = false, ri
     prevSessionRef.current = sessionId
     sessionRef.current = null
     messageOwnerRef.current = null
-    setMessages([]); setGenerating(false); setSummary('')
+    setMessages([]); setGenerating(false); setSummary(null)
     if (!sessionId) return
 
     const s = useStore.getState().sessions.find(s => s.id === sessionId)
@@ -214,12 +176,13 @@ const ChatView = React.memo(function ChatView({ sessionId, rightOpen = false, ri
         updateSourceMessages(source, update, replay)
         if (!shouldStartLiveGeneration({ replay })) return
         generationStartRef.current[source] = Date.now()
+        generationFramesRef.current[source] = splitSpinnerFrames(useStore.getState().sparkles)
         startGenerating(source)
         if (sessionRef.current === source) {
           genStart.current = generationStartRef.current[source]
           tokenCount.current = 0
           setGenerating(true)
-          setSummary('')
+          setSummary(null)
         }
 
         const store = useStore.getState()
@@ -318,9 +281,9 @@ const ChatView = React.memo(function ChatView({ sessionId, rightOpen = false, ri
         stopGenerating(source)
         if (sessionRef.current === source) {
           const start = generationStartRef.current[source] || genStart.current
-          const elapsed = Math.floor((Date.now() - start) / 1000)
-          const elapsedStr = elapsed >= 60 ? `${Math.floor(elapsed/60)}m ${elapsed%60}s` : `${elapsed}s`
-          setSummary(`✻  处理耗时 ${elapsedStr}`)
+          const elapsedMs = Date.now() - start
+          const frames = generationFramesRef.current[source] || splitSpinnerFrames(useStore.getState().sparkles)
+          setSummary({ elapsedMs, tokenCount: tokenCount.current, completedFrame: completionFrame(frames, elapsedMs), reason: 'done' })
           setGenerating(false)
         }
         updateSourceMessages(source, prev => prev.map(m => ({ ...m, running: false })))
@@ -341,7 +304,7 @@ const ChatView = React.memo(function ChatView({ sessionId, rightOpen = false, ri
       if (!sessionRef.current) return
       messagesBySourceRef.current[sessionRef.current] = []
       setMessages([])
-      setSummary('')
+      setSummary(null)
     }
     window.addEventListener('peri:clear', handleClear)
 
@@ -392,16 +355,10 @@ const ChatView = React.memo(function ChatView({ sessionId, rightOpen = false, ri
             </motion.div>
           ))}
         </AnimatePresence>
-        {generating && (
-          <div className="term-spinner-row">
-            <Spinner tokenCount={tokenCount.current} startTime={genStart.current} />
-            <button className="spinner-stop-btn" title="停止生成 (Esc / Ctrl+C)"
-              onClick={() => { if (sessionRef.current) invoke('cancel_prompt', { source: sessionRef.current }).catch(error => reportRuntimeError('取消生成', error)) }}>
-              <Square size={11} /> 停止
-            </button>
-          </div>
-        )}
-        {!generating && summary && <div className="term-summary">{summary}</div>}
+        <GenerationFooter running={generating}
+          frames={generationFramesRef.current[sessionRef.current || ''] || splitSpinnerFrames(useStore.getState().sparkles)}
+          tokenCount={tokenCount.current} startTime={genStart.current} summary={summary}
+          onStop={generating ? () => { if (sessionRef.current) invoke('cancel_prompt', { source: sessionRef.current }).catch(error => reportRuntimeError('取消生成', error)) } : undefined} />
         <div ref={bottomRef} />
       </div>
       <button className="scroll-bottom-btn" onClick={() => bottomRef.current?.scrollIntoView({ behavior: 'smooth' })}
