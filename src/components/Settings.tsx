@@ -108,6 +108,7 @@ export default function Settings({ onClose }: { onClose?: () => void }) {
   const reset = useStore(s => s.resetTheme)
   const setGlobalPreset = useStore(s => s.setGlobalPreset)
   const setZoneField = useStore(s => s.setZoneField)
+  const setCcEditMode = useStore(s => s.setCcEditMode)
   const applyZonePreset = useStore(s => s.applyZonePreset)
   const activePreset = useStore(s => s.activePreset)
   const dirty = useStore(s => s.dirty)
@@ -357,7 +358,7 @@ export default function Settings({ onClose }: { onClose?: () => void }) {
                 <button className="ps-btn primary"
                   onClick={() => {
                     const cur = useStore.getState().ccEditMode
-                    u({ ccEditMode: !cur } as any)
+                    setCcEditMode(!cur)
                     if (typeof onClose === 'function') onClose?.()
                   }}>
                   {t.ccEditMode ? '退出布局编辑器' : '进入布局编辑器'}

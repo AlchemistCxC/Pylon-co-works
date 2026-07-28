@@ -6,6 +6,7 @@ import {
   normalizeCcPositions,
   updateCcPositionState,
 } from '../src/ccLayoutState.ts'
+import { readFileSync } from 'node:fs'
 
 const defaults = {
   input: { x: 0, y: 0, w: 100, h: 52 },
@@ -39,5 +40,15 @@ const normalized = normalizeCcPositions({
 }, defaults)
 assert.deepEqual(normalized.input, { x: 1, y: 2, w: 98, h: 58 })
 assert.deepEqual(normalized.model, { x: 17, y: 55 }, 'naturalSize 控件迁移后只保留 x/y')
+
+const storeSource = readFileSync(new URL('../src/store.ts', import.meta.url), 'utf8')
+const controlSource = readFileSync(new URL('../src/components/ControlCenter.tsx', import.meta.url), 'utf8')
+assert.equal(storeSource.includes('state.ccEditMode = false'), true)
+assert.equal(storeSource.includes('users, ccEditMode, setActiveProfile'), true, 'ccEditMode 必须从 persist payload 排除')
+assert.equal(storeSource.includes('setCcEditMode: (enabled)'), true)
+assert.equal(storeSource.includes('setCcHeight: (height)'), true)
+assert.equal(controlSource.includes('useStore.setState({ ccPositions'), false)
+assert.equal(controlSource.includes('useStore.setState({ ccHidden'), false)
+assert.equal(controlSource.includes('useStore.setState({ ccEditMode'), false)
 
 console.log('ccLayoutState 回归测试通过')

@@ -68,6 +68,8 @@ type ThemeState = ThemeSettings & {
   hydrateSessions: () => void
   getUser: (source: string) => UserMapping | undefined
   updateTheme: (partial: Partial<ThemeSettings>) => void
+  setCcEditMode: (enabled: boolean) => void
+  setCcHeight: (height: number) => void
   updateCcPosition: (id: string, partial: Partial<{x: number, y: number, w: number, h: number}>) => void
   resetCcLayout: () => void
   setCcHidden: (id: string, hidden: boolean) => void
@@ -199,6 +201,8 @@ export const useStore = create<ThemeState>()(persist(
   },
   getUser: (source) => get().users.find(u => u.id === source),
   updateTheme: (partial) => set(partial),
+  setCcEditMode: (enabled) => set({ ccEditMode: enabled }),
+  setCcHeight: (height) => set({ ccHeight: Math.max(80, Math.min(400, height)) }),
   updateCcPosition: (id, partial) => set(state => {
     const ccPositions = updateCcPositionState(state.ccPositions, DEFAULTS.ccPositions, id, partial)
     if (ccPositions === state.ccPositions) return state
@@ -290,6 +294,7 @@ export const useStore = create<ThemeState>()(persist(
   delete (state as Record<string, unknown>).ccSizes
   state.ccPositions = normalizeCcPositions(state.ccPositions, DEFAULTS.ccPositions)
   state.ccLayoutVersion = CC_LAYOUT_SCHEMA_VERSION
+  state.ccEditMode = false
   const normalized = normalizeProfileState(
     Array.isArray(state.profiles) ? state.profiles : [],
     typeof state.activeProfileId === 'string' ? state.activeProfileId : '',
@@ -297,6 +302,6 @@ export const useStore = create<ThemeState>()(persist(
   )
   return { ...state, ...normalized } as ThemeState
 }, partialize: (state) => {
-  const { sessions, sessionsHydrated, users, setActiveProfile, addProfile, addSession, removeSession, updateSession, replaceSessions, setSessionPeriId, restoreSessions, hydrateSessions, getUser, updateTheme, updateCcPosition, resetCcLayout, setCcHidden, setCcScale, setLiveStats, liveCommands, sessionConfig, setSessionConfig, sessionModes, setSessionMode, liveTokensUsed, liveTokensMax, liveCacheReadTokens, liveMode, livePrismOn, liveGenerating, liveGeneratingSources, agents, setAgents, setActiveAgent, applyZonePreset, setZoneField, setGlobalPreset, presets, dirty, ...persisted } = state as any
+  const { sessions, sessionsHydrated, users, ccEditMode, setActiveProfile, addProfile, addSession, removeSession, updateSession, replaceSessions, setSessionPeriId, restoreSessions, hydrateSessions, getUser, updateTheme, setCcEditMode, setCcHeight, updateCcPosition, resetCcLayout, setCcHidden, setCcScale, setLiveStats, liveCommands, sessionConfig, setSessionConfig, sessionModes, setSessionMode, liveTokensUsed, liveTokensMax, liveCacheReadTokens, liveMode, livePrismOn, liveGenerating, liveGeneratingSources, agents, setAgents, setActiveAgent, applyZonePreset, setZoneField, setGlobalPreset, presets, dirty, ...persisted } = state as any
   return persisted
 }, onRehydrateStorage: () => state => state?.hydrateSessions()}))

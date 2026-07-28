@@ -161,6 +161,8 @@ export default function ControlCenter({ sessionId }: Props) {
   const ccVariant = useStore(s => s.ccVariant) || 'terminal'
   const ccBg = useStore(s => s.ccBg) || 'transparent'
   const ccBgImage = useStore(s => s.ccBgImage) || ''
+  const setCcEditMode = useStore(s => s.setCcEditMode)
+  const setCcHeight = useStore(s => s.setCcHeight)
 
   const inputRef = useRef<{ send: () => void; attachFile: () => void; cancel: () => void }>(null)
   const [selected, setSelected] = useState<string | null>(null)
@@ -235,12 +237,12 @@ export default function ControlCenter({ sessionId }: Props) {
     const startY = e.clientY
     const startH = ccHeight
     const onMove = (ev: MouseEvent) => {
-      useStore.setState({ ccHeight: Math.max(80, Math.min(400, startH + startY - ev.clientY)) } as any)
+      setCcHeight(startH + startY - ev.clientY)
     }
     const onUp = () => { document.removeEventListener('mousemove', onMove); document.removeEventListener('mouseup', onUp) }
     document.addEventListener('mousemove', onMove)
     document.addEventListener('mouseup', onUp)
-  }, [ccHeight])
+  }, [ccHeight, setCcHeight])
 
   // Escape 退出编辑模式
   useEffect(() => {
@@ -248,12 +250,12 @@ export default function ControlCenter({ sessionId }: Props) {
     const onKey = (e: KeyboardEvent) => {
       if (e.key === 'Escape') {
         if (selected) setSelected(null)
-        else useStore.setState({ ccEditMode: false } as any)
+        else setCcEditMode(false)
       }
     }
     window.addEventListener('keydown', onKey)
     return () => window.removeEventListener('keydown', onKey)
-  }, [editMode, selected])
+  }, [editMode, selected, setCcEditMode])
 
   return (
     <div className={`control-center ${inputMode === 'cli' ? 'cli-mode' : ''} ${editMode ? 'cc-editing' : ''} cc-variant-${ccVariant}`}
@@ -273,7 +275,7 @@ export default function ControlCenter({ sessionId }: Props) {
           </div>
         </> : WIDGET_REGISTRY.map(w => renderWidget(w.id))}
       </div>
-      {editMode && selected && <PropertyPanel id={selected} onClose={() => setSelected(null)} onExit={() => { useStore.setState({ ccEditMode: false } as any); setSelected(null) }} />}
+      {editMode && selected && <PropertyPanel id={selected} onClose={() => setSelected(null)} onExit={() => { setCcEditMode(false); setSelected(null) }} />}
       {editMode && (
         <WidgetToolbar
           selected={selected}
@@ -358,6 +360,7 @@ function WidgetToolbar({ selected, onSelect }: { selected: string | null; onSele
   const hidden = useStore(s => s.ccHidden || [])
   const resetCcLayout = useStore(s => s.resetCcLayout)
   const setCcHidden = useStore(s => s.setCcHidden)
+  const setCcEditMode = useStore(s => s.setCcEditMode)
 
   const reset = () => resetCcLayout()
 
@@ -381,7 +384,7 @@ function WidgetToolbar({ selected, onSelect }: { selected: string | null; onSele
         )
       })}
       <button className="cc-edit-toolbar-btn" onClick={reset} title="重置所有控件位置到默认">↺ 重置位置</button>
-      <button className="cc-edit-toolbar-btn danger" onClick={() => { useStore.setState({ ccEditMode: false } as any); onSelect(null) }}>退出编辑</button>
+      <button className="cc-edit-toolbar-btn danger" onClick={() => { setCcEditMode(false); onSelect(null) }}>退出编辑</button>
     </div>
   )
 }
