@@ -41,7 +41,7 @@ export interface ThemeSettings {
   ccStyle: string
   ccVariant: string
   modelVariant: string; modeVariant: string; sendVariant: string; attachVariant: string
-  ccLayout: string[]; ccHidden: string[]; ccSizes: Record<string, number>
+  ccHidden: string[]
   ccPositions: Record<string, {x: number, y: number, w: number, h: number}>
   ccEditMode: boolean
   ccCliCustomized: boolean  // 用户是否在 CLI 模式手动调过 widget 位置/尺寸；true 时不再套用 CLI 默认布局
@@ -118,7 +118,7 @@ const DEFAULTS: ThemeSettings = {
   ccStyle: 'wave',
   ccVariant: 'terminal',
   modelVariant: 'dropdown', modeVariant: 'pill', sendVariant: 'icon', attachVariant: 'icon',
-  ccLayout: ['input', 'context', 'model', 'mode'], ccHidden: [], ccSizes: {},
+  ccHidden: [],
   ccPositions: { input:{x:0,y:0,w:100,h:52}, ekg:{x:0,y:65,w:30,h:28}, pct:{x:32,y:69,w:8,h:20}, tokens:{x:41,y:69,w:16,h:20}, model:{x:58,y:69,w:18,h:20}, mode:{x:77,y:69,w:10,h:20}, send:{x:89,y:69,w:5,h:20}, attach:{x:95,y:69,w:4,h:20} },
   ccEditMode: false,
   ccCliCustomized: false,
@@ -284,6 +284,9 @@ export const useStore = create<ThemeState>()(persist(
 }),
 { name: 'pylon-theme', version: PROFILE_SCHEMA_VERSION, migrate: persisted => {
   const state = (persisted || {}) as Partial<ThemeState>
+  // ccLayout / ccSizes 是旧版百分比 widget 模型遗留字段；当前注册表与 ccPositions 才是布局真值。
+  delete (state as Record<string, unknown>).ccLayout
+  delete (state as Record<string, unknown>).ccSizes
   const normalized = normalizeProfileState(
     Array.isArray(state.profiles) ? state.profiles : [],
     typeof state.activeProfileId === 'string' ? state.activeProfileId : '',
