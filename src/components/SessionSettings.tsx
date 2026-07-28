@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import * as Dialog from '@radix-ui/react-dialog'
 import { invoke } from '@tauri-apps/api/core'
 import { useStore } from '../store'
@@ -17,6 +17,13 @@ export default function SessionSettings({ sessionId, open, onClose, onDeleted }:
   const [platform, setPlatform] = useState(s?.platform || 'local')
   const [workdir, setWorkdir] = useState(s?.workdir || '')
   const [sessionPrompt, setSessionPrompt] = useState(s?.sessionPrompt || '')
+
+  useEffect(() => {
+    setName(s?.name || '')
+    setPlatform(s?.platform || 'local')
+    setWorkdir(s?.workdir || '')
+    setSessionPrompt(s?.sessionPrompt || '')
+  }, [sessionId, s?.name, s?.platform, s?.workdir, s?.sessionPrompt])
 
   if (!s) return null
 
