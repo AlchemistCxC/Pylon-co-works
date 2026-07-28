@@ -1,3 +1,10 @@
+.set-custom-preset-save { display:flex; align-items:center; gap:6px; margin-top:10px; }
+.set-custom-preset-save .set-input { width:180px; }
+.set-custom-presets { display:flex; flex-direction:column; gap:5px; margin-top:8px; }
+.set-custom-preset { display:flex; align-items:center; gap:5px; }
+.set-custom-preset .set-preset-chip { min-width:120px; text-align:left; }
+.ps-btn.danger { color:var(--tool-err,var(--danger)); border-color:color-mix(in srgb,var(--tool-err,var(--danger)) 45%,transparent); }
+
 .settings {
   position:fixed; inset:32px 0 0 0; z-index:50;
   background:rgba(255,255,255,0.94); backdrop-filter:blur(var(--blur,16px));

@@ -115,7 +115,12 @@ export default function Settings({ onClose }: { onClose?: () => void }) {
   const agents = useStore(s => s.agents)
   const activeAgent = useStore(s => s.activeAgent)
   const setActiveAgent = useStore(s => s.setActiveAgent)
+  const customPresets = useStore(s => s.customPresets)
+  const saveCustomPreset = useStore(s => s.saveCustomPreset)
+  const applyCustomPreset = useStore(s => s.applyCustomPreset)
+  const removeCustomPreset = useStore(s => s.removeCustomPreset)
   const [activeTab, setActiveTab] = useState('global')
+  const [customPresetName, setCustomPresetName] = useState('')
 
   // 应用全局预设
   const applyGlobalPreset = (name: string) => {
@@ -187,9 +192,25 @@ export default function Settings({ onClose }: { onClose?: () => void }) {
                 </div>
                 <div className="set-hint">
                   {dirty.global
-                    ? '当前为自定义 — 切换预设可恢复'
+                    ? '当前为自定义 — 可保存为新预设或覆盖已有预设'
                     : '选择预设后修改任意外观参数，自动切换为自定义'}
                 </div>
+                <div className="set-custom-preset-save">
+                  <input className="set-input" value={customPresetName} onChange={event => setCustomPresetName(event.target.value)} placeholder="自定义预设名称" />
+                  <button className="ps-btn sm" onClick={() => {
+                    if (!customPresetName.trim()) return
+                    const id = saveCustomPreset(customPresetName)
+                    applyCustomPreset(id)
+                    setCustomPresetName('')
+                  }}>保存当前</button>
+                </div>
+                {customPresets.length > 0 && <div className="set-custom-presets">
+                  {customPresets.map(preset => <div className="set-custom-preset" key={preset.id}>
+                    <button className={`set-preset-chip ${activePreset.global === preset.id ? 'active' : ''}`} onClick={() => applyCustomPreset(preset.id)}>{preset.name}</button>
+                    <button className="ps-btn sm" onClick={() => saveCustomPreset(preset.name, preset.id)}>覆盖</button>
+                    <button className="ps-btn sm danger" onClick={() => removeCustomPreset(preset.id)}>删除</button>
+                  </div>)}
+                </div>}
               </Group>
 
               <Group title="玻璃效果">

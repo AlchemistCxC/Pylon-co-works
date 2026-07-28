@@ -4,6 +4,8 @@ import { normalizeProfileState, PROFILE_SCHEMA_VERSION } from './profilePersiste
 import { loadSessions, persistSessions } from './sessionPersistence'
 import { CC_LAYOUT_SCHEMA_VERSION, DEFAULT_CC_LAYOUT, cloneCcLayout, cloneCcPositions, normalizeCcLayout, normalizeCcPositions, setCcHiddenState, setCcScaleState, updateCcPlacementState, updateCcPositionState } from './ccLayoutState'
 import type { CcLayoutV3, CcWidgetPlacement } from './ccLayoutState'
+import { createCustomPreset, deleteCustomPreset, normalizeCustomPresets, pickCustomPresetTheme, upsertCustomPreset } from './customPresets'
+import type { CustomPreset } from './customPresets'
 
 export interface Profile { id: string; name: string; avatar?: string; persona: string; model: string }
 // 后端配置选项（来自 new_session 返回 & config_option_update 事件）
@@ -54,6 +56,7 @@ export interface ThemeSettings {
 }
 
 type ThemeState = ThemeSettings & {
+  customPresets: CustomPreset[]
   profiles: Profile[]
   activeProfileId: string
   sessions: Session[]
@@ -95,6 +98,9 @@ type ThemeState = ThemeSettings & {
   applyZonePreset: (zone: string, presetName: string, presetTheme: Partial<ThemeSettings>) => void
   setZoneField: (zone: string, partial: Partial<ThemeSettings>) => void
   setGlobalPreset: (name: string, theme: Partial<ThemeSettings>) => void
+  saveCustomPreset: (name: string, id?: string) => string
+  applyCustomPreset: (id: string) => void
+  removeCustomPreset: (id: string) => void
   agents: { id: string; name: string }[]
   activeAgent: string
   setAgents: (a: { id: string; name: string }[]) => void
@@ -146,6 +152,7 @@ export const useStore = create<ThemeState>()(persist(
   activeProfileId: DEFAULT_PROFILES[0].id,
   sessions: [],
   sessionsHydrated: false,
+  customPresets: [],
   hydrateSessions: () => {
     try {
       set({ sessions: loadSessions(localStorage, get().profiles), sessionsHydrated: true })
@@ -289,6 +296,30 @@ export const useStore = create<ThemeState>()(persist(
     activePreset: { global: name, sidebar: name, chat: name, cc: name, right: name },
     dirty: { global: false, sidebar: false, chat: false, cc: false, right: false },
   })),
+  saveCustomPreset: (name, id) => {
+    const state = get()
+    const existing = id ? state.customPresets.find(preset => preset.id === id) : undefined
+    const now = Date.now()
+    const preset = existing
+      ? { ...existing, name: name.trim().slice(0, 40), theme: pickCustomPresetTheme(state as unknown as Record<string, unknown>), updatedAt: now }
+      : createCustomPreset(name, pickCustomPresetTheme(state as unknown as Record<string, unknown>), now)
+    set({ customPresets: upsertCustomPreset(state.customPresets, preset) })
+    return preset.id
+  },
+  applyCustomPreset: (id) => set(state => {
+    const preset = state.customPresets.find(item => item.id === id)
+    if (!preset) return state
+    return {
+      ...preset.theme,
+      ccLayout: normalizeCcLayout(preset.theme.ccLayout, preset.theme.ccPositions),
+      activePreset: { global: id, sidebar: id, chat: id, cc: id, right: id },
+      dirty: { global: false, sidebar: false, chat: false, cc: false, right: false },
+    }
+  }),
+  removeCustomPreset: (id) => set(state => ({
+    customPresets: deleteCustomPreset(state.customPresets, id),
+    activePreset: Object.fromEntries(Object.entries(state.activePreset).map(([zone, value]) => [zone, value === id ? '' : value])),
+  })),
 
   agents: [],
   activeAgent: 'peri',
@@ -303,6 +334,7 @@ export const useStore = create<ThemeState>()(persist(
   state.ccLayout = normalizeCcLayout(state.ccLayout, state.ccPositions)
   state.ccLayoutVersion = CC_LAYOUT_SCHEMA_VERSION
   state.ccEditMode = false
+  state.customPresets = normalizeCustomPresets(state.customPresets)
   const normalized = normalizeProfileState(
     Array.isArray(state.profiles) ? state.profiles : [],
     typeof state.activeProfileId === 'string' ? state.activeProfileId : '',
@@ -310,6 +342,6 @@ export const useStore = create<ThemeState>()(persist(
   )
   return { ...state, ...normalized } as ThemeState
 }, partialize: (state) => {
-  const { sessions, sessionsHydrated, users, ccEditMode, setActiveProfile, addProfile, addSession, removeSession, updateSession, replaceSessions, setSessionPeriId, restoreSessions, hydrateSessions, getUser, updateTheme, setCcEditMode, setCcHeight, updateCcPosition, updateCcPlacement, resetCcLayout, setCcHidden, setCcScale, setLiveStats, liveCommands, sessionConfig, setSessionConfig, sessionModes, setSessionMode, liveTokensUsed, liveTokensMax, liveCacheReadTokens, liveMode, livePrismOn, liveGenerating, liveGeneratingSources, agents, setAgents, setActiveAgent, applyZonePreset, setZoneField, setGlobalPreset, presets, dirty, ...persisted } = state as any
+  const { sessions, sessionsHydrated, users, ccEditMode, setActiveProfile, addProfile, addSession, removeSession, updateSession, replaceSessions, setSessionPeriId, restoreSessions, hydrateSessions, getUser, updateTheme, setCcEditMode, setCcHeight, updateCcPosition, updateCcPlacement, resetCcLayout, setCcHidden, setCcScale, setLiveStats, liveCommands, sessionConfig, setSessionConfig, sessionModes, setSessionMode, liveTokensUsed, liveTokensMax, liveCacheReadTokens, liveMode, livePrismOn, liveGenerating, liveGeneratingSources, agents, setAgents, setActiveAgent, applyZonePreset, setZoneField, setGlobalPreset, saveCustomPreset, applyCustomPreset, removeCustomPreset, presets, dirty, ...persisted } = state as any
   return persisted
 }, onRehydrateStorage: () => state => state?.hydrateSessions()}))
