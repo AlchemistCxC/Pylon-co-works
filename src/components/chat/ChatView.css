@@ -138,7 +138,7 @@
 
 /* ── 回底按钮（Peri ⌄ 风格）── */
 .scroll-bottom-btn {
-  position:absolute; bottom:calc(var(--cc-height, 130px) + 8px); right:8px;
+  position:absolute; bottom:calc(var(--cc-height, 130px) + 8px); right:calc(8px + var(--chat-right-offset, 0px));
   width:24px; height:24px; display:flex; align-items:center; justify-content:center;
   background:transparent; border:none;
   color:#fff; cursor:pointer; font-size:14px; opacity:0.35;

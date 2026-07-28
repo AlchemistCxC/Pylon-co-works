@@ -58,7 +58,7 @@ function Spinner({ tokenCount, startTime }: { tokenCount: number; startTime: num
   )
 }
 
-interface Props { sessionId: string | null }
+interface Props { sessionId: string | null; rightOpen?: boolean; rightWidth?: number }
 
 interface Message {
   id: string; role: 'user' | 'assistant' | 'tool' | 'reasoning'
@@ -79,7 +79,7 @@ const MOCK_MESSAGES: Message[] = [
   { id: 'm6', role: 'assistant', sender: 'peri', content: '找到问题了：`main` 用了 `await` 却没标 `async`。\n\n```ts\nexport async function main(url: string) {\n  const r = await fetch(url)\n  return r.json()\n}\n```\n\n已修正，`build` 通过。', time: '10:25' },
 ]
 
-const ChatView = React.memo(function ChatView({ sessionId }: Props) {
+const ChatView = React.memo(function ChatView({ sessionId, rightOpen = false, rightWidth = 260 }: Props) {
   const bottomRef = useRef<HTMLDivElement>(null)
   const [messages, setMessages] = useState<Message[]>(!IS_TAURI ? MOCK_MESSAGES : [])
   const [generating, setGenerating] = useState(false)
@@ -374,7 +374,7 @@ const ChatView = React.memo(function ChatView({ sessionId }: Props) {
   )
 
   return (
-    <div className="chat-view">
+    <div className="chat-view" style={{ '--chat-right-offset': rightOpen ? `${rightWidth + 8}px` : '0px' } as React.CSSProperties}>
       <div className="term">
         <AnimatePresence initial={false}>
           {messages.map((msg) => (

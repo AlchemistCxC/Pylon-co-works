@@ -196,7 +196,7 @@ export default function App() {
         <div className="main">
           <div style={{ display: activeTab === 'prism' ? 'flex' : 'none' }}><PrismSheet /></div>
           <div className={`main-body ${ccEditMode ? 'blur-bg' : ''}`} style={{ display: activeTab === 'prism' ? 'none' : 'flex' }}>
-            <ChatView sessionId={activeSession} />
+            <ChatView sessionId={activeSession} rightOpen={rightOpen} rightWidth={s.rightWidth} />
             <PetCompanion />
             <ControlCenter sessionId={activeSession} />
           </div>
