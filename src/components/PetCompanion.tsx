@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { invoke } from '@tauri-apps/api/core'
+import { advanceCodeEatingBehavior, getCodeComment, shouldStartCodeEating, type PetBehavior } from './petBehavior'
 import { choosePetDestination, clampPetPosition } from './petMotion'
 import './PetCompanion.css'
 
@@ -123,6 +124,8 @@ export default function PetCompanion({ rightOpen = false, rightWidth = 0 }: { ri
   const [wanderEnabled, setWanderEnabled] = useState(() => localStorage.getItem(POSITION_KEY) === null)
   const [walking, setWalking] = useState(false)
   const [perched, setPerched] = useState(false)
+  const [behavior, setBehavior] = useState<PetBehavior>('idle')
+  const [comment, setComment] = useState('')
   const [dragging, setDragging] = useState(false)
   const [error, setError] = useState('')
   const shellRef = useRef<HTMLElement>(null)
@@ -199,6 +202,35 @@ export default function PetCompanion({ rightOpen = false, rightWidth = 0 }: { ri
     return () => window.removeEventListener('resize', clampCurrentPosition)
   }, [rightOpen, rightWidth])
 
+  useEffect(() => {
+    if (!wanderEnabled || dragging || behavior !== 'idle') return
+    const attempt = () => {
+      const hasCode = Boolean(shellRef.current?.parentElement?.querySelector('.term-code-block'))
+      if (shouldStartCodeEating({ hasCode, perched })) setBehavior('sniffing-code')
+    }
+    const first = window.setTimeout(attempt, 15_000)
+    const timer = window.setInterval(attempt, 45_000)
+    return () => { window.clearTimeout(first); window.clearInterval(timer) }
+  }, [behavior, dragging, perched, wanderEnabled])
+
+  useEffect(() => {
+    if (behavior === 'idle') return
+    const duration: Record<Exclude<PetBehavior, 'idle'>, number> = {
+      'sniffing-code': 600,
+      'eating-code': 900,
+      chewing: 1200,
+      'spitting-fragment': 500,
+      commenting: 4000,
+    }
+    if (behavior === 'commenting') setComment(getCodeComment())
+    const timer = window.setTimeout(() => {
+      const next = advanceCodeEatingBehavior(behavior)
+      if (next === 'idle') setComment('')
+      setBehavior(next)
+    }, duration[behavior])
+    return () => window.clearTimeout(timer)
+  }, [behavior])
+
   const onPointerDown = (event: React.PointerEvent) => {
     if ((event.target as HTMLElement).closest('button')) return
     const shell = shellRef.current
@@ -237,8 +269,10 @@ export default function PetCompanion({ rightOpen = false, rightWidth = 0 }: { ri
   if (!pet) return error ? <div className="pet-load-error">宠物加载失败：{error}</div> : null
 
   return (
-    <section ref={shellRef} className={`pet-companion ${dragging ? 'dragging' : ''} ${perched ? 'perched' : ''}`}
+    <section ref={shellRef} className={`pet-companion ${dragging ? 'dragging' : ''} ${perched ? 'perched' : ''} behavior-${behavior}`}
       style={style} aria-label="长期陪伴宠物" onPointerDown={onPointerDown} onPointerMove={onPointerMove} onPointerUp={onPointerUp}>
+      {behavior === 'spitting-fragment' && <span className="pet-code-fragment" aria-hidden="true">{'{}'}</span>}
+      {comment && <div className="pet-speech-bubble" role="status">{comment}</div>}
       <div className="pet-creature-hitbox" onDoubleClick={resumeWander}
         title={`${pet.name}：拖拽固定位置，双击恢复自主漫游`}>
         <PixelCreature stage={pet.stage} mood={pet.mood} walking={walking} />

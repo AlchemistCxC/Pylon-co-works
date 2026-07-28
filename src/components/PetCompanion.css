@@ -29,6 +29,12 @@
 .pixel-creature.walking { animation:pet-walk .24s steps(2,end) infinite; }
 .pet-companion.perched .pixel-creature { animation:pet-perch 2.8s steps(2,end) infinite; }
 .pet-companion.perched .pixel-tail { animation-duration:1.4s; }
+.pet-companion.behavior-sniffing-code .pixel-creature { animation:pet-sniff .3s steps(2,end) infinite; }
+.pet-companion.behavior-eating-code .pixel-creature { animation:pet-bite .22s steps(2,end) infinite; }
+.pet-companion.behavior-chewing .pixel-creature { animation:pet-chew .3s steps(2,end) infinite; }
+.pet-companion.behavior-spitting-fragment .pixel-creature { animation:pet-spit .5s steps(2,end) 1; }
+.pet-code-fragment { position:absolute;left:74px;top:42px;color:var(--pet-glow);font:700 11px var(--mono);pointer-events:none;animation:pet-fragment-fly .5s steps(4,end) forwards; }
+.pet-speech-bubble { position:absolute;left:50%;bottom:94px;min-width:max-content;max-width:190px;transform:translateX(-50%);padding:6px 8px;border:1px solid var(--border);border-radius:5px;background:color-mix(in srgb,var(--bg-panel) 94%,transparent);box-shadow:0 5px 16px rgba(0,0,0,.16);color:var(--text);font:10px/1.4 var(--mono);pointer-events:none;animation:pet-comment-pop .24s steps(3,end); }
 .pixel-creature.mood-excited,.pixel-creature.mood-happy { animation:pet-hop .42s steps(2,end) infinite; }
 .pixel-creature.mood-error { animation:pet-shiver .18s steps(2,end) 5; }
 .pixel-creature.mood-sleepy { animation:pet-breathe 3.4s steps(2,end) infinite;filter:saturate(.72); }
@@ -39,10 +45,16 @@
 @keyframes pet-hop { 50% { transform:scale(var(--pet-scale,1)) translateY(-4px); } }
 @keyframes pet-walk { 50% { transform:scale(var(--pet-scale,1)) translateY(-2px); } }
 @keyframes pet-perch { 50% { transform:scale(var(--pet-scale,1)) translateY(2px); } }
+@keyframes pet-sniff { 50% { transform:scale(var(--pet-scale,1)) translateX(2px); } }
+@keyframes pet-bite { 50% { transform:scale(var(--pet-scale,1)) translateX(2px) translateY(1px); } }
+@keyframes pet-chew { 50% { transform:scale(var(--pet-scale,1)) translateX(-1px); } }
+@keyframes pet-spit { 50% { transform:scale(var(--pet-scale,1)) translateX(-3px); } }
+@keyframes pet-fragment-fly { to { transform:translate(26px,-18px);opacity:0; } }
+@keyframes pet-comment-pop { from { opacity:0;transform:translateX(-50%) translateY(4px); } }
 @keyframes pet-shiver { 50% { transform:scale(var(--pet-scale,1)) translateX(1px); } }
 @keyframes pet-tail { 50% { transform:translateY(1px); } }
 @keyframes pet-feet { 50% { transform:translateY(1px); } }
 @keyframes pet-glow { 50% { opacity:.42; } }
 
 .app[data-ui-scheme="dark"] .pet-companion { --pet-body:#7fa7b7;--pet-mark:#c1dedf;--pet-eye:#10171c;--pet-glow:#8de8dd; }
-@media (prefers-reduced-motion:reduce) { .pet-companion,.pixel-creature,.pixel-tail,.pixel-antenna,.pixel-sparks,.pixel-feet { animation:none!important;transition:none!important; } }
+@media (prefers-reduced-motion:reduce) { .pet-companion,.pixel-creature,.pixel-tail,.pixel-antenna,.pixel-sparks,.pixel-feet,.pet-code-fragment,.pet-speech-bubble { animation:none!important;transition:none!important; } }
