@@ -2,6 +2,7 @@ import { create } from 'zustand'
 import { persist } from 'zustand/middleware'
 import { normalizeProfileState, PROFILE_SCHEMA_VERSION } from './profilePersistence'
 import { loadSessions, persistSessions } from './sessionPersistence'
+import { cloneCcPositions, setCcHiddenState, setCcScaleState, updateCcPositionState } from './ccLayoutState'
 
 export interface Profile { id: string; name: string; avatar?: string; persona: string; model: string }
 // 后端配置选项（来自 new_session 返回 & config_option_update 事件）
@@ -66,6 +67,10 @@ type ThemeState = ThemeSettings & {
   hydrateSessions: () => void
   getUser: (source: string) => UserMapping | undefined
   updateTheme: (partial: Partial<ThemeSettings>) => void
+  updateCcPosition: (id: string, partial: Partial<{x: number, y: number, w: number, h: number}>) => void
+  resetCcLayout: () => void
+  setCcHidden: (id: string, hidden: boolean) => void
+  setCcScale: (id: string, scale: number) => void
   liveTokensUsed: number
   liveTokensMax: number
   liveCacheReadTokens: number
@@ -193,6 +198,24 @@ export const useStore = create<ThemeState>()(persist(
   },
   getUser: (source) => get().users.find(u => u.id === source),
   updateTheme: (partial) => set(partial),
+  updateCcPosition: (id, partial) => set(state => {
+    const ccPositions = updateCcPositionState(state.ccPositions, DEFAULTS.ccPositions, id, partial)
+    if (ccPositions === state.ccPositions) return state
+    return {
+      ccPositions,
+      ccCliCustomized: true,
+    }
+  }),
+  resetCcLayout: () => set({
+    ccPositions: cloneCcPositions(DEFAULTS.ccPositions),
+    ccCliCustomized: false,
+  }),
+  setCcHidden: (id, hidden) => set(state => ({
+    ccHidden: setCcHiddenState(state.ccHidden, id, hidden),
+  })),
+  setCcScale: (id, scale) => set(state => ({
+    ccScale: setCcScaleState(state.ccScale, id, scale),
+  })),
 
   liveTokensUsed: 0, liveTokensMax: 131072, liveCacheReadTokens: 0, liveMode: 'auto', livePrismOn: true, liveGenerating: null, liveGeneratingSources: [],
   sessionModes: {},
@@ -268,6 +291,6 @@ export const useStore = create<ThemeState>()(persist(
   )
   return { ...state, ...normalized } as ThemeState
 }, partialize: (state) => {
-  const { sessions, sessionsHydrated, users, setActiveProfile, addProfile, addSession, removeSession, updateSession, replaceSessions, setSessionPeriId, restoreSessions, hydrateSessions, getUser, updateTheme, setLiveStats, liveCommands, sessionConfig, setSessionConfig, sessionModes, setSessionMode, liveTokensUsed, liveTokensMax, liveCacheReadTokens, liveMode, livePrismOn, liveGenerating, liveGeneratingSources, agents, setAgents, setActiveAgent, applyZonePreset, setZoneField, setGlobalPreset, presets, dirty, ...persisted } = state as any
+  const { sessions, sessionsHydrated, users, setActiveProfile, addProfile, addSession, removeSession, updateSession, replaceSessions, setSessionPeriId, restoreSessions, hydrateSessions, getUser, updateTheme, updateCcPosition, resetCcLayout, setCcHidden, setCcScale, setLiveStats, liveCommands, sessionConfig, setSessionConfig, sessionModes, setSessionMode, liveTokensUsed, liveTokensMax, liveCacheReadTokens, liveMode, livePrismOn, liveGenerating, liveGeneratingSources, agents, setAgents, setActiveAgent, applyZonePreset, setZoneField, setGlobalPreset, presets, dirty, ...persisted } = state as any
   return persisted
 }, onRehydrateStorage: () => state => state?.hydrateSessions()}))

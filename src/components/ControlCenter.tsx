@@ -321,10 +321,7 @@ function EditableWidget({ id, pos, editMode, isHidden, children, bodyRef, select
       const cur = cp[id] || start
       const nx = Math.max(0, Math.min(100 - cur.w, start.x + dxPct))
       const ny = Math.max(0, Math.min(100 - cur.h, start.y + dyPct))
-      const patch: any = { ccPositions: { ...cp, [id]: { ...cur, x: nx, y: ny } } }
-      // CLI 模式下手动调整过 → 标记，之后不再套用 CLI 默认布局
-      if (useStore.getState().inputMode === 'cli' && !useStore.getState().ccCliCustomized) patch.ccCliCustomized = true
-      useStore.setState(patch)
+      useStore.getState().updateCcPosition(id, { x: nx, y: ny })
     }
     const onUp = () => {
       window.removeEventListener('pointermove', onMove)
@@ -359,19 +356,13 @@ function isControlHandle(_el: HTMLElement | null): boolean {
 
 function WidgetToolbar({ selected, onSelect }: { selected: string | null; onSelect: (id: string | null) => void }) {
   const hidden = useStore(s => s.ccHidden || [])
-  const positions = useStore(s => s.ccPositions)
-  const u = useStore(s => s.updateTheme)
+  const resetCcLayout = useStore(s => s.resetCcLayout)
+  const setCcHidden = useStore(s => s.setCcHidden)
 
-  const reset = () => {
-    const fresh: any = {}
-    for (const w of WIDGET_REGISTRY) fresh[w.id] = w.defaultPos
-    useStore.setState({ ccPositions: fresh } as any)
-  }
+  const reset = () => resetCcLayout()
 
   const toggleHide = (id: string) => {
-    const h = useStore.getState().ccHidden || []
-    const next = h.includes(id) ? h.filter(x => x !== id) : [...h, id]
-    useStore.setState({ ccHidden: next } as any)
+    setCcHidden(id, !hidden.includes(id))
   }
 
   return (
@@ -401,8 +392,9 @@ function WidgetToolbar({ selected, onSelect }: { selected: string | null; onSele
 
 function PropertyPanel({ id, onClose, onExit }: { id: string; onClose: () => void; onExit: () => void }) {
   const pos = useStore(s => (s.ccPositions || {})[id]) || { x: 0, y: 0, w: 10, h: 10 }
-  const all = useStore(s => s.ccPositions || {})
   const u = useStore(s => s.updateTheme)
+  const updateCcPosition = useStore(s => s.updateCcPosition)
+  const setCcScale = useStore(s => s.setCcScale)
   const theme = useStore(s => s as any)
   const labels: Record<string, string> = {
     input: '输入栏', ekg: '用量条', pct: '百分比', tokens: 'Token数',
@@ -417,9 +409,7 @@ function PropertyPanel({ id, onClose, onExit }: { id: string; onClose: () => voi
     const next = k === 'w' ? { w: clipped, h: Math.round(clipped * ratio) }
                : k === 'h' ? { h: clipped, w: Math.round(clipped / ratio) }
                : { [k]: clipped }
-    const patch: any = { ccPositions: { ...all, [id]: { ...pos, ...next } } }
-    if (useStore.getState().inputMode === 'cli' && !useStore.getState().ccCliCustomized) patch.ccCliCustomized = true
-    u(patch)
+    updateCcPosition(id, next)
   }
 
   return (
@@ -439,7 +429,7 @@ function PropertyPanel({ id, onClose, onExit }: { id: string; onClose: () => voi
         {id !== 'input' && (
           <div className="cc-prop-field"><label>缩放</label>
             <input type="number" value={(theme.ccScale || {})[id] ?? 100}
-              onChange={v => up('ccScale', { ...(theme.ccScale || {}), [id]: Math.max(50, Math.min(200, +v.target.value)) })}
+              onChange={v => setCcScale(id, +v.target.value)}
               step={5} className="set-num" min={50} max={200} /><span>%</span>
           </div>
         )}
