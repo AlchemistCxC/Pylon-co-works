@@ -8,12 +8,22 @@ export interface LoadedMessages<T> {
   replayed: T[]
 }
 
+export interface ReplayEventState {
+  eventReplay: boolean
+  loadInProgress: boolean
+}
+
+export function isReplayEvent({ eventReplay, loadInProgress }: ReplayEventState): boolean {
+  return eventReplay || loadInProgress
+}
+
 export function shouldStartLiveGeneration(event: ReplayEventMeta): boolean {
   return event.replay !== true
 }
 
 export function resolveLoadedMessages<T>({ loadSucceeded, cached, replayed }: LoadedMessages<T>): T[] {
-  return loadSucceeded ? replayed : cached
+  if (!loadSucceeded || replayed.length === 0) return cached
+  return replayed
 }
 
 export function serializeLoadedMessages<T>(messages: T[]): string | null {

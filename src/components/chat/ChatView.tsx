@@ -9,7 +9,7 @@ import { AnimatePresence, motion } from 'motion/react'
 import Anser from 'anser'
 import GenerationFooter, { type GenerationSummary } from './GenerationFooter'
 import { completionFrame, splitSpinnerFrames } from './spinnerFrames'
-import { resolveLoadedMessages, serializeLoadedMessages, shouldStartLiveGeneration } from './replayState'
+import { isReplayEvent, resolveLoadedMessages, serializeLoadedMessages, shouldStartLiveGeneration } from './replayState'
 import { canPersistMessages } from './messagePersistence'
 import { addGeneratingSource, removeGeneratingSource, updateSourceState } from './sessionEventState'
 import { resolveToolVisualStatus } from './toolStatus'
@@ -167,7 +167,11 @@ const ChatView = React.memo(function ChatView({ sessionId, rightOpen = false, ri
 
     const unlisten = Promise.all([
       listen<{ source: string; content: string; replay?: boolean }>('peri:user', (event) => {
-        const { source, content, replay = false } = event.payload
+        const { source, content, replay: eventReplay = false } = event.payload
+        const replay = isReplayEvent({
+          eventReplay,
+          loadInProgress: replayingSourcesRef.current[source] !== undefined,
+        })
         const update = (prev: Message[]) => [
           ...prev.map(m => ({ ...m, running: false })),
           { id: 'user-' + Date.now(), role: 'user' as const, sender: source, content, time: new Date().toLocaleTimeString() },
@@ -199,7 +203,10 @@ const ChatView = React.memo(function ChatView({ sessionId, rightOpen = false, ri
         const upd = event.payload?.update
         if (!source || !upd) return
         const variant = upd.sessionUpdate
-        const replay = upd._meta?.periReplay === true
+        const replay = isReplayEvent({
+          eventReplay: upd._meta?.periReplay === true,
+          loadInProgress: replayingSourcesRef.current[source] !== undefined,
+        })
         if (replay && !replayingSourcesRef.current[source]) replayingSourcesRef.current[source] = []
         switch (variant) {
           case 'agent_message_chunk': {
