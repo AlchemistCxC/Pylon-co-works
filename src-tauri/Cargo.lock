@@ -2324,6 +2324,7 @@ dependencies = [
  "base64 0.22.1",
  "infer",
  "log",
+ "pylon-pet-core",
  "serde",
  "serde_json",
  "serde_yaml",
@@ -2333,6 +2334,13 @@ dependencies = [
  "tauri-plugin-fs",
  "tauri-plugin-shell",
  "tokio",
+]
+
+[[package]]
+name = "pylon-pet-core"
+version = "0.1.0"
+dependencies = [
+ "serde",
 ]
 
 [[package]]

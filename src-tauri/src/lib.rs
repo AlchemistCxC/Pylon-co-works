@@ -127,8 +127,15 @@ fn start_notification_dispatcher(state: &AppState, window: tauri::WebviewWindow)
                                 session.context_size = update.get("size").and_then(|v| v.as_u64()).unwrap_or(0);
                                 let _ = pet.lock().map(|mut p| pet::on_usage_update(&mut p, session.tokens_total));
                             }
-                            Some("tool_call_update") if update.get("status").and_then(|v| v.as_str()) == Some("completed") => {
-                                let _ = pet.lock().map(|mut p| pet::on_tool_success(&mut p));
+            Some("tool_call") => {
+                                let _ = pet.lock().map(|mut p| pet::on_tool_started(&mut p));
+                            }
+                            Some("tool_call_update") => {
+                                match update.get("status").and_then(|v| v.as_str()) {
+                                    Some("completed") => { let _ = pet.lock().map(|mut p| pet::on_tool_success(&mut p)); }
+                                    Some("failed") => { let _ = pet.lock().map(|mut p| pet::on_tool_failure(&mut p)); }
+                                    _ => {}
+                                }
                             }
                             Some("session_info_update") => {
                                 if let Some(title) = update.get("title").and_then(|v| v.as_str()) { session.title = title.to_string(); }
@@ -504,10 +511,13 @@ async fn reload_agents(state: tauri::State<'_, AppState>, config_path: Option<St
 #[tauri::command]
 async fn get_pet(state: tauri::State<'_, AppState>) -> Result<serde_json::Value, String> {
     let mut pet = state.pet.lock().map_err(|e| e.to_string())?;
+    pet::daily_visit(&mut pet);
     let msg = pet.msg.take();
-    let mut v = serde_json::to_value(&*pet).map_err(|e| e.to_string())?;
-    if let Some(m) = msg { v["msg"] = serde_json::Value::String(m.to_string()); }
-    Ok(v)
+    let mut value = serde_json::to_value(pet::view(&pet)).map_err(|e| e.to_string())?;
+    if let Some(message) = msg {
+        value["msg"] = serde_json::Value::String(message);
+    }
+    Ok(value)
 }
 
 #[tauri::command]
@@ -516,20 +526,23 @@ async fn pet_action(state: tauri::State<'_, AppState>, action: String, value: Op
     match action.as_str() {
         "poke" => { pet::on_poke(&mut pet); }
         "feed" => { pet::on_feed(&mut pet); }
-        "rename" => { if let Some(v) = value { pet.name = v; } }
-        "daily" => { pet::daily_decay(&mut pet); }
+        "rename" => { if let Some(v) = value { pet::rename(&mut pet, &v); } }
+        "daily" => { pet::daily_visit(&mut pet); }
         "sleepy" => { pet::check_sleepy(&mut pet); }
-        "nostalgia" => {
-            if let Some((prefix, mem)) = pet::recall_memory(&mut pet) {
-                pet.msg = Some(format!("{prefix} {mem}"));
-            }
+        "nostalgia" => { pet::recall_memory(&mut pet); }
+        "restore" => {
+            let raw = value.ok_or_else(|| "restore requires pet state".to_string())?;
+            let saved = serde_json::from_str(&raw).map_err(|error| format!("invalid pet state: {error}"))?;
+            pet::restore(&mut pet, saved);
         }
         _ => { return Err(format!("unknown action: {}", action)); }
     }
     let msg = pet.msg.take();
-    let mut v = serde_json::to_value(&*pet).map_err(|e| e.to_string())?;
-    if let Some(m) = msg { v["msg"] = serde_json::Value::String(m.to_string()); }
-    Ok(v)
+    let mut result = serde_json::to_value(pet::view(&pet)).map_err(|e| e.to_string())?;
+    if let Some(message) = msg {
+        result["msg"] = serde_json::Value::String(message);
+    }
+    Ok(result)
 }
 
 // ── Session persistence commands ──

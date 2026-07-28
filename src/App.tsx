@@ -7,6 +7,7 @@ import Settings from './components/Settings'
 import ProfileEditor from './components/ProfileEditor'
 import PrismSheet from './components/PrismSheet'
 import SessionSettings from './components/SessionSettings'
+import PetCompanion from './components/PetCompanion'
 import { useStore } from './store'
 import { belongsToProfile } from './components/chat/sessionProfile'
 import { useShallow } from 'zustand/react/shallow'
@@ -195,6 +196,7 @@ export default function App() {
           <div style={{ display: activeTab === 'prism' ? 'flex' : 'none' }}><PrismSheet /></div>
           <div className={`main-body ${ccEditMode ? 'blur-bg' : ''}`} style={{ display: activeTab === 'prism' ? 'none' : 'flex' }}>
             <ChatView sessionId={activeSession} />
+            <PetCompanion />
             <ControlCenter sessionId={activeSession} />
           </div>
           {ccEditMode && <div className="cc-edit-overlay" />}

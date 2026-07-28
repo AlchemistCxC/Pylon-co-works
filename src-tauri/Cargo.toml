@@ -16,6 +16,7 @@ tauri-plugin-shell = "2"
 tauri-plugin-dialog = "2"
 tauri-plugin-fs = "2"
 serde = { version = "1", features = ["derive"] }
+pylon-pet-core = { path = "pet-core" }
 serde_json = "1"
 tokio = { version = "1", features = ["full"] }
 serde_yaml = "0.9"
