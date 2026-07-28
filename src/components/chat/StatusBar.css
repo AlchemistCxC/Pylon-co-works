@@ -72,4 +72,11 @@
 
 /* ── cc widget separators (controlled by cc layout in ControlCenter) ── */
 .cc-model-widget { display:flex; align-items:center; }
-.cc-model-widget::after { content:' · '; color:rgba(0,0,0,0.18); font-size:12px; font-family:var(--mono); }
+.cc-model-widget::after { content:' · '; color:var(--text-dim); opacity:0.55; font-size:12px; font-family:var(--mono); }
+
+.cc-variant-terminal .cc-model-minimal,
+.cc-variant-terminal .cc-mode-minimal,
+.cc-variant-terminal .ekg-pct,
+.cc-variant-terminal .pill-mono {
+  border:0; border-radius:0; background:transparent; padding:0;
+}

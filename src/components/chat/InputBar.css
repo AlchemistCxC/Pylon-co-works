@@ -50,7 +50,7 @@
   color:var(--cli-text-color,var(--text)); font-family:var(--mono);
   font-size:var(--input-font-size,17px); padding:0; line-height:1.4;
   caret-color:var(--cli-text-color,var(--text));
-  width:100%; flex:1;
+  width:100%; flex:1; max-height:calc(10 * 1.4em);
 }
 .input-bar.cli-mode .input-textarea:focus { outline:none; border:none; box-shadow:none; }
 .input-bar.cli-mode .input-btn { display:none; }
