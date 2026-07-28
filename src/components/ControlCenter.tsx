@@ -164,9 +164,11 @@ export default function ControlCenter({ sessionId }: Props) {
 
   const inputRef = useRef<{ send: () => void; attachFile: () => void; cancel: () => void }>(null)
   const [selected, setSelected] = useState<string | null>(null)
+  // 默认布局使用响应式流式骨架；只有用户明确拖动过才恢复绝对坐标布局。
+  const responsiveLayout = !editMode && !cliCustomized
 
   // 把 inputRef 转给 SendWidget / AttachWidget
-  const renderWidget = (id: string) => {
+  const renderWidget = (id: string, flow = false) => {
     const def = WIDGET_REGISTRY.find(w => w.id === id)
     if (!def) return null
     if (!editMode && hidden.includes(id)) return null
@@ -218,6 +220,7 @@ export default function ControlCenter({ sessionId }: Props) {
         bodyRef={ccBodyRef}
         selected={selected === id}
         onSelect={() => setSelected(id)}
+        flow={flow}
       >
         {body}
       </EditableWidget>
@@ -262,8 +265,13 @@ export default function ControlCenter({ sessionId }: Props) {
         </div>
       )}
       <div className="cc-bg" />
-      <div className="cc-body" ref={ccBodyRef}>
-        {WIDGET_REGISTRY.map(w => renderWidget(w.id))}
+      <div className={`cc-body ${responsiveLayout ? 'cc-responsive' : ''}`} ref={ccBodyRef}>
+        {responsiveLayout ? <>
+          {renderWidget('input')}
+          <div className="cc-flow-row">
+            {WIDGET_REGISTRY.filter(w => w.id !== 'input').map(w => renderWidget(w.id, true))}
+          </div>
+        </> : WIDGET_REGISTRY.map(w => renderWidget(w.id))}
       </div>
       {editMode && selected && <PropertyPanel id={selected} onClose={() => setSelected(null)} onExit={() => { useStore.setState({ ccEditMode: false } as any); setSelected(null) }} />}
       {editMode && (
@@ -280,7 +288,7 @@ export default function ControlCenter({ sessionId }: Props) {
 // EditableWidget：单一职责，干净指针事件
 // ───────────────────────────────────────────────────────────────
 
-function EditableWidget({ id, pos, editMode, isHidden, children, bodyRef, selected, onSelect, naturalSize }: {
+function EditableWidget({ id, pos, editMode, isHidden, children, bodyRef, selected, onSelect, naturalSize, flow }: {
   id: string
   pos: { x: number; y: number; w: number; h: number }
   editMode: boolean
@@ -291,6 +299,7 @@ function EditableWidget({ id, pos, editMode, isHidden, children, bodyRef, select
   onSelect: () => void
   // 文字型控件(model/mode/send/attach)用 naturalSize=true — 宽高随内容自适应，不锁死%值
   naturalSize?: boolean
+  flow?: boolean
 }) {
   // 拖拽 / 缩放 — 使用 Pointer Events（统一鼠标+触屏）
   // 直接读 store.getState() 拿最新 pos，避免闭包过期
@@ -327,8 +336,8 @@ function EditableWidget({ id, pos, editMode, isHidden, children, bodyRef, select
 
   return (
     <div
-      className={`cc-widget ${editMode ? 'cc-edit' : ''} ${editMode && isHidden ? 'cc-hidden' : ''} ${selected ? 'cc-selected' : ''} ${naturalSize ? 'cc-natural' : ''}`}
-      style={naturalSize
+      className={`cc-widget ${editMode ? 'cc-edit' : ''} ${editMode && isHidden ? 'cc-hidden' : ''} ${selected ? 'cc-selected' : ''} ${naturalSize ? 'cc-natural' : ''} ${flow ? 'cc-flow-widget' : ''}`}
+      style={flow ? undefined : naturalSize
         ? { left: `${pos.x}%`, top: `${pos.y}%` }
         : { left: `${pos.x}%`, top: `${pos.y}%`, width: `${pos.w}%`, height: `${pos.h}%` }
       }

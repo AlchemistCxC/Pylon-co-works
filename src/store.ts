@@ -248,8 +248,8 @@ export const useStore = create<ThemeState>()(persist(
    */
   setGlobalPreset: (name, theme) => set(_ => ({
     ...theme,
-    // 预设显式带 ccPositions → 视为已指定布局，不再套 CLI 硬编码默认；否则重置让 CLI 默认生效
-    ccCliCustomized: !!(theme as any).ccPositions,
+    // 预设坐标属于系统默认，不是用户拖拽；继续使用响应式骨架。
+    ccCliCustomized: false,
     activePreset: { global: name, sidebar: name, chat: name, cc: name, right: name },
     dirty: { global: false, sidebar: false, chat: false, cc: false, right: false },
   })),

@@ -32,6 +32,24 @@
 .cc-widget.cc-natural > * { flex:none; }
 .cc-widget.cc-natural .ekg-bar { width:var(--ekg-w,140px) !important; flex:none; }
 
+/* 默认态采用稳定流式骨架：input 独占首行，其余 naturalSize 控件按语义顺序排列并自动换行。 */
+.cc-body.cc-responsive .cc-flow-row {
+  position:absolute;
+  left:1%; right:1%; top:58%; bottom:2%;
+  display:flex; align-items:center; align-content:center;
+  flex-wrap:wrap; gap:6px 14px;
+  overflow:hidden;
+}
+.cc-body.cc-responsive .cc-widget.cc-flow-widget {
+  position:relative;
+  left:auto !important; top:auto !important;
+  flex:0 0 auto;
+  overflow:visible;
+}
+@media (max-width:1100px) {
+  .cc-body.cc-responsive .cc-flow-row { gap:4px 9px; }
+}
+
 /* ── CLI mode ── */
 .control-center.cli-mode .cc-bg { background:transparent; }
 .control-center.cli-mode .cc-body { padding:0; }
