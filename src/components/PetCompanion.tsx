@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { invoke } from '@tauri-apps/api/core'
+import { choosePetDestination, clampPetPosition } from './petMotion'
 import './PetCompanion.css'
 
 type GrowthStage = 'seed' | 'sprout' | 'hopper' | 'guardian' | 'luminary'
@@ -116,11 +117,12 @@ function PixelCreature({ stage, mood, walking }: { stage: GrowthStage; mood: str
   )
 }
 
-export default function PetCompanion() {
+export default function PetCompanion({ rightOpen = false, rightWidth = 0 }: { rightOpen?: boolean; rightWidth?: number }) {
   const [pet, setPet] = useState<PetState | null>(null)
   const [position, setPosition] = useState<Position | null>(readPosition)
   const [wanderEnabled, setWanderEnabled] = useState(() => localStorage.getItem(POSITION_KEY) === null)
   const [walking, setWalking] = useState(false)
+  const [perched, setPerched] = useState(false)
   const [dragging, setDragging] = useState(false)
   const [error, setError] = useState('')
   const shellRef = useRef<HTMLElement>(null)
@@ -160,16 +162,42 @@ export default function PetCompanion() {
       const host = shellRef.current?.parentElement
       const shell = shellRef.current
       if (!host || !shell) return
-      const maxX = Math.max(12, host.clientWidth - shell.offsetWidth - 12)
-      const maxY = Math.max(12, host.clientHeight - shell.offsetHeight - 145)
+      const hostRect = host.getBoundingClientRect()
+      const input = host.querySelector<HTMLElement>('.control-center .input-bar')
+      const inputRect = input?.getBoundingClientRect() ?? null
+      const destination = choosePetDestination({
+        host: { left: hostRect.left, top: hostRect.top, width: hostRect.width, height: hostRect.height },
+        input: inputRect && inputRect.width > 0
+          ? { left: inputRect.left, top: inputRect.top, width: inputRect.width, height: inputRect.height }
+          : null,
+        pet: { width: shell.offsetWidth, height: shell.offsetHeight },
+        rightInset: rightOpen ? rightWidth : 0,
+      })
       setWalking(true)
-      setPosition({ x: 12 + Math.random() * Math.max(1, maxX - 12), y: 12 + Math.random() * Math.max(1, maxY - 12) })
-      window.setTimeout(() => setWalking(false), 2200)
+      setPerched(false)
+      setPosition(destination.position)
+      window.setTimeout(() => {
+        setWalking(false)
+        setPerched(destination.kind === 'perched')
+      }, 2200)
     }
     const first = window.setTimeout(wander, 1800)
     const timer = window.setInterval(wander, 9000)
     return () => { cancelled = true; window.clearTimeout(first); window.clearInterval(timer) }
-  }, [dragging, wanderEnabled])
+  }, [dragging, rightOpen, rightWidth, wanderEnabled])
+
+  useEffect(() => {
+    const shell = shellRef.current
+    const host = shell?.parentElement
+    if (!shell || !host) return
+    const clampCurrentPosition = () => setPosition(current => current
+      ? clampPetPosition(current, { width: host.clientWidth, height: host.clientHeight },
+        { width: shell.offsetWidth, height: shell.offsetHeight }, rightOpen ? rightWidth : 0)
+      : current)
+    clampCurrentPosition()
+    window.addEventListener('resize', clampCurrentPosition)
+    return () => window.removeEventListener('resize', clampCurrentPosition)
+  }, [rightOpen, rightWidth])
 
   const onPointerDown = (event: React.PointerEvent) => {
     if ((event.target as HTMLElement).closest('button')) return
@@ -209,7 +237,7 @@ export default function PetCompanion() {
   if (!pet) return error ? <div className="pet-load-error">宠物加载失败：{error}</div> : null
 
   return (
-    <section ref={shellRef} className={`pet-companion ${dragging ? 'dragging' : ''}`}
+    <section ref={shellRef} className={`pet-companion ${dragging ? 'dragging' : ''} ${perched ? 'perched' : ''}`}
       style={style} aria-label="长期陪伴宠物" onPointerDown={onPointerDown} onPointerMove={onPointerMove} onPointerUp={onPointerUp}>
       <div className="pet-creature-hitbox" onDoubleClick={resumeWander}
         title={`${pet.name}：拖拽固定位置，双击恢复自主漫游`}>

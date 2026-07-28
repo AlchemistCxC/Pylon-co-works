@@ -197,7 +197,7 @@ export default function App() {
           <div style={{ display: activeTab === 'prism' ? 'flex' : 'none' }}><PrismSheet /></div>
           <div className={`main-body ${ccEditMode ? 'blur-bg' : ''}`} style={{ display: activeTab === 'prism' ? 'none' : 'flex' }}>
             <ChatView sessionId={activeSession} rightOpen={rightOpen} rightWidth={s.rightWidth} />
-            <PetCompanion />
+            <PetCompanion rightOpen={rightOpen} rightWidth={s.rightWidth} />
             <ControlCenter sessionId={activeSession} />
           </div>
           {ccEditMode && <div className="cc-edit-overlay" />}
