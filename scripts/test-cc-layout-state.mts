@@ -3,6 +3,7 @@ import {
   cloneCcPositions,
   setCcHiddenState,
   setCcScaleState,
+  normalizeCcPositions,
   updateCcPositionState,
 } from '../src/ccLayoutState.ts'
 
@@ -31,5 +32,12 @@ assert.deepEqual(setCcHiddenState(['model', 'mode'], 'model', false), ['mode'])
 assert.deepEqual(setCcScaleState({}, 'model', 20), { model: 50 })
 assert.deepEqual(setCcScaleState({ model: 100 }, 'model', 240), { model: 200 })
 assert.deepEqual(setCcScaleState({ model: 100 }, 'mode', 125), { model: 100, mode: 125 })
+
+const normalized = normalizeCcPositions({
+  input: { x: 1, y: 2, w: 98, h: 58 },
+  model: { x: 17, y: 55, w: 18, h: 20 },
+}, defaults)
+assert.deepEqual(normalized.input, { x: 1, y: 2, w: 98, h: 58 })
+assert.deepEqual(normalized.model, { x: 17, y: 55 }, 'naturalSize 控件迁移后只保留 x/y')
 
 console.log('ccLayoutState 回归测试通过')

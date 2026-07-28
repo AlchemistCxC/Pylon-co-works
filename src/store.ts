@@ -2,7 +2,7 @@ import { create } from 'zustand'
 import { persist } from 'zustand/middleware'
 import { normalizeProfileState, PROFILE_SCHEMA_VERSION } from './profilePersistence'
 import { loadSessions, persistSessions } from './sessionPersistence'
-import { cloneCcPositions, setCcHiddenState, setCcScaleState, updateCcPositionState } from './ccLayoutState'
+import { CC_LAYOUT_SCHEMA_VERSION, cloneCcPositions, normalizeCcPositions, setCcHiddenState, setCcScaleState, updateCcPositionState } from './ccLayoutState'
 
 export interface Profile { id: string; name: string; avatar?: string; persona: string; model: string }
 // 后端配置选项（来自 new_session 返回 & config_option_update 事件）
@@ -42,7 +42,8 @@ export interface ThemeSettings {
   ccVariant: string
   modelVariant: string; modeVariant: string; sendVariant: string; attachVariant: string
   ccHidden: string[]
-  ccPositions: Record<string, {x: number, y: number, w: number, h: number}>
+  ccLayoutVersion: number
+  ccPositions: Record<string, {x: number, y: number, w?: number, h?: number}>
   ccEditMode: boolean
   ccCliCustomized: boolean  // 用户是否在 CLI 模式手动调过 widget 位置/尺寸；true 时不再套用 CLI 默认布局
   ccScale: Record<string, number>  // naturalSize 控件独立缩放% (50-200) key=widget id
@@ -118,8 +119,8 @@ const DEFAULTS: ThemeSettings = {
   ccStyle: 'wave',
   ccVariant: 'terminal',
   modelVariant: 'dropdown', modeVariant: 'pill', sendVariant: 'icon', attachVariant: 'icon',
-  ccHidden: [],
-  ccPositions: { input:{x:0,y:0,w:100,h:52}, ekg:{x:0,y:65,w:30,h:28}, pct:{x:32,y:69,w:8,h:20}, tokens:{x:41,y:69,w:16,h:20}, model:{x:58,y:69,w:18,h:20}, mode:{x:77,y:69,w:10,h:20}, send:{x:89,y:69,w:5,h:20}, attach:{x:95,y:69,w:4,h:20} },
+  ccHidden: [], ccLayoutVersion: CC_LAYOUT_SCHEMA_VERSION,
+  ccPositions: { input:{x:0,y:0,w:100,h:52}, ekg:{x:0,y:65}, pct:{x:32,y:69}, tokens:{x:41,y:69}, model:{x:58,y:69}, mode:{x:77,y:69}, send:{x:89,y:69}, attach:{x:95,y:69} },
   ccEditMode: false,
   ccCliCustomized: false,
   ccScale: {},
@@ -287,6 +288,8 @@ export const useStore = create<ThemeState>()(persist(
   // ccLayout / ccSizes 是旧版百分比 widget 模型遗留字段；当前注册表与 ccPositions 才是布局真值。
   delete (state as Record<string, unknown>).ccLayout
   delete (state as Record<string, unknown>).ccSizes
+  state.ccPositions = normalizeCcPositions(state.ccPositions, DEFAULTS.ccPositions)
+  state.ccLayoutVersion = CC_LAYOUT_SCHEMA_VERSION
   const normalized = normalizeProfileState(
     Array.isArray(state.profiles) ? state.profiles : [],
     typeof state.activeProfileId === 'string' ? state.activeProfileId : '',

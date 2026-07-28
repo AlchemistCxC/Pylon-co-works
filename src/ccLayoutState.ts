@@ -1,11 +1,22 @@
 export interface CcPosition {
   x: number
   y: number
-  w: number
-  h: number
+  w?: number
+  h?: number
 }
 
 export type CcPositions = Record<string, CcPosition>
+
+export const CC_LAYOUT_SCHEMA_VERSION = 2
+export const NATURAL_CC_WIDGET_IDS = new Set(['ekg', 'pct', 'tokens', 'model', 'mode', 'send', 'attach'])
+
+export function normalizeCcPositions(positions: CcPositions | null | undefined, defaults: CcPositions): CcPositions {
+  const merged = { ...cloneCcPositions(defaults), ...(positions || {}) }
+  return Object.fromEntries(Object.entries(merged).map(([id, position]) => {
+    if (!NATURAL_CC_WIDGET_IDS.has(id)) return [id, { ...position }]
+    return [id, { x: position.x, y: position.y }]
+  }))
+}
 
 export function updateCcPositionState(
   positions: CcPositions,

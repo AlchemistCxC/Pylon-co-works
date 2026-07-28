@@ -141,7 +141,7 @@ const WIDGET_REGISTRY: WidgetDef[] = [
 ]
 
 // ── 位置默认值合并（向后兼容老 localStorage 缺失字段） ──────
-function ensurePositions(positions: any): Record<string, { x: number; y: number; w: number; h: number }> {
+function ensurePositions(positions: any): Record<string, { x: number; y: number; w?: number; h?: number }> {
   const out: any = { ...(positions || {}) }
   for (const w of WIDGET_REGISTRY) {
     if (!out[w.id]) out[w.id] = w.defaultPos
@@ -290,7 +290,7 @@ export default function ControlCenter({ sessionId }: Props) {
 
 function EditableWidget({ id, pos, editMode, isHidden, children, bodyRef, selected, onSelect, naturalSize, flow }: {
   id: string
-  pos: { x: number; y: number; w: number; h: number }
+  pos: { x: number; y: number; w?: number; h?: number }
   editMode: boolean
   isHidden: boolean
   children: React.ReactNode
@@ -319,8 +319,8 @@ function EditableWidget({ id, pos, editMode, isHidden, children, bodyRef, select
       const dyPct = ((ev.clientY - startY) / rect.height) * 100
       const cp = useStore.getState().ccPositions || {}
       const cur = cp[id] || start
-      const nx = Math.max(0, Math.min(100 - cur.w, start.x + dxPct))
-      const ny = Math.max(0, Math.min(100 - cur.h, start.y + dyPct))
+      const nx = Math.max(0, Math.min(100 - (cur.w ?? 0), start.x + dxPct))
+      const ny = Math.max(0, Math.min(100 - (cur.h ?? 0), start.y + dyPct))
       useStore.getState().updateCcPosition(id, { x: nx, y: ny })
     }
     const onUp = () => {
@@ -336,7 +336,7 @@ function EditableWidget({ id, pos, editMode, isHidden, children, bodyRef, select
       className={`cc-widget ${editMode ? 'cc-edit' : ''} ${editMode && isHidden ? 'cc-hidden' : ''} ${selected ? 'cc-selected' : ''} ${naturalSize ? 'cc-natural' : ''} ${flow ? 'cc-flow-widget' : ''}`}
       style={flow ? undefined : naturalSize
         ? { left: `${pos.x}%`, top: `${pos.y}%` }
-        : { left: `${pos.x}%`, top: `${pos.y}%`, width: `${pos.w}%`, height: `${pos.h}%` }
+        : { left: `${pos.x}%`, top: `${pos.y}%`, width: `${pos.w ?? 10}%`, height: `${pos.h ?? 10}%` }
       }
       onPointerDown={editMode ? handleWidgetPointerDown : undefined}
     >
@@ -405,7 +405,9 @@ function PropertyPanel({ id, onClose, onExit }: { id: string; onClose: () => voi
   const upPos = (k: string, v: number) => {
     const clipped = Math.max(3, v)
     // 等比锁定：改 W 自动算 H，改 H 自动算 W
-    const ratio = pos.h / pos.w
+    const posW = pos.w ?? 10
+    const posH = pos.h ?? 10
+    const ratio = posH / posW
     const next = k === 'w' ? { w: clipped, h: Math.round(clipped * ratio) }
                : k === 'h' ? { h: clipped, w: Math.round(clipped / ratio) }
                : { [k]: clipped }
@@ -423,8 +425,8 @@ function PropertyPanel({ id, onClose, onExit }: { id: string; onClose: () => voi
         <div className="cc-prop-field"><label>X 坐标</label><input type="number" value={Math.round(pos.x)} onChange={v => upPos('x', +v.target.value)} step={1} className="set-num" /><span>%</span></div>
         <div className="cc-prop-field"><label>Y 坐标</label><input type="number" value={Math.round(pos.y)} onChange={v => upPos('y', +v.target.value)} step={1} className="set-num" /><span>%</span></div>
         {id === 'input' && <>
-          <div className="cc-prop-field"><label>宽度</label><input type="number" value={Math.round(pos.w)} onChange={v => upPos('w', Math.max(3, +v.target.value))} step={0.1} className="set-num" /><span>%</span></div>
-          <div className="cc-prop-field"><label>高度</label><input type="number" value={Math.round(pos.h)} onChange={v => upPos('h', Math.max(3, +v.target.value))} step={0.1} className="set-num" /><span>%</span></div>
+          <div className="cc-prop-field"><label>宽度</label><input type="number" value={Math.round(pos.w ?? 10)} onChange={v => upPos('w', Math.max(3, +v.target.value))} step={0.1} className="set-num" /><span>%</span></div>
+          <div className="cc-prop-field"><label>高度</label><input type="number" value={Math.round(pos.h ?? 10)} onChange={v => upPos('h', Math.max(3, +v.target.value))} step={0.1} className="set-num" /><span>%</span></div>
         </>}
         {id !== 'input' && (
           <div className="cc-prop-field"><label>缩放</label>
