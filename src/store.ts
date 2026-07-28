@@ -2,7 +2,8 @@ import { create } from 'zustand'
 import { persist } from 'zustand/middleware'
 import { normalizeProfileState, PROFILE_SCHEMA_VERSION } from './profilePersistence'
 import { loadSessions, persistSessions } from './sessionPersistence'
-import { CC_LAYOUT_SCHEMA_VERSION, cloneCcPositions, normalizeCcPositions, setCcHiddenState, setCcScaleState, updateCcPositionState } from './ccLayoutState'
+import { CC_LAYOUT_SCHEMA_VERSION, DEFAULT_CC_LAYOUT, cloneCcLayout, cloneCcPositions, normalizeCcLayout, normalizeCcPositions, setCcHiddenState, setCcScaleState, updateCcPlacementState, updateCcPositionState } from './ccLayoutState'
+import type { CcLayoutV3, CcWidgetPlacement } from './ccLayoutState'
 
 export interface Profile { id: string; name: string; avatar?: string; persona: string; model: string }
 // 后端配置选项（来自 new_session 返回 & config_option_update 事件）
@@ -43,6 +44,7 @@ export interface ThemeSettings {
   modelVariant: string; modeVariant: string; sendVariant: string; attachVariant: string
   ccHidden: string[]
   ccLayoutVersion: number
+  ccLayout: CcLayoutV3
   ccPositions: Record<string, {x: number, y: number, w?: number, h?: number}>
   ccEditMode: boolean
   ccCliCustomized: boolean  // 用户是否在 CLI 模式手动调过 widget 位置/尺寸；true 时不再套用 CLI 默认布局
@@ -71,6 +73,7 @@ type ThemeState = ThemeSettings & {
   setCcEditMode: (enabled: boolean) => void
   setCcHeight: (height: number) => void
   updateCcPosition: (id: string, partial: Partial<{x: number, y: number, w: number, h: number}>) => void
+  updateCcPlacement: (id: string, partial: Partial<CcWidgetPlacement>) => void
   resetCcLayout: () => void
   setCcHidden: (id: string, hidden: boolean) => void
   setCcScale: (id: string, scale: number) => void
@@ -121,7 +124,7 @@ const DEFAULTS: ThemeSettings = {
   ccStyle: 'wave',
   ccVariant: 'terminal',
   modelVariant: 'dropdown', modeVariant: 'pill', sendVariant: 'icon', attachVariant: 'icon',
-  ccHidden: [], ccLayoutVersion: CC_LAYOUT_SCHEMA_VERSION,
+  ccHidden: [], ccLayoutVersion: CC_LAYOUT_SCHEMA_VERSION, ccLayout: cloneCcLayout(DEFAULT_CC_LAYOUT),
   ccPositions: { input:{x:0,y:0,w:100,h:52}, ekg:{x:0,y:65}, pct:{x:32,y:69}, tokens:{x:41,y:69}, model:{x:58,y:69}, mode:{x:77,y:69}, send:{x:89,y:69}, attach:{x:95,y:69} },
   ccEditMode: false,
   ccCliCustomized: false,
@@ -211,7 +214,12 @@ export const useStore = create<ThemeState>()(persist(
       ccCliCustomized: true,
     }
   }),
+  updateCcPlacement: (id, partial) => set(state => ({
+    ccLayout: updateCcPlacementState(state.ccLayout, id, partial),
+    ccCliCustomized: true,
+  })),
   resetCcLayout: () => set({
+    ccLayout: cloneCcLayout(DEFAULT_CC_LAYOUT),
     ccPositions: cloneCcPositions(DEFAULTS.ccPositions),
     ccCliCustomized: false,
   }),
@@ -276,7 +284,7 @@ export const useStore = create<ThemeState>()(persist(
    */
   setGlobalPreset: (name, theme) => set(_ => ({
     ...theme,
-    // 预设坐标属于系统默认，不是用户拖拽；继续使用响应式骨架。
+    ccLayout: normalizeCcLayout(theme.ccLayout, theme.ccPositions),
     ccCliCustomized: false,
     activePreset: { global: name, sidebar: name, chat: name, cc: name, right: name },
     dirty: { global: false, sidebar: false, chat: false, cc: false, right: false },
@@ -289,10 +297,10 @@ export const useStore = create<ThemeState>()(persist(
 }),
 { name: 'pylon-theme', version: PROFILE_SCHEMA_VERSION, migrate: persisted => {
   const state = (persisted || {}) as Partial<ThemeState>
-  // ccLayout / ccSizes 是旧版百分比 widget 模型遗留字段；当前注册表与 ccPositions 才是布局真值。
-  delete (state as Record<string, unknown>).ccLayout
+  // ccSizes 是旧版百分比 widget 模型遗留字段；v3 使用 ccLayout 槽位模型。
   delete (state as Record<string, unknown>).ccSizes
   state.ccPositions = normalizeCcPositions(state.ccPositions, DEFAULTS.ccPositions)
+  state.ccLayout = normalizeCcLayout(state.ccLayout, state.ccPositions)
   state.ccLayoutVersion = CC_LAYOUT_SCHEMA_VERSION
   state.ccEditMode = false
   const normalized = normalizeProfileState(
@@ -302,6 +310,6 @@ export const useStore = create<ThemeState>()(persist(
   )
   return { ...state, ...normalized } as ThemeState
 }, partialize: (state) => {
-  const { sessions, sessionsHydrated, users, ccEditMode, setActiveProfile, addProfile, addSession, removeSession, updateSession, replaceSessions, setSessionPeriId, restoreSessions, hydrateSessions, getUser, updateTheme, setCcEditMode, setCcHeight, updateCcPosition, resetCcLayout, setCcHidden, setCcScale, setLiveStats, liveCommands, sessionConfig, setSessionConfig, sessionModes, setSessionMode, liveTokensUsed, liveTokensMax, liveCacheReadTokens, liveMode, livePrismOn, liveGenerating, liveGeneratingSources, agents, setAgents, setActiveAgent, applyZonePreset, setZoneField, setGlobalPreset, presets, dirty, ...persisted } = state as any
+  const { sessions, sessionsHydrated, users, ccEditMode, setActiveProfile, addProfile, addSession, removeSession, updateSession, replaceSessions, setSessionPeriId, restoreSessions, hydrateSessions, getUser, updateTheme, setCcEditMode, setCcHeight, updateCcPosition, updateCcPlacement, resetCcLayout, setCcHidden, setCcScale, setLiveStats, liveCommands, sessionConfig, setSessionConfig, sessionModes, setSessionMode, liveTokensUsed, liveTokensMax, liveCacheReadTokens, liveMode, livePrismOn, liveGenerating, liveGeneratingSources, agents, setAgents, setActiveAgent, applyZonePreset, setZoneField, setGlobalPreset, presets, dirty, ...persisted } = state as any
   return persisted
 }, onRehydrateStorage: () => state => state?.hydrateSessions()}))

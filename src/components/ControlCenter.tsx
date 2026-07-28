@@ -1,4 +1,4 @@
-import { useRef, useState, useCallback, useEffect, useMemo } from 'react'
+import { useRef, useState, useCallback, useEffect } from 'react'
 import { useStore } from '../store'
 import InputBar from './chat/InputBar'
 import ModelWidget from './chat/ModelWidget'
@@ -154,10 +154,8 @@ export default function ControlCenter({ sessionId }: Props) {
   const ccBgHeight = useStore(s => s.ccBgHeight ?? ccHeight)
   const inputMode = useStore(s => s.inputMode)
   const hidden = useStore(s => s.ccHidden || [])
-  const rawPositions = useStore(s => s.ccPositions)
-  const positions = useMemo(() => ensurePositions(rawPositions), [rawPositions])
+  const layout = useStore(s => s.ccLayout)
   const editMode = useStore(s => s.ccEditMode)
-  const cliCustomized = useStore(s => s.ccCliCustomized)
   const ccVariant = useStore(s => s.ccVariant) || 'terminal'
   const ccBg = useStore(s => s.ccBg) || 'transparent'
   const ccBgImage = useStore(s => s.ccBgImage) || ''
@@ -166,11 +164,8 @@ export default function ControlCenter({ sessionId }: Props) {
 
   const inputRef = useRef<{ send: () => void; attachFile: () => void; cancel: () => void }>(null)
   const [selected, setSelected] = useState<string | null>(null)
-  // 默认布局使用响应式流式骨架；只有用户明确拖动过才恢复绝对坐标布局。
-  const responsiveLayout = !editMode && !cliCustomized
-
   // 把 inputRef 转给 SendWidget / AttachWidget
-  const renderWidget = (id: string, flow = false) => {
+  const renderWidget = (id: string) => {
     const def = WIDGET_REGISTRY.find(w => w.id === id)
     if (!def) return null
     if (!editMode && hidden.includes(id)) return null
@@ -197,37 +192,28 @@ export default function ControlCenter({ sessionId }: Props) {
         body = def.render(sessionId)
     }
 
-    const rawPos = positions[id] || def.defaultPos
-    // CLI 模式下强制修正布局：input 占满整宽，status/model/mode 对齐到下方
-    // 不依赖 localStorage 旧值 — 旧值可能是 non-CLI 的预设
-    const CLI_OVERRIDES: Record<string, { x:number;y:number;w:number;h:number }> = {
-      input:   { x: 1,  y: 2,  w: 98, h: 58 },
-      ekg:     { x: 1,  y: 70, w: 28, h: 16 },
-      pct:     { x: 31, y: 73, w: 8,  h: 12 },
-      tokens:  { x: 40, y: 73, w: 15, h: 12 },
-      model:   { x: 56, y: 73, w: 16, h: 12 },
-      mode:    { x: 73, y: 73, w: 10, h: 12 },
-    }
-    // CLI 默认布局仅在用户从未手动调整过时套用；用户拖动/缩放过则尊重其自定义值
-    const pos = (!editMode && inputMode === 'cli' && !cliCustomized && CLI_OVERRIDES[id])
-      ? CLI_OVERRIDES[id]
-      : rawPos
-    // 小控件用 naturalSize（宽高由内容决定，盒子紧贴）— 仅 input 保留 % 尺寸
+    const placement = layout.placements[id as keyof typeof layout.placements]
+    if (!placement) return null
+    // 小控件用 naturalSize（宽高由内容决定，盒子紧贴）— 仅 input 占满槽位
     const isNatural = id !== 'input'
     return (
       <EditableWidget
-        key={id} id={id} pos={pos} editMode={editMode}
+        key={id} id={id} placement={placement} editMode={editMode}
         naturalSize={isNatural}
         isHidden={hidden.includes(id)}
         bodyRef={ccBodyRef}
         selected={selected === id}
         onSelect={() => setSelected(id)}
-        flow={flow}
       >
         {body}
       </EditableWidget>
     )
   }
+
+  const renderSlot = (slot: 'status-primary' | 'status-secondary' | 'actions') => WIDGET_REGISTRY
+    .filter(widget => widget.id !== 'input' && layout.placements[widget.id as keyof typeof layout.placements]?.slot === slot)
+    .sort((a, b) => (layout.placements[a.id as keyof typeof layout.placements]?.order ?? 0) - (layout.placements[b.id as keyof typeof layout.placements]?.order ?? 0))
+    .map(widget => renderWidget(widget.id))
 
   const ccBodyRef = useRef<HTMLDivElement>(null)
 
@@ -267,13 +253,13 @@ export default function ControlCenter({ sessionId }: Props) {
         </div>
       )}
       <div className="cc-bg" />
-      <div className={`cc-body ${responsiveLayout ? 'cc-responsive' : ''}`} ref={ccBodyRef}>
-        {responsiveLayout ? <>
-          {renderWidget('input')}
-          <div className="cc-flow-row">
-            {WIDGET_REGISTRY.filter(w => w.id !== 'input').map(w => renderWidget(w.id, true))}
-          </div>
-        </> : WIDGET_REGISTRY.map(w => renderWidget(w.id))}
+      <div className="cc-body" ref={ccBodyRef}>
+        <div className="cc-input-slot">{renderWidget('input')}</div>
+        <div className="cc-status-row">
+          <div className="cc-status-primary">{renderSlot('status-primary')}</div>
+          <div className="cc-status-secondary">{renderSlot('status-secondary')}</div>
+          <div className="cc-actions">{renderSlot('actions')}</div>
+        </div>
       </div>
       {editMode && selected && <PropertyPanel id={selected} onClose={() => setSelected(null)} onExit={() => { setCcEditMode(false); setSelected(null) }} />}
       {editMode && (
@@ -290,18 +276,17 @@ export default function ControlCenter({ sessionId }: Props) {
 // EditableWidget：单一职责，干净指针事件
 // ───────────────────────────────────────────────────────────────
 
-function EditableWidget({ id, pos, editMode, isHidden, children, bodyRef, selected, onSelect, naturalSize, flow }: {
+function EditableWidget({ id, placement, editMode, isHidden, children, bodyRef, selected, onSelect, naturalSize }: {
   id: string
-  pos: { x: number; y: number; w?: number; h?: number }
+  placement: { slot: 'input' | 'status-primary' | 'status-secondary' | 'actions'; order: number; offsetX: number; offsetY: number }
   editMode: boolean
   isHidden: boolean
   children: React.ReactNode
   bodyRef: React.RefObject<HTMLDivElement | null>
   selected: boolean
   onSelect: () => void
-  // 文字型控件(model/mode/send/attach)用 naturalSize=true — 宽高随内容自适应，不锁死%值
+  // 文字型控件(model/mode/send/attach)用 naturalSize=true — 宽高随内容自适应
   naturalSize?: boolean
-  flow?: boolean
 }) {
   // 拖拽 / 缩放 — 使用 Pointer Events（统一鼠标+触屏）
   // 直接读 store.getState() 拿最新 pos，避免闭包过期
@@ -313,17 +298,14 @@ function EditableWidget({ id, pos, editMode, isHidden, children, bodyRef, select
     e.preventDefault()
     onSelect()
     const body = bodyRef.current; if (!body) return
-    const rect = body.getBoundingClientRect()
     const startX = e.clientX, startY = e.clientY
-    const start = useStore.getState().ccPositions?.[id] || pos
+    const currentLayout = useStore.getState().ccLayout
+    const start = currentLayout.placements[id as keyof typeof currentLayout.placements] || placement
     const onMove = (ev: PointerEvent) => {
-      const dxPct = ((ev.clientX - startX) / rect.width) * 100
-      const dyPct = ((ev.clientY - startY) / rect.height) * 100
-      const cp = useStore.getState().ccPositions || {}
-      const cur = cp[id] || start
-      const nx = Math.max(0, Math.min(100 - (cur.w ?? 0), start.x + dxPct))
-      const ny = Math.max(0, Math.min(100 - (cur.h ?? 0), start.y + dyPct))
-      useStore.getState().updateCcPosition(id, { x: nx, y: ny })
+      useStore.getState().updateCcPlacement(id, {
+        offsetX: start.offsetX + ev.clientX - startX,
+        offsetY: start.offsetY + ev.clientY - startY,
+      })
     }
     const onUp = () => {
       window.removeEventListener('pointermove', onMove)
@@ -335,11 +317,9 @@ function EditableWidget({ id, pos, editMode, isHidden, children, bodyRef, select
 
   return (
     <div
-      className={`cc-widget ${editMode ? 'cc-edit' : ''} ${editMode && isHidden ? 'cc-hidden' : ''} ${selected ? 'cc-selected' : ''} ${naturalSize ? 'cc-natural' : ''} ${flow ? 'cc-flow-widget' : ''}`}
-      style={flow ? undefined : naturalSize
-        ? { left: `${pos.x}%`, top: `${pos.y}%` }
-        : { left: `${pos.x}%`, top: `${pos.y}%`, width: `${pos.w ?? 10}%`, height: `${pos.h ?? 10}%` }
-      }
+      data-widget-id={id}
+      className={`cc-widget ${editMode ? 'cc-edit' : ''} ${editMode && isHidden ? 'cc-hidden' : ''} ${selected ? 'cc-selected' : ''} ${naturalSize ? 'cc-natural' : ''}`}
+      style={{ transform: `translate(${placement.offsetX}px, ${placement.offsetY}px)` }}
       onPointerDown={editMode ? handleWidgetPointerDown : undefined}
     >
       {children}
@@ -394,9 +374,9 @@ function WidgetToolbar({ selected, onSelect }: { selected: string | null; onSele
 // ───────────────────────────────────────────────────────────────
 
 function PropertyPanel({ id, onClose, onExit }: { id: string; onClose: () => void; onExit: () => void }) {
-  const pos = useStore(s => (s.ccPositions || {})[id]) || { x: 0, y: 0, w: 10, h: 10 }
+  const placement = useStore(s => s.ccLayout.placements[id as keyof typeof s.ccLayout.placements])
   const u = useStore(s => s.updateTheme)
-  const updateCcPosition = useStore(s => s.updateCcPosition)
+  const updateCcPlacement = useStore(s => s.updateCcPlacement)
   const setCcScale = useStore(s => s.setCcScale)
   const theme = useStore(s => s as any)
   const labels: Record<string, string> = {
@@ -405,17 +385,7 @@ function PropertyPanel({ id, onClose, onExit }: { id: string; onClose: () => voi
   }
 
   const up = (k: string, v: any) => u({ [k]: v } as any)
-  const upPos = (k: string, v: number) => {
-    const clipped = Math.max(3, v)
-    // 等比锁定：改 W 自动算 H，改 H 自动算 W
-    const posW = pos.w ?? 10
-    const posH = pos.h ?? 10
-    const ratio = posH / posW
-    const next = k === 'w' ? { w: clipped, h: Math.round(clipped * ratio) }
-               : k === 'h' ? { h: clipped, w: Math.round(clipped / ratio) }
-               : { [k]: clipped }
-    updateCcPosition(id, next)
-  }
+  const upOffset = (key: 'offsetX' | 'offsetY', value: number) => updateCcPlacement(id, { [key]: value })
 
   return (
     <div className="cc-prop-panel">
@@ -424,13 +394,18 @@ function PropertyPanel({ id, onClose, onExit }: { id: string; onClose: () => voi
         <button onClick={onClose}>✕</button>
       </div>
       <div className="cc-prop-body">
-        <div className="cc-prop-sec">位置 & 大小</div>
-        <div className="cc-prop-field"><label>X 坐标</label><input type="number" value={Math.round(pos.x)} onChange={v => upPos('x', +v.target.value)} step={1} className="set-num" /><span>%</span></div>
-        <div className="cc-prop-field"><label>Y 坐标</label><input type="number" value={Math.round(pos.y)} onChange={v => upPos('y', +v.target.value)} step={1} className="set-num" /><span>%</span></div>
-        {id === 'input' && <>
-          <div className="cc-prop-field"><label>宽度</label><input type="number" value={Math.round(pos.w ?? 10)} onChange={v => upPos('w', Math.max(3, +v.target.value))} step={0.1} className="set-num" /><span>%</span></div>
-          <div className="cc-prop-field"><label>高度</label><input type="number" value={Math.round(pos.h ?? 10)} onChange={v => upPos('h', Math.max(3, +v.target.value))} step={0.1} className="set-num" /><span>%</span></div>
-        </>}
+        <div className="cc-prop-sec">布局</div>
+        <div className="cc-prop-field"><label>槽位</label>
+          <select className="set-select" value={placement?.slot || 'status-primary'} onChange={event => updateCcPlacement(id, { slot: event.target.value as any })}>
+            <option value="input">输入栏</option>
+            <option value="status-primary">状态左</option>
+            <option value="status-secondary">状态右</option>
+            <option value="actions">操作区</option>
+          </select>
+        </div>
+        <div className="cc-prop-field"><label>顺序</label><input type="number" value={placement?.order ?? 0} onChange={event => updateCcPlacement(id, { order: +event.target.value })} step={1} className="set-num" min={0} max={99} /></div>
+        <div className="cc-prop-field"><label>水平微调</label><input type="number" value={placement?.offsetX ?? 0} onChange={event => upOffset('offsetX', +event.target.value)} step={1} className="set-num" min={-48} max={48} /><span>px</span></div>
+        <div className="cc-prop-field"><label>垂直微调</label><input type="number" value={placement?.offsetY ?? 0} onChange={event => upOffset('offsetY', +event.target.value)} step={1} className="set-num" min={-16} max={16} /><span>px</span></div>
         {id !== 'input' && (
           <div className="cc-prop-field"><label>缩放</label>
             <input type="number" value={(theme.ccScale || {})[id] ?? 100}
