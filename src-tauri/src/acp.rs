@@ -516,12 +516,17 @@ impl AcpClient {
         }
     }
 
-    /// Load a persisted session. Peri replays history before returning the response.
-    pub async fn load_session(&self, session_id: &str, cwd: &str) -> Result<serde_json::Value, String> {
-        self.call_async(METHOD_SESSION_LOAD, serde_json::json!({
+    fn load_session_params(session_id: &str, cwd: &str) -> serde_json::Value {
+        serde_json::json!({
             "sessionId": session_id,
             "cwd": cwd,
-        })).await
+            "mcpServers": []
+        })
+    }
+
+    /// Load a persisted session. Peri replays history before returning the response.
+    pub async fn load_session(&self, session_id: &str, cwd: &str) -> Result<serde_json::Value, String> {
+        self.call_async(METHOD_SESSION_LOAD, Self::load_session_params(session_id, cwd)).await
     }
 
     /// P1: List persisted sessions from ThreadStore
@@ -547,6 +552,18 @@ mod tests {
             params: None,
             error: None,
         }
+    }
+
+    #[test]
+    fn session_load_params_include_required_mcp_servers() {
+        assert_eq!(
+            AcpClient::load_session_params("session-1", "G:/workspace"),
+            serde_json::json!({
+                "sessionId": "session-1",
+                "cwd": "G:/workspace",
+                "mcpServers": []
+            })
+        );
     }
 
     #[test]
