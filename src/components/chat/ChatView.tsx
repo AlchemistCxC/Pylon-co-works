@@ -13,7 +13,7 @@ import { isReplayEvent, resolveLoadedMessages, serializeLoadedMessages, shouldSt
 import { canPersistMessages } from './messagePersistence'
 import { addGeneratingSource, removeGeneratingSource, updateSourceState } from './sessionEventState'
 import { resolveToolVisualStatus } from './toolStatus'
-import { extractMode, extractModelConfig, sessionResponseObject, type PeriDonePayload, type PeriUpdatePayload, type SessionResponse } from './acpTypes'
+import { extractMode, extractModelConfig, extractUsage, sessionResponseObject, type PeriDonePayload, type PeriUpdatePayload, type SessionResponse } from './acpTypes'
 import { highlightCode } from './codeHighlight'
 import { reportRuntimeError } from '../../runtimeError'
 import './ChatView.css'
@@ -253,14 +253,9 @@ const ChatView = React.memo(function ChatView({ sessionId, rightOpen = false, ri
             break
           }
           case 'usage_update': {
-            const used = upd.value || (upd._meta?.inputTokens || 0) + (upd._meta?.outputTokens || 0)
-            const max = upd.size || 131072
-            useStore.getState().setSessionLiveStats(source, {
-              tokensUsed: used,
-              tokensMax: max,
-              cacheReadTokens: upd._meta?.cacheReadTokens || 0,
-            })
-            if (sessionRef.current === source) tokenCount.current = used
+            const usage = extractUsage(upd)
+            useStore.getState().setSessionLiveStats(source, usage)
+            if (sessionRef.current === source) tokenCount.current = usage.tokensUsed
             break
           }
           case 'available_commands_update':

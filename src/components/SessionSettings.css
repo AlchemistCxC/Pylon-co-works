@@ -1,10 +1,59 @@
 .session-settings {
+  --session-settings-surface: #ffffff;
+  --session-settings-text: var(--text);
+  --session-settings-muted: var(--text-dim);
+  --session-settings-input: var(--bg-input);
+  --session-settings-border: var(--border);
   width:min(680px,calc(100vw - 32px));
   max-width:680px;
   max-height:min(86vh,820px);
   overflow:hidden;
   display:flex;
   flex-direction:column;
+}
+
+.app[data-ui-scheme="dark"] .session-settings {
+  --session-settings-surface: #171923;
+  --session-settings-text: #f4f6fb;
+  --session-settings-muted: #b4bbc9;
+  --session-settings-input: #232633;
+  --session-settings-border: #424858;
+  background:var(--session-settings-surface);
+  color:var(--session-settings-text);
+  box-shadow:0 18px 60px rgba(0,0,0,0.58);
+}
+
+.app[data-ui-scheme="dark"] .session-settings .session-settings-section,
+.app[data-ui-scheme="dark"] .session-settings .session-settings-advanced {
+  background:#1d202b;
+  border-color:var(--session-settings-border);
+}
+
+.app[data-ui-scheme="dark"] .session-settings .sess-field input,
+.app[data-ui-scheme="dark"] .session-settings .sess-field select,
+.app[data-ui-scheme="dark"] .session-settings .sess-field textarea {
+  background:var(--session-settings-input);
+  border-color:var(--session-settings-border);
+  color:var(--session-settings-text);
+  caret-color:var(--session-settings-text);
+}
+
+.app[data-ui-scheme="dark"] .session-settings .sess-field input::placeholder,
+.app[data-ui-scheme="dark"] .session-settings .sess-field textarea::placeholder {
+  color:#858da0;
+}
+
+.app[data-ui-scheme="dark"] .session-settings .session-settings-agent,
+.app[data-ui-scheme="dark"] .session-settings .session-settings-counter,
+.app[data-ui-scheme="dark"] .session-settings .session-settings-status {
+  background:#292d3b;
+  border-color:var(--session-settings-border);
+  color:#c7cddd;
+}
+
+.app[data-ui-scheme="dark"] .session-settings .session-settings-footer {
+  background:var(--session-settings-surface);
+  border-color:var(--session-settings-border);
 }
 
 .session-settings-header {
@@ -15,8 +64,8 @@
   padding:18px 22px 16px;
   border-bottom:1px solid var(--border);
 }
-.session-settings-header h3 { margin:0; color:var(--text); font-size:16px; font-weight:650; }
-.session-settings-header p { margin:5px 0 0; color:var(--text-dim); font-size:12px; line-height:1.5; }
+.session-settings-header h3 { margin:0; color:var(--session-settings-text); font-size:16px; font-weight:650; }
+.session-settings-header p { margin:5px 0 0; color:var(--session-settings-muted); font-size:12px; line-height:1.5; }
 
 .session-settings-body {
   overflow-y:auto;
@@ -40,16 +89,16 @@
   margin-bottom:12px;
 }
 .session-settings-section h4,
-.session-settings-danger h4 { margin:0; color:var(--text); font-size:13px; font-weight:650; }
+.session-settings-danger h4 { margin:0; color:var(--session-settings-text); font-size:13px; font-weight:650; }
 .session-settings-section-heading p,
-.session-settings-danger p { margin:4px 0 0; color:var(--text-dim); font-size:11px; line-height:1.45; }
+.session-settings-danger p { margin:4px 0 0; color:var(--session-settings-muted); font-size:11px; line-height:1.45; }
 .session-settings-grid { display:grid; grid-template-columns:minmax(0,1fr) minmax(180px,0.55fr); gap:12px; }
 
 .sess-field { min-width:0; }
 .sess-field label {
   display:block;
   margin-bottom:5px;
-  color:var(--text-dim);
+  color:var(--session-settings-muted);
   font-size:11px;
   font-weight:600;
   letter-spacing:0.05em;
@@ -59,11 +108,11 @@
 .sess-field select,
 .sess-field textarea {
   width:100%;
-  border:1px solid var(--border);
+  border:1px solid var(--session-settings-border);
   border-radius:6px;
   outline:none;
-  background:var(--bg-input);
-  color:var(--text);
+  background:var(--session-settings-input);
+  color:var(--session-settings-text);
   font-family:var(--font);
   font-size:14px;
   transition:border-color 0.15s,box-shadow 0.15s;
@@ -90,7 +139,7 @@
   border-radius:999px;
   padding:3px 8px;
   background:var(--bg-input);
-  color:var(--text-dim);
+  color:var(--session-settings-muted);
   font-family:var(--mono);
   font-size:10px;
 }
@@ -107,7 +156,7 @@
   justify-content:space-between;
   gap:12px;
   padding:12px 15px;
-  color:var(--text);
+  color:var(--session-settings-text);
   font-size:12px;
   font-weight:600;
   cursor:pointer;
@@ -141,7 +190,7 @@
   gap:16px;
   padding:13px 22px;
   border-top:1px solid var(--border);
-  background:var(--dialog-bg,rgba(255,255,255,0.97));
+  background:var(--session-settings-surface);
 }
 .session-settings-footer-actions { display:flex; gap:8px; }
 .session-settings-dirty { color:var(--text-dim); font-size:11px; }

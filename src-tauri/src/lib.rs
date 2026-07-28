@@ -22,6 +22,10 @@ where
     }
 }
 
+fn should_forward_user_update(is_replay: bool) -> bool {
+    is_replay
+}
+
 struct AppState {
     acp: Arc<tokio::sync::Mutex<AcpClient>>,
     notification_task: Mutex<Option<tokio::task::JoinHandle<()>>>,
@@ -102,12 +106,14 @@ fn start_notification_dispatcher(state: &AppState, window: tauri::WebviewWindow)
                     .and_then(|value| value.as_bool())
                     .unwrap_or(false);
                 if variant == Some("user_message_chunk") {
-                    if let Some(text) = update.get("content").and_then(|c| c.get("text")).and_then(|v| v.as_str()) {
-                        emit_event(&window, "peri:user", serde_json::json!({
-                            "source": source,
-                            "content": text,
-                            "replay": is_replay,
-                        }));
+                    if should_forward_user_update(is_replay) {
+                        if let Some(text) = update.get("content").and_then(|c| c.get("text")).and_then(|v| v.as_str()) {
+                            emit_event(&window, "peri:user", serde_json::json!({
+                                "source": source,
+                                "content": text,
+                                "replay": is_replay,
+                            }));
+                        }
                     }
                     continue;
                 }
@@ -118,7 +124,10 @@ fn start_notification_dispatcher(state: &AppState, window: tauri::WebviewWindow)
                     if let Some(session) = items.get_mut(&source) {
                         match variant {
                             Some("usage_update") => {
-                                session.tokens_total = update.get("value").and_then(|v| v.as_u64()).unwrap_or(0);
+                                session.tokens_total = update.get("used")
+                                    .or_else(|| update.get("value"))
+                                    .and_then(|v| v.as_u64())
+                                    .unwrap_or(0);
                                 if let Some(meta) = update.get("_meta") {
                                     session.tokens_in = meta.get("inputTokens").and_then(|v| v.as_u64()).unwrap_or(0);
                                     session.tokens_out = meta.get("outputTokens").and_then(|v| v.as_u64()).unwrap_or(0);

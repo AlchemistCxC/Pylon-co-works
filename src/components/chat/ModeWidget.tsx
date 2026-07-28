@@ -1,7 +1,6 @@
 import { useStore } from '../../store'
 import { setSessionMode } from './sessionMode'
-
-const MODES = ['default', 'edit', 'auto', 'bypass'] as const
+import { nextSessionMode } from './sessionModeState'
 
 /**
  * modeVariant 取值：
@@ -17,8 +16,7 @@ export default function ModeWidget({ sessionSource }: Props) {
   const mode = useStore(s => sessionSource ? (s.sessionModes[sessionSource] || 'auto') : 'auto')
 
   const cycle = () => {
-    const idx = MODES.indexOf(mode as typeof MODES[number])
-    const next = MODES[(idx + 1) % MODES.length]
+    const next = nextSessionMode(mode)
     if (sessionSource) {
       setSessionMode(sessionSource, next).catch(error => {
         window.dispatchEvent(new CustomEvent('pylon:mode-error', { detail: String(error) }))

@@ -54,7 +54,7 @@ export type SessionUpdate =
   | (UpdateBase & { sessionUpdate: 'agent_message_chunk' | 'agent_thought_chunk'; content?: { text?: string } })
   | (UpdateBase & { sessionUpdate: 'tool_call'; toolCallId?: string; title?: string; rawInput?: unknown })
   | (UpdateBase & { sessionUpdate: 'tool_call_update'; toolCallId?: string; rawOutput?: unknown; status?: string })
-  | (UpdateBase & { sessionUpdate: 'usage_update'; value?: number; size?: number })
+  | (UpdateBase & { sessionUpdate: 'usage_update'; used?: number; value?: number; size?: number })
   | (UpdateBase & { sessionUpdate: 'available_commands_update'; commands?: AvailableCommand[] })
   | (UpdateBase & { sessionUpdate: 'config_option_update'; configOptions?: ConfigOption[]; id?: string; key?: string; currentValue?: unknown; value?: unknown })
 
@@ -94,4 +94,12 @@ export function extractMode(response: SessionResponseObject): string | undefined
     ?? option?.currentValue
     ?? option?.value
   return value == null ? undefined : String(value)
+}
+
+export function extractUsage(update: Extract<SessionUpdate, { sessionUpdate: 'usage_update' }>) {
+  return {
+    tokensUsed: update.used ?? update.value ?? 0,
+    tokensMax: update.size ?? 131072,
+    cacheReadTokens: update._meta?.cacheReadTokens ?? 0,
+  }
 }
