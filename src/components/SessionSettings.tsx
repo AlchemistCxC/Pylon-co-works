@@ -1,41 +1,73 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import * as Dialog from '@radix-ui/react-dialog'
 import { invoke } from '@tauri-apps/api/core'
 import { useStore } from '../store'
 import { reportRuntimeError } from '../runtimeError'
 import { runCloseSessionTransaction } from './chat/closeSessionTransaction'
+import { createSessionSettingsValues, isSessionSettingsDirty } from './sessionSettingsForm'
 import './SessionSettings.css'
 
 interface Props { sessionId: string; open: boolean; onClose: () => void; onDeleted?: () => void }
 
 export default function SessionSettings({ sessionId, open, onClose, onDeleted }: Props) {
-  const sessions = useStore(s => s.sessions)
-  const updateSession = useStore(s => s.updateSession)
-  const removeSession = useStore(s => s.removeSession)
-  const s = sessions.find(s => s.id === sessionId)
-  const [name, setName] = useState(s?.name || '')
-  const [platform, setPlatform] = useState(s?.platform || 'local')
-  const [workdir, setWorkdir] = useState(s?.workdir || '')
-  const [sessionPrompt, setSessionPrompt] = useState(s?.sessionPrompt || '')
+  const sessions = useStore(state => state.sessions)
+  const updateSession = useStore(state => state.updateSession)
+  const removeSession = useStore(state => state.removeSession)
+  const activeAgent = useStore(state => state.activeAgent)
+  const session = sessions.find(item => item.id === sessionId)
+  const initialValues = useMemo(() => createSessionSettingsValues(session), [
+    sessionId,
+    session?.name,
+    session?.platform,
+    session?.workdir,
+    session?.sessionPrompt,
+  ])
+  const [name, setName] = useState(initialValues.name)
+  const [platform, setPlatform] = useState(initialValues.platform)
+  const [workdir, setWorkdir] = useState(initialValues.workdir)
+  const [sessionPrompt, setSessionPrompt] = useState(initialValues.sessionPrompt)
 
   useEffect(() => {
-    setName(s?.name || '')
-    setPlatform(s?.platform || 'local')
-    setWorkdir(s?.workdir || '')
-    setSessionPrompt(s?.sessionPrompt || '')
-  }, [sessionId, s?.name, s?.platform, s?.workdir, s?.sessionPrompt])
+    setName(session?.name || '')
+    setPlatform(session?.platform || 'local')
+    setWorkdir(session?.workdir || '')
+    setSessionPrompt(session?.sessionPrompt || '')
+  }, [sessionId, session?.name, session?.platform, session?.workdir, session?.sessionPrompt])
 
-  if (!s) return null
+  if (!session) return null
+
+  const currentValues = { name, platform, workdir, sessionPrompt }
+  const dirty = isSessionSettingsDirty(currentValues, initialValues)
+  const promptLines = sessionPrompt ? sessionPrompt.split(/\r?\n/).length : 0
+
+  const closeWithoutSaving = () => {
+    setName(initialValues.name)
+    setPlatform(initialValues.platform)
+    setWorkdir(initialValues.workdir)
+    setSessionPrompt(initialValues.sessionPrompt)
+    onClose()
+  }
+
+  const beforeClose = () => {
+    if (dirty && !window.confirm('放弃未保存的会话设置？')) return
+    closeWithoutSaving()
+  }
 
   const save = () => {
-    updateSession(sessionId, { name, platform, workdir, sessionPrompt, lastActiveAt: Date.now() })
+    updateSession(sessionId, {
+      name,
+      platform,
+      workdir,
+      sessionPrompt,
+      lastActiveAt: Date.now(),
+    })
     onClose()
   }
 
   const del = async () => {
-    if (!window.confirm('删除会话？')) return
+    if (!window.confirm(`删除会话“${session.name}”？此操作无法撤销。`)) return
     const closed = await runCloseSessionTransaction({
-      close: () => invoke('close_session', { source: s.source }),
+      close: () => invoke('close_session', { source: session.source }),
       onSuccess: () => {},
       onError: error => reportRuntimeError('关闭会话', error),
     })
@@ -47,52 +79,109 @@ export default function SessionSettings({ sessionId, open, onClose, onDeleted }:
   }
 
   return (
-    <Dialog.Root open={open} onOpenChange={(o) => { if (!o) onClose() }}>
+    <Dialog.Root open={open} onOpenChange={nextOpen => { if (!nextOpen) beforeClose() }}>
       <Dialog.Portal>
         <Dialog.Overlay className="dialog-overlay" />
-        <Dialog.Content className="dialog-content session-settings">
-          <Dialog.Title className="modal-header">
-            <h3>会话设置</h3>
-            <Dialog.Close className="modal-close" onClick={onClose}>✕</Dialog.Close>
+        <Dialog.Content
+          className="dialog-content session-settings"
+          aria-describedby="session-settings-description"
+        >
+          <Dialog.Title asChild>
+            <header className="session-settings-header">
+              <div>
+                <h3>会话设置</h3>
+                <p id="session-settings-description">管理当前会话的身份、运行环境与专属 Prompt。</p>
+              </div>
+              <Dialog.Close className="modal-close" onClick={event => {
+                event.preventDefault()
+                beforeClose()
+              }} aria-label="关闭会话设置">✕</Dialog.Close>
+            </header>
           </Dialog.Title>
 
-        <div className="sess-field">
-          <label>名称</label>
-          <input value={name} onChange={e => setName(e.target.value)} />
-        </div>
+          <div className="session-settings-body">
+            <section className="session-settings-section" aria-labelledby="session-basic-title">
+              <div className="session-settings-section-heading">
+                <div>
+                  <h4 id="session-basic-title">基本信息</h4>
+                  <p>用于侧栏识别和来源分类。</p>
+                </div>
+              </div>
+              <div className="session-settings-grid">
+                <div className="sess-field">
+                  <label htmlFor="session-name">名称</label>
+                  <input id="session-name" value={name} onChange={event => setName(event.target.value)} />
+                </div>
+                <div className="sess-field">
+                  <label htmlFor="session-platform">平台</label>
+                  <select id="session-platform" value={platform} onChange={event => setPlatform(event.target.value)}>
+                    <option value="local">本地</option>
+                    <option value="qq-group">QQ 群聊</option>
+                    <option value="qq-dm">QQ 私聊</option>
+                    <option value="terminal">终端</option>
+                  </select>
+                </div>
+              </div>
+            </section>
 
-        <div className="sess-field">
-          <label>平台</label>
-          <select value={platform} onChange={e => setPlatform(e.target.value)}>
-            <option value="local">本地</option>
-            <option value="qq-group">QQ 群聊</option>
-            <option value="qq-dm">QQ 私聊</option>
-            <option value="terminal">终端</option>
-          </select>
-        </div>
+            <section className="session-settings-section" aria-labelledby="session-agent-title">
+              <div className="session-settings-section-heading">
+                <div>
+                  <h4 id="session-agent-title">Agent 运行环境</h4>
+                  <p>工作目录只影响当前会话。</p>
+                </div>
+                <span className="session-settings-agent">{activeAgent || 'peri'}</span>
+              </div>
+              <div className="sess-field">
+                <label htmlFor="session-workdir">工作目录</label>
+                <input id="session-workdir" value={workdir} onChange={event => setWorkdir(event.target.value)} placeholder="留空使用 Agent 默认 cwd" />
+                <p className="sess-field-hint">当前 Agent：{activeAgent || 'peri'}。连接状态由全局 Agent 设置管理。</p>
+              </div>
+            </section>
 
-        <div className="sess-field">
-          <label>工作目录</label>
-          <input value={workdir} onChange={e => setWorkdir(e.target.value)} placeholder="留空使用 Agent 默认 cwd" />
-        </div>
+            <section className="session-settings-section" aria-labelledby="session-prompt-title">
+              <div className="session-settings-section-heading">
+                <div>
+                  <h4 id="session-prompt-title">Session Prompt</h4>
+                  <p>留空时继续使用 Profile persona。</p>
+                </div>
+                <span className="session-settings-counter">{sessionPrompt.length} 字 · {promptLines} 行</span>
+              </div>
+              <div className="sess-field sess-field-prompt">
+                <label htmlFor="session-prompt">会话专属 Prompt</label>
+                <textarea id="session-prompt" value={sessionPrompt} onChange={event => setSessionPrompt(event.target.value)} placeholder="留空使用 Profile persona..." rows={6} />
+              </div>
+            </section>
 
-        <div className="sess-field">
-          <label>会话 Prompt（覆盖 Profile persona）</label>
-          <textarea value={sessionPrompt} onChange={e => setSessionPrompt(e.target.value)}
-            placeholder="留空使用 Profile persona..." rows={4} />
-        </div>
+            <details className="session-settings-advanced">
+              <summary>
+                <span>高级能力</span>
+                <span className="session-settings-status">未接入运行时</span>
+              </summary>
+              <div className="session-settings-advanced-body" role="status">
+                <strong>MCP / Skills / Hooks</strong>
+                <p>当前后端尚未提供会话级配置链路，因此这里仅说明状态，不提供编辑，也不会向 Agent 发送历史字段。</p>
+              </div>
+            </details>
 
-        <div className="sess-field sess-unavailable" role="status">
-          <label>Skills / Hooks</label>
-          <strong>未接入运行时</strong>
-          <p>当前后端尚未提供会话级 Skills / Hooks 链路，因此此处不提供编辑，也不会把已有历史配置发送给 Agent。</p>
-        </div>
+            <section className="session-settings-danger" aria-labelledby="session-danger-title">
+              <div>
+                <h4 id="session-danger-title">危险区域</h4>
+                <p>删除后会关闭后端会话并清理本地消息缓存，无法撤销。</p>
+              </div>
+              <button type="button" className="ps-btn danger" onClick={del}>删除会话</button>
+            </section>
+          </div>
 
-        <div className="sess-actions">
-          <button className="ps-btn primary" onClick={save}>保存</button>
-          <button className="ps-btn" onClick={onClose}>取消</button>
-          <button className="ps-btn danger" onClick={del}>删除会话</button>
-        </div>
+          <footer className="session-settings-footer">
+            <span className={`session-settings-dirty ${dirty ? 'active' : ''}`} role="status">
+              {dirty ? '有未保存修改' : '所有修改已保存'}
+            </span>
+            <div className="session-settings-footer-actions">
+              <button type="button" className="ps-btn" onClick={beforeClose}>取消</button>
+              <button type="button" className="ps-btn primary" onClick={save} disabled={!dirty}>保存修改</button>
+            </div>
+          </footer>
         </Dialog.Content>
       </Dialog.Portal>
     </Dialog.Root>
