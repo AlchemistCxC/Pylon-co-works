@@ -255,14 +255,16 @@ const ChatView = React.memo(function ChatView({ sessionId, rightOpen = false, ri
           case 'usage_update': {
             const used = upd.value || (upd._meta?.inputTokens || 0) + (upd._meta?.outputTokens || 0)
             const max = upd.size || 131072
-            if (sessionRef.current === source) {
-              tokenCount.current = used
-              useStore.getState().setLiveStats({ liveTokensUsed: used, liveTokensMax: max, liveCacheReadTokens: upd._meta?.cacheReadTokens || 0 })
-            }
+            useStore.getState().setSessionLiveStats(source, {
+              tokensUsed: used,
+              tokensMax: max,
+              cacheReadTokens: upd._meta?.cacheReadTokens || 0,
+            })
+            if (sessionRef.current === source) tokenCount.current = used
             break
           }
           case 'available_commands_update':
-            if (sessionRef.current === source) useStore.getState().setLiveStats({ liveCommands: upd.commands || [] } as any)
+            useStore.getState().setSessionLiveStats(source, { commands: upd.commands || [] })
             break
           case 'config_option_update': {
             if (Array.isArray(upd.configOptions)) {

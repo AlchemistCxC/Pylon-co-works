@@ -32,12 +32,12 @@ export default forwardRef<{ send: () => void; attachFile: () => void; cancel: ()
   const profiles = useStore(s => s.profiles)
   const sessions = useStore(s => s.sessions)
   const addSession = useStore(s => s.addSession)
-  const liveCommands = useStore(s => s.liveCommands || [])
   const inputMode = useStore(s => s.inputMode)
   const sessionSource = useStore(s => {
     if (!sessionId) return null
     return s.sessions.find(session => session.id === sessionId || session.source === sessionId)?.source ?? sessionId
   })
+  const liveCommands = useStore(s => sessionSource ? (s.sessionLiveStats[sessionSource]?.commands || []) : [])
   // 当前 session 是否正在生成（用于把发送按钮切成"停止"）
   const generating = useStore(s => sessionSource != null && (s.liveGeneratingSources || []).includes(sessionSource))
 

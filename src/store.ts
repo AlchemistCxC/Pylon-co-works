@@ -6,6 +6,8 @@ import { CC_LAYOUT_SCHEMA_VERSION, DEFAULT_CC_LAYOUT, cloneCcLayout, cloneCcPosi
 import type { CcLayoutV3, CcWidgetPlacement } from './ccLayoutState'
 import { createCustomPreset, deleteCustomPreset, normalizeCustomPresets, pickCustomPresetTheme, upsertCustomPreset } from './customPresets'
 import type { CustomPreset } from './customPresets'
+import { clearSessionSourceState, updateSessionLiveStats } from './components/chat/sessionRuntime'
+import type { SessionLiveStats } from './components/chat/sessionRuntime'
 
 export interface Profile { id: string; name: string; avatar?: string; persona: string; model: string }
 // 后端配置选项（来自 new_session 返回 & config_option_update 事件）
@@ -87,6 +89,9 @@ type ThemeState = ThemeSettings & {
   livePrismOn: boolean
   liveGenerating: string | null  // 兼容旧状态：最近开始生成的 session source
   liveGeneratingSources: string[] // 当前所有正在生成的 session source
+  sessionLiveStats: Record<string, SessionLiveStats>
+  setSessionLiveStats: (source: string, stats: Partial<SessionLiveStats>) => void
+  clearSessionRuntime: (source: string) => void
   sessionModes: Record<string, string>
   setSessionMode: (source: string, mode?: string) => void
   liveCommands: { name: string; input_hint?: string; description?: string }[]
@@ -182,10 +187,26 @@ export const useStore = create<ThemeState>()(persist(
       return { sessions }
     })
   },
-  removeSession: (id) => set(s => {
-    const sessions = s.sessions.filter(x => x.id !== id)
+  removeSession: (id) => set(state => {
+    const removed = state.sessions.find(session => session.id === id)
+    const sessions = state.sessions.filter(session => session.id !== id)
     persistSessions(localStorage, sessions)
-    return { sessions }
+    if (!removed) return { sessions }
+    const cleared = clearSessionSourceState({
+      source: removed.source,
+      sessionLiveStats: state.sessionLiveStats,
+      sessionModes: state.sessionModes,
+      sessionConfig: state.sessionConfig,
+      generatingSources: state.liveGeneratingSources,
+    })
+    return {
+      sessions,
+      sessionLiveStats: cleared.sessionLiveStats,
+      sessionModes: cleared.sessionModes,
+      sessionConfig: cleared.sessionConfig,
+      liveGeneratingSources: cleared.generatingSources,
+      liveGenerating: cleared.generatingSources[cleared.generatingSources.length - 1] || null,
+    }
   }),
   updateSession: (id, partial) => set(s => {
     const sessions = s.sessions.map(session => session.id === id ? { ...session, ...partial } : session)
@@ -238,6 +259,26 @@ export const useStore = create<ThemeState>()(persist(
   })),
 
   liveTokensUsed: 0, liveTokensMax: 131072, liveCacheReadTokens: 0, liveMode: 'auto', livePrismOn: true, liveGenerating: null, liveGeneratingSources: [],
+  sessionLiveStats: {},
+  setSessionLiveStats: (source, stats) => set(state => ({
+    sessionLiveStats: updateSessionLiveStats(state.sessionLiveStats, source, stats),
+  })),
+  clearSessionRuntime: (source) => set(state => {
+    const cleared = clearSessionSourceState({
+      source,
+      sessionLiveStats: state.sessionLiveStats,
+      sessionModes: state.sessionModes,
+      sessionConfig: state.sessionConfig,
+      generatingSources: state.liveGeneratingSources,
+    })
+    return {
+      sessionLiveStats: cleared.sessionLiveStats,
+      sessionModes: cleared.sessionModes,
+      sessionConfig: cleared.sessionConfig,
+      liveGeneratingSources: cleared.generatingSources,
+      liveGenerating: cleared.generatingSources[cleared.generatingSources.length - 1] || null,
+    }
+  }),
   sessionModes: {},
   setSessionMode: (source, mode) => set(state => {
     const sessionModes = { ...state.sessionModes }
@@ -342,6 +383,6 @@ export const useStore = create<ThemeState>()(persist(
   )
   return { ...state, ...normalized } as ThemeState
 }, partialize: (state) => {
-  const { sessions, sessionsHydrated, users, ccEditMode, setActiveProfile, addProfile, addSession, removeSession, updateSession, replaceSessions, setSessionPeriId, restoreSessions, hydrateSessions, getUser, updateTheme, setCcEditMode, setCcHeight, updateCcPosition, updateCcPlacement, resetCcLayout, setCcHidden, setCcScale, setLiveStats, liveCommands, sessionConfig, setSessionConfig, sessionModes, setSessionMode, liveTokensUsed, liveTokensMax, liveCacheReadTokens, liveMode, livePrismOn, liveGenerating, liveGeneratingSources, agents, setAgents, setActiveAgent, applyZonePreset, setZoneField, setGlobalPreset, saveCustomPreset, applyCustomPreset, removeCustomPreset, presets, dirty, ...persisted } = state as any
+  const { sessions, sessionsHydrated, users, ccEditMode, setActiveProfile, addProfile, addSession, removeSession, updateSession, replaceSessions, setSessionPeriId, restoreSessions, hydrateSessions, getUser, updateTheme, setCcEditMode, setCcHeight, updateCcPosition, updateCcPlacement, resetCcLayout, setCcHidden, setCcScale, setLiveStats, liveCommands, sessionLiveStats, setSessionLiveStats, clearSessionRuntime, sessionConfig, setSessionConfig, sessionModes, setSessionMode, liveTokensUsed, liveTokensMax, liveCacheReadTokens, liveMode, livePrismOn, liveGenerating, liveGeneratingSources, agents, setAgents, setActiveAgent, applyZonePreset, setZoneField, setGlobalPreset, saveCustomPreset, applyCustomPreset, removeCustomPreset, presets, dirty, ...persisted } = state as any
   return persisted
 }, onRehydrateStorage: () => state => state?.hydrateSessions()}))

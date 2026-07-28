@@ -61,9 +61,6 @@ export default function Sidebar({ activeSession, onSelectSession, onProfileEdit,
         onError: error => reportRuntimeError('关闭会话', error),
       })
       if (!closed) return
-      // 清理该会话的前端配置残留
-      const cfg = { ...useStore.getState().sessionConfig }
-      if (cfg[s.source]) { delete cfg[s.source]; useStore.setState({ sessionConfig: cfg }) }
     }
     removeSession(id)
     localStorage.removeItem('pylon-msgs-' + id)

@@ -8,14 +8,27 @@ import AttachWidget from './chat/AttachWidget'
 import ColorPopover from './ColorPopover'
 import { formatCacheReadTokens, formatTokenCount } from '../tokenFormat'
 import { toCssBackgroundImage } from '../backgroundImage'
+import { emptySessionLiveStats } from './chat/sessionRuntime'
+import type { SessionLiveStats } from './chat/sessionRuntime'
 import './ControlCenter.css'
 import './chat/StatusBar.css'  // model/mode/send/attach widget 样式
 
 interface Props { sessionId: string | null }
 
-function EkgWidget() {
-  const tokensUsed = useStore(s => s.liveTokensUsed) || 0
-  const tokensMax = useStore(s => s.liveTokensMax) || 128
+const EMPTY_SESSION_LIVE_STATS = emptySessionLiveStats()
+
+function useSessionLiveStats(sessionId: string | null): SessionLiveStats {
+  return useStore(state => {
+    if (!sessionId) return EMPTY_SESSION_LIVE_STATS
+    const source = state.sessions.find(session => session.id === sessionId)?.source
+    return source ? (state.sessionLiveStats[source] ?? EMPTY_SESSION_LIVE_STATS) : EMPTY_SESSION_LIVE_STATS
+  })
+}
+
+function EkgWidget({ sessionId }: Props) {
+  const runtime = useSessionLiveStats(sessionId)
+  const tokensUsed = runtime.tokensUsed
+  const tokensMax = runtime.tokensMax
   const used = Math.max(0, Math.min(1, tokensMax > 0 ? tokensUsed / tokensMax : 0))
   const pct = Math.round(used * 100)
   const barTrackColor = useStore(s => s.barTrackColor)
@@ -56,9 +69,10 @@ function EkgWidget() {
   )
 }
 
-function PctWidget() {
-  const tokensUsed = useStore(s => s.liveTokensUsed) || 0
-  const tokensMax = useStore(s => s.liveTokensMax) || 128
+function PctWidget({ sessionId }: Props) {
+  const runtime = useSessionLiveStats(sessionId)
+  const tokensUsed = runtime.tokensUsed
+  const tokensMax = runtime.tokensMax
   const used = Math.max(0, Math.min(1, tokensMax > 0 ? tokensUsed / tokensMax : 0))
   const pct = Math.round(used * 100)
   const ekgGreen = useStore(s => s.ekgGreen)
@@ -69,10 +83,11 @@ function PctWidget() {
   return <span className="ekg-pct" style={{ color, fontSize: `${ccScale}%` }}>{pct}%</span>
 }
 
-function TokensWidget() {
-  const tokensUsed = useStore(s => s.liveTokensUsed) || 0
-  const tokensMax = useStore(s => s.liveTokensMax) || 128
-  const cacheHit = useStore(s => s.liveCacheReadTokens) || 0
+function TokensWidget({ sessionId }: Props) {
+  const runtime = useSessionLiveStats(sessionId)
+  const tokensUsed = runtime.tokensUsed
+  const tokensMax = runtime.tokensMax
+  const cacheHit = runtime.cacheReadTokens
   const ccScale = useStore(s => (s.ccScale || {})['tokens'] ?? 100)
   return (
     <span className="pill-mono" style={{ borderLeft: 'none', padding: 0, fontSize: `${ccScale}%` }}>
@@ -100,17 +115,17 @@ const WIDGET_REGISTRY: WidgetDef[] = [
   {
     id: 'ekg', label: '用量条',
     defaultPos: { x: 0, y: 65, w: 30, h: 28 },
-    render: () => <EkgWidget />,
+    render: (sid) => <EkgWidget sessionId={sid} />,
   },
   {
     id: 'pct', label: '百分比',
     defaultPos: { x: 32, y: 69, w: 8, h: 20 },
-    render: () => <PctWidget />,
+    render: (sid) => <PctWidget sessionId={sid} />,
   },
   {
     id: 'tokens', label: 'Token数',
     defaultPos: { x: 41, y: 69, w: 16, h: 20 },
-    render: () => <TokensWidget />,
+    render: (sid) => <TokensWidget sessionId={sid} />,
   },
   {
     id: 'model', label: '模型',
