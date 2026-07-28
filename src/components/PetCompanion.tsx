@@ -120,10 +120,8 @@ export default function PetCompanion() {
   const [pet, setPet] = useState<PetState | null>(null)
   const [position, setPosition] = useState<Position | null>(readPosition)
   const [wanderEnabled, setWanderEnabled] = useState(() => localStorage.getItem(POSITION_KEY) === null)
-  const [collapsed, setCollapsed] = useState(() => localStorage.getItem(`${STORAGE_KEY}:collapsed`) === '1')
   const [walking, setWalking] = useState(false)
   const [dragging, setDragging] = useState(false)
-  const [statsOpen, setStatsOpen] = useState(false)
   const [error, setError] = useState('')
   const shellRef = useRef<HTMLElement>(null)
   const dragRef = useRef<{ dx: number; dy: number } | null>(null)
@@ -155,7 +153,7 @@ export default function PetCompanion() {
   }, [save])
 
   useEffect(() => {
-    if (!wanderEnabled || collapsed || dragging) return
+    if (!wanderEnabled || dragging) return
     let cancelled = false
     const wander = () => {
       if (cancelled || dragging) return
@@ -171,17 +169,7 @@ export default function PetCompanion() {
     const first = window.setTimeout(wander, 1800)
     const timer = window.setInterval(wander, 9000)
     return () => { cancelled = true; window.clearTimeout(first); window.clearInterval(timer) }
-  }, [collapsed, dragging, wanderEnabled])
-
-  const act = useCallback(async (action: 'poke' | 'feed' | 'nostalgia') => {
-    if (!pet) return
-    if (!IS_TAURI) {
-      save({ ...pet, mood: 'happy', happiness: Math.min(100, pet.happiness + 4), msg: action === 'feed' ? '能量沿着像素一格格亮起。' : '它贴近了你的指尖。' })
-      return
-    }
-    try { setError(''); save(await invoke<PetState>('pet_action', { action, value: null })) }
-    catch (cause) { setError(String(cause)) }
-  }, [pet, save])
+  }, [dragging, wanderEnabled])
 
   const onPointerDown = (event: React.PointerEvent) => {
     if ((event.target as HTMLElement).closest('button')) return
@@ -221,32 +209,12 @@ export default function PetCompanion() {
   if (!pet) return error ? <div className="pet-load-error">宠物加载失败：{error}</div> : null
 
   return (
-    <section ref={shellRef} className={`pet-companion ${collapsed ? 'collapsed' : ''} ${dragging ? 'dragging' : ''}`}
+    <section ref={shellRef} className={`pet-companion ${dragging ? 'dragging' : ''}`}
       style={style} aria-label="长期陪伴宠物" onPointerDown={onPointerDown} onPointerMove={onPointerMove} onPointerUp={onPointerUp}>
-      <button className="pet-collapse" type="button" onClick={() => {
-        const next = !collapsed; setCollapsed(next); localStorage.setItem(`${STORAGE_KEY}:collapsed`, next ? '1' : '0')
-      }} aria-label={collapsed ? '展开宠物' : '收起宠物'}>{collapsed ? '◆' : '—'}</button>
-
-      {!collapsed && <>
-        <div className="pet-heading"><div><strong>{pet.name}</strong><span>{pet.title}</span></div><span>Lv.{pet.stage}</span></div>
-        <div className="pet-habitat" onDoubleClick={resumeWander} title="拖拽固定位置，双击恢复自主漫游">
-          <PixelCreature stage={pet.stage} mood={pet.mood} walking={walking} />
-        </div>
-        <div className="pet-message">{pet.msg || '它安静地观察着工作区。'}</div>
-        <div className="pet-growth"><span><i style={{ width: `${pet.growth_progress}%` }} /></span><b>{pet.xp} XP</b></div>
-        <div className="pet-actions">
-          <button type="button" onClick={() => act('poke')}>触碰</button>
-          <button type="button" onClick={() => act('feed')}>充能</button>
-          <button type="button" onClick={() => setStatsOpen(v => !v)}>统计</button>
-        </div>
-        {statsOpen && <div className="pet-stats">
-          <span>相伴<b>{pet.age_days}天</b></span><span>连续<b>{pet.stats.streak_days}天</b></span>
-          <span>Token<b>{pet.stats.tokens_total.toLocaleString()}</b></span><span>完成<b>{pet.stats.prompts_completed}</b></span>
-          <span>工具<b>{pet.stats.tools_succeeded}/{pet.stats.tools_started}</b></span><span>成功率<b>{pet.stats.tool_success_rate}%</b></span>
-          <button type="button" onClick={() => act('nostalgia')} disabled={!pet.memories.length}>最近记忆</button>
-        </div>}
-        {error && <div className="pet-error">{error}</div>}
-      </>}
+      <div className="pet-creature-hitbox" onDoubleClick={resumeWander}
+        title={`${pet.name}：拖拽固定位置，双击恢复自主漫游`}>
+        <PixelCreature stage={pet.stage} mood={pet.mood} walking={walking} />
+      </div>
     </section>
   )
 }
