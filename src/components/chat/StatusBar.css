@@ -7,8 +7,8 @@
 .ekg-bar-track { position:absolute; inset:0; background:var(--bar-track,rgba(0,0,0,0.18)); }
 .ekg-bar-fill { position:absolute; left:0; top:0; bottom:0; width:var(--bar-fill,0%); background:var(--bar-color,var(--ekg-green,#4EBA65)); transition:width 0.3s; }
 
-.ekg-pct { font-size:var(--ekg-font,13px); font-weight:400; font-family:var(--mono); min-width:44px; transition:color 0.3s; flex-shrink:0; }
-.pill-mono { font-size:12px; color:var(--text-dim); padding:0 8px; border-radius:0; background:transparent; font-family:var(--mono); border-left:2px solid rgba(215,119,87,0.5); flex-shrink:0; }
+.ekg-pct { font-size:inherit; font-weight:400; font-family:var(--mono); min-width:0; transition:color 0.3s; flex-shrink:0; }
+.pill-mono { font-size:inherit; color:var(--text-dim); padding:0; border-radius:0; background:transparent; font-family:var(--mono); border:0; flex-shrink:0; }
 
 /* ── Prism tag ── */
 .prism-tag { font-size:12px; font-weight:400; padding:0; border:none; cursor:pointer; background:transparent; color:var(--text-dim); font-family:var(--mono); }
@@ -25,7 +25,7 @@
 .model-item:hover { background:#373737; color:#fff; }
 .model-item.active { color:var(--pill-text,#999); font-weight:600; }
 
-.cc-model-minimal { font-family:var(--mono); font-size:12px; color:var(--pill-text,#999); cursor:pointer; padding:0 4px; }
+.cc-model-minimal { font-family:var(--mono); font-size:inherit; color:var(--accent,#D77757); cursor:pointer; padding:0; }
 .cc-model-minimal:hover { color:var(--text); text-decoration:underline; }
 .cc-model-badge { font-family:var(--mono); font-size:11px; padding:2px 8px; border-radius:8px; background:var(--pill-bg,rgba(0,0,0,0.05)); color:var(--pill-text,#999); border:1px solid rgba(0,0,0,0.1); }
 
@@ -43,7 +43,7 @@
 .cc-mode-badge[data-mode="edit"]   { color:#A2A9E4; }
 .cc-mode-badge[data-mode="default"]{ color:var(--text-dim,#999); }
 
-.cc-mode-minimal { font-family:var(--mono); font-size:12px; cursor:pointer; background:transparent; border:0; padding:0; color:inherit; }
+.cc-mode-minimal { font-family:var(--mono); font-size:inherit; cursor:pointer; background:transparent; border:0; padding:0; color:inherit; }
 .cc-mode-minimal[data-mode="bypass"] { color:var(--tool-err,#FF6B80); }
 .cc-mode-minimal[data-mode="auto"]   { color:#FFC107; }
 .cc-mode-minimal[data-mode="edit"]   { color:#A2A9E4; }
@@ -72,7 +72,6 @@
 
 /* ── cc widget separators (controlled by cc layout in ControlCenter) ── */
 .cc-model-widget { display:flex; align-items:center; }
-.cc-model-widget::after { content:' · '; color:var(--text-dim); opacity:0.55; font-size:12px; font-family:var(--mono); }
 
 .cc-variant-terminal .cc-model-minimal,
 .cc-variant-terminal .cc-mode-minimal,

@@ -154,6 +154,7 @@ export default function ControlCenter({ sessionId }: Props) {
   const ccBgHeight = useStore(s => s.ccBgHeight ?? ccHeight)
   const inputMode = useStore(s => s.inputMode)
   const hidden = useStore(s => s.ccHidden || [])
+  const ccStyle = useStore(s => s.ccStyle)
   const layout = useStore(s => s.ccLayout)
   const editMode = useStore(s => s.ccEditMode)
   const ccVariant = useStore(s => s.ccVariant) || 'terminal'
@@ -169,7 +170,8 @@ export default function ControlCenter({ sessionId }: Props) {
     const def = WIDGET_REGISTRY.find(w => w.id === id)
     if (!def) return null
     if (!editMode && hidden.includes(id)) return null
-    // CLI 模式下 send/attach 无意义（InputBar 通过 Enter 发送）— 非编辑状态自动隐藏
+    // numeric 已由 pct widget 表达；两者同时显示会重复成 “0% · 0%”。
+    if (!editMode && ccStyle === 'numeric' && id === 'ekg' && !hidden.includes('pct')) return null
     if (!editMode && inputMode === 'cli' && (id === 'send' || id === 'attach')) return null
 
     // 独立 send/attach widget 是否已启用（在画布上且未隐藏）→ 决定 InputBar 是否隐藏自带按钮
