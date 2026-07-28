@@ -7,13 +7,18 @@ export interface BackgroundImageResult {
 }
 
 type LocalPathConverter = (path: string) => string
+type TauriWindow = { __TAURI_INTERNALS__?: unknown; __TAURI__?: unknown }
 
 const PASSTHROUGH_SCHEME = /^(?:https?:|data:|blob:|asset:|file:)/i
 const WINDOWS_LOCAL_PATH = /^(?:[a-z]:[\\/]|\\\\)/i
 const POSIX_LOCAL_PATH = /^\//
 
+export function hasTauriRuntime(target: TauriWindow): boolean {
+  return Boolean(target.__TAURI_INTERNALS__ || target.__TAURI__)
+}
+
 function defaultLocalPathConverter(path: string): string {
-  if (typeof window === 'undefined' || !(window as Window & { __TAURI_INTERNALS__?: unknown }).__TAURI_INTERNALS__) {
+  if (typeof window === 'undefined' || !hasTauriRuntime(window as Window & TauriWindow)) {
     throw new Error('本地文件路径只能在 Tauri 窗口中加载')
   }
   return convertFileSrc(path)

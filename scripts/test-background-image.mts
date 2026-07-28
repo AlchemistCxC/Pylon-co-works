@@ -1,5 +1,9 @@
 import { strict as assert } from 'node:assert'
-import { resolveBackgroundImage } from '../src/backgroundImage.ts'
+import { hasTauriRuntime, resolveBackgroundImage } from '../src/backgroundImage.ts'
+
+assert.equal(hasTauriRuntime({ __TAURI_INTERNALS__: {} }), true)
+assert.equal(hasTauriRuntime({ __TAURI__: {} }), true, 'withGlobalTauri 环境也必须识别为 Tauri runtime')
+assert.equal(hasTauriRuntime({}), false)
 
 const empty = resolveBackgroundImage('')
 assert.deepEqual(empty, { source: null, cssValue: 'none', error: null })
