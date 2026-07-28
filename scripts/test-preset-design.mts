@@ -1,9 +1,9 @@
 import { strict as assert } from 'node:assert'
 import { GLOBAL_PRESETS, ZONE_FIELDS } from '../src/presets.ts'
 
-assert.deepEqual(GLOBAL_PRESETS.map(preset => preset.label), ['Claude Code', 'Glass Light', 'Nord Frost'])
+assert.deepEqual(GLOBAL_PRESETS.map(preset => preset.label), ['Claude Code', 'Glass Light', 'Nord Frost', 'Tokyo Night', 'Solarized Light', 'Amber CRT'])
 
-const [claude, glass, nord] = GLOBAL_PRESETS.map(preset => preset.theme)
+const [claude, glass, nord, tokyo, solarized, amber] = GLOBAL_PRESETS.map(preset => preset.theme)
 assert.equal(claude.uiScheme, 'dark')
 assert.equal(claude.globalFont, 'mono')
 assert.equal(claude.inputMode, 'cli')
@@ -31,6 +31,13 @@ assert.equal(nord.globalFont, 'mono')
 assert.equal(nord.toolIndicator, '◆')
 assert.equal(nord.ccStyle, 'bar')
 assert.equal(nord.ccVariant, 'terminal')
+
+assert.equal(tokyo.globalBgColor, '#1a1b26')
+assert.equal(tokyo.toolRun, '#7aa2f7')
+assert.equal(solarized.uiScheme, 'light')
+assert.equal(solarized.globalBgColor, '#fdf6e3')
+assert.equal(amber.globalBgColor, '#120b00')
+assert.equal(amber.spinnerColor, '#ffb000')
 
 for (const field of [
   'ccPositions', 'ccHidden', 'ccScale', 'ccCliCustomized', 'ccLayoutVersion',

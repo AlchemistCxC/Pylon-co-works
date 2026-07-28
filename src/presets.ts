@@ -60,7 +60,7 @@ export const ZONE_FIELDS: Record<string, (keyof ThemeSettings)[]> = {
 
 // ── 预设定义 ─────────────────────────────────────────────────────
 
-export type PresetName = 'claude' | 'glass' | 'nord'
+export type PresetName = 'claude' | 'glass' | 'nord' | 'tokyo' | 'solarized' | 'amber'
 
 export interface GlobalPreset {
   name: PresetName
@@ -258,6 +258,32 @@ export const GLOBAL_PRESETS: GlobalPreset[] = [
       rightBg: '#252838', rightBgImage: '', rightWidth: 250,
       rightTransparency: 1, rightBlur: 0,
     },
+  },
+  {
+    name: 'tokyo', label: 'Tokyo Night', theme: {
+      transparency: 1, bgBlur: 0, globalFont: 'mono', globalFontSize: 15, globalBgImage: '', globalBgColor: '#1a1b26', uiScheme: 'dark', userName: '', userPrefix: '❯', userColor: '#bb9af7',
+      sidebarBg: '#16161e', sidebarBgImage: '', sidebarWidth: 240, sidebarTransparency: 1, sidebarBlur: 0, sidebarTextColor: '#a9b1d6', sidebarNameSize: 13, sidebarGroupSize: 11,
+      chatBg: '#1a1b26', chatBgImage: '', chatTransparency: 1, chatBlur: 0, chatFont: 'mono', chatFontSize: 15, chatLineHeight: 1.6, chatTextColor: '#c0caf5', chatCodeColor: '#e0af68', chatCodeBg: 'rgba(122,162,247,0.06)',
+      toolOk: '#9ece6a', toolRun: '#7aa2f7', toolErr: '#f7768e', toolNameColor: '#7dcfff', toolSummaryColor: '#565f89', userTagBg: '#24283b', userTagText: '#bb9af7', toolIndicator: '●', toolIndicatorGlow: 0, toolIndicatorGlowColor: '', toolConnectorMode: 'none', toolConnectorColor: '#414868', sparkles: '◴◷◶◵', spinnerColor: '#bb9af7', spinnerSize: 14, msgStyle: 'terminal', msgFont: 'mono', msgTextColor: '#c0caf5', msgLineHeight: 1.6,
+      ccHeight: 150, ccBgHeight: 150, ccBg: '#1a1b26', ccBgImage: '', ccStyle: 'numeric', ccVariant: 'terminal', ccPositions: {}, ccHidden: ['send','attach'], ccScale: { pct:95,tokens:95,model:95,mode:95 }, ccCliCustomized:false,
+      inputBg:'transparent',inputBgImage:'',inputTextColor:'#c0caf5',inputPlaceholder:'#565f89',inputSendBg:'transparent',inputFocusBorder:'#7aa2f7',inputFontSize:17,inputMinHeight:56,inputMode:'cli',cliLineWidth:1,cliLineColor:'#414868',cliTextColor:'#c0caf5',cliLinePadding:4,
+      statusBg:'transparent',statusBgImage:'',ekgWidth:140,ekgFontSize:13,ekgGreen:'#9ece6a',ekgYellow:'#e0af68',ekgRed:'#f7768e',ekgLineWidth:2,ekgAmplitudeMax:10,ekgSpeedBase:.5,ekgSpeedMax:2.5,ekgLeftColor:'#414868',ekgMovingColor:'',ekgConsumedColor:'#24283b',barTrackColor:'#24283b',barFillColor:'#7aa2f7',barFillFollow:true,barHeight:8,tokenDisplay:'ekg',pillBg:'#24283b',pillText:'#a9b1d6',prismOnColor:'#9ece6a',modelVariant:'minimal',modeVariant:'minimal',sendVariant:'minimal',attachVariant:'minimal',
+      rightBg:'#16161e',rightBgImage:'',rightWidth:260,rightTransparency:1,rightBlur:0,
+    }
+  },
+  {
+    name: 'solarized', label: 'Solarized Light', theme: {
+      transparency:1,bgBlur:0,globalFont:'mono',globalFontSize:15,globalBgImage:'',globalBgColor:'#fdf6e3',uiScheme:'light',userName:'',userPrefix:'❯',userColor:'#268bd2',
+      sidebarBg:'#eee8d5',sidebarBgImage:'',sidebarWidth:240,sidebarTransparency:1,sidebarBlur:0,sidebarTextColor:'#586e75',sidebarNameSize:13,sidebarGroupSize:11,
+      chatBg:'#fdf6e3',chatBgImage:'',chatTransparency:1,chatBlur:0,chatFont:'mono',chatFontSize:15,chatLineHeight:1.6,chatTextColor:'#657b83',chatCodeColor:'#b58900',chatCodeBg:'rgba(38,139,210,.06)',toolOk:'#859900',toolRun:'#268bd2',toolErr:'#dc322f',toolNameColor:'#268bd2',toolSummaryColor:'#93a1a1',userTagBg:'#eee8d5',userTagText:'#268bd2',toolIndicator:'●',toolIndicatorGlow:0,toolIndicatorGlowColor:'',toolConnectorMode:'none',toolConnectorColor:'#93a1a1',sparkles:'▁▂▃▄▅▆▇█▇▆▅▄▃',spinnerColor:'#b58900',spinnerSize:14,msgStyle:'terminal',msgFont:'mono',msgTextColor:'#657b83',msgLineHeight:1.6,
+      ccHeight:150,ccBgHeight:150,ccBg:'#fdf6e3',ccBgImage:'',ccStyle:'numeric',ccVariant:'terminal',ccPositions:{},ccHidden:['send','attach'],ccScale:{pct:95,tokens:95,model:95,mode:95},ccCliCustomized:false,inputBg:'transparent',inputBgImage:'',inputTextColor:'#657b83',inputPlaceholder:'#93a1a1',inputSendBg:'transparent',inputFocusBorder:'#268bd2',inputFontSize:17,inputMinHeight:56,inputMode:'cli',cliLineWidth:1,cliLineColor:'#93a1a1',cliTextColor:'#657b83',cliLinePadding:4,statusBg:'transparent',statusBgImage:'',ekgWidth:140,ekgFontSize:13,ekgGreen:'#859900',ekgYellow:'#b58900',ekgRed:'#dc322f',ekgLineWidth:2,ekgAmplitudeMax:10,ekgSpeedBase:.5,ekgSpeedMax:2.5,ekgLeftColor:'#93a1a1',ekgMovingColor:'',ekgConsumedColor:'#eee8d5',barTrackColor:'#eee8d5',barFillColor:'#268bd2',barFillFollow:true,barHeight:8,tokenDisplay:'ekg',pillBg:'#eee8d5',pillText:'#586e75',prismOnColor:'#859900',modelVariant:'minimal',modeVariant:'minimal',sendVariant:'minimal',attachVariant:'minimal',rightBg:'#eee8d5',rightBgImage:'',rightWidth:260,rightTransparency:1,rightBlur:0,
+    }
+  },
+  {
+    name:'amber',label:'Amber CRT',theme:{
+      transparency:1,bgBlur:0,globalFont:'mono',globalFontSize:15,globalBgImage:'',globalBgColor:'#120b00',uiScheme:'dark',userName:'',userPrefix:'>',userColor:'#ffb000',sidebarBg:'#120b00',sidebarBgImage:'',sidebarWidth:240,sidebarTransparency:1,sidebarBlur:0,sidebarTextColor:'#cc8c00',sidebarNameSize:13,sidebarGroupSize:11,chatBg:'#120b00',chatBgImage:'',chatTransparency:1,chatBlur:0,chatFont:'mono',chatFontSize:15,chatLineHeight:1.55,chatTextColor:'#ffcc55',chatCodeColor:'#ffe0a3',chatCodeBg:'transparent',toolOk:'#ffc24b',toolRun:'#ffb000',toolErr:'#ff6b35',toolNameColor:'#ffb000',toolSummaryColor:'#9b6b00',userTagBg:'#2b1900',userTagText:'#ffcc55',toolIndicator:'■',toolIndicatorGlow:3,toolIndicatorGlowColor:'#ffb000',toolConnectorMode:'none',toolConnectorColor:'#5c3900',sparkles:'┌┐┘└',spinnerColor:'#ffb000',spinnerSize:14,msgStyle:'terminal',msgFont:'mono',msgTextColor:'#ffcc55',msgLineHeight:1.55,
+      ccHeight:150,ccBgHeight:150,ccBg:'#120b00',ccBgImage:'',ccStyle:'numeric',ccVariant:'terminal',ccPositions:{},ccHidden:['send','attach'],ccScale:{pct:95,tokens:95,model:95,mode:95},ccCliCustomized:false,inputBg:'transparent',inputBgImage:'',inputTextColor:'#ffcc55',inputPlaceholder:'#7a5200',inputSendBg:'transparent',inputFocusBorder:'#ffb000',inputFontSize:17,inputMinHeight:56,inputMode:'cli',cliLineWidth:1,cliLineColor:'#9b6b00',cliTextColor:'#ffcc55',cliLinePadding:4,statusBg:'transparent',statusBgImage:'',ekgWidth:140,ekgFontSize:13,ekgGreen:'#ffc24b',ekgYellow:'#ffb000',ekgRed:'#ff6b35',ekgLineWidth:2,ekgAmplitudeMax:10,ekgSpeedBase:.5,ekgSpeedMax:2.5,ekgLeftColor:'#9b6b00',ekgMovingColor:'',ekgConsumedColor:'#2b1900',barTrackColor:'#2b1900',barFillColor:'#ffb000',barFillFollow:true,barHeight:8,tokenDisplay:'ekg',pillBg:'#2b1900',pillText:'#cc8c00',prismOnColor:'#ffc24b',modelVariant:'minimal',modeVariant:'minimal',sendVariant:'minimal',attachVariant:'minimal',rightBg:'#120b00',rightBgImage:'',rightWidth:260,rightTransparency:1,rightBlur:0,
+    }
   },
 ]
 
