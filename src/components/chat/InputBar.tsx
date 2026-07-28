@@ -9,9 +9,12 @@ import { buildSendMessagePayload } from './sessionRuntime'
 import { resolveSessionProfile } from './sessionProfile'
 import { reportRuntimeError } from '../../runtimeError'
 import { Paperclip, ArrowUp } from 'lucide-react'
+import type { AvailableCommand } from './acpTypes'
 import './InputBar.css'
 
 interface Props { sessionId: string | null; split?: boolean }
+
+const EMPTY_COMMANDS: readonly AvailableCommand[] = Object.freeze([])
 
 const FALLBACK_COMMANDS = [
   { cmd: '/model', args: ' <name>', info: '切换模型' },
@@ -37,7 +40,9 @@ export default forwardRef<{ send: () => void; attachFile: () => void; cancel: ()
     if (!sessionId) return null
     return s.sessions.find(session => session.id === sessionId || session.source === sessionId)?.source ?? sessionId
   })
-  const liveCommands = useStore(s => sessionSource ? (s.sessionLiveStats[sessionSource]?.commands || []) : [])
+  const liveCommands = useStore(state => sessionSource
+    ? (state.sessionLiveStats[sessionSource]?.commands ?? EMPTY_COMMANDS)
+    : EMPTY_COMMANDS)
   // 当前 session 是否正在生成（用于把发送按钮切成"停止"）
   const generating = useStore(s => sessionSource != null && (s.liveGeneratingSources || []).includes(sessionSource))
 
