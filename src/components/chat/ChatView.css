@@ -13,7 +13,7 @@
 .term-user-tag { background:var(--user-tag-bg,rgba(0,0,0,0.03)); color:var(--user-tag-text,var(--accent)); font-weight:600; margin-right:8px; padding:2px 8px; border-radius:4px; font-family:var(--font); }
 .term-user .term-p { display:inline; margin:0; }
 
-.term-assistant { position:relative; padding:2px 0; white-space:pre-wrap; }
+.term-assistant { position:relative; padding:2px 0; white-space:normal; }
 .term-row-user, .term-row-assistant, .term-row-reasoning {
   font-family:var(--msg-font,var(--chat-font,var(--mono)));
   color:var(--msg-text,var(--chat-text,var(--text)));

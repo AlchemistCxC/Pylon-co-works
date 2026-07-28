@@ -3,7 +3,8 @@ import { readFileSync } from 'node:fs'
 
 const css = readFileSync(new URL('../src/components/chat/ChatView.css', import.meta.url), 'utf8')
 
-assert.equal(css.includes('.term-row-assistant .term-assistant,'), true)
+assert.equal(css.includes('.term-assistant { position:relative; padding:2px 0; white-space:normal; }'), true)
+assert.equal(css.includes('.term-assistant { position:relative; padding:2px 0; white-space:pre-wrap; }'), false)
 assert.equal(css.includes('.term-row-assistant .term-assistant ol,'), true)
 assert.equal(css.includes('.term-row-assistant .term-assistant li'), true)
 assert.equal(css.includes('line-height:var(--msg-line-height,var(--chat-line-height,1.4));'), true)
