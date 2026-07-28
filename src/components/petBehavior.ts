@@ -31,6 +31,14 @@ export function shouldStartCodeEating({ hasCode, perched, random = Math.random }
   return hasCode && !perched && random() < 0.12
 }
 
+export function shouldStartTabletCoding({ generating, behavior, random = Math.random }: {
+  generating: boolean
+  behavior: PetBehavior
+  random?: () => number
+}) {
+  return generating && behavior === 'idle' && random() < 0.35
+}
+
 export function advanceCodeEatingBehavior(behavior: PetBehavior): PetBehavior {
   return NEXT_BEHAVIOR[behavior]
 }

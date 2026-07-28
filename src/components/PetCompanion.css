@@ -35,6 +35,14 @@
 .pet-companion.behavior-spitting-fragment .pixel-creature { animation:pet-spit .5s steps(2,end) 1; }
 .pet-code-fragment { position:absolute;left:74px;top:42px;color:var(--pet-glow);font:700 11px var(--mono);pointer-events:none;animation:pet-fragment-fly .5s steps(4,end) forwards; }
 .pet-speech-bubble { position:absolute;left:50%;bottom:94px;min-width:max-content;max-width:190px;transform:translateX(-50%);padding:6px 8px;border:1px solid var(--border);border-radius:5px;background:color-mix(in srgb,var(--bg-panel) 94%,transparent);box-shadow:0 5px 16px rgba(0,0,0,.16);color:var(--text);font:10px/1.4 var(--mono);pointer-events:none;animation:pet-comment-pop .24s steps(3,end); }
+.pet-tablet { position:absolute;left:50%;bottom:4px;width:58px;height:34px;transform:translateX(-50%);pointer-events:none;z-index:2; }
+.pet-tablet-screen { position:absolute;left:9px;top:0;width:40px;height:23px;border:3px solid #26343d;background:#101a20;box-shadow:inset 0 0 0 1px #58717d; }
+.pet-tablet-screen i { display:block;width:22px;height:2px;margin:3px 0 0 4px;background:var(--pet-glow);opacity:.8;animation:pet-tablet-code .6s steps(3,end) infinite; }
+.pet-tablet-screen i:nth-child(2) { width:14px;animation-delay:.2s; }
+.pet-tablet-screen i:nth-child(3) { width:26px;animation-delay:.4s; }
+.pet-tablet-keyboard { position:absolute;left:3px;bottom:0;width:52px;height:9px;background:#40535d;clip-path:polygon(12% 0,88% 0,100% 100%,0 100%); }
+.pet-companion.tablet-coding .pixel-creature { animation:pet-tablet-type .22s steps(2,end) infinite; }
+.pet-companion.tablet-coding .pixel-feet { animation:none; }
 .pixel-creature.mood-excited,.pixel-creature.mood-happy { animation:pet-hop .42s steps(2,end) infinite; }
 .pixel-creature.mood-error { animation:pet-shiver .18s steps(2,end) 5; }
 .pixel-creature.mood-sleepy { animation:pet-breathe 3.4s steps(2,end) infinite;filter:saturate(.72); }
@@ -51,10 +59,12 @@
 @keyframes pet-spit { 50% { transform:scale(var(--pet-scale,1)) translateX(-3px); } }
 @keyframes pet-fragment-fly { to { transform:translate(26px,-18px);opacity:0; } }
 @keyframes pet-comment-pop { from { opacity:0;transform:translateX(-50%) translateY(4px); } }
+@keyframes pet-tablet-type { 50% { transform:scale(var(--pet-scale,1)) translateY(1px) translateX(1px); } }
+@keyframes pet-tablet-code { 50% { opacity:.3;width:9px; } }
 @keyframes pet-shiver { 50% { transform:scale(var(--pet-scale,1)) translateX(1px); } }
 @keyframes pet-tail { 50% { transform:translateY(1px); } }
 @keyframes pet-feet { 50% { transform:translateY(1px); } }
 @keyframes pet-glow { 50% { opacity:.42; } }
 
 .app[data-ui-scheme="dark"] .pet-companion { --pet-body:#7fa7b7;--pet-mark:#c1dedf;--pet-eye:#10171c;--pet-glow:#8de8dd; }
-@media (prefers-reduced-motion:reduce) { .pet-companion,.pixel-creature,.pixel-tail,.pixel-antenna,.pixel-sparks,.pixel-feet,.pet-code-fragment,.pet-speech-bubble { animation:none!important;transition:none!important; } }
+@media (prefers-reduced-motion:reduce) { .pet-companion,.pixel-creature,.pixel-tail,.pixel-antenna,.pixel-sparks,.pixel-feet,.pet-code-fragment,.pet-speech-bubble,.pet-tablet-screen i { animation:none!important;transition:none!important; } }

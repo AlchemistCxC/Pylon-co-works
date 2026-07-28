@@ -1,7 +1,8 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { invoke } from '@tauri-apps/api/core'
-import { advanceCodeEatingBehavior, getCodeComment, shouldStartCodeEating, type PetBehavior } from './petBehavior'
+import { advanceCodeEatingBehavior, getCodeComment, shouldStartCodeEating, shouldStartTabletCoding, type PetBehavior } from './petBehavior'
 import { choosePetDestination, clampPetPosition } from './petMotion'
+import { useStore } from '../store'
 import './PetCompanion.css'
 
 type GrowthStage = 'seed' | 'sprout' | 'hopper' | 'guardian' | 'luminary'
@@ -126,10 +127,13 @@ export default function PetCompanion({ rightOpen = false, rightWidth = 0 }: { ri
   const [perched, setPerched] = useState(false)
   const [behavior, setBehavior] = useState<PetBehavior>('idle')
   const [comment, setComment] = useState('')
+  const [tabletCoding, setTabletCoding] = useState(false)
   const [dragging, setDragging] = useState(false)
   const [error, setError] = useState('')
   const shellRef = useRef<HTMLElement>(null)
   const dragRef = useRef<{ dx: number; dy: number } | null>(null)
+  const wasGeneratingRef = useRef(false)
+  const generating = useStore(s => (s.liveGeneratingSources || []).length > 0)
 
   const save = useCallback((next: PetState) => {
     setPet(next)
@@ -214,6 +218,14 @@ export default function PetCompanion({ rightOpen = false, rightWidth = 0 }: { ri
   }, [behavior, dragging, perched, wanderEnabled])
 
   useEffect(() => {
+    const generationStarted = generating && !wasGeneratingRef.current
+    const generationStopped = !generating && wasGeneratingRef.current
+    wasGeneratingRef.current = generating
+    if (generationStarted) setTabletCoding(shouldStartTabletCoding({ generating, behavior }))
+    if (generationStopped || behavior !== 'idle') setTabletCoding(false)
+  }, [behavior, generating])
+
+  useEffect(() => {
     if (behavior === 'idle') return
     const duration: Record<Exclude<PetBehavior, 'idle'>, number> = {
       'sniffing-code': 600,
@@ -269,10 +281,14 @@ export default function PetCompanion({ rightOpen = false, rightWidth = 0 }: { ri
   if (!pet) return error ? <div className="pet-load-error">宠物加载失败：{error}</div> : null
 
   return (
-    <section ref={shellRef} className={`pet-companion ${dragging ? 'dragging' : ''} ${perched ? 'perched' : ''} behavior-${behavior}`}
+    <section ref={shellRef} className={`pet-companion ${dragging ? 'dragging' : ''} ${perched ? 'perched' : ''} ${tabletCoding ? 'tablet-coding' : ''} behavior-${behavior}`}
       style={style} aria-label="长期陪伴宠物" onPointerDown={onPointerDown} onPointerMove={onPointerMove} onPointerUp={onPointerUp}>
       {behavior === 'spitting-fragment' && <span className="pet-code-fragment" aria-hidden="true">{'{}'}</span>}
       {comment && <div className="pet-speech-bubble" role="status">{comment}</div>}
+      {tabletCoding && <div className="pet-tablet" aria-label="宠物正在平板电脑上敲代码">
+        <span className="pet-tablet-screen"><i /><i /><i /></span>
+        <span className="pet-tablet-keyboard" />
+      </div>}
       <div className="pet-creature-hitbox" onDoubleClick={resumeWander}
         title={`${pet.name}：拖拽固定位置，双击恢复自主漫游`}>
         <PixelCreature stage={pet.stage} mood={pet.mood} walking={walking} />
