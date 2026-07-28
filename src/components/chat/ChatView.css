@@ -19,6 +19,13 @@
   color:var(--msg-text,var(--chat-text,var(--text)));
   line-height:var(--msg-line-height,var(--chat-line-height,1.4));
 }
+.term-row-assistant .term-assistant,
+.term-row-assistant .term-assistant p,
+.term-row-assistant .term-assistant ol,
+.term-row-assistant .term-assistant ul,
+.term-row-assistant .term-assistant li {
+  line-height:var(--msg-line-height,var(--chat-line-height,1.4));
+}
 .app[data-msg-style="bubble"] .term-row-user,
 .app[data-msg-style="bubble"] .term-row-assistant,
 .app[data-msg-style="bubble"] .term-row-reasoning {
@@ -68,9 +75,9 @@
 .term-li::before { content:'- '; color:var(--text-dim); }
 .term-p { margin:2px 0; }
 /* ReactMarkdown 列表缩进 */
-.term-assistant ol { padding-left:2em; margin:4px 0; }
-.term-assistant ul { padding-left:1.5em; margin:4px 0; }
-.term-assistant li { margin:2px 0; }
+.term-assistant ol { padding-left:2em; margin:0; }
+.term-assistant ul { padding-left:1.5em; margin:0; }
+.term-assistant li { margin:0; }
 .term-inline-code { font-family:var(--mono); color:var(--chat-code-color,#b47814); font-size:inherit; }
 
 /* ── 代码块（│ gutter 风格 — 对齐 Peri TUI code_block_lines）── */
