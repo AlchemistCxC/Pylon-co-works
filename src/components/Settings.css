@@ -74,6 +74,8 @@
 
 .set-bg-preview { width:24px; height:24px; border-radius:4px; background-size:cover; background-position:center; border:1px solid var(--border); cursor:pointer; flex-shrink:0; }
 .set-bg-preview:hover { border-color:var(--danger); opacity:0.8; }
+.set-bg-preview.error { border-color:var(--danger); background-image:none !important; }
+.set-bg-error { max-width:220px; color:var(--danger); font-size:11px; line-height:1.3; }
 
 .set-compact-row { display:flex; align-items:center; gap:6px; flex-wrap:wrap; padding:3px 0; }
 .set-compact-label { font-size:11px; color:var(--text-dim); flex-shrink:0; }

@@ -7,6 +7,7 @@ import SendWidget from './chat/SendWidget'
 import AttachWidget from './chat/AttachWidget'
 import ColorPopover from './ColorPopover'
 import { formatCacheReadTokens, formatTokenCount } from '../tokenFormat'
+import { toCssBackgroundImage } from '../backgroundImage'
 import './ControlCenter.css'
 import './chat/StatusBar.css'  // model/mode/send/attach widget 样式
 
@@ -253,7 +254,7 @@ export default function ControlCenter({ sessionId }: Props) {
 
   return (
     <div className={`control-center ${inputMode === 'cli' ? 'cli-mode' : ''} ${editMode ? 'cc-editing' : ''} cc-variant-${ccVariant}`}
-      style={{ '--cc-height': `${ccHeight}px`, '--cc-bg-height': `${ccBgHeight}px`, '--cc-bg': ccBg, '--cc-bg-image': ccBgImage ? `url(${ccBgImage})` : 'none' } as React.CSSProperties}>
+      style={{ '--cc-height': `${ccHeight}px`, '--cc-bg-height': `${ccBgHeight}px`, '--cc-bg': ccBg, '--cc-bg-image': toCssBackgroundImage(ccBgImage) } as React.CSSProperties}>
       {editMode && (
         <div className="cc-edit-hdr" onMouseDown={onHeightDrag}>
           <div className="cc-edit-hdr-bar" />

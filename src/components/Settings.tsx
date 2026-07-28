@@ -7,11 +7,13 @@ import { GLOBAL_PRESETS, pickZoneFields } from '../presets'
 import ColorPopover from './ColorPopover'
 import SettingsPreview from './SettingsPreview'
 import { reportRuntimeError } from '../runtimeError'
+import { resolveBackgroundImage } from '../backgroundImage'
 import './Settings.css'
 
 // ── helpers ──
 
 function BgImageRow({ label, value, onChange }: { label:string; value:string; onChange:(v:string)=>void }) {
+  const resolved = resolveBackgroundImage(value)
   const openFile = async () => {
     try {
       const { open } = await import('@tauri-apps/plugin-dialog')
@@ -23,8 +25,11 @@ function BgImageRow({ label, value, onChange }: { label:string; value:string; on
     <Row label={label}>
       <input type="text" value={value} onChange={e => onChange(e.target.value)} className="set-input" style={{width:'160px'}} placeholder="路径或 URL" />
       <button className="ps-btn sm" onClick={openFile}>选择</button>
-      {value && <div className="set-bg-preview" style={{backgroundImage:`url(${value})`}}
-        onClick={() => onChange('')} title="点击清除" />}
+      {value && <>
+        <div className={`set-bg-preview ${resolved.error ? 'error' : ''}`} style={{backgroundImage:resolved.cssValue}}
+          onClick={() => onChange('')} title={resolved.error ? `加载失败：${resolved.error}；点击清除` : '点击清除'} />
+        {resolved.error && <span className="set-bg-error" role="alert">{resolved.error}</span>}
+      </>}
     </Row>
   )
 }

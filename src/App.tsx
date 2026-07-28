@@ -16,6 +16,7 @@ import './App.css'
 import { getCurrentWindow } from '@tauri-apps/api/window'
 import { invoke } from '@tauri-apps/api/core'
 import { reportRuntimeError, type RuntimeErrorDetail } from './runtimeError'
+import { toCssBackgroundImage } from './backgroundImage'
 
 export default function App() {
   const [activeSession, setActiveSession] = useState<string | null>(null)
@@ -90,12 +91,12 @@ export default function App() {
   const cssVars = {
     '--t': s.transparency,
     '--blur': `${s.bgBlur}px`,
-    '--global-bg-image': s.globalBgImage ? `url(${s.globalBgImage})` : 'none',
+    '--global-bg-image': toCssBackgroundImage(s.globalBgImage),
     '--global-bg-color': (s as any).globalBgColor || '#e8e8ec',
     '--global-font': s.globalFont === 'mono' ? 'var(--mono)' : 'var(--font)',
     '--global-font-size': `${s.globalFontSize}px`,
     '--sidebar-bg': s.sidebarBg,
-    '--sidebar-bg-image': s.sidebarBgImage ? `url(${s.sidebarBgImage})` : 'none',
+    '--sidebar-bg-image': toCssBackgroundImage(s.sidebarBgImage),
     '--sidebar-width': `${s.sidebarWidth}px`,
     '--sidebar-transparency': s.sidebarTransparency,
     '--sidebar-blur': `${s.sidebarBlur}px`,
@@ -103,7 +104,7 @@ export default function App() {
     '--sidebar-name-size': `${s.sidebarNameSize}px`,
     '--sidebar-group-size': `${s.sidebarGroupSize}px`,
     '--chat-bg': s.chatBg,
-    '--chat-bg-image': s.chatBgImage ? `url(${s.chatBgImage})` : 'none',
+    '--chat-bg-image': toCssBackgroundImage(s.chatBgImage),
     '--chat-transparency': s.chatTransparency,
     '--chat-blur': `${s.chatBlur}px`,
     '--chat-font': s.chatFont === 'mono' ? 'var(--mono)' : 'var(--font)',
@@ -119,7 +120,7 @@ export default function App() {
     '--tool-name': s.toolNameColor, '--tool-summary': s.toolSummaryColor,
     '--user-tag-bg': s.userTagBg, '--user-tag-text': s.userTagText,
     '--input-bg': s.inputBg,
-    '--input-bg-image': s.inputBgImage ? `url(${s.inputBgImage})` : 'none',
+    '--input-bg-image': toCssBackgroundImage(s.inputBgImage),
     '--input-text': s.inputTextColor, '--input-placeholder': s.inputPlaceholder,
     '--input-send': s.inputSendBg, '--input-focus': s.inputFocusBorder,
     '--input-font-size': `${s.inputFontSize}px`, '--input-min-h': `${s.inputMinHeight}px`,
@@ -128,7 +129,7 @@ export default function App() {
     '--cli-text-color': s.cliTextColor || undefined,
     '--cli-line-padding': `${s.cliLinePadding ?? 6}px`,
     '--status-bg': s.statusBg,
-    '--status-bg-image': s.statusBgImage ? `url(${s.statusBgImage})` : 'none',
+    '--status-bg-image': toCssBackgroundImage(s.statusBgImage),
     '--ekg-w': `${s.ekgWidth}px`, '--ekg-font': `${s.ekgFontSize}px`,
     '--ekg-green': s.ekgGreen, '--ekg-yellow': s.ekgYellow, '--ekg-red': s.ekgRed,
     '--pill-bg': s.pillBg, '--pill-text': s.pillText,
@@ -141,7 +142,7 @@ export default function App() {
     '--cc-variant': s.ccVariant,
     '--spinner-color': s.spinnerColor || undefined, '--spinner-size': `${s.spinnerSize}px`,
     '--right-bg': s.rightBg,
-    '--right-bg-image': s.rightBgImage ? `url(${s.rightBgImage})` : 'none',
+    '--right-bg-image': toCssBackgroundImage(s.rightBgImage),
     '--right-width': `${s.rightWidth}px`,
     '--right-transparency': s.rightTransparency,
     '--right-blur': `${s.rightBlur}px`,
@@ -155,7 +156,7 @@ export default function App() {
   useEffect(() => {
     const root = document.documentElement
     root.style.setProperty('--global-bg-color', s.globalBgColor || '#e8e8ec')
-    root.style.setProperty('--global-bg-image', s.globalBgImage ? `url(${s.globalBgImage})` : 'none')
+    root.style.setProperty('--global-bg-image', toCssBackgroundImage(s.globalBgImage))
     root.style.setProperty('--t', String(s.transparency))
     root.style.setProperty('--blur', `${s.bgBlur}px`)
     document.body.dataset.uiScheme = s.uiScheme || 'light'
