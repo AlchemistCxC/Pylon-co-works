@@ -2,8 +2,14 @@ interface ModelChangeOptions {
   source: string
   nextModel: string
   previousModel?: string
-  writeModel: (model?: string) => void
+  writeModel: (model: string) => void
   invokeSet: (source: string, model: string) => Promise<unknown>
+}
+
+const DEFAULT_MODEL = 'default'
+
+function normalizeRollbackModel(previousModel?: string): string {
+  return typeof previousModel === 'string' && previousModel.trim() ? previousModel : DEFAULT_MODEL
 }
 
 export async function applySessionModelChange({
@@ -17,7 +23,7 @@ export async function applySessionModelChange({
   try {
     await invokeSet(source, nextModel)
   } catch (error) {
-    writeModel(previousModel)
+    writeModel(normalizeRollbackModel(previousModel))
     throw error
   }
 }

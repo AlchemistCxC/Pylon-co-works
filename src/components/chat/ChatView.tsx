@@ -9,14 +9,16 @@ import { AnimatePresence, motion } from 'motion/react'
 import Anser from 'anser'
 import GenerationFooter, { type GenerationSummary } from './GenerationFooter'
 import { resolveSpinnerFrames } from './spinnerFrames'
-import { isReplayEvent, resolveLoadedMessages, serializeLoadedMessages, shouldStartLiveGeneration } from './replayState'
-import { canPersistMessages, clearMessageStorage, messageStorageKey } from './messagePersistence'
-import { addGeneratingSource, removeGeneratingSource, updateSourceState } from './sessionEventState'
+import { isCurrentLoadGeneration, nextLoadGeneration, normalizeToolId, resolveLoadedMessages, resolveReplayEventMode, resolveTerminationScope, serializeLoadedMessages, settleReplayToolMessages, shouldAcceptToolCall, shouldStartLiveGeneration } from './replayState'
+import { canPersistMessages, clearMessageStorage, messageStorageKey, persistMessageSnapshot } from './messagePersistence'
+import { addGeneratingSource, isKnownSource, isRenderedSource, removeGeneratingSource, updateSourceState } from './sessionEventState'
 import { resolveToolVisualStatus } from './toolStatus'
 import { extractMode, extractModelConfig, extractUsage, sessionResponseObject, type PeriDonePayload, type PeriUpdatePayload, type SessionResponse } from './acpTypes'
 import { highlightCode } from './codeHighlight'
 import { sanitizeHtml } from './htmlSanitizer'
 import { reportRuntimeError } from '../../runtimeError'
+import { applyCancelEvent, beginCancel, createCancelState, rejectCancelCommand, resolveCancelCommand, type CancelState } from './cancelState'
+import { clearChatSourceRefs } from './sessionCleanup'
 import './ChatView.css'
 
 
@@ -42,6 +44,7 @@ const MOCK_MESSAGES: Message[] = [
 ]
 
 const ChatView = React.memo(function ChatView({ sessionId, rightOpen = false, rightWidth = 260 }: Props) {
+  const sessions = useStore(state => state.sessions)
   const bottomRef = useRef<HTMLDivElement>(null)
   const [messages, setMessages] = useState<Message[]>(!IS_TAURI ? MOCK_MESSAGES : [])
   const [generating, setGenerating] = useState(false)
@@ -54,7 +57,9 @@ const ChatView = React.memo(function ChatView({ sessionId, rightOpen = false, ri
   const generationStartRef = useRef<Record<string, number>>({})
   const generationFramesRef = useRef<Record<string, string[]>>({})
   const replayingSourcesRef = useRef<Record<string, Message[]>>({})
+  const replayToolIdsRef = useRef<Record<string, string[]>>({})
   const loadGenerationRef = useRef<Record<string, number>>({})
+  const cancelStateRef = useRef<Record<string, CancelState>>({})
   const prevSessionRef = useRef(sessionId)
   useEffect(() => {
     if (sessionId === prevSessionRef.current) return
@@ -82,6 +87,9 @@ const ChatView = React.memo(function ChatView({ sessionId, rightOpen = false, ri
     setMessages(cached)
     const sourceGenerating = (useStore.getState().liveGeneratingSources || []).includes(s.source)
     setGenerating(sourceGenerating)
+    cancelStateRef.current[s.source] = sourceGenerating
+      ? { source: s.source, status: 'generating' }
+      : createCancelState(s.source)
     if (sourceGenerating) genStart.current = generationStartRef.current[s.source] || Date.now()
 
     const profile = useStore.getState().profiles.find(p => p.id === s.profileId)
@@ -105,15 +113,17 @@ const ChatView = React.memo(function ChatView({ sessionId, rightOpen = false, ri
     }
 
     if (s.periId) {
-      const loadGeneration = (loadGenerationRef.current[s.source] || 0) + 1
+      const loadGeneration = nextLoadGeneration(loadGenerationRef.current[s.source])
       loadGenerationRef.current[s.source] = loadGeneration
       replayingSourcesRef.current[s.source] = []
+      replayToolIdsRef.current[s.source] = []
       invoke<SessionResponse>('load_persisted_session', { source: s.source, periId: s.periId, cwd: s.workdir || undefined }).then(response => {
         const res = sessionResponseObject(response)
-        if (loadGenerationRef.current[s.source] !== loadGeneration) return
+        if (!isCurrentLoadGeneration(loadGenerationRef.current[s.source], loadGeneration)) return
         const replayed = replayingSourcesRef.current[s.source] || []
         const resolved = resolveLoadedMessages({ loadSucceeded: true, cached, replayed })
         delete replayingSourcesRef.current[s.source]
+        delete replayToolIdsRef.current[s.source]
         messagesBySourceRef.current[s.source] = resolved
         const serialized = serializeLoadedMessages(resolved)
         try {
@@ -126,7 +136,7 @@ const ChatView = React.memo(function ChatView({ sessionId, rightOpen = false, ri
         syncMode(s.source, res)
       }).catch(error => {
         reportRuntimeError('恢复会话', error)
-        if (loadGenerationRef.current[s.source] !== loadGeneration) return
+        if (!isCurrentLoadGeneration(loadGenerationRef.current[s.source], loadGeneration)) return
         delete replayingSourcesRef.current[s.source]
         createSession()  // Fallback
       })
@@ -137,16 +147,44 @@ const ChatView = React.memo(function ChatView({ sessionId, rightOpen = false, ri
   }, [sessionId])
 
   useEffect(() => {
+    const activeSources = new Set(sessions.map(session => session.source))
+    const knownSources = new Set([
+      ...Object.keys(messagesBySourceRef.current),
+      ...Object.keys(generationStartRef.current),
+      ...Object.keys(generationFramesRef.current),
+      ...Object.keys(loadGenerationRef.current),
+      ...Object.keys(replayingSourcesRef.current),
+      ...Object.keys(replayToolIdsRef.current),
+      ...Object.keys(cancelStateRef.current),
+    ])
+    for (const source of knownSources) {
+      if (!activeSources.has(source)) {
+        clearChatSourceRefs({
+          messagesBySource: messagesBySourceRef.current,
+          generationStart: generationStartRef.current,
+          generationFrames: generationFramesRef.current,
+          loadGeneration: loadGenerationRef.current,
+          replayingSources: replayingSourcesRef.current,
+          replayToolIds: replayToolIdsRef.current,
+          cancelState: cancelStateRef.current,
+        }, source)
+      }
+    }
+  }, [sessions, sessionId])
+
+  useEffect(() => {
+    const isActiveSource = (source: string) => isKnownSource(source, useStore.getState().sessions.map(session => session.source))
     const updateSourceMessages = (source: string, updater: (prev: Message[]) => Message[], replay = false) => {
+      if (!isActiveSource(source)) return
       const next = replay
         ? updateSourceState(replayingSourcesRef.current, source, updater)
         : updateSourceState(messagesBySourceRef.current, source, updater)
       if (replay) return
       const session = useStore.getState().sessions.find(item => item.source === source)
       if (session) {
-        try { localStorage.setItem(messageStorageKey(session.id), JSON.stringify(next)) } catch {}
+        persistMessageSnapshot(session.id, next, localStorage)
       }
-      if (sessionRef.current === source) setMessages(next)
+      if (isRenderedSource(source, sessionRef.current)) setMessages(next)
     }
     const startGenerating = (source: string) => {
       const current = useStore.getState().liveGeneratingSources || []
@@ -169,10 +207,12 @@ const ChatView = React.memo(function ChatView({ sessionId, rightOpen = false, ri
     const unlisten = Promise.all([
       listen<{ source: string; content: string; replay?: boolean }>('peri:user', (event) => {
         const { source, content, replay: eventReplay = false } = event.payload
-        const replay = isReplayEvent({
+        if (!isActiveSource(source)) return
+        const replayMode = resolveReplayEventMode({
           eventReplay,
           loadInProgress: replayingSourcesRef.current[source] !== undefined,
         })
+        const replay = replayMode !== 'live'
         const update = (prev: Message[]) => [
           ...prev.map(m => ({ ...m, running: false })),
           { id: 'user-' + Date.now(), role: 'user' as const, sender: source, content, time: new Date().toLocaleTimeString() },
@@ -184,7 +224,8 @@ const ChatView = React.memo(function ChatView({ sessionId, rightOpen = false, ri
         const spinnerState = useStore.getState()
         generationFramesRef.current[source] = resolveSpinnerFrames(spinnerState.spinnerFramePreset, spinnerState.spinnerCustomFrames)
         startGenerating(source)
-        if (sessionRef.current === source) {
+        cancelStateRef.current[source] = { source, status: 'generating' }
+        if (isRenderedSource(source, sessionRef.current)) {
           genStart.current = generationStartRef.current[source]
           tokenCount.current = 0
           setGenerating(true)
@@ -202,13 +243,15 @@ const ChatView = React.memo(function ChatView({ sessionId, rightOpen = false, ri
 
       listen<PeriUpdatePayload>('peri:update', (event) => {
         const source = event.payload.source
+        if (!isActiveSource(source)) return
         const upd = event.payload?.update
         if (!source || !upd) return
         const variant = upd.sessionUpdate
-        const replay = isReplayEvent({
+        const replayMode = resolveReplayEventMode({
           eventReplay: upd._meta?.periReplay === true,
           loadInProgress: replayingSourcesRef.current[source] !== undefined,
         })
+        const replay = replayMode !== 'live'
         if (replay && !replayingSourcesRef.current[source]) replayingSourcesRef.current[source] = []
         switch (variant) {
           case 'agent_message_chunk': {
@@ -237,19 +280,24 @@ const ChatView = React.memo(function ChatView({ sessionId, rightOpen = false, ri
           }
           case 'tool_call': {
             const rawInput = upd.rawInput
+            const toolId = normalizeToolId(upd.toolCallId)
+            if (replay && !shouldAcceptToolCall(toolId, replayToolIdsRef.current[source] || [])) break
+            if (replay && toolId) replayToolIdsRef.current[source] = [...(replayToolIdsRef.current[source] || []), toolId]
             const title = upd.title || '?'
             const inputStr = formatToolInput(title, rawInput) || (typeof rawInput === 'string' ? rawInput.slice(0, 80) : '')
             updateSourceMessages(source, prev => [...prev, {
-              id: 'tool-' + upd.toolCallId, role: 'tool', sender: 'tool:' + title, content: '', time: new Date().toLocaleTimeString(),
+              id: 'tool-' + (toolId || `missing-${prev.length}`), role: 'tool', sender: 'tool:' + title, content: '', time: new Date().toLocaleTimeString(),
               toolName: title, toolInput: inputStr, running: true,
             }], replay)
             break
           }
           case 'tool_call_update': {
             const rawOutput = upd.rawOutput
+            const toolId = normalizeToolId(upd.toolCallId)
+            if (!toolId) break
             const outputStr = typeof rawOutput === 'string' ? rawOutput : JSON.stringify(rawOutput, null, 2)
             const lines = outputStr ? outputStr.split(/\n/).filter((l: string) => l.trim()).length : 0
-            updateSourceMessages(source, prev => prev.map(m => m.id === 'tool-' + upd.toolCallId && m.running
+            updateSourceMessages(source, prev => prev.map(m => m.id === 'tool-' + toolId && m.running
               ? { ...m, toolOutput: outputStr, toolOutputLines: lines, toolStatus: upd.status, running: false }
               : m), replay)
             break
@@ -257,7 +305,7 @@ const ChatView = React.memo(function ChatView({ sessionId, rightOpen = false, ri
           case 'usage_update': {
             const usage = extractUsage(upd)
             useStore.getState().setSessionLiveStats(source, usage)
-            if (sessionRef.current === source) tokenCount.current = usage.tokensUsed
+            if (isRenderedSource(source, sessionRef.current)) tokenCount.current = usage.tokensUsed
             break
           }
           case 'available_commands_update':
@@ -283,27 +331,48 @@ const ChatView = React.memo(function ChatView({ sessionId, rightOpen = false, ri
 
       listen<PeriDonePayload>('peri:done', (event) => {
         const source = event.payload.source
+        if (!isActiveSource(source)) return
         if (!source) return
-        stopGenerating(source)
-        if (sessionRef.current === source) {
-          const start = generationStartRef.current[source] || genStart.current
-          const elapsedMs = Date.now() - start
-          setSummary({ elapsedMs, tokenCount: tokenCount.current, completedFrame: '', reason: 'done' })
-          setGenerating(false)
+        const replay = replayingSourcesRef.current[source] !== undefined
+        const terminationScope = resolveTerminationScope(replay, event.payload.replay === true)
+        if (terminationScope === 'live') {
+          stopGenerating(source)
+          if (isRenderedSource(source, sessionRef.current)) {
+            const start = generationStartRef.current[source] || genStart.current
+            const elapsedMs = Date.now() - start
+            setSummary({ elapsedMs, tokenCount: tokenCount.current, completedFrame: '', reason: 'done' })
+            setGenerating(false)
+          }
         }
-        updateSourceMessages(source, prev => prev.map(m => ({ ...m, running: false })))
+        updateSourceMessages(source, prev => settleReplayToolMessages(prev.map(m => ({ ...m, running: false }))), replay)
       }),
 
-      listen<{ source: string; error: string; cancelled?: boolean }>('peri:error', (event) => {
+      listen<{ source: string; error: string; cancelled?: boolean; replay?: boolean }>('peri:error', (event) => {
         const { source, error } = event.payload
+        if (!isActiveSource(source)) return
         if (!source) return
-        stopGenerating(source)
-        updateSourceMessages(source, prev => [...prev.map(m => ({ ...m, running: false })), {
+        const replay = replayingSourcesRef.current[source] !== undefined
+        const terminationScope = resolveTerminationScope(replay, event.payload.replay === true)
+        const cancelState = cancelStateRef.current[source] || createCancelState(source)
+        const cancellationFailed = terminationScope === 'live'
+          && cancelState.status === 'canceling'
+          && event.payload.cancelled !== true
+        if (terminationScope === 'live') {
+          cancelStateRef.current[source] = applyCancelEvent(
+            source,
+            event.payload.cancelled === true
+              ? { kind: 'success' }
+              : { kind: 'error', error },
+            cancelState,
+          )
+          if (!cancellationFailed) stopGenerating(source)
+        }
+        updateSourceMessages(source, prev => [...settleReplayToolMessages(prev.map(m => ({ ...m, running: false }))), {
           id: 'err-' + Date.now(), role: 'assistant', sender: 'system', content: error, time: new Date().toLocaleTimeString(),
-        }])
-        if (sessionRef.current === source) {
+        }], replay)
+        if (terminationScope === 'live' && !cancellationFailed && isRenderedSource(source, sessionRef.current)) {
           const start = generationStartRef.current[source] || genStart.current
-          setSummary({ elapsedMs: Date.now() - start, tokenCount: tokenCount.current, completedFrame: '', reason: event.payload.cancelled ? 'cancelled' : 'error' })
+          setSummary({ elapsedMs: Date.now() - start, tokenCount: tokenCount.current, completedFrame: '', reason: event.payload.cancelled === true ? 'cancelled' : 'error' })
           setGenerating(false)
         }
       }),
@@ -334,11 +403,12 @@ const ChatView = React.memo(function ChatView({ sessionId, rightOpen = false, ri
   useEffect(() => {
     const ownerId = messageOwnerRef.current
     const source = sessionRef.current
-    if (!canPersistMessages({ ownerId, source, renderedSessionId: sessionId }) || messages.length === 0) return
+    const renderedSource = sessionRef.current
+    if (!canPersistMessages({ ownerId, source, renderedSessionId: sessionId, renderedSource }) || messages.length === 0) return
     const ownedSource = source as string
     const ownedSessionId = ownerId as string
     messagesBySourceRef.current[ownedSource] = messages
-    try { localStorage.setItem('pylon-msgs-' + ownedSessionId, JSON.stringify(messages)) } catch {}
+    try { persistMessageSnapshot(ownedSessionId, messages, localStorage) } catch {}
   }, [messages, sessionId])
 
   // dev/浏览器模式（无 Tauri）即使无 session 也渲染 mock 对话，方便调样式
@@ -375,11 +445,16 @@ const ChatView = React.memo(function ChatView({ sessionId, rightOpen = false, ri
           onStop={generating ? () => {
             if (!sessionRef.current) return
             const source = sessionRef.current
+            const currentCancelState = cancelStateRef.current[source] || { source, status: 'generating' as const }
+            const begun = beginCancel(source, currentCancelState)
+            if (!begun.shouldInvoke) return
+            cancelStateRef.current[source] = begun.state
             invoke('cancel_prompt', { source }).then(() => {
-              const start = generationStartRef.current[source] || genStart.current
-              setSummary({ elapsedMs: Date.now() - start, tokenCount: tokenCount.current, completedFrame: '', reason: 'cancelled' })
-              setGenerating(false)
-            }).catch(error => reportRuntimeError('取消生成', error))
+              cancelStateRef.current[source] = resolveCancelCommand(source, cancelStateRef.current[source] || begun.state)
+            }).catch(error => {
+              cancelStateRef.current[source] = rejectCancelCommand(source, cancelStateRef.current[source] || begun.state, error)
+              reportRuntimeError('取消生成', error)
+            })
           } : undefined} />
         <div ref={bottomRef} />
       </div>

@@ -24,4 +24,17 @@ await assert.rejects(() => applySessionModelChange({
 }), /agent unavailable/)
 assert.deepEqual(writes, ['model-b-new', 'model-b-old'], '后端失败必须回滚旧模型')
 
+for (const previousModel of [undefined, '', '   ', null as unknown as string]) {
+  writes.length = 0
+  await assert.rejects(() => applySessionModelChange({
+    source: 'local:c',
+    nextModel: 'model-c-new',
+    previousModel,
+    writeModel: model => writes.push(model),
+    invokeSet: async () => { throw new Error('agent unavailable') },
+  }), /agent unavailable/)
+  assert.deepEqual(writes, ['model-c-new', 'default'], `非法旧模型 ${String(previousModel)} 必须回滚 default`)
+  assert.ok(!writes.includes(undefined), '回滚不能写入 undefined')
+}
+
 console.log('sessionModelState 回归测试通过')

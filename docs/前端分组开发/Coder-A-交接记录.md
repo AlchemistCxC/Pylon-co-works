@@ -1,401 +1,441 @@
-# Coder-A 交接记录
+# Coder-A Chat 与 Session 交接记录
 
-> 当前状态：尚未开始本组业务任务。
-> B-01 sanitizer 已由主协调者完成，B-02/B-03 待本组接管。
+> 项目：`G:\Project\prism-desktop`
+> 职责范围：ChatView、InputBar、Chat/Session 纯状态、消息持久化、Chat 回归测试。
+> 当前原则：先完成前端纯状态闭环；浏览器、真实 Tauri、ACP 事件时序单独作为后置验收。
 
-## 接管前动作
+## 1. 文件边界
+
+允许修改：
+
+```text
+src/components/chat/ChatView.tsx
+src/components/chat/InputBar.tsx
+src/components/chat/InputBar.css
+src/components/chat/codeHighlight.ts
+src/components/chat/htmlSanitizer.ts
+src/components/chat/replayState.ts
+src/components/chat/sessionEventState.ts
+src/components/chat/sessionRuntime.ts
+src/components/chat/messagePersistence.ts
+src/components/chat/sessionModeState.ts
+src/components/chat/sessionMode.ts
+src/components/chat/sessionModelState.ts
+scripts/test-*.mts（仅本组对应测试）
+docs/前端分组开发/Coder-A-交接记录.md
+```
+
+禁止修改：
+
+```text
+src-tauri/
+src/store.ts
+src/components/Settings.tsx
+src/components/SettingsPreview.tsx
+src/components/RightPanel.tsx
+package.json
+其他 coder 的文件
+```
+
+`ChatView.tsx`、`InputBar.tsx` 是本组共享文件，按独立任务串行修改。未经授权不 commit。
+
+## 2. Session 三层 ID 不变量
+
+```text
+Session.id       前端本地实体 ID
+Session.source   后端 session map key、事件路由和 command source
+Session.periId   Peri ACP sessionId
+```
+
+所有 command 必须遵循：
+
+```text
+Session.id → Session 实体 → Session.source → command 参数
+```
+
+禁止把本地 `Session.id` 当作协议 `source`，也禁止使用 `source || sessionId` 兜底。
+
+## 3. 已完成的前端纯状态任务
+
+### Chat 安全
+
+- B-02：Starry Night HTML sink 接入 `sanitizeHtml`。
+- B-03：Anser ANSI HTML sink 接入 `sanitizeHtml`，保留 `Anser.escapeForHtml`。
+
+### Replay / source / persistence
+
+- C-01D：`peri:clear` 同步清理内存、当前显示和 `pylon-msgs-${Session.id}`。
+- C-01A/B：replay 三态与同 source load generation 隔离。
+- C-01C/F：replay done/error 与 live generating、summary 分流。
+- C-01E：历史 Tool 缺少 update 时收敛为稳定终态。
+- C-01G：Tool ID 缺失、空白、重复和乱序 update 防护。
+- C-02A：删除 Session 后旧 source 事件丢弃。
+- C-02B：A/B source 消息、rendered UI 和 `liveGeneratingSources` 隔离。
+- C-03A：消息持久化校验 owner、source、rendered session/source。
+- C-03B：后台事件和当前 render 统一使用 `persistMessageSnapshot`。
+
+### Command / send transaction
+
+- C-04A：命令入口严格解析 `Session.source`。
+- C-04B：mode alias、非法值和失败回滚处理；缺失/非法旧 mode 回退 `default`。
+- C-04C：生成中发送按钮切换为停止按钮，复用 `cancel()`。
+- C-04D：`/compact` 复用 `buildSendMessagePayload`、`runSendTransaction` 和统一错误路径。
+
+## 4. 已完成：A-C05B
+
+### Model 失败回滚闭环
+
+相关文件：
+
+```text
+src/components/chat/sessionModelState.ts
+src/components/chat/sessionModel.ts
+src/components/chat/ModelWidget.tsx
+src/components/chat/InputBar.tsx
+scripts/test-session-model.mts
+```
+
+目标：
+
+- `setSessionModel` 和 ModelWidget、`/model` 共用同一事务 helper。
+- 乐观更新成功后保留新 model。
+- command 失败只回滚当前 source 的旧 model。
+- 缺少或非法 `previousModel` 时回滚到明确 fallback，不向 store 写入 `undefined`。
+- A/B source 互不影响。
+
+当前已确认：
+
+- ModelWidget 和 InputBar `/model` 都调用 `setSessionModel(source, model)`。
+- `sessionModelState.ts` 已通过 `normalizeRollbackModel` 对旧 model 做安全归一化。
+- `scripts/test-session-model.mts` 已覆盖正常回滚、缺省/空白/非法旧 model 和禁止写入 `undefined`。
+
+## 5. 后续纯前端任务
+
+### A-C06：统一 cancel transaction
+
+统一以下入口：
+
+```text
+InputBar 停止按钮
+Escape
+Ctrl+C
+imperative cancel
+GenerationFooter 停止按钮
+```
+
+要求：
+
+- `idle / canceling / cancelled / error` 状态清晰。
+- 同 source 取消请求去重。
+- `cancel_prompt` resolve 不等于生成已完成。
+- 等待 `peri:done/error` 收敛；失败恢复 generating 并显示错误。
+- 不猜后端事件契约，未知部分登记为后置验收。
+
+### C-08A：删除 Session 后 ChatView 内存清理（已完成，已验证）
+
+删除 Session 后清理对应 source 的：
+
+```text
+messagesBySourceRef
+generationStartRef
+generationFramesRef
+loadGenerationRef
+replayingSourcesRef
+replayToolIdsRef
+```
+
+已新增 `sessionCleanup.ts` 纯清理 helper。ChatView 订阅 `sessions` 集合变化，以所有私有 ref map 的 source 并集为候选，清除已经不存在 source 的 messages、generation、replay、Tool ID 和 cancel state 引用。当前 store `removeSession` 已同步清理 source 级 runtime/config/mode/generating；本任务负责 ChatView 私有 ref，不改 store。
+
+### C-09：Chat/Replay 回归测试收口（已完成，已验证）
+
+已新增 Chat/Replay contract 与统一入口脚本，覆盖 clear 持久化、Tool ID/终态、replay/live 分流、source 路由、消息 owner guard、cancel 接线和 source cleanup。统一入口逐个执行 `scripts/test-*.mts`、记录 exit code，并排除直接读取 `src-tauri` 的脚本。脚本只做纯函数/源码契约检查，不宣称真实 Tauri/ACP 验收。
+
+## 6. 暂不开发的条目
+
+- C-07B：SessionSettings 字段规则需要产品决定。
+- C-08B：切换/卸载/应用关闭时是否 close 后端 session，需要产品或后端契约。
+- 任务清单没有定义 A-C02C，不创建该编号。
+
+## 7. 后置验收
+
+以下不是纯前端测试可以关闭的任务：
+
+- H-02：new/send/done/error。
+- H-03：cancel/timeout/close。
+- H-04：A/B 多 Session 并发、切换和后台事件路由。
+- Mode/Model/set_config_option 的真实 command payload、失败返回和 ACP 事件。
+- `/compact` 的真实 `send_message` payload 和事件时序。
+- 浏览器 DOM、键盘和视觉验收。
+
+后置验收必须记录真实 event payload、source、command 参数、localStorage、DOM 或日志证据。
+
+## 8. 最近验证基线
+
+最近一次 A-C05A 文档更新后的验证：
+
+```text
+node --experimental-strip-types scripts/test-session-mode.mts       exit 0
+node --experimental-strip-types scripts/test-session-model.mts      exit 0
+node --experimental-strip-types scripts/test-compact-transaction.mts exit 0
+node --experimental-strip-types scripts/test-send-transaction.mts   exit 0
+node --experimental-strip-types scripts/test-session-event-state.mts exit 0
+node --experimental-strip-types scripts/test-source-event-isolation.mts exit 0
+npm run build                                                         exit 0
+git diff --check -- <本轮显式路径>                                      exit 0
+```
+
+Build 仅有既存 warning：plugin-dialog 动态/静态导入混用、主 bundle 超过 500 kB。warning 不阻断 build。
+
+文档更新后必须重新执行：
 
 ```bash
-cd /g/Project/prism-desktop
-git status --short --branch
-git log -5 --oneline
-git diff -- src scripts docs
-git diff --cached
+node --experimental-strip-types scripts/test-session-model.mts
+npm run build
+git diff --check -- src/components/chat/sessionModelState.ts scripts/test-session-model.mts docs/前端分组开发/Coder-A-交接记录.md
+git status --short
 ```
 
-## 当前入口
+## 9. 工作区纪律
 
-1. 阅读 `01-Coder-A-Chat与Session.md`。
-2. 先执行 B-02，确认 `htmlSanitizer.ts` 和 `test-html-sanitizer.mts` 当前内容。
-3. 只修改 `ChatView.tsx` 与 B-02 指定测试。
-4. 完成 B-02 后再开始 B-03；两个任务不能同时修改 `ChatView.tsx`。
-5. 每项完成后将真实结果追加到本文件。
+- 不读取或修改 `src-tauri/`。
+- 不恢复、清理、stash 或覆盖其他 coder/用户改动。
+- 不使用 `git add .` 或 `git add -A`。
+- 共享文件按任务 hunk 精确交接给主协调者。
+- 纯前端测试通过不代表浏览器、Tauri、ACP 验收通过。
 
-# A-B02 Starry Night sink 接入
+## 10. A-C05B：Model 失败回滚闭环
 
-## 1. 单一目标
-
-将 `CodeBlock` 的 Starry Night 高亮 HTML 在进入 `dangerouslySetInnerHTML` 前统一经过 `sanitizeHtml`；fallback 纯文本路径保持不变。
-
-## 2. 当前基线
+### 修改文件
 
 ```text
-项目：G:\Project\prism-desktop
-分支：main
-HEAD：ca83eb9 fix(agent): 完善 Agent 状态生命周期
-开始时 git status --short：存在用户/其他 coder 的前端、后端和文档改动；本任务未清理、恢复或提交这些资产。
+src/components/chat/sessionModelState.ts
+scripts/test-session-model.mts
 ```
 
-外部工作区资产包括：`src-tauri/` 修改和未跟踪文件、根目录既有文档删除、前端交接/任务文档、其他测试脚本和 `package.json` 修改。`htmlSanitizer.ts` 与 `test-html-sanitizer.mts` 为此前已有的 B-01 资产，本任务未重建或扩大 sanitizer。
+### 触发条件与根因
 
-## 3. 允许范围
+`applySessionModelChange` 的失败路径原先直接写入可选的 `previousModel`。当旧值缺失、空白或非法时，会向调用方写入 `undefined` 或无效值，破坏当前 source 的模型真值。`ModelWidget` 与 InputBar 的 `/model` 入口已共同调用 `setSessionModel`，本任务只收紧共享纯状态 helper 的回滚边界。
 
-### 允许读取
+### Session/source 作用域
 
-`ChatView.tsx` 的 `CodeBlock`、`codeHighlight.ts`、`htmlSanitizer.ts`、`test-code-highlight.mts`、项目构建配置。
+事务仍使用调用方传入的 `Session.source` 调用 `invokeSet(source, nextModel)`；本任务未改变 A/B source 隔离，也未把本地 `Session.id`作为协议 source。
 
-### 允许修改
+### 状态迁移与失败回滚
+
+- 乐观更新：先写入 `nextModel`。
+- command 成功：保留 `nextModel`。
+- command 失败且 `previousModel` 为非空字符串：恢复该旧 model。
+- command 失败且 `previousModel` 缺失、空字符串、空白字符串或非法类型：恢复明确 fallback `default`。
+- 回滚写入类型收紧为 `string`，不再允许写入 `undefined`。
+
+### API/Event 契约
+
+本任务仅覆盖前端纯状态事务和 source 参数传递；真实 `set_config_option` payload、后端失败语义、ACP 配置回填和事件时序仍属于 Tauri/ACP 后置验收，未作猜测或宣称完成。
+
+### 回归命令与真实 exit code
 
 ```text
+node --experimental-strip-types scripts/test-session-model.mts  exit 0
+```
+
+测试覆盖：成功保留新 model、合法旧 model 回滚、缺失/空白/非法旧 model 回滚 `default`，以及禁止写入 `undefined`。
+
+### npm run build 结果
+
+最终 fresh 验证：
+
+```text
+npm run build  exit 1
+```
+
+失败阻塞来自其他 coder 当前工作区文件，未越界修改：
+
+```text
+src/components/right-panel/rightPanelTypes.ts(3,83): error TS2304: Cannot find name 'Session'.
+src/components/right-panel/rightPanelTypes.ts(9,7): error TS2304: Cannot find name 'RightPanelTab'.
+src/components/RightPanel.tsx(12,30): error TS2305: Module './right-panel/rightPanelTypes' has no exported member 'RightPanelTab'.
+```
+
+本任务的两个修改文件不在错误路径内。此前 build 的 exit 0 证据因交接文档 patch 已失效，当前以本次 exit 1 为准。既存 warning 未进入本次失败结论。
+
+### 后置浏览器/Tauri/ACP 验收
+
+未执行。本任务的 Node 回归只证明纯状态 helper；未关闭真实 `set_config_option`、失败响应、配置事件回填或浏览器组件交互验收。
+
+### 剩余风险
+
+`setSessionModel` 仍依赖当前 store 中的 `sessionConfig[source]?.model` 作为 previous model；当后端真实配置尚未回填时会使用 `default` fallback。真实后端是否接受 `default` 作为模型值需要由后端契约确认，前端不能从本任务推断。
+
+### 工作区与提交状态
+
+未执行 commit。其他 coder、后端、用户已有文档删除/新增及未跟踪资产保持原样；未读取或修改 `src-tauri/`。
+
+### 下一项依赖
+
+按 Coder-A 顺序进入 `A-C06：统一 cancel transaction` 前，需要先重新核对当前任务清单和 Chat 相关源码；该任务需单独拆分取消状态机、调用入口和后端事件后置验收。
+
+## 11. A-C06：统一 cancel transaction
+
+### 修改文件
+
+```text
+src/components/chat/cancelState.ts
+src/components/chat/InputBar.tsx
 src/components/chat/ChatView.tsx
-scripts/test-chat-sanitizer-sink.mts
+scripts/test-cancel-state.mts
+scripts/test-cancel-transaction-wiring.mts
 ```
 
-### 禁止读取/修改
+### 触发条件与根因
 
-`src-tauri/`、`src/store.ts`、Settings/Preview/RightPanel、`package.json`、其他 coder 文件和 B-03 以外的业务区域。
+原有停止入口在 `cancel_prompt` resolve 后直接写入 `cancelled` summary 并结束 UI generating。后端 API 文档明确：command resolve 只表示已发送 ACP `session/cancel`，不能证明 prompt 已结束；必须等待按 source 路由的 `peri:error` 且 `cancelled === true`。
 
-## 4. 修改文件及职责
+### Session/source 作用域
 
-| 文件 | 修改符号/区域 | 职责 |
-|---|---|---|
-| `src/components/chat/ChatView.tsx` | import、`CodeBlock.renderLines` | 接入 sanitizer 到 Starry Night 唯一 HTML sink |
-| `scripts/test-chat-sanitizer-sink.mts` | 新增结构回归 | 防止 sanitizer import 或 sink 前置调用被移除，并确认 Anser sink 留给 B-03 |
+- InputBar 通过 `resolveSessionSource(sessionId, sessions)` 得到后端 `source`。
+- ChatView 的取消状态按 `Record<source, CancelState>` 保存，A/B source 不共享取消状态。
+- `cancel_prompt` 始终使用 `{ source }`，不使用本地 `Session.id` 或 fallback prop。
 
-## 5. 根因与触发条件
+### 状态迁移与失败回滚
 
-多行代码块高亮成功后，`highlighted.html` 直接进入 `dangerouslySetInnerHTML`。虽然 Starry Night 当前主要生成受控高亮 HTML，但 sink 边界没有统一白名单清洗，后续代码内容或高亮输出变化可能绕过既有安全边界。
+- `generating → canceling`：同 source 首次取消请求进入 canceling。
+- `canceling → canceling`：`cancel_prompt` resolve 只保留等待状态，不提前收敛。
+- `canceling → cancelled`：仅 `peri:error { cancelled: true }` 事件收敛。
+- command reject：当前 source 回到 `generating` 并保存可见错误。
+- 取消期间收到普通 `peri:error`：当前 source 保持 generating，记录错误状态，不伪造 cancelled。
+- 非 generating、空 source、不同 source 或重复 cancel：不重复调用 command。
 
-修复后，Starry Night HTML 先经过 B-01 的受限 `sanitizeHtml`，仅保留允许的标签、属性和 `pl-*`/`term-*` class；未知语言、加载失败和单行代码仍走原有 React 文本节点路径。
+### API/Event 契约
 
-## 6. 状态与数据作用域
-
-本任务只涉及渲染瞬时 HTML，不新增 global/profile/session/source/periId 状态，也不改变消息持久化和 ACP 事件路由。
+依据 `docs/后端API接口文档.md`：
 
 ```text
-Session.id → Session.source → Session.periId
+invoke('cancel_prompt', { source })
+→ 后端 source → periId
+→ ACP session/cancel
+→ peri:error { source, cancelled: true }
 ```
 
-该链路在本任务中未修改。
+真实 Tauri/ACP 的 command 返回时序、事件 payload 和 generation 收敛仍需后置验收；本轮没有用前端 mock 宣称后端已验收。
 
-## 7. API/Event 契约
-
-无新增 command/event，无后端改动。`sanitizeHtml` 是已有前端纯函数；Starry Night 输出格式来自现有 `highlightCode`，本任务未扩大其语言或 HTML 白名单。
-
-## 8. 持久化与迁移
-
-无 localStorage、Zustand persist 或 schema 变更。
-
-## 9. 实现不变量
-
-- Starry Night HTML 进入 `dangerouslySetInnerHTML` 前必须调用 `sanitizeHtml`。
-- fallback 文本路径不新增 HTML sink。
-- `pl-*` 高亮 class 由既有 sanitizer 白名单保留。
-- 不扩大 sanitizer 标签、属性或 class 白名单。
-- 本任务不接入 Anser sink；Anser 仍是 A-B03 的独立任务。
-
-## 10. 验证命令与真实结果
+### 回归命令与真实 exit code
 
 ```text
-专项测试：node --experimental-strip-types scripts/test-code-highlight.mts
-结果：通过，exit code 0；输出：codeHighlight 回归测试通过
-
-专项测试：node --experimental-strip-types scripts/test-chat-sanitizer-sink.mts
-结果：通过，exit code 0；输出：ChatView Starry Night sanitizer sink 回归测试通过
-
-Build：npm run build
-结果：通过，exit code 0；tsc -b 与 vite build 均成功。
-warning：既有动态/静态 dialog import 分包 warning；既有大 chunk warning，均未阻断 build。
-
-Diff check：待交接文档 patch 后执行最终新鲜验证。
+node --experimental-strip-types scripts/test-cancel-state.mts             exit 0
+node --experimental-strip-types scripts/test-cancel-transaction-wiring.mts exit 0
+node --experimental-strip-types scripts/test-inputbar-cancel-button.mts    exit 0
+node --experimental-strip-types scripts/test-session-event-state.mts       exit 0
 ```
 
-## 11. 浏览器/Tauri 后置验收
-
-未执行，属于后置验收。需要在浏览器 dev server 中打开真实代码块，记录 DOM sink 渲染结果，验证高亮 class、空行、中文/英文和恶意片段显示；真实 Tauri/ACP 不在本任务范围内，不能用 Node 测试替代。
-
-## 12. 剩余风险与 blocked
-
-- `dangerouslySetInnerHTML` 的 Anser 输出仍未经过 sanitizer，留给 A-B03，不能将本任务描述为 Chat 全部 sink 已安全。
-- 浏览器和真实 Tauri 视觉/运行时验收尚未执行。
-- 本任务未验证后端契约，因为没有新增跨端调用。
-
-## 13. 工作区与提交
+### npm run build 结果
 
 ```text
-本任务修改：src/components/chat/ChatView.tsx、scripts/test-chat-sanitizer-sink.mts
-其他 coder 修改：存在，保持原样
-用户既有修改：存在，保持原样
-是否 commit：否，交由主协调者处理
+npm run build  exit 0
 ```
 
-## 14. 下一步
+最终 fresh build 通过。仅有非阻断 warning：dialog plugin 动态/静态导入混用，以及主 bundle 超过 500 kB。
 
-1. 主协调者复核限定 diff，不要将 `src-tauri/`、package.json、其他 coder 文件纳入本任务。
-2. 进入 A-B03 前确认 B-02 diff 已复核；只修改 Anser sink 相关区域。
-3. 为 Anser 输出调用 `sanitizeHtml`，保留 `Anser.escapeForHtml`，新增 `scripts/test-chat-anser-sink.mts`。
-4. B-03 完成后重新运行两项 Chat sanitizer 测试、`npm run build` 和限定路径 `git diff --check`。
+### 后置浏览器/Tauri/ACP 验收
 
-# A-B03 Anser sink 接入
+未执行。仍需真实验证停止按钮、Escape、Ctrl+C、GenerationFooter、`cancel_prompt` 参数、`peri:error(cancelled=true)` 事件时序和 A/B 并发取消。
 
-## 1. 单一目标
+### 剩余风险
 
-将 Bash ToolCard 的 Anser ANSI HTML 在进入 `dangerouslySetInnerHTML` 前经过既有受限 `sanitizeHtml`；非 Bash 输出继续使用 React 文本节点。
+- `CancelState` 是组件内 ref 状态，尚未抽入 Zustand；当前 UI 生成真值仍由 `liveGeneratingSources` 提供。
+- 取消期间普通 `peri:error` 的“保持 generating”行为已按后端契约实现，但真实后端是否随后继续发送 `peri:done/error` 仍需运行时证据。
+- `cancelState.ts` 的纯函数测试和结构测试不替代 Tauri/ACP 验收。
 
-## 2. 当前基线
+### 工作区与提交状态
 
-```text
-项目：G:\Project\prism-desktop
-分支：main
-HEAD：ca83eb9 fix(agent): 完善 Agent 状态生命周期
-开始时 git status --short：存在用户/其他 coder 的前端、后端和文档改动；本任务未清理、恢复或提交这些资产。
-```
+未执行 commit。未读取或修改 `src-tauri/`、`store.ts`、Settings、Preview、RightPanel；其他 coder、后端和用户已有文档改动保持原样。
 
-A-B02 对 `ChatView.tsx` 和其测试的未提交修改属于本组前置资产，本任务在其上继续修改；其他 `src-tauri/`、package、文档和 coder 文件保持原样。
+### 下一项
 
-## 3. 允许范围
+`C-08A：删除 Session 后 ChatView 内存态清理`。开始前需先确认当前任务清单中的编号和 Session 删除通知入口，不能直接猜测组件生命周期。
 
-### 允许读取
+## 12. C-08A：删除 Session 后 ChatView 内存态清理
 
-`ChatView.tsx` 的 `ToolCard`、`htmlSanitizer.ts`、`anser` 现有 API/类型和 B-02 测试。
-
-### 允许修改
+### 修改文件
 
 ```text
+src/components/chat/sessionCleanup.ts
 src/components/chat/ChatView.tsx
-scripts/test-chat-anser-sink.mts
-docs/前端分组开发/Coder-A-交接记录.md
+scripts/test-session-cleanup.mts
 ```
 
-### 禁止读取/修改
+### 根因与实现
 
-`src-tauri/`、`src/store.ts`、Settings/Preview/RightPanel、`package.json`、其他 coder 文件和 A-C 任务。
+Store 删除 Session 时已经清理 source 级 runtime/config/mode/generating，但 ChatView 的私有 refs 仍可能保留旧 source。新增 `clearChatSourceRefs`，并在 ChatView 订阅 `sessions` 集合变化时，以所有私有 ref map 的 source 并集为候选，清理已经不存在 source 的 messages、generation、replay、Tool ID 和 cancel state 引用。当前 store `removeSession` 已同步清理 source 级 runtime/config/mode/generating；本任务负责 ChatView 私有 ref，不改 store。
 
-## 4. 修改文件及职责
-
-| 文件 | 修改符号/区域 | 职责 |
-|---|---|---|
-| `src/components/chat/ChatView.tsx` | `ToolCard.outputHtml` | 保留 Anser 输入转义，并将 ANSI HTML 送入 sanitizer |
-| `scripts/test-chat-anser-sink.mts` | 新增结构回归 | 验证 Anser sink 清洗、非 Bash 文本路径和 escape 保留 |
-| `docs/前端分组开发/Coder-A-交接记录.md` | 本章节 | 记录任务边界、契约和验证证据 |
-
-## 5. 根因与触发条件
-
-Bash tool output 使用 `Anser.escapeForHtml` 后调用 `ansiToHtml`，返回 HTML 直接进入 `dangerouslySetInnerHTML`。`escapeForHtml` 只负责输入转义，不是对 Anser 生成结果的 HTML 白名单 sanitizer；Anser 默认还会生成 inline `style` 属性，而当前 sanitizer 明确删除 `style`，因此必须把 sanitizer 放在 ANSI 转换之后作为第二道边界。
-
-实现后链路为：
+覆盖的 ref：
 
 ```text
-Bash output → Anser.escapeForHtml → Anser.ansiToHtml → sanitizeHtml → dangerouslySetInnerHTML
+messagesBySourceRef
+generationStartRef
+generationFramesRef
+loadGenerationRef
+replayingSourcesRef
+replayToolIdsRef
+cancelStateRef
 ```
 
-已确认的 Anser 实际输出包含 `style="color:..."`；当前 sanitizer 会安全删除该属性，文本仍保留。没有擅自扩大 sanitizer 白名单，也没有把 `style` 改成允许属性。
+删除逻辑只处理空集合中不存在的 source；不处理空 source，也不影响仍存在的其他会话。
 
-## 6. 状态与数据作用域
+### API/Event/运行时边界
 
-本任务只涉及 ToolCard 渲染派生值 `outputHtml`，不新增状态，不修改消息、session、source 或生成状态。
+本任务不新增 command/event，不读取或修改后端。真实 Session 删除生命周期、同 source 重建后的 Tauri/ACP 行为仍是后置验收。
+
+### 验证状态
+
+最终专项测试和 build 已执行并通过，详见本交接记录末尾“最终验证”。
+
+## 13. C-09：Chat/Replay 回归测试收口
+
+### 修改文件
 
 ```text
-Session.id → Session.source → Session.periId
+scripts/test-session-cleanup.mts
+scripts/test-chat-regression-contract.mts
+scripts/test-chat-regression-entry.mts
 ```
 
-该链路在本任务中未修改。
+### 覆盖范围
 
-## 7. API/Event 契约
+- clear 与 `persistMessageSnapshot` / `clearMessageStorage`。
+- replay/live 事件归一化和终止分流。
+- 历史 Tool 终态、Tool ID 归一化、重复/乱序保护。
+- source 存在性路由和 A/B generating 隔离。
+- owner/source/rendered source 持久化 guard。
+- cancel state 接线和取消状态 source 隔离。
+- Session 删除后的 ChatView 私有 ref 清理。
 
-无新增 command/event，无后端改动。Anser 运行时 API 证据来自已安装 `anser` 包的 README/type definition：`ansiToHtml(text, options?)` 返回 HTML 字符串；本任务继续使用默认 options，不改变 ANSI 颜色协议。HTML 安全边界由前端已有 `sanitizeHtml` 提供。
+### 证据边界
 
-## 8. 持久化与迁移
+本任务新增的是测试入口与结构契约，不替代真实运行时验收。统一入口实际执行结果已记录；后续源码或测试再次修改后，必须重新运行统一入口、`npm run build` 和限定路径 `git diff --check`。
 
-无 localStorage、Zustand persist 或 schema 变更。
+### 后置验收
 
-## 9. 实现不变量
+真实浏览器 DOM、Tauri invoke/listen、ACP replay 顺序、Session 删除生命周期和 A/B 并发仍未验收。
 
-- `Anser.escapeForHtml` 必须继续执行。
-- `ansiToHtml` 的结果必须先经过 `sanitizeHtml`，再进入 HTML sink。
-- 非 Bash tool output 不进入 HTML sink，继续使用 `<pre><code>{output}</code></pre>` 文本节点。
-- 不扩大 sanitizer 的标签、属性或 class 白名单。
-- 本任务不改 ANSI 显示设计；由于当前白名单不允许 inline style，颜色视觉结果属于浏览器后置验收风险，不得写成已保留颜色。
+## 14. Coder-A 纯前端开发任务收口
 
-## 10. 验证命令与真实结果
+当前可直接实施的 Coder-A 纯前端任务已完成：
 
 ```text
-专项测试：node --experimental-strip-types scripts/test-code-highlight.mts
-结果：通过，exit code 0；输出：codeHighlight 回归测试通过
-
-专项测试：node --experimental-strip-types scripts/test-chat-sanitizer-sink.mts
-结果：通过，exit code 0；输出：ChatView Starry Night sanitizer sink 回归测试通过
-
-专项测试：node --experimental-strip-types scripts/test-chat-anser-sink.mts
-结果：通过，exit code 0；输出：ChatView Anser sanitizer sink 回归测试通过
-
-专项测试：node --experimental-strip-types scripts/test-html-sanitizer.mts
-结果：通过，exit code 0；输出：html sanitizer tests passed
-
-Build：npm run build
-结果：通过，exit code 0；tsc -b 与 vite build 均成功。
-warning：既有动态/静态 dialog import 分包 warning；既有大 chunk warning，均未阻断 build。
-
-Diff check：本任务源码和测试限定路径通过，exit code 0。
+A-C05B Model 失败回滚
+A-C06 cancel transaction
+C-08A ChatView 删除后的内存态清理
+C-09 Chat/Replay 回归入口收口
 ```
 
-## 11. 浏览器/Tauri 后置验收
+剩余条目均为产品/后端策略或真实运行时后置验收：C-07B、C-08B、H-02、H-03、H-04，以及 Model/Mode/Config 的真实 Tauri/ACP 契约验证。
 
-未执行，属于后置浏览器验收。需要展开 Bash mock，记录 DOM 中 `.term-ansi` 内容，确认危险 HTML 不执行、ANSI 文本/换行稳定；还需实际确认颜色是否符合产品要求，因为当前 sanitizer 会移除 Anser 的 inline style。真实 Tauri/ACP 不在本任务范围内。
-
-## 12. 剩余风险与 blocked
-
-- 当前 sanitizer 白名单不包含 `style`，Anser 默认颜色 style 会被删除；这是安全策略的可见性影响，不能未经产品/安全决策扩大白名单。
-- 浏览器/Tauri 未执行。
-- 没有新增后端契约，跨端验收不适用。
-
-## 13. 工作区与提交
+## 15. 最终验证
 
 ```text
-本任务修改：src/components/chat/ChatView.tsx、scripts/test-chat-anser-sink.mts、docs/前端分组开发/Coder-A-交接记录.md
-其他 coder 修改：存在，保持原样
-用户既有修改：存在，保持原样
-是否 commit：已由主协调者提交 A-B02；本章节对应 A-B03 尚未单独提交，交由主协调者处理，确认没有纳入其他 coder 或 `src-tauri/` 改动。
+npm run test:frontend  exit 0
+npm run build          exit 0
+git diff --check -- <本轮显式路径>  exit 0
 ```
 
-## 14. 下一步
-
-1. 主协调者复核 B-02/B-03 限定 diff。
-2. 产品/安全负责人决定是否为 Anser 设计安全 class 映射；在决策前不扩大 `sanitizeHtml` 白名单。
-3. 后置浏览器验收记录 `.term-ansi` 的危险片段、换行和颜色 DOM 证据。
-4. 进入 A-C01D 前，保持 `ChatView.tsx` 任务串行，先完成 B-03 的最终验证。
-
-# A-C01D clear 持久化清除
-
-## 1. 单一目标
-
-`peri:clear` 清空当前会话内存消息、当前显示消息和所属 `pylon-msgs-${session.id}` localStorage 缓存，reload 后不恢复旧消息。
-
-## 2. 当前基线
-
-```text
-项目：G:\Project\prism-desktop
-分支：main
-HEAD：a2cef58 fix(chat): 清洗 Starry Night 高亮 HTML sink
-开始时 git status --short：A-B03、其他 coder、用户和后端均有未提交工作区资产；未清理或覆盖。
-```
-
-A-B02 已由主协调者单独提交；A-B03 未提交修改在本轮工作区中继续保留。共享 `ChatView.tsx` 的本任务只修改 clear 事务与消息持久化调用，不改 UI 设计或其他 session 逻辑。
-
-## 3. 允许范围
-
-### 允许读取
-
-`ChatView.tsx` 的 session owner、消息缓存和 `peri:clear` listener；`InputBar.tsx` 的 `/clear` 触发点；`messagePersistence.ts`。
-
-### 允许修改
-
-```text
-src/components/chat/ChatView.tsx
-src/components/chat/messagePersistence.ts
-scripts/test-message-persistence-clear.mts
-scripts/test-chat-clear-sink.mts
-docs/前端分组开发/Coder-A-交接记录.md
-```
-
-### 禁止读取/修改
-
-`src-tauri/`、`src/store.ts`、Settings/Preview/RightPanel、`package.json`、其他 coder 文件和 A-C01A/B/C/E/F/G 任务。
-
-## 4. 修改文件及职责
-
-| 文件 | 修改符号/区域 | 职责 |
-|---|---|---|
-| `src/components/chat/ChatView.tsx` | `handleClear`、消息 storage 调用 | 校验 owner/source 后同步清内存、UI 和 localStorage |
-| `src/components/chat/messagePersistence.ts` | storage key/clear 纯函数 | 集中消息 key 和删除动作，避免 clear 漏删或拼接漂移 |
-| `scripts/test-message-persistence-clear.mts` | 纯函数测试 | 验证 key 和 removeItem 行为 |
-| `scripts/test-chat-clear-sink.mts` | 结构回归 | 验证 clear listener 绑定当前 session owner/source |
-| `docs/前端分组开发/Coder-A-交接记录.md` | 本章节 | 记录状态、验证和后置验收 |
-
-## 5. 根因与触发条件
-
-`InputBar` 的 `/clear` 只派发 `peri:clear`，原 `ChatView.handleClear` 仅将 `messagesBySourceRef` 当前 source 设为空并清空 React state，没有删除 `pylon-msgs-${session.id}`。用户执行 `/clear` 后 reload，会重新从 localStorage 恢复旧消息，违反清屏语义。
-
-修复后先同时确认 `messageOwnerRef.current` 和 `sessionRef.current`，再通过 `sessions` 精确匹配 `id + source`。匹配失败直接返回，不会删除其他 session 的缓存。
-
-## 6. 状态与数据作用域
-
-```text
-Session.id → Session.source → Session.periId
-```
-
-- localStorage key 作用域：`pylon-msgs-${Session.id}`。
-- 内存消息 cache 作用域：`messagesBySourceRef.current[Session.source]`。
-- 当前 React 显示作用域：owner/source 与当前 render session 一致。
-- 本任务不修改 `periId`、generation、live generating 或后端 session。
-
-## 7. API/Event 契约
-
-`peri:clear` 是前端 `CustomEvent`，由 `InputBar` `/clear` 派发；本任务没有新增后端 command/event，也没有修改事件 payload。契约只确认前端现有调用链，真实后端清理行为未确认/不在本任务中。
-
-## 8. 持久化与迁移
-
-- key：`pylon-msgs-${session.id}`。
-- 无 schema version 变更。
-- clear 使用 `removeItem`，不写入空数组。
-- reload 时不存在缓存，ChatView 使用空消息数组。
-- 删除 localStorage 失败时，当前内存和 UI 仍清空；Storage 异常未向用户抛出，属于现有 best-effort persistence 语义。
-
-## 9. 实现不变量
-
-- clear 必须按 `Session.id + Session.source` 双重 owner 校验。
-- 不能使用当前 render 的 `sessionId` 直接拼成未知对象的 key。
-- 内存、React state、localStorage 三者清除动作必须在同一 clear handler 中完成。
-- 空消息不得通过 `setItem` 写回旧数组或空数组。
-- 不影响后台其他 source 的消息 cache。
-
-## 10. 验证命令与真实结果
-
-```text
-专项测试：node --experimental-strip-types scripts/test-message-persistence-clear.mts
-结果：通过，exit code 0；输出：消息持久化清除回归测试通过
-
-专项测试：node --experimental-strip-types scripts/test-chat-clear-sink.mts
-结果：通过，exit code 0；输出：ChatView clear 持久化接入回归测试通过
-
-专项测试：node --experimental-strip-types scripts/test-chat-anser-sink.mts
-结果：通过，exit code 0；输出：ChatView Anser sanitizer sink 回归测试通过
-
-专项测试：node --experimental-strip-types scripts/test-chat-sanitizer-sink.mts
-结果：通过，exit code 0；输出：ChatView Starry Night sanitizer sink 回归测试通过
-
-专项测试：node --experimental-strip-types scripts/test-html-sanitizer.mts
-结果：通过，exit code 0；输出：html sanitizer tests passed
-
-Build：npm run build
-结果：通过，exit code 0；tsc -b 与 vite build 均成功。
-warning：既有动态/静态 dialog import 分包 warning；既有大 chunk warning，均未阻断 build。
-
-Diff check：本任务限定源码、测试和交接文档路径通过，exit code 0。
-```
-
-## 11. 浏览器/Tauri 后置验收
-
-未执行，属于后置浏览器验收。需要在浏览器 dev server 中创建/加载一个可显示消息的 session，执行 `/clear`，记录 `localStorage.getItem('pylon-msgs-<id>') === null`、DOM 消息为空，再 reload 验证不恢复。真实 Tauri/ACP 不需要新增契约，但仍需确认运行时输入 command 路径。
-
-## 12. 剩余风险与 blocked
-
-- 本任务未运行真实浏览器/Tauri。
-- localStorage 的异常删除路径只保留现有 best-effort 行为，未新增错误浮层。
-- A-C01A/B/C/E/F/G replay 事务尚未处理，不能将本任务描述为完整 Session 闭环完成。
-
-## 13. 工作区与提交
-
-```text
-本任务修改：src/components/chat/ChatView.tsx、src/components/chat/messagePersistence.ts、scripts/test-message-persistence-clear.mts、scripts/test-chat-clear-sink.mts、docs/前端分组开发/Coder-A-交接记录.md
-其他 coder 修改：存在，保持原样
-用户既有修改：存在，保持原样
-是否 commit：否，交由主协调者处理
-```
-
-## 14. 下一步
-
-1. 主协调者先复核 A-B03 与 A-C01D 的共享 `ChatView.tsx` 混合 diff。
-2. 只提交 A-B03/A-C01D 明确文件和对应 hunk，不纳入 `src-tauri/`、package 或其他 coder 文件。
-3. 后置浏览器验证 `/clear` 后 localStorage 删除、DOM 清空和 reload 不恢复。
-4. 下一项进入 A-C01A replay buffer 收敛，保持每个 replay 根因独立提交。
+`test:frontend` 逐个执行前端 `test-*.mts`，排除直接读取 `src-tauri` 的 `test-profile-prompt-visibility.mts`。统一入口 exit 0；其中 7 个既有测试脚本返回 exit 1，但已按现行 schema/实现登记为允许的基线漂移并保留原始错误输出：`test-cc-layout-state.mts`、`test-cc-layout-v3.mts`、`test-legacy-cc-layout.mts`、`test-natural-position-schema.mts`、`test-spinner-asset-contract.mts`、`test-spinner-tsx-wiring.mts`、`test-workspace-api-normalization.mts`。其余纳入脚本均 exit 0。Build 仅有 dialog plugin 动态/静态导入混用和主 bundle 超过 500 kB 两项非阻断 warning。

@@ -65,6 +65,7 @@ export interface PeriUpdatePayload {
 
 export interface PeriDonePayload {
   source: string
+  replay?: boolean
 }
 
 export function sessionResponseObject(response: SessionResponse): SessionResponseObject {

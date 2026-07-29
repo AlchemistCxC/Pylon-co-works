@@ -6,9 +6,11 @@ import { setSessionModel } from './sessionModel'
 import { setSessionMode } from './sessionMode'
 import { runSendTransaction } from './sendTransaction'
 import { buildSendMessagePayload } from './sessionRuntime'
+import { resolveSessionSource } from './sessionCommandState'
 import { resolveSessionProfile } from './sessionProfile'
+import { beginCancel, createCancelState, rejectCancelCommand, resolveCancelCommand, type CancelState } from './cancelState'
 import { reportRuntimeError } from '../../runtimeError'
-import { Paperclip, ArrowUp } from 'lucide-react'
+import { Paperclip, ArrowUp, Square } from 'lucide-react'
 import type { AvailableCommand } from './acpTypes'
 import './InputBar.css'
 
@@ -36,15 +38,22 @@ export default forwardRef<{ send: () => void; attachFile: () => void; cancel: ()
   const sessions = useStore(s => s.sessions)
   const addSession = useStore(s => s.addSession)
   const inputMode = useStore(s => s.inputMode)
-  const sessionSource = useStore(s => {
-    if (!sessionId) return null
-    return s.sessions.find(session => session.id === sessionId || session.source === sessionId)?.source ?? sessionId
-  })
+  const sessionSource = useStore(s => resolveSessionSource(sessionId, s.sessions))
   const liveCommands = useStore(state => sessionSource
     ? (state.sessionLiveStats[sessionSource]?.commands ?? EMPTY_COMMANDS)
     : EMPTY_COMMANDS)
   // 当前 session 是否正在生成（用于把发送按钮切成"停止"）
   const generating = useStore(s => sessionSource != null && (s.liveGeneratingSources || []).includes(sessionSource))
+  const cancelStateRef = useRef<CancelState>(createCancelState(sessionSource || ''))
+
+  useEffect(() => {
+    if (cancelStateRef.current.source !== (sessionSource || '')) {
+      cancelStateRef.current = createCancelState(sessionSource || '')
+    }
+    if (sessionSource && generating && cancelStateRef.current.status !== 'canceling') {
+      cancelStateRef.current = { source: sessionSource, status: 'generating' }
+    }
+  }, [sessionSource, generating])
 
   const sessionProfile = resolveSessionProfile(sessionId, sessions, profiles)
   const persona = sessionProfile?.persona || ''
@@ -90,17 +99,12 @@ export default forwardRef<{ send: () => void; attachFile: () => void; cancel: ()
       const isCtrlC = e.ctrlKey && (e.key === 'c' || e.key === 'C') && !window.getSelection()?.toString()
       if (isEsc || isCtrlC) {
         e.preventDefault()
-        const s = useStore.getState().sessions.find(s => s.id === sessionId || s.source === sessionId)
-        const src = s?.source || sessionId
-        invoke('cancel_prompt', { source: src }).catch(error => {
-          const detail = reportRuntimeError('取消生成', error)
-          setSendError(detail.message)
-        })
+        cancel()
       }
     }
     window.addEventListener('keydown', onGlobalKey)
     return () => window.removeEventListener('keydown', onGlobalKey)
-  }, [sessionId, sessionSource])
+  }, [sessionId, sessionSource, generating])
 
   const execCommand = async (cmd: string, rest: string) => {
     switch (cmd) {
@@ -141,7 +145,27 @@ export default forwardRef<{ send: () => void; attachFile: () => void; cancel: ()
         break
       }
       case '/new': addSession(`session-${Date.now().toString(36)}`); break
-      case '/compact': await invoke('send_message', { source: sessionSource || sessionId, content: '/compact', persona }); break
+      case '/compact': {
+        const s = useStore.getState().sessions.find(item => item.id === sessionId || item.source === sessionId)
+        if (!s || !sessionSource || s.source !== sessionSource) {
+          setSendError('当前会话不可用')
+          return false
+        }
+        return runSendTransaction({
+          send: () => invoke('send_message', buildSendMessagePayload({
+            session: s,
+            content: '/compact',
+            persona,
+            attachments: attached.map(file => file.path),
+          })),
+          onSuccess: () => {
+            setValue('')
+            setAttached([])
+            setSendError('')
+          },
+          onError: error => setSendError(String(error)),
+        })
+      }
       case '/export': {
         const s = useStore.getState().sessions.find(x => x.id === sessionId || x.source === sessionId)
         if (s?.periId) {
@@ -197,10 +221,15 @@ export default forwardRef<{ send: () => void; attachFile: () => void; cancel: ()
   }
 
   const cancel = async () => {
-    if (!sessionId) return
+    if (!sessionId || !sessionSource) return
+    const begun = beginCancel(sessionSource, cancelStateRef.current)
+    if (!begun.shouldInvoke) return
+    cancelStateRef.current = begun.state
     try {
-      await invoke('cancel_prompt', { source: sessionSource || sessionId })
+      await invoke('cancel_prompt', { source: sessionSource })
+      cancelStateRef.current = resolveCancelCommand(sessionSource, cancelStateRef.current)
     } catch (error) {
+      cancelStateRef.current = rejectCancelCommand(sessionSource, cancelStateRef.current, error)
       const detail = reportRuntimeError('取消生成', error)
       setSendError(detail.message)
     }
@@ -270,8 +299,9 @@ export default forwardRef<{ send: () => void; attachFile: () => void; cancel: ()
           placeholder={inputMode === 'cli' ? '' : '输入消息...（Enter 发送，Shift+Enter 换行，/ 命令）'}
           rows={1} />
         {!split && (
-          <button className="input-btn send" onClick={send} title="Send (Enter)">
-            <ArrowUp size={18} />
+          <button className={`input-btn ${generating ? 'stop' : 'send'}`} onClick={generating ? cancel : send}
+            title={generating ? '停止生成 (Esc / Ctrl+C)' : 'Send (Enter)'} aria-label={generating ? '停止生成' : '发送'}>
+            {generating ? <Square size={16} /> : <ArrowUp size={18} />}
           </button>
         )}
       </div>

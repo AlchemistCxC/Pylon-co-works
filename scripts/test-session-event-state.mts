@@ -1,6 +1,8 @@
 import { strict as assert } from 'node:assert'
 import {
   addGeneratingSource,
+  isKnownSource,
+  isRenderedSource,
   removeGeneratingSource,
   updateSourceState,
 } from '../src/components/chat/sessionEventState.ts'
@@ -21,5 +23,9 @@ assert.deepEqual(generating, ['local:a', 'local:b'], '生成状态应按 source 
 
 generating = removeGeneratingSource(generating, 'local:a')
 assert.deepEqual(generating, ['local:b'], 'A done/error 只应结束 A 的生成态')
+assert.equal(isKnownSource('local:a', ['local:a', 'local:b']), true)
+assert.equal(isKnownSource('local:deleted', ['local:a', 'local:b']), false)
+assert.equal(isRenderedSource('local:b', 'local:b'), true)
+assert.equal(isRenderedSource('local:a', 'local:b'), false)
 
 console.log('sessionEventState 回归测试通过')

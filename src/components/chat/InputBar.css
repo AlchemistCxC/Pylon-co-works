@@ -27,6 +27,8 @@
 .input-btn svg { opacity:0.4; }
 .input-btn:hover { background:var(--bg-hover); border-color:var(--border-focus); }
 .input-btn:hover svg { opacity:0.7; }
+.input-btn.stop { color:var(--danger,#FF6B80); border-color:var(--danger,#FF6B80); }
+.input-btn.stop svg { opacity:0.7; }
 
 .input-textarea {
   flex:1; background:var(--input-bg,var(--bg-input)); border:1px solid var(--border);

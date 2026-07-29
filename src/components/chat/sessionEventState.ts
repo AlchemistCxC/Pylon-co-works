@@ -15,3 +15,11 @@ export function addGeneratingSource(sources: string[], source: string): string[]
 export function removeGeneratingSource(sources: string[], source: string): string[] {
   return sources.filter(item => item !== source)
 }
+
+export function isKnownSource(source: string, knownSources: readonly string[]): boolean {
+  return source.length > 0 && knownSources.includes(source)
+}
+
+export function isRenderedSource(source: string, renderedSource: string | null): boolean {
+  return source.length > 0 && renderedSource === source
+}
