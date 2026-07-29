@@ -12,6 +12,7 @@ import { runAgentSwitchTransaction } from './agentSwitchTransaction'
 import './Settings.css'
 import { normalizeAgentStatus, statusLabel } from './settings/agentTypes'
 import { beginReconnect, completeReconnect, failReconnect } from './settings/agentState'
+import ConfigOptionsPanel from './settings/ConfigOptionsPanel'
 
 // ── helpers ──
 
@@ -494,6 +495,9 @@ export default function Settings({ onClose }: { onClose?: () => void }) {
               <div className="set-hint" style={{marginTop:16}}>
                 切换 Agent 后需重启 Prism Desktop 生效。
               </div>
+              <Group title="动态配置">
+                <ConfigOptionsPanel />
+              </Group>
             </Tabs.Content>
 
             {/* ═══ 会话 ═══ */}

@@ -16,7 +16,7 @@ export interface SessionConfig {
   models?: string[]        // 可选 model 列表
   thinkingEffort?: string
   context1m?: boolean
-  raw?: unknown            // 原始 configOptions（兜底/调试）
+  raw?: import('./components/chat/acpTypes').ConfigOption[]            // 原始 configOptions（兜底/调试）
 }
 export interface Session { id: string; periId?: string; name: string; source: string; profileId: string; createdAt: number; lastActiveAt: number; platform: string; workdir: string; sessionPrompt: string; skills: string[]; hooks: string[]; autoName: string }
 export interface UserMapping { id: string; name: string; avatar?: string }
