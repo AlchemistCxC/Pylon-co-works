@@ -5,6 +5,7 @@ import { loadSessions, persistSessions } from './sessionPersistence'
 import { CC_LAYOUT_SCHEMA_VERSION, DEFAULT_CC_LAYOUT, cloneCcLayout, cloneCcPositions, normalizeCcLayout, normalizeCcPositions, setCcHiddenState, setCcScaleState, updateCcPlacementState, updateCcPositionState } from './ccLayoutState'
 import type { CcLayoutV3, CcWidgetPlacement } from './ccLayoutState'
 import { createCustomPreset, deleteCustomPreset, normalizeCustomPresets, pickCustomPresetTheme, upsertCustomPreset } from './customPresets'
+import { normalizeThemeMigrationState } from './themeMigration'
 import type { CustomPreset } from './customPresets'
 import { clearSessionSourceState, updateSessionLiveStats } from './components/chat/sessionRuntime'
 import type { SessionLiveStats } from './components/chat/sessionRuntime'
@@ -46,6 +47,9 @@ export interface ThemeSettings {
   spinnerDoneMarker: string
   spinnerCancelledMarker: string
   spinnerErrorMarker: string
+  spinnerDoneMarkerMode: 'frame' | 'custom'
+  spinnerCancelledMarkerMode: 'frame' | 'custom'
+  spinnerErrorMarkerMode: 'frame' | 'custom'
   spinnerIntervalMs: number
   spinnerColor: string; spinnerSize: number
   msgStyle: string; msgFont: string; msgTextColor: string; msgLineHeight: number
@@ -123,7 +127,7 @@ type ThemeState = ThemeSettings & {
   setAgentStatus: (id: string, status: import('./components/settings/agentTypes').AgentStatus) => void
 }
 
-const DEFAULTS: ThemeSettings = {
+export const DEFAULTS: ThemeSettings = {
   transparency: 0.85, bgBlur: 16, globalFont: 'system', globalFontSize: 18, globalBgImage: '', globalBgColor: '#e8e8ec', uiScheme: 'light',
   sidebarBg: 'rgba(0,0,0,0.02)', sidebarBgImage: '', sidebarWidth: 250, sidebarTextColor: 'rgba(0,0,0,0.85)', sidebarNameSize: 14, sidebarGroupSize: 12,
   chatBg: '', chatBgImage: '', chatFont: 'mono', chatFontSize: 15, chatLineHeight: 1.4, chatTextColor: 'rgba(0,0,0,0.85)', chatCodeColor: '#b47814', chatCodeBg: 'rgba(0,0,0,0.03)',
@@ -142,7 +146,8 @@ const DEFAULTS: ThemeSettings = {
   toolIndicator: '●', sparkles: '✳✴✵✶✷✸✹✺✻✼❃❊',
   spinnerFramePreset: 'sparkles', spinnerCustomFrames: '',
   spinnerVerbSet: 'zh', spinnerCustomVerbs: '',
-  spinnerDoneMarker: '✓', spinnerCancelledMarker: '■', spinnerErrorMarker: '!', spinnerIntervalMs: 120,
+  spinnerDoneMarker: '✓', spinnerCancelledMarker: '■', spinnerErrorMarker: '!',
+  spinnerDoneMarkerMode: 'custom', spinnerCancelledMarkerMode: 'custom', spinnerErrorMarkerMode: 'custom', spinnerIntervalMs: 120,
   spinnerColor: '', spinnerSize: 14,
   msgStyle: 'terminal', msgFont: 'mono', msgTextColor: '', msgLineHeight: 1.8,
   ccHeight: 150, ccBgHeight: 150, ccBg: 'transparent', ccBgImage: '', ccStatusFontSize: 13,
@@ -364,9 +369,10 @@ export const useStore = create<ThemeState>()(persist(
   applyCustomPreset: (id) => set(state => {
     const preset = state.customPresets.find(item => item.id === id)
     if (!preset) return state
+    const theme = pickCustomPresetTheme(preset.theme as unknown as Record<string, unknown>)
     return {
-      ...preset.theme,
-      ccLayout: normalizeCcLayout(preset.theme.ccLayout, preset.theme.ccPositions),
+      ...theme,
+      ccLayout: normalizeCcLayout(theme.ccLayout, theme.ccPositions),
       activePreset: { global: id, sidebar: id, chat: id, cc: id, right: id },
       dirty: { global: false, sidebar: false, chat: false, cc: false, right: false },
     }
@@ -385,12 +391,14 @@ export const useStore = create<ThemeState>()(persist(
 }),
 { name: 'pylon-theme', version: PROFILE_SCHEMA_VERSION, migrate: persisted => {
   const state = (persisted || {}) as Partial<ThemeState>
-  // ccSizes 是旧版百分比 widget 模型遗留字段；v3 使用 ccLayout 槽位模型。
-  delete (state as Record<string, unknown>).ccSizes
-  state.ccPositions = normalizeCcPositions(state.ccPositions, DEFAULTS.ccPositions)
-  state.ccLayout = normalizeCcLayout(state.ccLayout, state.ccPositions)
-  state.ccLayoutVersion = CC_LAYOUT_SCHEMA_VERSION
-  state.ccEditMode = false
+  const normalizedTheme = normalizeThemeMigrationState(state, {
+    base: DEFAULTS as unknown as Record<string, unknown>,
+    activePreset: DEFAULTS.activePreset,
+    dirty: DEFAULTS.dirty,
+    ccPositions: DEFAULTS.ccPositions,
+    ccLayout: DEFAULTS.ccLayout,
+  })
+  Object.assign(state, normalizedTheme)
   state.spinnerFramePreset = state.spinnerFramePreset === 'ascii-line'
     || state.spinnerFramePreset === 'braille'
     || state.spinnerFramePreset === 'dots'
@@ -403,6 +411,9 @@ export const useStore = create<ThemeState>()(persist(
   state.spinnerDoneMarker = typeof state.spinnerDoneMarker === 'string' ? state.spinnerDoneMarker : '✓'
   state.spinnerCancelledMarker = typeof state.spinnerCancelledMarker === 'string' ? state.spinnerCancelledMarker : '■'
   state.spinnerErrorMarker = typeof state.spinnerErrorMarker === 'string' ? state.spinnerErrorMarker : '!'
+  state.spinnerDoneMarkerMode = state.spinnerDoneMarkerMode === 'frame' ? 'frame' : 'custom'
+  state.spinnerCancelledMarkerMode = state.spinnerCancelledMarkerMode === 'frame' ? 'frame' : 'custom'
+  state.spinnerErrorMarkerMode = state.spinnerErrorMarkerMode === 'frame' ? 'frame' : 'custom'
   state.spinnerIntervalMs = typeof state.spinnerIntervalMs === 'number' && Number.isFinite(state.spinnerIntervalMs)
     ? Math.max(40, Math.min(1000, state.spinnerIntervalMs))
     : 120

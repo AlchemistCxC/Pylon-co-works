@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { invoke } from '@tauri-apps/api/core'
 import { advanceCodeEatingBehavior, getCodeComment, shouldStartCodeEating, shouldStartTabletCoding, type PetBehavior } from './petBehavior'
 import { classifyPetPointerGesture, choosePetDestination, clampPetPosition, resolvePetClick } from './petMotion'
+import { readPetPosition, writePetPosition, clearPetPosition, persistPetState, PET_POSITION_KEY, PET_STORAGE_KEY } from './petPersistence'
 import { useStore } from '../store'
 import './PetCompanion.css'
 
@@ -54,8 +55,8 @@ interface PointerSession {
   wasWanderEnabled: boolean
 }
 
-const STORAGE_KEY = 'pylon-pet-v3'
-const POSITION_KEY = `${STORAGE_KEY}:position`
+const STORAGE_KEY = PET_STORAGE_KEY
+const POSITION_KEY = PET_POSITION_KEY
 const IS_TAURI = typeof (window as any).__TAURI_INTERNALS__ !== 'undefined' || typeof (window as any).__TAURI__ !== 'undefined'
 
 const EMPTY_STATS: PetStats = {
@@ -76,15 +77,11 @@ const STAGE_SCALE: Record<GrowthStage, number> = {
 }
 
 function readPosition(): Position | null {
-  try {
-    const raw = localStorage.getItem(POSITION_KEY)
-    return raw ? JSON.parse(raw) : null
-  } catch { return null }
+  return readPetPosition(localStorage)
 }
 
 function persistable(pet: PetState) {
-  const { stage: _stage, title: _title, age_days: _ageDays, next_stage_xp: _next, growth_progress: _progress, msg: _msg, ...state } = pet
-  return state
+  return persistPetState(pet)
 }
 
 function PixelCreature({ stage, mood, walking }: { stage: GrowthStage; mood: string; walking: boolean }) {
@@ -308,7 +305,7 @@ export default function PetCompanion({ rightOpen = false, rightWidth = 0 }: { ri
   }
 
   const resumeWander = () => {
-    localStorage.removeItem(POSITION_KEY)
+    clearPetPosition(localStorage)
     positionRef.current = null
     setPosition(null)
     setWanderEnabled(true)
@@ -345,7 +342,7 @@ export default function PetCompanion({ rightOpen = false, rightWidth = 0 }: { ri
     setDragging(false)
     if (shell?.hasPointerCapture(event.pointerId)) shell.releasePointerCapture(event.pointerId)
     if (gesture === 'drag') {
-      if (finalPosition) localStorage.setItem(POSITION_KEY, JSON.stringify(finalPosition))
+      if (finalPosition) writePetPosition(localStorage, finalPosition)
       return
     }
     if (gesture !== 'click') {

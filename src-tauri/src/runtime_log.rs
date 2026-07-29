@@ -44,14 +44,17 @@ pub struct RuntimeLogHub {
     next_id: AtomicU64,
     entries: Mutex<VecDeque<RuntimeLogEntry>>,
     capacity: usize,
+    events: tokio::sync::broadcast::Sender<RuntimeLogEntry>,
 }
 
 impl RuntimeLogHub {
     pub fn new(capacity: usize) -> Arc<Self> {
+        let (events, _) = tokio::sync::broadcast::channel(256);
         Arc::new(Self {
             next_id: AtomicU64::new(1),
             entries: Mutex::new(VecDeque::with_capacity(capacity.min(DEFAULT_CAPACITY))),
             capacity: capacity.max(1),
+            events,
         })
     }
 
@@ -82,7 +85,12 @@ impl RuntimeLogHub {
         while entries.len() > self.capacity {
             entries.pop_front();
         }
+        let _ = self.events.send(entry.clone());
         entry
+    }
+
+    pub fn subscribe(&self) -> tokio::sync::broadcast::Receiver<RuntimeLogEntry> {
+        self.events.subscribe()
     }
 
     pub fn list(&self, query: &RuntimeLogQuery) -> Vec<RuntimeLogEntry> {
@@ -222,5 +230,24 @@ mod tests {
         let second = hub.push("t2".into(), "info", "test", None, "second", Map::new());
         assert!(second.id > first.id);
         assert_eq!(hub.list(&RuntimeLogQuery::default()).len(), 1);
+    }
+
+    #[tokio::test]
+    async fn subscribers_receive_sanitized_entries_after_ring_write() {
+        let hub = RuntimeLogHub::new(2);
+        let mut events = hub.subscribe();
+        let entry = hub.push(
+            "t1".into(),
+            "error",
+            "acp",
+            None,
+            "token=hidden",
+            fields(&[("nested", json!({"apiKey": "secret"}))]),
+        );
+        let event = events.recv().await.expect("log event should be published");
+        assert_eq!(event, entry);
+        assert_eq!(event.message, REDACTED);
+        assert_eq!(event.fields["nested"]["apiKey"], json!(REDACTED));
+        assert_eq!(hub.list(&RuntimeLogQuery::default()).first(), Some(&entry));
     }
 }

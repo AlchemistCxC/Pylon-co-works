@@ -11,8 +11,9 @@ import { resolveBackgroundImage } from '../backgroundImage'
 import { runAgentSwitchTransaction } from './agentSwitchTransaction'
 import './Settings.css'
 import { normalizeAgentStatus, statusLabel } from './settings/agentTypes'
-import { beginReconnect, completeReconnect, failReconnect } from './settings/agentState'
+import { beginReconnect, failReconnect, normalizeAgentList } from './settings/agentState'
 import ConfigOptionsPanel from './settings/ConfigOptionsPanel'
+import { resolveSpinnerFrames } from './chat/spinnerFrames'
 
 // ── helpers ──
 
@@ -62,6 +63,25 @@ function Txt({ value, onChange }: { value:string; onChange:(v:string)=>void }) {
   return <input type="text" value={value} onChange={e => onChange(e.target.value)} className="set-input"/>
 }
 
+function SpinnerMarkerRow({ label, mode, value, frames, onModeChange, onValueChange }: {
+  label: string
+  mode: ThemeSettings['spinnerDoneMarkerMode']
+  value: string
+  frames: string[]
+  onModeChange: (value: ThemeSettings['spinnerDoneMarkerMode']) => void
+  onValueChange: (value: string) => void
+}) {
+  const safeFrames = frames.length > 0 ? frames : ['·']
+  return (
+    <Row label={label}>
+      <Sel value={mode} onChange={v => onModeChange(v as ThemeSettings['spinnerDoneMarkerMode'])} options={['frame', 'custom']} />
+      {mode === 'frame'
+        ? <Sel value={safeFrames.includes(value) ? value : safeFrames[0]} onChange={onValueChange} options={safeFrames} />
+        : <Txt value={value} onChange={onValueChange} />}
+    </Row>
+  )
+}
+
 function Group({ title, children, defaultOpen }: { title:string; children:React.ReactNode; defaultOpen?:boolean }) {
   const [open, setOpen] = useState(defaultOpen ?? true)
   return (
@@ -106,7 +126,7 @@ const TAB_PREVIEW: Record<string, string> = {
 
 // ── main ──
 
-export default function Settings({ onClose }: { onClose?: () => void }) {
+export default function Settings({ onClose, activeSessionId }: { onClose?: () => void; activeSessionId?: string | null }) {
   const t = useStore() as ThemeSettings
   const u = useStore(s => s.updateTheme)
   const reset = useStore(s => s.resetTheme)
@@ -122,6 +142,8 @@ export default function Settings({ onClose }: { onClose?: () => void }) {
   const setAgentStatus = useStore(s => s.setAgentStatus)
   const setActiveAgent = useStore(s => s.setActiveAgent)
   const customPresets = useStore(s => s.customPresets)
+  const sessions = useStore(s => s.sessions)
+  const activeSessionSource = sessions.find(session => session.id === activeSessionId)?.source
   const saveCustomPreset = useStore(s => s.saveCustomPreset)
   const applyCustomPreset = useStore(s => s.applyCustomPreset)
   const removeCustomPreset = useStore(s => s.removeCustomPreset)
@@ -158,6 +180,7 @@ export default function Settings({ onClose }: { onClose?: () => void }) {
   }
 
   const previewZone = TAB_PREVIEW[activeTab]
+  const spinnerFrames = resolveSpinnerFrames(t.spinnerFramePreset, t.spinnerCustomFrames)
 
   const switchAgent = async (agentId: string) => {
     if (switchingAgentId || agentId === activeAgent) return
@@ -187,7 +210,7 @@ export default function Settings({ onClose }: { onClose?: () => void }) {
     setAgentStatus(activeAgent, { ...beginReconnect({ ...currentStatus, pending: false }), agent: activeAgent })
     try {
       await invoke('reconnect_agent')
-      setAgentStatus(activeAgent, { ...completeReconnect({ ...currentStatus, pending: false }), agent: activeAgent })
+      // command resolve 只代表请求已接受，最终状态由 peri:agent-status 事件确认。
     } catch (error) {
       const detail = reportRuntimeError('重连 Agent', error)
       setAgentStatus(activeAgent, { ...failReconnect({ ...currentStatus, pending: false }, detail.message), agent: activeAgent })
@@ -200,7 +223,7 @@ export default function Settings({ onClose }: { onClose?: () => void }) {
     try {
       await invoke('reload_agents')
       const list = await invoke<unknown>('list_agents')
-      useStore.getState().setAgents(Array.isArray(list) ? list as { id: string; name: string }[] : [])
+      useStore.getState().setAgents(normalizeAgentList(list))
     } catch (error) {
       reportRuntimeError('重载 Agent 配置', error)
     } finally { setReloading(false) }
@@ -386,14 +409,20 @@ export default function Settings({ onClose }: { onClose?: () => void }) {
                 {t.spinnerFramePreset === 'custom' && <Row label="自定义帧"><textarea className="set-textarea" value={t.spinnerCustomFrames} onChange={e=>onSettingChange({spinnerCustomFrames:e.target.value})} placeholder="逐字符输入，例如：◐◓◑◒" /></Row>}
                 <Row label="文案语言"><Sel value={t.spinnerVerbSet} onChange={v=>onSettingChange({spinnerVerbSet:v as ThemeSettings['spinnerVerbSet']})} options={['zh','en','custom']}/></Row>
                 {t.spinnerVerbSet === 'custom' && <Row label="自定义文案"><textarea className="set-textarea" value={t.spinnerCustomVerbs} onChange={e=>onSettingChange({spinnerCustomVerbs:e.target.value})} placeholder="每行一条文案" /></Row>}
-                <Row label="完成标记"><Txt value={t.spinnerDoneMarker} onChange={v=>onSettingChange({spinnerDoneMarker:v})}/></Row>
-                <Row label="取消标记"><Txt value={t.spinnerCancelledMarker} onChange={v=>onSettingChange({spinnerCancelledMarker:v})}/></Row>
-                <Row label="错误标记"><Txt value={t.spinnerErrorMarker} onChange={v=>onSettingChange({spinnerErrorMarker:v})}/></Row>
+                <SpinnerMarkerRow label="完成标记" mode={t.spinnerDoneMarkerMode} value={t.spinnerDoneMarker} frames={spinnerFrames}
+                  onModeChange={v=>onSettingChange({spinnerDoneMarkerMode:v})} onValueChange={v=>onSettingChange({spinnerDoneMarker:v})}/>
+                <SpinnerMarkerRow label="取消标记" mode={t.spinnerCancelledMarkerMode} value={t.spinnerCancelledMarker} frames={spinnerFrames}
+                  onModeChange={v=>onSettingChange({spinnerCancelledMarkerMode:v})} onValueChange={v=>onSettingChange({spinnerCancelledMarker:v})}/>
+                <SpinnerMarkerRow label="错误标记" mode={t.spinnerErrorMarkerMode} value={t.spinnerErrorMarker} frames={spinnerFrames}
+                  onModeChange={v=>onSettingChange({spinnerErrorMarkerMode:v})} onValueChange={v=>onSettingChange({spinnerErrorMarker:v})}/>
                 <div className="set-compact-row">
                   <span className="set-compact-label">颜色</span>
                   <ColorPopover value={t.spinnerColor} onChange={v=>onSettingChange({spinnerColor:v})} chips={false}/>
                   <span className="set-compact-label">大小</span>
                   <Num value={t.spinnerSize} onChange={v=>onSettingChange({spinnerSize:v})} min={10} max={32}/>
+                  <span className="set-compact-label">间隔</span>
+                  <Num value={t.spinnerIntervalMs} onChange={v=>onSettingChange({spinnerIntervalMs: Math.max(40, Math.min(1000, v))})} min={40} max={1000}/>
+                  <span className="set-val">ms</span>
                 </div>
               </Group>
 
@@ -496,7 +525,7 @@ export default function Settings({ onClose }: { onClose?: () => void }) {
                 切换 Agent 后需重启 Prism Desktop 生效。
               </div>
               <Group title="动态配置">
-                <ConfigOptionsPanel />
+                <ConfigOptionsPanel sessionSource={activeSessionSource} />
               </Group>
             </Tabs.Content>
 

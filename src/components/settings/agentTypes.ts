@@ -25,18 +25,18 @@ export interface AgentStatusPayload {
 }
 
 export function normalizeAgentStatus(payload: AgentStatusPayload, fallbackAgent = ''): AgentStatus {
-  const status: AgentConnectionStatus = payload.status === 'reconnecting'
-    || payload.status === 'disconnected'
-    || payload.status === 'error'
-    || payload.status === 'crashed'
-    ? payload.status
-    : payload.crashed === true ? 'crashed' : 'connected'
+  const knownStatus: AgentConnectionStatus[] = ['connected', 'reconnecting', 'disconnected', 'error', 'crashed']
+  const status: AgentConnectionStatus = payload.status === undefined
+    ? payload.crashed === true ? 'crashed' : 'connected'
+    : knownStatus.includes(payload.status as AgentConnectionStatus)
+      ? payload.status as AgentConnectionStatus
+      : 'error'
   return {
     agent: payload.agent || fallbackAgent,
     status,
     transport: payload.transport,
     cwd: payload.cwd,
-    recentError: payload.error,
+    recentError: payload.error || (payload.status !== undefined && status === 'error' ? `未知 Agent 状态：${payload.status}` : undefined),
   }
 }
 

@@ -214,7 +214,7 @@ export default function App() {
           </div>
           {ccEditMode && <div className="cc-edit-overlay" />}
         </div>
-        {showSettings && <Settings onClose={() => setShowSettings(false)} />}
+        {showSettings && <Settings activeSessionId={activeSession} onClose={() => setShowSettings(false)} />}
         {rightOpen && <RightPanel sessionId={activeSession} onClose={() => setRightOpen(false)} />}
         {showProfileEdit && <ProfileEditor onClose={() => setShowProfileEdit(false)} />}
         {sessionSettingsId && <SessionSettings sessionId={sessionSettingsId} open={!!sessionSettingsId} onClose={() => setSessionSettingsId(null)} onDeleted={() => setActiveSession(null)} />}

@@ -1,6 +1,6 @@
 # Pylon — ACP 通用 GUI 客户端
 
-ACP（Agent Communication Protocol）协议的桌面 GUI 实现。基于 Tauri v2 + React 19，通过 stdin/stdout JSON-RPC 连接任意 ACP 兼容 agent——不绑定特定后端，Peri、Hermes 或任何符合 [ACP 规范](ACP-SPEC.md) 的 agent 均可接入。
+ACP（Agent Communication Protocol）协议的桌面 GUI 实现。基于 Tauri v2 + React 19，通过 stdin/stdout JSON-RPC 连接任意 ACP 兼容 agent——不绑定特定后端，Peri、Hermes 或任何符合 ACP v1 的 agent 均可接入。
 
 ## 设计理念
 
@@ -53,7 +53,7 @@ Pylon 是 ACP 协议的**参考 GUI 实现**。它不定义 agent 行为，只�
 | 框架 | Tauri v2 |
 | 前端 | React 19 + TypeScript + Zustand（persist 中间件） + Vite |
 | 后端 | Rust（stable-x86_64-pc-windows-gnu，tokio 异步运行时） |
-| 协议 | ACP — stdin/stdout JSON-RPC 2.0，详见 [ACP-SPEC.md](ACP-SPEC.md) |
+| 协议 | ACP v1 — stdin/stdout JSON-RPC 2.0；当前实现契约见 `docs/后端api文档.md` |
 | 样式 | 纯 CSS（500+ CSS 变量），无 Tailwind |
 | UI 库 | Radix UI（dialog / dropdown-menu / tabs / tooltip） |
 | Markdown | react-markdown + remark-gfm + starry-night + Anser（ANSI） |
@@ -133,7 +133,7 @@ pylon/
 │   ├── build.rs
 │   ├── src/
 │   │   ├── main.rs            # 入口
-│   │   ├── lib.rs             # Tauri commands（17 个）
+│   │   ├── lib.rs             # Tauri commands 与事件路由
 │   │   ├── acp.rs             # AcpClient：spawn agent + JSON-RPC
 │   │   ├── agent_config.rs    # agents.yaml 解析
 │   │   ├── error.rs           # PylonError 结构化错误
@@ -141,9 +141,11 @@ pylon/
 │   └── resources/fonts/       # Iosevka 等宽字体（嵌入）
 │
 ├── agents.yaml                # Agent 注册配置
-├── ACP-SPEC.md                # ACP 协议规范
 └── docs/
-    └── api-reference.md       # 前后端 API 参考
+    ├── 功能开发清单（前端）.md
+    ├── 功能开发清单（后端）.md
+    ├── 后端api文档.md
+    └── 验收清单.md
 ```
 
 ## 配置 Agent
@@ -178,7 +180,7 @@ agents:
 
 ## ACP 协议
 
-Pylon 实现了 ACP 协议的 GUI 端。协议细节见 [ACP-SPEC.md](ACP-SPEC.md)。
+Pylon 实现了 ACP 协议的 GUI 端。当前 Pylon command、event 与 ACP 映射见 `docs/后端api文档.md`。
 
 核心流程：
 ```
@@ -190,7 +192,7 @@ GUI (Pylon)  →   spawn agent  →  initialize
 
 ## 协作
 
-[`docs/api-reference.md`](docs/api-reference.md) 记录了前后端接口契约，包括所有 Tauri command 的参数/返回值、事件 payload 结构、Session 数据结构。
+`docs/后端api文档.md` 记录 Tauri command、事件 payload 与 ACP 映射；两份功能清单和验收清单记录当前实现边界与待验证项。
 
 ## License
 

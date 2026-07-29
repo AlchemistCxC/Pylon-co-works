@@ -34,7 +34,9 @@ export const ZONE_FIELDS: Record<string, (keyof ThemeSettings)[]> = {
     'toolIndicator', 'toolIndicatorGlow', 'toolIndicatorGlowColor',
     'toolConnectorMode', 'toolConnectorColor',
     'sparkles', 'spinnerFramePreset', 'spinnerCustomFrames', 'spinnerVerbSet', 'spinnerCustomVerbs',
-    'spinnerDoneMarker', 'spinnerCancelledMarker', 'spinnerErrorMarker', 'spinnerIntervalMs', 'spinnerColor', 'spinnerSize',
+    'spinnerDoneMarker', 'spinnerCancelledMarker', 'spinnerErrorMarker',
+    'spinnerDoneMarkerMode', 'spinnerCancelledMarkerMode', 'spinnerErrorMarkerMode',
+    'spinnerIntervalMs', 'spinnerColor', 'spinnerSize',
     'msgStyle', 'msgFont', 'msgTextColor', 'msgLineHeight',
   ],
   cc: [

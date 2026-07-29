@@ -1,17 +1,20 @@
 import { strict as assert } from 'node:assert'
 import { readFileSync } from 'node:fs'
 import { normalizeAgentStatus, statusLabel } from '../src/components/settings/agentTypes.ts'
-import { beginReconnect, completeReconnect, failReconnect } from '../src/components/settings/agentState.ts'
+import { beginReconnect, completeReconnect, failReconnect, normalizeAgentList } from '../src/components/settings/agentState.ts'
 
 assert.equal(normalizeAgentStatus({ crashed: true }, 'peri').status, 'crashed')
 assert.equal(normalizeAgentStatus({ status: 'reconnecting' }, 'peri').status, 'reconnecting')
-assert.equal(normalizeAgentStatus({}, 'peri').status, 'connected')
-assert.equal(statusLabel('connected'), '已连接')
+assert.equal(normalizeAgentStatus({ status: 'unknown' }, 'peri').status, 'error')
+assert.match(normalizeAgentStatus({ status: 'unknown' }, 'peri').recentError || '', /未知 Agent 状态/)
+assert.equal(normalizeAgentStatus({ status: 'connected', crashed: true }, 'peri').status, 'connected')
 
 const initial = { status: 'connected' as const, pending: false }
 assert.equal(beginReconnect(initial).status, 'reconnecting')
 assert.equal(completeReconnect(beginReconnect(initial)).status, 'connected')
 assert.equal(failReconnect(beginReconnect(initial), '失败').error, '失败')
+assert.deepEqual(normalizeAgentList([{ id: 'peri', name: 'Peri' }, { id: 1, name: 'bad' }, null]), [{ id: 'peri', name: 'Peri' }])
+assert.deepEqual(normalizeAgentList({ agents: [] }), [])
 
 const app = readFileSync(new URL('../src/App.tsx', import.meta.url), 'utf8')
 const settings = readFileSync(new URL('../src/components/Settings.tsx', import.meta.url), 'utf8')

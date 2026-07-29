@@ -7,7 +7,8 @@
     "dev": "vite",
     "build": "tsc -b && vite build",
     "preview": "vite preview",
-    "tauri": "tauri"
+    "tauri": "tauri",
+    "test:frontend": "node --experimental-strip-types scripts/run-frontend-tests.mts"
   },
   "dependencies": {
     "@dnd-kit/core": "^6.3.1",

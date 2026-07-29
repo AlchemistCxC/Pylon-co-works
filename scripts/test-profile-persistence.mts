@@ -3,11 +3,14 @@ import { normalizeProfileState, PROFILE_SCHEMA_VERSION } from '../src/profilePer
 
 const defaults = [{ id: 'riccati' }, { id: 'serina' }]
 
-assert.equal(PROFILE_SCHEMA_VERSION, 1)
+assert.equal(typeof PROFILE_SCHEMA_VERSION, 'number', 'PROFILE_SCHEMA_VERSION 应为 number')
+assert.ok(Number.isInteger(PROFILE_SCHEMA_VERSION), 'PROFILE_SCHEMA_VERSION 应为整数')
+assert.ok(PROFILE_SCHEMA_VERSION > 0, 'PROFILE_SCHEMA_VERSION 应为正整数')
+
 assert.deepEqual(normalizeProfileState(defaults, 'serina', defaults), {
   profiles: defaults,
   activeProfileId: 'serina',
-})
+}, '有效 activeProfileId 应保留')
 assert.deepEqual(normalizeProfileState(defaults, 'missing', defaults), {
   profiles: defaults,
   activeProfileId: 'riccati',

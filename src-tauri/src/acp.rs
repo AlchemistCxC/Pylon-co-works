@@ -26,6 +26,7 @@ pub const METHOD_SESSION_SET_MODE: &str = "session/set_mode";
 pub const METHOD_SESSION_SET_CONFIG_OPTION: &str = "session/set_config_option";
 pub const METHOD_SESSION_CANCEL: &str = "session/cancel";
 pub const NOTIF_SESSION_UPDATE: &str = "session/update";
+pub const NOTIF_AGENT_CRASHED: &str = "pylon:agent-crashed";
 
 /// Broadcast channel capacity for ACP message fan-out.
 pub const BROADCAST_CAP: usize = 256;
@@ -42,6 +43,29 @@ pub const MAX_ATTACHMENTS: usize = 8;
 
 type Pending = HashMap<u64, oneshot::Sender<RawMessage>>;
 const PENDING_SHARDS: usize = 16;
+
+fn connection_closed_message() -> RawMessage {
+    RawMessage {
+        id: None,
+        method: None,
+        result: None,
+        params: None,
+        error: Some(serde_json::json!("ACP connection closed")),
+    }
+}
+
+fn drain_pending(pending: &Arc<[Mutex<Pending>; PENDING_SHARDS]>) -> usize {
+    let mut drained = 0;
+    for shard in pending.iter() {
+        if let Ok(mut requests) = shard.lock() {
+            drained += requests.len();
+            for (_, tx) in requests.drain() {
+                let _ = tx.send(connection_closed_message());
+            }
+        }
+    }
+    drained
+}
 
 struct ManagedChild {
     child: Option<Child>,
@@ -88,7 +112,20 @@ impl ManagedChild {
                 child.wait().map_err(|error| format!("wait failed: {error}"))?;
                 Ok(())
             }
-            Err(error) => Err(format!("try_wait failed: {error}")),
+            Err(error) => {
+                // try_wait 失败时仍必须继续清理，不能把已取出的 Child
+                // 直接丢弃，否则 initialize/switch/Drop 错误路径可能遗留子进程。
+                let kill_result = child.kill();
+                let wait_result = child.wait();
+                match (kill_result, wait_result) {
+                    (Ok(()), Ok(_)) => Err(format!("try_wait failed: {error}; child killed and waited")),
+                    (kill_error, wait_error) => Err(format!(
+                        "try_wait failed: {error}; kill: {}; wait: {}",
+                        kill_error.map(|_| "ok".to_string()).unwrap_or_else(|err| err.to_string()),
+                        wait_error.map(|_| "ok".to_string()).unwrap_or_else(|err| err.to_string()),
+                    )),
+                }
+            }
         }
     }
 }
@@ -171,7 +208,7 @@ impl AcpClient {
             next_id: AtomicU64::new(1),
             pending: Arc::new(std::array::from_fn(|_| Mutex::new(HashMap::new()))),
             rx,
-            crashed: Arc::new(AtomicBool::new(true)),
+            crashed: Arc::new(AtomicBool::new(false)),
         }
     }
 
@@ -217,7 +254,10 @@ impl AcpClient {
 
         let msg = match tokio::time::timeout(std::time::Duration::from_secs(30), rx).await {
             Ok(Ok(msg)) => msg,
-            Ok(Err(_)) => return Err("ACP connection closed".to_string()),
+            Ok(Err(_)) => {
+                self.remove_pending(id);
+                return Err("ACP connection closed".to_string());
+            }
             Err(_) => {
                 self.remove_pending(id);
                 return Err("RPC timeout after 30s".to_string());
@@ -498,18 +538,14 @@ impl AcpClient {
                         }
                     }
                     crashed_reader.store(true, Ordering::Relaxed);
-                    pending_clone.iter().for_each(|shard| {
-                        if let Ok(mut pending) = shard.lock() {
-                            for (_, tx) in pending.drain() {
-                                let _ = tx.send(RawMessage {
-                                    id: None,
-                                    method: None,
-                                    result: None,
-                                    params: None,
-                                    error: Some(serde_json::json!("ACP connection closed")),
-                                });
-                            }
-                        }
+                    let drained = drain_pending(&pending_clone);
+                    log::warn!("ACP: drained {} pending requests after stdout closed", drained);
+                    let _ = tx_clone.send(RawMessage {
+                        id: None,
+                        method: Some(NOTIF_AGENT_CRASHED.to_string()),
+                        result: None,
+                        params: Some(serde_json::json!({"reason": "stdout_closed"})),
+                        error: None,
                     });
                     if let Some(hub) = &stdout_logs {
                         hub.push(crate::runtime_log::timestamp(), "error", "acp", None, "ACP child stdout closed; agent crashed", serde_json::Map::new());
@@ -576,6 +612,11 @@ mod tests {
             params: None,
             error: None,
         }
+    }
+
+    #[test]
+    fn disconnected_client_is_not_marked_as_crashed() {
+        assert!(!AcpClient::disconnected().is_crashed());
     }
 
     #[test]
@@ -659,5 +700,32 @@ mod tests {
 
         assert!(!cancel_called.load(Ordering::SeqCst));
         assert!(matches!(outcome, PromptWaitOutcome::Response(_)));
+    }
+
+    #[test]
+    fn drain_pending_notifies_every_waiter_and_clears_registry() {
+        let pending: Arc<[Mutex<Pending>; PENDING_SHARDS]> =
+            Arc::new(std::array::from_fn(|_| Mutex::new(HashMap::new())));
+        let mut receivers = Vec::new();
+        for id in [1_u64, 16, 31] {
+            let (tx, rx) = oneshot::channel();
+            pending[id as usize % PENDING_SHARDS].lock().unwrap().insert(id, tx);
+            receivers.push(rx);
+        }
+
+        assert_eq!(drain_pending(&pending), 3);
+        assert!(pending.iter().all(|shard| shard.lock().unwrap().is_empty()));
+        for receiver in receivers {
+            let message = receiver.blocking_recv().expect("EOF should wake pending request");
+            assert_eq!(message.error, Some(serde_json::json!("ACP connection closed")));
+        }
+    }
+
+    #[test]
+    fn drain_pending_is_idempotent_after_first_close() {
+        let pending: Arc<[Mutex<Pending>; PENDING_SHARDS]> =
+            Arc::new(std::array::from_fn(|_| Mutex::new(HashMap::new())));
+        assert_eq!(drain_pending(&pending), 0);
+        assert_eq!(drain_pending(&pending), 0);
     }
 }

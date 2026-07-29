@@ -10,7 +10,9 @@ assert.equal(css.includes('justify-content:flex-start;'), true)
 assert.equal(css.includes('.cc-status-secondary { order:1;'), true)
 assert.equal(css.includes('.cc-status-primary { order:2;'), true)
 assert.equal(css.includes('.cc-actions { order:3;'), true)
-assert.equal(css.includes('font-size:12px;'), true)
+const statusRow = css.match(/\.cc-status-row\s*\{[^}]*\}/s)?.[0] ?? ''
+assert.equal(css.includes('--cc-status-font-size'), true)
+assert.match(statusRow, /font-size:\s*var\(--cc-status-font-size\s*,\s*[^)]+\)/)
 assert.equal(source.includes("ccStyle === 'numeric' && id === 'ekg' && !hidden.includes('pct')"), true, 'numeric 模式不得同时显示两份百分比')
 
 console.log('controlCenterPeriStyle 回归测试通过')

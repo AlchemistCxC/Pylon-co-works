@@ -8,19 +8,61 @@ export interface CustomPreset {
   updatedAt: number
 }
 
-const EXCLUDED_THEME_KEYS = new Set(['activePreset', 'dirty', 'ccEditMode'])
+const THEME_SETTINGS_KEYS: readonly (keyof ThemeSettings)[] = [
+  'transparency', 'bgBlur', 'globalFont', 'globalFontSize', 'globalBgImage', 'globalBgColor', 'uiScheme',
+  'sidebarBg', 'sidebarBgImage', 'sidebarWidth', 'sidebarTextColor', 'sidebarNameSize', 'sidebarGroupSize',
+  'chatBg', 'chatBgImage', 'chatFont', 'chatFontSize', 'chatLineHeight', 'chatTextColor', 'chatCodeColor', 'chatCodeBg',
+  'toolOk', 'toolRun', 'toolErr', 'toolNameColor', 'toolSummaryColor', 'userTagBg', 'userTagText',
+  'toolIndicatorGlow', 'toolIndicatorGlowColor', 'toolConnectorMode', 'toolConnectorColor',
+  'inputBg', 'inputBgImage', 'inputTextColor', 'inputPlaceholder', 'inputSendBg', 'inputFocusBorder', 'inputFontSize', 'inputMinHeight',
+  'inputMode', 'cliLineWidth', 'cliLineColor', 'cliTextColor', 'cliLinePadding',
+  'statusBg', 'statusBgImage', 'ekgWidth', 'ekgFontSize', 'ekgGreen', 'ekgYellow', 'ekgRed', 'pillBg', 'pillText', 'prismOnColor',
+  'ekgLineWidth', 'ekgAmplitudeMax', 'ekgSpeedBase', 'ekgSpeedMax',
+  'barTrackColor', 'barFillColor', 'barFillFollow', 'barHeight',
+  'ekgLeftColor', 'ekgMovingColor', 'ekgConsumedColor', 'tokenDisplay',
+  'rightBg', 'rightBgImage', 'rightWidth',
+  'sidebarTransparency', 'sidebarBlur', 'chatTransparency', 'chatBlur', 'rightTransparency', 'rightBlur',
+  'userName', 'userPrefix', 'userColor', 'toolIndicator', 'sparkles',
+  'spinnerFramePreset', 'spinnerCustomFrames', 'spinnerVerbSet', 'spinnerCustomVerbs',
+  'spinnerDoneMarker', 'spinnerCancelledMarker', 'spinnerErrorMarker',
+  'spinnerDoneMarkerMode', 'spinnerCancelledMarkerMode', 'spinnerErrorMarkerMode',
+  'spinnerIntervalMs', 'spinnerColor', 'spinnerSize',
+  'msgStyle', 'msgFont', 'msgTextColor', 'msgLineHeight',
+  'ccHeight', 'ccBgHeight', 'ccBg', 'ccBgImage', 'ccStatusFontSize', 'ccStyle', 'ccVariant',
+  'modelVariant', 'modeVariant', 'sendVariant', 'attachVariant', 'ccHidden', 'ccLayoutVersion', 'ccLayout', 'ccPositions',
+  'ccCliCustomized', 'ccScale',
+]
+
+const THEME_SETTINGS_KEY_SET = new Set<string>(THEME_SETTINGS_KEYS)
+
+const generatedCustomPresetIds = new Set<string>()
+
+export function createCustomPresetId(now: number, existingIds: readonly string[] = []): string {
+  const baseId = `custom-${now}`
+  const occupied = new Set([...existingIds, ...generatedCustomPresetIds])
+  if (!occupied.has(baseId)) {
+    generatedCustomPresetIds.add(baseId)
+    return baseId
+  }
+  let suffix = 1
+  while (occupied.has(`${baseId}-${suffix}`)) suffix += 1
+  const id = `${baseId}-${suffix}`
+  generatedCustomPresetIds.add(id)
+  return id
+}
 
 export function pickCustomPresetTheme(state: Record<string, unknown>): Partial<ThemeSettings> {
   return Object.fromEntries(Object.entries(state).filter(([key, value]) =>
-    !EXCLUDED_THEME_KEYS.has(key) && typeof value !== 'function',
+    THEME_SETTINGS_KEY_SET.has(key) && typeof value !== 'function',
   )) as Partial<ThemeSettings>
 }
 
 export function createCustomPreset(name: string, theme: Partial<ThemeSettings>, now = Date.now()): CustomPreset {
   const cleanName = name.trim()
   if (!cleanName) throw new Error('预设名称不能为空')
+  const id = createCustomPresetId(now)
   return {
-    id: `custom-${now}`,
+    id,
     name: cleanName.slice(0, 40),
     theme: structuredClone(theme),
     createdAt: now,

@@ -145,5 +145,5 @@
 /* 预览应用容器 — 复用真实布局类 */
 .pv-app { display:flex; flex-direction:column; height:100%; overflow:hidden; }
 .pv-app .layout { flex:1; overflow:hidden; display:flex; }
-/* 预览代码块去边框，更简洁 */
-.pv-app .term-code-block { margin:2px 0; }
+.pv-right-panel { position:relative; top:auto; right:auto; bottom:auto; z-index:1; }
+.pv-right-panel .right-body { min-width:0; }

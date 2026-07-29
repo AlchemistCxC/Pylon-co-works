@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react'
 import { Square } from 'lucide-react'
-import { frameAt } from './spinnerFrames'
+import { frameAt, resolveSpinnerMarker } from './spinnerFrames'
+import { normalizeSpinnerVerbs } from './spinnerVerbs'
 import { useStore } from '../../store'
 
 const IDIOMS = [
@@ -9,10 +10,6 @@ const IDIOMS = [
   '精益求精','大巧若拙','返璞归真','独具匠心','无中生有','上善若水','海纳百川','虚怀若谷','心无旁骛','宁静致远','道法自然',
 ]
 const EN_VERBS = ['Thinking', 'Reading', 'Checking', 'Reasoning', 'Working', 'Reviewing', 'Verifying']
-
-function normalizeVerbs(value: string): string[] {
-  return Array.from(new Set(value.split(/\r?\n/).map(item => item.trim()).filter(Boolean)))
-}
 
 export interface GenerationSummary {
   elapsedMs: number
@@ -46,11 +43,29 @@ export default function GenerationFooter({ running, frames, tokenCount, startTim
   const spinnerDoneMarker = useStore(s => s.spinnerDoneMarker)
   const spinnerCancelledMarker = useStore(s => s.spinnerCancelledMarker)
   const spinnerErrorMarker = useStore(s => s.spinnerErrorMarker)
+  const spinnerDoneMarkerMode = useStore(s => s.spinnerDoneMarkerMode)
+  const spinnerCancelledMarkerMode = useStore(s => s.spinnerCancelledMarkerMode)
+  const spinnerErrorMarkerMode = useStore(s => s.spinnerErrorMarkerMode)
   const spinnerIntervalMs = useStore(s => s.spinnerIntervalMs)
   const verbs = spinnerVerbSet === 'custom'
-    ? normalizeVerbs(spinnerCustomVerbs)
+    ? normalizeSpinnerVerbs(spinnerCustomVerbs, IDIOMS)
     : spinnerVerbSet === 'en' ? EN_VERBS : IDIOMS
-  const safeVerbs = verbs.length > 0 ? verbs : IDIOMS
+  const safeVerbs = verbs
+  const marker = summary
+    ? resolveSpinnerMarker(
+      frames,
+      summary.reason === 'cancelled'
+        ? spinnerCancelledMarkerMode
+        : summary.reason === 'error'
+          ? spinnerErrorMarkerMode
+          : spinnerDoneMarkerMode,
+      summary.reason === 'cancelled'
+        ? spinnerCancelledMarker
+        : summary.reason === 'error'
+          ? spinnerErrorMarker
+          : spinnerDoneMarker,
+    )
+    : ''
   const [, tick] = useState(0)
   useEffect(() => {
     if (!running) return
@@ -60,7 +75,7 @@ export default function GenerationFooter({ running, frames, tokenCount, startTim
 
   if (running) {
     const elapsedMs = Date.now() - startTime
-    const tickIdx = Math.floor(elapsedMs / 120)
+    const tickIdx = Math.floor(elapsedMs / Math.max(40, Math.min(1000, spinnerIntervalMs || 120)))
     const parts = [formatElapsed(elapsedMs)]
     if (tokenCount > 0) parts.push(`↓ ${formatTokens(tokenCount)} tokens`)
     return (
@@ -80,8 +95,8 @@ export default function GenerationFooter({ running, frames, tokenCount, startTim
   if (!summary) return null
   return (
     <div className={`term-summary term-summary-${summary.reason}`}>
-      <span className="term-summary-frame" style={{ color: spinnerColor || undefined, fontSize: `${spinnerSize}px` }}>
-        {summary.completedFrame || (summary.reason === 'cancelled' ? spinnerCancelledMarker : summary.reason === 'error' ? spinnerErrorMarker : spinnerDoneMarker)}
+      <span className="term-summary-frame" style={{ fontSize: `${spinnerSize}px` }}>
+        {marker}
       </span>
       <span>{summary.reason === 'cancelled' ? '已停止' : summary.reason === 'error' ? '处理失败' : '处理耗时'} {formatElapsed(summary.elapsedMs)}</span>
     </div>
