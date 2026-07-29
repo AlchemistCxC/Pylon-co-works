@@ -514,7 +514,7 @@ function ToolCard({ name, input, output, outputLines, status: toolStatus }: { na
   }
   const outputHtml = useMemo(() => {
     if (!output || name !== 'Bash') return ''
-    return new Anser().ansiToHtml(Anser.escapeForHtml(output))
+    return sanitizeHtml(new Anser().ansiToHtml(Anser.escapeForHtml(output)))
   }, [output, name])
   return (
     <div className="term-tool" data-status={status} style={connCss}>
