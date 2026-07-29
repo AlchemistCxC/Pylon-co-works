@@ -39,6 +39,14 @@ export interface ThemeSettings {
   sidebarTransparency: number; sidebarBlur: number; chatTransparency: number; chatBlur: number; rightTransparency: number; rightBlur: number
   userName: string; userPrefix: string; userColor: string
   toolIndicator: string; sparkles: string
+  spinnerFramePreset: 'sparkles' | 'ascii-line' | 'braille' | 'dots' | 'custom'
+  spinnerCustomFrames: string
+  spinnerVerbSet: 'zh' | 'en' | 'custom'
+  spinnerCustomVerbs: string
+  spinnerDoneMarker: string
+  spinnerCancelledMarker: string
+  spinnerErrorMarker: string
+  spinnerIntervalMs: number
   spinnerColor: string; spinnerSize: number
   msgStyle: string; msgFont: string; msgTextColor: string; msgLineHeight: number
   ccHeight: number; ccBgHeight: number; ccBg: string
@@ -130,6 +138,9 @@ const DEFAULTS: ThemeSettings = {
   sidebarTransparency: 1, sidebarBlur: 0, chatTransparency: 1, chatBlur: 0, rightTransparency: 1, rightBlur: 0,
   userName: '', userPrefix: '❯', userColor: '',
   toolIndicator: '●', sparkles: '✳✴✵✶✷✸✹✺✻✼❃❊',
+  spinnerFramePreset: 'sparkles', spinnerCustomFrames: '',
+  spinnerVerbSet: 'zh', spinnerCustomVerbs: '',
+  spinnerDoneMarker: '✓', spinnerCancelledMarker: '■', spinnerErrorMarker: '!', spinnerIntervalMs: 120,
   spinnerColor: '', spinnerSize: 14,
   msgStyle: 'terminal', msgFont: 'mono', msgTextColor: '', msgLineHeight: 1.8,
   ccHeight: 150, ccBgHeight: 150, ccBg: 'transparent', ccBgImage: '', ccStatusFontSize: 13,
@@ -376,6 +387,21 @@ export const useStore = create<ThemeState>()(persist(
   state.ccLayout = normalizeCcLayout(state.ccLayout, state.ccPositions)
   state.ccLayoutVersion = CC_LAYOUT_SCHEMA_VERSION
   state.ccEditMode = false
+  state.spinnerFramePreset = state.spinnerFramePreset === 'ascii-line'
+    || state.spinnerFramePreset === 'braille'
+    || state.spinnerFramePreset === 'dots'
+    || state.spinnerFramePreset === 'custom'
+    ? state.spinnerFramePreset
+    : 'sparkles'
+  state.spinnerCustomFrames = typeof state.spinnerCustomFrames === 'string' ? state.spinnerCustomFrames : ''
+  state.spinnerVerbSet = state.spinnerVerbSet === 'en' || state.spinnerVerbSet === 'custom' ? state.spinnerVerbSet : 'zh'
+  state.spinnerCustomVerbs = typeof state.spinnerCustomVerbs === 'string' ? state.spinnerCustomVerbs : ''
+  state.spinnerDoneMarker = typeof state.spinnerDoneMarker === 'string' ? state.spinnerDoneMarker : '✓'
+  state.spinnerCancelledMarker = typeof state.spinnerCancelledMarker === 'string' ? state.spinnerCancelledMarker : '■'
+  state.spinnerErrorMarker = typeof state.spinnerErrorMarker === 'string' ? state.spinnerErrorMarker : '!'
+  state.spinnerIntervalMs = typeof state.spinnerIntervalMs === 'number' && Number.isFinite(state.spinnerIntervalMs)
+    ? Math.max(40, Math.min(1000, state.spinnerIntervalMs))
+    : 120
   state.customPresets = normalizeCustomPresets(state.customPresets)
   const normalized = normalizeProfileState(
     Array.isArray(state.profiles) ? state.profiles : [],

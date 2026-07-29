@@ -8,7 +8,7 @@ import remarkGfm from 'remark-gfm'
 import { AnimatePresence, motion } from 'motion/react'
 import Anser from 'anser'
 import GenerationFooter, { type GenerationSummary } from './GenerationFooter'
-import { completionFrame, splitSpinnerFrames } from './spinnerFrames'
+import { resolveSpinnerFrames } from './spinnerFrames'
 import { isReplayEvent, resolveLoadedMessages, serializeLoadedMessages, shouldStartLiveGeneration } from './replayState'
 import { canPersistMessages } from './messagePersistence'
 import { addGeneratingSource, removeGeneratingSource, updateSourceState } from './sessionEventState'
@@ -180,7 +180,8 @@ const ChatView = React.memo(function ChatView({ sessionId, rightOpen = false, ri
         updateSourceMessages(source, update, replay)
         if (!shouldStartLiveGeneration({ replay })) return
         generationStartRef.current[source] = Date.now()
-        generationFramesRef.current[source] = splitSpinnerFrames(useStore.getState().sparkles)
+        const spinnerState = useStore.getState()
+        generationFramesRef.current[source] = resolveSpinnerFrames(spinnerState.spinnerFramePreset, spinnerState.spinnerCustomFrames)
         startGenerating(source)
         if (sessionRef.current === source) {
           genStart.current = generationStartRef.current[source]
@@ -286,21 +287,24 @@ const ChatView = React.memo(function ChatView({ sessionId, rightOpen = false, ri
         if (sessionRef.current === source) {
           const start = generationStartRef.current[source] || genStart.current
           const elapsedMs = Date.now() - start
-          const frames = generationFramesRef.current[source] || splitSpinnerFrames(useStore.getState().sparkles)
-          setSummary({ elapsedMs, tokenCount: tokenCount.current, completedFrame: completionFrame(frames, elapsedMs), reason: 'done' })
+          setSummary({ elapsedMs, tokenCount: tokenCount.current, completedFrame: '', reason: 'done' })
           setGenerating(false)
         }
         updateSourceMessages(source, prev => prev.map(m => ({ ...m, running: false })))
       }),
 
-      listen<{ source: string; error: string }>('peri:error', (event) => {
+      listen<{ source: string; error: string; cancelled?: boolean }>('peri:error', (event) => {
         const { source, error } = event.payload
         if (!source) return
         stopGenerating(source)
         updateSourceMessages(source, prev => [...prev.map(m => ({ ...m, running: false })), {
           id: 'err-' + Date.now(), role: 'assistant', sender: 'system', content: error, time: new Date().toLocaleTimeString(),
         }])
-        if (sessionRef.current === source) setGenerating(false)
+        if (sessionRef.current === source) {
+          const start = generationStartRef.current[source] || genStart.current
+          setSummary({ elapsedMs: Date.now() - start, tokenCount: tokenCount.current, completedFrame: '', reason: event.payload.cancelled ? 'cancelled' : 'error' })
+          setGenerating(false)
+        }
       }),
     ])
 
@@ -360,9 +364,17 @@ const ChatView = React.memo(function ChatView({ sessionId, rightOpen = false, ri
           ))}
         </AnimatePresence>
         <GenerationFooter running={generating}
-          frames={generationFramesRef.current[sessionRef.current || ''] || splitSpinnerFrames(useStore.getState().sparkles)}
+          frames={generationFramesRef.current[sessionRef.current || ''] || resolveSpinnerFrames(useStore.getState().spinnerFramePreset, useStore.getState().spinnerCustomFrames)}
           tokenCount={tokenCount.current} startTime={genStart.current} summary={summary}
-          onStop={generating ? () => { if (sessionRef.current) invoke('cancel_prompt', { source: sessionRef.current }).catch(error => reportRuntimeError('取消生成', error)) } : undefined} />
+          onStop={generating ? () => {
+            if (!sessionRef.current) return
+            const source = sessionRef.current
+            invoke('cancel_prompt', { source }).then(() => {
+              const start = generationStartRef.current[source] || genStart.current
+              setSummary({ elapsedMs: Date.now() - start, tokenCount: tokenCount.current, completedFrame: '', reason: 'cancelled' })
+              setGenerating(false)
+            }).catch(error => reportRuntimeError('取消生成', error))
+          } : undefined} />
         <div ref={bottomRef} />
       </div>
       <button className="scroll-bottom-btn" onClick={() => bottomRef.current?.scrollIntoView({ behavior: 'smooth' })}

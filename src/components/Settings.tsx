@@ -350,9 +350,13 @@ export default function Settings({ onClose }: { onClose?: () => void }) {
                 {t.toolConnectorMode==='fixed' && <Row label="线色"><ColorPopover value={t.toolConnectorColor} onChange={v=>onSettingChange({toolConnectorColor:v})}/></Row>}
               </Group>
               <Group title="Spinner">
-                <Row label="字符集"><Sel value={t.sparkles} onChange={v=>onSettingChange({sparkles:v})} options={[
-                  '✳✴✵✶✷✸✹✺✻✼❃❊','◴◷◶◵','·○◎●◉◎○','←↖↑↗→↘↓↙','▖▗▘▝▗▖▝▘','▁▂▃▄▅▆▇█▇▆▅▄▃','┌┐┘└','⠁⠂⠄⡀⢀⠠⠐⠈'
-                ]}/></Row>
+                <Row label="动画预设"><Sel value={t.spinnerFramePreset} onChange={v=>onSettingChange({spinnerFramePreset:v as ThemeSettings['spinnerFramePreset']})} options={['sparkles','ascii-line','braille','dots','custom']}/></Row>
+                {t.spinnerFramePreset === 'custom' && <Row label="自定义帧"><textarea className="set-textarea" value={t.spinnerCustomFrames} onChange={e=>onSettingChange({spinnerCustomFrames:e.target.value})} placeholder="逐字符输入，例如：◐◓◑◒" /></Row>}
+                <Row label="文案语言"><Sel value={t.spinnerVerbSet} onChange={v=>onSettingChange({spinnerVerbSet:v as ThemeSettings['spinnerVerbSet']})} options={['zh','en','custom']}/></Row>
+                {t.spinnerVerbSet === 'custom' && <Row label="自定义文案"><textarea className="set-textarea" value={t.spinnerCustomVerbs} onChange={e=>onSettingChange({spinnerCustomVerbs:e.target.value})} placeholder="每行一条文案" /></Row>}
+                <Row label="完成标记"><Txt value={t.spinnerDoneMarker} onChange={v=>onSettingChange({spinnerDoneMarker:v})}/></Row>
+                <Row label="取消标记"><Txt value={t.spinnerCancelledMarker} onChange={v=>onSettingChange({spinnerCancelledMarker:v})}/></Row>
+                <Row label="错误标记"><Txt value={t.spinnerErrorMarker} onChange={v=>onSettingChange({spinnerErrorMarker:v})}/></Row>
                 <div className="set-compact-row">
                   <span className="set-compact-label">颜色</span>
                   <ColorPopover value={t.spinnerColor} onChange={v=>onSettingChange({spinnerColor:v})} chips={false}/>

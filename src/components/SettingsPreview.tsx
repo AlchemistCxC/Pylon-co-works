@@ -2,7 +2,7 @@ import { useState, useEffect, useRef } from 'react'
 import ControlCenter from './ControlCenter'
 import { useStore } from '../store'
 import GenerationFooter from './chat/GenerationFooter'
-import { splitSpinnerFrames } from './chat/spinnerFrames'
+import { resolveSpinnerFrames } from './chat/spinnerFrames'
 
 /**
  * SettingsPreview — 设置页右侧实时预览
@@ -153,13 +153,14 @@ function PvUser() {
 
 // 预览 spinner — 读 store（sparkles/spinnerColor/spinnerSize）
 function PvSpinner() {
-  const sparkles = useStore(s => s.sparkles) || '✳✴✵✶✷✸✹✺✻✼❃❊'
-  const frames = splitSpinnerFrames(sparkles)
+  const preset = useStore(s => s.spinnerFramePreset)
+  const customFrames = useStore(s => s.spinnerCustomFrames)
+  const frames = resolveSpinnerFrames(preset, customFrames)
   return (
     <>
       <GenerationFooter running frames={frames} tokenCount={1200} startTime={Date.now() - 3000} summary={null} />
       <GenerationFooter running={false} frames={frames} tokenCount={1200} startTime={Date.now() - 3000}
-        summary={{ elapsedMs: 3000, tokenCount: 1200, completedFrame: frames[0], reason: 'done' }} />
+        summary={{ elapsedMs: 3000, tokenCount: 1200, completedFrame: '', reason: 'done' }} />
     </>
   )
 }

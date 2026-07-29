@@ -1,18 +1,24 @@
 import { useEffect, useState } from 'react'
 import { Square } from 'lucide-react'
 import { frameAt } from './spinnerFrames'
+import { useStore } from '../../store'
 
 const IDIOMS = [
   '格物致知','见微知著','大道至简','慎思明辨','融会贯通','温故知新','举一反三',
   '水滴石穿','千里之行','厚积薄发','锲而不舍','知行合一','日拱一卒','功不唐捐','学以致用',
   '精益求精','大巧若拙','返璞归真','独具匠心','无中生有','上善若水','海纳百川','虚怀若谷','心无旁骛','宁静致远','道法自然',
 ]
+const EN_VERBS = ['Thinking', 'Reading', 'Checking', 'Reasoning', 'Working', 'Reviewing', 'Verifying']
+
+function normalizeVerbs(value: string): string[] {
+  return Array.from(new Set(value.split(/\r?\n/).map(item => item.trim()).filter(Boolean)))
+}
 
 export interface GenerationSummary {
   elapsedMs: number
   tokenCount: number
   completedFrame: string
-  reason: 'done' | 'cancelled'
+  reason: 'done' | 'cancelled' | 'error'
 }
 
 function formatElapsed(elapsedMs: number) {
@@ -33,12 +39,24 @@ export default function GenerationFooter({ running, frames, tokenCount, startTim
   summary: GenerationSummary | null
   onStop?: () => void
 }) {
+  const spinnerColor = useStore(s => s.spinnerColor)
+  const spinnerSize = useStore(s => s.spinnerSize)
+  const spinnerVerbSet = useStore(s => s.spinnerVerbSet)
+  const spinnerCustomVerbs = useStore(s => s.spinnerCustomVerbs)
+  const spinnerDoneMarker = useStore(s => s.spinnerDoneMarker)
+  const spinnerCancelledMarker = useStore(s => s.spinnerCancelledMarker)
+  const spinnerErrorMarker = useStore(s => s.spinnerErrorMarker)
+  const spinnerIntervalMs = useStore(s => s.spinnerIntervalMs)
+  const verbs = spinnerVerbSet === 'custom'
+    ? normalizeVerbs(spinnerCustomVerbs)
+    : spinnerVerbSet === 'en' ? EN_VERBS : IDIOMS
+  const safeVerbs = verbs.length > 0 ? verbs : IDIOMS
   const [, tick] = useState(0)
   useEffect(() => {
     if (!running) return
-    const id = setInterval(() => tick(value => value + 1), 120)
+    const id = setInterval(() => tick(value => value + 1), Math.max(40, Math.min(1000, spinnerIntervalMs || 120)))
     return () => clearInterval(id)
-  }, [running])
+  }, [running, spinnerIntervalMs])
 
   if (running) {
     const elapsedMs = Date.now() - startTime
@@ -48,8 +66,8 @@ export default function GenerationFooter({ running, frames, tokenCount, startTim
     return (
       <div className="term-spinner-row">
         <div className="term-spinner">
-          <span className="spinner-frame">{frameAt(frames, elapsedMs)}</span>
-          <span className="spinner-verb">{IDIOMS[Math.floor(tickIdx / 8) % IDIOMS.length]}</span>
+          <span className="spinner-frame" style={{ color: spinnerColor || undefined, fontSize: `${spinnerSize}px` }}>{frameAt(frames, elapsedMs, spinnerIntervalMs)}</span>
+          <span className="spinner-verb">{safeVerbs[Math.floor(tickIdx / 8) % safeVerbs.length]}</span>
           <span className="spinner-meta">({parts.join(' · ')})</span>
         </div>
         {onStop && <button className="spinner-stop-btn" title="停止生成 (Esc / Ctrl+C)" onClick={onStop}>
@@ -62,8 +80,10 @@ export default function GenerationFooter({ running, frames, tokenCount, startTim
   if (!summary) return null
   return (
     <div className={`term-summary term-summary-${summary.reason}`}>
-      <span className="term-summary-frame">{summary.completedFrame}</span>
-      <span>{summary.reason === 'cancelled' ? '已停止' : '处理耗时'} {formatElapsed(summary.elapsedMs)}</span>
+      <span className="term-summary-frame" style={{ color: spinnerColor || undefined, fontSize: `${spinnerSize}px` }}>
+        {summary.completedFrame || (summary.reason === 'cancelled' ? spinnerCancelledMarker : summary.reason === 'error' ? spinnerErrorMarker : spinnerDoneMarker)}
+      </span>
+      <span>{summary.reason === 'cancelled' ? '已停止' : summary.reason === 'error' ? '处理失败' : '处理耗时'} {formatElapsed(summary.elapsedMs)}</span>
     </div>
   )
 }

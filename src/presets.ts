@@ -33,7 +33,8 @@ export const ZONE_FIELDS: Record<string, (keyof ThemeSettings)[]> = {
     'userTagBg', 'userTagText',
     'toolIndicator', 'toolIndicatorGlow', 'toolIndicatorGlowColor',
     'toolConnectorMode', 'toolConnectorColor',
-    'sparkles', 'spinnerColor', 'spinnerSize',
+    'sparkles', 'spinnerFramePreset', 'spinnerCustomFrames', 'spinnerVerbSet', 'spinnerCustomVerbs',
+    'spinnerDoneMarker', 'spinnerCancelledMarker', 'spinnerErrorMarker', 'spinnerIntervalMs', 'spinnerColor', 'spinnerSize',
     'msgStyle', 'msgFont', 'msgTextColor', 'msgLineHeight',
   ],
   cc: [
