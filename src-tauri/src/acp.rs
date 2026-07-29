@@ -112,7 +112,6 @@ pub struct AcpClient {
     /// Set when the child process exits unexpectedly.
     pub crashed: Arc<AtomicBool>,
 }
-
 #[derive(Debug, Clone)]
 pub struct RawMessage {
     pub id: Option<u64>,
@@ -233,10 +232,10 @@ impl AcpClient {
     }
 
     /// Create a new session. Returns full Peri response (sessionId, modes, configOptions).
-    pub async fn new_session(&self, cwd: &str) -> Result<serde_json::Value, String> {
+    pub async fn new_session(&self, cwd: &str, mcp_servers: Vec<serde_json::Value>) -> Result<serde_json::Value, String> {
         self.call_async(METHOD_SESSION_NEW, serde_json::json!({
             "cwd": cwd,
-            "mcpServers": []
+            "mcpServers": mcp_servers
         })).await
     }
 
@@ -395,8 +394,11 @@ impl AcpClient {
         })).await
     }
 
-    /// Connect from AgentDef (P0: replaces hardcoded spawn)
-    pub async fn connect(agent: &crate::agent_config::AgentDef) -> Result<Self, String> {
+    /// Connect from AgentDef with optional structured runtime log sink.
+    pub async fn connect_with_logs(
+        agent: &crate::agent_config::AgentDef,
+        runtime_logs: Option<Arc<crate::runtime_log::RuntimeLogHub>>,
+    ) -> Result<Self, String> {
         let resolved_agent;
         let agent = if let Some(config_path) = crate::agent_config::config_path() {
             let base_dir = config_path.parent().unwrap_or_else(|| std::path::Path::new("."));
@@ -437,9 +439,19 @@ impl AcpClient {
                 // Drain stderr
                 let stderr = child.take_stderr()?;
                 let agent_name_stderr = agent.name.clone();
+                let stderr_logs = runtime_logs.clone();
                 std::thread::spawn(move || {
                     for line in BufReader::new(stderr).lines() {
-                        if let Ok(l) = line { if !l.is_empty() { log::error!("{} stderr: {}", agent_name_stderr, l); } }
+                        if let Ok(l) = line {
+                            if !l.is_empty() {
+                                log::error!("{} stderr: {}", agent_name_stderr, l);
+                                if let Some(hub) = &stderr_logs {
+                                    hub.push(crate::runtime_log::timestamp(), "error", "agent-stderr", None, "Agent stderr output", serde_json::Map::from_iter([
+                                        ("agent".to_string(), serde_json::Value::String(agent_name_stderr.clone())),
+                                    ]));
+                                }
+                            }
+                        }
                     }
                 });
 
@@ -451,6 +463,7 @@ impl AcpClient {
                 let pending_clone = pending.clone();
                 let tx_clone = tx.clone();
                 let crashed_reader = crashed.clone();
+                let stdout_logs = runtime_logs.clone();
                 std::thread::spawn(move || {
                     for line in stdout.lines() {
                         let line = match line { Ok(l) => l, Err(_) => break };
@@ -458,7 +471,15 @@ impl AcpClient {
                         if line.is_empty() { continue; }
                         let msg_val: serde_json::Value = match serde_json::from_str(&line) {
                             Ok(v) => v,
-                            Err(e) => { log::error!("ACP parse: {} — {}", e, line.chars().take(100).collect::<String>()); continue; }
+                            Err(e) => {
+                                log::error!("ACP parse: {}", e);
+                                if let Some(hub) = &stdout_logs {
+                                    hub.push(crate::runtime_log::timestamp(), "error", "acp", None, "ACP stdout JSON parse error", serde_json::Map::from_iter([
+                                        ("error".to_string(), serde_json::Value::String(e.to_string())),
+                                    ]));
+                                }
+                                continue;
+                            }
                         };
                         let raw = RawMessage {
                             id: msg_val.get("id").and_then(|v| v.as_u64()),
@@ -490,6 +511,9 @@ impl AcpClient {
                             }
                         }
                     });
+                    if let Some(hub) = &stdout_logs {
+                        hub.push(crate::runtime_log::timestamp(), "error", "acp", None, "ACP child stdout closed; agent crashed", serde_json::Map::new());
+                    }
                     log::error!("ACP: child process stdout closed (agent crashed)");
                 });
 
@@ -516,17 +540,17 @@ impl AcpClient {
         }
     }
 
-    fn load_session_params(session_id: &str, cwd: &str) -> serde_json::Value {
+    fn load_session_params(session_id: &str, cwd: &str, mcp_servers: Vec<serde_json::Value>) -> serde_json::Value {
         serde_json::json!({
             "sessionId": session_id,
             "cwd": cwd,
-            "mcpServers": []
+            "mcpServers": mcp_servers
         })
     }
 
     /// Load a persisted session. Peri replays history before returning the response.
-    pub async fn load_session(&self, session_id: &str, cwd: &str) -> Result<serde_json::Value, String> {
-        self.call_async(METHOD_SESSION_LOAD, Self::load_session_params(session_id, cwd)).await
+    pub async fn load_session(&self, session_id: &str, cwd: &str, mcp_servers: Vec<serde_json::Value>) -> Result<serde_json::Value, String> {
+        self.call_async(METHOD_SESSION_LOAD, Self::load_session_params(session_id, cwd, mcp_servers)).await
     }
 
     /// P1: List persisted sessions from ThreadStore
@@ -557,7 +581,7 @@ mod tests {
     #[test]
     fn session_load_params_include_required_mcp_servers() {
         assert_eq!(
-            AcpClient::load_session_params("session-1", "G:/workspace"),
+            AcpClient::load_session_params("session-1", "G:/workspace", Vec::new()),
             serde_json::json!({
                 "sessionId": "session-1",
                 "cwd": "G:/workspace",
