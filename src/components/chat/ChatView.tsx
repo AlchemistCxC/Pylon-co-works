@@ -15,6 +15,7 @@ import { addGeneratingSource, removeGeneratingSource, updateSourceState } from '
 import { resolveToolVisualStatus } from './toolStatus'
 import { extractMode, extractModelConfig, extractUsage, sessionResponseObject, type PeriDonePayload, type PeriUpdatePayload, type SessionResponse } from './acpTypes'
 import { highlightCode } from './codeHighlight'
+import { sanitizeHtml } from './htmlSanitizer'
 import { reportRuntimeError } from '../../runtimeError'
 import './ChatView.css'
 
@@ -446,7 +447,7 @@ function CodeBlock({ language, code }: { language?: string; code: string }) {
     return htmlLines.map((html, i) => (
       <div key={i} className="term-code-line">
         <span className="term-code-gutter">│ </span>
-        <span dangerouslySetInnerHTML={{ __html: html || '&nbsp;' }} />
+        <span dangerouslySetInnerHTML={{ __html: sanitizeHtml(html || '&nbsp;') }} />
       </div>
     ))
   }
