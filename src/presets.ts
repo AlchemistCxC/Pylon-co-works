@@ -37,7 +37,7 @@ export const ZONE_FIELDS: Record<string, (keyof ThemeSettings)[]> = {
     'msgStyle', 'msgFont', 'msgTextColor', 'msgLineHeight',
   ],
   cc: [
-    'ccHeight', 'ccBgHeight', 'ccBg', 'ccBgImage',
+    'ccHeight', 'ccBgHeight', 'ccBg', 'ccBgImage', 'ccStatusFontSize',
     'ccStyle', 'ccVariant', 'ccLayout', 'ccPositions', 'ccHidden', 'ccScale', 'ccCliCustomized', 'ccLayoutVersion',
     'inputBg', 'inputBgImage', 'inputTextColor', 'inputPlaceholder',
     'inputSendBg', 'inputFocusBorder', 'inputFontSize', 'inputMinHeight',

@@ -394,6 +394,7 @@ export default function Settings({ onClose }: { onClose?: () => void }) {
               <Group title="控件样式">
                 <Row label="输入栏"><Sel value={t.inputMode} onChange={v=>onSettingChange({inputMode:v})} options={['cli','default']}/></Row>
                 <Row label="上下文"><Sel value={t.ccStyle} onChange={v=>onSettingChange({ccStyle:v})} options={['wave','bar','numeric']}/></Row>
+                <Row label="信息字号"><Num value={t.ccStatusFontSize ?? 13} onChange={v=>onSettingChange({ccStatusFontSize:v})} min={11} max={20}/></Row>
                 <Row label="模型"><Sel value={t.modelVariant} onChange={v=>onSettingChange({modelVariant:v})} options={['dropdown','minimal','badge']}/></Row>
                 <Row label="模式"><Sel value={t.modeVariant} onChange={v=>onSettingChange({modeVariant:v})} options={['pill','badge','minimal']}/></Row>
                 <Row label="发送"><Sel value={t.sendVariant} onChange={v=>onSettingChange({sendVariant:v})} options={['icon','square','minimal']}/></Row>

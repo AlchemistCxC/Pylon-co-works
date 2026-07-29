@@ -42,7 +42,8 @@ export interface ThemeSettings {
   spinnerColor: string; spinnerSize: number
   msgStyle: string; msgFont: string; msgTextColor: string; msgLineHeight: number
   ccHeight: number; ccBgHeight: number; ccBg: string
- ccBgImage: string
+  ccBgImage: string
+  ccStatusFontSize: number
   ccStyle: string
   ccVariant: string
   modelVariant: string; modeVariant: string; sendVariant: string; attachVariant: string
@@ -131,7 +132,7 @@ const DEFAULTS: ThemeSettings = {
   toolIndicator: '●', sparkles: '✳✴✵✶✷✸✹✺✻✼❃❊',
   spinnerColor: '', spinnerSize: 14,
   msgStyle: 'terminal', msgFont: 'mono', msgTextColor: '', msgLineHeight: 1.8,
-  ccHeight: 150, ccBgHeight: 150, ccBg: 'transparent', ccBgImage: '',
+  ccHeight: 150, ccBgHeight: 150, ccBg: 'transparent', ccBgImage: '', ccStatusFontSize: 13,
   ccStyle: 'wave',
   ccVariant: 'terminal',
   modelVariant: 'dropdown', modeVariant: 'pill', sendVariant: 'icon', attachVariant: 'icon',
