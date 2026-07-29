@@ -10,7 +10,7 @@ import Anser from 'anser'
 import GenerationFooter, { type GenerationSummary } from './GenerationFooter'
 import { resolveSpinnerFrames } from './spinnerFrames'
 import { isReplayEvent, resolveLoadedMessages, serializeLoadedMessages, shouldStartLiveGeneration } from './replayState'
-import { canPersistMessages } from './messagePersistence'
+import { canPersistMessages, clearMessageStorage, messageStorageKey } from './messagePersistence'
 import { addGeneratingSource, removeGeneratingSource, updateSourceState } from './sessionEventState'
 import { resolveToolVisualStatus } from './toolStatus'
 import { extractMode, extractModelConfig, extractUsage, sessionResponseObject, type PeriDonePayload, type PeriUpdatePayload, type SessionResponse } from './acpTypes'
@@ -70,7 +70,7 @@ const ChatView = React.memo(function ChatView({ sessionId, rightOpen = false, ri
     messageOwnerRef.current = s.id
 
     const cached = messagesBySourceRef.current[s.source] ?? (() => {
-      const stored = localStorage.getItem('pylon-msgs-' + s.id)
+      const stored = localStorage.getItem(messageStorageKey(s.id))
       if (!stored) return []
       try {
         return (JSON.parse(stored) as Message[]).map(message => ({ ...message, running: false }))
@@ -117,8 +117,8 @@ const ChatView = React.memo(function ChatView({ sessionId, rightOpen = false, ri
         messagesBySourceRef.current[s.source] = resolved
         const serialized = serializeLoadedMessages(resolved)
         try {
-          if (serialized) localStorage.setItem('pylon-msgs-' + s.id, serialized)
-          else localStorage.removeItem('pylon-msgs-' + s.id)
+          if (serialized) localStorage.setItem(messageStorageKey(s.id), serialized)
+          else clearMessageStorage(s.id, localStorage)
         } catch {}
         if (sessionRef.current === s.source) setMessages(resolved)
         const cfg = extractModelConfig(res?.configOptions)
@@ -144,7 +144,7 @@ const ChatView = React.memo(function ChatView({ sessionId, rightOpen = false, ri
       if (replay) return
       const session = useStore.getState().sessions.find(item => item.source === source)
       if (session) {
-        try { localStorage.setItem('pylon-msgs-' + session.id, JSON.stringify(next)) } catch {}
+        try { localStorage.setItem(messageStorageKey(session.id), JSON.stringify(next)) } catch {}
       }
       if (sessionRef.current === source) setMessages(next)
     }
@@ -310,8 +310,13 @@ const ChatView = React.memo(function ChatView({ sessionId, rightOpen = false, ri
     ])
 
     const handleClear = () => {
-      if (!sessionRef.current) return
-      messagesBySourceRef.current[sessionRef.current] = []
+      const source = sessionRef.current
+      const ownerId = messageOwnerRef.current
+      if (!source || !ownerId) return
+      const session = useStore.getState().sessions.find(item => item.id === ownerId && item.source === source)
+      if (!session) return
+      messagesBySourceRef.current[source] = []
+      clearMessageStorage(session.id, localStorage)
       setMessages([])
       setSummary(null)
     }
