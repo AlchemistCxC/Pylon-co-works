@@ -10,6 +10,8 @@ import { reportRuntimeError } from '../runtimeError'
 import { resolveBackgroundImage } from '../backgroundImage'
 import { runAgentSwitchTransaction } from './agentSwitchTransaction'
 import './Settings.css'
+import { normalizeAgentStatus, statusLabel } from './settings/agentTypes'
+import { beginReconnect, completeReconnect, failReconnect } from './settings/agentState'
 
 // ── helpers ──
 
@@ -115,6 +117,8 @@ export default function Settings({ onClose }: { onClose?: () => void }) {
   const dirty = useStore(s => s.dirty)
   const agents = useStore(s => s.agents)
   const activeAgent = useStore(s => s.activeAgent)
+  const agentStatuses = useStore(s => s.agentStatuses)
+  const setAgentStatus = useStore(s => s.setAgentStatus)
   const setActiveAgent = useStore(s => s.setActiveAgent)
   const customPresets = useStore(s => s.customPresets)
   const saveCustomPreset = useStore(s => s.saveCustomPreset)
@@ -123,6 +127,9 @@ export default function Settings({ onClose }: { onClose?: () => void }) {
   const [activeTab, setActiveTab] = useState('global')
   const [customPresetName, setCustomPresetName] = useState('')
   const [switchingAgentId, setSwitchingAgentId] = useState<string | null>(null)
+  const [reconnecting, setReconnecting] = useState(false)
+  const [reloading, setReloading] = useState(false)
+  const currentStatus = agentStatuses[activeAgent] || normalizeAgentStatus({}, activeAgent)
 
   // 应用全局预设
   const applyGlobalPreset = (name: string) => {
@@ -173,9 +180,33 @@ export default function Settings({ onClose }: { onClose?: () => void }) {
     setSwitchingAgentId(null)
   }
 
+  const reconnectAgent = async () => {
+    if (reconnecting) return
+    setReconnecting(true)
+    setAgentStatus(activeAgent, { ...beginReconnect({ ...currentStatus, pending: false }), agent: activeAgent })
+    try {
+      await invoke('reconnect_agent')
+      setAgentStatus(activeAgent, { ...completeReconnect({ ...currentStatus, pending: false }), agent: activeAgent })
+    } catch (error) {
+      const detail = reportRuntimeError('重连 Agent', error)
+      setAgentStatus(activeAgent, { ...failReconnect({ ...currentStatus, pending: false }, detail.message), agent: activeAgent })
+    } finally { setReconnecting(false) }
+  }
+
+  const reloadAgents = async () => {
+    if (reloading) return
+    setReloading(true)
+    try {
+      await invoke('reload_agents')
+      const list = await invoke<unknown>('list_agents')
+      useStore.getState().setAgents(Array.isArray(list) ? list as { id: string; name: string }[] : [])
+    } catch (error) {
+      reportRuntimeError('重载 Agent 配置', error)
+    } finally { setReloading(false) }
+  }
+
   return (
     <div className="settings">
-      {onClose && <button className="settings-close" onClick={onClose}>✕</button>}
       <div className="settings-tabs-root">
         <div className="settings-nav">
           {TABS.map(tab => (
@@ -438,6 +469,14 @@ export default function Settings({ onClose }: { onClose?: () => void }) {
               <Group title="当前 Agent">
                 <div style={{ padding:'8px 0', fontFamily:'var(--mono)', fontSize:14, color:'var(--accent)' }}>
                   {activeAgent || 'peri'}
+                </div>
+                <div className="set-hint">状态：{statusLabel(currentStatus.status)}</div>
+                {currentStatus.transport && <div className="set-hint">Transport：{currentStatus.transport}</div>}
+                {currentStatus.cwd && <div className="set-hint">CWD：{currentStatus.cwd}</div>}
+                {currentStatus.recentError && <div className="set-hint" role="alert">最近错误：{currentStatus.recentError}</div>}
+                <div className="set-preset-row">
+                  <button className="ps-btn sm" disabled={reconnecting} onClick={reconnectAgent}>{reconnecting ? '重连中…' : '重连'}</button>
+                  <button className="ps-btn sm" disabled={reloading} onClick={reloadAgents}>{reloading ? '重载中…' : '重载配置'}</button>
                 </div>
               </Group>
               <Group title="切换 Agent（需重启）">

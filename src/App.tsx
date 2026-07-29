@@ -17,6 +17,8 @@ import { getCurrentWindow } from '@tauri-apps/api/window'
 import { invoke } from '@tauri-apps/api/core'
 import { reportRuntimeError, type RuntimeErrorDetail } from './runtimeError'
 import { toCssBackgroundImage } from './backgroundImage'
+import { listen } from '@tauri-apps/api/event'
+import { normalizeAgentStatus, type AgentStatusPayload } from './components/settings/agentTypes'
 
 export default function App() {
   const [activeSession, setActiveSession] = useState<string | null>(null)
@@ -47,9 +49,17 @@ export default function App() {
   }, [activeProfileId, activeSession, sessions])
 
   useEffect(() => {
-    invoke('list_agents').then((list: any) => {
-      useStore.getState().setAgents(list)
+    let disposed = false
+    const load = () => invoke('list_agents').then((list: any) => {
+      if (!disposed) useStore.getState().setAgents(Array.isArray(list) ? list : [])
     }).catch(error => reportRuntimeError('读取 Agent 列表', error))
+    load()
+    const unlisten = listen<AgentStatusPayload>('peri:agent-status', event => {
+      const state = useStore.getState()
+      const status = normalizeAgentStatus(event.payload, state.activeAgent)
+      state.setAgentStatus(status.agent || state.activeAgent, status)
+    })
+    return () => { disposed = true; unlisten.then(stop => stop()) }
   }, [])
 
   const activeAgent = useStore(s => s.activeAgent) || 'peri'
