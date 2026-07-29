@@ -1,0 +1,15 @@
+[package]
+name = "pylon-tests"
+version = "0.1.0"
+edition = "2021"
+publish = false
+
+[dependencies]
+pylon = { path = ".." }
+
+[build-dependencies]
+embed-resource = "3"
+
+[[test]]
+name = "pylon"
+path = "pylon.rs"

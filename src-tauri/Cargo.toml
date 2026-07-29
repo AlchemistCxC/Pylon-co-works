@@ -28,6 +28,7 @@ log = "0.4"
 
 [build-dependencies]
 tauri-build = { version = "2", features = [] }
+embed-resource = "3"
 
 [lib]
 name = "prism_desktop_lib"
