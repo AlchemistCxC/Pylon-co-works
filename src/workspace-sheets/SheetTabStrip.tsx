@@ -1,6 +1,7 @@
-import { useEffect, useRef } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import type { AgentStatus } from '../components/settings/agentTypes'
 import type { SheetRecord } from './sheetTypes'
+import WorkspaceMenu, { type WorkspaceMenuActions } from './WorkspaceMenu'
 
 interface SheetTabStripProps {
   sheets: SheetRecord[]
@@ -9,6 +10,8 @@ interface SheetTabStripProps {
   agentStatuses: Record<string, AgentStatus>
   onFocus: (id: string) => void
   onClose: (id: string) => void
+  menuActions: WorkspaceMenuActions
+  canReopen: boolean
 }
 
 function resolveAgentState(sheet: SheetRecord, activeAgent: string, agentStatuses: Record<string, AgentStatus>) {
@@ -24,8 +27,11 @@ export default function SheetTabStrip({
   agentStatuses,
   onFocus,
   onClose,
+  menuActions,
+  canReopen,
 }: SheetTabStripProps) {
   const tabRefs = useRef(new Map<string, HTMLDivElement>())
+  const [menuSheetId, setMenuSheetId] = useState<string | null>(null)
 
   useEffect(() => {
     if (!activeSheetId) return
@@ -56,6 +62,10 @@ export default function SheetTabStrip({
             data-kind={sheet.kind}
             data-agent-state={agentState}
             role="presentation"
+            onContextMenu={event => {
+              event.preventDefault()
+              setMenuSheetId(sheet.id)
+            }}
           >
             {agentState && <span className="sheet-tab-status" aria-label={`Agent 状态：${agentState}`} />}
             <button
@@ -98,6 +108,14 @@ export default function SheetTabStrip({
           </div>
         )
       })}
+      <WorkspaceMenu
+        {...menuActions}
+        sheet={sheets.find(sheet => sheet.id === menuSheetId) || null}
+        canReopen={canReopen}
+        open={menuSheetId !== null}
+        onCloseMenu={() => setMenuSheetId(null)}
+        className="workspace-menu-tab-context"
+      />
     </div>
   )
 }

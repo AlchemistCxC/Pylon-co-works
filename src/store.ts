@@ -140,6 +140,7 @@ type ThemeState = ThemeSettings & {
   hydrateWorkspaceSheets: (agentIds?: readonly string[]) => void
   openSheet: (sheet: SheetInput) => SheetId | null
   focusSheet: (id: SheetId) => void
+  toggleSheetPin: (id: SheetId) => void
   closeSheet: (id: SheetId) => void
   closeOtherSheets: (id: SheetId) => void
   closeRightSheets: (id: SheetId) => void
@@ -470,6 +471,11 @@ export const useStore = create<ThemeState>()(persist(
   },
   focusSheet: (id) => set(state => {
     const workspaceSheets = sheetReducer(state.workspaceSheets, { type: 'focus', id, now: Date.now() })
+    persistSheetState(localStorage, { ...workspaceSheets, agentStates: state.sheetAgentStates })
+    return { workspaceSheets }
+  }),
+  toggleSheetPin: (id) => set(state => {
+    const workspaceSheets = sheetReducer(state.workspaceSheets, { type: 'togglePin', id, now: Date.now() })
     persistSheetState(localStorage, { ...workspaceSheets, agentStates: state.sheetAgentStates })
     return { workspaceSheets }
   }),

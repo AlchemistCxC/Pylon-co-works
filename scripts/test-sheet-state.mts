@@ -49,4 +49,19 @@ const closeRightWithC = sheetReducer(closeRightWithB, { type: 'open', now: 3, sh
 const closeRight = sheetReducer(closeRightWithC, { type: 'closeRight', id: closeRightWithC.sheets[0].id, now: 4 })
 assert.deepEqual(closeRight.sheets.map(sheet => sheet.title), ['a'])
 
+const pinnedBase = createSheetState([
+  { id: 'pinned', kind: 'file', title: 'Pinned', singletonKey: 'pinned', pinned: true, createdAt: 1, lastFocusedAt: 1 },
+  { id: 'middle', kind: 'file', title: 'Middle', singletonKey: 'middle', createdAt: 2, lastFocusedAt: 2 },
+  { id: 'right', kind: 'file', title: 'Right', singletonKey: 'right', createdAt: 3, lastFocusedAt: 3 },
+], 'middle')
+const unpinned = sheetReducer(pinnedBase, { type: 'close', id: 'pinned', now: 5 })
+assert.deepEqual(unpinned.sheets.map(sheet => sheet.id), ['pinned', 'middle', 'right'])
+assert.equal(unpinned.recentlyClosed.length, 0)
+const unpinnedRight = sheetReducer(pinnedBase, { type: 'closeRight', id: 'middle', now: 6 })
+assert.deepEqual(unpinnedRight.sheets.map(sheet => sheet.id), ['pinned', 'middle'])
+const toggled = sheetReducer(pinnedBase, { type: 'togglePin', id: 'middle', now: 7 })
+assert.equal(toggled.sheets.find(sheet => sheet.id === 'middle')?.pinned, true)
+const closeOthersWithPinned = sheetReducer(toggled, { type: 'closeOthers', id: 'middle', now: 8 })
+assert.deepEqual(closeOthersWithPinned.sheets.map(sheet => sheet.id), ['pinned', 'middle'])
+
 console.log('F0.1 Sheet registry/reducer 回归测试通过')

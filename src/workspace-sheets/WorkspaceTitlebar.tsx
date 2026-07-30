@@ -1,7 +1,8 @@
-import type { MouseEventHandler } from 'react'
+import { useState, type MouseEventHandler } from 'react'
 import SheetTabStrip from './SheetTabStrip'
 import type { SheetRecord } from './sheetTypes'
 import type { AgentStatus } from '../components/settings/agentTypes'
+import WorkspaceMenu, { type WorkspaceMenuActions } from './WorkspaceMenu'
 
 interface WorkspaceTitlebarProps {
   sheets: SheetRecord[]
@@ -13,6 +14,7 @@ interface WorkspaceTitlebarProps {
   onToggleSidebar: () => void
   onFocusSheet: (id: string) => void
   onCloseSheet: (id: string) => void
+  menuActions: WorkspaceMenuActions
   onOpenSheet: () => void
   onReopenSheet: () => void
   onToggleRightPanel: () => void
@@ -32,6 +34,7 @@ export default function WorkspaceTitlebar({
   onToggleSidebar,
   onFocusSheet,
   onCloseSheet,
+  menuActions,
   onOpenSheet,
   onReopenSheet,
   onToggleRightPanel,
@@ -40,6 +43,8 @@ export default function WorkspaceTitlebar({
   onToggleFullscreen,
   onCloseWindow,
 }: WorkspaceTitlebarProps) {
+  const [menuOpen, setMenuOpen] = useState(false)
+  const activeSheet = sheets.find(sheet => sheet.id === activeSheetId) || null
   return (
     <header className={`workspace-titlebar ${sidebarCollapsed ? 'sidebar-collapsed' : ''}`} data-tauri-drag-region>
       <div className="workspace-titlebar-sidebar" data-tauri-drag-region>
@@ -63,8 +68,19 @@ export default function WorkspaceTitlebar({
           agentStatuses={agentStatuses}
           onFocus={onFocusSheet}
           onClose={onCloseSheet}
+          menuActions={menuActions}
+          canReopen={canReopenSheet}
         />
         <div className="workspace-titlebar-launchers">
+          <button type="button" className="workspace-titlebar-icon" onClick={() => setMenuOpen(value => !value)} title="Workspace 菜单" aria-label="Workspace 菜单" aria-expanded={menuOpen}>☰</button>
+          <WorkspaceMenu
+            {...menuActions}
+            sheet={activeSheet}
+            canReopen={canReopenSheet}
+            open={menuOpen}
+            onCloseMenu={() => setMenuOpen(false)}
+            className="workspace-menu-titlebar"
+          />
           <button type="button" className="workspace-titlebar-icon" onClick={onOpenSheet} title="打开 Sheet" aria-label="打开 Sheet">＋</button>
           <button type="button" className="workspace-titlebar-icon" onClick={onReopenSheet} disabled={!canReopenSheet} title="重开最近关闭的 Sheet" aria-label="重开最近关闭的 Sheet">⌄</button>
         </div>

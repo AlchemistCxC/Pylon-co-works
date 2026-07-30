@@ -34,6 +34,7 @@ const state: PersistedSheetState = {
       title: 'Riccati',
       agentId: 'riccati',
       singletonKey: 'agent:riccati',
+      pinned: true,
       createdAt: 10,
       lastFocusedAt: 20,
     },
@@ -61,6 +62,7 @@ assert.deepEqual(parseSheetState(serialized, ['riccati']), {
   ...state,
   agentStates: { riccati: state.agentStates.riccati },
 })
+assert.equal(parseSheetState(serialized, ['riccati']).sheets.find(sheet => sheet.id === 'agent-a')?.pinned, true)
 assert.deepEqual(parseSheetState(serialized, ['other']).sheets.map(sheet => sheet.agentId), [undefined])
 assert.deepEqual(parseSheetState(serialized, ['riccati']).agentStates, { riccati: state.agentStates.riccati })
 assert.deepEqual(parseSheetState(JSON.stringify({ version: 999, state })), EMPTY_PERSISTED_SHEET_STATE)

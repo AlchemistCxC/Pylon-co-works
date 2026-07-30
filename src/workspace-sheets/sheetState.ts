@@ -16,6 +16,7 @@ export const EMPTY_SHEET_STATE: SheetState = {
 export type SheetAction =
   | { type: 'open'; sheet: SheetInput; now: number }
   | { type: 'focus'; id: SheetId; now: number }
+  | { type: 'togglePin'; id: SheetId; now: number }
   | { type: 'close'; id: SheetId; now: number }
   | { type: 'closeOthers'; id: SheetId; now: number }
   | { type: 'closeRight'; id: SheetId; now: number }
@@ -39,13 +40,14 @@ function focusSheet(state: SheetState, id: SheetId, now: number): SheetState {
 }
 
 function closeIds(state: SheetState, ids: Set<SheetId>): SheetState {
-  const closed = state.sheets.filter(sheet => ids.has(sheet.id))
+  const closed = state.sheets.filter(sheet => ids.has(sheet.id) && !sheet.pinned)
   if (closed.length === 0) return withActiveFallback(state)
-  const sheets = state.sheets.filter(sheet => !ids.has(sheet.id))
-  const recentlyClosed = [...closed.reverse(), ...state.recentlyClosed.filter(sheet => !ids.has(sheet.id))].slice(0, MAX_RECENTLY_CLOSED)
+  const closeIds = new Set(closed.map(sheet => sheet.id))
+  const sheets = state.sheets.filter(sheet => !closeIds.has(sheet.id))
+  const recentlyClosed = [...closed.reverse(), ...state.recentlyClosed.filter(sheet => !closeIds.has(sheet.id))].slice(0, MAX_RECENTLY_CLOSED)
   return withActiveFallback({
     sheets,
-    activeSheetId: state.activeSheetId && !ids.has(state.activeSheetId) ? state.activeSheetId : null,
+    activeSheetId: state.activeSheetId && !closeIds.has(state.activeSheetId) ? state.activeSheetId : null,
     recentlyClosed,
   })
 }
@@ -89,6 +91,15 @@ export function sheetReducer(state: SheetState, action: SheetAction): SheetState
       return { ...state, sheets: [...state.sheets, sheet], activeSheetId: sheet.id }
     }
     case 'focus': return focusSheet(state, action.id, action.now)
+    case 'togglePin': {
+      if (!state.sheets.some(sheet => sheet.id === action.id)) return withActiveFallback(state)
+      return {
+        ...state,
+        sheets: state.sheets.map(sheet => sheet.id === action.id
+          ? { ...sheet, pinned: !sheet.pinned, lastFocusedAt: action.now }
+          : sheet),
+      }
+    }
     case 'close': return closeIds(state, new Set([action.id]))
     case 'closeOthers': return closeIds(state, new Set(state.sheets.filter(sheet => sheet.id !== action.id).map(sheet => sheet.id)))
     case 'closeRight': {
