@@ -223,6 +223,9 @@ impl AcpClient {
     }
     /// Send a JSON-RPC request and wait for the matching response.
     async fn call_async(&self, method: &str, params: serde_json::Value) -> Result<serde_json::Value, String> {
+        if self.is_crashed() {
+            return Err("ACP connection closed".to_string());
+        }
         let id = self.next_id.fetch_add(1, Ordering::Relaxed);
 
         // Register oneshot BEFORE writing to stdin
@@ -398,6 +401,11 @@ impl AcpClient {
     /// Check if the child process has exited unexpectedly.
     pub fn is_crashed(&self) -> bool {
         self.crashed.load(Ordering::Relaxed)
+    }
+
+    #[cfg(test)]
+    fn child_id(&self) -> Option<u32> {
+        self.child.child.as_ref().map(Child::id)
     }
 
     /// Set session mode.
@@ -863,5 +871,156 @@ mod tests {
             Arc::new(std::array::from_fn(|_| Mutex::new(HashMap::new())));
         assert_eq!(drain_pending(&pending), 0);
         assert_eq!(drain_pending(&pending), 0);
+    }
+
+    #[tokio::test]
+    async fn fake_acp_subprocess_completes_initialize_new_and_prompt_wire() {
+        let script = r#"import json,sys
+for line in sys.stdin:
+    request=json.loads(line)
+    method=request.get('method')
+    response={'jsonrpc':'2.0','id':request.get('id'),'result':{}}
+    if method == 'session/new':
+        response['result']={'sessionId':'fake-session-1'}
+    elif method == 'session/prompt':
+        response['result']={'stopReason':'end_turn'}
+    print(json.dumps(response), flush=True)
+"#;
+        let agent = crate::agent_config::AgentDef {
+            name: "fake-acp".to_string(),
+            transport: "subprocess".to_string(),
+            exe: "python".to_string(),
+            args: vec!["-u".to_string(), "-c".to_string(), script.to_string()],
+            cwd: None,
+            env: HashMap::new(),
+            default: false,
+        };
+        let mut client = AcpClient::connect_with_logs(&agent, None)
+            .await
+            .expect("fake ACP must initialize");
+        let child_id = client.child_id().expect("fake ACP child must exist");
+        let new_response = client.new_session(".", Vec::new()).await.expect("session/new must succeed");
+        assert_eq!(AcpClient::session_id_from(&new_response).unwrap(), "fake-session-1");
+
+        let (request_id, prompt_line, mut response_rx) = client
+            .prepare_prompt("fake-session-1", vec![serde_json::json!({"type":"text","text":"hello"})])
+            .expect("prompt must serialize");
+        assert!(prompt_line.contains("session/prompt"));
+        client.write_tx.send(prompt_line).await.expect("fake child stdin must remain open");
+        let response = tokio::time::timeout(std::time::Duration::from_secs(2), &mut response_rx)
+            .await
+            .expect("fake ACP prompt response must arrive")
+            .expect("fake ACP prompt pending must settle");
+        assert_eq!(response.id, Some(request_id));
+        assert_eq!(AcpClient::prompt_stop_reason(&response.result.unwrap()).unwrap(), "end_turn");
+
+        client.kill().expect("explicit child cleanup must succeed");
+        assert!(!process_exists(child_id), "fake ACP child must exit after kill_and_wait");
+    }
+
+    #[tokio::test]
+    async fn fake_acp_eof_drains_pending_requests() {
+        let script = r#"import sys
+sys.exit(0)
+"#;
+        let agent = crate::agent_config::AgentDef {
+            name: "fake-acp-eof".to_string(),
+            transport: "subprocess".to_string(),
+            exe: "python".to_string(),
+            args: vec!["-u".to_string(), "-c".to_string(), script.to_string()],
+            cwd: None,
+            env: HashMap::new(),
+            default: false,
+        };
+        let client = AcpClient::connect_with_logs(&agent, None).await;
+        assert!(client.is_err(), "initialize must fail when fake ACP closes without a response");
+    }
+
+    #[tokio::test]
+    async fn fake_acp_session_load_collects_replay_before_response() {
+        let script = r#"import json,sys
+for line in sys.stdin:
+    request=json.loads(line)
+    method=request.get('method')
+    response={'jsonrpc':'2.0','id':request.get('id'),'result':{}}
+    if method == 'initialize':
+        response['result']={}
+    elif method == 'session/load':
+        session_id=request['params']['sessionId']
+        for text in ['history-1','history-2']:
+            print(json.dumps({'jsonrpc':'2.0','method':'session/update','params':{'sessionId':session_id,'update':{'sessionUpdate':'agent_message_chunk','content':{'text':text}}}}), flush=True)
+        response['result']={'loaded':True}
+    else:
+        response['result']={}
+    print(json.dumps(response), flush=True)
+"#;
+        let agent = crate::agent_config::AgentDef {
+            name: "fake-acp-replay".to_string(),
+            transport: "subprocess".to_string(),
+            exe: "python".to_string(),
+            args: vec!["-u".to_string(), "-c".to_string(), script.to_string()],
+            cwd: None,
+            env: HashMap::new(),
+            default: false,
+        };
+        let client = AcpClient::connect_with_logs(&agent, None)
+            .await
+            .expect("fake ACP replay agent must initialize");
+        let (response, replay) = client
+            .load_session_with_replay("fake-session-replay", ".", Vec::new())
+            .await
+            .expect("session/load must return after replay response");
+        assert_eq!(response, serde_json::json!({"loaded": true}));
+        assert_eq!(replay.len(), 2);
+        assert_eq!(replay[0]["update"]["content"]["text"], "history-1");
+        assert_eq!(replay[1]["update"]["content"]["text"], "history-2");
+    }
+
+    #[tokio::test]
+    async fn fake_acp_eof_wakes_pending_request_after_initialize() {
+        let script = r#"import json,sys
+line=sys.stdin.readline()
+request=json.loads(line)
+print(json.dumps({'jsonrpc':'2.0','id':request.get('id'),'result':{}}), flush=True)
+sys.exit(0)
+"#;
+        let agent = crate::agent_config::AgentDef {
+            name: "fake-acp-eof-after-init".to_string(),
+            transport: "subprocess".to_string(),
+            exe: "python".to_string(),
+            args: vec!["-u".to_string(), "-c".to_string(), script.to_string()],
+            cwd: None,
+            env: HashMap::new(),
+            default: false,
+        };
+        let client = AcpClient::connect_with_logs(&agent, None)
+            .await
+            .expect("initialize response must arrive before EOF");
+        tokio::time::timeout(std::time::Duration::from_secs(2), async {
+            loop {
+                if client.is_crashed() {
+                    break;
+                }
+                tokio::time::sleep(std::time::Duration::from_millis(10)).await;
+            }
+        })
+        .await
+        .expect("fake child EOF must be observed");
+        let error = tokio::time::timeout(
+            std::time::Duration::from_secs(2),
+            client.new_session(".", Vec::new()),
+        )
+        .await
+        .expect("pending request must settle after EOF")
+        .expect_err("EOF must reject a new request");
+        assert!(error.contains("ACP connection closed"));
+    }
+
+    fn process_exists(pid: u32) -> bool {
+        std::process::Command::new("tasklist")
+            .args(["/FI", &format!("PID eq {pid}"), "/NH"])
+            .output()
+            .map(|output| String::from_utf8_lossy(&output.stdout).contains(&pid.to_string()))
+            .unwrap_or(false)
     }
 }
