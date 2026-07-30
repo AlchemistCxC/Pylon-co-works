@@ -48,6 +48,26 @@
 .term-reasoning-body { padding:4px 0 4px 18px; }
 .term-reasoning-line { color:var(--text-dim); font-style:italic; font-size:0.93em; line-height:1.6; white-space:pre-wrap; }
 
+/* Claude 风格：整行用户底色、统一消息节奏、Assistant/Thinking 约 2ch 缩进 */
+.app[data-active-preset="claude"] .term-row { margin:0 0 1em; }
+.app[data-active-preset="claude"] .term-row:last-of-type { margin-bottom:0; }
+.app[data-active-preset="claude"] .term-user {
+  padding:8px 12px;
+  background:var(--user-tag-bg, #373737);
+}
+.app[data-active-preset="claude"] .term-user-tag {
+  background:transparent;
+  padding:0;
+  border-radius:0;
+}
+.app[data-active-preset="claude"] .term-assistant { padding:0 0 0 2ch; }
+.app[data-active-preset="claude"] .term-reasoning { padding:0; }
+.app[data-active-preset="claude"] .term-reasoning-head { line-height:inherit; }
+.app[data-active-preset="claude"] .term-reasoning-body {
+  padding:0 0 0 2ch;
+  margin-top:1em;
+}
+
 .term-tool { padding:2px 0; position:relative; }
 /* 连续 ToolCard 竖线相连 — 从上一个 tool 的标志物延伸到本 tool 标志物
    颜色由 --tool-conn 驱动（none=transparent / fixed / follow） */

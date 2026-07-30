@@ -543,7 +543,7 @@ function ReasoningBlock({ text }: { text: string }) {
   const [open, setOpen] = useState(false)
   return (
     <div className="term-reasoning">
-      <button className="term-reasoning-head" type="button" onClick={() => setOpen(!open)}>Thought for {text.length} chars</button>
+      <button className="term-reasoning-head" type="button" onClick={() => setOpen(!open)} aria-expanded={open}>∴ Thinking…</button>
       {open && <div className="term-reasoning-body">{text.split('\n').map((line, i) => <div key={i} className="term-reasoning-line">{line || '\u00a0'}</div>)}</div>}
     </div>
   )

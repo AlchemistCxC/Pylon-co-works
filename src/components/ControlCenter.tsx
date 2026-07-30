@@ -13,7 +13,11 @@ import type { SessionLiveStats } from './chat/sessionRuntime'
 import './ControlCenter.css'
 import './chat/StatusBar.css'  // model/mode/send/attach widget 样式
 
-interface Props { sessionId: string | null }
+interface Props {
+  sessionId: string | null
+  rightOpen?: boolean
+  rightWidth?: number
+}
 
 const EMPTY_SESSION_LIVE_STATS = emptySessionLiveStats()
 
@@ -164,7 +168,7 @@ function ensurePositions(positions: any): Record<string, { x: number; y: number;
   return out
 }
 
-export default function ControlCenter({ sessionId }: Props) {
+export default function ControlCenter({ sessionId, rightOpen = false, rightWidth = 0 }: Props) {
   const ccHeight = useStore(s => s.ccHeight) || 120
   const ccBgHeight = useStore(s => s.ccBgHeight ?? ccHeight)
   const inputMode = useStore(s => s.inputMode)
@@ -263,7 +267,13 @@ export default function ControlCenter({ sessionId }: Props) {
 
   return (
     <div className={`control-center ${inputMode === 'cli' ? 'cli-mode' : ''} ${editMode ? 'cc-editing' : ''} cc-variant-${ccVariant}`}
-      style={{ '--cc-height': `${ccHeight}px`, '--cc-bg-height': `${ccBgHeight}px`, '--cc-bg': ccBg, '--cc-bg-image': toCssBackgroundImage(ccBgImage) } as React.CSSProperties}>
+      style={{
+        '--cc-height': `${ccHeight}px`,
+        '--cc-bg-height': `${ccBgHeight}px`,
+        '--cc-bg': ccBg,
+        '--cc-bg-image': toCssBackgroundImage(ccBgImage),
+        '--cc-right-inset': rightOpen ? `${rightWidth}px` : '0px',
+      } as React.CSSProperties}>
       {editMode && (
         <div className="cc-edit-hdr" onMouseDown={onHeightDrag}>
           <div className="cc-edit-hdr-bar" />
@@ -279,8 +289,8 @@ export default function ControlCenter({ sessionId }: Props) {
           <div className="cc-actions">{renderSlot('actions')}</div>
           {inputMode === 'cli' && cliHintMode !== 'hidden' && (
             <div className="cc-command-hint" aria-label="输入快捷键提示">
-              <span className="cc-command-hint-line"><span>/</span>: 命令 <i>|</i> Shift+Enter: 换行</span>
-              {cliHintMode === 'full' && <span className="cc-command-hint-line">Shift+Tab: 模式</span>}
+              <span className="cc-command-hint-key">/: 命令</span> <i>|</i> Shift+Enter: 换行
+              {cliHintMode === 'full' && <><i>|</i> Shift+Tab: 模式</>}
             </div>
           )}
         </div>

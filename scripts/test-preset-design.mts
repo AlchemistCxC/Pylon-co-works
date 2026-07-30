@@ -1,7 +1,7 @@
 import { strict as assert } from 'node:assert'
 import { GLOBAL_PRESETS, ZONE_FIELDS } from '../src/presets.ts'
 
-assert.deepEqual(GLOBAL_PRESETS.map(preset => preset.label), ['Claude Code', 'Glass Light', 'Nord Frost', 'Tokyo Night', 'Solarized Light', 'Amber CRT'])
+assert.deepEqual(GLOBAL_PRESETS.map(preset => preset.label), ['Claude 风格', 'Glass Light', 'Nord Frost', 'Tokyo Night', 'Solarized Light', 'Amber CRT'])
 
 const [claude, glass, nord, tokyo, solarized, amber] = GLOBAL_PRESETS.map(preset => preset.theme)
 assert.equal(claude.uiScheme, 'dark')
@@ -19,11 +19,14 @@ assert.equal(claude.toolIndicatorGlow, 0)
 assert.equal(claude.toolConnectorMode, 'none')
 assert.equal(claude.spinnerColor, '#D77757')
 assert.equal(claude.ccStyle, 'numeric')
+assert.equal(claude.ccHeight, 76)
+assert.equal(claude.ccBgHeight, 76)
+assert.equal(claude.cliLineColor, '#888888')
 
 assert.equal(glass.uiScheme, 'light')
 assert.equal(glass.globalFont, 'system')
 assert.equal(glass.ccVariant, 'pill')
-assert.equal(glass.ccStyle, 'numeric')
+assert.equal(glass.ccStyle, 'bar')
 assert.equal(glass.modelVariant, 'badge')
 
 assert.equal(nord.uiScheme, 'dark')
@@ -51,6 +54,18 @@ for (const preset of GLOBAL_PRESETS) {
   assert.equal(Array.isArray(preset.theme.ccHidden), true)
   assert.equal(typeof preset.theme.ccScale, 'object')
   assert.equal(preset.theme.ccCliCustomized, false)
+  assert.equal(preset.theme.ccStatusFontSize, 14)
+  assert.equal(preset.theme.inputFontSize, 15)
+  assert.equal(preset.theme.cliLineWidth, 1)
+  assert.equal(preset.theme.cliLinePadding, 3)
+  assert.equal(preset.theme.cliContentOffsetY, 0)
+  assert.equal(preset.theme.cliHintMode, 'full')
+  assert.equal(typeof preset.theme.cliPromptColor, 'string')
+}
+
+for (const preset of [glass, nord, tokyo, solarized, amber]) {
+  assert.equal(preset.ccHeight, 96)
+  assert.equal(preset.ccBgHeight, 96)
 }
 
 console.log('presetDesign 回归测试通过')

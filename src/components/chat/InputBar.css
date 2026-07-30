@@ -46,6 +46,7 @@
   display:flex; align-items:center; gap:0; width:100%;
   border-top:var(--cli-line-width,1px) solid var(--cli-line-color,#D77757);
   border-bottom:var(--cli-line-width,1px) solid var(--cli-line-color,#D77757);
+  box-sizing:border-box;
 }
 .input-bar.cli-mode .input-textarea {
   background:transparent; border:none; resize:none; height:auto; min-height:auto;
