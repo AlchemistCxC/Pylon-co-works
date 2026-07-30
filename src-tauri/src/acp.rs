@@ -1264,6 +1264,58 @@ for line in sys.stdin:
         assert!(!texts.contains(&"must-not-leak"));
     }
 
+    #[tokio::test]
+    async fn fake_acp_prompt_cancel_returns_final_cancelled_response() {
+        let script = r#"import json,sys
+prompt_id=None
+for line in sys.stdin:
+    request=json.loads(line)
+    method=request.get('method')
+    if method == 'initialize':
+        print(json.dumps({'jsonrpc':'2.0','id':request.get('id'),'result':{}}), flush=True)
+    elif method == 'session/prompt':
+        prompt_id=request.get('id')
+    elif method == 'session/cancel':
+        print(json.dumps({'jsonrpc':'2.0','id':prompt_id,'result':{'stopReason':'cancelled'}}), flush=True)
+"#;
+        let agent = crate::agent_config::AgentDef {
+            name: "fake-acp-cancel-response".to_string(),
+            transport: "subprocess".to_string(),
+            exe: "python".to_string(),
+            args: vec!["-u".to_string(), "-c".to_string(), script.to_string()],
+            cwd: None,
+            env: HashMap::new(),
+            default: false,
+        };
+        let client = AcpClient::connect_with_logs(&agent, None)
+            .await
+            .expect("cancel-response fake ACP must initialize");
+        let (_request_id, prompt_line, mut response_rx) = client
+            .prepare_prompt("fake-session-cancel-response", vec![serde_json::json!({"type":"text","text":"hello"})])
+            .expect("prompt must serialize");
+        client.write_tx.send(prompt_line).await.expect("prompt must write");
+        let cancel_tx = client.write_tx.clone();
+        let outcome = wait_prompt_with_cancel(
+            &mut response_rx,
+            std::time::Duration::from_millis(20),
+            std::time::Duration::from_millis(200),
+            move || async move {
+                cancel_tx.send(serde_json::json!({
+                    "jsonrpc": "2.0",
+                    "method": METHOD_SESSION_CANCEL,
+                    "params": {"sessionId": "fake-session-cancel-response"}
+                }).to_string()).await.map_err(|_| "ACP connection closed".to_string())
+            },
+        ).await;
+        match outcome {
+            PromptWaitOutcome::CancelledAfterTimeout { response: Some(raw), cancel_error } => {
+                assert!(cancel_error.is_none());
+                assert_eq!(raw.result.and_then(|value| value.get("stopReason").cloned()), Some(serde_json::json!("cancelled")));
+            }
+            other => panic!("expected final cancelled response, got {other:?}"),
+        }
+    }
+
     fn process_exists(pid: u32) -> bool {
         std::process::Command::new("tasklist")
             .args(["/FI", &format!("PID eq {pid}"), "/NH"])
