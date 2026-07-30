@@ -426,6 +426,9 @@ impl AcpClient {
 
     /// Send a fire-and-forget notification (no id, no response expected).
     pub async fn send_notification(&self, method: &str, params: serde_json::Value) -> Result<(), String> {
+        if self.is_crashed() {
+            return Err("ACP connection closed".to_string());
+        }
         let req = serde_json::json!({
             "jsonrpc": "2.0",
             "method": method,
@@ -977,6 +980,52 @@ for line in sys.stdin:
     }
 
     #[tokio::test]
+    async fn fake_acp_cancel_and_close_send_expected_notifications() {
+        let trace_path = std::env::temp_dir().join(format!("pylon-acp-control-{}.jsonl", std::process::id()));
+        let script = r#"import json,sys
+trace=open(sys.argv[1],'w',encoding='utf-8')
+for line in sys.stdin:
+    request=json.loads(line)
+    trace.write(json.dumps(request)+'\n')
+    trace.flush()
+    method=request.get('method')
+    response={'jsonrpc':'2.0','id':request.get('id'),'result':{}}
+    if method == 'session/close':
+        response['result']={'closed':True}
+    if request.get('id') is not None:
+        print(json.dumps(response), flush=True)
+"#;
+        let agent = crate::agent_config::AgentDef {
+            name: "fake-acp-control".to_string(),
+            transport: "subprocess".to_string(),
+            exe: "python".to_string(),
+            args: vec!["-u".to_string(), "-c".to_string(), script.to_string(), trace_path.to_string_lossy().into_owned()],
+            cwd: None,
+            env: HashMap::new(),
+            default: false,
+        };
+        let client = AcpClient::connect_with_logs(&agent, None)
+            .await
+            .expect("fake ACP control agent must initialize");
+        client.cancel_session("fake-session-control").await.expect("cancel notification must write");
+        client.close_session("fake-session-control").await.expect("close request must respond");
+        let trace = std::fs::read_to_string(&trace_path).expect("fake ACP must record control requests");
+        std::fs::remove_file(&trace_path).ok();
+        let requests: Vec<serde_json::Value> = trace.lines()
+            .map(|line| serde_json::from_str(line).expect("trace line must be JSON"))
+            .collect();
+        assert!(requests.iter().any(|request| {
+            request.get("method").and_then(|value| value.as_str()) == Some(METHOD_SESSION_CANCEL)
+                && request.get("id").is_none()
+                && request["params"]["sessionId"] == "fake-session-control"
+        }));
+        assert!(requests.iter().any(|request| {
+            request.get("method").and_then(|value| value.as_str()) == Some(METHOD_SESSION_CLOSE)
+                && request.get("id").and_then(|value| value.as_u64()).is_some()
+                && request["params"]["sessionId"] == "fake-session-control"
+        }));
+    }
+    #[tokio::test]
     async fn fake_acp_eof_wakes_pending_request_after_initialize() {
         let script = r#"import json,sys
 line=sys.stdin.readline()
@@ -1014,6 +1063,205 @@ sys.exit(0)
         .expect("pending request must settle after EOF")
         .expect_err("EOF must reject a new request");
         assert!(error.contains("ACP connection closed"));
+    }
+
+
+    #[tokio::test]
+    async fn fake_acp_malformed_json_does_not_break_following_response() {
+        let script = r#"import json,sys
+for line in sys.stdin:
+    request=json.loads(line)
+    print('{malformed-json', flush=True)
+    response={'jsonrpc':'2.0','id':request.get('id'),'result':{}}
+    if request.get('method') == 'session/new':
+        response['result']={'sessionId':'after-malformed'}
+    print(json.dumps(response), flush=True)
+"#;
+        let agent = crate::agent_config::AgentDef {
+            name: "fake-acp-malformed".to_string(),
+            transport: "subprocess".to_string(),
+            exe: "python".to_string(),
+            args: vec!["-u".to_string(), "-c".to_string(), script.to_string()],
+            cwd: None,
+            env: HashMap::new(),
+            default: false,
+        };
+        let client = AcpClient::connect_with_logs(&agent, None)
+            .await
+            .expect("malformed line must not break initialize");
+        let response = client.new_session(".", Vec::new()).await
+            .expect("response after malformed line must arrive");
+        assert_eq!(AcpClient::session_id_from(&response).unwrap(), "after-malformed");
+    }
+
+    #[tokio::test]
+    async fn fake_acp_stderr_is_drained_into_safe_runtime_log() {
+        let script = r#"import json,sys
+print('fake stderr diagnostic', file=sys.stderr, flush=True)
+for line in sys.stdin:
+    request=json.loads(line)
+    print(json.dumps({'jsonrpc':'2.0','id':request.get('id'),'result':{}}), flush=True)
+"#;
+        let agent = crate::agent_config::AgentDef {
+            name: "fake-acp-stderr".to_string(),
+            transport: "subprocess".to_string(),
+            exe: "python".to_string(),
+            args: vec!["-u".to_string(), "-c".to_string(), script.to_string()],
+            cwd: None,
+            env: HashMap::new(),
+            default: false,
+        };
+        let logs = crate::runtime_log::RuntimeLogHub::new(16);
+        let client = AcpClient::connect_with_logs(&agent, Some(logs.clone()))
+            .await
+            .expect("stderr fake ACP must initialize");
+        let _ = client;
+        tokio::time::timeout(std::time::Duration::from_secs(2), async {
+            loop {
+                let entries = logs.list(&crate::runtime_log::RuntimeLogQuery::default());
+                if entries.iter().any(|entry| entry.source == "agent-stderr") {
+                    break;
+                }
+                tokio::time::sleep(std::time::Duration::from_millis(10)).await;
+            }
+        })
+        .await
+        .expect("stderr reader must publish runtime log");
+        let entry = logs.list(&crate::runtime_log::RuntimeLogQuery::default())
+            .into_iter()
+            .find(|entry| entry.source == "agent-stderr")
+            .expect("agent stderr log must exist");
+        assert_eq!(entry.message, "Agent stderr output");
+        assert_eq!(entry.fields.get("agent").and_then(|value| value.as_str()), Some("fake-acp-stderr"));
+    }
+
+    #[tokio::test]
+    async fn fake_acp_delayed_response_stays_pending_until_response() {
+        let script = r#"import json,sys,time
+for line in sys.stdin:
+    request=json.loads(line)
+    if request.get('method') == 'session/new':
+        time.sleep(0.15)
+        print(json.dumps({'jsonrpc':'2.0','id':request.get('id'),'result':{'sessionId':'delayed-session'}}), flush=True)
+    else:
+        print(json.dumps({'jsonrpc':'2.0','id':request.get('id'),'result':{}}), flush=True)
+"#;
+        let agent = crate::agent_config::AgentDef {
+            name: "fake-acp-delayed".to_string(),
+            transport: "subprocess".to_string(),
+            exe: "python".to_string(),
+            args: vec!["-u".to_string(), "-c".to_string(), script.to_string()],
+            cwd: None,
+            env: HashMap::new(),
+            default: false,
+        };
+        let client = AcpClient::connect_with_logs(&agent, None)
+            .await
+            .expect("delayed fake ACP must initialize");
+        let response = tokio::time::timeout(
+            std::time::Duration::from_secs(2),
+            client.new_session(".", Vec::new()),
+        )
+        .await
+        .expect("delayed response must not hit test timeout")
+        .expect("delayed response must succeed");
+        assert_eq!(AcpClient::session_id_from(&response).unwrap(), "delayed-session");
+    }
+    #[tokio::test]
+    async fn fake_acp_prompt_timeout_sends_cancel_and_waits_for_cancelled_response() {
+        let trace_path = std::env::temp_dir().join(format!("pylon-acp-prompt-{}.jsonl", std::process::id()));
+        let script = r#"import json,sys,time
+trace=open(sys.argv[1],'w',encoding='utf-8')
+for line in sys.stdin:
+    request=json.loads(line)
+    trace.write(json.dumps(request)+'\n')
+    trace.flush()
+    method=request.get('method')
+    if method == 'initialize':
+        print(json.dumps({'jsonrpc':'2.0','id':request.get('id'),'result':{}}), flush=True)
+    elif method == 'session/prompt':
+        time.sleep(0.2)
+    elif method == 'session/cancel':
+        print(json.dumps({'jsonrpc':'2.0','id':None,'method':'session/update','params':{'sessionId':request['params']['sessionId'],'update':{'sessionUpdate':'agent_message_chunk','content':{'text':'cancelled'}}}}), flush=True)
+"#;
+        let agent = crate::agent_config::AgentDef {
+            name: "fake-acp-prompt-timeout".to_string(),
+            transport: "subprocess".to_string(),
+            exe: "python".to_string(),
+            args: vec!["-u".to_string(), "-c".to_string(), script.to_string(), trace_path.to_string_lossy().into_owned()],
+            cwd: None,
+            env: HashMap::new(),
+            default: false,
+        };
+        let client = AcpClient::connect_with_logs(&agent, None)
+            .await
+            .expect("timeout fake ACP must initialize");
+        let (request_id, prompt_line, mut response_rx) = client
+            .prepare_prompt("fake-session-timeout", vec![serde_json::json!({"type":"text","text":"hello"})])
+            .expect("prompt must serialize");
+        client.write_tx.send(prompt_line).await.expect("prompt must write");
+        let cancel_tx = client.write_tx.clone();
+        let outcome = wait_prompt_with_cancel(
+            &mut response_rx,
+            std::time::Duration::from_millis(20),
+            std::time::Duration::from_millis(200),
+            move || async move {
+                cancel_tx.send(serde_json::json!({
+                    "jsonrpc": "2.0",
+                    "method": METHOD_SESSION_CANCEL,
+                    "params": {"sessionId": "fake-session-timeout"}
+                }).to_string()).await.map_err(|_| "ACP connection closed".to_string())
+            },
+        ).await;
+        assert!(matches!(outcome, PromptWaitOutcome::CancelledAfterTimeout { response: None, cancel_error: None }));
+        client.remove_pending(request_id);
+        let trace = std::fs::read_to_string(&trace_path).expect("fake ACP must record prompt and cancel");
+        std::fs::remove_file(&trace_path).ok();
+        assert!(trace.lines().any(|line| {
+            let value: serde_json::Value = serde_json::from_str(line).unwrap();
+            value.get("method").and_then(|method| method.as_str()) == Some(METHOD_SESSION_CANCEL)
+                && value["params"]["sessionId"] == "fake-session-timeout"
+        }));
+    }
+    #[tokio::test]
+    async fn fake_acp_session_load_ignores_updates_from_other_sessions() {
+        let script = r#"import json,sys
+for line in sys.stdin:
+    request=json.loads(line)
+    if request.get('method') == 'initialize':
+        print(json.dumps({'jsonrpc':'2.0','id':request.get('id'),'result':{}}), flush=True)
+    elif request.get('method') == 'session/load':
+        session_id=request['params']['sessionId']
+        updates=[
+            (session_id, 'target-1'),
+            ('other-session', 'must-not-leak'),
+            (session_id, 'target-2'),
+        ]
+        for update_session, text in updates:
+            print(json.dumps({'jsonrpc':'2.0','method':'session/update','params':{'sessionId':update_session,'update':{'sessionUpdate':'agent_message_chunk','content':{'text':text}}}}), flush=True)
+        print(json.dumps({'jsonrpc':'2.0','id':request.get('id'),'result':{'loaded':True}}), flush=True)
+"#;
+        let agent = crate::agent_config::AgentDef {
+            name: "fake-acp-update-isolation".to_string(),
+            transport: "subprocess".to_string(),
+            exe: "python".to_string(),
+            args: vec!["-u".to_string(), "-c".to_string(), script.to_string()],
+            cwd: None,
+            env: HashMap::new(),
+            default: false,
+        };
+        let client = AcpClient::connect_with_logs(&agent, None)
+            .await
+            .expect("update isolation fake ACP must initialize");
+        let (_response, replay) = client
+            .load_session_with_replay("target-session", ".", Vec::new())
+            .await
+            .expect("target session load must succeed");
+        let texts: Vec<&str> = replay.iter()
+            .filter_map(|params| params["update"]["content"]["text"].as_str())
+            .collect();
+        assert_eq!(texts, vec!["target-1", "target-2"]);
+        assert!(!texts.contains(&"must-not-leak"));
     }
 
     fn process_exists(pid: u32) -> bool {
