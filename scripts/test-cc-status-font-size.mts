@@ -14,7 +14,7 @@ const field = 'ccStatusFontSize'
 // ThemeSettings/default contract.
 assert.match(store, /ccStatusFontSize:\s*number/)
 assert.match(store, /ccBgImage:\s*string\s*\n\s*ccStatusFontSize:\s*number/)
-assert.match(store, /ccBgImage:\s*'',\s*ccStatusFontSize:\s*13/)
+assert.match(store, /ccBgImage:\s*'',\s*ccStatusFontSize:\s*14/)
 
 // Built-in and custom preset paths must retain the field in the cc zone.
 assert.equal(ZONE_FIELDS.cc.includes(field as never), true, 'CC zone 缺少 ccStatusFontSize')
@@ -30,18 +30,19 @@ assert.equal(pickZoneFields({ ccStatusFontSize: 17 }, 'chat').ccStatusFontSize, 
 // applying the extracted subset must therefore preserve the default rather than erase it.
 for (const preset of GLOBAL_PRESETS) {
   const subset = pickZoneFields(preset.theme, 'cc')
-  const applied = { ccStatusFontSize: 13, ...subset }
+  const applied = { ccStatusFontSize: 14, ...subset }
   assert.equal(typeof applied.ccStatusFontSize, 'number', `${preset.name} CC 预设路径丢失 ccStatusFontSize`)
 }
 
 // App state -> CSS custom property -> ControlCenter consumer.
 assert.match(app, /ccStatusFontSize:\s*s\.ccStatusFontSize/)
-assert.match(app, /'--cc-status-font-size':\s*`\$\{s\.ccStatusFontSize\s*\?\?\s*13\}px`/)
-assert.match(css, /\.cc-status-row\s*\{[\s\S]*?font-size:\s*var\(--cc-status-font-size,\s*13px\)/)
+assert.match(app, /'--cc-status-font-size':\s*`\$\{s\.ccStatusFontSize\s*\?\?\s*14\}px`/)
+assert.match(css, /\.cc-status-row\s*\{[\s\S]*?font-size:\s*max\(14px,\s*var\(--cc-status-font-size,\s*14px\)\)/)
 
 // Settings entry -> zone-aware update path.
 assert.match(settings, /cc:\s*'cc'/)
-assert.match(settings, /<Row label="信息字号"><Num value=\{t\.ccStatusFontSize \?\? 13\}/)
+assert.match(settings, /<Row label="信息字号"><Num value=\{t\.ccStatusFontSize \?\? 14\}/)
 assert.match(settings, /onChange=\{v=>onSettingChange\(\{ccStatusFontSize:v\}\)\}/)
+assert.match(settings, /ccStatusFontSize:v\}\)\} min=\{14\} max=\{20\}/)
 
 console.log('ccStatusFontSize 闭环契约测试通过')

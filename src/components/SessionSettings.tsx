@@ -5,6 +5,7 @@ import { useStore } from '../store'
 import { reportRuntimeError } from '../runtimeError'
 import { runCloseSessionTransaction } from './chat/closeSessionTransaction'
 import { createSessionSettingsValues, isSessionSettingsDirty } from './sessionSettingsForm'
+import './SettingsCommon.css'
 import './SessionSettings.css'
 
 interface Props { sessionId: string; open: boolean; onClose: () => void; onDeleted?: () => void }
@@ -83,16 +84,16 @@ export default function SessionSettings({ sessionId, open, onClose, onDeleted }:
       <Dialog.Portal>
         <Dialog.Overlay className="dialog-overlay" />
         <Dialog.Content
-          className="dialog-content session-settings"
+          className="dialog-content settings-surface settings-dialog session-settings"
           aria-describedby="session-settings-description"
         >
           <Dialog.Title asChild>
-            <header className="session-settings-header">
+            <header className="session-settings-header settings-dialog-header">
               <div>
-                <h3>会话设置</h3>
-                <p id="session-settings-description">管理当前会话的身份、运行环境与专属 Prompt。</p>
+                <h3 className="settings-dialog-title">会话设置</h3>
+                <p id="session-settings-description" className="settings-dialog-description">管理当前会话的身份、运行环境与专属 Prompt。</p>
               </div>
-              <Dialog.Close className="modal-close" onClick={event => {
+              <Dialog.Close className="modal-close settings-dialog-close" onClick={event => {
                 event.preventDefault()
                 beforeClose()
               }} aria-label="关闭会话设置">✕</Dialog.Close>
@@ -103,18 +104,18 @@ export default function SessionSettings({ sessionId, open, onClose, onDeleted }:
             <section className="session-settings-section" aria-labelledby="session-basic-title">
               <div className="session-settings-section-heading">
                 <div>
-                  <h4 id="session-basic-title">基本信息</h4>
-                  <p>用于侧栏识别和来源分类。</p>
+                  <h4 id="session-basic-title" className="settings-section-title">基本信息</h4>
+                  <p className="session-settings-section-description settings-section-description">用于侧栏识别和来源分类。</p>
                 </div>
               </div>
               <div className="session-settings-grid">
                 <div className="sess-field">
                   <label htmlFor="session-name">名称</label>
-                  <input id="session-name" value={name} onChange={event => setName(event.target.value)} />
+                  <input id="session-name" className="settings-control" value={name} onChange={event => setName(event.target.value)} />
                 </div>
                 <div className="sess-field">
                   <label htmlFor="session-platform">平台</label>
-                  <select id="session-platform" value={platform} onChange={event => setPlatform(event.target.value)}>
+                  <select id="session-platform" className="settings-control" value={platform} onChange={event => setPlatform(event.target.value)}>
                     <option value="local">本地</option>
                     <option value="qq-group">QQ 群聊</option>
                     <option value="qq-dm">QQ 私聊</option>
@@ -127,14 +128,14 @@ export default function SessionSettings({ sessionId, open, onClose, onDeleted }:
             <section className="session-settings-section" aria-labelledby="session-agent-title">
               <div className="session-settings-section-heading">
                 <div>
-                  <h4 id="session-agent-title">Agent 运行环境</h4>
-                  <p>工作目录只影响当前会话。</p>
+                  <h4 id="session-agent-title" className="settings-section-title">Agent 运行环境</h4>
+                  <p className="settings-section-description">工作目录只影响当前会话。</p>
                 </div>
                 <span className="session-settings-agent">{activeAgent || 'peri'}</span>
               </div>
               <div className="sess-field">
                 <label htmlFor="session-workdir">工作目录</label>
-                <input id="session-workdir" value={workdir} onChange={event => setWorkdir(event.target.value)} placeholder="留空使用 Agent 默认 cwd" />
+                <input id="session-workdir" className="settings-control" value={workdir} onChange={event => setWorkdir(event.target.value)} placeholder="留空使用 Agent 默认 cwd" />
                 <p className="sess-field-hint">当前 Agent：{activeAgent || 'peri'}。连接状态由全局 Agent 设置管理。</p>
               </div>
             </section>
@@ -142,14 +143,14 @@ export default function SessionSettings({ sessionId, open, onClose, onDeleted }:
             <section className="session-settings-section" aria-labelledby="session-prompt-title">
               <div className="session-settings-section-heading">
                 <div>
-                  <h4 id="session-prompt-title">Session Prompt</h4>
-                  <p>留空时继续使用 Profile persona。</p>
+                  <h4 id="session-prompt-title" className="settings-section-title">Session Prompt</h4>
+                  <p className="settings-section-description">留空时继续使用 Profile persona。</p>
                 </div>
                 <span className="session-settings-counter">{sessionPrompt.length} 字 · {promptLines} 行</span>
               </div>
               <div className="sess-field sess-field-prompt">
                 <label htmlFor="session-prompt">会话专属 Prompt</label>
-                <textarea id="session-prompt" value={sessionPrompt} onChange={event => setSessionPrompt(event.target.value)} placeholder="留空使用 Profile persona..." rows={6} />
+                <textarea id="session-prompt" className="settings-control" value={sessionPrompt} onChange={event => setSessionPrompt(event.target.value)} placeholder="留空使用 Profile persona..." rows={8} />
               </div>
             </section>
 
@@ -173,13 +174,13 @@ export default function SessionSettings({ sessionId, open, onClose, onDeleted }:
             </section>
           </div>
 
-          <footer className="session-settings-footer">
-            <span className={`session-settings-dirty ${dirty ? 'active' : ''}`} role="status">
+          <footer className="session-settings-footer settings-dialog-footer">
+            <span className={`session-settings-dirty settings-dirty-state ${dirty ? 'active' : ''}`} role="status">
               {dirty ? '有未保存修改' : '所有修改已保存'}
             </span>
             <div className="session-settings-footer-actions">
-              <button type="button" className="ps-btn" onClick={beforeClose}>取消</button>
-              <button type="button" className="ps-btn primary" onClick={save} disabled={!dirty}>保存修改</button>
+              <button type="button" className="ps-btn settings-action" onClick={beforeClose}>取消</button>
+              <button type="button" className="ps-btn primary settings-action primary" onClick={save} disabled={!dirty}>保存修改</button>
             </div>
           </footer>
         </Dialog.Content>

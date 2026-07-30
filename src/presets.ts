@@ -44,7 +44,7 @@ export const ZONE_FIELDS: Record<string, (keyof ThemeSettings)[]> = {
     'ccStyle', 'ccVariant', 'ccLayout', 'ccPositions', 'ccHidden', 'ccScale', 'ccCliCustomized', 'ccLayoutVersion',
     'inputBg', 'inputBgImage', 'inputTextColor', 'inputPlaceholder',
     'inputSendBg', 'inputFocusBorder', 'inputFontSize', 'inputMinHeight',
-    'inputMode', 'cliLineWidth', 'cliLineColor', 'cliTextColor', 'cliLinePadding',
+    'inputMode', 'cliLineWidth', 'cliLineColor', 'cliTextColor', 'cliPromptColor', 'cliLinePadding', 'cliContentOffsetY', 'cliHintMode',
     'statusBg', 'statusBgImage',
     'ekgWidth', 'ekgFontSize',
     'ekgGreen', 'ekgYellow', 'ekgRed',
@@ -100,7 +100,7 @@ export const GLOBAL_PRESETS: GlobalPreset[] = [
       msgStyle: 'terminal', msgFont: 'mono', msgTextColor: '#FFFFFF', msgLineHeight: 1.5,
 
       // cc
-      ccHeight: 150, ccBgHeight: 150, ccBg: '#000000', ccBgImage: '',
+      ccHeight: 76, ccBgHeight: 76, ccBg: '#000000', ccBgImage: '', ccStatusFontSize: 14,
       ccStyle: 'numeric', ccVariant: 'terminal',
       barTrackColor: '#353117', barFillColor: '#4EBA65', barFillFollow: true, barHeight: 10,
       ccPositions: {
@@ -116,8 +116,8 @@ export const GLOBAL_PRESETS: GlobalPreset[] = [
       inputBg: 'transparent', inputBgImage: '',
       inputTextColor: '#FFFFFF', inputPlaceholder: '#999999',
       inputSendBg: 'transparent', inputFocusBorder: '#505050',
-      inputFontSize: 17, inputMinHeight: 56,
-      inputMode: 'cli', cliLineWidth: 1, cliLineColor: '#999999', cliTextColor: '#FFFFFF', cliLinePadding: 4,
+      inputFontSize: 15, inputMinHeight: 56,
+      inputMode: 'cli', cliLineWidth: 1, cliLineColor: '#999999', cliTextColor: '#FFFFFF', cliPromptColor: '#999999', cliLinePadding: 3, cliContentOffsetY: 0, cliHintMode: 'full',
       ccHidden: ['send', 'attach'],
       ccScale: { ekg: 90, pct: 90, tokens: 90, model: 90, mode: 90 }, ccCliCustomized: false,
       statusBg: 'transparent', statusBgImage: '',

@@ -9,6 +9,7 @@ import SettingsPreview from './SettingsPreview'
 import { reportRuntimeError } from '../runtimeError'
 import { resolveBackgroundImage } from '../backgroundImage'
 import { runAgentSwitchTransaction } from './agentSwitchTransaction'
+import './SettingsCommon.css'
 import './Settings.css'
 import { normalizeAgentStatus, statusLabel } from './settings/agentTypes'
 import { beginReconnect, failReconnect, normalizeAgentList } from './settings/agentState'
@@ -231,17 +232,38 @@ export default function Settings({ onClose, activeSessionId }: { onClose?: () =>
 
   return (
     <div className="settings">
+      <header className="settings-header">
+        <div>
+          <h2>设置</h2>
+          <p>调整 Pylon 的外观、工作区和 Agent 运行方式。</p>
+        </div>
+        <button type="button" className="settings-close" onClick={onClose} aria-label="关闭设置">✕</button>
+      </header>
       <div className="settings-tabs-root">
         <div className="settings-nav">
-          {TABS.map(tab => (
-            <button type="button" key={tab}
-              className={`set-nav-btn ${activeTab === tab ? 'active' : ''}`}
-              onClick={() => setActiveTab(tab)}>
-              {TAB_LABELS[tab]}
-            </button>
-          ))}
-          <hr className="set-nav-hr"/>
-          <button className="set-nav-btn reset" onClick={reset}>Reset</button>
+          <div className="settings-nav-group">
+            <div className="settings-nav-label">外观</div>
+            {TABS.slice(0, 5).map(tab => (
+              <button type="button" key={tab}
+                className={`set-nav-btn ${activeTab === tab ? 'active' : ''}`}
+                onClick={() => setActiveTab(tab)}>
+                {TAB_LABELS[tab]}
+              </button>
+            ))}
+          </div>
+          <div className="settings-nav-group settings-nav-runtime">
+            <div className="settings-nav-label">运行</div>
+            {TABS.slice(5).map(tab => (
+              <button type="button" key={tab}
+                className={`set-nav-btn ${activeTab === tab ? 'active' : ''}`}
+                onClick={() => setActiveTab(tab)}>
+                {TAB_LABELS[tab]}
+              </button>
+            ))}
+          </div>
+          <div className="settings-nav-footer">
+            <button className="set-nav-btn reset" onClick={reset}>重置主题</button>
+          </div>
         </div>
 
         <div className="settings-body">
@@ -452,14 +474,17 @@ export default function Settings({ onClose, activeSessionId }: { onClose?: () =>
                     ))}
                   </div>
                 </Row>
-                <Row label="高度"><Num value={t.ccHeight} onChange={v=>onSettingChange({ccHeight:v})} min={80} max={400}/><span className="set-val">px</span></Row>
+                <Row label="高度"><Num value={t.ccHeight} onChange={v=>onSettingChange({ccHeight:v})} min={64} max={400}/><span className="set-val">px</span></Row>
                 <Row label="背景色"><ColorPopover value={t.ccBg} onChange={v=>onSettingChange({ccBg:v})}/></Row>
                 <BgImageRow label="背景图" value={t.ccBgImage||''} onChange={v=>onSettingChange({ccBgImage:v})}/>
               </Group>
               <Group title="控件样式">
                 <Row label="输入栏"><Sel value={t.inputMode} onChange={v=>onSettingChange({inputMode:v})} options={['cli','default']}/></Row>
+                <Row label="提示符颜色"><ColorPopover value={t.cliPromptColor || ''} onChange={v=>onSettingChange({cliPromptColor:v})}/></Row>
+                <Row label="内容垂直偏移"><Num value={t.cliContentOffsetY ?? 0} onChange={v=>onSettingChange({cliContentOffsetY:v})} min={-6} max={6}/><span className="set-val">px</span></Row>
+                <Row label="命令提示"><Sel value={t.cliHintMode || 'full'} onChange={v=>onSettingChange({cliHintMode:v as ThemeSettings['cliHintMode']})} options={['hidden','compact','full']}/></Row>
                 <Row label="上下文"><Sel value={t.ccStyle} onChange={v=>onSettingChange({ccStyle:v})} options={['wave','bar','numeric']}/></Row>
-                <Row label="信息字号"><Num value={t.ccStatusFontSize ?? 13} onChange={v=>onSettingChange({ccStatusFontSize:v})} min={11} max={20}/></Row>
+                <Row label="信息字号"><Num value={t.ccStatusFontSize ?? 14} onChange={v=>onSettingChange({ccStatusFontSize:v})} min={14} max={20}/></Row>
                 <Row label="模型"><Sel value={t.modelVariant} onChange={v=>onSettingChange({modelVariant:v})} options={['dropdown','minimal','badge']}/></Row>
                 <Row label="模式"><Sel value={t.modeVariant} onChange={v=>onSettingChange({modeVariant:v})} options={['pill','badge','minimal']}/></Row>
                 <Row label="发送"><Sel value={t.sendVariant} onChange={v=>onSettingChange({sendVariant:v})} options={['icon','square','minimal']}/></Row>
@@ -531,8 +556,11 @@ export default function Settings({ onClose, activeSessionId }: { onClose?: () =>
 
             {/* ═══ 会话 ═══ */}
             <Tabs.Content value="session">
-              <h3>当前会话设置</h3>
-              <div className="set-hint">请在左栏会话右侧的设置按钮中编辑工作目录与 Prompt。会话级 Skills / Hooks 尚未接入运行时。</div>
+              <div className="settings-empty-state">
+                <span className="settings-empty-kicker">当前会话</span>
+                <h3>会话设置从会话入口打开</h3>
+                <p>在左栏目标会话右侧点击设置按钮，可编辑工作目录与 Session Prompt。会话级 Skills / Hooks 暂未接入运行时。</p>
+              </div>
             </Tabs.Content>
           </Tabs.Root>
         </div>

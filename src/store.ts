@@ -31,7 +31,8 @@ export interface ThemeSettings {
   toolIndicatorGlow: number; toolIndicatorGlowColor: string
   toolConnectorMode: string; toolConnectorColor: string
   inputBg: string; inputBgImage: string; inputTextColor: string; inputPlaceholder: string; inputSendBg: string; inputFocusBorder: string; inputFontSize: number; inputMinHeight: number
-  inputMode: string; cliLineWidth: number; cliLineColor: string; cliTextColor: string; cliLinePadding: number
+  inputMode: string; cliLineWidth: number; cliLineColor: string; cliTextColor: string; cliPromptColor: string; cliLinePadding: number; cliContentOffsetY: number
+  cliHintMode: 'hidden' | 'compact' | 'full'
   statusBg: string; statusBgImage: string; ekgWidth: number; ekgFontSize: number; ekgGreen: string; ekgYellow: string; ekgRed: string; pillBg: string; pillText: string; prismOnColor: string
   ekgLineWidth: number; ekgAmplitudeMax: number; ekgSpeedBase: number; ekgSpeedMax: number
   barTrackColor: string; barFillColor: string; barFillFollow: boolean; barHeight: number  // 柱状图：外壳背景/柱子色/是否跟随用量三段色/高度
@@ -135,7 +136,8 @@ export const DEFAULTS: ThemeSettings = {
   toolIndicatorGlow: 0, toolIndicatorGlowColor: '',
   toolConnectorMode: 'none', toolConnectorColor: 'rgba(0,0,0,0.12)',
   inputBg: 'rgba(0,0,0,0.02)', inputBgImage: '', inputTextColor: 'rgba(0,0,0,0.85)', inputPlaceholder: 'rgba(0,0,0,0.28)', inputSendBg: 'rgba(0,0,0,0.10)', inputFocusBorder: 'rgba(0,0,0,0.22)', inputFontSize: 17, inputMinHeight: 56,
-  inputMode: 'cli', cliLineWidth: 2, cliLineColor: '', cliTextColor: '', cliLinePadding: 6,
+  inputMode: 'cli', cliLineWidth: 2, cliLineColor: '', cliTextColor: '', cliPromptColor: '', cliLinePadding: 6, cliContentOffsetY: 0,
+  cliHintMode: 'full',
   statusBg: 'transparent', statusBgImage: '', ekgWidth: 150, ekgFontSize: 16, ekgGreen: '#4EBA65', ekgYellow: '#FFC107', ekgRed: '#FF6B80', pillBg: '#373737', pillText: '#999999', prismOnColor: '#4EBA65',
   ekgLineWidth: 3, ekgAmplitudeMax: 10, ekgSpeedBase: 0.5, ekgSpeedMax: 2.0,
   barTrackColor: 'rgba(0,0,0,0.18)', barFillColor: '#4EBA65', barFillFollow: true, barHeight: 10,
@@ -150,7 +152,7 @@ export const DEFAULTS: ThemeSettings = {
   spinnerDoneMarkerMode: 'custom', spinnerCancelledMarkerMode: 'custom', spinnerErrorMarkerMode: 'custom', spinnerIntervalMs: 120,
   spinnerColor: '', spinnerSize: 14,
   msgStyle: 'terminal', msgFont: 'mono', msgTextColor: '', msgLineHeight: 1.8,
-  ccHeight: 150, ccBgHeight: 150, ccBg: 'transparent', ccBgImage: '', ccStatusFontSize: 13,
+  ccHeight: 150, ccBgHeight: 150, ccBg: 'transparent', ccBgImage: '', ccStatusFontSize: 14,
   ccStyle: 'wave',
   ccVariant: 'terminal',
   modelVariant: 'dropdown', modeVariant: 'pill', sendVariant: 'icon', attachVariant: 'icon',

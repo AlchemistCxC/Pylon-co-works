@@ -42,7 +42,7 @@ assert.equal(amber.spinnerColor, '#ffb000')
 for (const field of [
   'ccPositions', 'ccHidden', 'ccScale', 'ccCliCustomized', 'ccLayoutVersion',
   'ccStyle', 'ccVariant', 'ccHeight', 'ccBgHeight', 'ccBg', 'ccBgImage',
-  'cliLinePadding', 'barTrackColor', 'barFillColor', 'barFillFollow', 'barHeight',
+  'cliLinePadding', 'cliPromptColor', 'cliContentOffsetY', 'cliHintMode', 'barTrackColor', 'barFillColor', 'barFillFollow', 'barHeight',
 ]) {
   assert.equal(ZONE_FIELDS.cc.includes(field as never), true, `CC zone 缺少字段 ${field}`)
 }

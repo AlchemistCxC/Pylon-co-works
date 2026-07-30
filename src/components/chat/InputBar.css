@@ -52,11 +52,11 @@
   color:var(--cli-text-color,var(--text)); font-family:var(--mono);
   font-size:var(--input-font-size,17px); padding:0; line-height:1.4;
   caret-color:var(--cli-text-color,var(--text));
-  width:100%; flex:1; max-height:calc(10 * 1.4em);
+  width:100%; flex:1; max-height:calc(10 * 1.4em); transform:translateY(var(--cli-content-offset-y,0px));
 }
 .input-bar.cli-mode .input-textarea:focus { outline:none; border:none; box-shadow:none; }
 .input-bar.cli-mode .input-btn { display:none; }
 .input-bar.cli-mode .cli-prefix {
-  color:var(--cli-text-color,#999); font-family:var(--mono); font-size:var(--input-font-size,17px);
-  font-weight:400; padding:0 6px 0 2px; line-height:1.4;
+  color:var(--cli-prompt-color,var(--cli-text-color,#999)); font-family:var(--mono); font-size:var(--input-font-size,17px);
+  font-weight:400; padding:0 8px 0 4px; line-height:1.4; transform:translateY(var(--cli-content-offset-y,0px));
 }

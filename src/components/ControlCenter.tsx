@@ -173,6 +173,7 @@ export default function ControlCenter({ sessionId }: Props) {
   const layout = useStore(s => s.ccLayout)
   const editMode = useStore(s => s.ccEditMode)
   const ccVariant = useStore(s => s.ccVariant) || 'terminal'
+  const cliHintMode = useStore(s => s.cliHintMode || 'full')
   const ccBg = useStore(s => s.ccBg) || 'transparent'
   const ccBgImage = useStore(s => s.ccBgImage) || ''
   const setCcEditMode = useStore(s => s.setCcEditMode)
@@ -276,6 +277,12 @@ export default function ControlCenter({ sessionId }: Props) {
           <div className="cc-status-primary">{renderSlot('status-primary')}</div>
           <div className="cc-status-secondary">{renderSlot('status-secondary')}</div>
           <div className="cc-actions">{renderSlot('actions')}</div>
+          {inputMode === 'cli' && cliHintMode !== 'hidden' && (
+            <div className="cc-command-hint" aria-label="输入快捷键提示">
+              <span className="cc-command-hint-line"><span>/</span>: 命令 <i>|</i> Shift+Enter: 换行</span>
+              {cliHintMode === 'full' && <span className="cc-command-hint-line">Shift+Tab: 模式</span>}
+            </div>
+          )}
         </div>
       </div>
       {editMode && selected && <PropertyPanel id={selected} onClose={() => setSelected(null)} onExit={() => { setCcEditMode(false); setSelected(null) }} />}

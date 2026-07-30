@@ -4,6 +4,7 @@ import { open, save } from '@tauri-apps/plugin-dialog'
 import { useStore } from '../../store'
 import { setSessionModel } from './sessionModel'
 import { setSessionMode } from './sessionMode'
+import { nextSessionMode } from './sessionModeState'
 import { runSendTransaction } from './sendTransaction'
 import { buildSendMessagePayload } from './sessionRuntime'
 import { resolveSessionSource } from './sessionCommandState'
@@ -255,6 +256,12 @@ export default forwardRef<{ send: () => void; attachFile: () => void; cancel: ()
       if (!hasSelection) { e.preventDefault(); cancel(); return }
     }
     if (e.ctrlKey && e.key === 'ArrowUp') { e.preventDefault(); if (lastMsg.current) setValue(lastMsg.current) }
+    if (e.key === 'Tab' && e.shiftKey && sessionSource) {
+      e.preventDefault()
+      const currentMode = useStore.getState().sessionModes[sessionSource] || 'default'
+      setSessionMode(sessionSource, nextSessionMode(currentMode)).catch(error => setSendError(String(error)))
+      return
+    }
     if (isCmd && filtered.length > 0) {
       if (e.key === 'Tab') { e.preventDefault(); setCmdIdx(i => (i + 1) % filtered.length); return }
       if (e.key === 'ArrowDown') { e.preventDefault(); setCmdIdx(i => Math.min(i + 1, filtered.length - 1)); return }
