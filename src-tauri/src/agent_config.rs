@@ -43,17 +43,34 @@ pub fn config_path() -> Option<PathBuf> {
     std::env::var_os("PYLON_AGENTS_CONFIG").map(PathBuf::from)
 }
 
+pub fn load() -> Result<HashMap<String, AgentDef>, String> {
+    if let Some(path) = config_path() {
+        return load_from_path(&path);
+    }
+    parse(include_str!("../../agents.yaml"))
+}
+
 fn parse(content: &str) -> Result<HashMap<String, AgentDef>, String> {
     let config: AgentConfigFile = serde_yaml::from_str(content)
         .map_err(|error| format!("failed to parse agents.yaml: {error}"))?;
     if config.agents.is_empty() {
         return Err("agents.yaml contains no agents".to_string());
     }
+    for (id, agent) in &config.agents {
+        if id.trim().is_empty() {
+            return Err("agents.yaml contains an agent with an empty id".to_string());
+        }
+        if agent.name.trim().is_empty() {
+            return Err(format!("agent {id} has an empty name"));
+        }
+        if agent.exe.trim().is_empty() {
+            return Err(format!("agent {id} has an empty executable"));
+        }
+        if agent.transport != "subprocess" {
+            return Err(format!("agent {id} uses unsupported transport: {}", agent.transport));
+        }
+    }
     Ok(config.agents)
-}
-
-pub fn load() -> Result<HashMap<String, AgentDef>, String> {
-    parse(include_str!("../../agents.yaml"))
 }
 
 pub fn load_from_path(path: &Path) -> Result<HashMap<String, AgentDef>, String> {
@@ -62,11 +79,19 @@ pub fn load_from_path(path: &Path) -> Result<HashMap<String, AgentDef>, String> 
     parse(&content)
 }
 
-/// Returns the id (key) of the first agent with `default: true`, or the first agent in the map.
-pub fn default_agent_id(agents: &HashMap<String, AgentDef>) -> Option<&str> {
-    agents.iter().find(|(_, a)| a.default)
-        .or_else(|| agents.iter().next())
-        .map(|(k, _)| k.as_str())
+pub fn default_agent_id(agents: &HashMap<String, AgentDef>) -> Result<Option<String>, String> {
+    let mut defaults: Vec<&String> = agents.iter()
+        .filter(|(_, agent)| agent.default)
+        .map(|(id, _)| id)
+        .collect();
+    if defaults.len() > 1 {
+        defaults.sort();
+        return Err(format!("multiple default agents configured: {}", defaults.iter().map(|id| id.as_str()).collect::<Vec<_>>().join(", ")));
+    }
+    if let Some(id) = defaults.pop() {
+        return Ok(Some(id.clone()));
+    }
+    Ok(agents.keys().min().cloned())
 }
 
 #[cfg(test)]
@@ -87,7 +112,7 @@ mod tests {
 
     #[test]
     fn empty_registry_has_no_default_agent() {
-        assert_eq!(default_agent_id(&HashMap::new()), None);
+        assert_eq!(default_agent_id(&HashMap::new()).unwrap(), None);
     }
 
     #[test]
@@ -95,7 +120,24 @@ mod tests {
         let mut agents = HashMap::new();
         agents.insert("fallback".to_string(), agent(false));
         agents.insert("primary".to_string(), agent(true));
-        assert_eq!(default_agent_id(&agents), Some("primary"));
+        assert_eq!(default_agent_id(&agents).unwrap(), Some("primary".to_string()));
+    }
+
+    #[test]
+    fn multiple_default_agents_are_rejected() {
+        let mut agents = HashMap::new();
+        agents.insert("a".to_string(), agent(true));
+        agents.insert("b".to_string(), agent(true));
+        let error = default_agent_id(&agents).expect_err("multiple defaults must fail");
+        assert!(error.contains("a, b"));
+    }
+
+    #[test]
+    fn fallback_agent_id_is_deterministic() {
+        let mut agents = HashMap::new();
+        agents.insert("zeta".to_string(), agent(false));
+        agents.insert("alpha".to_string(), agent(false));
+        assert_eq!(default_agent_id(&agents).unwrap(), Some("alpha".to_string()));
     }
 
     #[test]

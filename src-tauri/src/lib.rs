@@ -4,6 +4,7 @@ mod agent_runtime;
 mod error;
 mod mcp;
 mod pet;
+mod prism;
 mod runtime_log;
 mod workspace;
 
@@ -16,6 +17,7 @@ use acp::{AcpClient, PromptWaitOutcome};
 use agent_config::AgentDef;
 use agent_runtime::{notification_is_current, session_mapping_matches, source_for_peri_id_in_generation, status_after_connection_failure, AgentLifecycleStatus, AgentRuntimeState};
 use error::PylonError;
+use prism::PrismClient;
 
 fn emit_event<R, W>(window: &W, event: &str, payload: serde_json::Value)
 where
@@ -45,6 +47,328 @@ struct AppState {
     runtime_logs: Arc<runtime_log::RuntimeLogHub>,
     runtime_mcp: Mutex<Option<Vec<mcp::McpServerConfig>>>,
     agent_runtime: Arc<Mutex<AgentRuntimeState>>,
+    prism: PrismClient,
+}
+
+#[tauri::command]
+async fn prism_health(state: tauri::State<'_, AppState>) -> Result<serde_json::Value, String> {
+    state.prism.get("/health").await
+}
+
+#[tauri::command]
+async fn prism_status(state: tauri::State<'_, AppState>) -> Result<serde_json::Value, String> {
+    Ok(state.prism.status().await)
+}
+
+#[tauri::command]
+async fn prism_state(state: tauri::State<'_, AppState>) -> Result<serde_json::Value, String> {
+    state.prism.get("/state").await
+}
+
+#[tauri::command]
+async fn prism_scenarios(state: tauri::State<'_, AppState>) -> Result<serde_json::Value, String> {
+    state.prism.get("/api/scenarios").await
+}
+
+#[tauri::command]
+async fn prism_sources(state: tauri::State<'_, AppState>) -> Result<serde_json::Value, String> {
+    state.prism.get("/api/sources").await
+}
+
+#[tauri::command]
+async fn prism_aliases(state: tauri::State<'_, AppState>) -> Result<serde_json::Value, String> {
+    state.prism.get("/api/aliases").await
+}
+
+#[tauri::command]
+async fn prism_config(
+    state: tauri::State<'_, AppState>,
+    name: String,
+) -> Result<serde_json::Value, String> {
+    state.prism.get_query("/api/config", [("name", name)]).await
+}
+
+#[tauri::command]
+async fn prism_logs(
+    state: tauri::State<'_, AppState>,
+    log_type: Option<String>,
+    limit: Option<u64>,
+    offset: Option<u64>,
+) -> Result<serde_json::Value, String> {
+    let mut query = Vec::new();
+    if let Some(value) = log_type { query.push(("type".to_string(), value)); }
+    if let Some(value) = limit { query.push(("limit".to_string(), value.to_string())); }
+    if let Some(value) = offset { query.push(("offset".to_string(), value.to_string())); }
+    state.prism.get_query("/api/logs", query).await
+}
+
+#[tauri::command]
+async fn prism_chronicle(
+    state: tauri::State<'_, AppState>,
+    scenario: Option<String>,
+) -> Result<serde_json::Value, String> {
+    let query = scenario.into_iter().map(|value| ("scenario".to_string(), value)).collect::<Vec<_>>();
+    state.prism.get_query("/api/chronicle", query).await
+}
+
+#[tauri::command]
+async fn prism_history(
+    state: tauri::State<'_, AppState>,
+    scenario: Option<String>,
+    limit: Option<u64>,
+    offset: Option<u64>,
+) -> Result<serde_json::Value, String> {
+    let mut query = Vec::new();
+    if let Some(value) = scenario { query.push(("scenario".to_string(), value)); }
+    if let Some(value) = limit { query.push(("limit".to_string(), value.to_string())); }
+    if let Some(value) = offset { query.push(("offset".to_string(), value.to_string())); }
+    state.prism.get_query("/api/history", query).await
+}
+
+#[tauri::command]
+async fn prism_scenario(
+    state: tauri::State<'_, AppState>,
+    name: String,
+) -> Result<serde_json::Value, String> {
+    state.prism.get_query("/api/scenario", [("name", name)]).await
+}
+
+#[tauri::command]
+async fn prism_blocks(state: tauri::State<'_, AppState>) -> Result<serde_json::Value, String> {
+    state.prism.get("/api/blocks").await
+}
+
+#[tauri::command]
+async fn prism_inject(
+    state: tauri::State<'_, AppState>,
+    request: serde_json::Value,
+) -> Result<serde_json::Value, String> {
+    state.prism.post("/inject", request).await
+}
+
+#[tauri::command]
+async fn prism_command(
+    state: tauri::State<'_, AppState>,
+    command: String,
+) -> Result<serde_json::Value, String> {
+    state.prism.post("/command", serde_json::json!({"command": command})).await
+}
+
+#[tauri::command]
+async fn prism_create_scenario(
+    state: tauri::State<'_, AppState>,
+    name: String,
+    yaml: String,
+) -> Result<serde_json::Value, String> {
+    state.prism.post("/api/scenarios", serde_json::json!({"name": name, "yaml": yaml})).await
+}
+
+#[tauri::command]
+async fn prism_delete_scenario(
+    state: tauri::State<'_, AppState>,
+    name: String,
+) -> Result<serde_json::Value, String> {
+    state.prism.post_query("/api/scenarios/delete", [("name", name)], serde_json::json!({})).await
+}
+
+#[tauri::command]
+async fn prism_create_source(
+    state: tauri::State<'_, AppState>,
+    name: String,
+) -> Result<serde_json::Value, String> {
+    state.prism.post("/api/sources", serde_json::json!({"name": name})).await
+}
+
+#[tauri::command]
+async fn prism_delete_source(
+    state: tauri::State<'_, AppState>,
+    name: String,
+) -> Result<serde_json::Value, String> {
+    state.prism.post_query("/api/sources/delete", [("name", name)], serde_json::json!({})).await
+}
+
+#[tauri::command]
+async fn prism_source_detail(
+    state: tauri::State<'_, AppState>,
+    name: String,
+) -> Result<serde_json::Value, String> {
+    state.prism.get_query("/api/source/detail", [("name", name)]).await
+}
+
+#[tauri::command]
+async fn prism_source_files(
+    state: tauri::State<'_, AppState>,
+    name: String,
+) -> Result<serde_json::Value, String> {
+    state.prism.get_query("/api/sources/files", [("name", name)]).await
+}
+
+#[tauri::command]
+async fn prism_read_source_file(
+    state: tauri::State<'_, AppState>,
+    name: String,
+    path: String,
+) -> Result<serde_json::Value, String> {
+    state.prism.get_query("/api/sources/file", [("name", name), ("path", path)]).await
+}
+
+#[tauri::command]
+async fn prism_write_source_file(
+    state: tauri::State<'_, AppState>,
+    name: String,
+    path: String,
+    content: String,
+) -> Result<serde_json::Value, String> {
+    state.prism.put_query("/api/sources/file", [("name", name), ("path", path)], serde_json::json!({"content": content})).await
+}
+
+#[tauri::command]
+async fn prism_delete_source_file(
+    state: tauri::State<'_, AppState>,
+    name: String,
+    path: String,
+) -> Result<serde_json::Value, String> {
+    state.prism.delete_query("/api/sources/file", [("name", name), ("path", path)]).await
+}
+
+#[tauri::command]
+async fn prism_source_entries(
+    state: tauri::State<'_, AppState>,
+    source: String,
+    scenario: String,
+) -> Result<serde_json::Value, String> {
+    state.prism.get_query("/api/source/entries", [("source", source), ("scenario", scenario)]).await
+}
+
+#[tauri::command]
+async fn prism_source_entry(
+    state: tauri::State<'_, AppState>,
+    source: String,
+    scenario: String,
+    uid: String,
+) -> Result<serde_json::Value, String> {
+    state.prism.get_query("/api/source/entry", [("source", source), ("scenario", scenario), ("uid", uid)]).await
+}
+
+#[tauri::command]
+async fn prism_add_source_entry(
+    state: tauri::State<'_, AppState>,
+    source: String,
+    scenario: String,
+    entry: serde_json::Value,
+) -> Result<serde_json::Value, String> {
+    state.prism.post_query("/api/source/entry/add", [("source", source), ("scenario", scenario)], serde_json::json!({"entry": entry})).await
+}
+
+#[tauri::command]
+async fn prism_edit_source_entry(
+    state: tauri::State<'_, AppState>,
+    source: String,
+    scenario: String,
+    uid: String,
+    entry: serde_json::Value,
+) -> Result<serde_json::Value, String> {
+    state.prism.put_query("/api/source/entry/edit", [("source", source), ("scenario", scenario), ("uid", uid)], serde_json::json!({"entry": entry})).await
+}
+
+#[tauri::command]
+async fn prism_delete_source_entry(
+    state: tauri::State<'_, AppState>,
+    source: String,
+    scenario: String,
+    uid: String,
+) -> Result<serde_json::Value, String> {
+    state.prism.post_query("/api/source/entry/delete", [("source", source), ("scenario", scenario), ("uid", uid)], serde_json::json!({})).await
+}
+
+#[tauri::command]
+async fn prism_update_config(
+    state: tauri::State<'_, AppState>,
+    name: String,
+    yaml: String,
+) -> Result<serde_json::Value, String> {
+    state.prism.put_query("/api/config", [("name", name)], serde_json::json!({"yaml": yaml})).await
+}
+
+#[tauri::command]
+async fn prism_update_scenario(
+    state: tauri::State<'_, AppState>,
+    name: String,
+    update: serde_json::Value,
+) -> Result<serde_json::Value, String> {
+    state.prism.put_query("/api/scenario", [("name", name)], update).await
+}
+
+#[tauri::command]
+async fn prism_create_block(
+    state: tauri::State<'_, AppState>,
+    block: serde_json::Value,
+) -> Result<serde_json::Value, String> {
+    state.prism.post("/api/blocks", serde_json::json!({"block": block})).await
+}
+
+#[tauri::command]
+async fn prism_update_block(
+    state: tauri::State<'_, AppState>,
+    id: String,
+    block: serde_json::Value,
+) -> Result<serde_json::Value, String> {
+    state.prism.put_query("/api/blocks", [("id", id)], serde_json::json!({"block": block})).await
+}
+
+#[tauri::command]
+async fn prism_delete_block(
+    state: tauri::State<'_, AppState>,
+    id: String,
+) -> Result<serde_json::Value, String> {
+    state.prism.delete_query("/api/blocks", [("id", id)]).await
+}
+
+#[tauri::command]
+async fn prism_add_scenario_block(
+    state: tauri::State<'_, AppState>,
+    scenario: String,
+    block: serde_json::Value,
+) -> Result<serde_json::Value, String> {
+    state.prism.post_query("/api/scenario/blocks/add", [("scenario", scenario)], serde_json::json!({"block": block})).await
+}
+
+#[tauri::command]
+async fn prism_edit_scenario_block(
+    state: tauri::State<'_, AppState>,
+    scenario: String,
+    id: String,
+    block: serde_json::Value,
+) -> Result<serde_json::Value, String> {
+    state.prism.put_query("/api/scenario/blocks/edit", [("scenario", scenario), ("id", id)], serde_json::json!({"block": block})).await
+}
+
+#[tauri::command]
+async fn prism_delete_scenario_block(
+    state: tauri::State<'_, AppState>,
+    scenario: String,
+    id: String,
+) -> Result<serde_json::Value, String> {
+    state.prism.post_query("/api/scenario/blocks/delete", [("scenario", scenario), ("id", id)], serde_json::json!({})).await
+}
+
+#[tauri::command]
+async fn prism_reorder_scenario_blocks(
+    state: tauri::State<'_, AppState>,
+    scenario: String,
+    blocks: serde_json::Value,
+) -> Result<serde_json::Value, String> {
+    state.prism.put_query("/api/scenario/blocks/reorder", [("scenario", scenario)], serde_json::json!({"blocks": blocks})).await
+}
+
+#[tauri::command]
+async fn prism_reload(state: tauri::State<'_, AppState>) -> Result<serde_json::Value, String> {
+    state.prism.post("/reload", serde_json::json!({})).await
+}
+
+#[tauri::command]
+async fn prism_llm_test(state: tauri::State<'_, AppState>) -> Result<serde_json::Value, String> {
+    state.prism.post("/api/llm/test", serde_json::json!({})).await
 }
 
 
@@ -114,9 +438,12 @@ fn agent_status_payload(state: &AppState) -> serde_json::Value {
         }
     }
     let runtime = state.agent_runtime.lock().map(|value| value.clone()).unwrap_or_default();
-    let agent = state.get_active_agent().ok();
+    let active_agent_id = state.active_agent.lock().ok().map(|value| value.clone()).unwrap_or_default();
+    let agent = state.agents.lock().ok().and_then(|agents| agents.get(&active_agent_id).cloned());
     let crashed = matches!(runtime.status, AgentLifecycleStatus::Crashed) || state.acp.try_lock().map(|acp| acp.is_crashed()).unwrap_or(false);
     serde_json::json!({
+        "agentId": active_agent_id,
+        "agentName": agent.as_ref().map(|value| value.name.clone()).unwrap_or_default(),
         "agent": agent.as_ref().map(|value| value.name.clone()).unwrap_or_default(),
         "status": if crashed { AgentLifecycleStatus::Crashed.as_str() } else { runtime.status.as_str() },
         "transport": agent.as_ref().map(|value| value.transport.clone()).unwrap_or_default(),
@@ -125,6 +452,28 @@ fn agent_status_payload(state: &AppState) -> serde_json::Value {
         "lastConnectedAt": runtime.last_connected_at,
         "generation": state.current_generation(),
         "crashed": crashed,
+    })
+}
+
+fn agent_summary_payload(id: &str, agent: &AgentDef, active_id: &str, active_status: AgentLifecycleStatus) -> serde_json::Value {
+    serde_json::json!({
+        "id": id,
+        "name": agent.name,
+        "transport": agent.transport,
+        "available": id == active_id && active_status == AgentLifecycleStatus::Connected,
+        "active": id == active_id,
+        "cwd": agent.cwd.clone(),
+    })
+}
+
+fn configured_agent_summary(id: &str, agent: &AgentDef) -> serde_json::Value {
+    serde_json::json!({
+        "id": id,
+        "name": agent.name,
+        "transport": agent.transport,
+        "available": false,
+        "active": false,
+        "cwd": agent.cwd.clone(),
     })
 }
 
@@ -230,9 +579,11 @@ fn start_notification_dispatcher(state: &AppState, window: tauri::WebviewWindow)
                         runtime.last_error = Some(last_error.clone());
                     }
                     let runtime = agent_runtime.lock().map(|value| value.clone()).unwrap_or_default();
-                    let agent = active_agent.lock().ok()
-                        .and_then(|name| agents.lock().ok()?.get(&*name).cloned());
+                    let active_id = active_agent.lock().ok().map(|value| value.clone()).unwrap_or_default();
+                    let agent = agents.lock().ok().and_then(|items| items.get(&active_id).cloned());
                     emit_event(&window, "peri:agent-status", serde_json::json!({
+                        "agentId": active_id,
+                        "agentName": agent.as_ref().map(|value| value.name.clone()).unwrap_or_default(),
                         "agent": agent.as_ref().map(|value| value.name.clone()).unwrap_or_default(),
                         "status": AgentLifecycleStatus::Crashed.as_str(),
                         "transport": agent.as_ref().map(|value| value.transport.clone()).unwrap_or_default(),
@@ -478,6 +829,45 @@ mod session_info_tests {
     use super::*;
 
     #[test]
+    fn export_sanitizer_removes_secret_payloads() {
+        let messages = vec![serde_json::json!({
+            "update": {
+                "sessionUpdate": "agent_message_chunk",
+                "content": {"text": "visible"},
+                "rawInput": {"prompt": "private"},
+                "rawOutput": "private output",
+                "headers": {"authorization": "Bearer secret"},
+                "safe": "kept"
+            }
+        })];
+        let safe = sanitize_export_messages(&messages);
+        let text = serde_json::to_string(&safe).expect("serialize sanitized export");
+        assert!(text.contains("visible"));
+        assert!(text.contains("kept"));
+        assert!(!text.contains("private"));
+        assert!(!text.contains("secret"));
+    }
+
+    #[test]
+    fn export_file_write_rejects_existing_path_and_commits_new_file() {
+        let root = std::env::temp_dir().join(format!("pylon-export-test-{}", std::process::id()));
+        std::fs::create_dir_all(&root).expect("create export test directory");
+        let output = root.join("session.json");
+        write_export_atomically(&output, b"first").expect("write export");
+        assert_eq!(std::fs::read_to_string(&output).expect("read export"), "first");
+        assert!(write_export_atomically(&output, b"second").is_err());
+        assert_eq!(std::fs::read_to_string(&output).expect("read export"), "first");
+        std::fs::remove_dir_all(&root).expect("remove export test directory");
+    }
+
+    #[test]
+    fn export_session_owner_requires_active_generation_match() {
+        assert_eq!(is_export_sensitive_key("rawInput"), true);
+        assert_eq!(is_export_sensitive_key("tokenValue"), true);
+        assert_eq!(is_export_sensitive_key("safe"), false);
+    }
+
+    #[test]
     fn session_response_preserves_mode_and_all_config_options() {
         let mut session = SessionInfo::new("peri-1".into(), "persona".into(), "G:/work".into(), false, 0);
         session.apply_session_response(&serde_json::json!({
@@ -543,6 +933,44 @@ impl AppState {
             .ok_or_else(|| PylonError::SessionNotFound(source.to_string()))
     }
 
+    fn export_session_owner(&self, peri_id: &str) -> Result<(String, u64, String), String> {
+        let generation = self.current_generation();
+        let sessions = self.sessions.lock().map_err(|error| error.to_string())?;
+        let matches: Vec<(&String, &SessionInfo)> = sessions
+            .iter()
+            .filter(|(_, session)| session.peri_id == peri_id && session.generation == generation)
+            .collect();
+        match matches.as_slice() {
+            [(source, session)] => Ok(((*source).clone(), generation, session.cwd.clone())),
+            [] => Err("export session not found in the active generation".to_string()),
+            _ => Err("export session owner is ambiguous".to_string()),
+        }
+    }
+
+    fn with_session_if_matches<T>(
+        &self,
+        source: &str,
+        peri_id: &str,
+        generation: u64,
+        update: impl FnOnce(&mut SessionInfo) -> T,
+    ) -> Result<T, String> {
+        self.ensure_generation(generation)?;
+        let mut sessions = self.sessions.lock().map_err(|error| error.to_string())?;
+        let session = sessions
+            .get_mut(source)
+            .ok_or_else(|| format!("stale session mapping for source: {source}"))?;
+        if !session_mapping_matches(&session.peri_id, session.generation, peri_id, generation) {
+            return Err(format!("stale session mapping for source: {source}"));
+        }
+        Ok(update(session))
+    }
+
+    fn mark_first_prompt_if_matches(&self, source: &str, peri_id: &str, generation: u64) -> Result<(), String> {
+        self.with_session_if_matches(source, peri_id, generation, |session| {
+            session.has_first_prompt = true;
+        })
+    }
+
     fn remove_session_if_matches(&self, source: &str, peri_id: &str, generation: u64) -> Result<bool, String> {
         let mut sessions = self.sessions.lock().map_err(|error| error.to_string())?;
         if sessions.get(source).map(|session| {
@@ -556,6 +984,33 @@ impl AppState {
 }
 
 const MAX_SESSIONS: usize = 100;
+
+fn write_export_atomically(path: &std::path::Path, content: &[u8]) -> Result<(), String> {
+    if path.exists() {
+        return Err(format!("export output already exists: {}", path.display()));
+    }
+    let parent = path.parent().ok_or_else(|| "export output has no parent directory".to_string())?;
+    let temp = parent.join(format!(
+        ".{}.{}.tmp",
+        path.file_name().and_then(|name| name.to_str()).unwrap_or("export"),
+        std::process::id(),
+    ));
+    let result = (|| {
+        let mut file = std::fs::OpenOptions::new()
+            .write(true)
+            .create_new(true)
+            .open(&temp)
+            .map_err(|error| format!("create temporary export failed: {error}"))?;
+        use std::io::Write;
+        file.write_all(content).map_err(|error| format!("write temporary export failed: {error}"))?;
+        file.sync_all().map_err(|error| format!("sync temporary export failed: {error}"))?;
+        std::fs::rename(&temp, path).map_err(|error| format!("commit export failed: {error}"))
+    })();
+    if result.is_err() {
+        let _ = std::fs::remove_file(&temp);
+    }
+    result
+}
 
 #[tauri::command]
 async fn new_session(
@@ -694,6 +1149,10 @@ async fn send_message(
 
     match result {
         PromptWaitOutcome::Response(raw) => {
+            state.ensure_generation(prompt_generation)?;
+            if !state.session_matches(&source, &peri_id, prompt_generation)? {
+                return Err(format!("stale session mapping for source: {source}"));
+            }
             if let Some(error) = raw.error {
                 let error = error.to_string();
                 emit_event(&window, "peri:error", serde_json::json!({"source": source, "error": error}));
@@ -712,11 +1171,7 @@ async fn send_message(
                     return Err(error);
                 }
                 if is_first {
-                    if let Ok(mut sessions) = state.sessions.lock() {
-                        if let Some(session) = sessions.get_mut(&source) {
-                            session.has_first_prompt = true;
-                        }
-                    }
+                    state.mark_first_prompt_if_matches(&source, &peri_id, prompt_generation)?;
                 }
                 emit_event(&window, "peri:done", serde_json::json!({"source": source, "data": data}));
                 let _ = state.pet.lock().map(|mut p| pet::on_done(&mut p));
@@ -727,6 +1182,8 @@ async fn send_message(
             }
         }
         PromptWaitOutcome::ConnectionClosed => {
+            state.acp.lock().await.remove_pending(request_id);
+            let _ = state.remove_session_if_matches(&source, &peri_id, prompt_generation);
             log_runtime_summary(&state, "error", "prompt", Some(source.clone()), "Prompt connection closed", serde_json::Map::new());
             Err("ACP connection closed".to_string())
         }
@@ -767,15 +1224,9 @@ async fn set_mode(state: tauri::State<'_, AppState>, source: String, mode: Strin
     let peri_id = state.get_peri_id(&source).map_err(|e| e.to_string())?;
     state.acp.lock().await.set_mode(&peri_id, &mode).await?;
     state.ensure_generation(generation)?;
-    if let Ok(mut sessions) = state.sessions.lock() {
-        if sessions.get(&source).map(|session| {
-            session_mapping_matches(&session.peri_id, session.generation, &peri_id, generation)
-        }) == Some(true) {
-            if let Some(session) = sessions.get_mut(&source) {
-                session.mode = Some(mode);
-            }
-        }
-    }
+    state.with_session_if_matches(&source, &peri_id, generation, |session| {
+        session.mode = Some(mode);
+    })?;
     Ok(())
 }
 
@@ -786,22 +1237,16 @@ async fn set_config_option(state: tauri::State<'_, AppState>, source: String, ke
     // Peri returns full configOptions in the response body — no pre-subscribe needed
     let response = state.acp.lock().await.set_config_option(&peri_id, &key, &value).await?;
     state.ensure_generation(generation)?;
-    if let Ok(mut sessions) = state.sessions.lock() {
-        if sessions.get(&source).map(|session| {
-            session_mapping_matches(&session.peri_id, session.generation, &peri_id, generation)
-        }) == Some(true) {
-            if let Some(session) = sessions.get_mut(&source) {
-                if let Some(options) = response.get("configOptions").and_then(|value| value.as_array()) {
-                    session.config_options = options.clone();
-                    session.apply_config_options(options);
-                } else if key == "model" {
-                    session.model = value.clone();
-                } else if key == "mode" {
-                    session.mode = Some(value.clone());
-                }
-            }
+    state.with_session_if_matches(&source, &peri_id, generation, |session| {
+        if let Some(options) = response.get("configOptions").and_then(|value| value.as_array()) {
+            session.config_options = options.clone();
+            session.apply_config_options(options);
+        } else if key == "model" {
+            session.model = value.clone();
+        } else if key == "mode" {
+            session.mode = Some(value.clone());
         }
-    }
+    })?;
     Ok(response)
 }
 
@@ -812,6 +1257,9 @@ async fn close_session(state: tauri::State<'_, AppState>, source: String) -> Res
     let peri_id = state.get_peri_id(&source).map_err(|e| e.to_string())?;
     state.acp.lock().await.close_session(&peri_id).await?;
     state.ensure_generation(generation)?;
+    if !state.session_matches(&source, &peri_id, generation)? {
+        return Err(format!("stale session mapping for source: {source}"));
+    }
     let _ = state.remove_session_if_matches(&source, &peri_id, generation)?;
     Ok(())
 }
@@ -823,6 +1271,9 @@ async fn cancel_prompt(state: tauri::State<'_, AppState>, source: String) -> Res
     // Fire-and-forget notification — Peri will respond with stopReason=cancelled
     state.acp.lock().await.cancel_session(&peri_id).await?;
     state.ensure_generation(generation)?;
+    if !state.session_matches(&source, &peri_id, generation)? {
+        return Err(format!("stale session mapping for source: {source}"));
+    }
     Ok(())
 }
 
@@ -840,9 +1291,25 @@ async fn load_sessions(state: tauri::State<'_, AppState>) -> Result<Vec<serde_js
 
 #[tauri::command]
 async fn list_agents(state: tauri::State<'_, AppState>) -> Result<Vec<serde_json::Value>, String> {
+    let active_id = state.active_agent.lock().map_err(|e| e.to_string())?.clone();
+    let active_status = state.agent_runtime.lock().map(|runtime| runtime.status).unwrap_or(AgentLifecycleStatus::Disconnected);
     Ok(state.agents.lock().map_err(|e| e.to_string())?.iter().map(|(id, a)| {
-        serde_json::json!({"id": id, "name": a.name, "transport": a.transport})
+        agent_summary_payload(id, a, &active_id, active_status)
     }).collect())
+}
+
+#[tauri::command]
+async fn validate_agents() -> Result<serde_json::Value, String> {
+    let agents = agent_config::load()?;
+    let default_agent_id = agent_config::default_agent_id(&agents)?;
+    let summaries = agents.iter()
+        .map(|(id, agent)| configured_agent_summary(id, agent))
+        .collect::<Vec<_>>();
+    Ok(serde_json::json!({
+        "valid": true,
+        "defaultAgentId": default_agent_id,
+        "agents": summaries,
+    }))
 }
 
 async fn replace_agent_client(
@@ -944,10 +1411,12 @@ fn current_mcp_servers(state: &AppState) -> Result<Vec<mcp::McpServerConfig>, St
 #[tauri::command]
 async fn reload_agents(state: tauri::State<'_, AppState>, config_path: Option<String>) -> Result<(), String> {
     let _lifecycle_guard = state.agent_lifecycle.lock().await;
-    let path = config_path
-        .or_else(|| agent_config::config_path().map(|path| path.to_string_lossy().into_owned()))
-        .ok_or_else(|| "reload_agents requires configPath or PYLON_AGENTS_CONFIG".to_string())?;
-    let new_agents = agent_config::load_from_path(std::path::Path::new(&path))?;
+    let new_agents = if let Some(path) = config_path {
+        agent_config::load_from_path(std::path::Path::new(&path))?
+    } else {
+        agent_config::load()?
+    };
+    agent_config::default_agent_id(&new_agents)?;
     let active_agent = state.active_agent.lock().map_err(|error| error.to_string())?.clone();
     if !new_agents.contains_key(&active_agent) {
         return Err(format!("agent config cannot remove active agent: {active_agent}"));
@@ -1021,7 +1490,9 @@ async fn load_persisted_session(
         Ok((response, _replay)) => {
             if let Err(error) = state.ensure_generation(generation) {
                 let mut sessions = state.sessions.lock().map_err(|lock_error| lock_error.to_string())?;
-                if sessions.get(&source).map(|session| (session.peri_id.as_str(), session.generation)) == Some((peri_id.as_str(), generation)) {
+                if sessions.get(&source).map(|session| {
+                    session_mapping_matches(&session.peri_id, session.generation, &peri_id, generation)
+                }) == Some(true) {
                     if let Some(previous) = previous {
                         sessions.insert(source.clone(), previous);
                     } else {
@@ -1030,15 +1501,9 @@ async fn load_persisted_session(
                 }
                 return Err(error);
             }
-            if let Ok(mut sessions) = state.sessions.lock() {
-                if sessions.get(&source).map(|session| {
-                    session_mapping_matches(&session.peri_id, session.generation, &peri_id, generation)
-                }) == Some(true) {
-                    if let Some(session) = sessions.get_mut(&source) {
-                        session.apply_session_response(&response);
-                    }
-                }
-            }
+            state.with_session_if_matches(&source, &peri_id, generation, |session| {
+                session.apply_session_response(&response);
+            })?;
             Ok(response)
         }
         Err(error) => {
@@ -1066,6 +1531,31 @@ async fn list_persisted_sessions(state: tauri::State<'_, AppState>) -> Result<se
     Ok(response)
 }
 
+fn is_export_sensitive_key(key: &str) -> bool {
+    matches!(key.to_ascii_lowercase().as_str(), "rawinput" | "rawoutput" | "prompt" | "persona" | "headers" | "env" | "authorization")
+        || key.to_ascii_lowercase().contains("token")
+        || key.to_ascii_lowercase().contains("secret")
+}
+
+fn sanitize_export_value(value: &serde_json::Value) -> Option<serde_json::Value> {
+    match value {
+        serde_json::Value::Object(object) => Some(serde_json::Value::Object(
+            object.iter()
+                .filter(|(key, _)| !is_export_sensitive_key(key))
+                .filter_map(|(key, value)| sanitize_export_value(value).map(|value| (key.clone(), value)))
+                .collect(),
+        )),
+        serde_json::Value::Array(values) => Some(serde_json::Value::Array(
+            values.iter().filter_map(sanitize_export_value).collect(),
+        )),
+        _ => Some(value.clone()),
+    }
+}
+
+fn sanitize_export_messages(messages: &[serde_json::Value]) -> Vec<serde_json::Value> {
+    messages.iter().filter_map(sanitize_export_value).collect()
+}
+
 fn format_export_markdown(peri_id: &str, messages: &[serde_json::Value]) -> String {
     let mut markdown = format!("# Session {peri_id}\n\n");
     for message in messages {
@@ -1079,13 +1569,6 @@ fn format_export_markdown(peri_id: &str, messages: &[serde_json::Value]) -> Stri
                     markdown.push_str("\n\n");
                 }
             }
-            Some("agent_thought_chunk") => {
-                if let Some(text) = update.get("content").and_then(|content| content.get("text")).and_then(|value| value.as_str()) {
-                    markdown.push_str("## Reasoning\n\n");
-                    markdown.push_str(text);
-                    markdown.push_str("\n\n");
-                }
-            }
             Some("agent_message_chunk") => {
                 if let Some(text) = update.get("content").and_then(|content| content.get("text")).and_then(|value| value.as_str()) {
                     markdown.push_str("## Assistant\n\n");
@@ -1093,31 +1576,12 @@ fn format_export_markdown(peri_id: &str, messages: &[serde_json::Value]) -> Stri
                     markdown.push_str("\n\n");
                 }
             }
-            Some("tool_call") => {
+            Some("tool_call") | Some("tool_call_update") => {
                 let title = update.get("title").or_else(|| update.get("name"))
                     .and_then(|value| value.as_str()).unwrap_or("Tool");
                 markdown.push_str(&format!("## Tool: {title}\n\n"));
-                if let Some(input) = update.get("rawInput") {
-                    markdown.push_str("```json\n");
-                    markdown.push_str(&serde_json::to_string_pretty(input).unwrap_or_else(|_| input.to_string()));
-                    markdown.push_str("\n```\n\n");
-                }
-            }
-            Some("tool_call_update") => {
                 let status = update.get("status").and_then(|value| value.as_str()).unwrap_or("unknown");
-                markdown.push_str(&format!("### Tool result ({status})\n\n"));
-                if let Some(output) = update.get("rawOutput") {
-                    match output.as_str() {
-                        Some(text) => markdown.push_str(text),
-                        None => markdown.push_str(&serde_json::to_string_pretty(output).unwrap_or_else(|_| output.to_string())),
-                    }
-                    markdown.push_str("\n\n");
-                }
-            }
-            Some("usage_update" | "session_info_update" | "config_option_update") => {
-                markdown.push_str("<details><summary>Metadata</summary>\n\n```json\n");
-                markdown.push_str(&serde_json::to_string_pretty(update).unwrap_or_else(|_| update.to_string()));
-                markdown.push_str("\n```\n\n</details>\n\n");
+                markdown.push_str(&format!("### Tool status ({status})\n\n"));
             }
             _ => {}
         }
@@ -1152,19 +1616,26 @@ async fn export_session(
             return Err(format!("export output directory does not exist: {}", parent.display()));
         }
     }
-    let generation = state.current_generation();
-    let cwd = state.agent_cwd();
+    let (source, generation, cwd) = state.export_session_owner(&peri_id)?;
     let mcp_servers = mcp::validate_and_serialize(Some(current_mcp_servers(&state)?))?;
     let (_, messages) = state.acp.lock().await
         .load_session_with_replay(&peri_id, &cwd, mcp_servers)
         .await?;
     state.ensure_generation(generation)?;
+    let sessions = state.sessions.lock().map_err(|error| error.to_string())?;
+    if sessions.get(&source).map(|session| {
+        session_mapping_matches(&session.peri_id, session.generation, &peri_id, generation)
+    }) != Some(true) {
+        return Err("export session became stale".to_string());
+    }
+    drop(sessions);
+    let safe_messages = sanitize_export_messages(&messages);
     let content = match format.as_str() {
-        "markdown" => format_export_markdown(&peri_id, &messages),
-        _ => serde_json::to_string_pretty(&messages)
+        "markdown" => format_export_markdown(&peri_id, &safe_messages),
+        _ => serde_json::to_string_pretty(&safe_messages)
             .map_err(|error| format!("serialize export failed: {error}"))?,
     };
-    std::fs::write(&output_path, content).map_err(|e| format!("write failed: {}", e))?;
+    write_export_atomically(output, content.as_bytes())?;
     Ok(())
 }
 
@@ -1177,7 +1648,14 @@ pub fn run() {
             HashMap::new()
         }
     };
-    let default_agent_id = agent_config::default_agent_id(&agents).unwrap_or("").to_string();
+    let default_agent_id = match agent_config::default_agent_id(&agents) {
+        Ok(Some(id)) => id,
+        Ok(None) => String::new(),
+        Err(error) => {
+            eprintln!("Pylon agent configuration error: {error}");
+            String::new()
+        }
+    };
     let default_agent = agents.get(&default_agent_id).cloned();
     let agents_for_state = agents;
 
@@ -1189,6 +1667,13 @@ pub fn run() {
         }
     };
     rt.block_on(async {
+        let prism = match PrismClient::from_env() {
+            Ok(client) => client,
+            Err(error) => {
+                eprintln!("Pylon Prism client unavailable: {error}");
+                PrismClient::unavailable(error)
+            }
+        };
         let runtime_logs = runtime_log::RuntimeLogHub::default();
         let (initial_acp, initial_agent_runtime) = match default_agent {
             Some(agent) => match AcpClient::connect_with_logs(&agent, Some(runtime_logs.clone())).await {
@@ -1232,10 +1717,22 @@ pub fn run() {
                 runtime_logs,
                 runtime_mcp: Mutex::new(None),
                 agent_runtime: Arc::new(Mutex::new(initial_agent_runtime)),
+                prism,
             })
             .invoke_handler(tauri::generate_handler![
+                prism_health, prism_status, prism_state, prism_scenarios, prism_sources, prism_aliases, prism_config,
+                prism_logs, prism_chronicle, prism_history, prism_scenario, prism_blocks,
+                prism_inject, prism_command, prism_create_scenario, prism_delete_scenario,
+                prism_create_source, prism_delete_source, prism_source_detail, prism_source_files,
+                prism_read_source_file, prism_write_source_file, prism_delete_source_file,
+                prism_source_entries, prism_source_entry, prism_add_source_entry, prism_edit_source_entry,
+                prism_delete_source_entry,
+                prism_update_config, prism_update_scenario, prism_create_block, prism_update_block,
+                prism_delete_block, prism_add_scenario_block, prism_edit_scenario_block,
+                prism_delete_scenario_block, prism_reorder_scenario_blocks, prism_reload, prism_llm_test,
                 new_session, send_message, set_mode, set_config_option, close_session, cancel_prompt, load_sessions,
                 list_agents, switch_agent, reconnect_agent, agent_status, reload_agents, set_mcp_servers,
+                validate_agents,
                 get_pet, pet_action,
                 load_persisted_session, list_persisted_sessions,
                 export_session,
