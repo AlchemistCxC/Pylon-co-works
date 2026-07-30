@@ -14,7 +14,7 @@ use std::time::Duration;
 use tauri::{Emitter, Manager, Runtime};
 use acp::{AcpClient, PromptWaitOutcome};
 use agent_config::AgentDef;
-use agent_runtime::{notification_matches_session, session_mapping_matches, status_after_connection_failure, AgentLifecycleStatus, AgentRuntimeState};
+use agent_runtime::{notification_is_current, session_mapping_matches, source_for_peri_id_in_generation, status_after_connection_failure, AgentLifecycleStatus, AgentRuntimeState};
 use error::PylonError;
 
 fn emit_event<R, W>(window: &W, event: &str, payload: serde_json::Value)
@@ -255,12 +255,21 @@ fn start_notification_dispatcher(state: &AppState, window: tauri::WebviewWindow)
                 };
                 let (source, session_generation) = {
                     let mut mapped = None;
+                    let mut ambiguous = false;
                     for _ in 0..20 {
-                        mapped = sessions.lock().ok().and_then(|items| items.iter()
-                            .find(|(_, info)| info.peri_id == peri_id)
-                            .map(|(source, info)| (source.clone(), info.generation)));
-                        if mapped.is_some() { break; }
+                        if let Ok(items) = sessions.lock() {
+                            let mappings = items.iter().map(|(source, info)| (source, &info.peri_id, info.generation));
+                            mapped = source_for_peri_id_in_generation(mappings, &peri_id, generation);
+                            ambiguous = items.values()
+                                .filter(|info| info.peri_id == peri_id && info.generation == generation)
+                                .count() > 1;
+                        }
+                        if mapped.is_some() || ambiguous { break; }
                         tokio::time::sleep(Duration::from_millis(5)).await;
+                    }
+                    if ambiguous {
+                        log::warn!("ACP notification rejected: periId {} maps to multiple local sources", peri_id);
+                        continue;
                     }
                     let Some(mapped) = mapped else {
                         log::warn!("ACP notification for unknown session {}", peri_id);
@@ -268,14 +277,15 @@ fn start_notification_dispatcher(state: &AppState, window: tauri::WebviewWindow)
                     };
                     mapped
                 };
-                if !notification_matches_session(
+                if !notification_is_current(
                     &source,
                     &source,
                     &peri_id,
                     &peri_id,
                     generation,
                     session_generation,
-                ) || client_generation.load(Ordering::Acquire) != generation {
+                    client_generation.load(Ordering::Acquire),
+                ) {
                     log::warn!("ACP notification rejected for stale session {}", peri_id);
                     continue;
                 }
@@ -288,6 +298,19 @@ fn start_notification_dispatcher(state: &AppState, window: tauri::WebviewWindow)
                     .and_then(|meta| meta.get("periReplay"))
                     .and_then(|value| value.as_bool())
                     .unwrap_or(false);
+                let mapping_is_current = || {
+                    client_generation.load(Ordering::Acquire) == generation
+                        && sessions.lock().ok().and_then(|items| items.get(&source).map(|session| {
+                            session_mapping_matches(&session.peri_id, session.generation, &peri_id, generation)
+                        })) == Some(true)
+                };
+                if !mapping_is_current() {
+                    log::warn!("ACP notification rejected for stale session {}", peri_id);
+                    continue;
+                }
+                if variant == Some("agent_message_chunk") {
+                    let _ = pet.lock().map(|mut p| pet::on_first_chunk(&mut p));
+                }
                 if variant == Some("user_message_chunk") {
                     if should_forward_user_update(is_replay) {
                         if let Some(text) = update.get("content").and_then(|c| c.get("text")).and_then(|v| v.as_str()) {
@@ -300,12 +323,21 @@ fn start_notification_dispatcher(state: &AppState, window: tauri::WebviewWindow)
                     }
                     continue;
                 }
-                if variant == Some("agent_message_chunk") {
-                    let _ = pet.lock().map(|mut p| pet::on_first_chunk(&mut p));
-                }
+                let mut mapping_current_at_mutation = false;
                 if let Ok(mut items) = sessions.lock() {
-                    if let Some(session) = items.get_mut(&source) {
-                        match variant {
+                    if client_generation.load(Ordering::Acquire) == generation {
+                        if let Some(session) = items.get(&source) {
+                            mapping_current_at_mutation = session_mapping_matches(
+                                &session.peri_id,
+                                session.generation,
+                                &peri_id,
+                                generation,
+                            );
+                        }
+                    }
+                    if mapping_current_at_mutation {
+                        if let Some(session) = items.get_mut(&source) {
+                            match variant {
                             Some("usage_update") => {
                                 session.tokens_total = update.get("used")
                                     .or_else(|| update.get("value"))
@@ -349,6 +381,7 @@ fn start_notification_dispatcher(state: &AppState, window: tauri::WebviewWindow)
                                 }
                             }
                             _ => {}
+                            }
                         }
                     }
                 }
@@ -703,25 +736,19 @@ async fn send_message(
                 log::warn!("cancel timed-out prompt {}: {}", peri_id, cancel_error);
             }
             if response.is_none() {
-                let removed = {
-                    let mut sessions = state.sessions.lock().map_err(|e| e.to_string())?;
-                    if sessions.get(&source).map(|session| {
-                        session_mapping_matches(&session.peri_id, session.generation, &peri_id, prompt_generation)
-                    }) == Some(true) {
-                        sessions.remove(&source)
-                    } else {
-                        None
+                match state.remove_session_if_matches(&source, &peri_id, prompt_generation) {
+                    Ok(true) => {
+                        log::error!(
+                            "cancelled prompt {} did not settle within {}s; removed local session mapping",
+                            peri_id,
+                            acp::CANCEL_SETTLE_TIMEOUT_SECS
+                        );
+                        if let Err(close_error) = state.acp.lock().await.close_session(&peri_id).await {
+                            log::warn!("close unsettled prompt session {}: {}", peri_id, close_error);
+                        }
                     }
-                };
-                if removed.is_some() {
-                    log::error!(
-                        "cancelled prompt {} did not settle within {}s; removed local session mapping",
-                        peri_id,
-                        acp::CANCEL_SETTLE_TIMEOUT_SECS
-                    );
-                    if let Err(close_error) = state.acp.lock().await.close_session(&peri_id).await {
-                        log::warn!("close unsettled prompt session {}: {}", peri_id, close_error);
-                    }
+                    Ok(false) => {}
+                    Err(error) => return Err(error),
                 }
             }
             let error = "timed out after 300s";
@@ -741,8 +768,12 @@ async fn set_mode(state: tauri::State<'_, AppState>, source: String, mode: Strin
     state.acp.lock().await.set_mode(&peri_id, &mode).await?;
     state.ensure_generation(generation)?;
     if let Ok(mut sessions) = state.sessions.lock() {
-        if let Some(session) = sessions.get_mut(&source) {
-            session.mode = Some(mode);
+        if sessions.get(&source).map(|session| {
+            session_mapping_matches(&session.peri_id, session.generation, &peri_id, generation)
+        }) == Some(true) {
+            if let Some(session) = sessions.get_mut(&source) {
+                session.mode = Some(mode);
+            }
         }
     }
     Ok(())
@@ -756,14 +787,18 @@ async fn set_config_option(state: tauri::State<'_, AppState>, source: String, ke
     let response = state.acp.lock().await.set_config_option(&peri_id, &key, &value).await?;
     state.ensure_generation(generation)?;
     if let Ok(mut sessions) = state.sessions.lock() {
-        if let Some(session) = sessions.get_mut(&source) {
-            if let Some(options) = response.get("configOptions").and_then(|value| value.as_array()) {
-                session.config_options = options.clone();
-                session.apply_config_options(options);
-            } else if key == "model" {
-                session.model = value.clone();
-            } else if key == "mode" {
-                session.mode = Some(value.clone());
+        if sessions.get(&source).map(|session| {
+            session_mapping_matches(&session.peri_id, session.generation, &peri_id, generation)
+        }) == Some(true) {
+            if let Some(session) = sessions.get_mut(&source) {
+                if let Some(options) = response.get("configOptions").and_then(|value| value.as_array()) {
+                    session.config_options = options.clone();
+                    session.apply_config_options(options);
+                } else if key == "model" {
+                    session.model = value.clone();
+                } else if key == "mode" {
+                    session.mode = Some(value.clone());
+                }
             }
         }
     }
@@ -777,12 +812,7 @@ async fn close_session(state: tauri::State<'_, AppState>, source: String) -> Res
     let peri_id = state.get_peri_id(&source).map_err(|e| e.to_string())?;
     state.acp.lock().await.close_session(&peri_id).await?;
     state.ensure_generation(generation)?;
-    let mut sessions = state.sessions.lock().map_err(|e| e.to_string())?;
-    if sessions.get(&source).map(|session| {
-        session_mapping_matches(&session.peri_id, session.generation, &peri_id, generation)
-    }) == Some(true) {
-        sessions.remove(&source);
-    }
+    let _ = state.remove_session_if_matches(&source, &peri_id, generation)?;
     Ok(())
 }
 
@@ -821,23 +851,30 @@ async fn replace_agent_client(
     new_acp: AcpClient,
     window: tauri::WebviewWindow,
 ) -> Result<(), String> {
-    let old_generation = state.current_generation();
+    if new_acp.is_crashed() {
+        return Err("new ACP client crashed before activation".to_string());
+    }
+
     let mut old_acp = {
         let mut acp = state.acp.lock().await;
-        std::mem::replace(&mut *acp, new_acp)
-    };
-    let new_generation = state.client_generation.fetch_add(1, Ordering::AcqRel) + 1;
-    if let Some(agent_id) = agent_id {
-        *state.active_agent.lock().map_err(|error| error.to_string())? = agent_id;
-    }
-    if let Ok(mut sessions) = state.sessions.lock() {
+        // 所有可能失败的同步锁都在替换前获取；失败时 new_acp 仍未接管，
+        // 旧 client、generation、active agent 和 sessions 保持不变。
+        let mut active_agent = state.active_agent.lock().map_err(|error| error.to_string())?;
+        let mut sessions = state.sessions.lock().map_err(|error| error.to_string())?;
+        let old_acp = std::mem::replace(&mut *acp, new_acp);
+        let new_generation = state.client_generation.fetch_add(1, Ordering::AcqRel) + 1;
+        set_agent_runtime_status(state, AgentLifecycleStatus::Connected, None);
+        if let Some(agent_id) = agent_id {
+            *active_agent = agent_id;
+        }
         sessions.clear();
-    }
+        log::info!("ACP client activated; generation is now {}", new_generation);
+        old_acp
+    };
     start_notification_dispatcher(state, window);
     if let Err(error) = old_acp.kill() {
         log::warn!("kill replaced agent: {}", error);
     }
-    log::info!("ACP client replaced: generation {} -> {}", old_generation, new_generation);
     Ok(())
 }
 
@@ -906,12 +943,21 @@ fn current_mcp_servers(state: &AppState) -> Result<Vec<mcp::McpServerConfig>, St
 
 #[tauri::command]
 async fn reload_agents(state: tauri::State<'_, AppState>, config_path: Option<String>) -> Result<(), String> {
+    let _lifecycle_guard = state.agent_lifecycle.lock().await;
     let path = config_path
         .or_else(|| agent_config::config_path().map(|path| path.to_string_lossy().into_owned()))
         .ok_or_else(|| "reload_agents requires configPath or PYLON_AGENTS_CONFIG".to_string())?;
     let new_agents = agent_config::load_from_path(std::path::Path::new(&path))?;
+    let active_agent = state.active_agent.lock().map_err(|error| error.to_string())?.clone();
+    if !new_agents.contains_key(&active_agent) {
+        return Err(format!("agent config cannot remove active agent: {active_agent}"));
+    }
+    let agent_count = new_agents.len();
     let mut agents = state.agents.lock().map_err(|e| e.to_string())?;
     *agents = new_agents;
+    log_runtime_summary(&state, "info", "agent", None, "Agent registry reloaded", serde_json::Map::from_iter([
+        ("agentCount".to_string(), serde_json::Value::from(agent_count)),
+    ]));
     Ok(())
 }
 
@@ -985,15 +1031,21 @@ async fn load_persisted_session(
                 return Err(error);
             }
             if let Ok(mut sessions) = state.sessions.lock() {
-                if let Some(session) = sessions.get_mut(&source) {
-                    session.apply_session_response(&response);
+                if sessions.get(&source).map(|session| {
+                    session_mapping_matches(&session.peri_id, session.generation, &peri_id, generation)
+                }) == Some(true) {
+                    if let Some(session) = sessions.get_mut(&source) {
+                        session.apply_session_response(&response);
+                    }
                 }
             }
             Ok(response)
         }
         Err(error) => {
             let mut sessions = state.sessions.lock().map_err(|lock_error| lock_error.to_string())?;
-            if sessions.get(&source).map(|session| (session.peri_id.as_str(), session.generation)) == Some((peri_id.as_str(), generation)) {
+            if sessions.get(&source).map(|session| {
+                session_mapping_matches(&session.peri_id, session.generation, &peri_id, generation)
+            }) == Some(true) {
                 if let Some(previous) = previous {
                     sessions.insert(source.clone(), previous);
                 } else {
