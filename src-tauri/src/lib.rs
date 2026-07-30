@@ -962,17 +962,25 @@ async fn load_persisted_session(
     cwd: Option<String>,
     mcp_servers: Option<Vec<mcp::McpServerConfig>>,
 ) -> Result<serde_json::Value, String> {
+    let _creation_guard = state.session_creation.lock().await;
     let generation = state.current_generation();
     let cwd = cwd.unwrap_or_else(|| state.agent_cwd());
-    state.sessions.lock().map_err(|e| e.to_string())?
-        .insert(source.clone(), SessionInfo::new(peri_id.clone(), String::new(), cwd.clone(), true, generation));
     let mcp_servers = mcp::validate_and_serialize(mcp_servers)?;
-    match state.acp.lock().await.load_session(&peri_id, &cwd, mcp_servers).await {
-        Ok(response) => {
+    let previous = state.sessions.lock().map_err(|e| e.to_string())?
+        .insert(source.clone(), SessionInfo::new(peri_id.clone(), String::new(), cwd.clone(), true, generation));
+    match state.acp.lock().await
+        .load_session_with_replay(&peri_id, &cwd, mcp_servers)
+        .await
+    {
+        Ok((response, _replay)) => {
             if let Err(error) = state.ensure_generation(generation) {
                 let mut sessions = state.sessions.lock().map_err(|lock_error| lock_error.to_string())?;
                 if sessions.get(&source).map(|session| (session.peri_id.as_str(), session.generation)) == Some((peri_id.as_str(), generation)) {
-                    sessions.remove(&source);
+                    if let Some(previous) = previous {
+                        sessions.insert(source.clone(), previous);
+                    } else {
+                        sessions.remove(&source);
+                    }
                 }
                 return Err(error);
             }
@@ -986,7 +994,11 @@ async fn load_persisted_session(
         Err(error) => {
             let mut sessions = state.sessions.lock().map_err(|lock_error| lock_error.to_string())?;
             if sessions.get(&source).map(|session| (session.peri_id.as_str(), session.generation)) == Some((peri_id.as_str(), generation)) {
-                sessions.remove(&source);
+                if let Some(previous) = previous {
+                    sessions.insert(source.clone(), previous);
+                } else {
+                    sessions.remove(&source);
+                }
             }
             Err(error)
         }
@@ -1070,47 +1082,35 @@ async fn export_session(
     format: String,
     output_path: String,
 ) -> Result<(), String> {
+    if !matches!(format.as_str(), "markdown" | "json") {
+        return Err(format!("unsupported export format: {format}"));
+    }
+    if peri_id.trim().is_empty() {
+        return Err("export requires a non-empty session id".to_string());
+    }
+    if output_path.trim().is_empty() {
+        return Err("export requires a non-empty output path".to_string());
+    }
+    let output = std::path::Path::new(&output_path);
+    if output.is_dir() {
+        return Err(format!("export output path is a directory: {}", output.display()));
+    }
+    if let Some(parent) = output.parent() {
+        if !parent.is_dir() {
+            return Err(format!("export output directory does not exist: {}", parent.display()));
+        }
+    }
     let generation = state.current_generation();
     let cwd = state.agent_cwd();
-    let mut broadcast = state.acp.lock().await.rx.resubscribe();
-    let messages: Arc<Mutex<Vec<serde_json::Value>>> = Arc::new(Mutex::new(Vec::new()));
-    let replay_error: Arc<Mutex<Option<String>>> = Arc::new(Mutex::new(None));
-    let msgs = messages.clone();
-    let replay_error_for_task = replay_error.clone();
-    let pid = peri_id.clone();
-    let handle = tokio::spawn(async move {
-        loop {
-            match broadcast.recv().await {
-                Ok(raw) => {
-                    if raw.method.as_deref() == Some(acp::NOTIF_SESSION_UPDATE) {
-                        if let Some(params) = raw.params {
-                            if params.get("sessionId").and_then(|value| value.as_str()) != Some(&*pid) { continue; }
-                            msgs.lock().unwrap().push(params);
-                        }
-                    }
-                }
-                Err(tokio::sync::broadcast::error::RecvError::Lagged(count)) => {
-                    *replay_error_for_task.lock().unwrap() = Some(format!("export replay lagged by {count} messages"));
-                    break;
-                }
-                Err(tokio::sync::broadcast::error::RecvError::Closed) => {
-                    *replay_error_for_task.lock().unwrap() = Some("ACP notification stream closed during export".to_string());
-                    break;
-                }
-            }
-        }
-    });
     let mcp_servers = mcp::validate_and_serialize(Some(current_mcp_servers(&state)?))?;
-    state.acp.lock().await.load_session(&peri_id, &cwd, mcp_servers).await?;
+    let (_, messages) = state.acp.lock().await
+        .load_session_with_replay(&peri_id, &cwd, mcp_servers)
+        .await?;
     state.ensure_generation(generation)?;
-    handle.abort();
-    if let Some(error) = replay_error.lock().map_err(|lock_error| lock_error.to_string())?.take() {
-        return Err(error);
-    }
-    let msgs = messages.lock().map_err(|e| e.to_string())?;
     let content = match format.as_str() {
-        "markdown" => format_export_markdown(&peri_id, &msgs),
-        _ => serde_json::to_string_pretty(&*msgs).map_err(|error| format!("serialize export failed: {error}"))?,
+        "markdown" => format_export_markdown(&peri_id, &messages),
+        _ => serde_json::to_string_pretty(&messages)
+            .map_err(|error| format!("serialize export failed: {error}"))?,
     };
     std::fs::write(&output_path, content).map_err(|e| format!("write failed: {}", e))?;
     Ok(())

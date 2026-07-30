@@ -299,6 +299,7 @@ impl AcpClient {
         match stop_reason {
             "end_turn" | "max_turn_requests" => Ok(stop_reason),
             "cancelled" => Err("prompt cancelled".to_string()),
+            "refusal" => Err("prompt refused by agent".to_string()),
             other => Err(format!("unsupported prompt stopReason: {other}")),
         }
     }
@@ -584,9 +585,72 @@ impl AcpClient {
         })
     }
 
-    /// Load a persisted session. Peri replays history before returning the response.
-    pub async fn load_session(&self, session_id: &str, cwd: &str, mcp_servers: Vec<serde_json::Value>) -> Result<serde_json::Value, String> {
-        self.call_async(METHOD_SESSION_LOAD, Self::load_session_params(session_id, cwd, mcp_servers)).await
+    /// Load a persisted session and collect every replay notification before the response.
+    /// The reader publishes notifications before resolving the response pending entry, so
+    /// observing the matching response on this receiver is the deterministic replay boundary.
+    pub async fn load_session_with_replay(
+        &self,
+        session_id: &str,
+        cwd: &str,
+        mcp_servers: Vec<serde_json::Value>,
+    ) -> Result<(serde_json::Value, Vec<serde_json::Value>), String> {
+        let mut events = self.rx.resubscribe();
+        let id = self.next_id.fetch_add(1, Ordering::Relaxed);
+        let (tx, _rx) = oneshot::channel();
+        {
+            let mut pending = self.pending_shard(id).lock().map_err(|e| e.to_string())?;
+            pending.insert(id, tx);
+        }
+        let request = serde_json::json!({
+            "jsonrpc": "2.0",
+            "id": id,
+            "method": METHOD_SESSION_LOAD,
+            "params": Self::load_session_params(session_id, cwd, mcp_servers),
+        });
+        let line = serde_json::to_string(&request).map_err(|error| {
+            self.remove_pending(id);
+            format!("serialize failed: {error}")
+        })?;
+        if self.write_tx.send(line).await.is_err() {
+            self.remove_pending(id);
+            return Err("ACP connection closed".to_string());
+        }
+
+        let mut replay = Vec::new();
+        loop {
+            let raw = match tokio::time::timeout(std::time::Duration::from_secs(30), events.recv()).await {
+                Ok(Ok(raw)) => raw,
+                Ok(Err(tokio::sync::broadcast::error::RecvError::Lagged(count))) => {
+                    self.remove_pending(id);
+                    return Err(format!("session/load replay lagged by {count} messages"));
+                }
+                Ok(Err(tokio::sync::broadcast::error::RecvError::Closed)) => {
+                    self.remove_pending(id);
+                    return Err("ACP notification stream closed during session/load".to_string());
+                }
+                Err(_) => {
+                    self.remove_pending(id);
+                    return Err("session/load replay timed out after 30s".to_string());
+                }
+            };
+            if raw.method.as_deref() == Some(NOTIF_SESSION_UPDATE)
+                && raw.params.as_ref().and_then(|params| params.get("sessionId")).and_then(|value| value.as_str()) == Some(session_id)
+            {
+                if let Some(params) = raw.params {
+                    replay.push(params);
+                }
+                continue;
+            }
+            if raw.id != Some(id) {
+                continue;
+            }
+            if let Some(error) = raw.error {
+                self.remove_pending(id);
+                return Err(format!("RPC error: {error}"));
+            }
+            self.remove_pending(id);
+            return Ok((raw.result.unwrap_or(serde_json::Value::Null), replay));
+        }
     }
 
     /// P1: List persisted sessions from ThreadStore
@@ -640,13 +704,85 @@ mod tests {
     }
 
     #[test]
+    fn accepts_valid_session_id_after_trimming_whitespace() {
+        let response = serde_json::json!({"sessionId": "  session-42  "});
+        assert_eq!(AcpClient::session_id_from(&response).unwrap(), "session-42");
+    }
+
+    #[test]
     fn validates_prompt_stop_reasons() {
         assert_eq!(
             AcpClient::prompt_stop_reason(&serde_json::json!({"stopReason": "end_turn"})),
             Ok("end_turn")
         );
-        assert!(AcpClient::prompt_stop_reason(&serde_json::json!({"stopReason": "cancelled"})).is_err());
-        assert!(AcpClient::prompt_stop_reason(&serde_json::json!({})).is_err());
+        assert_eq!(
+            AcpClient::prompt_stop_reason(&serde_json::json!({"stopReason": "max_turn_requests"})),
+            Ok("max_turn_requests")
+        );
+        assert_eq!(
+            AcpClient::prompt_stop_reason(&serde_json::json!({"stopReason": "cancelled"}))
+                .expect_err("cancelled must not complete normally"),
+            "prompt cancelled"
+        );
+        assert_eq!(
+            AcpClient::prompt_stop_reason(&serde_json::json!({"stopReason": "refusal"}))
+                .expect_err("refusal must not complete normally"),
+            "prompt refused by agent"
+        );
+        assert_eq!(
+            AcpClient::prompt_stop_reason(&serde_json::json!({"stopReason": "paused"}))
+                .expect_err("unknown stop reason must be rejected"),
+            "unsupported prompt stopReason: paused"
+        );
+        assert_eq!(
+            AcpClient::prompt_stop_reason(&serde_json::json!({}))
+                .expect_err("missing stop reason must be rejected"),
+            "invalid session/prompt response: {}"
+        );
+    }
+
+    #[test]
+    fn prompt_without_attachments_contains_one_text_block() {
+        let blocks = AcpClient::prompt_blocks("hello".to_string(), &[]).unwrap();
+        assert_eq!(blocks, vec![serde_json::json!({"type": "text", "text": "hello"})]);
+    }
+
+    #[test]
+    fn prompt_rejects_more_than_maximum_attachments() {
+        let attachments = vec!["missing.txt".to_string(); MAX_ATTACHMENTS + 1];
+        let error = AcpClient::prompt_blocks("hello".to_string(), &attachments)
+            .expect_err("attachment count limit must be enforced before file access");
+        assert_eq!(error, format!("too many attachments: maximum is {MAX_ATTACHMENTS}"));
+    }
+
+    #[test]
+    fn prompt_rejects_missing_attachment_with_explicit_error() {
+        let error = AcpClient::prompt_blocks(
+            "hello".to_string(),
+            &["definitely-missing-pylon-attachment.txt".to_string()],
+        )
+        .expect_err("missing attachment must fail");
+        assert!(error.starts_with("attachment metadata failed for definitely-missing-pylon-attachment.txt:"));
+    }
+
+    #[test]
+    fn prompt_rejects_directory_attachment() {
+        let directory = std::env::temp_dir().join(format!("pylon-attachment-dir-{}", std::process::id()));
+        std::fs::create_dir_all(&directory).unwrap();
+        let error = AcpClient::prompt_blocks("hello".to_string(), &[directory.to_string_lossy().into_owned()])
+            .expect_err("directory attachment must fail");
+        std::fs::remove_dir_all(&directory).unwrap();
+        assert_eq!(error, format!("attachment is not a file: {}", directory.display()));
+    }
+
+    #[test]
+    fn prompt_rejects_unknown_binary_attachment() {
+        let path = std::env::temp_dir().join(format!("pylon-attachment-binary-{}.bin", std::process::id()));
+        std::fs::write(&path, [0xff, 0xfe, 0xfd]).unwrap();
+        let error = AcpClient::prompt_blocks("hello".to_string(), &[path.to_string_lossy().into_owned()])
+            .expect_err("unknown binary attachment must fail");
+        std::fs::remove_file(&path).unwrap();
+        assert_eq!(error, format!("unsupported attachment type: {}", path.display()));
     }
 
     #[tokio::test]

@@ -9,7 +9,7 @@ const MAX_ARGS: usize = 64;
 const MAX_ENV: usize = 64;
 const MAX_HEADERS: usize = 64;
 
-#[derive(Debug, Clone, Deserialize, Serialize)]
+#[derive(Clone, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct McpServerConfig {
     pub id: Option<String>,
@@ -31,7 +31,7 @@ pub struct McpServerConfig {
     pub disabled: bool,
 }
 
-#[derive(Debug, Clone, Deserialize, Serialize, Default)]
+#[derive(Clone, Deserialize, Serialize, Default)]
 #[serde(rename_all = "camelCase")]
 pub struct OAuthConfig {
     #[serde(default)]
