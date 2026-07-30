@@ -39,6 +39,9 @@
 .cc-status-primary, .cc-status-secondary, .cc-actions {
   display:flex; align-items:center; gap:0; min-width:0;
 }
+.cc-status-secondary { order:1; }
+.cc-status-primary { order:2; }
+.cc-actions { order:3; }
 .cc-command-hint {
   order:4; flex-basis:100%; width:100%; margin-left:0; padding-left:0;
   color:var(--text-dim); font-size:0.86em; font-weight:400; opacity:0.72;

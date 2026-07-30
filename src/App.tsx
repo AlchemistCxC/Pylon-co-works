@@ -1,13 +1,11 @@
 import { useState, useEffect } from 'react'
-import Sidebar from './components/Sidebar'
-import ChatView from './components/chat/ChatView'
-import ControlCenter from './components/ControlCenter'
-import RightPanel from './components/RightPanel'
+import SheetHost from './workspace-sheets/SheetHost'
+import WorkspaceTitlebar from './workspace-sheets/WorkspaceTitlebar'
+import SheetLauncher from './workspace-sheets/SheetLauncher'
 import Settings from './components/Settings'
 import ProfileEditor from './components/ProfileEditor'
-import PrismSheet from './components/PrismSheet'
+import RightPanel from './components/RightPanel'
 import SessionSettings from './components/SessionSettings'
-import PetCompanion from './components/PetCompanion'
 import { useStore } from './store'
 import { belongsToProfile } from './components/chat/sessionProfile'
 import { useShallow } from 'zustand/react/shallow'
@@ -27,10 +25,16 @@ export default function App() {
   const [showProfileEdit, setShowProfileEdit] = useState(false)
   const [sessionSettingsId, setSessionSettingsId] = useState<string | null>(null)
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false)
-  const [activeTab, setActiveTab] = useState<'peri' | 'prism'>('peri')
+  const [showSheetLauncher, setShowSheetLauncher] = useState(false)
   const [runtimeError, setRuntimeError] = useState<RuntimeErrorDetail | null>(null)
   const activeProfileId = useStore(s => s.activeProfileId)
   const sessions = useStore(s => s.sessions)
+  const workspaceSheets = useStore(s => s.workspaceSheets)
+  const agents = useStore(s => s.agents)
+  const agentStatuses = useStore(s => s.agentStatuses)
+  const hydrateWorkspaceSheets = useStore(s => s.hydrateWorkspaceSheets)
+  const setSheetAgentState = useStore(s => s.setSheetAgentState)
+  const activeAgent = useStore(s => s.activeAgent) || 'peri'
 
   useEffect(() => {
     const clearActiveSession = () => setActiveSession(null)
@@ -49,6 +53,21 @@ export default function App() {
   }, [activeProfileId, activeSession, sessions])
 
   useEffect(() => {
+    hydrateWorkspaceSheets()
+  }, [hydrateWorkspaceSheets])
+
+  useEffect(() => {
+    setSheetAgentState(activeAgent, { activeProfileId, activeSessionId: activeSession || undefined })
+  }, [activeAgent, activeProfileId, activeSession, setSheetAgentState])
+
+  useEffect(() => {
+    const activeSheet = workspaceSheets.sheets.find(sheet => sheet.id === workspaceSheets.activeSheetId)
+    if (activeSheet?.kind === 'agent' && activeSheet.agentId === activeAgent) return
+    const agentSheet = workspaceSheets.sheets.find(sheet => sheet.kind === 'agent' && sheet.agentId === activeAgent)
+    if (agentSheet) useStore.getState().focusSheet(agentSheet.id)
+  }, [activeAgent, workspaceSheets])
+
+  useEffect(() => {
     let disposed = false
     const load = () => invoke('list_agents').then((list: any) => {
       if (!disposed) useStore.getState().setAgents(Array.isArray(list) ? list : [])
@@ -62,8 +81,16 @@ export default function App() {
     return () => { disposed = true; unlisten.then(stop => stop()) }
   }, [])
 
-  const activeAgent = useStore(s => s.activeAgent) || 'peri'
-  const agentLabel = activeAgent.charAt(0).toUpperCase() + activeAgent.slice(1)
+  useEffect(() => {
+    const onKeyDown = (event: KeyboardEvent) => {
+      if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === 'p') {
+        event.preventDefault()
+        setShowSheetLauncher(true)
+      }
+    }
+    window.addEventListener('keydown', onKeyDown)
+    return () => window.removeEventListener('keydown', onKeyDown)
+  }, [])
 
   const s = useStore(useShallow(s => ({
     transparency: s.transparency, bgBlur: s.bgBlur,
@@ -109,6 +136,7 @@ export default function App() {
     '--sidebar-bg': s.sidebarBg,
     '--sidebar-bg-image': toCssBackgroundImage(s.sidebarBgImage),
     '--sidebar-width': `${s.sidebarWidth}px`,
+    '--titlebar-sidebar-width': `${sidebarCollapsed ? 42 : s.sidebarWidth}px`,
     '--sidebar-transparency': s.sidebarTransparency,
     '--sidebar-blur': `${s.sidebarBlur}px`,
     '--sidebar-text': s.sidebarTextColor,
@@ -178,25 +206,39 @@ export default function App() {
 
   const appWindow = (() => { try { return getCurrentWindow() } catch { return { minimize() {}, isFullscreen() { return Promise.resolve(false) }, setFullscreen(_v: boolean) { return Promise.resolve() }, destroy() {} } } })()
   const rightPanelInset = rightOpen ? s.rightWidth : 0
+  const profilesOpen = showProfileEdit
+  const settingsOpen = showSettings
 
   return (
     <div className="app" data-ui-scheme={s.uiScheme || 'light'} data-msg-style={s.msgStyle || 'terminal'} data-message-layout={s.messageLayout || 'classic'} data-footer-layout={s.footerLayout || 'free'} data-cli-overflow-mode={s.cliOverflowMode || 'fixed-scroll'} style={cssVars}>
-      <div className="titlebar" data-tauri-drag-region>
-        <button className="titlebar-toggle" onClick={() => setSidebarCollapsed(!sidebarCollapsed)}
-          title={sidebarCollapsed ? '展开左栏' : '收起左栏'}>☰</button>
-        <div className="titlebar-tabs">
-          <button className={`tab ${activeTab === 'peri' ? 'active' : ''}`} onClick={() => setActiveTab('peri')}>{agentLabel}</button>
-          <button className={`tab ${activeTab === 'prism' ? 'active' : ''}`} onClick={() => setActiveTab('prism')}>Prism</button>
-        </div>
-        <div className="titlebar-spacer" />
-        <div className="titlebar-controls">
-          <button onClick={() => setRightOpen(!rightOpen)} title="Panel">&#9776;</button>
-          <button onClick={() => setShowSettings(!showSettings)} title="Settings">&#9881;</button>
-          <button onClick={() => appWindow.minimize()}>─</button>
-          <button onClick={() => appWindow.isFullscreen().then(f => appWindow.setFullscreen(!f))}>⛶</button>
-          <button className="close" onClick={() => appWindow.destroy()}>✕</button>
-        </div>
-      </div>
+      <WorkspaceTitlebar
+        sheets={workspaceSheets.sheets}
+        activeSheetId={workspaceSheets.activeSheetId}
+        activeAgent={activeAgent}
+        agentStatuses={agentStatuses}
+        sidebarCollapsed={sidebarCollapsed}
+        canReopenSheet={workspaceSheets.recentlyClosed.length > 0}
+        onToggleSidebar={() => setSidebarCollapsed(value => !value)}
+        onFocusSheet={id => useStore.getState().focusSheet(id)}
+        onCloseSheet={id => useStore.getState().closeSheet(id)}
+        onOpenSheet={() => setShowSheetLauncher(true)}
+        onReopenSheet={() => useStore.getState().reopenSheet()}
+        onToggleRightPanel={() => setRightOpen(value => !value)}
+        onToggleSettings={() => setShowSettings(value => !value)}
+        onMinimize={() => appWindow.minimize()}
+        onToggleFullscreen={() => appWindow.isFullscreen().then(fullscreen => appWindow.setFullscreen(!fullscreen))}
+        onCloseWindow={() => appWindow.destroy()}
+      />
+      <SheetLauncher
+        open={showSheetLauncher}
+        agents={agents}
+        sheets={workspaceSheets.sheets}
+        onOpenChange={setShowSheetLauncher}
+        onFocusSheet={id => useStore.getState().focusSheet(id)}
+        onOpenSheet={(kind, title, agentId) => useStore.getState().openSheet({ kind, title, agentId })}
+        onOpenSettings={() => setShowSettings(true)}
+        onOpenProfiles={() => setShowProfileEdit(true)}
+      />
 
       {runtimeError && (
         <div className="runtime-error-banner" role="alert">
@@ -207,22 +249,18 @@ export default function App() {
       )}
 
       <div className={`layout ${ccEditMode ? 'cc-editing-app' : ''}`}>
-        <Sidebar activeSession={activeSession} onSelectSession={setActiveSession} onProfileEdit={() => setShowProfileEdit(true)} onSessionSettings={setSessionSettingsId} collapsed={sidebarCollapsed} />
-        <div className="main">
-          <div style={{ display: activeTab === 'prism' ? 'flex' : 'none' }}><PrismSheet /></div>
-          <div className={`main-body ${ccEditMode ? 'blur-bg' : ''}`} style={{
-            display: activeTab === 'prism' ? 'none' : 'flex',
-            '--right-panel-inset': `${rightPanelInset}px`,
-          } as React.CSSProperties}>
-            <ChatView sessionId={activeSession} />
-            <PetCompanion rightInset={rightPanelInset} />
-            <ControlCenter sessionId={activeSession} />
-          </div>
-          {ccEditMode && <div className="cc-edit-overlay" />}
-        </div>
-        {showSettings && <Settings activeSessionId={activeSession} onClose={() => setShowSettings(false)} />}
+        <SheetHost
+          activeSession={activeSession}
+          onSelectSession={setActiveSession}
+          onProfileEdit={() => setShowProfileEdit(true)}
+          onSessionSettings={setSessionSettingsId}
+          sidebarCollapsed={sidebarCollapsed}
+          rightInset={rightPanelInset}
+          ccEditMode={ccEditMode}
+        />
+        {settingsOpen && <Settings activeSessionId={activeSession} onClose={() => setShowSettings(false)} />}
         {rightOpen && <RightPanel sessionId={activeSession} onClose={() => setRightOpen(false)} />}
-        {showProfileEdit && <ProfileEditor onClose={() => setShowProfileEdit(false)} />}
+        {profilesOpen && <ProfileEditor onClose={() => setShowProfileEdit(false)} />}
         {sessionSettingsId && <SessionSettings sessionId={sessionSettingsId} open={!!sessionSettingsId} onClose={() => setSessionSettingsId(null)} onDeleted={() => setActiveSession(null)} />}
       </div>
     </div>

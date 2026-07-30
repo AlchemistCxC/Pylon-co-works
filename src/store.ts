@@ -10,6 +10,10 @@ import { clampCcHeight, resolveVisibleStatusWidgetCount } from './ccHeightState'
 import type { CustomPreset } from './customPresets'
 import { clearSessionSourceState, updateSessionLiveStats } from './components/chat/sessionRuntime'
 import type { SessionLiveStats } from './components/chat/sessionRuntime'
+import { createSheetState, sheetReducer } from './workspace-sheets/sheetState'
+import type { SheetState } from './workspace-sheets/sheetState'
+import { loadSheetState, persistSheetState, type SheetWorkspaceState } from './workspace-sheets/sheetPersistence'
+import type { SheetInput, SheetId } from './workspace-sheets/sheetTypes'
 
 export interface Profile { id: string; name: string; avatar?: string; persona: string; model: string }
 // 后端配置选项（来自 new_session 返回 & config_option_update 事件）
@@ -84,6 +88,7 @@ type ThemeState = ThemeSettings & {
   users: UserMapping[]
   setActiveProfile: (id: string) => void
   addProfile: (p: Profile) => void
+  removeProfile: (id: string) => void
   addSession: (name: string) => void
   removeSession: (id: string) => void
   updateSession: (id: string, partial: Partial<Session>) => void
@@ -130,6 +135,16 @@ type ThemeState = ThemeSettings & {
   setActiveAgent: (id: string) => void
   agentStatuses: Record<string, import('./components/settings/agentTypes').AgentStatus>
   setAgentStatus: (id: string, status: import('./components/settings/agentTypes').AgentStatus) => void
+  workspaceSheets: SheetState
+  sheetAgentStates: Record<string, SheetWorkspaceState>
+  hydrateWorkspaceSheets: (agentIds?: readonly string[]) => void
+  openSheet: (sheet: SheetInput) => SheetId | null
+  focusSheet: (id: SheetId) => void
+  closeSheet: (id: SheetId) => void
+  closeOtherSheets: (id: SheetId) => void
+  closeRightSheets: (id: SheetId) => void
+  reopenSheet: () => SheetId | null
+  setSheetAgentState: (agentId: string, partial: Partial<SheetWorkspaceState>) => void
 }
 
 export const DEFAULTS: ThemeSettings = {
@@ -197,12 +212,30 @@ export const useStore = create<ThemeState>()(persist(
     { id: 'qq:user:unknown', name: '访客' },
   ],
 
-  setActiveProfile: (id) => set(state => ({
-    activeProfileId: state.profiles.some(profile => profile.id === id)
-      ? id
-      : state.activeProfileId,
-  })),
+  setActiveProfile: (id) => set(state => {
+    if (!state.profiles.some(profile => profile.id === id)) return state
+    const activeProfileId = id
+    const sheetAgentStates = {
+      ...state.sheetAgentStates,
+      [state.activeAgent]: { ...state.sheetAgentStates[state.activeAgent], activeProfileId },
+    }
+    persistSheetState(localStorage, { ...state.workspaceSheets, agentStates: sheetAgentStates })
+    return { activeProfileId, sheetAgentStates }
+  }),
   addProfile: (p) => set(s => ({ profiles: [...s.profiles.filter(x => x.id !== p.id), p] })),
+  removeProfile: (id) => set(state => {
+    if (!state.profiles.some(profile => profile.id === id) || state.profiles.length <= 1) return state
+    const profiles = state.profiles.filter(profile => profile.id !== id)
+    const fallbackProfileId = profiles[0].id
+    const sessions = state.sessions.map(session => session.profileId === id ? { ...session, profileId: fallbackProfileId } : session)
+    persistSessions(localStorage, sessions)
+    const sheetAgentStates = Object.fromEntries(Object.entries(state.sheetAgentStates).map(([agentId, sheetState]) => [
+      agentId,
+      sheetState.activeProfileId === id ? { ...sheetState, activeProfileId: fallbackProfileId } : sheetState,
+    ]))
+    persistSheetState(localStorage, { ...state.workspaceSheets, agentStates: sheetAgentStates })
+    return { profiles, sessions, activeProfileId: state.activeProfileId === id ? fallbackProfileId : state.activeProfileId, sheetAgentStates }
+  }),
   addSession: (name) => {
     const profileId = get().activeProfileId
     const now = Date.now()
@@ -225,6 +258,11 @@ export const useStore = create<ThemeState>()(persist(
       sessionConfig: state.sessionConfig,
       generatingSources: state.liveGeneratingSources,
     })
+    const sheetAgentStates = Object.fromEntries(Object.entries(state.sheetAgentStates).map(([agentId, sheetState]) => [
+      agentId,
+      sheetState.activeSessionId === id ? { ...sheetState, activeSessionId: undefined } : sheetState,
+    ]))
+    persistSheetState(localStorage, { ...state.workspaceSheets, agentStates: sheetAgentStates })
     return {
       sessions,
       sessionLiveStats: cleared.sessionLiveStats,
@@ -232,6 +270,7 @@ export const useStore = create<ThemeState>()(persist(
       sessionConfig: cleared.sessionConfig,
       liveGeneratingSources: cleared.generatingSources,
       liveGenerating: cleared.generatingSources[cleared.generatingSources.length - 1] || null,
+      sheetAgentStates,
     }
   }),
   updateSession: (id, partial) => set(s => {
@@ -239,7 +278,7 @@ export const useStore = create<ThemeState>()(persist(
     persistSessions(localStorage, sessions)
     return { sessions }
   }),
-  replaceSessions: (sessions) => set(() => {
+  replaceSessions: (sessions: Session[]) => set(() => {
     persistSessions(localStorage, sessions)
     return { sessions }
   }),
@@ -403,10 +442,67 @@ export const useStore = create<ThemeState>()(persist(
 
   agents: [],
   activeAgent: 'peri',
-  setAgents: (a) => set({ agents: a }),
-  setActiveAgent: (id) => set({ activeAgent: id }),
+  setAgents: (a) => set(state => {
+    const workspaceSheets = loadSheetState(localStorage, a.map(agent => agent.id))
+    return { agents: a, workspaceSheets, sheetAgentStates: workspaceSheets.agentStates }
+  }),
+  setActiveAgent: (id) => set(state => {
+    const agentState = state.sheetAgentStates[id]
+    return {
+      activeAgent: id,
+      ...(agentState?.activeProfileId ? { activeProfileId: agentState.activeProfileId } : {}),
+    }
+  }),
   agentStatuses: {},
   setAgentStatus: (id, status) => set(state => ({ agentStatuses: { ...state.agentStatuses, [id]: status } })),
+  workspaceSheets: createSheetState(),
+  sheetAgentStates: {},
+  hydrateWorkspaceSheets: (agentIds) => set(() => {
+    const workspaceSheets = loadSheetState(localStorage, agentIds)
+    return { workspaceSheets, sheetAgentStates: workspaceSheets.agentStates }
+  }),
+  openSheet: (sheet) => {
+    const state = get()
+    const workspaceSheets = sheetReducer(state.workspaceSheets, { type: 'open', sheet, now: Date.now() })
+    set({ workspaceSheets })
+    persistSheetState(localStorage, { ...workspaceSheets, agentStates: state.sheetAgentStates })
+    return workspaceSheets.activeSheetId
+  },
+  focusSheet: (id) => set(state => {
+    const workspaceSheets = sheetReducer(state.workspaceSheets, { type: 'focus', id, now: Date.now() })
+    persistSheetState(localStorage, { ...workspaceSheets, agentStates: state.sheetAgentStates })
+    return { workspaceSheets }
+  }),
+  closeSheet: (id) => set(state => {
+    const workspaceSheets = sheetReducer(state.workspaceSheets, { type: 'close', id, now: Date.now() })
+    persistSheetState(localStorage, { ...workspaceSheets, agentStates: state.sheetAgentStates })
+    return { workspaceSheets }
+  }),
+  closeOtherSheets: (id) => set(state => {
+    const workspaceSheets = sheetReducer(state.workspaceSheets, { type: 'closeOthers', id, now: Date.now() })
+    persistSheetState(localStorage, { ...workspaceSheets, agentStates: state.sheetAgentStates })
+    return { workspaceSheets }
+  }),
+  closeRightSheets: (id) => set(state => {
+    const workspaceSheets = sheetReducer(state.workspaceSheets, { type: 'closeRight', id, now: Date.now() })
+    persistSheetState(localStorage, { ...workspaceSheets, agentStates: state.sheetAgentStates })
+    return { workspaceSheets }
+  }),
+  reopenSheet: () => {
+    const state = get()
+    const workspaceSheets = sheetReducer(state.workspaceSheets, { type: 'reopen', now: Date.now() })
+    set({ workspaceSheets })
+    persistSheetState(localStorage, { ...workspaceSheets, agentStates: state.sheetAgentStates })
+    return workspaceSheets.activeSheetId
+  },
+  setSheetAgentState: (agentId, partial) => set(state => {
+    const sheetAgentStates = {
+      ...state.sheetAgentStates,
+      [agentId]: { ...state.sheetAgentStates[agentId], ...partial },
+    }
+    persistSheetState(localStorage, { ...state.workspaceSheets, agentStates: sheetAgentStates })
+    return { sheetAgentStates }
+  }),
 }),
 { name: 'pylon-theme', version: PROFILE_SCHEMA_VERSION, migrate: persisted => {
   const state = (persisted || {}) as Partial<ThemeState>
@@ -460,6 +556,6 @@ export const useStore = create<ThemeState>()(persist(
   )
   return { ...state, ...normalized } as ThemeState
 }, partialize: (state) => {
-  const { sessions, sessionsHydrated, users, ccEditMode, setActiveProfile, addProfile, addSession, removeSession, updateSession, replaceSessions, setSessionPeriId, restoreSessions, hydrateSessions, getUser, updateTheme, setCcEditMode, setCcHeight, updateCcPosition, updateCcPlacement, resetCcLayout, setCcHidden, setCcScale, setLiveStats, liveCommands, sessionLiveStats, setSessionLiveStats, clearSessionRuntime, sessionConfig, setSessionConfig, sessionModes, setSessionMode, liveTokensUsed, liveTokensMax, liveCacheReadTokens, liveMode, livePrismOn, liveGenerating, liveGeneratingSources, agents, setAgents, setActiveAgent, agentStatuses, setAgentStatus, applyZonePreset, setZoneField, setGlobalPreset, saveCustomPreset, applyCustomPreset, removeCustomPreset, presets, dirty, ...persisted } = state as any
+  const { sessions, sessionsHydrated, users, ccEditMode, setActiveProfile, addProfile, removeProfile, addSession, removeSession, updateSession, replaceSessions, setSessionPeriId, restoreSessions, hydrateSessions, getUser, updateTheme, setCcEditMode, setCcHeight, updateCcPosition, updateCcPlacement, resetCcLayout, setCcHidden, setCcScale, setLiveStats, liveCommands, sessionLiveStats, setSessionLiveStats, clearSessionRuntime, sessionConfig, setSessionConfig, sessionModes, setSessionMode, liveTokensUsed, liveTokensMax, liveCacheReadTokens, liveMode, livePrismOn, liveGenerating, liveGeneratingSources, agents, setAgents, setActiveAgent, agentStatuses, setAgentStatus, workspaceSheets, sheetAgentStates, hydrateWorkspaceSheets, openSheet, focusSheet, closeSheet, closeOtherSheets, closeRightSheets, reopenSheet, setSheetAgentState, applyZonePreset, setZoneField, setGlobalPreset, saveCustomPreset, applyCustomPreset, removeCustomPreset, presets, dirty, ...persisted } = state as any
   return persisted
 }, onRehydrateStorage: () => state => state?.hydrateSessions()}))

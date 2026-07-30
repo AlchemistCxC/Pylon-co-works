@@ -8,13 +8,14 @@ type LegacyState = Record<string, unknown> & {
 }
 
 const store = readFileSync(new URL('../src/store.ts', import.meta.url), 'utf8')
+const migration = readFileSync(new URL('../src/themeMigration.ts', import.meta.url), 'utf8')
 
 assert.equal(/ccLayout:\s*cloneCcLayout\(DEFAULT_CC_LAYOUT\)/.test(store), true, '默认状态必须保留 v3 context 布局')
 assert.equal(/ccSizes:\s*\{/.test(store), false, '默认状态不得继续保存废弃尺寸字段')
-assert.equal(/delete\s+\(state\s+as\s+Record<string, unknown>\)\.ccSizes/.test(store), true, '迁移必须删除废弃 ccSizes')
-assert.equal(/state\.ccPositions\s*=\s*normalizeCcPositions\(/.test(store), true, '迁移必须 normalize ccPositions')
-assert.equal(/state\.ccLayout\s*=\s*normalizeCcLayout\(/.test(store), true, '迁移必须保留并 normalize ccLayout')
-assert.equal(/state\.ccLayoutVersion\s*=\s*CC_LAYOUT_SCHEMA_VERSION/.test(store), true, '迁移必须写入当前布局 schema 版本')
+assert.equal(/delete\s+state\.ccSizes/.test(migration), true, '迁移必须删除废弃 ccSizes')
+assert.equal(/normalized\.ccPositions\s*=\s*normalizeCcPositions\(/.test(migration), true, '迁移必须 normalize ccPositions')
+assert.equal(/normalized\.ccLayout\s*=\s*normalizeCcLayout\(/.test(migration), true, '迁移必须保留并 normalize ccLayout')
+assert.equal(/normalized\.ccLayoutVersion\s*=/.test(migration), true, '迁移必须写入当前布局 schema 版本')
 assert.equal(/ccPositions:\s*Record<string/.test(store), true, 'ccPositions 类型字段必须存在')
 assert.equal(/ccHidden:\s*string\[\]/.test(store), true, 'ccHidden 类型字段必须存在')
 

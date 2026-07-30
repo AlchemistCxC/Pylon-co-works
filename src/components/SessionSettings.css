@@ -2,6 +2,43 @@
   width:min(760px,calc(100vw - 32px)); max-width:760px;
   max-height:min(88vh,860px); display:flex; flex-direction:column;
 }
+.app[data-ui-scheme="dark"] .session-settings {
+  --session-settings-surface: #12141d;
+  --session-settings-raised: #1d202b;
+  --session-settings-subtle: #252936;
+  --session-settings-border: rgba(255,255,255,0.16);
+  --session-settings-text: rgba(255,255,255,0.92);
+  background: var(--session-settings-surface);
+  color: var(--session-settings-text);
+}
+body[data-ui-scheme="dark"] .session-settings {
+  --session-settings-surface: #12141d;
+  --session-settings-raised: #1d202b;
+  --session-settings-subtle: #252936;
+  --session-settings-border: rgba(255,255,255,0.16);
+  --session-settings-text: rgba(255,255,255,0.92);
+  background: var(--session-settings-surface);
+  color: var(--session-settings-text);
+}
+.app[data-ui-scheme="dark"] .session-settings .session-settings-section,
+.app[data-ui-scheme="dark"] .session-settings .session-settings-advanced,
+.app[data-ui-scheme="dark"] .session-settings .session-settings-danger,
+body[data-ui-scheme="dark"] .session-settings .session-settings-section,
+body[data-ui-scheme="dark"] .session-settings .session-settings-advanced,
+body[data-ui-scheme="dark"] .session-settings .session-settings-danger {
+  border-color: var(--session-settings-border);
+  background: var(--session-settings-raised);
+}
+.app[data-ui-scheme="dark"] .session-settings .sess-field input,
+.app[data-ui-scheme="dark"] .session-settings .sess-field select,
+.app[data-ui-scheme="dark"] .session-settings .sess-field textarea,
+body[data-ui-scheme="dark"] .session-settings .sess-field input,
+body[data-ui-scheme="dark"] .session-settings .sess-field select,
+body[data-ui-scheme="dark"] .session-settings .sess-field textarea {
+  background: var(--session-settings-subtle);
+  border-color: var(--session-settings-border);
+  color: var(--session-settings-text);
+}
 .session-settings-header { flex:0 0 auto; }
 .session-settings-body {
   min-height:0; overflow-y:auto; padding:22px 24px 28px;

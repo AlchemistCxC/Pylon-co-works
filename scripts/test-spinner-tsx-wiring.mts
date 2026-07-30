@@ -46,10 +46,10 @@ assert.match(footer, /setInterval\([\s\S]*?Math\.max\(40, Math\.min\(1000, spinn
 assert.match(footer, /frameAt\(frames, elapsedMs, spinnerIntervalMs\)/)
 
 // GenerationFooter frame/custom marker parsing and terminal-state color isolation.
-assert.match(footer, /summary\.completedFrame \|\| \(summary\.reason === 'cancelled'/)
-assert.match(footer, /resolveSpinnerMarker\(frames, spinnerCancelledMarkerMode, spinnerCancelledMarker\)/)
-assert.match(footer, /resolveSpinnerMarker\(frames, spinnerErrorMarkerMode, spinnerErrorMarker\)/)
-assert.match(footer, /resolveSpinnerMarker\(frames, spinnerDoneMarkerMode, spinnerDoneMarker\)/)
+assert.doesNotMatch(footer, /summary\.completedFrame \|\|/)
+assert.match(footer, /resolveSpinnerMarker\(\s*frames,\s*summary\.reason === 'cancelled'[\s\S]*?spinnerCancelledMarkerMode[\s\S]*?spinnerCancelledMarker/s)
+assert.match(footer, /resolveSpinnerMarker\(\s*frames,\s*summary\.reason === 'cancelled'[\s\S]*?spinnerErrorMarkerMode[\s\S]*?spinnerErrorMarker/s)
+assert.match(footer, /resolveSpinnerMarker\(\s*frames,\s*summary\.reason === 'cancelled'[\s\S]*?spinnerDoneMarkerMode[\s\S]*?spinnerDoneMarker/s)
 const terminalFrame = footer.match(/<span className="term-summary-frame"[\s\S]*?<\/span>/)?.[0] ?? ''
 assert.ok(terminalFrame, '应存在终止态 marker')
 assert.doesNotMatch(terminalFrame, /spinnerColor/, '终止态 marker 不得复用运行中 spinnerColor')

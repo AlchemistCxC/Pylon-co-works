@@ -95,7 +95,7 @@ for (const symbol of ['resolveSpinnerFrames', 'frameAt', 'resolveSpinnerMarker']
   check(new RegExp(`export function ${symbol}\\b`).test(spinnerFrames), `spinnerFrames missing ${symbol}`)
 }
 check(/frameAt\(frames, elapsedMs, spinnerIntervalMs\)/.test(footer), 'GenerationFooter does not use spinner frame timing')
-check(/resolveSpinnerMarker\(frames, spinner.*MarkerMode, spinner.*Marker\)/s.test(footer), 'GenerationFooter does not resolve terminal markers from settings')
+check(/resolveSpinnerMarker\(\s*frames,\s*summary\.reason === 'cancelled'/s.test(footer), 'GenerationFooter does not resolve terminal markers from settings')
 
 if (failures.length > 0) {
   console.error(`[spinner-contract] FAIL (${failures.length} contract gaps)`)

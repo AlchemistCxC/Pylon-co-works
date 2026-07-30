@@ -208,7 +208,6 @@ export default function Settings({ onClose, activeSessionId }: { onClose?: () =>
           liveGenerating: null,
           liveGeneratingSources: [],
         })
-        useStore.getState().replaceSessions([])
         setActiveAgent(agentId)
         window.dispatchEvent(new CustomEvent('pylon:agent-switched'))
       },
