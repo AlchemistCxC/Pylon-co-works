@@ -93,7 +93,7 @@ export const GLOBAL_PRESETS: GlobalPreset[] = [
       chatTextColor: '#FFFFFF', chatCodeColor: '#FFC107', chatCodeBg: 'transparent',
       toolOk: '#4EBA65', toolRun: '#93A5FF', toolErr: '#FF6B80',
       toolNameColor: '#4EBA65', toolSummaryColor: '#999999',
-      userTagBg: '#373737', userTagText: '#FFFFFF',
+      userTagBg: 'transparent', userTagText: '#FFFFFF',
       toolIndicator: '●', toolIndicatorGlow: 0, toolIndicatorGlowColor: '',
       toolConnectorMode: 'none', toolConnectorColor: '#505050',
       sparkles: '✳✴✵✶✷✸✹✺✻✼❃❊✼✻✺✸', spinnerColor: '#D77757', spinnerSize: 14,

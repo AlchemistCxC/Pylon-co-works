@@ -434,7 +434,7 @@ const ChatView = React.memo(function ChatView({ sessionId, rightOpen = false, ri
             >
               {msg.role === 'tool' && <ToolCard name={msg.toolName!} input={msg.toolInput} output={msg.toolOutput} outputLines={msg.toolOutputLines} status={msg.toolStatus} />}
               {msg.role === 'user' && <UserLine sender={msg.sender} content={msg.content} />}
-              {msg.role === 'reasoning' && <ReasoningBlock text={msg.content} />}
+              {msg.role === 'reasoning' && <ReasoningBlock text={msg.content} running={msg.running === true} />}
               {msg.role === 'assistant' && <AssistantContent text={msg.content} />}
             </motion.div>
           ))}
@@ -539,11 +539,13 @@ function CodeBlock({ language, code }: { language?: string; code: string }) {
   )
 }
 
-function ReasoningBlock({ text }: { text: string }) {
+function ReasoningBlock({ text, running }: { text: string; running: boolean }) {
   const [open, setOpen] = useState(false)
+  const characterCount = Array.from(text).length
+  const label = running ? 'Thinking…' : `Thought for ${characterCount} chars`
   return (
     <div className="term-reasoning">
-      <button className="term-reasoning-head" type="button" onClick={() => setOpen(!open)} aria-expanded={open}>∴ Thinking…</button>
+      <button className="term-reasoning-head" type="button" onClick={() => setOpen(!open)} aria-expanded={open}>{label}</button>
       {open && <div className="term-reasoning-body">{text.split('\n').map((line, i) => <div key={i} className="term-reasoning-line">{line || '\u00a0'}</div>)}</div>}
     </div>
   )

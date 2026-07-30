@@ -7,7 +7,10 @@ const css = readFileSync(new URL('../src/components/chat/ChatView.css', import.m
 
 assert.equal(app.includes("s.activePreset?.[zone] === 'claude' && !s.dirty?.[zone]"), true)
 assert.equal(app.includes('data-active-preset={activeVisualPreset}'), true)
-assert.equal(tsx.includes('∴ Thinking…'), true)
+assert.equal(tsx.includes("running ? 'Thinking…' : `Thought for ${characterCount} chars`"), true)
+assert.equal(tsx.includes('∴ Thinking…'), false)
+assert.equal(tsx.includes('Array.from(text).length'), true)
+assert.equal(tsx.includes('<ReasoningBlock text={msg.content} running={msg.running === true} />'), true)
 assert.equal(tsx.includes('aria-expanded={open}'), true)
 assert.equal(css.includes('.app[data-active-preset="claude"] .term-row { margin:0 0 1em; }'), true)
 assert.equal(css.includes('background:var(--user-tag-bg, #373737)'), true)
