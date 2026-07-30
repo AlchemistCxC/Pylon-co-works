@@ -4,6 +4,15 @@
 仓库：`G:\Project\prism-desktop`
 技术栈：Tauri v2 + Rust + React 19 + TypeScript + Zustand
 
+## 主控入口
+
+如果你是负责规划、自动化迁移、集成和 checkpoint 的主控会话，而不是 Backend/Frontend Worker，先读取：
+
+1. `.agents/ORCHESTRATOR_HANDOFF.md`
+2. `.agents/KANBAN_AUTOMATION_DESIGN.md`
+
+不要运行 Backend/Frontend bootstrap 领取产品开发任务。
+
 ## 启动规则
 
 不要进入仓库后直接扫描全仓库或完整读取大文件。

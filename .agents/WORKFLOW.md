@@ -1,5 +1,16 @@
 # 双 Lane 自动接力工作流
 
+## 原生 Kanban 迁移
+
+当前自研 JSON queue/bootstrap 是已运行的第一版。下一阶段设计为迁移到 Hermes 原生 Kanban Dispatcher，避免自建进程 Supervisor 和双运行时状态真值。
+
+主控接管入口：
+
+- `.agents/ORCHESTRATOR_HANDOFF.md`
+- `.agents/KANBAN_AUTOMATION_DESIGN.md`
+
+迁移未灰度通过前，本文件以下旧流程仍用于解释现有状态；不要让旧 queue 与 Kanban 同时分发新任务。
+
 ## 角色
 
 - Backend Lane：`src-tauri/**`、`agents.yaml`、Rust fixture/harness、后端手册。
