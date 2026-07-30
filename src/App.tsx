@@ -97,8 +97,6 @@ export default function App() {
     spinnerColor: s.spinnerColor, spinnerSize: s.spinnerSize,
     rightBg: s.rightBg, rightBgImage: s.rightBgImage, rightWidth: s.rightWidth,
     rightTransparency: s.rightTransparency, rightBlur: s.rightBlur,
-    activePreset: s.activePreset,
-    dirty: s.dirty,
   })))
 
   const cssVars = {
@@ -165,9 +163,6 @@ export default function App() {
   } as React.CSSProperties
 
   const ccEditMode = useStore(s => s.ccEditMode)
-  const activeVisualPreset = ['global', 'chat', 'cc'].every(zone => s.activePreset?.[zone] === 'claude' && !s.dirty?.[zone])
-    ? 'claude'
-    : ''
   const u = useStore(s => s.updateTheme)
 
   // body::before 玻璃层挂在 <body> 上，读不到 .app 子元素的 CSS 变量 —
@@ -182,9 +177,10 @@ export default function App() {
   }, [s.globalBgColor, s.globalBgImage, s.transparency, s.bgBlur, s.uiScheme])
 
   const appWindow = (() => { try { return getCurrentWindow() } catch { return { minimize() {}, isFullscreen() { return Promise.resolve(false) }, setFullscreen(_v: boolean) { return Promise.resolve() }, destroy() {} } } })()
+  const rightPanelInset = rightOpen ? s.rightWidth : 0
 
   return (
-    <div className="app" data-ui-scheme={s.uiScheme || 'light'} data-msg-style={s.msgStyle || 'terminal'} data-message-layout={s.messageLayout || 'classic'} data-footer-layout={s.footerLayout || 'free'} data-cli-overflow-mode={s.cliOverflowMode || 'fixed-scroll'} data-active-preset={activeVisualPreset} style={cssVars}>
+    <div className="app" data-ui-scheme={s.uiScheme || 'light'} data-msg-style={s.msgStyle || 'terminal'} data-message-layout={s.messageLayout || 'classic'} data-footer-layout={s.footerLayout || 'free'} data-cli-overflow-mode={s.cliOverflowMode || 'fixed-scroll'} style={cssVars}>
       <div className="titlebar" data-tauri-drag-region>
         <button className="titlebar-toggle" onClick={() => setSidebarCollapsed(!sidebarCollapsed)}
           title={sidebarCollapsed ? '展开左栏' : '收起左栏'}>☰</button>
@@ -214,10 +210,13 @@ export default function App() {
         <Sidebar activeSession={activeSession} onSelectSession={setActiveSession} onProfileEdit={() => setShowProfileEdit(true)} onSessionSettings={setSessionSettingsId} collapsed={sidebarCollapsed} />
         <div className="main">
           <div style={{ display: activeTab === 'prism' ? 'flex' : 'none' }}><PrismSheet /></div>
-          <div className={`main-body ${ccEditMode ? 'blur-bg' : ''}`} style={{ display: activeTab === 'prism' ? 'none' : 'flex' }}>
-            <ChatView sessionId={activeSession} rightOpen={rightOpen} rightWidth={s.rightWidth} />
-            <PetCompanion rightOpen={rightOpen} rightWidth={s.rightWidth} />
-            <ControlCenter sessionId={activeSession} rightOpen={rightOpen} rightWidth={s.rightWidth} />
+          <div className={`main-body ${ccEditMode ? 'blur-bg' : ''}`} style={{
+            display: activeTab === 'prism' ? 'none' : 'flex',
+            '--right-panel-inset': `${rightPanelInset}px`,
+          } as React.CSSProperties}>
+            <ChatView sessionId={activeSession} />
+            <PetCompanion rightInset={rightPanelInset} />
+            <ControlCenter sessionId={activeSession} />
           </div>
           {ccEditMode && <div className="cc-edit-overlay" />}
         </div>

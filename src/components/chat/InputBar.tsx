@@ -13,9 +13,10 @@ import { beginCancel, createCancelState, rejectCancelCommand, resolveCancelComma
 import { reportRuntimeError } from '../../runtimeError'
 import { Paperclip, ArrowUp, Square } from 'lucide-react'
 import type { AvailableCommand } from './acpTypes'
+import { resolveCliTextareaLayout, resolveDefaultTextareaHeight } from './inputOverflowState'
 import './InputBar.css'
 
-interface Props { sessionId: string | null; split?: boolean }
+interface Props { sessionId: string | null; split?: boolean; ariaDescribedBy?: string }
 
 const EMPTY_COMMANDS: readonly AvailableCommand[] = Object.freeze([])
 
@@ -28,7 +29,7 @@ const FALLBACK_COMMANDS = [
   { cmd: '/mode', args: ' <default|edit|auto|bypass>', info: '切换权限模式' },
 ]
 
-export default forwardRef<{ send: () => void; attachFile: () => void; cancel: () => void }, Props>(function InputBar({ sessionId, split }, ref) {
+export default forwardRef<{ send: () => void; attachFile: () => void; cancel: () => void }, Props>(function InputBar({ sessionId, split, ariaDescribedBy }, ref) {
   const [value, setValue] = useState('')
   const [cmdIdx, setCmdIdx] = useState(0)
   const [sendError, setSendError] = useState('')
@@ -39,6 +40,7 @@ export default forwardRef<{ send: () => void; attachFile: () => void; cancel: ()
   const sessions = useStore(s => s.sessions)
   const addSession = useStore(s => s.addSession)
   const inputMode = useStore(s => s.inputMode)
+  const cliOverflowMode = useStore(s => s.cliOverflowMode || 'fixed-scroll')
   const sessionSource = useStore(s => resolveSessionSource(sessionId, s.sessions))
   const liveCommands = useStore(state => sessionSource
     ? (state.sessionLiveStats[sessionSource]?.commands ?? EMPTY_COMMANDS)
@@ -67,11 +69,19 @@ export default forwardRef<{ send: () => void; attachFile: () => void; cancel: ()
   const filtered = isCmd ? COMMANDS.filter((c: typeof COMMANDS[number]) => c.cmd.startsWith(value.split(' ')[0])) : []
 
   useEffect(() => {
-    if (textareaRef.current) {
-      textareaRef.current.style.height = 'auto'
-      textareaRef.current.style.height = Math.min(textareaRef.current.scrollHeight, 200) + 'px'
+    const textarea = textareaRef.current
+    if (!textarea) return
+    textarea.style.height = 'auto'
+    if (inputMode !== 'cli') {
+      textarea.style.height = `${resolveDefaultTextareaHeight(textarea.scrollHeight)}px`
+      textarea.style.overflowY = textarea.scrollHeight > 200 ? 'auto' : 'hidden'
+      return
     }
-  }, [value])
+    const layout = resolveCliTextareaLayout(textarea.scrollHeight, cliOverflowMode)
+    textarea.style.height = `${layout.height}px`
+    textarea.style.overflowY = layout.overflowY
+    textarea.dataset.expanded = String(layout.expanded)
+  }, [value, inputMode, cliOverflowMode])
 
   useEffect(() => {
     const onModelError = (event: Event) => {
@@ -271,7 +281,7 @@ export default forwardRef<{ send: () => void; attachFile: () => void; cancel: ()
   }
 
   return (
-    <div className={`input-bar ${inputMode === 'cli' ? 'cli-mode' : ''}`}>
+    <div className={`input-bar ${inputMode === 'cli' ? 'cli-mode' : ''} cli-overflow-${cliOverflowMode}`}>
       {sendError && <div className="input-error">{sendError}</div>}
       {attached.length > 0 && (
         <div className="attached-files">
@@ -303,6 +313,7 @@ export default forwardRef<{ send: () => void; attachFile: () => void; cancel: ()
         <textarea ref={textareaRef} className="input-textarea" value={value}
           onChange={e => { setValue(e.target.value); setCmdIdx(0) }}
           onKeyDown={onKey}
+          aria-describedby={ariaDescribedBy}
           placeholder={inputMode === 'cli' ? '' : '输入消息...（Enter 发送，Shift+Enter 换行，/ 命令）'}
           rows={1} />
         {!split && (

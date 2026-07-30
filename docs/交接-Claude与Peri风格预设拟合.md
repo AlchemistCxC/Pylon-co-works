@@ -930,3 +930,652 @@ C-ENHANCE-08  窄屏、ARIA、reduced motion
 ```
 
 实施时每项独立闭环，不把共享 `store.ts`、`App.tsx`、`ControlCenter.tsx` 的任务并行修改；未经用户授权不 commit，不修改 `src-tauri/`。
+
+## 16. 2026-07-30 第二轮接手交接快照
+
+本节是本轮接手后的最新快照，优先级高于前文历史状态。交接文档中的旧行号、旧 HEAD 和旧验证输出均不得直接作为当前事实。
+
+### 16.1 当前 Git 基线
+
+```text
+项目：G:\Project\prism-desktop
+分支：main
+HEAD：d1568f17dd1bc23bcc7d196bba7365100c2e4e01
+HEAD 摘要：docs(backend): 完成 Pylon 后端全量交接
+```
+
+已提交的本轮相关前端 commit：
+
+```text
+fbfae2b feat(chat): 完善 Thinking 完成态显示
+a8c863f feat(ui): 建立参数化 Footer 布局契约
+```
+
+当前工作区不是干净状态。必须保留、不得覆盖或纳入前端提交的外部改动：
+
+```text
+src-tauri/build.rs
+src-tauri/src/agent_config.rs
+src-tauri/src/agent_runtime.rs
+src-tauri/src/lib.rs
+src-tauri/tests-harness/windows-test-manifest.rc
+src-tauri/tests/windows-test-manifest.rc
+src-tauri/loader-error.txt
+docs/功能开发清单（后端）.md
+docs/验收清单.md
+docs/视觉重整.md
+docs/后端交接清单.md
+docs/后端功能任务清单.md
+references/
+```
+
+禁止使用：
+
+```text
+git add .
+git add -A
+reset
+restore
+stash
+clean
+```
+
+### 16.2 本轮已完成并提交
+
+#### C-PRESET-01 / C-INFO-02 / C-FOOTER-03 / C-PRESET-04
+
+前文第 13、14 节记录的实现已存在于当前提交历史，主要包括：
+
+- Claude 显示名为 `Claude 风格`，内部 ID 仍为 `claude`。
+- Claude 默认用户消息背景已改为透明。
+- Thinking 运行中显示 `Thinking…`，结束后显示 `Thought for N chars`。
+- Claude 消息默认层级、Tool 标题、Thinking 折叠和 Footer 基础结构已接入。
+- InputBar 上下双横线继续由 InputBar 自身负责。
+
+Thinking 完成态当前按 `Array.from(text).length` 计算字符数；这是真实当前实现，不是规划状态。
+
+#### C-ENHANCE-01：布局模式字段闭环
+
+已完成并包含在 commit `a8c863f`：
+
+```ts
+messageLayout: 'classic' | 'claude' | 'bubble'
+footerLayout: 'free' | 'peri'
+cliOverflowMode: 'fixed-scroll' | 'grow' | 'overlay'
+```
+
+已接入：
+
+- `ThemeSettings`
+- `DEFAULTS`
+- migration normalize
+- `ZONE_FIELDS`
+- custom preset 白名单
+- 内建预设
+- App 根节点 `data-message-layout` / `data-footer-layout` / `data-cli-overflow-mode`
+- Settings 控件
+
+Claude 默认值：
+
+```ts
+messageLayout: 'claude'
+footerLayout: 'peri'
+cliOverflowMode: 'fixed-scroll'
+```
+
+#### C-ENHANCE-02：Peri Footer 显式行结构
+
+已完成并包含在 commit `a8c863f`：
+
+- `footerLayout=peri` 使用显式 `cc-footer`。
+- InputBar 为 composer 区。
+- `cc-footer-status-row` 为 Footer Row 1。
+- 快捷键提示为 Footer Row 2。
+- Row 1 继续复用 Widget registry、slot、order、offset、hidden、variant 和 scale。
+- `footerLayout=free` 保留原有布局路径。
+
+#### C-ENHANCE-03：动态最低高度
+
+已完成并包含在 commit `a8c863f`：
+
+新增：
+
+```text
+src/ccHeightState.ts
+```
+
+纯函数：
+
+```ts
+resolveVisibleStatusWidgetCount(...)
+resolveCcMinHeight(...)
+clampCcHeight(...)
+```
+
+已接入 ControlCenter、Settings、`setCcHeight()` 和 persist migration。当前最低高度不再由单一固定 `64px` / `76px` / `80px` 猜测，而由输入模式、Footer、hint、可见 Widget 和 overflow 模式共同决定。
+
+### 16.3 已完成但尚未提交：C-ENHANCE-04
+
+目标：实现三种多行输入策略。
+
+当前未提交文件：
+
+```text
+src/components/chat/InputBar.tsx
+src/components/chat/InputBar.css
+src/components/chat/inputOverflowState.ts
+src/components/ControlCenter.css
+scripts/test-input-overflow-state.mts
+scripts/test-layout-mode-contract.mts
+```
+
+当前行为：
+
+```text
+fixed-scroll
+- 输入区固定单行高度。
+- 多行内容在 textarea 内部滚动。
+- 中控高度保持固定。
+
+grow
+- textarea 随内容增长，最大 200px。
+- 超过 200px 后 textarea 内部滚动。
+- Control Center 高度允许自动增长。
+
+overlay
+- 中控主体保持固定。
+- 多行 textarea 向上浮层展开。
+- 不推挤 Footer 和其他控件。
+```
+
+纯状态模块：
+
+```text
+src/components/chat/inputOverflowState.ts
+```
+
+当前已执行并通过：
+
+```text
+node --experimental-strip-types scripts/test-input-overflow-state.mts
+node --experimental-strip-types scripts/test-layout-mode-contract.mts
+node --experimental-strip-types scripts/test-cc-height-state.mts
+node --experimental-strip-types scripts/test-preset-design.mts
+node --experimental-strip-types scripts/test-zone-fields.mts
+npm run build
+git diff --check -- src/components/chat/inputOverflowState.ts src/components/chat/InputBar.tsx src/components/chat/InputBar.css src/components/ControlCenter.css scripts/test-input-overflow-state.mts scripts/test-layout-mode-contract.mts
+```
+
+上述命令已在本节交接文档写入后重新执行并通过。C-ENHANCE-04 仍不得写成已提交。
+
+### 16.4 尚未实施任务
+
+#### C-ENHANCE-05：activePreset 与布局语义解耦
+
+当前仍存在临时接线：
+
+```tsx
+data-active-preset={activeVisualPreset}
+```
+
+`activeVisualPreset` 依赖 global/chat/cc 三个 zone 同时是 Claude 且全部未 dirty。需要改为布局字段直接驱动：
+
+```tsx
+data-message-layout={messageLayout}
+data-footer-layout={footerLayout}
+```
+
+消息 CSS 应从 `.app[data-active-preset="claude"]` 迁移到 `data-message-layout="claude"`；Footer CSS 应由 `data-footer-layout="peri"` 驱动。用户修改颜色、字号或横线颜色时，不应因此丢失 Claude 消息层级或 Peri Footer 结构。
+
+#### C-ENHANCE-06：Right Panel 共享 inset
+
+当前 ChatView、ControlCenter、PetCompanion 仍有各自的右栏偏移处理。需要在 `.main-body` 建立统一 CSS 变量：
+
+```tsx
+'--right-panel-inset': rightOpen ? `${rightWidth}px` : '0px'
+```
+
+Chat、Control Center、回底按钮和 Pet 统一消费。需要分别验证 Right Panel 关闭和打开状态，不能只验证某一个 hint 的 `right`。
+
+#### C-ENHANCE-07：Playwright 几何回归矩阵
+
+当前 Node 脚本只能验证源码结构和纯函数，不能替代浏览器视觉验收。需要新增真实 DOM/geometry 验收，至少覆盖：
+
+```text
+Claude / Glass
+Right Panel 开 / 关
+空输入 / 单行 / 三行 / 十行
+full / compact / hidden hint
+宽屏 / 900px / 640px
+command palette 开 / 关
+free / peri Footer
+fixed-scroll / grow / overlay
+```
+
+必须测量：
+
+```text
+.control-center
+.cc-body
+.cc-input-slot
+.input-bar.cli-mode
+.input-row
+.cli-prefix
+.input-textarea
+.cc-footer-status-row
+.cc-command-hint
+.right-panel
+```
+
+最低几何不变量：
+
+```text
+inputRow.top >= ccBody.top
+inputRow.bottom <= ccBody.bottom
+borderTopWidth > 0
+borderBottomWidth > 0
+hint.right <= rightPanel.left（右栏打开时）
+```
+
+仅 `getComputedStyle().borderTopWidth > 0` 不能关闭横线验收；必须同时证明边框位于容器内且未被 `overflow:hidden` 裁剪。
+
+#### C-ENHANCE-08：窄屏、ARIA、reduced motion
+
+尚未实施：
+
+- 窄屏快捷键提示单行收敛和低优先级片段隐藏。
+- Thinking 折叠按钮补稳定 `aria-controls`。
+- Tool 折叠按钮补稳定 `aria-controls`。
+- InputBar 使用 `aria-describedby` 指向命令提示。
+- `prefers-reduced-motion` 下关闭消息位移动画、非必要 transition 和 EKG 动画。
+
+### 16.5 当前验证证据分层
+
+本轮最后一次源码验证结果：
+
+```text
+纯函数/结构回归：通过
+- test-input-overflow-state.mts
+- test-layout-mode-contract.mts
+- test-cc-height-state.mts
+- test-preset-design.mts
+- test-zone-fields.mts
+
+npm run build：通过
+```
+
+Build 中仍有既有 warning：
+
+- `@tauri-apps/plugin-dialog` 同时被 dynamic import 和 static import。
+- Vite 报有 chunk 超过 500 kB。
+
+这些 warning 不影响本次 build exit 0，但未作为本任务修复范围。
+
+尚未完成：
+
+```text
+浏览器 Playwright 几何验收：未执行
+真实 Tauri 验收：未执行
+ACP/Peri runtime 联调：未执行
+```
+
+Node 回归和 `npm run build` 只能证明前端源码闭环，不能宣称真实 Tauri、ACP、Peri 运行时已验收。
+
+### 16.6 下一位 Coder 的接手顺序
+
+```text
+1. 先精确提交 C-ENHANCE-04，不纳入 src-tauri、既有 docs、references 或其他外部文件。
+2. 重新执行 C-ENHANCE-04 全部专项测试、npm run build、限定 git diff --check。
+3. C-ENHANCE-05：activePreset 与 messageLayout/footerLayout 解耦。
+4. C-ENHANCE-06：Right Panel 共享 inset。
+5. C-ENHANCE-07：Playwright 几何矩阵。
+6. C-ENHANCE-08：窄屏、ARIA、reduced motion。
+7. 所有源码、测试和交接文档最后 patch 后，重新执行全部相关专项测试、npm run build、限定 git diff --check 和 git status。
+```
+
+每个任务独立验证、独立提交；共享 `store.ts`、`App.tsx`、`ControlCenter.tsx` 和本交接文档必须串行。未经用户明确授权，不修改 `src-tauri/`，不把浏览器结果写成真实 Tauri/ACP 验收。
+
+## 17. 2026-07-30 第三轮连续开发快照
+
+本节记录当前工作树中的最新前端实现，优先于第 16 节的“尚未实施”状态。当前改动尚未 commit。
+
+### 17.1 C-ENHANCE-04：多行输入策略
+
+已在当前工作树实现：
+
+- `fixed-scroll`：textarea 固定单行高度，长内容内部滚动，中控高度固定。
+- `grow`：textarea 随内容增长，最大 200px，Control Center 自然增高。
+- `overlay`：多行 textarea 向上浮层展开，不推挤 Footer。
+- 纯状态模块：`src/components/chat/inputOverflowState.ts`。
+- 回归：`scripts/test-input-overflow-state.mts` 与 `scripts/test-layout-mode-contract.mts`。
+
+### 17.2 C-ENHANCE-05：布局语义与 preset 解耦
+
+已在当前工作树实现：
+
+- 删除 `activeVisualPreset` 与根节点 `data-active-preset`。
+- Claude 消息层级改由 `data-message-layout="claude"` 直接驱动。
+- Footer 继续由 `data-footer-layout="peri"` 驱动。
+- 用户只修改颜色、字号或横线色时，不再因 zone dirty 自动丢失 Claude 消息层级。
+- `scripts/test-chat-info-layer.mts` 已锁定旧临时接线不再存在。
+
+### 17.3 C-ENHANCE-06：Right Panel 共享 inset
+
+已在当前工作树实现：
+
+- `.main-body` 注入单一 `--right-panel-inset`。
+- Control Center、InputBar/Footer、回底按钮和 Pet 统一消费该变量。
+- 删除组件私有 `--cc-right-inset`、`--chat-right-offset` 及重复 `rightOpen/rightWidth` props。
+- 浏览器实测右栏打开时 InputBar、hint、回底按钮与 Pet 均满足 `right <= rightPanel.left`。
+
+### 17.4 动态最低高度浏览器校正
+
+浏览器发现旧纯函数低估真实 DOM 高度：Claude + Peri + full hint 的 `ccHeight:76` 会令 Input 上横线超出 `.cc-body`。
+
+当前高度预算已按实测校正：
+
+```text
+composer      30px
+footer gap     5px
+status row    25px
+hint row      21px
+bottom padding 3px
+```
+
+Claude + Peri + full hint、4 个可见状态 Widget 的动态最低高度现为 `84px`。浏览器实测：
+
+```text
+cc-body   top 861 / bottom 945 / height 84
+input-row top 862.109 / bottom 892.109 / height 30
+```
+
+`inputRow.top >= ccBody.top`、`inputRow.bottom <= ccBody.bottom`，上下 `1px` 边框均完整可见。
+
+### 17.5 C-ENHANCE-07：浏览器几何矩阵
+
+已使用真实浏览器 DOM 执行 63 个场景，覆盖：
+
+```text
+Claude：1200 / 900 / 640
+fixed-scroll / grow / overlay
+Right Panel 开 / 关
+1 / 3 / 10 行输入
+full / compact / hidden hint
+command palette 打开
+
+Classic/free 对照：1200 / 900 / 640，Right Panel 开 / 关
+```
+
+检查不变量：
+
+```text
+InputBar 位于 cc-body 内
+上下边框非零且未被裁剪
+快捷键提示 nowrap
+InputBar / hint / 回底按钮 / Pet 避让 Right Panel
+```
+
+首轮 30 个失败全部集中于“未定位 Pet 在右栏首次打开时未立即避让”。修复后 reduced-motion 浏览器实测：
+
+```text
+Right Panel left 380
+Pet left 264 / right 380
+petAvoidsPanel true
+```
+
+矩阵属于本轮 Playwright MCP 运行证据，尚未新增项目内 Playwright 依赖或 npm script；项目当前没有 `playwright`、`playwright-core`、`@playwright/test` 依赖。
+
+### 17.6 C-ENHANCE-08：窄屏、ARIA、reduced motion
+
+已在当前工作树实现：
+
+- `>900px`：显示完整单行 `/: 命令 | Shift+Enter: 换行 | Shift+Tab: 模式`。
+- `721～900px`：隐藏 Shift+Tab 低优先级片段。
+- `<=720px`：只保留 `/: 命令`，仍保持单一 DOM 行和 `nowrap`。
+- ControlCenter 用 `useId()` 生成 hint ID；InputBar textarea 通过 `aria-describedby` 关联。
+- Thinking 与 Tool 折叠按钮增加稳定 `aria-controls`，正文使用对应 ID。
+- Chat 消息使用 `useReducedMotion()`；reduced motion 下关闭消息初始位移与过渡。
+- Chat cursor、按钮 transition、EKG transition 纳入 `prefers-reduced-motion`。
+- Pet 原有 reduced-motion 规则继续生效。
+
+浏览器实测 `640px + prefers-reduced-motion:reduce`：
+
+```text
+messageLayout claude
+footerLayout peri
+InputBar 位于 cc-body 内
+上下边框 1px
+hint secondary display none
+hint tertiary display none
+textarea aria-describedby == hint id
+Pet transition-duration 0s
+Right Panel 打开后 Pet right == panel left
+```
+
+### 17.7 当前验证证据
+
+当前工作树最后一轮执行并通过：
+
+```text
+node --experimental-strip-types scripts/test-chat-info-layer.mts
+node --experimental-strip-types scripts/test-scroll-bottom-offset.mts
+node --experimental-strip-types scripts/test-control-center-responsive.mts
+node --experimental-strip-types scripts/test-pet-transparent-shell.mts
+node --experimental-strip-types scripts/test-pet-motion.mts
+node --experimental-strip-types scripts/test-input-overflow-state.mts
+node --experimental-strip-types scripts/test-layout-mode-contract.mts
+node --experimental-strip-types scripts/test-cc-height-state.mts
+node --experimental-strip-types scripts/test-preset-design.mts
+node --experimental-strip-types scripts/test-zone-fields.mts
+npm run build
+git diff --check -- src scripts
+```
+
+Build exit 0。仍有既有 warning：`plugin-dialog` 同时 dynamic/static import，以及主 chunk 超过 500 kB。
+
+尚未执行：
+
+```text
+真实 Tauri runtime 验收
+ACP / Peri 联调
+commit
+```
+
+当前工作区仍含独立后端、docs 与 `references/` 改动。后续提交必须使用显式路径或 task-only index，禁止 `git add .` / `git add -A`，不得纳入 `src-tauri/**` 和无关文档。
+
+## 18. 紧急修复：Claude 信息栏中点分隔恢复
+
+### 18.1 用户现象
+
+Claude 风格中控信息栏应当在每两个控件之间显示一个 ` · `，当前排列出现分隔不正确。
+
+### 18.2 根因
+
+`footerLayout=peri` 使用 `.cc-footer-status-row`，但旧组内分隔选择器只覆盖 `.cc-status-row .cc-widget + .cc-widget::before`。因此 Peri Footer 中同一 slot 内的相邻 Widget 没有中点；同时跨 slot 分隔仍依赖固定 `primary::before` / `secondary::after`，容易受 DOM 顺序和空组影响。
+
+### 18.3 修复
+
+- Peri/free 两条路径的 DOM 顺序统一为 `status-secondary → status-primary → actions`。
+- 组内相邻 Widget 同时覆盖 `.cc-status-row` 与 `.cc-footer-status-row`。
+- 跨 slot 使用“后续非空组”的通用 sibling 选择器，只在两个实际非空组之间生成一个中点。
+- 删除旧的固定 `secondary::after` / `primary::before` / `actions::before` 规则，避免重复或缺失。
+- 更新 `scripts/test-control-center-responsive.mts` 锁定 DOM 顺序、新分隔选择器和旧规则删除。
+
+### 18.4 浏览器实测
+
+Claude + Peri 当前实际控件：
+
+```text
+model · mode · pct · tokens
+```
+
+伪元素来源：
+
+```text
+model  before none
+mode   before " · "
+primary group before " · "
+pct    before none
+tokens before " · "
+```
+
+因此每两个实际控件之间恰好一个中点，空 actions 组不产生额外分隔。
+
+### 18.5 修改文件
+
+```text
+src/components/ControlCenter.tsx
+src/components/ControlCenter.css
+scripts/test-control-center-responsive.mts
+docs/交接-Claude与Peri风格预设拟合.md
+```
+
+### 18.6 最终验证
+
+紧急修复和本交接文档更新后实际执行并通过：
+
+```text
+node --experimental-strip-types scripts/test-control-center-responsive.mts
+node --experimental-strip-types scripts/test-layout-mode-contract.mts
+node --experimental-strip-types scripts/test-cc-height-state.mts
+node --experimental-strip-types scripts/test-chat-info-layer.mts
+node --experimental-strip-types scripts/test-scroll-bottom-offset.mts
+npm run build
+git diff --check -- src scripts docs/交接-Claude与Peri风格预设拟合.md
+```
+
+`npm run build` exit 0。仍有既有 warning：`plugin-dialog` 同时 dynamic/static import，以及主 chunk 超过 500 kB。
+
+## 19. 最终交接入口
+
+本节是当前最终交接入口，优先于第 16 节的历史快照和旧接手顺序。
+
+### 19.1 当前 Git 基线
+
+```text
+项目：G:\Project\prism-desktop
+分支：main
+HEAD：b19ef07
+HEAD 摘要：docs(backend): 标记交接提交边界
+相对 origin/main：ahead 12
+```
+
+本批 Claude + Peri 前端改动仍未 commit。
+
+### 19.2 当前任务状态
+
+```text
+C-ENHANCE-04  已实现，未提交
+C-ENHANCE-05  已实现，未提交
+C-ENHANCE-06  已实现，未提交
+C-ENHANCE-07  已执行浏览器几何矩阵，未建立项目内 Playwright runner
+C-ENHANCE-08  已实现，未提交
+紧急中点分隔修复  已实现，未提交
+```
+
+第 16.4 节的“尚未实施”和第 16.6 节的旧接手顺序仅是历史快照，不再代表当前下一步。
+
+### 19.3 当前未提交前端范围
+
+```text
+src/App.tsx
+src/ccHeightState.ts
+src/components/ControlCenter.tsx
+src/components/ControlCenter.css
+src/components/PetCompanion.tsx
+src/components/PetCompanion.css
+src/components/chat/ChatView.tsx
+src/components/chat/ChatView.css
+src/components/chat/InputBar.tsx
+src/components/chat/InputBar.css
+src/components/chat/StatusBar.css
+src/components/chat/inputOverflowState.ts
+
+scripts/test-cc-height-state.mts
+scripts/test-chat-info-layer.mts
+scripts/test-control-center-responsive.mts
+scripts/test-layout-mode-contract.mts
+scripts/test-pet-transparent-shell.mts
+scripts/test-scroll-bottom-offset.mts
+scripts/test-input-overflow-state.mts
+
+docs/交接-Claude与Peri风格预设拟合.md
+```
+
+### 19.4 必须保留的外部工作区改动
+
+以下不属于本批前端任务，不得覆盖或纳入前端提交：
+
+```text
+src-tauri/build.rs
+src-tauri/src/agent_config.rs
+src-tauri/tests-harness/windows-test-manifest.rc
+src-tauri/tests/windows-test-manifest.rc
+src-tauri/loader-error.txt
+
+docs/功能开发清单（后端）.md
+docs/验收清单.md
+docs/视觉重整.md
+references/
+```
+
+禁止使用：
+
+```text
+git add .
+git add -A
+reset
+restore
+stash
+clean
+```
+
+### 19.5 浏览器矩阵证据的精确结论
+
+首次 63 场景矩阵：
+
+```text
+总数 63
+通过 33
+失败 30
+```
+
+30 个失败全部仅为 `petAvoidsPanel=false`，InputBar、Footer、上下横线、hint、回底按钮和三种 overflow 策略均通过。
+
+修复 Pet 首次右栏避让后重跑：
+
+```text
+总数 63
+通过 61
+失败 2
+```
+
+剩余 2 项发生在矩阵打开 Right Panel 后约 30ms 立即采样，React effect 尚未完成位置收敛。独立时序探针确认约 100ms 后：
+
+```text
+Pet right == Right Panel left
+petAvoidsPanel == true
+```
+
+因此当前浏览器证据证明 Pet 最终会正确避让，但项目尚未建立可重复执行的 Playwright npm runner。不得把本轮 MCP 矩阵描述为项目内自动测试 `63/63 green`。
+
+### 19.6 下一位 Coder 的操作顺序
+
+```text
+1. 重新检查实时 HEAD、git status 和限定前端 diff。
+2. 复核第 17、18、19 节对应源码和当前未提交文件。
+3. 重新执行全部相关专项回归、npm run build 和限定 git diff --check。
+4. 浏览器快速复核中点分隔、双横线、三种输入策略和 Right Panel 避让。
+5. 只精确提交本批前端源码、测试和本交接文档。
+6. 不纳入 src-tauri、其他 docs、references 或现有外部改动。
+7. 后续进入真实 Tauri / ACP / Peri runtime 验收。
+```
+
+### 19.7 当前未完成项
+
+```text
+真实 Tauri runtime 验收：未执行
+ACP / Peri 联调：未执行
+项目内 Playwright 自动化 runner：未建立
+本批前端改动：未 commit
+```

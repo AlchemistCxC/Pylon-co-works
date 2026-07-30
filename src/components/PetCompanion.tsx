@@ -125,7 +125,7 @@ function PixelCreature({ stage, mood, walking }: { stage: GrowthStage; mood: str
   )
 }
 
-export default function PetCompanion({ rightOpen = false, rightWidth = 0 }: { rightOpen?: boolean; rightWidth?: number }) {
+export default function PetCompanion({ rightInset = 0 }: { rightInset?: number }) {
   const [pet, setPet] = useState<PetState | null>(null)
   const [position, setPosition] = useState<Position | null>(readPosition)
   const [wanderEnabled, setWanderEnabled] = useState(() => localStorage.getItem(POSITION_KEY) === null)
@@ -140,6 +140,7 @@ export default function PetCompanion({ rightOpen = false, rightWidth = 0 }: { ri
   const shellRef = useRef<HTMLElement>(null)
   const pointerRef = useRef<PointerSession | null>(null)
   const positionRef = useRef<Position | null>(position)
+  const previousRightInsetRef = useRef(rightInset)
   const lastClickAtRef = useRef<number | null>(null)
   const singleClickTimerRef = useRef<number | null>(null)
   const pokeTimerRef = useRef<number | null>(null)
@@ -198,7 +199,7 @@ export default function PetCompanion({ rightOpen = false, rightWidth = 0 }: { ri
           ? { left: inputRect.left, top: inputRect.top, width: inputRect.width, height: inputRect.height }
           : null,
         pet: { width: shell.offsetWidth, height: shell.offsetHeight },
-        rightInset: rightOpen ? rightWidth : 0,
+        rightInset,
       })
       setWalking(true)
       setPerched(false)
@@ -211,20 +212,26 @@ export default function PetCompanion({ rightOpen = false, rightWidth = 0 }: { ri
     const first = window.setTimeout(wander, 1800)
     const timer = window.setInterval(wander, 9000)
     return () => { cancelled = true; window.clearTimeout(first); window.clearInterval(timer) }
-  }, [dragging, rightOpen, rightWidth, wanderEnabled])
+  }, [dragging, rightInset, wanderEnabled])
 
   useEffect(() => {
     const shell = shellRef.current
     const host = shell?.parentElement
     if (!shell || !host) return
+    const insetChanged = previousRightInsetRef.current !== rightInset
+    previousRightInsetRef.current = rightInset
     const clampCurrentPosition = () => setPosition(current => current
       ? clampPetPosition(current, { width: host.clientWidth, height: host.clientHeight },
-        { width: shell.offsetWidth, height: shell.offsetHeight }, rightOpen ? rightWidth : 0)
-      : current)
+        { width: shell.offsetWidth, height: shell.offsetHeight }, rightInset)
+      : insetChanged && rightInset > 0
+        ? clampPetPosition({ x: host.clientWidth, y: Math.max(0, host.clientHeight - shell.offsetHeight - 18) },
+          { width: host.clientWidth, height: host.clientHeight },
+          { width: shell.offsetWidth, height: shell.offsetHeight }, rightInset)
+        : current)
     clampCurrentPosition()
     window.addEventListener('resize', clampCurrentPosition)
     return () => window.removeEventListener('resize', clampCurrentPosition)
-  }, [rightOpen, rightWidth])
+  }, [rightInset])
 
   useEffect(() => {
     if (!wanderEnabled || dragging || behavior !== 'idle') return
@@ -298,7 +305,7 @@ export default function PetCompanion({ rightOpen = false, rightWidth = 0 }: { ri
     const next = clampPetPosition({
       x: event.clientX - hostRect.left - pointer.dx,
       y: event.clientY - hostRect.top - pointer.dy,
-    }, { width: hostRect.width, height: hostRect.height }, { width: shell.offsetWidth, height: shell.offsetHeight }, rightOpen ? rightWidth : 0)
+    }, { width: hostRect.width, height: hostRect.height }, { width: shell.offsetWidth, height: shell.offsetHeight }, rightInset)
     positionRef.current = next
     setPosition(next)
     setDragging(true)

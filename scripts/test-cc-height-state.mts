@@ -17,16 +17,16 @@ assert.equal(resolveCcMinHeight({
 }), 64)
 assert.equal(resolveCcMinHeight({
   inputMode: 'cli', footerLayout: 'peri', hintMode: 'full', visibleStatusWidgets: 4, cliOverflowMode: 'fixed-scroll',
-}), 74)
+}), 84)
 assert.equal(resolveCcMinHeight({
   inputMode: 'cli', footerLayout: 'peri', hintMode: 'full', visibleStatusWidgets: 5, cliOverflowMode: 'fixed-scroll',
-}), 92)
+}), 109)
 assert.equal(resolveCcMinHeight({
   inputMode: 'cli', footerLayout: 'peri', hintMode: 'full', visibleStatusWidgets: 7, cliOverflowMode: 'grow',
 }), 64)
 assert.equal(clampCcHeight(20, {
   inputMode: 'cli', footerLayout: 'peri', hintMode: 'full', visibleStatusWidgets: 5, cliOverflowMode: 'fixed-scroll',
-}), 92)
+}), 109)
 assert.equal(clampCcHeight(999, {
   inputMode: 'cli', footerLayout: 'peri', hintMode: 'full', visibleStatusWidgets: 5, cliOverflowMode: 'fixed-scroll',
 }), 400)

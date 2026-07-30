@@ -1,11 +1,11 @@
-import { useRef, useEffect, useState, useMemo } from 'react'
+import { useRef, useEffect, useState, useMemo, useId } from 'react'
 import React from 'react'
 import { listen } from '@tauri-apps/api/event'
 import { invoke } from '@tauri-apps/api/core'
 import { useStore } from '../../store'
 import ReactMarkdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
-import { AnimatePresence, motion } from 'motion/react'
+import { AnimatePresence, motion, useReducedMotion } from 'motion/react'
 import Anser from 'anser'
 import GenerationFooter, { type GenerationSummary } from './GenerationFooter'
 import { resolveSpinnerFrames } from './spinnerFrames'
@@ -22,7 +22,7 @@ import { clearChatSourceRefs } from './sessionCleanup'
 import './ChatView.css'
 
 
-interface Props { sessionId: string | null; rightOpen?: boolean; rightWidth?: number }
+interface Props { sessionId: string | null }
 
 interface Message {
   id: string; role: 'user' | 'assistant' | 'tool' | 'reasoning'
@@ -43,7 +43,8 @@ const MOCK_MESSAGES: Message[] = [
   { id: 'm6', role: 'assistant', sender: 'peri', content: '找到问题了：`main` 用了 `await` 却没标 `async`。\n\n```ts\nexport async function main(url: string) {\n  const r = await fetch(url)\n  return r.json()\n}\n```\n\n已修正，`build` 通过。', time: '10:25' },
 ]
 
-const ChatView = React.memo(function ChatView({ sessionId, rightOpen = false, rightWidth = 260 }: Props) {
+const ChatView = React.memo(function ChatView({ sessionId }: Props) {
+  const reduceMotion = useReducedMotion()
   const sessions = useStore(state => state.sessions)
   const bottomRef = useRef<HTMLDivElement>(null)
   const [messages, setMessages] = useState<Message[]>(!IS_TAURI ? MOCK_MESSAGES : [])
@@ -421,16 +422,16 @@ const ChatView = React.memo(function ChatView({ sessionId, rightOpen = false, ri
   )
 
   return (
-    <div className="chat-view" style={{ '--chat-right-offset': rightOpen ? `${rightWidth + 8}px` : '0px' } as React.CSSProperties}>
+    <div className="chat-view">
       <div className="term">
         <AnimatePresence initial={false}>
           {messages.map((msg) => (
             <motion.div
               key={msg.id}
               className={`term-row term-row-${msg.role}`}
-              initial={{ opacity: 0, y: 8 }}
+              initial={reduceMotion ? false : { opacity: 0, y: 8 }}
               animate={{ opacity: 1, y: 0 }}
-              transition={{ duration: 0.25, ease: [0.2, 0, 0, 1] }}
+              transition={reduceMotion ? { duration: 0 } : { duration: 0.25, ease: [0.2, 0, 0, 1] }}
             >
               {msg.role === 'tool' && <ToolCard name={msg.toolName!} input={msg.toolInput} output={msg.toolOutput} outputLines={msg.toolOutputLines} status={msg.toolStatus} />}
               {msg.role === 'user' && <UserLine sender={msg.sender} content={msg.content} />}
@@ -541,12 +542,13 @@ function CodeBlock({ language, code }: { language?: string; code: string }) {
 
 function ReasoningBlock({ text, running }: { text: string; running: boolean }) {
   const [open, setOpen] = useState(false)
+  const bodyId = useId()
   const characterCount = Array.from(text).length
   const label = running ? 'Thinking…' : `Thought for ${characterCount} chars`
   return (
     <div className="term-reasoning">
-      <button className="term-reasoning-head" type="button" onClick={() => setOpen(!open)} aria-expanded={open}>{label}</button>
-      {open && <div className="term-reasoning-body">{text.split('\n').map((line, i) => <div key={i} className="term-reasoning-line">{line || '\u00a0'}</div>)}</div>}
+      <button className="term-reasoning-head" type="button" onClick={() => setOpen(!open)} aria-expanded={open} aria-controls={bodyId}>{label}</button>
+      {open && <div className="term-reasoning-body" id={bodyId}>{text.split('\n').map((line, i) => <div key={i} className="term-reasoning-line">{line || '\u00a0'}</div>)}</div>}
     </div>
   )
 }
@@ -569,6 +571,7 @@ function formatToolInput(name: string, rawInput: unknown): string {
 
 function ToolCard({ name, input, output, outputLines, status: toolStatus }: { name: string; input?: string; output?: string; outputLines?: number; status?: string }) {
   const [open, setOpen] = useState(false)
+  const bodyId = useId()
   const indicator = useStore(s => s.toolIndicator) || '●'
   const glow = useStore(s => s.toolIndicatorGlow) || 0
   const glowColor = useStore(s => s.toolIndicatorGlowColor) || ''
@@ -600,14 +603,14 @@ function ToolCard({ name, input, output, outputLines, status: toolStatus }: { na
   }, [output, name])
   return (
     <div className="term-tool" data-status={status} style={connCss}>
-      <button className="term-tool-head" type="button" onClick={() => setOpen(!open)}>
+      <button className="term-tool-head" type="button" onClick={() => setOpen(!open)} aria-expanded={open} aria-controls={bodyId}>
         <span className={`term-tool-indicator ${status}`} style={glowCss}>{indicator}</span>
         <span className="term-tool-name">{name}</span>
         {input && <span className="term-tool-summary"> ({input.length > 60 ? input.slice(0, 60) + '...' : input})</span>}
         {suffix && <span className="term-tool-suffix">{suffix}</span>}
       </button>
       {open && output && (
-        <div className="term-tool-body">
+        <div className="term-tool-body" id={bodyId}>
           {name === 'Bash' && outputHtml
             ? <div className="term-ansi" dangerouslySetInnerHTML={{ __html: outputHtml }} />
             : <pre><code>{output}</code></pre>}

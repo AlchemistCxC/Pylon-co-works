@@ -17,6 +17,8 @@ assert.match(component, /resolvePetClick\(\{[^}]*lastClickAt:[^}]*currentClickAt
   'PetCompanion 应调用 resolvePetClick')
 assert.match(component, /const onPointerUp[\s\S]*?if \(click\.kind === ['"]double['"]\)[\s\S]*?resumeWander\(\)/,
   'pointerup 双击分支应调用 resumeWander 恢复自主漫游')
+assert.match(component, /insetChanged && rightInset > 0[\s\S]*?clampPetPosition\(/,
+  '右栏首次打开时，未定位宠物也应立即收敛到安全区域')
 
 assert.equal(
   classifyPetPointerGesture({ startX: 10, startY: 20, endX: 10, endY: 20, durationMs: 120 }),

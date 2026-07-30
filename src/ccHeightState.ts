@@ -31,10 +31,10 @@ export function resolveVisibleStatusWidgetCount({
 }
 
 const BASE_MIN_HEIGHT = 64
-const COMPOSER_HEIGHT = 29
+const COMPOSER_HEIGHT = 30
 const FOOTER_GAP = 5
-const STATUS_ROW_HEIGHT = 18
-const HINT_ROW_HEIGHT = 19
+const STATUS_ROW_HEIGHT = 25
+const HINT_ROW_HEIGHT = 21
 const BOTTOM_PADDING = 3
 
 /**

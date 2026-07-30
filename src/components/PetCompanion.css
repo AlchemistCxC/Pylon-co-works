@@ -4,7 +4,7 @@
   --pet-eye:#17232b;
   --pet-glow:#91e8df;
   position:absolute;
-  right:18px;
+  right:calc(18px + var(--right-panel-inset, 0px));
   bottom:calc(var(--cc-height,120px) + 18px);
   z-index:32;
   width:116px;

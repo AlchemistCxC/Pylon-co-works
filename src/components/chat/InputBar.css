@@ -53,7 +53,16 @@
   color:var(--cli-text-color,var(--text)); font-family:var(--mono);
   font-size:var(--input-font-size,17px); padding:0; line-height:1.4;
   caret-color:var(--cli-text-color,var(--text));
-  width:100%; flex:1; max-height:calc(10 * 1.4em); transform:translateY(var(--cli-content-offset-y,0px));
+  width:100%; flex:1; max-height:200px; transform:translateY(var(--cli-content-offset-y,0px));
+}
+.input-bar.cli-mode.cli-overflow-fixed-scroll .input-textarea { max-height:22px; }
+.input-bar.cli-mode.cli-overflow-grow .input-row { align-items:flex-end; }
+.input-bar.cli-mode.cli-overflow-overlay .input-row { align-items:flex-end; }
+.input-bar.cli-mode.cli-overflow-overlay .input-textarea[data-expanded="true"] {
+  position:absolute; left:0; right:0; bottom:100%; z-index:12;
+  padding:var(--cli-line-padding,6px) 4px;
+  background:var(--cc-bg,#000); border:var(--cli-line-width,1px) solid var(--cli-line-color,#D77757);
+  transform:none;
 }
 .input-bar.cli-mode .input-textarea:focus { outline:none; border:none; box-shadow:none; }
 .input-bar.cli-mode .input-btn { display:none; }

@@ -51,6 +51,12 @@
 
 .cc-model-minimal { background:transparent; border:0; color:var(--pill-text,#999); font-family:var(--mono); cursor:pointer; }
 
+@media (prefers-reduced-motion:reduce) {
+  .ekg-bar-fill,
+  .ekg-pct,
+  .status-bar button { transition:none!important; }
+}
+
 /* ── Send / Attach widget variants ── */
 .cc-send-icon, .cc-send-square, .cc-send-minimal,
 .cc-attach-icon, .cc-attach-square, .cc-attach-minimal {

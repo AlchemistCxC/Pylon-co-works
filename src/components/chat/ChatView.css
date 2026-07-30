@@ -49,21 +49,21 @@
 .term-reasoning-line { color:var(--text-dim); font-style:italic; font-size:0.93em; line-height:1.6; white-space:pre-wrap; }
 
 /* Claude 风格：整行用户底色、统一消息节奏、Assistant/Thinking 约 2ch 缩进 */
-.app[data-active-preset="claude"] .term-row { margin:0 0 1em; }
-.app[data-active-preset="claude"] .term-row:last-of-type { margin-bottom:0; }
-.app[data-active-preset="claude"] .term-user {
+.app[data-message-layout="claude"] .term-row { margin:0 0 1em; }
+.app[data-message-layout="claude"] .term-row:last-of-type { margin-bottom:0; }
+.app[data-message-layout="claude"] .term-user {
   padding:8px 12px;
   background:var(--user-tag-bg, #373737);
 }
-.app[data-active-preset="claude"] .term-user-tag {
+.app[data-message-layout="claude"] .term-user-tag {
   background:transparent;
   padding:0;
   border-radius:0;
 }
-.app[data-active-preset="claude"] .term-assistant { padding:0 0 0 2ch; }
-.app[data-active-preset="claude"] .term-reasoning { padding:0; }
-.app[data-active-preset="claude"] .term-reasoning-head { line-height:inherit; }
-.app[data-active-preset="claude"] .term-reasoning-body {
+.app[data-message-layout="claude"] .term-assistant { padding:0 0 0 2ch; }
+.app[data-message-layout="claude"] .term-reasoning { padding:0; }
+.app[data-message-layout="claude"] .term-reasoning-head { line-height:inherit; }
+.app[data-message-layout="claude"] .term-reasoning-body {
   padding:0 0 0 2ch;
   margin-top:1em;
 }
@@ -166,7 +166,7 @@
 
 /* ── 回底按钮（Peri ⌄ 风格）── */
 .scroll-bottom-btn {
-  position:absolute; bottom:calc(var(--cc-height, 130px) + 8px); right:calc(8px + var(--chat-right-offset, 0px));
+  position:absolute; bottom:calc(var(--cc-height, 130px) + 8px); right:calc(8px + var(--right-panel-inset, 0px));
   width:24px; height:24px; display:flex; align-items:center; justify-content:center;
   background:transparent; border:none;
   color:#fff; cursor:pointer; font-size:14px; opacity:0.35;
@@ -179,4 +179,11 @@
 .chat-view::-webkit-scrollbar-track { background:transparent; }
 .chat-view::-webkit-scrollbar-thumb { background:var(--border); border-radius:3px; }
 .chat-view::-webkit-scrollbar-thumb:hover { background:var(--border-focus); }
+
+@media (prefers-reduced-motion:reduce) {
+  .term-cursor { animation:none; }
+  .term-assistant .copy-btn,
+  .spinner-stop-btn,
+  .scroll-bottom-btn { transition:none; }
+}
 

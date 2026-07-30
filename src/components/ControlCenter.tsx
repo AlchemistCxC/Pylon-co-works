@@ -1,4 +1,4 @@
-import { useRef, useState, useCallback, useEffect } from 'react'
+import { useRef, useState, useCallback, useEffect, useId } from 'react'
 import { useStore } from '../store'
 import InputBar from './chat/InputBar'
 import ModelWidget from './chat/ModelWidget'
@@ -16,8 +16,6 @@ import './chat/StatusBar.css'  // model/mode/send/attach widget 样式
 
 interface Props {
   sessionId: string | null
-  rightOpen?: boolean
-  rightWidth?: number
 }
 
 const EMPTY_SESSION_LIVE_STATS = emptySessionLiveStats()
@@ -169,7 +167,7 @@ function ensurePositions(positions: any): Record<string, { x: number; y: number;
   return out
 }
 
-export default function ControlCenter({ sessionId, rightOpen = false, rightWidth = 0 }: Props) {
+export default function ControlCenter({ sessionId }: Props) {
   const ccHeight = useStore(s => s.ccHeight) || 120
   const ccBgHeight = useStore(s => s.ccBgHeight ?? ccHeight)
   const inputMode = useStore(s => s.inputMode)
@@ -185,6 +183,8 @@ export default function ControlCenter({ sessionId, rightOpen = false, rightWidth
   const ccBgImage = useStore(s => s.ccBgImage) || ''
   const setCcEditMode = useStore(s => s.setCcEditMode)
   const setCcHeight = useStore(s => s.setCcHeight)
+  const hintId = useId()
+  const inputHintId = inputMode === 'cli' && cliHintMode !== 'hidden' ? hintId : undefined
 
   const inputRef = useRef<{ send: () => void; attachFile: () => void; cancel: () => void }>(null)
   const [selected, setSelected] = useState<string | null>(null)
@@ -205,7 +205,7 @@ export default function ControlCenter({ sessionId, rightOpen = false, rightWidth
     let body: React.ReactNode
     switch (id) {
       case 'input':
-        body = <InputBar ref={inputRef} sessionId={sessionId} split={inputSplit} />
+        body = <InputBar ref={inputRef} sessionId={sessionId} split={inputSplit} ariaDescribedBy={inputHintId} />
         break
       case 'send':
         body = <SendWidget onClick={() => inputRef.current?.send()} />
@@ -288,7 +288,6 @@ export default function ControlCenter({ sessionId, rightOpen = false, rightWidth
         '--cc-bg-height': `${ccBgHeight}px`,
         '--cc-bg': ccBg,
         '--cc-bg-image': toCssBackgroundImage(ccBgImage),
-        '--cc-right-inset': rightOpen ? `${rightWidth}px` : '0px',
       } as React.CSSProperties}>
       {editMode && (
         <div className="cc-edit-hdr" onMouseDown={onHeightDrag}>
@@ -303,14 +302,15 @@ export default function ControlCenter({ sessionId, rightOpen = false, rightWidth
             <div className="cc-input-slot">{renderWidget('input')}</div>
             <div className="cc-footer-status">
               <div className="cc-footer-status-row">
-                <div className="cc-status-primary">{renderSlot('status-primary')}</div>
                 <div className="cc-status-secondary">{renderSlot('status-secondary')}</div>
+                <div className="cc-status-primary">{renderSlot('status-primary')}</div>
                 <div className="cc-actions">{renderSlot('actions')}</div>
               </div>
               {inputMode === 'cli' && cliHintMode !== 'hidden' && (
-                <div className="cc-command-hint" aria-label="输入快捷键提示">
-                  <span className="cc-command-hint-key">/: 命令</span> <i>|</i> Shift+Enter: 换行
-                  {cliHintMode === 'full' && <><i>|</i> Shift+Tab: 模式</>}
+                <div className="cc-command-hint" id={hintId} aria-label="输入快捷键提示">
+                  <span className="cc-command-hint-key">/: 命令</span>
+                  <span className="cc-hint-secondary"><i>|</i> Shift+Enter: 换行</span>
+                  {cliHintMode === 'full' && <span className="cc-hint-tertiary"><i>|</i> Shift+Tab: 模式</span>}
                 </div>
               )}
             </div>
@@ -319,13 +319,14 @@ export default function ControlCenter({ sessionId, rightOpen = false, rightWidth
           <>
             <div className="cc-input-slot">{renderWidget('input')}</div>
             <div className="cc-status-row">
-              <div className="cc-status-primary">{renderSlot('status-primary')}</div>
               <div className="cc-status-secondary">{renderSlot('status-secondary')}</div>
+              <div className="cc-status-primary">{renderSlot('status-primary')}</div>
               <div className="cc-actions">{renderSlot('actions')}</div>
               {inputMode === 'cli' && cliHintMode !== 'hidden' && (
-                <div className="cc-command-hint" aria-label="输入快捷键提示">
-                  <span className="cc-command-hint-key">/: 命令</span> <i>|</i> Shift+Enter: 换行
-                  {cliHintMode === 'full' && <><i>|</i> Shift+Tab: 模式</>}
+                <div className="cc-command-hint" id={hintId} aria-label="输入快捷键提示">
+                  <span className="cc-command-hint-key">/: 命令</span>
+                  <span className="cc-hint-secondary"><i>|</i> Shift+Enter: 换行</span>
+                  {cliHintMode === 'full' && <span className="cc-hint-tertiary"><i>|</i> Shift+Tab: 模式</span>}
                 </div>
               )}
             </div>
