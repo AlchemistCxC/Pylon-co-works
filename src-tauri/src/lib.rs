@@ -441,22 +441,35 @@ fn agent_status_payload(state: &AppState) -> serde_json::Value {
     let active_agent_id = state.active_agent.lock().ok().map(|value| value.clone()).unwrap_or_default();
     let agent = state.agents.lock().ok().and_then(|agents| agents.get(&active_agent_id).cloned());
     let crashed = matches!(runtime.status, AgentLifecycleStatus::Crashed) || state.acp.try_lock().map(|acp| acp.is_crashed()).unwrap_or(false);
+    let status = if crashed { AgentLifecycleStatus::Crashed } else { runtime.status };
+    let available = agent.is_some() && status == AgentLifecycleStatus::Connected;
+    let last_error = runtime.last_error.clone();
+    let recent_error = last_error.clone();
+    let legacy_error = last_error.clone();
     serde_json::json!({
+        // agentId 是唯一稳定身份；agentName 仅用于展示。
         "agentId": active_agent_id,
         "agentName": agent.as_ref().map(|value| value.name.clone()).unwrap_or_default(),
+        // 旧前端兼容字段：值仍是 display name，不得作为 registry key。
         "agent": agent.as_ref().map(|value| value.name.clone()).unwrap_or_default(),
-        "status": if crashed { AgentLifecycleStatus::Crashed.as_str() } else { runtime.status.as_str() },
+        "status": status.as_str(),
         "transport": agent.as_ref().map(|value| value.transport.clone()).unwrap_or_default(),
-        "cwd": agent.and_then(|value| value.cwd).unwrap_or_default(),
-        "lastError": runtime.last_error,
+        "cwd": agent.as_ref().and_then(|value| value.cwd.clone()).unwrap_or_default(),
+        "lastError": last_error,
+        "recentError": recent_error,
+        // 旧前端兼容字段；新消费者使用 recentError。
+        "error": legacy_error,
         "lastConnectedAt": runtime.last_connected_at,
         "generation": state.current_generation(),
+        "active": agent.is_some(),
+        "available": available,
         "crashed": crashed,
     })
 }
 
 fn agent_summary_payload(id: &str, agent: &AgentDef, active_id: &str, active_status: AgentLifecycleStatus) -> serde_json::Value {
     serde_json::json!({
+        // list_agents 的 id 是 registry key，name 仅用于展示。
         "id": id,
         "name": agent.name,
         "transport": agent.transport,
@@ -498,7 +511,10 @@ where
         if let serde_json::Value::Object(ref mut map) = payload {
             map.insert("status".to_string(), serde_json::Value::String(status.as_str().to_string()));
             if let Some(error) = last_error {
-                map.insert("lastError".to_string(), serde_json::Value::String(error));
+                let error = serde_json::Value::String(error);
+                map.insert("lastError".to_string(), error.clone());
+                map.insert("recentError".to_string(), error.clone());
+                map.insert("error".to_string(), error);
             }
         }
         payload
@@ -581,16 +597,24 @@ fn start_notification_dispatcher(state: &AppState, window: tauri::WebviewWindow)
                     let runtime = agent_runtime.lock().map(|value| value.clone()).unwrap_or_default();
                     let active_id = active_agent.lock().ok().map(|value| value.clone()).unwrap_or_default();
                     let agent = agents.lock().ok().and_then(|items| items.get(&active_id).cloned());
+                    let last_error = runtime.last_error.clone();
+                    let recent_error = last_error.clone();
+                    let legacy_error = last_error.clone();
                     emit_event(&window, "peri:agent-status", serde_json::json!({
+                        // agentId 是 registry key；agentName/agent 仅用于展示兼容。
                         "agentId": active_id,
                         "agentName": agent.as_ref().map(|value| value.name.clone()).unwrap_or_default(),
                         "agent": agent.as_ref().map(|value| value.name.clone()).unwrap_or_default(),
                         "status": AgentLifecycleStatus::Crashed.as_str(),
                         "transport": agent.as_ref().map(|value| value.transport.clone()).unwrap_or_default(),
-                        "cwd": agent.and_then(|value| value.cwd).unwrap_or_default(),
-                        "lastError": runtime.last_error,
+                        "cwd": agent.as_ref().and_then(|value| value.cwd.clone()).unwrap_or_default(),
+                        "lastError": last_error,
+                        "recentError": recent_error,
+                        "error": legacy_error,
                         "lastConnectedAt": runtime.last_connected_at,
                         "generation": client_generation.load(Ordering::Acquire),
+                        "active": agent.is_some(),
+                        "available": false,
                         "crashed": true,
                     }));
                     continue;
