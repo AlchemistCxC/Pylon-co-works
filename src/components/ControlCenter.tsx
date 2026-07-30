@@ -10,6 +10,7 @@ import { formatCacheReadTokens, formatTokenCount } from '../tokenFormat'
 import { toCssBackgroundImage } from '../backgroundImage'
 import { emptySessionLiveStats } from './chat/sessionRuntime'
 import type { SessionLiveStats } from './chat/sessionRuntime'
+import { resolveCcMinHeight, resolveVisibleStatusWidgetCount } from '../ccHeightState'
 import './ControlCenter.css'
 import './chat/StatusBar.css'  // model/mode/send/attach widget 样式
 
@@ -178,6 +179,8 @@ export default function ControlCenter({ sessionId, rightOpen = false, rightWidth
   const editMode = useStore(s => s.ccEditMode)
   const ccVariant = useStore(s => s.ccVariant) || 'terminal'
   const cliHintMode = useStore(s => s.cliHintMode || 'full')
+  const footerLayout = useStore(s => s.footerLayout || 'free')
+  const cliOverflowMode = useStore(s => s.cliOverflowMode || 'fixed-scroll')
   const ccBg = useStore(s => s.ccBg) || 'transparent'
   const ccBgImage = useStore(s => s.ccBgImage) || ''
   const setCcEditMode = useStore(s => s.setCcEditMode)
@@ -238,6 +241,18 @@ export default function ControlCenter({ sessionId, rightOpen = false, rightWidth
     .map(widget => renderWidget(widget.id))
 
   const ccBodyRef = useRef<HTMLDivElement>(null)
+  const visibleStatusWidgets = resolveVisibleStatusWidgetCount({
+    hiddenIds: hidden,
+    inputMode,
+    ccStyle,
+  })
+  const minHeight = resolveCcMinHeight({
+    inputMode,
+    footerLayout,
+    hintMode: cliHintMode,
+    visibleStatusWidgets,
+    cliOverflowMode,
+  })
 
   // 整体高度拖拽
   const onHeightDrag = useCallback((e: React.MouseEvent) => {
@@ -269,6 +284,7 @@ export default function ControlCenter({ sessionId, rightOpen = false, rightWidth
     <div className={`control-center ${inputMode === 'cli' ? 'cli-mode' : ''} ${editMode ? 'cc-editing' : ''} cc-variant-${ccVariant}`}
       style={{
         '--cc-height': `${ccHeight}px`,
+        '--cc-min-height': `${minHeight}px`,
         '--cc-bg-height': `${ccBgHeight}px`,
         '--cc-bg': ccBg,
         '--cc-bg-image': toCssBackgroundImage(ccBgImage),
@@ -282,18 +298,39 @@ export default function ControlCenter({ sessionId, rightOpen = false, rightWidth
       )}
       <div className="cc-bg" />
       <div className="cc-body" ref={ccBodyRef}>
-        <div className="cc-input-slot">{renderWidget('input')}</div>
-        <div className="cc-status-row">
-          <div className="cc-status-primary">{renderSlot('status-primary')}</div>
-          <div className="cc-status-secondary">{renderSlot('status-secondary')}</div>
-          <div className="cc-actions">{renderSlot('actions')}</div>
-          {inputMode === 'cli' && cliHintMode !== 'hidden' && (
-            <div className="cc-command-hint" aria-label="输入快捷键提示">
-              <span className="cc-command-hint-key">/: 命令</span> <i>|</i> Shift+Enter: 换行
-              {cliHintMode === 'full' && <><i>|</i> Shift+Tab: 模式</>}
+        {footerLayout === 'peri' ? (
+          <div className="cc-footer cc-footer-peri">
+            <div className="cc-input-slot">{renderWidget('input')}</div>
+            <div className="cc-footer-status">
+              <div className="cc-footer-status-row">
+                <div className="cc-status-primary">{renderSlot('status-primary')}</div>
+                <div className="cc-status-secondary">{renderSlot('status-secondary')}</div>
+                <div className="cc-actions">{renderSlot('actions')}</div>
+              </div>
+              {inputMode === 'cli' && cliHintMode !== 'hidden' && (
+                <div className="cc-command-hint" aria-label="输入快捷键提示">
+                  <span className="cc-command-hint-key">/: 命令</span> <i>|</i> Shift+Enter: 换行
+                  {cliHintMode === 'full' && <><i>|</i> Shift+Tab: 模式</>}
+                </div>
+              )}
             </div>
-          )}
-        </div>
+          </div>
+        ) : (
+          <>
+            <div className="cc-input-slot">{renderWidget('input')}</div>
+            <div className="cc-status-row">
+              <div className="cc-status-primary">{renderSlot('status-primary')}</div>
+              <div className="cc-status-secondary">{renderSlot('status-secondary')}</div>
+              <div className="cc-actions">{renderSlot('actions')}</div>
+              {inputMode === 'cli' && cliHintMode !== 'hidden' && (
+                <div className="cc-command-hint" aria-label="输入快捷键提示">
+                  <span className="cc-command-hint-key">/: 命令</span> <i>|</i> Shift+Enter: 换行
+                  {cliHintMode === 'full' && <><i>|</i> Shift+Tab: 模式</>}
+                </div>
+              )}
+            </div>
+          </>
+        )}
       </div>
       {editMode && selected && <PropertyPanel id={selected} onClose={() => setSelected(null)} onExit={() => { setCcEditMode(false); setSelected(null) }} />}
       {editMode && (

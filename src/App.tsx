@@ -76,7 +76,7 @@ export default function App() {
     chatTransparency: s.chatTransparency, chatBlur: s.chatBlur,
     chatFont: s.chatFont, chatFontSize: s.chatFontSize, chatLineHeight: s.chatLineHeight,
     chatTextColor: s.chatTextColor, chatCodeColor: s.chatCodeColor, chatCodeBg: s.chatCodeBg,
-    msgStyle: s.msgStyle, msgFont: s.msgFont, msgTextColor: s.msgTextColor, msgLineHeight: s.msgLineHeight,
+    msgStyle: s.msgStyle, msgFont: s.msgFont, msgTextColor: s.msgTextColor, msgLineHeight: s.msgLineHeight, messageLayout: s.messageLayout,
     toolOk: s.toolOk, toolRun: s.toolRun, toolErr: s.toolErr,
     toolNameColor: s.toolNameColor, toolSummaryColor: s.toolSummaryColor,
     userTagBg: s.userTagBg, userTagText: s.userTagText,
@@ -84,7 +84,7 @@ export default function App() {
     inputTextColor: s.inputTextColor, inputPlaceholder: s.inputPlaceholder,
     inputSendBg: s.inputSendBg, inputFocusBorder: s.inputFocusBorder,
     inputFontSize: s.inputFontSize, inputMinHeight: s.inputMinHeight,
-    cliLineWidth: s.cliLineWidth, cliLineColor: s.cliLineColor, cliTextColor: s.cliTextColor, cliPromptColor: s.cliPromptColor, cliLinePadding: s.cliLinePadding, cliContentOffsetY: s.cliContentOffsetY, cliHintMode: s.cliHintMode,
+    cliLineWidth: s.cliLineWidth, cliLineColor: s.cliLineColor, cliTextColor: s.cliTextColor, cliPromptColor: s.cliPromptColor, cliLinePadding: s.cliLinePadding, cliContentOffsetY: s.cliContentOffsetY, cliHintMode: s.cliHintMode, footerLayout: s.footerLayout, cliOverflowMode: s.cliOverflowMode,
     statusBg: s.statusBg, statusBgImage: s.statusBgImage,
     ccStatusFontSize: s.ccStatusFontSize,
     ekgWidth: s.ekgWidth, ekgFontSize: s.ekgFontSize,
@@ -184,7 +184,7 @@ export default function App() {
   const appWindow = (() => { try { return getCurrentWindow() } catch { return { minimize() {}, isFullscreen() { return Promise.resolve(false) }, setFullscreen(_v: boolean) { return Promise.resolve() }, destroy() {} } } })()
 
   return (
-    <div className="app" data-ui-scheme={s.uiScheme || 'light'} data-msg-style={s.msgStyle || 'terminal'} data-active-preset={activeVisualPreset} style={cssVars}>
+    <div className="app" data-ui-scheme={s.uiScheme || 'light'} data-msg-style={s.msgStyle || 'terminal'} data-message-layout={s.messageLayout || 'classic'} data-footer-layout={s.footerLayout || 'free'} data-cli-overflow-mode={s.cliOverflowMode || 'fixed-scroll'} data-active-preset={activeVisualPreset} style={cssVars}>
       <div className="titlebar" data-tauri-drag-region>
         <button className="titlebar-toggle" onClick={() => setSidebarCollapsed(!sidebarCollapsed)}
           title={sidebarCollapsed ? '展开左栏' : '收起左栏'}>☰</button>

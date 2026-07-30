@@ -6,6 +6,7 @@ import { CC_LAYOUT_SCHEMA_VERSION, DEFAULT_CC_LAYOUT, cloneCcLayout, cloneCcPosi
 import type { CcLayoutV3, CcWidgetPlacement } from './ccLayoutState'
 import { createCustomPreset, deleteCustomPreset, normalizeCustomPresets, pickCustomPresetTheme, upsertCustomPreset } from './customPresets'
 import { normalizeThemeMigrationState } from './themeMigration'
+import { clampCcHeight, resolveVisibleStatusWidgetCount } from './ccHeightState'
 import type { CustomPreset } from './customPresets'
 import { clearSessionSourceState, updateSessionLiveStats } from './components/chat/sessionRuntime'
 import type { SessionLiveStats } from './components/chat/sessionRuntime'
@@ -54,6 +55,9 @@ export interface ThemeSettings {
   spinnerIntervalMs: number
   spinnerColor: string; spinnerSize: number
   msgStyle: string; msgFont: string; msgTextColor: string; msgLineHeight: number
+  messageLayout: 'classic' | 'claude' | 'bubble'
+  footerLayout: 'free' | 'peri'
+  cliOverflowMode: 'fixed-scroll' | 'grow' | 'overlay'
   ccHeight: number; ccBgHeight: number; ccBg: string
   ccBgImage: string
   ccStatusFontSize: number
@@ -152,6 +156,7 @@ export const DEFAULTS: ThemeSettings = {
   spinnerDoneMarkerMode: 'custom', spinnerCancelledMarkerMode: 'custom', spinnerErrorMarkerMode: 'custom', spinnerIntervalMs: 120,
   spinnerColor: '', spinnerSize: 14,
   msgStyle: 'terminal', msgFont: 'mono', msgTextColor: '', msgLineHeight: 1.8,
+  messageLayout: 'classic', footerLayout: 'free', cliOverflowMode: 'fixed-scroll',
   ccHeight: 150, ccBgHeight: 150, ccBg: 'transparent', ccBgImage: '', ccStatusFontSize: 14,
   ccStyle: 'wave',
   ccVariant: 'terminal',
@@ -254,7 +259,19 @@ export const useStore = create<ThemeState>()(persist(
   getUser: (source) => get().users.find(u => u.id === source),
   updateTheme: (partial) => set(partial),
   setCcEditMode: (enabled) => set({ ccEditMode: enabled }),
-  setCcHeight: (height) => set({ ccHeight: Math.max(80, Math.min(400, height)) }),
+  setCcHeight: (height) => set(state => ({
+    ccHeight: clampCcHeight(height, {
+      inputMode: state.inputMode,
+      footerLayout: state.footerLayout,
+      hintMode: state.cliHintMode,
+      visibleStatusWidgets: resolveVisibleStatusWidgetCount({
+        hiddenIds: state.ccHidden,
+        inputMode: state.inputMode,
+        ccStyle: state.ccStyle,
+      }),
+      cliOverflowMode: state.cliOverflowMode,
+    }),
+  })),
   updateCcPosition: (id, partial) => set(state => {
     const ccPositions = updateCcPositionState(state.ccPositions, DEFAULTS.ccPositions, id, partial)
     if (ccPositions === state.ccPositions) return state
@@ -419,6 +436,22 @@ export const useStore = create<ThemeState>()(persist(
   state.spinnerIntervalMs = typeof state.spinnerIntervalMs === 'number' && Number.isFinite(state.spinnerIntervalMs)
     ? Math.max(40, Math.min(1000, state.spinnerIntervalMs))
     : 120
+  state.messageLayout = state.messageLayout === 'claude' || state.messageLayout === 'bubble' ? state.messageLayout : 'classic'
+  state.footerLayout = state.footerLayout === 'peri' ? 'peri' : 'free'
+  state.cliOverflowMode = state.cliOverflowMode === 'grow' || state.cliOverflowMode === 'overlay' ? state.cliOverflowMode : 'fixed-scroll'
+  const migratedInputMode = typeof state.inputMode === 'string' ? state.inputMode : DEFAULTS.inputMode
+  const migratedHintMode = state.cliHintMode === 'hidden' || state.cliHintMode === 'compact' ? state.cliHintMode : 'full'
+  state.ccHeight = clampCcHeight(typeof state.ccHeight === 'number' ? state.ccHeight : DEFAULTS.ccHeight, {
+    inputMode: migratedInputMode,
+    footerLayout: state.footerLayout,
+    hintMode: migratedHintMode,
+    visibleStatusWidgets: resolveVisibleStatusWidgetCount({
+      hiddenIds: Array.isArray(state.ccHidden) ? state.ccHidden : [],
+      inputMode: migratedInputMode,
+      ccStyle: state.ccStyle || 'wave',
+    }),
+    cliOverflowMode: state.cliOverflowMode,
+  })
   state.customPresets = normalizeCustomPresets(state.customPresets)
   const normalized = normalizeProfileState(
     Array.isArray(state.profiles) ? state.profiles : [],

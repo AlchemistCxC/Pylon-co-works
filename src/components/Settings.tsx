@@ -15,6 +15,7 @@ import { normalizeAgentStatus, statusLabel } from './settings/agentTypes'
 import { beginReconnect, failReconnect, normalizeAgentList } from './settings/agentState'
 import ConfigOptionsPanel from './settings/ConfigOptionsPanel'
 import { resolveSpinnerFrames } from './chat/spinnerFrames'
+import { resolveCcMinHeight, resolveVisibleStatusWidgetCount } from '../ccHeightState'
 
 // ── helpers ──
 
@@ -182,6 +183,17 @@ export default function Settings({ onClose, activeSessionId }: { onClose?: () =>
 
   const previewZone = TAB_PREVIEW[activeTab]
   const spinnerFrames = resolveSpinnerFrames(t.spinnerFramePreset, t.spinnerCustomFrames)
+  const ccMinHeight = resolveCcMinHeight({
+    inputMode: t.inputMode,
+    footerLayout: t.footerLayout || 'free',
+    hintMode: t.cliHintMode || 'full',
+    visibleStatusWidgets: resolveVisibleStatusWidgetCount({
+      hiddenIds: t.ccHidden || [],
+      inputMode: t.inputMode,
+      ccStyle: t.ccStyle,
+    }),
+    cliOverflowMode: t.cliOverflowMode || 'fixed-scroll',
+  })
 
   const switchAgent = async (agentId: string) => {
     if (switchingAgentId || agentId === activeAgent) return
@@ -450,6 +462,7 @@ export default function Settings({ onClose, activeSessionId }: { onClose?: () =>
 
               <h3>消息渲染</h3>
               <Group title="风格">
+                <Row label="信息层级"><Sel value={t.messageLayout || 'classic'} onChange={v=>onSettingChange({messageLayout:v as ThemeSettings['messageLayout']})} options={['classic','claude','bubble']}/></Row>
                 <Row label="风格"><Sel value={t.msgStyle} onChange={v=>onSettingChange({msgStyle:v})} options={['terminal','bubble']}/></Row>
                 <Row label="字体"><Sel value={t.msgFont} onChange={v=>onSettingChange({msgFont:v})} options={['mono','system']}/></Row>
                 <div className="set-compact-row">
@@ -474,12 +487,14 @@ export default function Settings({ onClose, activeSessionId }: { onClose?: () =>
                     ))}
                   </div>
                 </Row>
-                <Row label="高度"><Num value={t.ccHeight} onChange={v=>onSettingChange({ccHeight:v})} min={64} max={400}/><span className="set-val">px</span></Row>
+                <Row label="高度"><Num value={t.ccHeight} onChange={v=>onSettingChange({ccHeight:Math.max(ccMinHeight, v)})} min={ccMinHeight} max={400}/><span className="set-val">px（最小 {ccMinHeight}）</span></Row>
                 <Row label="背景色"><ColorPopover value={t.ccBg} onChange={v=>onSettingChange({ccBg:v})}/></Row>
                 <BgImageRow label="背景图" value={t.ccBgImage||''} onChange={v=>onSettingChange({ccBgImage:v})}/>
               </Group>
               <Group title="控件样式">
                 <Row label="输入栏"><Sel value={t.inputMode} onChange={v=>onSettingChange({inputMode:v})} options={['cli','default']}/></Row>
+                <Row label="Footer 布局"><Sel value={t.footerLayout || 'free'} onChange={v=>onSettingChange({footerLayout:v as ThemeSettings['footerLayout']})} options={['free','peri']}/></Row>
+                <Row label="多行策略"><Sel value={t.cliOverflowMode || 'fixed-scroll'} onChange={v=>onSettingChange({cliOverflowMode:v as ThemeSettings['cliOverflowMode']})} options={['fixed-scroll','grow','overlay']}/></Row>
                 <Row label="提示符颜色"><ColorPopover value={t.cliPromptColor || ''} onChange={v=>onSettingChange({cliPromptColor:v})}/></Row>
                 <Row label="内容垂直偏移"><Num value={t.cliContentOffsetY ?? 0} onChange={v=>onSettingChange({cliContentOffsetY:v})} min={-6} max={6}/><span className="set-val">px</span></Row>
                 <Row label="命令提示"><Sel value={t.cliHintMode || 'full'} onChange={v=>onSettingChange({cliHintMode:v as ThemeSettings['cliHintMode']})} options={['hidden','compact','full']}/></Row>
