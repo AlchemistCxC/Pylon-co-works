@@ -1,0 +1,46 @@
+version: 1
+id: BE-B4-001
+title: 冻结 MCP owner、storage 和 merge 契约
+lane: backend
+priority: P1
+stage: settings
+subsystem: mcp-export
+size: M
+relay_group: settings
+blocks_other_lane: true
+domains: [mcp-backend, session-runtime]
+dependencies: {tasks: [BE-B1-001], checkpoints: [CP-RUNTIME-FOUNDATION]}
+goal:
+  user_result: MCP 设置 UI 能明确知道配置属于哪里、何时生效、是否跨重启恢复。
+  technical_result: 基于当前 runtime_mcp 和 ACP wire 冻结 owner/storage/merge/clear/disable 契约，不制造伪持久化。
+source_facts:
+  - runtime_mcp 当前只是进程内 snapshot。
+  - mcp.rs 已有较完整输入校验和 wire serialization。
+scope:
+  inspect_first:
+    - src-tauri/src/mcp.rs
+    - src-tauri/src/lib.rs::runtime_mcp
+    - src-tauri/src/lib.rs::set_mcp_servers
+    - F:\A-I\Agent\Peri 中 session/new/load MCP 消费路径
+    - docs/后端开发与交接手册.md B4.2/B4.3
+  likely_modify:
+    - src-tauri/src/mcp.rs
+    - src-tauri/src/lib.rs
+    - .agents/contracts 下新增 MCP contract
+    - docs/后端开发与交接手册.md
+  do_not_modify: [src/**, Hermes 配置, Peri 源码]
+guidance:
+  invariants:
+    - secret 可进 wire，不进日志/诊断/文档。
+    - 未实现持久化时必须明确 runtime-only。
+    - owner 不明确时先冻结产品契约再编码。
+  non_goals: [前端 MCP UI, 全局 Prompt 伪字段]
+verification:
+  during_development:
+    - cd src-tauri && cargo test --lib mcp -- --nocapture
+    - cd src-tauri && cargo check
+  checkpoint_only: [真实 Peri settings wire]
+completion:
+  - owner/storage/merge 契约 frozen
+  - 当前实现与 contract 一致
+opens_checkpoint: null

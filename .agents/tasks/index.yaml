@@ -1,0 +1,16 @@
+version: 1
+tasks:
+  - backend/BE-B0-001.yaml
+  - backend/BE-B1-001.yaml
+  - backend/BE-B3-001.yaml
+  - backend/BE-B2-001.yaml
+  - backend/BE-B4-001.yaml
+  - backend/BE-B5-001.yaml
+  - frontend/FE-F0-008.yaml
+  - frontend/FE-F1-001.yaml
+  - frontend/FE-F1-002.yaml
+  - frontend/FE-F5-001.yaml
+  - frontend/FE-F4-001.yaml
+  - frontend/FE-F0-009.yaml
+  - frontend/FE-F2-001.yaml
+  - frontend/FE-F6-001.yaml

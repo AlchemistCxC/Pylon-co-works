@@ -1,0 +1,48 @@
+version: 1
+id: FE-F5-001
+title: 建立稳定 Chat message ID allocator
+lane: frontend
+priority: P1
+stage: chat-runtime
+subsystem: chat
+size: M
+relay_group: chat-runtime
+blocks_other_lane: false
+domains: [chat-ui, react]
+dependencies: {tasks: [], checkpoints: []}
+goal:
+  user_result: 快速流式消息、reasoning、tool 和 error 不因同毫秒 key 冲突而错位或覆盖。
+  technical_result: 每 Session/source 使用稳定事件 ID或本地单调 sequence，替换 Date.now 作为 React message identity。
+source_facts:
+  - ChatView.tsx 多处使用 user/msg/thought/err + Date.now()。
+  - replay/tool 已有部分稳定 ID 逻辑，必须先复用现有 owner 而非另造体系。
+scope:
+  inspect_first:
+    - src/components/chat/ChatView.tsx 中消息创建和 replay/live 合并范围
+    - src/components/chat/replayState.ts
+    - src/components/chat/messagePersistence.ts
+    - src/components/chat/sessionEventState.ts
+    - 相关 replay/message tests
+  likely_modify:
+    - 新建或复用 message ID helper
+    - src/components/chat/ChatView.tsx 局部
+    - 对应 targeted tests
+    - docs/前端开发与交接手册.md F5.6
+  do_not_modify: [src-tauri/**, Chat 视觉, 整体 ChatView controller 重构]
+guidance:
+  invariants:
+    - 固定时间下连续事件仍唯一。
+    - replay/live 不冲突。
+    - 不使用数组 index。
+    - identity owner 保持 Session/source 隔离。
+  non_goals: [F5.7 controller 模块化, 视觉重写, 后端事件协议]
+verification:
+  during_development:
+    - 新增 message ID targeted test
+    - 相关 replay/tool targeted tests
+    - npm run build
+  checkpoint_only: [完整 frontend runner, 真实 Tauri stream]
+completion:
+  - Date.now 不再作为 message identity 唯一来源
+  - targeted tests 覆盖固定时间/连续事件
+opens_checkpoint: null

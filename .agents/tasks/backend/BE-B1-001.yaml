@@ -1,0 +1,62 @@
+version: 1
+id: BE-B1-001
+title: 收敛异步 Session mutation 身份重验
+lane: backend
+priority: P0
+stage: runtime-safety
+subsystem: session-lifecycle
+size: L
+relay_group: backend-runtime-foundation
+domains: [acp, session-runtime]
+dependencies: {tasks: [BE-B0-001], checkpoints: []}
+blocks_other_lane: true
+goal:
+  user_result: Agent/Session 快速切换、取消和失败时，旧响应不能覆盖或删除新 Session。
+  technical_result: 审计并统一 send/set/close/cancel/load 等 await 后 mutation 的 source/periId/sessionGeneration/clientGeneration 重验。
+source_facts:
+  - with_session_if_matches、remove_session_if_matches 等 helper 已在当前源码出现。
+  - replace_agent_client 仍有 sessions.clear()，但多 runtime 不属于本任务。
+  - 当前未提交历史已进入 b57a6fc，应基于实时源码判断哪些子路径仍缺校验。
+scope:
+  inspect_first:
+    - src-tauri/src/lib.rs::with_session_if_matches
+    - src-tauri/src/lib.rs::remove_session_if_matches
+    - src-tauri/src/lib.rs::send_message
+    - src-tauri/src/lib.rs::set_mode
+    - src-tauri/src/lib.rs::set_config_option
+    - src-tauri/src/lib.rs::close_session
+    - src-tauri/src/lib.rs::cancel_prompt
+    - src-tauri/src/lib.rs::load_persisted_session
+    - src-tauri/src/agent_runtime.rs
+    - F:\A-I\Agent\Peri 中对应 handler，仅在协议语义不明时定向读取
+  likely_modify:
+    - src-tauri/src/lib.rs
+    - src-tauri/src/agent_runtime.rs
+    - 对应 Rust tests/fixture
+    - docs/后端开发与交接手册.md
+  do_not_modify:
+    - src/**
+    - src-tauri/src/prism.rs
+    - 多 Agent runtime 数据模型
+guidance:
+  invariants:
+    - await 后本地 mutation 前验证四元身份。
+    - destructive cleanup 使用统一 helper。
+    - stale path 返回稳定语义，不静默写错状态。
+    - 不因旧错误删除新 mapping。
+  non_goals:
+    - B7 多 Agent runtime
+    - 全量错误 DTO
+    - 真实 Peri/Tauri 总验收
+verification:
+  during_development:
+    - cd src-tauri && cargo test --lib session_info_tests -- --nocapture
+    - cd src-tauri && cargo check
+  checkpoint_only:
+    - event-level fake ACP
+    - 真实 Tauri + Peri A→B→A
+completion:
+  - 主 mutation 路径审计完成
+  - 缺失校验已修复或明确记录后续任务
+  - targeted verification 通过
+opens_checkpoint: CP-RUNTIME-FOUNDATION

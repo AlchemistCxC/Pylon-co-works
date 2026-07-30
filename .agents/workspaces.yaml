@@ -1,0 +1,11 @@
+version: 1
+state_dir: G:\Project\prism-desktop-agent-state
+integration:
+  path: G:\Project\prism-desktop
+  branch: main
+backend:
+  path: G:\Project\prism-desktop-backend
+  branch: agent/backend
+frontend:
+  path: G:\Project\prism-desktop-frontend
+  branch: agent/frontend

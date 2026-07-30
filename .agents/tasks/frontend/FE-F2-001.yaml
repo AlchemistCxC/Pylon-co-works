@@ -1,0 +1,46 @@
+version: 1
+id: FE-F2-001
+title: 接入 Prism 只读 DTO adapter 与状态外壳
+lane: frontend
+priority: P1
+stage: prism-read
+subsystem: prism-ui
+size: L
+relay_group: prism-ui
+blocks_other_lane: false
+domains: [prism-ui, react]
+dependencies: {tasks: [BE-B3-001], checkpoints: []}
+goal:
+  user_result: Prism Sheet 显示真实 health/state/scenario/source/block 数据和 unavailable/unauthorized/error 状态。
+  technical_result: 建立 typed adapter/normalizer，替换对应静态只读数据，不接未冻结写能力。
+source_facts:
+  - 当前 PrismSheet 是静态演示。
+  - BE-B3-001 完成前 Prism contract 为 proposed。
+scope:
+  inspect_first:
+    - .agents/contracts/prism.md
+    - src/components/PrismSheet.tsx
+    - src/components/PrismSheet.css
+    - src/sheets/PrismManagerSheetView.tsx
+    - 现有 Prism 相关 tests（若有）
+  likely_modify:
+    - src/sheets/prism/ 下 typed adapter
+    - PrismSheet/Manager 局部
+    - targeted tests/CSS
+    - docs/前端开发与交接手册.md F2.1-F2.4
+  do_not_modify: [src-tauri/**, Prism 写 CRUD, G:\Project\prism]
+guidance:
+  invariants:
+    - 非法 payload 返回安全 error/null，不贯穿 any。
+    - 未冻结写能力隐藏或 unavailable。
+    - 保持现有 Prism 页面设计结构。
+  non_goals: [写事务, Source entry/file CRUD, 真实 token 写链]
+verification:
+  during_development:
+    - Prism adapter targeted tests
+    - npm run build
+  checkpoint_only: [npm run test:frontend, 真实 Tauri Prism read]
+completion:
+  - 对应静态 read 数据被真实 adapter 替代
+  - 状态外壳完整
+opens_checkpoint: CP-PRISM-READ

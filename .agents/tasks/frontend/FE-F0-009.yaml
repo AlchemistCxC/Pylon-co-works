@@ -1,0 +1,52 @@
+version: 1
+id: FE-F0-009
+title: 统一 Agent Sheet activate 异步切换事务
+lane: frontend
+priority: P0
+stage: agent-ui
+subsystem: workspace-sheet-agent
+size: L
+relay_group: agent-ui
+blocks_other_lane: false
+domains: [workspace-sheet, settings-ui, session-runtime]
+dependencies:
+  tasks: [FE-F4-001, BE-B1-001]
+  checkpoints: [CP-RUNTIME-FOUNDATION]
+goal:
+  user_result: 点击 Agent Sheet 会真实切换 runtime；失败时仍停留原 Agent，不出现目标 Sheet 已连接假状态。
+  technical_result: Sheet focus 经统一 activateSheet transaction 调 switch_agent，并处理 success/rollback/load 边界。
+source_facts:
+  - 当前 App.tsx 的 onFocusSheet 只调用本地 focusSheet。
+  - 真实 switch_agent 主要仍在 Settings.tsx。
+  - 后端仍是单 active runtime。
+scope:
+  inspect_first:
+    - src/App.tsx 中 Sheet focus action
+    - src/components/agentSwitchTransaction.ts
+    - src/components/Settings.tsx 中 switch_agent 流程
+    - src/store.ts 中 activeAgent/sheetAgentStates
+    - src/workspace-sheets/SheetTabStrip.tsx
+    - 相关 switch transaction tests
+  likely_modify:
+    - 上述前端文件局部
+    - 新的 activateSheet transaction/controller
+    - targeted tests
+    - docs/前端开发与交接手册.md F0.5/F0.9
+  do_not_modify: [src-tauri/**, 多 Agent runtime, 视觉重写]
+guidance:
+  invariants:
+    - 同 Agent 不重复 invoke。
+    - 不同 Agent 先执行后端事务，成功后提交本地 active 状态。
+    - 失败不伪装切换成功。
+    - Sheet/Session navigation state 与后端 runtime mapping 分层。
+  non_goals: [后台多 Agent 并行, 完整 persisted Session load 设计扩张]
+verification:
+  during_development:
+    - Agent switch transaction targeted tests
+    - Sheet state targeted tests
+    - npm run build
+  checkpoint_only: [真实 Tauri A→B→A]
+completion:
+  - 顶部 Sheet focus 不再只是本地 focus
+  - success/failure/快速切换有 targeted coverage
+opens_checkpoint: CP-AGENT-SHEET
