@@ -5,3 +5,5 @@ src-tauri/tests-harness/target/
 *.log
 .DS_Store
 *.tsbuildinfo
+__pycache__/
+*.py[cod]
