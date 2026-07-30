@@ -1,7 +1,7 @@
 import { invoke } from '@tauri-apps/api/core'
 import { useEffect, useRef, useState } from 'react'
 import LogsPanel from './right-panel/LogsPanel'
-import ReservedTab from './right-panel/ReservedTab'
+import PanelStatus from './right-panel/PanelStatus'
 import WorkspacePanel from './right-panel/WorkspacePanel'
 import { RIGHT_PANEL_TABS } from './right-panel/RightPanelTabs'
 import {
@@ -159,8 +159,16 @@ export default function RightPanel({ sessionId, onClose }: RightPanelProps) {
           </>
         )}
         {tab === 'logs' && <LogsPanel state={logsState} />}
-        {tab === 'reserved-1' && <ReservedTab title="预留页面一" detail="此页面暂未定义功能。" />}
-        {tab === 'reserved-2' && <ReservedTab title="预留页面二" detail="此页面暂未定义功能。" />}
+        {tab === 'activity' && (
+          <div className="panel-tab">
+            <PanelStatus kind="empty" title="活动能力尚未接入" detail="活动面板将在后端接口就绪后开启" />
+          </div>
+        )}
+        {tab === 'changes' && (
+          <div className="panel-tab">
+            <PanelStatus kind="empty" title="变更能力尚未接入" detail="Git 只读能力暂未接入，完成后将在此显示变更摘要" />
+          </div>
+        )}
       </div>
     </aside>
   )

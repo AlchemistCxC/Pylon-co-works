@@ -5,7 +5,7 @@ const right = readFileSync(new URL('../src/components/RightPanel.tsx', import.me
 const tabs = readFileSync(new URL('../src/components/right-panel/RightPanelTabs.tsx', import.meta.url), 'utf8')
 const css = readFileSync(new URL('../src/components/RightPanel.css', import.meta.url), 'utf8')
 
-for (const tab of ['workspace', 'logs', 'reserved-1', 'reserved-2']) {
+for (const tab of ['workspace', 'logs', 'activity', 'changes']) {
   assert.equal(tabs.includes(`id: '${tab}'`), true, `缺少 tab: ${tab}`)
 }
 assert.equal(right.includes('sessionId: string | null'), true)

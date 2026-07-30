@@ -1,6 +1,4 @@
-import type { ReactNode } from 'react'
-
-export type RightPanelTab = 'workspace' | 'logs' | 'reserved-1' | 'reserved-2'
+export type RightPanelTab = 'workspace' | 'logs' | 'activity' | 'changes'
 
 export interface SessionSourceRef {
   id: string
@@ -24,13 +22,7 @@ export interface PanelStatusProps {
   retry?: () => void
 }
 
-export interface ReservedTabProps {
-  title: string
-  detail: string
-  icon?: ReactNode
-}
-
-/** Minimal, backend-agnostic data used to render the Workspace tree. */
+/** Backend-agnostic data used to render the Workspace tree. */
 export interface WorkspaceEntry {
   path: string
   label: string
