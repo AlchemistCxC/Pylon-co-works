@@ -80,6 +80,14 @@
 .sheet-tab[data-agent-state="crashed"] .sheet-tab-status,
 .sheet-tab[data-agent-state="error"] .sheet-tab-status { background:var(--tool-err,#ff6b80); }
 .sheet-tab[data-agent-state="inactive"] .sheet-tab-status { background:transparent; border:1px solid var(--text-dim); box-shadow:none; }
+.workspace-menu { position:absolute; z-index:220; display:flex; min-width:180px; flex-direction:column; padding:4px; border:1px solid var(--border); border-radius:5px; background:var(--bg-panel); box-shadow:0 10px 30px rgba(0,0,0,0.28); color:var(--text); font:12px var(--mono); }
+.workspace-menu button { border:0; border-radius:3px; padding:7px 9px; background:transparent; color:inherit; cursor:pointer; text-align:left; white-space:nowrap; }
+.workspace-menu button:hover:not(:disabled) { background:var(--bg-hover); }
+.workspace-menu button:disabled { cursor:default; opacity:0.35; }
+.workspace-menu-separator { height:1px; margin:4px 2px; background:var(--border); }
+.workspace-menu-tab-context { top:calc(100% + 3px); left:8px; }
+.workspace-titlebar-launchers { position:relative; }
+.workspace-menu-titlebar { top:calc(100% + 2px); right:0; }
 
 @media (max-width:1100px) {
   .sheet-tab { min-width:82px; flex-basis:126px; }

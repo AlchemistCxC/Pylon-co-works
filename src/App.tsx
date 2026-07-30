@@ -221,6 +221,13 @@ export default function App() {
         onToggleSidebar={() => setSidebarCollapsed(value => !value)}
         onFocusSheet={id => useStore.getState().focusSheet(id)}
         onCloseSheet={id => useStore.getState().closeSheet(id)}
+        menuActions={{
+          onTogglePin: id => useStore.getState().toggleSheetPin(id),
+          onClose: id => useStore.getState().closeSheet(id),
+          onCloseOthers: id => useStore.getState().closeOtherSheets(id),
+          onCloseRight: id => useStore.getState().closeRightSheets(id),
+          onReopen: () => useStore.getState().reopenSheet(),
+        }}
         onOpenSheet={() => setShowSheetLauncher(true)}
         onReopenSheet={() => useStore.getState().reopenSheet()}
         onToggleRightPanel={() => setRightOpen(value => !value)}
