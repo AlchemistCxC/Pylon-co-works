@@ -1055,6 +1055,43 @@ mod session_info_tests {
         apply_client_replacement_sessions(&mut sessions, false, 9);
         assert!(sessions.is_empty());
     }
+
+    #[test]
+    fn inspector_aggregates_session_stats() {
+        let mut sessions = HashMap::new();
+        let mut s1 = SessionInfo::new("peri-1".into(), "p1".into(), ".".into(), true, 0);
+        s1.tokens_in = 100;
+        s1.tokens_out = 50;
+        s1.tokens_total = 150;
+        s1.context_size = 8192;
+        s1.model = "model-a".into();
+        let mut s2 = SessionInfo::new("peri-2".into(), "p2".into(), "/work".into(), false, 0);
+        s2.tokens_in = 20;
+        s2.tokens_out = 10;
+        s2.tokens_total = 30;
+        sessions.insert("source-a".into(), s1);
+        sessions.insert("source-b".into(), s2);
+        let runtime = AgentRuntimeState {
+            status: AgentLifecycleStatus::Connected,
+            last_error: None,
+            last_connected_at: Some("ts".into()),
+        };
+        let payload = build_inspector_payload(&sessions, &runtime, "agent-x");
+        assert_eq!(payload["agent"]["id"], "agent-x");
+        assert_eq!(payload["agent"]["status"], "connected");
+        assert_eq!(payload["summary"]["sessionCount"], 2);
+        assert_eq!(payload["summary"]["activeCount"], 1); // 仅 s1 有 first prompt
+        assert_eq!(payload["summary"]["tokensTotal"], 180);
+        assert_eq!(payload["summary"]["tokensIn"], 120);
+        assert_eq!(payload["summary"]["tokensOut"], 60);
+        let rows = payload["sessions"].as_array().expect("sessions must be array");
+        assert_eq!(rows.len(), 2);
+        let rows_by_source: HashMap<&str, &serde_json::Value> =
+            rows.iter().map(|r| (r["source"].as_str().unwrap(), r)).collect();
+        assert_eq!(rows_by_source["source-a"]["tokensTotal"], 150);
+        assert_eq!(rows_by_source["source-b"]["cwd"], "/work");
+        assert_eq!(rows_by_source["source-a"]["model"], "model-a");
+    }
 }
 
 #[cfg(test)]
@@ -1683,6 +1720,61 @@ async fn load_sessions(state: tauri::State<'_, AppState>) -> Result<Vec<serde_js
     }).collect())
 }
 
+/// Session Inspector 聚合 DTO：agent 状态 + 全量会话统计 + 会话明细。
+/// 独立纯函数便于单测（sessions 快照 + runtime 快照 → payload）。
+fn build_inspector_payload(
+    sessions: &HashMap<String, SessionInfo>,
+    runtime: &AgentRuntimeState,
+    active_id: &str,
+) -> serde_json::Value {
+    let total_tokens: u64 = sessions.values().map(|s| s.tokens_total).sum();
+    let total_in: u64 = sessions.values().map(|s| s.tokens_in).sum();
+    let total_out: u64 = sessions.values().map(|s| s.tokens_out).sum();
+    let active_count = sessions.values()
+        .filter(|s| s.has_first_prompt)
+        .count();
+
+    let session_rows: Vec<serde_json::Value> = sessions.iter().map(|(source, s)| {
+        serde_json::json!({
+            "source": source,
+            "periId": s.peri_id,
+            "title": s.title,
+            "model": s.model,
+            "mode": s.mode,
+            "tokensIn": s.tokens_in,
+            "tokensOut": s.tokens_out,
+            "tokensTotal": s.tokens_total,
+            "contextSize": s.context_size,
+            "cwd": s.cwd,
+        })
+    }).collect();
+
+    serde_json::json!({
+        "agent": {
+            "id": active_id,
+            "status": runtime.status.as_str(),
+            "lastError": runtime.last_error,
+            "lastConnectedAt": runtime.last_connected_at,
+        },
+        "summary": {
+            "sessionCount": sessions.len(),
+            "activeCount": active_count,
+            "tokensTotal": total_tokens,
+            "tokensIn": total_in,
+            "tokensOut": total_out,
+        },
+        "sessions": session_rows,
+    })
+}
+
+#[tauri::command]
+async fn session_inspector(state: tauri::State<'_, AppState>) -> Result<serde_json::Value, String> {
+    let sessions = state.sessions.lock().map_err(|e| e.to_string())?;
+    let runtime = state.agent_runtime.lock().map(|v| v.clone()).unwrap_or_default();
+    let active_id = state.active_agent.lock().map_err(|e| e.to_string())?.clone();
+    Ok(build_inspector_payload(&sessions, &runtime, &active_id))
+}
+
 // ── Agent Registry commands ──
 
 #[tauri::command]
@@ -2079,7 +2171,7 @@ pub fn run() {
                 prism_delete_block, prism_add_scenario_block, prism_edit_scenario_block,
                 prism_delete_scenario_block, prism_reorder_scenario_blocks, prism_reload, prism_llm_test,
                 new_session, send_message, set_mode, set_config_option, close_session, cancel_prompt, load_sessions,
-                list_agents, switch_agent, reconnect_agent, agent_status, reload_agents, set_mcp_servers,
+                session_inspector, list_agents, switch_agent, reconnect_agent, agent_status, reload_agents, set_mcp_servers,
                 validate_agents,
                 get_pet, pet_action,
                 load_persisted_session, list_persisted_sessions,
