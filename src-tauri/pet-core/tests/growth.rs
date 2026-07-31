@@ -1,4 +1,4 @@
-use pylon_pet_core::{AiEvent, GrowthStage, PetState, ToolOutcome};
+﻿use pylon_pet_core::{AiEvent, GrowthStage, PetState, ToolOutcome};
 
 #[test]
 fn token_usage_awards_xp_only_for_new_cumulative_tokens() {
@@ -134,12 +134,14 @@ fn offline_decay_is_capped_at_24h() {
 #[test]
 fn feeding_restores_hunger_and_play_restores_fun() {
     let mut pet = PetState::new_at(1);
+    pet.traits = pylon_pet_core::PetTraits::default();
     pet.apply(AiEvent::Feed, 1);
     assert_eq!(pet.hunger, 100);
     pet.apply(AiEvent::Feed, 2); // 30s 冷却内：bond 不加但 hunger 仍恢复
     assert_eq!(pet.hunger, 100);
 
     let mut pet = PetState::new_at(1);
+    pet.traits = pylon_pet_core::PetTraits::default();
     pet.apply(AiEvent::Play, 1);
     assert_eq!(pet.fun, 95, "play 恢复 fun +25");
     assert_eq!(pet.loneliness, 0, "play 大幅降低孤独");
@@ -293,4 +295,80 @@ fn failure_event_overrides_recent_happy_mood() {
     pet.hunger = 10;
     pet.apply(AiEvent::Poke, 2);
     assert_eq!(pet.mood, "hungry", "饥饿优先于 happy");
+}
+
+// ── M4：个性 traits + 防刷平衡（设计书 §7/§13.5.4）──
+
+#[test]
+fn feeding_spam_diminishes_returns() {
+    let mut pet = PetState::new_at(1);
+    pet.traits = pylon_pet_core::PetTraits::default();
+    pet.apply(AiEvent::Feed, 1);
+    assert_eq!(pet.hunger, 100, "首次喂食全收益");
+    // 30s 内连喂：50% 收益（hunger 已满，看 energy）
+    let e1 = pet.energy;
+    pet.apply(AiEvent::Feed, 2);
+    assert_eq!(pet.energy, (e1 as u16 + 10).min(100) as u8, "第二次喂食 50%");
+    // 30s 后重置
+    let mut pet = PetState::new_at(1);
+    pet.traits = pylon_pet_core::PetTraits::default();
+    pet.hunger = 50;
+    pet.apply(AiEvent::Feed, 1);
+    pet.hunger = 50;
+    pet.apply(AiEvent::Feed, 30_001); // 超过冷却
+    assert_eq!(pet.hunger, 70, "冷却后恢复全收益（+20）");
+}
+
+#[test]
+fn play_has_sixty_second_bond_cooldown() {
+    let mut pet = PetState::new_at(1);
+    pet.traits = pylon_pet_core::PetTraits::default();
+    pet.apply(AiEvent::Play, 1);
+    assert_eq!(pet.bond, 3, "首次玩耍 +3 bond");
+    pet.apply(AiEvent::Play, 2);
+    assert_eq!(pet.bond, 3, "60s 内重复玩耍不加 bond");
+    pet.apply(AiEvent::Play, 60_002);
+    assert_eq!(pet.bond, 6, "冷却后再次 +3");
+}
+
+#[test]
+fn greedy_pet_gets_more_from_food() {
+    let mut pet = PetState::new_at(1);
+    pet.traits = pylon_pet_core::PetTraits::default();
+    pet.traits.greed = 100;
+    pet.hunger = 50;
+    pet.apply(AiEvent::Feed, 1);
+    assert_eq!(pet.hunger, 80, "贪吃喂食收益 ×1.5（+30）");
+    let mut normal = PetState::new_at(1);
+    normal.traits = pylon_pet_core::PetTraits::default();
+    normal.hunger = 50;
+    normal.apply(AiEvent::Feed, 1);
+    assert_eq!(normal.hunger, 70, "普通喂食 +20");
+}
+
+#[test]
+fn clingy_pet_loses_bond_when_neglected() {
+    let mut pet = PetState::new_at(1);
+    pet.traits = pylon_pet_core::PetTraits::default();
+    pet.bond = 100;
+    pet.loneliness = 80; // ≥80 触发冷落惩罚
+    pet.apply(AiEvent::Visit, 3_600_000); // 1h 冷落
+    assert!(pet.bond < 100, "孤独≥80 持续必须掉 bond");
+    // 不黏人的宠物不受此惩罚（孤独<80）
+    let mut pet = PetState::new_at(1);
+    pet.traits = pylon_pet_core::PetTraits::default();
+    pet.bond = 100;
+    pet.loneliness = 50;
+    pet.apply(AiEvent::Visit, 3_600_000);
+    assert_eq!(pet.bond, 100);
+}
+
+#[test]
+fn random_traits_are_in_bounds_and_differ() {
+    let a = pylon_pet_core::PetTraits::random();
+    let b = pylon_pet_core::PetTraits::random();
+    for trait_value in [a.activity, a.clinginess, a.greed, a.curiosity] {
+        assert!((10..=100).contains(&trait_value), "trait 必须 10-100");
+    }
+    assert!(a != b || a != pylon_pet_core::PetTraits::random(), "随机应有个体差异");
 }

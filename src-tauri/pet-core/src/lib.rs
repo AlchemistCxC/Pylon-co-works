@@ -33,6 +33,19 @@ impl PetTraits {
         self.curiosity = self.curiosity.min(100);
         self
     }
+
+    /// 出生随机（M4）：每维 60±25，clamp 到 10-100（偏正面但有个性差异）。
+    pub fn random() -> Self {
+        use rand::RngExt;
+        let mut rng = rand::rng();
+        let roll = |rng: &mut rand::rngs::ThreadRng| -> u8 { (60_i32 + rng.random_range(-25..=25)).clamp(10, 100) as u8 };
+        Self {
+            activity: roll(&mut rng),
+            clinginess: roll(&mut rng),
+            greed: roll(&mut rng),
+            curiosity: roll(&mut rng),
+        }
+    }
 }
 
 /// 层次状态机（设计书 §5）：Awake(Idle/Interacting/Distress) / Asleep。
@@ -212,11 +225,21 @@ pub struct PetState {
     pub msg: Option<String>,
     #[serde(skip)]
     last_interaction_at_ms: u64,
+    // ── v2 防刷（M4；不落盘，重启后冷却清空）──
+    #[serde(skip)]
+    last_feed_at_ms: u64,
+    #[serde(skip)]
+    feed_spam_count: u8,
+    #[serde(skip)]
+    last_play_at_ms: u64,
 }
 
 impl Default for PetState {
     fn default() -> Self {
-        Self::new_at(0)
+        // 反序列化缺失字段的兜底：确定性（traits 中性，绝不随机——否则每次加载存档 traits 都会变）
+        let mut pet = Self::new_at(0);
+        pet.traits = PetTraits::default();
+        pet
     }
 }
 
@@ -236,7 +259,7 @@ impl PetState {
             hunger: 80,
             fun: 70,
             loneliness: 0,
-            traits: PetTraits::default(),
+            traits: PetTraits::random(),
             machine: PetMachineState::default(),
             last_tick_at_ms: now_ms,
             recent_events: Vec::with_capacity(RECENT_EVENTS_CAP),
@@ -252,6 +275,9 @@ impl PetState {
             memories: Vec::new(),
             msg: Some("一粒微光落在了这里。".into()),
             last_interaction_at_ms: 0,
+            last_feed_at_ms: 0,
+            feed_spam_count: 0,
+            last_play_at_ms: 0,
         }
     }
 
@@ -368,11 +394,24 @@ impl PetState {
             }
             AiEvent::Feed => {
                 self.stats.interactions = self.stats.interactions.saturating_add(1);
-                self.hunger = (self.hunger as u16 + 20).min(100) as u8;
-                self.energy = (self.energy as u16 + 20).min(100) as u8;
-                self.fun = (self.fun as u16 + 3).min(100) as u8;
-                self.loneliness = self.loneliness.saturating_sub(20);
-                self.happiness = (self.happiness as u16 + 7).min(100) as u8;
+                // M4 防刷：30s 内重复喂食收益递减（100%→50%→25%→0），30s 后重置
+                // （last_feed_at_ms==0 = 从未喂过，首次不视为 spam）
+                if self.last_feed_at_ms > 0 && now_ms.saturating_sub(self.last_feed_at_ms) < 30_000 {
+                    self.feed_spam_count = (self.feed_spam_count + 1).min(3);
+                } else {
+                    self.feed_spam_count = 0;
+                }
+                self.last_feed_at_ms = now_ms;
+                let multiplier = [100_u16, 50, 25, 0][self.feed_spam_count as usize];
+                // M4 个性：贪吃 → 饥饿恢复收益 ×(1+greed/200)（50%~150%）
+                let greed_factor = (100 + self.traits.greed as u16 * 2) / 2;
+                let hunger_gain = 20_u16 * multiplier / 100 * greed_factor / 100;
+                self.hunger = (self.hunger as u16 + hunger_gain).min(100) as u8;
+                self.energy = (self.energy as u16 + 20 * multiplier / 100).min(100) as u8;
+                self.fun = (self.fun as u16 + 3 * multiplier / 100).min(100) as u8;
+                self.loneliness = self.loneliness.saturating_sub((20 * multiplier / 100) as u8);
+                self.happiness = (self.happiness as u16 + 7 * multiplier / 100).min(100) as u8;
+                // bond 走 reward_interaction（30s 冷却，另计）
                 self.reward_interaction(now_ms, 1);
                 // mood 由 derive_mood 推导
                 self.push_event(RecentEvent::Feed);
@@ -380,12 +419,21 @@ impl PetState {
             }
             AiEvent::Play => {
                 self.stats.interactions = self.stats.interactions.saturating_add(1);
+                // M4 防刷：玩耍 60s 冷却（bond 收益；数值恢复不受限；首次不视为冷却中）
+                let play_cooled = self.last_play_at_ms == 0
+                    || now_ms.saturating_sub(self.last_play_at_ms) >= 60_000;
+                self.last_play_at_ms = now_ms;
                 self.hunger = self.hunger.saturating_sub(5);
                 self.energy = self.energy.saturating_sub(10);
-                self.fun = (self.fun as u16 + 25).min(100) as u8;
+                // M4 个性：好奇 → 玩耍 fun 收益 ×(1+curiosity/200)（50%~150%）
+                let curiosity_factor = (100 + self.traits.curiosity as u16 * 2) / 2;
+                let fun_gain = 25_u16 * curiosity_factor / 100;
+                self.fun = (self.fun as u16 + fun_gain).min(100) as u8;
                 self.loneliness = self.loneliness.saturating_sub(30);
                 self.happiness = (self.happiness as u16 + 4).min(100) as u8;
-                self.reward_interaction(now_ms, 3);
+                if play_cooled {
+                    self.gain_bond(3);
+                }
                 // mood 由 derive_mood 推导
                 self.push_event(RecentEvent::Play);
                 self.msg = Some("它追着你的光标跑来跑去。".into());
@@ -439,21 +487,26 @@ impl PetState {
         if self.machine == PetMachineState::Asleep {
             self.energy = (self.energy as u64 + dt * 2).min(100) as u8;
         } else {
-            // 所有 delta 先 min(100) 再 cast——dt×rate 可超 255，直接 as u8 会截断溢出
+            // 速率（每分钟）× dt；所有 delta 先 min(100) 再 cast 防 u8 截断
             // hunger -= dt×0.6×(1+greed/100)
             let hunger_delta = (dt * 6 * (100 + traits.greed as u64) / 1000).min(100);
             self.hunger = self.hunger.saturating_sub(hunger_delta as u8);
-            // energy -= dt×0.5×(1-activity/200)
-            let energy_delta = (dt * 5 * (200 - traits.activity as u64) / 1000).min(100);
+            // energy -= dt×0.5×(1-activity/200) = dt×(200-activity)/400
+            let energy_delta = (dt * (200 - traits.activity as u64) / 400).min(100);
             self.energy = self.energy.saturating_sub(energy_delta as u8);
-            // fun -= dt×0.35
-            let fun_delta = (dt * 35 / 100).min(100);
+            // fun -= dt×0.35×(1+activity/200) = dt×35×(200+activity)/20000
+            let fun_delta = (dt * 35 * (200 + traits.activity as u64) / 20_000).min(100);
             self.fun = self.fun.saturating_sub(fun_delta as u8);
-            // loneliness += dt×0.25×(1+clinginess/100)
-            let lonely_delta = (dt * 25 * (100 + traits.clinginess as u64) / 1000).min(100);
+            // loneliness += dt×0.25×(1+clinginess/100) = dt×25×(100+clinginess)/10000
+            let lonely_delta = (dt * 25 * (100 + traits.clinginess as u64) / 10_000).min(100);
             self.loneliness = (self.loneliness as u64 + lonely_delta).min(100) as u8;
             // hunger=0 持续：羁绊惩罚（0.5/tick，封顶 10）
             if self.hunger == 0 {
+                let penalty = (dt / 2).min(10);
+                self.bond = self.bond.saturating_sub(penalty as u32);
+            }
+            // M4 个性：黏人被冷落（孤独≥80）持续 → bond 惩罚（0.5/tick，封顶 10）
+            if self.loneliness >= 80 {
                 let penalty = (dt / 2).min(10);
                 self.bond = self.bond.saturating_sub(penalty as u32);
             }
