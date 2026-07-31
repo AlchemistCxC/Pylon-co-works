@@ -20,7 +20,7 @@ import { applyCancelEvent, beginCancel, createCancelState, rejectCancelCommand, 
 import { clearChatSourceRefs } from './sessionCleanup'
 import { measureRender, recordMeasuredAsync, recordRender } from './renderMetrics'
 import { prepareRenderableMessages } from './messagePipeline'
-import type { Message as PipelineMessage } from './messageTypes'
+import type { Message as PipelineMessage, RenderMessage } from './messageTypes'
 import { buildMessageLookups } from './messageLookups'
 import { getToolSummary } from './toolPresentation'
 import { buildToolPresentationModel, toolPresentationStatus, truncateToolSummary } from './toolPresentationModel'
@@ -28,6 +28,9 @@ import { normalizeToolStatus, type ToolVisualState } from './toolStatus'
 import { isPlainTextContent } from './markdownFastPath'
 import { MessageRenderBoundary } from './MessageRenderBoundary'
 import { createMockMessages } from './chatMockData'
+import DiffCard from './DiffCard'
+import { messageMatchesQuery } from './messageSearchIndex'
+import MessageSearchBar from './MessageSearchBar'
 import './ChatView.css'
 
 interface Props { sessionId: string | null }
@@ -84,9 +87,14 @@ const ChatView = React.memo(function ChatView({ sessionId }: Props) {
   const streamingSourceRef = useRef<string | null>(null)
   const flushStreamingRef = useRef<((source: string) => void) | null>(null)
   const [generating, setGenerating] = useState(false)
+  const [lastTokenAt, setLastTokenAt] = useState(0)
   const genStart = useRef(Date.now())
   const tokenCount = useRef(0)
   const [summary, setSummary] = useState<GenerationSummary | null>(null)
+  const [searchOpen, setSearchOpen] = useState(false)
+  const [searchQuery, setSearchQuery] = useState('')
+  const [searchIndex, setSearchIndex] = useState(0)
+  const messageRefs = useRef(new Map<string, HTMLDivElement>())
   const sessionRef = useRef<string | null>(null)
   const messageOwnerRef = useRef<string | null>(null)
   const messagesBySourceRef = useRef<Record<string, Message[]>>({})
@@ -97,6 +105,48 @@ const ChatView = React.memo(function ChatView({ sessionId }: Props) {
   const loadGenerationRef = useRef<Record<string, number>>({})
   const cancelStateRef = useRef<Record<string, CancelState>>({})
   const prevSessionRef = useRef(sessionId)
+  useEffect(() => {
+    const onSearchShortcut = (event: globalThis.KeyboardEvent) => {
+      if (!(event.ctrlKey || event.metaKey) || event.key.toLowerCase() !== 'f') return
+      event.preventDefault()
+      setSearchOpen(true)
+    }
+    window.addEventListener('keydown', onSearchShortcut)
+    return () => window.removeEventListener('keydown', onSearchShortcut)
+  }, [])
+
+  useEffect(() => {
+    setSearchQuery('')
+    setSearchIndex(0)
+    setSearchOpen(false)
+  }, [sessionId])
+
+  const searchMatches = useMemo(() => {
+    if (!searchQuery.trim()) return []
+    return messages.filter(message => messageMatchesQuery(message, searchQuery))
+  }, [messages, searchQuery])
+
+  useEffect(() => {
+    if (searchMatches.length === 0) {
+      setSearchIndex(0)
+      return
+    }
+    setSearchIndex(index => Math.min(index, searchMatches.length - 1))
+  }, [searchMatches.length])
+
+  const moveSearch = useCallback((direction: 1 | -1) => {
+    if (searchMatches.length === 0) return
+    setSearchIndex(index => (index + direction + searchMatches.length) % searchMatches.length)
+  }, [searchMatches.length])
+
+  useEffect(() => {
+    const message = searchMatches[searchIndex]
+    if (!message) return
+    const node = messageRefs.current.get(message.id)
+    if (!node) return
+    node.scrollIntoView({ behavior: 'smooth', block: 'center' })
+  }, [searchMatches, searchIndex])
+
   useEffect(() => {
     if (sessionId === prevSessionRef.current) return
     prevSessionRef.current = sessionId
@@ -290,6 +340,7 @@ const ChatView = React.memo(function ChatView({ sessionId }: Props) {
           genStart.current = generationStartRef.current[source]
           tokenCount.current = 0
           setGenerating(true)
+          setLastTokenAt(Date.now())
           setSummary(null)
           streamingSourceRef.current = source
           streamingTextRef.current = ''
@@ -326,6 +377,7 @@ const ChatView = React.memo(function ChatView({ sessionId }: Props) {
             if (!replay && isRenderedSource(source, sessionRef.current)) {
               streamingSourceRef.current = source
               streamingTextRef.current += text
+              setLastTokenAt(Date.now())
               setStreamingText(streamingTextRef.current)
               break
             }
@@ -344,6 +396,7 @@ const ChatView = React.memo(function ChatView({ sessionId }: Props) {
             if (!replay && isRenderedSource(source, sessionRef.current)) {
               streamingSourceRef.current = source
               streamingThinkingRef.current += text
+              setLastTokenAt(Date.now())
               setStreamingThinking(streamingThinkingRef.current)
               break
             }
@@ -539,6 +592,15 @@ const ChatView = React.memo(function ChatView({ sessionId }: Props) {
 
   return (
     <div className="chat-view" ref={chatViewRef}>
+      {searchOpen && <MessageSearchBar
+        query={searchQuery}
+        matchIndex={searchIndex}
+        matchCount={searchMatches.length}
+        onQueryChange={query => { setSearchQuery(query); setSearchIndex(0) }}
+        onPrevious={() => moveSearch(-1)}
+        onNext={() => moveSearch(1)}
+        onClose={() => { setSearchOpen(false); setSearchQuery('') }}
+      />}
       <div className="term">
         <AnimatePresence initial={false}>
           {measureRender('messages.map', () => {
@@ -546,9 +608,14 @@ const ChatView = React.memo(function ChatView({ sessionId }: Props) {
             return preparedMessages.map((renderMessage) => (
               <MemoMessageRow
                 key={renderMessage.message.id}
-                message={renderMessage.message}
+                renderMessage={renderMessage}
                 reduceMotion={reduceMotion === true}
                 toolVisualState={resolveRowToolVisualState(renderMessage.message, messageLookups)}
+                rowRef={node => {
+                  if (node) messageRefs.current.set(renderMessage.message.id, node)
+                  else messageRefs.current.delete(renderMessage.message.id)
+                }}
+                highlighted={searchMatches[searchIndex]?.id === renderMessage.message.id}
               />
             ))
           })}
@@ -557,7 +624,7 @@ const ChatView = React.memo(function ChatView({ sessionId }: Props) {
         {streamingText && <StreamingAssistantText text={streamingText} />}
         <GenerationFooter running={generating}
           frames={generationFramesRef.current[sessionRef.current || ''] || resolveSpinnerFrames(useStore.getState().spinnerFramePreset, useStore.getState().spinnerCustomFrames)}
-          tokenCount={tokenCount.current} startTime={genStart.current} summary={summary}
+          tokenCount={tokenCount.current} startTime={genStart.current} lastTokenAt={lastTokenAt} summary={summary}
           onStop={generating ? () => {
             if (!sessionRef.current) return
             const source = sessionRef.current
@@ -597,44 +664,49 @@ const ChatView = React.memo(function ChatView({ sessionId }: Props) {
 // ── Sub-components ──
 
 
-function MessageRow({ message: msg, reduceMotion, toolVisualState }: { message: Message; reduceMotion: boolean; toolVisualState?: string }) {
+function MessageRow({ renderMessage, reduceMotion, toolVisualState, rowRef, highlighted }: { renderMessage: RenderMessage; reduceMotion: boolean; toolVisualState?: string; rowRef?: (node: HTMLDivElement | null) => void; highlighted?: boolean }) {
   recordRender('MessageRow.render')
+  const msg = renderMessage.message
   const toolModel = msg.role === 'tool'
     ? buildToolPresentationModel(msg, toolVisualState ? normalizeToolStatus(toolVisualState) : undefined)
     : undefined
-  const renderType = msg.role === 'tool'
-    ? msg.toolOutput !== undefined ? 'tool_result' : 'tool_call'
-    : msg.role
+  const renderType = renderMessage.type
   return (
     <MessageRenderBoundary message={msg}>
       <motion.div
-      className={`term-row term-row-${msg.role}`}
+      ref={rowRef}
+      className={`term-row term-row-${msg.role}${highlighted ? ' term-row-search-active' : ''}`}
       data-render-type={renderType}
       initial={reduceMotion ? false : { opacity: 0, y: 8 }}
       animate={{ opacity: 1, y: 0 }}
       transition={reduceMotion ? { duration: 0 } : { duration: 0.25, ease: [0.2, 0, 0, 1] }}
     >
       {toolModel && <ToolCard model={toolModel} />}
-      {msg.role === 'user' && <UserLine sender={msg.sender} content={msg.content} />}
-      {msg.role === 'reasoning' && <ReasoningBlock text={msg.content} running={msg.running === true} />}
-      {msg.role === 'assistant' && <AssistantContent text={msg.content} />}
+      {renderMessage.type === 'user' && <UserLine sender={msg.sender} content={msg.content} />}
+      {renderMessage.type === 'reasoning' && <ReasoningBlock text={msg.content} running={msg.running === true} />}
+      {renderMessage.type === 'assistant' && <AssistantContent text={msg.content} />}
+      {(renderMessage.type === 'error' || renderMessage.type === 'system') && (
+        <div className="term-row-error" role="alert">{msg.content || '系统消息'}</div>
+      )}
       </motion.div>
     </MessageRenderBoundary>
   )
 }
 
 function areMessageRowPropsEqual(
-  previous: { message: Message; reduceMotion: boolean; toolVisualState?: string },
-  next: { message: Message; reduceMotion: boolean; toolVisualState?: string },
+  previous: { renderMessage: RenderMessage; reduceMotion: boolean; toolVisualState?: string; rowRef?: (node: HTMLDivElement | null) => void; highlighted?: boolean },
+  next: { renderMessage: RenderMessage; reduceMotion: boolean; toolVisualState?: string; rowRef?: (node: HTMLDivElement | null) => void; highlighted?: boolean },
 ): boolean {
-  if (previous.message !== next.message) return false
+  if (previous.renderMessage.message !== next.renderMessage.message) return false
+  if (previous.renderMessage.type !== next.renderMessage.type) return false
   if (previous.reduceMotion !== next.reduceMotion) return false
   if (previous.toolVisualState !== next.toolVisualState) return false
-  if (previous.message.running || next.message.running) return false
-  if (previous.message.role === 'tool' || next.message.role === 'tool') {
-    if (previous.message.toolStatus !== next.message.toolStatus) return false
-    if (previous.message.toolOutput !== next.message.toolOutput) return false
-    if (previous.message.toolInput !== next.message.toolInput) return false
+  if (previous.highlighted !== next.highlighted) return false
+  if (previous.renderMessage.message.running || next.renderMessage.message.running) return false
+  if (previous.renderMessage.message.role === 'tool' || next.renderMessage.message.role === 'tool') {
+    if (previous.renderMessage.message.toolStatus !== next.renderMessage.message.toolStatus) return false
+    if (previous.renderMessage.message.toolOutput !== next.renderMessage.message.toolOutput) return false
+    if (previous.renderMessage.message.toolInput !== next.renderMessage.message.toolInput) return false
   }
   return true
 }
@@ -799,6 +871,7 @@ function ToolCard({ model }: { model: ReturnType<typeof buildToolPresentationMod
           <span className={`term-tool-label${model.errorText ? ' term-tool-label-error' : ''}`}>
             {model.errorText ? '错误' : '输出'}{model.outputLabel ? ` · ${model.outputLabel}` : ''}
           </span>
+          {model.isDiffCandidate && <DiffCard output={model.outputText} />}
           {model.name === 'Bash' && outputHtml
             ? <div className="term-ansi" dangerouslySetInnerHTML={{ __html: outputHtml }} />
             : <pre><code>{model.outputText}</code></pre>}

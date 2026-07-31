@@ -28,11 +28,12 @@ function formatTokens(n: number) {
   return `${n}`
 }
 
-export default function GenerationFooter({ running, frames, tokenCount, startTime, summary, onStop }: {
+export default function GenerationFooter({ running, frames, tokenCount, startTime, lastTokenAt, summary, onStop }: {
   running: boolean
   frames: string[]
   tokenCount: number
   startTime: number
+  lastTokenAt?: number
   summary: GenerationSummary | null
   onStop?: () => void
 }) {
@@ -75,15 +76,18 @@ export default function GenerationFooter({ running, frames, tokenCount, startTim
 
   if (running) {
     const elapsedMs = Date.now() - startTime
+    const idleMs = lastTokenAt ? Math.max(0, Date.now() - lastTokenAt) : elapsedMs
+    const activity = idleMs > 10000 ? 'stalled' : idleMs > 3000 ? 'waiting' : 'active'
     const tickIdx = Math.floor(elapsedMs / Math.max(40, Math.min(1000, spinnerIntervalMs || 120)))
     const parts = [formatElapsed(elapsedMs)]
     if (tokenCount > 0) parts.push(`↓ ${formatTokens(tokenCount)} tokens`)
     return (
       <div className="term-spinner-row">
-        <div className="term-spinner">
+        <div className="term-spinner" data-activity={activity}>
           <span className="spinner-frame" style={{ color: spinnerColor || undefined, fontSize: `${spinnerSize}px` }}>{frameAt(frames, elapsedMs, spinnerIntervalMs)}</span>
-          <span className="spinner-verb">{safeVerbs[Math.floor(tickIdx / 8) % safeVerbs.length]}</span>
+          <span className="spinner-verb">{activity === 'active' ? safeVerbs[Math.floor(tickIdx / 8) % safeVerbs.length] : activity === 'waiting' ? '等待响应' : '仍在等待后端响应'}</span>
           <span className="spinner-meta">({parts.join(' · ')})</span>
+          {activity !== 'active' && <span className="spinner-activity" aria-live="polite">…</span>}
         </div>
         {onStop && <button className="spinner-stop-btn" title="停止生成 (Esc / Ctrl+C)" onClick={onStop}>
           <Square size={11} /> 停止

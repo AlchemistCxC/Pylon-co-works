@@ -32,6 +32,7 @@
 .term-row-tool > * { min-width:0; }
 .term-row-error { padding:4px 0; color:var(--tool-err,#be2828); }
 .term-row-error-detail { margin-left:8px; color:var(--text-dim); font-size:0.85em; }
+.term-row-search-active { outline:1px solid var(--accent); outline-offset:4px; border-radius:4px; background:color-mix(in srgb, var(--accent) 8%, transparent); }
 .app[data-msg-style="bubble"] .term-row-user,
 .app[data-msg-style="bubble"] .term-row-assistant,
 .app[data-msg-style="bubble"] .term-row-reasoning {
@@ -162,6 +163,9 @@
 .spinner-frame { color:inherit; font-size:1.15em; min-width:1.15em; text-align:center; display:inline-block; }
 .spinner-verb { color:inherit; font-weight:500; opacity:0.85; }
 .spinner-meta { color:var(--text-dim); }
+.term-spinner[data-activity="waiting"] .spinner-frame { animation-duration:1.8s; opacity:0.72; }
+.term-spinner[data-activity="stalled"] .spinner-frame { animation:none; opacity:0.55; }
+.spinner-activity { color:var(--text-dim); letter-spacing:0.12em; }
 /* 停止按钮：小尺寸、低调、右对齐，不抢视觉 */
 .spinner-stop-btn {
   display:inline-flex; align-items:center; gap:3px; flex-shrink:0;

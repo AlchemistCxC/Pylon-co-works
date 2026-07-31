@@ -1,0 +1,12 @@
+.term-diff-card { margin:4px 0 6px; border:1px solid var(--border); border-radius:4px; overflow:hidden; background:var(--chat-code-bg,rgba(0,0,0,0.02)); }
+.term-diff-head { width:100%; display:flex; justify-content:space-between; gap:12px; padding:5px 8px; border:0; color:var(--text); background:transparent; font:inherit; text-align:left; cursor:pointer; }
+.term-diff-head:hover { background:var(--border); }
+.term-diff-count { color:var(--text-dim); font-size:0.85em; }
+.term-diff-body { max-height:320px; overflow:auto; font-family:var(--mono); font-size:0.9em; line-height:1.5; }
+.term-diff-line { display:flex; min-width:max-content; padding-right:10px; white-space:pre; }
+.term-diff-line code { font:inherit; }
+.term-diff-sign { width:24px; flex-shrink:0; padding-left:8px; color:var(--text-dim); user-select:none; }
+.term-diff-added { background:color-mix(in srgb, var(--tool-ok,#1e9646) 14%, transparent); }
+.term-diff-added .term-diff-sign { color:var(--tool-ok,#1e9646); }
+.term-diff-removed { background:color-mix(in srgb, var(--tool-err,#be2828) 14%, transparent); }
+.term-diff-removed .term-diff-sign { color:var(--tool-err,#be2828); }

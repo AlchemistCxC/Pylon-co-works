@@ -11,7 +11,7 @@ import { resolveSessionSource } from './sessionCommandState'
 import { resolveSessionProfile } from './sessionProfile'
 import { beginCancel, createCancelState, rejectCancelCommand, resolveCancelCommand, type CancelState } from './cancelState'
 import { reportRuntimeError } from '../../runtimeError'
-import { Paperclip, ArrowUp, Square } from 'lucide-react'
+import { Paperclip, ArrowUp, Square, Pencil, Send, Trash2 } from 'lucide-react'
 import type { AvailableCommand } from './acpTypes'
 import { resolveCliTextareaLayout, resolveDefaultTextareaHeight } from './inputOverflowState'
 import { resolveCommandSuggestions, filterCommandSuggestions, parseSlashCommand, type CommandSuggestion } from './commandRegistry'
@@ -21,12 +21,23 @@ interface Props { sessionId: string | null; split?: boolean; ariaDescribedBy?: s
 
 const EMPTY_COMMANDS: readonly AvailableCommand[] = Object.freeze([])
 
+interface QueuedMessage {
+  id: number
+  text: string
+  editing: boolean
+}
+
 export default forwardRef<{ send: () => void; attachFile: () => void; cancel: () => void }, Props>(function InputBar({ sessionId, split, ariaDescribedBy }, ref) {
   const [value, setValue] = useState('')
   const [cmdIdx, setCmdIdx] = useState(0)
   const [sendError, setSendError] = useState('')
   const [attached, setAttached] = useState<{path:string;name:string;size:number}[]>([])
+  const [historyIndex, setHistoryIndex] = useState(-1)
+  const [historyLength, setHistoryLength] = useState(0)
+  const [queuedMessages, setQueuedMessages] = useState<QueuedMessage[]>([])
   const lastMsg = useRef('')
+  const historyBySourceRef = useRef<Record<string, string[]>>({})
+  const historyDraftRef = useRef('')
   const textareaRef = useRef<HTMLTextAreaElement>(null)
   const profiles = useStore(s => s.profiles)
   const sessions = useStore(s => s.sessions)
@@ -50,10 +61,30 @@ export default forwardRef<{ send: () => void; attachFile: () => void; cancel: ()
     }
   }, [sessionSource, generating])
 
+  useEffect(() => {
+    historyDraftRef.current = ''
+    setHistoryIndex(-1)
+    setHistoryLength(sessionSource ? (historyBySourceRef.current[sessionSource]?.length || 0) : 0)
+  }, [sessionSource])
+
+  useEffect(() => {
+    setQueuedMessages([])
+  }, [sessionSource])
+
   const sessionProfile = resolveSessionProfile(sessionId, sessions, profiles)
   const persona = sessionProfile?.persona || ''
 
   const COMMANDS = resolveCommandSuggestions(liveCommands)
+
+  const recordHistory = (text: string) => {
+    if (!sessionSource || !text) return
+    const previous = historyBySourceRef.current[sessionSource] || []
+    const next = previous.filter(item => item !== text).concat(text).slice(-50)
+    historyBySourceRef.current[sessionSource] = next
+    setHistoryLength(next.length)
+    setHistoryIndex(-1)
+    historyDraftRef.current = ''
+  }
 
   const isCmd = value.startsWith('/')
   const filtered = isCmd ? filterCommandSuggestions(value, COMMANDS) : []
@@ -160,6 +191,7 @@ export default forwardRef<{ send: () => void; attachFile: () => void; cancel: ()
             attachments: attached.map(file => file.path),
           })),
           onSuccess: () => {
+            recordHistory('/compact')
             setValue('')
             setAttached([])
             setSendError('')
@@ -187,9 +219,8 @@ export default forwardRef<{ send: () => void; attachFile: () => void; cancel: ()
     return true
   }
 
-  const send = async () => {
-    const text = value.trim()
-    if (!text || !sessionId) return
+  const sendText = async (text: string) => {
+    if (!text || !sessionId) return false
 
     if (isCmd && filtered.length > 0) {
       const parsed = parseSlashCommand(text)
@@ -198,7 +229,7 @@ export default forwardRef<{ send: () => void; attachFile: () => void; cancel: ()
         return
       }
       await execCommand(parsed.name, parsed.args)
-      return
+      return true
     }
 
     const s = useStore.getState().sessions.find(s => s.id === sessionId || s.source === sessionId)
@@ -216,12 +247,38 @@ export default forwardRef<{ send: () => void; attachFile: () => void; cancel: ()
       })),
       onSuccess: () => {
         lastMsg.current = text
+        recordHistory(text)
         setValue('')
         setAttached([])
         setSendError('')
       },
       onError: error => setSendError(String(error)),
     })
+    return true
+  }
+
+  const enqueue = (text: string) => {
+    if (!text || !sessionSource) return
+    setQueuedMessages(previous => [...previous, { id: Date.now() + previous.length, text, editing: false }])
+    setValue('')
+    setAttached([])
+    setSendError('')
+  }
+
+  const send = async () => {
+    const text = value.trim()
+    if (!text || !sessionId) return
+    if (generating) {
+      enqueue(text)
+      return
+    }
+    await sendText(text)
+  }
+
+  const sendQueued = async (item: QueuedMessage) => {
+    if (generating || !item.text.trim()) return
+    const sent = await sendText(item.text.trim())
+    if (sent) setQueuedMessages(previous => previous.filter(queued => queued.id !== item.id))
   }
 
   const cancel = async () => {
@@ -270,6 +327,24 @@ export default forwardRef<{ send: () => void; attachFile: () => void; cancel: ()
       if (e.key === 'ArrowDown') { e.preventDefault(); setCmdIdx(i => Math.min(i + 1, filtered.length - 1)); return }
       if (e.key === 'ArrowUp') { e.preventDefault(); setCmdIdx(i => Math.max(i - 1, 0)); return }
     }
+    if (e.key === 'ArrowUp' || e.key === 'ArrowDown') {
+      if (!sessionSource || historyLength === 0) return
+      e.preventDefault()
+      const history = historyBySourceRef.current[sessionSource] || []
+      if (historyIndex < 0) historyDraftRef.current = value
+      const nextIndex = e.key === 'ArrowUp'
+        ? Math.min(historyIndex < 0 ? history.length - 1 : historyIndex + 1, history.length - 1)
+        : Math.max(historyIndex - 1, -1)
+      setHistoryIndex(nextIndex)
+      setValue(nextIndex < 0 ? historyDraftRef.current : history[history.length - 1 - nextIndex])
+      return
+    }
+    if (e.key === 'Escape' && historyIndex >= 0) {
+      e.preventDefault()
+      setHistoryIndex(-1)
+      setValue(historyDraftRef.current)
+      return
+    }
     if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); send() }
   }
 
@@ -296,6 +371,40 @@ export default forwardRef<{ send: () => void; attachFile: () => void; cancel: ()
           ))}
         </div>
       )}
+      {historyIndex >= 0 && historyLength > 0 && (
+        <div className="input-history-hint" aria-live="polite">
+          历史记录 {historyIndex + 1}/{historyLength} · ↑/↓ 浏览 · Esc 返回草稿
+        </div>
+      )}
+      {queuedMessages.length > 0 && (
+        <div className="queued-message-list" aria-label="待发送消息">
+          <div className="queued-message-title">待发送 · {queuedMessages.length}</div>
+          {queuedMessages.map(item => (
+            <div className="queued-message" key={item.id}>
+              {item.editing
+                ? <textarea
+                  className="queued-message-editor"
+                  value={item.text}
+                  onChange={event => setQueuedMessages(previous => previous.map(queued => queued.id === item.id ? { ...queued, text: event.target.value } : queued))}
+                  aria-label="编辑待发送消息"
+                />
+                : <span className="queued-message-text">{item.text}</span>}
+              <div className="queued-message-actions">
+                <button type="button" onClick={() => setQueuedMessages(previous => previous.map(queued => queued.id === item.id ? { ...queued, editing: !queued.editing } : queued))} aria-label="编辑待发送消息" title="编辑">
+                  <Pencil size={13} />
+                </button>
+                <button type="button" onClick={() => sendQueued(item)} disabled={generating || !item.text.trim()} aria-label="发送待发送消息" title={generating ? '当前生成完成后发送' : '发送'}>
+                  <Send size={13} />
+                </button>
+                <button type="button" onClick={() => setQueuedMessages(previous => previous.filter(queued => queued.id !== item.id))} aria-label="取消待发送消息" title="取消">
+                  <Trash2 size={13} />
+                </button>
+              </div>
+            </div>
+          ))}
+          <button type="button" className="queued-message-clear" onClick={() => setQueuedMessages([])}>清空队列</button>
+        </div>
+      )}
       <div className="input-row">
         {inputMode === 'cli' && <span className="cli-prefix">❯</span>}
         {!split && (
@@ -304,7 +413,11 @@ export default forwardRef<{ send: () => void; attachFile: () => void; cancel: ()
           </button>
         )}
         <textarea ref={textareaRef} className="input-textarea" value={value}
-          onChange={e => { setValue(e.target.value); setCmdIdx(0) }}
+          onChange={e => {
+            setValue(e.target.value)
+            setCmdIdx(0)
+            if (historyIndex >= 0) setHistoryIndex(-1)
+          }}
           onKeyDown={onKey}
           aria-describedby={ariaDescribedBy}
           placeholder={inputMode === 'cli' ? '' : '输入消息...（Enter 发送，Shift+Enter 换行，/ 命令）'}

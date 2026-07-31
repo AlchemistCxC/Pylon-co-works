@@ -22,6 +22,8 @@ export type RenderMessage =
   | { type: 'reasoning'; message: Message }
   | { type: 'tool_call'; message: Message; toolId: string | null }
   | { type: 'tool_result'; message: Message; toolId: string | null }
+  | { type: 'error'; message: Message }
+  | { type: 'system'; message: Message; reason: 'unknown-role' }
 
 export type RenderDecision =
   | { kind: 'render'; message: RenderMessage }
@@ -46,6 +48,10 @@ export function renderDecisionKind(decision: RenderDecision): RenderDecision['ki
 }
 
 export function toRenderMessage(message: Message): RenderMessage {
+  if (message.sender === 'system' && message.role === 'assistant') {
+    return { type: 'error', message }
+  }
+
   switch (message.role) {
     case 'user':
       return { type: 'user', message }
@@ -57,6 +63,8 @@ export function toRenderMessage(message: Message): RenderMessage {
       return message.toolOutput !== undefined
         ? { type: 'tool_result', message, toolId: toolIdFromMessage(message) }
         : { type: 'tool_call', message, toolId: toolIdFromMessage(message) }
+    default:
+      return { type: 'system', reason: 'unknown-role', message }
   }
 }
 
@@ -67,6 +75,8 @@ export function renderMessageType(message: RenderMessage): RenderMessage['type']
     case 'reasoning':
     case 'tool_call':
     case 'tool_result':
+    case 'error':
+    case 'system':
       return message.type
     default:
       return assertNever(message, '未处理的 RenderMessage 类型')

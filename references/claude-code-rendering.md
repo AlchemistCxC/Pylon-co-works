@@ -1,65 +1,133 @@
-# Pylon 消息渲染改造开发文档
+# Pylon 前端优化与 Claude Code 能力借鉴文档
 
-> 文档状态：施工基线
+> 文档状态：前端持续施工基线
 > 更新日期：2026-07-31
 > 适用项目：`G:\Project\prism-desktop`
-> 参考源码：`references/claude-code-sourcemap/restored-src/src/`
-> Pylon 前端：`src/`
-> 约束：只改前端，不修改 `src-tauri/`，不改变既有视觉设计和 ACP 事件契约。
+> 前端目录：`src/`
+> Claude Code 参考源码：`references/claude-code-sourcemap/restored-src/src/`
+> 约束：只改前端，不修改 `src-tauri/`；不改变既有视觉设计、ACP event 契约、replay、persistence 和 cancel 语义，除非单独获得后端契约验收结果。
 
 ---
 
 ## 0. 文档目的
 
-本文件不是 Claude Code 源码介绍，而是 Pylon 消息渲染改造的实际开发文档。
+本文件是 Pylon 前端优化的总施工文档，不再局限于消息列表性能。
 
-开发目标：
+Claude Code 值得借鉴的内容分为五类：
 
-1. 降低流式消息期间不必要的 React 渲染。
-2. 让静态历史消息可以安全跳过更新。
-3. 把原始消息数据和显示层消息解耦。
-4. 让 tool 状态、tool 关联、消息可见性有明确的数据层。
-5. 为后续 Markdown cache 和 virtualization 保留正确的架构边界。
-6. 保持当前 UI、CSS、ACP 事件、replay、持久化和取消行为不变。
+```text
+1. UI/展示：消息行、ToolCard、搜索、plan、permission、diff 等可见能力。
+2. 交互体验：command palette、input history、queue、快捷键、焦点管理。
+3. Agent 工作流表达：plan、permission、task progress、compact boundary、diff。
+4. 性能和可靠性：streaming 分离、静态 memo/cache、stalled feedback、搜索索引、动态列表。
+5. 纯机械/架构整理：类型、纯函数、registry、错误边界、测试和渲染数据流拆分；不属于 UI 重排。
+```
+
+当前施工必须区分：
+
+```text
+纯机械/架构整理：可以直接落地，目标是降低耦合、保留行为，不宣称 UI 改版。
+UI/交互施工：必须单独描述可见变化、布局边界和用户操作语义。
+协议依赖施工：先核对 Peri ACP 实际源码，不能用前端模型伪造后端能力。
+```
+
+Pylon 不是 Claude Code 的终端复刻，不能直接移植 Ink/Yoga 或 Claude Code 的固定布局。
+本项目是 Tauri v2 + React 19 + TypeScript + Zustand 的桌面应用，必须优先适配现有的：
+
+```text
+ChatView.tsx 的 ACP 事件入口
+Message[] 持久化格式
+session/source 隔离模型
+现有 CSS 变量和 message layout
+Peri ACP 当前实际 payload
+Pylon 的设置项、主题和 widget 系统
+```
 
 核心原则：
 
 ```text
-先建立测量基线，再改结构。
-先改渲染边界，再改数据流。
-先做低风险 memo/cache，再做 streaming 分离。
-virtualization 最后做，不提前引入。
-任何不确定的产品语义都不在性能改造中擅自决定。
+先读现有实现，再定义借鉴边界。
+先建立可验证的前端模型，再增加 UI。
+先做不改变协议的纯前端能力，再处理 ACP 依赖功能。
+先做低风险交互和展示改进，再做 virtualization 等复杂性能系统。
+无法证明静态，就重新渲染；无法证明产品语义，就不擅自聚合或隐藏。
+真实运行时证据优先于 synthetic benchmark 和理论复杂度。
 ```
 
 ---
 
-## 1. 当前源码基线
+## 1. 当前前端源码地图
 
-### 1.1 Pylon 文件
+### 1.1 ChatView 当前职责
 
-| 文件 | 当前职责 | 改造阶段 |
-|---|---|---|
-| `src/components/chat/ChatView.tsx` | ACP 事件监听、session/replay、消息状态、列表渲染、消息子组件 | P0-P3 |
-| `src/components/chat/ChatView.css` | 消息、tool、thinking、代码块、滚动容器样式 | 保持不变，必要时同步拆分 |
-| `src/components/chat/GenerationFooter.tsx` | spinner、耗时、token、停止、结束摘要 | P2/P8 |
-| `src/components/chat/codeHighlight.ts` | Starry Night 代码高亮 | P3 |
-| `src/components/chat/toolStatus.ts` | tool 状态视觉映射 | P1 |
-| `src/components/chat/acpTypes.ts` | ACP event payload 和提取函数 | P1/P2，仅补充前端类型适配 |
-| `src/components/chat/sessionEventState.ts` | source 级生成状态维护 | P2 |
-| `src/components/chat/replayState.ts` | replay、load generation、终止状态 | P2 |
-| `src/components/chat/messagePersistence.ts` | localStorage 消息持久化 | P2，保持契约 |
-| `src/components/chat/sessionRuntime.ts` | session live stats | 不直接改动，除非验证需要 |
-| `src/store.ts` | Zustand 全局状态和主题 | 原则上不改消息结构 |
-| `scripts/run-frontend-tests.mts` | 前端回归测试入口 | 每阶段使用 |
-| `package.json` | build/test 命令 | 不修改脚本语义 |
+`src/components/chat/ChatView.tsx` 当前同时承担：
 
-### 1.2 Pylon 当前消息类型
+```text
+ACP listen：peri:user / peri:update / peri:done / peri:error
+source 有效性判断和后台 session 隔离
+session 创建、load_persisted_session、replay
+Message[] 原始消息存储
+localStorage persistence
+live streamingText / streamingThinking
+tool_call 与 tool_call_update 关联
+usage、commands、config option 更新
+cancel 后的最终收敛
+sticky/user_scrolled/jumping 滚动状态
+消息列表 map
+MessageRow、AssistantContent、CodeBlock、ReasoningBlock、ToolCard、UserLine
+```
 
-`ChatView.tsx` 当前定义：
+现有关键代码边界：
+
+```tsx
+const preparedMessages = useMemo(
+  () => prepareRenderableMessages(messages),
+  [messages],
+)
+
+const messageLookups = useMemo(
+  () => buildMessageLookups(messages),
+  [messages],
+)
+```
+
+live 文本已经分离：
+
+```tsx
+streamingTextRef.current += text
+setStreamingText(streamingTextRef.current)
+
+streamingThinkingRef.current += text
+setStreamingThinking(streamingThinkingRef.current)
+```
+
+tool_call 到达前 flush：
+
+```tsx
+if (!replay) flushStreaming(source)
+```
+
+消息渲染当前使用 `MemoMessageRow`：
+
+```tsx
+preparedMessages.map(renderMessage => (
+  <MemoMessageRow
+    key={renderMessage.message.id}
+    message={renderMessage.message}
+    reduceMotion={reduceMotion === true}
+    toolVisualState={resolveRowToolVisualState(renderMessage.message, messageLookups)}
+  />
+))
+```
+
+### 1.2 当前消息类型
+
+`tool_call` / `tool_call_update` 已在显示层派生为 `tool_call` / `tool_result`，不改变 Raw Message 持久化格式。
+
+`src/components/chat/messageTypes.ts`：
 
 ```ts
-interface Message {
+export interface Message {
   id: string
   role: 'user' | 'assistant' | 'tool' | 'reasoning'
   sender: string
@@ -74,486 +142,7 @@ interface Message {
 }
 ```
 
-当前内部渲染组件：
-
-```text
-AssistantContent
-ReasoningBlock
-ToolCard
-UserLine
-CodeBlock
-```
-
-重要结论：
-
-- Pylon 已经有 Thinking 折叠，不重复实现。
-- Pylon 已经有消息子组件，不从零设计消息 UI。
-- 当前缺少独立的 `MessageRow` 边界。
-- 当前缺少显示层 `RenderMessage`。
-- 当前 tool 状态和 tool 关联仍然主要由 `ChatView` 事件处理代码维护。
-
-### 1.3 当前流式事件路径
-
-`ChatView.tsx` 监听：
-
-```text
-peri:user
-peri:update
-  agent_message_chunk
-  agent_thought_chunk
-  tool_call
-  tool_call_update
-  usage_update
-  available_commands_update
-  config_option_update
-peri:done
-peri:error
-```
-
-当前 `agent_message_chunk` 路径：
-
-```tsx
-updateSourceMessages(source, prev => {
-  const last = prev[prev.length - 1]
-
-  if (last?.role === 'assistant' && last.running) {
-    return prev.map((message, index) => index === prev.length - 1
-      ? { ...message, content: message.content + text }
-      : message)
-  }
-
-  return [...prev, {
-    id: 'msg-' + Date.now(),
-    role: 'assistant',
-    sender: 'peri',
-    content: text,
-    time: new Date().toLocaleTimeString(),
-    running: !replay,
-  }]
-}, replay)
-```
-
-`updateSourceMessages()` 最终会在当前 source 可见时调用：
-
-```tsx
-setMessages(next)
-```
-
-因此当前每个 live assistant chunk 都会：
-
-```text
-更新消息数组
-触发 ChatView render
-重新执行 messages.map
-重新构造消息行 JSX
-```
-
-React 不会因此把所有 DOM 节点重新 mount，但当前没有 `MessageRow` 级 memo，历史消息仍会参与父列表渲染和子组件比较。
-
-### 1.4 当前自动滚动
-
-当前实现：
-
-```tsx
-useEffect(() => {
-  bottomRef.current?.scrollIntoView({ behavior: 'smooth' })
-}, [messages, generating])
-```
-
-这是后续必须处理的行为风险：
-
-```text
-用户主动上滚后，历史消息更新可能把视图拉回底部。
-后台 replay 可能影响当前滚动位置。
-tool output 更新可能触发无意义滚动。
-Thinking 展开/折叠可能触发滚动。
-```
-
----
-
-## 2. Claude Code 参考源码索引
-
-以下源码是本改造的参考依据，不是直接移植目标。
-
-| Claude Code 文件 | 实际行数 | 借鉴内容 |
-|---|---:|---|
-| `src/components/Messages.tsx` | 833 | 消息预处理、streaming 区、父级 memo、消息 lookup、虚拟列表接入 |
-| `src/components/MessageRow.tsx` | 382 | 单行 dispatch、static/dynamic 判断、保守 comparator |
-| `src/components/Message.tsx` | 626 | 消息类型和 content block 两级 dispatch |
-| `src/components/Markdown.tsx` | 235 | plain text fast path、token cache、Stable Prefix |
-| `src/components/VirtualMessageList.tsx` | 1081 | 动态窗口、搜索索引、稳定 handler、sticky prompt |
-| `src/hooks/useVirtualScroll.ts` | 721 | height cache、offsets、overscan、二分、快速滚动限制、resize 修正 |
-| `src/components/OffscreenFreeze.tsx` | 43 | Ink terminal scrollback 专用冻结机制，不直接移植 |
-| `src/components/messages/AssistantToolUseMessage.tsx` | 367 | tool presentation protocol、safe parse、状态分层、错误保护 |
-| `src/components/messages/AssistantThinkingMessage.tsx` | 85 | thinking 摘要/全文策略 |
-| `src/utils/groupToolUses.ts` | 182 | 显示层 grouping、原始消息不变、WeakMap 缓存 |
-| `src/components/messages/nullRenderingAttachments.ts` | 70 | 不可见消息过滤和 TypeScript 覆盖约束 |
-| `src/state/selectors.ts` | 76 | 纯 selector 和派生状态边界 |
-
-### 2.1 参考源码的关键实现
-
-#### 消息预处理与窗口切片分离
-
-Claude Code 的核心结构：
-
-```tsx
-const processedMessages = useMemo(() => {
-  const normalized = normalizeMessages(messages)
-  const grouped = applyGrouping(normalized, tools, verbose)
-  return collapseMessages(grouped)
-}, [messages, tools, verbose])
-
-const renderableMessages = useMemo(() => {
-  return processedMessages.slice(start, end)
-}, [processedMessages, start, end])
-```
-
-Pylon 必须保持同样的依赖边界：滚动窗口变化不能重新执行全量消息处理。
-
-#### MessageRow 保守 memo
-
-Claude Code 的 comparator 重点：
-
-```tsx
-if (prev.message !== next.message) return false
-if (prev.screen !== next.screen) return false
-if (prev.verbose !== next.verbose) return false
-if (prev.columns !== next.columns) return false
-
-if (isMessageStreaming(prev.message, prev.streamingToolUseIDs)) return false
-if (!allToolsResolved(prev.message, prev.lookups.resolvedToolUseIDs)) return false
-
-return true
-```
-
-原则：
-
-```text
-无法证明静态，就重新渲染。
-宁可多渲染，不可渲染错误。
-```
-
-#### Stable Prefix 的实际含义
-
-Claude Code 的 `StreamingMarkdown` 使用 `marked.lexer()`，按顶层 block token 推进稳定边界：
-
-```text
-已闭合段落、列表、代码块等 block → stablePrefix
-最后一个仍可能增长的 block → unstableSuffix
-```
-
-不是按 inline `strong` 或 inline `code` 闭合推进，也不保证严格 `O(增量长度)`。
-
-#### Virtualization 的实际组成
-
-Claude Code 的 `useVirtualScroll.ts` 使用：
-
-```text
-heightCache
-Float64Array offsets
-DEFAULT_ESTIMATE
-OVERSCAN_ROWS
-MAX_MOUNTED_ITEMS
-SLIDE_STEP
-useDeferredValue
-scroll quantization
-resize height scaling
-```
-
-Pylon 是浏览器 DOM，不移植 Ink 的 `VirtualMessageList`、`OffscreenFreeze` 或 Yoga 坐标逻辑。
-
----
-
-## 3. 改造总原则和非目标
-
-### 3.1 必须保持的行为
-
-```text
-ACP event 名称不变。
-ACP payload 语义不变。
-live/replay source 隔离不变。
-后台 session 仍然持久化。
-session 切换时旧 source 不得污染当前界面。
-peri:done / peri:error / cancel 最终状态必须收敛。
-tool_call 与 tool_call_update 关联不变。
-localStorage key 和序列化格式不变。
-当前 CSS class 和视觉布局不变。
-```
-
-### 3.2 本次不做的事情
-
-```text
-不修改 src-tauri/。
-不修改 ACP 后端协议。
-不重设计消息 UI。
-不引入 Claude Code 的 Ink 组件。
-不直接引入 virtualization。
-不改变消息持久化结构。
-不按换行擅自切割 assistant 消息。
-不把 Thinking 折叠作为新增功能。
-不为了“看起来更快”增加未经测量的复杂缓存。
-```
-
-### 3.3 推荐的最终分层
-
-```text
-ACP events
-    ↓
-Event adapter / source isolation
-    ↓
-Raw Message[] ------------- 继续负责 replay 和 persistence
-    ↓
-messagePipeline
-    ↓
-RenderMessage[] + MessageLookups + RenderDecision
-    ↓
-MessageRow
-    ↓
-消息类型组件
-    ↓
-Markdown / tool renderer / code renderer
-```
-
----
-
-## 4. 改造顺序总览
-
-严格按以下顺序施工：
-
-```text
-P0  性能基线和 render 计数
-P1  MessageRow 提取 + 保守 memo
-P1  派生消息处理与列表窗口解耦
-P2  streamingText / streamingThinking 视图分离
-P2  自动滚底与用户滚动状态分离
-P2  稳定 callback + 最小 row props
-P3  Tool presentation protocol
-P3  MessageLookups 和 ToolVisualState
-P3  显示层 RenderMessage / grouping / visibility pipeline
-P4  Markdown / code highlight cache
-P4  block-level streaming Markdown
-P5  单消息错误边界和 TypeScript exhaustiveness
-P6  搜索索引缓存和分块预热
-P7  virtualization：动态高度 cache + offsets + overscan
-P8  resize 修正、scroll quantization、fast-scroll mount cap
-P9  spinner stalled animation
-```
-
-每一项都必须先完成自身验收，再进入下一项。不要跨阶段同时改消息数据流、UI 结构和滚动系统。
-
----
-
-# 5. P0：建立性能基线
-
-## 5.1 目标
-
-取得 Pylon 当前真实渲染数据，回答：
-
-```text
-流式期间 ChatView 每秒 render 几次？
-历史消息实际重复 render 几次？
-ReactMarkdown 是否是主要耗时？
-starry-night 是否是主要耗时？
-motion/react 是否产生额外开销？
-自动滚底是否触发 layout/scroll 抖动？
-```
-
-## 5.2 实施方法
-
-建议增加开发环境专用测量，不改变生产行为：
-
-```ts
-const renderCountRef = useRef(0)
-renderCountRef.current += 1
-```
-
-在关键组件增加计数：
-
-```text
-ChatView
-MessageRow（先临时包装或内联计数）
-AssistantContent
-ReasoningBlock
-ToolCard
-CodeBlock
-```
-
-使用 `performance.mark()` / `performance.measure()` 测量：
-
-```text
-messages.map
-prepareMessages（如果已经存在）
-highlightCode
-scrollIntoView
-```
-
-## 5.3 测试矩阵
-
-```text
-10 条普通消息
-100 条普通消息
-500 条普通消息
-1000 条普通消息
-长 assistant Markdown
-多行代码块
-连续 tool call
-thinking + tool call
-高频 agent_message_chunk
-用户上滚后继续生成
-后台 session 更新
-replay 恢复
-取消和 error
-```
-
-## 5.4 验收
-
-必须能得到至少以下数据：
-
-```text
-ChatView render 次数
-每条消息行 render 次数
-streaming 期间每秒 commit/render 次数
-Markdown/highlight 调用次数
-每次 highlight 平均耗时
-自动滚动调用次数
-```
-
-如果没有真实数据，不得以理论复杂度作为改造收益结论。
-
----
-
-# 6. P1：提取 MessageRow 并加入保守 memo
-
-## 6.1 目标
-
-把当前 `ChatView.tsx` 的消息列表行提取为独立组件，使静态历史消息可以跳过完整子树更新。
-
-建议结构：
-
-```text
-src/components/chat/messages/
-├── MessageRow.tsx
-├── MessageRenderer.tsx
-├── AssistantMessage.tsx
-├── ReasoningMessage.tsx
-├── ToolMessage.tsx
-├── UserMessage.tsx
-└── CodeBlock.tsx
-```
-
-第一阶段可以只创建：
-
-```text
-MessageRow.tsx
-MessageRenderer.tsx
-```
-
-原有子组件可以暂时继续留在 `ChatView.tsx`，后续再搬运。
-
-## 6.2 实施方法
-
-把当前：
-
-```tsx
-{messages.map(msg => (
-  <motion.div key={msg.id} ...>
-    {msg.role === 'tool' && <ToolCard ... />}
-    {msg.role === 'user' && <UserLine ... />}
-    {msg.role === 'reasoning' && <ReasoningBlock ... />}
-    {msg.role === 'assistant' && <AssistantContent ... />}
-  </motion.div>
-))}
-```
-
-改为：
-
-```tsx
-{messages.map(message => (
-  <MessageRow
-    key={message.id}
-    message={message}
-    reduceMotion={reduceMotion}
-  />
-))}
-```
-
-`MessageRow` 内部暂时保持原有 CSS class、`motion.div` 和子组件 JSX，不改变视觉。
-
-## 6.3 comparator
-
-第一版使用保守 comparator：
-
-```tsx
-function areMessageRowPropsEqual(prev: Props, next: Props): boolean {
-  if (prev.message !== next.message) return false
-  if (prev.reduceMotion !== next.reduceMotion) return false
-
-  if (prev.message.running || next.message.running) return false
-
-  if (prev.message.role === 'tool' || next.message.role === 'tool') {
-    if (prev.message.toolStatus !== next.message.toolStatus) return false
-    if (prev.message.toolOutput !== next.message.toolOutput) return false
-    if (prev.message.toolInput !== next.message.toolInput) return false
-  }
-
-  return true
-}
-
-export const MessageRow = React.memo(MessageRowImpl, areMessageRowPropsEqual)
-```
-
-消息对象引用变化时直接重新渲染，不尝试深比较 content。
-
-## 6.4 注意事项
-
-不能只比较：
-
-```tsx
-prev.message.id === next.message.id
-```
-
-因为 assistant chunk 和 tool update 都可能保持相同 id、替换整个消息对象。
-
-不能把完整 `messages` 数组作为 row prop：
-
-```tsx
-<MessageRow messages={messages} index={index} />
-```
-
-需要的派生值在父层提前计算。
-
-## 6.5 验收
-
-```text
-消息视觉与改造前一致。
-assistant streaming 仍然实时更新。
-tool output/status 仍然更新。
-Reasoning 展开/折叠正常。
-复制按钮正常。
-历史静态消息 render 次数下降。
-npm run build 通过。
-npm run test:frontend 通过。
-git diff --check 通过。
-```
-
----
-
-# 7. P1：分离消息预处理和列表窗口
-
-## 7.1 目标
-
-建立显示层处理边界，为 grouping、lookup 和 virtualization 做准备。
-
-新增：
-
-```text
-src/components/chat/messagePipeline.ts
-src/components/chat/messageTypes.ts
-```
-
-## 7.2 类型设计
-
-保留持久化/事件层 `Message`，新增显示层类型：
+显示层已开始从 Raw Message 推导独立显示语义：
 
 ```ts
 export type RenderMessage =
@@ -561,590 +150,868 @@ export type RenderMessage =
   | { type: 'assistant'; message: Message }
   | { type: 'reasoning'; message: Message }
   | { type: 'tool'; message: Message }
-  | { type: 'tool_group'; messages: Message[] }
-  | { type: 'system'; message: Message }
 ```
 
-第一阶段可以只实现一对一映射：
+当前 visibility 只有一个规则：
 
 ```text
-Message → RenderMessage
+空 assistant 且不处于 running 状态 → skip
 ```
 
-不要一开始引入复杂 grouping。
+当前仍不能表达：
 
-## 7.3 处理边界
+```text
+system/error/plan/compact boundary
+permission request
+task progress
+grouped tool presentation
+```
+
+### 1.3 当前 ACP 前端已知事件
+
+`src/components/chat/acpTypes.ts` 当前支持：
+
+```text
+agent_message_chunk
+agent_thought_chunk
+tool_call
+tool_call_update
+usage_update
+available_commands_update
+config_option_update
+```
+
+外层事件：
+
+```text
+peri:user
+peri:update
+peri:done
+peri:error
+```
+
+当前不能假设已有以下事件：
+
+```text
+permission_request
+plan_update
+task_progress
+compact_boundary
+diff_update
+file_suggestion
+history_search
+```
+
+任何涉及这些事件的前端施工，必须先检查 Peri 实际源码或后端交接文档。不能为了让 UI 看起来完整而伪造事件。
+
+### 1.4 当前 InputBar
+
+`src/components/chat/InputBar.tsx` 当前已经包含：
+
+```text
+消息发送
+Enter 发送 / Shift+Enter 换行
+Escape 取消生成
+Ctrl+C 取消生成，但有选中文本时保留浏览器复制
+Ctrl+ArrowUp 恢复上一条消息
+Shift+Tab 切换 session mode
+Tab/ArrowUp/ArrowDown command 选择
+动态 available commands
+fallback commands
+/model
+/compact
+/new
+/export
+/clear
+/mode
+附件选择
+CLI textarea overflow layout
+发送错误展示
+```
+
+command 已从 InputBar 抽离到：
+
+```text
+src/components/chat/commandRegistry.ts
+src/components/chat/commandParser.ts
+```
+
+当前已完成 live/fallback command 归一化、suggestion 过滤和 slash command 解析；InputBar 的视觉布局未改变。剩余工作是 input history、queue 和 suggestion state 的进一步拆分。
+
+### 1.5 当前 GenerationFooter
+
+`src/components/chat/GenerationFooter.tsx` 已有：
+
+```text
+spinner frame
+中文/英文/自定义 spinner verb
+spinner interval
+elapsed time
+token count
+停止按钮
+完成/取消/错误 summary
+自定义完成、取消、错误 marker
+```
+
+当前没有 stalled generation 状态，即“后端仍在工作但一段时间没有 token”时，用户只能看到正常 spinner。
+
+### 1.6 当前 ToolCard
+
+`ChatView.tsx` 内部的 `ToolCard` 已有：
+
+```text
+折叠/展开
+tool name
+tool summary
+output
+outputLines
+Bash ANSI 输出转换
+sanitizeHtml
+tool visual status
+status color
+status indicator glow
+连续 tool connector
+Read/Grep/Glob/Edit/Write 输出行数摘要
+```
+
+当前仍缺少：
+
+```text
+Edit/Write 结构化 diff presentation
+tool progress 与最终 result 的独立 presentation
+相邻 tool 的 derived grouping
+工具输出搜索文本的专用 getSearchText
+```
+
+### 1.7 当前性能能力
+
+已完成的纯机械/架构能力：
+
+```text
+renderMetrics、MessageRow memo、streamingText / streamingThinking 分离
+sticky/user_scrolled/jumping 自动滚底
+ToolVisualState、MessageLookups、ToolPresentationModel
+静态 code highlight cache、plain-text fast path、MessageRenderBoundary
+messageSearchIndex 纯函数 API和分块预热
+```
+
+尚未接入 UI：
+
+```text
+transcript search
+message highlight/navigation
+stalled generation feedback
+```
+
+已有观测接口：
+
+```js
+window.__PYLON_RENDER_METRICS__.snapshot()
+window.__PYLON_RENDER_METRICS__.reset()
+```
+
+已有搜索 API：
 
 ```ts
-const preparedMessages = useMemo(
-  () => prepareMessages(messages),
-  [messages],
-)
-
-const visibleMessages = useMemo(
-  () => preparedMessages.slice(start, end),
-  [preparedMessages, start, end],
-)
+getMessageSearchText(message)
+messageMatchesQuery(message, query)
+warmMessageSearchIndex(messages, batchSize)
 ```
 
-关键要求：
+尚未接入 UI：
 
 ```text
-滚动 start/end 变化时不重新处理全部 messages。
-MessageRow 不接收完整原始数组。
-原始 messages 仍由 replay/persistence 使用。
-```
-
-## 7.4 验收
-
-```text
-prepareMessages 输出顺序与当前 messages 一致。
-message id 保持稳定。
-localStorage 数据不变化。
-replay 测试不变化。
-滚动窗口变化不会重复调用 prepareMessages。
+transcript search
+message highlight/navigation
 ```
 
 ---
 
-# 8. P2：分离 streamingText 和 streamingThinking
+## 2. Claude Code 借鉴原则
 
-## 8.1 目标
+### 2.1 可以直接借鉴的内容
 
-让已提交历史消息不随着每个 live chunk 改变。
+已完成的纯机械/架构项目不再作为待办重复列出；以下列表只保留可继续借鉴的方向。
 
-目标状态：
+这些内容不依赖 Claude Code 的终端渲染环境，适合转化为 Pylon React 实现：
+
+```text
+visibility 先于 grouping、render cap、virtualization
+tool progress 与最终 result 的独立 presentation
+Edit/Write diff presentation
+工具输出搜索文本的专用 getSearchText
+input history
+queued commands/messages
+stalled spinner feedback
+compact boundary 的显示模型
+plan/task/diff 的卡片化表达原则
+permission UI 的风险和决策分层
+```
+
+### 2.2 不能直接移植的内容
+
+以下内容只能借鉴原则，不能复制源码：
+
+```text
+Ink Box/Yoga 坐标系统
+VirtualMessageList 的终端 scrollback 假设
+OffscreenFreeze
+固定 200 条 render cap
+终端列宽作为唯一 layout 约束
+终端 focus context
+ANSI 输出作为唯一消息格式
+Claude Code 专有 tool schema
+Claude Code 专有 permission callback
+Claude Code 专有 session state
+```
+
+### 2.3 Pylon 特有约束
+
+Pylon 必须保留：
+
+```text
+CSS 变量驱动的主题系统
+classic / claude / bubble message layout
+free / peri footer layout
+CLI 模式与普通输入模式
+右侧 panel 和 workspace sheet
+session source 与 session id 双层模型
+localStorage 消息快照格式
+Tauri invoke/listen
+现有 ACP payload 兼容逻辑
+用户自定义 spinner、tool indicator、connector、字体和布局
+```
+
+---
+
+## 3. 总体目标架构
+
+目标不是把所有组件立即拆成几十个文件，而是逐步形成以下边界：
+
+```text
+ACP events
+    ↓
+Event adapter / source isolation
+    ↓
+Raw Message[] + live generation state
+    ↓
+messagePipeline
+    ↓
+RenderMessage[] + RenderDecision + MessageLookups
+    ↓
+MessageRow
+    ↓
+MessageRenderBoundary
+    ↓
+MessageRenderer
+    ├── UserMessage
+    ├── AssistantMessage
+    ├── ThinkingMessage
+    ├── ToolCallMessage
+    ├── ToolResultMessage
+    ├── SystemMessage
+    ├── ErrorMessage
+    ├── PlanMessage
+    └── Task/Permission presentation
+```
+
+Input 侧目标：
+
+```text
+InputBar
+    ↓
+input state machine
+    ├── editing
+    ├── command_suggesting
+    ├── history_browsing
+    ├── queued
+    ├── sending
+    ├── cancelling
+    └── error
+```
+
+Tool 侧目标：
+
+```text
+raw ACP tool payload
+    ↓
+normalizeToolInput
+    ↓
+ToolPresentationModel
+    ↓
+ToolVisualState
+    ↓
+ToolCard / DiffCard / ProgressCard
+```
+
+关键边界：
+
+```text
+Raw Message[] 继续负责 replay/persistence。
+RenderMessage[] 负责显示语义，不回写原始数据。
+streaming state 不进入已提交历史，直到 flush。
+UI grouping 不能改变 Message[]。
+搜索索引不能重新 parse Markdown。
+任何未识别状态必须有 fallback。
+```
+
+---
+
+## 4. 施工总路线
+
+### 阶段 F0：现状基线和证据闭环
+
+状态：已接入观测，真实 ACP runtime 基线仍待补齐。
+
+任务：
+
+```text
+确认 ChatView、InputBar、GenerationFooter、ToolCard 的真实 render 行为。
+确认 live/replay/background/session switch/cancel 的事件顺序。
+记录 streaming 期间 ChatView、MessageRow、Markdown、highlight、scroll 次数。
+区分真实 Tauri/Peri runtime、浏览器 mock、synthetic DOM、React benchmark。
+```
+
+验收：
+
+```text
+npm run build
+npm run test:frontend
+git diff --check
+真实 runtime 日志或录屏/抓包证据归档
+```
+
+禁止：
+
+```text
+不能用 mock ACP 数据宣称生产性能收益。
+不能仅凭 messages.map 超过 16.7ms 启动 virtualization。
+```
+
+### F1.5：结构化 Diff presentation
+
+优先级：中。
+
+当前状态：ToolPresentationModel、ToolCard 状态/摘要/长输出边界已经完成；只保留结构化 diff 这一项未完成工作。
+
+施工前置：
+
+```text
+先检查现有 ACP tool payload 和已持久化 toolOutput 是否包含 old/new、patch 或 unified diff。
+不能仅凭 Edit/Write 工具名判定存在可渲染 diff。
+```
+
+施工范围：
+
+```text
+增加纯函数 normalizeDiffPayload。
+无法识别时继续使用普通 pre 文本。
+可识别时在 ToolCard 内增加局部 DiffCard。
+保留现有 tool 状态、sanitizer、错误边界和主题变量。
+```
+
+不做：
+
+```text
+不扩展 ACP 协议。
+不改变 Message 持久化格式。
+不自动推断风险或成功状态。
+不把 diff 改成独立页面或重排 ChatView。
+```
+
+### 阶段 F2.1：RenderMessage visibility pipeline
+
+优先级：高。
+
+当前状态：`tool_call` / `tool_result` 已完成纯派生类型；visibility 仍只有空 assistant 规则。
+
+目标：
+
+```text
+继续使用 Raw Message[] → RenderMessage[] → RenderDecision 的纯派生链。
+error message 永远保留。
+空 assistant 且非 running 继续 skip。
+未知显示类型必须 fallback，禁止静默丢弃。
+保持 message 顺序、id、persistence 和 replay 语义。
+```
+
+不做：
+
+```text
+不修改 Message 持久化格式。
+不新增 ACP event。
+不做 tool grouping。
+不做 UI 重排或 virtualization。
+```
+
+### 阶段 F3：Compact boundary 和 session recovery presentation
+
+优先级：高。
+
+当前基础：
+
+```text
+InputBar 已发送 /compact。
+ChatView 已有 replay/load_persisted_session。
+session persistence 已存在。
+```
+
+Claude Code 借鉴点：
+
+```text
+compact 前后边界明确。
+用户知道上下文发生了压缩。
+恢复过程不是空白等待。
+恢复失败可以定位和重试。
+```
+
+前端第一版：
+
+```text
+将 /compact 作为普通发送事务继续发送。
+等待现有 ACP 事件，不伪造 compact 成功。
+如果后端输出能识别 compact summary，则在 pipeline 生成 system/compact row。
+如果暂时无法识别，只完善前端 compact pending/error 状态。
+```
+
+候选显示类型：
 
 ```ts
-messages: Message[]
-streamingText: string
-streamingThinking: string
-streamingSource: string | null
+{ type: 'compact_boundary'; message: Message; summary?: string }
 ```
 
-`messages` 继续负责：
+不能做：
 
 ```text
-replay
-localStorage
-完成后的历史显示
-session 切换恢复
+不能根据 token 数自行宣称 compact 已完成。
+不能从普通 assistant 文本中猜测 compact boundary。
+不能删除 localStorage 历史来模拟压缩。
 ```
 
-`streamingText` 只负责当前 live 预览。
+### 阶段 F4.2：Input history 和 queued message
 
-## 8.2 实施顺序
+优先级：高。
 
-### 第一步：只增加独立预览状态
+当前状态：command registry、live/fallback command 归一化和 slash command parser 已完成；只保留 history 和 queue。
 
-暂时不切换事件提交逻辑，先验证渲染结构：
+Input history：
+
+```text
+按当前 session/source 隔离，不能跨 session 串历史。
+只记录用户明确发送成功的文本。
+ArrowUp/ArrowDown 在没有 command suggestion 时浏览 history。
+Ctrl+ArrowUp 保留现有恢复上一条消息兼容行为。
+session switch 时清理浏览游标，不污染其他 session。
+```
+
+Queued message：
+
+```text
+只在已有生成状态下保存用户明确提交的后续文本。
+不把半成品 textarea 自动视为 queue。
+队列项必须支持取消、编辑或清空后才能接入 UI。
+不改变后端 send_message 契约。
+```
+
+不做：
+
+```text
+不重排 InputBar。
+不改变 command 执行语义。
+不把队列伪装成后端已接受。
+```
+
+### 阶段 F5：Chat search UI
+
+优先级：中高。
+
+当前已有纯函数索引，不应重新设计搜索数据层。
+
+新增建议：
+
+```text
+src/components/chat/MessageSearchBar.tsx
+src/components/chat/messageSearchState.ts
+```
+
+功能边界：
+
+```text
+Ctrl+F 打开当前 session 搜索。
+query trim + lower-case。
+使用 messageMatchesQuery，不重新 parse Markdown。
+命中消息按原始 message id 定位。
+支持上一个/下一个。
+显示当前命中序号和总数。
+命中消息增加短时 highlight class。
+session 切换时清空 query 和命中状态。
+后台 session 不参与当前视图搜索。
+```
+
+定位要求：
+
+```text
+第一版不引入 virtualization。
+使用 message id → DOM element 的局部 ref registry。
+MessageRow 只注册自身 ref，不接收完整 messages。
+找不到 DOM 节点时给出“结果存在但当前不可见”的状态，不假装已滚动。
+```
+
+性能要求：
+
+```text
+query 变化时只做 indexOf。
+搜索文本使用已有 WeakMap<Message, string>。
+大列表预热使用 warmMessageSearchIndex 的分块让出事件循环。
+不得每次键入都 JSON.stringify tool output。
+不得创建第二个 React root。
+```
+
+### 阶段 F6：GenerationFooter stalled feedback
+
+优先级：中高，纯前端，低风险。
+
+当前 GenerationFooter 只依赖：
 
 ```tsx
-<MessageList messages={messages} />
-<StreamingAssistantText text={streamingText} />
-<StreamingThinking text={streamingThinking} />
+running
+frames
+tokenCount
+startTime
+summary
+onStop
 ```
 
-### 第二步：live agent message chunk 进入预览状态
-
-只对：
-
-```text
-replay === false
-source === 当前有效 source
-```
-
-的 `agent_message_chunk` 写入 `streamingText`。
-
-### 第三步：定义 flush
-
-```text
-peri:done：提交最终 assistant message，清空 streamingText
-peri:error：按现有语义保留已收文本，再追加错误消息
-cancel：保留已收文本，结束生成状态
-tool_call：必须明确是否先 flush assistant 文本
-session switch：丢弃旧 source 的 streamingText
-replay：不进入 streamingText，直接写 replay messages
-```
-
-### 第四步：保持回退路径
-
-施工期间保留一个明确的 fallback 开关或可快速回滚的事件路径。不要同时改 replay、persistence、cancel 三套逻辑。
-
-## 8.3 禁止事项
-
-```text
-禁止按换行直接切割消息。
-禁止改变消息持久化格式。
-禁止让 replay 事件进入 live streaming state。
-禁止只依据当前 sessionId 判断 source，有效 source 必须同时校验。
-```
-
-## 8.4 验收矩阵
-
-```text
-连续 assistant chunk 正确合并。
-thinking chunk 不污染 assistant text。
-tool_call 前后的 assistant 文本顺序正确。
-peri:done flush 一次且不重复。
-peri:error 不丢文本。
-cancel 不残留 running 状态。
-后台 source 不显示到当前 session。
-replay 不出现 streaming footer。
-session 切换不串消息。
-```
-
----
-
-# 9. P2：自动滚底和用户滚动状态分离
-
-## 9.1 目标
-
-只有用户原本在底部时，新内容才自动跟随底部。
-
-状态模型：
+要增加 token activity 时间，而不是依赖父级高频重渲染：
 
 ```ts
-type ScrollFollowState =
-  | 'sticky'
-  | 'user_scrolled'
-  | 'jumping'
+lastTokenAt: number
 ```
 
-## 9.2 实施方法
+推荐状态：
 
-替换无条件：
-
-```tsx
-useEffect(() => {
-  bottomRef.current?.scrollIntoView({ behavior: 'smooth' })
-}, [messages, generating])
+```ts
+type GenerationActivity = 'active' | 'waiting' | 'stalled'
 ```
 
-改为：
+默认阈值：
 
 ```text
-监听 scrollTop、scrollHeight、clientHeight。
-距离底部小于阈值时视为 sticky。
-用户向上滚动后切换为 user_scrolled。
-新消息到达时仅 sticky 状态跟随底部。
-用户点击回到底部后恢复 sticky。
+active：最近 3 秒内有 token
+waiting：3 秒至 10 秒无 token
+stalled：超过 10 秒无 token
 ```
 
-推荐使用 `requestAnimationFrame` 合并滚动事件，不把实时 scrollTop 放入 Zustand。
-
-## 9.3 验收
+UI 原则：
 
 ```text
-底部生成时持续跟随。
-上滚阅读历史时不被新 chunk 拉回底部。
-后台 session 更新不影响当前 session。
-点击回底按钮正常。
-tool output 展开不会意外跳底。
-Thinking 展开不会意外跳底。
+active：保持现有 spinner。
+waiting：显示“等待响应”，动画可以降速。
+stalled：显示稳定省略号和“仍在等待后端响应”，不显示错误。
+收到 token：立即回到 active。
+peri:done/peri:error/cancel：沿用现有 summary。
 ```
 
----
-
-# 10. P2：稳定 callback 和最小 row props
-
-## 10.1 目标
-
-减少长列表每次 render 产生的短命闭包，并让 `MessageRow` comparator 真正有效。
-
-避免：
-
-```tsx
-messages.map(message => (
-  <MessageRow
-    onClick={() => setExpanded(message.id)}
-    onMouseEnter={() => setHovered(message.id)}
-  />
-))
-```
-
-推荐：
-
-```tsx
-const handlersRef = useRef({ onExpand, onHover })
-handlersRef.current = { onExpand, onHover }
-
-const handleRowClick = useCallback((message: Message) => {
-  handlersRef.current.onExpand(message.id)
-}, [])
-```
-
-## 10.2 props 规则
-
-`MessageRow` 只接收：
+实现约束：
 
 ```text
-message
-isActive
-isUserContinuation
-hasContentAfter
-renderState
-lookups
-stable callbacks
+不修改 ACP event 名称。
+不把 timer 状态写入 Zustand。
+不能让 stalled timer 触发历史 MessageRow 重渲染。
+不能把“无 token”误判为后端失败。
 ```
 
-不接收：
+### 阶段 F7：Plan presentation
 
-```text
-完整 messages 数组
-整个 Zustand state
-不相关的 spinner/token 状态
-整个 session 列表
-```
-
----
-
-# 11. P3：Tool presentation protocol
-
-## 11.1 目标
-
-把 tool 的输入解析、摘要、进度、输出和错误处理从 `ChatView.tsx`/`ToolCard` 中分离出来。
+优先级：依赖 ACP。
 
 Claude Code 参考：
 
 ```text
-AssistantToolUseMessage.tsx
-Tool.ts 的 inputSchema
-renderToolUseMessage
-renderToolUseProgressMessage
-renderToolUseQueuedMessage
+Plan message
+Plan approval
+Plan step list
+Enter/exit plan mode
+Rejected plan
 ```
 
-## 11.2 Pylon 目标接口
+前端准备工作：
 
-第一版只定义前端展示协议：
+```text
+先扩展 RenderMessage 类型和 PlanCard 纯展示组件。
+先支持已有文本/结构化 payload 的保守显示。
+先不模拟批准成功。
+```
+
+必须先确认：
+
+```text
+Peri 是否发送 plan 相关 sessionUpdate。
+是否有 plan id。
+是否有 plan step status。
+批准/拒绝是否有明确 ACP command。
+```
+
+如果协议没有这些字段，施工结果只能是：
+
+```text
+保留未来 RenderMessage 类型设计。
+增加 fallback system message。
+不增加虚假的 Plan mode 行为。
+```
+
+### 阶段 F8：Permission request UI
+
+优先级：依赖 ACP，安全价值高。
+
+Claude Code 借鉴：
+
+```text
+权限请求不是普通 tool output。
+用户能看到具体 command/path。
+allow once、session allow、deny 分开。
+拒绝原因可见。
+Edit/Write 优先展示 diff。
+未知权限类型 fallback。
+```
+
+候选组件：
+
+```text
+src/components/chat/PermissionRequestCard.tsx
+src/components/chat/permissionPresentation.ts
+src/components/chat/permissionState.ts
+```
+
+候选模型：
 
 ```ts
-export interface ToolPresentation {
-  getSummary(input: unknown): string
-  getSearchText?(output: unknown): string
-  renderInput?(input: unknown): React.ReactNode
-  renderOutput?(output: unknown): React.ReactNode
+interface PermissionRequestModel {
+  requestId: string
+  toolName: string
+  summary: string
+  risk: 'low' | 'medium' | 'high' | 'unknown'
+  decision: 'pending' | 'allowed' | 'denied' | 'expired'
+  options: Array<'allow_once' | 'allow_session' | 'deny'>
 }
 ```
 
-使用 registry 或保守 fallback：
-
-```ts
-const toolPresentation = resolveToolPresentation(toolName)
-const summary = toolPresentation.getSummary(input)
-```
-
-未知工具仍显示通用 ToolCard，不得因为没有专用 renderer 而丢消息。
-
-## 11.3 输入安全边界
+不能做：
 
 ```text
-rawInput
-→ normalizeToolInput
-→ safe presentation model
-→ render
+不能只根据 toolName 推断风险等级并自动放行。
+不能把前端按钮点击当作后端已接受，必须等待真实响应。
+不能把 permission UI 混入普通 ToolCard 后静默处理。
 ```
 
-不得直接把任意 payload 当作结构化对象深度读取。renderer 失败时：
+### 阶段 F9：Task progress/detail
+
+优先级：依赖 ACP。
+
+Claude Code 对后台 task、shell、agent task 有独立表达。
+
+Pylon 第一版如果得到 task id，可以建立：
 
 ```text
-记录 reportRuntimeError
-保留通用工具名和基础输入摘要
-不击穿整个 ChatView
+TaskProgressCard
+TaskStatusBadge
+TaskDetailPanel
 ```
 
-## 11.4 验收
+状态统一为：
 
 ```text
-Bash/Read/Write/Edit/Grep/Glob/Task 摘要保持不变。
-未知 tool 仍有 fallback 显示。
-异常 input 不让列表崩溃。
-输出 sanitizer 仍然生效。
-现有 tool status 颜色和连接线不变。
+queued
+running
+waiting
+completed
+failed
+cancelled
+unknown
+```
+
+必须确认：
+
+```text
+task id 是否稳定。
+toolCallId 是否能关联 task。
+是否有 progress update。
+后台 task 是否可以单独取消。
+session switch 后 task 是否继续运行。
+```
+
+前端不得从 tool output 文本正则猜 task 状态作为正式语义。
+
+### 阶段 F10：Diff presentation
+
+依赖：优先检查现有 ACP payload 和 `react-diff-viewer` 是否可用。
+
+`package.json` 已有：
+
+```text
+react-diff-viewer
+```
+
+建议顺序：
+
+```text
+1. 识别现有 tool output 中是否有 old/new 或 patch。
+2. 增加纯函数 normalizeDiffPayload。
+3. 无法识别时保留普通 pre output。
+4. 可识别时在 ToolCard 内增加 DiffCard。
+5. 再考虑独立 DiffDialog。
+```
+
+安全和视觉要求：
+
+```text
+diff 不能改变 tool 的完成/失败状态。
+长行允许横向滚动。
+差异颜色必须使用现有主题变量或新增主题变量。
+不在 diff 中执行 HTML。
+不因为 diff renderer 抛错而击穿 ChatView。
+```
+
+### 阶段 F11：block-level streaming Markdown
+
+条件性任务。
+
+只有 profiling 证明 `ReactMarkdown` 在高频 chunk 下是主要瓶颈时施工。
+
+当前已有：
+
+```text
+isPlainTextContent(text)
+streaming 消息明确绕过 plain-text fast path
+静态 assistant plain text 原生文本节点
+```
+
+正确边界：
+
+```text
+稳定的顶层 block → stable prefix
+最后持续增长 block → unstable suffix
+stable prefix 可以复用 token/AST 结果
+unstable suffix 每个 chunk 重新处理
+```
+
+禁止：
+
+```text
+不能按换行直接切割 Markdown。
+不能缓存 ReactNode。
+不能在 streaming 中途因为当前 chunk 看起来纯文本就切换 renderer。
+不能把 block-level streaming 和 virtualization 同卡施工。
+```
+
+### 阶段 F12：virtualization
+
+当前暂缓。
+
+启动条件：
+
+```text
+真实 React/Tauri runtime 证明 1000+ 消息不可接受。
+MessageRow memo、cache、pipeline、scroll protection 已不足。
+DOM/Fiber/Markdown 子树确认是主要瓶颈。
+用户实际体验不可接受，而不是 synthetic layout 超过预算。
+```
+
+实现必须包含：
+
+```text
+heightCache
+message key 稳定
+ResizeObserver
+累计 offsets
+binary search
+overscan
+top/bottom spacer
+动态高度修正
+sticky bottom
+user_scrolled protection
+rAF scroll quantization
+fast-scroll mount cap
+```
+
+不能直接移植：
+
+```text
+Ink/Yoga 坐标
+OffscreenFreeze
+终端 scrollback
+固定 render cap
 ```
 
 ---
 
-# 12. P3：MessageLookups 和 ToolVisualState
+## 5. 状态和数据契约规则
 
-## 12.1 MessageLookups
+### 5.1 Raw Message 与 RenderMessage
 
-新增纯派生函数：
-
-```ts
-interface MessageLookups {
-  toolById: Map<string, Message>
-  resolvedToolIds: Set<string>
-  failedToolIds: Set<string>
-  runningToolIds: Set<string>
-}
-```
-
-构建时机：
-
-```tsx
-const lookups = useMemo(
-  () => buildMessageLookups(preparedMessages),
-  [preparedMessages],
-)
-```
-
-`MessageRow` 不再扫描完整消息数组寻找 tool 关联。
-
-## 12.2 ToolVisualState
-
-把不稳定的后端状态归一化为前端有限状态：
-
-```ts
-type ToolVisualState =
-  | 'queued'
-  | 'running'
-  | 'waiting'
-  | 'completed'
-  | 'failed'
-  | 'cancelled'
-  | 'unknown'
-```
-
-处理路径：
+必须保持：
 
 ```text
-ACP tool status
-→ normalizeToolStatus
-→ ToolVisualState
-→ ToolCard
+Raw Message[] 是 replay/persistence 的事实来源。
+RenderMessage[] 是纯派生显示模型。
+RenderMessage 不能被 localStorage 直接持久化。
+UI 展示 grouping 不得修改 Raw Message[]。
 ```
 
-未知状态必须落到 `unknown`，不能静默当作 completed。
+### 5.2 source 隔离
 
-## 12.3 验收
+任何新状态都必须回答：
 
 ```text
-tool_call 初始状态正确。
-tool_call_update completed/failed 正确。
-错误和取消状态正确。
-未知状态有稳定 fallback。
-MessageRow 只依赖 lookups，不扫描完整数组。
+它是否按 source 存储？
+它是否只属于当前渲染 session？
+后台 source 更新是否能污染当前 UI？
+session switch 时如何清理？
+replay 是否进入该状态？
 ```
 
----
-
-# 13. P3：RenderMessage、visibility、grouping pipeline
-
-## 13.1 pipeline 顺序
-
-推荐顺序：
+当前已经存在的 source 级状态包括：
 
 ```text
-normalize
-→ filter null/empty messages
-→ attach tool relationships
-→ derive visibility
-→ optional grouping
-→ derive MessageLookups
-→ MessageRow
+messagesBySourceRef
+replayingSourcesRef
+generationStartRef
+generationFramesRef
+loadGenerationRef
+cancelStateRef
+sessionLiveStats
+liveGeneratingSources
 ```
 
-## 13.2 可见性决策
+新增长期状态优先按 source 存储，不要把后台 session 的 task/search/input 状态放入单一全局字段。
 
-新增纯函数：
+### 5.3 replay 与 live
 
-```ts
-type RenderDecision =
-  | { kind: 'render'; message: RenderMessage }
-  | { kind: 'skip'; reason: string }
-  | { kind: 'collapse'; message: RenderMessage }
-```
-
-将以下逻辑集中处理：
+必须保持：
 
 ```text
-空 assistant
-无可见输出的内部事件
-不可见 system/attachment
-tool result 是否已经由 grouped tool 包含
-错误消息是否必须保留
+replay event 不进入 streamingText。
+replay event 不显示 GenerationFooter running。
+load generation 过期时丢弃旧响应。
+后台 replay 消息仍然持久化。
+当前 source 校验必须同时考虑 source 和 session owner。
 ```
 
-不可见消息必须在：
+### 5.4 tool 关联
+
+当前 tool id 约定：
 
 ```text
-render cap 前
-消息计数前
-virtualization offset 前
+tool_call → id: tool-${toolId}
+tool_call_update → 根据 toolId 更新同一条 tool message
 ```
 
-过滤。
+新增 tool presentation 不得依赖数组位置。
+缺失 tool id 时必须 fallback，不得把所有缺失 id 的 tool update 更新到最后一条 tool。
 
-## 13.3 grouping
+### 5.5 状态穷举
 
-Claude Code `applyGrouping()` 的规则：
-
-```text
-原始 messages 不改变。
-只合并支持 grouped rendering 的 tool。
-至少两个相同类型 tool 才合并。
-tool result 随 grouped message 关联。
-verbose/transcript 可关闭 grouping。
-```
-
-Pylon 第一版只实现：
-
-```text
-tool_call 与 tool result 的 derived 关联
-```
-
-连续 tool 合并必须等产品展示语义明确后再做。
-
-## 13.4 缓存
-
-稳定 tools 数组可以使用：
-
-```ts
-const groupingCache = new WeakMap<Tools, Set<string>>()
-```
-
-仅当 tools 数组引用具有稳定生命周期时使用。不要在每次 render 都重建支持 grouping 的 tool 集合。
-
----
-
-# 14. P4：Markdown 和 code highlight cache
-
-## 14.1 先做低风险缓存
-
-先不要实现 Stable Prefix，先处理静态内容：
-
-```text
-静态 assistant content cache
-静态 code highlight cache
-纯文本 fast path
-```
-
-缓存 key：
-
-```text
-Markdown：content + relevant display config
-Code：language + code + relevant theme/config
-```
-
-必须有容量上限或生命周期清理，不能无限保留大段 tool output。
-
-## 14.2 ReactMarkdown 注意事项
-
-```text
-静态消息：content 不变时复用派生结果。
-streaming 消息：不要把缓存结果误用于仍在变化的文本。
-CSS/theme 变化：缓存必须失效或 key 必须包含主题版本。
-```
-
-## 14.3 code highlight 注意事项
-
-当前 `CodeBlock` 已经通过 `useEffect` 调用 `highlightCode()`，依赖：
-
-```tsx
-[language, code, isMultiLine]
-```
-
-缓存不能破坏：
-
-```text
-取消中的异步请求
-组件卸载后的 setState 防护
-sanitizeHtml
-language fallback
-```
-
-## 14.4 验收
-
-```text
-静态历史 Markdown 不重复解析。
-streaming Markdown 仍然实时更新。
-代码高亮结果不串 language/code。
-主题切换后颜色正确。
-HTML sanitizer 仍然覆盖所有 innerHTML sink。
-```
-
----
-
-# 15. P4：block-level streaming Markdown
-
-只有 P0 profiling 证明 Markdown 是主要瓶颈时才施工。
-
-## 15.1 实施方法
-
-新增独立组件：
-
-```text
-StreamingMarkdown.tsx
-```
-
-算法：
-
-```text
-strip 输入中的展示过滤标签
-从上一次 stable boundary 开始解析
-使用 Markdown parser 的顶层 block token
-最后一个非空 block 作为 unstable suffix
-前面的 block 作为 stable prefix
-stable prefix 交给静态 Markdown renderer
-unstable suffix 每个 chunk 重新解析
-```
-
-## 15.2 明确限制
-
-```text
-不是 inline token 级冻结。
-不是严格 O(增量长度)。
-单个持续增长的 paragraph 仍然会重复解析。
-文本重置或 session 切换时必须清空 boundary。
-```
-
-## 15.3 验收样例
-
-```text
-普通段落 + 空行 + 新段落
-未闭合代码块
-已闭合代码块后继续文本
-列表连续追加
-表格流式追加
-链接和强调标记跨 chunk
-文本 reset
-session switch
-```
-
----
-
-# 16. P5：单消息错误边界和类型穷举
-
-## 16.1 单消息错误隔离
-
-参考 Claude Code 的局部错误保护，为 Pylon 增加：
-
-```text
-MessageRenderBoundary
-```
-
-边界范围：
-
-```text
-单条 MessageRow
-或单个 ToolCard / Markdown renderer
-```
-
-失败时：
-
-```text
-当前消息显示降级占位
-记录工具名、消息 ID、渲染阶段
-其他消息继续显示
-```
-
-不要让单个恶意/异常 Markdown 或 tool renderer 击穿整个 ChatView。
-
-## 16.2 TypeScript exhaustiveness
-
-对 tool status、RenderMessage type、visibility reason 使用穷举检查：
+所有新的有限状态都必须有 fallback：
 
 ```ts
 function assertNever(value: never): never {
@@ -1152,249 +1019,220 @@ function assertNever(value: never): never {
 }
 ```
 
-新增消息类型时，必须明确选择：
+后端未知状态：
 
 ```text
-有可见输出的 renderer
-或明确加入 null-rendering 列表
+优先归一化为 unknown。
+不能静默当作 completed。
+不能因为 UI 没有分支就丢弃消息。
 ```
 
 ---
 
-# 17. P6：搜索索引缓存
+## 6. 性能规则
 
-当前 Pylon 没有 transcript search，本阶段是预留设计，不得提前增加 UI。
+### 6.1 memo
 
-参考 Claude Code：
+`MessageRow` comparator 必须保守：
+
+```text
+message 引用变化 → 默认重新渲染。
+reduceMotion 变化 → 重新渲染。
+toolVisualState 变化 → 重新渲染。
+running 变化 → 重新渲染。
+toolStatus/toolInput/toolOutput 变化 → 重新渲染。
+无法证明静态 → 重新渲染。
+```
+
+不能只比较：
 
 ```ts
-const searchTextCache = new WeakMap<Message, string>()
+prev.message.id === next.message.id
 ```
 
-规则：
+不能把完整 `messages`、Zustand state、session list 传给每个 row。
+
+### 6.2 cache
+
+允许缓存：
 
 ```text
-搜索文本按 Message 引用缓存。
-首次提取时 lower-case。
-输入 query 时只做 indexOf。
-tool 自定义 getSearchText 优先。
-全量预热按 500 条分块并让出事件循环。
-消息清空/session 切换后允许 WeakMap 自然回收。
+静态 code highlight：language + code，当前容量 128。
+搜索文本：WeakMap<Message, string>。
+工具 presentation 的纯派生结果：仅当 key 和生命周期明确。
+Markdown token/AST：只有 profiling 证明必要时。
 ```
 
-不要：
+禁止：
 
 ```text
-每次键入都重新 parse Markdown。
-每次键入都 JSON.stringify tool output。
-为了搜索再创建第二个 React root。
+无限缓存大型 tool output。
+缓存 ReactNode。
+缓存未包含 theme/display config 的 Markdown 结果。
+streaming 文本复用静态消息 cache。
+```
+
+### 6.3 滚动
+
+当前规则：
+
+```text
+距离底部 <= 48px → sticky。
+用户上滚 → user_scrolled。
+程序回底 → jumping，短时锁住 scroll 事件。
+只有 sticky 才跟随新消息。
+```
+
+任何新消息功能都必须测试：
+
+```text
+底部生成
+用户上滚后生成
+tool output 展开
+Thinking 展开
+搜索定位
+session replay
+窗口 resize
+```
+
+### 6.4 React render 与 timer
+
+spinner、search highlight、copy feedback 等短周期 UI：
+
+```text
+尽量局部 state。
+不要写入 Zustand 全局 state。
+不要使历史 MessageRow 重新渲染。
+不要在每个 chunk 创建不必要的闭包和数组。
 ```
 
 ---
 
-# 18. P7：Virtualization
+## 7. CSS 和视觉规则
 
-## 18.1 启动条件
+### 7.1 不改变既有视觉
 
-只有以下数据成立时才进入本阶段：
-
-```text
-1000+ 消息普通列表已经成为主要瓶颈。
-MessageRow memo 仍不能满足性能目标。
-DOM/fiber 数量和 Markdown 子树数量是主要开销。
-已完成自动滚底和用户滚动状态。
-消息 key 稳定。
-```
-
-几十条消息不需要 virtualization。几百条先做 memo/cache。数千条再考虑虚拟列表。
-
-## 18.2 定义
-
-Virtualization 不是分页，也不是删除历史消息：
+现有视觉基础必须保留：
 
 ```text
-全部 Message 数据仍在内存。
-只挂载视口附近的 DOM。
-未挂载区域由 top/bottom spacer 占位。
+.term-row-* 消息行 class
+.term-assistant
+.term-reasoning
+.term-tool
+.term-tool-head
+.term-tool-body
+.term-code-block
+.term-spinner
+.term-summary
+messageLayout: classic / claude / bubble
 ```
 
-## 18.3 浏览器实现要求
+### 7.2 新状态优先使用数据属性
 
-Pylon 当前滚动容器：
-
-```css
-.chat-view {
-  overflow-y: auto;
-}
-```
-
-实现至少需要：
-
-```text
-heightCache：按 message key 缓存高度
-offsets：累计高度数组
-measure：ResizeObserver 或 callback ref
-二分查找窗口起点
-topSpacer / bottomSpacer
-overscan
-动态高度变化后的 offset 失效
-展开/折叠刷新高度
-窗口 resize 修正
-sticky bottom
-用户上滚保护
-```
-
-## 18.4 未测量高度
-
-参考 Claude Code 的原则：
-
-```text
-未测量高度使用偏低估计。
-低估会多挂载消息，高估容易制造空白。
-```
-
-不要在 resize 时清空所有高度 cache。优先：
-
-```text
-按旧宽度/新宽度比例缩放估计。
-保留当前窗口。
-下一轮用真实 DOM 高度覆盖。
-```
-
-## 18.5 滚动性能
-
-不要：
+推荐：
 
 ```tsx
-onScroll={() => setScrollTop(element.scrollTop)}
+<div className="term-tool" data-status={status} data-activity={activity}>
 ```
 
-改为：
+CSS：
 
-```text
-requestAnimationFrame 合并 scroll event
-按滚动区间量化 React window 更新
-视觉滚动由浏览器原生处理
-React 只在挂载窗口需要改变时更新
+```css
+.term-tool[data-status="failed"] { ... }
+.term-tool[data-status="cancelled"] { ... }
+.term-spinner[data-activity="stalled"] { ... }
 ```
 
-## 18.6 快速滚动保护
+避免把大量动态颜色直接拼进 class name。
 
-需要限制：
+### 7.3 主题变量
+
+新增颜色前先检查 `store.ts` 的 `ThemeSettings` 和设置 UI。
+不能只在 CSS 写死一个颜色就结束。
+
+工具状态优先复用：
 
 ```text
-MAX_MOUNTED_ITEMS
-MAX_NEW_ITEMS_PER_COMMIT
-overscan
-fast-scroll mode
+--tool-ok
+--tool-run
+--tool-err
+--tool-name
+--tool-summary
+--tool-conn
 ```
 
-快速 PageUp/拖动时不要一次性挂载几百个新消息。可以让窗口分几帧追上目标，避免同步长任务。
-
-## 18.7 不可移植的 Claude Code 机制
-
-禁止直接复制：
+Diff、permission、plan 新增颜色必须考虑：
 
 ```text
-Ink Box/Yoga 坐标
-useTerminalViewport
-OffscreenFreeze
-ScrollBoxHandle
-terminal scrollback 规则
+light/dark uiScheme
+透明背景
+用户自定义 chat transparency
+messageLayout
+prefers-reduced-motion
+```
+
+### 7.4 可访问性
+
+已有折叠组件必须继续提供：
+
+```text
+button type="button"
+aria-expanded
+aria-controls
+稳定 body id
+```
+
+新增 suggestion、search、permission、plan UI 必须补充：
+
+```text
+aria-label
+键盘焦点顺序
+Escape 关闭语义
+当前选中项 aria-selected
+错误消息 aria-live（只在必要范围使用）
 ```
 
 ---
 
-# 19. P8：resize、scroll quantization、fast-scroll mount cap
+## 8. 安全规则
 
-如果 virtualization 已完成，再单独处理三个问题：
-
-## 19.1 resize
-
-触发源：
+前端渲染边界：
 
 ```text
-chat 宽度变化
-right panel 开关
-sidebar 宽度变化
-全局字体变化
-chat font size/line height 变化
+Markdown 普通文本走 ReactMarkdown。
+代码高亮 HTML 必须经过 sanitizeHtml。
+Bash ANSI 转 HTML 必须先 escape，再 sanitize。
+工具输入不能未经 normalize 就深度读取。
+未知工具必须 fallback。
+单条 renderer 出错不能击穿 ChatView。
 ```
 
-处理：
+危险 sink 审计范围：
 
 ```text
-标记受影响高度 cache
-按宽度比例缩放旧估计
-保留可见窗口
-使用 ResizeObserver 更新真实高度
-不要全量清空并重新挂载
+dangerouslySetInnerHTML
+ANSI 转 HTML
+Markdown 自定义 renderer
+Diff renderer
+工具 output
 ```
 
-## 19.2 scroll quantization
-
-普通 wheel event 不能每次触发完整 React commit。使用：
+permission UI 特别要求：
 
 ```text
-scroll event → rAF 合并
-scrollTop → 区间 bin
-bin 未变化 → 不更新 React window
-bin 变化 → 更新窗口
-```
-
-## 19.3 fast-scroll mount cap
-
-快速滚动时：
-
-```text
-限制一次新增 MessageRow 数量。
-保持当前已挂载内容作为临时边界。
-避免白屏优先于精确立即到达目标。
-用户停止滚动后补齐窗口。
-```
-
-验收重点：
-
-```text
-快速拖动不冻结。
-连续 PageUp 不产生长任务。
-滚动停止后窗口最终正确。
-不会出现永久空白。
+前端按钮不是权限事实。
+必须等待后端确认。
+未知权限请求不得自动 allow。
+权限范围和 session/source 必须明确。
 ```
 
 ---
 
-# 20. P9：spinner stalled animation
+## 9. 前端测试和验收
 
-当前 `GenerationFooter` 已经具备：
+### 9.1 统一命令
 
-```text
-spinner frame
-spinner verb
-interval
-elapsed time
-token count
-stop button
-completed/cancelled/error summary
-```
-
-闲置检测属于体验增强，不属于消息列表主线。
-
-只有 profiling 证明 spinner timer 造成问题时才增加：
-
-```text
-3 秒无 token：降速
-10 秒无 token：静态省略号
-恢复 token：立即恢复
-```
-
-不得让 spinner 的 timer 更新触发历史 MessageRow 重渲染。
-
----
-
-## 21. 每阶段统一验证
-
-每个阶段完成后执行：
+每张施工卡完成后执行：
 
 ```bash
 npm run build
@@ -1402,210 +1240,234 @@ npm run test:frontend
 git diff --check
 ```
 
-涉及消息事件时必须覆盖：
+`npm run test:frontend` 会自动执行 `scripts/test-*.mts`。
+新增专项测试脚本必须符合该命名规则，并且使用 Node `--experimental-strip-types` 可执行。
+
+### 9.2 当前已有专项测试方向
+
+已有/已记录的测试包括：
 
 ```text
-live assistant chunk
-thinking chunk
-tool call
-tool update
+test-markdown-fast-path.mts
+test-message-render-boundary.mts
+test-message-search-index.mts
+test-message-types-exhaustive.mts
+test-render-decision-exhaustive.mts
+test-tool-status-exhaustive.mts
+```
+
+新施工必须优先为纯函数增加测试，再接入 React 组件。
+
+### 9.3 消息事件矩阵
+
+涉及 ChatView、RenderMessage、ToolCard 的施工必须覆盖：
+
+```text
+peri:user
+live agent_message_chunk
+live agent_thought_chunk
+tool_call
+tool_call_update completed
+tool_call_update failed
+usage_update
+available_commands_update
+config_option_update
 peri:done
 peri:error
 cancel_prompt
-replay/load_persisted_session
+load_persisted_session
+replay
 session switch
+后台 source 更新
 ```
 
-涉及渲染安全时额外覆盖：
+### 9.4 InputBar 矩阵
 
 ```text
-异常 Markdown
-异常 code highlight
-未知 tool
-异常 tool input
-异常 tool output
-HTML sanitizer sink
-单消息 renderer throw
+空输入 Enter
+普通文本 Enter
+Shift+Enter
+slash command 部分匹配
+Tab/ArrowUp/ArrowDown 选择
+未知 command
+/model 无参数
+/mode 无 session
+/compact 失败
+/export 取消 save dialog
+Escape
+Ctrl+C 有选中文本
+Ctrl+C 无选中文本且 generating
+Ctrl+ArrowUp
+Shift+Tab
+附件选择和取消
 ```
 
-涉及滚动时额外覆盖：
+### 9.5 Tool presentation 矩阵
 
 ```text
-底部生成
-用户上滚后生成
-点击回底
-tool output 展开
-Thinking 展开
-窗口 resize
-session replay
+Bash 普通输出
+Bash ANSI 输出
+Read 多行输出
+Grep 多匹配输出
+Glob 无匹配输出
+Edit/Write changed lines
+tool running
+tool completed
+tool failed
+tool cancelled
+unknown status
+unknown tool
+异常 rawInput
+异常 rawOutput
+恶意 HTML
+超长 output
+```
+
+### 9.6 真实运行时验收
+
+必须区分证据等级：
+
+```text
+L1：纯函数单元测试。
+L2：Node runner / DOM harness。
+L3：浏览器 React benchmark。
+L4：真实 Tauri + 真实 Peri ACP runtime。
+L5：用户手动体验和实际操作反馈。
+```
+
+不能用 L1/L2/L3 伪装成 L4。
+
+---
+
+## 10. 任务拆分和提交规则
+
+每张施工卡必须是可单独验收的行为，不按“随便拆一个文件”划分。
+
+推荐任务卡格式：
+
+```text
+任务：F1.1 ToolPresentationModel
+目标：ToolCard 不再自行解析状态和摘要。
+范围：纯函数、类型、ToolCard props、专项测试。
+不改：src-tauri、Message persistence、ACP event 名称。
+验收：focused test、build、test:frontend、diff check。
+风险：现有 toolInput 已经是字符串，不能假设原始 object 还存在。
+回滚：恢复 ToolCard 原 props。
+```
+
+前端改动提交前：
+
+```bash
+git status --short
+git diff --stat
+git diff --check
+```
+
+工作区存在其他 lane 或用户改动时：
+
+```text
+不得整体 git add。
+不得整体 commit。
+不得回滚无关文件。
+只提交当前施工卡归属文件。
+```
+
+需要更新本文档时，只更新本文件对应阶段和真实验证结果，不写未运行的 PASS。
+
+## 11. 当前状态
+
+### 11.1 已完成：纯机械/架构整理
+
+以下项目已经完成，从待办问题中移除；它们不构成 UI 重排：
+
+```text
+render metrics 观测接入。
+MessageRow 提取和保守 memo。
+消息显示层一对一 pipeline。
+streamingText / streamingThinking 分离。
+sticky/user_scrolled/jumping 自动滚底和 callback wiring。
+ToolVisualState 归一化、MessageLookups 预计算、ToolPresentation registry。
+静态 code highlight cache、plain-text fast path。
+单消息 MessageRenderBoundary。
+RenderMessage / RenderDecision / ToolVisualState exhaustiveness。
+messageSearchIndex 纯函数 API 和分块预热。
+ToolPresentationModel 接入 ToolCard。
+ToolCard 状态标签、output label、长输出边界、错误输出 label。
+ChatView 浏览器 mock display 场景。
+RenderMessage 的 tool_call / tool_result 派生类型。
+InputBar command registry、live/fallback command 归一化和 slash command parser。
+```
+
+### 11.2 已完成：局部可见修正（不是 UI 重排）
+
+```text
+Claude message layout 的 user/assistant/reasoning/tool 左侧内容轨道统一。
+ToolCard 增加状态文字、输出/错误 label 和长输出内部滚动。
+```
+
+这些修改只修正既有消息轨道和工具反馈展示，不改变整体页面分栏、session/sidebar/workspace 结构或 InputBar 布局。
+
+### 11.3 当前未完成问题
+
+```text
+真实 ACP 流式 runtime 性能基线尚未形成持久化报告。
+ToolPresentation 尚未接入结构化 diff view。
+Input history 尚未实现。
+Queued message 尚未实现。
+Chat search UI 尚未实现。
+GenerationFooter stalled feedback 尚未实现。
+Plan/Permission/Task UI 尚未实现，也未确认 ACP 是否提供对应事件。
+Compact boundary / recovery presentation 尚未实现。
+block-level streaming Markdown 尚未实现。
+virtualization 尚未实现；当前因用户实测 2000 条全量列表可接受而暂缓。
+```
+
+### 11.4 当前优先级
+
+```text
+F1.5 结构化 diff presentation：先核对现有 ACP payload，再决定是否接入 react-diff-viewer。
+F2   RenderMessage visibility pipeline：补齐 error/system 等保守 fallback，不能修改 persistence。
+F3   Compact boundary / recovery presentation：只基于真实 ACP 输出，不猜测 compact 成功。
+F4.2 Input history 和 queued message：保持当前 send/cancel 契约，先做可取消/可编辑队列模型。
+F5   Chat search UI：复用已有 messageSearchIndex，不引入 virtualization。
+F6   GenerationFooter stalled feedback：只增加局部 timer 状态，不写入 Zustand。
+F7-F9 Plan/Permission/Task：先核对 Peri ACP 实际 payload。
+F11  block-level streaming Markdown：只有 profiling 证明必要时施工。
+F12  virtualization：启动条件仍是真实 Tauri/React runtime 证据。
 ```
 
 ---
 
-## 22. 当前执行任务
+## 12. 下一张施工卡
 
-当前已完成施工卡：
+建议施工卡：`F2.1 RenderMessage visibility pipeline`。
 
-```text
-P0：性能基线观测接入
-P1：MessageRow 提取 + 保守 memo
-P1：消息显示层 pipeline（一对一映射 + 空 assistant visibility）
-P2：streamingText / streamingThinking 视图分离
-P2：sticky / user_scrolled / jumping 自动滚底
-P2：稳定滚动 callback wiring
-P3：ToolVisualState 归一化
-P3：MessageLookups 预计算
-P3：ToolPresentation 基础 registry
-P3：MessageRow 最小 toolVisualState props
-P4：静态 code highlight cache
-```
-
-已完成提交：
+目标：
 
 ```text
-2b0a09c perf(chat): add render metrics and memoized message rows
- a366065 perf(chat): isolate live streaming message preview
- f293a7e perf(chat): preserve user scroll position during streaming
- ff93cd0 perf(chat): stabilize scroll callback wiring
- a1e516d perf(chat): normalize tool states and precompute lookups
- cd2bdf0 perf(chat): isolate tool presentation summaries
- 0176350 perf(chat): cache static code highlighting
- 81cb094 perf(chat): narrow memoized row tool props
+把当前已完成的 tool_call/tool_result 类型继续接入纯派生 visibility pipeline。
+保留 Raw Message[]、localStorage、replay、ACP event 和 cancel 语义。
+error message 永远保留。
+空 assistant 且非 running 继续 skip。
+未知显示类型必须 fallback，禁止静默丢弃。
 ```
 
-### 22.1 当前实现边界
-
-已建立的前端分层：
+不做：
 
 ```text
-ACP events
-    ↓
-ChatView source isolation / replay / persistence
-    ↓
-Message[] 原始消息
-    ↓
-messagePipeline → RenderMessage[]
-    ↓
-MessageLookups / ToolVisualState
-    ↓
-MemoMessageRow
-    ↓
-AssistantContent / ReasoningBlock / ToolCard
-    ↓
-ReactMarkdown / Starry Night
+不做 UI 重排。
+不新增后端事件。
+不修改 Message 持久化结构。
+不做 tool grouping。
+不做 virtualization。
 ```
 
-当前关键文件：
+验收：
 
-```text
-src/components/chat/renderMetrics.ts
-src/components/chat/messageTypes.ts
-src/components/chat/messagePipeline.ts
-src/components/chat/messageLookups.ts
-src/components/chat/toolPresentation.ts
-src/components/chat/toolStatus.ts
-src/components/chat/codeHighlight.ts
-src/components/chat/ChatView.tsx
+```bash
+npm run build
+npm run test:frontend
+git diff --check
 ```
 
-P0 开发环境观测接口：
-
-```js
-window.__PYLON_RENDER_METRICS__.snapshot()
-window.__PYLON_RENDER_METRICS__.reset()
-```
-
-已观测指标：
-
-```text
-ChatView.render
-MessageRow.render
-AssistantContent.render
-ReasoningBlock.render
-ToolCard.render
-CodeBlock.render
-messages.map
-highlightCode.call
-scrollIntoView.call
-streamingText.render
-streamingThinking.render
-markdown.parse
-CodeBlock.highlight（measures）
-messages.map（measures）
-```
-
-### 22.2 已验证结果
-
-最近一次完整验证：
-
-```text
-npm run build       PASS
-npm run test:frontend PASS
- git diff --check   PASS
-```
-
-Build 仍有既有 warning，非本次引入：
-
-```text
-@tauri-apps/plugin-dialog 动态/静态导入混用
-主 bundle 超过 500 kB
-```
-
-前端施工 commit 未包含用户已有改动。交接时工作区存在其他 lane/用户改动，尤其注意不要覆盖或回滚：
-
-```text
-src/App.css
-src/workspace-sheets/SheetTabStrip.tsx
-src-tauri/ 下用户已有改动
-FINAL-AUDIT-20260731.md
-references/claude-code-rendering.md
-scripts/agent-workflow/sync_kanban.py
-```
-
-### 22.3 重要语义和风险记录
-
-```text
-1. live agent_message_chunk / agent_thought_chunk 已进入独立 streaming state；replay 仍直接写 replay buffer。
-2. tool_call 到来前会 flush 当前 live streaming 文本，保持 tool 前后顺序。
-3. peri:done / peri:error / cancel 会保留并 flush 已收到的 live 文本。
-4. session switch 会清空 streaming state，避免旧 source 污染当前界面。
-5. sticky 状态才自动滚底；用户上滚后不会被新 chunk 拉回底部。
-6. MessageRow comparator 使用消息对象引用和必要 tool 字段，无法证明静态时重新渲染。
-7. ToolPresentation 只负责输入摘要；未知 tool 仍走 fallback。
-8. ToolVisualState 未知后端状态归一化为 unknown，不静默当作 completed。
-9. code highlight cache 使用 language+code key，容量上限 128，并复用相同 key 的 pending Promise。
-10. 尚未实现 Markdown ReactNode cache；直接缓存 ReactNode 会有 theme、hook 和 stale element 风险。
-11. 尚未实现 block-level streaming Markdown、单消息 ErrorBoundary、virtualization。
-12. 当前真实 ACP 流式 runtime 数据仍未形成持久化基线报告；P0 目前是观测接入，不要把 mock 数据当作生产性能结论。
-```
-
-### 22.4 下一张施工卡
-
-优先级建议：
-
-```text
-P4：plain-text fast path
-```
-
-实施边界：
-
-```text
-仅对确认不含 Markdown 结构的静态 assistant 文本绕过 ReactMarkdown。
-streamingText 不进入该 fast path。
-含代码、链接、列表、表格、blockquote、强调标记等内容继续使用 ReactMarkdown。
-先加纯函数判定和专项回归，再接入 AssistantContent。
-不缓存 ReactNode，不改变 CSS 和 Markdown 语义。
-```
-
-完成后再评估：
-
-```text
-P4：block-level streaming Markdown（只有 profiling 证明必要才做）
-P5：单消息错误边界和 TypeScript exhaustiveness
-P6：搜索索引缓存
-P7：virtualization
-```
-
-P0 未形成真实 ACP runtime 数据前，不得以理论复杂度替代运行时证据，也不要提前做 virtualization。
-
-本文件后续随着每张施工卡的真实验证结果更新，不以 Claude Code 的理论结构替代 Pylon 的运行时证据。
+本文档只保留未完成问题和当前施工边界；已完成问题不再重复进入路线，纯机械/架构整理统一归档在 11.1。

@@ -10,5 +10,9 @@ for (const variable of ['--msg-font', '--msg-text', '--msg-line-height']) {
 }
 assert.equal(app.includes('data-msg-style={s.msgStyle'), true)
 assert.equal(css.includes('[data-msg-style="bubble"]'), true)
+assert.equal(css.includes('[data-message-layout="claude"] .term-tool'), true)
+assert.match(css, /\.app\[data-message-layout="claude"\] \.term-user \{[\s\S]*?padding:8px 0;/)
+assert.match(css, /\.app\[data-message-layout="claude"\] \.term-assistant,[\s\S]*?\.term-reasoning,[\s\S]*?\.term-tool \{[\s\S]*?padding-left:0;/)
+assert.equal(css.includes('padding:0 0 0 2ch'), false)
 
 console.log('messageStyle 回归测试通过')

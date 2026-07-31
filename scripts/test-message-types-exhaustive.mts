@@ -11,6 +11,8 @@ assert.equal(renderMessageType(toRenderMessage({
   role: 'tool',
   toolOutput: 'done',
 })), 'tool_result')
+assert.equal(renderMessageType(toRenderMessage({ ...base, sender: 'system' })), 'error')
+assert.equal(renderMessageType(toRenderMessage({ ...base, role: 'future-role' as Message['role'] })), 'system')
 assert.throws(() => assertNever('unexpected' as never, '测试'), /测试: unexpected/)
 
 console.log('RenderMessage TypeScript 穷举回归测试通过')

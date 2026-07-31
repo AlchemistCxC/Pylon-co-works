@@ -89,7 +89,6 @@ export default function SheetTabStrip({
               setMenuSheetId(sheet.id)
             }}
           >
-            {agentState && <span className="sheet-tab-status" aria-label={`Agent 状态：${agentState}`} />}
             <button
               type="button"
               className="sheet-tab-focus"
@@ -111,8 +110,8 @@ export default function SheetTabStrip({
               }}
               title={displayTitle}
             >
-              {active && <span className="sheet-tab-prompt" aria-hidden="true">›</span>}
               <span className="sheet-tab-title">{displayTitle}</span>
+              {agentState && <span className="sheet-tab-status" aria-label={`Agent 状态：${agentState}`} />}
             </button>
             {!sheet.pinned && (
               <button

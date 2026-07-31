@@ -9,6 +9,7 @@ assert.equal(emptyDecision.kind, 'skip')
 assert.equal(emptyDecision.reason, 'empty-assistant')
 assert.equal(renderDecisionKind(emptyDecision), 'skip')
 assert.equal(renderDecisionKind(decideMessageVisibility(toRenderMessage(assistant))), 'render')
+assert.equal(renderDecisionKind(decideMessageVisibility(toRenderMessage({ ...emptyAssistant, sender: 'system' }))), 'render')
 assert.equal(prepareRenderableMessages([emptyAssistant, assistant]).length, 1)
 assert.throws(() => renderDecisionKind({ kind: 'future' } as never), /未处理的渲染决策: \[object Object\]/)
 
