@@ -1530,9 +1530,9 @@ async fn load_persisted_session(
     let _creation_guard = state.session_creation.lock().await;
     let generation = state.current_generation();
     let cwd = cwd.unwrap_or_else(|| state.agent_cwd());
-    // mcp_servers 参数保留仅为前端契约兼容——session/load 不携带 mcpServers（ACP 标准）。
-    // 仍做校验：前端传非法 MCP 配置时报错，结果不使用。
-    let _ = mcp::validate_and_serialize(mcp_servers)?;
+    // mcp_servers 必须随 session/load 发送：ACP schema 1.4 该字段无 default，
+    // Hermes（Pydantic）缺失即拒绝；Peri 容忍。无配置时 validate 产出空数组。
+    let mcp_servers = mcp::validate_and_serialize(mcp_servers)?;
     {
         // 与 new_session / send_message 自动创建一致，恢复历史会话也受上限约束；
         // 同 source 重载（替换）不占新名额。
@@ -1544,7 +1544,7 @@ async fn load_persisted_session(
     let previous = state.sessions.lock().map_err(|e| e.to_string())?
         .insert(source.clone(), SessionInfo::new(peri_id.clone(), String::new(), cwd.clone(), true, generation));
     match state.acp.lock().await
-        .load_session_with_replay(&peri_id, &cwd)
+        .load_session_with_replay(&peri_id, &cwd, mcp_servers)
         .await
     {
         Ok((response, _replay)) => {
@@ -1681,8 +1681,9 @@ async fn export_session(
         }
     }
     let (source, generation, cwd) = state.export_session_owner(&peri_id)?;
+    let mcp_servers = mcp::validate_and_serialize(Some(state.inner().current_mcp_servers()?))?;
     let (_, messages) = state.acp.lock().await
-        .load_session_with_replay(&peri_id, &cwd)
+        .load_session_with_replay(&peri_id, &cwd, mcp_servers)
         .await?;
     state.ensure_generation(generation)?;
     let sessions = state.sessions.lock().map_err(|error| error.to_string())?;

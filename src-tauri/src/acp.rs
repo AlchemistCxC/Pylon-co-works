@@ -593,12 +593,13 @@ impl AcpClient {
         }
     }
 
-    fn load_session_params(session_id: &str, cwd: &str) -> serde_json::Value {
-        // ACP 标准 session/load 仅传 sessionId + cwd；Peri 忽略多余字段，但 Hermes
-        // 严格校验（mcpServers 要求 []），不能把 mcpServers 塞进 load 参数。
+    fn load_session_params(session_id: &str, cwd: &str, mcp_servers: Vec<serde_json::Value>) -> serde_json::Value {
+        // ACP schema 1.4 LoadSessionRequest.mcp_servers 无 default（Hermes Pydantic 必填），
+        // 字段必须存在；Peri 的 DefaultOnError 容忍缺失/空。无配置时传空数组而非缺字段。
         serde_json::json!({
             "sessionId": session_id,
             "cwd": cwd,
+            "mcpServers": mcp_servers,
         })
     }
 
@@ -609,6 +610,7 @@ impl AcpClient {
         &self,
         session_id: &str,
         cwd: &str,
+        mcp_servers: Vec<serde_json::Value>,
     ) -> Result<(serde_json::Value, Vec<serde_json::Value>), String> {
         let mut events = self.rx.resubscribe();
         let id = self.next_id.fetch_add(1, Ordering::Relaxed);
@@ -621,7 +623,7 @@ impl AcpClient {
             "jsonrpc": "2.0",
             "id": id,
             "method": METHOD_SESSION_LOAD,
-            "params": Self::load_session_params(session_id, cwd),
+            "params": Self::load_session_params(session_id, cwd, mcp_servers),
         });
         let line = serde_json::to_string(&request).map_err(|error| {
             self.remove_pending(id);
@@ -710,12 +712,13 @@ mod tests {
     }
 
     #[test]
-    fn session_load_params_contain_only_standard_fields() {
+    fn session_load_params_include_mcp_servers_field() {
         assert_eq!(
-            AcpClient::load_session_params("session-1", "G:/workspace"),
+            AcpClient::load_session_params("session-1", "G:/workspace", Vec::new()),
             serde_json::json!({
                 "sessionId": "session-1",
                 "cwd": "G:/workspace",
+                "mcpServers": [],
             })
         );
     }
@@ -990,7 +993,7 @@ for line in sys.stdin:
             .await
             .expect("fake ACP replay agent must initialize");
         let (response, replay) = client
-            .load_session_with_replay("fake-session-replay", ".")
+            .load_session_with_replay("fake-session-replay", ".", Vec::new())
             .await
             .expect("session/load must return after replay response");
         assert_eq!(response, serde_json::json!({"loaded": true}));
@@ -1274,7 +1277,7 @@ for line in sys.stdin:
             .await
             .expect("update isolation fake ACP must initialize");
         let (_response, replay) = client
-            .load_session_with_replay("target-session", ".")
+            .load_session_with_replay("target-session", ".", Vec::new())
             .await
             .expect("target session load must succeed");
         let texts: Vec<&str> = replay.iter()
