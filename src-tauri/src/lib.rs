@@ -803,6 +803,16 @@ mod session_info_tests {
 // ── AppState helpers ──
 
 impl AppState {
+    /// 锁外 RPC：短锁仅覆盖同步准备（prepare_rpc），发送与等待在锁外执行——
+    /// Peri 卡顿时不阻塞其他命令（V14「锁外写 prompt」模式推广到全部 RPC）。
+    async fn acp_rpc(&self, method: &str, params: serde_json::Value) -> Result<serde_json::Value, String> {
+        let rpc = {
+            let acp = self.acp.lock().await;
+            acp.prepare_rpc(method, params)?
+        };
+        AcpClient::complete_rpc(rpc).await
+    }
+
     fn current_generation(&self) -> u64 {
         self.client_generation.load(Ordering::Acquire)
     }
@@ -1106,7 +1116,10 @@ async fn new_session(
     let session_cwd = cwd.unwrap_or_else(|| state.agent_cwd());
     let generation = state.current_generation();
     let mcp_servers = mcp::validate_and_serialize(mcp_servers)?;
-    let response = match state.acp.lock().await.new_session(&session_cwd, mcp_servers).await {
+    let response = match state.inner().acp_rpc(acp::METHOD_SESSION_NEW, serde_json::json!({
+        "cwd": session_cwd,
+        "mcpServers": mcp_servers,
+    })).await {
         Ok(response) => response,
         Err(error) => {
             state.inner().log_runtime_summary( "error", "session", Some(source.clone()), "Session creation failed", serde_json::Map::new());
@@ -1120,7 +1133,9 @@ async fn new_session(
     let replaced = state.sessions.lock().map_err(|e| e.to_string())?
         .insert(source.clone(), session);
     if let Some(old) = replaced {
-        if let Err(error) = state.acp.lock().await.close_session(&old.peri_id).await {
+        if let Err(error) = state.inner().acp_rpc(acp::METHOD_SESSION_CLOSE, serde_json::json!({
+            "sessionId": old.peri_id,
+        })).await {
             log::warn!("close replaced session: {}", error);
         }
     }
@@ -1170,7 +1185,10 @@ async fn send_message(
             }
             let session_cwd = state.agent_cwd();
             let generation = state.current_generation();
-            let response = match state.acp.lock().await.new_session(&session_cwd, requested_mcp_servers.clone()).await {
+            let response = match state.inner().acp_rpc(acp::METHOD_SESSION_NEW, serde_json::json!({
+                "cwd": session_cwd,
+                "mcpServers": requested_mcp_servers.clone(),
+            })).await {
                 Ok(response) => response,
                 Err(error) => {
                     state.inner().log_runtime_summary( "error", "session", Some(source.clone()), "Session creation failed", serde_json::Map::new());
@@ -1277,7 +1295,9 @@ async fn send_message(
                             peri_id,
                             acp::CANCEL_SETTLE_TIMEOUT_SECS
                         );
-                        if let Err(close_error) = state.acp.lock().await.close_session(&peri_id).await {
+                        if let Err(close_error) = state.inner().acp_rpc(acp::METHOD_SESSION_CLOSE, serde_json::json!({
+                            "sessionId": peri_id.clone(),
+                        })).await {
                             log::warn!("close unsettled prompt session {}: {}", peri_id, close_error);
                         }
                     }
@@ -1299,7 +1319,10 @@ async fn send_message(
 async fn set_mode(state: tauri::State<'_, AppState>, source: String, mode: String) -> Result<(), String> {
     let generation = state.current_generation();
     let peri_id = state.get_peri_id(&source).map_err(|e| e.to_string())?;
-    state.acp.lock().await.set_mode(&peri_id, &mode).await?;
+    state.inner().acp_rpc(acp::METHOD_SESSION_SET_MODE, serde_json::json!({
+        "sessionId": peri_id,
+        "modeId": mode.clone(),
+    })).await?;
     state.ensure_generation(generation)?;
     state.with_session_if_matches(&source, &peri_id, generation, |session| {
         session.mode = Some(mode);
@@ -1312,7 +1335,11 @@ async fn set_config_option(state: tauri::State<'_, AppState>, source: String, ke
     let generation = state.current_generation();
     let peri_id = state.get_peri_id(&source).map_err(|e| e.to_string())?;
     // Peri returns full configOptions in the response body — no pre-subscribe needed
-    let response = state.acp.lock().await.set_config_option(&peri_id, &key, &value).await?;
+    let response = state.inner().acp_rpc(acp::METHOD_SESSION_SET_CONFIG_OPTION, serde_json::json!({
+        "sessionId": peri_id,
+        "configId": key,
+        "value": {"valueId": {"value": value.clone()}},
+    })).await?;
     state.ensure_generation(generation)?;
     state.with_session_if_matches(&source, &peri_id, generation, |session| {
         if let Some(options) = response.get("configOptions").and_then(|value| value.as_array()) {
@@ -1332,12 +1359,15 @@ async fn close_session(state: tauri::State<'_, AppState>, source: String) -> Res
     let _creation_guard = state.session_creation.lock().await;
     let generation = state.current_generation();
     let peri_id = state.get_peri_id(&source).map_err(|e| e.to_string())?;
-    let acp = state.acp.lock().await;
     // 若该 session 有在途 prompt，先发 cancel（fire-and-forget）让 Peri 侧 settle，
     // 否则 pending oneshot 会挂到 PROMPT_TIMEOUT 才结束——close 后 prompt 卡死 300s。
-    let _ = acp.cancel_session(&peri_id).await;
-    acp.close_session(&peri_id).await?;
-    drop(acp);
+    {
+        let acp = state.acp.lock().await;
+        let _ = acp.cancel_session(&peri_id).await;
+    }
+    state.inner().acp_rpc(acp::METHOD_SESSION_CLOSE, serde_json::json!({
+        "sessionId": peri_id.clone(),
+    })).await?;
     state.ensure_generation(generation)?;
     if !state.session_matches(&source, &peri_id, generation)? {
         return Err(format!("stale session mapping for source: {source}"));
@@ -1556,7 +1586,11 @@ async fn load_persisted_session(
 async fn list_persisted_sessions(state: tauri::State<'_, AppState>) -> Result<serde_json::Value, String> {
     let generation = state.current_generation();
     let cwd = state.get_active_agent().ok().and_then(|a| a.cwd);
-    let response = state.acp.lock().await.list_persisted(cwd.as_deref()).await?;
+    let mut params = serde_json::json!({});
+    if let Some(c) = cwd {
+        params["cwd"] = serde_json::Value::String(c);
+    }
+    let response = state.inner().acp_rpc(acp::METHOD_SESSION_LIST, params).await?;
     state.ensure_generation(generation)?;
     Ok(response)
 }

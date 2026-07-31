@@ -135,6 +135,16 @@ pub struct RawMessage {
     pub error: Option<serde_json::Value>,
 }
 
+/// 一次 RPC 的同步准备阶段产物：id（用于清理 pending）、序列化行、写通道、响应接收器。
+/// 携带 pending 分片引用——锁外发送/等待/清理不需要再持有 AcpClient。
+pub struct PreparedRpc {
+    pub id: u64,
+    pub line: String,
+    pub write_tx: mpsc::Sender<String>,
+    pub rx: oneshot::Receiver<RawMessage>,
+    pending: Arc<[Mutex<Pending>; PENDING_SHARDS]>,
+}
+
 impl RawMessage {
     fn connection_closed() -> Self {
         Self {
@@ -224,26 +234,25 @@ impl AcpClient {
         &self.pending[id as usize % PENDING_SHARDS]
     }
     /// Send a JSON-RPC request and wait for the matching response.
-    async fn call_async(&self, method: &str, params: serde_json::Value) -> Result<serde_json::Value, String> {
+    /// 同步准备一次 JSON-RPC 请求（注册 pending + 序列化），不写入 stdin。
+    /// 调用方持锁只覆盖本方法；发送与等待经 [`Self::complete_rpc`] 在锁外进行，
+    /// 避免 Peri 卡顿时全局串行化（一个慢 RPC 阻塞所有其他命令）。
+    pub fn prepare_rpc(&self, method: &str, params: serde_json::Value) -> Result<PreparedRpc, String> {
         if self.is_crashed() {
             return Err("ACP connection closed".to_string());
         }
         let id = self.next_id.fetch_add(1, Ordering::Relaxed);
-
-        // Register oneshot BEFORE writing to stdin
         let (tx, rx) = oneshot::channel();
         {
             let mut pending = self.pending_shard(id).lock().map_err(|e| e.to_string())?;
             pending.insert(id, tx);
         }
-
         let req = serde_json::json!({
             "jsonrpc": "2.0",
             "id": id,
             "method": method,
             "params": params,
         });
-
         let line = match serde_json::to_string(&req) {
             Ok(line) => line,
             Err(error) => {
@@ -251,37 +260,47 @@ impl AcpClient {
                 return Err(format!("serialize failed: {}", error));
             }
         };
+        Ok(PreparedRpc {
+            id,
+            line,
+            write_tx: self.write_tx.clone(),
+            rx,
+            pending: self.pending.clone(),
+        })
+    }
 
-        if self.write_tx.send(line).await.is_err() {
-            self.remove_pending(id);
+    /// 发送已准备的 RPC 并等待匹配响应（30s 超时）。不依赖 AcpClient 实例，可在锁外执行。
+    pub async fn complete_rpc(rpc: PreparedRpc) -> Result<serde_json::Value, String> {
+        let PreparedRpc { id, line, write_tx, rx, pending } = rpc;
+        let remove_pending = |id: u64| {
+            if let Ok(mut p) = pending[id as usize % PENDING_SHARDS].lock() {
+                p.remove(&id);
+            }
+        };
+        if write_tx.send(line).await.is_err() {
+            remove_pending(id);
             return Err("ACP connection closed".to_string());
         }
-
         let msg = match tokio::time::timeout(std::time::Duration::from_secs(30), rx).await {
             Ok(Ok(msg)) => msg,
             Ok(Err(_)) => {
-                self.remove_pending(id);
+                remove_pending(id);
                 return Err("ACP connection closed".to_string());
             }
             Err(_) => {
-                self.remove_pending(id);
+                remove_pending(id);
                 return Err("RPC timeout after 30s".to_string());
             }
         };
-
         if let Some(err) = msg.error {
             return Err(format!("RPC error: {}", err));
         }
-
         Ok(msg.result.unwrap_or(serde_json::Value::Null))
     }
 
-    /// Create a new session. Returns full Peri response (sessionId, modes, configOptions).
-    pub async fn new_session(&self, cwd: &str, mcp_servers: Vec<serde_json::Value>) -> Result<serde_json::Value, String> {
-        self.call_async(METHOD_SESSION_NEW, serde_json::json!({
-            "cwd": cwd,
-            "mcpServers": mcp_servers
-        })).await
+    async fn call_async(&self, method: &str, params: serde_json::Value) -> Result<serde_json::Value, String> {
+        let rpc = self.prepare_rpc(method, params)?;
+        Self::complete_rpc(rpc).await
     }
 
     /// Extract and validate sessionId from a session/new response.
@@ -309,17 +328,7 @@ impl AcpClient {
         }
     }
 
-    /// Set a session config option (model, thinking_effort, context_1m, mode).
-    /// Returns Peri's full configOptionUpdate from the response body.
-    pub async fn set_config_option(&self, session_id: &str, key: &str, value: &str) -> Result<serde_json::Value, String> {
-        self.call_async(METHOD_SESSION_SET_CONFIG_OPTION, serde_json::json!({
-            "sessionId": session_id,
-            "configId": key,
-            "value": {"valueId": {"value": value}}
-        })).await
-    }
-
-
+    /// Build prompt blocks (text + attachments) for session/prompt.
     pub fn prompt_blocks(text: String, attachments: &[String]) -> Result<Vec<serde_json::Value>, String> {
         if attachments.len() > MAX_ATTACHMENTS {
             return Err(format!("too many attachments: maximum is {MAX_ATTACHMENTS}"));
@@ -408,22 +417,6 @@ impl AcpClient {
     #[cfg(test)]
     fn child_id(&self) -> Option<u32> {
         self.child.child.as_ref().map(Child::id)
-    }
-
-    /// Set session mode.
-    pub async fn set_mode(&self, session_id: &str, mode: &str) -> Result<serde_json::Value, String> {
-        self.call_async(METHOD_SESSION_SET_MODE, serde_json::json!({
-            "sessionId": session_id,
-            "modeId": mode
-        })).await
-    }
-
-    /// Close a session, releasing agent-side resources (ThreadStore, cancel tokens).
-    pub async fn close_session(&self, session_id: &str) -> Result<(), String> {
-        self.call_async(METHOD_SESSION_CLOSE, serde_json::json!({
-            "sessionId": session_id
-        })).await?;
-        Ok(())
     }
 
     /// Send a fire-and-forget notification (no id, no response expected).
@@ -675,21 +668,31 @@ impl AcpClient {
             return Ok((raw.result.unwrap_or(serde_json::Value::Null), replay));
         }
     }
-
-    /// P1: List persisted sessions from ThreadStore
-    pub async fn list_persisted(&self, cwd: Option<&str>) -> Result<serde_json::Value, String> {
-        let mut params = serde_json::json!({});
-        if let Some(c) = cwd {
-            params["cwd"] = serde_json::Value::String(c.to_string());
-        }
-        self.call_async(METHOD_SESSION_LIST, params).await
-    }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
     use std::sync::atomic::{AtomicBool, Ordering};
+
+    /// 测试辅助：经 prepare_rpc + complete_rpc 创建会话（生产调用点已锁外化）。
+    async fn new_session_rpc(client: &AcpClient) -> Result<serde_json::Value, String> {
+        AcpClient::complete_rpc(
+            client
+                .prepare_rpc(METHOD_SESSION_NEW, serde_json::json!({"cwd": ".", "mcpServers": []}))?,
+        )
+        .await
+    }
+
+    /// 测试辅助：经 prepare_rpc + complete_rpc 关闭会话。
+    async fn close_session_rpc(client: &AcpClient, session_id: &str) -> Result<(), String> {
+        AcpClient::complete_rpc(
+            client
+                .prepare_rpc(METHOD_SESSION_CLOSE, serde_json::json!({"sessionId": session_id}))?,
+        )
+        .await?;
+        Ok(())
+    }
 
     fn response() -> RawMessage {
         RawMessage {
@@ -913,7 +916,13 @@ for line in sys.stdin:
             .await
             .expect("fake ACP must initialize");
         let child_id = client.child_id().expect("fake ACP child must exist");
-        let new_response = client.new_session(".", Vec::new()).await.expect("session/new must succeed");
+        let new_response = AcpClient::complete_rpc(
+            client
+                .prepare_rpc(METHOD_SESSION_NEW, serde_json::json!({"cwd": ".", "mcpServers": []}))
+                .expect("session/new must prepare"),
+        )
+        .await
+        .expect("session/new must succeed");
         assert_eq!(AcpClient::session_id_from(&new_response).unwrap(), "fake-session-1");
 
         let (request_id, prompt_line, mut response_rx) = client
@@ -1019,7 +1028,7 @@ for line in sys.stdin:
             .await
             .expect("fake ACP control agent must initialize");
         client.cancel_session("fake-session-control").await.expect("cancel notification must write");
-        client.close_session("fake-session-control").await.expect("close request must respond");
+        close_session_rpc(&client, "fake-session-control").await.expect("close request must respond");
         let trace = std::fs::read_to_string(&trace_path).expect("fake ACP must record control requests");
         std::fs::remove_file(&trace_path).ok();
         let requests: Vec<serde_json::Value> = trace.lines()
@@ -1068,7 +1077,7 @@ sys.exit(0)
         .expect("fake child EOF must be observed");
         let error = tokio::time::timeout(
             std::time::Duration::from_secs(2),
-            client.new_session(".", Vec::new()),
+            new_session_rpc(&client),
         )
         .await
         .expect("pending request must settle after EOF")
@@ -1100,7 +1109,7 @@ for line in sys.stdin:
         let client = AcpClient::connect_with_logs(&agent, None)
             .await
             .expect("malformed line must not break initialize");
-        let response = client.new_session(".", Vec::new()).await
+        let response = new_session_rpc(&client).await
             .expect("response after malformed line must arrive");
         assert_eq!(AcpClient::session_id_from(&response).unwrap(), "after-malformed");
     }
@@ -1171,7 +1180,7 @@ for line in sys.stdin:
             .expect("delayed fake ACP must initialize");
         let response = tokio::time::timeout(
             std::time::Duration::from_secs(2),
-            client.new_session(".", Vec::new()),
+            new_session_rpc(&client),
         )
         .await
         .expect("delayed response must not hit test timeout")
