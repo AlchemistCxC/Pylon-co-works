@@ -16,15 +16,19 @@ use tokio::sync::{broadcast, mpsc, oneshot};
 // ── Constants ──
 
 /// JSON-RPC method names used by the ACP protocol.
-pub const METHOD_INITIALIZE: &str = "initialize";
-pub const METHOD_SESSION_NEW: &str = "session/new";
-pub const METHOD_SESSION_PROMPT: &str = "session/prompt";
-pub const METHOD_SESSION_CLOSE: &str = "session/close";
-pub const METHOD_SESSION_LOAD: &str = "session/load";
-pub const METHOD_SESSION_LIST: &str = "session/list";
-pub const METHOD_SESSION_SET_MODE: &str = "session/set_mode";
-pub const METHOD_SESSION_SET_CONFIG_OPTION: &str = "session/set_config_option";
-pub const METHOD_SESSION_CANCEL: &str = "session/cancel";
+// 方法名统一来自官方 schema v1 的 AGENT_METHOD_NAMES（消除手写字符串常量）。
+use agent_client_protocol_schema::v1::AGENT_METHOD_NAMES;
+
+pub const METHOD_INITIALIZE: &str = AGENT_METHOD_NAMES.initialize;
+pub const METHOD_SESSION_NEW: &str = AGENT_METHOD_NAMES.session_new;
+pub const METHOD_SESSION_PROMPT: &str = AGENT_METHOD_NAMES.session_prompt;
+pub const METHOD_SESSION_CLOSE: &str = AGENT_METHOD_NAMES.session_close;
+pub const METHOD_SESSION_LOAD: &str = AGENT_METHOD_NAMES.session_load;
+pub const METHOD_SESSION_LIST: &str = AGENT_METHOD_NAMES.session_list;
+pub const METHOD_SESSION_SET_MODE: &str = AGENT_METHOD_NAMES.session_set_mode;
+pub const METHOD_SESSION_SET_CONFIG_OPTION: &str = AGENT_METHOD_NAMES.session_set_config_option;
+pub const METHOD_SESSION_CANCEL: &str = AGENT_METHOD_NAMES.session_cancel;
+/// session/update 通知名官方为 pub(crate)，保留本地常量。
 pub const NOTIF_SESSION_UPDATE: &str = "session/update";
 pub const NOTIF_AGENT_CRASHED: &str = "pylon:agent-crashed";
 
