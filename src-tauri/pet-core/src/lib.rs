@@ -153,9 +153,43 @@ pub enum ToolOutcome {
     Started,
     Succeeded,
     Failed,
+    /// M5：工具被取消（打断，区别于失败）。
+    Cancelled,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+/// 工具分类（M5 感知层，设计书 §8.2）：dispatcher 按 tool_call.title 分类。
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub enum ToolKind {
+    Code,
+    Read,
+    Execute,
+    Network,
+    AgentSpawn,
+    Other,
+}
+
+impl ToolKind {
+    /// 工具名 → 分类字典（子串匹配，与 Peri 常用工具名对齐）。
+    pub fn classify(title: &str) -> Self {
+        let lower = title.to_ascii_lowercase();
+        let hit = |keywords: &[&str]| keywords.iter().any(|k| lower.contains(k));
+        if hit(&["edit_file", "write_file", "apply_patch", "multi_edit", "file_edit", "code"]) {
+            Self::Code
+        } else if hit(&["spawn_agent", "delegate", "run_agent", "subagent", "dispatch_agent"]) {
+            Self::AgentSpawn
+        } else if hit(&["bash", "run", "execute", "terminal", "shell", "cmd"]) {
+            Self::Execute
+        } else if hit(&["web_search", "fetch", "curl", "http", "browser", "search"]) {
+            Self::Network
+        } else if hit(&["read", "grep", "glob", "list", "workspace", "view", "search_files"]) {
+            Self::Read
+        } else {
+            Self::Other
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub enum AiEvent {
     UserSent,
     FirstChunk,
@@ -164,6 +198,22 @@ pub enum AiEvent {
     TokenUsage { total: u64 },
     TokenDelta { amount: u64 },
     ToolCall { outcome: ToolOutcome },
+    /// M5 感知：工具开始（带分类）——吃代码/捏朋友等行为信号。
+    ToolStarted { kind: ToolKind },
+    /// M5 感知：工具被取消（打断）。
+    ToolCancelled,
+    /// M5 感知：工作模式切换（plan/code 等）。
+    ModeChanged { mode: String },
+    /// M5 感知：模型切换。
+    ModelChanged { model: String },
+    /// M5 感知：agent 拒绝（refusal）。
+    PromptRefused,
+    /// M5 感知：达到轮次上限。
+    PromptMaxed,
+    /// M5 感知：prompt 超时（发呆）。
+    PromptTimeout,
+    /// M5 感知：输出含代码块。
+    CodeSeen,
     Poke,
     Feed,
     /// v2：玩耍（消耗 energy，大额恢复 fun/loneliness）。
@@ -192,6 +242,14 @@ pub struct PetStats {
     pub active_days: u32,
     pub streak_days: u32,
     pub longest_streak: u32,
+    // ── M5 感知统计（设计书 §8.3）──
+    pub code_sessions: u64,
+    pub code_eaten: u64,
+    pub code_watched: u64,
+    pub friends_made: u64,
+    pub dazes: u64,
+    /// 吃过的文件名集合（脱敏摘要，上限 10 滚动）。
+    pub code_files: Vec<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -291,6 +349,7 @@ impl PetState {
         saved.loneliness = saved.loneliness.min(100);
         saved.traits = saved.traits.clamp();
         saved.recent_events.truncate(RECENT_EVENTS_CAP);
+        saved.stats.code_files.truncate(10);
         // 旧存档 last_tick_at_ms=0：以出生时间为基准（不触发惩罚性衰减）
         if saved.last_tick_at_ms == 0 {
             saved.last_tick_at_ms = saved.born_at_ms;
@@ -382,6 +441,78 @@ impl PetState {
             AiEvent::TokenUsage { total } => self.set_token_total(total),
             AiEvent::TokenDelta { amount } => self.add_token_delta(amount),
             AiEvent::ToolCall { outcome } => self.record_tool(outcome),
+            // ── M5 感知（设计书 §8.3 行为映射）──
+            AiEvent::ToolStarted { kind } => {
+                match kind {
+                    ToolKind::Code => {
+                        self.stats.code_sessions = self.stats.code_sessions.saturating_add(1);
+                        self.hunger = self.hunger.saturating_sub(2);
+                        self.energy = self.energy.saturating_sub(3);
+                        self.fun = (self.fun as u16 + 4).min(100) as u8;
+                        self.loneliness = self.loneliness.saturating_sub(10);
+                        self.happiness = (self.happiness as u16 + 1).min(100) as u8;
+                        self.push_event(RecentEvent::Code);
+                        self.msg = Some("它嗅到了代码的味道，凑了过去。".into());
+                    }
+                    ToolKind::AgentSpawn => {
+                        self.push_event(RecentEvent::Spawn);
+                        self.msg = Some("它认真起来：agent 在找帮手！".into());
+                    }
+                    ToolKind::Read => {
+                        self.push_event(RecentEvent::Read);
+                        self.msg = Some("它歪头看你在翻东西。".into());
+                    }
+                    ToolKind::Execute => {
+                        self.push_event(RecentEvent::Exec);
+                        self.msg = Some("它捂住耳朵，等轰鸣过去。".into());
+                    }
+                    ToolKind::Network => {
+                        self.push_event(RecentEvent::Net);
+                        self.msg = Some("它伸长脖子看向远方。".into());
+                    }
+                    ToolKind::Other => {}
+                }
+            }
+            AiEvent::ToolCancelled => {
+                self.fun = self.fun.saturating_sub(2);
+                self.push_event(RecentEvent::ToolCancel);
+                self.msg = Some("它愣住，像被 Ctrl+Z 了一样。".into());
+            }
+            AiEvent::ModeChanged { mode } => {
+                if mode.to_ascii_lowercase().contains("code") {
+                    self.push_event(RecentEvent::ModeCode);
+                    self.msg = Some("它端正坐好：要写代码了！".into());
+                } else {
+                    self.push_event(RecentEvent::ModePlan);
+                    self.msg = Some("它趴下来安静围观。".into());
+                }
+            }
+            AiEvent::ModelChanged { model } => {
+                self.push_event(RecentEvent::ModelNew);
+                // 限频记忆：同模型不重复记
+                if self.last_agent_model.as_deref() != Some(model.as_str()) {
+                    self.remember(format!("它记住：那天换了个脑子（{model}）"));
+                    self.last_agent_model = Some(model);
+                }
+                self.msg = Some("它绕着你嗅了一圈：'换了个脑子？'".into());
+            }
+            AiEvent::PromptRefused => {
+                self.push_event(RecentEvent::Refused);
+                self.msg = Some("它歪头，光里写满了问号。".into());
+            }
+            AiEvent::PromptMaxed => {
+                self.push_event(RecentEvent::Maxed);
+                self.msg = Some("它累瘫了，像跑完了所有循环。".into());
+            }
+            AiEvent::PromptTimeout => {
+                self.stats.dazes = self.stats.dazes.saturating_add(1);
+                self.fun = (self.fun as u16 + 5).min(100) as u8;
+                self.push_event(RecentEvent::Timeout);
+                self.msg = Some("它望着空气发呆。".into());
+            }
+            AiEvent::CodeSeen => {
+                self.stats.code_watched = self.stats.code_watched.saturating_add(1);
+            }
             AiEvent::Poke => {
                 self.stats.interactions = self.stats.interactions.saturating_add(1);
                 self.happiness = (self.happiness as u16 + 4).min(100) as u8;
@@ -548,6 +679,9 @@ impl PetState {
         if recent3_has(RecentEvent::ToolCancel) {
             return "startled";
         }
+        if recent3_has(RecentEvent::Maxed) {
+            return "tired";
+        }
         // 4. 正向事件（窗口内）
         if recent.contains(&RecentEvent::Feed)
             || recent.contains(&RecentEvent::Play)
@@ -560,10 +694,21 @@ impl PetState {
             return "excited";
         }
         // 5. 工作状态
+        if recent.contains(&RecentEvent::ModeCode) {
+            return "focused";
+        }
         if recent.contains(&RecentEvent::ToolOk) || recent.contains(&RecentEvent::ToolFail) {
             return "focused";
         }
         if self.machine == PetMachineState::Awake(MachineSub::Interacting) {
+            return "curious";
+        }
+        // 6. 感知：看代码/阅读/上网 → 好奇（设计书 §8.3）
+        if recent.contains(&RecentEvent::Code)
+            || recent.contains(&RecentEvent::Read)
+            || recent.contains(&RecentEvent::Net)
+            || recent.contains(&RecentEvent::Spawn)
+        {
             return "curious";
         }
         "idle"
@@ -574,6 +719,19 @@ impl PetState {
         self.recent_events.push(event);
         if self.recent_events.len() > RECENT_EVENTS_CAP {
             self.recent_events.remove(0);
+        }
+    }
+
+    /// M5 感知：记录"吃过的代码"文件名（脱敏摘要：仅文件名，不含路径/参数）。
+    /// 上限 10 滚动；dispatcher 从 rawInput 提取后调用——原文绝不下沉。
+    pub fn record_code_file(&mut self, file: &str) {
+        let name = file.rsplit(['/', '\\']).next().unwrap_or(file).trim().to_string();
+        if name.is_empty() || self.stats.code_files.contains(&name) {
+            return;
+        }
+        self.stats.code_files.push(name);
+        if self.stats.code_files.len() > 10 {
+            self.stats.code_files.remove(0);
         }
     }
 
@@ -674,6 +832,11 @@ impl PetState {
                 self.happiness = self.happiness.saturating_sub(2);
                 // mood 由 derive_mood 推导
                 self.push_event(RecentEvent::ToolFail);
+            }
+            ToolOutcome::Cancelled => {
+                self.stats.tools_started = self.stats.tools_started.saturating_add(1);
+                self.fun = self.fun.saturating_sub(2);
+                self.push_event(RecentEvent::ToolCancel);
             }
         }
         self.recompute_stats();

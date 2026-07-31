@@ -229,6 +229,7 @@ fn exhausted_pet_falls_asleep_and_recovers_energy() {
 #[test]
 fn force_sleep_when_energy_hits_zero() {
     let mut pet = PetState::new_at(1);
+    pet.traits = pylon_pet_core::PetTraits::default();
     pet.apply(AiEvent::Visit, 3 * 3_600_000); // 3h 后 energy 掉到 0
     assert_eq!(pet.machine, pylon_pet_core::PetMachineState::Asleep, "energy=0 必须强制入睡");
 }
@@ -371,4 +372,99 @@ fn random_traits_are_in_bounds_and_differ() {
         assert!((10..=100).contains(&trait_value), "trait 必须 10-100");
     }
     assert!(a != b || a != pylon_pet_core::PetTraits::random(), "随机应有个体差异");
+}
+
+// ── M5：Agent 感知层（设计书 §8）──
+
+#[test]
+fn tool_kind_classification_dictionary() {
+    use pylon_pet_core::ToolKind;
+    assert_eq!(ToolKind::classify("edit_file"), ToolKind::Code);
+    assert_eq!(ToolKind::classify("write_file"), ToolKind::Code);
+    assert_eq!(ToolKind::classify("apply_patch"), ToolKind::Code);
+    assert_eq!(ToolKind::classify("spawn_agent"), ToolKind::AgentSpawn);
+    assert_eq!(ToolKind::classify("delegate"), ToolKind::AgentSpawn);
+    assert_eq!(ToolKind::classify("bash"), ToolKind::Execute);
+    assert_eq!(ToolKind::classify("run_command"), ToolKind::Execute);
+    assert_eq!(ToolKind::classify("web_search"), ToolKind::Network);
+    assert_eq!(ToolKind::classify("read_file"), ToolKind::Read);
+    assert_eq!(ToolKind::classify("grep"), ToolKind::Read);
+    assert_eq!(ToolKind::classify("custom_tool"), ToolKind::Other);
+    // 顺序：AgentSpawn 必须在 Execute 前检查（run_agent 含 "run"）
+    assert_eq!(ToolKind::classify("run_agent"), ToolKind::AgentSpawn);
+}
+
+#[test]
+fn code_tool_start_feeds_pet_stats() {
+    use pylon_pet_core::ToolKind;
+    let mut pet = PetState::new_at(1);
+    pet.apply(AiEvent::ToolStarted { kind: ToolKind::Code }, 1);
+    assert_eq!(pet.stats.code_sessions, 1);
+    assert_eq!(pet.mood, "curious", "Code 窗口 → curious（凑近看代码）");
+    pet.apply(AiEvent::ToolStarted { kind: ToolKind::Code }, 2);
+    assert_eq!(pet.stats.code_sessions, 2);
+}
+
+#[test]
+fn code_file_recording_is_sanitized_and_capped() {
+    let mut pet = PetState::new_at(1);
+    pet.record_code_file("G:/Project/src/lib.rs");
+    pet.record_code_file("src/main.ts");
+    pet.record_code_file("src/main.ts"); // 去重
+    assert_eq!(pet.stats.code_files, vec!["lib.rs".to_string(), "main.ts".to_string()], "仅文件名且去重");
+    for i in 0..12 {
+        pet.record_code_file(&format!("file-{i}.rs"));
+    }
+    assert!(pet.stats.code_files.len() <= 10, "上限 10 滚动");
+}
+
+#[test]
+fn timeout_dazes_pet_and_recovers_fun() {
+    let mut pet = PetState::new_at(1);
+    pet.fun = 30;
+    pet.apply(AiEvent::PromptTimeout, 1);
+    assert_eq!(pet.stats.dazes, 1);
+    assert_eq!(pet.fun, 35, "发呆恢复 fun +5");
+    assert_eq!(pet.mood, "dazed", "超时 → dazed");
+}
+
+#[test]
+fn cancelled_tool_startles_pet() {
+    let mut pet = PetState::new_at(1);
+    pet.apply(AiEvent::ToolCancelled, 1);
+    assert_eq!(pet.mood, "startled");
+    // ToolCall{outcome: Cancelled} 等价
+    let mut pet = PetState::new_at(1);
+    pet.apply(AiEvent::ToolCall { outcome: pylon_pet_core::ToolOutcome::Cancelled }, 1);
+    assert_eq!(pet.mood, "startled");
+}
+
+#[test]
+fn mode_and_model_changes_are_sensed() {
+    let mut pet = PetState::new_at(1);
+    pet.apply(AiEvent::ModeChanged { mode: "code".into() }, 1);
+    assert_eq!(pet.mood, "focused", "code 模式 → focused");
+    pet.apply(AiEvent::ModelChanged { model: "deepseek-v4".into() }, 2);
+    assert!(pet.memories.iter().any(|m| m.contains("换了个脑子")), "模型切换必须记入记忆");
+    let count = pet.memories.len();
+    pet.apply(AiEvent::ModelChanged { model: "deepseek-v4".into() }, 3);
+    assert_eq!(pet.memories.len(), count, "同模型不重复记忆");
+}
+
+#[test]
+fn refusal_and_maxed_are_distinct() {
+    let mut pet = PetState::new_at(1);
+    pet.apply(AiEvent::PromptRefused, 1);
+    assert_eq!(pet.mood, "confused");
+    let mut pet = PetState::new_at(1);
+    pet.apply(AiEvent::PromptMaxed, 1);
+    assert_eq!(pet.mood, "tired");
+}
+
+#[test]
+fn code_seen_counts_watching() {
+    let mut pet = PetState::new_at(1);
+    pet.apply(AiEvent::CodeSeen, 1);
+    pet.apply(AiEvent::CodeSeen, 2);
+    assert_eq!(pet.stats.code_watched, 2);
 }

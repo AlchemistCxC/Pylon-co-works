@@ -899,12 +899,16 @@ fn start_notification_dispatcher<R: tauri::Runtime>(handles: &AppStateHandles, r
                 }
                 if variant == Some("agent_message_chunk") {
                     let _ = pet.lock().map(|mut p| pet::on_first_chunk(&mut p));
-                    // B11.2：流式收集当前回合回复文本（完成持久化 POST /persist 用）；
-                    // 上限 64KB 截断防超长回复撑爆内存。审查修复：必须落在字符边界
-                    // （String::truncate 在非边界处 panic，会 poison sessions 锁）。
-                    if let Ok(mut items) = sessions.lock() {
-                        if let Some(session) = items.get_mut(&source) {
-                            if let Some(text) = update.get("content").and_then(|c| c.get("text")).and_then(|v| v.as_str()) {
+                    // M5 感知：输出含代码块 → 宠物蹲在屏幕前看
+                    if let Some(text) = update.get("content").and_then(|c| c.get("text")).and_then(|v| v.as_str()) {
+                        if text.contains("```") {
+                            let _ = pet.lock().map(|mut p| pet::on_code_seen(&mut p));
+                        }
+                        // B11.2：流式收集当前回合回复文本（完成持久化 POST /persist 用）；
+                        // 上限 64KB 截断防超长回复撑爆内存。审查修复：必须落在字符边界
+                        // （String::truncate 在非边界处 panic，会 poison sessions 锁）。
+                        if let Ok(mut items) = sessions.lock() {
+                            if let Some(session) = items.get_mut(&source) {
                                 session.last_response_text.push_str(text);
                                 if session.last_response_text.len() > 64 * 1024 {
                                     let mut end = 64 * 1024;
@@ -958,12 +962,22 @@ fn start_notification_dispatcher<R: tauri::Runtime>(handles: &AppStateHandles, r
                                 let _ = pet.lock().map(|mut p| pet::on_usage_update(&mut p, session.tokens_total));
                             }
             Some("tool_call") => {
-                                let _ = pet.lock().map(|mut p| pet::on_tool_started(&mut p));
+                                // M5 感知：title → 工具分类（吃代码/捏朋友）；rawInput 提取文件名（脱敏摘要）
+                                let title = update.get("title").and_then(|v| v.as_str()).unwrap_or("");
+                                let kind = pet::ToolKind::classify(title);
+                                let _ = pet.lock().map(|mut p| pet::on_tool_started_kind(&mut p, kind));
+                                // rawInput 仅提取文件名白名单形态（"path":"..."），原文绝不下沉
+                                if let Some(raw) = update.get("rawInput").and_then(|v| v.as_str()) {
+                                    if let Some(file) = extract_tool_file_name(raw) {
+                                        let _ = pet.lock().map(|mut p| pet::record_code_file(&mut p, &file));
+                                    }
+                                }
                             }
                             Some("tool_call_update") => {
                                 match update.get("status").and_then(|v| v.as_str()) {
                                     Some("completed") => { let _ = pet.lock().map(|mut p| pet::on_tool_success(&mut p)); }
                                     Some("failed") => { let _ = pet.lock().map(|mut p| pet::on_tool_failure(&mut p)); }
+                                    Some("cancelled") => { let _ = pet.lock().map(|mut p| pet::on_tool_cancelled(&mut p)); }
                                     _ => {}
                                 }
                             }
@@ -980,8 +994,22 @@ fn start_notification_dispatcher<R: tauri::Runtime>(handles: &AppStateHandles, r
                                     let current = update.get("currentValue").or_else(|| update.get("value"))
                                         .and_then(value_as_string);
                                     match (option_key, current) {
-                                        (Some("model"), Some(model)) => session.model = model,
-                                        (Some("mode"), Some(mode)) => session.mode = Some(mode),
+                                        (Some("model"), Some(model)) => {
+                                            // M5 感知：模型切换
+                                            let changed = session.model != model;
+                                            session.model = model.clone();
+                                            if changed {
+                                                let _ = pet.lock().map(|mut p| pet::on_model_changed(&mut p, &model));
+                                            }
+                                        }
+                                        (Some("mode"), Some(mode)) => {
+                                            let changed = session.mode.as_deref() != Some(mode.as_str());
+                                            session.mode = Some(mode.clone());
+                                            if changed {
+                                                // M5 感知：工作模式切换
+                                                let _ = pet.lock().map(|mut p| pet::on_mode_changed(&mut p, &mode));
+                                            }
+                                        }
                                         _ => {}
                                     }
                                 }
@@ -2014,6 +2042,18 @@ gateway:
         assert!(!inject_applies_to("/command"));
         assert!(!inject_applies_to("  /command"));
     }
+
+    #[test]
+    fn extract_tool_file_name_parses_sanitized_summary() {
+        assert_eq!(extract_tool_file_name(r#"{"path": "G:/project/src/lib.rs"}"#).as_deref(), Some("G:/project/src/lib.rs"));
+        assert_eq!(extract_tool_file_name(r#"{"file": "main.ts", "op": "edit"}"#).as_deref(), Some("main.ts"));
+        assert_eq!(extract_tool_file_name(r#"{"command": "ls"}"#), None, "无文件名键不提取");
+        assert_eq!(extract_tool_file_name(r#"{"path": ""}"#), None, "空路径不提取");
+        assert_eq!(extract_tool_file_name("not json at all"), None);
+        // 只取文件名值，不把整个 rawInput（可能含 secret）带出
+        let raw = r#"{"path": "src/x.rs", "token": "SECRET"}"#;
+        assert_eq!(extract_tool_file_name(raw).as_deref(), Some("src/x.rs"));
+    }
 }
 
 // ── B4.2 MCP 配置持久化测试 ──
@@ -3020,6 +3060,25 @@ fn inject_applies_to(content: &str) -> bool {
     !content.trim_start().starts_with('/')
 }
 
+/// M5 感知：从 tool_call rawInput 中脱敏提取文件名（`"path":"..."` 形态）。
+/// 安全红线：只取文件名/相对路径（白名单键），原文绝不下沉到宠物状态。
+fn extract_tool_file_name(raw: &str) -> Option<String> {
+    for key in ["\"path\"", "\"file\"", "\"filename\"", "\"file_path\""] {
+        if let Some(pos) = raw.find(key) {
+            let rest = &raw[pos + key.len()..];
+            let rest = rest.trim_start_matches([':', ' ', '"']);
+            let end = rest.find('"').unwrap_or(0);
+            if end > 0 {
+                let value = &rest[..end];
+                if !value.is_empty() && value.len() <= 256 {
+                    return Some(value.to_string());
+                }
+            }
+        }
+    }
+    None
+}
+
 /// B11.1 prompt 拼装：注入 context 前置 + 双换行分隔；context 空白时原样返回。
 fn compose_inject_prompt(context: &str, text: &str) -> String {
     let context = context.trim();
@@ -3310,7 +3369,14 @@ async fn send_prompt_core<R: tauri::Runtime>(
                     if let Some(window) = window {
                     emit_event_all(window, gateway, source, "peri:error", serde_json::json!({"source": source, "error": error}));
                 }
-                    let _ = state.pet.lock().map(|mut pet| pet::on_error(&mut pet));
+                    // M5 感知：refusal / max_turn 区分于普通失败
+                    if error.contains("refused") {
+                        let _ = state.pet.lock().map(|mut pet| pet::on_refused(&mut pet));
+                    } else if error.contains("max_turn") {
+                        let _ = state.pet.lock().map(|mut pet| pet::on_maxed(&mut pet));
+                    } else {
+                        let _ = state.pet.lock().map(|mut pet| pet::on_error(&mut pet));
+                    }
                     error
                 })?;
                 if let Err(error) = state.ensure_generation(runtime, prompt_generation) {
@@ -3404,6 +3470,8 @@ async fn send_prompt_core<R: tauri::Runtime>(
             if let Some(window) = window {
                 emit_event_all(window, gateway, source, "peri:error", serde_json::json!({"source": source, "error": error}));
             }
+            // M5 感知：超时 → 发呆（区别于普通失败）
+            let _ = state.pet.lock().map(|mut p| pet::on_timeout(&mut p));
             state.log_runtime_summary( "error", "prompt", Some(source.to_string()), "Prompt timed out", serde_json::Map::from_iter([
                 ("result".to_string(), serde_json::Value::String("timeout".to_string())),
             ]));

@@ -1,6 +1,6 @@
 //! Tauri 与独立宠物核心状态机之间的薄适配层。
 
-pub use pylon_pet_core::{AiEvent, GrowthStage, PetState, ToolOutcome};
+pub use pylon_pet_core::{AiEvent, GrowthStage, PetState, ToolKind, ToolOutcome};
 use serde::Serialize;
 use std::time::{SystemTime, UNIX_EPOCH};
 
@@ -59,8 +59,49 @@ pub fn on_usage_update(state: &mut PetState, total: u64) {
     state.apply(AiEvent::TokenUsage { total }, now_ms());
 }
 
-pub fn on_tool_started(state: &mut PetState) {
-    state.apply(AiEvent::ToolCall { outcome: ToolOutcome::Started }, now_ms());
+/// M5：工具开始（带分类）——吃代码/捏朋友信号。
+pub fn on_tool_started_kind(state: &mut PetState, kind: ToolKind) {
+    state.apply(AiEvent::ToolStarted { kind }, now_ms());
+}
+
+/// M5：工具被取消（打断）。
+pub fn on_tool_cancelled(state: &mut PetState) {
+    state.apply(AiEvent::ToolCancelled, now_ms());
+}
+
+/// M5：工作模式切换。
+pub fn on_mode_changed(state: &mut PetState, mode: &str) {
+    state.apply(AiEvent::ModeChanged { mode: mode.to_string() }, now_ms());
+}
+
+/// M5：模型切换。
+pub fn on_model_changed(state: &mut PetState, model: &str) {
+    state.apply(AiEvent::ModelChanged { model: model.to_string() }, now_ms());
+}
+
+/// M5：agent 拒绝。
+pub fn on_refused(state: &mut PetState) {
+    state.apply(AiEvent::PromptRefused, now_ms());
+}
+
+/// M5：达到轮次上限。
+pub fn on_maxed(state: &mut PetState) {
+    state.apply(AiEvent::PromptMaxed, now_ms());
+}
+
+/// M5：prompt 超时（发呆）。
+pub fn on_timeout(state: &mut PetState) {
+    state.apply(AiEvent::PromptTimeout, now_ms());
+}
+
+/// M5：输出含代码块。
+pub fn on_code_seen(state: &mut PetState) {
+    state.apply(AiEvent::CodeSeen, now_ms());
+}
+
+/// M5：记录吃过的代码文件名（脱敏摘要）。
+pub fn record_code_file(state: &mut PetState, file: &str) {
+    state.record_code_file(file);
 }
 
 pub fn on_tool_success(state: &mut PetState) {
