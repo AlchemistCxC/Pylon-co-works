@@ -454,7 +454,7 @@ impl AcpClient {
         runtime_logs: Option<Arc<crate::runtime_log::RuntimeLogHub>>,
     ) -> Result<Self, String> {
         let resolved_agent;
-        let agent = if let Some(config_path) = crate::agent_config::config_path() {
+        let agent = if let Some(config_path) = crate::agent_config::effective_config_path() {
             let base_dir = config_path.parent().unwrap_or_else(|| std::path::Path::new("."));
             resolved_agent = agent.resolve_paths(base_dir);
             &resolved_agent
