@@ -77,6 +77,11 @@ impl AgentRuntimeManager {
     pub fn get(&self, agent_id: &str) -> Option<Arc<AgentRuntime>> {
         self.runtimes.read().ok()?.get(agent_id).cloned()
     }
+
+    /// 全部 runtime（会话生命周期 watcher / gateway_status 遍历用）。
+    pub fn all(&self) -> Vec<Arc<AgentRuntime>> {
+        self.runtimes.read().map(|m| m.values().cloned().collect()).unwrap_or_default()
+    }
 }
 
 impl Default for AgentRuntimeManager {

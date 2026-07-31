@@ -90,6 +90,16 @@ impl GatewayCore {
         &self.qq
     }
 
+    /// 按 source 查询绑定（会话生命周期 watcher 取 reset 策略用）。
+    pub fn binding(&self, source: &str) -> Option<route::EntityBinding> {
+        self.routes.lookup(source).cloned()
+    }
+
+    /// 按 platform_key 取已注册适配器（系统消息投递 / gateway_status 用）。
+    pub fn adapter(&self, key: &str) -> Option<Arc<dyn PlatformAdapter>> {
+        self.adapters.lock().ok().and_then(|a| a.get(key).cloned())
+    }
+
     /// 注册平台适配器；platform_key 重复 → Err。
     /// 待 B10.2 各平台适配器接线时调用（当前注册表为空，deliver_all 空转安全）。
     #[allow(dead_code)]

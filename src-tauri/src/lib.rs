@@ -941,6 +941,8 @@ pub(crate) struct SessionInfo {
     tokens_out: u64,
     tokens_total: u64,
     context_size: u64,
+    /// 最后活动时间（Unix 毫秒，B10.3b 会话超时/重置判定）。
+    updated_at: Option<String>,
 }
 
 impl SessionInfo {
@@ -959,6 +961,7 @@ impl SessionInfo {
             tokens_out: 0,
             tokens_total: 0,
             context_size: 0,
+            updated_at: Some(runtime_log::timestamp()),
         }
     }
 
@@ -1131,6 +1134,34 @@ mod session_info_tests {
         assert_eq!(rows_by_source["source-a"]["tokensTotal"], 150);
         assert_eq!(rows_by_source["source-b"]["cwd"], "/work");
         assert_eq!(rows_by_source["source-a"]["model"], "model-a");
+    }
+
+    #[test]
+    fn session_expiry_idle_threshold_and_off_mode() {
+        let now = "1722500000000";
+        // idle：超过阈值过期
+        assert_eq!(
+            session_expired(Some("1722490000000"), now, "idle", 30).as_deref(),
+            Some("超过 30 分钟无活动")
+        );
+        // 31 分钟前（1860000ms）应过期
+        assert!(session_expired(Some("1722498140000"), now, "idle", 30).is_some(), "31 分钟前应过期");
+        // 1 分钟内未过期
+        assert!(session_expired(Some("1722499900000"), now, "idle", 30).is_none(), "1 分钟内未过期");
+        // off：永不过期
+        assert_eq!(session_expired(Some("1"), now, "off", 1), None);
+        // updated_at 缺失：保守不过期
+        assert_eq!(session_expired(None, now, "idle", 1), None);
+    }
+
+    #[test]
+    fn session_expiry_daily_mode_compares_calendar_day() {
+        let now = "1722500000000"; // 某日
+        assert!(session_expired(Some("1722400000000"), now, "daily", 0).is_some(), "跨天应过期");
+        assert!(session_expired(Some("1722500000000"), now, "daily", 0).is_none(), "同天未过期");
+        // 同一天但 23 小时前：daily 不过期（idle 才看时长）
+        let same_day_later = "1722490000000";
+        assert_eq!(session_expired(Some(same_day_later), now, "daily", 0), None);
     }
 }
 
@@ -1435,8 +1466,7 @@ impl AppState {
         runtime: &Arc<AgentRuntime>,
         agent_id: &str,
         window: &tauri::WebviewWindow,
-    ) -> Result<(), String> {
-        let status = runtime.agent_runtime.lock()
+    ) -> Result<(), String> {        let status = runtime.agent_runtime.lock()
             .map(|s| s.status)
             .unwrap_or(AgentLifecycleStatus::Disconnected);
         if matches!(
@@ -1477,7 +1507,93 @@ impl AppState {
     }
 }
 
+/// 会话过期检查（B10.3b，expiry watcher 每轮调用）：
+/// 遍历所有 runtime 的会话，按绑定 reset 策略判定过期；过期会话
+/// close ACP + 移除映射 + 平台通知 + 日志。生成中会话（prompt 锁被占用）豁免。
+async fn check_session_expiry(state: &AppState) {
+    let now = runtime_log::timestamp();
+    for runtime in state.runtimes.all() {
+        let sessions: Vec<(String, String, Option<String>)> = runtime.sessions.lock()
+            .map(|sessions| {
+                sessions.iter()
+                    .map(|(source, info)| (source.clone(), info.peri_id.clone(), info.updated_at.clone()))
+                    .collect()
+            })
+            .unwrap_or_default();
+        for (source, peri_id, updated_at) in sessions {
+            // 活跃豁免：生成中（prompt 锁被占用）永不视为过期
+            let generating = runtime.prompt_locks.lock()
+                .ok()
+                .and_then(|locks| locks.get(&source).cloned())
+                .map(|lock| lock.try_lock().is_err())
+                .unwrap_or(false);
+            if generating {
+                continue;
+            }
+            let binding = state.gateway.binding(&source);
+            let reset = binding.as_ref().and_then(|b| b.reset.as_deref()).unwrap_or("idle");
+            let idle_minutes = binding.as_ref().and_then(|b| b.idle_minutes).unwrap_or(1440);
+            let Some(reason) = session_expired(updated_at.as_deref(), &now, reset, idle_minutes) else {
+                continue;
+            };
+            log::info!("会话过期 ({source}): {reason}");
+            // close ACP session（失败不阻断本地清理）
+            if let Ok(close_params) = acp::session_close_params(&peri_id) {
+                if let Err(error) = state.acp_rpc(&runtime, acp::METHOD_SESSION_CLOSE, close_params).await {
+                    log::warn!("close expired session {peri_id}: {error}");
+                }
+            }
+            let _ = runtime.sessions.lock().map(|mut sessions| sessions.remove(&source));
+            // 平台通知（用户可见重置原因）
+            if let Some(adapter) = state.gateway.adapter("qq") {
+                let _ = adapter.deliver_text(&source, &format!("[会话已重置] {reason}"));
+            }
+            state.log_runtime_summary(
+                "warn",
+                "session",
+                Some(source),
+                &format!("Session expired ({reason})"),
+                serde_json::Map::new(),
+            );
+        }
+    }
+}
+
 const MAX_SESSIONS: usize = 100;
+
+/// 会话过期判定（B10.3b，参考 Hermes reset policy）：返回过期原因，None = 未过期。
+///
+/// - reset="off"：永不过期
+/// - reset="daily"：按 UTC 日历天比较（updated_at 与 now 不同天 → 过期）
+/// - 其他（默认 idle）：`now - updated_at > idle_minutes` → 过期
+/// updated_at 缺失（历史数据）视为未过期（保守，防误杀）。
+fn session_expired(
+    updated_at_ms: Option<&str>,
+    now_ms: &str,
+    reset: &str,
+    idle_minutes: u64,
+) -> Option<String> {
+    match reset {
+        "off" => None,
+        "daily" => {
+            let day = |ms: &str| ms.parse::<u64>().ok().map(|v| v / 86_400_000);
+            match (updated_at_ms.and_then(day), day(now_ms)) {
+                (Some(updated), Some(now)) if updated != now => Some("每日重置".to_string()),
+                _ => None,
+            }
+        }
+        _ => {
+            let idle_ms = idle_minutes.saturating_mul(60_000);
+            let now: u64 = now_ms.parse().ok()?;
+            let updated: u64 = updated_at_ms?.parse().ok()?;
+            if now.saturating_sub(updated) > idle_ms {
+                Some(format!("超过 {idle_minutes} 分钟无活动"))
+            } else {
+                None
+            }
+        }
+    }
+}
 
 /// 客户端替换后的 sessions 处理：keep=false 清空（跨 agent/全新进程语义）；
 /// keep=true 保留映射但迁移 generation——通知路由按新代际匹配，旧 session 才能继续收事件。
@@ -1614,6 +1730,14 @@ async fn send_prompt_core(
     let requested_mcp_servers = mcp::validate_and_serialize(mcp_servers.or_else(|| state.current_mcp_servers().ok()))?;
     let prompt_lock = prompt_lock_for(&runtime.prompt_locks, source);
     let _prompt_guard = prompt_lock.lock().await;
+
+    // 消息到达即活动：更新会话最后活动时间（B10.3b 会话超时判定）；
+    // 生成中的会话另有 prompt 锁活跃豁免，双保险。
+    if let Ok(mut sessions) = runtime.sessions.lock() {
+        if let Some(session) = sessions.get_mut(source) {
+            session.updated_at = Some(runtime_log::timestamp());
+        }
+    }
 
     if runtime.acp.lock().await.is_crashed() {
         if let Some(window) = window {
@@ -2483,6 +2607,18 @@ pub fn run() {
                             }
                         });
                     }));
+                }
+                // 会话过期 watcher（B10.3b）：每 60s 检查所有 runtime 的平台会话，
+                // 按绑定 reset 策略（idle/daily/off）过期并重置（close + 平台通知）。
+                {
+                    let app_for_watcher = app.handle().clone();
+                    tokio::spawn(async move {
+                        loop {
+                            tokio::time::sleep(Duration::from_secs(60)).await;
+                            let state = app_for_watcher.state::<AppState>();
+                            check_session_expiry(state.inner()).await;
+                        }
+                    });
                 }
                 Ok(())
             })
