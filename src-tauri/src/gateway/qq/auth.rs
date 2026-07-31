@@ -1,12 +1,11 @@
-//! QQ Bot OAuth2 Token 管理（BE-B10-004）。
+﻿//! QQ Bot OAuth2 Token 管理（BE-B10-004）。
 //!
 //! POST /app/getAppAccessToken → 缓存 access_token + 过期时间。
 //! Singleflight 锁避免并发刷新。移植自 Prism `src/qq/auth.rs`。
 //!
-//! 凭据由构造参数传入（PYLON_QQ_APP_ID / PYLON_QQ_CLIENT_SECRET 的配置接线
-//! 在 B10.2 适配器组装时做，本模块不读 env、不依赖 tauri）。
-//! 占位期无消费者，与 route/truncate/dedup 一致标 allow(dead_code)；
-//! B10.1 骨架接线时必须移除。
+//! 凭据由构造参数传入（PYLON_QQ_APP_ID / PYLON_QQ_CLIENT_SECRET 在 run() 接线，
+//! 本模块不读 env、不依赖 tauri）。已接线（B10.2）：QqAuth/get_gateway_url 由
+//! QQ 适配器与 WS 循环消费。
 
 use std::sync::Mutex;
 use std::time::{Duration, Instant};
@@ -37,7 +36,6 @@ fn token_is_fresh(now: Instant, expires_at: Instant) -> bool {
 }
 
 /// OAuth2 token 管理器
-#[allow(dead_code)]
 pub struct QqAuth {
     client: Client,
     app_id: String,
@@ -47,7 +45,6 @@ pub struct QqAuth {
     refresh_lock: AsyncMutex<()>,
 }
 
-#[allow(dead_code)]
 impl QqAuth {
     pub fn new(client: Client, app_id: String, client_secret: String) -> Self {
         Self {
@@ -128,7 +125,6 @@ impl QqAuth {
 }
 
 /// 获取 Gateway WebSocket URL
-#[allow(dead_code)]
 pub async fn get_gateway_url(client: &Client, token: &str) -> Result<String, String> {
     let url = format!("{}{}", API_BASE, GATEWAY_URL_PATH);
     let resp = client

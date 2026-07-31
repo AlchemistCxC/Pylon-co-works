@@ -1,9 +1,9 @@
-//! QQ 开放平台类型定义（BE-B10-004 起步：OAuth + Gateway URL；BE-B10-005 补事件类型）。
+﻿//! QQ 开放平台类型定义（BE-B10-004 起步：OAuth + Gateway URL；BE-B10-005 补事件类型）。
 //!
 //! 对应 QQ Bot API v2（https://bot.q.qq.com/wiki/develop/api-v2/）。
 //! 移植自 Prism `src/qq/types.rs`。
-//! 事件/WS 类型在 B10.2 适配器接线前无消费者，暂标 allow(dead_code)；
-//! B10.1 骨架接线时必须移除。
+//! 已接线（B10.2）：WS/事件类型由 ws.rs 与适配器消费；Identify/Resume/
+//! Ready/InboundEvent 等预留类型仍标 allow（B10.3 会话生命周期用）。
 
 use serde::{Deserialize, Serialize};
 
@@ -16,14 +16,11 @@ pub const GATEWAY_URL_PATH: &str = "/gateway";
 
 /// op 2 Identify 所需的 intents
 /// (1<<25)=GROUP_AT_MESSAGES | (1<<30)=PUBLIC_GUILD_MESSAGES | (1<<12)=DIRECT_MESSAGE | (1<<26)=INTERACTION
-#[allow(dead_code)]
 pub const DEFAULT_INTENTS: u32 = (1 << 25) | (1 << 30) | (1 << 12) | (1 << 26);
 
 /// 消息类型: 纯文本
-#[allow(dead_code)]
 pub const MSG_TYPE_TEXT: u32 = 0;
 /// 消息类型: Markdown
-#[allow(dead_code)]
 pub const MSG_TYPE_MARKDOWN: u32 = 2;
 
 /// OAuth2 换取 access token 的请求体（wire 用 appId/clientSecret camelCase）。
@@ -65,7 +62,6 @@ pub struct GatewayResponse {
 // ── WebSocket 事件 ──────────────────────────────────────────
 
 /// QQ Gateway 推送的原始事件帧
-#[allow(dead_code)]
 #[derive(Debug, Deserialize)]
 pub struct QqEvent {
     /// 操作码: 0=Dispatch, 10=Hello, 11=HeartbeatACK
@@ -116,7 +112,6 @@ pub struct ResumeData {
 
 // ── Hello ───────────────────────────────────────────────────
 
-#[allow(dead_code)]
 #[derive(Debug, Deserialize)]
 pub struct HelloData {
     pub heartbeat_interval: u32, // 毫秒
@@ -132,41 +127,47 @@ pub struct ReadyData {
 
 // ── 消息事件 ─────────────────────────────────────────────────
 
-#[allow(dead_code)]
 #[derive(Debug, Deserialize, Clone)]
 pub struct QqAuthor {
     #[serde(default)]
     pub user_openid: Option<String>,
+    /// 待 B10.3 群级白名单双控（member_openid 成员级）。
     #[serde(default)]
+    #[allow(dead_code)]
     pub member_openid: Option<String>,
     #[serde(default)]
+    #[allow(dead_code)]
     pub id: Option<String>,
 }
 
-#[allow(dead_code)]
 #[derive(Debug, Deserialize, Clone)]
 pub struct QqMessageEvent {
     #[serde(default)]
     pub id: Option<String>,
     #[serde(default)]
     pub content: Option<String>,
+    /// 待 B10.3 会话超时/重置策略消费。
     #[serde(default)]
+    #[allow(dead_code)]
     pub timestamp: Option<String>,
     #[serde(default)]
     pub author: Option<QqAuthor>,
     #[serde(default)]
     pub group_openid: Option<String>,
     #[serde(default)]
+    #[allow(dead_code)]
     pub channel_id: Option<String>,
     #[serde(default)]
+    #[allow(dead_code)]
     pub guild_id: Option<String>,
     #[serde(default)]
     pub attachments: Option<Vec<QqAttachment>>,
+    /// 待 B10.3 引用消息处理（message_type=103）消费。
     #[serde(default)]
+    #[allow(dead_code)]
     pub message_type: Option<u32>,
 }
 
-#[allow(dead_code)]
 #[derive(Debug, Deserialize, Serialize, Clone)]
 pub struct QqAttachment {
     #[serde(default)]
@@ -181,8 +182,9 @@ pub struct QqAttachment {
 
 // ── Shim 回调事件 ──────────────────────────────────────────
 
-/// 适配器解析 QQ 事件后的干净消息格式（ingest 入 gateway 前）。
-/// Prism 原为转发给 Python shim 的格式；Pylon 中作为 ingest 中间结构保留。
+/// 适配器解析 QQ 事件后的干净消息格式。
+/// Prism 原为转发给 Python shim 的格式；Pylon 以 ws.rs 的 Dispatch 结构
+/// 取代其角色，本类型作为持久化/调试格式预留。
 #[allow(dead_code)]
 #[derive(Debug, Serialize)]
 pub struct InboundEvent {

@@ -2221,6 +2221,36 @@ pub fn run() {
         };
         let runtime_logs = runtime_log::RuntimeLogHub::default();
         let gateway = Arc::new(GatewayCore::new());
+        // QQ 适配器（B10.2）：凭据存在时创建 auth + adapter + WS 循环并注册进 gateway。
+        // PYLON_QQ_CLIENT_SECRET 为 secret：只读入 QqAuth，不进任何输出。
+        if let (Ok(qq_app_id), Ok(qq_client_secret)) = (
+            std::env::var("PYLON_QQ_APP_ID"),
+            std::env::var("PYLON_QQ_CLIENT_SECRET"),
+        ) {
+            let qq_http = match reqwest::Client::builder()
+                .connect_timeout(Duration::from_secs(10))
+                .timeout(Duration::from_secs(30))
+                .build()
+            {
+                Ok(client) => client,
+                Err(error) => {
+                    eprintln!("Pylon QQ HTTP client unavailable: {error}");
+                    reqwest::Client::new()
+                }
+            };
+            let qq_auth = Arc::new(gateway::qq::auth::QqAuth::new(
+                qq_http.clone(),
+                qq_app_id,
+                qq_client_secret,
+            ));
+            let qq_adapter = gateway::qq::QqAdapter::new(gateway.clone(), qq_http.clone(), qq_auth.clone());
+            if let Err(error) = gateway.register(qq_adapter.clone()) {
+                eprintln!("Pylon QQ adapter register failed: {error}");
+            } else {
+                log::info!("QQ 适配器已注册（PYLON_QQ_APP_ID）");
+                tokio::spawn(gateway::qq::ws::run_ws_loop(qq_http, qq_auth, qq_adapter));
+            }
+        }
         let runtimes = Arc::new(AgentRuntimeManager::new());
         let default_runtime = AgentRuntime::new_disconnected();
         {

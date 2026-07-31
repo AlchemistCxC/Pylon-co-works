@@ -1,17 +1,18 @@
-//! QQ Bot 事件处理辅助函数（BE-B10-005）。
+﻿//! QQ Bot 事件处理辅助函数（BE-B10-005）。
 //!
 //! 移植自 Prism `src/qq/events.rs`（对应 Hermes adapter 的
 //! _process_attachments / _process_quoted_context / _parse_qq_timestamp）。
 //! 纯函数：附件分类、@剥离、时间戳标准化、引用合并。无 IO、不依赖 tauri。
-//! 占位期无消费者，与 route/truncate/dedup/auth 一致标 allow(dead_code)；
-//! B10.1 骨架接线时必须移除。
+//! 已接线（B10.2）：process_attachments/strip_at_mention 由 ws.rs 事件分发消费；
+//! 引用/时间戳处理待 B10.3 会话生命周期，仍标 allow。
 
 use super::types::QqAttachment;
 
 /// 附件处理结果
-#[allow(dead_code)]
 pub struct AttachmentResult {
     pub image_urls: Vec<String>,
+    /// 待 B10 媒体管线（出站媒体二期）消费。
+    #[allow(dead_code)]
     pub image_media_types: Vec<String>,
     pub voice_transcripts: Vec<String>,
     pub attachment_info: String,
@@ -23,7 +24,6 @@ pub struct AttachmentResult {
 /// - audio/voice/silk → voice_transcripts（首版占位，QQ asr_refer_text 后续）
 /// - video/* / 其他 → attachment_info 文本描述（带文件名）
 /// - URL 为空的附件跳过
-#[allow(dead_code)]
 pub fn process_attachments(raw: &Option<Vec<QqAttachment>>) -> AttachmentResult {
     let mut image_urls = Vec::new();
     let mut image_media_types = Vec::new();
@@ -70,7 +70,6 @@ pub fn parse_qq_timestamp(ts: &str) -> Option<f64> {
 }
 
 /// 去掉消息中的 @bot 前缀（@ 后跟非空白 + 空白）。
-#[allow(dead_code)]
 pub fn strip_at_mention(content: &str) -> String {
     let trimmed = content.trim_start();
     // @ 开头后跟非空白字符 + 空白

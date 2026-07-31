@@ -4,8 +4,8 @@
 //! 请求走 reqwest，错误返回 String；不依赖 tauri。
 //! 分块上传（upload.rs）不在本任务范围——>10MB 文件返回明确错误，
 //! >100MB 由 MAX_QQ_FILE_BYTES 守护拒绝（Prism routes.rs 实证上限）。
-//! 占位期无消费者，与 route/truncate/dedup/auth 一致标 allow(dead_code)；
-//! B10.1 骨架接线时必须移除。
+//! 已接线（B10.2）：send_message 由 QQ 适配器 deliver 消费；媒体/typing 待
+//! B10 收尾（媒体出站二期），仍标 allow。
 
 use std::path::Path;
 
@@ -28,7 +28,6 @@ fn msg_seq() -> u32 {
 ///
 /// chat_type: "c2c" → /v2/users/{chat_id}/messages；其他 → /v2/groups/{chat_id}/messages。
 /// reply_to 存在时附带 msg_id（回复锚点）。msg_type 支持 MSG_TYPE_TEXT/MSG_TYPE_MARKDOWN。
-#[allow(dead_code)]
 pub async fn send_message(
     client: &Client,
     base_url: &str,
@@ -93,7 +92,6 @@ pub async fn send_message(
 }
 
 /// 简单上传 — URL 直传或 base64 <10MB。
-#[allow(dead_code)]
 pub async fn upload_simple(
     client: &Client,
     base_url: &str,
