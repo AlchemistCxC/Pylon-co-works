@@ -32,6 +32,9 @@ agent-client-protocol-schema = "1.4"
 tauri-build = { version = "2", features = [] }
 embed-resource = "3"
 
+[dev-dependencies]
+tauri = { version = "2", features = ["test"] }
+
 [lib]
 name = "prism_desktop_lib"
 crate-type = ["lib", "cdylib", "staticlib"]

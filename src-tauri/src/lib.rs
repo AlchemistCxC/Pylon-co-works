@@ -163,11 +163,11 @@ impl AppStateHandles {
         });
     }
 
-    async fn replace_agent_client(
+    async fn replace_agent_client<R: tauri::Runtime>(
         &self,
         agent_id: Option<String>,
         new_acp: AcpClient,
-        window: tauri::WebviewWindow,
+        window: tauri::WebviewWindow<R>,
         keep_sessions: bool,
     ) -> Result<(), String> {
         if new_acp.is_crashed() {
@@ -198,9 +198,9 @@ impl AppStateHandles {
 
 /// 连接并替换客户端（connect_and_replace 的静态辅助版本）。
 /// 手动 switch/reconnect 传 keep_sessions=false；自动重连传 true（崩溃恢复续会话）。
-async fn do_connect_and_replace(
+async fn do_connect_and_replace<R: tauri::Runtime>(
     handles: &AppStateHandles,
-    window: &tauri::WebviewWindow,
+    window: &tauri::WebviewWindow<R>,
     agent: &AgentDef,
     agent_id: Option<String>,
     start_status: AgentLifecycleStatus,
@@ -623,7 +623,7 @@ async fn prompt_lock_for(
         .clone()
 }
 
-fn start_notification_dispatcher(state: &AppStateHandles, window: tauri::WebviewWindow) {
+fn start_notification_dispatcher<R: tauri::Runtime>(state: &AppStateHandles, window: tauri::WebviewWindow<R>) {
     if let Ok(mut task) = state.notification_task.lock() {
         if let Some(handle) = task.take() { handle.abort(); }
         let acp = state.acp.clone();
@@ -1054,6 +1054,123 @@ mod session_info_tests {
         sessions.insert("source-a".into(), SessionInfo::new("peri-1".into(), "persona".into(), ".".into(), true, 1));
         apply_client_replacement_sessions(&mut sessions, false, 9);
         assert!(sessions.is_empty());
+    }
+}
+
+#[cfg(test)]
+mod auto_reconnect_integration_tests {
+    use super::*;
+    use crate::agent_config::AgentDef;
+
+    /// fake ACP 脚本：FAKE_MODE=crash 时响应首个请求（initialize）后立即退出
+    /// → stdout EOF → 崩溃通知；FAKE_MODE=alive 时保持存活并响应请求。
+    const FAKE_SCRIPT: &str = r#"import json,sys,os
+mode = os.environ.get('FAKE_MODE', 'alive')
+for line in sys.stdin:
+    request = json.loads(line)
+    response = {'jsonrpc':'2.0','id':request.get('id'),'result':{}}
+    method = request.get('method')
+    if method == 'session/new':
+        response['result'] = {'sessionId':'fake-session-1'}
+    elif method == 'session/prompt':
+        response['result'] = {'stopReason':'end_turn'}
+    print(json.dumps(response), flush=True)
+    if mode == 'crash':
+        sys.exit(0)
+"#;
+
+    fn fake_agent(mode: &str) -> AgentDef {
+        let mut env = std::collections::HashMap::new();
+        env.insert("FAKE_MODE".to_string(), mode.to_string());
+        AgentDef {
+            name: "fake-acp".to_string(),
+            transport: "subprocess".to_string(),
+            exe: "python".to_string(),
+            args: vec!["-u".to_string(), "-c".to_string(), FAKE_SCRIPT.to_string()],
+            cwd: None,
+            env,
+            default: false,
+        }
+    }
+
+    fn build_state(initial_acp: AcpClient, agent: AgentDef) -> AppState {
+        let mut agents = std::collections::HashMap::new();
+        agents.insert(agent.name.clone(), agent);
+        let mut sessions = std::collections::HashMap::new();
+        // 崩溃前已有会话映射（generation 0）——重连后应保留并迁移到新代际
+        sessions.insert("source-a".to_string(), SessionInfo::new("fake-session-1".into(), "persona".into(), ".".into(), true, 0));
+        AppState {
+            acp: Arc::new(tokio::sync::Mutex::new(initial_acp)),
+            notification_task: Arc::new(Mutex::new(None)),
+            session_creation: Arc::new(tokio::sync::Mutex::new(())),
+            agent_lifecycle: Arc::new(tokio::sync::Mutex::new(())),
+            client_generation: Arc::new(AtomicU64::new(0)),
+            prompt_locks: Arc::new(tokio::sync::Mutex::new(std::collections::HashMap::new())),
+            agents: Arc::new(Mutex::new(agents)),
+            active_agent: Arc::new(Mutex::new("fake-acp".to_string())),
+            sessions: Arc::new(Mutex::new(sessions)),
+            pet: Arc::new(Mutex::new(pet::PetState::default())),
+            runtime_logs: runtime_log::RuntimeLogHub::default(),
+            runtime_mcp: Mutex::new(None),
+            agent_runtime: Arc::new(Mutex::new(AgentRuntimeState::default())),
+            auto_reconnect_active: Arc::new(AtomicBool::new(false)),
+            prism: prism::PrismClient::unavailable("test".to_string()),
+        }
+    }
+
+    #[tokio::test]
+    async fn fake_acp_crash_triggers_auto_reconnect() {
+        let app = tauri::test::mock_builder().build(tauri::test::mock_context(tauri::test::noop_assets())).unwrap();
+        let window = tauri::WebviewWindowBuilder::new(&app, "main", tauri::WebviewUrl::External("https://example.com".parse().unwrap()))
+            .build()
+            .expect("mock window must build");
+
+        // 初始连接 crash 模式：initialize 成功但进程立即退出 → EOF → 崩溃通知
+        let crash_agent = fake_agent("crash");
+        let initial_acp = AcpClient::connect_with_logs(&crash_agent, None)
+            .await
+            .expect("fake ACP must initialize");
+        let state = build_state(initial_acp, crash_agent);
+        let handles = AppStateHandles::from_state(&state);
+        start_notification_dispatcher(&handles, window);
+
+        // 等待崩溃被 dispatcher 处理：状态置 Crashed + 自动重连已调度
+        tokio::time::timeout(std::time::Duration::from_secs(5), async {
+            loop {
+                let status = state.agent_runtime.lock().map(|r| r.status).unwrap_or(AgentLifecycleStatus::Disconnected);
+                if status == AgentLifecycleStatus::Crashed { break; }
+                tokio::time::sleep(std::time::Duration::from_millis(20)).await;
+            }
+        })
+        .await
+        .expect("dispatcher must observe crash within 5s");
+        assert!(state.auto_reconnect_active.load(Ordering::Acquire), "auto-reconnect must be scheduled on crash");
+
+        // 注入重连成功：自动重连（2s 退避）开始前把 agents 表切到 alive 模式
+        {
+            let mut agents = state.agents.lock().unwrap();
+            agents.insert("fake-acp".to_string(), fake_agent("alive"));
+        }
+
+        // 等待自动重连完成：Connected + generation 前进
+        tokio::time::timeout(std::time::Duration::from_secs(15), async {
+            loop {
+                let status = state.agent_runtime.lock().map(|r| r.status).unwrap_or(AgentLifecycleStatus::Disconnected);
+                if status == AgentLifecycleStatus::Connected { break; }
+                tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+            }
+        })
+        .await
+        .expect("auto-reconnect must restore Connected within 15s");
+
+        // 断言：generation +1、sessions 保留且迁移到新代际、防重入标志释放
+        assert_eq!(state.client_generation.load(Ordering::Acquire), 1, "auto-reconnect must bump generation");
+        {
+            let sessions = state.sessions.lock().unwrap();
+            assert_eq!(sessions.len(), 1, "sessions must survive auto-reconnect");
+            assert_eq!(sessions.get("source-a").map(|s| s.generation), Some(1), "kept sessions must migrate generation");
+        }
+        assert!(!state.auto_reconnect_active.load(Ordering::Acquire), "auto-reconnect flag must release after loop");
     }
 }
 
