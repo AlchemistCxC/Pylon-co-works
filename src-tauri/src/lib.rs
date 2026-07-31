@@ -1711,7 +1711,6 @@ pub fn run() {
             }
         };
         let acp = Arc::new(tokio::sync::Mutex::new(initial_acp));
-        let acp_for_shutdown = acp.clone();
 
         tauri::Builder::default()
             .plugin(tauri_plugin_shell::init())
@@ -1760,18 +1759,10 @@ pub fn run() {
                 app.state::<AppState>().inner().start_runtime_log_dispatcher(window);
                 Ok(())
             })
-            .on_window_event(move |_window, event| {
-                if let tauri::WindowEvent::CloseRequested { .. } = event {
-                    // Kill child process on close to prevent orphans on Windows
-                    let acp = acp_for_shutdown.clone();
-                    let rt = tokio::runtime::Handle::current();
-                    rt.block_on(async {
-                        if let Err(e) = acp.lock().await.kill() {
-                            log::warn!("shutdown kill: {}", e);
-                        }
-                    });
-                }
-            })
+            // 关窗时不在此处 block_on kill——run() 由 rt.block_on 驱动，窗口回调在
+            // 同一 runtime 栈内执行，嵌套 block_on 必 panic ("Cannot start a runtime
+            // from within a runtime")。子进程清理依赖 AppState drop 链：
+            // AcpClient → ManagedChild::drop → kill_and_wait（同步 std 操作，不依赖 tokio）。
             .run(tauri::generate_context!())
             .unwrap_or_else(|error| eprintln!("error while running tauri application: {error}"));
     });
