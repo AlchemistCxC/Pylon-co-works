@@ -101,3 +101,52 @@ fn now_ms() -> u64 {
         .unwrap_or_default()
         .as_millis() as u64
 }
+
+/// 原子写：临时文件 + rename，中断也不会留下半截 JSON。
+pub fn save_to_file(state: &PetState, path: &std::path::Path) -> Result<(), String> {
+    let json = serde_json::to_string(state).map_err(|e| e.to_string())?;
+    if let Some(parent) = path.parent() {
+        std::fs::create_dir_all(parent).map_err(|e| e.to_string())?;
+    }
+    let temp = path.with_extension("json.tmp");
+    std::fs::write(&temp, json).map_err(|e| e.to_string())?;
+    std::fs::rename(&temp, path).map_err(|e| e.to_string())
+}
+
+/// 容错读：文件缺失/损坏一律返回 None（启动时静默降级为新宠物）。
+pub fn load_from_file(path: &std::path::Path) -> Option<PetState> {
+    let raw = std::fs::read_to_string(path).ok()?;
+    serde_json::from_str(&raw).ok()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn save_and_load_round_trips_state() {
+        let dir = std::env::temp_dir().join(format!("pylon-pet-test-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("pylon-pet.json");
+        let mut pet = PetState::new_at(1_000);
+        pet.apply(AiEvent::PromptCompleted, 2_000);
+        save_to_file(&pet, &path).expect("save must succeed");
+        let loaded = load_from_file(&path).expect("load must succeed");
+        assert_eq!(loaded.name, "微栖");
+        assert_eq!(loaded.xp, pet.xp);
+        assert_eq!(loaded.stats.prompts_completed, 1);
+        std::fs::remove_dir_all(&dir).unwrap();
+    }
+
+    #[test]
+    fn load_missing_or_corrupt_returns_none() {
+        let dir = std::env::temp_dir().join(format!("pylon-pet-bad-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let missing = dir.join("missing.json");
+        assert!(load_from_file(&missing).is_none());
+        let corrupt = dir.join("corrupt.json");
+        std::fs::write(&corrupt, "{not json").unwrap();
+        assert!(load_from_file(&corrupt).is_none());
+        std::fs::remove_dir_all(&dir).unwrap();
+    }
+}

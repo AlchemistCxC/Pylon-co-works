@@ -1853,8 +1853,26 @@ async fn reload_agents(state: tauri::State<'_, AppState>, config_path: Option<St
     Ok(())
 }
 
+/// 宠物状态落盘路径：app_config_dir/pylon-pet.json。
+fn pet_persist_path(app: &tauri::AppHandle) -> Result<std::path::PathBuf, String> {
+    let dir = app.path().app_config_dir().map_err(|e| e.to_string())?;
+    Ok(dir.join("pylon-pet.json"))
+}
+
+/// 尽力持久化：路径解析或写盘失败只 warn，不阻断主流程。
+fn persist_pet_if_possible(app: &tauri::AppHandle, pet: &pet::PetState) {
+    match pet_persist_path(app) {
+        Ok(path) => {
+            if let Err(error) = pet::save_to_file(pet, &path) {
+                log::warn!("persist pet state failed: {error}");
+            }
+        }
+        Err(error) => log::warn!("resolve pet persist path failed: {error}"),
+    }
+}
+
 #[tauri::command]
-async fn get_pet(state: tauri::State<'_, AppState>) -> Result<serde_json::Value, String> {
+async fn get_pet(app: tauri::AppHandle, state: tauri::State<'_, AppState>) -> Result<serde_json::Value, String> {
     let mut pet = state.pet.lock().map_err(|e| e.to_string())?;
     pet::daily_visit(&mut pet);
     // 自动入睡：轮询时检查（首字后 30s 无互动 → sleepy），幂等
@@ -1864,11 +1882,12 @@ async fn get_pet(state: tauri::State<'_, AppState>) -> Result<serde_json::Value,
     if let Some(message) = msg {
         value["msg"] = serde_json::Value::String(message);
     }
+    persist_pet_if_possible(&app, &pet);
     Ok(value)
 }
 
 #[tauri::command]
-async fn pet_action(state: tauri::State<'_, AppState>, action: String, value: Option<String>) -> Result<serde_json::Value, String> {
+async fn pet_action(app: tauri::AppHandle, state: tauri::State<'_, AppState>, action: String, value: Option<String>) -> Result<serde_json::Value, String> {
     let mut pet = state.pet.lock().map_err(|e| e.to_string())?;
     let mut sleepy_result: Option<bool> = None;
     match action.as_str() {
@@ -1894,6 +1913,7 @@ async fn pet_action(state: tauri::State<'_, AppState>, action: String, value: Op
     if let Some(message) = msg {
         result["msg"] = serde_json::Value::String(message);
     }
+    persist_pet_if_possible(&app, &pet);
     Ok(result)
 }
 
@@ -2186,6 +2206,18 @@ pub fn run() {
             .setup(|app| {
                 let window = app.get_webview_window("main").ok_or("main window not found")?;
                 if let Err(error) = window.set_title("Pylon") { log::warn!("set window title failed: {error}"); }
+                // 宠物状态落盘加载：文件缺失/损坏时保持新宠物（静默降级）
+                match pet_persist_path(app.handle()) {
+                    Ok(path) => {
+                        if let Some(saved) = pet::load_from_file(&path) {
+                            let pet_arc = app.state::<AppState>().pet.clone();
+                            if let Ok(mut pet) = pet_arc.lock() {
+                                pet::restore(&mut pet, saved);
+                            };
+                        }
+                    }
+                    Err(error) => log::warn!("resolve pet persist path failed: {error}"),
+                }
                 start_notification_dispatcher(&AppStateHandles::from_state(app.state::<AppState>().inner()), window.clone());
                 app.state::<AppState>().inner().start_runtime_log_dispatcher(window);
                 Ok(())
@@ -2194,7 +2226,16 @@ pub fn run() {
             // 同一 runtime 栈内执行，嵌套 block_on 必 panic ("Cannot start a runtime
             // from within a runtime")。子进程清理依赖 AppState drop 链：
             // AcpClient → ManagedChild::drop → kill_and_wait（同步 std 操作，不依赖 tokio）。
-            .run(tauri::generate_context!())
-            .unwrap_or_else(|error| eprintln!("error while running tauri application: {error}"));
+            .build(tauri::generate_context!())
+            .expect("error while building tauri application")
+            .run(|app_handle: &tauri::AppHandle, event: tauri::RunEvent| {
+                if let tauri::RunEvent::Exit = event {
+                    // 退出兜底：最后持久化一次（get_pet 12s 轮询已覆盖大部分变更）
+                    let pet_arc = app_handle.state::<AppState>().pet.clone();
+                    if let Ok(pet) = pet_arc.try_lock() {
+                        persist_pet_if_possible(app_handle, &pet);
+                    };
+                }
+            });
     });
 }
