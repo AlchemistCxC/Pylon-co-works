@@ -14,6 +14,7 @@
 .term-user .term-p { display:inline; margin:0; }
 
 .term-assistant { position:relative; padding:2px 0; white-space:normal; }
+.term-plain-text { white-space:pre-wrap; }
 .term-row-user, .term-row-assistant, .term-row-reasoning {
   min-width:0;
   font-family:var(--msg-font,var(--chat-font,var(--mono)));
@@ -29,6 +30,8 @@
 }
 .term-row-tool { min-width:0; }
 .term-row-tool > * { min-width:0; }
+.term-row-error { padding:4px 0; color:var(--tool-err,#be2828); }
+.term-row-error-detail { margin-left:8px; color:var(--text-dim); font-size:0.85em; }
 .app[data-msg-style="bubble"] .term-row-user,
 .app[data-msg-style="bubble"] .term-row-assistant,
 .app[data-msg-style="bubble"] .term-row-reasoning {
@@ -51,11 +54,11 @@
 .term-reasoning-body { padding:4px 0 4px 18px; }
 .term-reasoning-line { color:var(--text-dim); font-style:italic; font-size:0.93em; line-height:1.6; white-space:pre-wrap; }
 
-/* Claude 风格：整行用户底色、统一消息节奏、Assistant/Thinking 约 2ch 缩进 */
+/* Claude 风格：用户整行底色，但所有消息内容共用 .term 左侧轨道 */
 .app[data-message-layout="claude"] .term-row { margin:0 0 1em; }
 .app[data-message-layout="claude"] .term-row:last-of-type { margin-bottom:0; }
 .app[data-message-layout="claude"] .term-user {
-  padding:8px 12px;
+  padding:8px 0;
   background:var(--user-tag-bg, #373737);
 }
 .app[data-message-layout="claude"] .term-user-tag {
@@ -63,11 +66,15 @@
   padding:0;
   border-radius:0;
 }
-.app[data-message-layout="claude"] .term-assistant { padding:0 0 0 2ch; }
-.app[data-message-layout="claude"] .term-reasoning { padding:0; }
+.app[data-message-layout="claude"] .term-assistant,
+.app[data-message-layout="claude"] .term-reasoning,
+.app[data-message-layout="claude"] .term-tool {
+  padding-left:0;
+  padding-right:0;
+}
 .app[data-message-layout="claude"] .term-reasoning-head { line-height:inherit; }
 .app[data-message-layout="claude"] .term-reasoning-body {
-  padding:0 0 0 2ch;
+  padding:0 0 0 18px;
   margin-top:1em;
 }
 
@@ -86,11 +93,14 @@
 .term-tool-indicator.run { color:var(--tool-run,#3b82f6); }
 .term-tool-name { font-weight:700; color:var(--tool-name,inherit); }
 .term-tool-summary { min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; color:var(--tool-summary,var(--text-dim)); font-size:inherit; }
+.term-tool-status { flex-shrink:0; color:var(--text-dim); font-size:0.9em; }
 .term-tool-suffix { color:var(--text-dim); font-size:inherit; }
 .term-tool-body { padding:0 0 6px 18px; font-family:var(--mono); }
+.term-tool[data-output-collapsible="true"] .term-tool-body { max-height:320px; overflow:auto; }
 .term-tool-body pre { font-size:inherit; font-family:inherit; background:var(--chat-code-bg,rgba(0,0,0,0.02)); padding:6px 12px; border-radius:4px; overflow-x:auto; white-space:pre-wrap; margin:0; }
 .term-tool-body code { font-size:inherit; font-family:inherit; }
 .term-tool-label { font-size:12px; color:var(--text-dim); text-transform:uppercase; display:block; margin:4px 0 2px; }
+.term-tool-label-error { color:var(--tool-err,#be2828); }
 
 .term-h2 { font-size:1.1em; font-weight:600; margin:6px 0 2px; }
 .term-h3 { font-size:1em; font-weight:600; margin:4px 0 2px; }

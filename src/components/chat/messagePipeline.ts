@@ -1,4 +1,4 @@
-import { toRenderMessage, type Message, type RenderDecision, type RenderMessage } from './messageTypes'
+import { toRenderMessage, type Message, type RenderDecision, type RenderMessage, renderDecisionKind } from './messageTypes.ts'
 
 export function prepareMessages(messages: Message[]): RenderMessage[] {
   return messages.map(toRenderMessage)
@@ -12,5 +12,5 @@ export function decideMessageVisibility(message: RenderMessage): RenderDecision 
 }
 
 export function prepareRenderableMessages(messages: Message[]): RenderMessage[] {
-  return prepareMessages(messages).filter(message => decideMessageVisibility(message).kind === 'render')
+  return prepareMessages(messages).filter(message => renderDecisionKind(decideMessageVisibility(message)) === 'render')
 }

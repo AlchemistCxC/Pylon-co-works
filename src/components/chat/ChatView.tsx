@@ -12,7 +12,6 @@ import { resolveSpinnerFrames } from './spinnerFrames'
 import { isCurrentLoadGeneration, nextLoadGeneration, normalizeToolId, resolveLoadedMessages, resolveReplayEventMode, resolveTerminationScope, serializeLoadedMessages, settleReplayToolMessages, shouldAcceptToolCall, shouldStartLiveGeneration } from './replayState'
 import { canPersistMessages, clearMessageStorage, messageStorageKey, persistMessageSnapshot } from './messagePersistence'
 import { addGeneratingSource, isKnownSource, isRenderedSource, removeGeneratingSource, updateSourceState } from './sessionEventState'
-import { resolveToolVisualStatus } from './toolStatus'
 import { extractMode, extractModelConfig, extractUsage, sessionResponseObject, type PeriDonePayload, type PeriUpdatePayload, type SessionResponse } from './acpTypes'
 import { highlightCode } from './codeHighlight'
 import { sanitizeHtml } from './htmlSanitizer'
@@ -24,8 +23,12 @@ import { prepareRenderableMessages } from './messagePipeline'
 import type { Message as PipelineMessage } from './messageTypes'
 import { buildMessageLookups } from './messageLookups'
 import { getToolSummary } from './toolPresentation'
+import { buildToolPresentationModel, toolPresentationStatus, truncateToolSummary } from './toolPresentationModel'
+import { normalizeToolStatus, type ToolVisualState } from './toolStatus'
+import { isPlainTextContent } from './markdownFastPath'
+import { MessageRenderBoundary } from './MessageRenderBoundary'
+import { createMockMessages } from './chatMockData'
 import './ChatView.css'
-
 
 interface Props { sessionId: string | null }
 
@@ -35,14 +38,31 @@ type Message = PipelineMessage
 
 // dev/浏览器 mock：无 Tauri 后端时（预览调样式用）展示的演示对话
 const IS_TAURI = typeof (window as any).__TAURI_INTERNALS__ !== 'undefined' || typeof (window as any).__TAURI__ !== 'undefined'
-const MOCK_MESSAGES: Message[] = [
-  { id: 'm1', role: 'user', sender: 'local:demo', content: '帮我看看 main.ts 有没有类型错误', time: '10:24' },
-  { id: 'm2', role: 'reasoning', sender: 'peri', content: '先读源码定位类型问题，再跑一次 build 验证，然后修正。', time: '10:24' },
-  { id: 'm3', role: 'tool', sender: 'tool:Read', content: '', toolName: 'Read', toolInput: 'src/main.ts', toolOutput: 'export function main(url: string) {\n  const r = await fetch(url)\n  return r.json()\n}', toolOutputLines: 4, time: '10:24' },
-  { id: 'm4', role: 'tool', sender: 'tool:Grep', content: '', toolName: 'Grep', toolInput: 'async', toolOutput: 'src/main.ts:2:  const r = await fetch(url)', toolOutputLines: 1, time: '10:24' },
-  { id: 'm5', role: 'tool', sender: 'tool:Edit', content: '', toolName: 'Edit', toolInput: 'src/main.ts', toolOutput: 'async function main', toolOutputLines: 1, time: '10:24' },
-  { id: 'm6', role: 'assistant', sender: 'peri', content: '找到问题了：`main` 用了 `await` 却没标 `async`。\n\n```ts\nexport async function main(url: string) {\n  const r = await fetch(url)\n  return r.json()\n}\n```\n\n已修正，`build` 通过。', time: '10:25' },
-]
+
+function createBenchmarkMessages(count: number): Message[] {
+  return Array.from({ length: count }, (_, index) => {
+    const cycle = index % 4
+    const time = `11:${String(index % 60).padStart(2, '0')}`
+    if (cycle === 0) return { id: `benchmark-user-${index}`, role: 'user', sender: 'local:benchmark', content: `检查第 ${index} 个模块的状态`, time }
+    if (cycle === 1) return { id: `benchmark-assistant-${index}`, role: 'assistant', sender: 'peri', content: `第 ${index} 个模块检查完成，状态正常。`, time }
+    if (cycle === 2) return { id: `benchmark-reasoning-${index}`, role: 'reasoning', sender: 'peri', content: `分析第 ${index} 个模块的依赖关系。`, time }
+    return { id: `benchmark-tool-${index}`, role: 'tool', sender: 'tool:Grep', content: '', toolName: 'Grep', toolInput: `module-${index}`, toolOutput: `module-${index}: status ok`, toolOutputLines: 1, toolStatus: 'completed', time }
+  })
+}
+
+function resolveInitialBrowserMessages(): Message[] {
+  if (import.meta.env.DEV && typeof window !== 'undefined') {
+    const params = new URLSearchParams(window.location.search)
+    if (params.has('pylon-benchmark')) {
+      const requestedCount = Number(params.get('pylon-benchmark'))
+      const count = Number.isFinite(requestedCount) && requestedCount > 0
+        ? Math.min(Math.floor(requestedCount), 5000)
+        : 1000
+      return createBenchmarkMessages(count)
+    }
+  }
+  return createMockMessages()
+}
 
 const ChatView = React.memo(function ChatView({ sessionId }: Props) {
   recordRender('ChatView.render')
@@ -54,7 +74,7 @@ const ChatView = React.memo(function ChatView({ sessionId }: Props) {
   const scrollRafRef = useRef<number | null>(null)
   const scrollLockUntilRef = useRef(0)
   const scrollToBottomRef = useRef<((behavior?: ScrollBehavior) => void) | null>(null)
-  const [messages, setMessages] = useState<Message[]>(!IS_TAURI ? MOCK_MESSAGES : [])
+  const [messages, setMessages] = useState<Message[]>(!IS_TAURI ? resolveInitialBrowserMessages() : [])
   const preparedMessages = useMemo(() => prepareRenderableMessages(messages), [messages])
   const messageLookups = useMemo(() => buildMessageLookups(messages), [messages])
   const [streamingText, setStreamingText] = useState('')
@@ -579,18 +599,27 @@ const ChatView = React.memo(function ChatView({ sessionId }: Props) {
 
 function MessageRow({ message: msg, reduceMotion, toolVisualState }: { message: Message; reduceMotion: boolean; toolVisualState?: string }) {
   recordRender('MessageRow.render')
+  const toolModel = msg.role === 'tool'
+    ? buildToolPresentationModel(msg, toolVisualState ? normalizeToolStatus(toolVisualState) : undefined)
+    : undefined
+  const renderType = msg.role === 'tool'
+    ? msg.toolOutput !== undefined ? 'tool_result' : 'tool_call'
+    : msg.role
   return (
-    <motion.div
+    <MessageRenderBoundary message={msg}>
+      <motion.div
       className={`term-row term-row-${msg.role}`}
+      data-render-type={renderType}
       initial={reduceMotion ? false : { opacity: 0, y: 8 }}
       animate={{ opacity: 1, y: 0 }}
       transition={reduceMotion ? { duration: 0 } : { duration: 0.25, ease: [0.2, 0, 0, 1] }}
     >
-      {msg.role === 'tool' && <ToolCard name={msg.toolName!} input={msg.toolInput} output={msg.toolOutput} outputLines={msg.toolOutputLines} status={msg.toolStatus} visualState={toolVisualState} />}
+      {toolModel && <ToolCard model={toolModel} />}
       {msg.role === 'user' && <UserLine sender={msg.sender} content={msg.content} />}
       {msg.role === 'reasoning' && <ReasoningBlock text={msg.content} running={msg.running === true} />}
       {msg.role === 'assistant' && <AssistantContent text={msg.content} />}
-    </motion.div>
+      </motion.div>
+    </MessageRenderBoundary>
   )
 }
 
@@ -621,7 +650,7 @@ function resolveRowToolVisualState(message: Message, lookups: ReturnType<typeof 
   return 'unknown'
 }
 
-function AssistantContent({ text }: { text: string }) {
+function AssistantContent({ text, isStreaming = false }: { text: string; isStreaming?: boolean }) {
   recordRender('AssistantContent.render')
   recordRender('markdown.parse')
   const [copied, setCopied] = useState(false)
@@ -632,24 +661,28 @@ function AssistantContent({ text }: { text: string }) {
   return (
     <div className="term-assistant">
       <button className="copy-btn" onClick={copy}>{copied ? '✓' : '⎘'}</button>
-      <ReactMarkdown remarkPlugins={[remarkGfm]} components={{
-        code({ className, children, ...props }) {
-          const match = /language-(\w+)/.exec(className || '')
-          const code = String(children).replace(/\n$/, '')
-          if (match) return <CodeBlock language={match[1]} code={code} />
-          return <code className="term-inline-code" {...props}>{children}</code>
-        },
-        a({ href, children }) { return <a href={href} target="_blank" rel="noopener" className="term-link">{children}</a> },
-        blockquote({ children }) { return <blockquote className="term-blockquote">{children}</blockquote> },
-        table({ children }) { return <div className="term-table-wrap"><table className="term-table">{children}</table></div> },
-      }}>{text}</ReactMarkdown>
+      {isStreaming || !isPlainTextContent(text) ? (
+        <ReactMarkdown remarkPlugins={[remarkGfm]} components={{
+          code({ className, children, ...props }) {
+            const match = /language-(\w+)/.exec(className || '')
+            const code = String(children).replace(/\n$/, '')
+            if (match) return <CodeBlock language={match[1]} code={code} />
+            return <code className="term-inline-code" {...props}>{children}</code>
+          },
+          a({ href, children }) { return <a href={href} target="_blank" rel="noopener" className="term-link">{children}</a> },
+          blockquote({ children }) { return <blockquote className="term-blockquote">{children}</blockquote> },
+          table({ children }) { return <div className="term-table-wrap"><table className="term-table">{children}</table></div> },
+        }}>{text}</ReactMarkdown>
+      ) : (
+        <p className="term-p term-plain-text">{text}</p>
+      )}
     </div>
   )
 }
 
 function StreamingAssistantText({ text }: { text: string }) {
   recordRender('streamingText.render')
-  return <AssistantContent text={text} />
+  return <AssistantContent text={text} isStreaming />
 }
 
 function StreamingThinking({ text }: { text: string }) {
@@ -725,7 +758,7 @@ function formatToolInput(name: string, rawInput: unknown): string {
   return getToolSummary(name, rawInput)
 }
 
-function ToolCard({ name, input, output, outputLines, status: toolStatus, visualState }: { name: string; input?: string; output?: string; outputLines?: number; status?: string; visualState?: string }) {
+function ToolCard({ model }: { model: ReturnType<typeof buildToolPresentationModel> }) {
   recordRender('ToolCard.render')
   const [open, setOpen] = useState(false)
   const bodyId = useId()
@@ -737,40 +770,38 @@ function ToolCard({ name, input, output, outputLines, status: toolStatus, visual
   const toolErr = useStore(s => s.toolErr)
   const connectorMode = useStore(s => s.toolConnectorMode) || 'none'
   const connectorColor = useStore(s => s.toolConnectorColor) || 'rgba(0,0,0,0.12)'
-  const done = visualState === 'completed' || visualState === 'failed' || visualState === 'cancelled' || toolStatus === 'completed' || toolStatus === 'failed' || toolStatus === 'error' || output !== undefined
-  const status = resolveToolVisualStatus(visualState || toolStatus, output !== undefined)
-  // 标志物辉光：颜色跟随状态色，或用户指定
-  const statusColor = status === 'ok' ? toolOk : status === 'err' ? toolErr : toolRun
+  const status = toolPresentationStatus(model)
+  const displaySummary = truncateToolSummary(model.summary)
+  const displayStatus = model.state !== 'unknown' ? model.statusLabel : ''
   const glowCss = glow > 0
-    ? { textShadow: `0 0 ${glow}px ${glowColor || statusColor || 'currentColor'}` }
+    ? { textShadow: `0 0 ${glow}px ${glowColor || (status === 'ok' ? toolOk : status === 'err' ? toolErr : toolRun) || 'currentColor'}` }
     : undefined
-  // 竖线连接：none 关闭；fixed 固定色；follow 跟随本 tool 状态色
   const connCss: React.CSSProperties = connectorMode === 'none'
     ? { ['--tool-conn' as any]: 'transparent' }
-    : { ['--tool-conn' as any]: connectorMode === 'follow' ? (statusColor || connectorColor) : connectorColor }
-  let suffix = ''
-  if (done && outputLines !== undefined && outputLines > 0) {
-    if (name === 'Grep' || name === 'Glob') suffix = ` — ${outputLines} matches`
-    else if (name === 'Read') suffix = ` — ${outputLines} lines`
-    else if (name === 'Edit' || name === 'Write') suffix = ` — ${outputLines} lines changed`
-  }
+    : { ['--tool-conn' as any]: connectorMode === 'follow' ? ((status === 'ok' ? toolOk : status === 'err' ? toolErr : toolRun) || connectorColor) : connectorColor }
+  const suffix = model.state === 'completed' && model.outputLines > 0 ? ` — ${model.outputLabel}` : ''
   const outputHtml = useMemo(() => {
-    if (!output || name !== 'Bash') return ''
-    return sanitizeHtml(new Anser().ansiToHtml(Anser.escapeForHtml(output)))
-  }, [output, name])
+    if (!model.outputText || model.name !== 'Bash') return ''
+    return sanitizeHtml(new Anser().ansiToHtml(Anser.escapeForHtml(model.outputText)))
+  }, [model.outputText, model.name])
   return (
-    <div className="term-tool" data-status={status} style={connCss}>
+    <div className="term-tool" data-status={status} data-tool-state={model.state}
+      data-output-collapsible={model.canCollapseOutput ? 'true' : 'false'} style={connCss}>
       <button className="term-tool-head" type="button" onClick={() => setOpen(!open)} aria-expanded={open} aria-controls={bodyId}>
         <span className={`term-tool-indicator ${status}`} style={glowCss}>{indicator}</span>
-        <span className="term-tool-name">{name}</span>
-        {input && <span className="term-tool-summary"> ({input.length > 60 ? input.slice(0, 60) + '...' : input})</span>}
+        <span className="term-tool-name">{model.name}</span>
+        {displaySummary && <span className="term-tool-summary"> ({displaySummary})</span>}
+        {displayStatus && <span className="term-tool-status"> · {displayStatus}</span>}
         {suffix && <span className="term-tool-suffix">{suffix}</span>}
       </button>
-      {open && output && (
+      {open && model.hasOutput && (
         <div className="term-tool-body" id={bodyId}>
-          {name === 'Bash' && outputHtml
+          <span className={`term-tool-label${model.errorText ? ' term-tool-label-error' : ''}`}>
+            {model.errorText ? '错误' : '输出'}{model.outputLabel ? ` · ${model.outputLabel}` : ''}
+          </span>
+          {model.name === 'Bash' && outputHtml
             ? <div className="term-ansi" dangerouslySetInnerHTML={{ __html: outputHtml }} />
-            : <pre><code>{output}</code></pre>}
+            : <pre><code>{model.outputText}</code></pre>}
         </div>
       )}
     </div>

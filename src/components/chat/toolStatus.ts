@@ -1,6 +1,10 @@
 export type ToolVisualState = 'queued' | 'running' | 'waiting' | 'completed' | 'failed' | 'cancelled' | 'unknown'
 export type ToolVisualStatus = 'run' | 'ok' | 'err'
 
+export function assertNeverToolStatus(value: never): never {
+  throw new Error(`未处理的工具状态: ${String(value)}`)
+}
+
 export function normalizeToolStatus(toolStatus?: string): ToolVisualState {
   switch (toolStatus) {
     case 'pending':
@@ -29,8 +33,19 @@ export function normalizeToolStatus(toolStatus?: string): ToolVisualState {
 
 export function resolveToolVisualStatus(toolStatus?: string, hasOutput = false): ToolVisualStatus {
   const normalized = normalizeToolStatus(toolStatus)
-  if (normalized === 'failed' || normalized === 'cancelled') return 'err'
-  if (normalized === 'completed') return 'ok'
-  if (normalized === 'queued' || normalized === 'running' || normalized === 'waiting') return 'run'
-  return hasOutput ? 'ok' : 'run'
+  switch (normalized) {
+    case 'failed':
+    case 'cancelled':
+      return 'err'
+    case 'completed':
+      return 'ok'
+    case 'queued':
+    case 'running':
+    case 'waiting':
+      return 'run'
+    case 'unknown':
+      return hasOutput ? 'ok' : 'run'
+    default:
+      return assertNeverToolStatus(normalized)
+  }
 }
