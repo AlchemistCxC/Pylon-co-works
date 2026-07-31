@@ -34,7 +34,6 @@ fn deserialize_expires_in<'de, D>(d: D) -> Result<Option<i64>, D::Error>
 where
     D: serde::Deserializer<'de>,
 {
-    use serde::de;
     let v: serde_json::Value = serde::Deserialize::deserialize(d)?;
     match v {
         serde_json::Value::Number(n) => Ok(n.as_i64()),

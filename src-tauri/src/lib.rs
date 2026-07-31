@@ -11,7 +11,7 @@ mod runtime_log;
 mod workspace;
 
 use std::collections::HashMap;
-use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
+use std::sync::atomic::Ordering;
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 use tauri::{Emitter, Manager, Runtime};
@@ -20,6 +20,7 @@ use agent_config::AgentDef;
 use agent_runtime::{session_mapping_matches, source_for_peri_id_in_generation, status_after_connection_failure, AgentLifecycleStatus, AgentRuntimeState};
 use error::PylonError;
 use prism::PrismClient;
+use runtime::{AgentRuntime, AgentRuntimeManager};
 
 fn emit_event<R, W>(window: &W, event: &str, payload: serde_json::Value)
 where
@@ -31,57 +32,47 @@ where
     }
 }
 
+/// AppState：全局状态 = 全局配置 + per-agent 隔离运行时（B7a-2）。
+/// per-agent 字段（acp/notification_task/session_creation/agent_lifecycle/
+/// client_generation/prompt_locks/sessions/agent_runtime/auto_reconnect_active）
+/// 全部收进 AgentRuntimeManager（runtime.rs），命令层按 active_agent 解析 runtime。
 struct AppState {
-    acp: Arc<tokio::sync::Mutex<AcpClient>>,
-    notification_task: Arc<Mutex<Option<tokio::task::JoinHandle<()>>>>,
-    session_creation: Arc<tokio::sync::Mutex<()>>,
-    agent_lifecycle: Arc<tokio::sync::Mutex<()>>,
-    client_generation: Arc<AtomicU64>,
-    prompt_locks: Arc<tokio::sync::Mutex<HashMap<String, Arc<tokio::sync::Mutex<()>>>>>,
+    runtimes: Arc<AgentRuntimeManager>,
     agents: Arc<Mutex<HashMap<String, AgentDef>>>,
     active_agent: Arc<Mutex<String>>,
-    sessions: Arc<Mutex<HashMap<String, SessionInfo>>>,
     pet: Arc<Mutex<pet::PetState>>,
     runtime_logs: Arc<runtime_log::RuntimeLogHub>,
     runtime_mcp: Mutex<Option<Vec<mcp::McpServerConfig>>>,
-    agent_runtime: Arc<Mutex<AgentRuntimeState>>,
-    /// 自动重连进行中（防 dispatcher 多次崩溃通知重复调度）
-    auto_reconnect_active: Arc<AtomicBool>,
     prism: PrismClient,
 }
 
 /// 供 async 闭包/静态辅助持有的 AppState 字段子集。
 /// Tauri manage 的 state 不能 move 进闭包，只能 clone 字段；
 /// start_notification_dispatcher / do_connect_and_replace / 自动重连共用。
+/// per-agent 状态经 [`Self::active_runtime`] / 参数传入的 runtime 访问。
 struct AppStateHandles {
-    notification_task: Arc<Mutex<Option<tokio::task::JoinHandle<()>>>>,
-    acp: Arc<tokio::sync::Mutex<AcpClient>>,
-    agent_lifecycle: Arc<tokio::sync::Mutex<()>>,
+    runtimes: Arc<AgentRuntimeManager>,
     agents: Arc<Mutex<HashMap<String, AgentDef>>>,
     active_agent: Arc<Mutex<String>>,
-    agent_runtime: Arc<Mutex<AgentRuntimeState>>,
-    client_generation: Arc<AtomicU64>,
-    sessions: Arc<Mutex<HashMap<String, SessionInfo>>>,
     pet: Arc<Mutex<pet::PetState>>,
     runtime_logs: Arc<runtime_log::RuntimeLogHub>,
-    auto_reconnect_active: Arc<AtomicBool>,
 }
 
 impl AppStateHandles {
     fn from_state(state: &AppState) -> Self {
         Self {
-            notification_task: state.notification_task.clone(),
-            acp: state.acp.clone(),
-            agent_lifecycle: state.agent_lifecycle.clone(),
+            runtimes: state.runtimes.clone(),
             agents: state.agents.clone(),
             active_agent: state.active_agent.clone(),
-            agent_runtime: state.agent_runtime.clone(),
-            client_generation: state.client_generation.clone(),
-            sessions: state.sessions.clone(),
             pet: state.pet.clone(),
             runtime_logs: state.runtime_logs.clone(),
-            auto_reconnect_active: state.auto_reconnect_active.clone(),
         }
+    }
+
+    /// 当前 active agent 的 runtime（无 active agent 时返回 None）。
+    fn active_runtime(&self) -> Option<Arc<AgentRuntime>> {
+        let id = self.active_agent.lock().ok()?.clone();
+        self.runtimes.get(&id)
     }
 
     fn log_runtime_summary(
@@ -95,8 +86,8 @@ impl AppStateHandles {
         self.runtime_logs.push(runtime_log::timestamp(), level, source, session, message, fields);
     }
 
-    fn set_agent_runtime_status(&self, status: AgentLifecycleStatus, last_error: Option<String>) {
-        if let Ok(mut runtime) = self.agent_runtime.lock() {
+    fn set_agent_runtime_status(&self, runtime: &AgentRuntime, status: AgentLifecycleStatus, last_error: Option<String>) {
+        if let Ok(mut runtime) = runtime.agent_runtime.lock() {
             runtime.status = status;
             runtime.last_error = last_error;
             if status == AgentLifecycleStatus::Connected {
@@ -105,24 +96,38 @@ impl AppStateHandles {
         }
     }
 
-    fn agent_status_payload(&self) -> serde_json::Value {
-        let crashed = self.acp.try_lock().map(|acp| acp.is_crashed()).unwrap_or(false);
+    fn agent_status_payload(&self, runtime: Option<&AgentRuntime>) -> serde_json::Value {
+        let crashed = runtime
+            .and_then(|runtime| runtime.acp.try_lock().ok())
+            .map(|acp| acp.is_crashed())
+            .unwrap_or(false);
         if crashed {
-            if let Ok(mut runtime) = self.agent_runtime.lock() {
-                runtime.status = AgentLifecycleStatus::Crashed;
-                if runtime.last_error.is_none() {
-                    runtime.last_error = Some("ACP child process stdout closed".to_string());
+            if let Some(runtime) = runtime {
+                if let Ok(mut state) = runtime.agent_runtime.lock() {
+                    state.status = AgentLifecycleStatus::Crashed;
+                    if state.last_error.is_none() {
+                        state.last_error = Some("ACP child process stdout closed".to_string());
+                    }
                 }
             }
         }
-        let runtime = self.agent_runtime.lock().map(|value| value.clone()).unwrap_or_default();
+        let (status, last_error, last_connected_at) = runtime
+            .and_then(|runtime| runtime.agent_runtime.lock().ok().map(|state| state.clone()))
+            .map(|state| (state.status, state.last_error, state.last_connected_at))
+            .unwrap_or((AgentLifecycleStatus::Disconnected, None, None));
         let active_agent_id = self.active_agent.lock().ok().map(|value| value.clone()).unwrap_or_default();
         let agent = self.agents.lock().ok().and_then(|agents| agents.get(&active_agent_id).cloned());
-        let crashed = matches!(runtime.status, AgentLifecycleStatus::Crashed)
-            || self.acp.try_lock().map(|acp| acp.is_crashed()).unwrap_or(false);
-        let status = if crashed { AgentLifecycleStatus::Crashed } else { runtime.status };
+        let crashed = matches!(status, AgentLifecycleStatus::Crashed)
+            || runtime
+                .and_then(|runtime| runtime.acp.try_lock().ok())
+                .map(|acp| acp.is_crashed())
+                .unwrap_or(false);
+        let status = if crashed { AgentLifecycleStatus::Crashed } else { status };
         let available = agent.is_some() && status == AgentLifecycleStatus::Connected;
-        let last_error = runtime.last_error.clone();
+        let generation = runtime
+            .map(|runtime| runtime.client_generation.load(Ordering::Acquire))
+            .unwrap_or(0);
+        let last_error = last_error.clone();
         let recent_error = last_error.clone();
         let legacy_error = last_error.clone();
         serde_json::json!({
@@ -135,8 +140,8 @@ impl AppStateHandles {
             "lastError": last_error,
             "recentError": recent_error,
             "error": legacy_error,
-            "lastConnectedAt": runtime.last_connected_at,
-            "generation": self.client_generation.load(Ordering::Acquire),
+            "lastConnectedAt": last_connected_at,
+            "generation": generation,
             "active": agent.is_some(),
             "available": available,
             "crashed": crashed,
@@ -145,13 +150,14 @@ impl AppStateHandles {
 
     fn emit_agent_status<R: tauri::Runtime, W: tauri::Emitter<R>>(
         &self,
+        runtime: &AgentRuntime,
         window: &W,
         status: AgentLifecycleStatus,
         last_error: Option<String>,
     ) {
-        self.set_agent_runtime_status(status, last_error.clone());
+        self.set_agent_runtime_status(runtime, status, last_error.clone());
         emit_event(window, "peri:agent-status", {
-            let mut payload = self.agent_status_payload();
+            let mut payload = self.agent_status_payload(Some(runtime));
             if let serde_json::Value::Object(ref mut map) = payload {
                 map.insert("status".to_string(), serde_json::Value::String(status.as_str().to_string()));
                 if let Some(error) = last_error {
@@ -167,6 +173,7 @@ impl AppStateHandles {
 
     async fn replace_agent_client<R: tauri::Runtime>(
         &self,
+        runtime: &Arc<AgentRuntime>,
         agent_id: Option<String>,
         new_acp: AcpClient,
         window: tauri::WebviewWindow<R>,
@@ -177,20 +184,21 @@ impl AppStateHandles {
         }
 
         let mut old_acp = {
-            let mut acp = self.acp.lock().await;
-            let mut active_agent = self.active_agent.lock().map_err(|error| error.to_string())?;
-            let mut sessions = self.sessions.lock().map_err(|error| error.to_string())?;
+            let mut acp = runtime.acp.lock().await;
+            let mut sessions = runtime.sessions.lock().map_err(|error| error.to_string())?;
             let old_acp = std::mem::replace(&mut *acp, new_acp);
-            let new_generation = self.client_generation.fetch_add(1, Ordering::AcqRel) + 1;
-            self.set_agent_runtime_status(AgentLifecycleStatus::Connected, None);
+            let new_generation = runtime.client_generation.fetch_add(1, Ordering::AcqRel) + 1;
+            self.set_agent_runtime_status(runtime, AgentLifecycleStatus::Connected, None);
             if let Some(agent_id) = agent_id {
-                *active_agent = agent_id;
+                if let Ok(mut active) = self.active_agent.lock() {
+                    *active = agent_id;
+                }
             }
             apply_client_replacement_sessions(&mut sessions, keep_sessions, new_generation);
             log::info!("ACP client activated; generation is now {}", new_generation);
             old_acp
         };
-        start_notification_dispatcher(self, window);
+        start_notification_dispatcher(self, runtime, window);
         if let Err(error) = old_acp.kill() {
             log::warn!("kill replaced agent: {}", error);
         }
@@ -202,6 +210,7 @@ impl AppStateHandles {
 /// 手动 switch/reconnect 传 keep_sessions=false；自动重连传 true（崩溃恢复续会话）。
 async fn do_connect_and_replace<R: tauri::Runtime>(
     handles: &AppStateHandles,
+    runtime: &Arc<AgentRuntime>,
     window: &tauri::WebviewWindow<R>,
     agent: &AgentDef,
     agent_id: Option<String>,
@@ -209,22 +218,22 @@ async fn do_connect_and_replace<R: tauri::Runtime>(
     log_action: &str,
     keep_sessions: bool,
 ) -> Result<(), String> {
-    let previous_status = handles.agent_runtime.lock()
-        .map(|runtime| runtime.status)
+    let previous_status = runtime.agent_runtime.lock()
+        .map(|state| state.status)
         .unwrap_or(AgentLifecycleStatus::Disconnected);
-    handles.emit_agent_status(window, start_status, None);
+    handles.emit_agent_status(runtime, window, start_status, None);
     handles.log_runtime_summary("info", "agent", agent_id.clone(), &format!("Agent {log_action} started"), serde_json::Map::new());
     let new_acp = match AcpClient::connect_with_logs(agent, Some(handles.runtime_logs.clone())).await {
         Ok(client) => client,
         Err(error) => {
             let fallback_status = status_after_connection_failure(previous_status);
-            handles.emit_agent_status(window, fallback_status, Some(error.clone()));
+            handles.emit_agent_status(runtime, window, fallback_status, Some(error.clone()));
             handles.log_runtime_summary("error", "agent", agent_id, &format!("Agent {log_action} failed"), serde_json::Map::new());
             return Err(error);
         }
     };
-    handles.replace_agent_client(agent_id, new_acp, window.clone(), keep_sessions).await?;
-    handles.emit_agent_status(window, AgentLifecycleStatus::Connected, None);
+    handles.replace_agent_client(runtime, agent_id, new_acp, window.clone(), keep_sessions).await?;
+    handles.emit_agent_status(runtime, window, AgentLifecycleStatus::Connected, None);
     let _ = handles.pet.lock().map(|mut p| pet::on_agent_connected(&mut p));
     handles.log_runtime_summary("info", "agent", None, &format!("Agent {log_action} succeeded"), serde_json::Map::new());
     Ok(())
@@ -595,7 +604,8 @@ fn agent_summary_payload(id: &str, agent: &AgentDef, active_id: Option<&str>, ac
 
 #[tauri::command]
 async fn get_workspace_root(state: tauri::State<'_, AppState>, source: String) -> Result<workspace::WorkspaceRoot, String> {
-    let root = state.inner().workspace_root_for_source(&source)?;
+    let runtime = state.inner().require_runtime()?;
+    let root = state.inner().workspace_root_for_source(&runtime, &source)?;
     Ok(workspace::workspace_root(source, std::path::Path::new(&root)))
 }
 
@@ -603,7 +613,8 @@ async fn get_workspace_root(state: tauri::State<'_, AppState>, source: String) -
 async fn list_workspace_entries(
     state: tauri::State<'_, AppState>, source: String, relative_path: Option<String>, include_hidden: Option<bool>,
 ) -> Result<Vec<workspace::WorkspaceEntry>, String> {
-    let root = state.inner().workspace_root_for_source(&source)?;
+    let runtime = state.inner().require_runtime()?;
+    let root = state.inner().workspace_root_for_source(&runtime, &source)?;
     workspace::list_entries(std::path::Path::new(&root), relative_path.as_deref().unwrap_or("."), include_hidden.unwrap_or(false)).map_err(|e| e.to_string())
 }
 
@@ -611,36 +622,36 @@ async fn list_workspace_entries(
 async fn read_workspace_text(
     state: tauri::State<'_, AppState>, source: String, relative_path: String, max_bytes: Option<usize>,
 ) -> Result<workspace::WorkspaceTextPreview, String> {
-    let root = state.inner().workspace_root_for_source(&source)?;
+    let runtime = state.inner().require_runtime()?;
+    let root = state.inner().workspace_root_for_source(&runtime, &source)?;
     workspace::read_text(std::path::Path::new(&root), &relative_path, max_bytes).map_err(|e| e.to_string())
 }
 
-async fn prompt_lock_for(
-    locks: &Arc<tokio::sync::Mutex<HashMap<String, Arc<tokio::sync::Mutex<()>>>>>,
+fn prompt_lock_for(
+    locks: &Arc<Mutex<HashMap<String, Arc<tokio::sync::Mutex<()>>>>>,
     source: &str,
 ) -> Arc<tokio::sync::Mutex<()>> {
-    let mut locks = locks.lock().await;
+    let mut locks = locks.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
     locks
         .entry(source.to_string())
         .or_insert_with(|| Arc::new(tokio::sync::Mutex::new(())))
         .clone()
 }
 
-fn start_notification_dispatcher<R: tauri::Runtime>(state: &AppStateHandles, window: tauri::WebviewWindow<R>) {
-    if let Ok(mut task) = state.notification_task.lock() {
+fn start_notification_dispatcher<R: tauri::Runtime>(handles: &AppStateHandles, runtime: &Arc<AgentRuntime>, window: tauri::WebviewWindow<R>) {
+    if let Ok(mut task) = runtime.notification_task.lock() {
         if let Some(handle) = task.take() { handle.abort(); }
-        let acp = state.acp.clone();
-        let sessions = state.sessions.clone();
-        let pet = state.pet.clone();
-        let generation = state.client_generation.load(Ordering::Acquire);
-        let client_generation = state.client_generation.clone();
-        let agents = state.agents.clone();
-        let active_agent = state.active_agent.clone();
-        let agent_runtime = state.agent_runtime.clone();
-        let agent_lifecycle = state.agent_lifecycle.clone();
-        let runtime_logs = state.runtime_logs.clone();
-        let notification_task = state.notification_task.clone();
-        let auto_reconnect_active = state.auto_reconnect_active.clone();
+        let acp = runtime.acp.clone();
+        let sessions = runtime.sessions.clone();
+        let pet = handles.pet.clone();
+        let generation = runtime.client_generation.load(Ordering::Acquire);
+        let client_generation = runtime.client_generation.clone();
+        let agents = handles.agents.clone();
+        let active_agent = handles.active_agent.clone();
+        let agent_runtime = runtime.agent_runtime.clone();
+        let runtime_logs = handles.runtime_logs.clone();
+        let runtimes = handles.runtimes.clone();
+        let runtime_for_reconnect = runtime.clone();
         *task = Some(tokio::spawn(async move {
             let mut rx = acp.lock().await.rx.resubscribe();
             loop {
@@ -660,15 +671,15 @@ fn start_notification_dispatcher<R: tauri::Runtime>(state: &AppStateHandles, win
                 }
                 if raw.method.as_deref() == Some(acp::NOTIF_AGENT_CRASHED) {
                     let last_error = "ACP child process stdout closed".to_string();
-                    if let Ok(mut runtime) = agent_runtime.lock() {
-                        runtime.status = AgentLifecycleStatus::Crashed;
-                        runtime.last_error = Some(last_error.clone());
+                    if let Ok(mut runtime_state) = agent_runtime.lock() {
+                        runtime_state.status = AgentLifecycleStatus::Crashed;
+                        runtime_state.last_error = Some(last_error.clone());
                     }
                     let _ = pet.lock().map(|mut p| pet::on_agent_crashed(&mut p));
-                    let runtime = agent_runtime.lock().map(|value| value.clone()).unwrap_or_default();
+                    let runtime_state = agent_runtime.lock().map(|value| value.clone()).unwrap_or_default();
                     let active_id = active_agent.lock().ok().map(|value| value.clone()).unwrap_or_default();
                     let agent = agents.lock().ok().and_then(|items| items.get(&active_id).cloned());
-                    let last_error = runtime.last_error.clone();
+                    let last_error = runtime_state.last_error.clone();
                     let recent_error = last_error.clone();
                     let legacy_error = last_error.clone();
                     emit_event(&window, "peri:agent-status", serde_json::json!({
@@ -682,53 +693,53 @@ fn start_notification_dispatcher<R: tauri::Runtime>(state: &AppStateHandles, win
                         "lastError": last_error,
                         "recentError": recent_error,
                         "error": legacy_error,
-                        "lastConnectedAt": runtime.last_connected_at,
+                        "lastConnectedAt": runtime_state.last_connected_at,
                         "generation": client_generation.load(Ordering::Acquire),
                         "active": agent.is_some(),
                         "available": false,
                         "crashed": true,
                     }));
                     // 自动重连：崩溃后指数退避自动拉起（最多 5 次，~62s）。
-                    // 防重入：多次崩溃通知只调度一次；用户手动 switch/reconnect
-                    // 会置状态非 Crashed 或 bump generation，循环内每轮复查后放弃。
-                    if auto_reconnect_active.swap(true, Ordering::AcqRel) == false {
+                    // 防重入：多次崩溃通知只调度一次（auto_reconnect_active）。
+                    // per-runtime 语义：只重连本 runtime 绑定的 agent；用户手动
+                    // reconnect 会置状态非 Crashed、手动 switch 会改变 active_agent，
+                    // 循环内每轮复查后放弃。切换 agent 不会串扰其他 runtime。
+                    if runtime_for_reconnect.auto_reconnect_active.swap(true, Ordering::AcqRel) == false {
+                        let reconnect_runtime = runtime_for_reconnect.clone();
+                        let window_for_reconnect = window.clone();
                         let reconnect_handles = AppStateHandles {
-                            notification_task: notification_task.clone(),
-                            acp: acp.clone(),
-                            agent_lifecycle: agent_lifecycle.clone(),
+                            runtimes: runtimes.clone(),
                             agents: agents.clone(),
                             active_agent: active_agent.clone(),
-                            agent_runtime: agent_runtime.clone(),
-                            client_generation: client_generation.clone(),
-                            sessions: sessions.clone(),
                             pet: pet.clone(),
                             runtime_logs: runtime_logs.clone(),
-                            auto_reconnect_active: auto_reconnect_active.clone(),
                         };
-                        let window_for_reconnect = window.clone();
                         tokio::spawn(async move {
+                            // 手动 switch 会 abort 本 runtime 的 dispatcher，但不会
+                            // cancel 自动重连闭包——每轮用 active_agent 复查拦截，
+                            // 防止重连成功后把 active_agent 顶回本 agent。
+                            let reconnect_agent_id = reconnect_handles.active_agent.lock().ok().map(|v| v.clone()).unwrap_or_default();
                             for attempt in 1..=agent_runtime::MAX_RECONNECT_ATTEMPTS {
                                 tokio::time::sleep(Duration::from_millis(agent_runtime::reconnect_backoff_ms(attempt))).await;
-                                // 用户已手动 switch/reconnect（状态不再是 Crashed）→ 放弃自动重连
-                                let still_stale = reconnect_handles.agent_runtime.lock()
+                                // 用户已手动 reconnect（状态不再是 Crashed）→ 放弃自动重连
+                                let still_stale = reconnect_runtime.agent_runtime.lock()
                                     .map(|r| r.status == AgentLifecycleStatus::Crashed)
                                     .unwrap_or(false);
                                 if !still_stale { return; }
-                                let (active_id, agent) = {
-                                    let active_id = reconnect_handles.active_agent.lock().ok().map(|v| v.clone()).unwrap_or_default();
-                                    let agent = reconnect_handles.agents.lock().ok().and_then(|a| a.get(&active_id).cloned());
-                                    (active_id, agent)
-                                };
+                                // 用户已 switch 到其他 agent → 放弃（不把 active_agent 顶回）
+                                let still_active = reconnect_handles.active_agent.lock()
+                                    .map(|v| v.as_str() == reconnect_agent_id)
+                                    .unwrap_or(false);
+                                if !still_active { return; }
+                                let agent = reconnect_handles.agents.lock().ok().and_then(|a| a.get(&reconnect_agent_id).cloned());
                                 let Some(agent) = agent else { return; };
-                                let generation_at_start = reconnect_handles.client_generation.load(Ordering::Acquire);
-                                let _lifecycle_guard = reconnect_handles.agent_lifecycle.lock().await;
-                                // generation 检查：重连期间不应有并发 switch
-                                if reconnect_handles.client_generation.load(Ordering::Acquire) != generation_at_start { return; }
+                                let _lifecycle_guard = reconnect_runtime.agent_lifecycle.lock().await;
                                 match do_connect_and_replace(
                                     &reconnect_handles,
+                                    &reconnect_runtime,
                                     &window_for_reconnect,
                                     &agent,
-                                    Some(active_id),
+                                    None,
                                     AgentLifecycleStatus::Reconnecting,
                                     "auto-reconnect",
                                     true,
@@ -737,7 +748,7 @@ fn start_notification_dispatcher<R: tauri::Runtime>(state: &AppStateHandles, win
                                     Err(error) => log::warn!("auto-reconnect attempt {attempt} failed: {error}"),
                                 }
                             }
-                            reconnect_handles.auto_reconnect_active.store(false, Ordering::Release);
+                            reconnect_runtime.auto_reconnect_active.store(false, Ordering::Release);
                         });
                     }
                     continue;
@@ -1134,27 +1145,25 @@ for line in sys.stdin:
         }
     }
 
-    fn build_state(initial_acp: AcpClient, agent: AgentDef) -> AppState {
+    async fn build_state(initial_acp: AcpClient, agent: AgentDef) -> AppState {
         let mut agents = std::collections::HashMap::new();
-        agents.insert(agent.name.clone(), agent);
-        let mut sessions = std::collections::HashMap::new();
-        // 崩溃前已有会话映射（generation 0）——重连后应保留并迁移到新代际
-        sessions.insert("source-a".to_string(), SessionInfo::new("fake-session-1".into(), "persona".into(), ".".into(), true, 0));
+        agents.insert(agent.name.clone(), agent.clone());
+        let runtime = AgentRuntime::new_disconnected();
+        *runtime.acp.lock().await = initial_acp;
+        {
+            let mut sessions = runtime.sessions.lock().unwrap();
+            // 崩溃前已有会话映射（generation 0）——重连后应保留并迁移到新代际
+            sessions.insert("source-a".to_string(), SessionInfo::new("fake-session-1".into(), "persona".into(), ".".into(), true, 0));
+        }
+        let runtimes = Arc::new(AgentRuntimeManager::new());
+        runtimes.insert(agent.name.clone(), runtime);
         AppState {
-            acp: Arc::new(tokio::sync::Mutex::new(initial_acp)),
-            notification_task: Arc::new(Mutex::new(None)),
-            session_creation: Arc::new(tokio::sync::Mutex::new(())),
-            agent_lifecycle: Arc::new(tokio::sync::Mutex::new(())),
-            client_generation: Arc::new(AtomicU64::new(0)),
-            prompt_locks: Arc::new(tokio::sync::Mutex::new(std::collections::HashMap::new())),
+            runtimes,
             agents: Arc::new(Mutex::new(agents)),
             active_agent: Arc::new(Mutex::new("fake-acp".to_string())),
-            sessions: Arc::new(Mutex::new(sessions)),
             pet: Arc::new(Mutex::new(pet::PetState::default())),
             runtime_logs: runtime_log::RuntimeLogHub::default(),
             runtime_mcp: Mutex::new(None),
-            agent_runtime: Arc::new(Mutex::new(AgentRuntimeState::default())),
-            auto_reconnect_active: Arc::new(AtomicBool::new(false)),
             prism: prism::PrismClient::unavailable("test".to_string()),
         }
     }
@@ -1171,21 +1180,22 @@ for line in sys.stdin:
         let initial_acp = AcpClient::connect_with_logs(&crash_agent, None)
             .await
             .expect("fake ACP must initialize");
-        let state = build_state(initial_acp, crash_agent);
+        let state = build_state(initial_acp, crash_agent).await;
         let handles = AppStateHandles::from_state(&state);
-        start_notification_dispatcher(&handles, window);
+        let runtime = handles.active_runtime().expect("active runtime must exist");
+        start_notification_dispatcher(&handles, &runtime, window);
 
         // 等待崩溃被 dispatcher 处理：状态置 Crashed + 自动重连已调度
         tokio::time::timeout(std::time::Duration::from_secs(5), async {
             loop {
-                let status = state.agent_runtime.lock().map(|r| r.status).unwrap_or(AgentLifecycleStatus::Disconnected);
+                let status = runtime.agent_runtime.lock().map(|r| r.status).unwrap_or(AgentLifecycleStatus::Disconnected);
                 if status == AgentLifecycleStatus::Crashed { break; }
                 tokio::time::sleep(std::time::Duration::from_millis(20)).await;
             }
         })
         .await
         .expect("dispatcher must observe crash within 5s");
-        assert!(state.auto_reconnect_active.load(Ordering::Acquire), "auto-reconnect must be scheduled on crash");
+        assert!(runtime.auto_reconnect_active.load(Ordering::Acquire), "auto-reconnect must be scheduled on crash");
 
         // 注入重连成功：自动重连（2s 退避）开始前把 agents 表切到 alive 模式
         {
@@ -1196,7 +1206,7 @@ for line in sys.stdin:
         // 等待自动重连完成：Connected + generation 前进
         tokio::time::timeout(std::time::Duration::from_secs(15), async {
             loop {
-                let status = state.agent_runtime.lock().map(|r| r.status).unwrap_or(AgentLifecycleStatus::Disconnected);
+                let status = runtime.agent_runtime.lock().map(|r| r.status).unwrap_or(AgentLifecycleStatus::Disconnected);
                 if status == AgentLifecycleStatus::Connected { break; }
                 tokio::time::sleep(std::time::Duration::from_millis(50)).await;
             }
@@ -1205,24 +1215,34 @@ for line in sys.stdin:
         .expect("auto-reconnect must restore Connected within 15s");
 
         // 断言：generation +1、sessions 保留且迁移到新代际、防重入标志释放
-        assert_eq!(state.client_generation.load(Ordering::Acquire), 1, "auto-reconnect must bump generation");
+        assert_eq!(runtime.client_generation.load(Ordering::Acquire), 1, "auto-reconnect must bump generation");
         {
-            let sessions = state.sessions.lock().unwrap();
+            let sessions = runtime.sessions.lock().unwrap();
             assert_eq!(sessions.len(), 1, "sessions must survive auto-reconnect");
             assert_eq!(sessions.get("source-a").map(|s| s.generation), Some(1), "kept sessions must migrate generation");
         }
-        assert!(!state.auto_reconnect_active.load(Ordering::Acquire), "auto-reconnect flag must release after loop");
+        assert!(!runtime.auto_reconnect_active.load(Ordering::Acquire), "auto-reconnect flag must release after loop");
     }
 }
 
 // ── AppState helpers ──
 
 impl AppState {
+    /// 当前 active agent 的 runtime；无 active agent 时返回 None。
+    fn active_runtime(&self) -> Option<Arc<AgentRuntime>> {
+        AppStateHandles::from_state(self).active_runtime()
+    }
+
+    /// 当前 active agent 的 runtime；缺失时返回错误（命令层统一错误路径）。
+    fn require_runtime(&self) -> Result<Arc<AgentRuntime>, String> {
+        self.active_runtime().ok_or_else(|| "no active agent configured".to_string())
+    }
+
     /// 锁外 RPC：短锁仅覆盖同步准备（prepare_rpc），发送与等待在锁外执行——
     /// Peri 卡顿时不阻塞其他命令（V14「锁外写 prompt」模式推广到全部 RPC）。
-    async fn acp_rpc(&self, method: &str, params: serde_json::Value) -> Result<serde_json::Value, String> {
+    async fn acp_rpc(&self, runtime: &AgentRuntime, method: &str, params: serde_json::Value) -> Result<serde_json::Value, String> {
         let rpc = {
-            let acp = self.acp.lock().await;
+            let acp = runtime.acp.lock().await;
             acp.prepare_rpc(method, params)?
         };
         AcpClient::complete_rpc(rpc).await
@@ -1234,12 +1254,12 @@ impl AppState {
         self.active_agent.lock().ok().map(|id| id.as_str() == "hermes").unwrap_or(false)
     }
 
-    fn current_generation(&self) -> u64 {
-        self.client_generation.load(Ordering::Acquire)
+    fn current_generation(&self, runtime: &AgentRuntime) -> u64 {
+        runtime.client_generation.load(Ordering::Acquire)
     }
 
-    fn ensure_generation(&self, expected: u64) -> Result<(), String> {
-        let current = self.current_generation();
+    fn ensure_generation(&self, runtime: &AgentRuntime, expected: u64) -> Result<(), String> {
+        let current = self.current_generation(runtime);
         if current == expected {
             Ok(())
         } else {
@@ -1274,27 +1294,27 @@ impl AppState {
         self.runtime_logs.push(runtime_log::timestamp(), level, source, session, message, fields);
     }
 
-    fn workspace_root_for_source(&self, source: &str) -> Result<String, String> {
-        let sessions = self.sessions.lock().map_err(|e| e.to_string())?;
+    fn workspace_root_for_source(&self, runtime: &AgentRuntime, source: &str) -> Result<String, String> {
+        let sessions = runtime.sessions.lock().map_err(|e| e.to_string())?;
         sessions.get(source).map(|session| session.cwd.clone())
             .ok_or_else(|| PylonError::SessionNotFound(source.to_string()).to_string())
     }
 
     fn agent_status_payload(&self) -> serde_json::Value {
         let handles = AppStateHandles::from_state(self);
-        handles.agent_status_payload()
+        handles.agent_status_payload(handles.active_runtime().as_deref())
     }
 
-    fn get_peri_id(&self, source: &str) -> Result<String, PylonError> {
-        let sessions = self.sessions.lock().map_err(|e| PylonError::Acp(e.to_string()))?;
+    fn get_peri_id(&self, runtime: &AgentRuntime, source: &str) -> Result<String, PylonError> {
+        let sessions = runtime.sessions.lock().map_err(|e| PylonError::Acp(e.to_string()))?;
         sessions.get(source)
             .map(|s| s.peri_id.clone())
             .ok_or_else(|| PylonError::SessionNotFound(source.to_string()))
     }
 
-    fn export_session_owner(&self, peri_id: &str) -> Result<(String, u64, String), String> {
-        let generation = self.current_generation();
-        let sessions = self.sessions.lock().map_err(|error| error.to_string())?;
+    fn export_session_owner(&self, runtime: &AgentRuntime, peri_id: &str) -> Result<(String, u64, String), String> {
+        let generation = self.current_generation(runtime);
+        let sessions = runtime.sessions.lock().map_err(|error| error.to_string())?;
         let matches: Vec<(&String, &SessionInfo)> = sessions
             .iter()
             .filter(|(_, session)| session.peri_id == peri_id && session.generation == generation)
@@ -1306,8 +1326,8 @@ impl AppState {
         }
     }
 
-    fn session_matches(&self, source: &str, peri_id: &str, generation: u64) -> Result<bool, String> {
-        let sessions = self.sessions.lock().map_err(|e| e.to_string())?;
+    fn session_matches(&self, runtime: &AgentRuntime, source: &str, peri_id: &str, generation: u64) -> Result<bool, String> {
+        let sessions = runtime.sessions.lock().map_err(|e| e.to_string())?;
         Ok(sessions.get(source).map(|session| {
             session_mapping_matches(&session.peri_id, session.generation, peri_id, generation)
         }) == Some(true))
@@ -1315,13 +1335,14 @@ impl AppState {
 
     fn with_session_if_matches<T>(
         &self,
+        runtime: &AgentRuntime,
         source: &str,
         peri_id: &str,
         generation: u64,
         update: impl FnOnce(&mut SessionInfo) -> T,
     ) -> Result<T, String> {
-        self.ensure_generation(generation)?;
-        let mut sessions = self.sessions.lock().map_err(|error| error.to_string())?;
+        self.ensure_generation(runtime, generation)?;
+        let mut sessions = runtime.sessions.lock().map_err(|error| error.to_string())?;
         let session = sessions
             .get_mut(source)
             .ok_or_else(|| format!("stale session mapping for source: {source}"))?;
@@ -1331,14 +1352,14 @@ impl AppState {
         Ok(update(session))
     }
 
-    fn mark_first_prompt_if_matches(&self, source: &str, peri_id: &str, generation: u64) -> Result<(), String> {
-        self.with_session_if_matches(source, peri_id, generation, |session| {
+    fn mark_first_prompt_if_matches(&self, runtime: &AgentRuntime, source: &str, peri_id: &str, generation: u64) -> Result<(), String> {
+        self.with_session_if_matches(runtime, source, peri_id, generation, |session| {
             session.has_first_prompt = true;
         })
     }
 
-    fn remove_session_if_matches(&self, source: &str, peri_id: &str, generation: u64) -> Result<bool, String> {
-        let mut sessions = self.sessions.lock().map_err(|error| error.to_string())?;
+    fn remove_session_if_matches(&self, runtime: &AgentRuntime, source: &str, peri_id: &str, generation: u64) -> Result<bool, String> {
+        let mut sessions = runtime.sessions.lock().map_err(|error| error.to_string())?;
         if sessions.get(source).map(|session| {
             session_mapping_matches(&session.peri_id, session.generation, peri_id, generation)
         }) == Some(true) {
@@ -1368,6 +1389,7 @@ impl AppState {
 
     async fn connect_and_replace(
         &self,
+        runtime: &Arc<AgentRuntime>,
         window: &tauri::WebviewWindow,
         agent: &AgentDef,
         agent_id: Option<String>,
@@ -1377,7 +1399,7 @@ impl AppState {
         // 手动 switch/reconnect：跨 agent/全新进程语义，keep_sessions=false（清空映射）。
         // 实现委托给静态辅助，自动重连（keep_sessions=true）与手动路径共用同一份逻辑。
         let handles = AppStateHandles::from_state(self);
-        do_connect_and_replace(&handles, window, agent, agent_id, start_status, log_action, false).await
+        do_connect_and_replace(&handles, runtime, window, agent, agent_id, start_status, log_action, false).await
     }
 }
 
@@ -1434,31 +1456,32 @@ async fn new_session(
     cwd: Option<String>,
     mcp_servers: Option<Vec<mcp::McpServerConfig>>,
 ) -> Result<serde_json::Value, String> {
+    let runtime = state.inner().require_runtime()?;
     state.inner().log_runtime_summary( "info", "session", Some(source.clone()), "Session creation started", serde_json::Map::new());
-    let _creation_guard = state.session_creation.lock().await;
+    let _creation_guard = runtime.session_creation.lock().await;
     {
-        let sessions = state.sessions.lock().map_err(|e| e.to_string())?;
+        let sessions = runtime.sessions.lock().map_err(|e| e.to_string())?;
         if sessions.len() >= MAX_SESSIONS { return Err("max sessions reached".to_string()); }
     }
     let session_cwd = cwd.unwrap_or_else(|| state.agent_cwd());
-    let generation = state.current_generation();
+    let generation = state.current_generation(&runtime);
     let mcp_servers = mcp::validate_and_serialize(mcp_servers)?;
-    let response = match state.inner().acp_rpc(acp::METHOD_SESSION_NEW, acp::session_new_params(&session_cwd, mcp_servers)?).await {
+    let response = match state.inner().acp_rpc(&runtime, acp::METHOD_SESSION_NEW, acp::session_new_params(&session_cwd, mcp_servers)?).await {
         Ok(response) => response,
         Err(error) => {
             state.inner().log_runtime_summary( "error", "session", Some(source.clone()), "Session creation failed", serde_json::Map::new());
             return Err(error);
         }
     };
-    state.ensure_generation(generation)?;
+    state.ensure_generation(&runtime, generation)?;
     let peri_id = AcpClient::session_id_from(&response)?;
     let mut session = SessionInfo::new(peri_id.clone(), persona, session_cwd, false, generation);
     session.apply_session_response(&response);
-    let replaced = state.sessions.lock().map_err(|e| e.to_string())?
+    let replaced = runtime.sessions.lock().map_err(|e| e.to_string())?
         .insert(source.clone(), session);
     if let Some(old) = replaced {
         if let Ok(close_params) = acp::session_close_params(&old.peri_id) {
-            if let Err(error) = state.inner().acp_rpc(acp::METHOD_SESSION_CLOSE, close_params).await {
+            if let Err(error) = state.inner().acp_rpc(&runtime, acp::METHOD_SESSION_CLOSE, close_params).await {
                 log::warn!("close replaced session: {}", error);
             }
         }
@@ -1479,23 +1502,24 @@ async fn send_message(
     attachments: Option<Vec<String>>,
     mcp_servers: Option<Vec<mcp::McpServerConfig>>,
 ) -> Result<String, String> {
+    let runtime = state.inner().require_runtime()?;
     state.inner().log_runtime_summary( "info", "prompt", Some(source.clone()), "Prompt started", serde_json::Map::from_iter([
         ("contentLength".to_string(), serde_json::Value::from(content.len())),
         ("attachmentCount".to_string(), serde_json::Value::from(attachments.as_ref().map_or(0, Vec::len))),
     ]));
     let requested_mcp_servers = mcp::validate_and_serialize(mcp_servers.or_else(|| state.inner().current_mcp_servers().ok()))?;
-    let prompt_lock = prompt_lock_for(&state.prompt_locks, &source).await;
+    let prompt_lock = prompt_lock_for(&runtime.prompt_locks, &source);
     let _prompt_guard = prompt_lock.lock().await;
 
-    if state.acp.lock().await.is_crashed() {
+    if runtime.acp.lock().await.is_crashed() {
         emit_event(&window, "peri:error", serde_json::json!({"source": source, "error": PylonError::AgentCrashed.to_string()}));
         return Err(PylonError::AgentCrashed.into());
     }
 
     let (peri_id, is_first) = {
-        let _creation_guard = state.session_creation.lock().await;
+        let _creation_guard = runtime.session_creation.lock().await;
         let existing = {
-            let sessions = state.sessions.lock().map_err(|e| e.to_string())?;
+            let sessions = runtime.sessions.lock().map_err(|e| e.to_string())?;
             sessions.get(&source).map(|session| {
                 (session.peri_id.clone(), !session.has_first_prompt)
             })
@@ -1504,30 +1528,30 @@ async fn send_message(
             result
         } else {
             {
-                let sessions = state.sessions.lock().map_err(|e| e.to_string())?;
+                let sessions = runtime.sessions.lock().map_err(|e| e.to_string())?;
                 if sessions.len() >= MAX_SESSIONS { return Err("max sessions reached".to_string()); }
             }
             let session_cwd = state.agent_cwd();
-            let generation = state.current_generation();
-            let response = match state.inner().acp_rpc(acp::METHOD_SESSION_NEW, acp::session_new_params(&session_cwd, requested_mcp_servers.clone())?).await {
+            let generation = state.current_generation(&runtime);
+            let response = match state.inner().acp_rpc(&runtime, acp::METHOD_SESSION_NEW, acp::session_new_params(&session_cwd, requested_mcp_servers.clone())?).await {
                 Ok(response) => response,
                 Err(error) => {
                     state.inner().log_runtime_summary( "error", "session", Some(source.clone()), "Session creation failed", serde_json::Map::new());
                     return Err(error);
                 }
             };
-            state.ensure_generation(generation)?;
+            state.ensure_generation(&runtime, generation)?;
             let pid = AcpClient::session_id_from(&response)?;
             let mut session = SessionInfo::new(pid.clone(), persona.clone(), session_cwd, false, generation);
             session.apply_session_response(&response);
-            state.sessions.lock().map_err(|e| e.to_string())?
+            runtime.sessions.lock().map_err(|e| e.to_string())?
                 .insert(source.clone(), session);
             (pid, true)
         }
     };
 
     let attachment_paths = attachments.unwrap_or_default();
-    let prompt_generation = state.current_generation();
+    let prompt_generation = state.current_generation(&runtime);
 
     let effective_persona = session_prompt
         .filter(|value| !value.trim().is_empty())
@@ -1543,16 +1567,16 @@ async fn send_message(
     state.pet.lock().map(|mut p| pet::on_user_sent(&mut p)).ok();
     emit_event(&window, "peri:user", serde_json::json!({ "source": source, "content": content }));
     let (request_id, write_tx, prompt_line, mut rx) = {
-        let acp = state.acp.lock().await;
+        let acp = runtime.acp.lock().await;
         let (id, line, rx) = acp.prepare_prompt(&peri_id, prompt_blocks)?;
         (id, acp.write_tx.clone(), line, rx)
     };
     if write_tx.send(prompt_line).await.is_err() {
-        state.acp.lock().await.remove_pending(request_id);
-        let _ = state.remove_session_if_matches(&source, &peri_id, prompt_generation);
+        runtime.acp.lock().await.remove_pending(request_id);
+        let _ = state.remove_session_if_matches(&runtime, &source, &peri_id, prompt_generation);
         return Err("ACP connection closed".to_string());
     }
-    let acp_for_cancel = state.acp.clone();
+    let acp_for_cancel = runtime.acp.clone();
     let peri_id_for_cancel = peri_id.clone();
     let result = acp::wait_prompt_with_cancel(
         &mut rx,
@@ -1565,8 +1589,8 @@ async fn send_message(
 
     match result {
         PromptWaitOutcome::Response(raw) => {
-            state.ensure_generation(prompt_generation)?;
-            if !state.session_matches(&source, &peri_id, prompt_generation)? {
+            state.ensure_generation(&runtime, prompt_generation)?;
+            if !state.session_matches(&runtime, &source, &peri_id, prompt_generation)? {
                 return Err(format!("stale session mapping for source: {source}"));
             }
             if let Some(error) = raw.error {
@@ -1581,13 +1605,13 @@ async fn send_message(
                     let _ = state.pet.lock().map(|mut pet| pet::on_error(&mut pet));
                     error
                 })?;
-                if let Err(error) = state.ensure_generation(prompt_generation) {
-                    let _ = state.remove_session_if_matches(&source, &peri_id, prompt_generation);
+                if let Err(error) = state.ensure_generation(&runtime, prompt_generation) {
+                    let _ = state.remove_session_if_matches(&runtime, &source, &peri_id, prompt_generation);
                     emit_event(&window, "peri:error", serde_json::json!({"source": source, "error": error}));
                     return Err(error);
                 }
                 if is_first {
-                    state.mark_first_prompt_if_matches(&source, &peri_id, prompt_generation)?;
+                    state.mark_first_prompt_if_matches(&runtime, &source, &peri_id, prompt_generation)?;
                 }
                 emit_event(&window, "peri:done", serde_json::json!({"source": source, "data": data}));
                 let _ = state.pet.lock().map(|mut p| pet::on_done(&mut p));
@@ -1598,18 +1622,18 @@ async fn send_message(
             }
         }
         PromptWaitOutcome::ConnectionClosed => {
-            state.acp.lock().await.remove_pending(request_id);
-            let _ = state.remove_session_if_matches(&source, &peri_id, prompt_generation);
+            runtime.acp.lock().await.remove_pending(request_id);
+            let _ = state.remove_session_if_matches(&runtime, &source, &peri_id, prompt_generation);
             state.inner().log_runtime_summary( "error", "prompt", Some(source.clone()), "Prompt connection closed", serde_json::Map::new());
             Err("ACP connection closed".to_string())
         }
         PromptWaitOutcome::CancelledAfterTimeout { response, cancel_error } => {
-            state.acp.lock().await.remove_pending(request_id);
+            runtime.acp.lock().await.remove_pending(request_id);
             if let Some(cancel_error) = cancel_error {
                 log::warn!("cancel timed-out prompt {}: {}", peri_id, cancel_error);
             }
             if response.is_none() {
-                match state.remove_session_if_matches(&source, &peri_id, prompt_generation) {
+                match state.remove_session_if_matches(&runtime, &source, &peri_id, prompt_generation) {
                     Ok(true) => {
                         log::error!(
                             "cancelled prompt {} did not settle within {}s; removed local session mapping",
@@ -1617,7 +1641,7 @@ async fn send_message(
                             acp::CANCEL_SETTLE_TIMEOUT_SECS
                         );
                         if let Ok(close_params) = acp::session_close_params(&peri_id) {
-                            if let Err(close_error) = state.inner().acp_rpc(acp::METHOD_SESSION_CLOSE, close_params).await {
+                            if let Err(close_error) = state.inner().acp_rpc(&runtime, acp::METHOD_SESSION_CLOSE, close_params).await {
                                 log::warn!("close unsettled prompt session {}: {}", peri_id, close_error);
                             }
                         }
@@ -1638,11 +1662,12 @@ async fn send_message(
 
 #[tauri::command]
 async fn set_mode(state: tauri::State<'_, AppState>, source: String, mode: String) -> Result<(), String> {
-    let generation = state.current_generation();
-    let peri_id = state.get_peri_id(&source).map_err(|e| e.to_string())?;
-    state.inner().acp_rpc(acp::METHOD_SESSION_SET_MODE, acp::session_set_mode_params(&peri_id, &mode)?).await?;
-    state.ensure_generation(generation)?;
-    state.with_session_if_matches(&source, &peri_id, generation, |session| {
+    let runtime = state.inner().require_runtime()?;
+    let generation = state.current_generation(&runtime);
+    let peri_id = state.get_peri_id(&runtime, &source).map_err(|e| e.to_string())?;
+    state.inner().acp_rpc(&runtime, acp::METHOD_SESSION_SET_MODE, acp::session_set_mode_params(&peri_id, &mode)?).await?;
+    state.ensure_generation(&runtime, generation)?;
+    state.with_session_if_matches(&runtime, &source, &peri_id, generation, |session| {
         session.mode = Some(mode);
     })?;
     Ok(())
@@ -1650,18 +1675,19 @@ async fn set_mode(state: tauri::State<'_, AppState>, source: String, mode: Strin
 
 #[tauri::command]
 async fn set_config_option(state: tauri::State<'_, AppState>, source: String, key: String, value: String) -> Result<serde_json::Value, String> {
-    let generation = state.current_generation();
-    let peri_id = state.get_peri_id(&source).map_err(|e| e.to_string())?;
+    let runtime = state.inner().require_runtime()?;
+    let generation = state.current_generation(&runtime);
+    let peri_id = state.get_peri_id(&runtime, &source).map_err(|e| e.to_string())?;
     // 差异适配：Hermes 切 model 必须走 session/set_model（set_config_option 只认
     // edit_approval_policy，其余存 config_options 不生效）；Peri 走平铺 set_config_option。
     let use_set_model = key == "model" && state.inner().is_hermes_agent();
     let response = if use_set_model {
-        state.inner().acp_rpc(acp::METHOD_SESSION_SET_MODEL, acp::session_set_model_params(&peri_id, &value)?).await?
+        state.inner().acp_rpc(&runtime, acp::METHOD_SESSION_SET_MODEL, acp::session_set_model_params(&peri_id, &value)?).await?
     } else {
-        state.inner().acp_rpc(acp::METHOD_SESSION_SET_CONFIG_OPTION, acp::session_set_config_option_params(&peri_id, &key, &value)?).await?
+        state.inner().acp_rpc(&runtime, acp::METHOD_SESSION_SET_CONFIG_OPTION, acp::session_set_config_option_params(&peri_id, &key, &value)?).await?
     };
-    state.ensure_generation(generation)?;
-    state.with_session_if_matches(&source, &peri_id, generation, |session| {
+    state.ensure_generation(&runtime, generation)?;
+    state.with_session_if_matches(&runtime, &source, &peri_id, generation, |session| {
         if let Some(options) = response.get("configOptions").and_then(|value| value.as_array()) {
             session.config_options = options.clone();
             session.apply_config_options(options);
@@ -1676,39 +1702,41 @@ async fn set_config_option(state: tauri::State<'_, AppState>, source: String, ke
 
 #[tauri::command]
 async fn close_session(state: tauri::State<'_, AppState>, source: String) -> Result<(), String> {
-    let _creation_guard = state.session_creation.lock().await;
-    let generation = state.current_generation();
-    let peri_id = state.get_peri_id(&source).map_err(|e| e.to_string())?;
+    let runtime = state.inner().require_runtime()?;
+    let _creation_guard = runtime.session_creation.lock().await;
+    let generation = state.current_generation(&runtime);
+    let peri_id = state.get_peri_id(&runtime, &source).map_err(|e| e.to_string())?;
     // 若该 session 有在途 prompt，先发 cancel（fire-and-forget）让 Peri 侧 settle，
     // 否则 pending oneshot 会挂到 PROMPT_TIMEOUT 才结束——close 后 prompt 卡死 300s。
     {
-        let acp = state.acp.lock().await;
+        let acp = runtime.acp.lock().await;
         let _ = acp.cancel_session(&peri_id).await;
     }
     // Hermes 未实现 session/close（-32601）——降级为本地清理（映射已删，见下）
-    if let Err(error) = state.inner().acp_rpc(acp::METHOD_SESSION_CLOSE, acp::session_close_params(&peri_id)?).await {
+    if let Err(error) = state.inner().acp_rpc(&runtime, acp::METHOD_SESSION_CLOSE, acp::session_close_params(&peri_id)?).await {
         if error.contains("-32601") || error.contains("Method not found") {
             log::warn!("agent does not support session/close ({error}); local cleanup only");
         } else {
             return Err(error);
         }
     }
-    state.ensure_generation(generation)?;
-    if !state.session_matches(&source, &peri_id, generation)? {
+    state.ensure_generation(&runtime, generation)?;
+    if !state.session_matches(&runtime, &source, &peri_id, generation)? {
         return Err(format!("stale session mapping for source: {source}"));
     }
-    let _ = state.remove_session_if_matches(&source, &peri_id, generation)?;
+    let _ = state.remove_session_if_matches(&runtime, &source, &peri_id, generation)?;
     Ok(())
 }
 
 #[tauri::command]
 async fn cancel_prompt(state: tauri::State<'_, AppState>, source: String) -> Result<(), String> {
-    let generation = state.current_generation();
-    let peri_id = state.get_peri_id(&source).map_err(|e| e.to_string())?;
+    let runtime = state.inner().require_runtime()?;
+    let generation = state.current_generation(&runtime);
+    let peri_id = state.get_peri_id(&runtime, &source).map_err(|e| e.to_string())?;
     // Fire-and-forget notification — Peri will respond with stopReason=cancelled
-    state.acp.lock().await.cancel_session(&peri_id).await?;
-    state.ensure_generation(generation)?;
-    if !state.session_matches(&source, &peri_id, generation)? {
+    runtime.acp.lock().await.cancel_session(&peri_id).await?;
+    state.ensure_generation(&runtime, generation)?;
+    if !state.session_matches(&runtime, &source, &peri_id, generation)? {
         return Err(format!("stale session mapping for source: {source}"));
     }
     Ok(())
@@ -1716,7 +1744,8 @@ async fn cancel_prompt(state: tauri::State<'_, AppState>, source: String) -> Res
 
 #[tauri::command]
 async fn load_sessions(state: tauri::State<'_, AppState>) -> Result<Vec<serde_json::Value>, String> {
-    let sessions = state.sessions.lock().map_err(|e| e.to_string())?;
+    let runtime = state.inner().require_runtime()?;
+    let sessions = runtime.sessions.lock().map_err(|e| e.to_string())?;
     Ok(sessions.iter().map(|(source, info)| {
         serde_json::json!({"source": source, "periId": info.peri_id, "persona": info.persona, "cwd": info.cwd,
             "title": info.title, "mode": info.mode, "configOptions": info.config_options, "model": info.model, "tokensIn": info.tokens_in, "tokensOut": info.tokens_out,
@@ -1773,10 +1802,11 @@ fn build_inspector_payload(
 
 #[tauri::command]
 async fn session_inspector(state: tauri::State<'_, AppState>) -> Result<serde_json::Value, String> {
-    let sessions = state.sessions.lock().map_err(|e| e.to_string())?;
-    let runtime = state.agent_runtime.lock().map(|v| v.clone()).unwrap_or_default();
+    let runtime = state.inner().require_runtime()?;
+    let sessions = runtime.sessions.lock().map_err(|e| e.to_string())?;
+    let runtime_state = runtime.agent_runtime.lock().map(|v| v.clone()).unwrap_or_default();
     let active_id = state.active_agent.lock().map_err(|e| e.to_string())?.clone();
-    Ok(build_inspector_payload(&sessions, &runtime, &active_id))
+    Ok(build_inspector_payload(&sessions, &runtime_state, &active_id))
 }
 
 // ── Agent Registry commands ──
@@ -1784,7 +1814,9 @@ async fn session_inspector(state: tauri::State<'_, AppState>) -> Result<serde_js
 #[tauri::command]
 async fn list_agents(state: tauri::State<'_, AppState>) -> Result<Vec<serde_json::Value>, String> {
     let active_id = state.active_agent.lock().map_err(|e| e.to_string())?.clone();
-    let active_status = state.agent_runtime.lock().map(|runtime| runtime.status).unwrap_or(AgentLifecycleStatus::Disconnected);
+    let active_status = state.active_runtime()
+        .and_then(|runtime| runtime.agent_runtime.lock().ok().map(|state| state.status))
+        .unwrap_or(AgentLifecycleStatus::Disconnected);
     Ok(state.agents.lock().map_err(|e| e.to_string())?.iter().map(|(id, a)| {
         agent_summary_payload(id, a, Some(&active_id), Some(active_status))
     }).collect())
@@ -1806,19 +1838,42 @@ async fn validate_agents() -> Result<serde_json::Value, String> {
 
 #[tauri::command]
 async fn switch_agent(state: tauri::State<'_, AppState>, window: tauri::WebviewWindow, name: String) -> Result<(), String> {
-    let _lifecycle_guard = state.agent_lifecycle.lock().await;
-    let agent = state.agents.lock().map_err(|error| error.to_string())?
+    let inner = state.inner();
+    // 目标 runtime 懒启动（首次切换创建 disconnected runtime）
+    let runtime = inner.runtimes.get_or_create(&name);
+    let previous_active = inner.active_agent.lock().map_err(|error| error.to_string())?.clone();
+    let _lifecycle_guard = runtime.agent_lifecycle.lock().await;
+    let agent = inner.agents.lock().map_err(|error| error.to_string())?
         .get(&name)
         .ok_or_else(|| format!("unknown agent: {name}"))?
         .clone();
-    state.inner().connect_and_replace(&window, &agent, Some(name), AgentLifecycleStatus::Connecting, "switch").await
+    inner.connect_and_replace(&runtime, &window, &agent, Some(name.clone()), AgentLifecycleStatus::Connecting, "switch").await?;
+    // 切到不同 agent 时：先停旧 dispatcher 再 kill 旧 acp，防止 kill 触发旧
+    // runtime 的崩溃通知被旧 dispatcher 处理并调度自动重连；旧状态置 Disconnected。
+    if previous_active != name {
+        if let Some(old) = inner.runtimes.get(&previous_active) {
+            if let Ok(mut task) = old.notification_task.lock() {
+                if let Some(handle) = task.take() { handle.abort(); }
+            }
+            let mut acp = old.acp.lock().await;
+            let _ = acp.kill();
+            drop(acp);
+            if let Ok(mut state) = old.agent_runtime.lock() {
+                state.status = AgentLifecycleStatus::Disconnected;
+            }
+        }
+    }
+    Ok(())
 }
 
 #[tauri::command]
 async fn reconnect_agent(state: tauri::State<'_, AppState>, window: tauri::WebviewWindow) -> Result<(), String> {
-    let _lifecycle_guard = state.agent_lifecycle.lock().await;
-    let agent = state.get_active_agent().map_err(|error| error.to_string())?;
-    state.inner().connect_and_replace(&window, &agent, None, AgentLifecycleStatus::Reconnecting, "reconnect").await
+    let inner = state.inner();
+    let active_id = inner.active_agent.lock().map_err(|error| error.to_string())?.clone();
+    let runtime = inner.runtimes.get_or_create(&active_id);
+    let _lifecycle_guard = runtime.agent_lifecycle.lock().await;
+    let agent = inner.get_active_agent().map_err(|error| error.to_string())?;
+    inner.connect_and_replace(&runtime, &window, &agent, None, AgentLifecycleStatus::Reconnecting, "reconnect").await
 }
 
 #[tauri::command]
@@ -1835,7 +1890,8 @@ async fn set_mcp_servers(state: tauri::State<'_, AppState>, servers: Option<Vec<
 
 #[tauri::command]
 async fn reload_agents(state: tauri::State<'_, AppState>, config_path: Option<String>) -> Result<(), String> {
-    let _lifecycle_guard = state.agent_lifecycle.lock().await;
+    let runtime = state.inner().require_runtime()?;
+    let _lifecycle_guard = runtime.agent_lifecycle.lock().await;
     let new_agents = if let Some(path) = config_path {
         agent_config::load_from_path(std::path::Path::new(&path))?
     } else {
@@ -1929,8 +1985,9 @@ async fn load_persisted_session(
     cwd: Option<String>,
     mcp_servers: Option<Vec<mcp::McpServerConfig>>,
 ) -> Result<serde_json::Value, String> {
-    let _creation_guard = state.session_creation.lock().await;
-    let generation = state.current_generation();
+    let runtime = state.inner().require_runtime()?;
+    let _creation_guard = runtime.session_creation.lock().await;
+    let generation = state.current_generation(&runtime);
     let cwd = cwd.unwrap_or_else(|| state.agent_cwd());
     // mcp_servers 必须随 session/load 发送：ACP schema 1.4 该字段无 default，
     // Hermes（Pydantic）缺失即拒绝；Peri 容忍。无配置时 validate 产出空数组。
@@ -1938,20 +1995,21 @@ async fn load_persisted_session(
     {
         // 与 new_session / send_message 自动创建一致，恢复历史会话也受上限约束；
         // 同 source 重载（替换）不占新名额。
-        let sessions = state.sessions.lock().map_err(|e| e.to_string())?;
+        let sessions = runtime.sessions.lock().map_err(|e| e.to_string())?;
         if !sessions.contains_key(&source) && sessions.len() >= MAX_SESSIONS {
             return Err("max sessions reached".to_string());
         }
     }
-    let previous = state.sessions.lock().map_err(|e| e.to_string())?
+    let previous = runtime.sessions.lock().map_err(|e| e.to_string())?
         .insert(source.clone(), SessionInfo::new(peri_id.clone(), String::new(), cwd.clone(), true, generation));
-    match state.acp.lock().await
-        .load_session_with_replay(&peri_id, &cwd, mcp_servers)
-        .await
+    let acp = runtime.acp.lock().await;
+    let load_result = acp.load_session_with_replay(&peri_id, &cwd, mcp_servers).await;
+    drop(acp);
+    match load_result
     {
         Ok((response, _replay)) => {
-            if let Err(error) = state.ensure_generation(generation) {
-                let mut sessions = state.sessions.lock().map_err(|lock_error| lock_error.to_string())?;
+            if let Err(error) = state.ensure_generation(&runtime, generation) {
+                let mut sessions = runtime.sessions.lock().map_err(|lock_error| lock_error.to_string())?;
                 if sessions.get(&source).map(|session| {
                     session_mapping_matches(&session.peri_id, session.generation, &peri_id, generation)
                 }) == Some(true) {
@@ -1963,13 +2021,13 @@ async fn load_persisted_session(
                 }
                 return Err(error);
             }
-            state.with_session_if_matches(&source, &peri_id, generation, |session| {
+            state.with_session_if_matches(&runtime, &source, &peri_id, generation, |session| {
                 session.apply_session_response(&response);
             })?;
             Ok(response)
         }
         Err(error) => {
-            let mut sessions = state.sessions.lock().map_err(|lock_error| lock_error.to_string())?;
+            let mut sessions = runtime.sessions.lock().map_err(|lock_error| lock_error.to_string())?;
             if sessions.get(&source).map(|session| {
                 session_mapping_matches(&session.peri_id, session.generation, &peri_id, generation)
             }) == Some(true) {
@@ -1986,14 +2044,15 @@ async fn load_persisted_session(
 
 #[tauri::command]
 async fn list_persisted_sessions(state: tauri::State<'_, AppState>) -> Result<serde_json::Value, String> {
-    let generation = state.current_generation();
+    let runtime = state.inner().require_runtime()?;
+    let generation = state.current_generation(&runtime);
     let cwd = state.get_active_agent().ok().and_then(|a| a.cwd);
     let mut params = serde_json::json!({});
     if let Some(c) = cwd {
         params["cwd"] = serde_json::Value::String(c);
     }
-    let response = state.inner().acp_rpc(acp::METHOD_SESSION_LIST, params).await?;
-    state.ensure_generation(generation)?;
+    let response = state.inner().acp_rpc(&runtime, acp::METHOD_SESSION_LIST, params).await?;
+    state.ensure_generation(&runtime, generation)?;
     Ok(response)
 }
 
@@ -2082,13 +2141,14 @@ async fn export_session(
             return Err(format!("export output directory does not exist: {}", parent.display()));
         }
     }
-    let (source, generation, cwd) = state.export_session_owner(&peri_id)?;
+    let runtime = state.inner().require_runtime()?;
+    let (source, generation, cwd) = state.export_session_owner(&runtime, &peri_id)?;
     let mcp_servers = mcp::validate_and_serialize(Some(state.inner().current_mcp_servers()?))?;
-    let (_, messages) = state.acp.lock().await
+    let (_, messages) = runtime.acp.lock().await
         .load_session_with_replay(&peri_id, &cwd, mcp_servers)
         .await?;
-    state.ensure_generation(generation)?;
-    let sessions = state.sessions.lock().map_err(|error| error.to_string())?;
+    state.ensure_generation(&runtime, generation)?;
+    let sessions = runtime.sessions.lock().map_err(|error| error.to_string())?;
     if sessions.get(&source).map(|session| {
         session_mapping_matches(&session.peri_id, session.generation, &peri_id, generation)
     }) != Some(true) {
@@ -2141,48 +2201,50 @@ pub fn run() {
             }
         };
         let runtime_logs = runtime_log::RuntimeLogHub::default();
-        let (initial_acp, initial_agent_runtime) = match default_agent {
-            Some(agent) => match AcpClient::connect_with_logs(&agent, Some(runtime_logs.clone())).await {
-                Ok(client) => (client, AgentRuntimeState {
-                    status: AgentLifecycleStatus::Connected,
-                    last_error: None,
-                    last_connected_at: Some(runtime_log::timestamp()),
-                }),
-                Err(error) => {
-                    eprintln!("Pylon ACP agent unavailable: {error}");
-                    (AcpClient::disconnected(), AgentRuntimeState {
-                        status: AgentLifecycleStatus::Error,
-                        last_error: Some(error),
-                        last_connected_at: None,
-                    })
+        let runtimes = Arc::new(AgentRuntimeManager::new());
+        let default_runtime = AgentRuntime::new_disconnected();
+        {
+            // 默认 agent 初始连接：成功 → Connected；失败 → Error（保留错误信息）
+            if let Some(agent) = &default_agent {
+                match AcpClient::connect_with_logs(agent, Some(runtime_logs.clone())).await {
+                    Ok(client) => {
+                        let mut acp = default_runtime.acp.lock().await;
+                        *acp = client;
+                        drop(acp);
+                        if let Ok(mut state) = default_runtime.agent_runtime.lock() {
+                            state.status = AgentLifecycleStatus::Connected;
+                            state.last_error = None;
+                            state.last_connected_at = Some(runtime_log::timestamp());
+                        }
+                    }
+                    Err(error) => {
+                        eprintln!("Pylon ACP agent unavailable: {error}");
+                        if let Ok(mut state) = default_runtime.agent_runtime.lock() {
+                            state.status = AgentLifecycleStatus::Error;
+                            state.last_error = Some(error);
+                            state.last_connected_at = None;
+                        }
+                    }
                 }
-            },
-            None => {
+            } else {
                 eprintln!("Pylon has no configured Agent; start in disconnected mode");
-                (AcpClient::disconnected(), AgentRuntimeState::default())
             }
-        };
-        let acp = Arc::new(tokio::sync::Mutex::new(initial_acp));
+        }
+        if !default_agent_id.is_empty() {
+            runtimes.insert(default_agent_id.clone(), default_runtime);
+        }
 
         tauri::Builder::default()
             .plugin(tauri_plugin_shell::init())
             .plugin(tauri_plugin_dialog::init())
             .plugin(tauri_plugin_fs::init())
             .manage(AppState {
-                acp,
-                notification_task: Arc::new(Mutex::new(None)),
-                session_creation: Arc::new(tokio::sync::Mutex::new(())),
-                agent_lifecycle: Arc::new(tokio::sync::Mutex::new(())),
-                client_generation: Arc::new(AtomicU64::new(0)),
-                prompt_locks: Arc::new(tokio::sync::Mutex::new(HashMap::new())),
+                runtimes,
                 agents: Arc::new(Mutex::new(agents_for_state)),
                 active_agent: Arc::new(Mutex::new(default_agent_id)),
-                sessions: Arc::new(Mutex::new(HashMap::new())),
                 pet: Arc::new(Mutex::new(pet::PetState::default())),
                 runtime_logs,
                 runtime_mcp: Mutex::new(None),
-                agent_runtime: Arc::new(Mutex::new(initial_agent_runtime)),
-                auto_reconnect_active: Arc::new(AtomicBool::new(false)),
                 prism,
             })
             .invoke_handler(tauri::generate_handler![
@@ -2220,7 +2282,10 @@ pub fn run() {
                     }
                     Err(error) => log::warn!("resolve pet persist path failed: {error}"),
                 }
-                start_notification_dispatcher(&AppStateHandles::from_state(app.state::<AppState>().inner()), window.clone());
+                let handles = AppStateHandles::from_state(app.state::<AppState>().inner());
+                if let Some(runtime) = handles.active_runtime() {
+                    start_notification_dispatcher(&handles, &runtime, window.clone());
+                }
                 app.state::<AppState>().inner().start_runtime_log_dispatcher(window);
                 Ok(())
             })

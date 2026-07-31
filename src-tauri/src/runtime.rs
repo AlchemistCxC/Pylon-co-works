@@ -77,18 +77,6 @@ impl AgentRuntimeManager {
     pub fn get(&self, agent_id: &str) -> Option<Arc<AgentRuntime>> {
         self.runtimes.read().ok()?.get(agent_id).cloned()
     }
-
-    pub fn len(&self) -> usize {
-        self.runtimes.read().map(|m| m.len()).unwrap_or(0)
-    }
-
-    pub fn is_empty(&self) -> bool {
-        self.len() == 0
-    }
-
-    pub fn ids(&self) -> Vec<String> {
-        self.runtimes.read().map(|m| m.keys().cloned().collect()).unwrap_or_default()
-    }
 }
 
 impl Default for AgentRuntimeManager {
@@ -104,12 +92,11 @@ mod tests {
     #[test]
     fn manager_insert_get_and_isolate_runtimes() {
         let manager = AgentRuntimeManager::new();
-        assert!(manager.is_empty());
+        assert!(manager.get("peri").is_none());
         let a = AgentRuntime::new_disconnected();
         let b = AgentRuntime::new_disconnected();
         manager.insert("peri".into(), a.clone());
         manager.insert("hermes".into(), b.clone());
-        assert_eq!(manager.len(), 2);
         assert!(Arc::ptr_eq(&manager.get("peri").unwrap(), &a));
         assert!(Arc::ptr_eq(&manager.get("hermes").unwrap(), &b));
         assert!(manager.get("unknown").is_none());
@@ -142,6 +129,6 @@ mod tests {
         let first = manager.get_or_create("peri");
         let second = manager.get_or_create("peri");
         assert!(Arc::ptr_eq(&first, &second), "同一 agent 必须返回同一 runtime 实例");
-        assert_eq!(manager.len(), 1);
+        assert!(Arc::ptr_eq(&manager.get("peri").unwrap(), &first), "注册表必须登记同一实例");
     }
 }
