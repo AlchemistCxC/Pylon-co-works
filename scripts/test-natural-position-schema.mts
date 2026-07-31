@@ -13,6 +13,6 @@ for (const id of ['ekg', 'pct', 'tokens', 'model', 'mode', 'send', 'attach']) {
 
 assert.equal(store.includes('ccLayoutVersion: CC_LAYOUT_SCHEMA_VERSION'), false)
 assert.equal(migration.includes('normalizeCcPositions('), false)
-assert.equal(profile.includes('PROFILE_SCHEMA_VERSION = 2'), true)
+assert.equal(profile.includes('PROFILE_SCHEMA_VERSION = 3'), true)
 
 console.log('naturalPositionSchema 回归测试通过')

@@ -70,6 +70,32 @@
 .cc-widget.cc-natural > * { flex:none; }
 .cc-widget.cc-natural .ekg-bar { width:var(--ekg-w,140px) !important; flex:none; }
 
+.cc-context-ring {
+  --context-ring-color: var(--text-dim);
+  --context-ring-ratio: 0;
+  position:relative;
+  display:inline-flex;
+  width:2.1em;
+  height:2.1em;
+  align-items:center;
+  justify-content:center;
+  color:var(--context-ring-color);
+  font-family:var(--mono);
+  font-size:0.72em;
+  font-variant-numeric:tabular-nums;
+  line-height:1;
+}
+.cc-context-ring svg { position:absolute; inset:0; width:100%; height:100%; transform:rotate(-90deg); }
+.cc-context-ring circle { fill:none; stroke-width:2.15; }
+.cc-context-ring-track { stroke:color-mix(in srgb, var(--context-ring-color) 22%, transparent); }
+.cc-context-ring-value {
+  stroke:var(--context-ring-color);
+  stroke-linecap:round;
+  stroke-dasharray:var(--context-ring-ratio) 1;
+  filter:drop-shadow(0 0 2px color-mix(in srgb, var(--context-ring-color) 50%, transparent));
+}
+.cc-context-ring-label { position:relative; z-index:1; }
+
 @media (max-width:900px) {
   .cc-status-row { row-gap:2px; }
   .cc-command-hint { width:100%; padding-left:0; text-align:right; }

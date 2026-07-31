@@ -1,10 +1,10 @@
 import { strict as assert } from 'node:assert'
 import { clampCcHeight, resolveCcMinHeight, resolveVisibleStatusWidgetCount } from '../src/ccHeightState.ts'
 
-assert.equal(resolveVisibleStatusWidgetCount({ hiddenIds: [], inputMode: 'cli', ccStyle: 'wave' }), 5)
-assert.equal(resolveVisibleStatusWidgetCount({ hiddenIds: ['model', 'mode'], inputMode: 'cli', ccStyle: 'wave' }), 3)
-assert.equal(resolveVisibleStatusWidgetCount({ hiddenIds: [], inputMode: 'cli', ccStyle: 'numeric' }), 4)
-assert.equal(resolveVisibleStatusWidgetCount({ hiddenIds: ['pct'], inputMode: 'cli', ccStyle: 'numeric' }), 4)
+assert.equal(resolveVisibleStatusWidgetCount({ hiddenIds: [], inputMode: 'cli', ccStyle: 'wave' }), 6)
+assert.equal(resolveVisibleStatusWidgetCount({ hiddenIds: ['model', 'mode'], inputMode: 'cli', ccStyle: 'wave' }), 4)
+assert.equal(resolveVisibleStatusWidgetCount({ hiddenIds: [], inputMode: 'cli', ccStyle: 'numeric' }), 5)
+assert.equal(resolveVisibleStatusWidgetCount({ hiddenIds: ['pct'], inputMode: 'cli', ccStyle: 'numeric' }), 5)
 
 assert.equal(resolveCcMinHeight({
   inputMode: 'default', footerLayout: 'free', hintMode: 'full', visibleStatusWidgets: 7, cliOverflowMode: 'fixed-scroll',

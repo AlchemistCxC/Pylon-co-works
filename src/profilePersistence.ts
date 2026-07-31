@@ -7,7 +7,7 @@ export interface ProfilePersistenceState<T extends PersistedProfile> {
   activeProfileId: string
 }
 
-export const PROFILE_SCHEMA_VERSION = 2
+export const PROFILE_SCHEMA_VERSION = 3
 
 export function normalizeProfileState<T extends PersistedProfile>(
   profiles: T[],

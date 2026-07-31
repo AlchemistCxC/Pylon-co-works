@@ -9,6 +9,7 @@ import { formatCacheReadTokens, formatTokenCount } from '../../tokenFormat'
 import { emptySessionLiveStats } from '../chat/sessionRuntime'
 import type { SessionLiveStats } from '../chat/sessionRuntime'
 import type { CcSlot, CcWidgetId, CcWidgetPlacement } from '../../ccLayoutState'
+import { resolveContextMeter } from '../../contextMeter'
 
 export interface CcWidgetRenderProps {
   sessionId: string | null
@@ -86,6 +87,39 @@ function TokensWidget({ sessionId }: CcWidgetRenderProps) {
   </span>
 }
 
+function ContextRingWidget({ sessionId }: CcWidgetRenderProps) {
+  const runtime = useSessionLiveStats(sessionId)
+  const ekgGreen = useStore(s => s.ekgGreen)
+  const ekgYellow = useStore(s => s.ekgYellow)
+  const ekgRed = useStore(s => s.ekgRed)
+  const ccScale = useStore(s => (s.ccScale || {})['context-ring'] ?? 100)
+  const meter = resolveContextMeter({
+    used: runtime.tokensUsed,
+    max: runtime.tokensMax,
+    palette: { ok: ekgGreen, warning: ekgYellow, danger: ekgRed },
+  })
+
+  return (
+    <span
+      className="cc-context-ring"
+      role="img"
+      aria-label={meter.label}
+      title={meter.label}
+      style={{
+        '--context-ring-color': meter.color,
+        '--context-ring-ratio': meter.ratio,
+        fontSize: `${ccScale}%`,
+      } as React.CSSProperties}
+    >
+      <svg viewBox="0 0 24 24" aria-hidden="true">
+        <circle className="cc-context-ring-track" cx="12" cy="12" r="9" pathLength="1" />
+        <circle className="cc-context-ring-value" cx="12" cy="12" r="9" pathLength="1" />
+      </svg>
+      <span className="cc-context-ring-label">{meter.percentage}%</span>
+    </span>
+  )
+}
+
 const placement = (slot: CcSlot, order: number): CcWidgetPlacement => ({ slot, order, offsetX: 0, offsetY: 0 })
 
 export const CC_WIDGET_REGISTRY: readonly CcWidgetDef[] = [
@@ -93,6 +127,7 @@ export const CC_WIDGET_REGISTRY: readonly CcWidgetDef[] = [
   { id: 'ekg', label: '用量条', category: 'context', defaultPlacement: placement('status-primary', 0), naturalSize: true, render: props => <EkgWidget {...props} /> },
   { id: 'pct', label: '百分比', category: 'context', defaultPlacement: placement('status-primary', 1), naturalSize: true, render: props => <PctWidget {...props} /> },
   { id: 'tokens', label: 'Token数', category: 'context', defaultPlacement: placement('status-primary', 2), naturalSize: true, render: props => <TokensWidget {...props} /> },
+  { id: 'context-ring', label: '上下文环', category: 'context', defaultPlacement: placement('status-primary', 3), naturalSize: true, render: props => <ContextRingWidget {...props} /> },
   { id: 'model', label: '模型', category: 'runtime', defaultPlacement: placement('status-secondary', 0), naturalSize: true, render: ({ sessionId }) => {
     const session = useStore.getState().sessions.find(item => item.id === sessionId)
     return <ModelWidget sessionSource={session?.source} />

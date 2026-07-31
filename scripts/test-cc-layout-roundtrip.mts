@@ -12,10 +12,10 @@ const store = source('../src/store.ts')
 const controlCenter = source('../src/components/ControlCenter.tsx')
 const presets = source('../src/presets.ts')
 
-// Missing persisted layout falls back to the v3 placement schema.
+// Missing persisted layout falls back to the v4 placement schema.
 const legacy = normalizeCcLayout(undefined)
 assert.equal(legacy.version, CC_LAYOUT_SCHEMA_VERSION)
-assert.equal(legacy.version, 3)
+assert.equal(legacy.version, 4)
 assert.deepEqual(legacy.placements, DEFAULT_CC_LAYOUT.placements)
 assert.equal('x' in (legacy.placements.input as object), false)
 assert.equal('y' in (legacy.placements.input as object), false)
