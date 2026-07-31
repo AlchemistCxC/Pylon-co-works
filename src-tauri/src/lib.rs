@@ -2,6 +2,7 @@ mod acp;
 mod agent_config;
 mod agent_runtime;
 mod error;
+mod gateway;
 mod mcp;
 mod pet;
 mod prism;
