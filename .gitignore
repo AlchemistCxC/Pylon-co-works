@@ -2,6 +2,7 @@ node_modules/
 dist/
 src-tauri/target/
 src-tauri/tests-harness/target/
+src-tauri/pet-core/target/
 *.log
 .DS_Store
 *.tsbuildinfo
