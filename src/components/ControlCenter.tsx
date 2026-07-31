@@ -105,34 +105,28 @@ function TokensWidget({ sessionId }: Props) {
 interface WidgetDef {
   id: string
   label: string
-  defaultPos: { x: number; y: number; w: number; h: number }
   render: (sessionId: string | null) => React.ReactNode
 }
 
 const WIDGET_REGISTRY: WidgetDef[] = [
   {
     id: 'input', label: '输入栏',
-    defaultPos: { x: 0, y: 0, w: 100, h: 52 },
     render: (sid) => <InputBar sessionId={sid} />,
   },
   {
     id: 'ekg', label: '用量条',
-    defaultPos: { x: 0, y: 65, w: 30, h: 28 },
     render: (sid) => <EkgWidget sessionId={sid} />,
   },
   {
     id: 'pct', label: '百分比',
-    defaultPos: { x: 32, y: 69, w: 8, h: 20 },
     render: (sid) => <PctWidget sessionId={sid} />,
   },
   {
     id: 'tokens', label: 'Token数',
-    defaultPos: { x: 41, y: 69, w: 16, h: 20 },
     render: (sid) => <TokensWidget sessionId={sid} />,
   },
   {
     id: 'model', label: '模型',
-    defaultPos: { x: 58, y: 69, w: 18, h: 20 },
     render: (sid) => {
       const s = useStore.getState().sessions.find(s => s.id === sid)
       return <ModelWidget sessionSource={s?.source} />
@@ -140,7 +134,6 @@ const WIDGET_REGISTRY: WidgetDef[] = [
   },
   {
     id: 'mode', label: '权限模式',
-    defaultPos: { x: 77, y: 69, w: 10, h: 20 },
     render: (sid) => {
       const s = useStore.getState().sessions.find(s => s.id === sid)
       return <ModeWidget sessionSource={s?.source} />
@@ -148,24 +141,13 @@ const WIDGET_REGISTRY: WidgetDef[] = [
   },
   {
     id: 'send', label: '发送按钮',
-    defaultPos: { x: 89, y: 69, w: 5, h: 20 },
     render: () => null,
   },
   {
     id: 'attach', label: '附件按钮',
-    defaultPos: { x: 95, y: 69, w: 4, h: 20 },
     render: () => null,
   },
 ]
-
-// ── 位置默认值合并（向后兼容老 localStorage 缺失字段） ──────
-function ensurePositions(positions: any): Record<string, { x: number; y: number; w?: number; h?: number }> {
-  const out: any = { ...(positions || {}) }
-  for (const w of WIDGET_REGISTRY) {
-    if (!out[w.id]) out[w.id] = w.defaultPos
-  }
-  return out
-}
 
 export default function ControlCenter({ sessionId }: Props) {
   const ccHeight = useStore(s => s.ccHeight) || 120

@@ -32,7 +32,6 @@ const mixedState = {
   barFillFollow: true,
   spinnerSize: 18,
   ccScale: { ekg: 95 },
-  ccPositions: { input: { x: 1, y: 2 } },
   activePreset: { global: 'glass' },
   dirty: { global: true },
   ccEditMode: true,
@@ -52,7 +51,6 @@ assert.deepEqual(picked, {
   barFillFollow: true,
   spinnerSize: 18,
   ccScale: { ekg: 95 },
-  ccPositions: { input: { x: 1, y: 2 } },
 })
 assert.equal('activePreset' in picked, false)
 assert.equal('dirty' in picked, false)

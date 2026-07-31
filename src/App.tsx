@@ -130,7 +130,7 @@ export default function App() {
     '--t': s.transparency,
     '--blur': `${s.bgBlur}px`,
     '--global-bg-image': toCssBackgroundImage(s.globalBgImage),
-    '--global-bg-color': (s as any).globalBgColor || '#e8e8ec',
+    '--global-bg-color': s.globalBgColor || '#e8e8ec',
     '--global-font': s.globalFont === 'mono' ? 'var(--mono)' : 'var(--font)',
     '--global-font-size': `${s.globalFontSize}px`,
     '--sidebar-bg': s.sidebarBg,

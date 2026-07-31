@@ -1,11 +1,10 @@
 import { normalizeCustomPresets } from './customPresets.ts'
-import { normalizeCcLayout, normalizeCcPositions, type CcPositions, type CcLayoutV3 } from './ccLayoutState.ts'
+import { normalizeCcLayout, type CcLayoutV3 } from './ccLayoutState.ts'
 
 export type ThemeMigrationDefaults = {
   base: Record<string, unknown>
   activePreset: Record<string, string>
   dirty: Record<string, boolean>
-  ccPositions: CcPositions
   ccLayout: CcLayoutV3
 }
 
@@ -14,7 +13,6 @@ const ZONES = ['global', 'sidebar', 'chat', 'cc', 'right'] as const
 type ThemeMigrationState = Record<string, unknown> & {
   activePreset?: unknown
   dirty?: unknown
-  ccPositions?: unknown
   ccLayout?: unknown
   customPresets?: unknown
 }
@@ -33,18 +31,13 @@ export function normalizeThemeMigrationState(
     : {}
 
   delete state.ccSizes
+  delete state.ccPositions
+  delete state.ccCliCustomized
+  delete state.ccLayoutVersion
   const normalized: Record<string, unknown> = { ...defaults.base, ...state }
-  normalized.ccPositions = normalizeCcPositions(
-    state.ccPositions as CcPositions | undefined,
-    defaults.ccPositions,
-  )
   normalized.ccLayout = normalizeCcLayout(
     state.ccLayout as Partial<CcLayoutV3> | undefined,
-    normalized.ccPositions as CcPositions,
   )
-  normalized.ccLayoutVersion = normalized.ccLayout && typeof normalized.ccLayout === 'object'
-    ? (normalized.ccLayout as CcLayoutV3).version
-    : defaults.ccLayout.version
   normalized.ccEditMode = false
   normalized.activePreset = normalizeZoneRecord(
     state.activePreset,

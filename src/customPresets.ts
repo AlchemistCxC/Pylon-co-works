@@ -29,8 +29,8 @@ const THEME_SETTINGS_KEYS: readonly (keyof ThemeSettings)[] = [
   'spinnerIntervalMs', 'spinnerColor', 'spinnerSize',
   'msgStyle', 'msgFont', 'msgTextColor', 'msgLineHeight', 'messageLayout',
   'ccHeight', 'ccBgHeight', 'ccBg', 'ccBgImage', 'ccStatusFontSize', 'ccStyle', 'ccVariant',
-  'modelVariant', 'modeVariant', 'sendVariant', 'attachVariant', 'ccHidden', 'ccLayoutVersion', 'ccLayout', 'ccPositions',
-  'ccCliCustomized', 'ccScale', 'footerLayout', 'cliOverflowMode',
+  'modelVariant', 'modeVariant', 'sendVariant', 'attachVariant', 'ccHidden', 'ccLayout',
+  'ccScale', 'footerLayout', 'cliOverflowMode',
 ]
 
 const THEME_SETTINGS_KEY_SET = new Set<string>(THEME_SETTINGS_KEYS)

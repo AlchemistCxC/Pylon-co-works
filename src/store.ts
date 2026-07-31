@@ -2,7 +2,7 @@ import { create } from 'zustand'
 import { persist } from 'zustand/middleware'
 import { normalizeProfileState, PROFILE_SCHEMA_VERSION } from './profilePersistence'
 import { loadSessions, persistSessions } from './sessionPersistence'
-import { CC_LAYOUT_SCHEMA_VERSION, DEFAULT_CC_LAYOUT, cloneCcLayout, cloneCcPositions, normalizeCcLayout, normalizeCcPositions, setCcHiddenState, setCcScaleState, updateCcPlacementState, updateCcPositionState } from './ccLayoutState'
+import { DEFAULT_CC_LAYOUT, cloneCcLayout, normalizeCcLayout, setCcHiddenState, setCcScaleState, updateCcPlacementState } from './ccLayoutState'
 import type { CcLayoutV3, CcWidgetPlacement } from './ccLayoutState'
 import { createCustomPreset, deleteCustomPreset, normalizeCustomPresets, pickCustomPresetTheme, upsertCustomPreset } from './customPresets'
 import { normalizeThemeMigrationState } from './themeMigration'
@@ -69,11 +69,8 @@ export interface ThemeSettings {
   ccVariant: string
   modelVariant: string; modeVariant: string; sendVariant: string; attachVariant: string
   ccHidden: string[]
-  ccLayoutVersion: number
   ccLayout: CcLayoutV3
-  ccPositions: Record<string, {x: number, y: number, w?: number, h?: number}>
   ccEditMode: boolean
-  ccCliCustomized: boolean  // 用户是否在 CLI 模式手动调过 widget 位置/尺寸；true 时不再套用 CLI 默认布局
   ccScale: Record<string, number>  // naturalSize 控件独立缩放% (50-200) key=widget id
   activePreset: Record<string, string>
   dirty: Record<string, boolean>
@@ -100,7 +97,6 @@ type ThemeState = ThemeSettings & {
   updateTheme: (partial: Partial<ThemeSettings>) => void
   setCcEditMode: (enabled: boolean) => void
   setCcHeight: (height: number) => void
-  updateCcPosition: (id: string, partial: Partial<{x: number, y: number, w: number, h: number}>) => void
   updateCcPlacement: (id: string, partial: Partial<CcWidgetPlacement>) => void
   resetCcLayout: () => void
   setCcHidden: (id: string, hidden: boolean) => void
@@ -177,10 +173,8 @@ export const DEFAULTS: ThemeSettings = {
   ccStyle: 'wave',
   ccVariant: 'terminal',
   modelVariant: 'dropdown', modeVariant: 'pill', sendVariant: 'icon', attachVariant: 'icon',
-  ccHidden: [], ccLayoutVersion: CC_LAYOUT_SCHEMA_VERSION, ccLayout: cloneCcLayout(DEFAULT_CC_LAYOUT),
-  ccPositions: { input:{x:0,y:0,w:100,h:52}, ekg:{x:0,y:65}, pct:{x:32,y:69}, tokens:{x:41,y:69}, model:{x:58,y:69}, mode:{x:77,y:69}, send:{x:89,y:69}, attach:{x:95,y:69} },
+  ccHidden: [], ccLayout: cloneCcLayout(DEFAULT_CC_LAYOUT),
   ccEditMode: false,
-  ccCliCustomized: false,
   ccScale: {},
   activePreset: { global: '', sidebar: '', chat: '', cc: '', right: '' },
   dirty: { global: false, sidebar: false, chat: false, cc: false, right: false },
@@ -312,22 +306,11 @@ export const useStore = create<ThemeState>()(persist(
       cliOverflowMode: state.cliOverflowMode,
     }),
   })),
-  updateCcPosition: (id, partial) => set(state => {
-    const ccPositions = updateCcPositionState(state.ccPositions, DEFAULTS.ccPositions, id, partial)
-    if (ccPositions === state.ccPositions) return state
-    return {
-      ccPositions,
-      ccCliCustomized: true,
-    }
-  }),
   updateCcPlacement: (id, partial) => set(state => ({
     ccLayout: updateCcPlacementState(state.ccLayout, id, partial),
-    ccCliCustomized: true,
   })),
   resetCcLayout: () => set({
     ccLayout: cloneCcLayout(DEFAULT_CC_LAYOUT),
-    ccPositions: cloneCcPositions(DEFAULTS.ccPositions),
-    ccCliCustomized: false,
   }),
   setCcHidden: (id, hidden) => set(state => ({
     ccHidden: setCcHiddenState(state.ccHidden, id, hidden),
@@ -410,8 +393,7 @@ export const useStore = create<ThemeState>()(persist(
    */
   setGlobalPreset: (name, theme) => set(_ => ({
     ...theme,
-    ccLayout: normalizeCcLayout(theme.ccLayout, theme.ccPositions),
-    ccCliCustomized: false,
+    ccLayout: normalizeCcLayout(theme.ccLayout),
     activePreset: { global: name, sidebar: name, chat: name, cc: name, right: name },
     dirty: { global: false, sidebar: false, chat: false, cc: false, right: false },
   })),
@@ -431,7 +413,7 @@ export const useStore = create<ThemeState>()(persist(
     const theme = pickCustomPresetTheme(preset.theme as unknown as Record<string, unknown>)
     return {
       ...theme,
-      ccLayout: normalizeCcLayout(theme.ccLayout, theme.ccPositions),
+      ccLayout: normalizeCcLayout(theme.ccLayout),
       activePreset: { global: id, sidebar: id, chat: id, cc: id, right: id },
       dirty: { global: false, sidebar: false, chat: false, cc: false, right: false },
     }
@@ -516,7 +498,6 @@ export const useStore = create<ThemeState>()(persist(
     base: DEFAULTS as unknown as Record<string, unknown>,
     activePreset: DEFAULTS.activePreset,
     dirty: DEFAULTS.dirty,
-    ccPositions: DEFAULTS.ccPositions,
     ccLayout: DEFAULTS.ccLayout,
   })
   Object.assign(state, normalizedTheme)
@@ -562,6 +543,6 @@ export const useStore = create<ThemeState>()(persist(
   )
   return { ...state, ...normalized } as ThemeState
 }, partialize: (state) => {
-  const { sessions, sessionsHydrated, users, ccEditMode, setActiveProfile, addProfile, removeProfile, addSession, removeSession, updateSession, replaceSessions, setSessionPeriId, restoreSessions, hydrateSessions, getUser, updateTheme, setCcEditMode, setCcHeight, updateCcPosition, updateCcPlacement, resetCcLayout, setCcHidden, setCcScale, setLiveStats, liveCommands, sessionLiveStats, setSessionLiveStats, clearSessionRuntime, sessionConfig, setSessionConfig, sessionModes, setSessionMode, liveTokensUsed, liveTokensMax, liveCacheReadTokens, liveMode, livePrismOn, liveGenerating, liveGeneratingSources, agents, setAgents, setActiveAgent, agentStatuses, setAgentStatus, workspaceSheets, sheetAgentStates, hydrateWorkspaceSheets, openSheet, focusSheet, closeSheet, closeOtherSheets, closeRightSheets, reopenSheet, setSheetAgentState, applyZonePreset, setZoneField, setGlobalPreset, saveCustomPreset, applyCustomPreset, removeCustomPreset, presets, dirty, ...persisted } = state as any
+  const { sessions, sessionsHydrated, users, ccEditMode, setActiveProfile, addProfile, removeProfile, addSession, removeSession, updateSession, replaceSessions, setSessionPeriId, restoreSessions, hydrateSessions, getUser, updateTheme, setCcEditMode, setCcHeight, updateCcPlacement, resetCcLayout, setCcHidden, setCcScale, setLiveStats, liveCommands, sessionLiveStats, setSessionLiveStats, clearSessionRuntime, sessionConfig, setSessionConfig, sessionModes, setSessionMode, liveTokensUsed, liveTokensMax, liveCacheReadTokens, liveMode, livePrismOn, liveGenerating, liveGeneratingSources, agents, setAgents, setActiveAgent, agentStatuses, setAgentStatus, workspaceSheets, sheetAgentStates, hydrateWorkspaceSheets, openSheet, focusSheet, closeSheet, closeOtherSheets, closeRightSheets, reopenSheet, setSheetAgentState, applyZonePreset, setZoneField, setGlobalPreset, saveCustomPreset, applyCustomPreset, removeCustomPreset, presets, dirty, ...persisted } = state as any
   return persisted
 }, onRehydrateStorage: () => state => state?.hydrateSessions()}))

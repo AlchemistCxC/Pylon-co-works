@@ -41,7 +41,7 @@ export const ZONE_FIELDS: Record<string, (keyof ThemeSettings)[]> = {
   ],
   cc: [
     'ccHeight', 'ccBgHeight', 'ccBg', 'ccBgImage', 'ccStatusFontSize',
-    'ccStyle', 'ccVariant', 'ccLayout', 'ccPositions', 'ccHidden', 'ccScale', 'ccCliCustomized', 'ccLayoutVersion',
+    'ccStyle', 'ccVariant', 'ccLayout', 'ccHidden', 'ccScale',
     'inputBg', 'inputBgImage', 'inputTextColor', 'inputPlaceholder',
     'inputSendBg', 'inputFocusBorder', 'inputFontSize', 'inputMinHeight',
     'inputMode', 'cliLineWidth', 'cliLineColor', 'cliTextColor', 'cliPromptColor', 'cliLinePadding', 'cliContentOffsetY', 'cliHintMode', 'footerLayout', 'cliOverflowMode',
@@ -104,23 +104,13 @@ export const GLOBAL_PRESETS: GlobalPreset[] = [
       ccHeight: 76, ccBgHeight: 76, ccBg: '#000000', ccBgImage: '', ccStatusFontSize: 14,
       ccStyle: 'numeric', ccVariant: 'terminal',
       barTrackColor: '#353117', barFillColor: '#4EBA65', barFillFollow: true, barHeight: 10,
-      ccPositions: {
-        input:   { x: 0,  y: 0,  w: 100, h: 52 },
-        ekg:     { x: 0,  y: 59 },
-        pct:     { x: 14, y: 55 },
-        tokens:  { x: 9,  y: 55 },
-        model:   { x: 17, y: 55 },
-        mode:    { x: 29, y: 54 },
-        send:    { x: 89, y: 69 },
-        attach:  { x: 95, y: 69 },
-      },
       inputBg: 'transparent', inputBgImage: '',
       inputTextColor: '#FFFFFF', inputPlaceholder: '#999999',
       inputSendBg: 'transparent', inputFocusBorder: '#505050',
       inputFontSize: 15, inputMinHeight: 56,
       inputMode: 'cli', cliLineWidth: 1, cliLineColor: '#888888', cliTextColor: '#FFFFFF', cliPromptColor: '#999999', cliLinePadding: 3, cliContentOffsetY: 0, cliHintMode: 'full',
       ccHidden: ['send', 'attach'],
-      ccScale: { ekg: 90, pct: 90, tokens: 90, model: 90, mode: 90 }, ccCliCustomized: false,
+      ccScale: { ekg: 90, pct: 90, tokens: 90, model: 90, mode: 90 },
       statusBg: 'transparent', statusBgImage: '',
       ekgWidth: 140, ekgFontSize: 13,
       ekgGreen: '#4ade80', ekgYellow: '#fbbf24', ekgRed: '#f87171',
@@ -169,23 +159,13 @@ export const GLOBAL_PRESETS: GlobalPreset[] = [
       ccHeight: 96, ccBgHeight: 96, ccBg: 'rgba(255,255,255,0.20)', ccBgImage: '', ccStatusFontSize: 14,
       ccStyle: 'bar', ccVariant: 'pill',
       barTrackColor: 'rgba(0,0,0,0.06)', barFillColor: '#22c55e', barFillFollow: true, barHeight: 10,
-      ccPositions: {
-        input:   { x: 0,  y: 0,  w: 100, h: 52 },
-        ekg:     { x: 0,  y: 59 },
-        pct:     { x: 14, y: 55 },
-        tokens:  { x: 9,  y: 55 },
-        model:   { x: 17, y: 55 },
-        mode:    { x: 29, y: 54 },
-        send:    { x: 89, y: 69 },
-        attach:  { x: 95, y: 69 },
-      },
       inputBg: 'rgba(0,0,0,0.03)', inputBgImage: '',
       inputTextColor: 'rgba(0,0,0,0.80)', inputPlaceholder: 'rgba(0,0,0,0.22)',
       inputSendBg: 'rgba(99,102,241,0.12)', inputFocusBorder: 'rgba(99,102,241,0.35)',
       inputFontSize: 15, inputMinHeight: 52,
       inputMode: 'cli', cliLineWidth: 1, cliLineColor: '#9a9a9a', cliTextColor: 'rgba(0,0,0,0.80)', cliPromptColor: '#6b7280', cliLinePadding: 3, cliContentOffsetY: 0, cliHintMode: 'full',
       ccHidden: ['send', 'attach'],
-      ccScale: { ekg: 105, pct: 105, tokens: 100, model: 100, mode: 100 }, ccCliCustomized: false,
+      ccScale: { ekg: 105, pct: 105, tokens: 100, model: 100, mode: 100 },
       statusBg: 'transparent', statusBgImage: '',
       ekgWidth: 130, ekgFontSize: 13,
       ekgGreen: '#22c55e', ekgYellow: '#f59e0b', ekgRed: '#ef4444',
@@ -234,23 +214,13 @@ export const GLOBAL_PRESETS: GlobalPreset[] = [
       ccHeight: 96, ccBgHeight: 96, ccBg: '#252838', ccBgImage: '', ccStatusFontSize: 14,
       ccStyle: 'bar', ccVariant: 'terminal',
       barTrackColor: 'rgba(136,192,208,0.10)', barFillColor: '#88c0d0', barFillFollow: true, barHeight: 10,
-      ccPositions: {
-        input:   { x: 0,  y: 0,  w: 100, h: 52 },
-        ekg:     { x: 0,  y: 59 },
-        pct:     { x: 14, y: 55 },
-        tokens:  { x: 9,  y: 55 },
-        model:   { x: 17, y: 55 },
-        mode:    { x: 29, y: 54 },
-        send:    { x: 89, y: 69 },
-        attach:  { x: 95, y: 69 },
-      },
       inputBg: 'rgba(255,255,255,0.03)', inputBgImage: '',
       inputTextColor: '#e5e9f0', inputPlaceholder: 'rgba(229,233,240,0.20)',
       inputSendBg: 'rgba(136,192,208,0.15)', inputFocusBorder: 'rgba(136,192,208,0.45)',
       inputFontSize: 15, inputMinHeight: 52,
       inputMode: 'cli', cliLineWidth: 1, cliLineColor: '#7f8ea3', cliTextColor: '#e5e9f0', cliPromptColor: '#9aa7bd', cliLinePadding: 3, cliContentOffsetY: 0, cliHintMode: 'full',
       ccHidden: ['send', 'attach'],
-      ccScale: { ekg: 100, pct: 95, tokens: 95, model: 95, mode: 95 }, ccCliCustomized: false,
+      ccScale: { ekg: 100, pct: 95, tokens: 95, model: 95, mode: 95 },
       statusBg: 'transparent', statusBgImage: '',
       ekgWidth: 140, ekgFontSize: 13,
       ekgGreen: '#a3be8c', ekgYellow: '#ebcb8b', ekgRed: '#bf616a',
@@ -271,7 +241,7 @@ export const GLOBAL_PRESETS: GlobalPreset[] = [
       sidebarBg: '#16161e', sidebarBgImage: '', sidebarWidth: 240, sidebarTransparency: 1, sidebarBlur: 0, sidebarTextColor: '#a9b1d6', sidebarNameSize: 13, sidebarGroupSize: 11,
       chatBg: '#1a1b26', chatBgImage: '', chatTransparency: 1, chatBlur: 0, chatFont: 'mono', chatFontSize: 15, chatLineHeight: 1.6, chatTextColor: '#c0caf5', chatCodeColor: '#e0af68', chatCodeBg: 'rgba(122,162,247,0.06)',
       toolOk: '#9ece6a', toolRun: '#7aa2f7', toolErr: '#f7768e', toolNameColor: '#7dcfff', toolSummaryColor: '#565f89', userTagBg: '#24283b', userTagText: '#bb9af7', toolIndicator: '●', toolIndicatorGlow: 0, toolIndicatorGlowColor: '', toolConnectorMode: 'none', toolConnectorColor: '#414868', sparkles: '◴◷◶◵', spinnerColor: '#bb9af7', spinnerSize: 14, msgStyle: 'terminal', msgFont: 'mono', msgTextColor: '#c0caf5', msgLineHeight: 1.6, messageLayout:'classic',footerLayout:'free',cliOverflowMode:'fixed-scroll',
-      ccHeight: 96, ccBgHeight: 96, ccBg: '#1a1b26', ccBgImage: '', ccStatusFontSize: 14, ccStyle: 'numeric', ccVariant: 'terminal', ccPositions: {}, ccHidden: ['send','attach'], ccScale: { pct:95,tokens:95,model:95,mode:95 }, ccCliCustomized:false,
+      ccHeight: 96, ccBgHeight: 96, ccBg: '#1a1b26', ccBgImage: '', ccStatusFontSize: 14, ccStyle: 'numeric', ccVariant: 'terminal', ccHidden: ['send','attach'], ccScale: { pct:95,tokens:95,model:95,mode:95 },
       inputBg:'transparent',inputBgImage:'',inputTextColor:'#c0caf5',inputPlaceholder:'#565f89',inputSendBg:'transparent',inputFocusBorder:'#7aa2f7',inputFontSize:15,inputMinHeight:56,inputMode:'cli',cliLineWidth:1,cliLineColor:'#565f89',cliTextColor:'#c0caf5',cliPromptColor:'#7f89b0',cliLinePadding:3,cliContentOffsetY:0,cliHintMode:'full',
       statusBg:'transparent',statusBgImage:'',ekgWidth:140,ekgFontSize:13,ekgGreen:'#9ece6a',ekgYellow:'#e0af68',ekgRed:'#f7768e',ekgLineWidth:2,ekgAmplitudeMax:10,ekgSpeedBase:.5,ekgSpeedMax:2.5,ekgLeftColor:'#414868',ekgMovingColor:'',ekgConsumedColor:'#24283b',barTrackColor:'#24283b',barFillColor:'#7aa2f7',barFillFollow:true,barHeight:8,tokenDisplay:'ekg',pillBg:'#24283b',pillText:'#a9b1d6',prismOnColor:'#9ece6a',modelVariant:'minimal',modeVariant:'minimal',sendVariant:'minimal',attachVariant:'minimal',
       rightBg:'#16161e',rightBgImage:'',rightWidth:260,rightTransparency:1,rightBlur:0,
@@ -282,13 +252,13 @@ export const GLOBAL_PRESETS: GlobalPreset[] = [
       transparency:1,bgBlur:0,globalFont:'mono',globalFontSize:15,globalBgImage:'',globalBgColor:'#fdf6e3',uiScheme:'light',userName:'',userPrefix:'❯',userColor:'#268bd2',
       sidebarBg:'#eee8d5',sidebarBgImage:'',sidebarWidth:240,sidebarTransparency:1,sidebarBlur:0,sidebarTextColor:'#586e75',sidebarNameSize:13,sidebarGroupSize:11,
       chatBg:'#fdf6e3',chatBgImage:'',chatTransparency:1,chatBlur:0,chatFont:'mono',chatFontSize:15,chatLineHeight:1.6,chatTextColor:'#657b83',chatCodeColor:'#b58900',chatCodeBg:'rgba(38,139,210,.06)',toolOk:'#859900',toolRun:'#268bd2',toolErr:'#dc322f',toolNameColor:'#268bd2',toolSummaryColor:'#93a1a1',userTagBg:'#eee8d5',userTagText:'#268bd2',toolIndicator:'●',toolIndicatorGlow:0,toolIndicatorGlowColor:'',toolConnectorMode:'none',toolConnectorColor:'#93a1a1',sparkles:'▁▂▃▄▅▆▇█▇▆▅▄▃',spinnerColor:'#b58900',spinnerSize:14,msgStyle:'terminal',msgFont:'mono',msgTextColor:'#657b83',msgLineHeight:1.6,messageLayout:'classic',footerLayout:'free',cliOverflowMode:'fixed-scroll',
-      ccHeight:96,ccBgHeight:96,ccBg:'#fdf6e3',ccBgImage:'',ccStatusFontSize:14,ccStyle:'numeric',ccVariant:'terminal',ccPositions:{},ccHidden:['send','attach'],ccScale:{pct:95,tokens:95,model:95,mode:95},ccCliCustomized:false,inputBg:'transparent',inputBgImage:'',inputTextColor:'#657b83',inputPlaceholder:'#93a1a1',inputSendBg:'transparent',inputFocusBorder:'#268bd2',inputFontSize:15,inputMinHeight:56,inputMode:'cli',cliLineWidth:1,cliLineColor:'#93a1a1',cliTextColor:'#657b83',cliPromptColor:'#657b83',cliLinePadding:3,cliContentOffsetY:0,cliHintMode:'full',statusBg:'transparent',statusBgImage:'',ekgWidth:140,ekgFontSize:13,ekgGreen:'#859900',ekgYellow:'#b58900',ekgRed:'#dc322f',ekgLineWidth:2,ekgAmplitudeMax:10,ekgSpeedBase:.5,ekgSpeedMax:2.5,ekgLeftColor:'#93a1a1',ekgMovingColor:'',ekgConsumedColor:'#eee8d5',barTrackColor:'#eee8d5',barFillColor:'#268bd2',barFillFollow:true,barHeight:8,tokenDisplay:'ekg',pillBg:'#eee8d5',pillText:'#586e75',prismOnColor:'#859900',modelVariant:'minimal',modeVariant:'minimal',sendVariant:'minimal',attachVariant:'minimal',rightBg:'#eee8d5',rightBgImage:'',rightWidth:260,rightTransparency:1,rightBlur:0,
+      ccHeight:96,ccBgHeight:96,ccBg:'#fdf6e3',ccBgImage:'',ccStatusFontSize:14,ccStyle:'numeric',ccVariant:'terminal',ccHidden:['send','attach'],ccScale:{pct:95,tokens:95,model:95,mode:95},inputBg:'transparent',inputBgImage:'',inputTextColor:'#657b83',inputPlaceholder:'#93a1a1',inputSendBg:'transparent',inputFocusBorder:'#268bd2',inputFontSize:15,inputMinHeight:56,inputMode:'cli',cliLineWidth:1,cliLineColor:'#93a1a1',cliTextColor:'#657b83',cliPromptColor:'#657b83',cliLinePadding:3,cliContentOffsetY:0,cliHintMode:'full',statusBg:'transparent',statusBgImage:'',ekgWidth:140,ekgFontSize:13,ekgGreen:'#859900',ekgYellow:'#b58900',ekgRed:'#dc322f',ekgLineWidth:2,ekgAmplitudeMax:10,ekgSpeedBase:.5,ekgSpeedMax:2.5,ekgLeftColor:'#93a1a1',ekgMovingColor:'',ekgConsumedColor:'#eee8d5',barTrackColor:'#eee8d5',barFillColor:'#268bd2',barFillFollow:true,barHeight:8,tokenDisplay:'ekg',pillBg:'#eee8d5',pillText:'#586e75',prismOnColor:'#859900',modelVariant:'minimal',modeVariant:'minimal',sendVariant:'minimal',attachVariant:'minimal',rightBg:'#eee8d5',rightBgImage:'',rightWidth:260,rightTransparency:1,rightBlur:0,
     }
   },
   {
     name:'amber',label:'Amber CRT',theme:{
       transparency:1,bgBlur:0,globalFont:'mono',globalFontSize:15,globalBgImage:'',globalBgColor:'#120b00',uiScheme:'dark',userName:'',userPrefix:'>',userColor:'#ffb000',sidebarBg:'#120b00',sidebarBgImage:'',sidebarWidth:240,sidebarTransparency:1,sidebarBlur:0,sidebarTextColor:'#cc8c00',sidebarNameSize:13,sidebarGroupSize:11,chatBg:'#120b00',chatBgImage:'',chatTransparency:1,chatBlur:0,chatFont:'mono',chatFontSize:15,chatLineHeight:1.55,chatTextColor:'#ffcc55',chatCodeColor:'#ffe0a3',chatCodeBg:'transparent',toolOk:'#ffc24b',toolRun:'#ffb000',toolErr:'#ff6b35',toolNameColor:'#ffb000',toolSummaryColor:'#9b6b00',userTagBg:'#2b1900',userTagText:'#ffcc55',toolIndicator:'■',toolIndicatorGlow:3,toolIndicatorGlowColor:'#ffb000',toolConnectorMode:'none',toolConnectorColor:'#5c3900',sparkles:'┌┐┘└',spinnerColor:'#ffb000',spinnerSize:14,msgStyle:'terminal',msgFont:'mono',msgTextColor:'#ffcc55',msgLineHeight:1.55,messageLayout:'classic',footerLayout:'free',cliOverflowMode:'fixed-scroll',
-      ccHeight:96,ccBgHeight:96,ccBg:'#120b00',ccBgImage:'',ccStatusFontSize:14,ccStyle:'numeric',ccVariant:'terminal',ccPositions:{},ccHidden:['send','attach'],ccScale:{pct:95,tokens:95,model:95,mode:95},ccCliCustomized:false,inputBg:'transparent',inputBgImage:'',inputTextColor:'#ffcc55',inputPlaceholder:'#7a5200',inputSendBg:'transparent',inputFocusBorder:'#ffb000',inputFontSize:15,inputMinHeight:56,inputMode:'cli',cliLineWidth:1,cliLineColor:'#9b6b00',cliTextColor:'#ffcc55',cliPromptColor:'#cc8c00',cliLinePadding:3,cliContentOffsetY:0,cliHintMode:'full',statusBg:'transparent',statusBgImage:'',ekgWidth:140,ekgFontSize:13,ekgGreen:'#ffc24b',ekgYellow:'#ffb000',ekgRed:'#ff6b35',ekgLineWidth:2,ekgAmplitudeMax:10,ekgSpeedBase:.5,ekgSpeedMax:2.5,ekgLeftColor:'#9b6b00',ekgMovingColor:'',ekgConsumedColor:'#2b1900',barTrackColor:'#2b1900',barFillColor:'#ffb000',barFillFollow:true,barHeight:8,tokenDisplay:'ekg',pillBg:'#2b1900',pillText:'#cc8c00',prismOnColor:'#ffc24b',modelVariant:'minimal',modeVariant:'minimal',sendVariant:'minimal',attachVariant:'minimal',rightBg:'#120b00',rightBgImage:'',rightWidth:260,rightTransparency:1,rightBlur:0,
+      ccHeight:96,ccBgHeight:96,ccBg:'#120b00',ccBgImage:'',ccStatusFontSize:14,ccStyle:'numeric',ccVariant:'terminal',ccHidden:['send','attach'],ccScale:{pct:95,tokens:95,model:95,mode:95},inputBg:'transparent',inputBgImage:'',inputTextColor:'#ffcc55',inputPlaceholder:'#7a5200',inputSendBg:'transparent',inputFocusBorder:'#ffb000',inputFontSize:15,inputMinHeight:56,inputMode:'cli',cliLineWidth:1,cliLineColor:'#9b6b00',cliTextColor:'#ffcc55',cliPromptColor:'#cc8c00',cliLinePadding:3,cliContentOffsetY:0,cliHintMode:'full',statusBg:'transparent',statusBgImage:'',ekgWidth:140,ekgFontSize:13,ekgGreen:'#ffc24b',ekgYellow:'#ffb000',ekgRed:'#ff6b35',ekgLineWidth:2,ekgAmplitudeMax:10,ekgSpeedBase:.5,ekgSpeedMax:2.5,ekgLeftColor:'#9b6b00',ekgMovingColor:'',ekgConsumedColor:'#2b1900',barTrackColor:'#2b1900',barFillColor:'#ffb000',barFillFollow:true,barHeight:8,tokenDisplay:'ekg',pillBg:'#2b1900',pillText:'#cc8c00',prismOnColor:'#ffc24b',modelVariant:'minimal',modeVariant:'minimal',sendVariant:'minimal',attachVariant:'minimal',rightBg:'#120b00',rightBgImage:'',rightWidth:260,rightTransparency:1,rightBlur:0,
     }
   },
 ]
@@ -299,9 +269,7 @@ export function pickZoneFields(
   zone: string,
 ): Partial<ThemeSettings> {
   const fields = ZONE_FIELDS[zone] ?? []
-  const out: any = {}
-  for (const f of fields) {
-    if (f in theme) out[f] = (theme as any)[f]
-  }
-  return out
+  return Object.fromEntries(
+    fields.filter((f): f is keyof ThemeSettings => f in theme).map(f => [f, theme[f]]),
+  ) as Partial<ThemeSettings>
 }

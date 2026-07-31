@@ -9,11 +9,7 @@ import {
 
 assert.equal(CC_LAYOUT_SCHEMA_VERSION, 3)
 
-const migrated = normalizeCcLayout(undefined, {
-  input: { x: 1, y: 2, w: 98, h: 58 },
-  ekg: { x: 20, y: 70 },
-  model: { x: 80, y: 70 },
-})
+const migrated = normalizeCcLayout(undefined)
 assert.deepEqual(migrated.placements.input, DEFAULT_CC_LAYOUT.placements.input)
 assert.deepEqual(migrated.placements.ekg, DEFAULT_CC_LAYOUT.placements.ekg)
 assert.deepEqual(migrated.placements.model, DEFAULT_CC_LAYOUT.placements.model)

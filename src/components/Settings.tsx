@@ -129,7 +129,7 @@ const TAB_PREVIEW: Record<string, string> = {
 // ── main ──
 
 export default function Settings({ onClose, activeSessionId }: { onClose?: () => void; activeSessionId?: string | null }) {
-  const t = useStore() as ThemeSettings
+  const t = useStore()
   const u = useStore(s => s.updateTheme)
   const reset = useStore(s => s.resetTheme)
   const setGlobalPreset = useStore(s => s.setGlobalPreset)
@@ -160,7 +160,7 @@ export default function Settings({ onClose, activeSessionId }: { onClose?: () =>
   const applyGlobalPreset = (name: string) => {
     const preset = GLOBAL_PRESETS.find(p => p.name === name)
     if (!preset) return
-    setGlobalPreset(name, preset.theme as any)
+    setGlobalPreset(name, preset.theme)
   }
 
   // 改单个字段 — 标记当前 tab 对应的 zone 为 dirty
@@ -177,7 +177,7 @@ export default function Settings({ onClose, activeSessionId }: { onClose?: () =>
   const applyLocalPreset = (zone: string, presetName: string) => {
     const preset = GLOBAL_PRESETS.find(p => p.name === presetName)
     if (!preset) return
-    const sub = pickZoneFields(preset.theme as any, zone)
+    const sub = pickZoneFields(preset.theme, zone)
     applyZonePreset(zone, presetName, sub)
   }
 
@@ -328,13 +328,13 @@ export default function Settings({ onClose, activeSessionId }: { onClose?: () =>
               <Group title="玻璃效果">
                 <BgImageRow label="背景图" value={t.globalBgImage||''} onChange={v=>onSettingChange({globalBgImage:v})}/>
                 <Row label="背景底色">
-                  <ColorPopover value={(t as any).globalBgColor||'#e8e8ec'} onChange={v=>onSettingChange({globalBgColor:v} as any)}/>
+                  <ColorPopover value={t.globalBgColor || '#e8e8ec'} onChange={v=>onSettingChange({globalBgColor:v})}/>
                   <span className="set-hint" style={{marginLeft:8}}>终端/桌面背景模拟色</span>
                 </Row>
                 <Row label="UI 配色">
                   <div className="set-preset-row">
-                    <button className={`set-preset-chip ${(t as any).uiScheme === 'light' ? 'active' : ''}`} onClick={()=>onSettingChange({uiScheme:'light'} as any)}>浅色</button>
-                    <button className={`set-preset-chip ${(t as any).uiScheme === 'dark' ? 'active' : ''}`} onClick={()=>onSettingChange({uiScheme:'dark'} as any)}>深色</button>
+                    <button className={`set-preset-chip ${t.uiScheme === 'light' ? 'active' : ''}`} onClick={()=>onSettingChange({uiScheme:'light'})}>浅色</button>
+                    <button className={`set-preset-chip ${t.uiScheme === 'dark' ? 'active' : ''}`} onClick={()=>onSettingChange({uiScheme:'dark'})}>深色</button>
                   </div>
                 </Row>
                 <Row label="透明度"><Slider value={t.transparency} onChange={v=>onSettingChange({transparency:v})} min={0} max={1}/>

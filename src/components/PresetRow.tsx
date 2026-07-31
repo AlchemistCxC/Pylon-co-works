@@ -37,7 +37,7 @@ export default function PresetRow({ area }: Props) {
   const apply = (name: string) => {
     const preset = GLOBAL_PRESETS.find(p => p.name === name)
     if (!preset) return
-    const sub = pickZoneFields(preset.theme as any, zone)
+    const sub = pickZoneFields(preset.theme, zone)
     applyZonePreset(zone, name, sub)
   }
 

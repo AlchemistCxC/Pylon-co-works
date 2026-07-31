@@ -47,7 +47,7 @@ assert.equal(amber.globalBgColor, '#120b00')
 assert.equal(amber.spinnerColor, '#ffb000')
 
 for (const field of [
-  'ccPositions', 'ccHidden', 'ccScale', 'ccCliCustomized', 'ccLayoutVersion',
+  'ccHidden', 'ccScale',
   'ccStyle', 'ccVariant', 'ccHeight', 'ccBgHeight', 'ccBg', 'ccBgImage',
   'cliLinePadding', 'cliPromptColor', 'cliContentOffsetY', 'cliHintMode', 'barTrackColor', 'barFillColor', 'barFillFollow', 'barHeight',
 ]) {
@@ -57,7 +57,8 @@ for (const field of [
 for (const preset of GLOBAL_PRESETS) {
   assert.equal(Array.isArray(preset.theme.ccHidden), true)
   assert.equal(typeof preset.theme.ccScale, 'object')
-  assert.equal(preset.theme.ccCliCustomized, false)
+  assert.equal('ccCliCustomized' in preset.theme, false, '预设不得携带废弃 ccCliCustomized')
+  assert.equal('ccPositions' in preset.theme, false, '预设不得携带废弃 ccPositions')
   assert.equal(preset.theme.ccStatusFontSize, 14)
   assert.equal(preset.theme.inputFontSize, 15)
   assert.equal(preset.theme.cliLineWidth, 1)

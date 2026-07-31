@@ -1,11 +1,3 @@
-export interface CcPosition {
-  x: number
-  y: number
-  w?: number
-  h?: number
-}
-
-export type CcPositions = Record<string, CcPosition>
 export type CcWidgetId = 'input' | 'ekg' | 'pct' | 'tokens' | 'model' | 'mode' | 'send' | 'attach'
 export type CcSlot = 'input' | 'status-primary' | 'status-secondary' | 'actions'
 
@@ -22,7 +14,6 @@ export interface CcLayoutV3 {
 }
 
 export const CC_LAYOUT_SCHEMA_VERSION = 3
-export const NATURAL_CC_WIDGET_IDS = new Set(['ekg', 'pct', 'tokens', 'model', 'mode', 'send', 'attach'])
 
 export const DEFAULT_CC_LAYOUT: CcLayoutV3 = {
   version: CC_LAYOUT_SCHEMA_VERSION,
@@ -50,7 +41,7 @@ export function cloneCcLayout(layout: CcLayoutV3): CcLayoutV3 {
   }
 }
 
-export function normalizeCcLayout(layout: Partial<CcLayoutV3> | null | undefined, _legacyPositions?: CcPositions): CcLayoutV3 {
+export function normalizeCcLayout(layout: Partial<CcLayoutV3> | null | undefined): CcLayoutV3 {
   const placements = cloneCcLayout(DEFAULT_CC_LAYOUT).placements
   if (layout?.version !== CC_LAYOUT_SCHEMA_VERSION || !layout.placements) {
     return { version: CC_LAYOUT_SCHEMA_VERSION, placements }
@@ -87,31 +78,6 @@ export function updateCcPlacementState(
     version: CC_LAYOUT_SCHEMA_VERSION,
     placements: { ...layout.placements, [id]: next },
   }
-}
-
-export function normalizeCcPositions(positions: CcPositions | null | undefined, defaults: CcPositions): CcPositions {
-  const merged = { ...cloneCcPositions(defaults), ...(positions || {}) }
-  return Object.fromEntries(Object.entries(merged).map(([id, position]) => {
-    if (!NATURAL_CC_WIDGET_IDS.has(id)) return [id, { ...position }]
-    return [id, { x: position.x, y: position.y }]
-  }))
-}
-
-export function updateCcPositionState(
-  positions: CcPositions,
-  defaults: CcPositions,
-  id: string,
-  partial: Partial<CcPosition>,
-): CcPositions {
-  const current = positions[id] || defaults[id]
-  if (!current) return positions
-  return { ...positions, [id]: { ...current, ...partial } }
-}
-
-export function cloneCcPositions(positions: CcPositions): CcPositions {
-  return Object.fromEntries(
-    Object.entries(positions).map(([id, position]) => [id, { ...position }]),
-  )
 }
 
 export function setCcHiddenState(hiddenIds: string[], id: string, hidden: boolean): string[] {

@@ -6,7 +6,7 @@ const storeSource = readFileSync(new URL('../src/store.ts', import.meta.url), 'u
 const applyBody = storeSource.match(/applyCustomPreset:\s*\(id\) => set\(state => \{([\s\S]*?)\n\s*\}\),/)?.[1] ?? ''
 assert.match(applyBody, /pickCustomPresetTheme\(preset\.theme/)
 assert.match(applyBody, /\.\.\.theme/)
-assert.match(applyBody, /normalizeCcLayout\(theme\.ccLayout, theme\.ccPositions\)/)
+assert.match(applyBody, /normalizeCcLayout\(theme\.ccLayout\)/)
 assert.doesNotMatch(applyBody, /\.\.\.preset\.theme\s*,[\s\S]*profiles|profiles\s*:/)
 
 const profiles = [{ id: 'profile-1' }]
@@ -23,7 +23,6 @@ type State = Record<string, unknown> & {
   activePreset: Record<string, string>
   dirty: Record<string, boolean>
   ccLayout: typeof DEFAULT_CC_LAYOUT
-  ccPositions: Record<string, unknown>
 }
 
 const initial: State = {
@@ -34,7 +33,6 @@ const initial: State = {
   activePreset: { global: '', sidebar: '', chat: '', cc: '', right: '' },
   dirty: { global: false, sidebar: false, chat: false, cc: false, right: false },
   ccLayout: DEFAULT_CC_LAYOUT,
-  ccPositions: {},
 }
 
 const presetTheme = {
@@ -62,7 +60,7 @@ const presetTheme = {
 // 复刻 applyCustomPreset 的无副作用状态事务；源代码结构断言保证真实 action 使用同一边界。
 const applyCustomPreset = (state: State, theme: Record<string, unknown>): State => {
   const allowedTheme = Object.fromEntries(Object.entries(theme).filter(([key]) => [
-    'globalBgColor', 'ccLayout', 'ccPositions',
+    'globalBgColor', 'ccLayout',
   ].includes(key)))
   const layout = allowedTheme.ccLayout && typeof allowedTheme.ccLayout === 'object'
     ? allowedTheme.ccLayout as typeof DEFAULT_CC_LAYOUT

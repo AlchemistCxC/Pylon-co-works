@@ -27,7 +27,8 @@ assert.match(presets, /messageLayout: 'claude', footerLayout: 'peri', cliOverflo
 assert.ok((presets.match(/messageLayout/g) || []).length >= 6, '每个内建预设都应声明 messageLayout')
 
 assert.match(customPresets, /'msgStyle', 'msgFont', 'msgTextColor', 'msgLineHeight', 'messageLayout'/)
-assert.match(customPresets, /'ccCliCustomized', 'ccScale', 'footerLayout', 'cliOverflowMode'/)
+assert.match(customPresets, /'ccScale', 'footerLayout', 'cliOverflowMode'/)
+assert.equal(customPresets.includes('ccCliCustomized'), false, 'customPresets 不得再携带 ccCliCustomized')
 
 assert.match(app, /data-message-layout=\{s\.messageLayout \|\| 'classic'\}/)
 assert.match(app, /data-footer-layout=\{s\.footerLayout \|\| 'free'\}/)
