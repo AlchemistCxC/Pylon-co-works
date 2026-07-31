@@ -11,6 +11,7 @@ import { toCssBackgroundImage } from '../backgroundImage'
 import { emptySessionLiveStats } from './chat/sessionRuntime'
 import type { SessionLiveStats } from './chat/sessionRuntime'
 import { resolveCcMinHeight, resolveVisibleStatusWidgetCount } from '../ccHeightState'
+import { CC_WIDGET_REGISTRY as WIDGET_REGISTRY, type CcWidgetDef as WidgetDef } from './cc/widgetRegistry'
 import './ControlCenter.css'
 import './chat/StatusBar.css'  // model/mode/send/attach widget 样式
 
@@ -100,59 +101,13 @@ function TokensWidget({ sessionId }: Props) {
   )
 }
 
-// ── Widget 注册表：单一真实源 ──────────────────────────────────
-// 新增 widget：在这里加一项即可，画布 + 工具栏自动出现
-interface WidgetDef {
-  id: string
-  label: string
-  render: (sessionId: string | null) => React.ReactNode
-}
-
-const WIDGET_REGISTRY: WidgetDef[] = [
-  {
-    id: 'input', label: '输入栏',
-    render: (sid) => <InputBar sessionId={sid} />,
-  },
-  {
-    id: 'ekg', label: '用量条',
-    render: (sid) => <EkgWidget sessionId={sid} />,
-  },
-  {
-    id: 'pct', label: '百分比',
-    render: (sid) => <PctWidget sessionId={sid} />,
-  },
-  {
-    id: 'tokens', label: 'Token数',
-    render: (sid) => <TokensWidget sessionId={sid} />,
-  },
-  {
-    id: 'model', label: '模型',
-    render: (sid) => {
-      const s = useStore.getState().sessions.find(s => s.id === sid)
-      return <ModelWidget sessionSource={s?.source} />
-    },
-  },
-  {
-    id: 'mode', label: '权限模式',
-    render: (sid) => {
-      const s = useStore.getState().sessions.find(s => s.id === sid)
-      return <ModeWidget sessionSource={s?.source} />
-    },
-  },
-  {
-    id: 'send', label: '发送按钮',
-    render: () => null,
-  },
-  {
-    id: 'attach', label: '附件按钮',
-    render: () => null,
-  },
-]
-
+// Widget registry 位于 cc/widgetRegistry.tsx，供中控画布、工具栏和后续 Preview 共用。
 export default function ControlCenter({ sessionId }: Props) {
   const ccHeight = useStore(s => s.ccHeight) || 120
   const ccBgHeight = useStore(s => s.ccBgHeight ?? ccHeight)
   const inputMode = useStore(s => s.inputMode)
+  const inputVariant = useStore(s => s.inputVariant || (s.inputMode === 'cli' ? 'cli' : 'composer'))
+  const submitButtonMode = useStore(s => s.inputSubmitButtonMode || 'inline')
   const hidden = useStore(s => s.ccHidden || [])
   const ccStyle = useStore(s => s.ccStyle)
   const layout = useStore(s => s.ccLayout)
@@ -177,11 +132,13 @@ export default function ControlCenter({ sessionId }: Props) {
     if (!editMode && hidden.includes(id)) return null
     // numeric 已由 pct widget 表达；两者同时显示会重复成 “0% · 0%”。
     if (!editMode && ccStyle === 'numeric' && id === 'ekg' && !hidden.includes('pct')) return null
-    if (!editMode && inputMode === 'cli' && (id === 'send' || id === 'attach')) return null
+    if (!editMode && inputVariant === 'cli' && (id === 'send' || id === 'attach')) return null
 
     // 独立 send/attach widget 是否已启用（在画布上且未隐藏）→ 决定 InputBar 是否隐藏自带按钮
     // CLI 模式下独立按钮自动隐藏，此时 split=false（InputBar 的 CLI CSS 已隐藏自带按钮）
-    const externalBtns = inputMode !== 'cli' && (!hidden.includes('send') || !hidden.includes('attach'))
+    const externalBtns = inputVariant !== 'cli'
+      && submitButtonMode === 'external'
+      && (!hidden.includes('send') || !hidden.includes('attach'))
     const inputSplit = externalBtns
 
     let body: React.ReactNode
@@ -196,13 +153,13 @@ export default function ControlCenter({ sessionId }: Props) {
         body = <AttachWidget onClick={() => inputRef.current?.attachFile()} />
         break
       default:
-        body = def.render(sessionId)
+        body = def.render({ sessionId })
     }
 
     const placement = layout.placements[id as keyof typeof layout.placements]
     if (!placement) return null
     // 小控件用 naturalSize（宽高由内容决定，盒子紧贴）— 仅 input 占满槽位
-    const isNatural = id !== 'input'
+    const isNatural = def.naturalSize
     return (
       <EditableWidget
         key={id} id={id} placement={placement} editMode={editMode}

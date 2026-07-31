@@ -498,7 +498,10 @@ export default function Settings({ onClose, activeSessionId }: { onClose?: () =>
                 <BgImageRow label="背景图" value={t.ccBgImage||''} onChange={v=>onSettingChange({ccBgImage:v})}/>
               </Group>
               <Group title="控件样式">
-                <Row label="输入栏"><Sel value={t.inputMode} onChange={v=>onSettingChange({inputMode:v})} options={['cli','default']}/></Row>
+                <Row label="输入栏"><Sel value={t.inputVariant || (t.inputMode === 'cli' ? 'cli' : 'composer')} onChange={v=>onSettingChange({inputVariant:v as ThemeSettings['inputVariant'], inputMode:v === 'cli' ? 'cli' : 'default'})} options={['cli','composer','compact','command']}/></Row>
+                <Row label="Placeholder"><Sel value={t.inputShowPlaceholder === false ? 'hidden' : 'shown'} onChange={v=>onSettingChange({inputShowPlaceholder:v === 'shown'})} options={['shown','hidden']}/></Row>
+                <Row label="历史提示"><Sel value={t.inputShowHistoryHint === false ? 'hidden' : 'shown'} onChange={v=>onSettingChange({inputShowHistoryHint:v === 'shown'})} options={['shown','hidden']}/></Row>
+                <Row label="发送按钮"><Sel value={t.inputSubmitButtonMode || 'inline'} onChange={v=>onSettingChange({inputSubmitButtonMode:v as ThemeSettings['inputSubmitButtonMode']})} options={['inline','external','hidden']}/></Row>
                 <Row label="Footer 布局"><Sel value={t.footerLayout || 'free'} onChange={v=>onSettingChange({footerLayout:v as ThemeSettings['footerLayout']})} options={['free','peri']}/></Row>
                 <Row label="多行策略"><Sel value={t.cliOverflowMode || 'fixed-scroll'} onChange={v=>onSettingChange({cliOverflowMode:v as ThemeSettings['cliOverflowMode']})} options={['fixed-scroll','grow','overlay']}/></Row>
                 <Row label="提示符颜色"><ColorPopover value={t.cliPromptColor || ''} onChange={v=>onSettingChange({cliPromptColor:v})}/></Row>

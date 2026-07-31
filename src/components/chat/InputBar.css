@@ -50,7 +50,13 @@
 .input-textarea:focus { border-color:var(--input-focus,var(--border-focus)); }
 .input-textarea::placeholder { color:var(--input-placeholder,var(--text-placeholder)); }
 
-/* CLI mode */
+.input-bar.input-variant-compact .input-row { gap:5px; }
+.input-bar.input-variant-compact .input-textarea { min-height:36px; max-height:120px; padding:7px 10px; border-radius:6px; line-height:1.4; }
+.input-bar.input-variant-compact .input-btn { width:36px; height:36px; border-radius:6px; }
+.input-bar.input-variant-command .input-row { border:1px solid var(--input-focus,var(--border-focus)); border-radius:8px; padding:2px 6px; background:color-mix(in srgb, var(--input-bg,var(--bg-input)) 88%, var(--accent) 12%); }
+.input-bar.input-variant-command .input-textarea { border:0; background:transparent; min-height:42px; padding:9px 8px; }
+.input-command-kicker { position:absolute; bottom:calc(100% + 5px); left:0; color:var(--accent); font:600 10px var(--mono); letter-spacing:0.12em; }
+
 .input-bar.cli-mode { border:none; background:transparent; padding-top:0; }
 .input-bar.cli-mode .input-row {
   position:relative; padding:var(--cli-line-padding,6px) 0;

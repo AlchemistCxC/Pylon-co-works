@@ -37,7 +37,7 @@ export interface ThemeSettings {
   toolConnectorMode: string; toolConnectorColor: string
   toolConnectorStyle: 'solid' | 'dotted' | 'pulse'; toolConnectorWidth: number; toolConnectorOpacity: number
   inputBg: string; inputBgImage: string; inputTextColor: string; inputPlaceholder: string; inputSendBg: string; inputFocusBorder: string; inputFontSize: number; inputMinHeight: number
-  inputMode: string; cliLineWidth: number; cliLineColor: string; cliTextColor: string; cliPromptColor: string; cliLinePadding: number; cliContentOffsetY: number
+  inputMode: string; inputVariant: 'cli' | 'composer' | 'compact' | 'command'; inputShowPlaceholder: boolean; inputShowHistoryHint: boolean; inputSubmitButtonMode: 'inline' | 'external' | 'hidden'; cliLineWidth: number; cliLineColor: string; cliTextColor: string; cliPromptColor: string; cliLinePadding: number; cliContentOffsetY: number
   cliHintMode: 'hidden' | 'compact' | 'full'
   statusBg: string; statusBgImage: string; ekgWidth: number; ekgFontSize: number; ekgGreen: string; ekgYellow: string; ekgRed: string; pillBg: string; pillText: string; prismOnColor: string
   ekgLineWidth: number; ekgAmplitudeMax: number; ekgSpeedBase: number; ekgSpeedMax: number
@@ -154,7 +154,7 @@ export const DEFAULTS: ThemeSettings = {
   toolConnectorMode: 'none', toolConnectorColor: 'rgba(0,0,0,0.12)',
   toolConnectorStyle: 'solid', toolConnectorWidth: 2, toolConnectorOpacity: 1,
   inputBg: 'rgba(0,0,0,0.02)', inputBgImage: '', inputTextColor: 'rgba(0,0,0,0.85)', inputPlaceholder: 'rgba(0,0,0,0.28)', inputSendBg: 'rgba(0,0,0,0.10)', inputFocusBorder: 'rgba(0,0,0,0.22)', inputFontSize: 17, inputMinHeight: 56,
-  inputMode: 'cli', cliLineWidth: 2, cliLineColor: '', cliTextColor: '', cliPromptColor: '', cliLinePadding: 6, cliContentOffsetY: 0,
+  inputMode: 'cli', inputVariant: 'cli', inputShowPlaceholder: true, inputShowHistoryHint: true, inputSubmitButtonMode: 'inline', cliLineWidth: 2, cliLineColor: '', cliTextColor: '', cliPromptColor: '', cliLinePadding: 6, cliContentOffsetY: 0,
   cliHintMode: 'full',
   statusBg: 'transparent', statusBgImage: '', ekgWidth: 150, ekgFontSize: 16, ekgGreen: '#4EBA65', ekgYellow: '#FFC107', ekgRed: '#FF6B80', pillBg: '#373737', pillText: '#999999', prismOnColor: '#4EBA65',
   ekgLineWidth: 3, ekgAmplitudeMax: 10, ekgSpeedBase: 0.5, ekgSpeedMax: 2.0,
@@ -532,6 +532,15 @@ export const useStore = create<ThemeState>()(persist(
     ? Math.max(40, Math.min(1000, state.spinnerIntervalMs))
     : 120
   state.messageLayout = state.messageLayout === 'claude' || state.messageLayout === 'bubble' ? state.messageLayout : 'classic'
+  state.inputVariant = state.inputVariant === 'cli' || state.inputVariant === 'composer' || state.inputVariant === 'compact' || state.inputVariant === 'command'
+    ? state.inputVariant
+    : state.inputMode === 'cli' ? 'cli' : 'composer'
+  state.inputShowPlaceholder = state.inputShowPlaceholder !== false
+  state.inputShowHistoryHint = state.inputShowHistoryHint !== false
+  state.inputSubmitButtonMode = state.inputSubmitButtonMode === 'external' || state.inputSubmitButtonMode === 'hidden'
+    ? state.inputSubmitButtonMode
+    : 'inline'
+  state.inputMode = state.inputVariant === 'cli' ? 'cli' : 'default'
   state.footerLayout = state.footerLayout === 'peri' ? 'peri' : 'free'
   state.cliOverflowMode = state.cliOverflowMode === 'grow' || state.cliOverflowMode === 'overlay' ? state.cliOverflowMode : 'fixed-scroll'
   const migratedInputMode = typeof state.inputMode === 'string' ? state.inputMode : DEFAULTS.inputMode

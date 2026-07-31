@@ -15,7 +15,7 @@ const THEME_SETTINGS_KEYS: readonly (keyof ThemeSettings)[] = [
   'toolOk', 'toolRun', 'toolErr', 'toolNameColor', 'toolSummaryColor', 'userTagBg', 'userTagText',
   'toolIndicatorGlow', 'toolIndicatorGlowColor', 'toolConnectorMode', 'toolConnectorColor', 'toolConnectorStyle', 'toolConnectorWidth', 'toolConnectorOpacity',
   'inputBg', 'inputBgImage', 'inputTextColor', 'inputPlaceholder', 'inputSendBg', 'inputFocusBorder', 'inputFontSize', 'inputMinHeight',
-  'inputMode', 'cliLineWidth', 'cliLineColor', 'cliTextColor', 'cliPromptColor', 'cliLinePadding', 'cliContentOffsetY', 'cliHintMode',
+  'inputMode', 'inputVariant', 'inputShowPlaceholder', 'inputShowHistoryHint', 'inputSubmitButtonMode', 'cliLineWidth', 'cliLineColor', 'cliTextColor', 'cliPromptColor', 'cliLinePadding', 'cliContentOffsetY', 'cliHintMode',
   'statusBg', 'statusBgImage', 'ekgWidth', 'ekgFontSize', 'ekgGreen', 'ekgYellow', 'ekgRed', 'pillBg', 'pillText', 'prismOnColor',
   'ekgLineWidth', 'ekgAmplitudeMax', 'ekgSpeedBase', 'ekgSpeedMax',
   'barTrackColor', 'barFillColor', 'barFillFollow', 'barHeight',

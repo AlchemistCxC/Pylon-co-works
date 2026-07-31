@@ -44,7 +44,7 @@ export const ZONE_FIELDS: Record<string, (keyof ThemeSettings)[]> = {
     'ccStyle', 'ccVariant', 'ccLayout', 'ccHidden', 'ccScale',
     'inputBg', 'inputBgImage', 'inputTextColor', 'inputPlaceholder',
     'inputSendBg', 'inputFocusBorder', 'inputFontSize', 'inputMinHeight',
-    'inputMode', 'cliLineWidth', 'cliLineColor', 'cliTextColor', 'cliPromptColor', 'cliLinePadding', 'cliContentOffsetY', 'cliHintMode', 'footerLayout', 'cliOverflowMode',
+    'inputMode', 'inputVariant', 'inputShowPlaceholder', 'inputShowHistoryHint', 'inputSubmitButtonMode', 'cliLineWidth', 'cliLineColor', 'cliTextColor', 'cliPromptColor', 'cliLinePadding', 'cliContentOffsetY', 'cliHintMode', 'footerLayout', 'cliOverflowMode',
     'statusBg', 'statusBgImage',
     'ekgWidth', 'ekgFontSize',
     'ekgGreen', 'ekgYellow', 'ekgRed',

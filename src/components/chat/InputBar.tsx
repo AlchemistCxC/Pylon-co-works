@@ -44,6 +44,10 @@ export default forwardRef<{ send: () => void; attachFile: () => void; cancel: ()
   const sessions = useStore(s => s.sessions)
   const addSession = useStore(s => s.addSession)
   const inputMode = useStore(s => s.inputMode)
+  const inputVariant = useStore(s => s.inputVariant || (s.inputMode === 'cli' ? 'cli' : 'composer'))
+  const showPlaceholder = useStore(s => s.inputShowPlaceholder !== false)
+  const showHistoryHint = useStore(s => s.inputShowHistoryHint !== false)
+  const submitButtonMode = useStore(s => s.inputSubmitButtonMode || 'inline')
   const cliOverflowMode = useStore(s => s.cliOverflowMode || 'fixed-scroll')
   const sessionSource = useStore(s => resolveSessionSource(sessionId, s.sessions))
   const liveCommands = useStore(state => sessionSource
@@ -94,7 +98,7 @@ export default forwardRef<{ send: () => void; attachFile: () => void; cancel: ()
     const textarea = textareaRef.current
     if (!textarea) return
     textarea.style.height = 'auto'
-    if (inputMode !== 'cli') {
+    if (inputVariant !== 'cli') {
       textarea.style.height = `${resolveDefaultTextareaHeight(textarea.scrollHeight)}px`
       textarea.style.overflowY = textarea.scrollHeight > 200 ? 'auto' : 'hidden'
       return
@@ -103,7 +107,7 @@ export default forwardRef<{ send: () => void; attachFile: () => void; cancel: ()
     textarea.style.height = `${layout.height}px`
     textarea.style.overflowY = layout.overflowY
     textarea.dataset.expanded = String(layout.expanded)
-  }, [value, inputMode, cliOverflowMode])
+  }, [value, inputVariant, cliOverflowMode])
 
   useEffect(() => {
     const onModelError = (event: Event) => {
@@ -350,7 +354,8 @@ export default forwardRef<{ send: () => void; attachFile: () => void; cancel: ()
   }
 
   return (
-    <div className={`input-bar ${inputMode === 'cli' ? 'cli-mode' : ''} cli-overflow-${cliOverflowMode}`}>
+    <div className={`input-bar input-variant-${inputVariant} ${inputVariant === 'cli' ? 'cli-mode' : ''} cli-overflow-${cliOverflowMode}`}>
+      {inputVariant === 'command' && <div className="input-command-kicker">COMMAND</div>}
       {sendError && <div className="input-error">{sendError}</div>}
       {attached.length > 0 && (
         <div className="attached-files">
@@ -372,7 +377,7 @@ export default forwardRef<{ send: () => void; attachFile: () => void; cancel: ()
           ))}
         </div>
       )}
-      {historyIndex >= 0 && historyLength > 0 && (
+      {showHistoryHint && historyIndex >= 0 && historyLength > 0 && (
         <div className="input-history-hint" aria-live="polite">
           历史记录 {historyIndex + 1}/{historyLength} · ↑/↓ 浏览 · Esc 返回草稿
         </div>
@@ -407,8 +412,8 @@ export default forwardRef<{ send: () => void; attachFile: () => void; cancel: ()
         </div>
       )}
       <div className="input-row">
-        {inputMode === 'cli' && <span className="cli-prefix">❯</span>}
-        {!split && (
+        {inputVariant === 'cli' && <span className="cli-prefix">❯</span>}
+        {inputVariant !== 'cli' && !split && (
           <button className="input-btn attach" onClick={attachFile} title="Attach file (Ctrl+O)">
             <Paperclip size={16} />
           </button>
@@ -421,9 +426,9 @@ export default forwardRef<{ send: () => void; attachFile: () => void; cancel: ()
           }}
           onKeyDown={onKey}
           aria-describedby={ariaDescribedBy}
-          placeholder={inputMode === 'cli' ? '' : '输入消息...（Enter 发送，Shift+Enter 换行，/ 命令）'}
+          placeholder={showPlaceholder ? (inputVariant === 'cli' ? '' : inputVariant === 'command' ? '/ 命令或消息…' : '输入消息...（Enter 发送，Shift+Enter 换行，/ 命令）') : ''}
           rows={1} />
-        {!split && (
+        {inputVariant !== 'cli' && !split && submitButtonMode !== 'hidden' && (
           <button className={`input-btn ${generating ? 'stop' : 'send'}`} onClick={generating ? cancel : send}
             title={generating ? '停止生成 (Esc / Ctrl+C)' : 'Send (Enter)'} aria-label={generating ? '停止生成' : '发送'}>
             {generating ? <Square size={16} /> : <ArrowUp size={18} />}
