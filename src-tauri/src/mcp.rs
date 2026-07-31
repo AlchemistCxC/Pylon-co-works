@@ -1,7 +1,17 @@
 //! MCP server 配置的后端校验与 ACP 请求序列化。
+//!
+//! 序列化统一走官方 agent-client-protocol-schema v1 的 McpServer 类型
+//! （tagged：http/sse 带 type，stdio untagged）——与 ACP 同源，wire 格式
+//! 由 schema 保证。差异字典见 acp.rs「差异适配表」：Hermes 要求 name 必填，
+//! Peri DefaultOnError 容忍但 name 缺失会被跳过；统一补 name（name→id 兜底）
+//! 两边兼容。注意：官方 schema 无 oauth 字段，OAuthConfig 仅作前端表单
+//! 校验保留，不序列化进 wire。
 
+use agent_client_protocol_schema::v1::{
+    EnvVariable, HttpHeader, McpServer, McpServerHttp, McpServerSse, McpServerStdio,
+};
 use serde::{Deserialize, Serialize};
-use serde_json::{Map, Value};
+use serde_json::Value;
 use std::collections::HashMap;
 
 pub const MAX_SERVERS: usize = 32;
@@ -72,30 +82,47 @@ pub fn validate_and_serialize(input: Option<Vec<McpServerConfig>>) -> Result<Vec
         for arg in &server.args { validate_text("arg", arg)?; }
         validate_map("env", &server.env)?;
         validate_map("header", &server.headers)?;
-        let mut result = Map::new();
-        match transport.as_str() {
+        // name 必填（Hermes 严格；Peri 缺失会被 DefaultOnError 跳过）——name→id 兜底
+        let name = server.name.clone()
+            .or_else(|| server.id.clone())
+            .filter(|n| !n.trim().is_empty())
+            .ok_or_else(|| "MCP server requires name or id".to_string())?;
+        validate_text("name", &name)?;
+        let value = match transport.as_str() {
             "stdio" => {
                 let command = server.command.ok_or_else(|| "stdio MCP server requires command".to_string())?;
                 validate_text("command", &command)?;
-                result.insert("command".into(), Value::String(command));
-                result.insert("args".into(), Value::Array(server.args.into_iter().map(Value::String).collect()));
-                if !server.env.is_empty() { result.insert("env".into(), map_strings(server.env)); }
+                serde_json::to_value(McpServer::Stdio(
+                    McpServerStdio::new(name, command)
+                        .args(server.args)
+                        .env(env_variables(server.env)),
+                )).map_err(|e| format!("serialize MCP stdio server: {e}"))?
             }
             "sse" | "streamable-http" | "http" => {
                 let url = server.url.ok_or_else(|| "HTTP MCP server requires url".to_string())?;
                 let parsed = url::Url::parse(&url).map_err(|_| "invalid MCP URL".to_string())?;
                 if !matches!(parsed.scheme(), "http" | "https") { return Err("MCP URL must use http or https".into()); }
-                result.insert("url".into(), Value::String(url));
-                if !server.headers.is_empty() { result.insert("headers".into(), map_strings(server.headers)); }
-                if let Some(oauth) = server.oauth {
-                    validate_oauth(&oauth)?;
-                    result.insert("oauth".into(), serde_json::to_value(oauth).map_err(|e| e.to_string())?);
+                let headers = http_headers(server.headers);
+                if transport == "sse" {
+                    serde_json::to_value(McpServer::Sse(McpServerSse::new(name, url).headers(headers)))
+                        .map_err(|e| format!("serialize MCP sse server: {e}"))?
+                } else {
+                    serde_json::to_value(McpServer::Http(McpServerHttp::new(name, url).headers(headers)))
+                        .map_err(|e| format!("serialize MCP http server: {e}"))?
                 }
             }
             _ => unreachable!(),
-        }
-        Ok(Value::Object(result))
+        };
+        Ok(value)
     }).collect()
+}
+
+fn env_variables(env: HashMap<String, String>) -> Vec<EnvVariable> {
+    env.into_iter().map(|(name, value)| EnvVariable::new(name, value)).collect()
+}
+
+fn http_headers(headers: HashMap<String, String>) -> Vec<HttpHeader> {
+    headers.into_iter().map(|(name, value)| HttpHeader::new(name, value)).collect()
 }
 
 fn validate_text(field: &str, value: &str) -> Result<(), String> {
@@ -105,24 +132,10 @@ fn validate_text(field: &str, value: &str) -> Result<(), String> {
     Ok(())
 }
 
-fn map_strings(values: HashMap<String, String>) -> Value {
-    Value::Object(values.into_iter().map(|(key, value)| (key, Value::String(value))).collect())
-}
-
 fn validate_map(field: &str, values: &HashMap<String, String>) -> Result<(), String> {
     for (key, value) in values {
         validate_text(&format!("{field} key"), key)?;
         validate_text(field, value)?;
-    }
-    Ok(())
-}
-
-fn validate_oauth(oauth: &OAuthConfig) -> Result<(), String> {
-    if let Some(value) = &oauth.client_id { validate_text("oauth client_id", value)?; }
-    if let Some(value) = &oauth.client_secret { validate_text("oauth client_secret", value)?; }
-    if let Some(scopes) = &oauth.scopes {
-        if scopes.len() > MAX_ARGS { return Err(format!("too many OAuth scopes: maximum is {MAX_ARGS}")); }
-        for scope in scopes { validate_text("oauth scope", scope)?; }
     }
     Ok(())
 }
@@ -176,12 +189,19 @@ mod tests {
     }
 
     #[test]
-    fn allows_unnamed_servers_without_identity_collision() {
+    fn unnamed_servers_are_rejected() {
+        // 官方 McpServer 要求 name（Hermes 严格必填；Peri 缺失被 DefaultOnError 跳过）
         let mut first = stdio(true);
         first.id = None;
-        let mut second = stdio(true);
-        second.id = None;
-        assert!(validate_and_serialize(Some(vec![first, second])).is_ok());
+        first.name = None;
+        assert!(validate_and_serialize(Some(vec![first])).is_err());
+    }
+
+    #[test]
+    fn name_falls_back_to_id() {
+        // stdio() 构造 id=Some("demo") name=None → name 用 id 兜底
+        let values = validate_and_serialize(Some(vec![stdio(true)])).unwrap();
+        assert_eq!(values[0]["name"], "demo");
     }
 
     #[test]
@@ -196,7 +216,8 @@ mod tests {
     }
 
     #[test]
-    fn validates_oauth_fields_without_redacting_wire_secret() {
+    fn oauth_config_is_validated_but_not_serialized_to_wire() {
+        // 官方 schema 无 oauth 字段——OAuthConfig 仅前端表单使用，不进 wire
         let mut server = stdio(true);
         server.transport = "http".into();
         server.command = None;
@@ -207,7 +228,8 @@ mod tests {
             client_secret: Some("secret".into()),
             scopes: Some(vec!["read".into()]),
         });
-        let value = validate_and_serialize(Some(vec![server])).expect("valid OAuth config");
-        assert_eq!(value[0]["oauth"]["clientSecret"], "secret");
+        let value = validate_and_serialize(Some(vec![server])).expect("valid HTTP server");
+        assert_eq!(value[0]["type"], "http");
+        assert!(value[0].get("oauth").is_none(), "oauth must not reach the wire");
     }
 }
