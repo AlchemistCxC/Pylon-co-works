@@ -19,12 +19,21 @@ export default function ToolConnector({ status, visualState = 'unknown' }: {
   const toolOk = useStore(s => s.toolOk)
   const toolRun = useStore(s => s.toolRun)
   const toolErr = useStore(s => s.toolErr)
+  const connectorStyle = useStore(s => s.toolConnectorStyle)
+  const connectorWidth = useStore(s => s.toolConnectorWidth)
+  const connectorOpacity = useStore(s => s.toolConnectorOpacity)
   const color = resolveConnectorColor(connectorMode, status, { toolOk, toolRun, toolErr }, connectorColor)
+  const style: React.CSSProperties = {
+    background: color,
+    ['--tool-connector-color' as never]: color,
+    ['--tool-connector-width' as never]: `${Math.max(1, Math.min(6, connectorWidth || 2))}px`,
+    ['--tool-connector-opacity' as never]: Math.max(0.1, Math.min(1, connectorOpacity ?? 1)),
+  }
   return (
     <div
-      className={`term-tool-connector ${toolConnectorMotionClass(visualState)}`}
+      className={`term-tool-connector term-tool-connector-style--${connectorStyle || 'solid'} ${toolConnectorMotionClass(visualState)}`}
       data-tool-state={visualState}
-      style={{ background: color }}
+      style={style}
     />
   )
 }

@@ -65,6 +65,9 @@ function PreviewApp({ zone }: { zone: string }) {
   const rightBlur = useStore(s => s.rightBlur)
   const connectorMode = useStore(s => s.toolConnectorMode) || 'none'
   const connectorColor = useStore(s => s.toolConnectorColor) || 'rgba(0,0,0,0.12)'
+  const connectorStyle = useStore(s => s.toolConnectorStyle)
+  const connectorWidth = useStore(s => s.toolConnectorWidth)
+  const connectorOpacity = useStore(s => s.toolConnectorOpacity)
   const toolOk = useStore(s => s.toolOk)
   const toolRun = useStore(s => s.toolRun)
   const toolErr = useStore(s => s.toolErr)
@@ -122,10 +125,14 @@ function PreviewApp({ zone }: { zone: string }) {
                   const connectorStatus = previous?.status
                   return (
                     <div
-                      className="pv-tool-row"
+                      className={`pv-tool-row pv-tool-connector-style--${connectorStyle || 'solid'}`}
                       key={tl.name}
                       data-has-connector={connectorStatus ? 'true' : undefined}
-                      style={{ '--pv-connector-color': connectorStatus ? previewConnectorColor(connectorStatus) : 'transparent' } as React.CSSProperties}
+                      style={{
+                        '--pv-connector-color': connectorStatus ? previewConnectorColor(connectorStatus) : 'transparent',
+                        '--pv-connector-width': `${Math.max(1, Math.min(6, connectorWidth || 2))}px`,
+                        '--pv-connector-opacity': Math.max(0.1, Math.min(1, connectorOpacity ?? 1)),
+                      } as React.CSSProperties}
                     >
                       <div className="term-row term-row-tool"><PvTool {...tl} /></div>
                     </div>

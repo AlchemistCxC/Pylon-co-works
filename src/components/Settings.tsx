@@ -439,6 +439,9 @@ export default function Settings({ onClose, activeSessionId }: { onClose?: () =>
                 <Row label="辉光"><Slider value={t.toolIndicatorGlow} onChange={v=>onSettingChange({toolIndicatorGlow:v})} min={0} max={20} step={1}/><span className="set-val">{t.toolIndicatorGlow}px</span></Row>
                 <Row label="辉光色"><ColorPopover value={t.toolIndicatorGlowColor} onChange={v=>onSettingChange({toolIndicatorGlowColor:v})}/></Row>
                 <Row label="连接线"><Sel value={t.toolConnectorMode} onChange={v=>onSettingChange({toolConnectorMode:v})} options={['none','fixed','follow']}/></Row>
+                <Row label="线样式"><Sel value={t.toolConnectorStyle} onChange={v=>onSettingChange({toolConnectorStyle:v as ThemeSettings['toolConnectorStyle']})} options={['solid','dotted','pulse']}/></Row>
+                <Row label="线宽"><Num value={t.toolConnectorWidth} onChange={v=>onSettingChange({toolConnectorWidth:Math.max(1, Math.min(6, v))})} min={1} max={6}/><span className="set-val">px</span></Row>
+                <Row label="线透明度"><Slider value={t.toolConnectorOpacity} onChange={v=>onSettingChange({toolConnectorOpacity:v})} min={0.1} max={1} step={0.05}/><span className="set-val">{Math.round(t.toolConnectorOpacity*100)}%</span></Row>
                 {t.toolConnectorMode==='fixed' && <Row label="线色"><ColorPopover value={t.toolConnectorColor} onChange={v=>onSettingChange({toolConnectorColor:v})}/></Row>}
               </Group>
               <Group title="Spinner">

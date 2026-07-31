@@ -13,7 +13,7 @@ const THEME_SETTINGS_KEYS: readonly (keyof ThemeSettings)[] = [
   'sidebarBg', 'sidebarBgImage', 'sidebarWidth', 'sidebarTextColor', 'sidebarNameSize', 'sidebarGroupSize',
   'chatBg', 'chatBgImage', 'chatFont', 'chatFontSize', 'chatLineHeight', 'chatTextColor', 'chatCodeColor', 'chatCodeBg',
   'toolOk', 'toolRun', 'toolErr', 'toolNameColor', 'toolSummaryColor', 'userTagBg', 'userTagText',
-  'toolIndicatorGlow', 'toolIndicatorGlowColor', 'toolConnectorMode', 'toolConnectorColor',
+  'toolIndicatorGlow', 'toolIndicatorGlowColor', 'toolConnectorMode', 'toolConnectorColor', 'toolConnectorStyle', 'toolConnectorWidth', 'toolConnectorOpacity',
   'inputBg', 'inputBgImage', 'inputTextColor', 'inputPlaceholder', 'inputSendBg', 'inputFocusBorder', 'inputFontSize', 'inputMinHeight',
   'inputMode', 'cliLineWidth', 'cliLineColor', 'cliTextColor', 'cliPromptColor', 'cliLinePadding', 'cliContentOffsetY', 'cliHintMode',
   'statusBg', 'statusBgImage', 'ekgWidth', 'ekgFontSize', 'ekgGreen', 'ekgYellow', 'ekgRed', 'pillBg', 'pillText', 'prismOnColor',

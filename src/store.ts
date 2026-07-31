@@ -35,6 +35,7 @@ export interface ThemeSettings {
   toolOk: string; toolRun: string; toolErr: string; toolNameColor: string; toolSummaryColor: string; userTagBg: string; userTagText: string
   toolIndicatorGlow: number; toolIndicatorGlowColor: string
   toolConnectorMode: string; toolConnectorColor: string
+  toolConnectorStyle: 'solid' | 'dotted' | 'pulse'; toolConnectorWidth: number; toolConnectorOpacity: number
   inputBg: string; inputBgImage: string; inputTextColor: string; inputPlaceholder: string; inputSendBg: string; inputFocusBorder: string; inputFontSize: number; inputMinHeight: number
   inputMode: string; cliLineWidth: number; cliLineColor: string; cliTextColor: string; cliPromptColor: string; cliLinePadding: number; cliContentOffsetY: number
   cliHintMode: 'hidden' | 'compact' | 'full'
@@ -46,9 +47,9 @@ export interface ThemeSettings {
   sidebarTransparency: number; sidebarBlur: number; chatTransparency: number; chatBlur: number; rightTransparency: number; rightBlur: number
   userName: string; userPrefix: string; userColor: string
   toolIndicator: string; sparkles: string
-  spinnerFramePreset: 'sparkles' | 'ascii-line' | 'braille' | 'dots' | 'custom'
+  spinnerFramePreset: 'sparkles' | 'ascii-line' | 'braille' | 'dots' | 'orbit' | 'clock' | 'wave' | 'blocks' | 'scan' | 'custom'
   spinnerCustomFrames: string
-  spinnerVerbSet: 'zh' | 'en' | 'custom'
+  spinnerVerbSet: 'zh' | 'en' | 'analysis' | 'engineering' | 'custom'
   spinnerCustomVerbs: string
   spinnerDoneMarker: string
   spinnerCancelledMarker: string
@@ -151,6 +152,7 @@ export const DEFAULTS: ThemeSettings = {
   toolOk: '#4EBA65', toolRun: '#93A5FF', toolErr: '#FF6B80', toolNameColor: 'rgba(0,0,0,0.85)', toolSummaryColor: 'rgba(0,0,0,0.40)', userTagBg: 'rgba(168,85,247,0.08)', userTagText: '#a855f7',
   toolIndicatorGlow: 0, toolIndicatorGlowColor: '',
   toolConnectorMode: 'none', toolConnectorColor: 'rgba(0,0,0,0.12)',
+  toolConnectorStyle: 'solid', toolConnectorWidth: 2, toolConnectorOpacity: 1,
   inputBg: 'rgba(0,0,0,0.02)', inputBgImage: '', inputTextColor: 'rgba(0,0,0,0.85)', inputPlaceholder: 'rgba(0,0,0,0.28)', inputSendBg: 'rgba(0,0,0,0.10)', inputFocusBorder: 'rgba(0,0,0,0.22)', inputFontSize: 17, inputMinHeight: 56,
   inputMode: 'cli', cliLineWidth: 2, cliLineColor: '', cliTextColor: '', cliPromptColor: '', cliLinePadding: 6, cliContentOffsetY: 0,
   cliHintMode: 'full',
@@ -504,11 +506,21 @@ export const useStore = create<ThemeState>()(persist(
   state.spinnerFramePreset = state.spinnerFramePreset === 'ascii-line'
     || state.spinnerFramePreset === 'braille'
     || state.spinnerFramePreset === 'dots'
+    || state.spinnerFramePreset === 'orbit'
+    || state.spinnerFramePreset === 'clock'
+    || state.spinnerFramePreset === 'wave'
+    || state.spinnerFramePreset === 'blocks'
+    || state.spinnerFramePreset === 'scan'
     || state.spinnerFramePreset === 'custom'
     ? state.spinnerFramePreset
     : 'sparkles'
   state.spinnerCustomFrames = typeof state.spinnerCustomFrames === 'string' ? state.spinnerCustomFrames : ''
-  state.spinnerVerbSet = state.spinnerVerbSet === 'en' || state.spinnerVerbSet === 'custom' ? state.spinnerVerbSet : 'zh'
+  state.spinnerVerbSet = state.spinnerVerbSet === 'en'
+    || state.spinnerVerbSet === 'analysis'
+    || state.spinnerVerbSet === 'engineering'
+    || state.spinnerVerbSet === 'custom'
+    ? state.spinnerVerbSet
+    : 'zh'
   state.spinnerCustomVerbs = typeof state.spinnerCustomVerbs === 'string' ? state.spinnerCustomVerbs : ''
   state.spinnerDoneMarker = typeof state.spinnerDoneMarker === 'string' ? state.spinnerDoneMarker : '✓'
   state.spinnerCancelledMarker = typeof state.spinnerCancelledMarker === 'string' ? state.spinnerCancelledMarker : '■'
