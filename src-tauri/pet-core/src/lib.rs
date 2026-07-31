@@ -284,13 +284,18 @@ impl PetState {
         saved
     }
 
-    /// v2：事件入口——先结算需求衰减（时间戳），再记录窗口事件、应用收益表。
+    /// v2：事件入口——先结算需求衰减（时间戳），再记录窗口事件、应用收益表、
+    /// 执行 HSM 转移（设计书 §5 T1-T8）。
     pub fn apply(&mut self, event: AiEvent, now_ms: u64) {
         self.settle(now_ms);
         self.visit(now_ms);
+        // T2：睡眠中任何事件（除 Sleepy 本身）→ 唤醒
+        if self.machine == PetMachineState::Asleep && !matches!(event, AiEvent::Sleepy) {
+            self.wake();
+        }
         match event {
             AiEvent::Visit => {
-                // 睡眠中被日常访问唤醒
+                // 睡眠中被日常访问唤醒（wake 已在开头执行）
                 if self.machine == PetMachineState::Asleep {
                     self.wake();
                 }
@@ -308,6 +313,8 @@ impl PetState {
                 self.msg = Some("它追着新的想法望了过去。".into());
             }
             AiEvent::FirstChunk => {
+                // T5：对话开始 → Interacting
+                self.machine = PetMachineState::Awake(MachineSub::Interacting);
                 if self.first_chunk_at_ms.is_none() {
                     self.first_chunk_at_ms = Some(now_ms);
                     self.mood = "curious".into();
@@ -315,6 +322,8 @@ impl PetState {
                 }
             }
             AiEvent::PromptCompleted => {
+                // T6：对话结束 → Idle
+                self.machine = PetMachineState::Awake(MachineSub::Idle);
                 self.first_chunk_at_ms = None;
                 self.stats.prompts_completed = self.stats.prompts_completed.saturating_add(1);
                 self.gain_xp(3);
@@ -333,6 +342,8 @@ impl PetState {
                 self.msg = Some("它把这次完成收进了身体。".into());
             }
             AiEvent::PromptFailed => {
+                // T6：对话结束（失败）→ Idle
+                self.machine = PetMachineState::Awake(MachineSub::Idle);
                 self.first_chunk_at_ms = None;
                 self.stats.prompts_failed = self.stats.prompts_failed.saturating_add(1);
                 self.happiness = self.happiness.saturating_sub(3);
@@ -385,6 +396,8 @@ impl PetState {
                 self.msg = Some("它蜷成一小团等待。".into());
             }
             AiEvent::AgentConnected => {
+                // T4：连接恢复 → Idle
+                self.machine = PetMachineState::Awake(MachineSub::Idle);
                 self.mood = "excited".into();
                 self.gain_bond(1);
                 self.happiness = (self.happiness as u16 + 1).min(100) as u8;
@@ -392,10 +405,21 @@ impl PetState {
                 self.msg = Some("连接亮起，它精神地站了起来。".into());
             }
             AiEvent::AgentCrashed => {
+                // T3：崩溃 → Distress
+                self.machine = PetMachineState::Awake(MachineSub::Distress);
                 self.mood = "error".into();
                 self.happiness = self.happiness.saturating_sub(2);
                 self.push_event(RecentEvent::Crashed);
                 self.msg = Some("连接断了，它吓得缩了一下。".into());
+            }
+        }
+        // T1/T8 睡眠检查：energy 耗尽（≤15 且 30s 无互动，或直接归零）→ 入睡
+        if self.machine != PetMachineState::Asleep {
+            let idle_for = now_ms.saturating_sub(self.last_interaction_at_ms);
+            if self.energy <= 15 && (idle_for >= 30_000 || self.energy == 0) {
+                self.machine = PetMachineState::Asleep;
+                self.mood = "sleepy".into();
+                self.msg = Some("它蜷成一小团等待。".into());
             }
         }
     }

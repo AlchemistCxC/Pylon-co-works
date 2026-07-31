@@ -190,3 +190,43 @@ fn recent_events_window_is_ring_buffered() {
     }
     assert!(pet.recent_events.len() <= 8, "感知窗口环形 8");
 }
+
+// ── M2：HSM 状态机（设计书 §5）──
+
+#[test]
+fn conversation_drives_interacting_idle_transitions() {
+    let mut pet = PetState::new_at(1);
+    pet.apply(AiEvent::FirstChunk, 1);
+    assert_eq!(pet.machine, pylon_pet_core::PetMachineState::Awake(pylon_pet_core::MachineSub::Interacting));
+    pet.apply(AiEvent::PromptCompleted, 2);
+    assert_eq!(pet.machine, pylon_pet_core::PetMachineState::Awake(pylon_pet_core::MachineSub::Idle));
+}
+
+#[test]
+fn crash_and_reconnect_drive_distress_transitions() {
+    let mut pet = PetState::new_at(1);
+    pet.apply(AiEvent::AgentCrashed, 1);
+    assert_eq!(pet.machine, pylon_pet_core::PetMachineState::Awake(pylon_pet_core::MachineSub::Distress));
+    pet.apply(AiEvent::AgentConnected, 2);
+    assert_eq!(pet.machine, pylon_pet_core::PetMachineState::Awake(pylon_pet_core::MachineSub::Idle));
+}
+
+#[test]
+fn exhausted_pet_falls_asleep_and_recovers_energy() {
+    let mut pet = PetState::new_at(1);
+    pet.energy = 14; // ≤15
+    pet.apply(AiEvent::Visit, 31_000); // 30s 无互动
+    assert_eq!(pet.machine, pylon_pet_core::PetMachineState::Asleep);
+    assert_eq!(pet.mood, "sleepy");
+    // 睡眠中 30 分钟：energy +60 恢复；随后任何互动唤醒（wake 再 +30）
+    pet.apply(AiEvent::Visit, 31_000 + 1_800_000);
+    assert_eq!(pet.machine, pylon_pet_core::PetMachineState::Awake(pylon_pet_core::MachineSub::Idle), "Visit 唤醒睡眠中的宠物");
+    assert_eq!(pet.energy, 100, "睡眠恢复 60 + 唤醒加成 30 = 100（封顶）");
+}
+
+#[test]
+fn force_sleep_when_energy_hits_zero() {
+    let mut pet = PetState::new_at(1);
+    pet.apply(AiEvent::Visit, 3 * 3_600_000); // 3h 后 energy 掉到 0
+    assert_eq!(pet.machine, pylon_pet_core::PetMachineState::Asleep, "energy=0 必须强制入睡");
+}
