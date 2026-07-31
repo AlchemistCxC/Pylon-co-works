@@ -11,6 +11,7 @@ import { resolveSessionSource } from './sessionCommandState'
 import { resolveSessionProfile } from './sessionProfile'
 import { beginCancel, createCancelState, rejectCancelCommand, resolveCancelCommand, type CancelState } from './cancelState'
 import { reportRuntimeError } from '../../runtimeError'
+import { stripHiddenUnicode } from '../../utils/unicodeSanitizer'
 import { Paperclip, ArrowUp, Square, Pencil, Send, Trash2 } from 'lucide-react'
 import type { AvailableCommand } from './acpTypes'
 import { resolveCliTextareaLayout, resolveDefaultTextareaHeight } from './inputOverflowState'
@@ -241,7 +242,7 @@ export default forwardRef<{ send: () => void; attachFile: () => void; cancel: ()
     await runSendTransaction({
       send: () => invoke('send_message', buildSendMessagePayload({
         session: s,
-        content: text,
+        content: stripHiddenUnicode(text),
         persona,
         attachments: attached.map(file => file.path),
       })),

@@ -148,8 +148,13 @@ export default function PetCompanion({ rightInset = 0 }: { rightInset?: number }
   const generating = useStore(s => (s.liveGeneratingSources || []).length > 0)
 
   const save = useCallback((next: PetState) => {
-    setPet(next)
-    localStorage.setItem(STORAGE_KEY, JSON.stringify(persistable(next)))
+    // 数据无变化时不产生新 state（参考 CC hooks/useMemoryUsage 的 normal 不 setState 模式）
+    const serialized = JSON.stringify(persistable(next))
+    setPet(previous => {
+      if (previous && JSON.stringify(persistable(previous)) === serialized) return previous
+      return next
+    })
+    localStorage.setItem(STORAGE_KEY, serialized)
   }, [])
 
   useEffect(() => {

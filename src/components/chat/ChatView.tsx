@@ -18,7 +18,7 @@ import { reportRuntimeError } from '../../runtimeError'
 import { applyCancelEvent, beginCancel, createCancelState, rejectCancelCommand, resolveCancelCommand, type CancelState } from './cancelState'
 import { clearChatSourceRefs } from './sessionCleanup'
 import { measureRender, recordMeasuredAsync, recordRender } from './renderMetrics'
-import { prepareRenderableMessages } from './messagePipeline'
+import { prepareRenderableMessages, isMessageStatic } from './messagePipeline'
 import type { Message as PipelineMessage, RenderMessage } from './messageTypes'
 import { buildMessageLookups } from './messageLookups'
 import { getToolSummary } from './toolPresentation'
@@ -369,6 +369,7 @@ const ChatView = React.memo(function ChatView({ sessionId }: Props) {
                 key={renderMessage.message.id}
                 renderMessage={renderMessage}
                 reduceMotion={reduceMotion === true}
+                isStatic={isMessageStatic(renderMessage)}
                 toolVisualState={resolveRowToolVisualState(renderMessage.message, messageLookups)}
                 rowRef={node => {
                   if (node) messageRefs.current.set(renderMessage.message.id, node)
@@ -423,20 +424,21 @@ const ChatView = React.memo(function ChatView({ sessionId }: Props) {
 // ── Sub-components ──
 
 
-function MessageRow({ renderMessage, reduceMotion, toolVisualState, rowRef, highlighted }: { renderMessage: RenderMessage; reduceMotion: boolean; toolVisualState?: string; rowRef?: (node: HTMLDivElement | null) => void; highlighted?: boolean }) {
+function MessageRow({ renderMessage, reduceMotion, toolVisualState, rowRef, highlighted, isStatic }: { renderMessage: RenderMessage; reduceMotion: boolean; toolVisualState?: string; rowRef?: (node: HTMLDivElement | null) => void; highlighted?: boolean; isStatic?: boolean }) {
   recordRender('MessageRow.render')
   const msg = renderMessage.message
   const toolModel = msg.role === 'tool'
     ? buildToolPresentationModel(msg, toolVisualState ? normalizeToolStatus(toolVisualState) : undefined)
     : undefined
   const renderType = renderMessage.type
+  const skipEntrance = reduceMotion || isStatic === true
   return (
     <MessageRenderBoundary message={msg}>
       <motion.div
       ref={rowRef}
       className={`term-row term-row-${msg.role}${highlighted ? ' term-row-search-active' : ''}`}
       data-render-type={renderType}
-      initial={reduceMotion ? false : { opacity: 0, y: 8 }}
+      initial={skipEntrance ? false : { opacity: 0, y: 8 }}
       animate={{ opacity: 1, y: 0 }}
       transition={reduceMotion ? { duration: 0 } : { duration: 0.25, ease: [0.2, 0, 0, 1] }}
     >
@@ -453,14 +455,15 @@ function MessageRow({ renderMessage, reduceMotion, toolVisualState, rowRef, high
 }
 
 function areMessageRowPropsEqual(
-  previous: { renderMessage: RenderMessage; reduceMotion: boolean; toolVisualState?: string; rowRef?: (node: HTMLDivElement | null) => void; highlighted?: boolean },
-  next: { renderMessage: RenderMessage; reduceMotion: boolean; toolVisualState?: string; rowRef?: (node: HTMLDivElement | null) => void; highlighted?: boolean },
+  previous: { renderMessage: RenderMessage; reduceMotion: boolean; toolVisualState?: string; rowRef?: (node: HTMLDivElement | null) => void; highlighted?: boolean; isStatic?: boolean },
+  next: { renderMessage: RenderMessage; reduceMotion: boolean; toolVisualState?: string; rowRef?: (node: HTMLDivElement | null) => void; highlighted?: boolean; isStatic?: boolean },
 ): boolean {
   if (previous.renderMessage.message !== next.renderMessage.message) return false
   if (previous.renderMessage.type !== next.renderMessage.type) return false
   if (previous.reduceMotion !== next.reduceMotion) return false
   if (previous.toolVisualState !== next.toolVisualState) return false
   if (previous.highlighted !== next.highlighted) return false
+  if (previous.isStatic !== next.isStatic) return false
   if (previous.renderMessage.message.running || next.renderMessage.message.running) return false
   if (previous.renderMessage.message.role === 'tool' || next.renderMessage.message.role === 'tool') {
     if (previous.renderMessage.message.toolStatus !== next.renderMessage.message.toolStatus) return false

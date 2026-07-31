@@ -92,6 +92,8 @@ assert.equal(fallback.hasOutput, false)
 assert.equal(toolPresentationStatus(fallback), 'run')
 
 assert.equal(truncateToolSummary('short'), 'short')
-assert.equal(truncateToolSummary('abcdefgh', 6), 'abc...')
+assert.equal(truncateToolSummary('abcdefgh', 6), 'abcde…')
+assert.equal(truncateToolSummary('中文摘要内容', 6), '中文…')
+assert.equal(truncateToolSummary('✅完成状态', 5), '✅完…')
 
 console.log('ToolPresentationModel 回归测试通过')

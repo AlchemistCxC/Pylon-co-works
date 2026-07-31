@@ -1,5 +1,6 @@
 import type { Message } from './messageTypes.ts'
 import { normalizeToolStatus, type ToolVisualState } from './toolStatus.ts'
+import { truncateToWidth } from '../../utils/textWidth.ts'
 
 export interface ToolPresentationModel {
   toolId: string | null
@@ -115,8 +116,7 @@ export function toolPresentationStatus(model: ToolPresentationModel): 'run' | 'o
 }
 
 export function truncateToolSummary(summary: string, maxLength = 60): string {
-  if (summary.length <= maxLength) return summary
-  return `${summary.slice(0, Math.max(0, maxLength - 3))}...`
+  return truncateToWidth(summary, maxLength)
 }
 
 export const TOOL_PRESENTATION_LIMITS = {

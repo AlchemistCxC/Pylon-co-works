@@ -3,6 +3,7 @@ import { Square } from 'lucide-react'
 import { frameAt, resolveSpinnerMarker } from './spinnerFrames'
 import { normalizeSpinnerVerbs } from './spinnerVerbs'
 import { useStore } from '../../store'
+import { useMinDisplayTime } from './useMinDisplayTime'
 
 const IDIOMS = [
   '格物致知','见微知著','大道至简','慎思明辨','融会贯通','温故知新','举一反三',
@@ -74,18 +75,24 @@ export default function GenerationFooter({ running, frames, tokenCount, startTim
     return () => clearInterval(id)
   }, [running, spinnerIntervalMs])
 
+  const now = Date.now()
+  const idleMs = running && lastTokenAt ? Math.max(0, now - lastTokenAt) : running ? now - startTime : 0
+  const activity = idleMs > 10000 ? 'stalled' : idleMs > 3000 ? 'waiting' : 'active'
+  const tickIdx = Math.floor((now - startTime) / Math.max(40, Math.min(1000, spinnerIntervalMs || 120)))
+  const verb = !running ? '' : activity === 'active'
+    ? safeVerbs[Math.floor(tickIdx / 8) % safeVerbs.length]
+    : activity === 'waiting' ? '等待响应' : '仍在等待后端响应'
+  const displayVerb = useMinDisplayTime(verb, 1200)
+
   if (running) {
-    const elapsedMs = Date.now() - startTime
-    const idleMs = lastTokenAt ? Math.max(0, Date.now() - lastTokenAt) : elapsedMs
-    const activity = idleMs > 10000 ? 'stalled' : idleMs > 3000 ? 'waiting' : 'active'
-    const tickIdx = Math.floor(elapsedMs / Math.max(40, Math.min(1000, spinnerIntervalMs || 120)))
+    const elapsedMs = now - startTime
     const parts = [formatElapsed(elapsedMs)]
     if (tokenCount > 0) parts.push(`↓ ${formatTokens(tokenCount)} tokens`)
     return (
       <div className="term-spinner-row">
         <div className="term-spinner" data-activity={activity}>
           <span className="spinner-frame" style={{ color: spinnerColor || undefined, fontSize: `${spinnerSize}px` }}>{frameAt(frames, elapsedMs, spinnerIntervalMs)}</span>
-          <span className="spinner-verb">{activity === 'active' ? safeVerbs[Math.floor(tickIdx / 8) % safeVerbs.length] : activity === 'waiting' ? '等待响应' : '仍在等待后端响应'}</span>
+          <span className="spinner-verb">{displayVerb}</span>
           <span className="spinner-meta">({parts.join(' · ')})</span>
           {activity !== 'active' && <span className="spinner-activity" aria-live="polite">…</span>}
         </div>

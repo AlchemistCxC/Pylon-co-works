@@ -1418,6 +1418,8 @@ F5.9 包体懒加载（主 JS 943.64 → 843.30 kB / gzip 295.40 → 268.29 kB�
 F4.1 Agent 状态类型对齐后端（connecting/inactive + agentId/generation/lastConnectedAt）。
 F7.3 ccCliCustomized/ccPositions/ccLayoutVersion legacy 字段删除与迁移清理。
 F7.4 Settings/App/presets 类型收敛（as any 清除）。
+D1-D6 CC 机械变换（13.1）：消息静态化 / useMinDisplayTime / grapheme 截断 /
+  Pet normal 不 setState / useBlink 共享时钟 / 隐藏 Unicode 净化（降级方案）。
 ```
 
 ### 11.2 已完成：局部可见修正（不是 UI 重排）
@@ -1500,48 +1502,43 @@ git diff --check
 
 ### 13.1 机械变换（低风险，可直接开工）
 
-**D1. 消息静态化判定 `shouldRenderStatically`** — 机械变换 · 难度 1 · 建议顺序 1
+> 状态：D1-D6 已于 2026-07-31 落地（`test-cc-mechanical-adaptations.mts` 回归）。
+
+**D1. 消息静态化判定 `shouldRenderStatically`** — 机械变换 · 难度 1 · ✅ 已完成
 
 - CC 源码：`components/Messages.tsx:779` `shouldRenderStatically(message, streamingToolUseIDs, inProgressToolUseIDs, siblingToolUseIDs, screen, lookups)`；消费点 `components/MessageRow.tsx:155`
 - 摘要：transcript 模式恒 static；user/assistant 无 tool 关联恒 static；有 tool 关联时——streaming/in-progress/未决 PostToolUse hook 保持动态，兄弟 tool 全部 resolved 才 static；system `api_error` 恒动态（出现下一条非错误消息即隐藏）；collapsed_read_search 在 prompt 模式恒动态（防回合间闪烁）
-- 我们现状：`src/components/chat/ChatView.tsx` MessageRow 每条消息都走 `motion.div` initial/animate（ChatView.tsx:672-684），无静态化
-- 任务分解：① 纯函数 `isMessageStatic(renderMessage, messageLookups)` ② MessageRow 静态时跳过 motion 动画 ③ 专项测试
-- 收益：长会话历史消息零动画开销
+- 我们现状：已落地 `messagePipeline.ts::isMessageStatic`（保守子集：running/tool_call 动态，其余静态）；`ChatView.tsx` MessageRow 静态行跳过 motion 入场动画（`skipEntrance`）
 
-**D2. `useMinDisplayTime` 最小展示时长** — 机械变换 · 难度 1 · 顺序 2
+**D2. `useMinDisplayTime` 最小展示时长** — 机械变换 · 难度 1 · ✅ 已完成
 
 - CC 源码：`hooks/useMinDisplayTime.ts`（30 行全文）
 - 摘要：每个值至少展示 minMs；与 debounce（等安静）/throttle（限速）不同——elapsed >= minMs 直接更新，否则 setTimeout 补足剩余时长。用途示例：`components/messages/CollapsedReadSearchContent.tsx` 中 `ln(incomingHint, MIN_HINT_DISPLAY_MS)`
-- 我们现状：GenerationFooter stalled 文案（'等待响应'/'仍在等待后端响应'）切换无最小展示时长，快速 token 恢复时文案可能闪跳
-- 任务分解：① 移植 hook（TS 直译）② 接入 stalled 文案切换 ③ 测试
+- 我们现状：已移植 `src/components/chat/useMinDisplayTime.ts`；GenerationFooter stalled 文案接入（`useMinDisplayTime(verb, 1200)`，Hook 在组件顶层无条件调用）
 
-**D3. grapheme 宽度截断（Intl.Segmenter）** — 机械变换 · 难度 1 · 顺序 3
+**D3. grapheme 宽度截断（Intl.Segmenter）** — 机械变换 · 难度 1 · ✅ 已完成
 
 - CC 源码：`utils/truncate.ts:63` `truncateToWidth`/`:108` `truncateToWidthNoEllipsis`/`:82` `truncateStartToWidth`/`:16` `truncatePathMiddle`/`:160` `wrapText`；segmenter 懒初始化在 `utils/intl.ts`（`getGraphemeSegmenter`）
 - 摘要：按**显示列宽**而非字符数截断，用 Intl.Segmenter grapheme 边界迭代，不拆坏 emoji/CJK 组合字符
-- 我们现状：`src/components/chat/toolPresentationModel.ts:117` `truncateToolSummary(summary, maxLength = 60)` 按字符数 slice，会拆 emoji
-- 任务分解：① 移植 truncate.ts + intl.ts 懒初始化 ② `truncateToolSummary` 换用 ③ 测试（emoji/CJK/组合字符）
+- 我们现状：已移植 `src/utils/textWidth.ts`（零依赖：`graphemeWidth`/`stringWidth`/`truncateToWidth`/`truncateStartToWidth`，宽度区间含 CJK 全角与常用 emoji 区）；`truncateToolSummary` 换用（显示宽度语义）；tsconfig lib 升至 ES2022（Intl.Segmenter 类型）
 
-**D4. `useMemoryUsage` 模式：normal 态不 setState** — 机械变换 · 难度 1 · 顺序 4
+**D4. `useMemoryUsage` 模式：normal 态不 setState** — 机械变换 · 难度 1 · ✅ 已完成
 
 - CC 源码：`hooks/useMemoryUsage.ts`（`setMemoryUsage(prev => ...)`，`status === 'normal'` 时返回 prev 即 null，不触发重渲染）
 - 摘要：10s 轮询但状态无变化时不产生新 state，整树零重渲染
-- 我们现状：`src/components/PetCompanion.tsx` 每 12s `get_pet` 后无条件 setState（F8.2 的前置小步）
-- 任务分解：① Pet 轮询回调比对上次数据，无变化返回旧引用 ② 测试
+- 我们现状：已落地 `PetCompanion.tsx::save`——轮询数据持久化序列化相等时返回旧引用
 
-**D5. `useBlink` 共享动画时钟 + 失焦暂停** — 机械变换 · 难度 1 · 顺序 5
+**D5. `useBlink` 共享动画时钟 + 失焦暂停** — 机械变换 · 难度 1 · ✅ 已完成（备用件，无消费点）
 
 - CC 源码：`hooks/useBlink.ts`（`useAnimationFrame(enabled && focused ? intervalMs : null)`，所有实例从同一 time 派生 blink 状态 → 同步闪烁；失焦恒亮）
 - 摘要：动画实例共享时钟，多元素同步；不可见/失焦时暂停帧循环
-- 我们现状：无共享时钟动画（搜索命中高亮、闪烁类 UI 均为一次性）
-- 任务分解：① 移植 useAnimationFrame + useBlink ② 可先无消费点（备用件）
+- 我们现状：已移植 `src/components/chat/useBlink.ts`（Web 等价：模块级共享时钟 + 订阅者计数启停 + `document.hasFocus()`/visibilitychange；`blinkVisible` 纯逻辑可测）
 
-**D6. 隐藏 Unicode 净化** — 机械变换 · 难度 2 · 顺序 6
+**D6. 隐藏 Unicode 净化** — 机械变换 · 难度 2 · ✅ 已完成（降级方案）
 
 - CC 源码：`utils/sanitization.ts:25` `partiallySanitizeUnicode`（NFKC 迭代归一化 + `\p{Cf}\p{Co}\p{Cn}` 显式危险范围剥离双保险）、`:71` `recursivelySanitizeUnicode`（递归对象/数组）
 - 摘要：输入侧防隐藏控制字符/组合字符注入（prompt 注入与显示欺骗）
-- 我们现状：`src/components/chat/htmlSanitizer.ts` 只有输出侧（dangerouslySetInnerHTML）；输入侧无净化
-- 任务分解：① 移植纯函数 ② 接入用户输入/命令参数进入发送前净化 ③ 测试
+- 我们现状：已落地 `src/utils/unicodeSanitizer.ts`——**降级方案**（按用户决策）：只剥 `[\p{Cf}\p{Co}\p{Cn}]`，不做 NFKC（不改写正常输入）；`InputBar` 发送内容发送前净化；`recursivelyStripHiddenUnicode` 备用
 
 ### 13.2 工程设计（抽象/架构，中等风险）
 
@@ -1636,9 +1633,9 @@ git diff --check
 ### 13.5 施工优先级
 
 ```text
-近期（A 类机械，可随时开工，互相独立）：
+✅ 已完成（D1-D6 机械变换）：
   D1 消息静态化 → D2 useMinDisplayTime → D3 grapheme 截断 → D4 Pet normal 不 setState → D5 useBlink → D6 Unicode 净化
-中期（B 类工程设计，需小步拆）：
+近期（B 类工程设计，需小步拆）：
   E1 工具渲染注册表 → E2 keybinding 注册表 → E3 FileReadCache（需后端 mtime）
 UI 验收型（与对应功能卡一起做）：
   U1 Byline → U3 Dialog 确认 → U4 Ratchet → U5 错误分类
