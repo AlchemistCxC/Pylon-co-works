@@ -10,6 +10,7 @@ export type RenderMetricName =
   | 'scrollIntoView.call'
   | 'streamingText.render'
   | 'streamingThinking.render'
+  | 'markdown.parse'
 
 export interface RenderMetricSnapshot {
   counts: Record<RenderMetricName, number>
@@ -31,6 +32,7 @@ const METRIC_NAMES: RenderMetricName[] = [
   'scrollIntoView.call',
   'streamingText.render',
   'streamingThinking.render',
+  'markdown.parse',
 ]
 
 const enabled = import.meta.env.DEV

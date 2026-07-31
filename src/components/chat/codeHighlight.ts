@@ -31,20 +31,63 @@ const GRAMMAR_LOADERS: Record<string, () => Promise<{ default: Grammar }>> = {
 }
 
 const highlighters = new Map<string, Promise<Awaited<ReturnType<typeof createStarryNight>>>>()
+const highlightCache = new Map<string, string | null>()
+const highlightPending = new Map<string, Promise<string | null>>()
+const MAX_HIGHLIGHT_CACHE_ENTRIES = 128
+
+function cacheKey(language: string, code: string): string {
+  return `${language.toLowerCase()}\u0000${code}`
+}
+
+function cacheResult(key: string, value: string | null): string | null {
+  highlightCache.delete(key)
+  highlightCache.set(key, value)
+  while (highlightCache.size > MAX_HIGHLIGHT_CACHE_ENTRIES) {
+    const oldest = highlightCache.keys().next().value
+    if (oldest === undefined) break
+    highlightCache.delete(oldest)
+  }
+  return value
+}
 
 export function scopeForLanguage(language: string): string | undefined {
   return LANGUAGE_SCOPES[language.toLowerCase()]
 }
 
 export async function highlightCode(language: string, code: string): Promise<string | null> {
+  const key = cacheKey(language, code)
+  if (highlightCache.has(key)) {
+    const cached = highlightCache.get(key) ?? null
+    highlightCache.delete(key)
+    highlightCache.set(key, cached)
+    return cached
+  }
+  const pending = highlightPending.get(key)
+  if (pending) return pending
+
+  const result = highlightCodeUncached(language, code)
+  highlightPending.set(key, result)
+  try {
+    return await result
+  } finally {
+    highlightPending.delete(key)
+  }
+}
+
+async function highlightCodeUncached(language: string, code: string): Promise<string | null> {
   const scope = scopeForLanguage(language)
   const load = scope && GRAMMAR_LOADERS[scope]
-  if (!scope || !load) return null
+  if (!scope || !load) return cacheResult(cacheKey(language, code), null)
   let highlighter = highlighters.get(scope)
   if (!highlighter) {
     highlighter = load().then(({ default: grammar }) => createStarryNight([grammar]))
     highlighters.set(scope, highlighter)
   }
   const starry = await highlighter
-  return toHtml(starry.highlight(code, scope))
+  return cacheResult(cacheKey(language, code), toHtml(starry.highlight(code, scope)))
+}
+
+export function clearHighlightCache(): void {
+  highlightCache.clear()
+  highlightPending.clear()
 }

@@ -614,6 +614,7 @@ const MemoMessageRow = React.memo(MessageRow, areMessageRowPropsEqual)
 
 function AssistantContent({ text }: { text: string }) {
   recordRender('AssistantContent.render')
+  recordRender('markdown.parse')
   const [copied, setCopied] = useState(false)
   const copy = () => {
     navigator.clipboard.writeText(text)
