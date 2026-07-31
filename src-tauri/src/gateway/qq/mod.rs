@@ -2,4 +2,6 @@
 
 pub mod auth;
 pub mod dedup;
+pub mod events;
+pub mod send;
 pub mod types;
