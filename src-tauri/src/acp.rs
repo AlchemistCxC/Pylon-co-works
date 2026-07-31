@@ -44,29 +44,6 @@ pub const MAX_ATTACHMENTS: usize = 8;
 type Pending = HashMap<u64, oneshot::Sender<RawMessage>>;
 const PENDING_SHARDS: usize = 16;
 
-fn connection_closed_message() -> RawMessage {
-    RawMessage {
-        id: None,
-        method: None,
-        result: None,
-        params: None,
-        error: Some(serde_json::json!("ACP connection closed")),
-    }
-}
-
-fn drain_pending(pending: &Arc<[Mutex<Pending>; PENDING_SHARDS]>) -> usize {
-    let mut drained = 0;
-    for shard in pending.iter() {
-        if let Ok(mut requests) = shard.lock() {
-            drained += requests.len();
-            for (_, tx) in requests.drain() {
-                let _ = tx.send(connection_closed_message());
-            }
-        }
-    }
-    drained
-}
-
 struct ManagedChild {
     child: Option<Child>,
 }
@@ -158,6 +135,18 @@ pub struct RawMessage {
     pub error: Option<serde_json::Value>,
 }
 
+impl RawMessage {
+    fn connection_closed() -> Self {
+        Self {
+            id: None,
+            method: None,
+            result: None,
+            params: None,
+            error: Some(serde_json::json!("ACP connection closed")),
+        }
+    }
+}
+
 #[derive(Debug)]
 pub enum PromptWaitOutcome {
     Response(RawMessage),
@@ -210,6 +199,19 @@ impl AcpClient {
             rx,
             crashed: Arc::new(AtomicBool::new(false)),
         }
+    }
+
+    pub(crate) fn drain_pending(pending: &Arc<[Mutex<Pending>; PENDING_SHARDS]>) -> usize {
+        let mut drained = 0;
+        for shard in pending.iter() {
+            if let Ok(mut requests) = shard.lock() {
+                drained += requests.len();
+                for (_, tx) in requests.drain() {
+                    let _ = tx.send(RawMessage::connection_closed());
+                }
+            }
+        }
+        drained
     }
 
     pub fn remove_pending(&self, id: u64) {
@@ -550,7 +552,7 @@ impl AcpClient {
                         }
                     }
                     crashed_reader.store(true, Ordering::Relaxed);
-                    let drained = drain_pending(&pending_clone);
+                    let drained = Self::drain_pending(&pending_clone);
                     log::warn!("ACP: drained {} pending requests after stdout closed", drained);
                     let _ = tx_clone.send(RawMessage {
                         id: None,
@@ -860,7 +862,7 @@ mod tests {
             receivers.push(rx);
         }
 
-        assert_eq!(drain_pending(&pending), 3);
+        assert_eq!(AcpClient::drain_pending(&pending), 3);
         assert!(pending.iter().all(|shard| shard.lock().unwrap().is_empty()));
         for receiver in receivers {
             let message = receiver.blocking_recv().expect("EOF should wake pending request");
@@ -872,8 +874,8 @@ mod tests {
     fn drain_pending_is_idempotent_after_first_close() {
         let pending: Arc<[Mutex<Pending>; PENDING_SHARDS]> =
             Arc::new(std::array::from_fn(|_| Mutex::new(HashMap::new())));
-        assert_eq!(drain_pending(&pending), 0);
-        assert_eq!(drain_pending(&pending), 0);
+        assert_eq!(AcpClient::drain_pending(&pending), 0);
+        assert_eq!(AcpClient::drain_pending(&pending), 0);
     }
 
     #[tokio::test]
