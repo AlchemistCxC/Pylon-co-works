@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from 'react'
+import { useStore } from '../store'
 import type { AgentStatus } from '../components/settings/agentTypes'
 import type { SheetRecord } from './sheetTypes'
 import WorkspaceMenu, { type WorkspaceMenuActions } from './WorkspaceMenu'
@@ -20,6 +21,22 @@ function resolveAgentState(sheet: SheetRecord, activeAgent: string, agentStatuse
   return agentStatuses[sheet.agentId]?.status || 'disconnected'
 }
 
+function resolveSheetTitle(
+  sheet: SheetRecord,
+  agents: { id: string; name: string }[],
+  profiles: { id: string; name: string }[],
+  activeAgent: string,
+  activeProfileId: string,
+  sheetAgentStates: Record<string, { activeProfileId?: string }>,
+) {
+  if (sheet.kind !== 'agent' || !sheet.agentId) return sheet.title
+  const agentName = agents.find(agent => agent.id === sheet.agentId)?.name || sheet.title || sheet.agentId
+  const profileId = sheetAgentStates[sheet.agentId]?.activeProfileId
+    || (sheet.agentId === activeAgent ? activeProfileId : '')
+  const profileName = profiles.find(profile => profile.id === profileId)?.name || profileId || 'default'
+  return `${agentName}\\${profileName}`
+}
+
 export default function SheetTabStrip({
   sheets,
   activeSheetId,
@@ -30,6 +47,10 @@ export default function SheetTabStrip({
   menuActions,
   canReopen,
 }: SheetTabStripProps) {
+  const agents = useStore(state => state.agents)
+  const profiles = useStore(state => state.profiles)
+  const activeProfileId = useStore(state => state.activeProfileId)
+  const sheetAgentStates = useStore(state => state.sheetAgentStates)
   const tabRefs = useRef(new Map<string, HTMLDivElement>())
   const [menuSheetId, setMenuSheetId] = useState<string | null>(null)
 
@@ -51,6 +72,7 @@ export default function SheetTabStrip({
       {sheets.map(sheet => {
         const active = sheet.id === activeSheetId
         const agentState = resolveAgentState(sheet, activeAgent, agentStatuses)
+        const displayTitle = resolveSheetTitle(sheet, agents, profiles, activeAgent, activeProfileId, sheetAgentStates)
         return (
           <div
             key={sheet.id}
@@ -87,9 +109,10 @@ export default function SheetTabStrip({
                   onClose(sheet.id)
                 }
               }}
-              title={sheet.title}
+              title={displayTitle}
             >
-              <span className="sheet-tab-title">{sheet.title}</span>
+              {active && <span className="sheet-tab-prompt" aria-hidden="true">›</span>}
+              <span className="sheet-tab-title">{displayTitle}</span>
             </button>
             {!sheet.pinned && (
               <button

@@ -1,8 +1,8 @@
-import { useState, type MouseEventHandler } from 'react'
+import { type MouseEventHandler } from 'react'
 import SheetTabStrip from './SheetTabStrip'
 import type { SheetRecord } from './sheetTypes'
 import type { AgentStatus } from '../components/settings/agentTypes'
-import WorkspaceMenu, { type WorkspaceMenuActions } from './WorkspaceMenu'
+import type { WorkspaceMenuActions } from './WorkspaceMenu'
 
 interface WorkspaceTitlebarProps {
   sheets: SheetRecord[]
@@ -43,8 +43,6 @@ export default function WorkspaceTitlebar({
   onToggleFullscreen,
   onCloseWindow,
 }: WorkspaceTitlebarProps) {
-  const [menuOpen, setMenuOpen] = useState(false)
-  const activeSheet = sheets.find(sheet => sheet.id === activeSheetId) || null
   return (
     <header className={`workspace-titlebar ${sidebarCollapsed ? 'sidebar-collapsed' : ''}`} data-tauri-drag-region>
       <div className="workspace-titlebar-sidebar" data-tauri-drag-region>
@@ -72,17 +70,9 @@ export default function WorkspaceTitlebar({
           canReopen={canReopenSheet}
         />
         <div className="workspace-titlebar-launchers">
-          <button type="button" className="workspace-titlebar-icon" onClick={() => setMenuOpen(value => !value)} title="Workspace 菜单" aria-label="Workspace 菜单" aria-expanded={menuOpen}>☰</button>
-          <WorkspaceMenu
-            {...menuActions}
-            sheet={activeSheet}
-            canReopen={canReopenSheet}
-            open={menuOpen}
-            onCloseMenu={() => setMenuOpen(false)}
-            className="workspace-menu-titlebar"
-          />
-          <button type="button" className="workspace-titlebar-icon" onClick={onOpenSheet} title="打开 Sheet" aria-label="打开 Sheet">＋</button>
-          <button type="button" className="workspace-titlebar-icon" onClick={onReopenSheet} disabled={!canReopenSheet} title="重开最近关闭的 Sheet" aria-label="重开最近关闭的 Sheet">⌄</button>
+          <button type="button" className="workspace-titlebar-icon workspace-open-trigger" onClick={onOpenSheet} title="打开 Sheet" aria-label="打开 Sheet">+</button>
+          <span className="workspace-launcher-separator" aria-hidden="true" />
+          <button type="button" className="workspace-titlebar-icon workspace-reopen-trigger" onClick={onReopenSheet} disabled={!canReopenSheet} title="重开最近关闭的 Sheet" aria-label="重开最近关闭的 Sheet">⌄</button>
         </div>
         <div className="workspace-titlebar-drag" data-tauri-drag-region />
       </div>

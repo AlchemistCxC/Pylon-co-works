@@ -44,7 +44,6 @@ export default function AgentSheetView({
         </div>
         {ccEditMode && <div className="cc-edit-overlay" />}
       </div>
-      <span className="sheet-agent-identity" aria-hidden="true">{sheet.agentId}</span>
     </>
   )
 }

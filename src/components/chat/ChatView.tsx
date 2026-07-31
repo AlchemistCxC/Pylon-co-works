@@ -452,6 +452,19 @@ const ChatView = React.memo(function ChatView({ sessionId }: Props) {
             cancelStateRef.current[source] = begun.state
             invoke('cancel_prompt', { source }).then(() => {
               cancelStateRef.current[source] = resolveCancelCommand(source, cancelStateRef.current[source] || begun.state)
+              // cancel_prompt 的返回只表示请求已被后端接受；但 UI 不能继续显示已知已经取消的生成。
+              // 后续 peri:error(cancelled=true) 到达时仍会再次收敛状态。
+              cancelStateRef.current[source] = applyCancelEvent(source, { kind: 'success' }, cancelStateRef.current[source])
+              const nextSources = removeGeneratingSource(useStore.getState().liveGeneratingSources || [], source)
+              useStore.getState().setLiveStats({
+                liveGeneratingSources: nextSources,
+                liveGenerating: nextSources[nextSources.length - 1] || null,
+              })
+              if (isRenderedSource(source, sessionRef.current)) {
+                const start = generationStartRef.current[source] || genStart.current
+                setSummary({ elapsedMs: Date.now() - start, tokenCount: tokenCount.current, completedFrame: '', reason: 'cancelled' })
+                setGenerating(false)
+              }
             }).catch(error => {
               cancelStateRef.current[source] = rejectCancelCommand(source, cancelStateRef.current[source] || begun.state, error)
               reportRuntimeError('取消生成', error)
