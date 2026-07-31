@@ -528,7 +528,7 @@ const ChatView = React.memo(function ChatView({ sessionId }: Props) {
                 key={renderMessage.message.id}
                 message={renderMessage.message}
                 reduceMotion={reduceMotion === true}
-                lookups={messageLookups}
+                toolVisualState={resolveRowToolVisualState(renderMessage.message, messageLookups)}
               />
             ))
           })}
@@ -577,7 +577,7 @@ const ChatView = React.memo(function ChatView({ sessionId }: Props) {
 // ── Sub-components ──
 
 
-function MessageRow({ message: msg, reduceMotion, lookups }: { message: Message; reduceMotion: boolean; lookups: ReturnType<typeof buildMessageLookups> }) {
+function MessageRow({ message: msg, reduceMotion, toolVisualState }: { message: Message; reduceMotion: boolean; toolVisualState?: string }) {
   recordRender('MessageRow.render')
   return (
     <motion.div
@@ -586,7 +586,7 @@ function MessageRow({ message: msg, reduceMotion, lookups }: { message: Message;
       animate={{ opacity: 1, y: 0 }}
       transition={reduceMotion ? { duration: 0 } : { duration: 0.25, ease: [0.2, 0, 0, 1] }}
     >
-      {msg.role === 'tool' && <ToolCard name={msg.toolName!} input={msg.toolInput} output={msg.toolOutput} outputLines={msg.toolOutputLines} status={msg.toolStatus} visualState={msg.id.startsWith('tool-') ? (lookups.failedToolIds.has(msg.id.slice(5)) ? 'failed' : lookups.runningToolIds.has(msg.id.slice(5)) ? 'running' : lookups.resolvedToolIds.has(msg.id.slice(5)) ? 'completed' : 'unknown') : 'unknown'} />}
+      {msg.role === 'tool' && <ToolCard name={msg.toolName!} input={msg.toolInput} output={msg.toolOutput} outputLines={msg.toolOutputLines} status={msg.toolStatus} visualState={toolVisualState} />}
       {msg.role === 'user' && <UserLine sender={msg.sender} content={msg.content} />}
       {msg.role === 'reasoning' && <ReasoningBlock text={msg.content} running={msg.running === true} />}
       {msg.role === 'assistant' && <AssistantContent text={msg.content} />}
@@ -595,12 +595,12 @@ function MessageRow({ message: msg, reduceMotion, lookups }: { message: Message;
 }
 
 function areMessageRowPropsEqual(
-  previous: { message: Message; reduceMotion: boolean; lookups: ReturnType<typeof buildMessageLookups> },
-  next: { message: Message; reduceMotion: boolean; lookups: ReturnType<typeof buildMessageLookups> },
+  previous: { message: Message; reduceMotion: boolean; toolVisualState?: string },
+  next: { message: Message; reduceMotion: boolean; toolVisualState?: string },
 ): boolean {
   if (previous.message !== next.message) return false
   if (previous.reduceMotion !== next.reduceMotion) return false
-  if (previous.lookups !== next.lookups) return false
+  if (previous.toolVisualState !== next.toolVisualState) return false
   if (previous.message.running || next.message.running) return false
   if (previous.message.role === 'tool' || next.message.role === 'tool') {
     if (previous.message.toolStatus !== next.message.toolStatus) return false
@@ -611,6 +611,15 @@ function areMessageRowPropsEqual(
 }
 
 const MemoMessageRow = React.memo(MessageRow, areMessageRowPropsEqual)
+
+function resolveRowToolVisualState(message: Message, lookups: ReturnType<typeof buildMessageLookups>): string | undefined {
+  if (message.role !== 'tool' || !message.id.startsWith('tool-')) return undefined
+  const toolId = message.id.slice('tool-'.length)
+  if (lookups.failedToolIds.has(toolId)) return 'failed'
+  if (lookups.runningToolIds.has(toolId)) return 'running'
+  if (lookups.resolvedToolIds.has(toolId)) return 'completed'
+  return 'unknown'
+}
 
 function AssistantContent({ text }: { text: string }) {
   recordRender('AssistantContent.render')
