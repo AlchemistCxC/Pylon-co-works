@@ -1,4 +1,4 @@
-//! QQ 平台适配器（B10.1 骨架 + B10.2 组装：入站去重/ingest + 出站文本投递）。
+﻿//! QQ 平台适配器（B10.1 骨架 + B10.2 组装：入站去重/ingest + 出站文本投递）。
 
 pub mod auth;
 pub mod dedup;
@@ -50,21 +50,40 @@ impl QqAdapter {
         })
     }
 
-    /// 入站入口：resume 重放去重 → gateway.ingest 路由解析。
+    /// 入站入口：去重 → 路由解析 → 白名单 → dispatch（ACP 发送）。
     ///
-    /// - msg_id 已见（重放）→ Ok(None)，不重复 ingest
-    /// - 新消息 → 记录 seen + last_msg_id，返回路由解析结果
-    /// ws.rs 事件分发后调用本方法；去重在适配器层完成，ingest 层只见干净消息。
-    pub fn handle_incoming(&self, source: &str, msg_id: &str, content: &str) -> Result<Option<ResolvedIngest>, String> {
+    /// - msg_id 已见（resume 重放）→ Ok(None)，不重复 ingest
+    /// - 白名单拒绝 → Ok(None)，不 dispatch
+    /// - 新消息 → 记录 seen + last_msg_id，dispatch 发送并返回解析结果
+    /// ws.rs 事件分发后调用本方法；去重/白名单在适配器层完成，ingest 层只见干净消息。
+    pub fn handle_incoming(
+        &self,
+        source: &str,
+        msg_id: &str,
+        content: &str,
+        member_openid: Option<&str>,
+        user_openid: Option<&str>,
+    ) -> Result<Option<ResolvedIngest>, String> {
         let mut dedup = self.dedup.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
         if !dedup.is_new(msg_id) {
+            return Ok(None);
+        }
+        let resolved = self.core.ingest(source, content)?;
+        if !crate::gateway::ingest_allowed(
+            self.core.qq_config(),
+            resolved.binding.as_ref(),
+            source,
+            member_openid,
+            user_openid,
+        ) {
             return Ok(None);
         }
         if let Some(chat_id) = source.rsplit(':').next() {
             dedup.set_latest(chat_id, msg_id);
         }
         drop(dedup);
-        self.core.ingest(source, content).map(Some)
+        self.core.dispatch_ingest(&resolved);
+        Ok(Some(resolved))
     }
 }
 
@@ -128,8 +147,8 @@ gateway:
       profile: trpg
       session: 战役1
 "#;
-        Arc::new(GatewayCore::with_routes(
-            crate::gateway::route::EntityRouteTable::from_yaml_str(yaml).expect("合法路由配置"),
+        Arc::new(GatewayCore::from_config(
+            crate::gateway::route::parse_config(yaml).expect("合法路由配置"),
         ))
     }
 
@@ -157,7 +176,7 @@ gateway:
         let core = core_with_route();
         let adapter = test_adapter(core);
         let resolved = adapter
-            .handle_incoming("qq:group:123", "msg-1", "你好")
+            .handle_incoming("qq:group:123", "msg-1", "你好", None, None)
             .expect("ingest must resolve")
             .expect("新消息必须返回解析结果");
         assert_eq!(resolved.source, "qq:group:123");
@@ -169,9 +188,9 @@ gateway:
     fn replayed_msg_id_is_dropped_without_ingest() {
         let core = core_with_route();
         let adapter = test_adapter(core);
-        adapter.handle_incoming("qq:group:123", "msg-1", "first").expect("first ingest");
+        adapter.handle_incoming("qq:group:123", "msg-1", "first", None, None).expect("first ingest");
         let replay = adapter
-            .handle_incoming("qq:group:123", "msg-1", "first replay")
+            .handle_incoming("qq:group:123", "msg-1", "first replay", None, None)
             .expect("replay must be handled");
         assert!(replay.is_none(), "重复 msg_id 必须丢弃（resume 重放保护）");
     }
@@ -183,9 +202,9 @@ gateway:
         // 填满 dedup 窗口再插一条，把 msg-0 挤出
         for i in 0..=dedup::DedupState::new().window_capacity() {
             let msg = format!("msg-{i}");
-            let _ = adapter.handle_incoming("qq:group:123", &msg, "x");
+            let _ = adapter.handle_incoming("qq:group:123", &msg, "x", None, None);
         }
-        let replayed = adapter.handle_incoming("qq:group:123", "msg-0", "x").expect("ingest");
+        let replayed = adapter.handle_incoming("qq:group:123", "msg-0", "x", None, None).expect("ingest");
         assert!(replayed.is_some(), "窗口挤出后 msg-0 应重新可见");
     }
 
@@ -193,8 +212,56 @@ gateway:
     fn empty_source_is_rejected() {
         let core = core_with_route();
         let adapter = test_adapter(core);
-        let error = adapter.handle_incoming("", "msg-1", "x").expect_err("空 source 必须拒绝");
+        let error = adapter.handle_incoming("", "msg-1", "x", None, None).expect_err("空 source 必须拒绝");
         assert!(error.contains("source"));
+    }
+
+    #[test]
+    fn member_allowlist_rejects_stranger_group_message() {
+        let yaml = r#"
+gateway:
+  routes:
+    - source: qq:group:123
+      agent: peri
+      profile: trpg
+      session: 战役1
+      allow_from: [member-1]
+"#;
+        let core = Arc::new(GatewayCore::from_config(
+            crate::gateway::route::parse_config(yaml).expect("合法路由配置"),
+        ));
+        let adapter = test_adapter(core);
+        let allowed = adapter
+            .handle_incoming("qq:group:123", "msg-ok", "hi", Some("member-1"), None)
+            .expect("ingest")
+            .expect("白名单成员必须放行");
+        assert_eq!(allowed.source, "qq:group:123");
+        let rejected = adapter
+            .handle_incoming("qq:group:123", "msg-no", "hi", Some("stranger"), None)
+            .expect("ingest");
+        assert!(rejected.is_none(), "非白名单成员必须丢弃");
+    }
+
+    #[test]
+    fn group_allowlist_rejects_unlisted_group() {
+        let yaml = r#"
+gateway:
+  qq:
+    group_allow_from: [group-a]
+  routes:
+    - source: qq:group:group-b
+      agent: peri
+      profile: trpg
+      session: 战役1
+"#;
+        let core = Arc::new(GatewayCore::from_config(
+            crate::gateway::route::parse_config(yaml).expect("合法路由配置"),
+        ));
+        let adapter = test_adapter(core);
+        let rejected = adapter
+            .handle_incoming("qq:group:group-b", "msg-1", "hi", Some("member-1"), None)
+            .expect("ingest");
+        assert!(rejected.is_none(), "未列入群级白名单必须丢弃");
     }
 
     #[test]

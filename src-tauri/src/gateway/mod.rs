@@ -1,4 +1,4 @@
-//! Gateway：平台适配器层（B10）。
+﻿//! Gateway：平台适配器层（B10）。
 //!
 //! 消息拓扑：平台(qq/微信/飞书/ins) → gateway → ACP → 本地 agent。
 //! 信息脉络：agent ←ACP→ Pylon(gateway) → 平台。
@@ -13,14 +13,14 @@ pub mod truncate;
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
 
-use route::EntityRouteTable;
+use route::{EntityRouteTable, GatewayConfig, QqGatewayConfig};
 
 /// 平台适配器接口。
 ///
 /// 出站（agent → 平台）：GatewayCore 把 agent 事件按文本/非文本分类后调用
 /// [`Self::deliver_text`]（已按 [`Self::max_message_len`] 分段）或
 /// [`Self::deliver_event`]。入站（平台 → agent）：平台连接层解析事件后调用
-/// GatewayCore::ingest（QQ 适配器经 handle_incoming 去重后进入）。
+/// GatewayCore::ingest（QQ 适配器经 handle_incoming 去重+白名单后进入）。
 pub trait PlatformAdapter: Send + Sync {
     /// 平台标识（"qq"/"wechat"…），同时是 source 前缀（"qq:group:123"）。
     fn platform_key(&self) -> &str;
@@ -33,42 +33,61 @@ pub trait PlatformAdapter: Send + Sync {
 }
 
 /// 入站消息解析结果：平台消息 → 路由绑定（B10.3 消费：会话生命周期 + ACP 发送）。
-/// 字段待 B10.3 消费，当前由 ingest 构造（测试验证路由解析）。
 #[allow(dead_code)]
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct ResolvedIngest {
     pub source: String,
     pub content: String,
-    /// 静态绑定命中；未配置实体时为 None（B10.3 回退默认绑定）。
+    /// 静态绑定命中；未配置实体时为 None（回退默认绑定 = active agent）。
     pub binding: Option<route::EntityBinding>,
 }
 
 /// 入站消息字符上限：超长截断再进 prompt（防超长消息打爆 agent 输入）。
 pub const MAX_INGEST_CHARS: usize = 64 * 1024;
 
-/// Gateway 核心：适配器注册表 + 静态路由表 + 入站解析 + 出站分发（B10.1）。
+/// ingest 发送处理器：解析结果 → ACP 发送（B10.3 由 lib.rs 注册，
+/// 按 binding.agent_id 路由到对应 runtime，未绑定回退 active agent）。
+pub type IngestHandler = Arc<dyn Fn(&ResolvedIngest) + Send + Sync>;
+
+/// Gateway 核心：适配器注册表 + 静态路由表 + 平台配置 + 入站解析 + 出站分发。
 pub struct GatewayCore {
     adapters: Mutex<HashMap<String, Arc<dyn PlatformAdapter>>>,
     routes: EntityRouteTable,
+    qq: QqGatewayConfig,
+    ingest_handler: Mutex<Option<IngestHandler>>,
 }
 
 impl GatewayCore {
-    /// 从 agents.yaml 的 `gateway.routes` 段构建（缺段 → 空路由表）。
+    /// 从 agents.yaml 的 `gateway` 段构建（缺段 → 空路由表 + 默认平台配置）。
     pub fn new() -> Self {
-        let routes = EntityRouteTable::from_yaml_str(include_str!("../../../agents.yaml"))
+        let config = GatewayConfig::from_yaml_str(include_str!("../../../agents.yaml"))
             .unwrap_or_else(|error| {
-                log::warn!("gateway 路由配置解析失败，使用空路由表: {error}");
-                EntityRouteTable::empty()
+                log::warn!("gateway 配置解析失败，使用空配置: {error}");
+                GatewayConfig::empty()
             });
-        Self::with_routes(routes)
+        Self::from_config(config)
     }
 
-    /// 用显式路由表构造（测试注入 / B10.3 热重载途径）。
-    pub fn with_routes(routes: EntityRouteTable) -> Self {
+    /// 用显式配置构造（测试注入 / B10.3 热重载途径）。
+    pub fn from_config(config: GatewayConfig) -> Self {
         Self {
             adapters: Mutex::new(HashMap::new()),
-            routes,
+            routes: config.routes,
+            qq: config.qq,
+            ingest_handler: Mutex::new(None),
         }
+    }
+
+    /// 注册 ingest 发送处理器（run() 接线 ACP 发送；可重复注册覆盖）。
+    pub fn set_ingest_handler(&self, handler: IngestHandler) {
+        if let Ok(mut slot) = self.ingest_handler.lock() {
+            *slot = Some(handler);
+        }
+    }
+
+    /// QQ 群级白名单配置（QqAdapter 白名单检查用）。
+    pub fn qq_config(&self) -> &QqGatewayConfig {
+        &self.qq
     }
 
     /// 注册平台适配器；platform_key 重复 → Err。
@@ -89,11 +108,10 @@ impl GatewayCore {
         self.adapters.lock().map(|a| a.keys().cloned().collect()).unwrap_or_default()
     }
 
-    /// 入站解析：source 路由查询 + 超长截断。
+    /// 入站解析：source 路由查询 + 超长截断。纯解析，不触发发送。
     ///
-    /// 平台相关去重（resume 重放）由各适配器层完成，本入口只见干净消息。
-    /// 待 B10.3 会话生命周期接线后消费解析结果。
-    #[allow(dead_code)]
+    /// 平台相关去重（resume 重放）与白名单由各适配器层完成，本入口只见干净消息；
+    /// 白名单通过后由调用方 [`Self::dispatch_ingest`] 触发 ACP 发送。
     pub fn ingest(&self, source: &str, content: &str) -> Result<ResolvedIngest, String> {
         if source.trim().is_empty() {
             return Err("ingest requires a non-empty source".to_string());
@@ -105,6 +123,16 @@ impl GatewayCore {
             content,
             binding,
         })
+    }
+
+    /// 触发 ingest 发送（B10.3：按 binding 路由到 runtime，未绑定回退 active agent）。
+    /// 由适配器在白名单/去重通过后调用。
+    pub fn dispatch_ingest(&self, resolved: &ResolvedIngest) {
+        if let Ok(handler) = self.ingest_handler.lock() {
+            if let Some(handler) = handler.as_ref() {
+                handler(resolved);
+            }
+        }
     }
 
     /// 出站分发：把 agent 事件投递给 source 前缀匹配的平台适配器。
@@ -159,6 +187,35 @@ fn extract_deliver_text(event: &str, payload: &serde_json::Value) -> Option<Stri
         return None;
     }
     update.get("content").and_then(|c| c.get("text")).and_then(|v| v.as_str()).map(str::to_string)
+}
+
+/// 平台入站白名单检查（B10.3，Hermes group_allow_from / allow_from 模式）：
+///
+/// - 群消息（qq:group:*）：群级白名单（qq 配置）→ 成员白名单（binding.allow_from）
+/// - 私聊（qq:user:*）：用户白名单（binding.allow_from）
+/// - 未配置白名单 = 放行；群级白名单只约束群消息
+pub fn ingest_allowed(
+    qq_config: &QqGatewayConfig,
+    binding: Option<&route::EntityBinding>,
+    source: &str,
+    member_openid: Option<&str>,
+    user_openid: Option<&str>,
+) -> bool {
+    if let Some(group_id) = source.strip_prefix("qq:group:") {
+        if let Some(allow) = &qq_config.group_allow_from {
+            if !allow.iter().any(|g| g == group_id) {
+                return false;
+            }
+        }
+    }
+    let Some(binding) = binding else { return true; };
+    let Some(allow) = &binding.allow_from else { return true; };
+    let principal = if source.starts_with("qq:group:") {
+        member_openid.unwrap_or("")
+    } else {
+        user_openid.unwrap_or("")
+    };
+    allow.iter().any(|entry| entry == principal)
 }
 
 #[cfg(test)]
@@ -226,7 +283,7 @@ gateway:
       profile: trpg
       session: 战役1
 "#;
-        let core = GatewayCore::with_routes(EntityRouteTable::from_yaml_str(yaml).unwrap());
+        let core = GatewayCore::from_config(crate::gateway::route::parse_config(yaml).unwrap());
         let resolved = core.ingest("qq:group:123", "你好").expect("ingest must resolve");
         assert_eq!(resolved.source, "qq:group:123");
         assert_eq!(resolved.content, "你好");
@@ -306,5 +363,69 @@ gateway:
             "update": {"sessionUpdate": "agent_message_chunk", "content": {"text": "hi"}}
         }));
         core.deliver_all("failing:user:1", "peri:done", &serde_json::json!({"data": {}}));
+    }
+
+    fn config_with(yaml: &str) -> GatewayCore {
+        GatewayCore::from_config(route::parse_config(yaml).expect("合法配置"))
+    }
+
+    #[test]
+    fn ingest_allowed_enforces_group_and_member_allowlists() {
+        let config = config_with(r#"
+gateway:
+  qq:
+    group_allow_from: [group-a]
+  routes:
+    - source: qq:group:group-a
+      agent: peri
+      profile: trpg
+      session: 战役1
+      allow_from: [member-1]
+    - source: qq:user:user-1
+      agent: hermes
+      profile: default
+      session: dm
+      allow_from: [user-1]
+"#);
+        let qq = config.qq_config();
+        let group_binding = config.routes.lookup("qq:group:group-a");
+        // 群级白名单：未列出群拒绝
+        assert!(!ingest_allowed(qq, group_binding, "qq:group:group-x", Some("member-1"), None));
+        // 成员白名单：匹配放行、不匹配拒绝
+        assert!(ingest_allowed(qq, group_binding, "qq:group:group-a", Some("member-1"), None));
+        assert!(!ingest_allowed(qq, group_binding, "qq:group:group-a", Some("stranger"), None));
+        // 私聊白名单：按 user_openid
+        let c2c_binding = config.routes.lookup("qq:user:user-1");
+        assert!(ingest_allowed(qq, c2c_binding, "qq:user:user-1", None, Some("user-1")));
+        assert!(!ingest_allowed(qq, c2c_binding, "qq:user:user-1", None, Some("user-2")));
+        // 群级白名单配置了 group-a：any 群被拒绝
+        assert!(!ingest_allowed(qq, None, "qq:group:any", Some("whoever"), None));
+        // 无群级白名单 + 无绑定 → 放行
+        let open = config_with(r#"
+gateway:
+  routes:
+    - source: qq:group:123
+      agent: peri
+      profile: trpg
+      session: 战役1
+"#);
+        assert!(ingest_allowed(open.qq_config(), None, "qq:group:any", Some("whoever"), None));
+    }
+
+    #[test]
+    fn dispatch_ingest_invokes_registered_handler() {
+        use std::sync::atomic::{AtomicUsize, Ordering};
+        let core = GatewayCore::new();
+        let calls = Arc::new(AtomicUsize::new(0));
+        let calls_clone = calls.clone();
+        core.set_ingest_handler(Arc::new(move |_resolved: &ResolvedIngest| {
+            calls_clone.fetch_add(1, Ordering::SeqCst);
+        }));
+        let resolved = core.ingest("qq:group:1", "hello").expect("ingest");
+        assert_eq!(calls.load(Ordering::SeqCst), 0, "ingest 纯解析不得触发 handler");
+        core.dispatch_ingest(&resolved);
+        assert_eq!(calls.load(Ordering::SeqCst), 1, "dispatch 必须触发 handler");
+        core.dispatch_ingest(&resolved);
+        assert_eq!(calls.load(Ordering::SeqCst), 2, "handler 可重复调用");
     }
 }

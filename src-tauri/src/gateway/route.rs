@@ -1,30 +1,34 @@
-﻿//! 平台静态绑定路由（BE-B10-001）。
+﻿//! 平台静态绑定路由（BE-B10-001 + B10.3 扩展）。
 //!
-//! 首版静态 EntityBinding 路由表：source（如 `qq:group:123`）→
-//! { agent_id, profile_id, session_key }。未匹配的 source 由调用方回退默认绑定。
+//! 静态 EntityBinding 路由表：source（如 `qq:group:123`）→
+//! { agent_id, profile_id, session_key, allow_from, reset, idle_minutes }。
+//! 未匹配的 source 由调用方回退默认绑定。
 //! 二期预留动态覆盖/指令切换接口（本文件只做静态配置解析与查询）。
 //!
 //! 纯数据层：不依赖 tauri/AppState，不读 env。配置结构：
 //!
 //! ```yaml
 //! gateway:
+//!   qq:
+//!     group_allow_from: [group_openid_1]   # 可选：群级白名单（缺省=不限）
 //!   routes:
 //!     - source: qq:group:123
 //!       agent: peri
 //!       profile: trpg
 //!       session: 战役1
+//!       allow_from: [member_openid_1]      # 可选：群成员/私聊用户白名单
+//!       reset: idle                        # 可选：idle | daily | off（默认 idle）
+//!       idle_minutes: 1440                 # 可选：idle 模式阈值（默认 1440）
 //! ```
 
 use std::collections::HashSet;
 
 use serde::Deserialize;
 
-/// 平台绑定实体：source（平台路由 key）→ agent/profile/session 三元组。
+/// 平台绑定实体：source（平台路由 key）→ agent/profile/session 三元组 + 白名单 + 重置策略。
 ///
 /// yaml 键名为 `agent`/`profile`/`session`（与 Prism/前端 Session 语义对齐），
 /// Rust 侧统一为 `agent_id`/`profile_id`/`session_key` 命名。
-// 占位期无消费者（BE-B10-004/005/006 才接入命令层），此处仅抑制 dead_code 中间态噪音；
-// 消费者接入后本 allow 可移除。
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
 pub struct EntityBinding {
     pub source: String,
@@ -34,6 +38,44 @@ pub struct EntityBinding {
     pub profile_id: String,
     #[serde(rename = "session")]
     pub session_key: String,
+    /// 成员白名单（群消息按 member_openid，私聊按 user_openid）；缺省 = 不限。
+    #[serde(default)]
+    pub allow_from: Option<Vec<String>>,
+    /// 会话重置策略：idle | daily | off；缺省 idle。
+    #[serde(default)]
+    pub reset: Option<String>,
+    /// idle 模式无活动阈值（分钟）；缺省 1440（1 天）。
+    #[serde(default)]
+    pub idle_minutes: Option<u64>,
+}
+
+/// QQ 平台网关配置（B10.3：群级白名单）。
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct QqGatewayConfig {
+    /// 群级白名单：列出的 group_openid 才允许 ingest；None = 不限。
+    pub group_allow_from: Option<Vec<String>>,
+}
+
+/// 完整 gateway 配置：路由表 + 平台配置。
+#[derive(Debug, Clone)]
+pub struct GatewayConfig {
+    pub routes: EntityRouteTable,
+    pub qq: QqGatewayConfig,
+}
+
+impl GatewayConfig {
+    /// 从 yaml 解析（缺 gateway 段 → 空路由表 + 默认平台配置）。
+    pub fn from_yaml_str(input: &str) -> Result<Self, String> {
+        parse_config(input)
+    }
+
+    /// 空配置（无路由、无白名单）。
+    pub fn empty() -> Self {
+        Self {
+            routes: EntityRouteTable::empty(),
+            qq: QqGatewayConfig::default(),
+        }
+    }
 }
 
 /// gateway 配置文件的顶层结构（未知字段默认忽略）。
@@ -49,35 +91,55 @@ struct GatewaySection {
     /// 缺 `routes` 键视为空列表。
     #[serde(default)]
     routes: Vec<EntityBinding>,
+    /// 缺 `qq` 段视为默认（无群级白名单）。
+    #[serde(default)]
+    qq: Option<QqSection>,
+}
+
+/// `gateway.qq` 段结构。
+#[derive(Debug, Deserialize)]
+struct QqSection {
+    /// 缺省 = 不限。
+    #[serde(default)]
+    group_allow_from: Option<Vec<String>>,
+}
+
+/// 解析完整 gateway 配置（路由表 + 平台配置）。
+pub fn parse_config(input: &str) -> Result<GatewayConfig, String> {
+    let config: GatewayConfigFile = serde_yaml::from_str(input)
+        .map_err(|e| format!("gateway 配置解析失败: {e}"))?;
+    let section = config.gateway.unwrap_or(GatewaySection {
+        routes: Vec::new(),
+        qq: None,
+    });
+    let routes = section.routes;
+    let mut entries = Vec::with_capacity(routes.len());
+    let mut seen = HashSet::with_capacity(routes.len());
+    for route in routes {
+        if !seen.insert(route.source.clone()) {
+            return Err(format!("重复的 source 路由: {}", route.source));
+        }
+        entries.push(route);
+    }
+    let qq = section
+        .qq
+        .map(|q| QqGatewayConfig {
+            group_allow_from: q.group_allow_from,
+        })
+        .unwrap_or_default();
+    Ok(GatewayConfig {
+        routes: EntityRouteTable { entries },
+        qq,
+    })
 }
 
 /// 静态绑定路由表。
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct EntityRouteTable {
     entries: Vec<EntityBinding>,
 }
 
 impl EntityRouteTable {
-    /// 解析 gateway 配置 yaml，构建路由表。
-    ///
-    /// - source 重复 → Err（同一 platform_key 只允许一条绑定）
-    /// - 未知字段忽略（serde 默认行为）
-    /// - 缺 `gateway` 段 / `routes` 为空 → 空表
-    pub fn from_yaml_str(input: &str) -> Result<Self, String> {
-        let config: GatewayConfigFile = serde_yaml::from_str(input)
-            .map_err(|e| format!("gateway 配置解析失败: {e}"))?;
-        let routes = config.gateway.map(|g| g.routes).unwrap_or_default();
-        let mut entries = Vec::with_capacity(routes.len());
-        let mut seen = HashSet::with_capacity(routes.len());
-        for route in routes {
-            if !seen.insert(route.source.clone()) {
-                return Err(format!("重复的 source 路由: {}", route.source));
-            }
-            entries.push(route);
-        }
-        Ok(Self { entries })
-    }
-
     /// 构造空路由表（无任何绑定）。
     pub fn empty() -> Self {
         Self { entries: Vec::new() }
@@ -113,7 +175,7 @@ gateway:
       profile: default
       session: dm
 "#;
-        let table = EntityRouteTable::from_yaml_str(yaml).expect("合法配置应解析成功");
+        let table = parse_config(yaml).expect("合法配置应解析成功").routes;
         let hit = table.lookup("qq:group:123").expect("应命中 qq:group:123");
         assert_eq!(hit.source, "qq:group:123");
         assert_eq!(hit.agent_id, "peri");
@@ -139,7 +201,7 @@ gateway:
       profile: default
       session: 其他
 "#;
-        let err = EntityRouteTable::from_yaml_str(yaml).expect_err("重复 source 应报错");
+        let err = parse_config(yaml).expect_err("重复 source 应报错");
         assert!(err.contains("qq:group:123"), "错误信息应包含重复的 source，实际: {err}");
     }
 
@@ -153,7 +215,7 @@ gateway:
       profile: trpg
       session: 战役1
 "#;
-        let table = EntityRouteTable::from_yaml_str(yaml).expect("合法配置应解析成功");
+        let table = parse_config(yaml).expect("合法配置应解析成功").routes;
         assert!(table.lookup("qq:user:999").is_none());
         assert!(table.lookup("wechat:group:1").is_none());
     }
@@ -173,20 +235,21 @@ gateway:
     anything: 1
 top_level_unknown: value
 "#;
-        let table = EntityRouteTable::from_yaml_str(yaml).expect("未知字段应被忽略");
+        let table = parse_config(yaml).expect("未知字段应被忽略").routes;
         assert!(table.lookup("qq:group:123").is_some());
     }
 
     #[test]
     fn missing_gateway_section_yields_empty_table() {
-        let table = EntityRouteTable::from_yaml_str("some_other: 1")
-            .expect("无 gateway 段应得到空表");
+        let table = parse_config("some_other: 1")
+            .expect("无 gateway 段应得到空表")
+            .routes;
         assert!(table.lookup("qq:group:123").is_none());
     }
 
     #[test]
     fn malformed_yaml_rejected() {
-        let err = EntityRouteTable::from_yaml_str("gateway: [unclosed").expect_err("非法 yaml 应报错");
+        let err = parse_config("gateway: [unclosed").expect_err("非法 yaml 应报错");
         assert!(!err.is_empty());
     }
 
@@ -200,8 +263,39 @@ gateway:
       session: 战役1
 "#;
         assert!(
-            EntityRouteTable::from_yaml_str(yaml).is_err(),
+            parse_config(yaml).is_err(),
             "缺 agent 字段应解析失败"
         );
+    }
+
+    #[test]
+    fn parses_allowlist_reset_and_qq_group_allowlist() {
+        let yaml = r#"
+gateway:
+  qq:
+    group_allow_from: [group-a, group-b]
+  routes:
+    - source: qq:group:123
+      agent: peri
+      profile: trpg
+      session: 战役1
+      allow_from: [member-1, member-2]
+      reset: daily
+      idle_minutes: 60
+    - source: qq:user:456
+      agent: hermes
+      profile: default
+      session: dm
+"#;
+        let config = parse_config(yaml).expect("完整配置应解析成功");
+        assert_eq!(config.qq.group_allow_from.as_deref(), Some(&["group-a".to_string(), "group-b".to_string()][..]));
+        let group = config.routes.lookup("qq:group:123").expect("群路由应命中");
+        assert_eq!(group.agent_id, "peri");
+        assert_eq!(group.allow_from.as_deref(), Some(&["member-1".to_string(), "member-2".to_string()][..]));
+        assert_eq!(group.reset.as_deref(), Some("daily"));
+        assert_eq!(group.idle_minutes, Some(60));
+        let c2c = config.routes.lookup("qq:user:456").expect("私聊路由应命中");
+        assert!(c2c.allow_from.is_none(), "未配置白名单应为 None");
+        assert!(c2c.reset.is_none());
     }
 }

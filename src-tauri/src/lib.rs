@@ -232,23 +232,30 @@ async fn do_connect_and_replace<R: tauri::Runtime>(
     start_status: AgentLifecycleStatus,
     log_action: &str,
     keep_sessions: bool,
+    announce: bool,
 ) -> Result<(), String> {
     let previous_status = runtime.agent_runtime.lock()
         .map(|state| state.status)
         .unwrap_or(AgentLifecycleStatus::Disconnected);
-    handles.emit_agent_status(runtime, window, start_status, None);
+    if announce {
+        handles.emit_agent_status(runtime, window, start_status, None);
+    }
     handles.log_runtime_summary("info", "agent", agent_id.clone(), &format!("Agent {log_action} started"), serde_json::Map::new());
     let new_acp = match AcpClient::connect_with_logs(agent, Some(handles.runtime_logs.clone())).await {
         Ok(client) => client,
         Err(error) => {
             let fallback_status = status_after_connection_failure(previous_status);
-            handles.emit_agent_status(runtime, window, fallback_status, Some(error.clone()));
+            if announce {
+                handles.emit_agent_status(runtime, window, fallback_status, Some(error.clone()));
+            }
             handles.log_runtime_summary("error", "agent", agent_id, &format!("Agent {log_action} failed"), serde_json::Map::new());
             return Err(error);
         }
     };
     handles.replace_agent_client(runtime, agent_id, new_acp, window.clone(), keep_sessions).await?;
-    handles.emit_agent_status(runtime, window, AgentLifecycleStatus::Connected, None);
+    if announce {
+        handles.emit_agent_status(runtime, window, AgentLifecycleStatus::Connected, None);
+    }
     let _ = handles.pet.lock().map(|mut p| pet::on_agent_connected(&mut p));
     handles.log_runtime_summary("info", "agent", None, &format!("Agent {log_action} succeeded"), serde_json::Map::new());
     Ok(())
@@ -759,6 +766,7 @@ fn start_notification_dispatcher<R: tauri::Runtime>(handles: &AppStateHandles, r
                                     None,
                                     AgentLifecycleStatus::Reconnecting,
                                     "auto-reconnect",
+                                    true,
                                     true,
                                 ).await {
                                     Ok(()) => break,
@@ -1417,7 +1425,55 @@ impl AppState {
         // 手动 switch/reconnect：跨 agent/全新进程语义，keep_sessions=false（清空映射）。
         // 实现委托给静态辅助，自动重连（keep_sessions=true）与手动路径共用同一份逻辑。
         let handles = AppStateHandles::from_state(self);
-        do_connect_and_replace(&handles, runtime, window, agent, agent_id, start_status, log_action, false).await
+        do_connect_and_replace(&handles, runtime, window, agent, agent_id, start_status, log_action, false, true).await
+    }
+
+    /// 平台 ingest 目标 runtime 就绪检查（B10.3）：未连接时懒启动连接。
+    /// announce=false——平台消息路由不切换/不广播 GUI active agent 状态。
+    async fn ensure_runtime_ready(
+        &self,
+        runtime: &Arc<AgentRuntime>,
+        agent_id: &str,
+        window: &tauri::WebviewWindow,
+    ) -> Result<(), String> {
+        let status = runtime.agent_runtime.lock()
+            .map(|s| s.status)
+            .unwrap_or(AgentLifecycleStatus::Disconnected);
+        if matches!(
+            status,
+            AgentLifecycleStatus::Connected | AgentLifecycleStatus::Connecting | AgentLifecycleStatus::Reconnecting
+        ) {
+            return Ok(());
+        }
+        let agent = self.agents.lock().map_err(|e| e.to_string())?
+            .get(agent_id)
+            .cloned()
+            .ok_or_else(|| format!("unknown agent: {agent_id}"))?;
+        let keep = matches!(status, AgentLifecycleStatus::Crashed);
+        let _lifecycle_guard = runtime.agent_lifecycle.lock().await;
+        // 双检查：拿到生命周期锁后重查（防并发连接）
+        let status = runtime.agent_runtime.lock()
+            .map(|s| s.status)
+            .unwrap_or(AgentLifecycleStatus::Disconnected);
+        if matches!(
+            status,
+            AgentLifecycleStatus::Connected | AgentLifecycleStatus::Connecting | AgentLifecycleStatus::Reconnecting
+        ) {
+            return Ok(());
+        }
+        let handles = AppStateHandles::from_state(self);
+        do_connect_and_replace(
+            &handles,
+            runtime,
+            window,
+            &agent,
+            None,
+            AgentLifecycleStatus::Connecting,
+            "platform-ingest",
+            keep,
+            false,
+        )
+        .await
     }
 }
 
@@ -1521,17 +1577,48 @@ async fn send_message(
     mcp_servers: Option<Vec<mcp::McpServerConfig>>,
 ) -> Result<String, String> {
     let runtime = state.inner().require_runtime()?;
-    let gateway = state.gateway.clone();
-    state.inner().log_runtime_summary( "info", "prompt", Some(source.clone()), "Prompt started", serde_json::Map::from_iter([
+    send_prompt_core(
+        state.inner(),
+        &runtime,
+        Some(&window),
+        &state.gateway,
+        &source,
+        &content,
+        &persona,
+        session_prompt.as_deref(),
+        attachments.as_deref(),
+        mcp_servers,
+    )
+    .await
+}
+
+/// 公共发送管线（GUI `send_message` 与 gateway 平台 ingest 共用，B10.3）：
+/// per-runtime 会话创建/映射/prompt 锁/等待/cancel/事件广播。
+/// 平台 ingest 经 handler 路由到绑定 agent 的 runtime 后调用本函数。
+async fn send_prompt_core(
+    state: &AppState,
+    runtime: &Arc<AgentRuntime>,
+    window: Option<&tauri::Window>,
+    gateway: &GatewayCore,
+    source: &str,
+    content: &str,
+    persona: &str,
+    session_prompt: Option<&str>,
+    attachments: Option<&[String]>,
+    mcp_servers: Option<Vec<mcp::McpServerConfig>>,
+) -> Result<String, String> {
+    state.log_runtime_summary( "info", "prompt", Some(source.to_string()), "Prompt started", serde_json::Map::from_iter([
         ("contentLength".to_string(), serde_json::Value::from(content.len())),
-        ("attachmentCount".to_string(), serde_json::Value::from(attachments.as_ref().map_or(0, Vec::len))),
+        ("attachmentCount".to_string(), serde_json::Value::from(attachments.map_or(0, <[String]>::len))),
     ]));
-    let requested_mcp_servers = mcp::validate_and_serialize(mcp_servers.or_else(|| state.inner().current_mcp_servers().ok()))?;
-    let prompt_lock = prompt_lock_for(&runtime.prompt_locks, &source);
+    let requested_mcp_servers = mcp::validate_and_serialize(mcp_servers.or_else(|| state.current_mcp_servers().ok()))?;
+    let prompt_lock = prompt_lock_for(&runtime.prompt_locks, source);
     let _prompt_guard = prompt_lock.lock().await;
 
     if runtime.acp.lock().await.is_crashed() {
-        emit_event_all(&window, &gateway, &source, "peri:error", serde_json::json!({"source": source, "error": PylonError::AgentCrashed.to_string()}));
+        if let Some(window) = window {
+            emit_event_all(window, gateway, source, "peri:error", serde_json::json!({"source": source, "error": PylonError::AgentCrashed.to_string()}));
+        }
         return Err(PylonError::AgentCrashed.into());
     }
 
@@ -1539,7 +1626,7 @@ async fn send_message(
         let _creation_guard = runtime.session_creation.lock().await;
         let existing = {
             let sessions = runtime.sessions.lock().map_err(|e| e.to_string())?;
-            sessions.get(&source).map(|session| {
+            sessions.get(source).map(|session| {
                 (session.peri_id.clone(), !session.has_first_prompt)
             })
         };
@@ -1551,26 +1638,26 @@ async fn send_message(
                 if sessions.len() >= MAX_SESSIONS { return Err("max sessions reached".to_string()); }
             }
             let session_cwd = state.agent_cwd();
-            let generation = state.current_generation(&runtime);
-            let response = match state.inner().acp_rpc(&runtime, acp::METHOD_SESSION_NEW, acp::session_new_params(&session_cwd, requested_mcp_servers.clone())?).await {
+            let generation = state.current_generation(runtime);
+            let response = match state.acp_rpc(runtime, acp::METHOD_SESSION_NEW, acp::session_new_params(&session_cwd, requested_mcp_servers.clone())?).await {
                 Ok(response) => response,
                 Err(error) => {
-                    state.inner().log_runtime_summary( "error", "session", Some(source.clone()), "Session creation failed", serde_json::Map::new());
+                    state.log_runtime_summary( "error", "session", Some(source.to_string()), "Session creation failed", serde_json::Map::new());
                     return Err(error);
                 }
             };
-            state.ensure_generation(&runtime, generation)?;
+            state.ensure_generation(runtime, generation)?;
             let pid = AcpClient::session_id_from(&response)?;
-            let mut session = SessionInfo::new(pid.clone(), persona.clone(), session_cwd, false, generation);
+            let mut session = SessionInfo::new(pid.clone(), persona.to_string(), session_cwd, false, generation);
             session.apply_session_response(&response);
             runtime.sessions.lock().map_err(|e| e.to_string())?
-                .insert(source.clone(), session);
+                .insert(source.to_string(), session);
             (pid, true)
         }
     };
 
     let attachment_paths = attachments.unwrap_or_default();
-    let prompt_generation = state.current_generation(&runtime);
+    let prompt_generation = state.current_generation(runtime);
 
     let effective_persona = session_prompt
         .filter(|value| !value.trim().is_empty())
@@ -1579,12 +1666,14 @@ async fn send_message(
     let prompt_content = if is_first && !effective_persona.is_empty() && !content.starts_with('/') {
         format!("{}\n\n---\n\n{}", effective_persona, content)
     } else {
-        content.clone()
+        content.to_string()
     };
     let prompt_blocks = AcpClient::prompt_blocks(prompt_content, &attachment_paths)?;
 
     state.pet.lock().map(|mut p| pet::on_user_sent(&mut p)).ok();
-    emit_event(&window, "peri:user", serde_json::json!({ "source": source, "content": content }));
+    if let Some(window) = window {
+        emit_event(window, "peri:user", serde_json::json!({ "source": source, "content": content }));
+    }
     let (request_id, write_tx, prompt_line, mut rx) = {
         let acp = runtime.acp.lock().await;
         let (id, line, rx) = acp.prepare_prompt(&peri_id, prompt_blocks)?;
@@ -1592,7 +1681,7 @@ async fn send_message(
     };
     if write_tx.send(prompt_line).await.is_err() {
         runtime.acp.lock().await.remove_pending(request_id);
-        let _ = state.remove_session_if_matches(&runtime, &source, &peri_id, prompt_generation);
+        let _ = state.remove_session_if_matches(runtime, source, &peri_id, prompt_generation);
         return Err("ACP connection closed".to_string());
     }
     let acp_for_cancel = runtime.acp.clone();
@@ -1608,33 +1697,41 @@ async fn send_message(
 
     match result {
         PromptWaitOutcome::Response(raw) => {
-            state.ensure_generation(&runtime, prompt_generation)?;
-            if !state.session_matches(&runtime, &source, &peri_id, prompt_generation)? {
+            state.ensure_generation(runtime, prompt_generation)?;
+            if !state.session_matches(runtime, source, &peri_id, prompt_generation)? {
                 return Err(format!("stale session mapping for source: {source}"));
             }
             if let Some(error) = raw.error {
                 let error = error.to_string();
-                emit_event_all(&window, &gateway, &source, "peri:error", serde_json::json!({"source": source, "error": error}));
+                if let Some(window) = window {
+                    emit_event_all(window, gateway, source, "peri:error", serde_json::json!({"source": source, "error": error}));
+                }
                 let _ = state.pet.lock().map(|mut p| pet::on_error(&mut p));
                 Err(error)
             } else {
                 let data = raw.result.unwrap_or(serde_json::Value::Null);
                 AcpClient::prompt_stop_reason(&data).map_err(|error| {
-                    emit_event_all(&window, &gateway, &source, "peri:error", serde_json::json!({"source": source, "error": error}));
+                    if let Some(window) = window {
+                    emit_event_all(window, gateway, source, "peri:error", serde_json::json!({"source": source, "error": error}));
+                }
                     let _ = state.pet.lock().map(|mut pet| pet::on_error(&mut pet));
                     error
                 })?;
-                if let Err(error) = state.ensure_generation(&runtime, prompt_generation) {
-                    let _ = state.remove_session_if_matches(&runtime, &source, &peri_id, prompt_generation);
-                    emit_event_all(&window, &gateway, &source, "peri:error", serde_json::json!({"source": source, "error": error}));
+                if let Err(error) = state.ensure_generation(runtime, prompt_generation) {
+                    let _ = state.remove_session_if_matches(runtime, source, &peri_id, prompt_generation);
+                    if let Some(window) = window {
+                    emit_event_all(window, gateway, source, "peri:error", serde_json::json!({"source": source, "error": error}));
+                }
                     return Err(error);
                 }
                 if is_first {
-                    state.mark_first_prompt_if_matches(&runtime, &source, &peri_id, prompt_generation)?;
+                    state.mark_first_prompt_if_matches(runtime, source, &peri_id, prompt_generation)?;
                 }
-                emit_event_all(&window, &gateway, &source, "peri:done", serde_json::json!({"source": source, "data": data}));
+                if let Some(window) = window {
+                    emit_event_all(window, gateway, source, "peri:done", serde_json::json!({"source": source, "data": data}));
+                }
                 let _ = state.pet.lock().map(|mut p| pet::on_done(&mut p));
-                state.inner().log_runtime_summary( "info", "prompt", Some(source.clone()), "Prompt completed", serde_json::Map::from_iter([
+                state.log_runtime_summary( "info", "prompt", Some(source.to_string()), "Prompt completed", serde_json::Map::from_iter([
                     ("result".to_string(), serde_json::Value::String("success".to_string())),
                 ]));
                 Ok(peri_id)
@@ -1642,8 +1739,8 @@ async fn send_message(
         }
         PromptWaitOutcome::ConnectionClosed => {
             runtime.acp.lock().await.remove_pending(request_id);
-            let _ = state.remove_session_if_matches(&runtime, &source, &peri_id, prompt_generation);
-            state.inner().log_runtime_summary( "error", "prompt", Some(source.clone()), "Prompt connection closed", serde_json::Map::new());
+            let _ = state.remove_session_if_matches(runtime, source, &peri_id, prompt_generation);
+            state.log_runtime_summary( "error", "prompt", Some(source.to_string()), "Prompt connection closed", serde_json::Map::new());
             Err("ACP connection closed".to_string())
         }
         PromptWaitOutcome::CancelledAfterTimeout { response, cancel_error } => {
@@ -1652,7 +1749,7 @@ async fn send_message(
                 log::warn!("cancel timed-out prompt {}: {}", peri_id, cancel_error);
             }
             if response.is_none() {
-                match state.remove_session_if_matches(&runtime, &source, &peri_id, prompt_generation) {
+                match state.remove_session_if_matches(runtime, source, &peri_id, prompt_generation) {
                     Ok(true) => {
                         log::error!(
                             "cancelled prompt {} did not settle within {}s; removed local session mapping",
@@ -1660,7 +1757,7 @@ async fn send_message(
                             acp::CANCEL_SETTLE_TIMEOUT_SECS
                         );
                         if let Ok(close_params) = acp::session_close_params(&peri_id) {
-                            if let Err(close_error) = state.inner().acp_rpc(&runtime, acp::METHOD_SESSION_CLOSE, close_params).await {
+                            if let Err(close_error) = state.acp_rpc(runtime, acp::METHOD_SESSION_CLOSE, close_params).await {
                                 log::warn!("close unsettled prompt session {}: {}", peri_id, close_error);
                             }
                         }
@@ -1670,8 +1767,10 @@ async fn send_message(
                 }
             }
             let error = "timed out after 300s";
-            emit_event_all(&window, &gateway, &source, "peri:error", serde_json::json!({"source": source, "error": error}));
-            state.inner().log_runtime_summary( "error", "prompt", Some(source.clone()), "Prompt timed out", serde_json::Map::from_iter([
+            if let Some(window) = window {
+                emit_event_all(window, gateway, source, "peri:error", serde_json::json!({"source": source, "error": error}));
+            }
+            state.log_runtime_summary( "error", "prompt", Some(source.to_string()), "Prompt timed out", serde_json::Map::from_iter([
                 ("result".to_string(), serde_json::Value::String("timeout".to_string())),
             ]));
             Err(error.to_string())
@@ -2338,6 +2437,53 @@ pub fn run() {
                     start_notification_dispatcher(&handles, &runtime, window.clone());
                 }
                 app.state::<AppState>().inner().start_runtime_log_dispatcher(window);
+                // gateway ingest handler（B10.3）：平台消息 → 绑定/默认 agent runtime → 发送。
+                // 平台消息路由不切换 GUI active agent；目标 agent 未连接时懒启动
+                // （announce=false，不广播 GUI 状态）。
+                {
+                    let app_handle = app.handle().clone();
+                    let main_webview = app.get_webview_window("main");
+                    let main_window = main_webview.as_ref().map(|w| w.as_ref().window());
+                    let state = app.state::<AppState>();
+                    state.gateway.set_ingest_handler(Arc::new(move |resolved: &gateway::ResolvedIngest| {
+                        let app = app_handle.clone();
+                        let webview = main_webview.clone();
+                        let window = main_window.clone();
+                        let resolved = resolved.clone();
+                        tokio::spawn(async move {
+                            let state = app.state::<AppState>();
+                            let agent_id = resolved.binding.as_ref().map(|b| b.agent_id.clone())
+                                .unwrap_or_else(|| {
+                                    state.inner().active_agent.lock().map(|v| v.clone()).unwrap_or_default()
+                                });
+                            if agent_id.is_empty() {
+                                log::warn!("gateway ingest 无路由目标（未绑定且无 active agent）: {}", resolved.source);
+                                return;
+                            }
+                            let runtime = state.inner().runtimes.get_or_create(&agent_id);
+                            if let Some(webview) = webview.as_ref() {
+                                if let Err(error) = state.inner().ensure_runtime_ready(&runtime, &agent_id, webview).await {
+                                    log::warn!("gateway ingest 目标 agent 连接失败 ({agent_id}): {error}");
+                                    return;
+                                }
+                            }
+                            if let Err(error) = send_prompt_core(
+                                state.inner(),
+                                &runtime,
+                                window.as_ref(),
+                                &state.gateway,
+                                &resolved.source,
+                                &resolved.content,
+                                "",
+                                None,
+                                None,
+                                None,
+                            ).await {
+                                log::warn!("gateway ingest 发送失败 ({}): {error}", resolved.source);
+                            }
+                        });
+                    }));
+                }
                 Ok(())
             })
             // 关窗时不在此处 block_on kill——run() 由 rt.block_on 驱动，窗口回调在

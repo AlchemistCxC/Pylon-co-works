@@ -67,11 +67,15 @@ fn parse_ws_close_code(err: &str) -> u16 {
     0
 }
 
-/// 消息分发结果：平台消息 → gateway 入站（B10.3 会话生命周期消费）。
+/// 消息分发结果：平台消息 → gateway 入站（白名单/去重/ACP 发送由适配器层处理）。
 pub struct Dispatch {
     pub source: String,
     pub msg_id: String,
     pub content: String,
+    /// 群内发件人 openid（白名单成员级检查用）。
+    pub member_openid: Option<String>,
+    /// 私聊用户 openid（白名单检查用）。
+    pub user_openid: Option<String>,
 }
 
 /// 从 Dispatch 事件（op 0）中提取干净消息：
@@ -98,6 +102,12 @@ pub fn process_dispatch_event(event: &QqEvent) -> Option<Dispatch> {
     } else {
         format!("qq:user:{}", msg.author.as_ref()?.user_openid.as_deref()?)
     };
+    let member_openid = msg.author.as_ref().and_then(|a| a.member_openid.clone());
+    let user_openid = if is_c2c {
+        msg.author.as_ref().and_then(|a| a.user_openid.clone())
+    } else {
+        None
+    };
 
     let mut content = msg.content.unwrap_or_default();
     if is_group {
@@ -119,6 +129,8 @@ pub fn process_dispatch_event(event: &QqEvent) -> Option<Dispatch> {
         source,
         msg_id,
         content: parts.join("\n"),
+        member_openid,
+        user_openid,
     })
 }
 
@@ -315,16 +327,22 @@ async fn run_connection(
                                     }
                                 }
 
-                                // 消息事件 → 去重 → gateway.ingest（B10.3 起接 ACP 发送）
+                                // 消息事件 → 去重/白名单 → gateway dispatch（ACP 发送）
                                 if let Some(dispatch) = process_dispatch_event(&event) {
-                                    match adapter.handle_incoming(&dispatch.source, &dispatch.msg_id, &dispatch.content) {
+                                    match adapter.handle_incoming(
+                                        &dispatch.source,
+                                        &dispatch.msg_id,
+                                        &dispatch.content,
+                                        dispatch.member_openid.as_deref(),
+                                        dispatch.user_openid.as_deref(),
+                                    ) {
                                         Ok(Some(resolved)) => {
                                             log::info!("QQ WS: ingest {} ({})", dispatch.source, dispatch.msg_id);
                                             if let Some(binding) = resolved.binding {
                                                 log::info!("QQ WS: 路由命中 {} / {} / {}", binding.agent_id, binding.profile_id, binding.session_key);
                                             }
                                         }
-                                        Ok(None) => log::debug!("QQ WS: 重放消息丢弃 {}", dispatch.msg_id),
+                                        Ok(None) => log::debug!("QQ WS: 丢弃消息 {}（重放/白名单）", dispatch.msg_id),
                                         Err(error) => log::warn!("QQ WS: ingest 失败: {error}"),
                                     }
                                 }
