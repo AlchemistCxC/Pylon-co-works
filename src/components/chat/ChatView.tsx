@@ -23,6 +23,7 @@ import { measureRender, recordMeasuredAsync, recordRender } from './renderMetric
 import { prepareRenderableMessages } from './messagePipeline'
 import type { Message as PipelineMessage } from './messageTypes'
 import { buildMessageLookups } from './messageLookups'
+import { getToolSummary } from './toolPresentation'
 import './ChatView.css'
 
 
@@ -711,19 +712,7 @@ function ReasoningBlock({ text, running }: { text: string; running: boolean }) {
 }
 
 function formatToolInput(name: string, rawInput: unknown): string {
-  if (typeof rawInput !== 'object' || !rawInput) return ''
-  const input = rawInput as Record<string, unknown>
-  // Extract the most meaningful field per tool type
-  const firstString = (...values: unknown[]) => values.find((value): value is string => typeof value === 'string') || ''
-  if (name === 'Bash') return firstString(input.command, input.cmd)
-  if (name === 'Read' || name === 'Write' || name === 'Edit') return firstString(input.path, input.file_path, input.filePath)
-  if (name === 'Grep' || name === 'Glob') return firstString(input.pattern, input.regex, input.glob)
-  if (name === 'Task') return firstString(input.description, input.prompt, input.goal)
-  // Fallback: show first meaningful string value
-  for (const v of Object.values(input)) {
-    if (typeof v === 'string' && v.length > 0 && v.length < 200) return v
-  }
-  return ''
+  return getToolSummary(name, rawInput)
 }
 
 function ToolCard({ name, input, output, outputLines, status: toolStatus, visualState }: { name: string; input?: string; output?: string; outputLines?: number; status?: string; visualState?: string }) {
