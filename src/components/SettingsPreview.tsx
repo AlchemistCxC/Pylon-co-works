@@ -1,8 +1,9 @@
-import { useState, useEffect, useRef } from 'react'
+import { useState, useEffect, useRef, Fragment } from 'react'
 import ControlCenter from './ControlCenter'
 import { useStore } from '../store'
 import GenerationFooter from './chat/GenerationFooter'
 import { resolveSpinnerFrames } from './chat/spinnerFrames'
+import ToolConnector from './chat/ToolConnector'
 import { toCssBackgroundImage } from '../backgroundImage'
 
 interface Props { zone: string }
@@ -102,7 +103,12 @@ function PreviewApp({ zone }: { zone: string }) {
                   { name: 'Read', input: 'src/main.ts', done: true },
                   { name: 'Bash', input: 'npm run build', done: true },
                   { name: 'Edit', input: 'src/main.ts', done: false },
-                ].map((tl, i) => <div key={i} className="term-row term-row-tool"><PvTool {...tl} /></div>)}
+                ].map((tl, i) => (
+                  <Fragment key={i}>
+                    {i > 0 && <ToolConnector status={tl.done ? 'ok' : 'run'} />}
+                    <div className="term-row term-row-tool"><PvTool {...tl} /></div>
+                  </Fragment>
+                ))}
                 <PvSpinner />
                 <div className="term-assistant">
                   好的，我来分析一下。<code className="term-inline-code">main()</code> 里有一处类型错误需要修正。

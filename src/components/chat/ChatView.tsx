@@ -30,6 +30,7 @@ import { createMockMessages } from './chatMockData'
 import DiffCard from './DiffCard'
 import { messageMatchesQuery } from './messageSearchIndex'
 import MessageSearchBar from './MessageSearchBar'
+import ToolConnector from './ToolConnector'
 import { attachChatEventController, type ChatEventControllerRefs } from './chatEventController'
 import './ChatView.css'
 
@@ -328,6 +329,12 @@ const ChatView = React.memo(function ChatView({ sessionId }: Props) {
         const previousHead = previousRow?.querySelector<HTMLElement>('.term-tool-head')
         const head = row?.querySelector<HTMLElement>('.term-tool-head')
         if (!previousRow || !row || !previousHead || !head) continue
+        // 展开的工具下方无线：前一行 body 展开时截断（线不穿过 body）
+        if (previousRow.querySelector('.term-tool-body') !== null) {
+          connector.style.display = 'none'
+          continue
+        }
+        connector.style.display = 'block'
         const headHeight = head.offsetHeight
         const gap = row.offsetTop - (previousRow.offsetTop + previousRow.offsetHeight)
         const previousCenter = previousRow.offsetTop + previousRow.offsetHeight - 2 - headHeight / 2
@@ -414,15 +421,15 @@ const ChatView = React.memo(function ChatView({ sessionId }: Props) {
               const isToolRow = renderMessage.type === 'tool_call' || renderMessage.type === 'tool_result'
               const hasPreviousTool = isToolRow && previous !== undefined
                 && (previous.type === 'tool_call' || previous.type === 'tool_result')
-              const previousVisualState = previous ? resolveRowToolVisualState(previous.message, messageLookups) : undefined
+              const currentVisualState = resolveRowToolVisualState(renderMessage.message, messageLookups)
               return (
                 <React.Fragment key={renderMessage.message.id}>
-                  {hasPreviousTool && <ToolConnector status={previousVisualState === 'failed' ? 'err' : previousVisualState === 'completed' ? 'ok' : 'run'} />}
+                  {hasPreviousTool && <ToolConnector status={currentVisualState === 'failed' ? 'err' : currentVisualState === 'completed' ? 'ok' : 'run'} />}
                   <MemoMessageRow
                     renderMessage={renderMessage}
                     reduceMotion={reduceMotion === true}
                     isStatic={isMessageStatic(renderMessage)}
-                    toolVisualState={resolveRowToolVisualState(renderMessage.message, messageLookups)}
+                    toolVisualState={currentVisualState}
                     rowRef={node => {
                       if (node) messageRefs.current.set(renderMessage.message.id, node)
                       else messageRefs.current.delete(renderMessage.message.id)
@@ -476,19 +483,6 @@ const ChatView = React.memo(function ChatView({ sessionId }: Props) {
 })
 
 // ── Sub-components ──
-
-// 连续 Tool 之间的连接线：真实 DOM 元素，绝对定位在 .term 内，
-// top/height 由 ChatView 测量 effect 写入。层叠由 z-index 保证：
-// 线(1) 在 body 背景之上（展开不被截断）、head(2) 在线之上（指示器覆盖线）。
-function ToolConnector({ status }: { status: 'ok' | 'err' | 'run' }) {
-  const connectorMode = useStore(s => s.toolConnectorMode) || 'none'
-  const connectorColor = useStore(s => s.toolConnectorColor) || 'rgba(0,0,0,0.12)'
-  const toolOk = useStore(s => s.toolOk)
-  const toolRun = useStore(s => s.toolRun)
-  const toolErr = useStore(s => s.toolErr)
-  const color = resolveConnectorColor(connectorMode, status, { toolOk, toolRun, toolErr }, connectorColor)
-  return <div className="term-tool-connector" style={{ background: color }} />
-}
 
 
 function MessageRow({ renderMessage, reduceMotion, toolVisualState, rowRef, highlighted, isStatic }: { renderMessage: RenderMessage; reduceMotion: boolean; toolVisualState?: string; rowRef?: (node: HTMLDivElement | null) => void; highlighted?: boolean; isStatic?: boolean }) {
