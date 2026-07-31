@@ -1,4 +1,4 @@
-//! QQ 重放去重（BE-B10-003）。
+﻿//! QQ 重放去重（BE-B10-003）。
 //!
 //! 纯数据层：seen 滑动窗口（msg_id → 单调递增序号，超限清理最旧）+ last_msg_id
 //! 映射（chat_id → 最新 msg_id）。不依赖 tauri/WS，无 IO。
@@ -11,14 +11,12 @@ use std::collections::HashMap;
 /// seen 窗口上限（Hermes 实证值）。
 ///
 /// 待 B10.2 QQ 适配器消费，当前仅单测引用，故允许 dead_code。
-#[allow(dead_code)]
 const DEDUP_MAX_SIZE: usize = 1000;
 
 /// QQ 重放去重状态。
 ///
 /// 纯数据层，供 B10.2 适配器在 ingest 前判重、回复时取 last_msg_id；
 /// 当前尚未被适配器消费（仅单测），故允许 dead_code。
-#[allow(dead_code)]
 pub struct DedupState {
     /// msg_id → 单调递增序号（替代真实时间，用于清理最旧条目）。
     seen: HashMap<String, u64>,
@@ -29,7 +27,6 @@ pub struct DedupState {
 }
 
 /// 实现（各方法待 B10.2 适配器消费，当前仅单测引用，故允许 dead_code）。
-#[allow(dead_code)]
 impl DedupState {
     pub fn new() -> Self {
         Self {
@@ -52,6 +49,13 @@ impl DedupState {
         true
     }
 
+    /// seen 窗口容量（DEDUP_MAX_SIZE，Hermes 实证值）。
+    /// 待 B10.2 适配器（/测试）消费后移除 allow。
+    #[allow(dead_code)]
+    pub fn window_capacity(&self) -> usize {
+        DEDUP_MAX_SIZE
+    }
+
     /// 清理 seen 窗口中序号最小的条目（最旧）。
     fn evict_oldest(&mut self) {
         if let Some(oldest) = self
@@ -65,6 +69,8 @@ impl DedupState {
     }
 
     /// 查询 chat 的最新 msg_id。
+    /// 待 B10.2 适配器回复锚点接线后消费。
+    #[allow(dead_code)]
     pub fn latest_for(&self, chat_id: &str) -> Option<&str> {
         self.last_msg_id.get(chat_id).map(String::as_str)
     }

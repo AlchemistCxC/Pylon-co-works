@@ -1,4 +1,4 @@
-//! 平台静态绑定路由（BE-B10-001）。
+﻿//! 平台静态绑定路由（BE-B10-001）。
 //!
 //! 首版静态 EntityBinding 路由表：source（如 `qq:group:123`）→
 //! { agent_id, profile_id, session_key }。未匹配的 source 由调用方回退默认绑定。
@@ -25,7 +25,6 @@ use serde::Deserialize;
 /// Rust 侧统一为 `agent_id`/`profile_id`/`session_key` 命名。
 // 占位期无消费者（BE-B10-004/005/006 才接入命令层），此处仅抑制 dead_code 中间态噪音；
 // 消费者接入后本 allow 可移除。
-#[allow(dead_code)]
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
 pub struct EntityBinding {
     pub source: String,
@@ -53,7 +52,6 @@ struct GatewaySection {
 }
 
 /// 静态绑定路由表。
-#[allow(dead_code)]
 #[derive(Debug)]
 pub struct EntityRouteTable {
     entries: Vec<EntityBinding>,
@@ -65,7 +63,6 @@ impl EntityRouteTable {
     /// - source 重复 → Err（同一 platform_key 只允许一条绑定）
     /// - 未知字段忽略（serde 默认行为）
     /// - 缺 `gateway` 段 / `routes` 为空 → 空表
-    #[allow(dead_code)]
     pub fn from_yaml_str(input: &str) -> Result<Self, String> {
         let config: GatewayConfigFile = serde_yaml::from_str(input)
             .map_err(|e| format!("gateway 配置解析失败: {e}"))?;
@@ -82,13 +79,11 @@ impl EntityRouteTable {
     }
 
     /// 构造空路由表（无任何绑定）。
-    #[allow(dead_code)]
     pub fn empty() -> Self {
         Self { entries: Vec::new() }
     }
 
     /// 按 source 精确查询绑定；未命中返回 None（由调用方回退默认绑定）。
-    #[allow(dead_code)]
     pub fn lookup(&self, source: &str) -> Option<&EntityBinding> {
         self.entries.iter().find(|e| e.source == source)
     }

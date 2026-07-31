@@ -1,4 +1,4 @@
-mod acp;
+﻿mod acp;
 mod agent_config;
 mod agent_runtime;
 mod error;
@@ -19,6 +19,7 @@ use acp::{AcpClient, PromptWaitOutcome};
 use agent_config::AgentDef;
 use agent_runtime::{session_mapping_matches, source_for_peri_id_in_generation, status_after_connection_failure, AgentLifecycleStatus, AgentRuntimeState};
 use error::PylonError;
+use gateway::GatewayCore;
 use prism::PrismClient;
 use runtime::{AgentRuntime, AgentRuntimeManager};
 
@@ -32,7 +33,18 @@ where
     }
 }
 
-/// AppState：全局状态 = 全局配置 + per-agent 隔离运行时（B7a-2）。
+/// 事件广播（B10.1）：WebView 始终接收；平台 source 同时经 gateway 投递平台适配器。
+/// peri:user 回显/agent-status/runtime-log 不投平台（仅 update/done/error）。
+fn emit_event_all<R, W>(window: &W, gateway: &GatewayCore, source: &str, event: &str, payload: serde_json::Value)
+where
+    R: Runtime,
+    W: Emitter<R>,
+{
+    emit_event(window, event, payload.clone());
+    gateway.deliver_all(source, event, &payload);
+}
+
+/// AppState：全局状态 = 全局配置 + per-agent 隔离运行时（B7a-2）+ gateway（B10.1）。
 /// per-agent 字段（acp/notification_task/session_creation/agent_lifecycle/
 /// client_generation/prompt_locks/sessions/agent_runtime/auto_reconnect_active）
 /// 全部收进 AgentRuntimeManager（runtime.rs），命令层按 active_agent 解析 runtime。
@@ -44,6 +56,7 @@ struct AppState {
     runtime_logs: Arc<runtime_log::RuntimeLogHub>,
     runtime_mcp: Mutex<Option<Vec<mcp::McpServerConfig>>>,
     prism: PrismClient,
+    gateway: Arc<GatewayCore>,
 }
 
 /// 供 async 闭包/静态辅助持有的 AppState 字段子集。
@@ -56,6 +69,7 @@ struct AppStateHandles {
     active_agent: Arc<Mutex<String>>,
     pet: Arc<Mutex<pet::PetState>>,
     runtime_logs: Arc<runtime_log::RuntimeLogHub>,
+    gateway: Arc<GatewayCore>,
 }
 
 impl AppStateHandles {
@@ -66,6 +80,7 @@ impl AppStateHandles {
             active_agent: state.active_agent.clone(),
             pet: state.pet.clone(),
             runtime_logs: state.runtime_logs.clone(),
+            gateway: state.gateway.clone(),
         }
     }
 
@@ -651,6 +666,7 @@ fn start_notification_dispatcher<R: tauri::Runtime>(handles: &AppStateHandles, r
         let agent_runtime = runtime.agent_runtime.clone();
         let runtime_logs = handles.runtime_logs.clone();
         let runtimes = handles.runtimes.clone();
+        let gateway = handles.gateway.clone();
         let runtime_for_reconnect = runtime.clone();
         *task = Some(tokio::spawn(async move {
             let mut rx = acp.lock().await.rx.resubscribe();
@@ -713,6 +729,7 @@ fn start_notification_dispatcher<R: tauri::Runtime>(handles: &AppStateHandles, r
                             active_agent: active_agent.clone(),
                             pet: pet.clone(),
                             runtime_logs: runtime_logs.clone(),
+                            gateway: gateway.clone(),
                         };
                         tokio::spawn(async move {
                             // 手动 switch 会 abort 本 runtime 的 dispatcher，但不会
@@ -894,9 +911,9 @@ fn start_notification_dispatcher<R: tauri::Runtime>(handles: &AppStateHandles, r
                     break;
                 }
                 if let serde_json::Value::Object(ref mut map) = payload {
-                    map.insert("source".to_string(), serde_json::Value::String(source));
+                    map.insert("source".to_string(), serde_json::Value::String(source.clone()));
                 }
-                emit_event(&window, "peri:update", payload);
+                emit_event_all(&window, &gateway, &source, "peri:update", payload);
             }
         }));
     }
@@ -1165,6 +1182,7 @@ for line in sys.stdin:
             runtime_logs: runtime_log::RuntimeLogHub::default(),
             runtime_mcp: Mutex::new(None),
             prism: prism::PrismClient::unavailable("test".to_string()),
+            gateway: Arc::new(gateway::GatewayCore::new()),
         }
     }
 
@@ -1503,6 +1521,7 @@ async fn send_message(
     mcp_servers: Option<Vec<mcp::McpServerConfig>>,
 ) -> Result<String, String> {
     let runtime = state.inner().require_runtime()?;
+    let gateway = state.gateway.clone();
     state.inner().log_runtime_summary( "info", "prompt", Some(source.clone()), "Prompt started", serde_json::Map::from_iter([
         ("contentLength".to_string(), serde_json::Value::from(content.len())),
         ("attachmentCount".to_string(), serde_json::Value::from(attachments.as_ref().map_or(0, Vec::len))),
@@ -1512,7 +1531,7 @@ async fn send_message(
     let _prompt_guard = prompt_lock.lock().await;
 
     if runtime.acp.lock().await.is_crashed() {
-        emit_event(&window, "peri:error", serde_json::json!({"source": source, "error": PylonError::AgentCrashed.to_string()}));
+        emit_event_all(&window, &gateway, &source, "peri:error", serde_json::json!({"source": source, "error": PylonError::AgentCrashed.to_string()}));
         return Err(PylonError::AgentCrashed.into());
     }
 
@@ -1595,25 +1614,25 @@ async fn send_message(
             }
             if let Some(error) = raw.error {
                 let error = error.to_string();
-                emit_event(&window, "peri:error", serde_json::json!({"source": source, "error": error}));
+                emit_event_all(&window, &gateway, &source, "peri:error", serde_json::json!({"source": source, "error": error}));
                 let _ = state.pet.lock().map(|mut p| pet::on_error(&mut p));
                 Err(error)
             } else {
                 let data = raw.result.unwrap_or(serde_json::Value::Null);
                 AcpClient::prompt_stop_reason(&data).map_err(|error| {
-                    emit_event(&window, "peri:error", serde_json::json!({"source": source, "error": error}));
+                    emit_event_all(&window, &gateway, &source, "peri:error", serde_json::json!({"source": source, "error": error}));
                     let _ = state.pet.lock().map(|mut pet| pet::on_error(&mut pet));
                     error
                 })?;
                 if let Err(error) = state.ensure_generation(&runtime, prompt_generation) {
                     let _ = state.remove_session_if_matches(&runtime, &source, &peri_id, prompt_generation);
-                    emit_event(&window, "peri:error", serde_json::json!({"source": source, "error": error}));
+                    emit_event_all(&window, &gateway, &source, "peri:error", serde_json::json!({"source": source, "error": error}));
                     return Err(error);
                 }
                 if is_first {
                     state.mark_first_prompt_if_matches(&runtime, &source, &peri_id, prompt_generation)?;
                 }
-                emit_event(&window, "peri:done", serde_json::json!({"source": source, "data": data}));
+                emit_event_all(&window, &gateway, &source, "peri:done", serde_json::json!({"source": source, "data": data}));
                 let _ = state.pet.lock().map(|mut p| pet::on_done(&mut p));
                 state.inner().log_runtime_summary( "info", "prompt", Some(source.clone()), "Prompt completed", serde_json::Map::from_iter([
                     ("result".to_string(), serde_json::Value::String("success".to_string())),
@@ -1651,7 +1670,7 @@ async fn send_message(
                 }
             }
             let error = "timed out after 300s";
-            emit_event(&window, "peri:error", serde_json::json!({"source": source, "error": error}));
+            emit_event_all(&window, &gateway, &source, "peri:error", serde_json::json!({"source": source, "error": error}));
             state.inner().log_runtime_summary( "error", "prompt", Some(source.clone()), "Prompt timed out", serde_json::Map::from_iter([
                 ("result".to_string(), serde_json::Value::String("timeout".to_string())),
             ]));
@@ -2201,6 +2220,7 @@ pub fn run() {
             }
         };
         let runtime_logs = runtime_log::RuntimeLogHub::default();
+        let gateway = Arc::new(GatewayCore::new());
         let runtimes = Arc::new(AgentRuntimeManager::new());
         let default_runtime = AgentRuntime::new_disconnected();
         {
@@ -2246,6 +2266,7 @@ pub fn run() {
                 runtime_logs,
                 runtime_mcp: Mutex::new(None),
                 prism,
+                gateway,
             })
             .invoke_handler(tauri::generate_handler![
                 prism_health, prism_status, prism_state, prism_scenarios, prism_sources, prism_aliases, prism_config,

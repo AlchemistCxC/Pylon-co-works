@@ -1,4 +1,4 @@
-//! 长回复切断（BE-B10-002）。
+﻿//! 长回复切断（BE-B10-002）。
 //!
 //! 纯函数分段器：平台单条文本有上限（QQ = 4000 字符），agent 输出超限时切成多段。
 //! 规则参考 Hermes `gateway/platforms/base.py::truncate_message`：
@@ -21,7 +21,6 @@ const FENCE_CLOSE: &str = "\n```";
 ///
 /// B10 deliver 发送管线尚未接线，暂与 route.rs/dedup.rs 占位文件一致标 allow；
 /// 网关发送队列落地调用后移除。
-#[allow(dead_code)]
 pub fn truncate_message(content: &str, max_length: usize) -> Vec<String> {
     if char_len(content) <= max_length {
         return vec![content.to_string()];
