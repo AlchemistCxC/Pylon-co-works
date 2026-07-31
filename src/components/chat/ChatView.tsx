@@ -31,6 +31,7 @@ import { createMockMessages } from './chatMockData'
 import DiffCard from './DiffCard'
 import { messageMatchesQuery } from './messageSearchIndex'
 import MessageSearchBar from './MessageSearchBar'
+import { createMessageIdAllocator } from './messageIdAllocator'
 import './ChatView.css'
 
 interface Props { sessionId: string | null }
@@ -95,6 +96,7 @@ const ChatView = React.memo(function ChatView({ sessionId }: Props) {
   const [searchQuery, setSearchQuery] = useState('')
   const [searchIndex, setSearchIndex] = useState(0)
   const messageRefs = useRef(new Map<string, HTMLDivElement>())
+  const messageIdsRef = useRef(createMessageIdAllocator())
   const sessionRef = useRef<string | null>(null)
   const messageOwnerRef = useRef<string | null>(null)
   const messagesBySourceRef = useRef<Record<string, Message[]>>({})
@@ -284,8 +286,8 @@ const ChatView = React.memo(function ChatView({ sessionId }: Props) {
       if (text || thinking) {
         updateSourceMessages(source, previous => [
           ...previous,
-          ...(thinking ? [{ id: 'thought-' + Date.now(), role: 'reasoning' as const, sender: 'peri', content: thinking, time: new Date().toLocaleTimeString(), running: false }] : []),
-          ...(text ? [{ id: 'msg-' + Date.now(), role: 'assistant' as const, sender: 'peri', content: text, time: new Date().toLocaleTimeString(), running: false }] : []),
+          ...(thinking ? [{ id: messageIdsRef.current.next('thought'), role: 'reasoning' as const, sender: 'peri', content: thinking, time: new Date().toLocaleTimeString(), running: false }] : []),
+          ...(text ? [{ id: messageIdsRef.current.next('msg'), role: 'assistant' as const, sender: 'peri', content: text, time: new Date().toLocaleTimeString(), running: false }] : []),
         ])
       }
       streamingSourceRef.current = null
@@ -326,7 +328,7 @@ const ChatView = React.memo(function ChatView({ sessionId }: Props) {
         const replay = replayMode !== 'live'
         const update = (prev: Message[]) => [
           ...prev.map(m => ({ ...m, running: false })),
-          { id: 'user-' + Date.now(), role: 'user' as const, sender: source, content, time: new Date().toLocaleTimeString() },
+          { id: messageIdsRef.current.next('user'), role: 'user' as const, sender: source, content, time: new Date().toLocaleTimeString() },
         ]
         if (replay && !replayingSourcesRef.current[source]) replayingSourcesRef.current[source] = []
         updateSourceMessages(source, update, replay)
@@ -386,7 +388,7 @@ const ChatView = React.memo(function ChatView({ sessionId }: Props) {
               if (last?.role === 'assistant' && last.running) {
                 return prev.map((m, i) => i === prev.length - 1 ? { ...m, content: m.content + text } : m)
               }
-              return [...prev, { id: 'msg-' + Date.now(), role: 'assistant', sender: 'peri', content: text, time: new Date().toLocaleTimeString(), running: !replay }]
+              return [...prev, { id: messageIdsRef.current.next('msg'), role: 'assistant', sender: 'peri', content: text, time: new Date().toLocaleTimeString(), running: !replay }]
             }, replay)
             break
           }
@@ -405,7 +407,7 @@ const ChatView = React.memo(function ChatView({ sessionId }: Props) {
               if (last?.role === 'reasoning' && last.running) {
                 return prev.map((m, i) => i === prev.length - 1 ? { ...m, content: m.content + text } : m)
               }
-              return [...prev, { id: 'thought-' + Date.now(), role: 'reasoning', sender: 'peri', content: text, time: new Date().toLocaleTimeString(), running: !replay }]
+              return [...prev, { id: messageIdsRef.current.next('thought'), role: 'reasoning', sender: 'peri', content: text, time: new Date().toLocaleTimeString(), running: !replay }]
             }, replay)
             break
           }
@@ -418,7 +420,7 @@ const ChatView = React.memo(function ChatView({ sessionId }: Props) {
             const title = upd.title || '?'
             const inputStr = formatToolInput(title, rawInput) || (typeof rawInput === 'string' ? rawInput.slice(0, 80) : '')
             updateSourceMessages(source, prev => [...prev, {
-              id: 'tool-' + (toolId || `missing-${prev.length}`), role: 'tool', sender: 'tool:' + title, content: '', time: new Date().toLocaleTimeString(),
+              id: 'tool-' + (toolId || messageIdsRef.current.next('tool-missing')), role: 'tool', sender: 'tool:' + title, content: '', time: new Date().toLocaleTimeString(),
               toolName: title, toolInput: inputStr, running: true,
             }], replay)
             break
@@ -502,7 +504,7 @@ const ChatView = React.memo(function ChatView({ sessionId }: Props) {
         }
         if (terminationScope === 'live' && !cancellationFailed) flushStreaming(source)
         updateSourceMessages(source, prev => [...settleReplayToolMessages(prev.map(m => ({ ...m, running: false }))), {
-          id: 'err-' + Date.now(), role: 'assistant', sender: 'system', content: error, time: new Date().toLocaleTimeString(),
+          id: messageIdsRef.current.next('err'), role: 'assistant', sender: 'system', content: error, time: new Date().toLocaleTimeString(),
         }], replay)
         if (terminationScope === 'live' && !cancellationFailed && isRenderedSource(source, sessionRef.current)) {
           const start = generationStartRef.current[source] || genStart.current
