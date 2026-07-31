@@ -71,6 +71,10 @@ pub enum AiEvent {
     Feed,
     Sleepy,
     Visit,
+    /// Agent 进程连接成功（switch/重连/自动重连）
+    AgentConnected,
+    /// Agent 进程崩溃/断开
+    AgentCrashed,
 }
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
@@ -157,7 +161,13 @@ impl PetState {
     pub fn apply(&mut self, event: AiEvent, now_ms: u64) {
         self.visit(now_ms);
         match event {
-            AiEvent::Visit => {}
+            AiEvent::Visit => {
+                // 睡眠中被日常访问唤醒
+                if self.mood == "sleepy" {
+                    self.mood = "idle".into();
+                    self.msg = Some("它被你的脚步声唤醒。".into());
+                }
+            }
             AiEvent::UserSent => {
                 self.stats.messages = self.stats.messages.saturating_add(1);
                 self.first_chunk_at_ms = None;
@@ -180,7 +190,9 @@ impl PetState {
                 self.happiness = self.happiness.saturating_add(2).min(100);
                 self.energy = self.energy.saturating_sub(2);
                 self.mood = "excited".into();
-                if self.stats.prompts_completed % 10 == 0 {
+                if self.stats.prompts_completed == 1 {
+                    self.remember("陪你完成了第一次任务".into());
+                } else if self.stats.prompts_completed % 10 == 0 {
                     self.remember(format!("共同完成了 {} 次任务", self.stats.prompts_completed));
                 }
                 self.msg = Some("它把这次完成收进了身体。".into());
@@ -213,6 +225,16 @@ impl PetState {
             AiEvent::Sleepy => {
                 self.mood = "sleepy".into();
                 self.msg = Some("它蜷成一小团等待。".into());
+            }
+            AiEvent::AgentConnected => {
+                self.mood = "excited".into();
+                self.gain_bond(1);
+                self.msg = Some("连接亮起，它精神地站了起来。".into());
+            }
+            AiEvent::AgentCrashed => {
+                self.mood = "error".into();
+                self.happiness = self.happiness.saturating_sub(2);
+                self.msg = Some("连接断了，它吓得缩了一下。".into());
             }
         }
     }
@@ -312,8 +334,12 @@ impl PetState {
         self.stats.active_days = self.stats.active_days.saturating_add(1);
         self.stats.streak_days = if elapsed == 1 { self.stats.streak_days.saturating_add(1) } else { 1 };
         self.stats.longest_streak = self.stats.longest_streak.max(self.stats.streak_days);
+        if self.stats.streak_days == 7 {
+            self.remember("和你连续相伴了 7 天".into());
+        }
         self.energy = self.energy.saturating_add(20).min(100);
-        self.happiness = self.happiness.saturating_sub((elapsed.min(5) * 2) as u8);
+        let loneliness = (elapsed.min(5) * 2) as u8;
+        self.happiness = self.happiness.saturating_sub(loneliness);
         self.last_seen_day = today;
     }
 
@@ -325,7 +351,12 @@ impl PetState {
     }
 
     fn gain_xp(&mut self, amount: u32) {
+        let previous = self.stage();
         self.xp = self.xp.saturating_add(amount).min(999_999);
+        let evolved = self.stage();
+        if evolved != previous && evolved > previous {
+            self.remember(format!("蜕变为{}", evolved.title()));
+        }
     }
 
     fn gain_bond(&mut self, amount: u32) {

@@ -60,3 +60,49 @@ fn restores_old_data_by_clamping_and_recomputing_derived_stats() {
     assert_eq!(restored.stats.tool_success_rate, 75);
     assert_eq!(restored.age_days(86_400_000), 2);
 }
+
+#[test]
+fn sleepy_pet_is_woken_by_daily_visit() {
+    let mut pet = PetState::new_at(0);
+    pet.apply(AiEvent::FirstChunk, 1);
+    assert!(pet.check_sleepy(31_000), "30s idle after first chunk must fall asleep");
+    assert_eq!(pet.mood, "sleepy");
+
+    pet.apply(AiEvent::Visit, 31_001);
+    assert_eq!(pet.mood, "idle", "daily visit must wake a sleeping pet");
+    assert_eq!(pet.msg.as_deref(), Some("它被你的脚步声唤醒。"));
+}
+
+#[test]
+fn first_completion_and_evolution_become_memories() {
+    let mut pet = PetState::new_at(0);
+    for now in 1..=9 {
+        pet.apply(AiEvent::PromptCompleted, now);
+    }
+    assert_eq!(pet.stage(), GrowthStage::Sprout);
+    assert!(pet.memories.iter().any(|m| m.contains("第一次任务")));
+    assert!(pet.memories.iter().any(|m| m.contains("蜕变为初生体")));
+}
+
+#[test]
+fn agent_connect_and_crash_move_mood_and_stats() {
+    let mut pet = PetState::new_at(0);
+    let happiness_before = pet.happiness;
+
+    pet.apply(AiEvent::AgentConnected, 1);
+    assert_eq!(pet.mood, "excited");
+    assert_eq!(pet.bond, 1);
+
+    pet.apply(AiEvent::AgentCrashed, 2);
+    assert_eq!(pet.mood, "error");
+    assert_eq!(pet.happiness, happiness_before.saturating_sub(2));
+}
+
+#[test]
+fn token_delta_awards_step_xp_like_full_usage() {
+    let mut pet = PetState::new_at(0);
+    pet.apply(AiEvent::TokenDelta { amount: 8_000 }, 1);
+    pet.apply(AiEvent::TokenDelta { amount: 5_000 }, 2);
+    assert_eq!(pet.stats.tokens_total, 13_000);
+    assert_eq!(pet.xp, 2);
+}
