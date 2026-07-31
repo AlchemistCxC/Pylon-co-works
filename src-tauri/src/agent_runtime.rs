@@ -37,37 +37,6 @@ pub fn session_mapping_matches(
     current_peri_id == expected_peri_id && current_generation == expected_generation
 }
 
-pub fn notification_matches_session(
-    mapped_source: &str,
-    event_source: &str,
-    current_peri_id: &str,
-    event_peri_id: &str,
-    current_generation: u64,
-    event_generation: u64,
-) -> bool {
-    mapped_source == event_source
-        && session_mapping_matches(current_peri_id, current_generation, event_peri_id, event_generation)
-}
-
-pub fn notification_is_current(
-    mapped_source: &str,
-    event_source: &str,
-    current_peri_id: &str,
-    event_peri_id: &str,
-    current_generation: u64,
-    event_generation: u64,
-    active_generation: u64,
-) -> bool {
-    notification_matches_session(
-        mapped_source,
-        event_source,
-        current_peri_id,
-        event_peri_id,
-        current_generation,
-        event_generation,
-    ) && current_generation == active_generation
-}
-
 ///
 /// Peri `session/update` carries only `sessionId`. The local generation is
 /// therefore part of the routing key: stale mappings from an older client
@@ -107,22 +76,6 @@ impl Default for AgentRuntimeState {
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    #[test]
-    fn notification_requires_matching_source_peri_id_and_generation() {
-        assert!(notification_matches_session("a", "a", "peri-a", "peri-a", 4, 4));
-        assert!(!notification_matches_session("a", "b", "peri-a", "peri-a", 4, 4));
-        assert!(!notification_matches_session("a", "a", "peri-new", "peri-a", 4, 4));
-        assert!(!notification_matches_session("a", "a", "peri-a", "peri-a", 5, 4));
-    }
-
-    #[test]
-    fn notification_current_requires_active_generation() {
-        assert!(notification_is_current("a", "a", "peri-a", "peri-a", 4, 4, 4));
-        assert!(!notification_is_current("a", "a", "peri-a", "peri-a", 4, 4, 5));
-        assert!(!notification_is_current("a", "a", "peri-a", "peri-a", 5, 4, 5));
-        assert!(!notification_is_current("a", "b", "peri-a", "peri-a", 4, 4, 4));
-    }
 
     #[test]
     fn connection_failure_returns_to_disconnected_without_mutating_connected_state() {

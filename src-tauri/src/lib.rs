@@ -15,7 +15,7 @@ use std::time::Duration;
 use tauri::{Emitter, Manager, Runtime};
 use acp::{AcpClient, PromptWaitOutcome};
 use agent_config::AgentDef;
-use agent_runtime::{notification_is_current, session_mapping_matches, source_for_peri_id_in_generation, status_after_connection_failure, AgentLifecycleStatus, AgentRuntimeState};
+use agent_runtime::{session_mapping_matches, source_for_peri_id_in_generation, status_after_connection_failure, AgentLifecycleStatus, AgentRuntimeState};
 use error::PylonError;
 use prism::PrismClient;
 
@@ -534,15 +534,11 @@ fn start_notification_dispatcher(state: &AppState, window: tauri::WebviewWindow)
                     };
                     mapped
                 };
-                if !notification_is_current(
-                    &source,
-                    &source,
-                    &peri_id,
-                    &peri_id,
-                    generation,
-                    session_generation,
-                    client_generation.load(Ordering::Acquire),
-                ) {
+                // mapped/event 来自同一 session 映射（source/peri_id 相同），
+                // 等价检查退化为 generation 一致性：session 与 dispatcher 必须同代。
+                if session_generation != generation
+                    || client_generation.load(Ordering::Acquire) != generation
+                {
                     log::warn!("ACP notification rejected for stale session {}", peri_id);
                     continue;
                 }
