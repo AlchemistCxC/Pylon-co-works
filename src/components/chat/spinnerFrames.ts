@@ -1,11 +1,9 @@
-export const DEFAULT_SPARKLES = '✳✴✵✶✷✸✹✺✻✼❃❊'
+import { getSpinnerAssetPreset, type SpinnerAssetId } from './spinnerAssets.ts'
+import { resolveFrameIndex, type SpinnerMotionKind } from './spinnerMotion.ts'
 
-export const SPINNER_FRAME_PRESETS = {
-  sparkles: DEFAULT_SPARKLES,
-  'ascii-line': '|/-\\\\',
-  braille: '⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏',
-  dots: '⠁⠂⠄⡀⢀⠠⠐⠈',
-} as const
+export const DEFAULT_SPARKLES = getSpinnerAssetPreset('sparkles').frames
+
+export type SpinnerFramePreset = SpinnerAssetId
 
 function splitGraphemes(value: string): string[] {
   type Segmenter = new (locales?: string | string[], options?: { granularity: 'grapheme' }) => {
@@ -23,8 +21,8 @@ export function normalizeSpinnerFrames(value: string): string[] {
   return Array.from(new Set(splitGraphemes(value).map(frame => frame.trim()).filter(Boolean)))
 }
 
-export function resolveSpinnerFrames(preset: keyof typeof SPINNER_FRAME_PRESETS | 'custom', custom: string): string[] {
-  const frames = preset === 'custom' ? normalizeSpinnerFrames(custom) : normalizeSpinnerFrames(SPINNER_FRAME_PRESETS[preset])
+export function resolveSpinnerFrames(preset: SpinnerFramePreset, custom: string): string[] {
+  const frames = preset === 'custom' ? normalizeSpinnerFrames(custom) : normalizeSpinnerFrames(getSpinnerAssetPreset(preset).frames)
   return frames.length > 0 ? frames : normalizeSpinnerFrames(DEFAULT_SPARKLES)
 }
 
@@ -43,10 +41,21 @@ export function splitSpinnerFrames(value: string): string[] {
   return normalizeSpinnerFrames(value || DEFAULT_SPARKLES)
 }
 
-export function frameAt(frames: string[], elapsedMs: number, intervalMs = 120): string {
+export function frameAt(
+  frames: string[],
+  elapsedMs: number,
+  intervalMs = 120,
+  motion: SpinnerMotionKind = 'cycle',
+  direction?: 'forward' | 'reverse' | 'alternate',
+): string {
   const safeFrames = frames.length > 0 ? frames : splitSpinnerFrames('')
-  const interval = Math.max(1, intervalMs)
-  return safeFrames[Math.floor(Math.max(0, elapsedMs) / interval) % safeFrames.length]
+  return safeFrames[resolveFrameIndex({
+    frameCount: safeFrames.length,
+    elapsedMs,
+    intervalMs,
+    motion,
+    direction,
+  })]
 }
 
 export function completionFrame(frames: string[], elapsedMs: number): string {

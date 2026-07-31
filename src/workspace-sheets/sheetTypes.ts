@@ -45,22 +45,3 @@ export interface SheetRegistryEntry {
 export function isSheetKind(value: unknown): value is SheetKind {
   return typeof value === 'string' && (SHEET_KINDS as readonly string[]).includes(value)
 }
-
-export function normalizeSheetInput(input: SheetInput, now: number, fallbackId: SheetId): SheetRecord | null {
-  if (!isSheetKind(input.kind) || typeof input.title !== 'string' || !input.title.trim()) return null
-  const id = typeof input.id === 'string' && input.id.trim() ? input.id : fallbackId
-  const metadata = input.metadata && typeof input.metadata === 'object'
-    ? Object.fromEntries(Object.entries(input.metadata).filter(([key, value]) => typeof key === 'string' && typeof value === 'string'))
-    : undefined
-  return {
-    id,
-    kind: input.kind,
-    title: input.title.trim(),
-    ...(typeof input.agentId === 'string' && input.agentId.trim() ? { agentId: input.agentId.trim() } : {}),
-    ...(typeof input.singletonKey === 'string' && input.singletonKey.trim() ? { singletonKey: input.singletonKey.trim() } : {}),
-    ...(input.pinned === true ? { pinned: true } : {}),
-    createdAt: now,
-    lastFocusedAt: now,
-    ...(metadata && Object.keys(metadata).length > 0 ? { metadata } : {}),
-  }
-}

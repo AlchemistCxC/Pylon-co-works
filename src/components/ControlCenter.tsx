@@ -1,15 +1,13 @@
 import { useRef, useState, useCallback, useEffect, useId } from 'react'
 import { useStore } from '../store'
+import type { ThemeSettings } from '../store'
 import InputBar from './chat/InputBar'
 import ModelWidget from './chat/ModelWidget'
 import ModeWidget from './chat/ModeWidget'
 import SendWidget from './chat/SendWidget'
 import AttachWidget from './chat/AttachWidget'
 import ColorPopover from './ColorPopover'
-import { formatCacheReadTokens, formatTokenCount } from '../tokenFormat'
 import { toCssBackgroundImage } from '../backgroundImage'
-import { emptySessionLiveStats } from './chat/sessionRuntime'
-import type { SessionLiveStats } from './chat/sessionRuntime'
 import { resolveCcMinHeight, resolveVisibleStatusWidgetCount } from '../ccHeightState'
 import { CC_WIDGET_REGISTRY as WIDGET_REGISTRY, type CcWidgetDef as WidgetDef } from './cc/widgetRegistry'
 import './ControlCenter.css'
@@ -17,88 +15,6 @@ import './chat/StatusBar.css'  // model/mode/send/attach widget 样式
 
 interface Props {
   sessionId: string | null
-}
-
-const EMPTY_SESSION_LIVE_STATS = emptySessionLiveStats()
-
-function useSessionLiveStats(sessionId: string | null): SessionLiveStats {
-  return useStore(state => {
-    if (!sessionId) return EMPTY_SESSION_LIVE_STATS
-    const source = state.sessions.find(session => session.id === sessionId)?.source
-    return source ? (state.sessionLiveStats[source] ?? EMPTY_SESSION_LIVE_STATS) : EMPTY_SESSION_LIVE_STATS
-  })
-}
-
-function EkgWidget({ sessionId }: Props) {
-  const runtime = useSessionLiveStats(sessionId)
-  const tokensUsed = runtime.tokensUsed
-  const tokensMax = runtime.tokensMax
-  const used = Math.max(0, Math.min(1, tokensMax > 0 ? tokensUsed / tokensMax : 0))
-  const pct = Math.round(used * 100)
-  const barTrackColor = useStore(s => s.barTrackColor)
-  const barFillColor = useStore(s => s.barFillColor)
-  const barFillFollow = useStore(s => s.barFillFollow)
-  const barHeight = useStore(s => s.barHeight) || 10
-  const ekgGreen = useStore(s => s.ekgGreen)
-  const ekgYellow = useStore(s => s.ekgYellow)
-  const ekgRed = useStore(s => s.ekgRed)
-  const color = used < 0.50 ? (ekgGreen || '#34d399') : used < 0.80 ? (ekgYellow || '#fbbf24') : (ekgRed || '#f87171')
-  const barFill = (barFillFollow !== false) ? color : (barFillColor || color)
-  const ccScale = useStore(s => (s.ccScale || {})['ekg'] ?? 100)
-  const ccStyle = useStore(s => s.ccStyle) || 'bar'
-  // 柱状条
-  if (ccStyle === 'numeric') {
-    return <span className="ekg-pct" style={{ color, fontSize: `${ccScale}%` }}>{pct}%</span>
-  }
-  if (ccStyle === 'bar') {
-    return (
-      <div className="ekg-bar" style={{
-        '--bar-fill': `${pct}%`, '--bar-color': barFill,
-        '--bar-track': barTrackColor || 'rgba(0,0,0,0.18)',
-        '--bar-h': `${barHeight}px`,
-        fontSize: `${ccScale}%`,
-      } as React.CSSProperties}>
-        <div className="ekg-bar-track" />
-        <div className="ekg-bar-fill" />
-      </div>
-    )
-  }
-  // wave — 简化版 SVG
-  return (
-    <svg viewBox="0 0 140 30" className="ekg-svg" preserveAspectRatio="none"
-      style={{ fontSize: `${ccScale}%` } as React.CSSProperties}>
-      <rect x={0} y={12} width={140 * (1 - used)} height={6} rx={3} fill={color} opacity={0.3} />
-      <rect x={140 * (1 - used)} y={12} width={140 * used} height={6} rx={3} fill="var(--ekg-consumed,rgba(128,128,128,0.15))" />
-    </svg>
-  )
-}
-
-function PctWidget({ sessionId }: Props) {
-  const runtime = useSessionLiveStats(sessionId)
-  const tokensUsed = runtime.tokensUsed
-  const tokensMax = runtime.tokensMax
-  const used = Math.max(0, Math.min(1, tokensMax > 0 ? tokensUsed / tokensMax : 0))
-  const pct = Math.round(used * 100)
-  const ekgGreen = useStore(s => s.ekgGreen)
-  const ekgYellow = useStore(s => s.ekgYellow)
-  const ekgRed = useStore(s => s.ekgRed)
-  const color = used < 0.50 ? (ekgGreen || '#34d399') : used < 0.80 ? (ekgYellow || '#fbbf24') : (ekgRed || '#f87171')
-  const ccScale = useStore(s => (s.ccScale || {})['pct'] ?? 100)
-  return <span className="ekg-pct" style={{ color, fontSize: `${ccScale}%` }}>{pct}%</span>
-}
-
-function TokensWidget({ sessionId }: Props) {
-  const runtime = useSessionLiveStats(sessionId)
-  const tokensUsed = runtime.tokensUsed
-  const tokensMax = runtime.tokensMax
-  const cacheHit = runtime.cacheReadTokens
-  const ccScale = useStore(s => (s.ccScale || {})['tokens'] ?? 100)
-  return (
-    <span className="pill-mono" style={{ borderLeft: 'none', padding: 0, fontSize: `${ccScale}%` }}>
-      {formatTokenCount(tokensUsed)}/{formatTokenCount(tokensMax)}
-      {cacheHit > 0 && <span style={{ color: '#34d399', marginLeft: 4 }}>{formatCacheReadTokens(cacheHit)}</span>}
-    </span>
-  )
 }
 
 // Widget registry 位于 cc/widgetRegistry.tsx，供中控画布、工具栏和后续 Preview 共用。
@@ -130,8 +46,9 @@ export default function ControlCenter({ sessionId }: Props) {
     const def = WIDGET_REGISTRY.find(w => w.id === id)
     if (!def) return null
     if (!editMode && hidden.includes(id)) return null
-    // numeric 已由 pct widget 表达；两者同时显示会重复成 “0% · 0%”。
+    // numeric 由 pct 表达；ring 由用量 widget 表达，避免重复上下文百分比。
     if (!editMode && ccStyle === 'numeric' && id === 'ekg' && !hidden.includes('pct')) return null
+    if (!editMode && ccStyle === 'ring' && id === 'pct' && !hidden.includes('ekg')) return null
     if (!editMode && inputVariant === 'cli' && (id === 'send' || id === 'attach')) return null
 
     // 独立 send/attach widget 是否已启用（在画布上且未隐藏）→ 决定 InputBar 是否隐藏自带按钮
@@ -304,7 +221,6 @@ function EditableWidget({ id, placement, editMode, isHidden, children, bodyRef, 
 
   const handleWidgetPointerDown = (e: React.PointerEvent) => {
     if (!editMode) return
-    if (isControlHandle(e.target as HTMLElement)) return
     e.stopPropagation()
     e.preventDefault()
     onSelect()
@@ -336,11 +252,6 @@ function EditableWidget({ id, placement, editMode, isHidden, children, bodyRef, 
       {children}
     </div>
   )
-}
-
-// 编辑控件上的 handle 跳过 widget 拖拽
-function isControlHandle(_el: HTMLElement | null): boolean {
-  return false  // 迷你控件已移除，box 上仅有位置移动功能
 }
 
 // ───────────────────────────────────────────────────────────────
@@ -386,16 +297,16 @@ function WidgetToolbar({ selected, onSelect }: { selected: string | null; onSele
 
 function PropertyPanel({ id, onClose, onExit }: { id: string; onClose: () => void; onExit: () => void }) {
   const placement = useStore(s => s.ccLayout.placements[id as keyof typeof s.ccLayout.placements])
-  const u = useStore(s => s.updateTheme)
+  const u = useStore(s => s.setZoneField)
   const updateCcPlacement = useStore(s => s.updateCcPlacement)
   const setCcScale = useStore(s => s.setCcScale)
   const theme = useStore(s => s as any)
   const labels: Record<string, string> = {
-    input: '输入栏', ekg: '用量条', pct: '百分比', tokens: 'Token数', 'context-ring': '上下文环', 'runtime-status': '运行状态',
+    input: '输入栏', ekg: '用量条', pct: '百分比', tokens: 'Token数',
     model: '模型', mode: '权限模式', send: '发送按钮', attach: '附件按钮',
   }
 
-  const up = (k: string, v: any) => u({ [k]: v } as any)
+  const up = (k: string, v: any) => u('cc', { [k]: v } as Partial<ThemeSettings>)
   const upOffset = (key: 'offsetX' | 'offsetY', value: number) => updateCcPlacement(id, { [key]: value })
 
   return (
@@ -448,9 +359,9 @@ function PropertyPanel({ id, onClose, onExit }: { id: string; onClose: () => voi
           <div className="cc-prop-sec">用量条显示</div>
           <div className="cc-prop-field"><label>仪表类型</label>
             <div className="set-preset-row">
-              {(['wave', 'bar', 'numeric'] as const).map(s => (
+              {(['wave', 'bar', 'ring', 'numeric'] as const).map(s => (
                 <button key={s} className={`set-preset-chip ${theme.ccStyle === s ? 'active' : ''}`} onClick={() => up('ccStyle', s)}>
-                  {s === 'wave' ? '心电图' : s === 'bar' ? '柱状' : '数值'}
+                  {s === 'wave' ? '心电图' : s === 'bar' ? '柱状' : s === 'ring' ? '环形' : '数值'}
                 </button>
               ))}
             </div>

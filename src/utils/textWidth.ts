@@ -68,19 +68,3 @@ export function truncateToWidth(text: string, maxWidth: number): string {
   }
   return `${result}…`
 }
-
-/** 保留尾部截断（前缀 …），grapheme 安全 */
-export function truncateStartToWidth(text: string, maxWidth: number): string {
-  if (stringWidth(text) <= maxWidth) return text
-  if (maxWidth <= 1) return '…'
-  const segments = [...getGraphemeSegmenter().segment(text)]
-  let width = 0
-  let startIndex = segments.length
-  for (let index = segments.length - 1; index >= 0; index -= 1) {
-    const segWidth = graphemeWidth(segments[index]!.segment)
-    if (width + segWidth > maxWidth - 1) break
-    width += segWidth
-    startIndex = index
-  }
-  return `…${segments.slice(startIndex).map(part => part.segment).join('')}`
-}

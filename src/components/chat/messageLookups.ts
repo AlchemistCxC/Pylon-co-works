@@ -1,7 +1,6 @@
 import type { Message } from './messageTypes'
 
 export interface MessageLookups {
-  toolById: Map<string, Message>
   resolvedToolIds: Set<string>
   failedToolIds: Set<string>
   runningToolIds: Set<string>
@@ -14,7 +13,6 @@ function toolIdFromMessage(message: Message): string | null {
 }
 
 export function buildMessageLookups(messages: readonly Message[]): MessageLookups {
-  const toolById = new Map<string, Message>()
   const resolvedToolIds = new Set<string>()
   const failedToolIds = new Set<string>()
   const runningToolIds = new Set<string>()
@@ -22,7 +20,6 @@ export function buildMessageLookups(messages: readonly Message[]): MessageLookup
   for (const message of messages) {
     const toolId = toolIdFromMessage(message)
     if (!toolId) continue
-    toolById.set(toolId, message)
     const visualStatus = message.toolStatus
     if (message.running || visualStatus === 'pending' || visualStatus === 'in_progress') {
       runningToolIds.add(toolId)
@@ -35,5 +32,5 @@ export function buildMessageLookups(messages: readonly Message[]): MessageLookup
     }
   }
 
-  return { toolById, resolvedToolIds, failedToolIds, runningToolIds }
+  return { resolvedToolIds, failedToolIds, runningToolIds }
 }

@@ -134,7 +134,6 @@ const TAB_PREVIEW: Record<string, string> = {
 
 export default function Settings({ onClose, activeSessionId }: { onClose?: () => void; activeSessionId?: string | null }) {
   const t = useStore()
-  const u = useStore(s => s.updateTheme)
   const reset = useStore(s => s.resetTheme)
   const setGlobalPreset = useStore(s => s.setGlobalPreset)
   const setZoneField = useStore(s => s.setZoneField)
@@ -507,7 +506,7 @@ export default function Settings({ onClose, activeSessionId }: { onClose?: () =>
                 <Row label="提示符颜色"><ColorPopover value={t.cliPromptColor || ''} onChange={v=>onSettingChange({cliPromptColor:v})}/></Row>
                 <Row label="内容垂直偏移"><Num value={t.cliContentOffsetY ?? 0} onChange={v=>onSettingChange({cliContentOffsetY:v})} min={-6} max={6}/><span className="set-val">px</span></Row>
                 <Row label="命令提示"><Sel value={t.cliHintMode || 'full'} onChange={v=>onSettingChange({cliHintMode:v as ThemeSettings['cliHintMode']})} options={['hidden','compact','full']}/></Row>
-                <Row label="上下文"><Sel value={t.ccStyle} onChange={v=>onSettingChange({ccStyle:v})} options={['wave','bar','numeric']}/></Row>
+                <Row label="上下文"><Sel value={t.ccStyle} onChange={v=>onSettingChange({ccStyle:v})} options={['wave','bar','ring','numeric']}/></Row>
                 <Row label="信息字号"><Num value={t.ccStatusFontSize ?? 14} onChange={v=>onSettingChange({ccStatusFontSize:v})} min={14} max={20}/></Row>
                 <Row label="模型"><Sel value={t.modelVariant} onChange={v=>onSettingChange({modelVariant:v})} options={['dropdown','minimal','badge']}/></Row>
                 <Row label="模式"><Sel value={t.modeVariant} onChange={v=>onSettingChange({modeVariant:v})} options={['pill','badge','minimal']}/></Row>

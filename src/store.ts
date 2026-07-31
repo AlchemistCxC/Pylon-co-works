@@ -6,6 +6,7 @@ import { DEFAULT_CC_LAYOUT, cloneCcLayout, normalizeCcLayout, setCcHiddenState, 
 import type { CcLayoutV3, CcWidgetPlacement } from './ccLayoutState'
 import { createCustomPreset, deleteCustomPreset, normalizeCustomPresets, pickCustomPresetTheme, upsertCustomPreset } from './customPresets'
 import { normalizeThemeMigrationState } from './themeMigration'
+import { markZoneCustom } from './themePresetState'
 import { clampCcHeight, resolveVisibleStatusWidgetCount } from './ccHeightState'
 import type { CustomPreset } from './customPresets'
 import { clearSessionSourceState, updateSessionLiveStats } from './components/chat/sessionRuntime'
@@ -95,7 +96,6 @@ type ThemeState = ThemeSettings & {
   restoreSessions: () => Session[]
   hydrateSessions: () => void
   getUser: (source: string) => UserMapping | undefined
-  updateTheme: (partial: Partial<ThemeSettings>) => void
   setCcEditMode: (enabled: boolean) => void
   setCcHeight: (height: number) => void
   updateCcPlacement: (id: string, partial: Partial<CcWidgetPlacement>) => void
@@ -293,7 +293,10 @@ export const useStore = create<ThemeState>()(persist(
     return []
   },
   getUser: (source) => get().users.find(u => u.id === source),
-  updateTheme: (partial) => set(partial),
+  setZoneField: (zone, partial) => set(state => ({
+    ...partial,
+    ...markZoneCustom(state, zone),
+  })),
   setCcEditMode: (enabled) => set({ ccEditMode: enabled }),
   setCcHeight: (height) => set(state => ({
     ccHeight: clampCcHeight(height, {
@@ -307,18 +310,23 @@ export const useStore = create<ThemeState>()(persist(
       }),
       cliOverflowMode: state.cliOverflowMode,
     }),
+    ...markZoneCustom(state, 'cc'),
   })),
   updateCcPlacement: (id, partial) => set(state => ({
     ccLayout: updateCcPlacementState(state.ccLayout, id, partial),
+    ...markZoneCustom(state, 'cc'),
   })),
-  resetCcLayout: () => set({
+  resetCcLayout: () => set(state => ({
     ccLayout: cloneCcLayout(DEFAULT_CC_LAYOUT),
-  }),
+    ...markZoneCustom(state, 'cc'),
+  })),
   setCcHidden: (id, hidden) => set(state => ({
     ccHidden: setCcHiddenState(state.ccHidden, id, hidden),
+    ...markZoneCustom(state, 'cc'),
   })),
   setCcScale: (id, scale) => set(state => ({
     ccScale: setCcScaleState(state.ccScale, id, scale),
+    ...markZoneCustom(state, 'cc'),
   })),
 
   liveTokensUsed: 0, liveTokensMax: 131072, liveCacheReadTokens: 0, liveMode: 'auto', livePrismOn: true, liveGenerating: null, liveGeneratingSources: [],
@@ -366,26 +374,10 @@ export const useStore = create<ThemeState>()(persist(
    */
   applyZonePreset: (zone, presetName, presetTheme) => set(state => ({
     ...presetTheme,
+    ...(presetTheme.ccLayout ? { ccLayout: normalizeCcLayout(presetTheme.ccLayout) } : {}),
     activePreset: { ...state.activePreset, [zone]: presetName },
     dirty: { ...state.dirty, [zone]: false },
   })),
-
-  /**
-   * 用户改动了某个 zone 内的单个字段
-   * 1. 写入字段
-   * 2. 标记 dirty[zone] = true
-   * 3. 如果该 zone 当前指向的是内建预设（activePreset[zone] 非空且匹配预设名），
-   *    整局变 custom：activePreset[zone] = 'custom'，dirty[global] = true（但不影响其他 zone 的 preset）
-   */
-  setZoneField: (zone, partial) => set(state => {
-    const currentName = state.activePreset[zone] || ''
-    const newName = currentName === '' || currentName === 'custom' ? 'custom' : 'custom'
-    return {
-      ...partial,
-      activePreset: { ...state.activePreset, [zone]: newName },
-      dirty: { ...state.dirty, [zone]: true },
-    }
-  }),
 
   /**
    * 切换全局预设
@@ -564,6 +556,6 @@ export const useStore = create<ThemeState>()(persist(
   )
   return { ...state, ...normalized } as ThemeState
 }, partialize: (state) => {
-  const { sessions, sessionsHydrated, users, ccEditMode, setActiveProfile, addProfile, removeProfile, addSession, removeSession, updateSession, replaceSessions, setSessionPeriId, restoreSessions, hydrateSessions, getUser, updateTheme, setCcEditMode, setCcHeight, updateCcPlacement, resetCcLayout, setCcHidden, setCcScale, setLiveStats, liveCommands, sessionLiveStats, setSessionLiveStats, clearSessionRuntime, sessionConfig, setSessionConfig, sessionModes, setSessionMode, liveTokensUsed, liveTokensMax, liveCacheReadTokens, liveMode, livePrismOn, liveGenerating, liveGeneratingSources, agents, setAgents, setActiveAgent, agentStatuses, setAgentStatus, workspaceSheets, sheetAgentStates, hydrateWorkspaceSheets, openSheet, focusSheet, closeSheet, closeOtherSheets, closeRightSheets, reopenSheet, setSheetAgentState, applyZonePreset, setZoneField, setGlobalPreset, saveCustomPreset, applyCustomPreset, removeCustomPreset, presets, dirty, ...persisted } = state as any
+  const { sessions, sessionsHydrated, users, ccEditMode, setActiveProfile, addProfile, removeProfile, addSession, removeSession, updateSession, replaceSessions, setSessionPeriId, restoreSessions, hydrateSessions, getUser, setCcEditMode, setCcHeight, updateCcPlacement, resetCcLayout, setCcHidden, setCcScale, setLiveStats, liveCommands, sessionLiveStats, setSessionLiveStats, clearSessionRuntime, sessionConfig, setSessionConfig, sessionModes, setSessionMode, liveTokensUsed, liveTokensMax, liveCacheReadTokens, liveMode, livePrismOn, liveGenerating, liveGeneratingSources, agents, setAgents, setActiveAgent, agentStatuses, setAgentStatus, workspaceSheets, sheetAgentStates, hydrateWorkspaceSheets, openSheet, focusSheet, closeSheet, closeOtherSheets, closeRightSheets, reopenSheet, setSheetAgentState, applyZonePreset, setZoneField, setGlobalPreset, saveCustomPreset, applyCustomPreset, removeCustomPreset, dirty, ...persisted } = state as any
   return persisted
 }, onRehydrateStorage: () => state => state?.hydrateSessions()}))

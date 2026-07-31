@@ -202,7 +202,6 @@ export default function App() {
   } as React.CSSProperties
 
   const ccEditMode = useStore(s => s.ccEditMode)
-  const u = useStore(s => s.updateTheme)
 
   // body::before 玻璃层挂在 <body> 上，读不到 .app 子元素的 CSS 变量 —
   // 把全局背景相关变量 + scheme 提到 <html>(:root) 与 <body>，让玻璃层生效

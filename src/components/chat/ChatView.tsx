@@ -15,7 +15,7 @@ import { extractMode, extractModelConfig, sessionResponseObject, type SessionRes
 import { highlightCode } from './codeHighlight'
 import { sanitizeHtml } from './htmlSanitizer'
 import { reportRuntimeError } from '../../runtimeError'
-import { applyCancelEvent, beginCancel, createCancelState, rejectCancelCommand, resolveCancelCommand, type CancelState } from './cancelState'
+import { applyCancelEvent, beginCancel, createCancelState, rejectCancelCommand, type CancelState } from './cancelState'
 import { clearChatSourceRefs } from './sessionCleanup'
 import { measureRender, recordMeasuredAsync, recordRender } from './renderMetrics'
 import { prepareRenderableMessages, isMessageStatic } from './messagePipeline'
@@ -493,10 +493,9 @@ const ChatView = React.memo(function ChatView({ sessionId }: Props) {
             if (!begun.shouldInvoke) return
             cancelStateRef.current[source] = begun.state
             invoke('cancel_prompt', { source }).then(() => {
-              cancelStateRef.current[source] = resolveCancelCommand(source, cancelStateRef.current[source] || begun.state)
               // cancel_prompt 的返回只表示请求已被后端接受；但 UI 不能继续显示已知已经取消的生成。
               // 后续 peri:error(cancelled=true) 到达时仍会再次收敛状态。
-              cancelStateRef.current[source] = applyCancelEvent(source, { kind: 'success' }, cancelStateRef.current[source])
+              cancelStateRef.current[source] = applyCancelEvent(source, { kind: 'success' }, cancelStateRef.current[source] || begun.state)
               const nextSources = removeGeneratingSource(useStore.getState().liveGeneratingSources || [], source)
               useStore.getState().setLiveStats({
                 liveGeneratingSources: nextSources,

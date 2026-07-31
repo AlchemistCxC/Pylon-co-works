@@ -13,6 +13,8 @@ export interface Message {
   toolOutput?: string
   toolOutputLines?: number
   running?: boolean
+  thoughtStartedAt?: number
+  thoughtDurationMs?: number
   toolStatus?: string
 }
 

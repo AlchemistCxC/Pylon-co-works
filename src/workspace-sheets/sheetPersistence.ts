@@ -7,7 +7,6 @@ export const SHEET_STORAGE_KEY = 'pylon-workspace-sheets'
 export interface SheetWorkspaceState {
   activeProfileId?: string
   activeSessionId?: string
-  rightPanelTab?: string
 }
 
 export interface PersistedSheetState extends SheetState {
@@ -67,12 +66,10 @@ function normalizeAgentState(value: unknown): SheetWorkspaceState | null {
   const raw = value as Record<string, unknown>
   const activeProfileId = text(raw.activeProfileId)
   const activeSessionId = text(raw.activeSessionId)
-  const rightPanelTab = text(raw.rightPanelTab)
-  if (!activeProfileId && !activeSessionId && !rightPanelTab) return {}
+  if (!activeProfileId && !activeSessionId) return {}
   return {
     ...(activeProfileId ? { activeProfileId } : {}),
     ...(activeSessionId ? { activeSessionId } : {}),
-    ...(rightPanelTab ? { rightPanelTab } : {}),
   }
 }
 

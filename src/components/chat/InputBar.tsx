@@ -9,7 +9,7 @@ import { runSendTransaction } from './sendTransaction'
 import { buildSendMessagePayload } from './sessionRuntime'
 import { resolveSessionSource } from './sessionCommandState'
 import { resolveSessionProfile } from './sessionProfile'
-import { beginCancel, createCancelState, rejectCancelCommand, resolveCancelCommand, type CancelState } from './cancelState'
+import { beginCancel, createCancelState, rejectCancelCommand, type CancelState } from './cancelState'
 import { reportRuntimeError } from '../../runtimeError'
 import { stripHiddenUnicode } from '../../utils/unicodeSanitizer'
 import { Paperclip, ArrowUp, Square, Pencil, Send, Trash2 } from 'lucide-react'
@@ -293,7 +293,6 @@ export default forwardRef<{ send: () => void; attachFile: () => void; cancel: ()
     cancelStateRef.current = begun.state
     try {
       await invoke('cancel_prompt', { source: sessionSource })
-      cancelStateRef.current = resolveCancelCommand(sessionSource, cancelStateRef.current)
     } catch (error) {
       cancelStateRef.current = rejectCancelCommand(sessionSource, cancelStateRef.current, error)
       const detail = reportRuntimeError('取消生成', error)

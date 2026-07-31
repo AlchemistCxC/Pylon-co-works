@@ -45,10 +45,6 @@ export function beginCancel(source: string, state: CancelState): CancelBeginResu
   }
 }
 
-export function resolveCancelCommand(source: string, state: CancelState): CancelState {
-  return sameSource(source, state) ? state : state
-}
-
 export function rejectCancelCommand(
   source: string,
   state: CancelState,

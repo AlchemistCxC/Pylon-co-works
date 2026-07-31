@@ -6,21 +6,32 @@ const LONG_TOOL_OUTPUT = Array.from({ length: 36 }, (_, index) =>
 
 const ANSI_BASH_OUTPUT = '\u001b[32mPASS\u001b[0m  npm run build\n\u001b[33mWARN\u001b[0m  bundle exceeds 500 kB\n\u001b[31mERR\u001b[0m   0 errors'
 
+const TEST_OUTPUT = [
+  'test-chat-info-layer.mts      PASS',
+  'test-message-persistence.mts  PASS',
+  'test-tool-status.mts          PASS',
+  'test-spinner-frames.mts       PASS',
+  'test-thought-block-visual.mts PASS',
+  '5 suites passed · 0 failed',
+].join('\n')
+
 /** 浏览器预览使用的完整消息样本，覆盖当前 renderer 的主要分支。 */
 export const MOCK_MESSAGES: Message[] = [
   {
     id: 'mock-user-markdown',
     role: 'user',
     sender: 'local:demo',
-    content: '请检查 `ChatView.tsx`，并用 Markdown 汇报结果。',
+    content: '请检查 `ChatView.tsx`，并用 Markdown 汇报结果。重点观察 thought、tool 链和生成状态。',
     time: '10:24',
   },
   {
     id: 'mock-thinking',
     role: 'reasoning',
     sender: 'peri',
-    content: '先读取源码，再区分 renderer、tool 状态和持久化边界。\n确认后再给出改动建议。',
+    content: '先读取源码，再区分 renderer、tool 状态和持久化边界。\n确认消息流如何进入 streamingThinking，再检查终态如何写回历史消息。',
     time: '10:24',
+    thoughtStartedAt: Date.now() - 9200,
+    thoughtDurationMs: 9200,
   },
   {
     id: 'mock-read',
@@ -45,6 +56,15 @@ export const MOCK_MESSAGES: Message[] = [
     toolOutputLines: 36,
     toolStatus: 'completed',
     time: '10:24',
+  },
+  {
+    id: 'mock-thinking-tool-chain',
+    role: 'reasoning',
+    sender: 'peri',
+    content: '读取结果确认消息行经过边界组件。下一步验证连续 tool 的 connector 是否跟随前一个 tool 的终态着色。',
+    time: '10:24',
+    thoughtStartedAt: Date.now() - 6800,
+    thoughtDurationMs: 6800,
   },
   {
     id: 'mock-bash',
@@ -81,6 +101,15 @@ export const MOCK_MESSAGES: Message[] = [
     toolOutputLines: 1,
     toolStatus: 'failed',
     time: '10:24',
+  },
+  {
+    id: 'mock-recovery-thought',
+    role: 'reasoning',
+    sender: 'peri',
+    content: 'Write 被拒绝，不能把这个失败误判成整个生成失败。保留错误 tool 行，继续展示后续验证结果。',
+    time: '10:25',
+    thoughtStartedAt: Date.now() - 4300,
+    thoughtDurationMs: 4300,
   },
   {
     id: 'mock-task-running',
@@ -136,10 +165,43 @@ export const MOCK_MESSAGES: Message[] = [
     time: '10:25',
   },
   {
+    id: 'mock-final-thinking',
+    role: 'reasoning',
+    sender: 'peri',
+    content: '测试结果已经返回。最后整理状态摘要：成功、失败、等待和未知状态都必须保持可辨识，但不能让状态色压过正文。',
+    time: '10:26',
+    thoughtStartedAt: Date.now() - 12300,
+    thoughtDurationMs: 12300,
+  },
+  {
+    id: 'mock-test-output',
+    role: 'tool',
+    sender: 'tool:Bash',
+    content: '',
+    toolName: 'Bash',
+    toolInput: 'npm run test:frontend -- --focused chat',
+    toolOutput: TEST_OUTPUT,
+    toolOutputLines: 6,
+    toolStatus: 'completed',
+    time: '10:26',
+  },
+  {
+    id: 'mock-test-watch',
+    role: 'tool',
+    sender: 'tool:Watch',
+    content: '',
+    toolName: 'Watch',
+    toolInput: '观察 frontend regression 输出',
+    toolOutput: 'watching 5 suites\nno changes detected',
+    toolOutputLines: 2,
+    toolStatus: 'completed',
+    time: '10:26',
+  },
+  {
     id: 'mock-assistant-markdown',
     role: 'assistant',
     sender: 'peri',
-    content: '# 检查结果\n\n发现一个需要注意的渲染边界：`streamingText` 不应写回历史消息。\n\n> 建议先保持 raw message 和 render message 分离。\n\n- 已确认消息列表使用 memo row\n- 已确认 tool output 有 sanitizer\n- 已确认取消状态需要最终收敛\n\n| 项目 | 状态 |\n| --- | --- |\n| build | PASS |\n| frontend tests | PASS |\n\n详情见 [渲染基线](https://example.com/rendering)。',
+    content: '# 检查结果\n\n发现一个需要注意的渲染边界：`streamingText` 不应写回历史消息。\n\n> 建议先保持 raw message 和 render message 分离。\n\n- 已确认消息列表使用 memo row\n- 已确认 tool output 有 sanitizer\n- 已确认取消状态需要最终收敛\n- 已确认 thought 结束时记录真实耗时\n\n| 项目 | 状态 |\n| --- | --- |\n| build | PASS |\n| frontend tests | PASS |\n| thought visual | PASS |\n\n详情见 [渲染基线](https://example.com/rendering)。',
     time: '10:26',
   },
   {
@@ -153,7 +215,7 @@ export const MOCK_MESSAGES: Message[] = [
     id: 'mock-assistant-plain',
     role: 'assistant',
     sender: 'peri',
-    content: '纯文本 fast path 仍然保留换行和原始文本节奏。',
+    content: '纯文本 fast path 仍然保留换行和原始文本节奏。\n第二行用于观察长消息之间的垂直节奏。',
     time: '10:26',
   },
   {

@@ -17,7 +17,7 @@ import { applyCancelEvent, createCancelState, type CancelState } from './cancelS
 import { getToolSummary } from './toolPresentation'
 import { createMessageIdAllocator, type MessageIdAllocator } from './messageIdAllocator'
 import type { Message } from './messageTypes'
-import type { GenerationSummary } from './GenerationFooter'
+import type { GenerationPhase, GenerationSummary } from './GenerationFooter'
 
 export interface ChatEventControllerRefs {
   sessionRef: React.RefObject<string | null>
@@ -31,6 +31,7 @@ export interface ChatEventControllerRefs {
   streamingSourceRef: React.RefObject<string | null>
   streamingTextRef: React.RefObject<string>
   streamingThinkingRef: React.RefObject<string>
+  thinkingStartRef: React.RefObject<Record<string, number>>
   flushStreamingRef: React.RefObject<((source: string) => void) | null>
   genStartRef: React.RefObject<number>
   tokenCountRef: React.RefObject<number>
@@ -38,12 +39,23 @@ export interface ChatEventControllerRefs {
   setStreamingText: React.Dispatch<React.SetStateAction<string>>
   setStreamingThinking: React.Dispatch<React.SetStateAction<string>>
   setGenerating: React.Dispatch<React.SetStateAction<boolean>>
+  setGenerationPhase: React.Dispatch<React.SetStateAction<GenerationPhase | null>>
   setSummary: React.Dispatch<React.SetStateAction<GenerationSummary | null>>
   setLastTokenAt: React.Dispatch<React.SetStateAction<number>>
 }
 
 function formatToolInput(name: string, rawInput: unknown): string {
   return getToolSummary(name, rawInput)
+}
+
+function settleMessages(messages: Message[], completedAt: number): Message[] {
+  return messages.map(message => message.role === 'reasoning' && message.running
+    ? {
+        ...message,
+        running: false,
+        thoughtDurationMs: message.thoughtStartedAt ? Math.max(0, completedAt - message.thoughtStartedAt) : message.thoughtDurationMs,
+      }
+    : { ...message, running: false })
 }
 
 /**
@@ -70,13 +82,16 @@ export function attachChatEventController(refs: ChatEventControllerRefs): () => 
     if (refs.streamingSourceRef.current !== source) return
     const text = refs.streamingTextRef.current
     const thinking = refs.streamingThinkingRef.current
+    const thoughtStartedAt = refs.thinkingStartRef.current[source]
+    const thoughtDurationMs = thoughtStartedAt ? Math.max(0, Date.now() - thoughtStartedAt) : undefined
     if (text || thinking) {
       updateSourceMessages(source, previous => [
         ...previous,
-        ...(thinking ? [{ id: messageIds.next('thought'), role: 'reasoning' as const, sender: 'peri', content: thinking, time: new Date().toLocaleTimeString(), running: false }] : []),
+        ...(thinking ? [{ id: messageIds.next('thought'), role: 'reasoning' as const, sender: 'peri', content: thinking, time: new Date().toLocaleTimeString(), running: false, thoughtStartedAt, thoughtDurationMs }] : []),
         ...(text ? [{ id: messageIds.next('msg'), role: 'assistant' as const, sender: 'peri', content: text, time: new Date().toLocaleTimeString(), running: false }] : []),
       ])
     }
+    delete refs.thinkingStartRef.current[source]
     refs.streamingSourceRef.current = null
     refs.streamingTextRef.current = ''
     refs.streamingThinkingRef.current = ''
@@ -131,6 +146,7 @@ export function attachChatEventController(refs: ChatEventControllerRefs): () => 
         refs.setGenerating(true)
         refs.setLastTokenAt(Date.now())
         refs.setSummary(null)
+        refs.setGenerationPhase({ kind: 'thinking' })
         refs.streamingSourceRef.current = source
         refs.streamingTextRef.current = ''
         refs.streamingThinkingRef.current = ''
@@ -165,6 +181,7 @@ export function attachChatEventController(refs: ChatEventControllerRefs): () => 
           if (!text) return
           if (!replay && isRenderedSource(source, refs.sessionRef.current)) {
             refs.streamingSourceRef.current = source
+            refs.setGenerationPhase({ kind: 'responding' })
             refs.streamingTextRef.current += text
             refs.setLastTokenAt(Date.now())
             refs.setStreamingText(refs.streamingTextRef.current)
@@ -182,8 +199,11 @@ export function attachChatEventController(refs: ChatEventControllerRefs): () => 
         case 'agent_thought_chunk': {
           const text = upd.content?.text || ''
           if (!text) return
+          const thoughtStartedAt = refs.thinkingStartRef.current[source] ?? Date.now()
+          refs.thinkingStartRef.current[source] = thoughtStartedAt
           if (!replay && isRenderedSource(source, refs.sessionRef.current)) {
             refs.streamingSourceRef.current = source
+            refs.setGenerationPhase({ kind: 'thinking' })
             refs.streamingThinkingRef.current += text
             refs.setLastTokenAt(Date.now())
             refs.setStreamingThinking(refs.streamingThinkingRef.current)
@@ -194,12 +214,13 @@ export function attachChatEventController(refs: ChatEventControllerRefs): () => 
             if (last?.role === 'reasoning' && last.running) {
               return prev.map((m, i) => i === prev.length - 1 ? { ...m, content: m.content + text } : m)
             }
-            return [...prev, { id: messageIds.next('thought'), role: 'reasoning', sender: 'peri', content: text, time: new Date().toLocaleTimeString(), running: !replay }]
+            return [...prev, { id: messageIds.next('thought'), role: 'reasoning', sender: 'peri', content: text, time: new Date().toLocaleTimeString(), running: !replay, thoughtStartedAt }]
           }, replay)
           break
         }
         case 'tool_call': {
           if (!replay) flushStreaming(source)
+          if (isRenderedSource(source, refs.sessionRef.current)) refs.setGenerationPhase({ kind: 'tool', name: upd.title || '?' })
           const rawInput = upd.rawInput
           const toolId = normalizeToolId(upd.toolCallId)
           if (replay && !shouldAcceptToolCall(toolId, refs.replayToolIdsRef.current[source] || [])) break
@@ -263,10 +284,11 @@ export function attachChatEventController(refs: ChatEventControllerRefs): () => 
           const start = refs.generationStartRef.current[source] || refs.genStartRef.current
           const elapsedMs = Date.now() - start
           refs.setSummary({ elapsedMs, tokenCount: refs.tokenCountRef.current, completedFrame: '', reason: 'done' })
+          refs.setGenerationPhase(null)
           refs.setGenerating(false)
         }
       }
-      updateSourceMessages(source, prev => settleReplayToolMessages(prev.map(m => ({ ...m, running: false }))), replay)
+      updateSourceMessages(source, prev => settleReplayToolMessages(settleMessages(prev, Date.now())), replay)
     }),
 
     listen<{ source: string; error: string; cancelled?: boolean; replay?: boolean }>('peri:error', (event) => {
@@ -290,12 +312,13 @@ export function attachChatEventController(refs: ChatEventControllerRefs): () => 
         if (!cancellationFailed) stopGenerating(source)
       }
       if (terminationScope === 'live' && !cancellationFailed) flushStreaming(source)
-      updateSourceMessages(source, prev => [...settleReplayToolMessages(prev.map(m => ({ ...m, running: false }))), {
+      updateSourceMessages(source, prev => [...settleReplayToolMessages(settleMessages(prev, Date.now())), {
         id: messageIds.next('err'), role: 'assistant', sender: 'system', content: error, time: new Date().toLocaleTimeString(),
       }], replay)
       if (terminationScope === 'live' && !cancellationFailed && isRenderedSource(source, refs.sessionRef.current)) {
         const start = refs.generationStartRef.current[source] || refs.genStartRef.current
         refs.setSummary({ elapsedMs: Date.now() - start, tokenCount: refs.tokenCountRef.current, completedFrame: '', reason: event.payload.cancelled === true ? 'cancelled' : 'error' })
+        refs.setGenerationPhase(null)
         refs.setGenerating(false)
       }
     }),

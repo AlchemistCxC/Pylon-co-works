@@ -11,7 +11,7 @@ export interface CcMinHeightOptions {
   cliOverflowMode: CcOverflowMode
 }
 
-const STATUS_WIDGET_IDS = ['ekg', 'pct', 'tokens', 'context-ring', 'runtime-status', 'model', 'mode', 'send', 'attach'] as const
+const STATUS_WIDGET_IDS = ['ekg', 'pct', 'tokens', 'model', 'mode', 'send', 'attach'] as const
 
 export function resolveVisibleStatusWidgetCount({
   hiddenIds,
@@ -26,6 +26,7 @@ export function resolveVisibleStatusWidgetCount({
     if (hiddenIds.includes(id)) return false
     if (inputMode === 'cli' && (id === 'send' || id === 'attach')) return false
     if (ccStyle === 'numeric' && id === 'ekg' && !hiddenIds.includes('pct')) return false
+    if (ccStyle === 'ring' && id === 'pct' && !hiddenIds.includes('ekg')) return false
     return true
   }).length
 }

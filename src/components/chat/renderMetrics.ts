@@ -95,21 +95,3 @@ export function recordMeasuredAsync<T>(name: string, promise: Promise<T>): Promi
   const start = performance.now()
   return promise.finally(() => addMeasure(name, performance.now() - start))
 }
-
-export function recordPerformanceMeasure(name: string, callback: () => void) {
-  if (!enabled || typeof performance === 'undefined' || typeof performance.mark !== 'function') {
-    callback()
-    return
-  }
-  const startMark = `${name}:start`
-  const endMark = `${name}:end`
-  performance.mark(startMark)
-  try {
-    callback()
-  } finally {
-    performance.mark(endMark)
-    performance.measure(name, startMark, endMark)
-    performance.clearMarks(startMark)
-    performance.clearMarks(endMark)
-  }
-}

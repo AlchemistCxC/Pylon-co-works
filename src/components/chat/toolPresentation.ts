@@ -79,8 +79,8 @@ export interface ConnectorColors {
 }
 
 /**
- * 连接线颜色：none=透明；follow=跟随上一工具状态色（ok/err/run 用主题变量）；
- * fixed=固定 connectorColor。ToolCard 与 ToolConnector 共用，保证两处一致。
+ * 连接线颜色：none=透明；follow=跟随传入工具状态色（ok/err/run 用主题变量）；
+ * 调用方传入连接线上一个 Tool 的状态，fixed=固定 connectorColor。
  */
 export function resolveConnectorColor(
   mode: string,
