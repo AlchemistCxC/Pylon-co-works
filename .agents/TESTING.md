@@ -23,9 +23,11 @@ npm run build
 Backend：
 
 ```bash
+export PATH="/f/Coding/rust/toolchain/.cargo/bin:/f/Coding/c/mingw64/mingw64/bin:$PATH"
+export TMP=F:/tmp   # C 盘满，cargo 必须指过去
 cd src-tauri
-unset RUSTFLAGS
-cargo check
+unset RUSTFLAGS     # GNU 工具链，禁止 lld 替代 MinGW ld
+cargo check --offline
 cargo test --lib --no-run
 cargo test --lib <focused> -- --nocapture
 ```

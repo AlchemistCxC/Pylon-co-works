@@ -2,88 +2,32 @@
 
 ## 根目录
 
-- `src/`：React 前端生产源码。
-- `src-tauri/`：Rust/Tauri 后端生产源码。
-- `scripts/`：前端 pure/contract regression；`scripts/agent-workflow/` 是双 Agent 调度器。
-- `docs/`：产品设计与前后端持续交接手册。
-- `.agents/`：版本化工作流规则、任务定义和契约。
+- `src/`：React 前端生产源码（宫木云负责，工作区常含其未提交改动）。
+- `src-tauri/`：Rust/Tauri 后端生产源码（Riccati 负责）。
+- `scripts/`：前端 pure/contract regression；`scripts/agent-workflow/` 为调度辅助脚本。
+- `docs/`：README 之外的产品设计与持续交接手册（`后端开发与交接手册.md` 是后端唯一交接入口）。
+- `.agents/`：版本化工作流规则、任务定义和契约（任务卡在 `.agents/tasks/`）。
 - `agents.yaml`：Agent subprocess registry，可能包含敏感运行配置，不向前端透出 env/args。
+- `references/`：本地参考材料（Claude Code 源码图等）。
 
 ## 工作区
 
-- 主集成：`G:\Project\prism-desktop`，分支 `main`。
-- Backend：`G:\Project\prism-desktop-backend`，分支 `agent/backend`。
-- Frontend：`G:\Project\prism-desktop-frontend`，分支 `agent/frontend`。
-- 共享状态：`G:\Project\prism-desktop-agent-state`，不进入产品 Git。
+- 单仓库：`G:\Project\prism-desktop`，分支 `main`（与 origin 同步）。
+- 后端与前端在同一工作区协作；前端 `src/` 通常有未提交改动（宫木云），后端不得 reset/clean/restore/add 他人文件。
+- 子 agent 任务卡体系：`.agents/tasks/`（BE-* 后端 / FE-* 前端）+ `.agents/templates/subagent_dispatch.md` 派发模板。
+- 历史：旧的 `prism-desktop-backend/frontend` 分离仓库与 `agent/backend`、`agent/frontend` 分支已废弃，勿用。
+
+## src-tauri 后端地图
+
+- `src/lib.rs`：AppState、Tauri commands、通知 dispatcher、崩溃自动重连、Session Inspector。
+- `src/acp.rs`：AcpClient（官方 schema 类型化 + fake 测试基建）。
+- `src/agent_runtime.rs`：生命周期状态 + 路由纯逻辑 + 重连退避。
+- `src/runtime.rs`：AgentRuntime/AgentRuntimeManager（B7a，per-agent 隔离，尚未接线）。
+- `src/gateway/`：平台适配器层（B10，骨架 + route/truncate/dedup 已实现未接线）。
+- `src/prism.rs`：Prism loopback 客户端（39 命令）。
+- `src/pet.rs` + `pet-core/`：宠物状态机 + 落盘持久化。
+- 其余：`mcp.rs`、`runtime_log.rs`、`workspace.rs`、`agent_config.rs`、`error.rs`。
 
 ## 前端地图
 
-- `src/App.tsx`：App 壳、SheetHost、overlay、右栏和全局事件。较大，只按任务范围读取。
-- `src/store.ts`：Theme/Profile/Session/Agent/runtime/Sheet 状态 owner。较大，只有任务涉及状态 owner 时读取相关段落。
-- `src/workspace-sheets/`：Sheet 类型、registry、reducer、persistence、titlebar、launcher。
-- `src/components/chat/ChatView.tsx`：ACP events、replay、消息状态和渲染；大文件，按 symbol 读取。
-- `src/components/RightPanel.tsx` 与 `src/components/right-panel/`：Workspace/Logs 右栏。
-- `src/components/PrismSheet.tsx`：当前仍有静态演示数据，真实接入属于 F2。
-- `src/components/Settings.tsx`：Agent 切换、主题和设置入口。
-- `scripts/run-frontend-tests.mts`：前端集中测试入口，当前 allowed failures 为空。
-
-## 后端地图
-
-- `src-tauri/src/lib.rs`：AppState、Tauri commands、dispatcher、Session/Agent 生命周期、Prism 注册、export。当前过大，默认按 symbol 读取。
-- `src-tauri/src/acp.rs`：JSON-RPC child、pending、reader、EOF、cancel、load replay。
-- `src-tauri/src/agent_runtime.rs`：generation/source/periId 路由和状态纯逻辑。
-- `src-tauri/src/agent_config.rs`：Agent registry parse/load/default。
-- `src-tauri/src/prism.rs`：固定 loopback Prism HTTP client。
-- `src-tauri/src/workspace.rs`：Workspace containment、目录和文本预览。
-- `src-tauri/src/runtime_log.rs`：脱敏日志 ring buffer。
-- `src-tauri/src/mcp.rs`：MCP 配置校验与 ACP serialization。
-- `src-tauri/src/error.rs`：PylonError；当前序列化仍偏字符串。
-
-## 身份模型
-
-- `sheetId`：前端 Workspace Sheet。
-- `agentId`：Agent registry key。
-- `Session.id`：前端本地 Session 实体。
-- `source`：Tauri Session 路由 key。
-- `periId`：ACP 远端 sessionId。
-- `sessionGeneration`：Session 映射代际。
-- `clientGeneration`：ACP client 代际。
-
-这些 ID 不得混用。Workspace root 必须由 `source → SessionInfo.cwd` 解析。
-
-## 当前架构边界
-
-后端仍是单 active runtime：一个 ACP client、一个 active Agent、一个 dispatcher 和一份 runtime Session mapping。前端可保存多个 Agent Sheet 工作现场，但 B7 前不能宣传后台多 Agent 并行。
-
-## 外部真值
-
-- Peri ACP：`F:\A-I\Agent\Peri`，只读核对。
-- Prism HTTP：`G:\Project\prism`，只读核对。
-- `G:\Prism` 是生产数据目录，不是开发 fixture。
-
-## 验证入口
-
-前端最小：
-
-```bash
-node --experimental-strip-types scripts/<targeted>.mts
-npm run build
-```
-
-前端 checkpoint：
-
-```bash
-npm run test:frontend
-npm run build
-```
-
-后端最小：
-
-```bash
-cd src-tauri
-unset RUSTFLAGS
-cargo check
-cargo test --lib <filter> -- --nocapture
-```
-
-后端 checkpoint 按任务范围增加 `cargo test --lib --no-run`、focused fake ACP 和真实运行验收。
+（由 Frontend Lane 维护，本文件不展开）

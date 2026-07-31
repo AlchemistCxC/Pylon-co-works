@@ -1,71 +1,36 @@
-# 双 Lane 自动接力工作流
+# Pylon 协作工作流
 
-## 原生 Kanban 迁移
+## 当前工作流（2026-07-31 起）
 
-当前自研 JSON queue/bootstrap 是已运行的第一版。下一阶段设计为迁移到 Hermes 原生 Kanban Dispatcher，避免自建进程 Supervisor 和双运行时状态真值。
+主控（协调者）+ 子 agent 派发 + 任务卡体系：
 
-主控接管入口：
+```text
+主控（Riccati 会话）
+  ├─ 切分任务 → .agents/tasks/ 任务卡（YAML，自包含）
+  ├─ 派发：delegate_task（自包含任务文本，一次最多 3 个并行）
+  ├─ 验收：复跑 cargo check/test + 抽查 commit；子 agent 中间态与真 bug 要区分
+  └─ 保留架构/高集成任务自己做（B7a 重构、gateway 骨架接线等）
 
-- `.agents/ORCHESTRATOR_HANDOFF.md`
-- `.agents/KANBAN_AUTOMATION_DESIGN.md`
+子 agent（leaf）
+  ├─ 无对话上下文 → 任务卡必须自包含（背景/目标/文件边界/验证/commit 格式）
+  ├─ 独立 commit，不 push（主控统一推）
+  └─ 铁律：只改任务指定文件；cargo check 零 warning（自身文件）；测试真实断言
+```
 
-迁移未灰度通过前，本文件以下旧流程仍用于解释现有状态；不要让旧 queue 与 Kanban 同时分发新任务。
+派发模板：`.agents/templates/subagent_dispatch.md`。
 
 ## 角色
 
-- Backend Lane：`src-tauri/**`、`agents.yaml`、Rust fixture/harness、后端手册。
+- Backend Lane：`src-tauri/**`、`agents.yaml`、Rust fixture/harness、后端手册、`.agents` 任务卡。
 - Frontend Lane：`src/**`、业务 `scripts/**`、必要 `package.json`、前端手册。
-- 主会话/协调者：设计任务卡、拆跨端任务、维护依赖图、执行集中 checkpoint 与 debug。
+- 主控/协调者：切分任务卡、维护依赖图、派发与验收、集中 checkpoint。
 
 ## 任务原则
 
-任务按“可观察产品结果”拆，不按单文件拆。任务卡包含：目标、源码事实、首先读取、可能修改、禁止范围、实现不变量、非目标、最小验证和完成条件。
+- 任务按"可观察产品结果"拆，不按单文件拆；子 agent 任务额外要求"机械/自包含/验收明确"。
+- 任务卡包含：目标、源码事实、首先读取、可能修改、禁止范围、实现不变量、非目标、最小验证和完成条件。
+- 跨端目标拆成 Backend producer、Frontend consumer 和必要 checkpoint，不直接自动分配给单 Lane。
 
-跨端目标必须拆成 Backend producer、Frontend consumer 和必要的 checkpoint，不直接自动分配给单 Lane。
+## 历史
 
-## 状态机
-
-```text
-pending → ready → active → done
-                  ├→ blocked
-                  └→ active（handoff/resume）
-```
-
-- `pending`：依赖或 checkpoint 尚未满足。
-- `ready`：可领取。
-- `active`：当前 Lane 已领取。
-- `blocked`：必须有准确解除条件。
-- `done`：源码切片完成并记录 commit；不自动代表真实验收。
-
-## 自动领取
-
-`bootstrap.py`：
-
-1. 校验 Lane 与 worktree。
-2. 初始化或读取共享状态。
-3. 如果 Lane 有 active task，则 RESUME。
-4. 否则从 ready queue 评分领取。
-5. 生成 `session-brief.md`。
-
-评分考虑 priority、是否解除另一 Lane 阻塞、与上一任务 subsystem/读取文件的上下文亲和度、任务规模。checkpoint pending 时暂停相关 Lane。
-
-## 自动分 Lane
-
-任务卡可写 `lane: auto`。分配顺序：
-
-1. 显式 lane 优先。
-2. 单一 domain/path 归 Backend 或 Frontend。
-3. 同时涉及前后端则 `needs_split`，不入队。
-4. 信息不足则 `needs_planning`。
-
-## 接力
-
-任务未完成但需要换 Agent时，运行 `handoff.py`。current 保留 active task，新 Agent bootstrap 后自动 RESUME。共享 handoff 只保留当前版本，历史由事件日志和 Git 提交保存。
-
-## 连续开发
-
-默认一个 Agent 完成一个任务后停止。只有任务属于同一 `relay_group`、没有 checkpoint、上下文仍充足时，才使用 `finish_task.py --next` 自动领取下一项。
-
-## 集中测试
-
-日常只做最小验证。任务若声明 `opens_checkpoint`，完成后调度器将 checkpoint 标记 pending，并暂停指定 Lane。协调者集中测试/debug 后用 `checkpoint.py` passed/failed 更新状态。
+- 自研 JSON queue/bootstrap 与 Hermes 原生 Kanban Dispatcher 迁移设计（`KANBAN_AUTOMATION_DESIGN.md`）为早期方案；当前以 delegate_task 派发为准，旧 queue 不再分发新任务。若未来启用 Hermes Kanban，以 `KANBAN_AUTOMATION_DESIGN.md` 为迁移蓝本并更新本文。
