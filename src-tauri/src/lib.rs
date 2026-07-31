@@ -1460,12 +1460,13 @@ async fn get_pet(state: tauri::State<'_, AppState>) -> Result<serde_json::Value,
 #[tauri::command]
 async fn pet_action(state: tauri::State<'_, AppState>, action: String, value: Option<String>) -> Result<serde_json::Value, String> {
     let mut pet = state.pet.lock().map_err(|e| e.to_string())?;
+    let mut sleepy_result: Option<bool> = None;
     match action.as_str() {
         "poke" => { pet::on_poke(&mut pet); }
         "feed" => { pet::on_feed(&mut pet); }
         "rename" => { if let Some(v) = value { pet::rename(&mut pet, &v); } }
         "daily" => { pet::daily_visit(&mut pet); }
-        "sleepy" => { pet::check_sleepy(&mut pet); }
+        "sleepy" => { sleepy_result = Some(pet::check_sleepy(&mut pet)); }
         "nostalgia" => { pet::recall_memory(&mut pet); }
         "restore" => {
             let raw = value.ok_or_else(|| "restore requires pet state".to_string())?;
@@ -1476,6 +1477,10 @@ async fn pet_action(state: tauri::State<'_, AppState>, action: String, value: Op
     }
     let msg = pet.msg.take();
     let mut result = serde_json::to_value(pet::view(&pet)).map_err(|e| e.to_string())?;
+    if let Some(sleepy) = sleepy_result {
+        // 透传 check_sleepy 结果，前端据此切换睡眠动画/状态
+        result["sleepy"] = serde_json::Value::Bool(sleepy);
+    }
     if let Some(message) = msg {
         result["msg"] = serde_json::Value::String(message);
     }
