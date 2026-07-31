@@ -129,7 +129,7 @@ fn truncate(value: String, max_bytes: usize) -> String {
     format!("{}...", &value[..end])
 }
 
-fn sanitize_message(message: String) -> String {
+pub(crate) fn sanitize_message(message: String) -> String {
     let lower = message.to_ascii_lowercase();
     let contains_sensitive_payload = [
         "password=", "secret=", "token=", "api_key=", "apikey=", "authorization:",

@@ -498,7 +498,8 @@ impl AcpClient {
                     for line in BufReader::new(stderr).lines() {
                         if let Ok(l) = line {
                             if !l.is_empty() {
-                                log::error!("{} stderr: {}", agent_name_stderr, l);
+                                let safe = crate::runtime_log::sanitize_message(l.clone());
+                                log::error!("{} stderr: {}", agent_name_stderr, safe);
                                 if let Some(hub) = &stderr_logs {
                                     hub.push(crate::runtime_log::timestamp(), "error", "agent-stderr", None, "Agent stderr output", serde_json::Map::from_iter([
                                         ("agent".to_string(), serde_json::Value::String(agent_name_stderr.clone())),
