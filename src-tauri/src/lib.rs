@@ -800,6 +800,26 @@ mod session_info_tests {
         }));
         assert_eq!(session.mode.as_deref(), Some("code"));
     }
+
+    #[test]
+    fn keep_sessions_migrates_generation() {
+        let mut sessions = HashMap::new();
+        sessions.insert("source-a".into(), SessionInfo::new("peri-1".into(), "persona".into(), ".".into(), true, 1));
+        sessions.insert("source-b".into(), SessionInfo::new("peri-2".into(), "persona".into(), ".".into(), true, 1));
+        apply_client_replacement_sessions(&mut sessions, true, 9);
+        assert_eq!(sessions.len(), 2);
+        for session in sessions.values() {
+            assert_eq!(session.generation, 9);
+        }
+    }
+
+    #[test]
+    fn keep_sessions_false_clears_sessions() {
+        let mut sessions = HashMap::new();
+        sessions.insert("source-a".into(), SessionInfo::new("peri-1".into(), "persona".into(), ".".into(), true, 1));
+        apply_client_replacement_sessions(&mut sessions, false, 9);
+        assert!(sessions.is_empty());
+    }
 }
 
 // ── AppState helpers ──
@@ -1023,6 +1043,7 @@ impl AppState {
         agent_id: Option<String>,
         new_acp: AcpClient,
         window: tauri::WebviewWindow,
+        keep_sessions: bool,
     ) -> Result<(), String> {
         if new_acp.is_crashed() {
             return Err("new ACP client crashed before activation".to_string());
@@ -1038,7 +1059,7 @@ impl AppState {
             if let Some(agent_id) = agent_id {
                 *active_agent = agent_id;
             }
-            sessions.clear();
+            apply_client_replacement_sessions(&mut sessions, keep_sessions, new_generation);
             log::info!("ACP client activated; generation is now {}", new_generation);
             old_acp
         };
@@ -1071,7 +1092,7 @@ impl AppState {
                 return Err(error);
             }
         };
-        self.replace_agent_client(agent_id, new_acp, window.clone()).await?;
+        self.replace_agent_client(agent_id, new_acp, window.clone(), false).await?;
         self.emit_agent_status(window, AgentLifecycleStatus::Connected, None);
         self.log_runtime_summary("info", "agent", None, &format!("Agent {log_action} succeeded"), serde_json::Map::new());
         Ok(())
@@ -1079,6 +1100,22 @@ impl AppState {
 }
 
 const MAX_SESSIONS: usize = 100;
+
+/// 客户端替换后的 sessions 处理：keep=false 清空（跨 agent/全新进程语义）；
+/// keep=true 保留映射但迁移 generation——通知路由按新代际匹配，旧 session 才能继续收事件。
+fn apply_client_replacement_sessions(
+    sessions: &mut HashMap<String, SessionInfo>,
+    keep_sessions: bool,
+    new_generation: u64,
+) {
+    if !keep_sessions {
+        sessions.clear();
+    } else {
+        for session in sessions.values_mut() {
+            session.generation = new_generation;
+        }
+    }
+}
 
 fn write_export_atomically(path: &std::path::Path, content: &[u8]) -> Result<(), String> {
     if path.exists() {
