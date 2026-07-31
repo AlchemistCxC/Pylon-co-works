@@ -11,7 +11,7 @@ export interface CcMinHeightOptions {
   cliOverflowMode: CcOverflowMode
 }
 
-const STATUS_WIDGET_IDS = ['ekg', 'pct', 'tokens', 'context-ring', 'model', 'mode', 'send', 'attach'] as const
+const STATUS_WIDGET_IDS = ['ekg', 'pct', 'tokens', 'context-ring', 'runtime-status', 'model', 'mode', 'send', 'attach'] as const
 
 export function resolveVisibleStatusWidgetCount({
   hiddenIds,

@@ -10,6 +10,7 @@ import { emptySessionLiveStats } from '../chat/sessionRuntime'
 import type { SessionLiveStats } from '../chat/sessionRuntime'
 import type { CcSlot, CcWidgetId, CcWidgetPlacement } from '../../ccLayoutState'
 import { resolveContextMeter } from '../../contextMeter'
+import { resolveRuntimeIndicator } from '../../runtimeIndicator'
 
 export interface CcWidgetRenderProps {
   sessionId: string | null
@@ -120,6 +121,33 @@ function ContextRingWidget({ sessionId }: CcWidgetRenderProps) {
   )
 }
 
+function RuntimeStatusWidget({ sessionId }: CcWidgetRenderProps) {
+  const source = useStore(s => sessionId ? s.sessions.find(session => session.id === sessionId)?.source : undefined)
+  const generating = useStore(s => source != null && (s.liveGeneratingSources || []).includes(source))
+  const prismOn = useStore(s => s.livePrismOn)
+  const toolOk = useStore(s => s.toolOk)
+  const toolRun = useStore(s => s.toolRun)
+  const ccScale = useStore(s => (s.ccScale || {})['runtime-status'] ?? 100)
+  const indicator = resolveRuntimeIndicator({ generating, prismOn })
+  const color = indicator.colorToken === 'ok'
+    ? toolOk
+    : indicator.colorToken === 'run'
+      ? toolRun
+      : 'var(--text-dim)'
+
+  return (
+    <span
+      className={`cc-runtime-status cc-runtime-status-${indicator.state}`}
+      role="status"
+      aria-label={`运行状态：${indicator.label}`}
+      style={{ '--runtime-status-color': color, fontSize: `${ccScale}%` } as React.CSSProperties}
+    >
+      <span className="cc-runtime-status-dot" aria-hidden="true" />
+      {indicator.label}
+    </span>
+  )
+}
+
 const placement = (slot: CcSlot, order: number): CcWidgetPlacement => ({ slot, order, offsetX: 0, offsetY: 0 })
 
 export const CC_WIDGET_REGISTRY: readonly CcWidgetDef[] = [
@@ -128,11 +156,12 @@ export const CC_WIDGET_REGISTRY: readonly CcWidgetDef[] = [
   { id: 'pct', label: '百分比', category: 'context', defaultPlacement: placement('status-primary', 1), naturalSize: true, render: props => <PctWidget {...props} /> },
   { id: 'tokens', label: 'Token数', category: 'context', defaultPlacement: placement('status-primary', 2), naturalSize: true, render: props => <TokensWidget {...props} /> },
   { id: 'context-ring', label: '上下文环', category: 'context', defaultPlacement: placement('status-primary', 3), naturalSize: true, render: props => <ContextRingWidget {...props} /> },
-  { id: 'model', label: '模型', category: 'runtime', defaultPlacement: placement('status-secondary', 0), naturalSize: true, render: ({ sessionId }) => {
+  { id: 'runtime-status', label: '运行状态', category: 'runtime', defaultPlacement: placement('status-secondary', 0), naturalSize: true, render: props => <RuntimeStatusWidget {...props} /> },
+  { id: 'model', label: '模型', category: 'runtime', defaultPlacement: placement('status-secondary', 1), naturalSize: true, render: ({ sessionId }) => {
     const session = useStore.getState().sessions.find(item => item.id === sessionId)
     return <ModelWidget sessionSource={session?.source} />
   } },
-  { id: 'mode', label: '权限模式', category: 'runtime', defaultPlacement: placement('status-secondary', 1), naturalSize: true, render: ({ sessionId }) => {
+  { id: 'mode', label: '权限模式', category: 'runtime', defaultPlacement: placement('status-secondary', 2), naturalSize: true, render: ({ sessionId }) => {
     const session = useStore.getState().sessions.find(item => item.id === sessionId)
     return <ModeWidget sessionSource={session?.source} />
   } },

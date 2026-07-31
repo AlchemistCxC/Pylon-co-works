@@ -1,4 +1,4 @@
-export type CcWidgetId = 'input' | 'ekg' | 'pct' | 'tokens' | 'context-ring' | 'model' | 'mode' | 'send' | 'attach'
+export type CcWidgetId = 'input' | 'ekg' | 'pct' | 'tokens' | 'context-ring' | 'runtime-status' | 'model' | 'mode' | 'send' | 'attach'
 export type CcSlot = 'input' | 'status-primary' | 'status-secondary' | 'actions'
 
 export interface CcWidgetPlacement {
@@ -13,8 +13,8 @@ export interface CcLayoutV3 {
   placements: Record<CcWidgetId, CcWidgetPlacement>
 }
 
-// v4：新增 context-ring，保留 v3 用户的既有 placement 并补齐新控件默认位置。
-export const CC_LAYOUT_SCHEMA_VERSION = 4
+// v5：新增 runtime-status，保留旧 placement 并补齐新控件默认位置。
+export const CC_LAYOUT_SCHEMA_VERSION = 5
 
 export const DEFAULT_CC_LAYOUT: CcLayoutV3 = {
   version: CC_LAYOUT_SCHEMA_VERSION,
@@ -24,8 +24,9 @@ export const DEFAULT_CC_LAYOUT: CcLayoutV3 = {
     pct: { slot: 'status-primary', order: 1, offsetX: 0, offsetY: 0 },
     tokens: { slot: 'status-primary', order: 2, offsetX: 0, offsetY: 0 },
     'context-ring': { slot: 'status-primary', order: 3, offsetX: 0, offsetY: 0 },
-    model: { slot: 'status-secondary', order: 0, offsetX: 0, offsetY: 0 },
-    mode: { slot: 'status-secondary', order: 1, offsetX: 0, offsetY: 0 },
+    'runtime-status': { slot: 'status-secondary', order: 0, offsetX: 0, offsetY: 0 },
+    model: { slot: 'status-secondary', order: 1, offsetX: 0, offsetY: 0 },
+    mode: { slot: 'status-secondary', order: 2, offsetX: 0, offsetY: 0 },
     send: { slot: 'actions', order: 0, offsetX: 0, offsetY: 0 },
     attach: { slot: 'actions', order: 1, offsetX: 0, offsetY: 0 },
   },
@@ -45,7 +46,7 @@ export function cloneCcLayout(layout: CcLayoutV3): CcLayoutV3 {
 
 export function normalizeCcLayout(layout: Partial<CcLayoutV3> | null | undefined): CcLayoutV3 {
   const placements = cloneCcLayout(DEFAULT_CC_LAYOUT).placements
-  if (!layout?.placements || (layout.version !== 3 && layout.version !== CC_LAYOUT_SCHEMA_VERSION)) {
+  if (!layout?.placements || ![3, 4, CC_LAYOUT_SCHEMA_VERSION].includes(layout.version ?? 0)) {
     return { version: CC_LAYOUT_SCHEMA_VERSION, placements }
   }
 

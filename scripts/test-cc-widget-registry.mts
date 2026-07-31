@@ -5,7 +5,7 @@ import { DEFAULT_CC_LAYOUT, normalizeCcLayout } from '../src/ccLayoutState.ts'
 const registry = readFileSync(new URL('../src/components/cc/widgetRegistry.tsx', import.meta.url), 'utf8')
 const controlCenter = readFileSync(new URL('../src/components/ControlCenter.tsx', import.meta.url), 'utf8')
 
-for (const id of ['input', 'ekg', 'pct', 'tokens', 'context-ring', 'model', 'mode', 'send', 'attach']) {
+for (const id of ['input', 'ekg', 'pct', 'tokens', 'context-ring', 'runtime-status', 'model', 'mode', 'send', 'attach']) {
   assert.match(registry, new RegExp(`id: '${id}'`), `${id} 必须注册`)
   assert.ok(DEFAULT_CC_LAYOUT.placements[id as keyof typeof DEFAULT_CC_LAYOUT.placements], `${id} 必须有默认布局`)
 }
@@ -16,7 +16,9 @@ assert.match(registry, /category: 'action'/)
 assert.match(registry, /id: 'input'[\s\S]*?naturalSize: false/, 'input 不应使用自然尺寸')
 assert.match(registry, /id: 'tokens'[\s\S]*?naturalSize: true/, 'tokens 应使用自然尺寸')
 assert.match(registry, /id: 'context-ring'[\s\S]*?naturalSize: true/, 'context-ring 应使用自然尺寸')
+assert.match(registry, /id: 'runtime-status'[\s\S]*?naturalSize: true/, 'runtime-status 应使用自然尺寸')
 assert.match(registry, /resolveContextMeter/, 'context-ring 必须复用 contextMeter 纯函数')
+assert.match(registry, /resolveRuntimeIndicator/, 'runtime-status 必须复用 runtimeIndicator 纯函数')
 assert.match(registry, /defaultPlacement: placement\('status-primary', 0\)/, 'registry 必须声明默认位置')
 assert.match(registry, /renderPreview\?:/, 'registry 必须预留 Preview renderer')
 

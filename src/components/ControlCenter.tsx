@@ -391,7 +391,7 @@ function PropertyPanel({ id, onClose, onExit }: { id: string; onClose: () => voi
   const setCcScale = useStore(s => s.setCcScale)
   const theme = useStore(s => s as any)
   const labels: Record<string, string> = {
-    input: '输入栏', ekg: '用量条', pct: '百分比', tokens: 'Token数', 'context-ring': '上下文环',
+    input: '输入栏', ekg: '用量条', pct: '百分比', tokens: 'Token数', 'context-ring': '上下文环', 'runtime-status': '运行状态',
     model: '模型', mode: '权限模式', send: '发送按钮', attach: '附件按钮',
   }
 

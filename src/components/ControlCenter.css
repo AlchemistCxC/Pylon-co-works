@@ -96,6 +96,28 @@
 }
 .cc-context-ring-label { position:relative; z-index:1; }
 
+.cc-runtime-status {
+  display:inline-flex;
+  align-items:center;
+  gap:0.42em;
+  color:var(--runtime-status-color);
+  font-family:var(--mono);
+  font-size:0.9em;
+  line-height:1;
+  white-space:nowrap;
+}
+.cc-runtime-status-dot {
+  width:0.62em;
+  height:0.62em;
+  border-radius:50%;
+  flex:0 0 auto;
+  background:var(--runtime-status-color);
+  box-shadow:0 0 0.45em var(--runtime-status-color);
+}
+.cc-runtime-status-running .cc-runtime-status-dot { animation:cc-runtime-status-pulse 1.15s ease-in-out infinite; }
+@keyframes cc-runtime-status-pulse { 50% { opacity:0.42; transform:scale(0.72); } }
+@media (prefers-reduced-motion:reduce) { .cc-runtime-status-running .cc-runtime-status-dot { animation:none; } }
+
 @media (max-width:900px) {
   .cc-status-row { row-gap:2px; }
   .cc-command-hint { width:100%; padding-left:0; text-align:right; }
