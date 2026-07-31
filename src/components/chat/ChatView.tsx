@@ -22,6 +22,7 @@ import { clearChatSourceRefs } from './sessionCleanup'
 import { measureRender, recordMeasuredAsync, recordRender } from './renderMetrics'
 import { prepareRenderableMessages } from './messagePipeline'
 import type { Message as PipelineMessage } from './messageTypes'
+import { buildMessageLookups } from './messageLookups'
 import './ChatView.css'
 
 
@@ -54,6 +55,7 @@ const ChatView = React.memo(function ChatView({ sessionId }: Props) {
   const scrollToBottomRef = useRef<((behavior?: ScrollBehavior) => void) | null>(null)
   const [messages, setMessages] = useState<Message[]>(!IS_TAURI ? MOCK_MESSAGES : [])
   const preparedMessages = useMemo(() => prepareRenderableMessages(messages), [messages])
+  const messageLookups = useMemo(() => buildMessageLookups(messages), [messages])
   const [streamingText, setStreamingText] = useState('')
   const [streamingThinking, setStreamingThinking] = useState('')
   const streamingTextRef = useRef('')
@@ -525,6 +527,7 @@ const ChatView = React.memo(function ChatView({ sessionId }: Props) {
                 key={renderMessage.message.id}
                 message={renderMessage.message}
                 reduceMotion={reduceMotion === true}
+                lookups={messageLookups}
               />
             ))
           })}
@@ -573,7 +576,7 @@ const ChatView = React.memo(function ChatView({ sessionId }: Props) {
 // ── Sub-components ──
 
 
-function MessageRow({ message: msg, reduceMotion }: { message: Message; reduceMotion: boolean }) {
+function MessageRow({ message: msg, reduceMotion, lookups }: { message: Message; reduceMotion: boolean; lookups: ReturnType<typeof buildMessageLookups> }) {
   recordRender('MessageRow.render')
   return (
     <motion.div
@@ -582,7 +585,7 @@ function MessageRow({ message: msg, reduceMotion }: { message: Message; reduceMo
       animate={{ opacity: 1, y: 0 }}
       transition={reduceMotion ? { duration: 0 } : { duration: 0.25, ease: [0.2, 0, 0, 1] }}
     >
-      {msg.role === 'tool' && <ToolCard name={msg.toolName!} input={msg.toolInput} output={msg.toolOutput} outputLines={msg.toolOutputLines} status={msg.toolStatus} />}
+      {msg.role === 'tool' && <ToolCard name={msg.toolName!} input={msg.toolInput} output={msg.toolOutput} outputLines={msg.toolOutputLines} status={msg.toolStatus} visualState={msg.id.startsWith('tool-') ? (lookups.failedToolIds.has(msg.id.slice(5)) ? 'failed' : lookups.runningToolIds.has(msg.id.slice(5)) ? 'running' : lookups.resolvedToolIds.has(msg.id.slice(5)) ? 'completed' : 'unknown') : 'unknown'} />}
       {msg.role === 'user' && <UserLine sender={msg.sender} content={msg.content} />}
       {msg.role === 'reasoning' && <ReasoningBlock text={msg.content} running={msg.running === true} />}
       {msg.role === 'assistant' && <AssistantContent text={msg.content} />}
@@ -591,11 +594,12 @@ function MessageRow({ message: msg, reduceMotion }: { message: Message; reduceMo
 }
 
 function areMessageRowPropsEqual(
-  previous: { message: Message; reduceMotion: boolean },
-  next: { message: Message; reduceMotion: boolean },
+  previous: { message: Message; reduceMotion: boolean; lookups: ReturnType<typeof buildMessageLookups> },
+  next: { message: Message; reduceMotion: boolean; lookups: ReturnType<typeof buildMessageLookups> },
 ): boolean {
   if (previous.message !== next.message) return false
   if (previous.reduceMotion !== next.reduceMotion) return false
+  if (previous.lookups !== next.lookups) return false
   if (previous.message.running || next.message.running) return false
   if (previous.message.role === 'tool' || next.message.role === 'tool') {
     if (previous.message.toolStatus !== next.message.toolStatus) return false
@@ -722,7 +726,7 @@ function formatToolInput(name: string, rawInput: unknown): string {
   return ''
 }
 
-function ToolCard({ name, input, output, outputLines, status: toolStatus }: { name: string; input?: string; output?: string; outputLines?: number; status?: string }) {
+function ToolCard({ name, input, output, outputLines, status: toolStatus, visualState }: { name: string; input?: string; output?: string; outputLines?: number; status?: string; visualState?: string }) {
   recordRender('ToolCard.render')
   const [open, setOpen] = useState(false)
   const bodyId = useId()
@@ -734,8 +738,8 @@ function ToolCard({ name, input, output, outputLines, status: toolStatus }: { na
   const toolErr = useStore(s => s.toolErr)
   const connectorMode = useStore(s => s.toolConnectorMode) || 'none'
   const connectorColor = useStore(s => s.toolConnectorColor) || 'rgba(0,0,0,0.12)'
-  const done = toolStatus === 'completed' || toolStatus === 'failed' || toolStatus === 'error' || output !== undefined
-  const status = resolveToolVisualStatus(toolStatus, output !== undefined)
+  const done = visualState === 'completed' || visualState === 'failed' || visualState === 'cancelled' || toolStatus === 'completed' || toolStatus === 'failed' || toolStatus === 'error' || output !== undefined
+  const status = resolveToolVisualStatus(visualState || toolStatus, output !== undefined)
   // 标志物辉光：颜色跟随状态色，或用户指定
   const statusColor = status === 'ok' ? toolOk : status === 'err' ? toolErr : toolRun
   const glowCss = glow > 0
