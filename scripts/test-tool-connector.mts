@@ -16,11 +16,22 @@ assert.equal(/\b(?:top|height):\s*(?:-?\d+px|\d+px)\b/.test(connectorBlock), fal
 const claudeRule = css.match(/\.app\[data-message-layout="claude"\] \.term-row-tool \+ \.term-row-tool \.term-tool::before \{([\s\S]*?)\n\}/)?.[1]
 assert.ok(claudeRule?.includes('--conn-gap: 1em'), 'claude 布局必须补偿 1em 行间距')
 
-// 实际间距必须由 ResizeObserver 测量写入（body 展开/字号变化时线仍贯通）
+// 实际间距必须由行级 ResizeObserver 测量写入（body 展开/字号变化时线仍贯通）
 const chatView = readFileSync(new URL('../src/components/chat/ChatView.tsx', import.meta.url), 'utf8')
 assert.match(chatView, /const gap = row\.offsetTop - \(previous\.offsetTop \+ previous\.offsetHeight\)/, '必须实测相邻 tool 行间距')
 assert.match(chatView, /style\.setProperty\('--conn-gap', `\$\{Math\.max\(0, gap\)\}px`\)/, '实测间距必须写入 --conn-gap')
-assert.match(chatView, /new ResizeObserver/, '必须监听布局变化（body 展开/收起/字号）')
-assert.match(chatView, /requestAnimationFrame\(update\)/, '测量必须 rAF 节流')
+assert.match(chatView, /observer\.observe\(row\)/, '必须观察行元素（容器 content-box 固定高不触发 RO）')
+assert.match(chatView, /}, \[messages\]\)/, 'messages 变化必须重跑行绑定')
+assert.match(chatView, /requestAnimationFrame\(measure\)/, '测量必须 rAF 节流')
+
+// 层叠：线在 body 背景之上（展开不被截断）、head 在线之上（指示器覆盖线）
+assert.match(css, /\.term-tool \{[\s\S]*?position:relative; z-index:0;/, '.term-tool 必须创建 stacking context')
+assert.match(connectorBlock, /z-index:1;/, '线必须位于 body 背景之上')
+assert.match(css, /\.term-tool-head \{ position:relative; z-index:2;/, 'head 必须位于线之上')
+
+// 工具名随状态着色（主题变量驱动，参考 CC 主题着色）
+assert.match(css, /\.term-tool\[data-status="ok"\] \.term-tool-name \{ color:var\(--tool-ok,#1e9646\); \}/, '已完成工具名必须用 --tool-ok')
+assert.match(css, /\.term-tool\[data-status="err"\] \.term-tool-name \{ color:var\(--tool-err,#be2828\); \}/, '失败工具名必须用 --tool-err')
+assert.match(css, /\.term-tool\[data-status="run"\] \.term-tool-name \{ color:var\(--tool-run,#3b82f6\); \}/, '运行中工具名必须用 --tool-run')
 
 console.log('toolConnector 自适应回归测试通过')

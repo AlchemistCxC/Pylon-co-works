@@ -1,4 +1,4 @@
-import { useRef, useEffect, useState, useMemo, useId, useCallback } from 'react'
+import { useRef, useEffect, useLayoutEffect, useState, useMemo, useId, useCallback } from 'react'
 import React from 'react'
 import { invoke } from '@tauri-apps/api/core'
 import { useStore } from '../../store'
@@ -312,13 +312,15 @@ const ChatView = React.memo(function ChatView({ sessionId }: Props) {
     }
   }, [])
 
-  // 连续 Tool 连接线：实测相邻 tool 行间距写入 --conn-gap（body 展开/字号/行高变化
-  // 都会改变实际间距，固定公式无法覆盖；ResizeObserver + rAF 节流）
-  useEffect(() => {
+  // 连续 Tool 连接线：实测相邻 tool 行间距写入 --conn-gap。
+  // 注意：.chat-view 是 flex 固定高，行增删/body 展开只改变 scrollHeight（overflow），
+  // 观察容器自身 content-box 不会触发 ResizeObserver——必须观察行元素。
+  // messages 变化时重跑绑定（新行挂上 RO）；body 展开/字号变化由行 RO 触发重测。
+  useLayoutEffect(() => {
     const container = chatViewRef.current
     if (!container) return
     let raf = 0
-    const update = () => {
+    const measure = () => {
       raf = 0
       const rows = container.querySelectorAll<HTMLElement>('.term-row-tool')
       for (let index = 1; index < rows.length; index += 1) {
@@ -328,17 +330,27 @@ const ChatView = React.memo(function ChatView({ sessionId }: Props) {
         row.querySelector<HTMLElement>('.term-tool')?.style.setProperty('--conn-gap', `${Math.max(0, gap)}px`)
       }
     }
-    const observer = new ResizeObserver(() => {
+    const schedule = () => {
       if (raf !== 0) return
-      raf = requestAnimationFrame(update)
-    })
-    observer.observe(container)
-    update()
+      raf = requestAnimationFrame(measure)
+    }
+    const observer = new ResizeObserver(schedule)
+    const observedRows = new Set<Element>()
+    const sync = () => {
+      for (const row of container.querySelectorAll('.term-row-tool')) {
+        if (observedRows.has(row)) continue
+        observer.observe(row)
+        observedRows.add(row)
+      }
+    }
+    sync()
+    schedule()
     return () => {
       observer.disconnect()
+      observedRows.clear()
       if (raf !== 0) cancelAnimationFrame(raf)
     }
-  }, [])
+  }, [messages])
 
   const scrollToBottom = useCallback((behavior: ScrollBehavior = 'smooth') => {
     scrollFollowRef.current = 'jumping'
