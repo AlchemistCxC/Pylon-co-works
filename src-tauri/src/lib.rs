@@ -2050,9 +2050,19 @@ gateway:
         assert_eq!(extract_tool_file_name(r#"{"command": "ls"}"#), None, "无文件名键不提取");
         assert_eq!(extract_tool_file_name(r#"{"path": ""}"#), None, "空路径不提取");
         assert_eq!(extract_tool_file_name("not json at all"), None);
-        // 只取文件名值，不把整个 rawInput（可能含 secret）带出
+        // 只取顶层 path 值，不把 rawInput（可能含 secret）带出
         let raw = r#"{"path": "src/x.rs", "token": "SECRET"}"#;
         assert_eq!(extract_tool_file_name(raw).as_deref(), Some("src/x.rs"));
+    }
+
+    #[test]
+    fn extract_tool_file_name_ignores_embedded_path_fragments() {
+        // 审查修复回归：值内嵌的 "path": 片段不得被当作文件名（防 secret 以文件名形态落盘）
+        let embedded = r#"{"input": "config says \"path\":\"sk-abc123\""}"#;
+        assert_eq!(extract_tool_file_name(embedded), None, "非顶层键的内嵌 path 片段必须忽略");
+        // 非 JSON 形态一律不提取
+        assert_eq!(extract_tool_file_name(r#"{path: x}"#), None);
+        assert_eq!(extract_tool_file_name(r#""path":"src/x.rs""#), None);
     }
 }
 
@@ -3061,18 +3071,14 @@ fn inject_applies_to(content: &str) -> bool {
 }
 
 /// M5 感知：从 tool_call rawInput 中脱敏提取文件名（`"path":"..."` 形态）。
-/// 安全红线：只取文件名/相对路径（白名单键），原文绝不下沉到宠物状态。
+/// 安全红线（审查修复）：必须解析为 JSON 后取**顶层键**——纯子串匹配会被
+/// 值内嵌的 `"path":<secret>` 骗过，把 secret 以文件名形态带进宠物状态并落盘。
 fn extract_tool_file_name(raw: &str) -> Option<String> {
-    for key in ["\"path\"", "\"file\"", "\"filename\"", "\"file_path\""] {
-        if let Some(pos) = raw.find(key) {
-            let rest = &raw[pos + key.len()..];
-            let rest = rest.trim_start_matches([':', ' ', '"']);
-            let end = rest.find('"').unwrap_or(0);
-            if end > 0 {
-                let value = &rest[..end];
-                if !value.is_empty() && value.len() <= 256 {
-                    return Some(value.to_string());
-                }
+    let parsed: serde_json::Value = serde_json::from_str(raw).ok()?;
+    for key in ["path", "file", "filename", "file_path"] {
+        if let Some(value) = parsed.get(key).and_then(|v| v.as_str()) {
+            if !value.is_empty() && value.len() <= 256 {
+                return Some(value.to_string());
             }
         }
     }

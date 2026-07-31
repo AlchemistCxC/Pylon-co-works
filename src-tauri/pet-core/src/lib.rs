@@ -204,18 +204,20 @@ pub enum ToolKind {
 
 impl ToolKind {
     /// 工具名 → 分类字典（子串匹配，与 Peri 常用工具名对齐）。
+    /// 审查修复：去裸 "code"/"search" 子串（误伤 vscode/search_files），
+    /// Network 用显式 web 形态。
     pub fn classify(title: &str) -> Self {
         let lower = title.to_ascii_lowercase();
         let hit = |keywords: &[&str]| keywords.iter().any(|k| lower.contains(k));
-        if hit(&["edit_file", "write_file", "apply_patch", "multi_edit", "file_edit", "code"]) {
+        if hit(&["edit_file", "write_file", "apply_patch", "multi_edit", "file_edit", "code_edit"]) {
             Self::Code
         } else if hit(&["spawn_agent", "delegate", "run_agent", "subagent", "dispatch_agent"]) {
             Self::AgentSpawn
-        } else if hit(&["bash", "run", "execute", "terminal", "shell", "cmd"]) {
+        } else if hit(&["bash", "run_command", "run_shell", "execute", "terminal", "shell"]) {
             Self::Execute
-        } else if hit(&["web_search", "fetch", "curl", "http", "browser", "search"]) {
+        } else if hit(&["web_search", "search_web", "fetch", "curl", "http", "browser"]) {
             Self::Network
-        } else if hit(&["read", "grep", "glob", "list", "workspace", "view", "search_files"]) {
+        } else if hit(&["read", "grep", "glob", "list", "workspace", "view", "search_files", "search_in"]) {
             Self::Read
         } else {
             Self::Other
@@ -286,12 +288,24 @@ pub struct PetStats {
     pub code_files: Vec<String>,
 }
 
+/// 审查修复（P2-4）：0-100 状态值反序列化钳制——手改/损坏存档含 >100 值时
+/// 不再整份拒绝（否则 load 失败宠物重置），而是钳到 100。
+fn clamp_u8<'de, D>(deserializer: D) -> Result<u8, D::Error>
+where
+    D: serde::Deserializer<'de>,
+{
+    let value = u16::deserialize(deserializer)?;
+    Ok(value.min(100) as u8)
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(default)]
 pub struct PetState {
     pub name: String,
     pub mood: String,
+    #[serde(deserialize_with = "clamp_u8")]
     pub happiness: u8,
+    #[serde(deserialize_with = "clamp_u8")]
     pub energy: u8,
     pub xp: u32,
     pub bond: u32,
@@ -299,8 +313,11 @@ pub struct PetState {
     pub last_seen_day: u64,
     pub first_chunk_at_ms: Option<u64>,
     // ── v2：需求维度（设计书 §3，0-100）──
+    #[serde(deserialize_with = "clamp_u8")]
     pub hunger: u8,
+    #[serde(deserialize_with = "clamp_u8")]
     pub fun: u8,
+    #[serde(deserialize_with = "clamp_u8")]
     pub loneliness: u8,
     // ── v2：个性 / 状态机 / 感知 ──
     pub traits: PetTraits,
@@ -388,9 +405,10 @@ impl PetState {
         saved.traits = saved.traits.clamp();
         saved.recent_events.truncate(RECENT_EVENTS_CAP);
         saved.stats.code_files.truncate(10);
-        // 旧存档 last_tick_at_ms=0：以出生时间为基准（不触发惩罚性衰减）
+        // 旧存档 last_tick_at_ms=0（v1 无此字段）：审查修复——以**现在**为基准，
+        // 而不是 born_at（久远存档会触发 24h 惩罚性衰减，违背"不惩罚"意图）。
         if saved.last_tick_at_ms == 0 {
-            saved.last_tick_at_ms = saved.born_at_ms;
+            saved.last_tick_at_ms = now_ms;
         }
         // pending_action 时间戳校验：已过期直接丢弃（防恢复后立即触发陈旧行为）
         if let Some(PendingAction::CraftFriend { until_ms }) = saved.pending_action {
@@ -412,16 +430,18 @@ impl PetState {
     pub fn apply(&mut self, event: AiEvent, now_ms: u64) {
         self.settle(now_ms);
         self.visit(now_ms);
-        // T2：睡眠中任何事件（除 Sleepy 本身）→ 唤醒
-        if self.machine == PetMachineState::Asleep && !matches!(event, AiEvent::Sleepy) {
+        // T2：睡眠中真实互动事件（Poke/Feed/Play/对话等）→ 唤醒。
+        // 审查修复：Visit（get_pet 12s 轮询心跳）不唤醒——否则睡眠只能维持一个
+        // 轮询周期且每次白得 +30 energy（能量农场）。
+        if self.machine == PetMachineState::Asleep
+            && !matches!(event, AiEvent::Sleepy | AiEvent::Visit)
+        {
             self.wake();
         }
         match event {
             AiEvent::Visit => {
-                // 睡眠中被日常访问唤醒（wake 已在开头执行）
-                if self.machine == PetMachineState::Asleep {
-                    self.wake();
-                }
+                // 审查修复：asleep 时访问仅记账（跨天结算在 visit()），不唤醒
+                //（真实唤醒靠 Poke/Feed/Play 的 T2）。
             }
             AiEvent::UserSent => {
                 self.stats.messages = self.stats.messages.saturating_add(1);
@@ -494,8 +514,11 @@ impl PetState {
                     }
                     ToolKind::AgentSpawn => {
                         self.push_event(RecentEvent::Spawn);
-                        // M6：捏朋友——30s 延迟完成（时间戳驱动，零后台任务）
-                        self.pending_action = Some(PendingAction::CraftFriend { until_ms: now_ms + 30_000 });
+                        // M6：捏朋友——30s 延迟完成（时间戳驱动，零后台任务）。
+                        // 审查修复：已有 crafting 时不覆盖（连续 spawn 不会无限推迟完成）。
+                        if self.pending_action.is_none() {
+                            self.pending_action = Some(PendingAction::CraftFriend { until_ms: now_ms + 30_000 });
+                        }
                         self.msg = Some(lines::pick(lines::LineKey::FriendStart, &mut self.line_idx));
                     }
                     ToolKind::Read => {
@@ -545,10 +568,12 @@ impl PetState {
                 self.msg = Some("它累瘫了，像跑完了所有循环。".into());
             }
             AiEvent::PromptTimeout => {
+                // 审查修复：T7 超时 → 状态回 Idle（否则 Interacting 卡住推导 curious）
+                self.machine = PetMachineState::Awake(MachineSub::Idle);
                 self.stats.dazes = self.stats.dazes.saturating_add(1);
                 self.fun = (self.fun as u16 + 5).min(100) as u8;
                 self.push_event(RecentEvent::Timeout);
-                self.msg = Some("它望着空气发呆。".into());
+                self.msg = Some(lines::pick(lines::LineKey::Dazed, &mut self.line_idx));
             }
             AiEvent::CodeSeen => {
                 self.stats.code_watched = self.stats.code_watched.saturating_add(1);
@@ -574,16 +599,16 @@ impl PetState {
                 }
                 self.last_feed_at_ms = now_ms;
                 let multiplier = [100_u16, 50, 25, 0][self.feed_spam_count as usize];
-                // M4 个性：贪吃 → 饥饿恢复收益 ×(1+greed/200)（50%~150%）
-                let greed_factor = (100 + self.traits.greed as u16 * 2) / 2;
-                let hunger_gain = 20_u16 * multiplier / 100 * greed_factor / 100;
+                // 审查修复：hunger 收益固定 +20（贪吃改作用于 bond，见 reward 调用）
+                let hunger_gain = 20_u16 * multiplier / 100;
                 self.hunger = (self.hunger as u16 + hunger_gain).min(100) as u8;
                 self.energy = (self.energy as u16 + 20 * multiplier / 100).min(100) as u8;
                 self.fun = (self.fun as u16 + 3 * multiplier / 100).min(100) as u8;
                 self.loneliness = self.loneliness.saturating_sub((20 * multiplier / 100) as u8);
                 self.happiness = (self.happiness as u16 + 7 * multiplier / 100).min(100) as u8;
-                // bond 走 reward_interaction（30s 冷却，另计）
-                self.reward_interaction(now_ms, 1);
+                // bond 走 reward_interaction（30s 冷却）；审查修复：贪吃 → bond 收益 ×(1+greed/100)
+                let greed_bond = (1 + self.traits.greed as u32 / 100) as u32;
+                self.reward_interaction(now_ms, greed_bond);
                 // mood 由 derive_mood 推导
                 self.push_event(RecentEvent::Feed);
                 self.msg = Some(lines::pick(lines::LineKey::Feed, &mut self.line_idx));
@@ -594,10 +619,12 @@ impl PetState {
                 let play_cooled = self.last_play_at_ms == 0
                     || now_ms.saturating_sub(self.last_play_at_ms) >= 60_000;
                 self.last_play_at_ms = now_ms;
+                // 审查修复：玩耍也是互动——刷新睡眠判定基准（防 30s 内误入睡）
+                self.last_interaction_at_ms = now_ms;
                 self.hunger = self.hunger.saturating_sub(5);
                 self.energy = self.energy.saturating_sub(10);
-                // M4 个性：好奇 → 玩耍 fun 收益 ×(1+curiosity/200)（50%~150%）
-                let curiosity_factor = (100 + self.traits.curiosity as u16 * 2) / 2;
+                // M4 个性：好奇 → 玩耍 fun 收益 ×(1+curiosity/100)（100%~200%）
+                let curiosity_factor = 100 + self.traits.curiosity as u16;
                 let fun_gain = 25_u16 * curiosity_factor / 100;
                 self.fun = (self.fun as u16 + fun_gain).min(100) as u8;
                 self.loneliness = self.loneliness.saturating_sub(30);
@@ -953,7 +980,8 @@ impl PetState {
     }
 
     fn reward_interaction(&mut self, now_ms: u64, amount: u32) {
-        if now_ms.saturating_sub(self.last_interaction_at_ms) >= 30_000 {
+        // 审查修复：last_interaction==0（从未互动）视为首次，不触发冷却
+        if self.last_interaction_at_ms == 0 || now_ms.saturating_sub(self.last_interaction_at_ms) >= 30_000 {
             self.gain_bond(amount);
             self.last_interaction_at_ms = now_ms;
         }

@@ -62,15 +62,21 @@ fn restores_old_data_by_clamping_and_recomputing_derived_stats() {
 }
 
 #[test]
-fn sleepy_pet_is_woken_by_daily_visit() {
+fn sleepy_pet_is_woken_by_interaction_not_polling() {
+    // 审查修复：轮询 Visit 不唤醒（睡眠可持续）；真实互动唤醒
     let mut pet = PetState::new_at(0);
     pet.apply(AiEvent::FirstChunk, 1);
     assert!(pet.check_sleepy(31_000), "30s idle after first chunk must fall asleep");
     assert_eq!(pet.mood, "sleepy");
+    assert_eq!(pet.machine, pylon_pet_core::PetMachineState::Asleep);
 
+    // 轮询心跳不唤醒
     pet.apply(AiEvent::Visit, 31_001);
-    assert_eq!(pet.mood, "idle", "daily visit must wake a sleeping pet");
-    assert_eq!(pet.msg.as_deref(), Some("它被你的脚步声唤醒。"));
+    assert_eq!(pet.machine, pylon_pet_core::PetMachineState::Asleep, "轮询 Visit 不得唤醒睡眠宠物");
+    // 真实互动唤醒
+    pet.apply(AiEvent::Poke, 31_002);
+    assert_eq!(pet.machine, pylon_pet_core::PetMachineState::Awake(pylon_pet_core::MachineSub::Idle), "互动必须唤醒");
+    assert_eq!(pet.mood, "happy", "Poke 后窗口推导 happy");
 }
 
 #[test]
@@ -140,12 +146,18 @@ fn feeding_restores_hunger_and_play_restores_fun() {
     pet.apply(AiEvent::Feed, 2); // 30s 冷却内：bond 不加但 hunger 仍恢复
     assert_eq!(pet.hunger, 100);
 
+    // 好奇=0 时 play 收益为设计基准 +25
     let mut pet = PetState::new_at(1);
-    pet.traits = pylon_pet_core::PetTraits::default();
+    pet.traits = pylon_pet_core::PetTraits { curiosity: 0, ..pylon_pet_core::PetTraits::default() };
     pet.apply(AiEvent::Play, 1);
-    assert_eq!(pet.fun, 95, "play 恢复 fun +25");
+    assert_eq!(pet.fun, 95, "play 恢复 fun +25（curiosity=0 基准）");
     assert_eq!(pet.loneliness, 0, "play 大幅降低孤独");
     assert_eq!(pet.energy, 70, "play 消耗 energy -10");
+    // 好奇加成：curiosity=100 → fun +50
+    let mut pet = PetState::new_at(1);
+    pet.traits = pylon_pet_core::PetTraits { curiosity: 100, ..pylon_pet_core::PetTraits::default() };
+    pet.apply(AiEvent::Play, 1);
+    assert_eq!(pet.fun, 100, "curiosity=100 时 fun 收益翻倍");
 }
 
 #[test]
@@ -220,9 +232,13 @@ fn exhausted_pet_falls_asleep_and_recovers_energy() {
     pet.apply(AiEvent::Visit, 31_000); // 30s 无互动
     assert_eq!(pet.machine, pylon_pet_core::PetMachineState::Asleep);
     assert_eq!(pet.mood, "sleepy");
-    // 睡眠中 30 分钟：energy +60 恢复；随后任何互动唤醒（wake 再 +30）
+    // 睡眠中 30 分钟：energy +60 恢复；轮询 Visit 不唤醒（审查修复）
     pet.apply(AiEvent::Visit, 31_000 + 1_800_000);
-    assert_eq!(pet.machine, pylon_pet_core::PetMachineState::Awake(pylon_pet_core::MachineSub::Idle), "Visit 唤醒睡眠中的宠物");
+    assert_eq!(pet.machine, pylon_pet_core::PetMachineState::Asleep, "轮询不得唤醒");
+    assert_eq!(pet.energy, 74, "睡眠恢复 energy（14+60=74）");
+    // 真实互动唤醒（wake 再 +30）
+    pet.apply(AiEvent::Poke, 31_000 + 1_800_001);
+    assert_eq!(pet.machine, pylon_pet_core::PetMachineState::Awake(pylon_pet_core::MachineSub::Idle), "互动必须唤醒");
     assert_eq!(pet.energy, 100, "睡眠恢复 60 + 唤醒加成 30 = 100（封顶）");
 }
 
@@ -333,18 +349,21 @@ fn play_has_sixty_second_bond_cooldown() {
 }
 
 #[test]
-fn greedy_pet_gets_more_from_food() {
+fn greedy_pet_gets_more_bond_from_food() {
+    // 审查修复：贪吃影响喂食 bond 收益（设计书 §7），不再影响 hunger 恢复
     let mut pet = PetState::new_at(1);
     pet.traits = pylon_pet_core::PetTraits::default();
     pet.traits.greed = 100;
     pet.hunger = 50;
     pet.apply(AiEvent::Feed, 1);
-    assert_eq!(pet.hunger, 80, "贪吃喂食收益 ×1.5（+30）");
+    assert_eq!(pet.hunger, 70, "hunger 收益固定 +20");
+    assert_eq!(pet.bond, 2, "贪吃喂食 bond +2（×2）");
     let mut normal = PetState::new_at(1);
     normal.traits = pylon_pet_core::PetTraits::default();
     normal.hunger = 50;
     normal.apply(AiEvent::Feed, 1);
-    assert_eq!(normal.hunger, 70, "普通喂食 +20");
+    assert_eq!(normal.hunger, 70);
+    assert_eq!(normal.bond, 1, "普通喂食 bond +1");
 }
 
 #[test]
