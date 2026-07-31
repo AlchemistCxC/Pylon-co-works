@@ -1335,10 +1335,13 @@ async fn set_config_option(state: tauri::State<'_, AppState>, source: String, ke
     let generation = state.current_generation();
     let peri_id = state.get_peri_id(&source).map_err(|e| e.to_string())?;
     // Peri returns full configOptions in the response body — no pre-subscribe needed
+    // Peri 1.4 / Hermes 0.11 的 set_config_option 都是平铺 value：
+    //   {"sessionId","configId","value":"sonnet"}（ValueId untagged / Select 型）
+    // 旧三层嵌套 {"value":{"valueId":{"value":v}}} 会被官方 schema 反序列化拒绝。
     let response = state.inner().acp_rpc(acp::METHOD_SESSION_SET_CONFIG_OPTION, serde_json::json!({
         "sessionId": peri_id,
         "configId": key,
-        "value": {"valueId": {"value": value.clone()}},
+        "value": value.clone(),
     })).await?;
     state.ensure_generation(generation)?;
     state.with_session_if_matches(&source, &peri_id, generation, |session| {
