@@ -51,15 +51,47 @@ impl PetTraits {
 }
 
 /// 层次状态机（设计书 §5）：Awake(Idle/Interacting/Distress) / Asleep。
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+/// 序列化为字符串（前端契约："awake.idle" / "awake.interacting" / "awake.distress" / "asleep"）。
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum PetMachineState {
     Awake(MachineSub),
     Asleep,
 }
 
+impl PetMachineState {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Awake(MachineSub::Idle) => "awake.idle",
+            Self::Awake(MachineSub::Interacting) => "awake.interacting",
+            Self::Awake(MachineSub::Distress) => "awake.distress",
+            Self::Asleep => "asleep",
+        }
+    }
+}
+
 impl Default for PetMachineState {
     fn default() -> Self {
         Self::Awake(MachineSub::Idle)
+    }
+}
+
+impl Serialize for PetMachineState {
+    fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        serializer.serialize_str(self.as_str())
+    }
+}
+
+impl<'de> Deserialize<'de> for PetMachineState {
+    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        use serde::de::Error;
+        let raw = String::deserialize(deserializer)?;
+        match raw.as_str() {
+            "awake.idle" => Ok(Self::Awake(MachineSub::Idle)),
+            "awake.interacting" => Ok(Self::Awake(MachineSub::Interacting)),
+            "awake.distress" => Ok(Self::Awake(MachineSub::Distress)),
+            "asleep" => Ok(Self::Asleep),
+            other => Err(D::Error::custom(format!("unknown machine state: {other}"))),
+        }
     }
 }
 

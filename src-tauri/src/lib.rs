@@ -3893,6 +3893,7 @@ async fn pet_action(app: tauri::AppHandle, state: tauri::State<'_, AppState>, ac
     match action.as_str() {
         "poke" => { pet::on_poke(&mut pet); }
         "feed" => { pet::on_feed(&mut pet); }
+        "play" => { pet::on_play(&mut pet); }
         "rename" => { if let Some(v) = value { pet::rename(&mut pet, &v); } }
         "daily" => { pet::daily_visit(&mut pet); }
         "sleepy" => { sleepy_result = Some(pet::check_sleepy(&mut pet)); }

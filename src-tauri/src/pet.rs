@@ -13,6 +13,8 @@ pub struct PetView<'a> {
     pub age_days: u64,
     pub next_stage_xp: Option<u32>,
     pub growth_progress: u8,
+    /// M7：捏朋友进行中（前端进度展示）。
+    pub crafting: bool,
 }
 
 pub fn view(state: &PetState) -> PetView<'_> {
@@ -24,6 +26,7 @@ pub fn view(state: &PetState) -> PetView<'_> {
         age_days: state.age_days(now_ms()),
         next_stage_xp: state.next_stage_xp(),
         growth_progress: state.growth_progress(),
+        crafting: state.pending_action.is_some(),
     }
 }
 
@@ -53,6 +56,11 @@ pub fn on_poke(state: &mut PetState) {
 
 pub fn on_feed(state: &mut PetState) {
     state.apply(AiEvent::Feed, now_ms());
+}
+
+/// M4：玩耍（消耗 energy，恢复 fun/降低孤独；60s bond 冷却）。
+pub fn on_play(state: &mut PetState) {
+    state.apply(AiEvent::Play, now_ms());
 }
 
 pub fn on_usage_update(state: &mut PetState, total: u64) {
