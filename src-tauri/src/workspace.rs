@@ -178,9 +178,6 @@ mod tests {
     use std::time::{SystemTime, UNIX_EPOCH};
 
     struct TempDir(PathBuf);
-    impl TempDir {
-        fn path(&self) -> &Path { &self.0 }
-    }
     impl Drop for TempDir {
         fn drop(&mut self) { let _ = fs::remove_dir_all(&self.0); }
     }
