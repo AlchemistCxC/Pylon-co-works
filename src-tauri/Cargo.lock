@@ -2405,6 +2405,7 @@ dependencies = [
  "infer",
  "log",
  "pylon-pet-core",
+ "rand",
  "reqwest 0.12.28",
  "serde",
  "serde_json",
