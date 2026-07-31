@@ -71,6 +71,14 @@ pub fn on_tool_failure(state: &mut PetState) {
     state.apply(AiEvent::ToolCall { outcome: ToolOutcome::Failed }, now_ms());
 }
 
+pub fn on_agent_connected(state: &mut PetState) {
+    state.apply(AiEvent::AgentConnected, now_ms());
+}
+
+pub fn on_agent_crashed(state: &mut PetState) {
+    state.apply(AiEvent::AgentCrashed, now_ms());
+}
+
 pub fn recall_memory(state: &mut PetState) {
     state.msg = state.recall_memory().or_else(|| Some("还没有形成长期记忆。".into()));
 }

@@ -223,6 +223,7 @@ async fn do_connect_and_replace<R: tauri::Runtime>(
     };
     handles.replace_agent_client(agent_id, new_acp, window.clone(), keep_sessions).await?;
     handles.emit_agent_status(window, AgentLifecycleStatus::Connected, None);
+    let _ = handles.pet.lock().map(|mut p| pet::on_agent_connected(&mut p));
     handles.log_runtime_summary("info", "agent", None, &format!("Agent {log_action} succeeded"), serde_json::Map::new());
     Ok(())
 }
@@ -661,6 +662,7 @@ fn start_notification_dispatcher<R: tauri::Runtime>(state: &AppStateHandles, win
                         runtime.status = AgentLifecycleStatus::Crashed;
                         runtime.last_error = Some(last_error.clone());
                     }
+                    let _ = pet.lock().map(|mut p| pet::on_agent_crashed(&mut p));
                     let runtime = agent_runtime.lock().map(|value| value.clone()).unwrap_or_default();
                     let active_id = active_agent.lock().ok().map(|value| value.clone()).unwrap_or_default();
                     let agent = agents.lock().ok().and_then(|items| items.get(&active_id).cloned());
@@ -1855,6 +1857,8 @@ async fn reload_agents(state: tauri::State<'_, AppState>, config_path: Option<St
 async fn get_pet(state: tauri::State<'_, AppState>) -> Result<serde_json::Value, String> {
     let mut pet = state.pet.lock().map_err(|e| e.to_string())?;
     pet::daily_visit(&mut pet);
+    // 自动入睡：轮询时检查（首字后 30s 无互动 → sleepy），幂等
+    pet::check_sleepy(&mut pet);
     let msg = pet.msg.take();
     let mut value = serde_json::to_value(pet::view(&pet)).map_err(|e| e.to_string())?;
     if let Some(message) = msg {
