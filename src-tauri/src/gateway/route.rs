@@ -231,6 +231,11 @@ impl EntityRouteTable {
     pub fn lookup(&self, source: &str) -> Option<&EntityBinding> {
         self.entries.iter().find(|e| e.source == source)
     }
+
+    /// 遍历全部绑定（gateway_status 展示 / 热重载快照用）。
+    pub fn iter(&self) -> impl Iterator<Item = &EntityBinding> {
+        self.entries.iter()
+    }
 }
 
 #[cfg(test)]

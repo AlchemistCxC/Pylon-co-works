@@ -11,9 +11,9 @@ pub mod route;
 pub mod truncate;
 
 use std::collections::HashMap;
-use std::sync::{Arc, Mutex};
+use std::sync::{Arc, Mutex, RwLock};
 
-use route::{EntityRouteTable, GatewayConfig, InjectConfig, QqGatewayConfig};
+use route::{GatewayConfig, QqGatewayConfig};
 
 /// 平台适配器接口。
 ///
@@ -50,11 +50,11 @@ pub const MAX_INGEST_CHARS: usize = 64 * 1024;
 pub type IngestHandler = Arc<dyn Fn(&ResolvedIngest) + Send + Sync>;
 
 /// Gateway 核心：适配器注册表 + 静态路由表 + 平台配置 + 入站解析 + 出站分发。
+/// 配置段（routes/qq/inject）收进 RwLock——`reload()` 支持热重载（B10.5 预留，
+/// reload_gateway 命令接线）。
 pub struct GatewayCore {
     adapters: Mutex<HashMap<String, Arc<dyn PlatformAdapter>>>,
-    routes: EntityRouteTable,
-    qq: QqGatewayConfig,
-    inject: InjectConfig,
+    config: RwLock<GatewayConfig>,
     ingest_handler: Mutex<Option<IngestHandler>>,
 }
 
@@ -73,11 +73,18 @@ impl GatewayCore {
     pub fn from_config(config: GatewayConfig) -> Self {
         Self {
             adapters: Mutex::new(HashMap::new()),
-            routes: config.routes,
-            qq: config.qq,
-            inject: config.inject,
+            config: RwLock::new(config),
             ingest_handler: Mutex::new(None),
         }
+    }
+
+    /// 热重载配置（reload_gateway 命令）：替换路由表/平台配置/注入配置。
+    /// 已注册适配器不受影响（凭据/连接级配置仍启动生效）。
+    pub fn reload(&self, config: GatewayConfig) {
+        if let Ok(mut slot) = self.config.write() {
+            *slot = config;
+        }
+        log::info!("gateway 配置已热重载");
     }
 
     /// 注册 ingest 发送处理器（run() 接线 ACP 发送；可重复注册覆盖）。
@@ -88,33 +95,38 @@ impl GatewayCore {
     }
 
     /// QQ 群级白名单配置（QqAdapter 白名单检查用）。
-    pub fn qq_config(&self) -> &QqGatewayConfig {
-        &self.qq
+    pub fn qq_config(&self) -> QqGatewayConfig {
+        self.config.read().map(|c| c.qq.clone()).unwrap_or_default()
     }
 
     /// B11 注入开关（Prism 可用性由调用方降级处理）。
     pub fn inject_enabled(&self) -> bool {
-        self.inject.enabled
+        self.config.read().map(|c| c.inject.enabled).unwrap_or(false)
     }
 
     /// B11 注入场景（None = 让 Prism 用 active.scenario）。
-    pub fn inject_scenario(&self) -> Option<&str> {
-        self.inject.scenario.as_deref()
+    pub fn inject_scenario(&self) -> Option<String> {
+        self.config.read().ok().and_then(|c| c.inject.scenario.clone())
     }
 
     /// B11 注入知识源（空 = 让 Prism 用 active.sources）。
-    pub fn inject_sources(&self) -> &[String] {
-        &self.inject.sources
+    pub fn inject_sources(&self) -> Vec<String> {
+        self.config.read().map(|c| c.inject.sources.clone()).unwrap_or_default()
     }
 
     /// B11 完成持久化模式："skip" | "prism"。
-    pub fn inject_persist(&self) -> &str {
-        &self.inject.persist
+    pub fn inject_persist(&self) -> String {
+        self.config.read().map(|c| c.inject.persist.clone()).unwrap_or_else(|_| "skip".to_string())
     }
 
     /// 按 source 查询绑定（会话生命周期 watcher 取 reset 策略用）。
     pub fn binding(&self, source: &str) -> Option<route::EntityBinding> {
-        self.routes.lookup(source).cloned()
+        self.config.read().ok().and_then(|c| c.routes.lookup(source).cloned())
+    }
+
+    /// 全部路由绑定（gateway_status 命令展示用）。
+    pub fn routes(&self) -> Vec<route::EntityBinding> {
+        self.config.read().map(|c| c.routes.iter().cloned().collect()).unwrap_or_default()
     }
 
     /// 按 platform_key 取已注册适配器（系统消息投递 / gateway_status 用）。
@@ -148,7 +160,7 @@ impl GatewayCore {
             return Err("ingest requires a non-empty source".to_string());
         }
         let content: String = content.chars().take(MAX_INGEST_CHARS).collect();
-        let binding = self.routes.lookup(source).cloned();
+        let binding = self.config.read().ok().and_then(|c| c.routes.lookup(source).cloned());
         Ok(ResolvedIngest {
             source: source.to_string(),
             content,
@@ -419,18 +431,18 @@ gateway:
       allow_from: [user-1]
 "#);
         let qq = config.qq_config();
-        let group_binding = config.routes.lookup("qq:group:group-a");
+        let group_binding = config.binding("qq:group:group-a");
         // 群级白名单：未列出群拒绝
-        assert!(!ingest_allowed(qq, group_binding, "qq:group:group-x", Some("member-1"), None));
+        assert!(!ingest_allowed(&qq, group_binding.as_ref(), "qq:group:group-x", Some("member-1"), None));
         // 成员白名单：匹配放行、不匹配拒绝
-        assert!(ingest_allowed(qq, group_binding, "qq:group:group-a", Some("member-1"), None));
-        assert!(!ingest_allowed(qq, group_binding, "qq:group:group-a", Some("stranger"), None));
+        assert!(ingest_allowed(&qq, group_binding.as_ref(), "qq:group:group-a", Some("member-1"), None));
+        assert!(!ingest_allowed(&qq, group_binding.as_ref(), "qq:group:group-a", Some("stranger"), None));
         // 私聊白名单：按 user_openid
-        let c2c_binding = config.routes.lookup("qq:user:user-1");
-        assert!(ingest_allowed(qq, c2c_binding, "qq:user:user-1", None, Some("user-1")));
-        assert!(!ingest_allowed(qq, c2c_binding, "qq:user:user-1", None, Some("user-2")));
+        let c2c_binding = config.binding("qq:user:user-1");
+        assert!(ingest_allowed(&qq, c2c_binding.as_ref(), "qq:user:user-1", None, Some("user-1")));
+        assert!(!ingest_allowed(&qq, c2c_binding.as_ref(), "qq:user:user-1", None, Some("user-2")));
         // 群级白名单配置了 group-a：any 群被拒绝
-        assert!(!ingest_allowed(qq, None, "qq:group:any", Some("whoever"), None));
+        assert!(!ingest_allowed(&qq, None, "qq:group:any", Some("whoever"), None));
         // 无群级白名单 + 无绑定 → 放行
         let open = config_with(r#"
 gateway:
@@ -440,7 +452,7 @@ gateway:
       profile: trpg
       session: 战役1
 "#);
-        assert!(ingest_allowed(open.qq_config(), None, "qq:group:any", Some("whoever"), None));
+        assert!(ingest_allowed(&open.qq_config(), None, "qq:group:any", Some("whoever"), None));
     }
 
     #[test]

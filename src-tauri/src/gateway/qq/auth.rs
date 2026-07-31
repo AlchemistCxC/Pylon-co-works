@@ -122,6 +122,15 @@ impl QqAuth {
         *self.access_token.lock().unwrap() = None;
         *self.expires_at.lock().unwrap() = Instant::now();
     }
+
+    /// 测试构造：预设固定 token（不触发刷新；集成测试避免打真实 QQ API）。
+    #[cfg(test)]
+    pub(crate) fn for_testing(token: String) -> Self {
+        let auth = Self::new(Client::new(), "test-app".to_string(), "test-secret".to_string());
+        *auth.access_token.lock().unwrap() = Some(token);
+        *auth.expires_at.lock().unwrap() = Instant::now() + Duration::from_secs(3600);
+        auth
+    }
 }
 
 /// 获取 Gateway WebSocket URL

@@ -49,9 +49,8 @@ impl DedupState {
         true
     }
 
-    /// seen 窗口容量（DEDUP_MAX_SIZE，Hermes 实证值）。
-    /// 待 B10.2 适配器（/测试）消费后移除 allow。
-    #[allow(dead_code)]
+    /// seen 窗口容量（DEDUP_MAX_SIZE，Hermes 实证值）。仅测试引用。
+    #[cfg(test)]
     pub fn window_capacity(&self) -> usize {
         DEDUP_MAX_SIZE
     }
@@ -68,9 +67,7 @@ impl DedupState {
         }
     }
 
-    /// 查询 chat 的最新 msg_id。
-    /// 待 B10.2 适配器回复锚点接线后消费。
-    #[allow(dead_code)]
+    /// 查询 chat 的最新 msg_id（B10 收尾：deliver 回复锚点消费）。
     pub fn latest_for(&self, chat_id: &str) -> Option<&str> {
         self.last_msg_id.get(chat_id).map(String::as_str)
     }

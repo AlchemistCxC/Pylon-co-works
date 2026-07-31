@@ -1,4 +1,4 @@
-﻿//! QQ 平台适配器（B10.1 骨架 + B10.2 组装：入站去重/ingest + 出站文本投递）。
+﻿//! QQ 平台适配器（B10.1 骨架 + B10.2 组装 + B10 收尾：发送队列/重试/死目标/回复锚点）。
 
 pub mod auth;
 pub mod dedup;
@@ -7,10 +7,12 @@ pub mod send;
 pub mod types;
 pub mod ws;
 
+use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
 
 use dedup::DedupState;
 use reqwest::Client;
+use tokio::sync::mpsc;
 
 use crate::gateway::{GatewayCore, PlatformAdapter, ResolvedIngest};
 
@@ -18,14 +20,58 @@ use self::auth::QqAuth;
 
 /// QQ 平台单条文本上限（字符，Hermes MAX_MESSAGE_LENGTH 实证值）。
 const QQ_MAX_MESSAGE_LEN: usize = 4000;
+/// 每 chat 发送队列容量（agent 输出洪水时不阻塞 deliver，满则丢弃该段并告警）。
+const SEND_QUEUE_CAP: usize = 256;
+/// 瞬时失败重试次数（指数退避 1s/2s/4s 后放弃告警）。
+const SEND_RETRY_ATTEMPTS: u32 = 3;
+/// rate limited 等待（QQ 实证：60s 后重试一次）。
+const RATE_LIMIT_DELAY_SECS: u64 = 60;
+
+/// 发送失败分类（B10 收尾，参考 Hermes 发送重试/死目标模式）。
+#[derive(Debug)]
+enum SendFailure {
+    /// 瞬时（网络/5xx 等）：有限重试后告警。
+    Transient(String),
+    /// 平台限流（429/rate）：等 60s 重试一次，超限放弃告警。
+    RateLimited(String),
+    /// 死目标（403/404/forbidden/not found：群被删/拉黑/注销）：标记不可达，短路投递。
+    DeadTarget(String),
+}
+
+fn classify_send_error(error: &str) -> SendFailure {
+    let lower = error.to_lowercase();
+    if lower.contains("429") || lower.contains("rate") {
+        SendFailure::RateLimited(error.to_string())
+    } else if lower.contains("403") || lower.contains("404")
+        || lower.contains("forbidden") || lower.contains("not found")
+    {
+        SendFailure::DeadTarget(error.to_string())
+    } else {
+        SendFailure::Transient(error.to_string())
+    }
+}
+
+/// 入队消息：单 chat 串行发送（天然节流）。
+struct QueuedSend {
+    chat_type: String,
+    chat_id: String,
+    text: String,
+    reply_to: Option<String>,
+}
 
 /// QQ 适配器：入站（handle_incoming）去重后进入 gateway.ingest；
-/// 出站 deliver 文本经 send.rs 发送（truncate 分段已在 GatewayCore 核心层完成）。
+/// 出站 deliver 经 per-chat 发送队列串行投递（重试/死目标/回复锚点）。
 pub struct QqAdapter {
     dedup: Mutex<DedupState>,
     core: Arc<GatewayCore>,
     http: Client,
     auth: Arc<QqAuth>,
+    /// QQ API 基地址（测试可注入桩地址；生产 = types::API_BASE）。
+    base_url: String,
+    /// chat_id → 发送队列发送端（后台 send_loop 串行消费）。
+    senders: Mutex<HashMap<String, mpsc::Sender<QueuedSend>>>,
+    /// chat_id → 死目标原因（forbidden/not_found 标记；成功发送自愈清除）。
+    dead_targets: Arc<Mutex<HashMap<String, String>>>,
 }
 
 /// 从 gateway source 解析 QQ 目标：`qq:group:123` → (group, 123)；`qq:user:456` → (c2c, 456)。
@@ -47,6 +93,23 @@ impl QqAdapter {
             core,
             http,
             auth,
+            base_url: types::API_BASE.to_string(),
+            senders: Mutex::new(HashMap::new()),
+            dead_targets: Arc::new(Mutex::new(HashMap::new())),
+        })
+    }
+
+    /// 测试构造：注入 QQ API 桩地址（集成测试避免打真实 QQ API）。
+    #[cfg(test)]
+    pub(crate) fn for_testing(core: Arc<GatewayCore>, http: Client, auth: Arc<QqAuth>, base_url: String) -> Arc<Self> {
+        Arc::new(Self {
+            dedup: Mutex::new(DedupState::new()),
+            core,
+            http,
+            auth,
+            base_url,
+            senders: Mutex::new(HashMap::new()),
+            dead_targets: Arc::new(Mutex::new(HashMap::new())),
         })
     }
 
@@ -68,7 +131,7 @@ impl QqAdapter {
     ) -> Result<Option<ResolvedIngest>, String> {
         let resolved = self.core.ingest(source, content)?;
         if !crate::gateway::ingest_allowed(
-            self.core.qq_config(),
+            &self.core.qq_config(),
             resolved.binding.as_ref(),
             source,
             member_openid,
@@ -98,41 +161,146 @@ impl PlatformAdapter for QqAdapter {
         QQ_MAX_MESSAGE_LEN
     }
 
-    /// 投递文本（已分段）：拿 token → send_message。发送失败只告警（不阻断 WebView 事件）。
+    /// 投递文本（已分段，B10 收尾）：回复锚点（dedup latest_for）→ 死目标短路 →
+    /// per-chat 发送队列入队（后台串行发送 + 重试 + 死目标标记）。队列满丢弃该段并告警。
     /// deliver_event（done/error）首版不投平台，记录日志。
     fn deliver_text(&self, source: &str, text: &str) -> Result<(), String> {
         let (chat_type, chat_id) = parse_source(source)?;
-        let http = self.http.clone();
-        let auth = self.auth.clone();
-        let text = text.to_string();
-        let chat_type = chat_type.to_string();
-        let chat_id = chat_id.to_string();
-        tokio::spawn(async move {
-            match auth.get_token().await {
-                Ok(token) => match send::send_message(
-                    &http,
-                    types::API_BASE,
-                    &token,
-                    &chat_id,
-                    &chat_type,
-                    &text,
-                    None,
-                    types::MSG_TYPE_TEXT,
-                )
-                .await
-                {
-                    Ok(_) => {}
-                    Err(error) => log::warn!("QQ deliver 发送失败: {error}"),
-                },
-                Err(error) => log::warn!("QQ deliver token 获取失败: {error}"),
+        // 回复锚点：本 chat 最新收到的 msg_id（QQ 回复 API 需要）
+        let reply_to = self.dedup.lock()
+            .ok()
+            .and_then(|dedup| dedup.latest_for(chat_id).map(str::to_string));
+        // 死目标短路：目标不可达（群被删/拉黑/注销）不再投递
+        if let Some(reason) = self.dead_targets.lock().ok().and_then(|d| d.get(chat_id).cloned()) {
+            log::warn!("QQ deliver 短路（死目标 {chat_id}: {reason}），丢弃 {:.60}...", text);
+            return Ok(());
+        }
+        let Ok(runtime) = tokio::runtime::Handle::try_current() else {
+            return Err("QQ deliver 需要 tokio runtime".to_string());
+        };
+        let (tx, rx) = {
+            let mut senders = self.senders.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
+            if let Some(existing) = senders.get(chat_id) {
+                (existing.clone(), None)
+            } else {
+                let (tx, rx) = mpsc::channel(SEND_QUEUE_CAP);
+                senders.insert(chat_id.to_string(), tx.clone());
+                (tx, Some(rx))
             }
-        });
+        };
+        if let Some(rx) = rx {
+            // 首个入队者：启动本 chat 的后台发送循环
+            let http = self.http.clone();
+            let auth = self.auth.clone();
+            let dead = self.dead_targets.clone();
+            let base_url = self.base_url.clone();
+            runtime.spawn(async move {
+                Self::send_loop(http, auth, dead, base_url, rx).await;
+            });
+        }
+        let message = QueuedSend {
+            chat_type: chat_type.to_string(),
+            chat_id: chat_id.to_string(),
+            text: text.to_string(),
+            reply_to,
+        };
+        if tx.try_send(message).is_err() {
+            log::warn!("QQ deliver 队列满（{chat_id}），丢弃该段");
+        }
         Ok(())
     }
 
     fn deliver_event(&self, source: &str, event: &str, _payload: &serde_json::Value) -> Result<(), String> {
         log::info!("QQ deliver_event 未投递（首版仅文本）: {source} event={event}");
         Ok(())
+    }
+}
+
+impl QqAdapter {
+    /// per-chat 后台发送循环：串行消费队列（节流）→ token → 发送（瞬时 3 次退避重试 /
+    /// rate 60s 一次 / 死目标标记短路）。成功发送清除死目标标记（自愈）。
+    async fn send_loop(
+        http: Client,
+        auth: Arc<QqAuth>,
+        dead_targets: Arc<Mutex<HashMap<String, String>>>,
+        base_url: String,
+        mut rx: mpsc::Receiver<QueuedSend>,
+    ) {
+        while let Some(msg) = rx.recv().await {
+            if dead_targets.lock().ok().map(|d| d.contains_key(&msg.chat_id)).unwrap_or(false) {
+                log::warn!("QQ send_loop 跳过死目标 {}", msg.chat_id);
+                continue;
+            }
+            let token = match auth.get_token().await {
+                Ok(token) => token,
+                Err(error) => {
+                    log::warn!("QQ deliver token 获取失败: {error}");
+                    continue;
+                }
+            };
+            match Self::send_with_retry(&http, &base_url, &token, &msg).await {
+                Ok(()) => {
+                    dead_targets.lock().ok().map(|mut d| d.remove(&msg.chat_id));
+                }
+                Err(SendFailure::RateLimited(error)) => {
+                    log::warn!("QQ deliver rate limited（{chat_id}），{RATE_LIMIT_DELAY_SECS}s 后重试一次: {error}", chat_id = msg.chat_id);
+                    tokio::time::sleep(std::time::Duration::from_secs(RATE_LIMIT_DELAY_SECS)).await;
+                    let token = match auth.get_token().await {
+                        Ok(token) => token,
+                        Err(error) => {
+                            log::warn!("QQ deliver rate 重试 token 失败: {error}");
+                            continue;
+                        }
+                    };
+                    if let Err(error) = Self::send_once(&http, &base_url, &token, &msg).await {
+                        log::warn!("QQ deliver rate 重试仍失败: {error:?}");
+                    } else {
+                        dead_targets.lock().ok().map(|mut d| d.remove(&msg.chat_id));
+                    }
+                }
+                Err(SendFailure::DeadTarget(error)) => {
+                    dead_targets.lock().ok().map(|mut d| d.insert(msg.chat_id.clone(), error.clone()));
+                    log::warn!("QQ deliver 目标不可达（{}），标记死目标: {error}", msg.chat_id);
+                }
+                Err(SendFailure::Transient(error)) => {
+                    log::warn!("QQ deliver 发送失败（{chat_id}）: {error}", chat_id = msg.chat_id);
+                }
+            }
+        }
+    }
+
+    /// 发送 + 瞬时失败指数退避重试（SEND_RETRY_ATTEMPTS 次：1s/2s/4s）。
+    async fn send_with_retry(http: &Client, base_url: &str, token: &str, msg: &QueuedSend) -> Result<(), SendFailure> {
+        let mut last_error = None;
+        for attempt in 0..SEND_RETRY_ATTEMPTS {
+            match Self::send_once(http, base_url, token, msg).await {
+                Ok(()) => return Ok(()),
+                Err(error) => {
+                    last_error = Some(error);
+                    if attempt + 1 < SEND_RETRY_ATTEMPTS {
+                        tokio::time::sleep(std::time::Duration::from_secs(1 << attempt)).await;
+                    }
+                }
+            }
+        }
+        Err(last_error.unwrap_or(SendFailure::Transient("unknown".to_string())))
+    }
+
+    /// 单次发送（send.rs；错误分类给重试/死目标策略）。
+    async fn send_once(http: &Client, base_url: &str, token: &str, msg: &QueuedSend) -> Result<(), SendFailure> {
+        send::send_message(
+            http,
+            base_url,
+            token,
+            &msg.chat_id,
+            &msg.chat_type,
+            &msg.text,
+            msg.reply_to.as_deref(),
+            types::MSG_TYPE_TEXT,
+        )
+        .await
+        .map(|_| ())
+        .map_err(|error| classify_send_error(&error))
     }
 }
 

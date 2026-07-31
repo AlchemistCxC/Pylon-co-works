@@ -2250,6 +2250,269 @@ async fn git_history(
     git::git_history(&root, limit).await.map_err(PylonError::Git)
 }
 
+// ── B10 收尾：gateway_status / reload_gateway ──
+
+/// 网关状态：已注册平台适配器 + 静态路由表 + 平台配置 + 注入配置。
+#[tauri::command]
+async fn gateway_status(state: tauri::State<'_, AppState>) -> Result<serde_json::Value, PylonError> {
+    let gateway = &state.gateway;
+    let routes: Vec<serde_json::Value> = gateway.routes().iter().map(|binding| {
+        serde_json::json!({
+            "source": binding.source,
+            "agentId": binding.agent_id,
+            "profileId": binding.profile_id,
+            "sessionKey": binding.session_key,
+            "allowFrom": binding.allow_from,
+            "reset": binding.reset,
+            "idleMinutes": binding.idle_minutes,
+        })
+    }).collect();
+    let qq = gateway.qq_config();
+    Ok(serde_json::json!({
+        "adapters": gateway.adapter_keys(),
+        "routes": routes,
+        "qq": { "groupAllowFrom": qq.group_allow_from },
+        "inject": {
+            "enabled": gateway.inject_enabled(),
+            "scenario": gateway.inject_scenario(),
+            "sources": gateway.inject_sources(),
+            "persist": gateway.inject_persist(),
+        },
+    }))
+}
+
+/// 网关配置热重载：重新解析当前生效 agents.yaml 的 gateway 段
+/// （PYLON_AGENTS_CONFIG / exe 旁 agents.yaml / 内置配置）。
+/// 注意：QQ 凭据（PYLON_QQ_APP_ID/CLIENT_SECRET）与已注册适配器不受影响（启动生效）。
+#[tauri::command]
+async fn reload_gateway(state: tauri::State<'_, AppState>) -> Result<(), PylonError> {
+    let content = match agent_config::effective_config_path() {
+        Some(path) => std::fs::read_to_string(&path)
+            .map_err(|error| PylonError::Io(format!("读取 {} 失败: {error}", path.display())))?,
+        None => include_str!("../../agents.yaml").to_string(),
+    };
+    let config = gateway::route::parse_config(&content)
+        .map_err(|error| PylonError::Protocol(error))?;
+    state.gateway.reload(config);
+    state.inner().log_runtime_summary("info", "gateway", None, "Gateway config reloaded", serde_json::Map::new());
+    Ok(())
+}
+
+// ── B10.4 平台链路集成测试（fake QQ 事件 → ingest → 注入 → fake ACP → deliver 回发） ──
+
+#[cfg(test)]
+mod b10_gateway_integration_tests {
+    use super::*;
+    use crate::gateway::qq::{auth::QqAuth, QqAdapter};
+    use std::io::{Read, Write};
+    use std::net::TcpListener;
+    use std::sync::mpsc;
+    use std::thread;
+    use std::time::Duration;
+
+    /// fake ACP：prompt 时先发一条流式 chunk（deliver 回发的文本），再响应 end_turn。
+    const CHUNK_ACP_SCRIPT: &str = r#"import json,sys
+for line in sys.stdin:
+    request=json.loads(line)
+    method=request.get('method')
+    response={'jsonrpc':'2.0','id':request.get('id'),'result':{}}
+    if method == 'session/new':
+        response['result']={'sessionId':'b10-session'}
+    elif method == 'session/prompt':
+        session_id=request['params']['sessionId']
+        print(json.dumps({'jsonrpc':'2.0','method':'session/update','params':{'sessionId':session_id,'update':{'sessionUpdate':'agent_message_chunk','content':{'text':'QQ 回复内容'}}}}), flush=True)
+        response['result']={'stopReason':'end_turn'}
+    print(json.dumps(response), flush=True)
+"#;
+
+    fn chunk_acp_agent() -> AgentDef {
+        AgentDef {
+            name: "fake-acp-chunk".to_string(),
+            transport: "subprocess".to_string(),
+            exe: "python".to_string(),
+            args: vec!["-u".to_string(), "-c".to_string(), CHUNK_ACP_SCRIPT.to_string()],
+            cwd: None,
+            env: std::collections::HashMap::new(),
+            default: false,
+            set_model_api: false,
+            model: None,
+            acp_args: Vec::new(),
+            acp: None,
+        }
+    }
+
+    /// 模块内 state 构造。
+    async fn build_state_with(
+        initial_acp: AcpClient,
+        agent: AgentDef,
+        gateway: Arc<gateway::GatewayCore>,
+    ) -> AppState {
+        let mut agents = std::collections::HashMap::new();
+        agents.insert(agent.name.clone(), agent.clone());
+        let runtime = AgentRuntime::new_disconnected();
+        *runtime.acp.lock().await = initial_acp;
+        let runtimes = Arc::new(AgentRuntimeManager::new());
+        runtimes.insert(agent.name.clone(), runtime);
+        AppState {
+            runtimes,
+            agents: Arc::new(Mutex::new(agents)),
+            active_agent: Arc::new(Mutex::new(agent.name.clone())),
+            pet: Arc::new(Mutex::new(pet::PetState::default())),
+            runtime_logs: runtime_log::RuntimeLogHub::default(),
+            runtime_mcp: Mutex::new(None),
+            prism: prism::PrismClient::unavailable("test".to_string()),
+            gateway,
+            approval_mode: Arc::new(Mutex::new("default".to_string())),
+        }
+    }
+
+    /// QQ API 桩：捕获发送请求（Content-Length 完整读取），返回 {"id":"sent-1"}。
+    fn spawn_qq_api_stub() -> (std::net::SocketAddr, mpsc::Receiver<String>, thread::JoinHandle<()>) {
+        let listener = TcpListener::bind("127.0.0.1:0").expect("bind stub");
+        let address = listener.local_addr().expect("address");
+        let (request_tx, request_rx) = mpsc::channel();
+        let server = thread::spawn(move || {
+            let (mut stream, _) = listener.accept().expect("accept request");
+            let mut bytes = Vec::new();
+            let mut buffer = [0_u8; 4096];
+            loop {
+                let count = stream.read(&mut buffer).expect("read request");
+                if count == 0 {
+                    break;
+                }
+                bytes.extend_from_slice(&buffer[..count]);
+                if let Some(headers_end) = bytes.windows(4).position(|window| window == b"\r\n\r\n") {
+                    let headers = String::from_utf8_lossy(&bytes[..headers_end]);
+                    let length = headers
+                        .lines()
+                        .find_map(|line| line.strip_prefix("Content-Length: "))
+                        .and_then(|value| value.trim().parse::<usize>().ok())
+                        .unwrap_or(0);
+                    if bytes.len() >= headers_end + 4 + length {
+                        break;
+                    }
+                }
+            }
+            request_tx.send(String::from_utf8(bytes).expect("request UTF-8")).expect("send request");
+            let body = r#"{"id":"sent-1"}"#;
+            let response = format!(
+                "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{}",
+                body.len(), body
+            );
+            let _ = stream.write_all(response.as_bytes());
+        });
+        (address, request_rx, server)
+    }
+
+    #[tokio::test]
+    async fn qq_ingest_to_deliver_end_to_end_with_reply_anchor() {
+        let (_qq_api_address, qq_request_rx, qq_server) = spawn_qq_api_stub();
+        // gateway：qq:group:123 → peri 绑定；注入关闭（本测试不依赖 Prism）
+        let gateway = Arc::new(gateway::GatewayCore::from_config(
+            gateway::route::parse_config(r#"
+gateway:
+  inject:
+    enabled: false
+  routes:
+    - source: qq:group:123
+      agent: fake-acp-chunk
+      profile: trpg
+      session: 战役1
+"#).expect("合法配置"),
+        ));
+        // QQ 适配器注册（test token + 桩地址，避免真实 QQ API）
+        let qq_http = reqwest::Client::builder()
+            .connect_timeout(Duration::from_secs(5))
+            .timeout(Duration::from_secs(10))
+            .build()
+            .expect("http client");
+        let qq_auth = Arc::new(QqAuth::for_testing("test-token".to_string()));
+        let qq_adapter = QqAdapter::for_testing(gateway.clone(), qq_http.clone(), qq_auth.clone(), format!("http://{_qq_api_address}"));
+        gateway.register(qq_adapter.clone()).expect("register qq");
+
+        let agent = chunk_acp_agent();
+        let initial_acp = AcpClient::connect_with_logs(&agent, None).await.expect("fake ACP must initialize");
+        let state = build_state_with(initial_acp, agent, gateway.clone()).await;
+        let app = tauri::test::mock_builder()
+            .build(tauri::test::mock_context(tauri::test::noop_assets()))
+            .expect("mock app must build");
+        app.manage(state);
+        let webview = tauri::WebviewWindowBuilder::new(
+            &app,
+            "main",
+            tauri::WebviewUrl::External("https://example.com".parse().unwrap()),
+        )
+        .build()
+        .expect("mock webview must build");
+        // dispatcher：chunk 转发 → deliver_all → QQ 适配器
+        let handles = AppStateHandles::from_state(app.state::<AppState>().inner());
+        let runtime = handles.active_runtime().expect("active runtime");
+        start_notification_dispatcher(&handles, &runtime, webview.clone());
+        let main_window = webview.as_ref().window();
+
+        // ingest handler 接线（模拟 run() setup：绑定 agent 路由 + 发送）
+        let app_handle = app.handle().clone();
+        let window_for_handler = main_window.clone();
+        gateway.set_ingest_handler(Arc::new(move |resolved: &gateway::ResolvedIngest| {
+            let app = app_handle.clone();
+            let window = window_for_handler.clone();
+            let resolved = resolved.clone();
+            tokio::spawn(async move {
+                let state = app.state::<AppState>();
+                let agent_id = resolved.binding.as_ref().map(|b| b.agent_id.clone()).unwrap_or_default();
+                let runtime = state.inner().runtimes.get_or_create(&agent_id);
+                if let Err(error) = send_prompt_core(
+                    state.inner(),
+                    &runtime,
+                    Some(&window),
+                    &state.gateway,
+                    &resolved.source,
+                    &resolved.content,
+                    "",
+                    None,
+                    None,
+                    None,
+                ).await {
+                    log::warn!("ingest send failed: {error}");
+                }
+            });
+        }));
+
+        // 平台消息入站：去重 + 白名单 + ingest + dispatch（B10.4 链路起点）
+        let resolved = qq_adapter.handle_incoming("qq:group:123", "msg-1", "你好", Some("member-1"), None)
+            .expect("ingest must resolve")
+            .expect("新消息必须处理");
+        assert_eq!(resolved.source, "qq:group:123");
+        assert_eq!(resolved.binding.as_ref().unwrap().agent_id, "fake-acp-chunk");
+
+        // 中间断言：send_prompt_core 必须建立平台会话（handler 链路通的证据）
+        tokio::time::timeout(Duration::from_secs(5), async {
+            loop {
+                let sessions = app.state::<AppState>().inner().active_runtime()
+                    .map(|r| r.sessions.lock().map(|s| s.contains_key("qq:group:123")).unwrap_or(false))
+                    .unwrap_or(false);
+                if sessions {
+                    break;
+                }
+                tokio::time::sleep(Duration::from_millis(50)).await;
+            }
+        })
+        .await
+        .expect("ingest handler 必须建立平台会话（send_prompt_core 链路）");
+
+        // 等待 deliver 回发到达 QQ API 桩
+        let request = qq_request_rx.recv_timeout(Duration::from_secs(10)).expect("QQ API 桩必须收到 deliver");
+        assert!(request.starts_with("POST /v2/groups/123/messages HTTP/1.1"), "URL: {request:.100}");
+        assert!(request.contains("authorization: QQBot test-token") || request.contains("Authorization: QQBot test-token"));
+        let body: serde_json::Value = request.split("\r\n\r\n").nth(1).expect("body").parse().expect("body JSON");
+        assert_eq!(body["content"], "QQ 回复内容", "deliver 文本必须来自 fake ACP 流式 chunk");
+        assert_eq!(body["msg_type"], 0);
+        assert_eq!(body["msg_id"], "msg-1", "回复锚点必须取 chat 最新 msg_id（dedup latest_for）");
+
+        qq_server.join().expect("stub thread");
+    }
+}
+
 // ── AppState helpers ──
 
 impl AppState {
@@ -2924,8 +3187,8 @@ async fn send_prompt_core<R: tauri::Runtime>(
     };
     let prompt_text = if gateway.inject_enabled() && inject_applies_to(content) {
         match state.prism.inject(
-            gateway.inject_scenario().unwrap_or_default(),
-            gateway.inject_sources(),
+            &gateway.inject_scenario().unwrap_or_default(),
+            &gateway.inject_sources(),
             content,
             message_round,
         ).await {
@@ -3039,8 +3302,8 @@ async fn send_prompt_core<R: tauri::Runtime>(
                     };
                     if !response_text.trim().is_empty() {
                         match state.prism.persist_round(
-                            gateway.inject_scenario().unwrap_or_default(),
-                            gateway.inject_sources(),
+                            &gateway.inject_scenario().unwrap_or_default(),
+                            &gateway.inject_sources(),
                             content,
                             &response_text,
                             message_round,
@@ -3917,6 +4180,7 @@ pub fn run() {
                 list_runtime_logs, clear_runtime_logs, push_frontend_log,
                 get_workspace_root, list_workspace_entries, read_workspace_text,
                 git_status, git_diff, git_history,
+                gateway_status, reload_gateway,
             ])
             .setup(|app| {
                 let window = app.get_webview_window("main").ok_or("main window not found")?;
