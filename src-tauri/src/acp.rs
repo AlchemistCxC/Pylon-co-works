@@ -28,6 +28,9 @@ pub const METHOD_SESSION_LIST: &str = AGENT_METHOD_NAMES.session_list;
 pub const METHOD_SESSION_SET_MODE: &str = AGENT_METHOD_NAMES.session_set_mode;
 pub const METHOD_SESSION_SET_CONFIG_OPTION: &str = AGENT_METHOD_NAMES.session_set_config_option;
 pub const METHOD_SESSION_CANCEL: &str = AGENT_METHOD_NAMES.session_cancel;
+/// Hermes unstable 扩展：session/set_model（官方 Rust schema 1.4 尚无此类型，
+/// Hermes Python 0.11.2 已实现——切 model 必须走它，set_config_option 对 Hermes 不生效）。
+pub const METHOD_SESSION_SET_MODEL: &str = "session/set_model";
 /// session/update 通知名官方为 pub(crate)，保留本地常量。
 pub const NOTIF_SESSION_UPDATE: &str = "session/update";
 pub const NOTIF_AGENT_CRASHED: &str = "pylon:agent-crashed";
@@ -100,19 +103,29 @@ pub fn session_close_params(session_id: &str) -> Result<serde_json::Value, Strin
     to_params(&req, "session/close")
 }
 
+/// session/set_model 参数（Hermes unstable 扩展，字段与官方 SetSessionModelRequest 一致）。
+pub fn session_set_model_params(session_id: &str, model_id: &str) -> Result<serde_json::Value, String> {
+    Ok(serde_json::json!({
+        "sessionId": session_id,
+        "modelId": model_id,
+    }))
+}
+
 // ── 差异适配表（agent 协议差异，字典驱动）──
 //
-// 已知差异（2026-07-31 三方源码实证）：
-// | 差异点            | Peri (schema 1.4)              | Hermes (0.11.2)             |
+// 已知差异（2026-07-31 三方源码实证 + Hermes 0.18.2 真实 wire 验证）：
+// | 差异点            | Peri (schema 1.4)              | Hermes (0.11.2 / 0.18.2)    |
 // |-------------------|--------------------------------|-----------------------------|
 // | 能力声明          | clientCapabilities._meta.peri.*| 标准 agentCapabilities，    |
 // |                   |                                | 不校验客户端 caps（忽略）    |
-// | session/close     | 支持                           | 未实现 → -32601            |
+// | 切 model          | set_config_option("model")     | session/set_model（unstable）|
+// |                   |                                | set_config_option 不生效    |
+// | session/close     | 支持                           | 0.18.2 实测支持（旧版 -32601）|
 // | mcpServers        | 容忍缺失/空                    | 必填 List（缺字段即拒）      |
 // | set_config_option | ValueId 平铺（untagged）       | Select 型平铺（兼容）        |
 // | set_mode          | modeId                         | modeId                      |
-// 结论：除 session/close 外无 wire 分叉。initialize 统一带 _meta.peri.*
-// （Hermes 忽略无害）；close 对不支持方降级本地清理（见 lib.rs close_session）。
+// 结论：wire 分叉仅切 model 途径。initialize 统一带 _meta.peri.*（Hermes 忽略
+// 无害）；close 降级保留为防御兜底（旧 Hermes 版本无此方法）。
 
 /// Broadcast channel capacity for ACP message fan-out.
 pub const BROADCAST_CAP: usize = 256;

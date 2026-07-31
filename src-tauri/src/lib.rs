@@ -813,6 +813,12 @@ impl AppState {
         AcpClient::complete_rpc(rpc).await
     }
 
+    /// 差异适配：Hermes 的 set_config_option 不切 model（只认 edit_approval_policy），
+    /// 切 model 必须走 unstable 的 session/set_model。
+    fn is_hermes_agent(&self) -> bool {
+        self.active_agent.lock().ok().map(|id| id.as_str() == "hermes").unwrap_or(false)
+    }
+
     fn current_generation(&self) -> u64 {
         self.client_generation.load(Ordering::Acquire)
     }
@@ -1325,11 +1331,14 @@ async fn set_mode(state: tauri::State<'_, AppState>, source: String, mode: Strin
 async fn set_config_option(state: tauri::State<'_, AppState>, source: String, key: String, value: String) -> Result<serde_json::Value, String> {
     let generation = state.current_generation();
     let peri_id = state.get_peri_id(&source).map_err(|e| e.to_string())?;
-    // Peri returns full configOptions in the response body — no pre-subscribe needed
-    // Peri 1.4 / Hermes 0.11 的 set_config_option 都是平铺 value：
-    //   {"sessionId","configId","value":"sonnet"}（ValueId untagged / Select 型）
-    // 旧三层嵌套 {"value":{"valueId":{"value":v}}} 会被官方 schema 反序列化拒绝。
-    let response = state.inner().acp_rpc(acp::METHOD_SESSION_SET_CONFIG_OPTION, acp::session_set_config_option_params(&peri_id, &key, &value)?).await?;
+    // 差异适配：Hermes 切 model 必须走 session/set_model（set_config_option 只认
+    // edit_approval_policy，其余存 config_options 不生效）；Peri 走平铺 set_config_option。
+    let use_set_model = key == "model" && state.inner().is_hermes_agent();
+    let response = if use_set_model {
+        state.inner().acp_rpc(acp::METHOD_SESSION_SET_MODEL, acp::session_set_model_params(&peri_id, &value)?).await?
+    } else {
+        state.inner().acp_rpc(acp::METHOD_SESSION_SET_CONFIG_OPTION, acp::session_set_config_option_params(&peri_id, &key, &value)?).await?
+    };
     state.ensure_generation(generation)?;
     state.with_session_if_matches(&source, &peri_id, generation, |session| {
         if let Some(options) = response.get("configOptions").and_then(|value| value.as_array()) {
