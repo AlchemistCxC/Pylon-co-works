@@ -9,7 +9,7 @@ mod runtime_log;
 mod workspace;
 
 use std::collections::HashMap;
-use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 use tauri::{Emitter, Manager, Runtime};
@@ -43,6 +43,8 @@ struct AppState {
     runtime_logs: Arc<runtime_log::RuntimeLogHub>,
     runtime_mcp: Mutex<Option<Vec<mcp::McpServerConfig>>>,
     agent_runtime: Arc<Mutex<AgentRuntimeState>>,
+    /// 自动重连进行中（防 dispatcher 多次崩溃通知重复调度）
+    auto_reconnect_active: Arc<AtomicBool>,
     prism: PrismClient,
 }
 
@@ -1784,6 +1786,7 @@ pub fn run() {
                 runtime_logs,
                 runtime_mcp: Mutex::new(None),
                 agent_runtime: Arc::new(Mutex::new(initial_agent_runtime)),
+                auto_reconnect_active: Arc::new(AtomicBool::new(false)),
                 prism,
             })
             .invoke_handler(tauri::generate_handler![
