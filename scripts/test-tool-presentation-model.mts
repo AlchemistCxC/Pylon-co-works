@@ -50,9 +50,18 @@ const edit = buildToolPresentationModel({
 assert.equal(edit.state, 'completed')
 assert.equal(edit.outputLines, TOOL_PRESENTATION_LIMITS.collapsibleOutputLineLimit + 1)
 assert.equal(edit.canCollapseOutput, true)
-assert.equal(edit.isDiffCandidate, true)
+assert.equal(edit.isDiffCandidate, false, '普通多行文本不得判定为 diff candidate（需真实可解析 diff）')
 assert.equal(edit.statusLabel, '已完成')
 assert.equal(edit.outputLabel, `${TOOL_PRESENTATION_LIMITS.collapsibleOutputLineLimit + 1} lines changed`)
+
+const diffEdit = buildToolPresentationModel({
+  ...base,
+  toolName: 'Edit',
+  sender: 'tool:Edit',
+  toolOutput: '--- a/x\n+++ b/x\n@@ -1 +1 @@\n-old\n+new\n',
+  toolStatus: 'success',
+})
+assert.equal(diffEdit.isDiffCandidate, true, '可解析 unified diff 必须判定为 diff candidate')
 
 const shortRead = buildToolPresentationModel({
   ...base,

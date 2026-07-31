@@ -1,6 +1,7 @@
 import type { Message } from './messageTypes.ts'
 import { normalizeToolStatus, type ToolVisualState } from './toolStatus.ts'
 import { truncateToWidth } from '../../utils/textWidth.ts'
+import { resolveToolRenderer } from './toolPresentation.ts'
 
 export interface ToolPresentationModel {
   toolId: string | null
@@ -65,6 +66,7 @@ export function buildToolPresentationModel(
   visualState?: ToolVisualState,
 ): ToolPresentationModel {
   const name = message.toolName || message.sender.replace(/^tool:/, '') || '未知工具'
+  const renderer = resolveToolRenderer(name)
   const inputText = message.toolInput || ''
   const outputText = message.toolOutput || ''
   const outputLines = message.toolOutputLines ?? outputLineCount(outputText)
@@ -93,9 +95,13 @@ export function buildToolPresentationModel(
     state,
     hasOutput,
     canCollapseOutput,
-    isDiffCandidate: isDiffCandidate(name, outputText),
+    isDiffCandidate: renderer.isDiffCandidate
+      ? renderer.isDiffCandidate(outputText)
+      : isDiffCandidate(name, outputText),
     statusLabel: statusLabelFor(state),
-    outputLabel: outputLabelFor(name, outputLines),
+    outputLabel: renderer.outputLabel
+      ? renderer.outputLabel(outputLines, outputText)
+      : outputLabelFor(name, outputLines),
     errorText: state === 'failed' || state === 'cancelled' ? outputText || undefined : undefined,
   }
 }

@@ -1,5 +1,5 @@
 import type { Message } from './messageTypes.ts'
-import { resolveToolPresentation } from './toolPresentation.ts'
+import { resolveToolRenderer } from './toolPresentation.ts'
 
 const searchTextCache = new WeakMap<Message, string>()
 
@@ -18,7 +18,7 @@ export function getMessageSearchText(message: Message): string {
   if (cached !== undefined) return cached
 
   const toolText = message.role === 'tool'
-    ? resolveToolPresentation(message.toolName || '').getSearchText?.(message.toolOutput) || ''
+    ? resolveToolRenderer(message.toolName || '').getSearchText?.(message.toolOutput) || ''
     : ''
   const text = [
     message.sender,

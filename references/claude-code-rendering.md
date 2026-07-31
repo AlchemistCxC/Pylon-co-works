@@ -1420,6 +1420,7 @@ F7.3 ccCliCustomized/ccPositions/ccLayoutVersion legacy 字段删除与迁移清
 F7.4 Settings/App/presets 类型收敛（as any 清除）。
 D1-D6 CC 机械变换（13.1）：消息静态化 / useMinDisplayTime / grapheme 截断 /
   Pet normal 不 setState / useBlink 共享时钟 / 隐藏 Unicode 净化（降级方案）。
+E1 工具渲染注册表（13.2）：ToolRenderer 注册表 + model 查表（isDiffCandidate 真实解析）。
 ```
 
 ### 11.2 已完成：局部可见修正（不是 UI 重排）
@@ -1542,13 +1543,15 @@ git diff --check
 
 ### 13.2 工程设计（抽象/架构，中等风险）
 
-**E1. 工具渲染注册表（每 Tool 五态渲染函数）** — 工程设计 · 难度 2 · 顺序 1
+> 状态：E1 已于 2026-07-31 落地（`test-tool-renderer-registry.mts` 回归）。
+
+**E1. 工具渲染注册表（每 Tool 五态渲染函数）** — 工程设计 · 难度 2 · ✅ 已完成
 
 - CC 源码：`Tool.ts:577-636`（`renderToolResultMessage?`/`renderToolUseMessage`/`renderToolUseProgressMessage?` 为 Tool 接口可选字段）；每工具目录一个 `UI.tsx` 导出纯渲染函数（`BashTool/UI.tsx`：verbose/condensed 双态、长命令截断、sed 伪装文件编辑、ctrl+b 后台化提示；`FileWriteTool/UI.tsx` 同理）；消费点 `components/messages/AssistantToolUseMessage.tsx`（三态 queued/in-progress/resolved + `inputSchema.safeParse` 防御）
 - 摘要：工具渲染按 toolName 注册，UI 与工具逻辑同目录但文件分离，渲染函数纯导出
-- 我们现状：`src/components/chat/ChatView.tsx` ToolCard 单组件由 ToolPresentationModel 驱动（已归一化，但无按工具注册）
-- 任务分解：① 定义 `ToolRendererRegistry`（name → 渲染函数）② ToolCard 内部改为查表，默认回退现有 model 渲染 ③ 逐个工具（Bash/Read/Grep/Edit/Write）注册 ④ 测试
-- 不做：不改变 ToolCard 布局与折叠语义
+- 我们现状：已落地——`toolPresentation.ts` 扩展为完整 `ToolRenderer` 注册表（`getSummary`/`getSearchText?`/`normalizeInput?`/`outputLabel?`/`isDiffCandidate?`），Bash/Read/Write/Edit/Grep/Glob/Task 已注册；`toolPresentationModel.ts::buildToolPresentationModel` 改为查表（未注册工具回退既有 name switch，行为不变）；ToolCard 布局与折叠语义零改动
+- 行为增强点：Edit/Write 的 `isDiffCandidate` 从"工具名+非空输出"改为**真实 `normalizeDiffPayload` 解析**判定（非 diff 文本不再标为 diff candidate；DiffCard 本身有 null 回退，视觉等价）
+- 消费点：`chatEventController::formatToolInput`（summary）、`messageSearchIndex::getMessageSearchText`（searchText）、`buildToolPresentationModel`（outputLabel/isDiffCandidate）
 
 **E2. keybindings action 注册表 + context 优先级** — 工程设计 · 难度 2 · 顺序 2
 
@@ -1635,8 +1638,10 @@ git diff --check
 ```text
 ✅ 已完成（D1-D6 机械变换）：
   D1 消息静态化 → D2 useMinDisplayTime → D3 grapheme 截断 → D4 Pet normal 不 setState → D5 useBlink → D6 Unicode 净化
+✅ 已完成（B 类工程设计）：
+  E1 工具渲染注册表
 近期（B 类工程设计，需小步拆）：
-  E1 工具渲染注册表 → E2 keybinding 注册表 → E3 FileReadCache（需后端 mtime）
+  E2 keybinding 注册表 → E3 FileReadCache（需后端 mtime）
 UI 验收型（与对应功能卡一起做）：
   U1 Byline → U3 Dialog 确认 → U4 Ratchet → U5 错误分类
 协议/后端配合（等 B 编号或先核对 ACP）：
