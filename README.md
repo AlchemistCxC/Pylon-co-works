@@ -42,9 +42,18 @@ Pylon 是 ACP 协议的**参考 GUI 实现**。它不定义 agent 行为，只�
 - 设置面板实时预览，改即所见
 
 ### 终端宠物
-- ASCII 螃蟹豆豆，idle / curious / excited / sleepy / error / happy 六情绪
-- 双轴成长（token 量 + 工具成功数），四阶进化
-- 中文气泡：发送 / 首 token / 完成 / 错误 / 戳 / 喂 / 深夜 / 回忆
+- 像素生物五阶进化：微光种 → 初生体 → 漫游体 → 陪伴体 → 长明体（XP 驱动，token 量 + 工具成功率双轴成长）
+- 七情绪渲染：idle / curious / focused / excited / happy / error / sleepy
+- 事件感知：发送 / 首 token / 完成 / 失败 / 工具调用 / 戳 / 喂 / 自动入睡（首字后 30s 无互动）/ Agent 连接成功 / 崩溃
+- 记忆里程碑：首次任务、每 10 次任务、进化瞬间、连续 7 天；`nostalgia` 回忆气泡
+- 状态落盘：`app_config_dir/pylon-pet.json`（原子写 + 启动加载 + 退出兜底），跨重启不丢
+- 前端行为：自由拖拽固定、双击恢复漫游、嗅/吃代码、平板敲码（详见 `src/components/PetCompanion.tsx`）
+
+### 后端可靠性
+- ACP 参数构造官方 schema 类型化（agent-client-protocol-schema v1.4，v1+v2 类型全集），MCP stdio/http 双模式，Hermes 差异适配
+- 崩溃自动重连：指数退避 5 次（2s→32s，~62s 后放弃），防重入；自动重连保留会话映射 + generation 迁移，旧会话可续聊
+- Session Inspector：`session_inspector` 命令一站式聚合 agent 状态 + 会话统计（tokens/活跃数）+ 明细
+- 会话映射按 generation 路由隔离，stale 通知与旧客户端事件拒绝，无双写歧义
 
 ## 技术栈
 
@@ -53,7 +62,7 @@ Pylon 是 ACP 协议的**参考 GUI 实现**。它不定义 agent 行为，只�
 | 框架 | Tauri v2 |
 | 前端 | React 19 + TypeScript + Zustand（persist 中间件） + Vite |
 | 后端 | Rust（stable-x86_64-pc-windows-gnu，tokio 异步运行时） |
-| 协议 | ACP v1 — stdin/stdout JSON-RPC 2.0；当前实现契约见 `docs/后端api文档.md` |
+| 协议 | ACP v1 + v2（官方 `agent-client-protocol-schema` 1.4，stdin/stdout JSON-RPC 2.0）；实现契约见 `docs/后端开发与交接手册.md` |
 | 样式 | 纯 CSS（500+ CSS 变量），无 Tailwind |
 | UI 库 | Radix UI（dialog / dropdown-menu / tabs / tooltip） |
 | Markdown | react-markdown + remark-gfm + starry-night + Anser（ANSI） |
@@ -105,47 +114,44 @@ pylon/
 │   ├── presets.ts             # 全局预设定义 + 五区字段映射
 │   │
 │   ├── components/
-│   │   ├── chat/
-│   │   │   ├── ChatView.tsx   # 消息渲染 + ACP 事件监听
-│   │   │   ├── InputBar.tsx   # 输入栏：默认 / CLI 模式 + 命令面板
-│   │   │   ├── MessageBubble.tsx  # 消息气泡（备用风格）
-│   │   │   ├── ModelWidget.tsx    # 模型选择器
-│   │   │   ├── ModeWidget.tsx     # 权限模式切换
-│   │   │   ├── SendWidget.tsx     # 独立发送按钮
-│   │   │   └── AttachWidget.tsx   # 独立附件按钮
-│   │   │
+│   │   ├── chat/              # 聊天区（ChatView、InputBar、MessageBubble、消息渲染管线等）
 │   │   ├── ControlCenter.tsx  # 中控区 widget 画布 + PropertyPanel
 │   │   ├── Sidebar.tsx        # 会话列表
 │   │   ├── Settings.tsx       # 设置面板（含实时预览）
 │   │   ├── RightPanel.tsx     # 右侧面板
 │   │   ├── PrismSheet.tsx     # Prism 管理面板
-│   │   ├── ProfileEditor.tsx  # Profile 编辑
-│   │   ├── SessionSettings.tsx # 会话参数编辑
-│   │   ├── ColorPopover.tsx   # 取色器组件
-│   │   └── ErrorBoundary.tsx  # 出错降级
+│   │   ├── PetCompanion.tsx   # 终端宠物（含 petBehavior/petMotion/petPersistence 模块）
+│   │   └── ...                # ProfileEditor、SessionSettings、ColorPopover、ErrorBoundary 等
 │   │
+│   ├── workspace-sheets/      # Workspace Sheet 组件
 │   ├── index.css              # 全局样式 + CSS 变量定义
 │   └── utils.ts               # 工具函数（时间格式化）
 │
 ├── src-tauri/                 # Rust 后端
 │   ├── Cargo.toml
 │   ├── tauri.conf.json
-│   ├── build.rs
+│   ├── build.rs               # windres 注入 comctl32 v6 manifest（测试 exe 兼容）
 │   ├── src/
 │   │   ├── main.rs            # 入口
-│   │   ├── lib.rs             # Tauri commands 与事件路由
-│   │   ├── acp.rs             # AcpClient：spawn agent + JSON-RPC
+│   │   ├── lib.rs             # Tauri commands、通知 dispatcher、崩溃自动重连、Session Inspector
+│   │   ├── acp.rs             # AcpClient：spawn agent + JSON-RPC（官方 schema 类型化 + fake 测试基建）
 │   │   ├── agent_config.rs    # agents.yaml 解析
-│   │   ├── error.rs           # PylonError 结构化错误
-│   │   └── pet.rs             # 终端宠物状态机
+│   │   ├── agent_runtime.rs   # Agent 生命周期状态 + 重连退避常量
+│   │   ├── mcp.rs             # MCP 配置校验/序列化
+│   │   ├── pet.rs             # 宠物适配层 + 落盘持久化
+│   │   ├── prism.rs           # Prism 网关客户端（40 个命令）
+│   │   ├── runtime_log.rs     # 运行时日志中心
+│   │   ├── workspace.rs       # 工作区只读接口
+│   │   └── error.rs           # PylonError 结构化错误
+│   ├── pet-core/              # 宠物状态机独立 crate（事件驱动 + 单测）
+│   ├── tests/                 # 集成测试基建
 │   └── resources/fonts/       # Iosevka 等宽字体（嵌入）
 │
 ├── agents.yaml                # Agent 注册配置
 └── docs/
-    ├── 功能开发清单（前端）.md
-    ├── 功能开发清单（后端）.md
-    ├── 后端api文档.md
-    └── 验收清单.md
+    ├── 后端开发与交接手册.md    # Tauri command/事件契约、验证清单
+    ├── 前端开发与交接手册.md
+    └── Workspace Sheet与右栏设计书（前端）.md
 ```
 
 ## 配置 Agent
@@ -180,7 +186,7 @@ agents:
 
 ## ACP 协议
 
-Pylon 实现了 ACP 协议的 GUI 端。当前 Pylon command、event 与 ACP 映射见 `docs/后端api文档.md`。
+Pylon 实现了 ACP 协议的 GUI 端。当前 Pylon command、event 与 ACP 映射见 `docs/后端开发与交接手册.md`（4.2/4.3 节），参数构造基于官方 `agent-client-protocol-schema`（v1 + v2 类型全集），Hermes 差异适配见 `acp.rs` 注释。
 
 核心流程：
 ```
@@ -190,9 +196,11 @@ GUI (Pylon)  →   spawn agent  →  initialize
               →   session/close
 ```
 
+崩溃/断开时自动指数退避重连（最多 5 次），会话映射保留续聊；`session/update` 仅携带 sessionId 时按 generation 唯一解析映射。
+
 ## 协作
 
-`docs/后端api文档.md` 记录 Tauri command、事件 payload 与 ACP 映射；两份功能清单和验收清单记录当前实现边界与待验证项。
+`docs/后端开发与交接手册.md` 记录 Tauri command、事件 payload 与 ACP 映射；前端手册记录 UI 契约与实现边界。验收规则：一条一 commit、cargo check 通过再 commit、不提前 build、不跳级。
 
 ## License
 
