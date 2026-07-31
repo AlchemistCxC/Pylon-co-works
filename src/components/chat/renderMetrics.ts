@@ -8,6 +8,8 @@ export type RenderMetricName =
   | 'messages.map'
   | 'highlightCode.call'
   | 'scrollIntoView.call'
+  | 'streamingText.render'
+  | 'streamingThinking.render'
 
 export interface RenderMetricSnapshot {
   counts: Record<RenderMetricName, number>
@@ -27,6 +29,8 @@ const METRIC_NAMES: RenderMetricName[] = [
   'messages.map',
   'highlightCode.call',
   'scrollIntoView.call',
+  'streamingText.render',
+  'streamingThinking.render',
 ]
 
 const enabled = import.meta.env.DEV

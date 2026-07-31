@@ -47,6 +47,12 @@ const ChatView = React.memo(function ChatView({ sessionId }: Props) {
   const bottomRef = useRef<HTMLDivElement>(null)
   const [messages, setMessages] = useState<Message[]>(!IS_TAURI ? MOCK_MESSAGES : [])
   const preparedMessages = useMemo(() => prepareRenderableMessages(messages), [messages])
+  const [streamingText, setStreamingText] = useState('')
+  const [streamingThinking, setStreamingThinking] = useState('')
+  const streamingTextRef = useRef('')
+  const streamingThinkingRef = useRef('')
+  const streamingSourceRef = useRef<string | null>(null)
+  const flushStreamingRef = useRef<((source: string) => void) | null>(null)
   const [generating, setGenerating] = useState(false)
   const genStart = useRef(Date.now())
   const tokenCount = useRef(0)
@@ -66,6 +72,11 @@ const ChatView = React.memo(function ChatView({ sessionId }: Props) {
     prevSessionRef.current = sessionId
     sessionRef.current = null
     messageOwnerRef.current = null
+    streamingSourceRef.current = null
+    streamingTextRef.current = ''
+    streamingThinkingRef.current = ''
+    setStreamingText('')
+    setStreamingThinking('')
     setMessages([]); setGenerating(false); setSummary(null)
     if (!sessionId) return
 
@@ -186,6 +197,26 @@ const ChatView = React.memo(function ChatView({ sessionId }: Props) {
       }
       if (isRenderedSource(source, sessionRef.current)) setMessages(next)
     }
+    const flushStreaming = (source: string) => {
+      if (streamingSourceRef.current !== source) return
+      const text = streamingTextRef.current
+      const thinking = streamingThinkingRef.current
+      if (text || thinking) {
+        updateSourceMessages(source, previous => [
+          ...previous,
+          ...(thinking ? [{ id: 'thought-' + Date.now(), role: 'reasoning' as const, sender: 'peri', content: thinking, time: new Date().toLocaleTimeString(), running: false }] : []),
+          ...(text ? [{ id: 'msg-' + Date.now(), role: 'assistant' as const, sender: 'peri', content: text, time: new Date().toLocaleTimeString(), running: false }] : []),
+        ])
+      }
+      streamingSourceRef.current = null
+      streamingTextRef.current = ''
+      streamingThinkingRef.current = ''
+      if (isRenderedSource(source, sessionRef.current)) {
+        setStreamingText('')
+        setStreamingThinking('')
+      }
+    }
+    flushStreamingRef.current = flushStreaming
     const startGenerating = (source: string) => {
       const current = useStore.getState().liveGeneratingSources || []
       const next = addGeneratingSource(current, source)
@@ -230,6 +261,11 @@ const ChatView = React.memo(function ChatView({ sessionId }: Props) {
           tokenCount.current = 0
           setGenerating(true)
           setSummary(null)
+          streamingSourceRef.current = source
+          streamingTextRef.current = ''
+          streamingThinkingRef.current = ''
+          setStreamingText('')
+          setStreamingThinking('')
         }
 
         const store = useStore.getState()
@@ -257,6 +293,12 @@ const ChatView = React.memo(function ChatView({ sessionId }: Props) {
           case 'agent_message_chunk': {
             const text = upd.content?.text || ''
             if (!text) return
+            if (!replay && isRenderedSource(source, sessionRef.current)) {
+              streamingSourceRef.current = source
+              streamingTextRef.current += text
+              setStreamingText(streamingTextRef.current)
+              break
+            }
             updateSourceMessages(source, prev => {
               const last = prev[prev.length - 1]
               if (last?.role === 'assistant' && last.running) {
@@ -269,6 +311,12 @@ const ChatView = React.memo(function ChatView({ sessionId }: Props) {
           case 'agent_thought_chunk': {
             const text = upd.content?.text || ''
             if (!text) return
+            if (!replay && isRenderedSource(source, sessionRef.current)) {
+              streamingSourceRef.current = source
+              streamingThinkingRef.current += text
+              setStreamingThinking(streamingThinkingRef.current)
+              break
+            }
             updateSourceMessages(source, prev => {
               const last = prev[prev.length - 1]
               if (last?.role === 'reasoning' && last.running) {
@@ -279,6 +327,7 @@ const ChatView = React.memo(function ChatView({ sessionId }: Props) {
             break
           }
           case 'tool_call': {
+            if (!replay) flushStreaming(source)
             const rawInput = upd.rawInput
             const toolId = normalizeToolId(upd.toolCallId)
             if (replay && !shouldAcceptToolCall(toolId, replayToolIdsRef.current[source] || [])) break
@@ -337,6 +386,7 @@ const ChatView = React.memo(function ChatView({ sessionId }: Props) {
         const terminationScope = resolveTerminationScope(replay, event.payload.replay === true)
         if (terminationScope === 'live') {
           stopGenerating(source)
+          flushStreaming(source)
           if (isRenderedSource(source, sessionRef.current)) {
             const start = generationStartRef.current[source] || genStart.current
             const elapsedMs = Date.now() - start
@@ -367,6 +417,7 @@ const ChatView = React.memo(function ChatView({ sessionId }: Props) {
           )
           if (!cancellationFailed) stopGenerating(source)
         }
+        if (terminationScope === 'live' && !cancellationFailed) flushStreaming(source)
         updateSourceMessages(source, prev => [...settleReplayToolMessages(prev.map(m => ({ ...m, running: false }))), {
           id: 'err-' + Date.now(), role: 'assistant', sender: 'system', content: error, time: new Date().toLocaleTimeString(),
         }], replay)
@@ -392,6 +443,7 @@ const ChatView = React.memo(function ChatView({ sessionId }: Props) {
     window.addEventListener('peri:clear', handleClear)
 
     return () => {
+      flushStreamingRef.current = null
       unlisten.then(fns => fns.forEach(f => f()))
       window.removeEventListener('peri:clear', handleClear)
     }
@@ -439,6 +491,8 @@ const ChatView = React.memo(function ChatView({ sessionId }: Props) {
             ))
           })}
         </AnimatePresence>
+        {streamingThinking && <StreamingThinking text={streamingThinking} />}
+        {streamingText && <StreamingAssistantText text={streamingText} />}
         <GenerationFooter running={generating}
           frames={generationFramesRef.current[sessionRef.current || ''] || resolveSpinnerFrames(useStore.getState().spinnerFramePreset, useStore.getState().spinnerCustomFrames)}
           tokenCount={tokenCount.current} startTime={genStart.current} summary={summary}
@@ -460,6 +514,7 @@ const ChatView = React.memo(function ChatView({ sessionId }: Props) {
                 liveGenerating: nextSources[nextSources.length - 1] || null,
               })
               if (isRenderedSource(source, sessionRef.current)) {
+                flushStreamingRef.current?.(source)
                 const start = generationStartRef.current[source] || genStart.current
                 setSummary({ elapsedMs: Date.now() - start, tokenCount: tokenCount.current, completedFrame: '', reason: 'cancelled' })
                 setGenerating(false)
@@ -537,6 +592,16 @@ function AssistantContent({ text }: { text: string }) {
       }}>{text}</ReactMarkdown>
     </div>
   )
+}
+
+function StreamingAssistantText({ text }: { text: string }) {
+  recordRender('streamingText.render')
+  return <AssistantContent text={text} />
+}
+
+function StreamingThinking({ text }: { text: string }) {
+  recordRender('streamingThinking.render')
+  return <ReasoningBlock text={text} running />
 }
 
 function CodeBlock({ language, code }: { language?: string; code: string }) {
