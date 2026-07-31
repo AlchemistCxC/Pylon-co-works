@@ -12,7 +12,6 @@ pub const MAX_DIRECTORY_ENTRIES: usize = 1000;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum WorkspaceError {
-    InvalidRelativePath,
     AbsolutePathRejected,
     TraversalRejected,
     OutsideRoot,
@@ -20,7 +19,6 @@ pub enum WorkspaceError {
     NotReadable,
     NotFile,
     BinaryFile,
-    TooLarge,
     TooManyEntries,
     Io(String),
 }
@@ -28,7 +26,6 @@ pub enum WorkspaceError {
 impl std::fmt::Display for WorkspaceError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         let (code, message) = match self {
-            Self::InvalidRelativePath => ("invalid_relative_path", "路径格式无效"),
             Self::AbsolutePathRejected => ("absolute_path_rejected", "不允许使用绝对路径"),
             Self::TraversalRejected => ("traversal_rejected", "不允许路径穿越"),
             Self::OutsideRoot => ("outside_root", "路径位于工作区之外"),
@@ -36,7 +33,6 @@ impl std::fmt::Display for WorkspaceError {
             Self::NotReadable => ("not_readable", "路径不可读取"),
             Self::NotFile => ("not_file", "路径不是文件"),
             Self::BinaryFile => ("binary_file", "文件不是可预览的 UTF-8 文本"),
-            Self::TooLarge => ("too_large", "文件超过预览大小限制"),
             Self::TooManyEntries => ("too_many_entries", "目录条目超过限制"),
             Self::Io(_) => ("io_error", "工作区 I/O 操作失败"),
         };
