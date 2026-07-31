@@ -19,18 +19,15 @@ import { sanitizeHtml } from './htmlSanitizer'
 import { reportRuntimeError } from '../../runtimeError'
 import { applyCancelEvent, beginCancel, createCancelState, rejectCancelCommand, resolveCancelCommand, type CancelState } from './cancelState'
 import { clearChatSourceRefs } from './sessionCleanup'
+import { measureRender, recordMeasuredAsync, recordRender } from './renderMetrics'
+import { prepareRenderableMessages } from './messagePipeline'
+import type { Message as PipelineMessage } from './messageTypes'
 import './ChatView.css'
 
 
 interface Props { sessionId: string | null }
 
-interface Message {
-  id: string; role: 'user' | 'assistant' | 'tool' | 'reasoning'
-  sender: string; content: string; time: string
-  toolName?: string; toolInput?: string; toolOutput?: string
-  toolOutputLines?: number; running?: boolean
-  toolStatus?: string
-}
+type Message = PipelineMessage
 
 // dev/浏览器 mock：无 Tauri 后端时（预览调样式用）展示的演示对话
 const IS_TAURI = typeof (window as any).__TAURI_INTERNALS__ !== 'undefined' || typeof (window as any).__TAURI__ !== 'undefined'
@@ -44,10 +41,12 @@ const MOCK_MESSAGES: Message[] = [
 ]
 
 const ChatView = React.memo(function ChatView({ sessionId }: Props) {
+  recordRender('ChatView.render')
   const reduceMotion = useReducedMotion()
   const sessions = useStore(state => state.sessions)
   const bottomRef = useRef<HTMLDivElement>(null)
   const [messages, setMessages] = useState<Message[]>(!IS_TAURI ? MOCK_MESSAGES : [])
+  const preparedMessages = useMemo(() => prepareRenderableMessages(messages), [messages])
   const [generating, setGenerating] = useState(false)
   const genStart = useRef(Date.now())
   const tokenCount = useRef(0)
@@ -398,7 +397,11 @@ const ChatView = React.memo(function ChatView({ sessionId }: Props) {
     }
   }, [])
 
-  useEffect(() => { bottomRef.current?.scrollIntoView({ behavior: 'smooth' }) }, [messages, generating])
+  useEffect(() => {
+    if (!bottomRef.current) return
+    recordRender('scrollIntoView.call')
+    bottomRef.current.scrollIntoView({ behavior: 'smooth' })
+  }, [messages, generating])
 
   // 当前可见会话的消息同步到 localStorage；后台会话在事件入口直接持久化
   useEffect(() => {
@@ -425,20 +428,16 @@ const ChatView = React.memo(function ChatView({ sessionId }: Props) {
     <div className="chat-view">
       <div className="term">
         <AnimatePresence initial={false}>
-          {messages.map((msg) => (
-            <motion.div
-              key={msg.id}
-              className={`term-row term-row-${msg.role}`}
-              initial={reduceMotion ? false : { opacity: 0, y: 8 }}
-              animate={{ opacity: 1, y: 0 }}
-              transition={reduceMotion ? { duration: 0 } : { duration: 0.25, ease: [0.2, 0, 0, 1] }}
-            >
-              {msg.role === 'tool' && <ToolCard name={msg.toolName!} input={msg.toolInput} output={msg.toolOutput} outputLines={msg.toolOutputLines} status={msg.toolStatus} />}
-              {msg.role === 'user' && <UserLine sender={msg.sender} content={msg.content} />}
-              {msg.role === 'reasoning' && <ReasoningBlock text={msg.content} running={msg.running === true} />}
-              {msg.role === 'assistant' && <AssistantContent text={msg.content} />}
-            </motion.div>
-          ))}
+          {measureRender('messages.map', () => {
+            recordRender('messages.map')
+            return preparedMessages.map((renderMessage) => (
+              <MemoMessageRow
+                key={renderMessage.message.id}
+                message={renderMessage.message}
+                reduceMotion={reduceMotion === true}
+              />
+            ))
+          })}
         </AnimatePresence>
         <GenerationFooter running={generating}
           frames={generationFramesRef.current[sessionRef.current || ''] || resolveSpinnerFrames(useStore.getState().spinnerFramePreset, useStore.getState().spinnerCustomFrames)}
@@ -481,7 +480,42 @@ const ChatView = React.memo(function ChatView({ sessionId }: Props) {
 // ── Sub-components ──
 
 
+function MessageRow({ message: msg, reduceMotion }: { message: Message; reduceMotion: boolean }) {
+  recordRender('MessageRow.render')
+  return (
+    <motion.div
+      className={`term-row term-row-${msg.role}`}
+      initial={reduceMotion ? false : { opacity: 0, y: 8 }}
+      animate={{ opacity: 1, y: 0 }}
+      transition={reduceMotion ? { duration: 0 } : { duration: 0.25, ease: [0.2, 0, 0, 1] }}
+    >
+      {msg.role === 'tool' && <ToolCard name={msg.toolName!} input={msg.toolInput} output={msg.toolOutput} outputLines={msg.toolOutputLines} status={msg.toolStatus} />}
+      {msg.role === 'user' && <UserLine sender={msg.sender} content={msg.content} />}
+      {msg.role === 'reasoning' && <ReasoningBlock text={msg.content} running={msg.running === true} />}
+      {msg.role === 'assistant' && <AssistantContent text={msg.content} />}
+    </motion.div>
+  )
+}
+
+function areMessageRowPropsEqual(
+  previous: { message: Message; reduceMotion: boolean },
+  next: { message: Message; reduceMotion: boolean },
+): boolean {
+  if (previous.message !== next.message) return false
+  if (previous.reduceMotion !== next.reduceMotion) return false
+  if (previous.message.running || next.message.running) return false
+  if (previous.message.role === 'tool' || next.message.role === 'tool') {
+    if (previous.message.toolStatus !== next.message.toolStatus) return false
+    if (previous.message.toolOutput !== next.message.toolOutput) return false
+    if (previous.message.toolInput !== next.message.toolInput) return false
+  }
+  return true
+}
+
+const MemoMessageRow = React.memo(MessageRow, areMessageRowPropsEqual)
+
 function AssistantContent({ text }: { text: string }) {
+  recordRender('AssistantContent.render')
   const [copied, setCopied] = useState(false)
   const copy = () => {
     navigator.clipboard.writeText(text)
@@ -506,6 +540,7 @@ function AssistantContent({ text }: { text: string }) {
 }
 
 function CodeBlock({ language, code }: { language?: string; code: string }) {
+  recordRender('CodeBlock.render')
   const lines = code.split('\n')
   const isMultiLine = lines.length > 1
   const [highlighted, setHighlighted] = useState<{ html: string; lang: string } | null>(null)
@@ -514,7 +549,8 @@ function CodeBlock({ language, code }: { language?: string; code: string }) {
     if (!isMultiLine) return
     let cancelled = false
     const lang = language || 'text'
-    highlightCode(lang, code).then(html => {
+    recordRender('highlightCode.call')
+    recordMeasuredAsync('CodeBlock.highlight', highlightCode(lang, code)).then(html => {
       if (html && !cancelled) setHighlighted({ html, lang })
     }).catch(() => {})
     return () => { cancelled = true }
@@ -554,6 +590,7 @@ function CodeBlock({ language, code }: { language?: string; code: string }) {
 }
 
 function ReasoningBlock({ text, running }: { text: string; running: boolean }) {
+  recordRender('ReasoningBlock.render')
   const [open, setOpen] = useState(false)
   const bodyId = useId()
   const characterCount = Array.from(text).length
@@ -583,6 +620,7 @@ function formatToolInput(name: string, rawInput: unknown): string {
 }
 
 function ToolCard({ name, input, output, outputLines, status: toolStatus }: { name: string; input?: string; output?: string; outputLines?: number; status?: string }) {
+  recordRender('ToolCard.render')
   const [open, setOpen] = useState(false)
   const bodyId = useId()
   const indicator = useStore(s => s.toolIndicator) || '●'
