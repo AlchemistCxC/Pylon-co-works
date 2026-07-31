@@ -60,21 +60,27 @@ Pylon 的设置项、主题和 widget 系统
 
 ### 1.1 ChatView 当前职责
 
-`src/components/chat/ChatView.tsx` 当前同时承担：
+`src/components/chat/ChatView.tsx`（约 630 行）当前承担：
 
 ```text
-ACP listen：peri:user / peri:update / peri:done / peri:error
-source 有效性判断和后台 session 隔离
-session 创建、load_persisted_session、replay
-Message[] 原始消息存储
-localStorage persistence
+Session 创建、load_persisted_session、replay 编排
+stale source ref 清理（clearChatSourceRefs）
 live streamingText / streamingThinking
-tool_call 与 tool_call_update 关联
-usage、commands、config option 更新
-cancel 后的最终收敛
 sticky/user_scrolled/jumping 滚动状态
-消息列表 map
+消息列表 map（MemoMessageRow + rowRef registry）
+Ctrl+F 搜索 UI（MessageSearchBar + messageRefs 定位）
+持久化 effect（rendered source 兜底写入）
 MessageRow、AssistantContent、CodeBlock、ReasoningBlock、ToolCard、UserLine
+```
+
+ACP 事件入口已抽出（F5.7）：
+
+```text
+src/components/chat/chatEventController.ts
+  └─ peri:user / peri:update / peri:done / peri:error / peri:clear
+  └─ updateSourceMessages（后台持久化 + 渲染分发）
+  └─ flushStreaming / start·stopGenerating / handleClear
+  └─ 单调消息 ID allocator（F5.6）
 ```
 
 现有关键代码边界：
@@ -107,15 +113,17 @@ tool_call 到达前 flush：
 if (!replay) flushStreaming(source)
 ```
 
-消息渲染当前使用 `MemoMessageRow`：
+消息渲染当前使用 `MemoMessageRow`（行内注册自身 ref，不接收完整 messages）：
 
 ```tsx
 preparedMessages.map(renderMessage => (
   <MemoMessageRow
     key={renderMessage.message.id}
-    message={renderMessage.message}
+    renderMessage={renderMessage}
     reduceMotion={reduceMotion === true}
     toolVisualState={resolveRowToolVisualState(renderMessage.message, messageLookups)}
+    rowRef={node => { ... }}   // messageRefs registry，供搜索定位
+    highlighted={searchMatches[searchIndex]?.id === renderMessage.message.id}
   />
 ))
 ```
@@ -149,19 +157,25 @@ export type RenderMessage =
   | { type: 'user'; message: Message }
   | { type: 'assistant'; message: Message }
   | { type: 'reasoning'; message: Message }
-  | { type: 'tool'; message: Message }
+  | { type: 'tool_call'; message: Message; toolId: string | null }
+  | { type: 'tool_result'; message: Message; toolId: string | null }
+  | { type: 'error'; message: Message }
+  | { type: 'system'; message: Message; reason: 'unknown-role' }
 ```
 
-当前 visibility 只有一个规则：
+当前 visibility 规则：
 
 ```text
 空 assistant 且不处于 running 状态 → skip
+sender === 'system' 且 role === 'assistant' → error（永远保留）
+未知 role → system（reason: 'unknown-role' fallback，禁止静默丢弃）
+tool 有 toolOutput → tool_result；否则 → tool_call
 ```
 
 当前仍不能表达：
 
 ```text
-system/error/plan/compact boundary
+plan / compact boundary
 permission request
 task progress
 grouped tool presentation
@@ -236,7 +250,22 @@ src/components/chat/commandRegistry.ts
 src/components/chat/commandParser.ts
 ```
 
-当前已完成 live/fallback command 归一化、suggestion 过滤和 slash command 解析；InputBar 的视觉布局未改变。剩余工作是 input history、queue 和 suggestion state 的进一步拆分。
+Input history（F4.2）已实现：
+
+```text
+ArrowUp/ArrowDown 在无 command suggestion 时浏览 history
+history 按 session/source 隔离（historyBySourceRef），session switch 清理游标
+Ctrl+ArrowUp 保留恢复上一条消息兼容行为
+只记录发送成功的文本
+```
+
+Queued message（F4.2）已实现：
+
+```text
+生成中提交后续文本 → queuedMessages（可编辑/取消/清空）
+sendQueued 逐条发送，成功即移除
+不改变后端 send_message 契约
+```
 
 ### 1.5 当前 GenerationFooter
 
@@ -251,9 +280,13 @@ token count
 停止按钮
 完成/取消/错误 summary
 自定义完成、取消、错误 marker
+stalled 检测（F6 已完成）：lastTokenAt 驱动
+  active：最近 3 秒内有 token
+  waiting：3 秒至 10 秒无 token
+  stalled：超过 10 秒无 token
 ```
 
-当前没有 stalled generation 状态，即“后端仍在工作但一段时间没有 token”时，用户只能看到正常 spinner。
+stalled 状态只使用局部 timer 状态（tick），不写入 Zustand；收到 token 立即回到 active。
 
 ### 1.6 当前 ToolCard
 
@@ -272,12 +305,15 @@ status color
 status indicator glow
 连续 tool connector
 Read/Grep/Glob/Edit/Write 输出行数摘要
+结构化 diff 候选 → DiffCard（9f5fa3a 接入）
+  diffPresentation.ts::normalizeDiffPayload（对象/JSON + unified diff 双路解析）
+  isDiffCandidate 由 ToolPresentationModel 判定
 ```
 
 当前仍缺少：
 
 ```text
-Edit/Write 结构化 diff presentation
+diff 行模型与词级 diff（当前 makeLines 为逐行逐列简单比对，无 hunk/行号/词级）
 tool progress 与最终 result 的独立 presentation
 相邻 tool 的 derived grouping
 工具输出搜索文本的专用 getSearchText
@@ -292,15 +328,18 @@ renderMetrics、MessageRow memo、streamingText / streamingThinking 分离
 sticky/user_scrolled/jumping 自动滚底
 ToolVisualState、MessageLookups、ToolPresentationModel
 静态 code highlight cache、plain-text fast path、MessageRenderBoundary
-messageSearchIndex 纯函数 API和分块预热
+messageSearchIndex 纯函数 API 和分块预热
+F5.6 单调消息 ID allocator（替换 Date.now() 消息 key）
+F5.7 chatEventController 模块化
+F5.9 包体懒加载（Settings/Launcher/Prism/RightPanel 按需分包）
 ```
 
-尚未接入 UI：
+已接入 UI：
 
 ```text
-transcript search
-message highlight/navigation
-stalled generation feedback
+transcript search（F5 已完成）：Ctrl+F / MessageSearchBar / 上一个·下一个 / 命中序号
+message highlight/navigation（F5）：messageRefs registry + scrollIntoView
+stalled generation feedback（F6 已完成）：GenerationFooter activity 状态
 ```
 
 已有观测接口：
@@ -316,13 +355,6 @@ window.__PYLON_RENDER_METRICS__.reset()
 getMessageSearchText(message)
 messageMatchesQuery(message, query)
 warmMessageSearchIndex(messages, batchSize)
-```
-
-尚未接入 UI：
-
-```text
-transcript search
-message highlight/navigation
 ```
 
 ---
@@ -492,22 +524,29 @@ git diff --check
 
 优先级：中。
 
-当前状态：ToolPresentationModel、ToolCard 状态/摘要/长输出边界已经完成；只保留结构化 diff 这一项未完成工作。
+当前状态：基础版已完成（9f5fa3a 接入），增强待办：
+
+```text
+diffPresentation.ts::normalizeDiffPayload 已支持对象/JSON（oldText/newText/old/new/before/after）
+  与 unified diff（@@/---/+++ 头检测）双路解析。
+ToolPresentationModel::isDiffCandidate 判定，ToolCard 内渲染 DiffCard。
+无法识别时继续使用普通 pre 文本。
+```
+
+待增强（对照 `references/claude-code-sourcemap/.../components/StructuredDiff/Fallback.tsx`）：
+
+```text
+当前 makeLines 是逐行逐列简单比对（无 hunk 语义、无行号、无词级 diff）。
+参考 CC 行模型：transformLinesToObjects + processAdjacentLines（相邻 remove+add 配对）
+  + calculateWordDiffs + CHANGE_THRESHOLD=0.4 回退整行 + numberDiffLines 行号。
+400 行截断与 (truncated) 标注。
+```
 
 施工前置：
 
 ```text
 先检查现有 ACP tool payload 和已持久化 toolOutput 是否包含 old/new、patch 或 unified diff。
 不能仅凭 Edit/Write 工具名判定存在可渲染 diff。
-```
-
-施工范围：
-
-```text
-增加纯函数 normalizeDiffPayload。
-无法识别时继续使用普通 pre 文本。
-可识别时在 ToolCard 内增加局部 DiffCard。
-保留现有 tool 状态、sanitizer、错误边界和主题变量。
 ```
 
 不做：
@@ -523,15 +562,27 @@ git diff --check
 
 优先级：高。
 
-当前状态：`tool_call` / `tool_result` 已完成纯派生类型；visibility 仍只有空 assistant 规则。
+当前状态：主要派生已完成，剩保守 fallback 核对：
+
+```text
+tool_call / tool_result / error / system(unknown-role) 纯派生类型已存在
+  （messageTypes.ts::toRenderMessage，messagePipeline 消费）。
+error message 永远保留（sender === 'system' 且 role === 'assistant'）。
+未知 role → system（reason: 'unknown-role'），禁止静默丢弃。
+空 assistant 且非 running → skip（decideMessageVisibility）。
+test-render-decision-exhaustive / test-message-types-exhaustive 已覆盖。
+```
+
+仍缺：
+
+```text
+plan / compact boundary / permission / task progress 显示类型（依赖 ACP payload）。
+```
 
 目标：
 
 ```text
 继续使用 Raw Message[] → RenderMessage[] → RenderDecision 的纯派生链。
-error message 永远保留。
-空 assistant 且非 running 继续 skip。
-未知显示类型必须 fallback，禁止静默丢弃。
 保持 message 顺序、id、persistence 和 replay 语义。
 ```
 
@@ -592,26 +643,18 @@ compact 前后边界明确。
 
 优先级：高。
 
-当前状态：command registry、live/fallback command 归一化和 slash command parser 已完成；只保留 history 和 queue。
-
-Input history：
+当前状态：**已完成**（9f5fa3a 接入）。
 
 ```text
-按当前 session/source 隔离，不能跨 session 串历史。
-只记录用户明确发送成功的文本。
-ArrowUp/ArrowDown 在没有 command suggestion 时浏览 history。
-Ctrl+ArrowUp 保留现有恢复上一条消息兼容行为。
-session switch 时清理浏览游标，不污染其他 session。
+command registry、live/fallback command 归一化和 slash command parser（更早完成）。
+Input history：按 session/source 隔离（historyBySourceRef）；ArrowUp/ArrowDown
+  在无 command suggestion 时浏览；Ctrl+ArrowUp 保留恢复上一条兼容行为；
+  session switch 清理游标；只记录发送成功的文本。
+Queued message：生成中提交后续文本 → queuedMessages（可编辑/取消/清空）；
+  sendQueued 逐条发送成功即移除；不改变 send_message 契约。
 ```
 
-Queued message：
-
-```text
-只在已有生成状态下保存用户明确提交的后续文本。
-不把半成品 textarea 自动视为 queue。
-队列项必须支持取消、编辑或清空后才能接入 UI。
-不改变后端 send_message 契约。
-```
+验证：`test-input-history-ui.mts`、`test-queued-message-ui.mts`。
 
 不做：
 
@@ -625,100 +668,65 @@ Queued message：
 
 优先级：中高。
 
-当前已有纯函数索引，不应重新设计搜索数据层。
-
-新增建议：
+当前状态：**已完成**（9f5fa3a 接入）。
 
 ```text
-src/components/chat/MessageSearchBar.tsx
-src/components/chat/messageSearchState.ts
-```
-
-功能边界：
-
-```text
-Ctrl+F 打开当前 session 搜索。
-query trim + lower-case。
-使用 messageMatchesQuery，不重新 parse Markdown。
-命中消息按原始 message id 定位。
-支持上一个/下一个。
-显示当前命中序号和总数。
-命中消息增加短时 highlight class。
-session 切换时清空 query 和命中状态。
+src/components/chat/MessageSearchBar.tsx 已实现（query/matchIndex/matchCount/前后导航/关闭）。
+搜索状态在 ChatView 内部（searchOpen/searchQuery/searchIndex useState），未单独拆
+  messageSearchState.ts（保持现状，不为拆而拆）。
+Ctrl+F 打开当前 session 搜索；session 切换清空 query 与命中。
+messageMatchesQuery 纯函数索引，不重新 parse Markdown。
+命中消息按原始 message id 定位：messageRefs registry → scrollIntoView（smooth, center）。
+命中行加 term-row-search-active class 短时高亮。
 后台 session 不参与当前视图搜索。
 ```
 
-定位要求：
-
-```text
-第一版不引入 virtualization。
-使用 message id → DOM element 的局部 ref registry。
-MessageRow 只注册自身 ref，不接收完整 messages。
-找不到 DOM 节点时给出“结果存在但当前不可见”的状态，不假装已滚动。
-```
-
-性能要求：
+性能要求（已满足）：
 
 ```text
 query 变化时只做 indexOf。
-搜索文本使用已有 WeakMap<Message, string>。
-大列表预热使用 warmMessageSearchIndex 的分块让出事件循环。
+搜索文本使用已有 messageSearchIndex 的 WeakMap<Message, string>。
 不得每次键入都 JSON.stringify tool output。
 不得创建第二个 React root。
+```
+
+剩余边界：
+
+```text
+“结果存在但当前不可见”状态：第一版 scrollIntoView 直接定位；DOM 节点缺失
+  （如消息未挂载）时静默跳过——大列表/虚拟化接入后再补可见性提示。
 ```
 
 ### 阶段 F6：GenerationFooter stalled feedback
 
 优先级：中高，纯前端，低风险。
 
-当前 GenerationFooter 只依赖：
+当前状态：**已完成**（9f5fa3a 接入）。
 
 ```tsx
-running
-frames
-tokenCount
-startTime
-summary
-onStop
+GenerationFooter 新增 props：lastTokenAt?: number
 ```
-
-要增加 token activity 时间，而不是依赖父级高频重渲染：
 
 ```ts
-lastTokenAt: number
+const idleMs = lastTokenAt ? Math.max(0, Date.now() - lastTokenAt) : elapsedMs
+const activity = idleMs > 10000 ? 'stalled' : idleMs > 3000 ? 'waiting' : 'active'
 ```
-
-推荐状态：
-
-```ts
-type GenerationActivity = 'active' | 'waiting' | 'stalled'
-```
-
-默认阈值：
-
-```text
-active：最近 3 秒内有 token
-waiting：3 秒至 10 秒无 token
-stalled：超过 10 秒无 token
-```
-
-UI 原则：
 
 ```text
 active：保持现有 spinner。
-waiting：显示“等待响应”，动画可以降速。
+waiting：显示“等待响应”，动画降速。
 stalled：显示稳定省略号和“仍在等待后端响应”，不显示错误。
-收到 token：立即回到 active。
+收到 token：立即回到 active（ChatView 在 user/chunk/thought 事件更新 lastTokenAt）。
 peri:done/peri:error/cancel：沿用现有 summary。
 ```
 
-实现约束：
+实现约束（已满足）：
 
 ```text
 不修改 ACP event 名称。
-不把 timer 状态写入 Zustand。
-不能让 stalled timer 触发历史 MessageRow 重渲染。
-不能把“无 token”误判为后端失败。
+不把 timer 状态写入 Zustand（tick 为 GenerationFooter 局部 state）。
+stalled timer 不触发历史 MessageRow 重渲染（仅 Footer 自身）。
+不把“无 token”误判为后端失败。
 ```
 
 ### 阶段 F7：Plan presentation
@@ -1245,7 +1253,7 @@ git diff --check
 
 ### 9.2 当前已有专项测试方向
 
-已有/已记录的测试包括：
+与消息渲染/交互相关的已有测试（完整清单以 `scripts/test-*.mts` 为准）：
 
 ```text
 test-markdown-fast-path.mts
@@ -1254,6 +1262,13 @@ test-message-search-index.mts
 test-message-types-exhaustive.mts
 test-render-decision-exhaustive.mts
 test-tool-status-exhaustive.mts
+test-diff-presentation.mts               // F1.5 normalizeDiffPayload
+test-input-history-ui.mts                // F4.2 history
+test-queued-message-ui.mts               // F4.2 queued message
+test-message-id-allocator.mts            // F5.6 单调消息 ID
+test-chat-regression-contract.mts        // F5.7 控制器接线契约
+test-replay-termination.mts / test-replay-tool-ids.mts / test-replay-tool-settlement.mts
+test-source-event-isolation.mts / test-chat-clear-sink.mts / test-cancel-transaction-wiring.mts
 ```
 
 新施工必须优先为纯函数增加测试，再接入 React 组件。
@@ -1396,6 +1411,13 @@ ToolCard 状态标签、output label、长输出边界、错误输出 label。
 ChatView 浏览器 mock display 场景。
 RenderMessage 的 tool_call / tool_result 派生类型。
 InputBar command registry、live/fallback command 归一化和 slash command parser。
+F5.6 单调消息 ID allocator（chatEventController 持有，替换 Date.now() 消息 key）。
+F5.7 chatEventController 模块化（事件入口/reducer/replay/持久化迁出 ChatView）。
+F5.8 MessageBubble 死代码删除（868b0be）。
+F5.9 包体懒加载（主 JS 943.64 → 843.30 kB / gzip 295.40 → 268.29 kB）。
+F4.1 Agent 状态类型对齐后端（connecting/inactive + agentId/generation/lastConnectedAt）。
+F7.3 ccCliCustomized/ccPositions/ccLayoutVersion legacy 字段删除与迁移清理。
+F7.4 Settings/App/presets 类型收敛（as any 清除）。
 ```
 
 ### 11.2 已完成：局部可见修正（不是 UI 重排）
@@ -1403,6 +1425,10 @@ InputBar command registry、live/fallback command 归一化和 slash command par
 ```text
 Claude message layout 的 user/assistant/reasoning/tool 左侧内容轨道统一。
 ToolCard 增加状态文字、输出/错误 label 和长输出内部滚动。
+F5 Chat search UI：Ctrl+F / MessageSearchBar / 命中高亮与定位（term-row-search-active）。
+F6 GenerationFooter stalled feedback：waiting/stalled 文案与降速动画。
+F4.2 Input history（按 source 隔离）与 queued message（可编辑/取消/逐条发送）。
+DiffCard：tool output 中可识别的结构化/统一 diff 以 diff 卡片展示。
 ```
 
 这些修改只修正既有消息轨道和工具反馈展示，不改变整体页面分栏、session/sidebar/workspace 结构或 InputBar 布局。
@@ -1411,27 +1437,21 @@ ToolCard 增加状态文字、输出/错误 label 和长输出内部滚动。
 
 ```text
 真实 ACP 流式 runtime 性能基线尚未形成持久化报告。
-ToolPresentation 尚未接入结构化 diff view。
-Input history 尚未实现。
-Queued message 尚未实现。
-Chat search UI 尚未实现。
-GenerationFooter stalled feedback 尚未实现。
-Plan/Permission/Task UI 尚未实现，也未确认 ACP 是否提供对应事件。
-Compact boundary / recovery presentation 尚未实现。
-block-level streaming Markdown 尚未实现。
-virtualization 尚未实现；当前因用户实测 2000 条全量列表可接受而暂缓。
+F1.5 结构化 diff 增强：DiffCard 基础版已有，缺行模型/词级 diff/行号/截断（对照 CC StructuredDiff）。
+F3 Compact boundary / recovery presentation 尚未实现。
+F7-F9 Plan/Permission/Task UI 尚未实现，也未确认 ACP 是否提供对应事件。
+F11 block-level streaming Markdown 尚未实现。
+F12 virtualization 尚未实现；当前因用户实测 2000 条全量列表可接受而暂缓。
+F5 search 的“结果存在但当前不可见”提示（DOM 缺失时静默跳过）。
 ```
 
 ### 11.4 当前优先级
 
 ```text
-F1.5 结构化 diff presentation：先核对现有 ACP payload，再决定是否接入 react-diff-viewer。
-F2   RenderMessage visibility pipeline：补齐 error/system 等保守 fallback，不能修改 persistence。
+F1.5 结构化 diff 增强：对照 references 的 StructuredDiff 行模型升级 diffPresentation；先核对现有 ACP payload。
 F3   Compact boundary / recovery presentation：只基于真实 ACP 输出，不猜测 compact 成功。
-F4.2 Input history 和 queued message：保持当前 send/cancel 契约，先做可取消/可编辑队列模型。
-F5   Chat search UI：复用已有 messageSearchIndex，不引入 virtualization。
-F6   GenerationFooter stalled feedback：只增加局部 timer 状态，不写入 Zustand。
 F7-F9 Plan/Permission/Task：先核对 Peri ACP 实际 payload。
+F2.1 剩余：plan/compact/permission/task 显示类型（依赖 ACP）。
 F11  block-level streaming Markdown：只有 profiling 证明必要时施工。
 F12  virtualization：启动条件仍是真实 Tauri/React runtime 证据。
 ```
@@ -1440,26 +1460,26 @@ F12  virtualization：启动条件仍是真实 Tauri/React runtime 证据。
 
 ## 12. 下一张施工卡
 
-建议施工卡：`F2.1 RenderMessage visibility pipeline`。
+建议施工卡：`F1.5 结构化 diff 增强`。
 
 目标：
 
 ```text
-把当前已完成的 tool_call/tool_result 类型继续接入纯派生 visibility pipeline。
-保留 Raw Message[]、localStorage、replay、ACP event 和 cancel 语义。
-error message 永远保留。
-空 assistant 且非 running 继续 skip。
-未知显示类型必须 fallback，禁止静默丢弃。
+把 diffPresentation.ts 的逐行简单比对升级为 CC StructuredDiff 行模型：
+  normalizeDiffPayload 保持双路解析（对象/unified）不变。
+  增加行模型纯函数：行类型化、相邻 remove+add 配对、词级 diff、
+  CHANGE_THRESHOLD=0.4 回退、行号（numberDiffLines）、400 行截断标注。
+  DiffCard 消费行模型；无法识别时继续普通 pre 文本。
+保留现有 tool 状态、sanitizer、错误边界和主题变量。
 ```
 
-不做：
+不改：
 
 ```text
-不做 UI 重排。
-不新增后端事件。
-不修改 Message 持久化结构。
-不做 tool grouping。
-不做 virtualization。
+不扩展 ACP 协议。
+不修改 Message 持久化格式。
+不改变 ToolCard 布局与折叠语义。
+不把 diff 改成独立页面。
 ```
 
 验收：
