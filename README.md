@@ -46,7 +46,7 @@ GUI (Pylon) → spawn agent → initialize
 - 前端行为：自由拖拽固定、双击恢复漫游、嗅/吃代码、平板敲码
 
 ### Prism 集成
-- Prism 上下文注入引擎网关，40 个命令：场景 / 源 / 块 CRUD、注入、Chronicle 历史、LLM 测试
+- Prism 上下文注入引擎网关，39 个命令：场景 / 源 / 块 CRUD、注入、Chronicle 历史、LLM 测试
 
 ---
 
