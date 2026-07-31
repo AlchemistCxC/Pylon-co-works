@@ -3,6 +3,7 @@ mod agent_config;
 mod agent_runtime;
 mod error;
 mod gateway;
+mod git;
 mod mcp;
 mod pet;
 mod prism;
@@ -988,6 +989,7 @@ fn start_notification_dispatcher<R: tauri::Runtime>(handles: &AppStateHandles, r
     }
 }
 
+#[derive(Clone)]
 pub(crate) struct SessionInfo {
     peri_id: String,
     persona: String,
@@ -1179,6 +1181,7 @@ mod session_info_tests {
         s2.tokens_in = 20;
         s2.tokens_out = 10;
         s2.tokens_total = 30;
+        s2.context_size = 4096;
         sessions.insert("source-a".into(), s1);
         sessions.insert("source-b".into(), s2);
         let runtime = AgentRuntimeState {
@@ -1186,7 +1189,8 @@ mod session_info_tests {
             last_error: None,
             last_connected_at: Some("ts".into()),
         };
-        let payload = build_inspector_payload(&sessions, &runtime, "agent-x");
+        let entries = vec![("agent-x".to_string(), sessions, runtime)];
+        let payload = build_full_inspector_payload(&entries, "agent-x");
         assert_eq!(payload["agent"]["id"], "agent-x");
         assert_eq!(payload["agent"]["status"], "connected");
         assert_eq!(payload["summary"]["sessionCount"], 2);
@@ -1201,6 +1205,51 @@ mod session_info_tests {
         assert_eq!(rows_by_source["source-a"]["tokensTotal"], 150);
         assert_eq!(rows_by_source["source-b"]["cwd"], "/work");
         assert_eq!(rows_by_source["source-a"]["model"], "model-a");
+        assert_eq!(rows_by_source["source-a"]["agentId"], "agent-x", "session 行必须带 agentId 区分来源");
+        // B2 增量：runtimes 数组 + workspace 映射
+        let runtimes = payload["runtimes"].as_array().expect("runtimes must be array");
+        assert_eq!(runtimes.len(), 1);
+        assert_eq!(runtimes[0]["agentId"], "agent-x");
+        assert_eq!(runtimes[0]["status"], "connected");
+        assert_eq!(runtimes[0]["sessionCount"], 2);
+        assert_eq!(runtimes[0]["tokensTotal"], 180);
+        assert!(payload["workspace"].get("source-a").is_some(), "workspace 必须含每个 source 的 root 状态");
+    }
+
+    #[test]
+    fn inspector_full_aggregates_across_runtimes() {
+        let mut sessions_a = HashMap::new();
+        let s1 = SessionInfo::new("peri-a".into(), "pa".into(), ".".into(), true, 0);
+        sessions_a.insert("local".into(), s1);
+        let mut sessions_b = HashMap::new();
+        let s2 = SessionInfo::new("peri-b".into(), "pb".into(), ".".into(), false, 0);
+        sessions_b.insert("qq:group:1".into(), s2);
+        let state_a = AgentRuntimeState {
+            status: AgentLifecycleStatus::Connected,
+            last_error: None,
+            last_connected_at: Some("t1".into()),
+        };
+        let state_b = AgentRuntimeState {
+            status: AgentLifecycleStatus::Crashed,
+            last_error: Some("boom".into()),
+            last_connected_at: None,
+        };
+        let entries = vec![
+            ("peri".to_string(), sessions_a, state_a),
+            ("hermes".to_string(), sessions_b, state_b),
+        ];
+        let payload = build_full_inspector_payload(&entries, "peri");
+        assert_eq!(payload["summary"]["sessionCount"], 2, "跨 runtime 全局聚合");
+        assert_eq!(payload["summary"]["activeCount"], 1);
+        let runtimes = payload["runtimes"].as_array().expect("runtimes array");
+        assert_eq!(runtimes.len(), 2);
+        let crashed = runtimes.iter().find(|r| r["agentId"] == "hermes").expect("hermes runtime");
+        assert_eq!(crashed["status"], "crashed");
+        assert_eq!(crashed["lastError"], "boom");
+        assert_eq!(crashed["sessionCount"], 1);
+        let rows = payload["sessions"].as_array().expect("sessions array");
+        let qq_row = rows.iter().find(|r| r["source"] == "qq:group:1").expect("qq session");
+        assert_eq!(qq_row["agentId"], "hermes", "跨 runtime session 必须可区分来源");
     }
 
     #[test]
@@ -2160,6 +2209,45 @@ gateway:
         assert!(sessions.contains_key("local"), "GUI local 会话必须豁免过期重置");
         assert!(!sessions.contains_key("qq:group:123"), "平台会话过期必须 close + 移除");
     }
+}
+
+// ── B5 Git 只读 commands ──
+
+/// B5：解析 source 对应的 git 工作区 root（会话 cwd，失败回退 active agent cwd）。
+/// 只读操作；非 git 仓库 / git 不可用 → PylonError::Git（code=git_error）。
+fn git_workspace_root(state: &AppState, source: &str) -> Result<std::path::PathBuf, PylonError> {
+    let runtime = state.require_runtime()?;
+    let root = state.workspace_root_for_source(&runtime, source)
+        .or_else(|_| Ok::<String, String>(state.agent_cwd()))
+        .map_err(PylonError::Git)?;
+    Ok(std::path::PathBuf::from(root))
+}
+
+#[tauri::command]
+async fn git_status(state: tauri::State<'_, AppState>, source: String) -> Result<Vec<git::GitStatusEntry>, PylonError> {
+    let root = git_workspace_root(state.inner(), &source)?;
+    git::git_status(&root).await.map_err(PylonError::Git)
+}
+
+#[tauri::command]
+async fn git_diff(
+    state: tauri::State<'_, AppState>,
+    source: String,
+    path: Option<String>,
+    staged: Option<bool>,
+) -> Result<String, PylonError> {
+    let root = git_workspace_root(state.inner(), &source)?;
+    git::git_diff(&root, path.as_deref(), staged.unwrap_or(false)).await.map_err(PylonError::Git)
+}
+
+#[tauri::command]
+async fn git_history(
+    state: tauri::State<'_, AppState>,
+    source: String,
+    limit: Option<usize>,
+) -> Result<Vec<git::GitCommit>, PylonError> {
+    let root = git_workspace_root(state.inner(), &source)?;
+    git::git_history(&root, limit).await.map_err(PylonError::Git)
 }
 
 // ── AppState helpers ──
@@ -3123,22 +3211,55 @@ async fn load_sessions(state: tauri::State<'_, AppState>) -> Result<Vec<serde_js
     }).collect())
 }
 
-/// Session Inspector 聚合 DTO：agent 状态 + 全量会话统计 + 会话明细。
-/// 独立纯函数便于单测（sessions 快照 + runtime 快照 → payload）。
-fn build_inspector_payload(
-    sessions: &HashMap<String, SessionInfo>,
-    runtime: &AgentRuntimeState,
+/// B2 Inspector 完整版：全量（所有 runtime）聚合 + per-agent runtimes 增量 +
+/// workspace 增量。v1 顶层契约（agent/summary/sessions）保持形状，语义升级为全局：
+/// - summary/sessions 合并所有 runtime（session 行新增 agentId 区分来源）
+/// - runtimes[]：每个 agent 的运行时状态与聚合数
+/// - workspace{}：source → {path, exists, readable}（复用 workspace::workspace_root）
+fn build_full_inspector_payload(
+    entries: &[(String, HashMap<String, SessionInfo>, AgentRuntimeState)],
     active_id: &str,
 ) -> serde_json::Value {
-    let total_tokens: u64 = sessions.values().map(|s| s.tokens_total).sum();
-    let total_in: u64 = sessions.values().map(|s| s.tokens_in).sum();
-    let total_out: u64 = sessions.values().map(|s| s.tokens_out).sum();
-    let active_count = sessions.values()
-        .filter(|s| s.has_first_prompt)
-        .count();
+    let mut all_sessions: Vec<(String, String, &SessionInfo)> = Vec::new();
+    let mut total_tokens: u64 = 0;
+    let mut total_in: u64 = 0;
+    let mut total_out: u64 = 0;
+    let mut active_count: usize = 0;
+    let mut workspace = serde_json::Map::new();
+    let mut runtimes: Vec<serde_json::Value> = Vec::new();
 
-    let session_rows: Vec<serde_json::Value> = sessions.iter().map(|(source, s)| {
+    for (agent_id, sessions, runtime_state) in entries {
+        let mut session_count = 0usize;
+        let mut runtime_tokens: u64 = 0;
+        let mut runtime_active: usize = 0;
+        for (source, session) in sessions {
+            session_count += 1;
+            runtime_tokens += session.tokens_total;
+            total_tokens += session.tokens_total;
+            total_in += session.tokens_in;
+            total_out += session.tokens_out;
+            if session.has_first_prompt {
+                runtime_active += 1;
+                active_count += 1;
+            }
+            all_sessions.push((agent_id.clone(), source.clone(), session));
+            let root = workspace::workspace_root(source.clone(), std::path::Path::new(&session.cwd));
+            workspace.insert(source.clone(), serde_json::to_value(root).unwrap_or(serde_json::Value::Null));
+        }
+        runtimes.push(serde_json::json!({
+            "agentId": agent_id,
+            "status": runtime_state.status.as_str(),
+            "lastError": runtime_state.last_error,
+            "lastConnectedAt": runtime_state.last_connected_at,
+            "sessionCount": session_count,
+            "activeCount": runtime_active,
+            "tokensTotal": runtime_tokens,
+        }));
+    }
+
+    let session_rows: Vec<serde_json::Value> = all_sessions.iter().map(|(agent_id, source, s)| {
         serde_json::json!({
+            "agentId": agent_id,
             "source": source,
             "periId": s.peri_id,
             "title": s.title,
@@ -3155,28 +3276,40 @@ fn build_inspector_payload(
     serde_json::json!({
         "agent": {
             "id": active_id,
-            "status": runtime.status.as_str(),
-            "lastError": runtime.last_error,
-            "lastConnectedAt": runtime.last_connected_at,
+            "status": entries.iter().find(|(id, _, _)| id == active_id)
+                .map(|(_, _, rs)| rs.status.as_str())
+                .unwrap_or("disconnected"),
+            "lastError": entries.iter().find(|(id, _, _)| id == active_id)
+                .and_then(|(_, _, rs)| rs.last_error.clone()),
+            "lastConnectedAt": entries.iter().find(|(id, _, _)| id == active_id)
+                .and_then(|(_, _, rs)| rs.last_connected_at.clone()),
         },
         "summary": {
-            "sessionCount": sessions.len(),
+            "sessionCount": all_sessions.len(),
             "activeCount": active_count,
             "tokensTotal": total_tokens,
             "tokensIn": total_in,
             "tokensOut": total_out,
         },
         "sessions": session_rows,
+        "workspace": serde_json::Value::Object(workspace),
+        "runtimes": runtimes,
     })
 }
 
 #[tauri::command]
 async fn session_inspector(state: tauri::State<'_, AppState>) -> Result<serde_json::Value, PylonError> {
-    let runtime = state.inner().require_runtime()?;
-    let sessions = runtime.sessions.lock().map_err(|e| e.to_string())?;
-    let runtime_state = runtime.agent_runtime.lock().map(|v| v.clone()).unwrap_or_default();
+    // B2 完整版：遍历所有 runtime（含无会话的），全局聚合 + workspace/runtimes 增量。
+    let entries: Vec<(String, HashMap<String, SessionInfo>, AgentRuntimeState)> = state.inner().runtimes.all_with_ids()
+        .into_iter()
+        .map(|(agent_id, runtime)| {
+            let sessions = runtime.sessions.lock().map(|s| s.clone()).unwrap_or_default();
+            let runtime_state = runtime.agent_runtime.lock().map(|v| v.clone()).unwrap_or_default();
+            (agent_id, sessions, runtime_state)
+        })
+        .collect();
     let active_id = state.active_agent.lock().map_err(|e| e.to_string())?.clone();
-    Ok(build_inspector_payload(&sessions, &runtime_state, &active_id))
+    Ok(build_full_inspector_payload(&entries, &active_id))
 }
 
 // ── Agent Registry commands ──
@@ -3783,6 +3916,7 @@ pub fn run() {
                 export_session,
                 list_runtime_logs, clear_runtime_logs, push_frontend_log,
                 get_workspace_root, list_workspace_entries, read_workspace_text,
+                git_status, git_diff, git_history,
             ])
             .setup(|app| {
                 let window = app.get_webview_window("main").ok_or("main window not found")?;

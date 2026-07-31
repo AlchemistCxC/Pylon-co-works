@@ -20,6 +20,8 @@ pub enum PylonError {
     Protocol(String),
     Workspace(String),
     Prism(String),
+    /// B5：Git 只读操作错误（非 git 仓库 / git 不可用 / 命令失败）。
+    Git(String),
 }
 
 impl PylonError {
@@ -37,6 +39,7 @@ impl PylonError {
             Self::Protocol(_) => "protocol_error",
             Self::Workspace(_) => "workspace_error",
             Self::Prism(_) => "prism_error",
+            Self::Git(_) => "git_error",
         }
     }
 }
@@ -55,6 +58,7 @@ impl fmt::Display for PylonError {
             Self::Protocol(msg) => write!(f, "ACP protocol: {msg}"),
             Self::Workspace(msg) => write!(f, "{msg}"),
             Self::Prism(msg) => write!(f, "Prism error: {msg}"),
+            Self::Git(msg) => write!(f, "Git error: {msg}"),
         }
     }
 }
@@ -134,6 +138,7 @@ mod tests {
         assert_eq!(PylonError::Protocol("x".into()).code(), "protocol_error");
         assert_eq!(PylonError::Workspace("x".into()).code(), "workspace_error");
         assert_eq!(PylonError::Prism("x".into()).code(), "prism_error");
+        assert_eq!(PylonError::Git("x".into()).code(), "git_error");
     }
 
     #[test]

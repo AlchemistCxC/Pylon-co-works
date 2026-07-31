@@ -85,6 +85,11 @@ impl AgentRuntimeManager {
     pub fn all(&self) -> Vec<Arc<AgentRuntime>> {
         self.runtimes.read().map(|m| m.values().cloned().collect()).unwrap_or_default()
     }
+
+    /// 全部 runtime 带 agent_id（B2 Inspector 完整版 per-agent 聚合用）。
+    pub fn all_with_ids(&self) -> Vec<(String, Arc<AgentRuntime>)> {
+        self.runtimes.read().map(|m| m.iter().map(|(id, r)| (id.clone(), r.clone())).collect()).unwrap_or_default()
+    }
 }
 
 impl Default for AgentRuntimeManager {
