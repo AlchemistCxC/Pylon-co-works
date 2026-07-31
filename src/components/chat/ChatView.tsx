@@ -325,7 +325,7 @@ const ChatView = React.memo(function ChatView({ sessionId }: Props) {
         const previous = rows[index - 1]!
         const row = rows[index]!
         const gap = row.offsetTop - (previous.offsetTop + previous.offsetHeight)
-        row.querySelector('.term-tool')?.style.setProperty('--conn-gap', `${Math.max(0, gap)}px`)
+        row.querySelector<HTMLElement>('.term-tool')?.style.setProperty('--conn-gap', `${Math.max(0, gap)}px`)
       }
     }
     const observer = new ResizeObserver(() => {
