@@ -16,6 +16,7 @@ use crate::SessionInfo;
 pub struct AgentRuntime {
     pub acp: Arc<tokio::sync::Mutex<AcpClient>>,
     pub notification_task: Arc<Mutex<Option<tokio::task::JoinHandle<()>>>>,
+    pub session_creation: Arc<tokio::sync::Mutex<()>>,
     pub agent_lifecycle: Arc<tokio::sync::Mutex<()>>,
     pub client_generation: Arc<AtomicU64>,
     pub prompt_locks: Arc<Mutex<HashMap<String, Arc<tokio::sync::Mutex<()>>>>>,
@@ -30,6 +31,7 @@ impl AgentRuntime {
         Arc::new(Self {
             acp: Arc::new(tokio::sync::Mutex::new(AcpClient::disconnected())),
             notification_task: Arc::new(Mutex::new(None)),
+            session_creation: Arc::new(tokio::sync::Mutex::new(())),
             agent_lifecycle: Arc::new(tokio::sync::Mutex::new(())),
             client_generation: Arc::new(AtomicU64::new(0)),
             prompt_locks: Arc::new(Mutex::new(HashMap::new())),
@@ -53,6 +55,22 @@ impl AgentRuntimeManager {
     pub fn insert(&self, agent_id: String, runtime: Arc<AgentRuntime>) {
         if let Ok(mut map) = self.runtimes.write() {
             map.insert(agent_id, runtime);
+        }
+    }
+
+    /// 获取或创建 agent 的 runtime（switch/reconnect 懒启动路径）。
+    /// 并发重复调用只会创建一个实例（entry API 保证单实例）。
+    pub fn get_or_create(&self, agent_id: &str) -> Arc<AgentRuntime> {
+        match self.runtimes.write() {
+            Ok(mut map) => map
+                .entry(agent_id.to_string())
+                .or_insert_with(AgentRuntime::new_disconnected)
+                .clone(),
+            Err(poisoned) => poisoned
+                .into_inner()
+                .entry(agent_id.to_string())
+                .or_insert_with(AgentRuntime::new_disconnected)
+                .clone(),
         }
     }
 
@@ -104,5 +122,26 @@ mod tests {
         a.client_generation.store(7, std::sync::atomic::Ordering::Release);
         assert_eq!(a.client_generation.load(std::sync::atomic::Ordering::Acquire), 7);
         assert_eq!(b.client_generation.load(std::sync::atomic::Ordering::Acquire), 0);
+    }
+
+    #[test]
+    fn session_creation_lock_is_independent_per_agent() {
+        let a = AgentRuntime::new_disconnected();
+        let b = AgentRuntime::new_disconnected();
+        let guard = a.session_creation.try_lock();
+        assert!(guard.is_ok(), "a 的 session_creation 应可独立获取");
+        let b_guard = b.session_creation.try_lock();
+        assert!(b_guard.is_ok(), "b 的 session_creation 不应被 a 的锁阻塞");
+        drop(guard);
+        drop(b_guard);
+    }
+
+    #[test]
+    fn get_or_create_returns_single_shared_instance() {
+        let manager = AgentRuntimeManager::new();
+        let first = manager.get_or_create("peri");
+        let second = manager.get_or_create("peri");
+        assert!(Arc::ptr_eq(&first, &second), "同一 agent 必须返回同一 runtime 实例");
+        assert_eq!(manager.len(), 1);
     }
 }
