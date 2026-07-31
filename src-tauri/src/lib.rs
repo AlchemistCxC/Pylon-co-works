@@ -1500,6 +1500,14 @@ async fn load_persisted_session(
     let generation = state.current_generation();
     let cwd = cwd.unwrap_or_else(|| state.agent_cwd());
     let mcp_servers = mcp::validate_and_serialize(mcp_servers)?;
+    {
+        // 与 new_session / send_message 自动创建一致，恢复历史会话也受上限约束；
+        // 同 source 重载（替换）不占新名额。
+        let sessions = state.sessions.lock().map_err(|e| e.to_string())?;
+        if !sessions.contains_key(&source) && sessions.len() >= MAX_SESSIONS {
+            return Err("max sessions reached".to_string());
+        }
+    }
     let previous = state.sessions.lock().map_err(|e| e.to_string())?
         .insert(source.clone(), SessionInfo::new(peri_id.clone(), String::new(), cwd.clone(), true, generation));
     match state.acp.lock().await
