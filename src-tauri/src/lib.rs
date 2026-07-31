@@ -6,6 +6,7 @@ mod gateway;
 mod mcp;
 mod pet;
 mod prism;
+mod runtime;
 mod runtime_log;
 mod workspace;
 
@@ -890,7 +891,7 @@ fn start_notification_dispatcher<R: tauri::Runtime>(state: &AppStateHandles, win
     }
 }
 
-struct SessionInfo {
+pub(crate) struct SessionInfo {
     peri_id: String,
     persona: String,
     cwd: String,
