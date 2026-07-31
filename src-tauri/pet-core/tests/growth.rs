@@ -468,3 +468,57 @@ fn code_seen_counts_watching() {
     pet.apply(AiEvent::CodeSeen, 2);
     assert_eq!(pet.stats.code_watched, 2);
 }
+
+// ── M6：crafting 延迟行为 + 主动说话（设计书 §9）──
+
+#[test]
+fn friend_crafting_completes_after_thirty_seconds() {
+    use pylon_pet_core::ToolKind;
+    let mut pet = PetState::new_at(1);
+    pet.apply(AiEvent::ToolStarted { kind: ToolKind::AgentSpawn }, 1);
+    assert!(pet.pending_action.is_some(), "捏朋友必须挂起延迟行为");
+    assert!(!pet.settle_pending(29_999), "30s 前未完成");
+    assert!(pet.settle_pending(30_001), "30s 后完成");
+    assert!(pet.pending_action.is_none());
+    assert_eq!(pet.stats.friends_made, 1);
+    assert!(pet.memories.iter().any(|m| m.contains("幻影朋友")), "捏朋友必须记入记忆");
+    assert!(pet.bond >= 2);
+    assert!(pet.msg.is_some(), "完成必须说话");
+}
+
+#[test]
+fn poll_voice_reports_need_priorities() {
+    let mut pet = PetState::new_at(1);
+    pet.traits = pylon_pet_core::PetTraits::default();
+    assert!(!pet.poll_voice(1), "健康时不说话");
+    pet.hunger = 10;
+    assert!(pet.poll_voice(2), "饥饿必须说话");
+    assert!(pet.msg.as_deref() == Some("咕……") || pet.msg.is_some());
+    pet.msg = None;
+
+    pet.hunger = 80;
+    pet.loneliness = 90;
+    assert!(pet.poll_voice(3), "孤独必须说话");
+    pet.msg = None;
+
+    // 已 asleep 不说话
+    pet.apply(AiEvent::Sleepy, 4);
+    assert!(!pet.poll_voice(5), "睡眠中不说话");
+}
+
+#[test]
+fn voice_lines_rotate_without_immediate_repeat() {
+    let mut pet = PetState::new_at(1);
+    pet.traits = pylon_pet_core::PetTraits::default();
+    pet.hunger = 10;
+    let first = {
+        pet.poll_voice(1);
+        pet.msg.take()
+    };
+    let second = {
+        pet.poll_voice(2);
+        pet.msg.take()
+    };
+    assert!(first.is_some() && second.is_some());
+    assert_ne!(first, second, "文案池必须轮换不重复");
+}

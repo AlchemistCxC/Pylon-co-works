@@ -3875,6 +3875,8 @@ async fn get_pet(app: tauri::AppHandle, state: tauri::State<'_, AppState>) -> Re
     pet::daily_visit(&mut pet);
     // 自动入睡：轮询时检查（首字后 30s 无互动 → sleepy），幂等
     pet::check_sleepy(&mut pet);
+    // M6：主动说话（需求危机/捏朋友完成）
+    pet::poll_voice(&mut pet);
     let msg = pet.msg.take();
     let mut value = serde_json::to_value(pet::view(&pet)).map_err(|e| e.to_string())?;
     if let Some(message) = msg {

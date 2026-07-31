@@ -1,4 +1,6 @@
-﻿use serde::{Deserialize, Serialize};
+﻿mod lines;
+
+use serde::{Deserialize, Serialize};
 
 const DAY_MS: u64 = 86_400_000;
 const TOKEN_XP_STEP: u64 = 5_000;
@@ -290,6 +292,9 @@ pub struct PetState {
     feed_spam_count: u8,
     #[serde(skip)]
     last_play_at_ms: u64,
+    /// M6 文案轮换索引（不落盘）。
+    #[serde(skip)]
+    line_idx: u8,
 }
 
 impl Default for PetState {
@@ -331,11 +336,12 @@ impl PetState {
                 ..PetStats::default()
             },
             memories: Vec::new(),
-            msg: Some("一粒微光落在了这里。".into()),
+            msg: Some(lines::pick(lines::LineKey::Birth, &mut 0)),
             last_interaction_at_ms: 0,
             last_feed_at_ms: 0,
             feed_spam_count: 0,
             last_play_at_ms: 0,
+            line_idx: 0,
         }
     }
 
@@ -395,7 +401,7 @@ impl PetState {
                 self.loneliness = self.loneliness.saturating_sub(15);
                 self.happiness = (self.happiness as u16 + 1).min(100) as u8;
                 self.gain_bond(1);
-                self.msg = Some("它追着新的想法望了过去。".into());
+                self.msg = Some(lines::pick(lines::LineKey::UserSent, &mut self.line_idx));
             }
             AiEvent::FirstChunk => {
                 // T5：对话开始 → Interacting
@@ -403,7 +409,7 @@ impl PetState {
                 if self.first_chunk_at_ms.is_none() {
                     self.first_chunk_at_ms = Some(now_ms);
                     // mood 由 derive_mood 推导
-                    self.msg = Some("微光开始流动。".into());
+                    self.msg = Some(lines::pick(lines::LineKey::FirstChunk, &mut self.line_idx));
                 }
             }
             AiEvent::PromptCompleted => {
@@ -424,7 +430,7 @@ impl PetState {
                     self.remember(format!("共同完成了 {} 次任务", self.stats.prompts_completed));
                 }
                 self.push_event(RecentEvent::Done);
-                self.msg = Some("它把这次完成收进了身体。".into());
+                self.msg = Some(lines::pick(lines::LineKey::Done, &mut self.line_idx));
             }
             AiEvent::PromptFailed => {
                 // T6：对话结束（失败）→ Idle
@@ -436,7 +442,7 @@ impl PetState {
                 self.loneliness = (self.loneliness as u16 + 5).min(100) as u8;
                 // mood 由 derive_mood 推导
                 self.push_event(RecentEvent::Failed);
-                self.msg = Some("光暗了一下，但没有熄灭。".into());
+                self.msg = Some(lines::pick(lines::LineKey::Failed, &mut self.line_idx));
             }
             AiEvent::TokenUsage { total } => self.set_token_total(total),
             AiEvent::TokenDelta { amount } => self.add_token_delta(amount),
@@ -456,7 +462,9 @@ impl PetState {
                     }
                     ToolKind::AgentSpawn => {
                         self.push_event(RecentEvent::Spawn);
-                        self.msg = Some("它认真起来：agent 在找帮手！".into());
+                        // M6：捏朋友——30s 延迟完成（时间戳驱动，零后台任务）
+                        self.pending_action = Some(PendingAction::CraftFriend { until_ms: now_ms + 30_000 });
+                        self.msg = Some(lines::pick(lines::LineKey::FriendStart, &mut self.line_idx));
                     }
                     ToolKind::Read => {
                         self.push_event(RecentEvent::Read);
@@ -521,7 +529,7 @@ impl PetState {
                 self.reward_interaction(now_ms, 1);
                 // mood 由 derive_mood 推导
                 self.push_event(RecentEvent::Poke);
-                self.msg = Some("它贴近了你的指尖。".into());
+                self.msg = Some(lines::pick(lines::LineKey::Poke, &mut self.line_idx));
             }
             AiEvent::Feed => {
                 self.stats.interactions = self.stats.interactions.saturating_add(1);
@@ -546,7 +554,7 @@ impl PetState {
                 self.reward_interaction(now_ms, 1);
                 // mood 由 derive_mood 推导
                 self.push_event(RecentEvent::Feed);
-                self.msg = Some("能量沿着像素一格格亮起。".into());
+                self.msg = Some(lines::pick(lines::LineKey::Feed, &mut self.line_idx));
             }
             AiEvent::Play => {
                 self.stats.interactions = self.stats.interactions.saturating_add(1);
@@ -567,11 +575,11 @@ impl PetState {
                 }
                 // mood 由 derive_mood 推导
                 self.push_event(RecentEvent::Play);
-                self.msg = Some("它追着你的光标跑来跑去。".into());
+                self.msg = Some(lines::pick(lines::LineKey::Play, &mut self.line_idx));
             }
             AiEvent::Sleepy => {
                 self.machine = PetMachineState::Asleep;
-                self.msg = Some("它蜷成一小团等待。".into());
+                self.msg = Some(lines::pick(lines::LineKey::Sleep, &mut self.line_idx));
             }
             AiEvent::AgentConnected => {
                 // T4：连接恢复 → Idle
@@ -596,7 +604,7 @@ impl PetState {
             let idle_for = now_ms.saturating_sub(self.last_interaction_at_ms);
             if self.energy <= 15 && (idle_for >= 30_000 || self.energy == 0) {
                 self.machine = PetMachineState::Asleep;
-                self.msg = Some("它蜷成一小团等待。".into());
+                self.msg = Some(lines::pick(lines::LineKey::Sleep, &mut self.line_idx));
             }
         }
         // M3：情绪统一推导（取代事件直接赋值）
@@ -739,7 +747,7 @@ impl PetState {
     fn wake(&mut self) {
         self.machine = PetMachineState::Awake(MachineSub::Idle);
         self.energy = (self.energy as u16 + 30).min(100) as u8;
-        self.msg = Some("它被你的脚步声唤醒。".into());
+        self.msg = Some(lines::pick(lines::LineKey::Wake, &mut self.line_idx));
     }
 
     pub fn stage(&self) -> GrowthStage {
@@ -771,7 +779,59 @@ impl PetState {
 
     pub fn rename(&mut self, value: &str) {
         self.name = sanitize_name(value);
-        self.msg = Some(format!("它记住了名字：{}。", self.name));
+        let prefix = lines::pick(lines::LineKey::Rename, &mut self.line_idx);
+        self.msg = Some(format!("{prefix}{}。", self.name));
+    }
+
+    /// M6：结算延迟行为（时间戳驱动）。捏朋友到期 → 完成（记忆/bond/朋友统计）。
+    /// 返回是否发生了完成（调用方可决定是否更新 view）。
+    pub fn settle_pending(&mut self, now_ms: u64) -> bool {
+        if let Some(PendingAction::CraftFriend { until_ms }) = self.pending_action {
+            if now_ms >= until_ms {
+                self.pending_action = None;
+                self.stats.friends_made = self.stats.friends_made.saturating_add(1);
+                self.gain_bond(2);
+                self.gain_xp(2);
+                self.fun = (self.fun as u16 + 10).min(100) as u8;
+                self.loneliness = self.loneliness.saturating_sub(30);
+                self.remember("它捏了个幻影朋友".into());
+                self.msg = Some(lines::pick(lines::LineKey::FriendDone, &mut self.line_idx));
+                return true;
+            }
+        }
+        false
+    }
+
+    /// M6：主动说话（view/轮询入口，零后台任务）——
+    /// 需求危机按优先级产出 msg（设计书 §9）。返回是否说了话。
+    /// 紧急需求总是表达（可覆盖事件文案——饥饿优先，设计书 §1 无冷却）。
+    pub fn poll_voice(&mut self, now_ms: u64) -> bool {
+        self.settle(now_ms);
+        if self.settle_pending(now_ms) {
+            return true;
+        }
+        if self.machine == PetMachineState::Asleep {
+            return false;
+        }
+        let key = if self.hunger < 25 {
+            Some(lines::LineKey::Hungry)
+        } else if self.loneliness > 70 {
+            Some(lines::LineKey::Lonely)
+        } else if self.energy < 20 {
+            Some(lines::LineKey::Tired)
+        } else if self.fun < 20 {
+            Some(lines::LineKey::Bored)
+        } else if self.mood == "dazed" {
+            Some(lines::LineKey::Dazed)
+        } else {
+            None
+        };
+        if let Some(key) = key {
+            self.msg = Some(lines::pick(key, &mut self.line_idx));
+            true
+        } else {
+            false
+        }
     }
 
     pub fn recall_memory(&self) -> Option<String> {

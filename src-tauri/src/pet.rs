@@ -132,6 +132,11 @@ pub fn daily_visit(state: &mut PetState) {
     state.apply(AiEvent::Visit, now_ms());
 }
 
+/// M6：主动说话（需求危机/延迟行为完成 → msg）。get_pet 轮询调用。
+pub fn poll_voice(state: &mut PetState) -> bool {
+    state.poll_voice(now_ms())
+}
+
 pub fn rename(state: &mut PetState, value: &str) {
     state.rename(value);
 }
