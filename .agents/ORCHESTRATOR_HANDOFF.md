@@ -17,6 +17,22 @@
 | 后端边界 | 只动 `src-tauri/**`、`agents.yaml`、`.agents/`、docs；不碰 `src/` 前端（宫木云在改，大量未提交改动） |
 | 工具链 | Rust GNU：`export PATH="/f/Coding/rust/toolchain/.cargo/bin:/f/Coding/c/mingw64/mingw64/bin:$PATH"`；`unset RUSTFLAGS`；`TMP=F:/tmp`（C 盘满）；cargo 用 `--offline` |
 
+## 1.1 工具链与参考源码位置
+
+| 项 | 位置 | 用途 |
+|:--|:--|:--|
+| Rust 工具链 | `F:\Coding\rust\toolchain\.cargo\bin\`（cargo 1.97.0 GNU） | 编译/测试；`F:\Hermes\rust\` 是僵尸目录勿用 |
+| MinGW windres | `F:\Coding\c\mingw64\mingw64\bin\` | build.rs 注入 manifest（测试 exe 必需） |
+| Go | `F:\Hermes\Go\bin\go`（1.24.0） | 非 Pylon 用（其他项目） |
+| Python | `F:\Hermes\hermes-agent\venv\Scripts\python`（3.11.15） | 脚本/验证 |
+| JDK/Gradle/protoc | `F:\Hermes\jdk17` / `F:\Hermes\gradle-8.10` / `F:\Hermes\protoc\bin` | 非 Pylon 用 |
+| 临时目录 | `F:/tmp`（TMP/TEMP 环境变量） | C 盘满，cargo 必须指过去 |
+| **Peri 源码（ACP 真值）** | `F:\A-I\Agent\Peri` | ACP 协议/method/通知/replay 以它为准 |
+| **Hermes 源码（gateway 参考）** | `F:\Hermes\hermes-agent` | B10 设计参考：`gateway/platforms/base.py`（truncate/媒体/代理）、`gateway/platforms/qqbot/adapter.py`（重连/心跳/resume/交互审批）、`gateway/dead_targets.py`、`gateway/session.py` |
+| **Prism 源码（HTTP 真值）** | `G:\Project\prism`（V1.0，含 qq 模块）；旧版打包 `/f/Hermes/projects/prism-v3-src.zip` | route/认证以它为准；qq 模块是适配器移植参考 |
+| 官方 schema | cargo registry `agent-client-protocol-schema-1.4.0` | ACP 类型全集（request_permission 等） |
+| Claude Code 源码图 | `references/claude-code-sourcemap/`（本地） | 工具设计对比参考 |
+
 ## 2. 本次会话已完成（2026-07-31）
 
 ### 后端功能
