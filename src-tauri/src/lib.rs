@@ -756,14 +756,25 @@ fn start_notification_dispatcher<R: tauri::Runtime>(handles: &AppStateHandles, r
                                 let still_stale = reconnect_runtime.agent_runtime.lock()
                                     .map(|r| r.status == AgentLifecycleStatus::Crashed)
                                     .unwrap_or(false);
-                                if !still_stale { return; }
+                                if !still_stale {
+                                    // 核验修复：提前放弃也必须释放防重入标志，
+                                    // 否则后续崩溃将永远不再自动重连。
+                                    reconnect_runtime.auto_reconnect_active.store(false, Ordering::Release);
+                                    return;
+                                }
                                 // 用户已 switch 到其他 agent → 放弃（不把 active_agent 顶回）
                                 let still_active = reconnect_handles.active_agent.lock()
                                     .map(|v| v.as_str() == reconnect_agent_id)
                                     .unwrap_or(false);
-                                if !still_active { return; }
+                                if !still_active {
+                                    reconnect_runtime.auto_reconnect_active.store(false, Ordering::Release);
+                                    return;
+                                }
                                 let agent = reconnect_handles.agents.lock().ok().and_then(|a| a.get(&reconnect_agent_id).cloned());
-                                let Some(agent) = agent else { return; };
+                                let Some(agent) = agent else {
+                                    reconnect_runtime.auto_reconnect_active.store(false, Ordering::Release);
+                                    return;
+                                };
                                 let _lifecycle_guard = reconnect_runtime.agent_lifecycle.lock().await;
                                 match do_connect_and_replace(
                                     &reconnect_handles,
@@ -1428,6 +1439,67 @@ for line in sys.stdin:
             assert_eq!(sessions.get("source-a").map(|s| s.generation), Some(1), "kept sessions must migrate generation");
         }
         assert!(!runtime.auto_reconnect_active.load(Ordering::Acquire), "auto-reconnect flag must release after loop");
+    }
+
+    /// 核验回归：崩溃触发自动重连调度后，用户手动 reconnect 成功——
+    /// 自动重连闭包复查 status!=Crashed 提前放弃时**必须释放防重入标志**，
+    /// 否则下一次崩溃将永远不再自动重连。
+    #[tokio::test]
+    async fn manual_reconnect_releases_auto_reconnect_flag() {
+        let app = tauri::test::mock_builder().build(tauri::test::mock_context(tauri::test::noop_assets())).unwrap();
+        let window = tauri::WebviewWindowBuilder::new(&app, "main", tauri::WebviewUrl::External("https://example.com".parse().unwrap()))
+            .build()
+            .expect("mock window must build");
+
+        let crash_agent = fake_agent("crash");
+        let initial_acp = AcpClient::connect_with_logs(&crash_agent, None)
+            .await
+            .expect("fake ACP must initialize");
+        let state = build_state(initial_acp, crash_agent).await;
+        let handles = AppStateHandles::from_state(&state);
+        let runtime = handles.active_runtime().expect("active runtime must exist");
+        start_notification_dispatcher(&handles, &runtime, window.clone());
+
+        // 崩溃 → 自动重连已调度（标志 true）
+        tokio::time::timeout(std::time::Duration::from_secs(5), async {
+            loop {
+                if runtime.auto_reconnect_active.load(Ordering::Acquire) { break; }
+                tokio::time::sleep(std::time::Duration::from_millis(20)).await;
+            }
+        })
+        .await
+        .expect("auto-reconnect must be scheduled on crash");
+
+        // 用户手动 reconnect：agents 表切 alive + 走手动连接路径（状态置 Connected）
+        {
+            let mut agents = state.agents.lock().unwrap();
+            agents.insert("fake-acp".to_string(), fake_agent("alive"));
+        }
+        let agent = state.get_active_agent().expect("active agent");
+        do_connect_and_replace(
+            &handles,
+            &runtime,
+            &window,
+            &agent,
+            None,
+            AgentLifecycleStatus::Reconnecting,
+            "reconnect",
+            false,
+            true,
+        )
+        .await
+        .expect("manual reconnect must succeed");
+
+        // 自动重连闭包（2s 退避后复查）发现 status!=Crashed → 提前放弃并释放标志
+        tokio::time::timeout(std::time::Duration::from_secs(10), async {
+            loop {
+                if !runtime.auto_reconnect_active.load(Ordering::Acquire) { break; }
+                tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+            }
+        })
+        .await
+        .expect("auto-reconnect flag must release after manual reconnect");
+        assert_eq!(runtime.client_generation.load(Ordering::Acquire), 1, "manual reconnect must bump generation");
     }
 
     /// fake ACP：initialize 后主动发 request_permission（id 5），随后把 stdin 收到的
