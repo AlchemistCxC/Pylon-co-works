@@ -80,11 +80,19 @@
 }
 
 .term-tool { min-width:0; padding:2px 0; position:relative; }
-/* 连续 ToolCard 竖线相连 — 从上一个 tool 的标志物延伸到本 tool 标志物
-   颜色由 --tool-conn 驱动（none=transparent / fixed / follow） */
+/* 连续 ToolCard 竖线相连 — 从上一个 tool 指示器中心延伸到本 tool 指示器中心。
+   全部用 em + 布局 gap 参数化：字号/行高/指示器变化时线自动跟随，不再固定像素。
+   颜色由 --tool-conn 驱动（none=transparent / fixed / follow）。
+   --conn-gap：不同 message layout 的行间距（claude = 1em，其余 0）。 */
 .term-row-tool + .term-row-tool .term-tool::before {
-  content:''; position:absolute; left:3px; top:-8px; height:14px;
+  content:''; position:absolute;
+  left: calc(0.5em - 1px); /* 指示器字符中心（宽 1em） */
+  top: calc(-1 * var(--chat-line-height,1.4) * 1em / 2 - 2px - var(--conn-gap, 0px));
+  height: calc(var(--chat-line-height,1.4) * 1em + 4px + var(--conn-gap, 0px));
   width:2px; background:var(--tool-conn, transparent); pointer-events:none;
+}
+.app[data-message-layout="claude"] .term-row-tool + .term-row-tool .term-tool::before {
+  --conn-gap: 1em;
 }
 .term-tool-head { width:100%; min-width:0; padding:0; border:0; background:transparent; color:inherit; font:inherit; text-align:left; cursor:pointer; font-size:inherit; line-height:inherit; display:flex; align-items:baseline; }
 .term-tool-head:hover { opacity:0.8; }
