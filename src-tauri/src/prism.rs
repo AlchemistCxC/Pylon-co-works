@@ -73,7 +73,10 @@ impl PrismClient {
             .ok()
             .filter(|token| !token.trim().is_empty());
         Ok(Self {
+            // 审查修复：禁重定向——本地 Prism 被攻陷/返回 3xx 时不得把请求（写接口带
+            // Bearer）转发到外网 host。
             client: Client::builder()
+                .redirect(reqwest::redirect::Policy::none())
                 .connect_timeout(Duration::from_secs(5))
                 .timeout(Duration::from_secs(30))
                 .build()
@@ -124,7 +127,9 @@ impl PrismClient {
     }
 
     fn endpoint(&self, path: &str) -> Result<Url, String> {
-        if !path.starts_with('/') || path.contains("..") || path.contains('\\') {
+        // 审查修复：拒绝 `//host` 形态（RFC 3986 network-path reference 会经
+        // Url::join 覆盖 authority → SSRF 潜伏洞）；`..`/`\` 仍拒绝。
+        if !path.starts_with('/') || path.starts_with("//") || path.contains("..") || path.contains('\\') {
             return Err("非法 Prism API 路径".to_string());
         }
         self.base_url.join(path)
@@ -290,6 +295,8 @@ mod tests {
         assert!(client.endpoint("/health").is_ok());
         assert!(client.endpoint("/../etc/passwd").is_err());
         assert!(client.endpoint("http://evil.invalid/").is_err());
+        // 审查修复回归：//host 形态不得覆盖 authority（SSRF）
+        assert!(client.endpoint("//evil.invalid/").is_err());
     }
 
     #[test]

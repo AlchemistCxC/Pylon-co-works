@@ -59,8 +59,10 @@ fn default_enabled() -> bool { true }
 pub fn validate_and_serialize(input: Option<Vec<McpServerConfig>>) -> Result<Vec<Value>, String> {
     let servers = input.unwrap_or_default();
     if servers.len() > MAX_SERVERS { return Err(format!("too many MCP servers: maximum is {MAX_SERVERS}")); }
+    // 审查修复：去重只针对启用中的 server——禁用冲突 server 应作为"排除"途径
+    // （disabled 不进 wire，却参与去重会报 duplicate 且无解除途径）。
     let mut identities = std::collections::HashSet::new();
-    for server in &servers {
+    for server in servers.iter().filter(|server| server.enabled && !server.disabled) {
         // 核验修复：同一 server 内 id 与 name 相同不算重复（只防跨 server 撞 identity）。
         let mut local = std::collections::HashSet::new();
         for identity in [server.id.as_deref(), server.name.as_deref()].into_iter().flatten() {
@@ -209,6 +211,26 @@ mod tests {
         server.id = Some("demo".into());
         server.name = Some("demo".into());
         assert!(validate_and_serialize(Some(vec![server])).is_ok(), "同 server id==name 不算重复");
+    }
+
+    #[test]
+    fn disabled_server_does_not_participate_in_dedup() {
+        // 审查修复：禁用冲突 server 可作为"排除"途径（disabled 不进 wire 也不参与去重）
+        let mut first = stdio(true);
+        first.id = Some("shared".into());
+        first.name = None;
+        let mut second = stdio(false); // disabled
+        second.id = Some("shared".into());
+        second.name = None;
+        assert!(validate_and_serialize(Some(vec![first, second])).is_ok(), "disabled 不参与去重");
+        // 两个启用中的冲突仍拒绝
+        let mut first = stdio(true);
+        first.id = Some("shared".into());
+        first.name = None;
+        let mut second = stdio(true);
+        second.id = Some("shared".into());
+        second.name = None;
+        assert!(validate_and_serialize(Some(vec![first, second])).is_err());
     }
 
     #[test]

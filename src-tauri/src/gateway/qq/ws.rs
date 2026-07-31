@@ -158,6 +158,12 @@ pub async fn run_ws_loop(http_client: Client, auth: Arc<QqAuth>, adapter: Arc<Qq
             }
             Err(e) => {
                 let duration = connect_time.elapsed().as_secs_f64();
+                // 审查修复：连接存活足够久（>60s）说明本次是健康断线（服务端维护等），
+                // 重置退避/快速断开计数——否则任何正常断开都会累积，100 次后永久死亡。
+                if duration > 60.0 {
+                    backoff_idx = 0;
+                    quick_count = 0;
+                }
                 if duration < QUICK_DISCONNECT_THRESHOLD {
                     quick_count += 1;
                     if quick_count >= MAX_QUICK_DISCONNECTS {
@@ -348,7 +354,12 @@ async fn run_connection(
                                 }
                             }
                         }
-                        Message::Close(_) => return Err("服务器关闭".into()),
+                        // 审查修复：提取 Close frame 的 code——否则 4008 限流/4006 清
+                        // session/4001 致命 code 全被吞掉，重连策略全部失效。
+                        Message::Close(frame) => {
+                            let code: u16 = frame.map(|f| f.code.into()).unwrap_or(1000);
+                            return Err(format!("服务器关闭 code={code}"));
+                        }
                         Message::Ping(data) => { let _ = write.send(Message::Pong(data)).await; }
                         _ => {}
                     },

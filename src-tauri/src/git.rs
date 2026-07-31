@@ -65,19 +65,37 @@ fn is_relative_safe_path(path: &str) -> bool {
 }
 
 async fn run_git(cwd: &Path, args: &[&str]) -> Result<(String, String), String> {
+    // 审查修复：超时必须 kill 子进程（Command::output 默认 kill_on_drop=false，
+    // 超时后 git 会滞留并占用 index 锁）。
     let mut cmd = Command::new("git");
     cmd.args(args)
         .current_dir(cwd)
         .stdin(Stdio::null())
         .stdout(Stdio::piped())
         .stderr(Stdio::piped());
-    let output = tokio::time::timeout(GIT_TIMEOUT, cmd.output())
-        .await
-        .map_err(|_| "git 命令超时".to_string())?
-        .map_err(|error| format!("git 不可用: {error}"))?;
-    let stdout = String::from_utf8_lossy(&output.stdout).into_owned();
-    let stderr = String::from_utf8_lossy(&output.stderr).into_owned();
-    if !output.status.success() {
+    let mut child = cmd.spawn().map_err(|error| format!("git 不可用: {error}"))?;
+    // 审查修复：超时必须 kill 子进程（Command::output 默认 kill_on_drop=false，
+    // 超时后 git 会滞留并占用 index 锁）。wait() 借 &mut self，超时分支可安全 kill。
+    let status = match tokio::time::timeout(GIT_TIMEOUT, child.wait()).await {
+        Ok(status) => status.map_err(|error| format!("git 命令失败: {error}"))?,
+        Err(_) => {
+            let _ = child.kill().await;
+            let _ = child.wait().await;
+            return Err("git 命令超时".to_string());
+        }
+    };
+    // wait 已返回：stdout/stderr 管道已 EOF，读剩余输出（各自带超时防挂死）
+    let mut stdout_bytes = Vec::new();
+    let mut stderr_bytes = Vec::new();
+    if let Some(mut out) = child.stdout.take() {
+        let _ = tokio::time::timeout(Duration::from_secs(5), tokio::io::AsyncReadExt::read_to_end(&mut out, &mut stdout_bytes)).await;
+    }
+    if let Some(mut err) = child.stderr.take() {
+        let _ = tokio::time::timeout(Duration::from_secs(5), tokio::io::AsyncReadExt::read_to_end(&mut err, &mut stderr_bytes)).await;
+    }
+    let stdout = String::from_utf8_lossy(&stdout_bytes).into_owned();
+    let stderr = String::from_utf8_lossy(&stderr_bytes).into_owned();
+    if !status.success() {
         let detail = if stderr.trim().is_empty() { stdout.trim() } else { stderr.trim() };
         let detail = detail.chars().take(512).collect::<String>();
         return Err(if is_git_error(&stderr) {
@@ -89,9 +107,11 @@ async fn run_git(cwd: &Path, args: &[&str]) -> Result<(String, String), String> 
     Ok((stdout, stderr))
 }
 
-/// 工作区变更列表：`git status --porcelain=v1`（行格式 `XY path`，重命名 `-> new`）。
+/// 工作区变更列表：`git -c core.quotePath=false status --porcelain=v1`
+/// （行格式 `XY path`，重命名 `-> new`；审查修复：quotePath=false 防止中文
+/// 文件名被 C 转义成 `"\346\265\213..."` 失真）。
 pub async fn git_status(cwd: &Path) -> Result<Vec<GitStatusEntry>, String> {
-    let (stdout, _) = run_git(cwd, &["status", "--porcelain=v1"]).await?;
+    let (stdout, _) = run_git(cwd, &["-c", "core.quotePath=false", "status", "--porcelain=v1"]).await?;
     let mut entries = Vec::new();
     for line in stdout.lines() {
         if entries.len() >= MAX_STATUS_ENTRIES {
@@ -138,10 +158,20 @@ pub async fn git_diff(cwd: &Path, path: Option<&str>, staged: bool) -> Result<St
 }
 
 /// 提交历史：`git log --format=%H%x00%an%x00%at%x00%s`（NUL 分隔字段，行分隔 commit）。
+/// 审查修复：limit=0 返回空列表（原实现 max(1) 会错误返回 1 条）。
 pub async fn git_history(cwd: &Path, limit: Option<usize>) -> Result<Vec<GitCommit>, String> {
-    let limit = limit.unwrap_or(50).min(MAX_HISTORY).max(1);
+    let limit = match limit {
+        Some(0) => return Ok(Vec::new()),
+        Some(n) => n.min(MAX_HISTORY),
+        None => 50,
+    };
     let format = "%H%x00%an%x00%at%x00%s";
-    let (stdout, _) = run_git(cwd, &["log", &format!("-n{limit}"), &format!("--format={format}")]).await?;
+    let (stdout, _) = match run_git(cwd, &["log", &format!("-n{limit}"), &format!("--format={format}")]).await {
+        Ok(result) => result,
+        // 空仓库（无任何 commit）视为空历史，而非错误
+        Err(error) if error.contains("does not have any commits") => return Ok(Vec::new()),
+        Err(error) => return Err(error),
+    };
     let mut commits = Vec::new();
     for line in stdout.lines() {
         let mut fields = line.split('\0');
@@ -280,6 +310,17 @@ mod tests {
         assert_eq!(commits[0].author, "Pylon Test");
         assert!(!commits[0].hash.is_empty());
         assert!(!commits[0].date.is_empty());
+    }
+
+    #[tokio::test]
+    async fn history_zero_limit_returns_empty() {
+        // 审查修复回归：limit=0 返回空，而非 1 条
+        let repo = temp_repo("limit-zero");
+        let commits = git_history(&repo.0, Some(0)).await.expect("zero limit must succeed");
+        assert!(commits.is_empty(), "limit=0 必须返回空列表");
+        // None → 默认 50（空仓库也为空但成功）
+        let commits = git_history(&repo.0, None).await.expect("default limit must succeed");
+        assert!(commits.is_empty());
     }
 
     #[tokio::test]

@@ -26,6 +26,9 @@ const SEND_QUEUE_CAP: usize = 256;
 const SEND_RETRY_ATTEMPTS: u32 = 3;
 /// rate limited 等待（QQ 实证：60s 后重试一次）。
 const RATE_LIMIT_DELAY_SECS: u64 = 60;
+/// send_loop 空闲超时（审查修复：无消息时任务自行退出并从 senders map 移除，
+/// 防止 chat_id 无界增长导致常驻任务泄漏）。
+const SEND_LOOP_IDLE_SECS: u64 = 300;
 
 /// 发送失败分类（B10 收尾，参考 Hermes 发送重试/死目标模式）。
 #[derive(Debug)]
@@ -68,8 +71,8 @@ pub struct QqAdapter {
     auth: Arc<QqAuth>,
     /// QQ API 基地址（测试可注入桩地址；生产 = types::API_BASE）。
     base_url: String,
-    /// chat_id → 发送队列发送端（后台 send_loop 串行消费）。
-    senders: Mutex<HashMap<String, mpsc::Sender<QueuedSend>>>,
+    /// chat_id → 发送队列发送端（后台 send_loop 串行消费；空闲超时自回收）。
+    senders: Arc<Mutex<HashMap<String, mpsc::Sender<QueuedSend>>>>,
     /// chat_id → 死目标原因（forbidden/not_found 标记；成功发送自愈清除）。
     dead_targets: Arc<Mutex<HashMap<String, String>>>,
 }
@@ -94,7 +97,7 @@ impl QqAdapter {
             http,
             auth,
             base_url: types::API_BASE.to_string(),
-            senders: Mutex::new(HashMap::new()),
+            senders: Arc::new(Mutex::new(HashMap::new())),
             dead_targets: Arc::new(Mutex::new(HashMap::new())),
         })
     }
@@ -108,7 +111,7 @@ impl QqAdapter {
             http,
             auth,
             base_url,
-            senders: Mutex::new(HashMap::new()),
+            senders: Arc::new(Mutex::new(HashMap::new())),
             dead_targets: Arc::new(Mutex::new(HashMap::new())),
         })
     }
@@ -189,13 +192,15 @@ impl PlatformAdapter for QqAdapter {
             }
         };
         if let Some(rx) = rx {
-            // 首个入队者：启动本 chat 的后台发送循环
+            // 首个入队者：启动本 chat 的后台发送循环（空闲超时自回收并移除 map 条目）
             let http = self.http.clone();
             let auth = self.auth.clone();
             let dead = self.dead_targets.clone();
             let base_url = self.base_url.clone();
+            let senders = self.senders.clone();
+            let chat_id_owned = chat_id.to_string();
             runtime.spawn(async move {
-                Self::send_loop(http, auth, dead, base_url, rx).await;
+                Self::send_loop(http, auth, dead, base_url, senders, chat_id_owned, rx).await;
             });
         }
         let message = QueuedSend {
@@ -219,14 +224,26 @@ impl PlatformAdapter for QqAdapter {
 impl QqAdapter {
     /// per-chat 后台发送循环：串行消费队列（节流）→ token → 发送（瞬时 3 次退避重试 /
     /// rate 60s 一次 / 死目标标记短路）。成功发送清除死目标标记（自愈）。
+    /// 审查修复：空闲 SEND_LOOP_IDLE_SECS 无消息则退出并从 senders map 移除
+    /// （防 chat_id 无界增长 + 常驻任务泄漏）；token 瞬时失败退避重试不丢消息。
     async fn send_loop(
         http: Client,
         auth: Arc<QqAuth>,
         dead_targets: Arc<Mutex<HashMap<String, String>>>,
         base_url: String,
+        senders: Arc<Mutex<HashMap<String, mpsc::Sender<QueuedSend>>>>,
+        chat_id: String,
         mut rx: mpsc::Receiver<QueuedSend>,
     ) {
-        while let Some(msg) = rx.recv().await {
+        let idle = std::time::Duration::from_secs(SEND_LOOP_IDLE_SECS);
+        loop {
+            let msg = tokio::select! {
+                msg = rx.recv() => match msg {
+                    Some(msg) => msg,
+                    None => break,
+                },
+                _ = tokio::time::sleep(idle) => break,
+            };
             if dead_targets.lock().ok().map(|d| d.contains_key(&msg.chat_id)).unwrap_or(false) {
                 log::warn!("QQ send_loop 跳过死目标 {}", msg.chat_id);
                 continue;
@@ -234,8 +251,15 @@ impl QqAdapter {
             let token = match auth.get_token().await {
                 Ok(token) => token,
                 Err(error) => {
-                    log::warn!("QQ deliver token 获取失败: {error}");
-                    continue;
+                    log::warn!("QQ deliver token 获取失败（{chat_id}），1s 后重试: {error}");
+                    tokio::time::sleep(std::time::Duration::from_secs(1)).await;
+                    match auth.get_token().await {
+                        Ok(token) => token,
+                        Err(error) => {
+                            log::warn!("QQ deliver token 重试仍失败，放弃该消息: {error}");
+                            continue;
+                        }
+                    }
                 }
             };
             match Self::send_with_retry(&http, &base_url, &token, &msg).await {
@@ -267,6 +291,8 @@ impl QqAdapter {
                 }
             }
         }
+        senders.lock().ok().map(|mut map| map.remove(&chat_id));
+        log::info!("QQ send_loop 退出（{chat_id}，空闲或关闭）");
     }
 
     /// 发送 + 瞬时失败指数退避重试（SEND_RETRY_ATTEMPTS 次：1s/2s/4s）。

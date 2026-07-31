@@ -215,6 +215,15 @@ impl AppStateHandles {
                 }
             }
             apply_client_replacement_sessions(&mut sessions, keep_sessions, new_generation);
+            // 审查修复：客户端替换（switch/重连/自动重连）后旧进程的挂起权限请求
+            // 全部失效——清空，避免 300s 超时把 reject 写到新进程（且可能撞新 id）。
+            if let Ok(mut pending) = runtime.pending_permissions.lock() {
+                let stale = pending.len();
+                pending.clear();
+                if stale > 0 {
+                    log::warn!("客户端替换：清理 {stale} 个挂起的权限请求（旧进程已失效）");
+                }
+            }
             log::info!("ACP client activated; generation is now {}", new_generation);
             old_acp
         };
@@ -891,13 +900,18 @@ fn start_notification_dispatcher<R: tauri::Runtime>(handles: &AppStateHandles, r
                 if variant == Some("agent_message_chunk") {
                     let _ = pet.lock().map(|mut p| pet::on_first_chunk(&mut p));
                     // B11.2：流式收集当前回合回复文本（完成持久化 POST /persist 用）；
-                    // 上限 64KB 截断防超长回复撑爆内存。
+                    // 上限 64KB 截断防超长回复撑爆内存。审查修复：必须落在字符边界
+                    // （String::truncate 在非边界处 panic，会 poison sessions 锁）。
                     if let Ok(mut items) = sessions.lock() {
                         if let Some(session) = items.get_mut(&source) {
                             if let Some(text) = update.get("content").and_then(|c| c.get("text")).and_then(|v| v.as_str()) {
                                 session.last_response_text.push_str(text);
                                 if session.last_response_text.len() > 64 * 1024 {
-                                    session.last_response_text.truncate(64 * 1024);
+                                    let mut end = 64 * 1024;
+                                    while end > 0 && !session.last_response_text.is_char_boundary(end) {
+                                        end -= 1;
+                                    }
+                                    session.last_response_text.truncate(end);
                                 }
                             }
                         }
@@ -2811,13 +2825,34 @@ async fn check_session_expiry(state: &AppState) {
                 continue;
             };
             log::info!("会话过期 ({source}): {reason}");
-            // close ACP session（失败不阻断本地清理）
+            // 审查修复：删除前按 (peri_id, generation) 复核映射——close RPC 期间若
+            // 同 source 新建了会话，不得把新映射误删（旧映射已被 new_session 替换）。
+            let removed = {
+                let generation = runtime.client_generation.load(Ordering::Acquire);
+                let mut sessions = match runtime.sessions.lock() {
+                    Ok(guard) => guard,
+                    Err(poisoned) => poisoned.into_inner(),
+                };
+                if sessions.get(&source).map(|session| {
+                    session_mapping_matches(&session.peri_id, session.generation, &peri_id, generation)
+                }) == Some(true) {
+                    sessions.remove(&source).is_some()
+                } else {
+                    false
+                }
+            };
+            if !removed {
+                // 映射已变更（新会话已接管 source）——不 close、不通知
+                continue;
+            }
+            // close ACP session（失败不阻断本地清理；旧 peri_id 独立于映射）
             if let Ok(close_params) = acp::session_close_params(&peri_id) {
                 if let Err(error) = state.acp_rpc(&runtime, acp::METHOD_SESSION_CLOSE, close_params).await {
                     log::warn!("close expired session {peri_id}: {error}");
                 }
             }
-            let _ = runtime.sessions.lock().map(|mut sessions| sessions.remove(&source));
+            // 审查修复：应答该 session 挂起的权限请求为 Cancelled（协议要求）
+            respond_pending_permissions_cancelled(&runtime, &peri_id).await;
             // 平台通知（用户可见重置原因）
             if let Some(adapter) = state.gateway.adapter("qq") {
                 let _ = adapter.deliver_text(&source, &format!("[会话已重置] {reason}"));
@@ -3723,13 +3758,19 @@ fn persist_mcp_if_possible<R: tauri::Runtime>(app: &tauri::AppHandle<R>, servers
             return;
         }
     }
-    let temp = path.with_extension("json.tmp");
+    // 审查修复：唯一 temp（pid+时间戳）——并发 set_mcp_servers 不得互相截断写坏
+    let unique = path.with_file_name(format!(
+        ".{}.{}.{}.tmp",
+        path.file_name().and_then(|n| n.to_str()).unwrap_or("mcp"),
+        std::process::id(),
+        std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_nanos()).unwrap_or(0),
+    ));
     let result = (|| {
-        std::fs::write(&temp, json.as_bytes()).map_err(|error| format!("write temporary MCP config failed: {error}"))?;
-        std::fs::rename(&temp, &path).map_err(|error| format!("commit MCP config failed: {error}"))
+        std::fs::write(&unique, json.as_bytes()).map_err(|error| format!("write temporary MCP config failed: {error}"))?;
+        std::fs::rename(&unique, &path).map_err(|error| format!("commit MCP config failed: {error}"))
     })();
     if let Err(error) = result {
-        let _ = std::fs::remove_file(&temp);
+        let _ = std::fs::remove_file(&unique);
         log::warn!("persist MCP config failed: {error}");
     }
 }

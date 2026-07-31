@@ -133,7 +133,8 @@ pub(crate) fn sanitize_message(message: String) -> String {
     let lower = message.to_ascii_lowercase();
     let contains_sensitive_payload = [
         "password=", "secret=", "token=", "api_key=", "apikey=", "authorization:",
-        "prompt:", "persona:",
+        "prompt:", "persona:", "bearer ", "x-api-key:", "client_secret=", "access_token=",
+        "token\":", "secret\":", "apikey\":", "api_key\":", "password\":",
     ].iter().any(|marker| lower.contains(marker));
     if contains_sensitive_payload {
         return REDACTED.to_string();
@@ -150,12 +151,28 @@ fn is_sensitive_key(key: &str) -> bool {
         || key.contains("api_key")
 }
 
+/// 字段值内容脱敏：值中若出现 secret 形态（Bearer/JSON token 等），整体替换。
+/// 审查修复：原实现对非敏感 key 下的敏感值原样透传（`{"data": "api_key=sk-..."}`）。
+fn sanitize_value_content(value: &str) -> String {
+    let lower = value.to_ascii_lowercase();
+    let leaked = [
+        "bearer ", "authorization:", "x-api-key:", "api_key=", "apikey=",
+        "password=", "secret=", "token=", "client_secret=", "access_token=",
+        "token\":", "secret\":", "apikey\":", "api_key\":", "password\":",
+    ].iter().any(|marker| lower.contains(marker));
+    if leaked {
+        REDACTED.to_string()
+    } else {
+        value.to_string()
+    }
+}
+
 fn sanitize_value(key: &str, value: Value) -> Value {
     if is_sensitive_key(key) { return Value::String(REDACTED.to_string()); }
     match value {
         Value::Object(object) => Value::Object(object.into_iter().map(|(key, value)| (key.clone(), sanitize_value(&key, value))).collect()),
         Value::Array(values) => Value::Array(values.into_iter().map(|value| sanitize_value("value", value)).collect()),
-        Value::String(value) => Value::String(truncate(value, MAX_MESSAGE_BYTES)),
+        Value::String(value) => Value::String(truncate(sanitize_value_content(&value), MAX_MESSAGE_BYTES)),
         other => other,
     }
 }
@@ -220,6 +237,38 @@ mod tests {
             let entry = hub.push("t1".into(), "error", "runtime", None, message, Map::new());
             assert_eq!(entry.message, REDACTED);
         }
+    }
+
+    #[test]
+    fn redacts_bearer_and_json_token_shapes() {
+        // 审查修复回归：无前缀 Bearer / JSON token 形态也必须脱敏
+        let hub = RuntimeLogHub::default();
+        for message in [
+            "Bearer sk-abc123",
+            "x-api-key: 12345",
+            r#"{"token":"sk-abc"}"#,
+            r#"{"data":{"apiKey":"sk-abc"}}"#,
+            "client_secret=abc",
+            "access_token=abc",
+        ] {
+            let entry = hub.push("t1".into(), "error", "runtime", None, message, Map::new());
+            assert_eq!(entry.message, REDACTED, "message {message:?} 必须脱敏");
+        }
+    }
+
+    #[test]
+    fn redacts_sensitive_content_inside_field_values() {
+        // 审查修复回归：非敏感 key 下的敏感值内容也必须脱敏
+        let hub = RuntimeLogHub::default();
+        let entry = hub.push("t1".into(), "warn", "acp", None, "safe message", fields(&[
+            ("detail", json!("api_key=sk-123")),
+            ("items", json!(["Bearer secret-token", "safe"])),
+            ("ok", json!("fine")),
+        ]));
+        assert_eq!(entry.fields["detail"], json!(REDACTED), "值内 api_key= 必须脱敏");
+        assert_eq!(entry.fields["items"][0], json!(REDACTED), "数组内 Bearer 必须脱敏");
+        assert_eq!(entry.fields["items"][1], json!("safe"));
+        assert_eq!(entry.fields["ok"], json!("fine"));
     }
 
     #[test]

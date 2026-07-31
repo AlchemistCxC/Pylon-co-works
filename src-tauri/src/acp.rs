@@ -479,6 +479,10 @@ impl AcpClient {
 
     /// Prepare a prompt request without writing to stdin.
     pub fn prepare_prompt(&self, session_id: &str, prompt: Vec<serde_json::Value>) -> Result<(u64, String, oneshot::Receiver<RawMessage>), String> {
+        // 审查修复：与 prepare_rpc 一致，死亡连接立即拒绝（否则挂满 300s 假超时）
+        if self.is_crashed() {
+            return Err("ACP connection closed".to_string());
+        }
         // 先构造参数（可能因 block 格式失败），成功后再注册 pending，避免泄漏。
         let params = session_prompt_params(session_id, prompt)?;
         let id = self.next_id.fetch_add(1, Ordering::Relaxed);
@@ -732,6 +736,10 @@ impl AcpClient {
         cwd: &str,
         mcp_servers: Vec<serde_json::Value>,
     ) -> Result<(serde_json::Value, Vec<serde_json::Value>), String> {
+        // 审查修复：与 prepare_rpc 一致，死亡连接立即拒绝
+        if self.is_crashed() {
+            return Err("ACP connection closed".to_string());
+        }
         let mut events = self.rx.resubscribe();
         let id = self.next_id.fetch_add(1, Ordering::Relaxed);
         let (tx, _rx) = oneshot::channel();
