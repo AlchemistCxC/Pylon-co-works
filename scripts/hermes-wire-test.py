@@ -48,6 +48,18 @@ print("result:", json.dumps(resp.get("result"), ensure_ascii=False)[:300])
 session_id = resp.get("result", {}).get("sessionId")
 print("sessionId:", session_id)
 
+print("\n== session/new (带 MCP stdio 配置, 官方格式) ==")
+resp = rpc("session/new", {"cwd": "G:/Project/prism-desktop", "mcpServers": [
+    {"name": "demo-mcp", "command": "demo-mcp", "args": ["--stdio"], "env": []},
+    {"type": "http", "name": "web-mcp", "url": "http://127.0.0.1:3000/mcp", "headers": []},
+]})
+print("error:", resp.get("error"))
+print("result:", json.dumps(resp.get("result"), ensure_ascii=False)[:200])
+mcp_session_id = resp.get("result", {}).get("sessionId")
+if mcp_session_id:
+    rpc("session/close", {"sessionId": mcp_session_id})
+    print("mcp session closed")
+
 print("\n== session/set_model (Hermes 切 model 途径) ==")
 resp = rpc("session/set_model", {"sessionId": session_id, "modelId": "deepseek-v4-flash"})
 print("result:", json.dumps(resp.get("result"), ensure_ascii=False)[:200])
