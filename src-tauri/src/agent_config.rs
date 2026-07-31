@@ -1,4 +1,4 @@
-use std::collections::HashMap;
+﻿use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use serde::Deserialize;
 
@@ -12,6 +12,7 @@ pub struct AgentDef {
     pub name: String,
     pub transport: String,
     pub exe: String,
+    /// 进程级原始参数（如入口子命令 `acp`），原样拼在 exe 后。
     #[serde(default)]
     pub args: Vec<String>,
     #[serde(default)]
@@ -25,9 +26,27 @@ pub struct AgentDef {
     /// agents.yaml 对 Hermes 类 agent 配置 `set_model_api: true`。
     #[serde(default)]
     pub set_model_api: bool,
+    /// 结构化 acp 参数：初始模型，展开为 `--model <value>` 追加在 args 后。
+    #[serde(default)]
+    pub model: Option<String>,
+    /// 结构化 acp 参数：附加任意参数（如 `--verbose`），追加在 args 后。
+    #[serde(default)]
+    pub acp_args: Vec<String>,
 }
 
 impl AgentDef {
+    /// 完整命令行参数：args（含入口子命令）→ `--model <value>`（可选）→ acp_args。
+    /// args 与结构化字段并存时结构化参数在后（多数 CLI 后者覆盖前者）。
+    pub fn command_args(&self) -> Vec<String> {
+        let mut all = self.args.clone();
+        if let Some(model) = &self.model {
+            all.push("--model".to_string());
+            all.push(model.clone());
+        }
+        all.extend(self.acp_args.iter().cloned());
+        all
+    }
+
     pub fn resolve_paths(&self, base_dir: &Path) -> Self {
         let mut resolved = self.clone();
         let exe = Path::new(&resolved.exe);
@@ -130,7 +149,9 @@ mod tests {
             env: HashMap::new(),
             default,
             set_model_api: false,
-        }
+        model: None,
+        acp_args: Vec::new(),
+}
     }
 
     #[test]
@@ -196,5 +217,43 @@ mod tests {
         std::fs::remove_file(&path).ok();
         assert!(agents["hermes"].set_model_api, "配置了 set_model_api: true 必须生效");
         assert!(!agents["peri"].set_model_api, "缺省必须为 false（官方 set_config_option 路径）");
+    }
+
+    #[test]
+    fn parses_structured_acp_fields() {
+        let path = std::env::temp_dir().join(format!("pylon-agents-acp-{}.yaml", std::process::id()));
+        std::fs::write(
+            &path,
+            "agents:\n  peri:\n    name: Peri\n    transport: subprocess\n    exe: peri\n    args: [\"acp\"]\n    model: deepseek-v4-flash\n    acp_args: [\"--verbose\"]\n",
+        )
+        .expect("write temp agent config");
+        let agents = load_from_path(&path).expect("load runtime agent config");
+        std::fs::remove_file(&path).ok();
+        let peri = &agents["peri"];
+        assert_eq!(peri.model.as_deref(), Some("deepseek-v4-flash"));
+        assert_eq!(peri.acp_args, vec!["--verbose".to_string()]);
+    }
+
+    #[test]
+    fn command_args_merge_structured_fields_after_args() {
+        let mut def = agent(false);
+        def.args = vec!["acp".into(), "--config".into(), "a.yaml".into()];
+        def.model = Some("deepseek-v4-flash".into());
+        def.acp_args = vec!["--verbose".into(), "--timeout".into(), "120".into()];
+        assert_eq!(
+            def.command_args(),
+            vec!["acp", "--config", "a.yaml", "--model", "deepseek-v4-flash", "--verbose", "--timeout", "120"]
+        );
+        // 纯 args（无结构化字段）：原样返回（向后兼容）
+        let mut plain = agent(false);
+        plain.args = vec!["acp".into()];
+        assert_eq!(plain.command_args(), vec!["acp"]);
+        // model 后出现 → 覆盖 args 里手工写的 --model
+        let mut overridden = agent(false);
+        overridden.args = vec!["acp".into(), "--model".into(), "old".into()];
+        overridden.model = Some("new".into());
+        let merged = overridden.command_args();
+        assert_eq!(merged[merged.len() - 2], "--model");
+        assert_eq!(merged[merged.len() - 1], "new");
     }
 }
