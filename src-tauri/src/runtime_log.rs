@@ -80,7 +80,7 @@ impl RuntimeLogHub {
             message: sanitize_message(message.into()),
             fields: sanitize_fields(fields),
         };
-        let mut entries = self.entries.lock().expect("runtime log mutex poisoned");
+        let mut entries = self.entries.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
         entries.push_back(entry.clone());
         while entries.len() > self.capacity {
             entries.pop_front();
@@ -96,7 +96,7 @@ impl RuntimeLogHub {
     pub fn list(&self, query: &RuntimeLogQuery) -> Vec<RuntimeLogEntry> {
         let search = query.search.as_deref().map(str::to_lowercase);
         let limit = query.limit.unwrap_or(self.capacity).min(self.capacity);
-        let entries = self.entries.lock().expect("runtime log mutex poisoned");
+        let entries = self.entries.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
         entries.iter().rev()
             .filter(|entry| query.level.as_deref().is_none_or(|value| entry.level == value))
             .filter(|entry| query.source.as_deref().is_none_or(|value| entry.source == value))
@@ -111,7 +111,7 @@ impl RuntimeLogHub {
     }
 
     pub fn clear(&self) {
-        self.entries.lock().expect("runtime log mutex poisoned").clear();
+        self.entries.lock().unwrap_or_else(|poisoned| poisoned.into_inner()).clear();
     }
 }
 
