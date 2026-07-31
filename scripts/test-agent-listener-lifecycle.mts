@@ -16,7 +16,7 @@ assert.match(lifecycle, /if \(!disposed\) useStore\.getState\(\)\.setAgents\(/, 
 assert.match(lifecycle, /listen<AgentStatusPayload>\('peri:agent-status'/, '必须注册 peri:agent-status listener')
 assert.match(lifecycle, /const state = useStore\.getState\(\)/, 'listener 必须从最新 store state 读取 activeAgent')
 assert.match(lifecycle, /normalizeAgentStatus\(event\.payload, state\.activeAgent\)/, 'listener 必须按当前 activeAgent 规范化 payload')
-assert.match(lifecycle, /state\.setAgentStatus\(status\.agent \|\| state\.activeAgent, status\)/, 'listener 必须按 payload.agent 路由状态，缺省回退 activeAgent')
+assert.match(lifecycle, /state\.setAgentStatus\(status\.agentId \|\| status\.agent \|\| state\.activeAgent, status\)/, 'listener 必须按 payload.agentId 路由状态，缺省回退 agent/activeAgent')
 assert.match(lifecycle, /return \(\) => \{ disposed = true; unlisten\.then\(stop => stop\(\)\) \}/, '卸载时必须先设置 disposed 并清理 resolved unlisten')
 
 assert.match(store, /agentStatuses: Record<string, import\('\.\/components\/settings\/agentTypes'\)\.AgentStatus>/)
@@ -38,8 +38,8 @@ await pendingLoad
 assert.equal(writes, 0, '已卸载组件不得回写 list_agents 异步结果')
 
 // The routing contract is also checked with the real dependency-free normalizer.
-const status = normalizeAgentStatus({ agent: 'prism', status: 'connected' }, 'peri')
-const routedAgent = status.agent || 'peri'
+const status = normalizeAgentStatus({ agentId: 'prism', agent: 'Prism', status: 'connected' }, 'peri')
+const routedAgent = status.agentId || status.agent || 'peri'
 assert.equal(routedAgent, 'prism')
 assert.equal(status.status, 'connected')
 const fallback = normalizeAgentStatus({ status: 'reconnecting' }, 'peri')

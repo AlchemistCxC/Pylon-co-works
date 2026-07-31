@@ -76,7 +76,7 @@ export default function App() {
     const unlisten = listen<AgentStatusPayload>('peri:agent-status', event => {
       const state = useStore.getState()
       const status = normalizeAgentStatus(event.payload, state.activeAgent)
-      state.setAgentStatus(status.agent || state.activeAgent, status)
+      state.setAgentStatus(status.agentId || status.agent || state.activeAgent, status)
     })
     return () => { disposed = true; unlisten.then(stop => stop()) }
   }, [])

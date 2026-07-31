@@ -5,9 +5,21 @@ import { beginReconnect, completeReconnect, failReconnect, normalizeAgentList } 
 
 assert.equal(normalizeAgentStatus({ crashed: true }, 'peri').status, 'crashed')
 assert.equal(normalizeAgentStatus({ status: 'reconnecting' }, 'peri').status, 'reconnecting')
+assert.equal(normalizeAgentStatus({ status: 'connecting' }, 'peri').status, 'connecting')
+assert.equal(normalizeAgentStatus({ status: 'inactive' }, 'peri').status, 'inactive')
 assert.equal(normalizeAgentStatus({ status: 'unknown' }, 'peri').status, 'error')
 assert.match(normalizeAgentStatus({ status: 'unknown' }, 'peri').recentError || '', /未知 Agent 状态/)
 assert.equal(normalizeAgentStatus({ status: 'connected', crashed: true }, 'peri').status, 'connected')
+
+const enriched = normalizeAgentStatus({ agentId: 'prism', agent: 'Prism', status: 'connected', generation: 7, lastConnectedAt: 1234 }, 'peri')
+assert.equal(enriched.agentId, 'prism')
+assert.equal(enriched.agent, 'Prism')
+assert.equal(enriched.generation, 7)
+assert.equal(enriched.lastConnectedAt, 1234)
+
+assert.equal(statusLabel('connecting'), '连接中')
+assert.equal(statusLabel('inactive'), '未激活')
+assert.equal(statusLabel('reconnecting'), '重连中')
 
 const initial = { status: 'connected' as const, pending: false }
 assert.equal(beginReconnect(initial).status, 'reconnecting')
