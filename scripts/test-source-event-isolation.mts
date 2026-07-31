@@ -10,7 +10,7 @@ assert.equal(isRenderedSource('source-a', 'source-b'), false)
 assert.equal(isRenderedSource('source-a', null), false)
 assert.deepEqual(removeGeneratingSource(['source-a', 'source-b'], 'source-deleted'), ['source-a', 'source-b'])
 
-const source = readFileSync(new URL('../src/components/chat/ChatView.tsx', import.meta.url), 'utf8')
+const source = readFileSync(new URL('../src/components/chat/chatEventController.ts', import.meta.url), 'utf8')
 assert.match(source, /const isActiveSource = \(source: string\) => isKnownSource/, '事件入口必须校验 source 是否仍属于现有 session')
 assert.match(source, /if \(!isActiveSource\(source\)\) return/, '已删除 session 的旧 source 事件必须被丢弃')
 

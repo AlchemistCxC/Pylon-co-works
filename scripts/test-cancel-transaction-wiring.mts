@@ -3,6 +3,7 @@ import { readFileSync } from 'node:fs'
 
 const inputBar = readFileSync(new URL('../src/components/chat/InputBar.tsx', import.meta.url), 'utf8')
 const chatView = readFileSync(new URL('../src/components/chat/ChatView.tsx', import.meta.url), 'utf8')
+const controller = readFileSync(new URL('../src/components/chat/chatEventController.ts', import.meta.url), 'utf8')
 const cancelState = readFileSync(new URL('../src/components/chat/cancelState.ts', import.meta.url), 'utf8')
 
 assert.match(inputBar, /from '\.\/cancelState'/, 'InputBar 必须接入取消状态模块')
@@ -15,7 +16,7 @@ assert.match(inputBar, /cancel\(\)/, '键盘和按钮必须复用 cancel 入口'
 assert.match(chatView, /from '\.\/cancelState'/, 'ChatView 必须接入取消状态模块')
 assert.match(chatView, /const begun = beginCancel\(source, currentCancelState\)/, 'Footer 停止入口必须使用取消状态机')
 assert.match(chatView, /resolveCancelCommand\(source, cancelStateRef\.current\[source\]/, 'ChatView 不得把 command resolve 当作完成事件')
-assert.match(chatView, /event\.payload\.cancelled === true/, 'ChatView 必须识别 cancelled 终止事件')
+assert.match(controller, /event\.payload\.cancelled === true/, '事件控制器必须识别 cancelled 终止事件')
 assert.match(chatView, /applyCancelEvent\(/, 'ChatView 必须由事件收敛取消状态')
 assert.doesNotMatch(chatView, /invoke\('cancel_prompt',[\s\S]{0,500}setSummary\([\s\S]{0,200}reason: 'cancelled'/, 'cancel_prompt resolve 不得直接伪造 cancelled summary')
 

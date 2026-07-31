@@ -34,15 +34,21 @@ const replayIds = [replay.next('user'), replay.next('msg'), replay.next('thought
 const liveIds = [replay.next('user'), replay.next('msg'), replay.next('err')]
 assert.equal(new Set([...replayIds, ...liveIds]).size, 7, 'replay/live 共享 allocator 不得冲突')
 
-// 接线断言：ChatView 不再用 Date.now() 构造消息 key；tool_call 仍用事件稳定 ID
+// 接线断言：ChatView 与事件控制器不再用 Date.now() 构造消息 key；tool_call 仍用事件稳定 ID
 const chatView = readFileSync(new URL('../src/components/chat/ChatView.tsx', import.meta.url), 'utf8')
-assert.equal(chatView.includes("createMessageIdAllocator"), true, 'ChatView 必须接入 allocator')
+const controller = readFileSync(new URL('../src/components/chat/chatEventController.ts', import.meta.url), 'utf8')
+assert.equal(controller.includes("createMessageIdAllocator()"), true, '事件控制器必须拥有自己的 allocator')
+assert.equal(chatView.includes("createMessageIdAllocator"), false, 'ChatView 不再直接持有 allocator')
 assert.equal(chatView.includes("'msg-' + Date.now()"), false)
 assert.equal(chatView.includes("'user-' + Date.now()"), false)
 assert.equal(chatView.includes("'thought-' + Date.now()"), false)
 assert.equal(chatView.includes("'err-' + Date.now()"), false)
-assert.equal(chatView.includes('`missing-${prev.length}`'), false, '缺失 toolCallId 不得再用数组 index 兜底')
-assert.match(chatView, /'tool-' \+ \(toolId \|\| messageIdsRef\.current\.next\('tool-missing'\)\)/)
+assert.equal(controller.includes("'msg-' + Date.now()"), false)
+assert.equal(controller.includes("'user-' + Date.now()"), false)
+assert.equal(controller.includes("'thought-' + Date.now()"), false)
+assert.equal(controller.includes("'err-' + Date.now()"), false)
+assert.equal(controller.includes('`missing-${prev.length}`'), false, '缺失 toolCallId 不得再用数组 index 兜底')
+assert.match(controller, /'tool-' \+ \(toolId \|\| messageIds\.next\('tool-missing'\)\)/)
 assert.match(chatView, /key=\{renderMessage\.message\.id\}/, 'React key 仍使用 message.id 单一真值')
 
 console.log('messageIdAllocator 回归测试通过')

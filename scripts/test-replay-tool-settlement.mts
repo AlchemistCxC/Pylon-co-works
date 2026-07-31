@@ -5,7 +5,7 @@ import {
   settleReplayToolMessages,
 } from '../src/components/chat/replayState.ts'
 
-const source = readFileSync(new URL('../src/components/chat/ChatView.tsx', import.meta.url), 'utf8')
+const source = readFileSync(new URL('../src/components/chat/chatEventController.ts', import.meta.url), 'utf8')
 
 assert.equal(resolveTerminationScope(true), 'replay')
 assert.equal(resolveTerminationScope(false), 'live')
