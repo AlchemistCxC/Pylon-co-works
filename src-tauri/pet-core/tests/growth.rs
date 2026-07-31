@@ -95,7 +95,8 @@ fn agent_connect_and_crash_move_mood_and_stats() {
 
     pet.apply(AiEvent::AgentCrashed, 2);
     assert_eq!(pet.mood, "error");
-    assert_eq!(pet.happiness, happiness_before.saturating_sub(2));
+    // v2：连接时 happy +1，崩溃 -2
+    assert_eq!(pet.happiness, happiness_before.saturating_sub(1));
 }
 
 #[test]
@@ -105,4 +106,87 @@ fn token_delta_awards_step_xp_like_full_usage() {
     pet.apply(AiEvent::TokenDelta { amount: 5_000 }, 2);
     assert_eq!(pet.stats.tokens_total, 13_000);
     assert_eq!(pet.xp, 2);
+}
+
+// ── M1：需求衰减引擎 / 数值系统基础 / 迁移 ──
+
+#[test]
+fn needs_decay_over_time_and_clamp_at_zero() {
+    let mut pet = PetState::new_at(1); // last_tick=1ms，首次 apply 即开始结算
+    pet.apply(AiEvent::Visit, 60_000); // dt≈1 分钟，几乎无衰减
+    assert_eq!(pet.hunger, 80);
+    assert_eq!(pet.energy, 80); // 同一天 visit 无 +20
+
+    pet.apply(AiEvent::Visit, 3 * 3_600_000); // 距上次 3h
+    assert!(pet.hunger < 80, "hunger 必须随时间衰减");
+    assert!(pet.loneliness > 0, "loneliness 必须随时间上涨");
+}
+
+#[test]
+fn offline_decay_is_capped_at_24h() {
+    let mut pet = PetState::new_at(1);
+    pet.apply(AiEvent::Visit, 48 * 3_600_000); // 离线 48h：只按 24h 结算
+    assert_eq!(pet.hunger, 0, "24h 后 hunger 归零");
+    assert!(pet.bond <= 12, "饥饿惩罚封顶（24h×0.5=12）");
+    assert_eq!(pet.loneliness, 100, "loneliness 封顶 100");
+}
+
+#[test]
+fn feeding_restores_hunger_and_play_restores_fun() {
+    let mut pet = PetState::new_at(1);
+    pet.apply(AiEvent::Feed, 1);
+    assert_eq!(pet.hunger, 100);
+    pet.apply(AiEvent::Feed, 2); // 30s 冷却内：bond 不加但 hunger 仍恢复
+    assert_eq!(pet.hunger, 100);
+
+    let mut pet = PetState::new_at(1);
+    pet.apply(AiEvent::Play, 1);
+    assert_eq!(pet.fun, 95, "play 恢复 fun +25");
+    assert_eq!(pet.loneliness, 0, "play 大幅降低孤独");
+    assert_eq!(pet.energy, 70, "play 消耗 energy -10");
+}
+
+#[test]
+fn greedy_pet_hungers_faster() {
+    let mut pet = PetState::new_at(1);
+    pet.traits.greed = 100;
+    pet.apply(AiEvent::Visit, 3_600_000); // 1h
+    let greedy_hunger = pet.hunger;
+    let mut normal = PetState::new_at(1);
+    normal.apply(AiEvent::Visit, 3_600_000);
+    assert!(greedy_hunger < normal.hunger, "贪吃 trait 必须加速饥饿");
+}
+
+#[test]
+fn v1_snapshot_roundtrips_with_new_fields_defaulted() {
+    // 模拟 v1 存档（无 v2 字段）：serde default 补齐后 restore 无损
+    let legacy = serde_json::json!({
+        "name": "微栖",
+        "mood": "idle",
+        "happiness": 65,
+        "energy": 80,
+        "xp": 0,
+        "bond": 0,
+        "born_at_ms": 0,
+        "last_seen_day": 0,
+        "first_chunk_at_ms": null,
+        "stats": {},
+        "memories": []
+    });
+    let saved: PetState = serde_json::from_value(legacy).expect("v1 存档必须可反序列化");
+    let restored = PetState::restore(saved, 86_400_000);
+    assert_eq!(restored.hunger, 80, "v2 缺省 hunger=80");
+    assert_eq!(restored.fun, 70);
+    assert_eq!(restored.traits, pylon_pet_core::PetTraits::default());
+    assert_eq!(restored.machine, pylon_pet_core::PetMachineState::default());
+    assert_eq!(restored.name, "微栖");
+}
+
+#[test]
+fn recent_events_window_is_ring_buffered() {
+    let mut pet = PetState::new_at(0);
+    for _ in 0..20 {
+        pet.apply(AiEvent::PromptCompleted, 1);
+    }
+    assert!(pet.recent_events.len() <= 8, "感知窗口环形 8");
 }
