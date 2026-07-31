@@ -1343,7 +1343,10 @@ for line in sys.stdin:
             env,
             default: false,
             set_model_api: false,
-        }
+        model: None,
+        acp_args: Vec::new(),
+acp: None,
+}
     }
 
     async fn build_state(initial_acp: AcpClient, agent: AgentDef) -> AppState {
@@ -1539,7 +1542,10 @@ for line in sys.stdin:
             env,
             default: false,
             set_model_api: false,
-        };
+        model: None,
+        acp_args: Vec::new(),
+acp: None,
+};
         let initial_acp = AcpClient::connect_with_logs(&agent, None)
             .await
             .expect("fake ACP must initialize");
@@ -1641,7 +1647,10 @@ for line in sys.stdin:
             env,
             default: false,
             set_model_api: false,
-        }
+        model: None,
+        acp_args: Vec::new(),
+acp: None,
+}
     }
 
     const STUB_RESPONSE_BODY: &str = r#"{"context":"注入上下文","activated":["uid-1"],"source":"vein"}"#;
@@ -2084,7 +2093,10 @@ for line in sys.stdin:
             env: std::collections::HashMap::new(),
             default: false,
             set_model_api: false,
-        }
+        model: None,
+        acp_args: Vec::new(),
+acp: None,
+}
     }
 
     /// 模块内 state 构造（兄弟模块的 build_state_with 不可访问）。

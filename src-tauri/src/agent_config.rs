@@ -32,6 +32,18 @@ pub struct AgentDef {
     /// 结构化 acp 参数：附加任意参数（如 `--verbose`），追加在 args 后。
     #[serde(default)]
     pub acp_args: Vec<String>,
+    /// per-agent ACP 协议行为配置（差异适配字典外置；缺省 = 官方 schema 行为）。
+    #[serde(default)]
+    pub acp: Option<AcpConfig>,
+}
+
+/// per-agent ACP 协议行为配置（agents.yaml `acp:` 段）。
+#[derive(Debug, Clone, Default, Deserialize)]
+pub struct AcpConfig {
+    /// initialize 请求的 clientCapabilities 覆盖（任意 JSON，原样进 wire）。
+    /// None = 统一默认（tokenStats + _meta.peri.*，Hermes 忽略无害）。
+    #[serde(default)]
+    pub initialize_caps: Option<serde_json::Value>,
 }
 
 impl AgentDef {
@@ -151,6 +163,7 @@ mod tests {
             set_model_api: false,
         model: None,
         acp_args: Vec::new(),
+acp: None,
 }
     }
 
@@ -255,5 +268,23 @@ mod tests {
         let merged = overridden.command_args();
         assert_eq!(merged[merged.len() - 2], "--model");
         assert_eq!(merged[merged.len() - 1], "new");
+    }
+
+    #[test]
+    fn parses_acp_protocol_config_section() {
+        let path = std::env::temp_dir().join(format!("pylon-agents-acpcfg-{}.yaml", std::process::id()));
+        std::fs::write(
+            &path,
+            "agents:\n  custom:\n    name: Custom\n    transport: subprocess\n    exe: agent\n    acp:\n      initialize_caps:\n        fs: {}\n        auth: {}\n        _meta:\n          \"peri.skillNames\": true\n",
+        )
+        .expect("write temp agent config");
+        let agents = load_from_path(&path).expect("load runtime agent config");
+        std::fs::remove_file(&path).ok();
+        let caps = agents["custom"].acp.as_ref().expect("acp 段必须解析").initialize_caps.as_ref().expect("initialize_caps 必须解析");
+        assert_eq!(caps["fs"], serde_json::json!({}));
+        assert_eq!(caps["_meta"]["peri.skillNames"], serde_json::json!(true));
+        // 缺省：无 acp 段
+        let plain = agent(false);
+        assert!(plain.acp.is_none());
     }
 }

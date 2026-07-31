@@ -692,17 +692,23 @@ impl AcpClient {
                     child, write_tx, next_id: AtomicU64::new(1), pending, rx,
                     crashed,
                 };
-                // Initialize
-                client.call_async(METHOD_INITIALIZE, serde_json::json!({
-                    "protocolVersion": 1,
-                    "clientCapabilities": {
+                // Initialize——clientCapabilities 支持 per-agent 覆盖（差异字典外置，
+                // agents.yaml `acp.initialize_caps`）；缺省 = 统一默认（tokenStats +
+                // _meta.peri.*，Hermes 忽略无害）。差异适配表见 acp.rs 头部注释与手册 §3.3。
+                let capabilities = agent.acp
+                    .as_ref()
+                    .and_then(|acp| acp.initialize_caps.clone())
+                    .unwrap_or_else(|| serde_json::json!({
                         "tokenStats": true,
                         "_meta": {
                             "peri.tokenStats": true,
                             "peri.skillNames": true,
                             "peri.replay": true
                         }
-                    },
+                    }));
+                client.call_async(METHOD_INITIALIZE, serde_json::json!({
+                    "protocolVersion": 1,
+                    "clientCapabilities": capabilities,
                     "clientInfo": {"name": "Pylon", "version": "0.1.0"}
                 })).await?;
                 Ok(client)
@@ -1031,6 +1037,7 @@ for line in sys.stdin:
             set_model_api: false,
         model: None,
         acp_args: Vec::new(),
+acp: None,
 };
         let mut client = AcpClient::connect_with_logs(&agent, None)
             .await
@@ -1077,6 +1084,7 @@ sys.exit(0)
             set_model_api: false,
         model: None,
         acp_args: Vec::new(),
+acp: None,
 };
         let client = AcpClient::connect_with_logs(&agent, None).await;
         assert!(client.is_err(), "initialize must fail when fake ACP closes without a response");
@@ -1111,6 +1119,7 @@ for line in sys.stdin:
             set_model_api: false,
         model: None,
         acp_args: Vec::new(),
+acp: None,
 };
         let client = AcpClient::connect_with_logs(&agent, None)
             .await
@@ -1152,6 +1161,7 @@ for line in sys.stdin:
             set_model_api: false,
         model: None,
         acp_args: Vec::new(),
+acp: None,
 };
         let client = AcpClient::connect_with_logs(&agent, None)
             .await
@@ -1193,6 +1203,7 @@ sys.exit(0)
             set_model_api: false,
         model: None,
         acp_args: Vec::new(),
+acp: None,
 };
         let client = AcpClient::connect_with_logs(&agent, None)
             .await
@@ -1240,6 +1251,7 @@ for line in sys.stdin:
             set_model_api: false,
         model: None,
         acp_args: Vec::new(),
+acp: None,
 };
         let client = AcpClient::connect_with_logs(&agent, None)
             .await
@@ -1268,6 +1280,7 @@ for line in sys.stdin:
             set_model_api: false,
         model: None,
         acp_args: Vec::new(),
+acp: None,
 };
         let logs = crate::runtime_log::RuntimeLogHub::new(16);
         let client = AcpClient::connect_with_logs(&agent, Some(logs.clone()))
@@ -1315,6 +1328,7 @@ for line in sys.stdin:
             set_model_api: false,
         model: None,
         acp_args: Vec::new(),
+acp: None,
 };
         let client = AcpClient::connect_with_logs(&agent, None)
             .await
@@ -1356,6 +1370,7 @@ for line in sys.stdin:
             set_model_api: false,
         model: None,
         acp_args: Vec::new(),
+acp: None,
 };
         let client = AcpClient::connect_with_logs(&agent, None)
             .await
@@ -1416,6 +1431,7 @@ for line in sys.stdin:
             set_model_api: false,
         model: None,
         acp_args: Vec::new(),
+acp: None,
 };
         let client = AcpClient::connect_with_logs(&agent, None)
             .await
@@ -1456,6 +1472,7 @@ for line in sys.stdin:
             set_model_api: false,
         model: None,
         acp_args: Vec::new(),
+acp: None,
 };
         let client = AcpClient::connect_with_logs(&agent, None)
             .await
@@ -1509,6 +1526,7 @@ for line in sys.stdin:
             set_model_api: false,
         model: None,
         acp_args: Vec::new(),
+acp: None,
 };
         let mut client = AcpClient::connect_with_logs(&agent, None)
             .await
@@ -1528,6 +1546,95 @@ for line in sys.stdin:
         assert_eq!(response["result"]["outcome"]["outcome"], "selected");
         assert_eq!(response["result"]["outcome"]["optionId"], "allow_once");
         client.kill().expect("cleanup");
+    }
+
+    #[tokio::test]
+    async fn fake_acp_initialize_uses_configured_client_capabilities() {
+        let trace_path = std::env::temp_dir().join(format!("pylon-acp-caps-{}.jsonl", std::process::id()));
+        let script = r#"import json,sys
+trace=open(sys.argv[1],'w',encoding='utf-8')
+for line in sys.stdin:
+    request=json.loads(line)
+    trace.write(json.dumps(request)+'\n')
+    trace.flush()
+    print(json.dumps({'jsonrpc':'2.0','id':request.get('id'),'result':{}}), flush=True)
+"#;
+        let agent = crate::agent_config::AgentDef {
+            name: "fake-acp-caps".to_string(),
+            transport: "subprocess".to_string(),
+            exe: "python".to_string(),
+            args: vec!["-u".to_string(), "-c".to_string(), script.to_string(), trace_path.to_string_lossy().into_owned()],
+            cwd: None,
+            env: HashMap::new(),
+            default: false,
+            set_model_api: false,
+            model: None,
+            acp_args: Vec::new(),
+            acp: Some(crate::agent_config::AcpConfig {
+                initialize_caps: Some(serde_json::json!({
+                    "fs": {},
+                    "auth": {},
+                    "_meta": {"peri.skillNames": true}
+                })),
+            }),
+        };
+        let mut client = AcpClient::connect_with_logs(&agent, None)
+            .await
+            .expect("fake ACP with configured caps must initialize");
+        client.kill().expect("cleanup");
+        tokio::time::sleep(std::time::Duration::from_millis(200)).await;
+        let trace = std::fs::read_to_string(&trace_path).expect("read trace");
+        std::fs::remove_file(&trace_path).ok();
+        let request: serde_json::Value = trace.lines()
+            .map(|line| serde_json::from_str(line).expect("trace line"))
+            .find(|value: &serde_json::Value| {
+                value.get("method").and_then(|m| m.as_str()) == Some(METHOD_INITIALIZE)
+            })
+            .expect("initialize must be traced");
+        assert_eq!(request["params"]["clientCapabilities"]["fs"], serde_json::json!({}));
+        assert_eq!(request["params"]["clientCapabilities"]["_meta"]["peri.skillNames"], serde_json::json!(true));
+        assert!(request["params"]["clientCapabilities"].get("tokenStats").is_none(), "覆盖后不再带统一默认 caps");
+    }
+
+    #[tokio::test]
+    async fn fake_acp_initialize_defaults_to_unified_capabilities() {
+        let trace_path = std::env::temp_dir().join(format!("pylon-acp-caps-default-{}.jsonl", std::process::id()));
+        let script = r#"import json,sys
+trace=open(sys.argv[1],'w',encoding='utf-8')
+for line in sys.stdin:
+    request=json.loads(line)
+    trace.write(json.dumps(request)+'\n')
+    trace.flush()
+    print(json.dumps({'jsonrpc':'2.0','id':request.get('id'),'result':{}}), flush=True)
+"#;
+        let agent = crate::agent_config::AgentDef {
+            name: "fake-acp-caps-default".to_string(),
+            transport: "subprocess".to_string(),
+            exe: "python".to_string(),
+            args: vec!["-u".to_string(), "-c".to_string(), script.to_string(), trace_path.to_string_lossy().into_owned()],
+            cwd: None,
+            env: HashMap::new(),
+            default: false,
+            set_model_api: false,
+            model: None,
+            acp_args: Vec::new(),
+            acp: None,
+        };
+        let mut client = AcpClient::connect_with_logs(&agent, None)
+            .await
+            .expect("fake ACP with default caps must initialize");
+        client.kill().expect("cleanup");
+        tokio::time::sleep(std::time::Duration::from_millis(200)).await;
+        let trace = std::fs::read_to_string(&trace_path).expect("read trace");
+        std::fs::remove_file(&trace_path).ok();
+        let request: serde_json::Value = trace.lines()
+            .map(|line| serde_json::from_str(line).expect("trace line"))
+            .find(|value: &serde_json::Value| {
+                value.get("method").and_then(|m| m.as_str()) == Some(METHOD_INITIALIZE)
+            })
+            .expect("initialize must be traced");
+        assert_eq!(request["params"]["clientCapabilities"]["tokenStats"], serde_json::json!(true));
+        assert_eq!(request["params"]["clientCapabilities"]["_meta"]["peri.replay"], serde_json::json!(true));
     }
 
     fn process_exists(pid: u32) -> bool {
