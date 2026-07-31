@@ -1490,4 +1490,162 @@ npm run test:frontend
 git diff --check
 ```
 
-本文档只保留未完成问题和当前施工边界；已完成问题不再重复进入路线，纯机械/架构整理统一归档在 11.1。
+---
+
+## 13. Claude Code 优秀设计参考库
+
+> 本库条目均对照 `references/claude-code-sourcemap/restored-src/src/` 源码核实（路径+符号+摘要），
+> 并标注与我们仓库的对应现状。类型：`机械变换`（搬代码/纯函数，不改行为）/ `工程设计`（架构/抽象）/ `UI 设计`（可见变化）。
+> 难度：1 低 / 2 中 / 3 高。排序：类型优先，难度其次，同类型按建议施工顺序。
+
+### 13.1 机械变换（低风险，可直接开工）
+
+**D1. 消息静态化判定 `shouldRenderStatically`** — 机械变换 · 难度 1 · 建议顺序 1
+
+- CC 源码：`components/Messages.tsx:779` `shouldRenderStatically(message, streamingToolUseIDs, inProgressToolUseIDs, siblingToolUseIDs, screen, lookups)`；消费点 `components/MessageRow.tsx:155`
+- 摘要：transcript 模式恒 static；user/assistant 无 tool 关联恒 static；有 tool 关联时——streaming/in-progress/未决 PostToolUse hook 保持动态，兄弟 tool 全部 resolved 才 static；system `api_error` 恒动态（出现下一条非错误消息即隐藏）；collapsed_read_search 在 prompt 模式恒动态（防回合间闪烁）
+- 我们现状：`src/components/chat/ChatView.tsx` MessageRow 每条消息都走 `motion.div` initial/animate（ChatView.tsx:672-684），无静态化
+- 任务分解：① 纯函数 `isMessageStatic(renderMessage, messageLookups)` ② MessageRow 静态时跳过 motion 动画 ③ 专项测试
+- 收益：长会话历史消息零动画开销
+
+**D2. `useMinDisplayTime` 最小展示时长** — 机械变换 · 难度 1 · 顺序 2
+
+- CC 源码：`hooks/useMinDisplayTime.ts`（30 行全文）
+- 摘要：每个值至少展示 minMs；与 debounce（等安静）/throttle（限速）不同——elapsed >= minMs 直接更新，否则 setTimeout 补足剩余时长。用途示例：`components/messages/CollapsedReadSearchContent.tsx` 中 `ln(incomingHint, MIN_HINT_DISPLAY_MS)`
+- 我们现状：GenerationFooter stalled 文案（'等待响应'/'仍在等待后端响应'）切换无最小展示时长，快速 token 恢复时文案可能闪跳
+- 任务分解：① 移植 hook（TS 直译）② 接入 stalled 文案切换 ③ 测试
+
+**D3. grapheme 宽度截断（Intl.Segmenter）** — 机械变换 · 难度 1 · 顺序 3
+
+- CC 源码：`utils/truncate.ts:63` `truncateToWidth`/`:108` `truncateToWidthNoEllipsis`/`:82` `truncateStartToWidth`/`:16` `truncatePathMiddle`/`:160` `wrapText`；segmenter 懒初始化在 `utils/intl.ts`（`getGraphemeSegmenter`）
+- 摘要：按**显示列宽**而非字符数截断，用 Intl.Segmenter grapheme 边界迭代，不拆坏 emoji/CJK 组合字符
+- 我们现状：`src/components/chat/toolPresentationModel.ts:117` `truncateToolSummary(summary, maxLength = 60)` 按字符数 slice，会拆 emoji
+- 任务分解：① 移植 truncate.ts + intl.ts 懒初始化 ② `truncateToolSummary` 换用 ③ 测试（emoji/CJK/组合字符）
+
+**D4. `useMemoryUsage` 模式：normal 态不 setState** — 机械变换 · 难度 1 · 顺序 4
+
+- CC 源码：`hooks/useMemoryUsage.ts`（`setMemoryUsage(prev => ...)`，`status === 'normal'` 时返回 prev 即 null，不触发重渲染）
+- 摘要：10s 轮询但状态无变化时不产生新 state，整树零重渲染
+- 我们现状：`src/components/PetCompanion.tsx` 每 12s `get_pet` 后无条件 setState（F8.2 的前置小步）
+- 任务分解：① Pet 轮询回调比对上次数据，无变化返回旧引用 ② 测试
+
+**D5. `useBlink` 共享动画时钟 + 失焦暂停** — 机械变换 · 难度 1 · 顺序 5
+
+- CC 源码：`hooks/useBlink.ts`（`useAnimationFrame(enabled && focused ? intervalMs : null)`，所有实例从同一 time 派生 blink 状态 → 同步闪烁；失焦恒亮）
+- 摘要：动画实例共享时钟，多元素同步；不可见/失焦时暂停帧循环
+- 我们现状：无共享时钟动画（搜索命中高亮、闪烁类 UI 均为一次性）
+- 任务分解：① 移植 useAnimationFrame + useBlink ② 可先无消费点（备用件）
+
+**D6. 隐藏 Unicode 净化** — 机械变换 · 难度 2 · 顺序 6
+
+- CC 源码：`utils/sanitization.ts:25` `partiallySanitizeUnicode`（NFKC 迭代归一化 + `\p{Cf}\p{Co}\p{Cn}` 显式危险范围剥离双保险）、`:71` `recursivelySanitizeUnicode`（递归对象/数组）
+- 摘要：输入侧防隐藏控制字符/组合字符注入（prompt 注入与显示欺骗）
+- 我们现状：`src/components/chat/htmlSanitizer.ts` 只有输出侧（dangerouslySetInnerHTML）；输入侧无净化
+- 任务分解：① 移植纯函数 ② 接入用户输入/命令参数进入发送前净化 ③ 测试
+
+### 13.2 工程设计（抽象/架构，中等风险）
+
+**E1. 工具渲染注册表（每 Tool 五态渲染函数）** — 工程设计 · 难度 2 · 顺序 1
+
+- CC 源码：`Tool.ts:577-636`（`renderToolResultMessage?`/`renderToolUseMessage`/`renderToolUseProgressMessage?` 为 Tool 接口可选字段）；每工具目录一个 `UI.tsx` 导出纯渲染函数（`BashTool/UI.tsx`：verbose/condensed 双态、长命令截断、sed 伪装文件编辑、ctrl+b 后台化提示；`FileWriteTool/UI.tsx` 同理）；消费点 `components/messages/AssistantToolUseMessage.tsx`（三态 queued/in-progress/resolved + `inputSchema.safeParse` 防御）
+- 摘要：工具渲染按 toolName 注册，UI 与工具逻辑同目录但文件分离，渲染函数纯导出
+- 我们现状：`src/components/chat/ChatView.tsx` ToolCard 单组件由 ToolPresentationModel 驱动（已归一化，但无按工具注册）
+- 任务分解：① 定义 `ToolRendererRegistry`（name → 渲染函数）② ToolCard 内部改为查表，默认回退现有 model 渲染 ③ 逐个工具（Bash/Read/Grep/Edit/Write）注册 ④ 测试
+- 不做：不改变 ToolCard 布局与折叠语义
+
+**E2. keybindings action 注册表 + context 优先级** — 工程设计 · 难度 2 · 顺序 2
+
+- CC 源码：`keybindings/useKeybinding.ts:33`（action 字符串 + context + chord 序列 + `stopImmediatePropagation` 防冲突）；`keybindings/parser.ts`（ctrl/control/cmd/super 别名归一化）；`keybindings/defaultBindings.ts`（平台感知）；`keybindings/reservedShortcuts.ts`（锁定 ctrl+c/d 不可重绑）；`hooks/useCommandKeybindings.tsx`（`command:<name>` 绑定等价输入 `/name`）
+- 摘要：键位 = 配置驱动（action 字符串）而非散落硬编码；上下文栈解析优先级
+- 我们现状：`src/components/chat/InputBar.tsx` 键位散落硬编码（Ctrl+ArrowUp/ArrowDown/Shift+Tab/Esc/Ctrl+C）
+- 任务分解：① 抽出 `keybindingRegistry.ts`（action → handler，支持 context）② InputBar 现有键位迁移 ③ `command:` 映射到 commandRegistry ④ 测试（冲突/上下文）
+- 不做：不引入可配置键位 UI（仅内部注册表）
+
+**E3. FileReadCache mtime 失效缓存** — 工程设计 · 难度 2 · 顺序 3
+
+- CC 源码：`utils/fileReadCache.ts`（`FileReadCache` 单例；`fs.statSync` 每次比对 `mtimeMs`，脏则重读；`getCacheStats` 调试）
+- 摘要：读缓存以 mtime 为失效键，避免重复读大文件
+- 我们现状：右栏 `src/components/right-panel/workspaceApi.ts` 每次展开/读取都 `invoke('read_workspace_text')`
+- 任务分解：① 确认后端 `read_workspace_text` 返回 mtime（无则前端缓存最近读取，按 path+size 键）② 前端 LRU 缓存（~50 条）③ 测试
+- 阻塞：需核对后端 DTO（B2.2 范围）
+
+**E4. 原子写三件套（后端参考）** — 工程设计 · 难度 2 · 顺序 4
+
+- CC 源码：`utils/file.ts:362` `writeFileSyncAndFlush_DEPRECATED`（`${target}.tmp.${pid}.${Date.now()}` → `writeFileSync(flush: true)` → `renameSync` 原子覆盖；失败清 tmp 并降级非原子写；`O_EXCL('wx')` 锁另见 pidLock）
+- 摘要：崩溃安全写文件：临时文件 + flush + rename，防止半写文件
+- 我们现状：前端 localStorage 直写（sessionPersistence/sheetPersistence/theme）无此问题；`src-tauri` 侧会话/配置写文件可参考
+- 任务分解：作为后端 B 范围参考条目，前端不实施
+
+**E5. 工具组折叠 GroupedToolUseContent** — 工程设计 · 难度 3 · 顺序 5
+
+- CC 源码：`components/messages/GroupedToolUseContent.tsx`（同类工具多次调用聚合为组，结果按 tool_use_id 建 Map，`renderGroupedToolUse` 一次渲染）；配套 `CollapsedReadSearchContent.tsx`（Read/Search/Grep 折叠为一行，useRef 记 max count 防 debounce 抖动、elapsed>=2s 才显示耗时）
+- 摘要：连续同类工具折叠为组/一行，降低滚动噪音
+- 我们现状：无折叠；Raw Message[] 不允许 UI 层改动（只加显示层派生）
+- 任务分解：① 纯函数 `groupAdjacentTools(messages)`（不修改 Raw）② 折叠行渲染 + 展开 ③ 折叠状态按 source 隔离 ④ 测试
+- 约束：显示层聚合不进入持久化（对齐 5.1 契约）
+
+### 13.3 UI 设计（可见变化，需视觉验收）
+
+**U1. Byline 元信息行** — UI 设计 · 难度 1 · 顺序 1
+
+- CC 源码：`components/design-system/Byline.tsx:37`（自动过滤 null/undefined/false children，` · ` 分隔，inline 元信息）
+- 摘要：元信息拼接原语
+- 我们现状：`src/components/chat/ChatView.tsx` ToolCard/GenerationFooter 手写字符串拼接
+- 任务分解：① 小组件 ② ToolCard footer/GenerationFooter 替换 ③ 浏览器验收（暗色/窄宽）
+
+**U2. ProgressBar 八分块字符** — UI 设计 · 难度 1 · 顺序 2
+
+- CC 源码：`components/design-system/ProgressBar.tsx:26`（`BLOCKS = [' ','▏','▎','▍','▌','▋','▊','▉','█']`）
+- 摘要：字符级进度条的 8 分块精度
+- 我们现状：`src/components/ControlCenter.tsx` EkgWidget bar 已用 CSS 渐变实现同效果
+- 任务：可选（CSS 已覆盖），仅当需要行内字符进度时采用；低优先
+
+**U3. Dialog 确认/取消键位 + 二次确认** — UI 设计 · 难度 2 · 顺序 3
+
+- CC 源码：`components/design-system/Dialog.tsx`（`useKeybinding("confirm:no", onCancel)` Esc/n 取消；app:exit 二次确认 "Press X again to exit"；Byline 快捷键提示）
+- 摘要：对话框内置确认键位语义，破坏性动作二次确认
+- 我们现状：SessionSettings 关闭无确认；删除 Profile/清除会话无二次确认
+- 任务分解：① Dialog 键位语义组件 ② SessionSettings 关闭确认接入 ③ 浏览器验收（焦点/Esc）
+- 约束：不改变现有对话框布局，只加确认层
+
+**U4. Ratchet 棘轮 minHeight 防跳动** — UI 设计 · 难度 2 · 顺序 4
+
+- CC 源码：`components/design-system/Ratchet.tsx`（`useRef(maxHeight)` + `useLayoutEffect` 测量，只增不减，`Math.min(height, rows)` 上限，engaged 时施加 minHeight）
+- 摘要：流式内容容器高度只增不减，防 streaming/搜索高亮造成布局跳动
+- 我们现状：ChatView streaming 时消息区高度随文本增长自然跳动
+- 任务分解：① 移植 Ratchet（React DOM 版）② 仅 streaming 期间启用 ③ 浏览器验收
+- 风险：与 sticky 滚动/搜索定位的交互需测试（6.3 滚动规则）
+
+**U5. 错误消息分类渲染** — UI 设计 · 难度 2 · 顺序 5
+
+- CC 源码：`components/messages/AssistantTextMessage.tsx`（错误文案 9 类 sentinel 分类：rate-limit/API key/token revoked/超时等各走专属 UI，含 CtrlOToExpand 截断提示；分类逻辑在 services 层提取，组件只消费分类结果）
+- 摘要：错误不是统一红字，按类别给出可行动文案
+- 我们现状：`src/components/chat/ChatView.tsx` error/system 统一 `term-row-error` 红字（ChatView.tsx:690-692）
+- 任务分解：① 纯函数 `classifyErrorMessage(error)`（rate-limit/授权/超时/网络/通用）② 分类文案 ③ 接入 error 渲染分支 ④ 测试 + 浏览器验收
+- 约束：不改变消息持久化格式与事件语义
+
+### 13.4 协议/后端配合（中期，先核对 ACP）
+
+**P1. 系统提示词分节 memoize** — CC `constants/systemPromptSections.ts:20`（`systemPromptSection` 与 `DANGEROUS_uncachedSystemPromptSection`，cacheBreak 显式声明哪些节每轮重算）→ 后端 ACP 提示词构建参考
+**P2. git 三件套** — CC `utils/gitDiff.ts:148` `parseGitNumstat`（tab/二进制 '-'/文件名含 tab）、`:200` `parseGitDiff`（diff --git 切文件、hunk 正则、`''+line` 破 V8 sliced-string）、`:312` `isInTransientGitState`（fs.access 查 MERGE_HEAD/CHERRY_PICK_HEAD/REVERT_HEAD 不 spawn）；`utils/git/gitConfigParser.ts:36` `parseConfigString`（零依赖，引号/转义/内联注释对照 git config.c）→ F3 Git Sheet 解析与冲突状态检测直接移植
+**P3. task 增量输出 + 轮询 GC** — CC `utils/task/framework.ts`（`registerTask` 替换保留 UI 状态、`updateTaskState` 同引用跳过重渲染、`pollTasks` 1s + outputOffset 增量读取、终态 GC 驱逐）→ F8.3 Runs Sheet 参考模型
+**P4. Permission 7 步流水线** — CC `utils/permissions/permissions.ts` `hasPermissionsToUseToolInner`（rule→tool checkPermissions→safetyCheck→mode→alwaysAllow→passthrough→ask）+ `types/permissions.ts` allow/ask/deny 判别联合 → F8 施工卡落地时参考
+**P5. 主题预设目录化加载** — CC `outputStyles/loadOutputStylesDir.ts:26`（memoize + 目录扫描 .md → 样式名）→ 我们 `src/presets.ts` 硬编码数组可目录化；低优先
+**P6. 后台任务 stall watchdog** — CC `tasks/LocalShellTask/LocalShellTask.tsx`（45s 无输出增长 + 尾部匹配交互提示正则才通知）→ 与 F6 stalled 互补的后台任务通知模型
+
+### 13.5 施工优先级
+
+```text
+近期（A 类机械，可随时开工，互相独立）：
+  D1 消息静态化 → D2 useMinDisplayTime → D3 grapheme 截断 → D4 Pet normal 不 setState → D5 useBlink → D6 Unicode 净化
+中期（B 类工程设计，需小步拆）：
+  E1 工具渲染注册表 → E2 keybinding 注册表 → E3 FileReadCache（需后端 mtime）
+UI 验收型（与对应功能卡一起做）：
+  U1 Byline → U3 Dialog 确认 → U4 Ratchet → U5 错误分类
+协议/后端配合（等 B 编号或先核对 ACP）：
+  P1-P6
+```
+
+本文档只保留未完成问题和当前施工边界；已完成问题不再重复进入路线，纯机械/架构整理统一归档在 11.1；CC 可借鉴设计统一归档在本章参考库。
+
+---
