@@ -14,7 +14,7 @@ import { reportRuntimeError } from '../../runtimeError'
 import { Paperclip, ArrowUp, Square } from 'lucide-react'
 import type { AvailableCommand } from './acpTypes'
 import { resolveCliTextareaLayout, resolveDefaultTextareaHeight } from './inputOverflowState'
-import { resolveCommandSuggestions, filterCommandSuggestions, type CommandSuggestion } from './commandRegistry'
+import { resolveCommandSuggestions, filterCommandSuggestions, parseSlashCommand, type CommandSuggestion } from './commandRegistry'
 import './InputBar.css'
 
 interface Props { sessionId: string | null; split?: boolean; ariaDescribedBy?: string }
@@ -192,9 +192,12 @@ export default forwardRef<{ send: () => void; attachFile: () => void; cancel: ()
     if (!text || !sessionId) return
 
     if (isCmd && filtered.length > 0) {
-      const parts = text.split(/\s+/)
-      const rest = parts.slice(1).join(' ')
-      await execCommand(parts[0], rest)
+      const parsed = parseSlashCommand(text)
+      if (!parsed) {
+        setSendError('命令格式无效')
+        return
+      }
+      await execCommand(parsed.name, parsed.args)
       return
     }
 
