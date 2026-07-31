@@ -5,7 +5,7 @@
 
 .chat-view { flex:1; display:flex; flex-direction:column; min-height:0; overflow-y:auto; overflow-x:hidden; }
 
-.term { flex:1; min-width:0; padding:16px 24px; font-family:var(--chat-font,var(--mono)); font-size:var(--chat-font-size,15px); line-height:var(--chat-line-height,1.4); color:var(--chat-text,var(--text)); background:var(--chat-bg,transparent); background-image:var(--chat-bg-image,none); background-size:cover; background-position:center; opacity:var(--chat-transparency,1); backdrop-filter:blur(var(--chat-blur,0px)); text-rendering:optimizeLegibility; letter-spacing:0.01em; font-variant-ligatures:contextual; -webkit-font-smoothing:antialiased; font-feature-settings:'calt' 1,'liga' 1; }
+.term { flex:1; min-width:0; position:relative; padding:16px 24px; font-family:var(--chat-font,var(--mono)); font-size:var(--chat-font-size,15px); line-height:var(--chat-line-height,1.4); color:var(--chat-text,var(--text)); background:var(--chat-bg,transparent); background-image:var(--chat-bg-image,none); background-size:cover; background-position:center; opacity:var(--chat-transparency,1); backdrop-filter:blur(var(--chat-blur,0px)); text-rendering:optimizeLegibility; letter-spacing:0.01em; font-variant-ligatures:contextual; -webkit-font-smoothing:antialiased; font-feature-settings:'calt' 1,'liga' 1; }
 
 .term-user { padding:2px 0; }
 .term-user-prefix { color:var(--accent); font-weight:700; margin-right:6px; }
@@ -79,22 +79,15 @@
   margin-top:1em;
 }
 
-.term-tool { min-width:0; padding:2px 0; position:relative; z-index:0; }
-/* 连续 ToolCard 竖线相连 — 从上一个 tool 指示器中心延伸到本 tool 指示器中心。
-   全部用 em + 实测 gap（--conn-gap）参数化：字号/行高/指示器/body 展开时线自动贯通。
-   颜色由 --tool-conn 驱动（none=transparent / fixed / follow）。
-   层叠：.term-tool 为 stacking context(z-index:0)，线 z-index:1 位于 body 背景之上
-   （展开不被截断），.term-tool-head z-index:2 位于线之上（指示器覆盖线）。 */
-.term-row-tool + .term-row-tool .term-tool::before {
-  content:''; position:absolute;
-  left: calc(0.3em - 1px); /* 指示器字符中心（mono 下约 0.6em 宽） */
-  top: calc(-1 * var(--chat-line-height,1.4) * 1em / 2 - 2px - var(--conn-gap, 0px));
-  height: calc(var(--chat-line-height,1.4) * 1em + 4px + var(--conn-gap, 0px));
-  width:2px; background:var(--tool-conn, transparent); pointer-events:none;
-  z-index:1;
-}
-.app[data-message-layout="claude"] .term-row-tool + .term-row-tool .term-tool::before {
-  --conn-gap: 1em;
+.term-tool { min-width:0; padding:2px 0; position:relative; }
+/* 连续 Tool 连接线（真实 DOM 元素，ChatView 渲染 + 测量写 top/height）：
+   绝对定位相对 .term；left 对齐指示器中心（.term padding-left 24px + 字符中心 0.3em）。
+   层叠（z-index 参与最近 stacking context）：线(1) 在 body 背景之上（展开不被截断），
+   .term-tool-head(2) 在线之上（指示器覆盖线）。颜色由 ToolConnector 组件 inline 写入。 */
+.term-tool-connector {
+  position:absolute;
+  left:calc(24px + 0.3em - 1px);
+  width:2px; z-index:1; pointer-events:none;
 }
 .term-tool-head { position:relative; z-index:2; width:100%; min-width:0; padding:0; border:0; background:transparent; color:inherit; font:inherit; text-align:left; cursor:pointer; font-size:inherit; line-height:inherit; display:flex; align-items:baseline; }
 .term-tool-head:hover { opacity:0.8; }

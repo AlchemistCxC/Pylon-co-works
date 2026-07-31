@@ -21,7 +21,7 @@ import { measureRender, recordMeasuredAsync, recordRender } from './renderMetric
 import { prepareRenderableMessages, isMessageStatic } from './messagePipeline'
 import type { Message as PipelineMessage, RenderMessage } from './messageTypes'
 import { buildMessageLookups } from './messageLookups'
-import { getToolSummary } from './toolPresentation'
+import { getToolSummary, resolveConnectorColor } from './toolPresentation'
 import { buildToolPresentationModel, toolPresentationStatus, truncateToolSummary } from './toolPresentationModel'
 import { normalizeToolStatus, type ToolVisualState } from './toolStatus'
 import { isPlainTextContent } from './markdownFastPath'
@@ -312,9 +312,9 @@ const ChatView = React.memo(function ChatView({ sessionId }: Props) {
     }
   }, [])
 
-  // 连续 Tool 连接线：实测相邻 tool 行间距写入 --conn-gap。
-  // 注意：.chat-view 是 flex 固定高，行增删/body 展开只改变 scrollHeight（overflow），
-  // 观察容器自身 content-box 不会触发 ResizeObserver——必须观察行元素。
+  // 连续 Tool 连接线（真实 DOM 元素）：测量每对相邻 tool 行 head 中心间距，
+  // 写入 connector 的 top/height。.chat-view 是 flex 固定高，行展开只改 scrollHeight
+  // （overflow），观察容器 content-box 不触发 RO——必须观察行元素。
   // messages 变化时重跑绑定（新行挂上 RO）；body 展开/字号变化由行 RO 触发重测。
   useLayoutEffect(() => {
     const container = chatViewRef.current
@@ -322,12 +322,17 @@ const ChatView = React.memo(function ChatView({ sessionId }: Props) {
     let raf = 0
     const measure = () => {
       raf = 0
-      const rows = container.querySelectorAll<HTMLElement>('.term-row-tool')
-      for (let index = 1; index < rows.length; index += 1) {
-        const previous = rows[index - 1]!
-        const row = rows[index]!
-        const gap = row.offsetTop - (previous.offsetTop + previous.offsetHeight)
-        row.querySelector<HTMLElement>('.term-tool')?.style.setProperty('--conn-gap', `${Math.max(0, gap)}px`)
+      for (const connector of container.querySelectorAll<HTMLElement>('.term-tool-connector')) {
+        const previousRow = connector.previousElementSibling as HTMLElement | null
+        const row = connector.nextElementSibling as HTMLElement | null
+        const previousHead = previousRow?.querySelector<HTMLElement>('.term-tool-head')
+        const head = row?.querySelector<HTMLElement>('.term-tool-head')
+        if (!previousRow || !row || !previousHead || !head) continue
+        const headHeight = head.offsetHeight
+        const gap = row.offsetTop - (previousRow.offsetTop + previousRow.offsetHeight)
+        const previousCenter = previousRow.offsetTop + previousRow.offsetHeight - 2 - headHeight / 2
+        connector.style.top = `${previousCenter}px`
+        connector.style.height = `${gap + 4 + headHeight}px`
       }
     }
     const schedule = () => {
@@ -404,20 +409,29 @@ const ChatView = React.memo(function ChatView({ sessionId }: Props) {
         <AnimatePresence initial={false}>
           {measureRender('messages.map', () => {
             recordRender('messages.map')
-            return preparedMessages.map((renderMessage) => (
-              <MemoMessageRow
-                key={renderMessage.message.id}
-                renderMessage={renderMessage}
-                reduceMotion={reduceMotion === true}
-                isStatic={isMessageStatic(renderMessage)}
-                toolVisualState={resolveRowToolVisualState(renderMessage.message, messageLookups)}
-                rowRef={node => {
-                  if (node) messageRefs.current.set(renderMessage.message.id, node)
-                  else messageRefs.current.delete(renderMessage.message.id)
-                }}
-                highlighted={searchMatches[searchIndex]?.id === renderMessage.message.id}
-              />
-            ))
+            return preparedMessages.map((renderMessage, index) => {
+              const previous = preparedMessages[index - 1]
+              const isToolRow = renderMessage.type === 'tool_call' || renderMessage.type === 'tool_result'
+              const hasPreviousTool = isToolRow && previous !== undefined
+                && (previous.type === 'tool_call' || previous.type === 'tool_result')
+              const previousVisualState = previous ? resolveRowToolVisualState(previous.message, messageLookups) : undefined
+              return (
+                <React.Fragment key={renderMessage.message.id}>
+                  {hasPreviousTool && <ToolConnector status={previousVisualState === 'failed' ? 'err' : previousVisualState === 'completed' ? 'ok' : 'run'} />}
+                  <MemoMessageRow
+                    renderMessage={renderMessage}
+                    reduceMotion={reduceMotion === true}
+                    isStatic={isMessageStatic(renderMessage)}
+                    toolVisualState={resolveRowToolVisualState(renderMessage.message, messageLookups)}
+                    rowRef={node => {
+                      if (node) messageRefs.current.set(renderMessage.message.id, node)
+                      else messageRefs.current.delete(renderMessage.message.id)
+                    }}
+                    highlighted={searchMatches[searchIndex]?.id === renderMessage.message.id}
+                  />
+                </React.Fragment>
+              )
+            })
           })}
         </AnimatePresence>
         {streamingThinking && <StreamingThinking text={streamingThinking} />}
@@ -462,6 +476,19 @@ const ChatView = React.memo(function ChatView({ sessionId }: Props) {
 })
 
 // ── Sub-components ──
+
+// 连续 Tool 之间的连接线：真实 DOM 元素，绝对定位在 .term 内，
+// top/height 由 ChatView 测量 effect 写入。层叠由 z-index 保证：
+// 线(1) 在 body 背景之上（展开不被截断）、head(2) 在线之上（指示器覆盖线）。
+function ToolConnector({ status }: { status: 'ok' | 'err' | 'run' }) {
+  const connectorMode = useStore(s => s.toolConnectorMode) || 'none'
+  const connectorColor = useStore(s => s.toolConnectorColor) || 'rgba(0,0,0,0.12)'
+  const toolOk = useStore(s => s.toolOk)
+  const toolRun = useStore(s => s.toolRun)
+  const toolErr = useStore(s => s.toolErr)
+  const color = resolveConnectorColor(connectorMode, status, { toolOk, toolRun, toolErr }, connectorColor)
+  return <div className="term-tool-connector" style={{ background: color }} />
+}
 
 
 function MessageRow({ renderMessage, reduceMotion, toolVisualState, rowRef, highlighted, isStatic }: { renderMessage: RenderMessage; reduceMotion: boolean; toolVisualState?: string; rowRef?: (node: HTMLDivElement | null) => void; highlighted?: boolean; isStatic?: boolean }) {
@@ -646,9 +673,9 @@ function ToolCard({ model }: { model: ReturnType<typeof buildToolPresentationMod
   const glowCss = glow > 0
     ? { textShadow: `0 0 ${glow}px ${glowColor || (status === 'ok' ? toolOk : status === 'err' ? toolErr : toolRun) || 'currentColor'}` }
     : undefined
-  const connCss: React.CSSProperties = connectorMode === 'none'
-    ? { ['--tool-conn' as any]: 'transparent' }
-    : { ['--tool-conn' as any]: connectorMode === 'follow' ? ((status === 'ok' ? toolOk : status === 'err' ? toolErr : toolRun) || connectorColor) : connectorColor }
+  const connCss: React.CSSProperties = {
+    ['--tool-conn' as never]: resolveConnectorColor(connectorMode, status, { toolOk, toolRun, toolErr }, connectorColor),
+  }
   const suffix = model.state === 'completed' && model.outputLines > 0 ? ` — ${model.outputLabel}` : ''
   const outputHtml = useMemo(() => {
     if (!model.outputText || model.name !== 'Bash') return ''

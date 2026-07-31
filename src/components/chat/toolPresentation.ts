@@ -70,4 +70,29 @@ export function getToolSummary(toolName: string, input: unknown): string {
   return resolveToolRenderer(toolName).getSummary(input)
 }
 
+export type ToolConnectorStatus = 'ok' | 'err' | 'run'
+
+export interface ConnectorColors {
+  toolOk?: string
+  toolRun?: string
+  toolErr?: string
+}
+
+/**
+ * 连接线颜色：none=透明；follow=跟随上一工具状态色（ok/err/run 用主题变量）；
+ * fixed=固定 connectorColor。ToolCard 与 ToolConnector 共用，保证两处一致。
+ */
+export function resolveConnectorColor(
+  mode: string,
+  status: ToolConnectorStatus,
+  colors: ConnectorColors,
+  fallback: string,
+): string {
+  if (mode === 'none') return 'transparent'
+  if (mode === 'follow') {
+    return (status === 'ok' ? colors.toolOk : status === 'err' ? colors.toolErr : colors.toolRun) || fallback
+  }
+  return fallback
+}
+
 export const TOOL_RENDERER_NAMES = Object.freeze(Object.keys(TOOL_RENDERERS))
