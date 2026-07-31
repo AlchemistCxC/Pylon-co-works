@@ -6,6 +6,12 @@ tasks:
   - backend/BE-B2-001.yaml
   - backend/BE-B4-001.yaml
   - backend/BE-B5-001.yaml
+  - backend/BE-B10-001.yaml
+  - backend/BE-B10-002.yaml
+  - backend/BE-B10-003.yaml
+  - backend/BE-B10-004.yaml
+  - backend/BE-B10-005.yaml
+  - backend/BE-B10-006.yaml
   - frontend/FE-F0-008.yaml
   - frontend/FE-F1-001.yaml
   - frontend/FE-F1-002.yaml

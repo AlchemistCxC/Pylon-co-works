@@ -1,0 +1,46 @@
+version: 1
+id: BE-B10-004
+title: QQ 认证模块移植（QqAuth）
+lane: backend
+priority: P1
+stage: gateway-qq
+subsystem: gateway
+size: S
+relay_group: gateway
+blocks_other_lane: false
+domains: [gateway-qq, auth]
+dependencies: {tasks: [], checkpoints: []}
+goal:
+  user_result: gateway 具备 QQ 开放平台 token 获取/过期/失效管理。
+  technical_result: 移植 Prism auth.rs 到 src-tauri/src/gateway/qq/auth.rs，保留原有测试。
+source_facts:
+  - Prism 源码 G:\Project\prism\src\qq\auth.rs 已有 QqAuth（token 获取/过期/invalidate + 3 个单测）和 get_gateway_url。
+  - 设计定稿：凭据配置化 PYLON_QQ_APP_ID / PYLON_QQ_CLIENT_SECRET（本任务用参数传入，不读 env）。
+scope:
+  inspect_first:
+    - G:\Project\prism\src\qq\auth.rs（照抄参考）
+    - G:\Project\prism\src\qq\types.rs（依赖类型）
+  likely_modify:
+    - src-tauri/src/gateway/qq/auth.rs（新建，含单测）
+  do_not_modify:
+    - src/**
+    - src-tauri/src/lib.rs
+    - G:\Project\prism
+guidance:
+  invariants:
+    - 移植 QqAuth 结构与方法（new/get_token/invalidate），get_gateway_url 一并移植
+    - 依赖 reqwest（已依赖）；错误返回 String 或本模块错误类型
+    - 原单测 3 个（token_expiry_rejects_non_positive_lifetime / unreasonably_large / checked_instant_addition）必须保留
+    - 不依赖 tauri
+  non_goals:
+    - WS 连接
+    - env 读取/配置接线
+verification:
+  during_development:
+    - cd /g/Project/prism-desktop/src-tauri && cargo check --offline
+    - cargo test --offline --lib gateway::qq::auth
+  checkpoint_only: []
+completion:
+  - auth.rs 移植完成 + 原 3 单测通过
+  - cargo check 零 warning
+opens_checkpoint: null

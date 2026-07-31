@@ -1,0 +1,47 @@
+version: 1
+id: BE-B10-006
+title: QQ 发送模块移植（send）
+lane: backend
+priority: P1
+stage: gateway-qq
+subsystem: gateway
+size: M
+relay_group: gateway
+blocks_other_lane: false
+domains: [gateway-qq, send]
+dependencies: {tasks: [BE-B10-004, BE-B10-005], checkpoints: []}
+goal:
+  user_result: gateway 能把文本/媒体消息发到 QQ（v2 API）。
+  technical_result: 移植 Prism qq/send.rs 到 src-tauri/src/gateway/qq/send.rs，含参数构造单测。
+source_facts:
+  - Prism 源码 G:\Project\prism\src\qq\send.rs 有 send_message/send_media_message（v2/users|groups/{chat_id}/messages）。
+  - Prism G:\Project\prism\src\qq\upload.rs 有分块上传（100MB 上限）。
+  - 设计定稿：出站媒体首版降级为 URL 文本；上传能力可同步移植但暂不接线。
+scope:
+  inspect_first:
+    - G:\Project\prism\src\qq\send.rs（照抄参考）
+    - G:\Project\prism\src\qq\upload.rs（照抄参考）
+  likely_modify:
+    - src-tauri/src/gateway/qq/send.rs（新建，含单测）
+  do_not_modify:
+    - src/**
+    - src-tauri/src/lib.rs
+    - G:\Project\prism
+guidance:
+  invariants:
+    - 移植 send_message（chat_type 支持 c2c/group，reply_to 可选，msg_type）
+    - 移植 send_media_message 与上传辅助（100MB 上限常量保留）
+    - 请求走 reqwest；错误返回 String
+    - 不依赖 tauri；不接线 truncate/重试（主控接）
+  non_goals:
+    - 切断/重试/限速接线
+    - 实际网络发送测试（用本地 TCP 桩验证请求形状，参考 prism.rs tests 的 spawn_response_server 模式）
+verification:
+  during_development:
+    - cd /g/Project/prism-desktop/src-tauri && cargo check --offline
+    - cargo test --offline --lib gateway::qq::send
+  checkpoint_only: []
+completion:
+  - send.rs 移植完成 + 单测：请求 URL/参数/认证头形状（本地 TCP 桩）
+  - cargo check 零 warning
+opens_checkpoint: null
