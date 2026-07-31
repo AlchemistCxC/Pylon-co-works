@@ -230,3 +230,67 @@ fn force_sleep_when_energy_hits_zero() {
     pet.apply(AiEvent::Visit, 3 * 3_600_000); // 3h 后 energy 掉到 0
     assert_eq!(pet.machine, pylon_pet_core::PetMachineState::Asleep, "energy=0 必须强制入睡");
 }
+
+// ── M3：情绪推导（设计书 §6）──
+
+#[test]
+fn mood_derives_from_needs() {
+    let mut pet = PetState::new_at(1);
+    pet.hunger = 10;
+    pet.apply(AiEvent::Visit, 1);
+    assert_eq!(pet.mood, "hungry", "hunger<20 → hungry");
+
+    let mut pet = PetState::new_at(1);
+    pet.loneliness = 80;
+    pet.apply(AiEvent::Visit, 1);
+    assert_eq!(pet.mood, "lonely", "loneliness>60 → lonely");
+
+    let mut pet = PetState::new_at(1);
+    pet.apply(AiEvent::Poke, 1); // 更新最近互动时间（防入睡）
+    pet.energy = 10;
+    pet.apply(AiEvent::Visit, 1);
+    assert_eq!(pet.mood, "tired", "energy<20 → tired（需求优先于窗口 happy）");
+}
+
+#[test]
+fn mood_derives_from_recent_events() {
+    let mut pet = PetState::new_at(1);
+    pet.apply(AiEvent::Poke, 1);
+    assert_eq!(pet.mood, "happy", "Poke 后窗口 → happy");
+
+    let mut pet = PetState::new_at(1);
+    pet.apply(AiEvent::ToolCall { outcome: ToolOutcome::Succeeded }, 1);
+    assert_eq!(pet.mood, "focused", "工具成功 → focused");
+
+    let mut pet = PetState::new_at(1);
+    pet.apply(AiEvent::ToolCall { outcome: ToolOutcome::Failed }, 1);
+    assert_eq!(pet.mood, "error", "工具失败（近 3）→ error");
+
+    let mut pet = PetState::new_at(1);
+    pet.apply(AiEvent::AgentCrashed, 1);
+    assert_eq!(pet.mood, "error", "崩溃 → error");
+}
+
+#[test]
+fn feeding_recovers_mood_from_hungry_to_happy() {
+    let mut pet = PetState::new_at(1);
+    pet.hunger = 10;
+    pet.apply(AiEvent::Feed, 1);
+    assert_eq!(pet.mood, "happy", "喂食后 hunger>20 且窗口含 Feed → happy（不再 hungry）");
+}
+
+#[test]
+fn failure_event_overrides_recent_happy_mood() {
+    let mut pet = PetState::new_at(1);
+    pet.apply(AiEvent::Poke, 1);
+    assert_eq!(pet.mood, "happy");
+    // 失败（近 3）优先级高于窗口 happy
+    pet.apply(AiEvent::ToolCall { outcome: ToolOutcome::Failed }, 2);
+    assert_eq!(pet.mood, "error", "失败事件必须压过 happy");
+    // 需求危机优先于 happy（无失败事件时）
+    let mut pet = PetState::new_at(1);
+    pet.apply(AiEvent::Poke, 1);
+    pet.hunger = 10;
+    pet.apply(AiEvent::Poke, 2);
+    assert_eq!(pet.mood, "hungry", "饥饿优先于 happy");
+}

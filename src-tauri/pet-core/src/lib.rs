@@ -1,4 +1,4 @@
-use serde::{Deserialize, Serialize};
+﻿use serde::{Deserialize, Serialize};
 
 const DAY_MS: u64 = 86_400_000;
 const TOKEN_XP_STEP: u64 = 5_000;
@@ -303,7 +303,7 @@ impl PetState {
             AiEvent::UserSent => {
                 self.stats.messages = self.stats.messages.saturating_add(1);
                 self.first_chunk_at_ms = None;
-                self.mood = "curious".into();
+                // mood 由 derive_mood 推导
                 self.hunger = self.hunger.saturating_sub(1);
                 self.energy = self.energy.saturating_sub(2);
                 self.fun = (self.fun as u16 + 2).min(100) as u8;
@@ -317,7 +317,7 @@ impl PetState {
                 self.machine = PetMachineState::Awake(MachineSub::Interacting);
                 if self.first_chunk_at_ms.is_none() {
                     self.first_chunk_at_ms = Some(now_ms);
-                    self.mood = "curious".into();
+                    // mood 由 derive_mood 推导
                     self.msg = Some("微光开始流动。".into());
                 }
             }
@@ -332,7 +332,7 @@ impl PetState {
                 self.energy = self.energy.saturating_sub(2);
                 self.fun = (self.fun as u16 + 3).min(100) as u8;
                 self.loneliness = self.loneliness.saturating_sub(10);
-                self.mood = "excited".into();
+                // mood 由 derive_mood 推导
                 if self.stats.prompts_completed == 1 {
                     self.remember("陪你完成了第一次任务".into());
                 } else if self.stats.prompts_completed % 10 == 0 {
@@ -349,7 +349,7 @@ impl PetState {
                 self.happiness = self.happiness.saturating_sub(3);
                 self.fun = self.fun.saturating_sub(2);
                 self.loneliness = (self.loneliness as u16 + 5).min(100) as u8;
-                self.mood = "error".into();
+                // mood 由 derive_mood 推导
                 self.push_event(RecentEvent::Failed);
                 self.msg = Some("光暗了一下，但没有熄灭。".into());
             }
@@ -362,7 +362,7 @@ impl PetState {
                 self.fun = (self.fun as u16 + 2).min(100) as u8;
                 self.loneliness = self.loneliness.saturating_sub(15);
                 self.reward_interaction(now_ms, 1);
-                self.mood = "happy".into();
+                // mood 由 derive_mood 推导
                 self.push_event(RecentEvent::Poke);
                 self.msg = Some("它贴近了你的指尖。".into());
             }
@@ -374,7 +374,7 @@ impl PetState {
                 self.loneliness = self.loneliness.saturating_sub(20);
                 self.happiness = (self.happiness as u16 + 7).min(100) as u8;
                 self.reward_interaction(now_ms, 1);
-                self.mood = "happy".into();
+                // mood 由 derive_mood 推导
                 self.push_event(RecentEvent::Feed);
                 self.msg = Some("能量沿着像素一格格亮起。".into());
             }
@@ -386,19 +386,18 @@ impl PetState {
                 self.loneliness = self.loneliness.saturating_sub(30);
                 self.happiness = (self.happiness as u16 + 4).min(100) as u8;
                 self.reward_interaction(now_ms, 3);
-                self.mood = "happy".into();
+                // mood 由 derive_mood 推导
                 self.push_event(RecentEvent::Play);
                 self.msg = Some("它追着你的光标跑来跑去。".into());
             }
             AiEvent::Sleepy => {
                 self.machine = PetMachineState::Asleep;
-                self.mood = "sleepy".into();
                 self.msg = Some("它蜷成一小团等待。".into());
             }
             AiEvent::AgentConnected => {
                 // T4：连接恢复 → Idle
                 self.machine = PetMachineState::Awake(MachineSub::Idle);
-                self.mood = "excited".into();
+                // mood 由 derive_mood 推导
                 self.gain_bond(1);
                 self.happiness = (self.happiness as u16 + 1).min(100) as u8;
                 self.push_event(RecentEvent::Connected);
@@ -407,7 +406,7 @@ impl PetState {
             AiEvent::AgentCrashed => {
                 // T3：崩溃 → Distress
                 self.machine = PetMachineState::Awake(MachineSub::Distress);
-                self.mood = "error".into();
+                // mood 由 derive_mood 推导
                 self.happiness = self.happiness.saturating_sub(2);
                 self.push_event(RecentEvent::Crashed);
                 self.msg = Some("连接断了，它吓得缩了一下。".into());
@@ -418,10 +417,11 @@ impl PetState {
             let idle_for = now_ms.saturating_sub(self.last_interaction_at_ms);
             if self.energy <= 15 && (idle_for >= 30_000 || self.energy == 0) {
                 self.machine = PetMachineState::Asleep;
-                self.mood = "sleepy".into();
                 self.msg = Some("它蜷成一小团等待。".into());
             }
         }
+        // M3：情绪统一推导（取代事件直接赋值）
+        self.mood = self.derive_mood().to_string();
     }
 
     /// v2 需求衰减引擎（设计书 §4）：时间戳结算，零后台任务。
@@ -461,6 +461,61 @@ impl PetState {
         self.last_tick_at_ms = now_ms;
     }
 
+    /// v2 情绪推导（设计书 §6）：mood 不再由事件直接赋值，而是按优先级从
+    /// 状态机 + 需求 + 感知窗口综合计算——杜绝"刚喂了食还在生气"的错位。
+    /// 返回 &'static str（前端契约的 mood 字符串）。
+    pub fn derive_mood(&self) -> &'static str {
+        if self.machine == PetMachineState::Asleep {
+            return "sleepy";
+        }
+        let recent = &self.recent_events;
+        let recent3: Vec<&RecentEvent> = recent.iter().rev().take(3).collect();
+        let recent3_has = |event: RecentEvent| recent3.iter().any(|e| **e == event);
+        // 1. 崩溃/失败（近 3 条）
+        if recent3_has(RecentEvent::Crashed) || recent3_has(RecentEvent::Failed) || recent3_has(RecentEvent::ToolFail) {
+            return "error";
+        }
+        // 2. 需求危机
+        if self.hunger < 20 {
+            return "hungry";
+        }
+        if self.energy < 20 {
+            return "tired";
+        }
+        if self.loneliness > 60 {
+            return "lonely";
+        }
+        // 3. 短时事件情绪（近 3 条）
+        if recent3_has(RecentEvent::Timeout) {
+            return "dazed";
+        }
+        if recent3_has(RecentEvent::Refused) {
+            return "confused";
+        }
+        if recent3_has(RecentEvent::ToolCancel) {
+            return "startled";
+        }
+        // 4. 正向事件（窗口内）
+        if recent.contains(&RecentEvent::Feed)
+            || recent.contains(&RecentEvent::Play)
+            || recent.contains(&RecentEvent::Done)
+            || recent.contains(&RecentEvent::Poke)
+        {
+            return "happy";
+        }
+        if recent.contains(&RecentEvent::Connected) {
+            return "excited";
+        }
+        // 5. 工作状态
+        if recent.contains(&RecentEvent::ToolOk) || recent.contains(&RecentEvent::ToolFail) {
+            return "focused";
+        }
+        if self.machine == PetMachineState::Awake(MachineSub::Interacting) {
+            return "curious";
+        }
+        "idle"
+    }
+
     /// 感知窗口：环形 8，情绪推导输入（设计书 §6）。
     fn push_event(&mut self, event: RecentEvent) {
         self.recent_events.push(event);
@@ -469,11 +524,10 @@ impl PetState {
         }
     }
 
-    /// v2 唤醒（T2 转移动作）：状态置 Idle，energy +30，文案。
+    /// v2 唤醒（T2 转移动作）：状态置 Idle，energy +30，文案（mood 由推导决定）。
     fn wake(&mut self) {
         self.machine = PetMachineState::Awake(MachineSub::Idle);
         self.energy = (self.energy as u16 + 30).min(100) as u8;
-        self.mood = "idle".into();
         self.msg = Some("它被你的脚步声唤醒。".into());
     }
 
@@ -514,7 +568,11 @@ impl PetState {
     }
 
     pub fn check_sleepy(&mut self, now_ms: u64) -> bool {
-        if matches!(self.mood.as_str(), "error" | "excited" | "happy") {
+        // v2：状态机判定（原 mood 字符串判断被推导取代）
+        if self.machine == PetMachineState::Asleep {
+            return true;
+        }
+        if matches!(self.machine, PetMachineState::Awake(MachineSub::Distress)) {
             return false;
         }
         if self.first_chunk_at_ms.is_some_and(|start| now_ms.saturating_sub(start) > 30_000) {
@@ -553,7 +611,6 @@ impl PetState {
                 self.gain_bond(1);
                 self.fun = (self.fun as u16 + 2).min(100) as u8;
                 self.happiness = (self.happiness as u16 + 1).min(100) as u8;
-                self.mood = "focused".into();
                 self.push_event(RecentEvent::ToolOk);
             }
             ToolOutcome::Failed => {
@@ -562,7 +619,7 @@ impl PetState {
                 self.gain_xp(1);
                 self.fun = self.fun.saturating_sub(2);
                 self.happiness = self.happiness.saturating_sub(2);
-                self.mood = "error".into();
+                // mood 由 derive_mood 推导
                 self.push_event(RecentEvent::ToolFail);
             }
         }
