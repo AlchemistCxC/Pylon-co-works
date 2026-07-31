@@ -1,11 +1,6 @@
-import { useState, useEffect } from 'react'
+import { useState, useEffect, lazy, Suspense } from 'react'
 import SheetHost from './workspace-sheets/SheetHost'
 import WorkspaceTitlebar from './workspace-sheets/WorkspaceTitlebar'
-import SheetLauncher from './workspace-sheets/SheetLauncher'
-import Settings from './components/Settings'
-import ProfileEditor from './components/ProfileEditor'
-import RightPanel from './components/RightPanel'
-import SessionSettings from './components/SessionSettings'
 import { useStore } from './store'
 import { belongsToProfile } from './components/chat/sessionProfile'
 import { useShallow } from 'zustand/react/shallow'
@@ -17,6 +12,22 @@ import { reportRuntimeError, type RuntimeErrorDetail } from './runtimeError'
 import { toCssBackgroundImage } from './backgroundImage'
 import { listen } from '@tauri-apps/api/event'
 import { normalizeAgentStatus, type AgentStatusPayload } from './components/settings/agentTypes'
+
+// 非首屏 Dialog/Sheet 懒加载：Settings/ProfileEditor/SessionSettings 与 Prism Sheet 按需分包
+const Settings = lazy(() => import('./components/Settings'))
+const ProfileEditor = lazy(() => import('./components/ProfileEditor'))
+const SessionSettings = lazy(() => import('./components/SessionSettings'))
+const SheetLauncher = lazy(() => import('./workspace-sheets/SheetLauncher'))
+const RightPanel = lazy(() => import('./components/RightPanel'))
+
+function LazyDialogFallback() {
+  return (
+    <div className="sheet-empty-host">
+      <div className="sheet-empty-kicker">LOADING</div>
+      <p>加载模块…</p>
+    </div>
+  )
+}
 
 export default function App() {
   const [activeSession, setActiveSession] = useState<string | null>(null)
@@ -236,16 +247,20 @@ export default function App() {
         onToggleFullscreen={() => appWindow.isFullscreen().then(fullscreen => appWindow.setFullscreen(!fullscreen))}
         onCloseWindow={() => appWindow.destroy()}
       />
-      <SheetLauncher
-        open={showSheetLauncher}
-        agents={agents}
-        sheets={workspaceSheets.sheets}
-        onOpenChange={setShowSheetLauncher}
-        onFocusSheet={id => useStore.getState().focusSheet(id)}
-        onOpenSheet={(kind, title, agentId) => useStore.getState().openSheet({ kind, title, agentId })}
-        onOpenSettings={() => setShowSettings(true)}
-        onOpenProfiles={() => setShowProfileEdit(true)}
-      />
+      <Suspense fallback={null}>
+        {showSheetLauncher && (
+          <SheetLauncher
+            open={showSheetLauncher}
+            agents={agents}
+            sheets={workspaceSheets.sheets}
+            onOpenChange={setShowSheetLauncher}
+            onFocusSheet={id => useStore.getState().focusSheet(id)}
+            onOpenSheet={(kind, title, agentId) => useStore.getState().openSheet({ kind, title, agentId })}
+            onOpenSettings={() => setShowSettings(true)}
+            onOpenProfiles={() => setShowProfileEdit(true)}
+          />
+        )}
+      </Suspense>
 
       {runtimeError && (
         <div className="runtime-error-banner" role="alert">
@@ -265,10 +280,12 @@ export default function App() {
           rightInset={rightPanelInset}
           ccEditMode={ccEditMode}
         />
-        {settingsOpen && <Settings activeSessionId={activeSession} onClose={() => setShowSettings(false)} />}
-        {rightOpen && <RightPanel sessionId={activeSession} onClose={() => setRightOpen(false)} />}
-        {profilesOpen && <ProfileEditor onClose={() => setShowProfileEdit(false)} />}
-        {sessionSettingsId && <SessionSettings sessionId={sessionSettingsId} open={!!sessionSettingsId} onClose={() => setSessionSettingsId(null)} onDeleted={() => setActiveSession(null)} />}
+        <Suspense fallback={<LazyDialogFallback />}>
+          {settingsOpen && <Settings activeSessionId={activeSession} onClose={() => setShowSettings(false)} />}
+          {rightOpen && <RightPanel sessionId={activeSession} onClose={() => setRightOpen(false)} />}
+          {profilesOpen && <ProfileEditor onClose={() => setShowProfileEdit(false)} />}
+          {sessionSettingsId && <SessionSettings sessionId={sessionSettingsId} open={!!sessionSettingsId} onClose={() => setSessionSettingsId(null)} onDeleted={() => setActiveSession(null)} />}
+        </Suspense>
       </div>
     </div>
   )

@@ -1,8 +1,11 @@
+import { lazy, Suspense } from 'react'
 import { useStore } from '../store'
 import { SHEET_REGISTRY } from './sheetRegistry'
 import AgentSheetView from '../sheets/AgentSheetView'
-import PrismManagerSheetView from '../sheets/PrismManagerSheetView'
 import type { SheetRecord } from './sheetTypes'
+
+// Prism 管理 Sheet 非首屏：按需分包
+const PrismManagerSheetView = lazy(() => import('../sheets/PrismManagerSheetView'))
 
 interface SheetHostProps {
   activeSession: string | null
@@ -29,7 +32,16 @@ function SheetRenderer({ sheet, ...props }: { sheet: SheetRecord } & SheetHostPr
     case 'agent-sheet':
       return <AgentSheetView sheet={sheet} {...props} />
     case 'prism-manager-sheet':
-      return <PrismManagerSheetView />
+      return (
+        <Suspense fallback={
+          <div className="sheet-empty-host">
+            <div className="sheet-empty-kicker">LOADING</div>
+            <p>加载模块…</p>
+          </div>
+        }>
+          <PrismManagerSheetView />
+        </Suspense>
+      )
     default:
       return <UnavailableSheet kind={sheet.kind} />
   }
