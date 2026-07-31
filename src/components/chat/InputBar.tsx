@@ -14,20 +14,12 @@ import { reportRuntimeError } from '../../runtimeError'
 import { Paperclip, ArrowUp, Square } from 'lucide-react'
 import type { AvailableCommand } from './acpTypes'
 import { resolveCliTextareaLayout, resolveDefaultTextareaHeight } from './inputOverflowState'
+import { resolveCommandSuggestions, filterCommandSuggestions, type CommandSuggestion } from './commandRegistry'
 import './InputBar.css'
 
 interface Props { sessionId: string | null; split?: boolean; ariaDescribedBy?: string }
 
 const EMPTY_COMMANDS: readonly AvailableCommand[] = Object.freeze([])
-
-const FALLBACK_COMMANDS = [
-  { cmd: '/model', args: ' <name>', info: '切换模型' },
-  { cmd: '/compact', args: '', info: '压缩上下文' },
-  { cmd: '/new', args: '', info: '新会话' },
-  { cmd: '/export', args: '', info: '导出记录' },
-  { cmd: '/clear', args: '', info: '清屏' },
-  { cmd: '/mode', args: ' <default|edit|auto|bypass>', info: '切换权限模式' },
-]
 
 export default forwardRef<{ send: () => void; attachFile: () => void; cancel: () => void }, Props>(function InputBar({ sessionId, split, ariaDescribedBy }, ref) {
   const [value, setValue] = useState('')
@@ -61,12 +53,10 @@ export default forwardRef<{ send: () => void; attachFile: () => void; cancel: ()
   const sessionProfile = resolveSessionProfile(sessionId, sessions, profiles)
   const persona = sessionProfile?.persona || ''
 
-  const COMMANDS = liveCommands.length > 0
-    ? liveCommands.map((c: {name: string; input_hint?: string; description?: string}) => ({ cmd: '/' + c.name, args: c.input_hint ? ' ' + c.input_hint : '', info: c.description || '' }))
-    : FALLBACK_COMMANDS
+  const COMMANDS = resolveCommandSuggestions(liveCommands)
 
   const isCmd = value.startsWith('/')
-  const filtered = isCmd ? COMMANDS.filter((c: typeof COMMANDS[number]) => c.cmd.startsWith(value.split(' ')[0])) : []
+  const filtered = isCmd ? filterCommandSuggestions(value, COMMANDS) : []
 
   useEffect(() => {
     const textarea = textareaRef.current
@@ -294,7 +284,7 @@ export default forwardRef<{ send: () => void; attachFile: () => void; cancel: ()
       )}
       {isCmd && filtered.length > 0 && (
         <div className="command-palette">
-          {filtered.map((c: typeof COMMANDS[number], i: number) => (
+          {filtered.map((c: CommandSuggestion, i: number) => (
             <div key={c.cmd} className={`cmd-item ${i === cmdIdx ? 'active' : ''}`}
               onClick={() => { setValue(c.cmd + c.args + ' '); textareaRef.current?.focus() }}>
               <span className="cmd-name">{c.cmd}{c.args}</span>
