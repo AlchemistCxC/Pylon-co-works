@@ -10,7 +10,7 @@ use std::sync::{Arc, Mutex, RwLock};
 
 use crate::acp::AcpClient;
 use crate::agent_runtime::AgentRuntimeState;
-use crate::SessionInfo;
+use crate::{PendingPermission, SessionInfo};
 
 /// 单个 agent 的运行时状态（per-agent 隔离）。
 pub struct AgentRuntime {
@@ -23,6 +23,8 @@ pub struct AgentRuntime {
     pub sessions: Arc<Mutex<HashMap<String, SessionInfo>>>,
     pub agent_runtime: Arc<Mutex<AgentRuntimeState>>,
     pub auto_reconnect_active: Arc<AtomicBool>,
+    /// 挂起的权限请求（B9）：JSON-RPC id → 待用户决策（超时默认拒绝）。
+    pub pending_permissions: Arc<Mutex<HashMap<u64, PendingPermission>>>,
 }
 
 impl AgentRuntime {
@@ -38,6 +40,7 @@ impl AgentRuntime {
             sessions: Arc::new(Mutex::new(HashMap::new())),
             agent_runtime: Arc::new(Mutex::new(AgentRuntimeState::default())),
             auto_reconnect_active: Arc::new(AtomicBool::new(false)),
+            pending_permissions: Arc::new(Mutex::new(HashMap::new())),
         })
     }
 }

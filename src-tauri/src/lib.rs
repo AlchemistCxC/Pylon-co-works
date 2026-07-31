@@ -57,6 +57,8 @@ struct AppState {
     runtime_mcp: Mutex<Option<Vec<mcp::McpServerConfig>>>,
     prism: PrismClient,
     gateway: Arc<GatewayCore>,
+    /// 权限审批模式（B9.3）：bypass/auto 自动批准；edit/default 挂起询问。
+    approval_mode: Arc<Mutex<String>>,
 }
 
 /// 供 async 闭包/静态辅助持有的 AppState 字段子集。
@@ -70,6 +72,7 @@ struct AppStateHandles {
     pet: Arc<Mutex<pet::PetState>>,
     runtime_logs: Arc<runtime_log::RuntimeLogHub>,
     gateway: Arc<GatewayCore>,
+    approval_mode: Arc<Mutex<String>>,
 }
 
 impl AppStateHandles {
@@ -81,6 +84,7 @@ impl AppStateHandles {
             pet: state.pet.clone(),
             runtime_logs: state.runtime_logs.clone(),
             gateway: state.gateway.clone(),
+            approval_mode: state.approval_mode.clone(),
         }
     }
 
@@ -674,6 +678,8 @@ fn start_notification_dispatcher<R: tauri::Runtime>(handles: &AppStateHandles, r
         let runtime_logs = handles.runtime_logs.clone();
         let runtimes = handles.runtimes.clone();
         let gateway = handles.gateway.clone();
+        let approval_mode = handles.approval_mode.clone();
+        let pending_permissions = runtime.pending_permissions.clone();
         let runtime_for_reconnect = runtime.clone();
         *task = Some(tokio::spawn(async move {
             let mut rx = acp.lock().await.rx.resubscribe();
@@ -737,6 +743,7 @@ fn start_notification_dispatcher<R: tauri::Runtime>(handles: &AppStateHandles, r
                             pet: pet.clone(),
                             runtime_logs: runtime_logs.clone(),
                             gateway: gateway.clone(),
+                            approval_mode: approval_mode.clone(),
                         };
                         tokio::spawn(async move {
                             // 手动 switch 会 abort 本 runtime 的 dispatcher，但不会
@@ -775,6 +782,37 @@ fn start_notification_dispatcher<R: tauri::Runtime>(handles: &AppStateHandles, r
                             }
                             reconnect_runtime.auto_reconnect_active.store(false, Ordering::Release);
                         });
+                    }
+                    continue;
+                }
+                // B9 权限审批：agent 主动 request_permission（带 id 请求，客户端必须应答）。
+                // 模式判定：bypass/auto 自动批准；edit/default 挂起 + 前端事件。
+                if raw.method.as_deref() == Some(acp::METHOD_SESSION_REQUEST_PERMISSION) {
+                    let Some(request_id) = raw.id else { continue; };
+                    let Some(permission) = parse_permission_request(raw.params.as_ref()) else {
+                        log::warn!("ACP request_permission 解析失败 (id={request_id})，按拒绝处理");
+                        let acp = acp.lock().await;
+                        let _ = acp.send_response(request_id, permission_response("reject_once")).await;
+                        continue;
+                    };
+                    let mode = approval_mode.lock().map(|m| m.clone()).unwrap_or_else(|_| "default".to_string());
+                    if matches!(mode.as_str(), "bypass" | "auto") {
+                        log::info!("权限模式 {mode}：自动批准工具调用 {}", permission.tool_call_id);
+                        let acp = acp.lock().await;
+                        let _ = acp.send_response(request_id, permission_response("allow_once")).await;
+                    } else {
+                        let _ = pending_permissions.lock().map(|mut pending| {
+                            pending.insert(request_id, permission.clone());
+                        });
+                        emit_event(&window, "pylon:permission-request", serde_json::json!({
+                            "requestId": request_id,
+                            "sessionId": permission.session_id,
+                            "toolCallId": permission.tool_call_id,
+                            "title": permission.title,
+                            "prompt": permission.prompt,
+                            "options": permission.options,
+                            "requestedAt": permission.requested_at,
+                        }));
                     }
                     continue;
                 }
@@ -1163,6 +1201,83 @@ mod session_info_tests {
         let same_day_later = "1722490000000";
         assert_eq!(session_expired(Some(same_day_later), now, "daily", 0), None);
     }
+
+    #[test]
+    fn parse_permission_request_extracts_fields_and_sanitizes_prompt() {
+        let params = serde_json::json!({
+            "sessionId": "session-1",
+            "toolCall": {
+                "toolCallId": "call-1",
+                "title": "edit_file",
+                "rawInput": "{\"path\": \"/tmp/x\", \"token=SECRET\"}"
+            },
+            "options": [
+                {"optionId": "allow_once", "name": "Allow once", "kind": "allowOnce"},
+                {"optionId": "reject_once", "name": "Reject", "kind": "rejectOnce"}
+            ]
+        });
+        let permission = parse_permission_request(Some(&params)).expect("合法请求必须解析");
+        assert_eq!(permission.session_id, "session-1");
+        assert_eq!(permission.tool_call_id, "call-1");
+        assert_eq!(permission.title, "edit_file");
+        assert_eq!(permission.options, vec!["allow_once", "reject_once"]);
+        // prompt 脱敏：token= 载荷被 REDACTED
+        assert!(!permission.prompt.contains("SECRET"), "prompt 不得含 secret 载荷: {}", permission.prompt);
+        assert!(permission.prompt.contains("[REDACTED]"));
+    }
+
+    #[test]
+    fn parse_permission_request_rejects_malformed_shapes() {
+        // 缺 toolCall
+        assert!(parse_permission_request(Some(&serde_json::json!({
+            "sessionId": "s1", "options": [{"optionId": "allow_once"}]
+        }))).is_none());
+        // 缺 toolCallId
+        assert!(parse_permission_request(Some(&serde_json::json!({
+            "sessionId": "s1", "toolCall": {"title": "t"}, "options": [{"optionId": "allow_once"}]
+        }))).is_none());
+        // 空选项
+        assert!(parse_permission_request(Some(&serde_json::json!({
+            "sessionId": "s1", "toolCall": {"toolCallId": "c1"}, "options": []
+        }))).is_none());
+        // 缺 params
+        assert!(parse_permission_request(None).is_none());
+    }
+
+    #[test]
+    fn permission_response_wire_shapes_are_stable() {
+        // RequestPermissionOutcome 是 internally tagged（tag="outcome"）：
+        // Selected → {"outcome": {"outcome": "selected", "optionId": "..."}}
+        let selected = permission_response("allow_once");
+        assert_eq!(selected["outcome"]["outcome"], "selected");
+        assert_eq!(selected["outcome"]["optionId"], "allow_once");
+        let rejected = permission_response("reject_once");
+        assert_eq!(rejected["outcome"]["optionId"], "reject_once");
+        let cancelled = permission_response_cancelled();
+        assert_eq!(cancelled["outcome"]["outcome"], "cancelled");
+    }
+
+    #[tokio::test]
+    async fn resolve_permission_responds_and_clears_pending() {
+        let runtime = AgentRuntime::new_disconnected();
+        let permission = parse_permission_request(Some(&serde_json::json!({
+            "sessionId": "s1",
+            "toolCall": {"toolCallId": "call-1", "title": "tool"},
+            "options": [{"optionId": "allow_once"}, {"optionId": "reject_once"}]
+        }))).expect("parse");
+        runtime.pending_permissions.lock().unwrap().insert(7, permission);
+        // 非法选项拒绝
+        assert!(resolve_permission(&runtime, 7, "allow_always").await.is_err());
+        // 未找到拒绝
+        assert!(resolve_permission(&runtime, 99, "allow_once").await.is_err());
+        // 合法应答：disconnected client 写通道关闭 → 发送失败，但 pending 已清理？
+        // disconnected client 的 write_tx send 会失败（无接收端）——resolve 返回 Err 且 pending 保留。
+        // 用真实 fake ACP 覆盖发送成功路径（见集成测试）。
+        let result = resolve_permission(&runtime, 7, "reject_once").await;
+        assert!(result.is_err(), "disconnected client 发送应失败");
+        // 失败后 pending 保留（可重试）
+        assert!(runtime.pending_permissions.lock().unwrap().contains_key(&7));
+    }
 }
 
 #[cfg(test)]
@@ -1216,12 +1331,13 @@ for line in sys.stdin:
         AppState {
             runtimes,
             agents: Arc::new(Mutex::new(agents)),
-            active_agent: Arc::new(Mutex::new("fake-acp".to_string())),
+            active_agent: Arc::new(Mutex::new(agent.name.clone())),
             pet: Arc::new(Mutex::new(pet::PetState::default())),
             runtime_logs: runtime_log::RuntimeLogHub::default(),
             runtime_mcp: Mutex::new(None),
             prism: prism::PrismClient::unavailable("test".to_string()),
             gateway: Arc::new(gateway::GatewayCore::new()),
+            approval_mode: Arc::new(Mutex::new("default".to_string())),
         }
     }
 
@@ -1279,6 +1395,94 @@ for line in sys.stdin:
             assert_eq!(sessions.get("source-a").map(|s| s.generation), Some(1), "kept sessions must migrate generation");
         }
         assert!(!runtime.auto_reconnect_active.load(Ordering::Acquire), "auto-reconnect flag must release after loop");
+    }
+
+    /// fake ACP：initialize 后主动发 request_permission（id 5），随后把 stdin 收到的
+    /// 每一行写入 trace（验证客户端应答 wire）。
+    const PERMISSION_SCRIPT: &str = r#"import json,sys,time
+trace=open(sys.argv[1],'w',encoding='utf-8')
+def emit(obj):
+    print(json.dumps(obj), flush=True)
+for line in sys.stdin:
+    request=json.loads(line)
+    if request.get('method') == 'initialize':
+        emit({'jsonrpc':'2.0','id':request.get('id'),'result':{}})
+        time.sleep(0.5)
+        emit({'jsonrpc':'2.0','id':5,'method':'session/request_permission','params':{
+            'sessionId':'fake-session-p1',
+            'toolCall':{'toolCallId':'call-9','title':'edit_file','rawInput':'{"token=SECRET}","path":"x"}'},
+            'options':[{'optionId':'allow_once','name':'Allow once','kind':'allowOnce'},
+                       {'optionId':'reject_once','name':'Reject','kind':'rejectOnce'}]
+        }})
+    else:
+        trace.write(line)
+        trace.flush()
+"#;
+
+    #[tokio::test]
+    async fn fake_acp_request_permission_pends_then_resolves_on_wire() {
+        let trace_path = std::env::temp_dir().join(format!("pylon-permission-{}.jsonl", std::process::id()));
+        let mut env = std::collections::HashMap::new();
+        env.insert("FAKE_MODE".to_string(), "alive".to_string());
+        let agent = AgentDef {
+            name: "fake-permission".to_string(),
+            transport: "subprocess".to_string(),
+            exe: "python".to_string(),
+            args: vec!["-u".to_string(), "-c".to_string(), PERMISSION_SCRIPT.to_string(), trace_path.to_string_lossy().into_owned()],
+            cwd: None,
+            env,
+            default: false,
+        };
+        let initial_acp = AcpClient::connect_with_logs(&agent, None)
+            .await
+            .expect("fake ACP must initialize");
+        let state = build_state(initial_acp, agent).await;
+        let handles = AppStateHandles::from_state(&state);
+        let runtime = handles.active_runtime().expect("active runtime");
+        let app = tauri::test::mock_builder().build(tauri::test::mock_context(tauri::test::noop_assets())).unwrap();
+        let window = tauri::WebviewWindowBuilder::new(&app, "main", tauri::WebviewUrl::External("https://example.com".parse().unwrap()))
+            .build()
+            .expect("mock window must build");
+        start_notification_dispatcher(&handles, &runtime, window);
+
+        // 等 dispatcher 挂起权限请求
+        tokio::time::timeout(std::time::Duration::from_secs(5), async {
+            loop {
+                let pending = runtime.pending_permissions.lock().unwrap();
+                if pending.contains_key(&5) { break; }
+                drop(pending);
+                tokio::time::sleep(std::time::Duration::from_millis(20)).await;
+            }
+        })
+        .await
+        .expect("dispatcher must pend request_permission");
+        let pending = runtime.pending_permissions.lock().unwrap();
+        let permission = pending.get(&5).expect("pending entry");
+        assert_eq!(permission.tool_call_id, "call-9");
+        assert_eq!(permission.options, vec!["allow_once", "reject_once"]);
+        assert!(!permission.prompt.contains("SECRET"), "事件 prompt 必须脱敏");
+        drop(pending);
+
+        // 应答（approve_tool_call 等价路径）
+        resolve_permission(&runtime, 5, "allow_once").await.expect("resolve must succeed");
+        assert!(!runtime.pending_permissions.lock().unwrap().contains_key(&5), "应答后必须清理挂起");
+
+        // 等 fake ACP 收到响应并写入 trace
+        tokio::time::timeout(std::time::Duration::from_secs(5), async {
+            loop {
+                if std::fs::metadata(&trace_path).map(|m| m.len() > 0).unwrap_or(false) { break; }
+                tokio::time::sleep(std::time::Duration::from_millis(20)).await;
+            }
+        })
+        .await
+        .expect("fake ACP must receive response");
+        let trace = std::fs::read_to_string(&trace_path).expect("read trace");
+        std::fs::remove_file(&trace_path).ok();
+        let response: serde_json::Value = serde_json::from_str(trace.trim()).expect("trace line");
+        assert_eq!(response["id"], 5);
+        assert_eq!(response["jsonrpc"], "2.0");
+        assert_eq!(response["result"]["outcome"]["outcome"], "selected");
+        assert_eq!(response["result"]["outcome"]["optionId"], "allow_once");
     }
 }
 
@@ -1507,6 +1711,34 @@ impl AppState {
     }
 }
 
+/// 挂起的权限请求超时检查（B9.2：超时默认拒绝，不悬挂 pending）。
+async fn check_pending_permission_timeouts(state: &AppState) {
+    let now_ms: u64 = runtime_log::timestamp().parse().unwrap_or(0);
+    for runtime in state.runtimes.all() {
+        let expired: Vec<(u64, String)> = runtime.pending_permissions.lock()
+            .map(|pending| {
+                pending.iter()
+                    .filter(|(_, permission)| {
+                        permission
+                            .requested_at
+                            .parse::<u64>()
+                            .map(|at| now_ms.saturating_sub(at) > PERMISSION_REQUEST_TIMEOUT_SECS * 1000)
+                            .unwrap_or(false)
+                    })
+                    .map(|(id, permission)| (*id, permission.tool_call_id.clone()))
+                    .collect()
+            })
+            .unwrap_or_default();
+        for (request_id, tool_call_id) in expired {
+            let acp = runtime.acp.lock().await;
+            let _ = acp.send_response(request_id, permission_response("reject_once")).await;
+            drop(acp);
+            let _ = runtime.pending_permissions.lock().map(|mut pending| pending.remove(&request_id));
+            log::warn!("权限请求 {request_id} 超时默认拒绝（{tool_call_id}）");
+        }
+    }
+}
+
 /// 会话过期检查（B10.3b，expiry watcher 每轮调用）：
 /// 遍历所有 runtime 的会话，按绑定 reset 策略判定过期；过期会话
 /// close ACP + 移除映射 + 平台通知 + 日志。生成中会话（prompt 锁被占用）豁免。
@@ -1560,6 +1792,101 @@ async fn check_session_expiry(state: &AppState) {
 }
 
 const MAX_SESSIONS: usize = 100;
+
+/// 权限请求事件中 prompt 的安全上限（B9.4：事件不含完整 secret 载荷）。
+const PERMISSION_PROMPT_MAX_CHARS: usize = 500;
+/// 挂起的权限请求超时（B9.2：超时默认拒绝）。
+const PERMISSION_REQUEST_TIMEOUT_SECS: u64 = 300;
+
+/// 挂起的权限请求（B9，Peri agent 实证方向：agent 主动 request_permission，客户端应答）。
+#[derive(Clone)]
+pub(crate) struct PendingPermission {
+    pub session_id: String,
+    pub tool_call_id: String,
+    pub title: String,
+    /// raw_input 脱敏摘要（事件安全字段，不含完整载荷）。
+    pub prompt: String,
+    /// 可用选项 option_id（allow_once/reject_once/...），应答时校验。
+    pub options: Vec<String>,
+    pub requested_at: String,
+}
+
+/// 解析 agent 的 request_permission 请求参数（B9）：
+/// `{ sessionId, toolCall: { toolCallId, title?, rawInput? }, options: [{ optionId, ... }] }`。
+/// 解析失败（缺字段/无选项）返回 None——调用方按拒绝处理。
+fn parse_permission_request(params: Option<&serde_json::Value>) -> Option<PendingPermission> {
+    let params = params?;
+    let session_id = params.get("sessionId")?.as_str()?.to_string();
+    let tool_call = params.get("toolCall")?;
+    let tool_call_id = tool_call.get("toolCallId")?.as_str()?.to_string();
+    let title = tool_call
+        .get("title")
+        .and_then(|v| v.as_str())
+        .unwrap_or_default()
+        .to_string();
+    let raw_input = tool_call
+        .get("rawInput")
+        .map(serde_json::Value::to_string)
+        .unwrap_or_default();
+    let prompt: String = runtime_log::sanitize_message(raw_input)
+        .chars()
+        .take(PERMISSION_PROMPT_MAX_CHARS)
+        .collect();
+    let options: Vec<String> = params
+        .get("options")?
+        .as_array()?
+        .iter()
+        .filter_map(|option| option.get("optionId").and_then(|v| v.as_str()))
+        .map(str::to_string)
+        .collect();
+    if options.is_empty() {
+        return None;
+    }
+    Some(PendingPermission {
+        session_id,
+        tool_call_id,
+        title,
+        prompt,
+        options,
+        requested_at: runtime_log::timestamp(),
+    })
+}
+
+/// 构造 request_permission 应答（官方 schema 类型保证 wire 格式）。
+fn permission_response(option_id: &str) -> serde_json::Value {
+    use agent_client_protocol_schema::v1::{
+        RequestPermissionOutcome, RequestPermissionResponse, SelectedPermissionOutcome,
+    };
+    serde_json::to_value(RequestPermissionResponse::new(
+        RequestPermissionOutcome::Selected(SelectedPermissionOutcome::new(option_id.to_string())),
+    ))
+    .unwrap_or_else(|_| serde_json::json!({"outcome": {"selected": {"optionId": option_id}}}))
+}
+
+/// request_permission 应答：Cancelled（session/cancel 时必须应答所有挂起请求）。
+fn permission_response_cancelled() -> serde_json::Value {
+    use agent_client_protocol_schema::v1::{RequestPermissionOutcome, RequestPermissionResponse};
+    serde_json::to_value(RequestPermissionResponse::new(RequestPermissionOutcome::Cancelled))
+        .unwrap_or_else(|_| serde_json::json!({"outcome": "cancelled"}))
+}
+
+/// 应答并移除指定 session 的全部挂起权限请求（Cancelled）——cancel/close 路径调用。
+async fn respond_pending_permissions_cancelled(runtime: &AgentRuntime, session_id: &str) {
+    let pending: Vec<u64> = runtime.pending_permissions.lock()
+        .map(|pending| {
+            pending.iter()
+                .filter(|(_, p)| p.session_id == session_id)
+                .map(|(id, _)| *id)
+                .collect()
+        })
+        .unwrap_or_default();
+    for request_id in pending {
+        let acp = runtime.acp.lock().await;
+        let _ = acp.send_response(request_id, permission_response_cancelled()).await;
+        drop(acp);
+        let _ = runtime.pending_permissions.lock().map(|mut pending| pending.remove(&request_id));
+    }
+}
 
 /// 会话过期判定（B10.3b，参考 Hermes reset policy）：返回过期原因，None = 未过期。
 ///
@@ -1872,6 +2199,8 @@ async fn send_prompt_core(
             if let Some(cancel_error) = cancel_error {
                 log::warn!("cancel timed-out prompt {}: {}", peri_id, cancel_error);
             }
+            // B9：cancel 后应答该 session 挂起的权限请求为 Cancelled
+            respond_pending_permissions_cancelled(runtime, &peri_id).await;
             if response.is_none() {
                 match state.remove_session_if_matches(runtime, source, &peri_id, prompt_generation) {
                     Ok(true) => {
@@ -1962,6 +2291,8 @@ async fn close_session(state: tauri::State<'_, AppState>, source: String) -> Res
             return Err(error);
         }
     }
+    // B9：close 时应答该 session 全部挂起的权限请求为 Cancelled
+    respond_pending_permissions_cancelled(&runtime, &peri_id).await;
     state.ensure_generation(&runtime, generation)?;
     if !state.session_matches(&runtime, &source, &peri_id, generation)? {
         return Err(format!("stale session mapping for source: {source}"));
@@ -1977,6 +2308,8 @@ async fn cancel_prompt(state: tauri::State<'_, AppState>, source: String) -> Res
     let peri_id = state.get_peri_id(&runtime, &source).map_err(|e| e.to_string())?;
     // Fire-and-forget notification — Peri will respond with stopReason=cancelled
     runtime.acp.lock().await.cancel_session(&peri_id).await?;
+    // B9：cancel 时应答该 session 全部挂起的权限请求为 Cancelled（协议要求）
+    respond_pending_permissions_cancelled(&runtime, &peri_id).await;
     state.ensure_generation(&runtime, generation)?;
     if !state.session_matches(&runtime, &source, &peri_id, generation)? {
         return Err(format!("stale session mapping for source: {source}"));
@@ -2215,6 +2548,54 @@ async fn pet_action(app: tauri::AppHandle, state: tauri::State<'_, AppState>, ac
     }
     persist_pet_if_possible(&app, &pet);
     Ok(result)
+}
+
+// ── B9 权限审批 commands ──
+
+/// 应答挂起的权限请求（B9.4 契约）：option_id 必须是请求提供的选项之一。
+/// 拒绝走同一命令（option_id = "reject_once" 等）。返回 Err = 未找到或选项非法。
+pub(crate) async fn resolve_permission(
+    runtime: &AgentRuntime,
+    request_id: u64,
+    option_id: &str,
+) -> Result<(), String> {
+    let found = {
+        let pending = runtime.pending_permissions.lock().map_err(|e| e.to_string())?;
+        pending.get(&request_id).map(|permission| (permission.tool_call_id.clone(), permission.options.clone()))
+    };
+    let Some((tool_call_id, options)) = found else {
+        return Err(format!("permission request not found: {request_id}"));
+    };
+    if !options.iter().any(|option| option == option_id) {
+        return Err(format!("invalid option {option_id} for request {request_id}"));
+    }
+    let acp = runtime.acp.lock().await;
+    acp.send_response(request_id, permission_response(option_id)).await?;
+    drop(acp);
+    let _ = runtime.pending_permissions.lock().map(|mut pending| pending.remove(&request_id));
+    log::info!("权限请求 {request_id} 已应答 {option_id}（{tool_call_id}）");
+    Ok(())
+}
+
+/// 应答挂起的权限请求（命令入口，跨 runtime 定位）。
+#[tauri::command]
+async fn approve_tool_call(state: tauri::State<'_, AppState>, request_id: u64, option_id: String) -> Result<(), String> {
+    for runtime in state.inner().runtimes.all() {
+        if resolve_permission(&runtime, request_id, &option_id).await.is_ok() {
+            return Ok(());
+        }
+    }
+    Err(format!("permission request not found: {request_id}"))
+}
+
+/// 设置权限审批模式（B9.3）：bypass/auto 自动批准；edit/default 挂起询问。
+#[tauri::command]
+async fn set_approval_mode(state: tauri::State<'_, AppState>, mode: String) -> Result<(), String> {
+    if !matches!(mode.as_str(), "bypass" | "auto" | "edit" | "default") {
+        return Err(format!("unknown approval mode: {mode}"));
+    }
+    *state.approval_mode.lock().map_err(|e| e.to_string())? = mode;
+    Ok(())
 }
 
 // ── Session persistence commands ──
@@ -2520,6 +2901,7 @@ pub fn run() {
                 runtime_mcp: Mutex::new(None),
                 prism,
                 gateway,
+                approval_mode: Arc::new(Mutex::new("default".to_string())),
             })
             .invoke_handler(tauri::generate_handler![
                 prism_health, prism_status, prism_state, prism_scenarios, prism_sources, prism_aliases, prism_config,
@@ -2535,6 +2917,7 @@ pub fn run() {
                 new_session, send_message, set_mode, set_config_option, close_session, cancel_prompt, load_sessions,
                 session_inspector, list_agents, switch_agent, reconnect_agent, agent_status, reload_agents, set_mcp_servers,
                 validate_agents,
+                approve_tool_call, set_approval_mode,
                 get_pet, pet_action,
                 load_persisted_session, list_persisted_sessions,
                 export_session,
@@ -2610,6 +2993,7 @@ pub fn run() {
                 }
                 // 会话过期 watcher（B10.3b）：每 60s 检查所有 runtime 的平台会话，
                 // 按绑定 reset 策略（idle/daily/off）过期并重置（close + 平台通知）。
+                // 同循环检查挂起权限请求超时（B9.2：超时默认拒绝）。
                 {
                     let app_for_watcher = app.handle().clone();
                     tokio::spawn(async move {
@@ -2617,6 +3001,7 @@ pub fn run() {
                             tokio::time::sleep(Duration::from_secs(60)).await;
                             let state = app_for_watcher.state::<AppState>();
                             check_session_expiry(state.inner()).await;
+                            check_pending_permission_timeouts(state.inner()).await;
                         }
                     });
                 }

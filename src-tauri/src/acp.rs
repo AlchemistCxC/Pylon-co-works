@@ -17,7 +17,7 @@ use tokio::sync::{broadcast, mpsc, oneshot};
 
 /// JSON-RPC method names used by the ACP protocol.
 // 方法名统一来自官方 schema v1 的 AGENT_METHOD_NAMES（消除手写字符串常量）。
-use agent_client_protocol_schema::v1::AGENT_METHOD_NAMES;
+use agent_client_protocol_schema::v1::{AGENT_METHOD_NAMES, CLIENT_METHOD_NAMES};
 
 pub const METHOD_INITIALIZE: &str = AGENT_METHOD_NAMES.initialize;
 pub const METHOD_SESSION_NEW: &str = AGENT_METHOD_NAMES.session_new;
@@ -28,6 +28,10 @@ pub const METHOD_SESSION_LIST: &str = AGENT_METHOD_NAMES.session_list;
 pub const METHOD_SESSION_SET_MODE: &str = AGENT_METHOD_NAMES.session_set_mode;
 pub const METHOD_SESSION_SET_CONFIG_OPTION: &str = AGENT_METHOD_NAMES.session_set_config_option;
 pub const METHOD_SESSION_CANCEL: &str = AGENT_METHOD_NAMES.session_cancel;
+/// 客户端侧方法（B9）：agent 发起工具审批请求，客户端应答。
+/// Peri（agent）实证：需要批准时主动发带 id 的 request_permission 请求，
+/// 客户端以 RequestPermissionResponse（outcome）应答。
+pub const METHOD_SESSION_REQUEST_PERMISSION: &str = CLIENT_METHOD_NAMES.session_request_permission;
 /// Hermes unstable 扩展：session/set_model（官方 Rust schema 1.4 尚无此类型，
 /// Hermes Python 0.11.2 已实现——切 model 必须走它，set_config_option 对 Hermes 不生效）。
 pub const METHOD_SESSION_SET_MODEL: &str = "session/set_model";
@@ -528,6 +532,22 @@ impl AcpClient {
             "params": params,
         });
         let line = serde_json::to_string(&req).map_err(|e| format!("serialize failed: {}", e))?;
+        self.write_tx.send(line).await.map_err(|_| "ACP connection closed".to_string())?;
+        Ok(())
+    }
+
+    /// 应答 agent 发来的 JSON-RPC 请求（B9：session/request_permission）。
+    /// agent 侧 send_request 等待同 id 响应，不应答会挂起直到超时。
+    pub async fn send_response(&self, id: u64, result: serde_json::Value) -> Result<(), String> {
+        if self.is_crashed() {
+            return Err("ACP connection closed".to_string());
+        }
+        let line = serde_json::json!({
+            "jsonrpc": "2.0",
+            "id": id,
+            "result": result,
+        });
+        let line = serde_json::to_string(&line).map_err(|e| format!("serialize failed: {e}"))?;
         self.write_tx.send(line).await.map_err(|_| "ACP connection closed".to_string())?;
         Ok(())
     }
@@ -1431,6 +1451,47 @@ for line in sys.stdin:
             }
             other => panic!("expected final cancelled response, got {other:?}"),
         }
+    }
+
+    #[tokio::test]
+    async fn send_response_writes_result_with_matching_id() {
+        let trace_path = std::env::temp_dir().join(format!("pylon-acp-response-{}.jsonl", std::process::id()));
+        let script = r#"import json,sys
+trace=open(sys.argv[1],'w',encoding='utf-8')
+for line in sys.stdin:
+    trace.write(line)
+    trace.flush()
+    request=json.loads(line)
+    if request.get('method') == 'initialize':
+        print(json.dumps({'jsonrpc':'2.0','id':request.get('id'),'result':{}}), flush=True)
+"#;
+        let agent = crate::agent_config::AgentDef {
+            name: "fake-acp-response".to_string(),
+            transport: "subprocess".to_string(),
+            exe: "python".to_string(),
+            args: vec!["-u".to_string(), "-c".to_string(), script.to_string(), trace_path.to_string_lossy().into_owned()],
+            cwd: None,
+            env: HashMap::new(),
+            default: false,
+        };
+        let mut client = AcpClient::connect_with_logs(&agent, None)
+            .await
+            .expect("fake ACP must initialize");
+        let result = serde_json::json!({"outcome": {"outcome": "selected", "optionId": "allow_once"}});
+        client.send_response(42, result.clone()).await.expect("send_response must write");
+        // 等待写通道 flush（fake 脚本逐行写 trace）
+        tokio::time::sleep(std::time::Duration::from_millis(200)).await;
+        let trace = std::fs::read_to_string(&trace_path).expect("read trace");
+        std::fs::remove_file(&trace_path).ok();
+        let lines: Vec<serde_json::Value> = trace.lines()
+            .filter_map(|line| serde_json::from_str(line).ok())
+            .collect();
+        let response = lines.iter().find(|line| line.get("id").and_then(|v| v.as_u64()) == Some(42))
+            .expect("response line must exist");
+        assert_eq!(response["jsonrpc"], "2.0");
+        assert_eq!(response["result"]["outcome"]["outcome"], "selected");
+        assert_eq!(response["result"]["outcome"]["optionId"], "allow_once");
+        client.kill().expect("cleanup");
     }
 
     fn process_exists(pid: u32) -> bool {
