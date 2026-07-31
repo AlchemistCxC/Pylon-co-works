@@ -86,7 +86,7 @@
    --conn-gap：不同 message layout 的行间距（claude = 1em，其余 0）。 */
 .term-row-tool + .term-row-tool .term-tool::before {
   content:''; position:absolute;
-  left: calc(0.5em - 1px); /* 指示器字符中心（宽 1em） */
+  left: calc(0.3em - 1px); /* 指示器字符中心（mono 下约 0.6em 宽） */
   top: calc(-1 * var(--chat-line-height,1.4) * 1em / 2 - 2px - var(--conn-gap, 0px));
   height: calc(var(--chat-line-height,1.4) * 1em + 4px + var(--conn-gap, 0px));
   width:2px; background:var(--tool-conn, transparent); pointer-events:none;

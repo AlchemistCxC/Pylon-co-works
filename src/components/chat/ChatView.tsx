@@ -312,6 +312,34 @@ const ChatView = React.memo(function ChatView({ sessionId }: Props) {
     }
   }, [])
 
+  // 连续 Tool 连接线：实测相邻 tool 行间距写入 --conn-gap（body 展开/字号/行高变化
+  // 都会改变实际间距，固定公式无法覆盖；ResizeObserver + rAF 节流）
+  useEffect(() => {
+    const container = chatViewRef.current
+    if (!container) return
+    let raf = 0
+    const update = () => {
+      raf = 0
+      const rows = container.querySelectorAll<HTMLElement>('.term-row-tool')
+      for (let index = 1; index < rows.length; index += 1) {
+        const previous = rows[index - 1]!
+        const row = rows[index]!
+        const gap = row.offsetTop - (previous.offsetTop + previous.offsetHeight)
+        row.querySelector('.term-tool')?.style.setProperty('--conn-gap', `${Math.max(0, gap)}px`)
+      }
+    }
+    const observer = new ResizeObserver(() => {
+      if (raf !== 0) return
+      raf = requestAnimationFrame(update)
+    })
+    observer.observe(container)
+    update()
+    return () => {
+      observer.disconnect()
+      if (raf !== 0) cancelAnimationFrame(raf)
+    }
+  }, [])
+
   const scrollToBottom = useCallback((behavior: ScrollBehavior = 'smooth') => {
     scrollFollowRef.current = 'jumping'
     scrollLockUntilRef.current = performance.now() + (behavior === 'smooth' ? 500 : 50)
