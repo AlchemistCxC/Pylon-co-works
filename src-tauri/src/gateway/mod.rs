@@ -13,7 +13,7 @@ pub mod truncate;
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
 
-use route::{EntityRouteTable, GatewayConfig, QqGatewayConfig};
+use route::{EntityRouteTable, GatewayConfig, InjectConfig, QqGatewayConfig};
 
 /// 平台适配器接口。
 ///
@@ -54,6 +54,7 @@ pub struct GatewayCore {
     adapters: Mutex<HashMap<String, Arc<dyn PlatformAdapter>>>,
     routes: EntityRouteTable,
     qq: QqGatewayConfig,
+    inject: InjectConfig,
     ingest_handler: Mutex<Option<IngestHandler>>,
 }
 
@@ -74,6 +75,7 @@ impl GatewayCore {
             adapters: Mutex::new(HashMap::new()),
             routes: config.routes,
             qq: config.qq,
+            inject: config.inject,
             ingest_handler: Mutex::new(None),
         }
     }
@@ -88,6 +90,26 @@ impl GatewayCore {
     /// QQ 群级白名单配置（QqAdapter 白名单检查用）。
     pub fn qq_config(&self) -> &QqGatewayConfig {
         &self.qq
+    }
+
+    /// B11 注入开关（Prism 可用性由调用方降级处理）。
+    pub fn inject_enabled(&self) -> bool {
+        self.inject.enabled
+    }
+
+    /// B11 注入场景（None = 让 Prism 用 active.scenario）。
+    pub fn inject_scenario(&self) -> Option<&str> {
+        self.inject.scenario.as_deref()
+    }
+
+    /// B11 注入知识源（空 = 让 Prism 用 active.sources）。
+    pub fn inject_sources(&self) -> &[String] {
+        &self.inject.sources
+    }
+
+    /// B11 完成持久化模式："skip" | "prism"。
+    pub fn inject_persist(&self) -> &str {
+        &self.inject.persist
     }
 
     /// 按 source 查询绑定（会话生命周期 watcher 取 reset 策略用）。

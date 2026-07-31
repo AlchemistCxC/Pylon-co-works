@@ -1,9 +1,13 @@
-﻿//! 平台静态绑定路由（BE-B10-001 + B10.3 扩展）。
+﻿//! 平台静态绑定路由（BE-B10-001 + B10.3 扩展 + B11 注入配置）。
 //!
 //! 静态 EntityBinding 路由表：source（如 `qq:group:123`）→
 //! { agent_id, profile_id, session_key, allow_from, reset, idle_minutes }。
 //! 未匹配的 source 由调用方回退默认绑定。
 //! 二期预留动态覆盖/指令切换接口（本文件只做静态配置解析与查询）。
+//!
+//! B11 注入钩子配置（gateway.inject 段）：send_prompt_core 发送前置调用
+//! Prism /inject 拿 context 拼进 prompt；persist 控制完成后的回合持久化
+//! （"skip" 不持久化 / "prism" 调 Prism /persist）。
 //!
 //! 纯数据层：不依赖 tauri/AppState，不读 env。配置结构：
 //!
@@ -11,6 +15,11 @@
 //! gateway:
 //!   qq:
 //!     group_allow_from: [group_openid_1]   # 可选：群级白名单（缺省=不限）
+//!   inject:
+//!     enabled: true                        # 可选：注入开关（默认 true，Prism 不可用自动降级）
+//!     scenario: trpg                       # 可选：缺省让 Prism 用 active.scenario
+//!     sources: [vein]                      # 可选：缺省让 Prism 用 active.sources
+//!     persist: skip                        # 可选：skip | prism（默认 skip）
 //!   routes:
 //!     - source: qq:group:123
 //!       agent: peri
@@ -56,11 +65,36 @@ pub struct QqGatewayConfig {
     pub group_allow_from: Option<Vec<String>>,
 }
 
-/// 完整 gateway 配置：路由表 + 平台配置。
+/// B11 注入钩子配置（gateway.inject 段）。
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct InjectConfig {
+    /// 注入开关。默认 true：Prism 不可用/请求失败时自动降级为不注入（不阻塞消息）。
+    pub enabled: bool,
+    /// 注入场景（Prism scenario 名）；None = 让 Prism 用 active.scenario。
+    pub scenario: Option<String>,
+    /// 注入知识源列表；空 = 让 Prism 用 active.sources。
+    pub sources: Vec<String>,
+    /// 完成持久化模式："skip"（默认，不持久化）| "prism"（POST /persist）。
+    pub persist: String,
+}
+
+impl Default for InjectConfig {
+    fn default() -> Self {
+        Self {
+            enabled: true,
+            scenario: None,
+            sources: Vec::new(),
+            persist: "skip".to_string(),
+        }
+    }
+}
+
+/// 完整 gateway 配置：路由表 + 平台配置 + 注入配置。
 #[derive(Debug, Clone)]
 pub struct GatewayConfig {
     pub routes: EntityRouteTable,
     pub qq: QqGatewayConfig,
+    pub inject: InjectConfig,
 }
 
 impl GatewayConfig {
@@ -69,11 +103,12 @@ impl GatewayConfig {
         parse_config(input)
     }
 
-    /// 空配置（无路由、无白名单）。
+    /// 空配置（无路由、无白名单、默认注入配置）。
     pub fn empty() -> Self {
         Self {
             routes: EntityRouteTable::empty(),
             qq: QqGatewayConfig::default(),
+            inject: InjectConfig::default(),
         }
     }
 }
@@ -94,6 +129,9 @@ struct GatewaySection {
     /// 缺 `qq` 段视为默认（无群级白名单）。
     #[serde(default)]
     qq: Option<QqSection>,
+    /// 缺 `inject` 段视为默认（enabled=true, persist=skip）。
+    #[serde(default)]
+    inject: Option<InjectSection>,
 }
 
 /// `gateway.qq` 段结构。
@@ -104,13 +142,37 @@ struct QqSection {
     group_allow_from: Option<Vec<String>>,
 }
 
-/// 解析完整 gateway 配置（路由表 + 平台配置）。
+/// `gateway.inject` 段结构（B11）。
+#[derive(Debug, Deserialize)]
+struct InjectSection {
+    /// 缺省 = true（Prism 不可用自动降级）。
+    #[serde(default = "default_inject_enabled")]
+    enabled: bool,
+    #[serde(default)]
+    scenario: Option<String>,
+    #[serde(default)]
+    sources: Vec<String>,
+    /// 缺省 = "skip"。
+    #[serde(default = "default_persist_mode")]
+    persist: String,
+}
+
+fn default_inject_enabled() -> bool {
+    true
+}
+
+fn default_persist_mode() -> String {
+    "skip".to_string()
+}
+
+/// 解析完整 gateway 配置（路由表 + 平台配置 + 注入配置）。
 pub fn parse_config(input: &str) -> Result<GatewayConfig, String> {
     let config: GatewayConfigFile = serde_yaml::from_str(input)
         .map_err(|e| format!("gateway 配置解析失败: {e}"))?;
     let section = config.gateway.unwrap_or(GatewaySection {
         routes: Vec::new(),
         qq: None,
+        inject: None,
     });
     let routes = section.routes;
     let mut entries = Vec::with_capacity(routes.len());
@@ -127,9 +189,29 @@ pub fn parse_config(input: &str) -> Result<GatewayConfig, String> {
             group_allow_from: q.group_allow_from,
         })
         .unwrap_or_default();
+    let inject = match section.inject {
+        Some(section) => {
+            if !matches!(section.persist.as_str(), "skip" | "prism") {
+                return Err(format!("gateway.inject.persist 未知模式: {}", section.persist));
+            }
+            if let Some(ref scenario) = section.scenario {
+                if scenario.trim().is_empty() {
+                    return Err("gateway.inject.scenario 不能为空".to_string());
+                }
+            }
+            InjectConfig {
+                enabled: section.enabled,
+                scenario: section.scenario,
+                sources: section.sources,
+                persist: section.persist,
+            }
+        }
+        None => InjectConfig::default(),
+    };
     Ok(GatewayConfig {
         routes: EntityRouteTable { entries },
         qq,
+        inject,
     })
 }
 
@@ -297,5 +379,65 @@ gateway:
         let c2c = config.routes.lookup("qq:user:456").expect("私聊路由应命中");
         assert!(c2c.allow_from.is_none(), "未配置白名单应为 None");
         assert!(c2c.reset.is_none());
+    }
+
+    #[test]
+    fn inject_config_defaults_to_enabled_and_skip_persist() {
+        let config = parse_config("some_other: 1").expect("无 gateway 段应得到默认注入配置");
+        assert!(config.inject.enabled);
+        assert_eq!(config.inject.persist, "skip");
+        assert!(config.inject.scenario.is_none());
+        assert!(config.inject.sources.is_empty());
+    }
+
+    #[test]
+    fn inject_config_parses_full_section() {
+        let yaml = r#"
+gateway:
+  inject:
+    enabled: false
+    scenario: trpg
+    sources: [vein, shared]
+    persist: prism
+"#;
+        let config = parse_config(yaml).expect("注入配置应解析成功");
+        assert!(!config.inject.enabled);
+        assert_eq!(config.inject.scenario.as_deref(), Some("trpg"));
+        assert_eq!(config.inject.sources.as_slice(), &["vein".to_string(), "shared".to_string()][..]);
+        assert_eq!(config.inject.persist, "prism");
+    }
+
+    #[test]
+    fn inject_config_partial_section_keeps_defaults() {
+        let yaml = r#"
+gateway:
+  inject:
+    scenario: trpg
+"#;
+        let config = parse_config(yaml).expect("部分注入配置应解析成功");
+        assert!(config.inject.enabled, "缺 enabled 应默认 true");
+        assert_eq!(config.inject.persist, "skip", "缺 persist 应默认 skip");
+        assert_eq!(config.inject.scenario.as_deref(), Some("trpg"));
+    }
+
+    #[test]
+    fn inject_config_rejects_unknown_persist_mode() {
+        let yaml = r#"
+gateway:
+  inject:
+    persist: chronicle
+"#;
+        let error = parse_config(yaml).expect_err("未知 persist 模式应报错");
+        assert!(error.contains("persist"), "错误信息应指明 persist，实际: {error}");
+    }
+
+    #[test]
+    fn inject_config_rejects_empty_scenario() {
+        let yaml = r#"
+gateway:
+  inject:
+    scenario: ""
+"#;
+        assert!(parse_config(yaml).is_err(), "空 scenario 应报错");
     }
 }

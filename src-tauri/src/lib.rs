@@ -1,4 +1,4 @@
-mod acp;
+﻿mod acp;
 mod agent_config;
 mod agent_runtime;
 mod error;
@@ -878,6 +878,18 @@ fn start_notification_dispatcher<R: tauri::Runtime>(handles: &AppStateHandles, r
                 }
                 if variant == Some("agent_message_chunk") {
                     let _ = pet.lock().map(|mut p| pet::on_first_chunk(&mut p));
+                    // B11.2：流式收集当前回合回复文本（完成持久化 POST /persist 用）；
+                    // 上限 64KB 截断防超长回复撑爆内存。
+                    if let Ok(mut items) = sessions.lock() {
+                        if let Some(session) = items.get_mut(&source) {
+                            if let Some(text) = update.get("content").and_then(|c| c.get("text")).and_then(|v| v.as_str()) {
+                                session.last_response_text.push_str(text);
+                                if session.last_response_text.len() > 64 * 1024 {
+                                    session.last_response_text.truncate(64 * 1024);
+                                }
+                            }
+                        }
+                    }
                 }
                 if variant == Some("user_message_chunk") {
                     if is_replay {
@@ -981,6 +993,10 @@ pub(crate) struct SessionInfo {
     context_size: u64,
     /// 最后活动时间（Unix 毫秒，B10.3b 会话超时/重置判定）。
     updated_at: Option<String>,
+    /// B11：回合计数（每次用户消息 +1；注入与完成持久化共用同一 round）。
+    inject_round: u64,
+    /// B11.2：当前回合 agent 回复文本（dispatcher 流式收集，完成持久化用）。
+    last_response_text: String,
 }
 
 impl SessionInfo {
@@ -1000,6 +1016,8 @@ impl SessionInfo {
             tokens_total: 0,
             context_size: 0,
             updated_at: Some(runtime_log::timestamp()),
+            inject_round: 0,
+            last_response_text: String::new(),
         }
     }
 
@@ -1317,6 +1335,21 @@ for line in sys.stdin:
     }
 
     async fn build_state(initial_acp: AcpClient, agent: AgentDef) -> AppState {
+        build_state_with(
+            initial_acp,
+            agent,
+            Arc::new(gateway::GatewayCore::new()),
+            prism::PrismClient::unavailable("test".to_string()),
+        )
+        .await
+    }
+
+    async fn build_state_with(
+        initial_acp: AcpClient,
+        agent: AgentDef,
+        gateway: Arc<gateway::GatewayCore>,
+        prism: prism::PrismClient,
+    ) -> AppState {
         let mut agents = std::collections::HashMap::new();
         agents.insert(agent.name.clone(), agent.clone());
         let runtime = AgentRuntime::new_disconnected();
@@ -1335,8 +1368,8 @@ for line in sys.stdin:
             pet: Arc::new(Mutex::new(pet::PetState::default())),
             runtime_logs: runtime_log::RuntimeLogHub::default(),
             runtime_mcp: Mutex::new(None),
-            prism: prism::PrismClient::unavailable("test".to_string()),
-            gateway: Arc::new(gateway::GatewayCore::new()),
+            prism,
+            gateway,
             approval_mode: Arc::new(Mutex::new("default".to_string())),
         }
     }
@@ -1483,6 +1516,356 @@ for line in sys.stdin:
         assert_eq!(response["jsonrpc"], "2.0");
         assert_eq!(response["result"]["outcome"]["outcome"], "selected");
         assert_eq!(response["result"]["outcome"]["optionId"], "allow_once");
+    }
+}
+
+// ── B11 注入钩子集成测试 ──
+
+#[cfg(test)]
+mod b11_inject_integration_tests {
+    use super::*;
+    use crate::gateway::route;
+    use std::io::{Read, Write};
+    use std::net::TcpListener;
+    use std::sync::mpsc;
+    use std::thread;
+    use std::time::Duration;
+
+    /// 记录收到 session/prompt 请求的 fake ACP（trace 文件 + 标准响应）。
+    /// 可选流式 chunk（PERSIST_CHUNK 环境变量开启）——先发 agent_message_chunk
+    /// 再响应 stopReason（延迟 0.2s 让 dispatcher 先收集回复文本）。
+    const TRACE_ACP_SCRIPT: &str = r#"import json,sys,os,time
+trace=open(sys.argv[1],'w',encoding='utf-8')
+persist_chunk = os.environ.get('PERSIST_CHUNK', '') == '1'
+for line in sys.stdin:
+    request=json.loads(line)
+    method=request.get('method')
+    response={'jsonrpc':'2.0','id':request.get('id'),'result':{}}
+    if method == 'session/new':
+        response['result']={'sessionId':'fake-inject-session'}
+    elif method == 'session/prompt':
+        if persist_chunk:
+            session_id=request['params']['sessionId']
+            print(json.dumps({'jsonrpc':'2.0','method':'session/update','params':{'sessionId':session_id,'update':{'sessionUpdate':'agent_message_chunk','content':{'text':'回复文本'}}}}), flush=True)
+            time.sleep(0.2)
+        trace.write(json.dumps(request)+'\n')
+        trace.flush()
+        response['result']={'stopReason':'end_turn'}
+    print(json.dumps(response), flush=True)
+"#;
+
+    fn trace_acp_agent(trace_path: &std::path::Path, chunk: bool) -> AgentDef {
+        let mut env = std::collections::HashMap::new();
+        env.insert("FAKE_MODE".to_string(), "alive".to_string());
+        env.insert("PERSIST_CHUNK".to_string(), if chunk { "1".to_string() } else { "0".to_string() });
+        AgentDef {
+            name: "fake-acp-trace".to_string(),
+            transport: "subprocess".to_string(),
+            exe: "python".to_string(),
+            args: vec!["-u".to_string(), "-c".to_string(), TRACE_ACP_SCRIPT.to_string(), trace_path.to_string_lossy().into_owned()],
+            cwd: None,
+            env,
+            default: false,
+        }
+    }
+
+    const STUB_RESPONSE_BODY: &str = r#"{"context":"注入上下文","activated":["uid-1"],"source":"vein"}"#;
+
+    /// Prism /inject 桩：非阻塞轮询处理 expected_requests 次请求（超时自动退出，
+    /// 防"不应有请求"的测试卡死 join），完整请求文本发 channel。
+    fn spawn_inject_stub(expected_requests: usize) -> (std::net::SocketAddr, mpsc::Receiver<String>, thread::JoinHandle<()>) {
+        let listener = TcpListener::bind("127.0.0.1:0").expect("bind stub");
+        listener.set_nonblocking(true).expect("nonblocking");
+        let address = listener.local_addr().expect("address");
+        let (request_tx, request_rx) = mpsc::channel();
+        let server = thread::spawn(move || {
+            let deadline = std::time::Instant::now() + Duration::from_secs(5);
+            let mut handled = 0usize;
+            while handled < expected_requests {
+                match listener.accept() {
+                    Ok((mut stream, _)) => {
+                        let mut bytes = Vec::new();
+                        let mut buffer = [0_u8; 1024];
+                        loop {
+                            match stream.read(&mut buffer) {
+                                Ok(0) => break,
+                                Ok(count) => {
+                                    bytes.extend_from_slice(&buffer[..count]);
+                                    if let Some(headers_end) = bytes.windows(4).position(|window| window == b"\r\n\r\n") {
+                                        let headers = String::from_utf8_lossy(&bytes[..headers_end]);
+                                        let length = headers.lines()
+                                            .find_map(|line| line.strip_prefix("Content-Length: "))
+                                            .and_then(|value| value.trim().parse::<usize>().ok())
+                                            .unwrap_or(0);
+                                        if bytes.len() >= headers_end + 4 + length { break; }
+                                    }
+                                }
+                                Err(error) if error.kind() == std::io::ErrorKind::WouldBlock => {
+                                    if std::time::Instant::now() > deadline { return; }
+                                    thread::sleep(Duration::from_millis(20));
+                                }
+                                Err(_) => return,
+                            }
+                        }
+                        let _ = request_tx.send(String::from_utf8(bytes).expect("request UTF-8"));
+                        handled += 1;
+                        let response = format!(
+                            "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{}",
+                            STUB_RESPONSE_BODY.len(), STUB_RESPONSE_BODY
+                        );
+                        let _ = stream.write_all(response.as_bytes());
+                    }
+                    Err(error) if error.kind() == std::io::ErrorKind::WouldBlock => {
+                        if std::time::Instant::now() > deadline { return; }
+                        thread::sleep(Duration::from_millis(20));
+                    }
+                    Err(_) => return,
+                }
+            }
+        });
+        (address, request_rx, server)
+    }
+
+    fn gateway_with_inject(yaml: &str) -> Arc<gateway::GatewayCore> {
+        Arc::new(gateway::GatewayCore::from_config(route::parse_config(yaml).expect("合法配置")))
+    }
+
+    fn inject_prompt_text(trace_path: &std::path::Path) -> String {
+        let trace = std::fs::read_to_string(trace_path).expect("read trace");
+        let request: serde_json::Value = trace.lines()
+            .map(|line| serde_json::from_str(line).expect("trace line"))
+            .find(|value: &serde_json::Value| {
+                value.get("method").and_then(|m| m.as_str()) == Some("session/prompt")
+            })
+            .expect("prompt request must be traced");
+        request["params"]["prompt"][0]["text"].as_str().expect("prompt text").to_string()
+    }
+
+    /// mock 环境：owned app + window；state() 借用 app（生命周期安全）。
+    struct MockEnv {
+        app: tauri::App<tauri::test::MockRuntime>,
+        window: tauri::Window<tauri::test::MockRuntime>,
+        _webview: tauri::WebviewWindow<tauri::test::MockRuntime>,
+    }
+
+    impl MockEnv {
+        fn new(state: AppState) -> Self {
+            let app = tauri::test::mock_builder()
+                .build(tauri::test::mock_context(tauri::test::noop_assets()))
+                .expect("mock app must build");
+            app.manage(state);
+            let webview = tauri::WebviewWindowBuilder::new(
+                &app,
+                "main",
+                tauri::WebviewUrl::External("https://example.com".parse().unwrap()),
+            )
+            .build()
+            .expect("mock webview must build");
+            let window = webview.as_ref().window();
+            Self { app, window, _webview: webview }
+        }
+
+        fn state(&self) -> tauri::State<'_, AppState> {
+            self.app.state::<AppState>()
+        }
+    }
+
+    /// b11 模块专用 state 构造（auto_reconnect_integration_tests 的
+    /// build_state_with 是兄弟模块私有项，不能跨模块引用）。
+    async fn build_state_with(
+        initial_acp: AcpClient,
+        agent: AgentDef,
+        gateway: Arc<gateway::GatewayCore>,
+        prism: prism::PrismClient,
+    ) -> AppState {
+        let mut agents = std::collections::HashMap::new();
+        agents.insert(agent.name.clone(), agent.clone());
+        let runtime = AgentRuntime::new_disconnected();
+        *runtime.acp.lock().await = initial_acp;
+        let runtimes = Arc::new(AgentRuntimeManager::new());
+        runtimes.insert(agent.name.clone(), runtime);
+        AppState {
+            runtimes,
+            agents: Arc::new(Mutex::new(agents)),
+            active_agent: Arc::new(Mutex::new(agent.name.clone())),
+            pet: Arc::new(Mutex::new(pet::PetState::default())),
+            runtime_logs: runtime_log::RuntimeLogHub::default(),
+            runtime_mcp: Mutex::new(None),
+            prism,
+            gateway,
+            approval_mode: Arc::new(Mutex::new("default".to_string())),
+        }
+    }
+
+    #[tokio::test]
+    async fn inject_prepends_context_and_advances_round_per_message() {
+        let (address, request_rx, server) = spawn_inject_stub(2);
+        let trace_path = std::env::temp_dir().join(format!("pylon-b11-trace-{}.jsonl", std::process::id()));
+        let agent = trace_acp_agent(&trace_path, false);
+        let initial_acp = AcpClient::connect_with_logs(&agent, None).await.expect("fake ACP must initialize");
+        let gateway = gateway_with_inject(r#"
+gateway:
+  inject:
+    scenario: trpg
+    sources: [vein]
+"#);
+        let prism = prism::PrismClient::for_testing(format!("http://{}", address), Some("test-token".to_string()));
+        let state = build_state_with(initial_acp, agent, gateway, prism).await;
+        let env = MockEnv::new(state);
+
+        send_message(env.state(), env.window.clone(), "source-b11".to_string(), "你好".to_string(), String::new(), None, None, None)
+            .await
+            .expect("first message must send");
+        assert_eq!(inject_prompt_text(&trace_path), "注入上下文\n\n你好");
+        let first_request = request_rx.recv_timeout(Duration::from_secs(2)).expect("first inject request");
+        let first_body: serde_json::Value = first_request.split("\r\n\r\n").nth(1).expect("body").parse().expect("body JSON");
+        assert_eq!(first_body["scenario"], "trpg");
+        assert_eq!(first_body["sources"], serde_json::json!(["vein"]));
+        assert_eq!(first_body["user_msg"], "你好");
+        assert_eq!(first_body["round"], 0);
+
+        send_message(env.state(), env.window.clone(), "source-b11".to_string(), "继续".to_string(), String::new(), None, None, None)
+            .await
+            .expect("second message must send");
+        let second_request = request_rx.recv_timeout(Duration::from_secs(2)).expect("second inject request");
+        let second_body: serde_json::Value = second_request.split("\r\n\r\n").nth(1).expect("body").parse().expect("body JSON");
+        assert_eq!(second_body["round"], 1);
+        assert_eq!(second_body["user_msg"], "继续");
+
+        server.join().expect("stub thread");
+        std::fs::remove_file(&trace_path).ok();
+    }
+
+    #[tokio::test]
+    async fn inject_disabled_passes_plain_text_through() {
+        let (address, request_rx, server) = spawn_inject_stub(1);
+        let trace_path = std::env::temp_dir().join(format!("pylon-b11-disabled-{}.jsonl", std::process::id()));
+        let agent = trace_acp_agent(&trace_path, false);
+        let initial_acp = AcpClient::connect_with_logs(&agent, None).await.expect("fake ACP must initialize");
+        let gateway = gateway_with_inject(r#"
+gateway:
+  inject:
+    enabled: false
+"#);
+        let prism = prism::PrismClient::for_testing(format!("http://{}", address), Some("t".to_string()));
+        let state = build_state_with(initial_acp, agent, gateway, prism).await;
+        let env = MockEnv::new(state);
+
+        send_message(env.state(), env.window.clone(), "source-b11-off".to_string(), "你好".to_string(), String::new(), None, None, None)
+            .await
+            .expect("message must send");
+        assert_eq!(inject_prompt_text(&trace_path), "你好");
+        assert!(request_rx.try_recv().is_err(), "禁用注入时不得调用 /inject");
+        server.join().expect("stub thread");
+        std::fs::remove_file(&trace_path).ok();
+    }
+
+    #[tokio::test]
+    async fn inject_unavailable_degrades_without_injection() {
+        let trace_path = std::env::temp_dir().join(format!("pylon-b11-unavailable-{}.jsonl", std::process::id()));
+        let agent = trace_acp_agent(&trace_path, false);
+        let initial_acp = AcpClient::connect_with_logs(&agent, None).await.expect("fake ACP must initialize");
+        let gateway = gateway_with_inject(r#"
+gateway:
+  inject:
+    enabled: true
+"#);
+        let state = build_state_with(initial_acp, agent, gateway, prism::PrismClient::unavailable("test".to_string())).await;
+        let env = MockEnv::new(state);
+
+        send_message(env.state(), env.window.clone(), "source-b11-ua".to_string(), "你好".to_string(), String::new(), None, None, None)
+            .await
+            .expect("message must send without injection");
+        assert_eq!(inject_prompt_text(&trace_path), "你好");
+        std::fs::remove_file(&trace_path).ok();
+    }
+
+    #[tokio::test]
+    async fn command_message_skips_injection() {
+        let (address, request_rx, server) = spawn_inject_stub(1);
+        let trace_path = std::env::temp_dir().join(format!("pylon-b11-cmd-{}.jsonl", std::process::id()));
+        let agent = trace_acp_agent(&trace_path, false);
+        let initial_acp = AcpClient::connect_with_logs(&agent, None).await.expect("fake ACP must initialize");
+        let gateway = gateway_with_inject(r#"
+gateway:
+  inject:
+    enabled: true
+"#);
+        let prism = prism::PrismClient::for_testing(format!("http://{}", address), Some("t".to_string()));
+        let state = build_state_with(initial_acp, agent, gateway, prism).await;
+        let env = MockEnv::new(state);
+
+        send_message(env.state(), env.window.clone(), "source-b11-cmd".to_string(), "/status".to_string(), String::new(), None, None, None)
+            .await
+            .expect("command message must send");
+        assert_eq!(inject_prompt_text(&trace_path), "/status");
+        assert!(request_rx.try_recv().is_err(), "命令消息不得触发 /inject");
+        server.join().expect("stub thread");
+        std::fs::remove_file(&trace_path).ok();
+    }
+
+    #[tokio::test]
+    async fn persist_prism_mode_sends_round_with_streamed_response() {
+        let (address, request_rx, server) = spawn_inject_stub(2);
+        let trace_path = std::env::temp_dir().join(format!("pylon-b11-persist-{}.jsonl", std::process::id()));
+        let agent = trace_acp_agent(&trace_path, true);
+        let initial_acp = AcpClient::connect_with_logs(&agent, None).await.expect("fake ACP must initialize");
+        let gateway = gateway_with_inject(r#"
+gateway:
+  inject:
+    enabled: true
+    scenario: trpg
+    persist: prism
+"#);
+        let prism = prism::PrismClient::for_testing(format!("http://{}", address), Some("test-token".to_string()));
+        let state = build_state_with(initial_acp, agent, gateway, prism).await;
+        let app = tauri::test::mock_builder()
+            .build(tauri::test::mock_context(tauri::test::noop_assets()))
+            .expect("mock app must build");
+        app.manage(state);
+        let webview = tauri::WebviewWindowBuilder::new(
+            &app,
+            "main",
+            tauri::WebviewUrl::External("https://example.com".parse().unwrap()),
+        )
+        .build()
+        .expect("mock webview must build");
+        // 启动 dispatcher：流式收集回复文本（persist 依赖）
+        let handles = AppStateHandles::from_state(app.state::<AppState>().inner());
+        let runtime = handles.active_runtime().expect("active runtime");
+        start_notification_dispatcher(&handles, &runtime, webview.clone());
+        let window = webview.as_ref().window();
+
+        send_message(app.state::<AppState>(), window, "source-b11-persist".to_string(), "你好".to_string(), String::new(), None, None, None)
+            .await
+            .expect("message must send");
+
+        // 第一个请求 = /inject（round 0）
+        let first = request_rx.recv_timeout(Duration::from_secs(2)).expect("inject request");
+        assert!(first.starts_with("POST /inject HTTP/1.1"));
+        // 第二个请求 = /persist（round 0 + 流式回复文本）
+        let second = request_rx.recv_timeout(Duration::from_secs(2)).expect("persist request");
+        assert!(second.starts_with("POST /persist HTTP/1.1"));
+        let body: serde_json::Value = second.split("\r\n\r\n").nth(1).expect("body").parse().expect("body JSON");
+        assert_eq!(body["scenario"], "trpg");
+        assert_eq!(body["user_msg"], "你好");
+        assert_eq!(body["response"], "回复文本");
+        assert_eq!(body["round"], 0);
+
+        server.join().expect("stub thread");
+        std::fs::remove_file(&trace_path).ok();
+    }
+
+    #[test]
+    fn inject_prompt_composition_is_plain_and_conditional() {
+        assert_eq!(compose_inject_prompt("世界书上下文", "用户消息"), "世界书上下文\n\n用户消息");
+        assert_eq!(compose_inject_prompt("", "用户消息"), "用户消息");
+        assert_eq!(compose_inject_prompt("   ", "用户消息"), "用户消息");
+        assert_eq!(compose_inject_prompt("上下文", ""), "上下文\n\n");
+        assert!(inject_applies_to("普通消息"));
+        assert!(inject_applies_to("  hello"));
+        assert!(!inject_applies_to("/command"));
+        assert!(!inject_applies_to("  /command"));
     }
 }
 
@@ -1938,6 +2321,21 @@ fn apply_client_replacement_sessions(
     }
 }
 
+/// B11.1 注入适用性：命令消息（`/` 开头，与 persona 拼接规则一致）不注入。
+fn inject_applies_to(content: &str) -> bool {
+    !content.trim_start().starts_with('/')
+}
+
+/// B11.1 prompt 拼装：注入 context 前置 + 双换行分隔；context 空白时原样返回。
+fn compose_inject_prompt(context: &str, text: &str) -> String {
+    let context = context.trim();
+    if context.is_empty() {
+        text.to_string()
+    } else {
+        format!("{context}\n\n{text}")
+    }
+}
+
 fn write_export_atomically(path: &std::path::Path, content: &[u8]) -> Result<(), String> {
     if path.exists() {
         return Err(format!("export output already exists: {}", path.display()));
@@ -2009,9 +2407,9 @@ async fn new_session(
 }
 
 #[tauri::command]
-async fn send_message(
+async fn send_message<R: tauri::Runtime>(
     state: tauri::State<'_, AppState>,
-    window: tauri::Window,
+    window: tauri::Window<R>,
     source: String,
     content: String,
     persona: String,
@@ -2038,10 +2436,10 @@ async fn send_message(
 /// 公共发送管线（GUI `send_message` 与 gateway 平台 ingest 共用，B10.3）：
 /// per-runtime 会话创建/映射/prompt 锁/等待/cancel/事件广播。
 /// 平台 ingest 经 handler 路由到绑定 agent 的 runtime 后调用本函数。
-async fn send_prompt_core(
+async fn send_prompt_core<R: tauri::Runtime>(
     state: &AppState,
     runtime: &Arc<AgentRuntime>,
-    window: Option<&tauri::Window>,
+    window: Option<&tauri::Window<R>>,
     gateway: &GatewayCore,
     source: &str,
     content: &str,
@@ -2119,11 +2517,56 @@ async fn send_prompt_core(
     } else {
         content.to_string()
     };
-    let prompt_blocks = AcpClient::prompt_blocks(prompt_content, &attachment_paths)?;
+
+    // B11.1：发送前置注入钩子（GUI 与平台 ingest 统一入口）——Prism 可用 +
+    // gateway 配置开启 + 非命令消息 → POST /inject 拿 context 前置拼进 prompt。
+    // Prism 不可用/请求失败 → 降级为不注入（消息照发，fail-open）。
+    let mut inject_activated: Vec<String> = Vec::new();
+    let message_round = {
+        let sessions = runtime.sessions.lock().map_err(|e| e.to_string())?;
+        sessions.get(source).map(|s| s.inject_round).unwrap_or(0)
+    };
+    let prompt_text = if gateway.inject_enabled() && inject_applies_to(content) {
+        match state.prism.inject(
+            gateway.inject_scenario().unwrap_or_default(),
+            gateway.inject_sources(),
+            content,
+            message_round,
+        ).await {
+            Ok(result) => {
+                if result.activated.is_empty() {
+                    state.log_runtime_summary("info", "inject", Some(source.to_string()), "Prism inject returned empty context", serde_json::Map::from_iter([
+                        ("contextLength".to_string(), serde_json::Value::from(result.context.len())),
+                    ]));
+                } else {
+                    state.log_runtime_summary("info", "inject", Some(source.to_string()), "Prism inject activated", serde_json::Map::from_iter([
+                        ("activatedCount".to_string(), serde_json::Value::from(result.activated.len())),
+                        ("contextLength".to_string(), serde_json::Value::from(result.context.len())),
+                    ]));
+                }
+                inject_activated = result.activated;
+                compose_inject_prompt(&result.context, &prompt_content)
+            }
+            Err(error) => {
+                log::warn!("Prism inject failed: {error}");
+                state.log_runtime_summary("warn", "inject", Some(source.to_string()), "Prism inject failed; sent without injection", serde_json::Map::new());
+                prompt_content
+            }
+        }
+    } else {
+        prompt_content
+    };
+    let prompt_blocks = AcpClient::prompt_blocks(prompt_text, &attachment_paths)?;
 
     state.pet.lock().map(|mut p| pet::on_user_sent(&mut p)).ok();
     if let Some(window) = window {
-        emit_event(window, "peri:user", serde_json::json!({ "source": source, "content": content }));
+        let mut user_payload = serde_json::json!({ "source": source, "content": content });
+        if !inject_activated.is_empty() {
+            user_payload["injectActivated"] = serde_json::Value::Array(
+                inject_activated.iter().map(|item| serde_json::Value::String(item.clone())).collect()
+            );
+        }
+        emit_event(window, "peri:user", user_payload);
     }
     let (request_id, write_tx, prompt_line, mut rx) = {
         let acp = runtime.acp.lock().await;
@@ -2134,6 +2577,14 @@ async fn send_prompt_core(
         runtime.acp.lock().await.remove_pending(request_id);
         let _ = state.remove_session_if_matches(runtime, source, &peri_id, prompt_generation);
         return Err(PylonError::Protocol("ACP connection closed".to_string()));
+    }
+    // B11：回合推进——该 session 用户回合 +1（注入/持久化共用同一 round）；
+    // 清空上一回合回复文本（本轮回复由 dispatcher 重新收集）。
+    if let Ok(mut sessions) = runtime.sessions.lock() {
+        if let Some(session) = sessions.get_mut(source) {
+            session.inject_round = session.inject_round.saturating_add(1);
+            session.last_response_text.clear();
+        }
     }
     let acp_for_cancel = runtime.acp.clone();
     let peri_id_for_cancel = peri_id.clone();
@@ -2182,6 +2633,42 @@ async fn send_prompt_core(
                     emit_event_all(window, gateway, source, "peri:done", serde_json::json!({"source": source, "data": data}));
                 }
                 let _ = state.pet.lock().map(|mut p| pet::on_done(&mut p));
+                // B11.2：完成持久化（gateway.inject.persist = "prism"）——把本回合
+                // （用户消息 + 流式收集的回复文本）交 Prism /persist（LLM 摘要 +
+                // recent.json + active.round 推进）。失败只告警，不阻断。
+                if gateway.inject_persist() == "prism" {
+                    let response_text = {
+                        let sessions = runtime.sessions.lock().map_err(|e| e.to_string())?;
+                        sessions.get(source).map(|s| s.last_response_text.clone()).unwrap_or_default()
+                    };
+                    if !response_text.trim().is_empty() {
+                        match state.prism.persist_round(
+                            gateway.inject_scenario().unwrap_or_default(),
+                            gateway.inject_sources(),
+                            content,
+                            &response_text,
+                            message_round,
+                        ).await {
+                            Ok(value) => {
+                                let ok = value.get("ok").and_then(|v| v.as_bool()).unwrap_or(false);
+                                if !ok {
+                                    log::warn!("Prism persist 返回失败: {value}");
+                                }
+                                state.log_runtime_summary(
+                                    "info",
+                                    "persist",
+                                    Some(source.to_string()),
+                                    if ok { "Prism round persisted" } else { "Prism persist returned failure" },
+                                    serde_json::Map::new(),
+                                );
+                            }
+                            Err(error) => {
+                                log::warn!("Prism persist failed: {error}");
+                                state.log_runtime_summary("warn", "persist", Some(source.to_string()), "Prism persist failed", serde_json::Map::new());
+                            }
+                        }
+                    }
+                }
                 state.log_runtime_summary( "info", "prompt", Some(source.to_string()), "Prompt completed", serde_json::Map::from_iter([
                     ("result".to_string(), serde_json::Value::String("success".to_string())),
                 ]));

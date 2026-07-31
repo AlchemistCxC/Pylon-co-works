@@ -41,6 +41,27 @@ pub struct PrismClient {
     configuration_error: Option<String>,
 }
 
+/// B11：Prism /inject 响应（注入上下文 + 激活条目）。
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct InjectResult {
+    pub context: String,
+    pub activated: Vec<String>,
+    pub source: String,
+}
+
+impl InjectResult {
+    fn from_value(value: &Value) -> Result<Self, String> {
+        Ok(Self {
+            context: value.get("context").and_then(|v| v.as_str()).unwrap_or_default().to_string(),
+            activated: value.get("activated")
+                .and_then(|v| v.as_array())
+                .map(|items| items.iter().filter_map(|item| item.as_str()).map(str::to_string).collect())
+                .unwrap_or_default(),
+            source: value.get("source").and_then(|v| v.as_str()).unwrap_or_default().to_string(),
+        })
+    }
+}
+
 impl PrismClient {
     pub fn from_env() -> Result<Self, String> {
         let raw = env::var("PYLON_PRISM_URL")
@@ -146,6 +167,43 @@ impl PrismClient {
 
     pub async fn post(&self, path: &str, body: Value) -> Result<Value, String> {
         self.request(Method::POST, self.endpoint(path)?, Some(body)).await
+    }
+
+    /// B11：发送前置注入——POST /inject { scenario, sources, user_msg, round }。
+    /// 返回 { context, activated, source }（字段缺失按空/默认容错）。
+    pub async fn inject(&self, scenario: &str, sources: &[String], user_msg: &str, round: u64) -> Result<InjectResult, String> {
+        let body = serde_json::json!({
+            "scenario": scenario,
+            "sources": sources,
+            "user_msg": user_msg,
+            "round": round,
+        });
+        let value = self.post("/inject", body).await?;
+        InjectResult::from_value(&value)
+    }
+
+    /// B11.2：回合完成持久化——POST /persist { scenario, sources, user_msg, response, round }。
+    /// 返回原始响应（ok/writes/errors 由调用方记录）。
+    pub async fn persist_round(&self, scenario: &str, sources: &[String], user_msg: &str, response: &str, round: u64) -> Result<Value, String> {
+        let body = serde_json::json!({
+            "scenario": scenario,
+            "sources": sources,
+            "user_msg": user_msg,
+            "response": response,
+            "round": round,
+        });
+        self.post("/persist", body).await
+    }
+
+    /// 测试构造：任意 URL（桩服务），无 configuration_error（lib.rs 集成测试用）。
+    #[cfg(test)]
+    pub(crate) fn for_testing(url: String, token: Option<String>) -> Self {
+        Self {
+            client: Client::builder().build().expect("test HTTP client"),
+            base_url: Url::parse(&url).expect("test base URL"),
+            admin_token: token,
+            configuration_error: None,
+        }
     }
 
     pub async fn post_query<I, K, V>(&self, path: &str, query: I, body: Value) -> Result<Value, String>
@@ -360,5 +418,133 @@ mod tests {
         assert!(error.starts_with("Prism HTTP 500: "));
         assert!(error.len() <= "Prism HTTP 500: ".len() + MAX_ERROR_BODY);
         server.join().expect("server thread");
+    }
+
+    #[tokio::test]
+    async fn inject_shapes_request_and_parses_response() {
+        let listener = TcpListener::bind("127.0.0.1:0").expect("bind test server");
+        let address = listener.local_addr().expect("listener address");
+        let (request_tx, request_rx) = mpsc::channel();
+        let server = thread::spawn(move || {
+            let (mut stream, _) = listener.accept().expect("accept request");
+            let mut bytes = Vec::new();
+            let mut buffer = [0_u8; 1024];
+            let _content_length = loop {
+                let count = stream.read(&mut buffer).expect("read request");
+                if count == 0 {
+                    break 0;
+                }
+                bytes.extend_from_slice(&buffer[..count]);
+                if let Some(headers_end) = bytes.windows(4).position(|window| window == b"\r\n\r\n") {
+                    let headers = String::from_utf8_lossy(&bytes[..headers_end]);
+                    let length = headers
+                        .lines()
+                        .find_map(|line| line.strip_prefix("Content-Length: "))
+                        .and_then(|value| value.trim().parse::<usize>().ok())
+                        .unwrap_or(0);
+                    if bytes.len() >= headers_end + 4 + length {
+                        break length;
+                    }
+                }
+            };
+            request_tx.send(String::from_utf8(bytes).expect("request UTF-8")).expect("send request");
+            let body = r#"{"context":"注入上下文","activated":["uid-1"],"source":"vein"}"#;
+            let response = format!(
+                "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{}",
+                body.len(), body
+            );
+            stream
+                .write_all(response.as_bytes())
+                .expect("write response");
+        });
+        let client = test_client(address, Some("test-admin-token"));
+        let result = client.inject("trpg", &["vein".to_string()], "你好", 3).await.expect("inject must succeed");
+        assert_eq!(result.context, "注入上下文");
+        assert_eq!(result.activated, vec!["uid-1".to_string()]);
+        assert_eq!(result.source, "vein");
+        let request = request_rx.recv().expect("captured request");
+        assert!(request.starts_with("POST /inject HTTP/1.1"));
+        assert!(request.contains("authorization: Bearer test-admin-token") || request.contains("Authorization: Bearer test-admin-token"));
+        let body: serde_json::Value = request.split("\r\n\r\n").nth(1).expect("body").parse().expect("body JSON");
+        assert_eq!(body["scenario"], "trpg");
+        assert_eq!(body["sources"], serde_json::json!(["vein"]));
+        assert_eq!(body["user_msg"], "你好");
+        assert_eq!(body["round"], 3);
+        server.join().expect("server thread");
+    }
+
+    #[tokio::test]
+    async fn inject_tolerates_missing_response_fields() {
+        let (address, server) = spawn_response_server(
+            b"HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: 2\r\nConnection: close\r\n\r\n{}",
+        );
+        let result = test_client(address, Some("t")).inject("", &[], "", 0).await.expect("empty response must parse");
+        assert_eq!(result.context, "");
+        assert!(result.activated.is_empty());
+        assert_eq!(result.source, "");
+        server.join().expect("server thread");
+    }
+
+    #[tokio::test]
+    async fn persist_round_shapes_request_with_response_text() {
+        let listener = TcpListener::bind("127.0.0.1:0").expect("bind test server");
+        let address = listener.local_addr().expect("listener address");
+        let (request_tx, request_rx) = mpsc::channel();
+        let server = thread::spawn(move || {
+            let (mut stream, _) = listener.accept().expect("accept request");
+            let mut bytes = Vec::new();
+            let mut buffer = [0_u8; 1024];
+            let _content_length = loop {
+                let count = stream.read(&mut buffer).expect("read request");
+                if count == 0 {
+                    break 0;
+                }
+                bytes.extend_from_slice(&buffer[..count]);
+                if let Some(headers_end) = bytes.windows(4).position(|window| window == b"\r\n\r\n") {
+                    let headers = String::from_utf8_lossy(&bytes[..headers_end]);
+                    let length = headers
+                        .lines()
+                        .find_map(|line| line.strip_prefix("Content-Length: "))
+                        .and_then(|value| value.trim().parse::<usize>().ok())
+                        .unwrap_or(0);
+                    if bytes.len() >= headers_end + 4 + length {
+                        break length;
+                    }
+                }
+            };
+            request_tx.send(String::from_utf8(bytes).expect("request UTF-8")).expect("send request");
+            let body = r#"{"ok":true,"writes":[]}"#;
+            let response = format!(
+                "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{}",
+                body.len(), body
+            );
+            stream
+                .write_all(response.as_bytes())
+                .expect("write response");
+        });
+        let client = test_client(address, Some("test-admin-token"));
+        let response = client.persist_round("trpg", &[], "用户消息", "回复文本", 4).await.expect("persist must succeed");
+        assert_eq!(response["ok"], true);
+        let request = request_rx.recv().expect("captured request");
+        assert!(request.starts_with("POST /persist HTTP/1.1"));
+        assert!(request.contains("authorization: Bearer test-admin-token") || request.contains("Authorization: Bearer test-admin-token"));
+        let body: serde_json::Value = request.split("\r\n\r\n").nth(1).expect("body").parse().expect("body JSON");
+        assert_eq!(body["scenario"], "trpg");
+        assert_eq!(body["user_msg"], "用户消息");
+        assert_eq!(body["response"], "回复文本");
+        assert_eq!(body["round"], 4);
+        server.join().expect("server thread");
+    }
+
+    #[tokio::test]
+    async fn inject_fails_closed_on_configuration_error_without_network() {
+        let client = PrismClient {
+            client: Client::new(),
+            base_url: Url::parse(DEFAULT_BASE_URL).unwrap(),
+            admin_token: None,
+            configuration_error: Some("bad env".into()),
+        };
+        let error = client.inject("", &[], "x", 0).await.expect_err("configuration error must fail fast");
+        assert!(error.contains("Prism configuration error"));
     }
 }
