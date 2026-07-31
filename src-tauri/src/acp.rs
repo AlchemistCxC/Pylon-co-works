@@ -547,8 +547,17 @@ impl AcpClient {
                         if raw.method.is_none() && raw.id.is_some() {
                             if let Some(id) = raw.id {
                                 let shard = &pending_clone[id as usize % PENDING_SHARDS];
-                                let mut p = shard.lock().unwrap();
-                                if let Some(tx) = p.remove(&id) { let _ = tx.send(raw); }
+                                match shard.lock() {
+                                    Ok(mut p) => {
+                                        if let Some(tx) = p.remove(&id) { let _ = tx.send(raw); }
+                                    }
+                                    Err(_) => {
+                                        // poison 时无法 resolve pending，标记 crashed 让上层收敛，
+                                        // 避免读线程 panic 后 pending 悬挂到超时。
+                                        crashed_reader.store(true, Ordering::Relaxed);
+                                        log::error!("ACP: pending shard lock poisoned for id {id}");
+                                    }
+                                }
                             }
                         }
                     }
