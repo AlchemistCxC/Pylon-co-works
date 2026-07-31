@@ -1869,6 +1869,121 @@ gateway:
     }
 }
 
+// ── B4.2 MCP 配置持久化测试 ──
+
+#[cfg(test)]
+mod mcp_persist_tests {
+    use super::*;
+    use std::collections::HashMap;
+
+    fn sample_servers() -> Vec<mcp::McpServerConfig> {
+        vec![
+            mcp::McpServerConfig {
+                id: Some("files".into()),
+                name: None,
+                transport: "stdio".into(),
+                enabled: true,
+                command: Some("npx".into()),
+                args: vec!["-y".into(), "mcp-server-filesystem".into()],
+                env: [("API_TOKEN".to_string(), "secret-value".to_string())].into_iter().collect(),
+                url: None,
+                headers: HashMap::new(),
+                oauth: None,
+                disabled: false,
+            },
+            mcp::McpServerConfig {
+                id: None,
+                name: Some("remote".into()),
+                transport: "http".into(),
+                enabled: true,
+                command: None,
+                args: Vec::new(),
+                env: HashMap::new(),
+                url: Some("http://127.0.0.1:3000/mcp".into()),
+                headers: [("Authorization".to_string(), "Bearer x".to_string())].into_iter().collect(),
+                oauth: None,
+                disabled: false,
+            },
+        ]
+    }
+
+    #[test]
+    fn load_round_trips_servers_with_secrets() {
+        let dir = std::env::temp_dir().join(format!("pylon-mcp-dir-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("pylon-mcp.json");
+        std::fs::write(&path, serde_json::to_string(&sample_servers()).unwrap()).unwrap();
+        let loaded = load_mcp_persisted(&path).expect("valid file must load");
+        assert_eq!(loaded.len(), 2);
+        assert_eq!(loaded[0].id.as_deref(), Some("files"));
+        assert_eq!(loaded[0].env.get("API_TOKEN").map(String::as_str), Some("secret-value"), "secret 必须保留（本地配置文件）");
+        assert_eq!(loaded[1].url.as_deref(), Some("http://127.0.0.1:3000/mcp"));
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    fn load_missing_or_corrupt_returns_none() {
+        let dir = std::env::temp_dir().join(format!("pylon-mcp-bad-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let missing = dir.join("missing.json");
+        assert!(load_mcp_persisted(&missing).is_none(), "缺失文件应降级");
+        let corrupt = dir.join("corrupt.json");
+        std::fs::write(&corrupt, "{not json").unwrap();
+        assert!(load_mcp_persisted(&corrupt).is_none(), "损坏文件应降级");
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    fn load_rejects_hand_edited_invalid_config() {
+        let dir = std::env::temp_dir().join(format!("pylon-mcp-invalid-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("invalid.json");
+        // 重复 identity：validate 应拒绝 → 整体不加载（防手改文件注入非法配置）
+        let invalid = serde_json::json!([
+            {"id": "dup", "transport": "stdio", "command": "a"},
+            {"id": "dup", "transport": "stdio", "command": "b"}
+        ]);
+        std::fs::write(&path, invalid.to_string()).unwrap();
+        assert!(load_mcp_persisted(&path).is_none());
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    #[tokio::test]
+    async fn set_mcp_servers_persists_to_disk_and_restores() {
+        let app = tauri::test::mock_builder()
+            .build(tauri::test::mock_context(tauri::test::noop_assets()))
+            .expect("mock app must build");
+        let state = AppState {
+            runtimes: Arc::new(AgentRuntimeManager::new()),
+            agents: Arc::new(Mutex::new(HashMap::new())),
+            active_agent: Arc::new(Mutex::new(String::new())),
+            pet: Arc::new(Mutex::new(pet::PetState::default())),
+            runtime_logs: runtime_log::RuntimeLogHub::default(),
+            runtime_mcp: Mutex::new(None),
+            prism: prism::PrismClient::unavailable("test".to_string()),
+            gateway: Arc::new(gateway::GatewayCore::new()),
+            approval_mode: Arc::new(Mutex::new("default".to_string())),
+        };
+        app.manage(state);
+        let path = match mcp_persist_path(&app.handle()) {
+            Ok(path) => path,
+            Err(_) => return, // mock 环境无 config dir 时跳过（不验证持久化）
+        };
+        let _ = std::fs::remove_file(&path);
+
+        set_mcp_servers(app.handle().clone(), app.state::<AppState>(), Some(sample_servers())).await.expect("set_mcp_servers must succeed");
+        let loaded = load_mcp_persisted(&path).expect("命令后文件必须存在且可加载");
+        assert_eq!(loaded.len(), 2);
+        assert_eq!(loaded[0].env.get("API_TOKEN").map(String::as_str), Some("secret-value"));
+
+        // 清空配置 → 落盘空数组（非删除）
+        set_mcp_servers(app.handle().clone(), app.state::<AppState>(), Some(Vec::new())).await.expect("clear must succeed");
+        let cleared = load_mcp_persisted(&path).expect("cleared file must load");
+        assert!(cleared.is_empty());
+        std::fs::remove_file(&path).ok();
+    }
+}
+
 // ── AppState helpers ──
 
 impl AppState {
@@ -2944,9 +3059,16 @@ async fn agent_status(state: tauri::State<'_, AppState>) -> Result<serde_json::V
 }
 
 #[tauri::command]
-async fn set_mcp_servers(state: tauri::State<'_, AppState>, servers: Option<Vec<mcp::McpServerConfig>>) -> Result<Vec<serde_json::Value>, String> {
+async fn set_mcp_servers<R: tauri::Runtime>(
+    app: tauri::AppHandle<R>,
+    state: tauri::State<'_, AppState>,
+    servers: Option<Vec<mcp::McpServerConfig>>,
+) -> Result<Vec<serde_json::Value>, String> {
     let serialized = mcp::validate_and_serialize(servers.clone())?;
+    let persisted = servers.clone();
     *state.runtime_mcp.lock().map_err(|error| error.to_string())? = servers;
+    // B4.2：配置落盘（重启不丢）。写失败只 warn，不阻断本次设置。
+    persist_mcp_if_possible(&app, persisted.as_deref().unwrap_or_default());
     Ok(serialized)
 }
 
@@ -2977,6 +3099,64 @@ async fn reload_agents(state: tauri::State<'_, AppState>, config_path: Option<St
 fn pet_persist_path(app: &tauri::AppHandle) -> Result<std::path::PathBuf, String> {
     let dir = app.path().app_config_dir().map_err(|e| e.to_string())?;
     Ok(dir.join("pylon-pet.json"))
+}
+
+// ── B4.2 MCP 配置持久化 ──
+
+/// MCP 配置落盘路径：app_config_dir/pylon-mcp.json。
+/// 注意：env/headers 可能含 secret，文件是本地用户配置（写盘是持久化目的），
+/// 但不进任何日志/输出。
+fn mcp_persist_path<R: tauri::Runtime>(app: &tauri::AppHandle<R>) -> Result<std::path::PathBuf, String> {
+    let dir = app.path().app_config_dir().map_err(|e| e.to_string())?;
+    Ok(dir.join("pylon-mcp.json"))
+}
+
+/// 原子写 MCP 配置：临时文件 + rename，中断不留半截 JSON。
+/// 写失败只 warn，不阻断主流程（尽力持久化）。
+fn persist_mcp_if_possible<R: tauri::Runtime>(app: &tauri::AppHandle<R>, servers: &[mcp::McpServerConfig]) {
+    let path = match mcp_persist_path(app) {
+        Ok(path) => path,
+        Err(error) => {
+            log::warn!("resolve MCP persist path failed: {error}");
+            return;
+        }
+    };
+    let json = match serde_json::to_string(servers) {
+        Ok(json) => json,
+        Err(error) => {
+            log::warn!("serialize MCP config failed: {error}");
+            return;
+        }
+    };
+    if let Some(parent) = path.parent() {
+        if let Err(error) = std::fs::create_dir_all(parent) {
+            log::warn!("create MCP persist directory failed: {error}");
+            return;
+        }
+    }
+    let temp = path.with_extension("json.tmp");
+    let result = (|| {
+        std::fs::write(&temp, json.as_bytes()).map_err(|error| format!("write temporary MCP config failed: {error}"))?;
+        std::fs::rename(&temp, &path).map_err(|error| format!("commit MCP config failed: {error}"))
+    })();
+    if let Err(error) = result {
+        let _ = std::fs::remove_file(&temp);
+        log::warn!("persist MCP config failed: {error}");
+    }
+}
+
+/// 加载 MCP 持久化配置：文件缺失/损坏 → None（启动时静默降级为空配置）。
+/// 内容过 validate_and_serialize（防手改文件注入非法配置）——校验失败视为损坏。
+pub(crate) fn load_mcp_persisted(path: &std::path::Path) -> Option<Vec<mcp::McpServerConfig>> {
+    let raw = std::fs::read_to_string(path).ok()?;
+    let servers: Vec<mcp::McpServerConfig> = serde_json::from_str(&raw).ok()?;
+    match mcp::validate_and_serialize(Some(servers.clone())) {
+        Ok(_) => Some(servers),
+        Err(error) => {
+            log::warn!("loaded MCP config invalid; ignored: {error}");
+            None
+        }
+    }
 }
 
 /// 尽力持久化：路径解析或写盘失败只 warn，不阻断主流程。
@@ -3425,6 +3605,18 @@ pub fn run() {
                         }
                     }
                     Err(error) => log::warn!("resolve pet persist path failed: {error}"),
+                }
+                // B4.2：MCP 配置落盘加载（重启不丢）。文件缺失/损坏/非法 → 保持空配置（静默降级）。
+                match mcp_persist_path(app.handle()) {
+                    Ok(path) => {
+                        if let Some(servers) = load_mcp_persisted(&path) {
+                            if let Ok(mut slot) = app.state::<AppState>().runtime_mcp.lock() {
+                                *slot = Some(servers);
+                                log::info!("MCP 配置已从 {} 恢复", path.display());
+                            }
+                        }
+                    }
+                    Err(error) => log::warn!("resolve MCP persist path failed: {error}"),
                 }
                 let handles = AppStateHandles::from_state(app.state::<AppState>().inner());
                 if let Some(runtime) = handles.active_runtime() {
