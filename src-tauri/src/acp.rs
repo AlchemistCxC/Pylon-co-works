@@ -38,7 +38,7 @@ pub const NOTIF_AGENT_CRASHED: &str = "pylon:agent-crashed";
 // 构造，wire 格式由 schema 保证；扩展字段（mcpServers）保持 Value 直传——
 // Pylon 的 MCP 配置格式（stdio 无 name）与官方 McpServer 不兼容，不能强转。
 use agent_client_protocol_schema::v1::{
-    ContentBlock, LoadSessionRequest, NewSessionRequest, PromptRequest,
+    CloseSessionRequest, ContentBlock, LoadSessionRequest, NewSessionRequest, PromptRequest,
     SetSessionConfigOptionRequest, SetSessionModeRequest,
 };
 
@@ -93,6 +93,26 @@ pub fn session_prompt_params(session_id: &str, prompt: Vec<serde_json::Value>) -
     let req = PromptRequest::new(session_id.to_string(), content_blocks_from_values(prompt)?);
     to_params(&req, "session/prompt")
 }
+
+/// session/close 参数。
+pub fn session_close_params(session_id: &str) -> Result<serde_json::Value, String> {
+    let req = CloseSessionRequest::new(session_id.to_string());
+    to_params(&req, "session/close")
+}
+
+// ── 差异适配表（agent 协议差异，字典驱动）──
+//
+// 已知差异（2026-07-31 三方源码实证）：
+// | 差异点            | Peri (schema 1.4)              | Hermes (0.11.2)             |
+// |-------------------|--------------------------------|-----------------------------|
+// | 能力声明          | clientCapabilities._meta.peri.*| 标准 agentCapabilities，    |
+// |                   |                                | 不校验客户端 caps（忽略）    |
+// | session/close     | 支持                           | 未实现 → -32601            |
+// | mcpServers        | 容忍缺失/空                    | 必填 List（缺字段即拒）      |
+// | set_config_option | ValueId 平铺（untagged）       | Select 型平铺（兼容）        |
+// | set_mode          | modeId                         | modeId                      |
+// 结论：除 session/close 外无 wire 分叉。initialize 统一带 _meta.peri.*
+// （Hermes 忽略无害）；close 对不支持方降级本地清理（见 lib.rs close_session）。
 
 /// Broadcast channel capacity for ACP message fan-out.
 pub const BROADCAST_CAP: usize = 256;

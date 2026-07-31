@@ -1130,10 +1130,10 @@ async fn new_session(
     let replaced = state.sessions.lock().map_err(|e| e.to_string())?
         .insert(source.clone(), session);
     if let Some(old) = replaced {
-        if let Err(error) = state.inner().acp_rpc(acp::METHOD_SESSION_CLOSE, serde_json::json!({
-            "sessionId": old.peri_id,
-        })).await {
-            log::warn!("close replaced session: {}", error);
+        if let Ok(close_params) = acp::session_close_params(&old.peri_id) {
+            if let Err(error) = state.inner().acp_rpc(acp::METHOD_SESSION_CLOSE, close_params).await {
+                log::warn!("close replaced session: {}", error);
+            }
         }
     }
     state.inner().log_runtime_summary( "info", "session", Some(source.clone()), "Session creation succeeded", serde_json::Map::new());
@@ -1289,10 +1289,10 @@ async fn send_message(
                             peri_id,
                             acp::CANCEL_SETTLE_TIMEOUT_SECS
                         );
-                        if let Err(close_error) = state.inner().acp_rpc(acp::METHOD_SESSION_CLOSE, serde_json::json!({
-                            "sessionId": peri_id.clone(),
-                        })).await {
-                            log::warn!("close unsettled prompt session {}: {}", peri_id, close_error);
+                        if let Ok(close_params) = acp::session_close_params(&peri_id) {
+                            if let Err(close_error) = state.inner().acp_rpc(acp::METHOD_SESSION_CLOSE, close_params).await {
+                                log::warn!("close unsettled prompt session {}: {}", peri_id, close_error);
+                            }
                         }
                     }
                     Ok(false) => {}
@@ -1355,9 +1355,14 @@ async fn close_session(state: tauri::State<'_, AppState>, source: String) -> Res
         let acp = state.acp.lock().await;
         let _ = acp.cancel_session(&peri_id).await;
     }
-    state.inner().acp_rpc(acp::METHOD_SESSION_CLOSE, serde_json::json!({
-        "sessionId": peri_id.clone(),
-    })).await?;
+    // Hermes 未实现 session/close（-32601）——降级为本地清理（映射已删，见下）
+    if let Err(error) = state.inner().acp_rpc(acp::METHOD_SESSION_CLOSE, acp::session_close_params(&peri_id)?).await {
+        if error.contains("-32601") || error.contains("Method not found") {
+            log::warn!("agent does not support session/close ({error}); local cleanup only");
+        } else {
+            return Err(error);
+        }
+    }
     state.ensure_generation(generation)?;
     if !state.session_matches(&source, &peri_id, generation)? {
         return Err(format!("stale session mapping for source: {source}"));
