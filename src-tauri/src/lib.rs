@@ -1336,7 +1336,12 @@ async fn close_session(state: tauri::State<'_, AppState>, source: String) -> Res
     let _creation_guard = state.session_creation.lock().await;
     let generation = state.current_generation();
     let peri_id = state.get_peri_id(&source).map_err(|e| e.to_string())?;
-    state.acp.lock().await.close_session(&peri_id).await?;
+    let acp = state.acp.lock().await;
+    // 若该 session 有在途 prompt，先发 cancel（fire-and-forget）让 Peri 侧 settle，
+    // 否则 pending oneshot 会挂到 PROMPT_TIMEOUT 才结束——close 后 prompt 卡死 300s。
+    let _ = acp.cancel_session(&peri_id).await;
+    acp.close_session(&peri_id).await?;
+    drop(acp);
     state.ensure_generation(generation)?;
     if !state.session_matches(&source, &peri_id, generation)? {
         return Err(format!("stale session mapping for source: {source}"));
