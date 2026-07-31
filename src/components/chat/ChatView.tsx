@@ -1,4 +1,4 @@
-import { useRef, useEffect, useState, useMemo, useId } from 'react'
+import { useRef, useEffect, useState, useMemo, useId, useCallback } from 'react'
 import React from 'react'
 import { listen } from '@tauri-apps/api/event'
 import { invoke } from '@tauri-apps/api/core'
@@ -51,6 +51,7 @@ const ChatView = React.memo(function ChatView({ sessionId }: Props) {
   const scrollFollowRef = useRef<ScrollFollowState>('sticky')
   const scrollRafRef = useRef<number | null>(null)
   const scrollLockUntilRef = useRef(0)
+  const scrollToBottomRef = useRef<((behavior?: ScrollBehavior) => void) | null>(null)
   const [messages, setMessages] = useState<Message[]>(!IS_TAURI ? MOCK_MESSAGES : [])
   const preparedMessages = useMemo(() => prepareRenderableMessages(messages), [messages])
   const [streamingText, setStreamingText] = useState('')
@@ -476,19 +477,20 @@ const ChatView = React.memo(function ChatView({ sessionId }: Props) {
     }
   }, [])
 
-  const scrollToBottom = (behavior: ScrollBehavior = 'smooth') => {
+  const scrollToBottom = useCallback((behavior: ScrollBehavior = 'smooth') => {
     scrollFollowRef.current = 'jumping'
     scrollLockUntilRef.current = performance.now() + (behavior === 'smooth' ? 500 : 50)
     if (!bottomRef.current) return
     recordRender('scrollIntoView.call')
     bottomRef.current.scrollIntoView({ behavior })
     scrollFollowRef.current = 'sticky'
-  }
+  }, [])
+  scrollToBottomRef.current = scrollToBottom
 
   useEffect(() => {
     if (!bottomRef.current) return
     if (scrollFollowRef.current !== 'sticky') return
-    scrollToBottom()
+    scrollToBottomRef.current?.()
   }, [messages, generating, streamingText, streamingThinking])
 
   // 当前可见会话的消息同步到 localStorage；后台会话在事件入口直接持久化
@@ -562,7 +564,7 @@ const ChatView = React.memo(function ChatView({ sessionId }: Props) {
           } : undefined} />
         <div ref={bottomRef} />
       </div>
-      <button className="scroll-bottom-btn" onClick={() => scrollToBottom()}
+      <button className="scroll-bottom-btn" onClick={() => scrollToBottomRef.current?.()}
         title="回到底端">▼</button>
     </div>
   )
