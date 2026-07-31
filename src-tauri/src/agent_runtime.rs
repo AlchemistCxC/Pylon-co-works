@@ -21,6 +21,15 @@ impl AgentLifecycleStatus {
     }
 }
 
+/// 自动重连：最大尝试次数（2s+4s+8s+16s+32s = 62s 后放弃）
+pub const MAX_RECONNECT_ATTEMPTS: u32 = 5;
+
+/// 指数退避：attempt 从 1 开始 → 2s/4s/8s/16s/32s（封顶 30s）
+pub fn reconnect_backoff_ms(attempt: u32) -> u64 {
+    let exp = 1u64 << attempt.min(5); // 2^attempt，封顶 2^5=32s
+    (exp * 1000).min(30_000)
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct AgentRuntimeState {
     pub status: AgentLifecycleStatus,
@@ -100,6 +109,15 @@ mod tests {
         assert_eq!(state.status, AgentLifecycleStatus::Disconnected);
         assert_eq!(state.last_error, None);
         assert_eq!(state.last_connected_at, None);
+    }
+
+    #[test]
+    fn reconnect_backoff_is_exponential_and_capped() {
+        assert_eq!(reconnect_backoff_ms(1), 2_000);
+        assert_eq!(reconnect_backoff_ms(2), 4_000);
+        assert_eq!(reconnect_backoff_ms(3), 8_000);
+        assert_eq!(reconnect_backoff_ms(5), 30_000); // 2^5=32s 封顶 30s
+        assert_eq!(reconnect_backoff_ms(6), 30_000); // 封顶
     }
 
     #[test]
