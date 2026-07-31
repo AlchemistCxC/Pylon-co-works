@@ -3,6 +3,7 @@ id: BE-B10-003
 title: QQ 重放去重（seen 窗口 + last_msg_id）
 lane: backend
 priority: P1
+status: completed
 stage: gateway-qq
 subsystem: gateway
 size: S

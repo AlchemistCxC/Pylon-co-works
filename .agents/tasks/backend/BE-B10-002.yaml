@@ -3,6 +3,7 @@ id: BE-B10-002
 title: 长回复切断 truncate（平台文本上限分段）
 lane: backend
 priority: P1
+status: completed
 stage: gateway-deliver
 subsystem: gateway
 size: S

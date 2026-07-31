@@ -3,6 +3,7 @@ id: BE-B10-001
 title: gateway 静态绑定路由解析（EntityBinding）
 lane: backend
 priority: P1
+status: completed
 stage: gateway-route
 subsystem: gateway
 size: S
