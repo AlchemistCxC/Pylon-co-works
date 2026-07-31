@@ -20,6 +20,11 @@ pub struct AgentDef {
     pub env: HashMap<String, String>,
     #[serde(default)]
     pub default: bool,
+    /// 核验修复：切 model 走 unstable session/set_model（Hermes 系）而非
+    /// set_config_option("model")（Peri 系）。默认 false = 官方路径。
+    /// agents.yaml 对 Hermes 类 agent 配置 `set_model_api: true`。
+    #[serde(default)]
+    pub set_model_api: bool,
 }
 
 impl AgentDef {
@@ -124,6 +129,7 @@ mod tests {
             cwd: None,
             env: HashMap::new(),
             default,
+            set_model_api: false,
         }
     }
 
@@ -176,5 +182,19 @@ mod tests {
         assert!(resolved.exe.contains("portable"));
         assert!(resolved.exe.ends_with("bin/agent.exe") || resolved.exe.ends_with("bin\\agent.exe"));
         assert!(resolved.cwd.unwrap().contains("portable"));
+    }
+
+    #[test]
+    fn parses_set_model_api_flag_with_default_false() {
+        let path = std::env::temp_dir().join(format!("pylon-agents-setmodel-{}.yaml", std::process::id()));
+        std::fs::write(
+            &path,
+            "agents:\n  hermes:\n    name: Hermes\n    transport: subprocess\n    exe: hermes\n    set_model_api: true\n  peri:\n    name: Peri\n    transport: subprocess\n    exe: peri\n",
+        )
+        .expect("write temp agent config");
+        let agents = load_from_path(&path).expect("load runtime agent config");
+        std::fs::remove_file(&path).ok();
+        assert!(agents["hermes"].set_model_api, "配置了 set_model_api: true 必须生效");
+        assert!(!agents["peri"].set_model_api, "缺省必须为 false（官方 set_config_option 路径）");
     }
 }

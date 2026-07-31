@@ -1342,6 +1342,7 @@ for line in sys.stdin:
             cwd: None,
             env,
             default: false,
+            set_model_api: false,
         }
     }
 
@@ -1537,6 +1538,7 @@ for line in sys.stdin:
             cwd: None,
             env,
             default: false,
+            set_model_api: false,
         };
         let initial_acp = AcpClient::connect_with_logs(&agent, None)
             .await
@@ -1638,6 +1640,7 @@ for line in sys.stdin:
             cwd: None,
             env,
             default: false,
+            set_model_api: false,
         }
     }
 
@@ -2056,6 +2059,97 @@ mod mcp_persist_tests {
     }
 }
 
+// ── 会话过期平台判定测试（核验修复） ──
+
+#[cfg(test)]
+mod session_expiry_platform_tests {
+    use super::*;
+
+    const ECHO_ACP_SCRIPT: &str = r#"import json,sys
+for line in sys.stdin:
+    request=json.loads(line)
+    response={'jsonrpc':'2.0','id':request.get('id'),'result':{}}
+    if request.get('method') == 'session/new':
+        response['result']={'sessionId':'expiry-session'}
+    print(json.dumps(response), flush=True)
+"#;
+
+    fn echo_agent() -> AgentDef {
+        AgentDef {
+            name: "fake-acp-echo".to_string(),
+            transport: "subprocess".to_string(),
+            exe: "python".to_string(),
+            args: vec!["-u".to_string(), "-c".to_string(), ECHO_ACP_SCRIPT.to_string()],
+            cwd: None,
+            env: std::collections::HashMap::new(),
+            default: false,
+            set_model_api: false,
+        }
+    }
+
+    /// 模块内 state 构造（兄弟模块的 build_state_with 不可访问）。
+    async fn build_state_with(
+        initial_acp: AcpClient,
+        agent: AgentDef,
+        gateway: Arc<gateway::GatewayCore>,
+        prism: prism::PrismClient,
+    ) -> AppState {
+        let mut agents = std::collections::HashMap::new();
+        agents.insert(agent.name.clone(), agent.clone());
+        let runtime = AgentRuntime::new_disconnected();
+        *runtime.acp.lock().await = initial_acp;
+        let runtimes = Arc::new(AgentRuntimeManager::new());
+        runtimes.insert(agent.name.clone(), runtime);
+        AppState {
+            runtimes,
+            agents: Arc::new(Mutex::new(agents)),
+            active_agent: Arc::new(Mutex::new(agent.name.clone())),
+            pet: Arc::new(Mutex::new(pet::PetState::default())),
+            runtime_logs: runtime_log::RuntimeLogHub::default(),
+            runtime_mcp: Mutex::new(None),
+            prism,
+            gateway,
+            approval_mode: Arc::new(Mutex::new("default".to_string())),
+        }
+    }
+
+    #[tokio::test]
+    async fn expiry_watcher_skips_local_sessions_and_resets_platform_sessions() {
+        let agent = echo_agent();
+        let initial_acp = AcpClient::connect_with_logs(&agent, None).await.expect("fake ACP must initialize");
+        let gateway = Arc::new(gateway::GatewayCore::from_config(
+            gateway::route::parse_config(r#"
+gateway:
+  routes:
+    - source: qq:group:123
+      agent: peri
+      profile: trpg
+      session: 战役1
+"#).expect("合法配置"),
+        ));
+        let state = build_state_with(initial_acp, agent, gateway, prism::PrismClient::unavailable("test".to_string())).await;
+
+        let runtime = state.active_runtime().expect("active runtime");
+        {
+            let mut sessions = runtime.sessions.lock().unwrap();
+            // 清理 build_state_with 预置的 source-a，插入过期/平台两类会话
+            sessions.clear();
+            let mut local = SessionInfo::new("local-peri".into(), String::new(), ".".into(), true, 0);
+            local.updated_at = Some("1".into()); // 1970 年，必然过期
+            sessions.insert("local".to_string(), local);
+            let mut platform = SessionInfo::new("platform-peri".into(), String::new(), ".".into(), true, 0);
+            platform.updated_at = Some("1".into());
+            sessions.insert("qq:group:123".to_string(), platform);
+        }
+
+        check_session_expiry(&state).await;
+
+        let sessions = runtime.sessions.lock().unwrap();
+        assert!(sessions.contains_key("local"), "GUI local 会话必须豁免过期重置");
+        assert!(!sessions.contains_key("qq:group:123"), "平台会话过期必须 close + 移除");
+    }
+}
+
 // ── AppState helpers ──
 
 impl AppState {
@@ -2080,9 +2174,14 @@ impl AppState {
     }
 
     /// 差异适配：Hermes 的 set_config_option 不切 model（只认 edit_approval_policy），
-    /// 切 model 必须走 unstable 的 session/set_model。
-    fn is_hermes_agent(&self) -> bool {
-        self.active_agent.lock().ok().map(|id| id.as_str() == "hermes").unwrap_or(false)
+    /// 切 model 必须走 unstable 的 session/set_model。核验修复：按 AgentDef 配置
+    /// `set_model_api` 判定（不再硬编码 agent id "hermes"）。
+    fn uses_set_model_api(&self) -> bool {
+        let active_id = self.active_agent.lock().ok().map(|v| v.clone()).unwrap_or_default();
+        self.agents.lock().ok()
+            .and_then(|agents| agents.get(&active_id).cloned())
+            .map(|agent| agent.set_model_api)
+            .unwrap_or(false)
     }
 
     fn current_generation(&self, runtime: &AgentRuntime) -> u64 {
@@ -2314,6 +2413,13 @@ async fn check_pending_permission_timeouts(state: &AppState) {
 /// close ACP + 移除映射 + 平台通知 + 日志。生成中会话（prompt 锁被占用）豁免。
 async fn check_session_expiry(state: &AppState) {
     let now = runtime_log::timestamp();
+    // 核验修复：平台 source 判定（适配器前缀或静态绑定命中）。GUI local 会话
+    // 由前端/用户管理，不参与后台过期重置（watcher 是 B10.3b 为平台会话设计）。
+    let platform_keys: Vec<String> = state.gateway.adapter_keys();
+    let is_platform_source = |source: &str| -> bool {
+        platform_keys.iter().any(|key| source.starts_with(&format!("{key}:")))
+            || state.gateway.binding(source).is_some()
+    };
     for runtime in state.runtimes.all() {
         let sessions: Vec<(String, String, Option<String>)> = runtime.sessions.lock()
             .map(|sessions| {
@@ -2323,6 +2429,9 @@ async fn check_session_expiry(state: &AppState) {
             })
             .unwrap_or_default();
         for (source, peri_id, updated_at) in sessions {
+            if !is_platform_source(&source) {
+                continue;
+            }
             // 活跃豁免：生成中（prompt 锁被占用）永不视为过期
             let generating = runtime.prompt_locks.lock()
                 .ok()
@@ -2925,7 +3034,7 @@ async fn set_config_option(state: tauri::State<'_, AppState>, source: String, ke
     let peri_id = state.get_peri_id(&runtime, &source).map_err(|e| e.to_string())?;
     // 差异适配：Hermes 切 model 必须走 session/set_model（set_config_option 只认
     // edit_approval_policy，其余存 config_options 不生效）；Peri 走平铺 set_config_option。
-    let use_set_model = key == "model" && state.inner().is_hermes_agent();
+    let use_set_model = key == "model" && state.inner().uses_set_model_api();
     let response = if use_set_model {
         state.inner().acp_rpc(&runtime, acp::METHOD_SESSION_SET_MODEL, acp::session_set_model_params(&peri_id, &value)?).await?
     } else {

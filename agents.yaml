@@ -12,3 +12,4 @@ agents:
     exe: hermes
     args: ["acp"]
     cwd: G:\Project\prism-desktop
+    set_model_api: true

@@ -50,10 +50,12 @@ impl QqAdapter {
         })
     }
 
-    /// 入站入口：去重 → 路由解析 → 白名单 → dispatch（ACP 发送）。
+    /// 入站入口：白名单 → 去重 → 路由解析 → dispatch（ACP 发送）。
     ///
-    /// - msg_id 已见（resume 重放）→ Ok(None)，不重复 ingest
+    /// 核验修复：白名单先于 seen 记录——被白名单拒绝的消息不占去重窗口，
+    /// 之后白名单放宽时同一消息重放仍可正常处理（消息从未真正 ingest 过）。
     /// - 白名单拒绝 → Ok(None)，不 dispatch
+    /// - msg_id 已见（resume 重放）→ Ok(None)，不重复 ingest
     /// - 新消息 → 记录 seen + last_msg_id，dispatch 发送并返回解析结果
     /// ws.rs 事件分发后调用本方法；去重/白名单在适配器层完成，ingest 层只见干净消息。
     pub fn handle_incoming(
@@ -64,10 +66,6 @@ impl QqAdapter {
         member_openid: Option<&str>,
         user_openid: Option<&str>,
     ) -> Result<Option<ResolvedIngest>, String> {
-        let mut dedup = self.dedup.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
-        if !dedup.is_new(msg_id) {
-            return Ok(None);
-        }
         let resolved = self.core.ingest(source, content)?;
         if !crate::gateway::ingest_allowed(
             self.core.qq_config(),
@@ -76,6 +74,10 @@ impl QqAdapter {
             member_openid,
             user_openid,
         ) {
+            return Ok(None);
+        }
+        let mut dedup = self.dedup.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
+        if !dedup.is_new(msg_id) {
             return Ok(None);
         }
         if let Some(chat_id) = source.rsplit(':').next() {
@@ -240,6 +242,40 @@ gateway:
             .handle_incoming("qq:group:123", "msg-no", "hi", Some("stranger"), None)
             .expect("ingest");
         assert!(rejected.is_none(), "非白名单成员必须丢弃");
+    }
+
+    #[test]
+    fn allowlisted_rejected_message_is_reprocessable_on_replay() {
+        // 核验修复：白名单拒绝的消息不占去重窗口——之后白名单通过时同一 msg_id 可处理
+        let yaml = r#"
+gateway:
+  routes:
+    - source: qq:group:123
+      agent: peri
+      profile: trpg
+      session: 战役1
+      allow_from: [member-1]
+"#;
+        let core = Arc::new(GatewayCore::from_config(
+            crate::gateway::route::parse_config(yaml).expect("合法路由配置"),
+        ));
+        let adapter = test_adapter(core);
+        // stranger 发送 → 白名单拒绝（不记 seen）
+        let rejected = adapter
+            .handle_incoming("qq:group:123", "msg-1", "hi", Some("stranger"), None)
+            .expect("ingest");
+        assert!(rejected.is_none());
+        // 同一 msg_id 由白名单成员重放 → 应正常处理（未被 seen 窗口吞掉）
+        let reprocessed = adapter
+            .handle_incoming("qq:group:123", "msg-1", "hi", Some("member-1"), None)
+            .expect("ingest")
+            .expect("白名单通过后同一消息必须可处理");
+        assert_eq!(reprocessed.source, "qq:group:123");
+        // 处理过之后再次重放 → 去重丢弃
+        let replay = adapter
+            .handle_incoming("qq:group:123", "msg-1", "hi", Some("member-1"), None)
+            .expect("ingest");
+        assert!(replay.is_none(), "已处理消息重放必须去重");
     }
 
     #[test]

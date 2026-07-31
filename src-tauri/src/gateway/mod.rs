@@ -134,8 +134,7 @@ impl GatewayCore {
         Ok(())
     }
 
-    /// 已注册适配器的 platform_key 列表（gateway_status 命令/测试用）。
-    #[allow(dead_code)]
+    /// 已注册适配器的 platform_key 列表（会话生命周期 watcher 平台判定 / 测试用）。
     pub fn adapter_keys(&self) -> Vec<String> {
         self.adapters.lock().map(|a| a.keys().cloned().collect()).unwrap_or_default()
     }

@@ -61,9 +61,14 @@ pub fn validate_and_serialize(input: Option<Vec<McpServerConfig>>) -> Result<Vec
     if servers.len() > MAX_SERVERS { return Err(format!("too many MCP servers: maximum is {MAX_SERVERS}")); }
     let mut identities = std::collections::HashSet::new();
     for server in &servers {
+        // 核验修复：同一 server 内 id 与 name 相同不算重复（只防跨 server 撞 identity）。
+        let mut local = std::collections::HashSet::new();
         for identity in [server.id.as_deref(), server.name.as_deref()].into_iter().flatten() {
             validate_text("server identity", identity)?;
             let key = identity.to_ascii_lowercase();
+            if !local.insert(key.clone()) {
+                continue;
+            }
             if !identities.insert(key) {
                 return Err(format!("duplicate MCP server identity: {identity}"));
             }
@@ -195,6 +200,15 @@ mod tests {
         first.id = None;
         first.name = None;
         assert!(validate_and_serialize(Some(vec![first])).is_err());
+    }
+
+    #[test]
+    fn same_server_id_and_name_are_not_duplicate() {
+        // 核验修复：同一 server 的 id == name 只算一个身份（前端可能同时发 id+name）
+        let mut server = stdio(true);
+        server.id = Some("demo".into());
+        server.name = Some("demo".into());
+        assert!(validate_and_serialize(Some(vec![server])).is_ok(), "同 server id==name 不算重复");
     }
 
     #[test]

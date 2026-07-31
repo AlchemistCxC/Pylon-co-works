@@ -1,4 +1,4 @@
-//! ACP Client — spawn peri.exe as child process, JSON-RPC over stdin/stdout.
+﻿//! ACP Client — spawn peri.exe as child process, JSON-RPC over stdin/stdout.
 //!
 //! Architecture: one dedicated reader thread dispatches messages by request_id
 //! to per-session channels. No lock contention between concurrent sessions.
@@ -1028,6 +1028,7 @@ for line in sys.stdin:
             cwd: None,
             env: HashMap::new(),
             default: false,
+            set_model_api: false,
         };
         let mut client = AcpClient::connect_with_logs(&agent, None)
             .await
@@ -1071,6 +1072,7 @@ sys.exit(0)
             cwd: None,
             env: HashMap::new(),
             default: false,
+            set_model_api: false,
         };
         let client = AcpClient::connect_with_logs(&agent, None).await;
         assert!(client.is_err(), "initialize must fail when fake ACP closes without a response");
@@ -1102,6 +1104,7 @@ for line in sys.stdin:
             cwd: None,
             env: HashMap::new(),
             default: false,
+            set_model_api: false,
         };
         let client = AcpClient::connect_with_logs(&agent, None)
             .await
@@ -1140,6 +1143,7 @@ for line in sys.stdin:
             cwd: None,
             env: HashMap::new(),
             default: false,
+            set_model_api: false,
         };
         let client = AcpClient::connect_with_logs(&agent, None)
             .await
@@ -1178,6 +1182,7 @@ sys.exit(0)
             cwd: None,
             env: HashMap::new(),
             default: false,
+            set_model_api: false,
         };
         let client = AcpClient::connect_with_logs(&agent, None)
             .await
@@ -1222,6 +1227,7 @@ for line in sys.stdin:
             cwd: None,
             env: HashMap::new(),
             default: false,
+            set_model_api: false,
         };
         let client = AcpClient::connect_with_logs(&agent, None)
             .await
@@ -1247,6 +1253,7 @@ for line in sys.stdin:
             cwd: None,
             env: HashMap::new(),
             default: false,
+            set_model_api: false,
         };
         let logs = crate::runtime_log::RuntimeLogHub::new(16);
         let client = AcpClient::connect_with_logs(&agent, Some(logs.clone()))
@@ -1291,6 +1298,7 @@ for line in sys.stdin:
             cwd: None,
             env: HashMap::new(),
             default: false,
+            set_model_api: false,
         };
         let client = AcpClient::connect_with_logs(&agent, None)
             .await
@@ -1329,6 +1337,7 @@ for line in sys.stdin:
             cwd: None,
             env: HashMap::new(),
             default: false,
+            set_model_api: false,
         };
         let client = AcpClient::connect_with_logs(&agent, None)
             .await
@@ -1386,6 +1395,7 @@ for line in sys.stdin:
             cwd: None,
             env: HashMap::new(),
             default: false,
+            set_model_api: false,
         };
         let client = AcpClient::connect_with_logs(&agent, None)
             .await
@@ -1423,6 +1433,7 @@ for line in sys.stdin:
             cwd: None,
             env: HashMap::new(),
             default: false,
+            set_model_api: false,
         };
         let client = AcpClient::connect_with_logs(&agent, None)
             .await
@@ -1473,6 +1484,7 @@ for line in sys.stdin:
             cwd: None,
             env: HashMap::new(),
             default: false,
+            set_model_api: false,
         };
         let mut client = AcpClient::connect_with_logs(&agent, None)
             .await
