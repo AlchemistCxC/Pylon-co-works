@@ -6,7 +6,7 @@ import ReactMarkdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
 import { AnimatePresence, motion, useReducedMotion } from 'motion/react'
 import Anser from 'anser'
-import GenerationFooter, { type GenerationSummary } from './GenerationFooter'
+import GenerationFooter, { type GenerationPhase, type GenerationSummary } from './GenerationFooter'
 import { resolveSpinnerFrames } from './spinnerFrames'
 import { isCurrentLoadGeneration, nextLoadGeneration, resolveLoadedMessages, serializeLoadedMessages } from './replayState'
 import { canPersistMessages, clearMessageStorage, messageStorageKey, persistMessageSnapshot } from './messagePersistence'
@@ -23,7 +23,9 @@ import type { Message as PipelineMessage, RenderMessage } from './messageTypes'
 import { buildMessageLookups } from './messageLookups'
 import { getToolSummary, resolveConnectorColor } from './toolPresentation'
 import { buildToolPresentationModel, toolPresentationStatus, truncateToolSummary } from './toolPresentationModel'
-import { normalizeToolStatus, type ToolVisualState } from './toolStatus'
+import { normalizeToolStatus, resolveToolVisualStatus, type ToolVisualState } from './toolStatus'
+import { toolIndicatorMotionClass } from './toolIndicatorMotion'
+import { resolveToolIndicatorAsset } from './toolIndicatorAssets'
 import { isPlainTextContent } from './markdownFastPath'
 import { MessageRenderBoundary } from './MessageRenderBoundary'
 import { createMockMessages } from './chatMockData'
@@ -42,6 +44,12 @@ type Message = PipelineMessage
 
 // dev/浏览器 mock：无 Tauri 后端时（预览调样式用）展示的演示对话
 const IS_TAURI = typeof (window as any).__TAURI_INTERNALS__ !== 'undefined' || typeof (window as any).__TAURI__ !== 'undefined'
+const MOCK_GENERATION_PHASES: GenerationPhase[] = [
+  { kind: 'thinking' },
+  { kind: 'tool', name: 'Read' },
+  { kind: 'tool', name: 'Grep' },
+  { kind: 'responding' },
+]
 
 function createBenchmarkMessages(count: number): Message[] {
   return Array.from({ length: count }, (_, index) => {
@@ -85,6 +93,7 @@ const ChatView = React.memo(function ChatView({ sessionId }: Props) {
   const [streamingThinking, setStreamingThinking] = useState('')
   const streamingTextRef = useRef('')
   const streamingThinkingRef = useRef('')
+  const thinkingStartRef = useRef<Record<string, number>>({})
   const streamingSourceRef = useRef<string | null>(null)
   const flushStreamingRef = useRef<((source: string) => void) | null>(null)
   const [generating, setGenerating] = useState(false)
@@ -92,6 +101,9 @@ const ChatView = React.memo(function ChatView({ sessionId }: Props) {
   const genStart = useRef(Date.now())
   const tokenCount = useRef(0)
   const [summary, setSummary] = useState<GenerationSummary | null>(null)
+  const [generationPhase, setGenerationPhase] = useState<GenerationPhase | null>(null)
+  const [mockPhaseIndex, setMockPhaseIndex] = useState(0)
+  const mockGenerationStartRef = useRef(Date.now())
   const [searchOpen, setSearchOpen] = useState(false)
   const [searchQuery, setSearchQuery] = useState('')
   const [searchIndex, setSearchIndex] = useState(0)
@@ -122,6 +134,15 @@ const ChatView = React.memo(function ChatView({ sessionId }: Props) {
     setSearchOpen(false)
   }, [sessionId])
 
+  useEffect(() => {
+    if (IS_TAURI) return
+    const id = window.setInterval(() => setMockPhaseIndex(index => (index + 1) % MOCK_GENERATION_PHASES.length), 1800)
+    return () => window.clearInterval(id)
+  }, [])
+
+  const browserMockPhase = !IS_TAURI ? MOCK_GENERATION_PHASES[mockPhaseIndex] : undefined
+  const browserMockStart = mockGenerationStartRef.current
+  const browserMockTokenCount = browserMockPhase?.kind === 'thinking' ? 320 : browserMockPhase?.kind === 'responding' ? 1480 : 860
   const searchMatches = useMemo(() => {
     if (!searchQuery.trim()) return []
     return messages.filter(message => messageMatchesQuery(message, searchQuery))
@@ -158,7 +179,7 @@ const ChatView = React.memo(function ChatView({ sessionId }: Props) {
     streamingThinkingRef.current = ''
     setStreamingText('')
     setStreamingThinking('')
-    setMessages([]); setGenerating(false); setSummary(null)
+    setMessages([]); setGenerating(false); setSummary(null); setGenerationPhase(null)
     if (!sessionId) return
 
     const s = useStore.getState().sessions.find(s => s.id === sessionId)
@@ -278,6 +299,7 @@ const ChatView = React.memo(function ChatView({ sessionId }: Props) {
       streamingSourceRef,
       streamingTextRef,
       streamingThinkingRef,
+      thinkingStartRef,
       flushStreamingRef,
       genStartRef: genStart,
       tokenCountRef: tokenCount,
@@ -285,6 +307,7 @@ const ChatView = React.memo(function ChatView({ sessionId }: Props) {
       setStreamingText,
       setStreamingThinking,
       setGenerating,
+      setGenerationPhase,
       setSummary,
       setLastTokenAt,
     }
@@ -316,7 +339,7 @@ const ChatView = React.memo(function ChatView({ sessionId }: Props) {
   // 连续 Tool 连接线（真实 DOM 元素）：测量每对相邻 tool 行 head 中心间距，
   // 写入 connector 的 top/height。.chat-view 是 flex 固定高，行展开只改 scrollHeight
   // （overflow），观察容器 content-box 不触发 RO——必须观察行元素。
-  // messages 变化时重跑绑定（新行挂上 RO）；body 展开/字号变化由行 RO 触发重测。
+  // messages 变化时重跑绑定（新行挂上 RO）；Tool 或 reasoning body 展开、字号变化由行 RO 触发重测。
   useLayoutEffect(() => {
     const container = chatViewRef.current
     if (!container) return
@@ -328,18 +351,19 @@ const ChatView = React.memo(function ChatView({ sessionId }: Props) {
         const row = connector.nextElementSibling as HTMLElement | null
         const previousHead = previousRow?.querySelector<HTMLElement>('.term-tool-head')
         const head = row?.querySelector<HTMLElement>('.term-tool-head')
-        if (!previousRow || !row || !previousHead || !head) continue
-        // 展开的工具下方无线：前一行 body 展开时截断（线不穿过 body）
-        if (previousRow.querySelector('.term-tool-body') !== null) {
-          connector.style.display = 'none'
-          continue
-        }
+        const connectorParent = connector.offsetParent as HTMLElement | null
+        if (!previousRow || !row || !previousHead || !head || !connectorParent) continue
+        // 展开 Tool body 也保持连接，线会自然跨过 body 延伸至下一项。
         connector.style.display = 'block'
-        const headHeight = head.offsetHeight
-        const gap = row.offsetTop - (previousRow.offsetTop + previousRow.offsetHeight)
-        const previousCenter = previousRow.offsetTop + previousRow.offsetHeight - 2 - headHeight / 2
+        // 所有几何值都从 viewport rect 换算到 connector 的实际 offsetParent，
+        // 不依赖 motion wrapper 的 offsetTop 坐标系，避免缩放/动画/嵌套定位导致偏移。
+        const parentTop = connectorParent.getBoundingClientRect().top
+        const previousRect = previousHead.getBoundingClientRect()
+        const currentRect = head.getBoundingClientRect()
+        const previousCenter = previousRect.top - parentTop + previousRect.height / 2
+        const currentCenter = currentRect.top - parentTop + currentRect.height / 2
         connector.style.top = `${previousCenter}px`
-        connector.style.height = `${gap + 4 + headHeight}px`
+        connector.style.height = `${Math.max(0, currentCenter - previousCenter)}px`
       }
     }
     const schedule = () => {
@@ -349,7 +373,9 @@ const ChatView = React.memo(function ChatView({ sessionId }: Props) {
     const observer = new ResizeObserver(schedule)
     const observedRows = new Set<Element>()
     const sync = () => {
-      for (const row of container.querySelectorAll('.term-row-tool')) {
+      // reasoning 展开会推移其后的所有 Tool 行；因此必须观察所有消息行，
+      // 而非只观察 Tool 行，才能让绝对定位 connector 重新按 viewport rect 测量。
+      for (const row of container.querySelectorAll('.term-row')) {
         if (observedRows.has(row)) continue
         observer.observe(row)
         observedRows.add(row)
@@ -418,13 +444,22 @@ const ChatView = React.memo(function ChatView({ sessionId }: Props) {
             recordRender('messages.map')
             return preparedMessages.map((renderMessage, index) => {
               const previous = preparedMessages[index - 1]
-              const isToolRow = renderMessage.type === 'tool_call' || renderMessage.type === 'tool_result'
-              const hasPreviousTool = isToolRow && previous !== undefined
-                && (previous.type === 'tool_call' || previous.type === 'tool_result')
+              const isToolRow = isToolRenderMessage(renderMessage)
+              const hasPreviousTool = isToolRow && isToolRenderMessage(previous)
               const currentVisualState = resolveRowToolVisualState(renderMessage.message, messageLookups)
+              // 连接线从上一个连续 Tool 延伸，因此 follow 色也取上一个 Tool 的状态。
+              const previousConnectorStatus = hasPreviousTool
+                ? resolveRowToolConnectorStatus(previous.message)
+                : undefined
+              const previousConnectorVisualState = hasPreviousTool
+                ? resolveRowToolVisualState(previous.message, messageLookups)
+                : undefined
               return (
                 <React.Fragment key={renderMessage.message.id}>
-                  {hasPreviousTool && <ToolConnector status={currentVisualState === 'failed' ? 'err' : currentVisualState === 'completed' ? 'ok' : 'run'} />}
+                  {hasPreviousTool && <ToolConnector
+                    status={previousConnectorStatus || 'run'}
+                    visualState={normalizeToolStatus(previousConnectorVisualState)}
+                  />}
                   <MemoMessageRow
                     renderMessage={renderMessage}
                     reduceMotion={reduceMotion === true}
@@ -443,9 +478,13 @@ const ChatView = React.memo(function ChatView({ sessionId }: Props) {
         </AnimatePresence>
         {streamingThinking && <StreamingThinking text={streamingThinking} />}
         {streamingText && <StreamingAssistantText text={streamingText} />}
-        <GenerationFooter running={generating}
+        <GenerationFooter running={generating || browserMockPhase !== undefined}
           frames={generationFramesRef.current[sessionRef.current || ''] || resolveSpinnerFrames(useStore.getState().spinnerFramePreset, useStore.getState().spinnerCustomFrames)}
-          tokenCount={tokenCount.current} startTime={genStart.current} lastTokenAt={lastTokenAt} summary={summary}
+          tokenCount={browserMockPhase ? browserMockTokenCount : tokenCount.current}
+          startTime={browserMockPhase ? browserMockStart : genStart.current}
+          lastTokenAt={browserMockPhase ? Date.now() : lastTokenAt}
+          summary={summary}
+          phase={browserMockPhase || generationPhase || undefined}
           onStop={generating ? () => {
             if (!sessionRef.current) return
             const source = sessionRef.current
@@ -467,6 +506,7 @@ const ChatView = React.memo(function ChatView({ sessionId }: Props) {
                 flushStreamingRef.current?.(source)
                 const start = generationStartRef.current[source] || genStart.current
                 setSummary({ elapsedMs: Date.now() - start, tokenCount: tokenCount.current, completedFrame: '', reason: 'cancelled' })
+                setGenerationPhase(null)
                 setGenerating(false)
               }
             }).catch(error => {
@@ -505,7 +545,12 @@ function MessageRow({ renderMessage, reduceMotion, toolVisualState, rowRef, high
     >
       {toolModel && <ToolCard model={toolModel} />}
       {renderMessage.type === 'user' && <UserLine sender={msg.sender} content={msg.content} />}
-      {renderMessage.type === 'reasoning' && <ReasoningBlock text={msg.content} running={msg.running === true} />}
+      {renderMessage.type === 'reasoning' && <ReasoningBlock
+        text={msg.content}
+        running={msg.running === true}
+        startedAt={msg.thoughtStartedAt}
+        durationMs={msg.thoughtDurationMs}
+      />}
       {renderMessage.type === 'assistant' && <AssistantContent text={msg.content} />}
       {(renderMessage.type === 'error' || renderMessage.type === 'system') && (
         <div className="term-row-error" role="alert">{msg.content || '系统消息'}</div>
@@ -536,13 +581,25 @@ function areMessageRowPropsEqual(
 
 const MemoMessageRow = React.memo(MessageRow, areMessageRowPropsEqual)
 
-function resolveRowToolVisualState(message: Message, lookups: ReturnType<typeof buildMessageLookups>): string | undefined {
-  if (message.role !== 'tool' || !message.id.startsWith('tool-')) return undefined
-  const toolId = message.id.slice('tool-'.length)
-  if (lookups.failedToolIds.has(toolId)) return 'failed'
-  if (lookups.runningToolIds.has(toolId)) return 'running'
-  if (lookups.resolvedToolIds.has(toolId)) return 'completed'
-  return 'unknown'
+function isToolRenderMessage(renderMessage: RenderMessage | undefined): renderMessage is RenderMessage {
+  return renderMessage?.type === 'tool_call' || renderMessage?.type === 'tool_result'
+}
+
+function resolveRowToolVisualState(message: Message | undefined, lookups: ReturnType<typeof buildMessageLookups>): string | undefined {
+  if (!message || message.role !== 'tool') return undefined
+  if (message.id.startsWith('tool-')) {
+    const toolId = message.id.slice('tool-'.length)
+    if (lookups.failedToolIds.has(toolId)) return 'failed'
+    if (lookups.runningToolIds.has(toolId)) return 'running'
+    if (lookups.resolvedToolIds.has(toolId)) return 'completed'
+  }
+  if (message.running === true) return 'running'
+  return normalizeToolStatus(message.toolStatus)
+}
+
+function resolveRowToolConnectorStatus(message: Message | undefined): 'ok' | 'err' | 'run' {
+  if (!message || message.role !== 'tool') return 'run'
+  return resolveToolVisualStatus(message.toolStatus, message.toolOutput !== undefined)
 }
 
 function AssistantContent({ text, isStreaming = false }: { text: string; isStreaming?: boolean }) {
@@ -582,7 +639,8 @@ function StreamingAssistantText({ text }: { text: string }) {
 
 function StreamingThinking({ text }: { text: string }) {
   recordRender('streamingThinking.render')
-  return <ReasoningBlock text={text} running />
+  const [startedAt] = useState(() => Date.now())
+  return <ReasoningBlock text={text} running startedAt={startedAt} />
 }
 
 function CodeBlock({ language, code }: { language?: string; code: string }) {
@@ -635,15 +693,33 @@ function CodeBlock({ language, code }: { language?: string; code: string }) {
   )
 }
 
-function ReasoningBlock({ text, running }: { text: string; running: boolean }) {
+function formatThoughtDuration(durationMs: number | undefined) {
+  if (durationMs == null) return 'Thought complete'
+  const seconds = Math.max(1, Math.round(durationMs / 1000))
+  return `Thought for ${seconds}s`
+}
+
+function ReasoningBlock({ text, running, startedAt, durationMs }: { text: string; running: boolean; startedAt?: number; durationMs?: number }) {
   recordRender('ReasoningBlock.render')
   const [open, setOpen] = useState(false)
+  const [now, setNow] = useState(() => Date.now())
   const bodyId = useId()
-  const characterCount = Array.from(text).length
-  const label = running ? 'Thinking…' : `Thought for ${characterCount} chars`
+
+  useEffect(() => {
+    if (!running) return
+    const interval = window.setInterval(() => setNow(Date.now()), 250)
+    return () => window.clearInterval(interval)
+  }, [running])
+
+  const elapsedMs = running && startedAt ? Math.max(0, now - startedAt) : durationMs
+  const label = running ? 'Thinking…' : formatThoughtDuration(elapsedMs)
   return (
-    <div className="term-reasoning">
-      <button className="term-reasoning-head" type="button" onClick={() => setOpen(!open)} aria-expanded={open} aria-controls={bodyId}>{label}</button>
+    <div className="term-reasoning" data-state={running ? 'running' : 'complete'}>
+      <button className="term-reasoning-head" type="button" onClick={() => setOpen(!open)} aria-expanded={open} aria-controls={bodyId}>
+        <span className="term-reasoning-label">{label}</span>
+        {running && elapsedMs != null && <span className="term-reasoning-elapsed">{Math.max(1, Math.floor(elapsedMs / 1000))}s</span>}
+        <span className="term-reasoning-toggle" aria-hidden="true">{open ? '−' : '+'}</span>
+      </button>
       {open && <div className="term-reasoning-body" id={bodyId}>{text.split('\n').map((line, i) => <div key={i} className="term-reasoning-line">{line || '\u00a0'}</div>)}</div>}
     </div>
   )
@@ -653,7 +729,7 @@ function ToolCard({ model }: { model: ReturnType<typeof buildToolPresentationMod
   recordRender('ToolCard.render')
   const [open, setOpen] = useState(false)
   const bodyId = useId()
-  const indicator = useStore(s => s.toolIndicator) || '●'
+  const indicatorAsset = resolveToolIndicatorAsset(useStore(s => s.toolIndicator))
   const glow = useStore(s => s.toolIndicatorGlow) || 0
   const glowColor = useStore(s => s.toolIndicatorGlowColor) || ''
   const toolOk = useStore(s => s.toolOk)
@@ -679,7 +755,7 @@ function ToolCard({ model }: { model: ReturnType<typeof buildToolPresentationMod
     <div className="term-tool" data-status={status} data-tool-state={model.state}
       data-output-collapsible={model.canCollapseOutput ? 'true' : 'false'} style={connCss}>
       <button className="term-tool-head" type="button" onClick={() => setOpen(!open)} aria-expanded={open} aria-controls={bodyId}>
-        <span className={`term-tool-indicator ${status}`} style={glowCss}>{indicator}</span>
+        <span className={`term-tool-indicator ${status} ${toolIndicatorMotionClass(model.state)}`} style={glowCss} aria-label={indicatorAsset.ariaLabel[model.state]} role="img">{indicatorAsset.glyph}</span>
         <span className="term-tool-name">{model.name}</span>
         {displaySummary && <span className="term-tool-summary"> ({displaySummary})</span>}
         {displayStatus && <span className="term-tool-status"> · {displayStatus}</span>}

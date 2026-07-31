@@ -15,6 +15,7 @@ import { normalizeAgentStatus, statusLabel } from './settings/agentTypes'
 import { beginReconnect, failReconnect, normalizeAgentList } from './settings/agentState'
 import ConfigOptionsPanel from './settings/ConfigOptionsPanel'
 import { resolveSpinnerFrames } from './chat/spinnerFrames'
+import { resolveToolIndicatorAsset, toolIndicatorOptions } from './chat/toolIndicatorAssets'
 import { resolveCcMinHeight, resolveVisibleStatusWidgetCount } from '../ccHeightState'
 
 // ── helpers ──
@@ -55,9 +56,12 @@ function Num({ value, onChange, min, max }: { value:number; onChange:(v:number)=
     onChange={e => onChange(+e.target.value)} className="set-num"/>
 }
 
-function Sel({ value, onChange, options }: { value:string; onChange:(v:string)=>void; options:string[] }) {
+function Sel({ value, onChange, options }: { value:string; onChange:(v:string)=>void; options:(string | { value: string; label: string })[] }) {
   return <select value={value} onChange={e => onChange(e.target.value)} className="set-select">
-    {options.map(o => <option key={o}>{o}</option>)}
+    {options.map(option => {
+      const item = typeof option === 'string' ? { value: option, label: option } : option
+      return <option key={item.value} value={item.value}>{item.label}</option>
+    })}
   </select>
 }
 
@@ -431,16 +435,16 @@ export default function Settings({ onClose, activeSessionId }: { onClose?: () =>
                 </div>
               </Group>
               <Group title="指示器 & 连接线">
-                <Row label="形状"><Sel value={t.toolIndicator} onChange={v=>onSettingChange({toolIndicator:v})} options={['●','◆','■','▲','▶','○','◉']}/></Row>
+                <Row label="形状"><Sel value={resolveToolIndicatorAsset(t.toolIndicator).id} onChange={v=>onSettingChange({toolIndicator:v})} options={toolIndicatorOptions()} /></Row>
                 <Row label="辉光"><Slider value={t.toolIndicatorGlow} onChange={v=>onSettingChange({toolIndicatorGlow:v})} min={0} max={20} step={1}/><span className="set-val">{t.toolIndicatorGlow}px</span></Row>
                 <Row label="辉光色"><ColorPopover value={t.toolIndicatorGlowColor} onChange={v=>onSettingChange({toolIndicatorGlowColor:v})}/></Row>
                 <Row label="连接线"><Sel value={t.toolConnectorMode} onChange={v=>onSettingChange({toolConnectorMode:v})} options={['none','fixed','follow']}/></Row>
                 {t.toolConnectorMode==='fixed' && <Row label="线色"><ColorPopover value={t.toolConnectorColor} onChange={v=>onSettingChange({toolConnectorColor:v})}/></Row>}
               </Group>
               <Group title="Spinner">
-                <Row label="动画预设"><Sel value={t.spinnerFramePreset} onChange={v=>onSettingChange({spinnerFramePreset:v as ThemeSettings['spinnerFramePreset']})} options={['sparkles','ascii-line','braille','dots','custom']}/></Row>
+                <Row label="动画预设"><Sel value={t.spinnerFramePreset} onChange={v=>onSettingChange({spinnerFramePreset:v as ThemeSettings['spinnerFramePreset']})} options={['sparkles','ascii-line','braille','dots','orbit','clock','wave','blocks','scan','custom']}/></Row>
                 {t.spinnerFramePreset === 'custom' && <Row label="自定义帧"><textarea className="set-textarea" value={t.spinnerCustomFrames} onChange={e=>onSettingChange({spinnerCustomFrames:e.target.value})} placeholder="逐字符输入，例如：◐◓◑◒" /></Row>}
-                <Row label="文案语言"><Sel value={t.spinnerVerbSet} onChange={v=>onSettingChange({spinnerVerbSet:v as ThemeSettings['spinnerVerbSet']})} options={['zh','en','custom']}/></Row>
+                <Row label="文案语言"><Sel value={t.spinnerVerbSet} onChange={v=>onSettingChange({spinnerVerbSet:v as ThemeSettings['spinnerVerbSet']})} options={['zh','en','analysis','engineering','custom']}/></Row>
                 {t.spinnerVerbSet === 'custom' && <Row label="自定义文案"><textarea className="set-textarea" value={t.spinnerCustomVerbs} onChange={e=>onSettingChange({spinnerCustomVerbs:e.target.value})} placeholder="每行一条文案" /></Row>}
                 <SpinnerMarkerRow label="完成标记" mode={t.spinnerDoneMarkerMode} value={t.spinnerDoneMarker} frames={spinnerFrames}
                   onModeChange={v=>onSettingChange({spinnerDoneMarkerMode:v})} onValueChange={v=>onSettingChange({spinnerDoneMarker:v})}/>

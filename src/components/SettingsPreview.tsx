@@ -1,12 +1,19 @@
-import { useState, useEffect, useRef, Fragment } from 'react'
+import { useState, useEffect, useRef } from 'react'
 import ControlCenter from './ControlCenter'
 import { useStore } from '../store'
 import GenerationFooter from './chat/GenerationFooter'
 import { resolveSpinnerFrames } from './chat/spinnerFrames'
-import ToolConnector from './chat/ToolConnector'
+import { resolveConnectorColor, type ToolConnectorStatus } from './chat/toolPresentation'
+import { resolveToolIndicatorAsset } from './chat/toolIndicatorAssets'
 import { toCssBackgroundImage } from '../backgroundImage'
 
 interface Props { zone: string }
+
+const PREVIEW_TOOLS = [
+  { name: 'Read', input: 'src/main.ts', status: 'ok' },
+  { name: 'Bash', input: 'npm run build', status: 'err' },
+  { name: 'Edit', input: 'src/main.ts', status: 'run' },
+] as const
 
 export default function SettingsPreview({ zone }: Props) {
   const [dims, setDims] = useState(() => ({
@@ -56,6 +63,17 @@ function PreviewApp({ zone }: { zone: string }) {
   const rightWidth = useStore(s => s.rightWidth)
   const rightTransparency = useStore(s => s.rightTransparency)
   const rightBlur = useStore(s => s.rightBlur)
+  const connectorMode = useStore(s => s.toolConnectorMode) || 'none'
+  const connectorColor = useStore(s => s.toolConnectorColor) || 'rgba(0,0,0,0.12)'
+  const toolOk = useStore(s => s.toolOk)
+  const toolRun = useStore(s => s.toolRun)
+  const toolErr = useStore(s => s.toolErr)
+  const previewConnectorColor = (status: ToolConnectorStatus) => resolveConnectorColor(
+    connectorMode,
+    status,
+    { toolOk, toolRun, toolErr },
+    connectorColor,
+  )
   const z = (name: string): React.CSSProperties =>
     zone === name ? { outline: '2px solid var(--accent,#3b82f6)', outlineOffset: '-2px' } : {}
   const rightStyle = {
@@ -99,16 +117,20 @@ function PreviewApp({ zone }: { zone: string }) {
             <div className="chat-view" style={z('chat')}>
               <div className="term">
                 <div className="term-user"><PvUser /></div>
-                {[
-                  { name: 'Read', input: 'src/main.ts', done: true },
-                  { name: 'Bash', input: 'npm run build', done: true },
-                  { name: 'Edit', input: 'src/main.ts', done: false },
-                ].map((tl, i) => (
-                  <Fragment key={i}>
-                    {i > 0 && <ToolConnector status={tl.done ? 'ok' : 'run'} />}
-                    <div className="term-row term-row-tool"><PvTool {...tl} /></div>
-                  </Fragment>
-                ))}
+                {PREVIEW_TOOLS.map((tl, i) => {
+                  const previous = PREVIEW_TOOLS[i - 1]
+                  const connectorStatus = previous?.status
+                  return (
+                    <div
+                      className="pv-tool-row"
+                      key={tl.name}
+                      data-has-connector={connectorStatus ? 'true' : undefined}
+                      style={{ '--pv-connector-color': connectorStatus ? previewConnectorColor(connectorStatus) : 'transparent' } as React.CSSProperties}
+                    >
+                      <div className="term-row term-row-tool"><PvTool {...tl} /></div>
+                    </div>
+                  )
+                })}
                 <PvSpinner />
                 <div className="term-assistant">
                   好的，我来分析一下。<code className="term-inline-code">main()</code> 里有一处类型错误需要修正。
@@ -167,16 +189,14 @@ function PvSpinner() {
   </>
 }
 
-function PvTool({ name, input, done }: { name: string; input: string; done: boolean }) {
-  const connMode = useStore(s => s.toolConnectorMode) || 'none'
-  const connColor = useStore(s => s.toolConnectorColor) || 'rgba(128,128,128,0.3)'
+function PvTool({ name, input, status }: { name: string; input: string; status: ToolConnectorStatus }) {
   const toolOk = useStore(s => s.toolOk)
   const toolRun = useStore(s => s.toolRun)
-  const indicator = useStore(s => s.toolIndicator) || '●'
+  const toolErr = useStore(s => s.toolErr)
+  const indicatorAsset = resolveToolIndicatorAsset(useStore(s => s.toolIndicator))
   const glow = useStore(s => s.toolIndicatorGlow) || 0
   const glowColor = useStore(s => s.toolIndicatorGlowColor) || ''
-  const statusColor = done ? toolOk : toolRun
-  const conn = connMode === 'none' ? 'transparent' : connMode === 'follow' ? statusColor : connColor
+  const statusColor = status === 'ok' ? toolOk : status === 'err' ? toolErr : toolRun
   const glowCss = glow > 0 ? { textShadow: `0 0 ${glow}px ${glowColor || statusColor || 'currentColor'}` } : undefined
-  return <div className="term-tool" data-status={done ? 'ok' : 'run'} style={{ '--tool-conn': conn } as React.CSSProperties}><div className="term-tool-head"><span className={`term-tool-indicator ${done ? 'ok' : 'run'}`} style={glowCss}>{indicator}</span><span className="term-tool-name">{name}</span><span className="term-tool-summary"> ({input})</span>{done && <span className="term-tool-suffix"> — 12 lines</span>}</div></div>
+  return <div className="term-tool" data-status={status}><div className="term-tool-head"><span className={`term-tool-indicator ${status}`} aria-label={indicatorAsset.ariaLabel[status === 'ok' ? 'completed' : status === 'err' ? 'failed' : 'running']} role="img" style={glowCss}>{indicatorAsset.glyph}</span><span className="term-tool-name">{name}</span><span className="term-tool-summary"> ({input})</span>{status === 'ok' && <span className="term-tool-suffix"> — 12 lines</span>}</div></div>
 }
