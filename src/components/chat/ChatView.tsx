@@ -27,6 +27,8 @@ import './ChatView.css'
 
 interface Props { sessionId: string | null }
 
+type ScrollFollowState = 'sticky' | 'user_scrolled' | 'jumping'
+
 type Message = PipelineMessage
 
 // dev/浏览器 mock：无 Tauri 后端时（预览调样式用）展示的演示对话
@@ -44,7 +46,11 @@ const ChatView = React.memo(function ChatView({ sessionId }: Props) {
   recordRender('ChatView.render')
   const reduceMotion = useReducedMotion()
   const sessions = useStore(state => state.sessions)
+  const chatViewRef = useRef<HTMLDivElement>(null)
   const bottomRef = useRef<HTMLDivElement>(null)
+  const scrollFollowRef = useRef<ScrollFollowState>('sticky')
+  const scrollRafRef = useRef<number | null>(null)
+  const scrollLockUntilRef = useRef(0)
   const [messages, setMessages] = useState<Message[]>(!IS_TAURI ? MOCK_MESSAGES : [])
   const preparedMessages = useMemo(() => prepareRenderableMessages(messages), [messages])
   const [streamingText, setStreamingText] = useState('')
@@ -450,10 +456,40 @@ const ChatView = React.memo(function ChatView({ sessionId }: Props) {
   }, [])
 
   useEffect(() => {
+    const container = chatViewRef.current
+    if (!container) return
+    const updateFollowState = () => {
+      scrollRafRef.current = null
+      if (performance.now() < scrollLockUntilRef.current) return
+      const distanceFromBottom = container.scrollHeight - container.scrollTop - container.clientHeight
+      scrollFollowRef.current = distanceFromBottom <= 48 ? 'sticky' : 'user_scrolled'
+    }
+    const handleScroll = () => {
+      if (scrollRafRef.current !== null) return
+      scrollRafRef.current = requestAnimationFrame(updateFollowState)
+    }
+    container.addEventListener('scroll', handleScroll, { passive: true })
+    updateFollowState()
+    return () => {
+      container.removeEventListener('scroll', handleScroll)
+      if (scrollRafRef.current !== null) cancelAnimationFrame(scrollRafRef.current)
+    }
+  }, [])
+
+  const scrollToBottom = (behavior: ScrollBehavior = 'smooth') => {
+    scrollFollowRef.current = 'jumping'
+    scrollLockUntilRef.current = performance.now() + (behavior === 'smooth' ? 500 : 50)
     if (!bottomRef.current) return
     recordRender('scrollIntoView.call')
-    bottomRef.current.scrollIntoView({ behavior: 'smooth' })
-  }, [messages, generating])
+    bottomRef.current.scrollIntoView({ behavior })
+    scrollFollowRef.current = 'sticky'
+  }
+
+  useEffect(() => {
+    if (!bottomRef.current) return
+    if (scrollFollowRef.current !== 'sticky') return
+    scrollToBottom()
+  }, [messages, generating, streamingText, streamingThinking])
 
   // 当前可见会话的消息同步到 localStorage；后台会话在事件入口直接持久化
   useEffect(() => {
@@ -477,7 +513,7 @@ const ChatView = React.memo(function ChatView({ sessionId }: Props) {
   )
 
   return (
-    <div className="chat-view">
+    <div className="chat-view" ref={chatViewRef}>
       <div className="term">
         <AnimatePresence initial={false}>
           {measureRender('messages.map', () => {
@@ -526,7 +562,7 @@ const ChatView = React.memo(function ChatView({ sessionId }: Props) {
           } : undefined} />
         <div ref={bottomRef} />
       </div>
-      <button className="scroll-bottom-btn" onClick={() => bottomRef.current?.scrollIntoView({ behavior: 'smooth' })}
+      <button className="scroll-bottom-btn" onClick={() => scrollToBottom()}
         title="回到底端">▼</button>
     </div>
   )
