@@ -32,6 +32,68 @@ pub const METHOD_SESSION_CANCEL: &str = AGENT_METHOD_NAMES.session_cancel;
 pub const NOTIF_SESSION_UPDATE: &str = "session/update";
 pub const NOTIF_AGENT_CRASHED: &str = "pylon:agent-crashed";
 
+// ── 类型化参数构造（官方 agent-client-protocol-schema v1）──
+//
+// 核心字段（sessionId/cwd/configId/value/modeId/prompt）用官方 Request 类型
+// 构造，wire 格式由 schema 保证；扩展字段（mcpServers）保持 Value 直传——
+// Pylon 的 MCP 配置格式（stdio 无 name）与官方 McpServer 不兼容，不能强转。
+use agent_client_protocol_schema::v1::{
+    ContentBlock, LoadSessionRequest, NewSessionRequest, PromptRequest,
+    SetSessionConfigOptionRequest, SetSessionModeRequest,
+};
+
+fn to_params<T: serde::Serialize>(req: &T, what: &str) -> Result<serde_json::Value, String> {
+    serde_json::to_value(req).map_err(|e| format!("serialize {what} params: {e}"))
+}
+
+fn content_blocks_from_values(values: Vec<serde_json::Value>) -> Result<Vec<ContentBlock>, String> {
+    values.into_iter()
+        .map(|v| serde_json::from_value(v).map_err(|e| format!("invalid prompt block: {e}")))
+        .collect()
+}
+
+/// session/new 参数。mcpServers 以 Pylon 自有格式直传（官方 McpServer 需 name 字段）。
+pub fn session_new_params(cwd: &str, mcp_servers: Vec<serde_json::Value>) -> Result<serde_json::Value, String> {
+    let req = NewSessionRequest::new(cwd.to_string());
+    let mut params = to_params(&req, "session/new")?;
+    if let Some(obj) = params.as_object_mut() {
+        obj.insert("mcpServers".into(), serde_json::Value::Array(mcp_servers));
+    }
+    Ok(params)
+}
+
+/// session/load 参数。
+pub fn session_load_params(session_id: &str, cwd: &str, mcp_servers: Vec<serde_json::Value>) -> Result<serde_json::Value, String> {
+    let req = LoadSessionRequest::new(session_id.to_string(), cwd.to_string());
+    let mut params = to_params(&req, "session/load")?;
+    if let Some(obj) = params.as_object_mut() {
+        obj.insert("mcpServers".into(), serde_json::Value::Array(mcp_servers));
+    }
+    Ok(params)
+}
+
+/// session/set_mode 参数。
+pub fn session_set_mode_params(session_id: &str, mode: &str) -> Result<serde_json::Value, String> {
+    let req = SetSessionModeRequest::new(session_id.to_string(), mode.to_string());
+    to_params(&req, "session/set_mode")
+}
+
+/// session/set_config_option 参数（ValueId 平铺：{"configId","value"}）。
+pub fn session_set_config_option_params(session_id: &str, key: &str, value: &str) -> Result<serde_json::Value, String> {
+    let req = SetSessionConfigOptionRequest::new(
+        session_id.to_string(),
+        key.to_string(),
+        value, // &str → SessionConfigOptionValue via From<&str>（ValueId）
+    );
+    to_params(&req, "session/set_config_option")
+}
+
+/// session/prompt 参数。
+pub fn session_prompt_params(session_id: &str, prompt: Vec<serde_json::Value>) -> Result<serde_json::Value, String> {
+    let req = PromptRequest::new(session_id.to_string(), content_blocks_from_values(prompt)?);
+    to_params(&req, "session/prompt")
+}
+
 /// Broadcast channel capacity for ACP message fan-out.
 pub const BROADCAST_CAP: usize = 256;
 /// mpsc channel capacity for stdin writes — bounded to provide backpressure.
@@ -380,6 +442,8 @@ impl AcpClient {
 
     /// Prepare a prompt request without writing to stdin.
     pub fn prepare_prompt(&self, session_id: &str, prompt: Vec<serde_json::Value>) -> Result<(u64, String, oneshot::Receiver<RawMessage>), String> {
+        // 先构造参数（可能因 block 格式失败），成功后再注册 pending，避免泄漏。
+        let params = session_prompt_params(session_id, prompt)?;
         let id = self.next_id.fetch_add(1, Ordering::Relaxed);
         let (tx, rx) = oneshot::channel();
         {
@@ -391,10 +455,7 @@ impl AcpClient {
             "jsonrpc": "2.0",
             "id": id,
             "method": METHOD_SESSION_PROMPT,
-            "params": {
-                "sessionId": session_id,
-                "prompt": prompt
-            },
+            "params": params,
         });
 
         let line = match serde_json::to_string(&req) {
@@ -597,14 +658,10 @@ impl AcpClient {
         }
     }
 
-    fn load_session_params(session_id: &str, cwd: &str, mcp_servers: Vec<serde_json::Value>) -> serde_json::Value {
+    fn load_session_params(session_id: &str, cwd: &str, mcp_servers: Vec<serde_json::Value>) -> Result<serde_json::Value, String> {
         // ACP schema 1.4 LoadSessionRequest.mcp_servers 无 default（Hermes Pydantic 必填），
         // 字段必须存在；Peri 的 DefaultOnError 容忍缺失/空。无配置时传空数组而非缺字段。
-        serde_json::json!({
-            "sessionId": session_id,
-            "cwd": cwd,
-            "mcpServers": mcp_servers,
-        })
+        session_load_params(session_id, cwd, mcp_servers)
     }
 
     /// Load a persisted session and collect every replay notification before the response.
@@ -627,7 +684,7 @@ impl AcpClient {
             "jsonrpc": "2.0",
             "id": id,
             "method": METHOD_SESSION_LOAD,
-            "params": Self::load_session_params(session_id, cwd, mcp_servers),
+            "params": Self::load_session_params(session_id, cwd, mcp_servers)?,
         });
         let line = serde_json::to_string(&request).map_err(|error| {
             self.remove_pending(id);
@@ -718,7 +775,7 @@ mod tests {
     #[test]
     fn session_load_params_include_mcp_servers_field() {
         assert_eq!(
-            AcpClient::load_session_params("session-1", "G:/workspace", Vec::new()),
+            AcpClient::load_session_params("session-1", "G:/workspace", Vec::new()).unwrap(),
             serde_json::json!({
                 "sessionId": "session-1",
                 "cwd": "G:/workspace",

@@ -1116,10 +1116,7 @@ async fn new_session(
     let session_cwd = cwd.unwrap_or_else(|| state.agent_cwd());
     let generation = state.current_generation();
     let mcp_servers = mcp::validate_and_serialize(mcp_servers)?;
-    let response = match state.inner().acp_rpc(acp::METHOD_SESSION_NEW, serde_json::json!({
-        "cwd": session_cwd,
-        "mcpServers": mcp_servers,
-    })).await {
+    let response = match state.inner().acp_rpc(acp::METHOD_SESSION_NEW, acp::session_new_params(&session_cwd, mcp_servers)?).await {
         Ok(response) => response,
         Err(error) => {
             state.inner().log_runtime_summary( "error", "session", Some(source.clone()), "Session creation failed", serde_json::Map::new());
@@ -1185,10 +1182,7 @@ async fn send_message(
             }
             let session_cwd = state.agent_cwd();
             let generation = state.current_generation();
-            let response = match state.inner().acp_rpc(acp::METHOD_SESSION_NEW, serde_json::json!({
-                "cwd": session_cwd,
-                "mcpServers": requested_mcp_servers.clone(),
-            })).await {
+            let response = match state.inner().acp_rpc(acp::METHOD_SESSION_NEW, acp::session_new_params(&session_cwd, requested_mcp_servers.clone())?).await {
                 Ok(response) => response,
                 Err(error) => {
                     state.inner().log_runtime_summary( "error", "session", Some(source.clone()), "Session creation failed", serde_json::Map::new());
@@ -1319,10 +1313,7 @@ async fn send_message(
 async fn set_mode(state: tauri::State<'_, AppState>, source: String, mode: String) -> Result<(), String> {
     let generation = state.current_generation();
     let peri_id = state.get_peri_id(&source).map_err(|e| e.to_string())?;
-    state.inner().acp_rpc(acp::METHOD_SESSION_SET_MODE, serde_json::json!({
-        "sessionId": peri_id,
-        "modeId": mode.clone(),
-    })).await?;
+    state.inner().acp_rpc(acp::METHOD_SESSION_SET_MODE, acp::session_set_mode_params(&peri_id, &mode)?).await?;
     state.ensure_generation(generation)?;
     state.with_session_if_matches(&source, &peri_id, generation, |session| {
         session.mode = Some(mode);
@@ -1338,11 +1329,7 @@ async fn set_config_option(state: tauri::State<'_, AppState>, source: String, ke
     // Peri 1.4 / Hermes 0.11 的 set_config_option 都是平铺 value：
     //   {"sessionId","configId","value":"sonnet"}（ValueId untagged / Select 型）
     // 旧三层嵌套 {"value":{"valueId":{"value":v}}} 会被官方 schema 反序列化拒绝。
-    let response = state.inner().acp_rpc(acp::METHOD_SESSION_SET_CONFIG_OPTION, serde_json::json!({
-        "sessionId": peri_id,
-        "configId": key,
-        "value": value.clone(),
-    })).await?;
+    let response = state.inner().acp_rpc(acp::METHOD_SESSION_SET_CONFIG_OPTION, acp::session_set_config_option_params(&peri_id, &key, &value)?).await?;
     state.ensure_generation(generation)?;
     state.with_session_if_matches(&source, &peri_id, generation, |session| {
         if let Some(options) = response.get("configOptions").and_then(|value| value.as_array()) {
