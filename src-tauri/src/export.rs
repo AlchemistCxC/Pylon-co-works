@@ -142,3 +142,78 @@ pub(crate) async fn export_session(
     write_export_atomically(output, content.as_bytes())?;
     Ok(())
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn chunk(variant: &str, text: &str) -> serde_json::Value {
+        serde_json::json!({
+            "sessionId": "peri-1",
+            "update": { "sessionUpdate": variant, "content": { "text": text } }
+        })
+    }
+
+    #[test]
+    fn markdown_formats_user_assistant_and_tool() {
+        let messages = vec![
+            chunk("user_message_chunk", "你好"),
+            chunk("agent_message_chunk", "回复文本"),
+            serde_json::json!({
+                "sessionId": "peri-1",
+                "update": { "sessionUpdate": "tool_call", "title": "edit_file" }
+            }),
+            serde_json::json!({
+                "sessionId": "peri-1",
+                "update": { "sessionUpdate": "tool_call_update", "title": "edit_file", "status": "completed" }
+            }),
+        ];
+        let md = format_export_markdown("peri-1", &messages);
+        assert!(md.starts_with("# Session peri-1"));
+        assert!(md.contains("## User\n\n你好"));
+        assert!(md.contains("## Assistant\n\n回复文本"));
+        assert!(md.contains("## Tool: edit_file"));
+        assert!(md.contains("### Tool status (completed)"));
+    }
+
+    #[test]
+    fn markdown_skips_unknown_and_missing_content() {
+        // 未知变体（透传的 agent_thought_chunk 等）不进入 markdown 正文
+        let messages = vec![
+            chunk("agent_thought_chunk", "思考过程不应导出为正文"),
+            serde_json::json!({ "sessionId": "peri-1", "update": { "sessionUpdate": "usage_update", "used": 100 } }),
+            serde_json::json!({ "sessionId": "peri-1", "update": {} }),
+        ];
+        let md = format_export_markdown("peri-1", &messages);
+        assert!(!md.contains("思考过程"));
+        assert!(!md.contains("usage_update"));
+        assert_eq!(md.lines().filter(|line| line.starts_with("## ")).count(), 0, "无正文变体不得产生段落");
+    }
+
+    #[test]
+    fn sanitizer_strips_nested_secrets_recursively() {
+        let messages = vec![serde_json::json!({
+            "sessionId": "peri-1",
+            "update": {
+                "sessionUpdate": "tool_call",
+                "title": "edit_file",
+                "rawInput": "{\"path\":\"/tmp/x\",\"token\":\"sk-secret\"}",
+                "headers": { "authorization": "Bearer abc" },
+                "safe": { "nested": "kept", "apiKeyToken": "drop-me" }
+            }
+        })];
+        let safe = sanitize_export_messages(&messages);
+        let text = serde_json::to_string(&safe).unwrap();
+        assert!(!text.contains("sk-secret"));
+        assert!(!text.contains("Bearer"));
+        assert!(!text.contains("drop-me"));
+        assert!(text.contains("kept"));
+    }
+
+    #[test]
+    fn json_export_is_pretty_printed() {
+        let messages = vec![chunk("agent_message_chunk", "x")];
+        let content = serde_json::to_string_pretty(&sanitize_export_messages(&messages)).unwrap();
+        assert!(content.contains('\n'), "pretty JSON 必须换行");
+    }
+}

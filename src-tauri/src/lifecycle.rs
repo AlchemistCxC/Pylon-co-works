@@ -252,3 +252,41 @@ pub(crate) fn load_mcp_persisted(path: &std::path::Path) -> Option<Vec<crate::mc
 // ── B9 权限审批 commands ──
 // ── Session persistence commands ──
 
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn agent() -> AgentDef {
+        crate::test_utils::fake_acp_agent("peri", "print('x')")
+    }
+
+    #[test]
+    fn summary_marks_active_and_available_only_when_connected() {
+        let a = agent();
+        let disconnected = agent_summary_payload("peri", &a, Some("peri"), Some(AgentLifecycleStatus::Disconnected));
+        assert_eq!(disconnected["active"], true);
+        assert_eq!(disconnected["available"], false, "未连接不算可用");
+        let connected = agent_summary_payload("peri", &a, Some("peri"), Some(AgentLifecycleStatus::Connected));
+        assert_eq!(connected["available"], true, "连接后 available 才为 true");
+    }
+
+    #[test]
+    fn summary_non_active_agent_is_neither_active_nor_available() {
+        let a = agent();
+        let payload = agent_summary_payload("peri", &a, Some("hermes"), Some(AgentLifecycleStatus::Connected));
+        assert_eq!(payload["id"], "peri");
+        assert_eq!(payload["name"], "peri");
+        assert_eq!(payload["transport"], "subprocess");
+        assert_eq!(payload["active"], false);
+        assert_eq!(payload["available"], false, "非 active agent 即使有连接也不可用");
+    }
+
+    #[test]
+    fn summary_without_active_context_is_inactive() {
+        let a = agent();
+        let payload = agent_summary_payload("peri", &a, None, None);
+        assert_eq!(payload["active"], false);
+        assert_eq!(payload["available"], false);
+    }
+}
+
