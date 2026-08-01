@@ -39,6 +39,35 @@ pub const METHOD_SESSION_SET_MODEL: &str = "session/set_model";
 pub const NOTIF_SESSION_UPDATE: &str = "session/update";
 pub const NOTIF_AGENT_CRASHED: &str = "pylon:agent-crashed";
 
+/// ACP session/update 的 `update.sessionUpdate` 变体（R4：事件变体去字符串化——
+/// dispatcher/gateway/export 不再手写字符串比较；wire 字符串契约不变）。
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum SessionUpdateVariant {
+    AgentMessageChunk,
+    UserMessageChunk,
+    UsageUpdate,
+    ToolCall,
+    ToolCallUpdate,
+    SessionInfoUpdate,
+    ConfigOptionUpdate,
+}
+
+impl SessionUpdateVariant {
+    /// wire 字符串 → 变体；未知变体返回 None（调用方按忽略处理，与旧 `_ => {}` 一致）。
+    pub fn from_str(value: &str) -> Option<Self> {
+        match value {
+            "agent_message_chunk" => Some(Self::AgentMessageChunk),
+            "user_message_chunk" => Some(Self::UserMessageChunk),
+            "usage_update" => Some(Self::UsageUpdate),
+            "tool_call" => Some(Self::ToolCall),
+            "tool_call_update" => Some(Self::ToolCallUpdate),
+            "session_info_update" => Some(Self::SessionInfoUpdate),
+            "config_option_update" => Some(Self::ConfigOptionUpdate),
+            _ => None,
+        }
+    }
+}
+
 // ── 类型化参数构造（官方 agent-client-protocol-schema v1）──
 //
 // 核心字段（sessionId/cwd/configId/value/modeId/prompt）用官方 Request 类型
@@ -886,6 +915,19 @@ mod tests {
     #[test]
     fn disconnected_client_is_not_marked_as_crashed() {
         assert!(!AcpClient::disconnected().is_crashed());
+    }
+
+    #[test]
+    fn session_update_variant_wire_strings_are_stable() {
+        // 契约锁定：wire 字符串 ↔ 变体映射（前端/平台依赖这些字符串，勿改拼写）。
+        assert_eq!(SessionUpdateVariant::from_str("agent_message_chunk"), Some(SessionUpdateVariant::AgentMessageChunk));
+        assert_eq!(SessionUpdateVariant::from_str("user_message_chunk"), Some(SessionUpdateVariant::UserMessageChunk));
+        assert_eq!(SessionUpdateVariant::from_str("usage_update"), Some(SessionUpdateVariant::UsageUpdate));
+        assert_eq!(SessionUpdateVariant::from_str("tool_call"), Some(SessionUpdateVariant::ToolCall));
+        assert_eq!(SessionUpdateVariant::from_str("tool_call_update"), Some(SessionUpdateVariant::ToolCallUpdate));
+        assert_eq!(SessionUpdateVariant::from_str("session_info_update"), Some(SessionUpdateVariant::SessionInfoUpdate));
+        assert_eq!(SessionUpdateVariant::from_str("config_option_update"), Some(SessionUpdateVariant::ConfigOptionUpdate));
+        assert_eq!(SessionUpdateVariant::from_str("unknown_variant"), None);
     }
 
     #[test]

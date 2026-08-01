@@ -33,23 +33,27 @@ pub(crate) fn format_export_markdown(peri_id: &str, messages: &[serde_json::Valu
     let mut markdown = format!("# Session {peri_id}\n\n");
     for message in messages {
         let Some(update) = message.get("update") else { continue };
-        let variant = update.get("sessionUpdate").and_then(|value| value.as_str());
+        // R4：sessionUpdate 变体经枚举解析（wire 字符串契约不变）。
+        let variant = update.get("sessionUpdate")
+            .and_then(|value| value.as_str())
+            .and_then(crate::acp::SessionUpdateVariant::from_str);
         match variant {
-            Some("user_message_chunk") => {
+            Some(crate::acp::SessionUpdateVariant::UserMessageChunk) => {
                 if let Some(text) = update.get("content").and_then(|content| content.get("text")).and_then(|value| value.as_str()) {
                     markdown.push_str("## User\n\n");
                     markdown.push_str(text);
                     markdown.push_str("\n\n");
                 }
             }
-            Some("agent_message_chunk") => {
+            Some(crate::acp::SessionUpdateVariant::AgentMessageChunk) => {
                 if let Some(text) = update.get("content").and_then(|content| content.get("text")).and_then(|value| value.as_str()) {
                     markdown.push_str("## Assistant\n\n");
                     markdown.push_str(text);
                     markdown.push_str("\n\n");
                 }
             }
-            Some("tool_call") | Some("tool_call_update") => {
+            Some(crate::acp::SessionUpdateVariant::ToolCall)
+            | Some(crate::acp::SessionUpdateVariant::ToolCallUpdate) => {
                 let title = update.get("title").or_else(|| update.get("name"))
                     .and_then(|value| value.as_str()).unwrap_or("Tool");
                 markdown.push_str(&format!("## Tool: {title}\n\n"));

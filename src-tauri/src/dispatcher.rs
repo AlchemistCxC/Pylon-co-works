@@ -216,7 +216,10 @@ pub(crate) fn start_notification_dispatcher<R: tauri::Runtime>(handles: &AppStat
                     log::warn!("ACP session/update missing update payload");
                     continue;
                 };
-                let variant = update.get("sessionUpdate").and_then(|v| v.as_str());
+                // R4：sessionUpdate 变体经枚举解析（未知变体 → None，与旧 _ => {} 忽略一致）。
+                let variant = update.get("sessionUpdate")
+                    .and_then(|v| v.as_str())
+                    .and_then(crate::acp::SessionUpdateVariant::from_str);
                 let is_replay = update.get("_meta")
                     .and_then(|meta| meta.get("periReplay"))
                     .and_then(|value| value.as_bool())
@@ -231,7 +234,7 @@ pub(crate) fn start_notification_dispatcher<R: tauri::Runtime>(handles: &AppStat
                     log::warn!("ACP notification rejected for stale session {}", peri_id);
                     continue;
                 }
-                if variant == Some("agent_message_chunk") {
+                if variant == Some(crate::acp::SessionUpdateVariant::AgentMessageChunk) {
                     let _ = pet.lock().map(|mut p| crate::pet::on_first_chunk(&mut p));
                     // M5 感知：输出含代码块 → 宠物蹲在屏幕前看
                     if let Some(text) = update.get("content").and_then(|c| c.get("text")).and_then(|v| v.as_str()) {
@@ -255,7 +258,7 @@ pub(crate) fn start_notification_dispatcher<R: tauri::Runtime>(handles: &AppStat
                         }
                     }
                 }
-                if variant == Some("user_message_chunk") {
+                if variant == Some(crate::acp::SessionUpdateVariant::UserMessageChunk) {
                     if is_replay {
                         if let Some(text) = update.get("content").and_then(|c| c.get("text")).and_then(|v| v.as_str()) {
                             emit_event(&window, "peri:user", serde_json::json!({
@@ -282,7 +285,7 @@ pub(crate) fn start_notification_dispatcher<R: tauri::Runtime>(handles: &AppStat
                     if mapping_current_at_mutation {
                         if let Some(session) = items.get_mut(&source) {
                             match variant {
-                            Some("usage_update") => {
+                            Some(crate::acp::SessionUpdateVariant::UsageUpdate) => {
                                 session.tokens_total = update.get("used")
                                     .or_else(|| update.get("value"))
                                     .and_then(|v| v.as_u64())
@@ -295,7 +298,7 @@ pub(crate) fn start_notification_dispatcher<R: tauri::Runtime>(handles: &AppStat
                                 session.context_size = update.get("size").and_then(|v| v.as_u64()).unwrap_or(0);
                                 let _ = pet.lock().map(|mut p| crate::pet::on_usage_update(&mut p, session.tokens_total));
                             }
-            Some("tool_call") => {
+            Some(crate::acp::SessionUpdateVariant::ToolCall) => {
                                 // M5 感知：title → 工具分类（吃代码/捏朋友）；rawInput 提取文件名（脱敏摘要）
                                 let title = update.get("title").and_then(|v| v.as_str()).unwrap_or("");
                                 let kind = crate::pet::ToolKind::classify(title);
@@ -307,7 +310,7 @@ pub(crate) fn start_notification_dispatcher<R: tauri::Runtime>(handles: &AppStat
                                     }
                                 }
                             }
-                            Some("tool_call_update") => {
+                            Some(crate::acp::SessionUpdateVariant::ToolCallUpdate) => {
                                 match update.get("status").and_then(|v| v.as_str()) {
                                     Some("completed") => { let _ = pet.lock().map(|mut p| crate::pet::on_tool_success(&mut p)); }
                                     Some("failed") => { let _ = pet.lock().map(|mut p| crate::pet::on_tool_failure(&mut p)); }
@@ -315,10 +318,10 @@ pub(crate) fn start_notification_dispatcher<R: tauri::Runtime>(handles: &AppStat
                                     _ => {}
                                 }
                             }
-                            Some("session_info_update") => {
+                            Some(crate::acp::SessionUpdateVariant::SessionInfoUpdate) => {
                                 if let Some(title) = update.get("title").and_then(|v| v.as_str()) { session.title = title.to_string(); }
                             }
-                            Some("config_option_update") => {
+                            Some(crate::acp::SessionUpdateVariant::ConfigOptionUpdate) => {
                                 if let Some(options) = update.get("configOptions").and_then(|v| v.as_array()) {
                                     session.config_options = options.clone();
                                     session.apply_config_options(options);

@@ -238,12 +238,17 @@ impl Default for GatewayCore {
 }
 
 /// 从 agent 事件中提取可投递的平台文本：仅 peri:update 的 agent_message_chunk。
+/// R4：sessionUpdate 变体经枚举解析（wire 字符串契约不变）。
 fn extract_deliver_text(event: &str, payload: &serde_json::Value) -> Option<String> {
     if event != "peri:update" {
         return None;
     }
     let update = payload.get("update")?;
-    if update.get("sessionUpdate").and_then(|v| v.as_str()) != Some("agent_message_chunk") {
+    if update.get("sessionUpdate")
+        .and_then(|v| v.as_str())
+        .and_then(crate::acp::SessionUpdateVariant::from_str)
+        != Some(crate::acp::SessionUpdateVariant::AgentMessageChunk)
+    {
         return None;
     }
     update.get("content").and_then(|c| c.get("text")).and_then(|v| v.as_str()).map(str::to_string)
