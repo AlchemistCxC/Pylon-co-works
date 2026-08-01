@@ -106,6 +106,9 @@ pub(crate) struct AppState {
     pub(crate) approval_mode: Arc<Mutex<String>>,
     /// 宠物状态最近一次落盘时间（Unix 毫秒）——get_pet 12s 轮询路径写盘节流用。
     pub(crate) pet_last_persist_ms: AtomicU64,
+    /// R6a：宠物落盘写序锁（tokio Mutex）——序列化在临界区内执行，保证
+    /// 后写状态 ≥ 先写状态（无乱序覆盖）；fs 写经 spawn_blocking 移出 async 运行时。
+    pub(crate) pet_write_lock: tokio::sync::Mutex<()>,
 }
 
 /// 供 async 闭包/静态辅助持有的 AppState 字段子集。
@@ -652,6 +655,7 @@ for line in sys.stdin:
             gateway,
             approval_mode: Arc::new(Mutex::new("default".to_string())),
             pet_last_persist_ms: AtomicU64::new(0),
+            pet_write_lock: tokio::sync::Mutex::new(()),
         }
     }
 
@@ -1025,6 +1029,7 @@ for line in sys.stdin:
             gateway,
             approval_mode: Arc::new(Mutex::new("default".to_string())),
             pet_last_persist_ms: AtomicU64::new(0),
+            pet_write_lock: tokio::sync::Mutex::new(()),
         }
     }
 
@@ -1317,6 +1322,7 @@ mod mcp_persist_tests {
             gateway: Arc::new(gateway::GatewayCore::new()),
             approval_mode: Arc::new(Mutex::new("default".to_string())),
             pet_last_persist_ms: AtomicU64::new(0),
+            pet_write_lock: tokio::sync::Mutex::new(()),
         };
         app.manage(state);
         let path = match mcp_persist_path(&app.handle()) {
@@ -1381,6 +1387,7 @@ for line in sys.stdin:
             gateway,
             approval_mode: Arc::new(Mutex::new("default".to_string())),
             pet_last_persist_ms: AtomicU64::new(0),
+            pet_write_lock: tokio::sync::Mutex::new(()),
         }
     }
 
@@ -1475,6 +1482,7 @@ for line in sys.stdin:
             gateway,
             approval_mode: Arc::new(Mutex::new("default".to_string())),
             pet_last_persist_ms: AtomicU64::new(0),
+            pet_write_lock: tokio::sync::Mutex::new(()),
         }
     }
 
@@ -1747,6 +1755,7 @@ pub fn run() {
                 gateway,
                 approval_mode: Arc::new(Mutex::new("default".to_string())),
                 pet_last_persist_ms: AtomicU64::new(0),
+                pet_write_lock: tokio::sync::Mutex::new(()),
             })
             .invoke_handler(tauri::generate_handler![
                 crate::prism_cmds::prism_health, crate::prism_cmds::prism_status, crate::prism_cmds::prism_state, crate::prism_cmds::prism_scenarios, crate::prism_cmds::prism_sources, crate::prism_cmds::prism_aliases, crate::prism_cmds::prism_config,

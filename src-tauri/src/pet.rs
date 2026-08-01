@@ -244,11 +244,16 @@ fn now_ms() -> u64 {
     crate::time::Timestamp::now().as_u64()
 }
 
+/// 序列化宠物状态（R6a：与磁盘写分离——调用方可在锁内只做内存序列化，
+/// 慢速 fs 写移出 pet 锁经 [`Self::write_json_atomic`] 执行）。
+pub fn serialize_state(state: &PetState) -> Result<String, String> {
+    serde_json::to_string(state).map_err(|e| e.to_string())
+}
+
 /// 原子写：唯一临时文件 + rename，中断也不会留下半截 JSON。
 /// 审查修复：temp 名含 pid+时间戳——get_pet 轮询与 pet_action 可并发，固定 temp 名
 /// 会互相截断写坏（损坏 JSON 被 rename 就位 → 下次启动静默丢档）。
-pub fn save_to_file(state: &PetState, path: &std::path::Path) -> Result<(), String> {
-    let json = serde_json::to_string(state).map_err(|e| e.to_string())?;
+pub fn write_json_atomic(path: &std::path::Path, json: &str) -> Result<(), String> {
     if let Some(parent) = path.parent() {
         std::fs::create_dir_all(parent).map_err(|e| e.to_string())?;
     }
@@ -263,6 +268,12 @@ pub fn save_to_file(state: &PetState, path: &std::path::Path) -> Result<(), Stri
     };
     std::fs::write(&unique, json).map_err(|e| e.to_string())?;
     std::fs::rename(&unique, path).map_err(|e| e.to_string())
+}
+
+/// 序列化 + 原子写（Exit 兜底等同步路径；高频路径请用 serialize_state + write_json_atomic 分离）。
+pub fn save_to_file(state: &PetState, path: &std::path::Path) -> Result<(), String> {
+    let json = serialize_state(state)?;
+    write_json_atomic(path, &json)
 }
 
 /// 容错读：文件缺失/损坏一律返回 None（启动时静默降级为新宠物）。
