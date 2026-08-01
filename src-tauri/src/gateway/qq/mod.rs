@@ -24,6 +24,8 @@ const QQ_MAX_MESSAGE_LEN: usize = 4000;
 const SEND_QUEUE_CAP: usize = 256;
 /// 瞬时失败重试次数（指数退避 1s/2s/4s 后放弃告警）。
 const SEND_RETRY_ATTEMPTS: u32 = 3;
+/// token 瞬时失败重试次数（指数退避 1s/2s 后放弃该消息并告警，不丢队列后续消息）。
+const TOKEN_RETRY_ATTEMPTS: u32 = 3;
 /// rate limited 等待（QQ 实证：60s 后重试一次）。
 const RATE_LIMIT_DELAY_SECS: u64 = 60;
 /// send_loop 空闲超时（审查修复：无消息时任务自行退出并从 senders map 移除，
@@ -42,11 +44,20 @@ enum SendFailure {
 }
 
 fn classify_send_error(error: &str) -> SendFailure {
+    // 修复（P2-2）：QQ 真实错误是中文（如 {"code":304023,"message":"发送消息频率限制"}），
+    // 原实现只匹配英文/数字子串会误判为 Transient（限流丢消息 / 死目标永不标记）。
+    // 匹配原则：明确限流词 → RateLimited；明确权限/对象不存在 → DeadTarget；其余 Transient。
     let lower = error.to_lowercase();
-    if lower.contains("429") || lower.contains("rate") {
+    if lower.contains("429") || lower.contains("rate")
+        || error.contains("频率限制") || error.contains("发送频率") || error.contains("限流")
+    {
         SendFailure::RateLimited(error.to_string())
     } else if lower.contains("403") || lower.contains("404")
         || lower.contains("forbidden") || lower.contains("not found")
+        || lower.contains("not allowed")
+        || error.contains("被禁") || error.contains("禁言")
+        || error.contains("无权限") || error.contains("无操作权限")
+        || error.contains("不存在") || error.contains("失效")
     {
         SendFailure::DeadTarget(error.to_string())
     } else {
@@ -133,13 +144,10 @@ impl QqAdapter {
         user_openid: Option<&str>,
     ) -> Result<Option<ResolvedIngest>, String> {
         let resolved = self.core.ingest(source, content)?;
-        if !crate::gateway::ingest_allowed(
-            &self.core.qq_config(),
-            resolved.binding.as_ref(),
-            source,
-            member_openid,
-            user_openid,
-        ) {
+        // P3：锁内读取白名单配置（with_qq_config），避免每消息 clone 整个 QqGatewayConfig
+        if !self.core.with_qq_config(|qq| {
+            crate::gateway::ingest_allowed(qq, resolved.binding.as_ref(), source, member_openid, user_openid)
+        }) {
             return Ok(None);
         }
         let mut dedup = self.dedup.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
@@ -199,8 +207,10 @@ impl PlatformAdapter for QqAdapter {
             let base_url = self.base_url.clone();
             let senders = self.senders.clone();
             let chat_id_owned = chat_id.to_string();
+            // P2-3：把发送端克隆交给 send_loop——空闲退出前用它做强计数 double-check
+            let sender_owned = tx.clone();
             runtime.spawn(async move {
-                Self::send_loop(http, auth, dead, base_url, senders, chat_id_owned, rx).await;
+                Self::send_loop(http, auth, dead, base_url, senders, sender_owned, chat_id_owned, rx).await;
             });
         }
         let message = QueuedSend {
@@ -232,32 +242,58 @@ impl QqAdapter {
         dead_targets: Arc<Mutex<HashMap<String, String>>>,
         base_url: String,
         senders: Arc<Mutex<HashMap<String, mpsc::Sender<QueuedSend>>>>,
+        tx: mpsc::Sender<QueuedSend>,
         chat_id: String,
         mut rx: mpsc::Receiver<QueuedSend>,
     ) {
         let idle = std::time::Duration::from_secs(SEND_LOOP_IDLE_SECS);
-        loop {
+        'messages: loop {
             let msg = tokio::select! {
                 msg = rx.recv() => match msg {
                     Some(msg) => msg,
                     None => break,
                 },
-                _ = tokio::time::sleep(idle) => break,
+                _ = tokio::time::sleep(idle) => {
+                    // 修复（P2-3）：空闲退出竞态——break 与 map 移除之间，并发 deliver_text
+                    // 可能克隆 sender 并 try_send 成功，随后 rx 被 drop 丢消息且无告警。
+                    // 锁内 double-check：sender 强计数 >2（并发 deliver 正持有克隆，
+                    // 克隆发生在 senders 锁内，锁内判断可排空该窗口）或队列非空 →
+                    // 继续循环；否则移除 map 条目后退出。
+                    let exit = {
+                        let mut map = senders.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
+                        if tx.strong_count() > 2 || !rx.is_empty() {
+                            false
+                        } else {
+                            map.remove(&chat_id);
+                            true
+                        }
+                    };
+                    if exit {
+                        break;
+                    }
+                    continue;
+                }
             };
             if dead_targets.lock().ok().map(|d| d.contains_key(&msg.chat_id)).unwrap_or(false) {
                 log::warn!("QQ send_loop 跳过死目标 {}", msg.chat_id);
                 continue;
             }
-            let token = match auth.get_token().await {
-                Ok(token) => token,
-                Err(error) => {
-                    log::warn!("QQ deliver token 获取失败（{chat_id}），1s 后重试: {error}");
-                    tokio::time::sleep(std::time::Duration::from_secs(1)).await;
+            // 修复（P2-4）：token 瞬时失败指数退避重试（1s/2s），当前消息原地保留不丢；
+            // 连续超 TOKEN_RETRY_ATTEMPTS 次仍未成功 → 记录日志并丢弃该消息
+            // （继续处理队列后续消息）。
+            let token = {
+                let mut attempts = 0u32;
+                'token: loop {
                     match auth.get_token().await {
-                        Ok(token) => token,
+                        Ok(token) => break 'token token,
                         Err(error) => {
-                            log::warn!("QQ deliver token 重试仍失败，放弃该消息: {error}");
-                            continue;
+                            attempts += 1;
+                            if attempts >= TOKEN_RETRY_ATTEMPTS {
+                                log::warn!("QQ deliver token 连续 {attempts} 次获取失败（{chat_id}），丢弃该消息: {error}");
+                                continue 'messages;
+                            }
+                            log::warn!("QQ deliver token 获取失败（{chat_id}），{}s 后重试: {error}", 1u64 << (attempts - 1));
+                            tokio::time::sleep(std::time::Duration::from_secs(1u64 << (attempts - 1))).await;
                         }
                     }
                 }
@@ -296,17 +332,20 @@ impl QqAdapter {
     }
 
     /// 发送 + 瞬时失败指数退避重试（SEND_RETRY_ATTEMPTS 次：1s/2s/4s）。
+    /// 修复（P2-1）：按 SendFailure 变体分流——DeadTarget/RateLimited 立即返回
+    /// （死目标标记 / 60s 全局等待由 send_loop 调用处处理），仅 Transient 走退避重试。
     async fn send_with_retry(http: &Client, base_url: &str, token: &str, msg: &QueuedSend) -> Result<(), SendFailure> {
         let mut last_error = None;
         for attempt in 0..SEND_RETRY_ATTEMPTS {
             match Self::send_once(http, base_url, token, msg).await {
                 Ok(()) => return Ok(()),
-                Err(error) => {
-                    last_error = Some(error);
+                Err(SendFailure::Transient(error)) => {
+                    last_error = Some(SendFailure::Transient(error));
                     if attempt + 1 < SEND_RETRY_ATTEMPTS {
                         tokio::time::sleep(std::time::Duration::from_secs(1 << attempt)).await;
                     }
                 }
+                Err(error) => return Err(error),
             }
         }
         Err(last_error.unwrap_or(SendFailure::Transient("unknown".to_string())))
@@ -501,5 +540,21 @@ gateway:
         assert!(adapter
             .deliver_event("qq:group:123", "peri:done", &serde_json::json!({"data": {}}))
             .is_ok());
+    }
+
+    #[test]
+    fn classify_send_error_matches_chinese_and_http_status() {
+        // 限流：QQ 真实中文错误（原实现只匹配英文/数字子串会误判 Transient 丢消息）
+        assert!(matches!(classify_send_error("HTTP 429: {\"code\":304023,\"message\":\"发送消息频率限制\"}"), SendFailure::RateLimited(_)));
+        assert!(matches!(classify_send_error("发送频率过快"), SendFailure::RateLimited(_)));
+        assert!(matches!(classify_send_error("触发限流"), SendFailure::RateLimited(_)));
+        // 死目标：HTTP 状态码 / 中文权限 / 对象不存在
+        assert!(matches!(classify_send_error("HTTP 403: 无操作权限"), SendFailure::DeadTarget(_)));
+        assert!(matches!(classify_send_error("HTTP 404: {\"message\":\"群不存在\"}"), SendFailure::DeadTarget(_)));
+        assert!(matches!(classify_send_error("账号被禁言"), SendFailure::DeadTarget(_)));
+        assert!(matches!(classify_send_error("not allowed"), SendFailure::DeadTarget(_)));
+        // 其余 → Transient
+        assert!(matches!(classify_send_error("HTTP 500: internal error"), SendFailure::Transient(_)));
+        assert!(matches!(classify_send_error("connect timeout"), SendFailure::Transient(_)));
     }
 }

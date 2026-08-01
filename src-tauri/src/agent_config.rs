@@ -52,8 +52,15 @@ impl AgentDef {
     pub fn command_args(&self) -> Vec<String> {
         let mut all = self.args.clone();
         if let Some(model) = &self.model {
-            all.push("--model".to_string());
-            all.push(model.clone());
+            // P3：acp_args 已显式携带 --model 时不再追加结构化 --model——否则会
+            // 出现两个 --model（依赖参数顺序的静默覆盖，脆弱）。选"跳过 + 警告"
+            // 而非"忽略 acp_args"：acp_args 是 per-agent 显式覆盖通道，优先级更高。
+            if self.acp_args.iter().any(|arg| arg == "--model" || arg.starts_with("--model=")) {
+                log::warn!("agent {}: acp_args 含 --model，结构化 model 字段被忽略", self.name);
+            } else {
+                all.push("--model".to_string());
+                all.push(model.clone());
+            }
         }
         all.extend(self.acp_args.iter().cloned());
         all
@@ -75,7 +82,7 @@ impl AgentDef {
     }
 }
 
-pub fn config_path() -> Option<PathBuf> {
+fn config_path() -> Option<PathBuf> {
     std::env::var_os("PYLON_AGENTS_CONFIG").map(PathBuf::from)
 }
 

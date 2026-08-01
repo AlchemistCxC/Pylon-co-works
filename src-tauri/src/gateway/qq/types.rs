@@ -2,8 +2,7 @@
 //!
 //! 对应 QQ Bot API v2（https://bot.q.qq.com/wiki/develop/api-v2/）。
 //! 移植自 Prism `src/qq/types.rs`。
-//! 已接线（B10.2）：WS/事件类型由 ws.rs 与适配器消费；Identify/Resume/
-//! Ready/InboundEvent 等预留类型仍标 allow（B10.3 会话生命周期用）。
+//! 已接线（B10.2）：WS/事件类型由 ws.rs 与适配器消费。
 
 use serde::{Deserialize, Serialize};
 
@@ -77,52 +76,11 @@ pub struct QqEvent {
     pub d: Option<serde_json::Value>,
 }
 
-// ── Identify / Resume ───────────────────────────────────────
-
-#[allow(dead_code)]
-#[derive(Debug, Serialize)]
-pub struct IdentifyPayload {
-    pub op: u32, // 2
-    pub d: IdentifyData,
-}
-
-#[allow(dead_code)]
-#[derive(Debug, Serialize)]
-pub struct IdentifyData {
-    pub token: String,
-    pub intents: u32,
-    pub shard: [u32; 2],
-    pub properties: serde_json::Value,
-}
-
-#[allow(dead_code)]
-#[derive(Debug, Serialize)]
-pub struct ResumePayload {
-    pub op: u32, // 6
-    pub d: ResumeData,
-}
-
-#[allow(dead_code)]
-#[derive(Debug, Serialize)]
-pub struct ResumeData {
-    pub token: String,
-    pub session_id: String,
-    pub seq: u64,
-}
-
 // ── Hello ───────────────────────────────────────────────────
 
 #[derive(Debug, Deserialize)]
 pub struct HelloData {
     pub heartbeat_interval: u32, // 毫秒
-}
-
-// ── Ready ────────────────────────────────────────────────────
-
-#[allow(dead_code)]
-#[derive(Debug, Deserialize)]
-pub struct ReadyData {
-    pub session_id: Option<String>,
 }
 
 // ── 消息事件 ─────────────────────────────────────────────────
@@ -178,35 +136,4 @@ pub struct QqAttachment {
     pub filename: Option<String>,
     #[serde(default)]
     pub file_type: Option<u32>,
-}
-
-// ── Shim 回调事件 ──────────────────────────────────────────
-
-/// 适配器解析 QQ 事件后的干净消息格式。
-/// Prism 原为转发给 Python shim 的格式；Pylon 以 ws.rs 的 Dispatch 结构
-/// 取代其角色，本类型作为持久化/调试格式预留。
-#[allow(dead_code)]
-#[derive(Debug, Serialize)]
-pub struct InboundEvent {
-    /// 事件类型: GROUP_AT_MESSAGE_CREATE / C2C_MESSAGE_CREATE 等
-    #[serde(rename = "type")]
-    pub event_type: String,
-    /// 消息 ID
-    pub id: String,
-    /// 消息内容（已去掉 @bot 前缀）
-    pub content: String,
-    /// 时间戳
-    pub timestamp: String,
-    /// 群 ID（群消息时有值）
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub group_openid: Option<String>,
-    /// 用户 ID（C2C 时有值）
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub user_openid: Option<String>,
-    /// 群内发件人 ID（群消息时有值）
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub member_openid: Option<String>,
-    /// 附件列表
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub attachments: Option<Vec<QqAttachment>>,
 }

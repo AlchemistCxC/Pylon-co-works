@@ -33,7 +33,6 @@ pub trait PlatformAdapter: Send + Sync {
 }
 
 /// 入站消息解析结果：平台消息 → 路由绑定（B10.3 消费：会话生命周期 + ACP 发送）。
-#[allow(dead_code)]
 #[derive(Debug, Clone)]
 pub struct ResolvedIngest {
     pub source: String,
@@ -80,11 +79,15 @@ impl GatewayCore {
 
     /// 热重载配置（reload_gateway 命令）：替换路由表/平台配置/注入配置。
     /// 已注册适配器不受影响（凭据/连接级配置仍启动生效）。
+    /// 修复（P3）：写锁失败（中毒）不再误报"已热重载"，改走错误日志分支。
     pub fn reload(&self, config: GatewayConfig) {
-        if let Ok(mut slot) = self.config.write() {
-            *slot = config;
+        match self.config.write() {
+            Ok(mut slot) => {
+                *slot = config;
+                log::info!("gateway 配置已热重载");
+            }
+            Err(_) => log::error!("gateway 配置热重载失败（配置锁中毒），保持原配置"),
         }
-        log::info!("gateway 配置已热重载");
     }
 
     /// 注册 ingest 发送处理器（run() 接线 ACP 发送；可重复注册覆盖）。
@@ -95,8 +98,18 @@ impl GatewayCore {
     }
 
     /// QQ 群级白名单配置（QqAdapter 白名单检查用）。
+    /// 热路径（handle_incoming 每消息）请用 [`Self::with_qq_config`] 锁内读取，避免 clone。
     pub fn qq_config(&self) -> QqGatewayConfig {
         self.config.read().map(|c| c.qq.clone()).unwrap_or_default()
+    }
+
+    /// 锁内读取 QQ 配置（修复 P3：handle_incoming 每消息调用时避免 clone 整个配置，
+    /// 只读引用即可完成白名单检查；签名保持返回引用的生命周期受锁内闭包约束）。
+    pub(crate) fn with_qq_config<R>(&self, f: impl FnOnce(&QqGatewayConfig) -> R) -> R {
+        match self.config.read() {
+            Ok(guard) => f(&guard.qq),
+            Err(_) => f(&QqGatewayConfig::default()),
+        }
     }
 
     /// B11 注入开关（Prism 可用性由调用方降级处理）。
@@ -110,6 +123,8 @@ impl GatewayCore {
     }
 
     /// B11 注入知识源（空 = 让 Prism 用 active.sources）。
+    /// 签名保持返回 Vec（lib.rs 调用方契约，禁止改签名）；clone 成本仅发生在
+    /// inject/persist 回合，不在 handle_incoming 每消息热路径上。
     pub fn inject_sources(&self) -> Vec<String> {
         self.config.read().map(|c| c.inject.sources.clone()).unwrap_or_default()
     }
@@ -135,8 +150,7 @@ impl GatewayCore {
     }
 
     /// 注册平台适配器；platform_key 重复 → Err。
-    /// 待 B10.2 各平台适配器接线时调用（当前注册表为空，deliver_all 空转安全）。
-    #[allow(dead_code)]
+    /// 由 lib.rs run()/命令接线注册（QQ 适配器启动注册，deliver_all 分发到平台）。
     pub fn register(&self, adapter: Arc<dyn PlatformAdapter>) -> Result<(), String> {
         let mut adapters = self.adapters.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
         if adapters.contains_key(adapter.platform_key()) {
@@ -185,10 +199,13 @@ impl GatewayCore {
     /// - 其他事件 → deliver_event
     /// 投递失败（含未接线适配器）只告警，不阻断 WebView 事件。
     pub fn deliver_all(&self, source: &str, event: &str, payload: &serde_json::Value) {
+        // 修复（P3）：前缀匹配提为平台 key 比较（source "qq:group:1" → "qq"），
+        // 不再每适配器每元素 format! 一次（原实现与 starts_with("key:") 等价）。
+        let key = source.split(':').next().unwrap_or("");
         let adapters: Vec<Arc<dyn PlatformAdapter>> = self.adapters.lock()
             .map(|a| {
                 a.values()
-                    .filter(|adapter| source.starts_with(&format!("{}:", adapter.platform_key())))
+                    .filter(|adapter| adapter.platform_key() == key)
                     .cloned()
                     .collect()
             })

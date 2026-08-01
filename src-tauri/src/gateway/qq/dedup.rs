@@ -10,13 +10,13 @@ use std::collections::HashMap;
 
 /// seen 窗口上限（Hermes 实证值）。
 ///
-/// 待 B10.2 QQ 适配器消费，当前仅单测引用，故允许 dead_code。
+/// B10.2 起由 QqAdapter::handle_incoming 经 `is_new` 消费（去重窗口）。
 const DEDUP_MAX_SIZE: usize = 1000;
 
 /// QQ 重放去重状态。
 ///
-/// 纯数据层，供 B10.2 适配器在 ingest 前判重、回复时取 last_msg_id；
-/// 当前尚未被适配器消费（仅单测），故允许 dead_code。
+/// 纯数据层；B10.2 起由 QqAdapter::handle_incoming（ingest 前判重、记录 latest）
+/// 与 deliver_text（回复锚点 latest_for）消费。
 pub struct DedupState {
     /// msg_id → 单调递增序号（替代真实时间，用于清理最旧条目）。
     seen: HashMap<String, u64>,
@@ -26,7 +26,7 @@ pub struct DedupState {
     last_msg_id: HashMap<String, String>,
 }
 
-/// 实现（各方法待 B10.2 适配器消费，当前仅单测引用，故允许 dead_code）。
+/// 实现（B10.2 起由 QQ 适配器 handle_incoming / deliver_text 消费）。
 impl DedupState {
     pub fn new() -> Self {
         Self {

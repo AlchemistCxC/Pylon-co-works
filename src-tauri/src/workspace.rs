@@ -61,7 +61,7 @@ fn normalize_relative(relative: &str) -> Result<PathBuf, WorkspaceError> {
 }
 
 /// 解析并校验工作区内的现有路径。不存在路径统一返回 NotFound。
-pub fn resolve_workspace_path(root: &Path, relative: &str) -> Result<PathBuf, WorkspaceError> {
+fn resolve_workspace_path(root: &Path, relative: &str) -> Result<PathBuf, WorkspaceError> {
     let relative = normalize_relative(relative)?;
     let canonical_root = root.canonicalize().map_err(|e| {
         if e.kind() == std::io::ErrorKind::NotFound { WorkspaceError::NotFound } else { WorkspaceError::NotReadable }
@@ -123,6 +123,11 @@ fn entry_kind(metadata: &fs::Metadata) -> (&'static str, bool) {
 pub fn list_entries(root: &Path, relative: &str, include_hidden: bool) -> Result<Vec<WorkspaceEntry>, WorkspaceError> {
     let directory = resolve_workspace_path(root, relative)?;
     if !directory.is_dir() { return Err(WorkspaceError::NotFile); }
+    // P3：canonical root 只解析一次（不依赖循环变量）；symlink 条目 containment
+    // 校验复用，避免每个 symlink 都重复 root.canonicalize()。
+    let canonical_root = root.canonicalize().map_err(|e| {
+        if e.kind() == std::io::ErrorKind::NotFound { WorkspaceError::NotFound } else { WorkspaceError::NotReadable }
+    })?;
     let mut entries = Vec::new();
     for item in fs::read_dir(&directory).map_err(|e| WorkspaceError::Io(e.to_string()))? {
         let item = item.map_err(|e| WorkspaceError::Io(e.to_string()))?;
@@ -132,7 +137,9 @@ pub fn list_entries(root: &Path, relative: &str, include_hidden: bool) -> Result
         let (kind, expandable) = entry_kind(&metadata);
         let mut safe = true;
         if metadata.file_type().is_symlink() {
-            safe = resolve_workspace_path(root, &format!("{}/{}", relative.trim_end_matches(['/', '\\']), name)).is_ok();
+            // 与 resolve_workspace_path 相同的 containment 语义：canonical 后必须
+            // 落在 root 内；断链/不可解析一律视为不安全。
+            safe = directory.join(&name).canonicalize().map(|canonical| canonical.starts_with(&canonical_root)).unwrap_or(false);
         }
         if !safe { continue; }
         let modified_at = metadata.modified().ok().and_then(|time| time.duration_since(UNIX_EPOCH).ok()).map(|d| d.as_millis());

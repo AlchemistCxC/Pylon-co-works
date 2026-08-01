@@ -2,9 +2,9 @@
 //!
 //! 移植自 Prism `src/qq/events.rs`（对应 Hermes adapter 的
 //! _process_attachments / _process_quoted_context / _parse_qq_timestamp）。
-//! 纯函数：附件分类、@剥离、时间戳标准化、引用合并。无 IO、不依赖 tauri。
+//! 纯函数：附件分类、@剥离。无 IO、不依赖 tauri。
 //! 已接线（B10.2）：process_attachments/strip_at_mention 由 ws.rs 事件分发消费；
-//! 引用/时间戳处理待 B10.3 会话生命周期，仍标 allow。
+//! 引用/时间戳处理为 B10.3 会话生命周期预留（未使用，可从 git 历史恢复）。
 
 use super::types::QqAttachment;
 
@@ -60,15 +60,6 @@ pub fn process_attachments(raw: &Option<Vec<QqAttachment>>) -> AttachmentResult 
     }
 }
 
-/// 标准化 QQ 时间戳 → Unix 秒（数字字符串兼容 f64/i64）。
-#[allow(dead_code)]
-pub fn parse_qq_timestamp(ts: &str) -> Option<f64> {
-    ts.parse::<f64>().ok()
-        .or_else(|| {
-            ts.parse::<i64>().ok().map(|v| v as f64)
-        })
-}
-
 /// 去掉消息中的 @bot 前缀（@ 后跟非空白 + 空白）。
 pub fn strip_at_mention(content: &str) -> String {
     let trimmed = content.trim_start();
@@ -79,39 +70,6 @@ pub fn strip_at_mention(content: &str) -> String {
         }
     }
     content.trim().to_string()
-}
-
-/// 引用消息上下文字段
-#[allow(dead_code)]
-pub struct QuoteContext {
-    pub quote_block: String,
-    pub image_urls: Vec<String>,
-    pub image_media_types: Vec<String>,
-}
-
-/// 处理 QQ 引用消息。
-///
-/// QQ Bot API v2 的引用消息在 message_type=103 时，引用内容在
-/// msg_elements[0] 中。当前保留原始 event.d 由调用方自行处理，本函数预留接口。
-#[allow(dead_code)]
-pub fn process_quoted_context(_d: &serde_json::Value) -> QuoteContext {
-    QuoteContext {
-        quote_block: String::new(),
-        image_urls: Vec::new(),
-        image_media_types: Vec::new(),
-    }
-}
-
-/// 合并引用消息到正文（引用在前，正文在后，双换行分隔）。
-#[allow(dead_code)]
-pub fn merge_quote_into(text: &str, quote: &str) -> String {
-    if quote.is_empty() {
-        text.to_string()
-    } else if text.is_empty() {
-        quote.to_string()
-    } else {
-        format!("{}\n\n{}", quote, text)
-    }
 }
 
 #[cfg(test)]
@@ -182,26 +140,5 @@ mod tests {
         assert_eq!(strip_at_mention("@pylon  hello"), "hello");
         assert_eq!(strip_at_mention("hello @bot"), "hello @bot");
         assert_eq!(strip_at_mention("  @bot x  "), "x");
-    }
-
-    #[test]
-    fn parses_float_and_integer_timestamps() {
-        assert_eq!(parse_qq_timestamp("1722500000.123"), Some(1722500000.123));
-        assert_eq!(parse_qq_timestamp("1722500000"), Some(1722500000.0));
-        assert_eq!(parse_qq_timestamp("not-a-time"), None);
-    }
-
-    #[test]
-    fn merge_quote_prepends_quote_block() {
-        assert_eq!(merge_quote_into("正文", ""), "正文");
-        assert_eq!(merge_quote_into("", "引用"), "引用");
-        assert_eq!(merge_quote_into("正文", "引用"), "引用\n\n正文");
-    }
-
-    #[test]
-    fn quoted_context_is_an_unused_placeholder() {
-        let context = process_quoted_context(&serde_json::json!({"d": {}}));
-        assert!(context.quote_block.is_empty());
-        assert!(context.image_urls.is_empty());
     }
 }

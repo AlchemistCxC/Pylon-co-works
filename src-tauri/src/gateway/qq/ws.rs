@@ -15,7 +15,7 @@ use std::time::{Duration, Instant};
 use futures_util::{SinkExt, StreamExt};
 use reqwest::Client;
 use tokio::net::TcpStream;
-use tokio::time::sleep;
+use tokio::time::{sleep, sleep_until};
 use tokio_tungstenite::tungstenite::client::IntoClientRequest;
 use tokio_tungstenite::tungstenite::Message;
 use tokio_tungstenite::WebSocketStream;
@@ -89,7 +89,9 @@ pub fn process_dispatch_event(event: &QqEvent) -> Option<Dispatch> {
     }
     let t = event.t.as_deref()?;
     let d = event.d.as_ref()?;
-    let msg: QqMessageEvent = serde_json::from_value(d.clone()).ok()?;
+    // 直接借用 &Value 反序列化（serde_json 为 &Value 实现 Deserializer），
+    // 避免对整份载荷 clone 后再 by-value 消费的双份拷贝。
+    let msg: QqMessageEvent = serde::Deserialize::deserialize(d).ok()?;
     let msg_id = msg.id.as_deref()?.to_string();
 
     let is_group = t == "GROUP_AT_MESSAGE_CREATE";
@@ -147,15 +149,15 @@ pub async fn run_ws_loop(http_client: Client, auth: Arc<QqAuth>, adapter: Arc<Qq
     loop {
         let connect_time = Instant::now();
         match run_connection(&http_client, &auth, &adapter, &mut session).await {
-            Ok(()) => {
-                backoff_idx = 0;
-                quick_count = 0;
-            }
             Err(ref e) if e.contains("op 7") || e.contains("op 9") => {
                 backoff_idx = 0;
                 quick_count = 0;
                 log::info!("QQ WS: 协议层重连、保持 session");
             }
+            // run_connection 所有退出路径均为 Err（内部全部经 ?/return Err 退出），
+            // 无"健康断开"返回路径；编译器无法静态证明，保留断言臂——若未来出现
+            // Ok 即视为 bug 直接 panic，而非静默重置退避（P2-6 死分支清除）。
+            Ok(()) => unreachable!("run_connection 不应返回 Ok"),
             Err(e) => {
                 let duration = connect_time.elapsed().as_secs_f64();
                 // 审查修复：连接存活足够久（>60s）说明本次是健康断线（服务端维护等），
@@ -287,83 +289,91 @@ async fn run_connection(
 
     // 事件 + 心跳
     let mut last_heartbeat = Instant::now();
+    // 静默看门狗锚点：最后一次收到数据的时间。心跳发送不会重置它——
+    // 否则服务器半开（TCP 无 RST、无数据）时心跳会不断刷新计时，连接无限悬挂。
+    // 用 tokio::time::Instant 以配合 sleep_until 的 deadline 类型。
+    let mut last_inbound = tokio::time::Instant::now();
     let max_silence = heartbeat_interval * 3;
 
     loop {
         tokio::select! {
-            _ = sleep(max_silence) => {
-                return Err(format!("WS 超时: {}s 无数据", max_silence.as_secs()));
+            // 基于绝对时间锚点，任何入站数据都推迟超时点；心跳分支不会重置。
+            _ = sleep_until(last_inbound + max_silence) => {
+                return Err(format!("WS 静默超时: {}s 无数据", max_silence.as_secs()));
             }
             result = read.next() => {
                 match result {
                     None => return Err("WS 流关闭".into()),
                     Some(Err(e)) => return Err(format!("WS 错误: {e}")),
-                    Some(Ok(msg)) => match msg {
-                        Message::Text(text) => {
-                            if let Ok(event) = serde_json::from_str::<QqEvent>(&text) {
-                                let t = event.t.as_deref().unwrap_or("");
-                                let op = event.op;
+                    Some(Ok(msg)) => {
+                        last_inbound = tokio::time::Instant::now();
+                        match msg {
+                            Message::Text(text) => {
+                                if let Ok(event) = serde_json::from_str::<QqEvent>(&text) {
+                                    let t = event.t.as_deref().unwrap_or("");
+                                    let op = event.op;
 
-                                if let Some(s) = event.s { session.last_seq = Some(s); }
+                                    if let Some(s) = event.s { session.last_seq = Some(s); }
 
-                                // op 7: 服务端要求重连
-                                if op == 7 {
-                                    log::info!("QQ WS: 服务端要求重连 (op 7)");
-                                    return Err("op 7 reconnect".into());
-                                }
-
-                                // op 9: session 失效
-                                if op == 9 {
-                                    let resumable = event.d.as_ref().and_then(|d| d.as_bool()).unwrap_or(false);
-                                    if !resumable {
-                                        session.session_id = None;
-                                        session.last_seq = None;
-                                        log::info!("QQ WS: session 已清除 (op 9)");
+                                    // op 7: 服务端要求重连
+                                    if op == 7 {
+                                        log::info!("QQ WS: 服务端要求重连 (op 7)");
+                                        return Err("op 7 reconnect".into());
                                     }
-                                    return Err(format!("op 9 invalid session (resumable={resumable})"));
-                                }
 
-                                // READY → 存 session_id（resume 用）
-                                if op == 0 && t == "READY" {
-                                    if let Some(ref d) = event.d {
-                                        if let Some(sid) = d.get("session_id").and_then(|v| v.as_str()) {
-                                            session.session_id = Some(sid.to_string());
-                                            log::info!("QQ WS: READY session={}", sid);
+                                    // op 9: session 失效
+                                    if op == 9 {
+                                        let resumable = event.d.as_ref().and_then(|d| d.as_bool()).unwrap_or(false);
+                                        if !resumable {
+                                            session.session_id = None;
+                                            session.last_seq = None;
+                                            log::info!("QQ WS: session 已清除 (op 9)");
                                         }
+                                        return Err(format!("op 9 invalid session (resumable={resumable})"));
                                     }
-                                }
 
-                                // 消息事件 → 去重/白名单 → gateway dispatch（ACP 发送）
-                                if let Some(dispatch) = process_dispatch_event(&event) {
-                                    match adapter.handle_incoming(
-                                        &dispatch.source,
-                                        &dispatch.msg_id,
-                                        &dispatch.content,
-                                        dispatch.member_openid.as_deref(),
-                                        dispatch.user_openid.as_deref(),
-                                    ) {
-                                        Ok(Some(resolved)) => {
-                                            log::info!("QQ WS: ingest {} ({})", dispatch.source, dispatch.msg_id);
-                                            if let Some(binding) = resolved.binding {
-                                                log::info!("QQ WS: 路由命中 {} / {} / {}", binding.agent_id, binding.profile_id, binding.session_key);
+                                    // READY → 存 session_id（resume 用）
+                                    if op == 0 && t == "READY" {
+                                        if let Some(ref d) = event.d {
+                                            if let Some(sid) = d.get("session_id").and_then(|v| v.as_str()) {
+                                                session.session_id = Some(sid.to_string());
+                                                log::info!("QQ WS: READY session={}", sid);
                                             }
                                         }
-                                        Ok(None) => log::debug!("QQ WS: 丢弃消息 {}（重放/白名单）", dispatch.msg_id),
-                                        Err(error) => log::warn!("QQ WS: ingest 失败: {error}"),
+                                    }
+
+                                    // 消息事件 → 去重/白名单 → gateway dispatch（ACP 发送）
+                                    if let Some(dispatch) = process_dispatch_event(&event) {
+                                        match adapter.handle_incoming(
+                                            &dispatch.source,
+                                            &dispatch.msg_id,
+                                            &dispatch.content,
+                                            dispatch.member_openid.as_deref(),
+                                            dispatch.user_openid.as_deref(),
+                                        ) {
+                                            Ok(Some(resolved)) => {
+                                                log::info!("QQ WS: ingest {} ({})", dispatch.source, dispatch.msg_id);
+                                                if let Some(binding) = resolved.binding {
+                                                    log::info!("QQ WS: 路由命中 {} / {} / {}", binding.agent_id, binding.profile_id, binding.session_key);
+                                                }
+                                            }
+                                            Ok(None) => log::debug!("QQ WS: 丢弃消息 {}（重放/白名单）", dispatch.msg_id),
+                                            Err(error) => log::warn!("QQ WS: ingest 失败: {error}"),
+                                        }
                                     }
                                 }
                             }
+                            // 审查修复：提取 Close frame 的 code——否则 4008 限流/4006 清
+                            // session/4001 致命 code 全被吞掉，重连策略全部失效。
+                            Message::Close(frame) => {
+                                let code: u16 = frame.map(|f| f.code.into()).unwrap_or(1000);
+                                return Err(format!("服务器关闭 code={code}"));
+                            }
+                            Message::Ping(data) => { let _ = write.send(Message::Pong(data)).await; }
+                            _ => {}
                         }
-                        // 审查修复：提取 Close frame 的 code——否则 4008 限流/4006 清
-                        // session/4001 致命 code 全被吞掉，重连策略全部失效。
-                        Message::Close(frame) => {
-                            let code: u16 = frame.map(|f| f.code.into()).unwrap_or(1000);
-                            return Err(format!("服务器关闭 code={code}"));
-                        }
-                        Message::Ping(data) => { let _ = write.send(Message::Pong(data)).await; }
-                        _ => {}
-                    },
                 }
+            }
             }
             _ = sleep(heartbeat_interval.saturating_sub(last_heartbeat.elapsed())) => {
                 let hb = serde_json::json!({"op": 1, "d": session.last_seq});
@@ -455,24 +465,35 @@ async fn tunnel(
     tls_wrap(stream, target_host).await
 }
 
+/// 进程级缓存 TLS ClientConfig：证书加载只在首次连接时做一次，
+/// 重连热路径直接复用，避免每次重建 RootCertStore / 重读系统证书库。
+static TLS_CONFIG: std::sync::OnceLock<Arc<rustls::ClientConfig>> = std::sync::OnceLock::new();
+
+fn tls_config() -> Arc<rustls::ClientConfig> {
+    TLS_CONFIG
+        .get_or_init(|| {
+            let mut root_store = rustls::RootCertStore::empty();
+            let certs = rustls_native_certs::load_native_certs();
+            if !certs.errors.is_empty() {
+                log::warn!("QQ WS: 加载系统证书 {} 个错误", certs.errors.len());
+            }
+            for cert in certs.certs {
+                let _ = root_store.add(cert);
+            }
+            Arc::new(
+                rustls::ClientConfig::builder()
+                    .with_root_certificates(root_store)
+                    .with_no_client_auth(),
+            )
+        })
+        .clone()
+}
+
 async fn tls_wrap(
     stream: TcpStream,
     domain: &str,
 ) -> Result<tokio_rustls::client::TlsStream<TcpStream>, String> {
-    let mut root_store = rustls::RootCertStore::empty();
-    let certs = rustls_native_certs::load_native_certs();
-    if !certs.errors.is_empty() {
-        log::warn!("QQ WS: 加载系统证书 {n} 个错误", n = certs.errors.len());
-    }
-    for cert in certs.certs {
-        let _ = root_store.add(cert);
-    }
-
-    let config = rustls::ClientConfig::builder()
-        .with_root_certificates(root_store)
-        .with_no_client_auth();
-
-    let connector = tokio_rustls::TlsConnector::from(Arc::new(config));
+    let connector = tokio_rustls::TlsConnector::from(tls_config());
     let server_name: rustls::pki_types::ServerName<'static> =
         domain.to_string().try_into().map_err(|_| "域名无效".to_string())?;
 

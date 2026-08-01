@@ -37,6 +37,12 @@ pub struct McpServerConfig {
     pub headers: HashMap<String, String>,
     #[serde(default)]
     pub oauth: Option<OAuthConfig>,
+    /// P3 评估：enabled/disabled 语义重叠（`enabled && !disabled` 才生效），
+    /// 但不可收敛为一个字段——两者都是与前端/持久化配置的 wire 契约
+    /// （lib.rs 构造与 serde_json 持久化直接使用），删除会破坏 lib.rs 与
+    /// 已落盘配置。语义上也有区分：enabled 缺省 true（表单默认开），
+    /// disabled 是显式"排除"途径（禁用冲突 server 不参与去重，见
+    /// validate_and_serialize 注释）。
     #[serde(default)]
     pub disabled: bool,
 }

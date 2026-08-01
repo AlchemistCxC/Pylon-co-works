@@ -74,25 +74,40 @@ async fn run_git(cwd: &Path, args: &[&str]) -> Result<(String, String), String> 
         .stdout(Stdio::piped())
         .stderr(Stdio::piped());
     let mut child = cmd.spawn().map_err(|error| format!("git 不可用: {error}"))?;
+    // P1-1 死锁修复：wait 之前必须并发读 stdout/stderr。原实现先 wait 后读——
+    // 子进程输出超过 OS 管道缓冲（Windows 默认 4096B）时会阻塞在 write 上
+    // 永不退出 → 必现 10s 超时。这里先 take 出管道句柄，用两个 async 任务
+    // 与 wait 并发消费（各自 5s 超时防挂死），进程退出即 EOF。
+    let mut stdout_bytes = Vec::new();
+    let mut stderr_bytes = Vec::new();
+    let mut stdout = child.stdout.take();
+    let mut stderr = child.stderr.take();
+    let read_stdout = async {
+        if let Some(out) = stdout.as_mut() {
+            let _ = tokio::time::timeout(Duration::from_secs(5), tokio::io::AsyncReadExt::read_to_end(out, &mut stdout_bytes)).await;
+        }
+    };
+    let read_stderr = async {
+        if let Some(err) = stderr.as_mut() {
+            let _ = tokio::time::timeout(Duration::from_secs(5), tokio::io::AsyncReadExt::read_to_end(err, &mut stderr_bytes)).await;
+        }
+    };
     // 审查修复：超时必须 kill 子进程（Command::output 默认 kill_on_drop=false，
-    // 超时后 git 会滞留并占用 index 锁）。wait() 借 &mut self，超时分支可安全 kill。
-    let status = match tokio::time::timeout(GIT_TIMEOUT, child.wait()).await {
-        Ok(status) => status.map_err(|error| format!("git 命令失败: {error}"))?,
+    // 超时后 git 会滞留并占用 index 锁）。
+    let status = match tokio::time::timeout(GIT_TIMEOUT, async {
+        let status = child.wait().await.map_err(|error| format!("git 命令失败: {error}"))?;
+        tokio::join!(read_stdout, read_stderr);
+        Ok::<std::process::ExitStatus, String>(status)
+    })
+    .await
+    {
+        Ok(result) => result?,
         Err(_) => {
             let _ = child.kill().await;
             let _ = child.wait().await;
             return Err("git 命令超时".to_string());
         }
     };
-    // wait 已返回：stdout/stderr 管道已 EOF，读剩余输出（各自带超时防挂死）
-    let mut stdout_bytes = Vec::new();
-    let mut stderr_bytes = Vec::new();
-    if let Some(mut out) = child.stdout.take() {
-        let _ = tokio::time::timeout(Duration::from_secs(5), tokio::io::AsyncReadExt::read_to_end(&mut out, &mut stdout_bytes)).await;
-    }
-    if let Some(mut err) = child.stderr.take() {
-        let _ = tokio::time::timeout(Duration::from_secs(5), tokio::io::AsyncReadExt::read_to_end(&mut err, &mut stderr_bytes)).await;
-    }
     let stdout = String::from_utf8_lossy(&stdout_bytes).into_owned();
     let stderr = String::from_utf8_lossy(&stderr_bytes).into_owned();
     if !status.success() {

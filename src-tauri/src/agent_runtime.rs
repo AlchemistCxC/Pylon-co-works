@@ -21,10 +21,10 @@ impl AgentLifecycleStatus {
     }
 }
 
-/// 自动重连：最大尝试次数（2s+4s+8s+16s+32s = 62s 后放弃）
+/// 自动重连：最大尝试次数（2s+4s+8s+16s+30s ≈ 60s 后放弃；2^5=32s 被 30s 封顶）
 pub const MAX_RECONNECT_ATTEMPTS: u32 = 5;
 
-/// 指数退避：attempt 从 1 开始 → 2s/4s/8s/16s/32s（封顶 30s）
+/// 指数退避：attempt 从 1 开始 → 2s/4s/8s/16s/30s（2^5=32s 封顶 30s）
 pub fn reconnect_backoff_ms(attempt: u32) -> u64 {
     let exp = 1u64 << attempt.min(5); // 2^attempt，封顶 2^5=32s
     (exp * 1000).min(30_000)

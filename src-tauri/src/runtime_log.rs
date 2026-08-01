@@ -102,8 +102,17 @@ impl RuntimeLogHub {
             .filter(|entry| query.source.as_deref().is_none_or(|value| entry.source == value))
             .filter(|entry| query.session.as_deref().is_none_or(|value| entry.session.as_deref() == Some(value)))
             .filter(|entry| search.as_deref().is_none_or(|needle| {
+                // P3：needle 已小写一次（上方）；字段按 键/值 迭代检查，
+                // 不再 clone 整个 map 再整体序列化。字符串值免 JSON 再序列化，
+                // 非字符串值才 to_string（保持与原"序列化整 map"的匹配面一致）。
                 entry.message.to_lowercase().contains(needle)
-                    || serde_json::Value::Object(entry.fields.clone()).to_string().to_lowercase().contains(needle)
+                    || entry.fields.iter().any(|(key, value)| {
+                        key.to_lowercase().contains(needle)
+                            || match value {
+                                Value::String(text) => text.to_lowercase().contains(needle),
+                                other => other.to_string().to_lowercase().contains(needle),
+                            }
+                    })
             }))
             .take(limit)
             .cloned()

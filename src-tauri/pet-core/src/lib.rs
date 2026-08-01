@@ -184,6 +184,8 @@ impl GrowthStage {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ToolOutcome {
+    /// 预留变体：桥接层 pet.rs 当前不构造（只发 Succeeded/Failed/Cancelled），
+    /// 保留以兼容公共 API；record_tool 不再处理该分支。
     Started,
     Succeeded,
     Failed,
@@ -232,6 +234,7 @@ pub enum AiEvent {
     PromptCompleted,
     PromptFailed,
     TokenUsage { total: u64 },
+    /// 预留事件：桥接层尚未接线（生产代码只发 TokenUsage），保留供测试/未来增量接口。
     TokenDelta { amount: u64 },
     ToolCall { outcome: ToolOutcome },
     /// M5 感知：工具开始（带分类）——吃代码/捏朋友等行为信号。
@@ -334,6 +337,10 @@ pub struct PetState {
     pub msg: Option<String>,
     #[serde(skip)]
     last_interaction_at_ms: u64,
+    /// M7 审查修复：最近一次活动时间（不落盘）——check_sleepy 发呆判定基准；
+    /// 任何 apply 事件（除 Visit/Sleepy）都会刷新。
+    #[serde(skip)]
+    last_activity_at_ms: u64,
     // ── v2 防刷（M4；不落盘，重启后冷却清空）──
     #[serde(skip)]
     last_feed_at_ms: u64,
@@ -387,6 +394,7 @@ impl PetState {
             memories: Vec::new(),
             msg: Some(lines::pick(lines::LineKey::Birth, &mut 0)),
             last_interaction_at_ms: 0,
+            last_activity_at_ms: 0,
             last_feed_at_ms: 0,
             feed_spam_count: 0,
             last_play_at_ms: 0,
@@ -419,6 +427,7 @@ impl PetState {
         saved.memories.truncate(10);
         saved.first_chunk_at_ms = None;
         saved.last_interaction_at_ms = 0;
+        saved.last_activity_at_ms = 0;
         saved.recompute_stats();
         saved.visit(now_ms);
         saved.msg = Some(format!("{} 又亮起来了。", saved.name));
@@ -430,11 +439,20 @@ impl PetState {
     pub fn apply(&mut self, event: AiEvent, now_ms: u64) {
         self.settle(now_ms);
         self.visit(now_ms);
-        // T2：睡眠中真实互动事件（Poke/Feed/Play/对话等）→ 唤醒。
-        // 审查修复：Visit（get_pet 12s 轮询心跳）不唤醒——否则睡眠只能维持一个
-        // 轮询周期且每次白得 +30 energy（能量农场）。
+        // M7 审查修复：活动时间戳——除轮询心跳（Visit）与入睡动作（Sleepy）外的
+        // 任何事件都视为"有活动"；check_sleepy 的发呆判定以此为准（修复长生成期间
+        // first_chunk_at_ms 不刷新导致的睡-醒振荡，见 check_sleepy）。
+        if !matches!(event, AiEvent::Visit | AiEvent::Sleepy) {
+            self.last_activity_at_ms = now_ms;
+        }
+        // T2：睡眠中真实互动事件（Poke/Feed/Play/对话）→ 唤醒。
+        // 审查修复：TokenUsage/TokenDelta/工具事件等"工作流噪声"不唤醒——
+        // 否则流式 usage_update 会在长生成期间反复唤醒（睡-醒振荡 + energy 农场）。
         if self.machine == PetMachineState::Asleep
-            && !matches!(event, AiEvent::Sleepy | AiEvent::Visit)
+            && matches!(
+                event,
+                AiEvent::UserSent | AiEvent::FirstChunk | AiEvent::Poke | AiEvent::Feed | AiEvent::Play
+            )
         {
             self.wake();
         }
@@ -446,6 +464,8 @@ impl PetState {
             AiEvent::UserSent => {
                 self.stats.messages = self.stats.messages.saturating_add(1);
                 self.first_chunk_at_ms = None;
+                // 审查修复：用户发消息也是互动——刷新睡眠判定基准（防对话中 energy≤15 被 T1/T8 误入睡）
+                self.last_interaction_at_ms = now_ms;
                 // mood 由 derive_mood 推导
                 self.hunger = self.hunger.saturating_sub(1);
                 self.energy = self.energy.saturating_sub(2);
@@ -458,6 +478,8 @@ impl PetState {
             AiEvent::FirstChunk => {
                 // T5：对话开始 → Interacting
                 self.machine = PetMachineState::Awake(MachineSub::Interacting);
+                // 审查修复：对话开始也是互动（同上，防 T1/T8 误入睡）
+                self.last_interaction_at_ms = now_ms;
                 if self.first_chunk_at_ms.is_none() {
                     self.first_chunk_at_ms = Some(now_ms);
                     // mood 由 derive_mood 推导
@@ -497,6 +519,7 @@ impl PetState {
                 self.msg = Some(lines::pick(lines::LineKey::Failed, &mut self.line_idx));
             }
             AiEvent::TokenUsage { total } => self.set_token_total(total),
+            // 预留事件：桥接层尚未接线，保留处理供测试/未来增量接口
             AiEvent::TokenDelta { amount } => self.add_token_delta(amount),
             AiEvent::ToolCall { outcome } => self.record_tool(outcome),
             // ── M5 感知（设计书 §8.3 行为映射）──
@@ -548,6 +571,12 @@ impl PetState {
                 } else {
                     self.push_event(RecentEvent::ModePlan);
                     self.msg = Some("它趴下来安静围观。".into());
+                }
+                // 审查修复：写入 last_agent_mode（此前只 push 事件，前端永远 null）；
+                // 限频记忆：同模式不重复记（仿照 ModelChanged）。
+                if self.last_agent_mode.as_deref() != Some(mode.as_str()) {
+                    self.remember(format!("它记住：进入了{mode}模式"));
+                    self.last_agent_mode = Some(mode);
                 }
             }
             AiEvent::ModelChanged { model } => {
@@ -720,8 +749,8 @@ impl PetState {
             return "sleepy";
         }
         let recent = &self.recent_events;
-        let recent3: Vec<&RecentEvent> = recent.iter().rev().take(3).collect();
-        let recent3_has = |event: RecentEvent| recent3.iter().any(|e| **e == event);
+        // 审查修复：直接迭代最近 3 条，不再分配 Vec<&RecentEvent>
+        let recent3_has = |event: RecentEvent| recent.iter().rev().take(3).any(|e| *e == event);
         // 1. 崩溃/失败（近 3 条）
         if recent3_has(RecentEvent::Crashed) || recent3_has(RecentEvent::Failed) || recent3_has(RecentEvent::ToolFail) {
             return "error";
@@ -783,10 +812,7 @@ impl PetState {
 
     /// 感知窗口：环形 8，情绪推导输入（设计书 §6）。
     fn push_event(&mut self, event: RecentEvent) {
-        self.recent_events.push(event);
-        if self.recent_events.len() > RECENT_EVENTS_CAP {
-            self.recent_events.remove(0);
-        }
+        push_capped(&mut self.recent_events, event, RECENT_EVENTS_CAP);
     }
 
     /// M5 感知：记录"吃过的代码"文件名（脱敏摘要：仅文件名，不含路径/参数）。
@@ -796,10 +822,7 @@ impl PetState {
         if name.is_empty() || self.stats.code_files.contains(&name) {
             return;
         }
-        self.stats.code_files.push(name);
-        if self.stats.code_files.len() > 10 {
-            self.stats.code_files.remove(0);
-        }
+        push_capped(&mut self.stats.code_files, name, 10);
     }
 
     /// v2 唤醒（T2 转移动作）：状态置 Idle，energy +30，文案（mood 由推导决定）。
@@ -905,7 +928,10 @@ impl PetState {
         if matches!(self.machine, PetMachineState::Awake(MachineSub::Distress)) {
             return false;
         }
-        if self.first_chunk_at_ms.is_some_and(|start| now_ms.saturating_sub(start) > 30_000) {
+        // 审查修复：发呆判定基于"无任何活动"——last_activity_at_ms 由任何 apply 事件
+        // （除 Visit/Sleepy）刷新；不再依赖 first_chunk_at_ms（长生成期间不刷新，
+        // 曾导致 30s 后误入睡 → 流式 TokenUsage 唤醒 +30 → 再入睡的振荡与能量农场）。
+        if now_ms.saturating_sub(self.last_activity_at_ms) > 30_000 {
             self.apply(AiEvent::Sleepy, now_ms);
             return true;
         }
@@ -931,9 +957,12 @@ impl PetState {
 
     fn record_tool(&mut self, outcome: ToolOutcome) {
         match outcome {
-            ToolOutcome::Started => {
-                self.stats.tools_started = self.stats.tools_started.saturating_add(1);
-            }
+            // 审查修复：ToolOutcome::Started 为死分支——桥接层 pet.rs 只发
+            // Succeeded/Failed/Cancelled；变体保留仅为兼容公共 API，此臂不产生任何统计。
+            ToolOutcome::Started => {}
+            // 口径说明（现状语义）：Cancelled 只计入 tools_started（分母），
+            // 不计成功也不计失败（取消 ≠ 失败）——tool_success_rate =
+            // succeeded / started 因此是"取消算分母"的保守下限。
             ToolOutcome::Succeeded => {
                 self.stats.tools_started = self.stats.tools_started.saturating_add(1);
                 self.stats.tools_succeeded = self.stats.tools_succeeded.saturating_add(1);
@@ -1004,10 +1033,7 @@ impl PetState {
         if self.memories.last() == Some(&memory) {
             return;
         }
-        self.memories.push(memory);
-        if self.memories.len() > 10 {
-            self.memories.remove(0);
-        }
+        push_capped(&mut self.memories, memory, 10);
     }
 
     fn recompute_stats(&mut self) {
@@ -1027,6 +1053,13 @@ impl PetState {
 fn sanitize_name(value: &str) -> String {
     let name: String = value.trim().chars().take(12).collect();
     if name.is_empty() { "微栖".into() } else { name }
+}
+
+/// 环形缓冲 helper：push 后若超过 cap 移除最旧，返回被淘汰的元素（调用方通常忽略）。
+/// 统一 recent_events/code_files/memories 三处"push→超限→remove(0)"的重复模式。
+fn push_capped<T>(vec: &mut Vec<T>, item: T, cap: usize) -> Option<T> {
+    vec.push(item);
+    (vec.len() > cap).then(|| vec.remove(0))
 }
 
 fn day_number(ms: u64) -> u64 {

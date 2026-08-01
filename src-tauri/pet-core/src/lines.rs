@@ -50,10 +50,5 @@ pub fn pick(key: LineKey, idx: &mut u8) -> String {
     };
     let pick_idx = *idx as usize % pool.len();
     *idx = idx.wrapping_add(1);
-    let text = pool[pick_idx];
-    if key == LineKey::Rename {
-        format!("{text}") // 调用方拼名字
-    } else {
-        text.to_string()
-    }
+    pool[pick_idx].to_string() // Rename 等场景由调用方拼接前后缀
 }

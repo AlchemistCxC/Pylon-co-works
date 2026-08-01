@@ -12,7 +12,7 @@ mod runtime_log;
 mod workspace;
 
 use std::collections::HashMap;
-use std::sync::atomic::Ordering;
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 use tauri::{Emitter, Manager, Runtime};
@@ -60,6 +60,8 @@ struct AppState {
     gateway: Arc<GatewayCore>,
     /// 权限审批模式（B9.3）：bypass/auto 自动批准；edit/default 挂起询问。
     approval_mode: Arc<Mutex<String>>,
+    /// 宠物状态最近一次落盘时间（Unix 毫秒）——get_pet 12s 轮询路径写盘节流用。
+    pet_last_persist_ms: AtomicU64,
 }
 
 /// 供 async 闭包/静态辅助持有的 AppState 字段子集。
@@ -116,21 +118,23 @@ impl AppStateHandles {
         }
     }
 
-    fn agent_status_payload(&self, runtime: Option<&AgentRuntime>) -> serde_json::Value {
-        let crashed = runtime
-            .and_then(|runtime| runtime.acp.try_lock().ok())
-            .map(|acp| acp.is_crashed())
-            .unwrap_or(false);
+    /// 崩溃检测 + 记录（P2-3）：只做"acp 已死 → status=Crashed + 注入 last_error"的
+    /// 记录性写入，必须在纯查询路径（agent_status_payload）之外显式调用——
+    /// getter 不再有副作用。try_lock 失败（acp 锁正被占用）视为未崩溃（读路径不等待）。
+    fn detect_and_record_crashes(runtime: Option<&AgentRuntime>) {
+        let Some(runtime) = runtime else { return };
+        let crashed = runtime.acp.try_lock().ok().map(|acp| acp.is_crashed()).unwrap_or(false);
         if crashed {
-            if let Some(runtime) = runtime {
-                if let Ok(mut state) = runtime.agent_runtime.lock() {
-                    state.status = AgentLifecycleStatus::Crashed;
-                    if state.last_error.is_none() {
-                        state.last_error = Some("ACP child process stdout closed".to_string());
-                    }
+            if let Ok(mut state) = runtime.agent_runtime.lock() {
+                state.status = AgentLifecycleStatus::Crashed;
+                if state.last_error.is_none() {
+                    state.last_error = Some("ACP child process stdout closed".to_string());
                 }
             }
         }
+    }
+
+    fn agent_status_payload(&self, runtime: Option<&AgentRuntime>) -> serde_json::Value {
         let (status, last_error, last_connected_at) = runtime
             .and_then(|runtime| runtime.agent_runtime.lock().ok().map(|state| state.clone()))
             .map(|state| (state.status, state.last_error, state.last_connected_at))
@@ -176,15 +180,23 @@ impl AppStateHandles {
         last_error: Option<String>,
     ) {
         self.set_agent_runtime_status(runtime, status, last_error.clone());
+        // P2-3：崩溃检测在状态写入之后执行——acp 已死时崩溃状态优先于本次
+        // announce 的状态（避免"status=reconnecting 但 crashed=true"的自我矛盾）。
+        Self::detect_and_record_crashes(Some(runtime));
         emit_event(window, "peri:agent-status", {
             let mut payload = self.agent_status_payload(Some(runtime));
             if let serde_json::Value::Object(ref mut map) = payload {
-                map.insert("status".to_string(), serde_json::Value::String(status.as_str().to_string()));
-                if let Some(error) = last_error {
-                    let error = serde_json::Value::String(error);
-                    map.insert("lastError".to_string(), error.clone());
-                    map.insert("recentError".to_string(), error.clone());
-                    map.insert("error".to_string(), error);
+                // P3-12：只在 payload 未报告崩溃时覆盖——payload 内 status/crashed 必须一致。
+                let payload_crashed = map.get("status").and_then(|value| value.as_str())
+                    == Some(AgentLifecycleStatus::Crashed.as_str());
+                if !payload_crashed {
+                    map.insert("status".to_string(), serde_json::Value::String(status.as_str().to_string()));
+                    if let Some(error) = last_error {
+                        let error = serde_json::Value::String(error);
+                        map.insert("lastError".to_string(), error.clone());
+                        map.insert("recentError".to_string(), error.clone());
+                        map.insert("error".to_string(), error);
+                    }
                 }
             }
             payload
@@ -610,7 +622,7 @@ async fn clear_runtime_logs(state: tauri::State<'_, AppState>) -> Result<(), Pyl
 
 #[tauri::command]
 async fn push_frontend_log(
-    state: tauri::State<'_, AppState>, _window: tauri::Window, level: String, source: Option<String>, session: Option<String>, message: String,
+    state: tauri::State<'_, AppState>, level: String, source: Option<String>, session: Option<String>, message: String,
     fields: Option<serde_json::Map<String, serde_json::Value>>,
 ) -> Result<runtime_log::RuntimeLogEntry, String> {
     Ok(state.runtime_logs.push(
@@ -715,29 +727,19 @@ fn start_notification_dispatcher<R: tauri::Runtime>(handles: &AppStateHandles, r
                         runtime_state.last_error = Some(last_error.clone());
                     }
                     let _ = pet.lock().map(|mut p| pet::on_agent_crashed(&mut p));
-                    let runtime_state = agent_runtime.lock().map(|value| value.clone()).unwrap_or_default();
-                    let active_id = active_agent.lock().ok().map(|value| value.clone()).unwrap_or_default();
-                    let agent = agents.lock().ok().and_then(|items| items.get(&active_id).cloned());
-                    let last_error = runtime_state.last_error.clone();
-                    let recent_error = last_error.clone();
-                    let legacy_error = last_error.clone();
-                    emit_event(&window, "peri:agent-status", serde_json::json!({
-                        // agentId 是 registry key；agentName/agent 仅用于展示兼容。
-                        "agentId": active_id,
-                        "agentName": agent.as_ref().map(|value| value.name.clone()).unwrap_or_default(),
-                        "agent": agent.as_ref().map(|value| value.name.clone()).unwrap_or_default(),
-                        "status": AgentLifecycleStatus::Crashed.as_str(),
-                        "transport": agent.as_ref().map(|value| value.transport.clone()).unwrap_or_default(),
-                        "cwd": agent.as_ref().and_then(|value| value.cwd.clone()).unwrap_or_default(),
-                        "lastError": last_error,
-                        "recentError": recent_error,
-                        "error": legacy_error,
-                        "lastConnectedAt": runtime_state.last_connected_at,
-                        "generation": client_generation.load(Ordering::Acquire),
-                        "active": agent.is_some(),
-                        "available": false,
-                        "crashed": true,
-                    }));
+                    // P2-4：崩溃 payload 复用 agent_status_payload（状态已置 Crashed，
+                    // 读出的形状与旧手工构造一致：status=crashed/available=false/
+                    // crashed=true/lastError 注入），不再双份维护同一形状。
+                    let reconnect_handles = AppStateHandles {
+                        runtimes: runtimes.clone(),
+                        agents: agents.clone(),
+                        active_agent: active_agent.clone(),
+                        pet: pet.clone(),
+                        runtime_logs: runtime_logs.clone(),
+                        gateway: gateway.clone(),
+                        approval_mode: approval_mode.clone(),
+                    };
+                    emit_event(&window, "peri:agent-status", reconnect_handles.agent_status_payload(Some(runtime_for_reconnect.as_ref())));
                     // 自动重连：崩溃后指数退避自动拉起（最多 5 次，~62s）。
                     // 防重入：多次崩溃通知只调度一次（auto_reconnect_active）。
                     // per-runtime 语义：只重连本 runtime 绑定的 agent；用户手动
@@ -746,15 +748,6 @@ fn start_notification_dispatcher<R: tauri::Runtime>(handles: &AppStateHandles, r
                     if runtime_for_reconnect.auto_reconnect_active.swap(true, Ordering::AcqRel) == false {
                         let reconnect_runtime = runtime_for_reconnect.clone();
                         let window_for_reconnect = window.clone();
-                        let reconnect_handles = AppStateHandles {
-                            runtimes: runtimes.clone(),
-                            agents: agents.clone(),
-                            active_agent: active_agent.clone(),
-                            pet: pet.clone(),
-                            runtime_logs: runtime_logs.clone(),
-                            gateway: gateway.clone(),
-                            approval_mode: approval_mode.clone(),
-                        };
                         tokio::spawn(async move {
                             // 手动 switch 会 abort 本 runtime 的 dispatcher，但不会
                             // cancel 自动重连闭包——每轮用 active_agent 复查拦截，
@@ -786,6 +779,18 @@ fn start_notification_dispatcher<R: tauri::Runtime>(handles: &AppStateHandles, r
                                     return;
                                 };
                                 let _lifecycle_guard = reconnect_runtime.agent_lifecycle.lock().await;
+                                // P2-1：拿到生命周期锁后重查"仍然需要连接"——复查 stale 与
+                                // 拿锁之间，用户手动 reconnect 可能已把状态置非 Crashed 并完成
+                                // 连接；此时再 do_connect_and_replace 会连续第二次连接。
+                                // 手动操作（switch/reconnect）同样在锁内改状态，锁串行后
+                                // 此处必能看到其结果。
+                                let still_stale = reconnect_runtime.agent_runtime.lock()
+                                    .map(|r| r.status == AgentLifecycleStatus::Crashed)
+                                    .unwrap_or(false);
+                                if !still_stale {
+                                    reconnect_runtime.auto_reconnect_active.store(false, Ordering::Release);
+                                    return;
+                                }
                                 match do_connect_and_replace(
                                     &reconnect_handles,
                                     &reconnect_runtime,
@@ -1477,6 +1482,7 @@ acp: None,
             prism,
             gateway,
             approval_mode: Arc::new(Mutex::new("default".to_string())),
+            pet_last_persist_ms: AtomicU64::new(0),
         }
     }
 
@@ -1869,6 +1875,7 @@ acp: None,
             prism,
             gateway,
             approval_mode: Arc::new(Mutex::new("default".to_string())),
+            pet_last_persist_ms: AtomicU64::new(0),
         }
     }
 
@@ -2160,6 +2167,7 @@ mod mcp_persist_tests {
             prism: prism::PrismClient::unavailable("test".to_string()),
             gateway: Arc::new(gateway::GatewayCore::new()),
             approval_mode: Arc::new(Mutex::new("default".to_string())),
+            pet_last_persist_ms: AtomicU64::new(0),
         };
         app.manage(state);
         let path = match mcp_persist_path(&app.handle()) {
@@ -2235,6 +2243,7 @@ acp: None,
             prism,
             gateway,
             approval_mode: Arc::new(Mutex::new("default".to_string())),
+            pet_last_persist_ms: AtomicU64::new(0),
         }
     }
 
@@ -2427,6 +2436,7 @@ for line in sys.stdin:
             prism: prism::PrismClient::unavailable("test".to_string()),
             gateway,
             approval_mode: Arc::new(Mutex::new("default".to_string())),
+            pet_last_persist_ms: AtomicU64::new(0),
         }
     }
 
@@ -2533,6 +2543,7 @@ gateway:
                     &resolved.source,
                     &resolved.content,
                     "",
+                    None,
                     None,
                     None,
                     None,
@@ -2648,7 +2659,8 @@ impl AppState {
         message: &str,
         fields: serde_json::Map<String, serde_json::Value>,
     ) {
-        self.runtime_logs.push(runtime_log::timestamp(), level, source, session, message, fields);
+        // P2-6：委托 handles 版本（唯一实现，避免双份逐字重复）。
+        AppStateHandles::from_state(self).log_runtime_summary(level, source, session, message, fields);
     }
 
     fn workspace_root_for_source(&self, runtime: &AgentRuntime, source: &str) -> Result<String, String> {
@@ -2826,10 +2838,10 @@ async fn check_pending_permission_timeouts(state: &AppState) {
             })
             .unwrap_or_default();
         for (request_id, tool_call_id) in expired {
-            let acp = runtime.acp.lock().await;
-            let _ = acp.send_response(request_id, permission_response("reject_once")).await;
-            drop(acp);
-            let _ = runtime.pending_permissions.lock().map(|mut pending| pending.remove(&request_id));
+            // P1-2：统一走 respond_permission（acp 锁内复核 pending 再发送，
+            // 防客户端替换竞态）；发送失败保留 pending，下轮 watcher 重试或
+            // 客户端替换清理。超时日志无条件保留（记录本次判定）。
+            let _ = respond_permission(&runtime, request_id, permission_response("reject_once")).await;
             log::warn!("权限请求 {request_id} 超时默认拒绝（{tool_call_id}）");
         }
     }
@@ -2843,8 +2855,10 @@ async fn check_session_expiry(state: &AppState) {
     // 核验修复：平台 source 判定（适配器前缀或静态绑定命中）。GUI local 会话
     // 由前端/用户管理，不参与后台过期重置（watcher 是 B10.3b 为平台会话设计）。
     let platform_keys: Vec<String> = state.gateway.adapter_keys();
+    // P3：前缀循环外预构造，避免闭包内每 session 每 key 重复 format 分配。
+    let platform_prefixes: Vec<String> = platform_keys.into_iter().map(|key| format!("{key}:")).collect();
     let is_platform_source = |source: &str| -> bool {
-        platform_keys.iter().any(|key| source.starts_with(&format!("{key}:")))
+        platform_prefixes.iter().any(|prefix| source.starts_with(prefix))
             || state.gateway.binding(source).is_some()
     };
     for runtime in state.runtimes.all() {
@@ -2997,6 +3011,26 @@ fn permission_response_cancelled() -> serde_json::Value {
         .unwrap_or_else(|_| serde_json::json!({"outcome": "cancelled"}))
 }
 
+/// 统一权限应答（P1-2 TOCTOU 修复）：acp 锁内复核 pending 再发送。
+/// 客户端替换（replace_agent_client）在 acp 锁内清空 pending——若"锁外读 pending
+/// → 锁 acp 发送"，替换发生在两者之间时，旧进程的 request_id 会写到新进程。
+/// 返回 true = 已应答并移除；false = 请求已不存在（跳过）或发送失败（保留 pending
+/// 供重试/超时/客户端替换清理）。
+async fn respond_permission(runtime: &AgentRuntime, request_id: u64, response: serde_json::Value) -> bool {
+    let acp = runtime.acp.lock().await;
+    let still_pending = runtime.pending_permissions.lock()
+        .map(|pending| pending.contains_key(&request_id))
+        .unwrap_or(false);
+    if !still_pending {
+        return false;
+    }
+    if acp.send_response(request_id, response).await.is_err() {
+        return false;
+    }
+    let _ = runtime.pending_permissions.lock().map(|mut pending| pending.remove(&request_id));
+    true
+}
+
 /// 应答并移除指定 session 的全部挂起权限请求（Cancelled）——cancel/close 路径调用。
 async fn respond_pending_permissions_cancelled(runtime: &AgentRuntime, session_id: &str) {
     let pending: Vec<u64> = runtime.pending_permissions.lock()
@@ -3008,10 +3042,9 @@ async fn respond_pending_permissions_cancelled(runtime: &AgentRuntime, session_i
         })
         .unwrap_or_default();
     for request_id in pending {
-        let acp = runtime.acp.lock().await;
-        let _ = acp.send_response(request_id, permission_response_cancelled()).await;
-        drop(acp);
-        let _ = runtime.pending_permissions.lock().map(|mut pending| pending.remove(&request_id));
+        // P1-2：统一走 respond_permission（锁内复核）；发送失败时保留 pending
+        // （进程已死则由崩溃处理/客户端替换清理，不向新进程误写）。
+        let _ = respond_permission(runtime, request_id, permission_response_cancelled()).await;
     }
 }
 
@@ -3188,6 +3221,7 @@ async fn send_message<R: tauri::Runtime>(
         session_prompt.as_deref(),
         attachments.as_deref(),
         mcp_servers,
+        None,
     )
     .await
 }
@@ -3195,6 +3229,8 @@ async fn send_message<R: tauri::Runtime>(
 /// 公共发送管线（GUI `send_message` 与 gateway 平台 ingest 共用，B10.3）：
 /// per-runtime 会话创建/映射/prompt 锁/等待/cancel/事件广播。
 /// 平台 ingest 经 handler 路由到绑定 agent 的 runtime 后调用本函数。
+/// `cwd`：自动建会话时的工作目录——平台路由必须传绑定 agent 的 cwd
+/// （绑定 agent ≠ GUI active agent 时 agent_cwd() 会读错）；None 回退 active agent。
 async fn send_prompt_core<R: tauri::Runtime>(
     state: &AppState,
     runtime: &Arc<AgentRuntime>,
@@ -3206,6 +3242,7 @@ async fn send_prompt_core<R: tauri::Runtime>(
     session_prompt: Option<&str>,
     attachments: Option<&[String]>,
     mcp_servers: Option<Vec<mcp::McpServerConfig>>,
+    cwd: Option<&str>,
 ) -> Result<String, PylonError> {
     state.log_runtime_summary( "info", "prompt", Some(source.to_string()), "Prompt started", serde_json::Map::from_iter([
         ("contentLength".to_string(), serde_json::Value::from(content.len())),
@@ -3245,7 +3282,9 @@ async fn send_prompt_core<R: tauri::Runtime>(
                 let sessions = runtime.sessions.lock().map_err(|e| e.to_string())?;
                 if sessions.len() >= MAX_SESSIONS { return Err(PylonError::Protocol("max sessions reached".to_string())); }
             }
-            let session_cwd = state.agent_cwd();
+            // P1-1：会话 cwd 优先取调用方显式绑定（平台路由 = 绑定 agent 的 cwd，
+            // 可能 ≠ GUI active agent）；无则回退 active agent cwd。
+            let session_cwd = cwd.map(str::to_string).unwrap_or_else(|| state.agent_cwd());
             let generation = state.current_generation(runtime);
             let response = match state.acp_rpc(runtime, acp::METHOD_SESSION_NEW, acp::session_new_params(&session_cwd, requested_mcp_servers.clone())?).await {
                 Ok(response) => response,
@@ -3271,7 +3310,7 @@ async fn send_prompt_core<R: tauri::Runtime>(
         .filter(|value| !value.trim().is_empty())
         .unwrap_or(persona);
 
-    let prompt_content = if is_first && !effective_persona.is_empty() && !content.starts_with('/') {
+    let prompt_content = if is_first && !effective_persona.is_empty() && !content.trim_start().starts_with('/') {
         format!("{}\n\n---\n\n{}", effective_persona, content)
     } else {
         content.to_string()
@@ -3332,18 +3371,20 @@ async fn send_prompt_core<R: tauri::Runtime>(
         let (id, line, rx) = acp.prepare_prompt(&peri_id, prompt_blocks)?;
         (id, acp.write_tx.clone(), line, rx)
     };
-    if write_tx.send(prompt_line).await.is_err() {
-        runtime.acp.lock().await.remove_pending(request_id);
-        let _ = state.remove_session_if_matches(runtime, source, &peri_id, prompt_generation);
-        return Err(PylonError::Protocol("ACP connection closed".to_string()));
-    }
     // B11：回合推进——该 session 用户回合 +1（注入/持久化共用同一 round）；
     // 清空上一回合回复文本（本轮回复由 dispatcher 重新收集）。
+    // P2-8：必须在 write_tx.send 之前（prompt 锁内）完成——发送成功后清空会与
+    // dispatcher 的并行追加竞态：agent 极快响应时本轮回复文本会被清掉。
     if let Ok(mut sessions) = runtime.sessions.lock() {
         if let Some(session) = sessions.get_mut(source) {
             session.inject_round = session.inject_round.saturating_add(1);
             session.last_response_text.clear();
         }
+    }
+    if write_tx.send(prompt_line).await.is_err() {
+        runtime.acp.lock().await.remove_pending(request_id);
+        let _ = state.remove_session_if_matches(runtime, source, &peri_id, prompt_generation);
+        return Err(PylonError::Protocol("ACP connection closed".to_string()));
     }
     let acp_for_cancel = runtime.acp.clone();
     let peri_id_for_cancel = peri_id.clone();
@@ -3714,6 +3755,11 @@ async fn validate_agents() -> Result<serde_json::Value, PylonError> {
 #[tauri::command]
 async fn switch_agent(state: tauri::State<'_, AppState>, window: tauri::WebviewWindow, name: String) -> Result<(), PylonError> {
     let inner = state.inner();
+    // P3：先查 registry 确认 agent 存在，再 get_or_create——未知 agent 直接报错，
+    // 不得留下幽灵 runtime（disconnected 且永不连接的空注册项）。
+    if !inner.agents.lock().map_err(|error| error.to_string())?.contains_key(&name) {
+        return Err(PylonError::Protocol(format!("unknown agent: {name}")));
+    }
     // 目标 runtime 懒启动（首次切换创建 disconnected runtime）
     let runtime = inner.runtimes.get_or_create(&name);
     let previous_active = inner.active_agent.lock().map_err(|error| error.to_string())?.clone();
@@ -3753,7 +3799,13 @@ async fn reconnect_agent(state: tauri::State<'_, AppState>, window: tauri::Webvi
 
 #[tauri::command]
 async fn agent_status(state: tauri::State<'_, AppState>) -> Result<serde_json::Value, PylonError> {
-    Ok(state.inner().agent_status_payload())
+    let inner = state.inner();
+    // P2-3：崩溃检测显式前置（acp 已死 → 记录 Crashed + lastError），
+    // 随后 getter 只读构造 payload——响应形状（status/lastError/recentError/error）
+    // 是前端契约，保持不变。
+    let runtime = inner.active_runtime();
+    AppStateHandles::detect_and_record_crashes(runtime.as_deref());
+    Ok(inner.agent_status_payload())
 }
 
 #[tauri::command]
@@ -3875,6 +3927,11 @@ fn persist_pet_if_possible(app: &tauri::AppHandle, pet: &pet::PetState) {
     }
 }
 
+/// get_pet 轮询路径的写盘节流间隔（P3）：宠物状态只在有意义的变更时变化，
+/// 12s 轮询无条件全量序列化 + 落盘是纯浪费。状态突变路径（pet_action）与
+/// 退出兜底仍无条件写盘，节流只降低轮询路径频率，最坏丢失 <60s 的变更。
+const PET_PERSIST_THROTTLE_MS: u64 = 60_000;
+
 #[tauri::command]
 async fn get_pet(app: tauri::AppHandle, state: tauri::State<'_, AppState>) -> Result<serde_json::Value, PylonError> {
     let mut pet = state.pet.lock().map_err(|e| e.to_string())?;
@@ -3888,7 +3945,13 @@ async fn get_pet(app: tauri::AppHandle, state: tauri::State<'_, AppState>) -> Re
     if let Some(message) = msg {
         value["msg"] = serde_json::Value::String(message);
     }
-    persist_pet_if_possible(&app, &pet);
+    // P3：节流写盘——距上次落盘不足 60s 的轮询不再序列化 + 写盘。
+    let now_ms: u64 = runtime_log::timestamp().parse().unwrap_or(0);
+    let last_persist = state.pet_last_persist_ms.load(Ordering::Acquire);
+    if now_ms.saturating_sub(last_persist) >= PET_PERSIST_THROTTLE_MS {
+        persist_pet_if_possible(&app, &pet);
+        state.pet_last_persist_ms.store(now_ms, Ordering::Release);
+    }
     Ok(value)
 }
 
@@ -3943,10 +4006,12 @@ pub(crate) async fn resolve_permission(
     if !options.iter().any(|option| option == option_id) {
         return Err(PylonError::Protocol(format!("invalid option {option_id} for request {request_id}")));
     }
-    let acp = runtime.acp.lock().await;
-    acp.send_response(request_id, permission_response(option_id)).await?;
-    drop(acp);
-    let _ = runtime.pending_permissions.lock().map(|mut pending| pending.remove(&request_id));
+    // P1-2：选项校验通过后统一走 respond_permission——acp 锁内复核 pending 仍存在
+    // 再发送，客户端替换（替换时清空 pending）发生在读与发之间时不会把旧进程的
+    // request_id 写到新进程。发送失败保留 pending（可重试）。
+    if !respond_permission(runtime, request_id, permission_response(option_id)).await {
+        return Err(PylonError::Protocol(format!("permission request not found: {request_id}")));
+    }
     log::info!("权限请求 {request_id} 已应答 {option_id}（{tool_call_id}）");
     Ok(())
 }
@@ -4276,6 +4341,7 @@ pub fn run() {
                 prism,
                 gateway,
                 approval_mode: Arc::new(Mutex::new("default".to_string())),
+                pet_last_persist_ms: AtomicU64::new(0),
             })
             .invoke_handler(tauri::generate_handler![
                 prism_health, prism_status, prism_state, prism_scenarios, prism_sources, prism_aliases, prism_config,
@@ -4362,6 +4428,11 @@ pub fn run() {
                                     return;
                                 }
                             }
+                            // P1-1：平台路由绑定 agent ≠ GUI active agent 时会话 cwd 必须用
+                            // 绑定 agent 的 cwd（而非 active agent）；无绑定 agent 定义时回退 None。
+                            let agent_cwd = state.inner().agents.lock().ok()
+                                .and_then(|agents| agents.get(&agent_id).cloned())
+                                .and_then(|agent| agent.cwd);
                             if let Err(error) = send_prompt_core(
                                 state.inner(),
                                 &runtime,
@@ -4373,6 +4444,7 @@ pub fn run() {
                                 None,
                                 None,
                                 None,
+                                agent_cwd.as_deref(),
                             ).await {
                                 log::warn!("gateway ingest 发送失败 ({}): {error}", resolved.source);
                             }

@@ -11,6 +11,8 @@ use std::time::Duration;
 
 const DEFAULT_BASE_URL: &str = "http://127.0.0.1:9337";
 const MAX_ERROR_BODY: usize = 4096;
+/// 成功响应体上限（防御性；本机服务正常响应远小于此）。
+const MAX_RESPONSE_BYTES: usize = 16 * 1024 * 1024;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum PrismStatusCode {
@@ -88,9 +90,25 @@ impl PrismClient {
     }
 
     pub fn unavailable(error: String) -> Self {
+        // P3：不直接 expect。DEFAULT_BASE_URL 为编译期常量（单测
+        // default_base_url_parses 钉死可解析）；万一被误改，把解析错误并入
+        // configuration_error 而不是 panic——错误态客户端所有请求本就会
+        // 立即失败，base_url 仅作 status() 展示占位（请求层不可达）。
+        let base_url = match Url::parse(DEFAULT_BASE_URL) {
+            Ok(url) => url,
+            Err(parse_error) => {
+                return Self {
+                    client: Client::new(),
+                    base_url: Url::parse("http://127.0.0.1:9337")
+                        .expect("fallback 字面量与 DEFAULT_BASE_URL 相同，正常不可达"),
+                    admin_token: None,
+                    configuration_error: Some(format!("{error}；默认 Prism URL 不可解析: {parse_error}")),
+                };
+            }
+        };
         Self {
             client: Client::new(),
-            base_url: Url::parse(DEFAULT_BASE_URL).expect("default Prism URL must be valid"),
+            base_url,
             admin_token: None,
             configuration_error: Some(error),
         }
@@ -113,8 +131,19 @@ impl PrismClient {
         let response = request.send().await
             .map_err(|error| format!("Prism 请求失败: {error}"))?;
         let status = response.status();
+        // P3：响应体上限——reqwest 未启用 "stream" feature（Cargo.toml 不可改），
+        // bytes_stream 不可用，采用最小防护：Content-Length 预检 + 读完后二次校验。
+        // 本机服务低危，仅防服务异常时大响应进入内存/JSON 解析。
+        if let Some(len) = response.content_length() {
+            if len > MAX_RESPONSE_BYTES as u64 {
+                return Err(format!("Prism 响应超过 {MAX_RESPONSE_BYTES} 字节上限"));
+            }
+        }
         let text = response.text().await
             .map_err(|error| format!("读取 Prism 响应失败: {error}"))?;
+        if text.len() > MAX_RESPONSE_BYTES {
+            return Err(format!("Prism 响应超过 {MAX_RESPONSE_BYTES} 字节上限"));
+        }
         if !status.is_success() {
             let detail: String = text.chars().take(MAX_ERROR_BODY).collect();
             return Err(format!("Prism HTTP {}: {}", status.as_u16(), detail));
@@ -278,10 +307,17 @@ mod tests {
 
     #[test]
     fn only_loopback_urls_are_allowed() {
+        assert!(Url::parse("http://127.0.0.1:9337").is_ok());
         assert!(validate_loopback_url(&Url::parse("http://127.0.0.1:9337").unwrap()).is_ok());
         assert!(validate_loopback_url(&Url::parse("http://localhost:9337").unwrap()).is_ok());
         assert!(validate_loopback_url(&Url::parse("http://192.168.1.2:9337").unwrap()).is_err());
         assert!(validate_loopback_url(&Url::parse("file:///tmp/prism").unwrap()).is_err());
+    }
+
+    #[test]
+    fn default_base_url_parses() {
+        // P3：unavailable() 依赖该常量可解析（不再 expect，靠此测试钉死）
+        assert!(Url::parse(DEFAULT_BASE_URL).is_ok(), "默认常量必须可解析");
     }
 
     #[test]

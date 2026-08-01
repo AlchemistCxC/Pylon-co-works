@@ -13,8 +13,6 @@ pub enum PylonError {
     AgentCrashed,
     SessionNotFound(String),
     NoActiveAgent,
-    UnknownAgent(String),
-    Timeout(u64),
     Serialize(String),
     Io(String),
     Protocol(String),
@@ -32,8 +30,6 @@ impl PylonError {
             Self::AgentCrashed => "agent_crashed",
             Self::SessionNotFound(_) => "session_not_found",
             Self::NoActiveAgent => "no_active_agent",
-            Self::UnknownAgent(_) => "unknown_agent",
-            Self::Timeout(_) => "timeout",
             Self::Serialize(_) => "serialize_error",
             Self::Io(_) => "io_error",
             Self::Protocol(_) => "protocol_error",
@@ -51,8 +47,6 @@ impl fmt::Display for PylonError {
             Self::AgentCrashed => write!(f, "agent process crashed"),
             Self::SessionNotFound(id) => write!(f, "session not found: {id}"),
             Self::NoActiveAgent => write!(f, "no active agent configured"),
-            Self::UnknownAgent(name) => write!(f, "unknown agent: {name}"),
-            Self::Timeout(s) => write!(f, "timeout after {s}s"),
             Self::Serialize(msg) => write!(f, "serialization error: {msg}"),
             Self::Io(msg) => write!(f, "I/O error: {msg}"),
             Self::Protocol(msg) => write!(f, "ACP protocol: {msg}"),
@@ -131,8 +125,6 @@ mod tests {
         assert_eq!(PylonError::Acp("x".into()).code(), "acp_error");
         assert_eq!(PylonError::AgentCrashed.code(), "agent_crashed");
         assert_eq!(PylonError::NoActiveAgent.code(), "no_active_agent");
-        assert_eq!(PylonError::UnknownAgent("a".into()).code(), "unknown_agent");
-        assert_eq!(PylonError::Timeout(30).code(), "timeout");
         assert_eq!(PylonError::Serialize("x".into()).code(), "serialize_error");
         assert_eq!(PylonError::Io("x".into()).code(), "io_error");
         assert_eq!(PylonError::Protocol("x".into()).code(), "protocol_error");

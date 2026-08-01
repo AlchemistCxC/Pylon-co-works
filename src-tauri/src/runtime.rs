@@ -56,25 +56,27 @@ impl AgentRuntimeManager {
     }
 
     pub fn insert(&self, agent_id: String, runtime: Arc<AgentRuntime>) {
-        if let Ok(mut map) = self.runtimes.write() {
-            map.insert(agent_id, runtime);
-        }
+        // P3：poison 不再静默吞掉写入——记录日志后恢复锁继续写入
+        // （丢弃写入会让该 agent 的 runtime 凭空消失，恢复语义更安全）。
+        let mut map = self.runtimes.write().unwrap_or_else(|poisoned| {
+            log::warn!("AgentRuntimeManager runtimes 锁中毒：insert 恢复后继续写入");
+            poisoned.into_inner()
+        });
+        map.insert(agent_id, runtime);
     }
 
     /// 获取或创建 agent 的 runtime（switch/reconnect 懒启动路径）。
     /// 并发重复调用只会创建一个实例（entry API 保证单实例）。
     pub fn get_or_create(&self, agent_id: &str) -> Arc<AgentRuntime> {
-        match self.runtimes.write() {
-            Ok(mut map) => map
-                .entry(agent_id.to_string())
-                .or_insert_with(AgentRuntime::new_disconnected)
-                .clone(),
-            Err(poisoned) => poisoned
-                .into_inner()
-                .entry(agent_id.to_string())
-                .or_insert_with(AgentRuntime::new_disconnected)
-                .clone(),
-        }
+        // P3：poison 分支与正常分支合并为同一 entry 逻辑（原实现复制了一份），
+        // 中毒时记录日志后恢复。
+        let mut map = self.runtimes.write().unwrap_or_else(|poisoned| {
+            log::warn!("AgentRuntimeManager runtimes 锁中毒：恢复后继续");
+            poisoned.into_inner()
+        });
+        map.entry(agent_id.to_string())
+            .or_insert_with(AgentRuntime::new_disconnected)
+            .clone()
     }
 
     pub fn get(&self, agent_id: &str) -> Option<Arc<AgentRuntime>> {

@@ -7,6 +7,9 @@
 //! 无 IO、不依赖 tauri/AppState。
 
 /// 分段指示器 `" (XX/XX)"` 的最大长度预算（`(100/100)` 恰好 10 字符）。
+/// 段数 ≥1000 时指示器为 11+ 字符（如 `(1000/1000)` 12 字符）会超出预算、该段可能
+/// 微超 max_length；触发条件为正文超过 max_length×999 字符（4000 字符/段约 400 万字），
+/// 属不现实场景，接受忽略。
 const INDICATOR_RESERVE: usize = 10;
 /// 代码块收尾 fence（段尾补闭时使用，另起一行）。
 const FENCE_CLOSE: &str = "\n```";
@@ -15,6 +18,7 @@ const FENCE_CLOSE: &str = "\n```";
 ///
 /// - 不超限（或恰好等于上限）时原样返回单段；
 /// - 切点落在 ``` 代码块内时，段尾补闭 fence，下段以原语言标签重开；
+/// - 末段停在未闭合代码块内时同样补闭 fence，保证平台 markdown 渲染完整；
 /// - 多段时每段末尾追加 `(i/N)` 分段指示器（预留 10 字符预算）；
 /// - 切点优先换行 → 空格 → 硬切，避免切断单词/行；
 /// - 长度按字符（`char`）计。
@@ -52,9 +56,18 @@ pub fn truncate_message(content: &str, max_length: usize) -> Vec<String> {
             }
         };
 
-        // 余下内容（含段首 fence）能整体放进最后一段 → 收尾。
-        if char_len(&prefix) + char_len(remaining) <= max_length.saturating_sub(INDICATOR_RESERVE) {
-            chunks.push(prefix + remaining);
+        // 余下内容（含段首 fence、必要时段尾闭 fence）能整体放进最后一段 → 收尾。
+        // 末段同样检查是否停在未闭合代码块内：是则补闭 fence，避免平台 markdown 渲染破损。
+        let (in_code, _lang) = code_block_state(carry_lang, remaining);
+        let close_len = if in_code { char_len(FENCE_CLOSE) } else { 0 };
+        if char_len(&prefix) + char_len(remaining) + close_len
+            <= max_length.saturating_sub(INDICATOR_RESERVE)
+        {
+            let mut final_chunk = prefix + remaining;
+            if in_code {
+                final_chunk.push_str(FENCE_CLOSE);
+            }
+            chunks.push(final_chunk);
             break;
         }
 
@@ -75,22 +88,7 @@ pub fn truncate_message(content: &str, max_length: usize) -> Vec<String> {
 
         // 逐行扫描本段正文，判断段末是否停在未闭合代码块内；若是，段尾闭 fence
         // 并把语言标签带到下一段重开。
-        let mut in_code = carry_lang.is_some();
-        let mut lang: &str = carry_lang.unwrap_or("");
-        for line in chunk_body.lines() {
-            let stripped = line.trim();
-            if stripped.starts_with("```") {
-                if in_code {
-                    in_code = false;
-                    lang = "";
-                } else {
-                    in_code = true;
-                    let tag = stripped[3..].trim();
-                    lang = tag.split_whitespace().next().unwrap_or("");
-                }
-            }
-        }
-
+        let (in_code, lang) = code_block_state(carry_lang, chunk_body);
         if in_code {
             full_chunk.push_str(FENCE_CLOSE);
             carry_lang = Some(lang);
@@ -138,6 +136,27 @@ fn rfind_ascii_in_prefix(s: &str, limit: usize, needle: char) -> Option<usize> {
     region
         .rfind(needle)
         .map(|byte_idx| region[..byte_idx].chars().count())
+}
+
+/// 逐行扫描正文中的 ``` 围栏，返回（扫描结束时的代码块开闭状态，若在代码块内则其语言标签）。
+/// `carry` 为扫描前已在代码块内时的上段语言标签（Some → 起始已在代码块内）。
+fn code_block_state<'a>(carry: Option<&'a str>, body: &'a str) -> (bool, &'a str) {
+    let mut in_code = carry.is_some();
+    let mut lang = carry.unwrap_or("");
+    for line in body.lines() {
+        let stripped = line.trim();
+        if stripped.starts_with("```") {
+            if in_code {
+                in_code = false;
+                lang = "";
+            } else {
+                in_code = true;
+                let tag = stripped[3..].trim();
+                lang = tag.split_whitespace().next().unwrap_or("");
+            }
+        }
+    }
+    (in_code, lang)
 }
 
 #[cfg(test)]
@@ -254,6 +273,41 @@ mod tests {
         assert!(
             last.contains("after"),
             "末段应含收尾文本: {:?}",
+            last
+        );
+    }
+
+    #[test]
+    fn last_chunk_inside_code_block_gets_closing_fence() {
+        // 正文末尾停在未闭合代码块内：末段必须补闭 fence，保证平台 markdown 渲染完整。
+        let content = format!("begin\n```python\n{}", "y = 1\n".repeat(30));
+        let max = 60;
+        let chunks = truncate_message(&content, max);
+        assert!(chunks.len() > 1, "应分成多段，实际 {}", chunks.len());
+        for chunk in &chunks {
+            assert!(
+                char_len(chunk) <= max,
+                "段长度 {} 超过上限 {}: {:?}",
+                char_len(chunk),
+                max,
+                chunk
+            );
+        }
+        let first = strip_indicator(&chunks[0]);
+        assert!(
+            first.ends_with("\n```"),
+            "首段应以闭 fence 结尾: {:?}",
+            first
+        );
+        let last = strip_indicator(chunks.last().unwrap());
+        assert!(
+            last.ends_with("\n```"),
+            "末段应以闭 fence 结尾: {:?}",
+            last
+        );
+        assert!(
+            last.starts_with("```python\n"),
+            "末段应以 ```python 重开: {:?}",
             last
         );
     }
