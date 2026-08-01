@@ -1,6 +1,6 @@
 //! Tauri 与独立宠物核心状态机之间的薄适配层。
 
-pub use pylon_pet_core::{AiEvent, DayPart, GrowthStage, PetState, ToolKind, ToolOutcome};
+pub use pylon_pet_core::{AchievementInfo, AiEvent, DayPart, GrowthStage, PetState, ToolKind, ToolOutcome};
 use serde::Serialize;
 use std::time::{SystemTime, UNIX_EPOCH};
 
@@ -17,6 +17,8 @@ pub struct PetView<'a> {
     pub crafting: bool,
     /// M8：当前时段（dawn/day/dusk/night）——前端可显示时段状态/差异。
     pub day_part: DayPart,
+    /// M9：成就全量目录 + 解锁标志（前端徽章墙/进度展示）。
+    pub achievements: Vec<AchievementInfo>,
 }
 
 pub fn view(state: &PetState) -> PetView<'_> {
@@ -30,6 +32,7 @@ pub fn view(state: &PetState) -> PetView<'_> {
         growth_progress: state.growth_progress(),
         crafting: state.pending_action.is_some(),
         day_part: state.day_part(now_ms()),
+        achievements: state.achievement_info(),
     }
 }
 

@@ -597,23 +597,28 @@ fn day_part_respects_local_offset_and_clamps() {
 fn night_interactions_grant_bonus_bond() {
     // 午夜陪伴（设计书 §13.5.5）：Night 时段互动 bond ×1.5（向上取整）
     // now=0 → UTC hour 0 → Night（offset 0）
-    let mut pet = PetState::new_at(0);
-    pet.traits = pylon_pet_core::PetTraits::default();
+    // 预置成就解锁（隔离 M9 成就奖励干扰，专注午夜加成本身）
+    let isolated = || -> PetState {
+        let mut pet = PetState::new_at(0);
+        pet.traits = pylon_pet_core::PetTraits::default();
+        pet.unlocked = vec!["first_step".into(), "night_watcher".into()];
+        pet
+    };
+    let mut pet = isolated();
     pet.apply(AiEvent::UserSent, 0);
     assert_eq!(pet.bond, 2, "Night 发消息 bond 1×1.5 向上取整 = 2");
     // 对照 Day 时段：bond 1
     let mut day = day_pet(1);
     day.traits = pylon_pet_core::PetTraits::default();
+    day.unlocked = vec!["first_step".into()];
     day.apply(AiEvent::UserSent, 1);
     assert_eq!(day.bond, 1, "Day 发消息 bond +1");
     // Night 玩耍：3×1.5 = 5（向上取整）
-    let mut pet = PetState::new_at(0);
-    pet.traits = pylon_pet_core::PetTraits::default();
+    let mut pet = isolated();
     pet.apply(AiEvent::Play, 0);
     assert_eq!(pet.bond, 5, "Night 玩耍 bond 3×1.5 = 5");
     // Night 喂食（普通 traits）：1×1.5 = 2
-    let mut pet = PetState::new_at(0);
-    pet.traits = pylon_pet_core::PetTraits::default();
+    let mut pet = isolated();
     pet.apply(AiEvent::Feed, 0);
     assert_eq!(pet.bond, 2, "Night 喂食 bond 1×1.5 = 2");
 }
@@ -655,4 +660,109 @@ fn time_of_day_line_variants_are_used() {
     let poke_b = pick(LineKey::Poke, &mut idx, DayPart::Day);
     assert!(poke_a.contains("指尖") || poke_a.contains("晃了晃"));
     assert!(poke_b.contains("指尖") || poke_b.contains("晃了晃"));
+}
+
+// ── M9：成就徽章（unlock 幂等 / 奖励 / 记忆 / restore 补查 / 计数）──
+
+#[test]
+fn achievements_unlock_with_rewards_and_idempotency() {
+    let mut pet = day_pet(1);
+    pet.traits = pylon_pet_core::PetTraits::default();
+    pet.apply(AiEvent::UserSent, 1);
+    // first_step：messages≥1
+    assert!(pet.unlocked.contains(&"first_step".to_string()), "首次对话必须解锁 first_step: {:?}", pet.unlocked);
+    assert!(pet.memories.iter().any(|m| m.contains("初次对话")), "解锁必须记入记忆");
+    assert!(pet.msg.as_deref().unwrap_or("").contains("徽章"), "解锁必须有徽章文案: {:?}", pet.msg);
+    let xp_after = pet.xp;
+    assert!(xp_after >= 2, "first_step 奖励 xp+2: {xp_after}");
+    // 幂等：再次触发不重复解锁/重复奖励
+    pet.apply(AiEvent::UserSent, 2);
+    assert_eq!(pet.unlocked.iter().filter(|id| id.as_str() == "first_step").count(), 1, "成就只能解锁一次");
+    assert_eq!(pet.xp, xp_after, "重复触发不重复奖励");
+}
+
+#[test]
+fn night_interaction_unlocks_night_watcher_achievement() {
+    let mut pet = PetState::new_at(0); // Night（offset 0）
+    pet.traits = pylon_pet_core::PetTraits::default();
+    pet.apply(AiEvent::Poke, 0);
+    assert!(pet.unlocked.contains(&"night_watcher".to_string()), "Night 互动必须解锁深夜守望");
+    assert_eq!(pet.stats.night_visits, 1);
+    // 10 次后夜猫子
+    for now in 1..=9 {
+        pet.apply(AiEvent::Poke, now);
+    }
+    assert!(pet.unlocked.contains(&"night_owl".to_string()), "10 次深夜互动必须解锁夜猫子");
+    // 计数只记真实互动：Visit（轮询）不计数
+    let before = pet.stats.night_visits;
+    pet.apply(AiEvent::Visit, 3_600_000);
+    assert_eq!(pet.stats.night_visits, before, "Visit 不是真实互动，不计数");
+}
+
+#[test]
+fn feed_and_play_counts_feed_achievements() {
+    let mut pet = day_pet(1);
+    pet.traits = pylon_pet_core::PetTraits::default();
+    for now in 1..=50 {
+        pet.apply(AiEvent::Feed, now);
+    }
+    assert_eq!(pet.stats.feed_count, 50);
+    assert!(pet.unlocked.contains(&"gourmet".to_string()), "喂食 50 次解锁老饕");
+    let mut pet = day_pet(1);
+    pet.traits = pylon_pet_core::PetTraits::default();
+    for now in 1..=50 {
+        pet.apply(AiEvent::Play, now);
+    }
+    assert_eq!(pet.stats.play_count, 50);
+    assert!(!pet.unlocked.contains(&"gourmet".to_string()), "玩耍不喂食");
+}
+
+#[test]
+fn multiple_achievements_unlock_in_one_event() {
+    // 一次 Feed 同时跨越两个成就阈值：bond 299→300（羁绊伙伴）+ feed_count 49→50（老饕）
+    let mut pet = day_pet(1);
+    pet.traits = pylon_pet_core::PetTraits::default();
+    pet.bond = 299;
+    pet.stats.feed_count = 49;
+    pet.apply(AiEvent::Feed, 1);
+    assert!(pet.unlocked.contains(&"gourmet".to_string()), "喂食 50 次必须解锁老饕: {:?}", pet.unlocked);
+    assert!(pet.unlocked.contains(&"bond_friend".to_string()), "bond 300 必须解锁羁绊伙伴: {:?}", pet.unlocked);
+    // 成就在一次检查循环里全部解锁（遍历表顺序，最后一个的 msg 生效）
+    assert!(pet.msg.as_deref().unwrap_or("").contains("徽章"), "解锁必须有徽章文案");
+}
+
+#[test]
+fn restore_backfills_achievements_for_old_saves() {
+    // 模拟旧档：已达条件但从未触发解锁检查（unlocked 空）
+    let mut pet = PetState::new_at(1);
+    pet.unlocked = Vec::new();
+    pet.stats.messages = 10;
+    pet.stats.prompts_completed = 15;
+    let restored = PetState::restore(pet, 100_000);
+    assert!(restored.unlocked.contains(&"first_step".to_string()), "恢复必须补查 first_step");
+    assert!(restored.unlocked.contains(&"ten_tasks".to_string()), "恢复必须补查 ten_tasks");
+    assert!(restored.unlocked.contains(&"hundred_tasks".to_string()) == false, "15 次任务不满 100");
+    // 恢复文案优先（成就补查不覆盖"又亮起来了"）
+    assert!(restored.msg.as_deref().unwrap_or("").contains("又亮起来了"), "恢复文案必须保留: {:?}", restored.msg);
+}
+
+#[test]
+fn achievement_catalog_lists_all_with_unlocked_flags() {
+    use pylon_pet_core::ACHIEVEMENTS;
+    let mut pet = PetState::new_at(1);
+    pet.unlocked = vec!["first_step".into(), "night_watcher".into()];
+    let info = pet.achievement_info();
+    assert_eq!(info.len(), ACHIEVEMENTS.len(), "目录必须与定义表一致");
+    let first = info.iter().find(|a| a.id == "first_step").expect("目录含 first_step");
+    assert!(first.unlocked);
+    assert!(!first.name.is_empty());
+    let locked = info.iter().find(|a| a.id == "luminary").expect("目录含 luminary");
+    assert!(!locked.unlocked);
+    // 全量目录 ≥ 20（用户要求 20+）
+    assert!(ACHIEVEMENTS.len() >= 20, "成就数量必须 20+，实际 {}", ACHIEVEMENTS.len());
+    // id 唯一性
+    let mut ids: Vec<&str> = ACHIEVEMENTS.iter().map(|a| a.id).collect();
+    ids.sort();
+    ids.dedup();
+    assert_eq!(ids.len(), ACHIEVEMENTS.len(), "成就 id 必须唯一");
 }
