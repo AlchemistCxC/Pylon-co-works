@@ -35,20 +35,16 @@ use prism::PrismClient;
 use runtime::{AgentRuntime, AgentRuntimeManager};
 
 #[cfg(test)]
-use error::PylonError;
-#[cfg(test)]
 use crate::time::Timestamp;
 
 #[cfg(test)]
-use agent_runtime::{
-    session_mapping_matches, source_for_peri_id_in_generation, status_after_connection_failure,
-    AgentRuntimeState,
-};
+use agent_runtime::AgentRuntimeState;
 #[cfg(test)]
 use session::SessionInfo;
 
 // R1 拆分：子模块函数桥接。生产代码（setup/watcher/replace）裸引用；
-// 测试模块经 `use super::*` 引入其余命令/工具函数（cfg(test) 隔离非测试警告）。
+// 测试模块经 `use super::*` 引入命令/工具函数（R5a：清理 R1 遗留的冗余
+// cfg(test) 显式导入——测试模块实际引用集中在下列被保留的名字上）。
 use crate::dispatcher::start_notification_dispatcher;
 use crate::lifecycle::{load_mcp_persisted, mcp_persist_path};
 use crate::permission::check_pending_permission_timeouts;
@@ -56,40 +52,17 @@ use crate::pet_cmds::{persist_pet_if_possible, pet_persist_path};
 use crate::session::{apply_client_replacement_sessions, check_session_expiry, send_prompt_core};
 
 #[cfg(test)]
-use crate::export::{
-    export_session, format_export_markdown, is_export_sensitive_key, sanitize_export_messages,
-    sanitize_export_value, write_export_atomically,
-};
+use crate::export::{is_export_sensitive_key, sanitize_export_messages, write_export_atomically};
 #[cfg(test)]
-use crate::gateway_cmds::{gateway_status, reload_gateway};
-#[cfg(test)]
-use crate::lifecycle::{
-    agent_status, agent_summary_payload, do_connect_and_replace, list_agents, reconnect_agent,
-    reload_agents, set_mcp_servers, switch_agent, validate_agents,
-};
-#[cfg(test)]
-use crate::logs_cmds::{clear_runtime_logs, list_runtime_logs, push_frontend_log};
+use crate::lifecycle::{do_connect_and_replace, set_mcp_servers};
 #[cfg(test)]
 use crate::permission::{
-    approve_tool_call, parse_permission_request, permission_response, permission_response_cancelled,
-    respond_permission, respond_pending_permissions_cancelled, resolve_permission, set_approval_mode,
-    PendingPermission,
+    parse_permission_request, permission_response, permission_response_cancelled, resolve_permission,
 };
-#[cfg(test)]
-use crate::pet_cmds::{get_pet, pet_action};
-#[cfg(test)]
-use crate::prism_cmds::*;
 #[cfg(test)]
 use crate::session::{
-    build_full_inspector_payload, cancel_prompt, close_session, compose_inject_prompt,
-    config_option_current_value, extract_tool_file_name, find_config_option, inject_applies_to,
-    list_persisted_sessions, load_persisted_session, load_sessions, new_session, send_message,
-    session_expired, session_inspector, set_config_option, set_mode, value_as_string, MAX_SESSIONS,
-};
-#[cfg(test)]
-use crate::workspace_cmds::{
-    git_diff, git_history, git_status, git_workspace_root, get_workspace_root,
-    list_workspace_entries, read_workspace_text,
+    build_full_inspector_payload, compose_inject_prompt, config_option_current_value,
+    extract_tool_file_name, inject_applies_to, send_message, session_expired,
 };
 
 fn emit_event<R, W>(window: &W, event: &str, payload: serde_json::Value)
