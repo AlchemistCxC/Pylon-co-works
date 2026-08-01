@@ -18,6 +18,8 @@ mod prism_cmds;
 mod runtime;
 mod runtime_log;
 mod session;
+#[cfg(test)]
+mod test_utils;
 mod time;
 mod workspace;
 mod workspace_cmds;
@@ -609,19 +611,7 @@ for line in sys.stdin:
     fn fake_agent(mode: &str) -> AgentDef {
         let mut env = std::collections::HashMap::new();
         env.insert("FAKE_MODE".to_string(), mode.to_string());
-        AgentDef {
-            name: "fake-acp".to_string(),
-            transport: "subprocess".to_string(),
-            exe: "python".to_string(),
-            args: vec!["-u".to_string(), "-c".to_string(), FAKE_SCRIPT.to_string()],
-            cwd: None,
-            env,
-            default: false,
-            set_model_api: false,
-        model: None,
-        acp_args: Vec::new(),
-acp: None,
-}
+        crate::test_utils::fake_acp_agent_with("fake-acp", FAKE_SCRIPT, Vec::new(), env)
     }
 
     async fn build_state(initial_acp: AcpClient, agent: AgentDef) -> AppState {
@@ -809,19 +799,9 @@ for line in sys.stdin:
         let trace_path = std::env::temp_dir().join(format!("pylon-permission-{}.jsonl", std::process::id()));
         let mut env = std::collections::HashMap::new();
         env.insert("FAKE_MODE".to_string(), "alive".to_string());
-        let agent = AgentDef {
-            name: "fake-permission".to_string(),
-            transport: "subprocess".to_string(),
-            exe: "python".to_string(),
-            args: vec!["-u".to_string(), "-c".to_string(), PERMISSION_SCRIPT.to_string(), trace_path.to_string_lossy().into_owned()],
-            cwd: None,
-            env,
-            default: false,
-            set_model_api: false,
-        model: None,
-        acp_args: Vec::new(),
-acp: None,
-};
+        let agent = crate::test_utils::fake_acp_agent_with(
+            "fake-permission", PERMISSION_SCRIPT, vec![trace_path.to_string_lossy().into_owned()], env,
+        );
         let initial_acp = AcpClient::connect_with_logs(&agent, None)
             .await
             .expect("fake ACP must initialize");
@@ -914,19 +894,9 @@ for line in sys.stdin:
         let mut env = std::collections::HashMap::new();
         env.insert("FAKE_MODE".to_string(), "alive".to_string());
         env.insert("PERSIST_CHUNK".to_string(), if chunk { "1".to_string() } else { "0".to_string() });
-        AgentDef {
-            name: "fake-acp-trace".to_string(),
-            transport: "subprocess".to_string(),
-            exe: "python".to_string(),
-            args: vec!["-u".to_string(), "-c".to_string(), TRACE_ACP_SCRIPT.to_string(), trace_path.to_string_lossy().into_owned()],
-            cwd: None,
-            env,
-            default: false,
-            set_model_api: false,
-        model: None,
-        acp_args: Vec::new(),
-acp: None,
-}
+        crate::test_utils::fake_acp_agent_with(
+            "fake-acp-trace", TRACE_ACP_SCRIPT, vec![trace_path.to_string_lossy().into_owned()], env,
+        )
     }
 
     const STUB_RESPONSE_BODY: &str = r#"{"context":"注入上下文","activated":["uid-1"],"source":"vein"}"#;
@@ -1384,19 +1354,7 @@ for line in sys.stdin:
 "#;
 
     fn echo_agent() -> AgentDef {
-        AgentDef {
-            name: "fake-acp-echo".to_string(),
-            transport: "subprocess".to_string(),
-            exe: "python".to_string(),
-            args: vec!["-u".to_string(), "-c".to_string(), ECHO_ACP_SCRIPT.to_string()],
-            cwd: None,
-            env: std::collections::HashMap::new(),
-            default: false,
-            set_model_api: false,
-        model: None,
-        acp_args: Vec::new(),
-acp: None,
-}
+        crate::test_utils::fake_acp_agent("fake-acp-echo", ECHO_ACP_SCRIPT)
     }
 
     /// 模块内 state 构造（兄弟模块的 build_state_with 不可访问）。
@@ -1491,19 +1449,7 @@ for line in sys.stdin:
 "#;
 
     fn chunk_acp_agent() -> AgentDef {
-        AgentDef {
-            name: "fake-acp-chunk".to_string(),
-            transport: "subprocess".to_string(),
-            exe: "python".to_string(),
-            args: vec!["-u".to_string(), "-c".to_string(), CHUNK_ACP_SCRIPT.to_string()],
-            cwd: None,
-            env: std::collections::HashMap::new(),
-            default: false,
-            set_model_api: false,
-            model: None,
-            acp_args: Vec::new(),
-            acp: None,
-        }
+        crate::test_utils::fake_acp_agent("fake-acp-chunk", CHUNK_ACP_SCRIPT)
     }
 
     /// 模块内 state 构造。

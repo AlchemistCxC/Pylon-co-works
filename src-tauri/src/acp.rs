@@ -1125,19 +1125,7 @@ for line in sys.stdin:
         response['result']={'stopReason':'end_turn'}
     print(json.dumps(response), flush=True)
 "#;
-        let agent = crate::agent_config::AgentDef {
-            name: "fake-acp".to_string(),
-            transport: "subprocess".to_string(),
-            exe: "python".to_string(),
-            args: vec!["-u".to_string(), "-c".to_string(), script.to_string()],
-            cwd: None,
-            env: HashMap::new(),
-            default: false,
-            set_model_api: false,
-        model: None,
-        acp_args: Vec::new(),
-acp: None,
-};
+        let agent = crate::test_utils::fake_acp_agent("fake-acp", script);
         let mut client = AcpClient::connect_with_logs(&agent, None)
             .await
             .expect("fake ACP must initialize");
@@ -1172,19 +1160,7 @@ acp: None,
         let script = r#"import sys
 sys.exit(0)
 "#;
-        let agent = crate::agent_config::AgentDef {
-            name: "fake-acp-eof".to_string(),
-            transport: "subprocess".to_string(),
-            exe: "python".to_string(),
-            args: vec!["-u".to_string(), "-c".to_string(), script.to_string()],
-            cwd: None,
-            env: HashMap::new(),
-            default: false,
-            set_model_api: false,
-        model: None,
-        acp_args: Vec::new(),
-acp: None,
-};
+        let agent = crate::test_utils::fake_acp_agent("fake-acp-eof", script);
         let client = AcpClient::connect_with_logs(&agent, None).await;
         assert!(client.is_err(), "initialize must fail when fake ACP closes without a response");
     }
@@ -1207,19 +1183,7 @@ for line in sys.stdin:
         response['result']={}
     print(json.dumps(response), flush=True)
 "#;
-        let agent = crate::agent_config::AgentDef {
-            name: "fake-acp-replay".to_string(),
-            transport: "subprocess".to_string(),
-            exe: "python".to_string(),
-            args: vec!["-u".to_string(), "-c".to_string(), script.to_string()],
-            cwd: None,
-            env: HashMap::new(),
-            default: false,
-            set_model_api: false,
-        model: None,
-        acp_args: Vec::new(),
-acp: None,
-};
+        let agent = crate::test_utils::fake_acp_agent("fake-acp-replay", script);
         let client = AcpClient::connect_with_logs(&agent, None)
             .await
             .expect("fake ACP replay agent must initialize");
@@ -1249,19 +1213,8 @@ for line in sys.stdin:
     if request.get('id') is not None:
         print(json.dumps(response), flush=True)
 "#;
-        let agent = crate::agent_config::AgentDef {
-            name: "fake-acp-control".to_string(),
-            transport: "subprocess".to_string(),
-            exe: "python".to_string(),
-            args: vec!["-u".to_string(), "-c".to_string(), script.to_string(), trace_path.to_string_lossy().into_owned()],
-            cwd: None,
-            env: HashMap::new(),
-            default: false,
-            set_model_api: false,
-        model: None,
-        acp_args: Vec::new(),
-acp: None,
-};
+        let agent = crate::test_utils::fake_acp_agent_with(
+            "fake-acp-control", script, vec![trace_path.to_string_lossy().into_owned()], HashMap::new());
         let client = AcpClient::connect_with_logs(&agent, None)
             .await
             .expect("fake ACP control agent must initialize");
@@ -1291,19 +1244,7 @@ request=json.loads(line)
 print(json.dumps({'jsonrpc':'2.0','id':request.get('id'),'result':{}}), flush=True)
 sys.exit(0)
 "#;
-        let agent = crate::agent_config::AgentDef {
-            name: "fake-acp-eof-after-init".to_string(),
-            transport: "subprocess".to_string(),
-            exe: "python".to_string(),
-            args: vec!["-u".to_string(), "-c".to_string(), script.to_string()],
-            cwd: None,
-            env: HashMap::new(),
-            default: false,
-            set_model_api: false,
-        model: None,
-        acp_args: Vec::new(),
-acp: None,
-};
+        let agent = crate::test_utils::fake_acp_agent("fake-acp-eof-after-init", script);
         let client = AcpClient::connect_with_logs(&agent, None)
             .await
             .expect("initialize response must arrive before EOF");
@@ -1339,19 +1280,7 @@ for line in sys.stdin:
         response['result']={'sessionId':'after-malformed'}
     print(json.dumps(response), flush=True)
 "#;
-        let agent = crate::agent_config::AgentDef {
-            name: "fake-acp-malformed".to_string(),
-            transport: "subprocess".to_string(),
-            exe: "python".to_string(),
-            args: vec!["-u".to_string(), "-c".to_string(), script.to_string()],
-            cwd: None,
-            env: HashMap::new(),
-            default: false,
-            set_model_api: false,
-        model: None,
-        acp_args: Vec::new(),
-acp: None,
-};
+        let agent = crate::test_utils::fake_acp_agent("fake-acp-malformed", script);
         let client = AcpClient::connect_with_logs(&agent, None)
             .await
             .expect("malformed line must not break initialize");
@@ -1368,19 +1297,7 @@ for line in sys.stdin:
     request=json.loads(line)
     print(json.dumps({'jsonrpc':'2.0','id':request.get('id'),'result':{}}), flush=True)
 "#;
-        let agent = crate::agent_config::AgentDef {
-            name: "fake-acp-stderr".to_string(),
-            transport: "subprocess".to_string(),
-            exe: "python".to_string(),
-            args: vec!["-u".to_string(), "-c".to_string(), script.to_string()],
-            cwd: None,
-            env: HashMap::new(),
-            default: false,
-            set_model_api: false,
-        model: None,
-        acp_args: Vec::new(),
-acp: None,
-};
+        let agent = crate::test_utils::fake_acp_agent("fake-acp-stderr", script);
         let logs = crate::runtime_log::RuntimeLogHub::new(16);
         let client = AcpClient::connect_with_logs(&agent, Some(logs.clone()))
             .await
@@ -1416,19 +1333,7 @@ for line in sys.stdin:
     else:
         print(json.dumps({'jsonrpc':'2.0','id':request.get('id'),'result':{}}), flush=True)
 "#;
-        let agent = crate::agent_config::AgentDef {
-            name: "fake-acp-delayed".to_string(),
-            transport: "subprocess".to_string(),
-            exe: "python".to_string(),
-            args: vec!["-u".to_string(), "-c".to_string(), script.to_string()],
-            cwd: None,
-            env: HashMap::new(),
-            default: false,
-            set_model_api: false,
-        model: None,
-        acp_args: Vec::new(),
-acp: None,
-};
+        let agent = crate::test_utils::fake_acp_agent("fake-acp-delayed", script);
         let client = AcpClient::connect_with_logs(&agent, None)
             .await
             .expect("delayed fake ACP must initialize");
@@ -1458,19 +1363,8 @@ for line in sys.stdin:
     elif method == 'session/cancel':
         print(json.dumps({'jsonrpc':'2.0','id':None,'method':'session/update','params':{'sessionId':request['params']['sessionId'],'update':{'sessionUpdate':'agent_message_chunk','content':{'text':'cancelled'}}}}), flush=True)
 "#;
-        let agent = crate::agent_config::AgentDef {
-            name: "fake-acp-prompt-timeout".to_string(),
-            transport: "subprocess".to_string(),
-            exe: "python".to_string(),
-            args: vec!["-u".to_string(), "-c".to_string(), script.to_string(), trace_path.to_string_lossy().into_owned()],
-            cwd: None,
-            env: HashMap::new(),
-            default: false,
-            set_model_api: false,
-        model: None,
-        acp_args: Vec::new(),
-acp: None,
-};
+        let agent = crate::test_utils::fake_acp_agent_with(
+            "fake-acp-prompt-timeout", script, vec![trace_path.to_string_lossy().into_owned()], HashMap::new());
         let client = AcpClient::connect_with_logs(&agent, None)
             .await
             .expect("timeout fake ACP must initialize");
@@ -1520,19 +1414,7 @@ for line in sys.stdin:
             print(json.dumps({'jsonrpc':'2.0','method':'session/update','params':{'sessionId':update_session,'update':{'sessionUpdate':'agent_message_chunk','content':{'text':text}}}}), flush=True)
         print(json.dumps({'jsonrpc':'2.0','id':request.get('id'),'result':{'loaded':True}}), flush=True)
 "#;
-        let agent = crate::agent_config::AgentDef {
-            name: "fake-acp-update-isolation".to_string(),
-            transport: "subprocess".to_string(),
-            exe: "python".to_string(),
-            args: vec!["-u".to_string(), "-c".to_string(), script.to_string()],
-            cwd: None,
-            env: HashMap::new(),
-            default: false,
-            set_model_api: false,
-        model: None,
-        acp_args: Vec::new(),
-acp: None,
-};
+        let agent = crate::test_utils::fake_acp_agent("fake-acp-update-isolation", script);
         let client = AcpClient::connect_with_logs(&agent, None)
             .await
             .expect("update isolation fake ACP must initialize");
@@ -1561,19 +1443,7 @@ for line in sys.stdin:
     elif method == 'session/cancel':
         print(json.dumps({'jsonrpc':'2.0','id':prompt_id,'result':{'stopReason':'cancelled'}}), flush=True)
 "#;
-        let agent = crate::agent_config::AgentDef {
-            name: "fake-acp-cancel-response".to_string(),
-            transport: "subprocess".to_string(),
-            exe: "python".to_string(),
-            args: vec!["-u".to_string(), "-c".to_string(), script.to_string()],
-            cwd: None,
-            env: HashMap::new(),
-            default: false,
-            set_model_api: false,
-        model: None,
-        acp_args: Vec::new(),
-acp: None,
-};
+        let agent = crate::test_utils::fake_acp_agent("fake-acp-cancel-response", script);
         let client = AcpClient::connect_with_logs(&agent, None)
             .await
             .expect("cancel-response fake ACP must initialize");
@@ -1615,19 +1485,8 @@ for line in sys.stdin:
     if request.get('method') == 'initialize':
         print(json.dumps({'jsonrpc':'2.0','id':request.get('id'),'result':{}}), flush=True)
 "#;
-        let agent = crate::agent_config::AgentDef {
-            name: "fake-acp-response".to_string(),
-            transport: "subprocess".to_string(),
-            exe: "python".to_string(),
-            args: vec!["-u".to_string(), "-c".to_string(), script.to_string(), trace_path.to_string_lossy().into_owned()],
-            cwd: None,
-            env: HashMap::new(),
-            default: false,
-            set_model_api: false,
-        model: None,
-        acp_args: Vec::new(),
-acp: None,
-};
+        let agent = crate::test_utils::fake_acp_agent_with(
+            "fake-acp-response", script, vec![trace_path.to_string_lossy().into_owned()], HashMap::new());
         let mut client = AcpClient::connect_with_logs(&agent, None)
             .await
             .expect("fake ACP must initialize");
@@ -1707,19 +1566,8 @@ for line in sys.stdin:
     trace.flush()
     print(json.dumps({'jsonrpc':'2.0','id':request.get('id'),'result':{}}), flush=True)
 "#;
-        let agent = crate::agent_config::AgentDef {
-            name: "fake-acp-caps-default".to_string(),
-            transport: "subprocess".to_string(),
-            exe: "python".to_string(),
-            args: vec!["-u".to_string(), "-c".to_string(), script.to_string(), trace_path.to_string_lossy().into_owned()],
-            cwd: None,
-            env: HashMap::new(),
-            default: false,
-            set_model_api: false,
-            model: None,
-            acp_args: Vec::new(),
-            acp: None,
-        };
+        let agent = crate::test_utils::fake_acp_agent_with(
+            "fake-acp-caps-default", script, vec![trace_path.to_string_lossy().into_owned()], HashMap::new());
         let mut client = AcpClient::connect_with_logs(&agent, None)
             .await
             .expect("fake ACP with default caps must initialize");
