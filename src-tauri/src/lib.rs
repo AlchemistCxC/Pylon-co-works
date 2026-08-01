@@ -1727,7 +1727,7 @@ pub fn run() {
                         eprintln!("Pylon ACP agent unavailable: {error}");
                         if let Ok(mut state) = default_runtime.agent_runtime.lock() {
                             state.status = AgentLifecycleStatus::Error;
-                            state.last_error = Some(error);
+                            state.last_error = Some(error.to_string());
                             state.last_connected_at = None;
                         }
                     }

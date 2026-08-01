@@ -198,7 +198,7 @@ impl AppState {
 
     /// 锁外 RPC：短锁仅覆盖同步准备（prepare_rpc），发送与等待在锁外执行——
     /// Peri 卡顿时不阻塞其他命令（V14「锁外写 prompt」模式推广到全部 RPC）。
-    pub(crate) async fn acp_rpc(&self, runtime: &AgentRuntime, method: &str, params: serde_json::Value) -> Result<serde_json::Value, String> {
+    pub(crate) async fn acp_rpc(&self, runtime: &AgentRuntime, method: &str, params: serde_json::Value) -> Result<serde_json::Value, crate::acp::AcpError> {
         let rpc = {
             let acp = runtime.acp.lock().await;
             acp.prepare_rpc(method, params)?
@@ -730,7 +730,7 @@ pub(crate) async fn send_prompt_core<R: tauri::Runtime>(
         Ok(rx) => rx,
         Err(error) => {
             let _ = state.remove_session_if_matches(runtime, source, &peri_id, prompt_generation);
-            return Err(PylonError::Protocol(error));
+            return Err(PylonError::from(error));
         }
     };
     let acp_for_cancel = runtime.acp.clone();
@@ -740,7 +740,8 @@ pub(crate) async fn send_prompt_core<R: tauri::Runtime>(
         Duration::from_secs(acp::PROMPT_TIMEOUT_SECS),
         Duration::from_secs(acp::CANCEL_SETTLE_TIMEOUT_SECS),
         move || async move {
-            acp_for_cancel.lock().await.cancel_session(&peri_id_for_cancel).await
+            // R6e：cancel 闭包契约是 Result<(), String>（wait_prompt_with_cancel 泛型边界）
+            acp_for_cancel.lock().await.cancel_session(&peri_id_for_cancel).await.map_err(|e| e.to_string())
         },
     ).await;
 
@@ -760,6 +761,7 @@ pub(crate) async fn send_prompt_core<R: tauri::Runtime>(
             } else {
                 let data = raw.result.unwrap_or(serde_json::Value::Null);
                 AcpClient::prompt_stop_reason(&data).map_err(|error| {
+                    let error = error.to_string();
                     if let Some(window) = window {
                     emit_event_all(window, gateway, source, "peri:error", serde_json::json!({"source": source, "error": error}));
                 }
@@ -928,8 +930,9 @@ pub(crate) async fn close_session(state: tauri::State<'_, AppState>, source: Str
     }
     // Hermes 未实现 session/close（-32601）——降级为本地清理（映射已删，见下）
     if let Err(error) = state.inner().acp_rpc(&runtime, acp::METHOD_SESSION_CLOSE, acp::session_close_params(&peri_id)?).await {
-        if error.contains("-32601") || error.contains("Method not found") {
-            log::warn!("agent does not support session/close ({error}); local cleanup only");
+        let message = error.to_string();
+        if message.contains("-32601") || message.contains("Method not found") {
+            log::warn!("agent does not support session/close ({message}); local cleanup only");
         } else {
             return Err(error.into());
         }
@@ -1131,7 +1134,7 @@ pub(crate) async fn load_persisted_session(
                     sessions.remove(&source);
                 }
             }
-            Err(PylonError::Protocol(error))
+            Err(PylonError::from(error))
         }
     }
 }

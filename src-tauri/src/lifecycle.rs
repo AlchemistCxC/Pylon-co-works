@@ -34,7 +34,7 @@ pub(crate) async fn do_connect_and_replace<R: tauri::Runtime>(
         Err(error) => {
             let fallback_status = status_after_connection_failure(previous_status);
             if announce {
-                handles.emit_agent_status(runtime, window, fallback_status, Some(error.clone()));
+                handles.emit_agent_status(runtime, window, fallback_status, Some(error.to_string()));
             }
             handles.log_runtime_summary("error", "agent", agent_id, &format!("Agent {log_action} failed"), serde_json::Map::new());
             return Err(error.into());
