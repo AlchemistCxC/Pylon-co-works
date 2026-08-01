@@ -1,4 +1,6 @@
 import { useStore } from '../../store'
+import { useIdentityStore } from '../../identityStore'
+import { useRuntimeStore } from '../../runtimeStore'
 import { setSessionModel } from './sessionModel'
 import * as DropdownMenu from '@radix-ui/react-dropdown-menu'
 
@@ -19,9 +21,9 @@ interface Props { sessionSource?: string }
 export default function ModelWidget({ sessionSource }: Props) {
   const variant = useStore(s => s.modelVariant) || 'dropdown'
   const ccScale = useStore(s => (s.ccScale || {})['model'] ?? 100)
-  const cfg = useStore(s => (sessionSource ? s.sessionConfig[sessionSource] : undefined))
+  const cfg = useRuntimeStore(s => (sessionSource ? s.sessionConfig[sessionSource] : undefined))
   // 降级：无后端配置时读 profile.model（历史行为）
-  const activeProfile = useStore(s => s.profiles.find(x => x.id === s.activeProfileId))
+  const activeProfile = useIdentityStore(s => s.profiles.find(x => x.id === s.activeProfileId))
 
   const models = (cfg?.models && cfg.models.length ? cfg.models : FALLBACK_MODELS)
   const model = cfg?.model || activeProfile?.model || models[0]
@@ -34,8 +36,9 @@ export default function ModelWidget({ sessionSource }: Props) {
       })
     } else {
       // 降级：无 session（预览等），只改 profile
-      const profile = useStore.getState().profiles.find(x => x.id === useStore.getState().activeProfileId)
-      if (profile) useStore.getState().addProfile({ ...profile, model: m })
+      const identity = useIdentityStore.getState()
+      const profile = identity.profiles.find(x => x.id === identity.activeProfileId)
+      if (profile) useIdentityStore.getState().addProfile({ ...profile, model: m })
     }
   }
 

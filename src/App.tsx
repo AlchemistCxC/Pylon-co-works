@@ -2,6 +2,9 @@ import { useState, useEffect, lazy, Suspense, useRef, useMemo } from 'react'
 import SheetHost from './workspace-sheets/SheetHost'
 import WorkspaceTitlebar from './workspace-sheets/WorkspaceTitlebar'
 import { useStore } from './store'
+import { useIdentityStore } from './identityStore'
+import { useRuntimeStore } from './runtimeStore'
+import { useWorkspaceStore } from './workspaceStore'
 import { belongsToProfile } from './components/chat/sessionProfile'
 import { useShallow } from 'zustand/react/shallow'
 import './App.css'
@@ -41,13 +44,13 @@ export default function App() {
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false)
   const [showSheetLauncher, setShowSheetLauncher] = useState(false)
   const [runtimeError, setRuntimeError] = useState<RuntimeErrorDetail | null>(null)
-  const activeProfileId = useStore(s => s.activeProfileId)
-  const sessions = useStore(s => s.sessions)
-  const workspaceSheets = useStore(s => s.workspaceSheets)
-  const agents = useStore(s => s.agents)
-  const hydrateWorkspaceSheets = useStore(s => s.hydrateWorkspaceSheets)
-  const setSheetAgentState = useStore(s => s.setSheetAgentState)
-  const activeAgent = useStore(s => s.activeAgent) || 'peri'
+  const activeProfileId = useIdentityStore(s => s.activeProfileId)
+  const sessions = useIdentityStore(s => s.sessions)
+  const workspaceSheets = useWorkspaceStore(s => s.workspaceSheets)
+  const agents = useIdentityStore(s => s.agents)
+  const hydrateWorkspaceSheets = useWorkspaceStore(s => s.hydrateWorkspaceSheets)
+  const setSheetAgentState = useWorkspaceStore(s => s.setSheetAgentState)
+  const activeAgent = useIdentityStore(s => s.activeAgent) || 'peri'
   const prevActiveAgentRef = useRef<string>(activeAgent)
 
   useEffect(() => {
@@ -80,19 +83,19 @@ export default function App() {
     if (prevActiveAgentRef.current === activeAgent) return
     prevActiveAgentRef.current = activeAgent
     const agentSheet = workspaceSheets.sheets.find(sheet => sheet.kind === 'agent' && sheet.agentId === activeAgent)
-    if (agentSheet) useStore.getState().focusSheet(agentSheet.id)
+    if (agentSheet) useWorkspaceStore.getState().focusSheet(agentSheet.id)
   }, [activeAgent, workspaceSheets])
 
   useEffect(() => {
     let disposed = false
     const load = () => invoke('list_agents').then((list: any) => {
-      if (!disposed) useStore.getState().setAgents(Array.isArray(list) ? list : [])
+      if (!disposed) useIdentityStore.getState().setAgents(Array.isArray(list) ? list : [])
     }).catch(error => reportRuntimeError('读取 Agent 列表', error))
     load()
     const unlisten = listen<AgentStatusPayload>('peri:agent-status', event => {
-      const state = useStore.getState()
-      const status = normalizeAgentStatus(event.payload, state.activeAgent)
-      state.setAgentStatus(status.agentId || status.agent || state.activeAgent, status)
+      const activeAgent = useIdentityStore.getState().activeAgent
+      const status = normalizeAgentStatus(event.payload, activeAgent)
+      useRuntimeStore.getState().setAgentStatus(status.agentId || status.agent || activeAgent, status)
     })
     return () => { disposed = true; unlisten.then(stop => stop()) }
   }, [])
@@ -237,17 +240,17 @@ export default function App() {
         sidebarCollapsed={sidebarCollapsed}
         canReopenSheet={workspaceSheets.recentlyClosed.length > 0}
         onToggleSidebar={() => setSidebarCollapsed(value => !value)}
-        onFocusSheet={id => useStore.getState().focusSheet(id)}
-        onCloseSheet={id => useStore.getState().closeSheet(id)}
+        onFocusSheet={id => useWorkspaceStore.getState().focusSheet(id)}
+        onCloseSheet={id => useWorkspaceStore.getState().closeSheet(id)}
         menuActions={{
-          onTogglePin: id => useStore.getState().toggleSheetPin(id),
-          onClose: id => useStore.getState().closeSheet(id),
-          onCloseOthers: id => useStore.getState().closeOtherSheets(id),
-          onCloseRight: id => useStore.getState().closeRightSheets(id),
-          onReopen: () => useStore.getState().reopenSheet(),
+          onTogglePin: id => useWorkspaceStore.getState().toggleSheetPin(id),
+          onClose: id => useWorkspaceStore.getState().closeSheet(id),
+          onCloseOthers: id => useWorkspaceStore.getState().closeOtherSheets(id),
+          onCloseRight: id => useWorkspaceStore.getState().closeRightSheets(id),
+          onReopen: () => useWorkspaceStore.getState().reopenSheet(),
         }}
         onOpenSheet={() => setShowSheetLauncher(true)}
-        onReopenSheet={() => useStore.getState().reopenSheet()}
+        onReopenSheet={() => useWorkspaceStore.getState().reopenSheet()}
         onToggleRightPanel={() => setRightOpen(value => !value)}
         onToggleSettings={() => setShowSettings(value => !value)}
         onMinimize={() => appWindow.minimize()}
@@ -261,8 +264,8 @@ export default function App() {
             agents={agents}
             sheets={workspaceSheets.sheets}
             onOpenChange={setShowSheetLauncher}
-            onFocusSheet={id => useStore.getState().focusSheet(id)}
-            onOpenSheet={(kind, title, agentId) => useStore.getState().openSheet({ kind, title, agentId })}
+            onFocusSheet={id => useWorkspaceStore.getState().focusSheet(id)}
+            onOpenSheet={(kind, title, agentId) => useWorkspaceStore.getState().openSheet({ kind, title, agentId })}
             onOpenSettings={() => setShowSettings(true)}
             onOpenProfiles={() => setShowProfileEdit(true)}
           />

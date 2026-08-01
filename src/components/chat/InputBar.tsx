@@ -2,6 +2,8 @@ import { useState, useRef, KeyboardEvent, useEffect, forwardRef, useImperativeHa
 import { invoke } from '@tauri-apps/api/core'
 import { open, save } from '@tauri-apps/plugin-dialog'
 import { useStore } from '../../store'
+import { useIdentityStore } from '../../identityStore'
+import { useRuntimeStore } from '../../runtimeStore'
 import { setSessionModel } from './sessionModel'
 import { setSessionMode } from './sessionMode'
 import { nextSessionMode } from './sessionModeState'
@@ -40,21 +42,21 @@ export default forwardRef<{ send: () => void; attachFile: () => void; cancel: ()
   const historyBySourceRef = useRef<Record<string, string[]>>({})
   const historyDraftRef = useRef('')
   const textareaRef = useRef<HTMLTextAreaElement>(null)
-  const profiles = useStore(s => s.profiles)
-  const sessions = useStore(s => s.sessions)
-  const addSession = useStore(s => s.addSession)
+  const profiles = useIdentityStore(s => s.profiles)
+  const sessions = useIdentityStore(s => s.sessions)
+  const addSession = useIdentityStore(s => s.addSession)
   const inputMode = useStore(s => s.inputMode)
   const inputVariant = useStore(s => s.inputVariant || (s.inputMode === 'cli' ? 'cli' : 'composer'))
   const showPlaceholder = useStore(s => s.inputShowPlaceholder !== false)
   const showHistoryHint = useStore(s => s.inputShowHistoryHint !== false)
   const submitButtonMode = useStore(s => s.inputSubmitButtonMode || 'inline')
   const cliOverflowMode = useStore(s => s.cliOverflowMode || 'fixed-scroll')
-  const sessionSource = useStore(s => resolveSessionSource(sessionId, s.sessions))
-  const liveCommands = useStore(state => sessionSource
+  const sessionSource = useIdentityStore(s => resolveSessionSource(sessionId, s.sessions))
+  const liveCommands = useRuntimeStore(state => sessionSource
     ? (state.sessionLiveStats[sessionSource]?.commands ?? EMPTY_COMMANDS)
     : EMPTY_COMMANDS)
   // 当前 session 是否正在生成（用于把发送按钮切成"停止"）
-  const generating = useStore(s => sessionSource != null && (s.liveGeneratingSources || []).includes(sessionSource))
+  const generating = useRuntimeStore(s => sessionSource != null && (s.liveGeneratingSources || []).includes(sessionSource))
   const cancelStateRef = useRef<CancelState>(createCancelState(sessionSource || ''))
 
   useEffect(() => {
@@ -131,7 +133,7 @@ export default forwardRef<{ send: () => void; attachFile: () => void; cancel: ()
   useEffect(() => {
     const onGlobalKey = (e: globalThis.KeyboardEvent) => {
       if (!sessionId || !sessionSource) return
-      if (!(useStore.getState().liveGeneratingSources || []).includes(sessionSource)) return
+      if (!(useRuntimeStore.getState().liveGeneratingSources || []).includes(sessionSource)) return
       const isEsc = e.key === 'Escape'
       const isCtrlC = e.ctrlKey && (e.key === 'c' || e.key === 'C') && !window.getSelection()?.toString()
       if (isEsc || isCtrlC) {
@@ -183,7 +185,7 @@ export default forwardRef<{ send: () => void; attachFile: () => void; cancel: ()
       }
       case '/new': addSession(`session-${Date.now().toString(36)}`); break
       case '/compact': {
-        const s = useStore.getState().sessions.find(item => item.id === sessionId || item.source === sessionId)
+        const s = useIdentityStore.getState().sessions.find(item => item.id === sessionId || item.source === sessionId)
         if (!s || !sessionSource || s.source !== sessionSource) {
           setSendError('当前会话不可用')
           return false
@@ -205,7 +207,7 @@ export default forwardRef<{ send: () => void; attachFile: () => void; cancel: ()
         })
       }
       case '/export': {
-        const s = useStore.getState().sessions.find(x => x.id === sessionId || x.source === sessionId)
+        const s = useIdentityStore.getState().sessions.find(x => x.id === sessionId || x.source === sessionId)
         if (s?.periId) {
           const outputPath = await save({
             defaultPath: `session-${s.periId}.md`,
@@ -237,7 +239,7 @@ export default forwardRef<{ send: () => void; attachFile: () => void; cancel: ()
       return true
     }
 
-    const s = useStore.getState().sessions.find(s => s.id === sessionId || s.source === sessionId)
+    const s = useIdentityStore.getState().sessions.find(s => s.id === sessionId || s.source === sessionId)
     if (!s) {
       setSendError('当前会话不可用')
       return
@@ -324,7 +326,7 @@ export default forwardRef<{ send: () => void; attachFile: () => void; cancel: ()
     if (e.ctrlKey && e.key === 'ArrowUp') { e.preventDefault(); if (lastMsg.current) setValue(lastMsg.current) }
     if (e.key === 'Tab' && e.shiftKey && sessionSource) {
       e.preventDefault()
-      const currentMode = useStore.getState().sessionModes[sessionSource] || 'default'
+      const currentMode = useRuntimeStore.getState().sessionModes[sessionSource] || 'default'
       setSessionMode(sessionSource, nextSessionMode(currentMode)).catch(error => setSendError(String(error)))
       return
     }

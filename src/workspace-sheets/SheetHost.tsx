@@ -1,5 +1,5 @@
 import { lazy, Suspense } from 'react'
-import { useStore } from '../store'
+import { useWorkspaceStore } from '../workspaceStore'
 import { SHEET_REGISTRY } from './sheetRegistry'
 import AgentSheetView from '../sheets/AgentSheetView'
 import type { SheetRecord } from './sheetTypes'
@@ -18,8 +18,8 @@ interface SheetHostProps {
 }
 
 export default function SheetHost(props: SheetHostProps) {
-  const sheets = useStore(s => s.workspaceSheets.sheets)
-  const activeSheetId = useStore(s => s.workspaceSheets.activeSheetId)
+  const sheets = useWorkspaceStore(s => s.workspaceSheets.sheets)
+  const activeSheetId = useWorkspaceStore(s => s.workspaceSheets.activeSheetId)
   const activeSheet = sheets.find(sheet => sheet.id === activeSheetId)
 
   if (!activeSheet) return <EmptySheetHost />
@@ -48,7 +48,7 @@ function SheetRenderer({ sheet, ...props }: { sheet: SheetRecord } & SheetHostPr
 }
 
 function EmptySheetHost() {
-  const openSheet = useStore(s => s.openSheet)
+  const openSheet = useWorkspaceStore(s => s.openSheet)
   return (
     <div className="sheet-empty-host">
       <div className="sheet-empty-kicker">WORKSPACE</div>

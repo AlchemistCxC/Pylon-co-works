@@ -1,6 +1,6 @@
 import { useState, useMemo } from 'react'
 import { invoke } from '@tauri-apps/api/core'
-import { useStore } from '../store'
+import { useIdentityStore } from '../identityStore'
 import { formatTime } from '../utils'
 import { reportRuntimeError } from '../runtimeError'
 import { runCloseSessionTransaction } from './chat/closeSessionTransaction'
@@ -20,13 +20,13 @@ export default function Sidebar({ activeSession, onSelectSession, onProfileEdit,
   const [search, setSearch] = useState('')
   const [renaming, setRenaming] = useState<string | null>(null)
   const [renameValue, setRenameValue] = useState('')
-  const profiles = useStore(s => s.profiles)
-  const activeProfileId = useStore(s => s.activeProfileId)
-  const setActiveProfile = useStore(s => s.setActiveProfile)
-  const sessions = useStore(s => s.sessions)
-  const addSession = useStore(s => s.addSession)
-  const removeSession = useStore(s => s.removeSession)
-  const updateSession = useStore(s => s.updateSession)
+  const profiles = useIdentityStore(s => s.profiles)
+  const activeProfileId = useIdentityStore(s => s.activeProfileId)
+  const setActiveProfile = useIdentityStore(s => s.setActiveProfile)
+  const sessions = useIdentityStore(s => s.sessions)
+  const addSession = useIdentityStore(s => s.addSession)
+  const removeSession = useIdentityStore(s => s.removeSession)
+  const updateSession = useIdentityStore(s => s.updateSession)
   const activeProfile = profiles.find(p => p.id === activeProfileId)
 
   // filter 在 memo 内：sessions/activeProfileId 变化时才重算，避免每次渲染新数组引用让 memo 失效

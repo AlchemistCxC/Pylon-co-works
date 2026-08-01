@@ -1,4 +1,5 @@
 import { useStore } from '../../store'
+import { useRuntimeStore } from '../../runtimeStore'
 import { setSessionMode } from './sessionMode'
 import { nextSessionMode } from './sessionModeState'
 
@@ -13,7 +14,7 @@ interface Props { sessionSource?: string }
 export default function ModeWidget({ sessionSource }: Props) {
   const variant = useStore(s => s.modeVariant) || 'pill'
   const ccScale = useStore(s => (s.ccScale || {})['mode'] ?? 100)
-  const mode = useStore(s => sessionSource ? (s.sessionModes[sessionSource] || 'auto') : 'auto')
+  const mode = useRuntimeStore(s => sessionSource ? (s.sessionModes[sessionSource] || 'auto') : 'auto')
 
   const cycle = () => {
     const next = nextSessionMode(mode)

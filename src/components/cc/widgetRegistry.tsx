@@ -1,5 +1,7 @@
 import type { ReactNode } from 'react'
 import { useStore } from '../../store'
+import { useIdentityStore } from '../../identityStore'
+import { useRuntimeStore } from '../../runtimeStore'
 import InputBar from '../chat/InputBar'
 import ModelWidget from '../chat/ModelWidget'
 import ModeWidget from '../chat/ModeWidget'
@@ -29,11 +31,8 @@ export interface CcWidgetDef {
 const EMPTY_SESSION_LIVE_STATS = emptySessionLiveStats()
 
 function useSessionLiveStats(sessionId: string | null): SessionLiveStats {
-  return useStore(state => {
-    if (!sessionId) return EMPTY_SESSION_LIVE_STATS
-    const source = state.sessions.find(session => session.id === sessionId)?.source
-    return source ? (state.sessionLiveStats[source] ?? EMPTY_SESSION_LIVE_STATS) : EMPTY_SESSION_LIVE_STATS
-  })
+  const source = useIdentityStore(state => sessionId ? state.sessions.find(session => session.id === sessionId)?.source : undefined)
+  return useRuntimeStore(state => source ? (state.sessionLiveStats[source] ?? EMPTY_SESSION_LIVE_STATS) : EMPTY_SESSION_LIVE_STATS)
 }
 
 function EkgWidget({ sessionId }: CcWidgetRenderProps) {
@@ -96,12 +95,12 @@ function TokensWidget({ sessionId }: CcWidgetRenderProps) {
 }
 
 function ModelWidgetRenderer({ sessionId }: CcWidgetRenderProps) {
-  const sessionSource = useStore(s => s.sessions.find(item => item.id === sessionId)?.source)
+  const sessionSource = useIdentityStore(s => s.sessions.find(item => item.id === sessionId)?.source)
   return <ModelWidget sessionSource={sessionSource} />
 }
 
 function ModeWidgetRenderer({ sessionId }: CcWidgetRenderProps) {
-  const sessionSource = useStore(s => s.sessions.find(item => item.id === sessionId)?.source)
+  const sessionSource = useIdentityStore(s => s.sessions.find(item => item.id === sessionId)?.source)
   return <ModeWidget sessionSource={sessionSource} />
 }
 

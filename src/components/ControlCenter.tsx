@@ -1,5 +1,6 @@
 import { useRef, useState, useCallback, useEffect, useId } from 'react'
 import { useStore } from '../store'
+import { useRuntimeStore } from '../runtimeStore'
 import { useShallow } from 'zustand/react/shallow'
 import type { ThemeSettings } from '../store'
 import InputBar from './chat/InputBar'
@@ -346,10 +347,11 @@ function PropertyPanel({ id, onClose, onExit }: { id: string; onClose: () => voi
     barFillColor: s.barFillColor,
     modelVariant: s.modelVariant,
     modeVariant: s.modeVariant,
-    liveMode: s.liveMode,
     sendVariant: s.sendVariant,
     attachVariant: s.attachVariant,
   })))
+  // liveMode 是运行时状态（runtimeStore 域）
+  const liveMode = useRuntimeStore(s => s.liveMode)
   const labels: Record<string, string> = {
     input: '输入栏', ekg: '用量条', pct: '百分比', tokens: 'Token数',
     model: '模型', mode: '权限模式', send: '发送按钮', attach: '附件按钮',
@@ -467,7 +469,7 @@ function PropertyPanel({ id, onClose, onExit }: { id: string; onClose: () => voi
               ))}
             </div>
           </div>
-          <div className="cc-prop-field"><label>当前</label><span style={{ fontSize: 13, color: theme.liveMode === 'bypass' ? '#FF6B80' : theme.liveMode === 'auto' ? '#FFC107' : theme.liveMode === 'edit' ? '#A2A9E4' : '#999' }}>{theme.liveMode || 'default'}</span></div>
+          <div className="cc-prop-field"><label>当前</label><span style={{ fontSize: 13, color: liveMode === 'bypass' ? '#FF6B80' : liveMode === 'auto' ? '#FFC107' : liveMode === 'edit' ? '#A2A9E4' : '#999' }}>{liveMode || 'default'}</span></div>
         </>}
 
         {id === 'send' && <>

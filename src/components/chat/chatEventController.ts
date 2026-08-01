@@ -2,6 +2,8 @@ import type React from 'react'
 import { invoke } from '@tauri-apps/api/core'
 import { listen } from '@tauri-apps/api/event'
 import { useStore } from '../../store'
+import { useIdentityStore } from '../../identityStore'
+import { useRuntimeStore } from '../../runtimeStore'
 import { resolveSpinnerFrames } from './spinnerFrames'
 import { extractModelConfig, extractUsage, type PeriDonePayload, type PeriUpdatePayload } from './acpTypes'
 import { clearMessageStorage, persistMessageSnapshot } from './messagePersistence'
@@ -59,7 +61,7 @@ function isReplayScope(runtime: SourceChatRuntime | undefined): boolean {
  */
 export function attachChatEventController(refs: ChatEventControllerRefs): ChatControllerHandle {
   let runtimeState: ChatRuntimeState = {}
-  const knownSources = () => useStore.getState().sessions.map(session => session.source)
+  const knownSources = () => useIdentityStore.getState().sessions.map(session => session.source)
   const isActiveSource = (source: string) => source.length > 0 && knownSources().includes(source)
   const renderedSource = () => refs.sessionRef.current
 
@@ -97,7 +99,7 @@ export function attachChatEventController(refs: ChatEventControllerRefs): ChatCo
   const syncPersistence = (source: string, prev: SourceChatRuntime | undefined, next: SourceChatRuntime | undefined) => {
     if (!next || isReplayScope(next)) return
     if (prev?.messages === next.messages) return
-    const session = useStore.getState().sessions.find(item => item.source === source)
+    const session = useIdentityStore.getState().sessions.find(item => item.source === source)
     if (!session) return
     try {
       persistMessageSnapshot(session.id, next.messages, localStorage)
@@ -109,7 +111,7 @@ export function attachChatEventController(refs: ChatEventControllerRefs): ChatCo
     const prevGenerating = prev?.generating ?? false
     const nextGenerating = next?.generating ?? false
     if (prevGenerating === nextGenerating) return
-    const store = useStore.getState()
+    const store = useRuntimeStore.getState()
     if (nextGenerating) {
       const current = store.liveGeneratingSources || []
       const nextList = addGeneratingSource(current, source)
@@ -218,11 +220,11 @@ export function attachChatEventController(refs: ChatEventControllerRefs): ChatCo
           refs.setGenerationPhase({ kind: 'thinking' })
         }
       }
-      const store = useStore.getState()
+      const store = useIdentityStore.getState()
       const s = store.sessions.find(session => session.source === source)
       if (s?.name.startsWith('session-')) {
         const autoName = content.slice(0, 30)
-        store.updateSession(s.id, { autoName, name: autoName })
+        useIdentityStore.getState().updateSession(s.id, { autoName, name: autoName })
       }
     }),
 
@@ -260,25 +262,25 @@ export function attachChatEventController(refs: ChatEventControllerRefs): ChatCo
           break
         case 'usage_update': {
           const usage = extractUsage(upd)
-          useStore.getState().setSessionLiveStats(source, usage)
+          useRuntimeStore.getState().setSessionLiveStats(source, usage)
           dispatch({ type: 'usage-update', source, tokensUsed: usage.tokensUsed })
           break
         }
         case 'available_commands_update':
-          useStore.getState().setSessionLiveStats(source, { commands: upd.commands || [] })
+          useRuntimeStore.getState().setSessionLiveStats(source, { commands: upd.commands || [] })
           break
         case 'config_option_update': {
           if (Array.isArray(upd.configOptions)) {
             const cfg = extractModelConfig(upd.configOptions)
-            if (cfg.model || cfg.models) useStore.getState().setSessionConfig(source, { ...cfg, raw: upd.configOptions })
+            if (cfg.model || cfg.models) useRuntimeStore.getState().setSessionConfig(source, { ...cfg, raw: upd.configOptions })
             const modeOption = upd.configOptions.find(option => (option.id || option.key) === 'mode')
             const mode = modeOption?.currentValue ?? modeOption?.value
-            if (mode != null) useStore.getState().setSessionMode(source, String(mode))
+            if (mode != null) useRuntimeStore.getState().setSessionMode(source, String(mode))
           } else {
             const key = upd.id ?? upd.key
             const val = upd.currentValue ?? upd.value
-            if (key === 'model' && val != null) useStore.getState().setSessionConfig(source, { model: String(val) })
-            if (key === 'mode' && val != null) useStore.getState().setSessionMode(source, String(val))
+            if (key === 'model' && val != null) useRuntimeStore.getState().setSessionConfig(source, { model: String(val) })
+            if (key === 'mode' && val != null) useRuntimeStore.getState().setSessionMode(source, String(val))
           }
           break
         }
@@ -306,7 +308,7 @@ export function attachChatEventController(refs: ChatEventControllerRefs): ChatCo
     const source = refs.sessionRef.current
     const ownerId = refs.messageOwnerRef.current
     if (!source || !ownerId) return
-    const session = useStore.getState().sessions.find(item => item.id === ownerId && item.source === source)
+    const session = useIdentityStore.getState().sessions.find(item => item.id === ownerId && item.source === source)
     if (!session) return
     clearMessageStorage(session.id, localStorage)
     dispatch({ type: 'clear', source })

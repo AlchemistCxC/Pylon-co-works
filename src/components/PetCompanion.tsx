@@ -4,6 +4,7 @@ import { advanceCodeEatingBehavior, getCodeComment, shouldStartCodeEating, shoul
 import { classifyPetPointerGesture, choosePetDestination, clampPetPosition, resolvePetClick } from './petMotion'
 import { readPetPosition, writePetPosition, clearPetPosition, persistPetState, PET_POSITION_KEY, PET_STORAGE_KEY } from './petPersistence'
 import { useStore } from '../store'
+import { useRuntimeStore } from '../runtimeStore'
 import './PetCompanion.css'
 
 type GrowthStage = 'seed' | 'sprout' | 'hopper' | 'guardian' | 'luminary'
@@ -146,7 +147,7 @@ export default function PetCompanion({ rightInset = 0 }: { rightInset?: number }
   const pokeTimerRef = useRef<number | null>(null)
   const wanderSettleTimerRef = useRef<number | null>(null)
   const wasGeneratingRef = useRef(false)
-  const generating = useStore(s => (s.liveGeneratingSources || []).length > 0)
+  const generating = useRuntimeStore(s => (s.liveGeneratingSources || []).length > 0)
 
   const save = useCallback((next: PetState) => {
     // 数据无变化时不产生新 state、不写盘（参考 CC hooks/useMemoryUsage 的 normal 不 setState 模式）

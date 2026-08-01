@@ -2,6 +2,8 @@ import { useState } from 'react'
 import * as Tabs from '@radix-ui/react-tabs'
 import { invoke } from '@tauri-apps/api/core'
 import { useStore } from '../store'
+import { useIdentityStore } from '../identityStore'
+import { useRuntimeStore } from '../runtimeStore'
 import { useShallow } from 'zustand/react/shallow'
 import type { ThemeSettings } from '../store'
 import { GLOBAL_PRESETS, pickZoneFields } from '../presets'
@@ -153,13 +155,13 @@ export default function Settings({ onClose, activeSessionId }: { onClose?: () =>
   const applyZonePreset = useStore(s => s.applyZonePreset)
   const activePreset = useStore(s => s.activePreset)
   const dirty = useStore(s => s.dirty)
-  const agents = useStore(s => s.agents)
-  const activeAgent = useStore(s => s.activeAgent)
-  const agentStatuses = useStore(s => s.agentStatuses)
-  const setAgentStatus = useStore(s => s.setAgentStatus)
-  const setActiveAgent = useStore(s => s.setActiveAgent)
+  const agents = useIdentityStore(s => s.agents)
+  const activeAgent = useIdentityStore(s => s.activeAgent)
+  const agentStatuses = useRuntimeStore(s => s.agentStatuses)
+  const setAgentStatus = useRuntimeStore(s => s.setAgentStatus)
+  const setActiveAgent = useIdentityStore(s => s.setActiveAgent)
   const customPresets = useStore(s => s.customPresets)
-  const sessions = useStore(s => s.sessions)
+  const sessions = useIdentityStore(s => s.sessions)
   const activeSessionSource = sessions.find(session => session.id === activeSessionId)?.source
   const saveCustomPreset = useStore(s => s.saveCustomPreset)
   const applyCustomPreset = useStore(s => s.applyCustomPreset)
@@ -212,13 +214,7 @@ export default function Settings({ onClose, activeSessionId }: { onClose?: () =>
     await runAgentSwitchTransaction({
       switchAgent: () => invoke('switch_agent', { name: agentId }),
       onSuccess: () => {
-        useStore.setState({
-          sessionConfig: {},
-          sessionModes: {},
-          sessionLiveStats: {},
-          liveGenerating: null,
-          liveGeneratingSources: [],
-        })
+        useRuntimeStore.getState().resetAll()
         setActiveAgent(agentId)
         window.dispatchEvent(new CustomEvent('pylon:agent-switched'))
       },
@@ -246,7 +242,7 @@ export default function Settings({ onClose, activeSessionId }: { onClose?: () =>
     try {
       await invoke('reload_agents')
       const list = await invoke<unknown>('list_agents')
-      useStore.getState().setAgents(normalizeAgentList(list))
+      useIdentityStore.getState().setAgents(normalizeAgentList(list))
     } catch (error) {
       reportRuntimeError('重载 Agent 配置', error)
     } finally { setReloading(false) }

@@ -1,13 +1,13 @@
 import { useMemo, useState } from 'react'
-import { useStore } from '../../store'
+import { useRuntimeStore } from '../../runtimeStore'
 import { normalizeConfigOptions } from './configOptionState'
 import ConfigOptionField from './ConfigOptionField'
 import { invoke } from '@tauri-apps/api/core'
 import { reportRuntimeError } from '../../runtimeError'
 
 export default function ConfigOptionsPanel({ sessionSource }: { sessionSource?: string }) {
-  const config = useStore(state => sessionSource ? state.sessionConfig[sessionSource] : undefined)
-  const setSessionConfig = useStore(state => state.setSessionConfig)
+  const config = useRuntimeStore(state => sessionSource ? state.sessionConfig[sessionSource] : undefined)
+  const setSessionConfig = useRuntimeStore(state => state.setSessionConfig)
   const [pending, setPending] = useState<Record<string, boolean>>({})
   const [errors, setErrors] = useState<Record<string, string>>({})
   const options = useMemo(() => normalizeConfigOptions(config?.raw), [config?.raw])

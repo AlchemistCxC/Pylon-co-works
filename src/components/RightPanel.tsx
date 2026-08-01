@@ -13,7 +13,7 @@ import {
 import type { LogsViewState, RightPanelTab, WorkspaceViewState } from './right-panel/rightPanelTypes'
 import { normalizeRuntimeLogs } from './right-panel/logsApi'
 import { mergeWorkspaceEntries, normalizeWorkspaceText, workspaceTreeFromEntries } from './right-panel/workspaceApi'
-import { useStore } from '../store'
+import { useIdentityStore } from '../identityStore'
 import './RightPanel.css'
 
 interface RightPanelProps {
@@ -24,7 +24,7 @@ interface RightPanelProps {
 export default function RightPanel({ sessionId, onClose }: RightPanelProps) {
   const [tab, setTab] = useState<RightPanelTab>('workspace')
   // 只订阅目标会话对象：其他会话的更新不再重渲染右栏
-  const sessionSource = useStore(state => sessionId ? state.sessions.find(item => item.id === sessionId)?.source ?? null : null)
+  const sessionSource = useIdentityStore(state => sessionId ? state.sessions.find(item => item.id === sessionId)?.source ?? null : null)
   const [workspaceState, setWorkspaceState] = useState<WorkspaceViewState>(() => (
     createWorkspaceViewState(sessionSource)
   ))

@@ -2,6 +2,8 @@ import { useRef, useEffect, useLayoutEffect, useState, useMemo, useId, useCallba
 import React from 'react'
 import { invoke } from '@tauri-apps/api/core'
 import { useStore } from '../../store'
+import { useIdentityStore } from '../../identityStore'
+import { useRuntimeStore } from '../../runtimeStore'
 import ReactMarkdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
 import { AnimatePresence, motion, useReducedMotion } from 'motion/react'
@@ -76,7 +78,7 @@ function resolveInitialBrowserMessages(): Message[] {
 const ChatView = React.memo(function ChatView({ sessionId }: Props) {
   recordRender('ChatView.render')
   const reduceMotion = useReducedMotion()
-  const sessions = useStore(state => state.sessions)
+  const sessions = useIdentityStore(state => state.sessions)
   const chatViewRef = useRef<HTMLDivElement>(null)
   const bottomRef = useRef<HTMLDivElement>(null)
   const scrollFollowRef = useRef<ScrollFollowState>('sticky')
@@ -164,7 +166,7 @@ const ChatView = React.memo(function ChatView({ sessionId }: Props) {
     setMessages([]); setGenerating(false); setSummary(null); setGenerationPhase(null)
     if (!sessionId) return
 
-    const s = useStore.getState().sessions.find(s => s.id === sessionId)
+    const s = useIdentityStore.getState().sessions.find(s => s.id === sessionId)
     if (!s) return
     sessionRef.current = s.source  // set BEFORE async, so incoming events match
     messageOwnerRef.current = s.id
@@ -182,16 +184,16 @@ const ChatView = React.memo(function ChatView({ sessionId }: Props) {
       ? controllerHandleRef.current.initSource(s.source, cached)
       : cached
     setMessages(messages)
-    const sourceGenerating = (useStore.getState().liveGeneratingSources || []).includes(s.source)
+    const sourceGenerating = (useRuntimeStore.getState().liveGeneratingSources || []).includes(s.source)
     setGenerating(sourceGenerating)
 
-    const profile = useStore.getState().profiles.find(p => p.id === s.profileId)
+    const profile = useIdentityStore.getState().profiles.find(p => p.id === s.profileId)
     const persona = profile?.persona || ''
 
     // new_session 返回可能是 string(periId) 或 { sessionId, configOptions } — 兼容处理
     const syncMode = (source: string, res: ReturnType<typeof sessionResponseObject>) => {
       const currentMode = extractMode(res)
-      if (currentMode != null) useStore.getState().setSessionMode(source, String(currentMode))
+      if (currentMode != null) useRuntimeStore.getState().setSessionMode(source, String(currentMode))
     }
 
     const createSession = () => {
@@ -201,9 +203,9 @@ const ChatView = React.memo(function ChatView({ sessionId }: Props) {
         if (!isCurrentLoadGeneration(loadGenerationRef.current[s.source], loadGeneration)) return
         const res = sessionResponseObject(response)
         const periId = res.sessionId ?? res.periId
-        if (periId) useStore.getState().setSessionPeriId(s.id, periId)
+        if (periId) useIdentityStore.getState().setSessionPeriId(s.id, periId)
         const cfg = extractModelConfig(res?.configOptions)
-        if (cfg.model || cfg.models) useStore.getState().setSessionConfig(s.source, { ...cfg, raw: res?.configOptions })
+        if (cfg.model || cfg.models) useRuntimeStore.getState().setSessionConfig(s.source, { ...cfg, raw: res?.configOptions })
         syncMode(s.source, res)
       }).catch(error => {
         if (!isCurrentLoadGeneration(loadGenerationRef.current[s.source], loadGeneration)) return
@@ -227,7 +229,7 @@ const ChatView = React.memo(function ChatView({ sessionId }: Props) {
         } catch {}
         if (sessionRef.current === s.source) setMessages(resolved)
         const cfg = extractModelConfig(res?.configOptions)
-        if (cfg.model || cfg.models) useStore.getState().setSessionConfig(s.source, { ...cfg, raw: res?.configOptions })
+        if (cfg.model || cfg.models) useRuntimeStore.getState().setSessionConfig(s.source, { ...cfg, raw: res?.configOptions })
         syncMode(s.source, res)
       }).catch(error => {
         reportRuntimeError('恢复会话', error)
@@ -717,7 +719,7 @@ function ToolCard({ model }: { model: ReturnType<typeof buildToolPresentationMod
 }
 
 function UserLine({ sender, content }: { sender: string; content: string }) {
-  const getUser = useStore(s => s.getUser)
+  const getUser = useIdentityStore(s => s.getUser)
   const storeUser = useStore(s => s.userName)
   const prefix = useStore(s => s.userPrefix) || '❯'
   const userColor = useStore(s => s.userColor)

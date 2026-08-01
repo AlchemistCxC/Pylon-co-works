@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
-import { useStore } from '../store'
+import { useIdentityStore } from '../identityStore'
+import { useWorkspaceStore } from '../workspaceStore'
 import type { AgentStatus } from '../components/settings/agentTypes'
 import type { SheetRecord } from './sheetTypes'
 import WorkspaceMenu, { type WorkspaceMenuActions } from './WorkspaceMenu'
@@ -47,10 +48,10 @@ export default function SheetTabStrip({
   menuActions,
   canReopen,
 }: SheetTabStripProps) {
-  const agents = useStore(state => state.agents)
-  const profiles = useStore(state => state.profiles)
-  const activeProfileId = useStore(state => state.activeProfileId)
-  const sheetAgentStates = useStore(state => state.sheetAgentStates)
+  const agents = useIdentityStore(state => state.agents)
+  const profiles = useIdentityStore(state => state.profiles)
+  const activeProfileId = useIdentityStore(state => state.activeProfileId)
+  const sheetAgentStates = useWorkspaceStore(state => state.sheetAgentStates)
   const tabRefs = useRef(new Map<string, HTMLDivElement>())
   const [menuSheetId, setMenuSheetId] = useState<string | null>(null)
   const [menuPosition, setMenuPosition] = useState<{ x: number; y: number } | null>(null)

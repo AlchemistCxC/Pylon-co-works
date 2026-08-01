@@ -1,14 +1,15 @@
 import { useState } from 'react'
-import { useStore } from '../store'
+import { useIdentityStore } from '../identityStore'
+import { useRuntimeStore } from '../runtimeStore'
 import './SettingsCommon.css'
 import './ProfileEditor.css'
 
 export default function ProfileEditor({ onClose }: { onClose: () => void }) {
-  const profiles = useStore(s => s.profiles)
-  const activeProfileId = useStore(s => s.activeProfileId)
-  const addProfile = useStore(s => s.addProfile)
-  const setActiveProfile = useStore(s => s.setActiveProfile)
-  const sessionConfig = useStore(s => s.sessionConfig)
+  const profiles = useIdentityStore(s => s.profiles)
+  const activeProfileId = useIdentityStore(s => s.activeProfileId)
+  const addProfile = useIdentityStore(s => s.addProfile)
+  const setActiveProfile = useIdentityStore(s => s.setActiveProfile)
+  const sessionConfig = useRuntimeStore(s => s.sessionConfig)
   const profile = profiles.find(p => p.id === activeProfileId) || profiles[0]
 
   const [name, setName] = useState(profile?.name || '')

@@ -1,7 +1,6 @@
 import { create } from 'zustand'
 import { persist } from 'zustand/middleware'
 import { normalizeProfileState, PROFILE_SCHEMA_VERSION } from './profilePersistence'
-import { loadSessions, persistSessions } from './sessionPersistence'
 import { DEFAULT_CC_LAYOUT, cloneCcLayout, normalizeCcLayout, setCcHiddenState, setCcScaleState, updateCcPlacementState } from './ccLayoutState'
 import type { CcLayoutV3, CcWidgetPlacement } from './ccLayoutState'
 import { createCustomPreset, deleteCustomPreset, normalizeCustomPresets, pickCustomPresetTheme, upsertCustomPreset } from './customPresets'
@@ -9,24 +8,12 @@ import { normalizeThemeMigrationState } from './themeMigration'
 import { markZoneCustom } from './themePresetState'
 import { clampCcHeight, resolveVisibleStatusWidgetCount } from './ccHeightState'
 import type { CustomPreset } from './customPresets'
-import { clearSessionSourceState, updateSessionLiveStats } from './components/chat/sessionRuntime'
-import type { SessionLiveStats } from './components/chat/sessionRuntime'
-import { createSheetState, sheetReducer } from './workspace-sheets/sheetState'
-import type { SheetState } from './workspace-sheets/sheetState'
-import { loadSheetState, persistSheetState, type SheetWorkspaceState } from './workspace-sheets/sheetPersistence'
-import type { SheetInput, SheetId } from './workspace-sheets/sheetTypes'
+import { useIdentityStore } from './identityStore'
+import type { Profile, Session, UserMapping } from './identityStore'
+import type { SessionConfig } from './runtimeStore'
 
-export interface Profile { id: string; name: string; avatar?: string; persona: string; model: string }
-// 后端配置选项（来自 new_session 返回 & config_option_update 事件）
-export interface SessionConfig {
-  model?: string           // 当前 model 值
-  models?: string[]        // 可选 model 列表
-  thinkingEffort?: string
-  context1m?: boolean
-  raw?: import('./components/chat/acpTypes').ConfigOption[]            // 原始 configOptions（兜底/调试）
-}
-export interface Session { id: string; periId?: string; name: string; source: string; profileId: string; createdAt: number; lastActiveAt: number; platform: string; workdir: string; sessionPrompt: string; skills: string[]; hooks: string[]; autoName: string }
-export interface UserMapping { id: string; name: string; avatar?: string }
+export type { Profile, Session, UserMapping, AgentEntry } from './identityStore'
+export type { SessionConfig } from './runtimeStore'
 
 export interface ThemeSettings {
   transparency: number; bgBlur: number; globalFont: string; globalFontSize: number
@@ -78,47 +65,20 @@ export interface ThemeSettings {
   dirty: Record<string, boolean>
 }
 
+/**
+ * themeStore — 主题状态域（阶段 1：store 按域拆分后收敛）。
+ *
+ * 唯一持久化域（pylon-theme）。身份/运行时/Workspace 状态已迁出到
+ * identityStore / runtimeStore / workspaceStore（组合出口见文件尾）。
+ */
 type ThemeState = ThemeSettings & {
   customPresets: CustomPreset[]
-  profiles: Profile[]
-  activeProfileId: string
-  sessions: Session[]
-  sessionsHydrated: boolean
-  users: UserMapping[]
-  setActiveProfile: (id: string) => void
-  addProfile: (p: Profile) => void
-  removeProfile: (id: string) => void
-  addSession: (name: string) => void
-  removeSession: (id: string) => void
-  updateSession: (id: string, partial: Partial<Session>) => void
-  replaceSessions: (sessions: Session[]) => void
-  setSessionPeriId: (id: string, periId: string) => void
-  restoreSessions: () => Session[]
-  hydrateSessions: () => void
-  getUser: (source: string) => UserMapping | undefined
   setCcEditMode: (enabled: boolean) => void
   setCcHeight: (height: number) => void
   updateCcPlacement: (id: string, partial: Partial<CcWidgetPlacement>) => void
   resetCcLayout: () => void
   setCcHidden: (id: string, hidden: boolean) => void
   setCcScale: (id: string, scale: number) => void
-  liveTokensUsed: number
-  liveTokensMax: number
-  liveCacheReadTokens: number
-  liveMode: string
-  livePrismOn: boolean
-  liveGenerating: string | null  // 兼容旧状态：最近开始生成的 session source
-  liveGeneratingSources: string[] // 当前所有正在生成的 session source
-  sessionLiveStats: Record<string, SessionLiveStats>
-  setSessionLiveStats: (source: string, stats: Partial<SessionLiveStats>) => void
-  clearSessionRuntime: (source: string) => void
-  sessionModes: Record<string, string>
-  setSessionMode: (source: string, mode?: string) => void
-  liveCommands: { name: string; input_hint?: string; description?: string }[]
-  setLiveStats: (stats: Partial<{liveTokensUsed:number,liveTokensMax:number,liveCacheReadTokens:number,liveMode:string,livePrismOn:boolean,liveGenerating:string|null,liveGeneratingSources:string[],liveCommands:any[]}>) => void
-  // 每会话的后端配置选项（model 列表/当前值等），key = session source
-  sessionConfig: Record<string, SessionConfig>
-  setSessionConfig: (source: string, cfg: Partial<SessionConfig>) => void
   resetTheme: () => void
   applyZonePreset: (zone: string, presetName: string, presetTheme: Partial<ThemeSettings>) => void
   setZoneField: (zone: string, partial: Partial<ThemeSettings>) => void
@@ -126,23 +86,6 @@ type ThemeState = ThemeSettings & {
   saveCustomPreset: (name: string, id?: string) => string
   applyCustomPreset: (id: string) => void
   removeCustomPreset: (id: string) => void
-  agents: { id: string; name: string }[]
-  activeAgent: string
-  setAgents: (a: { id: string; name: string }[]) => void
-  setActiveAgent: (id: string) => void
-  agentStatuses: Record<string, import('./components/settings/agentTypes').AgentStatus>
-  setAgentStatus: (id: string, status: import('./components/settings/agentTypes').AgentStatus) => void
-  workspaceSheets: SheetState
-  sheetAgentStates: Record<string, SheetWorkspaceState>
-  hydrateWorkspaceSheets: (agentIds?: readonly string[]) => void
-  openSheet: (sheet: SheetInput) => SheetId | null
-  focusSheet: (id: SheetId) => void
-  toggleSheetPin: (id: SheetId) => void
-  closeSheet: (id: SheetId) => void
-  closeOtherSheets: (id: SheetId) => void
-  closeRightSheets: (id: SheetId) => void
-  reopenSheet: () => SheetId | null
-  setSheetAgentState: (agentId: string, partial: Partial<SheetWorkspaceState>) => void
 }
 
 export const DEFAULTS: ThemeSettings = {
@@ -182,125 +125,12 @@ export const DEFAULTS: ThemeSettings = {
   dirty: { global: false, sidebar: false, chat: false, cc: false, right: false },
 }
 
-const DEFAULT_PROFILES: Profile[] = [
-  { id: 'riccati', name: 'Riccati', persona: '你是 Riccati，宫木云的全栈开发助手。说话直接，不废话。', model: 'deepseek-v4-flash' },
-  { id: 'serina', name: 'Serina', persona: '你是 Serina，TRPG 叙世引擎 GM。', model: 'deepseek-v4-flash' },
-]
-
 export const useStore = create<ThemeState>()(persist(
   (set, get) => ({
   ...DEFAULTS,
 
-  profiles: DEFAULT_PROFILES,
-  activeProfileId: DEFAULT_PROFILES[0].id,
-  sessions: [],
-  sessionsHydrated: false,
   customPresets: [],
-  hydrateSessions: () => {
-    try {
-      set({ sessions: loadSessions(localStorage, get().profiles), sessionsHydrated: true })
-    } catch (error) {
-      console.error('Session 持久化读取失败', error)
-      set({ sessions: [], sessionsHydrated: true })
-    }
-  },
-  users: [
-    { id: 'qq:user:14CE', name: '14CE' },
-    { id: 'qq:user:unknown', name: '访客' },
-  ],
 
-  setActiveProfile: (id) => set(state => {
-    if (!state.profiles.some(profile => profile.id === id)) return state
-    const activeProfileId = id
-    const sheetAgentStates = {
-      ...state.sheetAgentStates,
-      [state.activeAgent]: { ...state.sheetAgentStates[state.activeAgent], activeProfileId },
-    }
-    persistSheetState(localStorage, { ...state.workspaceSheets, agentStates: sheetAgentStates })
-    return { activeProfileId, sheetAgentStates }
-  }),
-  addProfile: (p) => set(s => ({ profiles: [...s.profiles.filter(x => x.id !== p.id), p] })),
-  removeProfile: (id) => set(state => {
-    if (!state.profiles.some(profile => profile.id === id) || state.profiles.length <= 1) return state
-    const profiles = state.profiles.filter(profile => profile.id !== id)
-    const fallbackProfileId = profiles[0].id
-    const sessions = state.sessions.map(session => session.profileId === id ? { ...session, profileId: fallbackProfileId } : session)
-    persistSessions(localStorage, sessions)
-    const sheetAgentStates = Object.fromEntries(Object.entries(state.sheetAgentStates).map(([agentId, sheetState]) => [
-      agentId,
-      sheetState.activeProfileId === id ? { ...sheetState, activeProfileId: fallbackProfileId } : sheetState,
-    ]))
-    persistSheetState(localStorage, { ...state.workspaceSheets, agentStates: sheetAgentStates })
-    return { profiles, sessions, activeProfileId: state.activeProfileId === id ? fallbackProfileId : state.activeProfileId, sheetAgentStates }
-  }),
-  addSession: (name) => {
-    const profileId = get().activeProfileId
-    const now = Date.now()
-    // 同毫秒连点防撞 id：冲突时自增后缀（防御，正常路径 id 与之前一致）
-    const baseId = 's' + now.toString(36)
-    let id = baseId
-    let suffix = 1
-    while (get().sessions.some(session => session.id === id)) {
-      id = `${baseId}-${suffix}`
-      suffix += 1
-    }
-    const s: Session = { id, name, source: 'local:' + name, profileId, createdAt: now, lastActiveAt: now, platform: 'local', workdir: '', sessionPrompt: '', skills: [], hooks: [], autoName: '' }
-    set(state => {
-      const sessions = [...state.sessions, s]
-      persistSessions(localStorage, sessions)
-      return { sessions }
-    })
-  },
-  removeSession: (id) => set(state => {
-    const removed = state.sessions.find(session => session.id === id)
-    const sessions = state.sessions.filter(session => session.id !== id)
-    persistSessions(localStorage, sessions)
-    if (!removed) return { sessions }
-    const cleared = clearSessionSourceState({
-      source: removed.source,
-      sessionLiveStats: state.sessionLiveStats,
-      sessionModes: state.sessionModes,
-      sessionConfig: state.sessionConfig,
-      generatingSources: state.liveGeneratingSources,
-    })
-    const sheetAgentStates = Object.fromEntries(Object.entries(state.sheetAgentStates).map(([agentId, sheetState]) => [
-      agentId,
-      sheetState.activeSessionId === id ? { ...sheetState, activeSessionId: undefined } : sheetState,
-    ]))
-    persistSheetState(localStorage, { ...state.workspaceSheets, agentStates: sheetAgentStates })
-    return {
-      sessions,
-      sessionLiveStats: cleared.sessionLiveStats,
-      sessionModes: cleared.sessionModes,
-      sessionConfig: cleared.sessionConfig,
-      liveGeneratingSources: cleared.generatingSources,
-      liveGenerating: cleared.generatingSources[cleared.generatingSources.length - 1] || null,
-      sheetAgentStates,
-    }
-  }),
-  updateSession: (id, partial) => set(s => {
-    const sessions = s.sessions.map(session => session.id === id ? { ...session, ...partial } : session)
-    persistSessions(localStorage, sessions)
-    return { sessions }
-  }),
-  replaceSessions: (sessions: Session[]) => set(() => {
-    persistSessions(localStorage, sessions)
-    return { sessions }
-  }),
-  setSessionPeriId: (id, periId) => set(s => {
-    const sessions = s.sessions.map(ss => ss.id === id ? { ...ss, periId } : ss)
-    persistSessions(localStorage, sessions)
-    return { sessions }
-  }),
-  restoreSessions: () => {
-    try {
-      return loadSessions(localStorage, get().profiles)
-    } catch (error) {
-      console.error('Session 持久化恢复失败', error)
-    }
-    return []
-  },
-  getUser: (source) => get().users.find(u => u.id === source),
   setZoneField: (zone, partial) => set(state => ({
     ...partial,
     ...markZoneCustom(state, zone),
@@ -337,40 +167,6 @@ export const useStore = create<ThemeState>()(persist(
     ...markZoneCustom(state, 'cc'),
   })),
 
-  liveTokensUsed: 0, liveTokensMax: 131072, liveCacheReadTokens: 0, liveMode: 'auto', livePrismOn: true, liveGenerating: null, liveGeneratingSources: [],
-  sessionLiveStats: {},
-  setSessionLiveStats: (source, stats) => set(state => ({
-    sessionLiveStats: updateSessionLiveStats(state.sessionLiveStats, source, stats),
-  })),
-  clearSessionRuntime: (source) => set(state => {
-    const cleared = clearSessionSourceState({
-      source,
-      sessionLiveStats: state.sessionLiveStats,
-      sessionModes: state.sessionModes,
-      sessionConfig: state.sessionConfig,
-      generatingSources: state.liveGeneratingSources,
-    })
-    return {
-      sessionLiveStats: cleared.sessionLiveStats,
-      sessionModes: cleared.sessionModes,
-      sessionConfig: cleared.sessionConfig,
-      liveGeneratingSources: cleared.generatingSources,
-      liveGenerating: cleared.generatingSources[cleared.generatingSources.length - 1] || null,
-    }
-  }),
-  sessionModes: {},
-  setSessionMode: (source, mode) => set(state => {
-    const sessionModes = { ...state.sessionModes }
-    if (mode) sessionModes[source] = mode
-    else delete sessionModes[source]
-    return { sessionModes }
-  }),
-  setLiveStats: (stats) => set(stats),
-  liveCommands: [],
-  sessionConfig: {},
-  setSessionConfig: (source, cfg) => set(s => ({
-    sessionConfig: { ...s.sessionConfig, [source]: { ...s.sessionConfig[source], ...cfg } }
-  })),
   resetTheme: () => set(structuredClone(DEFAULTS)),
 
   /**
@@ -430,78 +226,9 @@ export const useStore = create<ThemeState>()(persist(
     }
     return { customPresets: deleteCustomPreset(state.customPresets, id), activePreset, dirty }
   }),
-
-  agents: [],
-  activeAgent: 'peri',
-  setAgents: (a) => set(state => {
-    const workspaceSheets = loadSheetState(localStorage, a.map(agent => agent.id))
-    return { agents: a, workspaceSheets, sheetAgentStates: workspaceSheets.agentStates }
-  }),
-  setActiveAgent: (id) => set(state => {
-    const agentState = state.sheetAgentStates[id]
-    return {
-      activeAgent: id,
-      ...(agentState?.activeProfileId ? { activeProfileId: agentState.activeProfileId } : {}),
-    }
-  }),
-  agentStatuses: {},
-  setAgentStatus: (id, status) => set(state => ({ agentStatuses: { ...state.agentStatuses, [id]: status } })),
-  workspaceSheets: createSheetState(),
-  sheetAgentStates: {},
-  hydrateWorkspaceSheets: (agentIds) => set(() => {
-    const workspaceSheets = loadSheetState(localStorage, agentIds)
-    return { workspaceSheets, sheetAgentStates: workspaceSheets.agentStates }
-  }),
-  openSheet: (sheet) => {
-    const state = get()
-    const workspaceSheets = sheetReducer(state.workspaceSheets, { type: 'open', sheet, now: Date.now() })
-    set({ workspaceSheets })
-    persistSheetState(localStorage, { ...workspaceSheets, agentStates: state.sheetAgentStates })
-    return workspaceSheets.activeSheetId
-  },
-  focusSheet: (id) => set(state => {
-    const workspaceSheets = sheetReducer(state.workspaceSheets, { type: 'focus', id, now: Date.now() })
-    persistSheetState(localStorage, { ...workspaceSheets, agentStates: state.sheetAgentStates })
-    return { workspaceSheets }
-  }),
-  toggleSheetPin: (id) => set(state => {
-    const workspaceSheets = sheetReducer(state.workspaceSheets, { type: 'togglePin', id, now: Date.now() })
-    persistSheetState(localStorage, { ...workspaceSheets, agentStates: state.sheetAgentStates })
-    return { workspaceSheets }
-  }),
-  closeSheet: (id) => set(state => {
-    const workspaceSheets = sheetReducer(state.workspaceSheets, { type: 'close', id, now: Date.now() })
-    persistSheetState(localStorage, { ...workspaceSheets, agentStates: state.sheetAgentStates })
-    return { workspaceSheets }
-  }),
-  closeOtherSheets: (id) => set(state => {
-    const workspaceSheets = sheetReducer(state.workspaceSheets, { type: 'closeOthers', id, now: Date.now() })
-    persistSheetState(localStorage, { ...workspaceSheets, agentStates: state.sheetAgentStates })
-    return { workspaceSheets }
-  }),
-  closeRightSheets: (id) => set(state => {
-    const workspaceSheets = sheetReducer(state.workspaceSheets, { type: 'closeRight', id, now: Date.now() })
-    persistSheetState(localStorage, { ...workspaceSheets, agentStates: state.sheetAgentStates })
-    return { workspaceSheets }
-  }),
-  reopenSheet: () => {
-    const state = get()
-    const workspaceSheets = sheetReducer(state.workspaceSheets, { type: 'reopen', now: Date.now() })
-    set({ workspaceSheets })
-    persistSheetState(localStorage, { ...workspaceSheets, agentStates: state.sheetAgentStates })
-    return workspaceSheets.activeSheetId
-  },
-  setSheetAgentState: (agentId, partial) => set(state => {
-    const sheetAgentStates = {
-      ...state.sheetAgentStates,
-      [agentId]: { ...state.sheetAgentStates[agentId], ...partial },
-    }
-    persistSheetState(localStorage, { ...state.workspaceSheets, agentStates: sheetAgentStates })
-    return { sheetAgentStates }
-  }),
 }),
 { name: 'pylon-theme', version: PROFILE_SCHEMA_VERSION, migrate: persisted => {
-  const state = (persisted || {}) as Partial<ThemeState>
+  const state = (persisted || {}) as Partial<ThemeState> & { profiles?: Profile[]; activeProfileId?: string }
   const normalizedTheme = normalizeThemeMigrationState(state, {
     base: DEFAULTS,
     activePreset: DEFAULTS.activePreset,
@@ -563,13 +290,23 @@ export const useStore = create<ThemeState>()(persist(
     cliOverflowMode: state.cliOverflowMode,
   })
   state.customPresets = normalizeCustomPresets(state.customPresets)
-  const normalized = normalizeProfileState(
-    Array.isArray(state.profiles) ? state.profiles : [],
-    typeof state.activeProfileId === 'string' ? state.activeProfileId : '',
-    DEFAULT_PROFILES,
-  )
-  return { ...state, ...normalized } as ThemeState
+  return state as ThemeState
 }, partialize: (state) => {
-  const { sessions, sessionsHydrated, users, ccEditMode, setActiveProfile, addProfile, removeProfile, addSession, removeSession, updateSession, replaceSessions, setSessionPeriId, restoreSessions, hydrateSessions, getUser, setCcEditMode, setCcHeight, updateCcPlacement, resetCcLayout, setCcHidden, setCcScale, setLiveStats, liveCommands, sessionLiveStats, setSessionLiveStats, clearSessionRuntime, sessionConfig, setSessionConfig, sessionModes, setSessionMode, liveTokensUsed, liveTokensMax, liveCacheReadTokens, liveMode, livePrismOn, liveGenerating, liveGeneratingSources, agents, setAgents, setActiveAgent, agentStatuses, setAgentStatus, workspaceSheets, sheetAgentStates, hydrateWorkspaceSheets, openSheet, focusSheet, closeSheet, closeOtherSheets, closeRightSheets, reopenSheet, setSheetAgentState, applyZonePreset, setZoneField, setGlobalPreset, saveCustomPreset, applyCustomPreset, removeCustomPreset, dirty, ...persisted } = state as ThemeState
+  const { customPresets, ccEditMode, setCcEditMode, setCcHeight, updateCcPlacement, resetCcLayout, setCcHidden, setCcScale, resetTheme, applyZonePreset, setZoneField, setGlobalPreset, saveCustomPreset, applyCustomPreset, removeCustomPreset, dirty, ...persisted } = state as ThemeState
   return persisted
-}, onRehydrateStorage: () => state => state?.hydrateSessions()}))
+}, onRehydrateStorage: () => state => {
+  // 阶段 1 迁移：旧 pylon-theme 里的 profiles/activeProfileId 迁入 identityStore（一次性）
+  const legacy = state as unknown as { profiles?: Profile[]; activeProfileId?: string }
+  if (legacy?.profiles && Array.isArray(legacy.profiles) && legacy.profiles.length > 0) {
+    useIdentityStore.setState({
+      profiles: legacy.profiles,
+      activeProfileId: typeof legacy.activeProfileId === 'string' ? legacy.activeProfileId : legacy.profiles[0].id,
+    })
+  }
+  useIdentityStore.getState().hydrateSessions()
+}}))
+
+// ── 组合出口：按域导入点 ──
+export { useIdentityStore } from './identityStore'
+export { useRuntimeStore } from './runtimeStore'
+export { useWorkspaceStore } from './workspaceStore'

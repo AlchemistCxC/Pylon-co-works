@@ -1,6 +1,6 @@
 import { type MouseEventHandler } from 'react'
 import SheetTabStrip from './SheetTabStrip'
-import { useStore } from '../store'
+import { useRuntimeStore } from '../runtimeStore'
 import type { SheetRecord } from './sheetTypes'
 import type { WorkspaceMenuActions } from './WorkspaceMenu'
 
@@ -42,7 +42,7 @@ export default function WorkspaceTitlebar({
   onCloseWindow,
 }: WorkspaceTitlebarProps) {
   // 在标题栏内部订阅 agent 状态：状态 tick 不再触发 App 整树（SheetHost）重渲染
-  const agentStatuses = useStore(s => s.agentStatuses)
+  const agentStatuses = useRuntimeStore(s => s.agentStatuses)
   return (
     <header className={`workspace-titlebar ${sidebarCollapsed ? 'sidebar-collapsed' : ''}`} data-tauri-drag-region>
       <div className="workspace-titlebar-sidebar" data-tauri-drag-region>
