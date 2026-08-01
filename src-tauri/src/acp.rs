@@ -274,6 +274,54 @@ pub struct PreparedRpc {
     pending: Arc<[Mutex<Pending>; PENDING_SHARDS]>,
 }
 
+/// 从 pending 分片移除指定 id（R3：发送失败 / 超时 / 连接关闭等失败路径统一清理入口，
+/// 替换 complete_rpc 内闭包与 send_prompt_core 手工 remove_pending 的重复实现）。
+fn remove_pending_from(pending: &Arc<[Mutex<Pending>; PENDING_SHARDS]>, id: u64) {
+    if let Ok(mut shard) = pending[id as usize % PENDING_SHARDS].lock() {
+        shard.remove(&id);
+    }
+}
+
+impl PreparedRpc {
+    /// 发送请求行（统一走 `send_line`：10s 写超时防 writer 阻塞击穿超时契约），
+    /// 失败时清理已注册 pending。成功后返回响应接收器——prompt 路径用它在锁外
+    /// 进入 [`wait_prompt_with_cancel`] 的超时/取消流程（响应未到的 pending 保留，
+    /// 由 reader 到响应时移除或 EOF 时 drain，与 V14 模式一致）。
+    pub async fn send_keep_rx(self) -> Result<oneshot::Receiver<RawMessage>, String> {
+        let PreparedRpc { id, line, write_tx, rx, pending } = self;
+        if let Err(error) = send_line(write_tx, line).await {
+            remove_pending_from(&pending, id);
+            return Err(error);
+        }
+        Ok(rx)
+    }
+
+    /// 通用 RPC 结算（R3：原 `AcpClient::complete_rpc` 提取为 PreparedRpc 方法）：
+    /// 发送 + 30s 超时等待匹配响应 + 错误/结果解析。不依赖 AcpClient 实例，可在锁外执行。
+    pub async fn complete(self) -> Result<serde_json::Value, String> {
+        let PreparedRpc { id, line, write_tx, rx, pending } = self;
+        if let Err(error) = send_line(write_tx, line).await {
+            remove_pending_from(&pending, id);
+            return Err(error);
+        }
+        let msg = match tokio::time::timeout(std::time::Duration::from_secs(30), rx).await {
+            Ok(Ok(msg)) => msg,
+            Ok(Err(_)) => {
+                remove_pending_from(&pending, id);
+                return Err("ACP connection closed".to_string());
+            }
+            Err(_) => {
+                remove_pending_from(&pending, id);
+                return Err("RPC timeout after 30s".to_string());
+            }
+        };
+        if let Some(err) = msg.error {
+            return Err(format!("RPC error: {}", err));
+        }
+        Ok(msg.result.unwrap_or(serde_json::Value::Null))
+    }
+}
+
 impl RawMessage {
     fn connection_closed() -> Self {
         Self {
@@ -379,9 +427,7 @@ impl AcpClient {
     }
 
     pub fn remove_pending(&self, id: u64) {
-        if let Ok(mut pending) = self.pending_shard(id).lock() {
-            pending.remove(&id);
-        }
+        remove_pending_from(&self.pending, id);
     }
 
     fn pending_shard(&self, id: u64) -> &Mutex<Pending> {
@@ -420,7 +466,7 @@ impl AcpClient {
 
     /// Send a JSON-RPC request and wait for the matching response.
     /// 同步准备一次 JSON-RPC 请求（注册 pending + 序列化），不写入 stdin。
-    /// 调用方持锁只覆盖本方法；发送与等待经 [`Self::complete_rpc`] 在锁外进行，
+    /// 调用方持锁只覆盖本方法；发送与等待经 [`PreparedRpc::complete`] 在锁外进行，
     /// 避免 Peri 卡顿时全局串行化（一个慢 RPC 阻塞所有其他命令）。
     pub fn prepare_rpc(&self, method: &str, params: serde_json::Value) -> Result<PreparedRpc, String> {
         if self.is_crashed() {
@@ -437,38 +483,8 @@ impl AcpClient {
         })
     }
 
-    /// 发送已准备的 RPC 并等待匹配响应（30s 超时）。不依赖 AcpClient 实例，可在锁外执行。
-    pub async fn complete_rpc(rpc: PreparedRpc) -> Result<serde_json::Value, String> {
-        let PreparedRpc { id, line, write_tx, rx, pending } = rpc;
-        let remove_pending = |id: u64| {
-            if let Ok(mut p) = pending[id as usize % PENDING_SHARDS].lock() {
-                p.remove(&id);
-            }
-        };
-        if let Err(error) = send_line(write_tx, line).await {
-            remove_pending(id);
-            return Err(error);
-        }
-        let msg = match tokio::time::timeout(std::time::Duration::from_secs(30), rx).await {
-            Ok(Ok(msg)) => msg,
-            Ok(Err(_)) => {
-                remove_pending(id);
-                return Err("ACP connection closed".to_string());
-            }
-            Err(_) => {
-                remove_pending(id);
-                return Err("RPC timeout after 30s".to_string());
-            }
-        };
-        if let Some(err) = msg.error {
-            return Err(format!("RPC error: {}", err));
-        }
-        Ok(msg.result.unwrap_or(serde_json::Value::Null))
-    }
-
     async fn call_async(&self, method: &str, params: serde_json::Value) -> Result<serde_json::Value, String> {
-        let rpc = self.prepare_rpc(method, params)?;
-        Self::complete_rpc(rpc).await
+        self.prepare_rpc(method, params)?.complete().await
     }
 
     /// Extract and validate sessionId from a session/new response.
@@ -543,7 +559,9 @@ impl AcpClient {
     }
 
     /// Prepare a prompt request without writing to stdin.
-    pub fn prepare_prompt(&self, session_id: &str, prompt: Vec<serde_json::Value>) -> Result<(u64, String, oneshot::Receiver<RawMessage>), String> {
+    /// R3：与 [`Self::prepare_rpc`] 统一返回 [`PreparedRpc`]——发送经 `send_keep_rx`
+    /// （含 10s 写超时与失败路径 pending 清理），等待经 [`wait_prompt_with_cancel`]。
+    pub fn prepare_prompt(&self, session_id: &str, prompt: Vec<serde_json::Value>) -> Result<PreparedRpc, String> {
         // 审查修复：与 prepare_rpc 一致，死亡连接立即拒绝（否则挂满 300s 假超时）
         if self.is_crashed() {
             return Err("ACP connection closed".to_string());
@@ -552,7 +570,13 @@ impl AcpClient {
         let params = session_prompt_params(session_id, prompt)?;
         let (tx, rx) = oneshot::channel();
         let (id, line) = self.register_request(METHOD_SESSION_PROMPT, &params, Some(tx))?;
-        Ok((id, line, rx))
+        Ok(PreparedRpc {
+            id,
+            line,
+            write_tx: self.write_tx.clone(),
+            rx,
+            pending: self.pending.clone(),
+        })
     }
 
     /// Kill the child process. Called before switching agents to prevent orphans.
@@ -832,22 +856,20 @@ mod tests {
     use super::*;
     use std::sync::atomic::{AtomicBool, Ordering};
 
-    /// 测试辅助：经 prepare_rpc + complete_rpc 创建会话（生产调用点已锁外化）。
+    /// 测试辅助：经 prepare_rpc + complete 创建会话（生产调用点已锁外化）。
     async fn new_session_rpc(client: &AcpClient) -> Result<serde_json::Value, String> {
-        AcpClient::complete_rpc(
-            client
-                .prepare_rpc(METHOD_SESSION_NEW, serde_json::json!({"cwd": ".", "mcpServers": []}))?,
-        )
-        .await
+        client
+            .prepare_rpc(METHOD_SESSION_NEW, serde_json::json!({"cwd": ".", "mcpServers": []}))?
+            .complete()
+            .await
     }
 
-    /// 测试辅助：经 prepare_rpc + complete_rpc 关闭会话。
+    /// 测试辅助：经 prepare_rpc + complete 关闭会话。
     async fn close_session_rpc(client: &AcpClient, session_id: &str) -> Result<(), String> {
-        AcpClient::complete_rpc(
-            client
-                .prepare_rpc(METHOD_SESSION_CLOSE, serde_json::json!({"sessionId": session_id}))?,
-        )
-        .await?;
+        client
+            .prepare_rpc(METHOD_SESSION_CLOSE, serde_json::json!({"sessionId": session_id}))?
+            .complete()
+            .await?;
         Ok(())
     }
 
@@ -1078,20 +1100,20 @@ acp: None,
             .await
             .expect("fake ACP must initialize");
         let child_id = client.child_id().expect("fake ACP child must exist");
-        let new_response = AcpClient::complete_rpc(
-            client
-                .prepare_rpc(METHOD_SESSION_NEW, serde_json::json!({"cwd": ".", "mcpServers": []}))
-                .expect("session/new must prepare"),
-        )
-        .await
-        .expect("session/new must succeed");
+        let new_response = client
+            .prepare_rpc(METHOD_SESSION_NEW, serde_json::json!({"cwd": ".", "mcpServers": []}))
+            .expect("session/new must prepare")
+            .complete()
+            .await
+            .expect("session/new must succeed");
         assert_eq!(AcpClient::session_id_from(&new_response).unwrap(), "fake-session-1");
 
-        let (request_id, prompt_line, mut response_rx) = client
+        let rpc = client
             .prepare_prompt("fake-session-1", vec![serde_json::json!({"type":"text","text":"hello"})])
             .expect("prompt must serialize");
-        assert!(prompt_line.contains("session/prompt"));
-        client.write_tx.send(prompt_line).await.expect("fake child stdin must remain open");
+        assert!(rpc.line.contains("session/prompt"));
+        let request_id = rpc.id;
+        let mut response_rx = rpc.send_keep_rx().await.expect("fake child stdin must remain open");
         let response = tokio::time::timeout(std::time::Duration::from_secs(2), &mut response_rx)
             .await
             .expect("fake ACP prompt response must arrive")
@@ -1410,10 +1432,11 @@ acp: None,
         let client = AcpClient::connect_with_logs(&agent, None)
             .await
             .expect("timeout fake ACP must initialize");
-        let (request_id, prompt_line, mut response_rx) = client
+        let rpc = client
             .prepare_prompt("fake-session-timeout", vec![serde_json::json!({"type":"text","text":"hello"})])
             .expect("prompt must serialize");
-        client.write_tx.send(prompt_line).await.expect("prompt must write");
+        let request_id = rpc.id;
+        let mut response_rx = rpc.send_keep_rx().await.expect("prompt must write");
         let cancel_tx = client.write_tx.clone();
         let outcome = wait_prompt_with_cancel(
             &mut response_rx,
@@ -1512,10 +1535,10 @@ acp: None,
         let client = AcpClient::connect_with_logs(&agent, None)
             .await
             .expect("cancel-response fake ACP must initialize");
-        let (_request_id, prompt_line, mut response_rx) = client
+        let rpc = client
             .prepare_prompt("fake-session-cancel-response", vec![serde_json::json!({"type":"text","text":"hello"})])
             .expect("prompt must serialize");
-        client.write_tx.send(prompt_line).await.expect("prompt must write");
+        let mut response_rx = rpc.send_keep_rx().await.expect("prompt must write");
         let cancel_tx = client.write_tx.clone();
         let outcome = wait_prompt_with_cancel(
             &mut response_rx,

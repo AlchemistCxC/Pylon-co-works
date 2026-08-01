@@ -206,7 +206,7 @@ impl AppState {
             let acp = runtime.acp.lock().await;
             acp.prepare_rpc(method, params)?
         };
-        AcpClient::complete_rpc(rpc).await
+        rpc.complete().await
     }
 
     /// 差异适配：Hermes 的 set_config_option 不切 model（只认 edit_approval_policy），
@@ -711,14 +711,15 @@ pub(crate) async fn send_prompt_core<R: tauri::Runtime>(
         }
         emit_event(window, "peri:user", user_payload);
     }
-    let (request_id, write_tx, prompt_line, mut rx) = {
+    let rpc = {
         let acp = runtime.acp.lock().await;
-        let (id, line, rx) = acp.prepare_prompt(&peri_id, prompt_blocks)?;
-        (id, acp.write_tx.clone(), line, rx)
+        acp.prepare_prompt(&peri_id, prompt_blocks)?
     };
+    // 取消/连接关闭分支清理 pending 仍需 request_id（send_keep_rx 会消费 rpc）。
+    let request_id = rpc.id;
     // B11：回合推进——该 session 用户回合 +1（注入/持久化共用同一 round）；
     // 清空上一回合回复文本（本轮回复由 dispatcher 重新收集）。
-    // P2-8：必须在 write_tx.send 之前（prompt 锁内）完成——发送成功后清空会与
+    // P2-8：必须在发送（send_keep_rx）之前完成——发送成功后清空会与
     // dispatcher 的并行追加竞态：agent 极快响应时本轮回复文本会被清掉。
     if let Ok(mut sessions) = runtime.sessions.lock() {
         if let Some(session) = sessions.get_mut(source) {
@@ -726,11 +727,15 @@ pub(crate) async fn send_prompt_core<R: tauri::Runtime>(
             session.last_response_text.clear();
         }
     }
-    if write_tx.send(prompt_line).await.is_err() {
-        runtime.acp.lock().await.remove_pending(request_id);
-        let _ = state.remove_session_if_matches(runtime, source, &peri_id, prompt_generation);
-        return Err(PylonError::Protocol("ACP connection closed".to_string()));
-    }
+    // R3：send_keep_rx 统一 10s 写超时（对齐 complete 路径；原裸 write_tx.send 在
+    // writer 阻塞 + 队列满时会无限挂起），失败已清理 pending，只收敛会话映射。
+    let mut rx = match rpc.send_keep_rx().await {
+        Ok(rx) => rx,
+        Err(error) => {
+            let _ = state.remove_session_if_matches(runtime, source, &peri_id, prompt_generation);
+            return Err(PylonError::Protocol(error));
+        }
+    };
     let acp_for_cancel = runtime.acp.clone();
     let peri_id_for_cancel = peri_id.clone();
     let result = acp::wait_prompt_with_cancel(
