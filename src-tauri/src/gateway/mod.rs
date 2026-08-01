@@ -105,11 +105,10 @@ impl GatewayCore {
 
     /// 锁内读取 QQ 配置（修复 P3：handle_incoming 每消息调用时避免 clone 整个配置，
     /// 只读引用即可完成白名单检查；签名保持返回引用的生命周期受锁内闭包约束）。
-    pub(crate) fn with_qq_config<R>(&self, f: impl FnOnce(&QqGatewayConfig) -> R) -> R {
-        match self.config.read() {
-            Ok(guard) => f(&guard.qq),
-            Err(_) => f(&QqGatewayConfig::default()),
-        }
+    /// R6b：返回 `Option<R>`——读锁中毒（panic 后）时返回 None，调用方**拒绝** ingest
+    /// （fail-closed）。旧实现回退默认空白名单 = 放行所有群，白名单安全路径必须拒绝。
+    pub(crate) fn with_qq_config<R>(&self, f: impl FnOnce(&QqGatewayConfig) -> R) -> Option<R> {
+        self.config.read().ok().map(|guard| f(&guard.qq))
     }
 
     /// B11 注入开关（Prism 可用性由调用方降级处理）。

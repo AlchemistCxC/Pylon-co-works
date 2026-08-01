@@ -145,9 +145,18 @@ impl QqAdapter {
     ) -> Result<Option<ResolvedIngest>, String> {
         let resolved = self.core.ingest(source, content)?;
         // P3：锁内读取白名单配置（with_qq_config），避免每消息 clone 整个 QqGatewayConfig
-        if !self.core.with_qq_config(|qq| {
+        // R6b：读锁中毒（panic 后）→ 拒绝 ingest（fail-closed）——不得回退默认
+        // 空白名单（空白名单 = 放行所有群，白名单安全路径必须拒绝）。
+        let allowed = match self.core.with_qq_config(|qq| {
             crate::gateway::ingest_allowed(qq, resolved.binding.as_ref(), source, member_openid, user_openid)
         }) {
+            Some(allowed) => allowed,
+            None => {
+                log::error!("gateway 配置读锁中毒，拒绝 ingest（fail-closed）: {source}");
+                return Ok(None);
+            }
+        };
+        if !allowed {
             return Ok(None);
         }
         let mut dedup = self.dedup.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
