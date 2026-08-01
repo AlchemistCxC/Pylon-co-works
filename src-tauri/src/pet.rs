@@ -1,6 +1,6 @@
 //! Tauri 与独立宠物核心状态机之间的薄适配层。
 
-pub use pylon_pet_core::{AiEvent, GrowthStage, PetState, ToolKind, ToolOutcome};
+pub use pylon_pet_core::{AiEvent, DayPart, GrowthStage, PetState, ToolKind, ToolOutcome};
 use serde::Serialize;
 use std::time::{SystemTime, UNIX_EPOCH};
 
@@ -15,6 +15,8 @@ pub struct PetView<'a> {
     pub growth_progress: u8,
     /// M7：捏朋友进行中（前端进度展示）。
     pub crafting: bool,
+    /// M8：当前时段（dawn/day/dusk/night）——前端可显示时段状态/差异。
+    pub day_part: DayPart,
 }
 
 pub fn view(state: &PetState) -> PetView<'_> {
@@ -27,84 +29,93 @@ pub fn view(state: &PetState) -> PetView<'_> {
         next_stage_xp: state.next_stage_xp(),
         growth_progress: state.growth_progress(),
         crafting: state.pending_action.is_some(),
+        day_part: state.day_part(now_ms()),
     }
 }
 
+/// 统一事件入口：注入本地时区偏移（M8 时段感知）后 apply。
+/// 时段判定粒度是小时，事件路径每次 set 的成本（一次 GetLocalTime）可忽略。
+fn apply(state: &mut PetState, event: AiEvent) {
+    state.set_local_offset_minutes(local_offset_minutes());
+    state.apply(event, now_ms());
+}
+
 pub fn restore(state: &mut PetState, saved: PetState) {
+    state.set_local_offset_minutes(local_offset_minutes());
     *state = PetState::restore(saved, now_ms());
 }
 
 pub fn on_user_sent(state: &mut PetState) {
-    state.apply(AiEvent::UserSent, now_ms());
+    apply(state, AiEvent::UserSent);
 }
 
 pub fn on_first_chunk(state: &mut PetState) {
-    state.apply(AiEvent::FirstChunk, now_ms());
+    apply(state, AiEvent::FirstChunk);
 }
 
 pub fn on_done(state: &mut PetState) {
-    state.apply(AiEvent::PromptCompleted, now_ms());
+    apply(state, AiEvent::PromptCompleted);
 }
 
 pub fn on_error(state: &mut PetState) {
-    state.apply(AiEvent::PromptFailed, now_ms());
+    apply(state, AiEvent::PromptFailed);
 }
 
 pub fn on_poke(state: &mut PetState) {
-    state.apply(AiEvent::Poke, now_ms());
+    apply(state, AiEvent::Poke);
 }
 
 pub fn on_feed(state: &mut PetState) {
-    state.apply(AiEvent::Feed, now_ms());
+    apply(state, AiEvent::Feed);
 }
 
 /// M4：玩耍（消耗 energy，恢复 fun/降低孤独；60s bond 冷却）。
 pub fn on_play(state: &mut PetState) {
-    state.apply(AiEvent::Play, now_ms());
+    apply(state, AiEvent::Play);
 }
 
 pub fn on_usage_update(state: &mut PetState, total: u64) {
-    state.apply(AiEvent::TokenUsage { total }, now_ms());
+    apply(state, AiEvent::TokenUsage { total });
 }
 
 /// M5：工具开始（带分类）——吃代码/捏朋友信号。
 pub fn on_tool_started_kind(state: &mut PetState, kind: ToolKind) {
-    state.apply(AiEvent::ToolStarted { kind }, now_ms());
+    apply(state, AiEvent::ToolStarted { kind });
 }
 
 /// M5：工具被取消（打断）。
 pub fn on_tool_cancelled(state: &mut PetState) {
-    state.apply(AiEvent::ToolCancelled, now_ms());
+    apply(state, AiEvent::ToolCancelled);
 }
 
 /// M5：工作模式切换。
 pub fn on_mode_changed(state: &mut PetState, mode: &str) {
-    state.apply(AiEvent::ModeChanged { mode: mode.to_string() }, now_ms());
+    apply(state, AiEvent::ModeChanged { mode: mode.to_string() });
 }
 
 /// M5：模型切换。
 pub fn on_model_changed(state: &mut PetState, model: &str) {
-    state.apply(AiEvent::ModelChanged { model: model.to_string() }, now_ms());
+    apply(state, AiEvent::ModelChanged { model: model.to_string() });
 }
 
 /// M5：agent 拒绝。
 pub fn on_refused(state: &mut PetState) {
-    state.apply(AiEvent::PromptRefused, now_ms());
+    apply(state, AiEvent::PromptRefused);
 }
 
 /// M5：达到轮次上限。
 pub fn on_maxed(state: &mut PetState) {
-    state.apply(AiEvent::PromptMaxed, now_ms());
+    apply(state, AiEvent::PromptMaxed);
 }
 
 /// M5：prompt 超时（发呆）。
 pub fn on_timeout(state: &mut PetState) {
-    state.apply(AiEvent::PromptTimeout, now_ms());
+    apply(state, AiEvent::PromptTimeout);
 }
 
 /// M5：输出含代码块。
 pub fn on_code_seen(state: &mut PetState) {
-    state.apply(AiEvent::CodeSeen, now_ms());
+    apply(state, AiEvent::CodeSeen);
 }
 
 /// M5：记录吃过的代码文件名（脱敏摘要）。
@@ -113,19 +124,19 @@ pub fn record_code_file(state: &mut PetState, file: &str) {
 }
 
 pub fn on_tool_success(state: &mut PetState) {
-    state.apply(AiEvent::ToolCall { outcome: ToolOutcome::Succeeded }, now_ms());
+    apply(state, AiEvent::ToolCall { outcome: ToolOutcome::Succeeded });
 }
 
 pub fn on_tool_failure(state: &mut PetState) {
-    state.apply(AiEvent::ToolCall { outcome: ToolOutcome::Failed }, now_ms());
+    apply(state, AiEvent::ToolCall { outcome: ToolOutcome::Failed });
 }
 
 pub fn on_agent_connected(state: &mut PetState) {
-    state.apply(AiEvent::AgentConnected, now_ms());
+    apply(state, AiEvent::AgentConnected);
 }
 
 pub fn on_agent_crashed(state: &mut PetState) {
-    state.apply(AiEvent::AgentCrashed, now_ms());
+    apply(state, AiEvent::AgentCrashed);
 }
 
 pub fn recall_memory(state: &mut PetState) {
@@ -137,7 +148,7 @@ pub fn check_sleepy(state: &mut PetState) -> bool {
 }
 
 pub fn daily_visit(state: &mut PetState) {
-    state.apply(AiEvent::Visit, now_ms());
+    apply(state, AiEvent::Visit);
 }
 
 /// M6：主动说话（需求危机/延迟行为完成 → msg）。get_pet 轮询调用。
@@ -146,7 +157,66 @@ pub fn poll_voice(state: &mut PetState) -> bool {
 }
 
 pub fn rename(state: &mut PetState, value: &str) {
-    state.rename(value);
+    state.set_local_offset_minutes(local_offset_minutes());
+    state.rename(value, now_ms());
+}
+
+/// 本地时区偏移（分钟，东正西负）：Windows 用 GetLocalTime（零依赖 FFI，
+/// SYSTEMTIME 布局由官方文档保证、线程安全）；其他平台回退 UTC（0）。
+/// 时段判定精度为小时，偏移一天内不变（中国无夏令时），进程级缓存一次。
+fn local_offset_minutes() -> i32 {
+    #[cfg(windows)]
+    {
+        use std::sync::atomic::{AtomicI32, Ordering};
+        static CACHED_OFFSET: AtomicI32 = AtomicI32::new(i32::MIN);
+        let cached = CACHED_OFFSET.load(Ordering::Relaxed);
+        if cached != i32::MIN {
+            return cached;
+        }
+        let utc_hour = now_ms() / 3_600_000 % 24;
+        let local = local_hour_windows();
+        let diff = (local as i64 - utc_hour as i64).rem_euclid(24) as i32;
+        let offset = if diff > 12 { diff - 24 } else { diff };
+        CACHED_OFFSET.store(offset, Ordering::Relaxed);
+        offset
+    }
+    #[cfg(not(windows))]
+    {
+        0
+    }
+}
+
+/// Windows 本地小时（GetLocalTime，0-23）。FFI 声明为 unsafe，调用在
+/// 单线程上下文（事件/dispatcher 路径），无并发问题。
+#[cfg(windows)]
+fn local_hour_windows() -> u32 {
+    #[repr(C)]
+    struct SystemTime {
+        w_year: u16,
+        w_month: u16,
+        w_day_of_week: u16,
+        w_day: u16,
+        w_hour: u16,
+        w_minute: u16,
+        w_second: u16,
+        w_milliseconds: u16,
+    }
+    #[link(name = "kernel32")]
+    extern "system" {
+        fn GetLocalTime(lp_system_time: *mut SystemTime);
+    }
+    let mut t = SystemTime {
+        w_year: 0,
+        w_month: 0,
+        w_day_of_week: 0,
+        w_day: 0,
+        w_hour: 0,
+        w_minute: 0,
+        w_second: 0,
+        w_milliseconds: 0,
+    };
+    unsafe { GetLocalTime(&mut t) };
+    t.w_hour as u32
 }
 
 fn now_ms() -> u64 {

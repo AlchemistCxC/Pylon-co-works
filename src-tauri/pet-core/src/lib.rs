@@ -1,4 +1,4 @@
-﻿mod lines;
+﻿pub mod lines;
 
 use serde::{Deserialize, Serialize};
 
@@ -100,6 +100,42 @@ pub enum MachineSub {
     Idle,
     Interacting,
     Distress,
+}
+
+/// 时段（M8 扩展位：时段感知）。由本地小时推导（UTC 小时 + local_offset_minutes）。
+/// 序列化为字符串（前端契约："dawn" / "day" / "dusk" / "night"）。
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum DayPart {
+    /// 5:00-8:00 拂晓
+    Dawn,
+    /// 8:00-18:00 白昼
+    Day,
+    /// 18:00-22:00 黄昏
+    Dusk,
+    /// 22:00-5:00 深夜
+    Night,
+}
+
+impl DayPart {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Dawn => "dawn",
+            Self::Day => "day",
+            Self::Dusk => "dusk",
+            Self::Night => "night",
+        }
+    }
+}
+
+/// 由本地小时推导时段（纯函数，边界可测）：5-7 拂晓 / 8-17 白昼 / 18-21 黄昏 / 其余深夜。
+pub fn day_part_of_hour(hour: u32) -> DayPart {
+    match hour {
+        5..=7 => DayPart::Dawn,
+        8..=17 => DayPart::Day,
+        18..=21 => DayPart::Dusk,
+        _ => DayPart::Night,
+    }
 }
 
 /// 最近事件窗口（情绪推导输入；轻量枚举，落盘无碍）。
@@ -341,6 +377,11 @@ pub struct PetState {
     /// 任何 apply 事件（除 Visit/Sleepy）都会刷新。
     #[serde(skip)]
     last_activity_at_ms: u64,
+    /// M8 时段感知：本地时区偏移（分钟，东正西负；不落盘——重启后由桥接层
+    /// 按系统时区重新注入）。0 = UTC（测试/无桥接环境）。时段判定粒度是小时，
+    /// 夏令时切换的半小时级误差可忽略（中国无夏令时）。
+    #[serde(skip)]
+    local_offset_minutes: i32,
     // ── v2 防刷（M4；不落盘，重启后冷却清空）──
     #[serde(skip)]
     last_feed_at_ms: u64,
@@ -392,9 +433,10 @@ impl PetState {
                 ..PetStats::default()
             },
             memories: Vec::new(),
-            msg: Some(lines::pick(lines::LineKey::Birth, &mut 0)),
+            msg: Some(lines::pick(lines::LineKey::Birth, &mut 0, DayPart::Day)),
             last_interaction_at_ms: 0,
             last_activity_at_ms: 0,
+            local_offset_minutes: 0,
             last_feed_at_ms: 0,
             feed_spam_count: 0,
             last_play_at_ms: 0,
@@ -454,7 +496,7 @@ impl PetState {
                 AiEvent::UserSent | AiEvent::FirstChunk | AiEvent::Poke | AiEvent::Feed | AiEvent::Play
             )
         {
-            self.wake();
+            self.wake(now_ms);
         }
         match event {
             AiEvent::Visit => {
@@ -472,8 +514,10 @@ impl PetState {
                 self.fun = (self.fun as u16 + 2).min(100) as u8;
                 self.loneliness = self.loneliness.saturating_sub(15);
                 self.happiness = (self.happiness as u16 + 1).min(100) as u8;
-                self.gain_bond(1);
-                self.msg = Some(lines::pick(lines::LineKey::UserSent, &mut self.line_idx));
+                // M8：午夜陪伴——Night 时段发消息 bond ×1.5
+                self.gain_bond(self.night_bond(now_ms, 1));
+                let part = self.day_part(now_ms);
+                self.msg = Some(lines::pick(lines::LineKey::UserSent, &mut self.line_idx, part));
             }
             AiEvent::FirstChunk => {
                 // T5：对话开始 → Interacting
@@ -483,7 +527,8 @@ impl PetState {
                 if self.first_chunk_at_ms.is_none() {
                     self.first_chunk_at_ms = Some(now_ms);
                     // mood 由 derive_mood 推导
-                    self.msg = Some(lines::pick(lines::LineKey::FirstChunk, &mut self.line_idx));
+                    let part = self.day_part(now_ms);
+                    self.msg = Some(lines::pick(lines::LineKey::FirstChunk, &mut self.line_idx, part));
                 }
             }
             AiEvent::PromptCompleted => {
@@ -504,7 +549,8 @@ impl PetState {
                     self.remember(format!("共同完成了 {} 次任务", self.stats.prompts_completed));
                 }
                 self.push_event(RecentEvent::Done);
-                self.msg = Some(lines::pick(lines::LineKey::Done, &mut self.line_idx));
+                let part = self.day_part(now_ms);
+                self.msg = Some(lines::pick(lines::LineKey::Done, &mut self.line_idx, part));
             }
             AiEvent::PromptFailed => {
                 // T6：对话结束（失败）→ Idle
@@ -516,7 +562,8 @@ impl PetState {
                 self.loneliness = (self.loneliness as u16 + 5).min(100) as u8;
                 // mood 由 derive_mood 推导
                 self.push_event(RecentEvent::Failed);
-                self.msg = Some(lines::pick(lines::LineKey::Failed, &mut self.line_idx));
+                let part = self.day_part(now_ms);
+                self.msg = Some(lines::pick(lines::LineKey::Failed, &mut self.line_idx, part));
             }
             AiEvent::TokenUsage { total } => self.set_token_total(total),
             // 预留事件：桥接层尚未接线，保留处理供测试/未来增量接口
@@ -542,7 +589,8 @@ impl PetState {
                         if self.pending_action.is_none() {
                             self.pending_action = Some(PendingAction::CraftFriend { until_ms: now_ms + 30_000 });
                         }
-                        self.msg = Some(lines::pick(lines::LineKey::FriendStart, &mut self.line_idx));
+                        let part = self.day_part(now_ms);
+                        self.msg = Some(lines::pick(lines::LineKey::FriendStart, &mut self.line_idx, part));
                     }
                     ToolKind::Read => {
                         self.push_event(RecentEvent::Read);
@@ -602,7 +650,8 @@ impl PetState {
                 self.stats.dazes = self.stats.dazes.saturating_add(1);
                 self.fun = (self.fun as u16 + 5).min(100) as u8;
                 self.push_event(RecentEvent::Timeout);
-                self.msg = Some(lines::pick(lines::LineKey::Dazed, &mut self.line_idx));
+                let part = self.day_part(now_ms);
+                self.msg = Some(lines::pick(lines::LineKey::Dazed, &mut self.line_idx, part));
             }
             AiEvent::CodeSeen => {
                 self.stats.code_watched = self.stats.code_watched.saturating_add(1);
@@ -612,10 +661,12 @@ impl PetState {
                 self.happiness = (self.happiness as u16 + 4).min(100) as u8;
                 self.fun = (self.fun as u16 + 2).min(100) as u8;
                 self.loneliness = self.loneliness.saturating_sub(15);
-                self.reward_interaction(now_ms, 1);
+                // M8：午夜陪伴——Night 时段戳一戳 bond ×1.5
+                self.reward_interaction(now_ms, self.night_bond(now_ms, 1));
                 // mood 由 derive_mood 推导
                 self.push_event(RecentEvent::Poke);
-                self.msg = Some(lines::pick(lines::LineKey::Poke, &mut self.line_idx));
+                let part = self.day_part(now_ms);
+                self.msg = Some(lines::pick(lines::LineKey::Poke, &mut self.line_idx, part));
             }
             AiEvent::Feed => {
                 self.stats.interactions = self.stats.interactions.saturating_add(1);
@@ -635,12 +686,14 @@ impl PetState {
                 self.fun = (self.fun as u16 + 3 * multiplier / 100).min(100) as u8;
                 self.loneliness = self.loneliness.saturating_sub((20 * multiplier / 100) as u8);
                 self.happiness = (self.happiness as u16 + 7 * multiplier / 100).min(100) as u8;
-                // bond 走 reward_interaction（30s 冷却）；审查修复：贪吃 → bond 收益 ×(1+greed/100)
+                // bond 走 reward_interaction（30s 冷却）；审查修复：贪吃 → bond 收益 ×(1+greed/100)；
+                // M8：午夜陪伴——Night 时段喂食 bond 再 ×1.5
                 let greed_bond = (1 + self.traits.greed as u32 / 100) as u32;
-                self.reward_interaction(now_ms, greed_bond);
+                self.reward_interaction(now_ms, self.night_bond(now_ms, greed_bond));
                 // mood 由 derive_mood 推导
                 self.push_event(RecentEvent::Feed);
-                self.msg = Some(lines::pick(lines::LineKey::Feed, &mut self.line_idx));
+                let part = self.day_part(now_ms);
+                self.msg = Some(lines::pick(lines::LineKey::Feed, &mut self.line_idx, part));
             }
             AiEvent::Play => {
                 self.stats.interactions = self.stats.interactions.saturating_add(1);
@@ -659,15 +712,18 @@ impl PetState {
                 self.loneliness = self.loneliness.saturating_sub(30);
                 self.happiness = (self.happiness as u16 + 4).min(100) as u8;
                 if play_cooled {
-                    self.gain_bond(3);
+                    // M8：午夜陪伴——Night 时段玩耍 bond ×1.5
+                    self.gain_bond(self.night_bond(now_ms, 3));
                 }
                 // mood 由 derive_mood 推导
                 self.push_event(RecentEvent::Play);
-                self.msg = Some(lines::pick(lines::LineKey::Play, &mut self.line_idx));
+                let part = self.day_part(now_ms);
+                self.msg = Some(lines::pick(lines::LineKey::Play, &mut self.line_idx, part));
             }
             AiEvent::Sleepy => {
                 self.machine = PetMachineState::Asleep;
-                self.msg = Some(lines::pick(lines::LineKey::Sleep, &mut self.line_idx));
+                let part = self.day_part(now_ms);
+                self.msg = Some(lines::pick(lines::LineKey::Sleep, &mut self.line_idx, part));
             }
             AiEvent::AgentConnected => {
                 // T4：连接恢复 → Idle
@@ -692,7 +748,8 @@ impl PetState {
             let idle_for = now_ms.saturating_sub(self.last_interaction_at_ms);
             if self.energy <= 15 && (idle_for >= 30_000 || self.energy == 0) {
                 self.machine = PetMachineState::Asleep;
-                self.msg = Some(lines::pick(lines::LineKey::Sleep, &mut self.line_idx));
+                let part = self.day_part(now_ms);
+                self.msg = Some(lines::pick(lines::LineKey::Sleep, &mut self.line_idx, part));
             }
         }
         // M3：情绪统一推导（取代事件直接赋值）
@@ -826,10 +883,35 @@ impl PetState {
     }
 
     /// v2 唤醒（T2 转移动作）：状态置 Idle，energy +30，文案（mood 由推导决定）。
-    fn wake(&mut self) {
+    fn wake(&mut self, now_ms: u64) {
         self.machine = PetMachineState::Awake(MachineSub::Idle);
         self.energy = (self.energy as u16 + 30).min(100) as u8;
-        self.msg = Some(lines::pick(lines::LineKey::Wake, &mut self.line_idx));
+        let part = self.day_part(now_ms);
+        self.msg = Some(lines::pick(lines::LineKey::Wake, &mut self.line_idx, part));
+    }
+
+    /// M8 时段感知：当前时段（本地小时推导）。offset 由桥接层注入（见
+    /// [`Self::set_local_offset_minutes`]）；0 = UTC。
+    pub fn day_part(&self, now_ms: u64) -> DayPart {
+        let hour = ((now_ms / 3_600_000) as i64 + self.local_offset_minutes as i64 / 60)
+            .rem_euclid(24) as u32;
+        day_part_of_hour(hour)
+    }
+
+    /// M8 时段感知：注入本地时区偏移（分钟，东正西负）。桥接层在事件/轮询
+    /// 入口调用；不落盘（serde skip），重启后重注入。
+    pub fn set_local_offset_minutes(&mut self, minutes: i32) {
+        self.local_offset_minutes = minutes.clamp(-24 * 60, 24 * 60);
+    }
+
+    /// M8 午夜陪伴（设计书 §13.5.5 预埋机制）：Night 时段互动 bond 收益 ×1.5
+    /// （向上取整，至少 +1）。只用于真实互动（UserSent/Poke/Feed/Play）。
+    fn night_bond(&self, now_ms: u64, amount: u32) -> u32 {
+        if self.day_part(now_ms) == DayPart::Night {
+            (amount * 3 + 1) / 2
+        } else {
+            amount
+        }
     }
 
     pub fn stage(&self) -> GrowthStage {
@@ -859,9 +941,10 @@ impl PetState {
             .clamp(0.0, 100.0) as u8
     }
 
-    pub fn rename(&mut self, value: &str) {
+    pub fn rename(&mut self, value: &str, now_ms: u64) {
         self.name = sanitize_name(value);
-        let prefix = lines::pick(lines::LineKey::Rename, &mut self.line_idx);
+        let part = self.day_part(now_ms);
+        let prefix = lines::pick(lines::LineKey::Rename, &mut self.line_idx, part);
         self.msg = Some(format!("{prefix}{}。", self.name));
     }
 
@@ -877,7 +960,8 @@ impl PetState {
                 self.fun = (self.fun as u16 + 10).min(100) as u8;
                 self.loneliness = self.loneliness.saturating_sub(30);
                 self.remember("它捏了个幻影朋友".into());
-                self.msg = Some(lines::pick(lines::LineKey::FriendDone, &mut self.line_idx));
+                let part = self.day_part(now_ms);
+                self.msg = Some(lines::pick(lines::LineKey::FriendDone, &mut self.line_idx, part));
                 return true;
             }
         }
@@ -895,13 +979,15 @@ impl PetState {
         if self.machine == PetMachineState::Asleep {
             return false;
         }
+        // M8：深夜不打扰——Night 时段不说 BORED（深夜不制造陪伴压力）
+        let night = self.day_part(now_ms) == DayPart::Night;
         let key = if self.hunger < 25 {
             Some(lines::LineKey::Hungry)
         } else if self.loneliness > 70 {
             Some(lines::LineKey::Lonely)
         } else if self.energy < 20 {
             Some(lines::LineKey::Tired)
-        } else if self.fun < 20 {
+        } else if !night && self.fun < 20 {
             Some(lines::LineKey::Bored)
         } else if self.mood == "dazed" {
             Some(lines::LineKey::Dazed)
@@ -909,7 +995,8 @@ impl PetState {
             None
         };
         if let Some(key) = key {
-            self.msg = Some(lines::pick(key, &mut self.line_idx));
+            let part = self.day_part(now_ms);
+            self.msg = Some(lines::pick(key, &mut self.line_idx, part));
             true
         } else {
             false

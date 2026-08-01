@@ -1,5 +1,14 @@
 ﻿use pylon_pet_core::{AiEvent, GrowthStage, PetState, ToolOutcome};
 
+/// 测试辅助（M8）：构造"本地 Day 时段（12:00）"的宠物——任意 now_ms 映射到
+/// 本地正午，隔离午夜 bond ×1.5 加成（时段相关断言用显式 offset 的变体测试）。
+fn day_pet(now_ms: u64) -> PetState {
+    let mut pet = PetState::new_at(now_ms);
+    let utc_hour = (now_ms / 3_600_000 % 24) as i32;
+    pet.set_local_offset_minutes((12 - utc_hour) * 60);
+    pet
+}
+
 #[test]
 fn token_usage_awards_xp_only_for_new_cumulative_tokens() {
     let mut pet = PetState::new_at(0);
@@ -338,7 +347,8 @@ fn feeding_spam_diminishes_returns() {
 
 #[test]
 fn play_has_sixty_second_bond_cooldown() {
-    let mut pet = PetState::new_at(1);
+    // M8：显式映射到本地 Day 时段（12:00），隔离午夜 bond ×1.5 加成
+    let mut pet = day_pet(1);
     pet.traits = pylon_pet_core::PetTraits::default();
     pet.apply(AiEvent::Play, 1);
     assert_eq!(pet.bond, 3, "首次玩耍 +3 bond");
@@ -351,14 +361,15 @@ fn play_has_sixty_second_bond_cooldown() {
 #[test]
 fn greedy_pet_gets_more_bond_from_food() {
     // 审查修复：贪吃影响喂食 bond 收益（设计书 §7），不再影响 hunger 恢复
-    let mut pet = PetState::new_at(1);
+    // M8：显式映射到本地 Day 时段（12:00），隔离午夜 bond ×1.5 加成
+    let mut pet = day_pet(1);
     pet.traits = pylon_pet_core::PetTraits::default();
     pet.traits.greed = 100;
     pet.hunger = 50;
     pet.apply(AiEvent::Feed, 1);
     assert_eq!(pet.hunger, 70, "hunger 收益固定 +20");
     assert_eq!(pet.bond, 2, "贪吃喂食 bond +2（×2）");
-    let mut normal = PetState::new_at(1);
+    let mut normal = day_pet(1);
     normal.traits = pylon_pet_core::PetTraits::default();
     normal.hunger = 50;
     normal.apply(AiEvent::Feed, 1);
@@ -540,4 +551,108 @@ fn voice_lines_rotate_without_immediate_repeat() {
     };
     assert!(first.is_some() && second.is_some());
     assert_ne!(first, second, "文案池必须轮换不重复");
+}
+
+// ── M8：时段感知（day_part / 午夜陪伴 / 深夜不打扰 / 时段文案）──
+
+#[test]
+fn day_part_boundaries_are_stable() {
+    use pylon_pet_core::day_part_of_hour;
+    use pylon_pet_core::DayPart;
+    assert_eq!(day_part_of_hour(0), DayPart::Night);
+    assert_eq!(day_part_of_hour(4), DayPart::Night);
+    assert_eq!(day_part_of_hour(5), DayPart::Dawn);
+    assert_eq!(day_part_of_hour(7), DayPart::Dawn);
+    assert_eq!(day_part_of_hour(8), DayPart::Day);
+    assert_eq!(day_part_of_hour(17), DayPart::Day);
+    assert_eq!(day_part_of_hour(18), DayPart::Dusk);
+    assert_eq!(day_part_of_hour(21), DayPart::Dusk);
+    assert_eq!(day_part_of_hour(22), DayPart::Night);
+    assert_eq!(day_part_of_hour(23), DayPart::Night);
+}
+
+#[test]
+fn day_part_respects_local_offset_and_clamps() {
+    use pylon_pet_core::DayPart;
+    // UTC 0 点（1970-01-01 00:00）+ 8h = 本地 8:00 → Day
+    let mut pet = PetState::new_at(0);
+    pet.set_local_offset_minutes(8 * 60);
+    assert_eq!(pet.day_part(0), DayPart::Day);
+    // +14h = 本地 14:00 → Day；+15h = 15:00 → Day
+    pet.set_local_offset_minutes(15 * 60);
+    assert_eq!(pet.day_part(0), DayPart::Day);
+    // 负偏移：UTC 0 点 - 5h = 前日 19:00 → Dusk
+    pet.set_local_offset_minutes(-5 * 60);
+    assert_eq!(pet.day_part(0), DayPart::Dusk);
+    // 越界钳制（±24h 上限）：99h → 钳到 24h，hour=24 mod 24 = 0 → Night
+    //（24h 偏移 ≡ 0h 偏移，同一时刻）
+    pet.set_local_offset_minutes(99 * 60);
+    assert_eq!(pet.day_part(0), DayPart::Night);
+    // 0 = UTC（默认）
+    let pet = PetState::new_at(0);
+    assert_eq!(pet.day_part(0), DayPart::Night);
+}
+
+#[test]
+fn night_interactions_grant_bonus_bond() {
+    // 午夜陪伴（设计书 §13.5.5）：Night 时段互动 bond ×1.5（向上取整）
+    // now=0 → UTC hour 0 → Night（offset 0）
+    let mut pet = PetState::new_at(0);
+    pet.traits = pylon_pet_core::PetTraits::default();
+    pet.apply(AiEvent::UserSent, 0);
+    assert_eq!(pet.bond, 2, "Night 发消息 bond 1×1.5 向上取整 = 2");
+    // 对照 Day 时段：bond 1
+    let mut day = day_pet(1);
+    day.traits = pylon_pet_core::PetTraits::default();
+    day.apply(AiEvent::UserSent, 1);
+    assert_eq!(day.bond, 1, "Day 发消息 bond +1");
+    // Night 玩耍：3×1.5 = 5（向上取整）
+    let mut pet = PetState::new_at(0);
+    pet.traits = pylon_pet_core::PetTraits::default();
+    pet.apply(AiEvent::Play, 0);
+    assert_eq!(pet.bond, 5, "Night 玩耍 bond 3×1.5 = 5");
+    // Night 喂食（普通 traits）：1×1.5 = 2
+    let mut pet = PetState::new_at(0);
+    pet.traits = pylon_pet_core::PetTraits::default();
+    pet.apply(AiEvent::Feed, 0);
+    assert_eq!(pet.bond, 2, "Night 喂食 bond 1×1.5 = 2");
+}
+
+#[test]
+fn night_poll_voice_skips_bored() {
+    // 深夜不打扰：Night 时段 fun<20 不说 BORED（紧急需求仍说）
+    let mut pet = PetState::new_at(0); // UTC 0 点 = Night
+    pet.traits = pylon_pet_core::PetTraits::default();
+    pet.fun = 5;
+    assert!(!pet.poll_voice(0), "Night 不说 BORED");
+    // 紧急需求仍说（饥饿优先于深夜规则）
+    pet.hunger = 10;
+    assert!(pet.poll_voice(0), "Night 饥饿仍必须说话");
+    // Day 时段照常说 BORED
+    let mut day = day_pet(1);
+    day.traits = pylon_pet_core::PetTraits::default();
+    day.fun = 5;
+    assert!(day.poll_voice(1), "Day fun<20 说 BORED");
+}
+
+#[test]
+fn time_of_day_line_variants_are_used() {
+    use pylon_pet_core::DayPart;
+    use pylon_pet_core::lines::{pick, LineKey};
+    let mut idx = 0u8;
+    let wake_night = pick(LineKey::Wake, &mut idx, DayPart::Night);
+    assert!(wake_night.contains("夜深") || wake_night.contains("黑暗"), "Night Wake 变体: {wake_night}");
+    let wake_day = pick(LineKey::Wake, &mut idx, DayPart::Day);
+    assert!(wake_day.contains("脚步") || wake_day.contains("懒腰"), "Day Wake 普通池: {wake_day}");
+    let sleep_day = pick(LineKey::Sleep, &mut idx, DayPart::Day);
+    assert!(sleep_day.contains("时区") || sleep_day.contains("阳光"), "Day Sleep 变体: {sleep_day}");
+    let sleep_default = pick(LineKey::Sleep, &mut idx, DayPart::Night);
+    assert!(sleep_default.contains("蜷成") || sleep_default.contains("注释"), "Night Sleep 普通池: {sleep_default}");
+    let done_night = pick(LineKey::Done, &mut idx, DayPart::Night);
+    assert!(done_night.contains("深夜") || done_night.contains("夜深"), "Night Done 变体: {done_night}");
+    // 无时段变体的场景（Poke）不随时段变化
+    let poke_a = pick(LineKey::Poke, &mut idx, DayPart::Night);
+    let poke_b = pick(LineKey::Poke, &mut idx, DayPart::Day);
+    assert!(poke_a.contains("指尖") || poke_a.contains("晃了晃"));
+    assert!(poke_b.contains("指尖") || poke_b.contains("晃了晃"));
 }
