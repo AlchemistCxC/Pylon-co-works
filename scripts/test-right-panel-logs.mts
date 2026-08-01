@@ -1,0 +1,31 @@
+import assert from 'node:assert/strict'
+import { readFile } from 'node:fs/promises'
+
+const root = new URL('../src/components/', import.meta.url)
+const right = await readFile(new URL('RightPanel.tsx', root), 'utf8')
+const logsPanel = await readFile(new URL('right-panel/LogsPanel.tsx', root), 'utf8')
+const types = await readFile(new URL('right-panel/rightPanelTypes.ts', root), 'utf8')
+const logsApi = await readFile(new URL('right-panel/logsApi.ts', root), 'utf8')
+
+assert.match(right, /import LogsPanel from ['"]\.\/right-panel\/LogsPanel['"]/, 'RightPanel must import LogsPanel')
+assert.match(right, /createLogsViewState/, 'RightPanel must use the Logs state initializer')
+assert.match(right, /useState<LogsViewState>/, 'logs state must be component-local state')
+assert.match(right, /import \{ useIdentityStore \} from ['"]\.\.\/identityStore['"]/, 'RightPanel must resolve source from the identity store')
+assert.match(right, /useIdentityStore\(state => sessionId \? state\.sessions\.find\(item => item\.id === sessionId\)\?\.source \?\? null : null\)/, 'RightPanel must resolve Session.id to Session.source')
+assert.match(right, /createLogsViewState\(sessionSource \? \{ sessionId: sessionId as string, source: sessionSource \} : null\)/, 'logs scope must use resolved backend source')
+assert.doesNotMatch(right, /source: sessionId/, 'local Session.id must not be used as backend source')
+assert.match(right, /<LogsPanel state=\{logsState\}/, 'logs tab must render LogsPanel with its local state')
+assert.match(right, /setLogsState\([\s\S]*createLogsViewState\([\s\S]*\},\n?\s*\[sessionId, sessionSource\]\)/, 'logs state must reset when session or source changes')
+assert.match(right, /useEffect\([\s\S]*setWorkspaceState\([\s\S]*\},\n?\s*\[sessionSource\]\)/, 'workspace state reset must remain source-scoped')
+assert.match(right, /tab === ['"]workspace['"][\s\S]*state=\{workspaceState\}/, 'workspace branch must remain')
+assert.match(right, /tab === ['"]activity['"][\s\S]*PanelStatus/, 'activity tab must show unavailable status')
+assert.match(right, /tab === ['"]changes['"][\s\S]*PanelStatus/, 'changes tab must show unavailable status')
+assert.match(logsPanel, /state\.status === ['"]unwired['"][\s\S]*日志尚未接入/, 'LogsPanel must preserve unwired semantics')
+assert.match(types, /export function createLogsViewState\(scope: LogsScope \| null\)/, 'logs initializer must be available from the existing state model')
+assert.match(logsApi, /归一化纯函数/, 'logs API must remain backend-agnostic (normalization-only)')
+assert.match(right, /invoke<unknown>\('list_runtime_logs', \{ query: \{ session: sessionSource \} \}\)/, 'Logs must call the confirmed runtime log command')
+assert.match(right, /normalizeRuntimeLogs\(payload\)/, 'Runtime logs must pass through the adapter')
+assert.doesNotMatch(logsPanel, /\binvoke\s*\(|\blisten\s*\(|\bfetch\s*\(|WebSocket/, 'LogsPanel must remain a pure display component')
+assert.doesNotMatch(logsApi, /\binvoke\s*\(|\blisten\s*\(|\bfetch\s*\(|WebSocket/, 'logs adapter must remain side-effect free')
+
+console.log('RightPanel LogsPanel wiring and workspace isolation: PASS')
