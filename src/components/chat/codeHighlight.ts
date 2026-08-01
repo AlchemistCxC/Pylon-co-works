@@ -1,5 +1,26 @@
-import { createStarryNight, type Grammar } from '@wooorm/starry-night'
-import { toHtml } from 'hast-util-to-html'
+// 仅类型导入（编译期擦除），运行时零开销：starry-night 核心（vscode-textmate /
+// oniguruma wasm 加载器）与 hast-util-to-html 直到首块代码真正高亮时才按需加载，
+// 避免把高亮引擎拖进主 chunk。
+import type { createStarryNight, Grammar } from '@wooorm/starry-night'
+import type { toHtml } from 'hast-util-to-html'
+
+type StarryCore = {
+  createStarryNight: typeof createStarryNight
+  toHtml: typeof toHtml
+}
+
+let corePromise: Promise<StarryCore> | null = null
+
+// 经 starryCore 包装模块动态导入：包根直接动态 import 会连带全部语法集，
+// 包装模块的具名 re-export 可被 rollup tree-shake，只带核心引擎（textmate/oniguruma）。
+// 显式 .ts 扩展名：Node（legacy 测试 runner）与 Vite 均可解析。
+function loadCore(): Promise<StarryCore> {
+  if (!corePromise) {
+    corePromise = import('./starryCore.ts')
+      .then(({ createStarryNight: create, toHtml: toHtmlFn }) => ({ createStarryNight: create, toHtml: toHtmlFn }))
+  }
+  return corePromise
+}
 
 const LANGUAGE_SCOPES: Record<string, string> = {
   js: 'source.js', javascript: 'source.js', jsx: 'source.js',
@@ -78,16 +99,16 @@ async function highlightCodeUncached(language: string, code: string): Promise<st
   const scope = scopeForLanguage(language)
   const load = scope && GRAMMAR_LOADERS[scope]
   if (!scope || !load) return cacheResult(cacheKey(language, code), null)
+  // 先同步触发核心动态 import（并行于语法包），避免串行等待
+  const core = loadCore()
   let highlighter = highlighters.get(scope)
   if (!highlighter) {
-    highlighter = load().then(({ default: grammar }) => createStarryNight([grammar]))
+    highlighter = load().then(async ({ default: grammar }) => {
+      const { createStarryNight: create } = await core
+      return create([grammar])
+    })
     highlighters.set(scope, highlighter)
   }
-  const starry = await highlighter
-  return cacheResult(cacheKey(language, code), toHtml(starry.highlight(code, scope)))
-}
-
-export function clearHighlightCache(): void {
-  highlightCache.clear()
-  highlightPending.clear()
+  const [starry, { toHtml: toHtmlFn }] = await Promise.all([highlighter, core])
+  return cacheResult(cacheKey(language, code), toHtmlFn(starry.highlight(code, scope)))
 }

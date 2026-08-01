@@ -1,11 +1,9 @@
-import { useRef, useEffect, useLayoutEffect, useState, useMemo, useId, useCallback } from 'react'
+import { useRef, useEffect, useLayoutEffect, useState, useMemo, useId, useCallback, Suspense } from 'react'
 import React from 'react'
 import { invoke } from '@tauri-apps/api/core'
 import { useStore } from '../../store'
 import { useIdentityStore } from '../../identityStore'
 import { useRuntimeStore } from '../../runtimeStore'
-import ReactMarkdown from 'react-markdown'
-import remarkGfm from 'remark-gfm'
 import { AnimatePresence, motion, useReducedMotion } from 'motion/react'
 import Anser from 'anser'
 import GenerationFooter, { type GenerationPhase, type GenerationSummary } from './GenerationFooter'
@@ -20,12 +18,13 @@ import { measureRender, recordMeasuredAsync, recordRender } from './renderMetric
 import { prepareRenderableMessages, isMessageStatic } from './messagePipeline'
 import type { Message as PipelineMessage, RenderMessage } from './messageTypes'
 import { buildMessageLookups } from './messageLookups'
-import { getToolSummary, resolveConnectorColor } from './toolPresentation'
+import { resolveConnectorColor } from './toolPresentation'
 import { buildToolPresentationModel, toolPresentationStatus, truncateToolSummary } from './toolPresentationModel'
-import { normalizeToolStatus, resolveToolVisualStatus, type ToolVisualState } from './toolStatus'
+import { normalizeToolStatus, resolveToolVisualStatus } from './toolStatus'
 import { toolIndicatorMotionClass } from './toolIndicatorMotion'
 import { resolveToolIndicatorAsset } from './toolIndicatorAssets'
 import { isPlainTextContent } from './markdownFastPath'
+import { MarkdownRenderer } from './markdownLazy'
 import { MessageRenderBoundary } from './MessageRenderBoundary'
 import { createMockMessages } from './chatMockData'
 import DiffCard from './DiffCard'
@@ -553,17 +552,19 @@ function AssistantContent({ text, isStreaming = false }: { text: string; isStrea
     <div className="term-assistant">
       <button className="copy-btn" onClick={copy}>{copied ? '✓' : '⎘'}</button>
       {isStreaming || !isPlainTextContent(text) ? (
-        <ReactMarkdown remarkPlugins={[remarkGfm]} components={{
-          code({ className, children, ...props }) {
-            const match = /language-(\w+)/.exec(className || '')
-            const code = String(children).replace(/\n$/, '')
-            if (match) return <CodeBlock language={match[1]} code={code} />
-            return <code className="term-inline-code" {...props}>{children}</code>
-          },
-          a({ href, children }) { return <a href={href} target="_blank" rel="noopener" className="term-link">{children}</a> },
-          blockquote({ children }) { return <blockquote className="term-blockquote">{children}</blockquote> },
-          table({ children }) { return <div className="term-table-wrap"><table className="term-table">{children}</table></div> },
-        }}>{text}</ReactMarkdown>
+        <Suspense fallback={<p className="term-p term-plain-text">{text}</p>}>
+          <MarkdownRenderer components={{
+            code({ className, children, ...props }) {
+              const match = /language-(\w+)/.exec(className || '')
+              const code = String(children).replace(/\n$/, '')
+              if (match) return <CodeBlock language={match[1]} code={code} />
+              return <code className="term-inline-code" {...props}>{children}</code>
+            },
+            a({ href, children }) { return <a href={href} target="_blank" rel="noopener" className="term-link">{children}</a> },
+            blockquote({ children }) { return <blockquote className="term-blockquote">{children}</blockquote> },
+            table({ children }) { return <div className="term-table-wrap"><table className="term-table">{children}</table></div> },
+          }}>{text}</MarkdownRenderer>
+        </Suspense>
       ) : (
         <p className="term-p term-plain-text">{text}</p>
       )}
@@ -729,7 +730,9 @@ function UserLine({ sender, content }: { sender: string; content: string }) {
     <div className="term-user">
       <span className="term-user-prefix" style={userColor ? { color: userColor } : {}}>{prefix}</span>
       <span className="term-user-name" style={userColor ? { color: userColor } : {}}>{name}</span>
-      <ReactMarkdown remarkPlugins={[remarkGfm]}>{content}</ReactMarkdown>
+      <Suspense fallback={<p className="term-p term-plain-text">{content}</p>}>
+        <MarkdownRenderer>{content}</MarkdownRenderer>
+      </Suspense>
     </div>
   )
 }
