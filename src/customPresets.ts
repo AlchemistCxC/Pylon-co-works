@@ -1,4 +1,5 @@
 import type { ThemeSettings } from './store'
+import { THEME_SETTINGS_KEYS } from './themeFields.ts'
 
 export interface CustomPreset {
   id: string
@@ -8,31 +9,7 @@ export interface CustomPreset {
   updatedAt: number
 }
 
-const THEME_SETTINGS_KEYS: readonly (keyof ThemeSettings)[] = [
-  'transparency', 'bgBlur', 'globalFont', 'globalFontSize', 'globalBgImage', 'globalBgColor', 'uiScheme',
-  'sidebarBg', 'sidebarBgImage', 'sidebarWidth', 'sidebarTextColor', 'sidebarNameSize', 'sidebarGroupSize',
-  'chatBg', 'chatBgImage', 'chatFont', 'chatFontSize', 'chatLineHeight', 'chatTextColor', 'chatCodeColor', 'chatCodeBg',
-  'toolOk', 'toolRun', 'toolErr', 'toolNameColor', 'toolSummaryColor', 'userTagBg', 'userTagText',
-  'toolIndicatorGlow', 'toolIndicatorGlowColor', 'toolConnectorMode', 'toolConnectorColor', 'toolConnectorStyle', 'toolConnectorWidth', 'toolConnectorOpacity',
-  'inputBg', 'inputBgImage', 'inputTextColor', 'inputPlaceholder', 'inputSendBg', 'inputFocusBorder', 'inputFontSize', 'inputMinHeight',
-  'inputMode', 'inputVariant', 'inputShowPlaceholder', 'inputShowHistoryHint', 'inputSubmitButtonMode', 'cliLineWidth', 'cliLineColor', 'cliTextColor', 'cliPromptColor', 'cliLinePadding', 'cliContentOffsetY', 'cliHintMode',
-  'statusBg', 'statusBgImage', 'ekgWidth', 'ekgFontSize', 'ekgGreen', 'ekgYellow', 'ekgRed', 'pillBg', 'pillText', 'prismOnColor',
-  'ekgLineWidth', 'ekgAmplitudeMax', 'ekgSpeedBase', 'ekgSpeedMax',
-  'barTrackColor', 'barFillColor', 'barFillFollow', 'barHeight',
-  'ekgLeftColor', 'ekgMovingColor', 'ekgConsumedColor', 'tokenDisplay',
-  'rightBg', 'rightBgImage', 'rightWidth',
-  'sidebarTransparency', 'sidebarBlur', 'chatTransparency', 'chatBlur', 'rightTransparency', 'rightBlur',
-  'userName', 'userPrefix', 'userColor', 'toolIndicator',
-  'spinnerFramePreset', 'spinnerCustomFrames', 'spinnerVerbSet', 'spinnerCustomVerbs',
-  'spinnerDoneMarker', 'spinnerCancelledMarker', 'spinnerErrorMarker',
-  'spinnerDoneMarkerMode', 'spinnerCancelledMarkerMode', 'spinnerErrorMarkerMode',
-  'spinnerIntervalMs', 'spinnerColor', 'spinnerSize',
-  'msgStyle', 'msgFont', 'msgTextColor', 'msgLineHeight', 'messageLayout',
-  'ccHeight', 'ccBgHeight', 'ccBg', 'ccBgImage', 'ccStatusFontSize', 'ccStyle', 'ccVariant',
-  'modelVariant', 'modeVariant', 'sendVariant', 'attachVariant', 'ccHidden', 'ccLayout',
-  'ccScale', 'footerLayout', 'cliOverflowMode',
-]
-
+// 白名单由 themeFields.ts 单一真值表生成（各 zone 字段并集）；本文件仅消费。
 const THEME_SETTINGS_KEY_SET = new Set<string>(THEME_SETTINGS_KEYS)
 
 const generatedCustomPresetIds = new Set<string>()

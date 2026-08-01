@@ -1,5 +1,6 @@
 import { normalizeCustomPresets } from './customPresets.ts'
 import { normalizeCcLayout, type CcLayoutV3 } from './ccLayoutState.ts'
+import { ZONES } from './themeFields.ts'
 
 export type ThemeMigrationDefaults = {
   base: object
@@ -7,8 +8,6 @@ export type ThemeMigrationDefaults = {
   dirty: Record<string, boolean>
   ccLayout: CcLayoutV3
 }
-
-const ZONES = ['global', 'sidebar', 'chat', 'cc', 'right'] as const
 
 type ThemeMigrationState = Record<string, unknown> & {
   activePreset?: unknown

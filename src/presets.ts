@@ -10,56 +10,12 @@
  */
 
 import type { ThemeSettings } from './store'
+import { ZONE_FIELDS } from './themeFields.ts'
 
 // ── 区域字段映射 ────────────────────────────────────────────────
+// 单一真值表在 themeFields.ts；本文件仅 re-export，保证旧导入路径不变。
 
-export const ZONE_FIELDS: Record<string, (keyof ThemeSettings)[]> = {
-  global: [
-    'transparency', 'bgBlur', 'globalFont', 'globalFontSize', 'globalBgImage',
-    'globalBgColor', 'uiScheme',
-    'userName', 'userPrefix', 'userColor',
-  ],
-  sidebar: [
-    'sidebarBg', 'sidebarBgImage', 'sidebarWidth',
-    'sidebarTransparency', 'sidebarBlur',
-    'sidebarTextColor', 'sidebarNameSize', 'sidebarGroupSize',
-  ],
-  chat: [
-    'chatBg', 'chatBgImage', 'chatTransparency', 'chatBlur',
-    'chatFont', 'chatFontSize', 'chatLineHeight',
-    'chatTextColor', 'chatCodeColor', 'chatCodeBg',
-    'toolOk', 'toolRun', 'toolErr',
-    'toolNameColor', 'toolSummaryColor',
-    'userTagBg', 'userTagText',
-    'toolIndicator', 'toolIndicatorGlow', 'toolIndicatorGlowColor',
-    'toolConnectorMode', 'toolConnectorColor', 'toolConnectorStyle', 'toolConnectorWidth', 'toolConnectorOpacity',
-    'spinnerFramePreset', 'spinnerCustomFrames', 'spinnerVerbSet', 'spinnerCustomVerbs',
-    'spinnerDoneMarker', 'spinnerCancelledMarker', 'spinnerErrorMarker',
-    'spinnerDoneMarkerMode', 'spinnerCancelledMarkerMode', 'spinnerErrorMarkerMode',
-    'spinnerIntervalMs', 'spinnerColor', 'spinnerSize',
-    'msgStyle', 'msgFont', 'msgTextColor', 'msgLineHeight', 'messageLayout',
-  ],
-  cc: [
-    'ccHeight', 'ccBgHeight', 'ccBg', 'ccBgImage', 'ccStatusFontSize',
-    'ccStyle', 'ccVariant', 'ccLayout', 'ccHidden', 'ccScale',
-    'inputBg', 'inputBgImage', 'inputTextColor', 'inputPlaceholder',
-    'inputSendBg', 'inputFocusBorder', 'inputFontSize', 'inputMinHeight',
-    'inputMode', 'inputVariant', 'inputShowPlaceholder', 'inputShowHistoryHint', 'inputSubmitButtonMode', 'cliLineWidth', 'cliLineColor', 'cliTextColor', 'cliPromptColor', 'cliLinePadding', 'cliContentOffsetY', 'cliHintMode', 'footerLayout', 'cliOverflowMode',
-    'statusBg', 'statusBgImage',
-    'ekgWidth', 'ekgFontSize',
-    'ekgGreen', 'ekgYellow', 'ekgRed',
-    'ekgLineWidth', 'ekgAmplitudeMax', 'ekgSpeedBase', 'ekgSpeedMax',
-    'ekgLeftColor', 'ekgMovingColor', 'ekgConsumedColor',
-    'barTrackColor', 'barFillColor', 'barFillFollow', 'barHeight',
-    'tokenDisplay',
-    'pillBg', 'pillText', 'prismOnColor',
-    'modelVariant', 'modeVariant', 'sendVariant', 'attachVariant',
-  ],
-  right: [
-    'rightBg', 'rightBgImage', 'rightWidth',
-    'rightTransparency', 'rightBlur',
-  ],
-}
+export { ZONE_FIELDS }
 
 // ── 预设定义 ─────────────────────────────────────────────────────
 
