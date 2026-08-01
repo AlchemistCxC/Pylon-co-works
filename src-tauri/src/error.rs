@@ -5,20 +5,29 @@
 
 use serde::ser::SerializeMap;
 use serde::Serialize;
-use std::fmt;
 
-#[derive(Debug)]
+#[derive(Debug, thiserror::Error)]
 pub enum PylonError {
+    #[error("ACP error: {0}")]
     Acp(String),
+    #[error("agent process crashed")]
     AgentCrashed,
+    #[error("session not found: {0}")]
     SessionNotFound(String),
+    #[error("no active agent configured")]
     NoActiveAgent,
+    #[error("serialization error: {0}")]
     Serialize(String),
+    #[error("I/O error: {0}")]
     Io(String),
+    #[error("ACP protocol: {0}")]
     Protocol(String),
+    #[error("{0}")]
     Workspace(String),
+    #[error("Prism error: {0}")]
     Prism(String),
     /// B5：Git 只读操作错误（非 git 仓库 / git 不可用 / 命令失败）。
+    #[error("Git error: {0}")]
     Git(String),
 }
 
@@ -40,24 +49,7 @@ impl PylonError {
     }
 }
 
-impl fmt::Display for PylonError {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        match self {
-            Self::Acp(msg) => write!(f, "ACP error: {msg}"),
-            Self::AgentCrashed => write!(f, "agent process crashed"),
-            Self::SessionNotFound(id) => write!(f, "session not found: {id}"),
-            Self::NoActiveAgent => write!(f, "no active agent configured"),
-            Self::Serialize(msg) => write!(f, "serialization error: {msg}"),
-            Self::Io(msg) => write!(f, "I/O error: {msg}"),
-            Self::Protocol(msg) => write!(f, "ACP protocol: {msg}"),
-            Self::Workspace(msg) => write!(f, "{msg}"),
-            Self::Prism(msg) => write!(f, "Prism error: {msg}"),
-            Self::Git(msg) => write!(f, "Git error: {msg}"),
-        }
-    }
-}
-
-impl std::error::Error for PylonError {}
+// Display/Error 由 thiserror derive（R2）；错误文案与手写 impl 逐字一致（契约不变）。
 
 /// B1.2：结构化 DTO——`{ "code", "message" }`（前端按 code 分支，message 展示用）。
 impl Serialize for PylonError {

@@ -31,6 +31,8 @@ futures-util = "0.3"
 infer = "0.19"
 url = "2"
 log = "0.4"
+# R2 错误类型化：PylonError Display/Error 由 derive 生成（DTO 序列化仍手写）
+thiserror = "2"
 # 官方 ACP schema（v1 + v2 类型全集）——消除手写协议参数构造
 agent-client-protocol-schema = "1.4"
 
