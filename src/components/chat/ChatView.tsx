@@ -10,13 +10,10 @@ import GenerationFooter, { type GenerationPhase, type GenerationSummary } from '
 import { resolveSpinnerFrames } from './spinnerFrames'
 import { isCurrentLoadGeneration, nextLoadGeneration, resolveLoadedMessages, serializeLoadedMessages } from './replayState'
 import { canPersistMessages, clearMessageStorage, messageStorageKey, persistMessageSnapshot } from './messagePersistence'
-import { isRenderedSource, removeGeneratingSource } from './sessionEventState'
 import { extractMode, extractModelConfig, sessionResponseObject, type SessionResponse } from './acpTypes'
 import { highlightCode } from './codeHighlight'
 import { sanitizeHtml } from './htmlSanitizer'
 import { reportRuntimeError } from '../../runtimeError'
-import { applyCancelEvent, beginCancel, createCancelState, rejectCancelCommand, type CancelState } from './cancelState'
-import { clearChatSourceRefs } from './sessionCleanup'
 import { measureRender, recordMeasuredAsync, recordRender } from './renderMetrics'
 import { prepareRenderableMessages, isMessageStatic } from './messagePipeline'
 import type { Message as PipelineMessage, RenderMessage } from './messageTypes'
@@ -33,7 +30,7 @@ import DiffCard from './DiffCard'
 import { messageMatchesQuery } from './messageSearchIndex'
 import MessageSearchBar from './MessageSearchBar'
 import ToolConnector from './ToolConnector'
-import { attachChatEventController, type ChatEventControllerRefs } from './chatEventController'
+import { attachChatEventController, type ChatControllerHandle, type ChatEventControllerRefs } from './chatEventController'
 import './ChatView.css'
 
 interface Props { sessionId: string | null }
@@ -91,15 +88,8 @@ const ChatView = React.memo(function ChatView({ sessionId }: Props) {
   const messageLookups = useMemo(() => buildMessageLookups(messages), [messages])
   const [streamingText, setStreamingText] = useState('')
   const [streamingThinking, setStreamingThinking] = useState('')
-  const streamingTextRef = useRef('')
-  const streamingThinkingRef = useRef('')
-  const thinkingStartRef = useRef<Record<string, number>>({})
-  const streamingSourceRef = useRef<string | null>(null)
-  const flushStreamingRef = useRef<((source: string) => void) | null>(null)
   const [generating, setGenerating] = useState(false)
   const [lastTokenAt, setLastTokenAt] = useState(0)
-  const genStart = useRef(Date.now())
-  const tokenCount = useRef(0)
   const [summary, setSummary] = useState<GenerationSummary | null>(null)
   const [generationPhase, setGenerationPhase] = useState<GenerationPhase | null>(null)
   const [mockPhaseIndex, setMockPhaseIndex] = useState(0)
@@ -110,14 +100,9 @@ const ChatView = React.memo(function ChatView({ sessionId }: Props) {
   const messageRefs = useRef(new Map<string, HTMLDivElement>())
   const sessionRef = useRef<string | null>(null)
   const messageOwnerRef = useRef<string | null>(null)
-  const messagesBySourceRef = useRef<Record<string, Message[]>>({})
-  const generationStartRef = useRef<Record<string, number>>({})
-  const generationFramesRef = useRef<Record<string, string[]>>({})
-  const replayingSourcesRef = useRef<Record<string, Message[]>>({})
-  const replayToolIdsRef = useRef<Record<string, string[]>>({})
   const loadGenerationRef = useRef<Record<string, number>>({})
-  const cancelStateRef = useRef<Record<string, CancelState>>({})
   const prevSessionRef = useRef(sessionId)
+  const controllerHandleRef = useRef<ChatControllerHandle | null>(null)
   useEffect(() => {
     const onSearchShortcut = (event: globalThis.KeyboardEvent) => {
       if (!(event.ctrlKey || event.metaKey) || event.key.toLowerCase() !== 'f') return
@@ -174,9 +159,6 @@ const ChatView = React.memo(function ChatView({ sessionId }: Props) {
     prevSessionRef.current = sessionId
     sessionRef.current = null
     messageOwnerRef.current = null
-    streamingSourceRef.current = null
-    streamingTextRef.current = ''
-    streamingThinkingRef.current = ''
     setStreamingText('')
     setStreamingThinking('')
     setMessages([]); setGenerating(false); setSummary(null); setGenerationPhase(null)
@@ -187,7 +169,7 @@ const ChatView = React.memo(function ChatView({ sessionId }: Props) {
     sessionRef.current = s.source  // set BEFORE async, so incoming events match
     messageOwnerRef.current = s.id
 
-    const cached = messagesBySourceRef.current[s.source] ?? (() => {
+    const cached = (() => {
       const stored = localStorage.getItem(messageStorageKey(s.id))
       if (!stored) return []
       try {
@@ -196,14 +178,12 @@ const ChatView = React.memo(function ChatView({ sessionId }: Props) {
         return []
       }
     })()
-    messagesBySourceRef.current[s.source] = cached
-    setMessages(cached)
+    const messages = controllerHandleRef.current
+      ? controllerHandleRef.current.initSource(s.source, cached)
+      : cached
+    setMessages(messages)
     const sourceGenerating = (useStore.getState().liveGeneratingSources || []).includes(s.source)
     setGenerating(sourceGenerating)
-    cancelStateRef.current[s.source] = sourceGenerating
-      ? { source: s.source, status: 'generating' }
-      : createCancelState(s.source)
-    if (sourceGenerating) genStart.current = generationStartRef.current[s.source] || Date.now()
 
     const profile = useStore.getState().profiles.find(p => p.id === s.profileId)
     const persona = profile?.persona || ''
@@ -234,16 +214,12 @@ const ChatView = React.memo(function ChatView({ sessionId }: Props) {
     if (s.periId) {
       const loadGeneration = nextLoadGeneration(loadGenerationRef.current[s.source])
       loadGenerationRef.current[s.source] = loadGeneration
-      replayingSourcesRef.current[s.source] = []
-      replayToolIdsRef.current[s.source] = []
       invoke<SessionResponse>('load_persisted_session', { source: s.source, periId: s.periId, cwd: s.workdir || undefined }).then(response => {
         const res = sessionResponseObject(response)
         if (!isCurrentLoadGeneration(loadGenerationRef.current[s.source], loadGeneration)) return
-        const replayed = replayingSourcesRef.current[s.source] || []
-        const resolved = resolveLoadedMessages({ loadSucceeded: true, cached, replayed })
-        delete replayingSourcesRef.current[s.source]
-        delete replayToolIdsRef.current[s.source]
-        messagesBySourceRef.current[s.source] = resolved
+        const resolved = controllerHandleRef.current
+          ? controllerHandleRef.current.commitReplay(s.source, cached)
+          : resolveLoadedMessages({ loadSucceeded: true, cached, replayed: [] })
         const serialized = serializeLoadedMessages(resolved)
         try {
           if (serialized) localStorage.setItem(messageStorageKey(s.id), serialized)
@@ -256,38 +232,20 @@ const ChatView = React.memo(function ChatView({ sessionId }: Props) {
       }).catch(error => {
         reportRuntimeError('恢复会话', error)
         if (!isCurrentLoadGeneration(loadGenerationRef.current[s.source], loadGeneration)) return
-        delete replayingSourcesRef.current[s.source]
+        controllerHandleRef.current?.clearReplay(s.source)
         createSession()  // Fallback
       })
     } else {
-      delete replayingSourcesRef.current[s.source]
+      controllerHandleRef.current?.clearReplay(s.source)
       createSession()
     }
   }, [sessionId])
 
   useEffect(() => {
-    const activeSources = new Set(sessions.map(session => session.source))
-    const knownSources = new Set([
-      ...Object.keys(messagesBySourceRef.current),
-      ...Object.keys(generationStartRef.current),
-      ...Object.keys(generationFramesRef.current),
-      ...Object.keys(loadGenerationRef.current),
-      ...Object.keys(replayingSourcesRef.current),
-      ...Object.keys(replayToolIdsRef.current),
-      ...Object.keys(cancelStateRef.current),
-    ])
-    for (const source of knownSources) {
-      if (!activeSources.has(source)) {
-        clearChatSourceRefs({
-          messagesBySource: messagesBySourceRef.current,
-          generationStart: generationStartRef.current,
-          generationFrames: generationFramesRef.current,
-          loadGeneration: loadGenerationRef.current,
-          replayingSources: replayingSourcesRef.current,
-          replayToolIds: replayToolIdsRef.current,
-          cancelState: cancelStateRef.current,
-        }, source)
-      }
+    const activeSources = sessions.map(session => session.source)
+    controllerHandleRef.current?.pruneSources(activeSources)
+    for (const source of Object.keys(loadGenerationRef.current)) {
+      if (!activeSources.includes(source)) delete loadGenerationRef.current[source]
     }
   }, [sessions, sessionId])
 
@@ -296,19 +254,6 @@ const ChatView = React.memo(function ChatView({ sessionId }: Props) {
     eventControllerRefs.current = {
       sessionRef,
       messageOwnerRef,
-      messagesBySourceRef,
-      generationStartRef,
-      generationFramesRef,
-      replayingSourcesRef,
-      replayToolIdsRef,
-      cancelStateRef,
-      streamingSourceRef,
-      streamingTextRef,
-      streamingThinkingRef,
-      thinkingStartRef,
-      flushStreamingRef,
-      genStartRef: genStart,
-      tokenCountRef: tokenCount,
       setMessages,
       setStreamingText,
       setStreamingThinking,
@@ -319,7 +264,13 @@ const ChatView = React.memo(function ChatView({ sessionId }: Props) {
     }
   }
   const controllerRefs = eventControllerRefs.current
-  useEffect(() => attachChatEventController(controllerRefs), [])
+  useEffect(() => {
+    controllerHandleRef.current = attachChatEventController(controllerRefs)
+    return () => {
+      controllerHandleRef.current?.dispose()
+      controllerHandleRef.current = null
+    }
+  }, [])
 
   useEffect(() => {
     const container = chatViewRef.current
@@ -418,9 +369,7 @@ const ChatView = React.memo(function ChatView({ sessionId }: Props) {
     const source = sessionRef.current
     const renderedSource = sessionRef.current
     if (!canPersistMessages({ ownerId, source, renderedSessionId: sessionId, renderedSource }) || messages.length === 0) return
-    const ownedSource = source as string
     const ownedSessionId = ownerId as string
-    messagesBySourceRef.current[ownedSource] = messages
     try { persistMessageSnapshot(ownedSessionId, messages, localStorage) } catch {}
   }, [messages, sessionId])
 
@@ -485,39 +434,15 @@ const ChatView = React.memo(function ChatView({ sessionId }: Props) {
         {streamingThinking && <StreamingThinking text={streamingThinking} />}
         {streamingText && <StreamingAssistantText text={streamingText} />}
         <GenerationFooter running={generating || browserMockPhase !== undefined}
-          frames={generationFramesRef.current[sessionRef.current || ''] || resolveSpinnerFrames(useStore.getState().spinnerFramePreset, useStore.getState().spinnerCustomFrames)}
-          tokenCount={browserMockPhase ? browserMockTokenCount : tokenCount.current}
-          startTime={browserMockPhase ? browserMockStart : genStart.current}
+          frames={controllerHandleRef.current?.getFrames(sessionRef.current || '') || resolveSpinnerFrames(useStore.getState().spinnerFramePreset, useStore.getState().spinnerCustomFrames)}
+          tokenCount={browserMockPhase ? browserMockTokenCount : (controllerHandleRef.current?.getTokenCount(sessionRef.current || '') ?? 0)}
+          startTime={browserMockPhase ? browserMockStart : (controllerHandleRef.current?.getStartTime(sessionRef.current || '') ?? Date.now())}
           lastTokenAt={browserMockPhase ? Date.now() : lastTokenAt}
           summary={summary}
           phase={browserMockPhase || generationPhase || undefined}
           onStop={generating ? () => {
             if (!sessionRef.current) return
-            const source = sessionRef.current
-            const currentCancelState = cancelStateRef.current[source] || { source, status: 'generating' as const }
-            const begun = beginCancel(source, currentCancelState)
-            if (!begun.shouldInvoke) return
-            cancelStateRef.current[source] = begun.state
-            invoke('cancel_prompt', { source }).then(() => {
-              // cancel_prompt 的返回只表示请求已被后端接受；但 UI 不能继续显示已知已经取消的生成。
-              // 后续 peri:error(cancelled=true) 到达时仍会再次收敛状态。
-              cancelStateRef.current[source] = applyCancelEvent(source, { kind: 'success' }, cancelStateRef.current[source] || begun.state)
-              const nextSources = removeGeneratingSource(useStore.getState().liveGeneratingSources || [], source)
-              useStore.getState().setLiveStats({
-                liveGeneratingSources: nextSources,
-                liveGenerating: nextSources[nextSources.length - 1] || null,
-              })
-              if (isRenderedSource(source, sessionRef.current)) {
-                flushStreamingRef.current?.(source)
-                const start = generationStartRef.current[source] || genStart.current
-                setSummary({ elapsedMs: Date.now() - start, tokenCount: tokenCount.current, completedFrame: '', reason: 'cancelled' })
-                setGenerationPhase(null)
-                setGenerating(false)
-              }
-            }).catch(error => {
-              cancelStateRef.current[source] = rejectCancelCommand(source, cancelStateRef.current[source] || begun.state, error)
-              reportRuntimeError('取消生成', error)
-            })
+            controllerHandleRef.current?.requestCancel(sessionRef.current)
           } : undefined} />
         <div ref={bottomRef} />
       </div>

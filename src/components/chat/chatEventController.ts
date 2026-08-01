@@ -1,40 +1,20 @@
 import type React from 'react'
+import { invoke } from '@tauri-apps/api/core'
 import { listen } from '@tauri-apps/api/event'
 import { useStore } from '../../store'
 import { resolveSpinnerFrames } from './spinnerFrames'
-import {
-  normalizeToolId,
-  resolveReplayEventMode,
-  resolveTerminationScope,
-  settleReplayToolMessages,
-  shouldAcceptToolCall,
-  shouldStartLiveGeneration,
-} from './replayState'
-import { clearMessageStorage, persistMessageSnapshot } from './messagePersistence'
-import { addGeneratingSource, isKnownSource, isRenderedSource, removeGeneratingSource, updateSourceState } from './sessionEventState'
 import { extractModelConfig, extractUsage, type PeriDonePayload, type PeriUpdatePayload } from './acpTypes'
-import { applyCancelEvent, createCancelState, type CancelState } from './cancelState'
-import { getToolSummary } from './toolPresentation'
-import { createMessageIdAllocator, type MessageIdAllocator } from './messageIdAllocator'
-import type { Message } from './messageTypes'
+import { clearMessageStorage, persistMessageSnapshot } from './messagePersistence'
+import { addGeneratingSource, removeGeneratingSource } from './sessionEventState'
+import { reportRuntimeError } from '../../runtimeError'
+import { applyChatEvent, createSourceChatRuntime, type ChatEvent, type ChatRuntimeState, type SourceChatRuntime } from './sessionRuntimeStore.ts'
+import { resolveLoadedMessages } from './replayState.ts'
+import type { Message } from './messageTypes.ts'
 import type { GenerationPhase, GenerationSummary } from './GenerationFooter'
 
 export interface ChatEventControllerRefs {
   sessionRef: React.RefObject<string | null>
   messageOwnerRef: React.RefObject<string | null>
-  messagesBySourceRef: React.RefObject<Record<string, Message[]>>
-  generationStartRef: React.RefObject<Record<string, number>>
-  generationFramesRef: React.RefObject<Record<string, string[]>>
-  replayingSourcesRef: React.RefObject<Record<string, Message[]>>
-  replayToolIdsRef: React.RefObject<Record<string, string[]>>
-  cancelStateRef: React.RefObject<Record<string, CancelState>>
-  streamingSourceRef: React.RefObject<string | null>
-  streamingTextRef: React.RefObject<string>
-  streamingThinkingRef: React.RefObject<string>
-  thinkingStartRef: React.RefObject<Record<string, number>>
-  flushStreamingRef: React.RefObject<((source: string) => void) | null>
-  genStartRef: React.RefObject<number>
-  tokenCountRef: React.RefObject<number>
   setMessages: React.Dispatch<React.SetStateAction<Message[]>>
   setStreamingText: React.Dispatch<React.SetStateAction<string>>
   setStreamingThinking: React.Dispatch<React.SetStateAction<string>>
@@ -44,123 +24,202 @@ export interface ChatEventControllerRefs {
   setLastTokenAt: React.Dispatch<React.SetStateAction<number>>
 }
 
-function formatToolInput(name: string, rawInput: unknown): string {
-  return getToolSummary(name, rawInput)
+export interface ChatControllerHandle {
+  /** 取消当前生成（footer 停止按钮）：begin-cancel → invoke → cancel-success/rejected */
+  requestCancel: (source: string) => void
+  /** 会话切换/恢复：注入本地缓存消息，返回当前有效消息（controller 内已有则优先） */
+  initSource: (source: string, cached: Message[]) => Message[]
+  /** load_persisted_session 成功后：replay 缓冲与缓存合并，清 replay 状态，返回最终消息 */
+  commitReplay: (source: string, cached: Message[]) => Message[]
+  /** load 失败 fallback：清 replay 状态，后续事件按 live 处理 */
+  clearReplay: (source: string) => void
+  /** 渲染期读取该 source 的 spinner 帧（user 事件后由接线层写入） */
+  getFrames: (source: string) => string[]
+  /** 渲染期读取该 source 的 token 计数（usage-update 维护） */
+  getTokenCount: (source: string) => number
+  /** 渲染期读取该 source 的生成起点（elapsed 显示用） */
+  getStartTime: (source: string) => number
+  /** 会话集合变化后清理孤儿 source 状态（替代 clearChatSourceRefs） */
+  pruneSources: (activeSources: readonly string[]) => void
+  dispose: () => void
 }
 
-function settleMessages(messages: Message[], completedAt: number): Message[] {
-  return messages.map(message => message.role === 'reasoning' && message.running
-    ? {
-        ...message,
-        running: false,
-        thoughtDurationMs: message.thoughtStartedAt ? Math.max(0, completedAt - message.thoughtStartedAt) : message.thoughtDurationMs,
-      }
-    : { ...message, running: false })
+function isRenderedSource(source: string, renderedSource: string | null): boolean {
+  return source.length > 0 && renderedSource === source
+}
+
+function isReplayScope(runtime: SourceChatRuntime | undefined): boolean {
+  return runtime?.replaying !== undefined
 }
 
 /**
- * 事件控制器：Tauri listeners、事件路由、message reducer、replay 与后台持久化。
- * 从 ChatView 抽出，保持行为不变；调用方以 `useEffect(() => attachChatEventController(refs), [])`
- * 挂载，返回值即 effect cleanup。本模块拥有自己的单调消息 ID allocator。
+ * 事件控制器（阶段 2 收敛版）：Tauri listeners → sessionRuntimeStore 纯 reducer →
+ * 副作用同步（渲染 setState / localStorage 持久化 / store live 状态 / frames / autoName）。
+ * 行为等价源：收敛前的 refs 版控制器（commit 927f963 之前）。
  */
-export function attachChatEventController(refs: ChatEventControllerRefs): () => void {
-  const messageIds: MessageIdAllocator = createMessageIdAllocator()
-  const isActiveSource = (source: string) => isKnownSource(source, useStore.getState().sessions.map(session => session.source))
-  const updateSourceMessages = (source: string, updater: (prev: Message[]) => Message[], replay = false) => {
-    if (!isActiveSource(source)) return
-    const next = replay
-      ? updateSourceState(refs.replayingSourcesRef.current, source, updater)
-      : updateSourceState(refs.messagesBySourceRef.current, source, updater)
-    if (replay) return
-    const session = useStore.getState().sessions.find(item => item.source === source)
-    if (session) {
-      // 写盘失败（如 localStorage 配额耗尽）不能中断事件流：事件 handler 后半段
-      // （startGenerating/setMessages 等）必须继续执行
-      try {
-        persistMessageSnapshot(session.id, next, localStorage)
-      } catch { /* 跳过本次持久化，内存态不受影响 */ }
-    }
-    if (isRenderedSource(source, refs.sessionRef.current)) refs.setMessages(next)
-  }
-  const flushStreaming = (source: string) => {
-    if (refs.streamingSourceRef.current !== source) return
-    const text = refs.streamingTextRef.current
-    const thinking = refs.streamingThinkingRef.current
-    const thoughtStartedAt = refs.thinkingStartRef.current[source]
-    const thoughtDurationMs = thoughtStartedAt ? Math.max(0, Date.now() - thoughtStartedAt) : undefined
-    if (text || thinking) {
-      updateSourceMessages(source, previous => [
-        ...previous,
-        ...(thinking ? [{ id: messageIds.next('thought'), role: 'reasoning' as const, sender: 'peri', content: thinking, time: new Date().toLocaleTimeString(), running: false, thoughtStartedAt, thoughtDurationMs }] : []),
-        ...(text ? [{ id: messageIds.next('msg'), role: 'assistant' as const, sender: 'peri', content: text, time: new Date().toLocaleTimeString(), running: false }] : []),
-      ])
-    }
-    delete refs.thinkingStartRef.current[source]
-    refs.streamingSourceRef.current = null
-    refs.streamingTextRef.current = ''
-    refs.streamingThinkingRef.current = ''
-    if (isRenderedSource(source, refs.sessionRef.current)) {
-      refs.setStreamingText('')
-      refs.setStreamingThinking('')
-    }
-  }
-  refs.flushStreamingRef.current = flushStreaming
-  const startGenerating = (source: string) => {
-    const current = useStore.getState().liveGeneratingSources || []
-    const next = addGeneratingSource(current, source)
-    if (next !== current) {
-      useStore.getState().setLiveStats({
-        liveGeneratingSources: next,
-        liveGenerating: source,
-      })
-    }
-  }
-  const stopGenerating = (source: string) => {
-    const next = removeGeneratingSource(useStore.getState().liveGeneratingSources || [], source)
-    useStore.getState().setLiveStats({
-      liveGeneratingSources: next,
-      liveGenerating: next[next.length - 1] || null,
+export function attachChatEventController(refs: ChatEventControllerRefs): ChatControllerHandle {
+  let runtimeState: ChatRuntimeState = {}
+  const knownSources = () => useStore.getState().sessions.map(session => session.source)
+  const isActiveSource = (source: string) => source.length > 0 && knownSources().includes(source)
+  const renderedSource = () => refs.sessionRef.current
+
+  const dispatch = (event: ChatEvent) => {
+    const before = runtimeState
+    const after = applyChatEvent(before, event, {
+      knownSources: knownSources(),
+      renderedSource: renderedSource(),
+      now: Date.now(),
     })
+    if (after === before) return
+    runtimeState = after
+    syncSideEffects(before, after, event)
+  }
+
+  /** 渲染态同步：rendered source 的消息/流式/生成态/summary 变化 → setState */
+  const syncRendered = (prev: SourceChatRuntime | undefined, next: SourceChatRuntime | undefined) => {
+    if (!next) return
+    if (prev?.messages !== next.messages) refs.setMessages(next.messages)
+    if ((prev?.streamingText ?? '') !== next.streamingText) refs.setStreamingText(next.streamingText)
+    if ((prev?.streamingThinking ?? '') !== next.streamingThinking) refs.setStreamingThinking(next.streamingThinking)
+    if ((prev?.generating ?? false) !== next.generating) refs.setGenerating(next.generating)
+    const prevSummary = prev?.lastSummary
+    const nextSummary = next.lastSummary
+    if (prevSummary !== nextSummary) {
+      // 终态收敛（done/error/cancel-success 生成 summary）时同步清空阶段标记
+      if (prevSummary === undefined && nextSummary !== undefined) refs.setGenerationPhase(null)
+      refs.setSummary(nextSummary
+        ? { elapsedMs: nextSummary.elapsedMs, tokenCount: nextSummary.tokenCount, completedFrame: '', reason: nextSummary.reason }
+        : null)
+    }
+  }
+
+  /** 持久化：live 路径（非 replay scope）且消息数组变化时写盘（失败静默，不中断事件流） */
+  const syncPersistence = (source: string, prev: SourceChatRuntime | undefined, next: SourceChatRuntime | undefined) => {
+    if (!next || isReplayScope(next)) return
+    if (prev?.messages === next.messages) return
+    const session = useStore.getState().sessions.find(item => item.source === source)
+    if (!session) return
+    try {
+      persistMessageSnapshot(session.id, next.messages, localStorage)
+    } catch { /* 跳过本次持久化，内存态不受影响 */ }
+  }
+
+  /** store 同步：generating 变化 → liveGeneratingSources 增删 */
+  const syncGenerating = (source: string, prev: SourceChatRuntime | undefined, next: SourceChatRuntime | undefined) => {
+    const prevGenerating = prev?.generating ?? false
+    const nextGenerating = next?.generating ?? false
+    if (prevGenerating === nextGenerating) return
+    const store = useStore.getState()
+    if (nextGenerating) {
+      const current = store.liveGeneratingSources || []
+      const nextList = addGeneratingSource(current, source)
+      if (nextList !== current) {
+        store.setLiveStats({ liveGeneratingSources: nextList, liveGenerating: source })
+      }
+    } else {
+      const nextList = removeGeneratingSource(store.liveGeneratingSources || [], source)
+      store.setLiveStats({ liveGeneratingSources: nextList, liveGenerating: nextList[nextList.length - 1] || null })
+    }
+  }
+
+  const syncSideEffects = (before: ChatRuntimeState, after: ChatRuntimeState, event: ChatEvent) => {
+    const source = event.source
+    const prev = before[source]
+    const next = after[source]
+    if (isRenderedSource(source, renderedSource())) syncRendered(prev, next)
+    syncPersistence(source, prev, next)
+    syncGenerating(source, prev, next)
+  }
+
+  /** user 事件后接线层补充：spinner 帧（依赖主题域，reducer 不持有） */
+  const resolveFrames = () => {
+    const state = useStore.getState()
+    return resolveSpinnerFrames(state.spinnerFramePreset, state.spinnerCustomFrames)
+  }
+
+  const requestCancel = (source: string) => {
+    dispatch({ type: 'begin-cancel', source })
+    invoke('cancel_prompt', { source }).then(() => {
+      // 取消失败/成功均由 reducer 收敛；liveGenerating 清理走 syncGenerating
+      dispatch({ type: 'cancel-success', source })
+    }).catch(error => {
+      dispatch({ type: 'cancel-rejected', source, error: error instanceof Error ? error.message : String(error) })
+      reportRuntimeError('取消生成', error)
+    })
+  }
+
+  const initSource = (source: string, cached: Message[]): Message[] => {
+    const existing = runtimeState[source]
+    if (existing) return existing.messages
+    runtimeState = {
+      ...runtimeState,
+      [source]: {
+        ...createSourceChatRuntime(source),
+        messages: cached.map(message => ({ ...message, running: false })),
+      },
+    }
+    return runtimeState[source].messages
+  }
+
+  const commitReplay = (source: string, cached: Message[]): Message[] => {
+    const existing = runtimeState[source]
+    const replayed = existing?.replaying ?? []
+    const resolved = resolveLoadedMessages({ loadSucceeded: true, cached, replayed })
+    const base = existing
+      ? { ...existing, replaying: undefined, replayToolIds: [], messages: resolved }
+      : { ...createSourceChatRuntime(source), messages: resolved }
+    runtimeState = { ...runtimeState, [source]: base }
+    return resolved
+  }
+
+  const clearReplay = (source: string) => {
+    const existing = runtimeState[source]
+    if (!existing) return
+    runtimeState = {
+      ...runtimeState,
+      [source]: { ...existing, replaying: undefined, replayToolIds: [] },
+    }
+  }
+
+  const getFrames = (source: string): string[] => runtimeState[source]?.generationFrames ?? []
+
+  const getTokenCount = (source: string): number => runtimeState[source]?.tokenCount ?? 0
+
+  const getStartTime = (source: string): number => runtimeState[source]?.generationStart ?? Date.now()
+
+  const pruneSources = (activeSources: readonly string[]) => {
+    const active = new Set(activeSources)
+    const next: ChatRuntimeState = {}
+    let changed = false
+    for (const [source, runtime] of Object.entries(runtimeState)) {
+      if (active.has(source)) next[source] = runtime
+      else changed = true
+    }
+    if (changed) runtimeState = next
   }
 
   const unlisten = Promise.all([
     listen<{ source: string; content: string; replay?: boolean }>('peri:user', (event) => {
       const { source, content, replay: eventReplay = false } = event.payload
       if (!isActiveSource(source)) return
-      const replayMode = resolveReplayEventMode({
+      dispatch({
+        type: 'user',
+        source,
+        content,
         eventReplay,
-        loadInProgress: refs.replayingSourcesRef.current[source] !== undefined,
+        loadInProgress: isReplayScope(runtimeState[source]),
       })
-      const replay = replayMode !== 'live'
-      const update = (prev: Message[]) => [
-        ...prev.map(m => ({ ...m, running: false })),
-        { id: messageIds.next('user'), role: 'user' as const, sender: source, content, time: new Date().toLocaleTimeString() },
-      ]
-      if (replay && !refs.replayingSourcesRef.current[source]) refs.replayingSourcesRef.current[source] = []
-      updateSourceMessages(source, update, replay)
-      if (!shouldStartLiveGeneration({ replay })) return
-      refs.generationStartRef.current[source] = Date.now()
-      const spinnerState = useStore.getState()
-      refs.generationFramesRef.current[source] = resolveSpinnerFrames(spinnerState.spinnerFramePreset, spinnerState.spinnerCustomFrames)
-      startGenerating(source)
-      refs.cancelStateRef.current[source] = { source, status: 'generating' }
-      if (isRenderedSource(source, refs.sessionRef.current)) {
-        refs.genStartRef.current = refs.generationStartRef.current[source]
-        refs.tokenCountRef.current = 0
-        refs.setGenerating(true)
-        refs.setLastTokenAt(Date.now())
-        refs.setSummary(null)
-        refs.setGenerationPhase({ kind: 'thinking' })
-        refs.streamingSourceRef.current = source
-        refs.streamingTextRef.current = ''
-        refs.streamingThinkingRef.current = ''
-        refs.setStreamingText('')
-        refs.setStreamingThinking('')
+      // reducer 已在 user 事件内启动生成（live）；接线层补 frames 与 UI 相位
+      const next = runtimeState[source]
+      if (next?.generating) {
+        runtimeState = { ...runtimeState, [source]: { ...next, generationFrames: resolveFrames() } }
+        if (isRenderedSource(source, renderedSource())) {
+          refs.setLastTokenAt(Date.now())
+          refs.setGenerationPhase({ kind: 'thinking' })
+        }
       }
-
       const store = useStore.getState()
-      const sessions = store.sessions
-      const s = sessions.find(s => s.source === source)
+      const s = store.sessions.find(session => session.source === source)
       if (s?.name.startsWith('session-')) {
         const autoName = content.slice(0, 30)
         store.updateSession(s.id, { autoName, name: autoName })
@@ -169,89 +228,40 @@ export function attachChatEventController(refs: ChatEventControllerRefs): () => 
 
     listen<PeriUpdatePayload>('peri:update', (event) => {
       const source = event.payload.source
-      if (!isActiveSource(source)) return
       const upd = event.payload?.update
-      if (!source || !upd) return
+      if (!isActiveSource(source) || !source || !upd) return
       const variant = upd.sessionUpdate
-      const replayMode = resolveReplayEventMode({
-        eventReplay: upd._meta?.periReplay === true,
-        loadInProgress: refs.replayingSourcesRef.current[source] !== undefined,
-      })
-      const replay = replayMode !== 'live'
-      if (replay && !refs.replayingSourcesRef.current[source]) refs.replayingSourcesRef.current[source] = []
+      const replay = upd._meta?.periReplay === true || isReplayScope(runtimeState[source])
+      const rendered = isRenderedSource(source, renderedSource())
       switch (variant) {
         case 'agent_message_chunk': {
           const text = upd.content?.text || ''
           if (!text) return
-          if (!replay && isRenderedSource(source, refs.sessionRef.current)) {
-            refs.streamingSourceRef.current = source
-            refs.setGenerationPhase({ kind: 'responding' })
-            refs.streamingTextRef.current += text
-            refs.setLastTokenAt(Date.now())
-            refs.setStreamingText(refs.streamingTextRef.current)
-            break
-          }
-          updateSourceMessages(source, prev => {
-            const last = prev[prev.length - 1]
-            if (last?.role === 'assistant' && last.running) {
-              return prev.map((m, i) => i === prev.length - 1 ? { ...m, content: m.content + text } : m)
-            }
-            return [...prev, { id: messageIds.next('msg'), role: 'assistant', sender: 'peri', content: text, time: new Date().toLocaleTimeString(), running: !replay }]
-          }, replay)
+          if (rendered) refs.setLastTokenAt(Date.now())
+          if (!replay && rendered) refs.setGenerationPhase({ kind: 'responding' })
+          dispatch({ type: 'message-chunk', source, text, replay })
           break
         }
         case 'agent_thought_chunk': {
           const text = upd.content?.text || ''
           if (!text) return
-          const thoughtStartedAt = refs.thinkingStartRef.current[source] ?? Date.now()
-          refs.thinkingStartRef.current[source] = thoughtStartedAt
-          if (!replay && isRenderedSource(source, refs.sessionRef.current)) {
-            refs.streamingSourceRef.current = source
-            refs.setGenerationPhase({ kind: 'thinking' })
-            refs.streamingThinkingRef.current += text
-            refs.setLastTokenAt(Date.now())
-            refs.setStreamingThinking(refs.streamingThinkingRef.current)
-            break
-          }
-          updateSourceMessages(source, prev => {
-            const last = prev[prev.length - 1]
-            if (last?.role === 'reasoning' && last.running) {
-              return prev.map((m, i) => i === prev.length - 1 ? { ...m, content: m.content + text } : m)
-            }
-            return [...prev, { id: messageIds.next('thought'), role: 'reasoning', sender: 'peri', content: text, time: new Date().toLocaleTimeString(), running: !replay, thoughtStartedAt }]
-          }, replay)
+          if (rendered) refs.setLastTokenAt(Date.now())
+          if (!replay && rendered) refs.setGenerationPhase({ kind: 'thinking' })
+          dispatch({ type: 'thought-chunk', source, text, replay })
           break
         }
         case 'tool_call': {
-          if (!replay) flushStreaming(source)
-          if (isRenderedSource(source, refs.sessionRef.current)) refs.setGenerationPhase({ kind: 'tool', name: upd.title || '?' })
-          const rawInput = upd.rawInput
-          const toolId = normalizeToolId(upd.toolCallId)
-          if (replay && !shouldAcceptToolCall(toolId, refs.replayToolIdsRef.current[source] || [])) break
-          if (replay && toolId) refs.replayToolIdsRef.current[source] = [...(refs.replayToolIdsRef.current[source] || []), toolId]
-          const title = upd.title || '?'
-          const inputStr = formatToolInput(title, rawInput) || (typeof rawInput === 'string' ? rawInput.slice(0, 80) : '')
-          updateSourceMessages(source, prev => [...prev, {
-            id: 'tool-' + (toolId || messageIds.next('tool-missing')), role: 'tool', sender: 'tool:' + title, content: '', time: new Date().toLocaleTimeString(),
-            toolName: title, toolInput: inputStr, running: true,
-          }], replay)
+          if (!replay && rendered) refs.setGenerationPhase({ kind: 'tool', name: upd.title || '?' })
+          dispatch({ type: 'tool-call', source, toolCallId: upd.toolCallId, title: upd.title, rawInput: upd.rawInput, replay })
           break
         }
-        case 'tool_call_update': {
-          const rawOutput = upd.rawOutput
-          const toolId = normalizeToolId(upd.toolCallId)
-          if (!toolId) break
-          const outputStr = typeof rawOutput === 'string' ? rawOutput : JSON.stringify(rawOutput, null, 2)
-          const lines = outputStr ? outputStr.split(/\n/).filter((l: string) => l.trim()).length : 0
-          updateSourceMessages(source, prev => prev.map(m => m.id === 'tool-' + toolId && m.running
-            ? { ...m, toolOutput: outputStr, toolOutputLines: lines, toolStatus: upd.status, running: false }
-            : m), replay)
+        case 'tool_call_update':
+          dispatch({ type: 'tool-call-update', source, toolCallId: upd.toolCallId, rawOutput: upd.rawOutput, status: upd.status, replay })
           break
-        }
         case 'usage_update': {
           const usage = extractUsage(upd)
           useStore.getState().setSessionLiveStats(source, usage)
-          if (isRenderedSource(source, refs.sessionRef.current)) refs.tokenCountRef.current = usage.tokensUsed
+          dispatch({ type: 'usage-update', source, tokensUsed: usage.tokensUsed })
           break
         }
         case 'available_commands_update':
@@ -277,56 +287,18 @@ export function attachChatEventController(refs: ChatEventControllerRefs): () => 
 
     listen<PeriDonePayload>('peri:done', (event) => {
       const source = event.payload.source
-      if (!isActiveSource(source)) return
-      if (!source) return
-      const replay = refs.replayingSourcesRef.current[source] !== undefined
-      const terminationScope = resolveTerminationScope(replay, event.payload.replay === true)
-      if (terminationScope === 'live') {
-        stopGenerating(source)
-        flushStreaming(source)
-        if (isRenderedSource(source, refs.sessionRef.current)) {
-          const start = refs.generationStartRef.current[source] || refs.genStartRef.current
-          const elapsedMs = Date.now() - start
-          refs.setSummary({ elapsedMs, tokenCount: refs.tokenCountRef.current, completedFrame: '', reason: 'done' })
-          refs.setGenerationPhase(null)
-          refs.setGenerating(false)
-        }
-      }
-      updateSourceMessages(source, prev => settleReplayToolMessages(settleMessages(prev, Date.now())), replay)
+      if (!isActiveSource(source) || !source) return
+      const replayScope = isReplayScope(runtimeState[source])
+      const replay = replayScope || event.payload.replay === true
+      dispatch({ type: 'done', source, replay, explicitReplay: replayScope ? undefined : event.payload.replay === true })
     }),
 
     listen<{ source: string; error: string; cancelled?: boolean; replay?: boolean }>('peri:error', (event) => {
       const { source, error } = event.payload
-      if (!isActiveSource(source)) return
-      if (!source) return
-      const replay = refs.replayingSourcesRef.current[source] !== undefined
-      const terminationScope = resolveTerminationScope(replay, event.payload.replay === true)
-      const cancelState = refs.cancelStateRef.current[source] || createCancelState(source)
-      const cancellationFailed = terminationScope === 'live'
-        && cancelState.status === 'canceling'
-        && event.payload.cancelled !== true
-      if (terminationScope === 'live') {
-        refs.cancelStateRef.current[source] = applyCancelEvent(
-          source,
-          event.payload.cancelled === true
-            ? { kind: 'success' }
-            : { kind: 'error', error },
-          cancelState,
-        )
-        // 取消失败也移除 generating 源：若后端不再发任何事件，不能把 liveGeneratingSources 悬挂。
-        // streaming 与 summary 仍只在该事件可正常收敛时处理，避免把"仍在生成"误判为结束。
-        stopGenerating(source)
-      }
-      if (terminationScope === 'live' && !cancellationFailed) flushStreaming(source)
-      updateSourceMessages(source, prev => [...settleReplayToolMessages(settleMessages(prev, Date.now())), {
-        id: messageIds.next('err'), role: 'assistant', sender: 'system', content: error, time: new Date().toLocaleTimeString(),
-      }], replay)
-      if (terminationScope === 'live' && !cancellationFailed && isRenderedSource(source, refs.sessionRef.current)) {
-        const start = refs.generationStartRef.current[source] || refs.genStartRef.current
-        refs.setSummary({ elapsedMs: Date.now() - start, tokenCount: refs.tokenCountRef.current, completedFrame: '', reason: event.payload.cancelled === true ? 'cancelled' : 'error' })
-        refs.setGenerationPhase(null)
-        refs.setGenerating(false)
-      }
+      if (!isActiveSource(source) || !source) return
+      const replayScope = isReplayScope(runtimeState[source])
+      const replay = replayScope || event.payload.replay === true
+      dispatch({ type: 'error', source, error, cancelled: event.payload.cancelled === true, replay, explicitReplay: replayScope ? undefined : event.payload.replay === true })
     }),
   ])
 
@@ -336,16 +308,23 @@ export function attachChatEventController(refs: ChatEventControllerRefs): () => 
     if (!source || !ownerId) return
     const session = useStore.getState().sessions.find(item => item.id === ownerId && item.source === source)
     if (!session) return
-    refs.messagesBySourceRef.current[source] = []
     clearMessageStorage(session.id, localStorage)
-    refs.setMessages([])
-    refs.setSummary(null)
+    dispatch({ type: 'clear', source })
   }
   window.addEventListener('peri:clear', handleClear)
 
-  return () => {
-    refs.flushStreamingRef.current = null
-    unlisten.then(fns => fns.forEach(f => f()))
-    window.removeEventListener('peri:clear', handleClear)
+  return {
+    requestCancel,
+    initSource,
+    commitReplay,
+    clearReplay,
+    getFrames,
+    getTokenCount,
+    getStartTime,
+    pruneSources,
+    dispose: () => {
+      unlisten.then(fns => fns.forEach(f => f()))
+      window.removeEventListener('peri:clear', handleClear)
+    },
   }
 }
