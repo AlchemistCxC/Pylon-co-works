@@ -8,7 +8,9 @@
     "build": "tsc -b && vite build",
     "preview": "vite preview",
     "tauri": "tauri",
-    "test:frontend": "node --experimental-strip-types scripts/run-frontend-tests.mts"
+    "test": "vitest run",
+    "test:frontend": "vitest run",
+    "test:legacy": "node --experimental-strip-types scripts/run-frontend-tests.mts"
   },
   "dependencies": {
     "@dnd-kit/core": "^6.3.1",
@@ -33,7 +35,6 @@
     "lucide-react": "^1.26.0",
     "motion": "^12.42.2",
     "react": "^19",
-    "react-diff-viewer": "^3.1.1",
     "react-dom": "^19",
     "react-dropzone": "^19.1.1",
     "react-markdown": "^10.1.0",
@@ -47,6 +48,7 @@
     "@types/react-dom": "^19",
     "@vitejs/plugin-react": "^4",
     "typescript": "^5",
-    "vite": "^6"
+    "vite": "^6",
+    "vitest": "^4.1.10"
   }
 }
