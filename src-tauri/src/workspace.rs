@@ -10,37 +10,30 @@ pub const DEFAULT_PREVIEW_BYTES: usize = 256 * 1024;
 pub const MAX_PREVIEW_BYTES: usize = 1024 * 1024;
 pub const MAX_DIRECTORY_ENTRIES: usize = 1000;
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+/// R5b：Display/Error 改 thiserror derive（与手写 impl 文案逐字一致——
+/// 每个变体输出 `code: message`，`Io` 变体**保留原行为**：内部 String 不参与
+/// Display（wire 文案恒为 "io_error: 工作区 I/O 操作失败"），勿改成 {0}）。
+#[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
 pub enum WorkspaceError {
+    #[error("absolute_path_rejected: 不允许使用绝对路径")]
     AbsolutePathRejected,
+    #[error("traversal_rejected: 不允许路径穿越")]
     TraversalRejected,
+    #[error("outside_root: 路径位于工作区之外")]
     OutsideRoot,
+    #[error("not_found: 路径不存在")]
     NotFound,
+    #[error("not_readable: 路径不可读取")]
     NotReadable,
+    #[error("not_file: 路径不是文件")]
     NotFile,
+    #[error("binary_file: 文件不是可预览的 UTF-8 文本")]
     BinaryFile,
+    #[error("too_many_entries: 目录条目超过限制")]
     TooManyEntries,
+    #[error("io_error: 工作区 I/O 操作失败")]
     Io(String),
 }
-
-impl std::fmt::Display for WorkspaceError {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        let (code, message) = match self {
-            Self::AbsolutePathRejected => ("absolute_path_rejected", "不允许使用绝对路径"),
-            Self::TraversalRejected => ("traversal_rejected", "不允许路径穿越"),
-            Self::OutsideRoot => ("outside_root", "路径位于工作区之外"),
-            Self::NotFound => ("not_found", "路径不存在"),
-            Self::NotReadable => ("not_readable", "路径不可读取"),
-            Self::NotFile => ("not_file", "路径不是文件"),
-            Self::BinaryFile => ("binary_file", "文件不是可预览的 UTF-8 文本"),
-            Self::TooManyEntries => ("too_many_entries", "目录条目超过限制"),
-            Self::Io(_) => ("io_error", "工作区 I/O 操作失败"),
-        };
-        write!(f, "{code}: {message}")
-    }
-}
-
-impl std::error::Error for WorkspaceError {}
 
 fn normalize_relative(relative: &str) -> Result<PathBuf, WorkspaceError> {
     if relative.trim().is_empty() {
@@ -238,5 +231,20 @@ mod tests {
         assert!(preview.truncated);
         fs::write(root.join("binary.bin"), [1u8, 0, 2]).unwrap();
         assert_eq!(read_text(&root, "binary.bin", None), Err(WorkspaceError::BinaryFile));
+    }
+
+    #[test]
+    fn workspace_error_display_is_stable() {
+        // R5b 契约锁定：Display 文案（code: message）与手写 impl 逐字一致。
+        assert_eq!(WorkspaceError::AbsolutePathRejected.to_string(), "absolute_path_rejected: 不允许使用绝对路径");
+        assert_eq!(WorkspaceError::TraversalRejected.to_string(), "traversal_rejected: 不允许路径穿越");
+        assert_eq!(WorkspaceError::OutsideRoot.to_string(), "outside_root: 路径位于工作区之外");
+        assert_eq!(WorkspaceError::NotFound.to_string(), "not_found: 路径不存在");
+        assert_eq!(WorkspaceError::NotReadable.to_string(), "not_readable: 路径不可读取");
+        assert_eq!(WorkspaceError::NotFile.to_string(), "not_file: 路径不是文件");
+        assert_eq!(WorkspaceError::BinaryFile.to_string(), "binary_file: 文件不是可预览的 UTF-8 文本");
+        assert_eq!(WorkspaceError::TooManyEntries.to_string(), "too_many_entries: 目录条目超过限制");
+        // Io 变体：内部 String 不参与 Display（历史契约，勿改）
+        assert_eq!(WorkspaceError::Io("detail".into()).to_string(), "io_error: 工作区 I/O 操作失败");
     }
 }
