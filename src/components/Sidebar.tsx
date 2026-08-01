@@ -27,7 +27,6 @@ export default function Sidebar({ activeSession, onSelectSession, onProfileEdit,
   const addSession = useIdentityStore(s => s.addSession)
   const removeSession = useIdentityStore(s => s.removeSession)
   const updateSession = useIdentityStore(s => s.updateSession)
-  const activeProfile = profiles.find(p => p.id === activeProfileId)
 
   // filter 在 memo 内：sessions/activeProfileId 变化时才重算，避免每次渲染新数组引用让 memo 失效
   const groups = useMemo(() => {

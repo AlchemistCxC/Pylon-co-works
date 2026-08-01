@@ -14,16 +14,3 @@ export async function runAgentSwitchTransaction({ switchAgent, onSuccess, onErro
     return false
   }
 }
-
-export interface AgentActivationOptions extends AgentSwitchTransactionOptions {
-  targetAgentId: string
-  activeAgentId: string
-}
-
-export async function activateAgent({ targetAgentId, activeAgentId, ...options }: AgentActivationOptions): Promise<boolean> {
-  if (!targetAgentId || targetAgentId === activeAgentId) {
-    options.onSuccess()
-    return true
-  }
-  return runAgentSwitchTransaction(options)
-}

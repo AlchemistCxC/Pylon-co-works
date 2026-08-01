@@ -26,7 +26,3 @@ export function resolveFrameIndex({ frameCount, elapsedMs, intervalMs, motion, d
     : indexInCycle
   return reverse ? frameCount - 1 - index : index
 }
-
-export function resolveReducedMotionFrame(frames: string[], marker = ''): string {
-  return marker.trim() || frames[0] || ''
-}

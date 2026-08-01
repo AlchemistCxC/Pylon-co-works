@@ -176,13 +176,13 @@ export const useIdentityStore = create<IdentityStoreState>()((set, get) => ({
     }
   },
   getUser: (source) => get().users.find(u => u.id === source),
-  setAgents: (a) => set(state => {
+  setAgents: (a) => set(() => {
     // 联动：Agent 列表变化时按新列表重载 sheets
     const workspaceSheets = loadSheetState(localStorage, a.map(agent => agent.id))
     useWorkspaceStore.getState().replaceSheets(workspaceSheets, workspaceSheets.agentStates)
     return { agents: a }
   }),
-  setActiveAgent: (id) => set(state => {
+  setActiveAgent: (id) => set(() => {
     const agentState = useWorkspaceStore.getState().sheetAgentStates[id]
     return {
       activeAgent: id,

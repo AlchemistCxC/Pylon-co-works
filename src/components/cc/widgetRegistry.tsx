@@ -5,8 +5,6 @@ import { useRuntimeStore } from '../../runtimeStore'
 import InputBar from '../chat/InputBar'
 import ModelWidget from '../chat/ModelWidget'
 import ModeWidget from '../chat/ModeWidget'
-import SendWidget from '../chat/SendWidget'
-import AttachWidget from '../chat/AttachWidget'
 import { formatCacheReadTokens, formatTokenCount } from '../../tokenFormat'
 import { emptySessionLiveStats } from '../chat/sessionRuntime'
 import type { SessionLiveStats } from '../chat/sessionRuntime'
@@ -116,7 +114,3 @@ export const CC_WIDGET_REGISTRY: readonly CcWidgetDef[] = [
   { id: 'send', label: '发送按钮', category: 'action', defaultPlacement: placement('actions', 0), naturalSize: true, render: () => null },
   { id: 'attach', label: '附件按钮', category: 'action', defaultPlacement: placement('actions', 1), naturalSize: true, render: () => null },
 ]
-
-export function getCcWidgetDef(id: string): CcWidgetDef | undefined {
-  return CC_WIDGET_REGISTRY.find(widget => widget.id === id)
-}

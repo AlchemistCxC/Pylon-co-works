@@ -16,7 +16,6 @@ interface AgentSheetViewProps {
 }
 
 export default function AgentSheetView({
-  sheet,
   activeSession,
   onSelectSession,
   onProfileEdit,

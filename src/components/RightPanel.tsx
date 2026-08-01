@@ -31,12 +31,10 @@ export default function RightPanel({ sessionId, onClose }: RightPanelProps) {
   const [logsState, setLogsState] = useState<LogsViewState>(() => (
     createLogsViewState(sessionSource ? { sessionId: sessionId as string, source: sessionSource } : null)
   ))
-  const [textPreview, setTextPreview] = useState<import('./right-panel/rightPanelTypes').WorkspaceTextPreview | null>(null)
   const requestGeneration = useRef(0)
 
   useEffect(() => {
     setWorkspaceState(createWorkspaceViewState(sessionSource))
-    setTextPreview(null)
     requestGeneration.current += 1
   }, [sessionSource])
 
@@ -115,7 +113,7 @@ export default function RightPanel({ sessionId, onClose }: RightPanelProps) {
         if (generation !== requestGeneration.current) return
         const normalized = normalizeWorkspaceText(payload)
         if (!normalized) throw new Error('工作区文本响应格式无效')
-        setTextPreview(normalized)
+        setWorkspaceState(state => transitionWorkspaceView(state, { type: 'loaded-text', text: normalized }))
       })
       .catch(error => {
         if (generation !== requestGeneration.current) return
@@ -125,6 +123,12 @@ export default function RightPanel({ sessionId, onClose }: RightPanelProps) {
         }))
       })
   }
+  // 文本预览真值唯一来源：视图状态机的 selectedText（loaded-text 事件写入），
+  // 不再与本地 state 双份维护
+  const selectedText = workspaceState.status === 'ready' || workspaceState.status === 'error'
+    ? workspaceState.selectedText
+    : undefined
+
   return (
     <aside className="right-panel">
       <div className="right-header">
@@ -146,13 +150,13 @@ export default function RightPanel({ sessionId, onClose }: RightPanelProps) {
               onExpand={expandWorkspace}
               onRead={readWorkspaceText}
             />
-            {textPreview && (
+            {selectedText && (
               <section className="workspace-text-preview" aria-label="文件内容预览">
                 <div className="workspace-text-preview-header">
-                  <strong>{textPreview.relativePath}</strong>
-                  <span>{textPreview.bytesRead}/{textPreview.totalBytes} bytes{ textPreview.truncated ? ' · 已截断' : '' }</span>
+                  <strong>{selectedText.relativePath}</strong>
+                  <span>{selectedText.bytesRead}/{selectedText.totalBytes} bytes{ selectedText.truncated ? ' · 已截断' : '' }</span>
                 </div>
-                <pre>{textPreview.content}</pre>
+                <pre>{selectedText.content}</pre>
               </section>
             )}
           </>
