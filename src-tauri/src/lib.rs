@@ -18,6 +18,7 @@ mod prism_cmds;
 mod runtime;
 mod runtime_log;
 mod session;
+mod time;
 mod workspace;
 mod workspace_cmds;
 
@@ -35,6 +36,8 @@ use runtime::{AgentRuntime, AgentRuntimeManager};
 
 #[cfg(test)]
 use error::PylonError;
+#[cfg(test)]
+use crate::time::Timestamp;
 
 #[cfg(test)]
 use agent_runtime::{
@@ -172,7 +175,7 @@ impl AppStateHandles {
         message: &str,
         fields: serde_json::Map<String, serde_json::Value>,
     ) {
-        self.runtime_logs.push(runtime_log::timestamp(), level, source, session, message, fields);
+        self.runtime_logs.push(crate::time::Timestamp::now(), level, source, session, message, fields);
     }
 
     fn set_agent_runtime_status(&self, runtime: &AgentRuntime, status: AgentLifecycleStatus, last_error: Option<String>) {
@@ -180,7 +183,7 @@ impl AppStateHandles {
             runtime.status = status;
             runtime.last_error = last_error;
             if status == AgentLifecycleStatus::Connected {
-                runtime.last_connected_at = Some(runtime_log::timestamp());
+                runtime.last_connected_at = Some(crate::time::Timestamp::now());
             }
         }
     }
@@ -437,7 +440,7 @@ mod session_info_tests {
         let runtime = AgentRuntimeState {
             status: AgentLifecycleStatus::Connected,
             last_error: None,
-            last_connected_at: Some("ts".into()),
+            last_connected_at: Some(Timestamp::new(1)),
         };
         let entries = vec![("agent-x".to_string(), sessions, runtime)];
         let payload = build_full_inspector_payload(&entries, "agent-x");
@@ -477,7 +480,7 @@ mod session_info_tests {
         let state_a = AgentRuntimeState {
             status: AgentLifecycleStatus::Connected,
             last_error: None,
-            last_connected_at: Some("t1".into()),
+            last_connected_at: Some(Timestamp::new(1)),
         };
         let state_b = AgentRuntimeState {
             status: AgentLifecycleStatus::Crashed,
@@ -504,29 +507,29 @@ mod session_info_tests {
 
     #[test]
     fn session_expiry_idle_threshold_and_off_mode() {
-        let now = "1722500000000";
+        let now = Timestamp::new(1722500000000);
         // idle：超过阈值过期
         assert_eq!(
-            session_expired(Some("1722490000000"), now, "idle", 30).as_deref(),
+            session_expired(Some(Timestamp::new(1722490000000)), now, "idle", 30).as_deref(),
             Some("超过 30 分钟无活动")
         );
         // 31 分钟前（1860000ms）应过期
-        assert!(session_expired(Some("1722498140000"), now, "idle", 30).is_some(), "31 分钟前应过期");
+        assert!(session_expired(Some(Timestamp::new(1722498140000)), now, "idle", 30).is_some(), "31 分钟前应过期");
         // 1 分钟内未过期
-        assert!(session_expired(Some("1722499900000"), now, "idle", 30).is_none(), "1 分钟内未过期");
+        assert!(session_expired(Some(Timestamp::new(1722499900000)), now, "idle", 30).is_none(), "1 分钟内未过期");
         // off：永不过期
-        assert_eq!(session_expired(Some("1"), now, "off", 1), None);
+        assert_eq!(session_expired(Some(Timestamp::new(1)), now, "off", 1), None);
         // updated_at 缺失：保守不过期
         assert_eq!(session_expired(None, now, "idle", 1), None);
     }
 
     #[test]
     fn session_expiry_daily_mode_compares_calendar_day() {
-        let now = "1722500000000"; // 某日
-        assert!(session_expired(Some("1722400000000"), now, "daily", 0).is_some(), "跨天应过期");
-        assert!(session_expired(Some("1722500000000"), now, "daily", 0).is_none(), "同天未过期");
+        let now = Timestamp::new(1722500000000); // 某日
+        assert!(session_expired(Some(Timestamp::new(1722400000000)), now, "daily", 0).is_some(), "跨天应过期");
+        assert!(session_expired(Some(Timestamp::new(1722500000000)), now, "daily", 0).is_none(), "同天未过期");
         // 同一天但 23 小时前：daily 不过期（idle 才看时长）
-        let same_day_later = "1722490000000";
+        let same_day_later = Timestamp::new(1722490000000);
         assert_eq!(session_expired(Some(same_day_later), now, "daily", 0), None);
     }
 
@@ -1472,10 +1475,10 @@ gateway:
             // 清理 build_state_with 预置的 source-a，插入过期/平台两类会话
             sessions.clear();
             let mut local = SessionInfo::new("local-peri".into(), String::new(), ".".into(), true, 0);
-            local.updated_at = Some("1".into()); // 1970 年，必然过期
+            local.updated_at = Some(Timestamp::new(1)); // 1970 年，必然过期
             sessions.insert("local".to_string(), local);
             let mut platform = SessionInfo::new("platform-peri".into(), String::new(), ".".into(), true, 0);
-            platform.updated_at = Some("1".into());
+            platform.updated_at = Some(Timestamp::new(1));
             sessions.insert("qq:group:123".to_string(), platform);
         }
 
@@ -1790,7 +1793,7 @@ pub fn run() {
                         if let Ok(mut state) = default_runtime.agent_runtime.lock() {
                             state.status = AgentLifecycleStatus::Connected;
                             state.last_error = None;
-                            state.last_connected_at = Some(runtime_log::timestamp());
+                            state.last_connected_at = Some(crate::time::Timestamp::now());
                         }
                     }
                     Err(error) => {

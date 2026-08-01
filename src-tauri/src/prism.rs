@@ -174,7 +174,7 @@ impl PrismClient {
             return serde_json::json!({
                 "status": PrismStatusCode::ConfigurationError.as_str(),
                 "baseUrl": self.base_url.as_str(),
-                "checkedAt": crate::runtime_log::timestamp(),
+                "checkedAt": crate::time::Timestamp::now(),
             });
         }
         let status = match self.get("/health").await {
@@ -184,7 +184,7 @@ impl PrismClient {
         serde_json::json!({
             "status": status.as_str(),
             "baseUrl": self.base_url.as_str(),
-            "checkedAt": crate::runtime_log::timestamp(),
+            "checkedAt": crate::time::Timestamp::now(),
         })
     }
 

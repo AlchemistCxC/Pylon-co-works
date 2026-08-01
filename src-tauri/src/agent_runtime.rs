@@ -30,11 +30,14 @@ pub fn reconnect_backoff_ms(attempt: u32) -> u64 {
     (exp * 1000).min(30_000)
 }
 
+use crate::time::Timestamp;
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct AgentRuntimeState {
     pub status: AgentLifecycleStatus,
     pub last_error: Option<String>,
-    pub last_connected_at: Option<String>,
+    /// R4：Timestamp（wire 序列化为字符串，契约不变）。
+    pub last_connected_at: Option<Timestamp>,
 }
 
 pub fn session_mapping_matches(

@@ -6,20 +6,18 @@ use std::collections::VecDeque;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
 
+use crate::time::Timestamp;
+
 pub const DEFAULT_CAPACITY: usize = 2000;
 const MAX_MESSAGE_BYTES: usize = 8 * 1024;
 const REDACTED: &str = "[REDACTED]";
-
-pub(crate) fn timestamp() -> String {
-    use std::time::{SystemTime, UNIX_EPOCH};
-    SystemTime::now().duration_since(UNIX_EPOCH).map(|value| value.as_millis().to_string()).unwrap_or_else(|_| "0".to_string())
-}
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
 pub struct RuntimeLogEntry {
     pub id: u64,
-    pub timestamp: String,
+    /// R4：Timestamp 序列化为字符串（wire 契约 `"1722500000000"` 不变）。
+    pub timestamp: Timestamp,
     pub level: String,
     pub source: String,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -64,7 +62,7 @@ impl RuntimeLogHub {
 
     pub fn push(
         &self,
-        timestamp: String,
+        timestamp: Timestamp,
         level: impl Into<String>,
         source: impl Into<String>,
         session: Option<String>,
@@ -202,9 +200,9 @@ mod tests {
     #[test]
     fn ring_buffer_keeps_latest_entries_and_monotonic_ids() {
         let hub = RuntimeLogHub::new(2);
-        hub.push("t1".into(), "info", "a", None, "one", Map::new());
-        hub.push("t2".into(), "info", "a", None, "two", Map::new());
-        hub.push("t3".into(), "info", "a", None, "three", Map::new());
+        hub.push(Timestamp::new(1), "info", "a", None, "one", Map::new());
+        hub.push(Timestamp::new(2), "info", "a", None, "two", Map::new());
+        hub.push(Timestamp::new(3), "info", "a", None, "three", Map::new());
         let entries = hub.list(&RuntimeLogQuery::default());
         assert_eq!(entries.iter().map(|entry| entry.id).collect::<Vec<_>>(), vec![3, 2]);
         assert_eq!(entries[0].message, "three");
@@ -213,8 +211,8 @@ mod tests {
     #[test]
     fn filters_by_level_source_session_and_search() {
         let hub = RuntimeLogHub::default();
-        hub.push("t1".into(), "error", "acp", Some("a".into()), "Parse failed", Map::new());
-        hub.push("t2".into(), "info", "ui", Some("b".into()), "Clicked", Map::new());
+        hub.push(Timestamp::new(1), "error", "acp", Some("a".into()), "Parse failed", Map::new());
+        hub.push(Timestamp::new(2), "info", "ui", Some("b".into()), "Clicked", Map::new());
         let query = RuntimeLogQuery { level: Some("error".into()), source: Some("acp".into()), session: Some("a".into()), search: Some("parse".into()), limit: Some(10) };
         assert_eq!(hub.list(&query).len(), 1);
     }
@@ -222,7 +220,7 @@ mod tests {
     #[test]
     fn redacts_sensitive_fields_and_truncates_message() {
         let hub = RuntimeLogHub::default();
-        let entry = hub.push("t1".into(), "warn", "acp", None, "x".repeat(9000), fields(&[
+        let entry = hub.push(Timestamp::new(1), "warn", "acp", None, "x".repeat(9000), fields(&[
             ("apiKey", json!("secret-value")),
             ("nested", json!({"authorization": "Bearer abc", "result": "safe"})),
         ]));
@@ -235,7 +233,7 @@ mod tests {
     #[test]
     fn keeps_safe_diagnostic_words_in_message() {
         let hub = RuntimeLogHub::default();
-        let entry = hub.push("t1".into(), "info", "runtime", None, "Prompt started; contentLength=42", Map::new());
+        let entry = hub.push(Timestamp::new(1), "info", "runtime", None, "Prompt started; contentLength=42", Map::new());
         assert_eq!(entry.message, "Prompt started; contentLength=42");
     }
 
@@ -243,7 +241,7 @@ mod tests {
     fn redacts_sensitive_message_payload_markers() {
         let hub = RuntimeLogHub::default();
         for message in ["token=abc", "authorization: Bearer abc", "persona: hidden"] {
-            let entry = hub.push("t1".into(), "error", "runtime", None, message, Map::new());
+            let entry = hub.push(Timestamp::new(1), "error", "runtime", None, message, Map::new());
             assert_eq!(entry.message, REDACTED);
         }
     }
@@ -260,7 +258,7 @@ mod tests {
             "client_secret=abc",
             "access_token=abc",
         ] {
-            let entry = hub.push("t1".into(), "error", "runtime", None, message, Map::new());
+            let entry = hub.push(Timestamp::new(1), "error", "runtime", None, message, Map::new());
             assert_eq!(entry.message, REDACTED, "message {message:?} 必须脱敏");
         }
     }
@@ -269,7 +267,7 @@ mod tests {
     fn redacts_sensitive_content_inside_field_values() {
         // 审查修复回归：非敏感 key 下的敏感值内容也必须脱敏
         let hub = RuntimeLogHub::default();
-        let entry = hub.push("t1".into(), "warn", "acp", None, "safe message", fields(&[
+        let entry = hub.push(Timestamp::new(1), "warn", "acp", None, "safe message", fields(&[
             ("detail", json!("api_key=sk-123")),
             ("items", json!(["Bearer secret-token", "safe"])),
             ("ok", json!("fine")),
@@ -283,9 +281,9 @@ mod tests {
     #[test]
     fn clear_keeps_id_sequence() {
         let hub = RuntimeLogHub::default();
-        let first = hub.push("t1".into(), "info", "test", None, "first", Map::new());
+        let first = hub.push(Timestamp::new(1), "info", "test", None, "first", Map::new());
         hub.clear();
-        let second = hub.push("t2".into(), "info", "test", None, "second", Map::new());
+        let second = hub.push(Timestamp::new(2), "info", "test", None, "second", Map::new());
         assert!(second.id > first.id);
         assert_eq!(hub.list(&RuntimeLogQuery::default()).len(), 1);
     }
@@ -295,7 +293,7 @@ mod tests {
         let hub = RuntimeLogHub::new(2);
         let mut events = hub.subscribe();
         let entry = hub.push(
-            "t1".into(),
+            Timestamp::new(1),
             "error",
             "acp",
             None,

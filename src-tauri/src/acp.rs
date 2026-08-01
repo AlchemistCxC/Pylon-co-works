@@ -684,7 +684,7 @@ impl AcpClient {
                                 let safe = crate::runtime_log::sanitize_message(l.clone());
                                 log::error!("{} stderr: {}", agent_name_stderr, safe);
                                 if let Some(hub) = &stderr_logs {
-                                    hub.push(crate::runtime_log::timestamp(), "error", "agent-stderr", None, "Agent stderr output", serde_json::Map::from_iter([
+                                    hub.push(crate::time::Timestamp::now(), "error", "agent-stderr", None, "Agent stderr output", serde_json::Map::from_iter([
                                         ("agent".to_string(), serde_json::Value::String(agent_name_stderr.clone())),
                                     ]));
                                 }
@@ -712,7 +712,7 @@ impl AcpClient {
                             Err(e) => {
                                 log::error!("ACP parse: {}", e);
                                 if let Some(hub) = &stdout_logs {
-                                    hub.push(crate::runtime_log::timestamp(), "error", "acp", None, "ACP stdout JSON parse error", serde_json::Map::from_iter([
+                                    hub.push(crate::time::Timestamp::now(), "error", "acp", None, "ACP stdout JSON parse error", serde_json::Map::from_iter([
                                         ("error".to_string(), serde_json::Value::String(e.to_string())),
                                     ]));
                                 }
@@ -755,7 +755,7 @@ impl AcpClient {
                         error: None,
                     });
                     if let Some(hub) = &stdout_logs {
-                        hub.push(crate::runtime_log::timestamp(), "error", "acp", None, "ACP child stdout closed; agent crashed", serde_json::Map::new());
+                        hub.push(crate::time::Timestamp::now(), "error", "acp", None, "ACP child stdout closed; agent crashed", serde_json::Map::new());
                     }
                     log::error!("ACP: child process stdout closed (agent crashed)");
                 });

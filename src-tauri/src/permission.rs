@@ -1,8 +1,9 @@
 //! B9 权限审批：挂起请求解析/应答/超时（R1 拆分自 lib.rs；行为零变化）。
 
 use crate::error::PylonError;
-use crate::runtime_log;
 use crate::runtime::AgentRuntime;
+use crate::runtime_log;
+use crate::time::Timestamp;
 use crate::AppState;
 
 /// 权限请求事件中 prompt 的安全上限（B9.4：事件不含完整 secret 载荷）。
@@ -20,7 +21,8 @@ pub(crate) struct PendingPermission {
     pub prompt: String,
     /// 可用选项 option_id（allow_once/reject_once/...），应答时校验。
     pub options: Vec<String>,
-    pub requested_at: String,
+    /// R4：Timestamp（事件 payload 序列化为字符串，契约不变）。
+    pub requested_at: Timestamp,
 }
 
 /// 解析 agent 的 request_permission 请求参数（B9）：
@@ -60,7 +62,7 @@ pub(crate) fn parse_permission_request(params: Option<&serde_json::Value>) -> Op
         title,
         prompt,
         options,
-        requested_at: runtime_log::timestamp(),
+        requested_at: Timestamp::now(),
     })
 }
 
@@ -169,17 +171,13 @@ pub(crate) async fn set_approval_mode(state: tauri::State<'_, AppState>, mode: S
 
 /// 挂起的权限请求超时检查（B9.2：超时默认拒绝，不悬挂 pending）。
 pub(crate) async fn check_pending_permission_timeouts(state: &AppState) {
-    let now_ms: u64 = runtime_log::timestamp().parse().unwrap_or(0);
+    let now = Timestamp::now();
     for runtime in state.runtimes.all() {
         let expired: Vec<(u64, String)> = runtime.pending_permissions.lock()
             .map(|pending| {
                 pending.iter()
                     .filter(|(_, permission)| {
-                        permission
-                            .requested_at
-                            .parse::<u64>()
-                            .map(|at| now_ms.saturating_sub(at) > PERMISSION_REQUEST_TIMEOUT_SECS * 1000)
-                            .unwrap_or(false)
+                        now.elapsed_since(permission.requested_at) > PERMISSION_REQUEST_TIMEOUT_SECS * 1000
                     })
                     .map(|(id, permission)| (*id, permission.tool_call_id.clone()))
                     .collect()

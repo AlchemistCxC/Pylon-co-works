@@ -240,10 +240,8 @@ fn local_hour_windows() -> u32 {
 }
 
 fn now_ms() -> u64 {
-    SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .unwrap_or_default()
-        .as_millis() as u64
+    // R4：统一走 Timestamp（Unix 毫秒），不再重复 SystemTime 换算。
+    crate::time::Timestamp::now().as_u64()
 }
 
 /// 原子写：唯一临时文件 + rename，中断也不会留下半截 JSON。

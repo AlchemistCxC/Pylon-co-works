@@ -21,7 +21,7 @@ pub(crate) async fn push_frontend_log(
     fields: Option<serde_json::Map<String, serde_json::Value>>,
 ) -> Result<runtime_log::RuntimeLogEntry, String> {
     Ok(state.runtime_logs.push(
-        runtime_log::timestamp(),
+        crate::time::Timestamp::now(),
         level,
         source.unwrap_or_else(|| "frontend".into()),
         session,

@@ -2,7 +2,6 @@
 
 use crate::error::PylonError;
 use crate::pet;
-use crate::runtime_log;
 use crate::AppState;
 use std::sync::atomic::Ordering;
 use tauri::Manager;
@@ -44,7 +43,8 @@ pub(crate) async fn get_pet(app: tauri::AppHandle, state: tauri::State<'_, AppSt
         value["msg"] = serde_json::Value::String(message);
     }
     // P3：节流写盘——距上次落盘不足 60s 的轮询不再序列化 + 写盘。
-    let now_ms: u64 = runtime_log::timestamp().parse().unwrap_or(0);
+    // R4：Timestamp::now() 直接取 u64，消除字符串 parse 往返。
+    let now_ms = crate::time::Timestamp::now().as_u64();
     let last_persist = state.pet_last_persist_ms.load(Ordering::Acquire);
     if now_ms.saturating_sub(last_persist) >= PET_PERSIST_THROTTLE_MS {
         persist_pet_if_possible(&app, &pet);

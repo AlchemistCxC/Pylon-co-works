@@ -15,7 +15,7 @@ use crate::error::PylonError;
 use crate::gateway::GatewayCore;
 use crate::mcp;
 use crate::runtime::AgentRuntime;
-use crate::runtime_log;
+use crate::time::Timestamp;
 use crate::workspace;
 use crate::{emit_event, emit_event_all, prompt_lock_for, AppState, AppStateHandles};
 
@@ -34,8 +34,8 @@ pub(crate) struct SessionInfo {
     pub(crate) tokens_out: u64,
     pub(crate) tokens_total: u64,
     pub(crate) context_size: u64,
-    /// 最后活动时间（Unix 毫秒，B10.3b 会话超时/重置判定）。
-    pub(crate) updated_at: Option<String>,
+    /// 最后活动时间（B10.3b 会话超时/重置判定；R4：Timestamp，仅内部使用不落 wire）。
+    pub(crate) updated_at: Option<Timestamp>,
     /// B11：回合计数（每次用户消息 +1；注入与完成持久化共用同一 round）。
     pub(crate) inject_round: u64,
     /// B11.2：当前回合 agent 回复文本（dispatcher 流式收集，完成持久化用）。
@@ -58,7 +58,7 @@ impl SessionInfo {
             tokens_out: 0,
             tokens_total: 0,
             context_size: 0,
-            updated_at: Some(runtime_log::timestamp()),
+            updated_at: Some(Timestamp::now()),
             inject_round: 0,
             last_response_text: String::new(),
         }
@@ -113,26 +113,23 @@ pub(crate) const MAX_SESSIONS: usize = 100;
 /// - reset="daily"：按 UTC 日历天比较（updated_at 与 now 不同天 → 过期）
 /// - 其他（默认 idle）：`now - updated_at > idle_minutes` → 过期
 /// updated_at 缺失（历史数据）视为未过期（保守，防误杀）。
+/// R4：参数从 &str 时间戳改为 Timestamp（消除 parse 往返），语义不变。
 pub(crate) fn session_expired(
-    updated_at_ms: Option<&str>,
-    now_ms: &str,
+    updated_at: Option<Timestamp>,
+    now: Timestamp,
     reset: &str,
     idle_minutes: u64,
 ) -> Option<String> {
     match reset {
         "off" => None,
-        "daily" => {
-            let day = |ms: &str| ms.parse::<u64>().ok().map(|v| v / 86_400_000);
-            match (updated_at_ms.and_then(day), day(now_ms)) {
-                (Some(updated), Some(now)) if updated != now => Some("每日重置".to_string()),
-                _ => None,
-            }
-        }
+        "daily" => match updated_at.map(Timestamp::day_number) {
+            Some(updated_day) if updated_day != now.day_number() => Some("每日重置".to_string()),
+            _ => None,
+        },
         _ => {
             let idle_ms = idle_minutes.saturating_mul(60_000);
-            let now: u64 = now_ms.parse().ok()?;
-            let updated: u64 = updated_at_ms?.parse().ok()?;
-            if now.saturating_sub(updated) > idle_ms {
+            let updated = updated_at?;
+            if now.elapsed_since(updated) > idle_ms {
                 Some(format!("超过 {idle_minutes} 分钟无活动"))
             } else {
                 None
@@ -420,7 +417,7 @@ impl AppState {
 /// 遍历所有 runtime 的会话，按绑定 reset 策略判定过期；过期会话
 /// close ACP + 移除映射 + 平台通知 + 日志。生成中会话（prompt 锁被占用）豁免。
 pub(crate) async fn check_session_expiry(state: &AppState) {
-    let now = runtime_log::timestamp();
+    let now = Timestamp::now();
     // 核验修复：平台 source 判定（适配器前缀或静态绑定命中）。GUI local 会话
     // 由前端/用户管理，不参与后台过期重置（watcher 是 B10.3b 为平台会话设计）。
     let platform_keys: Vec<String> = state.gateway.adapter_keys();
@@ -431,10 +428,10 @@ pub(crate) async fn check_session_expiry(state: &AppState) {
             || state.gateway.binding(source).is_some()
     };
     for runtime in state.runtimes.all() {
-        let sessions: Vec<(String, String, Option<String>)> = runtime.sessions.lock()
+        let sessions: Vec<(String, String, Option<Timestamp>)> = runtime.sessions.lock()
             .map(|sessions| {
                 sessions.iter()
-                    .map(|(source, info)| (source.clone(), info.peri_id.clone(), info.updated_at.clone()))
+                    .map(|(source, info)| (source.clone(), info.peri_id.clone(), info.updated_at))
                     .collect()
             })
             .unwrap_or_default();
@@ -454,7 +451,7 @@ pub(crate) async fn check_session_expiry(state: &AppState) {
             let binding = state.gateway.binding(&source);
             let reset = binding.as_ref().and_then(|b| b.reset.as_deref()).unwrap_or("idle");
             let idle_minutes = binding.as_ref().and_then(|b| b.idle_minutes).unwrap_or(1440);
-            let Some(reason) = session_expired(updated_at.as_deref(), &now, reset, idle_minutes) else {
+            let Some(reason) = session_expired(updated_at, now, reset, idle_minutes) else {
                 continue;
             };
             log::info!("会话过期 ({source}): {reason}");
@@ -601,7 +598,7 @@ pub(crate) async fn send_prompt_core<R: tauri::Runtime>(
     // 生成中的会话另有 prompt 锁活跃豁免，双保险。
     if let Ok(mut sessions) = runtime.sessions.lock() {
         if let Some(session) = sessions.get_mut(source) {
-            session.updated_at = Some(runtime_log::timestamp());
+            session.updated_at = Some(Timestamp::now());
         }
     }
 
