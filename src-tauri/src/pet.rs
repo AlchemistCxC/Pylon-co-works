@@ -1,6 +1,8 @@
 //! Tauri 与独立宠物核心状态机之间的薄适配层。
 
-pub use pylon_pet_core::{AchievementInfo, AiEvent, DayPart, GrowthStage, PetState, ToolKind, ToolOutcome};
+pub use pylon_pet_core::{
+    AchievementInfo, AiEvent, CosmeticInfo, DayPart, GrowthStage, PetState, ToolKind, ToolOutcome,
+};
 use serde::Serialize;
 use std::time::{SystemTime, UNIX_EPOCH};
 
@@ -19,6 +21,8 @@ pub struct PetView<'a> {
     pub day_part: DayPart,
     /// M9：成就全量目录 + 解锁标志（前端徽章墙/进度展示）。
     pub achievements: Vec<AchievementInfo>,
+    /// M10：装扮全量目录 + 拥有标志（前端外观/装备界面）。
+    pub cosmetics: Vec<CosmeticInfo>,
 }
 
 pub fn view(state: &PetState) -> PetView<'_> {
@@ -33,6 +37,7 @@ pub fn view(state: &PetState) -> PetView<'_> {
         crafting: state.pending_action.is_some(),
         day_part: state.day_part(now_ms()),
         achievements: state.achievement_info(),
+        cosmetics: state.cosmetic_info(),
     }
 }
 
@@ -162,6 +167,18 @@ pub fn poll_voice(state: &mut PetState) -> bool {
 pub fn rename(state: &mut PetState, value: &str) {
     state.set_local_offset_minutes(local_offset_minutes());
     state.rename(value, now_ms());
+}
+
+/// M10：装备装扮（校验拥有/成长解锁；失败返回原因字符串）。
+pub fn equip(state: &mut PetState, item_id: &str) -> Result<(), String> {
+    state.set_local_offset_minutes(local_offset_minutes());
+    state.equip(item_id).map(|_| ())
+}
+
+/// M10：卸下装扮。
+pub fn unequip(state: &mut PetState) {
+    state.set_local_offset_minutes(local_offset_minutes());
+    state.unequip();
 }
 
 /// 本地时区偏移（分钟，东正西负）：Windows 用 GetLocalTime（零依赖 FFI，

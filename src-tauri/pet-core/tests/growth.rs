@@ -766,3 +766,125 @@ fn achievement_catalog_lists_all_with_unlocked_flags() {
     ids.dedup();
     assert_eq!(ids.len(), ACHIEVEMENTS.len(), "成就 id 必须唯一");
 }
+
+// ── M10：装扮（掉落 / 冷却 / 装备 / 成长解锁）──
+
+#[test]
+fn cosmetic_drop_requires_lucky_roll_and_auto_equips() {
+    let mut pet = day_pet(1);
+    pet.traits = pylon_pet_core::PetTraits::default();
+    // roll=0（千分位 0 < 10）→ 掉落
+    assert!(pet.maybe_drop_cosmetic(1, 0), "roll=0 必须掉落");
+    assert_eq!(pet.inventory.len(), 1, "掉落入栏");
+    assert!(pet.equipped.is_some(), "掉落自动装备");
+    assert_eq!(pet.stats.cosmetics_collected, 1);
+    assert!(pet.memories.iter().any(|m| m.contains("捡到")), "掉落必须记入记忆");
+    assert!(pet.msg.as_deref().unwrap_or("").contains("捡到"), "掉落必须有文案: {:?}", pet.msg);
+    assert!(pet.last_drop_at_ms > 0, "掉落必须记录冷却时间戳");
+    // roll 不中（千分位 50 ≥ 10）→ 不掉
+    let mut pet = day_pet(1);
+    assert!(!pet.maybe_drop_cosmetic(1, 50), "roll=50 不掉落");
+    assert!(pet.inventory.is_empty());
+    // 边界：roll=9 掉、roll=10 不掉（DROP_PROBABILITY_PERMILLE=10）
+    let mut pet = day_pet(1);
+    assert!(pet.maybe_drop_cosmetic(1, 9));
+    let mut pet = day_pet(1);
+    assert!(!pet.maybe_drop_cosmetic(1, 10));
+}
+
+#[test]
+fn cosmetic_drop_has_24h_cooldown_and_full_collection_stops() {
+    // 冷却：掉落后在 24h 内 roll=0 也不掉
+    let mut pet = day_pet(1);
+    assert!(pet.maybe_drop_cosmetic(1, 0));
+    assert!(!pet.maybe_drop_cosmetic(2, 0), "冷却期内不得掉落");
+    // 24h 后（86400_000+1）冷却解除
+    assert!(pet.maybe_drop_cosmetic(86_400_001, 0), "冷却解除后可再掉落");
+    // 全收集：掉落池 8 件全收 → roll=0 也不掉
+    use pylon_pet_core::COSMETICS;
+    let droppable_count = COSMETICS.iter().filter(|d| matches!(d.unlock, pylon_pet_core::CosmeticUnlock::Drop)).count();
+    let mut pet = day_pet(1);
+    for (i, def) in COSMETICS.iter().filter(|d| matches!(d.unlock, pylon_pet_core::CosmeticUnlock::Drop)).enumerate() {
+        pet.inventory.push(def.id.to_string());
+        pet.last_drop_at_ms = 0; // 每件掉落间不冷却（构造全收集场景）
+        let _ = i;
+    }
+    assert_eq!(pet.inventory.len(), droppable_count);
+    assert!(!pet.maybe_drop_cosmetic(2, 0), "全收集后掉率为 0");
+}
+
+#[test]
+fn equip_requires_ownership_and_growth_unlocks_work() {
+    let mut pet = day_pet(1);
+    pet.traits = pylon_pet_core::PetTraits::default();
+    // 未拥有 → 报错
+    assert!(pet.equip("beret").is_err(), "未掉落不可装备");
+    assert!(pet.equip("unknown_item").is_err(), "未知 id 报错");
+    // 掉落一件 → 可装备
+    pet.maybe_drop_cosmetic(1, 0);
+    let owned = pet.inventory[0].clone();
+    assert!(pet.equip(&owned).is_ok(), "已拥有可装备");
+    assert_eq!(pet.equipped.as_deref(), Some(owned.as_str()));
+    // 成长解锁（确定性）：bond<300 不可装备 code_crown；bond≥300 可
+    let mut pet = day_pet(1);
+    pet.bond = 100;
+    assert!(pet.equip("code_crown").is_err(), "bond 不足不可装备成长装扮");
+    pet.bond = 300;
+    assert!(pet.equip("code_crown").is_ok(), "bond≥300 可装备代码之冕");
+    assert_eq!(pet.equipped.as_deref(), Some("code_crown"));
+    // 阶段解锁：Luminary 才能装备长明之翼
+    let mut pet = day_pet(1);
+    pet.xp = 500;
+    assert!(pet.equip("luminary_wings").is_ok(), "长明体可装备长明之翼");
+    let mut pet = day_pet(1);
+    pet.xp = 100;
+    assert!(pet.equip("luminary_wings").is_err(), "低阶段不可装备长明之翼");
+    // 卸下
+    pet.maybe_drop_cosmetic(1, 0);
+    pet.unequip();
+    assert!(pet.equipped.is_none(), "卸下后无装备");
+}
+
+#[test]
+fn cosmetic_catalog_lists_all_with_owned_flags() {
+    use pylon_pet_core::{COSMETICS, CosmeticUnlock};
+    let mut pet = day_pet(1);
+    // 掉落入栏一件
+    pet.maybe_drop_cosmetic(1, 0);
+    let info = pet.cosmetic_info();
+    assert_eq!(info.len(), COSMETICS.len(), "目录必须与定义表一致");
+    let owned_dropped = info.iter().find(|c| c.id == pet.inventory[0]).expect("目录含掉落物品");
+    assert!(owned_dropped.owned);
+    // 成长解锁按条件标记 owned（bond≥300 → code_crown owned）
+    let crown = info.iter().find(|c| c.id == "code_crown").expect("目录含代码之冕");
+    assert!(!crown.owned);
+    pet.bond = 300;
+    let info = pet.cosmetic_info();
+    let crown = info.iter().find(|c| c.id == "code_crown").unwrap();
+    assert!(crown.owned, "bond≥300 后 code_crown 标记 owned");
+    // id 唯一 + 掉落/成长分类齐备
+    let mut ids: Vec<&str> = COSMETICS.iter().map(|c| c.id).collect();
+    ids.sort();
+    ids.dedup();
+    assert_eq!(ids.len(), COSMETICS.len(), "装扮 id 必须唯一");
+    let drops = COSMETICS.iter().filter(|d| matches!(d.unlock, CosmeticUnlock::Drop)).count();
+    let growth = COSMETICS.len() - drops;
+    assert!(drops >= 5, "掉落类至少 5 件: {drops}");
+    assert!(growth >= 2, "成长解锁至少 2 件: {growth}");
+}
+
+#[test]
+fn old_save_without_cosmetic_fields_loads_safely() {
+    // 旧档（无 inventory/equipped/unlocked/last_drop_at_ms 字段）→ serde default 补齐
+    let legacy = r#"{"name":"微栖","mood":"idle","happiness":65,"energy":80,"xp":0,"bond":0,
+        "born_at_ms":1,"last_seen_day":0,"first_chunk_at_ms":null,"hunger":80,"fun":70,
+        "loneliness":0,"traits":{"activity":50,"clinginess":50,"greed":50,"curiosity":50},
+        "machine":"awake.idle","last_tick_at_ms":1,"recent_events":[],"last_agent_mode":null,
+        "last_agent_model":null,"pending_action":null,"stats":{},"memories":[]}"#;
+    let loaded: PetState = serde_json::from_str(legacy).expect("旧档必须可加载");
+    assert!(loaded.inventory.is_empty());
+    assert!(loaded.equipped.is_none());
+    assert!(loaded.unlocked.is_empty());
+    assert_eq!(loaded.last_drop_at_ms, 0);
+    assert_eq!(loaded.stats.feed_count, 0, "旧档新计数 default 0");
+}

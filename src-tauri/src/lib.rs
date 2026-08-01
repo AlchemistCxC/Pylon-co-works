@@ -3967,6 +3967,12 @@ async fn pet_action(app: tauri::AppHandle, state: tauri::State<'_, AppState>, ac
         "daily" => { pet::daily_visit(&mut pet); }
         "sleepy" => { sleepy_result = Some(pet::check_sleepy(&mut pet)); }
         "nostalgia" => { pet::recall_memory(&mut pet); }
+        // M10：装扮装备/卸下（equip 失败返回原因，不 panic）
+        "equip" => {
+            let item_id = value.ok_or_else(|| "equip requires item id".to_string())?;
+            pet::equip(&mut pet, &item_id).map_err(|error| PylonError::Protocol(error))?;
+        }
+        "unequip" => { pet::unequip(&mut pet); }
         "restore" => {
             let raw = value.ok_or_else(|| "restore requires pet state".to_string())?;
             let saved = serde_json::from_str(&raw).map_err(|error| format!("invalid pet state: {error}"))?;
