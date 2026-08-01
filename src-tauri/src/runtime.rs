@@ -10,7 +10,8 @@ use std::sync::{Arc, Mutex, RwLock};
 
 use crate::acp::AcpClient;
 use crate::agent_runtime::AgentRuntimeState;
-use crate::{PendingPermission, SessionInfo};
+use crate::permission::PendingPermission;
+use crate::session::SessionInfo;
 
 /// 单个 agent 的运行时状态（per-agent 隔离）。
 pub struct AgentRuntime {

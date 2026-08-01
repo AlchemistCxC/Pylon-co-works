@@ -3,7 +3,6 @@
 use std::sync::Arc;
 
 use crate::acp::AcpClient;
-use crate::agent_config;
 use crate::agent_config::AgentDef;
 use crate::agent_runtime::{status_after_connection_failure, AgentLifecycleStatus};
 use crate::error::PylonError;
@@ -66,6 +65,7 @@ pub(crate) fn agent_summary_payload(id: &str, agent: &AgentDef, active_id: Optio
     })
 }
 
+#[tauri::command]
 pub(crate) async fn list_agents(state: tauri::State<'_, AppState>) -> Result<Vec<serde_json::Value>, PylonError> {
     let active_id = state.active_agent.lock().map_err(|e| e.to_string())?.clone();
     let active_status = state.active_runtime()

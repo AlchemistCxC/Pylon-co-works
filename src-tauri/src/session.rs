@@ -14,7 +14,7 @@ use crate::agent_runtime::{
 use crate::error::PylonError;
 use crate::gateway::GatewayCore;
 use crate::mcp;
-use crate::runtime::{AgentRuntime, AgentRuntimeManager};
+use crate::runtime::AgentRuntime;
 use crate::runtime_log;
 use crate::workspace;
 use crate::{emit_event, emit_event_all, prompt_lock_for, AppState, AppStateHandles};
@@ -500,6 +500,7 @@ pub(crate) async fn check_session_expiry(state: &AppState) {
         }
     }
 }
+#[tauri::command]
 pub(crate) async fn new_session(
     state: tauri::State<'_, AppState>,
     source: String,
@@ -1068,6 +1069,7 @@ pub(crate) async fn session_inspector(state: tauri::State<'_, AppState>) -> Resu
     let active_id = state.active_agent.lock().map_err(|e| e.to_string())?.clone();
     Ok(build_full_inspector_payload(&entries, &active_id))
 }
+#[tauri::command]
 pub(crate) async fn load_persisted_session(
     state: tauri::State<'_, AppState>,
     source: String,

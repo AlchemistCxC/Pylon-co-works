@@ -26,42 +26,67 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 use tauri::{Emitter, Manager, Runtime};
-use acp::{AcpClient, PromptWaitOutcome};
+use acp::AcpClient;
 use agent_config::AgentDef;
-use agent_runtime::{session_mapping_matches, source_for_peri_id_in_generation, status_after_connection_failure, AgentLifecycleStatus, AgentRuntimeState};
-use error::PylonError;
+use agent_runtime::AgentLifecycleStatus;
 use gateway::GatewayCore;
 use prism::PrismClient;
 use runtime::{AgentRuntime, AgentRuntimeManager};
+
+#[cfg(test)]
+use error::PylonError;
+
+#[cfg(test)]
+use agent_runtime::{
+    session_mapping_matches, source_for_peri_id_in_generation, status_after_connection_failure,
+    AgentRuntimeState,
+};
+#[cfg(test)]
 use session::SessionInfo;
 
-// R1 拆分：子模块函数桥接（命令/测试/setup 裸引用解析）。
+// R1 拆分：子模块函数桥接。生产代码（setup/watcher/replace）裸引用；
+// 测试模块经 `use super::*` 引入其余命令/工具函数（cfg(test) 隔离非测试警告）。
 use crate::dispatcher::start_notification_dispatcher;
-use crate::export::{export_session, format_export_markdown, is_export_sensitive_key, sanitize_export_messages, sanitize_export_value, write_export_atomically};
+use crate::lifecycle::{load_mcp_persisted, mcp_persist_path};
+use crate::permission::check_pending_permission_timeouts;
+use crate::pet_cmds::{persist_pet_if_possible, pet_persist_path};
+use crate::session::{apply_client_replacement_sessions, check_session_expiry, send_prompt_core};
+
+#[cfg(test)]
+use crate::export::{
+    export_session, format_export_markdown, is_export_sensitive_key, sanitize_export_messages,
+    sanitize_export_value, write_export_atomically,
+};
+#[cfg(test)]
 use crate::gateway_cmds::{gateway_status, reload_gateway};
+#[cfg(test)]
 use crate::lifecycle::{
-    agent_status, agent_summary_payload, do_connect_and_replace, list_agents, load_mcp_persisted,
-    mcp_persist_path, persist_mcp_if_possible, reconnect_agent, reload_agents, set_mcp_servers,
-    switch_agent, validate_agents,
+    agent_status, agent_summary_payload, do_connect_and_replace, list_agents, reconnect_agent,
+    reload_agents, set_mcp_servers, switch_agent, validate_agents,
 };
+#[cfg(test)]
 use crate::logs_cmds::{clear_runtime_logs, list_runtime_logs, push_frontend_log};
+#[cfg(test)]
 use crate::permission::{
-    approve_tool_call, check_pending_permission_timeouts, parse_permission_request,
-    permission_response, permission_response_cancelled, respond_permission,
-    respond_pending_permissions_cancelled, resolve_permission, set_approval_mode, PendingPermission,
+    approve_tool_call, parse_permission_request, permission_response, permission_response_cancelled,
+    respond_permission, respond_pending_permissions_cancelled, resolve_permission, set_approval_mode,
+    PendingPermission,
 };
-use crate::pet_cmds::{get_pet, persist_pet_if_possible, pet_action, pet_persist_path};
+#[cfg(test)]
+use crate::pet_cmds::{get_pet, pet_action};
+#[cfg(test)]
 use crate::prism_cmds::*;
+#[cfg(test)]
 use crate::session::{
-    apply_client_replacement_sessions, build_full_inspector_payload, cancel_prompt, check_session_expiry,
-    close_session, compose_inject_prompt, config_option_current_value, extract_tool_file_name,
-    find_config_option, inject_applies_to, list_persisted_sessions, load_persisted_session, load_sessions,
-    new_session, send_message, send_prompt_core, session_expired, session_inspector, set_config_option,
-    set_mode, value_as_string, MAX_SESSIONS,
+    build_full_inspector_payload, cancel_prompt, close_session, compose_inject_prompt,
+    config_option_current_value, extract_tool_file_name, find_config_option, inject_applies_to,
+    list_persisted_sessions, load_persisted_session, load_sessions, new_session, send_message,
+    session_expired, session_inspector, set_config_option, set_mode, value_as_string, MAX_SESSIONS,
 };
+#[cfg(test)]
 use crate::workspace_cmds::{
-    git_diff, git_history, git_status, git_workspace_root, get_workspace_root, list_workspace_entries,
-    read_workspace_text,
+    git_diff, git_history, git_status, git_workspace_root, get_workspace_root,
+    list_workspace_entries, read_workspace_text,
 };
 
 fn emit_event<R, W>(window: &W, event: &str, payload: serde_json::Value)
@@ -1802,27 +1827,27 @@ pub fn run() {
                 pet_last_persist_ms: AtomicU64::new(0),
             })
             .invoke_handler(tauri::generate_handler![
-                prism_health, prism_status, prism_state, prism_scenarios, prism_sources, prism_aliases, prism_config,
-                prism_logs, prism_chronicle, prism_history, prism_scenario, prism_blocks,
-                prism_inject, prism_command, prism_create_scenario, prism_delete_scenario,
-                prism_create_source, prism_delete_source, prism_source_detail, prism_source_files,
-                prism_read_source_file, prism_write_source_file, prism_delete_source_file,
-                prism_source_entries, prism_source_entry, prism_add_source_entry, prism_edit_source_entry,
-                prism_delete_source_entry,
-                prism_update_config, prism_update_scenario, prism_create_block, prism_update_block,
-                prism_delete_block, prism_add_scenario_block, prism_edit_scenario_block,
-                prism_delete_scenario_block, prism_reorder_scenario_blocks, prism_reload, prism_llm_test,
-                new_session, send_message, set_mode, set_config_option, close_session, cancel_prompt, load_sessions,
-                session_inspector, list_agents, switch_agent, reconnect_agent, agent_status, reload_agents, set_mcp_servers,
-                validate_agents,
-                approve_tool_call, set_approval_mode,
-                get_pet, pet_action,
-                load_persisted_session, list_persisted_sessions,
-                export_session,
-                list_runtime_logs, clear_runtime_logs, push_frontend_log,
-                get_workspace_root, list_workspace_entries, read_workspace_text,
-                git_status, git_diff, git_history,
-                gateway_status, reload_gateway,
+                crate::prism_cmds::prism_health, crate::prism_cmds::prism_status, crate::prism_cmds::prism_state, crate::prism_cmds::prism_scenarios, crate::prism_cmds::prism_sources, crate::prism_cmds::prism_aliases, crate::prism_cmds::prism_config,
+                crate::prism_cmds::prism_logs, crate::prism_cmds::prism_chronicle, crate::prism_cmds::prism_history, crate::prism_cmds::prism_scenario, crate::prism_cmds::prism_blocks,
+                crate::prism_cmds::prism_inject, crate::prism_cmds::prism_command, crate::prism_cmds::prism_create_scenario, crate::prism_cmds::prism_delete_scenario,
+                crate::prism_cmds::prism_create_source, crate::prism_cmds::prism_delete_source, crate::prism_cmds::prism_source_detail, crate::prism_cmds::prism_source_files,
+                crate::prism_cmds::prism_read_source_file, crate::prism_cmds::prism_write_source_file, crate::prism_cmds::prism_delete_source_file,
+                crate::prism_cmds::prism_source_entries, crate::prism_cmds::prism_source_entry, crate::prism_cmds::prism_add_source_entry, crate::prism_cmds::prism_edit_source_entry,
+                crate::prism_cmds::prism_delete_source_entry,
+                crate::prism_cmds::prism_update_config, crate::prism_cmds::prism_update_scenario, crate::prism_cmds::prism_create_block, crate::prism_cmds::prism_update_block,
+                crate::prism_cmds::prism_delete_block, crate::prism_cmds::prism_add_scenario_block, crate::prism_cmds::prism_edit_scenario_block,
+                crate::prism_cmds::prism_delete_scenario_block, crate::prism_cmds::prism_reorder_scenario_blocks, crate::prism_cmds::prism_reload, crate::prism_cmds::prism_llm_test,
+                crate::session::new_session, crate::session::send_message, crate::session::set_mode, crate::session::set_config_option, crate::session::close_session, crate::session::cancel_prompt, crate::session::load_sessions,
+                crate::session::session_inspector, crate::lifecycle::list_agents, crate::lifecycle::switch_agent, crate::lifecycle::reconnect_agent, crate::lifecycle::agent_status, crate::lifecycle::reload_agents, crate::lifecycle::set_mcp_servers,
+                crate::lifecycle::validate_agents,
+                crate::permission::approve_tool_call, crate::permission::set_approval_mode,
+                crate::pet_cmds::get_pet, crate::pet_cmds::pet_action,
+                crate::session::load_persisted_session, crate::session::list_persisted_sessions,
+                crate::export::export_session,
+                crate::logs_cmds::list_runtime_logs, crate::logs_cmds::clear_runtime_logs, crate::logs_cmds::push_frontend_log,
+                crate::workspace_cmds::get_workspace_root, crate::workspace_cmds::list_workspace_entries, crate::workspace_cmds::read_workspace_text,
+                crate::workspace_cmds::git_status, crate::workspace_cmds::git_diff, crate::workspace_cmds::git_history,
+                crate::gateway_cmds::gateway_status, crate::gateway_cmds::reload_gateway,
             ])
             .setup(|app| {
                 let window = app.get_webview_window("main").ok_or("main window not found")?;
