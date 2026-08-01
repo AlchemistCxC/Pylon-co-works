@@ -1,10 +1,12 @@
 import type { LogEntry } from './rightPanelTypes'
 
-/** Backend-agnostic boundary for Logs data access. */
-export interface LogsApiScope {
-  sessionId: string
-  source: string
-}
+/**
+ * 日志数据归一化纯函数。
+ *
+ * 真实 Tauri 调用由 RightPanel 直接 invoke（见 RightPanel.tsx）：
+ *   list_runtime_logs { query: { session: source } } → RuntimeLogResponse[]
+ * 本模块不包含任何 Tauri/fetch 实现；仅负责把后端响应归一化为渲染模型。
+ */
 
 export interface RuntimeLogResponse {
   id: number | string
@@ -32,25 +34,3 @@ export function normalizeRuntimeLogs(value: unknown): LogEntry[] {
     }]
   })
 }
-
-export interface LogsListQuery {
-  level?: 'trace' | 'debug' | 'info' | 'warn' | 'error'
-  source?: string
-  session?: string
-  search?: string
-  limit?: number
-}
-
-export interface LogsListRequest {
-  query?: LogsListQuery
-}
-
-export interface LogsClearRequest {}
-
-export interface LogsApiAdapter<TList = unknown, TClear = unknown> {
-  list(request: LogsListRequest): Promise<TList>
-  clear(request: LogsClearRequest): Promise<TClear>
-}
-
-export type LogsListResult<TAdapter extends LogsApiAdapter> = Awaited<ReturnType<TAdapter['list']>>
-export type LogsClearResult<TAdapter extends LogsApiAdapter> = Awaited<ReturnType<TAdapter['clear']>>

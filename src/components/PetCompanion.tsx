@@ -144,17 +144,18 @@ export default function PetCompanion({ rightInset = 0 }: { rightInset?: number }
   const lastClickAtRef = useRef<number | null>(null)
   const singleClickTimerRef = useRef<number | null>(null)
   const pokeTimerRef = useRef<number | null>(null)
+  const wanderSettleTimerRef = useRef<number | null>(null)
   const wasGeneratingRef = useRef(false)
   const generating = useStore(s => (s.liveGeneratingSources || []).length > 0)
 
   const save = useCallback((next: PetState) => {
-    // 数据无变化时不产生新 state（参考 CC hooks/useMemoryUsage 的 normal 不 setState 模式）
+    // 数据无变化时不产生新 state、不写盘（参考 CC hooks/useMemoryUsage 的 normal 不 setState 模式）
     const serialized = JSON.stringify(persistable(next))
     setPet(previous => {
       if (previous && JSON.stringify(persistable(previous)) === serialized) return previous
+      localStorage.setItem(STORAGE_KEY, serialized)
       return next
     })
-    localStorage.setItem(STORAGE_KEY, serialized)
   }, [])
 
   useEffect(() => {
@@ -172,10 +173,17 @@ export default function PetCompanion({ rightInset = 0 }: { rightInset?: number }
 
   useEffect(() => {
     if (!IS_TAURI) return
-    const timer = window.setInterval(async () => {
+    const poll = async () => {
+      if (document.visibilityState !== 'visible') return
       try { save(await invoke<PetState>('get_pet')) } catch { /* 下一轮重试 */ }
-    }, 12_000)
-    return () => window.clearInterval(timer)
+    }
+    const timer = window.setInterval(poll, 12_000)
+    const onVisibility = () => { if (document.visibilityState === 'visible') poll() }
+    document.addEventListener('visibilitychange', onVisibility)
+    return () => {
+      window.clearInterval(timer)
+      document.removeEventListener('visibilitychange', onVisibility)
+    }
   }, [save])
 
   useEffect(() => {
@@ -185,6 +193,7 @@ export default function PetCompanion({ rightInset = 0 }: { rightInset?: number }
   useEffect(() => () => {
     if (singleClickTimerRef.current != null) window.clearTimeout(singleClickTimerRef.current)
     if (pokeTimerRef.current != null) window.clearTimeout(pokeTimerRef.current)
+    if (wanderSettleTimerRef.current != null) window.clearTimeout(wanderSettleTimerRef.current)
   }, [])
 
   useEffect(() => {
@@ -209,7 +218,9 @@ export default function PetCompanion({ rightInset = 0 }: { rightInset?: number }
       setWalking(true)
       setPerched(false)
       setPosition(destination.position)
-      window.setTimeout(() => {
+      if (wanderSettleTimerRef.current != null) window.clearTimeout(wanderSettleTimerRef.current)
+      wanderSettleTimerRef.current = window.setTimeout(() => {
+        wanderSettleTimerRef.current = null
         setWalking(false)
         setPerched(destination.kind === 'perched')
       }, 2200)
@@ -377,6 +388,26 @@ export default function PetCompanion({ rightInset = 0 }: { rightInset?: number }
     }, 300)
   }
 
+  // 触屏/指针被系统打断（pointercancel）或捕获丢失时复位拖拽状态，并恢复拖拽前的漫游设置，
+  // 避免 dragging 永久残留 / 宠物停止漫游
+  const onPointerCancel = (event: React.PointerEvent) => {
+    const shell = shellRef.current
+    if (!pointerRef.current || pointerRef.current.pointerId !== event.pointerId) return
+    const wasWanderEnabled = pointerRef.current.wasWanderEnabled
+    pointerRef.current = null
+    setDragging(false)
+    setWanderEnabled(wasWanderEnabled)
+    if (shell?.hasPointerCapture(event.pointerId)) shell.releasePointerCapture(event.pointerId)
+  }
+
+  const onLostPointerCapture = (event: React.PointerEvent) => {
+    const pointer = pointerRef.current
+    if (!pointer || pointer.pointerId !== event.pointerId) return
+    pointerRef.current = null
+    setDragging(false)
+    setWanderEnabled(pointer.wasWanderEnabled)
+  }
+
   const style = useMemo(() => position
     ? { left: `${position.x}px`, top: `${position.y}px`, right: 'auto', bottom: 'auto', '--pet-scale': STAGE_SCALE[pet?.stage || 'seed'] } as React.CSSProperties
     : { '--pet-scale': STAGE_SCALE[pet?.stage || 'seed'] } as React.CSSProperties, [position, pet?.stage])
@@ -385,7 +416,9 @@ export default function PetCompanion({ rightInset = 0 }: { rightInset?: number }
 
   return (
     <section ref={shellRef} className={`pet-companion ${dragging ? 'dragging' : ''} ${poking ? 'poking' : ''} ${perched ? 'perched' : ''} ${tabletCoding ? 'tablet-coding' : ''} behavior-${behavior}`}
-      style={style} aria-label="长期陪伴宠物" onPointerDown={onPointerDown} onPointerMove={onPointerMove} onPointerUp={onPointerUp}>
+      style={style} aria-label="长期陪伴宠物"
+      onPointerDown={onPointerDown} onPointerMove={onPointerMove} onPointerUp={onPointerUp}
+      onPointerCancel={onPointerCancel} onLostPointerCapture={onLostPointerCapture}>
       {behavior === 'spitting-fragment' && <span className="pet-code-fragment" aria-hidden="true">{'{}'}</span>}
       {comment && <div className="pet-speech-bubble" role="status">{comment}</div>}
       {tabletCoding && <div className="pet-tablet" aria-label="宠物正在平板电脑上敲代码">

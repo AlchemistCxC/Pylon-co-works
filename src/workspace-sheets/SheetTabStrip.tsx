@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import { useStore } from '../store'
 import type { AgentStatus } from '../components/settings/agentTypes'
 import type { SheetRecord } from './sheetTypes'
@@ -53,6 +53,12 @@ export default function SheetTabStrip({
   const sheetAgentStates = useStore(state => state.sheetAgentStates)
   const tabRefs = useRef(new Map<string, HTMLDivElement>())
   const [menuSheetId, setMenuSheetId] = useState<string | null>(null)
+  const [menuPosition, setMenuPosition] = useState<{ x: number; y: number } | null>(null)
+  // 稳定回调：避免菜单打开期间父组件重渲染导致 document 监听反复重绑
+  const onCloseMenu = useCallback(() => {
+    setMenuSheetId(null)
+    setMenuPosition(null)
+  }, [])
 
   useEffect(() => {
     if (!activeSheetId) return
@@ -86,6 +92,12 @@ export default function SheetTabStrip({
             role="presentation"
             onContextMenu={event => {
               event.preventDefault()
+              const viewportWidth = typeof window !== 'undefined' ? window.innerWidth : 0
+              const viewportHeight = typeof window !== 'undefined' ? window.innerHeight : 0
+              setMenuPosition({
+                x: Math.max(0, Math.min(event.clientX, viewportWidth - 210)),
+                y: Math.max(0, Math.min(event.clientY, viewportHeight - 160)),
+              })
               setMenuSheetId(sheet.id)
             }}
           >
@@ -135,8 +147,9 @@ export default function SheetTabStrip({
         sheet={sheets.find(sheet => sheet.id === menuSheetId) || null}
         canReopen={canReopen}
         open={menuSheetId !== null}
-        onCloseMenu={() => setMenuSheetId(null)}
+        onCloseMenu={onCloseMenu}
         className="workspace-menu-tab-context"
+        position={menuPosition}
       />
     </div>
   )

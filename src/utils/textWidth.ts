@@ -1,10 +1,23 @@
 let graphemeSegmenter: Intl.Segmenter | null = null
+type SegmenterConstructor = new (
+  locales?: string | string[],
+  options?: Intl.SegmenterOptions,
+) => Intl.Segmenter
+const SegmenterCtor = (Intl as typeof Intl & { Segmenter?: SegmenterConstructor }).Segmenter
 
 export function getGraphemeSegmenter(): Intl.Segmenter {
   if (!graphemeSegmenter) {
-    graphemeSegmenter = new Intl.Segmenter(undefined, { granularity: 'grapheme' })
+    if (!SegmenterCtor) throw new Error('Intl.Segmenter is not supported')
+    graphemeSegmenter = new SegmenterCtor(undefined, { granularity: 'grapheme' })
   }
   return graphemeSegmenter
+}
+
+/** 按字素拆串；无 Intl.Segmenter 的环境回退为逐码点（与旧 spinner 实现语义一致） */
+export function segmentGraphemes(value: string): string[] {
+  if (!SegmenterCtor) return Array.from(value)
+  const segmenter = getGraphemeSegmenter()
+  return Array.from(segmenter.segment(value), item => item.segment)
 }
 
 // 东亚全角/宽字符区间（Unicode East Asian Width W/F 主流集合，参考 CC utils/truncate.ts 的宽度语义）

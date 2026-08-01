@@ -1,29 +1,36 @@
 import { getSpinnerAssetPreset, type SpinnerAssetId } from './spinnerAssets.ts'
 import { resolveFrameIndex, type SpinnerMotionKind } from './spinnerMotion.ts'
+import { segmentGraphemes } from '../../utils/textWidth.ts'
 
 export const DEFAULT_SPARKLES = getSpinnerAssetPreset('sparkles').frames
 
 export type SpinnerFramePreset = SpinnerAssetId
 
-function splitGraphemes(value: string): string[] {
-  type Segmenter = new (locales?: string | string[], options?: { granularity: 'grapheme' }) => {
-    segment(input: string): Iterable<{ segment: string }>
-  }
-  const Segmenter = (Intl as typeof Intl & { Segmenter?: Segmenter }).Segmenter
-  if (Segmenter) {
-    const segmenter = new Segmenter(undefined, { granularity: 'grapheme' })
-    return Array.from(segmenter.segment(value), item => item.segment)
-  }
-  return Array.from(value)
+export function normalizeSpinnerFrames(value: string): string[] {
+  return Array.from(new Set(segmentGraphemes(value).map(frame => frame.trim()).filter(Boolean)))
 }
 
-export function normalizeSpinnerFrames(value: string): string[] {
-  return Array.from(new Set(splitGraphemes(value).map(frame => frame.trim()).filter(Boolean)))
+// 帧解析结果缓存：resolveSpinnerFrames 被 Settings 预览、Footer、事件控制器每渲染调用，
+// 相同输入缓存命中（LRU 上限，防自定义帧字符串无限增长）。
+const framesCache = new Map<string, string[]>()
+const FRAMES_CACHE_LIMIT = 64
+
+function cacheFrames(key: string, frames: string[]): string[] {
+  framesCache.delete(key)
+  framesCache.set(key, frames)
+  if (framesCache.size > FRAMES_CACHE_LIMIT) {
+    const oldest = framesCache.keys().next().value
+    if (oldest !== undefined) framesCache.delete(oldest)
+  }
+  return frames
 }
 
 export function resolveSpinnerFrames(preset: SpinnerFramePreset, custom: string): string[] {
+  const cacheKey = `${preset}\u0000${custom}`
+  const cached = framesCache.get(cacheKey)
+  if (cached !== undefined) return cached
   const frames = preset === 'custom' ? normalizeSpinnerFrames(custom) : normalizeSpinnerFrames(getSpinnerAssetPreset(preset).frames)
-  return frames.length > 0 ? frames : normalizeSpinnerFrames(DEFAULT_SPARKLES)
+  return cacheFrames(cacheKey, frames.length > 0 ? frames : normalizeSpinnerFrames(DEFAULT_SPARKLES))
 }
 
 export type SpinnerMarkerMode = 'frame' | 'custom'

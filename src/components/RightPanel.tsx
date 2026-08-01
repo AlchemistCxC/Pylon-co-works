@@ -7,7 +7,6 @@ import { RIGHT_PANEL_TABS } from './right-panel/RightPanelTabs'
 import {
   createLogsViewState,
   createWorkspaceViewState,
-  resolveSessionSource,
   transitionLogsView,
   transitionWorkspaceView,
 } from './right-panel/rightPanelTypes'
@@ -24,8 +23,8 @@ interface RightPanelProps {
 
 export default function RightPanel({ sessionId, onClose }: RightPanelProps) {
   const [tab, setTab] = useState<RightPanelTab>('workspace')
-  const sessions = useStore(state => state.sessions)
-  const sessionSource = resolveSessionSource(sessionId, sessions)
+  // 只订阅目标会话对象：其他会话的更新不再重渲染右栏
+  const sessionSource = useStore(state => sessionId ? state.sessions.find(item => item.id === sessionId)?.source ?? null : null)
   const [workspaceState, setWorkspaceState] = useState<WorkspaceViewState>(() => (
     createWorkspaceViewState(sessionSource)
   ))

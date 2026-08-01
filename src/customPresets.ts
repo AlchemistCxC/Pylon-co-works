@@ -22,7 +22,7 @@ const THEME_SETTINGS_KEYS: readonly (keyof ThemeSettings)[] = [
   'ekgLeftColor', 'ekgMovingColor', 'ekgConsumedColor', 'tokenDisplay',
   'rightBg', 'rightBgImage', 'rightWidth',
   'sidebarTransparency', 'sidebarBlur', 'chatTransparency', 'chatBlur', 'rightTransparency', 'rightBlur',
-  'userName', 'userPrefix', 'userColor', 'toolIndicator', 'sparkles',
+  'userName', 'userPrefix', 'userColor', 'toolIndicator',
   'spinnerFramePreset', 'spinnerCustomFrames', 'spinnerVerbSet', 'spinnerCustomVerbs',
   'spinnerDoneMarker', 'spinnerCancelledMarker', 'spinnerErrorMarker',
   'spinnerDoneMarkerMode', 'spinnerCancelledMarkerMode', 'spinnerErrorMarkerMode',
@@ -51,7 +51,7 @@ export function createCustomPresetId(now: number, existingIds: readonly string[]
   return id
 }
 
-export function pickCustomPresetTheme(state: Record<string, unknown>): Partial<ThemeSettings> {
+export function pickCustomPresetTheme(state: object): Partial<ThemeSettings> {
   return Object.fromEntries(Object.entries(state).filter(([key, value]) =>
     THEME_SETTINGS_KEY_SET.has(key) && typeof value !== 'function',
   )) as Partial<ThemeSettings>

@@ -1,4 +1,5 @@
 import { useMemo, type CSSProperties } from 'react'
+import { segmentGraphemes } from '../../utils/textWidth'
 
 interface SpinnerGlimmerProps {
   text: string
@@ -9,19 +10,8 @@ interface SpinnerGlimmerProps {
   cycleMs: number
 }
 
-function splitGraphemes(value: string): string[] {
-  type SegmenterConstructor = new (
-    locales?: string | string[],
-    options?: Intl.SegmenterOptions,
-  ) => Intl.Segmenter
-
-  const Segmenter = (Intl as typeof Intl & { Segmenter?: SegmenterConstructor }).Segmenter
-  if (Segmenter) return Array.from(new Segmenter(undefined, { granularity: 'grapheme' }).segment(value), item => item.segment)
-  return Array.from(value)
-}
-
 export default function SpinnerGlimmer({ text, elapsedMs, activity, reducedMotion, color, cycleMs }: SpinnerGlimmerProps) {
-  const graphemes = useMemo(() => splitGraphemes(text), [text])
+  const graphemes = useMemo(() => segmentGraphemes(text), [text])
   const glimmerSpeedMs = Math.max(80, Math.floor(cycleMs / Math.max(1, graphemes.length + 20)))
   const cycleLength = graphemes.length + 20
   const cyclePosition = Math.floor((elapsedMs % cycleMs) / glimmerSpeedMs)

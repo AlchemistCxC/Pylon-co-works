@@ -53,6 +53,7 @@ export default function GenerationFooter({ running, frames, tokenCount, startTim
   const spinnerCancelledMarkerMode = useStore(s => s.spinnerCancelledMarkerMode)
   const spinnerErrorMarkerMode = useStore(s => s.spinnerErrorMarkerMode)
   const spinnerIntervalMs = useStore(s => s.spinnerIntervalMs)
+  const spinnerFramePreset = useStore(s => s.spinnerFramePreset)
   const reduceMotion = window.matchMedia?.('(prefers-reduced-motion: reduce)').matches === true
   const verbPreset = getSpinnerVerbPreset(spinnerVerbSet)
   const verbs = spinnerVerbSet === 'custom'
@@ -60,7 +61,7 @@ export default function GenerationFooter({ running, frames, tokenCount, startTim
     : verbPreset.verbs
   const safeVerbs = verbs.length > 0 ? verbs : IDIOMS
   const randomVerb = useMemo(() => safeVerbs[Math.floor(Math.random() * safeVerbs.length)] || IDIOMS[0], [startTime, spinnerVerbSet, spinnerCustomVerbs])
-  const frameAsset = getSpinnerAssetPreset(useStore.getState().spinnerFramePreset)
+  const frameAsset = getSpinnerAssetPreset(spinnerFramePreset)
   const marker = summary
     ? resolveSpinnerMarker(
       frames,
@@ -86,7 +87,6 @@ export default function GenerationFooter({ running, frames, tokenCount, startTim
   const now = Date.now()
   const idleMs = running && lastTokenAt ? Math.max(0, now - lastTokenAt) : running ? now - startTime : 0
   const activity = idleMs > 10000 ? 'stalled' : idleMs > 3000 ? 'waiting' : 'active'
-  const tickIdx = Math.floor((now - startTime) / Math.max(40, Math.min(1000, spinnerIntervalMs || 120)))
   const phaseLabel = phase?.kind === 'thinking'
     ? '思考中'
     : phase?.kind === 'tool'

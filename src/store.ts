@@ -47,7 +47,7 @@ export interface ThemeSettings {
   rightBg: string; rightBgImage: string; rightWidth: number
   sidebarTransparency: number; sidebarBlur: number; chatTransparency: number; chatBlur: number; rightTransparency: number; rightBlur: number
   userName: string; userPrefix: string; userColor: string
-  toolIndicator: string; sparkles: string
+  toolIndicator: string
   spinnerFramePreset: 'sparkles' | 'ascii-line' | 'braille' | 'dots' | 'orbit' | 'clock' | 'wave' | 'blocks' | 'scan' | 'custom'
   spinnerCustomFrames: string
   spinnerVerbSet: 'zh' | 'en' | 'analysis' | 'engineering' | 'custom'
@@ -163,7 +163,7 @@ export const DEFAULTS: ThemeSettings = {
   rightBg: 'rgba(0,0,0,0.02)', rightBgImage: '', rightWidth: 260,
   sidebarTransparency: 1, sidebarBlur: 0, chatTransparency: 1, chatBlur: 0, rightTransparency: 1, rightBlur: 0,
   userName: '', userPrefix: '❯', userColor: '',
-  toolIndicator: '●', sparkles: '✳✴✵✶✷✸✹✺✻✼❃❊',
+  toolIndicator: '●',
   spinnerFramePreset: 'sparkles', spinnerCustomFrames: '',
   spinnerVerbSet: 'zh', spinnerCustomVerbs: '',
   spinnerDoneMarker: '✓', spinnerCancelledMarker: '■', spinnerErrorMarker: '!',
@@ -236,7 +236,15 @@ export const useStore = create<ThemeState>()(persist(
   addSession: (name) => {
     const profileId = get().activeProfileId
     const now = Date.now()
-    const s: Session = { id: 's' + now.toString(36), name, source: 'local:' + name, profileId, createdAt: now, lastActiveAt: now, platform: 'local', workdir: '', sessionPrompt: '', skills: [], hooks: [], autoName: '' }
+    // 同毫秒连点防撞 id：冲突时自增后缀（防御，正常路径 id 与之前一致）
+    const baseId = 's' + now.toString(36)
+    let id = baseId
+    let suffix = 1
+    while (get().sessions.some(session => session.id === id)) {
+      id = `${baseId}-${suffix}`
+      suffix += 1
+    }
+    const s: Session = { id, name, source: 'local:' + name, profileId, createdAt: now, lastActiveAt: now, platform: 'local', workdir: '', sessionPrompt: '', skills: [], hooks: [], autoName: '' }
     set(state => {
       const sessions = [...state.sessions, s]
       persistSessions(localStorage, sessions)
@@ -363,7 +371,7 @@ export const useStore = create<ThemeState>()(persist(
   setSessionConfig: (source, cfg) => set(s => ({
     sessionConfig: { ...s.sessionConfig, [source]: { ...s.sessionConfig[source], ...cfg } }
   })),
-  resetTheme: () => set(DEFAULTS),
+  resetTheme: () => set(structuredClone(DEFAULTS)),
 
   /**
    * 应用某个 zone 的预设（来自全局预设的子集）
@@ -396,15 +404,15 @@ export const useStore = create<ThemeState>()(persist(
     const existing = id ? state.customPresets.find(preset => preset.id === id) : undefined
     const now = Date.now()
     const preset = existing
-      ? { ...existing, name: name.trim().slice(0, 40), theme: pickCustomPresetTheme(state as unknown as Record<string, unknown>), updatedAt: now }
-      : createCustomPreset(name, pickCustomPresetTheme(state as unknown as Record<string, unknown>), now)
+      ? { ...existing, name: name.trim().slice(0, 40), theme: pickCustomPresetTheme(state), updatedAt: now }
+      : createCustomPreset(name, pickCustomPresetTheme(state), now)
     set({ customPresets: upsertCustomPreset(state.customPresets, preset) })
     return preset.id
   },
   applyCustomPreset: (id) => set(state => {
     const preset = state.customPresets.find(item => item.id === id)
     if (!preset) return state
-    const theme = pickCustomPresetTheme(preset.theme as unknown as Record<string, unknown>)
+    const theme = pickCustomPresetTheme(preset.theme)
     return {
       ...theme,
       ccLayout: normalizeCcLayout(theme.ccLayout),
@@ -412,10 +420,16 @@ export const useStore = create<ThemeState>()(persist(
       dirty: { global: false, sidebar: false, chat: false, cc: false, right: false },
     }
   }),
-  removeCustomPreset: (id) => set(state => ({
-    customPresets: deleteCustomPreset(state.customPresets, id),
-    activePreset: Object.fromEntries(Object.entries(state.activePreset).map(([zone, value]) => [zone, value === id ? '' : value])),
-  })),
+  removeCustomPreset: (id) => set(state => {
+    const activePreset = Object.fromEntries(
+      Object.entries(state.activePreset).map(([zone, value]) => [zone, value === id ? '' : value]),
+    )
+    const dirty = { ...state.dirty }
+    for (const [zone, value] of Object.entries(state.activePreset)) {
+      if (value === id) dirty[zone] = true
+    }
+    return { customPresets: deleteCustomPreset(state.customPresets, id), activePreset, dirty }
+  }),
 
   agents: [],
   activeAgent: 'peri',
@@ -489,7 +503,7 @@ export const useStore = create<ThemeState>()(persist(
 { name: 'pylon-theme', version: PROFILE_SCHEMA_VERSION, migrate: persisted => {
   const state = (persisted || {}) as Partial<ThemeState>
   const normalizedTheme = normalizeThemeMigrationState(state, {
-    base: DEFAULTS as unknown as Record<string, unknown>,
+    base: DEFAULTS,
     activePreset: DEFAULTS.activePreset,
     dirty: DEFAULTS.dirty,
     ccLayout: DEFAULTS.ccLayout,
@@ -556,6 +570,6 @@ export const useStore = create<ThemeState>()(persist(
   )
   return { ...state, ...normalized } as ThemeState
 }, partialize: (state) => {
-  const { sessions, sessionsHydrated, users, ccEditMode, setActiveProfile, addProfile, removeProfile, addSession, removeSession, updateSession, replaceSessions, setSessionPeriId, restoreSessions, hydrateSessions, getUser, setCcEditMode, setCcHeight, updateCcPlacement, resetCcLayout, setCcHidden, setCcScale, setLiveStats, liveCommands, sessionLiveStats, setSessionLiveStats, clearSessionRuntime, sessionConfig, setSessionConfig, sessionModes, setSessionMode, liveTokensUsed, liveTokensMax, liveCacheReadTokens, liveMode, livePrismOn, liveGenerating, liveGeneratingSources, agents, setAgents, setActiveAgent, agentStatuses, setAgentStatus, workspaceSheets, sheetAgentStates, hydrateWorkspaceSheets, openSheet, focusSheet, closeSheet, closeOtherSheets, closeRightSheets, reopenSheet, setSheetAgentState, applyZonePreset, setZoneField, setGlobalPreset, saveCustomPreset, applyCustomPreset, removeCustomPreset, dirty, ...persisted } = state as any
+  const { sessions, sessionsHydrated, users, ccEditMode, setActiveProfile, addProfile, removeProfile, addSession, removeSession, updateSession, replaceSessions, setSessionPeriId, restoreSessions, hydrateSessions, getUser, setCcEditMode, setCcHeight, updateCcPlacement, resetCcLayout, setCcHidden, setCcScale, setLiveStats, liveCommands, sessionLiveStats, setSessionLiveStats, clearSessionRuntime, sessionConfig, setSessionConfig, sessionModes, setSessionMode, liveTokensUsed, liveTokensMax, liveCacheReadTokens, liveMode, livePrismOn, liveGenerating, liveGeneratingSources, agents, setAgents, setActiveAgent, agentStatuses, setAgentStatus, workspaceSheets, sheetAgentStates, hydrateWorkspaceSheets, openSheet, focusSheet, closeSheet, closeOtherSheets, closeRightSheets, reopenSheet, setSheetAgentState, applyZonePreset, setZoneField, setGlobalPreset, saveCustomPreset, applyCustomPreset, removeCustomPreset, dirty, ...persisted } = state as ThemeState
   return persisted
 }, onRehydrateStorage: () => state => state?.hydrateSessions()}))

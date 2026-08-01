@@ -2,8 +2,10 @@ import { useState } from 'react'
 import * as Tabs from '@radix-ui/react-tabs'
 import { invoke } from '@tauri-apps/api/core'
 import { useStore } from '../store'
+import { useShallow } from 'zustand/react/shallow'
 import type { ThemeSettings } from '../store'
 import { GLOBAL_PRESETS, pickZoneFields } from '../presets'
+import { pickCustomPresetTheme } from '../customPresets'
 import ColorPopover from './ColorPopover'
 import SettingsPreview from './SettingsPreview'
 import { reportRuntimeError } from '../runtimeError'
@@ -129,11 +131,21 @@ const TAB_LABELS: Record<string, string> = {
 const TAB_PREVIEW: Record<string, string> = {
   global: 'global', sidebar: 'sidebar', terminal: 'chat', cc: 'cc', right: 'right',
 }
+// tab → 修改字段所属 zone（agent/session 无主题字段，回退 global）
+const TAB_ZONE_MAP: Record<string, string> = {
+  global: 'global', sidebar: 'sidebar', terminal: 'chat',
+  cc: 'cc', right: 'right',
+}
 
 // ── main ──
 
 export default function Settings({ onClose, activeSessionId }: { onClose?: () => void; activeSessionId?: string | null }) {
-  const t = useStore()
+  // 只订阅主题字段 + ccEditMode：后台生成时的 live 状态（token/生成源）不再穿透整棵设置树。
+  // pickCustomPresetTheme 白名单覆盖 Settings 全部 t.xxx 访问（已核对），ccEditMode 单独补。
+  const t = useStore(useShallow(s => ({
+    ...pickCustomPresetTheme(s),
+    ccEditMode: s.ccEditMode,
+  } as ThemeSettings & { ccEditMode: boolean })))
   const reset = useStore(s => s.resetTheme)
   const setGlobalPreset = useStore(s => s.setGlobalPreset)
   const setZoneField = useStore(s => s.setZoneField)
@@ -167,12 +179,8 @@ export default function Settings({ onClose, activeSessionId }: { onClose?: () =>
   }
 
   // 改单个字段 — 标记当前 tab 对应的 zone 为 dirty
-  const tabZoneMap: Record<string, string> = {
-    global: 'global', sidebar: 'sidebar', terminal: 'chat',
-    cc: 'cc', right: 'right',
-  }
   const onSettingChange = (partial: Partial<ThemeSettings>) => {
-    const zone = tabZoneMap[activeTab] || 'global'
+    const zone = TAB_ZONE_MAP[activeTab] || 'global'
     setZoneField(zone, partial)
   }
 

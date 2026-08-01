@@ -51,8 +51,14 @@ export function normalizeCcLayout(layout: Partial<CcLayoutV3> | null | undefined
   for (const id of Object.keys(placements) as CcWidgetId[]) {
     const candidate = layout.placements[id]
     if (!candidate) continue
+    // 槽位语义与 updateCcPlacementState 保持一致：input 槽只属于 input widget，
+    // 旧数据里"非 input 在 input 槽"会渲染消失，归一化时回落到默认槽位。
+    const candidateSlot = SLOT_SET.has(candidate.slot) ? candidate.slot : placements[id].slot
+    const slot = id === 'input'
+      ? candidateSlot === 'input' ? 'input' : placements[id].slot
+      : candidateSlot === 'input' ? placements[id].slot : candidateSlot
     placements[id] = {
-      slot: SLOT_SET.has(candidate.slot) ? candidate.slot : placements[id].slot,
+      slot,
       order: Math.round(clamp(candidate.order, 0, 99)),
       offsetX: clamp(candidate.offsetX, -48, 48),
       offsetY: clamp(candidate.offsetY, -16, 16),
@@ -68,7 +74,12 @@ export function updateCcPlacementState(
 ): CcLayoutV3 {
   const current = layout.placements[id as CcWidgetId]
   if (!current) return layout
-  const slot = partial.slot && SLOT_SET.has(partial.slot) ? partial.slot : current.slot
+  const requestedSlot = partial.slot && SLOT_SET.has(partial.slot) ? partial.slot : undefined
+  // 槽位语义校验：input 槽只属于 input widget（其他 widget 移入会被渲染过滤而消失），
+  // input widget 不得移出 input 槽（input 始终渲染在 cc-input-slot）。
+  const slot = id === 'input'
+    ? requestedSlot === 'input' ? 'input' : current.slot
+    : requestedSlot === 'input' ? current.slot : (requestedSlot ?? current.slot)
   const next: CcWidgetPlacement = {
     slot,
     order: partial.order == null ? current.order : Math.round(clamp(partial.order, 0, 99)),
@@ -88,5 +99,6 @@ export function setCcHiddenState(hiddenIds: string[], id: string, hidden: boolea
 }
 
 export function setCcScaleState(scales: Record<string, number>, id: string, scale: number): Record<string, number> {
-  return { ...scales, [id]: Math.max(50, Math.min(200, scale)) }
+  const safeScale = Number.isFinite(scale) ? scale : 100
+  return { ...scales, [id]: Math.max(50, Math.min(200, safeScale)) }
 }

@@ -1,14 +1,13 @@
 import { type MouseEventHandler } from 'react'
 import SheetTabStrip from './SheetTabStrip'
+import { useStore } from '../store'
 import type { SheetRecord } from './sheetTypes'
-import type { AgentStatus } from '../components/settings/agentTypes'
 import type { WorkspaceMenuActions } from './WorkspaceMenu'
 
 interface WorkspaceTitlebarProps {
   sheets: SheetRecord[]
   activeSheetId: string | null
   activeAgent: string
-  agentStatuses: Record<string, AgentStatus>
   sidebarCollapsed: boolean
   canReopenSheet: boolean
   onToggleSidebar: () => void
@@ -28,7 +27,6 @@ export default function WorkspaceTitlebar({
   sheets,
   activeSheetId,
   activeAgent,
-  agentStatuses,
   sidebarCollapsed,
   canReopenSheet,
   onToggleSidebar,
@@ -43,6 +41,8 @@ export default function WorkspaceTitlebar({
   onToggleFullscreen,
   onCloseWindow,
 }: WorkspaceTitlebarProps) {
+  // 在标题栏内部订阅 agent 状态：状态 tick 不再触发 App 整树（SheetHost）重渲染
+  const agentStatuses = useStore(s => s.agentStatuses)
   return (
     <header className={`workspace-titlebar ${sidebarCollapsed ? 'sidebar-collapsed' : ''}`} data-tauri-drag-region>
       <div className="workspace-titlebar-sidebar" data-tauri-drag-region>

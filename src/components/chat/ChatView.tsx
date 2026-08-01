@@ -215,14 +215,20 @@ const ChatView = React.memo(function ChatView({ sessionId }: Props) {
     }
 
     const createSession = () => {
+      const loadGeneration = nextLoadGeneration(loadGenerationRef.current[s.source])
+      loadGenerationRef.current[s.source] = loadGeneration
       invoke<SessionResponse>('new_session', { source: s.source, persona, cwd: s.workdir || undefined }).then(response => {
+        if (!isCurrentLoadGeneration(loadGenerationRef.current[s.source], loadGeneration)) return
         const res = sessionResponseObject(response)
         const periId = res.sessionId ?? res.periId
         if (periId) useStore.getState().setSessionPeriId(s.id, periId)
         const cfg = extractModelConfig(res?.configOptions)
         if (cfg.model || cfg.models) useStore.getState().setSessionConfig(s.source, { ...cfg, raw: res?.configOptions })
         syncMode(s.source, res)
-      }).catch(error => reportRuntimeError('创建会话', error))
+      }).catch(error => {
+        if (!isCurrentLoadGeneration(loadGenerationRef.current[s.source], loadGeneration)) return
+        reportRuntimeError('创建会话', error)
+      })
     }
 
     if (s.periId) {
@@ -527,9 +533,10 @@ const ChatView = React.memo(function ChatView({ sessionId }: Props) {
 function MessageRow({ renderMessage, reduceMotion, toolVisualState, rowRef, highlighted, isStatic }: { renderMessage: RenderMessage; reduceMotion: boolean; toolVisualState?: string; rowRef?: (node: HTMLDivElement | null) => void; highlighted?: boolean; isStatic?: boolean }) {
   recordRender('MessageRow.render')
   const msg = renderMessage.message
-  const toolModel = msg.role === 'tool'
+  // 展示模型是 message + 视觉状态的纯函数：props 未变时不重算（msg 引用不可变）
+  const toolModel = useMemo(() => msg.role === 'tool'
     ? buildToolPresentationModel(msg, toolVisualState ? normalizeToolStatus(toolVisualState) : undefined)
-    : undefined
+    : undefined, [msg, toolVisualState])
   const renderType = renderMessage.type
   const skipEntrance = reduceMotion || isStatic === true
   return (
@@ -605,9 +612,15 @@ function AssistantContent({ text, isStreaming = false }: { text: string; isStrea
   recordRender('AssistantContent.render')
   recordRender('markdown.parse')
   const [copied, setCopied] = useState(false)
+  const copiedTimerRef = useRef<number | null>(null)
+  useEffect(() => () => {
+    if (copiedTimerRef.current != null) window.clearTimeout(copiedTimerRef.current)
+  }, [])
   const copy = () => {
     navigator.clipboard.writeText(text)
-    setCopied(true); setTimeout(() => setCopied(false), 2000)
+    setCopied(true)
+    if (copiedTimerRef.current != null) window.clearTimeout(copiedTimerRef.current)
+    copiedTimerRef.current = window.setTimeout(() => setCopied(false), 2000)
   }
   return (
     <div className="term-assistant">
@@ -664,10 +677,15 @@ function CodeBlock({ language, code }: { language?: string; code: string }) {
     return <code className="term-inline-code">{code}</code>
   }
 
+  // 高亮 HTML 的逐行清洗是高亮结果的纯函数：只在 highlight 落地/变化时重算
+  const sanitizedLines = useMemo(() => highlighted
+    ? highlighted.html.split('\n').map(html => sanitizeHtml(html || '&nbsp;'))
+    : null, [highlighted])
+
   // 多行 → │ gutter 风格（对齐 Peri TUI code_block_lines）
   // 将 starry-night 输出的 HTML 按 \n 拆行，每行包 gutter
   const renderLines = () => {
-    if (!highlighted) {
+    if (!highlighted || !sanitizedLines) {
       return lines.map((line, i) => (
         <div key={i} className="term-code-line">
           <span className="term-code-gutter">│ </span>
@@ -675,12 +693,10 @@ function CodeBlock({ language, code }: { language?: string; code: string }) {
         </div>
       ))
     }
-    // starry-night 输出的是完整 HTML 字符串，内含 \n 分隔各行
-    const htmlLines = highlighted.html.split('\n')
-    return htmlLines.map((html, i) => (
+    return sanitizedLines.map((html, i) => (
       <div key={i} className="term-code-line">
         <span className="term-code-gutter">│ </span>
-        <span dangerouslySetInnerHTML={{ __html: sanitizeHtml(html || '&nbsp;') }} />
+        <span dangerouslySetInnerHTML={{ __html: html }} />
       </div>
     ))
   }

@@ -95,6 +95,16 @@ function TokensWidget({ sessionId }: CcWidgetRenderProps) {
   </span>
 }
 
+function ModelWidgetRenderer({ sessionId }: CcWidgetRenderProps) {
+  const sessionSource = useStore(s => s.sessions.find(item => item.id === sessionId)?.source)
+  return <ModelWidget sessionSource={sessionSource} />
+}
+
+function ModeWidgetRenderer({ sessionId }: CcWidgetRenderProps) {
+  const sessionSource = useStore(s => s.sessions.find(item => item.id === sessionId)?.source)
+  return <ModeWidget sessionSource={sessionSource} />
+}
+
 const placement = (slot: CcSlot, order: number): CcWidgetPlacement => ({ slot, order, offsetX: 0, offsetY: 0 })
 
 export const CC_WIDGET_REGISTRY: readonly CcWidgetDef[] = [
@@ -102,14 +112,8 @@ export const CC_WIDGET_REGISTRY: readonly CcWidgetDef[] = [
   { id: 'ekg', label: '用量条', category: 'context', defaultPlacement: placement('status-primary', 0), naturalSize: true, render: props => <EkgWidget {...props} /> },
   { id: 'pct', label: '百分比', category: 'context', defaultPlacement: placement('status-primary', 1), naturalSize: true, render: props => <PctWidget {...props} /> },
   { id: 'tokens', label: 'Token数', category: 'context', defaultPlacement: placement('status-primary', 2), naturalSize: true, render: props => <TokensWidget {...props} /> },
-  { id: 'model', label: '模型', category: 'runtime', defaultPlacement: placement('status-secondary', 0), naturalSize: true, render: ({ sessionId }) => {
-    const session = useStore.getState().sessions.find(item => item.id === sessionId)
-    return <ModelWidget sessionSource={session?.source} />
-  } },
-  { id: 'mode', label: '权限模式', category: 'runtime', defaultPlacement: placement('status-secondary', 1), naturalSize: true, render: ({ sessionId }) => {
-    const session = useStore.getState().sessions.find(item => item.id === sessionId)
-    return <ModeWidget sessionSource={session?.source} />
-  } },
+  { id: 'model', label: '模型', category: 'runtime', defaultPlacement: placement('status-secondary', 0), naturalSize: true, render: props => <ModelWidgetRenderer {...props} /> },
+  { id: 'mode', label: '权限模式', category: 'runtime', defaultPlacement: placement('status-secondary', 1), naturalSize: true, render: props => <ModeWidgetRenderer {...props} /> },
   { id: 'send', label: '发送按钮', category: 'action', defaultPlacement: placement('actions', 0), naturalSize: true, render: () => null },
   { id: 'attach', label: '附件按钮', category: 'action', defaultPlacement: placement('actions', 1), naturalSize: true, render: () => null },
 ]

@@ -7,11 +7,11 @@ export interface SheetState {
   recentlyClosed: SheetRecord[]
 }
 
-export const EMPTY_SHEET_STATE: SheetState = {
+export const EMPTY_SHEET_STATE: SheetState = Object.freeze({
   sheets: [],
   activeSheetId: null,
   recentlyClosed: [],
-}
+})
 
 export type SheetAction =
   | { type: 'open'; sheet: SheetInput; now: number }
@@ -73,7 +73,15 @@ export function sheetReducer(state: SheetState, action: SheetAction): SheetState
       const singletonKey = resolveSheetSingletonKey(action.sheet)
       const existing = singletonKey ? state.sheets.find(sheet => (sheet.singletonKey || resolveSheetSingletonKey(sheet)) === singletonKey) : undefined
       if (existing) return focusSheet(state, existing.id, action.now)
-      const id = action.sheet.id || `${action.sheet.kind}-${action.now.toString(36)}-${state.sheets.length}`
+      // 同毫秒/同长度防撞 id：冲突时自增后缀（防御，正常路径 id 与之前一致）
+      let id = action.sheet.id || `${action.sheet.kind}-${action.now.toString(36)}-${state.sheets.length}`
+      if (!action.sheet.id) {
+        let suffix = 1
+        while (state.sheets.some(sheet => sheet.id === id)) {
+          id = `${action.sheet.kind}-${action.now.toString(36)}-${state.sheets.length}-${suffix}`
+          suffix += 1
+        }
+      }
       const kind = isSheetKind(action.sheet.kind) ? action.sheet.kind : null
       if (!kind) return withActiveFallback(state)
       const sheet: SheetRecord = {

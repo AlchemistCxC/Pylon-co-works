@@ -201,6 +201,7 @@
   backdrop-filter:blur(16px);
 }
 .cc-edit-toolbar-label { font-size:11px; color:var(--text-dim); margin-right:4px; }
+.cc-edit-toolbar-chip-wrap { display:inline-flex; align-items:center; gap:4px; }
 .cc-edit-toolbar-chip {
   font-size:11px; padding:3px 9px;
   background:transparent; border:1px solid var(--border);
@@ -208,8 +209,15 @@
   color:var(--text); font-family:var(--mono);
 }
 .cc-edit-toolbar-chip:hover { border-color:var(--accent); color:var(--accent); }
-.cc-edit-toolbar-chip.active { background:var(--accent); color:#fff; border-color:var(--accent); }
-.cc-edit-toolbar-chip.dim { opacity:0.4; text-decoration:line-through; }
+.cc-edit-toolbar-chip-wrap.active .cc-edit-toolbar-chip { background:var(--accent); color:#fff; border-color:var(--accent); }
+.cc-edit-toolbar-chip-wrap.dim .cc-edit-toolbar-chip { opacity:0.4; text-decoration:line-through; }
+.cc-chip-toggle {
+  font-size:10px; padding:1px 6px;
+  background:transparent; border:1px solid var(--border);
+  border-radius:8px; cursor:pointer;
+  color:var(--text-dim); font-family:var(--mono);
+}
+.cc-chip-toggle:hover { border-color:var(--accent); color:var(--accent); }
 .cc-edit-toolbar-btn {
   font-size:11px; padding:3px 9px;
   background:transparent; border:1px solid var(--border);

@@ -11,11 +11,11 @@ import './SessionSettings.css'
 interface Props { sessionId: string; open: boolean; onClose: () => void; onDeleted?: () => void }
 
 export default function SessionSettings({ sessionId, open, onClose, onDeleted }: Props) {
-  const sessions = useStore(state => state.sessions)
   const updateSession = useStore(state => state.updateSession)
   const removeSession = useStore(state => state.removeSession)
   const activeAgent = useStore(state => state.activeAgent)
-  const session = sessions.find(item => item.id === sessionId)
+  // 只订阅目标会话对象：其他会话的更新（消息/改名/活跃时间）不再重渲染本对话框
+  const session = useStore(state => sessionId ? state.sessions.find(item => item.id === sessionId) : undefined)
   const initialValues = useMemo(() => createSessionSettingsValues(session), [
     sessionId,
     session?.name,

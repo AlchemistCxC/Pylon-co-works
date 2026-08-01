@@ -2,7 +2,7 @@ import { normalizeCustomPresets } from './customPresets.ts'
 import { normalizeCcLayout, type CcLayoutV3 } from './ccLayoutState.ts'
 
 export type ThemeMigrationDefaults = {
-  base: Record<string, unknown>
+  base: object
   activePreset: Record<string, string>
   dirty: Record<string, boolean>
   ccLayout: CcLayoutV3

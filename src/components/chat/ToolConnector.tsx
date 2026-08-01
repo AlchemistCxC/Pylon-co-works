@@ -1,3 +1,4 @@
+import { memo } from 'react'
 import { useStore } from '../../store'
 import { resolveConnectorColor, type ToolConnectorStatus } from './toolPresentation'
 import { toolConnectorMotionClass } from './toolIndicatorMotion'
@@ -10,7 +11,7 @@ import type { ToolVisualState } from './toolStatus'
  * - 层叠：线 z-index:1（body 背景之上、展开截断由测量控制），head z-index:2 盖线。
  * - 颜色和动画都继承连接线起点 Tool 的状态；mode none 时透明且无动画。
  */
-export default function ToolConnector({ status, visualState = 'unknown' }: {
+function ToolConnector({ status, visualState = 'unknown' }: {
   status: ToolConnectorStatus
   visualState?: ToolVisualState
 }) {
@@ -37,3 +38,6 @@ export default function ToolConnector({ status, visualState = 'unknown' }: {
     />
   )
 }
+
+// 连接线是 props + store 订阅的纯展示组件：ChatView 重渲染时跳过，主题变化仍即时生效
+export default memo(ToolConnector)

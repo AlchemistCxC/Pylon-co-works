@@ -27,8 +27,8 @@ export default function SheetHost(props: SheetHostProps) {
 }
 
 function SheetRenderer({ sheet, ...props }: { sheet: SheetRecord } & SheetHostProps) {
-  const registry = SHEET_REGISTRY[sheet.kind]
-  switch (registry.renderKey) {
+  const renderKey = SHEET_REGISTRY[sheet.kind]?.renderKey ?? 'unknown'
+  switch (renderKey) {
     case 'agent-sheet':
       return <AgentSheetView sheet={sheet} {...props} />
     case 'prism-manager-sheet':

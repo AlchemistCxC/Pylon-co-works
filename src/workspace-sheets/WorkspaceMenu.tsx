@@ -15,9 +15,11 @@ interface WorkspaceMenuProps extends WorkspaceMenuActions {
   open: boolean
   onCloseMenu: () => void
   className?: string
+  /** fixed 定位坐标（跟随右键位置）；缺省回退 CSS 定位 */
+  position?: { x: number; y: number } | null
 }
 
-export default function WorkspaceMenu({ sheet, canReopen, open, onCloseMenu, className = '', onTogglePin, onClose, onCloseOthers, onCloseRight, onReopen }: WorkspaceMenuProps) {
+export default function WorkspaceMenu({ sheet, canReopen, open, onCloseMenu, className = '', position, onTogglePin, onClose, onCloseOthers, onCloseRight, onReopen }: WorkspaceMenuProps) {
   const menuRef = useRef<HTMLDivElement>(null)
   useEffect(() => {
     if (!open) return
@@ -31,7 +33,8 @@ export default function WorkspaceMenu({ sheet, canReopen, open, onCloseMenu, cla
   const run = (action: () => void) => { action(); onCloseMenu() }
   const disabled = !sheet
   return (
-    <div ref={menuRef} className={`workspace-menu ${className}`} role="menu">
+    <div ref={menuRef} className={`workspace-menu ${className}`} role="menu"
+      style={position ? { position: 'fixed', left: position.x, top: position.y } : undefined}>
       <button type="button" role="menuitem" disabled={disabled} onClick={() => sheet && run(() => onTogglePin(sheet.id))}>{sheet?.pinned ? '取消固定 Sheet' : '固定 Sheet'}</button>
       <div className="workspace-menu-separator" />
       <button type="button" role="menuitem" disabled={disabled || Boolean(sheet?.pinned)} onClick={() => sheet && run(() => onClose(sheet.id))}>关闭当前 Sheet</button>

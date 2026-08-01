@@ -44,6 +44,8 @@ function WorkspaceTreeNode({ entry, selectedPath, onSelect, onExpand, onRead }: 
               entry={child}
               selectedPath={selectedPath}
               onSelect={onSelect}
+              onExpand={onExpand}
+              onRead={onRead}
             />
           ))}
         </ul>

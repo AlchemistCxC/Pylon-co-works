@@ -1,17 +1,13 @@
 /**
- * Backend-agnostic boundary for Workspace data access.
+ * Workspace 数据归一化纯函数。
  *
- * This module intentionally contains no Tauri, fetch, or command implementation.
- * F-14 can register a concrete adapter against this interface once the backend
- * contract is confirmed.
+ * 真实 Tauri 调用由 RightPanel 直接 invoke（见 RightPanel.tsx）：
+ *   list_workspace_entries { source, relativePath? } → WorkspaceBackendEntry[]
+ *   read_workspace_text    { source, relativePath }   → WorkspaceTextResponse
+ * 本模块不包含任何 Tauri/fetch 实现；仅负责把后端响应归一化为渲染模型。
  */
 
 import type { WorkspaceEntry, WorkspaceTextPreview, WorkspaceTree } from './rightPanelTypes'
-
-/** The only session scope that crosses the Workspace adapter boundary. */
-export interface WorkspaceApiScope {
-  source: string
-}
 
 export interface WorkspaceTextResponse {
   relativePath: string
@@ -75,31 +71,3 @@ export function normalizeWorkspaceText(value: unknown): WorkspaceTextPreview | n
 export function workspaceTreeFromEntries(entries: unknown): WorkspaceTree {
   return { entries: normalizeWorkspaceEntries(entries), selectedPath: null }
 }
-
-export interface WorkspaceRootRequest {
-  scope: WorkspaceApiScope
-}
-
-export interface WorkspaceListRequest {
-  scope: WorkspaceApiScope
-  path?: string
-}
-
-export interface WorkspaceReadRequest {
-  scope: WorkspaceApiScope
-  path: string
-}
-
-/**
- * Backend response types remain caller-supplied. The defaults deliberately do
- * not assert any response fields before the backend contract is registered.
- */
-export interface WorkspaceApiAdapter<TRoot = unknown, TList = unknown, TRead = unknown> {
-  root(request: WorkspaceRootRequest): Promise<TRoot>
-  list(request: WorkspaceListRequest): Promise<TList>
-  read(request: WorkspaceReadRequest): Promise<TRead>
-}
-
-export type WorkspaceRootResult<TAdapter extends WorkspaceApiAdapter> = Awaited<ReturnType<TAdapter['root']>>
-export type WorkspaceListResult<TAdapter extends WorkspaceApiAdapter> = Awaited<ReturnType<TAdapter['list']>>
-export type WorkspaceReadResult<TAdapter extends WorkspaceApiAdapter> = Awaited<ReturnType<TAdapter['read']>>

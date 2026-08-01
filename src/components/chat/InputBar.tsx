@@ -1,4 +1,4 @@
-import { useState, useRef, KeyboardEvent, useEffect, forwardRef, useImperativeHandle } from 'react'
+import { useState, useRef, KeyboardEvent, useEffect, forwardRef, useImperativeHandle, useMemo } from 'react'
 import { invoke } from '@tauri-apps/api/core'
 import { open, save } from '@tauri-apps/plugin-dialog'
 import { useStore } from '../../store'
@@ -9,7 +9,7 @@ import { runSendTransaction } from './sendTransaction'
 import { buildSendMessagePayload } from './sessionRuntime'
 import { resolveSessionSource } from './sessionCommandState'
 import { resolveSessionProfile } from './sessionProfile'
-import { beginCancel, createCancelState, rejectCancelCommand, type CancelState } from './cancelState'
+import { beginCancel, applyCancelEvent, createCancelState, rejectCancelCommand, type CancelState } from './cancelState'
 import { reportRuntimeError } from '../../runtimeError'
 import { stripHiddenUnicode } from '../../utils/unicodeSanitizer'
 import { Paperclip, ArrowUp, Square, Pencil, Send, Trash2 } from 'lucide-react'
@@ -18,7 +18,7 @@ import { resolveCliTextareaLayout, resolveDefaultTextareaHeight } from './inputO
 import { resolveCommandSuggestions, filterCommandSuggestions, parseSlashCommand, type CommandSuggestion } from './commandRegistry'
 import './InputBar.css'
 
-interface Props { sessionId: string | null; split?: boolean; ariaDescribedBy?: string }
+interface Props { sessionId: string | null; split?: boolean; ariaDescribedBy?: string; externalSend?: boolean; externalAttach?: boolean }
 
 const EMPTY_COMMANDS: readonly AvailableCommand[] = Object.freeze([])
 
@@ -28,7 +28,7 @@ interface QueuedMessage {
   editing: boolean
 }
 
-export default forwardRef<{ send: () => void; attachFile: () => void; cancel: () => void }, Props>(function InputBar({ sessionId, split, ariaDescribedBy }, ref) {
+export default forwardRef<{ send: () => void; attachFile: () => void; cancel: () => void }, Props>(function InputBar({ sessionId, split, ariaDescribedBy, externalSend = false, externalAttach = false }, ref) {
   const [value, setValue] = useState('')
   const [cmdIdx, setCmdIdx] = useState(0)
   const [sendError, setSendError] = useState('')
@@ -79,7 +79,7 @@ export default forwardRef<{ send: () => void; attachFile: () => void; cancel: ()
   const sessionProfile = resolveSessionProfile(sessionId, sessions, profiles)
   const persona = sessionProfile?.persona || ''
 
-  const COMMANDS = resolveCommandSuggestions(liveCommands)
+  const COMMANDS = useMemo(() => resolveCommandSuggestions(liveCommands), [liveCommands])
 
   const recordHistory = (text: string) => {
     if (!sessionSource || !text) return
@@ -293,6 +293,8 @@ export default forwardRef<{ send: () => void; attachFile: () => void; cancel: ()
     cancelStateRef.current = begun.state
     try {
       await invoke('cancel_prompt', { source: sessionSource })
+      // 成功路径收敛本地状态：canceling → cancelled，避免下次生成时停止按钮/Esc 失效
+      cancelStateRef.current = applyCancelEvent(sessionSource, { kind: 'success' }, cancelStateRef.current)
     } catch (error) {
       cancelStateRef.current = rejectCancelCommand(sessionSource, cancelStateRef.current, error)
       const detail = reportRuntimeError('取消生成', error)
@@ -412,7 +414,7 @@ export default forwardRef<{ send: () => void; attachFile: () => void; cancel: ()
       )}
       <div className="input-row">
         {inputVariant === 'cli' && <span className="cli-prefix">❯</span>}
-        {inputVariant !== 'cli' && !split && (
+        {inputVariant !== 'cli' && !split && !externalAttach && (
           <button className="input-btn attach" onClick={attachFile} title="Attach file (Ctrl+O)">
             <Paperclip size={16} />
           </button>
@@ -427,7 +429,7 @@ export default forwardRef<{ send: () => void; attachFile: () => void; cancel: ()
           aria-describedby={ariaDescribedBy}
           placeholder={showPlaceholder ? (inputVariant === 'cli' ? '' : inputVariant === 'command' ? '/ 命令或消息…' : '输入消息...（Enter 发送，Shift+Enter 换行，/ 命令）') : ''}
           rows={1} />
-        {inputVariant !== 'cli' && !split && submitButtonMode !== 'hidden' && (
+        {inputVariant !== 'cli' && !split && submitButtonMode !== 'hidden' && !externalSend && (
           <button className={`input-btn ${generating ? 'stop' : 'send'}`} onClick={generating ? cancel : send}
             title={generating ? '停止生成 (Esc / Ctrl+C)' : 'Send (Enter)'} aria-label={generating ? '停止生成' : '发送'}>
             {generating ? <Square size={16} /> : <ArrowUp size={18} />}

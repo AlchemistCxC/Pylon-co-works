@@ -1,4 +1,4 @@
-import { useState, useEffect, lazy, Suspense } from 'react'
+import { useState, useEffect, lazy, Suspense, useRef, useMemo } from 'react'
 import SheetHost from './workspace-sheets/SheetHost'
 import WorkspaceTitlebar from './workspace-sheets/WorkspaceTitlebar'
 import { useStore } from './store'
@@ -29,6 +29,9 @@ function LazyDialogFallback() {
   )
 }
 
+// 窗口控制句柄：非 Tauri 环境（浏览器预览）降级为无操作 stub。模块级单例，避免每 render 重建。
+const appWindowSingleton = (() => { try { return getCurrentWindow() } catch { return { minimize() {}, isFullscreen() { return Promise.resolve(false) }, setFullscreen(_v: boolean) { return Promise.resolve() }, destroy() {} } } })()
+
 export default function App() {
   const [activeSession, setActiveSession] = useState<string | null>(null)
   const [showSettings, setShowSettings] = useState(false)
@@ -42,10 +45,10 @@ export default function App() {
   const sessions = useStore(s => s.sessions)
   const workspaceSheets = useStore(s => s.workspaceSheets)
   const agents = useStore(s => s.agents)
-  const agentStatuses = useStore(s => s.agentStatuses)
   const hydrateWorkspaceSheets = useStore(s => s.hydrateWorkspaceSheets)
   const setSheetAgentState = useStore(s => s.setSheetAgentState)
   const activeAgent = useStore(s => s.activeAgent) || 'peri'
+  const prevActiveAgentRef = useRef<string>(activeAgent)
 
   useEffect(() => {
     const clearActiveSession = () => setActiveSession(null)
@@ -71,9 +74,11 @@ export default function App() {
     setSheetAgentState(activeAgent, { activeProfileId, activeSessionId: activeSession || undefined })
   }, [activeAgent, activeProfileId, activeSession, setSheetAgentState])
 
+  // 仅在 activeAgent 切换时聚焦该 agent 的 sheet；普通 sheet 导航（打开 Prism/工具 sheet、
+  // 点击其他 tab）不受影响。用 ref 对比避免 workspaceSheets 每次新引用触发重复聚焦。
   useEffect(() => {
-    const activeSheet = workspaceSheets.sheets.find(sheet => sheet.id === workspaceSheets.activeSheetId)
-    if (activeSheet?.kind === 'agent' && activeSheet.agentId === activeAgent) return
+    if (prevActiveAgentRef.current === activeAgent) return
+    prevActiveAgentRef.current = activeAgent
     const agentSheet = workspaceSheets.sheets.find(sheet => sheet.kind === 'agent' && sheet.agentId === activeAgent)
     if (agentSheet) useStore.getState().focusSheet(agentSheet.id)
   }, [activeAgent, workspaceSheets])
@@ -137,7 +142,10 @@ export default function App() {
     rightTransparency: s.rightTransparency, rightBlur: s.rightBlur,
   })))
 
-  const cssVars = {
+  // cssVars 只依赖 s（useShallow 稳定引用）与 sidebarCollapsed：避免 sessions/agents 等无关
+  // 状态 tick 时整棵 App 树重建 60+ CSS 变量与 6 次背景图解析。
+  const cssVars = useMemo(() => {
+    return {
     '--t': s.transparency,
     '--blur': `${s.bgBlur}px`,
     '--global-bg-image': toCssBackgroundImage(s.globalBgImage),
@@ -199,7 +207,8 @@ export default function App() {
     '--right-width': `${s.rightWidth}px`,
     '--right-transparency': s.rightTransparency,
     '--right-blur': `${s.rightBlur}px`,
-  } as React.CSSProperties
+    } as React.CSSProperties
+  }, [s, sidebarCollapsed])
 
   const ccEditMode = useStore(s => s.ccEditMode)
 
@@ -214,7 +223,7 @@ export default function App() {
     document.body.dataset.uiScheme = s.uiScheme || 'light'
   }, [s.globalBgColor, s.globalBgImage, s.transparency, s.bgBlur, s.uiScheme])
 
-  const appWindow = (() => { try { return getCurrentWindow() } catch { return { minimize() {}, isFullscreen() { return Promise.resolve(false) }, setFullscreen(_v: boolean) { return Promise.resolve() }, destroy() {} } } })()
+  const appWindow = appWindowSingleton
   const rightPanelInset = rightOpen ? s.rightWidth : 0
   const profilesOpen = showProfileEdit
   const settingsOpen = showSettings
@@ -225,7 +234,6 @@ export default function App() {
         sheets={workspaceSheets.sheets}
         activeSheetId={workspaceSheets.activeSheetId}
         activeAgent={activeAgent}
-        agentStatuses={agentStatuses}
         sidebarCollapsed={sidebarCollapsed}
         canReopenSheet={workspaceSheets.recentlyClosed.length > 0}
         onToggleSidebar={() => setSidebarCollapsed(value => !value)}

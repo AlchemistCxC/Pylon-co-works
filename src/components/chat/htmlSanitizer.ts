@@ -12,9 +12,28 @@ const DROP_CONTENT_TAGS = new Set([
   'title',
 ])
 const VOID_TAGS = new Set(['br'])
-const ALLOWED_ATTRIBUTES = new Set(['class', 'title', 'aria-hidden', 'role'])
+const ALLOWED_ATTRIBUTES = new Set(['class', 'title', 'aria-hidden', 'role', 'style'])
 const SAFE_CLASS = /^(?:pl-[A-Za-z0-9_-]+|term(?:-[A-Za-z0-9_-]+)?)$/
 const SAFE_ATTRIBUTE_VALUE = /^[^<>]*$/
+const SAFE_STYLE_PROPS = new Set(['color', 'background-color'])
+const UNSAFE_STYLE_VALUE = /(?:url\s*\(|expression\s*\(|javascript:|&|<|>|"|\\)/i
+
+/**
+ * 只放行受限 CSS 声明（Anser ANSI 着色输出需要 color/background-color），
+ * 拒绝 url()/表达式/脚本与任何可能逃逸属性边界的值。
+ */
+function sanitizeStyle(value: string): string | null {
+  const declarations: string[] = []
+  for (const part of value.split(';')) {
+    const colon = part.indexOf(':')
+    if (colon <= 0) continue
+    const property = part.slice(0, colon).trim().toLowerCase()
+    const propertyValue = part.slice(colon + 1).trim()
+    if (!propertyValue || !SAFE_STYLE_PROPS.has(property) || UNSAFE_STYLE_VALUE.test(propertyValue)) continue
+    declarations.push(`${property}: ${propertyValue}`)
+  }
+  return declarations.length > 0 ? declarations.join('; ') : null
+}
 
 function escapeText(value: string): string {
   // Keep already-escaped entities intact while escaping actual markup characters.
@@ -39,10 +58,16 @@ function sanitizeAttributes(source: string): string {
 
   while ((match = attributePattern.exec(source)) !== null) {
     const name = match[1].toLowerCase()
-    if (!ALLOWED_ATTRIBUTES.has(name) || name.startsWith('on') || name === 'style') continue
+    if (!ALLOWED_ATTRIBUTES.has(name) || name.startsWith('on')) continue
 
     const value = match[2] ?? match[3] ?? match[4] ?? ''
     if (!SAFE_ATTRIBUTE_VALUE.test(value)) continue
+
+    if (name === 'style') {
+      const styleValue = sanitizeStyle(value)
+      if (styleValue) attributes.push(`style="${escapeAttribute(styleValue)}"`)
+      continue
+    }
 
     if (name === 'class') {
       const classValue = sanitizeClass(value)

@@ -74,7 +74,11 @@ export function attachChatEventController(refs: ChatEventControllerRefs): () => 
     if (replay) return
     const session = useStore.getState().sessions.find(item => item.source === source)
     if (session) {
-      persistMessageSnapshot(session.id, next, localStorage)
+      // 写盘失败（如 localStorage 配额耗尽）不能中断事件流：事件 handler 后半段
+      // （startGenerating/setMessages 等）必须继续执行
+      try {
+        persistMessageSnapshot(session.id, next, localStorage)
+      } catch { /* 跳过本次持久化，内存态不受影响 */ }
     }
     if (isRenderedSource(source, refs.sessionRef.current)) refs.setMessages(next)
   }
@@ -309,7 +313,9 @@ export function attachChatEventController(refs: ChatEventControllerRefs): () => 
             : { kind: 'error', error },
           cancelState,
         )
-        if (!cancellationFailed) stopGenerating(source)
+        // 取消失败也移除 generating 源：若后端不再发任何事件，不能把 liveGeneratingSources 悬挂。
+        // streaming 与 summary 仍只在该事件可正常收敛时处理，避免把"仍在生成"误判为结束。
+        stopGenerating(source)
       }
       if (terminationScope === 'live' && !cancellationFailed) flushStreaming(source)
       updateSourceMessages(source, prev => [...settleReplayToolMessages(settleMessages(prev, Date.now())), {

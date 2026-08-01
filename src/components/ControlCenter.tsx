@@ -1,5 +1,6 @@
 import { useRef, useState, useCallback, useEffect, useId } from 'react'
 import { useStore } from '../store'
+import { useShallow } from 'zustand/react/shallow'
 import type { ThemeSettings } from '../store'
 import InputBar from './chat/InputBar'
 import ModelWidget from './chat/ModelWidget'
@@ -22,7 +23,6 @@ export default function ControlCenter({ sessionId }: Props) {
   const ccHeight = useStore(s => s.ccHeight) || 120
   const ccBgHeight = useStore(s => s.ccBgHeight ?? ccHeight)
   const inputMode = useStore(s => s.inputMode)
-  const inputVariant = useStore(s => s.inputVariant || (s.inputMode === 'cli' ? 'cli' : 'composer'))
   const submitButtonMode = useStore(s => s.inputSubmitButtonMode || 'inline')
   const hidden = useStore(s => s.ccHidden || [])
   const ccStyle = useStore(s => s.ccStyle)
@@ -49,19 +49,20 @@ export default function ControlCenter({ sessionId }: Props) {
     // numeric 由 pct 表达；ring 由用量 widget 表达，避免重复上下文百分比。
     if (!editMode && ccStyle === 'numeric' && id === 'ekg' && !hidden.includes('pct')) return null
     if (!editMode && ccStyle === 'ring' && id === 'pct' && !hidden.includes('ekg')) return null
-    if (!editMode && inputVariant === 'cli' && (id === 'send' || id === 'attach')) return null
 
-    // 独立 send/attach widget 是否已启用（在画布上且未隐藏）→ 决定 InputBar 是否隐藏自带按钮
-    // CLI 模式下独立按钮自动隐藏，此时 split=false（InputBar 的 CLI CSS 已隐藏自带按钮）
-    const externalBtns = inputVariant !== 'cli'
-      && submitButtonMode === 'external'
-      && (!hidden.includes('send') || !hidden.includes('attach'))
-    const inputSplit = externalBtns
+    // 独立 send/attach widget 仅在"外部按钮模式"下渲染；CLI/内联模式走 InputBar 自带按钮。
+    // externalSend/externalAttach 逐按钮决定 InputBar 是否隐藏自带按钮，避免重复或丢失。
+    // 可见性判定与 ccHeightState 统一使用 inputMode（Settings 双写保证 inputVariant 与 inputMode 同步）。
+    // 编辑模式保持原行为：只要任一外部按钮启用，InputBar 整体让位（画布此时显示全部控件）。
+    const externalBtnMode = inputMode !== 'cli' && submitButtonMode === 'external'
+    const externalSend = externalBtnMode && !hidden.includes('send')
+    const externalAttach = externalBtnMode && !hidden.includes('attach')
+    if (!editMode && (id === 'send' || id === 'attach') && !externalBtnMode) return null
 
     let body: React.ReactNode
     switch (id) {
       case 'input':
-        body = <InputBar ref={inputRef} sessionId={sessionId} split={inputSplit} ariaDescribedBy={inputHintId} />
+        body = <InputBar ref={inputRef} sessionId={sessionId} split={editMode ? (externalSend || externalAttach) : false} externalSend={externalSend} externalAttach={externalAttach} ariaDescribedBy={inputHintId} />
         break
       case 'send':
         body = <SendWidget onClick={() => inputRef.current?.send()} />
@@ -111,6 +112,8 @@ export default function ControlCenter({ sessionId }: Props) {
   })
 
   // 整体高度拖拽
+  const heightDragCleanupRef = useRef<(() => void) | null>(null)
+  useEffect(() => () => { heightDragCleanupRef.current?.() }, [])
   const onHeightDrag = useCallback((e: React.MouseEvent) => {
     e.preventDefault()
     const startY = e.clientY
@@ -118,7 +121,12 @@ export default function ControlCenter({ sessionId }: Props) {
     const onMove = (ev: MouseEvent) => {
       setCcHeight(startH + startY - ev.clientY)
     }
-    const onUp = () => { document.removeEventListener('mousemove', onMove); document.removeEventListener('mouseup', onUp) }
+    const onUp = () => {
+      heightDragCleanupRef.current = null
+      document.removeEventListener('mousemove', onMove)
+      document.removeEventListener('mouseup', onUp)
+    }
+    heightDragCleanupRef.current = onUp
     document.addEventListener('mousemove', onMove)
     document.addEventListener('mouseup', onUp)
   }, [ccHeight, setCcHeight])
@@ -218,6 +226,8 @@ function EditableWidget({ id, placement, editMode, isHidden, children, bodyRef, 
 }) {
   // 拖拽 / 缩放 — 使用 Pointer Events（统一鼠标+触屏）
   // 直接读 store.getState() 拿最新 pos，避免闭包过期
+  const pointerCleanupRef = useRef<(() => void) | null>(null)
+  useEffect(() => () => { pointerCleanupRef.current?.() }, [])
 
   const handleWidgetPointerDown = (e: React.PointerEvent) => {
     if (!editMode) return
@@ -235,9 +245,11 @@ function EditableWidget({ id, placement, editMode, isHidden, children, bodyRef, 
       })
     }
     const onUp = () => {
+      pointerCleanupRef.current = null
       window.removeEventListener('pointermove', onMove)
       window.removeEventListener('pointerup', onUp)
     }
+    pointerCleanupRef.current = onUp
     window.addEventListener('pointermove', onMove)
     window.addEventListener('pointerup', onUp)
   }
@@ -277,12 +289,19 @@ function WidgetToolbar({ selected, onSelect }: { selected: string | null; onSele
         const isHidden = hidden.includes(w.id)
         const isSelected = selected === w.id
         return (
-          <button key={w.id}
-            className={`cc-edit-toolbar-chip ${isSelected ? 'active' : ''} ${isHidden ? 'dim' : ''}`}
-            onClick={() => { onSelect(w.id); toggleHide(w.id) }}
-            title={isHidden ? '已隐藏 — 点击恢复' : '显示中 — 点击隐藏'}>
-            {isHidden ? '＋' : '●'} {w.label}
-          </button>
+          <span key={w.id}
+            className={`cc-edit-toolbar-chip-wrap ${isSelected ? 'active' : ''} ${isHidden ? 'dim' : ''}`}>
+            <button type="button" className="cc-edit-toolbar-chip"
+              onClick={() => onSelect(w.id)}
+              title="选中控件（打开属性面板）">
+              {isHidden ? '＋' : '●'} {w.label}
+            </button>
+            <button type="button" className="cc-chip-toggle"
+              onClick={() => toggleHide(w.id)}
+              title={isHidden ? '已隐藏 — 点击恢复' : '显示中 — 点击隐藏'}>
+              {isHidden ? '显示' : '隐藏'}
+            </button>
+          </span>
         )
       })}
       <button className="cc-edit-toolbar-btn" onClick={reset} title="重置所有控件位置到默认">↺ 重置位置</button>
@@ -300,7 +319,37 @@ function PropertyPanel({ id, onClose, onExit }: { id: string; onClose: () => voi
   const u = useStore(s => s.setZoneField)
   const updateCcPlacement = useStore(s => s.updateCcPlacement)
   const setCcScale = useStore(s => s.setCcScale)
-  const theme = useStore(s => s as any)
+  // 只订阅属性面板实际读取的字段：拖拽/生成期间的 live 状态变化不再重渲染面板。
+  const theme = useStore(useShallow(s => ({
+    ccScale: s.ccScale,
+    inputBg: s.inputBg,
+    inputTextColor: s.inputTextColor,
+    inputFontSize: s.inputFontSize,
+    inputMinHeight: s.inputMinHeight,
+    inputMode: s.inputMode,
+    cliLineWidth: s.cliLineWidth,
+    cliLineColor: s.cliLineColor,
+    cliLinePadding: s.cliLinePadding,
+    ccStyle: s.ccStyle,
+    ekgWidth: s.ekgWidth,
+    ekgFontSize: s.ekgFontSize,
+    ekgGreen: s.ekgGreen,
+    ekgYellow: s.ekgYellow,
+    ekgRed: s.ekgRed,
+    ekgLineWidth: s.ekgLineWidth,
+    ekgAmplitudeMax: s.ekgAmplitudeMax,
+    ekgSpeedBase: s.ekgSpeedBase,
+    ekgSpeedMax: s.ekgSpeedMax,
+    barTrackColor: s.barTrackColor,
+    barHeight: s.barHeight,
+    barFillFollow: s.barFillFollow,
+    barFillColor: s.barFillColor,
+    modelVariant: s.modelVariant,
+    modeVariant: s.modeVariant,
+    liveMode: s.liveMode,
+    sendVariant: s.sendVariant,
+    attachVariant: s.attachVariant,
+  })))
   const labels: Record<string, string> = {
     input: '输入栏', ekg: '用量条', pct: '百分比', tokens: 'Token数',
     model: '模型', mode: '权限模式', send: '发送按钮', attach: '附件按钮',
@@ -344,14 +393,16 @@ function PropertyPanel({ id, onClose, onExit }: { id: string; onClose: () => voi
           <div className="cc-prop-field"><label>最小高</label><input type="number" value={theme.inputMinHeight} onChange={v => up('inputMinHeight', +v.target.value)} step={0.1} className="set-num" min={36} max={120} /></div>
           <div className="cc-prop-field"><label>模式</label>
             <div className="set-preset-row">
-              <button className={`set-preset-chip ${theme.inputMode === 'default' ? 'active' : ''}`} onClick={() => up('inputMode', 'default')}>默认</button>
-              <button className={`set-preset-chip ${theme.inputMode === 'cli' ? 'active' : ''}`} onClick={() => up('inputMode', 'cli')}>CLI</button>
+              {/* 与 Settings 双写保持一致：inputMode 与 inputVariant 必须同步，否则
+                  ControlCenter（读 inputMode）与 InputBar（读 inputVariant）会分叉 */}
+              <button className={`set-preset-chip ${theme.inputMode === 'default' ? 'active' : ''}`} onClick={() => u('cc', { inputMode: 'default', inputVariant: 'composer' })}>默认</button>
+              <button className={`set-preset-chip ${theme.inputMode === 'cli' ? 'active' : ''}`} onClick={() => u('cc', { inputMode: 'cli', inputVariant: 'cli' })}>CLI</button>
             </div>
           </div>
           {theme.inputMode === 'cli' && <>
             <div className="cc-prop-field"><label>线宽</label><input type="number" value={theme.cliLineWidth} onChange={v => up('cliLineWidth', +v.target.value)} step={0.1} className="set-num" min={1} max={6} /></div>
             <div className="cc-prop-field"><label>线色</label><ColorPopover value={theme.cliLineColor || ''} onChange={v => up('cliLineColor', v)} /></div>
-            <div className="cc-prop-field"><label>行距</label><input type="number" value={(theme as any).cliLinePadding ?? 6} onChange={v => up('cliLinePadding', +v.target.value)} step={0.1} className="set-num" min={0} max={24} /></div>
+            <div className="cc-prop-field"><label>行距</label><input type="number" value={theme.cliLinePadding ?? 6} onChange={v => up('cliLinePadding', +v.target.value)} step={0.1} className="set-num" min={0} max={24} /></div>
           </>}
         </>}
 

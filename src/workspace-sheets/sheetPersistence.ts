@@ -24,12 +24,12 @@ interface StorageLike {
   removeItem(key: string): void
 }
 
-export const EMPTY_PERSISTED_SHEET_STATE: PersistedSheetState = {
+export const EMPTY_PERSISTED_SHEET_STATE: PersistedSheetState = Object.freeze({
   sheets: [],
   activeSheetId: null,
   recentlyClosed: [],
   agentStates: {},
-}
+})
 
 const text = (value: unknown) => typeof value === 'string' ? value.trim() : ''
 const timestamp = (value: unknown) => typeof value === 'number' && Number.isFinite(value) ? value : 0

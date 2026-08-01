@@ -29,9 +29,9 @@ export default function Sidebar({ activeSession, onSelectSession, onProfileEdit,
   const updateSession = useStore(s => s.updateSession)
   const activeProfile = profiles.find(p => p.id === activeProfileId)
 
-  const profileSessions = sessions.filter(s => s.profileId === activeProfileId)
-
+  // filter 在 memo 内：sessions/activeProfileId 变化时才重算，避免每次渲染新数组引用让 memo 失效
   const groups = useMemo(() => {
+    const profileSessions = sessions.filter(s => s.profileId === activeProfileId)
     const map = new Map<string, typeof profileSessions>()
     profileSessions.forEach(s => {
       const label = PLATFORM_LABELS[s.platform] || s.platform || '其他'
@@ -39,7 +39,7 @@ export default function Sidebar({ activeSession, onSelectSession, onProfileEdit,
       map.get(label)!.push(s)
     })
     return map
-  }, [profileSessions])
+  }, [sessions, activeProfileId])
 
   const filteredGroups = search
     ? [...groups].filter(([,items]) => items.some(s => s.name.toLowerCase().includes(search.toLowerCase())))
