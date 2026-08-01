@@ -11,8 +11,7 @@ import { runSendTransaction } from './sendTransaction'
 import { buildSendMessagePayload } from './sessionRuntime'
 import { resolveSessionSource } from './sessionCommandState'
 import { resolveSessionProfile } from './sessionProfile'
-import { beginCancel, applyCancelEvent, createCancelState, rejectCancelCommand, type CancelState } from './cancelState'
-import { reportRuntimeError } from '../../runtimeError'
+import { getChatController } from './chatEventController'
 import { stripHiddenUnicode } from '../../utils/unicodeSanitizer'
 import { Paperclip, ArrowUp, Square, Pencil, Send, Trash2 } from 'lucide-react'
 import type { AvailableCommand } from './acpTypes'
@@ -56,16 +55,6 @@ export default forwardRef<{ send: () => void; attachFile: () => void; cancel: ()
     : EMPTY_COMMANDS)
   // 当前 session 是否正在生成（用于把发送按钮切成"停止"）
   const generating = useRuntimeStore(s => sessionSource != null && (s.liveGeneratingSources || []).includes(sessionSource))
-  const cancelStateRef = useRef<CancelState>(createCancelState(sessionSource || ''))
-
-  useEffect(() => {
-    if (cancelStateRef.current.source !== (sessionSource || '')) {
-      cancelStateRef.current = createCancelState(sessionSource || '')
-    }
-    if (sessionSource && generating && cancelStateRef.current.status !== 'canceling') {
-      cancelStateRef.current = { source: sessionSource, status: 'generating' }
-    }
-  }, [sessionSource, generating])
 
   useEffect(() => {
     historyDraftRef.current = ''
@@ -289,18 +278,9 @@ export default forwardRef<{ send: () => void; attachFile: () => void; cancel: ()
 
   const cancel = async () => {
     if (!sessionId || !sessionSource) return
-    const begun = beginCancel(sessionSource, cancelStateRef.current)
-    if (!begun.shouldInvoke) return
-    cancelStateRef.current = begun.state
-    try {
-      await invoke('cancel_prompt', { source: sessionSource })
-      // 成功路径收敛本地状态：canceling → cancelled，避免下次生成时停止按钮/Esc 失效
-      cancelStateRef.current = applyCancelEvent(sessionSource, { kind: 'success' }, cancelStateRef.current)
-    } catch (error) {
-      cancelStateRef.current = rejectCancelCommand(sessionSource, cancelStateRef.current, error)
-      const detail = reportRuntimeError('取消生成', error)
-      setSendError(detail.message)
-    }
+    // 统一取消入口：与 Footer 停止按钮同路径（controller.requestCancel →
+    // reducer begin-cancel 去重 → invoke → cancel-success/rejected 收敛）
+    getChatController()?.requestCancel(sessionSource)
   }
 
   const attachFile = async () => {

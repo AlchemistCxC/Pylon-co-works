@@ -1,15 +1,5 @@
 export type RightPanelTab = 'workspace' | 'logs' | 'activity' | 'changes'
 
-export interface SessionSourceRef {
-  id: string
-  source: string
-}
-
-export function resolveSessionSource(sessionId: string | null, sessions: readonly SessionSourceRef[]) {
-  if (!sessionId) return null
-  return sessions.find(session => session.id === sessionId)?.source ?? null
-}
-
 export interface RightPanelTabDefinition {
   id: RightPanelTab
   label: string

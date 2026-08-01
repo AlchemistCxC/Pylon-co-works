@@ -46,6 +46,18 @@ export interface ChatControllerHandle {
   dispose: () => void
 }
 
+// 模块级单例：CC 里的 InputBar（不在 ChatView 子树内）经此访问统一的取消入口，
+// 避免 InputBar 另持一套 cancelState（阶段 6.1 收敛：去重由 reducer begin-cancel 承担）
+let activeController: ChatControllerHandle | null = null
+
+export function registerChatController(handle: ChatControllerHandle | null): void {
+  activeController = handle
+}
+
+export function getChatController(): ChatControllerHandle | null {
+  return activeController
+}
+
 function isRenderedSource(source: string, renderedSource: string | null): boolean {
   return source.length > 0 && renderedSource === source
 }

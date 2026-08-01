@@ -66,12 +66,3 @@ export function parseConfigNumberInput(value: string): number | undefined {
   const parsed = Number(value)
   return Number.isFinite(parsed) ? parsed : undefined
 }
-
-export function resolveSessionSource(
-  sessionId: string | null | undefined,
-  sessions: readonly { id: string; source: string }[],
-): string | undefined {
-  if (!sessionId) return undefined
-  const session = sessions.find(item => item.id === sessionId)
-  return session?.source || undefined
-}

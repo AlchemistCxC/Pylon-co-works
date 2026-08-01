@@ -31,7 +31,7 @@ import DiffCard from './DiffCard'
 import { messageMatchesQuery } from './messageSearchIndex'
 import MessageSearchBar from './MessageSearchBar'
 import ToolConnector from './ToolConnector'
-import { attachChatEventController, type ChatControllerHandle, type ChatEventControllerRefs } from './chatEventController'
+import { attachChatEventController, registerChatController, type ChatControllerHandle, type ChatEventControllerRefs } from './chatEventController'
 import './ChatView.css'
 
 interface Props { sessionId: string | null }
@@ -267,7 +267,9 @@ const ChatView = React.memo(function ChatView({ sessionId }: Props) {
   const controllerRefs = eventControllerRefs.current
   useEffect(() => {
     controllerHandleRef.current = attachChatEventController(controllerRefs)
+    registerChatController(controllerHandleRef.current)
     return () => {
+      registerChatController(null)
       controllerHandleRef.current?.dispose()
       controllerHandleRef.current = null
     }
