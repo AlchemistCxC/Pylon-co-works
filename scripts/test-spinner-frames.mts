@@ -33,7 +33,7 @@ const themeDefs = readFileSync(new URL('../src/themeFieldDefs.ts', import.meta.u
 assert.match(themeDefs, /\bspinnerDoneMarker\b[\s\S]*?control: 'spinnerMarker'/)
 assert.match(themeDefs, /\bspinnerCancelledMarker\b[\s\S]*?control: 'spinnerMarker'/)
 assert.match(themeDefs, /\bspinnerErrorMarker\b[\s\S]*?control: 'spinnerMarker'/)
-assert.match(themeDefs, /\bspinnerDoneMarkerMode:\s*S\('chat', '完成标记模式', \['frame', 'custom'\]\)/)
+assert.match(themeDefs, /\bspinnerDoneMarkerMode:\s*\{\s*\.\.\.S\('chat', '完成标记模式', \['frame', 'custom'\]\)/)
 
 const summaryRule = css.match(/\.term-summary \{[^}]+\}/)?.[0] || ''
 assert.equal(summaryRule.includes('font-size:var(--spinner-size,14px)'), true)

@@ -47,6 +47,6 @@ assert.match(css, /\.cc-status-row\s*\{[\s\S]*?font-size:\s*max\(14px,\s*var\(--
 
 // Settings entry -> zone-aware update path（声明式：defs 声明 + TAB_ZONE_MAP 映射）
 assert.match(settings, /cc:\s*'cc'/)
-assert.match(customPresets, /\bccStatusFontSize:\s*N\('cc', '信息字号', 14, 20\)/)
+assert.match(customPresets, /\bccStatusFontSize:\s*\{\s*\.\.\.N\('cc', '信息字号', 14, 20\)/)
 
 console.log('ccStatusFontSize 闭环契约测试通过')

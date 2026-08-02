@@ -1,6 +1,6 @@
 import { readFileSync } from 'node:fs'
 import { resolve } from 'node:path'
-import { THEME_SETTING_KEYS, ZONE_FIELDS } from '../src/themeFieldDefs.ts'
+import { THEME_FIELD_DEFS, THEME_SETTING_KEYS, ZONE_FIELDS } from '../src/themeFieldDefs.ts'
 
 const root = resolve(process.cwd())
 const read = (path: string) => readFileSync(resolve(root, path), 'utf8')
@@ -57,10 +57,9 @@ for (const field of spinnerFields) {
   check(!new RegExp(`(?:^|[,{]\\s*)${field}\\s*(?:,|})`).test(partialize), `partialize excludes ${field}`)
 }
 
-// Settings Spinner 字段经声明式渲染器暴露（defs 声明 + GROUP_MAP 分组）。
-const spinnerGroup = section(themeFields, "'Spinner':", '\n  },')
+// Settings Spinner 字段经声明式渲染器暴露（defs 声明 group + GROUP_ORDER 组序）。
 for (const field of spinnerFields) {
-  check(new RegExp(`\\b${field}\\b`).test(spinnerGroup), `Settings Spinner group missing ${field}`)
+  check(THEME_FIELD_DEFS[field].group === 'Spinner', `Settings Spinner group missing ${field}`)
 }
 check(/onChange: \(partial: Partial<ThemeSettings>\) => void/.test(renderer), '渲染器缺少 zone-aware onChange 路径')
 check(/const TAB_ZONE_MAP[\s\S]*terminal:\s*'chat'/.test(settings), 'Settings terminal tab is not mapped to chat zone')
