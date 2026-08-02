@@ -371,6 +371,8 @@ pub struct PreparedRpc {
     pub write_tx: mpsc::Sender<String>,
     pub rx: oneshot::Receiver<RawMessage>,
     pending: Arc<[Mutex<Pending>; PENDING_SHARDS]>,
+    /// 写超时收敛目标：send_line 超时置位，让上层快速失败并触发自动重连。
+    crashed: Arc<AtomicBool>,
 }
 
 /// 从 pending 分片移除指定 id（R3：发送失败 / 超时 / 连接关闭等失败路径统一清理入口，
@@ -393,8 +395,9 @@ impl PreparedRpc {
             write_tx,
             rx,
             pending,
+            crashed,
         } = self;
-        if let Err(error) = send_line(write_tx, line).await {
+        if let Err(error) = send_line(write_tx, line, &crashed).await {
             remove_pending_from(&pending, id);
             return Err(error);
         }
@@ -410,8 +413,9 @@ impl PreparedRpc {
             write_tx,
             rx,
             pending,
+            crashed,
         } = self;
-        if let Err(error) = send_line(write_tx, line).await {
+        if let Err(error) = send_line(write_tx, line, &crashed).await {
             remove_pending_from(&pending, id);
             return Err(error);
         }
@@ -497,8 +501,13 @@ where
 
 /// 写通道发送统一入口：10s 超时防 writer 阻塞击穿超时契约——agent 忙碌不读 stdin
 /// 时 writer 线程阻塞在 writeln!/flush，256 容量 mpsc 填满后 send 无限挂起。
-/// 超时视为连接故障（warn 日志 + Err），由调用方按连接故障收敛。
-async fn send_line(tx: mpsc::Sender<String>, line: String) -> Result<(), AcpError> {
+/// 超时视为连接故障（warn 日志 + crashed 置位 + Err）：置位后上层快速失败
+/// （后续命令立即 ConnectionClosed），dispatcher 收到崩溃通知自动重连。
+async fn send_line(
+    tx: mpsc::Sender<String>,
+    line: String,
+    crashed: &Arc<AtomicBool>,
+) -> Result<(), AcpError> {
     match tokio::time::timeout(
         std::time::Duration::from_secs(WRITE_TIMEOUT_SECS),
         tx.send(line),
@@ -509,6 +518,7 @@ async fn send_line(tx: mpsc::Sender<String>, line: String) -> Result<(), AcpErro
         Ok(Err(_)) => Err(AcpError::ConnectionClosed),
         Err(_) => {
             log::warn!("ACP write timeout after {WRITE_TIMEOUT_SECS}s: connection presumed dead");
+            crashed.store(true, Ordering::Release);
             Err(AcpError::WriteTimeout)
         }
     }
@@ -600,6 +610,7 @@ impl AcpClient {
             write_tx: self.write_tx.clone(),
             rx,
             pending: self.pending.clone(),
+            crashed: self.crashed.clone(),
         })
     }
 
@@ -734,6 +745,7 @@ impl AcpClient {
             write_tx: self.write_tx.clone(),
             rx,
             pending: self.pending.clone(),
+            crashed: self.crashed.clone(),
         })
     }
 
@@ -769,7 +781,7 @@ impl AcpClient {
         });
         let line = serde_json::to_string(&req)
             .map_err(|e| AcpError::Child(format!("serialize failed: {e}")))?;
-        send_line(self.write_tx.clone(), line).await
+        send_line(self.write_tx.clone(), line, &self.crashed).await
     }
 
     /// 应答 agent 发来的 JSON-RPC 请求（B9：session/request_permission）。
@@ -785,7 +797,7 @@ impl AcpClient {
         });
         let line = serde_json::to_string(&line)
             .map_err(|e| AcpError::Child(format!("serialize failed: {e}")))?;
-        send_line(self.write_tx.clone(), line).await
+        send_line(self.write_tx.clone(), line, &self.crashed).await
     }
 
     /// Cancel a running prompt. Fire-and-forget notification.
@@ -1040,7 +1052,7 @@ impl AcpClient {
         // 依赖后删除；id 仅用于在广播流中匹配响应。
         let params = Self::load_session_params(session_id, cwd, mcp_servers)?;
         let (id, line) = self.register_request(METHOD_SESSION_LOAD, &params, None)?;
-        send_line(self.write_tx.clone(), line).await?;
+        send_line(self.write_tx.clone(), line, &self.crashed).await?;
 
         let mut replay = Vec::new();
         loop {
@@ -1731,6 +1743,28 @@ for line in sys.stdin:
                 && value["params"]["sessionId"] == "fake-session-timeout"
         }));
     }
+
+    #[tokio::test]
+    async fn send_line_write_timeout_marks_connection_crashed() {
+        // 假死连接：容量 1 的写通道被填满且无人消费（writer 卡死），send_line 超时 →
+        // WriteTimeout + crashed 置位，后续命令快速失败并触发自动重连。
+        // 与 fake_acp_* 一致用真实时钟，超时等待 WRITE_TIMEOUT_SECS。
+        let (write_tx, _write_rx) = mpsc::channel::<String>(1);
+        write_tx
+            .send("first-line".to_string())
+            .await
+            .expect("empty channel must accept the first line");
+        let crashed = Arc::new(AtomicBool::new(false));
+        let error = send_line(write_tx, "second-line".to_string(), &crashed)
+            .await
+            .expect_err("full channel with no consumer must time out");
+        assert!(matches!(error, AcpError::WriteTimeout));
+        assert!(
+            crashed.load(Ordering::Relaxed),
+            "write timeout must mark the connection as crashed"
+        );
+    }
+
     #[tokio::test]
     async fn fake_acp_session_load_ignores_updates_from_other_sessions() {
         let script = r#"import json,sys
