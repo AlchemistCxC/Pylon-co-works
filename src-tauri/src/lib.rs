@@ -17,6 +17,7 @@ mod prism;
 mod prism_cmds;
 mod runtime;
 mod runtime_log;
+mod sanitize;
 mod session;
 #[cfg(test)]
 mod test_utils;

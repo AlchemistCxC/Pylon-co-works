@@ -1,54 +1,13 @@
-//! 会话导出（markdown/json，脱敏管线；R1 拆分自 lib.rs；C1：值内容脱敏 + markdown 注入转义）。
+//! 会话导出（markdown/json，脱敏管线；R1 拆分自 lib.rs；C1：值内容脱敏 + markdown 注入转义；
+//! R21：脱敏实现统一到 crate::sanitize，此处 re-export 保持调用面）。
 
 use crate::agent_runtime::session_mapping_matches;
 use crate::error::PylonError;
 use crate::AppState;
 
-/// O34：lowercase 一次收敛；C1：key 表扩充 password/api_key/apikey/cookie/credential。
-pub(crate) fn is_export_sensitive_key(key: &str) -> bool {
-    let lower = key.to_ascii_lowercase();
-    matches!(
-        lower.as_str(),
-        "rawinput"
-            | "rawoutput"
-            | "prompt"
-            | "persona"
-            | "headers"
-            | "env"
-            | "authorization"
-            | "password"
-            | "api_key"
-            | "apikey"
-            | "cookie"
-            | "credential"
-    ) || lower.contains("token")
-        || lower.contains("secret")
-}
-
-/// C1：非敏感 key 的 String 值做内容检测（复用 A12 的 sanitize_value_content，REDACTED 替换），
-/// 因此不再返回 None——filter_map 收敛为 map。
-pub(crate) fn sanitize_export_value(value: &serde_json::Value) -> serde_json::Value {
-    match value {
-        serde_json::Value::Object(object) => serde_json::Value::Object(
-            object
-                .iter()
-                .filter(|(key, _)| !is_export_sensitive_key(key))
-                .map(|(key, value)| (key.clone(), sanitize_export_value(value)))
-                .collect(),
-        ),
-        serde_json::Value::Array(values) => {
-            serde_json::Value::Array(values.iter().map(sanitize_export_value).collect())
-        }
-        serde_json::Value::String(value) => {
-            serde_json::Value::String(crate::runtime_log::sanitize_value_content(value))
-        }
-        other => other.clone(),
-    }
-}
-
-pub(crate) fn sanitize_export_messages(messages: &[serde_json::Value]) -> Vec<serde_json::Value> {
-    messages.iter().map(sanitize_export_value).collect()
-}
+#[cfg(test)]
+pub(crate) use crate::sanitize::is_export_sensitive_key;
+pub(crate) use crate::sanitize::sanitize_export_messages;
 
 /// C1：行内转义（title/status/peri_id 注入面）——换行折叠为空格，`#` 转义。
 fn escape_inline(value: &str) -> String {

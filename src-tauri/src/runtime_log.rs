@@ -10,6 +10,7 @@ use crate::time::Timestamp;
 
 pub const DEFAULT_CAPACITY: usize = 2000;
 const MAX_MESSAGE_BYTES: usize = 8 * 1024;
+#[cfg(test)]
 const REDACTED: &str = "[REDACTED]";
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -168,101 +169,14 @@ fn truncate(value: String, max_bytes: usize) -> String {
     format!("{}...", &value[..end])
 }
 
-/// R19：regex 归一化（A12 分隔符变体 + bearer 前缀），替换数组扫描。
-/// sanitize_message 与 sanitize_value_content 共用，消除双份 marker 列表漂移。
-pub(crate) fn contains_sensitive_pattern(lower: &str) -> bool {
-    static PATTERN: std::sync::OnceLock<regex::Regex> = std::sync::OnceLock::new();
-    PATTERN
-        .get_or_init(|| {
-            regex::Regex::new(
-                r#"(?:password|secret|token|api_key|apikey|authorization|client_secret|access_token|x-api-key|prompt|persona)\s*[:=："＝"]|bearer\s+"#,
-            )
-            .expect("SENSITIVE_KEY_PATTERN must compile")
-        })
-        .is_match(lower)
-}
-
-/// R19：裸 secret 前缀形态（sk-/ghp_/xoxb-/akia/eyj 等）检测。
-pub(crate) fn contains_bare_secret(lower: &str) -> bool {
-    static PATTERN: std::sync::OnceLock<regex::Regex> = std::sync::OnceLock::new();
-    PATTERN
-        .get_or_init(|| {
-            regex::Regex::new(r"sk-|ghp_|xoxb-|akia|eyj").expect("BARE_SECRET_PATTERN must compile")
-        })
-        .is_match(lower)
-}
-
+/// R21：脱敏实现统一到 crate::sanitize（策略参数化：runtime_log 走 Redact）。
+/// 此处仅保留 push/acp/permission 与测试所需的薄包装，hub 区（43-150）零改动。
 pub(crate) fn sanitize_message(message: String) -> String {
-    let lower = message.to_ascii_lowercase();
-    if contains_sensitive_pattern(&lower) || contains_bare_secret(&lower) {
-        return REDACTED.to_string();
-    }
-    truncate(message, MAX_MESSAGE_BYTES)
-}
-
-fn is_sensitive_key(key: &str) -> bool {
-    let key = key.to_ascii_lowercase();
-    [
-        "password",
-        "secret",
-        "authorization",
-        "headers",
-        "header",
-        "prompt",
-        "persona",
-        "content",
-        "rawinput",
-        "rawoutput",
-        "attachment",
-        "env",
-    ]
-    .iter()
-    .any(|part| key == *part)
-        || key.contains("token")
-        || key.contains("apikey")
-        || key.contains("api_key")
-}
-
-/// 字段值内容脱敏：值中若出现 secret 形态（分隔符变体/裸 secret 前缀），整体替换。
-/// 审查修复：原实现对非敏感 key 下的敏感值原样透传（`{"data": "api_key=sk-..."}`）。
-pub(crate) fn sanitize_value_content(value: &str) -> String {
-    let lower = value.to_ascii_lowercase();
-    if contains_sensitive_pattern(&lower) || contains_bare_secret(&lower) {
-        REDACTED.to_string()
-    } else {
-        value.to_string()
-    }
-}
-
-fn sanitize_value(key: &str, value: Value) -> Value {
-    if is_sensitive_key(key) {
-        return Value::String(REDACTED.to_string());
-    }
-    match value {
-        Value::Object(object) => Value::Object(
-            object
-                .into_iter()
-                .map(|(key, value)| (key.clone(), sanitize_value(&key, value)))
-                .collect(),
-        ),
-        Value::Array(values) => Value::Array(
-            values
-                .into_iter()
-                .map(|value| sanitize_value("value", value))
-                .collect(),
-        ),
-        Value::String(value) => {
-            Value::String(truncate(sanitize_value_content(&value), MAX_MESSAGE_BYTES))
-        }
-        other => other,
-    }
+    crate::sanitize::sanitize_message(message)
 }
 
 fn sanitize_fields(fields: Map<String, Value>) -> Map<String, Value> {
-    fields
-        .into_iter()
-        .map(|(key, value)| (key.clone(), sanitize_value(&key, value)))
-        .collect()
+    crate::sanitize::sanitize_fields(fields)
 }
 
 #[cfg(test)]
@@ -435,13 +349,29 @@ mod tests {
     #[test]
     fn value_content_redacts_variants_and_bare_secrets() {
         // A12 回归：值内容脱敏与消息脱敏共用检测，`token：`/裸 eyj 前缀等均覆盖
-        assert_eq!(sanitize_value_content("token：abc"), REDACTED);
-        assert_eq!(sanitize_value_content("token = abc"), REDACTED);
-        assert_eq!(sanitize_value_content(r#"{"data":"sk-abc"}"#), REDACTED);
-        assert_eq!(sanitize_value_content("eyJhbGciOiJIUzI1NiJ9"), REDACTED);
-        assert_eq!(sanitize_value_content("tokenCount=5"), "tokenCount=5");
+        // R21：实现已统一到 crate::sanitize，测试直接调用公共模块。
         assert_eq!(
-            sanitize_value_content("contentLength=42"),
+            crate::sanitize::sanitize_value_content("token：abc"),
+            REDACTED
+        );
+        assert_eq!(
+            crate::sanitize::sanitize_value_content("token = abc"),
+            REDACTED
+        );
+        assert_eq!(
+            crate::sanitize::sanitize_value_content(r#"{"data":"sk-abc"}"#),
+            REDACTED
+        );
+        assert_eq!(
+            crate::sanitize::sanitize_value_content("eyJhbGciOiJIUzI1NiJ9"),
+            REDACTED
+        );
+        assert_eq!(
+            crate::sanitize::sanitize_value_content("tokenCount=5"),
+            "tokenCount=5"
+        );
+        assert_eq!(
+            crate::sanitize::sanitize_value_content("contentLength=42"),
             "contentLength=42"
         );
     }
