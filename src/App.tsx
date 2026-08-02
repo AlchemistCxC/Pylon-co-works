@@ -10,7 +10,9 @@ import { useShallow } from 'zustand/react/shallow'
 import './App.css'
 
 import { getCurrentWindow } from '@tauri-apps/api/window'
+import { PhysicalSize } from '@tauri-apps/api/dpi'
 import { invoke } from '@tauri-apps/api/core'
+import { loadWindowSize, persistWindowSize } from './windowSizePersistence'
 import { reportRuntimeError, type RuntimeErrorDetail } from './runtimeError'
 import { toCssBackgroundImage } from './backgroundImage'
 import { listen } from '@tauri-apps/api/event'
@@ -107,6 +109,29 @@ export default function App() {
     return () => { disposed = true; unlisten.then(stop => stop()) }
   }, [])
 
+  // 窗口尺寸记忆：启动恢复上次尺寸，resize 防抖持久化（纯前端，不依赖后端）
+  useEffect(() => {
+    if (!IS_TAURI) return
+    const win = getCurrentWindow()
+    const saved = loadWindowSize(localStorage)
+    if (saved) win.setSize(new PhysicalSize(saved.width, saved.height)).catch(() => {})
+    let timer: number | null = null
+    let disposed = false
+    const unlisten = win.onResized(({ payload }) => {
+      if (disposed) return
+      if (timer !== null) window.clearTimeout(timer)
+      timer = window.setTimeout(() => {
+        timer = null
+        persistWindowSize(localStorage, { width: payload.width, height: payload.height })
+      }, 400)
+    })
+    return () => {
+      disposed = true
+      if (timer !== null) window.clearTimeout(timer)
+      unlisten.then(stop => stop())
+    }
+  }, [])
+
   useEffect(() => {
     const onKeyDown = (event: KeyboardEvent) => {
       if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === 'p') {
@@ -119,7 +144,7 @@ export default function App() {
   }, [])
 
   const s = useStore(useShallow(s => ({
-    transparency: s.transparency, bgBlur: s.bgBlur,
+    accent: s.accent, transparency: s.transparency, bgBlur: s.bgBlur,
     globalBgImage: s.globalBgImage, globalBgColor: s.globalBgColor, uiScheme: s.uiScheme,
     globalFont: s.globalFont, globalFontSize: s.globalFontSize,
     sidebarBg: s.sidebarBg, sidebarBgImage: s.sidebarBgImage, sidebarWidth: s.sidebarWidth,
@@ -129,10 +154,14 @@ export default function App() {
     chatTransparency: s.chatTransparency, chatBlur: s.chatBlur,
     chatFont: s.chatFont, chatFontSize: s.chatFontSize, chatLineHeight: s.chatLineHeight,
     chatTextColor: s.chatTextColor, chatCodeColor: s.chatCodeColor, chatCodeBg: s.chatCodeBg,
+    synKeyword: s.synKeyword, synString: s.synString, synComment: s.synComment, synLiteral: s.synLiteral,
+    synEntity: s.synEntity, synFunction: s.synFunction, synVariable: s.synVariable, synProperty: s.synProperty,
+    synRegex: s.synRegex, synMarkupHeading: s.synMarkupHeading, synCoReference: s.synCoReference, synSupport: s.synSupport,
     msgStyle: s.msgStyle, msgFont: s.msgFont, msgTextColor: s.msgTextColor, msgLineHeight: s.msgLineHeight, messageLayout: s.messageLayout,
     toolOk: s.toolOk, toolRun: s.toolRun, toolErr: s.toolErr,
     toolNameColor: s.toolNameColor, toolSummaryColor: s.toolSummaryColor,
     userTagBg: s.userTagBg, userTagText: s.userTagText,
+    diffAdded: s.diffAdded, diffRemoved: s.diffRemoved,
     inputBg: s.inputBg, inputBgImage: s.inputBgImage,
     inputTextColor: s.inputTextColor, inputPlaceholder: s.inputPlaceholder,
     inputSendBg: s.inputSendBg, inputFocusBorder: s.inputFocusBorder,
@@ -147,6 +176,7 @@ export default function App() {
     ekgSpeedBase: s.ekgSpeedBase, ekgSpeedMax: s.ekgSpeedMax,
     ekgLeftColor: s.ekgLeftColor, ekgMovingColor: s.ekgMovingColor,
     ekgConsumedColor: s.ekgConsumedColor, tokenDisplay: s.tokenDisplay, ccVariant: s.ccVariant,
+    modeAutoColor: s.modeAutoColor, modeEditColor: s.modeEditColor,
     spinnerColor: s.spinnerColor, spinnerSize: s.spinnerSize,
     rightBg: s.rightBg, rightBgImage: s.rightBgImage, rightWidth: s.rightWidth,
     rightTransparency: s.rightTransparency, rightBlur: s.rightBlur,
@@ -156,6 +186,7 @@ export default function App() {
   // 状态 tick 时整棵 App 树重建 60+ CSS 变量与 6 次背景图解析。
   const cssVars = useMemo(() => {
     return {
+    '--accent': s.accent || '#3b82f6',
     '--t': s.transparency,
     '--blur': `${s.bgBlur}px`,
     '--global-bg-image': toCssBackgroundImage(s.globalBgImage),
@@ -181,12 +212,16 @@ export default function App() {
     '--chat-text': s.chatTextColor,
     '--chat-code-color': s.chatCodeColor,
     '--chat-code-bg': s.chatCodeBg,
+    '--syn-kw': s.synKeyword, '--syn-str': s.synString, '--syn-cmt': s.synComment, '--syn-lit': s.synLiteral,
+    '--syn-ent': s.synEntity, '--syn-fn': s.synFunction, '--syn-var': s.synVariable, '--syn-prop': s.synProperty,
+    '--syn-re': s.synRegex, '--syn-mh': s.synMarkupHeading, '--syn-cor': s.synCoReference, '--syn-support': s.synSupport,
     '--msg-font': s.msgFont === 'mono' ? 'var(--mono)' : 'var(--font)',
     '--msg-text': s.msgTextColor || 'var(--chat-text,var(--text))',
     '--msg-line-height': s.msgLineHeight,
     '--tool-ok': s.toolOk, '--tool-run': s.toolRun, '--tool-err': s.toolErr,
     '--tool-name': s.toolNameColor, '--tool-summary': s.toolSummaryColor,
     '--user-tag-bg': s.userTagBg, '--user-tag-text': s.userTagText,
+    '--diff-added': s.diffAdded, '--diff-removed': s.diffRemoved,
     '--input-bg': s.inputBg,
     '--input-bg-image': toCssBackgroundImage(s.inputBgImage),
     '--input-text': s.inputTextColor, '--input-placeholder': s.inputPlaceholder,
@@ -211,6 +246,7 @@ export default function App() {
     '--ekg-left': s.ekgLeftColor, '--ekg-moving': s.ekgMovingColor,
     '--ekg-consumed': s.ekgConsumedColor, '--token-display': s.tokenDisplay,
     '--cc-variant': s.ccVariant,
+    '--mode-auto': s.modeAutoColor, '--mode-edit': s.modeEditColor,
     '--spinner-color': s.spinnerColor || undefined, '--spinner-size': `${s.spinnerSize}px`,
     '--right-bg': s.rightBg,
     '--right-bg-image': toCssBackgroundImage(s.rightBgImage),

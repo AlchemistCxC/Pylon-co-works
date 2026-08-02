@@ -34,6 +34,7 @@ export const GLOBAL_PRESETS: GlobalPreset[] = [
     label: 'Claude 风格',
     theme: {
       // global
+      accent: '#D77757',
       transparency: 1, bgBlur: 0, globalFont: 'mono', globalFontSize: 15,
       globalBgImage: '', globalBgColor: '#000000', uiScheme: 'dark',
       userName: '', userPrefix: '❯', userColor: '#D77757',
@@ -47,6 +48,10 @@ export const GLOBAL_PRESETS: GlobalPreset[] = [
       chatBg: '#000000', chatBgImage: '', chatTransparency: 1, chatBlur: 0,
       chatFont: 'mono', chatFontSize: 15, chatLineHeight: 1.5,
       chatTextColor: '#FFFFFF', chatCodeColor: '#FFC107', chatCodeBg: 'transparent',
+      // 语法高亮：CC 终端式暖色系（黑底可读，品牌橙打底）
+      synKeyword: '#e5a75b', synString: '#d4c05a', synComment: '#8a9199', synLiteral: '#e0964e',
+      synEntity: '#d7ba7d', synFunction: '#8fa1b3', synVariable: '#c9d1d9', synProperty: '#c9d1d9',
+      synRegex: '#e0964e', synMarkupHeading: '#61afef', synCoReference: '#8a9199', synSupport: '#8fa1b3',
       toolOk: '#4EBA65', toolRun: '#93A5FF', toolErr: '#FF6B80',
       toolNameColor: '#4EBA65', toolSummaryColor: '#999999',
       userTagBg: 'transparent', userTagText: '#FFFFFF',
@@ -88,6 +93,7 @@ export const GLOBAL_PRESETS: GlobalPreset[] = [
     label: 'Glass Light',
     theme: {
       // global — 高透毛玻璃
+      accent: '#6366f1',
       transparency: 0.90, bgBlur: 24, globalFont: 'system', globalFontSize: 17,
       globalBgImage: '', globalBgColor: '#f0f0f5', uiScheme: 'light',
       userName: '', userPrefix: '❯', userColor: '#6366f1',
@@ -143,6 +149,7 @@ export const GLOBAL_PRESETS: GlobalPreset[] = [
     label: 'Nord Frost',
     theme: {
       // global — 极光冷夜
+      accent: '#88c0d0',
       transparency: 0.96, bgBlur: 12, globalFont: 'mono', globalFontSize: 15,
       globalBgImage: '', globalBgColor: '#1e2130', uiScheme: 'dark',
       userName: '', userPrefix: '❯', userColor: '#88c0d0',
@@ -193,6 +200,7 @@ export const GLOBAL_PRESETS: GlobalPreset[] = [
   },
   {
     name: 'tokyo', label: 'Tokyo Night', theme: {
+      accent: '#7aa2f7',
       transparency: 1, bgBlur: 0, globalFont: 'mono', globalFontSize: 15, globalBgImage: '', globalBgColor: '#1a1b26', uiScheme: 'dark', userName: '', userPrefix: '❯', userColor: '#bb9af7',
       sidebarBg: '#16161e', sidebarBgImage: '', sidebarWidth: 240, sidebarTransparency: 1, sidebarBlur: 0, sidebarTextColor: '#a9b1d6', sidebarNameSize: 13, sidebarGroupSize: 11,
       chatBg: '#1a1b26', chatBgImage: '', chatTransparency: 1, chatBlur: 0, chatFont: 'mono', chatFontSize: 15, chatLineHeight: 1.6, chatTextColor: '#c0caf5', chatCodeColor: '#e0af68', chatCodeBg: 'rgba(122,162,247,0.06)',
@@ -205,6 +213,7 @@ export const GLOBAL_PRESETS: GlobalPreset[] = [
   },
   {
     name: 'solarized', label: 'Solarized Light', theme: {
+      accent:'#268bd2',
       transparency:1,bgBlur:0,globalFont:'mono',globalFontSize:15,globalBgImage:'',globalBgColor:'#fdf6e3',uiScheme:'light',userName:'',userPrefix:'❯',userColor:'#268bd2',
       sidebarBg:'#eee8d5',sidebarBgImage:'',sidebarWidth:240,sidebarTransparency:1,sidebarBlur:0,sidebarTextColor:'#586e75',sidebarNameSize:13,sidebarGroupSize:11,
       chatBg:'#fdf6e3',chatBgImage:'',chatTransparency:1,chatBlur:0,chatFont:'mono',chatFontSize:15,chatLineHeight:1.6,chatTextColor:'#657b83',chatCodeColor:'#b58900',chatCodeBg:'rgba(38,139,210,.06)',toolOk:'#859900',toolRun:'#268bd2',toolErr:'#dc322f',toolNameColor:'#268bd2',toolSummaryColor:'#93a1a1',userTagBg:'#eee8d5',userTagText:'#268bd2',toolIndicator:'●',toolIndicatorGlow:0,toolIndicatorGlowColor:'',toolConnectorMode:'none',toolConnectorColor:'#93a1a1',spinnerFramePreset:'wave',spinnerColor:'#b58900',spinnerSize:14,msgStyle:'terminal',msgFont:'mono',msgTextColor:'#657b83',msgLineHeight:1.6,messageLayout:'classic',footerLayout:'free',cliOverflowMode:'fixed-scroll',
@@ -213,6 +222,7 @@ export const GLOBAL_PRESETS: GlobalPreset[] = [
   },
   {
     name:'amber',label:'Amber CRT',theme:{
+      accent:'#ffb000',
       transparency:1,bgBlur:0,globalFont:'mono',globalFontSize:15,globalBgImage:'',globalBgColor:'#120b00',uiScheme:'dark',userName:'',userPrefix:'>',userColor:'#ffb000',sidebarBg:'#120b00',sidebarBgImage:'',sidebarWidth:240,sidebarTransparency:1,sidebarBlur:0,sidebarTextColor:'#cc8c00',sidebarNameSize:13,sidebarGroupSize:11,      chatBg:'#120b00',chatBgImage:'',chatTransparency:1,chatBlur:0,chatFont:'mono',chatFontSize:15,chatLineHeight:1.55,chatTextColor:'#ffcc55',chatCodeColor:'#ffe0a3',chatCodeBg:'transparent',toolOk:'#ffc24b',toolRun:'#ffb000',toolErr:'#ff6b35',toolNameColor:'#ffb000',toolSummaryColor:'#9b6b00',userTagBg:'#2b1900',userTagText:'#ffcc55',toolIndicator:'■',toolIndicatorGlow:3,toolIndicatorGlowColor:'#ffb000',toolConnectorMode:'none',toolConnectorColor:'#5c3900',spinnerFramePreset:'orbit',spinnerColor:'#ffb000',spinnerSize:14,msgStyle:'terminal',msgFont:'mono',msgTextColor:'#ffcc55',msgLineHeight:1.55,messageLayout:'classic',footerLayout:'free',cliOverflowMode:'fixed-scroll',
       ccHeight:96,ccBgHeight:96,ccBg:'#120b00',ccBgImage:'',ccStatusFontSize:14,ccStyle:'numeric',ccVariant:'terminal',ccHidden:['send','attach'],ccScale:{pct:95,tokens:95,model:95,mode:95},inputBg:'transparent',inputBgImage:'',inputTextColor:'#ffcc55',inputPlaceholder:'#7a5200',inputSendBg:'transparent',inputFocusBorder:'#ffb000',inputFontSize:15,inputMinHeight:56,inputMode:'cli',cliLineWidth:1,cliLineColor:'#9b6b00',cliTextColor:'#ffcc55',cliPromptColor:'#cc8c00',cliLinePadding:3,cliContentOffsetY:0,cliHintMode:'full',statusBg:'transparent',statusBgImage:'',ekgWidth:140,ekgFontSize:13,ekgGreen:'#ffc24b',ekgYellow:'#ffb000',ekgRed:'#ff6b35',ekgLineWidth:2,ekgAmplitudeMax:10,ekgSpeedBase:.5,ekgSpeedMax:2.5,ekgLeftColor:'#9b6b00',ekgMovingColor:'',ekgConsumedColor:'#2b1900',barTrackColor:'#2b1900',barFillColor:'#ffb000',barFillFollow:true,barHeight:8,tokenDisplay:'ekg',pillBg:'#2b1900',pillText:'#cc8c00',prismOnColor:'#ffc24b',modelVariant:'minimal',modeVariant:'minimal',sendVariant:'minimal',attachVariant:'minimal',rightBg:'#120b00',rightBgImage:'',rightWidth:260,rightTransparency:1,rightBlur:0,
     }

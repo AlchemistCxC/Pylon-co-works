@@ -198,8 +198,8 @@
 .term-code-block .pl-pds { color:var(--syn-str,#96b5b4); }           /* punctuation string */
 .term-code-block .pl-smi { color:var(--syn-prop,#c0c5ce); }          /* property */
 .term-code-block .pl-sr { color:var(--syn-re,#d08770); }            /* regex */
-.term-code-block .pl-mh { color:var(--syn-lit,#65737e); }           /* markup heading */
-.term-code-block .pl-cor { color:var(--syn-lit,#65737e); }           /* co-reference */
+.term-code-block .pl-mh { color:var(--syn-mh,#65737e); }            /* markup heading */
+.term-code-block .pl-cor { color:var(--syn-cor,#65737e); }          /* co-reference */
 .term-code-block .pl-s1 { color:var(--syn-support,#8fa1b3); }       /* support/module — blue-gray */
 
 /* ── streaming cursor ── */

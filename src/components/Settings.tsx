@@ -1,6 +1,9 @@
-import { useState } from 'react'
+import { useState, useEffect } from 'react'
 import * as Tabs from '@radix-ui/react-tabs'
 import { invoke } from '@tauri-apps/api/core'
+import { getCurrentWindow } from '@tauri-apps/api/window'
+import { PhysicalSize } from '@tauri-apps/api/dpi'
+import { clearWindowSize } from '../windowSizePersistence'
 import { useStore } from '../store'
 import { useIdentityStore } from '../identityStore'
 import { useRuntimeStore } from '../runtimeStore'
@@ -102,6 +105,32 @@ function Group({ title, children, defaultOpen }: { title:string; children:React.
       </button>
       {open && children}
     </div>
+  )
+}
+
+// 窗口尺寸：显示当前值 + 重置（记忆由 App 的 onResized 防抖持久化负责）
+function WindowSizeRow() {
+  const [size, setSize] = useState('—')
+  useEffect(() => {
+    if (typeof (window as any).__TAURI_INTERNALS__ === 'undefined') return
+    let cancelled = false
+    getCurrentWindow().outerSize().then(({ width, height }) => {
+      if (!cancelled) setSize(`${width}×${height}`)
+    }).catch(() => {})
+    return () => { cancelled = true }
+  }, [])
+  const reset = () => {
+    getCurrentWindow().setSize(new PhysicalSize(1200, 800)).catch(() => {})
+    clearWindowSize(localStorage)
+  }
+  return (
+    <Group title="窗口">
+      <Row label="当前尺寸"><span className="set-val" style={{ width: 'auto' }}>{size} px</span></Row>
+      <div className="set-hint">拖动窗口边框后自动记忆尺寸，下次启动恢复</div>
+      <div className="set-preset-row">
+        <button type="button" className="ps-btn sm" onClick={reset}>重置为默认 1200×800</button>
+      </div>
+    </Group>
   )
 }
 
@@ -332,6 +361,13 @@ export default function Settings({ onClose, activeSessionId }: { onClose?: () =>
                 </div>}
               </Group>
 
+              <Group title="强调色">
+                <Row label="强调色">
+                  <ColorPopover value={t.accent || '#3b82f6'} onChange={v=>onSettingChange({accent:v})}/>
+                </Row>
+                <div className="set-hint">链接、用户前缀、选中/焦点、spinner 光扫的统一取色</div>
+              </Group>
+
               <Group title="玻璃效果">
                 <BgImageRow label="背景图" value={t.globalBgImage||''} onChange={v=>onSettingChange({globalBgImage:v})}/>
                 <Row label="背景底色">
@@ -354,6 +390,8 @@ export default function Settings({ onClose, activeSessionId }: { onClose?: () =>
                 <Row label="字体"><Sel value={t.globalFont} onChange={v=>onSettingChange({globalFont:v})} options={['system','mono']}/></Row>
                 <Row label="基础字号"><Num value={t.globalFontSize} onChange={v=>onSettingChange({globalFontSize:v})} min={12} max={24}/></Row>
               </Group>
+
+              <WindowSizeRow />
             </Tabs.Content>
 
             {/* ═══ 左栏 ═══ */}
@@ -410,6 +448,36 @@ export default function Settings({ onClose, activeSessionId }: { onClose?: () =>
               <Group title="玻璃效果">
                 <Row label="透明度"><Slider value={t.chatTransparency} onChange={v=>onSettingChange({chatTransparency:v})} min={0} max={1}/><span className="set-val">{Math.round(t.chatTransparency*100)}%</span></Row>
                 <Row label="模糊"><Slider value={t.chatBlur} onChange={v=>onSettingChange({chatBlur:v})} min={0} max={40} step={2}/><span className="set-val">{t.chatBlur}px</span></Row>
+              </Group>
+              <Group title="语法高亮">
+                <div className="set-compact-row">
+                  <span className="set-compact-label">关键字</span>
+                  <ColorPopover value={t.synKeyword} onChange={v=>onSettingChange({synKeyword:v})} chips={false}/>
+                  <span className="set-compact-label">字符串</span>
+                  <ColorPopover value={t.synString} onChange={v=>onSettingChange({synString:v})} chips={false}/>
+                  <span className="set-compact-label">注释</span>
+                  <ColorPopover value={t.synComment} onChange={v=>onSettingChange({synComment:v})} chips={false}/>
+                  <span className="set-compact-label">数字</span>
+                  <ColorPopover value={t.synLiteral} onChange={v=>onSettingChange({synLiteral:v})} chips={false}/>
+                </div>
+                <div className="set-compact-row">
+                  <span className="set-compact-label">类型</span>
+                  <ColorPopover value={t.synEntity} onChange={v=>onSettingChange({synEntity:v})} chips={false}/>
+                  <span className="set-compact-label">函数</span>
+                  <ColorPopover value={t.synFunction} onChange={v=>onSettingChange({synFunction:v})} chips={false}/>
+                  <span className="set-compact-label">变量</span>
+                  <ColorPopover value={t.synVariable} onChange={v=>onSettingChange({synVariable:v})} chips={false}/>
+                  <span className="set-compact-label">属性</span>
+                  <ColorPopover value={t.synProperty} onChange={v=>onSettingChange({synProperty:v})} chips={false}/>
+                </div>
+                <div className="set-compact-row">
+                  <span className="set-compact-label">正则</span>
+                  <ColorPopover value={t.synRegex} onChange={v=>onSettingChange({synRegex:v})} chips={false}/>
+                  <span className="set-compact-label">标题</span>
+                  <ColorPopover value={t.synMarkupHeading} onChange={v=>onSettingChange({synMarkupHeading:v})} chips={false}/>
+                  <span className="set-compact-label">模块</span>
+                  <ColorPopover value={t.synSupport} onChange={v=>onSettingChange({synSupport:v})} chips={false}/>
+                </div>
               </Group>
 
               <h3>工具调用</h3>

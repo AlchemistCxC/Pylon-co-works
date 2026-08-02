@@ -6,7 +6,7 @@
 .term-diff-line { display:flex; min-width:max-content; padding-right:10px; white-space:pre; }
 .term-diff-line code { font:inherit; }
 .term-diff-sign { width:24px; flex-shrink:0; padding-left:8px; color:var(--text-dim); user-select:none; }
-.term-diff-added { background:color-mix(in srgb, var(--tool-ok,#1e9646) 14%, transparent); }
-.term-diff-added .term-diff-sign { color:var(--tool-ok,#1e9646); }
-.term-diff-removed { background:color-mix(in srgb, var(--tool-err,#be2828) 14%, transparent); }
-.term-diff-removed .term-diff-sign { color:var(--tool-err,#be2828); }
+.term-diff-added { background:color-mix(in srgb, var(--diff-added,#4EBA65) 14%, transparent); }
+.term-diff-added .term-diff-sign { color:var(--diff-added,#4EBA65); }
+.term-diff-removed { background:color-mix(in srgb, var(--diff-removed,#FF6B80) 14%, transparent); }
+.term-diff-removed .term-diff-sign { color:var(--diff-removed,#FF6B80); }

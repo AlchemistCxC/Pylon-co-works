@@ -86,9 +86,10 @@ function PctWidget({ sessionId }: CcWidgetRenderProps) {
 function TokensWidget({ sessionId }: CcWidgetRenderProps) {
   const runtime = useSessionLiveStats(sessionId)
   const ccScale = useStore(s => (s.ccScale || {})['tokens'] ?? 100)
+  const ekgGreen = useStore(s => s.ekgGreen)
   return <span className="pill-mono" style={{ borderLeft: 'none', padding: 0, fontSize: `${ccScale}%` }}>
     {formatTokenCount(runtime.tokensUsed)}/{formatTokenCount(runtime.tokensMax)}
-    {runtime.cacheReadTokens > 0 && <span style={{ color: '#34d399', marginLeft: 4 }}>{formatCacheReadTokens(runtime.cacheReadTokens)}</span>}
+    {runtime.cacheReadTokens > 0 && <span style={{ color: ekgGreen || '#34d399', marginLeft: 4 }}>{formatCacheReadTokens(runtime.cacheReadTokens)}</span>}
   </span>
 }
 

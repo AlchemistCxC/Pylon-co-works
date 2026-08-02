@@ -15,11 +15,18 @@ export type { Profile, Session, UserMapping, AgentEntry } from './identityStore'
 export type { SessionConfig } from './runtimeStore'
 
 export interface ThemeSettings {
+  /** 全局强调色（--accent）：链接/前缀/焦点/选中态统一取色，此前硬编码 #3b82f6 无法主题化 */
+  accent: string
   transparency: number; bgBlur: number; globalFont: string; globalFontSize: number
   globalBgImage: string; globalBgColor: string; uiScheme: string
   sidebarBg: string; sidebarBgImage: string; sidebarWidth: number; sidebarTextColor: string; sidebarNameSize: number; sidebarGroupSize: number
   chatBg: string; chatBgImage: string; chatFont: string; chatFontSize: number; chatLineHeight: number; chatTextColor: string; chatCodeColor: string; chatCodeBg: string
+  // 语法高亮（starry-night pl-* 映射，默认 base16-ocean.dark 配色）
+  synKeyword: string; synString: string; synComment: string; synLiteral: string; synEntity: string; synFunction: string
+  synVariable: string; synProperty: string; synRegex: string; synMarkupHeading: string; synCoReference: string; synSupport: string
   toolOk: string; toolRun: string; toolErr: string; toolNameColor: string; toolSummaryColor: string; userTagBg: string; userTagText: string
+  /** diff 块级色（此前复用 toolOk/toolErr，CC 系为独立柔和色） */
+  diffAdded: string; diffRemoved: string
   toolIndicatorGlow: number; toolIndicatorGlowColor: string
   toolConnectorMode: string; toolConnectorColor: string
   toolConnectorStyle: 'solid' | 'dotted' | 'pulse'; toolConnectorWidth: number; toolConnectorOpacity: number
@@ -56,6 +63,8 @@ export interface ThemeSettings {
   ccStyle: string
   ccVariant: string
   modelVariant: string; modeVariant: string; sendVariant: string; attachVariant: string
+  /** 权限模式徽标色（此前硬编码 #FFC107/#A2A9E4） */
+  modeAutoColor: string; modeEditColor: string
   ccHidden: string[]
   ccLayout: CcLayoutV3
   ccEditMode: boolean
@@ -88,10 +97,14 @@ type ThemeState = ThemeSettings & {
 }
 
 export const DEFAULTS: ThemeSettings = {
+  accent: '#3b82f6',
   transparency: 0.85, bgBlur: 16, globalFont: 'system', globalFontSize: 18, globalBgImage: '', globalBgColor: '#e8e8ec', uiScheme: 'light',
   sidebarBg: 'rgba(0,0,0,0.02)', sidebarBgImage: '', sidebarWidth: 250, sidebarTextColor: 'rgba(0,0,0,0.85)', sidebarNameSize: 14, sidebarGroupSize: 12,
   chatBg: '', chatBgImage: '', chatFont: 'mono', chatFontSize: 15, chatLineHeight: 1.4, chatTextColor: 'rgba(0,0,0,0.85)', chatCodeColor: '#b47814', chatCodeBg: 'rgba(0,0,0,0.03)',
+  synKeyword: '#b48ead', synString: '#96b5b4', synComment: '#65737e', synLiteral: '#d08770', synEntity: '#ebcb8b', synFunction: '#8fa1b3',
+  synVariable: '#c0c5ce', synProperty: '#c0c5ce', synRegex: '#d08770', synMarkupHeading: '#65737e', synCoReference: '#65737e', synSupport: '#8fa1b3',
   toolOk: '#4EBA65', toolRun: '#93A5FF', toolErr: '#FF6B80', toolNameColor: 'rgba(0,0,0,0.85)', toolSummaryColor: 'rgba(0,0,0,0.40)', userTagBg: 'rgba(168,85,247,0.08)', userTagText: '#a855f7',
+  diffAdded: '#4EBA65', diffRemoved: '#FF6B80',
   toolIndicatorGlow: 0, toolIndicatorGlowColor: '',
   toolConnectorMode: 'none', toolConnectorColor: 'rgba(0,0,0,0.12)',
   toolConnectorStyle: 'solid', toolConnectorWidth: 2, toolConnectorOpacity: 1,
@@ -117,6 +130,7 @@ export const DEFAULTS: ThemeSettings = {
   ccStyle: 'wave',
   ccVariant: 'terminal',
   modelVariant: 'dropdown', modeVariant: 'pill', sendVariant: 'icon', attachVariant: 'icon',
+  modeAutoColor: '#FFC107', modeEditColor: '#A2A9E4',
   ccHidden: [], ccLayout: cloneCcLayout(DEFAULT_CC_LAYOUT),
   ccEditMode: false,
   ccScale: {},

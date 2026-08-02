@@ -14,7 +14,7 @@ import type { ThemeSettings } from './store'
 
 export const THEME_FIELD_GROUPS = {
   global: [
-    'transparency', 'bgBlur', 'globalFont', 'globalFontSize', 'globalBgImage',
+    'accent', 'transparency', 'bgBlur', 'globalFont', 'globalFontSize', 'globalBgImage',
     'globalBgColor', 'uiScheme',
     'userName', 'userPrefix', 'userColor',
   ],
@@ -27,9 +27,12 @@ export const THEME_FIELD_GROUPS = {
     'chatBg', 'chatBgImage', 'chatTransparency', 'chatBlur',
     'chatFont', 'chatFontSize', 'chatLineHeight',
     'chatTextColor', 'chatCodeColor', 'chatCodeBg',
+    'synKeyword', 'synString', 'synComment', 'synLiteral', 'synEntity', 'synFunction',
+    'synVariable', 'synProperty', 'synRegex', 'synMarkupHeading', 'synCoReference', 'synSupport',
     'toolOk', 'toolRun', 'toolErr',
     'toolNameColor', 'toolSummaryColor',
     'userTagBg', 'userTagText',
+    'diffAdded', 'diffRemoved',
     'toolIndicator', 'toolIndicatorGlow', 'toolIndicatorGlowColor',
     'toolConnectorMode', 'toolConnectorColor', 'toolConnectorStyle', 'toolConnectorWidth', 'toolConnectorOpacity',
     'spinnerFramePreset', 'spinnerCustomFrames', 'spinnerVerbSet', 'spinnerCustomVerbs',
@@ -53,6 +56,7 @@ export const THEME_FIELD_GROUPS = {
     'tokenDisplay',
     'pillBg', 'pillText', 'prismOnColor',
     'modelVariant', 'modeVariant', 'sendVariant', 'attachVariant',
+    'modeAutoColor', 'modeEditColor',
   ],
   right: [
     'rightBg', 'rightBgImage', 'rightWidth',
