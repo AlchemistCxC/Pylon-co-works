@@ -5,14 +5,17 @@
 //! 已接线（B10.2）：send_message 由 QQ 适配器 deliver 消费；
 //! 媒体上传/typing 属出站媒体二期（BE-B10 范围外），未移植。
 
-use rand::RngExt;
 use reqwest::Client;
 
 use super::types::MSG_TYPE_MARKDOWN;
 
-/// 生成消息序列号（0..65536，用于 QQ 消息去重/乱序）。
+use std::sync::atomic::{AtomicU32, Ordering};
+
+static MSG_SEQ: AtomicU32 = AtomicU32::new(1);
+/// 生成消息序列号：进程级单调递增（修复：随机 16bit 碰撞致 QQ 幂等去重
+/// 静默吞消息；31bit 单调回绕周期 2^31，去重窗口内不可能碰撞）。
 fn msg_seq() -> u32 {
-    rand::rng().random_range(0..65536u32)
+    MSG_SEQ.fetch_add(1, Ordering::Relaxed) & 0x7FFF_FFFF
 }
 
 /// 发送文本消息到 C2C 或群聊。
@@ -142,6 +145,20 @@ mod tests {
 
     fn test_client() -> Client {
         Client::builder().build().expect("test HTTP client")
+    }
+
+    #[test]
+    fn msg_seq_is_monotonic_and_unique() {
+        // 修复（B2）：随机 16bit 碰撞致 QQ 幂等去重静默吞消息；改为进程级单调递增
+        let mut seen = std::collections::HashSet::new();
+        let mut last = 0;
+        for _ in 0..1000 {
+            let seq = msg_seq();
+            assert!(seq > last, "msg_seq 必须单调递增: {seq} <= {last}");
+            assert!(seen.insert(seq), "msg_seq 重复: {seq}");
+            last = seq;
+        }
+        assert_eq!(seen.len(), 1000);
     }
 
     #[tokio::test]
