@@ -68,6 +68,21 @@ pub(crate) async fn persist_pet_async(state: &AppState, app: &tauri::AppHandle) 
 /// 退出兜底仍无条件写盘，节流只降低轮询路径频率，最坏丢失 <60s 的变更。
 const PET_PERSIST_THROTTLE_MS: u64 = 60_000;
 
+/// O18：poke/play 高频动作的写盘短节流（5s）——连点互动合并写盘，
+/// 但 feed/rename/restore 等低频动作保持无条件写盘（状态不丢）。
+const POKE_PLAY_THROTTLE_MS: u64 = 5_000;
+
+/// O18：高频动作判定——poke/play 是高频互动（前端连点常见），写盘走短节流；
+/// 其余动作（feed/rename/restore/equip 等）低频，保持无条件写盘。
+fn is_high_frequency_action(action: &str) -> bool {
+    matches!(action, "poke" | "play")
+}
+
+/// 节流判定：距上次写盘不足 throttle_ms 视为在节流窗口内，不再落盘。
+fn within_throttle(last_persist_ms: u64, now_ms: u64, throttle_ms: u64) -> bool {
+    now_ms.saturating_sub(last_persist_ms) < throttle_ms
+}
+
 #[tauri::command]
 pub(crate) async fn get_pet(
     app: tauri::AppHandle,
@@ -164,7 +179,42 @@ pub(crate) async fn pet_action(
         }
         result
     };
-    // R6a：状态突变路径无条件写盘，但磁盘 IO 移出 pet 锁（锁外 persist_pet_async）。
-    persist_pet_async(&state, &app).await;
+    // R6a：状态突变路径写盘，磁盘 IO 移出 pet 锁（锁外 persist_pet_async）。
+    // O18：poke/play 高频动作复用 pet_last_persist_ms 短节流（5s 内重复互动
+    // 合并写盘）；feed/rename/restore 等低频动作保持无条件写盘。
+    // 写盘成功即刷新节流时间戳——否则节流判定永远"距上次 ≥5s"，节流失效。
+    let now_ms = crate::time::Timestamp::now().as_u64();
+    let last_persist = state.pet_last_persist_ms.load(Ordering::Acquire);
+    if is_high_frequency_action(&action) {
+        if !within_throttle(last_persist, now_ms, POKE_PLAY_THROTTLE_MS) {
+            persist_pet_async(&state, &app).await;
+            state.pet_last_persist_ms.store(now_ms, Ordering::Release);
+        }
+    } else {
+        persist_pet_async(&state, &app).await;
+    }
     Ok(result)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn poke_and_play_are_high_frequency_actions() {
+        assert!(is_high_frequency_action("poke"));
+        assert!(is_high_frequency_action("play"));
+        assert!(!is_high_frequency_action("feed"));
+        assert!(!is_high_frequency_action("rename"));
+        assert!(!is_high_frequency_action("restore"));
+        assert!(!is_high_frequency_action("equip"));
+    }
+
+    #[test]
+    fn throttle_window_covers_only_sub_throttle_elapsed() {
+        assert!(within_throttle(1_000, 5_999, 5_000));
+        assert!(!within_throttle(1_000, 6_000, 5_000));
+        assert!(within_throttle(0, 0, 5_000));
+        assert!(within_throttle(10_000, 1_000, 5_000));
+    }
 }
