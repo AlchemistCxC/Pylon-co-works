@@ -84,6 +84,18 @@ pub async fn send_message(
         .await
         .map_err(|e| format!("解析发送响应失败: {e}"))?;
 
+    // 修复（B3）：QQ 业务错误以 HTTP 200 + code 返回；原来只读 id，
+    // 限流/无权限/群不存在被静默判成功。Err 文案携带 code 与 message，
+    // classify_send_error 的中文匹配（频率限制/禁言/无权限等）才能命中。
+    let biz_code = data.get("code").and_then(|v| v.as_i64()).unwrap_or(0);
+    if biz_code != 0 {
+        let message = data
+            .get("message")
+            .and_then(|v| v.as_str())
+            .unwrap_or("unknown");
+        return Err(format!("HTTP 200 业务错误 code={biz_code}: {message}"));
+    }
+
     let msg_id = data
         .get("id")
         .and_then(|v| v.as_str())
@@ -229,6 +241,31 @@ mod tests {
         assert_eq!(body["markdown"]["content"], "**bold**");
         assert_eq!(body["msg_type"], 2);
         assert!(body.get("msg_id").is_none(), "无 reply_to 时不得带 msg_id");
+        server.join().expect("server thread");
+    }
+
+    #[tokio::test]
+    async fn send_message_reports_business_error_code() {
+        // 修复（B3）：HTTP 200 + code!=0 是 QQ 业务错误（限流/禁言/无权限），
+        // 原来被静默判成功返回 "unknown"
+        let (address, _request_rx, server) = spawn_capture_server(
+            b"HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: 52\r\nConnection: close\r\n\r\n{\"code\":304023,\"message\":\"\xe5\x8f\x91\xe9\x80\x81\xe6\xb6\x88\xe6\x81\xaf\xe9\xa2\x91\xe7\x8e\x87\xe9\x99\x90\xe5\x88\xb6\"}",
+        );
+        let client = test_client();
+        let error = send_message(
+            &client,
+            &format!("http://{}", address),
+            "t",
+            "chat-1",
+            "c2c",
+            "x",
+            None,
+            0,
+        )
+        .await
+        .expect_err("code!=0 必须失败");
+        assert!(error.contains("code=304023"));
+        assert!(error.contains("发送消息频率限制"));
         server.join().expect("server thread");
     }
 
