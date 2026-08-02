@@ -36,6 +36,9 @@ pub(crate) struct SessionInfo {
     pub(crate) updated_at: Option<Timestamp>,
     /// B11：回合计数（每次用户消息 +1；注入与完成持久化共用同一 round）。
     pub(crate) inject_round: u64,
+    /// B11.2：当前正在收集的回合号——回合推进时标记为最新 inject_round，
+    /// dispatcher 据此绑定流式收集（SessionInfo 无 serde derive，不落 wire/落盘）。
+    pub(crate) last_response_round: u64,
     /// B11.2：当前回合 agent 回复文本（dispatcher 流式收集，完成持久化用）。
     pub(crate) last_response_text: String,
 }
@@ -64,6 +67,7 @@ impl SessionInfo {
             context_size: 0,
             updated_at: Some(Timestamp::now()),
             inject_round: 0,
+            last_response_round: 0,
             last_response_text: String::new(),
         }
     }
@@ -101,6 +105,30 @@ impl SessionInfo {
             find_config_option(options, "mode").and_then(config_option_current_value)
         {
             self.mode = Some(mode);
+        }
+    }
+
+    /// B11.2：流式收集当前回合回复文本（完成持久化 POST /persist 用）。
+    /// 回合绑定：仅当 ① 收集标记回合 == 当前回合（标记未过期），且 ② chunk
+    /// 的接收回合 == 当前回合（事件接收后回合未推进）才追加——Round N 迟到
+    /// chunk 在 Round N+1 推进（clear）之后才被 dispatcher 追加 → 丢弃，防
+    /// 跨回合污染 persist 落库。
+    /// 上限 64KB 截断防超长回复撑爆内存；截断必须落在字符边界
+    /// （String::truncate 在非边界处 panic，会 poison sessions 锁）。
+    pub(crate) fn collect_response_chunk(&mut self, text: &str, received_round: u64) {
+        if self.last_response_round != self.inject_round {
+            return;
+        }
+        if received_round != self.inject_round {
+            return;
+        }
+        self.last_response_text.push_str(text);
+        if self.last_response_text.len() > 64 * 1024 {
+            let mut end = 64 * 1024;
+            while end > 0 && !self.last_response_text.is_char_boundary(end) {
+                end -= 1;
+            }
+            self.last_response_text.truncate(end);
         }
     }
 }
@@ -1022,6 +1050,8 @@ pub(crate) async fn send_prompt_core<R: tauri::Runtime>(
     if let Ok(mut sessions) = runtime.sessions.lock() {
         if let Some(session) = sessions.get_mut(source) {
             session.inject_round = session.inject_round.saturating_add(1);
+            // B11.2：先标记收集回合（dispatcher 据此绑定流式收集），再清空文本。
+            session.last_response_round = session.inject_round;
             session.last_response_text.clear();
         }
     }
@@ -1696,5 +1726,38 @@ mod tests {
                 assert_eq!(error.to_string(), "no active agent configured");
             }
         }
+    }
+
+    /// A3：Round N 迟到 chunk 在 Round N+1 推进（clear）之后才被 dispatcher 追加
+    /// → 必须被丢弃，不得污染 Round N+1 的 last_response_text（persist 落库依据）。
+    #[test]
+    fn stale_round_chunk_is_dropped_after_round_advance() {
+        let mut session = SessionInfo::new(
+            "peri-1".to_string(),
+            "persona".to_string(),
+            "cwd".to_string(),
+            false,
+            1,
+        );
+        // Round N 推进（send_message 内路径）：回合 +1、标记收集回合、清空文本。
+        session.inject_round = session.inject_round.saturating_add(1);
+        session.last_response_round = session.inject_round;
+        // dispatcher 于 Round N 接收并收集 chunk（received_round = 1）。
+        session.collect_response_chunk("回合N文本", 1);
+        assert_eq!(session.last_response_text, "回合N文本");
+        // Round N+1 推进：回合 +1、标记收集回合、清空文本。
+        session.inject_round = session.inject_round.saturating_add(1);
+        session.last_response_round = session.inject_round;
+        session.last_response_text.clear();
+        // Round N 迟到 chunk：接收于 Round N（received_round = 1），Round N+1
+        // 推进之后才被 dispatcher 追加 → 丢弃，不污染 Round N+1 文本。
+        session.collect_response_chunk("迟到文本", 1);
+        assert!(
+            !session.last_response_text.contains("迟到文本"),
+            "Round N 迟到 chunk 不得混入 Round N+1 的回复文本"
+        );
+        // Round N+1 自身 chunk 正常收集。
+        session.collect_response_chunk("回合N+1文本", 2);
+        assert_eq!(session.last_response_text, "回合N+1文本");
     }
 }

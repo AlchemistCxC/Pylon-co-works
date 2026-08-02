@@ -363,21 +363,20 @@ pub(crate) fn start_notification_dispatcher<R: tauri::Runtime>(
                         if text.contains("```") {
                             let _ = pet.lock().map(|mut p| crate::pet::on_code_seen(&mut p));
                         }
-                        // B11.2：流式收集当前回合回复文本（完成持久化 POST /persist 用）；
-                        // 上限 64KB 截断防超长回复撑爆内存。审查修复：必须落在字符边界
-                        // （String::truncate 在非边界处 panic，会 poison sessions 锁）。
+                        // B11.2：流式收集当前回合回复文本（完成持久化 POST /persist 用）。
+                        // 回合绑定：接收事件时捕获 session.inject_round，collect_response_chunk
+                        // 内与追加时刻的当前回合比对——Round N 迟到 chunk 在 Round N+1
+                        // 推进（clear）之后才被追加 → 丢弃，防跨回合污染。截断逻辑在方法内。
+                        let received_round = sessions
+                            .lock()
+                            .ok()
+                            .and_then(|items| {
+                                items.get(&source).map(|session| session.inject_round)
+                            })
+                            .unwrap_or(0);
                         if let Ok(mut items) = sessions.lock() {
                             if let Some(session) = items.get_mut(&source) {
-                                session.last_response_text.push_str(text);
-                                if session.last_response_text.len() > 64 * 1024 {
-                                    let mut end = 64 * 1024;
-                                    while end > 0
-                                        && !session.last_response_text.is_char_boundary(end)
-                                    {
-                                        end -= 1;
-                                    }
-                                    session.last_response_text.truncate(end);
-                                }
+                                session.collect_response_chunk(text, received_round);
                             }
                         }
                     }
