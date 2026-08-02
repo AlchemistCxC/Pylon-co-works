@@ -1,18 +1,21 @@
 //! 通知分发器：ACP 事件广播 → 前端/平台 + 崩溃处理 + 自动重连调度 + B9 权限挂起。
 //! R1 拆分自 lib.rs（行为零变化）。
 
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
 
+use crate::acp::AcpClient;
 use crate::agent_runtime;
 use crate::agent_runtime::{
     session_mapping_matches, source_for_peri_id_in_generation, AgentLifecycleStatus,
 };
 use crate::lifecycle::do_connect_and_replace;
 use crate::permission::{
-    parse_permission_request_with_generation, permission_response, pick_option,
+    parse_permission_request_with_generation, permission_response, pick_option, PendingPermission,
 };
+use crate::pet::PetState;
 use crate::runtime::AgentRuntime;
-use crate::session::{extract_tool_file_name, value_as_string};
+use crate::session::{extract_tool_file_name, value_as_string, SessionInfo};
 use crate::AppStateHandles;
 use crate::{emit_event, emit_event_all};
 
@@ -151,6 +154,250 @@ fn apply_update_event(
     pet_events
 }
 
+// R8：拆 handler 后共享状态经显式参数传递（闭包捕获收敛）——别名收敛复杂签名。
+type AcpLock = tokio::sync::Mutex<AcpClient>;
+type SessionsLock = std::sync::Mutex<std::collections::HashMap<String, SessionInfo>>;
+type PermissionLock = std::sync::Mutex<std::collections::HashMap<u64, PendingPermission>>;
+
+/// B9 权限审批（R8 自主循环拆分）：agent 主动 request_permission（带 id 请求，
+/// 客户端必须应答）。C4/C5 语义保持：代复核（应答不误写新代进程）+ 模式判定
+/// （bypass/auto 自动批准；edit/default 挂起 + 前端事件）。
+async fn handle_permission_request<R: tauri::Runtime>(
+    window: &tauri::WebviewWindow<R>,
+    acp: &AcpLock,
+    client_generation: &AtomicU64,
+    approval_mode: &std::sync::Mutex<String>,
+    pending_permissions: &PermissionLock,
+    request_id: u64,
+    params: Option<&serde_json::Value>,
+) {
+    // C4：记录到达时 client_generation——应答时复核，客户端替换后
+    // 旧进程同 id 请求不得被旧审批决策误写。
+    let Some(permission) =
+        parse_permission_request_with_generation(params, client_generation.load(Ordering::Acquire))
+    else {
+        log::warn!("ACP request_permission 解析失败 (id={request_id})，按拒绝处理");
+        let acp = acp.lock().await;
+        // C5：解析失败无选项可用 → pick_option 空集 → reject_once 兜底
+        let option_id = pick_option(&[], true).unwrap_or("reject_once");
+        let _ = acp
+            .send_response(request_id, permission_response(option_id))
+            .await;
+        return;
+    };
+    let mode = approval_mode
+        .lock()
+        .map(|m| m.clone())
+        .unwrap_or_else(|_| "default".to_string());
+    if matches!(mode.as_str(), "bypass" | "auto") {
+        log::info!(
+            "权限模式 {mode}：自动批准工具调用 {}",
+            permission.tool_call_id
+        );
+        // C5：自动批准按请求选项选 allow 语义项（无匹配取首个）。
+        let option_id = pick_option(&permission.options, false).unwrap_or("allow_once");
+        let acp = acp.lock().await;
+        let _ = acp
+            .send_response(request_id, permission_response(option_id))
+            .await;
+    } else {
+        let _ = pending_permissions.lock().map(|mut pending| {
+            pending.insert(request_id, permission.clone());
+        });
+        emit_event(
+            window,
+            "pylon:permission-request",
+            serde_json::json!({
+                "requestId": request_id,
+                "sessionId": permission.session_id,
+                "toolCallId": permission.tool_call_id,
+                "title": permission.title,
+                "prompt": permission.prompt,
+                "options": permission.options,
+                "requestedAt": permission.requested_at,
+            }),
+        );
+    }
+}
+
+/// NOTIF_SESSION_UPDATE 处理（R8 自主循环拆分）：source 解析（重试循环）→ 代际
+/// 复核 → session 状态 + 宠物感知应用（C11 回放守卫 / O7 锁外应用）→ 前端+平台
+/// 转发（B10.1）。返回 false 表示本代已结束（主循环应退出）。
+async fn handle_session_update<R: tauri::Runtime>(
+    window: &tauri::WebviewWindow<R>,
+    gateway: &crate::gateway::GatewayCore,
+    sessions: &SessionsLock,
+    pet: &std::sync::Mutex<PetState>,
+    client_generation: &AtomicU64,
+    generation: u64,
+    mut payload: serde_json::Value,
+) -> bool {
+    let peri_id = match payload.get("sessionId").and_then(|v| v.as_str()) {
+        Some(id) => id.to_string(),
+        None => {
+            log::warn!("ACP session/update missing sessionId");
+            return true;
+        }
+    };
+    let source = {
+        let mut mapped = None;
+        let mut ambiguous = false;
+        for _ in 0..20 {
+            if let Ok(items) = sessions.lock() {
+                let mappings = items
+                    .iter()
+                    .map(|(source, info)| (source, &info.peri_id, info.generation));
+                mapped = source_for_peri_id_in_generation(mappings, &peri_id, generation);
+                ambiguous = items
+                    .values()
+                    .filter(|info| info.peri_id == peri_id && info.generation == generation)
+                    .count()
+                    > 1;
+            }
+            if mapped.is_some() || ambiguous {
+                break;
+            }
+            tokio::time::sleep(std::time::Duration::from_millis(5)).await;
+        }
+        if ambiguous {
+            log::warn!(
+                "ACP notification rejected: periId {} maps to multiple local sources",
+                peri_id
+            );
+            return true;
+        }
+        let Some(mapped) = mapped else {
+            log::warn!("ACP notification for unknown session {}", peri_id);
+            return true;
+        };
+        mapped.0
+    };
+    // source_for_peri_id_in_generation 已按代过滤（返回的映射
+    // generation 必等于本 dispatcher 代），此处仅复核客户端未替换。
+    if client_generation.load(Ordering::Acquire) != generation {
+        log::warn!("ACP notification rejected for stale session {}", peri_id);
+        return true;
+    }
+    let Some(update) = payload.get("update") else {
+        log::warn!("ACP session/update missing update payload");
+        return true;
+    };
+    // R4：sessionUpdate 变体经枚举解析（未知变体 → None，与旧 _ => {} 忽略一致）。
+    let variant = update
+        .get("sessionUpdate")
+        .and_then(|v| v.as_str())
+        .and_then(crate::acp::SessionUpdateVariant::from_str);
+    let is_replay = update
+        .get("_meta")
+        .and_then(|meta| meta.get("periReplay"))
+        .and_then(|value| value.as_bool())
+        .unwrap_or(false);
+    let mapping_is_current = || {
+        client_generation.load(Ordering::Acquire) == generation
+            && sessions.lock().ok().and_then(|items| {
+                items.get(&source).map(|session| {
+                    session_mapping_matches(
+                        &session.peri_id,
+                        session.generation,
+                        &peri_id,
+                        generation,
+                    )
+                })
+            }) == Some(true)
+    };
+    if !mapping_is_current() {
+        log::warn!("ACP notification rejected for stale session {}", peri_id);
+        return true;
+    }
+    if variant == Some(crate::acp::SessionUpdateVariant::AgentMessageChunk) {
+        // C11：回放事件不触发宠物感知（on_first_chunk/on_code_seen）也不流式
+        // 收集回复文本（last_response_text 不得被回放内容污染）。事件本身仍
+        // 照常转发前端（emit_event_all 不变）。
+        if !is_replay {
+            let _ = pet.lock().map(|mut p| crate::pet::on_first_chunk(&mut p));
+            // M5 感知：输出含代码块 → 宠物蹲在屏幕前看
+            if let Some(text) = update
+                .get("content")
+                .and_then(|c| c.get("text"))
+                .and_then(|v| v.as_str())
+            {
+                if text.contains("```") {
+                    let _ = pet.lock().map(|mut p| crate::pet::on_code_seen(&mut p));
+                }
+                // B11.2：流式收集当前回合回复文本（完成持久化 POST /persist 用）。
+                // 回合绑定：接收事件时捕获 session.inject_round，collect_response_chunk
+                // 内与追加时刻的当前回合比对——Round N 迟到 chunk 在 Round N+1
+                // 推进（clear）之后才被追加 → 丢弃，防跨回合污染。截断逻辑在方法内。
+                let received_round = sessions
+                    .lock()
+                    .ok()
+                    .and_then(|items| items.get(&source).map(|session| session.inject_round))
+                    .unwrap_or(0);
+                if let Ok(mut items) = sessions.lock() {
+                    if let Some(session) = items.get_mut(&source) {
+                        session.collect_response_chunk(text, received_round);
+                    }
+                }
+            }
+        }
+    }
+    if variant == Some(crate::acp::SessionUpdateVariant::UserMessageChunk) {
+        if is_replay {
+            if let Some(text) = update
+                .get("content")
+                .and_then(|c| c.get("text"))
+                .and_then(|v| v.as_str())
+            {
+                emit_event(
+                    window,
+                    "peri:user",
+                    serde_json::json!({
+                        "source": source,
+                        "content": text,
+                        "replay": is_replay,
+                    }),
+                );
+            }
+        }
+        return true;
+    }
+    let mut mapping_current_at_mutation = false;
+    // O7：pet 感知事件在 sessions 锁内收集、锁外统一应用——
+    // 消除 sessions → pet 锁嵌套；收集顺序 = 应用顺序，行为等价。
+    let mut pet_events: Vec<PetEvent> = Vec::new();
+    if let Ok(mut items) = sessions.lock() {
+        if client_generation.load(Ordering::Acquire) == generation {
+            if let Some(session) = items.get(&source) {
+                mapping_current_at_mutation = session_mapping_matches(
+                    &session.peri_id,
+                    session.generation,
+                    &peri_id,
+                    generation,
+                );
+            }
+        }
+        if mapping_current_at_mutation {
+            if let Some(session) = items.get_mut(&source) {
+                pet_events = apply_update_event(session, update, variant, is_replay);
+            }
+        }
+    }
+    for event in pet_events {
+        let _ = pet.lock().map(|mut p| event.apply(&mut p));
+    }
+    if client_generation.load(Ordering::Acquire) != generation {
+        return false;
+    }
+    if let serde_json::Value::Object(ref mut map) = payload {
+        map.insert(
+            "source".to_string(),
+            serde_json::Value::String(source.clone()),
+        );
+    }
+    emit_event_all(window, gateway, &source, "peri:update", payload);
+    true
+}
+
 /// 启动（或重启）通知分发器：订阅 ACP broadcast 流，把事件路由到
 /// 前端（WebView 事件）与平台（gateway deliver_all），并处理崩溃/权限/宠物感知。
 pub(crate) fn start_notification_dispatcher<R: tauri::Runtime>(
@@ -184,7 +431,6 @@ pub(crate) fn start_notification_dispatcher<R: tauri::Runtime>(
     let pending_permissions = runtime.pending_permissions.clone();
     let runtime_for_reconnect = runtime.clone();
     *task = Some(tokio::spawn(async move {
-        use std::sync::atomic::Ordering;
         let mut rx = acp.lock().await.rx.resubscribe();
         // A7：崩溃信号独立 watch 通道——broadcast 洪泛 Lagged 时 NOTIF_AGENT_CRASHED
         // 会丢，自动重连依赖本通道（主循环 select! 双路监听，见下）。
@@ -402,234 +648,43 @@ pub(crate) fn start_notification_dispatcher<R: tauri::Runtime>(
             // B9 权限审批：agent 主动 request_permission（带 id 请求，客户端必须应答）。
             // 模式判定：bypass/auto 自动批准；edit/default 挂起 + 前端事件。
             if raw.method.as_deref() == Some(crate::acp::METHOD_SESSION_REQUEST_PERMISSION) {
-                let Some(request_id) = raw.id else {
-                    continue;
-                };
-                // C4：记录到达时 client_generation——应答时复核，客户端替换后
-                // 旧进程同 id 请求不得被旧审批决策误写。
-                let Some(permission) = parse_permission_request_with_generation(
-                    raw.params.as_ref(),
-                    client_generation.load(Ordering::Acquire),
-                ) else {
-                    log::warn!("ACP request_permission 解析失败 (id={request_id})，按拒绝处理");
-                    let acp = acp.lock().await;
-                    // C5：解析失败无选项可用 → pick_option 空集 → reject_once 兜底
-                    let option_id = pick_option(&[], true).unwrap_or("reject_once");
-                    let _ = acp
-                        .send_response(request_id, permission_response(option_id))
-                        .await;
-                    continue;
-                };
-                let mode = approval_mode
-                    .lock()
-                    .map(|m| m.clone())
-                    .unwrap_or_else(|_| "default".to_string());
-                if matches!(mode.as_str(), "bypass" | "auto") {
-                    log::info!(
-                        "权限模式 {mode}：自动批准工具调用 {}",
-                        permission.tool_call_id
-                    );
-                    // C5：自动批准按请求选项选 allow 语义项（无匹配取首个）。
-                    let option_id = pick_option(&permission.options, false).unwrap_or("allow_once");
-                    let acp = acp.lock().await;
-                    let _ = acp
-                        .send_response(request_id, permission_response(option_id))
-                        .await;
-                } else {
-                    let _ = pending_permissions.lock().map(|mut pending| {
-                        pending.insert(request_id, permission.clone());
-                    });
-                    emit_event(
+                if let Some(request_id) = raw.id {
+                    handle_permission_request(
                         &window,
-                        "pylon:permission-request",
-                        serde_json::json!({
-                            "requestId": request_id,
-                            "sessionId": permission.session_id,
-                            "toolCallId": permission.tool_call_id,
-                            "title": permission.title,
-                            "prompt": permission.prompt,
-                            "options": permission.options,
-                            "requestedAt": permission.requested_at,
-                        }),
-                    );
+                        &acp,
+                        &client_generation,
+                        &approval_mode,
+                        &pending_permissions,
+                        request_id,
+                        raw.params.as_ref(),
+                    )
+                    .await;
                 }
                 continue;
             }
             if raw.method.as_deref() != Some(crate::acp::NOTIF_SESSION_UPDATE) {
                 continue;
             }
-            let mut payload = match raw.params {
+            let payload = match raw.params {
                 Some(serde_json::Value::Object(map)) => serde_json::Value::Object(map),
                 _ => {
                     log::warn!("ACP session/update missing object params");
                     continue;
                 }
             };
-            let peri_id = match payload.get("sessionId").and_then(|v| v.as_str()) {
-                Some(id) => id.to_string(),
-                None => {
-                    log::warn!("ACP session/update missing sessionId");
-                    continue;
-                }
-            };
-            let source = {
-                let mut mapped = None;
-                let mut ambiguous = false;
-                for _ in 0..20 {
-                    if let Ok(items) = sessions.lock() {
-                        let mappings = items
-                            .iter()
-                            .map(|(source, info)| (source, &info.peri_id, info.generation));
-                        mapped = source_for_peri_id_in_generation(mappings, &peri_id, generation);
-                        ambiguous = items
-                            .values()
-                            .filter(|info| info.peri_id == peri_id && info.generation == generation)
-                            .count()
-                            > 1;
-                    }
-                    if mapped.is_some() || ambiguous {
-                        break;
-                    }
-                    tokio::time::sleep(std::time::Duration::from_millis(5)).await;
-                }
-                if ambiguous {
-                    log::warn!(
-                        "ACP notification rejected: periId {} maps to multiple local sources",
-                        peri_id
-                    );
-                    continue;
-                }
-                let Some(mapped) = mapped else {
-                    log::warn!("ACP notification for unknown session {}", peri_id);
-                    continue;
-                };
-                mapped.0
-            };
-            // source_for_peri_id_in_generation 已按代过滤（返回的映射
-            // generation 必等于本 dispatcher 代），此处仅复核客户端未替换。
-            if client_generation.load(Ordering::Acquire) != generation {
-                log::warn!("ACP notification rejected for stale session {}", peri_id);
-                continue;
-            }
-            let Some(update) = payload.get("update") else {
-                log::warn!("ACP session/update missing update payload");
-                continue;
-            };
-            // R4：sessionUpdate 变体经枚举解析（未知变体 → None，与旧 _ => {} 忽略一致）。
-            let variant = update
-                .get("sessionUpdate")
-                .and_then(|v| v.as_str())
-                .and_then(crate::acp::SessionUpdateVariant::from_str);
-            let is_replay = update
-                .get("_meta")
-                .and_then(|meta| meta.get("periReplay"))
-                .and_then(|value| value.as_bool())
-                .unwrap_or(false);
-            let mapping_is_current = || {
-                client_generation.load(Ordering::Acquire) == generation
-                    && sessions.lock().ok().and_then(|items| {
-                        items.get(&source).map(|session| {
-                            session_mapping_matches(
-                                &session.peri_id,
-                                session.generation,
-                                &peri_id,
-                                generation,
-                            )
-                        })
-                    }) == Some(true)
-            };
-            if !mapping_is_current() {
-                log::warn!("ACP notification rejected for stale session {}", peri_id);
-                continue;
-            }
-            if variant == Some(crate::acp::SessionUpdateVariant::AgentMessageChunk) {
-                // C11：回放事件不触发宠物感知（on_first_chunk/on_code_seen）也不流式
-                // 收集回复文本（last_response_text 不得被回放内容污染）。事件本身仍
-                // 照常转发前端（emit_event_all 不变）。
-                if !is_replay {
-                    let _ = pet.lock().map(|mut p| crate::pet::on_first_chunk(&mut p));
-                    // M5 感知：输出含代码块 → 宠物蹲在屏幕前看
-                    if let Some(text) = update
-                        .get("content")
-                        .and_then(|c| c.get("text"))
-                        .and_then(|v| v.as_str())
-                    {
-                        if text.contains("```") {
-                            let _ = pet.lock().map(|mut p| crate::pet::on_code_seen(&mut p));
-                        }
-                        // B11.2：流式收集当前回合回复文本（完成持久化 POST /persist 用）。
-                        // 回合绑定：接收事件时捕获 session.inject_round，collect_response_chunk
-                        // 内与追加时刻的当前回合比对——Round N 迟到 chunk 在 Round N+1
-                        // 推进（clear）之后才被追加 → 丢弃，防跨回合污染。截断逻辑在方法内。
-                        let received_round = sessions
-                            .lock()
-                            .ok()
-                            .and_then(|items| {
-                                items.get(&source).map(|session| session.inject_round)
-                            })
-                            .unwrap_or(0);
-                        if let Ok(mut items) = sessions.lock() {
-                            if let Some(session) = items.get_mut(&source) {
-                                session.collect_response_chunk(text, received_round);
-                            }
-                        }
-                    }
-                }
-            }
-            if variant == Some(crate::acp::SessionUpdateVariant::UserMessageChunk) {
-                if is_replay {
-                    if let Some(text) = update
-                        .get("content")
-                        .and_then(|c| c.get("text"))
-                        .and_then(|v| v.as_str())
-                    {
-                        emit_event(
-                            &window,
-                            "peri:user",
-                            serde_json::json!({
-                                "source": source,
-                                "content": text,
-                                "replay": is_replay,
-                            }),
-                        );
-                    }
-                }
-                continue;
-            }
-            let mut mapping_current_at_mutation = false;
-            // O7：pet 感知事件在 sessions 锁内收集、锁外统一应用——
-            // 消除 sessions → pet 锁嵌套；收集顺序 = 应用顺序，行为等价。
-            let mut pet_events: Vec<PetEvent> = Vec::new();
-            if let Ok(mut items) = sessions.lock() {
-                if client_generation.load(Ordering::Acquire) == generation {
-                    if let Some(session) = items.get(&source) {
-                        mapping_current_at_mutation = session_mapping_matches(
-                            &session.peri_id,
-                            session.generation,
-                            &peri_id,
-                            generation,
-                        );
-                    }
-                }
-                if mapping_current_at_mutation {
-                    if let Some(session) = items.get_mut(&source) {
-                        pet_events = apply_update_event(session, update, variant, is_replay);
-                    }
-                }
-            }
-            for event in pet_events {
-                let _ = pet.lock().map(|mut p| event.apply(&mut p));
-            }
-            if client_generation.load(Ordering::Acquire) != generation {
+            if !handle_session_update(
+                &window,
+                &gateway,
+                &sessions,
+                &pet,
+                &client_generation,
+                generation,
+                payload,
+            )
+            .await
+            {
                 break;
             }
-            if let serde_json::Value::Object(ref mut map) = payload {
-                map.insert(
-                    "source".to_string(),
-                    serde_json::Value::String(source.clone()),
-                );
-            }
-            emit_event_all(&window, &gateway, &source, "peri:update", payload);
         }
     }));
 }
