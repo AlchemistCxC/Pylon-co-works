@@ -1133,6 +1133,61 @@ async fn finalize_response<R: tauri::Runtime>(
     Ok(peri_id)
 }
 
+/// S3：prompt Response 错误是否携带"会话不存在"语义（幽灵映射自动重建判定）。
+/// agent 重启/会话回收后，本地映射的 peri_id 指向已死会话，prompt 会返回
+/// "session not found" 类 RPC 错误。对 error 的 JSON 序列化串做小写化宽松子串匹配：
+/// - 含 "not found"（排除 "method not found"——-32601 方法不支持，非会话缺失，
+///   与 close_session 的 -32601 降级语义一致）
+/// - 或含 "not exist"
+/// - 或同时含 "session" 与 ("invalid" | "unknown" | "missing")
+///   网络/临时错误（连接关闭/写超时/拒绝/取消等）不命中，不触发映射清理。
+pub(crate) fn prompt_error_indicates_missing_session(error: &str) -> bool {
+    let lower = error.to_lowercase();
+    if lower.contains("method not found") {
+        return false;
+    }
+    lower.contains("not found")
+        || lower.contains("not exist")
+        || (lower.contains("session")
+            && (lower.contains("invalid")
+                || lower.contains("unknown")
+                || lower.contains("missing")))
+}
+
+/// S3：Response 错误分支的幽灵映射清理——错误含"会话不存在"语义时，按
+/// (peri_id, generation) 复核删除本地映射（O1：锁表同步收敛）；下一条消息
+/// 自动走会话重建路径。返回是否删除了映射。事件（peri:error）与 pet 感知
+/// 由调用方保持原顺序，本函数只负责映射收敛与日志。
+pub(crate) fn cleanup_ghost_session_mapping(
+    state: &AppState,
+    runtime: &Arc<AgentRuntime>,
+    source: &str,
+    peri_id: &str,
+    prompt_generation: u64,
+    error: &str,
+) -> bool {
+    if !prompt_error_indicates_missing_session(error) {
+        return false;
+    }
+    match state.remove_session_if_matches(runtime, source, peri_id, prompt_generation) {
+        Ok(true) => {
+            state.log_runtime_summary(
+                "warn",
+                "session",
+                Some(source.to_string()),
+                &format!("Agent session {peri_id} missing ({error}); removed stale mapping — next prompt will rebuild"),
+                serde_json::Map::new(),
+            );
+            true
+        }
+        Ok(false) => false,
+        Err(remove_error) => {
+            tracing::warn!("remove stale session mapping failed: {remove_error}");
+            false
+        }
+    }
+}
+
 /// 公共发送管线（GUI `send_message` 与 gateway 平台 ingest 共用，B10.3）：
 /// per-runtime 会话创建/映射/prompt 锁/等待/cancel/事件广播。
 /// 平台 ingest 经 handler 路由到绑定 agent 的 runtime 后调用本函数。
@@ -1353,6 +1408,16 @@ pub(crate) async fn send_prompt_core<R: tauri::Runtime>(
                     );
                 }
                 let _ = state.pet.lock().map(|mut p| crate::pet::on_error(&mut p));
+                // S3：幽灵映射自动重建——agent 侧会话已不存在（重启/回收后映射滞留）
+                // 时清理本地映射，下一条消息自动走会话重建路径；网络/临时错误不清理。
+                cleanup_ghost_session_mapping(
+                    state,
+                    runtime,
+                    source,
+                    &peri_id,
+                    prompt_generation,
+                    &error,
+                );
                 Err(PylonError::Protocol(error))
             } else {
                 // R33c：成功路径收尾（stop reason 校验 / generation 复核 / 首轮标记 /
@@ -2011,5 +2076,105 @@ gateway:
             1,
             "映射未删除时锁表条目保留（生成中豁免仍依赖该条目）"
         );
+    }
+
+    /// S3：prompt 错误"会话不存在"语义匹配——宽松子串匹配覆盖 agent 实际错误形态
+    /// （JSON-RPC 错误对象序列化串 / 纯字符串），网络与临时/方法级错误不命中。
+    #[test]
+    fn prompt_error_indicates_missing_session_matching() {
+        let missing = [
+            "session not found: session-42",
+            "Session not found",
+            r#"{"code":-32602,"message":"session not found: session-42"}"#,
+            "unknown session: session-42",
+            r#"{"code":-32602,"message":"Invalid params: unknown session: session-42"}"#,
+            "invalid session: session-42",
+            "session does not exist",
+            r#"{"code":-32000,"message":"session missing"}"#,
+            "missing sessionId",
+        ];
+        for error in missing {
+            assert!(
+                prompt_error_indicates_missing_session(error),
+                "必须命中会话不存在语义: {error}"
+            );
+        }
+        let transient = [
+            "connection closed",
+            "ACP connection closed",
+            "write timeout: connection presumed dead",
+            "prompt cancelled",
+            "prompt refused by agent",
+            "timed out after 300s",
+            "method not found",
+            r#"{"code":-32601,"message":"Method not found"}"#,
+            r#"{"code":-32602,"message":"invalid params: missing content"}"#,
+            "rate limited",
+            "internal error",
+        ];
+        for error in transient {
+            assert!(
+                !prompt_error_indicates_missing_session(error),
+                "不得误伤网络/临时/方法级错误: {error}"
+            );
+        }
+    }
+
+    /// S3：幽灵映射自动重建——"会话不存在"语义的 prompt 错误清理本地映射（下次
+    /// send 自动重建会话）；网络/临时错误与不匹配映射（已被新会话替换）不清理。
+    #[tokio::test]
+    async fn ghost_session_mapping_is_removed_on_missing_session_error() {
+        let runtime = AgentRuntime::new_disconnected();
+        let state = state_without_active_runtime();
+        let insert = |runtime: &Arc<AgentRuntime>| {
+            let mut sessions = runtime.sessions.lock().unwrap();
+            sessions.insert(
+                "source-a".to_string(),
+                SessionInfo::new("peri-1".into(), String::new(), ".".into(), false, 1),
+            );
+        };
+        // "会话不存在"语义：清理映射（返回 true），且 O1 锁表同步收敛。
+        insert(&runtime);
+        prompt_lock_for(&runtime.prompt_locks, "source-a");
+        let removed = cleanup_ghost_session_mapping(
+            &state,
+            &runtime,
+            "source-a",
+            "peri-1",
+            1,
+            r#"{"code":-32602,"message":"session not found: peri-1"}"#,
+        );
+        assert!(removed, "会话不存在错误必须清理幽灵映射");
+        assert!(
+            runtime.sessions.lock().unwrap().is_empty(),
+            "幽灵映射必须被删除"
+        );
+        assert!(
+            runtime.prompt_locks.lock().unwrap().is_empty(),
+            "O1：锁表条目必须随映射删除收敛"
+        );
+        // 网络/临时错误：不清理映射。
+        insert(&runtime);
+        let removed = cleanup_ghost_session_mapping(
+            &state,
+            &runtime,
+            "source-a",
+            "peri-1",
+            1,
+            "write timeout: connection presumed dead",
+        );
+        assert!(!removed, "临时错误不得清理映射");
+        assert_eq!(runtime.sessions.lock().unwrap().len(), 1);
+        // 映射不匹配（peri_id 已被新会话替换）：错误含会话不存在语义也不得误删新映射。
+        let removed = cleanup_ghost_session_mapping(
+            &state,
+            &runtime,
+            "source-a",
+            "peri-dead",
+            1,
+            "session not found: peri-dead",
+        );
+        assert!(!removed, "peri_id 不匹配不得误删新会话映射");
+        assert_eq!(runtime.sessions.lock().unwrap().len(), 1);
     }
 }
