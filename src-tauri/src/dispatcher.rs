@@ -130,18 +130,19 @@ fn apply_update_event(
                     .and_then(value_as_string);
                 match (option_key, current) {
                     (Some("model"), Some(model)) => {
-                        // M5 感知：模型切换
+                        // M5 感知：模型切换。C11：回放不推送——回放时 session 为新对象，
+                        // model 为空必误判 changed（对齐 usage/tool 全部门控）。
                         let changed = session.model != model;
                         session.model = model.clone();
-                        if changed {
+                        if changed && !is_replay {
                             pet_events.push(PetEvent::ModelChanged(model));
                         }
                     }
                     (Some("mode"), Some(mode)) => {
                         let changed = session.mode.as_deref() != Some(mode.as_str());
                         session.mode = Some(mode.clone());
-                        if changed {
-                            // M5 感知：工作模式切换
+                        if changed && !is_replay {
+                            // M5 感知：工作模式切换（C11：回放不推送）
                             pet_events.push(PetEvent::ModeChanged(mode));
                         }
                     }
@@ -713,7 +714,8 @@ mod tests {
     use super::*;
 
     /// C11：带 `_meta.periReplay=true` 的事件不产生宠物感知事件——pet xp/bond/
-    /// recent_events 快照不变（回放不刷宠物状态）。对照：同事件不带回放标志 →
+    /// recent_events 快照不变（回放不刷宠物状态）。覆盖 usage/tool 全部门控 +
+    /// config_option（model/mode 感知，S2 补全）。对照：同事件不带回放标志 →
     /// 仍产出宠物事件（证明事件本身具备刷宠物状态的能力，守卫生效而非静默失效）。
     #[test]
     fn replay_updates_do_not_pollute_pet_state() {
@@ -758,6 +760,24 @@ mod tests {
                 "tool_call_update cancelled",
                 serde_json::json!({"sessionUpdate": "tool_call_update", "status": "cancelled"}),
                 crate::acp::SessionUpdateVariant::ToolCallUpdate,
+            ),
+            (
+                "config_option model",
+                serde_json::json!({
+                    "sessionUpdate": "config_option",
+                    "id": "model",
+                    "currentValue": "deepseek-v4-flash",
+                }),
+                crate::acp::SessionUpdateVariant::ConfigOptionUpdate,
+            ),
+            (
+                "config_option mode",
+                serde_json::json!({
+                    "sessionUpdate": "config_option",
+                    "id": "mode",
+                    "currentValue": "code",
+                }),
+                crate::acp::SessionUpdateVariant::ConfigOptionUpdate,
             ),
         ];
         for (label, mut update, variant) in cases {
