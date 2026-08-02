@@ -237,6 +237,24 @@ pub fn read_text(
         .unwrap_or(DEFAULT_PREVIEW_BYTES)
         .min(MAX_PREVIEW_BYTES);
     let mut file = fs::File::open(&path).map_err(|e| WorkspaceError::Io(e.to_string()))?;
+    // C3：open 后二次复核——resolve 与 open 之间路径可能被替换为指向 root 外的链接。
+    let canonical_root = root.canonicalize().map_err(|e| {
+        if e.kind() == std::io::ErrorKind::NotFound {
+            WorkspaceError::NotFound
+        } else {
+            WorkspaceError::NotReadable
+        }
+    })?;
+    let canonical = path.canonicalize().map_err(|e| {
+        if e.kind() == std::io::ErrorKind::NotFound {
+            WorkspaceError::NotFound
+        } else {
+            WorkspaceError::NotReadable
+        }
+    })?;
+    if canonical != canonical_root && !canonical.starts_with(&canonical_root) {
+        return Err(WorkspaceError::OutsideRoot);
+    }
     let mut bytes = Vec::with_capacity(total_bytes.min(limit.saturating_add(1)));
     let mut limited = file.by_ref().take(limit as u64 + 1);
     limited
@@ -246,14 +264,27 @@ pub fn read_text(
         return Err(WorkspaceError::BinaryFile);
     }
     let truncated = bytes.len() > limit;
-    let slice = &bytes[..bytes.len().min(limit)];
+    // C3：截断点可能切断多字节 UTF-8 字符——回退到最近字符边界，避免误报 binary。
+    // 字符边界判定：boundary 处字节非续字节（0x80..=0xBF）；仅当截断点自身
+    // 落在续字节上才回退，完整字符不会因此被丢弃。
+    let mut end = bytes.len().min(limit);
+    let mut backed_off = false;
+    while end > 0 && end < bytes.len() && (0x80..=0xBF).contains(&bytes[end]) {
+        end -= 1;
+        backed_off = true;
+    }
+    if backed_off && end == 0 && !bytes.is_empty() {
+        // 文件以续字节开头（本身非法 UTF-8），回退会清空内容——按 binary 拒绝。
+        return Err(WorkspaceError::BinaryFile);
+    }
+    let slice = &bytes[..end];
     let content = std::str::from_utf8(slice)
         .map_err(|_| WorkspaceError::BinaryFile)?
         .to_string();
     Ok(WorkspaceTextPreview {
         relative_path: relative.replace('\\', "/"),
         content,
-        bytes_read: slice.len(),
+        bytes_read: end,
         total_bytes,
         truncated,
         encoding: "utf-8".to_string(),
@@ -357,6 +388,21 @@ mod tests {
             read_text(&root, "binary.bin", None),
             Err(WorkspaceError::BinaryFile)
         );
+    }
+
+    #[test]
+    fn text_preview_multibyte_truncation_stays_utf8() {
+        // C3：256KB+ 中文文件，截断点落在多字节字符中间时回退到字符边界，
+        // 不得误报 BinaryFile；内容必须是完整字符序列。
+        let (_dir, root) = fixture();
+        let content = "中".repeat(100_000);
+        fs::write(root.join("zh.txt"), &content).unwrap();
+        let preview = read_text(&root, "zh.txt", None).unwrap();
+        assert!(preview.truncated);
+        assert!(preview.bytes_read > 0);
+        assert_eq!(preview.bytes_read % 3, 0, "截断必须停在 UTF-8 字符边界");
+        assert_eq!(preview.bytes_read, preview.content.len());
+        assert!(preview.content.chars().all(|c| c == '中'));
     }
 
     #[test]
