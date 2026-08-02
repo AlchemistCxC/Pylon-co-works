@@ -55,9 +55,12 @@ impl DedupState {
 
     /// 回滚 seen 记录（C14）：ingest 发送失败后撤销去重标记——msg_id 不再占
     /// 去重窗口，resume 重放同一消息可重新 ingest（防故障期消息永久丢失）。
+    /// 同步从 order 队列移除该条目，避免驱逐时 pop 到已不在 seen 的残留
+    /// （残留条目驱逐无效，seen 短暂超上限）。
     /// 不影响 last_msg_id（回复锚点语义：锚点跟随最后一次收到的消息）。
     pub fn rollback(&mut self, msg_id: &str) {
         self.seen.remove(msg_id);
+        self.order.retain(|m| m != msg_id);
     }
 
     /// seen 窗口容量（DEDUP_MAX_SIZE，Hermes 实证值）。仅测试引用。
@@ -149,6 +152,35 @@ mod tests {
         state.set_latest("chat-1", "msg-1");
         state.rollback("msg-1");
         assert_eq!(state.latest_for("chat-1"), Some("msg-1"));
+    }
+
+    #[test]
+    fn rollback_removes_order_entry() {
+        let mut state = DedupState::new();
+        state.is_new("msg-1");
+        state.is_new("msg-2");
+        state.rollback("msg-1");
+        assert_eq!(state.order.len(), 1, "rollback 后 order 不应残留该 msg_id");
+        assert!(!state.order.iter().any(|m| m == "msg-1"));
+    }
+
+    #[test]
+    fn rollback_keeps_window_bounded_after_reingest_cycles() {
+        let mut state = DedupState::new();
+        // C14：msg-0 失败回滚（若 order 残留，则成为队首脏条目）
+        assert!(state.is_new("msg-0"));
+        state.rollback("msg-0");
+        for i in 1..=DEDUP_MAX_SIZE {
+            assert!(state.is_new(&format!("msg-{i}")));
+        }
+        // 超限插入应驱逐真实最旧条目（msg-1），而非残留的 msg-0
+        assert!(state.is_new("msg-overflow"));
+        assert!(state.seen.len() <= DEDUP_MAX_SIZE);
+        assert!(!state.is_new("msg-2"));
+        assert!(!state.is_new("msg-overflow"));
+        // msg-1 已被驱逐 → 可重入（若驱逐的是残留 msg-0，msg-1 仍占窗口即失败）
+        assert!(state.is_new("msg-1"), "msg-1 应已被驱逐，可重入");
+        assert!(state.seen.len() <= DEDUP_MAX_SIZE);
     }
 
     #[test]
