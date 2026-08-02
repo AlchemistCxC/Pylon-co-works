@@ -437,7 +437,7 @@ pub(crate) fn start_notification_dispatcher<R: tauri::Runtime>(
                         continue;
                     }
                 };
-                let (source, session_generation) = {
+                let source = {
                     let mut mapped = None;
                     let mut ambiguous = false;
                     for _ in 0..20 {
@@ -471,13 +471,11 @@ pub(crate) fn start_notification_dispatcher<R: tauri::Runtime>(
                         log::warn!("ACP notification for unknown session {}", peri_id);
                         continue;
                     };
-                    mapped
+                    mapped.0
                 };
-                // mapped/event 来自同一 session 映射（source/peri_id 相同），
-                // 等价检查退化为 generation 一致性：session 与 dispatcher 必须同代。
-                if session_generation != generation
-                    || client_generation.load(Ordering::Acquire) != generation
-                {
+                // source_for_peri_id_in_generation 已按代过滤（返回的映射
+                // generation 必等于本 dispatcher 代），此处仅复核客户端未替换。
+                if client_generation.load(Ordering::Acquire) != generation {
                     log::warn!("ACP notification rejected for stale session {}", peri_id);
                     continue;
                 }
