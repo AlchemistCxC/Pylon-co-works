@@ -13,11 +13,12 @@ pub struct AgentDef {
     pub transport: String,
     pub exe: String,
     /// 进程级原始参数（如入口子命令 `acp`），原样拼在 exe 后。
-    #[serde(default)]
+    #[serde(default, deserialize_with = "string_or_scalar_seq")]
     pub args: Vec<String>,
     #[serde(default)]
     pub cwd: Option<String>,
-    #[serde(default)]
+    /// O27：env 值宽松化——number/bool 标量自动转字符串（`PORT: 8080` 不再整份拒绝）。
+    #[serde(default, deserialize_with = "string_or_scalar")]
     pub env: HashMap<String, String>,
     #[serde(default)]
     pub default: bool,
@@ -91,6 +92,68 @@ impl AgentDef {
 
 fn config_path() -> Option<PathBuf> {
     std::env::var_os("PYLON_AGENTS_CONFIG").map(PathBuf::from)
+}
+
+/// O27：env/args 标量宽松化共用转换——String 原样、Number→to_string、Bool→to_string，
+/// 其余（map/seq/null）拒绝。null 不在宽松范围内：显式 null 应视为配置错误。
+fn scalar_to_string(value: serde_yaml::Value) -> Option<String> {
+    match value {
+        serde_yaml::Value::String(text) => Some(text),
+        serde_yaml::Value::Number(number) => Some(number.to_string()),
+        serde_yaml::Value::Bool(flag) => Some(flag.to_string()),
+        _ => None,
+    }
+}
+
+/// env 值反序列化：map 中每个值经 scalar_to_string 转字符串。
+fn string_or_scalar<'de, D>(deserializer: D) -> Result<HashMap<String, String>, D::Error>
+where
+    D: serde::Deserializer<'de>,
+{
+    struct ScalarStringMapVisitor;
+
+    impl<'de> serde::de::Visitor<'de> for ScalarStringMapVisitor {
+        type Value = HashMap<String, String>;
+
+        fn expecting(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+            formatter.write_str("a map of string/number/bool values")
+        }
+
+        fn visit_map<A>(self, mut access: A) -> Result<Self::Value, A::Error>
+        where
+            A: serde::de::MapAccess<'de>,
+        {
+            let mut map = HashMap::with_capacity(access.size_hint().unwrap_or(0));
+            while let Some(key) = access.next_key::<String>()? {
+                let value = access.next_value::<serde_yaml::Value>()?;
+                let text = scalar_to_string(value).ok_or_else(|| {
+                    serde::de::Error::custom(format!(
+                        "agent env 值非法（key {key:?}）: expected string/number/bool"
+                    ))
+                })?;
+                map.insert(key, text);
+            }
+            Ok(map)
+        }
+    }
+
+    deserializer.deserialize_map(ScalarStringMapVisitor)
+}
+
+/// args 元素反序列化：序列中每个元素经 scalar_to_string 转字符串。
+fn string_or_scalar_seq<'de, D>(deserializer: D) -> Result<Vec<String>, D::Error>
+where
+    D: serde::Deserializer<'de>,
+{
+    let values = Vec::<serde_yaml::Value>::deserialize(deserializer)?;
+    values
+        .into_iter()
+        .map(|value| {
+            scalar_to_string(value).ok_or_else(|| {
+                serde::de::Error::custom("agent args 元素非法: expected string/number/bool")
+            })
+        })
+        .collect()
 }
 
 /// 实际生效的配置路径：优先 `PYLON_AGENTS_CONFIG`，其次 exe 同目录的
@@ -278,6 +341,42 @@ mod tests {
         )
         .expect_err("env key containing '=' must be rejected");
         assert!(error.contains("agent bad has invalid env entry"));
+    }
+
+    #[test]
+    fn parses_numeric_env_values_as_strings() {
+        let path =
+            std::env::temp_dir().join(format!("pylon-agents-envnum-{}.yaml", std::process::id()));
+        std::fs::write(
+            &path,
+            "agents:\n  runtime:\n    name: Runtime\n    transport: subprocess\n    exe: runtime-agent\n    env:\n      PORT: 8080\n      DEBUG: true\n      NODE_ENV: prod\n",
+        )
+        .expect("write temp agent config");
+        let agents = load_from_path(&path).expect("numeric env values must coerce to strings");
+        std::fs::remove_file(&path).ok();
+        assert_eq!(agents["runtime"].env.get("PORT"), Some(&"8080".to_string()));
+        assert_eq!(
+            agents["runtime"].env.get("DEBUG"),
+            Some(&"true".to_string())
+        );
+        assert_eq!(
+            agents["runtime"].env.get("NODE_ENV"),
+            Some(&"prod".to_string())
+        );
+    }
+
+    #[test]
+    fn parses_scalar_args_as_strings() {
+        let path =
+            std::env::temp_dir().join(format!("pylon-agents-argsnum-{}.yaml", std::process::id()));
+        std::fs::write(
+            &path,
+            "agents:\n  runtime:\n    name: Runtime\n    transport: subprocess\n    exe: runtime-agent\n    args: [acp, 8080, true]\n",
+        )
+        .expect("write temp agent config");
+        let agents = load_from_path(&path).expect("scalar args must coerce to strings");
+        std::fs::remove_file(&path).ok();
+        assert_eq!(agents["runtime"].args, vec!["acp", "8080", "true"]);
     }
 
     #[test]
