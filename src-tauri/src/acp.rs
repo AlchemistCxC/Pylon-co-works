@@ -241,17 +241,106 @@ pub const MAX_ATTACHMENTS: usize = 8;
 type Pending = HashMap<u64, oneshot::Sender<RawMessage>>;
 const PENDING_SHARDS: usize = 16;
 
+/// Windows Job Object 句柄（RAII：drop 即 CloseHandle）。已设置
+/// JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE——句柄关闭（最后一个句柄）时内核终止
+/// job 内全部进程（含子进程后续派生的整棵进程树，成员资格自动继承）。
+#[cfg(windows)]
+struct JobObject {
+    handle: windows_sys::Win32::Foundation::HANDLE,
+}
+
+#[cfg(windows)]
+impl Drop for JobObject {
+    fn drop(&mut self) {
+        unsafe { windows_sys::Win32::Foundation::CloseHandle(self.handle) };
+    }
+}
+
+// HANDLE 是内核对象句柄（数字 token），跨线程移动/共享安全；裸指针本身非
+// Send/Sync，显式标记（CloseHandle 线程安全，AcpClient 需保持 Send/Sync 供
+// tokio::spawn 使用）。
+#[cfg(windows)]
+unsafe impl Send for JobObject {}
+#[cfg(windows)]
+unsafe impl Sync for JobObject {}
+
 struct ManagedChild {
     child: Option<Child>,
+    /// Windows：进程树清理 job。句柄关闭即终止整棵进程树（KILL_ON_JOB_CLOSE）；
+    /// 创建/挂接失败时为 None，kill 时回退 taskkill。
+    #[cfg(windows)]
+    job: Option<JobObject>,
 }
 
 impl ManagedChild {
     fn empty() -> Self {
-        Self { child: None }
+        Self {
+            child: None,
+            #[cfg(windows)]
+            job: None,
+        }
     }
 
     fn new(child: Child) -> Self {
-        Self { child: Some(child) }
+        let mut managed = Self {
+            child: Some(child),
+            #[cfg(windows)]
+            job: None,
+        };
+        #[cfg(windows)]
+        managed.attach_job();
+        managed
+    }
+
+    /// Windows：spawn 后立即把子进程挂进 KILL_ON_JOB_CLOSE job。赋值发生在子进程
+    /// 完成初始化（读 stdin）之前，其后续派生的进程自动继承 job 成员资格；
+    /// 任一环节失败仅记 warn 并回退 taskkill（不阻塞 spawn）。
+    #[cfg(windows)]
+    fn attach_job(&mut self) {
+        use std::os::windows::io::AsRawHandle;
+        use windows_sys::Win32::System::JobObjects::{
+            AssignProcessToJobObject, CreateJobObjectW, JobObjectExtendedLimitInformation,
+            SetInformationJobObject, JOBOBJECT_EXTENDED_LIMIT_INFORMATION,
+            JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE,
+        };
+        let Some(child) = self.child.as_ref() else {
+            return;
+        };
+        let job = unsafe { CreateJobObjectW(std::ptr::null(), std::ptr::null()) };
+        if job.is_null() {
+            log::warn!(
+                "ACP: CreateJobObjectW failed ({}); taskkill fallback",
+                std::io::Error::last_os_error()
+            );
+            return;
+        }
+        let mut info = JOBOBJECT_EXTENDED_LIMIT_INFORMATION::default();
+        info.BasicLimitInformation.LimitFlags = JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE;
+        let set_ok = unsafe {
+            SetInformationJobObject(
+                job,
+                JobObjectExtendedLimitInformation,
+                &info as *const _ as *const core::ffi::c_void,
+                std::mem::size_of::<JOBOBJECT_EXTENDED_LIMIT_INFORMATION>() as u32,
+            )
+        };
+        if set_ok == 0 {
+            log::warn!(
+                "ACP: SetInformationJobObject failed ({}); taskkill fallback",
+                std::io::Error::last_os_error()
+            );
+            unsafe { windows_sys::Win32::Foundation::CloseHandle(job) };
+            return;
+        }
+        if unsafe { AssignProcessToJobObject(job, child.as_raw_handle()) } == 0 {
+            log::warn!(
+                "ACP: AssignProcessToJobObject failed ({}); taskkill fallback",
+                std::io::Error::last_os_error()
+            );
+            unsafe { windows_sys::Win32::Foundation::CloseHandle(job) };
+            return;
+        }
+        self.job = Some(JobObject { handle: job });
     }
 
     fn take_stdin(&mut self) -> Result<std::process::ChildStdin, AcpError> {
@@ -275,8 +364,9 @@ impl ManagedChild {
             .ok_or(AcpError::Child("no stderr".to_string()))
     }
 
-    /// Windows：`taskkill /T /F` 递归杀进程树（`Child::kill` 只杀直接子进程，
-    /// peri/hermes 派生的子进程会残留）。进程已退出时 taskkill 报错——静默返回
+    /// Windows：`taskkill /T /F` 递归杀进程树（job 挂接失败时的兜底——job 成功
+    /// 时 kill_and_wait 走 job 关闭路径）。`Child::kill` 只杀直接子进程，
+    /// peri/hermes 派生的子进程会残留。进程已退出时 taskkill 报错——静默返回
     /// false，由调用方回退普通 kill 路径。
     #[cfg(windows)]
     fn kill_process_tree(pid: u32) -> bool {
@@ -291,6 +381,16 @@ impl ManagedChild {
         let Some(mut child) = self.child.take() else {
             return Ok(());
         };
+        #[cfg(windows)]
+        if self.job.is_some() {
+            // Windows：关闭 job 句柄（KILL_ON_JOB_CLOSE）即终止整棵进程树，
+            // 随后 wait 回收直接子进程（进程可能已抢先退出，wait 报错仅记 warn）。
+            self.job = None;
+            if let Err(error) = child.wait() {
+                log::warn!("wait after job close: {error}");
+            }
+            return Ok(());
+        }
         match child.try_wait() {
             Ok(Some(_)) => Ok(()),
             Ok(None) => {
