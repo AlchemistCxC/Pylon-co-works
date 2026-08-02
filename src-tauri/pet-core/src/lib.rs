@@ -855,7 +855,12 @@ impl PetState {
                 self.happiness = (self.happiness as u16 + 7 * multiplier / 100).min(100) as u8;
                 // bond 走 reward_interaction（30s 冷却）；审查修复：贪吃 → bond 收益 ×(1+greed/100)；
                 // M8：午夜陪伴——Night 时段喂食 bond 再 ×1.5
-                let greed_bond = 1 + self.traits.greed as u32 / 100;
+                // O53：贪吃 → bond ×(1+greed/100)。对齐注释意图的通用公式
+                // ((100+greed)×amount)/100——当前基础 bond=1，整数除法下与旧式
+                // （1 + greed/100）数值一致（greed 1-99 → 1，greed=100 → 2）；
+                // 该公式在 amount>1 时才体现加成差异。
+                let base_bond = 1_u32;
+                let greed_bond = (100 + self.traits.greed as u32) * base_bond / 100;
                 self.reward_interaction(now_ms, self.night_bond(now_ms, greed_bond));
                 self.record_night_visit(now_ms);
                 // C13：喂食也是互动——刷新睡眠判定基准（防 energy≤15 时持续互动被 T1/T8 误入睡）
