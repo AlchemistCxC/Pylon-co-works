@@ -34,6 +34,11 @@ pub(crate) fn is_sensitive_key(key: &str) -> bool {
 }
 
 /// export 语义 key 表：敏感 key 子树整体剔除（不含 content——markdown 正文结构键）。
+/// 优化-11：token/apikey/api_key 改为后缀匹配，与 runtime_log 表（O26）对齐——
+/// tokensTotal/inputTokenCount/tokenStats/tokenCount 等统计键不再误伤；
+/// `tokenvalue` 精确名保留（按命名即 token 值容器，且为既有基线测试契约）；
+/// `secret` 保持 contains 语义（无统计键碰撞，且覆盖 client_secret/clientSecret 形态）；
+/// 值内容仍由 sanitize_value_content 兜底（password/token 等值形态整体 REDACTED）。
 pub(crate) fn is_export_sensitive_key(key: &str) -> bool {
     let lower = key.to_ascii_lowercase();
     matches!(
@@ -46,11 +51,12 @@ pub(crate) fn is_export_sensitive_key(key: &str) -> bool {
             | "env"
             | "authorization"
             | "password"
-            | "api_key"
-            | "apikey"
             | "cookie"
             | "credential"
-    ) || lower.contains("token")
+            | "tokenvalue"
+    ) || lower.ends_with("token")
+        || lower.ends_with("apikey")
+        || lower.ends_with("api_key")
         || lower.contains("secret")
 }
 
@@ -255,6 +261,34 @@ mod tests {
         assert_eq!(sanitized[0]["password"], json!(REDACTED));
         assert_eq!(sanitized[1], json!(REDACTED));
         assert_eq!(sanitized[2]["a"], json!(1));
+    }
+
+    #[test]
+    fn strip_policy_keeps_usage_stats_and_strips_token_family() {
+        // 优化-11：统计键保留（与 Redact 表 O26 语义对齐）
+        let value = json!({
+            "tokensTotal": 123,
+            "inputTokenCount": 45,
+            "tokenStats": {"input": 1, "output": 2},
+            "tokenCount": 7,
+            "usage": {"tokensTotal": 999, "safe": "kept"},
+            "password": "hunter2",
+            "apiKeyToken": "sk-xyz",
+            "api_key": "sk-abc",
+            "client_secret": "very-secret"
+        });
+        let sanitized = sanitize_value(SanitizePolicy::Strip, "root", value).unwrap();
+        assert_eq!(sanitized["tokensTotal"], json!(123));
+        assert_eq!(sanitized["inputTokenCount"], json!(45));
+        assert_eq!(sanitized["tokenStats"]["input"], json!(1));
+        assert_eq!(sanitized["tokenCount"], json!(7));
+        assert_eq!(sanitized["usage"]["tokensTotal"], json!(999));
+        assert_eq!(sanitized["usage"]["safe"], json!("kept"));
+        // token/secret 族仍剔除
+        assert!(sanitized.get("password").is_none());
+        assert!(sanitized.get("apiKeyToken").is_none());
+        assert!(sanitized.get("api_key").is_none());
+        assert!(sanitized.get("client_secret").is_none());
     }
 
     #[test]
