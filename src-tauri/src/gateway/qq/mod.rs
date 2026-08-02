@@ -9,6 +9,7 @@ pub mod ws;
 
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
+use std::time::{Duration, Instant};
 
 use dedup::DedupState;
 use reqwest::Client;
@@ -31,6 +32,9 @@ const RATE_LIMIT_DELAY_SECS: u64 = 60;
 /// send_loop 空闲超时（审查修复：无消息时任务自行退出并从 senders map 移除，
 /// 防止 chat_id 无界增长导致常驻任务泄漏）。
 const SEND_LOOP_IDLE_SECS: u64 = 300;
+/// 死目标 TTL（B8）：标记后 30 分钟自动过期，过期后下一次投递作为探测发送
+/// （探测失败重新标记，成功自愈清除）——死目标从"永久哑火"变为"渐进探测恢复"。
+const DEAD_TARGET_TTL: Duration = Duration::from_secs(30 * 60);
 
 /// 发送失败分类（B10 收尾，参考 Hermes 发送重试/死目标模式）。
 #[derive(Debug)]
@@ -73,6 +77,11 @@ fn classify_send_error(error: &str) -> SendFailure {
     }
 }
 
+/// 死目标标记是否已过期（TTL 后允许下一条投递做探测发送）。
+fn dead_target_expired(entry: &(String, Instant)) -> bool {
+    entry.1.elapsed() >= DEAD_TARGET_TTL
+}
+
 /// 入队消息：单 chat 串行发送（天然节流）。
 struct QueuedSend {
     chat_type: String,
@@ -92,8 +101,9 @@ pub struct QqAdapter {
     base_url: String,
     /// chat_id → 发送队列发送端（后台 send_loop 串行消费；空闲超时自回收）。
     senders: Arc<Mutex<HashMap<String, mpsc::Sender<QueuedSend>>>>,
-    /// chat_id → 死目标原因（forbidden/not_found 标记；成功发送自愈清除）。
-    dead_targets: Arc<Mutex<HashMap<String, String>>>,
+    /// chat_id → (死目标原因, 标记时间)（forbidden/not_found 标记；成功发送自愈清除；
+    /// TTL 过期后下一条投递作探测发送）。
+    dead_targets: Arc<Mutex<HashMap<String, (String, Instant)>>>,
 }
 
 /// 从 gateway source 解析 QQ 目标：`qq:group:123` → (group, 123)；`qq:user:456` → (c2c, 456)。
@@ -214,18 +224,23 @@ impl PlatformAdapter for QqAdapter {
             .lock()
             .ok()
             .and_then(|dedup| dedup.latest_for(chat_id).map(str::to_string));
-        // 死目标短路：目标不可达（群被删/拉黑/注销）不再投递
-        if let Some(reason) = self
+        // 死目标短路：目标不可达（群被删/拉黑/注销）不再投递；TTL 过期则清除标记
+        // 放行本条做探测发送（B8：失败重新标记，成功自愈）
+        if let Some(entry) = self
             .dead_targets
             .lock()
             .ok()
             .and_then(|d| d.get(chat_id).cloned())
         {
-            log::warn!(
-                "QQ deliver 短路（死目标 {chat_id}: {reason}），丢弃 {:.60}...",
-                text
-            );
-            return Ok(());
+            if !dead_target_expired(&entry) {
+                log::warn!(
+                    "QQ deliver 短路（死目标 {chat_id}: {}），丢弃 {:.60}...",
+                    entry.0,
+                    text
+                );
+                return Ok(());
+            }
+            self.dead_targets.lock().ok().map(|mut d| d.remove(chat_id));
         }
         let Ok(runtime) = tokio::runtime::Handle::try_current() else {
             return Err("QQ deliver 需要 tokio runtime".to_string());
@@ -301,7 +316,7 @@ impl QqAdapter {
     async fn send_loop(
         http: Client,
         auth: Arc<QqAuth>,
-        dead_targets: Arc<Mutex<HashMap<String, String>>>,
+        dead_targets: Arc<Mutex<HashMap<String, (String, Instant)>>>,
         base_url: String,
         senders: Arc<Mutex<HashMap<String, mpsc::Sender<QueuedSend>>>>,
         tx: mpsc::Sender<QueuedSend>,
@@ -336,14 +351,17 @@ impl QqAdapter {
                     continue;
                 }
             };
-            if dead_targets
+            // 死目标跳过：TTL 内跳过；过期则清除标记放行本条做探测发送（B8）
+            if let Some(entry) = dead_targets
                 .lock()
                 .ok()
-                .map(|d| d.contains_key(&msg.chat_id))
-                .unwrap_or(false)
+                .and_then(|d| d.get(&msg.chat_id).cloned())
             {
-                log::warn!("QQ send_loop 跳过死目标 {}", msg.chat_id);
-                continue;
+                if !dead_target_expired(&entry) {
+                    log::warn!("QQ send_loop 跳过死目标 {}", msg.chat_id);
+                    continue;
+                }
+                dead_targets.lock().ok().map(|mut d| d.remove(&msg.chat_id));
             }
             // 修复（P2-4）：token 瞬时失败指数退避重试（1s/2s），当前消息原地保留不丢；
             // 连续超 TOKEN_RETRY_ATTEMPTS 次仍未成功 → 记录日志并丢弃该消息
@@ -392,10 +410,9 @@ impl QqAdapter {
                     }
                 }
                 Err(SendFailure::DeadTarget(error)) => {
-                    dead_targets
-                        .lock()
-                        .ok()
-                        .map(|mut d| d.insert(msg.chat_id.clone(), error.clone()));
+                    dead_targets.lock().ok().map(|mut d| {
+                        d.insert(msg.chat_id.clone(), (error.clone(), Instant::now()))
+                    });
                     log::warn!(
                         "QQ deliver 目标不可达（{}），标记死目标: {error}",
                         msg.chat_id
@@ -642,6 +659,25 @@ gateway:
                 &serde_json::json!({"data": {}})
             )
             .is_ok());
+    }
+
+    #[test]
+    fn dead_target_expired_only_after_ttl() {
+        // 未过期：刚标记 → false
+        assert!(!dead_target_expired(&(
+            "forbidden".to_string(),
+            Instant::now()
+        )));
+        // 过期：标记时间已超 TTL → true
+        assert!(dead_target_expired(&(
+            "forbidden".to_string(),
+            Instant::now() - DEAD_TARGET_TTL
+        )));
+        // 恰好边界：超过 TTL 一瞬 → true
+        assert!(dead_target_expired(&(
+            "forbidden".to_string(),
+            Instant::now() - DEAD_TARGET_TTL - Duration::from_secs(1)
+        )));
     }
 
     #[test]
