@@ -12,7 +12,7 @@
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
-use futures_util::{SinkExt, StreamExt};
+use futures_util::{SinkExt, Stream, StreamExt};
 use reqwest::Client;
 use tokio::net::TcpStream;
 use tokio::time::{sleep, sleep_until};
@@ -31,6 +31,8 @@ const MAX_RECONNECT_ATTEMPTS: usize = 100;
 const QUICK_DISCONNECT_THRESHOLD: f64 = 5.0;
 const MAX_QUICK_DISCONNECTS: u32 = 3;
 const RATE_LIMIT_DELAY: u64 = 60;
+/// 等待服务器 Hello 的最长时间：半开连接（平台静默失效）超时后走统一重连路径。
+const HELLO_TIMEOUT: Duration = Duration::from_secs(60);
 
 /// QQ WebSocket close code 对应的重连策略。
 #[derive(Debug, PartialEq, Eq)]
@@ -237,25 +239,8 @@ async fn run_connection(
 
     let (mut write, mut read) = ws_stream.split();
 
-    // Hello → 提取 heartbeat_interval
-    let heartbeat_interval = loop {
-        let msg = read
-            .next()
-            .await
-            .ok_or("WS 提前关闭")?
-            .map_err(|e| format!("读: {e}"))?;
-        if let Message::Text(text) = msg {
-            let event: QqEvent =
-                serde_json::from_str(&text).map_err(|e| format!("解析 Hello: {e}"))?;
-            if event.op == 10 {
-                let hello: HelloData = serde_json::from_value(event.d.unwrap_or_default())
-                    .unwrap_or(HelloData {
-                        heartbeat_interval: 30000,
-                    });
-                break Duration::from_millis((hello.heartbeat_interval as f64 * 0.8) as u64);
-            }
-        }
-    };
+    // Hello → 提取 heartbeat_interval（HELLO_TIMEOUT 未收到视为半开连接）
+    let heartbeat_interval = await_hello(&mut read, HELLO_TIMEOUT).await?;
 
     // Identify 或 Resume
     if session.session_id.is_some() {
@@ -389,6 +374,36 @@ async fn run_connection(
 }
 
 pub type WsStream = WebSocketStream<tokio_rustls::client::TlsStream<TcpStream>>;
+
+/// 等待服务器 Hello（op 10）：超时前未收到任何帧视为半开连接，
+/// 返回 Err 走 run_ws_loop 的统一重连路径（close code 0 → ReconnectBackoff）。
+/// hello_timeout 由调用方传入（运行路径为 HELLO_TIMEOUT，测试可注入短超时）。
+async fn await_hello<S, E>(read: &mut S, hello_timeout: Duration) -> Result<Duration, String>
+where
+    S: Stream<Item = Result<Message, E>> + Unpin,
+    E: std::fmt::Display,
+{
+    loop {
+        let msg = tokio::time::timeout(hello_timeout, read.next())
+            .await
+            .map_err(|_| "WS Hello 等待超时")?
+            .ok_or("WS 提前关闭")?
+            .map_err(|e| format!("读: {e}"))?;
+        if let Message::Text(text) = msg {
+            let event: QqEvent =
+                serde_json::from_str(&text).map_err(|e| format!("解析 Hello: {e}"))?;
+            if event.op == 10 {
+                let hello: HelloData = serde_json::from_value(event.d.unwrap_or_default())
+                    .unwrap_or(HelloData {
+                        heartbeat_interval: 30000,
+                    });
+                return Ok(Duration::from_millis(
+                    (hello.heartbeat_interval as f64 * 0.8) as u64,
+                ));
+            }
+        }
+    }
+}
 
 /// 建立 WSS 连接：优先 HTTPS_PROXY/https_proxy/ALL_PROXY/all_proxy CONNECT 隧道，否则直连。
 fn proxy_url() -> Option<String> {
@@ -650,5 +665,84 @@ mod tests {
     fn ws_close_code_is_parsed_from_error_message() {
         assert_eq!(parse_ws_close_code("code=4008 rate limited"), 4008);
         assert_eq!(parse_ws_close_code("no code here"), 0);
+    }
+
+    struct StalledStream;
+
+    impl Stream for StalledStream {
+        type Item = Result<Message, tokio_tungstenite::tungstenite::Error>;
+        fn poll_next(
+            self: std::pin::Pin<&mut Self>,
+            _cx: &mut std::task::Context<'_>,
+        ) -> std::task::Poll<Option<Self::Item>> {
+            std::task::Poll::Pending
+        }
+    }
+
+    struct QueuedStream(Vec<Result<Message, tokio_tungstenite::tungstenite::Error>>);
+
+    impl Stream for QueuedStream {
+        type Item = Result<Message, tokio_tungstenite::tungstenite::Error>;
+        fn poll_next(
+            mut self: std::pin::Pin<&mut Self>,
+            _cx: &mut std::task::Context<'_>,
+        ) -> std::task::Poll<Option<Self::Item>> {
+            if self.0.is_empty() {
+                std::task::Poll::Ready(None)
+            } else {
+                std::task::Poll::Ready(Some(self.0.remove(0)))
+            }
+        }
+    }
+
+    #[tokio::test]
+    async fn hello_wait_times_out_when_server_stays_silent() {
+        let mut stalled = StalledStream;
+        let start = Instant::now();
+        let err = await_hello(&mut stalled, Duration::from_millis(100))
+            .await
+            .expect_err("静默连接应在超时后返回 Err");
+        assert!(err.contains("超时"), "错误消息应含超时提示: {err}");
+        assert!(
+            start.elapsed() >= Duration::from_millis(100),
+            "应在超时时长之后才返回"
+        );
+        assert_eq!(HELLO_TIMEOUT, Duration::from_secs(60));
+    }
+
+    #[tokio::test]
+    async fn hello_extracts_heartbeat_interval() {
+        let mut hello = QueuedStream(vec![Ok(Message::Text(
+            serde_json::json!({"op": 10, "d": {"heartbeat_interval": 30000}}).to_string(),
+        ))]);
+        let interval = await_hello(&mut hello, HELLO_TIMEOUT)
+            .await
+            .expect("Hello 应成功解析");
+        assert_eq!(interval, Duration::from_millis(24000));
+    }
+
+    #[tokio::test]
+    async fn hello_skips_non_hello_frames() {
+        let mut hello = QueuedStream(vec![
+            Ok(Message::Text(
+                serde_json::json!({"op": 0, "t": "READY", "d": {}}).to_string(),
+            )),
+            Ok(Message::Text(
+                serde_json::json!({"op": 10, "d": {"heartbeat_interval": 15000}}).to_string(),
+            )),
+        ]);
+        let interval = await_hello(&mut hello, HELLO_TIMEOUT)
+            .await
+            .expect("Hello 应成功解析");
+        assert_eq!(interval, Duration::from_millis(12000));
+    }
+
+    #[tokio::test]
+    async fn hello_errors_when_stream_closes_early() {
+        let mut closed = QueuedStream(vec![]);
+        let err = await_hello(&mut closed, HELLO_TIMEOUT)
+            .await
+            .expect_err("流提前关闭应返回 Err");
+        assert!(err.contains("提前关闭"), "错误消息应含提前关闭提示: {err}");
     }
 }
