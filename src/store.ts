@@ -60,7 +60,8 @@ export interface ThemeSettings {
   msgStyle: string; msgFont: string; msgTextColor: string; msgLineHeight: number
   messageLayout: 'classic' | 'claude' | 'bubble'
   /** CC 视觉还原：助手消息 ● 圆点 / Bash 工具 ! 前缀 + 灰底 */
-  assistantDot: boolean; bashPrefix: boolean; bashBg: string
+  assistantDot: boolean; assistantDotGlyph: string; assistantDotColor: string
+  bashPrefix: boolean; bashBg: string
   footerLayout: 'free' | 'peri'
   cliOverflowMode: 'fixed-scroll' | 'grow' | 'overlay'
   ccHeight: number; ccBgHeight: number; ccBg: string

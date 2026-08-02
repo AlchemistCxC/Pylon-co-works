@@ -61,7 +61,8 @@ export const GLOBAL_PRESETS: GlobalPreset[] = [
       msgStyle: 'terminal', msgFont: 'mono', msgTextColor: '#FFFFFF', msgLineHeight: 1.5,
       messageLayout: 'claude', footerLayout: 'peri', cliOverflowMode: 'fixed-scroll',
       // CC 视觉还原：助手 ● 圆点、Bash ! 前缀 + 灰底
-      assistantDot: true, bashPrefix: true, bashBg: '#41414a',
+      assistantDot: true, assistantDotGlyph: '●', assistantDotColor: '',
+      bashPrefix: true, bashBg: '#41414a',
 
       // cc
       ccHeight: 76, ccBgHeight: 76, ccBg: '#000000', ccBgImage: '', ccStatusFontSize: 14,

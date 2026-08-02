@@ -298,16 +298,16 @@
 
 
 /* ── CC 视觉还原（claude 预设启用）── */
-/* 圆点列宽：助手 ● 与工具指示共列，内容从第 3 列起（CC minWidth 语义） */
+/* 圆点列宽：助手 ● 与工具指示共列，内容从第 3 列起（CC minWidth 语义）。
+   has-dot 缩进不限定 claude 布局（assistantDot 独立开关时也安全）。 */
+.term-assistant.has-dot { position:relative; padding-left:var(--dot-col-width, 1.6em); }
 .app[data-message-layout="claude"] { --dot-col-width: 1.6em; }
-.app[data-message-layout="claude"] .term-assistant.has-dot {
-  position:relative;
-  padding-left: var(--dot-col-width, 1.6em);
-}
+/* claude 布局旧规则 padding-left:0 的同 specificity 覆盖：追加在末尾生效 */
+.app[data-message-layout="claude"] .term-assistant.has-dot { padding-left:var(--dot-col-width, 1.6em); }
 .term-assistant.has-dot .term-assistant-dot {
   position:absolute; left:0; top:0.12em;
   width:var(--dot-col-width, 1.6em); min-width:var(--dot-col-width, 1.6em);
-  color:var(--text); user-select:none;
+  color:var(--assistant-dot-color, var(--text)); user-select:none;
 }
 /* 工具指示与助手圆点同列：指示占圆点列宽（margin 归零），工具名从第 3 列起 */
 .app[data-message-layout="claude"] .term-tool-head .term-tool-indicator {

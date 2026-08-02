@@ -156,6 +156,8 @@ export const THEME_FIELD_DEFS = {
   messageLayout: { ...S('chat', '信息层级', ['classic', 'claude', 'bubble']), group: "风格", },
   // CC 视觉还原（claude 预设启用）：助手消息 ● 圆点 / Bash 工具 ! 前缀 + 灰底
   assistantDot: { ...B('chat', '助手圆点'), group: "CC 风格" },
+  assistantDotGlyph: { ...S('chat', '圆点形状', ['●', '■', '✦', '◆', '▶', '❯']), group: "CC 风格" },
+  assistantDotColor: { ...C('chat', '圆点颜色'), group: "CC 风格" },
   bashPrefix: { ...B('chat', 'Bash 前缀'), group: "CC 风格" },
   bashBg: { ...C('chat', 'Bash 背景'), group: "CC 风格" },
 
@@ -420,6 +422,8 @@ export const THEME_DEFAULTS: Record<string, string | number | boolean> = {
   msgLineHeight: 1.8,
   messageLayout: 'classic',
   assistantDot: false,
+  assistantDotGlyph: '●',
+  assistantDotColor: '',
   bashPrefix: false,
   bashBg: '',
   footerLayout: 'free',
