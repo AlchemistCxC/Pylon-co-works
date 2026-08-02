@@ -18,7 +18,7 @@ use reqwest::Client;
 use tokio::sync::mpsc;
 use tokio_util::sync::CancellationToken;
 
-use crate::gateway::{GatewayCore, PlatformAdapter, ResolvedIngest};
+use crate::gateway::{truncate_ingest_content, GatewayCore, PlatformAdapter, ResolvedIngest};
 
 use self::auth::QqAuth;
 
@@ -223,12 +223,15 @@ impl QqAdapter {
         })
     }
 
-    /// 入站入口：白名单 → 去重 → 路由解析 → dispatch（ACP 发送）。
+    /// 入站入口：白名单 + 路由绑定（单快照）→ 去重 → dispatch（ACP 发送）。
     ///
     /// 核验修复：白名单先于 seen 记录——被白名单拒绝的消息不占去重窗口，
     /// 之后白名单放宽时同一消息重放仍可正常处理（消息从未真正 ingest 过）。
-    /// 修复（O38）：白名单判定先于 `core.ingest`——被白名单拒绝的消息不再产生
-    /// 超长截断的 content clone 分配（白名单只看 source/member，与 content 无关）。
+    /// 修复（O38）：白名单判定先于内容截断 clone——拒绝路径不产生截断分配
+    /// （白名单只看 source/member，与 content 无关）。
+    /// 修复（S5）：白名单判定与路由绑定在同一 `with_routes_and_qq` 单快照内完成，
+    /// ResolvedIngest 的 binding 与白名单判定依据同一份配置（不再经 ingest()
+    /// 二次读锁，消除 reload 窗口下"旧绑定放行 → 新绑定投递"的混搭）。
     /// - 白名单拒绝 → Ok(None)，不 dispatch
     /// - msg_id 已见（resume 重放）→ Ok(None)，不重复 ingest
     /// - 新消息 → 记录 seen + last_msg_id，dispatch 发送并返回解析结果
@@ -241,16 +244,27 @@ impl QqAdapter {
         member_openid: Option<&str>,
         user_openid: Option<&str>,
     ) -> Result<Option<ResolvedIngest>, String> {
+        // S5：空 source 校验与 ingest() 保持一致（无 source 即无路由可解析）。
+        if source.trim().is_empty() {
+            return Err("ingest requires a non-empty source".to_string());
+        }
         // P3：锁内读取白名单配置，避免每消息 clone 整个 QqGatewayConfig
         // R6b：读锁中毒（panic 后）→ 拒绝 ingest（fail-closed）——不得回退默认
         // 空白名单（空白名单 = 放行所有群，白名单安全路径必须拒绝）。
-        // O38：白名单判定先于 ingest（截断 clone）——拒绝路径不产生截断分配。
-        // O67：with_routes_and_qq 单锁快照——qq 配置与路由绑定一次读锁内取齐，
-        // 消除 reload 热重载窗口下"新配置 + 旧路由表"混搭的非原子判定。
-        let allowed = match self.core.with_routes_and_qq(source, |qq, binding| {
-            crate::gateway::ingest_allowed(qq, binding, source, member_openid, user_openid)
+        // O38：白名单判定先于内容截断 clone——拒绝路径不产生截断分配。
+        // O67：with_routes_and_qq 单锁快照——qq 配置与路由绑定一次读锁内取齐。
+        // S5：单快照内同时完成白名单判定与 binding 提取——判定依据的 allow_from
+        // 与投递路由的 binding 必须出自同一份配置快照。旧实现白名单后经
+        // core.ingest() 二次读锁解析 binding，reload 落在两次读锁之间时：消息按
+        // 旧绑定的 allow_from 放行，却投递给新绑定（或绑定被删后回退 active
+        // agent）——白名单校验过的 agent 与实际接收 agent 不一致。
+        let (allowed, binding) = match self.core.with_routes_and_qq(source, |qq, binding| {
+            (
+                crate::gateway::ingest_allowed(qq, binding, source, member_openid, user_openid),
+                binding.cloned(),
+            )
         }) {
-            Some(allowed) => allowed,
+            Some(snapshot) => snapshot,
             None => {
                 tracing::error!("gateway 配置读锁中毒，拒绝 ingest（fail-closed）: {source}");
                 return Ok(None);
@@ -259,7 +273,10 @@ impl QqAdapter {
         if !allowed {
             return Ok(None);
         }
-        let resolved = self.core.ingest(source, content)?;
+        // S5：截断与 ingest() 共用 truncate_ingest_content（行为一致）；ResolvedIngest
+        // 用快照 binding 构造——不经 ingest() 二次读锁。ingest() 仍是公共解析入口
+        // （测试直接调用，保持原行为），本热路径改为单快照构造。
+        let content = truncate_ingest_content(content);
         let mut dedup = self
             .dedup
             .lock()
@@ -282,9 +299,9 @@ impl QqAdapter {
         // C14：组装带 msg_id 的解析结果再 dispatch——ingest 发送失败时 lib.rs 可经
         // rollback_seen 撤销 seen 标记（故障期消息不永久丢失，resume 重放可重入）。
         let dispatched = ResolvedIngest {
-            source: resolved.source,
-            content: resolved.content,
-            binding: resolved.binding,
+            source: source.to_string(),
+            content,
+            binding,
             msg_id: Some(msg_id.to_string()),
         };
         self.core.dispatch_ingest(&dispatched);
@@ -750,6 +767,84 @@ gateway:
             .handle_incoming("qq:group:123", "msg-no", "hi", Some("stranger"), None)
             .expect("ingest");
         assert!(rejected.is_none(), "非白名单成员必须丢弃");
+    }
+
+    #[test]
+    fn handle_incoming_binding_matches_whitelist_snapshot() {
+        // S5：白名单判定与投递路由出自同一配置快照——解析结果携带的 binding
+        // 与白名单判定所用的 binding 一致（旧实现白名单后经 core.ingest() 二次
+        // 读锁，reload 窗口下存在"旧绑定放行 → 新绑定投递/回退 active agent"
+        // 的白名单与实际接收 agent 不一致窗口）。
+        let yaml = r#"
+gateway:
+  routes:
+    - source: qq:group:123
+      agent: peri
+      profile: trpg
+      session: 战役1
+      allow_from: [member-1]
+"#;
+        let core = Arc::new(GatewayCore::from_config(
+            crate::gateway::route::parse_config(yaml).expect("合法路由配置"),
+        ));
+        let adapter = test_adapter(core.clone());
+        // 白名单放行 → 解析结果携带与快照一致的 binding（白名单命中的同一绑定）
+        let resolved = adapter
+            .handle_incoming("qq:group:123", "msg-1", "hi", Some("member-1"), None)
+            .expect("ingest")
+            .expect("白名单成员必须放行");
+        let binding = resolved.binding.expect("路由命中必须携带 binding");
+        assert_eq!(binding.agent_id, "peri");
+        assert_eq!(binding.profile_id, "trpg");
+        assert_eq!(binding.session_key, "战役1");
+        // 与 gateway 路由表（同一配置版本）完全一致
+        assert_eq!(core.binding("qq:group:123"), Some(binding));
+    }
+
+    #[test]
+    fn reload_keeps_allowlist_and_binding_on_same_snapshot() {
+        // S5 端到端：热重载后白名单与路由绑定来自同一新快照——旧成员按新
+        // 白名单拒绝，新成员放行且解析结果携带新 binding（无"旧绑定判定 +
+        // 新绑定投递"混搭）。
+        let core = Arc::new(GatewayCore::from_config(
+            crate::gateway::route::parse_config(
+                r#"
+gateway:
+  routes:
+    - source: qq:group:123
+      agent: peri
+      profile: trpg
+      session: 战役1
+      allow_from: [old-member]
+"#,
+            )
+            .expect("合法路由配置"),
+        ));
+        let adapter = test_adapter(core.clone());
+        core.reload(
+            crate::gateway::route::parse_config(
+                r#"
+gateway:
+  routes:
+    - source: qq:group:123
+      agent: hermes
+      profile: default
+      session: 新战役
+      allow_from: [new-member]
+"#,
+            )
+            .expect("合法路由配置"),
+        );
+        let rejected = adapter
+            .handle_incoming("qq:group:123", "msg-1", "hi", Some("old-member"), None)
+            .expect("ingest");
+        assert!(rejected.is_none(), "重载后旧成员必须按新白名单拒绝");
+        let accepted = adapter
+            .handle_incoming("qq:group:123", "msg-2", "hi", Some("new-member"), None)
+            .expect("ingest")
+            .expect("重载后新成员必须放行");
+        assert_eq!(accepted.binding.as_ref().unwrap().agent_id, "hermes");
+        assert_eq!(accepted.binding.as_ref().unwrap().session_key, "新战役");
     }
 
     #[test]

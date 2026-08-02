@@ -55,6 +55,12 @@ pub struct ResolvedIngest {
 /// 入站消息字符上限：超长截断再进 prompt（防超长消息打爆 agent 输入）。
 pub const MAX_INGEST_CHARS: usize = 64 * 1024;
 
+/// 入站文本超长截断（S5 修复：ingest() 与 handle_incoming 共用同一上限与实现，
+/// 避免适配器单快照路径与公共解析入口的截断行为漂移）。
+pub(crate) fn truncate_ingest_content(content: &str) -> String {
+    content.chars().take(MAX_INGEST_CHARS).collect()
+}
+
 /// ingest 发送处理器：解析结果 → ACP 发送（B10.3 由 lib.rs 注册，
 /// 按 binding.agent_id 路由到对应 runtime，未绑定回退 active agent）。
 pub type IngestHandler = Arc<dyn Fn(&ResolvedIngest) + Send + Sync>;
@@ -213,11 +219,14 @@ impl GatewayCore {
     ///
     /// 平台相关去重（resume 重放）与白名单由各适配器层完成，本入口只见干净消息；
     /// 白名单通过后由调用方 [`Self::dispatch_ingest`] 触发 ACP 发送。
+    // S5 修复后 QQ 适配器 handle_incoming 走单快照路径（不经本入口二次读锁）；
+    // 本方法仍是公共解析入口（测试直调 + 其他平台适配器/调用方契约），行为不变。
+    #[allow(dead_code)]
     pub fn ingest(&self, source: &str, content: &str) -> Result<ResolvedIngest, String> {
         if source.trim().is_empty() {
             return Err("ingest requires a non-empty source".to_string());
         }
-        let content: String = content.chars().take(MAX_INGEST_CHARS).collect();
+        let content = truncate_ingest_content(content);
         let binding = self
             .config
             .read()
