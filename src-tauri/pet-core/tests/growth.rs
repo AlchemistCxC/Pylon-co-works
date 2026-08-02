@@ -345,6 +345,37 @@ fn force_sleep_when_energy_hits_zero() {
     );
 }
 
+#[test]
+fn low_energy_interactions_keep_pet_awake() {
+    // C13：energy≤15 时持续互动不入睡——每次互动刷新睡眠判定基准
+    //（修复前：冷却期内的互动不刷新 last_interaction_at_ms，距首次互动 30s 后的
+    // 轮询会误入睡；用 Poke 测试因喂食会恢复 energy >15 无法构造低能量场景）
+    let mut pet = day_pet(1);
+    pet.traits = pylon_pet_core::PetTraits::default();
+    pet.energy = 10;
+    pet.apply(AiEvent::Poke, 1); // 首次：reward 发放，基准=1
+    pet.apply(AiEvent::Poke, 2); // 冷却内：无 bond 但必须刷新基准
+    pet.apply(AiEvent::Poke, 3);
+    pet.apply(AiEvent::Poke, 29_500); // 冷却内（距首次 29.5s）
+    pet.apply(AiEvent::Visit, 31_000); // 距末次互动仅 1.5s
+    assert_ne!(
+        pet.machine,
+        pylon_pet_core::PetMachineState::Asleep,
+        "距末次互动 1.5s 的轮询不得误入睡"
+    );
+    // 对照：真正 30s+ 无互动仍入睡（基准刷新不破坏入睡判定）
+    let mut pet = day_pet(1);
+    pet.traits = pylon_pet_core::PetTraits::default();
+    pet.energy = 10;
+    pet.apply(AiEvent::Poke, 1);
+    pet.apply(AiEvent::Visit, 31_000);
+    assert_eq!(
+        pet.machine,
+        pylon_pet_core::PetMachineState::Asleep,
+        "30s+ 无互动必须入睡"
+    );
+}
+
 // ── M3：情绪推导（设计书 §6）──
 
 #[test]

@@ -823,6 +823,8 @@ impl PetState {
                 // M8：午夜陪伴——Night 时段戳一戳 bond ×1.5
                 self.reward_interaction(now_ms, self.night_bond(now_ms, 1));
                 self.record_night_visit(now_ms);
+                // C13：戳也是互动——刷新睡眠判定基准（防 energy≤15 时持续互动被 T1/T8 误入睡）
+                self.last_interaction_at_ms = now_ms;
                 // mood 由 derive_mood 推导
                 self.push_event(RecentEvent::Poke);
                 let part = self.day_part(now_ms);
@@ -856,6 +858,8 @@ impl PetState {
                 let greed_bond = 1 + self.traits.greed as u32 / 100;
                 self.reward_interaction(now_ms, self.night_bond(now_ms, greed_bond));
                 self.record_night_visit(now_ms);
+                // C13：喂食也是互动——刷新睡眠判定基准（防 energy≤15 时持续互动被 T1/T8 误入睡）
+                self.last_interaction_at_ms = now_ms;
                 // mood 由 derive_mood 推导
                 self.push_event(RecentEvent::Feed);
                 let part = self.day_part(now_ms);
