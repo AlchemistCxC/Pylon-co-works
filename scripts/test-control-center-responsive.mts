@@ -8,9 +8,11 @@ const inputCss = readFileSync(new URL('../src/components/chat/InputBar.css', imp
 const inputBar = readFileSync(new URL('../src/components/chat/InputBar.tsx', import.meta.url), 'utf8')
 const store = readFileSync(new URL('../src/store.ts', import.meta.url), 'utf8')
 const presets = readFileSync(new URL('../src/presets.ts', import.meta.url), 'utf8')
+const defs = readFileSync(new URL('../src/themeFieldDefs.ts', import.meta.url), 'utf8')
 
 assert.equal(app.includes('ccStatusFontSize'), true)
-assert.equal(app.includes("'--cc-status-font-size'"), true)
+// cssVar 注入由 defs 声明驱动（unit: 'px' 自动生成 --cc-status-font-size）
+assert.equal(defs.includes("ccStatusFontSize"), true)
 assert.equal(css.includes('font-size:max(14px, var(--cc-status-font-size, 14px))'), true)
 assert.equal(css.includes('min-height:var(--cc-min-height,64px)'), true)
 assert.equal(store.includes('ccStatusFontSize: 14'), true)

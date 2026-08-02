@@ -42,7 +42,8 @@ for (const preset of GLOBAL_PRESETS) {
 
 // App state -> CSS custom property -> ControlCenter consumer.
 assert.match(app, /ccStatusFontSize:\s*s\.ccStatusFontSize/)
-assert.match(app, /'--cc-status-font-size':\s*`\$\{s\.ccStatusFontSize\s*\?\?\s*14\}px`/)
+// cssVar 注入由 defs 声明驱动（unit: 'px' → App 循环注入 --cc-status-font-size）
+assert.match(customPresets, /\bccStatusFontSize\b[\s\S]*?unit: 'px'/)
 assert.match(css, /\.cc-status-row\s*\{[\s\S]*?font-size:\s*max\(14px,\s*var\(--cc-status-font-size,\s*14px\)\)/)
 
 // Settings entry -> zone-aware update path（声明式：defs 声明 + TAB_ZONE_MAP 映射）
