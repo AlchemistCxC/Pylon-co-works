@@ -1260,7 +1260,10 @@ pub(crate) async fn send_prompt_core<R: tauri::Runtime>(
         }
         PromptWaitOutcome::ConnectionClosed => {
             runtime.acp.lock().await.remove_pending(request_id);
-            let _ = state.remove_session_if_matches(runtime, source, &peri_id, prompt_generation);
+            // A14：崩溃不删会话映射——自动重连（keep_sessions=true）会迁移
+            // generation 并恢复事件路由；此处删除映射会让重连后的活跃会话
+            // 丢失绑定（与 keep_sessions 语义相悖）。已知限制：若重连后
+            // 事件无匹配（幽灵映射），session_matches 复核会拒绝陈旧消息。
             state.log_runtime_summary(
                 "error",
                 "prompt",
