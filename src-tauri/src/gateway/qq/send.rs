@@ -44,7 +44,7 @@ pub async fn send_message(
 
     let seq = msg_seq();
 
-    let body = if msg_type == MSG_TYPE_MARKDOWN {
+    let mut body = if msg_type == MSG_TYPE_MARKDOWN {
         serde_json::json!({
             "content": content,
             "markdown": { "content": content },
@@ -59,9 +59,8 @@ pub async fn send_message(
         })
     };
 
-    let mut body = body.as_object().unwrap().clone();
     if let Some(rid) = reply_to {
-        body.insert("msg_id".into(), serde_json::Value::String(rid.to_string()));
+        body["msg_id"] = serde_json::Value::String(rid.to_string());
     }
 
     let resp = client
