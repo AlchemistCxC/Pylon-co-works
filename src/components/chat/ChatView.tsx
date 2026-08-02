@@ -714,19 +714,15 @@ function ToolCard({ model }: { model: ReturnType<typeof buildToolPresentationMod
   const connCss: React.CSSProperties = {
     ['--tool-conn' as never]: resolveConnectorColor(connectorMode, status, { toolOk, toolRun, toolErr }, connectorColor),
   }
-  // CC 视觉还原：Bash 工具行灰底（claude 预设启用）
-  const bashBg = useStore(s => s.bashBg)
   const isBash = model.name === 'Bash'
   const suffix = model.state === 'completed' && model.outputLines > 0 ? ` — ${model.outputLabel}` : ''
   const outputHtml = useMemo(() => {
-    if (!model.outputText || model.name !== 'Bash') return ''
+    if (!model.outputText || !isBash) return ''
     return sanitizeHtml(new Anser().ansiToHtml(Anser.escapeForHtml(model.outputText)))
   }, [model.outputText, model.name])
   return (
     <div className="term-tool" data-status={status} data-tool-state={model.state}
-      data-output-collapsible={model.canCollapseOutput ? 'true' : 'false'}
-      data-bash={isBash ? 'true' : undefined}
-      style={isBash && bashBg ? { ...connCss, '--bash-bg': bashBg } as React.CSSProperties : connCss}>
+      data-output-collapsible={model.canCollapseOutput ? 'true' : 'false'} style={connCss}>
       <button className="term-tool-head" type="button" onClick={() => setOpen(!open)} aria-expanded={open} aria-controls={bodyId}>
         <span className={`term-tool-indicator ${status} ${toolIndicatorMotionClass(model.state)}`} style={glowCss} aria-label={indicatorAsset.ariaLabel[model.state]} role="img">{indicatorAsset.glyph}</span>
         <span className="term-tool-name">{model.name}</span>

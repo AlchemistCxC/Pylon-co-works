@@ -54,15 +54,15 @@ export const GLOBAL_PRESETS: GlobalPreset[] = [
       synRegex: '#e0964e', synMarkupHeading: '#61afef', synCoReference: '#8a9199', synSupport: '#8fa1b3',
       toolOk: '#4EBA65', toolRun: '#93A5FF', toolErr: '#FF6B80',
       toolNameColor: '#4EBA65', toolSummaryColor: '#999999',
-      userTagBg: 'transparent', userTagText: '#FFFFFF',
+      // 用户消息整行灰底（CC userMessageBackground 暗色 rgb(55,55,55)），可经"标签背景"调整
+      userTagBg: '#373737', userTagText: '#FFFFFF',
       toolIndicator: '●', toolIndicatorGlow: 0, toolIndicatorGlowColor: '',
       toolConnectorMode: 'none', toolConnectorColor: '#505050',
       spinnerFramePreset: 'sparkles', spinnerColor: '#D77757', spinnerSize: 14,
       msgStyle: 'terminal', msgFont: 'mono', msgTextColor: '#FFFFFF', msgLineHeight: 1.5,
       messageLayout: 'claude', footerLayout: 'peri', cliOverflowMode: 'fixed-scroll',
-      // CC 视觉还原：助手 ● 圆点、Bash 灰底
+      // CC 视觉还原：助手 ● 圆点
       assistantDot: true, assistantDotGlyph: '●', assistantDotColor: '',
-      bashBg: '#41414a',
 
       // cc
       ccHeight: 76, ccBgHeight: 76, ccBg: '#000000', ccBgImage: '', ccStatusFontSize: 14,

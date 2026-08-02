@@ -154,11 +154,10 @@ export const THEME_FIELD_DEFS = {
   msgTextColor: { ...C('chat', '消息文字'), group: "风格", },
   msgLineHeight: { ...N('chat', '消息行距', 1.2, 2.5, 0.1), group: "风格", },
   messageLayout: { ...S('chat', '信息层级', ['classic', 'claude', 'bubble']), group: "风格", },
-  // CC 视觉还原（claude 预设启用）：助手消息 ● 圆点 / Bash 工具灰底
+  // CC 视觉还原（claude 预设启用）：助手消息 ● 圆点
   assistantDot: { ...B('chat', '助手圆点'), group: "CC 风格" },
   assistantDotGlyph: { ...S('chat', '圆点形状', ['●', '■', '✦', '◆', '▶', '❯']), group: "CC 风格" },
   assistantDotColor: { ...C('chat', '圆点颜色'), group: "CC 风格" },
-  bashBg: { ...C('chat', 'Bash 背景'), group: "CC 风格" },
 
   // ── cc ──
   ccHeight: {
@@ -423,7 +422,6 @@ export const THEME_DEFAULTS: Record<string, string | number | boolean> = {
   assistantDot: false,
   assistantDotGlyph: '●',
   assistantDotColor: '',
-  bashBg: '',
   footerLayout: 'free',
   cliOverflowMode: 'fixed-scroll',
   ccHeight: 150,
