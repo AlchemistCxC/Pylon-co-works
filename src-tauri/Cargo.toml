@@ -36,6 +36,7 @@ thiserror = "2"
 # 官方 ACP schema（v1 + v2 类型全集）——消除手写协议参数构造
 agent-client-protocol-schema = "1.4"
 dashmap = "6.2.1"
+encoding_rs = "0.8.35"
 
 [build-dependencies]
 tauri-build = { version = "2", features = [] }

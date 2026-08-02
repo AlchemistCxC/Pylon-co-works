@@ -276,17 +276,39 @@ pub fn read_text(
         return Err(WorkspaceError::BinaryFile);
     }
     let slice = &bytes[..end];
-    let content = std::str::from_utf8(slice)
-        .map_err(|_| WorkspaceError::BinaryFile)?
-        .to_string();
+    let (content, encoding) = decode_text(slice)?;
     Ok(WorkspaceTextPreview {
         relative_path: relative.replace('\\', "/"),
         content,
         bytes_read: end,
         total_bytes,
         truncated,
-        encoding: "utf-8".to_string(),
+        encoding: encoding.to_string(),
     })
+}
+
+/// R22：文本编码判定——UTF-8 BOM（剥离）→ 严格 UTF-8 → GBK 回退（encoding_rs）。
+/// encoding 字段如实回填（"utf-8"/"gbk"）；三种途径都不可解码时按 binary 拒绝。
+/// GBK 为 2 字节字符：截断只会损坏末尾一个字符，解码报错后回退 1 字节重试，
+/// 避免误报 binary（GBK 尾字节与 lead 字节区间重叠，只能按解码结果判定）。
+fn decode_text(bytes: &[u8]) -> Result<(String, &'static str), WorkspaceError> {
+    let body = bytes.strip_prefix(b"\xEF\xBB\xBF").unwrap_or(bytes);
+    if let Ok(text) = std::str::from_utf8(body) {
+        return Ok((text.to_string(), "utf-8"));
+    }
+    let mut slice = body;
+    if body.len() > 1 {
+        let (text, _, had_errors) = encoding_rs::GBK.decode(body);
+        if !had_errors {
+            return Ok((text.into_owned(), "gbk"));
+        }
+        slice = &body[..body.len() - 1];
+    }
+    let (text, _, had_errors) = encoding_rs::GBK.decode(slice);
+    if had_errors {
+        return Err(WorkspaceError::BinaryFile);
+    }
+    Ok((text.into_owned(), "gbk"))
 }
 
 pub fn workspace_root(source: String, root: &Path) -> WorkspaceRoot {
@@ -406,6 +428,33 @@ mod tests {
         assert_eq!(preview.bytes_read % 3, 0, "截断必须停在 UTF-8 字符边界");
         assert_eq!(preview.bytes_read, preview.content.len());
         assert!(preview.content.chars().all(|c| c == '中'));
+    }
+
+    #[test]
+    fn text_preview_detects_gbk_and_strips_utf8_bom() {
+        // R22：GBK 字节文件可预览（encoding 回填 "gbk"）；UTF-8 BOM 剥离。
+        let (_dir, root) = fixture();
+        let gbk = [0xD6, 0xD0, 0xCE, 0xC4, 0xB2, 0xE2, 0xCA, 0xD4]; // "中文测试"
+        fs::write(root.join("gbk.txt"), gbk).unwrap();
+        let preview = read_text(&root, "gbk.txt", None).unwrap();
+        assert_eq!(preview.content, "中文测试");
+        assert_eq!(preview.encoding, "gbk");
+        fs::write(root.join("bom.txt"), b"\xEF\xBB\xBFhello").unwrap();
+        let preview = read_text(&root, "bom.txt", None).unwrap();
+        assert_eq!(preview.content, "hello");
+        assert_eq!(preview.encoding, "utf-8");
+        assert_eq!(preview.bytes_read, 8);
+    }
+
+    #[test]
+    fn text_preview_gbk_truncation_backs_off() {
+        // R22：GBK 2 字节字符被截断只剩 lead 字节时回退，不误报 binary。
+        let (_dir, root) = fixture();
+        let gbk = [0xD6, 0xD0, 0xCE, 0xC4, 0xB2, 0xE2, 0xCA]; // "中文测" + 截断的 "试"
+        fs::write(root.join("gbk2.txt"), gbk).unwrap();
+        let preview = read_text(&root, "gbk2.txt", Some(7)).unwrap();
+        assert_eq!(preview.content, "中文测");
+        assert_eq!(preview.encoding, "gbk");
     }
 
     #[test]

@@ -2494,6 +2494,7 @@ dependencies = [
  "base64 0.22.1",
  "dashmap",
  "embed-resource",
+ "encoding_rs",
  "futures-util",
  "infer",
  "log",
