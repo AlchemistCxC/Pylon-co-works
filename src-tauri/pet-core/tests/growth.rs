@@ -860,7 +860,7 @@ fn night_poll_voice_skips_bored() {
 fn time_of_day_line_variants_are_used() {
     use pylon_pet_core::lines::{pick, LineKey};
     use pylon_pet_core::DayPart;
-    let mut idx = 0u8;
+    let mut idx = std::collections::HashMap::new();
     let wake_night = pick(LineKey::Wake, &mut idx, DayPart::Night);
     assert!(
         wake_night.contains("夜深") || wake_night.contains("黑暗"),
@@ -898,7 +898,7 @@ fn same_scene_picks_rotate_without_immediate_repeat() {
     // R30：同场景连续 pick 轮换不重复（API 级直接验证）
     use pylon_pet_core::lines::{pick, LineKey};
     use pylon_pet_core::DayPart;
-    let mut idx = 0u8;
+    let mut idx = std::collections::HashMap::new();
     let a = pick(LineKey::Poke, &mut idx, DayPart::Day);
     let b = pick(LineKey::Poke, &mut idx, DayPart::Day);
     assert_ne!(a, b, "同场景连续 pick 不得重复: {a} / {b}");

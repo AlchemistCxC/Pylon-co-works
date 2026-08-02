@@ -9,7 +9,7 @@
 use crate::DayPart;
 
 /// 文案场景 key。
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum LineKey {
     Birth,
     Sleep,
@@ -31,10 +31,14 @@ pub enum LineKey {
     FriendDone,
 }
 
-/// 抽取文案（轮换索引推进；idx 溢出回绕）。
+/// 抽取文案（每场景独立轮换计数器；idx 溢出回绕）。
 /// `part` 用于时段变体池：Wake/Sleep/Done 三场景在 Dusk/Night/Dawn 有专属变体，
 /// 其余场景一律回退普通池。
-pub fn pick(key: LineKey, idx: &mut u8, part: DayPart) -> String {
+pub fn pick(
+    key: LineKey,
+    counters: &mut std::collections::HashMap<LineKey, u8>,
+    part: DayPart,
+) -> String {
     let pool: &[&str] = match key {
         LineKey::Birth => &["一粒微光落在了这里。", "它在代码的缝隙里睁开了眼。"],
         LineKey::Sleep => match part {
@@ -99,10 +103,10 @@ pub fn pick(key: LineKey, idx: &mut u8, part: DayPart) -> String {
             "新朋友在旁边闪着同样的光。它俩并排坐着，像两行对齐的代码。",
         ],
     };
-    // R30：单计数器（PetState.line_idx，lib.rs 字段禁碰）无法按场景独立轮换——
-    // 以场景 key 做相位偏移：各场景轮换相位不同（同一节奏下不再锁步对齐），
-    // 计数器语义不变（每 pick 推进一次，溢出回绕）。
-    let pick_idx = (idx.wrapping_add(key as u8) as usize) % pool.len();
+    // R30：per-scene 独立计数器——交替场景各用各的索引，不锁步对齐
+    // （原单计数器在 Sleep/Hungry 交替时每场景周期性重复同句）。
+    let idx = counters.entry(key).or_insert(0);
+    let pick_idx = *idx as usize % pool.len();
     *idx = idx.wrapping_add(1);
     pool[pick_idx].to_string() // Rename 等场景由调用方拼接前后缀
 }

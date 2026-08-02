@@ -470,9 +470,10 @@ pub struct PetState {
     feed_spam_count: u8,
     #[serde(skip)]
     last_play_at_ms: u64,
-    /// M6 文案轮换索引（不落盘）。
+    /// M6 文案轮换索引（不落盘）：每场景独立计数器（R30）——交替场景各用
+    /// 各的索引，不再锁步对齐周期性重复。
     #[serde(skip)]
-    line_idx: u8,
+    line_idx_by_scene: std::collections::HashMap<lines::LineKey, u8>,
 }
 
 impl Default for PetState {
@@ -518,14 +519,18 @@ impl PetState {
                 ..PetStats::default()
             },
             memories: VecDeque::new(),
-            msg: Some(lines::pick(lines::LineKey::Birth, &mut 0, DayPart::Day)),
+            msg: Some(lines::pick(
+                lines::LineKey::Birth,
+                &mut std::collections::HashMap::new(),
+                DayPart::Day,
+            )),
             last_interaction_at_ms: 0,
             last_activity_at_ms: 0,
             local_offset_minutes: 0,
             last_feed_at_ms: 0,
             feed_spam_count: 0,
             last_play_at_ms: 0,
-            line_idx: 0,
+            line_idx_by_scene: std::collections::HashMap::new(),
         }
     }
 
@@ -653,7 +658,7 @@ impl PetState {
                 self.record_night_visit(part);
                 self.msg = Some(lines::pick(
                     lines::LineKey::UserSent,
-                    &mut self.line_idx,
+                    &mut self.line_idx_by_scene,
                     part,
                 ));
             }
@@ -667,7 +672,7 @@ impl PetState {
                     // mood 由 derive_mood 推导
                     self.msg = Some(lines::pick(
                         lines::LineKey::FirstChunk,
-                        &mut self.line_idx,
+                        &mut self.line_idx_by_scene,
                         part,
                     ));
                 }
@@ -693,7 +698,11 @@ impl PetState {
                     ));
                 }
                 self.push_event(RecentEvent::Done);
-                self.msg = Some(lines::pick(lines::LineKey::Done, &mut self.line_idx, part));
+                self.msg = Some(lines::pick(
+                    lines::LineKey::Done,
+                    &mut self.line_idx_by_scene,
+                    part,
+                ));
                 // M10：稀有发现掉落（1% + 24h 冷却；任务完成是掉落时机之一）
                 self.maybe_drop_cosmetic(now_ms, rand::rng().random_range(0..1000u32));
             }
@@ -709,7 +718,7 @@ impl PetState {
                 self.push_event(RecentEvent::Failed);
                 self.msg = Some(lines::pick(
                     lines::LineKey::Failed,
-                    &mut self.line_idx,
+                    &mut self.line_idx_by_scene,
                     part,
                 ));
             }
@@ -741,7 +750,7 @@ impl PetState {
                         }
                         self.msg = Some(lines::pick(
                             lines::LineKey::FriendStart,
-                            &mut self.line_idx,
+                            &mut self.line_idx_by_scene,
                             part,
                         ));
                     }
@@ -810,7 +819,11 @@ impl PetState {
                 self.stats.dazes = self.stats.dazes.saturating_add(1);
                 self.fun = (self.fun as u16 + 5).min(100) as u8;
                 self.push_event(RecentEvent::Timeout);
-                self.msg = Some(lines::pick(lines::LineKey::Dazed, &mut self.line_idx, part));
+                self.msg = Some(lines::pick(
+                    lines::LineKey::Dazed,
+                    &mut self.line_idx_by_scene,
+                    part,
+                ));
             }
             AiEvent::CodeSeen => {
                 self.stats.code_watched = self.stats.code_watched.saturating_add(1);
@@ -827,7 +840,11 @@ impl PetState {
                 self.last_interaction_at_ms = now_ms;
                 // mood 由 derive_mood 推导
                 self.push_event(RecentEvent::Poke);
-                self.msg = Some(lines::pick(lines::LineKey::Poke, &mut self.line_idx, part));
+                self.msg = Some(lines::pick(
+                    lines::LineKey::Poke,
+                    &mut self.line_idx_by_scene,
+                    part,
+                ));
             }
             AiEvent::Feed => {
                 self.stats.interactions = self.stats.interactions.saturating_add(1);
@@ -866,7 +883,11 @@ impl PetState {
                 self.last_interaction_at_ms = now_ms;
                 // mood 由 derive_mood 推导
                 self.push_event(RecentEvent::Feed);
-                self.msg = Some(lines::pick(lines::LineKey::Feed, &mut self.line_idx, part));
+                self.msg = Some(lines::pick(
+                    lines::LineKey::Feed,
+                    &mut self.line_idx_by_scene,
+                    part,
+                ));
             }
             AiEvent::Play => {
                 self.stats.interactions = self.stats.interactions.saturating_add(1);
@@ -893,11 +914,19 @@ impl PetState {
                 self.record_night_visit(part);
                 // mood 由 derive_mood 推导
                 self.push_event(RecentEvent::Play);
-                self.msg = Some(lines::pick(lines::LineKey::Play, &mut self.line_idx, part));
+                self.msg = Some(lines::pick(
+                    lines::LineKey::Play,
+                    &mut self.line_idx_by_scene,
+                    part,
+                ));
             }
             AiEvent::Sleepy => {
                 self.machine = PetMachineState::Asleep;
-                self.msg = Some(lines::pick(lines::LineKey::Sleep, &mut self.line_idx, part));
+                self.msg = Some(lines::pick(
+                    lines::LineKey::Sleep,
+                    &mut self.line_idx_by_scene,
+                    part,
+                ));
             }
             AiEvent::AgentConnected => {
                 // T4：连接恢复 → Idle
@@ -922,7 +951,11 @@ impl PetState {
             let idle_for = now_ms.saturating_sub(self.last_interaction_at_ms);
             if self.energy <= 15 && (idle_for >= 30_000 || self.energy == 0) {
                 self.machine = PetMachineState::Asleep;
-                self.msg = Some(lines::pick(lines::LineKey::Sleep, &mut self.line_idx, part));
+                self.msg = Some(lines::pick(
+                    lines::LineKey::Sleep,
+                    &mut self.line_idx_by_scene,
+                    part,
+                ));
             }
         }
         // M3：情绪统一推导（取代事件直接赋值）
@@ -1070,7 +1103,11 @@ impl PetState {
         self.machine = PetMachineState::Awake(MachineSub::Idle);
         self.energy = (self.energy as u16 + 30).min(100) as u8;
         let part = self.day_part(now_ms);
-        self.msg = Some(lines::pick(lines::LineKey::Wake, &mut self.line_idx, part));
+        self.msg = Some(lines::pick(
+            lines::LineKey::Wake,
+            &mut self.line_idx_by_scene,
+            part,
+        ));
     }
 
     /// M8 时段感知：当前时段（本地小时推导）。offset 由桥接层注入（见
@@ -1140,7 +1177,7 @@ impl PetState {
     pub fn rename(&mut self, value: &str, now_ms: u64) {
         self.name = sanitize_name(value);
         let part = self.day_part(now_ms);
-        let prefix = lines::pick(lines::LineKey::Rename, &mut self.line_idx, part);
+        let prefix = lines::pick(lines::LineKey::Rename, &mut self.line_idx_by_scene, part);
         self.msg = Some(format!("{prefix}{}。", self.name));
     }
 
@@ -1159,7 +1196,7 @@ impl PetState {
                 let part = self.day_part(now_ms);
                 self.msg = Some(lines::pick(
                     lines::LineKey::FriendDone,
-                    &mut self.line_idx,
+                    &mut self.line_idx_by_scene,
                     part,
                 ));
                 return true;
@@ -1196,7 +1233,7 @@ impl PetState {
         };
         if let Some(key) = key {
             let part = self.day_part(now_ms);
-            self.msg = Some(lines::pick(key, &mut self.line_idx, part));
+            self.msg = Some(lines::pick(key, &mut self.line_idx_by_scene, part));
             true
         } else {
             false
