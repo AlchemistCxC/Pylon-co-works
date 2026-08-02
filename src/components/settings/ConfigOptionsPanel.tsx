@@ -15,17 +15,23 @@ export default function ConfigOptionsPanel({ sessionSource }: { sessionSource?: 
 
   const update = async (id: string, value: unknown) => {
     const previous = options.find(option => option.id === id)?.currentValue
+    // 乐观更新与回滚都基于最新 store 的 raw 打补丁，而非渲染快照：
+    // 快速连续更新时旧快照重建会把先成功字段的乐观值覆盖回旧值。
+    const patch = (currentValue: unknown) => {
+      const raw = useRuntimeStore.getState().sessionConfig[sessionSource]?.raw ?? []
+      setSessionConfig(sessionSource, { raw: raw.map(option => option.id === id ? { ...option, currentValue } : option) })
+    }
     setPending(state => ({ ...state, [id]: true }))
     setErrors(state => {
       const next = { ...state }
       delete next[id]
       return next
     })
-    setSessionConfig(sessionSource, { raw: options.map(option => option.id === id ? { ...option.raw, currentValue: value } : option.raw) })
+    patch(value)
     try {
       await invoke('set_config_option', { source: sessionSource, key: id, value })
     } catch (error) {
-      setSessionConfig(sessionSource, { raw: options.map(option => option.id === id ? { ...option.raw, currentValue: previous } : option.raw) })
+      patch(previous)
       const detail = reportRuntimeError(`更新配置 ${id}`, error)
       setErrors(state => ({ ...state, [id]: detail.message }))
     } finally {
