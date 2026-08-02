@@ -35,6 +35,9 @@ pub trait PlatformAdapter: Send + Sync {
         event: &str,
         payload: &serde_json::Value,
     ) -> Result<(), String>;
+    /// 入站去重回滚（C14）：ingest 发送失败后撤销平台侧 seen 标记，resume 重放
+    /// 可重新 ingest（防故障期消息永久丢失）。默认空实现——无需去重的平台不关心。
+    fn rollback_seen(&self, _msg_id: &str) {}
 }
 
 /// 入站消息解析结果：平台消息 → 路由绑定（B10.3 消费：会话生命周期 + ACP 发送）。
@@ -44,6 +47,9 @@ pub struct ResolvedIngest {
     pub content: String,
     /// 静态绑定命中；未配置实体时为 None（回退默认绑定 = active agent）。
     pub binding: Option<route::EntityBinding>,
+    /// 平台消息去重 id（C14：ingest 发送失败经 [`PlatformAdapter::rollback_seen`]
+    /// 回滚去重窗口用）。`ingest()` 构造为 None；适配器层 handle_incoming 组装时填充。
+    pub msg_id: Option<String>,
 }
 
 /// 入站消息字符上限：超长截断再进 prompt（防超长消息打爆 agent 输入）。
@@ -214,6 +220,8 @@ impl GatewayCore {
             source: source.to_string(),
             content,
             binding,
+            // C14：纯解析层不知道平台 msg_id，由适配器层 handle_incoming 组装时填充
+            msg_id: None,
         })
     }
 

@@ -197,8 +197,16 @@ impl QqAdapter {
             dedup.set_latest(chat_id, msg_id);
         }
         drop(dedup);
-        self.core.dispatch_ingest(&resolved);
-        Ok(Some(resolved))
+        // C14：组装带 msg_id 的解析结果再 dispatch——ingest 发送失败时 lib.rs 可经
+        // rollback_seen 撤销 seen 标记（故障期消息不永久丢失，resume 重放可重入）。
+        let dispatched = ResolvedIngest {
+            source: resolved.source,
+            content: resolved.content,
+            binding: resolved.binding,
+            msg_id: Some(msg_id.to_string()),
+        };
+        self.core.dispatch_ingest(&dispatched);
+        Ok(Some(dispatched))
     }
 }
 
@@ -209,6 +217,14 @@ impl PlatformAdapter for QqAdapter {
 
     fn max_message_len(&self) -> usize {
         QQ_MAX_MESSAGE_LEN
+    }
+
+    /// 回滚 seen 标记（C14）：ingest 发送失败时撤销 msg_id 的去重记录，
+    /// 之后 resume 重放同一消息可重新 ingest。锁中毒时静默放弃（保守处理）。
+    fn rollback_seen(&self, msg_id: &str) {
+        if let Ok(mut dedup) = self.dedup.lock() {
+            dedup.rollback(msg_id);
+        }
     }
 
     /// 投递文本（已分段，B10 收尾）：回复锚点（dedup latest_for）→ 死目标短路 →
@@ -644,6 +660,34 @@ gateway:
             .handle_incoming("qq:group:group-b", "msg-1", "hi", Some("member-1"), None)
             .expect("ingest");
         assert!(rejected.is_none(), "未列入群级白名单必须丢弃");
+    }
+
+    #[test]
+    fn rollback_seen_allows_reingest_after_failure() {
+        // C14：ingest 发送失败后 rollback_seen → 同一 msg_id 可重新 ingest
+        let core = core_with_route();
+        let adapter = test_adapter(core);
+        let first = adapter
+            .handle_incoming("qq:group:123", "msg-1", "你好", None, None)
+            .expect("ingest");
+        assert!(first.is_some());
+        let replay = adapter
+            .handle_incoming("qq:group:123", "msg-1", "你好", None, None)
+            .expect("ingest");
+        assert!(replay.is_none(), "已处理消息重放必须去重");
+        // 发送失败回滚 → 重放重新可入
+        adapter.rollback_seen("msg-1");
+        let reprocessed = adapter
+            .handle_incoming("qq:group:123", "msg-1", "你好", None, None)
+            .expect("ingest")
+            .expect("rollback 后同一 msg_id 必须可重入");
+        assert_eq!(
+            reprocessed.msg_id.as_deref(),
+            Some("msg-1"),
+            "解析结果必须携带 msg_id（lib.rs 回滚依赖）"
+        );
+        // rollback 未记录过的 id 安全
+        adapter.rollback_seen("never-seen");
     }
 
     #[test]

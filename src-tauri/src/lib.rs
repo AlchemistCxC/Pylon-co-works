@@ -2615,6 +2615,15 @@ pub fn run() {
                                 agent_cwd.as_deref(),
                             ).await {
                                 log::warn!("gateway ingest 发送失败 ({}): {error}", resolved.source);
+                                // C14：发送失败回滚去重 seen——故障期消息不占去重窗口，
+                                // resume 重放可重新 ingest（防故障期消息永久丢失）。
+                                // 经 PlatformAdapter::rollback_seen（trait 默认空实现，
+                                // QQ 适配器覆盖为 dedup 回滚；未注册适配器时无操作）。
+                                if let Some(msg_id) = resolved.msg_id.as_deref() {
+                                    if let Some(adapter) = state.gateway.adapter("qq") {
+                                        adapter.rollback_seen(msg_id);
+                                    }
+                                }
                             }
                         });
                     }));

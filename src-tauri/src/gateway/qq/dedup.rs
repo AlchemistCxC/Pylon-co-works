@@ -53,6 +53,13 @@ impl DedupState {
         true
     }
 
+    /// 回滚 seen 记录（C14）：ingest 发送失败后撤销去重标记——msg_id 不再占
+    /// 去重窗口，resume 重放同一消息可重新 ingest（防故障期消息永久丢失）。
+    /// 不影响 last_msg_id（回复锚点语义：锚点跟随最后一次收到的消息）。
+    pub fn rollback(&mut self, msg_id: &str) {
+        self.seen.remove(msg_id);
+    }
+
     /// seen 窗口容量（DEDUP_MAX_SIZE，Hermes 实证值）。仅测试引用。
     #[cfg(test)]
     pub fn window_capacity(&self) -> usize {
@@ -126,6 +133,22 @@ mod tests {
         // 最早条目已被清出窗口，重新可见（重入会再次挤掉当前最旧条目，容量仍受限）
         assert!(state.is_new("msg-0"), "最早条目 msg-0 应已被清理");
         assert!(state.seen.len() <= DEDUP_MAX_SIZE);
+    }
+
+    #[test]
+    fn rollback_restores_reingest_after_seen() {
+        let mut state = DedupState::new();
+        assert!(state.is_new("msg-1"));
+        assert!(!state.is_new("msg-1"));
+        // C14：ingest 失败回滚 → 同一 msg_id 重新可入
+        state.rollback("msg-1");
+        assert!(state.is_new("msg-1"), "rollback 后同一 msg_id 必须可重入");
+        // rollback 未记录过的 id 安全无副作用
+        state.rollback("never-seen");
+        // 回滚不影响 last_msg_id 锚点
+        state.set_latest("chat-1", "msg-1");
+        state.rollback("msg-1");
+        assert_eq!(state.latest_for("chat-1"), Some("msg-1"));
     }
 
     #[test]
