@@ -99,10 +99,14 @@ impl RuntimeLogHub {
     pub fn list(&self, query: &RuntimeLogQuery) -> Vec<RuntimeLogEntry> {
         let search = query.search.as_deref().map(str::to_lowercase);
         let limit = query.limit.unwrap_or(self.capacity).min(self.capacity);
-        let entries = self
-            .entries
-            .lock()
-            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        // O23：锁内仅 clone 快照，过滤在锁外进行（保持 rev + take(limit) 语义）。
+        let entries = {
+            let guard = self
+                .entries
+                .lock()
+                .unwrap_or_else(|poisoned| poisoned.into_inner());
+            guard.iter().cloned().collect::<Vec<_>>()
+        };
         entries
             .iter()
             .rev()
