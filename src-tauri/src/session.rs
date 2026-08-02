@@ -225,6 +225,16 @@ pub(crate) fn apply_client_replacement_sessions(
     }
 }
 
+/// O1：prompt 锁表随会话生命周期收敛——会话映射删除时同步移除锁条目，
+/// 防止锁表无界增长。映射删除 = 该 source 生命周期结束；生成中的 prompt
+/// 持有 Arc 守卫，条目移除不影响在途等待，新会话 prompt_lock_for 按需重建。
+/// 调用方不得在持有 sessions 锁时调用本函数（保持锁序：sessions → prompt_locks 单向）。
+fn drop_prompt_lock(runtime: &AgentRuntime, source: &str) {
+    if let Ok(mut locks) = runtime.prompt_locks.lock() {
+        locks.remove(source);
+    }
+}
+
 /// B11.1 注入适用性：命令消息（`/` 开头，与 persona 拼接规则一致）不注入。
 pub(crate) fn inject_applies_to(content: &str) -> bool {
     !content.trim_start().starts_with('/')
@@ -471,15 +481,22 @@ impl AppState {
         peri_id: &str,
         generation: u64,
     ) -> Result<bool, String> {
-        let mut sessions = runtime.sessions.lock().map_err(|error| error.to_string())?;
-        if sessions.get(source).map(|session| {
-            session_mapping_matches(&session.peri_id, session.generation, peri_id, generation)
-        }) == Some(true)
-        {
-            Ok(sessions.remove(source).is_some())
-        } else {
-            Ok(false)
+        let removed = {
+            let mut sessions = runtime.sessions.lock().map_err(|error| error.to_string())?;
+            if sessions.get(source).map(|session| {
+                session_mapping_matches(&session.peri_id, session.generation, peri_id, generation)
+            }) == Some(true)
+            {
+                sessions.remove(source).is_some()
+            } else {
+                false
+            }
+        };
+        if removed {
+            // O1：映射删除 = 该 source 生命周期结束 → 锁表同步收敛（锁序单向，不嵌套）。
+            drop_prompt_lock(runtime, source);
         }
+        Ok(removed)
     }
 
     pub(crate) fn start_runtime_log_dispatcher(&self, window: tauri::WebviewWindow) {
@@ -673,6 +690,10 @@ pub(crate) async fn check_session_expiry(state: &AppState) {
                     }
                 }
             };
+            if removed {
+                // O1：映射删除 = 该 source 生命周期结束 → 锁表同步收敛
+                drop_prompt_lock(&runtime, &source);
+            }
             if !removed {
                 // 映射已变更（新会话已接管 source）——不 close、不通知
                 continue;
@@ -1854,5 +1875,48 @@ gateway:
         // Round N+1 自身 chunk 正常收集。
         session.collect_response_chunk("回合N+1文本", 2);
         assert_eq!(session.last_response_text, "回合N+1文本");
+    }
+
+    /// O1：会话映射删除时 prompt 锁表条目必须同步收敛（映射删除 = 生命周期结束，
+    /// 锁表不得无界增长）；映射不匹配时不删除也不清理。
+    #[tokio::test]
+    async fn remove_session_if_matches_drops_prompt_lock_entry() {
+        let runtime = AgentRuntime::new_disconnected();
+        let state = state_without_active_runtime();
+        {
+            let mut sessions = runtime.sessions.lock().unwrap();
+            sessions.insert(
+                "source-a".to_string(),
+                SessionInfo::new("peri-1".into(), String::new(), ".".into(), false, 1),
+            );
+        }
+        prompt_lock_for(&runtime.prompt_locks, "source-a");
+        assert_eq!(runtime.prompt_locks.lock().unwrap().len(), 1);
+        let removed = state
+            .remove_session_if_matches(&runtime, "source-a", "peri-1", 1)
+            .unwrap();
+        assert!(removed, "匹配映射必须被删除");
+        assert!(
+            runtime.prompt_locks.lock().unwrap().is_empty(),
+            "锁表条目必须随映射删除收敛"
+        );
+        // 不匹配（peri_id 已更换）：不删除映射，也不清理锁表（新会话仍在使用）。
+        prompt_lock_for(&runtime.prompt_locks, "source-b");
+        {
+            let mut sessions = runtime.sessions.lock().unwrap();
+            sessions.insert(
+                "source-b".to_string(),
+                SessionInfo::new("peri-2".into(), String::new(), ".".into(), false, 1),
+            );
+        }
+        let removed = state
+            .remove_session_if_matches(&runtime, "source-b", "peri-other", 1)
+            .unwrap();
+        assert!(!removed, "不匹配映射不得删除");
+        assert_eq!(
+            runtime.prompt_locks.lock().unwrap().len(),
+            1,
+            "映射未删除时锁表条目保留（生成中豁免仍依赖该条目）"
+        );
     }
 }
