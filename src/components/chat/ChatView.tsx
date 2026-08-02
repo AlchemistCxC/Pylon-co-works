@@ -714,8 +714,7 @@ function ToolCard({ model }: { model: ReturnType<typeof buildToolPresentationMod
   const connCss: React.CSSProperties = {
     ['--tool-conn' as never]: resolveConnectorColor(connectorMode, status, { toolOk, toolRun, toolErr }, connectorColor),
   }
-  // CC 视觉还原：Bash 工具行 ! 前缀 + 灰底（claude 预设启用）
-  const bashPrefix = useStore(s => s.bashPrefix)
+  // CC 视觉还原：Bash 工具行灰底（claude 预设启用）
   const bashBg = useStore(s => s.bashBg)
   const isBash = model.name === 'Bash'
   const suffix = model.state === 'completed' && model.outputLines > 0 ? ` — ${model.outputLabel}` : ''
@@ -726,10 +725,9 @@ function ToolCard({ model }: { model: ReturnType<typeof buildToolPresentationMod
   return (
     <div className="term-tool" data-status={status} data-tool-state={model.state}
       data-output-collapsible={model.canCollapseOutput ? 'true' : 'false'}
-      data-bash={isBash && bashPrefix ? 'true' : undefined}
+      data-bash={isBash ? 'true' : undefined}
       style={isBash && bashBg ? { ...connCss, '--bash-bg': bashBg } as React.CSSProperties : connCss}>
       <button className="term-tool-head" type="button" onClick={() => setOpen(!open)} aria-expanded={open} aria-controls={bodyId}>
-        {isBash && bashPrefix && <span className="term-tool-bash-prefix" aria-hidden="true">!</span>}
         <span className={`term-tool-indicator ${status} ${toolIndicatorMotionClass(model.state)}`} style={glowCss} aria-label={indicatorAsset.ariaLabel[model.state]} role="img">{indicatorAsset.glyph}</span>
         <span className="term-tool-name">{model.name}</span>
         {displaySummary && <span className="term-tool-summary"> ({displaySummary})</span>}

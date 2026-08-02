@@ -59,9 +59,9 @@ export interface ThemeSettings {
   spinnerColor: string; spinnerSize: number
   msgStyle: string; msgFont: string; msgTextColor: string; msgLineHeight: number
   messageLayout: 'classic' | 'claude' | 'bubble'
-  /** CC 视觉还原：助手消息 ● 圆点 / Bash 工具 ! 前缀 + 灰底 */
+  /** CC 视觉还原：助手消息 ● 圆点 / Bash 工具灰底 */
   assistantDot: boolean; assistantDotGlyph: string; assistantDotColor: string
-  bashPrefix: boolean; bashBg: string
+  bashBg: string
   footerLayout: 'free' | 'peri'
   cliOverflowMode: 'fixed-scroll' | 'grow' | 'overlay'
   ccHeight: number; ccBgHeight: number; ccBg: string

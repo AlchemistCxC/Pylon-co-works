@@ -60,9 +60,9 @@ export const GLOBAL_PRESETS: GlobalPreset[] = [
       spinnerFramePreset: 'sparkles', spinnerColor: '#D77757', spinnerSize: 14,
       msgStyle: 'terminal', msgFont: 'mono', msgTextColor: '#FFFFFF', msgLineHeight: 1.5,
       messageLayout: 'claude', footerLayout: 'peri', cliOverflowMode: 'fixed-scroll',
-      // CC 视觉还原：助手 ● 圆点、Bash ! 前缀 + 灰底
+      // CC 视觉还原：助手 ● 圆点、Bash 灰底
       assistantDot: true, assistantDotGlyph: '●', assistantDotColor: '',
-      bashPrefix: true, bashBg: '#41414a',
+      bashBg: '#41414a',
 
       // cc
       ccHeight: 76, ccBgHeight: 76, ccBg: '#000000', ccBgImage: '', ccStatusFontSize: 14,

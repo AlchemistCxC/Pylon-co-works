@@ -316,7 +316,3 @@
 /* 用户标签跟随终端字体（此前 var(--font) 混入 GUI 字体） */
 .term-user-tag { font-family:var(--mono); }
 .term-tool[data-bash="true"] { background:var(--bash-bg, transparent); }
-.term-tool-bash-prefix {
-  color:var(--cli-line-color, currentColor); font-weight:700;
-  margin-right:5px; user-select:none;
-}
