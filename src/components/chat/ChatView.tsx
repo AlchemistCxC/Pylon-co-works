@@ -567,7 +567,7 @@ function AssistantContent({ text, isStreaming = false }: { text: string; isStrea
               if (match) return <CodeBlock language={match[1]} code={code} />
               return <code className="term-inline-code" {...props}>{children}</code>
             },
-            a({ href, children }) { return <a href={href} target="_blank" rel="noopener" className="term-link">{children}</a> },
+            a({ href, children }) { return <a href={href} target="_blank" rel="noopener noreferrer" className="term-link">{children}</a> },
             blockquote({ children }) { return <blockquote className="term-blockquote">{children}</blockquote> },
             table({ children }) { return <div className="term-table-wrap"><table className="term-table">{children}</table></div> },
           }}>{text}</MarkdownRenderer>
@@ -603,7 +603,11 @@ function CodeBlock({ language, code }: { language?: string; code: string }) {
     recordRender('highlightCode.call')
     recordMeasuredAsync('CodeBlock.highlight', highlightCode(lang, code)).then(html => {
       if (html && !cancelled) setHighlighted({ html, lang })
-    }).catch(() => {})
+    }).catch(error => {
+      // 2026-08-02：失败不再完全静默——高亮库加载失败回退纯文本渲染（renderLines fallback），
+      // 至少留一条日志便于排查；不弹横幅（单块降级不应打断用户）。
+      if (!cancelled) console.warn('code highlight failed, falling back to plain text:', error)
+    })
     return () => { cancelled = true }
   }, [language, code, isMultiLine])
 
