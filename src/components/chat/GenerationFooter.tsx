@@ -95,8 +95,10 @@ export default function GenerationFooter({ running, frames, tokenCount, startTim
       : phase?.kind === 'responding'
         ? '正在回复'
         : null
+  // CC 风格（cc 动词集）：显示幽默随机动词而非阶段文案"思考中/调用 X"
+  const ccVerbs = spinnerVerbSet === 'cc'
   const verb = !running ? '' : activity === 'active'
-    ? phaseLabel || randomVerb
+    ? (ccVerbs ? randomVerb : phaseLabel || randomVerb)
     : activity === 'waiting' ? '等待响应' : '仍在等待后端响应'
   const displayVerb = useMinDisplayTime(verb, 1200)
 
@@ -106,7 +108,8 @@ export default function GenerationFooter({ running, frames, tokenCount, startTim
     if (tokenCount > 0) parts.push(`↓ ${formatTokens(tokenCount)} tokens`)
     return (
       <div className="term-spinner-row">
-        <div className="term-spinner" data-activity={activity} data-phase={phase?.kind || 'idle'}>
+        {/* cc 帧：不设 data-phase（帧恒 spinnerColor，颜色不随阶段跳，对齐 CC 恒色） */}
+        <div className="term-spinner" data-activity={activity} data-phase={spinnerFramePreset === 'cc' ? undefined : phase?.kind || 'idle'}>
           <span className="spinner-frame" style={{ color: spinnerColor || undefined, fontSize: `${spinnerSize}px` }}>{frameAt(frames, elapsedMs, spinnerIntervalMs, reduceMotion ? 'static' : frameAsset.motion, frameAsset.direction)}</span>
           <SpinnerGlimmer text={displayVerb} elapsedMs={elapsedMs} activity={activity} reducedMotion={reduceMotion} color={spinnerColor} cycleMs={GLIMMER_CYCLE_MS} />
           <span className="spinner-meta">({parts.join(' · ')})</span>
