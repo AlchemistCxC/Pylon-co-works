@@ -81,6 +81,12 @@ impl AgentRuntimeManager {
         self.runtimes.get(agent_id).map(|r| r.value().clone())
     }
 
+    /// 移除 agent 的 runtime（C6：reload 删除 agent 时清理幽灵 runtime）。
+    /// 返回被移除的 runtime（未注册时返回 None）。
+    pub fn remove(&self, agent_id: &str) -> Option<Arc<AgentRuntime>> {
+        self.runtimes.remove(agent_id).map(|(_, runtime)| runtime)
+    }
+
     /// 全部 runtime（会话生命周期 watcher / gateway_status 遍历用）。
     pub fn all(&self) -> Vec<Arc<AgentRuntime>> {
         self.runtimes.iter().map(|r| r.value().clone()).collect()
@@ -146,6 +152,19 @@ mod tests {
         assert!(b_guard.is_ok(), "b 的 session_creation 不应被 a 的锁阻塞");
         drop(guard);
         drop(b_guard);
+    }
+
+    #[test]
+    fn remove_drops_registered_runtime() {
+        let manager = AgentRuntimeManager::new();
+        let runtime = AgentRuntime::new_disconnected();
+        manager.insert("peri".into(), runtime.clone());
+        assert!(Arc::ptr_eq(&manager.remove("peri").unwrap(), &runtime));
+        assert!(manager.get("peri").is_none(), "remove 后 get 必须为 None");
+        assert!(
+            manager.remove("peri").is_none(),
+            "重复 remove 必须返回 None"
+        );
     }
 
     #[test]

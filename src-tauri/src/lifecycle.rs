@@ -284,8 +284,34 @@ pub(crate) async fn reload_agents(
         )));
     }
     let agent_count = new_agents.len();
-    let mut agents = state.agents.lock().map_err(|e| e.to_string())?;
-    *agents = new_agents;
+    // C6：reload 删除 agent 时清理幽灵 runtime——新旧表 diff，删除且非 active 的
+    // agent 在注册表替换后 abort notification_task + kill acp（防旧进程继续
+    // 运行/崩溃通知复活；与 switch_agent 清理旧 runtime 同款操作）。
+    let removed: Vec<String> = {
+        let mut agents = state.agents.lock().map_err(|e| e.to_string())?;
+        let removed = agents
+            .keys()
+            .filter(|id| !new_agents.contains_key(*id) && **id != active_agent)
+            .cloned()
+            .collect();
+        *agents = new_agents;
+        removed
+    };
+    for id in removed {
+        if let Some(old) = state.inner().runtimes.remove(&id) {
+            if let Ok(mut task) = old.notification_task.lock() {
+                if let Some(handle) = task.take() {
+                    handle.abort();
+                }
+            }
+            let mut acp = old.acp.lock().await;
+            let _ = acp.kill();
+            drop(acp);
+            if let Ok(mut runtime_state) = old.agent_runtime.lock() {
+                runtime_state.status = AgentLifecycleStatus::Disconnected;
+            }
+        }
+    }
     state.inner().log_runtime_summary(
         "info",
         "agent",
@@ -381,6 +407,7 @@ pub(crate) fn load_mcp_persisted(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::sync::Mutex;
 
     fn agent() -> AgentDef {
         crate::test_utils::fake_acp_agent("peri", "print('x')")
@@ -431,5 +458,71 @@ mod tests {
         let payload = agent_summary_payload("peri", &a, None, None);
         assert_eq!(payload["active"], false);
         assert_eq!(payload["available"], false);
+    }
+
+    #[tokio::test]
+    async fn reload_agents_cleans_up_ghost_runtimes_of_deleted_agents() {
+        use crate::runtime::AgentRuntimeManager;
+        use std::collections::HashMap;
+
+        let dir = std::env::temp_dir().join(format!("pylon-reload-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("agents.yaml");
+        std::fs::write(
+            &path,
+            "agents:\n  keep:\n    name: Keep\n    transport: subprocess\n    exe: keep-agent\n",
+        )
+        .unwrap();
+        let mut agents = HashMap::new();
+        agents.insert(
+            "keep".to_string(),
+            crate::test_utils::fake_acp_agent("Keep", "print('x')"),
+        );
+        agents.insert(
+            "remove-me".to_string(),
+            crate::test_utils::fake_acp_agent("RemoveMe", "print('x')"),
+        );
+        let runtimes = Arc::new(AgentRuntimeManager::new());
+        runtimes.insert("keep".into(), AgentRuntime::new_disconnected());
+        let doomed = AgentRuntime::new_disconnected();
+        runtimes.insert("remove-me".into(), doomed.clone());
+        let state = AppState {
+            runtimes,
+            agents: Arc::new(Mutex::new(agents)),
+            active_agent: Arc::new(Mutex::new("keep".to_string())),
+            pet: Arc::new(Mutex::new(crate::pet::PetState::default())),
+            runtime_logs: crate::runtime_log::RuntimeLogHub::default(),
+            runtime_mcp: Mutex::new(None),
+            prism: crate::prism::PrismClient::unavailable("test".to_string()),
+            gateway: Arc::new(crate::gateway::GatewayCore::new()),
+            approval_mode: Arc::new(Mutex::new("default".to_string())),
+            pet_last_persist_ms: std::sync::atomic::AtomicU64::new(0),
+            pet_write_lock: tokio::sync::Mutex::new(()),
+        };
+        let app = tauri::test::mock_builder()
+            .build(tauri::test::mock_context(tauri::test::noop_assets()))
+            .unwrap();
+        app.manage(state);
+        reload_agents(
+            app.state::<AppState>(),
+            Some(path.to_string_lossy().into_owned()),
+        )
+        .await
+        .expect("reload must succeed");
+        let state = app.state::<AppState>().inner();
+        assert!(
+            state.runtimes.get("keep").is_some(),
+            "保留 agent 的 runtime 必须还在"
+        );
+        assert!(
+            state.runtimes.get("remove-me").is_none(),
+            "删除 agent 的幽灵 runtime 必须被清理"
+        );
+        assert_eq!(
+            doomed.agent_runtime.lock().unwrap().status,
+            AgentLifecycleStatus::Disconnected,
+            "被清理 runtime 的状态必须置回 Disconnected"
+        );
+        std::fs::remove_dir_all(&dir).ok();
     }
 }
