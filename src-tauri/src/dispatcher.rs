@@ -16,6 +16,141 @@ use crate::session::{extract_tool_file_name, value_as_string};
 use crate::AppStateHandles;
 use crate::{emit_event, emit_event_all};
 
+/// C11/O7：一条 session/update 事件需要施加到宠物的感知事件。
+/// 按收集顺序产出，调用方在 sessions 锁外逐条应用——收集顺序 = 应用顺序。
+/// C11：回放（is_replay）事件仅同步 session 状态，不产生宠物感知
+/// （回放不刷 xp/bond/掉落）。
+#[derive(Debug)]
+enum PetEvent {
+    UsageUpdate(u64),
+    ToolStarted(crate::pet::ToolKind),
+    CodeFile(String),
+    ToolSucceeded,
+    ToolFailed,
+    ToolCancelled,
+    ModelChanged(String),
+    ModeChanged(String),
+}
+
+impl PetEvent {
+    fn apply(self, state: &mut crate::pet::PetState) {
+        match self {
+            PetEvent::UsageUpdate(total) => crate::pet::on_usage_update(state, total),
+            PetEvent::ToolStarted(kind) => crate::pet::on_tool_started_kind(state, kind),
+            PetEvent::CodeFile(file) => crate::pet::record_code_file(state, &file),
+            PetEvent::ToolSucceeded => crate::pet::on_tool_success(state),
+            PetEvent::ToolFailed => crate::pet::on_tool_failure(state),
+            PetEvent::ToolCancelled => crate::pet::on_tool_cancelled(state),
+            PetEvent::ModelChanged(model) => crate::pet::on_model_changed(state, &model),
+            PetEvent::ModeChanged(mode) => crate::pet::on_mode_changed(state, &mode),
+        }
+    }
+}
+
+/// O7：对一条 session/update 事件施加 session 状态变更，并返回需施加到宠物的
+/// 感知事件（按收集顺序）。调用方持有 sessions 锁时调用、锁外逐条应用。
+/// C11：回放（is_replay）事件仅同步 session 状态（tokens/title/model/mode），
+/// 不产出任何宠物感知事件。
+fn apply_update_event(
+    session: &mut crate::session::SessionInfo,
+    update: &serde_json::Value,
+    variant: Option<crate::acp::SessionUpdateVariant>,
+    is_replay: bool,
+) -> Vec<PetEvent> {
+    let mut pet_events: Vec<PetEvent> = Vec::new();
+    match variant {
+        Some(crate::acp::SessionUpdateVariant::UsageUpdate) => {
+            session.tokens_total = update
+                .get("used")
+                .or_else(|| update.get("value"))
+                .and_then(|v| v.as_u64())
+                .unwrap_or(0);
+            if let Some(meta) = update.get("_meta") {
+                session.tokens_in = meta
+                    .get("inputTokens")
+                    .and_then(|v| v.as_u64())
+                    .unwrap_or(0);
+                session.tokens_out = meta
+                    .get("outputTokens")
+                    .and_then(|v| v.as_u64())
+                    .unwrap_or(0);
+                if let Some(model) = meta.get("model").and_then(|v| v.as_str()) {
+                    session.model = model.to_string();
+                }
+            }
+            session.context_size = update.get("size").and_then(|v| v.as_u64()).unwrap_or(0);
+            if !is_replay {
+                pet_events.push(PetEvent::UsageUpdate(session.tokens_total));
+            }
+        }
+        Some(crate::acp::SessionUpdateVariant::ToolCall) => {
+            if !is_replay {
+                // M5 感知：title → 工具分类（吃代码/捏朋友）；rawInput 提取文件名（脱敏摘要）
+                let title = update.get("title").and_then(|v| v.as_str()).unwrap_or("");
+                let kind = crate::pet::ToolKind::classify(title);
+                pet_events.push(PetEvent::ToolStarted(kind));
+                // rawInput 仅提取文件名白名单形态（"path":"..."），原文绝不下沉
+                if let Some(raw) = update.get("rawInput").and_then(|v| v.as_str()) {
+                    if let Some(file) = extract_tool_file_name(raw) {
+                        pet_events.push(PetEvent::CodeFile(file.to_string()));
+                    }
+                }
+            }
+        }
+        Some(crate::acp::SessionUpdateVariant::ToolCallUpdate) => {
+            if !is_replay {
+                match update.get("status").and_then(|v| v.as_str()) {
+                    Some("completed") => pet_events.push(PetEvent::ToolSucceeded),
+                    Some("failed") => pet_events.push(PetEvent::ToolFailed),
+                    Some("cancelled") => pet_events.push(PetEvent::ToolCancelled),
+                    _ => {}
+                }
+            }
+        }
+        Some(crate::acp::SessionUpdateVariant::SessionInfoUpdate) => {
+            if let Some(title) = update.get("title").and_then(|v| v.as_str()) {
+                session.title = title.to_string();
+            }
+        }
+        Some(crate::acp::SessionUpdateVariant::ConfigOptionUpdate) => {
+            if let Some(options) = update.get("configOptions").and_then(|v| v.as_array()) {
+                session.config_options = options.clone();
+                session.apply_config_options(options);
+            } else {
+                let option_key = update
+                    .get("id")
+                    .or_else(|| update.get("key"))
+                    .and_then(|v| v.as_str());
+                let current = update
+                    .get("currentValue")
+                    .or_else(|| update.get("value"))
+                    .and_then(value_as_string);
+                match (option_key, current) {
+                    (Some("model"), Some(model)) => {
+                        // M5 感知：模型切换
+                        let changed = session.model != model;
+                        session.model = model.clone();
+                        if changed {
+                            pet_events.push(PetEvent::ModelChanged(model));
+                        }
+                    }
+                    (Some("mode"), Some(mode)) => {
+                        let changed = session.mode.as_deref() != Some(mode.as_str());
+                        session.mode = Some(mode.clone());
+                        if changed {
+                            // M5 感知：工作模式切换
+                            pet_events.push(PetEvent::ModeChanged(mode));
+                        }
+                    }
+                    _ => {}
+                }
+            }
+        }
+        _ => {}
+    }
+    pet_events
+}
+
 /// 启动（或重启）通知分发器：订阅 ACP broadcast 流，把事件路由到
 /// 前端（WebView 事件）与平台（gateway deliver_all），并处理崩溃/权限/宠物感知。
 pub(crate) fn start_notification_dispatcher<R: tauri::Runtime>(
@@ -378,30 +513,35 @@ pub(crate) fn start_notification_dispatcher<R: tauri::Runtime>(
                     continue;
                 }
                 if variant == Some(crate::acp::SessionUpdateVariant::AgentMessageChunk) {
-                    let _ = pet.lock().map(|mut p| crate::pet::on_first_chunk(&mut p));
-                    // M5 感知：输出含代码块 → 宠物蹲在屏幕前看
-                    if let Some(text) = update
-                        .get("content")
-                        .and_then(|c| c.get("text"))
-                        .and_then(|v| v.as_str())
-                    {
-                        if text.contains("```") {
-                            let _ = pet.lock().map(|mut p| crate::pet::on_code_seen(&mut p));
-                        }
-                        // B11.2：流式收集当前回合回复文本（完成持久化 POST /persist 用）。
-                        // 回合绑定：接收事件时捕获 session.inject_round，collect_response_chunk
-                        // 内与追加时刻的当前回合比对——Round N 迟到 chunk 在 Round N+1
-                        // 推进（clear）之后才被追加 → 丢弃，防跨回合污染。截断逻辑在方法内。
-                        let received_round = sessions
-                            .lock()
-                            .ok()
-                            .and_then(|items| {
-                                items.get(&source).map(|session| session.inject_round)
-                            })
-                            .unwrap_or(0);
-                        if let Ok(mut items) = sessions.lock() {
-                            if let Some(session) = items.get_mut(&source) {
-                                session.collect_response_chunk(text, received_round);
+                    // C11：回放事件不触发宠物感知（on_first_chunk/on_code_seen）也不流式
+                    // 收集回复文本（last_response_text 不得被回放内容污染）。事件本身仍
+                    // 照常转发前端（emit_event_all 不变）。
+                    if !is_replay {
+                        let _ = pet.lock().map(|mut p| crate::pet::on_first_chunk(&mut p));
+                        // M5 感知：输出含代码块 → 宠物蹲在屏幕前看
+                        if let Some(text) = update
+                            .get("content")
+                            .and_then(|c| c.get("text"))
+                            .and_then(|v| v.as_str())
+                        {
+                            if text.contains("```") {
+                                let _ = pet.lock().map(|mut p| crate::pet::on_code_seen(&mut p));
+                            }
+                            // B11.2：流式收集当前回合回复文本（完成持久化 POST /persist 用）。
+                            // 回合绑定：接收事件时捕获 session.inject_round，collect_response_chunk
+                            // 内与追加时刻的当前回合比对——Round N 迟到 chunk 在 Round N+1
+                            // 推进（clear）之后才被追加 → 丢弃，防跨回合污染。截断逻辑在方法内。
+                            let received_round = sessions
+                                .lock()
+                                .ok()
+                                .and_then(|items| {
+                                    items.get(&source).map(|session| session.inject_round)
+                                })
+                                .unwrap_or(0);
+                            if let Ok(mut items) = sessions.lock() {
+                                if let Some(session) = items.get_mut(&source) {
+                                    session.collect_response_chunk(text, received_round);
+                                }
                             }
                         }
                     }
@@ -440,122 +580,12 @@ pub(crate) fn start_notification_dispatcher<R: tauri::Runtime>(
                     }
                     if mapping_current_at_mutation {
                         if let Some(session) = items.get_mut(&source) {
-                            match variant {
-                                Some(crate::acp::SessionUpdateVariant::UsageUpdate) => {
-                                    session.tokens_total = update
-                                        .get("used")
-                                        .or_else(|| update.get("value"))
-                                        .and_then(|v| v.as_u64())
-                                        .unwrap_or(0);
-                                    if let Some(meta) = update.get("_meta") {
-                                        session.tokens_in = meta
-                                            .get("inputTokens")
-                                            .and_then(|v| v.as_u64())
-                                            .unwrap_or(0);
-                                        session.tokens_out = meta
-                                            .get("outputTokens")
-                                            .and_then(|v| v.as_u64())
-                                            .unwrap_or(0);
-                                        if let Some(model) =
-                                            meta.get("model").and_then(|v| v.as_str())
-                                        {
-                                            session.model = model.to_string();
-                                        }
-                                    }
-                                    session.context_size =
-                                        update.get("size").and_then(|v| v.as_u64()).unwrap_or(0);
-                                    let _ = pet.lock().map(|mut p| {
-                                        crate::pet::on_usage_update(&mut p, session.tokens_total)
-                                    });
-                                }
-                                Some(crate::acp::SessionUpdateVariant::ToolCall) => {
-                                    // M5 感知：title → 工具分类（吃代码/捏朋友）；rawInput 提取文件名（脱敏摘要）
-                                    let title =
-                                        update.get("title").and_then(|v| v.as_str()).unwrap_or("");
-                                    let kind = crate::pet::ToolKind::classify(title);
-                                    let _ = pet.lock().map(|mut p| {
-                                        crate::pet::on_tool_started_kind(&mut p, kind)
-                                    });
-                                    // rawInput 仅提取文件名白名单形态（"path":"..."），原文绝不下沉
-                                    if let Some(raw) =
-                                        update.get("rawInput").and_then(|v| v.as_str())
-                                    {
-                                        if let Some(file) = extract_tool_file_name(raw) {
-                                            let _ = pet.lock().map(|mut p| {
-                                                crate::pet::record_code_file(&mut p, &file)
-                                            });
-                                        }
-                                    }
-                                }
-                                Some(crate::acp::SessionUpdateVariant::ToolCallUpdate) => {
-                                    match update.get("status").and_then(|v| v.as_str()) {
-                                        Some("completed") => {
-                                            let _ = pet
-                                                .lock()
-                                                .map(|mut p| crate::pet::on_tool_success(&mut p));
-                                        }
-                                        Some("failed") => {
-                                            let _ = pet
-                                                .lock()
-                                                .map(|mut p| crate::pet::on_tool_failure(&mut p));
-                                        }
-                                        Some("cancelled") => {
-                                            let _ = pet
-                                                .lock()
-                                                .map(|mut p| crate::pet::on_tool_cancelled(&mut p));
-                                        }
-                                        _ => {}
-                                    }
-                                }
-                                Some(crate::acp::SessionUpdateVariant::SessionInfoUpdate) => {
-                                    if let Some(title) =
-                                        update.get("title").and_then(|v| v.as_str())
-                                    {
-                                        session.title = title.to_string();
-                                    }
-                                }
-                                Some(crate::acp::SessionUpdateVariant::ConfigOptionUpdate) => {
-                                    if let Some(options) =
-                                        update.get("configOptions").and_then(|v| v.as_array())
-                                    {
-                                        session.config_options = options.clone();
-                                        session.apply_config_options(options);
-                                    } else {
-                                        let option_key = update
-                                            .get("id")
-                                            .or_else(|| update.get("key"))
-                                            .and_then(|v| v.as_str());
-                                        let current = update
-                                            .get("currentValue")
-                                            .or_else(|| update.get("value"))
-                                            .and_then(value_as_string);
-                                        match (option_key, current) {
-                                            (Some("model"), Some(model)) => {
-                                                // M5 感知：模型切换
-                                                let changed = session.model != model;
-                                                session.model = model.clone();
-                                                if changed {
-                                                    let _ = pet.lock().map(|mut p| {
-                                                        crate::pet::on_model_changed(&mut p, &model)
-                                                    });
-                                                }
-                                            }
-                                            (Some("mode"), Some(mode)) => {
-                                                let changed =
-                                                    session.mode.as_deref() != Some(mode.as_str());
-                                                session.mode = Some(mode.clone());
-                                                if changed {
-                                                    // M5 感知：工作模式切换
-                                                    let _ = pet.lock().map(|mut p| {
-                                                        crate::pet::on_mode_changed(&mut p, &mode)
-                                                    });
-                                                }
-                                            }
-                                            _ => {}
-                                        }
-                                    }
-                                }
-                                _ => {}
+                            // O7：pet 事件在锁内收集（apply_update_event 内部含 C11 回放守卫），
+                            // 由调用方在 sessions 锁外统一应用——见 mutation 块之后的应用循环。
+                            let pet_events =
+                                apply_update_event(session, update, variant, is_replay);
+                            for event in pet_events {
+                                let _ = pet.lock().map(|mut p| event.apply(&mut p));
                             }
                         }
                     }
@@ -572,5 +602,99 @@ pub(crate) fn start_notification_dispatcher<R: tauri::Runtime>(
                 emit_event_all(&window, &gateway, &source, "peri:update", payload);
             }
         }));
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// C11：带 `_meta.periReplay=true` 的事件不产生宠物感知事件——pet xp/bond/
+    /// recent_events 快照不变（回放不刷宠物状态）。对照：同事件不带回放标志 →
+    /// 仍产出宠物事件（证明事件本身具备刷宠物状态的能力，守卫生效而非静默失效）。
+    #[test]
+    fn replay_updates_do_not_pollute_pet_state() {
+        let snapshot = |state: &crate::pet::PetState| -> serde_json::Value {
+            serde_json::json!({
+                "xp": state.xp,
+                "bond": state.bond,
+                "recent_events": state.recent_events,
+            })
+        };
+        let cases: Vec<(&str, serde_json::Value, crate::acp::SessionUpdateVariant)> = vec![
+            (
+                "usage_update",
+                serde_json::json!({
+                    "sessionUpdate": "usage_update",
+                    "used": 12345,
+                    "size": 32000,
+                    "_meta": {"inputTokens": 9000, "outputTokens": 3345},
+                }),
+                crate::acp::SessionUpdateVariant::UsageUpdate,
+            ),
+            (
+                "tool_call",
+                serde_json::json!({
+                    "sessionUpdate": "tool_call",
+                    "title": "write_file",
+                    "rawInput": "{\"path\":\"a.rs\"}",
+                }),
+                crate::acp::SessionUpdateVariant::ToolCall,
+            ),
+            (
+                "tool_call_update completed",
+                serde_json::json!({"sessionUpdate": "tool_call_update", "status": "completed"}),
+                crate::acp::SessionUpdateVariant::ToolCallUpdate,
+            ),
+            (
+                "tool_call_update failed",
+                serde_json::json!({"sessionUpdate": "tool_call_update", "status": "failed"}),
+                crate::acp::SessionUpdateVariant::ToolCallUpdate,
+            ),
+            (
+                "tool_call_update cancelled",
+                serde_json::json!({"sessionUpdate": "tool_call_update", "status": "cancelled"}),
+                crate::acp::SessionUpdateVariant::ToolCallUpdate,
+            ),
+        ];
+        for (label, mut update, variant) in cases {
+            update["_meta"] = serde_json::json!({"periReplay": true});
+            let mut session = crate::session::SessionInfo::new(
+                "peri-c11".to_string(),
+                String::new(),
+                "cwd".to_string(),
+                true,
+                1,
+            );
+            let events = apply_update_event(&mut session, &update, Some(variant), true);
+            assert!(
+                events.is_empty(),
+                "{label}: replay must not emit pet events, got {events:?}"
+            );
+            let mut pet = crate::pet::PetState::default();
+            let before = snapshot(&pet);
+            for event in events {
+                event.apply(&mut pet);
+            }
+            assert_eq!(
+                before,
+                snapshot(&pet),
+                "{label}: replay must not change pet xp/bond/recent_events"
+            );
+
+            update["_meta"] = serde_json::json!({"periReplay": false});
+            let mut live_session = crate::session::SessionInfo::new(
+                "peri-c11".to_string(),
+                String::new(),
+                "cwd".to_string(),
+                true,
+                1,
+            );
+            let live_events = apply_update_event(&mut live_session, &update, Some(variant), false);
+            assert!(
+                !live_events.is_empty(),
+                "{label}: live event must still emit pet events"
+            );
+        }
     }
 }
