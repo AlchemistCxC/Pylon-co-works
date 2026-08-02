@@ -1499,6 +1499,8 @@ pub(crate) fn build_full_inspector_payload(
     let mut total_out: u64 = 0;
     let mut active_count: usize = 0;
     let mut workspace = serde_json::Map::new();
+    // O29：cwd → workspace_root 结果缓存，同一 cwd 只计算一次（跨 runtime/source 去重）。
+    let mut workspace_cache: HashMap<String, serde_json::Value> = HashMap::new();
     let mut runtimes: Vec<serde_json::Value> = Vec::new();
 
     for (agent_id, sessions, runtime_state) in entries {
@@ -1516,12 +1518,18 @@ pub(crate) fn build_full_inspector_payload(
                 active_count += 1;
             }
             all_sessions.push((agent_id.clone(), source.clone(), session));
-            let root =
-                workspace::workspace_root(source.clone(), std::path::Path::new(&session.cwd));
-            workspace.insert(
-                source.clone(),
-                serde_json::to_value(root).unwrap_or(serde_json::Value::Null),
-            );
+            // O29：同一 cwd 只计算一次 workspace_root；按 source 逐项写入（值相同）。
+            let value = workspace_cache
+                .entry(session.cwd.clone())
+                .or_insert_with(|| {
+                    let root = workspace::workspace_root(
+                        source.clone(),
+                        std::path::Path::new(&session.cwd),
+                    );
+                    serde_json::to_value(root).unwrap_or(serde_json::Value::Null)
+                })
+                .clone();
+            workspace.insert(source.clone(), value);
         }
         runtimes.push(serde_json::json!({
             "agentId": agent_id,

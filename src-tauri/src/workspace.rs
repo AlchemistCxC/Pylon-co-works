@@ -71,7 +71,12 @@ fn normalize_relative(relative: &str) -> Result<PathBuf, WorkspaceError> {
 }
 
 /// 解析并校验工作区内的现有路径。不存在路径统一返回 NotFound。
-fn resolve_workspace_path(root: &Path, relative: &str) -> Result<PathBuf, WorkspaceError> {
+/// O29：返回 (canonical_root, canonical_path) 二元组——canonical root 只解析一次，
+/// 调用方不再重复 root.canonicalize()。
+fn resolve_workspace_path(
+    root: &Path,
+    relative: &str,
+) -> Result<(PathBuf, PathBuf), WorkspaceError> {
     let relative = normalize_relative(relative)?;
     let canonical_root = root.canonicalize().map_err(|e| {
         if e.kind() == std::io::ErrorKind::NotFound {
@@ -89,7 +94,7 @@ fn resolve_workspace_path(root: &Path, relative: &str) -> Result<PathBuf, Worksp
         }
     })?;
     if canonical == canonical_root || canonical.starts_with(&canonical_root) {
-        Ok(canonical)
+        Ok((canonical_root, canonical))
     } else {
         Err(WorkspaceError::OutsideRoot)
     }
@@ -151,19 +156,12 @@ pub fn list_entries(
     relative: &str,
     include_hidden: bool,
 ) -> Result<Vec<WorkspaceEntry>, WorkspaceError> {
-    let directory = resolve_workspace_path(root, relative)?;
+    let (canonical_root, directory) = resolve_workspace_path(root, relative)?;
     if !directory.is_dir() {
         return Err(WorkspaceError::NotFile);
     }
-    // P3：canonical root 只解析一次（不依赖循环变量）；symlink 条目 containment
-    // 校验复用，避免每个 symlink 都重复 root.canonicalize()。
-    let canonical_root = root.canonicalize().map_err(|e| {
-        if e.kind() == std::io::ErrorKind::NotFound {
-            WorkspaceError::NotFound
-        } else {
-            WorkspaceError::NotReadable
-        }
-    })?;
+    // P3 + O29：canonical root 由 resolve 一次解析并复用（不依赖循环变量），
+    // symlink 条目 containment 校验直接用之，避免重复 root.canonicalize()。
     let mut entries = Vec::new();
     for item in fs::read_dir(&directory).map_err(|e| WorkspaceError::Io(e.to_string()))? {
         let item = item.map_err(|e| WorkspaceError::Io(e.to_string()))?;
@@ -234,7 +232,7 @@ pub fn read_text(
     relative: &str,
     max_bytes: Option<usize>,
 ) -> Result<WorkspaceTextPreview, WorkspaceError> {
-    let path = resolve_workspace_path(root, relative)?;
+    let (canonical_root, path) = resolve_workspace_path(root, relative)?;
     let metadata = fs::metadata(&path).map_err(|e| WorkspaceError::Io(e.to_string()))?;
     if !metadata.is_file() {
         return Err(WorkspaceError::NotFile);
@@ -245,13 +243,6 @@ pub fn read_text(
         .min(MAX_PREVIEW_BYTES);
     let mut file = fs::File::open(&path).map_err(|e| WorkspaceError::Io(e.to_string()))?;
     // C3：open 后二次复核——resolve 与 open 之间路径可能被替换为指向 root 外的链接。
-    let canonical_root = root.canonicalize().map_err(|e| {
-        if e.kind() == std::io::ErrorKind::NotFound {
-            WorkspaceError::NotFound
-        } else {
-            WorkspaceError::NotReadable
-        }
-    })?;
     let canonical = path.canonicalize().map_err(|e| {
         if e.kind() == std::io::ErrorKind::NotFound {
             WorkspaceError::NotFound
