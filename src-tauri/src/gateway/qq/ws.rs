@@ -31,6 +31,8 @@ const MAX_RECONNECT_ATTEMPTS: usize = 100;
 const QUICK_DISCONNECT_THRESHOLD: f64 = 5.0;
 const MAX_QUICK_DISCONNECTS: u32 = 3;
 const RATE_LIMIT_DELAY: u64 = 60;
+/// 连续限流断开超过该次数后停止重连（防 60s 无限重试）。
+const MAX_RATE_LIMITS: u32 = 5;
 /// 等待服务器 Hello 的最长时间：半开连接（平台静默失效）超时后走统一重连路径。
 const HELLO_TIMEOUT: Duration = Duration::from_secs(60);
 
@@ -41,6 +43,9 @@ enum CloseAction {
     ReconnectBackoff,
     ReconnectClearToken,
     ReconnectClearSession,
+    // B5：4008 心跳失败改判 ReconnectBackoff 后，当前无 close code 触发限流路径；
+    // 保留分支（含 MAX_RATE_LIMITS 次数上限）供未来限流 code 使用。
+    #[allow(dead_code)]
     ReconnectRateLimit,
 }
 
@@ -49,11 +54,14 @@ fn classify_close_code(code: u16) -> CloseAction {
         4001 | 4002 | 4010 | 4011 | 4012 | 4013 | 4014 => {
             CloseAction::Fatal("invalid auth/permission")
         }
+        4003 => CloseAction::Fatal("重复登录（另一会话已顶下线）"),
+        4005 => CloseAction::Fatal("超出 identify 连接数"),
         4914 => CloseAction::Fatal("bot offline/sandbox"),
         4915 => CloseAction::Fatal("bot banned"),
         4004 => CloseAction::ReconnectClearToken,
         4006 | 4007 | 4009 | 4900..=4913 => CloseAction::ReconnectClearSession,
-        4008 => CloseAction::ReconnectRateLimit,
+        // 心跳失败是瞬时错误而非限流：按正常退避重连，而非 60s 无限重试。
+        4008 => CloseAction::ReconnectBackoff,
         _ => CloseAction::ReconnectBackoff,
     }
 }
@@ -147,6 +155,7 @@ pub async fn run_ws_loop(http_client: Client, auth: Arc<QqAuth>, adapter: Arc<Qq
         last_seq: None,
     };
     let mut quick_count = 0u32;
+    let mut rate_limit_streak = 0u32;
 
     loop {
         let connect_time = Instant::now();
@@ -154,6 +163,7 @@ pub async fn run_ws_loop(http_client: Client, auth: Arc<QqAuth>, adapter: Arc<Qq
             Err(ref e) if e.contains("op 7") || e.contains("op 9") => {
                 backoff_idx = 0;
                 quick_count = 0;
+                rate_limit_streak = 0;
                 log::info!("QQ WS: 协议层重连、保持 session");
             }
             // run_connection 所有退出路径均为 Err（内部全部经 ?/return Err 退出），
@@ -195,6 +205,11 @@ pub async fn run_ws_loop(http_client: Client, auth: Arc<QqAuth>, adapter: Arc<Qq
                         session.last_seq = None;
                     }
                     CloseAction::ReconnectRateLimit => {
+                        rate_limit_streak += 1;
+                        if rate_limit_streak >= MAX_RATE_LIMITS {
+                            log::error!("QQ WS: 连续 {rate_limit_streak} 次限流断开，停止重连");
+                            return;
+                        }
                         sleep(Duration::from_secs(RATE_LIMIT_DELAY)).await;
                         backoff_idx = 0;
                         quick_count = 0;
@@ -202,6 +217,8 @@ pub async fn run_ws_loop(http_client: Client, auth: Arc<QqAuth>, adapter: Arc<Qq
                     }
                     CloseAction::ReconnectBackoff => {}
                 }
+                // 非限流断开路径：重置连续限流计数。
+                rate_limit_streak = 0;
 
                 if backoff_idx >= MAX_RECONNECT_ATTEMPTS {
                     log::error!("QQ WS: 超过最大重连次数");
@@ -649,7 +666,15 @@ mod tests {
             classify_close_code(4006),
             CloseAction::ReconnectClearSession
         );
-        assert_eq!(classify_close_code(4008), CloseAction::ReconnectRateLimit);
+        assert_eq!(
+            classify_close_code(4003),
+            CloseAction::Fatal("重复登录（另一会话已顶下线）")
+        );
+        assert_eq!(
+            classify_close_code(4005),
+            CloseAction::Fatal("超出 identify 连接数")
+        );
+        assert_eq!(classify_close_code(4008), CloseAction::ReconnectBackoff);
         assert_eq!(
             classify_close_code(4900),
             CloseAction::ReconnectClearSession
