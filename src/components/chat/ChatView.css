@@ -83,9 +83,14 @@
   padding:0;
   border-radius:0;
 }
-/* claude 布局 chunk 间距：markdown 块间统一（对齐 CC gap 语义），硬编码不设设置项 */
-.app[data-message-layout="claude"] .term-p { margin:0.35em 0; }
-.app[data-message-layout="claude"] .term-li { margin:0.15em 0; }
+/* claude 布局 chunk 间距：markdown 块间统一（对齐 CC gap 语义），硬编码不设设置项。
+   用元素选择器（react-markdown 的 p/li 无 .term-p/.term-li 类）。 */
+.app[data-message-layout="claude"] .term-assistant p,
+.app[data-message-layout="claude"] .term-assistant ul,
+.app[data-message-layout="claude"] .term-assistant ol { margin:0.5em 0; }
+.app[data-message-layout="claude"] .term-assistant li { margin:0.15em 0; }
+.app[data-message-layout="claude"] .term-assistant h2,
+.app[data-message-layout="claude"] .term-assistant h3 { margin:0.7em 0 0.3em; }
 .app[data-message-layout="claude"] .term-assistant,
 .app[data-message-layout="claude"] .term-reasoning,
 .app[data-message-layout="claude"] .term-tool {

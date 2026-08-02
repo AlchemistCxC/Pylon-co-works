@@ -46,7 +46,8 @@ export const GLOBAL_PRESETS: GlobalPreset[] = [
 
       // chat
       chatBg: '#000000', chatBgImage: '', chatTransparency: 1, chatBlur: 0,
-      chatFont: 'mono', chatFontSize: 15, chatLineHeight: 1.5,
+      // 终端规格：字号 14、行高 1.3（紧凑字符行，对齐 CC 终端感）
+      chatFont: 'mono', chatFontSize: 14, chatLineHeight: 1.3,
       chatTextColor: '#FFFFFF', chatCodeColor: '#FFC107', chatCodeBg: 'transparent',
       // 语法高亮：CC 终端式暖色系（黑底可读，品牌橙打底）
       synKeyword: '#e5a75b', synString: '#d4c05a', synComment: '#8a9199', synLiteral: '#e0964e',
@@ -61,7 +62,7 @@ export const GLOBAL_PRESETS: GlobalPreset[] = [
       toolIndicator: '●', toolIndicatorGlow: 0, toolIndicatorGlowColor: '',
       toolConnectorMode: 'none', toolConnectorColor: '#505050',
       spinnerFramePreset: 'sparkles', spinnerColor: '#D77757', spinnerSize: 14,
-      msgStyle: 'terminal', msgFont: 'mono', msgTextColor: '#FFFFFF', msgLineHeight: 1.5,
+      msgStyle: 'terminal', msgFont: 'mono', msgTextColor: '#FFFFFF', msgLineHeight: 1.3,
       messageLayout: 'claude', footerLayout: 'peri', cliOverflowMode: 'fixed-scroll',
       // CC 视觉还原：助手 ● 圆点
       assistantDot: true, assistantDotGlyph: '●', assistantDotColor: '',
