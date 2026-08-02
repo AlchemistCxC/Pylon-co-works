@@ -236,7 +236,14 @@ export default function PetCompanion({ rightInset = 0 }: { rightInset?: number }
     }
     const first = window.setTimeout(wander, 1800)
     const timer = window.setInterval(wander, 9000)
-    return () => { cancelled = true; window.clearTimeout(first); window.clearInterval(timer) }
+    return () => {
+      cancelled = true
+      window.clearTimeout(first)
+      window.clearInterval(timer)
+      // 残留 settle timer 会按旧 destination 在 effect 重跑后再次 setWalking/Perched
+      if (wanderSettleTimerRef.current != null) window.clearTimeout(wanderSettleTimerRef.current)
+      wanderSettleTimerRef.current = null
+    }
   }, [dragging, rightInset, wanderEnabled])
 
   useEffect(() => {
