@@ -216,9 +216,7 @@ pub(crate) async fn reconnect_agent(
         .clone();
     let runtime = inner.runtimes.get_or_create(&active_id);
     let _lifecycle_guard = runtime.agent_lifecycle.lock().await;
-    let agent = inner
-        .get_active_agent()
-        .map_err(|error| error.to_string())?;
+    let agent = inner.get_active_agent()?;
     inner
         .connect_and_replace(
             &runtime,

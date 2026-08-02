@@ -235,9 +235,10 @@ impl AppState {
     }
 
     /// 当前 active agent 的 runtime；缺失时返回错误（命令层统一错误路径）。
-    pub(crate) fn require_runtime(&self) -> Result<Arc<AgentRuntime>, String> {
-        self.active_runtime()
-            .ok_or_else(|| "no active agent configured".to_string())
+    /// A10（2026-08-02）：直接返回 PylonError::NoActiveAgent（code=no_active_agent）——
+    /// 此前经 String 折叠成 protocol_error，专用码永远发不出。
+    pub(crate) fn require_runtime(&self) -> Result<Arc<AgentRuntime>, PylonError> {
+        self.active_runtime().ok_or(PylonError::NoActiveAgent)
     }
 
     /// 锁外 RPC：短锁仅覆盖同步准备（prepare_rpc），发送与等待在锁外执行——
@@ -340,12 +341,16 @@ impl AppState {
         &self,
         runtime: &AgentRuntime,
         source: &str,
-    ) -> Result<String, String> {
-        let sessions = runtime.sessions.lock().map_err(|e| e.to_string())?;
+    ) -> Result<String, PylonError> {
+        // A10（2026-08-02）：Mutex 中毒视为协议层错误（Acp 变体只留给 ACP 客户端层）。
+        let sessions = runtime
+            .sessions
+            .lock()
+            .map_err(|e| PylonError::Protocol(e.to_string()))?;
         sessions
             .get(source)
             .map(|session| session.cwd.clone())
-            .ok_or_else(|| PylonError::SessionNotFound(source.to_string()).to_string())
+            .ok_or_else(|| PylonError::SessionNotFound(source.to_string()))
     }
 
     pub(crate) fn agent_status_payload(&self) -> serde_json::Value {
@@ -361,7 +366,8 @@ impl AppState {
         let sessions = runtime
             .sessions
             .lock()
-            .map_err(|e| PylonError::Acp(e.to_string()))?;
+            // A10（2026-08-02）：Mutex 中毒改 Protocol——Acp 变体只留给 ACP 客户端层。
+            .map_err(|e| PylonError::Protocol(e.to_string()))?;
         sessions
             .get(source)
             .map(|s| s.peri_id.clone())
@@ -1284,9 +1290,7 @@ pub(crate) async fn set_mode(
 ) -> Result<(), PylonError> {
     let runtime = state.inner().require_runtime()?;
     let generation = state.current_generation(&runtime);
-    let peri_id = state
-        .get_peri_id(&runtime, &source)
-        .map_err(|e| e.to_string())?;
+    let peri_id = state.get_peri_id(&runtime, &source)?;
     state
         .inner()
         .acp_rpc(
@@ -1311,9 +1315,7 @@ pub(crate) async fn set_config_option(
 ) -> Result<serde_json::Value, PylonError> {
     let runtime = state.inner().require_runtime()?;
     let generation = state.current_generation(&runtime);
-    let peri_id = state
-        .get_peri_id(&runtime, &source)
-        .map_err(|e| e.to_string())?;
+    let peri_id = state.get_peri_id(&runtime, &source)?;
     // 差异适配：Hermes 切 model 必须走 session/set_model（set_config_option 只认
     // edit_approval_policy，其余存 config_options 不生效）；Peri 走平铺 set_config_option。
     let use_set_model = key == "model" && state.inner().uses_set_model_api();
@@ -1361,9 +1363,7 @@ pub(crate) async fn close_session(
     let runtime = state.inner().require_runtime()?;
     let _creation_guard = runtime.session_creation.lock().await;
     let generation = state.current_generation(&runtime);
-    let peri_id = state
-        .get_peri_id(&runtime, &source)
-        .map_err(|e| e.to_string())?;
+    let peri_id = state.get_peri_id(&runtime, &source)?;
     // 若该 session 有在途 prompt，先发 cancel（fire-and-forget）让 Peri 侧 settle，
     // 否则 pending oneshot 会挂到 PROMPT_TIMEOUT 才结束——close 后 prompt 卡死 300s。
     {
@@ -1406,9 +1406,7 @@ pub(crate) async fn cancel_prompt(
 ) -> Result<(), PylonError> {
     let runtime = state.inner().require_runtime()?;
     let generation = state.current_generation(&runtime);
-    let peri_id = state
-        .get_peri_id(&runtime, &source)
-        .map_err(|e| e.to_string())?;
+    let peri_id = state.get_peri_id(&runtime, &source)?;
     // Fire-and-forget notification — Peri will respond with stopReason=cancelled
     runtime.acp.lock().await.cancel_session(&peri_id).await?;
     // B9：cancel 时应答该 session 全部挂起的权限请求为 Cancelled（协议要求）
@@ -1663,4 +1661,40 @@ pub(crate) async fn list_persisted_sessions(
         .await?;
     state.ensure_generation(&runtime, generation)?;
     Ok(response)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::sync::Mutex;
+
+    /// A10：无 active agent 的裸状态（active_agent 指向不存在的 runtime）。
+    fn state_without_active_runtime() -> AppState {
+        AppState {
+            runtimes: Arc::new(crate::runtime::AgentRuntimeManager::new()),
+            agents: Arc::new(Mutex::new(HashMap::new())),
+            active_agent: Arc::new(Mutex::new("ghost-agent".to_string())),
+            pet: Arc::new(Mutex::new(crate::pet::PetState::default())),
+            runtime_logs: crate::runtime_log::RuntimeLogHub::default(),
+            runtime_mcp: Mutex::new(None),
+            prism: crate::prism::PrismClient::unavailable("test".to_string()),
+            gateway: Arc::new(GatewayCore::new()),
+            approval_mode: Arc::new(Mutex::new("default".to_string())),
+            pet_last_persist_ms: std::sync::atomic::AtomicU64::new(0),
+            pet_write_lock: tokio::sync::Mutex::new(()),
+        }
+    }
+
+    #[test]
+    fn require_runtime_without_active_agent_returns_no_active_agent() {
+        // A10：require_runtime 无 active agent 时返回专用错误码（不折叠成 protocol_error）。
+        let state = state_without_active_runtime();
+        match state.require_runtime() {
+            Ok(_) => panic!("require_runtime must fail without an active runtime"),
+            Err(error) => {
+                assert_eq!(error.code(), "no_active_agent");
+                assert_eq!(error.to_string(), "no active agent configured");
+            }
+        }
+    }
 }
