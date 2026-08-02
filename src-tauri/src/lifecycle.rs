@@ -339,22 +339,25 @@ pub(crate) async fn reload_agents(
         crate::agent_config::load()?
     };
     crate::agent_config::default_agent_id(&new_agents)?;
-    let active_agent = state
-        .active_agent
-        .lock()
-        .map_err(|error| error.to_string())?
-        .clone();
-    if !new_agents.contains_key(&active_agent) {
-        return Err(PylonError::Protocol(format!(
-            "agent config cannot remove active agent: {active_agent}"
-        )));
-    }
+    // O12：config 读（read_to_string + parse）在锁外完成（load_from_path/load
+    // 在取得 agents 锁之前执行）；active 存在性检查 + 新旧表 diff + 原子替换
+    // 合并为单次持锁操作——无"检查通过但替换未完成"的中间态。
     let agent_count = new_agents.len();
-    // C6：reload 删除 agent 时清理幽灵 runtime——新旧表 diff，删除且非 active 的
-    // agent 在注册表替换后 abort notification_task + kill acp（防旧进程继续
-    // 运行/崩溃通知复活；与 switch_agent 清理旧 runtime 同款操作）。
     let removed: Vec<String> = {
+        let active_agent = state
+            .active_agent
+            .lock()
+            .map_err(|error| error.to_string())?
+            .clone();
         let mut agents = state.agents.lock().map_err(|e| e.to_string())?;
+        if !new_agents.contains_key(&active_agent) {
+            return Err(PylonError::Protocol(format!(
+                "agent config cannot remove active agent: {active_agent}"
+            )));
+        }
+        // C6：reload 删除 agent 时清理幽灵 runtime——新旧表 diff，删除且非 active 的
+        // agent 在注册表替换后 abort notification_task + kill acp（防旧进程继续
+        // 运行/崩溃通知复活；与 switch_agent 清理旧 runtime 同款操作）。
         let removed = agents
             .keys()
             .filter(|id| !new_agents.contains_key(*id) && **id != active_agent)
