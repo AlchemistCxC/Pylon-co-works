@@ -637,9 +637,20 @@ fn refusal_and_maxed_are_distinct() {
     let mut pet = PetState::new_at(1);
     pet.apply(AiEvent::PromptRefused, 1);
     assert_eq!(pet.mood, "confused");
+    // C12：拒绝/达上限同样结束对话 → Idle（不卡 Interacting）
+    assert_eq!(
+        pet.machine,
+        pylon_pet_core::PetMachineState::Awake(pylon_pet_core::MachineSub::Idle),
+        "PromptRefused 必须回 Idle"
+    );
     let mut pet = PetState::new_at(1);
     pet.apply(AiEvent::PromptMaxed, 1);
     assert_eq!(pet.mood, "tired");
+    assert_eq!(
+        pet.machine,
+        pylon_pet_core::PetMachineState::Awake(pylon_pet_core::MachineSub::Idle),
+        "PromptMaxed 必须回 Idle"
+    );
 }
 
 #[test]
@@ -871,9 +882,10 @@ fn achievements_unlock_with_rewards_and_idempotency() {
         pet.memories.iter().any(|m| m.contains("初次对话")),
         "解锁必须记入记忆"
     );
+    // O56：事件文案（UserSent 行）不被徽章文案顶掉
     assert!(
-        pet.msg.as_deref().unwrap_or("").contains("徽章"),
-        "解锁必须有徽章文案: {:?}",
+        !pet.msg.as_deref().unwrap_or("").contains("徽章"),
+        "事件文案不得被徽章覆盖: {:?}",
         pet.msg
     );
     let xp_after = pet.xp;
@@ -938,12 +950,13 @@ fn feed_and_play_counts_feed_achievements() {
 
 #[test]
 fn multiple_achievements_unlock_in_one_event() {
-    // 一次 Feed 同时跨越两个成就阈值：bond 299→300（羁绊伙伴）+ feed_count 49→50（老饕）
+    // O56：本轮回合多枚解锁聚合为一条徽章文案（msg 为空时展示全部）
     let mut pet = day_pet(1);
     pet.traits = pylon_pet_core::PetTraits::default();
-    pet.bond = 299;
-    pet.stats.feed_count = 49;
-    pet.apply(AiEvent::Feed, 1);
+    pet.bond = 300;
+    pet.stats.feed_count = 50;
+    pet.msg = None; // 无事件文案时徽章聚合生效
+    pet.apply(AiEvent::Visit, 1);
     assert!(
         pet.unlocked.contains(&"gourmet".to_string()),
         "喂食 50 次必须解锁老饕: {:?}",
@@ -954,10 +967,32 @@ fn multiple_achievements_unlock_in_one_event() {
         "bond 300 必须解锁羁绊伙伴: {:?}",
         pet.unlocked
     );
-    // 成就在一次检查循环里全部解锁（遍历表顺序，最后一个的 msg 生效）
+    let msg = pet.msg.as_deref().unwrap_or("").to_string();
+    assert!(msg.contains("徽章"), "多枚解锁必须聚合徽章文案: {msg}");
     assert!(
-        pet.msg.as_deref().unwrap_or("").contains("徽章"),
-        "解锁必须有徽章文案"
+        msg.contains("老饕") && msg.contains("羁绊伙伴"),
+        "聚合文案必须含全部解锁名: {msg}"
+    );
+    // 事件文案存在时徽章不覆盖（一次 Feed 同时跨两个阈值）
+    let mut pet = day_pet(1);
+    pet.traits = pylon_pet_core::PetTraits::default();
+    pet.bond = 299;
+    pet.stats.feed_count = 49;
+    pet.apply(AiEvent::Feed, 1);
+    assert!(
+        pet.unlocked.contains(&"gourmet".to_string()),
+        "喂食跨阈值必须解锁老饕: {:?}",
+        pet.unlocked
+    );
+    assert!(
+        pet.unlocked.contains(&"bond_friend".to_string()),
+        "bond 跨阈值必须解锁羁绊伙伴: {:?}",
+        pet.unlocked
+    );
+    assert!(
+        !pet.msg.as_deref().unwrap_or("").contains("徽章"),
+        "事件文案（喂食）不得被徽章顶掉: {:?}",
+        pet.msg
     );
 }
 

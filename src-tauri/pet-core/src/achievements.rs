@@ -274,8 +274,10 @@ impl PetState {
     /// M9：解锁检查——遍历未解锁成就，满足条件则解锁（奖励 + 记忆 + 徽章文案）。
     /// 幂等：unlocked 判重；每枚只解锁一次（B 层只增不减）。
     /// O55 优化：判重集合一次构建，循环内 O(1) 查重（原每 def 线性扫描）。
+    /// O56 修复：本轮回合多枚解锁聚合为一条文案；已有事件文案时徽章不再覆盖。
     pub(crate) fn unlock_achievements(&mut self) {
         let mut unlocked_set: HashSet<String> = self.unlocked.iter().cloned().collect();
+        let mut unlocked_names: Vec<&str> = Vec::new();
         for def in ACHIEVEMENTS {
             if unlocked_set.contains(def.id) {
                 continue;
@@ -290,8 +292,14 @@ impl PetState {
                     self.gain_bond(def.bond);
                 }
                 self.remember(format!("解锁成就「{}」", def.name));
-                self.msg = Some(format!("{} 它胸前亮起一枚徽章：{}", def.icon, def.name));
+                unlocked_names.push(def.name);
             }
+        }
+        if !unlocked_names.is_empty() && self.msg.is_none() {
+            self.msg = Some(format!(
+                "🎖️ 它胸前亮起一枚徽章：{}",
+                unlocked_names.join("、")
+            ));
         }
     }
 }
