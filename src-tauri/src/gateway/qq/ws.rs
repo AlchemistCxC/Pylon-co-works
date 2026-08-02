@@ -12,6 +12,7 @@
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
+use backon::BackoffBuilder;
 use base64::Engine;
 use futures_util::{SinkExt, Stream, StreamExt};
 use reqwest::Client;
@@ -27,7 +28,10 @@ use super::events::{process_attachments, strip_at_mention};
 use super::types::{HelloData, QqEvent, QqMessageEvent};
 use super::QqAdapter;
 
-const RECONNECT_BACKOFF: [u64; 5] = [2, 5, 10, 30, 60];
+/// 重连退避（R12）：指数退避，起点 RECONNECT_BACKOFF_MIN、封顶 RECONNECT_BACKOFF_MAX、
+/// 因子 2，最多 MAX_RECONNECT_ATTEMPTS 次后停止重连。
+const RECONNECT_BACKOFF_MIN: Duration = Duration::from_secs(2);
+const RECONNECT_BACKOFF_MAX: Duration = Duration::from_secs(60);
 const MAX_RECONNECT_ATTEMPTS: usize = 100;
 const QUICK_DISCONNECT_THRESHOLD: f64 = 5.0;
 const MAX_QUICK_DISCONNECTS: u32 = 3;
@@ -155,10 +159,35 @@ pub fn process_dispatch_event(event: &QqEvent) -> Option<Dispatch> {
     })
 }
 
+/// 构建新退避实例。backon 的 ExponentialBackoff 无 reset，健康断开/协议重连
+/// 后重建即从头开始（等价于旧的 backoff_idx = 0）。
+fn reconnect_backoff() -> backon::ExponentialBackoff {
+    backon::ExponentialBuilder::default()
+        .with_min_delay(RECONNECT_BACKOFF_MIN)
+        .with_max_delay(RECONNECT_BACKOFF_MAX)
+        .with_max_times(MAX_RECONNECT_ATTEMPTS)
+        .build()
+}
+
+/// 应用一次退避延迟后睡眠；退避耗尽（超过 MAX_RECONNECT_ATTEMPTS 次）返回 false。
+async fn wait_backoff(backoff: &mut backon::ExponentialBackoff) -> bool {
+    match backoff.next() {
+        Some(delay) => {
+            log::info!("QQ WS: {}s 后重连", delay.as_secs());
+            sleep(delay).await;
+            true
+        }
+        None => {
+            log::error!("QQ WS: 超过最大重连次数");
+            false
+        }
+    }
+}
+
 /// WS 事件循环：连接失败/断开按 close code 分类重连（指数退避 2s→60s，
 /// 上限 100 次；3 次快速断开视为凭证问题停止）。
 pub async fn run_ws_loop(http_client: Client, auth: Arc<QqAuth>, adapter: Arc<QqAdapter>) {
-    let mut backoff_idx = 0;
+    let mut backoff = reconnect_backoff();
     let mut session = SessionState {
         session_id: None,
         last_seq: None,
@@ -184,7 +213,7 @@ pub async fn run_ws_loop(http_client: Client, auth: Arc<QqAuth>, adapter: Arc<Qq
                 // op 7 为服务端主动要求的协议层重连：session 有效可立即重连，但加
                 // 1s 最小间隔，防止服务器持续下发 op 7 时形成热循环（O45）。
                 sleep(Duration::from_secs(1)).await;
-                backoff_idx = 0;
+                backoff = reconnect_backoff();
                 quick_count = 0;
                 rate_limit_streak = 0;
                 log::info!("QQ WS: 协议层重连、保持 session");
@@ -201,16 +230,11 @@ pub async fn run_ws_loop(http_client: Client, auth: Arc<QqAuth>, adapter: Arc<Qq
                     log::warn!(
                         "QQ WS: 连续 {OP9_DEGRADE_THRESHOLD} 次 op 9，清除 session 降级为完整 Identify"
                     );
-                    if backoff_idx >= MAX_RECONNECT_ATTEMPTS {
-                        log::error!("QQ WS: 超过最大重连次数");
+                    if !wait_backoff(&mut backoff).await {
                         return;
                     }
-                    let delay = RECONNECT_BACKOFF.get(backoff_idx).copied().unwrap_or(60);
-                    log::info!("QQ WS: {}s 后重连 (第 {} 次)", delay, backoff_idx + 1);
-                    sleep(Duration::from_secs(delay)).await;
-                    backoff_idx += 1;
                 } else {
-                    backoff_idx = 0;
+                    backoff = reconnect_backoff();
                     quick_count = 0;
                     rate_limit_streak = 0;
                     log::info!("QQ WS: op 9 重连、保持 session (第 {op9_streak} 次)");
@@ -225,7 +249,7 @@ pub async fn run_ws_loop(http_client: Client, auth: Arc<QqAuth>, adapter: Arc<Qq
                 // 审查修复：连接存活足够久（>60s）说明本次是健康断线（服务端维护等），
                 // 重置退避/快速断开计数——否则任何正常断开都会累积，100 次后永久死亡。
                 if duration > 60.0 {
-                    backoff_idx = 0;
+                    backoff = reconnect_backoff();
                     quick_count = 0;
                 }
                 if duration < QUICK_DISCONNECT_THRESHOLD {
@@ -261,7 +285,7 @@ pub async fn run_ws_loop(http_client: Client, auth: Arc<QqAuth>, adapter: Arc<Qq
                             return;
                         }
                         sleep(Duration::from_secs(RATE_LIMIT_DELAY)).await;
-                        backoff_idx = 0;
+                        backoff = reconnect_backoff();
                         quick_count = 0;
                         continue;
                     }
@@ -270,15 +294,9 @@ pub async fn run_ws_loop(http_client: Client, auth: Arc<QqAuth>, adapter: Arc<Qq
                 // 非限流断开路径：重置连续限流计数。
                 rate_limit_streak = 0;
 
-                if backoff_idx >= MAX_RECONNECT_ATTEMPTS {
-                    log::error!("QQ WS: 超过最大重连次数");
+                if !wait_backoff(&mut backoff).await {
                     return;
                 }
-
-                let delay = RECONNECT_BACKOFF.get(backoff_idx).copied().unwrap_or(60);
-                log::info!("QQ WS: {}s 后重连 (第 {} 次)", delay, backoff_idx + 1);
-                sleep(Duration::from_secs(delay)).await;
-                backoff_idx += 1;
             }
         }
     }
@@ -820,6 +838,38 @@ mod tests {
     fn ws_close_code_is_parsed_from_error_message() {
         assert_eq!(parse_ws_close_code("code=4008 rate limited"), 4008);
         assert_eq!(parse_ws_close_code("no code here"), 0);
+    }
+
+    #[test]
+    fn reconnect_backoff_is_exponential_capped_and_bounded() {
+        let mut b = reconnect_backoff();
+        let mut prev = Duration::ZERO;
+        let mut count = 0usize;
+        let mut hit_cap = false;
+        for d in b.by_ref() {
+            assert!(d >= prev, "延迟单调不减: {d:?} < {prev:?}");
+            assert!(d >= RECONNECT_BACKOFF_MIN, "不得小于起点: {d:?}");
+            assert!(d <= RECONNECT_BACKOFF_MAX, "不得超过封顶: {d:?}");
+            if d == RECONNECT_BACKOFF_MAX {
+                hit_cap = true;
+            }
+            prev = d;
+            count += 1;
+        }
+        assert_eq!(
+            count, MAX_RECONNECT_ATTEMPTS,
+            "最多退避 MAX_RECONNECT_ATTEMPTS 次后耗尽"
+        );
+        assert!(hit_cap, "指数退避应到达 60s 封顶");
+    }
+
+    #[test]
+    fn reconnect_backoff_starts_anew_after_rebuild() {
+        let mut b = reconnect_backoff();
+        let _ = b.next();
+        let _ = b.next();
+        b = reconnect_backoff();
+        assert_eq!(b.next(), Some(RECONNECT_BACKOFF_MIN), "重建后从头开始");
     }
 
     #[test]
