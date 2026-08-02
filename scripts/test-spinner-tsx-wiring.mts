@@ -27,15 +27,13 @@ assert.equal(frameAt(['a', 'b', 'c'], 0, 120), 'a')
 assert.equal(frameAt(['a', 'b', 'c'], 120, 120), 'b')
 assert.equal(completionFrame(['←', '↑', '→'], 240), '→')
 
-// Settings non-Preview wiring: the controls must update through the zone-aware path.
-assert.match(settings, /const spinnerFrames = resolveSpinnerFrames\(t\.spinnerFramePreset, t\.spinnerCustomFrames\)/)
-assert.match(settings, /SpinnerMarkerRow label="完成标记"[\s\S]*?spinnerDoneMarkerMode/)
-assert.match(settings, /SpinnerMarkerRow label="取消标记"[\s\S]*?spinnerCancelledMarkerMode/)
-assert.match(settings, /SpinnerMarkerRow label="错误标记"[\s\S]*?spinnerErrorMarkerMode/)
-assert.equal((settings.match(/options=\{\['frame', 'custom'\]\}/g) ?? []).length, 1)
-assert.match(settings, /onModeChange=\{v=>onSettingChange\(\{spinnerDoneMarkerMode:v\}\)\}/)
-assert.match(settings, /onModeChange=\{v=>onSettingChange\(\{spinnerCancelledMarkerMode:v\}\)\}/)
-assert.match(settings, /onModeChange=\{v=>onSettingChange\(\{spinnerErrorMarkerMode:v\}\)\}/)
+// Settings non-Preview wiring: 声明式渲染器分发 spinnerMarker 控件到专用组件。
+const themeDefs = source('../src/themeFieldDefs.ts')
+const renderer = source('../src/themeFieldRenderer.tsx')
+assert.match(themeDefs, /\bspinnerDoneMarker\b[\s\S]*?control: 'spinnerMarker'/)
+assert.match(renderer, /control === 'spinnerMarker'/)
+assert.match(renderer, /spinnerDoneMarkerMode/)
+assert.equal((themeDefs.match(/'frame', 'custom'/g) ?? []).length >= 3, true)
 
 // Interval wiring is covered through the persisted setting and the live footer timer/frame path.
 assert.match(store, /spinnerIntervalMs: number/)

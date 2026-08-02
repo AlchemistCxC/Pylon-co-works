@@ -10,6 +10,7 @@ const presets = read('src/presets.ts')
 const themeFields = read('src/themeFieldDefs.ts')
 const customPresets = read('src/customPresets.ts')
 const settings = read('src/components/Settings.tsx')
+const renderer = read('src/themeFieldRenderer.tsx')
 const footer = read('src/components/chat/GenerationFooter.tsx')
 const spinnerFrames = read('src/components/chat/spinnerFrames.ts')
 
@@ -56,13 +57,12 @@ for (const field of spinnerFields) {
   check(!new RegExp(`(?:^|[,{]\\s*)${field}\\s*(?:,|})`).test(partialize), `partialize excludes ${field}`)
 }
 
-// Settings Spinner group must expose every field through the zone-aware update path.
-const spinnerGroup = section(settings, '<Group title="Spinner">', '\n              </Group>')
+// Settings Spinner 字段经声明式渲染器暴露（defs 声明 + GROUP_MAP 分组）。
+const spinnerGroup = section(themeFields, "'Spinner':", '\n  },')
 for (const field of spinnerFields) {
   check(new RegExp(`\\b${field}\\b`).test(spinnerGroup), `Settings Spinner group missing ${field}`)
 }
-check(/onSettingChange\(\{spinnerFramePreset:/.test(spinnerGroup), 'Settings Spinner does not update spinnerFramePreset via onSettingChange')
-check(/onSettingChange\(\{spinnerIntervalMs:/.test(spinnerGroup), 'Settings Spinner has no spinnerIntervalMs update control')
+check(/onChange: \(partial: Partial<ThemeSettings>\) => void/.test(renderer), '渲染器缺少 zone-aware onChange 路径')
 check(/const TAB_ZONE_MAP[\s\S]*terminal:\s*'chat'/.test(settings), 'Settings terminal tab is not mapped to chat zone')
 
 // Chat zone ownership is the contract used by local presets.

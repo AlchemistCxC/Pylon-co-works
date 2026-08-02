@@ -1,4 +1,5 @@
 import type { ThemeSettings } from './store'
+import { resolveCcMinHeight, resolveVisibleStatusWidgetCount } from './ccHeightState.ts'
 
 /**
  * themeFieldDefs — 声明式主题字段定义（自定义系统骨架核心）。
@@ -22,10 +23,18 @@ export interface ThemeFieldDef {
   type: ThemeFieldType
   label: string
   zone: ZoneName
+  /** Settings 分组标题（声明式 UI 按 group 渲染） */
+  group?: string
+  /** 特殊控件标识（渲染器分发到专用组件） */
+  control?: 'default' | 'bgImage' | 'spinnerMarker'
+  /** select/boolean 字段的联动：onChange 时同步写这些字段（如 inputVariant→inputMode） */
+  syncOnChange?: readonly string[]
   /** number 范围/步长 */
   min?: number
   max?: number
   step?: number
+  /** number 动态最小值（优先于 min，如 ccHeight 依赖布局状态） */
+  minFn?: (t: ThemeSettings) => number
   /** select 选项 */
   options?: readonly string[]
   /** CSS 变量注入名；缺省 = `--${kebab(fieldName)}` */
@@ -52,7 +61,7 @@ export const THEME_FIELD_DEFS = {
   bgBlur: N('global', '模糊', 0, 40, 2),
   globalFont: S('global', '字体', ['system', 'mono']),
   globalFontSize: N('global', '基础字号', 12, 24),
-  globalBgImage: T('global', '背景图'),
+  globalBgImage: { ...T('global', '背景图'), control: 'bgImage' },
   globalBgColor: C('global', '背景底色'),
   uiScheme: S('global', 'UI 配色', ['light', 'dark']),
   userName: T('global', '显示名'),
@@ -66,7 +75,7 @@ export const THEME_FIELD_DEFS = {
 
   // ── sidebar ──
   sidebarBg: C('sidebar', '背景色'),
-  sidebarBgImage: T('sidebar', '背景图'),
+  sidebarBgImage: { ...T('sidebar', '背景图'), control: 'bgImage' },
   sidebarWidth: N('sidebar', '栏宽', 160, 400),
   sidebarTransparency: N('sidebar', '透明度', 0, 1, 0.05),
   sidebarBlur: N('sidebar', '模糊', 0, 40, 2),
@@ -76,7 +85,7 @@ export const THEME_FIELD_DEFS = {
 
   // ── chat ──
   chatBg: C('chat', '背景色'),
-  chatBgImage: T('chat', '背景图'),
+  chatBgImage: { ...T('chat', '背景图'), control: 'bgImage' },
   chatTransparency: N('chat', '透明度', 0, 1, 0.05),
   chatBlur: N('chat', '模糊', 0, 40, 2),
   chatFont: S('chat', '字体', ['mono', 'system']),
@@ -106,7 +115,8 @@ export const THEME_FIELD_DEFS = {
   userTagText: C('chat', '标签文字'),
   diffAdded: C('chat', 'Diff·新增'),
   diffRemoved: C('chat', 'Diff·删除'),
-  toolIndicator: S('chat', '指示器形状', ['●', '■', '◆', '▶', '✦']),
+  // toolIndicator 走 widgetRegistry 动态选项（toolIndicatorOptions），不进声明式 UI
+  toolIndicator: { ...S('chat', '指示器形状', ['●', '■', '◆', '▶', '✦']), hidden: true },
   toolIndicatorGlow: N('chat', '指示器辉光', 0, 20, 1),
   toolIndicatorGlowColor: C('chat', '辉光色'),
   toolConnectorMode: S('chat', '连接线', ['none', 'fixed', 'follow']),
@@ -118,9 +128,9 @@ export const THEME_FIELD_DEFS = {
   spinnerCustomFrames: T('chat', '自定义帧'),
   spinnerVerbSet: S('chat', '文案语言', ['zh', 'en', 'analysis', 'engineering', 'custom']),
   spinnerCustomVerbs: T('chat', '自定义文案'),
-  spinnerDoneMarker: T('chat', '完成标记'),
-  spinnerCancelledMarker: T('chat', '取消标记'),
-  spinnerErrorMarker: T('chat', '错误标记'),
+  spinnerDoneMarker: { ...T('chat', '完成标记'), control: 'spinnerMarker' },
+  spinnerCancelledMarker: { ...T('chat', '取消标记'), control: 'spinnerMarker' },
+  spinnerErrorMarker: { ...T('chat', '错误标记'), control: 'spinnerMarker' },
   spinnerDoneMarkerMode: S('chat', '完成标记模式', ['frame', 'custom']),
   spinnerCancelledMarkerMode: S('chat', '取消标记模式', ['frame', 'custom']),
   spinnerErrorMarkerMode: S('chat', '错误标记模式', ['frame', 'custom']),
@@ -134,10 +144,23 @@ export const THEME_FIELD_DEFS = {
   messageLayout: S('chat', '信息层级', ['classic', 'claude', 'bubble']),
 
   // ── cc ──
-  ccHeight: N('cc', '高度', 64, 400),
+  ccHeight: {
+    ...N('cc', '高度', 64, 400),
+    minFn: t => resolveCcMinHeight({
+      inputMode: t.inputMode,
+      footerLayout: t.footerLayout || 'free',
+      hintMode: t.cliHintMode || 'full',
+      visibleStatusWidgets: resolveVisibleStatusWidgetCount({
+        hiddenIds: t.ccHidden || [],
+        inputMode: t.inputMode,
+        ccStyle: t.ccStyle || 'wave',
+      }),
+      cliOverflowMode: t.cliOverflowMode || 'fixed-scroll',
+    }),
+  },
   ccBgHeight: N('cc', '背景高度', 64, 400),
   ccBg: C('cc', '背景色'),
-  ccBgImage: T('cc', '背景图'),
+  ccBgImage: { ...T('cc', '背景图'), control: 'bgImage' },
   ccStatusFontSize: N('cc', '信息字号', 14, 20),
   ccStyle: S('cc', '上下文', ['wave', 'bar', 'ring', 'numeric']),
   ccVariant: S('cc', '整体风格', ['terminal', 'glass', 'pill']),
@@ -145,7 +168,7 @@ export const THEME_FIELD_DEFS = {
   ccHidden: H({ type: 'text', label: '隐藏控件', zone: 'cc', noCssVar: true }),
   ccScale: H({ type: 'text', label: '控件缩放', zone: 'cc', noCssVar: true }),
   inputBg: C('cc', '输入背景'),
-  inputBgImage: T('cc', '输入背景图'),
+  inputBgImage: { ...T('cc', '输入背景图'), control: 'bgImage' },
   inputTextColor: C('cc', '输入文字'),
   inputPlaceholder: C('cc', '占位符'),
   inputSendBg: C('cc', '发送按钮'),
@@ -153,7 +176,7 @@ export const THEME_FIELD_DEFS = {
   inputFontSize: N('cc', '输入字号', 12, 22),
   inputMinHeight: N('cc', '输入最小高', 32, 120),
   inputMode: S('cc', '输入模式', ['cli', 'default']),
-  inputVariant: S('cc', '输入栏', ['cli', 'composer', 'compact', 'command']),
+  inputVariant: { ...S('cc', '输入栏', ['cli', 'composer', 'compact', 'command']), syncOnChange: ['inputMode'] },
   inputShowPlaceholder: S('cc', 'Placeholder', ['shown', 'hidden']),
   inputShowHistoryHint: S('cc', '历史提示', ['shown', 'hidden']),
   inputSubmitButtonMode: S('cc', '发送按钮', ['inline', 'external', 'hidden']),
@@ -167,7 +190,7 @@ export const THEME_FIELD_DEFS = {
   footerLayout: S('cc', 'Footer 布局', ['free', 'peri']),
   cliOverflowMode: S('cc', '多行策略', ['fixed-scroll', 'grow', 'overlay']),
   statusBg: C('cc', '状态背景'),
-  statusBgImage: T('cc', '状态背景图'),
+  statusBgImage: { ...T('cc', '状态背景图'), control: 'bgImage' },
   ekgWidth: N('cc', '波形宽度', 60, 300),
   ekgFontSize: N('cc', '波形字号', 10, 24),
   ekgGreen: C('cc', '波形·正常'),
@@ -197,7 +220,7 @@ export const THEME_FIELD_DEFS = {
 
   // ── right ──
   rightBg: C('right', '背景色'),
-  rightBgImage: T('right', '背景图'),
+  rightBgImage: { ...T('right', '背景图'), control: 'bgImage' },
   rightWidth: N('right', '宽度', 200, 400),
   rightTransparency: N('right', '透明度', 0, 1, 0.05),
   rightBlur: N('right', '模糊', 0, 40, 2),
@@ -234,4 +257,46 @@ export const THEME_CSS_VAR_MAP: Readonly<Record<string, ThemeFieldKey>> = THEME_
 /** kebab-case 字段名 → cssVar（无显式声明时） */
 export function fieldToCssVar(key: string): string {
   return `--${key.replace(/[A-Z]/g, m => `-${m.toLowerCase()}`)}`
+}
+
+/**
+ * Settings 分组映射（声明式 UI 按此渲染字段组）。
+ * 纯字段组由渲染器自动生成；含自定义内容的组（预设/强调色/布局骨架/
+ * 窗口/配置备份/布局编辑）保留在 Settings 手写。
+ */
+export const GROUP_MAP: Record<string, Record<string, readonly ThemeFieldKey[]>> = {
+  global: {
+    '玻璃效果': ['transparency', 'bgBlur', 'globalBgImage', 'globalBgColor', 'uiScheme'],
+    '字体': ['globalFont', 'globalFontSize'],
+  },
+  sidebar: {
+    '背景': ['sidebarBg', 'sidebarBgImage'],
+    '布局': ['sidebarWidth'],
+    '玻璃效果': ['sidebarTransparency', 'sidebarBlur'],
+    '文字': ['sidebarTextColor', 'sidebarNameSize', 'sidebarGroupSize'],
+  },
+  chat: {
+    '背景': ['chatBg', 'chatBgImage'],
+    '字体': ['chatFont', 'chatFontSize', 'chatLineHeight'],
+    '颜色': ['chatTextColor', 'chatCodeColor', 'chatCodeBg'],
+    '玻璃效果': ['chatTransparency', 'chatBlur'],
+    '语法高亮': ['synKeyword', 'synString', 'synComment', 'synLiteral', 'synEntity', 'synFunction', 'synVariable', 'synProperty', 'synRegex', 'synMarkupHeading', 'synSupport'],
+    '指示器': ['toolOk', 'toolRun', 'toolErr'],
+    '文字 & 标签': ['toolNameColor', 'toolSummaryColor', 'userTagBg', 'userTagText'],
+    '指示器 & 连接线': ['toolIndicatorGlow', 'toolIndicatorGlowColor', 'toolConnectorMode', 'toolConnectorColor', 'toolConnectorStyle', 'toolConnectorWidth', 'toolConnectorOpacity'],
+    'Diff': ['diffAdded', 'diffRemoved'],
+    'Spinner': ['spinnerFramePreset', 'spinnerCustomFrames', 'spinnerVerbSet', 'spinnerCustomVerbs', 'spinnerDoneMarker', 'spinnerCancelledMarker', 'spinnerErrorMarker', 'spinnerDoneMarkerMode', 'spinnerCancelledMarkerMode', 'spinnerErrorMarkerMode', 'spinnerIntervalMs', 'spinnerColor', 'spinnerSize'],
+    '风格': ['messageLayout', 'msgStyle', 'msgFont', 'msgTextColor', 'msgLineHeight'],
+  },
+  cc: {
+    '外观风格': ['ccVariant', 'ccHeight', 'ccBg', 'ccBgImage'],
+    '控件样式': ['inputVariant', 'inputShowPlaceholder', 'inputShowHistoryHint', 'inputSubmitButtonMode', 'footerLayout', 'cliOverflowMode', 'cliPromptColor', 'cliContentOffsetY', 'cliHintMode', 'ccStyle', 'ccStatusFontSize', 'modelVariant', 'modeVariant', 'sendVariant', 'attachVariant', 'modeAutoColor', 'modeEditColor'],
+    '输入与状态': ['inputBg', 'inputBgImage', 'inputTextColor', 'inputPlaceholder', 'inputSendBg', 'inputFocusBorder', 'inputFontSize', 'inputMinHeight', 'inputMode', 'cliLineWidth', 'cliLineColor', 'cliTextColor', 'cliLinePadding', 'statusBg', 'statusBgImage'],
+    '波形与用量': ['ekgWidth', 'ekgFontSize', 'ekgGreen', 'ekgYellow', 'ekgRed', 'ekgLineWidth', 'ekgAmplitudeMax', 'ekgSpeedBase', 'ekgSpeedMax', 'ekgLeftColor', 'ekgMovingColor', 'ekgConsumedColor', 'barTrackColor', 'barFillColor', 'barFillFollow', 'barHeight', 'tokenDisplay', 'pillBg', 'pillText', 'prismOnColor'],
+    '中控背景': ['ccBgHeight', 'ccStatusFontSize'],
+  },
+  right: {
+    '外观': ['rightBg', 'rightBgImage', 'rightWidth'],
+    '玻璃效果': ['rightTransparency', 'rightBlur'],
+  },
 }

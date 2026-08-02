@@ -20,7 +20,7 @@ assert.match(input, /showHistoryHint && historyIndex >= 0/)
 assert.match(input, /submitButtonMode !== 'hidden'/)
 assert.match(css, /\.input-bar\.input-variant-compact/)
 assert.match(css, /\.input-bar\.input-variant-command/)
-assert.match(settings, /options=\{\['cli','composer','compact','command'\]\}/)
+assert.match(customPresets, /\binputVariant\b[\s\S]*?'cli', 'composer', 'compact', 'command'/)
 for (const field of ['inputVariant', 'inputShowPlaceholder', 'inputShowHistoryHint', 'inputSubmitButtonMode']) {
   assert.match(presets, new RegExp(`\\b${field}\\b`), `${field} 必须进入 cc zone`)
   assert.match(customPresets, new RegExp(`\\b${field}\\b`), `${field} 必须进入 custom preset allowlist`)

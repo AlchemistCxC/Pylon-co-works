@@ -19,10 +19,10 @@ assert.equal(frameAt(['a', 'b', 'c'], 240, 120, 'bounce'), 'c')
 assert.equal(frameAt(['a', 'b', 'c'], 360, 120, 'bounce'), 'b')
 assert.equal(frameAt(['a', 'b', 'c'], 1000, 120, 'static'), 'a')
 
-const settings = readFileSync(new URL('../src/components/Settings.tsx', import.meta.url), 'utf8')
+const themeDefs = readFileSync(new URL('../src/themeFieldDefs.ts', import.meta.url), 'utf8')
 const footer = readFileSync(new URL('../src/components/chat/GenerationFooter.tsx', import.meta.url), 'utf8')
-assert.match(settings, /'orbit','clock','wave','blocks','scan','custom'/)
-assert.match(settings, /'zh','en','analysis','engineering','custom'/)
+assert.match(themeDefs, /\bspinnerFramePreset\b[\s\S]*?'orbit', 'clock', 'wave', 'blocks', 'scan', 'custom'/)
+assert.match(themeDefs, /\bspinnerVerbSet\b[\s\S]*?'zh', 'en', 'analysis', 'engineering', 'custom'/)
 assert.match(footer, /getSpinnerAssetPreset/)
 assert.match(footer, /reduceMotion \? 'static' : frameAsset\.motion/)
 

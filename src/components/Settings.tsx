@@ -5,6 +5,7 @@ import { getCurrentWindow } from '@tauri-apps/api/window'
 import { PhysicalSize } from '@tauri-apps/api/dpi'
 import { clearWindowSize } from '../windowSizePersistence'
 import { applyImportPayload, buildExportPayload, configFileName } from '../configExportImport'
+import { ZoneGroupFields } from '../themeFieldRenderer'
 import { useStore } from '../store'
 import { useIdentityStore } from '../identityStore'
 import { useRuntimeStore } from '../runtimeStore'
@@ -15,53 +16,18 @@ import { pickCustomPresetTheme } from '../customPresets'
 import ColorPopover from './ColorPopover'
 import SettingsPreview from './SettingsPreview'
 import { reportRuntimeError } from '../runtimeError'
-import { resolveBackgroundImage } from '../backgroundImage'
 import { runAgentSwitchTransaction } from './agentSwitchTransaction'
 import './SettingsCommon.css'
 import './Settings.css'
 import { normalizeAgentStatus, statusLabel } from './settings/agentTypes'
 import { beginReconnect, failReconnect, normalizeAgentList } from './settings/agentState'
 import ConfigOptionsPanel from './settings/ConfigOptionsPanel'
-import { resolveSpinnerFrames } from './chat/spinnerFrames'
 import { resolveToolIndicatorAsset, toolIndicatorOptions } from './chat/toolIndicatorAssets'
-import { resolveCcMinHeight, resolveVisibleStatusWidgetCount } from '../ccHeightState'
 
 // ── helpers ──
 
-function BgImageRow({ label, value, onChange }: { label:string; value:string; onChange:(v:string)=>void }) {
-  const resolved = resolveBackgroundImage(value)
-  const openFile = async () => {
-    try {
-      const { open } = await import('@tauri-apps/plugin-dialog')
-      const selected = await open({ multiple: false, filters: [{ name: 'Images', extensions: ['png','jpg','jpeg','gif','webp','bmp'] }] })
-      if (selected) onChange(selected as string)
-    } catch { /* browser fallback */ }
-  }
-  return (
-    <Row label={label}>
-      <input type="text" value={value} onChange={e => onChange(e.target.value)} className="set-input" style={{width:'160px'}} placeholder="路径或 URL" />
-      <button className="ps-btn sm" onClick={openFile}>选择</button>
-      {value && <>
-        <div className={`set-bg-preview ${resolved.error ? 'error' : ''}`} style={{backgroundImage:resolved.cssValue}}
-          onClick={() => onChange('')} title={resolved.error ? `加载失败：${resolved.error}；点击清除` : '点击清除'} />
-        {resolved.error && <span className="set-bg-error" role="alert">{resolved.error}</span>}
-      </>}
-    </Row>
-  )
-}
-
 function Row({ label, children }: { label:string; children:React.ReactNode }) {
   return <div className="set-row"><span className="set-row-label">{label}</span>{children}</div>
-}
-
-function Slider({ value, onChange, min, max, step }: { value:number; onChange:(v:number)=>void; min:number; max:number; step?:number }) {
-  return <input type="range" min={min} max={max} step={step||0.05} value={value}
-    onChange={e => onChange(+e.target.value)} className="set-range"/>
-}
-
-function Num({ value, onChange, min, max }: { value:number; onChange:(v:number)=>void; min?:number; max?:number }) {
-  return <input type="number" min={min} max={max} value={value} step={0.1}
-    onChange={e => onChange(+e.target.value)} className="set-num"/>
 }
 
 function Sel({ value, onChange, options }: { value:string; onChange:(v:string)=>void; options:(string | { value: string; label: string })[] }) {
@@ -75,38 +41,6 @@ function Sel({ value, onChange, options }: { value:string; onChange:(v:string)=>
 
 function Txt({ value, onChange }: { value:string; onChange:(v:string)=>void }) {
   return <input type="text" value={value} onChange={e => onChange(e.target.value)} className="set-input"/>
-}
-
-function SpinnerMarkerRow({ label, mode, value, frames, onModeChange, onValueChange }: {
-  label: string
-  mode: ThemeSettings['spinnerDoneMarkerMode']
-  value: string
-  frames: string[]
-  onModeChange: (value: ThemeSettings['spinnerDoneMarkerMode']) => void
-  onValueChange: (value: string) => void
-}) {
-  const safeFrames = frames.length > 0 ? frames : ['·']
-  return (
-    <Row label={label}>
-      <Sel value={mode} onChange={v => onModeChange(v as ThemeSettings['spinnerDoneMarkerMode'])} options={['frame', 'custom']} />
-      {mode === 'frame'
-        ? <Sel value={safeFrames.includes(value) ? value : safeFrames[0]} onChange={onValueChange} options={safeFrames} />
-        : <Txt value={value} onChange={onValueChange} />}
-    </Row>
-  )
-}
-
-function Group({ title, children, defaultOpen }: { title:string; children:React.ReactNode; defaultOpen?:boolean }) {
-  const [open, setOpen] = useState(defaultOpen ?? true)
-  return (
-    <div className="set-group">
-      <button type="button" className="set-group-title" aria-expanded={open} onClick={() => setOpen(!open)}>
-        <span className="set-group-arrow">{open ? '▾' : '▸'}</span>
-        {title}
-      </button>
-      {open && children}
-    </div>
-  )
 }
 
 // 窗口尺寸：显示当前值 + 重置（记忆由 App 的 onResized 防抖持久化负责）
@@ -132,6 +66,19 @@ function WindowSizeRow() {
         <button type="button" className="ps-btn sm" onClick={reset}>重置为默认 1200×800</button>
       </div>
     </Group>
+  )
+}
+
+function Group({ title, children, defaultOpen }: { title:string; children:React.ReactNode; defaultOpen?:boolean }) {
+  const [open, setOpen] = useState(defaultOpen ?? true)
+  return (
+    <div className="set-group">
+      <button type="button" className="set-group-title" aria-expanded={open} onClick={() => setOpen(!open)}>
+        <span className="set-group-arrow">{open ? '▾' : '▸'}</span>
+        {title}
+      </button>
+      {open && children}
+    </div>
   )
 }
 
@@ -194,7 +141,6 @@ function ConfigBackupRow() {
   )
 }
 
-// 局部预设 chip 行 — 复用于每个 zone
 function ZonePresetRow({ zone, activeName, isDirty, onApply }: {
   zone: string; activeName: string; isDirty: boolean; onApply: (zone: string, name: string) => void
 }) {
@@ -274,6 +220,8 @@ export default function Settings({ onClose, activeSessionId }: { onClose?: () =>
     const zone = TAB_ZONE_MAP[activeTab] || 'global'
     setZoneField(zone, partial)
   }
+  // 声明式字段渲染上下文（骨架 3）：纯字段组由 themeFieldRenderer 自动渲染
+  const renderCtx = { t, onChange: onSettingChange }
 
   // 局部预设（zone 级别）
   const applyLocalPreset = (zone: string, presetName: string) => {
@@ -284,18 +232,6 @@ export default function Settings({ onClose, activeSessionId }: { onClose?: () =>
   }
 
   const previewZone = TAB_PREVIEW[activeTab]
-  const spinnerFrames = resolveSpinnerFrames(t.spinnerFramePreset, t.spinnerCustomFrames)
-  const ccMinHeight = resolveCcMinHeight({
-    inputMode: t.inputMode,
-    footerLayout: t.footerLayout || 'free',
-    hintMode: t.cliHintMode || 'full',
-    visibleStatusWidgets: resolveVisibleStatusWidgetCount({
-      hiddenIds: t.ccHidden || [],
-      inputMode: t.inputMode,
-      ccStyle: t.ccStyle,
-    }),
-    cliOverflowMode: t.cliOverflowMode || 'fixed-scroll',
-  })
 
   const switchAgent = async (agentId: string) => {
     if (switchingAgentId || agentId === activeAgent) return
@@ -435,28 +371,7 @@ export default function Settings({ onClose, activeSessionId }: { onClose?: () =>
                 <div className="set-hint">隐藏 Tab/侧栏/宠物可拼出 CC 式纯聊天单流</div>
               </Group>
 
-              <Group title="玻璃效果">
-                <BgImageRow label="背景图" value={t.globalBgImage||''} onChange={v=>onSettingChange({globalBgImage:v})}/>
-                <Row label="背景底色">
-                  <ColorPopover value={t.globalBgColor || '#e8e8ec'} onChange={v=>onSettingChange({globalBgColor:v})}/>
-                  <span className="set-hint" style={{marginLeft:8}}>终端/桌面背景模拟色</span>
-                </Row>
-                <Row label="UI 配色">
-                  <div className="set-preset-row">
-                    <button className={`set-preset-chip ${t.uiScheme === 'light' ? 'active' : ''}`} onClick={()=>onSettingChange({uiScheme:'light'})}>浅色</button>
-                    <button className={`set-preset-chip ${t.uiScheme === 'dark' ? 'active' : ''}`} onClick={()=>onSettingChange({uiScheme:'dark'})}>深色</button>
-                  </div>
-                </Row>
-                <Row label="透明度"><Slider value={t.transparency} onChange={v=>onSettingChange({transparency:v})} min={0} max={1}/>
-                  <span className="set-val">{Math.round(t.transparency*100)}%</span></Row>
-                <Row label="模糊"><Slider value={t.bgBlur} onChange={v=>onSettingChange({bgBlur:v})} min={0} max={40} step={2}/>
-                  <span className="set-val">{t.bgBlur}px</span></Row>
-              </Group>
-
-              <Group title="字体">
-                <Row label="字体"><Sel value={t.globalFont} onChange={v=>onSettingChange({globalFont:v})} options={['system','mono']}/></Row>
-                <Row label="基础字号"><Num value={t.globalFontSize} onChange={v=>onSettingChange({globalFontSize:v})} min={12} max={24}/></Row>
-              </Group>
+              <ZoneGroupFields zone="global" ctx={renderCtx} />
 
               <WindowSizeRow />
               <ConfigBackupRow />
@@ -466,193 +381,26 @@ export default function Settings({ onClose, activeSessionId }: { onClose?: () =>
             <Tabs.Content value="sidebar">
               <h3>左侧栏</h3>
               <ZonePresetRow zone="sidebar" activeName={activePreset.sidebar} isDirty={dirty.sidebar} onApply={applyLocalPreset}/>
-              <Group title="背景">
-                <Row label="背景色">
-                  <ColorPopover value={t.sidebarBg} onChange={v=>onSettingChange({sidebarBg:v})}/>
-                </Row>
-                <BgImageRow label="背景图" value={t.sidebarBgImage} onChange={v=>onSettingChange({sidebarBgImage:v})}/>
-              </Group>
-              <Group title="布局">
-                <Row label="栏宽"><Num value={t.sidebarWidth} onChange={v=>onSettingChange({sidebarWidth:v})} min={160} max={400}/></Row>
-              </Group>
-              <Group title="玻璃效果">
-                <Row label="透明度"><Slider value={t.sidebarTransparency} onChange={v=>onSettingChange({sidebarTransparency:v})} min={0} max={1}/><span className="set-val">{Math.round(t.sidebarTransparency*100)}%</span></Row>
-                <Row label="模糊"><Slider value={t.sidebarBlur} onChange={v=>onSettingChange({sidebarBlur:v})} min={0} max={40} step={2}/><span className="set-val">{t.sidebarBlur}px</span></Row>
-              </Group>
-              <Group title="文字">
-                <Row label="文字颜色">
-                  <ColorPopover value={t.sidebarTextColor} onChange={v=>onSettingChange({sidebarTextColor:v})}/>
-                </Row>
-                <Row label="会话名字号"><Num value={t.sidebarNameSize} onChange={v=>onSettingChange({sidebarNameSize:v})} min={11} max={20}/></Row>
-                <Row label="分组标题字号"><Num value={t.sidebarGroupSize} onChange={v=>onSettingChange({sidebarGroupSize:v})} min={10} max={16}/></Row>
-              </Group>
+              <ZoneGroupFields zone="sidebar" ctx={renderCtx} />
             </Tabs.Content>
 
             {/* ═══ 终端 ═══ */}
             <Tabs.Content value="terminal">
               <h3>聊天区</h3>
               <ZonePresetRow zone="chat" activeName={activePreset.chat} isDirty={dirty.chat} onApply={applyLocalPreset}/>
-              <Group title="背景">
-                <Row label="背景色">
-                  <ColorPopover value={t.chatBg} onChange={v=>onSettingChange({chatBg:v})}/>
-                </Row>
-                <BgImageRow label="背景图" value={t.chatBgImage} onChange={v=>onSettingChange({chatBgImage:v})}/>
-              </Group>
-              <Group title="字体">
-                <Row label="字体"><Sel value={t.chatFont} onChange={v=>onSettingChange({chatFont:v})} options={['mono','system']}/></Row>
-                <Row label="字号"><Num value={t.chatFontSize} onChange={v=>onSettingChange({chatFontSize:v})} min={12} max={22}/></Row>
-                <Row label="行高"><Num value={t.chatLineHeight} onChange={v=>onSettingChange({chatLineHeight:v})} min={1.2} max={2.5}/></Row>
-              </Group>
-              <Group title="颜色">
-                <div className="set-compact-row">
-                  <span className="set-compact-label">文字</span>
-                  <ColorPopover value={t.chatTextColor} onChange={v=>onSettingChange({chatTextColor:v})} chips={false}/>
-                  <span className="set-compact-label">内联代码</span>
-                  <ColorPopover value={t.chatCodeColor} onChange={v=>onSettingChange({chatCodeColor:v})} chips={false}/>
-                  <span className="set-compact-label">代码背景</span>
-                  <ColorPopover value={t.chatCodeBg} onChange={v=>onSettingChange({chatCodeBg:v})} chips={false}/>
-                </div>
-              </Group>
-              <Group title="玻璃效果">
-                <Row label="透明度"><Slider value={t.chatTransparency} onChange={v=>onSettingChange({chatTransparency:v})} min={0} max={1}/><span className="set-val">{Math.round(t.chatTransparency*100)}%</span></Row>
-                <Row label="模糊"><Slider value={t.chatBlur} onChange={v=>onSettingChange({chatBlur:v})} min={0} max={40} step={2}/><span className="set-val">{t.chatBlur}px</span></Row>
-              </Group>
-              <Group title="语法高亮">
-                <div className="set-compact-row">
-                  <span className="set-compact-label">关键字</span>
-                  <ColorPopover value={t.synKeyword} onChange={v=>onSettingChange({synKeyword:v})} chips={false}/>
-                  <span className="set-compact-label">字符串</span>
-                  <ColorPopover value={t.synString} onChange={v=>onSettingChange({synString:v})} chips={false}/>
-                  <span className="set-compact-label">注释</span>
-                  <ColorPopover value={t.synComment} onChange={v=>onSettingChange({synComment:v})} chips={false}/>
-                  <span className="set-compact-label">数字</span>
-                  <ColorPopover value={t.synLiteral} onChange={v=>onSettingChange({synLiteral:v})} chips={false}/>
-                </div>
-                <div className="set-compact-row">
-                  <span className="set-compact-label">类型</span>
-                  <ColorPopover value={t.synEntity} onChange={v=>onSettingChange({synEntity:v})} chips={false}/>
-                  <span className="set-compact-label">函数</span>
-                  <ColorPopover value={t.synFunction} onChange={v=>onSettingChange({synFunction:v})} chips={false}/>
-                  <span className="set-compact-label">变量</span>
-                  <ColorPopover value={t.synVariable} onChange={v=>onSettingChange({synVariable:v})} chips={false}/>
-                  <span className="set-compact-label">属性</span>
-                  <ColorPopover value={t.synProperty} onChange={v=>onSettingChange({synProperty:v})} chips={false}/>
-                </div>
-                <div className="set-compact-row">
-                  <span className="set-compact-label">正则</span>
-                  <ColorPopover value={t.synRegex} onChange={v=>onSettingChange({synRegex:v})} chips={false}/>
-                  <span className="set-compact-label">标题</span>
-                  <ColorPopover value={t.synMarkupHeading} onChange={v=>onSettingChange({synMarkupHeading:v})} chips={false}/>
-                  <span className="set-compact-label">模块</span>
-                  <ColorPopover value={t.synSupport} onChange={v=>onSettingChange({synSupport:v})} chips={false}/>
-                </div>
-              </Group>
-
-              <h3>工具调用</h3>
-              <Group title="指示器">
-                <div className="set-compact-row">
-                  <span className="set-compact-label">完成</span>
-                  <ColorPopover value={t.toolOk} onChange={v=>onSettingChange({toolOk:v})} chips={false}/>
-                  <span className="set-compact-label">运行中</span>
-                  <ColorPopover value={t.toolRun} onChange={v=>onSettingChange({toolRun:v})} chips={false}/>
-                  <span className="set-compact-label">错误</span>
-                  <ColorPopover value={t.toolErr} onChange={v=>onSettingChange({toolErr:v})} chips={false}/>
-                </div>
-              </Group>
-              <Group title="文字 & 标签">
-                <div className="set-compact-row">
-                  <span className="set-compact-label">工具名</span>
-                  <ColorPopover value={t.toolNameColor} onChange={v=>onSettingChange({toolNameColor:v})} chips={false}/>
-                  <span className="set-compact-label">摘要</span>
-                  <ColorPopover value={t.toolSummaryColor} onChange={v=>onSettingChange({toolSummaryColor:v})} chips={false}/>
-                </div>
-                <div className="set-compact-row" style={{marginTop:4}}>
-                  <span className="set-compact-label">标签背景</span>
-                  <ColorPopover value={t.userTagBg} onChange={v=>onSettingChange({userTagBg:v})} chips={false}/>
-                  <span className="set-compact-label">标签文字</span>
-                  <ColorPopover value={t.userTagText} onChange={v=>onSettingChange({userTagText:v})} chips={false}/>
-                </div>
-              </Group>
-              <Group title="指示器 & 连接线">
+              
+              <Group title="指示器形状">
                 <Row label="形状"><Sel value={resolveToolIndicatorAsset(t.toolIndicator).id} onChange={v=>onSettingChange({toolIndicator:v})} options={toolIndicatorOptions()} /></Row>
-                <Row label="辉光"><Slider value={t.toolIndicatorGlow} onChange={v=>onSettingChange({toolIndicatorGlow:v})} min={0} max={20} step={1}/><span className="set-val">{t.toolIndicatorGlow}px</span></Row>
-                <Row label="辉光色"><ColorPopover value={t.toolIndicatorGlowColor} onChange={v=>onSettingChange({toolIndicatorGlowColor:v})}/></Row>
-                <Row label="连接线"><Sel value={t.toolConnectorMode} onChange={v=>onSettingChange({toolConnectorMode:v})} options={['none','fixed','follow']}/></Row>
-                <Row label="线样式"><Sel value={t.toolConnectorStyle} onChange={v=>onSettingChange({toolConnectorStyle:v as ThemeSettings['toolConnectorStyle']})} options={['solid','dotted','pulse']}/></Row>
-                <Row label="线宽"><Num value={t.toolConnectorWidth} onChange={v=>onSettingChange({toolConnectorWidth:Math.max(1, Math.min(6, v))})} min={1} max={6}/><span className="set-val">px</span></Row>
-                <Row label="线透明度"><Slider value={t.toolConnectorOpacity} onChange={v=>onSettingChange({toolConnectorOpacity:v})} min={0.1} max={1} step={0.05}/><span className="set-val">{Math.round(t.toolConnectorOpacity*100)}%</span></Row>
-                {t.toolConnectorMode==='fixed' && <Row label="线色"><ColorPopover value={t.toolConnectorColor} onChange={v=>onSettingChange({toolConnectorColor:v})}/></Row>}
               </Group>
-              <Group title="Spinner">
-                <Row label="动画预设"><Sel value={t.spinnerFramePreset} onChange={v=>onSettingChange({spinnerFramePreset:v as ThemeSettings['spinnerFramePreset']})} options={['sparkles','ascii-line','braille','dots','orbit','clock','wave','blocks','scan','custom']}/></Row>
-                {t.spinnerFramePreset === 'custom' && <Row label="自定义帧"><textarea className="set-textarea" value={t.spinnerCustomFrames} onChange={e=>onSettingChange({spinnerCustomFrames:e.target.value})} placeholder="逐字符输入，例如：◐◓◑◒" /></Row>}
-                <Row label="文案语言"><Sel value={t.spinnerVerbSet} onChange={v=>onSettingChange({spinnerVerbSet:v as ThemeSettings['spinnerVerbSet']})} options={['zh','en','analysis','engineering','custom']}/></Row>
-                {t.spinnerVerbSet === 'custom' && <Row label="自定义文案"><textarea className="set-textarea" value={t.spinnerCustomVerbs} onChange={e=>onSettingChange({spinnerCustomVerbs:e.target.value})} placeholder="每行一条文案" /></Row>}
-                <SpinnerMarkerRow label="完成标记" mode={t.spinnerDoneMarkerMode} value={t.spinnerDoneMarker} frames={spinnerFrames}
-                  onModeChange={v=>onSettingChange({spinnerDoneMarkerMode:v})} onValueChange={v=>onSettingChange({spinnerDoneMarker:v})}/>
-                <SpinnerMarkerRow label="取消标记" mode={t.spinnerCancelledMarkerMode} value={t.spinnerCancelledMarker} frames={spinnerFrames}
-                  onModeChange={v=>onSettingChange({spinnerCancelledMarkerMode:v})} onValueChange={v=>onSettingChange({spinnerCancelledMarker:v})}/>
-                <SpinnerMarkerRow label="错误标记" mode={t.spinnerErrorMarkerMode} value={t.spinnerErrorMarker} frames={spinnerFrames}
-                  onModeChange={v=>onSettingChange({spinnerErrorMarkerMode:v})} onValueChange={v=>onSettingChange({spinnerErrorMarker:v})}/>
-                <div className="set-compact-row">
-                  <span className="set-compact-label">颜色</span>
-                  <ColorPopover value={t.spinnerColor} onChange={v=>onSettingChange({spinnerColor:v})} chips={false}/>
-                  <span className="set-compact-label">大小</span>
-                  <Num value={t.spinnerSize} onChange={v=>onSettingChange({spinnerSize:v})} min={10} max={32}/>
-                  <span className="set-compact-label">间隔</span>
-                  <Num value={t.spinnerIntervalMs} onChange={v=>onSettingChange({spinnerIntervalMs: Math.max(40, Math.min(1000, v))})} min={40} max={1000}/>
-                  <span className="set-val">ms</span>
-                </div>
-              </Group>
-
-              <h3>消息渲染</h3>
-              <Group title="风格">
-                <Row label="信息层级"><Sel value={t.messageLayout || 'classic'} onChange={v=>onSettingChange({messageLayout:v as ThemeSettings['messageLayout']})} options={['classic','claude','bubble']}/></Row>
-                <Row label="风格"><Sel value={t.msgStyle} onChange={v=>onSettingChange({msgStyle:v})} options={['terminal','bubble']}/></Row>
-                <Row label="字体"><Sel value={t.msgFont} onChange={v=>onSettingChange({msgFont:v})} options={['mono','system']}/></Row>
-                <div className="set-compact-row">
-                  <span className="set-compact-label">文字颜色</span>
-                  <ColorPopover value={t.msgTextColor} onChange={v=>onSettingChange({msgTextColor:v})} chips={false}/>
-                  <span className="set-compact-label">行间距</span>
-                  <Num value={t.msgLineHeight} onChange={v=>onSettingChange({msgLineHeight:v})} min={1.2} max={2.5}/>
-                </div>
-              </Group>
+              <ZoneGroupFields zone="chat" ctx={renderCtx} />
             </Tabs.Content>
 
             {/* ═══ 中控区 ═══ */}
             <Tabs.Content value="cc">
               <h3>中控区</h3>
               <ZonePresetRow zone="cc" activeName={activePreset.cc} isDirty={dirty.cc} onApply={applyLocalPreset}/>
-              <Group title="外观风格">
-                <Row label="整体风格">
-                  <div className="set-preset-row">
-                    {(['terminal','glass','pill'] as const).map(v => (
-                      <button key={v} className={`set-preset-chip ${t.ccVariant===v?'active':''}`}
-                        onClick={()=>onSettingChange({ccVariant:v})}>{v==='terminal'?'终端':v==='glass'?'玻璃':'胶囊'}</button>
-                    ))}
-                  </div>
-                </Row>
-                <Row label="高度"><Num value={t.ccHeight} onChange={v=>onSettingChange({ccHeight:Math.max(ccMinHeight, v)})} min={ccMinHeight} max={400}/><span className="set-val">px（最小 {ccMinHeight}）</span></Row>
-                <Row label="背景色"><ColorPopover value={t.ccBg} onChange={v=>onSettingChange({ccBg:v})}/></Row>
-                <BgImageRow label="背景图" value={t.ccBgImage||''} onChange={v=>onSettingChange({ccBgImage:v})}/>
-              </Group>
-              <Group title="控件样式">
-                <Row label="输入栏"><Sel value={t.inputVariant || (t.inputMode === 'cli' ? 'cli' : 'composer')} onChange={v=>onSettingChange({inputVariant:v as ThemeSettings['inputVariant'], inputMode:v === 'cli' ? 'cli' : 'default'})} options={['cli','composer','compact','command']}/></Row>
-                <Row label="Placeholder"><Sel value={t.inputShowPlaceholder === false ? 'hidden' : 'shown'} onChange={v=>onSettingChange({inputShowPlaceholder:v === 'shown'})} options={['shown','hidden']}/></Row>
-                <Row label="历史提示"><Sel value={t.inputShowHistoryHint === false ? 'hidden' : 'shown'} onChange={v=>onSettingChange({inputShowHistoryHint:v === 'shown'})} options={['shown','hidden']}/></Row>
-                <Row label="发送按钮"><Sel value={t.inputSubmitButtonMode || 'inline'} onChange={v=>onSettingChange({inputSubmitButtonMode:v as ThemeSettings['inputSubmitButtonMode']})} options={['inline','external','hidden']}/></Row>
-                <Row label="Footer 布局"><Sel value={t.footerLayout || 'free'} onChange={v=>onSettingChange({footerLayout:v as ThemeSettings['footerLayout']})} options={['free','peri']}/></Row>
-                <Row label="多行策略"><Sel value={t.cliOverflowMode || 'fixed-scroll'} onChange={v=>onSettingChange({cliOverflowMode:v as ThemeSettings['cliOverflowMode']})} options={['fixed-scroll','grow','overlay']}/></Row>
-                <Row label="提示符颜色"><ColorPopover value={t.cliPromptColor || ''} onChange={v=>onSettingChange({cliPromptColor:v})}/></Row>
-                <Row label="内容垂直偏移"><Num value={t.cliContentOffsetY ?? 0} onChange={v=>onSettingChange({cliContentOffsetY:v})} min={-6} max={6}/><span className="set-val">px</span></Row>
-                <Row label="命令提示"><Sel value={t.cliHintMode || 'full'} onChange={v=>onSettingChange({cliHintMode:v as ThemeSettings['cliHintMode']})} options={['hidden','compact','full']}/></Row>
-                <Row label="上下文"><Sel value={t.ccStyle} onChange={v=>onSettingChange({ccStyle:v})} options={['wave','bar','ring','numeric']}/></Row>
-                <Row label="信息字号"><Num value={t.ccStatusFontSize ?? 14} onChange={v=>onSettingChange({ccStatusFontSize:v})} min={14} max={20}/></Row>
-                <Row label="模型"><Sel value={t.modelVariant} onChange={v=>onSettingChange({modelVariant:v})} options={['dropdown','minimal','badge']}/></Row>
-                <Row label="模式"><Sel value={t.modeVariant} onChange={v=>onSettingChange({modeVariant:v})} options={['pill','badge','minimal']}/></Row>
-                <Row label="发送"><Sel value={t.sendVariant} onChange={v=>onSettingChange({sendVariant:v})} options={['icon','square','minimal']}/></Row>
-                <Row label="附件"><Sel value={t.attachVariant} onChange={v=>onSettingChange({attachVariant:v})} options={['icon','square','minimal']}/></Row>
-              </Group>
+              
+              <ZoneGroupFields zone="cc" ctx={renderCtx} />
               <Group title="布局编辑">
                 <button className="ps-btn primary"
                   onClick={() => {
@@ -670,15 +418,8 @@ export default function Settings({ onClose, activeSessionId }: { onClose?: () =>
             <Tabs.Content value="right">
               <h3>右侧栏</h3>
               <ZonePresetRow zone="right" activeName={activePreset.right} isDirty={dirty.right} onApply={applyLocalPreset}/>
-              <Group title="外观">
-                <Row label="背景色"><ColorPopover value={t.rightBg} onChange={v=>onSettingChange({rightBg:v})}/></Row>
-                <BgImageRow label="背景图" value={t.rightBgImage||''} onChange={v=>onSettingChange({rightBgImage:v})}/>
-                <Row label="宽度"><Num value={t.rightWidth} onChange={v=>onSettingChange({rightWidth:v})} min={200} max={400}/></Row>
-              </Group>
-              <Group title="玻璃效果">
-                <Row label="透明度"><Slider value={t.rightTransparency} onChange={v=>onSettingChange({rightTransparency:v})} min={0} max={1}/><span className="set-val">{Math.round(t.rightTransparency*100)}%</span></Row>
-                <Row label="模糊"><Slider value={t.rightBlur} onChange={v=>onSettingChange({rightBlur:v})} min={0} max={40} step={2}/><span className="set-val">{t.rightBlur}px</span></Row>
-              </Group>
+              
+              <ZoneGroupFields zone="right" ctx={renderCtx} />
             </Tabs.Content>
 
             {/* ═══ Agent ═══ */}
