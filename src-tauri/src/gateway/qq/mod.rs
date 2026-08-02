@@ -223,7 +223,7 @@ impl QqAdapter {
         })
     }
 
-    /// 入站入口：白名单 + 路由绑定（单快照）→ 去重 → dispatch（ACP 发送）。
+    /// 入站入口：空文本拦截 → 白名单 + 路由绑定（单快照）→ 去重 → dispatch（ACP 发送）。
     ///
     /// 核验修复：白名单先于 seen 记录——被白名单拒绝的消息不占去重窗口，
     /// 之后白名单放宽时同一消息重放仍可正常处理（消息从未真正 ingest 过）。
@@ -232,6 +232,9 @@ impl QqAdapter {
     /// 修复（S5）：白名单判定与路由绑定在同一 `with_routes_and_qq` 单快照内完成，
     /// ResolvedIngest 的 binding 与白名单判定依据同一份配置（不再经 ingest()
     /// 二次读锁，消除 reload 窗口下"旧绑定放行 → 新绑定投递"的混搭）。
+    /// 修复（S9）：空 content（@bot 后无文字、无附件）入口拦截，与白名单拒绝
+    /// 同语义：不占 seen 窗口，同一 msg_id 的非空内容仍可正常处理。
+    /// - 空文本 → Ok(None)，不 dispatch
     /// - 白名单拒绝 → Ok(None)，不 dispatch
     /// - msg_id 已见（resume 重放）→ Ok(None)，不重复 ingest
     /// - 新消息 → 记录 seen + last_msg_id，dispatch 发送并返回解析结果
@@ -244,6 +247,12 @@ impl QqAdapter {
         member_openid: Option<&str>,
         user_openid: Option<&str>,
     ) -> Result<Option<ResolvedIngest>, String> {
+        // S9：入站空文本拦截（与出站 O39 对称）——空消息不入站、不 dispatch，
+        // 空 content 不会直达 send_prompt_core（agent 收不到空 user 消息）。
+        // 拦截先于 dedup.is_new：与白名单拒绝同语义，不占 seen 窗口。
+        if content.trim().is_empty() {
+            return Ok(None);
+        }
         // S5：空 source 校验与 ingest() 保持一致（无 source 即无路由可解析）。
         if source.trim().is_empty() {
             return Err("ingest requires a non-empty source".to_string());
@@ -741,6 +750,33 @@ gateway:
             .handle_incoming("", "msg-1", "x", None, None)
             .expect_err("空 source 必须拒绝");
         assert!(error.contains("source"));
+    }
+
+    #[test]
+    fn empty_content_is_dropped_without_consuming_seen_window() {
+        // S9：入站空文本（@bot 后无文字、无附件）与白名单拒绝同语义——
+        // 入口拦截返回 Ok(None)、不占 seen 窗口；同一 msg_id 换成非空内容
+        // 仍可正常处理（拦截先于 dedup.is_new）。
+        let core = core_with_route();
+        let adapter = test_adapter(core);
+        for (msg_id, empty) in [("msg-empty", ""), ("msg-blank", "   "), ("msg-ws", "\t\n ")] {
+            let dropped = adapter
+                .handle_incoming("qq:group:123", msg_id, empty, None, None)
+                .expect("ingest");
+            assert!(dropped.is_none(), "空 content 必须丢弃: {empty:?}");
+        }
+        // 同一 msg_id 换非空内容 → 正常入站（空消息未占 seen）
+        let valid = adapter
+            .handle_incoming("qq:group:123", "msg-empty", "你好", None, None)
+            .expect("ingest")
+            .expect("同一 msg_id 的非空内容必须正常处理");
+        assert_eq!(valid.content, "你好");
+        assert_eq!(valid.msg_id.as_deref(), Some("msg-empty"));
+        // 处理过之后同一 msg_id 重放 → 正常去重
+        let replay = adapter
+            .handle_incoming("qq:group:123", "msg-empty", "重复", None, None)
+            .expect("ingest");
+        assert!(replay.is_none(), "已处理消息重放必须去重");
     }
 
     #[test]
