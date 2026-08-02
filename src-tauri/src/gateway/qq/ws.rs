@@ -12,6 +12,7 @@
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
+use base64::Engine;
 use futures_util::{SinkExt, Stream, StreamExt};
 use reqwest::Client;
 use tokio::net::TcpStream;
@@ -460,28 +461,66 @@ pub async fn connect(url: &str) -> Result<WsStream, String> {
     Ok(ws)
 }
 
+/// 解析后的代理配置：host、port、可选 userinfo（user, pass）。
+type ProxyConfig = (String, u16, Option<(String, String)>);
+
+/// 解析代理 URL → [`ProxyConfig`]。
+/// - 仅支持 http/https（CONNECT 隧道）；socks5 等明确报错（此前被误用 http 解析）。
+/// - host 必填；port 缺省 7897；userinfo 非空时返回（用于 Proxy-Authorization）。
+/// - 无 scheme 的裸 `host:port` 兼容补全 `http://`。
+fn parse_proxy(proxy_raw: &str) -> Result<ProxyConfig, String> {
+    let raw = proxy_raw.trim();
+    let parsed = if raw.contains("://") {
+        Url::parse(raw)
+    } else {
+        Url::parse(&format!("http://{raw}"))
+    }
+    .map_err(|e| format!("代理 URL 解析失败: {e}"))?;
+
+    match parsed.scheme() {
+        "http" | "https" => {}
+        scheme => {
+            return Err(format!(
+                "不支持的代理协议 {scheme}://，仅支持 http/https CONNECT"
+            ))
+        }
+    }
+
+    let host = parsed
+        .host_str()
+        .ok_or_else(|| "代理 URL 缺少 host".to_string())?
+        .to_string();
+    let port = parsed.port().unwrap_or(7897);
+    let userinfo = match parsed.username() {
+        "" => None,
+        user => Some((
+            user.to_string(),
+            parsed.password().unwrap_or("").to_string(),
+        )),
+    };
+    Ok((host, port, userinfo))
+}
+
 async fn tunnel(
     proxy_raw: &str,
     target_host: &str,
     target_port: u16,
 ) -> Result<tokio_rustls::client::TlsStream<TcpStream>, String> {
-    let proxy = proxy_raw
-        .trim_start_matches("http://")
-        .trim_start_matches("https://");
-    let (host, port) = if let Some((h, p)) = proxy.split_once(':') {
-        (h, p.parse::<u16>().unwrap_or(7897))
-    } else {
-        (proxy, 7897)
-    };
+    let (host, port, userinfo) = parse_proxy(proxy_raw)?;
 
     let mut stream = TcpStream::connect(format!("{host}:{port}"))
         .await
         .map_err(|e| format!("连代理: {e}"))?;
 
-    let req = format!(
+    let mut req = format!(
         "CONNECT {target_host}:{target_port} HTTP/1.1\r\n\
-         Host: {target_host}:{target_port}\r\n\r\n"
+         Host: {target_host}:{target_port}\r\n"
     );
+    if let Some((user, pass)) = userinfo {
+        let basic = base64::engine::general_purpose::STANDARD.encode(format!("{user}:{pass}"));
+        req.push_str(&format!("Proxy-Authorization: Basic {basic}\r\n"));
+    }
+    req.push_str("\r\n");
     use tokio::io::AsyncWriteExt;
     stream
         .write_all(req.as_bytes())
@@ -690,6 +729,31 @@ mod tests {
     fn ws_close_code_is_parsed_from_error_message() {
         assert_eq!(parse_ws_close_code("code=4008 rate limited"), 4008);
         assert_eq!(parse_ws_close_code("no code here"), 0);
+    }
+
+    #[test]
+    fn parse_proxy_handles_userinfo_and_socks5() {
+        let (host, port, userinfo) = parse_proxy("http://user:pass@127.0.0.1:7890").unwrap();
+        assert_eq!(host, "127.0.0.1");
+        assert_eq!(port, 7890);
+        assert_eq!(userinfo, Some(("user".to_string(), "pass".to_string())));
+
+        let (host, port, userinfo) = parse_proxy("http://proxy.example.com").unwrap();
+        assert_eq!(host, "proxy.example.com");
+        assert_eq!(port, 7897, "port 缺省 7897");
+        assert_eq!(userinfo, None);
+
+        let (host, port, userinfo) = parse_proxy("user:pass@127.0.0.1:7899").unwrap();
+        assert_eq!(host, "127.0.0.1");
+        assert_eq!(port, 7899);
+        assert_eq!(userinfo, Some(("user".to_string(), "pass".to_string())));
+
+        let err = parse_proxy("socks5://127.0.0.1:1080").unwrap_err();
+        assert!(err.contains("socks5"), "错误应指明协议: {err}");
+        assert!(err.contains("http/https"), "错误应提示支持范围: {err}");
+
+        let err = parse_proxy("http://").unwrap_err();
+        assert!(err.contains("host"), "缺少 host 应报错: {err}");
     }
 
     struct StalledStream;
