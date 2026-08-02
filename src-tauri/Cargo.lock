@@ -2500,6 +2500,7 @@ dependencies = [
  "log",
  "pylon-pet-core",
  "rand 0.10.2",
+ "regex",
  "reqwest 0.12.28",
  "rustls",
  "rustls-native-certs",
