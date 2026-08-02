@@ -1649,11 +1649,10 @@ pub(crate) async fn load_persisted_session(
             generation,
         ),
     );
-    let acp = runtime.acp.lock().await;
-    let load_result = acp
-        .load_session_with_replay(&peri_id, &cwd, mcp_servers)
-        .await;
-    drop(acp);
+    // O3：锁内仅提取回放句柄，等待在锁外进行——回放最长 30s，不阻塞其他命令。
+    let handles = runtime.acp.lock().await.replay_handles();
+    let load_result =
+        AcpClient::load_session_with_replay(handles, &peri_id, &cwd, mcp_servers).await;
     match load_result {
         Ok((response, _replay)) => {
             if let Err(error) = state.ensure_generation(&runtime, generation) {

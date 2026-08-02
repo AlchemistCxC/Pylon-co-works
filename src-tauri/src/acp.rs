@@ -347,7 +347,7 @@ pub struct AcpClient {
     child: ManagedChild,
     /// mpsc channel for writing JSON-RPC lines to stdin. Single consumer = no lock contention.
     pub(crate) write_tx: mpsc::Sender<String>,
-    next_id: AtomicU64,
+    next_id: Arc<AtomicU64>,
     pending: Arc<[Mutex<Pending>; PENDING_SHARDS]>,
     /// Broadcast channel for all received messages (responses + notifications).
     pub rx: broadcast::Receiver<RawMessage>,
@@ -553,7 +553,7 @@ impl AcpClient {
         Self {
             child: ManagedChild::empty(),
             write_tx,
-            next_id: AtomicU64::new(1),
+            next_id: Arc::new(AtomicU64::new(1)),
             pending: Arc::new(std::array::from_fn(|_| Mutex::new(HashMap::new()))),
             rx,
             crashed: Arc::new(AtomicBool::new(false)),
@@ -582,6 +582,24 @@ impl AcpClient {
     fn pending_shard(&self, id: u64) -> &Mutex<Pending> {
         &self.pending[id as usize % PENDING_SHARDS]
     }
+    /// 分配 id + 构造 json! 信封 + 序列化（O3：与 register_request 共享，
+    /// 供锁外回放路径复用——该路径无需注册 pending）。
+    fn register_line(
+        next_id: &AtomicU64,
+        method: &str,
+        params: &serde_json::Value,
+    ) -> Result<(u64, String), AcpError> {
+        let id = next_id.fetch_add(1, Ordering::Relaxed);
+        let req = serde_json::json!({
+            "jsonrpc": "2.0",
+            "id": id,
+            "method": method,
+            "params": params,
+        });
+        let line = serde_json::to_string(&req)
+            .map_err(|e| AcpError::Child(format!("serialize failed: {e}")))?;
+        Ok((id, line))
+    }
     /// 公共 RPC 请求准备：分配 id → 注册 pending（`pending_tx` 为 None 表示不需要
     /// pending 响应，如 session/load 回放经 broadcast 收集）→ 构造 json! 信封 →
     /// 序列化。返回 (id, 序列化行)。任何失败（锁中毒/序列化）时清理已注册的
@@ -592,24 +610,11 @@ impl AcpClient {
         params: &serde_json::Value,
         pending_tx: Option<oneshot::Sender<RawMessage>>,
     ) -> Result<(u64, String), AcpError> {
-        let id = self.next_id.fetch_add(1, Ordering::Relaxed);
+        let (id, line) = Self::register_line(&self.next_id, method, params)?;
         if let Some(tx) = pending_tx {
             let mut pending = self.pending_shard(id).lock().map_err(|e| e.to_string())?;
             pending.insert(id, tx);
         }
-        let req = serde_json::json!({
-            "jsonrpc": "2.0",
-            "id": id,
-            "method": method,
-            "params": params,
-        });
-        let line = match serde_json::to_string(&req) {
-            Ok(line) => line,
-            Err(error) => {
-                self.remove_pending(id);
-                return Err(AcpError::Child(format!("serialize failed: {}", error)));
-            }
-        };
         Ok((id, line))
     }
 
@@ -1037,7 +1042,7 @@ impl AcpClient {
                 let client = AcpClient {
                     child,
                     write_tx,
-                    next_id: AtomicU64::new(1),
+                    next_id: Arc::new(AtomicU64::new(1)),
                     pending,
                     rx,
                     crashed,
@@ -1090,23 +1095,25 @@ impl AcpClient {
     /// Load a persisted session and collect every replay notification before the response.
     /// The reader publishes notifications before resolving the matching response, so
     /// observing the response on this broadcast receiver is the deterministic replay boundary.
+    /// O3：接受 [`Self::replay_handles`] 产出的句柄而非 &self——调用方在锁内提取
+    /// 句柄后释放锁，等待（最长 30s）在锁外进行，期间其他命令可执行。
     pub async fn load_session_with_replay(
-        &self,
+        handles: ReplayHandles,
         session_id: &str,
         cwd: &str,
         mcp_servers: Vec<serde_json::Value>,
     ) -> Result<(serde_json::Value, Vec<serde_json::Value>), AcpError> {
         // 审查修复：与 prepare_rpc 一致，死亡连接立即拒绝
-        if self.is_crashed() {
+        if handles.crashed.load(Ordering::Relaxed) {
             return Err(AcpError::ConnectionClosed);
         }
-        let mut events = self.rx.resubscribe();
+        let mut events = handles.rx.resubscribe();
         // 回放与响应均经 broadcast 收集，无需注册 pending：旧代码的 (tx, _rx)
         // 条目永不消费（reader 对已丢弃 rx 的 tx.send 必然失败），确认无功能
         // 依赖后删除；id 仅用于在广播流中匹配响应。
         let params = Self::load_session_params(session_id, cwd, mcp_servers)?;
-        let (id, line) = self.register_request(METHOD_SESSION_LOAD, &params, None)?;
-        send_line(self.write_tx.clone(), line, &self.crashed).await?;
+        let (id, line) = Self::register_line(&handles.next_id, METHOD_SESSION_LOAD, &params)?;
+        send_line(handles.write_tx, line, &handles.crashed).await?;
 
         let mut replay = Vec::new();
         loop {
@@ -1150,6 +1157,28 @@ impl AcpClient {
                 return Err(AcpError::Rpc(format!("{}", error)));
             }
             return Ok((raw.result.unwrap_or(serde_json::Value::Null), replay));
+        }
+    }
+}
+
+/// O3：锁外执行 session/load 回放所需的句柄（写通道 / id 计数器 / 崩溃标记 /
+/// 广播订阅）。调用方在锁内经 [`AcpClient::replay_handles`] 一次性提取，
+/// 锁外交给 [`AcpClient::load_session_with_replay`] 等待回放完成。
+pub struct ReplayHandles {
+    write_tx: mpsc::Sender<String>,
+    next_id: Arc<AtomicU64>,
+    crashed: Arc<AtomicBool>,
+    rx: broadcast::Receiver<RawMessage>,
+}
+
+impl AcpClient {
+    /// 提取锁外回放所需句柄。调用方应在锁内调用后立即释放锁，再以句柄等待。
+    pub fn replay_handles(&self) -> ReplayHandles {
+        ReplayHandles {
+            write_tx: self.write_tx.clone(),
+            next_id: self.next_id.clone(),
+            crashed: self.crashed.clone(),
+            rx: self.rx.resubscribe(),
         }
     }
 }
@@ -1601,10 +1630,14 @@ for line in sys.stdin:
         let client = AcpClient::connect_with_logs(&agent, None)
             .await
             .expect("fake ACP replay agent must initialize");
-        let (response, replay) = client
-            .load_session_with_replay("fake-session-replay", ".", Vec::new())
-            .await
-            .expect("session/load must return after replay response");
+        let (response, replay) = AcpClient::load_session_with_replay(
+            client.replay_handles(),
+            "fake-session-replay",
+            ".",
+            Vec::new(),
+        )
+        .await
+        .expect("session/load must return after replay response");
         assert_eq!(response, serde_json::json!({"loaded": true}));
         assert_eq!(replay.len(), 2);
         assert_eq!(replay[0]["update"]["content"]["text"], "history-1");
@@ -1931,10 +1964,14 @@ for line in sys.stdin:
         let client = AcpClient::connect_with_logs(&agent, None)
             .await
             .expect("update isolation fake ACP must initialize");
-        let (_response, replay) = client
-            .load_session_with_replay("target-session", ".", Vec::new())
-            .await
-            .expect("target session load must succeed");
+        let (_response, replay) = AcpClient::load_session_with_replay(
+            client.replay_handles(),
+            "target-session",
+            ".",
+            Vec::new(),
+        )
+        .await
+        .expect("target session load must succeed");
         let texts: Vec<&str> = replay
             .iter()
             .filter_map(|params| params["update"]["content"]["text"].as_str())

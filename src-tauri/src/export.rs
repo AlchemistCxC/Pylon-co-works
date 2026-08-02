@@ -166,12 +166,11 @@ pub(crate) async fn export_session(
     let (source, generation, cwd) = state.export_session_owner(&runtime, &peri_id)?;
     let mcp_servers =
         crate::mcp::validate_and_serialize(Some(state.inner().current_mcp_servers()?))?;
-    let (_, messages) = runtime
-        .acp
-        .lock()
-        .await
-        .load_session_with_replay(&peri_id, &cwd, mcp_servers)
-        .await?;
+    // O3：锁内仅提取回放句柄，等待在锁外进行——回放最长 30s，不阻塞其他命令。
+    let handles = runtime.acp.lock().await.replay_handles();
+    let (_, messages) =
+        crate::acp::AcpClient::load_session_with_replay(handles, &peri_id, &cwd, mcp_servers)
+            .await?;
     state.ensure_generation(&runtime, generation)?;
     let sessions = runtime.sessions.lock().map_err(|error| error.to_string())?;
     if sessions.get(&source).map(|session| {
