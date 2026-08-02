@@ -1,8 +1,8 @@
 //! 结构化运行时日志：固定容量、查询过滤、截断和敏感字段脱敏。
 
+use ringbuffer::{AllocRingBuffer, RingBuffer};
 use serde::{Deserialize, Serialize};
 use serde_json::{Map, Value};
-use std::collections::VecDeque;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
 
@@ -41,7 +41,8 @@ pub struct RuntimeLogQuery {
 #[derive(Debug)]
 pub struct RuntimeLogHub {
     next_id: AtomicU64,
-    entries: Mutex<VecDeque<RuntimeLogEntry>>,
+    /// R20：ringbuffer 硬容量（满时 enqueue 自动覆盖最旧，无扩容路径）。
+    entries: Mutex<AllocRingBuffer<RuntimeLogEntry>>,
     capacity: usize,
     events: tokio::sync::broadcast::Sender<RuntimeLogEntry>,
 }
@@ -51,7 +52,7 @@ impl RuntimeLogHub {
         let (events, _) = tokio::sync::broadcast::channel(256);
         Arc::new(Self {
             next_id: AtomicU64::new(1),
-            entries: Mutex::new(VecDeque::with_capacity(capacity.min(DEFAULT_CAPACITY))),
+            entries: Mutex::new(AllocRingBuffer::new(capacity.max(1))),
             capacity: capacity.max(1),
             events,
         })
@@ -84,10 +85,8 @@ impl RuntimeLogHub {
             message: sanitize_message(message.into()),
             fields: sanitize_fields(fields),
         };
-        entries.push_back(entry.clone());
-        while entries.len() > self.capacity {
-            entries.pop_front();
-        }
+        // R20：ringbuffer enqueue 满时自动覆盖最旧。
+        let _ = entries.enqueue(entry.clone());
         drop(entries);
         // O24：broadcast send 移出 entries 锁临界区。
         let _ = self.events.send(entry.clone());
