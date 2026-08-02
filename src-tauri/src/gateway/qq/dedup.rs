@@ -6,7 +6,7 @@
 //! 背景：QQ WS 断线重连后 resume 会重放事件，必须去重，否则 agent 收到重复消息。
 //! 参考 Hermes `_seen_messages` 滑动窗口（DEDUP_MAX_SIZE = 1000 为 Hermes 实证值）。
 
-use std::collections::HashMap;
+use std::collections::{HashMap, VecDeque};
 
 /// seen 窗口上限（Hermes 实证值）。
 ///
@@ -18,8 +18,10 @@ const DEDUP_MAX_SIZE: usize = 1000;
 /// 纯数据层；B10.2 起由 QqAdapter::handle_incoming（ingest 前判重、记录 latest）
 /// 与 deliver_text（回复锚点 latest_for）消费。
 pub struct DedupState {
-    /// msg_id → 单调递增序号（替代真实时间，用于清理最旧条目）。
+    /// msg_id → 单调递增序号（替代真实时间）。
     seen: HashMap<String, u64>,
+    /// 插入顺序队列（队首最旧），用于 O(1) 驱逐。
+    order: VecDeque<String>,
     /// 内部单调递增计数器，每记录一条新消息 +1。
     next_seq: u64,
     /// chat_id → 最新 msg_id（回复锚点 + msg_seq 计算）。
@@ -31,6 +33,7 @@ impl DedupState {
     pub fn new() -> Self {
         Self {
             seen: HashMap::new(),
+            order: VecDeque::new(),
             next_seq: 0,
             last_msg_id: HashMap::new(),
         }
@@ -45,6 +48,7 @@ impl DedupState {
             self.evict_oldest();
         }
         self.seen.insert(msg_id.to_string(), self.next_seq);
+        self.order.push_back(msg_id.to_string());
         self.next_seq += 1;
         true
     }
@@ -55,14 +59,9 @@ impl DedupState {
         DEDUP_MAX_SIZE
     }
 
-    /// 清理 seen 窗口中序号最小的条目（最旧）。
+    /// 清理 seen 窗口中最旧的条目（队首，插入顺序即序号顺序）。
     fn evict_oldest(&mut self) {
-        if let Some(oldest) = self
-            .seen
-            .iter()
-            .min_by_key(|(_, seq)| **seq)
-            .map(|(msg_id, _)| msg_id.clone())
-        {
+        if let Some(oldest) = self.order.pop_front() {
             self.seen.remove(&oldest);
         }
     }
