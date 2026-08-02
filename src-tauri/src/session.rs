@@ -1849,6 +1849,7 @@ mod tests {
             pet_last_persist_ms: std::sync::atomic::AtomicU64::new(0),
             pet_write_lock: tokio::sync::Mutex::new(()),
             switch_lock: tokio::sync::Mutex::new(()),
+            mcp_write_lock: tokio::sync::Mutex::new(()),
         }
     }
 

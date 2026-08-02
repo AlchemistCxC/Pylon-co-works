@@ -119,6 +119,9 @@ pub(crate) struct AppState {
     /// C7：switch/reconnect 串行锁——并发 switch 不交叉杀进程（一个 switch
     /// 未完成前另一个 switch 不得 kill 同一批旧进程）。
     pub(crate) switch_lock: tokio::sync::Mutex<()>,
+    /// C8：MCP 写序锁（tokio Mutex）——set_mcp_servers 写 runtime_mcp + 落盘
+    /// 全程持锁，并发设置时磁盘必为最后一次设置（重启不回滚到旧配置）。
+    pub(crate) mcp_write_lock: tokio::sync::Mutex<()>,
 }
 
 /// 供 async 闭包/静态辅助持有的 AppState 字段子集。
@@ -790,6 +793,7 @@ for line in sys.stdin:
             pet_last_persist_ms: AtomicU64::new(0),
             pet_write_lock: tokio::sync::Mutex::new(()),
             switch_lock: tokio::sync::Mutex::new(()),
+            mcp_write_lock: tokio::sync::Mutex::new(()),
         }
     }
 
@@ -1462,6 +1466,7 @@ for line in sys.stdin:
             pet_last_persist_ms: AtomicU64::new(0),
             pet_write_lock: tokio::sync::Mutex::new(()),
             switch_lock: tokio::sync::Mutex::new(()),
+            mcp_write_lock: tokio::sync::Mutex::new(()),
         }
     }
 
@@ -1903,6 +1908,7 @@ mod mcp_persist_tests {
             pet_last_persist_ms: AtomicU64::new(0),
             pet_write_lock: tokio::sync::Mutex::new(()),
             switch_lock: tokio::sync::Mutex::new(()),
+            mcp_write_lock: tokio::sync::Mutex::new(()),
         };
         app.manage(state);
         let path = match mcp_persist_path(&app.handle()) {
@@ -1984,6 +1990,7 @@ for line in sys.stdin:
             pet_last_persist_ms: AtomicU64::new(0),
             pet_write_lock: tokio::sync::Mutex::new(()),
             switch_lock: tokio::sync::Mutex::new(()),
+            mcp_write_lock: tokio::sync::Mutex::new(()),
         }
     }
 
@@ -2192,6 +2199,7 @@ for line in sys.stdin:
             pet_last_persist_ms: AtomicU64::new(0),
             pet_write_lock: tokio::sync::Mutex::new(()),
             switch_lock: tokio::sync::Mutex::new(()),
+            mcp_write_lock: tokio::sync::Mutex::new(()),
         }
     }
 
@@ -2521,6 +2529,7 @@ pub fn run() {
                 pet_last_persist_ms: AtomicU64::new(0),
                 pet_write_lock: tokio::sync::Mutex::new(()),
             switch_lock: tokio::sync::Mutex::new(()),
+            mcp_write_lock: tokio::sync::Mutex::new(()),
             })
             .invoke_handler(tauri::generate_handler![
                 crate::prism_cmds::prism_health, crate::prism_cmds::prism_status, crate::prism_cmds::prism_state, crate::prism_cmds::prism_scenarios, crate::prism_cmds::prism_sources, crate::prism_cmds::prism_aliases, crate::prism_cmds::prism_config,

@@ -311,6 +311,9 @@ pub(crate) async fn set_mcp_servers<R: tauri::Runtime>(
     // O13：单次 clone（validate 消耗 clone，原值 move 进 runtime_mcp；
     // persist 在锁内借用 guard——原实现 serialized/persisted 两次 clone）。
     let serialized = crate::mcp::validate_and_serialize(servers.clone())?;
+    // C8：写 runtime_mcp + 落盘全程持写序锁——并发 set_mcp_servers 串行，
+    // 磁盘必为最后一次设置（重启不回滚到旧配置）。
+    let _mcp_write_guard = state.inner().mcp_write_lock.lock().await;
     {
         let mut guard = state
             .runtime_mcp
@@ -556,6 +559,7 @@ mod tests {
             pet_last_persist_ms: std::sync::atomic::AtomicU64::new(0),
             pet_write_lock: tokio::sync::Mutex::new(()),
             switch_lock: tokio::sync::Mutex::new(()),
+            mcp_write_lock: tokio::sync::Mutex::new(()),
         };
         let app = tauri::test::mock_builder()
             .build(tauri::test::mock_context(tauri::test::noop_assets()))
@@ -626,6 +630,7 @@ mod tests {
             pet_last_persist_ms: std::sync::atomic::AtomicU64::new(0),
             pet_write_lock: tokio::sync::Mutex::new(()),
             switch_lock: tokio::sync::Mutex::new(()),
+            mcp_write_lock: tokio::sync::Mutex::new(()),
         };
         let app = tauri::test::mock_builder()
             .build(tauri::test::mock_context(tauri::test::noop_assets()))
@@ -702,6 +707,7 @@ mod tests {
             pet_last_persist_ms: std::sync::atomic::AtomicU64::new(0),
             pet_write_lock: tokio::sync::Mutex::new(()),
             switch_lock: tokio::sync::Mutex::new(()),
+            mcp_write_lock: tokio::sync::Mutex::new(()),
         };
         let app = tauri::test::mock_builder()
             .build(tauri::test::mock_context(tauri::test::noop_assets()))
