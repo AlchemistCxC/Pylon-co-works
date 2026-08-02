@@ -28,7 +28,11 @@ const SEND_RETRY_ATTEMPTS: u32 = 3;
 /// token 瞬时失败重试次数（指数退避 1s/2s 后放弃该消息并告警，不丢队列后续消息）。
 const TOKEN_RETRY_ATTEMPTS: u32 = 3;
 /// rate limited 等待（QQ 实证：60s 后重试一次）。
+#[cfg(not(test))]
 const RATE_LIMIT_DELAY_SECS: u64 = 60;
+/// 测试态缩短 rate 重试等待（O42 集成测试验证重试失败分类，不等待真实 60s）。
+#[cfg(test)]
+const RATE_LIMIT_DELAY_SECS: u64 = 1;
 /// send_loop 空闲超时（审查修复：无消息时任务自行退出并从 senders map 移除，
 /// 防止 chat_id 无界增长导致常驻任务泄漏）。
 const SEND_LOOP_IDLE_SECS: u64 = 300;
@@ -428,10 +432,23 @@ impl QqAdapter {
                             continue;
                         }
                     };
-                    if let Err(error) = Self::send_once(&http, &base_url, &token, &msg).await {
-                        log::warn!("QQ deliver rate 重试仍失败: {error:?}");
-                    } else {
-                        dead_targets.lock().ok().map(|mut d| d.remove(&key));
+                    // O42：rate 重试失败按变体分流——重试后仍 403/404/不存在等
+                    // 死目标直接标记（原实现只 log warn，死目标永不标记）。
+                    match Self::send_once(&http, &base_url, &token, &msg).await {
+                        Ok(()) => {
+                            dead_targets.lock().ok().map(|mut d| d.remove(&key));
+                        }
+                        Err(SendFailure::DeadTarget(reason)) => {
+                            dead_targets.lock().ok().map(|mut d| {
+                                d.insert(key.clone(), (reason.clone(), Instant::now()))
+                            });
+                            log::warn!(
+                                "QQ deliver rate 重试后目标不可达（{key}），标记死目标: {reason}"
+                            );
+                        }
+                        Err(other) => {
+                            log::warn!("QQ deliver rate 重试仍失败: {other:?}");
+                        }
                     }
                 }
                 Err(SendFailure::DeadTarget(error)) => {
@@ -501,6 +518,7 @@ impl QqAdapter {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::io::{Read, Write};
 
     fn core_with_route() -> Arc<GatewayCore> {
         let yaml = r#"
@@ -764,6 +782,58 @@ gateway:
             error.contains("runtime"),
             "c2c:123 不应走死目标短路: {error}"
         );
+    }
+
+    /// 顺序响应桩：依次为每个连接返回对应响应（O42 集成测试：
+    /// 第 1 个连接回 429（限流），第 2 个回 403（死目标））。
+    fn spawn_sequence_server(
+        responses: &'static [&'static [u8]],
+    ) -> (std::net::SocketAddr, std::thread::JoinHandle<()>) {
+        let listener = std::net::TcpListener::bind("127.0.0.1:0").expect("bind test server");
+        let address = listener.local_addr().expect("listener address");
+        let server = std::thread::spawn(move || {
+            for response in responses {
+                let (mut stream, _) = listener.accept().expect("accept request");
+                let mut buffer = [0_u8; 1024];
+                let _ = stream.read(&mut buffer).expect("read request");
+                stream.write_all(response).expect("write response");
+            }
+        });
+        (address, server)
+    }
+
+    #[tokio::test]
+    async fn rate_retry_dead_target_failure_is_marked() {
+        // O42：rate 限流重试一次后仍失败且为死目标（403）→ 标记死目标
+        // （原实现重试失败只 log，永不标记）。
+        let (address, server) = spawn_sequence_server(&[
+            b"HTTP/1.1 429 Too Many Requests\r\nContent-Length: 0\r\nConnection: close\r\n\r\n",
+            b"HTTP/1.1 403 Forbidden\r\nContent-Length: 0\r\nConnection: close\r\n\r\n",
+        ]);
+        let core = core_with_route();
+        let auth = Arc::new(QqAuth::for_testing("test-token".to_string()));
+        let adapter =
+            QqAdapter::for_testing(core, Client::new(), auth, format!("http://{}", address));
+        adapter
+            .deliver_text("qq:group:123", "hi")
+            .expect("deliver must enqueue");
+        // 等待死目标标记（rate 重试在测试态 1s 后执行）
+        let deadline = Instant::now() + Duration::from_secs(10);
+        loop {
+            let marked = adapter
+                .dead_targets
+                .lock()
+                .unwrap()
+                .get("group:123")
+                .map(|(reason, _)| reason.clone());
+            if let Some(reason) = marked {
+                assert!(reason.contains("403"), "死目标原因应为 403: {reason}");
+                break;
+            }
+            assert!(Instant::now() < deadline, "rate 重试后死目标未在限期内标记");
+            tokio::time::sleep(Duration::from_millis(50)).await;
+        }
+        server.join().expect("server thread");
     }
 
     #[test]
