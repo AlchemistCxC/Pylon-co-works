@@ -38,6 +38,8 @@ const MAX_RATE_LIMITS: u32 = 5;
 const MAX_PARSE_FAILURES: u32 = 8;
 /// 等待服务器 Hello 的最长时间：半开连接（平台静默失效）超时后走统一重连路径。
 const HELLO_TIMEOUT: Duration = Duration::from_secs(60);
+/// TCP 连接（直连/代理）超时：慢网络下快速失败，避免悬挂阻塞重连循环（O48）。
+const CONNECT_TIMEOUT: Duration = Duration::from_secs(10);
 
 /// 连续 op 9（session 失效）超过该次数后降级：清除 session 走完整 Identify 并退避，
 /// 而非无限次立即重试 resume（O45）。
@@ -523,9 +525,13 @@ pub async fn connect(url: &str) -> Result<WsStream, String> {
     let tls_stream = match proxy {
         Some(ref p) => tunnel(p, target_host, target_port).await?,
         None => {
-            let stream = TcpStream::connect(format!("{target_host}:{target_port}"))
-                .await
-                .map_err(|e| format!("直连: {e}"))?;
+            let stream = tokio::time::timeout(
+                CONNECT_TIMEOUT,
+                TcpStream::connect(format!("{target_host}:{target_port}")),
+            )
+            .await
+            .map_err(|_| format!("直连超时（{}s）", CONNECT_TIMEOUT.as_secs()))?
+            .map_err(|e| format!("直连: {e}"))?;
             tls_wrap(stream, target_host).await?
         }
     };
@@ -589,9 +595,13 @@ async fn tunnel(
 ) -> Result<tokio_rustls::client::TlsStream<TcpStream>, String> {
     let (host, port, userinfo) = parse_proxy(proxy_raw)?;
 
-    let mut stream = TcpStream::connect(format!("{host}:{port}"))
-        .await
-        .map_err(|e| format!("连代理: {e}"))?;
+    let mut stream = tokio::time::timeout(
+        CONNECT_TIMEOUT,
+        TcpStream::connect(format!("{host}:{port}")),
+    )
+    .await
+    .map_err(|_| format!("连代理超时（{}s）", CONNECT_TIMEOUT.as_secs()))?
+    .map_err(|e| format!("连代理: {e}"))?;
 
     let mut req = format!(
         "CONNECT {target_host}:{target_port} HTTP/1.1\r\n\
