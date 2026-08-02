@@ -1,73 +1,222 @@
 //! Prism 管理 API 转发命令（R1 拆分自 lib.rs；行为零变化）。
 //! 全部为薄转发：Tauri 命令 → PrismClient（本地 Prism HTTP 服务）。
+//! R24：同构命令收敛为宏（prism_get! / prism_post! 等 6 模式）——wire
+//! 路径/参数/错误码不变；map_err(PylonError::Prism) 单一来源（helper 函数）。
 
 use crate::error::PylonError;
 use crate::AppState;
 
-#[tauri::command]
-pub(crate) async fn prism_health(
+// ── helper：map_err 单一来源（宏展开体不再重复）──
+
+async fn prism_get(
     state: tauri::State<'_, AppState>,
+    path: &str,
 ) -> Result<serde_json::Value, PylonError> {
-    state.prism.get("/health").await.map_err(PylonError::Prism)
+    state.prism.get(path).await.map_err(PylonError::Prism)
 }
+
+async fn prism_get_query<I, K, V>(
+    state: tauri::State<'_, AppState>,
+    path: &str,
+    query: I,
+) -> Result<serde_json::Value, PylonError>
+where
+    I: IntoIterator<Item = (K, V)>,
+    K: AsRef<str>,
+    V: AsRef<str>,
+{
+    state
+        .prism
+        .get_query(path, query)
+        .await
+        .map_err(PylonError::Prism)
+}
+
+async fn prism_post(
+    state: tauri::State<'_, AppState>,
+    path: &str,
+    body: serde_json::Value,
+) -> Result<serde_json::Value, PylonError> {
+    state
+        .prism
+        .post(path, body)
+        .await
+        .map_err(PylonError::Prism)
+}
+
+async fn prism_post_query<I, K, V>(
+    state: tauri::State<'_, AppState>,
+    path: &str,
+    query: I,
+    body: serde_json::Value,
+) -> Result<serde_json::Value, PylonError>
+where
+    I: IntoIterator<Item = (K, V)>,
+    K: AsRef<str>,
+    V: AsRef<str>,
+{
+    state
+        .prism
+        .post_query(path, query, body)
+        .await
+        .map_err(PylonError::Prism)
+}
+
+async fn prism_put_query<I, K, V>(
+    state: tauri::State<'_, AppState>,
+    path: &str,
+    query: I,
+    body: serde_json::Value,
+) -> Result<serde_json::Value, PylonError>
+where
+    I: IntoIterator<Item = (K, V)>,
+    K: AsRef<str>,
+    V: AsRef<str>,
+{
+    state
+        .prism
+        .put_query(path, query, body)
+        .await
+        .map_err(PylonError::Prism)
+}
+
+async fn prism_delete_query<I, K, V>(
+    state: tauri::State<'_, AppState>,
+    path: &str,
+    query: I,
+) -> Result<serde_json::Value, PylonError>
+where
+    I: IntoIterator<Item = (K, V)>,
+    K: AsRef<str>,
+    V: AsRef<str>,
+{
+    state
+        .prism
+        .delete_query(path, query)
+        .await
+        .map_err(PylonError::Prism)
+}
+
+// ── 命令宏：同名函数由宏展开生成（lib.rs generate_handler! 注册表不变）──
+
+/// GET 无参命令：`prism_get!(prism_health, "/health")`。
+macro_rules! prism_get {
+    ($name:ident, $path:literal) => {
+        #[tauri::command]
+        pub(crate) async fn $name(
+            state: tauri::State<'_, AppState>,
+        ) -> Result<serde_json::Value, PylonError> {
+            prism_get(state, $path).await
+        }
+    };
+}
+
+/// GET 带 query 命令：`prism_get_query!(prism_config, "/api/config", (name: String), [("name", name)])`。
+macro_rules! prism_get_query {
+    ($name:ident, $path:literal, ($($arg:ident: $ty:ty),*), $query:expr) => {
+        #[tauri::command]
+        pub(crate) async fn $name(
+            state: tauri::State<'_, AppState>,
+            $($arg: $ty),*
+        ) -> Result<serde_json::Value, PylonError> {
+            prism_get_query(state, $path, $query).await
+        }
+    };
+}
+
+/// POST 无 query 命令：`prism_post!(prism_command, "/command", (command: String), json!({...}))`。
+macro_rules! prism_post {
+    ($name:ident, $path:literal, ($($arg:ident: $ty:ty),*), $body:expr) => {
+        #[tauri::command]
+        pub(crate) async fn $name(
+            state: tauri::State<'_, AppState>,
+            $($arg: $ty),*
+        ) -> Result<serde_json::Value, PylonError> {
+            prism_post(state, $path, $body).await
+        }
+    };
+}
+
+/// POST 带 query 命令：`prism_post_query!(..., (name: String), [("name", name)], json!({}))`。
+macro_rules! prism_post_query {
+    ($name:ident, $path:literal, ($($arg:ident: $ty:ty),*), $query:expr, $body:expr) => {
+        #[tauri::command]
+        pub(crate) async fn $name(
+            state: tauri::State<'_, AppState>,
+            $($arg: $ty),*
+        ) -> Result<serde_json::Value, PylonError> {
+            prism_post_query(state, $path, $query, $body).await
+        }
+    };
+}
+
+/// PUT 带 query 命令。
+macro_rules! prism_put_query {
+    ($name:ident, $path:literal, ($($arg:ident: $ty:ty),*), $query:expr, $body:expr) => {
+        #[tauri::command]
+        pub(crate) async fn $name(
+            state: tauri::State<'_, AppState>,
+            $($arg: $ty),*
+        ) -> Result<serde_json::Value, PylonError> {
+            prism_put_query(state, $path, $query, $body).await
+        }
+    };
+}
+
+/// DELETE 带 query 命令。
+macro_rules! prism_delete_query {
+    ($name:ident, $path:literal, ($($arg:ident: $ty:ty),*), $query:expr) => {
+        #[tauri::command]
+        pub(crate) async fn $name(
+            state: tauri::State<'_, AppState>,
+            $($arg: $ty),*
+        ) -> Result<serde_json::Value, PylonError> {
+            prism_delete_query(state, $path, $query).await
+        }
+    };
+}
+
+// ── GET 无参 ──
+
+prism_get!(prism_health, "/health");
+prism_get!(prism_state, "/state");
+prism_get!(prism_scenarios, "/api/scenarios");
+prism_get!(prism_sources, "/api/sources");
+prism_get!(prism_aliases, "/api/aliases");
+prism_get!(prism_blocks, "/api/blocks");
+
+// ── GET 带 query ──
+
+prism_get_query!(prism_config, "/api/config", (name: String), [("name", name)]);
+prism_get_query!(prism_scenario, "/api/scenario", (name: String), [("name", name)]);
+prism_get_query!(prism_source_detail, "/api/source/detail", (name: String), [("name", name)]);
+prism_get_query!(prism_source_files, "/api/sources/files", (name: String), [("name", name)]);
+prism_get_query!(
+    prism_read_source_file,
+    "/api/sources/file",
+    (name: String, path: String),
+    [("name", name), ("path", path)]
+);
+prism_get_query!(
+    prism_source_entries,
+    "/api/source/entries",
+    (source: String, scenario: String),
+    [("source", source), ("scenario", scenario)]
+);
+prism_get_query!(
+    prism_source_entry,
+    "/api/source/entry",
+    (source: String, scenario: String, uid: String),
+    [("source", source), ("scenario", scenario), ("uid", uid)]
+);
+
+// ── 条件 query（可选参数逐项拼装，手写保留原语义）──
 
 #[tauri::command]
 pub(crate) async fn prism_status(
     state: tauri::State<'_, AppState>,
 ) -> Result<serde_json::Value, PylonError> {
     Ok(state.prism.status().await)
-}
-
-#[tauri::command]
-pub(crate) async fn prism_state(
-    state: tauri::State<'_, AppState>,
-) -> Result<serde_json::Value, PylonError> {
-    state.prism.get("/state").await.map_err(PylonError::Prism)
-}
-
-#[tauri::command]
-pub(crate) async fn prism_scenarios(
-    state: tauri::State<'_, AppState>,
-) -> Result<serde_json::Value, PylonError> {
-    state
-        .prism
-        .get("/api/scenarios")
-        .await
-        .map_err(PylonError::Prism)
-}
-
-#[tauri::command]
-pub(crate) async fn prism_sources(
-    state: tauri::State<'_, AppState>,
-) -> Result<serde_json::Value, PylonError> {
-    state
-        .prism
-        .get("/api/sources")
-        .await
-        .map_err(PylonError::Prism)
-}
-
-#[tauri::command]
-pub(crate) async fn prism_aliases(
-    state: tauri::State<'_, AppState>,
-) -> Result<serde_json::Value, PylonError> {
-    state
-        .prism
-        .get("/api/aliases")
-        .await
-        .map_err(PylonError::Prism)
-}
-
-#[tauri::command]
-pub(crate) async fn prism_config(
-    state: tauri::State<'_, AppState>,
-    name: String,
-) -> Result<serde_json::Value, PylonError> {
-    state
-        .prism
-        .get_query("/api/config", [("name", name)])
-        .await
-        .map_err(PylonError::Prism)
 }
 
 #[tauri::command]
@@ -87,11 +236,7 @@ pub(crate) async fn prism_logs(
     if let Some(value) = offset {
         query.push(("offset".to_string(), value.to_string()));
     }
-    state
-        .prism
-        .get_query("/api/logs", query)
-        .await
-        .map_err(PylonError::Prism)
+    prism_get_query(state, "/api/logs", query).await
 }
 
 #[tauri::command]
@@ -103,11 +248,7 @@ pub(crate) async fn prism_chronicle(
         .into_iter()
         .map(|value| ("scenario".to_string(), value))
         .collect::<Vec<_>>();
-    state
-        .prism
-        .get_query("/api/chronicle", query)
-        .await
-        .map_err(PylonError::Prism)
+    prism_get_query(state, "/api/chronicle", query).await
 }
 
 #[tauri::command]
@@ -127,434 +268,142 @@ pub(crate) async fn prism_history(
     if let Some(value) = offset {
         query.push(("offset".to_string(), value.to_string()));
     }
-    state
-        .prism
-        .get_query("/api/history", query)
-        .await
-        .map_err(PylonError::Prism)
+    prism_get_query(state, "/api/history", query).await
 }
 
-#[tauri::command]
-pub(crate) async fn prism_scenario(
-    state: tauri::State<'_, AppState>,
-    name: String,
-) -> Result<serde_json::Value, PylonError> {
-    state
-        .prism
-        .get_query("/api/scenario", [("name", name)])
-        .await
-        .map_err(PylonError::Prism)
-}
+// ── POST 无 query ──
 
-#[tauri::command]
-pub(crate) async fn prism_blocks(
-    state: tauri::State<'_, AppState>,
-) -> Result<serde_json::Value, PylonError> {
-    state
-        .prism
-        .get("/api/blocks")
-        .await
-        .map_err(PylonError::Prism)
-}
+prism_post!(prism_inject, "/inject", (request: serde_json::Value), request);
+prism_post!(
+    prism_command,
+    "/command",
+    (command: String),
+    serde_json::json!({"command": command})
+);
+prism_post!(
+    prism_create_scenario,
+    "/api/scenarios",
+    (name: String, yaml: String),
+    serde_json::json!({"name": name, "yaml": yaml})
+);
+prism_post!(
+    prism_create_source,
+    "/api/sources",
+    (name: String),
+    serde_json::json!({"name": name})
+);
+prism_post!(
+    prism_create_block,
+    "/api/blocks",
+    (block: serde_json::Value),
+    serde_json::json!({"block": block})
+);
+prism_post!(prism_reload, "/reload", (), serde_json::json!({}));
+prism_post!(prism_llm_test, "/api/llm/test", (), serde_json::json!({}));
 
-#[tauri::command]
-pub(crate) async fn prism_inject(
-    state: tauri::State<'_, AppState>,
-    request: serde_json::Value,
-) -> Result<serde_json::Value, PylonError> {
-    state
-        .prism
-        .post("/inject", request)
-        .await
-        .map_err(PylonError::Prism)
-}
+// ── POST 带 query ──
 
-#[tauri::command]
-pub(crate) async fn prism_command(
-    state: tauri::State<'_, AppState>,
-    command: String,
-) -> Result<serde_json::Value, PylonError> {
-    state
-        .prism
-        .post("/command", serde_json::json!({"command": command}))
-        .await
-        .map_err(PylonError::Prism)
-}
+prism_post_query!(
+    prism_delete_scenario,
+    "/api/scenarios/delete",
+    (name: String),
+    [("name", name)],
+    serde_json::json!({})
+);
+prism_post_query!(
+    prism_delete_source,
+    "/api/sources/delete",
+    (name: String),
+    [("name", name)],
+    serde_json::json!({})
+);
+prism_post_query!(
+    prism_add_source_entry,
+    "/api/source/entry/add",
+    (source: String, scenario: String, entry: serde_json::Value),
+    [("source", source), ("scenario", scenario)],
+    serde_json::json!({"entry": entry})
+);
+prism_post_query!(
+    prism_delete_source_entry,
+    "/api/source/entry/delete",
+    (source: String, scenario: String, uid: String),
+    [("source", source), ("scenario", scenario), ("uid", uid)],
+    serde_json::json!({})
+);
+prism_post_query!(
+    prism_add_scenario_block,
+    "/api/scenario/blocks/add",
+    (scenario: String, block: serde_json::Value),
+    [("scenario", scenario)],
+    serde_json::json!({"block": block})
+);
+prism_post_query!(
+    prism_delete_scenario_block,
+    "/api/scenario/blocks/delete",
+    (scenario: String, id: String),
+    [("scenario", scenario), ("id", id)],
+    serde_json::json!({})
+);
 
-#[tauri::command]
-pub(crate) async fn prism_create_scenario(
-    state: tauri::State<'_, AppState>,
-    name: String,
-    yaml: String,
-) -> Result<serde_json::Value, PylonError> {
-    state
-        .prism
-        .post(
-            "/api/scenarios",
-            serde_json::json!({"name": name, "yaml": yaml}),
-        )
-        .await
-        .map_err(PylonError::Prism)
-}
+// ── PUT 带 query ──
 
-#[tauri::command]
-pub(crate) async fn prism_delete_scenario(
-    state: tauri::State<'_, AppState>,
-    name: String,
-) -> Result<serde_json::Value, PylonError> {
-    state
-        .prism
-        .post_query(
-            "/api/scenarios/delete",
-            [("name", name)],
-            serde_json::json!({}),
-        )
-        .await
-        .map_err(PylonError::Prism)
-}
+prism_put_query!(
+    prism_write_source_file,
+    "/api/sources/file",
+    (name: String, path: String, content: String),
+    [("name", name), ("path", path)],
+    serde_json::json!({"content": content})
+);
+prism_put_query!(
+    prism_edit_source_entry,
+    "/api/source/entry/edit",
+    (source: String, scenario: String, uid: String, entry: serde_json::Value),
+    [("source", source), ("scenario", scenario), ("uid", uid)],
+    serde_json::json!({"entry": entry})
+);
+prism_put_query!(
+    prism_update_config,
+    "/api/config",
+    (name: String, yaml: String),
+    [("name", name)],
+    serde_json::json!({"yaml": yaml})
+);
+prism_put_query!(
+    prism_update_scenario,
+    "/api/scenario",
+    (name: String, update: serde_json::Value),
+    [("name", name)],
+    update
+);
+prism_put_query!(
+    prism_update_block,
+    "/api/blocks",
+    (id: String, block: serde_json::Value),
+    [("id", id)],
+    serde_json::json!({"block": block})
+);
+prism_put_query!(
+    prism_edit_scenario_block,
+    "/api/scenario/blocks/edit",
+    (scenario: String, id: String, block: serde_json::Value),
+    [("scenario", scenario), ("id", id)],
+    serde_json::json!({"block": block})
+);
+prism_put_query!(
+    prism_reorder_scenario_blocks,
+    "/api/scenario/blocks/reorder",
+    (scenario: String, blocks: serde_json::Value),
+    [("scenario", scenario)],
+    serde_json::json!({"blocks": blocks})
+);
 
-#[tauri::command]
-pub(crate) async fn prism_create_source(
-    state: tauri::State<'_, AppState>,
-    name: String,
-) -> Result<serde_json::Value, PylonError> {
-    state
-        .prism
-        .post("/api/sources", serde_json::json!({"name": name}))
-        .await
-        .map_err(PylonError::Prism)
-}
+// ── DELETE 带 query ──
 
-#[tauri::command]
-pub(crate) async fn prism_delete_source(
-    state: tauri::State<'_, AppState>,
-    name: String,
-) -> Result<serde_json::Value, PylonError> {
-    state
-        .prism
-        .post_query(
-            "/api/sources/delete",
-            [("name", name)],
-            serde_json::json!({}),
-        )
-        .await
-        .map_err(PylonError::Prism)
-}
-
-#[tauri::command]
-pub(crate) async fn prism_source_detail(
-    state: tauri::State<'_, AppState>,
-    name: String,
-) -> Result<serde_json::Value, PylonError> {
-    state
-        .prism
-        .get_query("/api/source/detail", [("name", name)])
-        .await
-        .map_err(PylonError::Prism)
-}
-
-#[tauri::command]
-pub(crate) async fn prism_source_files(
-    state: tauri::State<'_, AppState>,
-    name: String,
-) -> Result<serde_json::Value, PylonError> {
-    state
-        .prism
-        .get_query("/api/sources/files", [("name", name)])
-        .await
-        .map_err(PylonError::Prism)
-}
-
-#[tauri::command]
-pub(crate) async fn prism_read_source_file(
-    state: tauri::State<'_, AppState>,
-    name: String,
-    path: String,
-) -> Result<serde_json::Value, PylonError> {
-    state
-        .prism
-        .get_query("/api/sources/file", [("name", name), ("path", path)])
-        .await
-        .map_err(PylonError::Prism)
-}
-
-#[tauri::command]
-pub(crate) async fn prism_write_source_file(
-    state: tauri::State<'_, AppState>,
-    name: String,
-    path: String,
-    content: String,
-) -> Result<serde_json::Value, PylonError> {
-    state
-        .prism
-        .put_query(
-            "/api/sources/file",
-            [("name", name), ("path", path)],
-            serde_json::json!({"content": content}),
-        )
-        .await
-        .map_err(PylonError::Prism)
-}
-
-#[tauri::command]
-pub(crate) async fn prism_delete_source_file(
-    state: tauri::State<'_, AppState>,
-    name: String,
-    path: String,
-) -> Result<serde_json::Value, PylonError> {
-    state
-        .prism
-        .delete_query("/api/sources/file", [("name", name), ("path", path)])
-        .await
-        .map_err(PylonError::Prism)
-}
-
-#[tauri::command]
-pub(crate) async fn prism_source_entries(
-    state: tauri::State<'_, AppState>,
-    source: String,
-    scenario: String,
-) -> Result<serde_json::Value, PylonError> {
-    state
-        .prism
-        .get_query(
-            "/api/source/entries",
-            [("source", source), ("scenario", scenario)],
-        )
-        .await
-        .map_err(PylonError::Prism)
-}
-
-#[tauri::command]
-pub(crate) async fn prism_source_entry(
-    state: tauri::State<'_, AppState>,
-    source: String,
-    scenario: String,
-    uid: String,
-) -> Result<serde_json::Value, PylonError> {
-    state
-        .prism
-        .get_query(
-            "/api/source/entry",
-            [("source", source), ("scenario", scenario), ("uid", uid)],
-        )
-        .await
-        .map_err(PylonError::Prism)
-}
-
-#[tauri::command]
-pub(crate) async fn prism_add_source_entry(
-    state: tauri::State<'_, AppState>,
-    source: String,
-    scenario: String,
-    entry: serde_json::Value,
-) -> Result<serde_json::Value, PylonError> {
-    state
-        .prism
-        .post_query(
-            "/api/source/entry/add",
-            [("source", source), ("scenario", scenario)],
-            serde_json::json!({"entry": entry}),
-        )
-        .await
-        .map_err(PylonError::Prism)
-}
-
-#[tauri::command]
-pub(crate) async fn prism_edit_source_entry(
-    state: tauri::State<'_, AppState>,
-    source: String,
-    scenario: String,
-    uid: String,
-    entry: serde_json::Value,
-) -> Result<serde_json::Value, PylonError> {
-    state
-        .prism
-        .put_query(
-            "/api/source/entry/edit",
-            [("source", source), ("scenario", scenario), ("uid", uid)],
-            serde_json::json!({"entry": entry}),
-        )
-        .await
-        .map_err(PylonError::Prism)
-}
-
-#[tauri::command]
-pub(crate) async fn prism_delete_source_entry(
-    state: tauri::State<'_, AppState>,
-    source: String,
-    scenario: String,
-    uid: String,
-) -> Result<serde_json::Value, PylonError> {
-    state
-        .prism
-        .post_query(
-            "/api/source/entry/delete",
-            [("source", source), ("scenario", scenario), ("uid", uid)],
-            serde_json::json!({}),
-        )
-        .await
-        .map_err(PylonError::Prism)
-}
-
-#[tauri::command]
-pub(crate) async fn prism_update_config(
-    state: tauri::State<'_, AppState>,
-    name: String,
-    yaml: String,
-) -> Result<serde_json::Value, PylonError> {
-    state
-        .prism
-        .put_query(
-            "/api/config",
-            [("name", name)],
-            serde_json::json!({"yaml": yaml}),
-        )
-        .await
-        .map_err(PylonError::Prism)
-}
-
-#[tauri::command]
-pub(crate) async fn prism_update_scenario(
-    state: tauri::State<'_, AppState>,
-    name: String,
-    update: serde_json::Value,
-) -> Result<serde_json::Value, PylonError> {
-    state
-        .prism
-        .put_query("/api/scenario", [("name", name)], update)
-        .await
-        .map_err(PylonError::Prism)
-}
-
-#[tauri::command]
-pub(crate) async fn prism_create_block(
-    state: tauri::State<'_, AppState>,
-    block: serde_json::Value,
-) -> Result<serde_json::Value, PylonError> {
-    state
-        .prism
-        .post("/api/blocks", serde_json::json!({"block": block}))
-        .await
-        .map_err(PylonError::Prism)
-}
-
-#[tauri::command]
-pub(crate) async fn prism_update_block(
-    state: tauri::State<'_, AppState>,
-    id: String,
-    block: serde_json::Value,
-) -> Result<serde_json::Value, PylonError> {
-    state
-        .prism
-        .put_query(
-            "/api/blocks",
-            [("id", id)],
-            serde_json::json!({"block": block}),
-        )
-        .await
-        .map_err(PylonError::Prism)
-}
-
-#[tauri::command]
-pub(crate) async fn prism_delete_block(
-    state: tauri::State<'_, AppState>,
-    id: String,
-) -> Result<serde_json::Value, PylonError> {
-    state
-        .prism
-        .delete_query("/api/blocks", [("id", id)])
-        .await
-        .map_err(PylonError::Prism)
-}
-
-#[tauri::command]
-pub(crate) async fn prism_add_scenario_block(
-    state: tauri::State<'_, AppState>,
-    scenario: String,
-    block: serde_json::Value,
-) -> Result<serde_json::Value, PylonError> {
-    state
-        .prism
-        .post_query(
-            "/api/scenario/blocks/add",
-            [("scenario", scenario)],
-            serde_json::json!({"block": block}),
-        )
-        .await
-        .map_err(PylonError::Prism)
-}
-
-#[tauri::command]
-pub(crate) async fn prism_edit_scenario_block(
-    state: tauri::State<'_, AppState>,
-    scenario: String,
-    id: String,
-    block: serde_json::Value,
-) -> Result<serde_json::Value, PylonError> {
-    state
-        .prism
-        .put_query(
-            "/api/scenario/blocks/edit",
-            [("scenario", scenario), ("id", id)],
-            serde_json::json!({"block": block}),
-        )
-        .await
-        .map_err(PylonError::Prism)
-}
-
-#[tauri::command]
-pub(crate) async fn prism_delete_scenario_block(
-    state: tauri::State<'_, AppState>,
-    scenario: String,
-    id: String,
-) -> Result<serde_json::Value, PylonError> {
-    state
-        .prism
-        .post_query(
-            "/api/scenario/blocks/delete",
-            [("scenario", scenario), ("id", id)],
-            serde_json::json!({}),
-        )
-        .await
-        .map_err(PylonError::Prism)
-}
-
-#[tauri::command]
-pub(crate) async fn prism_reorder_scenario_blocks(
-    state: tauri::State<'_, AppState>,
-    scenario: String,
-    blocks: serde_json::Value,
-) -> Result<serde_json::Value, PylonError> {
-    state
-        .prism
-        .put_query(
-            "/api/scenario/blocks/reorder",
-            [("scenario", scenario)],
-            serde_json::json!({"blocks": blocks}),
-        )
-        .await
-        .map_err(PylonError::Prism)
-}
-
-#[tauri::command]
-pub(crate) async fn prism_reload(
-    state: tauri::State<'_, AppState>,
-) -> Result<serde_json::Value, PylonError> {
-    state
-        .prism
-        .post("/reload", serde_json::json!({}))
-        .await
-        .map_err(PylonError::Prism)
-}
-
-#[tauri::command]
-pub(crate) async fn prism_llm_test(
-    state: tauri::State<'_, AppState>,
-) -> Result<serde_json::Value, PylonError> {
-    state
-        .prism
-        .post("/api/llm/test", serde_json::json!({}))
-        .await
-        .map_err(PylonError::Prism)
-}
+prism_delete_query!(
+    prism_delete_source_file,
+    "/api/sources/file",
+    (name: String, path: String),
+    [("name", name), ("path", path)]
+);
+prism_delete_query!(prism_delete_block, "/api/blocks", (id: String), [("id", id)]);
