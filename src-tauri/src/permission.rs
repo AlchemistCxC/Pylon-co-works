@@ -133,38 +133,80 @@ pub(crate) fn pick_option(options: &[String], prefer_reject: bool) -> Option<&st
 /// → 锁 acp 发送"，替换发生在两者之间时，旧进程的 request_id 会写到新进程。
 /// C4：锁内同时复核 pending 记录的 client_generation 与当前一致——客户端替换
 /// 瞬间（同 id 请求已由新进程发出）旧审批决策不误写新进程。
+/// O9：锁内仅复核（存在 + 身份）+ 取 write_tx 克隆 + claim，锁外发送（10s 超时，
+/// 语义对齐 acp::send_line）——不再持 acp 锁 await，避免阻塞其他 ACP 操作。
 /// 返回 true = 已应答并移除；false = 请求已不存在/身份不匹配（跳过）或发送失败
-/// （保留 pending 供重试/超时/客户端替换清理）。
+/// （恢复 pending 供重试/超时/客户端替换清理）。
 pub(crate) async fn respond_permission(
     runtime: &AgentRuntime,
     request_id: u64,
     response: serde_json::Value,
 ) -> bool {
-    let acp = runtime.acp.lock().await;
-    let can_respond = runtime
-        .pending_permissions
-        .lock()
-        .map(|pending| {
-            pending
-                .get(&request_id)
-                .map(|permission| {
-                    permission.client_generation
-                        == runtime.client_generation.load(Ordering::Acquire)
-                })
-                .unwrap_or(false)
-        })
-        .unwrap_or(false);
-    if !can_respond {
+    // 锁内仅复核 + 取 write_tx 克隆 + claim（O9：发送全部在锁外）。
+    let (write_tx, crashed, claimed) = {
+        let acp = runtime.acp.lock().await;
+        let mut pending = match runtime.pending_permissions.lock() {
+            Ok(guard) => guard,
+            Err(_) => return false,
+        };
+        let can_respond = pending
+            .get(&request_id)
+            .map(|permission| {
+                permission.client_generation == runtime.client_generation.load(Ordering::Acquire)
+            })
+            .unwrap_or(false);
+        if !can_respond {
+            return false;
+        }
+        (
+            acp.write_tx.clone(),
+            acp.crashed.clone(),
+            pending.remove(&request_id),
+        )
+    };
+    // 锁外发送：信封序列化 + 10s 超时。发送失败恢复 pending（保留可重试）。
+    if crashed.load(Ordering::Acquire) {
+        // 对齐 acp::send_response：已崩溃连接不再发送
+        restore_pending(runtime, request_id, claimed);
         return false;
     }
-    if acp.send_response(request_id, response).await.is_err() {
+    let line = serde_json::json!({
+        "jsonrpc": "2.0",
+        "id": request_id,
+        "result": response,
+    });
+    let line = match serde_json::to_string(&line) {
+        Ok(line) => line,
+        Err(_) => {
+            restore_pending(runtime, request_id, claimed);
+            return false;
+        }
+    };
+    let sent =
+        match tokio::time::timeout(std::time::Duration::from_secs(10), write_tx.send(line)).await {
+            Ok(Ok(())) => true,
+            Ok(Err(_)) => false,
+            Err(_) => {
+                log::warn!("ACP write timeout after 10s: connection presumed dead");
+                crashed.store(true, Ordering::Release);
+                false
+            }
+        };
+    if !sent {
+        restore_pending(runtime, request_id, claimed);
         return false;
     }
-    let _ = runtime
-        .pending_permissions
-        .lock()
-        .map(|mut pending| pending.remove(&request_id));
     true
+}
+
+/// 发送失败后恢复已 claim 的挂起条目（O9：保留 pending 供重试/超时/客户端替换
+/// 清理）。同 id 已有更新条目时保留更新条目（不覆盖新请求）。
+fn restore_pending(runtime: &AgentRuntime, request_id: u64, claimed: Option<PendingPermission>) {
+    if let Some(permission) = claimed {
+        let _ = runtime.pending_permissions.lock().map(|mut pending| {
+            pending.entry(request_id).or_insert(permission);
+        });
+    }
 }
 
 /// 应答并移除指定 session 的全部挂起权限请求（Cancelled）——cancel/close 路径调用。
