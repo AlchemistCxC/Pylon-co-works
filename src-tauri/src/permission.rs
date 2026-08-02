@@ -234,34 +234,78 @@ pub(crate) async fn respond_pending_permissions_cancelled(
 
 /// 应答挂起的权限请求（B9.4 契约）：option_id 必须是请求提供的选项之一。
 /// 拒绝走同一命令（option_id = "reject_once" 等）。返回 Err = 未找到或选项非法。
+/// O36：合并单一临界区——acp 锁内查条目 + 校验选项 + C4 generation 校验 + claim，
+/// 锁外发送（O9 同款）；消除"锁读 → 校验 → respond_permission 再锁"两段式重复
+/// 锁往返。
 pub(crate) async fn resolve_permission(
     runtime: &AgentRuntime,
     request_id: u64,
     option_id: &str,
 ) -> Result<(), PylonError> {
-    let found = {
-        let pending = runtime
+    let (write_tx, crashed, claimed, tool_call_id, line) = {
+        let acp = runtime.acp.lock().await;
+        let mut pending = runtime
             .pending_permissions
             .lock()
             .map_err(|e| e.to_string())?;
-        pending
-            .get(&request_id)
-            .map(|permission| (permission.tool_call_id.clone(), permission.options.clone()))
+        let Some(permission) = pending.get(&request_id) else {
+            return Err(PylonError::Protocol(format!(
+                "permission request not found: {request_id}"
+            )));
+        };
+        if !permission.options.iter().any(|option| option == option_id) {
+            return Err(PylonError::Protocol(format!(
+                "invalid option {option_id} for request {request_id}"
+            )));
+        }
+        // C4：锁内复核身份——客户端替换（generation 前进）后旧审批决策不误写
+        // 新进程同 id 请求。
+        if permission.client_generation != runtime.client_generation.load(Ordering::Acquire) {
+            return Err(PylonError::Protocol(format!(
+                "permission request not found: {request_id}"
+            )));
+        }
+        let tool_call_id = permission.tool_call_id.clone();
+        let line = serde_json::json!({
+            "jsonrpc": "2.0",
+            "id": request_id,
+            "result": permission_response(option_id),
+        });
+        let line = match serde_json::to_string(&line) {
+            Ok(line) => line,
+            Err(_) => {
+                return Err(PylonError::Protocol(format!(
+                    "permission request not found: {request_id}"
+                )));
+            }
+        };
+        (
+            acp.write_tx.clone(),
+            acp.crashed.clone(),
+            pending.remove(&request_id),
+            tool_call_id,
+            line,
+        )
     };
-    let Some((tool_call_id, options)) = found else {
+    // 锁外发送（O9/O35）：崩溃/超时/通道关闭均失败——恢复 pending 保留可重试。
+    if crashed.load(Ordering::Acquire) {
+        restore_pending(runtime, request_id, claimed);
         return Err(PylonError::Protocol(format!(
             "permission request not found: {request_id}"
         )));
-    };
-    if !options.iter().any(|option| option == option_id) {
-        return Err(PylonError::Protocol(format!(
-            "invalid option {option_id} for request {request_id}"
-        )));
     }
-    // P1-2：选项校验通过后统一走 respond_permission——acp 锁内复核 pending 仍存在
-    // 再发送，客户端替换（替换时清空 pending）发生在读与发之间时不会把旧进程的
-    // request_id 写到新进程。发送失败保留 pending（可重试）。
-    if !respond_permission(runtime, request_id, permission_response(option_id)).await {
+    let sent =
+        match tokio::time::timeout(std::time::Duration::from_secs(10), write_tx.send(line)).await {
+            Ok(Ok(())) => true,
+            Ok(Err(_)) => false,
+            Err(_) => {
+                log::warn!("ACP write timeout after 10s: connection presumed dead");
+                crashed.store(true, Ordering::Release);
+                false
+            }
+        };
+    if !sent {
+        restore_pending(runtime, request_id, claimed);
         return Err(PylonError::Protocol(format!(
             "permission request not found: {request_id}"
         )));
