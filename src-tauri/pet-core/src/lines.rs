@@ -99,7 +99,10 @@ pub fn pick(key: LineKey, idx: &mut u8, part: DayPart) -> String {
             "新朋友在旁边闪着同样的光。它俩并排坐着，像两行对齐的代码。",
         ],
     };
-    let pick_idx = *idx as usize % pool.len();
+    // R30：单计数器（PetState.line_idx，lib.rs 字段禁碰）无法按场景独立轮换——
+    // 以场景 key 做相位偏移：各场景轮换相位不同（同一节奏下不再锁步对齐），
+    // 计数器语义不变（每 pick 推进一次，溢出回绕）。
+    let pick_idx = (idx.wrapping_add(key as u8) as usize) % pool.len();
     *idx = idx.wrapping_add(1);
     pool[pick_idx].to_string() // Rename 等场景由调用方拼接前后缀
 }

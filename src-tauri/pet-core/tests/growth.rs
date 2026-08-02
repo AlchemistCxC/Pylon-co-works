@@ -896,6 +896,19 @@ fn time_of_day_line_variants_are_used() {
     assert!(poke_b.contains("指尖") || poke_b.contains("晃了晃"));
 }
 
+#[test]
+fn same_scene_picks_rotate_without_immediate_repeat() {
+    // R30：同场景连续 pick 轮换不重复（API 级直接验证）
+    use pylon_pet_core::lines::{pick, LineKey};
+    use pylon_pet_core::DayPart;
+    let mut idx = 0u8;
+    let a = pick(LineKey::Poke, &mut idx, DayPart::Day);
+    let b = pick(LineKey::Poke, &mut idx, DayPart::Day);
+    assert_ne!(a, b, "同场景连续 pick 不得重复: {a} / {b}");
+    let c = pick(LineKey::Poke, &mut idx, DayPart::Day);
+    assert_ne!(b, c, "轮换持续不重复: {b} / {c}");
+}
+
 // ── M9：成就徽章（unlock 幂等 / 奖励 / 记忆 / restore 补查 / 计数）──
 
 #[test]
