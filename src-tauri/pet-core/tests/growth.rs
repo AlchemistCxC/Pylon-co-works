@@ -1,4 +1,4 @@
-﻿use pylon_pet_core::{AiEvent, GrowthStage, PetState, ToolOutcome};
+use pylon_pet_core::{AiEvent, GrowthStage, PetState, ToolOutcome};
 
 /// 测试辅助（M8）：构造"本地 Day 时段（12:00）"的宠物——任意 now_ms 映射到
 /// 本地正午，隔离午夜 bond ×1.5 加成（时段相关断言用显式 offset 的变体测试）。
@@ -25,7 +25,11 @@ fn token_usage_awards_xp_only_for_new_cumulative_tokens() {
 fn tool_outcomes_build_reliable_statistics_and_growth() {
     let mut pet = PetState::new_at(0);
     for now in 1..=12 {
-        let outcome = if now <= 9 { ToolOutcome::Succeeded } else { ToolOutcome::Failed };
+        let outcome = if now <= 9 {
+            ToolOutcome::Succeeded
+        } else {
+            ToolOutcome::Failed
+        };
         pet.apply(AiEvent::ToolCall { outcome }, now);
     }
 
@@ -75,16 +79,27 @@ fn sleepy_pet_is_woken_by_interaction_not_polling() {
     // 审查修复：轮询 Visit 不唤醒（睡眠可持续）；真实互动唤醒
     let mut pet = PetState::new_at(0);
     pet.apply(AiEvent::FirstChunk, 1);
-    assert!(pet.check_sleepy(31_000), "30s idle after first chunk must fall asleep");
+    assert!(
+        pet.check_sleepy(31_000),
+        "30s idle after first chunk must fall asleep"
+    );
     assert_eq!(pet.mood, "sleepy");
     assert_eq!(pet.machine, pylon_pet_core::PetMachineState::Asleep);
 
     // 轮询心跳不唤醒
     pet.apply(AiEvent::Visit, 31_001);
-    assert_eq!(pet.machine, pylon_pet_core::PetMachineState::Asleep, "轮询 Visit 不得唤醒睡眠宠物");
+    assert_eq!(
+        pet.machine,
+        pylon_pet_core::PetMachineState::Asleep,
+        "轮询 Visit 不得唤醒睡眠宠物"
+    );
     // 真实互动唤醒
     pet.apply(AiEvent::Poke, 31_002);
-    assert_eq!(pet.machine, pylon_pet_core::PetMachineState::Awake(pylon_pet_core::MachineSub::Idle), "互动必须唤醒");
+    assert_eq!(
+        pet.machine,
+        pylon_pet_core::PetMachineState::Awake(pylon_pet_core::MachineSub::Idle),
+        "互动必须唤醒"
+    );
     assert_eq!(pet.mood, "happy", "Poke 后窗口推导 happy");
 }
 
@@ -157,14 +172,20 @@ fn feeding_restores_hunger_and_play_restores_fun() {
 
     // 好奇=0 时 play 收益为设计基准 +25
     let mut pet = PetState::new_at(1);
-    pet.traits = pylon_pet_core::PetTraits { curiosity: 0, ..pylon_pet_core::PetTraits::default() };
+    pet.traits = pylon_pet_core::PetTraits {
+        curiosity: 0,
+        ..pylon_pet_core::PetTraits::default()
+    };
     pet.apply(AiEvent::Play, 1);
     assert_eq!(pet.fun, 95, "play 恢复 fun +25（curiosity=0 基准）");
     assert_eq!(pet.loneliness, 0, "play 大幅降低孤独");
     assert_eq!(pet.energy, 70, "play 消耗 energy -10");
     // 好奇加成：curiosity=100 → fun +50
     let mut pet = PetState::new_at(1);
-    pet.traits = pylon_pet_core::PetTraits { curiosity: 100, ..pylon_pet_core::PetTraits::default() };
+    pet.traits = pylon_pet_core::PetTraits {
+        curiosity: 100,
+        ..pylon_pet_core::PetTraits::default()
+    };
     pet.apply(AiEvent::Play, 1);
     assert_eq!(pet.fun, 100, "curiosity=100 时 fun 收益翻倍");
 }
@@ -220,18 +241,30 @@ fn recent_events_window_is_ring_buffered() {
 fn conversation_drives_interacting_idle_transitions() {
     let mut pet = PetState::new_at(1);
     pet.apply(AiEvent::FirstChunk, 1);
-    assert_eq!(pet.machine, pylon_pet_core::PetMachineState::Awake(pylon_pet_core::MachineSub::Interacting));
+    assert_eq!(
+        pet.machine,
+        pylon_pet_core::PetMachineState::Awake(pylon_pet_core::MachineSub::Interacting)
+    );
     pet.apply(AiEvent::PromptCompleted, 2);
-    assert_eq!(pet.machine, pylon_pet_core::PetMachineState::Awake(pylon_pet_core::MachineSub::Idle));
+    assert_eq!(
+        pet.machine,
+        pylon_pet_core::PetMachineState::Awake(pylon_pet_core::MachineSub::Idle)
+    );
 }
 
 #[test]
 fn crash_and_reconnect_drive_distress_transitions() {
     let mut pet = PetState::new_at(1);
     pet.apply(AiEvent::AgentCrashed, 1);
-    assert_eq!(pet.machine, pylon_pet_core::PetMachineState::Awake(pylon_pet_core::MachineSub::Distress));
+    assert_eq!(
+        pet.machine,
+        pylon_pet_core::PetMachineState::Awake(pylon_pet_core::MachineSub::Distress)
+    );
     pet.apply(AiEvent::AgentConnected, 2);
-    assert_eq!(pet.machine, pylon_pet_core::PetMachineState::Awake(pylon_pet_core::MachineSub::Idle));
+    assert_eq!(
+        pet.machine,
+        pylon_pet_core::PetMachineState::Awake(pylon_pet_core::MachineSub::Idle)
+    );
 }
 
 #[test]
@@ -243,11 +276,19 @@ fn exhausted_pet_falls_asleep_and_recovers_energy() {
     assert_eq!(pet.mood, "sleepy");
     // 睡眠中 30 分钟：energy +60 恢复；轮询 Visit 不唤醒（审查修复）
     pet.apply(AiEvent::Visit, 31_000 + 1_800_000);
-    assert_eq!(pet.machine, pylon_pet_core::PetMachineState::Asleep, "轮询不得唤醒");
+    assert_eq!(
+        pet.machine,
+        pylon_pet_core::PetMachineState::Asleep,
+        "轮询不得唤醒"
+    );
     assert_eq!(pet.energy, 74, "睡眠恢复 energy（14+60=74）");
     // 真实互动唤醒（wake 再 +30）
     pet.apply(AiEvent::Poke, 31_000 + 1_800_001);
-    assert_eq!(pet.machine, pylon_pet_core::PetMachineState::Awake(pylon_pet_core::MachineSub::Idle), "互动必须唤醒");
+    assert_eq!(
+        pet.machine,
+        pylon_pet_core::PetMachineState::Awake(pylon_pet_core::MachineSub::Idle),
+        "互动必须唤醒"
+    );
     assert_eq!(pet.energy, 100, "睡眠恢复 60 + 唤醒加成 30 = 100（封顶）");
 }
 
@@ -256,7 +297,11 @@ fn force_sleep_when_energy_hits_zero() {
     let mut pet = PetState::new_at(1);
     pet.traits = pylon_pet_core::PetTraits::default();
     pet.apply(AiEvent::Visit, 3 * 3_600_000); // 3h 后 energy 掉到 0
-    assert_eq!(pet.machine, pylon_pet_core::PetMachineState::Asleep, "energy=0 必须强制入睡");
+    assert_eq!(
+        pet.machine,
+        pylon_pet_core::PetMachineState::Asleep,
+        "energy=0 必须强制入睡"
+    );
 }
 
 // ── M3：情绪推导（设计书 §6）──
@@ -277,7 +322,10 @@ fn mood_derives_from_needs() {
     pet.apply(AiEvent::Poke, 1); // 更新最近互动时间（防入睡）
     pet.energy = 10;
     pet.apply(AiEvent::Visit, 1);
-    assert_eq!(pet.mood, "tired", "energy<20 → tired（需求优先于窗口 happy）");
+    assert_eq!(
+        pet.mood, "tired",
+        "energy<20 → tired（需求优先于窗口 happy）"
+    );
 }
 
 #[test]
@@ -287,11 +335,21 @@ fn mood_derives_from_recent_events() {
     assert_eq!(pet.mood, "happy", "Poke 后窗口 → happy");
 
     let mut pet = PetState::new_at(1);
-    pet.apply(AiEvent::ToolCall { outcome: ToolOutcome::Succeeded }, 1);
+    pet.apply(
+        AiEvent::ToolCall {
+            outcome: ToolOutcome::Succeeded,
+        },
+        1,
+    );
     assert_eq!(pet.mood, "focused", "工具成功 → focused");
 
     let mut pet = PetState::new_at(1);
-    pet.apply(AiEvent::ToolCall { outcome: ToolOutcome::Failed }, 1);
+    pet.apply(
+        AiEvent::ToolCall {
+            outcome: ToolOutcome::Failed,
+        },
+        1,
+    );
     assert_eq!(pet.mood, "error", "工具失败（近 3）→ error");
 
     let mut pet = PetState::new_at(1);
@@ -304,7 +362,10 @@ fn feeding_recovers_mood_from_hungry_to_happy() {
     let mut pet = PetState::new_at(1);
     pet.hunger = 10;
     pet.apply(AiEvent::Feed, 1);
-    assert_eq!(pet.mood, "happy", "喂食后 hunger>20 且窗口含 Feed → happy（不再 hungry）");
+    assert_eq!(
+        pet.mood, "happy",
+        "喂食后 hunger>20 且窗口含 Feed → happy（不再 hungry）"
+    );
 }
 
 #[test]
@@ -313,7 +374,12 @@ fn failure_event_overrides_recent_happy_mood() {
     pet.apply(AiEvent::Poke, 1);
     assert_eq!(pet.mood, "happy");
     // 失败（近 3）优先级高于窗口 happy
-    pet.apply(AiEvent::ToolCall { outcome: ToolOutcome::Failed }, 2);
+    pet.apply(
+        AiEvent::ToolCall {
+            outcome: ToolOutcome::Failed,
+        },
+        2,
+    );
     assert_eq!(pet.mood, "error", "失败事件必须压过 happy");
     // 需求危机优先于 happy（无失败事件时）
     let mut pet = PetState::new_at(1);
@@ -334,7 +400,11 @@ fn feeding_spam_diminishes_returns() {
     // 30s 内连喂：50% 收益（hunger 已满，看 energy）
     let e1 = pet.energy;
     pet.apply(AiEvent::Feed, 2);
-    assert_eq!(pet.energy, (e1 as u16 + 10).min(100) as u8, "第二次喂食 50%");
+    assert_eq!(
+        pet.energy,
+        (e1 as u16 + 10).min(100) as u8,
+        "第二次喂食 50%"
+    );
     // 30s 后重置
     let mut pet = PetState::new_at(1);
     pet.traits = pylon_pet_core::PetTraits::default();
@@ -401,7 +471,10 @@ fn random_traits_are_in_bounds_and_differ() {
     for trait_value in [a.activity, a.clinginess, a.greed, a.curiosity] {
         assert!((10..=100).contains(&trait_value), "trait 必须 10-100");
     }
-    assert!(a != b || a != pylon_pet_core::PetTraits::random(), "随机应有个体差异");
+    assert!(
+        a != b || a != pylon_pet_core::PetTraits::random(),
+        "随机应有个体差异"
+    );
 }
 
 // ── M5：Agent 感知层（设计书 §8）──
@@ -428,10 +501,20 @@ fn tool_kind_classification_dictionary() {
 fn code_tool_start_feeds_pet_stats() {
     use pylon_pet_core::ToolKind;
     let mut pet = PetState::new_at(1);
-    pet.apply(AiEvent::ToolStarted { kind: ToolKind::Code }, 1);
+    pet.apply(
+        AiEvent::ToolStarted {
+            kind: ToolKind::Code,
+        },
+        1,
+    );
     assert_eq!(pet.stats.code_sessions, 1);
     assert_eq!(pet.mood, "curious", "Code 窗口 → curious（凑近看代码）");
-    pet.apply(AiEvent::ToolStarted { kind: ToolKind::Code }, 2);
+    pet.apply(
+        AiEvent::ToolStarted {
+            kind: ToolKind::Code,
+        },
+        2,
+    );
     assert_eq!(pet.stats.code_sessions, 2);
 }
 
@@ -441,7 +524,11 @@ fn code_file_recording_is_sanitized_and_capped() {
     pet.record_code_file("G:/Project/src/lib.rs");
     pet.record_code_file("src/main.ts");
     pet.record_code_file("src/main.ts"); // 去重
-    assert_eq!(pet.stats.code_files, vec!["lib.rs".to_string(), "main.ts".to_string()], "仅文件名且去重");
+    assert_eq!(
+        pet.stats.code_files,
+        vec!["lib.rs".to_string(), "main.ts".to_string()],
+        "仅文件名且去重"
+    );
     for i in 0..12 {
         pet.record_code_file(&format!("file-{i}.rs"));
     }
@@ -465,19 +552,42 @@ fn cancelled_tool_startles_pet() {
     assert_eq!(pet.mood, "startled");
     // ToolCall{outcome: Cancelled} 等价
     let mut pet = PetState::new_at(1);
-    pet.apply(AiEvent::ToolCall { outcome: pylon_pet_core::ToolOutcome::Cancelled }, 1);
+    pet.apply(
+        AiEvent::ToolCall {
+            outcome: pylon_pet_core::ToolOutcome::Cancelled,
+        },
+        1,
+    );
     assert_eq!(pet.mood, "startled");
 }
 
 #[test]
 fn mode_and_model_changes_are_sensed() {
     let mut pet = PetState::new_at(1);
-    pet.apply(AiEvent::ModeChanged { mode: "code".into() }, 1);
+    pet.apply(
+        AiEvent::ModeChanged {
+            mode: "code".into(),
+        },
+        1,
+    );
     assert_eq!(pet.mood, "focused", "code 模式 → focused");
-    pet.apply(AiEvent::ModelChanged { model: "deepseek-v4".into() }, 2);
-    assert!(pet.memories.iter().any(|m| m.contains("换了个脑子")), "模型切换必须记入记忆");
+    pet.apply(
+        AiEvent::ModelChanged {
+            model: "deepseek-v4".into(),
+        },
+        2,
+    );
+    assert!(
+        pet.memories.iter().any(|m| m.contains("换了个脑子")),
+        "模型切换必须记入记忆"
+    );
     let count = pet.memories.len();
-    pet.apply(AiEvent::ModelChanged { model: "deepseek-v4".into() }, 3);
+    pet.apply(
+        AiEvent::ModelChanged {
+            model: "deepseek-v4".into(),
+        },
+        3,
+    );
     assert_eq!(pet.memories.len(), count, "同模型不重复记忆");
 }
 
@@ -505,13 +615,21 @@ fn code_seen_counts_watching() {
 fn friend_crafting_completes_after_thirty_seconds() {
     use pylon_pet_core::ToolKind;
     let mut pet = PetState::new_at(1);
-    pet.apply(AiEvent::ToolStarted { kind: ToolKind::AgentSpawn }, 1);
+    pet.apply(
+        AiEvent::ToolStarted {
+            kind: ToolKind::AgentSpawn,
+        },
+        1,
+    );
     assert!(pet.pending_action.is_some(), "捏朋友必须挂起延迟行为");
     assert!(!pet.settle_pending(29_999), "30s 前未完成");
     assert!(pet.settle_pending(30_001), "30s 后完成");
     assert!(pet.pending_action.is_none());
     assert_eq!(pet.stats.friends_made, 1);
-    assert!(pet.memories.iter().any(|m| m.contains("幻影朋友")), "捏朋友必须记入记忆");
+    assert!(
+        pet.memories.iter().any(|m| m.contains("幻影朋友")),
+        "捏朋友必须记入记忆"
+    );
     assert!(pet.bond >= 2);
     assert!(pet.msg.is_some(), "完成必须说话");
 }
@@ -660,19 +778,34 @@ fn night_poll_voice_skips_bored() {
 
 #[test]
 fn time_of_day_line_variants_are_used() {
-    use pylon_pet_core::DayPart;
     use pylon_pet_core::lines::{pick, LineKey};
+    use pylon_pet_core::DayPart;
     let mut idx = 0u8;
     let wake_night = pick(LineKey::Wake, &mut idx, DayPart::Night);
-    assert!(wake_night.contains("夜深") || wake_night.contains("黑暗"), "Night Wake 变体: {wake_night}");
+    assert!(
+        wake_night.contains("夜深") || wake_night.contains("黑暗"),
+        "Night Wake 变体: {wake_night}"
+    );
     let wake_day = pick(LineKey::Wake, &mut idx, DayPart::Day);
-    assert!(wake_day.contains("脚步") || wake_day.contains("懒腰"), "Day Wake 普通池: {wake_day}");
+    assert!(
+        wake_day.contains("脚步") || wake_day.contains("懒腰"),
+        "Day Wake 普通池: {wake_day}"
+    );
     let sleep_day = pick(LineKey::Sleep, &mut idx, DayPart::Day);
-    assert!(sleep_day.contains("时区") || sleep_day.contains("阳光"), "Day Sleep 变体: {sleep_day}");
+    assert!(
+        sleep_day.contains("时区") || sleep_day.contains("阳光"),
+        "Day Sleep 变体: {sleep_day}"
+    );
     let sleep_default = pick(LineKey::Sleep, &mut idx, DayPart::Night);
-    assert!(sleep_default.contains("蜷成") || sleep_default.contains("注释"), "Night Sleep 普通池: {sleep_default}");
+    assert!(
+        sleep_default.contains("蜷成") || sleep_default.contains("注释"),
+        "Night Sleep 普通池: {sleep_default}"
+    );
     let done_night = pick(LineKey::Done, &mut idx, DayPart::Night);
-    assert!(done_night.contains("深夜") || done_night.contains("夜深"), "Night Done 变体: {done_night}");
+    assert!(
+        done_night.contains("深夜") || done_night.contains("夜深"),
+        "Night Done 变体: {done_night}"
+    );
     // 无时段变体的场景（Poke）不随时段变化
     let poke_a = pick(LineKey::Poke, &mut idx, DayPart::Night);
     let poke_b = pick(LineKey::Poke, &mut idx, DayPart::Day);
@@ -688,14 +821,32 @@ fn achievements_unlock_with_rewards_and_idempotency() {
     pet.traits = pylon_pet_core::PetTraits::default();
     pet.apply(AiEvent::UserSent, 1);
     // first_step：messages≥1
-    assert!(pet.unlocked.contains(&"first_step".to_string()), "首次对话必须解锁 first_step: {:?}", pet.unlocked);
-    assert!(pet.memories.iter().any(|m| m.contains("初次对话")), "解锁必须记入记忆");
-    assert!(pet.msg.as_deref().unwrap_or("").contains("徽章"), "解锁必须有徽章文案: {:?}", pet.msg);
+    assert!(
+        pet.unlocked.contains(&"first_step".to_string()),
+        "首次对话必须解锁 first_step: {:?}",
+        pet.unlocked
+    );
+    assert!(
+        pet.memories.iter().any(|m| m.contains("初次对话")),
+        "解锁必须记入记忆"
+    );
+    assert!(
+        pet.msg.as_deref().unwrap_or("").contains("徽章"),
+        "解锁必须有徽章文案: {:?}",
+        pet.msg
+    );
     let xp_after = pet.xp;
     assert!(xp_after >= 2, "first_step 奖励 xp+2: {xp_after}");
     // 幂等：再次触发不重复解锁/重复奖励
     pet.apply(AiEvent::UserSent, 2);
-    assert_eq!(pet.unlocked.iter().filter(|id| id.as_str() == "first_step").count(), 1, "成就只能解锁一次");
+    assert_eq!(
+        pet.unlocked
+            .iter()
+            .filter(|id| id.as_str() == "first_step")
+            .count(),
+        1,
+        "成就只能解锁一次"
+    );
     assert_eq!(pet.xp, xp_after, "重复触发不重复奖励");
 }
 
@@ -704,13 +855,19 @@ fn night_interaction_unlocks_night_watcher_achievement() {
     let mut pet = PetState::new_at(0); // Night（offset 0）
     pet.traits = pylon_pet_core::PetTraits::default();
     pet.apply(AiEvent::Poke, 0);
-    assert!(pet.unlocked.contains(&"night_watcher".to_string()), "Night 互动必须解锁深夜守望");
+    assert!(
+        pet.unlocked.contains(&"night_watcher".to_string()),
+        "Night 互动必须解锁深夜守望"
+    );
     assert_eq!(pet.stats.night_visits, 1);
     // 10 次后夜猫子
     for now in 1..=9 {
         pet.apply(AiEvent::Poke, now);
     }
-    assert!(pet.unlocked.contains(&"night_owl".to_string()), "10 次深夜互动必须解锁夜猫子");
+    assert!(
+        pet.unlocked.contains(&"night_owl".to_string()),
+        "10 次深夜互动必须解锁夜猫子"
+    );
     // 计数只记真实互动：Visit（轮询）不计数
     let before = pet.stats.night_visits;
     pet.apply(AiEvent::Visit, 3_600_000);
@@ -725,7 +882,10 @@ fn feed_and_play_counts_feed_achievements() {
         pet.apply(AiEvent::Feed, now);
     }
     assert_eq!(pet.stats.feed_count, 50);
-    assert!(pet.unlocked.contains(&"gourmet".to_string()), "喂食 50 次解锁老饕");
+    assert!(
+        pet.unlocked.contains(&"gourmet".to_string()),
+        "喂食 50 次解锁老饕"
+    );
     let mut pet = day_pet(1);
     pet.traits = pylon_pet_core::PetTraits::default();
     for now in 1..=50 {
@@ -743,10 +903,21 @@ fn multiple_achievements_unlock_in_one_event() {
     pet.bond = 299;
     pet.stats.feed_count = 49;
     pet.apply(AiEvent::Feed, 1);
-    assert!(pet.unlocked.contains(&"gourmet".to_string()), "喂食 50 次必须解锁老饕: {:?}", pet.unlocked);
-    assert!(pet.unlocked.contains(&"bond_friend".to_string()), "bond 300 必须解锁羁绊伙伴: {:?}", pet.unlocked);
+    assert!(
+        pet.unlocked.contains(&"gourmet".to_string()),
+        "喂食 50 次必须解锁老饕: {:?}",
+        pet.unlocked
+    );
+    assert!(
+        pet.unlocked.contains(&"bond_friend".to_string()),
+        "bond 300 必须解锁羁绊伙伴: {:?}",
+        pet.unlocked
+    );
     // 成就在一次检查循环里全部解锁（遍历表顺序，最后一个的 msg 生效）
-    assert!(pet.msg.as_deref().unwrap_or("").contains("徽章"), "解锁必须有徽章文案");
+    assert!(
+        pet.msg.as_deref().unwrap_or("").contains("徽章"),
+        "解锁必须有徽章文案"
+    );
 }
 
 #[test]
@@ -757,11 +928,24 @@ fn restore_backfills_achievements_for_old_saves() {
     pet.stats.messages = 10;
     pet.stats.prompts_completed = 15;
     let restored = PetState::restore(pet, 100_000);
-    assert!(restored.unlocked.contains(&"first_step".to_string()), "恢复必须补查 first_step");
-    assert!(restored.unlocked.contains(&"ten_tasks".to_string()), "恢复必须补查 ten_tasks");
-    assert!(restored.unlocked.contains(&"hundred_tasks".to_string()) == false, "15 次任务不满 100");
+    assert!(
+        restored.unlocked.contains(&"first_step".to_string()),
+        "恢复必须补查 first_step"
+    );
+    assert!(
+        restored.unlocked.contains(&"ten_tasks".to_string()),
+        "恢复必须补查 ten_tasks"
+    );
+    assert!(
+        restored.unlocked.contains(&"hundred_tasks".to_string()) == false,
+        "15 次任务不满 100"
+    );
     // 恢复文案优先（成就补查不覆盖"又亮起来了"）
-    assert!(restored.msg.as_deref().unwrap_or("").contains("又亮起来了"), "恢复文案必须保留: {:?}", restored.msg);
+    assert!(
+        restored.msg.as_deref().unwrap_or("").contains("又亮起来了"),
+        "恢复文案必须保留: {:?}",
+        restored.msg
+    );
 }
 
 #[test]
@@ -771,13 +955,23 @@ fn achievement_catalog_lists_all_with_unlocked_flags() {
     pet.unlocked = vec!["first_step".into(), "night_watcher".into()];
     let info = pet.achievement_info();
     assert_eq!(info.len(), ACHIEVEMENTS.len(), "目录必须与定义表一致");
-    let first = info.iter().find(|a| a.id == "first_step").expect("目录含 first_step");
+    let first = info
+        .iter()
+        .find(|a| a.id == "first_step")
+        .expect("目录含 first_step");
     assert!(first.unlocked);
     assert!(!first.name.is_empty());
-    let locked = info.iter().find(|a| a.id == "luminary").expect("目录含 luminary");
+    let locked = info
+        .iter()
+        .find(|a| a.id == "luminary")
+        .expect("目录含 luminary");
     assert!(!locked.unlocked);
     // 全量目录 ≥ 20（用户要求 20+）
-    assert!(ACHIEVEMENTS.len() >= 20, "成就数量必须 20+，实际 {}", ACHIEVEMENTS.len());
+    assert!(
+        ACHIEVEMENTS.len() >= 20,
+        "成就数量必须 20+，实际 {}",
+        ACHIEVEMENTS.len()
+    );
     // id 唯一性
     let mut ids: Vec<&str> = ACHIEVEMENTS.iter().map(|a| a.id).collect();
     ids.sort();
@@ -796,8 +990,15 @@ fn cosmetic_drop_requires_lucky_roll_and_auto_equips() {
     assert_eq!(pet.inventory.len(), 1, "掉落入栏");
     assert!(pet.equipped.is_some(), "掉落自动装备");
     assert_eq!(pet.stats.cosmetics_collected, 1);
-    assert!(pet.memories.iter().any(|m| m.contains("捡到")), "掉落必须记入记忆");
-    assert!(pet.msg.as_deref().unwrap_or("").contains("捡到"), "掉落必须有文案: {:?}", pet.msg);
+    assert!(
+        pet.memories.iter().any(|m| m.contains("捡到")),
+        "掉落必须记入记忆"
+    );
+    assert!(
+        pet.msg.as_deref().unwrap_or("").contains("捡到"),
+        "掉落必须有文案: {:?}",
+        pet.msg
+    );
     assert!(pet.last_drop_at_ms > 0, "掉落必须记录冷却时间戳");
     // roll 不中（千分位 50 ≥ 10）→ 不掉
     let mut pet = day_pet(1);
@@ -820,9 +1021,16 @@ fn cosmetic_drop_has_24h_cooldown_and_full_collection_stops() {
     assert!(pet.maybe_drop_cosmetic(86_400_001, 0), "冷却解除后可再掉落");
     // 全收集：掉落池 8 件全收 → roll=0 也不掉
     use pylon_pet_core::COSMETICS;
-    let droppable_count = COSMETICS.iter().filter(|d| matches!(d.unlock, pylon_pet_core::CosmeticUnlock::Drop)).count();
+    let droppable_count = COSMETICS
+        .iter()
+        .filter(|d| matches!(d.unlock, pylon_pet_core::CosmeticUnlock::Drop))
+        .count();
     let mut pet = day_pet(1);
-    for (i, def) in COSMETICS.iter().filter(|d| matches!(d.unlock, pylon_pet_core::CosmeticUnlock::Drop)).enumerate() {
+    for (i, def) in COSMETICS
+        .iter()
+        .filter(|d| matches!(d.unlock, pylon_pet_core::CosmeticUnlock::Drop))
+        .enumerate()
+    {
         pet.inventory.push(def.id.to_string());
         pet.last_drop_at_ms = 0; // 每件掉落间不冷却（构造全收集场景）
         let _ = i;
@@ -846,7 +1054,10 @@ fn equip_requires_ownership_and_growth_unlocks_work() {
     // 成长解锁（确定性）：bond<300 不可装备 code_crown；bond≥300 可
     let mut pet = day_pet(1);
     pet.bond = 100;
-    assert!(pet.equip("code_crown").is_err(), "bond 不足不可装备成长装扮");
+    assert!(
+        pet.equip("code_crown").is_err(),
+        "bond 不足不可装备成长装扮"
+    );
     pet.bond = 300;
     assert!(pet.equip("code_crown").is_ok(), "bond≥300 可装备代码之冕");
     assert_eq!(pet.equipped.as_deref(), Some("code_crown"));
@@ -856,7 +1067,10 @@ fn equip_requires_ownership_and_growth_unlocks_work() {
     assert!(pet.equip("luminary_wings").is_ok(), "长明体可装备长明之翼");
     let mut pet = day_pet(1);
     pet.xp = 100;
-    assert!(pet.equip("luminary_wings").is_err(), "低阶段不可装备长明之翼");
+    assert!(
+        pet.equip("luminary_wings").is_err(),
+        "低阶段不可装备长明之翼"
+    );
     // 卸下
     pet.maybe_drop_cosmetic(1, 0);
     pet.unequip();
@@ -865,16 +1079,22 @@ fn equip_requires_ownership_and_growth_unlocks_work() {
 
 #[test]
 fn cosmetic_catalog_lists_all_with_owned_flags() {
-    use pylon_pet_core::{COSMETICS, CosmeticUnlock};
+    use pylon_pet_core::{CosmeticUnlock, COSMETICS};
     let mut pet = day_pet(1);
     // 掉落入栏一件
     pet.maybe_drop_cosmetic(1, 0);
     let info = pet.cosmetic_info();
     assert_eq!(info.len(), COSMETICS.len(), "目录必须与定义表一致");
-    let owned_dropped = info.iter().find(|c| c.id == pet.inventory[0]).expect("目录含掉落物品");
+    let owned_dropped = info
+        .iter()
+        .find(|c| c.id == pet.inventory[0])
+        .expect("目录含掉落物品");
     assert!(owned_dropped.owned);
     // 成长解锁按条件标记 owned（bond≥300 → code_crown owned）
-    let crown = info.iter().find(|c| c.id == "code_crown").expect("目录含代码之冕");
+    let crown = info
+        .iter()
+        .find(|c| c.id == "code_crown")
+        .expect("目录含代码之冕");
     assert!(!crown.owned);
     pet.bond = 300;
     let info = pet.cosmetic_info();
@@ -885,7 +1105,10 @@ fn cosmetic_catalog_lists_all_with_owned_flags() {
     ids.sort();
     ids.dedup();
     assert_eq!(ids.len(), COSMETICS.len(), "装扮 id 必须唯一");
-    let drops = COSMETICS.iter().filter(|d| matches!(d.unlock, CosmeticUnlock::Drop)).count();
+    let drops = COSMETICS
+        .iter()
+        .filter(|d| matches!(d.unlock, CosmeticUnlock::Drop))
+        .count();
     let growth = COSMETICS.len() - drops;
     assert!(drops >= 5, "掉落类至少 5 件: {drops}");
     assert!(growth >= 2, "成长解锁至少 2 件: {growth}");

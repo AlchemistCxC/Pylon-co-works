@@ -1,4 +1,4 @@
-﻿pub mod lines;
+pub mod lines;
 
 use rand::RngExt;
 use serde::{Deserialize, Serialize};
@@ -24,7 +24,12 @@ pub struct PetTraits {
 
 impl Default for PetTraits {
     fn default() -> Self {
-        Self { activity: 50, clinginess: 50, greed: 50, curiosity: 50 }
+        Self {
+            activity: 50,
+            clinginess: 50,
+            greed: 50,
+            curiosity: 50,
+        }
     }
 }
 
@@ -40,7 +45,9 @@ impl PetTraits {
     /// 出生随机（M4）：每维 60±25，clamp 到 10-100（偏正面但有个性差异）。
     pub fn random() -> Self {
         let mut rng = rand::rng();
-        let roll = |rng: &mut rand::rngs::ThreadRng| -> u8 { (60_i32 + rng.random_range(-25..=25)).clamp(10, 100) as u8 };
+        let roll = |rng: &mut rand::rngs::ThreadRng| -> u8 {
+            (60_i32 + rng.random_range(-25..=25)).clamp(10, 100) as u8
+        };
         Self {
             activity: roll(&mut rng),
             clinginess: roll(&mut rng),
@@ -170,20 +177,15 @@ pub enum PendingAction {
     CraftFriend { until_ms: u64 },
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize, Default)]
 #[serde(rename_all = "snake_case")]
 pub enum GrowthStage {
+    #[default]
     Seed,
     Sprout,
     Hopper,
     Guardian,
     Luminary,
-}
-
-impl Default for GrowthStage {
-    fn default() -> Self {
-        Self::Seed
-    }
 }
 
 impl GrowthStage {
@@ -247,15 +249,51 @@ impl ToolKind {
     pub fn classify(title: &str) -> Self {
         let lower = title.to_ascii_lowercase();
         let hit = |keywords: &[&str]| keywords.iter().any(|k| lower.contains(k));
-        if hit(&["edit_file", "write_file", "apply_patch", "multi_edit", "file_edit", "code_edit"]) {
+        if hit(&[
+            "edit_file",
+            "write_file",
+            "apply_patch",
+            "multi_edit",
+            "file_edit",
+            "code_edit",
+        ]) {
             Self::Code
-        } else if hit(&["spawn_agent", "delegate", "run_agent", "subagent", "dispatch_agent"]) {
+        } else if hit(&[
+            "spawn_agent",
+            "delegate",
+            "run_agent",
+            "subagent",
+            "dispatch_agent",
+        ]) {
             Self::AgentSpawn
-        } else if hit(&["bash", "run_command", "run_shell", "execute", "terminal", "shell"]) {
+        } else if hit(&[
+            "bash",
+            "run_command",
+            "run_shell",
+            "execute",
+            "terminal",
+            "shell",
+        ]) {
             Self::Execute
-        } else if hit(&["web_search", "search_web", "fetch", "curl", "http", "browser"]) {
+        } else if hit(&[
+            "web_search",
+            "search_web",
+            "fetch",
+            "curl",
+            "http",
+            "browser",
+        ]) {
             Self::Network
-        } else if hit(&["read", "grep", "glob", "list", "workspace", "view", "search_files", "search_in"]) {
+        } else if hit(&[
+            "read",
+            "grep",
+            "glob",
+            "list",
+            "workspace",
+            "view",
+            "search_files",
+            "search_in",
+        ]) {
             Self::Read
         } else {
             Self::Other
@@ -269,18 +307,30 @@ pub enum AiEvent {
     FirstChunk,
     PromptCompleted,
     PromptFailed,
-    TokenUsage { total: u64 },
+    TokenUsage {
+        total: u64,
+    },
     /// 预留事件：桥接层尚未接线（生产代码只发 TokenUsage），保留供测试/未来增量接口。
-    TokenDelta { amount: u64 },
-    ToolCall { outcome: ToolOutcome },
+    TokenDelta {
+        amount: u64,
+    },
+    ToolCall {
+        outcome: ToolOutcome,
+    },
     /// M5 感知：工具开始（带分类）——吃代码/捏朋友等行为信号。
-    ToolStarted { kind: ToolKind },
+    ToolStarted {
+        kind: ToolKind,
+    },
     /// M5 感知：工具被取消（打断）。
     ToolCancelled,
     /// M5 感知：工作模式切换（plan/code 等）。
-    ModeChanged { mode: String },
+    ModeChanged {
+        mode: String,
+    },
     /// M5 感知：模型切换。
-    ModelChanged { model: String },
+    ModelChanged {
+        model: String,
+    },
     /// M5 感知：agent 拒绝（refusal）。
     PromptRefused,
     /// M5 感知：达到轮次上限。
@@ -526,7 +576,11 @@ impl PetState {
         if self.machine == PetMachineState::Asleep
             && matches!(
                 event,
-                AiEvent::UserSent | AiEvent::FirstChunk | AiEvent::Poke | AiEvent::Feed | AiEvent::Play
+                AiEvent::UserSent
+                    | AiEvent::FirstChunk
+                    | AiEvent::Poke
+                    | AiEvent::Feed
+                    | AiEvent::Play
             )
         {
             self.wake(now_ms);
@@ -551,7 +605,11 @@ impl PetState {
                 self.gain_bond(self.night_bond(now_ms, 1));
                 self.record_night_visit(now_ms);
                 let part = self.day_part(now_ms);
-                self.msg = Some(lines::pick(lines::LineKey::UserSent, &mut self.line_idx, part));
+                self.msg = Some(lines::pick(
+                    lines::LineKey::UserSent,
+                    &mut self.line_idx,
+                    part,
+                ));
             }
             AiEvent::FirstChunk => {
                 // T5：对话开始 → Interacting
@@ -562,7 +620,11 @@ impl PetState {
                     self.first_chunk_at_ms = Some(now_ms);
                     // mood 由 derive_mood 推导
                     let part = self.day_part(now_ms);
-                    self.msg = Some(lines::pick(lines::LineKey::FirstChunk, &mut self.line_idx, part));
+                    self.msg = Some(lines::pick(
+                        lines::LineKey::FirstChunk,
+                        &mut self.line_idx,
+                        part,
+                    ));
                 }
             }
             AiEvent::PromptCompleted => {
@@ -579,8 +641,11 @@ impl PetState {
                 // mood 由 derive_mood 推导
                 if self.stats.prompts_completed == 1 {
                     self.remember("陪你完成了第一次任务".into());
-                } else if self.stats.prompts_completed % 10 == 0 {
-                    self.remember(format!("共同完成了 {} 次任务", self.stats.prompts_completed));
+                } else if self.stats.prompts_completed.is_multiple_of(10) {
+                    self.remember(format!(
+                        "共同完成了 {} 次任务",
+                        self.stats.prompts_completed
+                    ));
                 }
                 self.push_event(RecentEvent::Done);
                 let part = self.day_part(now_ms);
@@ -599,7 +664,11 @@ impl PetState {
                 // mood 由 derive_mood 推导
                 self.push_event(RecentEvent::Failed);
                 let part = self.day_part(now_ms);
-                self.msg = Some(lines::pick(lines::LineKey::Failed, &mut self.line_idx, part));
+                self.msg = Some(lines::pick(
+                    lines::LineKey::Failed,
+                    &mut self.line_idx,
+                    part,
+                ));
             }
             AiEvent::TokenUsage { total } => self.set_token_total(total),
             // 预留事件：桥接层尚未接线，保留处理供测试/未来增量接口
@@ -623,10 +692,16 @@ impl PetState {
                         // M6：捏朋友——30s 延迟完成（时间戳驱动，零后台任务）。
                         // 审查修复：已有 crafting 时不覆盖（连续 spawn 不会无限推迟完成）。
                         if self.pending_action.is_none() {
-                            self.pending_action = Some(PendingAction::CraftFriend { until_ms: now_ms + 30_000 });
+                            self.pending_action = Some(PendingAction::CraftFriend {
+                                until_ms: now_ms + 30_000,
+                            });
                         }
                         let part = self.day_part(now_ms);
-                        self.msg = Some(lines::pick(lines::LineKey::FriendStart, &mut self.line_idx, part));
+                        self.msg = Some(lines::pick(
+                            lines::LineKey::FriendStart,
+                            &mut self.line_idx,
+                            part,
+                        ));
                     }
                     ToolKind::Read => {
                         self.push_event(RecentEvent::Read);
@@ -711,7 +786,8 @@ impl PetState {
                 self.stats.feed_count = self.stats.feed_count.saturating_add(1);
                 // M4 防刷：30s 内重复喂食收益递减（100%→50%→25%→0），30s 后重置
                 // （last_feed_at_ms==0 = 从未喂过，首次不视为 spam）
-                if self.last_feed_at_ms > 0 && now_ms.saturating_sub(self.last_feed_at_ms) < 30_000 {
+                if self.last_feed_at_ms > 0 && now_ms.saturating_sub(self.last_feed_at_ms) < 30_000
+                {
                     self.feed_spam_count = (self.feed_spam_count + 1).min(3);
                 } else {
                     self.feed_spam_count = 0;
@@ -723,11 +799,13 @@ impl PetState {
                 self.hunger = (self.hunger as u16 + hunger_gain).min(100) as u8;
                 self.energy = (self.energy as u16 + 20 * multiplier / 100).min(100) as u8;
                 self.fun = (self.fun as u16 + 3 * multiplier / 100).min(100) as u8;
-                self.loneliness = self.loneliness.saturating_sub((20 * multiplier / 100) as u8);
+                self.loneliness = self
+                    .loneliness
+                    .saturating_sub((20 * multiplier / 100) as u8);
                 self.happiness = (self.happiness as u16 + 7 * multiplier / 100).min(100) as u8;
                 // bond 走 reward_interaction（30s 冷却）；审查修复：贪吃 → bond 收益 ×(1+greed/100)；
                 // M8：午夜陪伴——Night 时段喂食 bond 再 ×1.5
-                let greed_bond = (1 + self.traits.greed as u32 / 100) as u32;
+                let greed_bond = 1 + self.traits.greed as u32 / 100;
                 self.reward_interaction(now_ms, self.night_bond(now_ms, greed_bond));
                 self.record_night_visit(now_ms);
                 // mood 由 derive_mood 推导
@@ -854,7 +932,10 @@ impl PetState {
         // 审查修复：直接迭代最近 3 条，不再分配 Vec<&RecentEvent>
         let recent3_has = |event: RecentEvent| recent.iter().rev().take(3).any(|e| *e == event);
         // 1. 崩溃/失败（近 3 条）
-        if recent3_has(RecentEvent::Crashed) || recent3_has(RecentEvent::Failed) || recent3_has(RecentEvent::ToolFail) {
+        if recent3_has(RecentEvent::Crashed)
+            || recent3_has(RecentEvent::Failed)
+            || recent3_has(RecentEvent::ToolFail)
+        {
             return "error";
         }
         // 2. 需求危机
@@ -920,7 +1001,12 @@ impl PetState {
     /// M5 感知：记录"吃过的代码"文件名（脱敏摘要：仅文件名，不含路径/参数）。
     /// 上限 10 滚动；dispatcher 从 rawInput 提取后调用——原文绝不下沉。
     pub fn record_code_file(&mut self, file: &str) {
-        let name = file.rsplit(['/', '\\']).next().unwrap_or(file).trim().to_string();
+        let name = file
+            .rsplit(['/', '\\'])
+            .next()
+            .unwrap_or(file)
+            .trim()
+            .to_string();
         if name.is_empty() || self.stats.code_files.contains(&name) {
             return;
         }
@@ -955,7 +1041,7 @@ impl PetState {
     /// （向上取整，至少 +1）。只用于真实互动（UserSent/Poke/Feed/Play）。
     fn night_bond(&self, now_ms: u64, amount: u32) -> u32 {
         if self.day_part(now_ms) == DayPart::Night {
-            (amount * 3 + 1) / 2
+            (amount * 3).div_ceil(2)
         } else {
             amount
         }
@@ -989,7 +1075,9 @@ impl PetState {
     pub fn growth_progress(&self) -> u8 {
         let stage = self.stage();
         let start = stage.minimum_xp();
-        let Some(end) = self.next_stage_xp() else { return 100 };
+        let Some(end) = self.next_stage_xp() else {
+            return 100;
+        };
         (((self.xp.saturating_sub(start)) as f32 / (end - start) as f32) * 100.0)
             .round()
             .clamp(0.0, 100.0) as u8
@@ -1015,7 +1103,11 @@ impl PetState {
                 self.loneliness = self.loneliness.saturating_sub(30);
                 self.remember("它捏了个幻影朋友".into());
                 let part = self.day_part(now_ms);
-                self.msg = Some(lines::pick(lines::LineKey::FriendDone, &mut self.line_idx, part));
+                self.msg = Some(lines::pick(
+                    lines::LineKey::FriendDone,
+                    &mut self.line_idx,
+                    part,
+                ));
                 return true;
             }
         }
@@ -1058,7 +1150,9 @@ impl PetState {
     }
 
     pub fn recall_memory(&self) -> Option<String> {
-        self.memories.last().map(|memory| format!("同行记录：{memory}"))
+        self.memories
+            .last()
+            .map(|memory| format!("同行记录：{memory}"))
     }
 
     pub fn check_sleepy(&mut self, now_ms: u64) -> bool {
@@ -1140,7 +1234,11 @@ impl PetState {
         }
         let elapsed = today - self.last_seen_day;
         self.stats.active_days = self.stats.active_days.saturating_add(1);
-        self.stats.streak_days = if elapsed == 1 { self.stats.streak_days.saturating_add(1) } else { 1 };
+        self.stats.streak_days = if elapsed == 1 {
+            self.stats.streak_days.saturating_add(1)
+        } else {
+            1
+        };
         self.stats.longest_streak = self.stats.longest_streak.max(self.stats.streak_days);
         if self.stats.streak_days == 7 {
             self.remember("和你连续相伴了 7 天".into());
@@ -1153,7 +1251,9 @@ impl PetState {
 
     fn reward_interaction(&mut self, now_ms: u64, amount: u32) {
         // 审查修复：last_interaction==0（从未互动）视为首次，不触发冷却
-        if self.last_interaction_at_ms == 0 || now_ms.saturating_sub(self.last_interaction_at_ms) >= 30_000 {
+        if self.last_interaction_at_ms == 0
+            || now_ms.saturating_sub(self.last_interaction_at_ms) >= 30_000
+        {
             self.gain_bond(amount);
             self.last_interaction_at_ms = now_ms;
         }
@@ -1180,13 +1280,18 @@ impl PetState {
     }
 
     fn recompute_stats(&mut self) {
-        let resolved = self.stats.tools_succeeded.saturating_add(self.stats.tools_failed);
+        let resolved = self
+            .stats
+            .tools_succeeded
+            .saturating_add(self.stats.tools_failed);
         self.stats.tools_started = self.stats.tools_started.max(resolved);
-        self.stats.tool_success_rate = if self.stats.tools_started == 0 {
-            0
-        } else {
-            ((self.stats.tools_succeeded.saturating_mul(100) / self.stats.tools_started).min(100)) as u8
-        };
+        self.stats.tool_success_rate = self
+            .stats
+            .tools_succeeded
+            .saturating_mul(100)
+            .checked_div(self.stats.tools_started)
+            .map(|rate| rate.min(100) as u8)
+            .unwrap_or(0);
         self.stats.active_days = self.stats.active_days.max(1);
         self.stats.streak_days = self.stats.streak_days.max(1);
         self.stats.longest_streak = self.stats.longest_streak.max(self.stats.streak_days);
@@ -1195,7 +1300,11 @@ impl PetState {
 
 fn sanitize_name(value: &str) -> String {
     let name: String = value.trim().chars().take(12).collect();
-    if name.is_empty() { "微栖".into() } else { name }
+    if name.is_empty() {
+        "微栖".into()
+    } else {
+        name
+    }
 }
 
 /// 环形缓冲 helper：push 后若超过 cap 移除最旧，返回被淘汰的元素（调用方通常忽略）。

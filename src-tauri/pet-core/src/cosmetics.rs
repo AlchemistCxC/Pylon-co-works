@@ -39,17 +39,83 @@ pub struct CosmeticDef {
 
 /// 装扮全量目录（掉落 8 + 成长解锁 3）。
 pub static COSMETICS: &[CosmeticDef] = &[
-    CosmeticDef { id: "beret", name: "夜光贝雷帽", kind: CosmeticKind::Hat, icon: "🎩", unlock: CosmeticUnlock::Drop },
-    CosmeticDef { id: "pixel_hat", name: "像素渔夫帽", kind: CosmeticKind::Hat, icon: "👒", unlock: CosmeticUnlock::Drop },
-    CosmeticDef { id: "pixel_cape", name: "像素披风", kind: CosmeticKind::Cape, icon: "🧣", unlock: CosmeticUnlock::Drop },
-    CosmeticDef { id: "star_scarf", name: "星光围巾", kind: CosmeticKind::Cape, icon: "✨", unlock: CosmeticUnlock::Drop },
-    CosmeticDef { id: "glow_band", name: "光点手环", kind: CosmeticKind::Glow, icon: "💫", unlock: CosmeticUnlock::Drop },
-    CosmeticDef { id: "code_pin", name: "代码胸针", kind: CosmeticKind::Glow, icon: "🧷", unlock: CosmeticUnlock::Drop },
-    CosmeticDef { id: "phantom_cat", name: "幻影猫", kind: CosmeticKind::Companion, icon: "🐱", unlock: CosmeticUnlock::Drop },
-    CosmeticDef { id: "mini_orb", name: "迷你光球", kind: CosmeticKind::Companion, icon: "💡", unlock: CosmeticUnlock::Drop },
-    CosmeticDef { id: "code_crown", name: "代码之冕", kind: CosmeticKind::Hat, icon: "👑", unlock: CosmeticUnlock::Bond(300) },
-    CosmeticDef { id: "bond_glow", name: "羁绊之光", kind: CosmeticKind::Glow, icon: "🔆", unlock: CosmeticUnlock::Bond(2000) },
-    CosmeticDef { id: "luminary_wings", name: "长明之翼", kind: CosmeticKind::Cape, icon: "🪽", unlock: CosmeticUnlock::Stage(GrowthStage::Luminary) },
+    CosmeticDef {
+        id: "beret",
+        name: "夜光贝雷帽",
+        kind: CosmeticKind::Hat,
+        icon: "🎩",
+        unlock: CosmeticUnlock::Drop,
+    },
+    CosmeticDef {
+        id: "pixel_hat",
+        name: "像素渔夫帽",
+        kind: CosmeticKind::Hat,
+        icon: "👒",
+        unlock: CosmeticUnlock::Drop,
+    },
+    CosmeticDef {
+        id: "pixel_cape",
+        name: "像素披风",
+        kind: CosmeticKind::Cape,
+        icon: "🧣",
+        unlock: CosmeticUnlock::Drop,
+    },
+    CosmeticDef {
+        id: "star_scarf",
+        name: "星光围巾",
+        kind: CosmeticKind::Cape,
+        icon: "✨",
+        unlock: CosmeticUnlock::Drop,
+    },
+    CosmeticDef {
+        id: "glow_band",
+        name: "光点手环",
+        kind: CosmeticKind::Glow,
+        icon: "💫",
+        unlock: CosmeticUnlock::Drop,
+    },
+    CosmeticDef {
+        id: "code_pin",
+        name: "代码胸针",
+        kind: CosmeticKind::Glow,
+        icon: "🧷",
+        unlock: CosmeticUnlock::Drop,
+    },
+    CosmeticDef {
+        id: "phantom_cat",
+        name: "幻影猫",
+        kind: CosmeticKind::Companion,
+        icon: "🐱",
+        unlock: CosmeticUnlock::Drop,
+    },
+    CosmeticDef {
+        id: "mini_orb",
+        name: "迷你光球",
+        kind: CosmeticKind::Companion,
+        icon: "💡",
+        unlock: CosmeticUnlock::Drop,
+    },
+    CosmeticDef {
+        id: "code_crown",
+        name: "代码之冕",
+        kind: CosmeticKind::Hat,
+        icon: "👑",
+        unlock: CosmeticUnlock::Bond(300),
+    },
+    CosmeticDef {
+        id: "bond_glow",
+        name: "羁绊之光",
+        kind: CosmeticKind::Glow,
+        icon: "🔆",
+        unlock: CosmeticUnlock::Bond(2000),
+    },
+    CosmeticDef {
+        id: "luminary_wings",
+        name: "长明之翼",
+        kind: CosmeticKind::Cape,
+        icon: "🪽",
+        unlock: CosmeticUnlock::Stage(GrowthStage::Luminary),
+    },
 ];
 
 /// 装扮展示信息（全量目录 + 拥有标志；PetView 透出给前端）。
@@ -130,12 +196,17 @@ impl PetState {
         if roll >= DROP_PROBABILITY_PERMILLE {
             return false;
         }
-        if self.last_drop_at_ms > 0 && now_ms.saturating_sub(self.last_drop_at_ms) < DROP_COOLDOWN_MS {
+        if self.last_drop_at_ms > 0
+            && now_ms.saturating_sub(self.last_drop_at_ms) < DROP_COOLDOWN_MS
+        {
             return false;
         }
         let droppable: Vec<&CosmeticDef> = COSMETICS
             .iter()
-            .filter(|def| matches!(def.unlock, CosmeticUnlock::Drop) && !self.inventory.iter().any(|id| id == def.id))
+            .filter(|def| {
+                matches!(def.unlock, CosmeticUnlock::Drop)
+                    && !self.inventory.iter().any(|id| id == def.id)
+            })
             .collect();
         if droppable.is_empty() {
             return false; // 掉落池已全收集（先判空，random_range(0..0) 会 panic）
@@ -149,8 +220,10 @@ impl PetState {
         self.last_drop_at_ms = now_ms;
         self.stats.cosmetics_collected = self.stats.cosmetics_collected.saturating_add(1);
         self.remember(format!("它捡到了{}", picked.name));
-        self.msg = Some(format!("{} 它捡到{}，立刻戴上了。", picked.icon, picked.name));
+        self.msg = Some(format!(
+            "{} 它捡到{}，立刻戴上了。",
+            picked.icon, picked.name
+        ));
         true
     }
-
 }
