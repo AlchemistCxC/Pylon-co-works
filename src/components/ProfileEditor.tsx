@@ -10,7 +10,9 @@ export default function ProfileEditor({ onClose }: { onClose: () => void }) {
   const addProfile = useIdentityStore(s => s.addProfile)
   const setActiveProfile = useIdentityStore(s => s.setActiveProfile)
   const sessionConfig = useRuntimeStore(s => s.sessionConfig)
-  const profile = profiles.find(p => p.id === activeProfileId) || profiles[0]
+  // activeProfileId 失效时不回退 profiles[0]：否则 save 走编辑分支、覆写第一个 profile。
+  // find 不到即进入新建分支（Date.now 新 id）。
+  const profile = profiles.find(p => p.id === activeProfileId)
 
   const [name, setName] = useState(profile?.name || '')
   const [avatar, setAvatar] = useState(profile?.avatar || '')
