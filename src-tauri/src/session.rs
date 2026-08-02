@@ -729,6 +729,30 @@ pub(crate) async fn check_session_expiry(state: &AppState) {
         }
     }
 }
+/// R32：会话槽位替换——MAX_SESSIONS 上限检查 + 插入新 SessionInfo +
+/// 返回被替换的旧会话（None = 新槽位）。`allow_same_source_replace`：
+/// true = 同 source 替换不占新名额（load_persisted_session 既有语义）；
+/// false = 满额即拒绝，无论是否替换（new_session 既有语义）。
+/// 检查与插入在同一写锁内完成；会话创建路径由 session_creation 串行化，
+/// 与原先"读锁检查 + 写锁插入"行为等价。
+pub(crate) fn replace_session_slot(
+    runtime: &AgentRuntime,
+    source: &str,
+    session: SessionInfo,
+    allow_same_source_replace: bool,
+) -> Result<Option<SessionInfo>, PylonError> {
+    let mut sessions = runtime
+        .sessions
+        .lock()
+        .map_err(|error| PylonError::Protocol(error.to_string()))?;
+    if sessions.len() >= MAX_SESSIONS
+        && !(allow_same_source_replace && sessions.contains_key(source))
+    {
+        return Err(PylonError::Protocol("max sessions reached".to_string()));
+    }
+    Ok(sessions.insert(source.to_string(), session))
+}
+
 #[tauri::command]
 pub(crate) async fn new_session(
     state: tauri::State<'_, AppState>,
@@ -786,11 +810,8 @@ pub(crate) async fn new_session(
     let peri_id = AcpClient::session_id_from(&response)?;
     let mut session = SessionInfo::new(peri_id.clone(), persona, session_cwd, false, generation);
     session.apply_session_response(&response);
-    let replaced = runtime
-        .sessions
-        .lock()
-        .map_err(|e| e.to_string())?
-        .insert(source.clone(), session);
+    // R32：槽位替换统一走辅助（满额检查在 RPC 前已完成，此处为替换插入）。
+    let replaced = replace_session_slot(&runtime, &source, session, false)?;
     if let Some(old) = replaced {
         if let Ok(close_params) = acp::session_close_params(&old.peri_id) {
             if let Err(error) = state
@@ -1655,16 +1676,11 @@ pub(crate) async fn load_persisted_session(
     // mcp_servers 必须随 session/load 发送：ACP schema 1.4 该字段无 default，
     // Hermes（Pydantic）缺失即拒绝；Peri 容忍。无配置时 validate 产出空数组。
     let mcp_servers = mcp::validate_and_serialize(mcp_servers)?;
-    {
-        // 与 new_session / send_message 自动创建一致，恢复历史会话也受上限约束；
-        // 同 source 重载（替换）不占新名额。
-        let sessions = runtime.sessions.lock().map_err(|e| e.to_string())?;
-        if !sessions.contains_key(&source) && sessions.len() >= MAX_SESSIONS {
-            return Err(PylonError::Protocol("max sessions reached".to_string()));
-        }
-    }
-    let previous = runtime.sessions.lock().map_err(|e| e.to_string())?.insert(
-        source.clone(),
+    // 与 new_session / send_message 自动创建一致，恢复历史会话也受上限约束；
+    // 同 source 重载（替换）不占新名额（R32：检查与插入统一在槽位辅助内）。
+    let previous = replace_session_slot(
+        &runtime,
+        &source,
         SessionInfo::new(
             peri_id.clone(),
             String::new(),
@@ -1672,7 +1688,8 @@ pub(crate) async fn load_persisted_session(
             true,
             generation,
         ),
-    );
+        true,
+    )?;
     // O3：锁内仅提取回放句柄，等待在锁外进行——回放最长 30s，不阻塞其他命令。
     let handles = runtime.acp.lock().await.replay_handles();
     let load_result =
