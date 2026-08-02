@@ -1087,10 +1087,32 @@ fn achievement_catalog_lists_all_with_unlocked_flags() {
         ACHIEVEMENTS.len()
     );
     // id 唯一性
-    let mut ids: Vec<&str> = ACHIEVEMENTS.iter().map(|a| a.id).collect();
+    let mut ids: Vec<&str> = ACHIEVEMENTS.iter().map(|a| a.id.as_str()).collect();
     ids.sort();
     ids.dedup();
     assert_eq!(ids.len(), ACHIEVEMENTS.len(), "成就 id 必须唯一");
+}
+
+#[test]
+fn achievement_id_serde_keeps_string_contract() {
+    // R28：枚举化后 wire 序列化必须保持原字符串 id（unlocked 落盘/前端契约不变）
+    use pylon_pet_core::achievements::AchievementId;
+    for def in pylon_pet_core::ACHIEVEMENTS {
+        let wire = serde_json::to_string(&def.id).expect("id 必须可序列化");
+        assert_eq!(
+            wire,
+            format!("\"{}\"", def.id.as_str()),
+            "枚举序列化必须等于原字符串 id"
+        );
+    }
+    assert_eq!(
+        serde_json::to_string(&AchievementId::FirstStep).unwrap(),
+        "\"first_step\""
+    );
+    assert_eq!(
+        serde_json::to_string(&AchievementId::BondSoulmate).unwrap(),
+        "\"bond_soulmate\""
+    );
 }
 
 // ── M10：装扮（掉落 / 冷却 / 装备 / 成长解锁）──
