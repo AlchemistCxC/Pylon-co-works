@@ -82,7 +82,7 @@ pub struct Dispatch {
 /// - GROUP_AT_MESSAGE_CREATE → `qq:group:{group_openid}`，内容剥离 @bot 前缀
 /// - C2C_MESSAGE_CREATE → `qq:user:{user_openid}`，内容原样
 /// - 附件：图片 URL / 语音占位 / 文件描述拼进文本（events.rs）
-/// 其他事件/缺 id/缺路由标识 → None（不 ingest）。
+///   其他事件/缺 id/缺路由标识 → None（不 ingest）。
 pub fn process_dispatch_event(event: &QqEvent) -> Option<Dispatch> {
     if event.op != 0 {
         return None;
@@ -230,7 +230,9 @@ async fn run_connection(
     let gateway_url = auth::get_gateway_url(http_client, &token).await?;
     log::info!("QQ WS: Gateway URL 已获取");
 
-    let ws_stream = connect(&gateway_url).await.map_err(|e| format!("WS 连接失败: {e}"))?;
+    let ws_stream = connect(&gateway_url)
+        .await
+        .map_err(|e| format!("WS 连接失败: {e}"))?;
     log::info!("QQ WS: 已连接");
 
     let (mut write, mut read) = ws_stream.split();
@@ -414,9 +416,7 @@ pub async fn connect(url: &str) -> Result<WsStream, String> {
         }
     };
 
-    let request = url
-        .into_client_request()
-        .map_err(|e| format!("req: {e}"))?;
+    let request = url.into_client_request().map_err(|e| format!("req: {e}"))?;
     let (ws, _) = tokio_tungstenite::client_async_with_config(request, tls_stream, None)
         .await
         .map_err(|e| format!("WS 握手: {e}"))?;
@@ -451,14 +451,23 @@ async fn tunnel(
          Host: {target_host}:{target_port}\r\n\r\n"
     );
     use tokio::io::AsyncWriteExt;
-    stream.write_all(req.as_bytes()).await.map_err(|e| format!("CONNECT: {e}"))?;
+    stream
+        .write_all(req.as_bytes())
+        .await
+        .map_err(|e| format!("CONNECT: {e}"))?;
 
     use tokio::io::AsyncReadExt;
     let mut buf = [0u8; 512];
-    let n = stream.read(&mut buf).await.map_err(|e| format!("read: {e}"))?;
+    let n = stream
+        .read(&mut buf)
+        .await
+        .map_err(|e| format!("read: {e}"))?;
     let resp = String::from_utf8_lossy(&buf[..n]);
     if !resp.contains("200") {
-        return Err(format!("CONNECT 被拒: {}", resp.lines().next().unwrap_or("")));
+        return Err(format!(
+            "CONNECT 被拒: {}",
+            resp.lines().next().unwrap_or("")
+        ));
     }
     log::info!("QQ WS: 代理隧道 → {target_host}:{target_port}");
 
@@ -494,8 +503,10 @@ async fn tls_wrap(
     domain: &str,
 ) -> Result<tokio_rustls::client::TlsStream<TcpStream>, String> {
     let connector = tokio_rustls::TlsConnector::from(tls_config());
-    let server_name: rustls::pki_types::ServerName<'static> =
-        domain.to_string().try_into().map_err(|_| "域名无效".to_string())?;
+    let server_name: rustls::pki_types::ServerName<'static> = domain
+        .to_string()
+        .try_into()
+        .map_err(|_| "域名无效".to_string())?;
 
     connector
         .connect(server_name, stream)
@@ -518,16 +529,20 @@ mod tests {
 
     #[test]
     fn group_at_message_extracts_source_strips_mention_and_attachments() {
-        let e = event(0, Some("GROUP_AT_MESSAGE_CREATE"), serde_json::json!({
-            "id": "msg-1",
-            "content": "@bot 你好世界",
-            "timestamp": "1722500000",
-            "group_openid": "group-123",
-            "author": {"member_openid": "mem-1", "user_openid": "user-1"},
-            "attachments": [
-                {"url": "https://cdn/a.png", "content_type": "image/png", "filename": "a.png"}
-            ]
-        }));
+        let e = event(
+            0,
+            Some("GROUP_AT_MESSAGE_CREATE"),
+            serde_json::json!({
+                "id": "msg-1",
+                "content": "@bot 你好世界",
+                "timestamp": "1722500000",
+                "group_openid": "group-123",
+                "author": {"member_openid": "mem-1", "user_openid": "user-1"},
+                "attachments": [
+                    {"url": "https://cdn/a.png", "content_type": "image/png", "filename": "a.png"}
+                ]
+            }),
+        );
         let dispatch = process_dispatch_event(&e).expect("group message must dispatch");
         assert_eq!(dispatch.source, "qq:group:group-123");
         assert_eq!(dispatch.msg_id, "msg-1");
@@ -537,11 +552,15 @@ mod tests {
 
     #[test]
     fn c2c_message_keeps_content_and_uses_user_openid() {
-        let e = event(0, Some("C2C_MESSAGE_CREATE"), serde_json::json!({
-            "id": "msg-2",
-            "content": "@bot 私聊原文（不剥离）",
-            "author": {"user_openid": "user-9"}
-        }));
+        let e = event(
+            0,
+            Some("C2C_MESSAGE_CREATE"),
+            serde_json::json!({
+                "id": "msg-2",
+                "content": "@bot 私聊原文（不剥离）",
+                "author": {"user_openid": "user-9"}
+            }),
+        );
         let dispatch = process_dispatch_event(&e).expect("c2c message must dispatch");
         assert_eq!(dispatch.source, "qq:user:user-9");
         assert_eq!(dispatch.content, "@bot 私聊原文（不剥离）");
@@ -550,31 +569,55 @@ mod tests {
     #[test]
     fn non_message_events_are_ignored() {
         // op 0 但非消息类型（如 READY / MESSAGE_AUDIT_PASS）
-        assert!(process_dispatch_event(&event(0, Some("READY"), serde_json::json!({"session_id": "s1"}))).is_none());
+        assert!(process_dispatch_event(&event(
+            0,
+            Some("READY"),
+            serde_json::json!({"session_id": "s1"})
+        ))
+        .is_none());
         // op 10 Hello
-        assert!(process_dispatch_event(&event(10, None, serde_json::json!({"heartbeat_interval": 30000}))).is_none());
+        assert!(process_dispatch_event(&event(
+            10,
+            None,
+            serde_json::json!({"heartbeat_interval": 30000})
+        ))
+        .is_none());
         // 缺 id 的消息
-        assert!(process_dispatch_event(&event(0, Some("C2C_MESSAGE_CREATE"), serde_json::json!({
-            "content": "no id",
-            "author": {"user_openid": "u1"}
-        }))).is_none());
+        assert!(process_dispatch_event(&event(
+            0,
+            Some("C2C_MESSAGE_CREATE"),
+            serde_json::json!({
+                "content": "no id",
+                "author": {"user_openid": "u1"}
+            })
+        ))
+        .is_none());
         // 缺 group_openid 的群消息
-        assert!(process_dispatch_event(&event(0, Some("GROUP_AT_MESSAGE_CREATE"), serde_json::json!({
-            "id": "m3", "content": "x"
-        }))).is_none());
+        assert!(process_dispatch_event(&event(
+            0,
+            Some("GROUP_AT_MESSAGE_CREATE"),
+            serde_json::json!({
+                "id": "m3", "content": "x"
+            })
+        ))
+        .is_none());
     }
 
     #[test]
     fn voice_and_file_attachments_are_appended() {
-        let e = event(0, Some("C2C_MESSAGE_CREATE"), serde_json::json!({
-            "id": "msg-3",
-            "content": "看这个",
-            "author": {"user_openid": "u1"},
-            "attachments": [
-                {"url": "https://cdn/v.silk", "content_type": "audio/silk", "filename": "v.silk"},
-                {"url": "https://cdn/doc.pdf", "content_type": "application/pdf", "filename": "doc.pdf"}
-            ]
-        }));
+        let e = event(
+            0,
+            Some("C2C_MESSAGE_CREATE"),
+            serde_json::json!({
+                "id": "msg-3",
+                "content": "看这个",
+                "author": {"user_openid": "u1"},
+                "attachments": [
+                    {"url": "https://cdn/v.silk", "content_type": "audio/silk", "filename": "v.silk"},
+                    {"url": "https://cdn/doc.pdf", "content_type": "application/pdf", "filename": "doc.pdf"}
+                ]
+            }),
+        );
         let dispatch = process_dispatch_event(&e).expect("dispatch");
         assert!(dispatch.content.contains("[Voice] [语音消息]"));
         assert!(dispatch.content.contains("[file: doc.pdf]"));
@@ -582,12 +625,24 @@ mod tests {
 
     #[test]
     fn close_code_classification_is_stable() {
-        assert_eq!(classify_close_code(4001), CloseAction::Fatal("invalid auth/permission"));
+        assert_eq!(
+            classify_close_code(4001),
+            CloseAction::Fatal("invalid auth/permission")
+        );
         assert_eq!(classify_close_code(4004), CloseAction::ReconnectClearToken);
-        assert_eq!(classify_close_code(4006), CloseAction::ReconnectClearSession);
+        assert_eq!(
+            classify_close_code(4006),
+            CloseAction::ReconnectClearSession
+        );
         assert_eq!(classify_close_code(4008), CloseAction::ReconnectRateLimit);
-        assert_eq!(classify_close_code(4900), CloseAction::ReconnectClearSession);
-        assert_eq!(classify_close_code(4914), CloseAction::Fatal("bot offline/sandbox"));
+        assert_eq!(
+            classify_close_code(4900),
+            CloseAction::ReconnectClearSession
+        );
+        assert_eq!(
+            classify_close_code(4914),
+            CloseAction::Fatal("bot offline/sandbox")
+        );
         assert_eq!(classify_close_code(1000), CloseAction::ReconnectBackoff);
     }
 

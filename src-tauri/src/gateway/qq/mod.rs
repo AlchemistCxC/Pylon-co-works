@@ -1,4 +1,4 @@
-﻿//! QQ 平台适配器（B10.1 骨架 + B10.2 组装 + B10 收尾：发送队列/重试/死目标/回复锚点）。
+//! QQ 平台适配器（B10.1 骨架 + B10.2 组装 + B10 收尾：发送队列/重试/死目标/回复锚点）。
 
 pub mod auth;
 pub mod dedup;
@@ -48,16 +48,24 @@ fn classify_send_error(error: &str) -> SendFailure {
     // 原实现只匹配英文/数字子串会误判为 Transient（限流丢消息 / 死目标永不标记）。
     // 匹配原则：明确限流词 → RateLimited；明确权限/对象不存在 → DeadTarget；其余 Transient。
     let lower = error.to_lowercase();
-    if lower.contains("429") || lower.contains("rate")
-        || error.contains("频率限制") || error.contains("发送频率") || error.contains("限流")
+    if lower.contains("429")
+        || lower.contains("rate")
+        || error.contains("频率限制")
+        || error.contains("发送频率")
+        || error.contains("限流")
     {
         SendFailure::RateLimited(error.to_string())
-    } else if lower.contains("403") || lower.contains("404")
-        || lower.contains("forbidden") || lower.contains("not found")
+    } else if lower.contains("403")
+        || lower.contains("404")
+        || lower.contains("forbidden")
+        || lower.contains("not found")
         || lower.contains("not allowed")
-        || error.contains("被禁") || error.contains("禁言")
-        || error.contains("无权限") || error.contains("无操作权限")
-        || error.contains("不存在") || error.contains("失效")
+        || error.contains("被禁")
+        || error.contains("禁言")
+        || error.contains("无权限")
+        || error.contains("无操作权限")
+        || error.contains("不存在")
+        || error.contains("失效")
     {
         SendFailure::DeadTarget(error.to_string())
     } else {
@@ -115,7 +123,12 @@ impl QqAdapter {
 
     /// 测试构造：注入 QQ API 桩地址（集成测试避免打真实 QQ API）。
     #[cfg(test)]
-    pub(crate) fn for_testing(core: Arc<GatewayCore>, http: Client, auth: Arc<QqAuth>, base_url: String) -> Arc<Self> {
+    pub(crate) fn for_testing(
+        core: Arc<GatewayCore>,
+        http: Client,
+        auth: Arc<QqAuth>,
+        base_url: String,
+    ) -> Arc<Self> {
         Arc::new(Self {
             dedup: Mutex::new(DedupState::new()),
             core,
@@ -134,7 +147,7 @@ impl QqAdapter {
     /// - 白名单拒绝 → Ok(None)，不 dispatch
     /// - msg_id 已见（resume 重放）→ Ok(None)，不重复 ingest
     /// - 新消息 → 记录 seen + last_msg_id，dispatch 发送并返回解析结果
-    /// ws.rs 事件分发后调用本方法；去重/白名单在适配器层完成，ingest 层只见干净消息。
+    ///   ws.rs 事件分发后调用本方法；去重/白名单在适配器层完成，ingest 层只见干净消息。
     pub fn handle_incoming(
         &self,
         source: &str,
@@ -148,7 +161,13 @@ impl QqAdapter {
         // R6b：读锁中毒（panic 后）→ 拒绝 ingest（fail-closed）——不得回退默认
         // 空白名单（空白名单 = 放行所有群，白名单安全路径必须拒绝）。
         let allowed = match self.core.with_qq_config(|qq| {
-            crate::gateway::ingest_allowed(qq, resolved.binding.as_ref(), source, member_openid, user_openid)
+            crate::gateway::ingest_allowed(
+                qq,
+                resolved.binding.as_ref(),
+                source,
+                member_openid,
+                user_openid,
+            )
         }) {
             Some(allowed) => allowed,
             None => {
@@ -159,7 +178,10 @@ impl QqAdapter {
         if !allowed {
             return Ok(None);
         }
-        let mut dedup = self.dedup.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
+        let mut dedup = self
+            .dedup
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
         if !dedup.is_new(msg_id) {
             return Ok(None);
         }
@@ -187,19 +209,32 @@ impl PlatformAdapter for QqAdapter {
     fn deliver_text(&self, source: &str, text: &str) -> Result<(), String> {
         let (chat_type, chat_id) = parse_source(source)?;
         // 回复锚点：本 chat 最新收到的 msg_id（QQ 回复 API 需要）
-        let reply_to = self.dedup.lock()
+        let reply_to = self
+            .dedup
+            .lock()
             .ok()
             .and_then(|dedup| dedup.latest_for(chat_id).map(str::to_string));
         // 死目标短路：目标不可达（群被删/拉黑/注销）不再投递
-        if let Some(reason) = self.dead_targets.lock().ok().and_then(|d| d.get(chat_id).cloned()) {
-            log::warn!("QQ deliver 短路（死目标 {chat_id}: {reason}），丢弃 {:.60}...", text);
+        if let Some(reason) = self
+            .dead_targets
+            .lock()
+            .ok()
+            .and_then(|d| d.get(chat_id).cloned())
+        {
+            log::warn!(
+                "QQ deliver 短路（死目标 {chat_id}: {reason}），丢弃 {:.60}...",
+                text
+            );
             return Ok(());
         }
         let Ok(runtime) = tokio::runtime::Handle::try_current() else {
             return Err("QQ deliver 需要 tokio runtime".to_string());
         };
         let (tx, rx) = {
-            let mut senders = self.senders.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
+            let mut senders = self
+                .senders
+                .lock()
+                .unwrap_or_else(|poisoned| poisoned.into_inner());
             if let Some(existing) = senders.get(chat_id) {
                 (existing.clone(), None)
             } else {
@@ -219,7 +254,17 @@ impl PlatformAdapter for QqAdapter {
             // P2-3：把发送端克隆交给 send_loop——空闲退出前用它做强计数 double-check
             let sender_owned = tx.clone();
             runtime.spawn(async move {
-                Self::send_loop(http, auth, dead, base_url, senders, sender_owned, chat_id_owned, rx).await;
+                Self::send_loop(
+                    http,
+                    auth,
+                    dead,
+                    base_url,
+                    senders,
+                    sender_owned,
+                    chat_id_owned,
+                    rx,
+                )
+                .await;
             });
         }
         let message = QueuedSend {
@@ -234,7 +279,12 @@ impl PlatformAdapter for QqAdapter {
         Ok(())
     }
 
-    fn deliver_event(&self, source: &str, event: &str, _payload: &serde_json::Value) -> Result<(), String> {
+    fn deliver_event(
+        &self,
+        source: &str,
+        event: &str,
+        _payload: &serde_json::Value,
+    ) -> Result<(), String> {
         log::info!("QQ deliver_event 未投递（首版仅文本）: {source} event={event}");
         Ok(())
     }
@@ -245,6 +295,9 @@ impl QqAdapter {
     /// rate 60s 一次 / 死目标标记短路）。成功发送清除死目标标记（自愈）。
     /// 审查修复：空闲 SEND_LOOP_IDLE_SECS 无消息则退出并从 senders map 移除
     /// （防 chat_id 无界增长 + 常驻任务泄漏）；token 瞬时失败退避重试不丢消息。
+    // clippy 2026-08-02：8 参为串行队列状态（http/auth/dead_targets/base_url/senders/tx/chat_id/rx），
+    // 均为独立不可分组资源，保持显式签名（重构参数结构体收益低）。
+    #[allow(clippy::too_many_arguments)]
     async fn send_loop(
         http: Client,
         auth: Arc<QqAuth>,
@@ -283,7 +336,12 @@ impl QqAdapter {
                     continue;
                 }
             };
-            if dead_targets.lock().ok().map(|d| d.contains_key(&msg.chat_id)).unwrap_or(false) {
+            if dead_targets
+                .lock()
+                .ok()
+                .map(|d| d.contains_key(&msg.chat_id))
+                .unwrap_or(false)
+            {
                 log::warn!("QQ send_loop 跳过死目标 {}", msg.chat_id);
                 continue;
             }
@@ -301,8 +359,14 @@ impl QqAdapter {
                                 log::warn!("QQ deliver token 连续 {attempts} 次获取失败（{chat_id}），丢弃该消息: {error}");
                                 continue 'messages;
                             }
-                            log::warn!("QQ deliver token 获取失败（{chat_id}），{}s 后重试: {error}", 1u64 << (attempts - 1));
-                            tokio::time::sleep(std::time::Duration::from_secs(1u64 << (attempts - 1))).await;
+                            log::warn!(
+                                "QQ deliver token 获取失败（{chat_id}），{}s 后重试: {error}",
+                                1u64 << (attempts - 1)
+                            );
+                            tokio::time::sleep(std::time::Duration::from_secs(
+                                1u64 << (attempts - 1),
+                            ))
+                            .await;
                         }
                     }
                 }
@@ -328,11 +392,20 @@ impl QqAdapter {
                     }
                 }
                 Err(SendFailure::DeadTarget(error)) => {
-                    dead_targets.lock().ok().map(|mut d| d.insert(msg.chat_id.clone(), error.clone()));
-                    log::warn!("QQ deliver 目标不可达（{}），标记死目标: {error}", msg.chat_id);
+                    dead_targets
+                        .lock()
+                        .ok()
+                        .map(|mut d| d.insert(msg.chat_id.clone(), error.clone()));
+                    log::warn!(
+                        "QQ deliver 目标不可达（{}），标记死目标: {error}",
+                        msg.chat_id
+                    );
                 }
                 Err(SendFailure::Transient(error)) => {
-                    log::warn!("QQ deliver 发送失败（{chat_id}）: {error}", chat_id = msg.chat_id);
+                    log::warn!(
+                        "QQ deliver 发送失败（{chat_id}）: {error}",
+                        chat_id = msg.chat_id
+                    );
                 }
             }
         }
@@ -343,7 +416,12 @@ impl QqAdapter {
     /// 发送 + 瞬时失败指数退避重试（SEND_RETRY_ATTEMPTS 次：1s/2s/4s）。
     /// 修复（P2-1）：按 SendFailure 变体分流——DeadTarget/RateLimited 立即返回
     /// （死目标标记 / 60s 全局等待由 send_loop 调用处处理），仅 Transient 走退避重试。
-    async fn send_with_retry(http: &Client, base_url: &str, token: &str, msg: &QueuedSend) -> Result<(), SendFailure> {
+    async fn send_with_retry(
+        http: &Client,
+        base_url: &str,
+        token: &str,
+        msg: &QueuedSend,
+    ) -> Result<(), SendFailure> {
         let mut last_error = None;
         for attempt in 0..SEND_RETRY_ATTEMPTS {
             match Self::send_once(http, base_url, token, msg).await {
@@ -361,7 +439,12 @@ impl QqAdapter {
     }
 
     /// 单次发送（send.rs；错误分类给重试/死目标策略）。
-    async fn send_once(http: &Client, base_url: &str, token: &str, msg: &QueuedSend) -> Result<(), SendFailure> {
+    async fn send_once(
+        http: &Client,
+        base_url: &str,
+        token: &str,
+        msg: &QueuedSend,
+    ) -> Result<(), SendFailure> {
         send::send_message(
             http,
             base_url,
@@ -432,7 +515,9 @@ gateway:
     fn replayed_msg_id_is_dropped_without_ingest() {
         let core = core_with_route();
         let adapter = test_adapter(core);
-        adapter.handle_incoming("qq:group:123", "msg-1", "first", None, None).expect("first ingest");
+        adapter
+            .handle_incoming("qq:group:123", "msg-1", "first", None, None)
+            .expect("first ingest");
         let replay = adapter
             .handle_incoming("qq:group:123", "msg-1", "first replay", None, None)
             .expect("replay must be handled");
@@ -448,7 +533,9 @@ gateway:
             let msg = format!("msg-{i}");
             let _ = adapter.handle_incoming("qq:group:123", &msg, "x", None, None);
         }
-        let replayed = adapter.handle_incoming("qq:group:123", "msg-0", "x", None, None).expect("ingest");
+        let replayed = adapter
+            .handle_incoming("qq:group:123", "msg-0", "x", None, None)
+            .expect("ingest");
         assert!(replayed.is_some(), "窗口挤出后 msg-0 应重新可见");
     }
 
@@ -456,7 +543,9 @@ gateway:
     fn empty_source_is_rejected() {
         let core = core_with_route();
         let adapter = test_adapter(core);
-        let error = adapter.handle_incoming("", "msg-1", "x", None, None).expect_err("空 source 必须拒绝");
+        let error = adapter
+            .handle_incoming("", "msg-1", "x", None, None)
+            .expect_err("空 source 必须拒绝");
         assert!(error.contains("source"));
     }
 
@@ -547,23 +636,54 @@ gateway:
         let core = core_with_route();
         let adapter = test_adapter(core);
         assert!(adapter
-            .deliver_event("qq:group:123", "peri:done", &serde_json::json!({"data": {}}))
+            .deliver_event(
+                "qq:group:123",
+                "peri:done",
+                &serde_json::json!({"data": {}})
+            )
             .is_ok());
     }
 
     #[test]
     fn classify_send_error_matches_chinese_and_http_status() {
         // 限流：QQ 真实中文错误（原实现只匹配英文/数字子串会误判 Transient 丢消息）
-        assert!(matches!(classify_send_error("HTTP 429: {\"code\":304023,\"message\":\"发送消息频率限制\"}"), SendFailure::RateLimited(_)));
-        assert!(matches!(classify_send_error("发送频率过快"), SendFailure::RateLimited(_)));
-        assert!(matches!(classify_send_error("触发限流"), SendFailure::RateLimited(_)));
+        assert!(matches!(
+            classify_send_error("HTTP 429: {\"code\":304023,\"message\":\"发送消息频率限制\"}"),
+            SendFailure::RateLimited(_)
+        ));
+        assert!(matches!(
+            classify_send_error("发送频率过快"),
+            SendFailure::RateLimited(_)
+        ));
+        assert!(matches!(
+            classify_send_error("触发限流"),
+            SendFailure::RateLimited(_)
+        ));
         // 死目标：HTTP 状态码 / 中文权限 / 对象不存在
-        assert!(matches!(classify_send_error("HTTP 403: 无操作权限"), SendFailure::DeadTarget(_)));
-        assert!(matches!(classify_send_error("HTTP 404: {\"message\":\"群不存在\"}"), SendFailure::DeadTarget(_)));
-        assert!(matches!(classify_send_error("账号被禁言"), SendFailure::DeadTarget(_)));
-        assert!(matches!(classify_send_error("not allowed"), SendFailure::DeadTarget(_)));
+        assert!(matches!(
+            classify_send_error("HTTP 403: 无操作权限"),
+            SendFailure::DeadTarget(_)
+        ));
+        assert!(matches!(
+            classify_send_error("HTTP 404: {\"message\":\"群不存在\"}"),
+            SendFailure::DeadTarget(_)
+        ));
+        assert!(matches!(
+            classify_send_error("账号被禁言"),
+            SendFailure::DeadTarget(_)
+        ));
+        assert!(matches!(
+            classify_send_error("not allowed"),
+            SendFailure::DeadTarget(_)
+        ));
         // 其余 → Transient
-        assert!(matches!(classify_send_error("HTTP 500: internal error"), SendFailure::Transient(_)));
-        assert!(matches!(classify_send_error("connect timeout"), SendFailure::Transient(_)));
+        assert!(matches!(
+            classify_send_error("HTTP 500: internal error"),
+            SendFailure::Transient(_)
+        ));
+        assert!(matches!(
+            classify_send_error("connect timeout"),
+            SendFailure::Transient(_)
+        ));
     }
 }

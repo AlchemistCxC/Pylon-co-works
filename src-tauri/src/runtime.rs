@@ -53,7 +53,9 @@ pub struct AgentRuntimeManager {
 
 impl AgentRuntimeManager {
     pub fn new() -> Self {
-        Self { runtimes: RwLock::new(HashMap::new()) }
+        Self {
+            runtimes: RwLock::new(HashMap::new()),
+        }
     }
 
     pub fn insert(&self, agent_id: String, runtime: Arc<AgentRuntime>) {
@@ -86,12 +88,18 @@ impl AgentRuntimeManager {
 
     /// 全部 runtime（会话生命周期 watcher / gateway_status 遍历用）。
     pub fn all(&self) -> Vec<Arc<AgentRuntime>> {
-        self.runtimes.read().map(|m| m.values().cloned().collect()).unwrap_or_default()
+        self.runtimes
+            .read()
+            .map(|m| m.values().cloned().collect())
+            .unwrap_or_default()
     }
 
     /// 全部 runtime 带 agent_id（B2 Inspector 完整版 per-agent 聚合用）。
     pub fn all_with_ids(&self) -> Vec<(String, Arc<AgentRuntime>)> {
-        self.runtimes.read().map(|m| m.iter().map(|(id, r)| (id.clone(), r.clone())).collect()).unwrap_or_default()
+        self.runtimes
+            .read()
+            .map(|m| m.iter().map(|(id, r)| (id.clone(), r.clone())).collect())
+            .unwrap_or_default()
     }
 }
 
@@ -122,9 +130,18 @@ mod tests {
     fn runtime_fields_are_independent_per_agent() {
         let a = AgentRuntime::new_disconnected();
         let b = AgentRuntime::new_disconnected();
-        a.client_generation.store(7, std::sync::atomic::Ordering::Release);
-        assert_eq!(a.client_generation.load(std::sync::atomic::Ordering::Acquire), 7);
-        assert_eq!(b.client_generation.load(std::sync::atomic::Ordering::Acquire), 0);
+        a.client_generation
+            .store(7, std::sync::atomic::Ordering::Release);
+        assert_eq!(
+            a.client_generation
+                .load(std::sync::atomic::Ordering::Acquire),
+            7
+        );
+        assert_eq!(
+            b.client_generation
+                .load(std::sync::atomic::Ordering::Acquire),
+            0
+        );
     }
 
     #[test]
@@ -144,7 +161,13 @@ mod tests {
         let manager = AgentRuntimeManager::new();
         let first = manager.get_or_create("peri");
         let second = manager.get_or_create("peri");
-        assert!(Arc::ptr_eq(&first, &second), "同一 agent 必须返回同一 runtime 实例");
-        assert!(Arc::ptr_eq(&manager.get("peri").unwrap(), &first), "注册表必须登记同一实例");
+        assert!(
+            Arc::ptr_eq(&first, &second),
+            "同一 agent 必须返回同一 runtime 实例"
+        );
+        assert!(
+            Arc::ptr_eq(&manager.get("peri").unwrap(), &first),
+            "注册表必须登记同一实例"
+        );
     }
 }

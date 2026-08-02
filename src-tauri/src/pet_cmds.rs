@@ -69,7 +69,10 @@ pub(crate) async fn persist_pet_async(state: &AppState, app: &tauri::AppHandle) 
 const PET_PERSIST_THROTTLE_MS: u64 = 60_000;
 
 #[tauri::command]
-pub(crate) async fn get_pet(app: tauri::AppHandle, state: tauri::State<'_, AppState>) -> Result<serde_json::Value, PylonError> {
+pub(crate) async fn get_pet(
+    app: tauri::AppHandle,
+    state: tauri::State<'_, AppState>,
+) -> Result<serde_json::Value, PylonError> {
     // R6a：pet 锁守卫限定在显式块内——块结束即释放（std MutexGuard 不可跨
     // await 保持 Send；显式块作用域比 drop(pet) 更可靠），下方 await 全部锁外。
     let value = {
@@ -98,31 +101,57 @@ pub(crate) async fn get_pet(app: tauri::AppHandle, state: tauri::State<'_, AppSt
 }
 
 #[tauri::command]
-pub(crate) async fn pet_action(app: tauri::AppHandle, state: tauri::State<'_, AppState>, action: String, value: Option<String>) -> Result<serde_json::Value, PylonError> {
+pub(crate) async fn pet_action(
+    app: tauri::AppHandle,
+    state: tauri::State<'_, AppState>,
+    action: String,
+    value: Option<String>,
+) -> Result<serde_json::Value, PylonError> {
     // R6a：pet 锁守卫限定在显式块内（块结束即释放，std MutexGuard 不可跨 await）。
     let result = {
         let mut pet = state.pet.lock().map_err(|e| e.to_string())?;
         let mut sleepy_result: Option<bool> = None;
         match action.as_str() {
-            "poke" => { pet::on_poke(&mut pet); }
-            "feed" => { pet::on_feed(&mut pet); }
-            "play" => { pet::on_play(&mut pet); }
-            "rename" => { if let Some(v) = value { pet::rename(&mut pet, &v); } }
-            "daily" => { pet::daily_visit(&mut pet); }
-            "sleepy" => { sleepy_result = Some(pet::check_sleepy(&mut pet)); }
-            "nostalgia" => { pet::recall_memory(&mut pet); }
+            "poke" => {
+                pet::on_poke(&mut pet);
+            }
+            "feed" => {
+                pet::on_feed(&mut pet);
+            }
+            "play" => {
+                pet::on_play(&mut pet);
+            }
+            "rename" => {
+                if let Some(v) = value {
+                    pet::rename(&mut pet, &v);
+                }
+            }
+            "daily" => {
+                pet::daily_visit(&mut pet);
+            }
+            "sleepy" => {
+                sleepy_result = Some(pet::check_sleepy(&mut pet));
+            }
+            "nostalgia" => {
+                pet::recall_memory(&mut pet);
+            }
             // M10：装扮装备/卸下（equip 失败返回原因，不 panic）
             "equip" => {
                 let item_id = value.ok_or_else(|| "equip requires item id".to_string())?;
-                pet::equip(&mut pet, &item_id).map_err(|error| PylonError::Protocol(error))?;
+                pet::equip(&mut pet, &item_id).map_err(PylonError::Protocol)?;
             }
-            "unequip" => { pet::unequip(&mut pet); }
+            "unequip" => {
+                pet::unequip(&mut pet);
+            }
             "restore" => {
                 let raw = value.ok_or_else(|| "restore requires pet state".to_string())?;
-                let saved = serde_json::from_str(&raw).map_err(|error| format!("invalid pet state: {error}"))?;
+                let saved = serde_json::from_str(&raw)
+                    .map_err(|error| format!("invalid pet state: {error}"))?;
                 pet::restore(&mut pet, saved);
             }
-            _ => { return Err(PylonError::Protocol(format!("unknown action: {}", action))); }
+            _ => {
+                return Err(PylonError::Protocol(format!("unknown action: {}", action)));
+            }
         }
         let msg = pet.msg.take();
         let mut result = serde_json::to_value(pet::view(&pet)).map_err(|e| e.to_string())?;

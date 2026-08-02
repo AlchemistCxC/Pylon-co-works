@@ -98,12 +98,22 @@ pub fn on_tool_cancelled(state: &mut PetState) {
 
 /// M5：工作模式切换。
 pub fn on_mode_changed(state: &mut PetState, mode: &str) {
-    apply(state, AiEvent::ModeChanged { mode: mode.to_string() });
+    apply(
+        state,
+        AiEvent::ModeChanged {
+            mode: mode.to_string(),
+        },
+    );
 }
 
 /// M5：模型切换。
 pub fn on_model_changed(state: &mut PetState, model: &str) {
-    apply(state, AiEvent::ModelChanged { model: model.to_string() });
+    apply(
+        state,
+        AiEvent::ModelChanged {
+            model: model.to_string(),
+        },
+    );
 }
 
 /// M5：agent 拒绝。
@@ -132,11 +142,21 @@ pub fn record_code_file(state: &mut PetState, file: &str) {
 }
 
 pub fn on_tool_success(state: &mut PetState) {
-    apply(state, AiEvent::ToolCall { outcome: ToolOutcome::Succeeded });
+    apply(
+        state,
+        AiEvent::ToolCall {
+            outcome: ToolOutcome::Succeeded,
+        },
+    );
 }
 
 pub fn on_tool_failure(state: &mut PetState) {
-    apply(state, AiEvent::ToolCall { outcome: ToolOutcome::Failed });
+    apply(
+        state,
+        AiEvent::ToolCall {
+            outcome: ToolOutcome::Failed,
+        },
+    );
 }
 
 pub fn on_agent_connected(state: &mut PetState) {
@@ -148,7 +168,9 @@ pub fn on_agent_crashed(state: &mut PetState) {
 }
 
 pub fn recall_memory(state: &mut PetState) {
-    state.msg = state.recall_memory().or_else(|| Some("还没有形成长期记忆。".into()));
+    state.msg = state
+        .recall_memory()
+        .or_else(|| Some("还没有形成长期记忆。".into()));
 }
 
 pub fn check_sleepy(state: &mut PetState) -> bool {
@@ -258,7 +280,10 @@ pub fn write_json_atomic(path: &std::path::Path, json: &str) -> Result<(), Strin
         std::fs::create_dir_all(parent).map_err(|e| e.to_string())?;
     }
     let unique = {
-        let now = SystemTime::now().duration_since(UNIX_EPOCH).map(|d| d.as_nanos()).unwrap_or(0);
+        let now = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .map(|d| d.as_nanos())
+            .unwrap_or(0);
         path.with_file_name(format!(
             ".{}.{}.{}.tmp",
             path.file_name().and_then(|n| n.to_str()).unwrap_or("state"),

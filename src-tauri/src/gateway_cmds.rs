@@ -6,19 +6,25 @@ use crate::AppState;
 
 /// 网关状态：已注册平台适配器 + 静态路由表 + 平台配置 + 注入配置。
 #[tauri::command]
-pub(crate) async fn gateway_status(state: tauri::State<'_, AppState>) -> Result<serde_json::Value, PylonError> {
+pub(crate) async fn gateway_status(
+    state: tauri::State<'_, AppState>,
+) -> Result<serde_json::Value, PylonError> {
     let gateway = &state.gateway;
-    let routes: Vec<serde_json::Value> = gateway.routes().iter().map(|binding| {
-        serde_json::json!({
-            "source": binding.source,
-            "agentId": binding.agent_id,
-            "profileId": binding.profile_id,
-            "sessionKey": binding.session_key,
-            "allowFrom": binding.allow_from,
-            "reset": binding.reset,
-            "idleMinutes": binding.idle_minutes,
+    let routes: Vec<serde_json::Value> = gateway
+        .routes()
+        .iter()
+        .map(|binding| {
+            serde_json::json!({
+                "source": binding.source,
+                "agentId": binding.agent_id,
+                "profileId": binding.profile_id,
+                "sessionKey": binding.session_key,
+                "allowFrom": binding.allow_from,
+                "reset": binding.reset,
+                "idleMinutes": binding.idle_minutes,
+            })
         })
-    }).collect();
+        .collect();
     let qq = gateway.qq_config();
     Ok(serde_json::json!({
         "adapters": gateway.adapter_keys(),
@@ -43,9 +49,14 @@ pub(crate) async fn reload_gateway(state: tauri::State<'_, AppState>) -> Result<
             .map_err(|error| PylonError::Io(format!("读取 {} 失败: {error}", path.display())))?,
         None => include_str!("../../agents.yaml").to_string(),
     };
-    let config = crate::gateway::route::parse_config(&content)
-        .map_err(|error| PylonError::Protocol(error))?;
+    let config = crate::gateway::route::parse_config(&content).map_err(PylonError::Protocol)?;
     state.gateway.reload(config);
-    state.inner().log_runtime_summary("info", "gateway", None, "Gateway config reloaded", serde_json::Map::new());
+    state.inner().log_runtime_summary(
+        "info",
+        "gateway",
+        None,
+        "Gateway config reloaded",
+        serde_json::Map::new(),
+    );
     Ok(())
 }

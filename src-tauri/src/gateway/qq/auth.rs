@@ -1,4 +1,4 @@
-﻿//! QQ Bot OAuth2 Token 管理（BE-B10-004）。
+//! QQ Bot OAuth2 Token 管理（BE-B10-004）。
 //!
 //! POST /app/getAppAccessToken → 缓存 access_token + 过期时间。
 //! Singleflight 锁避免并发刷新。移植自 Prism `src/qq/auth.rs`。
@@ -126,7 +126,11 @@ impl QqAuth {
     /// 测试构造：预设固定 token（不触发刷新；集成测试避免打真实 QQ API）。
     #[cfg(test)]
     pub(crate) fn for_testing(token: String) -> Self {
-        let auth = Self::new(Client::new(), "test-app".to_string(), "test-secret".to_string());
+        let auth = Self::new(
+            Client::new(),
+            "test-app".to_string(),
+            "test-secret".to_string(),
+        );
         *auth.access_token.lock().unwrap() = Some(token);
         *auth.expires_at.lock().unwrap() = Instant::now() + Duration::from_secs(3600);
         auth

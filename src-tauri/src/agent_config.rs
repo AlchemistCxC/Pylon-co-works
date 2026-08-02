@@ -1,6 +1,6 @@
-﻿use std::collections::HashMap;
-use std::path::{Path, PathBuf};
 use serde::Deserialize;
+use std::collections::HashMap;
+use std::path::{Path, PathBuf};
 
 #[derive(Debug, Clone, Deserialize)]
 struct AgentConfigFile {
@@ -55,8 +55,15 @@ impl AgentDef {
             // P3：acp_args 已显式携带 --model 时不再追加结构化 --model——否则会
             // 出现两个 --model（依赖参数顺序的静默覆盖，脆弱）。选"跳过 + 警告"
             // 而非"忽略 acp_args"：acp_args 是 per-agent 显式覆盖通道，优先级更高。
-            if self.acp_args.iter().any(|arg| arg == "--model" || arg.starts_with("--model=")) {
-                log::warn!("agent {}: acp_args 含 --model，结构化 model 字段被忽略", self.name);
+            if self
+                .acp_args
+                .iter()
+                .any(|arg| arg == "--model" || arg.starts_with("--model="))
+            {
+                log::warn!(
+                    "agent {}: acp_args 含 --model，结构化 model 字段被忽略",
+                    self.name
+                );
             } else {
                 all.push("--model".to_string());
                 all.push(model.clone());
@@ -127,7 +134,10 @@ fn parse(content: &str) -> Result<HashMap<String, AgentDef>, String> {
             return Err(format!("agent {id} has an empty executable"));
         }
         if agent.transport != "subprocess" {
-            return Err(format!("agent {id} uses unsupported transport: {}", agent.transport));
+            return Err(format!(
+                "agent {id} uses unsupported transport: {}",
+                agent.transport
+            ));
         }
     }
     Ok(config.agents)
@@ -140,13 +150,21 @@ pub fn load_from_path(path: &Path) -> Result<HashMap<String, AgentDef>, String> 
 }
 
 pub fn default_agent_id(agents: &HashMap<String, AgentDef>) -> Result<Option<String>, String> {
-    let mut defaults: Vec<&String> = agents.iter()
+    let mut defaults: Vec<&String> = agents
+        .iter()
         .filter(|(_, agent)| agent.default)
         .map(|(id, _)| id)
         .collect();
     if defaults.len() > 1 {
         defaults.sort();
-        return Err(format!("multiple default agents configured: {}", defaults.iter().map(|id| id.as_str()).collect::<Vec<_>>().join(", ")));
+        return Err(format!(
+            "multiple default agents configured: {}",
+            defaults
+                .iter()
+                .map(|id| id.as_str())
+                .collect::<Vec<_>>()
+                .join(", ")
+        ));
     }
     if let Some(id) = defaults.pop() {
         return Ok(Some(id.clone()));
@@ -168,10 +186,10 @@ mod tests {
             env: HashMap::new(),
             default,
             set_model_api: false,
-        model: None,
-        acp_args: Vec::new(),
-acp: None,
-}
+            model: None,
+            acp_args: Vec::new(),
+            acp: None,
+        }
     }
 
     #[test]
@@ -184,7 +202,10 @@ acp: None,
         let mut agents = HashMap::new();
         agents.insert("fallback".to_string(), agent(false));
         agents.insert("primary".to_string(), agent(true));
-        assert_eq!(default_agent_id(&agents).unwrap(), Some("primary".to_string()));
+        assert_eq!(
+            default_agent_id(&agents).unwrap(),
+            Some("primary".to_string())
+        );
     }
 
     #[test]
@@ -201,7 +222,10 @@ acp: None,
         let mut agents = HashMap::new();
         agents.insert("zeta".to_string(), agent(false));
         agents.insert("alpha".to_string(), agent(false));
-        assert_eq!(default_agent_id(&agents).unwrap(), Some("alpha".to_string()));
+        assert_eq!(
+            default_agent_id(&agents).unwrap(),
+            Some("alpha".to_string())
+        );
     }
 
     #[test]
@@ -221,13 +245,16 @@ acp: None,
         relative.cwd = Some("workspace".to_string());
         let resolved = relative.resolve_paths(Path::new("C:/portable/pylon"));
         assert!(resolved.exe.contains("portable"));
-        assert!(resolved.exe.ends_with("bin/agent.exe") || resolved.exe.ends_with("bin\\agent.exe"));
+        assert!(
+            resolved.exe.ends_with("bin/agent.exe") || resolved.exe.ends_with("bin\\agent.exe")
+        );
         assert!(resolved.cwd.unwrap().contains("portable"));
     }
 
     #[test]
     fn parses_set_model_api_flag_with_default_false() {
-        let path = std::env::temp_dir().join(format!("pylon-agents-setmodel-{}.yaml", std::process::id()));
+        let path =
+            std::env::temp_dir().join(format!("pylon-agents-setmodel-{}.yaml", std::process::id()));
         std::fs::write(
             &path,
             "agents:\n  hermes:\n    name: Hermes\n    transport: subprocess\n    exe: hermes\n    set_model_api: true\n  peri:\n    name: Peri\n    transport: subprocess\n    exe: peri\n",
@@ -235,13 +262,20 @@ acp: None,
         .expect("write temp agent config");
         let agents = load_from_path(&path).expect("load runtime agent config");
         std::fs::remove_file(&path).ok();
-        assert!(agents["hermes"].set_model_api, "配置了 set_model_api: true 必须生效");
-        assert!(!agents["peri"].set_model_api, "缺省必须为 false（官方 set_config_option 路径）");
+        assert!(
+            agents["hermes"].set_model_api,
+            "配置了 set_model_api: true 必须生效"
+        );
+        assert!(
+            !agents["peri"].set_model_api,
+            "缺省必须为 false（官方 set_config_option 路径）"
+        );
     }
 
     #[test]
     fn parses_structured_acp_fields() {
-        let path = std::env::temp_dir().join(format!("pylon-agents-acp-{}.yaml", std::process::id()));
+        let path =
+            std::env::temp_dir().join(format!("pylon-agents-acp-{}.yaml", std::process::id()));
         std::fs::write(
             &path,
             "agents:\n  peri:\n    name: Peri\n    transport: subprocess\n    exe: peri\n    args: [\"acp\"]\n    model: deepseek-v4-flash\n    acp_args: [\"--verbose\"]\n",
@@ -262,7 +296,16 @@ acp: None,
         def.acp_args = vec!["--verbose".into(), "--timeout".into(), "120".into()];
         assert_eq!(
             def.command_args(),
-            vec!["acp", "--config", "a.yaml", "--model", "deepseek-v4-flash", "--verbose", "--timeout", "120"]
+            vec![
+                "acp",
+                "--config",
+                "a.yaml",
+                "--model",
+                "deepseek-v4-flash",
+                "--verbose",
+                "--timeout",
+                "120"
+            ]
         );
         // 纯 args（无结构化字段）：原样返回（向后兼容）
         let mut plain = agent(false);
@@ -279,7 +322,8 @@ acp: None,
 
     #[test]
     fn parses_acp_protocol_config_section() {
-        let path = std::env::temp_dir().join(format!("pylon-agents-acpcfg-{}.yaml", std::process::id()));
+        let path =
+            std::env::temp_dir().join(format!("pylon-agents-acpcfg-{}.yaml", std::process::id()));
         std::fs::write(
             &path,
             "agents:\n  custom:\n    name: Custom\n    transport: subprocess\n    exe: agent\n    acp:\n      initialize_caps:\n        fs: {}\n        auth: {}\n        _meta:\n          \"peri.skillNames\": true\n",
@@ -287,7 +331,13 @@ acp: None,
         .expect("write temp agent config");
         let agents = load_from_path(&path).expect("load runtime agent config");
         std::fs::remove_file(&path).ok();
-        let caps = agents["custom"].acp.as_ref().expect("acp 段必须解析").initialize_caps.as_ref().expect("initialize_caps 必须解析");
+        let caps = agents["custom"]
+            .acp
+            .as_ref()
+            .expect("acp 段必须解析")
+            .initialize_caps
+            .as_ref()
+            .expect("initialize_caps 必须解析");
         assert_eq!(caps["fs"], serde_json::json!({}));
         assert_eq!(caps["_meta"]["peri.skillNames"], serde_json::json!(true));
         // 缺省：无 acp 段

@@ -54,22 +54,36 @@ pub struct InjectResult {
 impl InjectResult {
     fn from_value(value: &Value) -> Result<Self, String> {
         Ok(Self {
-            context: value.get("context").and_then(|v| v.as_str()).unwrap_or_default().to_string(),
-            activated: value.get("activated")
+            context: value
+                .get("context")
+                .and_then(|v| v.as_str())
+                .unwrap_or_default()
+                .to_string(),
+            activated: value
+                .get("activated")
                 .and_then(|v| v.as_array())
-                .map(|items| items.iter().filter_map(|item| item.as_str()).map(str::to_string).collect())
+                .map(|items| {
+                    items
+                        .iter()
+                        .filter_map(|item| item.as_str())
+                        .map(str::to_string)
+                        .collect()
+                })
                 .unwrap_or_default(),
-            source: value.get("source").and_then(|v| v.as_str()).unwrap_or_default().to_string(),
+            source: value
+                .get("source")
+                .and_then(|v| v.as_str())
+                .unwrap_or_default()
+                .to_string(),
         })
     }
 }
 
 impl PrismClient {
     pub fn from_env() -> Result<Self, String> {
-        let raw = env::var("PYLON_PRISM_URL")
-            .unwrap_or_else(|_| DEFAULT_BASE_URL.to_string());
-        let base_url = Url::parse(&raw)
-            .map_err(|error| format!("invalid PYLON_PRISM_URL: {error}"))?;
+        let raw = env::var("PYLON_PRISM_URL").unwrap_or_else(|_| DEFAULT_BASE_URL.to_string());
+        let base_url =
+            Url::parse(&raw).map_err(|error| format!("invalid PYLON_PRISM_URL: {error}"))?;
         validate_loopback_url(&base_url)?;
         let admin_token = env::var("PRISM_ADMIN_API_TOKEN")
             .ok()
@@ -97,12 +111,18 @@ impl PrismClient {
         let base_url = match Url::parse(DEFAULT_BASE_URL) {
             Ok(url) => url,
             Err(parse_error) => {
+                // 2026-08-02：fallback 字面量不再复制 DEFAULT_BASE_URL（若常量被误改坏，
+                // 副本同样解析失败 → expect panic）；改用 RFC 3986 最小合法形态
+                // "scheme://host"（url crate 保证可解析，fallback_url_parses 测试钉死），
+                // 仅作错误态展示占位，不参与任何请求。
                 return Self {
                     client: Client::new(),
-                    base_url: Url::parse("http://127.0.0.1:9337")
-                        .expect("fallback 字面量与 DEFAULT_BASE_URL 相同，正常不可达"),
+                    base_url: Url::parse("http://127.0.0.1")
+                        .expect("RFC 3986 最小合法 URL（scheme://host）必须可解析"),
                     admin_token: None,
-                    configuration_error: Some(format!("{error}；默认 Prism URL 不可解析: {parse_error}")),
+                    configuration_error: Some(format!(
+                        "{error}；默认 Prism URL 不可解析: {parse_error}"
+                    )),
                 };
             }
         };
@@ -114,21 +134,30 @@ impl PrismClient {
         }
     }
 
-    async fn request(&self, method: Method, url: Url, body: Option<Value>) -> Result<Value, String> {
+    async fn request(
+        &self,
+        method: Method,
+        url: Url,
+        body: Option<Value>,
+    ) -> Result<Value, String> {
         if let Some(error) = &self.configuration_error {
             return Err(format!("Prism configuration error: {error}"));
         }
         let is_write = method != Method::GET && method != Method::HEAD;
         let mut request = self.client.request(method.clone(), url);
         if is_write {
-            let token = self.admin_token.as_deref()
+            let token = self
+                .admin_token
+                .as_deref()
                 .ok_or_else(|| "PRISM_ADMIN_API_TOKEN 未配置，无法调用 Prism 写接口".to_string())?;
             request = request.bearer_auth(token);
         }
         if let Some(body) = body {
             request = request.json(&body);
         }
-        let response = request.send().await
+        let response = request
+            .send()
+            .await
             .map_err(|error| format!("Prism 请求失败: {error}"))?;
         let status = response.status();
         // P3：响应体上限——reqwest 未启用 "stream" feature（Cargo.toml 不可改），
@@ -139,7 +168,9 @@ impl PrismClient {
                 return Err(format!("Prism 响应超过 {MAX_RESPONSE_BYTES} 字节上限"));
             }
         }
-        let text = response.text().await
+        let text = response
+            .text()
+            .await
             .map_err(|error| format!("读取 Prism 响应失败: {error}"))?;
         if text.len() > MAX_RESPONSE_BYTES {
             return Err(format!("Prism 响应超过 {MAX_RESPONSE_BYTES} 字节上限"));
@@ -151,17 +182,21 @@ impl PrismClient {
         if text.trim().is_empty() {
             return Ok(Value::Null);
         }
-        serde_json::from_str(&text)
-            .map_err(|error| format!("Prism 返回非法 JSON: {error}"))
+        serde_json::from_str(&text).map_err(|error| format!("Prism 返回非法 JSON: {error}"))
     }
 
     fn endpoint(&self, path: &str) -> Result<Url, String> {
         // 审查修复：拒绝 `//host` 形态（RFC 3986 network-path reference 会经
         // Url::join 覆盖 authority → SSRF 潜伏洞）；`..`/`\` 仍拒绝。
-        if !path.starts_with('/') || path.starts_with("//") || path.contains("..") || path.contains('\\') {
+        if !path.starts_with('/')
+            || path.starts_with("//")
+            || path.contains("..")
+            || path.contains('\\')
+        {
             return Err("非法 Prism API 路径".to_string());
         }
-        self.base_url.join(path)
+        self.base_url
+            .join(path)
             .map_err(|error| format!("构造 Prism API URL 失败: {error}"))
     }
 
@@ -200,12 +235,19 @@ impl PrismClient {
     }
 
     pub async fn post(&self, path: &str, body: Value) -> Result<Value, String> {
-        self.request(Method::POST, self.endpoint(path)?, Some(body)).await
+        self.request(Method::POST, self.endpoint(path)?, Some(body))
+            .await
     }
 
     /// B11：发送前置注入——POST /inject { scenario, sources, user_msg, round }。
     /// 返回 { context, activated, source }（字段缺失按空/默认容错）。
-    pub async fn inject(&self, scenario: &str, sources: &[String], user_msg: &str, round: u64) -> Result<InjectResult, String> {
+    pub async fn inject(
+        &self,
+        scenario: &str,
+        sources: &[String],
+        user_msg: &str,
+        round: u64,
+    ) -> Result<InjectResult, String> {
         let body = serde_json::json!({
             "scenario": scenario,
             "sources": sources,
@@ -218,7 +260,14 @@ impl PrismClient {
 
     /// B11.2：回合完成持久化——POST /persist { scenario, sources, user_msg, response, round }。
     /// 返回原始响应（ok/writes/errors 由调用方记录）。
-    pub async fn persist_round(&self, scenario: &str, sources: &[String], user_msg: &str, response: &str, round: u64) -> Result<Value, String> {
+    pub async fn persist_round(
+        &self,
+        scenario: &str,
+        sources: &[String],
+        user_msg: &str,
+        response: &str,
+        round: u64,
+    ) -> Result<Value, String> {
         let body = serde_json::json!({
             "scenario": scenario,
             "sources": sources,
@@ -240,7 +289,12 @@ impl PrismClient {
         }
     }
 
-    pub async fn post_query<I, K, V>(&self, path: &str, query: I, body: Value) -> Result<Value, String>
+    pub async fn post_query<I, K, V>(
+        &self,
+        path: &str,
+        query: I,
+        body: Value,
+    ) -> Result<Value, String>
     where
         I: IntoIterator<Item = (K, V)>,
         K: AsRef<str>,
@@ -251,7 +305,12 @@ impl PrismClient {
         self.request(Method::POST, url, Some(body)).await
     }
 
-    pub async fn put_query<I, K, V>(&self, path: &str, query: I, body: Value) -> Result<Value, String>
+    pub async fn put_query<I, K, V>(
+        &self,
+        path: &str,
+        query: I,
+        body: Value,
+    ) -> Result<Value, String>
     where
         I: IntoIterator<Item = (K, V)>,
         K: AsRef<str>,
@@ -321,6 +380,15 @@ mod tests {
     }
 
     #[test]
+    fn fallback_url_parses() {
+        // 2026-08-02：unavailable() 错误态 fallback 字面量必须可解析（expect 的依据）
+        assert!(
+            Url::parse("http://127.0.0.1").is_ok(),
+            "RFC 3986 最小合法 URL 必须可解析"
+        );
+    }
+
+    #[test]
     fn api_paths_cannot_escape_the_fixed_base() {
         let client = PrismClient {
             client: Client::new(),
@@ -337,12 +405,27 @@ mod tests {
 
     #[test]
     fn status_error_classification_is_stable_and_secret_free() {
-        assert_eq!(classify_status_error("Prism HTTP 401: secret"), PrismStatusCode::Unauthorized);
-        assert_eq!(classify_status_error("Prism 请求失败: connection refused"), PrismStatusCode::Unavailable);
-        assert_eq!(classify_status_error("invalid PYLON_PRISM_URL: bad URL"), PrismStatusCode::ConfigurationError);
-        assert_eq!(classify_status_error("Prism 返回非法 JSON"), PrismStatusCode::Error);
+        assert_eq!(
+            classify_status_error("Prism HTTP 401: secret"),
+            PrismStatusCode::Unauthorized
+        );
+        assert_eq!(
+            classify_status_error("Prism 请求失败: connection refused"),
+            PrismStatusCode::Unavailable
+        );
+        assert_eq!(
+            classify_status_error("invalid PYLON_PRISM_URL: bad URL"),
+            PrismStatusCode::ConfigurationError
+        );
+        assert_eq!(
+            classify_status_error("Prism 返回非法 JSON"),
+            PrismStatusCode::Error
+        );
         assert_eq!(PrismStatusCode::Unauthorized.as_str(), "unauthorized");
-        assert_eq!(PrismStatusCode::ConfigurationError.as_str(), "configuration_error");
+        assert_eq!(
+            PrismStatusCode::ConfigurationError.as_str(),
+            "configuration_error"
+        );
     }
 
     fn test_client(address: std::net::SocketAddr, token: Option<&str>) -> PrismClient {
@@ -354,7 +437,9 @@ mod tests {
         }
     }
 
-    fn spawn_response_server(response: &'static [u8]) -> (std::net::SocketAddr, thread::JoinHandle<()>) {
+    fn spawn_response_server(
+        response: &'static [u8],
+    ) -> (std::net::SocketAddr, thread::JoinHandle<()>) {
         let listener = TcpListener::bind("127.0.0.1:0").expect("bind test server");
         let address = listener.local_addr().expect("listener address");
         let server = thread::spawn(move || {
@@ -381,7 +466,8 @@ mod tests {
                     break 0;
                 }
                 bytes.extend_from_slice(&buffer[..count]);
-                if let Some(headers_end) = bytes.windows(4).position(|window| window == b"\r\n\r\n") {
+                if let Some(headers_end) = bytes.windows(4).position(|window| window == b"\r\n\r\n")
+                {
                     let headers = String::from_utf8_lossy(&bytes[..headers_end]);
                     let length = headers
                         .lines()
@@ -393,20 +479,29 @@ mod tests {
                     }
                 }
             };
-            request_tx.send(String::from_utf8(bytes).expect("request UTF-8")).expect("send request");
+            request_tx
+                .send(String::from_utf8(bytes).expect("request UTF-8"))
+                .expect("send request");
             stream
                 .write_all(b"HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: 11\r\nConnection: close\r\n\r\n{\"ok\":true}")
                 .expect("write response");
         });
         let client = test_client(address, Some("test-admin-token"));
         let response = client
-            .post_query("/api/sources/delete", [("name", "source A")], serde_json::json!({}))
+            .post_query(
+                "/api/sources/delete",
+                [("name", "source A")],
+                serde_json::json!({}),
+            )
             .await
             .expect("delete request");
         assert_eq!(response["ok"], true);
         let request = request_rx.recv().expect("captured request");
         assert!(request.starts_with("POST /api/sources/delete?name=source+A HTTP/1.1"));
-        assert!(request.contains("authorization: Bearer test-admin-token") || request.contains("Authorization: Bearer test-admin-token"));
+        assert!(
+            request.contains("authorization: Bearer test-admin-token")
+                || request.contains("Authorization: Bearer test-admin-token")
+        );
         assert!(request.ends_with("{}"));
         server.join().expect("server thread");
     }
@@ -415,7 +510,10 @@ mod tests {
     async fn write_without_admin_token_fails_before_network_request() {
         let listener = TcpListener::bind("127.0.0.1:0").expect("bind test server");
         let client = test_client(listener.local_addr().expect("listener address"), None);
-        let error = client.post("/api/reload", serde_json::json!({})).await.expect_err("missing token must fail");
+        let error = client
+            .post("/api/reload", serde_json::json!({}))
+            .await
+            .expect_err("missing token must fail");
         assert!(error.contains("PRISM_ADMIN_API_TOKEN"));
     }
 
@@ -478,7 +576,8 @@ mod tests {
                     break 0;
                 }
                 bytes.extend_from_slice(&buffer[..count]);
-                if let Some(headers_end) = bytes.windows(4).position(|window| window == b"\r\n\r\n") {
+                if let Some(headers_end) = bytes.windows(4).position(|window| window == b"\r\n\r\n")
+                {
                     let headers = String::from_utf8_lossy(&bytes[..headers_end]);
                     let length = headers
                         .lines()
@@ -490,7 +589,9 @@ mod tests {
                     }
                 }
             };
-            request_tx.send(String::from_utf8(bytes).expect("request UTF-8")).expect("send request");
+            request_tx
+                .send(String::from_utf8(bytes).expect("request UTF-8"))
+                .expect("send request");
             let body = r#"{"context":"注入上下文","activated":["uid-1"],"source":"vein"}"#;
             let response = format!(
                 "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{}",
@@ -501,14 +602,25 @@ mod tests {
                 .expect("write response");
         });
         let client = test_client(address, Some("test-admin-token"));
-        let result = client.inject("trpg", &["vein".to_string()], "你好", 3).await.expect("inject must succeed");
+        let result = client
+            .inject("trpg", &["vein".to_string()], "你好", 3)
+            .await
+            .expect("inject must succeed");
         assert_eq!(result.context, "注入上下文");
         assert_eq!(result.activated, vec!["uid-1".to_string()]);
         assert_eq!(result.source, "vein");
         let request = request_rx.recv().expect("captured request");
         assert!(request.starts_with("POST /inject HTTP/1.1"));
-        assert!(request.contains("authorization: Bearer test-admin-token") || request.contains("Authorization: Bearer test-admin-token"));
-        let body: serde_json::Value = request.split("\r\n\r\n").nth(1).expect("body").parse().expect("body JSON");
+        assert!(
+            request.contains("authorization: Bearer test-admin-token")
+                || request.contains("Authorization: Bearer test-admin-token")
+        );
+        let body: serde_json::Value = request
+            .split("\r\n\r\n")
+            .nth(1)
+            .expect("body")
+            .parse()
+            .expect("body JSON");
         assert_eq!(body["scenario"], "trpg");
         assert_eq!(body["sources"], serde_json::json!(["vein"]));
         assert_eq!(body["user_msg"], "你好");
@@ -521,7 +633,10 @@ mod tests {
         let (address, server) = spawn_response_server(
             b"HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: 2\r\nConnection: close\r\n\r\n{}",
         );
-        let result = test_client(address, Some("t")).inject("", &[], "", 0).await.expect("empty response must parse");
+        let result = test_client(address, Some("t"))
+            .inject("", &[], "", 0)
+            .await
+            .expect("empty response must parse");
         assert_eq!(result.context, "");
         assert!(result.activated.is_empty());
         assert_eq!(result.source, "");
@@ -543,7 +658,8 @@ mod tests {
                     break 0;
                 }
                 bytes.extend_from_slice(&buffer[..count]);
-                if let Some(headers_end) = bytes.windows(4).position(|window| window == b"\r\n\r\n") {
+                if let Some(headers_end) = bytes.windows(4).position(|window| window == b"\r\n\r\n")
+                {
                     let headers = String::from_utf8_lossy(&bytes[..headers_end]);
                     let length = headers
                         .lines()
@@ -555,7 +671,9 @@ mod tests {
                     }
                 }
             };
-            request_tx.send(String::from_utf8(bytes).expect("request UTF-8")).expect("send request");
+            request_tx
+                .send(String::from_utf8(bytes).expect("request UTF-8"))
+                .expect("send request");
             let body = r#"{"ok":true,"writes":[]}"#;
             let response = format!(
                 "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{}",
@@ -566,12 +684,23 @@ mod tests {
                 .expect("write response");
         });
         let client = test_client(address, Some("test-admin-token"));
-        let response = client.persist_round("trpg", &[], "用户消息", "回复文本", 4).await.expect("persist must succeed");
+        let response = client
+            .persist_round("trpg", &[], "用户消息", "回复文本", 4)
+            .await
+            .expect("persist must succeed");
         assert_eq!(response["ok"], true);
         let request = request_rx.recv().expect("captured request");
         assert!(request.starts_with("POST /persist HTTP/1.1"));
-        assert!(request.contains("authorization: Bearer test-admin-token") || request.contains("Authorization: Bearer test-admin-token"));
-        let body: serde_json::Value = request.split("\r\n\r\n").nth(1).expect("body").parse().expect("body JSON");
+        assert!(
+            request.contains("authorization: Bearer test-admin-token")
+                || request.contains("Authorization: Bearer test-admin-token")
+        );
+        let body: serde_json::Value = request
+            .split("\r\n\r\n")
+            .nth(1)
+            .expect("body")
+            .parse()
+            .expect("body JSON");
         assert_eq!(body["scenario"], "trpg");
         assert_eq!(body["user_msg"], "用户消息");
         assert_eq!(body["response"], "回复文本");
@@ -587,7 +716,10 @@ mod tests {
             admin_token: None,
             configuration_error: Some("bad env".into()),
         };
-        let error = client.inject("", &[], "x", 0).await.expect_err("configuration error must fail fast");
+        let error = client
+            .inject("", &[], "x", 0)
+            .await
+            .expect_err("configuration error must fail fast");
         assert!(error.contains("Prism configuration error"));
     }
 }

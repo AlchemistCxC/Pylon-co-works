@@ -1,4 +1,4 @@
-﻿//! QQ 重放去重（BE-B10-003）。
+//! QQ 重放去重（BE-B10-003）。
 //!
 //! 纯数据层：seen 滑动窗口（msg_id → 单调递增序号，超限清理最旧）+ last_msg_id
 //! 映射（chat_id → 最新 msg_id）。不依赖 tauri/WS，无 IO。
@@ -74,7 +74,8 @@ impl DedupState {
 
     /// 更新 chat 的最新 msg_id。
     pub fn set_latest(&mut self, chat_id: &str, msg_id: &str) {
-        self.last_msg_id.insert(chat_id.to_string(), msg_id.to_string());
+        self.last_msg_id
+            .insert(chat_id.to_string(), msg_id.to_string());
     }
 }
 

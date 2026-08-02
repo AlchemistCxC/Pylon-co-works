@@ -1,4 +1,4 @@
-﻿//! 平台静态绑定路由（BE-B10-001 + B10.3 扩展 + B11 注入配置）。
+//! 平台静态绑定路由（BE-B10-001 + B10.3 扩展 + B11 注入配置）。
 //!
 //! 静态 EntityBinding 路由表：source（如 `qq:group:123`）→
 //! { agent_id, profile_id, session_key, allow_from, reset, idle_minutes }。
@@ -167,8 +167,8 @@ fn default_persist_mode() -> String {
 
 /// 解析完整 gateway 配置（路由表 + 平台配置 + 注入配置）。
 pub fn parse_config(input: &str) -> Result<GatewayConfig, String> {
-    let config: GatewayConfigFile = serde_yaml::from_str(input)
-        .map_err(|e| format!("gateway 配置解析失败: {e}"))?;
+    let config: GatewayConfigFile =
+        serde_yaml::from_str(input).map_err(|e| format!("gateway 配置解析失败: {e}"))?;
     let section = config.gateway.unwrap_or(GatewaySection {
         routes: Vec::new(),
         qq: None,
@@ -192,7 +192,10 @@ pub fn parse_config(input: &str) -> Result<GatewayConfig, String> {
     let inject = match section.inject {
         Some(section) => {
             if !matches!(section.persist.as_str(), "skip" | "prism") {
-                return Err(format!("gateway.inject.persist 未知模式: {}", section.persist));
+                return Err(format!(
+                    "gateway.inject.persist 未知模式: {}",
+                    section.persist
+                ));
             }
             if let Some(ref scenario) = section.scenario {
                 if scenario.trim().is_empty() {
@@ -224,7 +227,9 @@ pub struct EntityRouteTable {
 impl EntityRouteTable {
     /// 构造空路由表（无任何绑定）。
     pub fn empty() -> Self {
-        Self { entries: Vec::new() }
+        Self {
+            entries: Vec::new(),
+        }
     }
 
     /// 按 source 精确查询绑定；未命中返回 None（由调用方回退默认绑定）。
@@ -289,7 +294,10 @@ gateway:
       session: 其他
 "#;
         let err = parse_config(yaml).expect_err("重复 source 应报错");
-        assert!(err.contains("qq:group:123"), "错误信息应包含重复的 source，实际: {err}");
+        assert!(
+            err.contains("qq:group:123"),
+            "错误信息应包含重复的 source，实际: {err}"
+        );
     }
 
     #[test]
@@ -349,10 +357,7 @@ gateway:
       profile: trpg
       session: 战役1
 "#;
-        assert!(
-            parse_config(yaml).is_err(),
-            "缺 agent 字段应解析失败"
-        );
+        assert!(parse_config(yaml).is_err(), "缺 agent 字段应解析失败");
     }
 
     #[test]
@@ -375,10 +380,16 @@ gateway:
       session: dm
 "#;
         let config = parse_config(yaml).expect("完整配置应解析成功");
-        assert_eq!(config.qq.group_allow_from.as_deref(), Some(&["group-a".to_string(), "group-b".to_string()][..]));
+        assert_eq!(
+            config.qq.group_allow_from.as_deref(),
+            Some(&["group-a".to_string(), "group-b".to_string()][..])
+        );
         let group = config.routes.lookup("qq:group:123").expect("群路由应命中");
         assert_eq!(group.agent_id, "peri");
-        assert_eq!(group.allow_from.as_deref(), Some(&["member-1".to_string(), "member-2".to_string()][..]));
+        assert_eq!(
+            group.allow_from.as_deref(),
+            Some(&["member-1".to_string(), "member-2".to_string()][..])
+        );
         assert_eq!(group.reset.as_deref(), Some("daily"));
         assert_eq!(group.idle_minutes, Some(60));
         let c2c = config.routes.lookup("qq:user:456").expect("私聊路由应命中");
@@ -408,7 +419,10 @@ gateway:
         let config = parse_config(yaml).expect("注入配置应解析成功");
         assert!(!config.inject.enabled);
         assert_eq!(config.inject.scenario.as_deref(), Some("trpg"));
-        assert_eq!(config.inject.sources.as_slice(), &["vein".to_string(), "shared".to_string()][..]);
+        assert_eq!(
+            config.inject.sources.as_slice(),
+            &["vein".to_string(), "shared".to_string()][..]
+        );
         assert_eq!(config.inject.persist, "prism");
     }
 
@@ -433,7 +447,10 @@ gateway:
     persist: chronicle
 "#;
         let error = parse_config(yaml).expect_err("未知 persist 模式应报错");
-        assert!(error.contains("persist"), "错误信息应指明 persist，实际: {error}");
+        assert!(
+            error.contains("persist"),
+            "错误信息应指明 persist，实际: {error}"
+        );
     }
 
     #[test]

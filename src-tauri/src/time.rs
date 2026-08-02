@@ -79,7 +79,10 @@ mod tests {
 
     #[test]
     fn elapsed_is_saturating() {
-        assert_eq!(Timestamp::new(2000).elapsed_since(Timestamp::new(1500)), 500);
+        assert_eq!(
+            Timestamp::new(2000).elapsed_since(Timestamp::new(1500)),
+            500
+        );
         assert_eq!(Timestamp::new(1000).elapsed_since(Timestamp::new(2000)), 0);
     }
 

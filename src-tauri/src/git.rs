@@ -1,4 +1,4 @@
-﻿//! Git 只读接口（B5）：固定 runner → status → diff → history。
+//! Git 只读接口（B5）：固定 runner → status → diff → history。
 //!
 //! 安全面：
 //! - 命令以参数数组执行（无 shell 拼接，防注入）
@@ -73,7 +73,9 @@ async fn run_git(cwd: &Path, args: &[&str]) -> Result<(String, String), String> 
         .stdin(Stdio::null())
         .stdout(Stdio::piped())
         .stderr(Stdio::piped());
-    let mut child = cmd.spawn().map_err(|error| format!("git 不可用: {error}"))?;
+    let mut child = cmd
+        .spawn()
+        .map_err(|error| format!("git 不可用: {error}"))?;
     // P1-1 死锁修复：wait 之前必须并发读 stdout/stderr。原实现先 wait 后读——
     // 子进程输出超过 OS 管道缓冲（Windows 默认 4096B）时会阻塞在 write 上
     // 永不退出 → 必现 10s 超时。这里先 take 出管道句柄，用两个 async 任务
@@ -84,18 +86,29 @@ async fn run_git(cwd: &Path, args: &[&str]) -> Result<(String, String), String> 
     let mut stderr = child.stderr.take();
     let read_stdout = async {
         if let Some(out) = stdout.as_mut() {
-            let _ = tokio::time::timeout(Duration::from_secs(5), tokio::io::AsyncReadExt::read_to_end(out, &mut stdout_bytes)).await;
+            let _ = tokio::time::timeout(
+                Duration::from_secs(5),
+                tokio::io::AsyncReadExt::read_to_end(out, &mut stdout_bytes),
+            )
+            .await;
         }
     };
     let read_stderr = async {
         if let Some(err) = stderr.as_mut() {
-            let _ = tokio::time::timeout(Duration::from_secs(5), tokio::io::AsyncReadExt::read_to_end(err, &mut stderr_bytes)).await;
+            let _ = tokio::time::timeout(
+                Duration::from_secs(5),
+                tokio::io::AsyncReadExt::read_to_end(err, &mut stderr_bytes),
+            )
+            .await;
         }
     };
     // 审查修复：超时必须 kill 子进程（Command::output 默认 kill_on_drop=false，
     // 超时后 git 会滞留并占用 index 锁）。
     let status = match tokio::time::timeout(GIT_TIMEOUT, async {
-        let status = child.wait().await.map_err(|error| format!("git 命令失败: {error}"))?;
+        let status = child
+            .wait()
+            .await
+            .map_err(|error| format!("git 命令失败: {error}"))?;
         tokio::join!(read_stdout, read_stderr);
         Ok::<std::process::ExitStatus, String>(status)
     })
@@ -111,7 +124,11 @@ async fn run_git(cwd: &Path, args: &[&str]) -> Result<(String, String), String> 
     let stdout = String::from_utf8_lossy(&stdout_bytes).into_owned();
     let stderr = String::from_utf8_lossy(&stderr_bytes).into_owned();
     if !status.success() {
-        let detail = if stderr.trim().is_empty() { stdout.trim() } else { stderr.trim() };
+        let detail = if stderr.trim().is_empty() {
+            stdout.trim()
+        } else {
+            stderr.trim()
+        };
         let detail = detail.chars().take(512).collect::<String>();
         return Err(if is_git_error(&stderr) {
             format!("not a git repository: {detail}")
@@ -126,7 +143,11 @@ async fn run_git(cwd: &Path, args: &[&str]) -> Result<(String, String), String> 
 /// （行格式 `XY path`，重命名 `-> new`；审查修复：quotePath=false 防止中文
 /// 文件名被 C 转义成 `"\346\265\213..."` 失真）。
 pub async fn git_status(cwd: &Path) -> Result<Vec<GitStatusEntry>, String> {
-    let (stdout, _) = run_git(cwd, &["-c", "core.quotePath=false", "status", "--porcelain=v1"]).await?;
+    let (stdout, _) = run_git(
+        cwd,
+        &["-c", "core.quotePath=false", "status", "--porcelain=v1"],
+    )
+    .await?;
     let mut entries = Vec::new();
     for line in stdout.lines() {
         if entries.len() >= MAX_STATUS_ENTRIES {
@@ -137,12 +158,17 @@ pub async fn git_status(cwd: &Path) -> Result<Vec<GitStatusEntry>, String> {
             continue;
         }
         let status = line[..2].to_string();
-        let staged = !status.starts_with("??") && !status.starts_with("!!") && status.as_bytes()[0] != b' ';
+        let staged =
+            !status.starts_with("??") && !status.starts_with("!!") && status.as_bytes()[0] != b' ';
         let path = line[3..].split(" -> ").last().unwrap_or("").to_string();
         if path.is_empty() {
             continue;
         }
-        entries.push(GitStatusEntry { path, status, staged });
+        entries.push(GitStatusEntry {
+            path,
+            status,
+            staged,
+        });
     }
     Ok(entries)
 }
@@ -169,7 +195,10 @@ pub async fn git_diff(cwd: &Path, path: Option<&str>, staged: bool) -> Result<St
     while end > 0 && !stdout.is_char_boundary(end) {
         end -= 1;
     }
-    Ok(format!("{}...（diff 超过 {MAX_DIFF_BYTES} 字节已截断）", &stdout[..end]))
+    Ok(format!(
+        "{}...（diff 超过 {MAX_DIFF_BYTES} 字节已截断）",
+        &stdout[..end]
+    ))
 }
 
 /// 提交历史：`git log --format=%H%x00%an%x00%at%x00%s`（NUL 分隔字段，行分隔 commit）。
@@ -181,7 +210,12 @@ pub async fn git_history(cwd: &Path, limit: Option<usize>) -> Result<Vec<GitComm
         None => 50,
     };
     let format = "%H%x00%an%x00%at%x00%s";
-    let (stdout, _) = match run_git(cwd, &["log", &format!("-n{limit}"), &format!("--format={format}")]).await {
+    let (stdout, _) = match run_git(
+        cwd,
+        &["log", &format!("-n{limit}"), &format!("--format={format}")],
+    )
+    .await
+    {
         Ok(result) => result,
         // 空仓库（无任何 commit）视为空历史，而非错误
         Err(error) if error.contains("does not have any commits") => return Ok(Vec::new()),
@@ -199,7 +233,12 @@ pub async fn git_history(cwd: &Path, limit: Option<usize>) -> Result<Vec<GitComm
         if hash.is_empty() {
             continue;
         }
-        commits.push(GitCommit { hash, author, date, subject });
+        commits.push(GitCommit {
+            hash,
+            author,
+            date,
+            subject,
+        });
         if commits.len() >= limit {
             break;
         }
@@ -236,7 +275,8 @@ mod tests {
     }
 
     fn temp_repo(name: &str) -> TempRepo {
-        let dir = std::env::temp_dir().join(format!("pylon-git-test-{name}-{}", std::process::id()));
+        let dir =
+            std::env::temp_dir().join(format!("pylon-git-test-{name}-{}", std::process::id()));
         std::fs::create_dir_all(&dir).unwrap();
         init_repo(&dir);
         TempRepo(dir)
@@ -262,10 +302,16 @@ mod tests {
         std::fs::write(repo.0.join("new.txt"), "x").unwrap();
 
         let entries = git_status(&repo.0).await.expect("status must succeed");
-        let modified = entries.iter().find(|e| e.path == "a.txt").expect("modified entry");
+        let modified = entries
+            .iter()
+            .find(|e| e.path == "a.txt")
+            .expect("modified entry");
         assert_eq!(modified.status, " M");
         assert!(!modified.staged);
-        let untracked = entries.iter().find(|e| e.path == "new.txt").expect("untracked entry");
+        let untracked = entries
+            .iter()
+            .find(|e| e.path == "new.txt")
+            .expect("untracked entry");
         assert_eq!(untracked.status, "??");
     }
 
@@ -287,14 +333,20 @@ mod tests {
         run(&["commit", "-q", "-m", "init"]);
         std::fs::write(repo.0.join("a.txt"), "v2").unwrap();
 
-        let diff = git_diff(&repo.0, None, false).await.expect("diff must succeed");
+        let diff = git_diff(&repo.0, None, false)
+            .await
+            .expect("diff must succeed");
         assert!(diff.contains("-v1"), "diff 应含旧内容");
         assert!(diff.contains("+v2"), "diff 应含新内容");
         // 路径守卫：穿越路径拒绝
         assert!(git_diff(&repo.0, Some("../outside"), false).await.is_err());
-        assert!(git_diff(&repo.0, Some("C:\\Windows\\x"), false).await.is_err());
+        assert!(git_diff(&repo.0, Some("C:\\Windows\\x"), false)
+            .await
+            .is_err());
         // 限定路径：命中
-        let scoped = git_diff(&repo.0, Some("a.txt"), false).await.expect("scoped diff");
+        let scoped = git_diff(&repo.0, Some("a.txt"), false)
+            .await
+            .expect("scoped diff");
         assert!(scoped.contains("+v2"));
     }
 
@@ -318,7 +370,9 @@ mod tests {
         run(&["add", "a.txt"]);
         run(&["commit", "-q", "-m", "second"]);
 
-        let commits = git_history(&repo.0, Some(10)).await.expect("history must succeed");
+        let commits = git_history(&repo.0, Some(10))
+            .await
+            .expect("history must succeed");
         assert_eq!(commits.len(), 2);
         assert_eq!(commits[0].subject, "second");
         assert_eq!(commits[1].subject, "first");
@@ -331,10 +385,14 @@ mod tests {
     async fn history_zero_limit_returns_empty() {
         // 审查修复回归：limit=0 返回空，而非 1 条
         let repo = temp_repo("limit-zero");
-        let commits = git_history(&repo.0, Some(0)).await.expect("zero limit must succeed");
+        let commits = git_history(&repo.0, Some(0))
+            .await
+            .expect("zero limit must succeed");
         assert!(commits.is_empty(), "limit=0 必须返回空列表");
         // None → 默认 50（空仓库也为空但成功）
-        let commits = git_history(&repo.0, None).await.expect("default limit must succeed");
+        let commits = git_history(&repo.0, None)
+            .await
+            .expect("default limit must succeed");
         assert!(commits.is_empty());
     }
 
@@ -343,7 +401,10 @@ mod tests {
         let dir = std::env::temp_dir().join(format!("pylon-git-nonrepo-{}", std::process::id()));
         std::fs::create_dir_all(&dir).unwrap();
         let error = git_status(&dir).await.expect_err("non-repo must fail");
-        assert!(error.contains("not a git repository"), "错误应明确非 git 仓库: {error}");
+        assert!(
+            error.contains("not a git repository"),
+            "错误应明确非 git 仓库: {error}"
+        );
         std::fs::remove_dir_all(&dir).ok();
     }
 }

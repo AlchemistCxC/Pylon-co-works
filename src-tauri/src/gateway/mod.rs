@@ -1,4 +1,4 @@
-﻿//! Gateway：平台适配器层（B10）。
+//! Gateway：平台适配器层（B10）。
 //!
 //! 消息拓扑：平台(qq/微信/飞书/ins) → gateway → ACP → 本地 agent。
 //! 信息脉络：agent ←ACP→ Pylon(gateway) → 平台。
@@ -29,7 +29,12 @@ pub trait PlatformAdapter: Send + Sync {
     /// 向平台会话投递一段文本（已分段，未接线实现返回 Err 由调用方告警）。
     fn deliver_text(&self, source: &str, text: &str) -> Result<(), String>;
     /// 向平台会话投递非文本事件（peri:done / peri:error 等）。
-    fn deliver_event(&self, source: &str, event: &str, payload: &serde_json::Value) -> Result<(), String>;
+    fn deliver_event(
+        &self,
+        source: &str,
+        event: &str,
+        payload: &serde_json::Value,
+    ) -> Result<(), String>;
 }
 
 /// 入站消息解析结果：平台消息 → 路由绑定（B10.3 消费：会话生命周期 + ACP 发送）。
@@ -113,34 +118,52 @@ impl GatewayCore {
 
     /// B11 注入开关（Prism 可用性由调用方降级处理）。
     pub fn inject_enabled(&self) -> bool {
-        self.config.read().map(|c| c.inject.enabled).unwrap_or(false)
+        self.config
+            .read()
+            .map(|c| c.inject.enabled)
+            .unwrap_or(false)
     }
 
     /// B11 注入场景（None = 让 Prism 用 active.scenario）。
     pub fn inject_scenario(&self) -> Option<String> {
-        self.config.read().ok().and_then(|c| c.inject.scenario.clone())
+        self.config
+            .read()
+            .ok()
+            .and_then(|c| c.inject.scenario.clone())
     }
 
     /// B11 注入知识源（空 = 让 Prism 用 active.sources）。
     /// 签名保持返回 Vec（lib.rs 调用方契约，禁止改签名）；clone 成本仅发生在
     /// inject/persist 回合，不在 handle_incoming 每消息热路径上。
     pub fn inject_sources(&self) -> Vec<String> {
-        self.config.read().map(|c| c.inject.sources.clone()).unwrap_or_default()
+        self.config
+            .read()
+            .map(|c| c.inject.sources.clone())
+            .unwrap_or_default()
     }
 
     /// B11 完成持久化模式："skip" | "prism"。
     pub fn inject_persist(&self) -> String {
-        self.config.read().map(|c| c.inject.persist.clone()).unwrap_or_else(|_| "skip".to_string())
+        self.config
+            .read()
+            .map(|c| c.inject.persist.clone())
+            .unwrap_or_else(|_| "skip".to_string())
     }
 
     /// 按 source 查询绑定（会话生命周期 watcher 取 reset 策略用）。
     pub fn binding(&self, source: &str) -> Option<route::EntityBinding> {
-        self.config.read().ok().and_then(|c| c.routes.lookup(source).cloned())
+        self.config
+            .read()
+            .ok()
+            .and_then(|c| c.routes.lookup(source).cloned())
     }
 
     /// 全部路由绑定（gateway_status 命令展示用）。
     pub fn routes(&self) -> Vec<route::EntityBinding> {
-        self.config.read().map(|c| c.routes.iter().cloned().collect()).unwrap_or_default()
+        self.config
+            .read()
+            .map(|c| c.routes.iter().cloned().collect())
+            .unwrap_or_default()
     }
 
     /// 按 platform_key 取已注册适配器（系统消息投递 / gateway_status 用）。
@@ -151,9 +174,15 @@ impl GatewayCore {
     /// 注册平台适配器；platform_key 重复 → Err。
     /// 由 lib.rs run()/命令接线注册（QQ 适配器启动注册，deliver_all 分发到平台）。
     pub fn register(&self, adapter: Arc<dyn PlatformAdapter>) -> Result<(), String> {
-        let mut adapters = self.adapters.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
+        let mut adapters = self
+            .adapters
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
         if adapters.contains_key(adapter.platform_key()) {
-            return Err(format!("duplicate platform adapter: {}", adapter.platform_key()));
+            return Err(format!(
+                "duplicate platform adapter: {}",
+                adapter.platform_key()
+            ));
         }
         adapters.insert(adapter.platform_key().to_string(), adapter);
         Ok(())
@@ -161,7 +190,10 @@ impl GatewayCore {
 
     /// 已注册适配器的 platform_key 列表（会话生命周期 watcher 平台判定 / 测试用）。
     pub fn adapter_keys(&self) -> Vec<String> {
-        self.adapters.lock().map(|a| a.keys().cloned().collect()).unwrap_or_default()
+        self.adapters
+            .lock()
+            .map(|a| a.keys().cloned().collect())
+            .unwrap_or_default()
     }
 
     /// 入站解析：source 路由查询 + 超长截断。纯解析，不触发发送。
@@ -173,7 +205,11 @@ impl GatewayCore {
             return Err("ingest requires a non-empty source".to_string());
         }
         let content: String = content.chars().take(MAX_INGEST_CHARS).collect();
-        let binding = self.config.read().ok().and_then(|c| c.routes.lookup(source).cloned());
+        let binding = self
+            .config
+            .read()
+            .ok()
+            .and_then(|c| c.routes.lookup(source).cloned());
         Ok(ResolvedIngest {
             source: source.to_string(),
             content,
@@ -196,12 +232,14 @@ impl GatewayCore {
     /// - peri:update 的 agent_message_chunk → 提取文本 → 按适配器上限分段 →
     ///   逐段 deliver_text（truncate 分段管线，平台无关，在核心层完成）
     /// - 其他事件 → deliver_event
-    /// 投递失败（含未接线适配器）只告警，不阻断 WebView 事件。
+    ///   投递失败（含未接线适配器）只告警，不阻断 WebView 事件。
     pub fn deliver_all(&self, source: &str, event: &str, payload: &serde_json::Value) {
         // 修复（P3）：前缀匹配提为平台 key 比较（source "qq:group:1" → "qq"），
         // 不再每适配器每元素 format! 一次（原实现与 starts_with("key:") 等价）。
         let key = source.split(':').next().unwrap_or("");
-        let adapters: Vec<Arc<dyn PlatformAdapter>> = self.adapters.lock()
+        let adapters: Vec<Arc<dyn PlatformAdapter>> = self
+            .adapters
+            .lock()
             .map(|a| {
                 a.values()
                     .filter(|adapter| adapter.platform_key() == key)
@@ -216,14 +254,22 @@ impl GatewayCore {
             for adapter in &adapters {
                 for chunk in truncate::truncate_message(&text, adapter.max_message_len()) {
                     if let Err(error) = adapter.deliver_text(source, &chunk) {
-                        log::warn!("gateway deliver_text({}) failed: {}", adapter.platform_key(), error);
+                        log::warn!(
+                            "gateway deliver_text({}) failed: {}",
+                            adapter.platform_key(),
+                            error
+                        );
                     }
                 }
             }
         } else {
             for adapter in &adapters {
                 if let Err(error) = adapter.deliver_event(source, event, payload) {
-                    log::warn!("gateway deliver_event({}) failed: {}", adapter.platform_key(), error);
+                    log::warn!(
+                        "gateway deliver_event({}) failed: {}",
+                        adapter.platform_key(),
+                        error
+                    );
                 }
             }
         }
@@ -243,14 +289,19 @@ fn extract_deliver_text(event: &str, payload: &serde_json::Value) -> Option<Stri
         return None;
     }
     let update = payload.get("update")?;
-    if update.get("sessionUpdate")
+    if update
+        .get("sessionUpdate")
         .and_then(|v| v.as_str())
         .and_then(crate::acp::SessionUpdateVariant::from_str)
         != Some(crate::acp::SessionUpdateVariant::AgentMessageChunk)
     {
         return None;
     }
-    update.get("content").and_then(|c| c.get("text")).and_then(|v| v.as_str()).map(str::to_string)
+    update
+        .get("content")
+        .and_then(|c| c.get("text"))
+        .and_then(|v| v.as_str())
+        .map(str::to_string)
 }
 
 /// 平台入站白名单检查（B10.3，Hermes group_allow_from / allow_from 模式）：
@@ -272,8 +323,12 @@ pub fn ingest_allowed(
             }
         }
     }
-    let Some(binding) = binding else { return true; };
-    let Some(allow) = &binding.allow_from else { return true; };
+    let Some(binding) = binding else {
+        return true;
+    };
+    let Some(allow) = &binding.allow_from else {
+        return true;
+    };
     let principal = if source.starts_with("qq:group:") {
         member_openid.unwrap_or("")
     } else {
@@ -306,13 +361,22 @@ mod tests {
     }
 
     impl PlatformAdapter for FakeAdapter {
-        fn platform_key(&self) -> &str { self.key }
-        fn max_message_len(&self) -> usize { self.max_len }
+        fn platform_key(&self) -> &str {
+            self.key
+        }
+        fn max_message_len(&self) -> usize {
+            self.max_len
+        }
         fn deliver_text(&self, _source: &str, _text: &str) -> Result<(), String> {
             self.delivered.fetch_add(1, Ordering::SeqCst);
             Ok(())
         }
-        fn deliver_event(&self, _source: &str, event: &str, _payload: &serde_json::Value) -> Result<(), String> {
+        fn deliver_event(
+            &self,
+            _source: &str,
+            event: &str,
+            _payload: &serde_json::Value,
+        ) -> Result<(), String> {
             self.events.lock().unwrap().push(event.to_string());
             Ok(())
         }
@@ -321,8 +385,11 @@ mod tests {
     #[test]
     fn register_rejects_duplicate_platform_key() {
         let core = GatewayCore::new();
-        core.register(FakeAdapter::new("qq", 4000)).expect("first register");
-        let error = core.register(FakeAdapter::new("qq", 4000)).expect_err("duplicate must fail");
+        core.register(FakeAdapter::new("qq", 4000))
+            .expect("first register");
+        let error = core
+            .register(FakeAdapter::new("qq", 4000))
+            .expect_err("duplicate must fail");
         assert!(error.contains("qq"));
         assert_eq!(core.adapter_keys(), vec!["qq"]);
     }
@@ -348,14 +415,18 @@ gateway:
       session: 战役1
 "#;
         let core = GatewayCore::from_config(crate::gateway::route::parse_config(yaml).unwrap());
-        let resolved = core.ingest("qq:group:123", "你好").expect("ingest must resolve");
+        let resolved = core
+            .ingest("qq:group:123", "你好")
+            .expect("ingest must resolve");
         assert_eq!(resolved.source, "qq:group:123");
         assert_eq!(resolved.content, "你好");
         let binding = resolved.binding.expect("static binding must hit");
         assert_eq!(binding.agent_id, "peri");
         assert_eq!(binding.profile_id, "trpg");
         assert_eq!(binding.session_key, "战役1");
-        let unbound = core.ingest("qq:user:999", "hi").expect("unbound source must resolve to default");
+        let unbound = core
+            .ingest("qq:user:999", "hi")
+            .expect("unbound source must resolve to default");
         assert!(unbound.binding.is_none());
     }
 
@@ -382,7 +453,11 @@ gateway:
         });
         core.deliver_all("qq:group:1", "peri:update", &payload);
         assert!(qq.delivered.load(Ordering::SeqCst) > 1, "长文本必须分段");
-        assert_eq!(qq.events.lock().unwrap().len(), 0, "文本事件不走 deliver_event");
+        assert_eq!(
+            qq.events.lock().unwrap().len(),
+            0,
+            "文本事件不走 deliver_event"
+        );
     }
 
     #[test]
@@ -393,18 +468,33 @@ gateway:
         core.register(qq.clone()).unwrap();
         core.register(wechat.clone()).unwrap();
         // 非文本事件：仅 qq source 到达 qq 适配器
-        core.deliver_all("qq:group:1", "peri:done", &serde_json::json!({"source": "qq:group:1", "data": {}}));
+        core.deliver_all(
+            "qq:group:1",
+            "peri:done",
+            &serde_json::json!({"source": "qq:group:1", "data": {}}),
+        );
         assert_eq!(*qq.events.lock().unwrap(), vec!["peri:done".to_string()]);
-        assert!(wechat.events.lock().unwrap().is_empty(), "wechat 不得收到 qq 事件");
+        assert!(
+            wechat.events.lock().unwrap().is_empty(),
+            "wechat 不得收到 qq 事件"
+        );
         // local source（GUI 会话）不投递给任何平台
-        core.deliver_all("local", "peri:done", &serde_json::json!({"source": "local", "data": {}}));
+        core.deliver_all(
+            "local",
+            "peri:done",
+            &serde_json::json!({"source": "local", "data": {}}),
+        );
         assert!(qq.events.lock().unwrap().len() == 1);
     }
 
     #[test]
     fn deliver_all_with_empty_registry_is_safe() {
         let core = GatewayCore::new();
-        core.deliver_all("qq:group:1", "peri:update", &serde_json::json!({"update": {}}));
+        core.deliver_all(
+            "qq:group:1",
+            "peri:update",
+            &serde_json::json!({"update": {}}),
+        );
         assert!(core.adapter_keys().is_empty());
     }
 
@@ -412,21 +502,38 @@ gateway:
     fn deliver_all_reports_wired_failures_without_panicking() {
         struct FailingAdapter;
         impl PlatformAdapter for FailingAdapter {
-            fn platform_key(&self) -> &str { "failing" }
-            fn max_message_len(&self) -> usize { 4000 }
+            fn platform_key(&self) -> &str {
+                "failing"
+            }
+            fn max_message_len(&self) -> usize {
+                4000
+            }
             fn deliver_text(&self, _s: &str, _t: &str) -> Result<(), String> {
                 Err("未接线".to_string())
             }
-            fn deliver_event(&self, _s: &str, _e: &str, _p: &serde_json::Value) -> Result<(), String> {
+            fn deliver_event(
+                &self,
+                _s: &str,
+                _e: &str,
+                _p: &serde_json::Value,
+            ) -> Result<(), String> {
                 Err("未接线".to_string())
             }
         }
         let core = GatewayCore::new();
         core.register(Arc::new(FailingAdapter)).unwrap();
-        core.deliver_all("failing:user:1", "peri:update", &serde_json::json!({
-            "update": {"sessionUpdate": "agent_message_chunk", "content": {"text": "hi"}}
-        }));
-        core.deliver_all("failing:user:1", "peri:done", &serde_json::json!({"data": {}}));
+        core.deliver_all(
+            "failing:user:1",
+            "peri:update",
+            &serde_json::json!({
+                "update": {"sessionUpdate": "agent_message_chunk", "content": {"text": "hi"}}
+            }),
+        );
+        core.deliver_all(
+            "failing:user:1",
+            "peri:done",
+            &serde_json::json!({"data": {}}),
+        );
     }
 
     fn config_with(yaml: &str) -> GatewayCore {
@@ -435,7 +542,8 @@ gateway:
 
     #[test]
     fn ingest_allowed_enforces_group_and_member_allowlists() {
-        let config = config_with(r#"
+        let config = config_with(
+            r#"
 gateway:
   qq:
     group_allow_from: [group-a]
@@ -450,30 +558,75 @@ gateway:
       profile: default
       session: dm
       allow_from: [user-1]
-"#);
+"#,
+        );
         let qq = config.qq_config();
         let group_binding = config.binding("qq:group:group-a");
         // 群级白名单：未列出群拒绝
-        assert!(!ingest_allowed(&qq, group_binding.as_ref(), "qq:group:group-x", Some("member-1"), None));
+        assert!(!ingest_allowed(
+            &qq,
+            group_binding.as_ref(),
+            "qq:group:group-x",
+            Some("member-1"),
+            None
+        ));
         // 成员白名单：匹配放行、不匹配拒绝
-        assert!(ingest_allowed(&qq, group_binding.as_ref(), "qq:group:group-a", Some("member-1"), None));
-        assert!(!ingest_allowed(&qq, group_binding.as_ref(), "qq:group:group-a", Some("stranger"), None));
+        assert!(ingest_allowed(
+            &qq,
+            group_binding.as_ref(),
+            "qq:group:group-a",
+            Some("member-1"),
+            None
+        ));
+        assert!(!ingest_allowed(
+            &qq,
+            group_binding.as_ref(),
+            "qq:group:group-a",
+            Some("stranger"),
+            None
+        ));
         // 私聊白名单：按 user_openid
         let c2c_binding = config.binding("qq:user:user-1");
-        assert!(ingest_allowed(&qq, c2c_binding.as_ref(), "qq:user:user-1", None, Some("user-1")));
-        assert!(!ingest_allowed(&qq, c2c_binding.as_ref(), "qq:user:user-1", None, Some("user-2")));
+        assert!(ingest_allowed(
+            &qq,
+            c2c_binding.as_ref(),
+            "qq:user:user-1",
+            None,
+            Some("user-1")
+        ));
+        assert!(!ingest_allowed(
+            &qq,
+            c2c_binding.as_ref(),
+            "qq:user:user-1",
+            None,
+            Some("user-2")
+        ));
         // 群级白名单配置了 group-a：any 群被拒绝
-        assert!(!ingest_allowed(&qq, None, "qq:group:any", Some("whoever"), None));
+        assert!(!ingest_allowed(
+            &qq,
+            None,
+            "qq:group:any",
+            Some("whoever"),
+            None
+        ));
         // 无群级白名单 + 无绑定 → 放行
-        let open = config_with(r#"
+        let open = config_with(
+            r#"
 gateway:
   routes:
     - source: qq:group:123
       agent: peri
       profile: trpg
       session: 战役1
-"#);
-        assert!(ingest_allowed(&open.qq_config(), None, "qq:group:any", Some("whoever"), None));
+"#,
+        );
+        assert!(ingest_allowed(
+            &open.qq_config(),
+            None,
+            "qq:group:any",
+            Some("whoever"),
+            None
+        ));
     }
 
     #[test]
@@ -486,7 +639,11 @@ gateway:
             calls_clone.fetch_add(1, Ordering::SeqCst);
         }));
         let resolved = core.ingest("qq:group:1", "hello").expect("ingest");
-        assert_eq!(calls.load(Ordering::SeqCst), 0, "ingest 纯解析不得触发 handler");
+        assert_eq!(
+            calls.load(Ordering::SeqCst),
+            0,
+            "ingest 纯解析不得触发 handler"
+        );
         core.dispatch_ingest(&resolved);
         assert_eq!(calls.load(Ordering::SeqCst), 1, "dispatch 必须触发 handler");
         core.dispatch_ingest(&resolved);

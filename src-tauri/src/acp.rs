@@ -1,4 +1,4 @@
-﻿//! ACP Client — spawn peri.exe as child process, JSON-RPC over stdin/stdout.
+//! ACP Client — spawn peri.exe as child process, JSON-RPC over stdin/stdout.
 //!
 //! Architecture: one dedicated reader thread dispatches messages by request_id
 //! to per-session channels. No lock contention between concurrent sessions.
@@ -9,8 +9,8 @@ use std::collections::HashMap;
 use std::future::Future;
 use std::io::{BufRead, BufReader, BufWriter, Write};
 use std::process::{Child, Command, Stdio};
-use std::sync::{Arc, Mutex};
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
+use std::sync::{Arc, Mutex};
 use tokio::sync::{broadcast, mpsc, oneshot};
 
 // ── Constants ──
@@ -83,13 +83,17 @@ fn to_params<T: serde::Serialize>(req: &T, what: &str) -> Result<serde_json::Val
 }
 
 fn content_blocks_from_values(values: Vec<serde_json::Value>) -> Result<Vec<ContentBlock>, String> {
-    values.into_iter()
+    values
+        .into_iter()
         .map(|v| serde_json::from_value(v).map_err(|e| format!("invalid prompt block: {e}")))
         .collect()
 }
 
 /// session/new 参数。mcpServers 以 Pylon 自有格式直传（官方 McpServer 需 name 字段）。
-pub fn session_new_params(cwd: &str, mcp_servers: Vec<serde_json::Value>) -> Result<serde_json::Value, String> {
+pub fn session_new_params(
+    cwd: &str,
+    mcp_servers: Vec<serde_json::Value>,
+) -> Result<serde_json::Value, String> {
     let req = NewSessionRequest::new(cwd.to_string());
     let mut params = to_params(&req, "session/new")?;
     if let Some(obj) = params.as_object_mut() {
@@ -99,7 +103,11 @@ pub fn session_new_params(cwd: &str, mcp_servers: Vec<serde_json::Value>) -> Res
 }
 
 /// session/load 参数。仅被 [`AcpClient::load_session_params`] 包装使用。
-fn session_load_params(session_id: &str, cwd: &str, mcp_servers: Vec<serde_json::Value>) -> Result<serde_json::Value, String> {
+fn session_load_params(
+    session_id: &str,
+    cwd: &str,
+    mcp_servers: Vec<serde_json::Value>,
+) -> Result<serde_json::Value, String> {
     let req = LoadSessionRequest::new(session_id.to_string(), cwd.to_string());
     let mut params = to_params(&req, "session/load")?;
     if let Some(obj) = params.as_object_mut() {
@@ -115,7 +123,11 @@ pub fn session_set_mode_params(session_id: &str, mode: &str) -> Result<serde_jso
 }
 
 /// session/set_config_option 参数（ValueId 平铺：{"configId","value"}）。
-pub fn session_set_config_option_params(session_id: &str, key: &str, value: &str) -> Result<serde_json::Value, String> {
+pub fn session_set_config_option_params(
+    session_id: &str,
+    key: &str,
+    value: &str,
+) -> Result<serde_json::Value, String> {
     let req = SetSessionConfigOptionRequest::new(
         session_id.to_string(),
         key.to_string(),
@@ -125,7 +137,10 @@ pub fn session_set_config_option_params(session_id: &str, key: &str, value: &str
 }
 
 /// session/prompt 参数。仅被 [`AcpClient::prepare_prompt`] 内部使用。
-fn session_prompt_params(session_id: &str, prompt: Vec<serde_json::Value>) -> Result<serde_json::Value, String> {
+fn session_prompt_params(
+    session_id: &str,
+    prompt: Vec<serde_json::Value>,
+) -> Result<serde_json::Value, String> {
     let req = PromptRequest::new(session_id.to_string(), content_blocks_from_values(prompt)?);
     to_params(&req, "session/prompt")
 }
@@ -137,7 +152,10 @@ pub fn session_close_params(session_id: &str) -> Result<serde_json::Value, Strin
 }
 
 /// session/set_model 参数（Hermes unstable 扩展，字段与官方 SetSessionModelRequest 一致）。
-pub fn session_set_model_params(session_id: &str, model_id: &str) -> Result<serde_json::Value, String> {
+pub fn session_set_model_params(
+    session_id: &str,
+    model_id: &str,
+) -> Result<serde_json::Value, String> {
     Ok(serde_json::json!({
         "sessionId": session_id,
         "modelId": model_id,
@@ -285,8 +303,12 @@ impl ManagedChild {
                     }
                     return Ok(());
                 }
-                child.kill().map_err(|error| AcpError::Child(format!("kill failed: {error}")))?;
-                child.wait().map_err(|error| AcpError::Child(format!("wait failed: {error}")))?;
+                child
+                    .kill()
+                    .map_err(|error| AcpError::Child(format!("kill failed: {error}")))?;
+                child
+                    .wait()
+                    .map_err(|error| AcpError::Child(format!("wait failed: {error}")))?;
                 Ok(())
             }
             Err(error) => {
@@ -295,11 +317,17 @@ impl ManagedChild {
                 let kill_result = child.kill();
                 let wait_result = child.wait();
                 match (kill_result, wait_result) {
-                    (Ok(()), Ok(_)) => Err(AcpError::Child(format!("try_wait failed: {error}; child killed and waited"))),
+                    (Ok(()), Ok(_)) => Err(AcpError::Child(format!(
+                        "try_wait failed: {error}; child killed and waited"
+                    ))),
                     (kill_error, wait_error) => Err(AcpError::Child(format!(
                         "try_wait failed: {error}; kill: {}; wait: {}",
-                        kill_error.map(|_| "ok".to_string()).unwrap_or_else(|err| err.to_string()),
-                        wait_error.map(|_| "ok".to_string()).unwrap_or_else(|err| err.to_string()),
+                        kill_error
+                            .map(|_| "ok".to_string())
+                            .unwrap_or_else(|err| err.to_string()),
+                        wait_error
+                            .map(|_| "ok".to_string())
+                            .unwrap_or_else(|err| err.to_string()),
                     ))),
                 }
             }
@@ -359,7 +387,13 @@ impl PreparedRpc {
     /// 进入 [`wait_prompt_with_cancel`] 的超时/取消流程（响应未到的 pending 保留，
     /// 由 reader 到响应时移除或 EOF 时 drain，与 V14 模式一致）。
     pub async fn send_keep_rx(self) -> Result<oneshot::Receiver<RawMessage>, AcpError> {
-        let PreparedRpc { id, line, write_tx, rx, pending } = self;
+        let PreparedRpc {
+            id,
+            line,
+            write_tx,
+            rx,
+            pending,
+        } = self;
         if let Err(error) = send_line(write_tx, line).await {
             remove_pending_from(&pending, id);
             return Err(error);
@@ -370,7 +404,13 @@ impl PreparedRpc {
     /// 通用 RPC 结算（R3：原 `AcpClient::complete_rpc` 提取为 PreparedRpc 方法）：
     /// 发送 + 30s 超时等待匹配响应 + 错误/结果解析。不依赖 AcpClient 实例，可在锁外执行。
     pub async fn complete(self) -> Result<serde_json::Value, AcpError> {
-        let PreparedRpc { id, line, write_tx, rx, pending } = self;
+        let PreparedRpc {
+            id,
+            line,
+            write_tx,
+            rx,
+            pending,
+        } = self;
         if let Err(error) = send_line(write_tx, line).await {
             remove_pending_from(&pending, id);
             return Err(error);
@@ -459,7 +499,12 @@ where
 /// 时 writer 线程阻塞在 writeln!/flush，256 容量 mpsc 填满后 send 无限挂起。
 /// 超时视为连接故障（warn 日志 + Err），由调用方按连接故障收敛。
 async fn send_line(tx: mpsc::Sender<String>, line: String) -> Result<(), AcpError> {
-    match tokio::time::timeout(std::time::Duration::from_secs(WRITE_TIMEOUT_SECS), tx.send(line)).await {
+    match tokio::time::timeout(
+        std::time::Duration::from_secs(WRITE_TIMEOUT_SECS),
+        tx.send(line),
+    )
+    .await
+    {
         Ok(Ok(())) => Ok(()),
         Ok(Err(_)) => Err(AcpError::ConnectionClosed),
         Err(_) => {
@@ -539,7 +584,11 @@ impl AcpClient {
     /// 同步准备一次 JSON-RPC 请求（注册 pending + 序列化），不写入 stdin。
     /// 调用方持锁只覆盖本方法；发送与等待经 [`PreparedRpc::complete`] 在锁外进行，
     /// 避免 Peri 卡顿时全局串行化（一个慢 RPC 阻塞所有其他命令）。
-    pub fn prepare_rpc(&self, method: &str, params: serde_json::Value) -> Result<PreparedRpc, AcpError> {
+    pub fn prepare_rpc(
+        &self,
+        method: &str,
+        params: serde_json::Value,
+    ) -> Result<PreparedRpc, AcpError> {
         if self.is_crashed() {
             return Err(AcpError::ConnectionClosed);
         }
@@ -554,25 +603,33 @@ impl AcpClient {
         })
     }
 
-    async fn call_async(&self, method: &str, params: serde_json::Value) -> Result<serde_json::Value, AcpError> {
+    async fn call_async(
+        &self,
+        method: &str,
+        params: serde_json::Value,
+    ) -> Result<serde_json::Value, AcpError> {
         self.prepare_rpc(method, params)?.complete().await
     }
 
     /// Extract and validate sessionId from a session/new response.
     pub fn session_id_from(response: &serde_json::Value) -> Result<String, AcpError> {
-        let session_id = response.get("sessionId")
+        let session_id = response
+            .get("sessionId")
             .and_then(|value| value.as_str())
             .ok_or_else(|| AcpError::Child(format!("invalid session/new response: {response}")))?
             .trim();
         if session_id.is_empty() || session_id.eq_ignore_ascii_case("error") {
-            return Err(AcpError::Child(format!("session/new failed: invalid sessionId {session_id:?}")));
+            return Err(AcpError::Child(format!(
+                "session/new failed: invalid sessionId {session_id:?}"
+            )));
         }
         Ok(session_id.to_string())
     }
 
     /// Validate a session/prompt response and return its stop reason.
     pub fn prompt_stop_reason(response: &serde_json::Value) -> Result<&str, AcpError> {
-        let stop_reason = response.get("stopReason")
+        let stop_reason = response
+            .get("stopReason")
             .and_then(|value| value.as_str())
             .ok_or_else(|| AcpError::Child(format!("invalid session/prompt response: {response}")))?
             .trim();
@@ -580,34 +637,50 @@ impl AcpClient {
             "end_turn" | "max_turn_requests" => Ok(stop_reason),
             "cancelled" => Err(AcpError::Child("prompt cancelled".to_string())),
             "refusal" => Err(AcpError::Child("prompt refused by agent".to_string())),
-            other => Err(AcpError::Child(format!("unsupported prompt stopReason: {other}"))),
+            other => Err(AcpError::Child(format!(
+                "unsupported prompt stopReason: {other}"
+            ))),
         }
     }
 
     /// Build prompt blocks (text + attachments) for session/prompt.
-    pub fn prompt_blocks(text: String, attachments: &[String]) -> Result<Vec<serde_json::Value>, String> {
+    pub fn prompt_blocks(
+        text: String,
+        attachments: &[String],
+    ) -> Result<Vec<serde_json::Value>, String> {
         if attachments.len() > MAX_ATTACHMENTS {
-            return Err(format!("too many attachments: maximum is {MAX_ATTACHMENTS}"));
+            return Err(format!(
+                "too many attachments: maximum is {MAX_ATTACHMENTS}"
+            ));
         }
         let mut blocks = vec![serde_json::json!({"type": "text", "text": text})];
         for raw_path in attachments {
             let path = std::path::Path::new(raw_path);
-            let metadata = std::fs::metadata(path)
-                .map_err(|error| format!("attachment metadata failed for {}: {error}", path.display()))?;
+            let metadata = std::fs::metadata(path).map_err(|error| {
+                format!("attachment metadata failed for {}: {error}", path.display())
+            })?;
             if !metadata.is_file() {
                 return Err(format!("attachment is not a file: {}", path.display()));
             }
             if metadata.len() > MAX_ATTACHMENT_BYTES {
                 return Err(format!(
                     "attachment too large: {} is {} bytes, maximum is {} bytes",
-                    path.display(), metadata.len(), MAX_ATTACHMENT_BYTES
+                    path.display(),
+                    metadata.len(),
+                    MAX_ATTACHMENT_BYTES
                 ));
             }
-            let bytes = std::fs::read(path)
-                .map_err(|error| format!("attachment read failed for {}: {error}", path.display()))?;
+            let bytes = std::fs::read(path).map_err(|error| {
+                format!("attachment read failed for {}: {error}", path.display())
+            })?;
             let mime = infer::get(&bytes).map(|kind| kind.mime_type());
             match mime {
-                Some(mime) if matches!(mime, "image/png" | "image/jpeg" | "image/gif" | "image/webp") => {
+                Some(mime)
+                    if matches!(
+                        mime,
+                        "image/png" | "image/jpeg" | "image/gif" | "image/webp"
+                    ) =>
+                {
                     blocks.push(serde_json::json!({
                         "type": "image",
                         "mimeType": mime,
@@ -615,8 +688,12 @@ impl AcpClient {
                     }));
                 }
                 Some(mime) if mime.starts_with("text/") => {
-                    let content = String::from_utf8(bytes)
-                        .map_err(|error| format!("attachment is not valid UTF-8 text {}: {error}", path.display()))?;
+                    let content = String::from_utf8(bytes).map_err(|error| {
+                        format!(
+                            "attachment is not valid UTF-8 text {}: {error}",
+                            path.display()
+                        )
+                    })?;
                     blocks.push(serde_json::json!({"type": "text", "text": content}));
                 }
                 None => {
@@ -624,7 +701,12 @@ impl AcpClient {
                         .map_err(|_| format!("unsupported attachment type: {}", path.display()))?;
                     blocks.push(serde_json::json!({"type": "text", "text": content}));
                 }
-                Some(mime) => return Err(format!("unsupported attachment MIME {mime}: {}", path.display())),
+                Some(mime) => {
+                    return Err(format!(
+                        "unsupported attachment MIME {mime}: {}",
+                        path.display()
+                    ))
+                }
             }
         }
         Ok(blocks)
@@ -633,7 +715,11 @@ impl AcpClient {
     /// Prepare a prompt request without writing to stdin.
     /// R3：与 [`Self::prepare_rpc`] 统一返回 [`PreparedRpc`]——发送经 `send_keep_rx`
     /// （含 10s 写超时与失败路径 pending 清理），等待经 [`wait_prompt_with_cancel`]。
-    pub fn prepare_prompt(&self, session_id: &str, prompt: Vec<serde_json::Value>) -> Result<PreparedRpc, AcpError> {
+    pub fn prepare_prompt(
+        &self,
+        session_id: &str,
+        prompt: Vec<serde_json::Value>,
+    ) -> Result<PreparedRpc, AcpError> {
         // 审查修复：与 prepare_rpc 一致，死亡连接立即拒绝（否则挂满 300s 假超时）
         if self.is_crashed() {
             return Err(AcpError::ConnectionClosed);
@@ -668,7 +754,11 @@ impl AcpClient {
 
     /// Send a fire-and-forget notification (no id, no response expected).
     /// 仅被 [`Self::cancel_session`] 调用。
-    async fn send_notification(&self, method: &str, params: serde_json::Value) -> Result<(), AcpError> {
+    async fn send_notification(
+        &self,
+        method: &str,
+        params: serde_json::Value,
+    ) -> Result<(), AcpError> {
         if self.is_crashed() {
             return Err(AcpError::ConnectionClosed);
         }
@@ -677,7 +767,8 @@ impl AcpClient {
             "method": method,
             "params": params,
         });
-        let line = serde_json::to_string(&req).map_err(|e| AcpError::Child(format!("serialize failed: {e}")))?;
+        let line = serde_json::to_string(&req)
+            .map_err(|e| AcpError::Child(format!("serialize failed: {e}")))?;
         send_line(self.write_tx.clone(), line).await
     }
 
@@ -692,15 +783,20 @@ impl AcpClient {
             "id": id,
             "result": result,
         });
-        let line = serde_json::to_string(&line).map_err(|e| AcpError::Child(format!("serialize failed: {e}")))?;
+        let line = serde_json::to_string(&line)
+            .map_err(|e| AcpError::Child(format!("serialize failed: {e}")))?;
         send_line(self.write_tx.clone(), line).await
     }
 
     /// Cancel a running prompt. Fire-and-forget notification.
     pub async fn cancel_session(&self, session_id: &str) -> Result<(), AcpError> {
-        self.send_notification(METHOD_SESSION_CANCEL, serde_json::json!({
-            "sessionId": session_id
-        })).await
+        self.send_notification(
+            METHOD_SESSION_CANCEL,
+            serde_json::json!({
+                "sessionId": session_id
+            }),
+        )
+        .await
     }
 
     /// Connect from AgentDef with optional structured runtime log sink.
@@ -710,7 +806,9 @@ impl AcpClient {
     ) -> Result<Self, AcpError> {
         let resolved_agent;
         let agent = if let Some(config_path) = crate::agent_config::effective_config_path() {
-            let base_dir = config_path.parent().unwrap_or_else(|| std::path::Path::new("."));
+            let base_dir = config_path
+                .parent()
+                .unwrap_or_else(|| std::path::Path::new("."));
             resolved_agent = agent.resolve_paths(base_dir);
             &resolved_agent
         } else {
@@ -720,17 +818,18 @@ impl AcpClient {
             "subprocess" => {
                 let mut cmd = Command::new(&agent.exe);
                 cmd.args(agent.command_args())
-                   .stdin(Stdio::piped())
-                   .stdout(Stdio::piped())
-                   .stderr(Stdio::piped());
+                    .stdin(Stdio::piped())
+                    .stdout(Stdio::piped())
+                    .stderr(Stdio::piped());
                 if let Some(cwd) = &agent.cwd {
                     cmd.current_dir(cwd);
                 }
                 for (k, v) in &agent.env {
                     cmd.env(k, v);
                 }
-                let child = cmd.spawn()
-                    .map_err(|e| AcpError::Child(format!("spawn {} failed: {}", &agent.exe, e)))?;
+                let child = cmd
+                    .spawn()
+                    .map_err(|e| AcpError::Child(format!("spawn {} failed: {}", agent.exe, e)))?;
                 let mut child = ManagedChild::new(child);
 
                 let stdin = child.take_stdin()?;
@@ -739,8 +838,12 @@ impl AcpClient {
                 std::thread::spawn(move || {
                     let mut writer = BufWriter::new(stdin);
                     while let Some(line) = write_rx.blocking_recv() {
-                        if writeln!(writer, "{}", line).is_err() { break; }
-                        if writer.flush().is_err() { break; }
+                        if writeln!(writer, "{}", line).is_err() {
+                            break;
+                        }
+                        if writer.flush().is_err() {
+                            break;
+                        }
                     }
                 });
                 let stdout = BufReader::new(child.take_stdout()?);
@@ -750,16 +853,23 @@ impl AcpClient {
                 let agent_name_stderr = agent.name.clone();
                 let stderr_logs = runtime_logs.clone();
                 std::thread::spawn(move || {
-                    for line in BufReader::new(stderr).lines() {
-                        if let Ok(l) = line {
-                            if !l.is_empty() {
-                                let safe = crate::runtime_log::sanitize_message(l.clone());
-                                log::error!("{} stderr: {}", agent_name_stderr, safe);
-                                if let Some(hub) = &stderr_logs {
-                                    hub.push(crate::time::Timestamp::now(), "error", "agent-stderr", None, "Agent stderr output", serde_json::Map::from_iter([
-                                        ("agent".to_string(), serde_json::Value::String(agent_name_stderr.clone())),
-                                    ]));
-                                }
+                    // clippy 2026-08-02：读失败即停（map_while）——stderr 一旦读失败后续必失败
+                    for l in BufReader::new(stderr).lines().map_while(Result::ok) {
+                        if !l.is_empty() {
+                            let safe = crate::runtime_log::sanitize_message(l.clone());
+                            log::error!("{} stderr: {}", agent_name_stderr, safe);
+                            if let Some(hub) = &stderr_logs {
+                                hub.push(
+                                    crate::time::Timestamp::now(),
+                                    "error",
+                                    "agent-stderr",
+                                    None,
+                                    "Agent stderr output",
+                                    serde_json::Map::from_iter([(
+                                        "agent".to_string(),
+                                        serde_json::Value::String(agent_name_stderr.clone()),
+                                    )]),
+                                );
                             }
                         }
                     }
@@ -776,24 +886,40 @@ impl AcpClient {
                 let stdout_logs = runtime_logs.clone();
                 std::thread::spawn(move || {
                     for line in stdout.lines() {
-                        let line = match line { Ok(l) => l, Err(_) => break };
+                        let line = match line {
+                            Ok(l) => l,
+                            Err(_) => break,
+                        };
                         let line = line.trim().to_string();
-                        if line.is_empty() { continue; }
+                        if line.is_empty() {
+                            continue;
+                        }
                         let msg_val: serde_json::Value = match serde_json::from_str(&line) {
                             Ok(v) => v,
                             Err(e) => {
                                 log::error!("ACP parse: {}", e);
                                 if let Some(hub) = &stdout_logs {
-                                    hub.push(crate::time::Timestamp::now(), "error", "acp", None, "ACP stdout JSON parse error", serde_json::Map::from_iter([
-                                        ("error".to_string(), serde_json::Value::String(e.to_string())),
-                                    ]));
+                                    hub.push(
+                                        crate::time::Timestamp::now(),
+                                        "error",
+                                        "acp",
+                                        None,
+                                        "ACP stdout JSON parse error",
+                                        serde_json::Map::from_iter([(
+                                            "error".to_string(),
+                                            serde_json::Value::String(e.to_string()),
+                                        )]),
+                                    );
                                 }
                                 continue;
                             }
                         };
                         let raw = RawMessage {
                             id: msg_val.get("id").and_then(|v| v.as_u64()),
-                            method: msg_val.get("method").and_then(|v| v.as_str()).map(|s| s.to_string()),
+                            method: msg_val
+                                .get("method")
+                                .and_then(|v| v.as_str())
+                                .map(|s| s.to_string()),
                             result: msg_val.get("result").cloned(),
                             params: msg_val.get("params").cloned(),
                             error: msg_val.get("error").cloned(),
@@ -804,7 +930,9 @@ impl AcpClient {
                                 let shard = &pending_clone[id as usize % PENDING_SHARDS];
                                 match shard.lock() {
                                     Ok(mut p) => {
-                                        if let Some(tx) = p.remove(&id) { let _ = tx.send(raw); }
+                                        if let Some(tx) = p.remove(&id) {
+                                            let _ = tx.send(raw);
+                                        }
                                     }
                                     Err(_) => {
                                         // poison 时无法 resolve pending，标记 crashed 让上层收敛，
@@ -818,7 +946,10 @@ impl AcpClient {
                     }
                     crashed_reader.store(true, Ordering::Relaxed);
                     let drained = Self::drain_pending(&pending_clone);
-                    log::warn!("ACP: drained {} pending requests after stdout closed", drained);
+                    log::warn!(
+                        "ACP: drained {} pending requests after stdout closed",
+                        drained
+                    );
                     let _ = tx_clone.send(RawMessage {
                         id: None,
                         method: Some(NOTIF_AGENT_CRASHED.to_string()),
@@ -827,41 +958,64 @@ impl AcpClient {
                         error: None,
                     });
                     if let Some(hub) = &stdout_logs {
-                        hub.push(crate::time::Timestamp::now(), "error", "acp", None, "ACP child stdout closed; agent crashed", serde_json::Map::new());
+                        hub.push(
+                            crate::time::Timestamp::now(),
+                            "error",
+                            "acp",
+                            None,
+                            "ACP child stdout closed; agent crashed",
+                            serde_json::Map::new(),
+                        );
                     }
                     log::error!("ACP: child process stdout closed (agent crashed)");
                 });
 
                 let client = AcpClient {
-                    child, write_tx, next_id: AtomicU64::new(1), pending, rx,
+                    child,
+                    write_tx,
+                    next_id: AtomicU64::new(1),
+                    pending,
+                    rx,
                     crashed,
                 };
                 // Initialize——clientCapabilities 支持 per-agent 覆盖（差异字典外置，
                 // agents.yaml `acp.initialize_caps`）；缺省 = 统一默认（tokenStats +
                 // _meta.peri.*，Hermes 忽略无害）。差异适配表见 acp.rs 头部注释与手册 §3.3。
-                let capabilities = agent.acp
+                let capabilities = agent
+                    .acp
                     .as_ref()
                     .and_then(|acp| acp.initialize_caps.clone())
-                    .unwrap_or_else(|| serde_json::json!({
-                        "tokenStats": true,
-                        "_meta": {
-                            "peri.tokenStats": true,
-                            "peri.skillNames": true,
-                            "peri.replay": true
-                        }
-                    }));
-                client.call_async(METHOD_INITIALIZE, serde_json::json!({
-                    "protocolVersion": 1,
-                    "clientCapabilities": capabilities,
-                    "clientInfo": {"name": "Pylon", "version": "0.1.0"}
-                })).await?;
+                    .unwrap_or_else(|| {
+                        serde_json::json!({
+                            "tokenStats": true,
+                            "_meta": {
+                                "peri.tokenStats": true,
+                                "peri.skillNames": true,
+                                "peri.replay": true
+                            }
+                        })
+                    });
+                client
+                    .call_async(
+                        METHOD_INITIALIZE,
+                        serde_json::json!({
+                            "protocolVersion": 1,
+                            "clientCapabilities": capabilities,
+                            "clientInfo": {"name": "Pylon", "version": "0.1.0"}
+                        }),
+                    )
+                    .await?;
                 Ok(client)
             }
             other => Err(AcpError::Child(format!("unsupported transport: {}", other))),
         }
     }
 
-    fn load_session_params(session_id: &str, cwd: &str, mcp_servers: Vec<serde_json::Value>) -> Result<serde_json::Value, String> {
+    fn load_session_params(
+        session_id: &str,
+        cwd: &str,
+        mcp_servers: Vec<serde_json::Value>,
+    ) -> Result<serde_json::Value, String> {
         // ACP schema 1.4 LoadSessionRequest.mcp_servers 无 default（Hermes Pydantic 必填），
         // 字段必须存在；Peri 的 DefaultOnError 容忍缺失/空。无配置时传空数组而非缺字段。
         session_load_params(session_id, cwd, mcp_servers)
@@ -886,26 +1040,37 @@ impl AcpClient {
         // 依赖后删除；id 仅用于在广播流中匹配响应。
         let params = Self::load_session_params(session_id, cwd, mcp_servers)?;
         let (id, line) = self.register_request(METHOD_SESSION_LOAD, &params, None)?;
-        if let Err(error) = send_line(self.write_tx.clone(), line).await {
-            return Err(error);
-        }
+        send_line(self.write_tx.clone(), line).await?;
 
         let mut replay = Vec::new();
         loop {
-            let raw = match tokio::time::timeout(std::time::Duration::from_secs(30), events.recv()).await {
+            let raw = match tokio::time::timeout(std::time::Duration::from_secs(30), events.recv())
+                .await
+            {
                 Ok(Ok(raw)) => raw,
                 Ok(Err(tokio::sync::broadcast::error::RecvError::Lagged(count))) => {
-                    return Err(AcpError::Child(format!("session/load replay lagged by {count} messages")));
+                    return Err(AcpError::Child(format!(
+                        "session/load replay lagged by {count} messages"
+                    )));
                 }
                 Ok(Err(tokio::sync::broadcast::error::RecvError::Closed)) => {
-                    return Err(AcpError::Child("ACP notification stream closed during session/load".to_string()));
+                    return Err(AcpError::Child(
+                        "ACP notification stream closed during session/load".to_string(),
+                    ));
                 }
                 Err(_) => {
-                    return Err(AcpError::Child("session/load replay timed out after 30s".to_string()));
+                    return Err(AcpError::Child(
+                        "session/load replay timed out after 30s".to_string(),
+                    ));
                 }
             };
             if raw.method.as_deref() == Some(NOTIF_SESSION_UPDATE)
-                && raw.params.as_ref().and_then(|params| params.get("sessionId")).and_then(|value| value.as_str()) == Some(session_id)
+                && raw
+                    .params
+                    .as_ref()
+                    .and_then(|params| params.get("sessionId"))
+                    .and_then(|value| value.as_str())
+                    == Some(session_id)
             {
                 if let Some(params) = raw.params {
                     replay.push(params);
@@ -931,7 +1096,10 @@ mod tests {
     /// 测试辅助：经 prepare_rpc + complete 创建会话（生产调用点已锁外化）。
     async fn new_session_rpc(client: &AcpClient) -> Result<serde_json::Value, AcpError> {
         client
-            .prepare_rpc(METHOD_SESSION_NEW, serde_json::json!({"cwd": ".", "mcpServers": []}))?
+            .prepare_rpc(
+                METHOD_SESSION_NEW,
+                serde_json::json!({"cwd": ".", "mcpServers": []}),
+            )?
             .complete()
             .await
     }
@@ -939,7 +1107,10 @@ mod tests {
     /// 测试辅助：经 prepare_rpc + complete 关闭会话。
     async fn close_session_rpc(client: &AcpClient, session_id: &str) -> Result<(), AcpError> {
         client
-            .prepare_rpc(METHOD_SESSION_CLOSE, serde_json::json!({"sessionId": session_id}))?
+            .prepare_rpc(
+                METHOD_SESSION_CLOSE,
+                serde_json::json!({"sessionId": session_id}),
+            )?
             .complete()
             .await?;
         Ok(())
@@ -963,13 +1134,34 @@ mod tests {
     #[test]
     fn session_update_variant_wire_strings_are_stable() {
         // 契约锁定：wire 字符串 ↔ 变体映射（前端/平台依赖这些字符串，勿改拼写）。
-        assert_eq!(SessionUpdateVariant::from_str("agent_message_chunk"), Some(SessionUpdateVariant::AgentMessageChunk));
-        assert_eq!(SessionUpdateVariant::from_str("user_message_chunk"), Some(SessionUpdateVariant::UserMessageChunk));
-        assert_eq!(SessionUpdateVariant::from_str("usage_update"), Some(SessionUpdateVariant::UsageUpdate));
-        assert_eq!(SessionUpdateVariant::from_str("tool_call"), Some(SessionUpdateVariant::ToolCall));
-        assert_eq!(SessionUpdateVariant::from_str("tool_call_update"), Some(SessionUpdateVariant::ToolCallUpdate));
-        assert_eq!(SessionUpdateVariant::from_str("session_info_update"), Some(SessionUpdateVariant::SessionInfoUpdate));
-        assert_eq!(SessionUpdateVariant::from_str("config_option_update"), Some(SessionUpdateVariant::ConfigOptionUpdate));
+        assert_eq!(
+            SessionUpdateVariant::from_str("agent_message_chunk"),
+            Some(SessionUpdateVariant::AgentMessageChunk)
+        );
+        assert_eq!(
+            SessionUpdateVariant::from_str("user_message_chunk"),
+            Some(SessionUpdateVariant::UserMessageChunk)
+        );
+        assert_eq!(
+            SessionUpdateVariant::from_str("usage_update"),
+            Some(SessionUpdateVariant::UsageUpdate)
+        );
+        assert_eq!(
+            SessionUpdateVariant::from_str("tool_call"),
+            Some(SessionUpdateVariant::ToolCall)
+        );
+        assert_eq!(
+            SessionUpdateVariant::from_str("tool_call_update"),
+            Some(SessionUpdateVariant::ToolCallUpdate)
+        );
+        assert_eq!(
+            SessionUpdateVariant::from_str("session_info_update"),
+            Some(SessionUpdateVariant::SessionInfoUpdate)
+        );
+        assert_eq!(
+            SessionUpdateVariant::from_str("config_option_update"),
+            Some(SessionUpdateVariant::ConfigOptionUpdate)
+        );
         assert_eq!(SessionUpdateVariant::from_str("unknown_variant"), None);
     }
 
@@ -1038,7 +1230,10 @@ mod tests {
     #[test]
     fn prompt_without_attachments_contains_one_text_block() {
         let blocks = AcpClient::prompt_blocks("hello".to_string(), &[]).unwrap();
-        assert_eq!(blocks, vec![serde_json::json!({"type": "text", "text": "hello"})]);
+        assert_eq!(
+            blocks,
+            vec![serde_json::json!({"type": "text", "text": "hello"})]
+        );
     }
 
     #[test]
@@ -1046,7 +1241,10 @@ mod tests {
         let attachments = vec!["missing.txt".to_string(); MAX_ATTACHMENTS + 1];
         let error = AcpClient::prompt_blocks("hello".to_string(), &attachments)
             .expect_err("attachment count limit must be enforced before file access");
-        assert_eq!(error, format!("too many attachments: maximum is {MAX_ATTACHMENTS}"));
+        assert_eq!(
+            error,
+            format!("too many attachments: maximum is {MAX_ATTACHMENTS}")
+        );
     }
 
     #[test]
@@ -1056,27 +1254,43 @@ mod tests {
             &["definitely-missing-pylon-attachment.txt".to_string()],
         )
         .expect_err("missing attachment must fail");
-        assert!(error.starts_with("attachment metadata failed for definitely-missing-pylon-attachment.txt:"));
+        assert!(error.starts_with(
+            "attachment metadata failed for definitely-missing-pylon-attachment.txt:"
+        ));
     }
 
     #[test]
     fn prompt_rejects_directory_attachment() {
-        let directory = std::env::temp_dir().join(format!("pylon-attachment-dir-{}", std::process::id()));
+        let directory =
+            std::env::temp_dir().join(format!("pylon-attachment-dir-{}", std::process::id()));
         std::fs::create_dir_all(&directory).unwrap();
-        let error = AcpClient::prompt_blocks("hello".to_string(), &[directory.to_string_lossy().into_owned()])
-            .expect_err("directory attachment must fail");
+        let error = AcpClient::prompt_blocks(
+            "hello".to_string(),
+            &[directory.to_string_lossy().into_owned()],
+        )
+        .expect_err("directory attachment must fail");
         std::fs::remove_dir_all(&directory).unwrap();
-        assert_eq!(error, format!("attachment is not a file: {}", directory.display()));
+        assert_eq!(
+            error,
+            format!("attachment is not a file: {}", directory.display())
+        );
     }
 
     #[test]
     fn prompt_rejects_unknown_binary_attachment() {
-        let path = std::env::temp_dir().join(format!("pylon-attachment-binary-{}.bin", std::process::id()));
+        let path = std::env::temp_dir().join(format!(
+            "pylon-attachment-binary-{}.bin",
+            std::process::id()
+        ));
         std::fs::write(&path, [0xff, 0xfe, 0xfd]).unwrap();
-        let error = AcpClient::prompt_blocks("hello".to_string(), &[path.to_string_lossy().into_owned()])
-            .expect_err("unknown binary attachment must fail");
+        let error =
+            AcpClient::prompt_blocks("hello".to_string(), &[path.to_string_lossy().into_owned()])
+                .expect_err("unknown binary attachment must fail");
         std::fs::remove_file(&path).unwrap();
-        assert_eq!(error, format!("unsupported attachment type: {}", path.display()));
+        assert_eq!(
+            error,
+            format!("unsupported attachment type: {}", path.display())
+        );
     }
 
     #[tokio::test]
@@ -1091,17 +1305,22 @@ mod tests {
             std::time::Duration::from_millis(200),
             move || async move {
                 cancel_called_for_task.store(true, Ordering::SeqCst);
-                tx.send(response()).map_err(|_| "receiver closed".to_string())
+                tx.send(response())
+                    .map_err(|_| "receiver closed".to_string())
             },
         )
         .await;
 
         assert!(cancel_called.load(Ordering::SeqCst));
         match outcome {
-            PromptWaitOutcome::CancelledAfterTimeout { response, cancel_error } => {
+            PromptWaitOutcome::CancelledAfterTimeout {
+                response,
+                cancel_error,
+            } => {
                 assert!(cancel_error.is_none());
                 assert_eq!(
-                    response.and_then(|raw| raw.result)
+                    response
+                        .and_then(|raw| raw.result)
                         .and_then(|value| value.get("stopReason").cloned()),
                     Some(serde_json::json!("cancelled"))
                 );
@@ -1139,15 +1358,23 @@ mod tests {
         let mut receivers = Vec::new();
         for id in [1_u64, 16, 31] {
             let (tx, rx) = oneshot::channel();
-            pending[id as usize % PENDING_SHARDS].lock().unwrap().insert(id, tx);
+            pending[id as usize % PENDING_SHARDS]
+                .lock()
+                .unwrap()
+                .insert(id, tx);
             receivers.push(rx);
         }
 
         assert_eq!(AcpClient::drain_pending(&pending), 3);
         assert!(pending.iter().all(|shard| shard.lock().unwrap().is_empty()));
         for receiver in receivers {
-            let message = receiver.blocking_recv().expect("EOF should wake pending request");
-            assert_eq!(message.error, Some(serde_json::json!("ACP connection closed")));
+            let message = receiver
+                .blocking_recv()
+                .expect("EOF should wake pending request");
+            assert_eq!(
+                message.error,
+                Some(serde_json::json!("ACP connection closed"))
+            );
         }
     }
 
@@ -1178,28 +1405,46 @@ for line in sys.stdin:
             .expect("fake ACP must initialize");
         let child_id = client.child_id().expect("fake ACP child must exist");
         let new_response = client
-            .prepare_rpc(METHOD_SESSION_NEW, serde_json::json!({"cwd": ".", "mcpServers": []}))
+            .prepare_rpc(
+                METHOD_SESSION_NEW,
+                serde_json::json!({"cwd": ".", "mcpServers": []}),
+            )
             .expect("session/new must prepare")
             .complete()
             .await
             .expect("session/new must succeed");
-        assert_eq!(AcpClient::session_id_from(&new_response).unwrap(), "fake-session-1");
+        assert_eq!(
+            AcpClient::session_id_from(&new_response).unwrap(),
+            "fake-session-1"
+        );
 
         let rpc = client
-            .prepare_prompt("fake-session-1", vec![serde_json::json!({"type":"text","text":"hello"})])
+            .prepare_prompt(
+                "fake-session-1",
+                vec![serde_json::json!({"type":"text","text":"hello"})],
+            )
             .expect("prompt must serialize");
         assert!(rpc.line.contains("session/prompt"));
         let request_id = rpc.id;
-        let mut response_rx = rpc.send_keep_rx().await.expect("fake child stdin must remain open");
+        let mut response_rx = rpc
+            .send_keep_rx()
+            .await
+            .expect("fake child stdin must remain open");
         let response = tokio::time::timeout(std::time::Duration::from_secs(2), &mut response_rx)
             .await
             .expect("fake ACP prompt response must arrive")
             .expect("fake ACP prompt pending must settle");
         assert_eq!(response.id, Some(request_id));
-        assert_eq!(AcpClient::prompt_stop_reason(&response.result.unwrap()).unwrap(), "end_turn");
+        assert_eq!(
+            AcpClient::prompt_stop_reason(&response.result.unwrap()).unwrap(),
+            "end_turn"
+        );
 
         client.kill().expect("explicit child cleanup must succeed");
-        assert!(!process_exists(child_id), "fake ACP child must exit after kill_and_wait");
+        assert!(
+            !process_exists(child_id),
+            "fake ACP child must exit after kill_and_wait"
+        );
     }
 
     #[tokio::test]
@@ -1209,7 +1454,10 @@ sys.exit(0)
 "#;
         let agent = crate::test_utils::fake_acp_agent("fake-acp-eof", script);
         let client = AcpClient::connect_with_logs(&agent, None).await;
-        assert!(client.is_err(), "initialize must fail when fake ACP closes without a response");
+        assert!(
+            client.is_err(),
+            "initialize must fail when fake ACP closes without a response"
+        );
     }
 
     #[tokio::test]
@@ -1246,7 +1494,8 @@ for line in sys.stdin:
 
     #[tokio::test]
     async fn fake_acp_cancel_and_close_send_expected_notifications() {
-        let trace_path = std::env::temp_dir().join(format!("pylon-acp-control-{}.jsonl", std::process::id()));
+        let trace_path =
+            std::env::temp_dir().join(format!("pylon-acp-control-{}.jsonl", std::process::id()));
         let script = r#"import json,sys
 trace=open(sys.argv[1],'w',encoding='utf-8')
 for line in sys.stdin:
@@ -1261,15 +1510,26 @@ for line in sys.stdin:
         print(json.dumps(response), flush=True)
 "#;
         let agent = crate::test_utils::fake_acp_agent_with(
-            "fake-acp-control", script, vec![trace_path.to_string_lossy().into_owned()], HashMap::new());
+            "fake-acp-control",
+            script,
+            vec![trace_path.to_string_lossy().into_owned()],
+            HashMap::new(),
+        );
         let client = AcpClient::connect_with_logs(&agent, None)
             .await
             .expect("fake ACP control agent must initialize");
-        client.cancel_session("fake-session-control").await.expect("cancel notification must write");
-        close_session_rpc(&client, "fake-session-control").await.expect("close request must respond");
-        let trace = std::fs::read_to_string(&trace_path).expect("fake ACP must record control requests");
+        client
+            .cancel_session("fake-session-control")
+            .await
+            .expect("cancel notification must write");
+        close_session_rpc(&client, "fake-session-control")
+            .await
+            .expect("close request must respond");
+        let trace =
+            std::fs::read_to_string(&trace_path).expect("fake ACP must record control requests");
         std::fs::remove_file(&trace_path).ok();
-        let requests: Vec<serde_json::Value> = trace.lines()
+        let requests: Vec<serde_json::Value> = trace
+            .lines()
             .map(|line| serde_json::from_str(line).expect("trace line must be JSON"))
             .collect();
         assert!(requests.iter().any(|request| {
@@ -1305,16 +1565,13 @@ sys.exit(0)
         })
         .await
         .expect("fake child EOF must be observed");
-        let error = tokio::time::timeout(
-            std::time::Duration::from_secs(2),
-            new_session_rpc(&client),
-        )
-        .await
-        .expect("pending request must settle after EOF")
-        .expect_err("EOF must reject a new request");
+        let error =
+            tokio::time::timeout(std::time::Duration::from_secs(2), new_session_rpc(&client))
+                .await
+                .expect("pending request must settle after EOF")
+                .expect_err("EOF must reject a new request");
         assert!(error.to_string().contains("ACP connection closed"));
     }
-
 
     #[tokio::test]
     async fn fake_acp_malformed_json_does_not_break_following_response() {
@@ -1331,9 +1588,13 @@ for line in sys.stdin:
         let client = AcpClient::connect_with_logs(&agent, None)
             .await
             .expect("malformed line must not break initialize");
-        let response = new_session_rpc(&client).await
+        let response = new_session_rpc(&client)
+            .await
             .expect("response after malformed line must arrive");
-        assert_eq!(AcpClient::session_id_from(&response).unwrap(), "after-malformed");
+        assert_eq!(
+            AcpClient::session_id_from(&response).unwrap(),
+            "after-malformed"
+        );
     }
 
     #[tokio::test]
@@ -1361,12 +1622,16 @@ for line in sys.stdin:
         })
         .await
         .expect("stderr reader must publish runtime log");
-        let entry = logs.list(&crate::runtime_log::RuntimeLogQuery::default())
+        let entry = logs
+            .list(&crate::runtime_log::RuntimeLogQuery::default())
             .into_iter()
             .find(|entry| entry.source == "agent-stderr")
             .expect("agent stderr log must exist");
         assert_eq!(entry.message, "Agent stderr output");
-        assert_eq!(entry.fields.get("agent").and_then(|value| value.as_str()), Some("fake-acp-stderr"));
+        assert_eq!(
+            entry.fields.get("agent").and_then(|value| value.as_str()),
+            Some("fake-acp-stderr")
+        );
     }
 
     #[tokio::test]
@@ -1384,18 +1649,20 @@ for line in sys.stdin:
         let client = AcpClient::connect_with_logs(&agent, None)
             .await
             .expect("delayed fake ACP must initialize");
-        let response = tokio::time::timeout(
-            std::time::Duration::from_secs(2),
-            new_session_rpc(&client),
-        )
-        .await
-        .expect("delayed response must not hit test timeout")
-        .expect("delayed response must succeed");
-        assert_eq!(AcpClient::session_id_from(&response).unwrap(), "delayed-session");
+        let response =
+            tokio::time::timeout(std::time::Duration::from_secs(2), new_session_rpc(&client))
+                .await
+                .expect("delayed response must not hit test timeout")
+                .expect("delayed response must succeed");
+        assert_eq!(
+            AcpClient::session_id_from(&response).unwrap(),
+            "delayed-session"
+        );
     }
     #[tokio::test]
     async fn fake_acp_prompt_timeout_sends_cancel_and_waits_for_cancelled_response() {
-        let trace_path = std::env::temp_dir().join(format!("pylon-acp-prompt-{}.jsonl", std::process::id()));
+        let trace_path =
+            std::env::temp_dir().join(format!("pylon-acp-prompt-{}.jsonl", std::process::id()));
         let script = r#"import json,sys,time
 trace=open(sys.argv[1],'w',encoding='utf-8')
 for line in sys.stdin:
@@ -1411,12 +1678,19 @@ for line in sys.stdin:
         print(json.dumps({'jsonrpc':'2.0','id':None,'method':'session/update','params':{'sessionId':request['params']['sessionId'],'update':{'sessionUpdate':'agent_message_chunk','content':{'text':'cancelled'}}}}), flush=True)
 "#;
         let agent = crate::test_utils::fake_acp_agent_with(
-            "fake-acp-prompt-timeout", script, vec![trace_path.to_string_lossy().into_owned()], HashMap::new());
+            "fake-acp-prompt-timeout",
+            script,
+            vec![trace_path.to_string_lossy().into_owned()],
+            HashMap::new(),
+        );
         let client = AcpClient::connect_with_logs(&agent, None)
             .await
             .expect("timeout fake ACP must initialize");
         let rpc = client
-            .prepare_prompt("fake-session-timeout", vec![serde_json::json!({"type":"text","text":"hello"})])
+            .prepare_prompt(
+                "fake-session-timeout",
+                vec![serde_json::json!({"type":"text","text":"hello"})],
+            )
             .expect("prompt must serialize");
         let request_id = rpc.id;
         let mut response_rx = rpc.send_keep_rx().await.expect("prompt must write");
@@ -1426,16 +1700,30 @@ for line in sys.stdin:
             std::time::Duration::from_millis(20),
             std::time::Duration::from_millis(200),
             move || async move {
-                cancel_tx.send(serde_json::json!({
-                    "jsonrpc": "2.0",
-                    "method": METHOD_SESSION_CANCEL,
-                    "params": {"sessionId": "fake-session-timeout"}
-                }).to_string()).await.map_err(|_| "ACP connection closed".to_string())
+                cancel_tx
+                    .send(
+                        serde_json::json!({
+                            "jsonrpc": "2.0",
+                            "method": METHOD_SESSION_CANCEL,
+                            "params": {"sessionId": "fake-session-timeout"}
+                        })
+                        .to_string(),
+                    )
+                    .await
+                    .map_err(|_| "ACP connection closed".to_string())
             },
-        ).await;
-        assert!(matches!(outcome, PromptWaitOutcome::CancelledAfterTimeout { response: None, cancel_error: None }));
+        )
+        .await;
+        assert!(matches!(
+            outcome,
+            PromptWaitOutcome::CancelledAfterTimeout {
+                response: None,
+                cancel_error: None
+            }
+        ));
         client.remove_pending(request_id);
-        let trace = std::fs::read_to_string(&trace_path).expect("fake ACP must record prompt and cancel");
+        let trace =
+            std::fs::read_to_string(&trace_path).expect("fake ACP must record prompt and cancel");
         std::fs::remove_file(&trace_path).ok();
         assert!(trace.lines().any(|line| {
             let value: serde_json::Value = serde_json::from_str(line).unwrap();
@@ -1469,7 +1757,8 @@ for line in sys.stdin:
             .load_session_with_replay("target-session", ".", Vec::new())
             .await
             .expect("target session load must succeed");
-        let texts: Vec<&str> = replay.iter()
+        let texts: Vec<&str> = replay
+            .iter()
             .filter_map(|params| params["update"]["content"]["text"].as_str())
             .collect();
         assert_eq!(texts, vec!["target-1", "target-2"]);
@@ -1495,7 +1784,10 @@ for line in sys.stdin:
             .await
             .expect("cancel-response fake ACP must initialize");
         let rpc = client
-            .prepare_prompt("fake-session-cancel-response", vec![serde_json::json!({"type":"text","text":"hello"})])
+            .prepare_prompt(
+                "fake-session-cancel-response",
+                vec![serde_json::json!({"type":"text","text":"hello"})],
+            )
             .expect("prompt must serialize");
         let mut response_rx = rpc.send_keep_rx().await.expect("prompt must write");
         let cancel_tx = client.write_tx.clone();
@@ -1504,17 +1796,31 @@ for line in sys.stdin:
             std::time::Duration::from_millis(20),
             std::time::Duration::from_millis(200),
             move || async move {
-                cancel_tx.send(serde_json::json!({
-                    "jsonrpc": "2.0",
-                    "method": METHOD_SESSION_CANCEL,
-                    "params": {"sessionId": "fake-session-cancel-response"}
-                }).to_string()).await.map_err(|_| "ACP connection closed".to_string())
+                cancel_tx
+                    .send(
+                        serde_json::json!({
+                            "jsonrpc": "2.0",
+                            "method": METHOD_SESSION_CANCEL,
+                            "params": {"sessionId": "fake-session-cancel-response"}
+                        })
+                        .to_string(),
+                    )
+                    .await
+                    .map_err(|_| "ACP connection closed".to_string())
             },
-        ).await;
+        )
+        .await;
         match outcome {
-            PromptWaitOutcome::CancelledAfterTimeout { response: Some(raw), cancel_error } => {
+            PromptWaitOutcome::CancelledAfterTimeout {
+                response: Some(raw),
+                cancel_error,
+            } => {
                 assert!(cancel_error.is_none());
-                assert_eq!(raw.result.and_then(|value| value.get("stopReason").cloned()), Some(serde_json::json!("cancelled")));
+                assert_eq!(
+                    raw.result
+                        .and_then(|value| value.get("stopReason").cloned()),
+                    Some(serde_json::json!("cancelled"))
+                );
             }
             other => panic!("expected final cancelled response, got {other:?}"),
         }
@@ -1522,7 +1828,8 @@ for line in sys.stdin:
 
     #[tokio::test]
     async fn send_response_writes_result_with_matching_id() {
-        let trace_path = std::env::temp_dir().join(format!("pylon-acp-response-{}.jsonl", std::process::id()));
+        let trace_path =
+            std::env::temp_dir().join(format!("pylon-acp-response-{}.jsonl", std::process::id()));
         let script = r#"import json,sys
 trace=open(sys.argv[1],'w',encoding='utf-8')
 for line in sys.stdin:
@@ -1533,20 +1840,31 @@ for line in sys.stdin:
         print(json.dumps({'jsonrpc':'2.0','id':request.get('id'),'result':{}}), flush=True)
 "#;
         let agent = crate::test_utils::fake_acp_agent_with(
-            "fake-acp-response", script, vec![trace_path.to_string_lossy().into_owned()], HashMap::new());
+            "fake-acp-response",
+            script,
+            vec![trace_path.to_string_lossy().into_owned()],
+            HashMap::new(),
+        );
         let mut client = AcpClient::connect_with_logs(&agent, None)
             .await
             .expect("fake ACP must initialize");
-        let result = serde_json::json!({"outcome": {"outcome": "selected", "optionId": "allow_once"}});
-        client.send_response(42, result.clone()).await.expect("send_response must write");
+        let result =
+            serde_json::json!({"outcome": {"outcome": "selected", "optionId": "allow_once"}});
+        client
+            .send_response(42, result.clone())
+            .await
+            .expect("send_response must write");
         // 等待写通道 flush（fake 脚本逐行写 trace）
         tokio::time::sleep(std::time::Duration::from_millis(200)).await;
         let trace = std::fs::read_to_string(&trace_path).expect("read trace");
         std::fs::remove_file(&trace_path).ok();
-        let lines: Vec<serde_json::Value> = trace.lines()
+        let lines: Vec<serde_json::Value> = trace
+            .lines()
             .filter_map(|line| serde_json::from_str(line).ok())
             .collect();
-        let response = lines.iter().find(|line| line.get("id").and_then(|v| v.as_u64()) == Some(42))
+        let response = lines
+            .iter()
+            .find(|line| line.get("id").and_then(|v| v.as_u64()) == Some(42))
             .expect("response line must exist");
         assert_eq!(response["jsonrpc"], "2.0");
         assert_eq!(response["result"]["outcome"]["outcome"], "selected");
@@ -1556,7 +1874,8 @@ for line in sys.stdin:
 
     #[tokio::test]
     async fn fake_acp_initialize_uses_configured_client_capabilities() {
-        let trace_path = std::env::temp_dir().join(format!("pylon-acp-caps-{}.jsonl", std::process::id()));
+        let trace_path =
+            std::env::temp_dir().join(format!("pylon-acp-caps-{}.jsonl", std::process::id()));
         let script = r#"import json,sys
 trace=open(sys.argv[1],'w',encoding='utf-8')
 for line in sys.stdin:
@@ -1569,7 +1888,12 @@ for line in sys.stdin:
             name: "fake-acp-caps".to_string(),
             transport: "subprocess".to_string(),
             exe: "python".to_string(),
-            args: vec!["-u".to_string(), "-c".to_string(), script.to_string(), trace_path.to_string_lossy().into_owned()],
+            args: vec![
+                "-u".to_string(),
+                "-c".to_string(),
+                script.to_string(),
+                trace_path.to_string_lossy().into_owned(),
+            ],
             cwd: None,
             env: HashMap::new(),
             default: false,
@@ -1591,20 +1915,35 @@ for line in sys.stdin:
         tokio::time::sleep(std::time::Duration::from_millis(200)).await;
         let trace = std::fs::read_to_string(&trace_path).expect("read trace");
         std::fs::remove_file(&trace_path).ok();
-        let request: serde_json::Value = trace.lines()
+        let request: serde_json::Value = trace
+            .lines()
             .map(|line| serde_json::from_str(line).expect("trace line"))
             .find(|value: &serde_json::Value| {
                 value.get("method").and_then(|m| m.as_str()) == Some(METHOD_INITIALIZE)
             })
             .expect("initialize must be traced");
-        assert_eq!(request["params"]["clientCapabilities"]["fs"], serde_json::json!({}));
-        assert_eq!(request["params"]["clientCapabilities"]["_meta"]["peri.skillNames"], serde_json::json!(true));
-        assert!(request["params"]["clientCapabilities"].get("tokenStats").is_none(), "覆盖后不再带统一默认 caps");
+        assert_eq!(
+            request["params"]["clientCapabilities"]["fs"],
+            serde_json::json!({})
+        );
+        assert_eq!(
+            request["params"]["clientCapabilities"]["_meta"]["peri.skillNames"],
+            serde_json::json!(true)
+        );
+        assert!(
+            request["params"]["clientCapabilities"]
+                .get("tokenStats")
+                .is_none(),
+            "覆盖后不再带统一默认 caps"
+        );
     }
 
     #[tokio::test]
     async fn fake_acp_initialize_defaults_to_unified_capabilities() {
-        let trace_path = std::env::temp_dir().join(format!("pylon-acp-caps-default-{}.jsonl", std::process::id()));
+        let trace_path = std::env::temp_dir().join(format!(
+            "pylon-acp-caps-default-{}.jsonl",
+            std::process::id()
+        ));
         let script = r#"import json,sys
 trace=open(sys.argv[1],'w',encoding='utf-8')
 for line in sys.stdin:
@@ -1614,7 +1953,11 @@ for line in sys.stdin:
     print(json.dumps({'jsonrpc':'2.0','id':request.get('id'),'result':{}}), flush=True)
 "#;
         let agent = crate::test_utils::fake_acp_agent_with(
-            "fake-acp-caps-default", script, vec![trace_path.to_string_lossy().into_owned()], HashMap::new());
+            "fake-acp-caps-default",
+            script,
+            vec![trace_path.to_string_lossy().into_owned()],
+            HashMap::new(),
+        );
         let mut client = AcpClient::connect_with_logs(&agent, None)
             .await
             .expect("fake ACP with default caps must initialize");
@@ -1622,14 +1965,21 @@ for line in sys.stdin:
         tokio::time::sleep(std::time::Duration::from_millis(200)).await;
         let trace = std::fs::read_to_string(&trace_path).expect("read trace");
         std::fs::remove_file(&trace_path).ok();
-        let request: serde_json::Value = trace.lines()
+        let request: serde_json::Value = trace
+            .lines()
             .map(|line| serde_json::from_str(line).expect("trace line"))
             .find(|value: &serde_json::Value| {
                 value.get("method").and_then(|m| m.as_str()) == Some(METHOD_INITIALIZE)
             })
             .expect("initialize must be traced");
-        assert_eq!(request["params"]["clientCapabilities"]["tokenStats"], serde_json::json!(true));
-        assert_eq!(request["params"]["clientCapabilities"]["_meta"]["peri.replay"], serde_json::json!(true));
+        assert_eq!(
+            request["params"]["clientCapabilities"]["tokenStats"],
+            serde_json::json!(true)
+        );
+        assert_eq!(
+            request["params"]["clientCapabilities"]["_meta"]["peri.replay"],
+            serde_json::json!(true)
+        );
     }
 
     fn process_exists(pid: u32) -> bool {

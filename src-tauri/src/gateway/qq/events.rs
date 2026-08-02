@@ -1,4 +1,4 @@
-﻿//! QQ Bot 事件处理辅助函数（BE-B10-005）。
+//! QQ Bot 事件处理辅助函数（BE-B10-005）。
 //!
 //! 移植自 Prism `src/qq/events.rs`（对应 Hermes adapter 的
 //! _process_attachments / _process_quoted_context / _parse_qq_timestamp）。
@@ -36,7 +36,9 @@ pub fn process_attachments(raw: &Option<Vec<QqAttachment>>) -> AttachmentResult 
             let url = att.url.as_deref().unwrap_or("");
             let filename = att.filename.as_deref().unwrap_or("");
 
-            if url.is_empty() { continue; }
+            if url.is_empty() {
+                continue;
+            }
 
             if ct.starts_with("image/") {
                 image_urls.push(url.to_string());
@@ -45,9 +47,15 @@ pub fn process_attachments(raw: &Option<Vec<QqAttachment>>) -> AttachmentResult 
                 // 语音: 优先使用 QQ 自带的 asr_refer_text
                 voice_transcripts.push("[Voice] [语音消息]".to_string());
             } else if ct.starts_with("video/") {
-                other.push(format!("[video: {}]", if filename.is_empty() { ct } else { filename }));
+                other.push(format!(
+                    "[video: {}]",
+                    if filename.is_empty() { ct } else { filename }
+                ));
             } else {
-                other.push(format!("[file: {}]", if filename.is_empty() { ct } else { filename }));
+                other.push(format!(
+                    "[file: {}]",
+                    if filename.is_empty() { ct } else { filename }
+                ));
             }
         }
     }
@@ -123,12 +131,20 @@ mod tests {
     #[test]
     fn unknown_voice_variant_detected_by_content_type_keyword() {
         // 语音判定只看 content_type（voice/silk 关键词），不看 filename
-        let raw = Some(vec![attachment("https://cdn/v.silk", "application/silk", "v.silk")]);
+        let raw = Some(vec![attachment(
+            "https://cdn/v.silk",
+            "application/silk",
+            "v.silk",
+        )]);
         let result = process_attachments(&raw);
         assert_eq!(result.voice_transcripts, vec!["[Voice] [语音消息]"]);
         assert!(result.image_urls.is_empty());
         // filename 带 silk 但 content_type 不含关键词 → 归为文件
-        let raw = Some(vec![attachment("https://cdn/v.silk", "application/octet-stream", "v.silk")]);
+        let raw = Some(vec![attachment(
+            "https://cdn/v.silk",
+            "application/octet-stream",
+            "v.silk",
+        )]);
         let result = process_attachments(&raw);
         assert!(result.voice_transcripts.is_empty());
         assert!(result.attachment_info.contains("[file: v.silk]"));

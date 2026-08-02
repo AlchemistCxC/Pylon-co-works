@@ -69,19 +69,29 @@ where
         })
         .map(|(source, _, generation)| (source.clone(), generation));
     let first = matches.next()?;
-    if matches.next().is_some() { None } else { Some(first) }
+    if matches.next().is_some() {
+        None
+    } else {
+        Some(first)
+    }
 }
 
 pub fn status_after_connection_failure(previous: AgentLifecycleStatus) -> AgentLifecycleStatus {
     match previous {
-        AgentLifecycleStatus::Connecting | AgentLifecycleStatus::Reconnecting => AgentLifecycleStatus::Disconnected,
+        AgentLifecycleStatus::Connecting | AgentLifecycleStatus::Reconnecting => {
+            AgentLifecycleStatus::Disconnected
+        }
         status => status,
     }
 }
 
 impl Default for AgentRuntimeState {
     fn default() -> Self {
-        Self { status: AgentLifecycleStatus::Disconnected, last_error: None, last_connected_at: None }
+        Self {
+            status: AgentLifecycleStatus::Disconnected,
+            last_error: None,
+            last_connected_at: None,
+        }
     }
 }
 
@@ -91,9 +101,18 @@ mod tests {
 
     #[test]
     fn connection_failure_returns_to_disconnected_without_mutating_connected_state() {
-        assert_eq!(status_after_connection_failure(AgentLifecycleStatus::Connecting), AgentLifecycleStatus::Disconnected);
-        assert_eq!(status_after_connection_failure(AgentLifecycleStatus::Reconnecting), AgentLifecycleStatus::Disconnected);
-        assert_eq!(status_after_connection_failure(AgentLifecycleStatus::Connected), AgentLifecycleStatus::Connected);
+        assert_eq!(
+            status_after_connection_failure(AgentLifecycleStatus::Connecting),
+            AgentLifecycleStatus::Disconnected
+        );
+        assert_eq!(
+            status_after_connection_failure(AgentLifecycleStatus::Reconnecting),
+            AgentLifecycleStatus::Disconnected
+        );
+        assert_eq!(
+            status_after_connection_failure(AgentLifecycleStatus::Connected),
+            AgentLifecycleStatus::Connected
+        );
     }
 
     #[test]
@@ -126,7 +145,12 @@ mod tests {
     #[test]
     fn stale_generation_cannot_remove_current_session() {
         assert!(!session_mapping_matches("peri-current", 3, "peri-old", 2));
-        assert!(!session_mapping_matches("peri-current", 3, "peri-current", 2));
+        assert!(!session_mapping_matches(
+            "peri-current",
+            3,
+            "peri-current",
+            2
+        ));
     }
 
     #[test]
@@ -135,7 +159,10 @@ mod tests {
         let source_b = String::from("source-b");
         let peri_id = String::from("peri-shared");
         let mappings = vec![(&source_a, &peri_id, 3), (&source_b, &peri_id, 3)];
-        assert_eq!(source_for_peri_id_in_generation(mappings, "peri-shared", 3), None);
+        assert_eq!(
+            source_for_peri_id_in_generation(mappings, "peri-shared", 3),
+            None
+        );
     }
 
     #[test]
@@ -144,8 +171,14 @@ mod tests {
         let active_source = String::from("source-active");
         let peri_id = String::from("peri-replaced");
         let mappings = vec![(&old_source, &peri_id, 2), (&active_source, &peri_id, 3)];
-        assert_eq!(source_for_peri_id_in_generation(mappings, "peri-replaced", 3), Some(("source-active".into(), 3)));
-        assert_eq!(source_for_peri_id_in_generation(vec![(&old_source, &peri_id, 2)], "peri-replaced", 3), None);
+        assert_eq!(
+            source_for_peri_id_in_generation(mappings, "peri-replaced", 3),
+            Some(("source-active".into(), 3))
+        );
+        assert_eq!(
+            source_for_peri_id_in_generation(vec![(&old_source, &peri_id, 2)], "peri-replaced", 3),
+            None
+        );
     }
 
     #[test]
@@ -153,7 +186,10 @@ mod tests {
         let source = String::from("source-a");
         let peri_id = String::from("peri-1");
         let mappings = vec![(&source, &peri_id, 7)];
-        assert_eq!(source_for_peri_id_in_generation(mappings, "peri-1", 7), Some(("source-a".into(), 7)));
+        assert_eq!(
+            source_for_peri_id_in_generation(mappings, "peri-1", 7),
+            Some(("source-a".into(), 7))
+        );
     }
 
     #[test]
@@ -161,6 +197,9 @@ mod tests {
         let source = String::from("source-a");
         let peri_id = String::from("peri-a");
         let mappings = vec![(&source, &peri_id, 1)];
-        assert_eq!(source_for_peri_id_in_generation(mappings, "peri-b", 1), None);
+        assert_eq!(
+            source_for_peri_id_in_generation(mappings, "peri-b", 1),
+            None
+        );
     }
 }

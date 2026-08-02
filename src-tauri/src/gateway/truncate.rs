@@ -1,4 +1,4 @@
-﻿//! 长回复切断（BE-B10-002）。
+//! 长回复切断（BE-B10-002）。
 //!
 //! 纯函数分段器：平台单条文本有上限（QQ = 4000 字符），agent 输出超限时切成多段。
 //! 规则参考 Hermes `gateway/platforms/base.py::truncate_message`：
@@ -151,7 +151,7 @@ fn code_block_state<'a>(carry: Option<&'a str>, body: &'a str) -> (bool, &'a str
                 lang = "";
             } else {
                 in_code = true;
-                let tag = stripped[3..].trim();
+                let tag = stripped.strip_prefix("```").unwrap_or("").trim();
                 lang = tag.split_whitespace().next().unwrap_or("");
             }
         }
@@ -270,11 +270,7 @@ mod tests {
 
         // 尾部内容完整保留，不因分段丢失。
         let last = strip_indicator(chunks.last().unwrap());
-        assert!(
-            last.contains("after"),
-            "末段应含收尾文本: {:?}",
-            last
-        );
+        assert!(last.contains("after"), "末段应含收尾文本: {:?}", last);
     }
 
     #[test]
@@ -300,11 +296,7 @@ mod tests {
             first
         );
         let last = strip_indicator(chunks.last().unwrap());
-        assert!(
-            last.ends_with("\n```"),
-            "末段应以闭 fence 结尾: {:?}",
-            last
-        );
+        assert!(last.ends_with("\n```"), "末段应以闭 fence 结尾: {:?}", last);
         assert!(
             last.starts_with("```python\n"),
             "末段应以 ```python 重开: {:?}",
@@ -330,11 +322,7 @@ mod tests {
             );
             // 剥掉指示器后是原文子串：分段不破坏内容、不改变顺序。
             let body = strip_indicator(chunk);
-            assert!(
-                content.contains(body),
-                "段正文不是原文子串: {:?}",
-                body
-            );
+            assert!(content.contains(body), "段正文不是原文子串: {:?}", body);
         }
         // 末段正文应覆盖原文末尾（原文末尾是 "word " 带尾空格，需 trim 后比较）。
         let last = strip_indicator(chunks.last().unwrap());
@@ -360,11 +348,7 @@ mod tests {
             );
             // 切点按字符对齐：剥掉指示器后必为原文子串（若切进多字节字符中间则不成立）。
             let body = strip_indicator(chunk);
-            assert!(
-                content.contains(body),
-                "段正文不是原文子串: {:?}",
-                body
-            );
+            assert!(content.contains(body), "段正文不是原文子串: {:?}", body);
         }
     }
 }

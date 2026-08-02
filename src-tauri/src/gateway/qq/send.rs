@@ -1,4 +1,4 @@
-﻿//! QQ Bot REST API 消息发送（BE-B10-006）。
+//! QQ Bot REST API 消息发送（BE-B10-006）。
 //!
 //! POST /v2/{users|groups}/{id}/messages。移植自 Prism `src/qq/send.rs`。
 //! 请求走 reqwest，错误返回 String；不依赖 tauri。
@@ -19,6 +19,9 @@ fn msg_seq() -> u32 {
 ///
 /// chat_type: "c2c" → /v2/users/{chat_id}/messages；"group" → /v2/groups/{chat_id}/messages。
 /// reply_to 存在时附带 msg_id（回复锚点）。msg_type 支持 MSG_TYPE_TEXT/MSG_TYPE_MARKDOWN。
+// clippy 2026-08-02：8 参均为独立发送参数（client/base_url/token/chat_id/chat_type/content/reply_to/msg_type），
+// 保持显式签名（重构参数结构体收益低）。
+#[allow(clippy::too_many_arguments)]
 pub async fn send_message(
     client: &Client,
     base_url: &str,
@@ -96,7 +99,13 @@ mod tests {
     use std::thread;
 
     /// 本地 TCP 桩：捕获请求头与 body，返回固定响应（prism.rs 同款模式）。
-    fn spawn_capture_server(response: &'static [u8]) -> (std::net::SocketAddr, mpsc::Receiver<String>, thread::JoinHandle<()>) {
+    fn spawn_capture_server(
+        response: &'static [u8],
+    ) -> (
+        std::net::SocketAddr,
+        mpsc::Receiver<String>,
+        thread::JoinHandle<()>,
+    ) {
         let listener = TcpListener::bind("127.0.0.1:0").expect("bind test server");
         let address = listener.local_addr().expect("listener address");
         let (request_tx, request_rx) = mpsc::channel();
@@ -110,7 +119,8 @@ mod tests {
                     break 0;
                 }
                 bytes.extend_from_slice(&buffer[..count]);
-                if let Some(headers_end) = bytes.windows(4).position(|window| window == b"\r\n\r\n") {
+                if let Some(headers_end) = bytes.windows(4).position(|window| window == b"\r\n\r\n")
+                {
                     let headers = String::from_utf8_lossy(&bytes[..headers_end]);
                     let length = headers
                         .lines()
@@ -122,10 +132,10 @@ mod tests {
                     }
                 }
             };
-            request_tx.send(String::from_utf8(bytes).expect("request UTF-8")).expect("send request");
-            stream
-                .write_all(response)
-                .expect("write response");
+            request_tx
+                .send(String::from_utf8(bytes).expect("request UTF-8"))
+                .expect("send request");
+            stream.write_all(response).expect("write response");
         });
         (address, request_rx, server)
     }
@@ -155,8 +165,16 @@ mod tests {
         assert_eq!(msg_id, "msg-1");
         let request = request_rx.recv().expect("captured request");
         assert!(request.starts_with("POST /v2/users/openid-123/messages HTTP/1.1"));
-        assert!(request.contains("authorization: QQBot test-token") || request.contains("Authorization: QQBot test-token"));
-        let body: serde_json::Value = request.split("\r\n\r\n").nth(1).expect("body").parse().expect("body JSON");
+        assert!(
+            request.contains("authorization: QQBot test-token")
+                || request.contains("Authorization: QQBot test-token")
+        );
+        let body: serde_json::Value = request
+            .split("\r\n\r\n")
+            .nth(1)
+            .expect("body")
+            .parse()
+            .expect("body JSON");
         assert_eq!(body["content"], "你好");
         assert_eq!(body["msg_type"], 0);
         assert_eq!(body["msg_id"], "parent-msg");
@@ -185,7 +203,12 @@ mod tests {
         assert_eq!(msg_id, "msg-2");
         let request = request_rx.recv().expect("captured request");
         assert!(request.starts_with("POST /v2/groups/group-456/messages HTTP/1.1"));
-        let body: serde_json::Value = request.split("\r\n\r\n").nth(1).expect("body").parse().expect("body JSON");
+        let body: serde_json::Value = request
+            .split("\r\n\r\n")
+            .nth(1)
+            .expect("body")
+            .parse()
+            .expect("body JSON");
         assert_eq!(body["markdown"]["content"], "**bold**");
         assert_eq!(body["msg_type"], 2);
         assert!(body.get("msg_id").is_none(), "无 reply_to 时不得带 msg_id");
@@ -198,9 +221,18 @@ mod tests {
             b"HTTP/1.1 400 Bad Request\r\nContent-Length: 12\r\nConnection: close\r\n\r\n{\"bad\":true}",
         );
         let client = test_client();
-        let error = send_message(&client, &format!("http://{}", address), "t", "chat-1", "c2c", "x", None, 0)
-            .await
-            .expect_err("400 must fail");
+        let error = send_message(
+            &client,
+            &format!("http://{}", address),
+            "t",
+            "chat-1",
+            "c2c",
+            "x",
+            None,
+            0,
+        )
+        .await
+        .expect_err("400 must fail");
         // 修复（P2-2）：错误携带 HTTP 状态码，classify_send_error 才能命中 403/404/429
         assert!(error.contains("HTTP 400"));
         assert!(error.contains("{\"bad\":true}"));
@@ -210,9 +242,18 @@ mod tests {
     #[tokio::test]
     async fn send_message_rejects_unknown_chat_type() {
         let client = test_client();
-        let error = send_message(&client, "http://127.0.0.1:9", "t", "chat-1", "groupp", "x", None, 0)
-            .await
-            .expect_err("拼错的 chat_type 必须报错");
+        let error = send_message(
+            &client,
+            "http://127.0.0.1:9",
+            "t",
+            "chat-1",
+            "groupp",
+            "x",
+            None,
+            0,
+        )
+        .await
+        .expect_err("拼错的 chat_type 必须报错");
         assert!(error.contains("不支持的 chat_type: groupp"));
     }
 }

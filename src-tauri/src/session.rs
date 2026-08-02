@@ -1,4 +1,4 @@
-﻿//! 会话域：SessionInfo / AppState helpers / 会话命令 / 过期生命周期。
+//! 会话域：SessionInfo / AppState helpers / 会话命令 / 过期生命周期。
 //! R1 拆分自 lib.rs（行为零变化）。
 
 use std::collections::HashMap;
@@ -8,9 +8,7 @@ use std::time::Duration;
 
 use crate::acp::{self, AcpClient, PromptWaitOutcome};
 use crate::agent_config::AgentDef;
-use crate::agent_runtime::{
-    session_mapping_matches, AgentLifecycleStatus, AgentRuntimeState,
-};
+use crate::agent_runtime::{session_mapping_matches, AgentLifecycleStatus, AgentRuntimeState};
 use crate::error::PylonError;
 use crate::gateway::GatewayCore;
 use crate::mcp;
@@ -43,7 +41,13 @@ pub(crate) struct SessionInfo {
 }
 
 impl SessionInfo {
-    pub(crate) fn new(peri_id: String, persona: String, cwd: String, has_first_prompt: bool, generation: u64) -> Self {
+    pub(crate) fn new(
+        peri_id: String,
+        persona: String,
+        cwd: String,
+        has_first_prompt: bool,
+        generation: u64,
+    ) -> Self {
         Self {
             peri_id,
             persona,
@@ -65,41 +69,79 @@ impl SessionInfo {
     }
 
     pub(crate) fn apply_session_response(&mut self, response: &serde_json::Value) {
-        if let Some(options) = response.get("configOptions").and_then(|value| value.as_array()) {
+        if let Some(options) = response
+            .get("configOptions")
+            .and_then(|value| value.as_array())
+        {
             self.config_options = options.clone();
             self.apply_config_options(options);
         }
-        self.mode = response.get("modes")
-            .and_then(|modes| modes.get("currentModeId").or_else(|| modes.get("currentMode")).or_else(|| modes.get("current")))
+        self.mode = response
+            .get("modes")
+            .and_then(|modes| {
+                modes
+                    .get("currentModeId")
+                    .or_else(|| modes.get("currentMode"))
+                    .or_else(|| modes.get("current"))
+            })
             .and_then(value_as_string)
-            .or_else(|| find_config_option(&self.config_options, "mode").and_then(config_option_current_value));
+            .or_else(|| {
+                find_config_option(&self.config_options, "mode")
+                    .and_then(config_option_current_value)
+            });
     }
 
     pub(crate) fn apply_config_options(&mut self, options: &[serde_json::Value]) {
-        if let Some(model) = find_config_option(options, "model").and_then(config_option_current_value) {
+        if let Some(model) =
+            find_config_option(options, "model").and_then(config_option_current_value)
+        {
             self.model = model;
         }
-        if let Some(mode) = find_config_option(options, "mode").and_then(config_option_current_value) {
+        if let Some(mode) =
+            find_config_option(options, "mode").and_then(config_option_current_value)
+        {
             self.mode = Some(mode);
         }
     }
 }
 
 pub(crate) fn value_as_string(value: &serde_json::Value) -> Option<String> {
-    value.as_str().map(ToOwned::to_owned)
-        .or_else(|| value.get("value").and_then(|nested| nested.as_str()).map(ToOwned::to_owned))
-        .or_else(|| value.get("valueId").and_then(|nested| nested.get("value")).and_then(|nested| nested.as_str()).map(ToOwned::to_owned))
+    value
+        .as_str()
+        .map(ToOwned::to_owned)
+        .or_else(|| {
+            value
+                .get("value")
+                .and_then(|nested| nested.as_str())
+                .map(ToOwned::to_owned)
+        })
+        .or_else(|| {
+            value
+                .get("valueId")
+                .and_then(|nested| nested.get("value"))
+                .and_then(|nested| nested.as_str())
+                .map(ToOwned::to_owned)
+        })
 }
 
-pub(crate) fn find_config_option<'a>(options: &'a [serde_json::Value], key: &str) -> Option<&'a serde_json::Value> {
+pub(crate) fn find_config_option<'a>(
+    options: &'a [serde_json::Value],
+    key: &str,
+) -> Option<&'a serde_json::Value> {
     options.iter().find(|option| {
-        option.get("id").or_else(|| option.get("key")).or_else(|| option.get("name"))
-            .and_then(|value| value.as_str()) == Some(key)
+        option
+            .get("id")
+            .or_else(|| option.get("key"))
+            .or_else(|| option.get("name"))
+            .and_then(|value| value.as_str())
+            == Some(key)
     })
 }
 
 pub(crate) fn config_option_current_value(option: &serde_json::Value) -> Option<String> {
-    option.get("currentValue").and_then(value_as_string)
+    option
+        .get("currentValue")
+        .and_then(value_as_string)
         .or_else(|| option.get("value").and_then(value_as_string))
         .or_else(|| option.get("current").and_then(value_as_string))
         .or_else(|| option.get("selected").and_then(value_as_string))
@@ -112,7 +154,8 @@ pub(crate) const MAX_SESSIONS: usize = 100;
 /// - reset="off"：永不过期
 /// - reset="daily"：按 UTC 日历天比较（updated_at 与 now 不同天 → 过期）
 /// - 其他（默认 idle）：`now - updated_at > idle_minutes` → 过期
-/// updated_at 缺失（历史数据）视为未过期（保守，防误杀）。
+///   updated_at 缺失（历史数据）视为未过期（保守，防误杀）。
+///
 /// R4：参数从 &str 时间戳改为 Timestamp（消除 parse 往返），语义不变。
 pub(crate) fn session_expired(
     updated_at: Option<Timestamp>,
@@ -193,12 +236,18 @@ impl AppState {
 
     /// 当前 active agent 的 runtime；缺失时返回错误（命令层统一错误路径）。
     pub(crate) fn require_runtime(&self) -> Result<Arc<AgentRuntime>, String> {
-        self.active_runtime().ok_or_else(|| "no active agent configured".to_string())
+        self.active_runtime()
+            .ok_or_else(|| "no active agent configured".to_string())
     }
 
     /// 锁外 RPC：短锁仅覆盖同步准备（prepare_rpc），发送与等待在锁外执行——
     /// Peri 卡顿时不阻塞其他命令（V14「锁外写 prompt」模式推广到全部 RPC）。
-    pub(crate) async fn acp_rpc(&self, runtime: &AgentRuntime, method: &str, params: serde_json::Value) -> Result<serde_json::Value, crate::acp::AcpError> {
+    pub(crate) async fn acp_rpc(
+        &self,
+        runtime: &AgentRuntime,
+        method: &str,
+        params: serde_json::Value,
+    ) -> Result<serde_json::Value, crate::acp::AcpError> {
         let rpc = {
             let acp = runtime.acp.lock().await;
             acp.prepare_rpc(method, params)?
@@ -210,8 +259,15 @@ impl AppState {
     /// 切 model 必须走 unstable 的 session/set_model。核验修复：按 AgentDef 配置
     /// `set_model_api` 判定（不再硬编码 agent id "hermes"）。
     pub(crate) fn uses_set_model_api(&self) -> bool {
-        let active_id = self.active_agent.lock().ok().map(|v| v.clone()).unwrap_or_default();
-        self.agents.lock().ok()
+        let active_id = self
+            .active_agent
+            .lock()
+            .ok()
+            .map(|v| v.clone())
+            .unwrap_or_default();
+        self.agents
+            .lock()
+            .ok()
             .and_then(|agents| agents.get(&active_id).cloned())
             .map(|agent| agent.set_model_api)
             .unwrap_or(false)
@@ -221,29 +277,50 @@ impl AppState {
         runtime.client_generation.load(Ordering::Acquire)
     }
 
-    pub(crate) fn ensure_generation(&self, runtime: &AgentRuntime, expected: u64) -> Result<(), String> {
+    pub(crate) fn ensure_generation(
+        &self,
+        runtime: &AgentRuntime,
+        expected: u64,
+    ) -> Result<(), String> {
         let current = self.current_generation(runtime);
         if current == expected {
             Ok(())
         } else {
-            Err(format!("stale ACP client generation: expected {expected}, current {current}"))
+            Err(format!(
+                "stale ACP client generation: expected {expected}, current {current}"
+            ))
         }
     }
 
     pub(crate) fn get_active_agent(&self) -> Result<AgentDef, PylonError> {
-        let name = self.active_agent.lock().map_err(|e| PylonError::Acp(e.to_string()))?;
-        self.agents.lock().map_err(|e| PylonError::Acp(e.to_string()))?.get(&*name).cloned().ok_or(PylonError::NoActiveAgent)
+        let name = self
+            .active_agent
+            .lock()
+            .map_err(|e| PylonError::Acp(e.to_string()))?;
+        self.agents
+            .lock()
+            .map_err(|e| PylonError::Acp(e.to_string()))?
+            .get(&*name)
+            .cloned()
+            .ok_or(PylonError::NoActiveAgent)
     }
 
     pub(crate) fn agent_cwd(&self) -> String {
-        self.active_agent.lock().ok()
+        self.active_agent
+            .lock()
+            .ok()
             .and_then(|name| self.agents.lock().ok()?.get(&*name).cloned())
             .and_then(|a| a.cwd.clone())
             .unwrap_or_else(|| ".".to_string())
     }
 
     pub(crate) fn current_mcp_servers(&self) -> Result<Vec<crate::mcp::McpServerConfig>, String> {
-        Ok(self.runtime_mcp.lock().map_err(|error| error.to_string())?.clone().unwrap_or_default())
+        Ok(self
+            .runtime_mcp
+            .lock()
+            .map_err(|error| error.to_string())?
+            .clone()
+            .unwrap_or_default())
     }
 
     pub(crate) fn log_runtime_summary(
@@ -255,12 +332,19 @@ impl AppState {
         fields: serde_json::Map<String, serde_json::Value>,
     ) {
         // P2-6：委托 handles 版本（唯一实现，避免双份逐字重复）。
-        AppStateHandles::from_state(self).log_runtime_summary(level, source, session, message, fields);
+        AppStateHandles::from_state(self)
+            .log_runtime_summary(level, source, session, message, fields);
     }
 
-    pub(crate) fn workspace_root_for_source(&self, runtime: &AgentRuntime, source: &str) -> Result<String, String> {
+    pub(crate) fn workspace_root_for_source(
+        &self,
+        runtime: &AgentRuntime,
+        source: &str,
+    ) -> Result<String, String> {
         let sessions = runtime.sessions.lock().map_err(|e| e.to_string())?;
-        sessions.get(source).map(|session| session.cwd.clone())
+        sessions
+            .get(source)
+            .map(|session| session.cwd.clone())
             .ok_or_else(|| PylonError::SessionNotFound(source.to_string()).to_string())
     }
 
@@ -269,14 +353,26 @@ impl AppState {
         handles.agent_status_payload(handles.active_runtime().as_deref())
     }
 
-    pub(crate) fn get_peri_id(&self, runtime: &AgentRuntime, source: &str) -> Result<String, PylonError> {
-        let sessions = runtime.sessions.lock().map_err(|e| PylonError::Acp(e.to_string()))?;
-        sessions.get(source)
+    pub(crate) fn get_peri_id(
+        &self,
+        runtime: &AgentRuntime,
+        source: &str,
+    ) -> Result<String, PylonError> {
+        let sessions = runtime
+            .sessions
+            .lock()
+            .map_err(|e| PylonError::Acp(e.to_string()))?;
+        sessions
+            .get(source)
             .map(|s| s.peri_id.clone())
             .ok_or_else(|| PylonError::SessionNotFound(source.to_string()))
     }
 
-    pub(crate) fn export_session_owner(&self, runtime: &AgentRuntime, peri_id: &str) -> Result<(String, u64, String), String> {
+    pub(crate) fn export_session_owner(
+        &self,
+        runtime: &AgentRuntime,
+        peri_id: &str,
+    ) -> Result<(String, u64, String), String> {
         let generation = self.current_generation(runtime);
         let sessions = runtime.sessions.lock().map_err(|error| error.to_string())?;
         let matches: Vec<(&String, &SessionInfo)> = sessions
@@ -290,7 +386,13 @@ impl AppState {
         }
     }
 
-    pub(crate) fn session_matches(&self, runtime: &AgentRuntime, source: &str, peri_id: &str, generation: u64) -> Result<bool, String> {
+    pub(crate) fn session_matches(
+        &self,
+        runtime: &AgentRuntime,
+        source: &str,
+        peri_id: &str,
+        generation: u64,
+    ) -> Result<bool, String> {
         let sessions = runtime.sessions.lock().map_err(|e| e.to_string())?;
         Ok(sessions.get(source).map(|session| {
             session_mapping_matches(&session.peri_id, session.generation, peri_id, generation)
@@ -316,17 +418,30 @@ impl AppState {
         Ok(update(session))
     }
 
-    pub(crate) fn mark_first_prompt_if_matches(&self, runtime: &AgentRuntime, source: &str, peri_id: &str, generation: u64) -> Result<(), String> {
+    pub(crate) fn mark_first_prompt_if_matches(
+        &self,
+        runtime: &AgentRuntime,
+        source: &str,
+        peri_id: &str,
+        generation: u64,
+    ) -> Result<(), String> {
         self.with_session_if_matches(runtime, source, peri_id, generation, |session| {
             session.has_first_prompt = true;
         })
     }
 
-    pub(crate) fn remove_session_if_matches(&self, runtime: &AgentRuntime, source: &str, peri_id: &str, generation: u64) -> Result<bool, String> {
+    pub(crate) fn remove_session_if_matches(
+        &self,
+        runtime: &AgentRuntime,
+        source: &str,
+        peri_id: &str,
+        generation: u64,
+    ) -> Result<bool, String> {
         let mut sessions = runtime.sessions.lock().map_err(|error| error.to_string())?;
         if sessions.get(source).map(|session| {
             session_mapping_matches(&session.peri_id, session.generation, peri_id, generation)
-        }) == Some(true) {
+        }) == Some(true)
+        {
             Ok(sessions.remove(source).is_some())
         } else {
             Ok(false)
@@ -363,7 +478,18 @@ impl AppState {
         // 手动 switch/reconnect：跨 agent/全新进程语义，keep_sessions=false（清空映射）。
         // 实现委托给静态辅助，自动重连（keep_sessions=true）与手动路径共用同一份逻辑。
         let handles = AppStateHandles::from_state(self);
-        crate::lifecycle::do_connect_and_replace(&handles, runtime, window, agent, agent_id, start_status, log_action, false, true).await
+        crate::lifecycle::do_connect_and_replace(
+            &handles,
+            runtime,
+            window,
+            agent,
+            agent_id,
+            start_status,
+            log_action,
+            false,
+            true,
+        )
+        .await
     }
 
     /// 平台 ingest 目标 runtime 就绪检查（B10.3）：未连接时懒启动连接。
@@ -373,28 +499,40 @@ impl AppState {
         runtime: &Arc<AgentRuntime>,
         agent_id: &str,
         window: &tauri::WebviewWindow,
-    ) -> Result<(), String> {        let status = runtime.agent_runtime.lock()
+    ) -> Result<(), String> {
+        let status = runtime
+            .agent_runtime
+            .lock()
             .map(|s| s.status)
             .unwrap_or(AgentLifecycleStatus::Disconnected);
         if matches!(
             status,
-            AgentLifecycleStatus::Connected | AgentLifecycleStatus::Connecting | AgentLifecycleStatus::Reconnecting
+            AgentLifecycleStatus::Connected
+                | AgentLifecycleStatus::Connecting
+                | AgentLifecycleStatus::Reconnecting
         ) {
             return Ok(());
         }
-        let agent = self.agents.lock().map_err(|e| e.to_string())?
+        let agent = self
+            .agents
+            .lock()
+            .map_err(|e| e.to_string())?
             .get(agent_id)
             .cloned()
             .ok_or_else(|| format!("unknown agent: {agent_id}"))?;
         let keep = matches!(status, AgentLifecycleStatus::Crashed);
         let _lifecycle_guard = runtime.agent_lifecycle.lock().await;
         // 双检查：拿到生命周期锁后重查（防并发连接）
-        let status = runtime.agent_runtime.lock()
+        let status = runtime
+            .agent_runtime
+            .lock()
             .map(|s| s.status)
             .unwrap_or(AgentLifecycleStatus::Disconnected);
         if matches!(
             status,
-            AgentLifecycleStatus::Connected | AgentLifecycleStatus::Connecting | AgentLifecycleStatus::Reconnecting
+            AgentLifecycleStatus::Connected
+                | AgentLifecycleStatus::Connecting
+                | AgentLifecycleStatus::Reconnecting
         ) {
             return Ok(());
         }
@@ -422,15 +560,23 @@ pub(crate) async fn check_session_expiry(state: &AppState) {
     // 由前端/用户管理，不参与后台过期重置（watcher 是 B10.3b 为平台会话设计）。
     let platform_keys: Vec<String> = state.gateway.adapter_keys();
     // P3：前缀循环外预构造，避免闭包内每 session 每 key 重复 format 分配。
-    let platform_prefixes: Vec<String> = platform_keys.into_iter().map(|key| format!("{key}:")).collect();
+    let platform_prefixes: Vec<String> = platform_keys
+        .into_iter()
+        .map(|key| format!("{key}:"))
+        .collect();
     let is_platform_source = |source: &str| -> bool {
-        platform_prefixes.iter().any(|prefix| source.starts_with(prefix))
+        platform_prefixes
+            .iter()
+            .any(|prefix| source.starts_with(prefix))
             || state.gateway.binding(source).is_some()
     };
     for runtime in state.runtimes.all() {
-        let sessions: Vec<(String, String, Option<Timestamp>)> = runtime.sessions.lock()
+        let sessions: Vec<(String, String, Option<Timestamp>)> = runtime
+            .sessions
+            .lock()
             .map(|sessions| {
-                sessions.iter()
+                sessions
+                    .iter()
                     .map(|(source, info)| (source.clone(), info.peri_id.clone(), info.updated_at))
                     .collect()
             })
@@ -440,7 +586,9 @@ pub(crate) async fn check_session_expiry(state: &AppState) {
                 continue;
             }
             // 活跃豁免：生成中（prompt 锁被占用）永不视为过期
-            let generating = runtime.prompt_locks.lock()
+            let generating = runtime
+                .prompt_locks
+                .lock()
                 .ok()
                 .and_then(|locks| locks.get(&source).cloned())
                 .map(|lock| lock.try_lock().is_err())
@@ -449,8 +597,14 @@ pub(crate) async fn check_session_expiry(state: &AppState) {
                 continue;
             }
             let binding = state.gateway.binding(&source);
-            let reset = binding.as_ref().and_then(|b| b.reset.as_deref()).unwrap_or("idle");
-            let idle_minutes = binding.as_ref().and_then(|b| b.idle_minutes).unwrap_or(1440);
+            let reset = binding
+                .as_ref()
+                .and_then(|b| b.reset.as_deref())
+                .unwrap_or("idle");
+            let idle_minutes = binding
+                .as_ref()
+                .and_then(|b| b.idle_minutes)
+                .unwrap_or(1440);
             let Some(reason) = session_expired(updated_at, now, reset, idle_minutes) else {
                 continue;
             };
@@ -464,8 +618,14 @@ pub(crate) async fn check_session_expiry(state: &AppState) {
                     Err(poisoned) => poisoned.into_inner(),
                 };
                 if sessions.get(&source).map(|session| {
-                    session_mapping_matches(&session.peri_id, session.generation, &peri_id, generation)
-                }) == Some(true) {
+                    session_mapping_matches(
+                        &session.peri_id,
+                        session.generation,
+                        &peri_id,
+                        generation,
+                    )
+                }) == Some(true)
+                {
                     sessions.remove(&source).is_some()
                 } else {
                     false
@@ -477,7 +637,10 @@ pub(crate) async fn check_session_expiry(state: &AppState) {
             }
             // close ACP session（失败不阻断本地清理；旧 peri_id 独立于映射）
             if let Ok(close_params) = acp::session_close_params(&peri_id) {
-                if let Err(error) = state.acp_rpc(&runtime, acp::METHOD_SESSION_CLOSE, close_params).await {
+                if let Err(error) = state
+                    .acp_rpc(&runtime, acp::METHOD_SESSION_CLOSE, close_params)
+                    .await
+                {
                     log::warn!("close expired session {peri_id}: {error}");
                 }
             }
@@ -512,19 +675,41 @@ pub(crate) async fn new_session(
     mcp_servers: Option<Vec<crate::mcp::McpServerConfig>>,
 ) -> Result<serde_json::Value, PylonError> {
     let runtime = state.inner().require_runtime()?;
-    state.inner().log_runtime_summary( "info", "session", Some(source.clone()), "Session creation started", serde_json::Map::new());
+    state.inner().log_runtime_summary(
+        "info",
+        "session",
+        Some(source.clone()),
+        "Session creation started",
+        serde_json::Map::new(),
+    );
     let _creation_guard = runtime.session_creation.lock().await;
     {
         let sessions = runtime.sessions.lock().map_err(|e| e.to_string())?;
-        if sessions.len() >= MAX_SESSIONS { return Err(PylonError::Protocol("max sessions reached".to_string())); }
+        if sessions.len() >= MAX_SESSIONS {
+            return Err(PylonError::Protocol("max sessions reached".to_string()));
+        }
     }
     let session_cwd = cwd.unwrap_or_else(|| state.agent_cwd());
     let generation = state.current_generation(&runtime);
     let mcp_servers = mcp::validate_and_serialize(mcp_servers)?;
-    let response = match state.inner().acp_rpc(&runtime, acp::METHOD_SESSION_NEW, acp::session_new_params(&session_cwd, mcp_servers)?).await {
+    let response = match state
+        .inner()
+        .acp_rpc(
+            &runtime,
+            acp::METHOD_SESSION_NEW,
+            acp::session_new_params(&session_cwd, mcp_servers)?,
+        )
+        .await
+    {
         Ok(response) => response,
         Err(error) => {
-            state.inner().log_runtime_summary( "error", "session", Some(source.clone()), "Session creation failed", serde_json::Map::new());
+            state.inner().log_runtime_summary(
+                "error",
+                "session",
+                Some(source.clone()),
+                "Session creation failed",
+                serde_json::Map::new(),
+            );
             return Err(error.into());
         }
     };
@@ -532,21 +717,37 @@ pub(crate) async fn new_session(
     let peri_id = AcpClient::session_id_from(&response)?;
     let mut session = SessionInfo::new(peri_id.clone(), persona, session_cwd, false, generation);
     session.apply_session_response(&response);
-    let replaced = runtime.sessions.lock().map_err(|e| e.to_string())?
+    let replaced = runtime
+        .sessions
+        .lock()
+        .map_err(|e| e.to_string())?
         .insert(source.clone(), session);
     if let Some(old) = replaced {
         if let Ok(close_params) = acp::session_close_params(&old.peri_id) {
-            if let Err(error) = state.inner().acp_rpc(&runtime, acp::METHOD_SESSION_CLOSE, close_params).await {
+            if let Err(error) = state
+                .inner()
+                .acp_rpc(&runtime, acp::METHOD_SESSION_CLOSE, close_params)
+                .await
+            {
                 log::warn!("close replaced session: {}", error);
             }
         }
     }
-    state.inner().log_runtime_summary( "info", "session", Some(source.clone()), "Session creation succeeded", serde_json::Map::new());
+    state.inner().log_runtime_summary(
+        "info",
+        "session",
+        Some(source.clone()),
+        "Session creation succeeded",
+        serde_json::Map::new(),
+    );
     // Return full response so frontend gets modes + configOptions + sessionId
     Ok(response)
 }
 
 #[tauri::command]
+// clippy 2026-08-02：8 参含 2 个 Tauri 注入（state/window）+ 6 个业务参数（source/content/
+// persona/session_prompt/attachments/mcp_servers），send_message 为 IPC 契约签名不可折叠。
+#[allow(clippy::too_many_arguments)]
 pub(crate) async fn send_message<R: tauri::Runtime>(
     state: tauri::State<'_, AppState>,
     window: tauri::Window<R>,
@@ -579,6 +780,10 @@ pub(crate) async fn send_message<R: tauri::Runtime>(
 /// 平台 ingest 经 handler 路由到绑定 agent 的 runtime 后调用本函数。
 /// `cwd`：自动建会话时的工作目录——平台路由必须传绑定 agent 的 cwd
 /// （绑定 agent ≠ GUI active agent 时 agent_cwd() 会读错）；None 回退 active agent。
+// clippy 2026-08-02：11 参为管线全参数（state/runtime/window/gateway/source/content/persona/
+// session_prompt/attachments/mcp_servers/cwd），GUI 与平台双调用点共享签名；收敛为参数
+// 结构体需同步重构调用方与测试，收益低于风险，保持显式。
+#[allow(clippy::too_many_arguments)]
 pub(crate) async fn send_prompt_core<R: tauri::Runtime>(
     state: &AppState,
     runtime: &Arc<AgentRuntime>,
@@ -592,11 +797,24 @@ pub(crate) async fn send_prompt_core<R: tauri::Runtime>(
     mcp_servers: Option<Vec<crate::mcp::McpServerConfig>>,
     cwd: Option<&str>,
 ) -> Result<String, PylonError> {
-    state.log_runtime_summary( "info", "prompt", Some(source.to_string()), "Prompt started", serde_json::Map::from_iter([
-        ("contentLength".to_string(), serde_json::Value::from(content.len())),
-        ("attachmentCount".to_string(), serde_json::Value::from(attachments.map_or(0, <[String]>::len))),
-    ]));
-    let requested_mcp_servers = mcp::validate_and_serialize(mcp_servers.or_else(|| state.current_mcp_servers().ok()))?;
+    state.log_runtime_summary(
+        "info",
+        "prompt",
+        Some(source.to_string()),
+        "Prompt started",
+        serde_json::Map::from_iter([
+            (
+                "contentLength".to_string(),
+                serde_json::Value::from(content.len()),
+            ),
+            (
+                "attachmentCount".to_string(),
+                serde_json::Value::from(attachments.map_or(0, <[String]>::len)),
+            ),
+        ]),
+    );
+    let requested_mcp_servers =
+        mcp::validate_and_serialize(mcp_servers.or_else(|| state.current_mcp_servers().ok()))?;
     let prompt_lock = prompt_lock_for(&runtime.prompt_locks, source);
     let _prompt_guard = prompt_lock.lock().await;
 
@@ -610,42 +828,72 @@ pub(crate) async fn send_prompt_core<R: tauri::Runtime>(
 
     if runtime.acp.lock().await.is_crashed() {
         if let Some(window) = window {
-            emit_event_all(window, gateway, source, "peri:error", serde_json::json!({"source": source, "error": PylonError::AgentCrashed.to_string()}));
+            emit_event_all(
+                window,
+                gateway,
+                source,
+                "peri:error",
+                serde_json::json!({"source": source, "error": PylonError::AgentCrashed.to_string()}),
+            );
         }
-        return Err(PylonError::AgentCrashed.into());
+        return Err(PylonError::AgentCrashed);
     }
 
     let (peri_id, is_first) = {
         let _creation_guard = runtime.session_creation.lock().await;
         let existing = {
             let sessions = runtime.sessions.lock().map_err(|e| e.to_string())?;
-            sessions.get(source).map(|session| {
-                (session.peri_id.clone(), !session.has_first_prompt)
-            })
+            sessions
+                .get(source)
+                .map(|session| (session.peri_id.clone(), !session.has_first_prompt))
         };
         if let Some(result) = existing {
             result
         } else {
             {
                 let sessions = runtime.sessions.lock().map_err(|e| e.to_string())?;
-                if sessions.len() >= MAX_SESSIONS { return Err(PylonError::Protocol("max sessions reached".to_string())); }
+                if sessions.len() >= MAX_SESSIONS {
+                    return Err(PylonError::Protocol("max sessions reached".to_string()));
+                }
             }
             // P1-1：会话 cwd 优先取调用方显式绑定（平台路由 = 绑定 agent 的 cwd，
             // 可能 ≠ GUI active agent）；无则回退 active agent cwd。
             let session_cwd = cwd.map(str::to_string).unwrap_or_else(|| state.agent_cwd());
             let generation = state.current_generation(runtime);
-            let response = match state.acp_rpc(runtime, acp::METHOD_SESSION_NEW, acp::session_new_params(&session_cwd, requested_mcp_servers.clone())?).await {
+            let response = match state
+                .acp_rpc(
+                    runtime,
+                    acp::METHOD_SESSION_NEW,
+                    acp::session_new_params(&session_cwd, requested_mcp_servers.clone())?,
+                )
+                .await
+            {
                 Ok(response) => response,
                 Err(error) => {
-                    state.log_runtime_summary( "error", "session", Some(source.to_string()), "Session creation failed", serde_json::Map::new());
+                    state.log_runtime_summary(
+                        "error",
+                        "session",
+                        Some(source.to_string()),
+                        "Session creation failed",
+                        serde_json::Map::new(),
+                    );
                     return Err(error.into());
                 }
             };
             state.ensure_generation(runtime, generation)?;
             let pid = AcpClient::session_id_from(&response)?;
-            let mut session = SessionInfo::new(pid.clone(), persona.to_string(), session_cwd, false, generation);
+            let mut session = SessionInfo::new(
+                pid.clone(),
+                persona.to_string(),
+                session_cwd,
+                false,
+                generation,
+            );
             session.apply_session_response(&response);
-            runtime.sessions.lock().map_err(|e| e.to_string())?
+            runtime
+                .sessions
+                .lock()
+                .map_err(|e| e.to_string())?
                 .insert(source.to_string(), session);
             (pid, true)
         }
@@ -658,11 +906,12 @@ pub(crate) async fn send_prompt_core<R: tauri::Runtime>(
         .filter(|value| !value.trim().is_empty())
         .unwrap_or(persona);
 
-    let prompt_content = if is_first && !effective_persona.is_empty() && !content.trim_start().starts_with('/') {
-        format!("{}\n\n---\n\n{}", effective_persona, content)
-    } else {
-        content.to_string()
-    };
+    let prompt_content =
+        if is_first && !effective_persona.is_empty() && !content.trim_start().starts_with('/') {
+            format!("{}\n\n---\n\n{}", effective_persona, content)
+        } else {
+            content.to_string()
+        };
 
     // B11.1：发送前置注入钩子（GUI 与平台 ingest 统一入口）——Prism 可用 +
     // gateway 配置开启 + 非命令消息 → POST /inject 拿 context 前置拼进 prompt。
@@ -673,43 +922,83 @@ pub(crate) async fn send_prompt_core<R: tauri::Runtime>(
         sessions.get(source).map(|s| s.inject_round).unwrap_or(0)
     };
     let prompt_text = if gateway.inject_enabled() && inject_applies_to(content) {
-        match state.prism.inject(
-            &gateway.inject_scenario().unwrap_or_default(),
-            &gateway.inject_sources(),
-            content,
-            message_round,
-        ).await {
+        match state
+            .prism
+            .inject(
+                &gateway.inject_scenario().unwrap_or_default(),
+                &gateway.inject_sources(),
+                content,
+                message_round,
+            )
+            .await
+        {
             Ok(result) => {
                 if result.activated.is_empty() {
-                    state.log_runtime_summary("info", "inject", Some(source.to_string()), "Prism inject returned empty context", serde_json::Map::from_iter([
-                        ("contextLength".to_string(), serde_json::Value::from(result.context.len())),
-                    ]));
+                    state.log_runtime_summary(
+                        "info",
+                        "inject",
+                        Some(source.to_string()),
+                        "Prism inject returned empty context",
+                        serde_json::Map::from_iter([(
+                            "contextLength".to_string(),
+                            serde_json::Value::from(result.context.len()),
+                        )]),
+                    );
                 } else {
-                    state.log_runtime_summary("info", "inject", Some(source.to_string()), "Prism inject activated", serde_json::Map::from_iter([
-                        ("activatedCount".to_string(), serde_json::Value::from(result.activated.len())),
-                        ("contextLength".to_string(), serde_json::Value::from(result.context.len())),
-                    ]));
+                    state.log_runtime_summary(
+                        "info",
+                        "inject",
+                        Some(source.to_string()),
+                        "Prism inject activated",
+                        serde_json::Map::from_iter([
+                            (
+                                "activatedCount".to_string(),
+                                serde_json::Value::from(result.activated.len()),
+                            ),
+                            (
+                                "contextLength".to_string(),
+                                serde_json::Value::from(result.context.len()),
+                            ),
+                        ]),
+                    );
                 }
                 inject_activated = result.activated;
                 compose_inject_prompt(&result.context, &prompt_content)
             }
             Err(error) => {
                 log::warn!("Prism inject failed: {error}");
-                state.log_runtime_summary("warn", "inject", Some(source.to_string()), "Prism inject failed; sent without injection", serde_json::Map::new());
+                state.log_runtime_summary(
+                    "warn",
+                    "inject",
+                    Some(source.to_string()),
+                    "Prism inject failed; sent without injection",
+                    serde_json::Map::new(),
+                );
                 prompt_content
             }
         }
     } else {
         prompt_content
     };
+    // clippy needless_borrow 误报（2026-08-02）：建议去掉 & 直接传 attachment_paths，
+    // 但 prompt_blocks 参数是 &[String]，Vec 不会自动借用（编译失败）；&Vec → &[T]
+    // 是 deref coercion 的惯用写法，allow 保留。
+    #[allow(clippy::needless_borrow)]
     let prompt_blocks = AcpClient::prompt_blocks(prompt_text, &attachment_paths)?;
 
-    state.pet.lock().map(|mut p| crate::pet::on_user_sent(&mut p)).ok();
+    state
+        .pet
+        .lock()
+        .map(|mut p| crate::pet::on_user_sent(&mut p))
+        .ok();
     if let Some(window) = window {
         let mut user_payload = serde_json::json!({ "source": source, "content": content });
         if !inject_activated.is_empty() {
             user_payload["injectActivated"] = serde_json::Value::Array(
-                inject_activated.iter().map(|item| serde_json::Value::String(item.clone())).collect()
+                inject_activated
+                    .iter()
+                    .map(|item| serde_json::Value::String(item.clone()))
+                    .collect(),
             );
         }
         emit_event(window, "peri:user", user_payload);
@@ -747,20 +1036,34 @@ pub(crate) async fn send_prompt_core<R: tauri::Runtime>(
         Duration::from_secs(acp::CANCEL_SETTLE_TIMEOUT_SECS),
         move || async move {
             // R6e：cancel 闭包契约是 Result<(), String>（wait_prompt_with_cancel 泛型边界）
-            acp_for_cancel.lock().await.cancel_session(&peri_id_for_cancel).await.map_err(|e| e.to_string())
+            acp_for_cancel
+                .lock()
+                .await
+                .cancel_session(&peri_id_for_cancel)
+                .await
+                .map_err(|e| e.to_string())
         },
-    ).await;
+    )
+    .await;
 
     match result {
         PromptWaitOutcome::Response(raw) => {
             state.ensure_generation(runtime, prompt_generation)?;
             if !state.session_matches(runtime, source, &peri_id, prompt_generation)? {
-                return Err(PylonError::Protocol(format!("stale session mapping for source: {source}")));
+                return Err(PylonError::Protocol(format!(
+                    "stale session mapping for source: {source}"
+                )));
             }
             if let Some(error) = raw.error {
                 let error = error.to_string();
                 if let Some(window) = window {
-                    emit_event_all(window, gateway, source, "peri:error", serde_json::json!({"source": source, "error": error}));
+                    emit_event_all(
+                        window,
+                        gateway,
+                        source,
+                        "peri:error",
+                        serde_json::json!({"source": source, "error": error}),
+                    );
                 }
                 let _ = state.pet.lock().map(|mut p| crate::pet::on_error(&mut p));
                 Err(PylonError::Protocol(error))
@@ -769,30 +1072,67 @@ pub(crate) async fn send_prompt_core<R: tauri::Runtime>(
                 AcpClient::prompt_stop_reason(&data).map_err(|error| {
                     let error = error.to_string();
                     if let Some(window) = window {
-                    emit_event_all(window, gateway, source, "peri:error", serde_json::json!({"source": source, "error": error}));
-                }
+                        emit_event_all(
+                            window,
+                            gateway,
+                            source,
+                            "peri:error",
+                            serde_json::json!({"source": source, "error": error}),
+                        );
+                    }
                     // M5 感知：refusal / max_turn 区分于普通失败
                     if error.contains("refused") {
-                        let _ = state.pet.lock().map(|mut pet| crate::pet::on_refused(&mut pet));
+                        let _ = state
+                            .pet
+                            .lock()
+                            .map(|mut pet| crate::pet::on_refused(&mut pet));
                     } else if error.contains("max_turn") {
-                        let _ = state.pet.lock().map(|mut pet| crate::pet::on_maxed(&mut pet));
+                        let _ = state
+                            .pet
+                            .lock()
+                            .map(|mut pet| crate::pet::on_maxed(&mut pet));
                     } else {
-                        let _ = state.pet.lock().map(|mut pet| crate::pet::on_error(&mut pet));
+                        let _ = state
+                            .pet
+                            .lock()
+                            .map(|mut pet| crate::pet::on_error(&mut pet));
                     }
                     error
                 })?;
                 if let Err(error) = state.ensure_generation(runtime, prompt_generation) {
-                    let _ = state.remove_session_if_matches(runtime, source, &peri_id, prompt_generation);
+                    let _ = state.remove_session_if_matches(
+                        runtime,
+                        source,
+                        &peri_id,
+                        prompt_generation,
+                    );
                     if let Some(window) = window {
-                    emit_event_all(window, gateway, source, "peri:error", serde_json::json!({"source": source, "error": error}));
-                }
+                        emit_event_all(
+                            window,
+                            gateway,
+                            source,
+                            "peri:error",
+                            serde_json::json!({"source": source, "error": error}),
+                        );
+                    }
                     return Err(error.into());
                 }
                 if is_first {
-                    state.mark_first_prompt_if_matches(runtime, source, &peri_id, prompt_generation)?;
+                    state.mark_first_prompt_if_matches(
+                        runtime,
+                        source,
+                        &peri_id,
+                        prompt_generation,
+                    )?;
                 }
                 if let Some(window) = window {
-                    emit_event_all(window, gateway, source, "peri:done", serde_json::json!({"source": source, "data": data}));
+                    emit_event_all(
+                        window,
+                        gateway,
+                        source,
+                        "peri:done",
+                        serde_json::json!({"source": source, "data": data}),
+                    );
                 }
                 let _ = state.pet.lock().map(|mut p| crate::pet::on_done(&mut p));
                 // B11.2：完成持久化（gateway.inject.persist = "prism"）——把本回合
@@ -801,16 +1141,23 @@ pub(crate) async fn send_prompt_core<R: tauri::Runtime>(
                 if gateway.inject_persist() == "prism" {
                     let response_text = {
                         let sessions = runtime.sessions.lock().map_err(|e| e.to_string())?;
-                        sessions.get(source).map(|s| s.last_response_text.clone()).unwrap_or_default()
+                        sessions
+                            .get(source)
+                            .map(|s| s.last_response_text.clone())
+                            .unwrap_or_default()
                     };
                     if !response_text.trim().is_empty() {
-                        match state.prism.persist_round(
-                            &gateway.inject_scenario().unwrap_or_default(),
-                            &gateway.inject_sources(),
-                            content,
-                            &response_text,
-                            message_round,
-                        ).await {
+                        match state
+                            .prism
+                            .persist_round(
+                                &gateway.inject_scenario().unwrap_or_default(),
+                                &gateway.inject_sources(),
+                                content,
+                                &response_text,
+                                message_round,
+                            )
+                            .await
+                        {
                             Ok(value) => {
                                 let ok = value.get("ok").and_then(|v| v.as_bool()).unwrap_or(false);
                                 if !ok {
@@ -820,30 +1167,56 @@ pub(crate) async fn send_prompt_core<R: tauri::Runtime>(
                                     "info",
                                     "persist",
                                     Some(source.to_string()),
-                                    if ok { "Prism round persisted" } else { "Prism persist returned failure" },
+                                    if ok {
+                                        "Prism round persisted"
+                                    } else {
+                                        "Prism persist returned failure"
+                                    },
                                     serde_json::Map::new(),
                                 );
                             }
                             Err(error) => {
                                 log::warn!("Prism persist failed: {error}");
-                                state.log_runtime_summary("warn", "persist", Some(source.to_string()), "Prism persist failed", serde_json::Map::new());
+                                state.log_runtime_summary(
+                                    "warn",
+                                    "persist",
+                                    Some(source.to_string()),
+                                    "Prism persist failed",
+                                    serde_json::Map::new(),
+                                );
                             }
                         }
                     }
                 }
-                state.log_runtime_summary( "info", "prompt", Some(source.to_string()), "Prompt completed", serde_json::Map::from_iter([
-                    ("result".to_string(), serde_json::Value::String("success".to_string())),
-                ]));
+                state.log_runtime_summary(
+                    "info",
+                    "prompt",
+                    Some(source.to_string()),
+                    "Prompt completed",
+                    serde_json::Map::from_iter([(
+                        "result".to_string(),
+                        serde_json::Value::String("success".to_string()),
+                    )]),
+                );
                 Ok(peri_id)
             }
         }
         PromptWaitOutcome::ConnectionClosed => {
             runtime.acp.lock().await.remove_pending(request_id);
             let _ = state.remove_session_if_matches(runtime, source, &peri_id, prompt_generation);
-            state.log_runtime_summary( "error", "prompt", Some(source.to_string()), "Prompt connection closed", serde_json::Map::new());
+            state.log_runtime_summary(
+                "error",
+                "prompt",
+                Some(source.to_string()),
+                "Prompt connection closed",
+                serde_json::Map::new(),
+            );
             Err(PylonError::Protocol("ACP connection closed".to_string()))
         }
-        PromptWaitOutcome::CancelledAfterTimeout { response, cancel_error } => {
+        PromptWaitOutcome::CancelledAfterTimeout {
+            response,
+            cancel_error,
+        } => {
             runtime.acp.lock().await.remove_pending(request_id);
             if let Some(cancel_error) = cancel_error {
                 log::warn!("cancel timed-out prompt {}: {}", peri_id, cancel_error);
@@ -851,7 +1224,8 @@ pub(crate) async fn send_prompt_core<R: tauri::Runtime>(
             // B9：cancel 后应答该 session 挂起的权限请求为 Cancelled
             crate::permission::respond_pending_permissions_cancelled(runtime, &peri_id).await;
             if response.is_none() {
-                match state.remove_session_if_matches(runtime, source, &peri_id, prompt_generation) {
+                match state.remove_session_if_matches(runtime, source, &peri_id, prompt_generation)
+                {
                     Ok(true) => {
                         log::error!(
                             "cancelled prompt {} did not settle within {}s; removed local session mapping",
@@ -859,8 +1233,15 @@ pub(crate) async fn send_prompt_core<R: tauri::Runtime>(
                             acp::CANCEL_SETTLE_TIMEOUT_SECS
                         );
                         if let Ok(close_params) = acp::session_close_params(&peri_id) {
-                            if let Err(close_error) = state.acp_rpc(runtime, acp::METHOD_SESSION_CLOSE, close_params).await {
-                                log::warn!("close unsettled prompt session {}: {}", peri_id, close_error);
+                            if let Err(close_error) = state
+                                .acp_rpc(runtime, acp::METHOD_SESSION_CLOSE, close_params)
+                                .await
+                            {
+                                log::warn!(
+                                    "close unsettled prompt session {}: {}",
+                                    peri_id,
+                                    close_error
+                                );
                             }
                         }
                     }
@@ -870,24 +1251,50 @@ pub(crate) async fn send_prompt_core<R: tauri::Runtime>(
             }
             let error = "timed out after 300s";
             if let Some(window) = window {
-                emit_event_all(window, gateway, source, "peri:error", serde_json::json!({"source": source, "error": error}));
+                emit_event_all(
+                    window,
+                    gateway,
+                    source,
+                    "peri:error",
+                    serde_json::json!({"source": source, "error": error}),
+                );
             }
             // M5 感知：超时 → 发呆（区别于普通失败）
             let _ = state.pet.lock().map(|mut p| crate::pet::on_timeout(&mut p));
-            state.log_runtime_summary( "error", "prompt", Some(source.to_string()), "Prompt timed out", serde_json::Map::from_iter([
-                ("result".to_string(), serde_json::Value::String("timeout".to_string())),
-            ]));
+            state.log_runtime_summary(
+                "error",
+                "prompt",
+                Some(source.to_string()),
+                "Prompt timed out",
+                serde_json::Map::from_iter([(
+                    "result".to_string(),
+                    serde_json::Value::String("timeout".to_string()),
+                )]),
+            );
             Err(PylonError::Protocol(error.to_string()))
         }
     }
 }
 
 #[tauri::command]
-pub(crate) async fn set_mode(state: tauri::State<'_, AppState>, source: String, mode: String) -> Result<(), PylonError> {
+pub(crate) async fn set_mode(
+    state: tauri::State<'_, AppState>,
+    source: String,
+    mode: String,
+) -> Result<(), PylonError> {
     let runtime = state.inner().require_runtime()?;
     let generation = state.current_generation(&runtime);
-    let peri_id = state.get_peri_id(&runtime, &source).map_err(|e| e.to_string())?;
-    state.inner().acp_rpc(&runtime, acp::METHOD_SESSION_SET_MODE, acp::session_set_mode_params(&peri_id, &mode)?).await?;
+    let peri_id = state
+        .get_peri_id(&runtime, &source)
+        .map_err(|e| e.to_string())?;
+    state
+        .inner()
+        .acp_rpc(
+            &runtime,
+            acp::METHOD_SESSION_SET_MODE,
+            acp::session_set_mode_params(&peri_id, &mode)?,
+        )
+        .await?;
     state.ensure_generation(&runtime, generation)?;
     state.with_session_if_matches(&runtime, &source, &peri_id, generation, |session| {
         session.mode = Some(mode);
@@ -896,21 +1303,45 @@ pub(crate) async fn set_mode(state: tauri::State<'_, AppState>, source: String, 
 }
 
 #[tauri::command]
-pub(crate) async fn set_config_option(state: tauri::State<'_, AppState>, source: String, key: String, value: String) -> Result<serde_json::Value, PylonError> {
+pub(crate) async fn set_config_option(
+    state: tauri::State<'_, AppState>,
+    source: String,
+    key: String,
+    value: String,
+) -> Result<serde_json::Value, PylonError> {
     let runtime = state.inner().require_runtime()?;
     let generation = state.current_generation(&runtime);
-    let peri_id = state.get_peri_id(&runtime, &source).map_err(|e| e.to_string())?;
+    let peri_id = state
+        .get_peri_id(&runtime, &source)
+        .map_err(|e| e.to_string())?;
     // 差异适配：Hermes 切 model 必须走 session/set_model（set_config_option 只认
     // edit_approval_policy，其余存 config_options 不生效）；Peri 走平铺 set_config_option。
     let use_set_model = key == "model" && state.inner().uses_set_model_api();
     let response = if use_set_model {
-        state.inner().acp_rpc(&runtime, acp::METHOD_SESSION_SET_MODEL, acp::session_set_model_params(&peri_id, &value)?).await?
+        state
+            .inner()
+            .acp_rpc(
+                &runtime,
+                acp::METHOD_SESSION_SET_MODEL,
+                acp::session_set_model_params(&peri_id, &value)?,
+            )
+            .await?
     } else {
-        state.inner().acp_rpc(&runtime, acp::METHOD_SESSION_SET_CONFIG_OPTION, acp::session_set_config_option_params(&peri_id, &key, &value)?).await?
+        state
+            .inner()
+            .acp_rpc(
+                &runtime,
+                acp::METHOD_SESSION_SET_CONFIG_OPTION,
+                acp::session_set_config_option_params(&peri_id, &key, &value)?,
+            )
+            .await?
     };
     state.ensure_generation(&runtime, generation)?;
     state.with_session_if_matches(&runtime, &source, &peri_id, generation, |session| {
-        if let Some(options) = response.get("configOptions").and_then(|value| value.as_array()) {
+        if let Some(options) = response
+            .get("configOptions")
+            .and_then(|value| value.as_array())
+        {
             session.config_options = options.clone();
             session.apply_config_options(options);
         } else if key == "model" {
@@ -923,11 +1354,16 @@ pub(crate) async fn set_config_option(state: tauri::State<'_, AppState>, source:
 }
 
 #[tauri::command]
-pub(crate) async fn close_session(state: tauri::State<'_, AppState>, source: String) -> Result<(), PylonError> {
+pub(crate) async fn close_session(
+    state: tauri::State<'_, AppState>,
+    source: String,
+) -> Result<(), PylonError> {
     let runtime = state.inner().require_runtime()?;
     let _creation_guard = runtime.session_creation.lock().await;
     let generation = state.current_generation(&runtime);
-    let peri_id = state.get_peri_id(&runtime, &source).map_err(|e| e.to_string())?;
+    let peri_id = state
+        .get_peri_id(&runtime, &source)
+        .map_err(|e| e.to_string())?;
     // 若该 session 有在途 prompt，先发 cancel（fire-and-forget）让 Peri 侧 settle，
     // 否则 pending oneshot 会挂到 PROMPT_TIMEOUT 才结束——close 后 prompt 卡死 300s。
     {
@@ -935,7 +1371,15 @@ pub(crate) async fn close_session(state: tauri::State<'_, AppState>, source: Str
         let _ = acp.cancel_session(&peri_id).await;
     }
     // Hermes 未实现 session/close（-32601）——降级为本地清理（映射已删，见下）
-    if let Err(error) = state.inner().acp_rpc(&runtime, acp::METHOD_SESSION_CLOSE, acp::session_close_params(&peri_id)?).await {
+    if let Err(error) = state
+        .inner()
+        .acp_rpc(
+            &runtime,
+            acp::METHOD_SESSION_CLOSE,
+            acp::session_close_params(&peri_id)?,
+        )
+        .await
+    {
         let message = error.to_string();
         if message.contains("-32601") || message.contains("Method not found") {
             log::warn!("agent does not support session/close ({message}); local cleanup only");
@@ -947,30 +1391,41 @@ pub(crate) async fn close_session(state: tauri::State<'_, AppState>, source: Str
     crate::permission::respond_pending_permissions_cancelled(&runtime, &peri_id).await;
     state.ensure_generation(&runtime, generation)?;
     if !state.session_matches(&runtime, &source, &peri_id, generation)? {
-        return Err(PylonError::Protocol(format!("stale session mapping for source: {source}")));
+        return Err(PylonError::Protocol(format!(
+            "stale session mapping for source: {source}"
+        )));
     }
     let _ = state.remove_session_if_matches(&runtime, &source, &peri_id, generation)?;
     Ok(())
 }
 
 #[tauri::command]
-pub(crate) async fn cancel_prompt(state: tauri::State<'_, AppState>, source: String) -> Result<(), PylonError> {
+pub(crate) async fn cancel_prompt(
+    state: tauri::State<'_, AppState>,
+    source: String,
+) -> Result<(), PylonError> {
     let runtime = state.inner().require_runtime()?;
     let generation = state.current_generation(&runtime);
-    let peri_id = state.get_peri_id(&runtime, &source).map_err(|e| e.to_string())?;
+    let peri_id = state
+        .get_peri_id(&runtime, &source)
+        .map_err(|e| e.to_string())?;
     // Fire-and-forget notification — Peri will respond with stopReason=cancelled
     runtime.acp.lock().await.cancel_session(&peri_id).await?;
     // B9：cancel 时应答该 session 全部挂起的权限请求为 Cancelled（协议要求）
     crate::permission::respond_pending_permissions_cancelled(&runtime, &peri_id).await;
     state.ensure_generation(&runtime, generation)?;
     if !state.session_matches(&runtime, &source, &peri_id, generation)? {
-        return Err(PylonError::Protocol(format!("stale session mapping for source: {source}")));
+        return Err(PylonError::Protocol(format!(
+            "stale session mapping for source: {source}"
+        )));
     }
     Ok(())
 }
 
 #[tauri::command]
-pub(crate) async fn load_sessions(state: tauri::State<'_, AppState>) -> Result<Vec<serde_json::Value>, PylonError> {
+pub(crate) async fn load_sessions(
+    state: tauri::State<'_, AppState>,
+) -> Result<Vec<serde_json::Value>, PylonError> {
     let runtime = state.inner().require_runtime()?;
     let sessions = runtime.sessions.lock().map_err(|e| e.to_string())?;
     Ok(sessions.iter().map(|(source, info)| {
@@ -1012,8 +1467,12 @@ pub(crate) fn build_full_inspector_payload(
                 active_count += 1;
             }
             all_sessions.push((agent_id.clone(), source.clone(), session));
-            let root = workspace::workspace_root(source.clone(), std::path::Path::new(&session.cwd));
-            workspace.insert(source.clone(), serde_json::to_value(root).unwrap_or(serde_json::Value::Null));
+            let root =
+                workspace::workspace_root(source.clone(), std::path::Path::new(&session.cwd));
+            workspace.insert(
+                source.clone(),
+                serde_json::to_value(root).unwrap_or(serde_json::Value::Null),
+            );
         }
         runtimes.push(serde_json::json!({
             "agentId": agent_id,
@@ -1026,21 +1485,24 @@ pub(crate) fn build_full_inspector_payload(
         }));
     }
 
-    let session_rows: Vec<serde_json::Value> = all_sessions.iter().map(|(agent_id, source, s)| {
-        serde_json::json!({
-            "agentId": agent_id,
-            "source": source,
-            "periId": s.peri_id,
-            "title": s.title,
-            "model": s.model,
-            "mode": s.mode,
-            "tokensIn": s.tokens_in,
-            "tokensOut": s.tokens_out,
-            "tokensTotal": s.tokens_total,
-            "contextSize": s.context_size,
-            "cwd": s.cwd,
+    let session_rows: Vec<serde_json::Value> = all_sessions
+        .iter()
+        .map(|(agent_id, source, s)| {
+            serde_json::json!({
+                "agentId": agent_id,
+                "source": source,
+                "periId": s.peri_id,
+                "title": s.title,
+                "model": s.model,
+                "mode": s.mode,
+                "tokensIn": s.tokens_in,
+                "tokensOut": s.tokens_out,
+                "tokensTotal": s.tokens_total,
+                "contextSize": s.context_size,
+                "cwd": s.cwd,
+            })
         })
-    }).collect();
+        .collect();
 
     serde_json::json!({
         "agent": {
@@ -1051,7 +1513,7 @@ pub(crate) fn build_full_inspector_payload(
             "lastError": entries.iter().find(|(id, _, _)| id == active_id)
                 .and_then(|(_, _, rs)| rs.last_error.clone()),
             "lastConnectedAt": entries.iter().find(|(id, _, _)| id == active_id)
-                .and_then(|(_, _, rs)| rs.last_connected_at.clone()),
+                .and_then(|(_, _, rs)| rs.last_connected_at),
         },
         "summary": {
             "sessionCount": all_sessions.len(),
@@ -1067,17 +1529,34 @@ pub(crate) fn build_full_inspector_payload(
 }
 
 #[tauri::command]
-pub(crate) async fn session_inspector(state: tauri::State<'_, AppState>) -> Result<serde_json::Value, PylonError> {
+pub(crate) async fn session_inspector(
+    state: tauri::State<'_, AppState>,
+) -> Result<serde_json::Value, PylonError> {
     // B2 完整版：遍历所有 runtime（含无会话的），全局聚合 + workspace/runtimes 增量。
-    let entries: Vec<(String, HashMap<String, SessionInfo>, AgentRuntimeState)> = state.inner().runtimes.all_with_ids()
+    let entries: Vec<(String, HashMap<String, SessionInfo>, AgentRuntimeState)> = state
+        .inner()
+        .runtimes
+        .all_with_ids()
         .into_iter()
         .map(|(agent_id, runtime)| {
-            let sessions = runtime.sessions.lock().map(|s| s.clone()).unwrap_or_default();
-            let runtime_state = runtime.agent_runtime.lock().map(|v| v.clone()).unwrap_or_default();
+            let sessions = runtime
+                .sessions
+                .lock()
+                .map(|s| s.clone())
+                .unwrap_or_default();
+            let runtime_state = runtime
+                .agent_runtime
+                .lock()
+                .map(|v| v.clone())
+                .unwrap_or_default();
             (agent_id, sessions, runtime_state)
         })
         .collect();
-    let active_id = state.active_agent.lock().map_err(|e| e.to_string())?.clone();
+    let active_id = state
+        .active_agent
+        .lock()
+        .map_err(|e| e.to_string())?
+        .clone();
     Ok(build_full_inspector_payload(&entries, &active_id))
 }
 #[tauri::command]
@@ -1103,19 +1582,37 @@ pub(crate) async fn load_persisted_session(
             return Err(PylonError::Protocol("max sessions reached".to_string()));
         }
     }
-    let previous = runtime.sessions.lock().map_err(|e| e.to_string())?
-        .insert(source.clone(), SessionInfo::new(peri_id.clone(), String::new(), cwd.clone(), true, generation));
+    let previous = runtime.sessions.lock().map_err(|e| e.to_string())?.insert(
+        source.clone(),
+        SessionInfo::new(
+            peri_id.clone(),
+            String::new(),
+            cwd.clone(),
+            true,
+            generation,
+        ),
+    );
     let acp = runtime.acp.lock().await;
-    let load_result = acp.load_session_with_replay(&peri_id, &cwd, mcp_servers).await;
+    let load_result = acp
+        .load_session_with_replay(&peri_id, &cwd, mcp_servers)
+        .await;
     drop(acp);
-    match load_result
-    {
+    match load_result {
         Ok((response, _replay)) => {
             if let Err(error) = state.ensure_generation(&runtime, generation) {
-                let mut sessions = runtime.sessions.lock().map_err(|lock_error| lock_error.to_string())?;
+                let mut sessions = runtime
+                    .sessions
+                    .lock()
+                    .map_err(|lock_error| lock_error.to_string())?;
                 if sessions.get(&source).map(|session| {
-                    session_mapping_matches(&session.peri_id, session.generation, &peri_id, generation)
-                }) == Some(true) {
+                    session_mapping_matches(
+                        &session.peri_id,
+                        session.generation,
+                        &peri_id,
+                        generation,
+                    )
+                }) == Some(true)
+                {
                     if let Some(previous) = previous {
                         sessions.insert(source.clone(), previous);
                     } else {
@@ -1130,10 +1627,14 @@ pub(crate) async fn load_persisted_session(
             Ok(response)
         }
         Err(error) => {
-            let mut sessions = runtime.sessions.lock().map_err(|lock_error| lock_error.to_string())?;
+            let mut sessions = runtime
+                .sessions
+                .lock()
+                .map_err(|lock_error| lock_error.to_string())?;
             if sessions.get(&source).map(|session| {
                 session_mapping_matches(&session.peri_id, session.generation, &peri_id, generation)
-            }) == Some(true) {
+            }) == Some(true)
+            {
                 if let Some(previous) = previous {
                     sessions.insert(source.clone(), previous);
                 } else {
@@ -1146,7 +1647,9 @@ pub(crate) async fn load_persisted_session(
 }
 
 #[tauri::command]
-pub(crate) async fn list_persisted_sessions(state: tauri::State<'_, AppState>) -> Result<serde_json::Value, PylonError> {
+pub(crate) async fn list_persisted_sessions(
+    state: tauri::State<'_, AppState>,
+) -> Result<serde_json::Value, PylonError> {
     let runtime = state.inner().require_runtime()?;
     let generation = state.current_generation(&runtime);
     let cwd = state.get_active_agent().ok().and_then(|a| a.cwd);
@@ -1154,8 +1657,10 @@ pub(crate) async fn list_persisted_sessions(state: tauri::State<'_, AppState>) -
     if let Some(c) = cwd {
         params["cwd"] = serde_json::Value::String(c);
     }
-    let response = state.inner().acp_rpc(&runtime, acp::METHOD_SESSION_LIST, params).await?;
+    let response = state
+        .inner()
+        .acp_rpc(&runtime, acp::METHOD_SESSION_LIST, params)
+        .await?;
     state.ensure_generation(&runtime, generation)?;
     Ok(response)
 }
-

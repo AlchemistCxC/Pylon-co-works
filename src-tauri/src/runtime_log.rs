@@ -78,7 +78,10 @@ impl RuntimeLogHub {
             message: sanitize_message(message.into()),
             fields: sanitize_fields(fields),
         };
-        let mut entries = self.entries.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
+        let mut entries = self
+            .entries
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
         entries.push_back(entry.clone());
         while entries.len() > self.capacity {
             entries.pop_front();
@@ -94,31 +97,56 @@ impl RuntimeLogHub {
     pub fn list(&self, query: &RuntimeLogQuery) -> Vec<RuntimeLogEntry> {
         let search = query.search.as_deref().map(str::to_lowercase);
         let limit = query.limit.unwrap_or(self.capacity).min(self.capacity);
-        let entries = self.entries.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
-        entries.iter().rev()
-            .filter(|entry| query.level.as_deref().is_none_or(|value| entry.level == value))
-            .filter(|entry| query.source.as_deref().is_none_or(|value| entry.source == value))
-            .filter(|entry| query.session.as_deref().is_none_or(|value| entry.session.as_deref() == Some(value)))
-            .filter(|entry| search.as_deref().is_none_or(|needle| {
-                // P3：needle 已小写一次（上方）；字段按 键/值 迭代检查，
-                // 不再 clone 整个 map 再整体序列化。字符串值免 JSON 再序列化，
-                // 非字符串值才 to_string（保持与原"序列化整 map"的匹配面一致）。
-                entry.message.to_lowercase().contains(needle)
-                    || entry.fields.iter().any(|(key, value)| {
-                        key.to_lowercase().contains(needle)
-                            || match value {
-                                Value::String(text) => text.to_lowercase().contains(needle),
-                                other => other.to_string().to_lowercase().contains(needle),
-                            }
-                    })
-            }))
+        let entries = self
+            .entries
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        entries
+            .iter()
+            .rev()
+            .filter(|entry| {
+                query
+                    .level
+                    .as_deref()
+                    .is_none_or(|value| entry.level == value)
+            })
+            .filter(|entry| {
+                query
+                    .source
+                    .as_deref()
+                    .is_none_or(|value| entry.source == value)
+            })
+            .filter(|entry| {
+                query
+                    .session
+                    .as_deref()
+                    .is_none_or(|value| entry.session.as_deref() == Some(value))
+            })
+            .filter(|entry| {
+                search.as_deref().is_none_or(|needle| {
+                    // P3：needle 已小写一次（上方）；字段按 键/值 迭代检查，
+                    // 不再 clone 整个 map 再整体序列化。字符串值免 JSON 再序列化，
+                    // 非字符串值才 to_string（保持与原"序列化整 map"的匹配面一致）。
+                    entry.message.to_lowercase().contains(needle)
+                        || entry.fields.iter().any(|(key, value)| {
+                            key.to_lowercase().contains(needle)
+                                || match value {
+                                    Value::String(text) => text.to_lowercase().contains(needle),
+                                    other => other.to_string().to_lowercase().contains(needle),
+                                }
+                        })
+                })
+            })
             .take(limit)
             .cloned()
             .collect()
     }
 
     pub fn clear(&self) {
-        self.entries.lock().unwrap_or_else(|poisoned| poisoned.into_inner()).clear();
+        self.entries
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
+            .clear();
     }
 }
 
@@ -130,19 +158,39 @@ fn normalize_level(level: String) -> String {
 }
 
 fn truncate(value: String, max_bytes: usize) -> String {
-    if value.len() <= max_bytes { return value; }
+    if value.len() <= max_bytes {
+        return value;
+    }
     let mut end = max_bytes.saturating_sub(3);
-    while end > 0 && !value.is_char_boundary(end) { end -= 1; }
+    while end > 0 && !value.is_char_boundary(end) {
+        end -= 1;
+    }
     format!("{}...", &value[..end])
 }
 
 pub(crate) fn sanitize_message(message: String) -> String {
     let lower = message.to_ascii_lowercase();
     let contains_sensitive_payload = [
-        "password=", "secret=", "token=", "api_key=", "apikey=", "authorization:",
-        "prompt:", "persona:", "bearer ", "x-api-key:", "client_secret=", "access_token=",
-        "token\":", "secret\":", "apikey\":", "api_key\":", "password\":",
-    ].iter().any(|marker| lower.contains(marker));
+        "password=",
+        "secret=",
+        "token=",
+        "api_key=",
+        "apikey=",
+        "authorization:",
+        "prompt:",
+        "persona:",
+        "bearer ",
+        "x-api-key:",
+        "client_secret=",
+        "access_token=",
+        "token\":",
+        "secret\":",
+        "apikey\":",
+        "api_key\":",
+        "password\":",
+    ]
+    .iter()
+    .any(|marker| lower.contains(marker));
     if contains_sensitive_payload {
         return REDACTED.to_string();
     }
@@ -151,8 +199,22 @@ pub(crate) fn sanitize_message(message: String) -> String {
 
 fn is_sensitive_key(key: &str) -> bool {
     let key = key.to_ascii_lowercase();
-    ["password", "secret", "authorization", "headers", "header", "prompt", "persona", "content", "rawinput", "rawoutput", "attachment", "env"]
-        .iter().any(|part| key == *part)
+    [
+        "password",
+        "secret",
+        "authorization",
+        "headers",
+        "header",
+        "prompt",
+        "persona",
+        "content",
+        "rawinput",
+        "rawoutput",
+        "attachment",
+        "env",
+    ]
+    .iter()
+    .any(|part| key == *part)
         || key.contains("token")
         || key.contains("apikey")
         || key.contains("api_key")
@@ -163,10 +225,24 @@ fn is_sensitive_key(key: &str) -> bool {
 fn sanitize_value_content(value: &str) -> String {
     let lower = value.to_ascii_lowercase();
     let leaked = [
-        "bearer ", "authorization:", "x-api-key:", "api_key=", "apikey=",
-        "password=", "secret=", "token=", "client_secret=", "access_token=",
-        "token\":", "secret\":", "apikey\":", "api_key\":", "password\":",
-    ].iter().any(|marker| lower.contains(marker));
+        "bearer ",
+        "authorization:",
+        "x-api-key:",
+        "api_key=",
+        "apikey=",
+        "password=",
+        "secret=",
+        "token=",
+        "client_secret=",
+        "access_token=",
+        "token\":",
+        "secret\":",
+        "apikey\":",
+        "api_key\":",
+        "password\":",
+    ]
+    .iter()
+    .any(|marker| lower.contains(marker));
     if leaked {
         REDACTED.to_string()
     } else {
@@ -175,17 +251,34 @@ fn sanitize_value_content(value: &str) -> String {
 }
 
 fn sanitize_value(key: &str, value: Value) -> Value {
-    if is_sensitive_key(key) { return Value::String(REDACTED.to_string()); }
+    if is_sensitive_key(key) {
+        return Value::String(REDACTED.to_string());
+    }
     match value {
-        Value::Object(object) => Value::Object(object.into_iter().map(|(key, value)| (key.clone(), sanitize_value(&key, value))).collect()),
-        Value::Array(values) => Value::Array(values.into_iter().map(|value| sanitize_value("value", value)).collect()),
-        Value::String(value) => Value::String(truncate(sanitize_value_content(&value), MAX_MESSAGE_BYTES)),
+        Value::Object(object) => Value::Object(
+            object
+                .into_iter()
+                .map(|(key, value)| (key.clone(), sanitize_value(&key, value)))
+                .collect(),
+        ),
+        Value::Array(values) => Value::Array(
+            values
+                .into_iter()
+                .map(|value| sanitize_value("value", value))
+                .collect(),
+        ),
+        Value::String(value) => {
+            Value::String(truncate(sanitize_value_content(&value), MAX_MESSAGE_BYTES))
+        }
         other => other,
     }
 }
 
 fn sanitize_fields(fields: Map<String, Value>) -> Map<String, Value> {
-    fields.into_iter().map(|(key, value)| (key.clone(), sanitize_value(&key, value))).collect()
+    fields
+        .into_iter()
+        .map(|(key, value)| (key.clone(), sanitize_value(&key, value)))
+        .collect()
 }
 
 #[cfg(test)]
@@ -194,7 +287,10 @@ mod tests {
     use serde_json::json;
 
     fn fields(values: &[(&str, Value)]) -> Map<String, Value> {
-        values.iter().map(|(key, value)| ((*key).to_string(), value.clone())).collect()
+        values
+            .iter()
+            .map(|(key, value)| ((*key).to_string(), value.clone()))
+            .collect()
     }
 
     #[test]
@@ -204,26 +300,59 @@ mod tests {
         hub.push(Timestamp::new(2), "info", "a", None, "two", Map::new());
         hub.push(Timestamp::new(3), "info", "a", None, "three", Map::new());
         let entries = hub.list(&RuntimeLogQuery::default());
-        assert_eq!(entries.iter().map(|entry| entry.id).collect::<Vec<_>>(), vec![3, 2]);
+        assert_eq!(
+            entries.iter().map(|entry| entry.id).collect::<Vec<_>>(),
+            vec![3, 2]
+        );
         assert_eq!(entries[0].message, "three");
     }
 
     #[test]
     fn filters_by_level_source_session_and_search() {
         let hub = RuntimeLogHub::default();
-        hub.push(Timestamp::new(1), "error", "acp", Some("a".into()), "Parse failed", Map::new());
-        hub.push(Timestamp::new(2), "info", "ui", Some("b".into()), "Clicked", Map::new());
-        let query = RuntimeLogQuery { level: Some("error".into()), source: Some("acp".into()), session: Some("a".into()), search: Some("parse".into()), limit: Some(10) };
+        hub.push(
+            Timestamp::new(1),
+            "error",
+            "acp",
+            Some("a".into()),
+            "Parse failed",
+            Map::new(),
+        );
+        hub.push(
+            Timestamp::new(2),
+            "info",
+            "ui",
+            Some("b".into()),
+            "Clicked",
+            Map::new(),
+        );
+        let query = RuntimeLogQuery {
+            level: Some("error".into()),
+            source: Some("acp".into()),
+            session: Some("a".into()),
+            search: Some("parse".into()),
+            limit: Some(10),
+        };
         assert_eq!(hub.list(&query).len(), 1);
     }
 
     #[test]
     fn redacts_sensitive_fields_and_truncates_message() {
         let hub = RuntimeLogHub::default();
-        let entry = hub.push(Timestamp::new(1), "warn", "acp", None, "x".repeat(9000), fields(&[
-            ("apiKey", json!("secret-value")),
-            ("nested", json!({"authorization": "Bearer abc", "result": "safe"})),
-        ]));
+        let entry = hub.push(
+            Timestamp::new(1),
+            "warn",
+            "acp",
+            None,
+            "x".repeat(9000),
+            fields(&[
+                ("apiKey", json!("secret-value")),
+                (
+                    "nested",
+                    json!({"authorization": "Bearer abc", "result": "safe"}),
+                ),
+            ]),
+        );
         assert!(entry.message.len() <= MAX_MESSAGE_BYTES);
         assert_eq!(entry.fields["apiKey"], json!(REDACTED));
         assert_eq!(entry.fields["nested"]["authorization"], json!(REDACTED));
@@ -233,7 +362,14 @@ mod tests {
     #[test]
     fn keeps_safe_diagnostic_words_in_message() {
         let hub = RuntimeLogHub::default();
-        let entry = hub.push(Timestamp::new(1), "info", "runtime", None, "Prompt started; contentLength=42", Map::new());
+        let entry = hub.push(
+            Timestamp::new(1),
+            "info",
+            "runtime",
+            None,
+            "Prompt started; contentLength=42",
+            Map::new(),
+        );
         assert_eq!(entry.message, "Prompt started; contentLength=42");
     }
 
@@ -241,7 +377,14 @@ mod tests {
     fn redacts_sensitive_message_payload_markers() {
         let hub = RuntimeLogHub::default();
         for message in ["token=abc", "authorization: Bearer abc", "persona: hidden"] {
-            let entry = hub.push(Timestamp::new(1), "error", "runtime", None, message, Map::new());
+            let entry = hub.push(
+                Timestamp::new(1),
+                "error",
+                "runtime",
+                None,
+                message,
+                Map::new(),
+            );
             assert_eq!(entry.message, REDACTED);
         }
     }
@@ -258,7 +401,14 @@ mod tests {
             "client_secret=abc",
             "access_token=abc",
         ] {
-            let entry = hub.push(Timestamp::new(1), "error", "runtime", None, message, Map::new());
+            let entry = hub.push(
+                Timestamp::new(1),
+                "error",
+                "runtime",
+                None,
+                message,
+                Map::new(),
+            );
             assert_eq!(entry.message, REDACTED, "message {message:?} 必须脱敏");
         }
     }
@@ -267,13 +417,28 @@ mod tests {
     fn redacts_sensitive_content_inside_field_values() {
         // 审查修复回归：非敏感 key 下的敏感值内容也必须脱敏
         let hub = RuntimeLogHub::default();
-        let entry = hub.push(Timestamp::new(1), "warn", "acp", None, "safe message", fields(&[
-            ("detail", json!("api_key=sk-123")),
-            ("items", json!(["Bearer secret-token", "safe"])),
-            ("ok", json!("fine")),
-        ]));
-        assert_eq!(entry.fields["detail"], json!(REDACTED), "值内 api_key= 必须脱敏");
-        assert_eq!(entry.fields["items"][0], json!(REDACTED), "数组内 Bearer 必须脱敏");
+        let entry = hub.push(
+            Timestamp::new(1),
+            "warn",
+            "acp",
+            None,
+            "safe message",
+            fields(&[
+                ("detail", json!("api_key=sk-123")),
+                ("items", json!(["Bearer secret-token", "safe"])),
+                ("ok", json!("fine")),
+            ]),
+        );
+        assert_eq!(
+            entry.fields["detail"],
+            json!(REDACTED),
+            "值内 api_key= 必须脱敏"
+        );
+        assert_eq!(
+            entry.fields["items"][0],
+            json!(REDACTED),
+            "数组内 Bearer 必须脱敏"
+        );
         assert_eq!(entry.fields["items"][1], json!("safe"));
         assert_eq!(entry.fields["ok"], json!("fine"));
     }
@@ -283,7 +448,14 @@ mod tests {
         let hub = RuntimeLogHub::default();
         let first = hub.push(Timestamp::new(1), "info", "test", None, "first", Map::new());
         hub.clear();
-        let second = hub.push(Timestamp::new(2), "info", "test", None, "second", Map::new());
+        let second = hub.push(
+            Timestamp::new(2),
+            "info",
+            "test",
+            None,
+            "second",
+            Map::new(),
+        );
         assert!(second.id > first.id);
         assert_eq!(hub.list(&RuntimeLogQuery::default()).len(), 1);
     }
