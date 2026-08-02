@@ -266,6 +266,11 @@ const ChatView = React.memo(function ChatView({ sessionId }: Props) {
   }
   const controllerRefs = eventControllerRefs.current
   useEffect(() => {
+    // 2026-08-02 修复：非 Tauri 环境（浏览器预览 mock）不挂接 controller——
+    // @tauri-apps/api 的 listen() 在无后端时会 reject，此前每次挂载产生多个未处理
+    // rejection 且 dispose 的 unlisten.then 永不执行。所有消费点（initSource/
+    // commitReplay/clearReplay/pruneSources/requestCancel）均有可选链或 fallback。
+    if (!IS_TAURI) return
     controllerHandleRef.current = attachChatEventController(controllerRefs)
     registerChatController(controllerHandleRef.current)
     return () => {
