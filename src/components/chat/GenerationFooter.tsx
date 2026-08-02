@@ -86,7 +86,8 @@ export default function GenerationFooter({ running, frames, tokenCount, startTim
 
   const now = Date.now()
   const idleMs = running && lastTokenAt ? Math.max(0, now - lastTokenAt) : running ? now - startTime : 0
-  const activity = idleMs > 10000 ? 'stalled' : idleMs > 3000 ? 'waiting' : 'active'
+  // CC 对齐：3s 无响应即 stalled（趋向停滞红），waiting 提前到 1.2s（保留 Pylon 两级）
+  const activity = idleMs > 3000 ? 'stalled' : idleMs > 1200 ? 'waiting' : 'active'
   const phaseLabel = phase?.kind === 'thinking'
     ? '思考中'
     : phase?.kind === 'tool'

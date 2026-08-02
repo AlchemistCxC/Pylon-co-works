@@ -10,6 +10,7 @@ export type SpinnerAssetId =
   | 'wave'
   | 'blocks'
   | 'scan'
+  | 'cc'
   | 'custom'
 
 export interface SpinnerAssetPreset {
@@ -22,7 +23,7 @@ export interface SpinnerAssetPreset {
 }
 
 export interface SpinnerVerbPreset {
-  id: 'zh' | 'en' | 'analysis' | 'engineering' | 'custom'
+  id: 'zh' | 'en' | 'analysis' | 'engineering' | 'cc' | 'custom'
   label: string
   verbs: readonly string[]
 }
@@ -37,6 +38,8 @@ export const SPINNER_ASSET_PRESETS: readonly SpinnerAssetPreset[] = [
   { id: 'wave', label: 'Wave', frames: '▁▂▃▄▅▆▇█▇▆▅▄▃', motion: 'cycle', defaultIntervalMs: 90 },
   { id: 'blocks', label: 'Blocks', frames: '▖▘▝▗', motion: 'bounce', defaultIntervalMs: 130 },
   { id: 'scan', label: 'Scan', frames: '▏▎▍▌▋▊▉█', motion: 'ping-pong', defaultIntervalMs: 100 },
+  // CC 帧（Claude Code 终端：·✢*✶✻✽ ping-pong，120ms）
+  { id: 'cc', label: 'CC', frames: '·✢*✶✻✽', motion: 'ping-pong', defaultIntervalMs: 120 },
   { id: 'custom', label: 'Custom', frames: '', motion: 'cycle', defaultIntervalMs: 120 },
 ]
 
@@ -45,6 +48,35 @@ export const SPINNER_VERB_PRESETS: readonly SpinnerVerbPreset[] = [
   { id: 'en', label: 'English', verbs: ['Thinking', 'Reading', 'Checking', 'Reasoning', 'Working', 'Reviewing', 'Verifying'] },
   { id: 'analysis', label: '分析', verbs: ['解析', '推演', '归纳', '校验', '定位', '拆解', '复核'] },
   { id: 'engineering', label: '工程', verbs: ['读取', '搜索', '修改', '构建', '测试', '整理', '验证'] },
+  // CC 幽默 -ing 动词集（Claude Code SPINNER_VERBS，随机展示当前"正在做"的动作）
+  { id: 'cc', label: 'CC', verbs: [
+    'Accomplishing', 'Architecting', 'Baking', 'Beaming', 'Beboppin\'', 'Befuddling',
+    'Billowing', 'Bloviating', 'Boogieing', 'Boondoggling', 'Bootstrapping', 'Brewing',
+    'Burrowing', 'Calculating', 'Canoodling', 'Caramelizing', 'Cascading', 'Catapulting',
+    'Cerebrating', 'Channeling', 'Choreographing', 'Churning', 'Clauding', 'Coalescing',
+    'Cogitating', 'Combobulating', 'Composing', 'Computing', 'Concocting', 'Considering',
+    'Contemplating', 'Cooking', 'Crafting', 'Creating', 'Crunching', 'Crystallizing',
+    'Deciphering', 'Deliberating', 'Determining', 'Dilly-dallying', 'Discombobulating',
+    'Doing', 'Doodling', 'Drizzling', 'Elucidating', 'Embellishing', 'Enchanting',
+    'Envisioning', 'Fermenting', 'Finagling', 'Flambéing', 'Flibbertigibbeting', 'Flowing',
+    'Flummoxing', 'Fluttering', 'Forging', 'Frolicking', 'Gallivanting', 'Galloping',
+    'Generating', 'Germinating', 'Gitifying', 'Grooving', 'Harmonizing', 'Hatching',
+    'Herding', 'Hyperspacing', 'Ideating', 'Imagining', 'Improvising', 'Incubating',
+    'Inferring', 'Infusing', 'Jitterbugging', 'Kneading', 'Levitating', 'Lollygagging',
+    'Manifesting', 'Marinating', 'Meandering', 'Metamorphosing', 'Moonwalking', 'Moseying',
+    'Mulling', 'Mustering', 'Musing', 'Nebulizing', 'Noodling', 'Orbiting',
+    'Orchestrating', 'Osmosing', 'Perambulating', 'Percolating', 'Perusing', 'Photosynthesizing',
+    'Pollinating', 'Pondering', 'Pontificating', 'Pouncing', 'Prestidigitating', 'Processing',
+    'Propagating', 'Puzzling', 'Quantumizing', 'Razzle-dazzling', 'Razzmatazzing', 'Reticulating',
+    'Ruminating', 'Sautéing', 'Scampering', 'Schlepping', 'Scurrying', 'Seasoning',
+    'Shimmying', 'Simmering', 'Skedaddling', 'Sketching', 'Slithering', 'Smooshing',
+    'Spelunking', 'Spinning', 'Sprouting', 'Stewing', 'Sublimating', 'Swirling',
+    'Swooping', 'Symbioting', 'Synthesizing', 'Tempering', 'Thinking', 'Thundering',
+    'Tinkering', 'Tomfoolering', 'Transfiguring', 'Transmuting', 'Twisting', 'Undulating',
+    'Unfurling', 'Unravelling', 'Vibing', 'Waddling', 'Wandering', 'Warping',
+    'Whatchamacalliting', 'Whirlpooling', 'Whirring', 'Whisking', 'Wibbling', 'Working',
+    'Wrangling', 'Zesting', 'Zigzagging',
+  ] },
   { id: 'custom', label: '自定义', verbs: [] },
 ]
 

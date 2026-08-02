@@ -37,7 +37,7 @@ assert.equal(stripHiddenUnicode('ＡＢＣ'), 'ＡＢＣ', '不做 NFKC，全角
 // ── D2 useMinDisplayTime 接线断言（hook 本体纯 React，只断言接线） ──
 const footer = readFileSync(new URL('../src/components/chat/GenerationFooter.tsx', import.meta.url), 'utf8')
 assert.equal(footer.includes("useMinDisplayTime(verb, 1200)"), true, 'Footer 文案必须使用最小展示时长')
-assert.match(footer, /const activity = idleMs > 10000 \? 'stalled'/, 'stalled 阈值保持')
+assert.match(footer, /const activity = idleMs > 3000 \? 'stalled'/, 'stalled 阈值对齐 CC 3s')
 
 // ── D4 Pet polling 接线断言（normal 不 setState、无变化不写盘） ──
 const pet = readFileSync(new URL('../src/components/PetCompanion.tsx', import.meta.url), 'utf8')

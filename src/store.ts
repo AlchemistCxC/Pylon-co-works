@@ -47,9 +47,9 @@ export interface ThemeSettings {
   sidebarTransparency: number; sidebarBlur: number; chatTransparency: number; chatBlur: number; rightTransparency: number; rightBlur: number
   userName: string; userPrefix: string; userColor: string
   toolIndicator: string
-  spinnerFramePreset: 'sparkles' | 'ascii-line' | 'braille' | 'dots' | 'orbit' | 'clock' | 'wave' | 'blocks' | 'scan' | 'custom'
+  spinnerFramePreset: 'sparkles' | 'ascii-line' | 'braille' | 'dots' | 'orbit' | 'clock' | 'wave' | 'blocks' | 'scan' | 'cc' | 'custom'
   spinnerCustomFrames: string
-  spinnerVerbSet: 'zh' | 'en' | 'analysis' | 'engineering' | 'custom'
+  spinnerVerbSet: 'zh' | 'en' | 'analysis' | 'engineering' | 'cc' | 'custom'
   spinnerCustomVerbs: string
   spinnerDoneMarker: string
   spinnerCancelledMarker: string
@@ -59,6 +59,8 @@ export interface ThemeSettings {
   spinnerErrorMarkerMode: 'frame' | 'custom'
   spinnerIntervalMs: number
   spinnerColor: string; spinnerSize: number
+  /** CC stalled 渐变红（3s 无响应后帧/文案趋向此色） */
+  spinnerStalledColor: string
   msgStyle: string; msgFont: string; msgTextColor: string; msgLineHeight: number
   messageLayout: 'classic' | 'claude' | 'bubble'
   /** CC 视觉还原：助手消息 ● 圆点 */
@@ -238,6 +240,7 @@ export const useStore = create<ThemeState>()(persist(
     || state.spinnerFramePreset === 'wave'
     || state.spinnerFramePreset === 'blocks'
     || state.spinnerFramePreset === 'scan'
+    || state.spinnerFramePreset === 'cc'
     || state.spinnerFramePreset === 'custom'
     ? state.spinnerFramePreset
     : 'sparkles'
@@ -245,6 +248,7 @@ export const useStore = create<ThemeState>()(persist(
   state.spinnerVerbSet = state.spinnerVerbSet === 'en'
     || state.spinnerVerbSet === 'analysis'
     || state.spinnerVerbSet === 'engineering'
+    || state.spinnerVerbSet === 'cc'
     || state.spinnerVerbSet === 'custom'
     ? state.spinnerVerbSet
     : 'zh'

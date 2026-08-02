@@ -251,7 +251,7 @@
 .spinner-glimmer-edge { color:color-mix(in srgb, currentColor 70%, var(--spinner-glimmer-color,var(--accent)) 30%); }
 .spinner-glimmer-core { color:var(--spinner-glimmer-color,var(--accent)); text-shadow:0 0 0.5em color-mix(in srgb, var(--spinner-glimmer-color,var(--accent)) 55%, transparent); }
 .term-spinner[data-activity="waiting"] .spinner-verb { opacity:0.68; }
-.term-spinner[data-activity="stalled"] .spinner-verb { opacity:0.52; color:var(--tool-err,#FF6B80); }
+.term-spinner[data-activity="stalled"] .spinner-verb { opacity:0.52; color:var(--spinner-stalled-color,#FF6B80); }
 .spinner-meta { color:var(--text-dim); }
 .term-spinner[data-phase="thinking"] .spinner-frame { color:var(--accent) !important; animation:spinner-thinking-pulse 1.8s ease-in-out infinite; }
 .term-spinner[data-phase="tool"] .spinner-frame { color:var(--tool-run,#3b82f6) !important; animation:spinner-tool-pulse 0.9s ease-in-out infinite; }
@@ -261,7 +261,7 @@
 @keyframes spinner-thinking-pulse { 0%,100% { opacity:0.62; filter:none; } 50% { opacity:1; filter:drop-shadow(0 0 0.35em color-mix(in srgb, var(--accent) 62%, transparent)); } }
 @keyframes spinner-tool-pulse { 0%,100% { opacity:0.7; } 50% { opacity:1; filter:drop-shadow(0 0 0.42em color-mix(in srgb, var(--tool-run,#3b82f6) 65%, transparent)); } }
 .term-spinner[data-activity="waiting"] .spinner-frame { animation-duration:1.8s; opacity:0.72; }
-.term-spinner[data-activity="stalled"] .spinner-frame { animation:none; opacity:0.55; }
+.term-spinner[data-activity="stalled"] .spinner-frame { animation:none; opacity:0.55; color:var(--spinner-stalled-color,#FF6B80); }
 .spinner-activity { color:var(--text-dim); letter-spacing:0.12em; }
 /* 停止按钮：小尺寸、低调、右对齐，不抢视觉 */
 .spinner-stop-btn {

@@ -6,9 +6,10 @@ import { resolveSpinnerVerbs } from '../src/components/chat/spinnerVerbs.ts'
 import { resolveFrameIndex } from '../src/components/chat/spinnerMotion.ts'
 
 assert.deepEqual(SPINNER_ASSET_PRESETS.map(asset => asset.id), [
-  'sparkles', 'ascii-line', 'braille', 'dots', 'orbit', 'clock', 'wave', 'blocks', 'scan', 'custom',
+  'sparkles', 'ascii-line', 'braille', 'dots', 'orbit', 'clock', 'wave', 'blocks', 'scan', 'cc', 'custom',
 ])
-assert.deepEqual(SPINNER_VERB_PRESETS.map(preset => preset.id), ['zh', 'en', 'analysis', 'engineering', 'custom'])
+assert.deepEqual(SPINNER_VERB_PRESETS.map(preset => preset.id), ['zh', 'en', 'analysis', 'engineering', 'cc', 'custom'])
+assert.deepEqual(resolveSpinnerFrames('cc', ''), ['·', '✢', '*', '✶', '✻', '✽'])
 assert.deepEqual(resolveSpinnerFrames('orbit', ''), ['◜', '◝', '◞', '◟'])
 assert.deepEqual(resolveSpinnerFrames('custom', ''), resolveSpinnerFrames('sparkles', ''))
 assert.deepEqual(resolveSpinnerVerbs('analysis', ''), ['解析', '推演', '归纳', '校验', '定位', '拆解', '复核'])
@@ -21,8 +22,8 @@ assert.equal(frameAt(['a', 'b', 'c'], 1000, 120, 'static'), 'a')
 
 const themeDefs = readFileSync(new URL('../src/themeFieldDefs.ts', import.meta.url), 'utf8')
 const footer = readFileSync(new URL('../src/components/chat/GenerationFooter.tsx', import.meta.url), 'utf8')
-assert.match(themeDefs, /\bspinnerFramePreset\b[\s\S]*?'orbit', 'clock', 'wave', 'blocks', 'scan', 'custom'/)
-assert.match(themeDefs, /\bspinnerVerbSet\b[\s\S]*?'zh', 'en', 'analysis', 'engineering', 'custom'/)
+assert.match(themeDefs, /\bspinnerFramePreset\b[\s\S]*?'orbit', 'clock', 'wave', 'blocks', 'scan', 'cc', 'custom'/)
+assert.match(themeDefs, /\bspinnerVerbSet\b[\s\S]*?'zh', 'en', 'analysis', 'engineering', 'cc', 'custom'/)
 assert.match(footer, /getSpinnerAssetPreset/)
 assert.match(footer, /reduceMotion \? 'static' : frameAsset\.motion/)
 

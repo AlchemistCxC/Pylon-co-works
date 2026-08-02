@@ -61,7 +61,8 @@ export const GLOBAL_PRESETS: GlobalPreset[] = [
       userTagBg: '#373737', userTagText: '#FFFFFF',
       toolIndicator: '●', toolIndicatorGlow: 0, toolIndicatorGlowColor: '',
       toolConnectorMode: 'none', toolConnectorColor: '#505050',
-      spinnerFramePreset: 'sparkles', spinnerColor: '#D77757', spinnerSize: 14,
+      // CC spinner：cc 帧（·✢*✶✻✽）+ cc 幽默动词集 + 停滞渐变红
+      spinnerFramePreset: 'cc', spinnerColor: '#D77757', spinnerSize: 14, spinnerVerbSet: 'cc',
       msgStyle: 'terminal', msgFont: 'mono', msgTextColor: '#FFFFFF', msgLineHeight: 1.3,
       messageLayout: 'claude', footerLayout: 'peri', cliOverflowMode: 'fixed-scroll',
       // CC 视觉还原：助手 ● 圆点
