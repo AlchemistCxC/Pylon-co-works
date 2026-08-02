@@ -242,9 +242,10 @@ impl AppStateHandles {
         let generation = runtime
             .map(|runtime| runtime.client_generation.load(Ordering::Acquire))
             .unwrap_or(0);
-        let last_error = last_error.clone();
-        let recent_error = last_error.clone();
-        let legacy_error = last_error.clone();
+        // O2：三个别名（lastError/recentError/error）共用同一份引用（as_deref），
+        // json! 序列化时各自转 Value——消除 3 次显式 clone（last_error 是
+        // agent_runtime 锁内 state.clone() 的产物，自身 clone 是必须的）。
+        let last_error_ref = last_error.as_deref();
         serde_json::json!({
             "agentId": active_agent_id,
             "agentName": agent.as_ref().map(|value| value.name.clone()).unwrap_or_default(),
@@ -252,9 +253,9 @@ impl AppStateHandles {
             "status": status.as_str(),
             "transport": agent.as_ref().map(|value| value.transport.clone()).unwrap_or_default(),
             "cwd": agent.as_ref().and_then(|value| value.cwd.clone()).unwrap_or_default(),
-            "lastError": last_error,
-            "recentError": recent_error,
-            "error": legacy_error,
+            "lastError": last_error_ref,
+            "recentError": last_error_ref,
+            "error": last_error_ref,
             "lastConnectedAt": last_connected_at,
             "generation": generation,
             "active": agent.is_some(),
