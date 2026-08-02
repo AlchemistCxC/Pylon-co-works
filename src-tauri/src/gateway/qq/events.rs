@@ -68,7 +68,8 @@ pub fn process_attachments(raw: &Option<Vec<QqAttachment>>) -> AttachmentResult 
     }
 }
 
-/// 去掉消息中的 @bot 前缀（@ 后跟非空白 + 空白）。
+/// 去掉消息中的 @bot 前缀（@ 后跟非空白 + 空白；无空白时剥离到首个非
+/// ASCII 标识符字符，如 `@bot你好` → `你好`）。
 pub fn strip_at_mention(content: &str) -> String {
     let trimmed = content.trim_start();
     // @ 开头后跟非空白字符 + 空白
@@ -76,6 +77,11 @@ pub fn strip_at_mention(content: &str) -> String {
         if let Some(space) = rest.find(char::is_whitespace) {
             return rest[space..].trim().to_string();
         }
+        // 无空白：剥离 @ 后到首个非 ASCII 字母数字字符（@bot 的 bot 为标识符）
+        let end = rest
+            .find(|c: char| !c.is_ascii_alphanumeric())
+            .unwrap_or(rest.len());
+        return rest[end..].trim().to_string();
     }
     content.trim().to_string()
 }
@@ -156,5 +162,8 @@ mod tests {
         assert_eq!(strip_at_mention("@pylon  hello"), "hello");
         assert_eq!(strip_at_mention("hello @bot"), "hello @bot");
         assert_eq!(strip_at_mention("  @bot x  "), "x");
+        // 无空格 @：剥离 @ + bot 标识符，保留正文
+        assert_eq!(strip_at_mention("@bot你好"), "你好");
+        assert_eq!(strip_at_mention("@bot，早上好"), "，早上好");
     }
 }
