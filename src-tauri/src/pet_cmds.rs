@@ -63,6 +63,14 @@ pub(crate) async fn persist_pet_async(state: &AppState, app: &tauri::AppHandle) 
     }
 }
 
+/// 统一刷新语义（O21）：写盘成功后刷新 `pet_last_persist_ms`——get_pet 轮询与
+/// pet_action 突变共用，消除 pet_action 写盘不刷新时间戳导致的活跃期冗余写
+/// （写盘后 get_pet 在 60s 节流窗口外仍会再次序列化 + 落盘）。
+async fn persist_and_mark(state: &AppState, app: &tauri::AppHandle, now_ms: u64) {
+    persist_pet_async(state, app).await;
+    state.pet_last_persist_ms.store(now_ms, Ordering::Release);
+}
+
 /// get_pet 轮询路径的写盘节流间隔（P3）：宠物状态只在有意义的变更时变化，
 /// 12s 轮询无条件全量序列化 + 落盘是纯浪费。状态突变路径（pet_action）与
 /// 退出兜底仍无条件写盘，节流只降低轮询路径频率，最坏丢失 <60s 的变更。
@@ -109,8 +117,7 @@ pub(crate) async fn get_pet(
     let now_ms = crate::time::Timestamp::now().as_u64();
     let last_persist = state.pet_last_persist_ms.load(Ordering::Acquire);
     if now_ms.saturating_sub(last_persist) >= PET_PERSIST_THROTTLE_MS {
-        persist_pet_async(&state, &app).await;
-        state.pet_last_persist_ms.store(now_ms, Ordering::Release);
+        persist_and_mark(&state, &app, now_ms).await;
     }
     Ok(value)
 }
@@ -182,16 +189,15 @@ pub(crate) async fn pet_action(
     // R6a：状态突变路径写盘，磁盘 IO 移出 pet 锁（锁外 persist_pet_async）。
     // O18：poke/play 高频动作复用 pet_last_persist_ms 短节流（5s 内重复互动
     // 合并写盘）；feed/rename/restore 等低频动作保持无条件写盘。
-    // 写盘成功即刷新节流时间戳——否则节流判定永远"距上次 ≥5s"，节流失效。
+    // O21：统一经 persist_and_mark 刷新节流时间戳（get_pet 同语义）。
     let now_ms = crate::time::Timestamp::now().as_u64();
     let last_persist = state.pet_last_persist_ms.load(Ordering::Acquire);
     if is_high_frequency_action(&action) {
         if !within_throttle(last_persist, now_ms, POKE_PLAY_THROTTLE_MS) {
-            persist_pet_async(&state, &app).await;
-            state.pet_last_persist_ms.store(now_ms, Ordering::Release);
+            persist_and_mark(&state, &app, now_ms).await;
         }
     } else {
-        persist_pet_async(&state, &app).await;
+        persist_and_mark(&state, &app, now_ms).await;
     }
     Ok(result)
 }
