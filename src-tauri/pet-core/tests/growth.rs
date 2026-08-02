@@ -116,6 +116,51 @@ fn restore_clamps_injected_values_and_drops_unknown_ids() {
 }
 
 #[test]
+fn restore_rejects_equipped_without_ownership() {
+    // S7：restore 的 equipped 校验必须与 equip() 一致（合法 id 且拥有）——
+    // 手改/损坏存档注入 equipped=code_crown + bond=50 → 置 None（防前端显示
+    // "未拥有却已装备"；C10 掉落不顶装备使该状态无法被后续掉落纠正）
+    let mut saved = PetState::new_at(0);
+    saved.equipped = Some("code_crown".into());
+    saved.bond = 50;
+    let restored = PetState::restore(saved, 86_400_000);
+    assert!(
+        restored.equipped.is_none(),
+        "未拥有的装备必须剔除（bond 不足）"
+    );
+    // 合法：bond≥300 成长解锁 → 保留
+    let mut saved = PetState::new_at(0);
+    saved.equipped = Some("code_crown".into());
+    saved.bond = 300;
+    let restored = PetState::restore(saved, 86_400_000);
+    assert_eq!(
+        restored.equipped.as_deref(),
+        Some("code_crown"),
+        "bond≥300 成长解锁装备必须保留"
+    );
+    // 合法：掉落入栏 → 保留
+    let mut saved = PetState::new_at(0);
+    saved.inventory = vec!["beret".into()];
+    saved.equipped = Some("beret".into());
+    let restored = PetState::restore(saved, 86_400_000);
+    assert_eq!(
+        restored.equipped.as_deref(),
+        Some("beret"),
+        "掉落入栏装备必须保留"
+    );
+    // 合法：阶段解锁（Luminary）→ 保留
+    let mut saved = PetState::new_at(0);
+    saved.xp = 500;
+    saved.equipped = Some("luminary_wings".into());
+    let restored = PetState::restore(saved, 86_400_000);
+    assert_eq!(
+        restored.equipped.as_deref(),
+        Some("luminary_wings"),
+        "阶段解锁装备必须保留"
+    );
+}
+
+#[test]
 fn sleepy_pet_is_woken_by_interaction_not_polling() {
     // 审查修复：轮询 Visit 不唤醒（睡眠可持续）；真实互动唤醒
     let mut pet = PetState::new_at(0);

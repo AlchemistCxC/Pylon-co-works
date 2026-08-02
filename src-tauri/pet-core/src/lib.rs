@@ -580,8 +580,16 @@ impl PetState {
             .inventory
             .retain(|id| COSMETICS.iter().any(|c| c.id == id));
         saved.inventory.truncate(128);
+        // S7 审查修复：equipped 校验与 equip() 语义一致——合法 id **且拥有**
+        //（掉落入栏 / bond / stage 成长条件）。手改/损坏存档注入"未拥有"装备
+        //（如 equipped=code_crown + bond=50）→ 置 None；C10"掉落不顶装备"使
+        // 非法状态无法被后续掉落纠正，restore 是唯一防线。
         if let Some(id) = saved.equipped.as_deref() {
-            if !COSMETICS.iter().any(|c| c.id == id) {
+            let owned = COSMETICS
+                .iter()
+                .find(|def| def.id == id)
+                .is_some_and(|def| saved.owns_cosmetic(def));
+            if !owned {
                 saved.equipped = None;
             }
         }
