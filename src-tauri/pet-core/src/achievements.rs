@@ -1,6 +1,8 @@
 //! 成就系统（M9）：静态目录表 + 解锁判定 + PetState 成就方法。
 //! R6c 自 lib.rs 拆分（纯搬移，零行为变化）。
 
+use std::collections::HashSet;
+
 use serde::Serialize;
 
 use crate::{GrowthStage, PetState};
@@ -271,13 +273,16 @@ impl PetState {
 
     /// M9：解锁检查——遍历未解锁成就，满足条件则解锁（奖励 + 记忆 + 徽章文案）。
     /// 幂等：unlocked 判重；每枚只解锁一次（B 层只增不减）。
+    /// O55 优化：判重集合一次构建，循环内 O(1) 查重（原每 def 线性扫描）。
     pub(crate) fn unlock_achievements(&mut self) {
+        let mut unlocked_set: HashSet<String> = self.unlocked.iter().cloned().collect();
         for def in ACHIEVEMENTS {
-            if self.unlocked.iter().any(|id| id == def.id) {
+            if unlocked_set.contains(def.id) {
                 continue;
             }
             if achievement_met(def.id, self) {
                 self.unlocked.push(def.id.to_string());
+                unlocked_set.insert(def.id.to_string());
                 if def.xp > 0 {
                     self.gain_xp(def.xp);
                 }
