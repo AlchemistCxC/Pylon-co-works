@@ -15,6 +15,7 @@ import { invoke } from '@tauri-apps/api/core'
 import { loadWindowSize, persistWindowSize } from './windowSizePersistence'
 import { reportRuntimeError, type RuntimeErrorDetail } from './runtimeError'
 import { toCssBackgroundImage } from './backgroundImage'
+import { THEME_CSS_VAR_MAP, THEME_FIELD_DEFS } from './themeFieldDefs'
 import { listen } from '@tauri-apps/api/event'
 import { normalizeAgentStatus, type AgentStatusPayload } from './components/settings/agentTypes'
 
@@ -185,75 +186,31 @@ export default function App() {
   // cssVars 只依赖 s（useShallow 稳定引用）与 sidebarCollapsed：避免 sessions/agents 等无关
   // 状态 tick 时整棵 App 树重建 60+ CSS 变量与 6 次背景图解析。
   const cssVars = useMemo(() => {
-    return {
-    '--accent': s.accent || '#3b82f6',
-    '--t': s.transparency,
-    '--blur': `${s.bgBlur}px`,
-    '--global-bg-image': toCssBackgroundImage(s.globalBgImage),
-    '--global-bg-color': s.globalBgColor || '#e8e8ec',
-    '--global-font': s.globalFont === 'mono' ? 'var(--mono)' : 'var(--font)',
-    '--global-font-size': `${s.globalFontSize}px`,
-    '--sidebar-bg': s.sidebarBg,
-    '--sidebar-bg-image': toCssBackgroundImage(s.sidebarBgImage),
-    '--sidebar-width': `${s.sidebarWidth}px`,
-    '--titlebar-sidebar-width': `${sidebarCollapsed ? 42 : s.sidebarWidth}px`,
-    '--sidebar-transparency': s.sidebarTransparency,
-    '--sidebar-blur': `${s.sidebarBlur}px`,
-    '--sidebar-text': s.sidebarTextColor,
-    '--sidebar-name-size': `${s.sidebarNameSize}px`,
-    '--sidebar-group-size': `${s.sidebarGroupSize}px`,
-    '--chat-bg': s.chatBg,
-    '--chat-bg-image': toCssBackgroundImage(s.chatBgImage),
-    '--chat-transparency': s.chatTransparency,
-    '--chat-blur': `${s.chatBlur}px`,
-    '--chat-font': s.chatFont === 'mono' ? 'var(--mono)' : 'var(--font)',
-    '--chat-font-size': `${s.chatFontSize}px`,
-    '--chat-line-height': s.chatLineHeight,
-    '--chat-text': s.chatTextColor,
-    '--chat-code-color': s.chatCodeColor,
-    '--chat-code-bg': s.chatCodeBg,
-    '--syn-kw': s.synKeyword, '--syn-str': s.synString, '--syn-cmt': s.synComment, '--syn-lit': s.synLiteral,
-    '--syn-ent': s.synEntity, '--syn-fn': s.synFunction, '--syn-var': s.synVariable, '--syn-prop': s.synProperty,
-    '--syn-re': s.synRegex, '--syn-mh': s.synMarkupHeading, '--syn-cor': s.synCoReference, '--syn-support': s.synSupport,
-    '--msg-font': s.msgFont === 'mono' ? 'var(--mono)' : 'var(--font)',
-    '--msg-text': s.msgTextColor || 'var(--chat-text,var(--text))',
-    '--msg-line-height': s.msgLineHeight,
-    '--tool-ok': s.toolOk, '--tool-run': s.toolRun, '--tool-err': s.toolErr,
-    '--tool-name': s.toolNameColor, '--tool-summary': s.toolSummaryColor,
-    '--user-tag-bg': s.userTagBg, '--user-tag-text': s.userTagText,
-    '--diff-added': s.diffAdded, '--diff-removed': s.diffRemoved,
-    '--input-bg': s.inputBg,
-    '--input-bg-image': toCssBackgroundImage(s.inputBgImage),
-    '--input-text': s.inputTextColor, '--input-placeholder': s.inputPlaceholder,
-    '--input-send': s.inputSendBg, '--input-focus': s.inputFocusBorder,
-    '--input-font-size': `${s.inputFontSize}px`, '--input-min-h': `${s.inputMinHeight}px`,
-    '--cli-line-width': `${s.cliLineWidth}px`,
-    '--cli-line-color': s.cliLineColor || undefined,
-    '--cli-text-color': s.cliTextColor || undefined,
-    '--cli-prompt-color': s.cliPromptColor || undefined,
-    '--cli-line-padding': `${s.cliLinePadding ?? 6}px`,
-    '--cli-content-offset-y': `${s.cliContentOffsetY ?? 0}px`,
-    '--status-bg': s.statusBg,
-    '--status-bg-image': toCssBackgroundImage(s.statusBgImage),
-    '--cc-status-font-size': `${s.ccStatusFontSize ?? 14}px`,
-    '--ekg-w': `${s.ekgWidth}px`, '--ekg-font': `${s.ekgFontSize}px`,
-    '--ekg-green': s.ekgGreen, '--ekg-yellow': s.ekgYellow, '--ekg-red': s.ekgRed,
-    '--pill-bg': s.pillBg, '--pill-text': s.pillText,
-    '--prism-on': s.prismOnColor,
-    '--ekg-line-width': `${s.ekgLineWidth}px`,
-    '--ekg-amp-max': `${s.ekgAmplitudeMax}px`,
-    '--ekg-speed-base': s.ekgSpeedBase, '--ekg-speed-max': s.ekgSpeedMax,
-    '--ekg-left': s.ekgLeftColor, '--ekg-moving': s.ekgMovingColor,
-    '--ekg-consumed': s.ekgConsumedColor, '--token-display': s.tokenDisplay,
-    '--cc-variant': s.ccVariant,
-    '--mode-auto': s.modeAutoColor, '--mode-edit': s.modeEditColor,
-    '--spinner-color': s.spinnerColor || undefined, '--spinner-size': `${s.spinnerSize}px`,
-    '--right-bg': s.rightBg,
-    '--right-bg-image': toCssBackgroundImage(s.rightBgImage),
-    '--right-width': `${s.rightWidth}px`,
-    '--right-transparency': s.rightTransparency,
-    '--right-blur': `${s.rightBlur}px`,
-    } as React.CSSProperties
+    // 派生/函数值保留手写（背景图转换、字体选择、fallback、窗口宽度、select 直通）
+    const vars: Record<string, string> = {
+      '--global-bg-image': toCssBackgroundImage(s.globalBgImage),
+      '--sidebar-bg-image': toCssBackgroundImage(s.sidebarBgImage),
+      '--chat-bg-image': toCssBackgroundImage(s.chatBgImage),
+      '--input-bg-image': toCssBackgroundImage(s.inputBgImage),
+      '--status-bg-image': toCssBackgroundImage(s.statusBgImage),
+      '--right-bg-image': toCssBackgroundImage(s.rightBgImage),
+      '--global-font': s.globalFont === 'mono' ? 'var(--mono)' : 'var(--font)',
+      '--chat-font': s.chatFont === 'mono' ? 'var(--mono)' : 'var(--font)',
+      '--msg-font': s.msgFont === 'mono' ? 'var(--mono)' : 'var(--font)',
+      '--msg-text': s.msgTextColor || 'var(--chat-text,var(--text))',
+      '--titlebar-sidebar-width': `${sidebarCollapsed ? 42 : s.sidebarWidth}px`,
+      '--token-display': s.tokenDisplay,
+      '--cc-variant': s.ccVariant,
+    }
+    // color/number 字段由 THEME_CSS_VAR_MAP 循环注入（unit 格式化）；空 color 省略
+    for (const [cssVar, key] of Object.entries(THEME_CSS_VAR_MAP)) {
+      if (cssVar in vars) continue
+      const def = THEME_FIELD_DEFS[key]
+      const value = (s as Record<string, unknown>)[key]
+      if (value === undefined || (def.type === 'color' && value === '')) continue
+      vars[cssVar] = def.type === 'number' && def.unit ? `${value}${def.unit}` : String(value)
+    }
+    return vars as React.CSSProperties
   }, [s, sidebarCollapsed])
 
   const ccEditMode = useStore(s => s.ccEditMode)
