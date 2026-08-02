@@ -651,18 +651,26 @@ pub(crate) async fn check_session_expiry(state: &AppState) {
                     Ok(guard) => guard,
                     Err(poisoned) => poisoned.into_inner(),
                 };
-                if sessions.get(&source).map(|session| {
+                let current = sessions.get(&source);
+                if current.map(|session| {
                     session_mapping_matches(
                         &session.peri_id,
                         session.generation,
                         &peri_id,
                         generation,
                     )
-                }) == Some(true)
+                }) != Some(true)
                 {
-                    sessions.remove(&source).is_some()
-                } else {
                     false
+                } else {
+                    let current = current.expect("已确认存在");
+                    // 锁内用最新 updated_at 复核——快照值与删除时点之间新消息到达会刷新
+                    // updated_at，不得误杀刚活跃的会话。
+                    if session_expired(current.updated_at, now, reset, idle_minutes).is_some() {
+                        sessions.remove(&source).is_some()
+                    } else {
+                        false
+                    }
                 }
             };
             if !removed {
