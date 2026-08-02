@@ -36,11 +36,16 @@ pub enum WorkspaceError {
 }
 
 fn normalize_relative(relative: &str) -> Result<PathBuf, WorkspaceError> {
+    // O30：NUL 字节在 Windows 上必然导致 I/O 失败，入口即拒（按绝对路径类处理）。
+    if relative.contains('\0') {
+        return Err(WorkspaceError::AbsolutePathRejected);
+    }
     if relative.trim().is_empty() {
         return Ok(PathBuf::from("."));
     }
     let normalized = relative.replace('\\', "/");
-    if normalized.starts_with('/') || normalized.starts_with("//") {
+    // O30：starts_with('/') 已覆盖 "//" 前缀，死分支移除。
+    if normalized.starts_with('/') {
         return Err(WorkspaceError::AbsolutePathRejected);
     }
     let mut parts = Vec::new();
@@ -51,6 +56,8 @@ fn normalize_relative(relative: &str) -> Result<PathBuf, WorkspaceError> {
         if part == ".." {
             return Err(WorkspaceError::TraversalRejected);
         }
+        // O30：盘符/冒号判定仅在 Windows 上生效——Linux 上合法冒号文件名不再误拒。
+        #[cfg(windows)]
         if part.contains(':') {
             return Err(WorkspaceError::AbsolutePathRejected);
         }
@@ -342,6 +349,11 @@ mod tests {
         );
         assert_eq!(
             resolve_workspace_path(&root, "C:\\Windows\\win.ini"),
+            Err(WorkspaceError::AbsolutePathRejected)
+        );
+        // O30：NUL 字节入口即拒
+        assert_eq!(
+            resolve_workspace_path(&root, "a\0b.txt"),
             Err(WorkspaceError::AbsolutePathRejected)
         );
         assert!(resolve_workspace_path(&root, "./src\\main.ts").is_ok());
