@@ -39,6 +39,9 @@ const SEND_LOOP_IDLE_SECS: u64 = 300;
 /// 死目标 TTL（B8）：标记后 30 分钟自动过期，过期后下一次投递作为探测发送
 /// （探测失败重新标记，成功自愈清除）——死目标从"永久哑火"变为"渐进探测恢复"。
 const DEAD_TARGET_TTL: Duration = Duration::from_secs(30 * 60);
+/// 死目标短路告警节流（O43）：同 key 1s 内至多一条 warn——
+/// 死目标期间每条 agent 输出都触发 deliver，逐条 warn 会刷屏。
+const DEAD_TARGET_WARN_INTERVAL: Duration = Duration::from_secs(1);
 
 /// 发送失败分类（B10 收尾，参考 Hermes 发送重试/死目标模式）。
 #[derive(Debug)]
@@ -109,6 +112,9 @@ pub struct QqAdapter {
     /// 复合键 `{chat_type}:{chat_id}` → (死目标原因, 标记时间)（forbidden/not_found 标记；
     /// 成功发送自愈清除；TTL 过期后下一条投递作探测发送）。
     dead_targets: Arc<Mutex<HashMap<String, (String, Instant)>>>,
+    /// 复合键 `{chat_type}:{chat_id}` → 最近一次短路 warn 时间（O43 节流：
+    /// 同 key 1s 内至多一条告警，过期条目随检查清理，表保持有界）。
+    short_circuit_warns: Mutex<HashMap<String, Instant>>,
 }
 
 /// 从 gateway source 解析 QQ 目标：`qq:group:123` → (group, 123)；`qq:user:456` → (c2c, 456)。
@@ -133,6 +139,7 @@ impl QqAdapter {
             base_url: types::API_BASE.to_string(),
             senders: Arc::new(Mutex::new(HashMap::new())),
             dead_targets: Arc::new(Mutex::new(HashMap::new())),
+            short_circuit_warns: Mutex::new(HashMap::new()),
         })
     }
 
@@ -152,6 +159,7 @@ impl QqAdapter {
             base_url,
             senders: Arc::new(Mutex::new(HashMap::new())),
             dead_targets: Arc::new(Mutex::new(HashMap::new())),
+            short_circuit_warns: Mutex::new(HashMap::new()),
         })
     }
 
@@ -264,11 +272,22 @@ impl PlatformAdapter for QqAdapter {
             .and_then(|d| d.get(&key).cloned())
         {
             if !dead_target_expired(&entry) {
-                log::warn!(
-                    "QQ deliver 短路（死目标 {key}: {}），丢弃 {:.60}...",
-                    entry.0,
-                    text
-                );
+                // O43：告警节流——死目标期间每条 agent 输出都触发 deliver，逐条
+                // warn 会刷屏；同 key 1s 内至多一条，过期条目随检查顺带清理。
+                let mut warns = self
+                    .short_circuit_warns
+                    .lock()
+                    .unwrap_or_else(|poisoned| poisoned.into_inner());
+                let now = Instant::now();
+                warns.retain(|_, last| now.duration_since(*last) < DEAD_TARGET_WARN_INTERVAL);
+                if !warns.contains_key(&key) {
+                    log::warn!(
+                        "QQ deliver 短路（死目标 {key}: {}），丢弃 {:.60}...",
+                        entry.0,
+                        text
+                    );
+                    warns.insert(key.clone(), now);
+                }
                 return Ok(());
             }
             self.dead_targets.lock().ok().map(|mut d| d.remove(&key));
@@ -384,10 +403,12 @@ impl QqAdapter {
                     continue;
                 }
             };
-            // 死目标跳过：TTL 内跳过；过期则清除标记放行本条做探测发送（B8）
+            // 死目标跳过：TTL 内跳过；过期则清除标记放行本条做探测发送（B8）。
+            // O43：降级 debug——队列内逐条跳过是批量场景，warn 由 deliver_text
+            // 短路节流兜底（每条目 1s 至多一条），此处逐条 warn 会刷屏。
             if let Some(entry) = dead_targets.lock().ok().and_then(|d| d.get(&key).cloned()) {
                 if !dead_target_expired(&entry) {
-                    log::warn!("QQ send_loop 跳过死目标 {}", msg.chat_id);
+                    log::debug!("QQ send_loop 跳过死目标 {}", msg.chat_id);
                     continue;
                 }
                 dead_targets.lock().ok().map(|mut d| d.remove(&key));
@@ -403,7 +424,9 @@ impl QqAdapter {
                         Err(error) => {
                             attempts += 1;
                             if attempts >= TOKEN_RETRY_ATTEMPTS {
-                                log::warn!("QQ deliver token 连续 {attempts} 次获取失败（{key}），丢弃该消息: {error}");
+                                log::warn!(
+                                    "QQ deliver token 连续 {attempts} 次获取失败（{key}），丢弃该消息: {error}"
+                                );
                                 continue 'messages;
                             }
                             log::warn!(
@@ -423,7 +446,9 @@ impl QqAdapter {
                     dead_targets.lock().ok().map(|mut d| d.remove(&key));
                 }
                 Err(SendFailure::RateLimited(error)) => {
-                    log::warn!("QQ deliver rate limited（{key}），{RATE_LIMIT_DELAY_SECS}s 后重试一次: {error}");
+                    log::warn!(
+                        "QQ deliver rate limited（{key}），{RATE_LIMIT_DELAY_SECS}s 后重试一次: {error}"
+                    );
                     tokio::time::sleep(std::time::Duration::from_secs(RATE_LIMIT_DELAY_SECS)).await;
                     let token = match auth.get_token().await {
                         Ok(token) => token,
@@ -834,6 +859,74 @@ gateway:
             tokio::time::sleep(Duration::from_millis(50)).await;
         }
         server.join().expect("server thread");
+    }
+
+    /// 捕获 logger（O43 节流断言：统计"短路"告警条数）。
+    /// 全 crate 无其他测试安装 logger，安装成功即独占捕获，无并行冲突。
+    struct CapturingLogger {
+        records: Arc<Mutex<Vec<String>>>,
+    }
+
+    impl log::Log for CapturingLogger {
+        fn enabled(&self, metadata: &log::Metadata) -> bool {
+            metadata.level() <= log::Level::Warn
+        }
+
+        fn log(&self, record: &log::Record) {
+            if record.level() <= log::Level::Warn {
+                self.records
+                    .lock()
+                    .unwrap_or_else(|poisoned| poisoned.into_inner())
+                    .push(format!("{}: {}", record.level(), record.args()));
+            }
+        }
+
+        fn flush(&self) {}
+    }
+
+    #[test]
+    fn dead_target_short_circuit_warn_is_throttled_to_one_per_second() {
+        use log::LevelFilter;
+        // 用独有 chat id（group:456）隔离并行测试的日志干扰——全局 logger 下
+        // 其他测试的"短路"告警（如 group:123）不得计入本测试计数。
+        let records: Arc<Mutex<Vec<String>>> = Arc::new(Mutex::new(Vec::new()));
+        let _ = log::set_logger(Box::leak(Box::new(CapturingLogger {
+            records: records.clone(),
+        })));
+        log::set_max_level(LevelFilter::Warn);
+
+        let core = core_with_route();
+        let adapter = test_adapter(core);
+        adapter.dead_targets.lock().unwrap().insert(
+            "group:456".to_string(),
+            ("forbidden".to_string(), Instant::now()),
+        );
+        let warn_count = || {
+            records
+                .lock()
+                .unwrap_or_else(|poisoned| poisoned.into_inner())
+                .iter()
+                .filter(|record| record.contains("group:456"))
+                .count()
+        };
+        // 同 1s 内连续 3 条 → 只告警 1 次，节流表只留 1 条
+        for _ in 0..3 {
+            adapter
+                .deliver_text("qq:group:456", "hi")
+                .expect("短路返回 Ok");
+        }
+        assert_eq!(warn_count(), 1, "1s 内同 key 至多一条短路告警");
+        assert_eq!(
+            adapter.short_circuit_warns.lock().unwrap().len(),
+            1,
+            "节流表只记录一条"
+        );
+        // 间隔超过 1s 后再次投递 → 恢复告警
+        std::thread::sleep(DEAD_TARGET_WARN_INTERVAL + Duration::from_millis(100));
+        adapter
+            .deliver_text("qq:group:456", "hi")
+            .expect("短路返回 Ok");
+        assert_eq!(warn_count(), 2, "1s 后应恢复告警");
     }
 
     #[test]
