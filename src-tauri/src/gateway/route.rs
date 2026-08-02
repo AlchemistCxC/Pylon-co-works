@@ -30,7 +30,7 @@
 //!       idle_minutes: 1440                 # 可选：idle 模式阈值（默认 1440）
 //! ```
 
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 
 use serde::Deserialize;
 
@@ -229,8 +229,13 @@ pub fn parse_config(input: &str) -> Result<GatewayConfig, String> {
         }
         None => InjectConfig::default(),
     };
+    let index = entries
+        .iter()
+        .enumerate()
+        .map(|(i, e)| (e.source.clone(), i))
+        .collect();
     Ok(GatewayConfig {
-        routes: EntityRouteTable { entries },
+        routes: EntityRouteTable { entries, index },
         qq,
         inject,
     })
@@ -240,6 +245,8 @@ pub fn parse_config(input: &str) -> Result<GatewayConfig, String> {
 #[derive(Debug, Clone)]
 pub struct EntityRouteTable {
     entries: Vec<EntityBinding>,
+    /// source → entries 下标索引（lookup O(1)）。
+    index: HashMap<String, usize>,
 }
 
 impl EntityRouteTable {
@@ -247,12 +254,13 @@ impl EntityRouteTable {
     pub fn empty() -> Self {
         Self {
             entries: Vec::new(),
+            index: HashMap::new(),
         }
     }
 
     /// 按 source 精确查询绑定；未命中返回 None（由调用方回退默认绑定）。
     pub fn lookup(&self, source: &str) -> Option<&EntityBinding> {
-        self.entries.iter().find(|e| e.source == source)
+        self.index.get(source).and_then(|&i| self.entries.get(i))
     }
 
     /// 遍历全部绑定（gateway_status 展示 / 热重载快照用）。
