@@ -154,6 +154,8 @@ impl QqAdapter {
     ///
     /// 核验修复：白名单先于 seen 记录——被白名单拒绝的消息不占去重窗口，
     /// 之后白名单放宽时同一消息重放仍可正常处理（消息从未真正 ingest 过）。
+    /// 修复（O38）：白名单判定先于 `core.ingest`——被白名单拒绝的消息不再产生
+    /// 超长截断的 content clone 分配（白名单只看 source/member，与 content 无关）。
     /// - 白名单拒绝 → Ok(None)，不 dispatch
     /// - msg_id 已见（resume 重放）→ Ok(None)，不重复 ingest
     /// - 新消息 → 记录 seen + last_msg_id，dispatch 发送并返回解析结果
@@ -166,18 +168,13 @@ impl QqAdapter {
         member_openid: Option<&str>,
         user_openid: Option<&str>,
     ) -> Result<Option<ResolvedIngest>, String> {
-        let resolved = self.core.ingest(source, content)?;
         // P3：锁内读取白名单配置（with_qq_config），避免每消息 clone 整个 QqGatewayConfig
         // R6b：读锁中毒（panic 后）→ 拒绝 ingest（fail-closed）——不得回退默认
         // 空白名单（空白名单 = 放行所有群，白名单安全路径必须拒绝）。
+        // O38：白名单判定先于 ingest（截断 clone）——拒绝路径不产生截断分配。
+        let binding = self.core.binding(source);
         let allowed = match self.core.with_qq_config(|qq| {
-            crate::gateway::ingest_allowed(
-                qq,
-                resolved.binding.as_ref(),
-                source,
-                member_openid,
-                user_openid,
-            )
+            crate::gateway::ingest_allowed(qq, binding.as_ref(), source, member_openid, user_openid)
         }) {
             Some(allowed) => allowed,
             None => {
@@ -188,6 +185,7 @@ impl QqAdapter {
         if !allowed {
             return Ok(None);
         }
+        let resolved = self.core.ingest(source, content)?;
         let mut dedup = self
             .dedup
             .lock()
