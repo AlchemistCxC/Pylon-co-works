@@ -1,41 +1,76 @@
-//! 会话导出（markdown/json，脱敏管线；R1 拆分自 lib.rs；行为零变化）。
+//! 会话导出（markdown/json，脱敏管线；R1 拆分自 lib.rs；C1：值内容脱敏 + markdown 注入转义）。
 
 use crate::agent_runtime::session_mapping_matches;
 use crate::error::PylonError;
 use crate::AppState;
 
+/// O34：lowercase 一次收敛；C1：key 表扩充 password/api_key/apikey/cookie/credential。
 pub(crate) fn is_export_sensitive_key(key: &str) -> bool {
+    let lower = key.to_ascii_lowercase();
     matches!(
-        key.to_ascii_lowercase().as_str(),
-        "rawinput" | "rawoutput" | "prompt" | "persona" | "headers" | "env" | "authorization"
-    ) || key.to_ascii_lowercase().contains("token")
-        || key.to_ascii_lowercase().contains("secret")
+        lower.as_str(),
+        "rawinput"
+            | "rawoutput"
+            | "prompt"
+            | "persona"
+            | "headers"
+            | "env"
+            | "authorization"
+            | "password"
+            | "api_key"
+            | "apikey"
+            | "cookie"
+            | "credential"
+    ) || lower.contains("token")
+        || lower.contains("secret")
 }
 
-pub(crate) fn sanitize_export_value(value: &serde_json::Value) -> Option<serde_json::Value> {
+/// C1：非敏感 key 的 String 值做内容检测（复用 A12 的 sanitize_value_content，REDACTED 替换），
+/// 因此不再返回 None——filter_map 收敛为 map。
+pub(crate) fn sanitize_export_value(value: &serde_json::Value) -> serde_json::Value {
     match value {
-        serde_json::Value::Object(object) => Some(serde_json::Value::Object(
+        serde_json::Value::Object(object) => serde_json::Value::Object(
             object
                 .iter()
                 .filter(|(key, _)| !is_export_sensitive_key(key))
-                .filter_map(|(key, value)| {
-                    sanitize_export_value(value).map(|value| (key.clone(), value))
-                })
+                .map(|(key, value)| (key.clone(), sanitize_export_value(value)))
                 .collect(),
-        )),
-        serde_json::Value::Array(values) => Some(serde_json::Value::Array(
-            values.iter().filter_map(sanitize_export_value).collect(),
-        )),
-        _ => Some(value.clone()),
+        ),
+        serde_json::Value::Array(values) => {
+            serde_json::Value::Array(values.iter().map(sanitize_export_value).collect())
+        }
+        serde_json::Value::String(value) => {
+            serde_json::Value::String(crate::runtime_log::sanitize_value_content(value))
+        }
+        other => other.clone(),
     }
 }
 
 pub(crate) fn sanitize_export_messages(messages: &[serde_json::Value]) -> Vec<serde_json::Value> {
-    messages.iter().filter_map(sanitize_export_value).collect()
+    messages.iter().map(sanitize_export_value).collect()
+}
+
+/// C1：行内转义（title/status/peri_id 注入面）——换行折叠为空格，`#` 转义。
+fn escape_inline(value: &str) -> String {
+    value.replace('\n', " ").replace('#', "\\#")
+}
+
+/// C1：正文文本转义——以 `#` 开头的行加 `\#` 前缀，防用户文本注入 markdown 标题结构。
+fn escape_text_lines(text: &str) -> String {
+    text.lines()
+        .map(|line| {
+            if line.starts_with('#') {
+                format!("\\{line}")
+            } else {
+                line.to_string()
+            }
+        })
+        .collect::<Vec<_>>()
+        .join("\n")
 }
 
 pub(crate) fn format_export_markdown(peri_id: &str, messages: &[serde_json::Value]) -> String {
-    let mut markdown = format!("# Session {peri_id}\n\n");
+    let mut markdown = format!("# Session {}\n\n", escape_inline(peri_id));
     for message in messages {
         let Some(update) = message.get("update") else {
             continue;
@@ -53,7 +88,7 @@ pub(crate) fn format_export_markdown(peri_id: &str, messages: &[serde_json::Valu
                     .and_then(|value| value.as_str())
                 {
                     markdown.push_str("## User\n\n");
-                    markdown.push_str(text);
+                    markdown.push_str(&escape_text_lines(text));
                     markdown.push_str("\n\n");
                 }
             }
@@ -64,7 +99,7 @@ pub(crate) fn format_export_markdown(peri_id: &str, messages: &[serde_json::Valu
                     .and_then(|value| value.as_str())
                 {
                     markdown.push_str("## Assistant\n\n");
-                    markdown.push_str(text);
+                    markdown.push_str(&escape_text_lines(text));
                     markdown.push_str("\n\n");
                 }
             }
@@ -75,12 +110,12 @@ pub(crate) fn format_export_markdown(peri_id: &str, messages: &[serde_json::Valu
                     .or_else(|| update.get("name"))
                     .and_then(|value| value.as_str())
                     .unwrap_or("Tool");
-                markdown.push_str(&format!("## Tool: {title}\n\n"));
+                markdown.push_str(&format!("## Tool: {}\n\n", escape_inline(title)));
                 let status = update
                     .get("status")
                     .and_then(|value| value.as_str())
                     .unwrap_or("unknown");
-                markdown.push_str(&format!("### Tool status ({status})\n\n"));
+                markdown.push_str(&format!("### Tool status ({})\n\n", escape_inline(status)));
             }
             _ => {}
         }
@@ -261,6 +296,63 @@ mod tests {
         assert!(!text.contains("Bearer"));
         assert!(!text.contains("drop-me"));
         assert!(text.contains("kept"));
+    }
+
+    #[test]
+    fn sanitizer_strips_password_api_key_cookie_and_credential() {
+        let messages = vec![serde_json::json!({
+            "sessionId": "peri-1",
+            "update": {
+                "sessionUpdate": "tool_call",
+                "password": "hunter2",
+                "api_key": "sk-abcdef",
+                "apiKey": "key-2",
+                "cookie": "session=abc",
+                "credential": "user:pass",
+                "safe": "kept"
+            }
+        })];
+        let safe = sanitize_export_messages(&messages);
+        let text = serde_json::to_string(&safe).unwrap();
+        for needle in ["hunter2", "sk-abcdef", "key-2", "session=abc", "user:pass"] {
+            assert!(!text.contains(needle), "{needle} 必须被剔除");
+        }
+        assert!(text.contains("kept"));
+    }
+
+    #[test]
+    fn sanitizer_redacts_secret_shapes_inside_non_sensitive_values() {
+        let messages = vec![serde_json::json!({
+            "sessionId": "peri-1",
+            "update": { "detail": "Bearer sk-abc", "path": "safe" }
+        })];
+        let safe = sanitize_export_messages(&messages);
+        assert_eq!(safe[0]["update"]["detail"], "[REDACTED]");
+        assert_eq!(safe[0]["update"]["path"], "safe");
+    }
+
+    #[test]
+    fn markdown_escapes_heading_injection_in_text() {
+        let messages = vec![chunk("user_message_chunk", "# 伪造标题\n正文第二行")];
+        let md = format_export_markdown("peri-1", &messages);
+        assert!(md.contains("## User\n\n\\# 伪造标题\n正文第二行"), "{md}");
+        assert_eq!(
+            md.lines().filter(|line| line.starts_with("## ")).count(),
+            1,
+            "注入行不得产生额外标题段"
+        );
+    }
+
+    #[test]
+    fn markdown_escapes_inline_title_status_and_session_id() {
+        let messages = vec![serde_json::json!({
+            "sessionId": "peri-1",
+            "update": { "sessionUpdate": "tool_call", "title": "edit\n#file", "status": "done\n#ok" }
+        })];
+        let md = format_export_markdown("peri\n#1", &messages);
+        assert!(md.starts_with("# Session peri \\#1"), "{md}");
+        assert!(md.contains("## Tool: edit \\#file"), "{md}");
+        assert!(md.contains("### Tool status (done \\#ok)"), "{md}");
     }
 
     #[test]
