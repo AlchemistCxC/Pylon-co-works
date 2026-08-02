@@ -251,21 +251,24 @@ pub fn unequip(state: &mut PetState) {
     state.unequip();
 }
 
-/// 本地时区偏移（分钟，东正西负）：Windows 用 GetLocalTime（零依赖 FFI，
-/// SYSTEMTIME 布局由官方文档保证、线程安全）；其他平台回退 UTC（0）。
+/// 本地时区偏移（分钟，东正西负）：Windows 用 GetLocalTime（R15：windows-sys
+/// 绑定，删手绘 SYSTEMTIME 布局 + extern 声明）；其他平台回退 UTC（0）。
 /// 时段判定精度为小时，偏移一天内不变（中国无夏令时），进程级缓存一次。
 fn local_offset_minutes() -> i32 {
     #[cfg(windows)]
     {
         use std::sync::atomic::{AtomicI32, Ordering};
+        use windows_sys::Win32::Foundation::SYSTEMTIME;
+        use windows_sys::Win32::System::SystemInformation::GetLocalTime;
         static CACHED_OFFSET: AtomicI32 = AtomicI32::new(i32::MIN);
         let cached = CACHED_OFFSET.load(Ordering::Relaxed);
         if cached != i32::MIN {
             return cached;
         }
         let utc_hour = now_ms() / 3_600_000 % 24;
-        let local = local_hour_windows();
-        let diff_hours = (local as i64 - utc_hour as i64).rem_euclid(24) as i32;
+        let mut st = SYSTEMTIME::default();
+        unsafe { GetLocalTime(&mut st) };
+        let diff_hours = (st.wHour as i64 - utc_hour as i64).rem_euclid(24) as i32;
         let offset = if diff_hours > 12 {
             diff_hours - 24
         } else {
@@ -281,39 +284,6 @@ fn local_offset_minutes() -> i32 {
     {
         0
     }
-}
-
-/// Windows 本地小时（GetLocalTime，0-23）。FFI 声明为 unsafe，调用在
-/// 单线程上下文（事件/dispatcher 路径），无并发问题。
-#[cfg(windows)]
-fn local_hour_windows() -> u32 {
-    #[repr(C)]
-    struct SystemTime {
-        w_year: u16,
-        w_month: u16,
-        w_day_of_week: u16,
-        w_day: u16,
-        w_hour: u16,
-        w_minute: u16,
-        w_second: u16,
-        w_milliseconds: u16,
-    }
-    #[link(name = "kernel32")]
-    extern "system" {
-        fn GetLocalTime(lp_system_time: *mut SystemTime);
-    }
-    let mut t = SystemTime {
-        w_year: 0,
-        w_month: 0,
-        w_day_of_week: 0,
-        w_day: 0,
-        w_hour: 0,
-        w_minute: 0,
-        w_second: 0,
-        w_milliseconds: 0,
-    };
-    unsafe { GetLocalTime(&mut t) };
-    t.w_hour as u32
 }
 
 fn now_ms() -> u64 {
