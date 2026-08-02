@@ -14,6 +14,7 @@ use std::time::{Duration, Instant};
 use dedup::DedupState;
 use reqwest::Client;
 use tokio::sync::mpsc;
+use tokio_util::sync::CancellationToken;
 
 use crate::gateway::{GatewayCore, PlatformAdapter, ResolvedIngest};
 
@@ -35,7 +36,11 @@ const RATE_LIMIT_DELAY_SECS: u64 = 60;
 const RATE_LIMIT_DELAY_SECS: u64 = 1;
 /// send_loop 空闲超时（审查修复：无消息时任务自行退出并从 senders map 移除，
 /// 防止 chat_id 无界增长导致常驻任务泄漏）。
+#[cfg(not(test))]
 const SEND_LOOP_IDLE_SECS: u64 = 300;
+/// 测试态缩短空闲超时（R10 集成测试验证 token 触发与 worker 重建，不等待真实 300s）。
+#[cfg(test)]
+const SEND_LOOP_IDLE_SECS: u64 = 1;
 /// 死目标 TTL（B8）：标记后 30 分钟自动过期，过期后下一次投递作为探测发送
 /// （探测失败重新标记，成功自愈清除）——死目标从"永久哑火"变为"渐进探测恢复"。
 const DEAD_TARGET_TTL: Duration = Duration::from_secs(30 * 60);
@@ -97,6 +102,15 @@ struct QueuedSend {
     reply_to: Option<String>,
 }
 
+/// 每 chat 发送 worker 句柄（R10）：发送端 + 取消令牌。
+/// token 是 worker 存活判定：空闲退出时触发（cancel），deliver_text 见
+/// cancelled 即重建新 worker（新 token）；token 相等性校验防止旧 worker
+/// 的清理误删重建后的新条目。
+struct SendWorker {
+    tx: mpsc::Sender<QueuedSend>,
+    token: CancellationToken,
+}
+
 /// QQ 适配器：入站（handle_incoming）去重后进入 gateway.ingest；
 /// 出站 deliver 经 per-chat 发送队列串行投递（重试/死目标/回复锚点）。
 pub struct QqAdapter {
@@ -106,9 +120,10 @@ pub struct QqAdapter {
     auth: Arc<QqAuth>,
     /// QQ API 基地址（测试可注入桩地址；生产 = types::API_BASE）。
     base_url: String,
-    /// 复合键 `{chat_type}:{chat_id}` → 发送队列发送端（后台 send_loop 串行消费；
-    /// 空闲超时自回收）。群/私聊同 id 互不串扰（O40）。
-    senders: Arc<Mutex<HashMap<String, mpsc::Sender<QueuedSend>>>>,
+    /// 复合键 `{chat_type}:{chat_id}` → 发送 worker 句柄（SendWorker：发送端 +
+    /// 存活 token；后台 send_loop 串行消费，空闲超时触发 token 并自回收）。
+    /// 群/私聊同 id 互不串扰（O40）。
+    senders: Arc<Mutex<HashMap<String, SendWorker>>>,
     /// 复合键 `{chat_type}:{chat_id}` → (死目标原因, 标记时间)（forbidden/not_found 标记；
     /// 成功发送自愈清除；TTL 过期后下一条投递作探测发送）。
     dead_targets: Arc<Mutex<HashMap<String, (String, Instant)>>>,
@@ -295,51 +310,54 @@ impl PlatformAdapter for QqAdapter {
         let Ok(runtime) = tokio::runtime::Handle::try_current() else {
             return Err("QQ deliver 需要 tokio runtime".to_string());
         };
-        let (tx, rx) = {
-            let mut senders = self
-                .senders
-                .lock()
-                .unwrap_or_else(|poisoned| poisoned.into_inner());
-            if let Some(existing) = senders.get(&key) {
-                (existing.clone(), None)
-            } else {
-                let (tx, rx) = mpsc::channel(SEND_QUEUE_CAP);
-                senders.insert(key.clone(), tx.clone());
-                (tx, Some(rx))
-            }
-        };
-        if let Some(rx) = rx {
-            // 首个入队者：启动本 chat 的后台发送循环（空闲超时自回收并移除 map 条目）
-            let http = self.http.clone();
-            let auth = self.auth.clone();
-            let dead = self.dead_targets.clone();
-            let base_url = self.base_url.clone();
-            let senders = self.senders.clone();
-            let key_owned = key.clone();
-            // P2-3：把发送端克隆交给 send_loop——空闲退出前用它做强计数 double-check
-            let sender_owned = tx.clone();
-            runtime.spawn(async move {
-                Self::send_loop(
-                    http,
-                    auth,
-                    dead,
-                    base_url,
-                    senders,
-                    sender_owned,
-                    key_owned,
-                    rx,
-                )
-                .await;
-            });
-        }
         let message = QueuedSend {
             chat_type: chat_type.to_string(),
             chat_id: chat_id.to_string(),
             text: text.to_string(),
             reply_to,
         };
-        if tx.try_send(message).is_err() {
-            log::warn!("QQ deliver 队列满（{chat_id}），丢弃该段");
+        // R10：入队与 worker 存活判定在同一把 senders 锁内完成——并发 deliver 的
+        // try_send 与 worker 的空闲退出判定串行化，无需 strong_count 启发式：
+        // 队列里已有本条消息 → worker 必继续；worker 已触发 token → 必重建新 worker。
+        let mut spawned = None;
+        {
+            let mut senders = self
+                .senders
+                .lock()
+                .unwrap_or_else(|poisoned| poisoned.into_inner());
+            match senders.get(&key) {
+                Some(existing) if !existing.token.is_cancelled() => {
+                    if existing.tx.try_send(message).is_err() {
+                        log::warn!("QQ deliver 队列满（{chat_id}），丢弃该段");
+                    }
+                }
+                _ => {
+                    // 无存活 worker（或旧 worker 已空闲退出、token 已触发）：
+                    // 重建 channel + token，启动新后台发送循环。
+                    let (tx, rx) = mpsc::channel(SEND_QUEUE_CAP);
+                    let token = CancellationToken::new();
+                    let worker = SendWorker {
+                        tx: tx.clone(),
+                        token: token.clone(),
+                    };
+                    senders.insert(key.clone(), worker);
+                    if tx.try_send(message).is_err() {
+                        log::warn!("QQ deliver 队列满（{chat_id}），丢弃该段");
+                    }
+                    spawned = Some((rx, token));
+                }
+            }
+        }
+        if let Some((rx, token)) = spawned {
+            let http = self.http.clone();
+            let auth = self.auth.clone();
+            let dead = self.dead_targets.clone();
+            let base_url = self.base_url.clone();
+            let senders = self.senders.clone();
+            let key_owned = key.clone();
+            runtime.spawn(async move {
+                Self::send_loop(http, auth, dead, base_url, senders, key_owned, rx, token).await;
+            });
         }
         Ok(())
     }
@@ -358,11 +376,13 @@ impl PlatformAdapter for QqAdapter {
 impl QqAdapter {
     /// per-chat 后台发送循环：串行消费队列（节流）→ token → 发送（瞬时 3 次退避重试 /
     /// rate 60s 一次 / 死目标标记短路）。成功发送清除死目标标记（自愈）。
-    /// 审查修复：空闲 SEND_LOOP_IDLE_SECS 无消息则退出并从 senders map 移除
-    /// （防 chat_id 无界增长 + 常驻任务泄漏）；token 瞬时失败退避重试不丢消息。
+    /// R10：空闲 SEND_LOOP_IDLE_SECS 无消息则触发 cancel_token 并退出（从 senders
+    /// map 移除，防 chat_id 无界增长 + 常驻任务泄漏）——token 取代原 strong_count
+    /// 协议：deliver_text 在 senders 锁内 try_send（与退出判定串行化），并凭
+    /// `token.is_cancelled()` 判定 worker 存活、重建新 worker 时使用新 token。
     /// O40：key 为复合键 `{chat_type}:{chat_id}`（群/私聊同 id 互不串扰），
     /// 死目标/senders 均以 key 寻址；msg.chat_id 仅用于 QQ API 路径与日志。
-    // clippy 2026-08-02：8 参为串行队列状态（http/auth/dead_targets/base_url/senders/tx/key/rx），
+    // clippy 2026-08-02：8 参为串行队列状态（http/auth/dead_targets/base_url/senders/key/rx/cancel_token），
     // 均为独立不可分组资源，保持显式签名（重构参数结构体收益低）。
     #[allow(clippy::too_many_arguments)]
     async fn send_loop(
@@ -370,10 +390,10 @@ impl QqAdapter {
         auth: Arc<QqAuth>,
         dead_targets: Arc<Mutex<HashMap<String, (String, Instant)>>>,
         base_url: String,
-        senders: Arc<Mutex<HashMap<String, mpsc::Sender<QueuedSend>>>>,
-        tx: mpsc::Sender<QueuedSend>,
+        senders: Arc<Mutex<HashMap<String, SendWorker>>>,
         key: String,
         mut rx: mpsc::Receiver<QueuedSend>,
+        cancel_token: CancellationToken,
     ) {
         let idle = std::time::Duration::from_secs(SEND_LOOP_IDLE_SECS);
         'messages: loop {
@@ -383,18 +403,27 @@ impl QqAdapter {
                     None => break,
                 },
                 _ = tokio::time::sleep(idle) => {
-                    // 修复（P2-3）：空闲退出竞态——break 与 map 移除之间，并发 deliver_text
-                    // 可能克隆 sender 并 try_send 成功，随后 rx 被 drop 丢消息且无告警。
-                    // 锁内 double-check：sender 强计数 >2（并发 deliver 正持有克隆，
-                    // 克隆发生在 senders 锁内，锁内判断可排空该窗口）或队列非空 →
-                    // 继续循环；否则移除 map 条目后退出。
+                    // R10：空闲退出协议（取代 P2-3 的 strong_count double-check）。
+                    // 并发 deliver_text 的 try_send 与本次判定在同一把 senders 锁内
+                    // 串行化：锁内队列非空 → 必继续；否则凭 token 所有权确认本 worker
+                    // 仍是 map 内唯一条目 → 触发 token、移除条目后退出。deliver_text
+                    // 见 token 已触发即重建新 worker（新 token），旧 worker 终段清理
+                    // 经 token 相等性校验不误删新条目。
                     let exit = {
-                        let mut map = senders.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
-                        if tx.strong_count() > 2 || !rx.is_empty() {
+                        let mut map =
+                            senders.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
+                        if !rx.is_empty() {
                             false
-                        } else {
+                        } else if map
+                            .get(&key)
+                            .map(|worker| worker.token == cancel_token)
+                            .unwrap_or(false)
+                        {
+                            cancel_token.cancel();
                             map.remove(&key);
                             true
+                        } else {
+                            false
                         }
                     };
                     if exit {
@@ -488,7 +517,17 @@ impl QqAdapter {
                 }
             }
         }
-        senders.lock().ok().map(|mut map| map.remove(&key));
+        // R10：终段清理——仅当 map 内仍是本 worker（token 相同）才移除，
+        // 防止与重建后的新 worker 条目互相覆盖（空闲分支已在锁内移除过，此处兜底）。
+        if let Ok(mut map) = senders.lock() {
+            if map
+                .get(&key)
+                .map(|worker| worker.token == cancel_token)
+                .unwrap_or(false)
+            {
+                map.remove(&key);
+            }
+        }
         log::info!("QQ send_loop 退出（{key}，空闲或关闭）");
     }
 
@@ -927,6 +966,60 @@ gateway:
             .deliver_text("qq:group:456", "hi")
             .expect("短路返回 Ok");
         assert_eq!(warn_count(), 2, "1s 后应恢复告警");
+    }
+
+    #[tokio::test]
+    async fn idle_exit_triggers_token_and_deliver_rebuilds_worker() {
+        // R10：空闲退出触发 cancel token 并移除条目；再次 deliver 重建新 worker
+        // （新 token）。桩 server 两个连接均被消费 ⇒ 两条消息都真实发出。
+        let (address, server) = spawn_sequence_server(&[
+            b"HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: 14\r\nConnection: close\r\n\r\n{\"id\":\"msg-1\"}",
+            b"HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: 14\r\nConnection: close\r\n\r\n{\"id\":\"msg-2\"}",
+        ]);
+        let core = core_with_route();
+        let auth = Arc::new(QqAuth::for_testing("test-token".to_string()));
+        let adapter =
+            QqAdapter::for_testing(core, Client::new(), auth, format!("http://{}", address));
+        adapter
+            .deliver_text("qq:group:123", "first")
+            .expect("deliver must enqueue");
+        let token1 = adapter
+            .senders
+            .lock()
+            .unwrap()
+            .get("group:123")
+            .expect("worker1 必须存在")
+            .token
+            .clone();
+        assert!(!token1.is_cancelled(), "新 worker token 未触发");
+        // 空闲超时（测试态 SEND_LOOP_IDLE_SECS=1s）→ token 触发 + map 条目移除
+        tokio::time::sleep(Duration::from_secs(2)).await;
+        assert!(token1.is_cancelled(), "空闲退出必须触发 token");
+        assert!(
+            adapter.senders.lock().unwrap().get("group:123").is_none(),
+            "旧 worker 必须已从 map 移除"
+        );
+        // 再次投递 → 重建新 worker（新 token）
+        adapter
+            .deliver_text("qq:group:123", "second")
+            .expect("deliver must enqueue");
+        let token2 = adapter
+            .senders
+            .lock()
+            .unwrap()
+            .get("group:123")
+            .expect("worker2 必须重建")
+            .token
+            .clone();
+        assert_ne!(token1, token2, "重建必须使用新 token");
+        assert!(!token2.is_cancelled());
+        // 第二个 worker 同样空闲退出（两条消息均已发出并消费两个桩连接）
+        tokio::time::sleep(Duration::from_secs(2)).await;
+        assert!(
+            adapter.senders.lock().unwrap().get("group:123").is_none(),
+            "新 worker 也应空闲退出"
+        );
+        server.join().expect("server thread");
     }
 
     #[test]
