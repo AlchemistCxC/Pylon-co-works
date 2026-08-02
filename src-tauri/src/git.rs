@@ -76,32 +76,36 @@ async fn run_git(cwd: &Path, args: &[&str]) -> Result<(String, String), String> 
     let mut child = cmd
         .spawn()
         .map_err(|error| format!("git 不可用: {error}"))?;
-    // P1-1 死锁修复：wait 之前必须并发读 stdout/stderr。原实现先 wait 后读——
-    // 子进程输出超过 OS 管道缓冲（Windows 默认 4096B）时会阻塞在 write 上
-    // 永不退出 → 必现 10s 超时。这里先 take 出管道句柄，用两个 async 任务
-    // 与 wait 并发消费（各自 5s 超时防挂死），进程退出即 EOF。
-    let mut stdout_bytes = Vec::new();
-    let mut stderr_bytes = Vec::new();
+    // A1 死锁修复（2026-08-02）：wait 之前必须真正并发读 stdout/stderr。原实现
+    // 把读管道写成 async 块，只在 wait 返回后才 join——两个读 future 在子进程
+    // 运行期间从未被 poll，输出超过 OS 管道缓冲（Windows 默认 4096B）时子进程
+    // 阻塞在 write 上永不退出 → 必现 10s 超时。这里 take 出管道句柄后用
+    // tokio::spawn 启动两个读任务与 wait 并发消费（各自 5s 超时防挂死，
+    // 进程退出即 EOF），读任务返回 Vec<u8> 而非共享缓冲。
     let mut stdout = child.stdout.take();
     let mut stderr = child.stderr.take();
-    let read_stdout = async {
+    let read_stdout_task = tokio::spawn(async move {
+        let mut buf = Vec::new();
         if let Some(out) = stdout.as_mut() {
             let _ = tokio::time::timeout(
                 Duration::from_secs(5),
-                tokio::io::AsyncReadExt::read_to_end(out, &mut stdout_bytes),
+                tokio::io::AsyncReadExt::read_to_end(out, &mut buf),
             )
             .await;
         }
-    };
-    let read_stderr = async {
+        buf
+    });
+    let read_stderr_task = tokio::spawn(async move {
+        let mut buf = Vec::new();
         if let Some(err) = stderr.as_mut() {
             let _ = tokio::time::timeout(
                 Duration::from_secs(5),
-                tokio::io::AsyncReadExt::read_to_end(err, &mut stderr_bytes),
+                tokio::io::AsyncReadExt::read_to_end(err, &mut buf),
             )
             .await;
         }
-    };
+        buf
+    });
     // 审查修复：超时必须 kill 子进程（Command::output 默认 kill_on_drop=false，
     // 超时后 git 会滞留并占用 index 锁）。
     let status = match tokio::time::timeout(GIT_TIMEOUT, async {
@@ -109,7 +113,6 @@ async fn run_git(cwd: &Path, args: &[&str]) -> Result<(String, String), String> 
             .wait()
             .await
             .map_err(|error| format!("git 命令失败: {error}"))?;
-        tokio::join!(read_stdout, read_stderr);
         Ok::<std::process::ExitStatus, String>(status)
     })
     .await
@@ -121,6 +124,8 @@ async fn run_git(cwd: &Path, args: &[&str]) -> Result<(String, String), String> 
             return Err("git 命令超时".to_string());
         }
     };
+    let stdout_bytes = read_stdout_task.await.unwrap_or_default();
+    let stderr_bytes = read_stderr_task.await.unwrap_or_default();
     let stdout = String::from_utf8_lossy(&stdout_bytes).into_owned();
     let stderr = String::from_utf8_lossy(&stderr_bytes).into_owned();
     if !status.success() {
@@ -406,5 +411,38 @@ mod tests {
             "错误应明确非 git 仓库: {error}"
         );
         std::fs::remove_dir_all(&dir).ok();
+    }
+
+    #[tokio::test]
+    async fn git_diff_large_output_does_not_deadlock() {
+        // A1 回归：输出超过 OS 管道缓冲（Windows 4096B）时，读任务必须与 wait
+        // 并发——否则 git 阻塞在写管道上永不退出，10s 必超时。全行改写使 diff
+        // 输出 ~2MB（远超 MAX_DIFF_BYTES），同时验证截断标记。
+        let repo = temp_repo("large-diff");
+        let line = "line_aaaaaaaaaa_bbbbbbbbbb_cccccccccc_dddddddddd_eeeeeeeeee\n";
+        let old = line.repeat(20_000);
+        std::fs::write(repo.0.join("big.txt"), &old).unwrap();
+        let run = |args: &[&str]| {
+            let status = std::process::Command::new("git")
+                .args(args)
+                .current_dir(&repo.0)
+                .stdout(Stdio::null())
+                .stderr(Stdio::null())
+                .status()
+                .expect("git must run");
+            assert!(status.success(), "git {args:?} failed");
+        };
+        run(&["add", "big.txt"]);
+        run(&["commit", "-q", "-m", "init"]);
+        let new = line.repeat(20_000).replace('a', "x");
+        std::fs::write(repo.0.join("big.txt"), &new).unwrap();
+
+        let diff = git_diff(&repo.0, None, false)
+            .await
+            .expect("large diff must succeed within timeout");
+        assert!(
+            diff.contains("已截断"),
+            "超过 {MAX_DIFF_BYTES} 的输出必须截断"
+        );
     }
 }
