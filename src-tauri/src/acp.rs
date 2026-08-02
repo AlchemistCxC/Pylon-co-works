@@ -347,6 +347,9 @@ pub struct AcpClient {
     child: ManagedChild,
     /// mpsc channel for writing JSON-RPC lines to stdin. Single consumer = no lock contention.
     pub(crate) write_tx: mpsc::Sender<String>,
+    /// R4：writer tokio 任务句柄——kill/替换 agent 时 abort 掉可能阻塞在 stdin
+    /// 写入的旧任务（`disconnected()` 无运行时，为 None）。
+    writer_task: Option<tokio::task::JoinHandle<()>>,
     next_id: Arc<AtomicU64>,
     pending: Arc<[Mutex<Pending>; PENDING_SHARDS]>,
     /// Broadcast channel for all received messages (responses + notifications).
@@ -553,6 +556,7 @@ impl AcpClient {
         Self {
             child: ManagedChild::empty(),
             write_tx,
+            writer_task: None,
             next_id: Arc::new(AtomicU64::new(1)),
             pending: Arc::new(std::array::from_fn(|_| Mutex::new(HashMap::new()))),
             rx,
@@ -761,7 +765,7 @@ impl AcpClient {
                     return Err(format!(
                         "unsupported attachment MIME {mime}: {}",
                         path.display()
-                    ))
+                    ));
                 }
             }
         }
@@ -795,7 +799,12 @@ impl AcpClient {
     }
 
     /// Kill the child process. Called before switching agents to prevent orphans.
+    /// R4：同时 abort writer 任务——替换时旧 writer 可能正阻塞在 stdin 写（agent
+    /// 不读 stdin，管道填满），任务随后在子进程终止、写失败后自行结束。
     pub fn kill(&mut self) -> Result<(), AcpError> {
+        if let Some(task) = self.writer_task.take() {
+            task.abort();
+        }
         self.child.kill_and_wait()
     }
 
@@ -897,15 +906,45 @@ impl AcpClient {
 
                 let stdin = child.take_stdin()?;
                 let (write_tx, mut write_rx) = mpsc::channel::<String>(WRITE_CHAN_CAP);
-                // Spawn single-consumer writer task — writes JSON-RPC lines to stdin, with newline
-                std::thread::spawn(move || {
-                    let mut writer = BufWriter::new(stdin);
-                    while let Some(line) = write_rx.blocking_recv() {
-                        if writeln!(writer, "{}", line).is_err() {
-                            break;
-                        }
-                        if writer.flush().is_err() {
-                            break;
+                let crashed = Arc::new(AtomicBool::new(false));
+                // R4：writer 从 std 线程改为 tokio 任务（spawn_blocking + 写超时）。
+                // 每行经独立的 blocking 段写入并以 WRITE_TIMEOUT_SECS 竞争超时——
+                // agent 不读 stdin 时管道填满，旧 std 线程的 flush 永久阻塞
+                // （无超时路径），写通道填满后 send_line 的 10s 超时兜底前已有
+                // 多条命令排队失败。单消费者 + 逐行等待保证写入顺序不变。
+                let writer_crashed = crashed.clone();
+                let writer_task = tokio::task::spawn(async move {
+                    let stdin_writer = Arc::new(Mutex::new(BufWriter::new(stdin)));
+                    while let Some(line) = write_rx.recv().await {
+                        let stdin_writer = stdin_writer.clone();
+                        let write = tokio::task::spawn_blocking(move || {
+                            let mut guard = match stdin_writer.lock() {
+                                Ok(guard) => guard,
+                                Err(poisoned) => poisoned.into_inner(),
+                            };
+                            writeln!(guard, "{line}")?;
+                            guard.flush()
+                        });
+                        match tokio::time::timeout(
+                            std::time::Duration::from_secs(WRITE_TIMEOUT_SECS),
+                            write,
+                        )
+                        .await
+                        {
+                            // 写入成功 → 取下一条
+                            Ok(Ok(Ok(()))) => {}
+                            // EPIPE 等写失败 → reader 线程经 EOF 置位 crashed + watch
+                            Ok(Ok(Err(_))) | Ok(Err(_)) => break,
+                            // 写超时：agent 存活但不读 stdin，reader 不会收到 EOF——
+                            // writer 自行置位 crashed（与 send_line 超时语义一致），
+                            // 上层快速失败并触发自动重连。
+                            Err(_) => {
+                                log::warn!(
+                                    "ACP writer timeout after {WRITE_TIMEOUT_SECS}s: connection presumed dead"
+                                );
+                                writer_crashed.store(true, Ordering::Release);
+                                break;
+                            }
                         }
                     }
                 });
@@ -941,7 +980,6 @@ impl AcpClient {
                 let pending: Arc<[Mutex<Pending>; PENDING_SHARDS]> =
                     Arc::new(std::array::from_fn(|_| Mutex::new(HashMap::new())));
                 let (tx, rx) = broadcast::channel(BROADCAST_CAP);
-                let crashed = Arc::new(AtomicBool::new(false));
                 let (crashed_watch, crashed_watch_rx) = watch::channel(false);
 
                 let pending_clone = pending.clone();
@@ -1042,6 +1080,7 @@ impl AcpClient {
                 let client = AcpClient {
                     child,
                     write_tx,
+                    writer_task: Some(writer_task),
                     next_id: Arc::new(AtomicU64::new(1)),
                     pending,
                     rx,
