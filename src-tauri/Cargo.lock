@@ -384,8 +384,10 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "1aa79e62e7697b8e29b513a68abacf485adcd1fe8284a4316c5ae868e6633327"
 dependencies = [
  "iana-time-zone",
+ "js-sys",
  "num-traits",
  "serde",
+ "wasm-bindgen",
  "windows-link 0.2.1",
 ]
 
@@ -2544,6 +2546,7 @@ dependencies = [
  "agent-client-protocol-schema",
  "backon",
  "base64 0.22.1",
+ "chrono",
  "dashmap",
  "embed-resource",
  "encoding_rs",
@@ -2574,7 +2577,6 @@ dependencies = [
  "tracing",
  "tracing-subscriber",
  "url",
- "windows-sys 0.61.2",
 ]
 
 [[package]]

@@ -251,32 +251,21 @@ pub fn unequip(state: &mut PetState) {
     state.unequip();
 }
 
-/// 本地时区偏移（分钟，东正西负）：Windows 用 GetLocalTime（R15：windows-sys
-/// 绑定，删手绘 SYSTEMTIME 布局 + extern 声明）；其他平台回退 UTC（0）。
-/// 时段判定精度为小时，偏移一天内不变（中国无夏令时），进程级缓存一次。
+/// 本地时区偏移（分钟，东正西负）：R16：chrono Local 取真实分钟偏移
+/// （含 DST、半时区）；其他平台回退 UTC（0）。时段判定精度为小时，偏移
+/// 进程内不变，进程级缓存一次。
 fn local_offset_minutes() -> i32 {
     #[cfg(windows)]
     {
         use std::sync::atomic::{AtomicI32, Ordering};
-        use windows_sys::Win32::Foundation::SYSTEMTIME;
-        use windows_sys::Win32::System::SystemInformation::GetLocalTime;
         static CACHED_OFFSET: AtomicI32 = AtomicI32::new(i32::MIN);
         let cached = CACHED_OFFSET.load(Ordering::Relaxed);
         if cached != i32::MIN {
             return cached;
         }
-        let utc_hour = now_ms() / 3_600_000 % 24;
-        let mut st = SYSTEMTIME::default();
-        unsafe { GetLocalTime(&mut st) };
-        let diff_hours = (st.wHour as i64 - utc_hour as i64).rem_euclid(24) as i32;
-        let offset = if diff_hours > 12 {
-            diff_hours - 24
-        } else {
-            diff_hours
-        };
-        // 修复（2026-08-02 A2）：返回真分钟（东八区 +8 → +480）——旧实现返回
-        // 小时差被 pet-core 按分钟消费（/60）后恒为 0，day_part 永远 UTC。
-        let minutes = offset * 60;
+        // local_minus_utc() 返回秒（i32），/60 → 分钟（东八区 +8 → +480；
+        // DST/半时区也正确——A2 修单位，R16 修精度）。
+        let minutes = chrono::Local::now().offset().local_minus_utc() / 60;
         CACHED_OFFSET.store(minutes, Ordering::Relaxed);
         minutes
     }
