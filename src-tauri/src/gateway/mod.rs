@@ -263,6 +263,11 @@ impl GatewayCore {
             return;
         }
         if let Some(text) = extract_deliver_text(event, payload) {
+            // 修复（O39）：空文本 chunk 不投递——空消息不入队发送
+            // （也避免空文本被当作事件走 deliver_event 分支）。
+            if text.is_empty() {
+                return;
+            }
             for adapter in &adapters {
                 for chunk in truncate::truncate_message(&text, adapter.max_message_len()) {
                     if let Err(error) = adapter.deliver_text(source, &chunk) {
@@ -569,6 +574,36 @@ gateway:
             *bound_qq.events.lock().unwrap(),
             vec!["peri:done".to_string()],
             "绑定命中的平台源必须照常投递"
+        );
+    }
+
+    #[test]
+    fn deliver_all_skips_empty_text_chunk() {
+        // O39：空文本 chunk 不投递——空消息不入队发送，也不落入 deliver_event 分支
+        let core = config_with(
+            r#"
+gateway:
+  routes:
+    - source: qq:group:1
+      agent: peri
+      profile: trpg
+      session: 战役1
+"#,
+        );
+        let qq = FakeAdapter::new("qq", 4000);
+        core.register(qq.clone()).unwrap();
+        core.deliver_all(
+            "qq:group:1",
+            "peri:update",
+            &serde_json::json!({
+                "source": "qq:group:1",
+                "update": {"sessionUpdate": "agent_message_chunk", "content": {"text": ""}}
+            }),
+        );
+        assert_eq!(qq.delivered.load(Ordering::SeqCst), 0, "空文本不得投递");
+        assert!(
+            qq.events.lock().unwrap().is_empty(),
+            "空文本不得落入 deliver_event"
         );
     }
 
