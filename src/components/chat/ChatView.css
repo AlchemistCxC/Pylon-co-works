@@ -10,7 +10,7 @@
 .term-user { padding:2px 0; }
 .term-user-prefix { color:var(--accent); font-weight:700; margin-right:6px; }
 .term-user-name { font-weight:700; color:var(--accent); margin-right:8px; }
-.term-user-tag { background:var(--user-tag-bg,rgba(0,0,0,0.03)); color:var(--user-tag-text,var(--accent)); font-weight:600; margin-right:8px; padding:2px 8px; border-radius:4px; font-family:var(--font); }
+.term-user-tag { background:var(--user-tag-bg,rgba(0,0,0,0.03)); color:var(--user-tag-text,var(--accent)); font-weight:600; margin-right:8px; padding:2px 8px; border-radius:4px; font-family:var(--mono); }
 .term-user .term-p { display:inline; margin:0; }
 .term-user code { font-family:var(--mono); font-size:inherit; }
 
@@ -298,10 +298,23 @@
 
 
 /* ── CC 视觉还原（claude 预设启用）── */
-.term-assistant-dot {
-  display:inline-block; min-width:1.2em; margin-right:0.35em;
+/* 圆点列宽：助手 ● 与工具指示共列，内容从第 3 列起（CC minWidth 语义） */
+.app[data-message-layout="claude"] { --dot-col-width: 1.6em; }
+.app[data-message-layout="claude"] .term-assistant.has-dot {
+  position:relative;
+  padding-left: var(--dot-col-width, 1.6em);
+}
+.term-assistant.has-dot .term-assistant-dot {
+  position:absolute; left:0; top:0.12em;
+  width:var(--dot-col-width, 1.6em); min-width:var(--dot-col-width, 1.6em);
   color:var(--text); user-select:none;
 }
+/* 工具指示与助手圆点同列：指示占圆点列宽（margin 归零），工具名从第 3 列起 */
+.app[data-message-layout="claude"] .term-tool-head .term-tool-indicator {
+  min-width:var(--dot-col-width, 1.6em); text-align:left; margin-right:0;
+}
+/* 用户标签跟随终端字体（此前 var(--font) 混入 GUI 字体） */
+.term-user-tag { font-family:var(--mono); }
 .term-tool[data-bash="true"] { background:var(--bash-bg, transparent); }
 .term-tool-bash-prefix {
   color:var(--cli-line-color, currentColor); font-weight:700;

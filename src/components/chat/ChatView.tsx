@@ -561,10 +561,11 @@ function AssistantContent({ text, isStreaming = false }: { text: string; isStrea
     if (copiedTimerRef.current != null) window.clearTimeout(copiedTimerRef.current)
     copiedTimerRef.current = window.setTimeout(() => setCopied(false), 2000)
   }
-  // CC 视觉还原：assistantDot 时助手消息左侧 ● 圆点（claude 预设启用）
+  // CC 视觉还原：assistantDot 时助手消息左侧 ● 圆点（claude 预设启用）。
+  // has-dot：内容整块左缩进圆点列宽，多行对齐圆点右侧（CC minWidth 语义）。
   const assistantDot = useStore(s => s.assistantDot)
   return (
-    <div className="term-assistant">
+    <div className={`term-assistant${assistantDot ? ' has-dot' : ''}`}>
       {assistantDot && <span className="term-assistant-dot" aria-hidden="true">●</span>}
       <button className="copy-btn" onClick={copy}>{copied ? '✓' : '⎘'}</button>
       {isStreaming || !isPlainTextContent(text) ? (
