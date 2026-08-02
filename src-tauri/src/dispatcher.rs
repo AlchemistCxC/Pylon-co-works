@@ -189,6 +189,16 @@ pub(crate) fn start_notification_dispatcher<R: tauri::Runtime>(
         // A7：崩溃信号独立 watch 通道——broadcast 洪泛 Lagged 时 NOTIF_AGENT_CRASHED
         // 会丢，自动重连依赖本通道（主循环 select! 双路监听，见下）。
         let mut crashed_rx = acp.lock().await.crashed_receiver();
+        // R7：自动重连状态组（reconnect_epoch / remaining_attempts / pending_reconnect）。
+        // - reconnect_epoch：本 dispatcher 实例（=本 runtime 代际）的崩溃通知计数，
+        //   每次 handle_crash 通知 +1（含被防重入标志吸收的重复/新一轮通知——被吸收
+        //   的通知以 epoch 变化表达"重连意图待消费"，不再被静默吞掉）。
+        // - remaining_attempts：重连循环内的局部尝试计数（预算），epoch 变化时重置。
+        // - pending_reconnect 概念：epoch 变化即"新一轮崩溃在重连循环期间到来"——
+        //   重连循环每轮复查 epoch 未变；变了则旧循环放弃（消费旧 ticket），以最新
+        //   epoch 重新武装（退避从 attempt 1 重新开始）。A5 的"成功分支复查"窄窗口
+        //   由此结构性覆盖（不再依赖单一复查点）。
+        let reconnect_epoch = std::sync::Arc::new(std::sync::atomic::AtomicU64::new(0));
         // A7：崩溃处理提取为闭包，broadcast 分支与 watch 分支共用。幂等设计：
         // auto_reconnect_active 防重入，双通道都送达时最多多发一次同 payload 状态事件。
         let handle_crash = || async {
@@ -215,6 +225,9 @@ pub(crate) fn start_notification_dispatcher<R: tauri::Runtime>(
                 "peri:agent-status",
                 reconnect_handles.agent_status_payload(Some(runtime_for_reconnect.as_ref())),
             );
+            // R7：每次崩溃通知推进 reconnect_epoch（防重入标志无论是否持有）——
+            // 被吸收的重复通知也会改变 epoch，重连循环据此感知"新一轮崩溃到来"。
+            reconnect_epoch.fetch_add(1, Ordering::AcqRel);
             // 自动重连：崩溃后指数退避自动拉起（最多 5 次，~62s）。
             // 防重入：多次崩溃通知只调度一次（auto_reconnect_active）。
             // per-runtime 语义：只重连本 runtime 绑定的 agent；用户手动
@@ -226,6 +239,9 @@ pub(crate) fn start_notification_dispatcher<R: tauri::Runtime>(
             {
                 let reconnect_runtime = runtime_for_reconnect.clone();
                 let window_for_reconnect = window.clone();
+                let epoch_for_reconnect = reconnect_epoch.clone();
+                // 调度时读当前 epoch：本循环的 ticket。
+                let mut scheduled_epoch = reconnect_epoch.load(Ordering::Acquire);
                 tokio::spawn(async move {
                     // 手动 switch 会 abort 本 runtime 的 dispatcher，但不会
                     // cancel 自动重连闭包——每轮用 active_agent 复查拦截，
@@ -236,7 +252,25 @@ pub(crate) fn start_notification_dispatcher<R: tauri::Runtime>(
                         .ok()
                         .map(|v| v.clone())
                         .unwrap_or_default();
-                    for attempt in 1..=agent_runtime::MAX_RECONNECT_ATTEMPTS {
+                    // R7：remaining_attempts 局部预算 + attempt 退避指数。
+                    let mut remaining_attempts = agent_runtime::MAX_RECONNECT_ATTEMPTS;
+                    let mut attempt: u32 = 1;
+                    loop {
+                        if remaining_attempts == 0 {
+                            break;
+                        }
+                        // R7：每轮复查 epoch——重连期间到来新一轮崩溃通知（含被防重入
+                        // 标志吸收的）→ 本循环已失效：放弃旧 ticket、以最新 epoch 重新
+                        // 武装（预算与退避重置），本循环仍是唯一重连权威（标志持续持有）。
+                        if epoch_for_reconnect.load(Ordering::Acquire) != scheduled_epoch {
+                            log::info!(
+                                "auto-reconnect superseded by a newer crash; re-arming from attempt 1"
+                            );
+                            // 放弃旧 ticket：以最新 epoch 重新武装。
+                            scheduled_epoch = epoch_for_reconnect.load(Ordering::Acquire);
+                            remaining_attempts = agent_runtime::MAX_RECONNECT_ATTEMPTS;
+                            attempt = 1;
+                        }
                         tokio::time::sleep(std::time::Duration::from_millis(
                             agent_runtime::reconnect_backoff_ms(attempt),
                         ))
@@ -261,10 +295,7 @@ pub(crate) fn start_notification_dispatcher<R: tauri::Runtime>(
                         if !(still_stale && still_active) {
                             // 核验修复：提前放弃也必须释放防重入标志，
                             // 否则后续崩溃将永远不再自动重连。
-                            reconnect_runtime
-                                .auto_reconnect_active
-                                .store(false, Ordering::Release);
-                            return;
+                            break;
                         }
                         let agent = reconnect_handles
                             .agents
@@ -272,10 +303,7 @@ pub(crate) fn start_notification_dispatcher<R: tauri::Runtime>(
                             .ok()
                             .and_then(|a| a.get(&reconnect_agent_id).cloned());
                         let Some(agent) = agent else {
-                            reconnect_runtime
-                                .auto_reconnect_active
-                                .store(false, Ordering::Release);
-                            return;
+                            break;
                         };
                         let _lifecycle_guard = reconnect_runtime.agent_lifecycle.lock().await;
                         // P2-1：拿到生命周期锁后重查"仍然需要连接"——复查 stale 与
@@ -289,10 +317,7 @@ pub(crate) fn start_notification_dispatcher<R: tauri::Runtime>(
                             .map(|r| r.status == AgentLifecycleStatus::Crashed)
                             .unwrap_or(false);
                         if !still_stale {
-                            reconnect_runtime
-                                .auto_reconnect_active
-                                .store(false, Ordering::Release);
-                            return;
+                            break;
                         }
                         match do_connect_and_replace(
                             &reconnect_handles,
@@ -317,15 +342,22 @@ pub(crate) fn start_notification_dispatcher<R: tauri::Runtime>(
                                     .map(|r| r.status == AgentLifecycleStatus::Crashed)
                                     .unwrap_or(false);
                                 if still_stale {
+                                    attempt += 1;
+                                    remaining_attempts -= 1;
                                     continue;
                                 }
                                 break;
                             }
                             Err(error) => {
-                                log::warn!("auto-reconnect attempt {attempt} failed: {error}")
+                                log::warn!("auto-reconnect attempt {attempt} failed: {error}");
+                                attempt += 1;
+                                remaining_attempts -= 1;
                             }
                         }
                     }
+                    // R7：成功/放弃消费 ticket——循环结束（成功、提前放弃或预算耗尽）
+                    // 统一推进 epoch，使后续通知的计数严格单调。
+                    epoch_for_reconnect.fetch_add(1, Ordering::AcqRel);
                     reconnect_runtime
                         .auto_reconnect_active
                         .store(false, Ordering::Release);
