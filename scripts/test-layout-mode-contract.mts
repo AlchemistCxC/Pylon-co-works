@@ -1,11 +1,12 @@
 import { strict as assert } from 'node:assert'
 import { readFileSync } from 'node:fs'
+import { ZONE_FIELDS } from '../src/themeFieldDefs.ts'
 
 const root = new URL('../', import.meta.url)
 const app = readFileSync(new URL('src/App.tsx', root), 'utf8')
 const store = readFileSync(new URL('src/store.ts', root), 'utf8')
-const presets = readFileSync(new URL('src/themeFields.ts', root), 'utf8')
-const customPresets = readFileSync(new URL('src/themeFields.ts', root), 'utf8')
+const presets = readFileSync(new URL('src/themeFieldDefs.ts', root), 'utf8')
+const customPresets = readFileSync(new URL('src/themeFieldDefs.ts', root), 'utf8')
 const presetThemes = readFileSync(new URL('src/presets.ts', root), 'utf8')
 const settings = readFileSync(new URL('src/components/Settings.tsx', root), 'utf8')
 const controlCenter = readFileSync(new URL('src/components/ControlCenter.tsx', root), 'utf8')
@@ -22,15 +23,22 @@ assert.match(store, /state\.messageLayout = state\.messageLayout === 'claude' \|
 assert.match(store, /state\.footerLayout = state\.footerLayout === 'peri' \? 'peri' : 'free'/)
 assert.match(store, /state\.cliOverflowMode = state\.cliOverflowMode === 'grow' \|\| state\.cliOverflowMode === 'overlay' \? state\.cliOverflowMode : 'fixed-scroll'/)
 
-assert.match(presets, /'msgStyle', 'msgFont', 'msgTextColor', 'msgLineHeight', 'messageLayout'/)
-assert.match(presets, /'cliHintMode', 'footerLayout', 'cliOverflowMode'/)
+{
+  const chatFields = ZONE_FIELDS.chat.map(f => String(f))
+  const chatOrder = ['msgStyle', 'msgFont', 'msgTextColor', 'msgLineHeight', 'messageLayout']
+  const chatIndexes = chatOrder.map(f => chatFields.indexOf(f))
+  assert.ok(chatIndexes.every(i => i >= 0) && chatIndexes.every((v, i) => i === 0 || v > chatIndexes[i - 1]), 'chat zone 消息字段顺序契约')
+  const ccFields = ZONE_FIELDS.cc.map(f => String(f))
+  const ccOrder = ['cliHintMode', 'footerLayout', 'cliOverflowMode']
+  const ccIndexes = ccOrder.map(f => ccFields.indexOf(f))
+  assert.ok(ccIndexes.every(i => i >= 0) && ccIndexes.every((v, i) => i === 0 || v > ccIndexes[i - 1]), 'cc zone 布局字段顺序契约')
+}
 assert.match(presetThemes, /messageLayout: 'claude', footerLayout: 'peri', cliOverflowMode: 'fixed-scroll'/)
 assert.ok((presetThemes.match(/messageLayout/g) || []).length >= 6, '每个内建预设都应声明 messageLayout')
 
-assert.match(customPresets, /'msgStyle', 'msgFont', 'msgTextColor', 'msgLineHeight', 'messageLayout'/)
-assert.match(customPresets, /'ccScale'/)
-assert.match(customPresets, /'footerLayout'/)
-assert.match(customPresets, /'cliOverflowMode'/)
+assert.ok(ZONE_FIELDS.chat.includes('ccScale' as never) || ZONE_FIELDS.cc.includes('ccScale' as never), 'ccScale 必须在某 zone')
+assert.ok(ZONE_FIELDS.cc.includes('footerLayout' as never), 'footerLayout 必须在 cc zone')
+assert.ok(ZONE_FIELDS.cc.includes('cliOverflowMode' as never), 'cliOverflowMode 必须在 cc zone')
 assert.equal(customPresets.includes('ccCliCustomized'), false, 'customPresets 不得再携带 ccCliCustomized')
 
 assert.match(app, /data-message-layout=\{s\.messageLayout \|\| 'classic'\}/)

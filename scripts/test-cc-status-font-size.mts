@@ -6,7 +6,7 @@ const read = (path: string) => readFileSync(new URL(path, import.meta.url), 'utf
 const app = read('../src/App.tsx')
 const css = read('../src/components/ControlCenter.css')
 const store = read('../src/store.ts')
-const customPresets = read('../src/themeFields.ts')
+const customPresets = read('../src/themeFieldDefs.ts')
 const settings = read('../src/components/Settings.tsx')
 
 const field = 'ccStatusFontSize'
@@ -19,7 +19,13 @@ assert.match(store, /ccBgImage:\s*'',\s*ccStatusFontSize:\s*14/)
 // Built-in and custom preset paths must retain the field in the cc zone.
 assert.equal(ZONE_FIELDS.cc.includes(field as never), true, 'CC zone 缺少 ccStatusFontSize')
 assert.equal(ZONE_FIELDS.cc.filter(item => item === field).length, 1, 'ccStatusFontSize 在 CC zone 重复归属')
-assert.match(customPresets, /'ccBgImage',\s*'ccStatusFontSize',\s*'ccStyle'/)
+{
+  const ccIndexes = ZONE_FIELDS.cc.map(item => String(item))
+  const bg = ccIndexes.indexOf('ccBgImage')
+  const size = ccIndexes.indexOf('ccStatusFontSize')
+  const style = ccIndexes.indexOf('ccStyle')
+  assert.ok(bg >= 0 && size > bg && style > size, 'cc zone 字段顺序契约：ccBgImage < ccStatusFontSize < ccStyle')
+}
 
 const explicitPresetTheme = pickZoneFields({ ccStatusFontSize: 17, chatFontSize: 99 }, 'cc')
 assert.equal(explicitPresetTheme.ccStatusFontSize, 17, 'CC 预设未提取 ccStatusFontSize')

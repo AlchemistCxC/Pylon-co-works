@@ -5,8 +5,8 @@ import { DEFAULT_CC_LAYOUT } from '../src/ccLayoutState.ts'
 const defaults = {
   transparency: 0.85,
   ccLayout: DEFAULT_CC_LAYOUT,
-  activePreset: { global: '', sidebar: '', chat: '', cc: '', right: '' },
-  dirty: { global: false, sidebar: false, chat: false, cc: false, right: false },
+  activePreset: { global: '', layout: '', sidebar: '', chat: '', cc: '', right: '' },
+  dirty: { global: false, layout: false, sidebar: false, chat: false, cc: false, right: false },
 } as const
 
 const migrated = normalizeThemeMigrationState({

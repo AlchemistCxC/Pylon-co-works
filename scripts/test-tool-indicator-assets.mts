@@ -6,7 +6,7 @@ const chatView = readFileSync(new URL('../src/components/chat/ChatView.tsx', imp
 const settings = readFileSync(new URL('../src/components/Settings.tsx', import.meta.url), 'utf8')
 const preview = readFileSync(new URL('../src/components/SettingsPreview.tsx', import.meta.url), 'utf8')
 const presets = readFileSync(new URL('../src/presets.ts', import.meta.url), 'utf8')
-const customPresets = readFileSync(new URL('../src/themeFields.ts', import.meta.url), 'utf8')
+const customPresets = readFileSync(new URL('../src/themeFieldDefs.ts', import.meta.url), 'utf8')
 
 assert.deepEqual(TOOL_INDICATOR_ASSETS.map(asset => asset.id), [
   'circle', 'diamond', 'square', 'triangle', 'play', 'ring', 'double-ring', 'chevron', 'branch', 'node', 'hex',
@@ -27,6 +27,6 @@ assert.match(settings, /resolveToolIndicatorAsset\(t\.toolIndicator\)\.id/, 'Set
 assert.match(preview, /resolveToolIndicatorAsset\(useStore\(s => s\.toolIndicator\)\)/, 'Preview 必须复用 registry')
 assert.match(preview, /indicatorAsset\.glyph/, 'Preview 必须渲染 registry glyph')
 assert.match(presets, /toolIndicator:/, '内建预设必须保留 toolIndicator 字段')
-assert.match(customPresets, /'toolIndicator'/, '自定义预设 allowlist 必须包含 toolIndicator')
+assert.match(customPresets, /\btoolIndicator\b/, '自定义预设 allowlist 必须包含 toolIndicator')
 
 console.log('toolIndicator assets registry 契约测试通过')

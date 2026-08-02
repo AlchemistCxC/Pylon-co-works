@@ -1,12 +1,13 @@
 import { readFileSync } from 'node:fs'
 import { resolve } from 'node:path'
+import { THEME_SETTING_KEYS, ZONE_FIELDS } from '../src/themeFieldDefs.ts'
 
 const root = resolve(process.cwd())
 const read = (path: string) => readFileSync(resolve(root, path), 'utf8')
 
 const store = read('src/store.ts')
 const presets = read('src/presets.ts')
-const themeFields = read('src/themeFields.ts')
+const themeFields = read('src/themeFieldDefs.ts')
 const customPresets = read('src/customPresets.ts')
 const settings = read('src/components/Settings.tsx')
 const footer = read('src/components/chat/GenerationFooter.tsx')
@@ -65,11 +66,10 @@ check(/onSettingChange\(\{spinnerIntervalMs:/.test(spinnerGroup), 'Settings Spin
 check(/const TAB_ZONE_MAP[\s\S]*terminal:\s*'chat'/.test(settings), 'Settings terminal tab is not mapped to chat zone')
 
 // Chat zone ownership is the contract used by local presets.
-const chatFields = section(themeFields, '  chat: [', '\n  ],\n  cc: [')
 for (const field of spinnerFields) {
-  check(new RegExp(`['"]${field}['"]`).test(chatFields), `ZONE_FIELDS.chat missing ${field}`)
+  check(ZONE_FIELDS.chat.includes(field as never), `ZONE_FIELDS.chat missing ${field}`)
 }
-check(occurrences(themeFields, "'spinnerFramePreset'") === 1, 'spinnerFramePreset has duplicate or non-chat ZONE_FIELDS ownership')
+check(ZONE_FIELDS.chat.filter(field => field === 'spinnerFramePreset').length === 1, 'spinnerFramePreset has duplicate or non-chat ZONE_FIELDS ownership')
 
 // Built-in presets may omit optional values, but any spinner value they provide must be chat-owned.
 const presetThemes = section(presets, 'export const GLOBAL_PRESETS:', '\n]\n\n/** 从预设')
@@ -80,10 +80,9 @@ for (const field of spinnerFields) {
 check(/pickZoneFields\([\s\S]*zone/.test(settings), 'Settings local preset path does not call pickZoneFields')
 
 // Custom preset save/apply must allowlist and round-trip every spinner field.
-// 字段字面量位于 THEME_FIELD_GROUPS（THEME_SETTINGS_KEYS 由并集生成）
-const customKeyList = section(themeFields, 'export const THEME_FIELD_GROUPS = {', 'const META_KEYS')
+// 白名单由 themeFieldDefs 的 THEME_SETTING_KEYS（非 META 字段）派生
 for (const field of spinnerFields) {
-  check(new RegExp(`['"]${field}['"]`).test(customKeyList), 'custom preset allowlist missing ' + field)
+  check(THEME_SETTING_KEYS.includes(field as never), 'custom preset allowlist missing ' + field)
 }
 check(/pickCustomPresetTheme\(state/.test(store), 'saveCustomPreset is not wired to pickCustomPresetTheme')
 check(/pickCustomPresetTheme\(preset\.theme/.test(store), 'applyCustomPreset is not wired to pickCustomPresetTheme')

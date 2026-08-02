@@ -6,6 +6,7 @@ import type { CcLayoutV3, CcWidgetPlacement } from './ccLayoutState'
 import { createCustomPreset, deleteCustomPreset, normalizeCustomPresets, pickCustomPresetTheme, upsertCustomPreset } from './customPresets'
 import { normalizeThemeMigrationState } from './themeMigration'
 import { markZoneCustom } from './themePresetState'
+import { ZONES } from './themeFields'
 import { clampCcHeight, resolveVisibleStatusWidgetCount } from './ccHeightState'
 import type { CustomPreset } from './customPresets'
 import { useIdentityStore } from './identityStore'
@@ -137,8 +138,8 @@ export const DEFAULTS: ThemeSettings = {
   ccHidden: [], ccLayout: cloneCcLayout(DEFAULT_CC_LAYOUT),
   ccEditMode: false,
   ccScale: {},
-  activePreset: { global: '', sidebar: '', chat: '', cc: '', right: '' },
-  dirty: { global: false, sidebar: false, chat: false, cc: false, right: false },
+  activePreset: { global: '', layout: '', sidebar: '', chat: '', cc: '', right: '' },
+  dirty: { global: false, layout: false, sidebar: false, chat: false, cc: false, right: false },
 }
 
 export const useStore = create<ThemeState>()(persist(
@@ -208,8 +209,8 @@ export const useStore = create<ThemeState>()(persist(
   setGlobalPreset: (name, theme) => set(_ => ({
     ...theme,
     ccLayout: normalizeCcLayout(theme.ccLayout),
-    activePreset: { global: name, sidebar: name, chat: name, cc: name, right: name },
-    dirty: { global: false, sidebar: false, chat: false, cc: false, right: false },
+    activePreset: Object.fromEntries(ZONES.map(zone => [zone, name])),
+    dirty: Object.fromEntries(ZONES.map(zone => [zone, false])),
   })),
   saveCustomPreset: (name, id) => {
     const state = get()
@@ -228,8 +229,8 @@ export const useStore = create<ThemeState>()(persist(
     return {
       ...theme,
       ccLayout: normalizeCcLayout(theme.ccLayout),
-      activePreset: { global: id, sidebar: id, chat: id, cc: id, right: id },
-      dirty: { global: false, sidebar: false, chat: false, cc: false, right: false },
+      activePreset: Object.fromEntries(ZONES.map(zone => [zone, id])),
+      dirty: Object.fromEntries(ZONES.map(zone => [zone, false])),
     }
   }),
   removeCustomPreset: (id) => set(state => {

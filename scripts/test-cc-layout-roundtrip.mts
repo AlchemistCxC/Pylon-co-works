@@ -10,7 +10,7 @@ import {
 const source = (path: string) => readFileSync(new URL(path, import.meta.url), 'utf8')
 const store = source('../src/store.ts')
 const controlCenter = source('../src/components/ControlCenter.tsx')
-const presets = source('../src/themeFields.ts')
+const presets = source('../src/themeFieldDefs.ts')
 
 // Missing persisted layout falls back to the current placement schema.
 const legacy = normalizeCcLayout(undefined)
@@ -55,11 +55,11 @@ assert.equal(controlCenter.includes('updateCcPlacement(id, {'), true)
 
 // Every preset must remain valid against the declared ThemeSettings schema and carry
 // ccLayout only as the canonical v3 field when it is present.
-assert.match(presets, /'ccLayout'/)
+assert.match(presets, /\bccLayout\b/)
 assert.equal(presets.includes("'ccPositions'"), false)
 assert.equal(presets.includes("'ccCliCustomized'"), false)
 assert.equal(presets.includes("'ccLayoutVersion'"), false)
-assert.match(presets, /cc:\s*\[[\s\S]*?'ccLayout'[\s\S]*?'ccHidden'[\s\S]*?'ccScale'/)
+assert.match(presets, /\bccLayout\b[\s\S]*?\bccHidden\b[\s\S]*?\bccScale\b/)
 assert.equal(presets.includes("'responsiveLayout'"), false)
 
 console.log('ccLayout action round-trip 回归测试通过')
