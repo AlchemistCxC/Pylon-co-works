@@ -271,17 +271,23 @@ pub fn read_text(
     }
     let truncated = bytes.len() > limit;
     // C3：截断点可能切断多字节 UTF-8 字符——回退到最近字符边界，避免误报 binary。
-    // 字符边界判定：boundary 处字节非续字节（0x80..=0xBF）；仅当截断点自身
-    // 落在续字节上才回退，完整字符不会因此被丢弃。
-    let mut end = bytes.len().min(limit);
-    let mut backed_off = false;
-    while end > 0 && end < bytes.len() && (0x80..=0xBF).contains(&bytes[end]) {
-        end -= 1;
-        backed_off = true;
-    }
-    if backed_off && end == 0 && !bytes.is_empty() {
-        // 文件以续字节开头（本身非法 UTF-8），回退会清空内容——按 binary 拒绝。
-        return Err(WorkspaceError::BinaryFile);
+    // S6：边界判定改为按 from_utf8 前缀可解码，不再用 0x80..=0xBF 续字节规则——
+    // GBK 的 lead/trail 大量落此区间（如 啊=B0A1），旧逻辑会把整段回退清空
+    // （end==0）而误报 BinaryFile。最大 UTF-8 字符宽 4 字节，至多回退 3 字节；
+    // BOM 前缀对边界搜索透明。找不到 UTF-8 边界 = 非 UTF-8 内容，整段交给
+    // decode_text 的 1 字节回退（R22），由解码结果判定，不再按字节区间猜测。
+    let cut = bytes.len().min(limit);
+    let mut end = cut;
+    for candidate in (cut.saturating_sub(3)..=cut).rev() {
+        if candidate > 0 {
+            let prefix = bytes[..candidate]
+                .strip_prefix(b"\xEF\xBB\xBF")
+                .unwrap_or(&bytes[..candidate]);
+            if !prefix.is_empty() && std::str::from_utf8(prefix).is_ok() {
+                end = candidate;
+                break;
+            }
+        }
     }
     let slice = &bytes[..end];
     let (content, encoding) = decode_text(slice)?;
@@ -463,6 +469,23 @@ mod tests {
         let preview = read_text(&root, "gbk2.txt", Some(7)).unwrap();
         assert_eq!(preview.content, "中文测");
         assert_eq!(preview.encoding, "gbk");
+    }
+
+    #[test]
+    fn text_preview_gbk_repeated_char_truncation_not_binary() {
+        // S6：GBK 常用字 lead/trail 字节（啊=B0A1）全落 0x80..=0xBF，旧逻辑按
+        // UTF-8 续字节回退会一路退到 end==0 而误报 BinaryFile；修复后整段交给
+        // decode_text 的 GBK 1 字节回退，预览成功且 encoding=gbk。
+        let (_dir, root) = fixture();
+        let gbk: Vec<u8> = (0..=DEFAULT_PREVIEW_BYTES)
+            .flat_map(|_| [0xB0u8, 0xA1])
+            .collect();
+        fs::write(root.join("gbk-rep.txt"), &gbk).unwrap();
+        let preview = read_text(&root, "gbk-rep.txt", None).unwrap();
+        assert!(preview.truncated);
+        assert_eq!(preview.encoding, "gbk");
+        assert_eq!(preview.bytes_read, DEFAULT_PREVIEW_BYTES);
+        assert_eq!(preview.content, "啊".repeat(DEFAULT_PREVIEW_BYTES / 2));
     }
 
     #[test]
