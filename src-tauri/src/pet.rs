@@ -217,10 +217,17 @@ fn local_offset_minutes() -> i32 {
         }
         let utc_hour = now_ms() / 3_600_000 % 24;
         let local = local_hour_windows();
-        let diff = (local as i64 - utc_hour as i64).rem_euclid(24) as i32;
-        let offset = if diff > 12 { diff - 24 } else { diff };
-        CACHED_OFFSET.store(offset, Ordering::Relaxed);
-        offset
+        let diff_hours = (local as i64 - utc_hour as i64).rem_euclid(24) as i32;
+        let offset = if diff_hours > 12 {
+            diff_hours - 24
+        } else {
+            diff_hours
+        };
+        // 修复（2026-08-02 A2）：返回真分钟（东八区 +8 → +480）——旧实现返回
+        // 小时差被 pet-core 按分钟消费（/60）后恒为 0，day_part 永远 UTC。
+        let minutes = offset * 60;
+        CACHED_OFFSET.store(minutes, Ordering::Relaxed);
+        minutes
     }
     #[cfg(not(windows))]
     {

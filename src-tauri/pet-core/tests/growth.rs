@@ -574,13 +574,17 @@ fn day_part_boundaries_are_stable() {
 #[test]
 fn day_part_respects_local_offset_and_clamps() {
     use pylon_pet_core::DayPart;
-    // UTC 0 点（1970-01-01 00:00）+ 8h = 本地 8:00 → Day
+    // UTC 0 点（1970-01-01 00:00）+ 480 分钟（东八区）= 本地 8:00 → Day
     let mut pet = PetState::new_at(0);
-    pet.set_local_offset_minutes(8 * 60);
+    pet.set_local_offset_minutes(480);
     assert_eq!(pet.day_part(0), DayPart::Day);
-    // +14h = 本地 14:00 → Day；+15h = 15:00 → Day
+    // +900 分钟 = 本地 15:00 → Day
     pet.set_local_offset_minutes(15 * 60);
     assert_eq!(pet.day_part(0), DayPart::Day);
+    // 修复（2026-08-02 A2）：480 分钟时 UTC 14:00 = 本地 22:00 → Night
+    //（旧实现偏移按小时语义被丢弃，此处恒 Day/恒 UTC——断言修复后为 Night）
+    pet.set_local_offset_minutes(480);
+    assert_eq!(pet.day_part(14 * 3_600_000), DayPart::Night);
     // 负偏移：UTC 0 点 - 5h = 前日 19:00 → Dusk
     pet.set_local_offset_minutes(-5 * 60);
     assert_eq!(pet.day_part(0), DayPart::Dusk);
@@ -591,6 +595,20 @@ fn day_part_respects_local_offset_and_clamps() {
     // 0 = UTC（默认）
     let pet = PetState::new_at(0);
     assert_eq!(pet.day_part(0), DayPart::Night);
+}
+
+#[test]
+fn offset_480_minutes_produces_night_at_local_22h() {
+    use pylon_pet_core::DayPart;
+    // 东八区（+480 分钟）：UTC 14:00 = 本地 22:00 → Night（修复后深夜功能
+    // 生效——Night bond×1.5 / night_visits / 深夜静默按真实本地时段触发）
+    let mut pet = PetState::new_at(0);
+    pet.set_local_offset_minutes(480);
+    assert_eq!(pet.day_part(14 * 3_600_000), DayPart::Night);
+    // 跨日回绕：UTC 16:00 = 次日本地 00:00 → 仍 Night
+    assert_eq!(pet.day_part(16 * 3_600_000), DayPart::Night);
+    // 对照：UTC 4:00 = 本地 12:00 → Day（凌晨本地正午，隔离误判）
+    assert_eq!(pet.day_part(4 * 3_600_000), DayPart::Day);
 }
 
 #[test]

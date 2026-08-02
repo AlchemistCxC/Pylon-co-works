@@ -937,8 +937,10 @@ impl PetState {
 
     /// M8 时段感知：当前时段（本地小时推导）。offset 由桥接层注入（见
     /// [`Self::set_local_offset_minutes`]）；0 = UTC。
+    /// 修复（2026-08-02 A2）：偏移单位为分钟，直接按分钟加毫秒——旧实现
+    /// `offset / 60` 把"小时差当分钟注入"的偏移（写入端 8 → 480 之前）丢弃。
     pub fn day_part(&self, now_ms: u64) -> DayPart {
-        let hour = ((now_ms / 3_600_000) as i64 + self.local_offset_minutes as i64 / 60)
+        let hour = ((now_ms as i64 + self.local_offset_minutes as i64 * 60_000) / 3_600_000)
             .rem_euclid(24) as u32;
         day_part_of_hour(hour)
     }
