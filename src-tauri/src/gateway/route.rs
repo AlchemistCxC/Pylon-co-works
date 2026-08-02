@@ -121,7 +121,7 @@ struct GatewayConfigFile {
 }
 
 /// `gateway` 段结构。
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Default, Deserialize)]
 struct GatewaySection {
     /// 缺 `routes` 键视为空列表。
     #[serde(default)]
@@ -169,11 +169,7 @@ fn default_persist_mode() -> String {
 pub fn parse_config(input: &str) -> Result<GatewayConfig, String> {
     let config: GatewayConfigFile =
         serde_yaml::from_str(input).map_err(|e| format!("gateway 配置解析失败: {e}"))?;
-    let section = config.gateway.unwrap_or(GatewaySection {
-        routes: Vec::new(),
-        qq: None,
-        inject: None,
-    });
+    let section = config.gateway.unwrap_or_default();
     let routes = section.routes;
     let mut entries = Vec::with_capacity(routes.len());
     let mut seen = HashSet::with_capacity(routes.len());
