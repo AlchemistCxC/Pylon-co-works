@@ -865,6 +865,268 @@ pub(crate) async fn send_message<R: tauri::Runtime>(
     .await
 }
 
+/// R33a：prompt 阶段纯函数——content 构造 + persona 拼接 + B11.1 注入调用 +
+/// attachments 块构建。返回 (prompt_blocks, 注入命中的来源列表, 注入回合号)。
+/// 注入日志（activated/empty/failed）在本函数内按原顺序发出；pet/用户事件由
+/// 调用方在返回后触发——wire/事件顺序与拆分前一致。
+// clippy 2026-08-02：9 参为阶段全参数（state/runtime/gateway/source/content/persona/
+// session_prompt/attachments/is_first），与 send_prompt_core 显式参数风格一致。
+#[allow(clippy::too_many_arguments)]
+async fn prepare_prompt_blocks(
+    state: &AppState,
+    runtime: &Arc<AgentRuntime>,
+    gateway: &GatewayCore,
+    source: &str,
+    content: &str,
+    persona: &str,
+    session_prompt: Option<&str>,
+    attachments: Option<&[String]>,
+    is_first: bool,
+) -> Result<(Vec<serde_json::Value>, Vec<String>, u64), PylonError> {
+    let attachment_paths = attachments.unwrap_or_default();
+    let effective_persona = session_prompt
+        .filter(|value| !value.trim().is_empty())
+        .unwrap_or(persona);
+
+    let prompt_content =
+        if is_first && !effective_persona.is_empty() && !content.trim_start().starts_with('/') {
+            format!("{}\n\n---\n\n{}", effective_persona, content)
+        } else {
+            content.to_string()
+        };
+
+    // B11.1：发送前置注入钩子（GUI 与平台 ingest 统一入口）——Prism 可用 +
+    // gateway 配置开启 + 非命令消息 → POST /inject 拿 context 前置拼进 prompt。
+    // Prism 不可用/请求失败 → 降级为不注入（消息照发，fail-open）。
+    let mut inject_activated: Vec<String> = Vec::new();
+    let message_round = {
+        let sessions = runtime.sessions.lock().map_err(|e| e.to_string())?;
+        sessions.get(source).map(|s| s.inject_round).unwrap_or(0)
+    };
+    let prompt_text = if gateway.inject_enabled() && inject_applies_to(content) {
+        match state
+            .prism
+            .inject(
+                &gateway.inject_scenario().unwrap_or_default(),
+                &gateway.inject_sources(),
+                content,
+                message_round,
+            )
+            .await
+        {
+            Ok(result) => {
+                if result.activated.is_empty() {
+                    state.log_runtime_summary(
+                        "info",
+                        "inject",
+                        Some(source.to_string()),
+                        "Prism inject returned empty context",
+                        serde_json::Map::from_iter([(
+                            "contextLength".to_string(),
+                            serde_json::Value::from(result.context.len()),
+                        )]),
+                    );
+                } else {
+                    state.log_runtime_summary(
+                        "info",
+                        "inject",
+                        Some(source.to_string()),
+                        "Prism inject activated",
+                        serde_json::Map::from_iter([
+                            (
+                                "activatedCount".to_string(),
+                                serde_json::Value::from(result.activated.len()),
+                            ),
+                            (
+                                "contextLength".to_string(),
+                                serde_json::Value::from(result.context.len()),
+                            ),
+                        ]),
+                    );
+                }
+                inject_activated = result.activated;
+                compose_inject_prompt(&result.context, &prompt_content)
+            }
+            Err(error) => {
+                log::warn!("Prism inject failed: {error}");
+                state.log_runtime_summary(
+                    "warn",
+                    "inject",
+                    Some(source.to_string()),
+                    "Prism inject failed; sent without injection",
+                    serde_json::Map::new(),
+                );
+                prompt_content
+            }
+        }
+    } else {
+        prompt_content
+    };
+    // clippy needless_borrow 误报（2026-08-02）：建议去掉 & 直接传 attachment_paths，
+    // 但 prompt_blocks 参数是 &[String]，Vec 不会自动借用（编译失败）；&Vec → &[T]
+    // 是 deref coercion 的惯用写法，allow 保留。
+    #[allow(clippy::needless_borrow)]
+    let prompt_blocks = AcpClient::prompt_blocks(prompt_text, &attachment_paths)?;
+    Ok((prompt_blocks, inject_activated, message_round))
+}
+
+/// R33b：回合推进纯函数——该 session 用户回合 +1、标记收集回合（dispatcher
+/// 据此绑定流式收集）、清空上一回合回复文本（本轮回复由 dispatcher 重新收集）。
+/// 必须在发送（send_keep_rx）之前完成（P2-8：发送成功后清空会与 dispatcher
+/// 的并行追加竞态：agent 极快响应时本轮回复文本会被清掉）。
+fn advance_round(runtime: &Arc<AgentRuntime>, source: &str) {
+    if let Ok(mut sessions) = runtime.sessions.lock() {
+        if let Some(session) = sessions.get_mut(source) {
+            session.inject_round = session.inject_round.saturating_add(1);
+            // B11.2：先标记收集回合（dispatcher 据此绑定流式收集），再清空文本。
+            session.last_response_round = session.inject_round;
+            session.last_response_text.clear();
+        }
+    }
+}
+
+/// R33c：Response 成功路径收尾——stop reason 校验（M5 感知）、generation 复核、
+/// 首轮标记、peri:done 广播、B11.2 完成持久化、完成日志。wire/事件顺序与
+/// 拆分前内联路径完全一致（peri:error 先于 pet 感知、done 先于 persist）。
+// clippy 2026-08-02：11 参为收尾阶段全参数（state/runtime/window/gateway/source/
+// content/peri_id/prompt_generation/is_first/message_round/data），与管线其余阶段
+// 同风格显式传参，避免包一层结果结构体降低可读性。
+#[allow(clippy::too_many_arguments)]
+async fn finalize_response<R: tauri::Runtime>(
+    state: &AppState,
+    runtime: &Arc<AgentRuntime>,
+    window: Option<&tauri::Window<R>>,
+    gateway: &GatewayCore,
+    source: &str,
+    content: &str,
+    peri_id: String,
+    prompt_generation: u64,
+    is_first: bool,
+    message_round: u64,
+    data: serde_json::Value,
+) -> Result<String, PylonError> {
+    AcpClient::prompt_stop_reason(&data).map_err(|error| {
+        let error = error.to_string();
+        if let Some(window) = window {
+            emit_event_all(
+                window,
+                gateway,
+                source,
+                "peri:error",
+                serde_json::json!({"source": source, "error": error}),
+            );
+        }
+        // M5 感知：refusal / max_turn 区分于普通失败
+        if error.contains("refused") {
+            let _ = state
+                .pet
+                .lock()
+                .map(|mut pet| crate::pet::on_refused(&mut pet));
+        } else if error.contains("max_turn") {
+            let _ = state
+                .pet
+                .lock()
+                .map(|mut pet| crate::pet::on_maxed(&mut pet));
+        } else {
+            let _ = state
+                .pet
+                .lock()
+                .map(|mut pet| crate::pet::on_error(&mut pet));
+        }
+        error
+    })?;
+    if let Err(error) = state.ensure_generation(runtime, prompt_generation) {
+        let _ = state.remove_session_if_matches(runtime, source, &peri_id, prompt_generation);
+        if let Some(window) = window {
+            emit_event_all(
+                window,
+                gateway,
+                source,
+                "peri:error",
+                serde_json::json!({"source": source, "error": error}),
+            );
+        }
+        return Err(error.into());
+    }
+    if is_first {
+        state.mark_first_prompt_if_matches(runtime, source, &peri_id, prompt_generation)?;
+    }
+    if let Some(window) = window {
+        emit_event_all(
+            window,
+            gateway,
+            source,
+            "peri:done",
+            serde_json::json!({"source": source, "data": data}),
+        );
+    }
+    let _ = state.pet.lock().map(|mut p| crate::pet::on_done(&mut p));
+    // B11.2：完成持久化（gateway.inject.persist = "prism"）——把本回合
+    // （用户消息 + 流式收集的回复文本）交 Prism /persist（LLM 摘要 +
+    // recent.json + active.round 推进）。失败只告警，不阻断。
+    if gateway.inject_persist() == "prism" {
+        let response_text = {
+            let sessions = runtime.sessions.lock().map_err(|e| e.to_string())?;
+            sessions
+                .get(source)
+                .map(|s| s.last_response_text.clone())
+                .unwrap_or_default()
+        };
+        if !response_text.trim().is_empty() {
+            match state
+                .prism
+                .persist_round(
+                    &gateway.inject_scenario().unwrap_or_default(),
+                    &gateway.inject_sources(),
+                    content,
+                    &response_text,
+                    message_round,
+                )
+                .await
+            {
+                Ok(value) => {
+                    let ok = value.get("ok").and_then(|v| v.as_bool()).unwrap_or(false);
+                    if !ok {
+                        log::warn!("Prism persist 返回失败: {value}");
+                    }
+                    state.log_runtime_summary(
+                        "info",
+                        "persist",
+                        Some(source.to_string()),
+                        if ok {
+                            "Prism round persisted"
+                        } else {
+                            "Prism persist returned failure"
+                        },
+                        serde_json::Map::new(),
+                    );
+                }
+                Err(error) => {
+                    log::warn!("Prism persist failed: {error}");
+                    state.log_runtime_summary(
+                        "warn",
+                        "persist",
+                        Some(source.to_string()),
+                        "Prism persist failed",
+                        serde_json::Map::new(),
+                    );
+                }
+            }
+        }
+    }
+    state.log_runtime_summary(
+        "info",
+        "prompt",
+        Some(source.to_string()),
+        "Prompt completed",
+        serde_json::Map::from_iter([(
+            "result".to_string(),
+            serde_json::Value::String("success".to_string()),
+        )]),
+    );
+    Ok(peri_id)
+}
+
 /// 公共发送管线（GUI `send_message` 与 gateway 平台 ingest 共用，B10.3）：
 /// per-runtime 会话创建/映射/prompt 锁/等待/cancel/事件广播。
 /// 平台 ingest 经 handler 路由到绑定 agent 的 runtime 后调用本函数。
@@ -996,92 +1258,20 @@ pub(crate) async fn send_prompt_core<R: tauri::Runtime>(
         }
     };
 
-    let attachment_paths = attachments.unwrap_or_default();
+    // R33a：content 构造 + persona 拼接 + B11.1 注入 + attachments 块构建。
     let prompt_generation = state.current_generation(runtime);
-
-    let effective_persona = session_prompt
-        .filter(|value| !value.trim().is_empty())
-        .unwrap_or(persona);
-
-    let prompt_content =
-        if is_first && !effective_persona.is_empty() && !content.trim_start().starts_with('/') {
-            format!("{}\n\n---\n\n{}", effective_persona, content)
-        } else {
-            content.to_string()
-        };
-
-    // B11.1：发送前置注入钩子（GUI 与平台 ingest 统一入口）——Prism 可用 +
-    // gateway 配置开启 + 非命令消息 → POST /inject 拿 context 前置拼进 prompt。
-    // Prism 不可用/请求失败 → 降级为不注入（消息照发，fail-open）。
-    let mut inject_activated: Vec<String> = Vec::new();
-    let message_round = {
-        let sessions = runtime.sessions.lock().map_err(|e| e.to_string())?;
-        sessions.get(source).map(|s| s.inject_round).unwrap_or(0)
-    };
-    let prompt_text = if gateway.inject_enabled() && inject_applies_to(content) {
-        match state
-            .prism
-            .inject(
-                &gateway.inject_scenario().unwrap_or_default(),
-                &gateway.inject_sources(),
-                content,
-                message_round,
-            )
-            .await
-        {
-            Ok(result) => {
-                if result.activated.is_empty() {
-                    state.log_runtime_summary(
-                        "info",
-                        "inject",
-                        Some(source.to_string()),
-                        "Prism inject returned empty context",
-                        serde_json::Map::from_iter([(
-                            "contextLength".to_string(),
-                            serde_json::Value::from(result.context.len()),
-                        )]),
-                    );
-                } else {
-                    state.log_runtime_summary(
-                        "info",
-                        "inject",
-                        Some(source.to_string()),
-                        "Prism inject activated",
-                        serde_json::Map::from_iter([
-                            (
-                                "activatedCount".to_string(),
-                                serde_json::Value::from(result.activated.len()),
-                            ),
-                            (
-                                "contextLength".to_string(),
-                                serde_json::Value::from(result.context.len()),
-                            ),
-                        ]),
-                    );
-                }
-                inject_activated = result.activated;
-                compose_inject_prompt(&result.context, &prompt_content)
-            }
-            Err(error) => {
-                log::warn!("Prism inject failed: {error}");
-                state.log_runtime_summary(
-                    "warn",
-                    "inject",
-                    Some(source.to_string()),
-                    "Prism inject failed; sent without injection",
-                    serde_json::Map::new(),
-                );
-                prompt_content
-            }
-        }
-    } else {
-        prompt_content
-    };
-    // clippy needless_borrow 误报（2026-08-02）：建议去掉 & 直接传 attachment_paths，
-    // 但 prompt_blocks 参数是 &[String]，Vec 不会自动借用（编译失败）；&Vec → &[T]
-    // 是 deref coercion 的惯用写法，allow 保留。
-    #[allow(clippy::needless_borrow)]
-    let prompt_blocks = AcpClient::prompt_blocks(prompt_text, &attachment_paths)?;
+    let (prompt_blocks, inject_activated, message_round) = prepare_prompt_blocks(
+        state,
+        runtime,
+        gateway,
+        source,
+        content,
+        persona,
+        session_prompt,
+        attachments,
+        is_first,
+    )
+    .await?;
 
     state
         .pet
@@ -1106,18 +1296,9 @@ pub(crate) async fn send_prompt_core<R: tauri::Runtime>(
     };
     // 取消/连接关闭分支清理 pending 仍需 request_id（send_keep_rx 会消费 rpc）。
     let request_id = rpc.id;
-    // B11：回合推进——该 session 用户回合 +1（注入/持久化共用同一 round）；
-    // 清空上一回合回复文本（本轮回复由 dispatcher 重新收集）。
-    // P2-8：必须在发送（send_keep_rx）之前完成——发送成功后清空会与
-    // dispatcher 的并行追加竞态：agent 极快响应时本轮回复文本会被清掉。
-    if let Ok(mut sessions) = runtime.sessions.lock() {
-        if let Some(session) = sessions.get_mut(source) {
-            session.inject_round = session.inject_round.saturating_add(1);
-            // B11.2：先标记收集回合（dispatcher 据此绑定流式收集），再清空文本。
-            session.last_response_round = session.inject_round;
-            session.last_response_text.clear();
-        }
-    }
+    // R33b：回合推进（该 session 用户回合 +1、标记收集回合、清空回复文本）。
+    // P2-8：必须在发送（send_keep_rx）之前完成，见 advance_round 说明。
+    advance_round(runtime, source);
     // R3：send_keep_rx 统一 10s 写超时（对齐 complete 路径；原裸 write_tx.send 在
     // writer 阻塞 + 队列满时会无限挂起），失败已清理 pending，只收敛会话映射。
     let mut rx = match rpc.send_keep_rx().await {
@@ -1167,137 +1348,23 @@ pub(crate) async fn send_prompt_core<R: tauri::Runtime>(
                 let _ = state.pet.lock().map(|mut p| crate::pet::on_error(&mut p));
                 Err(PylonError::Protocol(error))
             } else {
+                // R33c：成功路径收尾（stop reason 校验 / generation 复核 / 首轮标记 /
+                // peri:done 广播 / B11.2 完成持久化）委托阶段函数，顺序不变。
                 let data = raw.result.unwrap_or(serde_json::Value::Null);
-                AcpClient::prompt_stop_reason(&data).map_err(|error| {
-                    let error = error.to_string();
-                    if let Some(window) = window {
-                        emit_event_all(
-                            window,
-                            gateway,
-                            source,
-                            "peri:error",
-                            serde_json::json!({"source": source, "error": error}),
-                        );
-                    }
-                    // M5 感知：refusal / max_turn 区分于普通失败
-                    if error.contains("refused") {
-                        let _ = state
-                            .pet
-                            .lock()
-                            .map(|mut pet| crate::pet::on_refused(&mut pet));
-                    } else if error.contains("max_turn") {
-                        let _ = state
-                            .pet
-                            .lock()
-                            .map(|mut pet| crate::pet::on_maxed(&mut pet));
-                    } else {
-                        let _ = state
-                            .pet
-                            .lock()
-                            .map(|mut pet| crate::pet::on_error(&mut pet));
-                    }
-                    error
-                })?;
-                if let Err(error) = state.ensure_generation(runtime, prompt_generation) {
-                    let _ = state.remove_session_if_matches(
-                        runtime,
-                        source,
-                        &peri_id,
-                        prompt_generation,
-                    );
-                    if let Some(window) = window {
-                        emit_event_all(
-                            window,
-                            gateway,
-                            source,
-                            "peri:error",
-                            serde_json::json!({"source": source, "error": error}),
-                        );
-                    }
-                    return Err(error.into());
-                }
-                if is_first {
-                    state.mark_first_prompt_if_matches(
-                        runtime,
-                        source,
-                        &peri_id,
-                        prompt_generation,
-                    )?;
-                }
-                if let Some(window) = window {
-                    emit_event_all(
-                        window,
-                        gateway,
-                        source,
-                        "peri:done",
-                        serde_json::json!({"source": source, "data": data}),
-                    );
-                }
-                let _ = state.pet.lock().map(|mut p| crate::pet::on_done(&mut p));
-                // B11.2：完成持久化（gateway.inject.persist = "prism"）——把本回合
-                // （用户消息 + 流式收集的回复文本）交 Prism /persist（LLM 摘要 +
-                // recent.json + active.round 推进）。失败只告警，不阻断。
-                if gateway.inject_persist() == "prism" {
-                    let response_text = {
-                        let sessions = runtime.sessions.lock().map_err(|e| e.to_string())?;
-                        sessions
-                            .get(source)
-                            .map(|s| s.last_response_text.clone())
-                            .unwrap_or_default()
-                    };
-                    if !response_text.trim().is_empty() {
-                        match state
-                            .prism
-                            .persist_round(
-                                &gateway.inject_scenario().unwrap_or_default(),
-                                &gateway.inject_sources(),
-                                content,
-                                &response_text,
-                                message_round,
-                            )
-                            .await
-                        {
-                            Ok(value) => {
-                                let ok = value.get("ok").and_then(|v| v.as_bool()).unwrap_or(false);
-                                if !ok {
-                                    log::warn!("Prism persist 返回失败: {value}");
-                                }
-                                state.log_runtime_summary(
-                                    "info",
-                                    "persist",
-                                    Some(source.to_string()),
-                                    if ok {
-                                        "Prism round persisted"
-                                    } else {
-                                        "Prism persist returned failure"
-                                    },
-                                    serde_json::Map::new(),
-                                );
-                            }
-                            Err(error) => {
-                                log::warn!("Prism persist failed: {error}");
-                                state.log_runtime_summary(
-                                    "warn",
-                                    "persist",
-                                    Some(source.to_string()),
-                                    "Prism persist failed",
-                                    serde_json::Map::new(),
-                                );
-                            }
-                        }
-                    }
-                }
-                state.log_runtime_summary(
-                    "info",
-                    "prompt",
-                    Some(source.to_string()),
-                    "Prompt completed",
-                    serde_json::Map::from_iter([(
-                        "result".to_string(),
-                        serde_json::Value::String("success".to_string()),
-                    )]),
-                );
-                Ok(peri_id)
+                finalize_response(
+                    state,
+                    runtime,
+                    window,
+                    gateway,
+                    source,
+                    content,
+                    peri_id,
+                    prompt_generation,
+                    is_first,
+                    message_round,
+                    data,
+                )
+                .await
             }
         }
         PromptWaitOutcome::ConnectionClosed => {
