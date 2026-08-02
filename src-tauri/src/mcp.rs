@@ -124,7 +124,9 @@ pub fn validate_and_serialize(input: Option<Vec<McpServerConfig>>) -> Result<Vec
                         .map_err(|e| format!("serialize MCP http server: {e}"))?
                 }
             }
-            _ => unreachable!(),
+            // 2026-08-02：unreachable!() 改显式 Err——transport 已被上方白名单前置过滤，
+            // 正常不可达，但未来改动过滤逻辑时不应成为生产 panic 点。
+            _ => return Err(format!("unsupported MCP transport: {transport}")),
         };
         Ok(value)
     }).collect()
