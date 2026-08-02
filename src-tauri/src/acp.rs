@@ -1260,6 +1260,13 @@ impl AcpClient {
 
         let mut replay = Vec::new();
         loop {
+            // 优化 3：每轮复检 crashed——EOF 仅广播 NOTIF_AGENT_CRASHED（非目标
+            // session/update 被跳过），reader 先 store crashed 后广播（acp.rs:1154-1164），
+            // 此处命中即可立即 ConnectionClosed，与 send_keep_rx/complete 的发送后复检
+            // 一致，避免挂满 30s 假超时。
+            if handles.crashed.load(Ordering::Relaxed) {
+                return Err(AcpError::ConnectionClosed);
+            }
             let raw = match tokio::time::timeout(std::time::Duration::from_secs(30), events.recv())
                 .await
             {
@@ -2129,6 +2136,41 @@ for line in sys.stdin:
             .collect();
         assert_eq!(texts, vec!["target-1", "target-2"]);
         assert!(!texts.contains(&"must-not-leak"));
+    }
+
+    #[tokio::test]
+    async fn fake_acp_session_load_replay_eof_returns_connection_closed() {
+        // 优化 3：回放期间 EOF（崩溃）——每轮复检 crashed 立即 ConnectionClosed，
+        // 而非依赖 NOTIF_AGENT_CRASHED 广播被跳过（非目标 session/update）后
+        // 挂满 30s 假超时。
+        let script = r#"import json,sys
+for line in sys.stdin:
+    request=json.loads(line)
+    if request.get('method') == 'initialize':
+        print(json.dumps({'jsonrpc':'2.0','id':request.get('id'),'result':{}}), flush=True)
+    elif request.get('method') == 'session/load':
+        session_id=request['params']['sessionId']
+        print(json.dumps({'jsonrpc':'2.0','method':'session/update','params':{'sessionId':session_id,'update':{'sessionUpdate':'agent_message_chunk','content':{'text':'history-1'}}}}), flush=True)
+        break
+sys.exit(0)
+"#;
+        let agent = crate::test_utils::fake_acp_agent("fake-acp-replay-eof", script);
+        let client = AcpClient::connect_with_logs(&agent, None)
+            .await
+            .expect("fake ACP replay EOF agent must initialize");
+        let result = tokio::time::timeout(
+            std::time::Duration::from_secs(5),
+            AcpClient::load_session_with_replay(
+                client.replay_handles(),
+                "fake-session-replay-eof",
+                ".",
+                Vec::new(),
+            ),
+        )
+        .await
+        .expect("replay EOF must fail fast, not hang until the 30s timeout");
+        assert!(matches!(result, Err(AcpError::ConnectionClosed)));
+        assert!(client.is_crashed(), "EOF must mark the connection crashed");
     }
 
     #[tokio::test]
