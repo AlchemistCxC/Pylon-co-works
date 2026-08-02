@@ -299,12 +299,21 @@ async fn run_connection(
     // 用 tokio::time::Instant 以配合 sleep_until 的 deadline 类型。
     let mut last_inbound = tokio::time::Instant::now();
     let max_silence = heartbeat_interval * 3;
+    // 心跳 ACK 看门狗锚点：仅 op 11 刷新。与静默看门狗互补——半死连接上
+    // 若服务器仍回其他数据但心跳无 ACK，静默看门狗不触发，此锚点兜底。
+    // 超过 2 个心跳间隔未收到 ACK 视为半死，走统一重连路径。
+    let mut last_ack_at = tokio::time::Instant::now();
+    let ack_timeout = heartbeat_interval * 2;
 
     loop {
         tokio::select! {
             // 基于绝对时间锚点，任何入站数据都推迟超时点；心跳分支不会重置。
             _ = sleep_until(last_inbound + max_silence) => {
                 return Err(format!("WS 静默超时: {}s 无数据", max_silence.as_secs()));
+            }
+            // 心跳 ACK 看门狗：超时未 ACK → Err，run_ws_loop 按 close code 0 走退避重连。
+            _ = sleep_until(last_ack_at + ack_timeout) => {
+                return Err(format!("WS 心跳 ACK 超时: {}s 未收到 op 11", ack_timeout.as_secs()));
             }
             result = read.next() => {
                 match result {
@@ -317,6 +326,11 @@ async fn run_connection(
                                 if let Ok(event) = serde_json::from_str::<QqEvent>(&text) {
                                     let t = event.t.as_deref().unwrap_or("");
                                     let op = event.op;
+
+                                    // op 11: 心跳 ACK —— 刷新 ACK 锚点
+                                    if op == 11 {
+                                        last_ack_at = tokio::time::Instant::now();
+                                    }
 
                                     if let Some(s) = event.s { session.last_seq = Some(s); }
 
