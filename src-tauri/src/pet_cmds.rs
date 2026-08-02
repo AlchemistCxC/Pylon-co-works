@@ -29,12 +29,13 @@ pub(crate) fn persist_pet_if_possible(app: &tauri::AppHandle, pet: &pet::PetStat
 /// ≥ 先写状态（无乱序覆盖）；pet 锁只做内存序列化（微秒级）；fs 写经
 /// `spawn_blocking` 在阻塞线程池执行，不阻塞 async 运行时。
 /// 失败只 warn（尽力持久化语义，与同步路径一致）。
-pub(crate) async fn persist_pet_async(state: &AppState, app: &tauri::AppHandle) {
+/// O20：返回是否真正写盘成功——失败时调用方不得刷新节流时间戳（可重试）。
+pub(crate) async fn persist_pet_async(state: &AppState, app: &tauri::AppHandle) -> bool {
     let path = match pet_persist_path(app) {
         Ok(path) => path,
         Err(error) => {
             log::warn!("resolve pet persist path failed: {error}");
-            return;
+            return false;
         }
     };
     let _write_guard = state.pet_write_lock.lock().await;
@@ -45,30 +46,47 @@ pub(crate) async fn persist_pet_async(state: &AppState, app: &tauri::AppHandle) 
             Ok(pet) => pet,
             Err(_) => {
                 log::warn!("pet lock poisoned; skip persist");
-                return;
+                return false;
             }
         };
         match pet::serialize_state(&pet) {
             Ok(json) => json,
             Err(error) => {
                 log::warn!("serialize pet state failed: {error}");
-                return;
+                return false;
             }
         }
     };
     match tokio::task::spawn_blocking(move || pet::write_json_atomic(&path, &json)).await {
-        Ok(Ok(())) => {}
-        Ok(Err(error)) => log::warn!("persist pet state failed: {error}"),
-        Err(error) => log::warn!("persist pet task failed: {error}"),
+        Ok(Ok(())) => true,
+        Ok(Err(error)) => {
+            log::warn!("persist pet state failed: {error}");
+            false
+        }
+        Err(error) => {
+            log::warn!("persist pet task failed: {error}");
+            false
+        }
     }
 }
 
 /// 统一刷新语义（O21）：写盘成功后刷新 `pet_last_persist_ms`——get_pet 轮询与
 /// pet_action 突变共用，消除 pet_action 写盘不刷新时间戳导致的活跃期冗余写
 /// （写盘后 get_pet 在 60s 节流窗口外仍会再次序列化 + 落盘）。
-async fn persist_and_mark(state: &AppState, app: &tauri::AppHandle, now_ms: u64) {
-    persist_pet_async(state, app).await;
-    state.pet_last_persist_ms.store(now_ms, Ordering::Release);
+/// O20：persist 失败不 store（false 时不更新时间戳）——写失败可重试。
+async fn persist_and_mark(state: &AppState, app: &tauri::AppHandle, now_ms: u64) -> bool {
+    if persist_pet_async(state, app).await {
+        state.pet_last_persist_ms.store(now_ms, Ordering::Release);
+        true
+    } else {
+        false
+    }
+}
+
+/// O20：写失败回滚 CAS 认领——时间戳退回认领前，下次轮询可重试；
+/// 回滚 CAS 失败（期间已有更晚写盘刷新时间戳）则无需回滚。
+fn rollback_claim(claimed_ms: u64, original_ms: u64, slot: &std::sync::atomic::AtomicU64) {
+    let _ = slot.compare_exchange(claimed_ms, original_ms, Ordering::AcqRel, Ordering::Acquire);
 }
 
 /// get_pet 轮询路径的写盘节流间隔（P3）：宠物状态只在有意义的变更时变化，
@@ -130,6 +148,7 @@ pub(crate) async fn get_pet(
     // （原子计数无需 pet 锁；R4：Timestamp 直取 u64 消除 parse 往返）。
     // O19：CAS 认领——load 判断 + persist + store 是 check-then-act 竞态，
     // 并发轮询可能全部通过判断重复写盘；认领成功者唯一执行写盘。
+    // O20：写失败回滚认领（时间戳退回认领前）——下次轮询可重试。
     let now_ms = crate::time::Timestamp::now().as_u64();
     let last_persist = state.pet_last_persist_ms.load(Ordering::Acquire);
     if try_claim_persist_slot(
@@ -137,8 +156,9 @@ pub(crate) async fn get_pet(
         now_ms,
         PET_PERSIST_THROTTLE_MS,
         &state.pet_last_persist_ms,
-    ) {
-        persist_and_mark(&state, &app, now_ms).await;
+    ) && !persist_and_mark(&state, &app, now_ms).await
+    {
+        rollback_claim(now_ms, last_persist, &state.pet_last_persist_ms);
     }
     Ok(value)
 }
@@ -261,5 +281,23 @@ mod tests {
         let slot = std::sync::atomic::AtomicU64::new(20_000);
         assert!(!try_claim_persist_slot(10_000, 80_000, 60_000, &slot));
         assert_eq!(slot.load(Ordering::Acquire), 20_000);
+    }
+
+    #[test]
+    fn rollback_claim_restores_original_timestamp_on_failure() {
+        let slot = std::sync::atomic::AtomicU64::new(10_000);
+        assert!(try_claim_persist_slot(10_000, 70_000, 60_000, &slot));
+        assert_eq!(slot.load(Ordering::Acquire), 70_000);
+        rollback_claim(70_000, 10_000, &slot);
+        assert_eq!(slot.load(Ordering::Acquire), 10_000);
+    }
+
+    #[test]
+    fn rollback_claim_is_noop_when_slot_moved_by_newer_write() {
+        let slot = std::sync::atomic::AtomicU64::new(70_000);
+        // 认领后、回滚前，另一写者已成功把时间戳刷到 130_000 → 回滚不得覆盖
+        slot.store(130_000, Ordering::Release);
+        rollback_claim(70_000, 10_000, &slot);
+        assert_eq!(slot.load(Ordering::Acquire), 130_000);
     }
 }
