@@ -99,10 +99,11 @@ pub struct QqAdapter {
     auth: Arc<QqAuth>,
     /// QQ API 基地址（测试可注入桩地址；生产 = types::API_BASE）。
     base_url: String,
-    /// chat_id → 发送队列发送端（后台 send_loop 串行消费；空闲超时自回收）。
+    /// 复合键 `{chat_type}:{chat_id}` → 发送队列发送端（后台 send_loop 串行消费；
+    /// 空闲超时自回收）。群/私聊同 id 互不串扰（O40）。
     senders: Arc<Mutex<HashMap<String, mpsc::Sender<QueuedSend>>>>,
-    /// chat_id → (死目标原因, 标记时间)（forbidden/not_found 标记；成功发送自愈清除；
-    /// TTL 过期后下一条投递作探测发送）。
+    /// 复合键 `{chat_type}:{chat_id}` → (死目标原因, 标记时间)（forbidden/not_found 标记；
+    /// 成功发送自愈清除；TTL 过期后下一条投递作探测发送）。
     dead_targets: Arc<Mutex<HashMap<String, (String, Instant)>>>,
 }
 
@@ -195,7 +196,15 @@ impl QqAdapter {
             return Ok(None);
         }
         if let Some(chat_id) = source.rsplit(':').next() {
-            dedup.set_latest(chat_id, msg_id);
+            // O40：复合键 `{chat_type}:{chat_id}` 隔离——群聊与私聊同 id
+            // （如 group:123 / c2c:123）不得互串回复锚点；无法解析 kind 时
+            // 回退原裸 id 键（保留旧行为，此类 source 会被白名单拒绝）。
+            let key = match source.split(':').nth(1) {
+                Some("group") => format!("group:{chat_id}"),
+                Some("user") => format!("c2c:{chat_id}"),
+                _ => chat_id.to_string(),
+            };
+            dedup.set_latest(&key, msg_id);
         }
         drop(dedup);
         // C14：组装带 msg_id 的解析结果再 dispatch——ingest 发送失败时 lib.rs 可经
@@ -233,29 +242,32 @@ impl PlatformAdapter for QqAdapter {
     /// deliver_event（done/error）首版不投平台，记录日志。
     fn deliver_text(&self, source: &str, text: &str) -> Result<(), String> {
         let (chat_type, chat_id) = parse_source(source)?;
+        // O40：复合键 `{chat_type}:{chat_id}`——群聊与私聊同 id 时
+        // 回复锚点/死目标/发送队列互不串扰（如 group:123 与 c2c:123）。
+        let key = format!("{chat_type}:{chat_id}");
         // 回复锚点：本 chat 最新收到的 msg_id（QQ 回复 API 需要）
         let reply_to = self
             .dedup
             .lock()
             .ok()
-            .and_then(|dedup| dedup.latest_for(chat_id).map(str::to_string));
+            .and_then(|dedup| dedup.latest_for(&key).map(str::to_string));
         // 死目标短路：目标不可达（群被删/拉黑/注销）不再投递；TTL 过期则清除标记
         // 放行本条做探测发送（B8：失败重新标记，成功自愈）
         if let Some(entry) = self
             .dead_targets
             .lock()
             .ok()
-            .and_then(|d| d.get(chat_id).cloned())
+            .and_then(|d| d.get(&key).cloned())
         {
             if !dead_target_expired(&entry) {
                 log::warn!(
-                    "QQ deliver 短路（死目标 {chat_id}: {}），丢弃 {:.60}...",
+                    "QQ deliver 短路（死目标 {key}: {}），丢弃 {:.60}...",
                     entry.0,
                     text
                 );
                 return Ok(());
             }
-            self.dead_targets.lock().ok().map(|mut d| d.remove(chat_id));
+            self.dead_targets.lock().ok().map(|mut d| d.remove(&key));
         }
         let Ok(runtime) = tokio::runtime::Handle::try_current() else {
             return Err("QQ deliver 需要 tokio runtime".to_string());
@@ -265,11 +277,11 @@ impl PlatformAdapter for QqAdapter {
                 .senders
                 .lock()
                 .unwrap_or_else(|poisoned| poisoned.into_inner());
-            if let Some(existing) = senders.get(chat_id) {
+            if let Some(existing) = senders.get(&key) {
                 (existing.clone(), None)
             } else {
                 let (tx, rx) = mpsc::channel(SEND_QUEUE_CAP);
-                senders.insert(chat_id.to_string(), tx.clone());
+                senders.insert(key.clone(), tx.clone());
                 (tx, Some(rx))
             }
         };
@@ -280,7 +292,7 @@ impl PlatformAdapter for QqAdapter {
             let dead = self.dead_targets.clone();
             let base_url = self.base_url.clone();
             let senders = self.senders.clone();
-            let chat_id_owned = chat_id.to_string();
+            let key_owned = key.clone();
             // P2-3：把发送端克隆交给 send_loop——空闲退出前用它做强计数 double-check
             let sender_owned = tx.clone();
             runtime.spawn(async move {
@@ -291,7 +303,7 @@ impl PlatformAdapter for QqAdapter {
                     base_url,
                     senders,
                     sender_owned,
-                    chat_id_owned,
+                    key_owned,
                     rx,
                 )
                 .await;
@@ -325,7 +337,9 @@ impl QqAdapter {
     /// rate 60s 一次 / 死目标标记短路）。成功发送清除死目标标记（自愈）。
     /// 审查修复：空闲 SEND_LOOP_IDLE_SECS 无消息则退出并从 senders map 移除
     /// （防 chat_id 无界增长 + 常驻任务泄漏）；token 瞬时失败退避重试不丢消息。
-    // clippy 2026-08-02：8 参为串行队列状态（http/auth/dead_targets/base_url/senders/tx/chat_id/rx），
+    /// O40：key 为复合键 `{chat_type}:{chat_id}`（群/私聊同 id 互不串扰），
+    /// 死目标/senders 均以 key 寻址；msg.chat_id 仅用于 QQ API 路径与日志。
+    // clippy 2026-08-02：8 参为串行队列状态（http/auth/dead_targets/base_url/senders/tx/key/rx），
     // 均为独立不可分组资源，保持显式签名（重构参数结构体收益低）。
     #[allow(clippy::too_many_arguments)]
     async fn send_loop(
@@ -335,7 +349,7 @@ impl QqAdapter {
         base_url: String,
         senders: Arc<Mutex<HashMap<String, mpsc::Sender<QueuedSend>>>>,
         tx: mpsc::Sender<QueuedSend>,
-        chat_id: String,
+        key: String,
         mut rx: mpsc::Receiver<QueuedSend>,
     ) {
         let idle = std::time::Duration::from_secs(SEND_LOOP_IDLE_SECS);
@@ -356,7 +370,7 @@ impl QqAdapter {
                         if tx.strong_count() > 2 || !rx.is_empty() {
                             false
                         } else {
-                            map.remove(&chat_id);
+                            map.remove(&key);
                             true
                         }
                     };
@@ -367,16 +381,12 @@ impl QqAdapter {
                 }
             };
             // 死目标跳过：TTL 内跳过；过期则清除标记放行本条做探测发送（B8）
-            if let Some(entry) = dead_targets
-                .lock()
-                .ok()
-                .and_then(|d| d.get(&msg.chat_id).cloned())
-            {
+            if let Some(entry) = dead_targets.lock().ok().and_then(|d| d.get(&key).cloned()) {
                 if !dead_target_expired(&entry) {
                     log::warn!("QQ send_loop 跳过死目标 {}", msg.chat_id);
                     continue;
                 }
-                dead_targets.lock().ok().map(|mut d| d.remove(&msg.chat_id));
+                dead_targets.lock().ok().map(|mut d| d.remove(&key));
             }
             // 修复（P2-4）：token 瞬时失败指数退避重试（1s/2s），当前消息原地保留不丢；
             // 连续超 TOKEN_RETRY_ATTEMPTS 次仍未成功 → 记录日志并丢弃该消息
@@ -389,11 +399,11 @@ impl QqAdapter {
                         Err(error) => {
                             attempts += 1;
                             if attempts >= TOKEN_RETRY_ATTEMPTS {
-                                log::warn!("QQ deliver token 连续 {attempts} 次获取失败（{chat_id}），丢弃该消息: {error}");
+                                log::warn!("QQ deliver token 连续 {attempts} 次获取失败（{key}），丢弃该消息: {error}");
                                 continue 'messages;
                             }
                             log::warn!(
-                                "QQ deliver token 获取失败（{chat_id}），{}s 后重试: {error}",
+                                "QQ deliver token 获取失败（{key}），{}s 后重试: {error}",
                                 1u64 << (attempts - 1)
                             );
                             tokio::time::sleep(std::time::Duration::from_secs(
@@ -406,10 +416,10 @@ impl QqAdapter {
             };
             match Self::send_with_retry(&http, &base_url, &token, &msg).await {
                 Ok(()) => {
-                    dead_targets.lock().ok().map(|mut d| d.remove(&msg.chat_id));
+                    dead_targets.lock().ok().map(|mut d| d.remove(&key));
                 }
                 Err(SendFailure::RateLimited(error)) => {
-                    log::warn!("QQ deliver rate limited（{chat_id}），{RATE_LIMIT_DELAY_SECS}s 后重试一次: {error}", chat_id = msg.chat_id);
+                    log::warn!("QQ deliver rate limited（{key}），{RATE_LIMIT_DELAY_SECS}s 后重试一次: {error}");
                     tokio::time::sleep(std::time::Duration::from_secs(RATE_LIMIT_DELAY_SECS)).await;
                     let token = match auth.get_token().await {
                         Ok(token) => token,
@@ -421,28 +431,23 @@ impl QqAdapter {
                     if let Err(error) = Self::send_once(&http, &base_url, &token, &msg).await {
                         log::warn!("QQ deliver rate 重试仍失败: {error:?}");
                     } else {
-                        dead_targets.lock().ok().map(|mut d| d.remove(&msg.chat_id));
+                        dead_targets.lock().ok().map(|mut d| d.remove(&key));
                     }
                 }
                 Err(SendFailure::DeadTarget(error)) => {
-                    dead_targets.lock().ok().map(|mut d| {
-                        d.insert(msg.chat_id.clone(), (error.clone(), Instant::now()))
-                    });
-                    log::warn!(
-                        "QQ deliver 目标不可达（{}），标记死目标: {error}",
-                        msg.chat_id
-                    );
+                    dead_targets
+                        .lock()
+                        .ok()
+                        .map(|mut d| d.insert(key.clone(), (error.clone(), Instant::now())));
+                    log::warn!("QQ deliver 目标不可达（{key}），标记死目标: {error}");
                 }
                 Err(SendFailure::Transient(error)) => {
-                    log::warn!(
-                        "QQ deliver 发送失败（{chat_id}）: {error}",
-                        chat_id = msg.chat_id
-                    );
+                    log::warn!("QQ deliver 发送失败（{key}）: {error}");
                 }
             }
         }
-        senders.lock().ok().map(|mut map| map.remove(&chat_id));
-        log::info!("QQ send_loop 退出（{chat_id}，空闲或关闭）");
+        senders.lock().ok().map(|mut map| map.remove(&key));
+        log::info!("QQ send_loop 退出（{key}，空闲或关闭）");
     }
 
     /// 发送 + 瞬时失败指数退避重试（SEND_RETRY_ATTEMPTS 次：1s/2s/4s）。
@@ -721,6 +726,44 @@ gateway:
             "forbidden".to_string(),
             Instant::now() - DEAD_TARGET_TTL - Duration::from_secs(1)
         )));
+    }
+
+    #[test]
+    fn anchor_keys_isolate_group_and_c2c_with_same_id() {
+        // O40：群聊与私聊同 id（group:123 / c2c:123）回复锚点互不串扰
+        let core = core_with_route();
+        let adapter = test_adapter(core);
+        adapter
+            .handle_incoming("qq:group:123", "msg-g1", "hi", None, None)
+            .expect("group ingest");
+        adapter
+            .handle_incoming("qq:user:123", "msg-c1", "hi", None, None)
+            .expect("c2c ingest");
+        let dedup = adapter.dedup.lock().unwrap();
+        assert_eq!(dedup.latest_for("group:123"), Some("msg-g1"));
+        assert_eq!(dedup.latest_for("c2c:123"), Some("msg-c1"));
+        assert_eq!(dedup.latest_for("123"), None, "不得存在裸 id 键");
+    }
+
+    #[test]
+    fn dead_target_short_circuit_is_isolated_per_chat_type() {
+        // O40：group:123 标记死目标，同 id 的 c2c:123 不受影响（不短路）
+        let core = core_with_route();
+        let adapter = test_adapter(core);
+        adapter.dead_targets.lock().unwrap().insert(
+            "group:123".to_string(),
+            ("forbidden".to_string(), Instant::now()),
+        );
+        // 群聊 → 短路丢弃（Ok 且不投递）
+        assert!(adapter.deliver_text("qq:group:123", "hi").is_ok());
+        // 同 id 私聊 → 未标记死目标，无 runtime 时走到 runtime 检查报错（未短路）
+        let error = adapter
+            .deliver_text("qq:user:123", "hi")
+            .expect_err("c2c 未短路");
+        assert!(
+            error.contains("runtime"),
+            "c2c:123 不应走死目标短路: {error}"
+        );
     }
 
     #[test]
