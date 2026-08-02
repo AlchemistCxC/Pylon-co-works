@@ -366,7 +366,16 @@ pub fn save_to_file(state: &PetState, path: &std::path::Path) -> Result<(), Stri
 }
 
 /// 容错读：文件缺失/损坏一律返回 None（启动时静默降级为新宠物）。
+/// O17：读前预检大小（>16MB 视为损坏返回 None）——防止意外超大文件
+/// 被 read_to_string 全量读入内存（正常档 <1KB，16MB 是宽松上限）。
+const MAX_STATE_FILE_BYTES: u64 = 16 * 1024 * 1024;
+
 pub fn load_from_file(path: &std::path::Path) -> Option<PetState> {
+    let len = std::fs::metadata(path).ok()?.len();
+    if len > MAX_STATE_FILE_BYTES {
+        log::warn!("state file too large ({} bytes), treating as corrupt", len);
+        return None;
+    }
     let raw = std::fs::read_to_string(path).ok()?;
     serde_json::from_str(&raw).ok()
 }
