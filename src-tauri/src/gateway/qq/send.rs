@@ -46,6 +46,7 @@ pub async fn send_message(
 
     let body = if msg_type == MSG_TYPE_MARKDOWN {
         serde_json::json!({
+            "content": content,
             "markdown": { "content": content },
             "msg_type": msg_type,
             "msg_seq": seq,
