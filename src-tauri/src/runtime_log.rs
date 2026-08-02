@@ -168,41 +168,28 @@ fn truncate(value: String, max_bytes: usize) -> String {
     format!("{}...", &value[..end])
 }
 
-/// A12：敏感 key + 分隔符（半角/全角冒号等号、引号，允许中间空白）或 `bearer ` 前缀检测。
+/// R19：regex 归一化（A12 分隔符变体 + bearer 前缀），替换数组扫描。
 /// sanitize_message 与 sanitize_value_content 共用，消除双份 marker 列表漂移。
 pub(crate) fn contains_sensitive_pattern(lower: &str) -> bool {
-    const SENSITIVE_KEYS: [&str; 11] = [
-        "password",
-        "secret",
-        "token",
-        "api_key",
-        "apikey",
-        "authorization",
-        "client_secret",
-        "access_token",
-        "x-api-key",
-        "prompt",
-        "persona",
-    ];
-    const DELIMITERS: [&str; 5] = [":", "=", "：", "＝", "\""];
-    if lower.contains("bearer ") {
-        return true;
-    }
-    SENSITIVE_KEYS.iter().any(|key| {
-        lower.match_indices(key).any(|(start, matched)| {
-            let rest = lower[start + matched.len()..].trim_start();
-            DELIMITERS
-                .iter()
-                .any(|delimiter| rest.starts_with(delimiter))
+    static PATTERN: std::sync::OnceLock<regex::Regex> = std::sync::OnceLock::new();
+    PATTERN
+        .get_or_init(|| {
+            regex::Regex::new(
+                r#"(?:password|secret|token|api_key|apikey|authorization|client_secret|access_token|x-api-key|prompt|persona)\s*[:=："＝"]|bearer\s+"#,
+            )
+            .expect("SENSITIVE_KEY_PATTERN must compile")
         })
-    })
+        .is_match(lower)
 }
 
-/// A12：裸 secret 前缀形态（sk-/ghp_/xoxb-/akia/eyj 等）检测。
+/// R19：裸 secret 前缀形态（sk-/ghp_/xoxb-/akia/eyj 等）检测。
 pub(crate) fn contains_bare_secret(lower: &str) -> bool {
-    ["sk-", "ghp_", "xoxb-", "akia", "eyj"]
-        .iter()
-        .any(|prefix| lower.contains(prefix))
+    static PATTERN: std::sync::OnceLock<regex::Regex> = std::sync::OnceLock::new();
+    PATTERN
+        .get_or_init(|| {
+            regex::Regex::new(r"sk-|ghp_|xoxb-|akia|eyj").expect("BARE_SECRET_PATTERN must compile")
+        })
+        .is_match(lower)
 }
 
 pub(crate) fn sanitize_message(message: String) -> String {
