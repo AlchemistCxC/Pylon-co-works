@@ -308,14 +308,18 @@ pub(crate) async fn set_mcp_servers<R: tauri::Runtime>(
     state: tauri::State<'_, AppState>,
     servers: Option<Vec<crate::mcp::McpServerConfig>>,
 ) -> Result<Vec<serde_json::Value>, String> {
+    // O13：单次 clone（validate 消耗 clone，原值 move 进 runtime_mcp；
+    // persist 在锁内借用 guard——原实现 serialized/persisted 两次 clone）。
     let serialized = crate::mcp::validate_and_serialize(servers.clone())?;
-    let persisted = servers.clone();
-    *state
-        .runtime_mcp
-        .lock()
-        .map_err(|error| error.to_string())? = servers;
-    // B4.2：配置落盘（重启不丢）。写失败只 warn，不阻断本次设置。
-    persist_mcp_if_possible(&app, persisted.as_deref().unwrap_or_default());
+    {
+        let mut guard = state
+            .runtime_mcp
+            .lock()
+            .map_err(|error| error.to_string())?;
+        *guard = servers;
+        // B4.2：配置落盘（重启不丢）。写失败只 warn，不阻断本次设置。
+        persist_mcp_if_possible(&app, guard.as_deref().unwrap_or_default());
+    }
     Ok(serialized)
 }
 
