@@ -717,6 +717,12 @@ pub(crate) async fn new_session(
     mcp_servers: Option<Vec<crate::mcp::McpServerConfig>>,
 ) -> Result<serde_json::Value, PylonError> {
     let runtime = state.inner().require_runtime()?;
+    // B1：GUI 不得冒名平台源——qq:* 无 binding → 拒绝（防会话建立后出站投递到 QQ）。
+    if source.starts_with("qq:") && state.gateway.binding(&source).is_none() {
+        return Err(PylonError::Protocol(format!(
+            "invalid GUI source: {source}"
+        )));
+    }
     state.inner().log_runtime_summary(
         "info",
         "session",
@@ -839,6 +845,13 @@ pub(crate) async fn send_prompt_core<R: tauri::Runtime>(
     mcp_servers: Option<Vec<crate::mcp::McpServerConfig>>,
     cwd: Option<&str>,
 ) -> Result<String, PylonError> {
+    // B1：GUI source 不得冒名平台源——qq:* 无 binding → 拒绝（防冒名出站投递到 QQ）。
+    // 平台 ingest 的 qq:* 必带 binding（绑定命中），不受影响。
+    if source.starts_with("qq:") && gateway.binding(source).is_none() {
+        return Err(PylonError::Protocol(format!(
+            "invalid GUI source: {source}"
+        )));
+    }
     state.log_runtime_summary(
         "info",
         "prompt",
@@ -1734,6 +1747,70 @@ mod tests {
                 assert_eq!(error.to_string(), "no active agent configured");
             }
         }
+    }
+
+    /// B1：GUI source 冒名平台源（qq:* 无 binding）必须在 send_prompt_core 入口被拒绝，
+    /// 不得建立会话（与 deliver_all 出站白名单构成双防线）。
+    #[tokio::test]
+    async fn send_prompt_core_rejects_unbound_qq_gui_source() {
+        let state = state_without_active_runtime();
+        let runtime = AgentRuntime::new_disconnected();
+        // gateway 只绑定 qq:group:123；qq:group:999 无 binding（GUI 冒名）
+        let gateway = GatewayCore::from_config(
+            crate::gateway::route::parse_config(
+                r#"
+gateway:
+  routes:
+    - source: qq:group:123
+      agent: peri
+      profile: trpg
+      session: 战役1
+"#,
+            )
+            .expect("合法配置"),
+        );
+        let error = send_prompt_core::<tauri::test::MockRuntime>(
+            &state,
+            &runtime,
+            None,
+            &gateway,
+            "qq:group:999",
+            "你好",
+            "",
+            None,
+            None,
+            None,
+            None,
+        )
+        .await
+        .expect_err("无 binding 的 qq:* source 必须被拒绝");
+        assert_eq!(error.code(), "protocol_error");
+        assert!(
+            error
+                .to_string()
+                .contains("invalid GUI source: qq:group:999"),
+            "错误信息必须指明非法 GUI source，实际: {error}"
+        );
+        // 正对照：绑定命中的 qq:* source 放行（后续失败来自未连接 ACP，而非 source 校验）
+        let bound_error = send_prompt_core::<tauri::test::MockRuntime>(
+            &state,
+            &runtime,
+            None,
+            &gateway,
+            "qq:group:123",
+            "你好",
+            "",
+            None,
+            None,
+            None,
+            None,
+        )
+        .await
+        .expect_err("绑定命中应放行 source 校验，继续管线直到连接层失败");
+        assert!(
+            !bound_error.to_string().contains("invalid GUI source"),
+            "绑定命中的 qq:* source 不得被 source 校验拒绝，实际: {bound_error}"
+        );
     }
 
     /// A3：Round N 迟到 chunk 在 Round N+1 推进（clear）之后才被 dispatcher 追加

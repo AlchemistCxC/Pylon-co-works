@@ -250,6 +250,18 @@ impl GatewayCore {
         if adapters.is_empty() {
             return;
         }
+        // B1：出站白名单（安全收紧）——source 必须是 binding 命中的平台源。
+        // GUI 会话冒名 qq:*（无 binding）不得被投递到平台；配置锁中毒 fail-closed。
+        let bound = self
+            .config
+            .read()
+            .ok()
+            .map(|c| c.routes.lookup(source).is_some())
+            .unwrap_or(false);
+        if !bound {
+            log::warn!("gateway deliver_all 拒绝未绑定 source 的出站投递: {source}");
+            return;
+        }
         if let Some(text) = extract_deliver_text(event, payload) {
             for adapter in &adapters {
                 for chunk in truncate::truncate_message(&text, adapter.max_message_len()) {
@@ -441,7 +453,17 @@ gateway:
 
     #[test]
     fn deliver_all_splits_agent_text_by_adapter_limit() {
-        let core = GatewayCore::new();
+        // B1：出站白名单——投递 source 必须是 binding 命中的平台源
+        let core = config_with(
+            r#"
+gateway:
+  routes:
+    - source: qq:group:1
+      agent: peri
+      profile: trpg
+      session: 战役1
+"#,
+        );
         let qq = FakeAdapter::new("qq", 20);
         core.register(qq.clone()).unwrap();
         let payload = serde_json::json!({
@@ -462,7 +484,17 @@ gateway:
 
     #[test]
     fn deliver_all_routes_by_source_prefix_only() {
-        let core = GatewayCore::new();
+        // B1：出站白名单——投递 source 必须是 binding 命中的平台源
+        let core = config_with(
+            r#"
+gateway:
+  routes:
+    - source: qq:group:1
+      agent: peri
+      profile: trpg
+      session: 战役1
+"#,
+        );
         let qq = FakeAdapter::new("qq", 20);
         let wechat = FakeAdapter::new("wechat", 20);
         core.register(qq.clone()).unwrap();
@@ -485,6 +517,59 @@ gateway:
             &serde_json::json!({"source": "local", "data": {}}),
         );
         assert!(qq.events.lock().unwrap().len() == 1);
+    }
+
+    #[test]
+    fn deliver_all_rejects_unbound_source_outbound() {
+        // B1：出站白名单——无 binding 的 qq:*（GUI 冒名平台源）不得出站；
+        // 绑定命中的平台源照常投递（正对照）。
+        let core = GatewayCore::new();
+        let qq = FakeAdapter::new("qq", 4000);
+        core.register(qq.clone()).unwrap();
+        core.deliver_all(
+            "qq:group:999",
+            "peri:update",
+            &serde_json::json!({
+                "update": {"sessionUpdate": "agent_message_chunk", "content": {"text": "hi"}}
+            }),
+        );
+        core.deliver_all(
+            "qq:group:999",
+            "peri:done",
+            &serde_json::json!({"data": {}}),
+        );
+        assert_eq!(
+            qq.delivered.load(Ordering::SeqCst),
+            0,
+            "未绑定 source 不得投递文本"
+        );
+        assert!(
+            qq.events.lock().unwrap().is_empty(),
+            "未绑定 source 不得投递事件"
+        );
+        // 绑定命中（qq:group:123）仍投递
+        let bound = config_with(
+            r#"
+gateway:
+  routes:
+    - source: qq:group:123
+      agent: peri
+      profile: trpg
+      session: 战役1
+"#,
+        );
+        let bound_qq = FakeAdapter::new("qq", 4000);
+        bound.register(bound_qq.clone()).unwrap();
+        bound.deliver_all(
+            "qq:group:123",
+            "peri:done",
+            &serde_json::json!({"data": {}}),
+        );
+        assert_eq!(
+            *bound_qq.events.lock().unwrap(),
+            vec!["peri:done".to_string()],
+            "绑定命中的平台源必须照常投递"
+        );
     }
 
     #[test]
@@ -520,7 +605,16 @@ gateway:
                 Err("未接线".to_string())
             }
         }
-        let core = GatewayCore::new();
+        let core = config_with(
+            r#"
+gateway:
+  routes:
+    - source: failing:user:1
+      agent: peri
+      profile: trpg
+      session: 战役1
+"#,
+        );
         core.register(Arc::new(FailingAdapter)).unwrap();
         core.deliver_all(
             "failing:user:1",
