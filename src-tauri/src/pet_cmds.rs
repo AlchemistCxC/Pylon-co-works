@@ -91,6 +91,20 @@ fn within_throttle(last_persist_ms: u64, now_ms: u64, throttle_ms: u64) -> bool 
     now_ms.saturating_sub(last_persist_ms) < throttle_ms
 }
 
+/// O19：CAS 认领写盘权利——节流窗口已过且 `slot` 未被其他调用者抢先刷新时
+/// 认领成功（时间戳即"写权利"）：并发轮询/突变只有一个写者，时间戳单调。
+fn try_claim_persist_slot(
+    last_persist_ms: u64,
+    now_ms: u64,
+    throttle_ms: u64,
+    slot: &std::sync::atomic::AtomicU64,
+) -> bool {
+    now_ms.saturating_sub(last_persist_ms) >= throttle_ms
+        && slot
+            .compare_exchange(last_persist_ms, now_ms, Ordering::AcqRel, Ordering::Acquire)
+            .is_ok()
+}
+
 #[tauri::command]
 pub(crate) async fn get_pet(
     app: tauri::AppHandle,
@@ -114,9 +128,16 @@ pub(crate) async fn get_pet(
     };
     // P3：节流写盘——距上次落盘不足 60s 的轮询不再序列化 + 写盘
     // （原子计数无需 pet 锁；R4：Timestamp 直取 u64 消除 parse 往返）。
+    // O19：CAS 认领——load 判断 + persist + store 是 check-then-act 竞态，
+    // 并发轮询可能全部通过判断重复写盘；认领成功者唯一执行写盘。
     let now_ms = crate::time::Timestamp::now().as_u64();
     let last_persist = state.pet_last_persist_ms.load(Ordering::Acquire);
-    if now_ms.saturating_sub(last_persist) >= PET_PERSIST_THROTTLE_MS {
+    if try_claim_persist_slot(
+        last_persist,
+        now_ms,
+        PET_PERSIST_THROTTLE_MS,
+        &state.pet_last_persist_ms,
+    ) {
         persist_and_mark(&state, &app, now_ms).await;
     }
     Ok(value)
@@ -222,5 +243,23 @@ mod tests {
         assert!(!within_throttle(1_000, 6_000, 5_000));
         assert!(within_throttle(0, 0, 5_000));
         assert!(within_throttle(10_000, 1_000, 5_000));
+    }
+
+    #[test]
+    fn claim_slot_after_throttle_elapsed_only_once_per_window() {
+        let slot = std::sync::atomic::AtomicU64::new(0);
+        assert!(try_claim_persist_slot(0, 60_000, 60_000, &slot));
+        assert_eq!(slot.load(Ordering::Acquire), 60_000);
+        assert!(!try_claim_persist_slot(60_000, 60_100, 60_000, &slot));
+        assert_eq!(slot.load(Ordering::Acquire), 60_000);
+        assert!(try_claim_persist_slot(60_000, 120_000, 60_000, &slot));
+        assert_eq!(slot.load(Ordering::Acquire), 120_000);
+    }
+
+    #[test]
+    fn claim_fails_when_slot_observed_stale() {
+        let slot = std::sync::atomic::AtomicU64::new(20_000);
+        assert!(!try_claim_persist_slot(10_000, 80_000, 60_000, &slot));
+        assert_eq!(slot.load(Ordering::Acquire), 20_000);
     }
 }
