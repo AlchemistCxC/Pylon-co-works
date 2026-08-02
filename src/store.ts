@@ -291,7 +291,9 @@ export const useStore = create<ThemeState>()(persist(
   state.customPresets = normalizeCustomPresets(state.customPresets)
   return state as ThemeState
 }, partialize: (state) => {
-  const { customPresets, ccEditMode, setCcEditMode, setCcHeight, updateCcPlacement, resetCcLayout, setCcHidden, setCcScale, resetTheme, applyZonePreset, setZoneField, setGlobalPreset, saveCustomPreset, applyCustomPreset, removeCustomPreset, dirty, ...persisted } = state as ThemeState
+  // 2026-08-02 修复：customPresets 不再剔除——用户保存的自定义预设必须跨重启保留
+  // （Settings 提供完整保存/应用/删除 UI，此前重启即丢属缺陷）。ccEditMode/dirty/函数照旧排除。
+  const { ccEditMode, setCcEditMode, setCcHeight, updateCcPlacement, resetCcLayout, setCcHidden, setCcScale, resetTheme, applyZonePreset, setZoneField, setGlobalPreset, saveCustomPreset, applyCustomPreset, removeCustomPreset, dirty, ...persisted } = state as ThemeState
   return persisted
 }, onRehydrateStorage: () => state => {
   // 阶段 1 迁移：旧 pylon-theme 里的 profiles/activeProfileId 迁入 identityStore（一次性）
