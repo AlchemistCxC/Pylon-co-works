@@ -59,22 +59,27 @@ pub struct EntityBinding {
 }
 
 /// QQ 平台网关配置（B10.3：群级白名单）。
-#[derive(Debug, Clone, Default, PartialEq, Eq)]
+#[derive(Debug, Clone, Default, PartialEq, Eq, Deserialize)]
 pub struct QqGatewayConfig {
     /// 群级白名单：列出的 group_openid 才允许 ingest；None = 不限。
+    #[serde(default)]
     pub group_allow_from: Option<Vec<String>>,
 }
 
 /// B11 注入钩子配置（gateway.inject 段）。
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
 pub struct InjectConfig {
     /// 注入开关。默认 true：Prism 不可用/请求失败时自动降级为不注入（不阻塞消息）。
+    #[serde(default = "default_inject_enabled")]
     pub enabled: bool,
     /// 注入场景（Prism scenario 名）；None = 让 Prism 用 active.scenario。
+    #[serde(default)]
     pub scenario: Option<String>,
     /// 注入知识源列表；空 = 让 Prism 用 active.sources。
+    #[serde(default)]
     pub sources: Vec<String>,
     /// 完成持久化模式："skip"（默认，不持久化）| "prism"（POST /persist）。
+    #[serde(default = "default_persist_mode")]
     pub persist: String,
 }
 
@@ -128,33 +133,10 @@ struct GatewaySection {
     routes: Vec<EntityBinding>,
     /// 缺 `qq` 段视为默认（无群级白名单）。
     #[serde(default)]
-    qq: Option<QqSection>,
+    qq: Option<QqGatewayConfig>,
     /// 缺 `inject` 段视为默认（enabled=true, persist=skip）。
     #[serde(default)]
-    inject: Option<InjectSection>,
-}
-
-/// `gateway.qq` 段结构。
-#[derive(Debug, Deserialize)]
-struct QqSection {
-    /// 缺省 = 不限。
-    #[serde(default)]
-    group_allow_from: Option<Vec<String>>,
-}
-
-/// `gateway.inject` 段结构（B11）。
-#[derive(Debug, Deserialize)]
-struct InjectSection {
-    /// 缺省 = true（Prism 不可用自动降级）。
-    #[serde(default = "default_inject_enabled")]
-    enabled: bool,
-    #[serde(default)]
-    scenario: Option<String>,
-    #[serde(default)]
-    sources: Vec<String>,
-    /// 缺省 = "skip"。
-    #[serde(default = "default_persist_mode")]
-    persist: String,
+    inject: Option<InjectConfig>,
 }
 
 fn default_inject_enabled() -> bool {
@@ -194,34 +176,32 @@ pub fn parse_config(input: &str) -> Result<GatewayConfig, String> {
     }
     let qq = section
         .qq
-        .map(|q| QqGatewayConfig {
-            group_allow_from: q.group_allow_from.filter(|v| !v.is_empty()),
+        .map(|mut q| {
+            q.group_allow_from = q.group_allow_from.filter(|v| !v.is_empty());
+            q
         })
         .unwrap_or_default();
     let inject = match section.inject {
-        Some(section) => {
-            if !matches!(section.persist.as_str(), "skip" | "prism") {
+        Some(mut inject) => {
+            if !matches!(inject.persist.as_str(), "skip" | "prism") {
                 return Err(format!(
                     "gateway.inject.persist 未知模式: {}",
-                    section.persist
+                    inject.persist
                 ));
             }
-            if let Some(ref scenario) = section.scenario {
+            if let Some(ref scenario) = inject.scenario {
                 if scenario.trim().is_empty() {
                     return Err("gateway.inject.scenario 不能为空".to_string());
                 }
             }
-            InjectConfig {
-                enabled: section.enabled,
-                scenario: section.scenario.map(|s| s.trim().to_string()),
-                sources: section
-                    .sources
-                    .into_iter()
-                    .map(|s| s.trim().to_string())
-                    .filter(|s| !s.is_empty())
-                    .collect(),
-                persist: section.persist,
-            }
+            inject.scenario = inject.scenario.map(|s| s.trim().to_string());
+            inject.sources = inject
+                .sources
+                .into_iter()
+                .map(|s| s.trim().to_string())
+                .filter(|s| !s.is_empty())
+                .collect();
+            inject
         }
         None => InjectConfig::default(),
     };
