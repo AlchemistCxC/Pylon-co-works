@@ -351,9 +351,33 @@ pub(crate) async fn set_approval_mode(
 
 /// 挂起的权限请求超时检查（B9.2：超时默认拒绝，不悬挂 pending）。
 /// C5：默认拒绝选项按请求提供的选项选择（reject 优先），不再硬编码 reject_once。
+/// O37：已崩溃 runtime 的 pending 永久悬挂（写通道已死，任何应答都不可能送达）
+/// ——直接清空并 log；多条超时应答 join_all 并行（不再逐条 await 串行）。
 pub(crate) async fn check_pending_permission_timeouts(state: &AppState) {
     let now = Timestamp::now();
     for runtime in state.runtimes.all() {
+        // O37：已崩溃 runtime 的挂起请求永久无法应答（O9 锁外发送依赖写通道，
+        // 崩溃后 send 必失败、restore 后下轮 watcher 重试仍失败）——直接清空。
+        let crashed = runtime
+            .acp
+            .try_lock()
+            .map(|acp| acp.is_crashed())
+            .unwrap_or(false);
+        if crashed {
+            let dropped = runtime
+                .pending_permissions
+                .lock()
+                .map(|pending| pending.len())
+                .unwrap_or(0);
+            if dropped > 0 {
+                log::warn!("runtime 已崩溃，清空 {dropped} 条挂起权限请求");
+            }
+            let _ = runtime
+                .pending_permissions
+                .lock()
+                .map(|mut pending| pending.clear());
+            continue;
+        }
         let expired: Vec<(u64, String, Vec<String>)> = runtime
             .pending_permissions
             .lock()
@@ -374,15 +398,28 @@ pub(crate) async fn check_pending_permission_timeouts(state: &AppState) {
                     .collect()
             })
             .unwrap_or_default();
-        for (request_id, tool_call_id, options) in expired {
-            // C5：超时默认拒绝按请求选项选 reject 语义项（无匹配取首个，空则 reject_once）。
-            let option_id = pick_option(&options, true).unwrap_or("reject_once");
-            // P1-2：统一走 respond_permission（acp 锁内复核 pending 再发送，
-            // 防客户端替换竞态）；发送失败保留 pending，下轮 watcher 重试或
-            // 客户端替换清理。超时日志无条件保留（记录本次判定）。
-            let _ = respond_permission(&runtime, request_id, permission_response(option_id)).await;
-            log::warn!("权限请求 {request_id} 超时默认拒绝 {option_id}（{tool_call_id}）");
+        if expired.is_empty() {
+            continue;
         }
+        // O37：多条超时应答互不依赖——join_all 并行，避免写通道阻塞时逐条串行
+        // 放大整体耗时。P1-2：统一走 respond_permission（锁内复核 + 锁外发送，
+        // 防客户端替换竞态）；发送失败恢复 pending，下轮 watcher 重试或客户端
+        // 替换清理。超时日志无条件保留（记录本次判定）。
+        let responses = expired
+            .into_iter()
+            .map(|(request_id, tool_call_id, options)| {
+                let runtime = runtime.clone();
+                let option_id = pick_option(&options, true)
+                    .unwrap_or("reject_once")
+                    .to_string();
+                async move {
+                    let _ =
+                        respond_permission(&runtime, request_id, permission_response(&option_id))
+                            .await;
+                    log::warn!("权限请求 {request_id} 超时默认拒绝 {option_id}（{tool_call_id}）");
+                }
+            });
+        futures_util::future::join_all(responses).await;
     }
 }
 
