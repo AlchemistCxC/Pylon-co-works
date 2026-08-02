@@ -168,30 +168,46 @@ fn truncate(value: String, max_bytes: usize) -> String {
     format!("{}...", &value[..end])
 }
 
+/// A12：敏感 key + 分隔符（半角/全角冒号等号、引号，允许中间空白）或 `bearer ` 前缀检测。
+/// sanitize_message 与 sanitize_value_content 共用，消除双份 marker 列表漂移。
+pub(crate) fn contains_sensitive_pattern(lower: &str) -> bool {
+    const SENSITIVE_KEYS: [&str; 11] = [
+        "password",
+        "secret",
+        "token",
+        "api_key",
+        "apikey",
+        "authorization",
+        "client_secret",
+        "access_token",
+        "x-api-key",
+        "prompt",
+        "persona",
+    ];
+    const DELIMITERS: [&str; 5] = [":", "=", "：", "＝", "\""];
+    if lower.contains("bearer ") {
+        return true;
+    }
+    SENSITIVE_KEYS.iter().any(|key| {
+        lower.match_indices(key).any(|(start, matched)| {
+            let rest = lower[start + matched.len()..].trim_start();
+            DELIMITERS
+                .iter()
+                .any(|delimiter| rest.starts_with(delimiter))
+        })
+    })
+}
+
+/// A12：裸 secret 前缀形态（sk-/ghp_/xoxb-/akia/eyj 等）检测。
+pub(crate) fn contains_bare_secret(lower: &str) -> bool {
+    ["sk-", "ghp_", "xoxb-", "akia", "eyj"]
+        .iter()
+        .any(|prefix| lower.contains(prefix))
+}
+
 pub(crate) fn sanitize_message(message: String) -> String {
     let lower = message.to_ascii_lowercase();
-    let contains_sensitive_payload = [
-        "password=",
-        "secret=",
-        "token=",
-        "api_key=",
-        "apikey=",
-        "authorization:",
-        "prompt:",
-        "persona:",
-        "bearer ",
-        "x-api-key:",
-        "client_secret=",
-        "access_token=",
-        "token\":",
-        "secret\":",
-        "apikey\":",
-        "api_key\":",
-        "password\":",
-    ]
-    .iter()
-    .any(|marker| lower.contains(marker));
-    if contains_sensitive_payload {
+    if contains_sensitive_pattern(&lower) || contains_bare_secret(&lower) {
         return REDACTED.to_string();
     }
     truncate(message, MAX_MESSAGE_BYTES)
@@ -220,30 +236,11 @@ fn is_sensitive_key(key: &str) -> bool {
         || key.contains("api_key")
 }
 
-/// 字段值内容脱敏：值中若出现 secret 形态（Bearer/JSON token 等），整体替换。
+/// 字段值内容脱敏：值中若出现 secret 形态（分隔符变体/裸 secret 前缀），整体替换。
 /// 审查修复：原实现对非敏感 key 下的敏感值原样透传（`{"data": "api_key=sk-..."}`）。
-fn sanitize_value_content(value: &str) -> String {
+pub(crate) fn sanitize_value_content(value: &str) -> String {
     let lower = value.to_ascii_lowercase();
-    let leaked = [
-        "bearer ",
-        "authorization:",
-        "x-api-key:",
-        "api_key=",
-        "apikey=",
-        "password=",
-        "secret=",
-        "token=",
-        "client_secret=",
-        "access_token=",
-        "token\":",
-        "secret\":",
-        "apikey\":",
-        "api_key\":",
-        "password\":",
-    ]
-    .iter()
-    .any(|marker| lower.contains(marker));
-    if leaked {
+    if contains_sensitive_pattern(&lower) || contains_bare_secret(&lower) {
         REDACTED.to_string()
     } else {
         value.to_string()
@@ -411,6 +408,55 @@ mod tests {
             );
             assert_eq!(entry.message, REDACTED, "message {message:?} 必须脱敏");
         }
+    }
+
+    #[test]
+    fn redacts_delimiter_variants_and_bare_secrets() {
+        // A12 回归：分隔符变体（含全角、含空白）与裸 secret 前缀形态必须脱敏
+        let hub = RuntimeLogHub::default();
+        for message in [
+            "token: abc",
+            "token = abc",
+            "token：abc",
+            "token ＝ abc",
+            "sk-abc123",
+            "ghp_abcdef",
+            r#"{"data":"sk-abc"}"#,
+            "x-api-key: 12345",
+        ] {
+            let entry = hub.push(
+                Timestamp::new(1),
+                "error",
+                "runtime",
+                None,
+                message,
+                Map::new(),
+            );
+            assert_eq!(entry.message, REDACTED, "message {message:?} 必须脱敏");
+        }
+        let safe = hub.push(
+            Timestamp::new(2),
+            "info",
+            "runtime",
+            None,
+            "tokensTotal=42; prompt started",
+            Map::new(),
+        );
+        assert_eq!(safe.message, "tokensTotal=42; prompt started");
+    }
+
+    #[test]
+    fn value_content_redacts_variants_and_bare_secrets() {
+        // A12 回归：值内容脱敏与消息脱敏共用检测，`token：`/裸 eyj 前缀等均覆盖
+        assert_eq!(sanitize_value_content("token：abc"), REDACTED);
+        assert_eq!(sanitize_value_content("token = abc"), REDACTED);
+        assert_eq!(sanitize_value_content(r#"{"data":"sk-abc"}"#), REDACTED);
+        assert_eq!(sanitize_value_content("eyJhbGciOiJIUzI1NiJ9"), REDACTED);
+        assert_eq!(sanitize_value_content("tokenCount=5"), "tokenCount=5");
+        assert_eq!(
+            sanitize_value_content("contentLength=42"),
+            "contentLength=42"
+        );
     }
 
     #[test]
