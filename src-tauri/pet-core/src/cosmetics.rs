@@ -216,14 +216,19 @@ impl PetState {
             return false; // 掉落池已全收集
         };
         self.inventory.push(picked.id.to_string());
-        self.equipped = Some(picked.id.to_string());
         self.last_drop_at_ms = now_ms;
         self.stats.cosmetics_collected = self.stats.cosmetics_collected.saturating_add(1);
         self.remember(format!("它捡到了{}", picked.name));
-        self.msg = Some(format!(
-            "{} 它捡到{}，立刻戴上了。",
-            picked.icon, picked.name
-        ));
+        // C10 修复：已有装备时掉落不再顶掉手动装备（收进光里，待手动换装）。
+        if self.equipped.is_none() {
+            self.equipped = Some(picked.id.to_string());
+            self.msg = Some(format!(
+                "{} 它捡到{}，立刻戴上了。",
+                picked.icon, picked.name
+            ));
+        } else {
+            self.msg = Some(format!("{} 它捡到{}，收进光里。", picked.icon, picked.name));
+        }
         true
     }
 }

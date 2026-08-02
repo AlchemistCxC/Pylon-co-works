@@ -75,6 +75,47 @@ fn restores_old_data_by_clamping_and_recomputing_derived_stats() {
 }
 
 #[test]
+fn restore_clamps_injected_values_and_drops_unknown_ids() {
+    // A13：手改/损坏存档注入天文数字与未知 id → 钳制到上限 + 白名单剔除
+    let mut saved = PetState::new_at(0);
+    saved.xp = u32::MAX;
+    saved.bond = u32::MAX;
+    saved.stats.messages = u64::MAX;
+    saved.stats.tokens_total = u64::MAX;
+    saved.stats.token_xp = u32::MAX;
+    saved.unlocked = vec!["fake_achievement".into(), "first_step".into()];
+    saved.inventory = vec!["fake_item".into(), "beret".into()];
+    saved.equipped = Some("fake_item".into());
+
+    let restored = PetState::restore(saved, 86_400_000);
+
+    assert_eq!(restored.xp, 999_999, "注入 xp 必须钳制到 999_999");
+    assert_eq!(restored.bond, 9_999, "注入 bond 必须钳制到 9_999");
+    assert_eq!(restored.stats.messages, 10_000_000, "注入统计必须钳制");
+    assert_eq!(restored.stats.tokens_total, 10_000_000);
+    assert_eq!(restored.stats.token_xp, 10_000_000);
+    assert!(
+        !restored.unlocked.iter().any(|id| id.starts_with("fake")),
+        "未知成就 id 必须剔除（不因注入解锁）: {:?}",
+        restored.unlocked
+    );
+    assert!(
+        restored.unlocked.contains(&"first_step".to_string()),
+        "合法成就 id 必须保留"
+    );
+    assert_eq!(
+        restored.inventory,
+        vec!["beret".to_string()],
+        "未知装扮 id 必须剔除"
+    );
+    assert!(restored.equipped.is_none(), "未知装备 id → None");
+    assert_eq!(
+        restored.stats.cosmetics_collected, 1,
+        "cosmetics_collected 按 retain 后重算"
+    );
+}
+
+#[test]
 fn sleepy_pet_is_woken_by_interaction_not_polling() {
     // 审查修复：轮询 Visit 不唤醒（睡眠可持续）；真实互动唤醒
     let mut pet = PetState::new_at(0);
@@ -975,7 +1016,7 @@ fn restore_backfills_achievements_for_old_saves() {
         "恢复必须补查 ten_tasks"
     );
     assert!(
-        restored.unlocked.contains(&"hundred_tasks".to_string()) == false,
+        !restored.unlocked.contains(&"hundred_tasks".to_string()),
         "15 次任务不满 100"
     );
     // 恢复文案优先（成就补查不覆盖"又亮起来了"）
@@ -1029,6 +1070,11 @@ fn cosmetic_drop_requires_lucky_roll_and_auto_equips() {
     assert!(pet.equipped.is_some(), "掉落自动装备");
     assert_eq!(pet.stats.cosmetics_collected, 1);
     assert!(
+        pet.msg.as_deref().unwrap_or("").contains("戴上"),
+        "首掉落文案应为戴上: {:?}",
+        pet.msg
+    );
+    assert!(
         pet.memories.iter().any(|m| m.contains("捡到")),
         "掉落必须记入记忆"
     );
@@ -1075,6 +1121,32 @@ fn cosmetic_drop_has_24h_cooldown_and_full_collection_stops() {
     }
     assert_eq!(pet.inventory.len(), droppable_count);
     assert!(!pet.maybe_drop_cosmetic(2, 0), "全收集后掉率为 0");
+}
+
+#[test]
+fn drop_does_not_override_manual_equip() {
+    // C10：已有装备时掉落不再顶掉手动装备（收进光里，待手动换装）
+    let mut pet = day_pet(1);
+    pet.traits = pylon_pet_core::PetTraits::default();
+    assert!(pet.maybe_drop_cosmetic(1, 0), "首掉落");
+    let first = pet.equipped.clone().expect("首掉落自动装备");
+    // 冷却解除后第二次掉落：equipped 保持 first 不变
+    assert!(pet.maybe_drop_cosmetic(86_400_001, 0), "冷却解除后可再掉落");
+    assert_eq!(pet.inventory.len(), 2, "两件都入栏");
+    assert_eq!(
+        pet.equipped.as_deref(),
+        Some(first.as_str()),
+        "掉落不得顶掉已有装备"
+    );
+    assert!(
+        pet.msg.as_deref().unwrap_or("").contains("收进光里"),
+        "已装备时掉落文案应为收进光里: {:?}",
+        pet.msg
+    );
+    // 手动卸下后再次掉落 → 重新自动装备
+    pet.unequip();
+    assert!(pet.maybe_drop_cosmetic(2 * 86_400_001, 0), "卸下后可再掉落");
+    assert!(pet.equipped.is_some(), "未装备时掉落自动戴上");
 }
 
 #[test]
