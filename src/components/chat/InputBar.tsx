@@ -300,7 +300,9 @@ export default forwardRef<{ send: () => void; attachFile: () => void; cancel: ()
     } catch (e) { /* cancelled */ }
   }
 
-  useImperativeHandle(ref, () => ({ send, attachFile, cancel }), [value, attached, sessionId, sessionSource, isCmd, filtered])
+  // deps 必须覆盖 send 引用的 generating 与 sendText 引用的 persona，否则外部 ref.send()
+  // 在生成状态翻转瞬间使用过期闭包（enqueue 与直接发送二选一错位）
+  useImperativeHandle(ref, () => ({ send, attachFile, cancel }), [value, attached, sessionId, sessionSource, isCmd, filtered, generating, persona])
 
   const onKey = (e: KeyboardEvent) => {
     if (e.key === 'Escape' && generating) { e.preventDefault(); cancel(); return }
