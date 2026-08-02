@@ -70,6 +70,11 @@ impl RuntimeLogHub {
         message: impl Into<String>,
         fields: Map<String, Value>,
     ) -> RuntimeLogEntry {
+        let mut entries = self
+            .entries
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        // O22：id 分配在锁内，保证 id 递增与入队序一致。
         let entry = RuntimeLogEntry {
             id: self.next_id.fetch_add(1, Ordering::Relaxed),
             timestamp,
@@ -79,10 +84,6 @@ impl RuntimeLogHub {
             message: sanitize_message(message.into()),
             fields: sanitize_fields(fields),
         };
-        let mut entries = self
-            .entries
-            .lock()
-            .unwrap_or_else(|poisoned| poisoned.into_inner());
         entries.push_back(entry.clone());
         while entries.len() > self.capacity {
             entries.pop_front();
