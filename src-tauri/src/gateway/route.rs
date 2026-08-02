@@ -56,6 +56,9 @@ pub struct EntityBinding {
     /// idle 模式无活动阈值（分钟）；缺省 1440（1 天）。
     #[serde(default)]
     pub idle_minutes: Option<u64>,
+    /// 段内未知字段（配置拼错可见，parse_config 告警）。
+    #[serde(flatten)]
+    extra: HashMap<String, serde_json::Value>,
 }
 
 /// QQ 平台网关配置（B10.3：群级白名单）。
@@ -64,6 +67,9 @@ pub struct QqGatewayConfig {
     /// 群级白名单：列出的 group_openid 才允许 ingest；None = 不限。
     #[serde(default)]
     pub group_allow_from: Option<Vec<String>>,
+    /// 段内未知字段（配置拼错可见，parse_config 告警）。
+    #[serde(flatten)]
+    extra: HashMap<String, serde_json::Value>,
 }
 
 /// B11 注入钩子配置（gateway.inject 段）。
@@ -168,6 +174,13 @@ pub fn parse_config(input: &str) -> Result<GatewayConfig, String> {
         if source.is_empty() {
             return Err("route source 不能为空".to_string());
         }
+        if !route.extra.is_empty() {
+            let mut keys: Vec<&String> = route.extra.keys().collect();
+            keys.sort();
+            tracing::warn!(
+                "route {source} 含未知字段（可能拼错，白名单等安全控件可能静默失效）: {keys:?}"
+            );
+        }
         if !seen.insert(source.clone()) {
             return Err(format!("重复的 source 路由: {source}"));
         }
@@ -185,6 +198,11 @@ pub fn parse_config(input: &str) -> Result<GatewayConfig, String> {
     let qq = section
         .qq
         .map(|mut q| {
+            if !q.extra.is_empty() {
+                let mut keys: Vec<&String> = q.extra.keys().collect();
+                keys.sort();
+                tracing::warn!("gateway.qq 段含未知字段（可能拼错）: {keys:?}");
+            }
             q.group_allow_from = q.group_allow_from.filter(|v| !v.is_empty());
             q
         })
@@ -391,6 +409,40 @@ top_level_unknown: value
 "#;
         let table = parse_config(yaml).expect("未知字段应被忽略").routes;
         assert!(table.lookup("qq:group:123").is_some());
+    }
+
+    #[test]
+    fn allow_from_typo_collected_instead_of_silently_dropped() {
+        let yaml = r#"
+gateway:
+  qq:
+    groupAllowFrom: [group-a]
+  routes:
+    - source: qq:group:123
+      agent: peri
+      profile: trpg
+      session: 战役1
+      allowFrom: [member-1]
+"#;
+        let config = parse_config(yaml).expect("拼错的字段名应解析成功（未知字段被收集告警）");
+        let binding = config.routes.lookup("qq:group:123").expect("路由应命中");
+        assert!(
+            binding.allow_from.is_none(),
+            "allowFrom 拼错不应生效，白名单应保持 None（缺省不限）"
+        );
+        assert_eq!(
+            binding.extra.keys().map(String::as_str).collect::<Vec<_>>(),
+            vec!["allowFrom"]
+        );
+        assert_eq!(
+            config
+                .qq
+                .extra
+                .keys()
+                .map(String::as_str)
+                .collect::<Vec<_>>(),
+            vec!["groupAllowFrom"]
+        );
     }
 
     #[test]
