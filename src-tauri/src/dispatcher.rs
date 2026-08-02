@@ -8,7 +8,7 @@ use crate::agent_runtime::{
     session_mapping_matches, source_for_peri_id_in_generation, AgentLifecycleStatus,
 };
 use crate::lifecycle::do_connect_and_replace;
-use crate::permission::{parse_permission_request, permission_response};
+use crate::permission::{parse_permission_request_with_generation, permission_response};
 use crate::runtime::AgentRuntime;
 use crate::session::{extract_tool_file_name, value_as_string};
 use crate::AppStateHandles;
@@ -232,7 +232,12 @@ pub(crate) fn start_notification_dispatcher<R: tauri::Runtime>(
                     let Some(request_id) = raw.id else {
                         continue;
                     };
-                    let Some(permission) = parse_permission_request(raw.params.as_ref()) else {
+                    // C4：记录到达时 client_generation——应答时复核，客户端替换后
+                    // 旧进程同 id 请求不得被旧审批决策误写。
+                    let Some(permission) = parse_permission_request_with_generation(
+                        raw.params.as_ref(),
+                        client_generation.load(Ordering::Acquire),
+                    ) else {
                         log::warn!("ACP request_permission 解析失败 (id={request_id})，按拒绝处理");
                         let acp = acp.lock().await;
                         let _ = acp

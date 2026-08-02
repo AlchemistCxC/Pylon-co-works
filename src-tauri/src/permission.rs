@@ -1,5 +1,7 @@
 //! B9 权限审批：挂起请求解析/应答/超时（R1 拆分自 lib.rs；行为零变化）。
 
+use std::sync::atomic::Ordering;
+
 use crate::error::PylonError;
 use crate::runtime::AgentRuntime;
 use crate::runtime_log;
@@ -21,6 +23,9 @@ pub(crate) struct PendingPermission {
     pub prompt: String,
     /// 可用选项 option_id（allow_once/reject_once/...），应答时校验。
     pub options: Vec<String>,
+    /// C4：应答身份复核——解析时记录的 client_generation。客户端替换
+    /// （generation 前进）后，旧进程的应答决策不得误写新进程同 id 请求。
+    pub client_generation: u64,
     /// R4：Timestamp（事件 payload 序列化为字符串，契约不变）。
     pub requested_at: Timestamp,
 }
@@ -28,8 +33,20 @@ pub(crate) struct PendingPermission {
 /// 解析 agent 的 request_permission 请求参数（B9）：
 /// `{ sessionId, toolCall: { toolCallId, title?, rawInput? }, options: [{ optionId, ... }] }`。
 /// 解析失败（缺字段/无选项）返回 None——调用方按拒绝处理。
+/// 兼容入口（仅 lib.rs 测试调用，无 runtime 上下文）：client_generation 置 0——
+/// 生产路径（dispatcher）必须走 [`parse_permission_request_with_generation`]。
+#[cfg(test)]
 pub(crate) fn parse_permission_request(
     params: Option<&serde_json::Value>,
+) -> Option<PendingPermission> {
+    parse_permission_request_with_generation(params, 0)
+}
+
+/// C4：带 client_generation 的解析入口——记录请求到达时的身份 generation，
+/// 应答时复核（见 [`respond_permission`]）。
+pub(crate) fn parse_permission_request_with_generation(
+    params: Option<&serde_json::Value>,
+    client_generation: u64,
 ) -> Option<PendingPermission> {
     let params = params?;
     let session_id = params.get("sessionId")?.as_str()?.to_string();
@@ -64,6 +81,7 @@ pub(crate) fn parse_permission_request(
         title,
         prompt,
         options,
+        client_generation,
         requested_at: Timestamp::now(),
     })
 }
@@ -91,20 +109,30 @@ pub(crate) fn permission_response_cancelled() -> serde_json::Value {
 /// 统一权限应答（P1-2 TOCTOU 修复）：acp 锁内复核 pending 再发送。
 /// 客户端替换（replace_agent_client）在 acp 锁内清空 pending——若"锁外读 pending
 /// → 锁 acp 发送"，替换发生在两者之间时，旧进程的 request_id 会写到新进程。
-/// 返回 true = 已应答并移除；false = 请求已不存在（跳过）或发送失败（保留 pending
-/// 供重试/超时/客户端替换清理）。
+/// C4：锁内同时复核 pending 记录的 client_generation 与当前一致——客户端替换
+/// 瞬间（同 id 请求已由新进程发出）旧审批决策不误写新进程。
+/// 返回 true = 已应答并移除；false = 请求已不存在/身份不匹配（跳过）或发送失败
+/// （保留 pending 供重试/超时/客户端替换清理）。
 pub(crate) async fn respond_permission(
     runtime: &AgentRuntime,
     request_id: u64,
     response: serde_json::Value,
 ) -> bool {
     let acp = runtime.acp.lock().await;
-    let still_pending = runtime
+    let can_respond = runtime
         .pending_permissions
         .lock()
-        .map(|pending| pending.contains_key(&request_id))
+        .map(|pending| {
+            pending
+                .get(&request_id)
+                .map(|permission| {
+                    permission.client_generation
+                        == runtime.client_generation.load(Ordering::Acquire)
+                })
+                .unwrap_or(false)
+        })
         .unwrap_or(false);
-    if !still_pending {
+    if !can_respond {
         return false;
     }
     if acp.send_response(request_id, response).await.is_err() {
@@ -239,5 +267,124 @@ pub(crate) async fn check_pending_permission_timeouts(state: &AppState) {
                 respond_permission(&runtime, request_id, permission_response("reject_once")).await;
             log::warn!("权限请求 {request_id} 超时默认拒绝（{tool_call_id}）");
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::runtime::AgentRuntime;
+
+    fn request_params() -> serde_json::Value {
+        serde_json::json!({
+            "sessionId": "s1",
+            "toolCall": {"toolCallId": "call-1", "title": "tool"},
+            "options": [{"optionId": "allow_once"}, {"optionId": "reject_once"}]
+        })
+    }
+
+    fn parsed(generation: u64) -> PendingPermission {
+        parse_permission_request_with_generation(Some(&request_params()), generation)
+            .expect("合法请求必须解析")
+    }
+
+    /// fake ACP：把收到的请求行追加写入 trace 文件并逐个应答（writer 不阻塞）。
+    fn trace_script(trace_path: &std::path::Path) -> String {
+        format!(
+            r#"import json,sys
+with open({trace:?}, 'a') as f:
+    for line in sys.stdin:
+        request = json.loads(line)
+        f.write(line)
+        f.flush()
+        print(json.dumps({{'jsonrpc':'2.0','id':request.get('id'),'result':{{}}}}), flush=True)
+"#,
+            trace = trace_path.to_string_lossy()
+        )
+    }
+
+    #[tokio::test]
+    async fn respond_permission_rejects_stale_generation() {
+        let runtime = AgentRuntime::new_disconnected();
+        // 客户端替换场景：pending 记录的是旧 generation（1），当前 generation 为 0
+        runtime
+            .pending_permissions
+            .lock()
+            .unwrap()
+            .insert(7, parsed(1));
+        assert!(
+            !respond_permission(&runtime, 7, permission_response("allow_once")).await,
+            "generation 不匹配必须拒绝应答"
+        );
+        assert!(
+            runtime.pending_permissions.lock().unwrap().contains_key(&7),
+            "拒绝应答后 pending 保留（由客户端替换清理）"
+        );
+    }
+
+    #[tokio::test]
+    async fn respond_permission_stale_generation_never_reaches_client() {
+        let trace_path = std::env::temp_dir().join(format!(
+            "prism_perm_stale_{}_{}.jsonl",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        let _ = std::fs::remove_file(&trace_path);
+        let agent = crate::test_utils::fake_acp_agent("fake-acp-perm", &trace_script(&trace_path));
+        let acp = crate::acp::AcpClient::connect_with_logs(&agent, None)
+            .await
+            .expect("fake ACP 必须初始化");
+        let runtime = AgentRuntime::new_disconnected();
+        *runtime.acp.lock().await = acp;
+
+        // 旧 generation（1）的挂起：不匹配 → 不应答且不发送
+        runtime
+            .pending_permissions
+            .lock()
+            .unwrap()
+            .insert(7, parsed(1));
+        assert!(
+            !respond_permission(&runtime, 7, permission_response("allow_once")).await,
+            "stale generation 必须拒绝"
+        );
+        assert!(runtime.pending_permissions.lock().unwrap().contains_key(&7));
+
+        // 当前 generation（0）的挂起：匹配 → 应答发送成功并清理
+        runtime
+            .pending_permissions
+            .lock()
+            .unwrap()
+            .insert(8, parsed(0));
+        assert!(
+            respond_permission(&runtime, 8, permission_response("allow_once")).await,
+            "匹配 generation 必须应答"
+        );
+        assert!(!runtime.pending_permissions.lock().unwrap().contains_key(&8));
+
+        // 等 fake ACP 把请求写入 trace 后回读断言（serde_json 紧凑序列化："id":8）
+        tokio::time::timeout(std::time::Duration::from_secs(5), async {
+            loop {
+                if std::fs::read_to_string(&trace_path)
+                    .map(|trace| trace.contains("\"id\":8"))
+                    .unwrap_or(false)
+                {
+                    break;
+                }
+                tokio::time::sleep(std::time::Duration::from_millis(20)).await;
+            }
+        })
+        .await
+        .expect("匹配 generation 的应答必须到达客户端");
+        let trace = std::fs::read_to_string(&trace_path).unwrap_or_default();
+        assert!(
+            !trace.contains("\"id\":7"),
+            "stale generation 应答不得写入新进程: {trace}"
+        );
+
+        let _ = runtime.acp.lock().await.kill();
+        let _ = std::fs::remove_file(&trace_path);
     }
 }
