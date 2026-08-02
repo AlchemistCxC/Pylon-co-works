@@ -7,7 +7,7 @@
 use base64::Engine;
 use std::collections::HashMap;
 use std::future::Future;
-use std::io::{BufRead, BufReader, BufWriter, Write};
+use std::io::{BufRead, BufReader, BufWriter, Read, Write};
 use std::process::{Child, Command, Stdio};
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
@@ -704,9 +704,26 @@ impl AcpClient {
                     MAX_ATTACHMENT_BYTES
                 ));
             }
-            let bytes = std::fs::read(path).map_err(|error| {
+            // A9：metadata 校验后不能直接 std::fs::read 无上限读取——校验与读取间
+            // 文件可被替换/增长（TOCTOU），超大文件导致 OOM。改为上限读取
+            // （MAX + 1 字节探测超限），读后再校验一次。
+            let file = std::fs::File::open(path).map_err(|error| {
                 format!("attachment read failed for {}: {error}", path.display())
             })?;
+            let mut bytes = Vec::new();
+            file.take(MAX_ATTACHMENT_BYTES + 1)
+                .read_to_end(&mut bytes)
+                .map_err(|error| {
+                    format!("attachment read failed for {}: {error}", path.display())
+                })?;
+            if bytes.len() as u64 > MAX_ATTACHMENT_BYTES {
+                return Err(format!(
+                    "attachment too large: {} is {} bytes, maximum is {} bytes",
+                    path.display(),
+                    bytes.len(),
+                    MAX_ATTACHMENT_BYTES
+                ));
+            }
             let mime = infer::get(&bytes).map(|kind| kind.mime_type());
             match mime {
                 Some(mime)
@@ -1339,6 +1356,24 @@ mod tests {
         assert_eq!(
             error,
             format!("unsupported attachment type: {}", path.display())
+        );
+    }
+
+    #[test]
+    fn prompt_rejects_attachment_grown_beyond_limit_after_metadata_check() {
+        // A9：metadata 校验与读取间文件被增长（TOCTOU）时必须拒绝，不能无上限读取。
+        let path = std::env::temp_dir().join(format!(
+            "pylon-attachment-toctou-{}.bin",
+            std::process::id()
+        ));
+        std::fs::write(&path, vec![0u8; MAX_ATTACHMENT_BYTES as usize + 1]).unwrap();
+        let error =
+            AcpClient::prompt_blocks("hello".to_string(), &[path.to_string_lossy().into_owned()])
+                .expect_err("oversized attachment must fail");
+        std::fs::remove_file(&path).unwrap();
+        assert!(
+            error.starts_with("attachment too large:"),
+            "must reject with the bounded-read too-large message, got: {error}"
         );
     }
 
