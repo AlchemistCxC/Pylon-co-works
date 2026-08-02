@@ -35,6 +35,9 @@ function LazyDialogFallback() {
 // 窗口控制句柄：非 Tauri 环境（浏览器预览）降级为无操作 stub。模块级单例，避免每 render 重建。
 const appWindowSingleton = (() => { try { return getCurrentWindow() } catch { return { minimize() {}, isFullscreen() { return Promise.resolve(false) }, setFullscreen(_v: boolean) { return Promise.resolve() }, destroy() {} } } })()
 
+// 非 Tauri（浏览器预览）时 @tauri-apps/api 的 listen/invoke 会 reject，统一守卫
+const IS_TAURI = typeof (window as any).__TAURI_INTERNALS__ !== 'undefined' || typeof (window as any).__TAURI__ !== 'undefined'
+
 export default function App() {
   const [activeSession, setActiveSession] = useState<string | null>(null)
   const [showSettings, setShowSettings] = useState(false)
@@ -88,6 +91,8 @@ export default function App() {
 
   useEffect(() => {
     let disposed = false
+    // 浏览器预览无 Tauri 后端：list_agents/listen 都会 reject，整体跳过
+    if (!IS_TAURI) return
     // 2026-08-02：list_agents 返回类型收窄为 AgentEntry[]（后端契约 {id, name, ...}），
     // 非数组/异常形状由 setAgents 内部 normalizeAgentList 兜底，不再 any。
     const load = () => invoke<AgentEntry[]>('list_agents').then((list: AgentEntry[]) => {
@@ -256,7 +261,7 @@ export default function App() {
         onToggleRightPanel={() => setRightOpen(value => !value)}
         onToggleSettings={() => setShowSettings(value => !value)}
         onMinimize={() => appWindow.minimize()}
-        onToggleFullscreen={() => appWindow.isFullscreen().then(fullscreen => appWindow.setFullscreen(!fullscreen))}
+        onToggleFullscreen={() => appWindow.isFullscreen().then(fullscreen => appWindow.setFullscreen(!fullscreen)).catch(error => console.error('全屏切换失败', error))}
         onCloseWindow={() => appWindow.destroy()}
       />
       <Suspense fallback={null}>

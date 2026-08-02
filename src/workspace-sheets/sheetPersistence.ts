@@ -117,9 +117,15 @@ export function parseSheetState(raw: string | null, agentIds?: readonly string[]
 }
 
 export function persistSheetState(storage: StorageLike, state: PersistedSheetState): void {
-  storage.setItem(SHEET_STORAGE_KEY, serializeSheetState(normalizeState(state)))
+  try {
+    storage.setItem(SHEET_STORAGE_KEY, serializeSheetState(normalizeState(state)))
+  } catch {
+    // 存储不可用/写满：静默降级——写盘失败不应让 workspace action（zustand set 内）抛异常
+  }
 }
 
 export function loadSheetState(storage: StorageLike, agentIds?: readonly string[]): PersistedSheetState {
-  return parseSheetState(storage.getItem(SHEET_STORAGE_KEY), agentIds)
+  let raw: string | null = null
+  try { raw = storage.getItem(SHEET_STORAGE_KEY) } catch { /* 存储不可用：按空状态处理 */ }
+  return parseSheetState(raw, agentIds)
 }

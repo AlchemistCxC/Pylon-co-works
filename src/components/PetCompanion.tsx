@@ -128,7 +128,10 @@ function PixelCreature({ stage, mood, walking }: { stage: GrowthStage; mood: str
 export default function PetCompanion({ rightInset = 0 }: { rightInset?: number }) {
   const [pet, setPet] = useState<PetState | null>(null)
   const [position, setPosition] = useState<Position | null>(readPosition)
-  const [wanderEnabled, setWanderEnabled] = useState(() => localStorage.getItem(POSITION_KEY) === null)
+  // 存储不可用（无痕/受限 WebView）时降级为默认启用 wandering，绝不在渲染期抛异常
+  const [wanderEnabled, setWanderEnabled] = useState(() => {
+    try { return localStorage.getItem(POSITION_KEY) === null } catch { return true }
+  })
   const [walking, setWalking] = useState(false)
   const [perched, setPerched] = useState(false)
   const [behavior, setBehavior] = useState<PetBehavior>('idle')
@@ -151,11 +154,17 @@ export default function PetCompanion({ rightInset = 0 }: { rightInset?: number }
   const save = useCallback((next: PetState) => {
     // 数据无变化时不产生新 state、不写盘（参考 CC hooks/useMemoryUsage 的 normal 不 setState 模式）
     const serialized = JSON.stringify(persistable(next))
+    let changed = false
     setPet(previous => {
       if (previous && JSON.stringify(persistable(previous)) === serialized) return previous
-      localStorage.setItem(STORAGE_KEY, serialized)
+      changed = true
       return next
     })
+    // 写盘在 updater 外：StrictMode/并发下 updater 可能双调用，副作用必须在纯函数外；
+    // changed 标志保留"无变化不写盘"语义，存储不可用时静默降级。
+    if (changed) {
+      try { localStorage.setItem(STORAGE_KEY, serialized) } catch { /* 存储不可用：跳过写盘 */ }
+    }
   }, [])
 
   useEffect(() => {
