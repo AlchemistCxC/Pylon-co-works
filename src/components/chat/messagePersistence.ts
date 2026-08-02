@@ -53,14 +53,20 @@ export function parseMessageSnapshot<T>(raw: string | null): T[] | null {
 
 export function persistMessageSnapshot<T>(sessionId: string, messages: T[], storage: MessageStorage): void {
   const key = messageStorageKey(sessionId)
-  if (messages.length === 0) {
-    storage.removeItem(key)
-    return
+  try {
+    if (messages.length === 0) {
+      storage.removeItem(key)
+      return
+    }
+    const envelope: MessageSnapshotEnvelope<T> = { version: MESSAGE_SNAPSHOT_VERSION, messages }
+    storage.setItem(key, JSON.stringify(envelope))
+  } catch {
+    // 存储不可用/写满：静默降级——落盘失败不应让渲染 effect 或 controller 抛异常
   }
-  const envelope: MessageSnapshotEnvelope<T> = { version: MESSAGE_SNAPSHOT_VERSION, messages }
-  storage.setItem(key, JSON.stringify(envelope))
 }
 
 export function clearMessageStorage(sessionId: string, storage: Pick<MessageStorage, 'removeItem'>): void {
-  storage.removeItem(messageStorageKey(sessionId))
+  try {
+    storage.removeItem(messageStorageKey(sessionId))
+  } catch { /* 存储不可用：跳过清除 */ }
 }

@@ -34,11 +34,15 @@ export function readPetPosition(storage: PetStorage): PetPosition | null {
 }
 
 export function writePetPosition(storage: PetStorage, position: PetPosition): void {
-  storage.setItem(PET_POSITION_KEY, JSON.stringify(position))
+  try {
+    storage.setItem(PET_POSITION_KEY, JSON.stringify(position))
+  } catch { /* 存储不可用：跳过写盘 */ }
 }
 
 export function clearPetPosition(storage: PetStorage): void {
-  storage.removeItem(PET_POSITION_KEY)
+  try {
+    storage.removeItem(PET_POSITION_KEY)
+  } catch { /* 存储不可用：跳过清除 */ }
 }
 
 export function persistPetState<T extends object>(state: T): Omit<T, 'stage' | 'title' | 'age_days' | 'next_stage_xp' | 'growth_progress' | 'msg'> {

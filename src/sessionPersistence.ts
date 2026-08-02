@@ -110,7 +110,11 @@ export function parseSessions(raw: string | null, profiles: PersistedProfile[]):
 }
 
 export function persistSessions(storage: StorageLike, sessions: PersistedSession[]): void {
-  storage.setItem(SESSION_STORAGE_KEY, serializeSessions(sessions))
+  try {
+    storage.setItem(SESSION_STORAGE_KEY, serializeSessions(sessions))
+  } catch {
+    // 存储不可用/写满：静默降级——写盘失败不应让 identityStore action 抛异常
+  }
 }
 
 export function loadSessions(storage: StorageLike, profiles: PersistedProfile[]): PersistedSession[] {
