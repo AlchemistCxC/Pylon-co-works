@@ -227,22 +227,16 @@ pub fn list_entries(
     Ok(entries)
 }
 
-pub fn read_text(
-    root: &Path,
-    relative: &str,
-    max_bytes: Option<usize>,
-) -> Result<WorkspaceTextPreview, WorkspaceError> {
+/// R23：统一的 workspace 内文件打开通道——resolve → metadata 校验 → open →
+/// canonicalize 复核（TOCTOU：resolve 与 open 之间路径可能被替换为指向 root 外
+/// 的链接）。返回 (已打开文件, canonical 路径)；root 外一律 OutsideRoot。
+fn open_workspace_file(root: &Path, relative: &str) -> Result<(fs::File, PathBuf), WorkspaceError> {
     let (canonical_root, path) = resolve_workspace_path(root, relative)?;
     let metadata = fs::metadata(&path).map_err(|e| WorkspaceError::Io(e.to_string()))?;
     if !metadata.is_file() {
         return Err(WorkspaceError::NotFile);
     }
-    let total_bytes = usize::try_from(metadata.len()).unwrap_or(usize::MAX);
-    let limit = max_bytes
-        .unwrap_or(DEFAULT_PREVIEW_BYTES)
-        .min(MAX_PREVIEW_BYTES);
-    let mut file = fs::File::open(&path).map_err(|e| WorkspaceError::Io(e.to_string()))?;
-    // C3：open 后二次复核——resolve 与 open 之间路径可能被替换为指向 root 外的链接。
+    let file = fs::File::open(&path).map_err(|e| WorkspaceError::Io(e.to_string()))?;
     let canonical = path.canonicalize().map_err(|e| {
         if e.kind() == std::io::ErrorKind::NotFound {
             WorkspaceError::NotFound
@@ -253,6 +247,20 @@ pub fn read_text(
     if canonical != canonical_root && !canonical.starts_with(&canonical_root) {
         return Err(WorkspaceError::OutsideRoot);
     }
+    Ok((file, canonical))
+}
+
+pub fn read_text(
+    root: &Path,
+    relative: &str,
+    max_bytes: Option<usize>,
+) -> Result<WorkspaceTextPreview, WorkspaceError> {
+    let (mut file, path) = open_workspace_file(root, relative)?;
+    let metadata = fs::metadata(&path).map_err(|e| WorkspaceError::Io(e.to_string()))?;
+    let total_bytes = usize::try_from(metadata.len()).unwrap_or(usize::MAX);
+    let limit = max_bytes
+        .unwrap_or(DEFAULT_PREVIEW_BYTES)
+        .min(MAX_PREVIEW_BYTES);
     let mut bytes = Vec::with_capacity(total_bytes.min(limit.saturating_add(1)));
     let mut limited = file.by_ref().take(limit as u64 + 1);
     limited
