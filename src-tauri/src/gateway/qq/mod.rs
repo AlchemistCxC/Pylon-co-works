@@ -168,13 +168,14 @@ impl QqAdapter {
         member_openid: Option<&str>,
         user_openid: Option<&str>,
     ) -> Result<Option<ResolvedIngest>, String> {
-        // P3：锁内读取白名单配置（with_qq_config），避免每消息 clone 整个 QqGatewayConfig
+        // P3：锁内读取白名单配置，避免每消息 clone 整个 QqGatewayConfig
         // R6b：读锁中毒（panic 后）→ 拒绝 ingest（fail-closed）——不得回退默认
         // 空白名单（空白名单 = 放行所有群，白名单安全路径必须拒绝）。
         // O38：白名单判定先于 ingest（截断 clone）——拒绝路径不产生截断分配。
-        let binding = self.core.binding(source);
-        let allowed = match self.core.with_qq_config(|qq| {
-            crate::gateway::ingest_allowed(qq, binding.as_ref(), source, member_openid, user_openid)
+        // O67：with_routes_and_qq 单锁快照——qq 配置与路由绑定一次读锁内取齐，
+        // 消除 reload 热重载窗口下"新配置 + 旧路由表"混搭的非原子判定。
+        let allowed = match self.core.with_routes_and_qq(source, |qq, binding| {
+            crate::gateway::ingest_allowed(qq, binding, source, member_openid, user_openid)
         }) {
             Some(allowed) => allowed,
             None => {

@@ -109,17 +109,24 @@ impl GatewayCore {
     }
 
     /// QQ 群级白名单配置（QqAdapter 白名单检查用）。
-    /// 热路径（handle_incoming 每消息）请用 [`Self::with_qq_config`] 锁内读取，避免 clone。
+    /// 热路径（handle_incoming 每消息）请用 [`Self::with_routes_and_qq`] 锁内读取，避免 clone。
     pub fn qq_config(&self) -> QqGatewayConfig {
         self.config.read().map(|c| c.qq.clone()).unwrap_or_default()
     }
 
-    /// 锁内读取 QQ 配置（修复 P3：handle_incoming 每消息调用时避免 clone 整个配置，
-    /// 只读引用即可完成白名单检查；签名保持返回引用的生命周期受锁内闭包约束）。
-    /// R6b：返回 `Option<R>`——读锁中毒（panic 后）时返回 None，调用方**拒绝** ingest
-    /// （fail-closed）。旧实现回退默认空白名单 = 放行所有群，白名单安全路径必须拒绝。
-    pub(crate) fn with_qq_config<R>(&self, f: impl FnOnce(&QqGatewayConfig) -> R) -> Option<R> {
-        self.config.read().ok().map(|guard| f(&guard.qq))
+    /// 单锁快照：一次读锁内取 QQ 配置 + source 路由绑定（O67 修复）。
+    /// 白名单判定与绑定解析必须出自同一份配置快照——分两次读锁在 reload 热重载
+    /// 窗口下可能混搭"新 qq 配置 + 旧路由表"（或反之），原子快照保证判定基于
+    /// 同一版本配置。读锁中毒 → None（fail-closed，回退会放行所有群，必须拒绝）。
+    pub(crate) fn with_routes_and_qq<R>(
+        &self,
+        source: &str,
+        f: impl FnOnce(&QqGatewayConfig, Option<&route::EntityBinding>) -> R,
+    ) -> Option<R> {
+        self.config
+            .read()
+            .ok()
+            .map(|guard| f(&guard.qq, guard.routes.lookup(source)))
     }
 
     /// B11 注入开关（Prism 可用性由调用方降级处理）。
