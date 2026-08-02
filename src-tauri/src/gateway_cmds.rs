@@ -44,10 +44,13 @@ pub(crate) async fn gateway_status(
 /// 注意：QQ 凭据（PYLON_QQ_APP_ID/CLIENT_SECRET）与已注册适配器不受影响（启动生效）。
 #[tauri::command]
 pub(crate) async fn reload_gateway(state: tauri::State<'_, AppState>) -> Result<(), PylonError> {
+    // R35/O57：配置来源统一——有路径时 tokio::fs 异步读（不阻塞 async 运行时），
+    // 无路径（内置配置）时经 load_gateway_config 的 include_str 兜底。
     let content = match agent_config::effective_config_path() {
-        Some(path) => std::fs::read_to_string(&path)
+        Some(path) => tokio::fs::read_to_string(&path)
+            .await
             .map_err(|error| PylonError::Io(format!("读取 {} 失败: {error}", path.display())))?,
-        None => include_str!("../../agents.yaml").to_string(),
+        None => agent_config::load_gateway_config().map_err(PylonError::Io)?,
     };
     let config = crate::gateway::route::parse_config(&content).map_err(PylonError::Protocol)?;
     state.gateway.reload(config);

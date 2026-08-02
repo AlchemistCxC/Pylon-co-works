@@ -188,6 +188,19 @@ pub fn load() -> Result<HashMap<String, AgentDef>, String> {
     parse(include_str!("../../agents.yaml"))
 }
 
+/// 网关配置读取统一入口（R35）：effective_config_path 优先读文件，无路径时回退
+/// 编译期嵌入（include_str）。reload 路径的异步读（tokio::fs）在 gateway_cmds 内
+/// 实现，本入口承载"路径选择 + 兜底"语义供复用。
+/// 登记说明：启动路径 GatewayCore::new 已含 include_str 兜底 + reload 热更新覆盖，
+/// 本次只统一 reload 路径（gateway/mod.rs 属另一链，禁碰）。
+pub fn load_gateway_config() -> Result<String, String> {
+    match effective_config_path() {
+        Some(path) => std::fs::read_to_string(&path)
+            .map_err(|error| format!("读取 {} 失败: {error}", path.display())),
+        None => Ok(include_str!("../../agents.yaml").to_string()),
+    }
+}
+
 fn parse(content: &str) -> Result<HashMap<String, AgentDef>, String> {
     let config: AgentConfigFile = serde_yaml::from_str(content)
         .map_err(|error| format!("failed to parse agents.yaml: {error}"))?;
