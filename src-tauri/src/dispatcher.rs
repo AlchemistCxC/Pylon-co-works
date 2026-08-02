@@ -8,7 +8,9 @@ use crate::agent_runtime::{
     session_mapping_matches, source_for_peri_id_in_generation, AgentLifecycleStatus,
 };
 use crate::lifecycle::do_connect_and_replace;
-use crate::permission::{parse_permission_request_with_generation, permission_response};
+use crate::permission::{
+    parse_permission_request_with_generation, permission_response, pick_option,
+};
 use crate::runtime::AgentRuntime;
 use crate::session::{extract_tool_file_name, value_as_string};
 use crate::AppStateHandles;
@@ -240,8 +242,10 @@ pub(crate) fn start_notification_dispatcher<R: tauri::Runtime>(
                     ) else {
                         log::warn!("ACP request_permission 解析失败 (id={request_id})，按拒绝处理");
                         let acp = acp.lock().await;
+                        // C5：解析失败无选项可用 → pick_option 空集 → reject_once 兜底
+                        let option_id = pick_option(&[], true).unwrap_or("reject_once");
                         let _ = acp
-                            .send_response(request_id, permission_response("reject_once"))
+                            .send_response(request_id, permission_response(option_id))
                             .await;
                         continue;
                     };
@@ -254,9 +258,12 @@ pub(crate) fn start_notification_dispatcher<R: tauri::Runtime>(
                             "权限模式 {mode}：自动批准工具调用 {}",
                             permission.tool_call_id
                         );
+                        // C5：自动批准按请求选项选 allow 语义项（无匹配取首个）。
+                        let option_id =
+                            pick_option(&permission.options, false).unwrap_or("allow_once");
                         let acp = acp.lock().await;
                         let _ = acp
-                            .send_response(request_id, permission_response("allow_once"))
+                            .send_response(request_id, permission_response(option_id))
                             .await;
                     } else {
                         let _ = pending_permissions.lock().map(|mut pending| {

@@ -106,6 +106,28 @@ pub(crate) fn permission_response_cancelled() -> serde_json::Value {
     .unwrap_or_else(|_| serde_json::json!({"outcome": "cancelled"}))
 }
 
+/// C5：按请求提供选项选择应答 option_id（协议合规）——自动批准/超时默认拒绝不再
+/// 硬编码 allow_once/reject_once，而是优先命中语义选项，否则取首个可用项。
+/// 语义优先级（忽略大小写）：
+/// - prefer_reject（超时默认拒绝）：`reject_once` → 前缀 `reject` → 首个
+/// - prefer_reject=false（自动批准）：`allow_once` → 首个
+///
+/// 无选项返回 None（调用方兜底 reject_once）。
+pub(crate) fn pick_option(options: &[String], prefer_reject: bool) -> Option<&str> {
+    if prefer_reject {
+        options
+            .iter()
+            .find(|option| option.eq_ignore_ascii_case("reject_once"))
+            .or_else(|| options.iter().find(|option| option.starts_with("reject")))
+    } else {
+        options
+            .iter()
+            .find(|option| option.eq_ignore_ascii_case("allow_once"))
+    }
+    .or_else(|| options.first())
+    .map(String::as_str)
+}
+
 /// 统一权限应答（P1-2 TOCTOU 修复）：acp 锁内复核 pending 再发送。
 /// 客户端替换（replace_agent_client）在 acp 锁内清空 pending——若"锁外读 pending
 /// → 锁 acp 发送"，替换发生在两者之间时，旧进程的 request_id 会写到新进程。
@@ -242,10 +264,11 @@ pub(crate) async fn set_approval_mode(
 }
 
 /// 挂起的权限请求超时检查（B9.2：超时默认拒绝，不悬挂 pending）。
+/// C5：默认拒绝选项按请求提供的选项选择（reject 优先），不再硬编码 reject_once。
 pub(crate) async fn check_pending_permission_timeouts(state: &AppState) {
     let now = Timestamp::now();
     for runtime in state.runtimes.all() {
-        let expired: Vec<(u64, String)> = runtime
+        let expired: Vec<(u64, String, Vec<String>)> = runtime
             .pending_permissions
             .lock()
             .map(|pending| {
@@ -255,17 +278,24 @@ pub(crate) async fn check_pending_permission_timeouts(state: &AppState) {
                         now.elapsed_since(permission.requested_at)
                             > PERMISSION_REQUEST_TIMEOUT_SECS * 1000
                     })
-                    .map(|(id, permission)| (*id, permission.tool_call_id.clone()))
+                    .map(|(id, permission)| {
+                        (
+                            *id,
+                            permission.tool_call_id.clone(),
+                            permission.options.clone(),
+                        )
+                    })
                     .collect()
             })
             .unwrap_or_default();
-        for (request_id, tool_call_id) in expired {
+        for (request_id, tool_call_id, options) in expired {
+            // C5：超时默认拒绝按请求选项选 reject 语义项（无匹配取首个，空则 reject_once）。
+            let option_id = pick_option(&options, true).unwrap_or("reject_once");
             // P1-2：统一走 respond_permission（acp 锁内复核 pending 再发送，
             // 防客户端替换竞态）；发送失败保留 pending，下轮 watcher 重试或
             // 客户端替换清理。超时日志无条件保留（记录本次判定）。
-            let _ =
-                respond_permission(&runtime, request_id, permission_response("reject_once")).await;
-            log::warn!("权限请求 {request_id} 超时默认拒绝（{tool_call_id}）");
+            let _ = respond_permission(&runtime, request_id, permission_response(option_id)).await;
+            log::warn!("权限请求 {request_id} 超时默认拒绝 {option_id}（{tool_call_id}）");
         }
     }
 }
@@ -286,6 +316,44 @@ mod tests {
     fn parsed(generation: u64) -> PendingPermission {
         parse_permission_request_with_generation(Some(&request_params()), generation)
             .expect("合法请求必须解析")
+    }
+
+    fn opts(items: &[&str]) -> Vec<String> {
+        items.iter().map(|s| s.to_string()).collect()
+    }
+
+    #[test]
+    fn pick_option_reject_prefers_reject_once_then_prefix_then_first() {
+        // reject_once 优先（忽略大小写）
+        assert_eq!(
+            pick_option(&opts(&["allow_once", "REJECT_ONCE"]), true),
+            Some("REJECT_ONCE")
+        );
+        // 无 reject_once 时前缀 reject 优先
+        assert_eq!(
+            pick_option(&opts(&["allow_once", "reject_forever"]), true),
+            Some("reject_forever")
+        );
+        // 无 reject 语义项时取首个
+        assert_eq!(
+            pick_option(&opts(&["allow_once", "ask_again"]), true),
+            Some("allow_once")
+        );
+        // 空集无兜底项
+        assert_eq!(pick_option(&[], true), None);
+    }
+
+    #[test]
+    fn pick_option_allow_prefers_allow_once_then_first() {
+        assert_eq!(
+            pick_option(&opts(&["allow_always", "ALLOW_ONCE"]), false),
+            Some("ALLOW_ONCE")
+        );
+        assert_eq!(
+            pick_option(&opts(&["allow_always", "reject_once"]), false),
+            Some("allow_always")
+        );
+        assert_eq!(pick_option(&[], false), None);
     }
 
     /// fake ACP：把收到的请求行追加写入 trace 文件并逐个应答（writer 不阻塞）。
