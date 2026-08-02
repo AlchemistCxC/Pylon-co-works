@@ -8,6 +8,7 @@
 use reqwest::Client;
 
 use super::types::MSG_TYPE_MARKDOWN;
+use super::QqChatType;
 
 use std::sync::atomic::{AtomicU32, Ordering};
 
@@ -20,8 +21,10 @@ fn msg_seq() -> u32 {
 
 /// 发送文本消息到 C2C 或群聊。
 ///
-/// chat_type: "c2c" → /v2/users/{chat_id}/messages；"group" → /v2/groups/{chat_id}/messages。
+/// chat_type: C2C → /v2/users/{chat_id}/messages；Group → /v2/groups/{chat_id}/messages。
 /// reply_to 存在时附带 msg_id（回复锚点）。msg_type 支持 MSG_TYPE_TEXT/MSG_TYPE_MARKDOWN。
+/// R14：chat_type 为枚举——非法值在类型层不可表达（FromStr 拒绝），
+/// 拼错不再可能静默走群发路径。
 // clippy 2026-08-02：8 参均为独立发送参数（client/base_url/token/chat_id/chat_type/content/reply_to/msg_type），
 // 保持显式签名（重构参数结构体收益低）。
 #[allow(clippy::too_many_arguments)]
@@ -30,16 +33,15 @@ pub async fn send_message(
     base_url: &str,
     token: &str,
     chat_id: &str,
-    chat_type: &str, // "c2c" | "group"
+    chat_type: &QqChatType,
     content: &str,
     reply_to: Option<&str>,
     msg_type: u32,
 ) -> Result<String, String> {
-    // 修复（P3）：明确枚举匹配，拼错的 chat_type 不再静默走群发路径
+    // 修复（P3）+ R14：枚举匹配，非法 chat_type 由类型系统拒绝
     let path = match chat_type {
-        "c2c" => format!("/v2/users/{chat_id}/messages"),
-        "group" => format!("/v2/groups/{chat_id}/messages"),
-        other => return Err(format!("不支持的 chat_type: {other}")),
+        QqChatType::C2C => format!("/v2/users/{chat_id}/messages"),
+        QqChatType::Group => format!("/v2/groups/{chat_id}/messages"),
     };
 
     let seq = msg_seq();
@@ -184,7 +186,7 @@ mod tests {
             &format!("http://{}", address),
             "test-token",
             "openid-123",
-            "c2c",
+            &QqChatType::C2C,
             "你好",
             Some("parent-msg"),
             0,
@@ -222,7 +224,7 @@ mod tests {
             &format!("http://{}", address),
             "test-token",
             "group-456",
-            "group",
+            &QqChatType::Group,
             "**bold**",
             None,
             2,
@@ -257,7 +259,7 @@ mod tests {
             &format!("http://{}", address),
             "t",
             "chat-1",
-            "c2c",
+            &QqChatType::C2C,
             "x",
             None,
             0,
@@ -280,7 +282,7 @@ mod tests {
             &format!("http://{}", address),
             "t",
             "chat-1",
-            "c2c",
+            &QqChatType::C2C,
             "x",
             None,
             0,
@@ -291,23 +293,5 @@ mod tests {
         assert!(error.contains("HTTP 400"));
         assert!(error.contains("{\"bad\":true}"));
         server.join().expect("server thread");
-    }
-
-    #[tokio::test]
-    async fn send_message_rejects_unknown_chat_type() {
-        let client = test_client();
-        let error = send_message(
-            &client,
-            "http://127.0.0.1:9",
-            "t",
-            "chat-1",
-            "groupp",
-            "x",
-            None,
-            0,
-        )
-        .await
-        .expect_err("拼错的 chat_type 必须报错");
-        assert!(error.contains("不支持的 chat_type: groupp"));
     }
 }

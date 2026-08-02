@@ -8,6 +8,8 @@ pub mod types;
 pub mod ws;
 
 use std::collections::HashMap;
+use std::fmt;
+use std::str::FromStr;
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
@@ -94,9 +96,47 @@ fn dead_target_expired(entry: &(String, Instant)) -> bool {
     entry.1.elapsed() >= DEAD_TARGET_TTL
 }
 
+/// QQ 目标类型（R14：字符串枚举化——parse_source / send_message 不再以裸 &str
+/// 拼路径，非法 chat_type 在类型层不可表达）。
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum QqChatType {
+    /// 私聊（qq:user:* → /v2/users/{id}/messages）。
+    C2C,
+    /// 群聊（qq:group:* → /v2/groups/{id}/messages）。
+    Group,
+}
+
+impl QqChatType {
+    /// wire 形态："c2c" / "group"（QQ API 路径段）。
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            QqChatType::C2C => "c2c",
+            QqChatType::Group => "group",
+        }
+    }
+}
+
+impl FromStr for QqChatType {
+    type Err = String;
+
+    fn from_str(value: &str) -> Result<Self, Self::Err> {
+        match value {
+            "c2c" => Ok(QqChatType::C2C),
+            "group" => Ok(QqChatType::Group),
+            other => Err(format!("不支持的 chat_type: {other}")),
+        }
+    }
+}
+
+impl fmt::Display for QqChatType {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str(self.as_str())
+    }
+}
+
 /// 入队消息：单 chat 串行发送（天然节流）。
 struct QueuedSend {
-    chat_type: String,
+    chat_type: QqChatType,
     chat_id: String,
     text: String,
     reply_to: Option<String>,
@@ -132,13 +172,18 @@ pub struct QqAdapter {
     short_circuit_warns: Mutex<HashMap<String, Instant>>,
 }
 
-/// 从 gateway source 解析 QQ 目标：`qq:group:123` → (group, 123)；`qq:user:456` → (c2c, 456)。
-pub fn parse_source(source: &str) -> Result<(&str, &str), String> {
+/// 从 gateway source 解析 QQ 目标：`qq:group:123` → (Group, 123)；`qq:user:456` → (C2C, 456)。
+pub fn parse_source(source: &str) -> Result<(QqChatType, &str), String> {
     let mut parts = source.splitn(3, ':');
     match (parts.next(), parts.next(), parts.next()) {
-        (Some("qq"), Some(kind @ ("group" | "user")), Some(id)) if !id.is_empty() => {
-            Ok((if kind == "group" { "group" } else { "c2c" }, id))
-        }
+        (Some("qq"), Some(kind @ ("group" | "user")), Some(id)) if !id.is_empty() => Ok((
+            if kind == "group" {
+                QqChatType::Group
+            } else {
+                QqChatType::C2C
+            },
+            id,
+        )),
         _ => Err(format!("无法解析 QQ source: {source}")),
     }
 }
@@ -311,7 +356,7 @@ impl PlatformAdapter for QqAdapter {
             return Err("QQ deliver 需要 tokio runtime".to_string());
         };
         let message = QueuedSend {
-            chat_type: chat_type.to_string(),
+            chat_type,
             chat_id: chat_id.to_string(),
             text: text.to_string(),
             reply_to,
@@ -609,12 +654,24 @@ gateway:
 
     #[test]
     fn parse_source_accepts_group_and_user_shapes() {
-        assert_eq!(parse_source("qq:group:123"), Ok(("group", "123")));
-        assert_eq!(parse_source("qq:user:456"), Ok(("c2c", "456")));
+        assert_eq!(parse_source("qq:group:123"), Ok((QqChatType::Group, "123")));
+        assert_eq!(parse_source("qq:user:456"), Ok((QqChatType::C2C, "456")));
         assert!(parse_source("qq:unknown:1").is_err());
         assert!(parse_source("qq:group:").is_err());
         assert!(parse_source("local").is_err());
         assert!(parse_source("wechat:group:1").is_err());
+    }
+
+    #[test]
+    fn qq_chat_type_roundtrips_via_from_str_and_as_str() {
+        // R14：wire 形态 "c2c"/"group" 与枚举互转；非法值类型层拒绝
+        assert_eq!("c2c".parse::<QqChatType>(), Ok(QqChatType::C2C));
+        assert_eq!("group".parse::<QqChatType>(), Ok(QqChatType::Group));
+        assert_eq!(QqChatType::C2C.as_str(), "c2c");
+        assert_eq!(QqChatType::Group.as_str(), "group");
+        assert_eq!(format!("{}:123", QqChatType::Group), "group:123");
+        assert!("groupp".parse::<QqChatType>().is_err());
+        assert!("".parse::<QqChatType>().is_err());
     }
 
     #[test]
