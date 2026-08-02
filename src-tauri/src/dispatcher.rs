@@ -552,6 +552,9 @@ pub(crate) fn start_notification_dispatcher<R: tauri::Runtime>(
                             break;
                         };
                         let _lifecycle_guard = reconnect_runtime.agent_lifecycle.lock().await;
+                        // R9：自动重连是 LifecycleOp 状态机的一环——经本 runtime 的
+                        // agent_lifecycle 与 switch/reconnect/平台懒启动串行（无 kill，
+                        // 不持 switch_lock；状态机定义见 lifecycle.rs 模块文档）。
                         // P2-1：拿到生命周期锁后重查"仍然需要连接"——复查 stale 与
                         // 拿锁之间，用户手动 reconnect 可能已把状态置非 Crashed 并完成
                         // 连接；此时再 do_connect_and_replace 会连续第二次连接。

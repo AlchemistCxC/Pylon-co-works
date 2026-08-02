@@ -1,4 +1,33 @@
 //! Agent 生命周期：连接/切换/registry 命令 + MCP 配置持久化（R1 拆分自 lib.rs；行为零变化）。
+//!
+//! # R9：LifecycleOp 状态机与统一串行化
+//!
+//! 生命周期操作（switch / reconnect / 自动重连 / 平台懒启动）统一走
+//! [`do_connect_and_replace`]，并按下表串行约束执行（C7 落地 switch_lock，
+//! R9 复核全部入口后整理为显式状态机文档化）：
+//!
+//! | 入口 | switch_lock | agent_lifecycle | 锁后复查 | 清理 |
+//! |------|------------|-----------------|---------|------|
+//! | `switch_agent` | ✓ | ✓（目标 runtime） | ✓ 目标状态（C7） | ✓ stop_agent_runtime(旧 active) |
+//! | `reconnect_agent` | ✓ | ✓（active runtime） | —（强制重连语义，锁已串行） | — |
+//! | 自动重连（dispatcher.rs） | —（无 kill，无交叉清理面） | ✓（本 runtime） | ✓ P2-1 锁后 stale 复查 + 每轮 active 复查 | — |
+//! | `ensure_runtime_ready`（平台懒启动，session.rs） | —（无 kill） | ✓（目标 runtime） | ✓ 双检查 | — |
+//!
+//! 状态机（状态载体 = [`AgentLifecycleStatus`]；LifecycleOp 是操作视角的命名，
+//! 不引入平行枚举——状态已由该字段承载，避免双份类型漂移）：
+//! `Idle(Disconnected)` → `Connecting` → `Connected`；`Connected` →
+//! `Reconnecting`（手动/自动重连）→ `Connected`；`Crashed`/`Error` 是
+//! 崩溃/失败终态（崩溃通知、连接失败路径进入），自动重连在 `Crashed` 上以
+//! 退避序列回到 `Reconnecting` → `Connected`。
+//!
+//! 统一序列：**取锁**（switch_lock 串行手动操作避免交叉杀进程；agent_lifecycle
+//! 串行同一 runtime 的所有连接）→ **复查**（锁后按现状决策，不盲杀在途连接）→
+//! **连接**（[`do_connect_and_replace`]，四入口共用）→ **清理**（switch 停旧
+//! active 进程）。锁序一致：switch_lock 先于 agent_lifecycle（switch/reconnect），
+//! 无锁序反转；无 kill 的入口（自动重连/懒启动）不持 switch_lock，与持锁入口
+//! 仅共享 agent_lifecycle，无死锁环。`reload_agents` 是 C6 的 registry 操作
+//! （持 active runtime 的 agent_lifecycle，仅杀被移除且非 active 的 runtime，
+//! 与 switch 的清理集合不相交），不在 R9 的 switch_lock 串行范围内。
 
 use std::sync::Arc;
 
@@ -197,6 +226,7 @@ pub(crate) async fn switch_agent<R: tauri::Runtime>(
 ) -> Result<(), PylonError> {
     let inner = state.inner();
     // C7：switch/reconnect 串行锁——并发 switch 不得交叉 kill 同一批旧进程。
+    // R9：LifecycleOp 统一序列的"取锁"步（switch_lock → agent_lifecycle，见模块文档）。
     let _switch_guard = inner.switch_lock.lock().await;
     // P3：先查 registry 确认 agent 存在，再 get_or_create——未知 agent 直接报错，
     // 不得留下幽灵 runtime（disconnected 且永不连接的空注册项）。
@@ -282,6 +312,7 @@ pub(crate) async fn reconnect_agent(
 ) -> Result<(), PylonError> {
     let inner = state.inner();
     // C7：switch/reconnect 串行锁（与 switch_agent 共用，防交叉杀进程）。
+    // R9：LifecycleOp 统一序列"取锁"步（switch_lock → agent_lifecycle，见模块文档）。
     let _switch_guard = inner.switch_lock.lock().await;
     let active_id = inner
         .active_agent
