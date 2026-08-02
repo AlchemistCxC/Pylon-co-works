@@ -876,6 +876,70 @@ for line in sys.stdin:
         );
     }
 
+    /// A7 回归：洪泛 300 条（> BROADCAST_CAP=256）后 EOF——NOTIF_AGENT_CRASHED 广播
+    /// 必然被 Lagged 丢弃（dispatcher 逐条处理期间队列溢出），崩溃信号必须经独立
+    /// watch 通道送达，自动重连才仍会触发。
+    #[tokio::test]
+    async fn flood_crash_still_triggers_auto_reconnect_via_watch() {
+        let app = tauri::test::mock_builder()
+            .build(tauri::test::mock_context(tauri::test::noop_assets()))
+            .unwrap();
+        let window = tauri::WebviewWindowBuilder::new(
+            &app,
+            "main",
+            tauri::WebviewUrl::External("https://example.com".parse().unwrap()),
+        )
+        .build()
+        .expect("mock window must build");
+
+        // 洪泛崩溃 agent：initialize 成功后连发 300 条 session/update 再退出。
+        // 300 > BROADCAST_CAP(256)——广播路径的崩溃通知必然丢失，只有 watch 通道可靠。
+        let flood_script = r#"import json,sys
+for line in sys.stdin:
+    request = json.loads(line)
+    if request.get('method') == 'initialize':
+        print(json.dumps({'jsonrpc':'2.0','id':request.get('id'),'result':{}}), flush=True)
+        for i in range(300):
+            print(json.dumps({'jsonrpc':'2.0','method':'session/update','params':{'sessionId':'flood','update':{'sessionUpdate':'agent_message_chunk','content':{'text':'x'}}}}), flush=True)
+        break
+sys.exit(0)
+"#;
+        let flood_agent = crate::test_utils::fake_acp_agent_with(
+            "fake-acp",
+            flood_script,
+            Vec::new(),
+            std::collections::HashMap::new(),
+        );
+        let initial_acp = AcpClient::connect_with_logs(&flood_agent, None)
+            .await
+            .expect("flood fake ACP must initialize");
+        let state = build_state(initial_acp, flood_agent).await;
+        let handles = AppStateHandles::from_state(&state);
+        let runtime = handles.active_runtime().expect("active runtime must exist");
+        start_notification_dispatcher(&handles, &runtime, window);
+
+        // 等待崩溃被 dispatcher 处理：状态置 Crashed（经 watch 路径，广播已丢）
+        tokio::time::timeout(std::time::Duration::from_secs(5), async {
+            loop {
+                let status = runtime
+                    .agent_runtime
+                    .lock()
+                    .map(|r| r.status)
+                    .unwrap_or(AgentLifecycleStatus::Disconnected);
+                if status == AgentLifecycleStatus::Crashed {
+                    break;
+                }
+                tokio::time::sleep(std::time::Duration::from_millis(20)).await;
+            }
+        })
+        .await
+        .expect("dispatcher must observe flood crash via watch within 5s");
+        assert!(
+            runtime.auto_reconnect_active.load(Ordering::Acquire),
+            "auto-reconnect must be scheduled on crash even after broadcast overflow"
+        );
+    }
+
     /// 核验回归：崩溃触发自动重连调度后，用户手动 reconnect 成功——
     /// 自动重连闭包复查 status!=Crashed 提前放弃时**必须释放防重入标志**，
     /// 否则下一次崩溃将永远不再自动重连。

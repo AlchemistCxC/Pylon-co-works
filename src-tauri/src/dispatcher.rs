@@ -44,11 +44,161 @@ pub(crate) fn start_notification_dispatcher<R: tauri::Runtime>(
         *task = Some(tokio::spawn(async move {
             use std::sync::atomic::Ordering;
             let mut rx = acp.lock().await.rx.resubscribe();
+            // A7：崩溃信号独立 watch 通道——broadcast 洪泛 Lagged 时 NOTIF_AGENT_CRASHED
+            // 会丢，自动重连依赖本通道（主循环 select! 双路监听，见下）。
+            let mut crashed_rx = acp.lock().await.crashed_receiver();
+            // A7：崩溃处理提取为闭包，broadcast 分支与 watch 分支共用。幂等设计：
+            // auto_reconnect_active 防重入，双通道都送达时最多多发一次同 payload 状态事件。
+            let handle_crash = || async {
+                let last_error = "ACP child process stdout closed".to_string();
+                if let Ok(mut runtime_state) = agent_runtime.lock() {
+                    runtime_state.status = AgentLifecycleStatus::Crashed;
+                    runtime_state.last_error = Some(last_error.clone());
+                }
+                let _ = pet.lock().map(|mut p| crate::pet::on_agent_crashed(&mut p));
+                // P2-4：崩溃 payload 复用 agent_status_payload（状态已置 Crashed，
+                // 读出的形状与旧手工构造一致：status=crashed/available=false/
+                // crashed=true/lastError 注入），不再双份维护同一形状。
+                let reconnect_handles = AppStateHandles {
+                    runtimes: runtimes.clone(),
+                    agents: agents.clone(),
+                    active_agent: active_agent.clone(),
+                    pet: pet.clone(),
+                    runtime_logs: runtime_logs.clone(),
+                    gateway: gateway.clone(),
+                    approval_mode: approval_mode.clone(),
+                };
+                emit_event(
+                    &window,
+                    "peri:agent-status",
+                    reconnect_handles.agent_status_payload(Some(runtime_for_reconnect.as_ref())),
+                );
+                // 自动重连：崩溃后指数退避自动拉起（最多 5 次，~62s）。
+                // 防重入：多次崩溃通知只调度一次（auto_reconnect_active）。
+                // per-runtime 语义：只重连本 runtime 绑定的 agent；用户手动
+                // reconnect 会置状态非 Crashed、手动 switch 会改变 active_agent，
+                // 循环内每轮复查后放弃。切换 agent 不会串扰其他 runtime。
+                if !runtime_for_reconnect
+                    .auto_reconnect_active
+                    .swap(true, Ordering::AcqRel)
+                {
+                    let reconnect_runtime = runtime_for_reconnect.clone();
+                    let window_for_reconnect = window.clone();
+                    tokio::spawn(async move {
+                        // 手动 switch 会 abort 本 runtime 的 dispatcher，但不会
+                        // cancel 自动重连闭包——每轮用 active_agent 复查拦截，
+                        // 防止重连成功后把 active_agent 顶回本 agent。
+                        let reconnect_agent_id = reconnect_handles
+                            .active_agent
+                            .lock()
+                            .ok()
+                            .map(|v| v.clone())
+                            .unwrap_or_default();
+                        for attempt in 1..=agent_runtime::MAX_RECONNECT_ATTEMPTS {
+                            tokio::time::sleep(std::time::Duration::from_millis(
+                                agent_runtime::reconnect_backoff_ms(attempt),
+                            ))
+                            .await;
+                            // 用户已手动 reconnect（状态不再是 Crashed）→ 放弃自动重连
+                            let still_stale = reconnect_runtime
+                                .agent_runtime
+                                .lock()
+                                .map(|r| r.status == AgentLifecycleStatus::Crashed)
+                                .unwrap_or(false);
+                            if !still_stale {
+                                // 核验修复：提前放弃也必须释放防重入标志，
+                                // 否则后续崩溃将永远不再自动重连。
+                                reconnect_runtime
+                                    .auto_reconnect_active
+                                    .store(false, Ordering::Release);
+                                return;
+                            }
+                            // 用户已 switch 到其他 agent → 放弃（不把 active_agent 顶回）
+                            let still_active = reconnect_handles
+                                .active_agent
+                                .lock()
+                                .map(|v| v.as_str() == reconnect_agent_id)
+                                .unwrap_or(false);
+                            if !still_active {
+                                reconnect_runtime
+                                    .auto_reconnect_active
+                                    .store(false, Ordering::Release);
+                                return;
+                            }
+                            let agent = reconnect_handles
+                                .agents
+                                .lock()
+                                .ok()
+                                .and_then(|a| a.get(&reconnect_agent_id).cloned());
+                            let Some(agent) = agent else {
+                                reconnect_runtime
+                                    .auto_reconnect_active
+                                    .store(false, Ordering::Release);
+                                return;
+                            };
+                            let _lifecycle_guard = reconnect_runtime.agent_lifecycle.lock().await;
+                            // P2-1：拿到生命周期锁后重查"仍然需要连接"——复查 stale 与
+                            // 拿锁之间，用户手动 reconnect 可能已把状态置非 Crashed 并完成
+                            // 连接；此时再 do_connect_and_replace 会连续第二次连接。
+                            // 手动操作（switch/reconnect）同样在锁内改状态，锁串行后
+                            // 此处必能看到其结果。
+                            let still_stale = reconnect_runtime
+                                .agent_runtime
+                                .lock()
+                                .map(|r| r.status == AgentLifecycleStatus::Crashed)
+                                .unwrap_or(false);
+                            if !still_stale {
+                                reconnect_runtime
+                                    .auto_reconnect_active
+                                    .store(false, Ordering::Release);
+                                return;
+                            }
+                            match do_connect_and_replace(
+                                &reconnect_handles,
+                                &reconnect_runtime,
+                                &window_for_reconnect,
+                                &agent,
+                                None,
+                                AgentLifecycleStatus::Reconnecting,
+                                "auto-reconnect",
+                                true,
+                                true,
+                            )
+                            .await
+                            {
+                                Ok(()) => break,
+                                Err(error) => {
+                                    log::warn!("auto-reconnect attempt {attempt} failed: {error}")
+                                }
+                            }
+                        }
+                        reconnect_runtime
+                            .auto_reconnect_active
+                            .store(false, Ordering::Release);
+                    });
+                }
+            };
+            // 订阅即查现值：崩溃发生在订阅之前（connect 成功后立刻 EOF、dispatcher
+            // 尚未启动）时 changed() 不会触发，只能靠 watch 保留的最新值兜底。
+            if *crashed_rx.borrow_and_update() {
+                handle_crash().await;
+            }
             loop {
                 if client_generation.load(Ordering::Acquire) != generation {
                     break;
                 }
-                let raw = match rx.recv().await {
+                let raw = tokio::select! {
+                    biased;
+                    // A7：watch 分支——崩溃信号不依赖 broadcast 容量，洪泛 Lagged 后仍触发
+                    changed = crashed_rx.changed() => {
+                        if changed.is_ok() && *crashed_rx.borrow_and_update() {
+                            handle_crash().await;
+                        }
+                        continue;
+                    }
+                    raw = rx.recv() => raw,
+                };
+                let raw = match raw {
                     Ok(raw) => raw,
                     Err(tokio::sync::broadcast::error::RecvError::Lagged(n)) => {
                         log::warn!("notification dispatcher lagged by {} messages", n);
@@ -60,135 +210,7 @@ pub(crate) fn start_notification_dispatcher<R: tauri::Runtime>(
                     break;
                 }
                 if raw.method.as_deref() == Some(crate::acp::NOTIF_AGENT_CRASHED) {
-                    let last_error = "ACP child process stdout closed".to_string();
-                    if let Ok(mut runtime_state) = agent_runtime.lock() {
-                        runtime_state.status = AgentLifecycleStatus::Crashed;
-                        runtime_state.last_error = Some(last_error.clone());
-                    }
-                    let _ = pet.lock().map(|mut p| crate::pet::on_agent_crashed(&mut p));
-                    // P2-4：崩溃 payload 复用 agent_status_payload（状态已置 Crashed，
-                    // 读出的形状与旧手工构造一致：status=crashed/available=false/
-                    // crashed=true/lastError 注入），不再双份维护同一形状。
-                    let reconnect_handles = AppStateHandles {
-                        runtimes: runtimes.clone(),
-                        agents: agents.clone(),
-                        active_agent: active_agent.clone(),
-                        pet: pet.clone(),
-                        runtime_logs: runtime_logs.clone(),
-                        gateway: gateway.clone(),
-                        approval_mode: approval_mode.clone(),
-                    };
-                    emit_event(
-                        &window,
-                        "peri:agent-status",
-                        reconnect_handles
-                            .agent_status_payload(Some(runtime_for_reconnect.as_ref())),
-                    );
-                    // 自动重连：崩溃后指数退避自动拉起（最多 5 次，~62s）。
-                    // 防重入：多次崩溃通知只调度一次（auto_reconnect_active）。
-                    // per-runtime 语义：只重连本 runtime 绑定的 agent；用户手动
-                    // reconnect 会置状态非 Crashed、手动 switch 会改变 active_agent，
-                    // 循环内每轮复查后放弃。切换 agent 不会串扰其他 runtime。
-                    if !runtime_for_reconnect
-                        .auto_reconnect_active
-                        .swap(true, Ordering::AcqRel)
-                    {
-                        let reconnect_runtime = runtime_for_reconnect.clone();
-                        let window_for_reconnect = window.clone();
-                        tokio::spawn(async move {
-                            // 手动 switch 会 abort 本 runtime 的 dispatcher，但不会
-                            // cancel 自动重连闭包——每轮用 active_agent 复查拦截，
-                            // 防止重连成功后把 active_agent 顶回本 agent。
-                            let reconnect_agent_id = reconnect_handles
-                                .active_agent
-                                .lock()
-                                .ok()
-                                .map(|v| v.clone())
-                                .unwrap_or_default();
-                            for attempt in 1..=agent_runtime::MAX_RECONNECT_ATTEMPTS {
-                                tokio::time::sleep(std::time::Duration::from_millis(
-                                    agent_runtime::reconnect_backoff_ms(attempt),
-                                ))
-                                .await;
-                                // 用户已手动 reconnect（状态不再是 Crashed）→ 放弃自动重连
-                                let still_stale = reconnect_runtime
-                                    .agent_runtime
-                                    .lock()
-                                    .map(|r| r.status == AgentLifecycleStatus::Crashed)
-                                    .unwrap_or(false);
-                                if !still_stale {
-                                    // 核验修复：提前放弃也必须释放防重入标志，
-                                    // 否则后续崩溃将永远不再自动重连。
-                                    reconnect_runtime
-                                        .auto_reconnect_active
-                                        .store(false, Ordering::Release);
-                                    return;
-                                }
-                                // 用户已 switch 到其他 agent → 放弃（不把 active_agent 顶回）
-                                let still_active = reconnect_handles
-                                    .active_agent
-                                    .lock()
-                                    .map(|v| v.as_str() == reconnect_agent_id)
-                                    .unwrap_or(false);
-                                if !still_active {
-                                    reconnect_runtime
-                                        .auto_reconnect_active
-                                        .store(false, Ordering::Release);
-                                    return;
-                                }
-                                let agent = reconnect_handles
-                                    .agents
-                                    .lock()
-                                    .ok()
-                                    .and_then(|a| a.get(&reconnect_agent_id).cloned());
-                                let Some(agent) = agent else {
-                                    reconnect_runtime
-                                        .auto_reconnect_active
-                                        .store(false, Ordering::Release);
-                                    return;
-                                };
-                                let _lifecycle_guard =
-                                    reconnect_runtime.agent_lifecycle.lock().await;
-                                // P2-1：拿到生命周期锁后重查"仍然需要连接"——复查 stale 与
-                                // 拿锁之间，用户手动 reconnect 可能已把状态置非 Crashed 并完成
-                                // 连接；此时再 do_connect_and_replace 会连续第二次连接。
-                                // 手动操作（switch/reconnect）同样在锁内改状态，锁串行后
-                                // 此处必能看到其结果。
-                                let still_stale = reconnect_runtime
-                                    .agent_runtime
-                                    .lock()
-                                    .map(|r| r.status == AgentLifecycleStatus::Crashed)
-                                    .unwrap_or(false);
-                                if !still_stale {
-                                    reconnect_runtime
-                                        .auto_reconnect_active
-                                        .store(false, Ordering::Release);
-                                    return;
-                                }
-                                match do_connect_and_replace(
-                                    &reconnect_handles,
-                                    &reconnect_runtime,
-                                    &window_for_reconnect,
-                                    &agent,
-                                    None,
-                                    AgentLifecycleStatus::Reconnecting,
-                                    "auto-reconnect",
-                                    true,
-                                    true,
-                                )
-                                .await
-                                {
-                                    Ok(()) => break,
-                                    Err(error) => log::warn!(
-                                        "auto-reconnect attempt {attempt} failed: {error}"
-                                    ),
-                                }
-                            }
-                            reconnect_runtime
-                                .auto_reconnect_active
-                                .store(false, Ordering::Release);
-                        });
-                    }
+                    handle_crash().await;
                     continue;
                 }
                 // B9 权限审批：agent 主动 request_permission（带 id 请求，客户端必须应答）。

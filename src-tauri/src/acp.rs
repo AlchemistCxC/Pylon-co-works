@@ -11,7 +11,7 @@ use std::io::{BufRead, BufReader, BufWriter, Write};
 use std::process::{Child, Command, Stdio};
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
-use tokio::sync::{broadcast, mpsc, oneshot};
+use tokio::sync::{broadcast, mpsc, oneshot, watch};
 
 // ── Constants ──
 
@@ -353,6 +353,13 @@ pub struct AcpClient {
     pub rx: broadcast::Receiver<RawMessage>,
     /// Set when the child process exits unexpectedly.
     pub crashed: Arc<AtomicBool>,
+    /// A7：EOF 崩溃信号独立 watch 通道（保留最新值，broadcast 洪泛 Lagged 丢消息
+    /// 时 NOTIF_AGENT_CRASHED 可能丢失，本通道是自动重连的可靠信号源）。
+    /// reader 线程 EOF 时 `send(true)`；dispatcher 经 [`Self::crashed_receiver`] 订阅。
+    crashed_watch: watch::Sender<bool>,
+    /// 保持通道开放的兜底接收端：reader 线程在外部订阅之前崩溃时，`send` 不会因
+    /// "无接收者"失败——订阅方经 `has_changed`/`borrow` 仍能读到 true。
+    _crashed_watch_rx: watch::Receiver<bool>,
 }
 #[derive(Debug, Clone)]
 pub struct RawMessage {
@@ -542,6 +549,7 @@ impl AcpClient {
         let (write_tx, write_rx) = mpsc::channel(1);
         drop(write_rx);
         let (_tx, rx) = broadcast::channel(BROADCAST_CAP);
+        let (crashed_watch, crashed_watch_rx) = watch::channel(false);
         Self {
             child: ManagedChild::empty(),
             write_tx,
@@ -549,6 +557,8 @@ impl AcpClient {
             pending: Arc::new(std::array::from_fn(|_| Mutex::new(HashMap::new()))),
             rx,
             crashed: Arc::new(AtomicBool::new(false)),
+            crashed_watch,
+            _crashed_watch_rx: crashed_watch_rx,
         }
     }
 
@@ -772,6 +782,12 @@ impl AcpClient {
         self.crashed.load(Ordering::Relaxed)
     }
 
+    /// A7：订阅崩溃信号（EOF 后为 true）。watch 保留最新值——订阅晚于崩溃时
+    /// `has_changed`/`borrow` 仍能读到 true，不依赖时序。
+    pub fn crashed_receiver(&self) -> watch::Receiver<bool> {
+        self.crashed_watch.subscribe()
+    }
+
     #[cfg(test)]
     fn child_id(&self) -> Option<u32> {
         self.child.child.as_ref().map(Child::id)
@@ -904,10 +920,12 @@ impl AcpClient {
                     Arc::new(std::array::from_fn(|_| Mutex::new(HashMap::new())));
                 let (tx, rx) = broadcast::channel(BROADCAST_CAP);
                 let crashed = Arc::new(AtomicBool::new(false));
+                let (crashed_watch, crashed_watch_rx) = watch::channel(false);
 
                 let pending_clone = pending.clone();
                 let tx_clone = tx.clone();
                 let crashed_reader = crashed.clone();
+                let crashed_watch_reader = crashed_watch.clone();
                 let stdout_logs = runtime_logs.clone();
                 std::thread::spawn(move || {
                     for line in stdout.lines() {
@@ -970,6 +988,10 @@ impl AcpClient {
                         }
                     }
                     crashed_reader.store(true, Ordering::Relaxed);
+                    // A7：EOF 崩溃信号经 watch 通道可靠投递——broadcast 在洪泛
+                    // Lagged 时会丢 NOTIF_AGENT_CRASHED，watch 保留最新值不丢，
+                    // 自动重连依赖此信号（dispatcher select! 双路监听）。
+                    let _ = crashed_watch_reader.send(true);
                     let drained = Self::drain_pending(&pending_clone);
                     log::warn!(
                         "ACP: drained {} pending requests after stdout closed",
@@ -1002,6 +1024,8 @@ impl AcpClient {
                     pending,
                     rx,
                     crashed,
+                    crashed_watch,
+                    _crashed_watch_rx: crashed_watch_rx,
                 };
                 // Initialize——clientCapabilities 支持 per-agent 覆盖（差异字典外置，
                 // agents.yaml `acp.initialize_caps`）；缺省 = 统一默认（tokenStats +
@@ -1483,6 +1507,41 @@ sys.exit(0)
             client.is_err(),
             "initialize must fail when fake ACP closes without a response"
         );
+    }
+
+    #[tokio::test]
+    async fn crashed_watch_signals_eof_after_broadcast_overflow() {
+        // A7：洪泛 300 条（> BROADCAST_CAP=256）后 EOF——NOTIF_AGENT_CRASHED 广播
+        // 必然被 Lagged 丢弃；崩溃信号必须经独立 watch 通道仍可靠送达（watch 保留
+        // 最新值：订阅晚于崩溃时 has_changed 直接可读，订阅早于崩溃时 changed 触发）。
+        let script = r#"import json,sys
+for line in sys.stdin:
+    request = json.loads(line)
+    if request.get('method') == 'initialize':
+        print(json.dumps({'jsonrpc':'2.0','id':request.get('id'),'result':{}}), flush=True)
+        for i in range(300):
+            print(json.dumps({'jsonrpc':'2.0','method':'session/update','params':{'sessionId':'flood','update':{'sessionUpdate':'agent_message_chunk','content':{'text':'x'}}}}), flush=True)
+        break
+sys.exit(0)
+"#;
+        let agent = crate::test_utils::fake_acp_agent("fake-acp-flood-crash", script);
+        let client = AcpClient::connect_with_logs(&agent, None)
+            .await
+            .expect("flood fake ACP must initialize");
+        let mut crashed_rx = client.crashed_receiver();
+        if crashed_rx.has_changed().unwrap_or(false) {
+            // 崩溃发生在订阅之前（connect 成功后立刻 EOF）——watch 保留最新值，直接可读
+        } else {
+            tokio::time::timeout(std::time::Duration::from_secs(5), crashed_rx.changed())
+                .await
+                .expect("watch must signal crash within 5s")
+                .expect("watch channel must stay open");
+        }
+        assert!(
+            *crashed_rx.borrow_and_update(),
+            "crashed watch value must be true after EOF"
+        );
+        assert!(client.is_crashed());
     }
 
     #[tokio::test]
