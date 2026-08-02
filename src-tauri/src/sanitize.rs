@@ -70,10 +70,13 @@ pub(crate) fn contains_sensitive_pattern(lower: &str) -> bool {
 }
 
 /// R19：裸 secret 前缀形态（sk-/ghp_/xoxb-/akia/eyj 等）检测。
+/// S1：词边界锚定——`disk-usage`/`task-123`/`heyjohn` 等含子串的正常词不再误伤；
+/// 调用方已 lower 化（sanitize_value_content/sanitize_message），故保持原大小写语义。
 pub(crate) fn contains_bare_secret(lower: &str) -> bool {
     BARE_SECRET_PATTERN
         .get_or_init(|| {
-            Regex::new(r"sk-|ghp_|xoxb-|akia|eyj").expect("BARE_SECRET_PATTERN must compile")
+            Regex::new(r"(^|[^a-z0-9])(sk-|ghp_|xoxb-|akia|eyj)")
+                .expect("BARE_SECRET_PATTERN must compile")
         })
         .is_match(lower)
 }
@@ -252,5 +255,23 @@ mod tests {
         assert_eq!(sanitized[0]["password"], json!(REDACTED));
         assert_eq!(sanitized[1], json!(REDACTED));
         assert_eq!(sanitized[2]["a"], json!(1));
+    }
+
+    #[test]
+    fn bare_secret_pattern_respects_word_boundaries() {
+        for word in ["disk-usage", "task-123", "risk-2024", "heyjohn", "zakiah"] {
+            assert_eq!(sanitize_value_content(word), word, "{word} 不得被误伤");
+            assert!(
+                !contains_bare_secret(&word.to_ascii_lowercase()),
+                "{word} 不得命中"
+            );
+        }
+        for secret in ["sk-abc123", "Bearer sk-abc123", "ghp_xxx", "eyJhbGci"] {
+            assert_eq!(
+                sanitize_value_content(secret),
+                REDACTED,
+                "{secret} 必须命中"
+            );
+        }
     }
 }
