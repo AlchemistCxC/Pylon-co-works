@@ -156,21 +156,29 @@ where
         .collect()
 }
 
+/// O28：生效配置路径进程级缓存——有效路径在进程生命周期内不变，避免每次调用
+/// 重复 stat exe 旁 agents.yaml（reload_gateway/load 高频路径）。
+static EFFECTIVE_CONFIG_PATH: std::sync::OnceLock<Option<PathBuf>> = std::sync::OnceLock::new();
+
 /// 实际生效的配置路径：优先 `PYLON_AGENTS_CONFIG`，其次 exe 同目录的
 /// `agents.yaml`（发行包可热改），否则回退编译期嵌入（返回 None）。
 pub fn effective_config_path() -> Option<PathBuf> {
-    if let Some(path) = config_path() {
-        return Some(path);
-    }
-    if let Ok(exe) = std::env::current_exe() {
-        if let Some(dir) = exe.parent() {
-            let nearby = dir.join("agents.yaml");
-            if nearby.is_file() {
-                return Some(nearby);
+    EFFECTIVE_CONFIG_PATH
+        .get_or_init(|| {
+            if let Some(path) = config_path() {
+                return Some(path);
             }
-        }
-    }
-    None
+            if let Ok(exe) = std::env::current_exe() {
+                if let Some(dir) = exe.parent() {
+                    let nearby = dir.join("agents.yaml");
+                    if nearby.is_file() {
+                        return Some(nearby);
+                    }
+                }
+            }
+            None
+        })
+        .clone()
 }
 
 pub fn load() -> Result<HashMap<String, AgentDef>, String> {
