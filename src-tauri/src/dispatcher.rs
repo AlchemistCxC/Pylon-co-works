@@ -241,27 +241,26 @@ pub(crate) fn start_notification_dispatcher<R: tauri::Runtime>(
                             agent_runtime::reconnect_backoff_ms(attempt),
                         ))
                         .await;
-                        // 用户已手动 reconnect（状态不再是 Crashed）→ 放弃自动重连
-                        let still_stale = reconnect_runtime
-                            .agent_runtime
-                            .lock()
-                            .map(|r| r.status == AgentLifecycleStatus::Crashed)
-                            .unwrap_or(false);
-                        if !still_stale {
+                        // 用户已手动 reconnect（状态非 Crashed）或已 switch（active_agent
+                        // 已换）→ 放弃自动重连。两读在同一锁持有期内完成，消除
+                        // "已复查 stale、尚未复查 active"之间的切换窗口。
+                        let (still_stale, still_active) = {
+                            let runtime_guard = reconnect_runtime
+                                .agent_runtime
+                                .lock()
+                                .unwrap_or_else(|p| p.into_inner());
+                            let active_guard = reconnect_handles
+                                .active_agent
+                                .lock()
+                                .unwrap_or_else(|p| p.into_inner());
+                            (
+                                runtime_guard.status == AgentLifecycleStatus::Crashed,
+                                active_guard.as_str() == reconnect_agent_id,
+                            )
+                        };
+                        if !(still_stale && still_active) {
                             // 核验修复：提前放弃也必须释放防重入标志，
                             // 否则后续崩溃将永远不再自动重连。
-                            reconnect_runtime
-                                .auto_reconnect_active
-                                .store(false, Ordering::Release);
-                            return;
-                        }
-                        // 用户已 switch 到其他 agent → 放弃（不把 active_agent 顶回）
-                        let still_active = reconnect_handles
-                            .active_agent
-                            .lock()
-                            .map(|v| v.as_str() == reconnect_agent_id)
-                            .unwrap_or(false);
-                        if !still_active {
                             reconnect_runtime
                                 .auto_reconnect_active
                                 .store(false, Ordering::Release);
