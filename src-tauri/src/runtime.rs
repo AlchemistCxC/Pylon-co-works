@@ -6,7 +6,9 @@
 
 use std::collections::HashMap;
 use std::sync::atomic::{AtomicBool, AtomicU64};
-use std::sync::{Arc, Mutex, RwLock};
+use std::sync::{Arc, Mutex};
+
+use dashmap::DashMap;
 
 use crate::acp::AcpClient;
 use crate::agent_runtime::AgentRuntimeState;
@@ -47,59 +49,49 @@ impl AgentRuntime {
 }
 
 /// 多 agent 运行时注册表：agent_id → AgentRuntime。
+///
+/// DashMap 分片锁：entry 原子单实例创建、get/iter 免整表锁、
+/// 无 std RwLock poison 面（W1-R1）。
 pub struct AgentRuntimeManager {
-    runtimes: RwLock<HashMap<String, Arc<AgentRuntime>>>,
+    runtimes: DashMap<String, Arc<AgentRuntime>>,
 }
 
 impl AgentRuntimeManager {
     pub fn new() -> Self {
         Self {
-            runtimes: RwLock::new(HashMap::new()),
+            runtimes: DashMap::new(),
         }
     }
 
     pub fn insert(&self, agent_id: String, runtime: Arc<AgentRuntime>) {
-        // P3：poison 不再静默吞掉写入——记录日志后恢复锁继续写入
-        // （丢弃写入会让该 agent 的 runtime 凭空消失，恢复语义更安全）。
-        let mut map = self.runtimes.write().unwrap_or_else(|poisoned| {
-            log::warn!("AgentRuntimeManager runtimes 锁中毒：insert 恢复后继续写入");
-            poisoned.into_inner()
-        });
-        map.insert(agent_id, runtime);
+        self.runtimes.insert(agent_id, runtime);
     }
 
     /// 获取或创建 agent 的 runtime（switch/reconnect 懒启动路径）。
-    /// 并发重复调用只会创建一个实例（entry API 保证单实例）。
+    /// 并发重复调用只会创建一个实例（DashMap entry API 保证原子单实例）。
     pub fn get_or_create(&self, agent_id: &str) -> Arc<AgentRuntime> {
-        // P3：poison 分支与正常分支合并为同一 entry 逻辑（原实现复制了一份），
-        // 中毒时记录日志后恢复。
-        let mut map = self.runtimes.write().unwrap_or_else(|poisoned| {
-            log::warn!("AgentRuntimeManager runtimes 锁中毒：恢复后继续");
-            poisoned.into_inner()
-        });
-        map.entry(agent_id.to_string())
+        self.runtimes
+            .entry(agent_id.to_string())
             .or_insert_with(AgentRuntime::new_disconnected)
+            .value()
             .clone()
     }
 
     pub fn get(&self, agent_id: &str) -> Option<Arc<AgentRuntime>> {
-        self.runtimes.read().ok()?.get(agent_id).cloned()
+        self.runtimes.get(agent_id).map(|r| r.value().clone())
     }
 
     /// 全部 runtime（会话生命周期 watcher / gateway_status 遍历用）。
     pub fn all(&self) -> Vec<Arc<AgentRuntime>> {
-        self.runtimes
-            .read()
-            .map(|m| m.values().cloned().collect())
-            .unwrap_or_default()
+        self.runtimes.iter().map(|r| r.value().clone()).collect()
     }
 
     /// 全部 runtime 带 agent_id（B2 Inspector 完整版 per-agent 聚合用）。
     pub fn all_with_ids(&self) -> Vec<(String, Arc<AgentRuntime>)> {
         self.runtimes
-            .read()
-            .map(|m| m.iter().map(|(id, r)| (id.clone(), r.clone())).collect())
-            .unwrap_or_default()
+            .iter()
+            .map(|e| (e.key().clone(), e.value().clone()))
+            .collect()
     }
 }
 
