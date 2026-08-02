@@ -34,6 +34,8 @@ const MAX_QUICK_DISCONNECTS: u32 = 3;
 const RATE_LIMIT_DELAY: u64 = 60;
 /// 连续限流断开超过该次数后停止重连（防 60s 无限重试）。
 const MAX_RATE_LIMITS: u32 = 5;
+/// 连续帧解析失败超过该次数后断开连接（防止格式错乱的流无限悬挂，O47）。
+const MAX_PARSE_FAILURES: u32 = 8;
 /// 等待服务器 Hello 的最长时间：半开连接（平台静默失效）超时后走统一重连路径。
 const HELLO_TIMEOUT: Duration = Duration::from_secs(60);
 
@@ -352,6 +354,8 @@ async fn run_connection(
     // 超过 2 个心跳间隔未收到 ACK 视为半死，走统一重连路径。
     let mut last_ack_at = tokio::time::Instant::now();
     let ack_timeout = heartbeat_interval * 2;
+    // 帧解析失败计数：任意成功帧清零；超过 MAX_PARSE_FAILURES 断开连接。
+    let mut parse_fail_streak = 0u32;
 
     loop {
         tokio::select! {
@@ -371,7 +375,9 @@ async fn run_connection(
                         last_inbound = tokio::time::Instant::now();
                         match msg {
                             Message::Text(text) => {
-                                if let Ok(event) = serde_json::from_str::<QqEvent>(&text) {
+                                match serde_json::from_str::<QqEvent>(&text) {
+                                    Ok(event) => {
+                                    parse_fail_streak = 0;
                                     let t = event.t.as_deref().unwrap_or("");
                                     let op = event.op;
 
@@ -426,6 +432,19 @@ async fn run_connection(
                                             }
                                             Ok(None) => log::debug!("QQ WS: 丢弃消息 {}（重放/白名单）", dispatch.msg_id),
                                             Err(error) => log::warn!("QQ WS: ingest 失败: {error}"),
+                                        }
+                                    }
+                                    }
+                                    Err(error) => {
+                                        parse_fail_streak += 1;
+                                        let preview: String = text.chars().take(200).collect();
+                                        log::warn!(
+                                            "QQ WS: 帧解析失败 ({parse_fail_streak} 次): {error}: {preview}"
+                                        );
+                                        if parse_fail_streak >= MAX_PARSE_FAILURES {
+                                            return Err(format!(
+                                                "连续 {parse_fail_streak} 帧解析失败"
+                                            ));
                                         }
                                     }
                                 }
