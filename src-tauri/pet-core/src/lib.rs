@@ -603,6 +603,8 @@ impl PetState {
     /// v2：事件入口——先结算需求衰减（时间戳），再记录窗口事件、应用收益表、
     /// 执行 HSM 转移（设计书 §5 T1-T8）。
     pub fn apply(&mut self, event: AiEvent, now_ms: u64) {
+        // O54：时段一次计算，事件内复用（night_bond/record_night_visit 收 part 参数）
+        let part = self.day_part(now_ms);
         self.settle(now_ms);
         self.visit(now_ms);
         // M7 审查修复：活动时间戳——除轮询心跳（Visit）与入睡动作（Sleepy）外的
@@ -643,9 +645,8 @@ impl PetState {
                 self.loneliness = self.loneliness.saturating_sub(15);
                 self.happiness = (self.happiness as u16 + 1).min(100) as u8;
                 // M8：午夜陪伴——Night 时段发消息 bond ×1.5
-                self.gain_bond(self.night_bond(now_ms, 1));
-                self.record_night_visit(now_ms);
-                let part = self.day_part(now_ms);
+                self.gain_bond(self.night_bond(part, 1));
+                self.record_night_visit(part);
                 self.msg = Some(lines::pick(
                     lines::LineKey::UserSent,
                     &mut self.line_idx,
@@ -660,7 +661,6 @@ impl PetState {
                 if self.first_chunk_at_ms.is_none() {
                     self.first_chunk_at_ms = Some(now_ms);
                     // mood 由 derive_mood 推导
-                    let part = self.day_part(now_ms);
                     self.msg = Some(lines::pick(
                         lines::LineKey::FirstChunk,
                         &mut self.line_idx,
@@ -689,7 +689,6 @@ impl PetState {
                     ));
                 }
                 self.push_event(RecentEvent::Done);
-                let part = self.day_part(now_ms);
                 self.msg = Some(lines::pick(lines::LineKey::Done, &mut self.line_idx, part));
                 // M10：稀有发现掉落（1% + 24h 冷却；任务完成是掉落时机之一）
                 self.maybe_drop_cosmetic(now_ms, rand::rng().random_range(0..1000u32));
@@ -704,7 +703,6 @@ impl PetState {
                 self.loneliness = (self.loneliness as u16 + 5).min(100) as u8;
                 // mood 由 derive_mood 推导
                 self.push_event(RecentEvent::Failed);
-                let part = self.day_part(now_ms);
                 self.msg = Some(lines::pick(
                     lines::LineKey::Failed,
                     &mut self.line_idx,
@@ -737,7 +735,6 @@ impl PetState {
                                 until_ms: now_ms + 30_000,
                             });
                         }
-                        let part = self.day_part(now_ms);
                         self.msg = Some(lines::pick(
                             lines::LineKey::FriendStart,
                             &mut self.line_idx,
@@ -809,7 +806,6 @@ impl PetState {
                 self.stats.dazes = self.stats.dazes.saturating_add(1);
                 self.fun = (self.fun as u16 + 5).min(100) as u8;
                 self.push_event(RecentEvent::Timeout);
-                let part = self.day_part(now_ms);
                 self.msg = Some(lines::pick(lines::LineKey::Dazed, &mut self.line_idx, part));
             }
             AiEvent::CodeSeen => {
@@ -821,13 +817,12 @@ impl PetState {
                 self.fun = (self.fun as u16 + 2).min(100) as u8;
                 self.loneliness = self.loneliness.saturating_sub(15);
                 // M8：午夜陪伴——Night 时段戳一戳 bond ×1.5
-                self.reward_interaction(now_ms, self.night_bond(now_ms, 1));
-                self.record_night_visit(now_ms);
+                self.reward_interaction(now_ms, self.night_bond(part, 1));
+                self.record_night_visit(part);
                 // C13：戳也是互动——刷新睡眠判定基准（防 energy≤15 时持续互动被 T1/T8 误入睡）
                 self.last_interaction_at_ms = now_ms;
                 // mood 由 derive_mood 推导
                 self.push_event(RecentEvent::Poke);
-                let part = self.day_part(now_ms);
                 self.msg = Some(lines::pick(lines::LineKey::Poke, &mut self.line_idx, part));
             }
             AiEvent::Feed => {
@@ -861,13 +856,12 @@ impl PetState {
                 // 该公式在 amount>1 时才体现加成差异。
                 let base_bond = 1_u32;
                 let greed_bond = (100 + self.traits.greed as u32) * base_bond / 100;
-                self.reward_interaction(now_ms, self.night_bond(now_ms, greed_bond));
-                self.record_night_visit(now_ms);
+                self.reward_interaction(now_ms, self.night_bond(part, greed_bond));
+                self.record_night_visit(part);
                 // C13：喂食也是互动——刷新睡眠判定基准（防 energy≤15 时持续互动被 T1/T8 误入睡）
                 self.last_interaction_at_ms = now_ms;
                 // mood 由 derive_mood 推导
                 self.push_event(RecentEvent::Feed);
-                let part = self.day_part(now_ms);
                 self.msg = Some(lines::pick(lines::LineKey::Feed, &mut self.line_idx, part));
             }
             AiEvent::Play => {
@@ -890,17 +884,15 @@ impl PetState {
                 self.happiness = (self.happiness as u16 + 4).min(100) as u8;
                 if play_cooled {
                     // M8：午夜陪伴——Night 时段玩耍 bond ×1.5
-                    self.gain_bond(self.night_bond(now_ms, 3));
+                    self.gain_bond(self.night_bond(part, 3));
                 }
-                self.record_night_visit(now_ms);
+                self.record_night_visit(part);
                 // mood 由 derive_mood 推导
                 self.push_event(RecentEvent::Play);
-                let part = self.day_part(now_ms);
                 self.msg = Some(lines::pick(lines::LineKey::Play, &mut self.line_idx, part));
             }
             AiEvent::Sleepy => {
                 self.machine = PetMachineState::Asleep;
-                let part = self.day_part(now_ms);
                 self.msg = Some(lines::pick(lines::LineKey::Sleep, &mut self.line_idx, part));
             }
             AiEvent::AgentConnected => {
@@ -926,7 +918,6 @@ impl PetState {
             let idle_for = now_ms.saturating_sub(self.last_interaction_at_ms);
             if self.energy <= 15 && (idle_for >= 30_000 || self.energy == 0) {
                 self.machine = PetMachineState::Asleep;
-                let part = self.day_part(now_ms);
                 self.msg = Some(lines::pick(lines::LineKey::Sleep, &mut self.line_idx, part));
             }
         }
@@ -1096,8 +1087,9 @@ impl PetState {
 
     /// M8 午夜陪伴（设计书 §13.5.5 预埋机制）：Night 时段互动 bond 收益 ×1.5
     /// （向上取整，至少 +1）。只用于真实互动（UserSent/Poke/Feed/Play）。
-    fn night_bond(&self, now_ms: u64, amount: u32) -> u32 {
-        if self.day_part(now_ms) == DayPart::Night {
+    /// O54：part 由调用方（apply 顶部）一次计算后传入。
+    fn night_bond(&self, part: DayPart, amount: u32) -> u32 {
+        if part == DayPart::Night {
             (amount * 3).div_ceil(2)
         } else {
             amount
@@ -1105,8 +1097,9 @@ impl PetState {
     }
 
     /// M9：深夜互动计数（night_visits 成就条件）——真实互动且 Night 时段。
-    fn record_night_visit(&mut self, now_ms: u64) {
-        if self.day_part(now_ms) == DayPart::Night {
+    /// O54：part 由调用方（apply 顶部）一次计算后传入。
+    fn record_night_visit(&mut self, part: DayPart) {
+        if part == DayPart::Night {
             self.stats.night_visits = self.stats.night_visits.saturating_add(1);
         }
     }
