@@ -38,8 +38,8 @@ for (const field of spinnerFields) {
   check(new RegExp(`\\b${field}\\b`).test(themeType), `ThemeSettings missing ${field}`)
 }
 
-// Defaults must initialize every field, including the values used by migration fallback.
-const defaults = section(store, 'export const DEFAULTS: ThemeSettings = {', '\n}\n\nexport const useStore')
+// Defaults must initialize every field（DEFAULTS 由 THEME_DEFAULTS 派生，真值源在 defs）。
+const defaults = section(themeFields, 'export const THEME_DEFAULTS:', '')
 for (const field of spinnerFields) {
   check(new RegExp(`\\b${field}\\s*:`).test(defaults), `DEFAULTS missing ${field}`)
 }

@@ -8,6 +8,7 @@ import { normalizeThemeMigrationState } from './themeMigration'
 import { markZoneCustom } from './themePresetState'
 import { ZONES } from './themeFields'
 import { clampCcHeight, resolveVisibleStatusWidgetCount } from './ccHeightState'
+import { THEME_DEFAULTS } from './themeFieldDefs'
 import type { CustomPreset } from './customPresets'
 import { useIdentityStore } from './identityStore'
 import type { Profile } from './identityStore'
@@ -99,48 +100,20 @@ type ThemeState = ThemeSettings & {
   removeCustomPreset: (id: string) => void
 }
 
+/**
+ * DEFAULTS 由 defs 派生（THEME_DEFAULTS 标量默认值）+
+ * 对象/复合字段（ccLayout/ccHidden/ccScale/META 路由）保留显式声明。
+ * 加标量字段：defs 加声明 + THEME_DEFAULTS 加默认值即可，此处自动。
+ */
 export const DEFAULTS: ThemeSettings = {
-  accent: '#3b82f6',
-  showTabBar: true, showSidebar: true, showPet: true,
-  transparency: 0.85, bgBlur: 16, globalFont: 'system', globalFontSize: 18, globalBgImage: '', globalBgColor: '#e8e8ec', uiScheme: 'light',
-  sidebarBg: 'rgba(0,0,0,0.02)', sidebarBgImage: '', sidebarWidth: 250, sidebarTextColor: 'rgba(0,0,0,0.85)', sidebarNameSize: 14, sidebarGroupSize: 12,
-  chatBg: '', chatBgImage: '', chatFont: 'mono', chatFontSize: 15, chatLineHeight: 1.4, chatTextColor: 'rgba(0,0,0,0.85)', chatCodeColor: '#b47814', chatCodeBg: 'rgba(0,0,0,0.03)',
-  synKeyword: '#b48ead', synString: '#96b5b4', synComment: '#65737e', synLiteral: '#d08770', synEntity: '#ebcb8b', synFunction: '#8fa1b3',
-  synVariable: '#c0c5ce', synProperty: '#c0c5ce', synRegex: '#d08770', synMarkupHeading: '#65737e', synCoReference: '#65737e', synSupport: '#8fa1b3',
-  toolOk: '#4EBA65', toolRun: '#93A5FF', toolErr: '#FF6B80', toolNameColor: 'rgba(0,0,0,0.85)', toolSummaryColor: 'rgba(0,0,0,0.40)', userTagBg: 'rgba(168,85,247,0.08)', userTagText: '#a855f7',
-  diffAdded: '#4EBA65', diffRemoved: '#FF6B80',
-  toolIndicatorGlow: 0, toolIndicatorGlowColor: '',
-  toolConnectorMode: 'none', toolConnectorColor: 'rgba(0,0,0,0.12)',
-  toolConnectorStyle: 'solid', toolConnectorWidth: 2, toolConnectorOpacity: 1,
-  inputBg: 'rgba(0,0,0,0.02)', inputBgImage: '', inputTextColor: 'rgba(0,0,0,0.85)', inputPlaceholder: 'rgba(0,0,0,0.28)', inputSendBg: 'rgba(0,0,0,0.10)', inputFocusBorder: 'rgba(0,0,0,0.22)', inputFontSize: 17, inputMinHeight: 56,
-  inputMode: 'cli', inputVariant: 'cli', inputShowPlaceholder: true, inputShowHistoryHint: true, inputSubmitButtonMode: 'inline', cliLineWidth: 2, cliLineColor: '', cliTextColor: '', cliPromptColor: '', cliLinePadding: 6, cliContentOffsetY: 0,
-  cliHintMode: 'full',
-  statusBg: 'transparent', statusBgImage: '', ekgWidth: 150, ekgFontSize: 16, ekgGreen: '#4EBA65', ekgYellow: '#FFC107', ekgRed: '#FF6B80', pillBg: '#373737', pillText: '#999999', prismOnColor: '#4EBA65',
-  ekgLineWidth: 3, ekgAmplitudeMax: 10, ekgSpeedBase: 0.5, ekgSpeedMax: 2.0,
-  barTrackColor: 'rgba(0,0,0,0.18)', barFillColor: '#4EBA65', barFillFollow: true, barHeight: 10,
-  ekgLeftColor: 'rgba(0,0,0,0.35)', ekgMovingColor: '', ekgConsumedColor: 'rgba(0,0,0,0.08)', tokenDisplay: 'ekg',
-  rightBg: 'rgba(0,0,0,0.02)', rightBgImage: '', rightWidth: 260,
-  sidebarTransparency: 1, sidebarBlur: 0, chatTransparency: 1, chatBlur: 0, rightTransparency: 1, rightBlur: 0,
-  userName: '', userPrefix: '❯', userColor: '',
-  toolIndicator: '●',
-  spinnerFramePreset: 'sparkles', spinnerCustomFrames: '',
-  spinnerVerbSet: 'zh', spinnerCustomVerbs: '',
-  spinnerDoneMarker: '✓', spinnerCancelledMarker: '■', spinnerErrorMarker: '!',
-  spinnerDoneMarkerMode: 'custom', spinnerCancelledMarkerMode: 'custom', spinnerErrorMarkerMode: 'custom', spinnerIntervalMs: 120,
-  spinnerColor: '', spinnerSize: 14,
-  msgStyle: 'terminal', msgFont: 'mono', msgTextColor: '', msgLineHeight: 1.8,
-  messageLayout: 'classic', footerLayout: 'free', cliOverflowMode: 'fixed-scroll',
-  ccHeight: 150, ccBgHeight: 150, ccBg: 'transparent', ccBgImage: '', ccStatusFontSize: 14,
-  ccStyle: 'wave',
-  ccVariant: 'terminal',
-  modelVariant: 'dropdown', modeVariant: 'pill', sendVariant: 'icon', attachVariant: 'icon',
-  modeAutoColor: '#FFC107', modeEditColor: '#A2A9E4',
-  ccHidden: [], ccLayout: cloneCcLayout(DEFAULT_CC_LAYOUT),
+  ...THEME_DEFAULTS,
+  ccHidden: [],
+  ccLayout: cloneCcLayout(DEFAULT_CC_LAYOUT),
   ccEditMode: false,
   ccScale: {},
   activePreset: { global: '', layout: '', sidebar: '', chat: '', cc: '', right: '' },
   dirty: { global: false, layout: false, sidebar: false, chat: false, cc: false, right: false },
-}
+} as unknown as ThemeSettings
 
 export const useStore = create<ThemeState>()(persist(
   (set, get) => ({
