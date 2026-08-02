@@ -82,6 +82,21 @@ pub(crate) fn format_export_markdown(peri_id: &str, messages: &[serde_json::Valu
     markdown
 }
 
+/// 导出路径父目录检查：裸文件名（`parent()` 为 `Some("")`）落在当前工作目录，
+/// 跳过存在性检查——由 `write_export_atomically` 的 `create_new` 原子写兜底报错
+/// （优化-10：修复裸文件名恒报"导出目录不存在"）。
+fn check_export_parent(output: &std::path::Path) -> Result<(), PylonError> {
+    if let Some(parent) = output.parent() {
+        if !parent.as_os_str().is_empty() && !parent.is_dir() {
+            return Err(PylonError::Protocol(format!(
+                "export output directory does not exist: {}",
+                parent.display()
+            )));
+        }
+    }
+    Ok(())
+}
+
 /// 原子写导出文件：`create_new` 直接占用目标（已存在拒绝，防覆盖）。
 /// C2：消除 exists 检查 + temp + rename 的 TOCTOU 窗口（Unix rename 覆盖已存在文件）。
 pub(crate) fn write_export_atomically(
@@ -146,14 +161,7 @@ pub(crate) async fn export_session(
             output.display()
         )));
     }
-    if let Some(parent) = output.parent() {
-        if !parent.is_dir() {
-            return Err(PylonError::Protocol(format!(
-                "export output directory does not exist: {}",
-                parent.display()
-            )));
-        }
-    }
+    check_export_parent(output)?;
     let runtime = state.inner().require_runtime()?;
     let (source, generation, cwd) = state.export_session_owner(&runtime, &peri_id)?;
     let mcp_servers =
@@ -317,5 +325,21 @@ mod tests {
         let messages = vec![chunk("agent_message_chunk", "x")];
         let content = serde_json::to_string_pretty(&sanitize_export_messages(&messages)).unwrap();
         assert!(content.contains('\n'), "pretty JSON 必须换行");
+    }
+
+    #[test]
+    fn export_parent_check_skips_bare_filename() {
+        // 裸文件名：parent() == Some("")，空父路径落在当前工作目录，必须跳过存在性检查
+        assert!(check_export_parent(std::path::Path::new("export.md")).is_ok());
+        // 真实存在的父目录：不报错
+        let real_parent = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("src/dummy.md");
+        assert!(check_export_parent(&real_parent).is_ok());
+        // 不存在的父目录：报错
+        let missing_parent =
+            std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("no_such_dir_xyz/dummy.md");
+        let error = check_export_parent(&missing_parent).unwrap_err();
+        assert!(
+            matches!(error, PylonError::Protocol(message) if message.contains("does not exist"))
+        );
     }
 }
