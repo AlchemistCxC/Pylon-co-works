@@ -10,3 +10,7 @@
 .term-diff-added .term-diff-sign { color:var(--diff-added,#4EBA65); }
 .term-diff-removed { background:color-mix(in srgb, var(--diff-removed,#FF6B80) 14%, transparent); }
 .term-diff-removed .term-diff-sign { color:var(--diff-removed,#FF6B80); }
+/* 词级高亮（CC 双层：整行背景之上，变更词再叠词色） */
+.term-diff-word { border-radius:2px; }
+.term-diff-word-added { background:var(--diff-added-word,#3EA15E); color:#fff; }
+.term-diff-word-removed { background:var(--diff-removed-word,#E0556B); color:#fff; }

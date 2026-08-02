@@ -31,6 +31,8 @@ export interface ThemeSettings {
   toolOk: string; toolRun: string; toolErr: string; toolNameColor: string; toolSummaryColor: string; userTagBg: string; userTagText: string
   /** diff 块级色（此前复用 toolOk/toolErr，CC 系为独立柔和色） */
   diffAdded: string; diffRemoved: string
+  /** diff 词级高亮色（CC 双层：整行背景 + 变更词背景） */
+  diffAddedWord: string; diffRemovedWord: string
   toolIndicatorGlow: number; toolIndicatorGlowColor: string
   toolConnectorMode: string; toolConnectorColor: string
   toolConnectorStyle: 'solid' | 'dotted' | 'pulse'; toolConnectorWidth: number; toolConnectorOpacity: number

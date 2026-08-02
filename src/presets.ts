@@ -52,6 +52,8 @@ export const GLOBAL_PRESETS: GlobalPreset[] = [
       synKeyword: '#e5a75b', synString: '#d4c05a', synComment: '#8a9199', synLiteral: '#e0964e',
       synEntity: '#d7ba7d', synFunction: '#8fa1b3', synVariable: '#c9d1d9', synProperty: '#c9d1d9',
       synRegex: '#e0964e', synMarkupHeading: '#61afef', synCoReference: '#8a9199', synSupport: '#8fa1b3',
+      // diff 词级（CC dark diffAddedWord/diffRemovedWord）
+      diffAddedWord: '#38A660', diffRemovedWord: '#B3596B',
       toolOk: '#4EBA65', toolRun: '#93A5FF', toolErr: '#FF6B80',
       toolNameColor: '#4EBA65', toolSummaryColor: '#999999',
       // 用户消息整行灰底（CC userMessageBackground 暗色 rgb(55,55,55)），可经"标签背景"调整

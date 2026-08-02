@@ -67,3 +67,44 @@ export function normalizeDiffPayload(output: string): DiffPayload | null {
   }
   return fromUnifiedDiff(output)
 }
+
+export interface DiffWordSegment {
+  text: string
+  kind: 'added' | 'removed' | 'common'
+}
+
+/**
+ * 词级 diff（CC 双层：整行背景 + 变更词背景）。
+ * 保留空白 token 对齐；LCS DP 找公共词序列，差异词标记 added/removed。
+ */
+export function wordDiff(oldText: string, newText: string): DiffWordSegment[] {
+  const oldTokens = oldText.split(/(\s+)/).filter(token => token !== '')
+  const newTokens = newText.split(/(\s+)/).filter(token => token !== '')
+  const m = oldTokens.length
+  const n = newTokens.length
+  const dp: number[][] = Array.from({ length: m + 1 }, () => new Array<number>(n + 1).fill(0))
+  for (let i = m - 1; i >= 0; i -= 1) {
+    for (let j = n - 1; j >= 0; j -= 1) {
+      dp[i][j] = oldTokens[i] === newTokens[j]
+        ? dp[i + 1][j + 1] + 1
+        : Math.max(dp[i + 1][j], dp[i][j + 1])
+    }
+  }
+  const segments: DiffWordSegment[] = []
+  let i = 0
+  let j = 0
+  while (i < m || j < n) {
+    if (i < m && j < n && oldTokens[i] === newTokens[j]) {
+      segments.push({ text: oldTokens[i], kind: 'common' })
+      i += 1
+      j += 1
+    } else if (j < n && (i >= m || dp[i][j + 1] >= dp[i + 1][j])) {
+      segments.push({ text: newTokens[j], kind: 'added' })
+      j += 1
+    } else {
+      segments.push({ text: oldTokens[i], kind: 'removed' })
+      i += 1
+    }
+  }
+  return segments
+}

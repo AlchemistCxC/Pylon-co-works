@@ -1,6 +1,26 @@
 import { useId, useMemo, useState } from 'react'
-import { normalizeDiffPayload } from './diffPresentation'
+import { normalizeDiffPayload, wordDiff, type DiffLine } from './diffPresentation'
 import './DiffCard.css'
+
+/** 词级片段渲染（common 普通、added/removed 词色背景） */
+function WordSegments({ segments }: { segments: ReturnType<typeof wordDiff> }) {
+  return (
+    <code>
+      {segments.map((segment, i) => segment.kind === 'common'
+        ? <span key={i}>{segment.text}</span>
+        : <span key={i} className={`term-diff-word term-diff-word-${segment.kind}`}>{segment.text}</span>)}
+    </code>
+  )
+}
+
+function DiffLineRow({ line }: { line: DiffLine }) {
+  return (
+    <div className={`term-diff-line term-diff-${line.kind}`}>
+      <span className="term-diff-sign">{line.kind === 'added' ? '+' : line.kind === 'removed' ? '-' : ' '}</span>
+      <code>{line.text || '\u00a0'}</code>
+    </div>
+  )
+}
 
 export default function DiffCard({ output }: { output: string }) {
   // payload 解析（含 JSON.parse）与计数都是 output 的纯函数：只在 output 变化时重算
@@ -23,12 +43,33 @@ export default function DiffCard({ output }: { output: string }) {
         <span className="term-diff-count">{addedCount} additions · {removedCount} deletions</span>
       </button>
       {open && <div className="term-diff-body" id={bodyId}>
-        {payload.lines.map((line, index) => (
-          <div className={`term-diff-line term-diff-${line.kind}`} key={`${index}-${line.kind}`}>
-            <span className="term-diff-sign">{line.kind === 'added' ? '+' : line.kind === 'removed' ? '-' : ' '}</span>
-            <code>{line.text || '\u00a0'}</code>
-          </div>
-        ))}
+        {(() => {
+          const rows: React.ReactNode[] = []
+          for (let index = 0; index < payload.lines.length; index += 1) {
+            const line = payload.lines[index]
+            const next = payload.lines[index + 1]
+            // 相邻 removed + added 对 → 词级 diff（CC 双层：整行背景 + 变更词背景）
+            if (line.kind === 'removed' && next?.kind === 'added') {
+              const segments = wordDiff(line.text, next.text)
+              rows.push(
+                <div className="term-diff-line term-diff-removed" key={`${index}-r`}>
+                  <span className="term-diff-sign">-</span>
+                  <WordSegments segments={segments.filter(s => s.kind !== 'added')} />
+                </div>,
+              )
+              rows.push(
+                <div className="term-diff-line term-diff-added" key={`${index}-a`}>
+                  <span className="term-diff-sign">+</span>
+                  <WordSegments segments={segments.filter(s => s.kind !== 'removed')} />
+                </div>,
+              )
+              index += 1
+            } else {
+              rows.push(<DiffLineRow line={line} key={`${index}-${line.kind}`} />)
+            }
+          }
+          return rows
+        })()}
       </div>}
     </div>
   )

@@ -127,6 +127,8 @@ export const THEME_FIELD_DEFS = {
   userTagText: { ...C('chat', '标签文字'), group: "文字 & 标签", },
   diffAdded: { ...C('chat', 'Diff·新增'), group: "Diff", },
   diffRemoved: { ...C('chat', 'Diff·删除'), group: "Diff", },
+  diffAddedWord: { ...C('chat', 'Diff·词级新增'), group: "Diff", advanced: true },
+  diffRemovedWord: { ...C('chat', 'Diff·词级删除'), group: "Diff", advanced: true },
   // toolIndicator 走 widgetRegistry 动态选项（toolIndicatorOptions），不进声明式 UI
   toolIndicator: { ...S('chat', '指示器形状', ['●', '■', '◆', '▶', '✦']), hidden: true },
   toolIndicatorGlow: { ...N('chat', '指示器辉光', 0, 20, 1), group: "指示器 & 连接线", suffix: 'px' },
@@ -339,6 +341,8 @@ export const THEME_DEFAULTS: Record<string, string | number | boolean> = {
   userTagText: '#a855f7',
   diffAdded: '#4EBA65',
   diffRemoved: '#FF6B80',
+  diffAddedWord: '#3EA15E',
+  diffRemovedWord: '#E0556B',
   toolIndicatorGlow: 0,
   toolIndicatorGlowColor: '',
   toolConnectorMode: 'none',
