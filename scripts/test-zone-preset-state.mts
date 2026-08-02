@@ -17,8 +17,8 @@ assert.match(applyZonePresetBody, /activePreset:\s*\{\s*\.\.\.state\.activePrese
 assert.match(applyZonePresetBody, /dirty:\s*\{\s*\.\.\.state\.dirty, \[zone\]: false\s*\}/)
 assert.match(setZoneFieldBody, /\.\.\.partial/)
 assert.match(setZoneFieldBody, /markZoneCustom\(state, zone\)/)
-assert.match(setGlobalPresetBody, /activePreset:\s*\{\s*global: name, sidebar: name, chat: name, cc: name, right: name\s*\}/)
-assert.match(setGlobalPresetBody, /dirty:\s*\{\s*global: false, sidebar: false, chat: false, cc: false, right: false\s*\}/)
+assert.match(setGlobalPresetBody, /activePreset:\s*Object\.fromEntries\(ZONES\.map\(zone => \[zone, name\]\)\)/)
+assert.match(setGlobalPresetBody, /dirty:\s*Object\.fromEntries\(ZONES\.map\(zone => \[zone, false\]\)\)/)
 
 // Pure state harness for the exact action contract above.
 type State = Record<string, unknown> & {
