@@ -116,13 +116,13 @@ impl RuntimeLogHub {
                 query
                     .level
                     .as_deref()
-                    .is_none_or(|value| entry.level == value)
+                    .is_none_or(|value| entry.level.eq_ignore_ascii_case(value))
             })
             .filter(|entry| {
                 query
                     .source
                     .as_deref()
-                    .is_none_or(|value| entry.source == value)
+                    .is_none_or(|value| entry.source.eq_ignore_ascii_case(value))
             })
             .filter(|entry| {
                 query
@@ -132,16 +132,13 @@ impl RuntimeLogHub {
             })
             .filter(|entry| {
                 search.as_deref().is_none_or(|needle| {
-                    // P3：needle 已小写一次（上方）；字段按 键/值 迭代检查，
-                    // 不再 clone 整个 map 再整体序列化。字符串值免 JSON 再序列化，
-                    // 非字符串值才 to_string（保持与原"序列化整 map"的匹配面一致）。
+                    // P3：needle 已小写一次（上方）。O25：search 只匹配字符串值，
+                    // 不命中字段 key；字符串值免 JSON 再序列化，非字符串值才
+                    // to_string（保持与原"序列化整 map"的匹配面一致）。
                     entry.message.to_lowercase().contains(needle)
-                        || entry.fields.iter().any(|(key, value)| {
-                            key.to_lowercase().contains(needle)
-                                || match value {
-                                    Value::String(text) => text.to_lowercase().contains(needle),
-                                    other => other.to_string().to_lowercase().contains(needle),
-                                }
+                        || entry.fields.values().any(|value| match value {
+                            Value::String(text) => text.to_lowercase().contains(needle),
+                            other => other.to_string().to_lowercase().contains(needle),
                         })
                 })
             })
@@ -239,6 +236,58 @@ mod tests {
             limit: Some(10),
         };
         assert_eq!(hub.list(&query).len(), 1);
+    }
+
+    #[test]
+    fn query_level_and_source_are_case_insensitive() {
+        // O25：大写 LEVEL/SOURCE 查询命中小写存储。
+        let hub = RuntimeLogHub::default();
+        hub.push(
+            Timestamp::new(1),
+            "error",
+            "acp",
+            None,
+            "Parse failed",
+            Map::new(),
+        );
+        let query = RuntimeLogQuery {
+            level: Some("ERROR".into()),
+            source: Some("ACP".into()),
+            session: None,
+            search: None,
+            limit: Some(10),
+        };
+        assert_eq!(hub.list(&query).len(), 1);
+    }
+
+    #[test]
+    fn search_matches_values_but_not_field_keys() {
+        // O25：search 命中字段值，不命中字段 key。
+        let hub = RuntimeLogHub::default();
+        hub.push(
+            Timestamp::new(1),
+            "info",
+            "acp",
+            None,
+            "safe message",
+            fields(&[("parseKey", json!("value-with-needle"))]),
+        );
+        let by_key = RuntimeLogQuery {
+            level: None,
+            source: None,
+            session: None,
+            search: Some("parseKey".into()),
+            limit: Some(10),
+        };
+        assert!(hub.list(&by_key).is_empty(), "search 不得命中字段 key");
+        let by_value = RuntimeLogQuery {
+            level: None,
+            source: None,
+            session: None,
+            search: Some("needle".into()),
+            limit: Some(10),
+        };
+        assert_eq!(hub.list(&by_value).len(), 1, "search 必须命中字段值");
     }
 
     #[test]
