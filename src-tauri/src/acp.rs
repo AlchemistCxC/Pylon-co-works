@@ -1146,7 +1146,15 @@ impl AcpClient {
                     == Some(session_id)
             {
                 if let Some(params) = raw.params {
-                    replay.push(params);
+                    // O4：收集上限——超长历史回放截断，防止 Vec 无界增长。
+                    // 达到上限后继续等待响应（不得 break 提前返回——响应缺失
+                    // 会让调用方把 Null 当 session/load 结果，破坏会话配置）。
+                    if replay.len() < 10_000 {
+                        replay.push(params);
+                    } else if replay.len() == 10_000 {
+                        log::warn!("session/load replay 超过 10000 条，截断");
+                        replay.truncate(10_000);
+                    }
                 }
                 continue;
             }
