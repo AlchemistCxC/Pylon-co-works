@@ -177,16 +177,25 @@ pub fn parse_config(input: &str) -> Result<GatewayConfig, String> {
     let routes = section.routes;
     let mut entries = Vec::with_capacity(routes.len());
     let mut seen = HashSet::with_capacity(routes.len());
-    for route in routes {
+    for mut route in routes {
         if !seen.insert(route.source.clone()) {
             return Err(format!("重复的 source 路由: {}", route.source));
         }
+        if let Some(ref reset) = route.reset {
+            if !matches!(reset.as_str(), "idle" | "daily" | "off") {
+                return Err(format!(
+                    "route {} 的 reset 非法: {reset}（可选 idle/daily/off）",
+                    route.source
+                ));
+            }
+        }
+        route.allow_from = route.allow_from.filter(|v| !v.is_empty());
         entries.push(route);
     }
     let qq = section
         .qq
         .map(|q| QqGatewayConfig {
-            group_allow_from: q.group_allow_from,
+            group_allow_from: q.group_allow_from.filter(|v| !v.is_empty()),
         })
         .unwrap_or_default();
     let inject = match section.inject {
@@ -204,8 +213,13 @@ pub fn parse_config(input: &str) -> Result<GatewayConfig, String> {
             }
             InjectConfig {
                 enabled: section.enabled,
-                scenario: section.scenario,
-                sources: section.sources,
+                scenario: section.scenario.map(|s| s.trim().to_string()),
+                sources: section
+                    .sources
+                    .into_iter()
+                    .map(|s| s.trim().to_string())
+                    .filter(|s| !s.is_empty())
+                    .collect(),
                 persist: section.persist,
             }
         }
@@ -461,5 +475,82 @@ gateway:
     scenario: ""
 "#;
         assert!(parse_config(yaml).is_err(), "空 scenario 应报错");
+    }
+
+    #[test]
+    fn invalid_reset_value_rejected() {
+        let yaml = r#"
+gateway:
+  routes:
+    - source: qq:group:123
+      agent: peri
+      profile: trpg
+      session: 战役1
+      reset: never
+"#;
+        let err = parse_config(yaml).expect_err("非法 reset 应报错");
+        assert!(err.contains("reset"), "错误信息应指明 reset，实际: {err}");
+        assert!(err.contains("never"), "错误信息应包含非法值，实际: {err}");
+    }
+
+    #[test]
+    fn all_reset_values_accepted() {
+        for value in ["idle", "daily", "off"] {
+            let yaml = format!(
+                r#"
+gateway:
+  routes:
+    - source: qq:group:123
+      agent: peri
+      profile: trpg
+      session: 战役1
+      reset: {value}
+"#
+            );
+            let config = parse_config(&yaml).expect("合法 reset 应解析成功");
+            let binding = config.routes.lookup("qq:group:123").expect("路由应命中");
+            assert_eq!(binding.reset.as_deref(), Some(value));
+        }
+    }
+
+    #[test]
+    fn empty_allow_from_is_unrestricted() {
+        let yaml = r#"
+gateway:
+  qq:
+    group_allow_from: []
+  routes:
+    - source: qq:group:123
+      agent: peri
+      profile: trpg
+      session: 战役1
+      allow_from: []
+"#;
+        let config = parse_config(yaml).expect("空 allowlist 应解析成功");
+        assert!(
+            config.qq.group_allow_from.is_none(),
+            "空 group_allow_from 应为 None（缺省不限）"
+        );
+        let binding = config.routes.lookup("qq:group:123").expect("路由应命中");
+        assert!(
+            binding.allow_from.is_none(),
+            "空 allow_from 应为 None（缺省不限）"
+        );
+    }
+
+    #[test]
+    fn inject_trims_scenario_and_sources() {
+        let yaml = r#"
+gateway:
+  inject:
+    scenario: "  trpg  "
+    sources: ["  vein ", "shared", "   ", ""]
+"#;
+        let config = parse_config(yaml).expect("含空白配置应解析成功");
+        assert_eq!(config.inject.scenario.as_deref(), Some("trpg"));
+        assert_eq!(
+            config.inject.sources.as_slice(),
+            &["vein".to_string(), "shared".to_string()][..]
+        );
     }
 }
