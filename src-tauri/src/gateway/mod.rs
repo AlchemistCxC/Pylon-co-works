@@ -73,7 +73,7 @@ impl GatewayCore {
     pub fn new() -> Self {
         let config = GatewayConfig::from_yaml_str(include_str!("../../../agents.yaml"))
             .unwrap_or_else(|error| {
-                log::warn!("gateway 配置解析失败，使用空配置: {error}");
+                tracing::warn!("gateway 配置解析失败，使用空配置: {error}");
                 GatewayConfig::empty()
             });
         Self::from_config(config)
@@ -95,9 +95,9 @@ impl GatewayCore {
         match self.config.write() {
             Ok(mut slot) => {
                 *slot = config;
-                log::info!("gateway 配置已热重载");
+                tracing::info!("gateway 配置已热重载");
             }
-            Err(_) => log::error!("gateway 配置热重载失败（配置锁中毒），保持原配置"),
+            Err(_) => tracing::error!("gateway 配置热重载失败（配置锁中毒），保持原配置"),
         }
     }
 
@@ -274,7 +274,7 @@ impl GatewayCore {
             .map(|c| c.routes.lookup(source).is_some())
             .unwrap_or(false);
         if !bound {
-            log::warn!("gateway deliver_all 拒绝未绑定 source 的出站投递: {source}");
+            tracing::warn!("gateway deliver_all 拒绝未绑定 source 的出站投递: {source}");
             return;
         }
         if let Some(text) = extract_deliver_text(event, payload) {
@@ -286,7 +286,7 @@ impl GatewayCore {
             for adapter in &adapters {
                 for chunk in truncate::truncate_message(&text, adapter.max_message_len()) {
                     if let Err(error) = adapter.deliver_text(source, &chunk) {
-                        log::warn!(
+                        tracing::warn!(
                             "gateway deliver_text({}) failed: {}",
                             adapter.platform_key(),
                             error
@@ -297,7 +297,7 @@ impl GatewayCore {
         } else {
             for adapter in &adapters {
                 if let Err(error) = adapter.deliver_event(source, event, payload) {
-                    log::warn!(
+                    tracing::warn!(
                         "gateway deliver_event({}) failed: {}",
                         adapter.platform_key(),
                         error

@@ -252,7 +252,7 @@ impl QqAdapter {
         }) {
             Some(allowed) => allowed,
             None => {
-                log::error!("gateway 配置读锁中毒，拒绝 ingest（fail-closed）: {source}");
+                tracing::error!("gateway 配置读锁中毒，拒绝 ingest（fail-closed）: {source}");
                 return Ok(None);
             }
         };
@@ -341,7 +341,7 @@ impl PlatformAdapter for QqAdapter {
                 let now = Instant::now();
                 warns.retain(|_, last| now.duration_since(*last) < DEAD_TARGET_WARN_INTERVAL);
                 if !warns.contains_key(&key) {
-                    log::warn!(
+                    tracing::warn!(
                         "QQ deliver 短路（死目标 {key}: {}），丢弃 {:.60}...",
                         entry.0,
                         text
@@ -373,7 +373,7 @@ impl PlatformAdapter for QqAdapter {
             match senders.get(&key) {
                 Some(existing) if !existing.token.is_cancelled() => {
                     if existing.tx.try_send(message).is_err() {
-                        log::warn!("QQ deliver 队列满（{chat_id}），丢弃该段");
+                        tracing::warn!("QQ deliver 队列满（{chat_id}），丢弃该段");
                     }
                 }
                 _ => {
@@ -387,7 +387,7 @@ impl PlatformAdapter for QqAdapter {
                     };
                     senders.insert(key.clone(), worker);
                     if tx.try_send(message).is_err() {
-                        log::warn!("QQ deliver 队列满（{chat_id}），丢弃该段");
+                        tracing::warn!("QQ deliver 队列满（{chat_id}），丢弃该段");
                     }
                     spawned = Some((rx, token));
                 }
@@ -413,7 +413,7 @@ impl PlatformAdapter for QqAdapter {
         event: &str,
         _payload: &serde_json::Value,
     ) -> Result<(), String> {
-        log::info!("QQ deliver_event 未投递（首版仅文本）: {source} event={event}");
+        tracing::info!("QQ deliver_event 未投递（首版仅文本）: {source} event={event}");
         Ok(())
     }
 }
@@ -482,7 +482,7 @@ impl QqAdapter {
             // 短路节流兜底（每条目 1s 至多一条），此处逐条 warn 会刷屏。
             if let Some(entry) = dead_targets.lock().ok().and_then(|d| d.get(&key).cloned()) {
                 if !dead_target_expired(&entry) {
-                    log::debug!("QQ send_loop 跳过死目标 {}", msg.chat_id);
+                    tracing::debug!("QQ send_loop 跳过死目标 {}", msg.chat_id);
                     continue;
                 }
                 dead_targets.lock().ok().map(|mut d| d.remove(&key));
@@ -498,12 +498,12 @@ impl QqAdapter {
                         Err(error) => {
                             attempts += 1;
                             if attempts >= TOKEN_RETRY_ATTEMPTS {
-                                log::warn!(
+                                tracing::warn!(
                                     "QQ deliver token 连续 {attempts} 次获取失败（{key}），丢弃该消息: {error}"
                                 );
                                 continue 'messages;
                             }
-                            log::warn!(
+                            tracing::warn!(
                                 "QQ deliver token 获取失败（{key}），{}s 后重试: {error}",
                                 1u64 << (attempts - 1)
                             );
@@ -520,14 +520,14 @@ impl QqAdapter {
                     dead_targets.lock().ok().map(|mut d| d.remove(&key));
                 }
                 Err(SendFailure::RateLimited(error)) => {
-                    log::warn!(
+                    tracing::warn!(
                         "QQ deliver rate limited（{key}），{RATE_LIMIT_DELAY_SECS}s 后重试一次: {error}"
                     );
                     tokio::time::sleep(std::time::Duration::from_secs(RATE_LIMIT_DELAY_SECS)).await;
                     let token = match auth.get_token().await {
                         Ok(token) => token,
                         Err(error) => {
-                            log::warn!("QQ deliver rate 重试 token 失败: {error}");
+                            tracing::warn!("QQ deliver rate 重试 token 失败: {error}");
                             continue;
                         }
                     };
@@ -541,12 +541,12 @@ impl QqAdapter {
                             dead_targets.lock().ok().map(|mut d| {
                                 d.insert(key.clone(), (reason.clone(), Instant::now()))
                             });
-                            log::warn!(
+                            tracing::warn!(
                                 "QQ deliver rate 重试后目标不可达（{key}），标记死目标: {reason}"
                             );
                         }
                         Err(other) => {
-                            log::warn!("QQ deliver rate 重试仍失败: {other:?}");
+                            tracing::warn!("QQ deliver rate 重试仍失败: {other:?}");
                         }
                     }
                 }
@@ -555,10 +555,10 @@ impl QqAdapter {
                         .lock()
                         .ok()
                         .map(|mut d| d.insert(key.clone(), (error.clone(), Instant::now())));
-                    log::warn!("QQ deliver 目标不可达（{key}），标记死目标: {error}");
+                    tracing::warn!("QQ deliver 目标不可达（{key}），标记死目标: {error}");
                 }
                 Err(SendFailure::Transient(error)) => {
-                    log::warn!("QQ deliver 发送失败（{key}）: {error}");
+                    tracing::warn!("QQ deliver 发送失败（{key}）: {error}");
                 }
             }
         }
@@ -573,7 +573,7 @@ impl QqAdapter {
                 map.remove(&key);
             }
         }
-        log::info!("QQ send_loop 退出（{key}，空闲或关闭）");
+        tracing::info!("QQ send_loop 退出（{key}，空闲或关闭）");
     }
 
     /// 发送 + 瞬时失败指数退避重试（SEND_RETRY_ATTEMPTS 次：1s/2s/4s）。
@@ -628,6 +628,7 @@ impl QqAdapter {
 mod tests {
     use super::*;
     use std::io::{Read, Write};
+    use tracing_subscriber::layer::Layer;
 
     fn core_with_route() -> Arc<GatewayCore> {
         let yaml = r#"
@@ -957,40 +958,67 @@ gateway:
         server.join().expect("server thread");
     }
 
-    /// 捕获 logger（O43 节流断言：统计"短路"告警条数）。
-    /// 全 crate 无其他测试安装 logger，安装成功即独占捕获，无并行冲突。
-    struct CapturingLogger {
+    /// 捕获 Layer（O43 节流断言：统计"短路"告警条数）。
+    /// 全局默认 subscriber——callsite interest 是进程级缓存：首次注册的线程
+    /// 若无全局默认订阅者会把 interest 算成 never()（永久静音该 callsite），
+    /// with_default 的线程局部订阅者救不回来；set_global_default 会重建全部
+    /// callsite interest，保证告警必然到达捕获层。本测试是唯一注册全局
+    /// subscriber 的测试，必成功；其他测试的 group:123 告警与本测试的
+    /// group:456 计数互不干扰。
+    struct CapturingLayer {
         records: Arc<Mutex<Vec<String>>>,
     }
 
-    impl log::Log for CapturingLogger {
-        fn enabled(&self, metadata: &log::Metadata) -> bool {
-            metadata.level() <= log::Level::Warn
-        }
-
-        fn log(&self, record: &log::Record) {
-            if record.level() <= log::Level::Warn {
-                self.records
-                    .lock()
-                    .unwrap_or_else(|poisoned| poisoned.into_inner())
-                    .push(format!("{}: {}", record.level(), record.args()));
+    impl<S: tracing::Subscriber> tracing_subscriber::Layer<S> for CapturingLayer {
+        fn on_event(
+            &self,
+            event: &tracing::Event<'_>,
+            _ctx: tracing_subscriber::layer::Context<'_, S>,
+        ) {
+            if event.metadata().level() > &tracing::Level::WARN {
+                return;
             }
+            let mut message = String::new();
+            struct Message<'a>(&'a mut String);
+            impl tracing::field::Visit for Message<'_> {
+                fn record_debug(
+                    &mut self,
+                    field: &tracing::field::Field,
+                    value: &dyn std::fmt::Debug,
+                ) {
+                    if field.name() == "message" && self.0.is_empty() {
+                        self.0.push_str(&format!("{value:?}"));
+                    }
+                }
+                fn record_str(&mut self, field: &tracing::field::Field, value: &str) {
+                    if field.name() == "message" {
+                        self.0.push_str(value);
+                    }
+                }
+            }
+            event.record(&mut Message(&mut message));
+            self.records
+                .lock()
+                .unwrap_or_else(|poisoned| poisoned.into_inner())
+                .push(format!("{}: {}", event.metadata().level(), message));
         }
-
-        fn flush(&self) {}
     }
 
     #[test]
     fn dead_target_short_circuit_warn_is_throttled_to_one_per_second() {
-        use log::LevelFilter;
-        // 用独有 chat id（group:456）隔离并行测试的日志干扰——全局 logger 下
-        // 其他测试的"短路"告警（如 group:123）不得计入本测试计数。
+        // 用独有 chat id（group:456）隔离并行测试的日志干扰——全局捕获只认
+        // 本 key 的告警，其他测试的"短路"告警（如 group:123）不得计入本测试计数。
         let records: Arc<Mutex<Vec<String>>> = Arc::new(Mutex::new(Vec::new()));
-        let _ = log::set_logger(Box::leak(Box::new(CapturingLogger {
+        let subscriber = CapturingLayer {
             records: records.clone(),
-        })));
-        log::set_max_level(LevelFilter::Warn);
-
+        }
+        .with_subscriber(
+            tracing_subscriber::fmt()
+                .with_max_level(tracing::Level::TRACE)
+                .finish(),
+        );
+        tracing::subscriber::set_global_default(subscriber)
+            .expect("本测试是唯一注册全局 subscriber 的测试");
         let core = core_with_route();
         let adapter = test_adapter(core);
         adapter.dead_targets.lock().unwrap().insert(

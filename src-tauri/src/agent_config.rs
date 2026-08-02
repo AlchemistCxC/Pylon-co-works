@@ -61,7 +61,7 @@ impl AgentDef {
                 .iter()
                 .any(|arg| arg == "--model" || arg.starts_with("--model="))
             {
-                log::warn!(
+                tracing::warn!(
                     "agent {}: acp_args 含 --model，结构化 model 字段被忽略",
                     self.name
                 );

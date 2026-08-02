@@ -4,9 +4,21 @@ use ringbuffer::{AllocRingBuffer, RingBuffer};
 use serde::{Deserialize, Serialize};
 use serde_json::{Map, Value};
 use std::sync::atomic::{AtomicU64, Ordering};
-use std::sync::{Arc, Mutex};
+use std::sync::{Arc, Mutex, OnceLock};
 
 use crate::time::Timestamp;
+
+/// R18：生产 hub 注册处——run() 创建 hub 后写入，tracing Layer 按事件读取。
+/// 测试不安装 subscriber，Layer 不运行，无需注册。
+static HUB: OnceLock<Arc<RuntimeLogHub>> = OnceLock::new();
+
+pub fn register_hub(hub: Arc<RuntimeLogHub>) {
+    let _ = HUB.set(hub);
+}
+
+fn hub() -> Option<Arc<RuntimeLogHub>> {
+    HUB.get().cloned()
+}
 
 pub const DEFAULT_CAPACITY: usize = 2000;
 const MAX_MESSAGE_BYTES: usize = 8 * 1024;
@@ -161,6 +173,127 @@ fn normalize_level(level: String) -> String {
     }
 }
 
+/// R18：tracing Layer——把 tracing 宏产生的 event 转发到 RuntimeLogHub。
+/// runtime-log 事件形状不变（level / source=target / message / fields / session），
+/// 消息与字段在 push 层统一走 sanitize（hub.push 自带）。session 字段 tracing
+/// 原生没有，约定由 event field 传递（record_str 命中 "session" 时抽取）。
+#[derive(Clone, Default)]
+pub struct RuntimeLogLayer {
+    /// 显式 hub（测试/自定义场景）；None 时按事件惰性读取静态注册的 hub。
+    hub: Option<Arc<RuntimeLogHub>>,
+}
+
+impl RuntimeLogLayer {
+    pub fn new() -> Self {
+        Self { hub: None }
+    }
+
+    /// 绑定显式 hub（不经过静态注册）——Layer 单元测试用，避免并行测试
+    /// 竞争全局注册点。
+    #[cfg(test)]
+    pub fn with_hub(hub: Arc<RuntimeLogHub>) -> Self {
+        Self { hub: Some(hub) }
+    }
+}
+
+impl<S> tracing_subscriber::Layer<S> for RuntimeLogLayer
+where
+    S: tracing::Subscriber,
+{
+    fn on_event(
+        &self,
+        event: &tracing::Event<'_>,
+        _ctx: tracing_subscriber::layer::Context<'_, S>,
+    ) {
+        // 与 fmt layer 的 max_level=INFO 一致：debug/trace 不进 hub（不冲刷环形缓冲）。
+        if event.metadata().level() > &tracing::Level::INFO {
+            return;
+        }
+        let Some(hub) = self.hub.clone().or_else(hub) else {
+            return;
+        };
+        let mut capture = EventCapture::default();
+        event.record(&mut capture);
+        hub.push(
+            crate::time::Timestamp::now(),
+            level_name(event.metadata().level()),
+            event.metadata().target(),
+            capture.session,
+            capture.message,
+            capture.fields,
+        );
+    }
+}
+
+fn level_name(level: &tracing::Level) -> &'static str {
+    match *level {
+        tracing::Level::TRACE => "trace",
+        tracing::Level::DEBUG => "debug",
+        tracing::Level::INFO => "info",
+        tracing::Level::WARN => "warn",
+        tracing::Level::ERROR => "error",
+    }
+}
+
+#[derive(Default)]
+struct EventCapture {
+    message: String,
+    session: Option<String>,
+    fields: Map<String, Value>,
+}
+
+impl tracing::field::Visit for EventCapture {
+    fn record_str(&mut self, field: &tracing::field::Field, value: &str) {
+        match field.name() {
+            "message" => self.message.push_str(value),
+            "session" if self.session.is_none() => self.session = Some(value.to_string()),
+            name => {
+                self.fields
+                    .insert(name.to_string(), Value::String(value.to_string()));
+            }
+        }
+    }
+
+    fn record_debug(&mut self, field: &tracing::field::Field, value: &dyn std::fmt::Debug) {
+        match field.name() {
+            "message" if self.message.is_empty() => self.message = format!("{value:?}"),
+            name => {
+                self.fields
+                    .insert(name.to_string(), Value::String(format!("{value:?}")));
+            }
+        }
+    }
+
+    fn record_u64(&mut self, field: &tracing::field::Field, value: u64) {
+        self.fields
+            .insert(field.name().to_string(), Value::from(value));
+    }
+
+    fn record_i64(&mut self, field: &tracing::field::Field, value: i64) {
+        self.fields
+            .insert(field.name().to_string(), Value::from(value));
+    }
+
+    fn record_f64(&mut self, field: &tracing::field::Field, value: f64) {
+        self.fields
+            .insert(field.name().to_string(), Value::from(value));
+    }
+
+    fn record_bool(&mut self, field: &tracing::field::Field, value: bool) {
+        self.fields
+            .insert(field.name().to_string(), Value::from(value));
+    }
+
+    fn record_error(
+        &mut self,
+        field: &tracing::field::Field,
+        value: &(dyn std::error::Error + 'static),
+    ) {
+        self.fields
+            .insert(field.name().to_string(), Value::String(value.to_string()));
+    }
+}
+
 fn truncate(value: String, max_bytes: usize) -> String {
     if value.len() <= max_bytes {
         return value;
@@ -186,12 +319,23 @@ fn sanitize_fields(fields: Map<String, Value>) -> Map<String, Value> {
 mod tests {
     use super::*;
     use serde_json::json;
+    use tracing_subscriber::layer::Layer;
 
     fn fields(values: &[(&str, Value)]) -> Map<String, Value> {
         values
             .iter()
             .map(|(key, value)| ((*key).to_string(), value.clone()))
             .collect()
+    }
+
+    fn layer_subscriber(
+        hub: Arc<RuntimeLogHub>,
+    ) -> impl tracing::Subscriber + Send + Sync + 'static {
+        RuntimeLogLayer::with_hub(hub).with_subscriber(
+            tracing_subscriber::fmt()
+                .with_max_level(tracing::Level::TRACE)
+                .finish(),
+        )
     }
 
     #[test]
@@ -528,5 +672,45 @@ mod tests {
         assert_eq!(event.message, REDACTED);
         assert_eq!(event.fields["nested"]["apiKey"], json!(REDACTED));
         assert_eq!(hub.list(&RuntimeLogQuery::default()).first(), Some(&entry));
+    }
+
+    #[test]
+    fn tracing_layer_forwards_events_to_registered_hub() {
+        // R18：Layer 转发形状——level / source=target / message / fields；
+        // sanitize 在 push 层生效（敏感 key 字段 → REDACTED）。
+        let hub = RuntimeLogHub::new(16);
+        tracing::subscriber::with_default(layer_subscriber(hub.clone()), || {
+            let api_key = "abc123".to_string();
+            // 0.1.44：inline `{name}` 只做消息插值不生成字段；显式 `name = %expr` 才记录字段。
+            tracing::warn!(api_key = %api_key, "connect failed: {api_key} retry={}", 2);
+        });
+        let entries = hub.list(&RuntimeLogQuery::default());
+        assert_eq!(entries.len(), 1);
+        let entry = &entries[0];
+        assert_eq!(entry.level, "warn");
+        assert!(
+            entry.source.contains("runtime_log"),
+            "source 应为 target: {}",
+            entry.source
+        );
+        assert_eq!(entry.message, "connect failed: abc123 retry=2");
+        assert_eq!(entry.fields["api_key"], json!(REDACTED));
+    }
+
+    #[test]
+    fn tracing_layer_caps_level_and_reads_session_field() {
+        // R18：INFO 以下不进 hub；session 由 event field 传递并抽取。
+        let hub = RuntimeLogHub::new(16);
+        tracing::subscriber::with_default(layer_subscriber(hub.clone()), || {
+            let session = "s-1";
+            tracing::debug!("dropped below INFO cap");
+            tracing::info!(session, "session started");
+        });
+        let entries = hub.list(&RuntimeLogQuery::default());
+        assert_eq!(entries.len(), 1);
+        let entry = &entries[0];
+        assert_eq!(entry.level, "info");
+        assert_eq!(entry.session.as_deref(), Some("s-1"));
+        assert_eq!(entry.message, "session started");
     }
 }

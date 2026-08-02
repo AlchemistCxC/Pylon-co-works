@@ -173,12 +173,12 @@ fn reconnect_backoff() -> backon::ExponentialBackoff {
 async fn wait_backoff(backoff: &mut backon::ExponentialBackoff) -> bool {
     match backoff.next() {
         Some(delay) => {
-            log::info!("QQ WS: {}s 后重连", delay.as_secs());
+            tracing::info!("QQ WS: {}s 后重连", delay.as_secs());
             sleep(delay).await;
             true
         }
         None => {
-            log::error!("QQ WS: 超过最大重连次数");
+            tracing::error!("QQ WS: 超过最大重连次数");
             false
         }
     }
@@ -216,7 +216,7 @@ pub async fn run_ws_loop(http_client: Client, auth: Arc<QqAuth>, adapter: Arc<Qq
                 backoff = reconnect_backoff();
                 quick_count = 0;
                 rate_limit_streak = 0;
-                log::info!("QQ WS: 协议层重连、保持 session");
+                tracing::info!("QQ WS: 协议层重连、保持 session");
             }
             Err(ref e) if e.contains("op 9") => {
                 op9_streak += 1;
@@ -227,7 +227,7 @@ pub async fn run_ws_loop(http_client: Client, auth: Arc<QqAuth>, adapter: Arc<Qq
                     session.session_id = None;
                     session.last_seq = None;
                     op9_streak = 0;
-                    log::warn!(
+                    tracing::warn!(
                         "QQ WS: 连续 {OP9_DEGRADE_THRESHOLD} 次 op 9，清除 session 降级为完整 Identify"
                     );
                     if !wait_backoff(&mut backoff).await {
@@ -237,7 +237,7 @@ pub async fn run_ws_loop(http_client: Client, auth: Arc<QqAuth>, adapter: Arc<Qq
                     backoff = reconnect_backoff();
                     quick_count = 0;
                     rate_limit_streak = 0;
-                    log::info!("QQ WS: op 9 重连、保持 session (第 {op9_streak} 次)");
+                    tracing::info!("QQ WS: op 9 重连、保持 session (第 {op9_streak} 次)");
                 }
             }
             // run_connection 所有退出路径均为 Err（内部全部经 ?/return Err 退出），
@@ -255,7 +255,7 @@ pub async fn run_ws_loop(http_client: Client, auth: Arc<QqAuth>, adapter: Arc<Qq
                 if duration < QUICK_DISCONNECT_THRESHOLD {
                     quick_count += 1;
                     if quick_count >= MAX_QUICK_DISCONNECTS {
-                        log::error!("QQ WS: {quick_count} 次快速断开，检查凭证和权限");
+                        tracing::error!("QQ WS: {quick_count} 次快速断开，检查凭证和权限");
                         return;
                     }
                 } else {
@@ -264,11 +264,11 @@ pub async fn run_ws_loop(http_client: Client, auth: Arc<QqAuth>, adapter: Arc<Qq
 
                 let code = parse_ws_close_code(&e);
                 let action = classify_close_code(code);
-                log::warn!("QQ WS: 连接断开 (code={code}, action={action:?}): {e}");
+                tracing::warn!("QQ WS: 连接断开 (code={code}, action={action:?}): {e}");
 
                 match action {
                     CloseAction::Fatal(desc) => {
-                        log::error!("QQ WS: 致命错误 — {desc}，停止重连");
+                        tracing::error!("QQ WS: 致命错误 — {desc}，停止重连");
                         return;
                     }
                     CloseAction::ReconnectClearToken => {
@@ -281,7 +281,7 @@ pub async fn run_ws_loop(http_client: Client, auth: Arc<QqAuth>, adapter: Arc<Qq
                     CloseAction::ReconnectRateLimit => {
                         rate_limit_streak += 1;
                         if rate_limit_streak >= MAX_RATE_LIMITS {
-                            log::error!("QQ WS: 连续 {rate_limit_streak} 次限流断开，停止重连");
+                            tracing::error!("QQ WS: 连续 {rate_limit_streak} 次限流断开，停止重连");
                             return;
                         }
                         sleep(Duration::from_secs(RATE_LIMIT_DELAY)).await;
@@ -316,14 +316,14 @@ async fn run_connection(
 ) -> Result<(), String> {
     let token = auth.get_token().await?;
     let gateway_url = auth::get_gateway_url(http_client, &token).await?;
-    log::info!("QQ WS: Gateway URL 已获取");
+    tracing::info!("QQ WS: Gateway URL 已获取");
 
     let ws_stream = connect(&gateway_url)
         .await
         .map_err(|e| format!("WS 连接失败: {e}"))?;
     // 连接寿命计时起点 = 连接建立成功时刻（O46）；此前失败则保持 loop 起点。
     *connected_at = Instant::now();
-    log::info!("QQ WS: 已连接");
+    tracing::info!("QQ WS: 已连接");
 
     let (mut write, mut read) = ws_stream.split();
 
@@ -344,7 +344,7 @@ async fn run_connection(
             .send(Message::Text(resume.to_string()))
             .await
             .map_err(|e| format!("Resume: {e}"))?;
-        log::info!("QQ WS: Resume 已发送");
+        tracing::info!("QQ WS: Resume 已发送");
     } else {
         let identify = serde_json::json!({
             "op": 2,
@@ -359,7 +359,7 @@ async fn run_connection(
             .send(Message::Text(identify.to_string()))
             .await
             .map_err(|e| format!("Identify: {e}"))?;
-        log::info!("QQ WS: Identify 已发送");
+        tracing::info!("QQ WS: Identify 已发送");
     }
 
     // 事件 + 心跳
@@ -410,7 +410,7 @@ async fn run_connection(
 
                                     // op 7: 服务端要求重连
                                     if op == 7 {
-                                        log::info!("QQ WS: 服务端要求重连 (op 7)");
+                                        tracing::info!("QQ WS: 服务端要求重连 (op 7)");
                                         return Err("op 7 reconnect".into());
                                     }
 
@@ -420,7 +420,7 @@ async fn run_connection(
                                         if !resumable {
                                             session.session_id = None;
                                             session.last_seq = None;
-                                            log::info!("QQ WS: session 已清除 (op 9)");
+                                            tracing::info!("QQ WS: session 已清除 (op 9)");
                                         }
                                         return Err(format!("op 9 invalid session (resumable={resumable})"));
                                     }
@@ -430,7 +430,7 @@ async fn run_connection(
                                         if let Some(ref d) = event.d {
                                             if let Some(sid) = d.get("session_id").and_then(|v| v.as_str()) {
                                                 session.session_id = Some(sid.to_string());
-                                                log::info!("QQ WS: READY session={}", sid);
+                                                tracing::info!("QQ WS: READY session={}", sid);
                                             }
                                         }
                                     }
@@ -445,20 +445,20 @@ async fn run_connection(
                                             dispatch.user_openid.as_deref(),
                                         ) {
                                             Ok(Some(resolved)) => {
-                                                log::info!("QQ WS: ingest {} ({})", dispatch.source, dispatch.msg_id);
+                                                tracing::info!("QQ WS: ingest {} ({})", dispatch.source, dispatch.msg_id);
                                                 if let Some(binding) = resolved.binding {
-                                                    log::info!("QQ WS: 路由命中 {} / {} / {}", binding.agent_id, binding.profile_id, binding.session_key);
+                                                    tracing::info!("QQ WS: 路由命中 {} / {} / {}", binding.agent_id, binding.profile_id, binding.session_key);
                                                 }
                                             }
-                                            Ok(None) => log::debug!("QQ WS: 丢弃消息 {}（重放/白名单）", dispatch.msg_id),
-                                            Err(error) => log::warn!("QQ WS: ingest 失败: {error}"),
+                                            Ok(None) => tracing::debug!("QQ WS: 丢弃消息 {}（重放/白名单）", dispatch.msg_id),
+                                            Err(error) => tracing::warn!("QQ WS: ingest 失败: {error}"),
                                         }
                                     }
                                     }
                                     Err(error) => {
                                         parse_fail_streak += 1;
                                         let preview: String = text.chars().take(200).collect();
-                                        log::warn!(
+                                        tracing::warn!(
                                             "QQ WS: 帧解析失败 ({parse_fail_streak} 次): {error}: {preview}"
                                         );
                                         if parse_fail_streak >= MAX_PARSE_FAILURES {
@@ -560,8 +560,8 @@ pub async fn connect(url: &str) -> Result<WsStream, String> {
         .map_err(|e| format!("WS 握手: {e}"))?;
 
     match proxy {
-        Some(_) => log::info!("QQ WS: 通过代理已连接"),
-        None => log::info!("QQ WS: 直连已连接"),
+        Some(_) => tracing::info!("QQ WS: 通过代理已连接"),
+        None => tracing::info!("QQ WS: 直连已连接"),
     }
     Ok(ws)
 }
@@ -587,7 +587,7 @@ fn parse_proxy(proxy_raw: &str) -> Result<ProxyConfig, String> {
         scheme => {
             return Err(format!(
                 "不支持的代理协议 {scheme}://，仅支持 http/https CONNECT"
-            ))
+            ));
         }
     }
 
@@ -649,7 +649,7 @@ async fn tunnel(
             resp.lines().next().unwrap_or("")
         ));
     }
-    log::info!("QQ WS: 代理隧道 → {target_host}:{target_port}");
+    tracing::info!("QQ WS: 代理隧道 → {target_host}:{target_port}");
 
     tls_wrap(stream, target_host).await
 }
@@ -664,7 +664,7 @@ fn tls_config() -> Arc<rustls::ClientConfig> {
             let mut root_store = rustls::RootCertStore::empty();
             let certs = rustls_native_certs::load_native_certs();
             if !certs.errors.is_empty() {
-                log::warn!("QQ WS: 加载系统证书 {} 个错误", certs.errors.len());
+                tracing::warn!("QQ WS: 加载系统证书 {} 个错误", certs.errors.len());
             }
             for cert in certs.certs {
                 let _ = root_store.add(cert);

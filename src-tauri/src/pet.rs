@@ -313,7 +313,7 @@ pub fn write_json_atomic(path: &std::path::Path, json: &str) -> Result<(), Strin
     // 不再留下半截 `.xxx.tmp` 垃圾文件。
     if let Err(ref error) = result {
         let _ = std::fs::remove_file(&unique);
-        log::warn!("write state file failed: {error}");
+        tracing::warn!("write state file failed: {error}");
     }
     result
 }
@@ -332,7 +332,7 @@ const MAX_STATE_FILE_BYTES: u64 = 16 * 1024 * 1024;
 pub fn load_from_file(path: &std::path::Path) -> Option<PetState> {
     let len = std::fs::metadata(path).ok()?.len();
     if len > MAX_STATE_FILE_BYTES {
-        log::warn!("state file too large ({} bytes), treating as corrupt", len);
+        tracing::warn!("state file too large ({} bytes), treating as corrupt", len);
         return None;
     }
     let raw = std::fs::read_to_string(path).ok()?;

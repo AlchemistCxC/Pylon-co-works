@@ -110,7 +110,7 @@ impl QqAuth {
         *self.token.lock().unwrap_or_else(|p| p.into_inner()) =
             Some((data.access_token, expires_at));
 
-        log::info!("QQ token 已刷新，有效期 {} 秒", expires_in);
+        tracing::info!("QQ token 已刷新，有效期 {} 秒", expires_in);
         Ok(token)
     }
 

@@ -18,10 +18,10 @@ pub(crate) fn persist_pet_if_possible(app: &tauri::AppHandle, pet: &pet::PetStat
     match pet_persist_path(app) {
         Ok(path) => {
             if let Err(error) = pet::save_to_file(pet, &path) {
-                log::warn!("persist pet state failed: {error}");
+                tracing::warn!("persist pet state failed: {error}");
             }
         }
-        Err(error) => log::warn!("resolve pet persist path failed: {error}"),
+        Err(error) => tracing::warn!("resolve pet persist path failed: {error}"),
     }
 }
 
@@ -35,7 +35,7 @@ pub(crate) async fn persist_pet_async(state: &AppState, app: &tauri::AppHandle) 
     let path = match pet_persist_path(app) {
         Ok(path) => path,
         Err(error) => {
-            log::warn!("resolve pet persist path failed: {error}");
+            tracing::warn!("resolve pet persist path failed: {error}");
             return false;
         }
     };
@@ -46,14 +46,14 @@ pub(crate) async fn persist_pet_async(state: &AppState, app: &tauri::AppHandle) 
         let pet = match state.pet.lock() {
             Ok(pet) => pet,
             Err(_) => {
-                log::warn!("pet lock poisoned; skip persist");
+                tracing::warn!("pet lock poisoned; skip persist");
                 return false;
             }
         };
         match pet::serialize_state(&pet) {
             Ok(json) => json,
             Err(error) => {
-                log::warn!("serialize pet state failed: {error}");
+                tracing::warn!("serialize pet state failed: {error}");
                 return false;
             }
         }
@@ -61,11 +61,11 @@ pub(crate) async fn persist_pet_async(state: &AppState, app: &tauri::AppHandle) 
     match tokio::task::spawn_blocking(move || pet::write_json_atomic(&path, &json)).await {
         Ok(Ok(())) => true,
         Ok(Err(error)) => {
-            log::warn!("persist pet state failed: {error}");
+            tracing::warn!("persist pet state failed: {error}");
             false
         }
         Err(error) => {
-            log::warn!("persist pet task failed: {error}");
+            tracing::warn!("persist pet task failed: {error}");
             false
         }
     }

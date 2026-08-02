@@ -75,7 +75,7 @@ where
     W: Emitter<R>,
 {
     if let Err(error) = window.emit(event, payload) {
-        log::warn!("emit {event} failed: {error}");
+        tracing::warn!("emit {event} failed: {error}");
     }
 }
 
@@ -328,15 +328,15 @@ impl AppStateHandles {
                 let stale = pending.len();
                 pending.clear();
                 if stale > 0 {
-                    log::warn!("客户端替换：清理 {stale} 个挂起的权限请求（旧进程已失效）");
+                    tracing::warn!("客户端替换：清理 {stale} 个挂起的权限请求（旧进程已失效）");
                 }
             }
-            log::info!("ACP client activated; generation is now {}", new_generation);
+            tracing::info!("ACP client activated; generation is now {}", new_generation);
             old_acp
         };
         start_notification_dispatcher(self, runtime, window);
         if let Err(error) = old_acp.kill() {
-            log::warn!("kill replaced agent: {}", error);
+            tracing::warn!("kill replaced agent: {}", error);
         }
         Ok(())
     }
@@ -2336,7 +2336,7 @@ gateway:
                 )
                 .await
                 {
-                    log::warn!("ingest send failed: {error}");
+                    tracing::warn!("ingest send failed: {error}");
                 }
             });
         }));
@@ -2407,6 +2407,20 @@ gateway:
     }
 }
 
+/// R18：初始化 tracing subscriber——fmt（stderr，INFO 上限）+ RuntimeLogLayer
+/// （tracing event → RuntimeLogHub 转发，level/source/message/fields 形状保持）。
+/// main.rs 在 run() 之前调用；hub 本身由 run() 创建后经 register_hub 注册，
+/// Layer 按事件惰性读取，注册前的 event 直接丢弃（此前 log 宏本就无 sink）。
+pub fn init_tracing() {
+    use tracing_subscriber::layer::Layer;
+    let base = tracing_subscriber::fmt()
+        .with_max_level(tracing::Level::INFO)
+        .with_writer(std::io::stderr)
+        .finish();
+    let subscriber = runtime_log::RuntimeLogLayer::new().with_subscriber(base);
+    let _ = tracing::subscriber::set_global_default(subscriber);
+}
+
 /// 会话过期判定（B10.3b，参考 Hermes reset policy）：返回过期原因，None = 未过期。
 ///
 /// - reset="off"：永不过期
@@ -2449,6 +2463,7 @@ pub fn run() {
             }
         };
         let runtime_logs = runtime_log::RuntimeLogHub::default();
+        runtime_log::register_hub(runtime_logs.clone());
         let gateway = Arc::new(GatewayCore::new());
         // QQ 适配器（B10.2）：凭据存在时创建 auth + adapter + WS 循环并注册进 gateway。
         // PYLON_QQ_CLIENT_SECRET 为 secret：只读入 QqAuth，不进任何输出。
@@ -2476,7 +2491,7 @@ pub fn run() {
             if let Err(error) = gateway.register(qq_adapter.clone()) {
                 eprintln!("Pylon QQ adapter register failed: {error}");
             } else {
-                log::info!("QQ 适配器已注册（PYLON_QQ_APP_ID）");
+                tracing::info!("QQ 适配器已注册（PYLON_QQ_APP_ID）");
                 tokio::spawn(gateway::qq::ws::run_ws_loop(qq_http, qq_auth, qq_adapter));
             }
         }
@@ -2557,7 +2572,7 @@ pub fn run() {
             ])
             .setup(|app| {
                 let window = app.get_webview_window("main").ok_or("main window not found")?;
-                if let Err(error) = window.set_title("Pylon") { log::warn!("set window title failed: {error}"); }
+                if let Err(error) = window.set_title("Pylon") { tracing::warn!("set window title failed: {error}"); }
                 // 宠物状态落盘加载：文件缺失/损坏时保持新宠物（静默降级）
                 match pet_persist_path(app.handle()) {
                     Ok(path) => {
@@ -2568,7 +2583,7 @@ pub fn run() {
                             };
                         }
                     }
-                    Err(error) => log::warn!("resolve pet persist path failed: {error}"),
+                    Err(error) => tracing::warn!("resolve pet persist path failed: {error}"),
                 }
                 // B4.2：MCP 配置落盘加载（重启不丢）。文件缺失/损坏/非法 → 保持空配置（静默降级）。
                 match mcp_persist_path(app.handle()) {
@@ -2576,11 +2591,11 @@ pub fn run() {
                         if let Some(servers) = load_mcp_persisted(&path) {
                             if let Ok(mut slot) = app.state::<AppState>().runtime_mcp.lock() {
                                 *slot = Some(servers);
-                                log::info!("MCP 配置已从 {} 恢复", path.display());
+                                tracing::info!("MCP 配置已从 {} 恢复", path.display());
                             }
                         }
                     }
-                    Err(error) => log::warn!("resolve MCP persist path failed: {error}"),
+                    Err(error) => tracing::warn!("resolve MCP persist path failed: {error}"),
                 }
                 let handles = AppStateHandles::from_state(app.state::<AppState>().inner());
                 if let Some(runtime) = handles.active_runtime() {
@@ -2607,13 +2622,13 @@ pub fn run() {
                                     state.inner().active_agent.lock().map(|v| v.clone()).unwrap_or_default()
                                 });
                             if agent_id.is_empty() {
-                                log::warn!("gateway ingest 无路由目标（未绑定且无 active agent）: {}", resolved.source);
+                                tracing::warn!("gateway ingest 无路由目标（未绑定且无 active agent）: {}", resolved.source);
                                 return;
                             }
                             let runtime = state.inner().runtimes.get_or_create(&agent_id);
                             if let Some(webview) = webview.as_ref() {
                                 if let Err(error) = state.inner().ensure_runtime_ready(&runtime, &agent_id, webview).await {
-                                    log::warn!("gateway ingest 目标 agent 连接失败 ({agent_id}): {error}");
+                                    tracing::warn!("gateway ingest 目标 agent 连接失败 ({agent_id}): {error}");
                                     return;
                                 }
                             }
@@ -2635,7 +2650,7 @@ pub fn run() {
                                 None,
                                 agent_cwd.as_deref(),
                             ).await {
-                                log::warn!("gateway ingest 发送失败 ({}): {error}", resolved.source);
+                                tracing::warn!("gateway ingest 发送失败 ({}): {error}", resolved.source);
                                 // C14：发送失败回滚去重 seen——故障期消息不占去重窗口，
                                 // resume 重放可重新 ingest（防故障期消息永久丢失）。
                                 // 经 PlatformAdapter::rollback_seen（trait 默认空实现，

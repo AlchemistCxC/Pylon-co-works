@@ -209,7 +209,7 @@ async fn resolve_pending(
             Ok(Ok(())) => true,
             Ok(Err(_)) => false,
             Err(_) => {
-                log::warn!("ACP write timeout after 10s: connection presumed dead");
+                tracing::warn!("ACP write timeout after 10s: connection presumed dead");
                 crashed.store(true, Ordering::Release);
                 false
             }
@@ -270,7 +270,7 @@ pub(crate) async fn resolve_permission(
             "permission request not found: {request_id}"
         )));
     }
-    log::info!("权限请求 {request_id} 已应答 {option_id}");
+    tracing::info!("权限请求 {request_id} 已应答 {option_id}");
     Ok(())
 }
 
@@ -330,7 +330,7 @@ pub(crate) async fn check_pending_permission_timeouts(state: &AppState) {
                 .map(|pending| pending.len())
                 .unwrap_or(0);
             if dropped > 0 {
-                log::warn!("runtime 已崩溃，清空 {dropped} 条挂起权限请求");
+                tracing::warn!("runtime 已崩溃，清空 {dropped} 条挂起权限请求");
             }
             let _ = runtime
                 .pending_permissions
@@ -374,7 +374,9 @@ pub(crate) async fn check_pending_permission_timeouts(state: &AppState) {
                     .to_string();
                 async move {
                     let _ = resolve_pending(&runtime, request_id, None, &option_id).await;
-                    log::warn!("权限请求 {request_id} 超时默认拒绝 {option_id}（{tool_call_id}）");
+                    tracing::warn!(
+                        "权限请求 {request_id} 超时默认拒绝 {option_id}（{tool_call_id}）"
+                    );
                 }
             });
         futures_util::future::join_all(responses).await;

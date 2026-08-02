@@ -308,7 +308,7 @@ impl ManagedChild {
         };
         let job = unsafe { CreateJobObjectW(std::ptr::null(), std::ptr::null()) };
         if job.is_null() {
-            log::warn!(
+            tracing::warn!(
                 "ACP: CreateJobObjectW failed ({}); taskkill fallback",
                 std::io::Error::last_os_error()
             );
@@ -325,7 +325,7 @@ impl ManagedChild {
             )
         };
         if set_ok == 0 {
-            log::warn!(
+            tracing::warn!(
                 "ACP: SetInformationJobObject failed ({}); taskkill fallback",
                 std::io::Error::last_os_error()
             );
@@ -333,7 +333,7 @@ impl ManagedChild {
             return;
         }
         if unsafe { AssignProcessToJobObject(job, child.as_raw_handle()) } == 0 {
-            log::warn!(
+            tracing::warn!(
                 "ACP: AssignProcessToJobObject failed ({}); taskkill fallback",
                 std::io::Error::last_os_error()
             );
@@ -387,7 +387,7 @@ impl ManagedChild {
             // 随后 wait 回收直接子进程（进程可能已抢先退出，wait 报错仅记 warn）。
             self.job = None;
             if let Err(error) = child.wait() {
-                log::warn!("wait after job close: {error}");
+                tracing::warn!("wait after job close: {error}");
             }
             return Ok(());
         }
@@ -399,7 +399,7 @@ impl ManagedChild {
                     // taskkill /T 已杀整个进程树；wait 回收句柄（进程可能已
                     // 抢先退出，wait 报错仅记 warn，不视为失败）。
                     if let Err(error) = child.wait() {
-                        log::warn!("wait after taskkill: {error}");
+                        tracing::warn!("wait after taskkill: {error}");
                     }
                     return Ok(());
                 }
@@ -438,7 +438,7 @@ impl ManagedChild {
 impl Drop for ManagedChild {
     fn drop(&mut self) {
         if let Err(error) = self.kill_and_wait() {
-            log::warn!("cleanup ACP child: {}", error);
+            tracing::warn!("cleanup ACP child: {}", error);
         }
     }
 }
@@ -606,7 +606,7 @@ where
             {
                 Ok(result) => result.err(),
                 Err(_) => {
-                    log::warn!("ACP: cancel timed out after {WRITE_TIMEOUT_SECS}s");
+                    tracing::warn!("ACP: cancel timed out after {WRITE_TIMEOUT_SECS}s");
                     Some("ACP write timeout".to_string())
                 }
             };
@@ -640,7 +640,9 @@ async fn send_line(
         Ok(Ok(())) => Ok(()),
         Ok(Err(_)) => Err(AcpError::ConnectionClosed),
         Err(_) => {
-            log::warn!("ACP write timeout after {WRITE_TIMEOUT_SECS}s: connection presumed dead");
+            tracing::warn!(
+                "ACP write timeout after {WRITE_TIMEOUT_SECS}s: connection presumed dead"
+            );
             crashed.store(true, Ordering::Release);
             Err(AcpError::WriteTimeout)
         }
@@ -1039,7 +1041,7 @@ impl AcpClient {
                             // writer 自行置位 crashed（与 send_line 超时语义一致），
                             // 上层快速失败并触发自动重连。
                             Err(_) => {
-                                log::warn!(
+                                tracing::warn!(
                                     "ACP writer timeout after {WRITE_TIMEOUT_SECS}s: connection presumed dead"
                                 );
                                 writer_crashed.store(true, Ordering::Release);
@@ -1059,7 +1061,7 @@ impl AcpClient {
                     for l in BufReader::new(stderr).lines().map_while(Result::ok) {
                         if !l.is_empty() {
                             let safe = crate::runtime_log::sanitize_message(l.clone());
-                            log::error!("{} stderr: {}", agent_name_stderr, safe);
+                            tracing::error!("{} stderr: {}", agent_name_stderr, safe);
                             if let Some(hub) = &stderr_logs {
                                 hub.push(
                                     crate::time::Timestamp::now(),
@@ -1100,7 +1102,7 @@ impl AcpClient {
                         let msg_val: serde_json::Value = match serde_json::from_str(&line) {
                             Ok(v) => v,
                             Err(e) => {
-                                log::error!("ACP parse: {}", e);
+                                tracing::error!("ACP parse: {}", e);
                                 if let Some(hub) = &stdout_logs {
                                     hub.push(
                                         crate::time::Timestamp::now(),
@@ -1141,7 +1143,9 @@ impl AcpClient {
                                         // poison 时无法 resolve pending，标记 crashed 让上层收敛，
                                         // 避免读线程 panic 后 pending 悬挂到超时。
                                         crashed_reader.store(true, Ordering::Relaxed);
-                                        log::error!("ACP: pending shard lock poisoned for id {id}");
+                                        tracing::error!(
+                                            "ACP: pending shard lock poisoned for id {id}"
+                                        );
                                     }
                                 }
                             }
@@ -1153,7 +1157,7 @@ impl AcpClient {
                     // 自动重连依赖此信号（dispatcher select! 双路监听）。
                     let _ = crashed_watch_reader.send(true);
                     let drained = Self::drain_pending(&pending_clone);
-                    log::warn!(
+                    tracing::warn!(
                         "ACP: drained {} pending requests after stdout closed",
                         drained
                     );
@@ -1174,7 +1178,7 @@ impl AcpClient {
                             serde_json::Map::new(),
                         );
                     }
-                    log::error!("ACP: child process stdout closed (agent crashed)");
+                    tracing::error!("ACP: child process stdout closed (agent crashed)");
                 });
 
                 let client = AcpClient {
@@ -1291,7 +1295,7 @@ impl AcpClient {
                     if replay.len() < 10_000 {
                         replay.push(params);
                     } else if replay.len() == 10_000 {
-                        log::warn!("session/load replay 超过 10000 条，截断");
+                        tracing::warn!("session/load replay 超过 10000 条，截断");
                         replay.truncate(10_000);
                     }
                 }

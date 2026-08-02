@@ -157,7 +157,7 @@ pub fn parse_config(input: &str) -> Result<GatewayConfig, String> {
     if !config.extra.is_empty() {
         let mut keys: Vec<&String> = config.extra.keys().collect();
         keys.sort();
-        log::warn!("gateway 配置含未知顶层字段（可能拼错）: {keys:?}");
+        tracing::warn!("gateway 配置含未知顶层字段（可能拼错）: {keys:?}");
     }
     let section = config.gateway.unwrap_or_default();
     let routes = section.routes;

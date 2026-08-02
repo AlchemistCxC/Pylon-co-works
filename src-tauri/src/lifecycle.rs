@@ -450,20 +450,20 @@ pub(crate) fn persist_mcp_if_possible<R: tauri::Runtime>(
     let path = match mcp_persist_path(app) {
         Ok(path) => path,
         Err(error) => {
-            log::warn!("resolve MCP persist path failed: {error}");
+            tracing::warn!("resolve MCP persist path failed: {error}");
             return;
         }
     };
     let json = match serde_json::to_string(servers) {
         Ok(json) => json,
         Err(error) => {
-            log::warn!("serialize MCP config failed: {error}");
+            tracing::warn!("serialize MCP config failed: {error}");
             return;
         }
     };
     if let Some(parent) = path.parent() {
         if let Err(error) = std::fs::create_dir_all(parent) {
-            log::warn!("create MCP persist directory failed: {error}");
+            tracing::warn!("create MCP persist directory failed: {error}");
             return;
         }
     }
@@ -485,7 +485,7 @@ pub(crate) fn persist_mcp_if_possible<R: tauri::Runtime>(
     })();
     if let Err(error) = result {
         let _ = std::fs::remove_file(&unique);
-        log::warn!("persist MCP config failed: {error}");
+        tracing::warn!("persist MCP config failed: {error}");
     }
 }
 
@@ -499,7 +499,7 @@ pub(crate) fn load_mcp_persisted(
     match crate::mcp::validate_and_serialize(Some(servers.clone())) {
         Ok(_) => Some(servers),
         Err(error) => {
-            log::warn!("loaded MCP config invalid; ignored: {error}");
+            tracing::warn!("loaded MCP config invalid; ignored: {error}");
             None
         }
     }

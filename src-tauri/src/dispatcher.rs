@@ -176,7 +176,7 @@ async fn handle_permission_request<R: tauri::Runtime>(
     let Some(permission) =
         parse_permission_request_with_generation(params, client_generation.load(Ordering::Acquire))
     else {
-        log::warn!("ACP request_permission 解析失败 (id={request_id})，按拒绝处理");
+        tracing::warn!("ACP request_permission 解析失败 (id={request_id})，按拒绝处理");
         let acp = acp.lock().await;
         // C5：解析失败无选项可用 → pick_option 空集 → reject_once 兜底
         let option_id = pick_option(&[], true).unwrap_or("reject_once");
@@ -190,7 +190,7 @@ async fn handle_permission_request<R: tauri::Runtime>(
         .map(|m| m.clone())
         .unwrap_or_else(|_| "default".to_string());
     if matches!(mode.as_str(), "bypass" | "auto") {
-        log::info!(
+        tracing::info!(
             "权限模式 {mode}：自动批准工具调用 {}",
             permission.tool_call_id
         );
@@ -240,7 +240,7 @@ async fn handle_session_update<R: tauri::Runtime>(
     let peri_id = match payload.get("sessionId").and_then(|v| v.as_str()) {
         Some(id) => id.to_string(),
         None => {
-            log::warn!("ACP session/update missing sessionId");
+            tracing::warn!("ACP session/update missing sessionId");
             return true;
         }
     };
@@ -275,14 +275,14 @@ async fn handle_session_update<R: tauri::Runtime>(
             let _ = tokio::time::timeout(remaining, mapping_ready.notified()).await;
         }
         if ambiguous {
-            log::warn!(
+            tracing::warn!(
                 "ACP notification rejected: periId {} maps to multiple local sources",
                 peri_id
             );
             return true;
         }
         let Some(mapped) = mapped else {
-            log::warn!("ACP notification for unknown session {}", peri_id);
+            tracing::warn!("ACP notification for unknown session {}", peri_id);
             return true;
         };
         mapped.0
@@ -290,11 +290,11 @@ async fn handle_session_update<R: tauri::Runtime>(
     // source_for_peri_id_in_generation 已按代过滤（返回的映射
     // generation 必等于本 dispatcher 代），此处仅复核客户端未替换。
     if client_generation.load(Ordering::Acquire) != generation {
-        log::warn!("ACP notification rejected for stale session {}", peri_id);
+        tracing::warn!("ACP notification rejected for stale session {}", peri_id);
         return true;
     }
     let Some(update) = payload.get("update") else {
-        log::warn!("ACP session/update missing update payload");
+        tracing::warn!("ACP session/update missing update payload");
         return true;
     };
     // R4：sessionUpdate 变体经枚举解析（未知变体 → None，与旧 _ => {} 忽略一致）。
@@ -321,7 +321,7 @@ async fn handle_session_update<R: tauri::Runtime>(
             }) == Some(true)
     };
     if !mapping_is_current() {
-        log::warn!("ACP notification rejected for stale session {}", peri_id);
+        tracing::warn!("ACP notification rejected for stale session {}", peri_id);
         return true;
     }
     if variant == Some(crate::acp::SessionUpdateVariant::AgentMessageChunk) {
@@ -524,7 +524,7 @@ pub(crate) fn start_notification_dispatcher<R: tauri::Runtime>(
                         // 标志吸收的）→ 本循环已失效：放弃旧 ticket、以最新 epoch 重新
                         // 武装（预算与退避重置），本循环仍是唯一重连权威（标志持续持有）。
                         if epoch_for_reconnect.load(Ordering::Acquire) != scheduled_epoch {
-                            log::info!(
+                            tracing::info!(
                                 "auto-reconnect superseded by a newer crash; re-arming from attempt 1"
                             );
                             // 放弃旧 ticket：以最新 epoch 重新武装。
@@ -613,7 +613,7 @@ pub(crate) fn start_notification_dispatcher<R: tauri::Runtime>(
                                 break;
                             }
                             Err(error) => {
-                                log::warn!("auto-reconnect attempt {attempt} failed: {error}");
+                                tracing::warn!("auto-reconnect attempt {attempt} failed: {error}");
                                 attempt += 1;
                                 remaining_attempts -= 1;
                             }
@@ -651,7 +651,7 @@ pub(crate) fn start_notification_dispatcher<R: tauri::Runtime>(
             let raw = match raw {
                 Ok(raw) => raw,
                 Err(tokio::sync::broadcast::error::RecvError::Lagged(n)) => {
-                    log::warn!("notification dispatcher lagged by {} messages", n);
+                    tracing::warn!("notification dispatcher lagged by {} messages", n);
                     continue;
                 }
                 Err(tokio::sync::broadcast::error::RecvError::Closed) => break,
@@ -686,7 +686,7 @@ pub(crate) fn start_notification_dispatcher<R: tauri::Runtime>(
             let payload = match raw.params {
                 Some(serde_json::Value::Object(map)) => serde_json::Value::Object(map),
                 _ => {
-                    log::warn!("ACP session/update missing object params");
+                    tracing::warn!("ACP session/update missing object params");
                     continue;
                 }
             };

@@ -506,10 +506,10 @@ impl AppState {
                 match events.recv().await {
                     Ok(entry) => match serde_json::to_value(entry) {
                         Ok(payload) => emit_event(&window, "pylon:runtime-log", payload),
-                        Err(error) => log::warn!("serialize runtime log event failed: {error}"),
+                        Err(error) => tracing::warn!("serialize runtime log event failed: {error}"),
                     },
                     Err(tokio::sync::broadcast::error::RecvError::Lagged(count)) => {
-                        log::warn!("runtime log event dispatcher lagged by {count} entries");
+                        tracing::warn!("runtime log event dispatcher lagged by {count} entries");
                     }
                     Err(tokio::sync::broadcast::error::RecvError::Closed) => break,
                 }
@@ -659,7 +659,7 @@ pub(crate) async fn check_session_expiry(state: &AppState) {
             let Some(reason) = session_expired(updated_at, now, reset, idle_minutes) else {
                 continue;
             };
-            log::info!("会话过期 ({source}): {reason}");
+            tracing::info!("会话过期 ({source}): {reason}");
             // 审查修复：删除前按 (peri_id, generation) 复核映射——close RPC 期间若
             // 同 source 新建了会话，不得把新映射误删（旧映射已被 new_session 替换）。
             let removed = {
@@ -704,7 +704,7 @@ pub(crate) async fn check_session_expiry(state: &AppState) {
                     .acp_rpc(&runtime, acp::METHOD_SESSION_CLOSE, close_params)
                     .await
                 {
-                    log::warn!("close expired session {peri_id}: {error}");
+                    tracing::warn!("close expired session {peri_id}: {error}");
                 }
             }
             // 审查修复：应答该 session 挂起的权限请求为 Cancelled（协议要求）
@@ -825,7 +825,7 @@ pub(crate) async fn new_session(
                 .acp_rpc(&runtime, acp::METHOD_SESSION_CLOSE, close_params)
                 .await
             {
-                log::warn!("close replaced session: {}", error);
+                tracing::warn!("close replaced session: {}", error);
             }
         }
     }
@@ -954,7 +954,7 @@ async fn prepare_prompt_blocks(
                 compose_inject_prompt(&result.context, &prompt_content)
             }
             Err(error) => {
-                log::warn!("Prism inject failed: {error}");
+                tracing::warn!("Prism inject failed: {error}");
                 state.log_runtime_summary(
                     "warn",
                     "inject",
@@ -1093,7 +1093,7 @@ async fn finalize_response<R: tauri::Runtime>(
                 Ok(value) => {
                     let ok = value.get("ok").and_then(|v| v.as_bool()).unwrap_or(false);
                     if !ok {
-                        log::warn!("Prism persist 返回失败: {value}");
+                        tracing::warn!("Prism persist 返回失败: {value}");
                     }
                     state.log_runtime_summary(
                         "info",
@@ -1108,7 +1108,7 @@ async fn finalize_response<R: tauri::Runtime>(
                     );
                 }
                 Err(error) => {
-                    log::warn!("Prism persist failed: {error}");
+                    tracing::warn!("Prism persist failed: {error}");
                     state.log_runtime_summary(
                         "warn",
                         "persist",
@@ -1395,7 +1395,7 @@ pub(crate) async fn send_prompt_core<R: tauri::Runtime>(
         } => {
             runtime.acp.lock().await.remove_pending(request_id);
             if let Some(cancel_error) = cancel_error {
-                log::warn!("cancel timed-out prompt {}: {}", peri_id, cancel_error);
+                tracing::warn!("cancel timed-out prompt {}: {}", peri_id, cancel_error);
             }
             // B9：cancel 后应答该 session 挂起的权限请求为 Cancelled
             crate::permission::respond_pending_permissions_cancelled(runtime, &peri_id).await;
@@ -1403,7 +1403,7 @@ pub(crate) async fn send_prompt_core<R: tauri::Runtime>(
                 match state.remove_session_if_matches(runtime, source, &peri_id, prompt_generation)
                 {
                     Ok(true) => {
-                        log::error!(
+                        tracing::error!(
                             "cancelled prompt {} did not settle within {}s; removed local session mapping",
                             peri_id,
                             acp::CANCEL_SETTLE_TIMEOUT_SECS
@@ -1413,7 +1413,7 @@ pub(crate) async fn send_prompt_core<R: tauri::Runtime>(
                                 .acp_rpc(runtime, acp::METHOD_SESSION_CLOSE, close_params)
                                 .await
                             {
-                                log::warn!(
+                                tracing::warn!(
                                     "close unsettled prompt session {}: {}",
                                     peri_id,
                                     close_error
@@ -1552,7 +1552,7 @@ pub(crate) async fn close_session(
     {
         let message = error.to_string();
         if message.contains("-32601") || message.contains("Method not found") {
-            log::warn!("agent does not support session/close ({message}); local cleanup only");
+            tracing::warn!("agent does not support session/close ({message}); local cleanup only");
         } else {
             return Err(error.into());
         }
