@@ -33,7 +33,7 @@ export default forwardRef<{ send: () => void; attachFile: () => void; cancel: ()
   const [value, setValue] = useState('')
   const [cmdIdx, setCmdIdx] = useState(0)
   const [sendError, setSendError] = useState('')
-  const [attached, setAttached] = useState<{path:string;name:string;size:number}[]>([])
+  const [attached, setAttached] = useState<{path:string;name:string}[]>([])
   const [historyIndex, setHistoryIndex] = useState(-1)
   const [historyLength, setHistoryLength] = useState(0)
   const [queuedMessages, setQueuedMessages] = useState<QueuedMessage[]>([])
@@ -296,7 +296,7 @@ export default forwardRef<{ send: () => void; attachFile: () => void; cancel: ()
       if (!selected) return
       const path = selected as string
       const name = path.replace(/^.*[\\\\/]/, '')
-      setAttached(prev => [...prev, { path, name, size: 0 }])
+      setAttached(prev => [...prev, { path, name }])
     } catch (e) { /* cancelled */ }
   }
 
