@@ -9,7 +9,7 @@ import Anser from 'anser'
 import GenerationFooter, { type GenerationPhase, type GenerationSummary } from './GenerationFooter'
 import { resolveSpinnerFrames } from './spinnerFrames'
 import { isCurrentLoadGeneration, nextLoadGeneration, resolveLoadedMessages, serializeLoadedMessages } from './replayState'
-import { canPersistMessages, clearMessageStorage, messageStorageKey, persistMessageSnapshot } from './messagePersistence'
+import { canPersistMessages, clearMessageStorage, messageStorageKey, parseMessageSnapshot, persistMessageSnapshot } from './messagePersistence'
 import { extractMode, extractModelConfig, sessionResponseObject, type SessionResponse } from './acpTypes'
 import { highlightCode } from './codeHighlight'
 import { sanitizeHtml } from './htmlSanitizer'
@@ -155,6 +155,40 @@ const ChatView = React.memo(function ChatView({ sessionId }: Props) {
     node.scrollIntoView({ behavior: 'smooth', block: 'center' })
   }, [searchMatches, searchIndex])
 
+  // 2026-08-02 加固：controller attach 必须先于 sessionId 切换 effect 声明——
+  // React effect 按声明顺序执行，首挂载时若 controller 未就绪，initSource 被跳过
+  // （controller runtimeState 从空开始，后续 live 事件覆盖 UI 缓存导致历史丢失）。
+  // eventControllerRefs 构造也随之上移（attach 块消费它，必须在初始化后使用）。
+  const eventControllerRefs = useRef<ChatEventControllerRefs | null>(null)
+  if (!eventControllerRefs.current) {
+    eventControllerRefs.current = {
+      sessionRef,
+      messageOwnerRef,
+      setMessages,
+      setStreamingText,
+      setStreamingThinking,
+      setGenerating,
+      setGenerationPhase,
+      setSummary,
+      setLastTokenAt,
+    }
+  }
+  const controllerRefs = eventControllerRefs.current
+  useEffect(() => {
+    // 非 Tauri 环境（浏览器预览 mock）不挂接 controller——
+    // @tauri-apps/api 的 listen() 在无后端时会 reject，此前每次挂载产生多个未处理
+    // rejection 且 dispose 的 unlisten.then 永不执行。所有消费点（initSource/
+    // commitReplay/clearReplay/pruneSources/requestCancel）均有可选链或 fallback。
+    if (!IS_TAURI) return
+    controllerHandleRef.current = attachChatEventController(controllerRefs)
+    registerChatController(controllerHandleRef.current)
+    return () => {
+      registerChatController(null)
+      controllerHandleRef.current?.dispose()
+      controllerHandleRef.current = null
+    }
+  }, [])
+
   useEffect(() => {
     if (sessionId === prevSessionRef.current) return
     prevSessionRef.current = sessionId
@@ -173,11 +207,8 @@ const ChatView = React.memo(function ChatView({ sessionId }: Props) {
     const cached = (() => {
       const stored = localStorage.getItem(messageStorageKey(s.id))
       if (!stored) return []
-      try {
-        return (JSON.parse(stored) as Message[]).map(message => ({ ...message, running: false }))
-      } catch {
-        return []
-      }
+      // 2026-08-02：parseMessageSnapshot 兼容版本 envelope 与旧裸数组（损坏返回 null → 空）
+      return (parseMessageSnapshot<Message>(stored) ?? []).map(message => ({ ...message, running: false }))
     })()
     const messages = controllerHandleRef.current
       ? controllerHandleRef.current.initSource(s.source, cached)
@@ -249,36 +280,6 @@ const ChatView = React.memo(function ChatView({ sessionId }: Props) {
       if (!activeSources.includes(source)) delete loadGenerationRef.current[source]
     }
   }, [sessions, sessionId])
-
-  const eventControllerRefs = useRef<ChatEventControllerRefs | null>(null)
-  if (!eventControllerRefs.current) {
-    eventControllerRefs.current = {
-      sessionRef,
-      messageOwnerRef,
-      setMessages,
-      setStreamingText,
-      setStreamingThinking,
-      setGenerating,
-      setGenerationPhase,
-      setSummary,
-      setLastTokenAt,
-    }
-  }
-  const controllerRefs = eventControllerRefs.current
-  useEffect(() => {
-    // 2026-08-02 修复：非 Tauri 环境（浏览器预览 mock）不挂接 controller——
-    // @tauri-apps/api 的 listen() 在无后端时会 reject，此前每次挂载产生多个未处理
-    // rejection 且 dispose 的 unlisten.then 永不执行。所有消费点（initSource/
-    // commitReplay/clearReplay/pruneSources/requestCancel）均有可选链或 fallback。
-    if (!IS_TAURI) return
-    controllerHandleRef.current = attachChatEventController(controllerRefs)
-    registerChatController(controllerHandleRef.current)
-    return () => {
-      registerChatController(null)
-      controllerHandleRef.current?.dispose()
-      controllerHandleRef.current = null
-    }
-  }, [])
 
   useEffect(() => {
     const container = chatViewRef.current

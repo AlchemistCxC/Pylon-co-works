@@ -185,7 +185,12 @@ export function attachChatEventController(refs: ChatEventControllerRefs): ChatCo
   const commitReplay = (source: string, cached: Message[]): Message[] => {
     const existing = runtimeState[source]
     const replayed = existing?.replaying ?? []
-    const resolved = resolveLoadedMessages({ loadSucceeded: true, cached, replayed })
+    let resolved = resolveLoadedMessages({ loadSucceeded: true, cached, replayed })
+    // 2026-08-02 修复：replay 缓冲与本地缓存均为空（持久化失败/无历史场景）时，
+    // 不得用空数组覆盖内存中已有消息——live 事件可能已先行写入（load 期间 agent 已回话）。
+    if (resolved.length === 0 && existing && existing.messages.length > 0) {
+      resolved = existing.messages
+    }
     const base = existing
       ? { ...existing, replaying: undefined, replayToolIds: [], messages: resolved }
       : { ...createSourceChatRuntime(source), messages: resolved }

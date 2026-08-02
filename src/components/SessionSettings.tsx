@@ -4,6 +4,7 @@ import { invoke } from '@tauri-apps/api/core'
 import { useIdentityStore } from '../identityStore'
 import { reportRuntimeError } from '../runtimeError'
 import { runCloseSessionTransaction } from './chat/closeSessionTransaction'
+import { clearMessageStorage } from './chat/messagePersistence'
 import { createSessionSettingsValues, isSessionSettingsDirty } from './sessionSettingsForm'
 import './SettingsCommon.css'
 import './SessionSettings.css'
@@ -74,7 +75,7 @@ export default function SessionSettings({ sessionId, open, onClose, onDeleted }:
     })
     if (!closed) return
     removeSession(sessionId)
-    localStorage.removeItem('pylon-msgs-' + sessionId)
+    clearMessageStorage(sessionId, localStorage)
     onClose()
     onDeleted?.()
   }

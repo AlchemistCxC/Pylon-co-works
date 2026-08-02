@@ -4,6 +4,7 @@ import { useIdentityStore } from '../identityStore'
 import { formatTime } from '../utils'
 import { reportRuntimeError } from '../runtimeError'
 import { runCloseSessionTransaction } from './chat/closeSessionTransaction'
+import { clearMessageStorage } from './chat/messagePersistence'
 import './Sidebar.css'
 
 const PLATFORM_LABELS: Record<string, string> = { local: '本地', 'qq-group': 'QQ 群聊', 'qq-dm': 'QQ 私聊', terminal: '终端' }
@@ -62,7 +63,7 @@ export default function Sidebar({ activeSession, onSelectSession, onProfileEdit,
       if (!closed) return
     }
     removeSession(id)
-    localStorage.removeItem('pylon-msgs-' + id)
+    clearMessageStorage(id, localStorage)
     if (activeSession === id) onSelectSession(null)
   }
 

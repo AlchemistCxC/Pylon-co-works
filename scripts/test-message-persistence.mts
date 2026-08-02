@@ -1,5 +1,5 @@
 import { strict as assert } from 'node:assert'
-import { canPersistMessages, persistMessageSnapshot } from '../src/components/chat/messagePersistence.ts'
+import { canPersistMessages, parseMessageSnapshot, persistMessageSnapshot } from '../src/components/chat/messagePersistence.ts'
 
 assert.equal(canPersistMessages({
   ownerId: 'session-a',
@@ -37,8 +37,15 @@ const storage = {
 }
 
 persistMessageSnapshot('session-a', [{ id: 'm1' }], storage)
-assert.deepEqual(writes, [['pylon-msgs-session-a', '[{"id":"m1"}]']])
+assert.deepEqual(writes, [['pylon-msgs-session-a', '{"version":1,"messages":[{"id":"m1"}]}']])
 persistMessageSnapshot('session-a', [], storage)
 assert.deepEqual(removes, ['pylon-msgs-session-a'])
+
+// 2026-08-02 版本 envelope：读取兼容新 envelope 与旧裸数组，损坏返回 null
+assert.deepEqual(parseMessageSnapshot('{"version":1,"messages":[{"id":"m1"}]}'), [{ id: 'm1' }])
+assert.deepEqual(parseMessageSnapshot('[{"id":"m1"}]'), [{ id: 'm1' }], '旧裸数组格式必须兼容')
+assert.equal(parseMessageSnapshot('{"version":1,"messages":"not-array"}'), null)
+assert.equal(parseMessageSnapshot('{not json'), null)
+assert.equal(parseMessageSnapshot(null), null)
 
 console.log('messagePersistence 回归测试通过')
