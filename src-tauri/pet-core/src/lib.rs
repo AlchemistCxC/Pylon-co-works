@@ -1231,7 +1231,8 @@ impl PetState {
         }
         let old_steps = self.stats.tokens_total / TOKEN_XP_STEP;
         let new_steps = total / TOKEN_XP_STEP;
-        let gained = new_steps.saturating_sub(old_steps) as u32;
+        // O52：极端量级不再 u32 截断回绕——超限钳到 u32::MAX（增益封顶，行为等价）
+        let gained = u32::try_from(new_steps.saturating_sub(old_steps)).unwrap_or(u32::MAX);
         self.stats.tokens_total = total;
         self.stats.token_xp = self.stats.token_xp.saturating_add(gained);
         self.gain_xp(gained);
