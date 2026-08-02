@@ -96,11 +96,12 @@ fn config_path() -> Option<PathBuf> {
 
 /// O27：env/args 标量宽松化共用转换——String 原样、Number→to_string、Bool→to_string，
 /// 其余（map/seq/null）拒绝。null 不在宽松范围内：显式 null 应视为配置错误。
-fn scalar_to_string(value: serde_yaml::Value) -> Option<String> {
+/// R27b：serde_yaml → serde_yml（API 兼容，noyalib compat 面）。
+fn scalar_to_string(value: serde_yml::Value) -> Option<String> {
     match value {
-        serde_yaml::Value::String(text) => Some(text),
-        serde_yaml::Value::Number(number) => Some(number.to_string()),
-        serde_yaml::Value::Bool(flag) => Some(flag.to_string()),
+        serde_yml::Value::String(text) => Some(text),
+        serde_yml::Value::Number(number) => Some(number.to_string()),
+        serde_yml::Value::Bool(flag) => Some(flag.to_string()),
         _ => None,
     }
 }
@@ -125,7 +126,7 @@ where
         {
             let mut map = HashMap::with_capacity(access.size_hint().unwrap_or(0));
             while let Some(key) = access.next_key::<String>()? {
-                let value = access.next_value::<serde_yaml::Value>()?;
+                let value = access.next_value::<serde_yml::Value>()?;
                 let text = scalar_to_string(value).ok_or_else(|| {
                     serde::de::Error::custom(format!(
                         "agent env 值非法（key {key:?}）: expected string/number/bool"
@@ -145,7 +146,7 @@ fn string_or_scalar_seq<'de, D>(deserializer: D) -> Result<Vec<String>, D::Error
 where
     D: serde::Deserializer<'de>,
 {
-    let values = Vec::<serde_yaml::Value>::deserialize(deserializer)?;
+    let values = Vec::<serde_yml::Value>::deserialize(deserializer)?;
     values
         .into_iter()
         .map(|value| {
@@ -202,7 +203,9 @@ pub fn load_gateway_config() -> Result<String, String> {
 }
 
 fn parse(content: &str) -> Result<HashMap<String, AgentDef>, String> {
-    let config: AgentConfigFile = serde_yaml::from_str(content)
+    // R27b：serde_yaml → serde_yml（API 兼容：serde_yml::from_str）。
+    // 自定义错误前缀 "failed to parse agents.yaml" 保持（不依赖上游错误文案）。
+    let config: AgentConfigFile = serde_yml::from_str(content)
         .map_err(|error| format!("failed to parse agents.yaml: {error}"))?;
     if config.agents.is_empty() {
         return Err("agents.yaml contains no agents".to_string());
