@@ -197,12 +197,19 @@ export default forwardRef<{ send: () => void; attachFile: () => void; cancel: ()
       case '/export': {
         const s = useIdentityStore.getState().sessions.find(x => x.id === sessionId || x.source === sessionId)
         if (s?.periId) {
-          const outputPath = await save({
-            defaultPath: `session-${s.periId}.md`,
-            filters: [{ name: 'Markdown', extensions: ['md'] }],
-          })
-          if (outputPath) {
-            await invoke('export_session', { periId: s.periId, format: 'markdown', outputPath })
+          // 2026-08-02 修复：invoke 失败不再冒泡成未处理 rejection（旧实现无 try/catch）
+          try {
+            const outputPath = await save({
+              defaultPath: `session-${s.periId}.md`,
+              filters: [{ name: 'Markdown', extensions: ['md'] }],
+            })
+            if (outputPath) {
+              await invoke('export_session', { periId: s.periId, format: 'markdown', outputPath })
+              setSendError('')
+            }
+          } catch (error) {
+            setSendError(String(error))
+            return false
           }
         }
         break
@@ -319,8 +326,11 @@ export default forwardRef<{ send: () => void; attachFile: () => void; cancel: ()
       e.preventDefault()
       const history = historyBySourceRef.current[sessionSource] || []
       if (historyIndex < 0) historyDraftRef.current = value
+      // nextIndex 语义 = "从最新往回数第几条"（0 = 最新一条，len-1 = 最旧一条）。
+      // 修复（2026-08-02）：↑ 应 +1 前进到更旧，首次按必须从最新（0）开始；
+      // 旧实现首次直接跳 len-1（最旧）且再次 ↑ 卡死（min(historyIndex+1, len-1) 恒等于 len-1）。
       const nextIndex = e.key === 'ArrowUp'
-        ? Math.min(historyIndex < 0 ? history.length - 1 : historyIndex + 1, history.length - 1)
+        ? Math.min(historyIndex + 1, history.length - 1)
         : Math.max(historyIndex - 1, -1)
       setHistoryIndex(nextIndex)
       setValue(nextIndex < 0 ? historyDraftRef.current : history[history.length - 1 - nextIndex])

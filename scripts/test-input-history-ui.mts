@@ -10,5 +10,9 @@ assert.match(source, /historyIndex < 0/)
 assert.match(source, /historyDraftRef\.current/)
 assert.match(source, /历史记录 \{historyIndex \+ 1\}\/\{historyLength\}/)
 assert.match(css, /\.input-history-hint/)
+// 2026-08-02 修复：↑ 首次按必须从最新一条（nextIndex=0）开始，再按 ↑ 逐步变旧；
+// 旧实现首次直接跳 len-1（最旧）且再次 ↑ 卡死（min(historyIndex+1, len-1) 恒等 len-1）。
+assert.ok(!/Math\.min\(historyIndex < 0 \? history\.length - 1/.test(source), '旧实现（↑ 直达最旧并卡死）已移除')
+assert.match(source, /Math\.min\(historyIndex \+ 1, history\.length - 1\)/)
 
 console.log('Input history UI 接线回归测试通过')
