@@ -11,7 +11,7 @@ const effectEnd = app.indexOf('\n  }, [])', effectStart)
 assert.notEqual(effectEnd, -1, 'Agent 初始化 effect 必须有空依赖清理边界')
 const lifecycle = app.slice(effectStart, effectEnd + '\n  }, [])'.length)
 
-assert.match(lifecycle, /invoke\('list_agents'\)/, '必须异步加载 list_agents')
+assert.match(lifecycle, /invoke(?:<[^>]+>)?\('list_agents'\)/, '必须异步加载 list_agents')
 assert.match(lifecycle, /if \(!disposed\) useIdentityStore\.getState\(\)\.setAgents\(/, 'list_agents 结果必须受 disposed guard 保护')
 assert.match(lifecycle, /listen<AgentStatusPayload>\('peri:agent-status'/, '必须注册 peri:agent-status listener')
 assert.match(lifecycle, /const activeAgent = useIdentityStore\.getState\(\)\.activeAgent/, 'listener 必须从最新 identity store 读取 activeAgent')

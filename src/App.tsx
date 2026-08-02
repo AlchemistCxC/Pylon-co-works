@@ -2,7 +2,7 @@ import { useState, useEffect, lazy, Suspense, useRef, useMemo } from 'react'
 import SheetHost from './workspace-sheets/SheetHost'
 import WorkspaceTitlebar from './workspace-sheets/WorkspaceTitlebar'
 import { useStore } from './store'
-import { useIdentityStore } from './identityStore'
+import { useIdentityStore, type AgentEntry } from './identityStore'
 import { useRuntimeStore } from './runtimeStore'
 import { useWorkspaceStore } from './workspaceStore'
 import { belongsToProfile } from './components/chat/sessionProfile'
@@ -88,7 +88,9 @@ export default function App() {
 
   useEffect(() => {
     let disposed = false
-    const load = () => invoke('list_agents').then((list: any) => {
+    // 2026-08-02：list_agents 返回类型收窄为 AgentEntry[]（后端契约 {id, name, ...}），
+    // 非数组/异常形状由 setAgents 内部 normalizeAgentList 兜底，不再 any。
+    const load = () => invoke<AgentEntry[]>('list_agents').then((list: AgentEntry[]) => {
       if (!disposed) useIdentityStore.getState().setAgents(Array.isArray(list) ? list : [])
     }).catch(error => reportRuntimeError('读取 Agent 列表', error))
     load()
