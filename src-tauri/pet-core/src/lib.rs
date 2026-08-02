@@ -536,6 +536,47 @@ impl PetState {
         saved.traits = saved.traits.clamp();
         saved.recent_events.truncate(RECENT_EVENTS_CAP);
         saved.stats.code_files.truncate(10);
+        // A13：数值上限——手改/损坏存档注入的天文数字钳制到合法上限
+        //（xp/bond 上限与 gain_xp/gain_bond 的封顶一致，stats 统一 10M 上限）
+        saved.xp = saved.xp.min(999_999);
+        saved.bond = saved.bond.min(9_999);
+        saved.stats.messages = saved.stats.messages.min(10_000_000);
+        saved.stats.prompts_completed = saved.stats.prompts_completed.min(10_000_000);
+        saved.stats.prompts_failed = saved.stats.prompts_failed.min(10_000_000);
+        saved.stats.tokens_total = saved.stats.tokens_total.min(10_000_000);
+        saved.stats.token_xp = saved.stats.token_xp.min(10_000_000);
+        saved.stats.tools_started = saved.stats.tools_started.min(10_000_000);
+        saved.stats.tools_succeeded = saved.stats.tools_succeeded.min(10_000_000);
+        saved.stats.tools_failed = saved.stats.tools_failed.min(10_000_000);
+        saved.stats.interactions = saved.stats.interactions.min(10_000_000);
+        saved.stats.active_days = saved.stats.active_days.min(10_000_000);
+        saved.stats.streak_days = saved.stats.streak_days.min(10_000_000);
+        saved.stats.longest_streak = saved.stats.longest_streak.min(10_000_000);
+        saved.stats.code_sessions = saved.stats.code_sessions.min(10_000_000);
+        saved.stats.code_eaten = saved.stats.code_eaten.min(10_000_000);
+        saved.stats.code_watched = saved.stats.code_watched.min(10_000_000);
+        saved.stats.friends_made = saved.stats.friends_made.min(10_000_000);
+        saved.stats.dazes = saved.stats.dazes.min(10_000_000);
+        saved.stats.feed_count = saved.stats.feed_count.min(10_000_000);
+        saved.stats.play_count = saved.stats.play_count.min(10_000_000);
+        saved.stats.night_visits = saved.stats.night_visits.min(10_000_000);
+        saved.stats.cosmetics_collected = saved.stats.cosmetics_collected.min(10_000_000);
+        // A13：id 白名单——未知成就/装扮 id 一律剔除（防注入假解锁）；
+        // 必须在 unlock_achievements 补查**之前**执行，保证补查只基于合法 id。
+        saved
+            .unlocked
+            .retain(|id| ACHIEVEMENTS.iter().any(|a| a.id == id));
+        saved.unlocked.truncate(64);
+        saved
+            .inventory
+            .retain(|id| COSMETICS.iter().any(|c| c.id == id));
+        saved.inventory.truncate(128);
+        if let Some(id) = saved.equipped.as_deref() {
+            if !COSMETICS.iter().any(|c| c.id == id) {
+                saved.equipped = None;
+            }
+        }
+        saved.stats.cosmetics_collected = saved.inventory.len() as u64;
         // 旧存档 last_tick_at_ms=0（v1 无此字段）：审查修复——以**现在**为基准，
         // 而不是 born_at（久远存档会触发 24h 惩罚性衰减，违背"不惩罚"意图）。
         if saved.last_tick_at_ms == 0 {
