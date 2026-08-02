@@ -37,6 +37,10 @@ const MAX_RATE_LIMITS: u32 = 5;
 /// 等待服务器 Hello 的最长时间：半开连接（平台静默失效）超时后走统一重连路径。
 const HELLO_TIMEOUT: Duration = Duration::from_secs(60);
 
+/// 连续 op 9（session 失效）超过该次数后降级：清除 session 走完整 Identify 并退避，
+/// 而非无限次立即重试 resume（O45）。
+const OP9_DEGRADE_THRESHOLD: u32 = 3;
+
 /// QQ WebSocket close code 对应的重连策略。
 #[derive(Debug, PartialEq, Eq)]
 enum CloseAction {
@@ -157,15 +161,46 @@ pub async fn run_ws_loop(http_client: Client, auth: Arc<QqAuth>, adapter: Arc<Qq
     };
     let mut quick_count = 0u32;
     let mut rate_limit_streak = 0u32;
+    let mut op9_streak = 0u32;
 
     loop {
         let connect_time = Instant::now();
         match run_connection(&http_client, &auth, &adapter, &mut session).await {
-            Err(ref e) if e.contains("op 7") || e.contains("op 9") => {
+            Err(ref e) if e.contains("op 7") => {
+                // op 7 为服务端主动要求的协议层重连：session 有效可立即重连，但加
+                // 1s 最小间隔，防止服务器持续下发 op 7 时形成热循环（O45）。
+                sleep(Duration::from_secs(1)).await;
                 backoff_idx = 0;
                 quick_count = 0;
                 rate_limit_streak = 0;
                 log::info!("QQ WS: 协议层重连、保持 session");
+            }
+            Err(ref e) if e.contains("op 9") => {
+                op9_streak += 1;
+                if op9_streak >= OP9_DEGRADE_THRESHOLD {
+                    // 连续 op 9 说明 resume 状态反复被拒：降级清除 session 走完整
+                    // Identify，并按退避重连（快速 op 9 不计入快速断开计数，否则
+                    // 会与"凭证问题"路径混淆）。
+                    session.session_id = None;
+                    session.last_seq = None;
+                    op9_streak = 0;
+                    log::warn!(
+                        "QQ WS: 连续 {OP9_DEGRADE_THRESHOLD} 次 op 9，清除 session 降级为完整 Identify"
+                    );
+                    if backoff_idx >= MAX_RECONNECT_ATTEMPTS {
+                        log::error!("QQ WS: 超过最大重连次数");
+                        return;
+                    }
+                    let delay = RECONNECT_BACKOFF.get(backoff_idx).copied().unwrap_or(60);
+                    log::info!("QQ WS: {}s 后重连 (第 {} 次)", delay, backoff_idx + 1);
+                    sleep(Duration::from_secs(delay)).await;
+                    backoff_idx += 1;
+                } else {
+                    backoff_idx = 0;
+                    quick_count = 0;
+                    rate_limit_streak = 0;
+                    log::info!("QQ WS: op 9 重连、保持 session (第 {op9_streak} 次)");
+                }
             }
             // run_connection 所有退出路径均为 Err（内部全部经 ?/return Err 退出），
             // 无"健康断开"返回路径；编译器无法静态证明，保留断言臂——若未来出现
