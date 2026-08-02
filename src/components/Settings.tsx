@@ -386,9 +386,8 @@ export default function Settings({ onClose, activeSessionId }: { onClose?: () =>
 
             {/* ═══ 终端 ═══ */}
             <Tabs.Content value="terminal">
-              <h3>聊天区</h3>
               <ZonePresetRow zone="chat" activeName={activePreset.chat} isDirty={dirty.chat} onApply={applyLocalPreset}/>
-              
+
               <Group title="指示器形状">
                 <Row label="形状"><Sel value={resolveToolIndicatorAsset(t.toolIndicator).id} onChange={v=>onSettingChange({toolIndicator:v})} options={toolIndicatorOptions()} /></Row>
               </Group>

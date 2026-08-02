@@ -26,7 +26,7 @@ export interface ThemeFieldDef {
   /** Settings 分组标题（声明式 UI 按 group 渲染） */
   group?: string
   /** 特殊控件标识（渲染器分发到专用组件） */
-  control?: 'default' | 'bgImage' | 'spinnerMarker'
+  control?: 'default' | 'bgImage' | 'spinnerMarker' | 'schemeChip'
   /** select/boolean 字段的联动：onChange 时同步写这些字段（如 inputVariant→inputMode） */
   syncOnChange?: readonly string[]
   /** number 范围/步长 */
@@ -41,6 +41,12 @@ export interface ThemeFieldDef {
   showIf?: (t: ThemeSettings) => boolean
   /** 高阶选项：渲染器折叠进组内"高级"子区，平时不占屏 */
   advanced?: boolean
+  /** number 显示后缀（set-val，如 'px'/'%'/'ms'）；配合 percent 处理 0-1 值 */
+  suffix?: string
+  /** number 值为 0-1 时按百分比显示（*100） */
+  percent?: boolean
+  /** 字段提示文案（Row 内 set-hint） */
+  hint?: string
   /** select 选项 */
   options?: readonly string[]
   /** CSS 变量注入名；缺省 = `--${kebab(fieldName)}` */
@@ -63,13 +69,13 @@ const H = (def: ThemeFieldDef): ThemeFieldDef => ({ ...def, hidden: true })
 export const THEME_FIELD_DEFS = {
   // ── global ──
   accent: { ...C('global', '强调色'), cssVar: '--accent' },
-  transparency: { ...N('global', '透明度', 0, 1, 0.05), group: "玻璃效果", cssVar: '--t' },
-  bgBlur: { ...N('global', '模糊', 0, 40, 2), group: "玻璃效果", unit: 'px', cssVar: '--blur' },
+  transparency: { ...N('global', '透明度', 0, 1, 0.05), group: "玻璃效果", cssVar: '--t', percent: true, suffix: '%' },
+  bgBlur: { ...N('global', '模糊', 0, 40, 2), group: "玻璃效果", unit: 'px', cssVar: '--blur', suffix: 'px' },
   globalFont: { ...S('global', '字体', ['system', 'mono']), group: "字体", },
   globalFontSize: { ...N('global', '基础字号', 12, 24), group: "字体", unit: 'px' },
   globalBgImage: { ...T('global', '背景图'), control: 'bgImage', group: "玻璃效果", },
-  globalBgColor: { ...C('global', '背景底色'), group: "玻璃效果", },
-  uiScheme: { ...S('global', 'UI 配色', ['light', 'dark']), group: "玻璃效果", },
+  globalBgColor: { ...C('global', '背景底色'), group: "玻璃效果", hint: '终端/桌面背景模拟色' },
+  uiScheme: { ...S('global', 'UI 配色', ['light', 'dark']), group: "玻璃效果", control: 'schemeChip' },
   userName: T('global', '显示名'),
   userPrefix: T('global', '前缀'),
   userColor: C('global', '名字颜色'),
@@ -83,8 +89,8 @@ export const THEME_FIELD_DEFS = {
   sidebarBg: { ...C('sidebar', '背景色'), group: "背景", },
   sidebarBgImage: { ...T('sidebar', '背景图'), control: 'bgImage', group: "背景", },
   sidebarWidth: { ...N('sidebar', '栏宽', 160, 400), group: "布局", unit: 'px' },
-  sidebarTransparency: { ...N('sidebar', '透明度', 0, 1, 0.05), group: "玻璃效果", },
-  sidebarBlur: { ...N('sidebar', '模糊', 0, 40, 2), group: "玻璃效果", unit: 'px' },
+  sidebarTransparency: { ...N('sidebar', '透明度', 0, 1, 0.05), group: "玻璃效果", percent: true, suffix: '%' },
+  sidebarBlur: { ...N('sidebar', '模糊', 0, 40, 2), group: "玻璃效果", unit: 'px', suffix: 'px' },
   sidebarTextColor: { ...C('sidebar', '文字颜色'), group: "文字", },
   sidebarNameSize: { ...N('sidebar', '会话名字号', 11, 20), group: "文字", unit: 'px' },
   sidebarGroupSize: { ...N('sidebar', '分组标题字号', 10, 16), group: "文字", unit: 'px' },
@@ -92,8 +98,8 @@ export const THEME_FIELD_DEFS = {
   // ── chat ──
   chatBg: { ...C('chat', '背景色'), group: "背景", },
   chatBgImage: { ...T('chat', '背景图'), control: 'bgImage', group: "背景", },
-  chatTransparency: { ...N('chat', '透明度', 0, 1, 0.05), group: "玻璃效果", },
-  chatBlur: { ...N('chat', '模糊', 0, 40, 2), group: "玻璃效果", unit: 'px' },
+  chatTransparency: { ...N('chat', '透明度', 0, 1, 0.05), group: "玻璃效果", percent: true, suffix: '%' },
+  chatBlur: { ...N('chat', '模糊', 0, 40, 2), group: "玻璃效果", unit: 'px', suffix: 'px' },
   chatFont: { ...S('chat', '字体', ['mono', 'system']), group: "字体", },
   chatFontSize: { ...N('chat', '字号', 12, 22), group: "字体", unit: 'px' },
   chatLineHeight: { ...N('chat', '行高', 1.2, 2.5, 0.1), group: "字体", },
@@ -123,13 +129,13 @@ export const THEME_FIELD_DEFS = {
   diffRemoved: { ...C('chat', 'Diff·删除'), group: "Diff", },
   // toolIndicator 走 widgetRegistry 动态选项（toolIndicatorOptions），不进声明式 UI
   toolIndicator: { ...S('chat', '指示器形状', ['●', '■', '◆', '▶', '✦']), hidden: true },
-  toolIndicatorGlow: { ...N('chat', '指示器辉光', 0, 20, 1), group: "指示器 & 连接线", },
+  toolIndicatorGlow: { ...N('chat', '指示器辉光', 0, 20, 1), group: "指示器 & 连接线", suffix: 'px' },
   toolIndicatorGlowColor: { ...C('chat', '辉光色'), group: "指示器 & 连接线", },
   toolConnectorMode: { ...S('chat', '连接线', ['none', 'fixed', 'follow']), group: "指示器 & 连接线", },
   toolConnectorColor: { ...C('chat', '连接线色'), group: "指示器 & 连接线", showIf: t => t.toolConnectorMode === 'fixed' },
   toolConnectorStyle: { ...S('chat', '线样式', ['solid', 'dotted', 'pulse']), group: "指示器 & 连接线", },
-  toolConnectorWidth: { ...N('chat', '线宽', 1, 6), group: "指示器 & 连接线", },
-  toolConnectorOpacity: { ...N('chat', '线透明度', 0.1, 1, 0.05), group: "指示器 & 连接线", },
+  toolConnectorWidth: { ...N('chat', '线宽', 1, 6), group: "指示器 & 连接线", suffix: 'px' },
+  toolConnectorOpacity: { ...N('chat', '线透明度', 0.1, 1, 0.05), group: "指示器 & 连接线", percent: true, suffix: '%' },
   spinnerFramePreset: { ...S('chat', '动画预设', ['sparkles', 'ascii-line', 'braille', 'dots', 'orbit', 'clock', 'wave', 'blocks', 'scan', 'custom']), group: "Spinner", },
   spinnerCustomFrames: { ...T('chat', '自定义帧'), group: "Spinner", showIf: t => t.spinnerFramePreset === 'custom' },
   spinnerVerbSet: { ...S('chat', '文案语言', ['zh', 'en', 'analysis', 'engineering', 'custom']), group: "Spinner", },
@@ -140,7 +146,7 @@ export const THEME_FIELD_DEFS = {
   spinnerDoneMarkerMode: { ...S('chat', '完成标记模式', ['frame', 'custom']), group: "Spinner", },
   spinnerCancelledMarkerMode: { ...S('chat', '取消标记模式', ['frame', 'custom']), group: "Spinner", },
   spinnerErrorMarkerMode: { ...S('chat', '错误标记模式', ['frame', 'custom']), group: "Spinner", },
-  spinnerIntervalMs: { ...N('chat', '动画间隔', 40, 1000, 10), group: "Spinner", },
+  spinnerIntervalMs: { ...N('chat', '动画间隔', 40, 1000, 10), group: "Spinner", suffix: 'ms' },
   spinnerColor: { ...C('chat', 'Spinner 颜色'), group: "Spinner", },
   spinnerSize: { ...N('chat', 'Spinner 大小', 10, 32), group: "Spinner", unit: 'px' },
   msgStyle: { ...S('chat', '消息风格', ['terminal', 'bubble']), group: "风格", },
@@ -229,8 +235,8 @@ export const THEME_FIELD_DEFS = {
   rightBg: { ...C('right', '背景色'), group: "外观", },
   rightBgImage: { ...T('right', '背景图'), control: 'bgImage', group: "外观", },
   rightWidth: { ...N('right', '宽度', 200, 400), group: "外观", unit: 'px' },
-  rightTransparency: { ...N('right', '透明度', 0, 1, 0.05), group: "玻璃效果", },
-  rightBlur: { ...N('right', '模糊', 0, 40, 2), group: "玻璃效果", unit: 'px' },
+  rightTransparency: { ...N('right', '透明度', 0, 1, 0.05), group: "玻璃效果", percent: true, suffix: '%' },
+  rightBlur: { ...N('right', '模糊', 0, 40, 2), group: "玻璃效果", unit: 'px', suffix: 'px' },
 
   // ── META（持久化但非预设内容）──
   ccEditMode: { type: 'text', label: '编辑模式', zone: 'cc', noCssVar: true, hidden: true, meta: true },
@@ -271,12 +277,16 @@ export function fieldToCssVar(key: string): string {
  * 纯字段组由渲染器自动生成；含自定义内容的组（预设/强调色/布局骨架/
  * 窗口/配置备份/布局编辑）保留在 Settings 手写。
  */
-export const GROUP_ORDER: Record<string, readonly string[]> = {
-  global: ["玻璃效果", "字体"],
-  sidebar: ["背景", "布局", "玻璃效果", "文字"],
-  chat: ["背景", "字体", "颜色", "玻璃效果", "语法高亮", "指示器", "文字 & 标签", "指示器 & 连接线", "Diff", "Spinner", "风格"],
-  cc: ["外观风格", "控件样式", "输入与状态", "波形与用量", "中控背景"],
-  right: ["外观", "玻璃效果"],
+export const GROUP_ORDER: Record<string, readonly { heading?: string; groups: readonly { title: string; compact?: boolean }[] }[]> = {
+  global: [{ groups: [{ title: '玻璃效果' }, { title: '字体' }] }],
+  sidebar: [{ groups: [{ title: '背景' }, { title: '布局' }, { title: '玻璃效果' }, { title: '文字' }] }],
+  chat: [
+    { heading: '聊天区', groups: [{ title: '背景' }, { title: '字体' }, { title: '颜色', compact: true }, { title: '玻璃效果' }, { title: '语法高亮', compact: true }] },
+    { heading: '工具调用', groups: [{ title: '指示器', compact: true }, { title: '文字 & 标签', compact: true }, { title: '指示器 & 连接线' }, { title: 'Diff' }, { title: 'Spinner' }] },
+    { heading: '消息渲染', groups: [{ title: '风格', compact: true }] },
+  ],
+  cc: [{ groups: [{ title: '外观风格' }, { title: '控件样式' }, { title: '输入与状态' }, { title: '波形与用量' }, { title: '中控背景' }] }],
+  right: [{ groups: [{ title: '外观' }, { title: '玻璃效果' }] }],
 }
 export const THEME_DEFAULTS: Record<string, string | number | boolean> = {
   accent: '#3b82f6',

@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { Fragment, useState } from 'react'
 import type { ThemeSettings } from './store'
 import { GROUP_ORDER, THEME_FIELD_DEFS, THEME_FIELD_KEYS, type ThemeFieldDef, type ThemeFieldKey, type ZoneName } from './themeFieldDefs'
 import ColorPopover from './components/ColorPopover'
@@ -6,11 +6,12 @@ import { resolveBackgroundImage } from './backgroundImage'
 import { resolveSpinnerFrames } from './components/chat/spinnerFrames'
 
 /**
- * themeFieldRenderer — 声明式字段渲染器（自定义系统骨架 3）。
+ * themeFieldRenderer — 声明式字段渲染器（自定义系统骨架）。
  *
- * 按 THEME_FIELD_DEFS 的类型/控件标识 + GROUP_MAP 分组渲染 Settings 字段区，
- * 特殊控件（背景图/Spinner marker）经 control 标识分发。纯字段组从此
- * 无需手写 Row；新增字段进 defs + GROUP_MAP 即自动出现 UI。
+ * 按 THEME_FIELD_DEFS 类型/控件标识 + GROUP_ORDER（分区/组/compact）渲染
+ * Settings 字段区。能力：type 分发、特殊控件（bgImage/spinnerMarker/
+ * schemeChip）、showIf 条件、advanced 折叠、suffix 后缀、hint 提示、
+ * compact 紧凑行、h3 分区。
  */
 
 interface RenderCtx {
@@ -109,7 +110,15 @@ function spinnerMarkerModeKey(key: string): ThemeFieldKey | null {
   return map[key] ?? null
 }
 
-function FieldRow({ def, ctx, keyName }: { def: ThemeFieldDef; ctx: RenderCtx; keyName: ThemeFieldKey }) {
+/** number 显示后缀（percent 时值 *100） */
+function formatDisplayValue(value: unknown, def: ThemeFieldDef): string {
+  const num = Number(value ?? 0)
+  const display = def.percent ? Math.round(num * 100) : num
+  return `${display}${def.suffix ?? ''}`
+}
+
+/** 控件本体（不含 Row 包装；compact 行内联复用） */
+function FieldControl({ def, ctx, keyName }: { def: ThemeFieldDef; ctx: RenderCtx; keyName: ThemeFieldKey }) {
   const { t, onChange } = ctx
   const value = t[keyName]
 
@@ -132,6 +141,15 @@ function FieldRow({ def, ctx, keyName }: { def: ThemeFieldDef; ctx: RenderCtx; k
     )
   }
 
+  if (def.control === 'schemeChip') {
+    return (
+      <div className="set-preset-row">
+        <button type="button" className={`set-preset-chip ${value === 'light' ? 'active' : ''}`} onClick={() => onChange({ [keyName]: 'light' } as Partial<ThemeSettings>)}>浅色</button>
+        <button type="button" className={`set-preset-chip ${value === 'dark' ? 'active' : ''}`} onClick={() => onChange({ [keyName]: 'dark' } as Partial<ThemeSettings>)}>深色</button>
+      </div>
+    )
+  }
+
   const emit = (partial: Partial<ThemeSettings>) => {
     const next: Partial<ThemeSettings> = { ...partial }
     if (def.syncOnChange && partial[keyName] !== undefined) {
@@ -148,76 +166,115 @@ function FieldRow({ def, ctx, keyName }: { def: ThemeFieldDef; ctx: RenderCtx; k
 
   switch (def.type) {
     case 'color':
-      return (
-        <Row label={def.label}>
-          <ColorPopover value={String(value ?? '')} onChange={v => emit({ [keyName]: v } as Partial<ThemeSettings>)} chips={false} />
-        </Row>
-      )
+      return <ColorPopover value={String(value ?? '')} onChange={v => emit({ [keyName]: v } as Partial<ThemeSettings>)} chips={false} />
     case 'number': {
       const min = def.minFn ? def.minFn(t as ThemeSettings) : (def.min ?? 0)
       return (
-        <Row label={def.label}>
+        <>
           <Slider value={Number(value ?? 0)} onChange={v => emit({ [keyName]: v } as Partial<ThemeSettings>)} min={min} max={def.max ?? 100} step={def.step} />
           <Num value={Number(value ?? 0)} onChange={v => emit({ [keyName]: v } as Partial<ThemeSettings>)} min={min} max={def.max} />
-        </Row>
+          {def.suffix && <span className="set-val">{formatDisplayValue(value, def)}</span>}
+        </>
       )
     }
     case 'select':
-      return (
-        <Row label={def.label}>
-          <Sel value={String(value ?? '')} onChange={v => emit({ [keyName]: v } as Partial<ThemeSettings>)} options={def.options ?? []} />
-        </Row>
-      )
+      return <Sel value={String(value ?? '')} onChange={v => emit({ [keyName]: v } as Partial<ThemeSettings>)} options={def.options ?? []} />
     case 'boolean':
-      return (
-        <Row label={def.label}>
-          <Sel value={value ? 'on' : 'off'} onChange={v => emit({ [keyName]: v === 'on' } as Partial<ThemeSettings>)} options={[{ value: 'on', label: '开' }, { value: 'off', label: '关' }]} />
-        </Row>
-      )
+      return <Sel value={value ? 'on' : 'off'} onChange={v => emit({ [keyName]: v === 'on' } as Partial<ThemeSettings>)} options={[{ value: 'on', label: '开' }, { value: 'off', label: '关' }]} />
     case 'text':
-      return (
-        <Row label={def.label}>
-          <Txt value={String(value ?? '')} onChange={v => emit({ [keyName]: v } as Partial<ThemeSettings>)} />
-        </Row>
-      )
+      return <Txt value={String(value ?? '')} onChange={v => emit({ [keyName]: v } as Partial<ThemeSettings>)} />
   }
 }
 
-/**
- * 渲染某 zone 的纯字段组：组顺序来自 GROUP_ORDER，字段从 defs 按 group 自动收集
- * （新字段标 group 即自动进组）；hidden 跳过、showIf 条件过滤、
- * advanced 字段折叠进组内"高级…"子区。
- */
-export function ZoneGroupFields({ zone, ctx }: { zone: ZoneName; ctx: RenderCtx }) {
-  const order = GROUP_ORDER[zone]
-  if (!order) return null
+function FieldRow({ def, ctx, keyName }: { def: ThemeFieldDef; ctx: RenderCtx; keyName: ThemeFieldKey }) {
+  return (
+    <Row label={def.label}>
+      <FieldControl def={def} ctx={ctx} keyName={keyName} />
+      {def.hint && <div className="set-hint">{def.hint}</div>}
+    </Row>
+  )
+}
+
+function renderGroupFields(fields: ThemeFieldKey[], ctx: RenderCtx) {
+  const regular = fields.filter(key => !(THEME_FIELD_DEFS[key] as ThemeFieldDef).advanced)
+  const advanced = fields.filter(key => (THEME_FIELD_DEFS[key] as ThemeFieldDef).advanced)
   return (
     <>
-      {order.map(title => {
-        const fields = THEME_FIELD_KEYS.filter(key => {
-          const def = THEME_FIELD_DEFS[key] as ThemeFieldDef
-          return def.zone === zone && def.group === title && !def.hidden
-            && (!def.showIf || def.showIf(ctx.t as ThemeSettings))
-        })
-        const regular = fields.filter(key => !(THEME_FIELD_DEFS[key] as ThemeFieldDef).advanced)
-        const advanced = fields.filter(key => (THEME_FIELD_DEFS[key] as ThemeFieldDef).advanced)
-        if (fields.length === 0) return null
+      {regular.map(key => {
+        const def = THEME_FIELD_DEFS[key] as ThemeFieldDef
+        return <FieldRow key={key} keyName={key} def={def} ctx={ctx} />
+      })}
+      {advanced.length > 0 && (
+        <details className="set-advanced">
+          <summary>高级…</summary>
+          {advanced.map(key => {
+            const def = THEME_FIELD_DEFS[key] as ThemeFieldDef
+            return <FieldRow key={key} keyName={key} def={def} ctx={ctx} />
+          })}
+        </details>
+      )}
+    </>
+  )
+}
+
+function renderCompactGroup(fields: ThemeFieldKey[], ctx: RenderCtx) {
+  const regular = fields.filter(key => !(THEME_FIELD_DEFS[key] as ThemeFieldDef).advanced)
+  return (
+    <div className="set-compact-row">
+      {regular.map(key => {
+        const def = THEME_FIELD_DEFS[key] as ThemeFieldDef
         return (
-          <Group key={title} title={title}>
-            {regular.map(key => {
+          <Fragment key={key}>
+            <span className="set-compact-label">{def.label}</span>
+            <FieldControl def={def} ctx={ctx} keyName={key} />
+          </Fragment>
+        )
+      })}
+      {fields.some(key => (THEME_FIELD_DEFS[key] as ThemeFieldDef).advanced) && (
+        <details className="set-advanced">
+          <summary>高级…</summary>
+          {fields.filter(key => (THEME_FIELD_DEFS[key] as ThemeFieldDef).advanced).map(key => {
+            const def = THEME_FIELD_DEFS[key] as ThemeFieldDef
+            return <FieldRow key={key} keyName={key} def={def} ctx={ctx} />
+          })}
+        </details>
+      )}
+    </div>
+  )
+}
+
+/**
+ * 渲染某 zone 的字段区：GROUP_ORDER 提供 分区（h3）→ 组（可 compact）两级。
+ * 字段从 defs 按 group 自动收集；hidden 跳过、showIf 条件过滤。
+ */
+export function ZoneGroupFields({ zone, ctx }: { zone: ZoneName; ctx: RenderCtx }) {
+  const sections = GROUP_ORDER[zone]
+  if (!sections) return null
+  return (
+    <>
+      {sections.map((section, si) => {
+        const groups = section.groups
+          .map(group => {
+            const fields = THEME_FIELD_KEYS.filter(key => {
               const def = THEME_FIELD_DEFS[key] as ThemeFieldDef
-              return <FieldRow key={key} keyName={key} def={def} ctx={ctx} />
-            })}
-            {advanced.length > 0 && (
-              <details className="set-advanced">
-                <summary>高级…</summary>
-                {advanced.map(key => {
-                  const def = THEME_FIELD_DEFS[key] as ThemeFieldDef
-                  return <FieldRow key={key} keyName={key} def={def} ctx={ctx} />
-                })}
-              </details>
-            )}
-          </Group>
+              return def.zone === zone && def.group === group.title && !def.hidden
+                && (!def.showIf || def.showIf(ctx.t as ThemeSettings))
+            })
+            return { ...group, fields }
+          })
+          .filter(group => group.fields.length > 0)
+        if (groups.length === 0) return null
+        return (
+          <Fragment key={section.heading ?? si}>
+            {section.heading && <h3>{section.heading}</h3>}
+            {groups.map(group => (
+              <Group key={group.title} title={group.title}>
+                {group.compact
+                  ? renderCompactGroup(group.fields, ctx)
+                  : renderGroupFields(group.fields, ctx)}
+              </Group>
+            ))}
+          </Fragment>
         )
       })}
     </>
