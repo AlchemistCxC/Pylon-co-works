@@ -164,8 +164,18 @@ pub async fn run_ws_loop(http_client: Client, auth: Arc<QqAuth>, adapter: Arc<Qq
     let mut op9_streak = 0u32;
 
     loop {
-        let connect_time = Instant::now();
-        match run_connection(&http_client, &auth, &adapter, &mut session).await {
+        // 计时起点由 run_connection 在连接建立成功后刷新（O46）：慢网络下
+        // DNS/网关/TLS 耗时不计入连接寿命，quick_count 兜底恢复才生效。
+        let mut connect_time = Instant::now();
+        match run_connection(
+            &http_client,
+            &auth,
+            &adapter,
+            &mut session,
+            &mut connect_time,
+        )
+        .await
+        {
             Err(ref e) if e.contains("op 7") => {
                 // op 7 为服务端主动要求的协议层重连：session 有效可立即重连，但加
                 // 1s 最小间隔，防止服务器持续下发 op 7 时形成热循环（O45）。
@@ -280,6 +290,7 @@ async fn run_connection(
     auth: &QqAuth,
     adapter: &QqAdapter,
     session: &mut SessionState,
+    connected_at: &mut Instant,
 ) -> Result<(), String> {
     let token = auth.get_token().await?;
     let gateway_url = auth::get_gateway_url(http_client, &token).await?;
@@ -288,6 +299,8 @@ async fn run_connection(
     let ws_stream = connect(&gateway_url)
         .await
         .map_err(|e| format!("WS 连接失败: {e}"))?;
+    // 连接寿命计时起点 = 连接建立成功时刻（O46）；此前失败则保持 loop 起点。
+    *connected_at = Instant::now();
     log::info!("QQ WS: 已连接");
 
     let (mut write, mut read) = ws_stream.split();
