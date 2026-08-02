@@ -750,7 +750,13 @@ pub(crate) fn replace_session_slot(
     {
         return Err(PylonError::Protocol("max sessions reached".to_string()));
     }
-    Ok(sessions.insert(source.to_string(), session))
+    let replaced = sessions.insert(source.to_string(), session);
+    drop(sessions);
+    // R6：映射就绪事件化（吸收 O5）——insert 成功后通知 dispatcher（未知 periId
+    // 等待由 20×5ms 轮询改为事件驱动）。new_session / load_persisted_session
+    // 共用本槽位辅助，两条链路均在此通知。
+    runtime.mapping_ready.notify_waiters();
+    Ok(replaced)
 }
 
 #[tauri::command]
@@ -1249,11 +1255,12 @@ pub(crate) async fn send_prompt_core<R: tauri::Runtime>(
                 generation,
             );
             session.apply_session_response(&response);
-            runtime
-                .sessions
-                .lock()
-                .map_err(|e| e.to_string())?
-                .insert(source.to_string(), session);
+            {
+                let mut sessions = runtime.sessions.lock().map_err(|e| e.to_string())?;
+                sessions.insert(source.to_string(), session);
+            }
+            // R6：映射就绪事件化（吸收 O5）——自动建会话 insert 成功后通知 dispatcher。
+            runtime.mapping_ready.notify_waiters();
             (pid, true)
         }
     };

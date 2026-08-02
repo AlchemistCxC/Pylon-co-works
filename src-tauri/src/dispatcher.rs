@@ -223,6 +223,10 @@ async fn handle_permission_request<R: tauri::Runtime>(
 /// NOTIF_SESSION_UPDATE 处理（R8 自主循环拆分）：source 解析（重试循环）→ 代际
 /// 复核 → session 状态 + 宠物感知应用（C11 回放守卫 / O7 锁外应用）→ 前端+平台
 /// 转发（B10.1）。返回 false 表示本代已结束（主循环应退出）。
+// clippy 2026-08-03：8 参为 R8 显式参数风格（window/gateway/sessions/pet/
+// client_generation/generation/mapping_ready/payload），与调用点逐参对应，
+// 结构体重构收益低。
+#[allow(clippy::too_many_arguments)]
 async fn handle_session_update<R: tauri::Runtime>(
     window: &tauri::WebviewWindow<R>,
     gateway: &crate::gateway::GatewayCore,
@@ -230,6 +234,7 @@ async fn handle_session_update<R: tauri::Runtime>(
     pet: &std::sync::Mutex<PetState>,
     client_generation: &AtomicU64,
     generation: u64,
+    mapping_ready: &tokio::sync::Notify,
     mut payload: serde_json::Value,
 ) -> bool {
     let peri_id = match payload.get("sessionId").and_then(|v| v.as_str()) {
@@ -242,7 +247,13 @@ async fn handle_session_update<R: tauri::Runtime>(
     let source = {
         let mut mapped = None;
         let mut ambiguous = false;
-        for _ in 0..20 {
+        // R6：映射就绪事件化（吸收 O5）——20×5ms 轮询改为事件驱动：RPC 先于
+        // 插映射，通知可先到，故仍在 100ms 窗口内等待；insert 成功后
+        // mapping_ready.notify_waiters() 唤醒，deadline 兜底总等待 ≤100ms。
+        // 唤醒可能来自其他会话的插映射（并发建会话），每次唤醒后复核，
+        // 未命中且未超时则继续等——与原轮询语义等价（最坏仍 100ms 丢弃）。
+        let deadline = std::time::Instant::now() + std::time::Duration::from_millis(100);
+        loop {
             if let Ok(items) = sessions.lock() {
                 let mappings = items
                     .iter()
@@ -257,7 +268,11 @@ async fn handle_session_update<R: tauri::Runtime>(
             if mapped.is_some() || ambiguous {
                 break;
             }
-            tokio::time::sleep(std::time::Duration::from_millis(5)).await;
+            let remaining = deadline.saturating_duration_since(std::time::Instant::now());
+            if remaining.is_zero() {
+                break;
+            }
+            let _ = tokio::time::timeout(remaining, mapping_ready.notified()).await;
         }
         if ambiguous {
             log::warn!(
@@ -682,6 +697,7 @@ pub(crate) fn start_notification_dispatcher<R: tauri::Runtime>(
                 &pet,
                 &client_generation,
                 generation,
+                &runtime_for_reconnect.mapping_ready,
                 payload,
             )
             .await
