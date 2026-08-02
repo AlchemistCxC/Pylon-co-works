@@ -1,5 +1,7 @@
 pub mod lines;
 
+use std::collections::VecDeque;
+
 use rand::RngExt;
 use serde::{Deserialize, Serialize};
 
@@ -374,7 +376,7 @@ pub struct PetStats {
     pub friends_made: u64,
     pub dazes: u64,
     /// 吃过的文件名集合（脱敏摘要，上限 10 滚动）。
-    pub code_files: Vec<String>,
+    pub code_files: VecDeque<String>,
     // ── M9 成就计数（B 层只增不减）──
     /// 喂食总次数（Feed 事件）。
     pub feed_count: u64,
@@ -427,7 +429,8 @@ pub struct PetState {
     pub traits: PetTraits,
     pub machine: PetMachineState,
     pub last_tick_at_ms: u64,
-    pub recent_events: Vec<RecentEvent>,
+    /// R29：环形缓冲（VecDeque）——push_back/pop_front O(1)，serde 数组契约不变。
+    pub recent_events: VecDeque<RecentEvent>,
     pub last_agent_mode: Option<String>,
     pub last_agent_model: Option<String>,
     pub pending_action: Option<PendingAction>,
@@ -445,7 +448,8 @@ pub struct PetState {
     pub last_drop_at_ms: u64,
     // ── 原有 ──
     pub stats: PetStats,
-    pub memories: Vec<String>,
+    /// R29：环形缓冲（VecDeque），serde 数组契约不变。
+    pub memories: VecDeque<String>,
     #[serde(skip)]
     pub msg: Option<String>,
     #[serde(skip)]
@@ -499,7 +503,7 @@ impl PetState {
             traits: PetTraits::random(),
             machine: PetMachineState::default(),
             last_tick_at_ms: now_ms,
-            recent_events: Vec::with_capacity(RECENT_EVENTS_CAP),
+            recent_events: VecDeque::with_capacity(RECENT_EVENTS_CAP),
             last_agent_mode: None,
             last_agent_model: None,
             pending_action: None,
@@ -513,7 +517,7 @@ impl PetState {
                 longest_streak: 1,
                 ..PetStats::default()
             },
-            memories: Vec::new(),
+            memories: VecDeque::new(),
             msg: Some(lines::pick(lines::LineKey::Birth, &mut 0, DayPart::Day)),
             last_interaction_at_ms: 0,
             last_activity_at_ms: 0,
@@ -1201,7 +1205,7 @@ impl PetState {
 
     pub fn recall_memory(&self) -> Option<String> {
         self.memories
-            .last()
+            .back()
             .map(|memory| format!("同行记录：{memory}"))
     }
 
@@ -1324,7 +1328,7 @@ impl PetState {
     }
 
     fn remember(&mut self, memory: String) {
-        if self.memories.last() == Some(&memory) {
+        if self.memories.back() == Some(&memory) {
             return;
         }
         push_capped(&mut self.memories, memory, 10);
@@ -1358,11 +1362,13 @@ fn sanitize_name(value: &str) -> String {
     }
 }
 
-/// 环形缓冲 helper：push 后若超过 cap 移除最旧，返回被淘汰的元素（调用方通常忽略）。
-/// 统一 recent_events/code_files/memories 三处"push→超限→remove(0)"的重复模式。
-fn push_capped<T>(vec: &mut Vec<T>, item: T, cap: usize) -> Option<T> {
-    vec.push(item);
-    (vec.len() > cap).then(|| vec.remove(0))
+/// 环形缓冲 helper：push_back 后若超过 cap 则 pop_front 淘汰最旧（O(1)），
+/// 返回被淘汰的元素（调用方通常忽略）。
+/// R29：Vec → VecDeque——原实现 push 后 remove(0) 是 O(n) 搬移；三处
+/// recent_events/code_files/memories 统一走此 helper。serde 数组契约不变。
+fn push_capped<T>(deque: &mut VecDeque<T>, item: T, cap: usize) -> Option<T> {
+    deque.push_back(item);
+    (deque.len() > cap).then(|| deque.pop_front().expect("len > cap ⇒ 非空"))
 }
 
 fn day_number(ms: u64) -> u64 {

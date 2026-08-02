@@ -596,11 +596,8 @@ fn code_file_recording_is_sanitized_and_capped() {
     pet.record_code_file("G:/Project/src/lib.rs");
     pet.record_code_file("src/main.ts");
     pet.record_code_file("src/main.ts"); // 去重
-    assert_eq!(
-        pet.stats.code_files,
-        vec!["lib.rs".to_string(), "main.ts".to_string()],
-        "仅文件名且去重"
-    );
+    let names: Vec<&str> = pet.stats.code_files.iter().map(String::as_str).collect();
+    assert_eq!(names, vec!["lib.rs", "main.ts"], "仅文件名且去重");
     for i in 0..12 {
         pet.record_code_file(&format!("file-{i}.rs"));
     }
