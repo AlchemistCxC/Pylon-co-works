@@ -550,108 +550,127 @@ pub(crate) fn start_notification_dispatcher<R: tauri::Runtime>(
                     // R7：remaining_attempts 局部预算 + attempt 退避指数。
                     let mut remaining_attempts = agent_runtime::MAX_RECONNECT_ATTEMPTS;
                     let mut attempt: u32 = 1;
-                    loop {
-                        if remaining_attempts == 0 {
-                            break;
-                        }
-                        // R7：每轮复查 epoch——重连期间到来新一轮崩溃通知（含被防重入
-                        // 标志吸收的）→ 本循环已失效：放弃旧 ticket、以最新 epoch 重新
-                        // 武装（预算与退避重置），本循环仍是唯一重连权威（标志持续持有）。
-                        if epoch_for_reconnect.load(Ordering::Acquire) != scheduled_epoch {
-                            tracing::info!(
-                                "auto-reconnect superseded by a newer crash; re-arming from attempt 1"
-                            );
-                            // 放弃旧 ticket：以最新 epoch 重新武装。
-                            scheduled_epoch = epoch_for_reconnect.load(Ordering::Acquire);
-                            remaining_attempts = agent_runtime::MAX_RECONNECT_ATTEMPTS;
-                            attempt = 1;
-                        }
-                        tokio::time::sleep(std::time::Duration::from_millis(
-                            agent_runtime::reconnect_backoff_ms(attempt),
-                        ))
-                        .await;
-                        // 用户已手动 reconnect（状态非 Crashed）或已 switch（active_agent
-                        // 已换）→ 放弃自动重连。两读在同一锁持有期内完成，消除
-                        // "已复查 stale、尚未复查 active"之间的切换窗口。
-                        let (still_stale, still_active) = {
-                            let runtime_guard = reconnect_runtime
-                                .agent_runtime
-                                .lock()
-                                .unwrap_or_else(|p| p.into_inner());
-                            let active_guard = reconnect_handles
-                                .active_agent
-                                .lock()
-                                .unwrap_or_else(|p| p.into_inner());
-                            (
-                                runtime_guard.status == AgentLifecycleStatus::Crashed,
-                                active_guard.as_str() == reconnect_agent_id,
-                            )
-                        };
-                        if !(still_stale && still_active) {
-                            // 核验修复：提前放弃也必须释放防重入标志，
-                            // 否则后续崩溃将永远不再自动重连。
-                            break;
-                        }
-                        let agent = reconnect_handles
-                            .agents
-                            .lock()
-                            .ok()
-                            .and_then(|a| a.get(&reconnect_agent_id).cloned());
-                        let Some(agent) = agent else {
-                            break;
-                        };
-                        let _lifecycle_guard = reconnect_runtime.agent_lifecycle.lock().await;
-                        // R9：自动重连是 LifecycleOp 状态机的一环——经本 runtime 的
-                        // agent_lifecycle 与 switch/reconnect/平台懒启动串行（无 kill，
-                        // 不持 switch_lock；状态机定义见 lifecycle.rs 模块文档）。
-                        // P2-1：拿到生命周期锁后重查"仍然需要连接"——复查 stale 与
-                        // 拿锁之间，用户手动 reconnect 可能已把状态置非 Crashed 并完成
-                        // 连接；此时再 do_connect_and_replace 会连续第二次连接。
-                        // 手动操作（switch/reconnect）同样在锁内改状态，锁串行后
-                        // 此处必能看到其结果。
-                        let still_stale = reconnect_runtime
-                            .agent_runtime
-                            .lock()
-                            .map(|r| r.status == AgentLifecycleStatus::Crashed)
-                            .unwrap_or(false);
-                        if !still_stale {
-                            break;
-                        }
-                        match do_connect_and_replace(
-                            &reconnect_handles,
-                            &reconnect_runtime,
-                            &window_for_reconnect,
-                            &agent,
-                            None,
-                            AgentLifecycleStatus::Reconnecting,
-                            "auto-reconnect",
-                            true,
-                            true,
-                        )
-                        .await
-                        {
-                            Ok(()) => {
-                                // 连接成功后又立即崩溃时，新 dispatcher 的崩溃通知会被
-                                // "已重连"防重入标志吞掉（标志仍持有）——成功分支复查，
-                                // 仍 Crashed 则继续退避重连，避免 agent 永久下线。
-                                let still_stale = reconnect_runtime
-                                    .agent_runtime
-                                    .lock()
-                                    .map(|r| r.status == AgentLifecycleStatus::Crashed)
-                                    .unwrap_or(false);
-                                if still_stale {
-                                    attempt += 1;
-                                    remaining_attempts -= 1;
-                                    continue;
-                                }
+                    // O-4：退出闸门（外层循环）——内层循环因成功复查通过/提前放弃/
+                    // 预算耗尽退出时，期间可能恰有一轮崩溃通知被处理（epoch 已变，
+                    // 防重入 swap 被吞）：其"重连意图"未消费，若此刻释放标志则该
+                    // 崩溃不再调度新循环。闸门复查 epoch——未变才退出消费 ticket
+                    // 并释放标志；已变则重新武装（预算与退避重置）继续重连（标志
+                    // 持续持有，本循环仍是唯一重连权威，对齐 R7 每轮复查语义）。
+                    'auto_reconnect: loop {
+                        loop {
+                            if remaining_attempts == 0 {
                                 break;
                             }
-                            Err(error) => {
-                                tracing::warn!("auto-reconnect attempt {attempt} failed: {error}");
-                                attempt += 1;
-                                remaining_attempts -= 1;
+                            // R7：每轮复查 epoch——重连期间到来新一轮崩溃通知（含被防重入
+                            // 标志吸收的）→ 本循环已失效：放弃旧 ticket、以最新 epoch 重新
+                            // 武装（预算与退避重置），本循环仍是唯一重连权威（标志持续持有）。
+                            if epoch_for_reconnect.load(Ordering::Acquire) != scheduled_epoch {
+                                tracing::info!(
+                                "auto-reconnect superseded by a newer crash; re-arming from attempt 1"
+                            );
+                                // 放弃旧 ticket：以最新 epoch 重新武装。
+                                scheduled_epoch = epoch_for_reconnect.load(Ordering::Acquire);
+                                remaining_attempts = agent_runtime::MAX_RECONNECT_ATTEMPTS;
+                                attempt = 1;
+                            }
+                            tokio::time::sleep(std::time::Duration::from_millis(
+                                agent_runtime::reconnect_backoff_ms(attempt),
+                            ))
+                            .await;
+                            // 用户已手动 reconnect（状态非 Crashed）或已 switch（active_agent
+                            // 已换）→ 放弃自动重连。两读在同一锁持有期内完成，消除
+                            // "已复查 stale、尚未复查 active"之间的切换窗口。
+                            let (still_stale, still_active) = {
+                                let runtime_guard = reconnect_runtime
+                                    .agent_runtime
+                                    .lock()
+                                    .unwrap_or_else(|p| p.into_inner());
+                                let active_guard = reconnect_handles
+                                    .active_agent
+                                    .lock()
+                                    .unwrap_or_else(|p| p.into_inner());
+                                (
+                                    runtime_guard.status == AgentLifecycleStatus::Crashed,
+                                    active_guard.as_str() == reconnect_agent_id,
+                                )
+                            };
+                            if !(still_stale && still_active) {
+                                // 核验修复：提前放弃也必须释放防重入标志，
+                                // 否则后续崩溃将永远不再自动重连。
+                                break;
+                            }
+                            let agent = reconnect_handles
+                                .agents
+                                .lock()
+                                .ok()
+                                .and_then(|a| a.get(&reconnect_agent_id).cloned());
+                            let Some(agent) = agent else {
+                                break;
+                            };
+                            let _lifecycle_guard = reconnect_runtime.agent_lifecycle.lock().await;
+                            // R9：自动重连是 LifecycleOp 状态机的一环——经本 runtime 的
+                            // agent_lifecycle 与 switch/reconnect/平台懒启动串行（无 kill，
+                            // 不持 switch_lock；状态机定义见 lifecycle.rs 模块文档）。
+                            // P2-1：拿到生命周期锁后重查"仍然需要连接"——复查 stale 与
+                            // 拿锁之间，用户手动 reconnect 可能已把状态置非 Crashed 并完成
+                            // 连接；此时再 do_connect_and_replace 会连续第二次连接。
+                            // 手动操作（switch/reconnect）同样在锁内改状态，锁串行后
+                            // 此处必能看到其结果。
+                            let still_stale = reconnect_runtime
+                                .agent_runtime
+                                .lock()
+                                .map(|r| r.status == AgentLifecycleStatus::Crashed)
+                                .unwrap_or(false);
+                            if !still_stale {
+                                break;
+                            }
+                            match do_connect_and_replace(
+                                &reconnect_handles,
+                                &reconnect_runtime,
+                                &window_for_reconnect,
+                                &agent,
+                                None,
+                                AgentLifecycleStatus::Reconnecting,
+                                "auto-reconnect",
+                                true,
+                                true,
+                            )
+                            .await
+                            {
+                                Ok(()) => {
+                                    // 连接成功后又立即崩溃时，新 dispatcher 的崩溃通知会被
+                                    // "已重连"防重入标志吞掉（标志仍持有）——成功分支复查，
+                                    // 仍 Crashed 则继续退避重连，避免 agent 永久下线。
+                                    let still_stale = reconnect_runtime
+                                        .agent_runtime
+                                        .lock()
+                                        .map(|r| r.status == AgentLifecycleStatus::Crashed)
+                                        .unwrap_or(false);
+                                    if still_stale {
+                                        attempt += 1;
+                                        remaining_attempts -= 1;
+                                        continue;
+                                    }
+                                    break;
+                                }
+                                Err(error) => {
+                                    tracing::warn!(
+                                        "auto-reconnect attempt {attempt} failed: {error}"
+                                    );
+                                    attempt += 1;
+                                    remaining_attempts -= 1;
+                                }
                             }
                         }
+                        if epoch_for_reconnect.load(Ordering::Acquire) == scheduled_epoch {
+                            break 'auto_reconnect;
+                        }
+                        tracing::info!(
+                        "auto-reconnect ended but a newer crash arrived; re-arming from attempt 1"
+                    );
+                        scheduled_epoch = epoch_for_reconnect.load(Ordering::Acquire);
+                        remaining_attempts = agent_runtime::MAX_RECONNECT_ATTEMPTS;
+                        attempt = 1;
                     }
                     // R7：成功/放弃消费 ticket——循环结束（成功、提前放弃或预算耗尽）
                     // 统一推进 epoch，使后续通知的计数严格单调。
