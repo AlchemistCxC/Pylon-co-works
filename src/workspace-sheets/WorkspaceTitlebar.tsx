@@ -1,6 +1,7 @@
 import { type MouseEventHandler } from 'react'
 import SheetTabStrip from './SheetTabStrip'
 import { useRuntimeStore } from '../runtimeStore'
+import { useStore } from '../store'
 import type { SheetRecord } from './sheetTypes'
 import type { WorkspaceMenuActions } from './WorkspaceMenu'
 
@@ -43,6 +44,7 @@ export default function WorkspaceTitlebar({
 }: WorkspaceTitlebarProps) {
   // 在标题栏内部订阅 agent 状态：状态 tick 不再触发 App 整树（SheetHost）重渲染
   const agentStatuses = useRuntimeStore(s => s.agentStatuses)
+  const showTabBar = useStore(s => s.showTabBar !== false)
   return (
     <header className={`workspace-titlebar ${sidebarCollapsed ? 'sidebar-collapsed' : ''}`} data-tauri-drag-region>
       <div className="workspace-titlebar-sidebar" data-tauri-drag-region>
@@ -59,7 +61,7 @@ export default function WorkspaceTitlebar({
       </div>
 
       <div className="workspace-titlebar-workspace">
-        <SheetTabStrip
+        {showTabBar && <SheetTabStrip
           sheets={sheets}
           activeSheetId={activeSheetId}
           activeAgent={activeAgent}
@@ -68,7 +70,7 @@ export default function WorkspaceTitlebar({
           onClose={onCloseSheet}
           menuActions={menuActions}
           canReopen={canReopenSheet}
-        />
+        />}
         <div className="workspace-titlebar-launchers">
           <button type="button" className="workspace-titlebar-icon workspace-open-trigger" onClick={onOpenSheet} title="打开 Sheet" aria-label="打开 Sheet">+</button>
           <span className="workspace-launcher-separator" aria-hidden="true" />

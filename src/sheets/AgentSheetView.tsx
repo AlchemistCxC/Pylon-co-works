@@ -2,6 +2,7 @@ import Sidebar from '../components/Sidebar'
 import ChatView from '../components/chat/ChatView'
 import ControlCenter from '../components/ControlCenter'
 import PetCompanion from '../components/PetCompanion'
+import { useStore } from '../store'
 import type { SheetRecord } from '../workspace-sheets/sheetTypes'
 
 interface AgentSheetViewProps {
@@ -24,21 +25,23 @@ export default function AgentSheetView({
   rightInset,
   ccEditMode,
 }: AgentSheetViewProps) {
+  const showSidebar = useStore(s => s.showSidebar !== false)
+  const showPet = useStore(s => s.showPet !== false)
   return (
     <>
-      <Sidebar
+      {showSidebar && <Sidebar
         activeSession={activeSession}
         onSelectSession={onSelectSession}
         onProfileEdit={onProfileEdit}
         onSessionSettings={onSessionSettings}
         collapsed={sidebarCollapsed}
-      />
+      />}
       <div className="main">
         <div className={`main-body ${ccEditMode ? 'blur-bg' : ''}`} style={{
           '--right-panel-inset': `${rightInset}px`,
         } as React.CSSProperties}>
           <ChatView sessionId={activeSession} />
-          <PetCompanion rightInset={rightInset} />
+          {showPet && <PetCompanion rightInset={rightInset} />}
           <ControlCenter sessionId={activeSession} />
         </div>
         {ccEditMode && <div className="cc-edit-overlay" />}

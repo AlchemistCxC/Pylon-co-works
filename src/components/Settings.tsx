@@ -1,9 +1,10 @@
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useRef } from 'react'
 import * as Tabs from '@radix-ui/react-tabs'
 import { invoke } from '@tauri-apps/api/core'
 import { getCurrentWindow } from '@tauri-apps/api/window'
 import { PhysicalSize } from '@tauri-apps/api/dpi'
 import { clearWindowSize } from '../windowSizePersistence'
+import { applyImportPayload, buildExportPayload, configFileName } from '../configExportImport'
 import { useStore } from '../store'
 import { useIdentityStore } from '../identityStore'
 import { useRuntimeStore } from '../runtimeStore'
@@ -130,6 +131,65 @@ function WindowSizeRow() {
       <div className="set-preset-row">
         <button type="button" className="ps-btn sm" onClick={reset}>重置为默认 1200×800</button>
       </div>
+    </Group>
+  )
+}
+
+// 配置导出/导入：Tauri 对话框 + 浏览器下载/上传 fallback
+function ConfigBackupRow() {
+  const [msg, setMsg] = useState<string | null>(null)
+  const fileRef = useRef<HTMLInputElement>(null)
+  const isTauri = typeof (window as any).__TAURI_INTERNALS__ !== 'undefined'
+  const doExport = async () => {
+    try {
+      const json = buildExportPayload(localStorage)
+      const fileName = configFileName()
+      if (isTauri) {
+        const { save } = await import('@tauri-apps/plugin-dialog')
+        const path = await save({ defaultPath: fileName, filters: [{ name: 'Pylon 配置', extensions: ['json'] }] })
+        if (path) {
+          const { writeTextFile } = await import('@tauri-apps/plugin-fs')
+          await writeTextFile(path, json)
+          setMsg('已导出配置')
+        }
+      } else {
+        const blob = new Blob([json], { type: 'application/json' })
+        const url = URL.createObjectURL(blob)
+        const a = document.createElement('a')
+        a.href = url; a.download = fileName; a.click()
+        URL.revokeObjectURL(url)
+        setMsg('已导出配置')
+      }
+    } catch (cause) { setMsg(`导出失败：${String(cause)}`) }
+  }
+  const doImport = async (file?: File) => {
+    try {
+      let json: string | null = null
+      if (file) {
+        json = await file.text()
+      } else if (isTauri) {
+        const { open } = await import('@tauri-apps/plugin-dialog')
+        const selected = await open({ multiple: false, filters: [{ name: 'Pylon 配置', extensions: ['json'] }] })
+        if (!selected) return
+        const { readTextFile } = await import('@tauri-apps/plugin-fs')
+        json = await readTextFile(selected as string)
+      }
+      if (json === null) return
+      const result = applyImportPayload(localStorage, json)
+      setMsg(result.ok
+        ? `已导入 ${result.keys.length} 项配置，刷新后生效`
+        : `导入失败：${result.error}`)
+    } catch (cause) { setMsg(`导入失败：${String(cause)}`) }
+  }
+  return (
+    <Group title="配置备份">
+      <div className="set-preset-row">
+        <button type="button" className="ps-btn sm" onClick={doExport}>导出配置</button>
+        <button type="button" className="ps-btn sm" onClick={() => fileRef.current?.click()}>导入配置</button>
+        <input ref={fileRef} type="file" accept="application/json,.json" style={{ display: 'none' }}
+          onChange={e => { const file = e.target.files?.[0]; if (file) void doImport(file); e.target.value = '' }} />
+      </div>
+      {msg && <div className="set-hint">{msg}</div>}
     </Group>
   )
 }
@@ -368,6 +428,13 @@ export default function Settings({ onClose, activeSessionId }: { onClose?: () =>
                 <div className="set-hint">链接、用户前缀、选中/焦点、spinner 光扫的统一取色</div>
               </Group>
 
+              <Group title="布局骨架">
+                <Row label="Tab 条"><Sel value={t.showTabBar === false ? 'hidden' : 'shown'} onChange={v=>onSettingChange({showTabBar: v === 'shown'})} options={['shown','hidden']}/></Row>
+                <Row label="侧栏"><Sel value={t.showSidebar === false ? 'hidden' : 'shown'} onChange={v=>onSettingChange({showSidebar: v === 'shown'})} options={['shown','hidden']}/></Row>
+                <Row label="宠物"><Sel value={t.showPet === false ? 'hidden' : 'shown'} onChange={v=>onSettingChange({showPet: v === 'shown'})} options={['shown','hidden']}/></Row>
+                <div className="set-hint">隐藏 Tab/侧栏/宠物可拼出 CC 式纯聊天单流</div>
+              </Group>
+
               <Group title="玻璃效果">
                 <BgImageRow label="背景图" value={t.globalBgImage||''} onChange={v=>onSettingChange({globalBgImage:v})}/>
                 <Row label="背景底色">
@@ -392,6 +459,7 @@ export default function Settings({ onClose, activeSessionId }: { onClose?: () =>
               </Group>
 
               <WindowSizeRow />
+              <ConfigBackupRow />
             </Tabs.Content>
 
             {/* ═══ 左栏 ═══ */}

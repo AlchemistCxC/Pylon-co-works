@@ -16,6 +16,7 @@ export const THEME_FIELD_GROUPS = {
   global: [
     'accent', 'transparency', 'bgBlur', 'globalFont', 'globalFontSize', 'globalBgImage',
     'globalBgColor', 'uiScheme',
+    'showTabBar', 'showSidebar', 'showPet',
     'userName', 'userPrefix', 'userColor',
   ],
   sidebar: [

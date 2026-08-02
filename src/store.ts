@@ -17,6 +17,8 @@ export type { SessionConfig } from './runtimeStore'
 export interface ThemeSettings {
   /** 全局强调色（--accent）：链接/前缀/焦点/选中态统一取色，此前硬编码 #3b82f6 无法主题化 */
   accent: string
+  /** 布局骨架显隐（CC 单流模式入口）：tab 条 / 侧栏 / 宠物 */
+  showTabBar: boolean; showSidebar: boolean; showPet: boolean
   transparency: number; bgBlur: number; globalFont: string; globalFontSize: number
   globalBgImage: string; globalBgColor: string; uiScheme: string
   sidebarBg: string; sidebarBgImage: string; sidebarWidth: number; sidebarTextColor: string; sidebarNameSize: number; sidebarGroupSize: number
@@ -98,6 +100,7 @@ type ThemeState = ThemeSettings & {
 
 export const DEFAULTS: ThemeSettings = {
   accent: '#3b82f6',
+  showTabBar: true, showSidebar: true, showPet: true,
   transparency: 0.85, bgBlur: 16, globalFont: 'system', globalFontSize: 18, globalBgImage: '', globalBgColor: '#e8e8ec', uiScheme: 'light',
   sidebarBg: 'rgba(0,0,0,0.02)', sidebarBgImage: '', sidebarWidth: 250, sidebarTextColor: 'rgba(0,0,0,0.85)', sidebarNameSize: 14, sidebarGroupSize: 12,
   chatBg: '', chatBgImage: '', chatFont: 'mono', chatFontSize: 15, chatLineHeight: 1.4, chatTextColor: 'rgba(0,0,0,0.85)', chatCodeColor: '#b47814', chatCodeBg: 'rgba(0,0,0,0.03)',
