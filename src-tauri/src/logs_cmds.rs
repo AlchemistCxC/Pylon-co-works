@@ -28,7 +28,7 @@ pub(crate) async fn push_frontend_log(
     session: Option<String>,
     message: String,
     fields: Option<serde_json::Map<String, serde_json::Value>>,
-) -> Result<runtime_log::RuntimeLogEntry, String> {
+) -> Result<runtime_log::RuntimeLogEntry, PylonError> {
     Ok(state.runtime_logs.push(
         crate::time::Timestamp::now(),
         level,
