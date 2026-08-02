@@ -102,7 +102,9 @@ const ChatView = React.memo(function ChatView({ sessionId }: Props) {
   const sessionRef = useRef<string | null>(null)
   const messageOwnerRef = useRef<string | null>(null)
   const loadGenerationRef = useRef<Record<string, number>>({})
-  const prevSessionRef = useRef(sessionId)
+  // 初始 null：重挂载（切走 sheet 再切回）时首跑不得与当前 sessionId 相等，
+  // 否则初始化被跳过、sessionRef 恒 null、事件永不 sync 到 UI。
+  const prevSessionRef = useRef<string | null>(null)
   const controllerHandleRef = useRef<ChatControllerHandle | null>(null)
   useEffect(() => {
     const onSearchShortcut = (event: globalThis.KeyboardEvent) => {
@@ -281,6 +283,8 @@ const ChatView = React.memo(function ChatView({ sessionId }: Props) {
     }
   }, [sessions, sessionId])
 
+  // 依赖 sessionId：空状态（无会话）时 .chat-view 未渲染、ref 为 null，effect 首跑直接
+  // return；选中会话后 .chat-view 挂载，必须重跑才能绑定 scroll listener。
   useEffect(() => {
     const container = chatViewRef.current
     if (!container) return
@@ -300,7 +304,7 @@ const ChatView = React.memo(function ChatView({ sessionId }: Props) {
       container.removeEventListener('scroll', handleScroll)
       if (scrollRafRef.current !== null) cancelAnimationFrame(scrollRafRef.current)
     }
-  }, [])
+  }, [sessionId])
 
   // 连续 Tool 连接线（真实 DOM 元素）：测量每对相邻 tool 行 head 中心间距，
   // 写入 connector 的 top/height。.chat-view 是 flex 固定高，行展开只改 scrollHeight
@@ -551,7 +555,8 @@ function AssistantContent({ text, isStreaming = false }: { text: string; isStrea
     if (copiedTimerRef.current != null) window.clearTimeout(copiedTimerRef.current)
   }, [])
   const copy = () => {
-    navigator.clipboard.writeText(text)
+    // 剪贴板权限缺失时静默降级（避免 unhandled rejection）
+    navigator.clipboard.writeText(text).catch(() => {})
     setCopied(true)
     if (copiedTimerRef.current != null) window.clearTimeout(copiedTimerRef.current)
     copiedTimerRef.current = window.setTimeout(() => setCopied(false), 2000)
@@ -612,15 +617,17 @@ function CodeBlock({ language, code }: { language?: string; code: string }) {
     return () => { cancelled = true }
   }, [language, code, isMultiLine])
 
+  // 高亮 HTML 的逐行清洗是高亮结果的纯函数：只在 highlight 落地/变化时重算。
+  // 必须在 early return 之前调用——流式输出时同一实例 code 从单行变多行，
+  // 条件性调用会改变 hook 数导致 "Rendered more hooks than during the previous render"。
+  const sanitizedLines = useMemo(() => highlighted
+    ? highlighted.html.split('\n').map(html => sanitizeHtml(html || '&nbsp;'))
+    : null, [highlighted])
+
   // 单行 → 内联代码风格（无 gutter）
   if (!isMultiLine) {
     return <code className="term-inline-code">{code}</code>
   }
-
-  // 高亮 HTML 的逐行清洗是高亮结果的纯函数：只在 highlight 落地/变化时重算
-  const sanitizedLines = useMemo(() => highlighted
-    ? highlighted.html.split('\n').map(html => sanitizeHtml(html || '&nbsp;'))
-    : null, [highlighted])
 
   // 多行 → │ gutter 风格（对齐 Peri TUI code_block_lines）
   // 将 starry-night 输出的 HTML 按 \n 拆行，每行包 gutter
