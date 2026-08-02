@@ -185,7 +185,8 @@ function FieldRow({ def, ctx, keyName }: { def: ThemeFieldDef; ctx: RenderCtx; k
 
 /**
  * 渲染某 zone 的纯字段组：组顺序来自 GROUP_ORDER，字段从 defs 按 group 自动收集
- * （新字段标 group 即自动进组，无需改组表）；hidden 字段跳过。
+ * （新字段标 group 即自动进组）；hidden 跳过、showIf 条件过滤、
+ * advanced 字段折叠进组内"高级…"子区。
  */
 export function ZoneGroupFields({ zone, ctx }: { zone: ZoneName; ctx: RenderCtx }) {
   const order = GROUP_ORDER[zone]
@@ -196,14 +197,26 @@ export function ZoneGroupFields({ zone, ctx }: { zone: ZoneName; ctx: RenderCtx 
         const fields = THEME_FIELD_KEYS.filter(key => {
           const def = THEME_FIELD_DEFS[key] as ThemeFieldDef
           return def.zone === zone && def.group === title && !def.hidden
+            && (!def.showIf || def.showIf(ctx.t as ThemeSettings))
         })
+        const regular = fields.filter(key => !(THEME_FIELD_DEFS[key] as ThemeFieldDef).advanced)
+        const advanced = fields.filter(key => (THEME_FIELD_DEFS[key] as ThemeFieldDef).advanced)
         if (fields.length === 0) return null
         return (
           <Group key={title} title={title}>
-            {fields.map(key => {
-              const def = THEME_FIELD_DEFS[key]
+            {regular.map(key => {
+              const def = THEME_FIELD_DEFS[key] as ThemeFieldDef
               return <FieldRow key={key} keyName={key} def={def} ctx={ctx} />
             })}
+            {advanced.length > 0 && (
+              <details className="set-advanced">
+                <summary>高级…</summary>
+                {advanced.map(key => {
+                  const def = THEME_FIELD_DEFS[key] as ThemeFieldDef
+                  return <FieldRow key={key} keyName={key} def={def} ctx={ctx} />
+                })}
+              </details>
+            )}
           </Group>
         )
       })}

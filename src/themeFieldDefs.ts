@@ -37,6 +37,10 @@ export interface ThemeFieldDef {
   minFn?: (t: ThemeSettings) => number
   /** number 单位后缀（'px' 等）；cssVar 注入时格式化 `${value}${unit}` */
   unit?: string
+  /** 条件显示：返回 false 时 Settings 不渲染该字段（如 spinner 自定义帧依赖预设） */
+  showIf?: (t: ThemeSettings) => boolean
+  /** 高阶选项：渲染器折叠进组内"高级"子区，平时不占屏 */
+  advanced?: boolean
   /** select 选项 */
   options?: readonly string[]
   /** CSS 变量注入名；缺省 = `--${kebab(fieldName)}` */
@@ -122,14 +126,14 @@ export const THEME_FIELD_DEFS = {
   toolIndicatorGlow: { ...N('chat', '指示器辉光', 0, 20, 1), group: "指示器 & 连接线", },
   toolIndicatorGlowColor: { ...C('chat', '辉光色'), group: "指示器 & 连接线", },
   toolConnectorMode: { ...S('chat', '连接线', ['none', 'fixed', 'follow']), group: "指示器 & 连接线", },
-  toolConnectorColor: { ...C('chat', '连接线色'), group: "指示器 & 连接线", },
+  toolConnectorColor: { ...C('chat', '连接线色'), group: "指示器 & 连接线", showIf: t => t.toolConnectorMode === 'fixed' },
   toolConnectorStyle: { ...S('chat', '线样式', ['solid', 'dotted', 'pulse']), group: "指示器 & 连接线", },
   toolConnectorWidth: { ...N('chat', '线宽', 1, 6), group: "指示器 & 连接线", },
   toolConnectorOpacity: { ...N('chat', '线透明度', 0.1, 1, 0.05), group: "指示器 & 连接线", },
   spinnerFramePreset: { ...S('chat', '动画预设', ['sparkles', 'ascii-line', 'braille', 'dots', 'orbit', 'clock', 'wave', 'blocks', 'scan', 'custom']), group: "Spinner", },
-  spinnerCustomFrames: { ...T('chat', '自定义帧'), group: "Spinner", },
+  spinnerCustomFrames: { ...T('chat', '自定义帧'), group: "Spinner", showIf: t => t.spinnerFramePreset === 'custom' },
   spinnerVerbSet: { ...S('chat', '文案语言', ['zh', 'en', 'analysis', 'engineering', 'custom']), group: "Spinner", },
-  spinnerCustomVerbs: { ...T('chat', '自定义文案'), group: "Spinner", },
+  spinnerCustomVerbs: { ...T('chat', '自定义文案'), group: "Spinner", showIf: t => t.spinnerVerbSet === 'custom' },
   spinnerDoneMarker: { ...T('chat', '完成标记'), control: 'spinnerMarker', group: "Spinner", },
   spinnerCancelledMarker: { ...T('chat', '取消标记'), control: 'spinnerMarker', group: "Spinner", },
   spinnerErrorMarker: { ...T('chat', '错误标记'), control: 'spinnerMarker', group: "Spinner", },
@@ -177,7 +181,7 @@ export const THEME_FIELD_DEFS = {
   inputSendBg: { ...C('cc', '发送按钮'), group: "输入与状态", },
   inputFocusBorder: { ...C('cc', '焦点边框'), group: "输入与状态", },
   inputFontSize: { ...N('cc', '输入字号', 12, 22), group: "输入与状态", unit: 'px' },
-  inputMinHeight: { ...N('cc', '输入最小高', 32, 120), group: "输入与状态", unit: 'px' },
+  inputMinHeight: { ...N('cc', '输入最小高', 32, 120), group: "输入与状态", unit: 'px', advanced: true },
   inputMode: { ...S('cc', '输入模式', ['cli', 'default']), group: "输入与状态", },
   inputVariant: { ...S('cc', '输入栏', ['cli', 'composer', 'compact', 'command']), syncOnChange: ['inputMode'], group: "控件样式", },
   inputShowPlaceholder: { ...S('cc', 'Placeholder', ['shown', 'hidden']), group: "控件样式", },
@@ -187,8 +191,8 @@ export const THEME_FIELD_DEFS = {
   cliLineColor: { ...C('cc', 'CLI 线色'), group: "输入与状态", },
   cliTextColor: { ...C('cc', 'CLI 文字'), group: "输入与状态", },
   cliPromptColor: { ...C('cc', '提示符颜色'), group: "控件样式", },
-  cliLinePadding: { ...N('cc', 'CLI 内边距', 0, 16), group: "输入与状态", unit: 'px' },
-  cliContentOffsetY: { ...N('cc', '内容垂直偏移', -6, 6), group: "控件样式", unit: 'px' },
+  cliLinePadding: { ...N('cc', 'CLI 内边距', 0, 16), group: "输入与状态", unit: 'px', advanced: true },
+  cliContentOffsetY: { ...N('cc', '内容垂直偏移', -6, 6), group: "控件样式", unit: 'px', advanced: true },
   cliHintMode: { ...S('cc', '命令提示', ['hidden', 'compact', 'full']), group: "控件样式", },
   footerLayout: { ...S('cc', 'Footer 布局', ['free', 'peri']), group: "控件样式", },
   cliOverflowMode: { ...S('cc', '多行策略', ['fixed-scroll', 'grow', 'overlay']), group: "控件样式", },
@@ -199,17 +203,17 @@ export const THEME_FIELD_DEFS = {
   ekgGreen: { ...C('cc', '波形·正常'), group: "波形与用量", },
   ekgYellow: { ...C('cc', '波形·警示'), group: "波形与用量", },
   ekgRed: { ...C('cc', '波形·危险'), group: "波形与用量", },
-  ekgLineWidth: { ...N('cc', '波形线宽', 1, 6), group: "波形与用量", unit: 'px' },
-  ekgAmplitudeMax: { ...N('cc', '波形幅度', 2, 40), group: "波形与用量", unit: 'px' },
-  ekgSpeedBase: { ...N('cc', '波形速度基', 0.1, 2, 0.1), group: "波形与用量", },
-  ekgSpeedMax: { ...N('cc', '波形速度峰', 0.5, 6, 0.1), group: "波形与用量", },
-  ekgLeftColor: { ...C('cc', '波形·左色'), group: "波形与用量", },
-  ekgMovingColor: { ...C('cc', '波形·动色'), group: "波形与用量", },
-  ekgConsumedColor: { ...C('cc', '波形·已耗'), group: "波形与用量", },
-  barTrackColor: { ...C('cc', '柱·轨道'), group: "波形与用量", },
-  barFillColor: { ...C('cc', '柱·填充'), group: "波形与用量", },
+  ekgLineWidth: { ...N('cc', '波形线宽', 1, 6), group: "波形与用量", unit: 'px', advanced: true },
+  ekgAmplitudeMax: { ...N('cc', '波形幅度', 2, 40), group: "波形与用量", unit: 'px', advanced: true },
+  ekgSpeedBase: { ...N('cc', '波形速度基', 0.1, 2, 0.1), group: "波形与用量", advanced: true },
+  ekgSpeedMax: { ...N('cc', '波形速度峰', 0.5, 6, 0.1), group: "波形与用量", advanced: true },
+  ekgLeftColor: { ...C('cc', '波形·左色'), group: "波形与用量", advanced: true },
+  ekgMovingColor: { ...C('cc', '波形·动色'), group: "波形与用量", advanced: true },
+  ekgConsumedColor: { ...C('cc', '波形·已耗'), group: "波形与用量", advanced: true },
+  barTrackColor: { ...C('cc', '柱·轨道'), group: "波形与用量", advanced: true },
+  barFillColor: { ...C('cc', '柱·填充'), group: "波形与用量", advanced: true },
   barFillFollow: { ...B('cc', '柱·跟随用量'), group: "波形与用量", },
-  barHeight: { ...N('cc', '柱高', 4, 24), group: "波形与用量", },
+  barHeight: { ...N('cc', '柱高', 4, 24), group: "波形与用量", advanced: true },
   tokenDisplay: { ...S('cc', 'Token 显示', ['ekg', 'pct', 'bar', 'ring', 'tokens']), group: "波形与用量", },
   pillBg: { ...C('cc', '胶囊背景'), group: "波形与用量", },
   pillText: { ...C('cc', '胶囊文字'), group: "波形与用量", },
@@ -218,8 +222,8 @@ export const THEME_FIELD_DEFS = {
   modeVariant: { ...S('cc', '模式', ['pill', 'badge', 'minimal']), group: "控件样式", },
   sendVariant: { ...S('cc', '发送', ['icon', 'square', 'minimal']), group: "控件样式", },
   attachVariant: { ...S('cc', '附件', ['icon', 'square', 'minimal']), group: "控件样式", },
-  modeAutoColor: { ...C('cc', '模式·auto'), group: "控件样式", },
-  modeEditColor: { ...C('cc', '模式·edit'), group: "控件样式", },
+  modeAutoColor: { ...C('cc', '模式·auto'), group: "控件样式", advanced: true },
+  modeEditColor: { ...C('cc', '模式·edit'), group: "控件样式", advanced: true },
 
   // ── right ──
   rightBg: { ...C('right', '背景色'), group: "外观", },

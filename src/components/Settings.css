@@ -177,3 +177,14 @@
 .pv-app .layout { flex:1; overflow:hidden; display:flex; }
 .pv-right-panel { position:relative; top:auto; right:auto; bottom:auto; z-index:1; }
 .pv-right-panel .right-body { min-width:0; }
+
+/* ── 声明式高级字段折叠（themeFieldRenderer）── */
+.set-advanced { margin-top:6px; padding-top:6px; border-top:1px dashed var(--border); }
+.set-advanced summary {
+  cursor:pointer; font-size:11px; color:var(--text-dim);
+  font-weight:600; letter-spacing:0.06em; user-select:none; padding:2px 0 6px;
+}
+.set-advanced summary:hover { color:var(--text); }
+.set-advanced summary::-webkit-details-marker { display:none; }
+.set-advanced summary::before { content:'▸ '; font-size:9px; }
+.set-advanced[open] summary::before { content:'▾ '; }
