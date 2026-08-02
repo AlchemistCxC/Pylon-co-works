@@ -128,34 +128,51 @@ pub(crate) fn pick_option(options: &[String], prefer_reject: bool) -> Option<&st
     .map(String::as_str)
 }
 
-/// 统一权限应答（P1-2 TOCTOU 修复）：acp 锁内复核 pending 再发送。
-/// 客户端替换（replace_agent_client）在 acp 锁内清空 pending——若"锁外读 pending
-/// → 锁 acp 发送"，替换发生在两者之间时，旧进程的 request_id 会写到新进程。
-/// C4：锁内同时复核 pending 记录的 client_generation 与当前一致——客户端替换
-/// 瞬间（同 id 请求已由新进程发出）旧审批决策不误写新进程。
-/// O9：锁内仅复核（存在 + 身份）+ 取 write_tx 克隆 + claim，锁外发送（10s 超时，
-/// 语义对齐 acp::send_line）——不再持 acp 锁 await，避免阻塞其他 ACP 操作。
-/// 返回 true = 已应答并移除；false = 请求已不存在/身份不匹配（跳过）或发送失败
+/// R34：四路应答统一核心（由 respond_permission 演进——四路：应答 / cancel /
+/// resolve / 超时 全部收敛于此，单一临界区 + 锁外发送）。
+///
+/// 单临界区（P1-2 TOCTOU 修复）：acp 锁内查条目 + C4 generation 校验 +
+/// tool_call_id 校验 + 选项校验 + claim；锁外发送（O9：10s 超时，语义对齐
+/// acp::send_line），不再持 acp 锁 await。客户端替换（replace_agent_client）
+/// 在 acp 锁内清空 pending——复核与 claim 同锁，替换瞬间旧审批决策不会写到
+/// 新进程同 id 请求。
+///
+/// 参数：
+/// - `expected_tool_call_id`：Some 时要求条目 tool_call_id 一致（cancel 路径按
+///   收集时的原 id 校验，防同 id 被新工具调用复用后误 cancel）。
+/// - `option_id`：空串 = Cancelled 应答（cancel/close 路径，无选项概念）；
+///   非空必须 ∈ 条目的 options（C5 选项契约）。
+///
+/// 返回 true = 已应答并移除；false = 任一校验失败（跳过）或发送失败
 /// （恢复 pending 供重试/超时/客户端替换清理）。
-pub(crate) async fn respond_permission(
+async fn resolve_pending(
     runtime: &AgentRuntime,
     request_id: u64,
-    response: serde_json::Value,
+    expected_tool_call_id: Option<&str>,
+    option_id: &str,
 ) -> bool {
-    // 锁内仅复核 + 取 write_tx 克隆 + claim（O9：发送全部在锁外）。
+    // 锁内复核 + 取 write_tx 克隆 + claim（发送全部在锁外）。
     let (write_tx, crashed, claimed) = {
         let acp = runtime.acp.lock().await;
         let mut pending = match runtime.pending_permissions.lock() {
             Ok(guard) => guard,
             Err(_) => return false,
         };
-        let can_respond = pending
-            .get(&request_id)
-            .map(|permission| {
-                permission.client_generation == runtime.client_generation.load(Ordering::Acquire)
-            })
-            .unwrap_or(false);
-        if !can_respond {
+        let Some(permission) = pending.get(&request_id) else {
+            return false;
+        };
+        // C4：身份复核——客户端替换（generation 前进）后不误写新进程同 id 请求。
+        if permission.client_generation != runtime.client_generation.load(Ordering::Acquire) {
+            return false;
+        }
+        // tool_call_id 复核（cancel 路径用）。
+        if let Some(expected) = expected_tool_call_id {
+            if permission.tool_call_id != expected {
+                return false;
+            }
+        }
+        // C5 选项契约：空 option_id = Cancelled；非空必须 ∈ options。
+        if !option_id.is_empty() && !permission.options.iter().any(|option| option == option_id) {
             return false;
         }
         (
@@ -164,7 +181,12 @@ pub(crate) async fn respond_permission(
             pending.remove(&request_id),
         )
     };
-    // 锁外发送：信封序列化 + 10s 超时。发送失败恢复 pending（保留可重试）。
+    // 锁外发送：构造应答 + 信封序列化 + 10s 超时。失败恢复 pending（保留可重试）。
+    let outcome = if option_id.is_empty() {
+        permission_response_cancelled()
+    } else {
+        permission_response(option_id)
+    };
     if crashed.load(Ordering::Acquire) {
         // 对齐 acp::send_response：已崩溃连接不再发送
         restore_pending(runtime, request_id, claimed);
@@ -173,7 +195,7 @@ pub(crate) async fn respond_permission(
     let line = serde_json::json!({
         "jsonrpc": "2.0",
         "id": request_id,
-        "result": response,
+        "result": outcome,
     });
     let line = match serde_json::to_string(&line) {
         Ok(line) => line,
@@ -214,103 +236,41 @@ pub(crate) async fn respond_pending_permissions_cancelled(
     runtime: &AgentRuntime,
     session_id: &str,
 ) {
-    let pending: Vec<u64> = runtime
+    let pending: Vec<(u64, String)> = runtime
         .pending_permissions
         .lock()
         .map(|pending| {
             pending
                 .iter()
                 .filter(|(_, p)| p.session_id == session_id)
-                .map(|(id, _)| *id)
+                .map(|(id, p)| (*id, p.tool_call_id.clone()))
                 .collect()
         })
         .unwrap_or_default();
-    for request_id in pending {
-        // P1-2：统一走 respond_permission（锁内复核）；发送失败时保留 pending
-        // （进程已死则由崩溃处理/客户端替换清理，不向新进程误写）。
-        let _ = respond_permission(runtime, request_id, permission_response_cancelled()).await;
+    for (request_id, tool_call_id) in pending {
+        // R34：统一走 resolve_pending（锁内复核身份 + tool_call_id，锁外发送）；
+        // 空 option_id = Cancelled 应答。校验/发送失败时保留 pending（进程已死
+        // 则由崩溃处理/客户端替换清理，不向新进程误写）。
+        let _ = resolve_pending(runtime, request_id, Some(&tool_call_id), "").await;
     }
 }
 
 /// 应答挂起的权限请求（B9.4 契约）：option_id 必须是请求提供的选项之一。
-/// 拒绝走同一命令（option_id = "reject_once" 等）。返回 Err = 未找到或选项非法。
-/// O36：合并单一临界区——acp 锁内查条目 + 校验选项 + C4 generation 校验 + claim，
-/// 锁外发送（O9 同款）；消除"锁读 → 校验 → respond_permission 再锁"两段式重复
-/// 锁往返。
+/// 拒绝走同一命令（option_id = "reject_once" 等）。返回 Err = 未找到/选项非法/
+/// 身份不匹配（C4）/发送失败。
+/// R34：统一收敛到 resolve_pending——单一临界区（锁内查条目 + 校验选项 +
+/// C4 generation 校验 + claim）+ 锁外发送（O9/O36 合并落点）。
 pub(crate) async fn resolve_permission(
     runtime: &AgentRuntime,
     request_id: u64,
     option_id: &str,
 ) -> Result<(), PylonError> {
-    let (write_tx, crashed, claimed, tool_call_id, line) = {
-        let acp = runtime.acp.lock().await;
-        let mut pending = runtime
-            .pending_permissions
-            .lock()
-            .map_err(|e| e.to_string())?;
-        let Some(permission) = pending.get(&request_id) else {
-            return Err(PylonError::Protocol(format!(
-                "permission request not found: {request_id}"
-            )));
-        };
-        if !permission.options.iter().any(|option| option == option_id) {
-            return Err(PylonError::Protocol(format!(
-                "invalid option {option_id} for request {request_id}"
-            )));
-        }
-        // C4：锁内复核身份——客户端替换（generation 前进）后旧审批决策不误写
-        // 新进程同 id 请求。
-        if permission.client_generation != runtime.client_generation.load(Ordering::Acquire) {
-            return Err(PylonError::Protocol(format!(
-                "permission request not found: {request_id}"
-            )));
-        }
-        let tool_call_id = permission.tool_call_id.clone();
-        let line = serde_json::json!({
-            "jsonrpc": "2.0",
-            "id": request_id,
-            "result": permission_response(option_id),
-        });
-        let line = match serde_json::to_string(&line) {
-            Ok(line) => line,
-            Err(_) => {
-                return Err(PylonError::Protocol(format!(
-                    "permission request not found: {request_id}"
-                )));
-            }
-        };
-        (
-            acp.write_tx.clone(),
-            acp.crashed.clone(),
-            pending.remove(&request_id),
-            tool_call_id,
-            line,
-        )
-    };
-    // 锁外发送（O9/O35）：崩溃/超时/通道关闭均失败——恢复 pending 保留可重试。
-    if crashed.load(Ordering::Acquire) {
-        restore_pending(runtime, request_id, claimed);
+    if !resolve_pending(runtime, request_id, None, option_id).await {
         return Err(PylonError::Protocol(format!(
             "permission request not found: {request_id}"
         )));
     }
-    let sent =
-        match tokio::time::timeout(std::time::Duration::from_secs(10), write_tx.send(line)).await {
-            Ok(Ok(())) => true,
-            Ok(Err(_)) => false,
-            Err(_) => {
-                log::warn!("ACP write timeout after 10s: connection presumed dead");
-                crashed.store(true, Ordering::Release);
-                false
-            }
-        };
-    if !sent {
-        restore_pending(runtime, request_id, claimed);
-        return Err(PylonError::Protocol(format!(
-            "permission request not found: {request_id}"
-        )));
-    }
-    log::info!("权限请求 {request_id} 已应答 {option_id}（{tool_call_id}）");
+    log::info!("权限请求 {request_id} 已应答 {option_id}");
     Ok(())
 }
 
@@ -402,7 +362,7 @@ pub(crate) async fn check_pending_permission_timeouts(state: &AppState) {
             continue;
         }
         // O37：多条超时应答互不依赖——join_all 并行，避免写通道阻塞时逐条串行
-        // 放大整体耗时。P1-2：统一走 respond_permission（锁内复核 + 锁外发送，
+        // 放大整体耗时。R34：统一走 resolve_pending（锁内复核 + 锁外发送，
         // 防客户端替换竞态）；发送失败恢复 pending，下轮 watcher 重试或客户端
         // 替换清理。超时日志无条件保留（记录本次判定）。
         let responses = expired
@@ -413,9 +373,7 @@ pub(crate) async fn check_pending_permission_timeouts(state: &AppState) {
                     .unwrap_or("reject_once")
                     .to_string();
                 async move {
-                    let _ =
-                        respond_permission(&runtime, request_id, permission_response(&option_id))
-                            .await;
+                    let _ = resolve_pending(&runtime, request_id, None, &option_id).await;
                     log::warn!("权限请求 {request_id} 超时默认拒绝 {option_id}（{tool_call_id}）");
                 }
             });
@@ -504,7 +462,7 @@ with open({trace:?}, 'a') as f:
             .unwrap()
             .insert(7, parsed(1));
         assert!(
-            !respond_permission(&runtime, 7, permission_response("allow_once")).await,
+            !resolve_pending(&runtime, 7, None, "allow_once").await,
             "generation 不匹配必须拒绝应答"
         );
         assert!(
@@ -538,7 +496,7 @@ with open({trace:?}, 'a') as f:
             .unwrap()
             .insert(7, parsed(1));
         assert!(
-            !respond_permission(&runtime, 7, permission_response("allow_once")).await,
+            !resolve_pending(&runtime, 7, None, "allow_once").await,
             "stale generation 必须拒绝"
         );
         assert!(runtime.pending_permissions.lock().unwrap().contains_key(&7));
@@ -550,7 +508,7 @@ with open({trace:?}, 'a') as f:
             .unwrap()
             .insert(8, parsed(0));
         assert!(
-            respond_permission(&runtime, 8, permission_response("allow_once")).await,
+            resolve_pending(&runtime, 8, None, "allow_once").await,
             "匹配 generation 必须应答"
         );
         assert!(!runtime.pending_permissions.lock().unwrap().contains_key(&8));
@@ -569,10 +527,58 @@ with open({trace:?}, 'a') as f:
         })
         .await
         .expect("匹配 generation 的应答必须到达客户端");
+
+        // R34：Cancelled 应答（空 option_id）——匹配身份 + tool_call_id 则发送
+        runtime
+            .pending_permissions
+            .lock()
+            .unwrap()
+            .insert(9, parsed(0));
+        assert!(
+            resolve_pending(&runtime, 9, Some("call-1"), "").await,
+            "匹配的 cancel 必须应答"
+        );
+        // tool_call_id 不匹配（同 id 已被复用为其他工具调用）→ 拒绝应答且不发送
+        runtime
+            .pending_permissions
+            .lock()
+            .unwrap()
+            .insert(10, parsed(0));
+        assert!(
+            !resolve_pending(&runtime, 10, Some("other-call"), "").await,
+            "tool_call_id 不匹配必须拒绝"
+        );
+        assert!(runtime
+            .pending_permissions
+            .lock()
+            .unwrap()
+            .contains_key(&10));
+        // 等 cancel 应答写入 trace 后回读断言
+        tokio::time::timeout(std::time::Duration::from_secs(5), async {
+            loop {
+                if std::fs::read_to_string(&trace_path)
+                    .map(|trace| trace.contains("\"id\":9"))
+                    .unwrap_or(false)
+                {
+                    break;
+                }
+                tokio::time::sleep(std::time::Duration::from_millis(20)).await;
+            }
+        })
+        .await
+        .expect("cancel 应答必须到达客户端");
         let trace = std::fs::read_to_string(&trace_path).unwrap_or_default();
+        assert!(
+            trace.contains("\"outcome\":\"cancelled\""),
+            "cancel 应答必须是 Cancelled 形状: {trace}"
+        );
         assert!(
             !trace.contains("\"id\":7"),
             "stale generation 应答不得写入新进程: {trace}"
+        );
+        assert!(
+            !trace.contains("\"id\":10"),
+            "tool_call_id 不匹配的应答不得发送: {trace}"
         );
 
         let _ = runtime.acp.lock().await.kill();
