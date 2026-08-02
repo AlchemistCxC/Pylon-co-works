@@ -346,8 +346,17 @@ pub fn write_json_atomic(path: &std::path::Path, json: &str) -> Result<(), Strin
             now,
         ))
     };
-    std::fs::write(&unique, json).map_err(|e| e.to_string())?;
-    std::fs::rename(&unique, path).map_err(|e| e.to_string())
+    let result = (|| {
+        std::fs::write(&unique, json).map_err(|e| e.to_string())?;
+        std::fs::rename(&unique, path).map_err(|e| e.to_string())
+    })();
+    // O16：失败清理遗留 temp（对齐 lifecycle.rs MCP 同款）——write/rename 失败
+    // 不再留下半截 `.xxx.tmp` 垃圾文件。
+    if let Err(ref error) = result {
+        let _ = std::fs::remove_file(&unique);
+        log::warn!("write state file failed: {error}");
+    }
+    result
 }
 
 /// 序列化 + 原子写（Exit 兜底等同步路径；高频路径请用 serialize_state + write_json_atomic 分离）。
