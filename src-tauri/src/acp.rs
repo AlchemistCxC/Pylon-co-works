@@ -401,6 +401,13 @@ impl PreparedRpc {
             remove_pending_from(&pending, id);
             return Err(error);
         }
+        // A6：发送后复检 crashed——reader EOF 先 store 后 drain：注册先于 drain 的
+        // pending 会被 drain resolve；注册后于 drain 的在此命中（否则 prompt 悬挂
+        // 300s 假超时）。crashed 已置位时 pending 不可能再被消费，直接清理返回。
+        if crashed.load(Ordering::Acquire) {
+            remove_pending_from(&pending, id);
+            return Err(AcpError::ConnectionClosed);
+        }
         Ok(rx)
     }
 
@@ -418,6 +425,12 @@ impl PreparedRpc {
         if let Err(error) = send_line(write_tx, line, &crashed).await {
             remove_pending_from(&pending, id);
             return Err(error);
+        }
+        // A6：与 send_keep_rx 相同的发送后复检，避免注册后于 drain 的 pending
+        // 悬挂满 30s 假超时（同一次崩溃窗口内保持快速 ConnectionClosed 收敛）。
+        if crashed.load(Ordering::Acquire) {
+            remove_pending_from(&pending, id);
+            return Err(AcpError::ConnectionClosed);
         }
         let msg = match tokio::time::timeout(std::time::Duration::from_secs(30), rx).await {
             Ok(Ok(msg)) => msg,
@@ -1763,6 +1776,43 @@ for line in sys.stdin:
             crashed.load(Ordering::Relaxed),
             "write timeout must mark the connection as crashed"
         );
+    }
+
+    #[tokio::test]
+    async fn send_after_crash_returns_connection_closed_without_pending_stall() {
+        // A6：模拟 EOF 竞态窗口——pending 注册后于 drain（drain 未 resolve 该 id），
+        // 但 reader 已 store crashed。send 成功后复检 crashed 必须立即返回
+        // ConnectionClosed 并清理 pending（修复前 send_keep_rx 挂满 300s / complete
+        // 挂满 30s 假超时）。
+        for complete in [false, true] {
+            let (write_tx, _write_rx) = mpsc::channel::<String>(1);
+            let pending: Arc<[Mutex<Pending>; PENDING_SHARDS]> =
+                Arc::new(std::array::from_fn(|_| Mutex::new(HashMap::new())));
+            let crashed = Arc::new(AtomicBool::new(true));
+            let (_tx, rx) = oneshot::channel();
+            let rpc = PreparedRpc {
+                id: 7,
+                line: "test-line".to_string(),
+                write_tx,
+                rx,
+                pending: pending.clone(),
+                crashed,
+            };
+            let result = tokio::time::timeout(std::time::Duration::from_secs(2), async move {
+                if complete {
+                    rpc.complete().await.map(|_| ())
+                } else {
+                    rpc.send_keep_rx().await.map(|_| ())
+                }
+            })
+            .await
+            .expect("crashed path must return immediately, not stall");
+            assert!(matches!(result, Err(AcpError::ConnectionClosed)));
+            assert!(
+                !pending[7 % PENDING_SHARDS].lock().unwrap().contains_key(&7),
+                "pending must be cleaned up on the crashed path"
+            );
+        }
     }
 
     #[tokio::test]
