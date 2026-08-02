@@ -653,7 +653,8 @@ impl PetState {
             AiEvent::UserSent => {
                 self.stats.messages = self.stats.messages.saturating_add(1);
                 self.first_chunk_at_ms = None;
-                // 审查修复：用户发消息也是互动——刷新睡眠判定基准（防对话中 energy≤15 被 T1/T8 误入睡）
+                // 审查修复：用户发消息也是互动——刷新互动基准（bond 冷却用；
+                // S8 后 T1/T8 睡眠判定统一由 last_activity_at_ms 驱动，见 apply 顶部）
                 self.last_interaction_at_ms = now_ms;
                 // mood 由 derive_mood 推导
                 self.hunger = self.hunger.saturating_sub(1);
@@ -673,7 +674,7 @@ impl PetState {
             AiEvent::FirstChunk => {
                 // T5：对话开始 → Interacting
                 self.machine = PetMachineState::Awake(MachineSub::Interacting);
-                // 审查修复：对话开始也是互动（同上，防 T1/T8 误入睡）
+                // 审查修复：对话开始也是互动（同上；睡眠判定见 apply 顶部统一基准）
                 self.last_interaction_at_ms = now_ms;
                 if self.first_chunk_at_ms.is_none() {
                     self.first_chunk_at_ms = Some(now_ms);
@@ -844,7 +845,7 @@ impl PetState {
                 // M8：午夜陪伴——Night 时段戳一戳 bond ×1.5
                 self.reward_interaction(now_ms, self.night_bond(part, 1));
                 self.record_night_visit(part);
-                // C13：戳也是互动——刷新睡眠判定基准（防 energy≤15 时持续互动被 T1/T8 误入睡）
+                // C13：戳也是互动——刷新互动基准（bond 冷却用；睡眠判定见 apply 顶部统一基准）
                 self.last_interaction_at_ms = now_ms;
                 // mood 由 derive_mood 推导
                 self.push_event(RecentEvent::Poke);
@@ -887,7 +888,7 @@ impl PetState {
                 let greed_bond = (100 + self.traits.greed as u32) * base_bond / 100;
                 self.reward_interaction(now_ms, self.night_bond(part, greed_bond));
                 self.record_night_visit(part);
-                // C13：喂食也是互动——刷新睡眠判定基准（防 energy≤15 时持续互动被 T1/T8 误入睡）
+                // C13：喂食也是互动——刷新互动基准（bond 冷却用；睡眠判定见 apply 顶部统一基准）
                 self.last_interaction_at_ms = now_ms;
                 // mood 由 derive_mood 推导
                 self.push_event(RecentEvent::Feed);
@@ -905,7 +906,7 @@ impl PetState {
                 let play_cooled = self.last_play_at_ms == 0
                     || now_ms.saturating_sub(self.last_play_at_ms) >= 60_000;
                 self.last_play_at_ms = now_ms;
-                // 审查修复：玩耍也是互动——刷新睡眠判定基准（防 30s 内误入睡）
+                // 审查修复：玩耍也是互动——刷新互动基准（bond 冷却用；睡眠判定见 apply 顶部统一基准）
                 self.last_interaction_at_ms = now_ms;
                 self.hunger = self.hunger.saturating_sub(5);
                 self.energy = self.energy.saturating_sub(10);
@@ -954,9 +955,17 @@ impl PetState {
                 self.msg = Some("连接断了，它吓得缩了一下。".into());
             }
         }
-        // T1/T8 睡眠检查：energy 耗尽（≤15 且 30s 无互动，或直接归零）→ 入睡
-        if self.machine != PetMachineState::Asleep {
-            let idle_for = now_ms.saturating_sub(self.last_interaction_at_ms);
+        // T1/T8 睡眠检查：energy 耗尽（≤15 且 30s 无活动，或直接归零）→ 入睡
+        // S8 审查修复：判定基准与 check_sleepy 统一为 last_activity_at_ms（任何事件
+        // 刷新，除 Visit/Sleepy）——旧基准 last_interaction_at_ms 只覆盖互动事件，
+        // FirstChunk 后长生成（工具链/Token）尾部事件不刷新，对话进行中 energy≤15
+        // 会被误入睡（check_sleepy 同刻判定"未发呆"，两路径矛盾）；并豁免
+        // Awake(Distress)（与 check_sleepy 一致：崩溃状态不入睡）。
+        if !matches!(
+            self.machine,
+            PetMachineState::Asleep | PetMachineState::Awake(MachineSub::Distress)
+        ) {
+            let idle_for = now_ms.saturating_sub(self.last_activity_at_ms);
             if self.energy <= 15 && (idle_for >= 30_000 || self.energy == 0) {
                 self.machine = PetMachineState::Asleep;
                 self.msg = Some(lines::pick(

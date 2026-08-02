@@ -421,6 +421,54 @@ fn low_energy_interactions_keep_pet_awake() {
     );
 }
 
+#[test]
+fn long_generation_events_keep_low_energy_pet_awake() {
+    // S8：T1/T8 判定基准与 check_sleepy 统一为 last_activity_at_ms——长生成期间
+    // 工具链/Token 事件（旧基准 last_interaction_at_ms 不刷新）不得导致对话中误入睡
+    let mut pet = day_pet(1);
+    pet.traits = pylon_pet_core::PetTraits::default();
+    pet.energy = 10;
+    pet.apply(AiEvent::FirstChunk, 1); // 对话开始（Interacting）
+    pet.apply(
+        AiEvent::ToolStarted {
+            kind: pylon_pet_core::ToolKind::Code,
+        },
+        31_000, // 生成 30s 后的工具事件
+    );
+    pet.apply(AiEvent::TokenUsage { total: 5_000 }, 40_000);
+    assert_ne!(
+        pet.machine,
+        pylon_pet_core::PetMachineState::Asleep,
+        "长生成尾部事件必须刷新睡眠基准（不得对话中入睡）"
+    );
+    // 对照：30s+ 无任何事件仍入睡
+    let mut pet = day_pet(1);
+    pet.traits = pylon_pet_core::PetTraits::default();
+    pet.energy = 10;
+    pet.apply(AiEvent::FirstChunk, 1);
+    pet.apply(AiEvent::Visit, 40_000); // Visit 不刷新基准
+    assert_eq!(
+        pet.machine,
+        pylon_pet_core::PetMachineState::Asleep,
+        "30s+ 无活动必须入睡"
+    );
+}
+
+#[test]
+fn distress_exempts_low_energy_sleep_check() {
+    // S8：T1/T8 豁免 Awake(Distress)（与 check_sleepy 一致）——崩溃中不因低能量入睡
+    let mut pet = day_pet(1);
+    pet.traits = pylon_pet_core::PetTraits::default();
+    pet.energy = 10;
+    pet.apply(AiEvent::AgentCrashed, 1);
+    pet.apply(AiEvent::Visit, 60_000);
+    assert_eq!(
+        pet.machine,
+        pylon_pet_core::PetMachineState::Awake(pylon_pet_core::MachineSub::Distress),
+        "Distress 期间低能量不得入睡"
+    );
+}
+
 // ── M3：情绪推导（设计书 §6）──
 
 #[test]
