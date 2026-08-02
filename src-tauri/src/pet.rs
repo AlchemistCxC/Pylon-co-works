@@ -27,15 +27,18 @@ pub struct PetView<'a> {
 
 pub fn view(state: &PetState) -> PetView<'_> {
     let stage = state.stage();
+    // O14：now_ms() 只取一次，age_days/day_part 共用（两次调用间时钟偏移原可致
+    // 展示不一致，行为等价且更省一次系统调用）。
+    let now = now_ms();
     PetView {
         state,
         stage,
         title: stage.title(),
-        age_days: state.age_days(now_ms()),
+        age_days: state.age_days(now),
         next_stage_xp: state.next_stage_xp(),
         growth_progress: state.growth_progress(),
         crafting: state.pending_action.is_some(),
-        day_part: state.day_part(now_ms()),
+        day_part: state.day_part(now),
         achievements: state.achievement_info(),
         cosmetics: state.cosmetic_info(),
     }
