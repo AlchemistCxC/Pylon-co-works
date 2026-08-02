@@ -60,9 +60,12 @@ impl DedupState {
     }
 
     /// 清理 seen 窗口中最旧的条目（队首，插入顺序即序号顺序）。
+    /// 若被驱逐的 msg_id 恰为某 chat 的 last_msg_id 锚点，同步清除
+    /// （锚点失效后降级普通发送，而非悬空引用）。
     fn evict_oldest(&mut self) {
         if let Some(oldest) = self.order.pop_front() {
             self.seen.remove(&oldest);
+            self.last_msg_id.retain(|_, v| v != &oldest);
         }
     }
 
@@ -148,5 +151,21 @@ mod tests {
         assert_eq!(state.latest_for("chat-a"), Some("msg-a2"));
         assert_eq!(state.latest_for("chat-b"), Some("msg-b1"));
         assert_eq!(state.latest_for("chat-c"), None);
+    }
+
+    #[test]
+    fn evicting_last_msg_id_clears_anchor() {
+        let mut state = DedupState::new();
+        // chat-1 锚点指向 msg-0（最旧条目）
+        state.set_latest("chat-1", "msg-0");
+        for i in 0..DEDUP_MAX_SIZE {
+            assert!(state.is_new(&format!("msg-{i}")));
+        }
+        // 超限插入触发驱逐：msg-0 被清出窗口，同时锚点失效
+        assert!(state.is_new("msg-overflow"));
+        assert_eq!(state.latest_for("chat-1"), None, "锚点应随驱逐清除");
+        // 无关 chat 锚点不受影响
+        state.set_latest("chat-2", "msg-500");
+        assert_eq!(state.latest_for("chat-2"), Some("msg-500"));
     }
 }
