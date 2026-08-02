@@ -561,8 +561,11 @@ function AssistantContent({ text, isStreaming = false }: { text: string; isStrea
     if (copiedTimerRef.current != null) window.clearTimeout(copiedTimerRef.current)
     copiedTimerRef.current = window.setTimeout(() => setCopied(false), 2000)
   }
+  // CC 视觉还原：assistantDot 时助手消息左侧 ● 圆点（claude 预设启用）
+  const assistantDot = useStore(s => s.assistantDot)
   return (
     <div className="term-assistant">
+      {assistantDot && <span className="term-assistant-dot" aria-hidden="true">●</span>}
       <button className="copy-btn" onClick={copy}>{copied ? '✓' : '⎘'}</button>
       {isStreaming || !isPlainTextContent(text) ? (
         <Suspense fallback={<p className="term-p term-plain-text">{text}</p>}>
@@ -708,6 +711,10 @@ function ToolCard({ model }: { model: ReturnType<typeof buildToolPresentationMod
   const connCss: React.CSSProperties = {
     ['--tool-conn' as never]: resolveConnectorColor(connectorMode, status, { toolOk, toolRun, toolErr }, connectorColor),
   }
+  // CC 视觉还原：Bash 工具行 ! 前缀 + 灰底（claude 预设启用）
+  const bashPrefix = useStore(s => s.bashPrefix)
+  const bashBg = useStore(s => s.bashBg)
+  const isBash = model.name === 'Bash'
   const suffix = model.state === 'completed' && model.outputLines > 0 ? ` — ${model.outputLabel}` : ''
   const outputHtml = useMemo(() => {
     if (!model.outputText || model.name !== 'Bash') return ''
@@ -715,8 +722,11 @@ function ToolCard({ model }: { model: ReturnType<typeof buildToolPresentationMod
   }, [model.outputText, model.name])
   return (
     <div className="term-tool" data-status={status} data-tool-state={model.state}
-      data-output-collapsible={model.canCollapseOutput ? 'true' : 'false'} style={connCss}>
+      data-output-collapsible={model.canCollapseOutput ? 'true' : 'false'}
+      data-bash={isBash && bashPrefix ? 'true' : undefined}
+      style={isBash && bashBg ? { ...connCss, '--bash-bg': bashBg } as React.CSSProperties : connCss}>
       <button className="term-tool-head" type="button" onClick={() => setOpen(!open)} aria-expanded={open} aria-controls={bodyId}>
+        {isBash && bashPrefix && <span className="term-tool-bash-prefix" aria-hidden="true">!</span>}
         <span className={`term-tool-indicator ${status} ${toolIndicatorMotionClass(model.state)}`} style={glowCss} aria-label={indicatorAsset.ariaLabel[model.state]} role="img">{indicatorAsset.glyph}</span>
         <span className="term-tool-name">{model.name}</span>
         {displaySummary && <span className="term-tool-summary"> ({displaySummary})</span>}

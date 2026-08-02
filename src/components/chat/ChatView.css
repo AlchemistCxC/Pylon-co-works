@@ -296,3 +296,14 @@
   .scroll-bottom-btn { transition:none; }
 }
 
+
+/* ── CC 视觉还原（claude 预设启用）── */
+.term-assistant-dot {
+  display:inline-block; min-width:1.2em; margin-right:0.35em;
+  color:var(--text); user-select:none;
+}
+.term-tool[data-bash="true"] { background:var(--bash-bg, transparent); }
+.term-tool-bash-prefix {
+  color:var(--cli-line-color, currentColor); font-weight:700;
+  margin-right:5px; user-select:none;
+}
