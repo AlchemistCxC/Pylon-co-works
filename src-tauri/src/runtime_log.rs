@@ -88,6 +88,8 @@ impl RuntimeLogHub {
         while entries.len() > self.capacity {
             entries.pop_front();
         }
+        drop(entries);
+        // O24：broadcast send 移出 entries 锁临界区。
         let _ = self.events.send(entry.clone());
         entry
     }
