@@ -310,9 +310,17 @@ impl AppStateHandles {
             return Err("new ACP client crashed before activation".to_string());
         }
 
+        // 优化-1：keep=false（手动 switch/reconnect）映射清空后，旧 source 的 prompt
+        // 锁条目必须同步收敛（O1 语义，与 remove_session_if_matches/check_session_expiry
+        // 一致）——否则旧 source 条目随任意命名的 GUI source 无限累积。锁内先快照
+        // 旧 source 键，映射清空后在锁外逐个清理（锁序单向：sessions → prompt_locks）。
+        let mut stale_sources: Vec<String> = Vec::new();
         let mut old_acp = {
             let mut acp = runtime.acp.lock().await;
             let mut sessions = runtime.sessions.lock().map_err(|error| error.to_string())?;
+            if !keep_sessions {
+                stale_sources = sessions.keys().cloned().collect();
+            }
             let old_acp = std::mem::replace(&mut *acp, new_acp);
             let new_generation = runtime.client_generation.fetch_add(1, Ordering::AcqRel) + 1;
             self.set_agent_runtime_status(runtime, AgentLifecycleStatus::Connected, None);
@@ -334,6 +342,8 @@ impl AppStateHandles {
             tracing::info!("ACP client activated; generation is now {}", new_generation);
             old_acp
         };
+        // 优化-1：sessions 锁已释放——清理旧 source 的 prompt 锁条目。
+        drop_stale_prompt_locks(runtime, &stale_sources);
         start_notification_dispatcher(self, runtime, window);
         if let Err(error) = old_acp.kill() {
             tracing::warn!("kill replaced agent: {}", error);
@@ -356,6 +366,21 @@ pub(crate) fn prompt_lock_for(
         .entry(source.to_string())
         .or_insert_with(|| Arc::new(tokio::sync::Mutex::new(())))
         .clone()
+}
+
+/// 优化-1：keep=false 客户端替换后 prompt 锁表同步收敛——移除旧 source 条目
+/// （O1 语义：映射删除 = 该 source 生命周期结束；生成中的 prompt 持有 Arc 守卫，
+/// 条目移除不影响在途等待，新会话 prompt_lock_for 按需重建）。
+/// 锁序单向：调用方不得在持有 sessions 锁时调用（sessions → prompt_locks）。
+fn drop_stale_prompt_locks(runtime: &AgentRuntime, stale_sources: &[String]) {
+    if stale_sources.is_empty() {
+        return;
+    }
+    if let Ok(mut locks) = runtime.prompt_locks.lock() {
+        for source in stale_sources {
+            locks.remove(source);
+        }
+    }
 }
 
 #[cfg(test)]
@@ -473,6 +498,46 @@ mod session_info_tests {
         );
         apply_client_replacement_sessions(&mut sessions, false, 9);
         assert!(sessions.is_empty());
+    }
+
+    /// 优化-1：keep=false 客户端替换（switch/重连）后 prompt 锁表必须收敛——
+    /// 与 replace_agent_client 同序列：锁内快照旧 source → 清空映射 → 锁外清理；
+    /// 无会话映射的孤儿锁条目不在清理范围（保守作用域）。
+    #[test]
+    fn keep_sessions_false_drops_stale_prompt_locks() {
+        let runtime = AgentRuntime::new_disconnected();
+        {
+            let mut sessions = runtime.sessions.lock().unwrap();
+            sessions.insert(
+                "source-a".into(),
+                SessionInfo::new("peri-1".into(), "persona".into(), ".".into(), true, 1),
+            );
+            sessions.insert(
+                "qq:u-123".into(),
+                SessionInfo::new("peri-2".into(), "persona".into(), ".".into(), true, 1),
+            );
+        }
+        for source in ["source-a", "qq:u-123", "orphan-lock"] {
+            prompt_lock_for(&runtime.prompt_locks, source);
+        }
+        assert_eq!(runtime.prompt_locks.lock().unwrap().len(), 3);
+        let stale_sources: Vec<String> = {
+            let mut sessions = runtime.sessions.lock().unwrap();
+            let stale = sessions.keys().cloned().collect();
+            apply_client_replacement_sessions(&mut sessions, false, 9);
+            stale
+        };
+        drop_stale_prompt_locks(&runtime, &stale_sources);
+        assert!(runtime.sessions.lock().unwrap().is_empty());
+        let locks = runtime.prompt_locks.lock().unwrap();
+        assert!(
+            !locks.contains_key("source-a") && !locks.contains_key("qq:u-123"),
+            "旧 source 锁条目必须随映射清空收敛"
+        );
+        assert!(
+            locks.contains_key("orphan-lock"),
+            "无会话映射的孤儿锁不在清理范围"
+        );
     }
 
     #[test]
