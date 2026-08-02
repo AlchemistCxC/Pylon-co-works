@@ -1848,6 +1848,7 @@ mod tests {
             approval_mode: Arc::new(Mutex::new("default".to_string())),
             pet_last_persist_ms: std::sync::atomic::AtomicU64::new(0),
             pet_write_lock: tokio::sync::Mutex::new(()),
+            switch_lock: tokio::sync::Mutex::new(()),
         }
     }
 

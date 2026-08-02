@@ -64,9 +64,23 @@ pub(crate) async fn do_connect_and_replace<R: tauri::Runtime>(
                 return Err(error.into());
             }
         };
-    handles
+    if let Err(error) = handles
         .replace_agent_client(runtime, agent_id, new_acp, window.clone(), keep_sessions)
-        .await?;
+        .await
+    {
+        // C7：replace 失败收敛——连接成功但客户端激活失败（如新 acp 已崩溃），
+        // 不得停留在 start_status（Connecting/Reconnecting）卡死；广播失败
+        // 状态 + 错误后返回（announce 路径才广播，事件次数不变）。
+        if announce {
+            handles.emit_agent_status(
+                runtime,
+                window,
+                AgentLifecycleStatus::Disconnected,
+                Some(error.clone()),
+            );
+        }
+        return Err(error);
+    }
     if announce {
         handles.emit_agent_status(runtime, window, AgentLifecycleStatus::Connected, None);
     }
@@ -141,13 +155,34 @@ pub(crate) async fn validate_agents() -> Result<serde_json::Value, PylonError> {
     }))
 }
 
+/// C7：停掉旧 runtime 的进程——先 abort notification_task（防 kill 触发的崩溃
+/// 通知被旧 dispatcher 处理并调度自动重连）再 kill acp，状态置 Disconnected。
+/// switch 换目标 / reload 删除 agent 共用。
+async fn stop_agent_runtime(agent_id: &str, inner: &AppState) {
+    if let Some(old) = inner.runtimes.get(agent_id) {
+        if let Ok(mut task) = old.notification_task.lock() {
+            if let Some(handle) = task.take() {
+                handle.abort();
+            }
+        }
+        let mut acp = old.acp.lock().await;
+        let _ = acp.kill();
+        drop(acp);
+        if let Ok(mut state) = old.agent_runtime.lock() {
+            state.status = AgentLifecycleStatus::Disconnected;
+        }
+    }
+}
+
 #[tauri::command]
-pub(crate) async fn switch_agent(
+pub(crate) async fn switch_agent<R: tauri::Runtime>(
     state: tauri::State<'_, AppState>,
-    window: tauri::WebviewWindow,
+    window: tauri::WebviewWindow<R>,
     name: String,
 ) -> Result<(), PylonError> {
     let inner = state.inner();
+    // C7：switch/reconnect 串行锁——并发 switch 不得交叉 kill 同一批旧进程。
+    let _switch_guard = inner.switch_lock.lock().await;
     // P3：先查 registry 确认 agent 存在，再 get_or_create——未知 agent 直接报错，
     // 不得留下幽灵 runtime（disconnected 且永不连接的空注册项）。
     if !inner
@@ -166,6 +201,13 @@ pub(crate) async fn switch_agent(
         .map_err(|error| error.to_string())?
         .clone();
     let _lifecycle_guard = runtime.agent_lifecycle.lock().await;
+    // C7：锁后复查——目标 runtime 的生命周期锁排队期间状态可能已推进（并发
+    // 连接/自动重连完成），拿到锁后按现状决策，不得盲杀在途连接。
+    let target_status = runtime
+        .agent_runtime
+        .lock()
+        .map(|state| state.status)
+        .unwrap_or(AgentLifecycleStatus::Disconnected);
     let agent = inner
         .agents
         .lock()
@@ -173,32 +215,47 @@ pub(crate) async fn switch_agent(
         .get(&name)
         .ok_or_else(|| format!("unknown agent: {name}"))?
         .clone();
-    inner
-        .connect_and_replace(
-            &runtime,
-            &window,
-            &agent,
-            Some(name.clone()),
-            AgentLifecycleStatus::Connecting,
-            "switch",
-        )
-        .await?;
+    if matches!(
+        target_status,
+        AgentLifecycleStatus::Connected
+            | AgentLifecycleStatus::Connecting
+            | AgentLifecycleStatus::Reconnecting
+    ) {
+        if previous_active == name {
+            // 同 agent 幂等：已连接/连接中，无需重复连接。
+            return Ok(());
+        }
+        if target_status == AgentLifecycleStatus::Connected {
+            // 非 active 目标已连接：只更新 active_agent + 清理旧进程，
+            // 跳过 connect_and_replace（不重复连接、不换客户端）。
+            if let Ok(mut active) = inner.active_agent.lock() {
+                *active = name;
+            }
+            stop_agent_runtime(&previous_active, inner).await;
+            return Ok(());
+        }
+        // 目标 Connecting/Reconnecting（如自动重连在途）：继续走连接路径，
+        // connect_and_replace 会在 lifecycle 锁下收敛为新客户端。
+    }
+    // 直接调泛型 do_connect_and_replace（与 AppState::connect_and_replace 包装器
+    // 同一实现：keep_sessions=false + announce=true）；窗口类型随调用方 Runtime。
+    let handles = AppStateHandles::from_state(inner);
+    do_connect_and_replace(
+        &handles,
+        &runtime,
+        &window,
+        &agent,
+        Some(name.clone()),
+        AgentLifecycleStatus::Connecting,
+        "switch",
+        false,
+        true,
+    )
+    .await?;
     // 切到不同 agent 时：先停旧 dispatcher 再 kill 旧 acp，防止 kill 触发旧
     // runtime 的崩溃通知被旧 dispatcher 处理并调度自动重连；旧状态置 Disconnected。
     if previous_active != name {
-        if let Some(old) = inner.runtimes.get(&previous_active) {
-            if let Ok(mut task) = old.notification_task.lock() {
-                if let Some(handle) = task.take() {
-                    handle.abort();
-                }
-            }
-            let mut acp = old.acp.lock().await;
-            let _ = acp.kill();
-            drop(acp);
-            if let Ok(mut state) = old.agent_runtime.lock() {
-                state.status = AgentLifecycleStatus::Disconnected;
-            }
-        }
+        stop_agent_runtime(&previous_active, inner).await;
     }
     Ok(())
 }
@@ -209,6 +266,8 @@ pub(crate) async fn reconnect_agent(
     window: tauri::WebviewWindow,
 ) -> Result<(), PylonError> {
     let inner = state.inner();
+    // C7：switch/reconnect 串行锁（与 switch_agent 共用，防交叉杀进程）。
+    let _switch_guard = inner.switch_lock.lock().await;
     let active_id = inner
         .active_agent
         .lock()
@@ -298,19 +357,8 @@ pub(crate) async fn reload_agents(
         removed
     };
     for id in removed {
-        if let Some(old) = state.inner().runtimes.remove(&id) {
-            if let Ok(mut task) = old.notification_task.lock() {
-                if let Some(handle) = task.take() {
-                    handle.abort();
-                }
-            }
-            let mut acp = old.acp.lock().await;
-            let _ = acp.kill();
-            drop(acp);
-            if let Ok(mut runtime_state) = old.agent_runtime.lock() {
-                runtime_state.status = AgentLifecycleStatus::Disconnected;
-            }
-        }
+        stop_agent_runtime(&id, state.inner()).await;
+        state.inner().runtimes.remove(&id);
     }
     state.inner().log_runtime_summary(
         "info",
@@ -460,6 +508,157 @@ mod tests {
         assert_eq!(payload["available"], false);
     }
 
+    async fn mock_window() -> tauri::WebviewWindow<tauri::test::MockRuntime> {
+        let app = tauri::test::mock_builder()
+            .build(tauri::test::mock_context(tauri::test::noop_assets()))
+            .expect("mock app must build");
+        tauri::WebviewWindowBuilder::new(
+            &app,
+            "main",
+            tauri::WebviewUrl::External("https://example.com".parse().unwrap()),
+        )
+        .build()
+        .expect("mock window must build")
+    }
+
+    #[tokio::test]
+    async fn switch_to_same_agent_already_connected_is_idempotent() {
+        use crate::runtime::AgentRuntimeManager;
+        use std::collections::HashMap;
+
+        let mut agents = HashMap::new();
+        agents.insert(
+            "peri".to_string(),
+            crate::test_utils::fake_acp_agent("peri", "print('x')"),
+        );
+        let runtimes = Arc::new(AgentRuntimeManager::new());
+        let runtime = AgentRuntime::new_disconnected();
+        *runtime.agent_runtime.lock().unwrap() = crate::agent_runtime::AgentRuntimeState {
+            status: AgentLifecycleStatus::Connected,
+            last_error: None,
+            last_connected_at: None,
+        };
+        runtimes.insert("peri".into(), runtime.clone());
+        let state = AppState {
+            runtimes,
+            agents: Arc::new(Mutex::new(agents)),
+            active_agent: Arc::new(Mutex::new("peri".to_string())),
+            pet: Arc::new(Mutex::new(crate::pet::PetState::default())),
+            runtime_logs: crate::runtime_log::RuntimeLogHub::default(),
+            runtime_mcp: Mutex::new(None),
+            prism: crate::prism::PrismClient::unavailable("test".to_string()),
+            gateway: Arc::new(crate::gateway::GatewayCore::new()),
+            approval_mode: Arc::new(Mutex::new("default".to_string())),
+            pet_last_persist_ms: std::sync::atomic::AtomicU64::new(0),
+            pet_write_lock: tokio::sync::Mutex::new(()),
+            switch_lock: tokio::sync::Mutex::new(()),
+        };
+        let app = tauri::test::mock_builder()
+            .build(tauri::test::mock_context(tauri::test::noop_assets()))
+            .expect("mock app must build");
+        app.manage(state);
+        switch_agent(
+            app.state::<AppState>(),
+            mock_window().await,
+            "peri".to_string(),
+        )
+        .await
+        .expect("同 agent 已连接时 switch 必须幂等成功");
+        let state = app.state::<AppState>().inner();
+        let runtime = state.runtimes.get("peri").expect("runtime must exist");
+        assert_eq!(
+            runtime
+                .client_generation
+                .load(std::sync::atomic::Ordering::Acquire),
+            0,
+            "幂等路径不得触发 connect_and_replace（generation 不变）"
+        );
+        assert_eq!(
+            runtime.agent_runtime.lock().unwrap().status,
+            AgentLifecycleStatus::Connected,
+            "目标状态必须保持 Connected"
+        );
+    }
+
+    #[tokio::test]
+    async fn switch_to_non_active_agent_already_connected_skips_reconnect() {
+        use crate::runtime::AgentRuntimeManager;
+        use std::collections::HashMap;
+
+        let mut agents = HashMap::new();
+        agents.insert(
+            "a".to_string(),
+            crate::test_utils::fake_acp_agent("a", "print('x')"),
+        );
+        agents.insert(
+            "b".to_string(),
+            crate::test_utils::fake_acp_agent("b", "print('x')"),
+        );
+        let runtimes = Arc::new(AgentRuntimeManager::new());
+        let runtime_a = AgentRuntime::new_disconnected();
+        let runtime_b = AgentRuntime::new_disconnected();
+        *runtime_a.agent_runtime.lock().unwrap() = crate::agent_runtime::AgentRuntimeState {
+            status: AgentLifecycleStatus::Connected,
+            last_error: None,
+            last_connected_at: None,
+        };
+        *runtime_b.agent_runtime.lock().unwrap() = crate::agent_runtime::AgentRuntimeState {
+            status: AgentLifecycleStatus::Connected,
+            last_error: None,
+            last_connected_at: None,
+        };
+        runtimes.insert("a".into(), runtime_a.clone());
+        runtimes.insert("b".into(), runtime_b.clone());
+        let state = AppState {
+            runtimes,
+            agents: Arc::new(Mutex::new(agents)),
+            active_agent: Arc::new(Mutex::new("a".to_string())),
+            pet: Arc::new(Mutex::new(crate::pet::PetState::default())),
+            runtime_logs: crate::runtime_log::RuntimeLogHub::default(),
+            runtime_mcp: Mutex::new(None),
+            prism: crate::prism::PrismClient::unavailable("test".to_string()),
+            gateway: Arc::new(crate::gateway::GatewayCore::new()),
+            approval_mode: Arc::new(Mutex::new("default".to_string())),
+            pet_last_persist_ms: std::sync::atomic::AtomicU64::new(0),
+            pet_write_lock: tokio::sync::Mutex::new(()),
+            switch_lock: tokio::sync::Mutex::new(()),
+        };
+        let app = tauri::test::mock_builder()
+            .build(tauri::test::mock_context(tauri::test::noop_assets()))
+            .expect("mock app must build");
+        app.manage(state);
+        switch_agent(
+            app.state::<AppState>(),
+            mock_window().await,
+            "b".to_string(),
+        )
+        .await
+        .expect("非 active 已连接目标 switch 必须成功");
+        let state = app.state::<AppState>().inner();
+        assert_eq!(
+            &*state.active_agent.lock().unwrap(),
+            "b",
+            "active_agent 必须切到 b"
+        );
+        assert_eq!(
+            runtime_b
+                .client_generation
+                .load(std::sync::atomic::Ordering::Acquire),
+            0,
+            "已连接目标不得被重新连接（generation 不变）"
+        );
+        assert_eq!(
+            runtime_b.agent_runtime.lock().unwrap().status,
+            AgentLifecycleStatus::Connected,
+            "目标 b 必须保持 Connected"
+        );
+        assert_eq!(
+            runtime_a.agent_runtime.lock().unwrap().status,
+            AgentLifecycleStatus::Disconnected,
+            "旧 active（a）必须被停掉并置 Disconnected"
+        );
+    }
+
     #[tokio::test]
     async fn reload_agents_cleans_up_ghost_runtimes_of_deleted_agents() {
         use crate::runtime::AgentRuntimeManager;
@@ -498,6 +697,7 @@ mod tests {
             approval_mode: Arc::new(Mutex::new("default".to_string())),
             pet_last_persist_ms: std::sync::atomic::AtomicU64::new(0),
             pet_write_lock: tokio::sync::Mutex::new(()),
+            switch_lock: tokio::sync::Mutex::new(()),
         };
         let app = tauri::test::mock_builder()
             .build(tauri::test::mock_context(tauri::test::noop_assets()))
