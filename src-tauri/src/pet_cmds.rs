@@ -4,6 +4,7 @@ use crate::error::PylonError;
 use crate::pet;
 use crate::AppState;
 use std::sync::atomic::Ordering;
+use std::time::Duration;
 use tauri::Manager;
 
 /// 宠物状态落盘路径：app_config_dir/pylon-pet.json。
@@ -83,44 +84,72 @@ async fn persist_and_mark(state: &AppState, app: &tauri::AppHandle, now_ms: u64)
     }
 }
 
-/// O20：写失败回滚 CAS 认领——时间戳退回认领前，下次轮询可重试；
-/// 回滚 CAS 失败（期间已有更晚写盘刷新时间戳）则无需回滚。
-fn rollback_claim(claimed_ms: u64, original_ms: u64, slot: &std::sync::atomic::AtomicU64) {
-    let _ = slot.compare_exchange(claimed_ms, original_ms, Ordering::AcqRel, Ordering::Acquire);
-}
-
-/// get_pet 轮询路径的写盘节流间隔（P3）：宠物状态只在有意义的变更时变化，
-/// 12s 轮询无条件全量序列化 + 落盘是纯浪费。状态突变路径（pet_action）与
-/// 退出兜底仍无条件写盘，节流只降低轮询路径频率，最坏丢失 <60s 的变更。
+/// get_pet 轮询路径的写盘节流间隔（P3 语义保留为 R17 re-arm 兜底）：宠物状态
+/// 只在有意义的变更时变化；距上次成功落盘 ≥60s 时重触发一次 coalescing 写盘，
+/// 保证最坏丢失窗口 ≤60s（写失败也由该窗口重试）。
 const PET_PERSIST_THROTTLE_MS: u64 = 60_000;
 
-/// O18：poke/play 高频动作的写盘短节流（5s）——连点互动合并写盘，
-/// 但 feed/rename/restore 等低频动作保持无条件写盘（状态不丢）。
-const POKE_PLAY_THROTTLE_MS: u64 = 5_000;
-
-/// O18：高频动作判定——poke/play 是高频互动（前端连点常见），写盘走短节流；
-/// 其余动作（feed/rename/restore/equip 等）低频，保持无条件写盘。
-fn is_high_frequency_action(action: &str) -> bool {
-    matches!(action, "poke" | "play")
-}
+/// R17：coalescing 落盘后台任务的 debounce 间隔——唤醒后合并 2s 内的连续突变。
+const PET_FLUSH_DEBOUNCE_MS: u64 = 2_000;
 
 /// 节流判定：距上次写盘不足 throttle_ms 视为在节流窗口内，不再落盘。
 fn within_throttle(last_persist_ms: u64, now_ms: u64, throttle_ms: u64) -> bool {
     now_ms.saturating_sub(last_persist_ms) < throttle_ms
 }
 
-/// O19：CAS 认领写盘权利——节流窗口已过且 `slot` 未被其他调用者抢先刷新时
-/// 认领成功（时间戳即"写权利"）：并发轮询/突变只有一个写者，时间戳单调。
-fn try_claim_persist_slot(
-    last_persist_ms: u64,
-    now_ms: u64,
-    throttle_ms: u64,
-    slot: &std::sync::atomic::AtomicU64,
-) -> bool {
-    now_ms.saturating_sub(last_persist_ms) >= throttle_ms
-        && slot
-            .compare_exchange(last_persist_ms, now_ms, Ordering::AcqRel, Ordering::Acquire)
-            .is_ok()
+// R17：进程级单例（宠物全局唯一）——状态突变路径不直接写盘，只置 dirty 并
+// 唤醒后台任务；后台任务 debounce 后统一落盘（coalescing）。
+// 替代"写锁 + 节流 + spawn_blocking"三件套的命令路径组合：写盘时机从"每次
+// 突变立即写"变为"debounce 后合并写"，最坏丢失窗口仍 ≤60s（re-arm 兜底）。
+static PET_DIRTY: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+static PET_NOTIFY: tokio::sync::Notify = tokio::sync::Notify::const_new();
+static PET_FLUSH_SPAWNED: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+
+/// 状态突变路径标记：置 dirty 并唤醒后台落盘任务（写盘时机由 debounce 决定）。
+fn mark_dirty() {
+    PET_DIRTY.store(true, Ordering::Release);
+    PET_NOTIFY.notify_waiters();
+}
+
+/// Exit 兜底的有界 drain（lib.rs RunEvent::Exit 调用）：清 dirty 后直接同步
+/// 持久化，后台任务不再重复写盘（在途写盘不受影响，与 R6a 尽力语义一致）。
+pub(crate) fn drain_pet_dirty() {
+    PET_DIRTY.store(false, Ordering::Release);
+}
+
+/// debounce 静默判定：消费 dirty 标志——置位说明唤醒窗口内仍有待写突变。
+fn consume_dirty() -> bool {
+    PET_DIRTY.swap(false, Ordering::AcqRel)
+}
+
+/// lazily spawn（get_pet 首次调用）：进程生命周期内只启动一个后台任务。
+fn ensure_flush_task(app: &tauri::AppHandle) {
+    if PET_FLUSH_SPAWNED.swap(true, Ordering::AcqRel) {
+        return;
+    }
+    let app = app.clone();
+    tokio::spawn(async move { pet_flush_loop(app).await });
+}
+
+/// 后台 coalescing 落盘任务：唤醒后 debounce 2s；期间新突变再次置 dirty 则
+/// 继续合并；dirty 静默后写盘一次。写失败恢复 dirty 并回到等待（下次唤醒
+/// ≤60s：新突变 / get_pet re-arm），避免失败热循环刷日志。
+async fn pet_flush_loop(app: tauri::AppHandle) {
+    loop {
+        PET_NOTIFY.notified().await;
+        loop {
+            tokio::time::sleep(Duration::from_millis(PET_FLUSH_DEBOUNCE_MS)).await;
+            if !consume_dirty() {
+                break;
+            }
+            let state = app.state::<AppState>();
+            let now_ms = crate::time::Timestamp::now().as_u64();
+            if !persist_and_mark(&state, &app, now_ms).await {
+                PET_DIRTY.store(true, Ordering::Release);
+                break;
+            }
+        }
+    }
 }
 
 #[tauri::command]
@@ -144,28 +173,21 @@ pub(crate) async fn get_pet(
         }
         value
     };
-    // P3：节流写盘——距上次落盘不足 60s 的轮询不再序列化 + 写盘
-    // （原子计数无需 pet 锁；R4：Timestamp 直取 u64 消除 parse 往返）。
-    // O19：CAS 认领——load 判断 + persist + store 是 check-then-act 竞态，
-    // 并发轮询可能全部通过判断重复写盘；认领成功者唯一执行写盘。
-    // O20：写失败回滚认领（时间戳退回认领前）——下次轮询可重试。
+    // R17：get_pet 首次调用 lazily spawn coalescing 后台落盘任务（进程级单例）。
+    ensure_flush_task(&app);
+    // P3 节流语义保留为 re-arm 兜底：距上次成功落盘 ≥60s 时 mark_dirty 强制
+    // 一次 flush——最坏丢失窗口 ≤60s；写失败时间戳不刷新，下一轮 re-arm 重试。
     let now_ms = crate::time::Timestamp::now().as_u64();
     let last_persist = state.pet_last_persist_ms.load(Ordering::Acquire);
-    if try_claim_persist_slot(
-        last_persist,
-        now_ms,
-        PET_PERSIST_THROTTLE_MS,
-        &state.pet_last_persist_ms,
-    ) && !persist_and_mark(&state, &app, now_ms).await
-    {
-        rollback_claim(now_ms, last_persist, &state.pet_last_persist_ms);
+    if !within_throttle(last_persist, now_ms, PET_PERSIST_THROTTLE_MS) {
+        mark_dirty();
     }
     Ok(value)
 }
 
 #[tauri::command]
 pub(crate) async fn pet_action(
-    app: tauri::AppHandle,
+    _app: tauri::AppHandle,
     state: tauri::State<'_, AppState>,
     action: String,
     value: Option<String>,
@@ -227,35 +249,17 @@ pub(crate) async fn pet_action(
         }
         result
     };
-    // R6a：状态突变路径写盘，磁盘 IO 移出 pet 锁（锁外 persist_pet_async）。
-    // O18：poke/play 高频动作复用 pet_last_persist_ms 短节流（5s 内重复互动
-    // 合并写盘）；feed/rename/restore 等低频动作保持无条件写盘。
-    // O21：统一经 persist_and_mark 刷新节流时间戳（get_pet 同语义）。
-    let now_ms = crate::time::Timestamp::now().as_u64();
-    let last_persist = state.pet_last_persist_ms.load(Ordering::Acquire);
-    if is_high_frequency_action(&action) {
-        if !within_throttle(last_persist, now_ms, POKE_PLAY_THROTTLE_MS) {
-            persist_and_mark(&state, &app, now_ms).await;
-        }
-    } else {
-        persist_and_mark(&state, &app, now_ms).await;
-    }
+    // R6a：状态突变路径不直接写盘（磁盘 IO 全量移出 pet 锁 + 命令路径）。
+    // R17：统一 mark_dirty——poke/play 连点等高频突变由后台任务 debounce 合并
+    // 为一次写盘（O18/O19 的命令路径节流/CAS 语义被 coalescing 任务承担）；
+    // 写失败不刷新时间戳（O20），由 60s re-arm 兜底重试。
+    mark_dirty();
     Ok(result)
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    #[test]
-    fn poke_and_play_are_high_frequency_actions() {
-        assert!(is_high_frequency_action("poke"));
-        assert!(is_high_frequency_action("play"));
-        assert!(!is_high_frequency_action("feed"));
-        assert!(!is_high_frequency_action("rename"));
-        assert!(!is_high_frequency_action("restore"));
-        assert!(!is_high_frequency_action("equip"));
-    }
 
     #[test]
     fn throttle_window_covers_only_sub_throttle_elapsed() {
@@ -266,38 +270,24 @@ mod tests {
     }
 
     #[test]
-    fn claim_slot_after_throttle_elapsed_only_once_per_window() {
-        let slot = std::sync::atomic::AtomicU64::new(0);
-        assert!(try_claim_persist_slot(0, 60_000, 60_000, &slot));
-        assert_eq!(slot.load(Ordering::Acquire), 60_000);
-        assert!(!try_claim_persist_slot(60_000, 60_100, 60_000, &slot));
-        assert_eq!(slot.load(Ordering::Acquire), 60_000);
-        assert!(try_claim_persist_slot(60_000, 120_000, 60_000, &slot));
-        assert_eq!(slot.load(Ordering::Acquire), 120_000);
+    fn dirty_flag_mark_consume_and_drain_round_trips() {
+        PET_DIRTY.store(false, Ordering::Release);
+        assert!(!consume_dirty());
+        mark_dirty();
+        assert!(PET_DIRTY.load(Ordering::Acquire));
+        assert!(consume_dirty());
+        assert!(!consume_dirty());
+        mark_dirty();
+        drain_pet_dirty();
+        assert!(!PET_DIRTY.load(Ordering::Acquire));
+        PET_DIRTY.store(false, Ordering::Release);
     }
 
     #[test]
-    fn claim_fails_when_slot_observed_stale() {
-        let slot = std::sync::atomic::AtomicU64::new(20_000);
-        assert!(!try_claim_persist_slot(10_000, 80_000, 60_000, &slot));
-        assert_eq!(slot.load(Ordering::Acquire), 20_000);
-    }
-
-    #[test]
-    fn rollback_claim_restores_original_timestamp_on_failure() {
-        let slot = std::sync::atomic::AtomicU64::new(10_000);
-        assert!(try_claim_persist_slot(10_000, 70_000, 60_000, &slot));
-        assert_eq!(slot.load(Ordering::Acquire), 70_000);
-        rollback_claim(70_000, 10_000, &slot);
-        assert_eq!(slot.load(Ordering::Acquire), 10_000);
-    }
-
-    #[test]
-    fn rollback_claim_is_noop_when_slot_moved_by_newer_write() {
-        let slot = std::sync::atomic::AtomicU64::new(70_000);
-        // 认领后、回滚前，另一写者已成功把时间戳刷到 130_000 → 回滚不得覆盖
-        slot.store(130_000, Ordering::Release);
-        rollback_claim(70_000, 10_000, &slot);
-        assert_eq!(slot.load(Ordering::Acquire), 130_000);
+    fn rearm_fires_only_after_throttle_elapsed() {
+        // 距上次成功落盘 <60s → 在节流窗口内，get_pet 不 re-arm
+        assert!(within_throttle(1_000, 60_999, PET_PERSIST_THROTTLE_MS));
+        // ≥60s → 窗口已过，get_pet 触发 mark_dirty
+        assert!(!within_throttle(1_000, 61_000, PET_PERSIST_THROTTLE_MS));
     }
 }

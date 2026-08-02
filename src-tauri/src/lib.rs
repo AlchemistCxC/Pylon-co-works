@@ -2673,6 +2673,9 @@ pub fn run() {
             .expect("error while building tauri application")
             .run(|app_handle: &tauri::AppHandle, event: tauri::RunEvent| {
                 if let tauri::RunEvent::Exit = event {
+                    // R17：coalescing 有界 drain——清 dirty 防后台任务重复写盘，
+                    // 随后直接同步落盘兜底（后台任务在途写盘不受影响，R6a 尽力语义）。
+                    crate::pet_cmds::drain_pet_dirty();
                     // 退出兜底：最后持久化一次（get_pet 12s 轮询已覆盖大部分变更）
                     let pet_arc = app_handle.state::<AppState>().pet.clone();
                     if let Ok(pet) = pet_arc.try_lock() {
