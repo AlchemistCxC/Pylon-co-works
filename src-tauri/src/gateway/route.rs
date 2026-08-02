@@ -178,17 +178,21 @@ pub fn parse_config(input: &str) -> Result<GatewayConfig, String> {
     let mut entries = Vec::with_capacity(routes.len());
     let mut seen = HashSet::with_capacity(routes.len());
     for mut route in routes {
-        if !seen.insert(route.source.clone()) {
-            return Err(format!("重复的 source 路由: {}", route.source));
+        let source = route.source.trim().to_string();
+        if source.is_empty() {
+            return Err("route source 不能为空".to_string());
+        }
+        if !seen.insert(source.clone()) {
+            return Err(format!("重复的 source 路由: {source}"));
         }
         if let Some(ref reset) = route.reset {
             if !matches!(reset.as_str(), "idle" | "daily" | "off") {
                 return Err(format!(
-                    "route {} 的 reset 非法: {reset}（可选 idle/daily/off）",
-                    route.source
+                    "route {source} 的 reset 非法: {reset}（可选 idle/daily/off）"
                 ));
             }
         }
+        route.source = source;
         route.allow_from = route.allow_from.filter(|v| !v.is_empty());
         entries.push(route);
     }
@@ -312,6 +316,55 @@ gateway:
             err.contains("qq:group:123"),
             "错误信息应包含重复的 source，实际: {err}"
         );
+    }
+
+    #[test]
+    fn whitespace_variant_source_deduplicated_after_trim() {
+        let yaml = r#"
+gateway:
+  routes:
+    - source: " qq:group:1 "
+      agent: peri
+      profile: trpg
+      session: 战役1
+    - source: "qq:group:1"
+      agent: hermes
+      profile: default
+      session: 其他
+"#;
+        let err = parse_config(yaml).expect_err("trim 后重复的 source 应报错");
+        assert!(
+            err.contains("qq:group:1"),
+            "错误信息应包含重复的 source，实际: {err}"
+        );
+    }
+
+    #[test]
+    fn source_stored_trimmed() {
+        let yaml = r#"
+gateway:
+  routes:
+    - source: "  qq:group:1  "
+      agent: peri
+      profile: trpg
+      session: 战役1
+"#;
+        let table = parse_config(yaml).expect("含空白 source 应解析成功").routes;
+        let hit = table.lookup("qq:group:1").expect("trim 后应命中");
+        assert_eq!(hit.source, "qq:group:1");
+    }
+
+    #[test]
+    fn empty_source_rejected() {
+        let yaml = r#"
+gateway:
+  routes:
+    - source: "   "
+      agent: peri
+      profile: trpg
+      session: 战役1
+"#;
+        assert!(parse_config(yaml).is_err(), "空白 source 应报错");
     }
 
     #[test]
