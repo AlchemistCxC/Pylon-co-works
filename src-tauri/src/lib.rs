@@ -402,9 +402,9 @@ mod session_info_tests {
 
     #[test]
     fn export_session_owner_requires_active_generation_match() {
-        assert_eq!(is_export_sensitive_key("rawInput"), true);
-        assert_eq!(is_export_sensitive_key("tokenValue"), true);
-        assert_eq!(is_export_sensitive_key("safe"), false);
+        assert!(is_export_sensitive_key("rawInput"));
+        assert!(is_export_sensitive_key("tokenValue"));
+        assert!(!is_export_sensitive_key("safe"));
     }
 
     #[test]
@@ -1204,25 +1204,27 @@ for line in sys.stdin:
         // 等 dispatcher 挂起权限请求
         tokio::time::timeout(std::time::Duration::from_secs(5), async {
             loop {
-                let pending = runtime.pending_permissions.lock().unwrap();
-                if pending.contains_key(&5) {
+                let contains = runtime.pending_permissions.lock().unwrap().contains_key(&5);
+                if contains {
                     break;
                 }
-                drop(pending);
                 tokio::time::sleep(std::time::Duration::from_millis(20)).await;
             }
         })
         .await
         .expect("dispatcher must pend request_permission");
-        let pending = runtime.pending_permissions.lock().unwrap();
-        let permission = pending.get(&5).expect("pending entry");
-        assert_eq!(permission.tool_call_id, "call-9");
-        assert_eq!(permission.options, vec!["allow_once", "reject_once"]);
-        assert!(
-            !permission.prompt.contains("SECRET"),
-            "事件 prompt 必须脱敏"
-        );
-        drop(pending);
+        let (tool_call_id, options, prompt) = {
+            let pending = runtime.pending_permissions.lock().unwrap();
+            let permission = pending.get(&5).expect("pending entry");
+            (
+                permission.tool_call_id.clone(),
+                permission.options.clone(),
+                permission.prompt.clone(),
+            )
+        };
+        assert_eq!(tool_call_id, "call-9");
+        assert_eq!(options, vec!["allow_once", "reject_once"]);
+        assert!(!prompt.contains("SECRET"), "事件 prompt 必须脱敏");
 
         // 应答（approve_tool_call 等价路径）
         resolve_permission(&runtime, 5, "allow_once")
@@ -1912,7 +1914,7 @@ mod mcp_persist_tests {
             mcp_write_lock: tokio::sync::Mutex::new(()),
         };
         app.manage(state);
-        let path = match mcp_persist_path(&app.handle()) {
+        let path = match mcp_persist_path(app.handle()) {
             Ok(path) => path,
             Err(_) => return, // mock 环境无 config dir 时跳过（不验证持久化）
         };
@@ -2091,7 +2093,7 @@ gateway:
             // 大量非平台填充会话：拉长快照持锁窗口，主线程才能稳定观察到快照阶段。
             for i in 0..50_000 {
                 let mut filler = SessionInfo::new(
-                    format!("local-fill-{i}").into(),
+                    format!("local-fill-{i}"),
                     String::new(),
                     ".".into(),
                     true,

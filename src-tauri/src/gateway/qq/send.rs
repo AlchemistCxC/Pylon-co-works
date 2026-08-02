@@ -209,7 +209,7 @@ mod tests {
         assert_eq!(body["content"], "你好");
         assert_eq!(body["msg_type"], 0);
         assert_eq!(body["msg_id"], "parent-msg");
-        assert_eq!(body["msg_seq"].as_u64().unwrap() < 65536, true);
+        assert!(body["msg_seq"].as_u64().unwrap() < 65536);
         server.join().expect("server thread");
     }
 
