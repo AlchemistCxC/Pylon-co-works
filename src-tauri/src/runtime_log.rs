@@ -291,6 +291,39 @@ mod tests {
     }
 
     #[test]
+    fn does_not_redact_suffix_shared_key_names() {
+        // O26：tokensTotal 等共享后缀名不再整体 REDACTED；password 仍脱敏。
+        let hub = RuntimeLogHub::default();
+        let entry = hub.push(
+            Timestamp::new(1),
+            "info",
+            "acp",
+            None,
+            "safe",
+            fields(&[
+                ("tokensTotal", json!(42)),
+                ("password", json!("hunter2")),
+                ("access_token", json!("abc")),
+            ]),
+        );
+        assert_eq!(
+            entry.fields["tokensTotal"],
+            json!(42),
+            "tokensTotal 不得整体脱敏"
+        );
+        assert_eq!(
+            entry.fields["password"],
+            json!(REDACTED),
+            "password 必须脱敏"
+        );
+        assert_eq!(
+            entry.fields["access_token"],
+            json!(REDACTED),
+            "access_token 必须脱敏"
+        );
+    }
+
+    #[test]
     fn redacts_sensitive_fields_and_truncates_message() {
         let hub = RuntimeLogHub::default();
         let entry = hub.push(

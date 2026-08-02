@@ -9,6 +9,8 @@ pub(crate) const REDACTED: &str = "[REDACTED]";
 const MAX_MESSAGE_BYTES: usize = 8 * 1024;
 
 /// runtime_log 语义 key 表：敏感 key 的值整体 REDACTED 替换。
+/// O26：token/apikey/api_key 改为精确或后缀匹配（tokensTotal 等共享后缀名不再误伤）；
+/// `content` 移出精确表（值内容由 sanitize_value_content 兜底）。
 pub(crate) fn is_sensitive_key(key: &str) -> bool {
     let key = key.to_ascii_lowercase();
     [
@@ -19,7 +21,6 @@ pub(crate) fn is_sensitive_key(key: &str) -> bool {
         "header",
         "prompt",
         "persona",
-        "content",
         "rawinput",
         "rawoutput",
         "attachment",
@@ -27,9 +28,9 @@ pub(crate) fn is_sensitive_key(key: &str) -> bool {
     ]
     .iter()
     .any(|part| key == *part)
-        || key.contains("token")
-        || key.contains("apikey")
-        || key.contains("api_key")
+        || key.ends_with("token")
+        || key.ends_with("apikey")
+        || key.ends_with("api_key")
 }
 
 /// export 语义 key 表：敏感 key 子树整体剔除（不含 content——markdown 正文结构键）。
