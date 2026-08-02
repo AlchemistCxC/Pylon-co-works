@@ -496,7 +496,8 @@ impl PetState {
             xp: 0,
             bond: 0,
             born_at_ms: now_ms,
-            last_seen_day: day_number(now_ms),
+            // 出生时偏移未注入（0 = UTC），桥接层随后 set_local_offset_minutes 统一
+            last_seen_day: day_number(now_ms, 0),
             first_chunk_at_ms: None,
             hunger: 80,
             fun: 70,
@@ -1173,7 +1174,9 @@ impl PetState {
     }
 
     pub fn age_days(&self, now_ms: u64) -> u64 {
-        day_number(now_ms).saturating_sub(day_number(self.born_at_ms)) + 1
+        day_number(now_ms, self.local_offset_minutes)
+            .saturating_sub(day_number(self.born_at_ms, self.local_offset_minutes))
+            + 1
     }
 
     pub fn next_stage_xp(&self) -> Option<u32> {
@@ -1337,7 +1340,7 @@ impl PetState {
     }
 
     fn visit(&mut self, now_ms: u64) {
-        let today = day_number(now_ms);
+        let today = day_number(now_ms, self.local_offset_minutes);
         if today <= self.last_seen_day {
             return;
         }
@@ -1425,6 +1428,9 @@ fn push_capped<T>(deque: &mut VecDeque<T>, item: T, cap: usize) -> Option<T> {
     (deque.len() > cap).then(|| deque.pop_front().expect("len > cap ⇒ 非空"))
 }
 
-fn day_number(ms: u64) -> u64 {
-    ms / DAY_MS
+/// 本地日历日序号（绝对天，epoch 起算）：`ms` 加时区偏移后按天取整——
+/// streak/active_days/age_days/last_seen_day 统一按本地日结算（偏移由桥接层
+/// 注入，见 [`PetState::set_local_offset_minutes`]；0 = UTC）。纪元前钳到 day 0。
+fn day_number(ms: u64, offset_minutes: i32) -> u64 {
+    ((ms as i64 + offset_minutes as i64 * 60_000) / DAY_MS as i64).max(0) as u64
 }

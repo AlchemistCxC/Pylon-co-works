@@ -903,6 +903,37 @@ fn offset_480_minutes_produces_night_at_local_22h() {
 }
 
 #[test]
+fn local_calendar_day_rolls_over_at_local_midnight() {
+    // 优化-9：day_number 纳入 local_offset_minutes——东八区本地午夜（UTC 16:00）
+    // 即触发跨天结算，而非旧 UTC 语义的本地 8:00（UTC 24:00 才换天）。
+    let mut pet = PetState::new_at(0); // 出生 last_seen_day = day 0（offset 0）
+    pet.set_local_offset_minutes(480);
+    // 首访：UTC 16:00 = 本地次日 00:00 → 本地日 1 → 跨天结算
+    pet.apply(AiEvent::Visit, 16 * 3_600_000);
+    assert_eq!(pet.stats.active_days, 2, "本地午夜跨天必须结算 active_days");
+    assert_eq!(pet.stats.streak_days, 2, "连续两天 → streak +1");
+    // 对照：UTC 24:00 = 本地 08:00 → 仍本地日 1，不重复结算
+    pet.apply(AiEvent::Visit, 24 * 3_600_000);
+    assert_eq!(pet.stats.active_days, 2, "同本地日不重复结算");
+    assert_eq!(pet.stats.streak_days, 2);
+    // 次日：UTC 40:00 = 本地次日 00:00 → 本地日 2 → streak 3
+    pet.apply(AiEvent::Visit, 40 * 3_600_000);
+    assert_eq!(pet.stats.active_days, 3);
+    assert_eq!(pet.stats.streak_days, 3);
+}
+
+#[test]
+fn age_days_uses_local_calendar_day() {
+    // 出生 UTC 20:00 = 东八区次日 04:00（本地日 1）；同日 UTC 04:00（本地 12:00）
+    // 查询 → 同一本地日 → age 1（旧 UTC 语义会按 UTC 日 0→1 误报 2）。
+    let mut pet = PetState::new_at(20 * 3_600_000);
+    pet.set_local_offset_minutes(480);
+    assert_eq!(pet.age_days(28 * 3_600_000), 1);
+    // 次日 UTC 20:00（本地日 2）→ age 2
+    assert_eq!(pet.age_days(20 * 3_600_000 + 86_400_000), 2);
+}
+
+#[test]
 fn night_interactions_grant_bonus_bond() {
     // 午夜陪伴（设计书 §13.5.5）：Night 时段互动 bond ×1.5（向上取整）
     // now=0 → UTC hour 0 → Night（offset 0）
