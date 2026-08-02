@@ -139,6 +139,23 @@ fn parse(content: &str) -> Result<HashMap<String, AgentDef>, String> {
                 agent.transport
             ));
         }
+        // A11：env 键/值未校验时 `cmd.env(k, v)` 会 panic（含 '=' 或 NUL 的键、
+        // NUL 值均触发）——非法配置从启动 panic 变为启动报错降级。
+        for (key, value) in &agent.env {
+            if key.is_empty() {
+                return Err(format!("agent {id} has invalid env entry: empty key"));
+            }
+            if key.contains('=') {
+                return Err(format!(
+                    "agent {id} has invalid env entry: key contains '=': {key:?}"
+                ));
+            }
+            if key.contains('\0') || value.contains('\0') {
+                return Err(format!(
+                    "agent {id} has invalid env entry: NUL byte in key or value: {key:?}"
+                ));
+            }
+        }
     }
     Ok(config.agents)
 }
@@ -146,7 +163,14 @@ fn parse(content: &str) -> Result<HashMap<String, AgentDef>, String> {
 pub fn load_from_path(path: &Path) -> Result<HashMap<String, AgentDef>, String> {
     let content = std::fs::read_to_string(path)
         .map_err(|error| format!("read agent config {} failed: {error}", path.display()))?;
-    parse(&content)
+    let agents = parse(&content)?;
+    // A11：相对 exe/cwd 以配置所在目录为基准绝对化（否则相对路径随进程 cwd 变化，
+    // 落库/回放错位）。connect_with_logs 的临时 resolve 保留（幂等，双保险）。
+    let base_dir = path.parent().unwrap_or_else(|| std::path::Path::new("."));
+    Ok(agents
+        .into_iter()
+        .map(|(id, agent)| (id, agent.resolve_paths(base_dir)))
+        .collect())
 }
 
 pub fn default_agent_id(agents: &HashMap<String, AgentDef>) -> Result<Option<String>, String> {
@@ -236,6 +260,24 @@ mod tests {
         let agents = load_from_path(&path).expect("load runtime agent config");
         std::fs::remove_file(&path).ok();
         assert!(agents.contains_key("runtime"));
+    }
+
+    #[test]
+    fn rejects_agent_env_with_empty_key() {
+        let error = parse(
+            "agents:\n  bad:\n    name: Bad\n    transport: subprocess\n    exe: agent\n    env:\n      \"\": \"value\"\n",
+        )
+        .expect_err("empty env key must be rejected");
+        assert!(error.contains("agent bad has invalid env entry"));
+    }
+
+    #[test]
+    fn rejects_agent_env_key_containing_equals() {
+        let error = parse(
+            "agents:\n  bad:\n    name: Bad\n    transport: subprocess\n    exe: agent\n    env:\n      \"a=b\": \"value\"\n",
+        )
+        .expect_err("env key containing '=' must be rejected");
+        assert!(error.contains("agent bad has invalid env entry"));
     }
 
     #[test]
