@@ -567,6 +567,9 @@ pub(crate) fn start_notification_dispatcher<R: tauri::Runtime>(
                     continue;
                 }
                 let mut mapping_current_at_mutation = false;
+                // O7：pet 感知事件在 sessions 锁内收集、锁外统一应用——
+                // 消除 sessions → pet 锁嵌套；收集顺序 = 应用顺序，行为等价。
+                let mut pet_events: Vec<PetEvent> = Vec::new();
                 if let Ok(mut items) = sessions.lock() {
                     if client_generation.load(Ordering::Acquire) == generation {
                         if let Some(session) = items.get(&source) {
@@ -580,15 +583,12 @@ pub(crate) fn start_notification_dispatcher<R: tauri::Runtime>(
                     }
                     if mapping_current_at_mutation {
                         if let Some(session) = items.get_mut(&source) {
-                            // O7：pet 事件在锁内收集（apply_update_event 内部含 C11 回放守卫），
-                            // 由调用方在 sessions 锁外统一应用——见 mutation 块之后的应用循环。
-                            let pet_events =
-                                apply_update_event(session, update, variant, is_replay);
-                            for event in pet_events {
-                                let _ = pet.lock().map(|mut p| event.apply(&mut p));
-                            }
+                            pet_events = apply_update_event(session, update, variant, is_replay);
                         }
                     }
+                }
+                for event in pet_events {
+                    let _ = pet.lock().map(|mut p| event.apply(&mut p));
                 }
                 if client_generation.load(Ordering::Acquire) != generation {
                     break;
