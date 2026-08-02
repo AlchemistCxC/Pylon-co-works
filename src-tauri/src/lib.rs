@@ -876,6 +876,130 @@ for line in sys.stdin:
         );
     }
 
+    /// A5：持续崩溃型 fake ACP（每次重启成功激活后 200ms 内退出）→ 自动重连循环必须
+    /// 在"连接成功后又崩"时继续退避重连（而非 break 后永久 Crashed），最终标志释放。
+    /// 200ms 延迟是刻意的：replace_agent_client 的 is_crashed() 检查在激活时发生，
+    /// 立即退出会让每次重连都撞上 "crashed before activation"（走 Err 分支，generation
+    /// 从不前进，"成功后又崩"不可观察）；延迟到激活之后才崩，才能覆盖 A5 场景。
+    const CRASH_LOOP_SCRIPT: &str = r#"import json,sys,time
+for line in sys.stdin:
+    request = json.loads(line)
+    response = {'jsonrpc':'2.0','id':request.get('id'),'result':{}}
+    method = request.get('method')
+    if method == 'session/new':
+        response['result'] = {'sessionId':'fake-session-1'}
+    elif method == 'session/prompt':
+        response['result'] = {'stopReason':'end_turn'}
+    print(json.dumps(response), flush=True)
+    time.sleep(0.2)
+    sys.exit(0)
+"#;
+
+    /// A5 回归：重连成功后又立即崩溃时，成功分支复查 still_stale 后继续退避重连，
+    /// agent 不会因防重入标志吞掉第二次崩溃通知而永久下线。
+    #[tokio::test]
+    async fn fake_acp_crash_loop_keeps_reconnecting_then_flag_releases() {
+        let app = tauri::test::mock_builder()
+            .build(tauri::test::mock_context(tauri::test::noop_assets()))
+            .unwrap();
+        let window = tauri::WebviewWindowBuilder::new(
+            &app,
+            "main",
+            tauri::WebviewUrl::External("https://example.com".parse().unwrap()),
+        )
+        .build()
+        .expect("mock window must build");
+
+        // 初始连接 crash-loop 模式：initialize 成功后 200ms 退出 → EOF → 崩溃通知
+        let crash_agent = crate::test_utils::fake_acp_agent_with(
+            "fake-acp",
+            CRASH_LOOP_SCRIPT,
+            Vec::new(),
+            std::collections::HashMap::new(),
+        );
+        let initial_acp = AcpClient::connect_with_logs(&crash_agent, None)
+            .await
+            .expect("fake ACP must initialize");
+        let state = build_state(initial_acp, crash_agent).await;
+        let handles = AppStateHandles::from_state(&state);
+        let runtime = handles.active_runtime().expect("active runtime must exist");
+        start_notification_dispatcher(&handles, &runtime, window.clone());
+
+        // 首次崩溃 → 自动重连已调度（标志 true）
+        tokio::time::timeout(std::time::Duration::from_secs(5), async {
+            loop {
+                let status = runtime
+                    .agent_runtime
+                    .lock()
+                    .map(|r| r.status)
+                    .unwrap_or(AgentLifecycleStatus::Disconnected);
+                if status == AgentLifecycleStatus::Crashed
+                    && runtime.auto_reconnect_active.load(Ordering::Acquire)
+                {
+                    break;
+                }
+                tokio::time::sleep(std::time::Duration::from_millis(20)).await;
+            }
+        })
+        .await
+        .expect("dispatcher must observe crash and schedule auto-reconnect within 5s");
+
+        // 持续崩溃：每次重连成功（generation +1）后 200ms 又崩 → 循环必须继续退避重连。
+        // 达到 generation>=2 即证明"成功后又崩"至少发生一轮且重连被多次调度
+        // （修复前：第一次重连成功后循环 break，崩溃通知被防重入标志吞掉，generation 永远停 1）。
+        tokio::time::timeout(std::time::Duration::from_secs(20), async {
+            loop {
+                if runtime.client_generation.load(Ordering::Acquire) >= 2 {
+                    break;
+                }
+                tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+            }
+        })
+        .await
+        .expect("auto-reconnect must retry after post-reconnect crash (generation >= 2)");
+
+        // 恢复场景收尾：切 alive + 手动 reconnect → 在途退避循环复查非 Crashed 提前
+        // 放弃并释放防重入标志（可再次调度），agent 稳定 Connected。
+        {
+            let mut agents = state.agents.lock().unwrap();
+            agents.insert("fake-acp".to_string(), fake_agent("alive"));
+        }
+        let agent = state.get_active_agent().expect("active agent");
+        do_connect_and_replace(
+            &handles,
+            &runtime,
+            &window,
+            &agent,
+            None,
+            AgentLifecycleStatus::Reconnecting,
+            "reconnect",
+            false,
+            true,
+        )
+        .await
+        .expect("manual reconnect must succeed");
+        tokio::time::timeout(std::time::Duration::from_secs(15), async {
+            loop {
+                let status = runtime
+                    .agent_runtime
+                    .lock()
+                    .map(|r| r.status)
+                    .unwrap_or(AgentLifecycleStatus::Disconnected);
+                let flag = runtime.auto_reconnect_active.load(Ordering::Acquire);
+                if status == AgentLifecycleStatus::Connected && !flag {
+                    break;
+                }
+                tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+            }
+        })
+        .await
+        .expect("flag must release and agent must stay Connected within 15s");
+        assert!(
+            !runtime.auto_reconnect_active.load(Ordering::Acquire),
+            "auto-reconnect flag must be released and reschedulable"
+        );
+    }
+
     /// A7 回归：洪泛 300 条（> BROADCAST_CAP=256）后 EOF——NOTIF_AGENT_CRASHED 广播
     /// 必然被 Lagged 丢弃（dispatcher 逐条处理期间队列溢出），崩溃信号必须经独立
     /// watch 通道送达，自动重连才仍会触发。

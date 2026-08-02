@@ -166,7 +166,20 @@ pub(crate) fn start_notification_dispatcher<R: tauri::Runtime>(
                             )
                             .await
                             {
-                                Ok(()) => break,
+                                Ok(()) => {
+                                    // 连接成功后又立即崩溃时，新 dispatcher 的崩溃通知会被
+                                    // "已重连"防重入标志吞掉（标志仍持有）——成功分支复查，
+                                    // 仍 Crashed 则继续退避重连，避免 agent 永久下线。
+                                    let still_stale = reconnect_runtime
+                                        .agent_runtime
+                                        .lock()
+                                        .map(|r| r.status == AgentLifecycleStatus::Crashed)
+                                        .unwrap_or(false);
+                                    if still_stale {
+                                        continue;
+                                    }
+                                    break;
+                                }
                                 Err(error) => {
                                     log::warn!("auto-reconnect attempt {attempt} failed: {error}")
                                 }
