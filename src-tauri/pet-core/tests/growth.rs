@@ -921,6 +921,44 @@ fn multiple_achievements_unlock_in_one_event() {
 }
 
 #[test]
+fn collector_counts_drops_and_growth_unlocks() {
+    // C9：收藏家按"拥有"计数（掉落 ∪ 成长解锁）——4 掉落 + bond 300 成长解锁 code_crown = 5
+    let mut pet = day_pet(1);
+    pet.traits = pylon_pet_core::PetTraits::default();
+    pet.bond = 300;
+    for def in pylon_pet_core::COSMETICS
+        .iter()
+        .filter(|d| matches!(d.unlock, pylon_pet_core::CosmeticUnlock::Drop))
+        .take(4)
+    {
+        pet.inventory.push(def.id.to_string());
+    }
+    pet.apply(AiEvent::Visit, 1);
+    assert!(
+        pet.unlocked.contains(&"collector".to_string()),
+        "4 掉落 + 成长解锁 code_crown = 5 件拥有，必须解锁收藏家: {:?}",
+        pet.unlocked
+    );
+    // 对照：仅 3 掉落 + code_crown = 4 件，不满 5 不解锁
+    let mut pet = day_pet(1);
+    pet.traits = pylon_pet_core::PetTraits::default();
+    pet.bond = 300;
+    for def in pylon_pet_core::COSMETICS
+        .iter()
+        .filter(|d| matches!(d.unlock, pylon_pet_core::CosmeticUnlock::Drop))
+        .take(3)
+    {
+        pet.inventory.push(def.id.to_string());
+    }
+    pet.apply(AiEvent::Visit, 1);
+    assert!(
+        !pet.unlocked.contains(&"collector".to_string()),
+        "3 掉落 + code_crown = 4 件，不得解锁收藏家: {:?}",
+        pet.unlocked
+    );
+}
+
+#[test]
 fn restore_backfills_achievements_for_old_saves() {
     // 模拟旧档：已达条件但从未触发解锁检查（unlocked 空）
     let mut pet = PetState::new_at(1);

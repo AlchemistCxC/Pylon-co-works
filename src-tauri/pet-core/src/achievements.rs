@@ -231,7 +231,14 @@ fn achievement_met(id: &str, pet: &PetState) -> bool {
         "daze_dreamer" => stats.dazes >= 10,
         "bond_friend" => pet.bond >= 300,
         "bond_soulmate" => pet.bond >= 2000,
-        "collector" => stats.cosmetics_collected >= 5,
+        // C9 修复：收藏家按"拥有"计数（掉落 ∪ 成长解锁），不再只计掉落。
+        "collector" => {
+            crate::cosmetics::COSMETICS
+                .iter()
+                .filter(|def| pet.owns_cosmetic(def))
+                .count()
+                >= 5
+        }
         "luminary" => pet.stage() == GrowthStage::Luminary,
         _ => false,
     }
