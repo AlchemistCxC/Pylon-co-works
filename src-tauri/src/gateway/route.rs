@@ -153,7 +153,7 @@ fn default_persist_mode() -> String {
 /// 解析完整 gateway 配置（路由表 + 平台配置 + 注入配置）。
 pub fn parse_config(input: &str) -> Result<GatewayConfig, String> {
     let config: GatewayConfigFile =
-        serde_yaml::from_str(input).map_err(|e| format!("gateway 配置解析失败: {e}"))?;
+        serde_yml::from_str(input).map_err(|e| format!("gateway 配置解析失败: {e}"))?;
     if !config.extra.is_empty() {
         let mut keys: Vec<&String> = config.extra.keys().collect();
         keys.sort();
