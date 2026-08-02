@@ -103,6 +103,7 @@ pub(crate) fn agent_summary_payload(
     agent: &AgentDef,
     active_id: Option<&str>,
     active_status: Option<AgentLifecycleStatus>,
+    crashed: bool,
 ) -> serde_json::Value {
     let available = active_id.is_some_and(|aid| id == aid)
         && active_status == Some(AgentLifecycleStatus::Connected);
@@ -112,6 +113,9 @@ pub(crate) fn agent_summary_payload(
         "id": id,
         "name": agent.name,
         "transport": agent.transport,
+        // O11：crashed 只做状态透传（acp 已死）；available/active 是前端契约，
+        // 计算逻辑保持不变（crashed 不改变 available 判定）。
+        "crashed": crashed,
         "available": available,
         "active": active,
         "cwd": agent.cwd.clone(),
@@ -136,7 +140,18 @@ pub(crate) async fn list_agents(
         .lock()
         .map_err(|e| e.to_string())?
         .iter()
-        .map(|(id, a)| agent_summary_payload(id, a, Some(&active_id), Some(active_status)))
+        .map(|(id, a)| {
+            // O11：crashed 感知——per-agent runtime 的 acp 是否已死
+            // （try_lock：读路径不等待 acp 锁；锁被占用时视为未崩溃）。
+            let crashed = state.runtimes.get(id).is_some_and(|runtime| {
+                runtime
+                    .acp
+                    .try_lock()
+                    .map(|acp| acp.is_crashed())
+                    .unwrap_or(false)
+            });
+            agent_summary_payload(id, a, Some(&active_id), Some(active_status), crashed)
+        })
         .collect())
 }
 
@@ -146,7 +161,7 @@ pub(crate) async fn validate_agents() -> Result<serde_json::Value, PylonError> {
     let default_agent_id = crate::agent_config::default_agent_id(&agents)?;
     let summaries = agents
         .iter()
-        .map(|(id, agent)| agent_summary_payload(id, agent, None, None))
+        .map(|(id, agent)| agent_summary_payload(id, agent, None, None, false))
         .collect::<Vec<_>>();
     Ok(serde_json::json!({
         "valid": true,
@@ -479,6 +494,7 @@ mod tests {
             &a,
             Some("peri"),
             Some(AgentLifecycleStatus::Disconnected),
+            false,
         );
         assert_eq!(disconnected["active"], true);
         assert_eq!(disconnected["available"], false, "未连接不算可用");
@@ -487,6 +503,7 @@ mod tests {
             &a,
             Some("peri"),
             Some(AgentLifecycleStatus::Connected),
+            false,
         );
         assert_eq!(connected["available"], true, "连接后 available 才为 true");
     }
@@ -499,6 +516,7 @@ mod tests {
             &a,
             Some("hermes"),
             Some(AgentLifecycleStatus::Connected),
+            false,
         );
         assert_eq!(payload["id"], "peri");
         assert_eq!(payload["name"], "peri");
@@ -513,9 +531,35 @@ mod tests {
     #[test]
     fn summary_without_active_context_is_inactive() {
         let a = agent();
-        let payload = agent_summary_payload("peri", &a, None, None);
+        let payload = agent_summary_payload("peri", &a, None, None, false);
         assert_eq!(payload["active"], false);
         assert_eq!(payload["available"], false);
+    }
+
+    #[test]
+    fn summary_exposes_crashed_without_touching_available() {
+        let a = agent();
+        let payload = agent_summary_payload(
+            "peri",
+            &a,
+            Some("peri"),
+            Some(AgentLifecycleStatus::Connected),
+            true,
+        );
+        assert_eq!(payload["crashed"], true, "crashed 必须透传");
+        assert_eq!(
+            payload["available"], true,
+            "available 是前端契约，crashed 不改变其计算（active+Connected 即可用）"
+        );
+        let crashed_disconnected = agent_summary_payload(
+            "peri",
+            &a,
+            Some("peri"),
+            Some(AgentLifecycleStatus::Disconnected),
+            true,
+        );
+        assert_eq!(crashed_disconnected["available"], false);
+        assert_eq!(crashed_disconnected["crashed"], true);
     }
 
     async fn mock_window() -> tauri::WebviewWindow<tauri::test::MockRuntime> {
