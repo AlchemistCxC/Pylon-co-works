@@ -71,31 +71,28 @@ pub fn validate_and_serialize(input: Option<Vec<McpServerConfig>>) -> Result<Vec
     }
     // 审查修复：去重只针对启用中的 server——禁用冲突 server 应作为"排除"途径
     // （disabled 不进 wire，却参与去重会报 duplicate 且无解除途径）。
+    // O60：去重并入序列化单次迭代（此前两遍遍历）。校验顺序保持先身份后
+    // 传输细节——身份冲突的 server 不进入后续校验即报错，语义不变。
     let mut identities = std::collections::HashSet::new();
-    for server in servers
-        .iter()
-        .filter(|server| server.enabled && !server.disabled)
-    {
-        // 核验修复：同一 server 内 id 与 name 相同不算重复（只防跨 server 撞 identity）。
-        let mut local = std::collections::HashSet::new();
-        for identity in [server.id.as_deref(), server.name.as_deref()]
-            .into_iter()
-            .flatten()
-        {
-            validate_text("server identity", identity)?;
-            let key = identity.to_ascii_lowercase();
-            if !local.insert(key.clone()) {
-                continue;
-            }
-            if !identities.insert(key) {
-                return Err(format!("duplicate MCP server identity: {identity}"));
-            }
-        }
-    }
     servers
         .into_iter()
         .filter(|server| server.enabled && !server.disabled)
         .map(|server| {
+            // 核验修复：同一 server 内 id 与 name 相同不算重复（只防跨 server 撞 identity）。
+            let mut local = std::collections::HashSet::new();
+            for identity in [server.id.as_deref(), server.name.as_deref()]
+                .into_iter()
+                .flatten()
+            {
+                validate_text("server identity", identity)?;
+                let key = identity.to_ascii_lowercase();
+                if !local.insert(key.clone()) {
+                    continue;
+                }
+                if !identities.insert(key) {
+                    return Err(format!("duplicate MCP server identity: {identity}"));
+                }
+            }
             let transport = if server.transport.trim().is_empty() {
                 if server.command.is_some() {
                     "stdio".to_string()
