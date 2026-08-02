@@ -565,7 +565,7 @@ impl PetState {
         // 必须在 unlock_achievements 补查**之前**执行，保证补查只基于合法 id。
         saved
             .unlocked
-            .retain(|id| ACHIEVEMENTS.iter().any(|a| a.id == id));
+            .retain(|id| ACHIEVEMENTS.iter().any(|a| a.id.as_str() == id.as_str()));
         saved.unlocked.truncate(64);
         saved
             .inventory
@@ -789,10 +789,17 @@ impl PetState {
                 self.msg = Some("它绕着你嗅了一圈：'换了个脑子？'".into());
             }
             AiEvent::PromptRefused => {
+                // C12：对话结束（拒绝）→ Idle——与 PromptCompleted/Failed 一致
+                //（否则 Interacting 卡住，情绪恒推导 curious）
+                self.machine = PetMachineState::Awake(MachineSub::Idle);
+                self.first_chunk_at_ms = None;
                 self.push_event(RecentEvent::Refused);
                 self.msg = Some("它歪头，光里写满了问号。".into());
             }
             AiEvent::PromptMaxed => {
+                // C12：对话结束（达轮次上限）→ Idle——同上
+                self.machine = PetMachineState::Awake(MachineSub::Idle);
+                self.first_chunk_at_ms = None;
                 self.push_event(RecentEvent::Maxed);
                 self.msg = Some("它累瘫了，像跑完了所有循环。".into());
             }
