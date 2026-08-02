@@ -483,9 +483,15 @@ pub(crate) async fn check_session_expiry(state: &AppState) {
             }
             // 审查修复：应答该 session 挂起的权限请求为 Cancelled（协议要求）
             crate::permission::respond_pending_permissions_cancelled(&runtime, &peri_id).await;
-            // 平台通知（用户可见重置原因）
-            if let Some(adapter) = state.gateway.adapter("qq") {
-                let _ = adapter.deliver_text(&source, &format!("[会话已重置] {reason}"));
+            // 平台通知（用户可见重置原因）：投递给 source 归属的适配器。
+            // 2026-08-02 修复：原硬编码 gateway.adapter("qq") 只有 QQ 能收到通知；
+            // 泛化为与 deliver_all 同语义的前缀匹配（source 首段 == platform_key），
+            // 未来新增平台适配器自动生效。
+            let platform_key = source.split(':').next().unwrap_or("");
+            if !platform_key.is_empty() {
+                if let Some(adapter) = state.gateway.adapter(platform_key) {
+                    let _ = adapter.deliver_text(&source, &format!("[会话已重置] {reason}"));
+                }
             }
             state.log_runtime_summary(
                 "warn",
