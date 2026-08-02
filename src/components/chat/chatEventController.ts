@@ -107,10 +107,14 @@ export function attachChatEventController(refs: ChatEventControllerRefs): ChatCo
     }
   }
 
-  /** 持久化：live 路径（非 replay scope）且消息数组变化时写盘（失败静默，不中断事件流） */
+  /** 持久化：live 路径（非 replay scope）且消息数组变化时写盘（失败静默，不中断事件流）。
+   *  2026-08-02 收敛双写：rendered source 的消息由 ChatView 渲染 effect（messages 变化后）
+   *  统一落盘（覆盖 initSource/commitReplay 等非事件注入路径），此处只负责后台会话
+   *  （非 rendered source）的事件驱动写入——两处各司其职，不再同 key 重复 JSON.stringify。 */
   const syncPersistence = (source: string, prev: SourceChatRuntime | undefined, next: SourceChatRuntime | undefined) => {
     if (!next || isReplayScope(next)) return
     if (prev?.messages === next.messages) return
+    if (isRenderedSource(source, renderedSource())) return
     const session = useIdentityStore.getState().sessions.find(item => item.source === source)
     if (!session) return
     try {
@@ -153,6 +157,9 @@ export function attachChatEventController(refs: ChatEventControllerRefs): ChatCo
 
   const requestCancel = (source: string) => {
     dispatch({ type: 'begin-cancel', source })
+    // 2026-08-02 修复：begin-cancel 去重失败（非 generating/canceling 状态）时不白调后端。
+    // 旧实现 dispatch 后无条件 invoke，footer 停止按钮/全局 Esc 在非生成态点击会发无效请求。
+    if (runtimeState[source]?.cancelState.status !== 'canceling') return
     invoke('cancel_prompt', { source }).then(() => {
       // 取消失败/成功均由 reducer 收敛；liveGenerating 清理走 syncGenerating
       dispatch({ type: 'cancel-success', source })
