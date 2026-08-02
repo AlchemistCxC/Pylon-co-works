@@ -118,11 +118,14 @@ impl GatewayConfig {
     }
 }
 
-/// gateway 配置文件的顶层结构（未知字段默认忽略）。
+/// gateway 配置文件的顶层结构（未知字段收集后告警）。
 #[derive(Debug, Deserialize)]
 struct GatewayConfigFile {
     /// 缺 `gateway` 段视为空表（容忍配置文件尚未包含本段）。
     gateway: Option<GatewaySection>,
+    /// 未知顶层字段（配置拼错可见）。
+    #[serde(flatten)]
+    extra: HashMap<String, serde_json::Value>,
 }
 
 /// `gateway` 段结构。
@@ -151,6 +154,11 @@ fn default_persist_mode() -> String {
 pub fn parse_config(input: &str) -> Result<GatewayConfig, String> {
     let config: GatewayConfigFile =
         serde_yaml::from_str(input).map_err(|e| format!("gateway 配置解析失败: {e}"))?;
+    if !config.extra.is_empty() {
+        let mut keys: Vec<&String> = config.extra.keys().collect();
+        keys.sort();
+        log::warn!("gateway 配置含未知顶层字段（可能拼错）: {keys:?}");
+    }
     let section = config.gateway.unwrap_or_default();
     let routes = section.routes;
     let mut entries = Vec::with_capacity(routes.len());
