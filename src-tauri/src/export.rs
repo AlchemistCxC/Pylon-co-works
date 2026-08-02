@@ -123,40 +123,38 @@ pub(crate) fn format_export_markdown(peri_id: &str, messages: &[serde_json::Valu
     markdown
 }
 
-/// 原子写导出文件：临时文件 + rename（已存在拒绝，防覆盖）。
+/// 原子写导出文件：`create_new` 直接占用目标（已存在拒绝，防覆盖）。
+/// C2：消除 exists 检查 + temp + rename 的 TOCTOU 窗口（Unix rename 覆盖已存在文件）。
 pub(crate) fn write_export_atomically(
     path: &std::path::Path,
     content: &[u8],
 ) -> Result<(), String> {
-    if path.exists() {
-        return Err(format!("export output already exists: {}", path.display()));
-    }
-    let parent = path
-        .parent()
-        .ok_or_else(|| "export output has no parent directory".to_string())?;
-    let temp = parent.join(format!(
-        ".{}.{}.tmp",
-        path.file_name()
-            .and_then(|name| name.to_str())
-            .unwrap_or("export"),
-        std::process::id(),
-    ));
     let result = (|| {
         let mut file = std::fs::OpenOptions::new()
             .write(true)
             .create_new(true)
-            .open(&temp)
-            .map_err(|error| format!("create temporary export failed: {error}"))?;
-        use std::io::Write;
-        file.write_all(content)
-            .map_err(|error| format!("write temporary export failed: {error}"))?;
-        file.sync_all()
-            .map_err(|error| format!("sync temporary export failed: {error}"))?;
-        std::fs::rename(&temp, path).map_err(|error| format!("commit export failed: {error}"))
+            .open(path)
+            .map_err(|error| {
+                if error.kind() == std::io::ErrorKind::AlreadyExists {
+                    format!("export output already exists: {}", path.display())
+                } else {
+                    format!("create export failed: {error}")
+                }
+            })?;
+        let written = (|| {
+            use std::io::Write;
+            file.write_all(content)
+                .map_err(|error| format!("write export failed: {error}"))?;
+            file.sync_all()
+                .map_err(|error| format!("sync export failed: {error}"))?;
+            Ok::<(), String>(())
+        })();
+        drop(file);
+        if written.is_err() {
+            let _ = std::fs::remove_file(path);
+        }
+        written
     })();
-    if result.is_err() {
-        let _ = std::fs::remove_file(&temp);
-    }
     result
 }
 
