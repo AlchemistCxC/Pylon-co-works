@@ -41,7 +41,7 @@ assert.match(themeDefs, /spinnerIntervalMs: 120/)
 assert.match(store, /state\.spinnerIntervalMs = typeof state\.spinnerIntervalMs === 'number'/)
 assert.match(footer, /const spinnerIntervalMs = useStore\(s => s\.spinnerIntervalMs\)/)
 assert.match(footer, /setInterval\([\s\S]*?Math\.max\(40, Math\.min\(1000, spinnerIntervalMs \|\| 120\)\)/)
-assert.match(footer, /frameAt\(frames, elapsedMs, spinnerIntervalMs(?:,|\))/)
+assert.match(footer, /resolveFrame\(frames, elapsedMs, spinnerIntervalMs/)
 
 // GenerationFooter frame/custom marker parsing and terminal-state color isolation.
 assert.doesNotMatch(footer, /summary\.completedFrame \|\|/)

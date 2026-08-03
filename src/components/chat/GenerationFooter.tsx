@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from 'react'
 import { Square } from 'lucide-react'
-import { frameAt, resolveSpinnerMarker } from './spinnerFrames'
+import { resolveSpinnerMarker } from './spinnerFrames'
+import { resolveActivity, resolveFrame } from './spinnerMachine'
 import { getSpinnerAssetPreset, getSpinnerVerbPreset } from './spinnerAssets'
 import { normalizeSpinnerVerbs } from './spinnerVerbs'
 import SpinnerGlimmer from './SpinnerGlimmer'
@@ -86,8 +87,8 @@ export default function GenerationFooter({ running, frames, tokenCount, startTim
 
   const now = Date.now()
   const idleMs = running && lastTokenAt ? Math.max(0, now - lastTokenAt) : running ? now - startTime : 0
-  // CC 对齐：3s 无响应即 stalled（趋向停滞红），waiting 提前到 1.2s（保留 Pylon 两级）
-  const activity = idleMs > 3000 ? 'stalled' : idleMs > 1200 ? 'waiting' : 'active'
+  // CC 对齐状态机：3s stalled（渐变红）、1.2s waiting（Pylon 两级）
+  const activity = resolveActivity(idleMs)
   const phaseLabel = phase?.kind === 'thinking'
     ? '思考中'
     : phase?.kind === 'tool'
@@ -110,7 +111,7 @@ export default function GenerationFooter({ running, frames, tokenCount, startTim
       <div className="term-spinner-row">
         {/* cc 帧：不设 data-phase（帧恒 spinnerColor，颜色不随阶段跳，对齐 CC 恒色） */}
         <div className="term-spinner" data-activity={activity} data-phase={spinnerFramePreset === 'cc' ? undefined : phase?.kind || 'idle'}>
-          <span className="spinner-frame" style={{ color: spinnerColor || undefined, fontSize: `${spinnerSize}px` }}>{frameAt(frames, elapsedMs, spinnerIntervalMs, reduceMotion ? 'static' : frameAsset.motion, frameAsset.direction)}</span>
+          <span className="spinner-frame" style={{ color: spinnerColor || undefined, fontSize: `${spinnerSize}px` }}>{resolveFrame(frames, elapsedMs, spinnerIntervalMs, reduceMotion ? 'static' : frameAsset.motion, frameAsset.direction).char}</span>
           <SpinnerGlimmer text={displayVerb} elapsedMs={elapsedMs} activity={activity} reducedMotion={reduceMotion} color={spinnerColor} cycleMs={GLIMMER_CYCLE_MS} />
           <span className="spinner-meta">({parts.join(' · ')})</span>
           {activity !== 'active' && <span className="spinner-activity" aria-live="polite">…</span>}

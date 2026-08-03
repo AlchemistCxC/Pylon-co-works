@@ -1,5 +1,6 @@
 import { useMemo, type CSSProperties } from 'react'
 import { segmentGraphemes } from '../../utils/textWidth'
+import { glimmerIntensity, resolveGlimmer } from './spinnerMachine'
 
 interface SpinnerGlimmerProps {
   text: string
@@ -12,19 +13,18 @@ interface SpinnerGlimmerProps {
 
 export default function SpinnerGlimmer({ text, elapsedMs, activity, reducedMotion, color, cycleMs }: SpinnerGlimmerProps) {
   const graphemes = useMemo(() => segmentGraphemes(text), [text])
-  const glimmerSpeedMs = Math.max(80, Math.floor(cycleMs / Math.max(1, graphemes.length + 20)))
-  const cycleLength = graphemes.length + 20
-  const cyclePosition = Math.floor((elapsedMs % cycleMs) / glimmerSpeedMs)
-  const glimmerIndex = reducedMotion || activity !== 'active' || graphemes.length === 0
+  // CC 光扫状态机：±1 字符窗口（core + 两侧 edge）
+  const { glimmerIndex } = resolveGlimmer(text, elapsedMs, cycleMs)
+  const activeIndex = reducedMotion || activity !== 'active' || graphemes.length === 0
     ? -1
-    : (cyclePosition % cycleLength) - 10
+    : glimmerIndex
 
   return (
-    <span className="spinner-verb" data-glimmer-active={glimmerIndex >= 0 ? 'true' : 'false'} style={{ '--spinner-glimmer-color': color || undefined } as CSSProperties}>
+    <span className="spinner-verb" data-glimmer-active={activeIndex >= 0 ? 'true' : 'false'} style={{ '--spinner-glimmer-color': color || undefined } as CSSProperties}>
       {graphemes.map((grapheme, index) => {
-        const distance = Math.abs(index - glimmerIndex)
-        const intensity = distance === 0 ? 'core' : distance === 1 ? 'edge' : undefined
-        return <span className={intensity ? `spinner-glimmer spinner-glimmer-${intensity}` : undefined} key={`${index}-${grapheme}`}>{grapheme}</span>
+        const intensity = glimmerIntensity(index, activeIndex)
+        const cls = intensity === 2 ? 'core' : intensity === 1 ? 'edge' : undefined
+        return <span className={cls ? `spinner-glimmer spinner-glimmer-${cls}` : undefined} key={`${index}-${grapheme}`}>{grapheme}</span>
       })}
     </span>
   )
