@@ -1477,7 +1477,11 @@ fn unknown_recent_event_loads_without_reset_and_never_persists() {
     let loaded: PetState = serde_json::from_str(saved).expect("未知变体必须可反序列化");
     assert_eq!(loaded.xp, 10, "未知变体不得导致整档重置");
     assert_eq!(loaded.bond, 5);
-    assert_eq!(loaded.recent_events.len(), 3, "反序列化阶段保留未知变体（Unknown 占位）");
+    assert_eq!(
+        loaded.recent_events.len(),
+        3,
+        "反序列化阶段保留未知变体（Unknown 占位）"
+    );
     // E20：未知 machine 值兜底 Awake(Idle)
     assert_eq!(
         loaded.machine,
@@ -1495,7 +1499,11 @@ fn unknown_recent_event_loads_without_reset_and_never_persists() {
         "restore 必须过滤 Unknown: {:?}",
         restored.recent_events
     );
-    assert_eq!(restored.recent_events.len(), 2, "Poke/Done 保留，FutureEvent 剔除");
+    assert_eq!(
+        restored.recent_events.len(),
+        2,
+        "Poke/Done 保留，FutureEvent 剔除"
+    );
     assert_eq!(restored.xp, 10, "过滤不得影响进度");
     // 写档后文件中无 "Unknown"
     let json = serde_json::to_string(&restored).expect("restore 后必须可序列化");
@@ -1511,7 +1519,10 @@ fn unknown_recent_event_loads_without_reset_and_never_persists() {
         "last_agent_model":null,"pending_action":"FutureAction","stats":{},"memories":[]}"#;
     let loaded: PetState = serde_json::from_str(saved).expect("未知 pending_action 必须可反序列化");
     let restored = PetState::restore(loaded, 100_000);
-    assert!(restored.pending_action.is_none(), "未知延迟行为必须降级为无");
+    assert!(
+        restored.pending_action.is_none(),
+        "未知延迟行为必须降级为无"
+    );
     let json = serde_json::to_string(&restored).expect("serialize");
     assert!(
         !json.contains("Unknown"),
@@ -1528,7 +1539,13 @@ fn catalog_cache_does_not_leak_state_between_calls() {
     let mut pet = PetState::new_at(1);
     pet.unlocked = vec!["first_step".into()];
     let first = pet.achievement_info();
-    assert!(first.iter().find(|a| a.id == "first_step").unwrap().unlocked);
+    assert!(
+        first
+            .iter()
+            .find(|a| a.id == "first_step")
+            .unwrap()
+            .unlocked
+    );
     assert!(!first.iter().find(|a| a.id == "luminary").unwrap().unlocked);
 
     // 两次调用之间解锁一枚 + 掉落入栏一件
@@ -1536,19 +1553,39 @@ fn catalog_cache_does_not_leak_state_between_calls() {
     pet.maybe_drop_cosmetic(1, 0);
     let second = pet.achievement_info();
     assert!(
-        second.iter().find(|a| a.id == "night_watcher").unwrap().unlocked,
+        second
+            .iter()
+            .find(|a| a.id == "night_watcher")
+            .unwrap()
+            .unlocked,
         "第二次调用必须反映新解锁（缓存不串态）"
     );
-    assert!(second.iter().find(|a| a.id == "first_step").unwrap().unlocked);
+    assert!(
+        second
+            .iter()
+            .find(|a| a.id == "first_step")
+            .unwrap()
+            .unlocked
+    );
     assert_eq!(second.len(), first.len(), "目录骨架必须一致");
 
     let cosmetic_first = pet.cosmetic_info();
     let owned_id = pet.inventory[0].clone();
     assert!(
-        cosmetic_first.iter().find(|c| c.id == owned_id).unwrap().owned,
+        cosmetic_first
+            .iter()
+            .find(|c| c.id == owned_id)
+            .unwrap()
+            .owned,
         "掉落入栏必须标记 owned"
     );
-    assert!(!cosmetic_first.iter().find(|c| c.id == "code_crown").unwrap().owned);
+    assert!(
+        !cosmetic_first
+            .iter()
+            .find(|c| c.id == "code_crown")
+            .unwrap()
+            .owned
+    );
     pet.bond = 300;
     let cosmetic_second = pet.cosmetic_info();
     assert!(
