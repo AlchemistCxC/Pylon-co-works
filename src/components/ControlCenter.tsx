@@ -25,6 +25,7 @@ export default function ControlCenter({ sessionId }: Props) {
   const submitButtonMode = useStore(s => s.inputSubmitButtonMode || 'inline')
   const hidden = useStore(s => s.ccHidden || [])
   const ccStyle = useStore(s => s.ccStyle)
+  const tokenDisplay = useStore(s => s.tokenDisplay)
   const layout = useStore(s => s.ccLayout)
   const editMode = useStore(s => s.ccEditMode)
   const ccVariant = useStore(s => s.ccVariant) || 'terminal'
@@ -48,6 +49,14 @@ export default function ControlCenter({ sessionId }: Props) {
     // numeric 由 pct 表达；ring 由用量 widget 表达，避免重复上下文百分比。
     if (!editMode && ccStyle === 'numeric' && id === 'ekg' && !hidden.includes('pct')) return null
     if (!editMode && ccStyle === 'ring' && id === 'pct' && !hidden.includes('ekg')) return null
+    // tokenDisplay 选择 token 显示控件（ekg/pct/tokens 三选一），编辑模式全显。
+    // ccStyle 'numeric' 时 ekg 以 pct 形态渲染，因此 tokenDisplay 指向 ekg 时落位 pct。
+    if (!editMode && (id === 'ekg' || id === 'pct' || id === 'tokens')) {
+      const tokenWidget = tokenDisplay === 'pct' ? 'pct'
+        : tokenDisplay === 'tokens' ? 'tokens'
+          : ccStyle === 'numeric' ? 'pct' : 'ekg'
+      if (id !== tokenWidget) return null
+    }
 
     // 独立 send/attach widget 仅在"外部按钮模式"下渲染；CLI/内联模式走 InputBar 自带按钮。
     // externalSend/externalAttach 逐按钮决定 InputBar 是否隐藏自带按钮，避免重复或丢失。

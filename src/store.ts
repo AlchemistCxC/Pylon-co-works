@@ -228,7 +228,8 @@ export const useStore = create<ThemeState>()(persist(
    */
   applyZonePreset: (zone, presetName, presetTheme) => set(state => ({
     ...presetTheme,
-    ...(presetTheme.ccLayout ? { ccLayout: normalizeCcLayout(presetTheme.ccLayout) } : {}),
+    // cc zone 预设即恢复规范排布（预设不携带 ccLayout → 默认布局），与其他 zone 预设一致
+    ...(zone === 'cc' ? { ccLayout: normalizeCcLayout(presetTheme.ccLayout) } : {}),
     ...(zone === 'cc' && presetTheme.ccHeight !== undefined ? syncPresetCcHeight(presetTheme) : {}),
     activePreset: { ...state.activePreset, [zone]: presetName },
     dirty: { ...state.dirty, [zone]: false },
@@ -242,9 +243,9 @@ export const useStore = create<ThemeState>()(persist(
    */
   setGlobalPreset: (name, theme) => set(_ => ({
     ...theme,
-    // 预设不携带 ccLayout 时保留用户现有排布（与 applyZonePreset 一致；无条件
-    // normalizeCcLayout(undefined) 会重置用户拖拽/排序的自定义 widget 布局）
-    ...(theme.ccLayout ? { ccLayout: normalizeCcLayout(theme.ccLayout) } : {}),
+    // 预设是规范快照：点击预设即恢复其规范排布（预设不携带 ccLayout → 默认布局）。
+    // 否则编辑过的 widget 排布会残留，预设"覆盖不生效"且无法恢复原预设状态。
+    ccLayout: normalizeCcLayout(theme.ccLayout),
     ...(theme.ccHeight !== undefined ? syncPresetCcHeight(theme) : {}),
     activePreset: Object.fromEntries(ZONES.map(zone => [zone, name])),
     dirty: Object.fromEntries(ZONES.map(zone => [zone, false])),

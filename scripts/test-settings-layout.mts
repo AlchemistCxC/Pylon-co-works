@@ -111,8 +111,9 @@ assert.doesNotMatch(settings, /<Group title="布局骨架">/, 'Settings 不得�
 assert.equal((settings.match(/<ConfigBackupRow \/>/g) ?? []).length, 1, 'ConfigBackupRow 不得重复渲染')
 
 // ── 高危修复契约（2026-08-03 逻辑检测）──
-// setGlobalPreset 不得无条件重置 ccLayout（保留用户排布）
-assert.match(store, /setGlobalPreset[\s\S]*?theme\.ccLayout \? \{ ccLayout: normalizeCcLayout/, 'setGlobalPreset 必须仅在预设携带 ccLayout 时归一化')
+// setGlobalPreset 是规范快照：点击预设总是恢复其排布（预设不携带 ccLayout → 默认布局）。
+// 用户报告：编辑过的 widget 排布残留导致"预设覆盖不生效、无法恢复原预设"
+assert.match(store, /setGlobalPreset[\s\S]*?ccLayout: normalizeCcLayout\(theme\.ccLayout\),/, 'setGlobalPreset 必须无条件恢复规范排布')
 // ConfigOptionsPanel 按 option 序列号守卫回滚
 const configPanel = read('../src/components/settings/ConfigOptionsPanel.tsx')
 assert.match(configPanel, /latestReqRef/, 'ConfigOptionsPanel 必须维护请求序列号')
