@@ -1140,13 +1140,15 @@ async fn prepare_prompt_blocks<R: tauri::Runtime>(
     // clippy needless_borrow 误报（2026-08-02）：建议去掉 & 直接传 attachment_paths，
     // 但 prompt_blocks 参数是 &[String]，Vec 不会自动借用（编译失败）；&Vec → &[T]
     // 是 deref coercion 的惯用写法，allow 保留。
-    // G1-04：附件限制按 active agent 协议配置解析（缺省 = 现状 8/10MB，wire 不变）。
+    // G1-04 + E-11：附件限制按 runtime 归属 agent 协议配置解析（平台 ingest 绑定
+    // agent ≠ GUI active agent 时精确归属，缺省 = 现状 8/10MB，wire 不变）；
+    // 未注册 runtime（测试直构形态）回退 active agent（原 G1-04 行为）。
+    let limits = match state.agent_for_runtime(runtime) {
+        Some(agent) => crate::agent_config::AttachmentLimits::from_agent(&agent),
+        None => crate::agent_config::AttachmentLimits::from_agent(&state.get_active_agent()?),
+    };
     #[allow(clippy::needless_borrow)]
-    let prompt_blocks = AcpClient::prompt_blocks(
-        prompt_text,
-        &attachment_paths,
-        crate::agent_config::AttachmentLimits::from_agent(&state.get_active_agent()?),
-    )?;
+    let prompt_blocks = AcpClient::prompt_blocks(prompt_text, &attachment_paths, limits)?;
     flow.message_round = message_round;
     flow.inject_activated = inject_activated;
     flow.prompt_blocks = prompt_blocks;
@@ -2235,6 +2237,72 @@ gateway:
         *state.runtime_mcp.lock().unwrap() = Some(bad);
         let values = state.wire_mcp_servers().expect("缓存命中不得触发校验");
         assert_eq!(values, cached, "命中必须返回缓存 wire 形态");
+    }
+
+    /// E-11：附件限制按 runtime 归属 agent 协议配置解析（非 active agent）——
+    /// active agent 上限 1、runtime 归属 agent 上限 8 时，3 个附件必须放行
+    /// （若仍按 active agent 解析会报 too many attachments: maximum is 1）。
+    #[tokio::test]
+    async fn attachment_limits_follow_runtime_agent_not_active_agent() {
+        const FAKE_SCRIPT: &str = r#"import json,sys
+for line in sys.stdin:
+    request = json.loads(line)
+    response = {'jsonrpc':'2.0','id':request.get('id'),'result':{}}
+    method = request.get('method')
+    if method == 'session/new':
+        response['result'] = {'sessionId':'e11-session'}
+    elif method == 'session/prompt':
+        response['result'] = {'stopReason':'end_turn'}
+    print(json.dumps(response), flush=True)
+"#;
+        // active agent：max_attachments=1（若按 active agent 解析，3 附件必拒）
+        let mut active_def = crate::test_utils::fake_acp_agent("active-a", FAKE_SCRIPT);
+        active_def.acp = Some(crate::agent_config::AcpProtocolConfig {
+            max_attachments: Some(1),
+            ..Default::default()
+        });
+        // runtime 归属 agent：max_attachments=8
+        let mut runtime_def = crate::test_utils::fake_acp_agent("runtime-b", FAKE_SCRIPT);
+        runtime_def.acp = Some(crate::agent_config::AcpProtocolConfig {
+            max_attachments: Some(8),
+            ..Default::default()
+        });
+        let runtime = AgentRuntime::new_disconnected();
+        *runtime.acp.lock().await = AcpClient::connect_with_logs(&runtime_def, None)
+            .await
+            .expect("fake ACP must initialize");
+        let state = crate::test_utils::TestStateBuilder::bare()
+            .with_active_agent("active-a")
+            .with_agent(active_def)
+            .with_agent(runtime_def)
+            .with_runtime("runtime-b", runtime.clone())
+            .build();
+        let gateway = Arc::new(GatewayCore::new());
+        // 3 个真实临时附件文件（prompt_blocks 校验 metadata）
+        let dir = std::env::temp_dir().join(format!("pylon-e11-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let attachments: Vec<String> = (0..3)
+            .map(|i| {
+                let path = dir.join(format!("att-{i}.txt"));
+                std::fs::write(&path, b"x").unwrap();
+                path.to_string_lossy().into_owned()
+            })
+            .collect();
+        let ctx = PromptContext {
+            source: "gui-e11".to_string(),
+            content: "你好".to_string(),
+            persona: String::new(),
+            session_prompt: None,
+            attachments: Some(attachments),
+            mcp_servers: None,
+            cwd: None,
+        };
+        let result =
+            send_prompt_core::<tauri::test::MockRuntime>(&state, &runtime, None, &gateway, &ctx)
+                .await;
+        std::fs::remove_dir_all(&dir).ok();
+        result
+            .expect("3 附件必须按 runtime 归属 agent 的 8 上限放行（active agent 上限 1 被忽略）");
     }
 
     /// A3：Round N 迟到 chunk 在 Round N+1 推进（clear）之后才被 dispatcher 追加
