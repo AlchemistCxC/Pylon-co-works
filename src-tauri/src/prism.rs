@@ -345,11 +345,21 @@ fn validate_loopback_url(url: &Url) -> Result<(), String> {
 }
 
 fn classify_status_error(error: &str) -> PrismStatusCode {
-    if error.contains("Prism HTTP 401") || error.contains("Prism HTTP 403") {
-        PrismStatusCode::Unauthorized
-    } else if error.contains("invalid PYLON_PRISM_URL") || error.contains("PYLON_PRISM_URL") {
-        PrismStatusCode::ConfigurationError
-    } else if error.contains("Prism 请求失败") {
+    // G5-7：HTTP 状态前缀解析（不再 contains 匹配响应体文本）——401/403 →
+    // Unauthorized；其余任何 HTTP 状态 → Error（不再落入配置/不可用分类）。
+    // 配置错误（configuration_error）由 status() 的 configuration_error 字段
+    // 短路分支独家产出（构造期错误，不触网络），运行时不可达此处（request()
+    // 入口即返回）——删除 contains 分支后，响应体内容（如 500 + 文本提到
+    // PYLON_PRISM_URL）不再能伪造分类。
+    if let Some(rest) = error.strip_prefix("Prism HTTP ") {
+        let status = rest.split(':').next().unwrap_or("");
+        return if status == "401" || status == "403" {
+            PrismStatusCode::Unauthorized
+        } else {
+            PrismStatusCode::Error
+        };
+    }
+    if error.contains("Prism 请求失败") {
         PrismStatusCode::Unavailable
     } else {
         PrismStatusCode::Error
@@ -413,13 +423,26 @@ mod tests {
             classify_status_error("Prism 请求失败: connection refused"),
             PrismStatusCode::Unavailable
         );
+        // G5-7：删 ConfigurationError contains 分支——配置错误运行时不可达
+        // classify（status() 字段短路），响应体文本提到 PYLON_PRISM_URL 不再
+        // 能伪造 configuration_error 分类。
         assert_eq!(
             classify_status_error("invalid PYLON_PRISM_URL: bad URL"),
-            PrismStatusCode::ConfigurationError
+            PrismStatusCode::Error
         );
         assert_eq!(
             classify_status_error("Prism 返回非法 JSON"),
             PrismStatusCode::Error
+        );
+        // G5-7 新增用例：HTTP 500 + 响应体含 PYLON_PRISM_URL → Error（原 contains
+        // 会误判 ConfigurationError）；HTTP 403 → Unauthorized（前缀解析保持）。
+        assert_eq!(
+            classify_status_error("Prism HTTP 500: invalid PYLON_PRISM_URL in body"),
+            PrismStatusCode::Error
+        );
+        assert_eq!(
+            classify_status_error("Prism HTTP 403: forbidden"),
+            PrismStatusCode::Unauthorized
         );
         assert_eq!(PrismStatusCode::Unauthorized.as_str(), "unauthorized");
         assert_eq!(
