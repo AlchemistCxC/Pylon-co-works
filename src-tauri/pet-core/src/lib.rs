@@ -309,7 +309,8 @@ pub enum AiEvent {
     TokenUsage {
         total: u64,
     },
-    /// 预留事件：桥接层尚未接线（生产代码只发 TokenUsage），保留供测试/未来增量接口。
+    /// 预留增量接口：生产桥接层只发 TokenUsage（pet.rs），TokenDelta 供测试/
+    /// 未来增量上报使用；语义由测试钉死（growth.rs:219 增量等价累计）。
     TokenDelta {
         amount: u64,
     },
@@ -1024,7 +1025,8 @@ impl PetState {
     /// v2 情绪推导（设计书 §6）：mood 不再由事件直接赋值，而是按优先级从
     /// 状态机 + 需求 + 感知窗口综合计算——杜绝"刚喂了食还在生气"的错位。
     /// 返回 &'static str（前端契约的 mood 字符串）。
-    pub fn derive_mood(&self) -> &'static str {
+    /// G6-02：私有化——全仓无外部消费（测试一律断言 pet.mood 字符串）。
+    fn derive_mood(&self) -> &'static str {
         if self.machine == PetMachineState::Asleep {
             return "sleepy";
         }
