@@ -294,22 +294,29 @@ impl AppState {
         rpc.complete().await
     }
 
-    /// 差异适配：Hermes 的 set_config_option 不切 model（只认 edit_approval_policy），
-    /// 切 model 必须走 unstable 的 session/set_model。核验修复：按 AgentDef 配置
-    /// `set_model_api` 判定（不再硬编码 agent id "hermes"）。
-    pub(crate) fn uses_set_model_api(&self) -> bool {
-        let active_id = self
-            .active_agent
-            .lock()
-            .ok()
-            .map(|v| v.clone())
-            .unwrap_or_default();
-        self.agents
-            .lock()
-            .ok()
-            .and_then(|agents| agents.get(&active_id).cloned())
-            .map(|agent| agent.set_model_api)
-            .unwrap_or(false)
+    /// 按 runtime 实例解析归属 agent 的 AgentDef（per-agent 协议参数消费：
+    /// 附件限制 / close_via_rpc / 超时 / mcp mode 等）。
+    /// runtime 注册表按 agent id 键控；平台 ingest 的绑定 agent ≠ GUI active agent，
+    /// 故不能取 active agent 的配置。未注册（测试直构形态）/agent 已移除时返回
+    /// None——调用方按"缺省 = 现状常量值"处理（G2-03/05/06/07 参数化默认值）。
+    pub(crate) fn agent_for_runtime(&self, runtime: &Arc<AgentRuntime>) -> Option<AgentDef> {
+        let agent_id = self
+            .runtimes
+            .all_with_ids()
+            .into_iter()
+            .find(|(_, registered)| Arc::ptr_eq(registered, runtime))
+            .map(|(id, _)| id)?;
+        self.agents.lock().ok()?.get(&agent_id).cloned()
+    }
+
+    /// 按 runtime 解析协议配置（缺省实例 = 全部默认值 = 重构前全局常量行为）。
+    pub(crate) fn protocol_for_runtime(
+        &self,
+        runtime: &Arc<AgentRuntime>,
+    ) -> crate::agent_config::AcpProtocolConfig {
+        self.agent_for_runtime(runtime)
+            .map(|agent| agent.protocol().clone())
+            .unwrap_or_default()
     }
 
     pub(crate) fn current_generation(&self, runtime: &AgentRuntime) -> u64 {
@@ -698,13 +705,16 @@ pub(crate) async fn check_session_expiry(state: &AppState) {
                 // 映射已变更（新会话已接管 source）——不 close、不通知
                 continue;
             }
-            // close ACP session（失败不阻断本地清理；旧 peri_id 独立于映射）
-            if let Ok(close_params) = acp::session_close_params(&peri_id) {
-                if let Err(error) = state
-                    .acp_rpc(&runtime, acp::METHOD_SESSION_CLOSE, close_params)
-                    .await
-                {
-                    tracing::warn!("close expired session {peri_id}: {error}");
+            // close ACP session（失败不阻断本地清理；旧 peri_id 独立于映射）。
+            // G2-03：D3 消费——close_via_rpc()=false 时跳过 RPC（本地清理语义不变）。
+            if state.protocol_for_runtime(&runtime).close_via_rpc() {
+                if let Ok(close_params) = acp::session_close_params(&peri_id) {
+                    if let Err(error) = state
+                        .acp_rpc(&runtime, acp::METHOD_SESSION_CLOSE, close_params)
+                        .await
+                    {
+                        tracing::warn!("close expired session {peri_id}: {error}");
+                    }
                 }
             }
             // 审查修复：应答该 session 挂起的权限请求为 Cancelled（协议要求）
@@ -847,13 +857,16 @@ pub(crate) async fn new_session(
     // R32：槽位替换统一走辅助（满额检查在 RPC 前已完成，此处为替换插入）。
     let replaced = replace_session_slot(&runtime, &source, session, false)?;
     if let Some(old) = replaced {
-        if let Ok(close_params) = acp::session_close_params(&old.peri_id) {
-            if let Err(error) = state
-                .inner()
-                .acp_rpc(&runtime, acp::METHOD_SESSION_CLOSE, close_params)
-                .await
-            {
-                tracing::warn!("close replaced session: {}", error);
+        // G2-03：D3 消费——close_via_rpc()=false 时跳过 RPC（本地清理语义不变）
+        if state.protocol_for_runtime(&runtime).close_via_rpc() {
+            if let Ok(close_params) = acp::session_close_params(&old.peri_id) {
+                if let Err(error) = state
+                    .inner()
+                    .acp_rpc(&runtime, acp::METHOD_SESSION_CLOSE, close_params)
+                    .await
+                {
+                    tracing::warn!("close replaced session: {}", error);
+                }
             }
         }
     }
@@ -1507,15 +1520,18 @@ pub(crate) async fn send_prompt_core<R: tauri::Runtime>(
                             acp::CANCEL_SETTLE_TIMEOUT_SECS
                         );
                         if let Ok(close_params) = acp::session_close_params(&peri_id) {
-                            if let Err(close_error) = state
-                                .acp_rpc(runtime, acp::METHOD_SESSION_CLOSE, close_params)
-                                .await
-                            {
-                                tracing::warn!(
-                                    "close unsettled prompt session {}: {}",
-                                    peri_id,
-                                    close_error
-                                );
+                            // G2-03：D3 消费——close_via_rpc()=false 时跳过 RPC
+                            if state.protocol_for_runtime(runtime).close_via_rpc() {
+                                if let Err(close_error) = state
+                                    .acp_rpc(runtime, acp::METHOD_SESSION_CLOSE, close_params)
+                                    .await
+                                {
+                                    tracing::warn!(
+                                        "close unsettled prompt session {}: {}",
+                                        peri_id,
+                                        close_error
+                                    );
+                                }
                             }
                         }
                     }
@@ -1584,27 +1600,37 @@ pub(crate) async fn set_config_option(
     let runtime = state.inner().require_runtime()?;
     let generation = state.current_generation(&runtime);
     let peri_id = state.get_peri_id(&runtime, &source)?;
-    // 差异适配：Hermes 切 model 必须走 session/set_model（set_config_option 只认
-    // edit_approval_policy，其余存 config_options 不生效）；Peri 走平铺 set_config_option。
-    let use_set_model = key == "model" && state.inner().uses_set_model_api();
-    let response = if use_set_model {
-        state
-            .inner()
-            .acp_rpc(
-                &runtime,
-                acp::METHOD_SESSION_SET_MODEL,
-                acp::session_set_model_params(&peri_id, &value)?,
-            )
-            .await?
-    } else {
-        state
-            .inner()
-            .acp_rpc(
-                &runtime,
-                acp::METHOD_SESSION_SET_CONFIG_OPTION,
-                acp::session_set_config_option_params(&peri_id, &key, &value)?,
-            )
-            .await?
+    // G2-03：D2 路由收敛——set_model_api 枚举三路（ConfigOption 默认 / SetModel /
+    // Disabled）；route() 收编了 key=="model" 特判（G1 交付，agent_config.rs）。
+    let target = state
+        .get_active_agent()?
+        .protocol()
+        .set_model_api()
+        .route(&key);
+    let response = match target {
+        crate::agent_config::ModelSwitchTarget::Disabled => {
+            return Err(PylonError::Protocol("model switching disabled".to_string()));
+        }
+        crate::agent_config::ModelSwitchTarget::SetModel => {
+            state
+                .inner()
+                .acp_rpc(
+                    &runtime,
+                    acp::METHOD_SESSION_SET_MODEL,
+                    acp::session_set_model_params(&peri_id, &value)?,
+                )
+                .await?
+        }
+        crate::agent_config::ModelSwitchTarget::ConfigOption => {
+            state
+                .inner()
+                .acp_rpc(
+                    &runtime,
+                    acp::METHOD_SESSION_SET_CONFIG_OPTION,
+                    acp::session_set_config_option_params(&peri_id, &key, &value)?,
+                )
+                .await?
+        }
     };
     state.ensure_generation(&runtime, generation)?;
     state.with_session_if_matches(&runtime, &source, &peri_id, generation, |session| {
@@ -1638,21 +1664,26 @@ pub(crate) async fn close_session(
         let acp = runtime.acp.lock().await;
         let _ = acp.cancel_session(&peri_id).await;
     }
-    // Hermes 未实现 session/close（-32601）——降级为本地清理（映射已删，见下）
-    if let Err(error) = state
-        .inner()
-        .acp_rpc(
-            &runtime,
-            acp::METHOD_SESSION_CLOSE,
-            acp::session_close_params(&peri_id)?,
-        )
-        .await
-    {
-        let message = error.to_string();
-        if message.contains("-32601") || message.contains("Method not found") {
-            tracing::warn!("agent does not support session/close ({message}); local cleanup only");
-        } else {
-            return Err(error.into());
+    // G2-03：D3 类型化——close_via_rpc()=false（声明式配置）时跳过 RPC 直接本地
+    // 清理；-32601 / "Method not found" 经 is_method_not_found() 类型化降级（不再
+    // 裸字符串 contains，G1-06 交付）。
+    if state.protocol_for_runtime(&runtime).close_via_rpc() {
+        if let Err(error) = state
+            .inner()
+            .acp_rpc(
+                &runtime,
+                acp::METHOD_SESSION_CLOSE,
+                acp::session_close_params(&peri_id)?,
+            )
+            .await
+        {
+            if error.is_method_not_found() {
+                tracing::warn!(
+                    "agent does not support session/close ({error}); local cleanup only"
+                );
+            } else {
+                return Err(error.into());
+            }
         }
     }
     // B9：close 时应答该 session 全部挂起的权限请求为 Cancelled
