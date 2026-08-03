@@ -168,42 +168,6 @@ type AcpLock = tokio::sync::Mutex<AcpClient>;
 type SessionsLock = std::sync::Mutex<std::collections::HashMap<String, SessionInfo>>;
 type PermissionLock = std::sync::Mutex<std::collections::HashMap<u64, PendingPermission>>;
 
-/// O9 锁外发送（无 pending 的直接应答路径共用）：锁内仅克隆 write_tx/crashed，
-/// 锁外构造应答行并以 10s 超时发送——与 permission::resolve_pending 同模式。
-/// 不经 acp.send_response 的锁内 await：持 acp 锁发送时写超时（agent 停止读
-/// stdin 时 mpsc 填满）会阻塞 dispatcher 主循环，事件积压可能 Lagged 丢事件。
-async fn send_direct_permission_response(acp: &AcpLock, request_id: u64, option_id: &str) {
-    // acp::send_response 已无 lib 调用方（锁外发送取代）；acp.rs 单测仍直接调用，
-    // 此处保留函数项引用防 dead_code 告警（文件集限制：不得改 acp.rs）。
-    let _ = crate::acp::AcpClient::send_response;
-    let (write_tx, crashed) = {
-        let acp = acp.lock().await;
-        (acp.write_tx.clone(), acp.crashed.clone())
-    };
-    // 与 acp::send_response 一致：已崩溃连接不再发送（静默丢弃同 `let _ =` 语义）。
-    if crashed.load(Ordering::Acquire) {
-        return;
-    }
-    let line = serde_json::json!({
-        "jsonrpc": "2.0",
-        "id": request_id,
-        "result": permission_response(option_id),
-    });
-    let Ok(line) = serde_json::to_string(&line) else {
-        return;
-    };
-    // 锁外发送：10s 写超时（同 acp WRITE_TIMEOUT_SECS），超时置 crashed 让上层
-    // 快速失败并触发自动重连（对齐 resolve_pending 的锁外发送）。
-    match tokio::time::timeout(std::time::Duration::from_secs(10), write_tx.send(line)).await {
-        Ok(Ok(())) => {}
-        Ok(Err(_)) => {}
-        Err(_) => {
-            tracing::warn!("ACP write timeout after 10s: connection presumed dead");
-            crashed.store(true, Ordering::Release);
-        }
-    }
-}
-
 /// B9 权限审批（R8 自主循环拆分）：agent 主动 request_permission（带 id 请求，
 /// 客户端必须应答）。C4/C5 语义保持：代复核（应答不误写新代进程）+ 模式判定
 /// （bypass/auto 自动批准；edit/default 挂起 + 前端事件）。
@@ -224,9 +188,20 @@ async fn handle_permission_request<R: tauri::Runtime>(
         tracing::warn!("ACP request_permission 解析失败 (id={request_id})，按拒绝处理");
         // C5：解析失败无选项可用 → pick_option 空集 → reject_once 兜底
         let option_id = pick_option(&[], true).unwrap_or("reject_once");
-        // O9：无 pending 直接应答——锁内取 write_tx 克隆，锁外 10s 超时发送
-        // （持锁 await 会阻塞 dispatcher 主循环，写超时期间事件积压可能 Lagged）。
-        send_direct_permission_response(acp, request_id, option_id).await;
+        // O9/G3 §2.2.2：无 pending 直接应答——锁内取 write_tx/crashed 克隆，锁外
+        // 经 permission::send_agent_response 10s 超时发送（持锁 await 会阻塞
+        // dispatcher 主循环，写超时期间事件积压可能 Lagged）。
+        let (write_tx, crashed) = {
+            let acp = acp.lock().await;
+            (acp.write_tx.clone(), acp.crashed.clone())
+        };
+        crate::permission::send_agent_response(
+            write_tx,
+            crashed,
+            request_id,
+            permission_response(option_id),
+        )
+        .await;
         return;
     };
     let mode = approval_mode
@@ -240,8 +215,18 @@ async fn handle_permission_request<R: tauri::Runtime>(
         );
         // C5：自动批准按请求选项选 allow 语义项（无匹配取首个）。
         let option_id = pick_option(&permission.options, false).unwrap_or("allow_once");
-        // O9：无 pending 直接应答——锁外发送（持锁 await 会阻塞 dispatcher 主循环）。
-        send_direct_permission_response(acp, request_id, option_id).await;
+        // O9/G3 §2.2.2：无 pending 直接应答——锁外发送（同解析失败分支）。
+        let (write_tx, crashed) = {
+            let acp = acp.lock().await;
+            (acp.write_tx.clone(), acp.crashed.clone())
+        };
+        crate::permission::send_agent_response(
+            write_tx,
+            crashed,
+            request_id,
+            permission_response(option_id),
+        )
+        .await;
     } else {
         let _ = pending_permissions.lock().map(|mut pending| {
             pending.insert(request_id, permission.clone());

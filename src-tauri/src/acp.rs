@@ -1190,6 +1190,10 @@ impl AcpClient {
 
     /// 应答 agent 发来的 JSON-RPC 请求（B9：session/request_permission）。
     /// agent 侧 send_request 等待同 id 响应，不应答会挂起直到超时。
+    /// G3 §4.2（8a）：生产已无调用方——dispatcher 直接应答与 permission::resolve_pending
+    /// 均收敛为锁外 permission::send_agent_response（H-4/H-5）；唯一调用方是
+    /// 本文件单测 send_response_writes_result_with_matching_id，标 cfg(test)。
+    #[cfg(test)]
     pub async fn send_response(&self, id: u64, result: serde_json::Value) -> Result<(), AcpError> {
         if self.is_crashed() {
             return Err(AcpError::ConnectionClosed);
