@@ -1,3 +1,29 @@
+# Pylon agent 配置（战役 2 后：协议差异全部配置化，覆盖制——无声明=默认值，有声明=覆盖默认）
+#
+# acp: 段（AcpProtocolConfig，全字段可选）：
+#   set_model_api: config_option | set_model | none | true | false
+#       # 切 model 途径（D2）。config_option=Peri 官方路径（默认）；set_model=Hermes
+#       # unstable session/set_model；none=禁用切 model；true/false 为 legacy 布尔
+#       # 兼容形态（true=set_model，false=config_option）。顶层 set_model_api: true
+#       # 为 legacy 写法，等价于 acp.set_model_api: set_model。
+#   session_close: true | false
+#       # D3。true=总是尝试 session/close RPC + -32601 防御降级（默认）；
+#       # false=跳过 RPC 直接本地清理（旧版 Hermes 无此方法时用）。
+#   mcp_servers: always | omit_if_empty
+#       # D4。always=恒发 mcpServers 字段（默认，现状 wire）；omit_if_empty=空配置
+#       # 时省略字段（协议 v2 语义——仅当 agent 容忍缺字段时使用，Hermes Pydantic
+#       # 必填会拒绝）。
+#   initialize_caps: {...}     # D1 clientCapabilities 覆盖（默认：tokenStats +
+#                               # _meta.peri.*，Hermes 忽略无害）
+#   protocol_version: 1        # H3 initialize 协议版本（默认 1）
+#   client_info: {...}         # H4 initialize clientInfo（默认 {"name":"Pylon","version":"0.1.0"}）
+#   prompt_timeout_secs: 300   # H5 prompt 超时（默认 300）
+#   cancel_settle_timeout_secs: 30  # H6 cancel 后等待 settle 超时（默认 30）
+#   rpc_timeout_secs: 30       # H8/H9 通用 RPC 超时（默认 30）
+#   max_attachments: 8         # H10 附件数上限（默认 8）
+#   max_attachment_bytes: 10485760  # H11 单附件上限（默认 10MB）
+#   replay_max_events: 10000   # H12 session/load 回放收集上限（默认 10000）
+
 agents:
   peri:
     name: Peri
@@ -7,6 +33,8 @@ agents:
     model: deepseek-v4-flash
     cwd: G:\Project\prism-desktop
     default: true
+    # acp: 段缺省 = 官方 schema 行为（config_option 切 model / close 总是尝试 /
+    # mcpServers 恒发 / protocolVersion 1 / 超时 300-30-30-10s）——无需声明。
   hermes:
     name: Hermes
     transport: subprocess
@@ -14,3 +42,7 @@ agents:
     args: ["acp"]
     cwd: G:\Project\prism-desktop
     set_model_api: true
+    # legacy 顶层布尔（= acp.set_model_api: set_model）。显式化等价写法：
+    # acp:
+    #   set_model_api: set_model        # Hermes 切 model 走 unstable session/set_model
+    #   session_close: false            # 旧版 Hermes 无 session/close——跳过 RPC 本地清理
