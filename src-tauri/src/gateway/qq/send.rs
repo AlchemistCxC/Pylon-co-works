@@ -7,7 +7,7 @@
 
 use reqwest::Client;
 
-use super::types::MSG_TYPE_MARKDOWN;
+use super::types::QqMsgType;
 use super::QqChatType;
 
 use std::sync::atomic::{AtomicU32, Ordering};
@@ -22,7 +22,8 @@ fn msg_seq() -> u32 {
 /// 发送文本消息到 C2C 或群聊。
 ///
 /// chat_type: C2C → /v2/users/{chat_id}/messages；Group → /v2/groups/{chat_id}/messages。
-/// reply_to 存在时附带 msg_id（回复锚点）。msg_type 支持 MSG_TYPE_TEXT/MSG_TYPE_MARKDOWN。
+/// reply_to 存在时附带 msg_id（回复锚点）。msg_type 支持 Text/Markdown（§3-8：
+/// 裸数字类型化为 QqMsgType，wire 数值不变）。
 /// R14：chat_type 为枚举——非法值在类型层不可表达（FromStr 拒绝），
 /// 拼错不再可能静默走群发路径。
 // clippy 2026-08-02：8 参均为独立发送参数（client/base_url/token/chat_id/chat_type/content/reply_to/msg_type），
@@ -36,7 +37,7 @@ pub async fn send_message(
     chat_type: &QqChatType,
     content: &str,
     reply_to: Option<&str>,
-    msg_type: u32,
+    msg_type: QqMsgType,
 ) -> Result<String, String> {
     // 修复（P3）+ R14：枚举匹配，非法 chat_type 由类型系统拒绝
     let path = match chat_type {
@@ -46,17 +47,17 @@ pub async fn send_message(
 
     let seq = msg_seq();
 
-    let mut body = if msg_type == MSG_TYPE_MARKDOWN {
+    let mut body = if msg_type == QqMsgType::Markdown {
         serde_json::json!({
             "content": content,
             "markdown": { "content": content },
-            "msg_type": msg_type,
+            "msg_type": msg_type.as_u32(),
             "msg_seq": seq,
         })
     } else {
         serde_json::json!({
             "content": content,
-            "msg_type": msg_type,
+            "msg_type": msg_type.as_u32(),
             "msg_seq": seq,
         })
     };
@@ -189,7 +190,7 @@ mod tests {
             &QqChatType::C2C,
             "你好",
             Some("parent-msg"),
-            0,
+            QqMsgType::Text,
         )
         .await
         .expect("send message must succeed");
@@ -227,7 +228,7 @@ mod tests {
             &QqChatType::Group,
             "**bold**",
             None,
-            2,
+            QqMsgType::Markdown,
         )
         .await
         .expect("send message must succeed");
@@ -262,7 +263,7 @@ mod tests {
             &QqChatType::C2C,
             "x",
             None,
-            0,
+            QqMsgType::Text,
         )
         .await
         .expect_err("code!=0 必须失败");
@@ -285,7 +286,7 @@ mod tests {
             &QqChatType::C2C,
             "x",
             None,
-            0,
+            QqMsgType::Text,
         )
         .await
         .expect_err("400 must fail");

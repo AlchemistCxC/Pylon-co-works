@@ -17,10 +17,41 @@ pub const GATEWAY_URL_PATH: &str = "/gateway";
 /// (1<<25)=GROUP_AT_MESSAGES | (1<<30)=PUBLIC_GUILD_MESSAGES | (1<<12)=DIRECT_MESSAGE | (1<<26)=INTERACTION
 pub const DEFAULT_INTENTS: u32 = (1 << 25) | (1 << 30) | (1 << 12) | (1 << 26);
 
-/// 消息类型: 纯文本
+/// 消息类型: 纯文本（wire 数值）。
 pub const MSG_TYPE_TEXT: u32 = 0;
-/// 消息类型: Markdown
+/// 消息类型: Markdown（wire 数值）。
 pub const MSG_TYPE_MARKDOWN: u32 = 2;
+
+/// QQ 消息类型（§3-8：send_message 的 msg_type 裸数字类型化，沿 R14 路线）。
+/// wire 数值与 [`MSG_TYPE_TEXT`]/[`MSG_TYPE_MARKDOWN`] 保持一致。
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum QqMsgType {
+    /// 纯文本。
+    Text,
+    /// Markdown。
+    Markdown,
+}
+
+impl QqMsgType {
+    /// wire 数值（"msg_type" 字段）。
+    pub fn as_u32(self) -> u32 {
+        match self {
+            QqMsgType::Text => MSG_TYPE_TEXT,
+            QqMsgType::Markdown => MSG_TYPE_MARKDOWN,
+        }
+    }
+
+    /// wire 数值 → 枚举；未知值返回 None（类型层拒绝非法 msg_type）。
+    /// 暂无生产调用方（send 侧直接构造枚举），保留为 wire 解析入口。
+    #[allow(dead_code)]
+    pub fn from_u32(value: u32) -> Option<Self> {
+        match value {
+            MSG_TYPE_TEXT => Some(QqMsgType::Text),
+            MSG_TYPE_MARKDOWN => Some(QqMsgType::Markdown),
+            _ => None,
+        }
+    }
+}
 
 /// OAuth2 换取 access token 的请求体（wire 用 appId/clientSecret camelCase）。
 #[derive(Debug, Serialize)]

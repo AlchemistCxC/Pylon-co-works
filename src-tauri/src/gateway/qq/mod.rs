@@ -22,6 +22,9 @@ use crate::gateway::{build_resolved, route, GatewayCore, PlatformAdapter, Resolv
 
 use self::auth::QqAuth;
 
+/// QQ 平台键（gateway source 前缀与适配器 platform_key 的统一字面量，§3-8）。
+const PLATFORM_KEY: &str = "qq";
+
 /// QQ 平台单条文本上限（字符，Hermes MAX_MESSAGE_LENGTH 实证值）。
 const QQ_MAX_MESSAGE_LEN: usize = 4000;
 /// 每 chat 发送队列容量（agent 输出洪水时不阻塞 deliver，满则丢弃该段并告警）。
@@ -212,7 +215,7 @@ pub(crate) fn ingest_allowed(
 pub fn parse_source(source: &str) -> Result<(QqChatType, &str), String> {
     let mut parts = source.splitn(3, ':');
     match (parts.next(), parts.next(), parts.next()) {
-        (Some("qq"), Some(kind @ ("group" | "user")), Some(id)) if !id.is_empty() => Ok((
+        (Some(PLATFORM_KEY), Some(kind @ ("group" | "user")), Some(id)) if !id.is_empty() => Ok((
             if kind == "group" {
                 QqChatType::Group
             } else {
@@ -354,7 +357,7 @@ impl QqAdapter {
 
 impl PlatformAdapter for QqAdapter {
     fn platform_key(&self) -> &str {
-        "qq"
+        PLATFORM_KEY
     }
 
     fn max_message_len(&self) -> usize {
@@ -682,7 +685,7 @@ impl QqAdapter {
             &msg.chat_type,
             &msg.text,
             msg.reply_to.as_deref(),
-            types::MSG_TYPE_TEXT,
+            types::QqMsgType::Text,
         )
         .await
         .map(|_| ())
