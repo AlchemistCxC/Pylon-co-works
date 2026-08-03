@@ -17,6 +17,9 @@ export default function SessionSettings({ sessionId, open, onClose, onDeleted }:
   const activeAgent = useIdentityStore(state => state.activeAgent)
   // 只订阅目标会话对象：其他会话的更新（消息/改名/活跃时间）不再重渲染本对话框
   const session = useIdentityStore(state => sessionId ? state.sessions.find(item => item.id === sessionId) : undefined)
+  // createSessionSettingsValues 只读 name/platform/workdir/sessionPrompt，均已入 deps；
+  // session 对象整体入 deps 会让任何会话更新（消息/活跃时间）都重建表单
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   const initialValues = useMemo(() => createSessionSettingsValues(session), [
     sessionId,
     session?.name,

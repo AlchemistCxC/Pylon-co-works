@@ -61,6 +61,8 @@ export default function GenerationFooter({ running, frames, tokenCount, startTim
     ? normalizeSpinnerVerbs(spinnerCustomVerbs, IDIOMS)
     : verbPreset.verbs
   const safeVerbs = verbs.length > 0 ? verbs : IDIOMS
+  // safeVerbs 由 spinnerVerbSet/spinnerCustomVerbs 推导，已在 deps 覆盖（传递依赖）
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   const randomVerb = useMemo(() => safeVerbs[Math.floor(Math.random() * safeVerbs.length)] || IDIOMS[0], [startTime, spinnerVerbSet, spinnerCustomVerbs])
   const frameAsset = getSpinnerAssetPreset(spinnerFramePreset)
   const marker = summary

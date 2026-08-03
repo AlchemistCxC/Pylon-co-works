@@ -133,6 +133,8 @@ export default forwardRef<{ send: () => void; attachFile: () => void; cancel: ()
     }
     window.addEventListener('keydown', onGlobalKey)
     return () => window.removeEventListener('keydown', onGlobalKey)
+    // cancel 是稳定 useCallback（引用型），事件监听靠 sessionId/generating 重绑
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [sessionId, sessionSource, generating])
 
   const execCommand = async (cmd: string, rest: string) => {
@@ -299,11 +301,13 @@ export default forwardRef<{ send: () => void; attachFile: () => void; cancel: ()
       const path = selected as string
       const name = path.replace(/^.*[\\\\/]/, '')
       setAttached(prev => [...prev, { path, name }])
-    } catch (e) { /* cancelled */ }
+    } catch { /* cancelled */ }
   }
 
   // deps 必须覆盖 send 引用的 generating 与 sendText 引用的 persona，否则外部 ref.send()
-  // 在生成状态翻转瞬间使用过期闭包（enqueue 与直接发送二选一错位）
+  // 在生成状态翻转瞬间使用过期闭包（enqueue 与直接发送二选一错位）。
+  // send/cancel 是稳定 useCallback，无需入 deps
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   useImperativeHandle(ref, () => ({ send, attachFile, cancel }), [value, attached, sessionId, sessionSource, isCmd, filtered, generating, persona])
 
   const onKey = (e: KeyboardEvent) => {

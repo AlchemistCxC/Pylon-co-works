@@ -9,9 +9,8 @@
     "preview": "vite preview",
     "tauri": "tauri",
     "test": "vitest run",
-    "test:frontend": "vitest run",
     "test:legacy": "node --experimental-strip-types scripts/run-frontend-tests.mts",
-    "lint": "eslint src/ --ext .ts,.tsx"
+    "lint": "eslint src/"
   },
   "dependencies": {
     "@dnd-kit/core": "^6.3.1",
@@ -25,21 +24,17 @@
     "@tauri-apps/api": "^2",
     "@tauri-apps/plugin-dialog": "^2",
     "@tauri-apps/plugin-fs": "^2",
-    "@tauri-apps/plugin-shell": "^2",
     "@wooorm/starry-night": "^3.10.0",
     "anser": "^2.3.5",
     "clsx": "^2.1.1",
     "cmdk": "^1.1.1",
-    "copy-to-clipboard": "^4.0.2",
     "hast-util-to-html": "^9.0.5",
     "immer": "^11.1.15",
     "lucide-react": "^1.26.0",
     "motion": "^12.42.2",
     "react": "^19",
     "react-dom": "^19",
-    "react-dropzone": "^19.1.1",
     "react-markdown": "^10.1.0",
-    "react-resizable-panels": "^4.12.2",
     "remark-gfm": "^4.0.1",
     "zustand": "^5"
   },

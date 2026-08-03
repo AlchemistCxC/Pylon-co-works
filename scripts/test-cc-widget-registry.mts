@@ -31,7 +31,7 @@ assert.deepEqual(normalized.placements.tokens, { slot: 'status-secondary', order
 assert.deepEqual(normalized.placements['context-ring'], DEFAULT_CC_LAYOUT.placements['context-ring'])
 assert.match(controlCenter, /from '\.\/cc\/widgetRegistry'/, 'ControlCenter 必须消费外置 registry')
 assert.match(controlCenter, /const isNatural = def\.naturalSize/, '自然尺寸必须由 registry metadata 决定')
-assert.match(controlCenter, /body = def\.render\(\{ sessionId \}\)/, 'renderer 必须使用统一 render props')
+assert.match(controlCenter, /body = def\.render\?\.\(\{ sessionId \}\)/, 'renderer 必须使用统一 render props（render 可选：input/send/attach 由特判渲染）')
 assert.match(controlCenter, /WIDGET_REGISTRY\s*\.filter/, 'slot 渲染必须来自 registry')
 assert.match(controlCenter, /WIDGET_REGISTRY\.map/, 'toolbar 必须来自 registry')
 

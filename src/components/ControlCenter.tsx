@@ -70,7 +70,7 @@ export default function ControlCenter({ sessionId }: Props) {
         body = <AttachWidget onClick={() => inputRef.current?.attachFile()} />
         break
       default:
-        body = def.render({ sessionId })
+        body = def.render?.({ sessionId })
     }
 
     const placement = layout.placements[id as keyof typeof layout.placements]

@@ -18,7 +18,7 @@ interface SheetLauncherProps {
 }
 
 const TOOL_OPTIONS: Array<{ kind: SheetKind; title: string; description: string; enabled: boolean }> = [
-  { kind: 'prism', title: 'Prism', description: 'Prism 管理工作台', enabled: true },
+  { kind: 'prism', title: 'Prism', description: 'Prism 管理 API 尚未接入', enabled: false },
   { kind: 'runtime', title: 'Runtime', description: '后端能力尚未接入', enabled: false },
   { kind: 'changes', title: 'Changes', description: 'Git 只读能力尚未接入', enabled: false },
   { kind: 'git-history', title: 'Git History', description: 'Git 只读能力尚未接入', enabled: false },

@@ -1,6 +1,6 @@
 const FENCED_CODE_PATTERN = /(^|\n)\s{0,3}(```|~~~)/
 const INLINE_CODE_PATTERN = /`[^`\n]+`/
-const LINK_PATTERN = /!?(?:\[[^\]\n]+\]\([^\)\n]+\)|<https?:\/\/[^>\n]+>)/
+const LINK_PATTERN = /!?(?:\[[^\]\n]+\]\([^)\n]+\)|<https?:\/\/[^>\n]+>)/
 const HEADING_PATTERN = /(^|\n)\s{0,3}#{1,6}\s+/
 const BLOCKQUOTE_PATTERN = /(^|\n)\s{0,3}>\s?/
 const UNORDERED_LIST_PATTERN = /(^|\n)\s{0,3}[-*+]\s+/

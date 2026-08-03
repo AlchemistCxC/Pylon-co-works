@@ -63,9 +63,7 @@ interface IdentityStoreState {
   addSession: (name: string) => void
   removeSession: (id: string) => void
   updateSession: (id: string, partial: Partial<Session>) => void
-  replaceSessions: (sessions: Session[]) => void
   setSessionPeriId: (id: string, periId: string) => void
-  restoreSessions: () => Session[]
   hydrateSessions: () => void
   getUser: (source: string) => UserMapping | undefined
   setAgents: (a: AgentEntry[]) => void
@@ -152,23 +150,11 @@ export const useIdentityStore = create<IdentityStoreState>()((set, get) => ({
     persistSessions(localStorage, sessions)
     return { sessions }
   }),
-  replaceSessions: (sessions: Session[]) => set(() => {
-    persistSessions(localStorage, sessions)
-    return { sessions }
-  }),
   setSessionPeriId: (id, periId) => set(s => {
     const sessions = s.sessions.map(ss => ss.id === id ? { ...ss, periId } : ss)
     persistSessions(localStorage, sessions)
     return { sessions }
   }),
-  restoreSessions: () => {
-    try {
-      return loadSessions(localStorage, get().profiles)
-    } catch (error) {
-      console.error('Session 持久化恢复失败', error)
-    }
-    return []
-  },
   hydrateSessions: () => {
     try {
       set({ sessions: loadSessions(localStorage, get().profiles), sessionsHydrated: true })

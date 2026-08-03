@@ -116,7 +116,9 @@ const ChatView = React.memo(function ChatView({ sessionId }: Props) {
     }
     window.addEventListener('keydown', onSearchShortcut)
     return () => window.removeEventListener('keydown', onSearchShortcut)
-  }, [])
+    // setSearchOpen 按会话作用域（useSessionUiState）：切会话必须重绑快捷键，
+    // 否则捕获首个会话的 setter，Ctrl+F 会操作旧会话的搜索状态
+  }, [sessionId, setSearchOpen])
 
   useEffect(() => {
     if (IS_TAURI) return
@@ -148,12 +150,13 @@ const ChatView = React.memo(function ChatView({ sessionId }: Props) {
       return
     }
     setSearchIndex(index => Math.min(index, searchMatches.length - 1))
-  }, [searchMatches.length])
+    // setSearchIndex 按会话作用域：跨会话需重绑（同快捷键 effect 的理由）
+  }, [searchMatches.length, setSearchIndex])
 
   const moveSearch = useCallback((direction: 1 | -1) => {
     if (searchMatches.length === 0) return
     setSearchIndex(index => (index + direction + searchMatches.length) % searchMatches.length)
-  }, [searchMatches.length])
+  }, [searchMatches.length, setSearchIndex])
 
   useEffect(() => {
     const message = searchMatches[searchIndex]
@@ -195,6 +198,8 @@ const ChatView = React.memo(function ChatView({ sessionId }: Props) {
       controllerHandleRef.current?.dispose()
       controllerHandleRef.current = null
     }
+    // controllerRefs 是稳定 ref 对象（内部 .current 由接线层填充），无需加入 deps
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
 
   useEffect(() => {
@@ -697,10 +702,11 @@ function ToolCard({ model }: { model: ReturnType<typeof buildToolPresentationMod
   }
   const isBash = model.name === 'Bash'
   const suffix = model.state === 'completed' && model.outputLines > 0 ? ` — ${model.outputLabel}` : ''
+  // isBash = model.name === 'Bash'，name 已在 deps（传递依赖）
   const outputHtml = useMemo(() => {
     if (!model.outputText || !isBash) return ''
     return sanitizeHtml(new Anser().ansiToHtml(Anser.escapeForHtml(model.outputText)))
-  }, [model.outputText, model.name])
+  }, [model.outputText, model.name]) // eslint-disable-line react-hooks/exhaustive-deps
   return (
     <div className="term-tool" data-status={status} data-tool-state={model.state}
       data-output-collapsible={model.canCollapseOutput ? 'true' : 'false'} style={connCss}>

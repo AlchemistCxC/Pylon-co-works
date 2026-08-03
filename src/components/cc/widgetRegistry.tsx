@@ -2,7 +2,6 @@ import type { ReactNode } from 'react'
 import { useStore } from '../../store'
 import { useIdentityStore } from '../../identityStore'
 import { useRuntimeStore } from '../../runtimeStore'
-import InputBar from '../chat/InputBar'
 import ModelWidget from '../chat/ModelWidget'
 import ModeWidget from '../chat/ModeWidget'
 import { formatCacheReadTokens, formatTokenCount } from '../../tokenFormat'
@@ -22,7 +21,7 @@ export interface CcWidgetDef {
   naturalSize: boolean
   minWidth?: number
   minHeight?: number
-  render: (props: CcWidgetRenderProps) => ReactNode
+  render?: (props: CcWidgetRenderProps) => ReactNode
   renderPreview?: (props: CcWidgetRenderProps) => ReactNode
 }
 
@@ -106,12 +105,13 @@ function ModeWidgetRenderer({ sessionId }: CcWidgetRenderProps) {
 const placement = (slot: CcSlot, order: number): CcWidgetPlacement => ({ slot, order, offsetX: 0, offsetY: 0 })
 
 export const CC_WIDGET_REGISTRY: readonly CcWidgetDef[] = [
-  { id: 'input', label: '输入栏', category: 'input', defaultPlacement: placement('input', 0), naturalSize: false, render: ({ sessionId }) => <InputBar sessionId={sessionId} /> },
+  // input/send/attach 由 ControlCenter 特判渲染（InputBar 需 ref/split 等参数），注册表不持 render
+  { id: 'input', label: '输入栏', category: 'input', defaultPlacement: placement('input', 0), naturalSize: false },
   { id: 'ekg', label: '用量条', category: 'context', defaultPlacement: placement('status-primary', 0), naturalSize: true, render: props => <EkgWidget {...props} /> },
   { id: 'pct', label: '百分比', category: 'context', defaultPlacement: placement('status-primary', 1), naturalSize: true, render: props => <PctWidget {...props} /> },
   { id: 'tokens', label: 'Token数', category: 'context', defaultPlacement: placement('status-primary', 2), naturalSize: true, render: props => <TokensWidget {...props} /> },
   { id: 'model', label: '模型', category: 'runtime', defaultPlacement: placement('status-secondary', 0), naturalSize: true, render: props => <ModelWidgetRenderer {...props} /> },
   { id: 'mode', label: '权限模式', category: 'runtime', defaultPlacement: placement('status-secondary', 1), naturalSize: true, render: props => <ModeWidgetRenderer {...props} /> },
-  { id: 'send', label: '发送按钮', category: 'action', defaultPlacement: placement('actions', 0), naturalSize: true, render: () => null },
-  { id: 'attach', label: '附件按钮', category: 'action', defaultPlacement: placement('actions', 1), naturalSize: true, render: () => null },
+  { id: 'send', label: '发送按钮', category: 'action', defaultPlacement: placement('actions', 0), naturalSize: true },
+  { id: 'attach', label: '附件按钮', category: 'action', defaultPlacement: placement('actions', 1), naturalSize: true },
 ]
