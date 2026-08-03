@@ -87,6 +87,9 @@ pub struct InjectConfig {
     /// 完成持久化模式："skip"（默认，不持久化）| "prism"（POST /persist）。
     #[serde(default = "default_persist_mode")]
     pub persist: String,
+    /// 段内未知字段（配置拼错可见，parse_config 告警；§3-6 补全）。
+    #[serde(flatten)]
+    extra: HashMap<String, serde_json::Value>,
 }
 
 impl Default for InjectConfig {
@@ -96,6 +99,7 @@ impl Default for InjectConfig {
             scenario: None,
             sources: Vec::new(),
             persist: "skip".to_string(),
+            extra: HashMap::new(),
         }
     }
 }
@@ -146,6 +150,10 @@ struct GatewaySection {
     /// 缺 `inject` 段视为默认（enabled=true, persist=skip）。
     #[serde(default)]
     inject: Option<InjectConfig>,
+    /// 段内未知字段（gateway.* 顶层拼错可见，parse_config 告警；§3-6 补全——
+    /// 此前 gateway.* 未知键静默丢弃，与顶层文件告警行为不一致）。
+    #[serde(flatten)]
+    extra: HashMap<String, serde_json::Value>,
 }
 
 fn default_inject_enabled() -> bool {
@@ -166,6 +174,12 @@ pub fn parse_config(input: &str) -> Result<GatewayConfig, String> {
         tracing::warn!("gateway 配置含未知顶层字段（可能拼错）: {keys:?}");
     }
     let section = config.gateway.unwrap_or_default();
+    // §3-6：gateway 段级未知键告警（对齐顶层文件/route/qq 段的收集告警语义）。
+    if !section.extra.is_empty() {
+        let mut keys: Vec<&String> = section.extra.keys().collect();
+        keys.sort();
+        tracing::warn!("gateway 段含未知字段（可能拼错）: {keys:?}");
+    }
     let routes = section.routes;
     let mut entries = Vec::with_capacity(routes.len());
     let mut seen = HashSet::with_capacity(routes.len());
@@ -209,6 +223,12 @@ pub fn parse_config(input: &str) -> Result<GatewayConfig, String> {
         .unwrap_or_default();
     let inject = match section.inject {
         Some(mut inject) => {
+            // §3-6：gateway.inject 段未知键告警（此前静默丢弃，与 qq 段行为不一致）。
+            if !inject.extra.is_empty() {
+                let mut keys: Vec<&String> = inject.extra.keys().collect();
+                keys.sort();
+                tracing::warn!("gateway.inject 段含未知字段（可能拼错）: {keys:?}");
+            }
             if !matches!(inject.persist.as_str(), "skip" | "prism") {
                 return Err(format!(
                     "gateway.inject.persist 未知模式: {}",
@@ -443,6 +463,46 @@ gateway:
                 .collect::<Vec<_>>(),
             vec!["groupAllowFrom"]
         );
+    }
+
+    #[test]
+    fn gateway_section_and_inject_unknown_keys_are_collected() {
+        // §3-6：gateway.* 段级未知键与 gateway.inject.* 未知键从"静默丢弃"改为
+        // 收集进 extra（parse_config 告警依据）——拼错不再无声失效（白名单类
+        // 安全控件静默失效的隐患同源）。
+        let yaml = r#"
+gateway:
+  unknown_section_key: 1
+  inject:
+    enabled: true
+    typoInjectKey: [a]
+  routes:
+    - source: qq:group:123
+      agent: peri
+      profile: trpg
+      session: 战役1
+"#;
+        let config = parse_config(yaml).expect("未知键应解析成功（收集告警不拒绝）");
+        assert_eq!(
+            config.inject.extra.keys().map(String::as_str).collect::<Vec<_>>(),
+            vec!["typoInjectKey"],
+            "gateway.inject 未知键必须收集进 extra"
+        );
+        let file: GatewayConfigFile = serde_yml::from_str(yaml).expect("deserialize");
+        let section = file.gateway.expect("gateway 段存在");
+        assert_eq!(
+            section
+                .extra
+                .keys()
+                .map(String::as_str)
+                .collect::<Vec<_>>(),
+            vec!["unknown_section_key"],
+            "gateway 段级未知键必须收集进 extra"
+        );
+        // 已知键不得误入 extra
+        assert!(config.inject.extra.get("enabled").is_none());
+        assert!(section.extra.get("routes").is_none());
+        assert!(section.extra.get("inject").is_none());
     }
 
     #[test]
