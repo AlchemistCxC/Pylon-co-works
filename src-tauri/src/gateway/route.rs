@@ -38,15 +38,14 @@ use serde::{Deserialize, Serialize};
 ///
 /// yaml 键名为 `agent`/`profile`/`session`（与 Prism/前端 Session 语义对齐），
 /// Rust 侧统一为 `agent_id`/`profile_id`/`session_key` 命名。
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
 pub struct EntityBinding {
     pub source: String,
-    #[serde(rename(deserialize = "agent"))]
+    #[serde(rename = "agent")]
     pub agent_id: String,
-    #[serde(rename(deserialize = "profile"))]
+    #[serde(rename = "profile")]
     pub profile_id: String,
-    #[serde(rename(deserialize = "session"))]
+    #[serde(rename = "session")]
     pub session_key: String,
     /// 成员白名单（群消息按 member_openid，私聊按 user_openid）；缺省 = 不限。
     #[serde(default)]
@@ -57,9 +56,28 @@ pub struct EntityBinding {
     /// idle 模式无活动阈值（分钟）；缺省 1440（1 天）。
     #[serde(default)]
     pub idle_minutes: Option<u64>,
-    /// 段内未知字段（配置拼错可见，parse_config 告警；不参与序列化——gateway_status 契约）。
-    #[serde(flatten, skip)]
+    /// 段内未知字段（配置拼错可见，parse_config 告警；不参与序列化——
+    /// 手写 Serialize impl 不输出本字段）。
+    #[serde(flatten)]
     extra: HashMap<String, serde_json::Value>,
+}
+
+// B4：手写 Serialize——gateway_status wire 契约（camelCase 键）。不依赖
+// rename_all（其宽松字段匹配会破坏 flatten 拼错键收集，实测 S4 测试失败）；
+// 字段增删时本 impl 编译期强制同步（引用已删字段即编译错误）。
+impl Serialize for EntityBinding {
+    fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        use serde::ser::SerializeStruct;
+        let mut st = serializer.serialize_struct("EntityBinding", 7)?;
+        st.serialize_field("source", &self.source)?;
+        st.serialize_field("agentId", &self.agent_id)?;
+        st.serialize_field("profileId", &self.profile_id)?;
+        st.serialize_field("sessionKey", &self.session_key)?;
+        st.serialize_field("allowFrom", &self.allow_from)?;
+        st.serialize_field("reset", &self.reset)?;
+        st.serialize_field("idleMinutes", &self.idle_minutes)?;
+        st.end()
+    }
 }
 
 /// QQ 平台网关配置（B10.3：群级白名单 + §3-7：max_message_len 参数外置）。
@@ -722,6 +740,35 @@ gateway:
             let binding = config.routes.lookup("qq:group:123").expect("路由应命中");
             assert_eq!(binding.reset.as_deref(), Some(value));
         }
+    }
+
+    #[test]
+    fn binding_serializes_with_camel_case_wire_contract() {
+        // B4：gateway_status wire 契约钉死（手写 Serialize impl 的字段/键集合）。
+        let binding = EntityBinding {
+            source: "qq:group:1".into(),
+            agent_id: "peri".into(),
+            profile_id: "trpg".into(),
+            session_key: "战役1".into(),
+            allow_from: Some(vec!["member-1".into()]),
+            reset: Some("daily".into()),
+            idle_minutes: Some(60),
+            extra: HashMap::from([("typoKey".into(), serde_json::json!(1))]),
+        };
+        let value = serde_json::to_value(&binding).expect("serialize");
+        assert_eq!(
+            value,
+            serde_json::json!({
+                "source": "qq:group:1",
+                "agentId": "peri",
+                "profileId": "trpg",
+                "sessionKey": "战役1",
+                "allowFrom": ["member-1"],
+                "reset": "daily",
+                "idleMinutes": 60,
+            }),
+            "gateway_status wire 形状（extra 不得输出）: {value}"
+        );
     }
 
     #[test]
