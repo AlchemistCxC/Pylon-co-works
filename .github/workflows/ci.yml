@@ -1,0 +1,36 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  frontend:
+    name: 前端（tsc + 测试 + build）
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: 安装依赖
+        run: npm ci
+
+      - name: 类型检查
+        run: npx tsc -b
+
+      - name: lint
+        run: npm run lint
+
+      - name: 结构性回归测试（legacy 套件）
+        run: npm run test:legacy
+
+      - name: vitest（组件测试 + 覆盖率）
+        run: npx vitest run --coverage
+
+      - name: 生产构建
+        run: npx vite build

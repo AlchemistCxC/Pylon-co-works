@@ -14,3 +14,7 @@ __pycache__/
 AGENTS.md
 /references/
 /.hermes/
+
+# 测试产物
+/coverage/
+

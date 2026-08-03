@@ -13,7 +13,7 @@ const lifecycle = app.slice(effectStart, effectEnd + '\n  }, [])'.length)
 
 assert.match(lifecycle, /invoke(?:<[^>]+>)?\('list_agents'\)/, '必须异步加载 list_agents')
 assert.match(lifecycle, /if \(!disposed\) useIdentityStore\.getState\(\)\.setAgents\(/, 'list_agents 结果必须受 disposed guard 保护')
-assert.match(lifecycle, /listen<AgentStatusPayload>\('peri:agent-status'/, '必须注册 peri:agent-status listener')
+assert.match(lifecycle, /listen<AgentStatusPayload>\('pylon:agent-status'/, '必须注册 pylon:agent-status listener（H-9 事件前缀同步）')
 assert.match(lifecycle, /const activeAgent = useIdentityStore\.getState\(\)\.activeAgent/, 'listener 必须从最新 identity store 读取 activeAgent')
 assert.match(lifecycle, /normalizeAgentStatus\(event\.payload, activeAgent\)/, 'listener 必须按当前 activeAgent 规范化 payload')
 assert.match(lifecycle, /useRuntimeStore\.getState\(\)\.setAgentStatus\(status\.agentId \|\| status\.agent \|\| activeAgent, status\)/, 'listener 必须按 payload.agentId 路由状态，缺省回退 agent/activeAgent')

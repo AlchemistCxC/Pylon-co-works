@@ -10,7 +10,8 @@
     "tauri": "tauri",
     "test": "vitest run",
     "test:frontend": "vitest run",
-    "test:legacy": "node --experimental-strip-types scripts/run-frontend-tests.mts"
+    "test:legacy": "node --experimental-strip-types scripts/run-frontend-tests.mts",
+    "lint": "eslint src/ --ext .ts,.tsx"
   },
   "dependencies": {
     "@dnd-kit/core": "^6.3.1",
@@ -43,6 +44,7 @@
     "zustand": "^5"
   },
   "devDependencies": {
+    "@eslint/js": "^10.0.1",
     "@tauri-apps/cli": "^2.11.4",
     "@testing-library/jest-dom": "^7.0.0",
     "@testing-library/react": "^16.3.2",
@@ -50,8 +52,11 @@
     "@types/react-dom": "^19",
     "@vitejs/plugin-react": "^4",
     "@vitest/coverage-v8": "^4.1.10",
+    "eslint": "^10.8.0",
+    "eslint-plugin-react-hooks": "^7.1.1",
     "jsdom": "^30.0.1",
     "typescript": "^5",
+    "typescript-eslint": "^8.66.0",
     "vite": "^6",
     "vitest": "^4.1.10"
   }
