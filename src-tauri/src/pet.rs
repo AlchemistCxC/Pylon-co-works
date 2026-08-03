@@ -243,10 +243,20 @@ pub fn serialize_state(state: &PetState) -> Result<String, String> {
     serde_json::to_string(state).map_err(|e| e.to_string())
 }
 
+/// G6-08：写序锁（护 **rename 序**）——异步路径（persist_pet_async 的
+/// spawn_blocking 闭包）与 Exit 同步路径（save_to_file）串行化"唯一 temp +
+/// rename"，杜绝"旧序列化后 rename 覆盖新档"的关窗竞态（最后 rename 者必为
+/// 最新状态）。与 `pet_write_lock`（AppState 字段，tokio Mutex，护 **序列化序**）
+/// 职责正交——一个护序列化序、一个护 rename 序，两层锁各司其职。
+/// 两个调用方均为非 async 上下文，锁内无 await、无嵌套调用（本函数不调用
+/// 自身/其他写盘函数），无死锁风险；未竞争时开销可忽略。
+static STATE_FILE_WRITE_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
 /// 原子写：唯一临时文件 + rename，中断也不会留下半截 JSON。
 /// 审查修复：temp 名含 pid+时间戳——get_pet 轮询与 pet_action 可并发，固定 temp 名
 /// 会互相截断写坏（损坏 JSON 被 rename 就位 → 下次启动静默丢档）。
 pub fn write_json_atomic(path: &std::path::Path, json: &str) -> Result<(), String> {
+    let _write_guard = STATE_FILE_WRITE_LOCK.lock().map_err(|e| e.to_string())?;
     if let Some(parent) = path.parent() {
         std::fs::create_dir_all(parent).map_err(|e| e.to_string())?;
     }
