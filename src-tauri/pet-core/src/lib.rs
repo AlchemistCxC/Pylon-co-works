@@ -72,6 +72,20 @@ const TOOL_BOND: u32 = 1;
 /// 任务完成收益（设计书）：xp+3 / bond+2。
 const PROMPT_XP: u32 = 3;
 const PROMPT_BOND: u32 = 2;
+/// 出生数值（设计书 §3）：需求满格起步、快乐中等偏高、孤独为零。
+const BIRTH_HAPPINESS: u8 = 65;
+const BIRTH_ENERGY: u8 = 80;
+const BIRTH_HUNGER: u8 = 80;
+const BIRTH_FUN: u8 = 70;
+const BIRTH_LONELINESS: u8 = 0;
+/// 出生个性随机（设计书 §4）：每维 60±25，钳制 10-100（偏正面但有个性差异）。
+const TRAIT_BASE: i32 = 60;
+const TRAIT_SPREAD: i32 = 25;
+const TRAIT_MIN: i32 = 10;
+const TRAIT_MAX: i32 = 100;
+/// 午夜陪伴加成（设计书 M8）：Night 时段互动 bond ×1.5（amount×3/2 向上取整）。
+const NIGHT_BOND_NUMERATOR: u32 = 3;
+const NIGHT_BOND_DENOMINATOR: u32 = 2;
 
 // ── G6-09：restore/数值上限（A13 防注入；与 gain_xp/gain_bond 封顶一致）──
 
@@ -128,7 +142,8 @@ impl PetTraits {
     pub fn random() -> Self {
         let mut rng = rand::rng();
         let roll = |rng: &mut rand::rngs::ThreadRng| -> u8 {
-            (60_i32 + rng.random_range(-25..=25)).clamp(10, 100) as u8
+            (TRAIT_BASE + rng.random_range(-TRAIT_SPREAD..=TRAIT_SPREAD))
+                .clamp(TRAIT_MIN, TRAIT_MAX) as u8
         };
         Self {
             activity: roll(&mut rng),
@@ -270,7 +285,9 @@ pub enum RecentEvent {
 /// 延迟行为（时间戳驱动完成，零后台任务）：捏朋友等。
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub enum PendingAction {
-    CraftFriend { until_ms: u64 },
+    CraftFriend {
+        until_ms: u64,
+    },
     /// G6-11：反序列化兜底（同上）；restore 时降级为无（语义不可结算）。
     #[serde(other)]
     Unknown,
@@ -586,17 +603,17 @@ impl PetState {
         Self {
             name: "微栖".into(),
             mood: "idle".into(),
-            happiness: 65,
-            energy: 80,
+            happiness: BIRTH_HAPPINESS,
+            energy: BIRTH_ENERGY,
             xp: 0,
             bond: 0,
             born_at_ms: now_ms,
             // 出生时偏移未注入（0 = UTC），桥接层随后 set_local_offset_minutes 统一
             last_seen_day: day_number(now_ms, 0),
             first_chunk_at_ms: None,
-            hunger: 80,
-            fun: 70,
-            loneliness: 0,
+            hunger: BIRTH_HUNGER,
+            fun: BIRTH_FUN,
+            loneliness: BIRTH_LONELINESS,
             traits: PetTraits::random(),
             machine: PetMachineState::default(),
             last_tick_at_ms: now_ms,
@@ -974,8 +991,7 @@ impl PetState {
                     self.feed_spam_count = 0;
                 }
                 self.last_feed_at_ms = now_ms;
-                let multiplier =
-                    FEED_SPAM_MULTIPLIERS[self.feed_spam_count as usize];
+                let multiplier = FEED_SPAM_MULTIPLIERS[self.feed_spam_count as usize];
                 // 审查修复：hunger 收益固定 +20（贪吃改作用于 bond，见 reward 调用）
                 let hunger_gain = FEED_HUNGER_GAIN * multiplier / 100;
                 self.hunger = (self.hunger as u16 + hunger_gain).min(100) as u8;
@@ -1073,7 +1089,8 @@ impl PetState {
             PetMachineState::Asleep | PetMachineState::Awake(MachineSub::Distress)
         ) {
             let idle_for = now_ms.saturating_sub(self.last_activity_at_ms);
-            if self.energy <= SLEEP_ENERGY_THRESHOLD && (idle_for >= SLEEP_IDLE_MS || self.energy == 0)
+            if self.energy <= SLEEP_ENERGY_THRESHOLD
+                && (idle_for >= SLEEP_IDLE_MS || self.energy == 0)
             {
                 self.machine = PetMachineState::Asleep;
                 self.msg = Some(lines::pick(
@@ -1106,8 +1123,9 @@ impl PetState {
         } else {
             // 速率（每分钟）× dt；所有 delta 先 min(100) 再 cast 防 u8 截断
             // hunger -= dt×0.6×(1+greed/100)
-            let hunger_delta =
-                (dt * HUNGER_DECAY_RATE * (100 + traits.greed as u64) / HUNGER_DECAY_SCALE).min(100);
+            let hunger_delta = (dt * HUNGER_DECAY_RATE * (100 + traits.greed as u64)
+                / HUNGER_DECAY_SCALE)
+                .min(100);
             self.hunger = self.hunger.saturating_sub(hunger_delta as u8);
             // energy -= dt×0.5×(1-activity/200)
             let energy_delta =
@@ -1262,7 +1280,7 @@ impl PetState {
     /// O54：part 由调用方（apply 顶部）一次计算后传入。
     fn night_bond(&self, part: DayPart, amount: u32) -> u32 {
         if part == DayPart::Night {
-            (amount * 3).div_ceil(2)
+            (amount * NIGHT_BOND_NUMERATOR).div_ceil(NIGHT_BOND_DENOMINATOR)
         } else {
             amount
         }
@@ -1276,13 +1294,20 @@ impl PetState {
         }
     }
 
+    /// 成长阶段判定：由 [`GrowthStage::minimum_xp`] 单一事实源推导
+    /// （阈值 0/25/90/220/500，区间语义与设计书一致）。
     pub fn stage(&self) -> GrowthStage {
-        match self.xp {
-            0..=24 => GrowthStage::Seed,
-            25..=89 => GrowthStage::Sprout,
-            90..=219 => GrowthStage::Hopper,
-            220..=499 => GrowthStage::Guardian,
-            _ => GrowthStage::Luminary,
+        let xp = self.xp;
+        if xp < GrowthStage::Sprout.minimum_xp() {
+            GrowthStage::Seed
+        } else if xp < GrowthStage::Hopper.minimum_xp() {
+            GrowthStage::Sprout
+        } else if xp < GrowthStage::Guardian.minimum_xp() {
+            GrowthStage::Hopper
+        } else if xp < GrowthStage::Luminary.minimum_xp() {
+            GrowthStage::Guardian
+        } else {
+            GrowthStage::Luminary
         }
     }
 
