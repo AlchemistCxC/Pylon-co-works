@@ -226,14 +226,27 @@ export const useStore = create<ThemeState>()(persist(
    * 3. 清除 dirty[zone]
    * 4. 不影响其他 zone
    */
-  applyZonePreset: (zone, presetName, presetTheme) => set(state => ({
-    ...presetTheme,
-    // cc zone 预设即恢复规范排布（预设不携带 ccLayout → 默认布局），与其他 zone 预设一致
-    ...(zone === 'cc' ? { ccLayout: normalizeCcLayout(presetTheme.ccLayout) } : {}),
-    ...(zone === 'cc' && presetTheme.ccHeight !== undefined ? syncPresetCcHeight(presetTheme) : {}),
-    activePreset: { ...state.activePreset, [zone]: presetName },
-    dirty: { ...state.dirty, [zone]: false },
-  })),
+  applyZonePreset: (zone, presetName, presetTheme) => set(state => {
+    // 局部预设把某 zone 切离当前全局预设 → 全局预设不再完整，标记 global 为 custom
+    const globalPreset = state.activePreset.global
+    const breaksGlobal = Boolean(globalPreset) && globalPreset !== 'custom' && globalPreset !== presetName
+    return {
+      ...presetTheme,
+      // cc zone 预设即恢复规范排布（预设不携带 ccLayout → 默认布局），与其他 zone 预设一致
+      ...(zone === 'cc' ? { ccLayout: normalizeCcLayout(presetTheme.ccLayout) } : {}),
+      ...(zone === 'cc' && presetTheme.ccHeight !== undefined ? syncPresetCcHeight(presetTheme) : {}),
+      activePreset: {
+        ...state.activePreset,
+        [zone]: presetName,
+        ...(breaksGlobal ? { global: 'custom' } : {}),
+      },
+      dirty: {
+        ...state.dirty,
+        [zone]: false,
+        ...(breaksGlobal ? { global: true } : {}),
+      },
+    }
+  }),
 
   /**
    * 切换全局预设

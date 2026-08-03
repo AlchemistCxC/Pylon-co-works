@@ -9,16 +9,18 @@ assert.ok(preset, '测试预设必须存在')
 
 // Source evidence keeps this test dependency-free: store.ts has extensionless imports that
 // native Node type stripping cannot resolve, while the actions themselves are pure state updates.
-const applyZonePresetBody = storeSource.match(/applyZonePreset:\s*\(zone, presetName, presetTheme\) => set\(state => \(\{([\s\S]*?)\}\)\),/)?.[1] ?? ''
 const setZoneFieldBody = storeSource.match(/setZoneField:\s*\(zone, partial\) => set\(state => \(\{([\s\S]*?)\n\s*\}\)\),/)?.[1] ?? ''
 const setGlobalPresetBody = storeSource.match(/setGlobalPreset:\s*\(name, theme\) => set\(_ => \(\{([\s\S]*?)\}\)\),/)?.[1] ?? ''
-assert.match(applyZonePresetBody, /\.\.\.presetTheme/)
-assert.match(applyZonePresetBody, /activePreset:\s*\{\s*\.\.\.state\.activePreset, \[zone\]: presetName\s*\}/)
-assert.match(applyZonePresetBody, /dirty:\s*\{\s*\.\.\.state\.dirty, \[zone\]: false\s*\}/)
+const applyZonePresetBody = storeSource.match(/applyZonePreset:\s*\(zone, presetName, presetTheme\) => set\(state => \{([\s\S]*?)\n\s*\}\)\),/)?.[1] ?? ''
 assert.match(setZoneFieldBody, /\.\.\.partial/)
 assert.match(setZoneFieldBody, /markZoneCustom\(state, zone\)/)
 assert.match(setGlobalPresetBody, /activePreset:\s*Object\.fromEntries\(ZONES\.map\(zone => \[zone, name\]\)\)/)
 assert.match(setGlobalPresetBody, /dirty:\s*Object\.fromEntries\(ZONES\.map\(zone => \[zone, false\]\)\)/)
+// 局部预设切离当前全局预设 → 全局预设不再完整，必须标记 global 为 custom + dirty
+assert.match(applyZonePresetBody, /\.\.\.presetTheme/, 'applyZonePreset 必须写入预设字段')
+assert.match(applyZonePresetBody, /breaksGlobal = Boolean\(globalPreset\)/, 'applyZonePreset 必须检测全局预设冲突')
+assert.match(applyZonePresetBody, /global: 'custom'/, 'breaksGlobal 时必须把 global 标记为 custom')
+assert.match(applyZonePresetBody, /global: true/, 'breaksGlobal 时必须置 dirty.global')
 
 // Pure state harness for the exact action contract above.
 type State = Record<string, unknown> & {
