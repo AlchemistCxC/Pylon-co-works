@@ -17,6 +17,8 @@ import { resolveSpinnerFrames } from './components/chat/spinnerFrames'
 interface RenderCtx {
   t: ThemeSettings & { ccEditMode: boolean }
   onChange: (partial: Partial<ThemeSettings>) => void
+  /** 设置搜索：按字段 label 过滤；非空时强制展开全部匹配组 */
+  search?: string
 }
 
 export function Row({ label, children }: { label: string; children: React.ReactNode }) {
@@ -46,15 +48,16 @@ export function Txt({ value, onChange }: { value: string; onChange: (v: string) 
   return <input type="text" value={value} onChange={e => onChange(e.target.value)} className="set-input" />
 }
 
-function Group({ title, children }: { title: string; children: React.ReactNode }) {
-  const [open, setOpen] = useState(true)
+function Group({ title, children, defaultOpen, forceOpen }: { title: string; children: React.ReactNode; defaultOpen?: boolean; forceOpen?: boolean }) {
+  const [open, setOpen] = useState(defaultOpen ?? true)
+  const visible = open || forceOpen === true
   return (
     <div className="set-group">
-      <button type="button" className="set-group-title" aria-expanded={open} onClick={() => setOpen(!open)}>
-        <span className="set-group-arrow">{open ? '▾' : '▸'}</span>
+      <button type="button" className="set-group-title" aria-expanded={visible} onClick={() => setOpen(!visible)}>
+        <span className="set-group-arrow">{visible ? '▾' : '▸'}</span>
         {title}
       </button>
-      {open && children}
+      {visible && children}
     </div>
   )
 }
@@ -196,21 +199,26 @@ function FieldRow({ def, ctx, keyName }: { def: ThemeFieldDef; ctx: RenderCtx; k
 function renderGroupFields(fields: ThemeFieldKey[], ctx: RenderCtx) {
   const regular = fields.filter(key => !(THEME_FIELD_DEFS[key] as ThemeFieldDef).advanced)
   const advanced = fields.filter(key => (THEME_FIELD_DEFS[key] as ThemeFieldDef).advanced)
+  // 搜索时 advanced 字段内联展开（不藏进"高级…"，否则命中项不可见）
+  const searching = (ctx.search?.trim() ?? '').length > 0
+  const advancedRows = advanced.map(key => {
+    const def = THEME_FIELD_DEFS[key] as ThemeFieldDef
+    return <FieldRow key={key} keyName={key} def={def} ctx={ctx} />
+  })
   return (
     <>
       {regular.map(key => {
         const def = THEME_FIELD_DEFS[key] as ThemeFieldDef
         return <FieldRow key={key} keyName={key} def={def} ctx={ctx} />
       })}
-      {advanced.length > 0 && (
-        <details className="set-advanced">
-          <summary>高级…</summary>
-          {advanced.map(key => {
-            const def = THEME_FIELD_DEFS[key] as ThemeFieldDef
-            return <FieldRow key={key} keyName={key} def={def} ctx={ctx} />
-          })}
-        </details>
-      )}
+      {advanced.length > 0 && (searching
+        ? advancedRows
+        : (
+          <details className="set-advanced">
+            <summary>高级…</summary>
+            {advancedRows}
+          </details>
+        ))}
     </>
   )
 }
@@ -248,6 +256,8 @@ function renderCompactGroup(fields: ThemeFieldKey[], ctx: RenderCtx) {
 export function ZoneGroupFields({ zone, ctx }: { zone: ZoneName; ctx: RenderCtx }) {
   const sections = GROUP_ORDER[zone]
   if (!sections) return null
+  const query = ctx.search?.trim().toLowerCase() ?? ''
+  const searching = query.length > 0
   return (
     <>
       {sections.map((section, si) => {
@@ -257,6 +267,7 @@ export function ZoneGroupFields({ zone, ctx }: { zone: ZoneName; ctx: RenderCtx 
               const def = THEME_FIELD_DEFS[key] as ThemeFieldDef
               return def.zone === zone && def.group === group.title && !def.hidden
                 && (!def.showIf || def.showIf(ctx.t as ThemeSettings))
+                && (!searching || def.label.toLowerCase().includes(query))
             })
             return { ...group, fields }
           })
@@ -266,7 +277,7 @@ export function ZoneGroupFields({ zone, ctx }: { zone: ZoneName; ctx: RenderCtx 
           <Fragment key={section.heading ?? si}>
             {section.heading && <h3>{section.heading}</h3>}
             {groups.map(group => (
-              <Group key={group.title} title={group.title}>
+              <Group key={group.title} title={group.title} defaultOpen={group.defaultOpen} forceOpen={searching}>
                 {group.compact
                   ? renderCompactGroup(group.fields, ctx)
                   : renderGroupFields(group.fields, ctx)}

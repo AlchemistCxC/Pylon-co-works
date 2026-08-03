@@ -250,7 +250,7 @@
 .spinner-glimmer { color:inherit; transition:color 110ms linear, text-shadow 110ms linear; }
 .spinner-glimmer-edge { color:color-mix(in srgb, currentColor 70%, var(--spinner-glimmer-color,var(--accent)) 30%); }
 .spinner-glimmer-core { color:var(--spinner-glimmer-color,var(--accent)); text-shadow:0 0 0.5em color-mix(in srgb, var(--spinner-glimmer-color,var(--accent)) 55%, transparent); }
-/* stalled 颜色渐变（CC 渐入语义）：常态 → 停滞红平滑过渡 */
+/* stalled 颜色渐变（CC 渐入语义）：常态 → 停滞色平滑过渡（色值用户自定） */
 .term-spinner .spinner-frame,
 .term-spinner .spinner-verb { transition:color 1.2s ease; }
 .term-spinner[data-activity="waiting"] .spinner-verb { opacity:0.68; }

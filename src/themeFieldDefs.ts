@@ -98,8 +98,8 @@ export const THEME_FIELD_DEFS = {
   // ── chat ──
   chatBg: { ...C('chat', '背景色'), group: "背景", },
   chatBgImage: { ...T('chat', '背景图'), control: 'bgImage', group: "背景", },
-  chatTransparency: { ...N('chat', '透明度', 0, 1, 0.05), group: "玻璃效果", percent: true, suffix: '%' },
-  chatBlur: { ...N('chat', '模糊', 0, 40, 2), group: "玻璃效果", unit: 'px', suffix: 'px' },
+  chatTransparency: { ...N('chat', '透明度', 0, 1, 0.05), group: "背景", percent: true, suffix: '%' },
+  chatBlur: { ...N('chat', '模糊', 0, 40, 2), group: "背景", unit: 'px', suffix: 'px' },
   chatFont: { ...S('chat', '字体', ['mono', 'system']), group: "字体", },
   chatFontSize: { ...N('chat', '字号', 12, 22), group: "字体", unit: 'px' },
   chatLineHeight: { ...N('chat', '行高', 1.2, 2.5, 0.1), group: "字体", },
@@ -118,9 +118,9 @@ export const THEME_FIELD_DEFS = {
   synMarkupHeading: { ...C('chat', '语法·标题'), cssVar: '--syn-mh', group: "语法高亮", },
   synCoReference: { ...C('chat', '语法·引用'), cssVar: '--syn-cor', hidden: true },
   synSupport: { ...C('chat', '语法·模块'), cssVar: '--syn-support', group: "语法高亮", },
-  toolOk: { ...C('chat', '工具·完成'), group: "指示器", },
-  toolRun: { ...C('chat', '工具·运行中'), group: "指示器", },
-  toolErr: { ...C('chat', '工具·错误'), group: "指示器", },
+  toolOk: { ...C('chat', '工具·完成'), group: "指示器 & 连接线", },
+  toolRun: { ...C('chat', '工具·运行中'), group: "指示器 & 连接线", },
+  toolErr: { ...C('chat', '工具·错误'), group: "指示器 & 连接线", },
   toolNameColor: { ...C('chat', '工具名'), group: "文字 & 标签", },
   toolSummaryColor: { ...C('chat', '工具摘要'), group: "文字 & 标签", },
   userTagBg: { ...C('chat', '标签背景'), group: "文字 & 标签", },
@@ -142,8 +142,8 @@ export const THEME_FIELD_DEFS = {
   spinnerCustomFrames: { ...T('chat', '自定义帧'), group: "Spinner", showIf: t => t.spinnerFramePreset === 'custom' },
   spinnerVerbSet: { ...S('chat', '文案语言', ['zh', 'en', 'analysis', 'engineering', 'cc', 'custom']), group: "Spinner", },
   spinnerCustomVerbs: { ...T('chat', '自定义文案'), group: "Spinner", showIf: t => t.spinnerVerbSet === 'custom' },
-  // CC stalled 渐变红（3s 无响应后帧/文案趋向此色）
-  spinnerStalledColor: { ...C('chat', '停滞变红色'), group: "Spinner", advanced: true },
+  // CC stalled 渐变（3s 无响应后帧/文案趋向此色）；色值用户自定，不限定红
+  spinnerStalledColor: { ...C('chat', '停滞颜色'), group: "Spinner", advanced: true, hint: '3s 无响应后 spinner 渐变趋向此色（CC 停滞反馈）' },
   spinnerDoneMarker: { ...T('chat', '完成标记'), control: 'spinnerMarker', group: "Spinner", },
   spinnerCancelledMarker: { ...T('chat', '取消标记'), control: 'spinnerMarker', group: "Spinner", },
   spinnerErrorMarker: { ...T('chat', '错误标记'), control: 'spinnerMarker', group: "Spinner", },
@@ -286,15 +286,16 @@ export function fieldToCssVar(key: string): string {
  * 纯字段组由渲染器自动生成；含自定义内容的组（预设/强调色/布局骨架/
  * 窗口/配置备份/布局编辑）保留在 Settings 手写。
  */
-export const GROUP_ORDER: Record<string, readonly { heading?: string; groups: readonly { title: string; compact?: boolean }[] }[]> = {
+export const GROUP_ORDER: Record<string, readonly { heading?: string; groups: readonly { title: string; compact?: boolean; defaultOpen?: boolean }[] }[]> = {
   global: [{ groups: [{ title: '玻璃效果' }, { title: '字体' }] }],
   sidebar: [{ groups: [{ title: '背景' }, { title: '布局' }, { title: '玻璃效果' }, { title: '文字' }] }],
   chat: [
-    { heading: '聊天区', groups: [{ title: '背景' }, { title: '字体' }, { title: '颜色', compact: true }, { title: '玻璃效果' }, { title: '语法高亮', compact: true }] },
-    { heading: '工具调用', groups: [{ title: '指示器', compact: true }, { title: '文字 & 标签', compact: true }, { title: '指示器 & 连接线' }, { title: 'Diff' }, { title: 'Spinner' }] },
-    { heading: '消息渲染', groups: [{ title: '风格', compact: true }, { title: 'CC 风格' }] },
+    // 高频组默认展开；低频组（语法高亮/Diff/CC 风格）默认折叠，搜索时强制展开
+    { heading: '聊天区', groups: [{ title: '背景' }, { title: '字体' }, { title: '颜色', compact: true }, { title: '语法高亮', compact: true, defaultOpen: false }] },
+    { heading: '工具调用', groups: [{ title: '指示器 & 连接线' }, { title: '文字 & 标签', compact: true }, { title: 'Diff', defaultOpen: false }, { title: 'Spinner' }] },
+    { heading: '消息渲染', groups: [{ title: '风格', compact: true }, { title: 'CC 风格', defaultOpen: false }] },
   ],
-  cc: [{ groups: [{ title: '外观风格' }, { title: '控件样式' }, { title: '输入与状态' }, { title: '波形与用量' }, { title: '中控背景' }] }],
+  cc: [{ groups: [{ title: '外观风格' }, { title: '控件样式' }, { title: '输入与状态' }, { title: '波形与用量' }, { title: '中控背景', defaultOpen: false }] }],
   right: [{ groups: [{ title: '外观' }, { title: '玻璃效果' }] }],
 }
 export const THEME_DEFAULTS: Record<string, string | number | boolean> = {

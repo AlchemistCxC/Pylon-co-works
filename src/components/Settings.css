@@ -50,7 +50,33 @@
 
 .set-nav-btn.reset { font-weight:500; color:var(--danger); text-align:center; }
 .set-nav-btn.reset:hover { background:color-mix(in srgb,var(--danger) 8%,transparent); }
+/* 该区有自定义改动（dirty）时导航按钮右侧小圆点 */
+.set-nav-btn.dirty::after {
+  content:''; display:inline-block; width:7px; height:7px; margin-left:8px;
+  border-radius:50%; background:var(--accent); opacity:0.85; vertical-align:1px;
+}
 .set-nav-hr { display:none; }
+
+/* ── 中：设置工具栏（搜索 + 重置本区）── */
+.set-toolbar {
+  display:flex; align-items:center; gap:10px;
+  margin:0 0 18px; padding:0 0 14px; border-bottom:1px solid var(--border);
+}
+.set-search-wrap { position:relative; flex:1; min-width:0; }
+.set-search {
+  width:100%; padding:8px 28px 8px 12px; box-sizing:border-box;
+  border:1px solid var(--border); border-radius:7px; background:color-mix(in srgb,var(--bg-panel) 62%,transparent);
+  color:var(--text); font-size:13px; outline:none;
+}
+.set-search:focus { border-color:color-mix(in srgb,var(--accent) 45%,transparent); }
+.set-search::placeholder { color:var(--text-dim); }
+.set-search-clear {
+  position:absolute; right:6px; top:50%; transform:translateY(-50%);
+  width:20px; height:20px; border:0; border-radius:50%; background:var(--bg-hover);
+  color:var(--text-dim); font-size:11px; cursor:pointer; line-height:1;
+}
+.set-search-clear:hover { color:var(--text); }
+.set-zone-reset { flex-shrink:0; }
 
 /* ── 中：设置内容 ── */
 .settings-body {

@@ -6,7 +6,7 @@ import type { CcLayoutV3, CcWidgetPlacement } from './ccLayoutState'
 import { createCustomPreset, deleteCustomPreset, normalizeCustomPresets, pickCustomPresetTheme, upsertCustomPreset } from './customPresets'
 import { normalizeThemeMigrationState } from './themeMigration'
 import { markZoneCustom } from './themePresetState'
-import { ZONES } from './themeFields'
+import { ZONES, ZONE_FIELDS } from './themeFields'
 import { clampCcHeight, resolveVisibleStatusWidgetCount } from './ccHeightState'
 import { THEME_DEFAULTS } from './themeFieldDefs'
 import type { CustomPreset } from './customPresets'
@@ -98,6 +98,8 @@ type ThemeState = ThemeSettings & {
   setCcHidden: (id: string, hidden: boolean) => void
   setCcScale: (id: string, scale: number) => void
   resetTheme: () => void
+  /** 重置单个 zone 的字段到默认值（不清其他 zone），并清该 zone 的 dirty/activePreset */
+  resetZone: (zone: string) => void
   applyZonePreset: (zone: string, presetName: string, presetTheme: Partial<ThemeSettings>) => void
   setZoneField: (zone: string, partial: Partial<ThemeSettings>) => void
   setGlobalPreset: (name: string, theme: Partial<ThemeSettings>) => void
@@ -164,6 +166,24 @@ export const useStore = create<ThemeState>()(persist(
   })),
 
   resetTheme: () => set(structuredClone(DEFAULTS)),
+
+  resetZone: (zone) => set(state => {
+    const fields = (ZONE_FIELDS[zone] ?? []) as (keyof ThemeSettings)[]
+    // 只重置标量主题字段；ccLayout/ccHidden/ccScale 等对象字段走专用动作（避免误清用户排布）
+    const reset = Object.fromEntries(
+      fields
+        .filter(field => {
+          const value = DEFAULTS[field]
+          return typeof value === 'string' || typeof value === 'number' || typeof value === 'boolean'
+        })
+        .map(field => [field, DEFAULTS[field]]),
+    )
+    return {
+      ...reset,
+      activePreset: { ...state.activePreset, [zone]: '' },
+      dirty: { ...state.dirty, [zone]: false },
+    }
+  }),
 
   /**
    * 应用某个 zone 的预设（来自全局预设的子集）

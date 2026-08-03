@@ -1,0 +1,53 @@
+import { strict as assert } from 'node:assert'
+import { readFileSync } from 'node:fs'
+
+const read = (path: string) => readFileSync(new URL(path, import.meta.url), 'utf8')
+const defs = read('../src/themeFieldDefs.ts')
+const renderer = read('../src/themeFieldRenderer.tsx')
+const settings = read('../src/components/Settings.tsx')
+const store = read('../src/store.ts')
+
+// ── 低频组默认折叠 + 组粒度合并 ──
+assert.match(defs, /defaultOpen: false/, '低频组必须声明默认折叠')
+assert.match(defs, /\{ title: '语法高亮', compact: true, defaultOpen: false \}/, '语法高亮组默认折叠')
+assert.match(defs, /\{ title: 'Diff', defaultOpen: false \}/, 'Diff 组默认折叠')
+assert.match(defs, /\{ title: 'CC 风格', defaultOpen: false \}/, 'CC 风格组默认折叠')
+assert.match(defs, /\{ title: '中控背景', defaultOpen: false \}/, '中控背景组默认折叠')
+// 背景+玻璃效果合并：chatTransparency/chatBlur 归入"背景"
+assert.match(defs, /chatTransparency: \{[\s\S]*?group: "背景"/, '透明度并入背景组')
+assert.match(defs, /chatBlur: \{[\s\S]*?group: "背景"/, '模糊并入背景组')
+// 指示器+连接线合并：工具三色归入"指示器 & 连接线"
+assert.match(defs, /toolOk: \{[\s\S]*?group: "指示器 & 连接线"/, '工具·完成并入指示器&连接线')
+assert.match(defs, /toolRun: \{[\s\S]*?group: "指示器 & 连接线"/, '工具·运行中并入指示器&连接线')
+assert.match(defs, /toolErr: \{[\s\S]*?group: "指示器 & 连接线"/, '工具·错误并入指示器&连接线')
+assert.doesNotMatch(defs, /\{ title: '指示器', compact: true \}/, 'chat 区不得再有独立"指示器"组')
+const chatOrder = defs.match(/chat: \[([\s\S]*?)\],\n  cc:/)?.[1] ?? ''
+assert.ok(chatOrder.length > 0, '必须能截取 chat GROUP_ORDER 数组')
+assert.doesNotMatch(chatOrder, /玻璃效果/, 'chat 区不得再有独立"玻璃效果"组')
+
+// ── 渲染器：search 过滤 + defaultOpen/forceOpen + 搜索时 advanced 内联 ──
+assert.match(renderer, /search\?: string/, 'RenderCtx 必须支持 search')
+assert.match(renderer, /function Group\(\{ title, children, defaultOpen, forceOpen \}/, 'Group 必须支持 defaultOpen/forceOpen')
+assert.match(renderer, /def\.label\.toLowerCase\(\)\.includes\(query\)/, '字段必须按 label 过滤')
+assert.match(renderer, /defaultOpen=\{group\.defaultOpen\} forceOpen=\{searching\}/, '搜索时强制展开折叠组')
+assert.match(renderer, /const searching = \(ctx\.search\?\.trim\(\) \?\? ''\)\.length > 0[\s\S]*?searching[\s\S]*?\? advancedRows/, '搜索时 advanced 字段内联展开')
+
+// ── Settings：工具栏（搜索 + 重置本区）+ nav dirty 圆点 ──
+assert.match(settings, /className="set-search"/, '设置页必须有搜索输入框')
+assert.match(settings, /set-zone-reset/, '必须有重置本区按钮')
+assert.match(settings, /resetZone\(TAB_ZONE_MAP\[activeTab\]/, '重置本区必须接线到 store.resetZone')
+assert.match(settings, /\$\{dirty\[TAB_ZONE_MAP\[tab\]\] \? ' dirty' : ''\}/, '导航按钮必须显示 dirty 圆点')
+assert.match(settings, /const isSearching = searchQuery\.trim\(\)\.length > 0/, '搜索状态必须驱动手写组隐藏')
+
+// ── store：resetZone 只重置标量主题字段 ──
+assert.match(store, /resetZone: \(zone\) => set\(state => \{/, 'store 必须实现 resetZone')
+assert.match(store, /ZONE_FIELDS\[zone\]/, 'resetZone 必须按 zone 字段表重置')
+assert.match(store, /typeof value === 'string' \|\| typeof value === 'number' \|\| typeof value === 'boolean'/, 'resetZone 必须只重置标量（不碰 ccLayout/ccHidden/ccScale）')
+assert.match(store, /activePreset: \{ \.\.\.state\.activePreset, \[zone\]: '' \}/, 'resetZone 必须清 activePreset[zone]')
+assert.match(store, /dirty: \{ \.\.\.state\.dirty, \[zone\]: false \}/, 'resetZone 必须清 dirty[zone]')
+
+// ── 停滞颜色标签中性化 ──
+assert.match(defs, /spinnerStalledColor: \{[\s\S]*?'停滞颜色'/, '停滞字段不得再叫"停滞变红色"')
+assert.doesNotMatch(defs, /'停滞变红色'/, '旧标签"停滞变红色"必须移除')
+
+console.log('Settings 排布优化（折叠/合并/搜索/dirty/重置）回归测试通过')
