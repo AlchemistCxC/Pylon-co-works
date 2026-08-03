@@ -810,26 +810,17 @@ for line in sys.stdin:
         crate::test_utils::fake_acp_agent_with("fake-acp", FAKE_SCRIPT, Vec::new(), env)
     }
 
+    /// G5-2：state 构造收敛到 test_utils::test_state_with_acp；本模块特有的
+    /// "崩溃前 session 映射"预置（builder 不背此语义，方案 05 §2.1 第 3 点）保留在测试内。
     async fn build_state(initial_acp: AcpClient, agent: AgentDef) -> AppState {
-        build_state_with(
+        let state = crate::test_utils::test_state_with_acp(
+            agent.clone(),
             initial_acp,
-            agent,
             Arc::new(gateway::GatewayCore::new()),
             prism::PrismClient::unavailable("test".to_string()),
         )
-        .await
-    }
-
-    async fn build_state_with(
-        initial_acp: AcpClient,
-        agent: AgentDef,
-        gateway: Arc<gateway::GatewayCore>,
-        prism: prism::PrismClient,
-    ) -> AppState {
-        let mut agents = std::collections::HashMap::new();
-        agents.insert(agent.name.clone(), agent.clone());
-        let runtime = AgentRuntime::new_disconnected();
-        *runtime.acp.lock().await = initial_acp;
+        .await;
+        let runtime = state.runtimes.get(&agent.name).expect("runtime must exist");
         {
             let mut sessions = runtime.sessions.lock().unwrap();
             // 崩溃前已有会话映射（generation 0）——重连后应保留并迁移到新代际
@@ -844,23 +835,7 @@ for line in sys.stdin:
                 ),
             );
         }
-        let runtimes = Arc::new(AgentRuntimeManager::new());
-        runtimes.insert(agent.name.clone(), runtime);
-        AppState {
-            runtimes,
-            agents: Arc::new(Mutex::new(agents)),
-            active_agent: Arc::new(Mutex::new(agent.name.clone())),
-            pet: Arc::new(Mutex::new(pet::PetState::default())),
-            runtime_logs: runtime_log::RuntimeLogHub::default(),
-            runtime_mcp: Mutex::new(None),
-            prism,
-            gateway,
-            approval_mode: Arc::new(Mutex::new("default".to_string())),
-            pet_last_persist_ms: AtomicU64::new(0),
-            pet_write_lock: tokio::sync::Mutex::new(()),
-            switch_lock: tokio::sync::Mutex::new(()),
-            mcp_write_lock: tokio::sync::Mutex::new(()),
-        }
+        state
     }
 
     #[tokio::test]
@@ -1507,37 +1482,6 @@ for line in sys.stdin:
         }
     }
 
-    /// b11 模块专用 state 构造（auto_reconnect_integration_tests 的
-    /// build_state_with 是兄弟模块私有项，不能跨模块引用）。
-    async fn build_state_with(
-        initial_acp: AcpClient,
-        agent: AgentDef,
-        gateway: Arc<gateway::GatewayCore>,
-        prism: prism::PrismClient,
-    ) -> AppState {
-        let mut agents = std::collections::HashMap::new();
-        agents.insert(agent.name.clone(), agent.clone());
-        let runtime = AgentRuntime::new_disconnected();
-        *runtime.acp.lock().await = initial_acp;
-        let runtimes = Arc::new(AgentRuntimeManager::new());
-        runtimes.insert(agent.name.clone(), runtime);
-        AppState {
-            runtimes,
-            agents: Arc::new(Mutex::new(agents)),
-            active_agent: Arc::new(Mutex::new(agent.name.clone())),
-            pet: Arc::new(Mutex::new(pet::PetState::default())),
-            runtime_logs: runtime_log::RuntimeLogHub::default(),
-            runtime_mcp: Mutex::new(None),
-            prism,
-            gateway,
-            approval_mode: Arc::new(Mutex::new("default".to_string())),
-            pet_last_persist_ms: AtomicU64::new(0),
-            pet_write_lock: tokio::sync::Mutex::new(()),
-            switch_lock: tokio::sync::Mutex::new(()),
-            mcp_write_lock: tokio::sync::Mutex::new(()),
-        }
-    }
-
     #[tokio::test]
     async fn inject_prepends_context_and_advances_round_per_message() {
         let (address, request_rx, server) = spawn_inject_stub(2);
@@ -1559,7 +1503,8 @@ gateway:
             format!("http://{}", address),
             Some("test-token".to_string()),
         );
-        let state = build_state_with(initial_acp, agent, gateway, prism).await;
+        let state =
+            crate::test_utils::test_state_with_acp(agent, initial_acp, gateway, prism).await;
         let env = MockEnv::new(state);
 
         send_message(
@@ -1635,7 +1580,8 @@ gateway:
         );
         let prism =
             prism::PrismClient::for_testing(format!("http://{}", address), Some("t".to_string()));
-        let state = build_state_with(initial_acp, agent, gateway, prism).await;
+        let state =
+            crate::test_utils::test_state_with_acp(agent, initial_acp, gateway, prism).await;
         let env = MockEnv::new(state);
 
         send_message(
@@ -1673,9 +1619,9 @@ gateway:
     enabled: true
 "#,
         );
-        let state = build_state_with(
-            initial_acp,
+        let state = crate::test_utils::test_state_with_acp(
             agent,
+            initial_acp,
             gateway,
             prism::PrismClient::unavailable("test".to_string()),
         )
@@ -1716,7 +1662,8 @@ gateway:
         );
         let prism =
             prism::PrismClient::for_testing(format!("http://{}", address), Some("t".to_string()));
-        let state = build_state_with(initial_acp, agent, gateway, prism).await;
+        let state =
+            crate::test_utils::test_state_with_acp(agent, initial_acp, gateway, prism).await;
         let env = MockEnv::new(state);
 
         send_message(
@@ -1759,7 +1706,8 @@ gateway:
             format!("http://{}", address),
             Some("test-token".to_string()),
         );
-        let state = build_state_with(initial_acp, agent, gateway, prism).await;
+        let state =
+            crate::test_utils::test_state_with_acp(agent, initial_acp, gateway, prism).await;
         let app = tauri::test::mock_builder()
             .build(tauri::test::mock_context(tauri::test::noop_assets()))
             .expect("mock app must build");
@@ -1963,21 +1911,9 @@ mod mcp_persist_tests {
         let app = tauri::test::mock_builder()
             .build(tauri::test::mock_context(tauri::test::noop_assets()))
             .expect("mock app must build");
-        let state = AppState {
-            runtimes: Arc::new(AgentRuntimeManager::new()),
-            agents: Arc::new(Mutex::new(HashMap::new())),
-            active_agent: Arc::new(Mutex::new(String::new())),
-            pet: Arc::new(Mutex::new(pet::PetState::default())),
-            runtime_logs: runtime_log::RuntimeLogHub::default(),
-            runtime_mcp: Mutex::new(None),
-            prism: prism::PrismClient::unavailable("test".to_string()),
-            gateway: Arc::new(gateway::GatewayCore::new()),
-            approval_mode: Arc::new(Mutex::new("default".to_string())),
-            pet_last_persist_ms: AtomicU64::new(0),
-            pet_write_lock: tokio::sync::Mutex::new(()),
-            switch_lock: tokio::sync::Mutex::new(()),
-            mcp_write_lock: tokio::sync::Mutex::new(()),
-        };
+        let state = crate::test_utils::TestStateBuilder::bare()
+            .with_active_agent("")
+            .build();
         app.manage(state);
         let path = match mcp_persist_path(app.handle()) {
             Ok(path) => path,
@@ -2032,36 +1968,6 @@ for line in sys.stdin:
         crate::test_utils::fake_acp_agent("fake-acp-echo", ECHO_ACP_SCRIPT)
     }
 
-    /// 模块内 state 构造（兄弟模块的 build_state_with 不可访问）。
-    async fn build_state_with(
-        initial_acp: AcpClient,
-        agent: AgentDef,
-        gateway: Arc<gateway::GatewayCore>,
-        prism: prism::PrismClient,
-    ) -> AppState {
-        let mut agents = std::collections::HashMap::new();
-        agents.insert(agent.name.clone(), agent.clone());
-        let runtime = AgentRuntime::new_disconnected();
-        *runtime.acp.lock().await = initial_acp;
-        let runtimes = Arc::new(AgentRuntimeManager::new());
-        runtimes.insert(agent.name.clone(), runtime);
-        AppState {
-            runtimes,
-            agents: Arc::new(Mutex::new(agents)),
-            active_agent: Arc::new(Mutex::new(agent.name.clone())),
-            pet: Arc::new(Mutex::new(pet::PetState::default())),
-            runtime_logs: runtime_log::RuntimeLogHub::default(),
-            runtime_mcp: Mutex::new(None),
-            prism,
-            gateway,
-            approval_mode: Arc::new(Mutex::new("default".to_string())),
-            pet_last_persist_ms: AtomicU64::new(0),
-            pet_write_lock: tokio::sync::Mutex::new(()),
-            switch_lock: tokio::sync::Mutex::new(()),
-            mcp_write_lock: tokio::sync::Mutex::new(()),
-        }
-    }
-
     #[tokio::test]
     async fn expiry_watcher_skips_local_sessions_and_resets_platform_sessions() {
         let agent = echo_agent();
@@ -2081,9 +1987,9 @@ gateway:
             )
             .expect("合法配置"),
         ));
-        let state = build_state_with(
-            initial_acp,
+        let state = crate::test_utils::test_state_with_acp(
             agent,
+            initial_acp,
             gateway,
             prism::PrismClient::unavailable("test".to_string()),
         )
@@ -2092,7 +1998,7 @@ gateway:
         let runtime = state.active_runtime().expect("active runtime");
         {
             let mut sessions = runtime.sessions.lock().unwrap();
-            // 清理 build_state_with 预置的 source-a，插入过期/平台两类会话
+            // 插入过期/平台两类会话
             sessions.clear();
             let mut local =
                 SessionInfo::new("local-peri".into(), String::new(), ".".into(), true, 0);
@@ -2139,9 +2045,9 @@ gateway:
             .expect("合法配置"),
         ));
         let state = Arc::new(
-            build_state_with(
-                initial_acp,
+            crate::test_utils::test_state_with_acp(
                 agent,
+                initial_acp,
                 gateway,
                 prism::PrismClient::unavailable("test".to_string()),
             )
@@ -2242,35 +2148,6 @@ for line in sys.stdin:
         crate::test_utils::fake_acp_agent("fake-acp-chunk", CHUNK_ACP_SCRIPT)
     }
 
-    /// 模块内 state 构造。
-    async fn build_state_with(
-        initial_acp: AcpClient,
-        agent: AgentDef,
-        gateway: Arc<gateway::GatewayCore>,
-    ) -> AppState {
-        let mut agents = std::collections::HashMap::new();
-        agents.insert(agent.name.clone(), agent.clone());
-        let runtime = AgentRuntime::new_disconnected();
-        *runtime.acp.lock().await = initial_acp;
-        let runtimes = Arc::new(AgentRuntimeManager::new());
-        runtimes.insert(agent.name.clone(), runtime);
-        AppState {
-            runtimes,
-            agents: Arc::new(Mutex::new(agents)),
-            active_agent: Arc::new(Mutex::new(agent.name.clone())),
-            pet: Arc::new(Mutex::new(pet::PetState::default())),
-            runtime_logs: runtime_log::RuntimeLogHub::default(),
-            runtime_mcp: Mutex::new(None),
-            prism: prism::PrismClient::unavailable("test".to_string()),
-            gateway,
-            approval_mode: Arc::new(Mutex::new("default".to_string())),
-            pet_last_persist_ms: AtomicU64::new(0),
-            pet_write_lock: tokio::sync::Mutex::new(()),
-            switch_lock: tokio::sync::Mutex::new(()),
-            mcp_write_lock: tokio::sync::Mutex::new(()),
-        }
-    }
-
     /// QQ API 桩：捕获发送请求（Content-Length 完整读取），返回 {"id":"sent-1"}。
     fn spawn_qq_api_stub() -> (
         std::net::SocketAddr,
@@ -2355,7 +2232,13 @@ gateway:
         let initial_acp = AcpClient::connect_with_logs(&agent, None)
             .await
             .expect("fake ACP must initialize");
-        let state = build_state_with(initial_acp, agent, gateway.clone()).await;
+        let state = crate::test_utils::test_state_with_acp(
+            agent,
+            initial_acp,
+            gateway.clone(),
+            prism::PrismClient::unavailable("test".to_string()),
+        )
+        .await;
         let app = tauri::test::mock_builder()
             .build(tauri::test::mock_context(tauri::test::noop_assets()))
             .expect("mock app must build");
