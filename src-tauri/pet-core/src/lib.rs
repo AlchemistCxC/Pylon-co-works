@@ -1229,6 +1229,8 @@ impl PetState {
     /// 需求危机按优先级产出 msg（设计书 §9）。返回是否说了话。
     /// 紧急需求总是表达（可覆盖事件文案——饥饿优先，设计书 §1 无冷却）。
     pub fn poll_voice(&mut self, now_ms: u64) -> bool {
+        // O54 同款：day_part 纯函数（同 now_ms 必同值），一次计算供全程复用
+        let part = self.day_part(now_ms);
         self.settle(now_ms);
         if self.settle_pending(now_ms) {
             return true;
@@ -1237,7 +1239,7 @@ impl PetState {
             return false;
         }
         // M8：深夜不打扰——Night 时段不说 BORED（深夜不制造陪伴压力）
-        let night = self.day_part(now_ms) == DayPart::Night;
+        let night = part == DayPart::Night;
         let key = if self.hunger < 25 {
             Some(lines::LineKey::Hungry)
         } else if self.loneliness > 70 {
@@ -1252,7 +1254,6 @@ impl PetState {
             None
         };
         if let Some(key) = key {
-            let part = self.day_part(now_ms);
             self.msg = Some(lines::pick(key, &mut self.line_idx_by_scene, part));
             true
         } else {
