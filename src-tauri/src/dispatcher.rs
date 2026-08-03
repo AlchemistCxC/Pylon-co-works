@@ -702,13 +702,13 @@ pub(crate) fn start_notification_dispatcher<R: tauri::Runtime>(
             if client_generation.load(Ordering::Acquire) != generation {
                 break;
             }
-            if raw.method.as_deref() == Some(crate::acp::NOTIF_AGENT_CRASHED) {
+            if raw.kind == crate::acp::AcpKind::Crashed {
                 handle_crash().await;
                 continue;
             }
             // B9 权限审批：agent 主动 request_permission（带 id 请求，客户端必须应答）。
             // 模式判定：bypass/auto 自动批准；edit/default 挂起 + 前端事件。
-            if raw.method.as_deref() == Some(crate::acp::METHOD_SESSION_REQUEST_PERMISSION) {
+            if raw.kind == crate::acp::AcpKind::PermissionRequest {
                 if let Some(request_id) = raw.id {
                     handle_permission_request(
                         &window,
@@ -723,7 +723,7 @@ pub(crate) fn start_notification_dispatcher<R: tauri::Runtime>(
                 }
                 continue;
             }
-            if raw.method.as_deref() != Some(crate::acp::NOTIF_SESSION_UPDATE) {
+            if raw.kind != crate::acp::AcpKind::SessionUpdate {
                 continue;
             }
             let payload = match raw.params {

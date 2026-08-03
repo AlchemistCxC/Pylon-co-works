@@ -496,10 +496,39 @@ pub struct AcpClient {
     /// "无接收者"失败——订阅方经 `has_changed`/`borrow` 仍能读到 true。
     _crashed_watch_rx: watch::Receiver<bool>,
 }
+/// B1：消息类型化分类（reader 一次分类，dispatcher 枚举匹配——method 拼写错误
+/// 编译期拦截；未知 method 归 OtherNotification，行为与旧 `_ => {}` 忽略一致）。
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum AcpKind {
+    /// 带 id 的 JSON-RPC 响应（method 为 None）。
+    Response,
+    /// session/update 通知（dispatcher 主通道）。
+    SessionUpdate,
+    /// session/request_permission 请求（B9 权限审批）。
+    PermissionRequest,
+    /// pylon:agent-crashed 崩溃广播。
+    Crashed,
+    /// 其他通知（透传忽略，dispatcher 不处理）。
+    OtherNotification,
+}
+
+impl AcpKind {
+    pub fn from_method(method: Option<&str>) -> Self {
+        match method {
+            None => Self::Response,
+            Some(NOTIF_AGENT_CRASHED) => Self::Crashed,
+            Some(METHOD_SESSION_REQUEST_PERMISSION) => Self::PermissionRequest,
+            Some(NOTIF_SESSION_UPDATE) => Self::SessionUpdate,
+            Some(_) => Self::OtherNotification,
+        }
+    }
+}
+
 #[derive(Debug, Clone)]
 pub struct RawMessage {
     pub id: Option<u64>,
     pub method: Option<String>,
+    pub kind: AcpKind,
     pub result: Option<serde_json::Value>,
     pub params: Option<serde_json::Value>,
     pub error: Option<serde_json::Value>,
@@ -603,6 +632,7 @@ impl RawMessage {
         Self {
             id: None,
             method: None,
+            kind: AcpKind::Response,
             result: None,
             params: None,
             error: Some(serde_json::json!("ACP connection closed")),
@@ -810,12 +840,14 @@ fn spawn_stdout_reader(
                     continue;
                 }
             };
+            let method = msg_val
+                .get("method")
+                .and_then(|v| v.as_str())
+                .map(|s| s.to_string());
             let raw = RawMessage {
                 id: msg_val.get("id").and_then(|v| v.as_u64()),
-                method: msg_val
-                    .get("method")
-                    .and_then(|v| v.as_str())
-                    .map(|s| s.to_string()),
+                kind: AcpKind::from_method(method.as_deref()),
+                method,
                 result: msg_val.get("result").cloned(),
                 params: msg_val.get("params").cloned(),
                 error: msg_val.get("error").cloned(),
@@ -853,6 +885,7 @@ fn spawn_stdout_reader(
         let _ = tx_clone.send(RawMessage {
             id: None,
             method: Some(NOTIF_AGENT_CRASHED.to_string()),
+            kind: AcpKind::Crashed,
             result: None,
             params: Some(serde_json::json!({"reason": "stdout_closed"})),
             error: None,
@@ -1475,10 +1508,33 @@ mod tests {
         RawMessage {
             id: Some(1),
             method: None,
+            kind: AcpKind::Response,
             result: Some(serde_json::json!({"stopReason": "cancelled"})),
             params: None,
             error: None,
         }
+    }
+
+    #[test]
+    fn acp_kind_classification_is_stable() {
+        // B1：wire method 字符串 → 类型化分类契约（dispatcher 匹配依赖）。
+        assert_eq!(AcpKind::from_method(None), AcpKind::Response);
+        assert_eq!(
+            AcpKind::from_method(Some(NOTIF_SESSION_UPDATE)),
+            AcpKind::SessionUpdate
+        );
+        assert_eq!(
+            AcpKind::from_method(Some(METHOD_SESSION_REQUEST_PERMISSION)),
+            AcpKind::PermissionRequest
+        );
+        assert_eq!(
+            AcpKind::from_method(Some(NOTIF_AGENT_CRASHED)),
+            AcpKind::Crashed
+        );
+        assert_eq!(
+            AcpKind::from_method(Some("unknown/method")),
+            AcpKind::OtherNotification
+        );
     }
 
     #[test]
