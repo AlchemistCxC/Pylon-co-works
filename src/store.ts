@@ -133,6 +133,16 @@ function clampPresetCcHeight(theme: Partial<ThemeSettings>): number {
 }
 
 /**
+ * 预设应用的 cc 高度同步：ccHeight 被 clamp 上调时，ccBgHeight 必须跟随
+ * （否则背景比容器短，露出底部无背景条）。返回两者。
+ */
+function syncPresetCcHeight(theme: Partial<ThemeSettings>): { ccHeight: number; ccBgHeight: number } {
+  const ccHeight = clampPresetCcHeight(theme)
+  const bgHeight = typeof theme.ccBgHeight === 'number' ? theme.ccBgHeight : DEFAULTS.ccBgHeight
+  return { ccHeight, ccBgHeight: Math.max(bgHeight, ccHeight) }
+}
+
+/**
  * DEFAULTS 由 defs 派生（THEME_DEFAULTS 标量默认值）+
  * 对象/复合字段（ccLayout/ccHidden/ccScale/META 路由）保留显式声明。
  * 加标量字段：defs 加声明 + THEME_DEFAULTS 加默认值即可，此处自动。
@@ -219,7 +229,7 @@ export const useStore = create<ThemeState>()(persist(
   applyZonePreset: (zone, presetName, presetTheme) => set(state => ({
     ...presetTheme,
     ...(presetTheme.ccLayout ? { ccLayout: normalizeCcLayout(presetTheme.ccLayout) } : {}),
-    ...(zone === 'cc' && presetTheme.ccHeight !== undefined ? { ccHeight: clampPresetCcHeight(presetTheme) } : {}),
+    ...(zone === 'cc' && presetTheme.ccHeight !== undefined ? syncPresetCcHeight(presetTheme) : {}),
     activePreset: { ...state.activePreset, [zone]: presetName },
     dirty: { ...state.dirty, [zone]: false },
   })),
@@ -235,7 +245,7 @@ export const useStore = create<ThemeState>()(persist(
     // 预设不携带 ccLayout 时保留用户现有排布（与 applyZonePreset 一致；无条件
     // normalizeCcLayout(undefined) 会重置用户拖拽/排序的自定义 widget 布局）
     ...(theme.ccLayout ? { ccLayout: normalizeCcLayout(theme.ccLayout) } : {}),
-    ...(theme.ccHeight !== undefined ? { ccHeight: clampPresetCcHeight(theme) } : {}),
+    ...(theme.ccHeight !== undefined ? syncPresetCcHeight(theme) : {}),
     activePreset: Object.fromEntries(ZONES.map(zone => [zone, name])),
     dirty: Object.fromEntries(ZONES.map(zone => [zone, false])),
   })),
@@ -257,7 +267,7 @@ export const useStore = create<ThemeState>()(persist(
     return {
       ...theme,
       ccLayout: normalizeCcLayout(theme.ccLayout),
-      ...(theme.ccHeight !== undefined ? { ccHeight: clampPresetCcHeight(theme) } : {}),
+      ...(theme.ccHeight !== undefined ? syncPresetCcHeight(theme) : {}),
       activePreset: Object.fromEntries(ZONES.map(zone => [zone, id])),
       dirty: Object.fromEntries(ZONES.map(zone => [zone, false])),
     }

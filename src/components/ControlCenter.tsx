@@ -148,7 +148,9 @@ export default function ControlCenter({ sessionId }: Props) {
       style={{
         '--cc-height': `${ccHeight}px`,
         '--cc-min-height': `${minHeight}px`,
-        '--cc-bg-height': `${ccBgHeight}px`,
+        // 背景高度不得小于容器最小高：预设 ccBgHeight(76) 与 clamp 后的 ccHeight(84)
+        // 不一致时，背景短于容器会露出底部无背景条
+        '--cc-bg-height': `${Math.max(ccBgHeight, minHeight)}px`,
         '--cc-bg': ccBg,
         '--cc-bg-image': toCssBackgroundImage(ccBgImage),
       } as React.CSSProperties}>

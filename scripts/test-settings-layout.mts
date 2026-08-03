@@ -79,8 +79,8 @@ assert.doesNotMatch(store, /ekgLeftColor: string; ekgMovingColor/, 'store 不得
 // ── 中低危修复契约（2026-08-03 逻辑检测二轮）──
 const controller = read('../src/components/chat/chatEventController.ts')
 // 预设应用必须 clamp ccHeight（claude 预设 76 < 最小高）
-assert.match(store, /clampPresetCcHeight\(/, '预设应用必须过 ccHeight clamp')
-assert.match(store, /ccHeight !== undefined \? \{ ccHeight: clampPresetCcHeight\(theme\) \}/, 'setGlobalPreset/applyCustomPreset 必须 clamp ccHeight')
+assert.match(store, /syncPresetCcHeight\(/, '预设应用必须过 ccHeight clamp')
+assert.match(store, /ccHeight !== undefined \? syncPresetCcHeight\(theme\) : \{\}/, 'setGlobalPreset/applyCustomPreset 必须 clamp ccHeight')
 assert.match(store, /zone === 'cc' && presetTheme\.ccHeight !== undefined/, 'applyZonePreset 必须 clamp cc zone ccHeight')
 // removeCustomPreset 删除已应用预设 → 'custom'（与 markZoneCustom 一致）
 assert.match(store, /activePreset\[zone\] = 'custom'/, '删除已应用预设必须标记为 custom')
