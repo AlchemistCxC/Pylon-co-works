@@ -497,25 +497,26 @@ gateway:
 "#;
         let config = parse_config(yaml).expect("未知键应解析成功（收集告警不拒绝）");
         assert_eq!(
-            config.inject.extra.keys().map(String::as_str).collect::<Vec<_>>(),
+            config
+                .inject
+                .extra
+                .keys()
+                .map(String::as_str)
+                .collect::<Vec<_>>(),
             vec!["typoInjectKey"],
             "gateway.inject 未知键必须收集进 extra"
         );
         let file: GatewayConfigFile = serde_yml::from_str(yaml).expect("deserialize");
         let section = file.gateway.expect("gateway 段存在");
         assert_eq!(
-            section
-                .extra
-                .keys()
-                .map(String::as_str)
-                .collect::<Vec<_>>(),
+            section.extra.keys().map(String::as_str).collect::<Vec<_>>(),
             vec!["unknown_section_key"],
             "gateway 段级未知键必须收集进 extra"
         );
         // 已知键不得误入 extra
-        assert!(config.inject.extra.get("enabled").is_none());
-        assert!(section.extra.get("routes").is_none());
-        assert!(section.extra.get("inject").is_none());
+        assert!(!config.inject.extra.contains_key("enabled"));
+        assert!(!section.extra.contains_key("routes"));
+        assert!(!section.extra.contains_key("inject"));
     }
 
     #[test]
@@ -664,7 +665,10 @@ gateway:
 "#;
         let config = parse_config(yaml).expect("合法 max_message_len 应解析成功");
         assert_eq!(config.qq.max_message_len, Some(2000));
-        assert_eq!(config.qq.group_allow_from.as_deref(), Some(&["group-a".to_string()][..]));
+        assert_eq!(
+            config.qq.group_allow_from.as_deref(),
+            Some(&["group-a".to_string()][..])
+        );
     }
 
     #[test]

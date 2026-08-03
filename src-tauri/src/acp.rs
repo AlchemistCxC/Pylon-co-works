@@ -73,11 +73,11 @@ impl SessionUpdateVariant {
 // 核心字段（sessionId/cwd/configId/value/modeId/prompt）用官方 Request 类型
 // 构造，wire 格式由 schema 保证；扩展字段（mcpServers）保持 Value 直传——
 // Pylon 的 MCP 配置格式（stdio 无 name）与官方 McpServer 不兼容，不能强转。
+use crate::agent_config::McpServersMode;
 use agent_client_protocol_schema::v1::{
     CloseSessionRequest, ContentBlock, LoadSessionRequest, NewSessionRequest, PromptRequest,
     SetSessionConfigOptionRequest, SetSessionModeRequest,
 };
-use crate::agent_config::McpServersMode;
 
 fn to_params<T: serde::Serialize>(req: &T, what: &str) -> Result<serde_json::Value, String> {
     serde_json::to_value(req).map_err(|e| format!("serialize {what} params: {e}"))
@@ -726,8 +726,7 @@ fn spawn_writer_task(
                 writeln!(guard, "{line}")?;
                 guard.flush()
             });
-            match tokio::time::timeout(std::time::Duration::from_secs(write_timeout), write).await
-            {
+            match tokio::time::timeout(std::time::Duration::from_secs(write_timeout), write).await {
                 // 写入成功 → 取下一条
                 Ok(Ok(Ok(()))) => {}
                 // EPIPE 等写失败 → reader 线程经 EOF 置位 crashed + watch
@@ -1253,7 +1252,8 @@ impl AcpClient {
                 let (write_tx, write_rx) = mpsc::channel::<String>(WRITE_CHAN_CAP);
                 let crashed = Arc::new(AtomicBool::new(false));
                 // G1-05：三线程启动收敛为私有函数（S3 卫生，行为零变化）。
-                let writer_task = spawn_writer_task(stdin, write_rx, &crashed, DEFAULT_WRITE_TIMEOUT_SECS);
+                let writer_task =
+                    spawn_writer_task(stdin, write_rx, &crashed, DEFAULT_WRITE_TIMEOUT_SECS);
                 let stdout = BufReader::new(child.take_stdout()?);
 
                 // Drain stderr（防管道缓冲死锁）
@@ -1265,7 +1265,14 @@ impl AcpClient {
                 let (tx, rx) = broadcast::channel(BROADCAST_CAP);
                 let (crashed_watch, crashed_watch_rx) = watch::channel(false);
 
-                spawn_stdout_reader(stdout, pending.clone(), tx.clone(), &crashed, &crashed_watch, &runtime_logs);
+                spawn_stdout_reader(
+                    stdout,
+                    pending.clone(),
+                    tx.clone(),
+                    &crashed,
+                    &crashed_watch,
+                    &runtime_logs,
+                );
 
                 let client = AcpClient {
                     child,
@@ -1367,8 +1374,7 @@ impl AcpClient {
             if handles.crashed.load(Ordering::Relaxed) {
                 return Err(AcpError::ConnectionClosed);
             }
-            let raw = match tokio::time::timeout(handles.rpc_timeout, events.recv()).await
-            {
+            let raw = match tokio::time::timeout(handles.rpc_timeout, events.recv()).await {
                 Ok(Ok(raw)) => raw,
                 Ok(Err(tokio::sync::broadcast::error::RecvError::Lagged(count))) => {
                     return Err(AcpError::Child(format!(
@@ -1403,10 +1409,7 @@ impl AcpClient {
                     if replay.len() < handles.replay_max {
                         replay.push(params);
                     } else if replay.len() == handles.replay_max {
-                        tracing::warn!(
-                            "session/load replay 超过 {} 条，截断",
-                            handles.replay_max
-                        );
+                        tracing::warn!("session/load replay 超过 {} 条，截断", handles.replay_max);
                         replay.truncate(handles.replay_max);
                     }
                 }
@@ -1505,9 +1508,7 @@ mod tests {
         // 字符串兜底：纯文案 / 无 code 信封
         assert!(AcpError::Rpc("RPC error: Method not found".into()).is_method_not_found());
         assert!(AcpError::Rpc("RPC error: -32601".into()).is_method_not_found());
-        assert!(
-            AcpError::Rpc(r#"{"message":"Method not found"}"#.into()).is_method_not_found()
-        );
+        assert!(AcpError::Rpc(r#"{"message":"Method not found"}"#.into()).is_method_not_found());
         // 非 -32601 错误 → false
         assert!(
             !AcpError::Rpc(r#"{"code":-32602,"message":"Invalid params"}"#.into())
@@ -1526,7 +1527,8 @@ mod tests {
     }
 
     #[test]
-    fn session_update_variant_wire_strings_are_stable() {        // 契约锁定：wire 字符串 ↔ 变体映射（前端/平台依赖这些字符串，勿改拼写）。
+    fn session_update_variant_wire_strings_are_stable() {
+        // 契约锁定：wire 字符串 ↔ 变体映射（前端/平台依赖这些字符串，勿改拼写）。
         assert_eq!(
             SessionUpdateVariant::from_str("agent_message_chunk"),
             Some(SessionUpdateVariant::AgentMessageChunk)
@@ -2080,8 +2082,12 @@ for line in sys.stdin:
     else:
         pass
 "#;
-        let mut agent =
-            crate::test_utils::fake_acp_agent_with("fake-acp-rpc-timeout", script, Vec::new(), HashMap::new());
+        let mut agent = crate::test_utils::fake_acp_agent_with(
+            "fake-acp-rpc-timeout",
+            script,
+            Vec::new(),
+            HashMap::new(),
+        );
         agent.acp = Some(crate::agent_config::AcpProtocolConfig {
             rpc_timeout_secs: Some(1),
             ..Default::default()
@@ -2091,7 +2097,10 @@ for line in sys.stdin:
             .expect("fake ACP must initialize");
         let start = std::time::Instant::now();
         let result = client
-            .prepare_rpc(METHOD_SESSION_NEW, serde_json::json!({"cwd": ".", "mcpServers": []}))
+            .prepare_rpc(
+                METHOD_SESSION_NEW,
+                serde_json::json!({"cwd": ".", "mcpServers": []}),
+            )
             .expect("session/new must prepare")
             .complete()
             .await;
@@ -2756,10 +2765,8 @@ for line in sys.stdin:
     /// G1-03：声明 protocol_version/client_info 后按声明进 wire（覆盖路径）。
     #[tokio::test]
     async fn custom_protocol_version_and_client_info_reach_wire() {
-        let trace_path = std::env::temp_dir().join(format!(
-            "pylon-acp-handshake-{}.jsonl",
-            std::process::id()
-        ));
+        let trace_path =
+            std::env::temp_dir().join(format!("pylon-acp-handshake-{}.jsonl", std::process::id()));
         let script = r#"import json,sys
 trace=open(sys.argv[1],'w',encoding='utf-8')
 for line in sys.stdin:

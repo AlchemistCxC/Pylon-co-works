@@ -222,7 +222,9 @@ mod tests {
             "默认 prism 必须为 unavailable(\"test\")（与既有测试字面量一致）"
         );
         assert_eq!(
-            state.pet_last_persist_ms.load(std::sync::atomic::Ordering::Acquire),
+            state
+                .pet_last_persist_ms
+                .load(std::sync::atomic::Ordering::Acquire),
             0
         );
     }

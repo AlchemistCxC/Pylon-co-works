@@ -457,8 +457,8 @@ gateway:
 "#;
         let core = GatewayCore::from_config(crate::gateway::route::parse_config(yaml).unwrap());
         let binding = core.binding("qq:group:123");
-        let resolved = build_resolved("qq:group:123", "你好", binding)
-            .expect("build_resolved must assemble");
+        let resolved =
+            build_resolved("qq:group:123", "你好", binding).expect("build_resolved must assemble");
         assert_eq!(resolved.source, "qq:group:123");
         assert_eq!(resolved.content, "你好");
         let binding = resolved.binding.expect("static binding must hit");
@@ -474,7 +474,10 @@ gateway:
     fn ingest_rejects_empty_source_and_truncates_overlong_content() {
         // §3-4：build_resolved 纯函数直测（原 ingest() 测试改写）
         assert!(build_resolved("", "x", None).is_err());
-        assert!(build_resolved("   ", "x", None).is_err(), "空白 source 同样拒绝");
+        assert!(
+            build_resolved("   ", "x", None).is_err(),
+            "空白 source 同样拒绝"
+        );
         let long = "a".repeat(MAX_INGEST_CHARS + 1000);
         let resolved = build_resolved("qq:group:1", &long, None).unwrap();
         assert_eq!(resolved.content.chars().count(), MAX_INGEST_CHARS);
@@ -651,7 +654,10 @@ gateway:
             core.adapter_for_source("qq:group:123").is_some(),
             "注册适配器前缀命中必须返回适配器"
         );
-        assert!(core.adapter_for_source("qq").is_some(), "裸平台 key 也应命中");
+        assert!(
+            core.adapter_for_source("qq").is_some(),
+            "裸平台 key 也应命中"
+        );
         assert!(
             core.adapter_for_source("local").is_none(),
             "GUI source（无注册适配器）必须为 None"
@@ -660,7 +666,10 @@ gateway:
             core.adapter_for_source("wechat:group:1").is_none(),
             "未注册平台 key 必须为 None"
         );
-        assert!(core.adapter_for_source("").is_none(), "空 source 必须为 None");
+        assert!(
+            core.adapter_for_source("").is_none(),
+            "空 source 必须为 None"
+        );
         assert!(core.adapter_for_source(":").is_none(), "空 key 必须为 None");
     }
 
@@ -674,7 +683,10 @@ gateway:
             !core.is_platform_source("qq:group:999"),
             "无注册适配器 + 无 binding 的 qq:* 源必须判定 false（E14）"
         );
-        assert!(!core.is_platform_source("local"), "GUI source 必须判定 false");
+        assert!(
+            !core.is_platform_source("local"),
+            "GUI source 必须判定 false"
+        );
         assert!(!core.is_platform_source(""), "空 source 必须判定 false");
         // 有 binding（无适配器）→ true
         let bound = config_with(

@@ -214,7 +214,8 @@ impl AcpProtocolConfig {
     /// H5 prompt 超时（秒，缺省 300）。G2（W2 链 E）消费：wait_prompt_with_cancel。
     #[allow(dead_code)]
     pub fn prompt_timeout(&self) -> u64 {
-        self.prompt_timeout_secs.unwrap_or(crate::acp::PROMPT_TIMEOUT_SECS)
+        self.prompt_timeout_secs
+            .unwrap_or(crate::acp::PROMPT_TIMEOUT_SECS)
     }
 
     /// H6 cancel settle 超时（秒，缺省 30）。G2（W2 链 E）消费。
@@ -232,13 +233,16 @@ impl AcpProtocolConfig {
     /// H7 写通道超时（秒，缺省 10）。G2（W2 链 E）消费：permission.rs H18 同源建议。
     #[allow(dead_code)]
     pub fn write_timeout(&self) -> u64 {
-        self.write_timeout_secs.unwrap_or(crate::acp::DEFAULT_WRITE_TIMEOUT_SECS)
+        self.write_timeout_secs
+            .unwrap_or(crate::acp::DEFAULT_WRITE_TIMEOUT_SECS)
     }
 
     /// H10/H11 附件限制（缺省 8 / 10MB）。
     pub fn attachment_limits(&self) -> AttachmentLimits {
         AttachmentLimits {
-            max_attachments: self.max_attachments.unwrap_or(crate::acp::DEFAULT_MAX_ATTACHMENTS),
+            max_attachments: self
+                .max_attachments
+                .unwrap_or(crate::acp::DEFAULT_MAX_ATTACHMENTS),
             max_attachment_bytes: self
                 .max_attachment_bytes
                 .unwrap_or(crate::acp::DEFAULT_MAX_ATTACHMENT_BYTES),
@@ -332,13 +336,28 @@ pub(crate) fn default_client_info() -> serde_json::Value {
 /// 此处拦截 0 并指明 agent id；风格对齐 route.rs reset 校验）。
 fn validate_acp_section(id: &str, acp: &AcpProtocolConfig) -> Result<(), String> {
     let numeric = [
-        ("prompt_timeout_secs", acp.prompt_timeout_secs.map(|v| v as u128)),
-        ("cancel_settle_timeout_secs", acp.cancel_settle_timeout_secs.map(|v| v as u128)),
+        (
+            "prompt_timeout_secs",
+            acp.prompt_timeout_secs.map(|v| v as u128),
+        ),
+        (
+            "cancel_settle_timeout_secs",
+            acp.cancel_settle_timeout_secs.map(|v| v as u128),
+        ),
         ("rpc_timeout_secs", acp.rpc_timeout_secs.map(|v| v as u128)),
-        ("write_timeout_secs", acp.write_timeout_secs.map(|v| v as u128)),
+        (
+            "write_timeout_secs",
+            acp.write_timeout_secs.map(|v| v as u128),
+        ),
         ("max_attachments", acp.max_attachments.map(|v| v as u128)),
-        ("max_attachment_bytes", acp.max_attachment_bytes.map(|v| v as u128)),
-        ("replay_max_events", acp.replay_max_events.map(|v| v as u128)),
+        (
+            "max_attachment_bytes",
+            acp.max_attachment_bytes.map(|v| v as u128),
+        ),
+        (
+            "replay_max_events",
+            acp.replay_max_events.map(|v| v as u128),
+        ),
     ];
     for (field, value) in numeric {
         if value == Some(0) {
@@ -525,8 +544,8 @@ fn parse(content: &str) -> Result<HashMap<String, AgentDef>, String> {
         if id.trim().is_empty() {
             return Err("agents.yaml contains an agent with an empty id".to_string());
         }
-        let mut agent: AgentDef = serde_yml::from_value(raw)
-            .map_err(|error| format!("agent {id} 配置非法: {error}"))?;
+        let mut agent: AgentDef =
+            serde_yml::from_value(raw).map_err(|error| format!("agent {id} 配置非法: {error}"))?;
         // D2 兼容合并：acp 段未声明 set_model_api 时回退顶层 legacy bool
         // （agents.yaml 现状 hermes 即顶层 `set_model_api: true`——旧键保留，
         // bool 双格式兼容；acp 段显式声明优先）。
@@ -855,8 +874,10 @@ mod tests {
             crate::agent_config::AttachmentLimits::default().max_attachments > 0,
             "附件默认限制与常量同源"
         );
-        let mut config = AcpProtocolConfig::default();
-        config.session_close = Some(false);
+        let mut config = AcpProtocolConfig {
+            session_close: Some(false),
+            ..AcpProtocolConfig::default()
+        };
         assert!(!config.close_via_rpc(), "session_close: false 必须跳过 RPC");
         config.session_close = Some(true);
         assert!(config.close_via_rpc(), "session_close: true 必须尝试 RPC");
@@ -892,10 +913,8 @@ mod tests {
     /// G1-01：空 acp 段/无 acp 段 → 全部访问器 = 重构前硬编码现值（wire 零变化）。
     #[test]
     fn protocol_defaults_match_current_behavior() {
-        let path = std::env::temp_dir().join(format!(
-            "pylon-agents-protodef-{}.yaml",
-            std::process::id()
-        ));
+        let path =
+            std::env::temp_dir().join(format!("pylon-agents-protodef-{}.yaml", std::process::id()));
         std::fs::write(
             &path,
             "agents:\n  plain:\n    name: Plain\n    transport: subprocess\n    exe: plain\n",
@@ -912,7 +931,10 @@ mod tests {
             crate::acp::CANCEL_SETTLE_TIMEOUT_SECS
         );
         assert_eq!(protocol.rpc_timeout(), DEFAULT_RPC_TIMEOUT_SECS);
-        assert_eq!(protocol.write_timeout(), crate::acp::DEFAULT_WRITE_TIMEOUT_SECS);
+        assert_eq!(
+            protocol.write_timeout(),
+            crate::acp::DEFAULT_WRITE_TIMEOUT_SECS
+        );
         assert_eq!(protocol.replay_max(), DEFAULT_REPLAY_MAX_EVENTS);
         assert_eq!(protocol.protocol_version(), DEFAULT_PROTOCOL_VERSION);
         assert!(protocol.close_via_rpc(), "session_close 缺省必须尝试 RPC");
@@ -940,7 +962,10 @@ mod tests {
             serde_json::json!({"name": "Pylon", "version": "0.1.0"})
         );
         // DEFAULT_ACCPROTOCOL 静态与解析结果一致（AgentDef::protocol 缺省回退）
-        assert_eq!(DEFAULT_ACCPROTOCOL.set_model_api(), SetModelApi::ConfigOption);
+        assert_eq!(
+            DEFAULT_ACCPROTOCOL.set_model_api(),
+            SetModelApi::ConfigOption
+        );
         assert_eq!(DEFAULT_ACCPROTOCOL.prompt_timeout(), 300);
     }
 
@@ -950,16 +975,17 @@ mod tests {
         // 注意：serde_yml 对"空 flow mapping {} 为块内唯一尾部键"解析失败
         // （多键则正常）——测试用两键形态，生产配置同规避。
         let yaml = "agents:\n  future:\n    name: Future\n    transport: subprocess\n    exe: future\n    acp:\n      set_model_api: none\n      session_close: false\n      mcp_servers: omit_if_empty\n      initialize_caps:\n        fs: {}\n        auth: {}\n      protocol_version: 2\n      client_info:\n        name: Pylon\n        version: \"0.2.0\"\n      prompt_timeout_secs: 600\n      cancel_settle_timeout_secs: 45\n      rpc_timeout_secs: 60\n      write_timeout_secs: 15\n      max_attachments: 4\n      max_attachment_bytes: 5242880\n      replay_max_events: 5000\n";
-        let path = std::env::temp_dir().join(format!(
-            "pylon-agents-acpfull-{}.yaml",
-            std::process::id()
-        ));
+        let path =
+            std::env::temp_dir().join(format!("pylon-agents-acpfull-{}.yaml", std::process::id()));
         std::fs::write(&path, yaml).expect("write temp agent config");
         let agents = load_from_path(&path).expect("load runtime agent config");
         std::fs::remove_file(&path).ok();
         let protocol = agents["future"].protocol();
         assert_eq!(protocol.set_model_api(), SetModelApi::None);
-        assert!(!protocol.close_via_rpc(), "session_close: false 必须跳过 RPC");
+        assert!(
+            !protocol.close_via_rpc(),
+            "session_close: false 必须跳过 RPC"
+        );
         assert_eq!(protocol.mcp_servers, McpServersMode::OmitIfEmpty);
         assert_eq!(
             protocol.initialize_caps(),
@@ -1010,13 +1036,19 @@ mod tests {
             "agents:\n  bad:\n    name: Bad\n    transport: subprocess\n    exe: agent\n    acp:\n      prompt_timeout_secs: -5\n",
         )
         .expect_err("负数值必须拒绝");
-        assert!(error.contains("agent bad"), "报错必须指明 agent id: {error}");
+        assert!(
+            error.contains("agent bad"),
+            "报错必须指明 agent id: {error}"
+        );
         // 0：parse 校验层拒绝（u64 可解析，语义非法）
         let error = parse(
             "agents:\n  bad:\n    name: Bad\n    transport: subprocess\n    exe: agent\n    acp:\n      prompt_timeout_secs: 0\n",
         )
         .expect_err("0 必须拒绝");
-        assert!(error.contains("agent bad"), "报错必须指明 agent id: {error}");
+        assert!(
+            error.contains("agent bad"),
+            "报错必须指明 agent id: {error}"
+        );
         assert!(
             error.contains("prompt_timeout_secs"),
             "报错必须指明字段: {error}"
@@ -1042,16 +1074,19 @@ mod tests {
             "agents:\n  bad:\n    name: Bad\n    transport: subprocess\n    exe: agent\n    acp:\n      set_model_api: unknown\n",
         )
         .expect_err("未知 set_model_api 必须拒绝");
-        assert!(error.contains("agent bad"), "报错必须指明 agent id: {error}");
         assert!(
-            error.contains("set_model_api"),
-            "报错必须指明字段: {error}"
+            error.contains("agent bad"),
+            "报错必须指明 agent id: {error}"
         );
+        assert!(error.contains("set_model_api"), "报错必须指明字段: {error}");
         let error = parse(
             "agents:\n  bad:\n    name: Bad\n    transport: subprocess\n    exe: agent\n    acp:\n      mcp_servers: sometimes\n",
         )
         .expect_err("未知 mcp_servers 必须拒绝");
-        assert!(error.contains("agent bad"), "报错必须指明 agent id: {error}");
+        assert!(
+            error.contains("agent bad"),
+            "报错必须指明 agent id: {error}"
+        );
         assert!(error.contains("mcp_servers"), "报错必须指明字段: {error}");
         // 合法值不受影响（正对照）
         assert!(
