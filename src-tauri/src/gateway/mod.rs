@@ -190,6 +190,44 @@ impl GatewayCore {
         self.adapters.lock().ok().and_then(|a| a.get(key).cloned())
     }
 
+    /// source 归属的平台 key（首段）。空 source/无冒号时返回空串。
+    /// 全部"按 source 取适配器/判定平台源"的消费点统一走本辅助（§3-1 收敛 5 处
+    /// `split(':')` 前缀匹配）。
+    fn platform_key_of(source: &str) -> &str {
+        source.split(':').next().unwrap_or("")
+    }
+
+    /// 按 source 前缀取已注册适配器（"qq:group:1" → "qq"）。
+    /// 与 deliver_all 前缀语义完全一致——所有"按 source 取适配器"的消费点统一走这里。
+    /// 未注册该 key 的适配器（含 GUI source）返回 None。
+    pub fn adapter_for_source(&self, source: &str) -> Option<Arc<dyn PlatformAdapter>> {
+        let key = Self::platform_key_of(source);
+        if key.is_empty() {
+            return None;
+        }
+        self.adapter(key)
+    }
+
+    /// 平台源判定：注册的适配器前缀命中 或 静态绑定命中。
+    /// 语义与 check_session_expiry 现有闭包（session.rs:618-623）逐字一致——
+    /// "有注册适配器 OR 有 binding"（与 deliver_all 出站白名单的前置条件等价，E14 封闭）。
+    /// 注意：QQ 适配器未注册（无 PYLON_QQ_APP_ID 凭据启动）时，qq:* 源仅 binding
+    /// 命中才返回 true；两者皆无 → false。若未来引入运行时注册（B10.5），需同步收严。
+    /// §3-9 跨组消费（session.rs/lib.rs 平台判定收敛，W2/W3 波执行）前无生产调用者。
+    #[allow(dead_code)]
+    pub fn is_platform_source(&self, source: &str) -> bool {
+        let prefix_hit = {
+            let key = Self::platform_key_of(source);
+            !key.is_empty()
+                && self
+                    .adapters
+                    .lock()
+                    .map(|a| a.contains_key(key))
+                    .unwrap_or(false)
+        };
+        prefix_hit || self.binding(source).is_some()
+    }
+
     /// 注册平台适配器；platform_key 重复 → Err。
     /// 由 lib.rs run()/命令接线注册（QQ 适配器启动注册，deliver_all 分发到平台）。
     pub fn register(&self, adapter: Arc<dyn PlatformAdapter>) -> Result<(), String> {
@@ -258,22 +296,13 @@ impl GatewayCore {
     /// - 其他事件 → deliver_event
     ///   投递失败（含未接线适配器）只告警，不阻断 WebView 事件。
     pub fn deliver_all(&self, source: &str, event: &str, payload: &serde_json::Value) {
-        // 修复（P3）：前缀匹配提为平台 key 比较（source "qq:group:1" → "qq"），
-        // 不再每适配器每元素 format! 一次（原实现与 starts_with("key:") 等价）。
-        let key = source.split(':').next().unwrap_or("");
-        let adapters: Vec<Arc<dyn PlatformAdapter>> = self
-            .adapters
-            .lock()
-            .map(|a| {
-                a.values()
-                    .filter(|adapter| adapter.platform_key() == key)
-                    .cloned()
-                    .collect()
-            })
-            .unwrap_or_default();
-        if adapters.is_empty() {
+        // §3-1：适配器查找统一走 adapter_for_source（平台 key 前缀 + 单 Arc 克隆，
+        // 替代 filter + collect Vec——GUI source 每次事件不再付一次空 Vec 分配）。
+        // 锁序保持"先适配器后绑定"（§1.6-1，B1 修复产物）：GUI source（key 无注册
+        // 适配器）在此提前返回，不触发"拒绝未绑定"告警。
+        let Some(adapter) = self.adapter_for_source(source) else {
             return;
-        }
+        };
         // B1：出站白名单（安全收紧）——source 必须是 binding 命中的平台源。
         // GUI 会话冒名 qq:*（无 binding）不得被投递到平台；配置锁中毒 fail-closed。
         let bound = self
@@ -292,27 +321,21 @@ impl GatewayCore {
             if text.is_empty() {
                 return;
             }
-            for adapter in &adapters {
-                for chunk in truncate::truncate_message(&text, adapter.max_message_len()) {
-                    if let Err(error) = adapter.deliver_text(source, &chunk) {
-                        tracing::warn!(
-                            "gateway deliver_text({}) failed: {}",
-                            adapter.platform_key(),
-                            error
-                        );
-                    }
-                }
-            }
-        } else {
-            for adapter in &adapters {
-                if let Err(error) = adapter.deliver_event(source, event, payload) {
+            for chunk in truncate::truncate_message(&text, adapter.max_message_len()) {
+                if let Err(error) = adapter.deliver_text(source, &chunk) {
                     tracing::warn!(
-                        "gateway deliver_event({}) failed: {}",
+                        "gateway deliver_text({}) failed: {}",
                         adapter.platform_key(),
                         error
                     );
                 }
             }
+        } else if let Err(error) = adapter.deliver_event(source, event, payload) {
+            tracing::warn!(
+                "gateway deliver_event({}) failed: {}",
+                adapter.platform_key(),
+                error
+            );
         }
     }
 }
@@ -640,6 +663,71 @@ gateway:
             &serde_json::json!({"update": {}}),
         );
         assert!(core.adapter_keys().is_empty());
+    }
+
+    #[test]
+    fn adapter_for_source_resolves_registered_adapter_by_prefix() {
+        let core = GatewayCore::new();
+        let qq = FakeAdapter::new("qq", 4000);
+        core.register(qq.clone()).unwrap();
+        assert!(
+            core.adapter_for_source("qq:group:123").is_some(),
+            "注册适配器前缀命中必须返回适配器"
+        );
+        assert!(core.adapter_for_source("qq").is_some(), "裸平台 key 也应命中");
+        assert!(
+            core.adapter_for_source("local").is_none(),
+            "GUI source（无注册适配器）必须为 None"
+        );
+        assert!(
+            core.adapter_for_source("wechat:group:1").is_none(),
+            "未注册平台 key 必须为 None"
+        );
+        assert!(core.adapter_for_source("").is_none(), "空 source 必须为 None");
+        assert!(core.adapter_for_source(":").is_none(), "空 key 必须为 None");
+    }
+
+    #[test]
+    fn is_platform_source_hits_adapter_prefix_or_binding() {
+        // E14 语义：is_platform_source = "有注册适配器 OR 有 binding"
+        // （与 deliver_all 出站白名单等价；QQ 适配器未注册时 qq:* 冒名源判定 false）
+        let core = GatewayCore::new();
+        // 无注册适配器 + 无 binding → qq:* 判定 false（E14 钉住）
+        assert!(
+            !core.is_platform_source("qq:group:999"),
+            "无注册适配器 + 无 binding 的 qq:* 源必须判定 false（E14）"
+        );
+        assert!(!core.is_platform_source("local"), "GUI source 必须判定 false");
+        assert!(!core.is_platform_source(""), "空 source 必须判定 false");
+        // 有 binding（无适配器）→ true
+        let bound = config_with(
+            r#"
+gateway:
+  routes:
+    - source: qq:group:123
+      agent: peri
+      profile: trpg
+      session: 战役1
+"#,
+        );
+        assert!(
+            bound.is_platform_source("qq:group:123"),
+            "binding 命中必须判定为平台源"
+        );
+        assert!(
+            !bound.is_platform_source("qq:user:999"),
+            "无 binding 的 qq:* 源在无适配器时必须判定 false"
+        );
+        // 有注册适配器（无 binding）→ true（前缀命中；deliver_all 层面仍被绑定白名单拒绝）
+        bound.register(FakeAdapter::new("qq", 4000)).unwrap();
+        assert!(
+            bound.is_platform_source("qq:user:999"),
+            "注册适配器前缀命中必须判定为平台源"
+        );
+        assert!(
+            !bound.is_platform_source("local"),
+            "GUI source（无注册适配器）必须判定 false"
+        );
     }
 
     #[test]
