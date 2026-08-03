@@ -203,13 +203,13 @@ impl AcpProtocolConfig {
     /// H5 prompt 超时（秒，缺省 300）。G2（W2 链 E）消费：wait_prompt_with_cancel。
     pub fn prompt_timeout(&self) -> u64 {
         self.prompt_timeout_secs
-            .unwrap_or(crate::acp::PROMPT_TIMEOUT_SECS)
+            .unwrap_or(crate::acp::DEFAULT_PROMPT_TIMEOUT_SECS)
     }
 
     /// H6 cancel settle 超时（秒，缺省 30）。G2（W2 链 E）消费。
     pub fn cancel_settle_timeout(&self) -> u64 {
         self.cancel_settle_timeout_secs
-            .unwrap_or(crate::acp::CANCEL_SETTLE_TIMEOUT_SECS)
+            .unwrap_or(crate::acp::DEFAULT_CANCEL_SETTLE_TIMEOUT_SECS)
     }
 
     /// H8/H9 通用 RPC 超时（秒，缺省 30；complete + 回放共用）。
@@ -901,10 +901,13 @@ mod tests {
         let protocol = agents["plain"].protocol();
         // G1-01 自检：D2 兼容合并——顶层 legacy bool 与 acp 段缺省等价
         assert_eq!(protocol.set_model_api(), SetModelApi::ConfigOption);
-        assert_eq!(protocol.prompt_timeout(), crate::acp::PROMPT_TIMEOUT_SECS);
+        assert_eq!(
+            protocol.prompt_timeout(),
+            crate::acp::DEFAULT_PROMPT_TIMEOUT_SECS
+        );
         assert_eq!(
             protocol.cancel_settle_timeout(),
-            crate::acp::CANCEL_SETTLE_TIMEOUT_SECS
+            crate::acp::DEFAULT_CANCEL_SETTLE_TIMEOUT_SECS
         );
         assert_eq!(protocol.rpc_timeout(), DEFAULT_RPC_TIMEOUT_SECS);
         assert_eq!(protocol.replay_max(), DEFAULT_REPLAY_MAX_EVENTS);

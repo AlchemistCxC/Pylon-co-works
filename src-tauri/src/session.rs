@@ -797,19 +797,12 @@ async fn create_session_slot(
     }
     let generation = state.current_generation(runtime);
     // G2-07：McpServersMode 消费（G1 入口，E4 警告语义见 acp.rs 构造器 doc）——
-    // per-agent 协议配置解析，缺省 Always = 现状 wire。
-    // Always 走 2 参包装（session_new_params = Always 恒发语义；G1 交付未带
-    // allow(dead_code) 且 acp.rs 禁碰，本分支保持其生产消费——登记偏差 4）；
-    // OmitIfEmpty 走 with_mode 显式删键路径（v2 语义）。
-    let mode = state.protocol_for_runtime(runtime).mcp_servers;
-    let params = match mode {
-        crate::agent_config::McpServersMode::Always => {
-            acp::session_new_params(session_cwd, wire_mcp_servers.to_vec())?
-        }
-        crate::agent_config::McpServersMode::OmitIfEmpty => {
-            acp::session_new_params_with_mode(session_cwd, wire_mcp_servers.to_vec(), mode)?
-        }
-    };
+    // per-agent 协议配置解析，缺省 Always = 现状 wire；OmitIfEmpty 显式删键（v2 语义）。
+    let params = acp::session_new_params(
+        session_cwd,
+        wire_mcp_servers.to_vec(),
+        state.protocol_for_runtime(runtime).mcp_servers,
+    )?;
     let response = match state
         .acp_rpc(runtime, acp::METHOD_SESSION_NEW, params)
         .await
@@ -2011,8 +2004,14 @@ pub(crate) async fn load_persisted_session(
     )?;
     // O3：锁内仅提取回放句柄，等待在锁外进行——回放最长 30s，不阻塞其他命令。
     let handles = runtime.acp.lock().await.replay_handles();
-    let load_result =
-        AcpClient::load_session_with_replay(handles, &peri_id, &cwd, mcp_servers).await;
+    let load_result = AcpClient::load_session_with_replay(
+        handles,
+        &peri_id,
+        &cwd,
+        mcp_servers,
+        state.protocol_for_runtime(&runtime).mcp_servers,
+    )
+    .await;
     match load_result {
         Ok((response, _replay)) => {
             if let Err(error) = state.ensure_generation(&runtime, generation) {

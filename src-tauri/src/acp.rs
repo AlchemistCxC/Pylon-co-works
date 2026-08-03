@@ -92,25 +92,12 @@ fn content_blocks_from_values(values: Vec<serde_json::Value>) -> Result<Vec<Cont
         .collect()
 }
 
-/// session/new 参数。mcpServers 以 Pylon 自有格式直传（官方 McpServer 需 name 字段）。
-/// G1-07a：mode 参数化核心为 [`session_new_params_with_mode`]——本签名保持
-/// McpServersMode::Always（现状 wire：恒发 mcpServers 字段，session.rs 调用点
-/// 无需改动；G2 波次接线时切换）。
-/// E4 警告：OmitIfEmpty 与 agent 能力匹配——声明 omit_if_empty 且无配置时省字段，
-/// Hermes（Pydantic 必填）会拒绝 session/new；配置与 agent 能力匹配是用户责任，
-/// 默认 Always = 现状 wire，安全。
-pub fn session_new_params(
-    cwd: &str,
-    mcp_servers: Vec<serde_json::Value>,
-) -> Result<serde_json::Value, String> {
-    session_new_params_with_mode(cwd, mcp_servers, McpServersMode::Always)
-}
-
-/// session/new 参数（G1-07a mode 参数化核心）：Always = 恒发 mcpServers 字段
+/// session/new 参数（G1-07a mode 参数化）：Always = 恒发 mcpServers 字段
 /// （现状 wire）；OmitIfEmpty = 空数组时省略字段（v2 语义，07 文档 §8.2）。
 /// E4 警告：OmitIfEmpty 与 agent 能力匹配——声明 omit_if_empty 且无配置时省字段，
 /// Hermes（Pydantic 必填）会拒绝 session/new；配置与 agent 能力匹配是用户责任。
-pub fn session_new_params_with_mode(
+/// 调用方经 `agent.protocol().mcp_servers` 传 mode（session.rs 统一接线）。
+pub fn session_new_params(
     cwd: &str,
     mcp_servers: Vec<serde_json::Value>,
     mode: McpServersMode,
@@ -264,7 +251,9 @@ impl AcpError {
 pub const BROADCAST_CAP: usize = 256;
 /// mpsc channel capacity for stdin writes — bounded to provide backpressure.
 pub const WRITE_CHAN_CAP: usize = 256;
-/// Default prompt timeout in seconds (G1-05：DEFAULT_* 前缀统一；值不变)。
+/// G1-05：DEFAULT_* 前缀统一；值不变。超时访问器（prompt_timeout/
+/// cancel_settle_timeout）在 AcpProtocolConfig（agent_config.rs），
+/// DEFAULT_* 为"无声明=现状"默认值的唯一事实源。
 pub const DEFAULT_PROMPT_TIMEOUT_SECS: u64 = 300;
 /// Maximum time to wait for Peri's final prompt response after sending cancel.
 pub const DEFAULT_CANCEL_SETTLE_TIMEOUT_SECS: u64 = 30;
@@ -277,10 +266,6 @@ pub const DEFAULT_WRITE_TIMEOUT_SECS: u64 = 10;
 pub const DEFAULT_MAX_ATTACHMENT_BYTES: u64 = 10 * 1024 * 1024;
 /// Maximum number of attachments in one prompt.
 pub const DEFAULT_MAX_ATTACHMENTS: usize = 8;
-/// G1-05 过渡别名：W2（G2-06 超时参数化消费）落地前 session.rs 仍引用旧名；
-/// G2 波次完成后由 G2 链删除（值不变，wire 契约不变）。
-pub const PROMPT_TIMEOUT_SECS: u64 = DEFAULT_PROMPT_TIMEOUT_SECS;
-pub const CANCEL_SETTLE_TIMEOUT_SECS: u64 = DEFAULT_CANCEL_SETTLE_TIMEOUT_SECS;
 
 type Pending = HashMap<u64, oneshot::Sender<RawMessage>>;
 const PENDING_SHARDS: usize = 16;
@@ -1349,11 +1334,14 @@ impl AcpClient {
     /// observing the response on this broadcast receiver is the deterministic replay boundary.
     /// O3：接受 [`Self::replay_handles`] 产出的句柄而非 &self——调用方在锁内提取
     /// 句柄后释放锁，等待（最长 30s）在锁外进行，期间其他命令可执行。
+    /// G1-07a：mode 参数化——调用方（session.rs / export.rs）经
+    /// `agent.protocol().mcp_servers` 传值；Always = 现状 wire（恒发）。
     pub async fn load_session_with_replay(
         handles: ReplayHandles,
         session_id: &str,
         cwd: &str,
         mcp_servers: Vec<serde_json::Value>,
+        mode: McpServersMode,
     ) -> Result<(serde_json::Value, Vec<serde_json::Value>), AcpError> {
         // 审查修复：与 prepare_rpc 一致，死亡连接立即拒绝
         if handles.crashed.load(Ordering::Relaxed) {
@@ -1363,10 +1351,7 @@ impl AcpClient {
         // 回放与响应均经 broadcast 收集，无需注册 pending：旧代码的 (tx, _rx)
         // 条目永不消费（reader 对已丢弃 rx 的 tx.send 必然失败），确认无功能
         // 依赖后删除；id 仅用于在广播流中匹配响应。
-        // G1-07a：mode 恒传 Always（现状 wire）——调用方（session.rs:1835 /
-        // export.rs:172）为跨组文件，G2 波次接线时经 agent.protocol().mcp_servers
-        // 切换 OmitIfEmpty（v2 语义）。
-        let params = Self::load_params(session_id, cwd, mcp_servers, McpServersMode::Always)?;
+        let params = Self::load_params(session_id, cwd, mcp_servers, mode)?;
         let (id, line) = Self::register_line(&handles.next_id, METHOD_SESSION_LOAD, &params)?;
         send_line(handles.write_tx, line, &handles.crashed).await?;
 
@@ -1587,7 +1572,7 @@ mod tests {
     /// 非空数组 → 照常插入。new/load 双路径。
     #[test]
     fn omit_if_empty_mode_omits_empty_field() {
-        let params = crate::acp::session_new_params_with_mode(
+        let params = crate::acp::session_new_params(
             "G:/workspace",
             Vec::new(),
             crate::agent_config::McpServersMode::OmitIfEmpty,
@@ -1597,7 +1582,7 @@ mod tests {
             params.get("mcpServers").is_none(),
             "OmitIfEmpty + 空数组必须省略 mcpServers 键: {params}"
         );
-        let params = crate::acp::session_new_params_with_mode(
+        let params = crate::acp::session_new_params(
             "G:/workspace",
             vec![serde_json::json!({"name": "mcp-1"})],
             crate::agent_config::McpServersMode::OmitIfEmpty,
@@ -1629,9 +1614,11 @@ mod tests {
     /// G1-07a：Always = 现状 wire——空数组恒发 mcpServers 字段（new/load 双路径）。
     #[test]
     fn always_mode_keeps_field() {
-        let params = crate::acp::session_new_params("G:/workspace", Vec::new()).unwrap();
+        let params =
+            crate::acp::session_new_params("G:/workspace", Vec::new(), McpServersMode::Always)
+                .unwrap();
         assert_eq!(params["mcpServers"], serde_json::json!([]));
-        let params = crate::acp::session_new_params_with_mode(
+        let params = crate::acp::session_new_params(
             "G:/workspace",
             Vec::new(),
             crate::agent_config::McpServersMode::Always,
@@ -2066,6 +2053,7 @@ for line in sys.stdin:
             "fake-session-replay",
             ".",
             Vec::new(),
+            McpServersMode::Always,
         )
         .await
         .expect("session/load must return after replay response");
@@ -2152,6 +2140,7 @@ for line in sys.stdin:
             "target-cap",
             ".",
             Vec::new(),
+            McpServersMode::Always,
         )
         .await
         .expect("session/load must return after replay response");
@@ -2491,6 +2480,7 @@ for line in sys.stdin:
             "target-session",
             ".",
             Vec::new(),
+            McpServersMode::Always,
         )
         .await
         .expect("target session load must succeed");
@@ -2529,6 +2519,7 @@ sys.exit(0)
                 "fake-session-replay-eof",
                 ".",
                 Vec::new(),
+                McpServersMode::Always,
             ),
         )
         .await
