@@ -88,4 +88,19 @@ assert.doesNotMatch(settings, /<Group title="强调色">/, 'Settings 不得再�
 assert.doesNotMatch(settings, /<Group title="布局骨架">/, 'Settings 不得再手写布局骨架组')
 assert.equal((settings.match(/<ConfigBackupRow \/>/g) ?? []).length, 1, 'ConfigBackupRow 不得重复渲染')
 
+// ── 高危修复契约（2026-08-03 逻辑检测）──
+// setGlobalPreset 不得无条件重置 ccLayout（保留用户排布）
+assert.match(store, /setGlobalPreset[\s\S]*?theme\.ccLayout \? \{ ccLayout: normalizeCcLayout/, 'setGlobalPreset 必须仅在预设携带 ccLayout 时归一化')
+// ConfigOptionsPanel 按 option 序列号守卫回滚
+const configPanel = read('../src/components/settings/ConfigOptionsPanel.tsx')
+assert.match(configPanel, /latestReqRef/, 'ConfigOptionsPanel 必须维护请求序列号')
+assert.match(configPanel, /if \(latestReqRef\.current\[id\] !== seq\) return/, '旧请求失败不得回滚')
+// App 启动恢复 profile 选择（防默认值覆写）
+const app = read('../src/App.tsx')
+assert.match(app, /profileRestoredRef/, 'App 必须防止启动覆写 profile 选择')
+// commitReplay 合并 load 期间 live 消息
+const controller = read('../src/components/chat/chatEventController.ts')
+assert.match(controller, /liveAdditions = existing \? existing\.messages\.slice\(cached\.length\)/, 'commitReplay 必须保留 load 期间 live 消息')
+assert.match(controller, /seq: maxSeq/, 'initSource 必须从缓存推进 seq（live/replay id 不撞）')
+
 console.log('Settings 骨架优化（default 派生/校验器/字段恢复/手写组声明式化）回归测试通过')

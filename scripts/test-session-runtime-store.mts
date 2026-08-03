@@ -207,9 +207,9 @@ function apply(state: ChatRuntimeState, event: ChatEvent, now = 1_000_000): Chat
   s = apply(s, { type: 'error', source: SOURCE, error: 'cancel failed', cancelled: false }, 2_000_000)
   const r = s[SOURCE]
   assert.equal(r.cancelState.status, 'generating', '取消失败回滚为 generating')
-  assert.equal(r.generating, true, 'cancellationFailed 不收敛 generating（与现状一致）')
-  assert.equal(r.lastSummary, undefined)
-  assert.equal(r.streamingThinking, '', 'cancellationFailed 不 flush streaming（与现状一致）')
+  assert.equal(r.generating, false, 'cancellationFailed 必须收敛 generating（2026-08-03 修复：否则 spinner 常转）')
+  assert.equal(r.lastSummary?.reason, 'error', 'cancellationFailed 必须写 error summary')
+  assert.equal(r.streamingThinking, '', 'streaming 已落盘')
   assert.equal(r.messages.at(-1)?.content, 'cancel failed')
 }
 
@@ -265,6 +265,19 @@ function apply(state: ChatRuntimeState, event: ChatEvent, now = 1_000_000): Chat
   const s = initialState()
   const next = applyChatEvent(s, { type: 'user', source: 'local:unknown', content: 'x' }, { knownSources: [SOURCE], renderedSource: null, now: 1 })
   assert.equal(next, s, '未知 source 必须返回原状态（引用相等）')
+}
+
+// ── 终态收敛：replay 作用域 done 也必须复位 generating（2026-08-03 修复）──
+{
+  let s = initialState()
+  // user 事件先置 generating=true（load 期间 replaying 未初始化时被判 live）
+  s = apply(s, { type: 'user', source: SOURCE, content: 'live-during-load' }, 1_000_000)
+  assert.equal(s[SOURCE].generating, true)
+  // replay 标记的 done（replay 缓冲已初始化）不得把 generating 留在 true
+  s = applyChatEvent(s, { type: 'done', source: SOURCE, explicitReplay: true }, { knownSources: [SOURCE], renderedSource: null, now: 2_000_000 })
+  const r = s[SOURCE]
+  assert.equal(r.generating, false, 'replay 作用域 done 必须收敛 generating')
+  assert.equal(r.lastSummary, undefined, 'replay 作用域不写 live summary')
 }
 
 console.log('sessionRuntimeStore reducer 等价回归测试通过')

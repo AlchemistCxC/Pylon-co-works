@@ -79,7 +79,18 @@ export default function App() {
     hydrateWorkspaceSheets()
   }, [hydrateWorkspaceSheets])
 
+  // 2026-08-03 修复：启动时不得用默认 activeProfileId 覆盖持久化的该 agent profile 选择。
+  // 首次运行从 sheetAgentStates 恢复；之后（用户切换 profile/agent）才写回。
+  const profileRestoredRef = useRef(false)
   useEffect(() => {
+    if (!profileRestoredRef.current) {
+      profileRestoredRef.current = true
+      const restored = useWorkspaceStore.getState().sheetAgentStates[activeAgent]?.activeProfileId
+      if (restored && restored !== activeProfileId) {
+        useIdentityStore.getState().setActiveProfile(restored)
+      }
+      return
+    }
     setSheetAgentState(activeAgent, { activeProfileId, activeSessionId: activeSession || undefined })
   }, [activeAgent, activeProfileId, activeSession, setSheetAgentState])
 

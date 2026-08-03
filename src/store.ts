@@ -206,7 +206,9 @@ export const useStore = create<ThemeState>()(persist(
    */
   setGlobalPreset: (name, theme) => set(_ => ({
     ...theme,
-    ccLayout: normalizeCcLayout(theme.ccLayout),
+    // 预设不携带 ccLayout 时保留用户现有排布（与 applyZonePreset 一致；无条件
+    // normalizeCcLayout(undefined) 会重置用户拖拽/排序的自定义 widget 布局）
+    ...(theme.ccLayout ? { ccLayout: normalizeCcLayout(theme.ccLayout) } : {}),
     activePreset: Object.fromEntries(ZONES.map(zone => [zone, name])),
     dirty: Object.fromEntries(ZONES.map(zone => [zone, false])),
   })),

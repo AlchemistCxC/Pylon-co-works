@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react'
+import { useMemo, useRef, useState } from 'react'
 import { useRuntimeStore } from '../../runtimeStore'
 import { normalizeConfigOptions } from './configOptionState'
 import ConfigOptionField from './ConfigOptionField'
@@ -10,10 +10,15 @@ export default function ConfigOptionsPanel({ sessionSource }: { sessionSource?: 
   const setSessionConfig = useRuntimeStore(state => state.setSessionConfig)
   const [pending, setPending] = useState<Record<string, boolean>>({})
   const [errors, setErrors] = useState<Record<string, string>>({})
+  // 每 option 的请求序列号：仅最新请求可回滚/报错/清 pending——
+  // 旧请求失败时其值已被更新的在途请求取代，回滚会把成功提交的新值覆盖回旧值。
+  const latestReqRef = useRef<Record<string, number>>({})
   const options = useMemo(() => normalizeConfigOptions(config?.raw), [config?.raw])
   if (!sessionSource || options.length === 0) return <div className="set-hint">当前会话暂无动态配置选项。</div>
 
   const update = async (id: string, value: unknown) => {
+    const seq = (latestReqRef.current[id] ?? 0) + 1
+    latestReqRef.current[id] = seq
     const previous = options.find(option => option.id === id)?.currentValue
     // 乐观更新与回滚都基于最新 store 的 raw 打补丁，而非渲染快照：
     // 快速连续更新时旧快照重建会把先成功字段的乐观值覆盖回旧值。
@@ -31,11 +36,12 @@ export default function ConfigOptionsPanel({ sessionSource }: { sessionSource?: 
     try {
       await invoke('set_config_option', { source: sessionSource, key: id, value })
     } catch (error) {
+      if (latestReqRef.current[id] !== seq) return
       patch(previous)
       const detail = reportRuntimeError(`更新配置 ${id}`, error)
       setErrors(state => ({ ...state, [id]: detail.message }))
     } finally {
-      setPending(state => ({ ...state, [id]: false }))
+      if (latestReqRef.current[id] === seq) setPending(state => ({ ...state, [id]: false }))
     }
   }
 

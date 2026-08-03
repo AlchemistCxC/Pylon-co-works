@@ -345,18 +345,23 @@ export function applyChatEvent(
       const replay = current.replaying !== undefined
       const terminationScope = replay || event.explicitReplay === true ? 'replay' : 'live'
       let runtime = settleMessages(current, replay, now)
-      if (terminationScope === 'live') {
+      // 有流式缓冲（live 作用域，或 replay/live 交错时 load 期间已发消息）都要落盘
+      if (terminationScope === 'live' || runtime.streamingText || runtime.streamingThinking) {
         runtime = flushStreaming(runtime, false, now)
-        runtime = {
-          ...runtime,
-          generating: false,
-          generationStart: undefined,
+      }
+      // 终态收敛：无论作用域都复位 generating（replay/live 交错时 user 事件先置 true、
+      // replay 作用域 done 不收敛会导致 spinner 常转）；summary 仅 live 作用域写
+      runtime = {
+        ...runtime,
+        generating: false,
+        generationStart: undefined,
+        ...(terminationScope === 'live' ? {
           lastSummary: {
             elapsedMs: now - (current.generationStart ?? now),
             tokenCount: current.tokenCount,
             reason: 'done',
           },
-        }
+        } : {}),
       }
       return { ...state, [source]: runtime }
     }
@@ -364,9 +369,6 @@ export function applyChatEvent(
     case 'error': {
       const replay = current.replaying !== undefined
       const terminationScope = replay || event.explicitReplay === true ? 'replay' : 'live'
-      const cancellationFailed = terminationScope === 'live'
-        && current.cancelState.status === 'canceling'
-        && event.cancelled !== true
       let runtime = settleMessages(current, replay, now)
       runtime = {
         ...runtime,
@@ -378,8 +380,10 @@ export function applyChatEvent(
             )
           : runtime.cancelState,
       }
-      if (terminationScope === 'live' && !cancellationFailed) {
-        // 与现状一致：streaming 落盘在 error 消息之前
+      // 与现状一致：streaming 落盘在 error 消息之前。cancellationFailed（cancel 在途但
+      // cancelled!=true）也在此收敛：applyCancelEvent(error) 已把 cancelState 弹回
+      // generating，后续 cancel-success/rejected 全部 no-op，若不收敛 generating 永不复位
+      if (terminationScope === 'live') {
         runtime = flushStreaming(runtime, false, now)
       }
       const seq = runtime.seq + 1
@@ -390,17 +394,18 @@ export function applyChatEvent(
         content: event.error,
         time: nowTime(now),
       }, seq)
-      if (terminationScope === 'live' && !cancellationFailed) {
-        runtime = {
-          ...runtime,
-          generating: false,
-          generationStart: undefined,
+      // 终态收敛：无论作用域都复位 generating（同 done 的交错防护）
+      runtime = {
+        ...runtime,
+        generating: false,
+        generationStart: undefined,
+        ...(terminationScope === 'live' ? {
           lastSummary: {
             elapsedMs: now - (current.generationStart ?? now),
             tokenCount: current.tokenCount,
             reason: event.cancelled === true ? 'cancelled' : 'error',
           },
-        }
+        } : {}),
       }
       return { ...state, [source]: runtime }
     }

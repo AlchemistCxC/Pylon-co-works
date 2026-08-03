@@ -172,11 +172,17 @@ export function attachChatEventController(refs: ChatEventControllerRefs): ChatCo
   const initSource = (source: string, cached: Message[]): Message[] => {
     const existing = runtimeState[source]
     if (existing) return existing.messages
+    // seq 从缓存推进：load 期间 live 消息与 replay 共用同一单调 seq，id 不撞缓存旧 id
+    const maxSeq = cached.reduce((max, message) => {
+      const n = /-(\d+)$/.exec(message.id)?.[1]
+      return n ? Math.max(max, Number(n)) : max
+    }, 0)
     runtimeState = {
       ...runtimeState,
       [source]: {
         ...createSourceChatRuntime(source),
         messages: cached.map(message => ({ ...message, running: false })),
+        seq: maxSeq,
       },
     }
     return runtimeState[source].messages
@@ -185,17 +191,17 @@ export function attachChatEventController(refs: ChatEventControllerRefs): ChatCo
   const commitReplay = (source: string, cached: Message[]): Message[] => {
     const existing = runtimeState[source]
     const replayed = existing?.replaying ?? []
-    let resolved = resolveLoadedMessages({ loadSucceeded: true, cached, replayed })
-    // 2026-08-02 修复：replay 缓冲与本地缓存均为空（持久化失败/无历史场景）时，
-    // 不得用空数组覆盖内存中已有消息——live 事件可能已先行写入（load 期间 agent 已回话）。
-    if (resolved.length === 0 && existing && existing.messages.length > 0) {
-      resolved = existing.messages
-    }
+    const resolved = resolveLoadedMessages({ loadSucceeded: true, cached, replayed })
+    // 保留 load 期间 live 到达的消息：existing.messages = initSource 的 cached 前缀 + live 增量，
+    // 按位置取前缀之后部分（id 经 initSource seq 推进保证单调不撞），与 replay 权威历史合并。
+    // 覆盖旧实现"resolved 非空即整体覆盖"——load 期间用户发消息/agent 已回话会被丢弃。
+    const liveAdditions = existing ? existing.messages.slice(cached.length) : []
+    const merged = liveAdditions.length > 0 ? [...resolved, ...liveAdditions] : resolved
     const base = existing
-      ? { ...existing, replaying: undefined, replayToolIds: [], messages: resolved }
+      ? { ...existing, replaying: undefined, replayToolIds: [], messages: merged }
       : { ...createSourceChatRuntime(source), messages: resolved }
     runtimeState = { ...runtimeState, [source]: base }
-    return resolved
+    return merged
   }
 
   const clearReplay = (source: string) => {

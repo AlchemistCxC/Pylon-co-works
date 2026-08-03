@@ -91,8 +91,8 @@ function ctx(now: number, rendered: string | null = null) {
   }
   const r = s[SOURCE]
   assert.equal(r.cancelState.status, 'generating')
-  assert.equal(r.generating, true)
-  assert.equal(r.lastSummary, undefined)
+  assert.equal(r.generating, false, '取消失败必须收敛 generating（2026-08-03 修复）')
+  assert.equal(r.lastSummary?.reason, 'error')
 }
 
 // 4. 普通错误：user → thought → error → 错误消息追加
