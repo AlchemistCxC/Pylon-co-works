@@ -77,6 +77,7 @@ use agent_client_protocol_schema::v1::{
     CloseSessionRequest, ContentBlock, LoadSessionRequest, NewSessionRequest, PromptRequest,
     SetSessionConfigOptionRequest, SetSessionModeRequest,
 };
+use crate::agent_config::McpServersMode;
 
 fn to_params<T: serde::Serialize>(req: &T, what: &str) -> Result<serde_json::Value, String> {
     serde_json::to_value(req).map_err(|e| format!("serialize {what} params: {e}"))
@@ -90,17 +91,44 @@ fn content_blocks_from_values(values: Vec<serde_json::Value>) -> Result<Vec<Cont
 }
 
 /// session/new 参数。mcpServers 以 Pylon 自有格式直传（官方 McpServer 需 name 字段）。
+/// G1-07a：mode 参数化核心为 [`session_new_params_with_mode`]——本签名保持
+/// McpServersMode::Always（现状 wire：恒发 mcpServers 字段，session.rs 调用点
+/// 无需改动；G2 波次接线时切换）。
 /// E4 警告：OmitIfEmpty 与 agent 能力匹配——声明 omit_if_empty 且无配置时省字段，
 /// Hermes（Pydantic 必填）会拒绝 session/new；配置与 agent 能力匹配是用户责任，
-/// 默认 Always = 现状 wire，安全（mode 参数化入口见 G1-07a）。
+/// 默认 Always = 现状 wire，安全。
 pub fn session_new_params(
     cwd: &str,
     mcp_servers: Vec<serde_json::Value>,
 ) -> Result<serde_json::Value, String> {
+    session_new_params_with_mode(cwd, mcp_servers, McpServersMode::Always)
+}
+
+/// session/new 参数（G1-07a mode 参数化核心）：Always = 恒发 mcpServers 字段
+/// （现状 wire）；OmitIfEmpty = 空数组时省略字段（v2 语义，07 文档 §8.2）。
+/// E4 警告：OmitIfEmpty 与 agent 能力匹配——声明 omit_if_empty 且无配置时省字段，
+/// Hermes（Pydantic 必填）会拒绝 session/new；配置与 agent 能力匹配是用户责任。
+pub fn session_new_params_with_mode(
+    cwd: &str,
+    mcp_servers: Vec<serde_json::Value>,
+    mode: McpServersMode,
+) -> Result<serde_json::Value, String> {
     let req = NewSessionRequest::new(cwd.to_string());
     let mut params = to_params(&req, "session/new")?;
     if let Some(obj) = params.as_object_mut() {
-        obj.insert("mcpServers".into(), serde_json::Value::Array(mcp_servers));
+        match mode {
+            McpServersMode::Always => {
+                obj.insert("mcpServers".into(), serde_json::Value::Array(mcp_servers));
+            }
+            McpServersMode::OmitIfEmpty => {
+                // schema 类型恒序列化 mcpServers（v1 必填无 skip）——省略需显式删键
+                if mcp_servers.is_empty() {
+                    obj.remove("mcpServers");
+                } else {
+                    obj.insert("mcpServers".into(), serde_json::Value::Array(mcp_servers));
+                }
+            }
+        }
     }
     Ok(params)
 }
@@ -1275,17 +1303,31 @@ impl AcpClient {
     /// session/load 参数（G1-05：原顶层 session_load_params 内联收敛，消除 S2 命名混淆）。
     /// ACP schema 1.4 LoadSessionRequest.mcp_servers 无 default（Hermes Pydantic 必填），
     /// 字段必须存在；Peri 的 DefaultOnError 容忍缺失/空。无配置时传空数组而非缺字段。
+    /// G1-07a：mode 参数化——Always = 恒发（现状 wire）；OmitIfEmpty = 空数组时省略字段。
     /// E4 警告：OmitIfEmpty 与 agent 能力匹配——声明 omit_if_empty 且无配置时省字段，
     /// Hermes（Pydantic 必填）会拒绝 session/load；配置与 agent 能力匹配是用户责任。
     fn load_params(
         session_id: &str,
         cwd: &str,
         mcp_servers: Vec<serde_json::Value>,
+        mode: McpServersMode,
     ) -> Result<serde_json::Value, String> {
         let req = LoadSessionRequest::new(session_id.to_string(), cwd.to_string());
         let mut params = to_params(&req, "session/load")?;
         if let Some(obj) = params.as_object_mut() {
-            obj.insert("mcpServers".into(), serde_json::Value::Array(mcp_servers));
+            match mode {
+                McpServersMode::Always => {
+                    obj.insert("mcpServers".into(), serde_json::Value::Array(mcp_servers));
+                }
+                McpServersMode::OmitIfEmpty => {
+                    // schema 类型恒序列化 mcpServers（v1 必填无 skip）——省略需显式删键
+                    if mcp_servers.is_empty() {
+                        obj.remove("mcpServers");
+                    } else {
+                        obj.insert("mcpServers".into(), serde_json::Value::Array(mcp_servers));
+                    }
+                }
+            }
         }
         Ok(params)
     }
@@ -1309,7 +1351,10 @@ impl AcpClient {
         // 回放与响应均经 broadcast 收集，无需注册 pending：旧代码的 (tx, _rx)
         // 条目永不消费（reader 对已丢弃 rx 的 tx.send 必然失败），确认无功能
         // 依赖后删除；id 仅用于在广播流中匹配响应。
-        let params = Self::load_params(session_id, cwd, mcp_servers)?;
+        // G1-07a：mode 恒传 Always（现状 wire）——调用方（session.rs:1835 /
+        // export.rs:172）为跨组文件，G2 波次接线时经 agent.protocol().mcp_servers
+        // 切换 OmitIfEmpty（v2 语义）。
+        let params = Self::load_params(session_id, cwd, mcp_servers, McpServersMode::Always)?;
         let (id, line) = Self::register_line(&handles.next_id, METHOD_SESSION_LOAD, &params)?;
         send_line(handles.write_tx, line, &handles.crashed).await?;
 
@@ -1516,13 +1561,84 @@ mod tests {
     #[test]
     fn load_params_include_mcp_servers_field() {
         assert_eq!(
-            AcpClient::load_params("session-1", "G:/workspace", Vec::new()).unwrap(),
+            AcpClient::load_params(
+                "session-1",
+                "G:/workspace",
+                Vec::new(),
+                crate::agent_config::McpServersMode::Always
+            )
+            .unwrap(),
             serde_json::json!({
                 "sessionId": "session-1",
                 "cwd": "G:/workspace",
                 "mcpServers": [],
             })
         );
+    }
+
+    /// G1-07a：OmitIfEmpty 且空数组 → params 无 mcpServers 键（v2 语义）；
+    /// 非空数组 → 照常插入。new/load 双路径。
+    #[test]
+    fn omit_if_empty_mode_omits_empty_field() {
+        let params = crate::acp::session_new_params_with_mode(
+            "G:/workspace",
+            Vec::new(),
+            crate::agent_config::McpServersMode::OmitIfEmpty,
+        )
+        .unwrap();
+        assert!(
+            params.get("mcpServers").is_none(),
+            "OmitIfEmpty + 空数组必须省略 mcpServers 键: {params}"
+        );
+        let params = crate::acp::session_new_params_with_mode(
+            "G:/workspace",
+            vec![serde_json::json!({"name": "mcp-1"})],
+            crate::agent_config::McpServersMode::OmitIfEmpty,
+        )
+        .unwrap();
+        assert_eq!(params["mcpServers"][0]["name"], "mcp-1");
+        // load 路径同语义
+        let params = AcpClient::load_params(
+            "session-1",
+            "G:/workspace",
+            Vec::new(),
+            crate::agent_config::McpServersMode::OmitIfEmpty,
+        )
+        .unwrap();
+        assert!(
+            params.get("mcpServers").is_none(),
+            "load OmitIfEmpty + 空数组必须省略 mcpServers 键: {params}"
+        );
+        let params = AcpClient::load_params(
+            "session-1",
+            "G:/workspace",
+            vec![serde_json::json!({"name": "mcp-1"})],
+            crate::agent_config::McpServersMode::OmitIfEmpty,
+        )
+        .unwrap();
+        assert_eq!(params["mcpServers"][0]["name"], "mcp-1");
+    }
+
+    /// G1-07a：Always = 现状 wire——空数组恒发 mcpServers 字段（new/load 双路径）。
+    #[test]
+    fn always_mode_keeps_field() {
+        let params = crate::acp::session_new_params("G:/workspace", Vec::new()).unwrap();
+        assert_eq!(params["mcpServers"], serde_json::json!([]));
+        let params = crate::acp::session_new_params_with_mode(
+            "G:/workspace",
+            Vec::new(),
+            crate::agent_config::McpServersMode::Always,
+        )
+        .unwrap();
+        assert_eq!(params["mcpServers"], serde_json::json!([]));
+        let params = AcpClient::load_params(
+            "session-1",
+            "G:/workspace",
+            Vec::new(),
+            crate::agent_config::McpServersMode::Always,
+        )
+        .unwrap();
+        assert_eq!(params["mcpServers"], serde_json::json!([]));
     }
 
     #[test]
