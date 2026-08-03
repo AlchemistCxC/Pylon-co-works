@@ -53,4 +53,12 @@ assert.ok(terminalFrame, '应存在终止态 marker')
 assert.doesNotMatch(terminalFrame, /spinnerColor/, '终止态 marker 不得复用运行中 spinnerColor')
 assert.match(terminalFrame, /fontSize: `\$\{spinnerSize\}px`/)
 
+// Settings 冗余治理：标记模式内嵌于 spinnerMarker 控件，独立行必须隐藏；
+// 特殊控件（spinnerMarker/bgImage）不得自带 Row（label 由 FieldRow 单层提供，防双重 label）。
+assert.match(themeDefs, /spinnerDoneMarkerMode:[\s\S]*?hidden: true/, '完成标记模式行必须隐藏')
+assert.match(themeDefs, /spinnerCancelledMarkerMode:[\s\S]*?hidden: true/, '取消标记模式行必须隐藏')
+assert.match(themeDefs, /spinnerErrorMarkerMode:[\s\S]*?hidden: true/, '错误标记模式行必须隐藏')
+assert.equal((renderer.match(/<Row label=/g) ?? []).length, 1, 'label 必须仅由 FieldRow 的 <Row label=...> 提供一次（特殊控件不得自带 Row）')
+assert.match(renderer, /function FieldRow\([\s\S]*?<Row label=\{def\.label\}>/, 'label Row 必须存在于 FieldRow')
+
 console.log('D-01E 非 Preview TSX 接线回归测试通过（Preview 未覆盖）')

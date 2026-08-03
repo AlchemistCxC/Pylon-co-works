@@ -59,7 +59,7 @@ function Group({ title, children }: { title: string; children: React.ReactNode }
   )
 }
 
-function BgImageRow({ label, value, onChange }: { label: string; value: string; onChange: (v: string) => void }) {
+function BgImageControl({ value, onChange }: { value: string; onChange: (v: string) => void }) {
   const resolved = resolveBackgroundImage(value)
   const openFile = async () => {
     try {
@@ -69,7 +69,7 @@ function BgImageRow({ label, value, onChange }: { label: string; value: string; 
     } catch { /* browser fallback */ }
   }
   return (
-    <Row label={label}>
+    <>
       <input type="text" value={value} onChange={e => onChange(e.target.value)} className="set-input" style={{ width: '160px' }} placeholder="路径或 URL" />
       <button className="ps-btn sm" onClick={openFile}>选择</button>
       {value && <>
@@ -77,12 +77,11 @@ function BgImageRow({ label, value, onChange }: { label: string; value: string; 
           onClick={() => onChange('')} title={resolved.error ? `加载失败：${resolved.error}；点击清除` : '点击清除'} />
         {resolved.error && <span className="set-bg-error" role="alert">{resolved.error}</span>}
       </>}
-    </Row>
+    </>
   )
 }
 
-function SpinnerMarkerRow({ label, mode, value, frames, onModeChange, onValueChange }: {
-  label: string
+function SpinnerMarkerControl({ mode, value, frames, onModeChange, onValueChange }: {
   mode: string
   value: string
   frames: string[]
@@ -91,12 +90,12 @@ function SpinnerMarkerRow({ label, mode, value, frames, onModeChange, onValueCha
 }) {
   const safeFrames = frames.length > 0 ? frames : ['·']
   return (
-    <Row label={label}>
+    <>
       <Sel value={mode} onChange={onModeChange} options={['frame', 'custom']} />
       {mode === 'frame'
         ? <Sel value={safeFrames.includes(value) ? value : safeFrames[0]} onChange={onValueChange} options={safeFrames} />
         : <Txt value={value} onChange={onValueChange} />}
-    </Row>
+    </>
   )
 }
 
@@ -123,15 +122,14 @@ function FieldControl({ def, ctx, keyName }: { def: ThemeFieldDef; ctx: RenderCt
   const value = t[keyName]
 
   if (def.control === 'bgImage') {
-    return <BgImageRow label={def.label} value={String(value ?? '')} onChange={v => onChange({ [keyName]: v } as Partial<ThemeSettings>)} />
+    return <BgImageControl value={String(value ?? '')} onChange={v => onChange({ [keyName]: v } as Partial<ThemeSettings>)} />
   }
 
   if (def.control === 'spinnerMarker') {
     const modeKey = spinnerMarkerModeKey(keyName)
     const frames = resolveSpinnerFrames(t.spinnerFramePreset, t.spinnerCustomFrames)
     return (
-      <SpinnerMarkerRow
-        label={def.label}
+      <SpinnerMarkerControl
         mode={modeKey ? String(t[modeKey] ?? 'frame') : 'custom'}
         value={String(value ?? '')}
         frames={frames}

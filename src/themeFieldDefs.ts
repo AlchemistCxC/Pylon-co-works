@@ -147,9 +147,10 @@ export const THEME_FIELD_DEFS = {
   spinnerDoneMarker: { ...T('chat', '完成标记'), control: 'spinnerMarker', group: "Spinner", },
   spinnerCancelledMarker: { ...T('chat', '取消标记'), control: 'spinnerMarker', group: "Spinner", },
   spinnerErrorMarker: { ...T('chat', '错误标记'), control: 'spinnerMarker', group: "Spinner", },
-  spinnerDoneMarkerMode: { ...S('chat', '完成标记模式', ['frame', 'custom']), group: "Spinner", },
-  spinnerCancelledMarkerMode: { ...S('chat', '取消标记模式', ['frame', 'custom']), group: "Spinner", },
-  spinnerErrorMarkerMode: { ...S('chat', '错误标记模式', ['frame', 'custom']), group: "Spinner", },
+  // 模式已内嵌于 spinnerMarker 控件（SpinnerMarkerControl 的 frame/custom 下拉），独立行冗余 → hidden
+  spinnerDoneMarkerMode: { ...S('chat', '完成标记模式', ['frame', 'custom']), group: "Spinner", hidden: true },
+  spinnerCancelledMarkerMode: { ...S('chat', '取消标记模式', ['frame', 'custom']), group: "Spinner", hidden: true },
+  spinnerErrorMarkerMode: { ...S('chat', '错误标记模式', ['frame', 'custom']), group: "Spinner", hidden: true },
   spinnerIntervalMs: { ...N('chat', '动画间隔', 40, 1000, 10), group: "Spinner", suffix: 'ms' },
   spinnerColor: { ...C('chat', 'Spinner 颜色'), group: "Spinner", },
   spinnerSize: { ...N('chat', 'Spinner 大小', 10, 32), group: "Spinner", unit: 'px' },
