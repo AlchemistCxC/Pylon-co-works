@@ -229,7 +229,6 @@ impl AcpError {
     /// MethodNotFound），字符串兜底（"-32601" / "Method not found"，保留现状
     /// 大小写敏感语义）。
     /// G2（W2 链 E）消费：`if error.is_method_not_found() { 降级本地清理 }`。
-    #[allow(dead_code)]
     pub fn is_method_not_found(&self) -> bool {
         let AcpError::Rpc(message) = self else {
             return false;

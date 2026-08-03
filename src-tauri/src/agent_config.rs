@@ -58,13 +58,11 @@ pub struct AcpProtocolConfig {
     /// false = 跳过 RPC 直接本地清理（旧 Hermes 声明式配置）。
     /// G2（W2 链 E）消费：close_session/check_session_expiry/未结算 close/replaced close
     /// 四处经 [`Self::close_via_rpc`] 判定。
-    #[allow(dead_code)]
     #[serde(default)]
     pub session_close: Option<bool>,
     /// D4 mcpServers 字段形态：always(默认，恒发字段，现状) | omit_if_empty
     /// （v2 语义，空则省略——07 文档 §8.2）。
     /// G2（W2 链 E）消费：session_new/load 调用点传 `protocol().mcp_servers`。
-    #[allow(dead_code)]
     #[serde(default, deserialize_with = "deserialize_mcp_servers_mode")]
     pub mcp_servers: McpServersMode,
     /// D1 initialize 请求的 clientCapabilities 覆盖（任意 JSON，原样进 wire）。
@@ -86,10 +84,6 @@ pub struct AcpProtocolConfig {
     /// H8/H9 通用 RPC 超时（秒，complete + session/load 回放共用）；None = 30。
     #[serde(default)]
     pub rpc_timeout_secs: Option<u64>,
-    /// H7 写通道超时（秒）；None = 10。E2 已定：写超时是"连接活性"语义，
-    /// 默认值仍可配置，但 send_line/writer 任务不按协议参数分派。
-    #[serde(default)]
-    pub write_timeout_secs: Option<u64>,
     /// H10 单条 prompt 附件数上限；None = 8。
     #[serde(default)]
     pub max_attachments: Option<usize>,
@@ -117,7 +111,6 @@ impl SetModelApi {
     /// key=="model" 特判收敛于此（session.rs:1556 现状 bool 路由的声明式替代）：
     /// SetModel → model 键走 set_model；其余键一律 config_option；None → model 键禁用。
     /// G2（W2 链 E）消费：set_config_option 三路路由。
-    #[allow(dead_code)]
     pub fn route(self, key: &str) -> ModelSwitchTarget {
         match self {
             Self::SetModel if key == "model" => ModelSwitchTarget::SetModel,
@@ -128,7 +121,6 @@ impl SetModelApi {
 }
 
 /// D2 路由结果（G2 set_config_option 三路匹配消费；G1 链内无消费点，W2 移交）。
-#[allow(dead_code)]
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ModelSwitchTarget {
     ConfigOption,
@@ -189,7 +181,6 @@ pub static DEFAULT_ACCPROTOCOL: AcpProtocolConfig = AcpProtocolConfig {
     prompt_timeout_secs: None,
     cancel_settle_timeout_secs: None,
     rpc_timeout_secs: None,
-    write_timeout_secs: None,
     max_attachments: None,
     max_attachment_bytes: None,
     replay_max_events: None,
@@ -199,27 +190,23 @@ impl AcpProtocolConfig {
     /// D2 已解析的切 model 途径：acp 段声明优先；未声明回退 ConfigOption
     /// （生产解析路径 parse() 已合并顶层 legacy bool，此兜底仅覆盖直构场景）。
     /// G2（W2 链 E）消费：`protocol().set_model_api().route(&key)`。
-    #[allow(dead_code)]
     pub fn set_model_api(&self) -> SetModelApi {
         self.set_model_api.unwrap_or(SetModelApi::ConfigOption)
     }
 
     /// D3 是否尝试 session/close RPC（false = 跳过 RPC 直接本地清理；缺省 true）。
     /// G2（W2 链 E）消费：close 四处消费点。
-    #[allow(dead_code)]
     pub fn close_via_rpc(&self) -> bool {
         self.session_close.unwrap_or(true)
     }
 
     /// H5 prompt 超时（秒，缺省 300）。G2（W2 链 E）消费：wait_prompt_with_cancel。
-    #[allow(dead_code)]
     pub fn prompt_timeout(&self) -> u64 {
         self.prompt_timeout_secs
             .unwrap_or(crate::acp::PROMPT_TIMEOUT_SECS)
     }
 
     /// H6 cancel settle 超时（秒，缺省 30）。G2（W2 链 E）消费。
-    #[allow(dead_code)]
     pub fn cancel_settle_timeout(&self) -> u64 {
         self.cancel_settle_timeout_secs
             .unwrap_or(crate::acp::CANCEL_SETTLE_TIMEOUT_SECS)
@@ -228,13 +215,6 @@ impl AcpProtocolConfig {
     /// H8/H9 通用 RPC 超时（秒，缺省 30；complete + 回放共用）。
     pub fn rpc_timeout(&self) -> u64 {
         self.rpc_timeout_secs.unwrap_or(DEFAULT_RPC_TIMEOUT_SECS)
-    }
-
-    /// H7 写通道超时（秒，缺省 10）。G2（W2 链 E）消费：permission.rs H18 同源建议。
-    #[allow(dead_code)]
-    pub fn write_timeout(&self) -> u64 {
-        self.write_timeout_secs
-            .unwrap_or(crate::acp::DEFAULT_WRITE_TIMEOUT_SECS)
     }
 
     /// H10/H11 附件限制（缺省 8 / 10MB）。
@@ -345,10 +325,6 @@ fn validate_acp_section(id: &str, acp: &AcpProtocolConfig) -> Result<(), String>
             acp.cancel_settle_timeout_secs.map(|v| v as u128),
         ),
         ("rpc_timeout_secs", acp.rpc_timeout_secs.map(|v| v as u128)),
-        (
-            "write_timeout_secs",
-            acp.write_timeout_secs.map(|v| v as u128),
-        ),
         ("max_attachments", acp.max_attachments.map(|v| v as u128)),
         (
             "max_attachment_bytes",
@@ -931,10 +907,6 @@ mod tests {
             crate::acp::CANCEL_SETTLE_TIMEOUT_SECS
         );
         assert_eq!(protocol.rpc_timeout(), DEFAULT_RPC_TIMEOUT_SECS);
-        assert_eq!(
-            protocol.write_timeout(),
-            crate::acp::DEFAULT_WRITE_TIMEOUT_SECS
-        );
         assert_eq!(protocol.replay_max(), DEFAULT_REPLAY_MAX_EVENTS);
         assert_eq!(protocol.protocol_version(), DEFAULT_PROTOCOL_VERSION);
         assert!(protocol.close_via_rpc(), "session_close 缺省必须尝试 RPC");
@@ -974,9 +946,9 @@ mod tests {
     fn parses_full_acp_section() {
         // 注意：serde_yml 对"空 flow mapping {} 为块内唯一尾部键"解析失败
         // （多键则正常）——测试用两键形态，生产配置同规避。
-        let yaml = "agents:\n  future:\n    name: Future\n    transport: subprocess\n    exe: future\n    acp:\n      set_model_api: none\n      session_close: false\n      mcp_servers: omit_if_empty\n      initialize_caps:\n        fs: {}\n        auth: {}\n      protocol_version: 2\n      client_info:\n        name: Pylon\n        version: \"0.2.0\"\n      prompt_timeout_secs: 600\n      cancel_settle_timeout_secs: 45\n      rpc_timeout_secs: 60\n      write_timeout_secs: 15\n      max_attachments: 4\n      max_attachment_bytes: 5242880\n      replay_max_events: 5000\n";
         let path =
             std::env::temp_dir().join(format!("pylon-agents-acpfull-{}.yaml", std::process::id()));
+        let yaml = "agents:\n  future:\n    name: Future\n    transport: subprocess\n    exe: future\n    acp:\n      set_model_api: none\n      session_close: false\n      mcp_servers: omit_if_empty\n      initialize_caps:\n        fs: {}\n        auth: {}\n      protocol_version: 2\n      client_info:\n        name: Pylon\n        version: \"0.2.0\"\n      prompt_timeout_secs: 600\n      cancel_settle_timeout_secs: 45\n      rpc_timeout_secs: 60\n      max_attachments: 4\n      max_attachment_bytes: 5242880\n      replay_max_events: 5000\n";
         std::fs::write(&path, yaml).expect("write temp agent config");
         let agents = load_from_path(&path).expect("load runtime agent config");
         std::fs::remove_file(&path).ok();
@@ -999,7 +971,6 @@ mod tests {
         assert_eq!(protocol.prompt_timeout(), 600);
         assert_eq!(protocol.cancel_settle_timeout(), 45);
         assert_eq!(protocol.rpc_timeout(), 60);
-        assert_eq!(protocol.write_timeout(), 15);
         let limits = protocol.attachment_limits();
         assert_eq!(limits.max_attachments, 4);
         assert_eq!(limits.max_attachment_bytes, 5_242_880);
@@ -1057,7 +1028,6 @@ mod tests {
         for field in [
             "cancel_settle_timeout_secs",
             "rpc_timeout_secs",
-            "write_timeout_secs",
             "max_attachments",
             "max_attachment_bytes",
             "replay_max_events",
