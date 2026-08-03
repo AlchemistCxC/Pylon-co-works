@@ -759,6 +759,34 @@ pub(crate) fn replace_session_slot(
     Ok(replaced)
 }
 
+/// G2-02：load_persisted_session 失败恢复去重——锁 sessions → 复核映射
+/// （(peri_id, generation) 匹配）→ 有 previous 则 insert 否则 remove。
+/// 调用方不得持有 sessions 锁（E5 锁序纪律：sessions → prompt_locks 单向）。
+/// 错误传播：锁错误经 String → PylonError::Protocol（与调用方原样语义一致）。
+fn restore_previous_slot(
+    runtime: &AgentRuntime,
+    source: &str,
+    peri_id: &str,
+    generation: u64,
+    previous: Option<SessionInfo>,
+) -> Result<(), PylonError> {
+    let mut sessions = runtime
+        .sessions
+        .lock()
+        .map_err(|lock_error| lock_error.to_string())?;
+    if sessions.get(source).map(|session| {
+        session_mapping_matches(&session.peri_id, session.generation, peri_id, generation)
+    }) == Some(true)
+    {
+        if let Some(previous) = previous {
+            sessions.insert(source.to_string(), previous);
+        } else {
+            sessions.remove(source);
+        }
+    }
+    Ok(())
+}
+
 #[tauri::command]
 pub(crate) async fn new_session(
     state: tauri::State<'_, AppState>,
@@ -1841,25 +1869,7 @@ pub(crate) async fn load_persisted_session(
     match load_result {
         Ok((response, _replay)) => {
             if let Err(error) = state.ensure_generation(&runtime, generation) {
-                let mut sessions = runtime
-                    .sessions
-                    .lock()
-                    .map_err(|lock_error| lock_error.to_string())?;
-                if sessions.get(&source).map(|session| {
-                    session_mapping_matches(
-                        &session.peri_id,
-                        session.generation,
-                        &peri_id,
-                        generation,
-                    )
-                }) == Some(true)
-                {
-                    if let Some(previous) = previous {
-                        sessions.insert(source.clone(), previous);
-                    } else {
-                        sessions.remove(&source);
-                    }
-                }
+                restore_previous_slot(&runtime, &source, &peri_id, generation, previous)?;
                 return Err(error.into());
             }
             state.with_session_if_matches(&runtime, &source, &peri_id, generation, |session| {
@@ -1868,20 +1878,7 @@ pub(crate) async fn load_persisted_session(
             Ok(response)
         }
         Err(error) => {
-            let mut sessions = runtime
-                .sessions
-                .lock()
-                .map_err(|lock_error| lock_error.to_string())?;
-            if sessions.get(&source).map(|session| {
-                session_mapping_matches(&session.peri_id, session.generation, &peri_id, generation)
-            }) == Some(true)
-            {
-                if let Some(previous) = previous {
-                    sessions.insert(source.clone(), previous);
-                } else {
-                    sessions.remove(&source);
-                }
-            }
+            restore_previous_slot(&runtime, &source, &peri_id, generation, previous)?;
             Err(PylonError::from(error))
         }
     }
@@ -2080,6 +2077,55 @@ gateway:
             runtime.prompt_locks.lock().unwrap().len(),
             1,
             "映射未删除时锁表条目保留（生成中豁免仍依赖该条目）"
+        );
+    }
+
+    /// G2-02：restore_previous_slot 失败恢复语义——映射匹配时恢复 previous 槽位
+    /// （有 previous 则 insert 否则 remove）；映射不匹配（已被新会话接管）不动。
+    #[tokio::test]
+    async fn restore_previous_slot_restores_or_removes_on_match() {
+        let runtime = AgentRuntime::new_disconnected();
+        let insert = |runtime: &Arc<AgentRuntime>| {
+            let mut sessions = runtime.sessions.lock().unwrap();
+            sessions.insert(
+                "source-a".to_string(),
+                SessionInfo::new("peri-1".into(), String::new(), ".".into(), false, 1),
+            );
+        };
+        // 映射匹配 + previous → 恢复 previous 槽位（回滚到旧会话）
+        insert(&runtime);
+        let previous = SessionInfo::new("old-peri".into(), String::new(), "/old".into(), true, 1);
+        restore_previous_slot(&runtime, "source-a", "peri-1", 1, Some(previous.clone()))
+            .expect("restore must succeed");
+        let sessions = runtime.sessions.lock().unwrap();
+        assert_eq!(
+            sessions.get("source-a").map(|s| s.peri_id.as_str()),
+            Some("old-peri"),
+            "previous 槽位必须恢复"
+        );
+        assert_eq!(
+            sessions.get("source-a").map(|s| s.cwd.as_str()),
+            Some("/old"),
+            "previous 会话内容必须完整恢复"
+        );
+        drop(sessions);
+        // 映射匹配 + 无 previous → remove（新建的临时槽位回滚删除）
+        restore_previous_slot(&runtime, "source-a", "old-peri", 1, None)
+            .expect("remove must succeed");
+        assert!(
+            runtime.sessions.lock().unwrap().is_empty(),
+            "无 previous 时必须 remove 临时槽位"
+        );
+        // 映射不匹配（peri_id 已被新会话替换）→ 不恢复也不删除
+        insert(&runtime);
+        restore_previous_slot(&runtime, "source-a", "peri-dead", 1, Some(previous))
+            .expect("mismatch must be a no-op");
+        let sessions = runtime.sessions.lock().unwrap();
+        assert_eq!(sessions.len(), 1, "不匹配时不得改动映射");
+        assert_eq!(
+            sessions.get("source-a").map(|s| s.peri_id.as_str()),
+            Some("peri-1"),
+            "不匹配时新映射必须原样保留"
         );
     }
 
