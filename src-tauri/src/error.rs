@@ -61,12 +61,6 @@ impl Serialize for PylonError {
     }
 }
 
-impl From<PylonError> for String {
-    fn from(e: PylonError) -> String {
-        e.to_string()
-    }
-}
-
 /// 内部 String 错误 → Protocol（保持消息，语义细化留待各子系统错误类型）。
 impl From<String> for PylonError {
     fn from(msg: String) -> Self {
