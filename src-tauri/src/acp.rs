@@ -231,8 +231,8 @@ pub const CANCEL_SETTLE_TIMEOUT_SECS: u64 = 30;
 /// Write-channel send timeout. The writer thread blocks on writeln!/flush while the
 /// agent is busy reading nothing, filling the mpsc; without a timeout `send().await`
 /// hangs forever, breaking the 30s RPC timeout contract above. Timeout is treated as
-/// a connection failure (warn + Err).
-const WRITE_TIMEOUT_SECS: u64 = 10;
+/// a connection failure (warn + Err). G1-01：pub(crate) 供 AcpProtocolConfig 访问器引用。
+pub(crate) const WRITE_TIMEOUT_SECS: u64 = 10;
 /// Maximum size for a single attachment.
 pub const MAX_ATTACHMENT_BYTES: u64 = 10 * 1024 * 1024;
 /// Maximum number of attachments in one prompt.
@@ -2308,12 +2308,13 @@ for line in sys.stdin:
             set_model_api: false,
             model: None,
             acp_args: Vec::new(),
-            acp: Some(crate::agent_config::AcpConfig {
+            acp: Some(crate::agent_config::AcpProtocolConfig {
                 initialize_caps: Some(serde_json::json!({
                     "fs": {},
                     "auth": {},
                     "_meta": {"peri.skillNames": true}
                 })),
+                ..Default::default()
             }),
         };
         let mut client = AcpClient::connect_with_logs(&agent, None)

@@ -4,7 +4,9 @@ use std::path::{Path, PathBuf};
 
 #[derive(Debug, Clone, Deserialize)]
 struct AgentConfigFile {
-    agents: HashMap<String, AgentDef>,
+    /// E1：agents 先以宽松值解析，再在 parse() 内逐 agent 反序列化——
+    /// 非法字段（负数值/未知枚举/类型错误）的报错带 agent id 上下文。
+    agents: HashMap<String, serde_yml::Value>,
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -35,19 +37,310 @@ pub struct AgentDef {
     pub acp_args: Vec<String>,
     /// per-agent ACP 协议行为配置（差异适配字典外置；缺省 = 官方 schema 行为）。
     #[serde(default)]
-    pub acp: Option<AcpConfig>,
+    pub acp: Option<AcpProtocolConfig>,
 }
 
 /// per-agent ACP 协议行为配置（agents.yaml `acp:` 段）。
+///
+/// 覆盖制：字段缺省 = 当前行为默认值（DEFAULT_* 常量，值 = 重构前硬编码现值），
+/// 有声明 = 覆盖。默认路径 wire 逐字节不变；新配置仅当用户声明才改变 wire。
+/// 差异适配（D 系列）与硬编码（H2-H12）全部收敛于此，事实源见
+/// docs/refactor/07-ACP协议全貌.md §5。
 #[derive(Debug, Clone, Default, Deserialize)]
-pub struct AcpConfig {
-    /// initialize 请求的 clientCapabilities 覆盖（任意 JSON，原样进 wire）。
+pub struct AcpProtocolConfig {
+    /// D2 切 model 途径：config_option(默认) | set_model | none。
+    /// 双格式兼容：bool true=set_model / false=config_option（自定义反序列化器
+    /// [`deserialize_set_model_api`]）。None = 未声明——回退 AgentDef 顶层 legacy
+    /// `set_model_api` 布尔（parse() 时合并解析，见 [`AgentDef::protocol`]）。
+    #[serde(default, deserialize_with = "deserialize_set_model_api")]
+    pub set_model_api: Option<SetModelApi>,
+    /// D3 session/close：None|true = 总是尝试 RPC + -32601 防御降级（现状）；
+    /// false = 跳过 RPC 直接本地清理（旧 Hermes 声明式配置）。
+    #[serde(default)]
+    pub session_close: Option<bool>,
+    /// D4 mcpServers 字段形态：always(默认，恒发字段，现状) | omit_if_empty
+    /// （v2 语义，空则省略——07 文档 §8.2）。
+    #[serde(default, deserialize_with = "deserialize_mcp_servers_mode")]
+    pub mcp_servers: McpServersMode,
+    /// D1 initialize 请求的 clientCapabilities 覆盖（任意 JSON，原样进 wire）。
     /// None = 统一默认（tokenStats + _meta.peri.*，Hermes 忽略无害）。
     #[serde(default)]
     pub initialize_caps: Option<serde_json::Value>,
+    /// H3 initialize protocolVersion；None = 1。
+    #[serde(default)]
+    pub protocol_version: Option<u16>,
+    /// H4 initialize clientInfo；None = {"name":"Pylon","version":"0.1.0"}。
+    #[serde(default)]
+    pub client_info: Option<serde_json::Value>,
+    /// H5 prompt 超时（秒）；None = 300。
+    #[serde(default)]
+    pub prompt_timeout_secs: Option<u64>,
+    /// H6 cancel settle 超时（秒）；None = 30。
+    #[serde(default)]
+    pub cancel_settle_timeout_secs: Option<u64>,
+    /// H8/H9 通用 RPC 超时（秒，complete + session/load 回放共用）；None = 30。
+    #[serde(default)]
+    pub rpc_timeout_secs: Option<u64>,
+    /// H7 写通道超时（秒）；None = 10。E2 已定：写超时是"连接活性"语义，
+    /// 默认值仍可配置，但 send_line/writer 任务不按协议参数分派。
+    #[serde(default)]
+    pub write_timeout_secs: Option<u64>,
+    /// H10 单条 prompt 附件数上限；None = 8。
+    #[serde(default)]
+    pub max_attachments: Option<usize>,
+    /// H11 单附件大小上限（字节）；None = 10MB。
+    #[serde(default)]
+    pub max_attachment_bytes: Option<u64>,
+    /// H12 session/load 回放收集上限；None = 10_000。
+    #[serde(default)]
+    pub replay_max_events: Option<usize>,
+}
+
+/// D2 切 model 途径（枚举化替代顶层 bool；双格式反序列化兼容 bool|string）。
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum SetModelApi {
+    /// set_config_option("model")（Peri 官方路径；默认）。
+    #[default]
+    ConfigOption,
+    /// session/set_model（Hermes unstable 扩展，官方 schema 1.4 无此类型）。
+    SetModel,
+    /// 禁用切 model（model 键路由返回 Disabled）。
+    None,
+}
+
+impl SetModelApi {
+    /// key=="model" 特判收敛于此（session.rs:1556 现状 bool 路由的声明式替代）：
+    /// SetModel → model 键走 set_model；其余键一律 config_option；None → model 键禁用。
+    pub fn route(self, key: &str) -> ModelSwitchTarget {
+        match self {
+            Self::SetModel if key == "model" => ModelSwitchTarget::SetModel,
+            Self::None if key == "model" => ModelSwitchTarget::Disabled,
+            _ => ModelSwitchTarget::ConfigOption,
+        }
+    }
+}
+
+/// D2 路由结果（G2 set_config_option 三路匹配消费）。
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ModelSwitchTarget {
+    ConfigOption,
+    SetModel,
+    Disabled,
+}
+
+/// D4 mcpServers 字段形态（07 文档 §8.2：v2 已改"空则省略"，与官方化方向对齐）。
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum McpServersMode {
+    /// 恒发 mcpServers 字段（现状 wire；Hermes 必填 List 兼容）。
+    #[default]
+    Always,
+    /// 空数组时省略字段（v2 语义）。E4 警告：声明 omit_if_empty 且无配置时省字段
+    /// ——Hermes（Pydantic 必填）会拒绝 session/new；配置与 agent 能力匹配是
+    /// 用户责任，默认 Always = 现状 wire，安全。
+    OmitIfEmpty,
+}
+
+/// H10/H11 附件限制值对象（prompt_blocks 参数化载体）。
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct AttachmentLimits {
+    pub max_attachments: usize,
+    pub max_attachment_bytes: u64,
+}
+
+impl Default for AttachmentLimits {
+    fn default() -> Self {
+        Self {
+            max_attachments: crate::acp::MAX_ATTACHMENTS,
+            max_attachment_bytes: crate::acp::MAX_ATTACHMENT_BYTES,
+        }
+    }
+}
+
+impl AttachmentLimits {
+    /// 从 AgentDef 的协议配置解析附件限制（缺省 = 现状常量值）。
+    pub fn from_agent(agent: &AgentDef) -> Self {
+        agent.protocol().attachment_limits()
+    }
+}
+
+/// H8/H9 通用 RPC 超时默认值（秒；complete + session/load 回放共用，现值 30）。
+pub const DEFAULT_RPC_TIMEOUT_SECS: u64 = 30;
+/// H12 session/load 回放收集上限默认值（现值 10_000）。
+pub const DEFAULT_REPLAY_MAX_EVENTS: usize = 10_000;
+/// H3 initialize protocolVersion 默认值（schema 稳定值 1）。
+pub const DEFAULT_PROTOCOL_VERSION: u16 = 1;
+
+/// 空 acp 段的协议配置（[`AgentDef::protocol`] 的缺省值；全部默认 = 重构前现状行为）。
+pub static DEFAULT_ACCPROTOCOL: AcpProtocolConfig = AcpProtocolConfig {
+    set_model_api: Some(SetModelApi::ConfigOption),
+    session_close: None,
+    mcp_servers: McpServersMode::Always,
+    initialize_caps: None,
+    protocol_version: None,
+    client_info: None,
+    prompt_timeout_secs: None,
+    cancel_settle_timeout_secs: None,
+    rpc_timeout_secs: None,
+    write_timeout_secs: None,
+    max_attachments: None,
+    max_attachment_bytes: None,
+    replay_max_events: None,
+};
+
+impl AcpProtocolConfig {
+    /// D2 已解析的切 model 途径：acp 段声明优先；未声明回退 ConfigOption
+    /// （生产解析路径 parse() 已合并顶层 legacy bool，此兜底仅覆盖直构场景）。
+    pub fn set_model_api(&self) -> SetModelApi {
+        self.set_model_api.unwrap_or(SetModelApi::ConfigOption)
+    }
+
+    /// D3 是否尝试 session/close RPC（false = 跳过 RPC 直接本地清理；缺省 true）。
+    pub fn close_via_rpc(&self) -> bool {
+        self.session_close.unwrap_or(true)
+    }
+
+    /// H5 prompt 超时（秒，缺省 300）。
+    pub fn prompt_timeout(&self) -> u64 {
+        self.prompt_timeout_secs.unwrap_or(crate::acp::PROMPT_TIMEOUT_SECS)
+    }
+
+    /// H6 cancel settle 超时（秒，缺省 30）。
+    pub fn cancel_settle_timeout(&self) -> u64 {
+        self.cancel_settle_timeout_secs
+            .unwrap_or(crate::acp::CANCEL_SETTLE_TIMEOUT_SECS)
+    }
+
+    /// H8/H9 通用 RPC 超时（秒，缺省 30；complete + 回放共用）。
+    pub fn rpc_timeout(&self) -> u64 {
+        self.rpc_timeout_secs.unwrap_or(DEFAULT_RPC_TIMEOUT_SECS)
+    }
+
+    /// H7 写通道超时（秒，缺省 10）。
+    pub fn write_timeout(&self) -> u64 {
+        self.write_timeout_secs.unwrap_or(crate::acp::WRITE_TIMEOUT_SECS)
+    }
+
+    /// H10/H11 附件限制（缺省 8 / 10MB）。
+    pub fn attachment_limits(&self) -> AttachmentLimits {
+        AttachmentLimits {
+            max_attachments: self.max_attachments.unwrap_or(crate::acp::MAX_ATTACHMENTS),
+            max_attachment_bytes: self
+                .max_attachment_bytes
+                .unwrap_or(crate::acp::MAX_ATTACHMENT_BYTES),
+        }
+    }
+
+    /// H12 session/load 回放收集上限（缺省 10_000）。
+    pub fn replay_max(&self) -> usize {
+        self.replay_max_events.unwrap_or(DEFAULT_REPLAY_MAX_EVENTS)
+    }
+
+    /// H3 initialize protocolVersion（缺省 1）。
+    pub fn protocol_version(&self) -> u16 {
+        self.protocol_version.unwrap_or(DEFAULT_PROTOCOL_VERSION)
+    }
+
+    /// H4 initialize clientInfo（缺省 Pylon 0.1.0）。
+    pub fn client_info(&self) -> serde_json::Value {
+        self.client_info.clone().unwrap_or_else(default_client_info)
+    }
+
+    /// D1 initialize clientCapabilities（缺省统一默认 caps，见 [`default_initialize_caps`]）。
+    pub fn initialize_caps(&self) -> serde_json::Value {
+        self.initialize_caps
+            .clone()
+            .unwrap_or_else(default_initialize_caps)
+    }
+}
+
+/// D2 双格式反序列化：bool（true=set_model / false=config_option）或字符串
+/// （"set_model"/"config_option"/"none"）。未知值拒绝（E1：报错指明字段与可选值；
+/// agent id 上下文由 parse() 的逐 agent 反序列化包装补充）。
+fn deserialize_set_model_api<'de, D>(deserializer: D) -> Result<Option<SetModelApi>, D::Error>
+where
+    D: serde::Deserializer<'de>,
+{
+    use serde::de::Error;
+    let value = serde_yml::Value::deserialize(deserializer)?;
+    match value {
+        serde_yml::Value::Bool(true) => Ok(Some(SetModelApi::SetModel)),
+        serde_yml::Value::Bool(false) => Ok(Some(SetModelApi::ConfigOption)),
+        serde_yml::Value::String(text) => match text.as_str() {
+            "set_model" => Ok(Some(SetModelApi::SetModel)),
+            "config_option" => Ok(Some(SetModelApi::ConfigOption)),
+            "none" => Ok(Some(SetModelApi::None)),
+            other => Err(D::Error::custom(format!(
+                "unknown acp.set_model_api value: {other:?}（可选 set_model/config_option/none 或 true/false）"
+            ))),
+        },
+        other => Err(D::Error::custom(format!(
+            "invalid acp.set_model_api value: {other:?}（可选 set_model/config_option/none 或 true/false）"
+        ))),
+    }
+}
+
+/// D4 mcp_servers 字段形态反序列化：字符串 "always" | "omit_if_empty"。
+fn deserialize_mcp_servers_mode<'de, D>(deserializer: D) -> Result<McpServersMode, D::Error>
+where
+    D: serde::Deserializer<'de>,
+{
+    use serde::de::Error;
+    let value = String::deserialize(deserializer)?;
+    match value.as_str() {
+        "always" => Ok(McpServersMode::Always),
+        "omit_if_empty" => Ok(McpServersMode::OmitIfEmpty),
+        other => Err(D::Error::custom(format!(
+            "unknown acp.mcp_servers value: {other:?}（可选 always/omit_if_empty）"
+        ))),
+    }
+}
+
+/// D1 统一默认 clientCapabilities（现值：tokenStats + _meta.peri.*，Hermes 忽略无害；
+/// `_meta.peri.*` 是 Peri wire 契约，不得从默认 caps 移除——07 文档 §4.3）。
+pub(crate) fn default_initialize_caps() -> serde_json::Value {
+    serde_json::json!({
+        "tokenStats": true,
+        "_meta": {
+            "peri.tokenStats": true,
+            "peri.skillNames": true,
+            "peri.replay": true
+        }
+    })
+}
+
+/// H4 默认 clientInfo（现值 {"name":"Pylon","version":"0.1.0"}）。
+pub(crate) fn default_client_info() -> serde_json::Value {
+    serde_json::json!({"name": "Pylon", "version": "0.1.0"})
+}
+
+/// E1：acp 段取值校验——数值字段必须 > 0（负数在反序列化层已被 u64 拒绝，
+/// 此处拦截 0 并指明 agent id；风格对齐 route.rs reset 校验）。
+fn validate_acp_section(id: &str, acp: &AcpProtocolConfig) -> Result<(), String> {
+    let numeric = [
+        ("prompt_timeout_secs", acp.prompt_timeout_secs.map(|v| v as u128)),
+        ("cancel_settle_timeout_secs", acp.cancel_settle_timeout_secs.map(|v| v as u128)),
+        ("rpc_timeout_secs", acp.rpc_timeout_secs.map(|v| v as u128)),
+        ("write_timeout_secs", acp.write_timeout_secs.map(|v| v as u128)),
+        ("max_attachments", acp.max_attachments.map(|v| v as u128)),
+        ("max_attachment_bytes", acp.max_attachment_bytes.map(|v| v as u128)),
+        ("replay_max_events", acp.replay_max_events.map(|v| v as u128)),
+    ];
+    for (field, value) in numeric {
+        if value == Some(0) {
+            return Err(format!("agent {id} 的 acp.{field} 非法: 0（必须大于 0）"));
+        }
+    }
+    Ok(())
 }
 
 impl AgentDef {
+    /// 协议行为配置（acp 段缺省 = 默认实例 [`DEFAULT_ACCPROTOCOL`]）。
+    /// 生产解析路径 parse() 已把顶层 legacy `set_model_api` 布尔合并进 acp 段
+    /// （D2 兼容），此处只做缺省回退。
+    pub fn protocol(&self) -> &AcpProtocolConfig {
+        self.acp.as_ref().unwrap_or(&DEFAULT_ACCPROTOCOL)
+    }
+
     /// 完整命令行参数：args（含入口子命令）→ `--model <value>`（可选）→ acp_args。
     /// args 与结构化字段并存时结构化参数在后（多数 CLI 后者覆盖前者）。
     pub fn command_args(&self) -> Vec<String> {
@@ -205,14 +498,38 @@ pub fn load_gateway_config() -> Result<String, String> {
 fn parse(content: &str) -> Result<HashMap<String, AgentDef>, String> {
     // R27b：serde_yaml → serde_yml（API 兼容：serde_yml::from_str）。
     // 自定义错误前缀 "failed to parse agents.yaml" 保持（不依赖上游错误文案）。
+    // E1：agents 先以宽松值解析再逐 agent 反序列化——非法字段（负数值/未知枚举/
+    // 类型错误）的报错带 agent id 上下文（风格对齐 route.rs reset 校验）。
     let config: AgentConfigFile = serde_yml::from_str(content)
         .map_err(|error| format!("failed to parse agents.yaml: {error}"))?;
     if config.agents.is_empty() {
         return Err("agents.yaml contains no agents".to_string());
     }
-    for (id, agent) in &config.agents {
+    let mut agents = HashMap::with_capacity(config.agents.len());
+    for (id, raw) in config.agents {
         if id.trim().is_empty() {
             return Err("agents.yaml contains an agent with an empty id".to_string());
+        }
+        let mut agent: AgentDef = serde_yml::from_value(raw)
+            .map_err(|error| format!("agent {id} 配置非法: {error}"))?;
+        // D2 兼容合并：acp 段未声明 set_model_api 时回退顶层 legacy bool
+        // （agents.yaml 现状 hermes 即顶层 `set_model_api: true`——旧键保留，
+        // bool 双格式兼容；acp 段显式声明优先）。
+        match agent.acp.as_mut() {
+            Some(acp) if acp.set_model_api.is_none() => {
+                acp.set_model_api = Some(if agent.set_model_api {
+                    SetModelApi::SetModel
+                } else {
+                    SetModelApi::ConfigOption
+                });
+            }
+            None if agent.set_model_api => {
+                agent.acp = Some(AcpProtocolConfig {
+                    set_model_api: Some(SetModelApi::SetModel),
+                    ..Default::default()
+                });
+            }
+            _ => {}
         }
         if agent.name.trim().is_empty() {
             return Err(format!("agent {id} has an empty name"));
@@ -243,8 +560,12 @@ fn parse(content: &str) -> Result<HashMap<String, AgentDef>, String> {
                 ));
             }
         }
+        if let Some(acp) = &agent.acp {
+            validate_acp_section(&id, acp)?;
+        }
+        agents.insert(id, agent);
     }
-    Ok(config.agents)
+    Ok(agents)
 }
 
 pub fn load_from_path(path: &Path) -> Result<HashMap<String, AgentDef>, String> {
@@ -508,5 +829,206 @@ mod tests {
         // 缺省：无 acp 段
         let plain = agent(false);
         assert!(plain.acp.is_none());
+    }
+
+    /// G1-01：D2 双格式反序列化——acp 段内 bool|string 五形态 + 顶层 legacy bool
+    /// 合并语义（顶层 `set_model_api: true` 无 acp 段 → SetModel；acp 段显式声明优先）。
+    #[test]
+    fn parses_set_model_api_dual_format() {
+        let yaml = "agents:\n  bool-true:\n    name: A\n    transport: subprocess\n    exe: a\n    acp:\n      set_model_api: true\n  bool-false:\n    name: B\n    transport: subprocess\n    exe: b\n    acp:\n      set_model_api: false\n  str-set-model:\n    name: C\n    transport: subprocess\n    exe: c\n    acp:\n      set_model_api: set_model\n  str-config-option:\n    name: D\n    transport: subprocess\n    exe: d\n    acp:\n      set_model_api: config_option\n  str-none:\n    name: E\n    transport: subprocess\n    exe: e\n    acp:\n      set_model_api: none\n  legacy-true:\n    name: F\n    transport: subprocess\n    exe: f\n    set_model_api: true\n  legacy-false:\n    name: G\n    transport: subprocess\n    exe: g\n  legacy-true-overridden:\n    name: H\n    transport: subprocess\n    exe: h\n    set_model_api: true\n    acp:\n      set_model_api: config_option\n";
+        let path = std::env::temp_dir().join(format!(
+            "pylon-agents-setmodel-dual-{}.yaml",
+            std::process::id()
+        ));
+        std::fs::write(&path, yaml).expect("write temp agent config");
+        let agents = load_from_path(&path).expect("load runtime agent config");
+        std::fs::remove_file(&path).ok();
+        let resolved = |id: &str| agents[id].protocol().set_model_api();
+        assert_eq!(resolved("bool-true"), SetModelApi::SetModel);
+        assert_eq!(resolved("bool-false"), SetModelApi::ConfigOption);
+        assert_eq!(resolved("str-set-model"), SetModelApi::SetModel);
+        assert_eq!(resolved("str-config-option"), SetModelApi::ConfigOption);
+        assert_eq!(resolved("str-none"), SetModelApi::None);
+        assert_eq!(resolved("legacy-true"), SetModelApi::SetModel);
+        assert_eq!(resolved("legacy-false"), SetModelApi::ConfigOption);
+        assert_eq!(
+            resolved("legacy-true-overridden"),
+            SetModelApi::ConfigOption,
+            "acp 段显式声明必须优先于顶层 legacy bool"
+        );
+    }
+
+    /// G1-01：空 acp 段/无 acp 段 → 全部访问器 = 重构前硬编码现值（wire 零变化）。
+    #[test]
+    fn protocol_defaults_match_current_behavior() {
+        let path = std::env::temp_dir().join(format!(
+            "pylon-agents-protodef-{}.yaml",
+            std::process::id()
+        ));
+        std::fs::write(
+            &path,
+            "agents:\n  plain:\n    name: Plain\n    transport: subprocess\n    exe: plain\n",
+        )
+        .expect("write temp agent config");
+        let agents = load_from_path(&path).expect("load runtime agent config");
+        std::fs::remove_file(&path).ok();
+        let protocol = agents["plain"].protocol();
+        // G1-01 自检：D2 兼容合并——顶层 legacy bool 与 acp 段缺省等价
+        assert_eq!(protocol.set_model_api(), SetModelApi::ConfigOption);
+        assert_eq!(protocol.prompt_timeout(), crate::acp::PROMPT_TIMEOUT_SECS);
+        assert_eq!(
+            protocol.cancel_settle_timeout(),
+            crate::acp::CANCEL_SETTLE_TIMEOUT_SECS
+        );
+        assert_eq!(protocol.rpc_timeout(), DEFAULT_RPC_TIMEOUT_SECS);
+        assert_eq!(protocol.write_timeout(), crate::acp::WRITE_TIMEOUT_SECS);
+        assert_eq!(protocol.replay_max(), DEFAULT_REPLAY_MAX_EVENTS);
+        assert_eq!(protocol.protocol_version(), DEFAULT_PROTOCOL_VERSION);
+        assert!(protocol.close_via_rpc(), "session_close 缺省必须尝试 RPC");
+        assert_eq!(protocol.mcp_servers, McpServersMode::Always);
+        let limits = protocol.attachment_limits();
+        assert_eq!(limits.max_attachments, crate::acp::MAX_ATTACHMENTS);
+        assert_eq!(
+            limits.max_attachment_bytes,
+            crate::acp::MAX_ATTACHMENT_BYTES
+        );
+        assert_eq!(
+            protocol.initialize_caps(),
+            serde_json::json!({
+                "tokenStats": true,
+                "_meta": {
+                    "peri.tokenStats": true,
+                    "peri.skillNames": true,
+                    "peri.replay": true
+                }
+            }),
+            "默认 caps = 现值（tokenStats + _meta.peri.*）"
+        );
+        assert_eq!(
+            protocol.client_info(),
+            serde_json::json!({"name": "Pylon", "version": "0.1.0"})
+        );
+        // DEFAULT_ACCPROTOCOL 静态与解析结果一致（AgentDef::protocol 缺省回退）
+        assert_eq!(DEFAULT_ACCPROTOCOL.set_model_api(), SetModelApi::ConfigOption);
+        assert_eq!(DEFAULT_ACCPROTOCOL.prompt_timeout(), 300);
+    }
+
+    /// G1-01：acp 段全字段声明 → 访问器全部返回声明值。
+    #[test]
+    fn parses_full_acp_section() {
+        // 注意：serde_yml 对"空 flow mapping {} 为块内唯一尾部键"解析失败
+        // （多键则正常）——测试用两键形态，生产配置同规避。
+        let yaml = "agents:\n  future:\n    name: Future\n    transport: subprocess\n    exe: future\n    acp:\n      set_model_api: none\n      session_close: false\n      mcp_servers: omit_if_empty\n      initialize_caps:\n        fs: {}\n        auth: {}\n      protocol_version: 2\n      client_info:\n        name: Pylon\n        version: \"0.2.0\"\n      prompt_timeout_secs: 600\n      cancel_settle_timeout_secs: 45\n      rpc_timeout_secs: 60\n      write_timeout_secs: 15\n      max_attachments: 4\n      max_attachment_bytes: 5242880\n      replay_max_events: 5000\n";
+        let path = std::env::temp_dir().join(format!(
+            "pylon-agents-acpfull-{}.yaml",
+            std::process::id()
+        ));
+        std::fs::write(&path, yaml).expect("write temp agent config");
+        let agents = load_from_path(&path).expect("load runtime agent config");
+        std::fs::remove_file(&path).ok();
+        let protocol = agents["future"].protocol();
+        assert_eq!(protocol.set_model_api(), SetModelApi::None);
+        assert!(!protocol.close_via_rpc(), "session_close: false 必须跳过 RPC");
+        assert_eq!(protocol.mcp_servers, McpServersMode::OmitIfEmpty);
+        assert_eq!(
+            protocol.initialize_caps(),
+            serde_json::json!({"fs": {}, "auth": {}})
+        );
+        assert_eq!(protocol.protocol_version(), 2);
+        assert_eq!(
+            protocol.client_info(),
+            serde_json::json!({"name": "Pylon", "version": "0.2.0"})
+        );
+        assert_eq!(protocol.prompt_timeout(), 600);
+        assert_eq!(protocol.cancel_settle_timeout(), 45);
+        assert_eq!(protocol.rpc_timeout(), 60);
+        assert_eq!(protocol.write_timeout(), 15);
+        let limits = protocol.attachment_limits();
+        assert_eq!(limits.max_attachments, 4);
+        assert_eq!(limits.max_attachment_bytes, 5_242_880);
+        assert_eq!(protocol.replay_max(), 5000);
+        // D2 路由纯函数：None + model 键 → Disabled；其余键 → ConfigOption
+        assert_eq!(
+            protocol.set_model_api().route("model"),
+            ModelSwitchTarget::Disabled
+        );
+        assert_eq!(
+            protocol.set_model_api().route("mode"),
+            ModelSwitchTarget::ConfigOption
+        );
+        assert_eq!(
+            SetModelApi::SetModel.route("model"),
+            ModelSwitchTarget::SetModel
+        );
+        assert_eq!(
+            SetModelApi::SetModel.route("mode"),
+            ModelSwitchTarget::ConfigOption
+        );
+        assert_eq!(
+            SetModelApi::ConfigOption.route("model"),
+            ModelSwitchTarget::ConfigOption
+        );
+    }
+
+    /// E1 封闭：非法 acp 取值必须拒绝且报错指明 agent id——
+    /// 负数值（serde 层拒绝，逐 agent 包装带 id）、0（parse 校验）、未知枚举。
+    #[test]
+    fn rejects_invalid_acp_values_with_agent_context() {
+        // 负数值：serde u64 层拒绝，报错带 agent id（逐 agent 反序列化包装）
+        let error = parse(
+            "agents:\n  bad:\n    name: Bad\n    transport: subprocess\n    exe: agent\n    acp:\n      prompt_timeout_secs: -5\n",
+        )
+        .expect_err("负数值必须拒绝");
+        assert!(error.contains("agent bad"), "报错必须指明 agent id: {error}");
+        // 0：parse 校验层拒绝（u64 可解析，语义非法）
+        let error = parse(
+            "agents:\n  bad:\n    name: Bad\n    transport: subprocess\n    exe: agent\n    acp:\n      prompt_timeout_secs: 0\n",
+        )
+        .expect_err("0 必须拒绝");
+        assert!(error.contains("agent bad"), "报错必须指明 agent id: {error}");
+        assert!(
+            error.contains("prompt_timeout_secs"),
+            "报错必须指明字段: {error}"
+        );
+        // 全部数值字段 0 均拒绝
+        for field in [
+            "cancel_settle_timeout_secs",
+            "rpc_timeout_secs",
+            "write_timeout_secs",
+            "max_attachments",
+            "max_attachment_bytes",
+            "replay_max_events",
+        ] {
+            let error = parse(&format!(
+                "agents:\n  bad:\n    name: Bad\n    transport: subprocess\n    exe: agent\n    acp:\n      {field}: 0\n"
+            ))
+            .expect_err("{field} 为 0 必须拒绝");
+            assert!(error.contains("agent bad"), "{field}: {error}");
+            assert!(error.contains(field), "{field}: {error}");
+        }
+        // 未知枚举值：反序列化层拒绝，报错带 agent id
+        let error = parse(
+            "agents:\n  bad:\n    name: Bad\n    transport: subprocess\n    exe: agent\n    acp:\n      set_model_api: unknown\n",
+        )
+        .expect_err("未知 set_model_api 必须拒绝");
+        assert!(error.contains("agent bad"), "报错必须指明 agent id: {error}");
+        assert!(
+            error.contains("set_model_api"),
+            "报错必须指明字段: {error}"
+        );
+        let error = parse(
+            "agents:\n  bad:\n    name: Bad\n    transport: subprocess\n    exe: agent\n    acp:\n      mcp_servers: sometimes\n",
+        )
+        .expect_err("未知 mcp_servers 必须拒绝");
+        assert!(error.contains("agent bad"), "报错必须指明 agent id: {error}");
+        assert!(error.contains("mcp_servers"), "报错必须指明字段: {error}");
+        // 合法值不受影响（正对照）
+        assert!(
+            parse(
+                "agents:\n  good:\n    name: Good\n    transport: subprocess\n    exe: agent\n    acp:\n      prompt_timeout_secs: 1\n      max_attachments: 1\n      max_attachment_bytes: 1\n      replay_max_events: 1\n"
+            )
+            .is_ok(),
+            "合法 >0 值必须通过"
+        );
     }
 }
