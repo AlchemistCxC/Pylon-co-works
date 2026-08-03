@@ -51,6 +51,30 @@ impl AgentRuntime {
             mapping_ready: tokio::sync::Notify::new(),
         })
     }
+
+    /// O1：prompt 锁表随会话生命周期收敛（单 key 移除）——映射删除 = 该 source
+    /// 生命周期结束；生成中的 prompt 持有 Arc 守卫，条目移除不影响在途等待，
+    /// 新会话 prompt_lock_for 按需重建。G2-08：session.rs 私有 drop_prompt_lock
+    /// 收敛为本方法（锁序纪律从注释约束升级为容器方法约束）。
+    /// 锁序：调用方不得持有 sessions 锁（sessions → prompt_locks 单向）。
+    pub fn remove_prompt_lock(&self, source: &str) {
+        if let Ok(mut locks) = self.prompt_locks.lock() {
+            locks.remove(source);
+        }
+    }
+
+    /// 优化-1：批量移除（keep=false 客户端替换后 prompt 锁表同步收敛；G2-08：
+    /// lib.rs 原 drop_stale_prompt_locks 收敛为本方法，行为零变化）。同锁序纪律。
+    pub fn drop_prompt_locks(&self, stale_sources: &[String]) {
+        if stale_sources.is_empty() {
+            return;
+        }
+        if let Ok(mut locks) = self.prompt_locks.lock() {
+            for source in stale_sources {
+                locks.remove(source);
+            }
+        }
+    }
 }
 
 /// 多 agent 运行时注册表：agent_id → AgentRuntime。

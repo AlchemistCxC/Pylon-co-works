@@ -225,16 +225,6 @@ pub(crate) fn apply_client_replacement_sessions(
     }
 }
 
-/// O1：prompt 锁表随会话生命周期收敛——会话映射删除时同步移除锁条目，
-/// 防止锁表无界增长。映射删除 = 该 source 生命周期结束；生成中的 prompt
-/// 持有 Arc 守卫，条目移除不影响在途等待，新会话 prompt_lock_for 按需重建。
-/// 调用方不得在持有 sessions 锁时调用本函数（保持锁序：sessions → prompt_locks 单向）。
-fn drop_prompt_lock(runtime: &AgentRuntime, source: &str) {
-    if let Ok(mut locks) = runtime.prompt_locks.lock() {
-        locks.remove(source);
-    }
-}
-
 /// B11.1 注入适用性：命令消息（`/` 开头，与 persona 拼接规则一致）不注入。
 pub(crate) fn inject_applies_to(content: &str) -> bool {
     !content.trim_start().starts_with('/')
@@ -501,7 +491,7 @@ impl AppState {
         };
         if removed {
             // O1：映射删除 = 该 source 生命周期结束 → 锁表同步收敛（锁序单向，不嵌套）。
-            drop_prompt_lock(runtime, source);
+            runtime.remove_prompt_lock(source);
         }
         Ok(removed)
     }
@@ -699,7 +689,7 @@ pub(crate) async fn check_session_expiry(state: &AppState) {
             };
             if removed {
                 // O1：映射删除 = 该 source 生命周期结束 → 锁表同步收敛
-                drop_prompt_lock(&runtime, &source);
+                runtime.remove_prompt_lock(&source);
             }
             if !removed {
                 // 映射已变更（新会话已接管 source）——不 close、不通知
@@ -884,11 +874,17 @@ pub(crate) async fn ensure_session_mapping(
     wire_mcp_servers: &[serde_json::Value],
 ) -> Result<SessionMapping, PylonError> {
     let _creation_guard = runtime.session_creation.lock().await;
+    // G2-08 锁合并：消息到达即活动（B10.3b 会话超时判定）——updated_at 刷新与
+    // 存在性读取合并为 guard 内一次 sessions.lock()（每消息 7 处 sessions 锁降为
+    // 6 处）。行为差异（E10 已拍板）：crashed 早退路径不再刷新 updated_at。
     let existing = {
-        let sessions = runtime.sessions.lock().map_err(|e| e.to_string())?;
-        sessions
-            .get(source)
-            .map(|session| (session.peri_id.clone(), !session.has_first_prompt))
+        let mut sessions = runtime.sessions.lock().map_err(|e| e.to_string())?;
+        if let Some(session) = sessions.get_mut(source) {
+            session.updated_at = Some(Timestamp::now());
+            Some((session.peri_id.clone(), !session.has_first_prompt))
+        } else {
+            None
+        }
     };
     if let Some((peri_id, is_first)) = existing {
         return Ok(SessionMapping {
@@ -1432,13 +1428,10 @@ pub(crate) async fn send_prompt_core<R: tauri::Runtime>(
     let prompt_lock = prompt_lock_for(&runtime.prompt_locks, source);
     let _prompt_guard = prompt_lock.lock().await;
 
-    // 消息到达即活动：更新会话最后活动时间（B10.3b 会话超时判定）；
-    // 生成中的会话另有 prompt 锁活跃豁免，双保险。
-    if let Ok(mut sessions) = runtime.sessions.lock() {
-        if let Some(session) = sessions.get_mut(source) {
-            session.updated_at = Some(Timestamp::now());
-        }
-    }
+    // G2-08 锁合并：updated_at 刷新移入 ensure_session_mapping 的存在性读取
+    // （guard 内一次 sessions.lock() 完成"刷新 + 存在性读取 + is_first"）——
+    // E10 拍板接受的行为差异：crashed 早退路径不再刷新 updated_at（发送失败的
+    // 消息不再计为活动，仅崩溃路径可见，语义更正确）。
 
     if runtime.acp.lock().await.is_crashed() {
         if let Some(window) = window {

@@ -343,7 +343,8 @@ impl AppStateHandles {
             old_acp
         };
         // 优化-1：sessions 锁已释放——清理旧 source 的 prompt 锁条目。
-        drop_stale_prompt_locks(runtime, &stale_sources);
+        // G2-08：lib.rs 本地 drop_stale_prompt_locks 删除，收敛为 runtime 方法。
+        runtime.drop_prompt_locks(&stale_sources);
         start_notification_dispatcher(self, runtime, window);
         if let Err(error) = old_acp.kill() {
             tracing::warn!("kill replaced agent: {}", error);
@@ -366,21 +367,6 @@ pub(crate) fn prompt_lock_for(
         .entry(source.to_string())
         .or_insert_with(|| Arc::new(tokio::sync::Mutex::new(())))
         .clone()
-}
-
-/// 优化-1：keep=false 客户端替换后 prompt 锁表同步收敛——移除旧 source 条目
-/// （O1 语义：映射删除 = 该 source 生命周期结束；生成中的 prompt 持有 Arc 守卫，
-/// 条目移除不影响在途等待，新会话 prompt_lock_for 按需重建）。
-/// 锁序单向：调用方不得在持有 sessions 锁时调用（sessions → prompt_locks）。
-fn drop_stale_prompt_locks(runtime: &AgentRuntime, stale_sources: &[String]) {
-    if stale_sources.is_empty() {
-        return;
-    }
-    if let Ok(mut locks) = runtime.prompt_locks.lock() {
-        for source in stale_sources {
-            locks.remove(source);
-        }
-    }
 }
 
 #[cfg(test)]
@@ -527,7 +513,8 @@ mod session_info_tests {
             apply_client_replacement_sessions(&mut sessions, false, 9);
             stale
         };
-        drop_stale_prompt_locks(&runtime, &stale_sources);
+        // G2-08：收敛为 runtime 方法（与 replace_agent_client 同序列语义）
+        runtime.drop_prompt_locks(&stale_sources);
         assert!(runtime.sessions.lock().unwrap().is_empty());
         let locks = runtime.prompt_locks.lock().unwrap();
         assert!(
