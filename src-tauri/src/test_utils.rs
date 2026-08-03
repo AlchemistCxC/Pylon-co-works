@@ -168,6 +168,8 @@ impl TestStateBuilder {
             pet_write_lock: tokio::sync::Mutex::new(()),
             switch_lock: tokio::sync::Mutex::new(()),
             mcp_write_lock: tokio::sync::Mutex::new(()),
+            // E18 纪律：默认值 = run() 现值（mcp_wire 初始 None）。
+            mcp_wire: Mutex::new(None),
         }
     }
 }

@@ -366,6 +366,10 @@ pub(crate) async fn set_mcp_servers<R: tauri::Runtime>(
             .lock()
             .map_err(|error| error.to_string())?;
         *guard = servers;
+        // P1（E10）：wire 缓存与 runtime_mcp 同锁写入（读路径 miss 时回退重算并回填）。
+        if let Ok(mut cache) = state.inner().mcp_wire.lock() {
+            *cache = Some(serialized.clone());
+        }
         // B4.2：配置落盘（重启不丢）。写失败只 warn，不阻断本次设置。
         persist_mcp_if_possible(&app, guard.as_deref().unwrap_or_default());
     }

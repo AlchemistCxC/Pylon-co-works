@@ -122,6 +122,12 @@ pub(crate) struct AppState {
     /// C8：MCP 写序锁（tokio Mutex）——set_mcp_servers 写 runtime_mcp + 落盘
     /// 全程持锁，并发设置时磁盘必为最后一次设置（重启不回滚到旧配置）。
     pub(crate) mcp_write_lock: tokio::sync::Mutex<()>,
+    /// P1（E10）：MCP wire 序列化缓存（Vec<Value>，session/new 的 mcpServers 载荷）。
+    /// 每消息省一次全量 validate+serialize（≤32 server × 字段校验 + 一次 clone）。
+    /// 写入 = set_mcp_servers 与 runtime_mcp 同 mcp_write_lock 下同步；读取
+    /// （send_prompt_core None 路径）miss 时回退全量重算并回填（E3 自愈：启动
+    /// 恢复路径直写 runtime_mcp 不经 set_mcp_servers，缓存为 None，首次读取即回填）。
+    pub(crate) mcp_wire: Mutex<Option<Vec<serde_json::Value>>>,
 }
 
 /// 供 async 闭包/静态辅助持有的 AppState 字段子集。
@@ -2485,6 +2491,9 @@ pub fn run() {
                 pet_write_lock: tokio::sync::Mutex::new(()),
             switch_lock: tokio::sync::Mutex::new(()),
             mcp_write_lock: tokio::sync::Mutex::new(()),
+            // P1（E10）：wire 缓存初始 None——启动恢复路径（setup load_mcp_persisted
+            // 直写 runtime_mcp）后首次读取 miss 回退全量重算并回填（E3 自愈）。
+            mcp_wire: Mutex::new(None),
             })
             .invoke_handler(tauri::generate_handler![
                 crate::prism_cmds::prism_health, crate::prism_cmds::prism_status, crate::prism_cmds::prism_state, crate::prism_cmds::prism_scenarios, crate::prism_cmds::prism_sources, crate::prism_cmds::prism_aliases, crate::prism_cmds::prism_config,

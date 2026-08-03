@@ -174,6 +174,14 @@ pub fn validate_and_serialize(input: Option<Vec<McpServerConfig>>) -> Result<Vec
         .collect()
 }
 
+/// P1（E10）：MCP wire 序列化纯函数（无状态无锁）——校验 + 序列化全量执行，
+/// 语义与 [`validate_and_serialize`] 逐字一致，接受 `&[McpServerConfig]` 引用形态，
+/// 供 MCP 缓存（`AppState.mcp_wire`）miss 回退时全量重算并回填（E3 自愈：启动
+/// 恢复路径直写 runtime_mcp 不经 set_mcp_servers，缓存为 None，首次读取即回填）。
+pub fn serialize_for_session(configs: &[McpServerConfig]) -> Result<Vec<Value>, String> {
+    validate_and_serialize(Some(configs.to_vec()))
+}
+
 fn env_variables(env: HashMap<String, String>) -> Vec<EnvVariable> {
     env.into_iter()
         .map(|(name, value)| EnvVariable::new(name, value))
@@ -330,6 +338,24 @@ mod tests {
         let mut server = stdio(true);
         server.env.insert("TOKEN".into(), "x".repeat(4097));
         assert!(validate_and_serialize(Some(vec![server])).is_err());
+    }
+
+    /// P1（E10）：serialize_for_session 与 validate_and_serialize 语义逐字一致
+    /// （引用形态 ↔ 所有权形态）；超限输入同样拒绝。
+    #[test]
+    fn serialize_for_session_matches_validate_and_serialize() {
+        assert!(serialize_for_session(&[]).unwrap().is_empty());
+        let configs = vec![stdio(true)];
+        assert_eq!(
+            serialize_for_session(&configs).unwrap(),
+            validate_and_serialize(Some(configs)).unwrap(),
+            "引用形态与所有权形态输出必须逐字节一致"
+        );
+        let too_many: Vec<McpServerConfig> = (0..=MAX_SERVERS).map(|_| stdio(true)).collect();
+        assert!(
+            serialize_for_session(&too_many).is_err(),
+            "超限输入必须拒绝（与 validate_and_serialize 一致）"
+        );
     }
 
     #[test]

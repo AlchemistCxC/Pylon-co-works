@@ -359,6 +359,22 @@ impl AppState {
             .unwrap_or_default())
     }
 
+    /// P1（E10）：读 MCP wire 缓存（send_prompt_core None 路径）——命中直接返回
+    /// （零重算零校验）；miss（None，如启动恢复路径直写 runtime_mcp 后首次读取）
+    /// 回退全量重算（校验 + 序列化，语义 = 现状 validate_and_serialize）并回填
+    /// （E3 自愈）。写入侧 = lifecycle::set_mcp_servers（同 mcp_write_lock）。
+    pub(crate) fn wire_mcp_servers(&self) -> Result<Vec<serde_json::Value>, String> {
+        if let Some(cached) = self.mcp_wire.lock().map_err(|e| e.to_string())?.clone() {
+            return Ok(cached);
+        }
+        let servers = self.current_mcp_servers().unwrap_or_default();
+        let values = crate::mcp::serialize_for_session(&servers)?;
+        if let Ok(mut slot) = self.mcp_wire.lock() {
+            *slot = Some(values.clone());
+        }
+        Ok(values)
+    }
+
     pub(crate) fn log_runtime_summary(
         &self,
         level: &str,
@@ -1411,11 +1427,12 @@ pub(crate) async fn send_prompt_core<R: tauri::Runtime>(
             ),
         ]),
     );
-    let requested_mcp_servers = mcp::validate_and_serialize(
-        mcp_servers
-            .clone()
-            .or_else(|| state.current_mcp_servers().ok()),
-    )?;
+    // P1（E10）：GUI 显式 mcp_servers（前端每消息下发）直校验；None（平台 ingest
+    // 路径）走 mcp_wire 缓存——命中零重算，miss 回退全量重算并回填（E3 自愈）。
+    let requested_mcp_servers = match mcp_servers {
+        Some(servers) => mcp::validate_and_serialize(Some(servers.clone()))?,
+        None => state.wire_mcp_servers()?,
+    };
     let prompt_lock = prompt_lock_for(&runtime.prompt_locks, source);
     let _prompt_guard = prompt_lock.lock().await;
 
@@ -2174,6 +2191,50 @@ gateway:
             !pass_error.to_string().contains("invalid GUI source"),
             "无适配器注册的 qq:* source 不得被入口校验拒绝（E14），实际: {pass_error}"
         );
+    }
+
+    /// P1（E10）：缓存未初始化（None，启动恢复路径形态）→ 回退全量重算
+    /// （校验 + 序列化）并回填；行为与现状 validate_and_serialize(current_mcp_servers)
+    /// 逐字一致（E3 自愈：首次读取即回填）。
+    #[test]
+    fn mcp_wire_cache_uninitialized_falls_back_and_backfills() {
+        let state = crate::test_utils::TestStateBuilder::bare().build();
+        let values = state.wire_mcp_servers().expect("miss 回退必须成功");
+        assert!(values.is_empty(), "空配置 → 空 wire 数组（现状语义）");
+        assert_eq!(
+            state.mcp_wire.lock().unwrap().as_ref().map(Vec::len),
+            Some(0),
+            "miss 后必须回填缓存"
+        );
+    }
+
+    /// P1（E10）：缓存命中直接返回 wire 形态（零重算零校验）——runtime_mcp 即使
+    /// 被置入非法数据（超限 server）也不触发校验，证明读路径短路。
+    #[test]
+    fn mcp_wire_cache_hit_short_circuits_recompute() {
+        let state = crate::test_utils::TestStateBuilder::bare().build();
+        let cached = vec![serde_json::json!({"name": "cached-mcp"})];
+        *state.mcp_wire.lock().unwrap() = Some(cached.clone());
+        // 非法 runtime_mcp：33 个 server（> MAX_SERVERS=32，validate 必失败）
+        let mut bad = Vec::new();
+        for i in 0..(crate::mcp::MAX_SERVERS + 1) {
+            bad.push(crate::mcp::McpServerConfig {
+                id: Some(format!("s{i}")),
+                name: None,
+                transport: "stdio".into(),
+                enabled: true,
+                command: Some("cmd".into()),
+                args: Vec::new(),
+                env: HashMap::new(),
+                url: None,
+                headers: HashMap::new(),
+                oauth: None,
+                disabled: false,
+            });
+        }
+        *state.runtime_mcp.lock().unwrap() = Some(bad);
+        let values = state.wire_mcp_servers().expect("缓存命中不得触发校验");
+        assert_eq!(values, cached, "命中必须返回缓存 wire 形态");
     }
 
     /// A3：Round N 迟到 chunk 在 Round N+1 推进（clear）之后才被 dispatcher 追加
