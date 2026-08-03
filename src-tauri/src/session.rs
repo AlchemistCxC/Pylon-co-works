@@ -996,28 +996,52 @@ pub(crate) async fn send_message<R: tauri::Runtime>(
     send_prompt_core(state.inner(), &runtime, Some(&window), &state.gateway, &ctx).await
 }
 
+/// G2-06：管线运行期载体——阶段函数（ensure_session/prepare/send/finalize）不再
+/// 逐参重传。输入借用（state/runtime/window/gateway/ctx），派生产物（peri_id/
+/// generation/is_first/message_round/inject_activated/prompt_blocks/request_id）
+/// 在管线内逐步填充。
+pub(crate) struct PromptFlow<'a, R: tauri::Runtime> {
+    pub(crate) state: &'a AppState,
+    pub(crate) runtime: &'a Arc<AgentRuntime>,
+    pub(crate) window: Option<&'a tauri::Window<R>>,
+    pub(crate) gateway: &'a GatewayCore,
+    pub(crate) ctx: &'a PromptContext,
+    /// ensure_session 后确定。
+    pub(crate) peri_id: String,
+    /// prompt_generation（ensure 后快照）。
+    pub(crate) generation: u64,
+    /// ensure 后确定。
+    pub(crate) is_first: bool,
+    /// prepare 后确定（inject 回合）。
+    pub(crate) message_round: u64,
+    /// prepare 后确定（注入命中的来源列表）。
+    pub(crate) inject_activated: Vec<String>,
+    /// prepare 后确定（prompt blocks，prepare_prompt 消费）。
+    pub(crate) prompt_blocks: Vec<serde_json::Value>,
+    /// prepare_prompt 后捕获（取消/清理用）。
+    pub(crate) request_id: u64,
+}
+
 /// R33a：prompt 阶段纯函数——content 构造 + persona 拼接 + B11.1 注入调用 +
-/// attachments 块构建。返回 (prompt_blocks, 注入命中的来源列表, 注入回合号)。
-/// 注入日志（activated/empty/failed）在本函数内按原顺序发出；pet/用户事件由
-/// 调用方在返回后触发——wire/事件顺序与拆分前一致。
-// clippy 2026-08-02：9 参为阶段全参数（state/runtime/gateway/source/content/persona/
-// session_prompt/attachments/is_first），与 send_prompt_core 显式参数风格一致。
-#[allow(clippy::too_many_arguments)]
-async fn prepare_prompt_blocks(
-    state: &AppState,
-    runtime: &Arc<AgentRuntime>,
-    gateway: &GatewayCore,
-    source: &str,
-    content: &str,
-    persona: &str,
-    session_prompt: Option<&str>,
-    attachments: Option<&[String]>,
-    is_first: bool,
-) -> Result<(Vec<serde_json::Value>, Vec<String>, u64), PylonError> {
-    let attachment_paths = attachments.unwrap_or_default();
-    let effective_persona = session_prompt
+/// attachments 块构建。G2-06：9 参收敛为 (&mut PromptFlow) 单参；prompt_blocks/
+/// inject_activated/message_round 写入 flow。注入日志（activated/empty/failed）在
+/// 本函数内按原顺序发出；pet/用户事件由调用方在返回后触发——wire/事件顺序不变。
+async fn prepare_prompt_blocks<R: tauri::Runtime>(
+    flow: &mut PromptFlow<'_, R>,
+) -> Result<(), PylonError> {
+    let state = flow.state;
+    let runtime = flow.runtime;
+    let gateway = flow.gateway;
+    let source = &flow.ctx.source;
+    let content = &flow.ctx.content;
+    let is_first = flow.is_first;
+    let attachment_paths = flow.ctx.attachments.as_deref().unwrap_or_default();
+    let effective_persona = flow
+        .ctx
+        .session_prompt
+        .as_deref()
         .filter(|value| !value.trim().is_empty())
-        .unwrap_or(persona);
+        .unwrap_or(&flow.ctx.persona);
 
     let prompt_content =
         if is_first && !effective_persona.is_empty() && !content.trim_start().starts_with('/') {
@@ -1103,16 +1127,19 @@ async fn prepare_prompt_blocks(
         &attachment_paths,
         crate::agent_config::AttachmentLimits::from_agent(&state.get_active_agent()?),
     )?;
-    Ok((prompt_blocks, inject_activated, message_round))
+    flow.message_round = message_round;
+    flow.inject_activated = inject_activated;
+    flow.prompt_blocks = prompt_blocks;
+    Ok(())
 }
 
 /// R33b：回合推进纯函数——该 session 用户回合 +1、标记收集回合（dispatcher
 /// 据此绑定流式收集）、清空上一回合回复文本（本轮回复由 dispatcher 重新收集）。
 /// 必须在发送（send_keep_rx）之前完成（P2-8：发送成功后清空会与 dispatcher
 /// 的并行追加竞态：agent 极快响应时本轮回复文本会被清掉）。
-fn advance_round(runtime: &Arc<AgentRuntime>, source: &str) {
-    if let Ok(mut sessions) = runtime.sessions.lock() {
-        if let Some(session) = sessions.get_mut(source) {
+fn advance_round<R: tauri::Runtime>(flow: &mut PromptFlow<'_, R>) {
+    if let Ok(mut sessions) = flow.runtime.sessions.lock() {
+        if let Some(session) = sessions.get_mut(&flow.ctx.source) {
             session.inject_round = session.inject_round.saturating_add(1);
             // B11.2：先标记收集回合（dispatcher 据此绑定流式收集），再清空文本。
             session.last_response_round = session.inject_round;
@@ -1124,23 +1151,21 @@ fn advance_round(runtime: &Arc<AgentRuntime>, source: &str) {
 /// R33c：Response 成功路径收尾——stop reason 校验（M5 感知）、generation 复核、
 /// 首轮标记、peri:done 广播、B11.2 完成持久化、完成日志。wire/事件顺序与
 /// 拆分前内联路径完全一致（peri:error 先于 pet 感知、done 先于 persist）。
-// clippy 2026-08-02：11 参为收尾阶段全参数（state/runtime/window/gateway/source/
-// content/peri_id/prompt_generation/is_first/message_round/data），与管线其余阶段
-// 同风格显式传参，避免包一层结果结构体降低可读性。
-#[allow(clippy::too_many_arguments)]
+/// G2-06：11 参收敛为 (flow, data) 两参；函数体经局部别名访问 flow 派生字段。
 async fn finalize_response<R: tauri::Runtime>(
-    state: &AppState,
-    runtime: &Arc<AgentRuntime>,
-    window: Option<&tauri::Window<R>>,
-    gateway: &GatewayCore,
-    source: &str,
-    content: &str,
-    peri_id: String,
-    prompt_generation: u64,
-    is_first: bool,
-    message_round: u64,
+    flow: &mut PromptFlow<'_, R>,
     data: serde_json::Value,
 ) -> Result<String, PylonError> {
+    let state = flow.state;
+    let runtime = flow.runtime;
+    let window = flow.window;
+    let gateway = flow.gateway;
+    let source = &flow.ctx.source;
+    let content = &flow.ctx.content;
+    let peri_id = &flow.peri_id;
+    let prompt_generation = flow.generation;
+    let is_first = flow.is_first;
+    let message_round = flow.message_round;
     AcpClient::prompt_stop_reason(&data).map_err(|error| {
         let error = error.to_string();
         if let Some(window) = window {
@@ -1172,7 +1197,7 @@ async fn finalize_response<R: tauri::Runtime>(
         error
     })?;
     if let Err(error) = state.ensure_generation(runtime, prompt_generation) {
-        let _ = state.remove_session_if_matches(runtime, source, &peri_id, prompt_generation);
+        let _ = state.remove_session_if_matches(runtime, source, peri_id, prompt_generation);
         if let Some(window) = window {
             emit_event_all(
                 window,
@@ -1185,7 +1210,7 @@ async fn finalize_response<R: tauri::Runtime>(
         return Err(error.into());
     }
     if is_first {
-        state.mark_first_prompt_if_matches(runtime, source, &peri_id, prompt_generation)?;
+        state.mark_first_prompt_if_matches(runtime, source, peri_id, prompt_generation)?;
     }
     if let Some(window) = window {
         emit_event_all(
@@ -1260,7 +1285,7 @@ async fn finalize_response<R: tauri::Runtime>(
             serde_json::Value::String("success".to_string()),
         )]),
     );
-    Ok(peri_id)
+    Ok(flow.peri_id.clone())
 }
 
 /// S3：prompt Response 错误是否携带"会话不存在"语义（幽灵映射自动重建判定）。
@@ -1346,15 +1371,16 @@ pub(crate) async fn send_prompt_core<R: tauri::Runtime>(
     gateway: &GatewayCore,
     ctx: &PromptContext,
 ) -> Result<String, PylonError> {
-    // 解构 ctx 业务参数（引用形态，管线内只读）。
+    // 解构 ctx 业务参数（引用形态，管线内只读；session_prompt 由 prepare_prompt_blocks
+    // 经 flow.ctx 直接读取，不在本函数体内消费）。
     let PromptContext {
         source,
         content,
         persona,
-        session_prompt,
         attachments,
         mcp_servers,
         cwd,
+        ..
     } = ctx;
     // B1：GUI source 不得冒名平台源——qq:* 无 binding → 拒绝（防冒名出站投递到 QQ）。
     // 平台 ingest 的 qq:* 必带 binding（绑定命中），不受影响。
@@ -1429,20 +1455,24 @@ pub(crate) async fn send_prompt_core<R: tauri::Runtime>(
         (mapping.peri_id, mapping.is_first)
     };
 
-    // R33a：content 构造 + persona 拼接 + B11.1 注入 + attachments 块构建。
-    let prompt_generation = state.current_generation(runtime);
-    let (prompt_blocks, inject_activated, message_round) = prepare_prompt_blocks(
+    // G2-06：管线阶段载体（PromptFlow）——派生字段由阶段函数逐步填充。
+    let mut flow = PromptFlow {
         state,
         runtime,
+        window,
         gateway,
-        source,
-        content,
-        persona,
-        session_prompt.as_deref(),
-        attachments.as_deref(),
+        ctx,
+        peri_id,
+        generation: state.current_generation(runtime),
         is_first,
-    )
-    .await?;
+        message_round: 0,
+        inject_activated: Vec::new(),
+        prompt_blocks: Vec::new(),
+        request_id: 0,
+    };
+
+    // R33a：content 构造 + persona 拼接 + B11.1 注入 + attachments 块构建。
+    prepare_prompt_blocks(&mut flow).await?;
 
     state
         .pet
@@ -1451,9 +1481,9 @@ pub(crate) async fn send_prompt_core<R: tauri::Runtime>(
         .ok();
     if let Some(window) = window {
         let mut user_payload = serde_json::json!({ "source": source, "content": content });
-        if !inject_activated.is_empty() {
+        if !flow.inject_activated.is_empty() {
             user_payload["injectActivated"] = serde_json::Value::Array(
-                inject_activated
+                flow.inject_activated
                     .iter()
                     .map(|item| serde_json::Value::String(item.clone()))
                     .collect(),
@@ -1463,28 +1493,33 @@ pub(crate) async fn send_prompt_core<R: tauri::Runtime>(
     }
     let rpc = {
         let acp = runtime.acp.lock().await;
-        acp.prepare_prompt(&peri_id, prompt_blocks)?
+        acp.prepare_prompt(&flow.peri_id, std::mem::take(&mut flow.prompt_blocks))?
     };
     // 取消/连接关闭分支清理 pending 仍需 request_id（send_keep_rx 会消费 rpc）。
-    let request_id = rpc.id;
+    flow.request_id = rpc.id;
     // R33b：回合推进（该 session 用户回合 +1、标记收集回合、清空回复文本）。
     // P2-8：必须在发送（send_keep_rx）之前完成，见 advance_round 说明。
-    advance_round(runtime, source);
+    advance_round(&mut flow);
     // R3：send_keep_rx 统一 10s 写超时（对齐 complete 路径；原裸 write_tx.send 在
     // writer 阻塞 + 队列满时会无限挂起），失败已清理 pending，只收敛会话映射。
     let mut rx = match rpc.send_keep_rx().await {
         Ok(rx) => rx,
         Err(error) => {
-            let _ = state.remove_session_if_matches(runtime, source, &peri_id, prompt_generation);
+            let _ =
+                state.remove_session_if_matches(runtime, source, &flow.peri_id, flow.generation);
             return Err(PylonError::from(error));
         }
     };
     let acp_for_cancel = runtime.acp.clone();
-    let peri_id_for_cancel = peri_id.clone();
+    let peri_id_for_cancel = flow.peri_id.clone();
+    // G2-06：超时参数化（per-agent 协议配置，缺省 300/30 = 现状常量值）。
+    let protocol = state.protocol_for_runtime(runtime);
+    let prompt_timeout_secs = protocol.prompt_timeout();
+    let cancel_settle_timeout_secs = protocol.cancel_settle_timeout();
     let result = acp::wait_prompt_with_cancel(
         &mut rx,
-        Duration::from_secs(acp::PROMPT_TIMEOUT_SECS),
-        Duration::from_secs(acp::CANCEL_SETTLE_TIMEOUT_SECS),
+        Duration::from_secs(prompt_timeout_secs),
+        Duration::from_secs(cancel_settle_timeout_secs),
         move || async move {
             // R6e：cancel 闭包契约是 Result<(), String>（wait_prompt_with_cancel 泛型边界）
             acp_for_cancel
@@ -1499,8 +1534,8 @@ pub(crate) async fn send_prompt_core<R: tauri::Runtime>(
 
     match result {
         PromptWaitOutcome::Response(raw) => {
-            state.ensure_generation(runtime, prompt_generation)?;
-            if !state.session_matches(runtime, source, &peri_id, prompt_generation)? {
+            state.ensure_generation(runtime, flow.generation)?;
+            if !state.session_matches(runtime, source, &flow.peri_id, flow.generation)? {
                 return Err(PylonError::Protocol(format!(
                     "stale session mapping for source: {source}"
                 )));
@@ -1523,8 +1558,8 @@ pub(crate) async fn send_prompt_core<R: tauri::Runtime>(
                     state,
                     runtime,
                     source,
-                    &peri_id,
-                    prompt_generation,
+                    &flow.peri_id,
+                    flow.generation,
                     &error,
                 );
                 Err(PylonError::Protocol(error))
@@ -1532,24 +1567,11 @@ pub(crate) async fn send_prompt_core<R: tauri::Runtime>(
                 // R33c：成功路径收尾（stop reason 校验 / generation 复核 / 首轮标记 /
                 // peri:done 广播 / B11.2 完成持久化）委托阶段函数，顺序不变。
                 let data = raw.result.unwrap_or(serde_json::Value::Null);
-                finalize_response(
-                    state,
-                    runtime,
-                    window,
-                    gateway,
-                    source,
-                    content,
-                    peri_id,
-                    prompt_generation,
-                    is_first,
-                    message_round,
-                    data,
-                )
-                .await
+                finalize_response(&mut flow, data).await
             }
         }
         PromptWaitOutcome::ConnectionClosed => {
-            runtime.acp.lock().await.remove_pending(request_id);
+            runtime.acp.lock().await.remove_pending(flow.request_id);
             // A14：崩溃不删会话映射——自动重连（keep_sessions=true）会迁移
             // generation 并恢复事件路由；此处删除映射会让重连后的活跃会话
             // 丢失绑定（与 keep_sessions 语义相悖）。已知限制：若重连后
@@ -1567,22 +1589,26 @@ pub(crate) async fn send_prompt_core<R: tauri::Runtime>(
             response,
             cancel_error,
         } => {
-            runtime.acp.lock().await.remove_pending(request_id);
+            runtime.acp.lock().await.remove_pending(flow.request_id);
             if let Some(cancel_error) = cancel_error {
-                tracing::warn!("cancel timed-out prompt {}: {}", peri_id, cancel_error);
+                tracing::warn!("cancel timed-out prompt {}: {}", flow.peri_id, cancel_error);
             }
             // B9：cancel 后应答该 session 挂起的权限请求为 Cancelled
-            crate::permission::respond_pending_permissions_cancelled(runtime, &peri_id).await;
+            crate::permission::respond_pending_permissions_cancelled(runtime, &flow.peri_id).await;
             if response.is_none() {
-                match state.remove_session_if_matches(runtime, source, &peri_id, prompt_generation)
-                {
+                match state.remove_session_if_matches(
+                    runtime,
+                    source,
+                    &flow.peri_id,
+                    flow.generation,
+                ) {
                     Ok(true) => {
                         tracing::error!(
                             "cancelled prompt {} did not settle within {}s; removed local session mapping",
-                            peri_id,
-                            acp::CANCEL_SETTLE_TIMEOUT_SECS
+                            flow.peri_id,
+                            cancel_settle_timeout_secs
                         );
-                        if let Ok(close_params) = acp::session_close_params(&peri_id) {
+                        if let Ok(close_params) = acp::session_close_params(&flow.peri_id) {
                             // G2-03：D3 消费——close_via_rpc()=false 时跳过 RPC
                             if state.protocol_for_runtime(runtime).close_via_rpc() {
                                 if let Err(close_error) = state
@@ -1591,7 +1617,7 @@ pub(crate) async fn send_prompt_core<R: tauri::Runtime>(
                                 {
                                     tracing::warn!(
                                         "close unsettled prompt session {}: {}",
-                                        peri_id,
+                                        flow.peri_id,
                                         close_error
                                     );
                                 }
@@ -1602,7 +1628,9 @@ pub(crate) async fn send_prompt_core<R: tauri::Runtime>(
                     Err(error) => return Err(error.into()),
                 }
             }
-            let error = "timed out after 300s";
+            // G2-06：超时文案参数化（缺省 300 时与旧文案逐字一致——session.rs:2108
+            // 负例表 "timed out after 300s" 依赖此不变量）。
+            let error = format!("timed out after {prompt_timeout_secs}s");
             if let Some(window) = window {
                 emit_event_all(
                     window,
@@ -1624,7 +1652,7 @@ pub(crate) async fn send_prompt_core<R: tauri::Runtime>(
                     serde_json::Value::String("timeout".to_string()),
                 )]),
             );
-            Err(PylonError::Protocol(error.to_string()))
+            Err(PylonError::Protocol(error))
         }
     }
 }
