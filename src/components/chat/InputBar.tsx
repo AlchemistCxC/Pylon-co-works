@@ -17,6 +17,7 @@ import { Paperclip, ArrowUp, Square, Pencil, Send, Trash2 } from 'lucide-react'
 import type { AvailableCommand } from './acpTypes'
 import { resolveCliTextareaLayout, resolveDefaultTextareaHeight } from './inputOverflowState'
 import { resolveCommandSuggestions, filterCommandSuggestions, parseSlashCommand, type CommandSuggestion } from './commandRegistry'
+import { useSessionUiState } from './sessionUiState'
 import './InputBar.css'
 
 interface Props { sessionId: string | null; split?: boolean; ariaDescribedBy?: string; externalSend?: boolean; externalAttach?: boolean }
@@ -30,7 +31,8 @@ interface QueuedMessage {
 }
 
 export default forwardRef<{ send: () => void; attachFile: () => void; cancel: () => void }, Props>(function InputBar({ sessionId, split, ariaDescribedBy, externalSend = false, externalAttach = false }, ref) {
-  const [value, setValue] = useState('')
+  // 草稿按会话作用域：切会话不串（A 草稿不显示在 B）、不丢（切回 A 恢复）
+  const [value, setValue] = useSessionUiState(sessionId, 'draft', '')
   const [cmdIdx, setCmdIdx] = useState(0)
   const [sendError, setSendError] = useState('')
   const [attached, setAttached] = useState<{path:string;name:string}[]>([])

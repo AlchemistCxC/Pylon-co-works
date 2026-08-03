@@ -3,6 +3,7 @@ import { loadSessions, persistSessions } from './sessionPersistence'
 import { loadSheetState } from './workspace-sheets/sheetPersistence'
 import { useWorkspaceStore } from './workspaceStore'
 import { useRuntimeStore } from './runtimeStore'
+import { clearSessionUiState } from './components/chat/sessionUiState'
 
 /**
  * identityStore — 身份与会话状态域（阶段 1：store 按域拆分）。
@@ -136,8 +137,9 @@ export const useIdentityStore = create<IdentityStoreState>()((set, get) => ({
     const sessions = state.sessions.filter(session => session.id !== id)
     persistSessions(localStorage, sessions)
     if (!removed) return { sessions }
-    // 联动：清 runtime（live stats/modes/config/generating）与 sheet 状态
+    // 联动：清 runtime（live stats/modes/config/generating）、sheet 状态与会话级 UI 状态
     useRuntimeStore.getState().clearSessionSource(removed.source)
+    clearSessionUiState(id)
     const agentStates = Object.fromEntries(Object.entries(useWorkspaceStore.getState().sheetAgentStates).map(([agentId, sheetState]) => [
       agentId,
       sheetState.activeSessionId === id ? { ...sheetState, activeSessionId: undefined } : sheetState,

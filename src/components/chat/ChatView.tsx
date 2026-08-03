@@ -20,6 +20,7 @@ import type { Message as PipelineMessage, RenderMessage } from './messageTypes'
 import { buildMessageLookups } from './messageLookups'
 import { buildChatRowDescriptors } from './chatRowPipeline'
 import { beginProgrammaticScroll, createScrollFollowState, onUserScroll, shouldAutoScroll, type ScrollFollowState } from './scrollFollowState'
+import { useSessionUiState } from './sessionUiState'
 import { resolveConnectorColor } from './toolPresentation'
 import { buildToolPresentationModel, toolPresentationStatus, truncateToolSummary } from './toolPresentationModel'
 import { normalizeToolStatus } from './toolStatus'
@@ -82,6 +83,7 @@ const ChatView = React.memo(function ChatView({ sessionId }: Props) {
   const bottomRef = useRef<HTMLDivElement>(null)
   const scrollFollowRef = useRef<ScrollFollowState>(createScrollFollowState())
   const scrollRafRef = useRef<number | null>(null)
+  const scrollBoundRef = useRef(false)
   const scrollToBottomRef = useRef<((behavior?: ScrollBehavior) => void) | null>(null)
   const [messages, setMessages] = useState<Message[]>(!IS_TAURI ? resolveInitialBrowserMessages() : [])
   const preparedMessages = useMemo(() => prepareRenderableMessages(messages), [messages])
@@ -94,9 +96,10 @@ const ChatView = React.memo(function ChatView({ sessionId }: Props) {
   const [generationPhase, setGenerationPhase] = useState<GenerationPhase | null>(null)
   const [mockPhaseIndex, setMockPhaseIndex] = useState(0)
   const mockGenerationStartRef = useRef(Date.now())
-  const [searchOpen, setSearchOpen] = useState(false)
-  const [searchQuery, setSearchQuery] = useState('')
-  const [searchIndex, setSearchIndex] = useState(0)
+  // 搜索状态按会话作用域（多会话基建）：切会话保留各会话的搜索词/开关/位置
+  const [searchOpen, setSearchOpen] = useSessionUiState(sessionId, 'search-open', false)
+  const [searchQuery, setSearchQuery] = useSessionUiState(sessionId, 'search-query', '')
+  const [searchIndex, setSearchIndex] = useSessionUiState(sessionId, 'search-index', 0)
   const messageRefs = useRef(new Map<string, HTMLDivElement>())
   const sessionRef = useRef<string | null>(null)
   const messageOwnerRef = useRef<string | null>(null)
@@ -114,12 +117,6 @@ const ChatView = React.memo(function ChatView({ sessionId }: Props) {
     window.addEventListener('keydown', onSearchShortcut)
     return () => window.removeEventListener('keydown', onSearchShortcut)
   }, [])
-
-  useEffect(() => {
-    setSearchQuery('')
-    setSearchIndex(0)
-    setSearchOpen(false)
-  }, [sessionId])
 
   useEffect(() => {
     if (IS_TAURI) return
@@ -284,6 +281,11 @@ const ChatView = React.memo(function ChatView({ sessionId }: Props) {
     }
   }, [sessionId])
 
+  // 会话级滚动跟随：切会话重置为 sticky（新会话从底部开始，不继承上一会话的 user_scrolled）
+  useEffect(() => {
+    scrollFollowRef.current = createScrollFollowState()
+  }, [sessionId])
+
   useEffect(() => {
     const activeSources = sessions.map(session => session.source)
     controllerHandleRef.current?.pruneSources(activeSources)
@@ -308,7 +310,12 @@ const ChatView = React.memo(function ChatView({ sessionId }: Props) {
       scrollRafRef.current = requestAnimationFrame(updateFollowState)
     }
     container.addEventListener('scroll', handleScroll, { passive: true })
-    updateFollowState()
+    // 仅首次绑定时 eager 判定初始相位；会话切换（重绑定）时容器仍停留在上一会话的
+    // 滚动位置，eager 判定会基于过期位置把刚重置的 sticky 翻成 user_scrolled
+    if (!scrollBoundRef.current) {
+      scrollBoundRef.current = true
+      updateFollowState()
+    }
     return () => {
       container.removeEventListener('scroll', handleScroll)
       if (scrollRafRef.current !== null) cancelAnimationFrame(scrollRafRef.current)
