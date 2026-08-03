@@ -18,7 +18,7 @@ use reqwest::Client;
 use tokio::sync::mpsc;
 use tokio_util::sync::CancellationToken;
 
-use crate::gateway::{truncate_ingest_content, GatewayCore, PlatformAdapter, ResolvedIngest};
+use crate::gateway::{route, truncate_ingest_content, GatewayCore, PlatformAdapter, ResolvedIngest};
 
 use self::auth::QqAuth;
 
@@ -172,6 +172,42 @@ pub struct QqAdapter {
     short_circuit_warns: Mutex<HashMap<String, Instant>>,
 }
 
+/// 平台入站白名单检查（B10.3，Hermes group_allow_from / allow_from 模式）：
+///
+/// - 群消息（qq:group:*）：群级白名单（qq 配置）→ 成员白名单（binding.allow_from）
+/// - 私聊（qq:user:*）：用户白名单（binding.allow_from）
+/// - 未配置白名单 = 放行；群级白名单只约束群消息
+///
+/// §3-2：从 gateway/mod.rs 下沉（QQ 专属语义：qq:group: 前缀解析 + group_allow_from）——
+/// 通用模块不感知 QQ source 形状；第二个平台接入时再评估通用化。
+pub(crate) fn ingest_allowed(
+    qq_config: &route::QqGatewayConfig,
+    binding: Option<&route::EntityBinding>,
+    source: &str,
+    member_openid: Option<&str>,
+    user_openid: Option<&str>,
+) -> bool {
+    if let Some(group_id) = source.strip_prefix("qq:group:") {
+        if let Some(allow) = &qq_config.group_allow_from {
+            if !allow.iter().any(|g| g == group_id) {
+                return false;
+            }
+        }
+    }
+    let Some(binding) = binding else {
+        return true;
+    };
+    let Some(allow) = &binding.allow_from else {
+        return true;
+    };
+    let principal = if source.starts_with("qq:group:") {
+        member_openid.unwrap_or("")
+    } else {
+        user_openid.unwrap_or("")
+    };
+    allow.iter().any(|entry| entry == principal)
+}
+
 /// 从 gateway source 解析 QQ 目标：`qq:group:123` → (Group, 123)；`qq:user:456` → (C2C, 456)。
 pub fn parse_source(source: &str) -> Result<(QqChatType, &str), String> {
     let mut parts = source.splitn(3, ':');
@@ -269,7 +305,7 @@ impl QqAdapter {
         // agent）——白名单校验过的 agent 与实际接收 agent 不一致。
         let (allowed, binding) = match self.core.with_routes_and_qq(source, |qq, binding| {
             (
-                crate::gateway::ingest_allowed(qq, binding, source, member_openid, user_openid),
+                ingest_allowed(qq, binding, source, member_openid, user_openid),
                 binding.cloned(),
             )
         }) {
@@ -679,6 +715,12 @@ gateway:
         QqAdapter::new(core, Client::new(), auth)
     }
 
+    fn config_with(yaml: &str) -> Arc<GatewayCore> {
+        Arc::new(GatewayCore::from_config(
+            crate::gateway::route::parse_config(yaml).expect("合法配置"),
+        ))
+    }
+
     #[test]
     fn parse_source_accepts_group_and_user_shapes() {
         assert_eq!(parse_source("qq:group:123"), Ok((QqChatType::Group, "123")));
@@ -687,6 +729,96 @@ gateway:
         assert!(parse_source("qq:group:").is_err());
         assert!(parse_source("local").is_err());
         assert!(parse_source("wechat:group:1").is_err());
+    }
+
+    #[test]
+    fn ingest_allowed_enforces_group_and_member_allowlists() {
+        // §3-2：白名单函数随 QQ 语义下沉至适配器模块（通用模块不再感知 qq:group: 形状）
+        let config = config_with(
+            r#"
+gateway:
+  qq:
+    group_allow_from: [group-a]
+  routes:
+    - source: qq:group:group-a
+      agent: peri
+      profile: trpg
+      session: 战役1
+      allow_from: [member-1]
+    - source: qq:user:user-1
+      agent: hermes
+      profile: default
+      session: dm
+      allow_from: [user-1]
+"#,
+        );
+        let qq = config.qq_config();
+        let group_binding = config.binding("qq:group:group-a");
+        // 群级白名单：未列出群拒绝
+        assert!(!ingest_allowed(
+            &qq,
+            group_binding.as_ref(),
+            "qq:group:group-x",
+            Some("member-1"),
+            None
+        ));
+        // 成员白名单：匹配放行、不匹配拒绝
+        assert!(ingest_allowed(
+            &qq,
+            group_binding.as_ref(),
+            "qq:group:group-a",
+            Some("member-1"),
+            None
+        ));
+        assert!(!ingest_allowed(
+            &qq,
+            group_binding.as_ref(),
+            "qq:group:group-a",
+            Some("stranger"),
+            None
+        ));
+        // 私聊白名单：按 user_openid
+        let c2c_binding = config.binding("qq:user:user-1");
+        assert!(ingest_allowed(
+            &qq,
+            c2c_binding.as_ref(),
+            "qq:user:user-1",
+            None,
+            Some("user-1")
+        ));
+        assert!(!ingest_allowed(
+            &qq,
+            c2c_binding.as_ref(),
+            "qq:user:user-1",
+            None,
+            Some("user-2")
+        ));
+        // 群级白名单配置了 group-a：any 群被拒绝
+        assert!(!ingest_allowed(
+            &qq,
+            None,
+            "qq:group:any",
+            Some("whoever"),
+            None
+        ));
+        // 无群级白名单 + 无绑定 → 放行
+        let open = config_with(
+            r#"
+gateway:
+  routes:
+    - source: qq:group:123
+      agent: peri
+      profile: trpg
+      session: 战役1
+"#,
+        );
+        assert!(ingest_allowed(
+            &open.qq_config(),
+            None,
+            "qq:group:any",
+            Some("whoever"),
+            None
+        ));
     }
 
     #[test]

@@ -368,39 +368,6 @@ fn extract_deliver_text(event: &str, payload: &serde_json::Value) -> Option<Stri
         .map(str::to_string)
 }
 
-/// 平台入站白名单检查（B10.3，Hermes group_allow_from / allow_from 模式）：
-///
-/// - 群消息（qq:group:*）：群级白名单（qq 配置）→ 成员白名单（binding.allow_from）
-/// - 私聊（qq:user:*）：用户白名单（binding.allow_from）
-/// - 未配置白名单 = 放行；群级白名单只约束群消息
-pub fn ingest_allowed(
-    qq_config: &QqGatewayConfig,
-    binding: Option<&route::EntityBinding>,
-    source: &str,
-    member_openid: Option<&str>,
-    user_openid: Option<&str>,
-) -> bool {
-    if let Some(group_id) = source.strip_prefix("qq:group:") {
-        if let Some(allow) = &qq_config.group_allow_from {
-            if !allow.iter().any(|g| g == group_id) {
-                return false;
-            }
-        }
-    }
-    let Some(binding) = binding else {
-        return true;
-    };
-    let Some(allow) = &binding.allow_from else {
-        return true;
-    };
-    let principal = if source.starts_with("qq:group:") {
-        member_openid.unwrap_or("")
-    } else {
-        user_openid.unwrap_or("")
-    };
-    allow.iter().any(|entry| entry == principal)
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -779,95 +746,6 @@ gateway:
 
     fn config_with(yaml: &str) -> GatewayCore {
         GatewayCore::from_config(route::parse_config(yaml).expect("合法配置"))
-    }
-
-    #[test]
-    fn ingest_allowed_enforces_group_and_member_allowlists() {
-        let config = config_with(
-            r#"
-gateway:
-  qq:
-    group_allow_from: [group-a]
-  routes:
-    - source: qq:group:group-a
-      agent: peri
-      profile: trpg
-      session: 战役1
-      allow_from: [member-1]
-    - source: qq:user:user-1
-      agent: hermes
-      profile: default
-      session: dm
-      allow_from: [user-1]
-"#,
-        );
-        let qq = config.qq_config();
-        let group_binding = config.binding("qq:group:group-a");
-        // 群级白名单：未列出群拒绝
-        assert!(!ingest_allowed(
-            &qq,
-            group_binding.as_ref(),
-            "qq:group:group-x",
-            Some("member-1"),
-            None
-        ));
-        // 成员白名单：匹配放行、不匹配拒绝
-        assert!(ingest_allowed(
-            &qq,
-            group_binding.as_ref(),
-            "qq:group:group-a",
-            Some("member-1"),
-            None
-        ));
-        assert!(!ingest_allowed(
-            &qq,
-            group_binding.as_ref(),
-            "qq:group:group-a",
-            Some("stranger"),
-            None
-        ));
-        // 私聊白名单：按 user_openid
-        let c2c_binding = config.binding("qq:user:user-1");
-        assert!(ingest_allowed(
-            &qq,
-            c2c_binding.as_ref(),
-            "qq:user:user-1",
-            None,
-            Some("user-1")
-        ));
-        assert!(!ingest_allowed(
-            &qq,
-            c2c_binding.as_ref(),
-            "qq:user:user-1",
-            None,
-            Some("user-2")
-        ));
-        // 群级白名单配置了 group-a：any 群被拒绝
-        assert!(!ingest_allowed(
-            &qq,
-            None,
-            "qq:group:any",
-            Some("whoever"),
-            None
-        ));
-        // 无群级白名单 + 无绑定 → 放行
-        let open = config_with(
-            r#"
-gateway:
-  routes:
-    - source: qq:group:123
-      agent: peri
-      profile: trpg
-      session: 战役1
-"#,
-        );
-        assert!(ingest_allowed(
-            &open.qq_config(),
-            None,
-            "qq:group:any",
-            Some("whoever"),
-            None
-        ));
     }
 
     #[test]
