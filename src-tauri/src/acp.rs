@@ -37,7 +37,9 @@ pub const METHOD_SESSION_REQUEST_PERMISSION: &str = CLIENT_METHOD_NAMES.session_
 pub const METHOD_SESSION_SET_MODEL: &str = "session/set_model";
 /// session/update 通知名官方为 pub(crate)，保留本地常量。
 pub const NOTIF_SESSION_UPDATE: &str = "session/update";
-pub const NOTIF_AGENT_CRASHED: &str = "pylon:agent-crashed";
+/// G3 Step 8a（4.2）：进程内崩溃伪通知常量迁移——事件名唯一来源收口到
+/// event_names 常量表，本名保持既有引用（dispatcher/reader/测试）零改动。
+pub use crate::event_names::AGENT_CRASHED as NOTIF_AGENT_CRASHED;
 
 /// ACP session/update 的 `update.sessionUpdate` 变体（R4：事件变体去字符串化——
 /// dispatcher/gateway/export 不再手写字符串比较；wire 字符串契约不变）。

@@ -26,5 +26,6 @@ pub(crate) const PERMISSION_REQUEST: &str = "pylon:permission-request";
 /// 运行日志实时推送（§4.7，RuntimeLogEntry 已脱敏）。
 pub(crate) const RUNTIME_LOG: &str = "pylon:runtime-log";
 /// 进程内广播伪通知：ACP stdout EOF（非 WebView 事件，dispatcher 主循环消费）。
-/// acp.rs 以 `pub use` 别名暴露为 NOTIF_AGENT_CRASHED（保持既有引用不变）。
-pub(crate) const AGENT_CRASHED: &str = "pylon:agent-crashed";
+/// acp.rs 以 `pub use` 别名暴露为 NOTIF_AGENT_CRASHED（保持既有引用不变）——
+/// 重导出要求本常量 pub（crate 为 cdylib，无外部 Rust API 面，pub 无泄漏）。
+pub const AGENT_CRASHED: &str = "pylon:agent-crashed";
