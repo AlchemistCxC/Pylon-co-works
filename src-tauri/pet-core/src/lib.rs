@@ -224,9 +224,6 @@ impl GrowthStage {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ToolOutcome {
-    /// 预留变体：桥接层 pet.rs 当前不构造（只发 Succeeded/Failed/Cancelled），
-    /// 保留以兼容公共 API；record_tool 不再处理该分支。
-    Started,
     Succeeded,
     Failed,
     /// M5：工具被取消（打断，区别于失败）。
@@ -1305,9 +1302,6 @@ impl PetState {
 
     fn record_tool(&mut self, outcome: ToolOutcome, now_ms: u64) {
         match outcome {
-            // 审查修复：ToolOutcome::Started 为死分支——桥接层 pet.rs 只发
-            // Succeeded/Failed/Cancelled；变体保留仅为兼容公共 API，此臂不产生任何统计。
-            ToolOutcome::Started => {}
             // 口径说明（现状语义）：Cancelled 只计入 tools_started（分母），
             // 不计成功也不计失败（取消 ≠ 失败）——tool_success_rate =
             // succeeded / started 因此是"取消算分母"的保守下限。
