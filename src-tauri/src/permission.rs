@@ -1,6 +1,7 @@
 //! B9 权限审批：挂起请求解析/应答/超时（R1 拆分自 lib.rs；行为零变化）。
 
 use std::sync::atomic::Ordering;
+use std::sync::Arc;
 
 use crate::error::PylonError;
 use crate::runtime::AgentRuntime;
@@ -128,6 +129,34 @@ pub(crate) fn pick_option(options: &[String], prefer_reject: bool) -> Option<&st
     .map(String::as_str)
 }
 
+/// 锁外应答发送共享 helper（G3 §2.2.2）：构造 {jsonrpc,id,result} 信封 → 序列化 →
+/// 10s 超时发送 → 超时置 crashed（语义对齐 acp::send_line / WRITE_TIMEOUT_SECS）。
+/// 收敛 dispatcher::send_direct_permission_response 与 resolve_pending 的锁外发送段
+/// （三份同形拷贝 → 一份）；调用方（resolve_pending）在返回 false 时恢复 pending。
+pub(crate) async fn send_agent_response(
+    write_tx: tokio::sync::mpsc::Sender<String>,
+    crashed: Arc<std::sync::atomic::AtomicBool>,
+    request_id: u64,
+    result: serde_json::Value,
+) -> bool {
+    if crashed.load(Ordering::Acquire) {
+        return false; // 已崩溃不发送（原两处同语义）
+    }
+    let line = serde_json::json!({ "jsonrpc": "2.0", "id": request_id, "result": result });
+    let Ok(line) = serde_json::to_string(&line) else {
+        return false;
+    };
+    match tokio::time::timeout(std::time::Duration::from_secs(10), write_tx.send(line)).await {
+        Ok(Ok(())) => true,
+        Ok(Err(_)) => false,
+        Err(_) => {
+            tracing::warn!("ACP write timeout after 10s: connection presumed dead");
+            crashed.store(true, Ordering::Release);
+            false
+        }
+    }
+}
+
 /// R34：四路应答统一核心（由 respond_permission 演进——四路：应答 / cancel /
 /// resolve / 超时 全部收敛于此，单一临界区 + 锁外发送）。
 ///
@@ -181,40 +210,15 @@ async fn resolve_pending(
             pending.remove(&request_id),
         )
     };
-    // 锁外发送：构造应答 + 信封序列化 + 10s 超时。失败恢复 pending（保留可重试）。
+    // 锁外发送（G3 §2.2.2 收敛）：构造应答 → send_agent_response（信封 + 序列化 +
+    // 10s 超时 + crashed 预检/置位）。失败恢复 pending（保留可重试）；原 :190-194
+    // 的 crashed 预检分支自然落入 helper 返回 false → restore，行为一致。
     let outcome = if option_id.is_empty() {
         permission_response_cancelled()
     } else {
         permission_response(option_id)
     };
-    if crashed.load(Ordering::Acquire) {
-        // 对齐 acp::send_response：已崩溃连接不再发送
-        restore_pending(runtime, request_id, claimed);
-        return false;
-    }
-    let line = serde_json::json!({
-        "jsonrpc": "2.0",
-        "id": request_id,
-        "result": outcome,
-    });
-    let line = match serde_json::to_string(&line) {
-        Ok(line) => line,
-        Err(_) => {
-            restore_pending(runtime, request_id, claimed);
-            return false;
-        }
-    };
-    let sent =
-        match tokio::time::timeout(std::time::Duration::from_secs(10), write_tx.send(line)).await {
-            Ok(Ok(())) => true,
-            Ok(Err(_)) => false,
-            Err(_) => {
-                tracing::warn!("ACP write timeout after 10s: connection presumed dead");
-                crashed.store(true, Ordering::Release);
-                false
-            }
-        };
-    if !sent {
+    if !send_agent_response(write_tx, crashed, request_id, outcome).await {
         restore_pending(runtime, request_id, claimed);
         return false;
     }
