@@ -193,6 +193,28 @@ impl From<AcpError> for crate::error::PylonError {
     }
 }
 
+impl AcpError {
+    /// H14 类型化：close 降级判定（session.rs:1619 错误串 contains 的声明式替代，
+    /// G2-03 消费点）。JSON-RPC error 信封的 `code` 字段解析优先（-32601 =
+    /// MethodNotFound），字符串兜底（"-32601" / "Method not found"，保留现状
+    /// 大小写敏感语义）。
+    /// G2（W2 链 E）消费：`if error.is_method_not_found() { 降级本地清理 }`。
+    #[allow(dead_code)]
+    pub fn is_method_not_found(&self) -> bool {
+        let AcpError::Rpc(message) = self else {
+            return false;
+        };
+        if let Ok(value) = serde_json::from_str::<serde_json::Value>(message) {
+            if value.get("code").and_then(|code| code.as_i64()) == Some(-32601) {
+                return true;
+            }
+            let text = value.to_string();
+            return text.contains("-32601") || text.contains("Method not found");
+        }
+        message.contains("-32601") || message.contains("Method not found")
+    }
+}
+
 // ── 差异适配表（agent 协议差异，字典驱动）──
 //
 // 已知差异（2026-07-31 三方源码实证 + Hermes 0.18.2 真实 wire 验证）：
@@ -1426,9 +1448,40 @@ mod tests {
         assert!(!AcpClient::disconnected().is_crashed());
     }
 
+    /// G1-06：close 降级判定类型化——-32601 信封（code 优先）与字符串兜底。
     #[test]
-    fn session_update_variant_wire_strings_are_stable() {
-        // 契约锁定：wire 字符串 ↔ 变体映射（前端/平台依赖这些字符串，勿改拼写）。
+    fn method_not_found_detection() {
+        // code 优先解析：-32601 信封命中
+        assert!(
+            AcpError::Rpc(r#"{"code":-32601,"message":"Method not found"}"#.into())
+                .is_method_not_found()
+        );
+        assert!(AcpError::Rpc(r#"{"code":-32601}"#.into()).is_method_not_found());
+        // 字符串兜底：纯文案 / 无 code 信封
+        assert!(AcpError::Rpc("RPC error: Method not found".into()).is_method_not_found());
+        assert!(AcpError::Rpc("RPC error: -32601".into()).is_method_not_found());
+        assert!(
+            AcpError::Rpc(r#"{"message":"Method not found"}"#.into()).is_method_not_found()
+        );
+        // 非 -32601 错误 → false
+        assert!(
+            !AcpError::Rpc(r#"{"code":-32602,"message":"Invalid params"}"#.into())
+                .is_method_not_found()
+        );
+        assert!(
+            !AcpError::Rpc(r#"{"code":-32000,"message":"session missing"}"#.into())
+                .is_method_not_found()
+        );
+        assert!(!AcpError::Rpc("RPC error: connection closed".into()).is_method_not_found());
+        assert!(!AcpError::Rpc("ACP write timeout".into()).is_method_not_found());
+        // 非 Rpc 变体 → false
+        assert!(!AcpError::ConnectionClosed.is_method_not_found());
+        assert!(!AcpError::RpcTimeout.is_method_not_found());
+        assert!(!AcpError::WriteTimeout.is_method_not_found());
+    }
+
+    #[test]
+    fn session_update_variant_wire_strings_are_stable() {        // 契约锁定：wire 字符串 ↔ 变体映射（前端/平台依赖这些字符串，勿改拼写）。
         assert_eq!(
             SessionUpdateVariant::from_str("agent_message_chunk"),
             Some(SessionUpdateVariant::AgentMessageChunk)

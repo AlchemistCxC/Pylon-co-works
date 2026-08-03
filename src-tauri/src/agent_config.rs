@@ -56,10 +56,15 @@ pub struct AcpProtocolConfig {
     pub set_model_api: Option<SetModelApi>,
     /// D3 session/close：None|true = 总是尝试 RPC + -32601 防御降级（现状）；
     /// false = 跳过 RPC 直接本地清理（旧 Hermes 声明式配置）。
+    /// G2（W2 链 E）消费：close_session/check_session_expiry/未结算 close/replaced close
+    /// 四处经 [`Self::close_via_rpc`] 判定。
+    #[allow(dead_code)]
     #[serde(default)]
     pub session_close: Option<bool>,
     /// D4 mcpServers 字段形态：always(默认，恒发字段，现状) | omit_if_empty
     /// （v2 语义，空则省略——07 文档 §8.2）。
+    /// G2（W2 链 E）消费：session_new/load 调用点传 `protocol().mcp_servers`。
+    #[allow(dead_code)]
     #[serde(default, deserialize_with = "deserialize_mcp_servers_mode")]
     pub mcp_servers: McpServersMode,
     /// D1 initialize 请求的 clientCapabilities 覆盖（任意 JSON，原样进 wire）。
@@ -111,6 +116,8 @@ pub enum SetModelApi {
 impl SetModelApi {
     /// key=="model" 特判收敛于此（session.rs:1556 现状 bool 路由的声明式替代）：
     /// SetModel → model 键走 set_model；其余键一律 config_option；None → model 键禁用。
+    /// G2（W2 链 E）消费：set_config_option 三路路由。
+    #[allow(dead_code)]
     pub fn route(self, key: &str) -> ModelSwitchTarget {
         match self {
             Self::SetModel if key == "model" => ModelSwitchTarget::SetModel,
@@ -120,7 +127,8 @@ impl SetModelApi {
     }
 }
 
-/// D2 路由结果（G2 set_config_option 三路匹配消费）。
+/// D2 路由结果（G2 set_config_option 三路匹配消费；G1 链内无消费点，W2 移交）。
+#[allow(dead_code)]
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ModelSwitchTarget {
     ConfigOption,
@@ -190,21 +198,27 @@ pub static DEFAULT_ACCPROTOCOL: AcpProtocolConfig = AcpProtocolConfig {
 impl AcpProtocolConfig {
     /// D2 已解析的切 model 途径：acp 段声明优先；未声明回退 ConfigOption
     /// （生产解析路径 parse() 已合并顶层 legacy bool，此兜底仅覆盖直构场景）。
+    /// G2（W2 链 E）消费：`protocol().set_model_api().route(&key)`。
+    #[allow(dead_code)]
     pub fn set_model_api(&self) -> SetModelApi {
         self.set_model_api.unwrap_or(SetModelApi::ConfigOption)
     }
 
     /// D3 是否尝试 session/close RPC（false = 跳过 RPC 直接本地清理；缺省 true）。
+    /// G2（W2 链 E）消费：close 四处消费点。
+    #[allow(dead_code)]
     pub fn close_via_rpc(&self) -> bool {
         self.session_close.unwrap_or(true)
     }
 
-    /// H5 prompt 超时（秒，缺省 300）。
+    /// H5 prompt 超时（秒，缺省 300）。G2（W2 链 E）消费：wait_prompt_with_cancel。
+    #[allow(dead_code)]
     pub fn prompt_timeout(&self) -> u64 {
         self.prompt_timeout_secs.unwrap_or(crate::acp::PROMPT_TIMEOUT_SECS)
     }
 
-    /// H6 cancel settle 超时（秒，缺省 30）。
+    /// H6 cancel settle 超时（秒，缺省 30）。G2（W2 链 E）消费。
+    #[allow(dead_code)]
     pub fn cancel_settle_timeout(&self) -> u64 {
         self.cancel_settle_timeout_secs
             .unwrap_or(crate::acp::CANCEL_SETTLE_TIMEOUT_SECS)
@@ -215,7 +229,8 @@ impl AcpProtocolConfig {
         self.rpc_timeout_secs.unwrap_or(DEFAULT_RPC_TIMEOUT_SECS)
     }
 
-    /// H7 写通道超时（秒，缺省 10）。
+    /// H7 写通道超时（秒，缺省 10）。G2（W2 链 E）消费：permission.rs H18 同源建议。
+    #[allow(dead_code)]
     pub fn write_timeout(&self) -> u64 {
         self.write_timeout_secs.unwrap_or(crate::acp::DEFAULT_WRITE_TIMEOUT_SECS)
     }
@@ -829,6 +844,22 @@ mod tests {
         // 缺省：无 acp 段
         let plain = agent(false);
         assert!(plain.acp.is_none());
+    }
+
+    /// G1-06：close_via_rpc 缺省 true（现状 wire：总是尝试 RPC + -32601 降级）。
+    #[test]
+    fn close_via_rpc_default_true() {
+        assert!(DEFAULT_ACCPROTOCOL.close_via_rpc());
+        assert!(AcpProtocolConfig::default().close_via_rpc());
+        assert!(
+            crate::agent_config::AttachmentLimits::default().max_attachments > 0,
+            "附件默认限制与常量同源"
+        );
+        let mut config = AcpProtocolConfig::default();
+        config.session_close = Some(false);
+        assert!(!config.close_via_rpc(), "session_close: false 必须跳过 RPC");
+        config.session_close = Some(true);
+        assert!(config.close_via_rpc(), "session_close: true 必须尝试 RPC");
     }
 
     /// G1-01：D2 双格式反序列化——acp 段内 bool|string 五形态 + 顶层 legacy bool
