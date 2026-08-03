@@ -90,26 +90,15 @@ fn content_blocks_from_values(values: Vec<serde_json::Value>) -> Result<Vec<Cont
 }
 
 /// session/new 参数。mcpServers 以 Pylon 自有格式直传（官方 McpServer 需 name 字段）。
+/// E4 警告：OmitIfEmpty 与 agent 能力匹配——声明 omit_if_empty 且无配置时省字段，
+/// Hermes（Pydantic 必填）会拒绝 session/new；配置与 agent 能力匹配是用户责任，
+/// 默认 Always = 现状 wire，安全（mode 参数化入口见 G1-07a）。
 pub fn session_new_params(
     cwd: &str,
     mcp_servers: Vec<serde_json::Value>,
 ) -> Result<serde_json::Value, String> {
     let req = NewSessionRequest::new(cwd.to_string());
     let mut params = to_params(&req, "session/new")?;
-    if let Some(obj) = params.as_object_mut() {
-        obj.insert("mcpServers".into(), serde_json::Value::Array(mcp_servers));
-    }
-    Ok(params)
-}
-
-/// session/load 参数。仅被 [`AcpClient::load_session_params`] 包装使用。
-fn session_load_params(
-    session_id: &str,
-    cwd: &str,
-    mcp_servers: Vec<serde_json::Value>,
-) -> Result<serde_json::Value, String> {
-    let req = LoadSessionRequest::new(session_id.to_string(), cwd.to_string());
-    let mut params = to_params(&req, "session/load")?;
     if let Some(obj) = params.as_object_mut() {
         obj.insert("mcpServers".into(), serde_json::Value::Array(mcp_servers));
     }
@@ -224,19 +213,23 @@ impl From<AcpError> for crate::error::PylonError {
 pub const BROADCAST_CAP: usize = 256;
 /// mpsc channel capacity for stdin writes — bounded to provide backpressure.
 pub const WRITE_CHAN_CAP: usize = 256;
-/// Default prompt timeout in seconds.
-pub const PROMPT_TIMEOUT_SECS: u64 = 300;
+/// Default prompt timeout in seconds (G1-05：DEFAULT_* 前缀统一；值不变)。
+pub const DEFAULT_PROMPT_TIMEOUT_SECS: u64 = 300;
 /// Maximum time to wait for Peri's final prompt response after sending cancel.
-pub const CANCEL_SETTLE_TIMEOUT_SECS: u64 = 30;
+pub const DEFAULT_CANCEL_SETTLE_TIMEOUT_SECS: u64 = 30;
 /// Write-channel send timeout. The writer thread blocks on writeln!/flush while the
 /// agent is busy reading nothing, filling the mpsc; without a timeout `send().await`
-/// hangs forever, breaking the 30s RPC timeout contract above. Timeout is treated as
-/// a connection failure (warn + Err). G1-01：pub(crate) 供 AcpProtocolConfig 访问器引用。
-pub(crate) const WRITE_TIMEOUT_SECS: u64 = 10;
+/// hangs forever, breaking the RPC timeout contract above. Timeout is treated as
+/// a connection failure (warn + Err). E2 已定：写超时是"连接活性"语义不参数化。
+pub const DEFAULT_WRITE_TIMEOUT_SECS: u64 = 10;
 /// Maximum size for a single attachment.
-pub const MAX_ATTACHMENT_BYTES: u64 = 10 * 1024 * 1024;
+pub const DEFAULT_MAX_ATTACHMENT_BYTES: u64 = 10 * 1024 * 1024;
 /// Maximum number of attachments in one prompt.
-pub const MAX_ATTACHMENTS: usize = 8;
+pub const DEFAULT_MAX_ATTACHMENTS: usize = 8;
+/// G1-05 过渡别名：W2（G2-06 超时参数化消费）落地前 session.rs 仍引用旧名；
+/// G2 波次完成后由 G2 链删除（值不变，wire 契约不变）。
+pub const PROMPT_TIMEOUT_SECS: u64 = DEFAULT_PROMPT_TIMEOUT_SECS;
+pub const CANCEL_SETTLE_TIMEOUT_SECS: u64 = DEFAULT_CANCEL_SETTLE_TIMEOUT_SECS;
 
 type Pending = HashMap<u64, oneshot::Sender<RawMessage>>;
 const PENDING_SHARDS: usize = 16;
@@ -608,14 +601,14 @@ where
         Ok(Err(_)) => PromptWaitOutcome::ConnectionClosed,
         Err(_) => {
             let cancel_error = match tokio::time::timeout(
-                std::time::Duration::from_secs(WRITE_TIMEOUT_SECS),
+                std::time::Duration::from_secs(DEFAULT_WRITE_TIMEOUT_SECS),
                 cancel(),
             )
             .await
             {
                 Ok(result) => result.err(),
                 Err(_) => {
-                    tracing::warn!("ACP: cancel timed out after {WRITE_TIMEOUT_SECS}s");
+                    tracing::warn!("ACP: cancel timed out after {DEFAULT_WRITE_TIMEOUT_SECS}s");
                     Some("ACP write timeout".to_string())
                 }
             };
@@ -641,7 +634,7 @@ async fn send_line(
     crashed: &Arc<AtomicBool>,
 ) -> Result<(), AcpError> {
     match tokio::time::timeout(
-        std::time::Duration::from_secs(WRITE_TIMEOUT_SECS),
+        std::time::Duration::from_secs(DEFAULT_WRITE_TIMEOUT_SECS),
         tx.send(line),
     )
     .await
@@ -650,12 +643,197 @@ async fn send_line(
         Ok(Err(_)) => Err(AcpError::ConnectionClosed),
         Err(_) => {
             tracing::warn!(
-                "ACP write timeout after {WRITE_TIMEOUT_SECS}s: connection presumed dead"
+                "ACP write timeout after {DEFAULT_WRITE_TIMEOUT_SECS}s: connection presumed dead"
             );
             crashed.store(true, Ordering::Release);
             Err(AcpError::WriteTimeout)
         }
     }
+}
+
+/// G1-05：writer 任务启动（S3 拆分；R4 自 std 线程改 tokio 任务：
+/// spawn_blocking + 写超时）。每行经独立的 blocking 段写入并以 write_timeout
+/// 竞争超时——agent 不读 stdin 时管道填满，旧 std 线程的 flush 永久阻塞
+/// （无超时路径），写通道填满后 send_line 的超时兜底前已有多条命令排队失败。
+/// 单消费者 + 逐行等待保证写入顺序不变。超时语义与 send_line 一致：
+/// 置位 crashed 让上层快速失败并触发自动重连。
+fn spawn_writer_task(
+    stdin: std::process::ChildStdin,
+    mut write_rx: mpsc::Receiver<String>,
+    crashed: &Arc<AtomicBool>,
+    write_timeout: u64,
+) -> tokio::task::JoinHandle<()> {
+    let writer_crashed = crashed.clone();
+    tokio::task::spawn(async move {
+        let stdin_writer = Arc::new(Mutex::new(BufWriter::new(stdin)));
+        while let Some(line) = write_rx.recv().await {
+            let stdin_writer = stdin_writer.clone();
+            let write = tokio::task::spawn_blocking(move || {
+                let mut guard = match stdin_writer.lock() {
+                    Ok(guard) => guard,
+                    Err(poisoned) => poisoned.into_inner(),
+                };
+                writeln!(guard, "{line}")?;
+                guard.flush()
+            });
+            match tokio::time::timeout(std::time::Duration::from_secs(write_timeout), write).await
+            {
+                // 写入成功 → 取下一条
+                Ok(Ok(Ok(()))) => {}
+                // EPIPE 等写失败 → reader 线程经 EOF 置位 crashed + watch
+                Ok(Ok(Err(_))) | Ok(Err(_)) => break,
+                // 写超时：agent 存活但不读 stdin，reader 不会收到 EOF——
+                // writer 自行置位 crashed（与 send_line 超时语义一致），
+                // 上层快速失败并触发自动重连。
+                Err(_) => {
+                    tracing::warn!(
+                        "ACP writer timeout after {write_timeout}s: connection presumed dead"
+                    );
+                    writer_crashed.store(true, Ordering::Release);
+                    break;
+                }
+            }
+        }
+    })
+}
+
+/// G1-05：stderr drain 线程启动（S3 拆分；防管道缓冲死锁）。
+/// clippy 2026-08-02：读失败即停（map_while）——stderr 一旦读失败后续必失败。
+fn spawn_stderr_reader(
+    stderr: std::process::ChildStderr,
+    agent_name: &str,
+    runtime_logs: &Option<Arc<crate::runtime_log::RuntimeLogHub>>,
+) {
+    let agent_name_stderr = agent_name.to_string();
+    let stderr_logs = runtime_logs.clone();
+    std::thread::spawn(move || {
+        for l in BufReader::new(stderr).lines().map_while(Result::ok) {
+            if !l.is_empty() {
+                let safe = crate::runtime_log::sanitize_message(l.clone());
+                tracing::error!("{} stderr: {}", agent_name_stderr, safe);
+                if let Some(hub) = &stderr_logs {
+                    hub.push(
+                        crate::time::Timestamp::now(),
+                        "error",
+                        "agent-stderr",
+                        None,
+                        "Agent stderr output",
+                        serde_json::Map::from_iter([(
+                            "agent".to_string(),
+                            serde_json::Value::String(agent_name_stderr.clone()),
+                        )]),
+                    );
+                }
+            }
+        }
+    });
+}
+
+/// G1-05：stdout reader 线程启动（S3 拆分；行为与原内联实现逐字一致）：
+/// 逐行解析 JSON → broadcast 转发 + pending 分片 resolve；EOF → store crashed →
+/// watch 信号（A7 可靠投递）→ drain pending → NOTIF_AGENT_CRASHED 广播。
+fn spawn_stdout_reader(
+    stdout: std::io::BufReader<std::process::ChildStdout>,
+    pending: Arc<[Mutex<Pending>; PENDING_SHARDS]>,
+    tx: broadcast::Sender<RawMessage>,
+    crashed: &Arc<AtomicBool>,
+    crashed_watch: &watch::Sender<bool>,
+    runtime_logs: &Option<Arc<crate::runtime_log::RuntimeLogHub>>,
+) {
+    let pending_clone = pending.clone();
+    let tx_clone = tx.clone();
+    let crashed_reader = crashed.clone();
+    let crashed_watch_reader = crashed_watch.clone();
+    let stdout_logs = runtime_logs.clone();
+    std::thread::spawn(move || {
+        for line in stdout.lines() {
+            let line = match line {
+                Ok(l) => l,
+                Err(_) => break,
+            };
+            let line = line.trim().to_string();
+            if line.is_empty() {
+                continue;
+            }
+            let msg_val: serde_json::Value = match serde_json::from_str(&line) {
+                Ok(v) => v,
+                Err(e) => {
+                    tracing::error!("ACP parse: {}", e);
+                    if let Some(hub) = &stdout_logs {
+                        hub.push(
+                            crate::time::Timestamp::now(),
+                            "error",
+                            "acp",
+                            None,
+                            "ACP stdout JSON parse error",
+                            serde_json::Map::from_iter([(
+                                "error".to_string(),
+                                serde_json::Value::String(e.to_string()),
+                            )]),
+                        );
+                    }
+                    continue;
+                }
+            };
+            let raw = RawMessage {
+                id: msg_val.get("id").and_then(|v| v.as_u64()),
+                method: msg_val
+                    .get("method")
+                    .and_then(|v| v.as_str())
+                    .map(|s| s.to_string()),
+                result: msg_val.get("result").cloned(),
+                params: msg_val.get("params").cloned(),
+                error: msg_val.get("error").cloned(),
+            };
+            let _ = tx_clone.send(raw.clone());
+            if raw.method.is_none() {
+                if let Some(id) = raw.id {
+                    let shard = &pending_clone[id as usize % PENDING_SHARDS];
+                    match shard.lock() {
+                        Ok(mut p) => {
+                            if let Some(tx) = p.remove(&id) {
+                                let _ = tx.send(raw);
+                            }
+                        }
+                        Err(_) => {
+                            // poison 时无法 resolve pending，标记 crashed 让上层收敛，
+                            // 避免读线程 panic 后 pending 悬挂到超时。
+                            crashed_reader.store(true, Ordering::Relaxed);
+                            tracing::error!("ACP: pending shard lock poisoned for id {id}");
+                        }
+                    }
+                }
+            }
+        }
+        crashed_reader.store(true, Ordering::Relaxed);
+        // A7：EOF 崩溃信号经 watch 通道可靠投递——broadcast 在洪泛
+        // Lagged 时会丢 NOTIF_AGENT_CRASHED，watch 保留最新值不丢，
+        // 自动重连依赖此信号（dispatcher select! 双路监听）。
+        let _ = crashed_watch_reader.send(true);
+        let drained = AcpClient::drain_pending(&pending_clone);
+        tracing::warn!(
+            "ACP: drained {} pending requests after stdout closed",
+            drained
+        );
+        let _ = tx_clone.send(RawMessage {
+            id: None,
+            method: Some(NOTIF_AGENT_CRASHED.to_string()),
+            result: None,
+            params: Some(serde_json::json!({"reason": "stdout_closed"})),
+            error: None,
+        });
+        if let Some(hub) = &stdout_logs {
+            hub.push(
+                crate::time::Timestamp::now(),
+                "error",
+                "acp",
+                None,
+                "ACP child stdout closed; agent crashed",
+                serde_json::Map::new(),
+            );
+        }
+        tracing::error!("ACP: child process stdout closed (agent crashed)");
+    });
 }
 
 impl AcpClient {
@@ -1022,179 +1200,22 @@ impl AcpClient {
                 let mut child = ManagedChild::new(child);
 
                 let stdin = child.take_stdin()?;
-                let (write_tx, mut write_rx) = mpsc::channel::<String>(WRITE_CHAN_CAP);
+                let (write_tx, write_rx) = mpsc::channel::<String>(WRITE_CHAN_CAP);
                 let crashed = Arc::new(AtomicBool::new(false));
-                // R4：writer 从 std 线程改为 tokio 任务（spawn_blocking + 写超时）。
-                // 每行经独立的 blocking 段写入并以 WRITE_TIMEOUT_SECS 竞争超时——
-                // agent 不读 stdin 时管道填满，旧 std 线程的 flush 永久阻塞
-                // （无超时路径），写通道填满后 send_line 的 10s 超时兜底前已有
-                // 多条命令排队失败。单消费者 + 逐行等待保证写入顺序不变。
-                let writer_crashed = crashed.clone();
-                let writer_task = tokio::task::spawn(async move {
-                    let stdin_writer = Arc::new(Mutex::new(BufWriter::new(stdin)));
-                    while let Some(line) = write_rx.recv().await {
-                        let stdin_writer = stdin_writer.clone();
-                        let write = tokio::task::spawn_blocking(move || {
-                            let mut guard = match stdin_writer.lock() {
-                                Ok(guard) => guard,
-                                Err(poisoned) => poisoned.into_inner(),
-                            };
-                            writeln!(guard, "{line}")?;
-                            guard.flush()
-                        });
-                        match tokio::time::timeout(
-                            std::time::Duration::from_secs(WRITE_TIMEOUT_SECS),
-                            write,
-                        )
-                        .await
-                        {
-                            // 写入成功 → 取下一条
-                            Ok(Ok(Ok(()))) => {}
-                            // EPIPE 等写失败 → reader 线程经 EOF 置位 crashed + watch
-                            Ok(Ok(Err(_))) | Ok(Err(_)) => break,
-                            // 写超时：agent 存活但不读 stdin，reader 不会收到 EOF——
-                            // writer 自行置位 crashed（与 send_line 超时语义一致），
-                            // 上层快速失败并触发自动重连。
-                            Err(_) => {
-                                tracing::warn!(
-                                    "ACP writer timeout after {WRITE_TIMEOUT_SECS}s: connection presumed dead"
-                                );
-                                writer_crashed.store(true, Ordering::Release);
-                                break;
-                            }
-                        }
-                    }
-                });
+                // G1-05：三线程启动收敛为私有函数（S3 卫生，行为零变化）。
+                let writer_task = spawn_writer_task(stdin, write_rx, &crashed, DEFAULT_WRITE_TIMEOUT_SECS);
                 let stdout = BufReader::new(child.take_stdout()?);
 
-                // Drain stderr
+                // Drain stderr（防管道缓冲死锁）
                 let stderr = child.take_stderr()?;
-                let agent_name_stderr = agent.name.clone();
-                let stderr_logs = runtime_logs.clone();
-                std::thread::spawn(move || {
-                    // clippy 2026-08-02：读失败即停（map_while）——stderr 一旦读失败后续必失败
-                    for l in BufReader::new(stderr).lines().map_while(Result::ok) {
-                        if !l.is_empty() {
-                            let safe = crate::runtime_log::sanitize_message(l.clone());
-                            tracing::error!("{} stderr: {}", agent_name_stderr, safe);
-                            if let Some(hub) = &stderr_logs {
-                                hub.push(
-                                    crate::time::Timestamp::now(),
-                                    "error",
-                                    "agent-stderr",
-                                    None,
-                                    "Agent stderr output",
-                                    serde_json::Map::from_iter([(
-                                        "agent".to_string(),
-                                        serde_json::Value::String(agent_name_stderr.clone()),
-                                    )]),
-                                );
-                            }
-                        }
-                    }
-                });
+                spawn_stderr_reader(stderr, &agent.name, &runtime_logs);
 
                 let pending: Arc<[Mutex<Pending>; PENDING_SHARDS]> =
                     Arc::new(std::array::from_fn(|_| Mutex::new(HashMap::new())));
                 let (tx, rx) = broadcast::channel(BROADCAST_CAP);
                 let (crashed_watch, crashed_watch_rx) = watch::channel(false);
 
-                let pending_clone = pending.clone();
-                let tx_clone = tx.clone();
-                let crashed_reader = crashed.clone();
-                let crashed_watch_reader = crashed_watch.clone();
-                let stdout_logs = runtime_logs.clone();
-                std::thread::spawn(move || {
-                    for line in stdout.lines() {
-                        let line = match line {
-                            Ok(l) => l,
-                            Err(_) => break,
-                        };
-                        let line = line.trim().to_string();
-                        if line.is_empty() {
-                            continue;
-                        }
-                        let msg_val: serde_json::Value = match serde_json::from_str(&line) {
-                            Ok(v) => v,
-                            Err(e) => {
-                                tracing::error!("ACP parse: {}", e);
-                                if let Some(hub) = &stdout_logs {
-                                    hub.push(
-                                        crate::time::Timestamp::now(),
-                                        "error",
-                                        "acp",
-                                        None,
-                                        "ACP stdout JSON parse error",
-                                        serde_json::Map::from_iter([(
-                                            "error".to_string(),
-                                            serde_json::Value::String(e.to_string()),
-                                        )]),
-                                    );
-                                }
-                                continue;
-                            }
-                        };
-                        let raw = RawMessage {
-                            id: msg_val.get("id").and_then(|v| v.as_u64()),
-                            method: msg_val
-                                .get("method")
-                                .and_then(|v| v.as_str())
-                                .map(|s| s.to_string()),
-                            result: msg_val.get("result").cloned(),
-                            params: msg_val.get("params").cloned(),
-                            error: msg_val.get("error").cloned(),
-                        };
-                        let _ = tx_clone.send(raw.clone());
-                        if raw.method.is_none() {
-                            if let Some(id) = raw.id {
-                                let shard = &pending_clone[id as usize % PENDING_SHARDS];
-                                match shard.lock() {
-                                    Ok(mut p) => {
-                                        if let Some(tx) = p.remove(&id) {
-                                            let _ = tx.send(raw);
-                                        }
-                                    }
-                                    Err(_) => {
-                                        // poison 时无法 resolve pending，标记 crashed 让上层收敛，
-                                        // 避免读线程 panic 后 pending 悬挂到超时。
-                                        crashed_reader.store(true, Ordering::Relaxed);
-                                        tracing::error!(
-                                            "ACP: pending shard lock poisoned for id {id}"
-                                        );
-                                    }
-                                }
-                            }
-                        }
-                    }
-                    crashed_reader.store(true, Ordering::Relaxed);
-                    // A7：EOF 崩溃信号经 watch 通道可靠投递——broadcast 在洪泛
-                    // Lagged 时会丢 NOTIF_AGENT_CRASHED，watch 保留最新值不丢，
-                    // 自动重连依赖此信号（dispatcher select! 双路监听）。
-                    let _ = crashed_watch_reader.send(true);
-                    let drained = Self::drain_pending(&pending_clone);
-                    tracing::warn!(
-                        "ACP: drained {} pending requests after stdout closed",
-                        drained
-                    );
-                    let _ = tx_clone.send(RawMessage {
-                        id: None,
-                        method: Some(NOTIF_AGENT_CRASHED.to_string()),
-                        result: None,
-                        params: Some(serde_json::json!({"reason": "stdout_closed"})),
-                        error: None,
-                    });
-                    if let Some(hub) = &stdout_logs {
-                        hub.push(
-                            crate::time::Timestamp::now(),
-                            "error",
-                            "acp",
-                            None,
-                            "ACP child stdout closed; agent crashed",
-                            serde_json::Map::new(),
-                        );
-                    }
-                    tracing::error!("ACP: child process stdout closed (agent crashed)");
-                });
+                spawn_stdout_reader(stdout, pending.clone(), tx.clone(), &crashed, &crashed_watch, &runtime_logs);
 
                 let client = AcpClient {
                     child,
@@ -1229,14 +1250,22 @@ impl AcpClient {
         }
     }
 
-    fn load_session_params(
+    /// session/load 参数（G1-05：原顶层 session_load_params 内联收敛，消除 S2 命名混淆）。
+    /// ACP schema 1.4 LoadSessionRequest.mcp_servers 无 default（Hermes Pydantic 必填），
+    /// 字段必须存在；Peri 的 DefaultOnError 容忍缺失/空。无配置时传空数组而非缺字段。
+    /// E4 警告：OmitIfEmpty 与 agent 能力匹配——声明 omit_if_empty 且无配置时省字段，
+    /// Hermes（Pydantic 必填）会拒绝 session/load；配置与 agent 能力匹配是用户责任。
+    fn load_params(
         session_id: &str,
         cwd: &str,
         mcp_servers: Vec<serde_json::Value>,
     ) -> Result<serde_json::Value, String> {
-        // ACP schema 1.4 LoadSessionRequest.mcp_servers 无 default（Hermes Pydantic 必填），
-        // 字段必须存在；Peri 的 DefaultOnError 容忍缺失/空。无配置时传空数组而非缺字段。
-        session_load_params(session_id, cwd, mcp_servers)
+        let req = LoadSessionRequest::new(session_id.to_string(), cwd.to_string());
+        let mut params = to_params(&req, "session/load")?;
+        if let Some(obj) = params.as_object_mut() {
+            obj.insert("mcpServers".into(), serde_json::Value::Array(mcp_servers));
+        }
+        Ok(params)
     }
 
     /// Load a persisted session and collect every replay notification before the response.
@@ -1258,7 +1287,7 @@ impl AcpClient {
         // 回放与响应均经 broadcast 收集，无需注册 pending：旧代码的 (tx, _rx)
         // 条目永不消费（reader 对已丢弃 rx 的 tx.send 必然失败），确认无功能
         // 依赖后删除；id 仅用于在广播流中匹配响应。
-        let params = Self::load_session_params(session_id, cwd, mcp_servers)?;
+        let params = Self::load_params(session_id, cwd, mcp_servers)?;
         let (id, line) = Self::register_line(&handles.next_id, METHOD_SESSION_LOAD, &params)?;
         send_line(handles.write_tx, line, &handles.crashed).await?;
 
@@ -1325,6 +1354,19 @@ impl AcpClient {
             return Ok((raw.result.unwrap_or(serde_json::Value::Null), replay));
         }
     }
+
+    /// 提取锁外回放所需句柄。调用方应在锁内调用后立即释放锁，再以句柄等待。
+    /// G1-05：原独立 impl 块并入主块（S1 卫生，行为零变化）。
+    pub fn replay_handles(&self) -> ReplayHandles {
+        ReplayHandles {
+            write_tx: self.write_tx.clone(),
+            next_id: self.next_id.clone(),
+            crashed: self.crashed.clone(),
+            rx: self.rx.resubscribe(),
+            rpc_timeout: std::time::Duration::from_secs(self.protocol.rpc_timeout()),
+            replay_max: self.protocol.replay_max(),
+        }
+    }
 }
 
 /// O3：锁外执行 session/load 回放所需的句柄（写通道 / id 计数器 / 崩溃标记 /
@@ -1339,20 +1381,6 @@ pub struct ReplayHandles {
     rpc_timeout: std::time::Duration,
     /// G1-02：回放收集上限（缺省 10_000，替代 H12 字面量）。
     replay_max: usize,
-}
-
-impl AcpClient {
-    /// 提取锁外回放所需句柄。调用方应在锁内调用后立即释放锁，再以句柄等待。
-    pub fn replay_handles(&self) -> ReplayHandles {
-        ReplayHandles {
-            write_tx: self.write_tx.clone(),
-            next_id: self.next_id.clone(),
-            crashed: self.crashed.clone(),
-            rx: self.rx.resubscribe(),
-            rpc_timeout: std::time::Duration::from_secs(self.protocol.rpc_timeout()),
-            replay_max: self.protocol.replay_max(),
-        }
-    }
 }
 
 #[cfg(test)]
@@ -1433,9 +1461,9 @@ mod tests {
     }
 
     #[test]
-    fn session_load_params_include_mcp_servers_field() {
+    fn load_params_include_mcp_servers_field() {
         assert_eq!(
-            AcpClient::load_session_params("session-1", "G:/workspace", Vec::new()).unwrap(),
+            AcpClient::load_params("session-1", "G:/workspace", Vec::new()).unwrap(),
             serde_json::json!({
                 "sessionId": "session-1",
                 "cwd": "G:/workspace",
@@ -1510,7 +1538,7 @@ mod tests {
 
     #[test]
     fn prompt_rejects_more_than_maximum_attachments() {
-        let attachments = vec!["missing.txt".to_string(); MAX_ATTACHMENTS + 1];
+        let attachments = vec!["missing.txt".to_string(); DEFAULT_MAX_ATTACHMENTS + 1];
         let error = AcpClient::prompt_blocks(
             "hello".to_string(),
             &attachments,
@@ -1519,7 +1547,7 @@ mod tests {
         .expect_err("attachment count limit must be enforced before file access");
         assert_eq!(
             error,
-            format!("too many attachments: maximum is {MAX_ATTACHMENTS}")
+            format!("too many attachments: maximum is {DEFAULT_MAX_ATTACHMENTS}")
         );
     }
 
@@ -1581,7 +1609,7 @@ mod tests {
             "pylon-attachment-toctou-{}.bin",
             std::process::id()
         ));
-        std::fs::write(&path, vec![0u8; MAX_ATTACHMENT_BYTES as usize + 1]).unwrap();
+        std::fs::write(&path, vec![0u8; DEFAULT_MAX_ATTACHMENT_BYTES as usize + 1]).unwrap();
         let error = AcpClient::prompt_blocks(
             "hello".to_string(),
             &[path.to_string_lossy().into_owned()],
@@ -2198,7 +2226,7 @@ for line in sys.stdin:
     async fn send_line_write_timeout_marks_connection_crashed() {
         // 假死连接：容量 1 的写通道被填满且无人消费（writer 卡死），send_line 超时 →
         // WriteTimeout + crashed 置位，后续命令快速失败并触发自动重连。
-        // 与 fake_acp_* 一致用真实时钟，超时等待 WRITE_TIMEOUT_SECS。
+        // 与 fake_acp_* 一致用真实时钟，超时等待 DEFAULT_WRITE_TIMEOUT_SECS。
         let (write_tx, _write_rx) = mpsc::channel::<String>(1);
         write_tx
             .send("first-line".to_string())

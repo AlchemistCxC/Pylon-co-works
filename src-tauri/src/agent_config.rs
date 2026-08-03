@@ -150,8 +150,8 @@ pub struct AttachmentLimits {
 impl Default for AttachmentLimits {
     fn default() -> Self {
         Self {
-            max_attachments: crate::acp::MAX_ATTACHMENTS,
-            max_attachment_bytes: crate::acp::MAX_ATTACHMENT_BYTES,
+            max_attachments: crate::acp::DEFAULT_MAX_ATTACHMENTS,
+            max_attachment_bytes: crate::acp::DEFAULT_MAX_ATTACHMENT_BYTES,
         }
     }
 }
@@ -217,16 +217,16 @@ impl AcpProtocolConfig {
 
     /// H7 写通道超时（秒，缺省 10）。
     pub fn write_timeout(&self) -> u64 {
-        self.write_timeout_secs.unwrap_or(crate::acp::WRITE_TIMEOUT_SECS)
+        self.write_timeout_secs.unwrap_or(crate::acp::DEFAULT_WRITE_TIMEOUT_SECS)
     }
 
     /// H10/H11 附件限制（缺省 8 / 10MB）。
     pub fn attachment_limits(&self) -> AttachmentLimits {
         AttachmentLimits {
-            max_attachments: self.max_attachments.unwrap_or(crate::acp::MAX_ATTACHMENTS),
+            max_attachments: self.max_attachments.unwrap_or(crate::acp::DEFAULT_MAX_ATTACHMENTS),
             max_attachment_bytes: self
                 .max_attachment_bytes
-                .unwrap_or(crate::acp::MAX_ATTACHMENT_BYTES),
+                .unwrap_or(crate::acp::DEFAULT_MAX_ATTACHMENT_BYTES),
         }
     }
 
@@ -881,16 +881,16 @@ mod tests {
             crate::acp::CANCEL_SETTLE_TIMEOUT_SECS
         );
         assert_eq!(protocol.rpc_timeout(), DEFAULT_RPC_TIMEOUT_SECS);
-        assert_eq!(protocol.write_timeout(), crate::acp::WRITE_TIMEOUT_SECS);
+        assert_eq!(protocol.write_timeout(), crate::acp::DEFAULT_WRITE_TIMEOUT_SECS);
         assert_eq!(protocol.replay_max(), DEFAULT_REPLAY_MAX_EVENTS);
         assert_eq!(protocol.protocol_version(), DEFAULT_PROTOCOL_VERSION);
         assert!(protocol.close_via_rpc(), "session_close 缺省必须尝试 RPC");
         assert_eq!(protocol.mcp_servers, McpServersMode::Always);
         let limits = protocol.attachment_limits();
-        assert_eq!(limits.max_attachments, crate::acp::MAX_ATTACHMENTS);
+        assert_eq!(limits.max_attachments, crate::acp::DEFAULT_MAX_ATTACHMENTS);
         assert_eq!(
             limits.max_attachment_bytes,
-            crate::acp::MAX_ATTACHMENT_BYTES
+            crate::acp::DEFAULT_MAX_ATTACHMENT_BYTES
         );
         assert_eq!(
             protocol.initialize_caps(),
