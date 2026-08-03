@@ -1461,3 +1461,60 @@ fn old_save_without_cosmetic_fields_loads_safely() {
     assert_eq!(loaded.last_drop_at_ms, 0);
     assert_eq!(loaded.stats.feed_count, 0, "旧档新计数 default 0");
 }
+
+// ── G6-11：枚举变体 catch-all 防整档重置（E19/E20 封闭）──
+
+#[test]
+fn unknown_recent_event_loads_without_reset_and_never_persists() {
+    // 上游升级宠物状态机新增事件变体 → 降级旧客户端读新档：未知变体不再整档
+    // 重置（可加载、进度保留）；restore 一次性过滤 Unknown（E19：写档即干净）。
+    let saved = r#"{"name":"微栖","mood":"idle","happiness":65,"energy":80,"xp":10,"bond":5,
+        "born_at_ms":1,"last_seen_day":0,"first_chunk_at_ms":null,"hunger":80,"fun":70,
+        "loneliness":0,"traits":{"activity":50,"clinginess":50,"greed":50,"curiosity":50},
+        "machine":"awake.future_state","last_tick_at_ms":1,
+        "recent_events":["Poke","FutureEvent","Done"],"last_agent_mode":null,
+        "last_agent_model":null,"pending_action":null,"stats":{},"memories":[]}"#;
+    let loaded: PetState = serde_json::from_str(saved).expect("未知变体必须可反序列化");
+    assert_eq!(loaded.xp, 10, "未知变体不得导致整档重置");
+    assert_eq!(loaded.bond, 5);
+    assert_eq!(loaded.recent_events.len(), 3, "反序列化阶段保留未知变体（Unknown 占位）");
+    // E20：未知 machine 值兜底 Awake(Idle)
+    assert_eq!(
+        loaded.machine,
+        pylon_pet_core::PetMachineState::Awake(pylon_pet_core::MachineSub::Idle),
+        "未知 machine 值必须兜底 Awake(Idle)"
+    );
+
+    let restored = PetState::restore(loaded, 100_000);
+    // E19：Unknown 从 recent_events 过滤（一次性迁移）
+    assert!(
+        restored
+            .recent_events
+            .iter()
+            .all(|e| !matches!(e, pylon_pet_core::RecentEvent::Unknown)),
+        "restore 必须过滤 Unknown: {:?}",
+        restored.recent_events
+    );
+    assert_eq!(restored.recent_events.len(), 2, "Poke/Done 保留，FutureEvent 剔除");
+    assert_eq!(restored.xp, 10, "过滤不得影响进度");
+    // 写档后文件中无 "Unknown"
+    let json = serde_json::to_string(&restored).expect("restore 后必须可序列化");
+    assert!(
+        !json.contains("Unknown"),
+        "写档不得含 Unknown（落盘即干净）: {json}"
+    );
+    // 未知 pending_action 降级为无
+    let saved = r#"{"name":"微栖","mood":"idle","happiness":65,"energy":80,"xp":0,"bond":0,
+        "born_at_ms":1,"last_seen_day":0,"first_chunk_at_ms":null,"hunger":80,"fun":70,
+        "loneliness":0,"traits":{"activity":50,"clinginess":50,"greed":50,"curiosity":50},
+        "machine":"awake.idle","last_tick_at_ms":1,"recent_events":[],"last_agent_mode":null,
+        "last_agent_model":null,"pending_action":"FutureAction","stats":{},"memories":[]}"#;
+    let loaded: PetState = serde_json::from_str(saved).expect("未知 pending_action 必须可反序列化");
+    let restored = PetState::restore(loaded, 100_000);
+    assert!(restored.pending_action.is_none(), "未知延迟行为必须降级为无");
+    let json = serde_json::to_string(&restored).expect("serialize");
+    assert!(
+        !json.contains("Unknown"),
+        "未知 pending_action 不得落盘: {json}"
+    );
+}

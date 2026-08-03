@@ -153,6 +153,9 @@ impl PetMachineState {
             Self::Awake(MachineSub::Idle) => "awake.idle",
             Self::Awake(MachineSub::Interacting) => "awake.interacting",
             Self::Awake(MachineSub::Distress) => "awake.distress",
+            // G6-11：MachineSub::Unknown 生产不可达（手写 Deserialize 兜底
+            // Awake(Idle)，E20）；保守输出同 Idle，不产生新 wire 字符串。
+            Self::Awake(MachineSub::Unknown) => "awake.idle",
             Self::Asleep => "asleep",
         }
     }
@@ -172,14 +175,15 @@ impl Serialize for PetMachineState {
 
 impl<'de> Deserialize<'de> for PetMachineState {
     fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
-        use serde::de::Error;
         let raw = String::deserialize(deserializer)?;
         match raw.as_str() {
             "awake.idle" => Ok(Self::Awake(MachineSub::Idle)),
             "awake.interacting" => Ok(Self::Awake(MachineSub::Interacting)),
             "awake.distress" => Ok(Self::Awake(MachineSub::Distress)),
             "asleep" => Ok(Self::Asleep),
-            other => Err(D::Error::custom(format!("unknown machine state: {other}"))),
+            // G6-11/E20（已拍板）：未知状态值兜底 Awake(Idle)（最保守）——
+            // 上游升级状态机后降级读新档不再整档重置。
+            _ => Ok(Self::Awake(MachineSub::Idle)),
         }
     }
 }
@@ -189,6 +193,11 @@ pub enum MachineSub {
     Idle,
     Interacting,
     Distress,
+    /// G6-11：反序列化兜底——未知值降级为无害占位，防整档重置。
+    /// PetMachineState 手写 Deserialize 已按 E20 直接兜底 Awake(Idle)，
+    /// 本变体仅防御未来直接反序列化 MachineSub 的路径。
+    #[serde(other)]
+    Unknown,
 }
 
 /// 时段（M8 扩展位：时段感知）。由本地小时推导（UTC 小时 + local_offset_minutes）。
@@ -251,12 +260,20 @@ pub enum RecentEvent {
     ModeCode,
     ModePlan,
     ModelNew,
+    /// G6-11：反序列化兜底——上游新增事件变体后，降级客户端读新档不再整档
+    /// 重置；Unknown 不参与任何统计/情绪推导分支（derive_mood 比对不命中），
+    /// restore 一次性过滤（E19），绝不落盘。
+    #[serde(other)]
+    Unknown,
 }
 
 /// 延迟行为（时间戳驱动完成，零后台任务）：捏朋友等。
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub enum PendingAction {
     CraftFriend { until_ms: u64 },
+    /// G6-11：反序列化兜底（同上）；restore 时降级为无（语义不可结算）。
+    #[serde(other)]
+    Unknown,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize, Default)]
@@ -623,6 +640,11 @@ impl PetState {
         saved.loneliness = saved.loneliness.min(100);
         saved.traits = saved.traits.clamp();
         saved.recent_events.truncate(RECENT_EVENTS_CAP);
+        // G6-11/E19：未知变体过滤——反序列化兜底出的 Unknown 一次性剔除
+        //（不参与统计/情绪推导，落盘即干净：写档不含 "Unknown"）。
+        saved
+            .recent_events
+            .retain(|event| !matches!(event, RecentEvent::Unknown));
         saved.stats.code_files.truncate(CODE_FILES_CAP);
         // A13：数值上限——手改/损坏存档注入的天文数字钳制到合法上限
         //（xp/bond 上限与 gain_xp/gain_bond 的封顶一致，stats 统一 10M 上限）
@@ -683,6 +705,10 @@ impl PetState {
             if until_ms <= now_ms {
                 saved.pending_action = None;
             }
+        }
+        // G6-11：未知延迟行为降级为无（无法结算其语义；一次性迁移，不落盘）。
+        if matches!(saved.pending_action, Some(PendingAction::Unknown)) {
+            saved.pending_action = None;
         }
         saved.memories.truncate(MEMORY_CAP);
         saved.first_chunk_at_ms = None;
