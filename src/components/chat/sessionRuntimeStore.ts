@@ -13,7 +13,7 @@ import { getToolSummary } from './toolPresentation.ts'
  * 目标：把 ChatView/chatEventController 的 10+ useRef 集合收敛为"每 source 一份状态 + 纯 reducer"。
  * 本文件为纯函数层（无 React/zustand 依赖），可直接单测。
  *
- * 语义等价源：chatEventController.ts 的 peri:user / peri:update / peri:done / peri:error
+ * 语义等价源：chatEventController.ts 的 pylon:user / pylon:update / pylon:done / pylon:error
  * 与 ChatView 的 cancel 链路、flushStreaming、clear。
  *
  * 约定：

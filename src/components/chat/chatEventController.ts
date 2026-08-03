@@ -234,7 +234,7 @@ export function attachChatEventController(refs: ChatEventControllerRefs): ChatCo
   }
 
   const unlisten = Promise.all([
-    listen<{ source: string; content: string; replay?: boolean }>('peri:user', (event) => {
+    listen<{ source: string; content: string; replay?: boolean }>('pylon:user', (event) => {
       const { source, content, replay: eventReplay = false } = event.payload
       if (!isActiveSource(source)) return
       dispatch({
@@ -261,7 +261,7 @@ export function attachChatEventController(refs: ChatEventControllerRefs): ChatCo
       }
     }),
 
-    listen<PeriUpdatePayload>('peri:update', (event) => {
+    listen<PeriUpdatePayload>('pylon:update', (event) => {
       const source = event.payload.source
       const upd = event.payload?.update
       if (!isActiveSource(source) || !source || !upd) return
@@ -320,7 +320,7 @@ export function attachChatEventController(refs: ChatEventControllerRefs): ChatCo
       }
     }),
 
-    listen<PeriDonePayload>('peri:done', (event) => {
+    listen<PeriDonePayload>('pylon:done', (event) => {
       const source = event.payload.source
       if (!isActiveSource(source) || !source) return
       const replayScope = isReplayScope(runtimeState[source])
@@ -328,7 +328,7 @@ export function attachChatEventController(refs: ChatEventControllerRefs): ChatCo
       dispatch({ type: 'done', source, replay, explicitReplay: replayScope ? undefined : event.payload.replay === true })
     }),
 
-    listen<{ source: string; error: string; cancelled?: boolean; replay?: boolean }>('peri:error', (event) => {
+    listen<{ source: string; error: string; cancelled?: boolean; replay?: boolean }>('pylon:error', (event) => {
       const { source, error } = event.payload
       if (!isActiveSource(source) || !source) return
       const replayScope = isReplayScope(runtimeState[source])

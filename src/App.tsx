@@ -113,7 +113,7 @@ export default function App() {
       if (!disposed) useIdentityStore.getState().setAgents(Array.isArray(list) ? list : [])
     }).catch(error => reportRuntimeError('读取 Agent 列表', error))
     load()
-    const unlisten = listen<AgentStatusPayload>('peri:agent-status', event => {
+    const unlisten = listen<AgentStatusPayload>('pylon:agent-status', event => {
       const activeAgent = useIdentityStore.getState().activeAgent
       const status = normalizeAgentStatus(event.payload, activeAgent)
       useRuntimeStore.getState().setAgentStatus(status.agentId || status.agent || activeAgent, status)

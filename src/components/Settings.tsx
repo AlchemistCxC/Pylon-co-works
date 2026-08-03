@@ -254,7 +254,7 @@ export default function Settings({ onClose, activeSessionId }: { onClose?: () =>
     setAgentStatus(activeAgent, { ...beginReconnect({ ...currentStatus, pending: false }), agent: activeAgent })
     try {
       await invoke('reconnect_agent')
-      // command resolve 只代表请求已接受，最终状态由 peri:agent-status 事件确认。
+      // command resolve 只代表请求已接受，最终状态由 pylon:agent-status 事件确认。
     } catch (error) {
       const detail = reportRuntimeError('重连 Agent', error)
       setAgentStatus(activeAgent, { ...failReconnect({ ...currentStatus, pending: false }, detail.message), agent: activeAgent })
