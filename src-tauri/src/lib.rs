@@ -3,6 +3,7 @@ mod agent_config;
 mod agent_runtime;
 mod dispatcher;
 mod error;
+mod event_names;
 mod export;
 mod gateway;
 mod gateway_cmds;
