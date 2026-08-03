@@ -769,6 +769,127 @@ pub(crate) fn replace_session_slot(
     Ok(replaced)
 }
 
+/// G2-04：会话建立结果——peri_id + 是否首轮 + session/new 原始响应（new_session 命令回传前端）。
+pub(crate) struct SessionMapping {
+    pub(crate) peri_id: String,
+    pub(crate) is_first: bool,
+    pub(crate) new_response: Option<serde_json::Value>,
+}
+
+/// G2-04：无条件建会话——上限检查 + session/new RPC + ensure_generation +
+/// SessionInfo 构造 + apply_session_response + replace_session_slot（notify 唯一出口）+
+/// 可选 close 被替换旧会话（new_session 语义；E7 拍板：ensure 路径也传 true）。
+/// 调用方必须持有 runtime.session_creation 锁（并发建会话串行化，覆盖"检查 +
+/// RPC + 插入"全程；tokio Mutex 不可重入，本函数内部不取锁）；RPC await 期间
+/// 不持 sessions 锁（V14），await 后 ensure_generation（RPC 后位置不变量）。
+/// "Session creation failed" 日志在本函数内发出（唯一出口）。
+async fn create_session_slot(
+    state: &AppState,
+    runtime: &Arc<AgentRuntime>,
+    source: &str,
+    persona: &str,
+    session_cwd: &str,
+    wire_mcp_servers: &[serde_json::Value],
+    close_replaced: bool,
+) -> Result<SessionMapping, PylonError> {
+    {
+        let sessions = runtime.sessions.lock().map_err(|e| e.to_string())?;
+        if sessions.len() >= MAX_SESSIONS {
+            return Err(PylonError::Protocol("max sessions reached".to_string()));
+        }
+    }
+    let generation = state.current_generation(runtime);
+    let response = match state
+        .acp_rpc(
+            runtime,
+            acp::METHOD_SESSION_NEW,
+            acp::session_new_params(session_cwd, wire_mcp_servers.to_vec())?,
+        )
+        .await
+    {
+        Ok(response) => response,
+        Err(error) => {
+            state.log_runtime_summary(
+                "error",
+                "session",
+                Some(source.to_string()),
+                "Session creation failed",
+                serde_json::Map::new(),
+            );
+            return Err(error.into());
+        }
+    };
+    state.ensure_generation(runtime, generation)?;
+    let peri_id = AcpClient::session_id_from(&response)?;
+    let mut session = SessionInfo::new(
+        peri_id.clone(),
+        persona.to_string(),
+        session_cwd.to_string(),
+        false,
+        generation,
+    );
+    session.apply_session_response(&response);
+    let replaced = replace_session_slot(runtime, source, session, false)?;
+    if close_replaced {
+        if let Some(old) = replaced {
+            // G2-03：D3 消费——close_via_rpc()=false 时跳过 RPC（本地清理语义不变）
+            if state.protocol_for_runtime(runtime).close_via_rpc() {
+                if let Ok(close_params) = acp::session_close_params(&old.peri_id) {
+                    if let Err(error) = state
+                        .acp_rpc(runtime, acp::METHOD_SESSION_CLOSE, close_params)
+                        .await
+                    {
+                        tracing::warn!("close replaced session: {}", error);
+                    }
+                }
+            }
+        }
+    }
+    Ok(SessionMapping {
+        peri_id,
+        is_first: true,
+        new_response: Some(response),
+    })
+}
+
+/// G2-04：会话建立/复用——已有映射则复用（返回 is_first = !has_first_prompt），
+/// 否则走 create_session_slot（E7 拍板：自动建会话覆盖旧映射时 close 旧 peri，
+/// close_replaced 传 true——覆盖场景仅并发 replace 返回 Some 的幽灵映射）。
+/// 调用方须已持有该 source 的 prompt 锁（send_prompt_core 路径）。
+pub(crate) async fn ensure_session_mapping(
+    state: &AppState,
+    runtime: &Arc<AgentRuntime>,
+    source: &str,
+    persona: &str,
+    session_cwd: &str,
+    wire_mcp_servers: &[serde_json::Value],
+) -> Result<SessionMapping, PylonError> {
+    let _creation_guard = runtime.session_creation.lock().await;
+    let existing = {
+        let sessions = runtime.sessions.lock().map_err(|e| e.to_string())?;
+        sessions
+            .get(source)
+            .map(|session| (session.peri_id.clone(), !session.has_first_prompt))
+    };
+    if let Some((peri_id, is_first)) = existing {
+        return Ok(SessionMapping {
+            peri_id,
+            is_first,
+            new_response: None,
+        });
+    }
+    create_session_slot(
+        state,
+        runtime,
+        source,
+        persona,
+        session_cwd,
+        wire_mcp_servers,
+        true,
+    )
+    .await
+}
+
 /// G2-02：load_persisted_session 失败恢复去重——锁 sessions → 复核映射
 /// （(peri_id, generation) 匹配）→ 有 previous 则 insert 否则 remove。
 /// 调用方不得持有 sessions 锁（E5 锁序纪律：sessions → prompt_locks 单向）。
@@ -820,56 +941,20 @@ pub(crate) async fn new_session(
         serde_json::Map::new(),
     );
     let _creation_guard = runtime.session_creation.lock().await;
-    {
-        let sessions = runtime.sessions.lock().map_err(|e| e.to_string())?;
-        if sessions.len() >= MAX_SESSIONS {
-            return Err(PylonError::Protocol("max sessions reached".to_string()));
-        }
-    }
     let session_cwd = cwd.unwrap_or_else(|| state.agent_cwd());
-    let generation = state.current_generation(&runtime);
     let mcp_servers = mcp::validate_and_serialize(mcp_servers)?;
-    let response = match state
-        .inner()
-        .acp_rpc(
-            &runtime,
-            acp::METHOD_SESSION_NEW,
-            acp::session_new_params(&session_cwd, mcp_servers)?,
-        )
-        .await
-    {
-        Ok(response) => response,
-        Err(error) => {
-            state.inner().log_runtime_summary(
-                "error",
-                "session",
-                Some(source.clone()),
-                "Session creation failed",
-                serde_json::Map::new(),
-            );
-            return Err(error.into());
-        }
-    };
-    state.ensure_generation(&runtime, generation)?;
-    let peri_id = AcpClient::session_id_from(&response)?;
-    let mut session = SessionInfo::new(peri_id.clone(), persona, session_cwd, false, generation);
-    session.apply_session_response(&response);
-    // R32：槽位替换统一走辅助（满额检查在 RPC 前已完成，此处为替换插入）。
-    let replaced = replace_session_slot(&runtime, &source, session, false)?;
-    if let Some(old) = replaced {
-        // G2-03：D3 消费——close_via_rpc()=false 时跳过 RPC（本地清理语义不变）
-        if state.protocol_for_runtime(&runtime).close_via_rpc() {
-            if let Ok(close_params) = acp::session_close_params(&old.peri_id) {
-                if let Err(error) = state
-                    .inner()
-                    .acp_rpc(&runtime, acp::METHOD_SESSION_CLOSE, close_params)
-                    .await
-                {
-                    tracing::warn!("close replaced session: {}", error);
-                }
-            }
-        }
-    }
+    // G2-04：会话建立收敛——守卫/上限/RPC/构造/插入（notify 唯一出口）/
+    // close 旧会话全部收敛进 create_session_slot（close_replaced=true，new_session 语义）。
+    let mapping = create_session_slot(
+        state.inner(),
+        &runtime,
+        &source,
+        &persona,
+        &session_cwd,
+        &mcp_servers,
+        true,
+    )
+    .await?;
     state.inner().log_runtime_summary(
         "info",
         "session",
@@ -878,7 +963,9 @@ pub(crate) async fn new_session(
         serde_json::Map::new(),
     );
     // Return full response so frontend gets modes + configOptions + sessionId
-    Ok(response)
+    Ok(mapping
+        .new_response
+        .expect("create_session_slot 必返回 session/new 原始响应"))
 }
 
 #[tauri::command]
@@ -1305,65 +1392,22 @@ pub(crate) async fn send_prompt_core<R: tauri::Runtime>(
         return Err(PylonError::AgentCrashed);
     }
 
+    // G2-04：会话建立/复用收敛——ensure_session_mapping（复用优先）→
+    // create_session_slot（自动建会话，E7 拍板 close_replaced=true）。
+    // P1-1：会话 cwd 优先取调用方显式绑定（平台路由 = 绑定 agent 的 cwd，
+    // 可能 ≠ GUI active agent）；无则回退 active agent cwd。
+    let session_cwd = cwd.map(str::to_string).unwrap_or_else(|| state.agent_cwd());
     let (peri_id, is_first) = {
-        let _creation_guard = runtime.session_creation.lock().await;
-        let existing = {
-            let sessions = runtime.sessions.lock().map_err(|e| e.to_string())?;
-            sessions
-                .get(source)
-                .map(|session| (session.peri_id.clone(), !session.has_first_prompt))
-        };
-        if let Some(result) = existing {
-            result
-        } else {
-            {
-                let sessions = runtime.sessions.lock().map_err(|e| e.to_string())?;
-                if sessions.len() >= MAX_SESSIONS {
-                    return Err(PylonError::Protocol("max sessions reached".to_string()));
-                }
-            }
-            // P1-1：会话 cwd 优先取调用方显式绑定（平台路由 = 绑定 agent 的 cwd，
-            // 可能 ≠ GUI active agent）；无则回退 active agent cwd。
-            let session_cwd = cwd.map(str::to_string).unwrap_or_else(|| state.agent_cwd());
-            let generation = state.current_generation(runtime);
-            let response = match state
-                .acp_rpc(
-                    runtime,
-                    acp::METHOD_SESSION_NEW,
-                    acp::session_new_params(&session_cwd, requested_mcp_servers.clone())?,
-                )
-                .await
-            {
-                Ok(response) => response,
-                Err(error) => {
-                    state.log_runtime_summary(
-                        "error",
-                        "session",
-                        Some(source.to_string()),
-                        "Session creation failed",
-                        serde_json::Map::new(),
-                    );
-                    return Err(error.into());
-                }
-            };
-            state.ensure_generation(runtime, generation)?;
-            let pid = AcpClient::session_id_from(&response)?;
-            let mut session = SessionInfo::new(
-                pid.clone(),
-                persona.to_string(),
-                session_cwd,
-                false,
-                generation,
-            );
-            session.apply_session_response(&response);
-            {
-                let mut sessions = runtime.sessions.lock().map_err(|e| e.to_string())?;
-                sessions.insert(source.to_string(), session);
-            }
-            // R6：映射就绪事件化（吸收 O5）——自动建会话 insert 成功后通知 dispatcher。
-            runtime.mapping_ready.notify_waiters();
-            (pid, true)
-        }
+        let mapping = ensure_session_mapping(
+            state,
+            runtime,
+            source,
+            persona,
+            &session_cwd,
+            &requested_mcp_servers,
+        )
+        .await?;
+        (mapping.peri_id, mapping.is_first)
     };
 
     // R33a：content 构造 + persona 拼接 + B11.1 注入 + attachments 块构建。
