@@ -105,6 +105,12 @@ async fn run_git(cwd: &Path, args: &[&str]) -> Result<(String, String), String> 
     let mut cmd = Command::new("git");
     cmd.args(args)
         .current_dir(cwd)
+        // G5-5：固定 C locale——is_git_error 依赖英文文案（"not a git
+        // repository"），宿主 locale（如 zh_CN）下 git 输出本地化文案会误判普通
+        // 失败（message 语义漂移）。只覆盖 LC_ALL/LANG 两个变量，不 env_clear
+        // （保留 PATH 等）；Windows 无 locale 变量时零影响。
+        .env("LC_ALL", "C")
+        .env("LANG", "C")
         .stdin(Stdio::null())
         .stdout(Stdio::piped())
         .stderr(Stdio::piped());
@@ -449,6 +455,30 @@ mod tests {
             "错误应明确非 git 仓库: {error}"
         );
         std::fs::remove_dir_all(&dir).ok();
+    }
+
+    #[tokio::test]
+    async fn locale_override_keeps_english_error_detection() {
+        // G5-5：宿主 locale 非 C 时 git 文案可能本地化——run_git 固定 LC_ALL/LANG=C
+        // （子进程继承覆盖，不 env_clear）。本机 git 构建对 locale 无感知（实测
+        // zh_CN 仍英文），故本测试钉住可观测契约：宿主 locale 被设为 zh_CN 时，
+        // 非 git 目录错误仍命中 is_git_error 的英文检测（在 locale 感知的 git
+        // 构建上该测试修复前必失败、修复后通过；本机为契约钉）。限制记录：
+        // run_git 不支持注入命令/环境参数（Command::new("git") 固定），机制级
+        // 直测（PATH 前置 fake git）已实测不可行（std 对无扩展名程序按 .exe
+        // 解析，.bat 不命中）且会污染并行测试的 PATH——采用方案 G5-5 兜底形态。
+        let dir = std::env::temp_dir().join(format!("pylon-git-nonrepo-zh-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        std::env::set_var("LC_ALL", "zh_CN.UTF-8");
+        std::env::set_var("LANG", "zh_CN.UTF-8");
+        let error = git_status(&dir).await.expect_err("non-repo must fail");
+        std::env::remove_var("LC_ALL");
+        std::env::remove_var("LANG");
+        std::fs::remove_dir_all(&dir).ok();
+        assert!(
+            error.contains("not a git repository"),
+            "宿主 locale 覆盖下错误检测必须仍走英文: {error}"
+        );
     }
 
     #[tokio::test]
