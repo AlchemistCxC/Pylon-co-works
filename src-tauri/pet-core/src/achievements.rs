@@ -1,13 +1,16 @@
 //! 成就系统（M9）：静态目录表 + 解锁判定 + PetState 成就方法。
 //! R6c 自 lib.rs 拆分（纯搬移，零行为变化）。
 
-use std::collections::HashSet;
-
 use serde::Serialize;
 
 use crate::{GrowthStage, PetState};
 
 // ── M9 成就系统（设计书 §15 扩展位：成就徽章集合）──
+
+/// 成就数量（解锁判重数组 [bool; N] 的尺寸；与 ACHIEVEMENTS 表长一致，
+/// 编译期断言兜底）。
+const ACHIEVEMENT_COUNT: usize = 23;
+const _: () = assert!(ACHIEVEMENTS.len() == ACHIEVEMENT_COUNT);
 
 /// 成就 id（R28：字符串 match 枚举化；序列化保持原字符串契约，
 /// unlocked 落盘/wire 均为 "first_step" 等稳定字符串）。
@@ -40,6 +43,37 @@ pub enum AchievementId {
 }
 
 impl AchievementId {
+    /// 稳定序号（枚举声明序 0-22，与 ACHIEVEMENTS 表序无关）：
+    /// unlock_achievements 的栈上判重数组索引（G6-03）。非 wire 契约
+    /// （wire 走 [`Self::as_str`]）；公开供测试钉子钉住序号唯一性。
+    pub const fn index(self) -> usize {
+        match self {
+            Self::FirstStep => 0,
+            Self::FirstEvolve => 1,
+            Self::WeekCompanion => 2,
+            Self::MonthCompanion => 3,
+            Self::TenTasks => 4,
+            Self::HundredTasks => 5,
+            Self::CodeGourmet => 6,
+            Self::CodeFeast => 7,
+            Self::FriendMaker => 8,
+            Self::FriendCollector => 9,
+            Self::NightWatcher => 10,
+            Self::NightOwl => 11,
+            Self::Gourmet => 12,
+            Self::Gourmand => 13,
+            Self::ToolMaster => 14,
+            Self::ToolLegend => 15,
+            Self::TokenGrower => 16,
+            Self::TokenGiant => 17,
+            Self::DazeDreamer => 18,
+            Self::BondFriend => 19,
+            Self::BondSoulmate => 20,
+            Self::Collector => 21,
+            Self::Luminary => 22,
+        }
+    }
+
     pub fn as_str(self) -> &'static str {
         match self {
             Self::FirstStep => "first_step",
@@ -332,18 +366,27 @@ impl PetState {
 
     /// M9：解锁检查——遍历未解锁成就，满足条件则解锁（奖励 + 记忆 + 徽章文案）。
     /// 幂等：unlocked 判重；每枚只解锁一次（B 层只增不减）。
-    /// O55 优化：判重集合一次构建，循环内 O(1) 查重（原每 def 线性扫描）。
-    /// O56 修复：本轮回合多枚解锁聚合为一条文案；已有事件文案时徽章不再覆盖。
+    /// G6-03：零分配化——O55 的 HashSet<String> 换栈上 [bool; N]（O(1) 判重
+    /// 保留，量级从"每事件 23 个 String 入堆"降到寄存器级）；全解锁
+    /// early-exit 免遍历（合法存档 unlocked 互异，len≥表长即无新增可能）。
     pub(crate) fn unlock_achievements(&mut self) {
-        let mut unlocked_set: HashSet<String> = self.unlocked.iter().cloned().collect();
+        if self.unlocked.len() >= ACHIEVEMENTS.len() {
+            return;
+        }
+        // 判重数组：index 是变体固有序号（0-22）；restore 白名单保证 unlocked
+        // 只含合法 id，越界即 panic（开发期暴露，G6-12 唯一性钉子兜底）。
+        let mut unlocked_flags = [false; ACHIEVEMENT_COUNT];
+        for def in ACHIEVEMENTS {
+            unlocked_flags[def.id.index()] = self.unlocked.iter().any(|id| id == def.id.as_str());
+        }
         let mut unlocked_names: Vec<&str> = Vec::new();
         for def in ACHIEVEMENTS {
-            if unlocked_set.contains(def.id.as_str()) {
+            if unlocked_flags[def.id.index()] {
                 continue;
             }
             if achievement_met(def.id, self) {
                 self.unlocked.push(def.id.as_str().to_string());
-                unlocked_set.insert(def.id.as_str().to_string());
+                unlocked_flags[def.id.index()] = true;
                 if def.xp > 0 {
                     self.gain_xp(def.xp);
                 }
