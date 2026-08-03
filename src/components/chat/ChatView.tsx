@@ -467,7 +467,7 @@ const ChatView = React.memo(function ChatView({ sessionId }: Props) {
 // ── Sub-components ──
 
 
-function MessageRow({ renderMessage, reduceMotion, toolVisualState, rowRef, highlighted, isStatic }: { renderMessage: RenderMessage; reduceMotion: boolean; toolVisualState?: string; rowRef?: (node: HTMLDivElement | null) => void; highlighted?: boolean; isStatic?: boolean }) {
+export function MessageRow({ renderMessage, reduceMotion, toolVisualState, rowRef, highlighted, isStatic }: { renderMessage: RenderMessage; reduceMotion: boolean; toolVisualState?: string; rowRef?: (node: HTMLDivElement | null) => void; highlighted?: boolean; isStatic?: boolean }) {
   recordRender('MessageRow.render')
   const msg = renderMessage.message
   // 展示模型是 message + 视觉状态的纯函数：props 未变时不重算（msg 引用不可变）
@@ -524,7 +524,7 @@ function areMessageRowPropsEqual(
 
 const MemoMessageRow = React.memo(MessageRow, areMessageRowPropsEqual)
 
-function AssistantContent({ text, isStreaming = false }: { text: string; isStreaming?: boolean }) {
+export function AssistantContent({ text, isStreaming = false }: { text: string; isStreaming?: boolean }) {
   recordRender('AssistantContent.render')
   recordRender('markdown.parse')
   const [copied, setCopied] = useState(false)
