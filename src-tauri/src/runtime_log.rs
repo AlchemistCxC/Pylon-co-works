@@ -54,9 +54,12 @@ pub struct RuntimeLogQuery {
 pub struct RuntimeLogHub {
     next_id: AtomicU64,
     /// R20：ringbuffer 硬容量（满时 enqueue 自动覆盖最旧，无扩容路径）。
-    entries: Mutex<AllocRingBuffer<RuntimeLogEntry>>,
+    /// G3 §2.2.3：条目 Arc 化——push 双全量 clone → 2 次 Arc clone（ring + broadcast
+    /// 共享同一 Arc）；serde `Arc<T: Serialize>` 保证消费方（session.rs / logs_cmds.rs）
+    /// 零改动。
+    entries: Mutex<AllocRingBuffer<Arc<RuntimeLogEntry>>>,
     capacity: usize,
-    events: tokio::sync::broadcast::Sender<RuntimeLogEntry>,
+    events: tokio::sync::broadcast::Sender<Arc<RuntimeLogEntry>>,
 }
 
 impl RuntimeLogHub {
@@ -88,7 +91,7 @@ impl RuntimeLogHub {
             .lock()
             .unwrap_or_else(|poisoned| poisoned.into_inner());
         // O22：id 分配在锁内，保证 id 递增与入队序一致。
-        let entry = RuntimeLogEntry {
+        let entry = Arc::new(RuntimeLogEntry {
             id: self.next_id.fetch_add(1, Ordering::Relaxed),
             timestamp,
             level: normalize_level(level.into()),
@@ -96,16 +99,19 @@ impl RuntimeLogHub {
             session: session.map(|value| truncate(value, MAX_MESSAGE_BYTES)),
             message: sanitize_message(message.into()),
             fields: sanitize_fields(fields),
-        };
+        });
         // R20：ringbuffer enqueue 满时自动覆盖最旧。
-        let _ = entries.enqueue(entry.clone());
+        // G3：1 次 Arc clone（原 :101 全量 clone）。
+        let _ = entries.enqueue(Arc::clone(&entry));
         drop(entries);
         // O24：broadcast send 移出 entries 锁临界区。
-        let _ = self.events.send(entry.clone());
-        entry
+        // G3：1 次 Arc clone（原 :104 全量 clone）。
+        let _ = self.events.send(Arc::clone(&entry));
+        // 返回路径 1 次全量 clone（签名不变，调用方零改动）。
+        (*entry).clone()
     }
 
-    pub fn subscribe(&self) -> tokio::sync::broadcast::Receiver<RuntimeLogEntry> {
+    pub fn subscribe(&self) -> tokio::sync::broadcast::Receiver<Arc<RuntimeLogEntry>> {
         self.events.subscribe()
     }
 
@@ -113,6 +119,7 @@ impl RuntimeLogHub {
         let search = query.search.as_deref().map(str::to_lowercase);
         let limit = query.limit.unwrap_or(self.capacity).min(self.capacity);
         // O23：锁内仅 clone 快照，过滤在锁外进行（保持 rev + take(limit) 语义）。
+        // G3：Arc 快照（廉价指针复制，原 :121 全量 clone），仅结果集 clone。
         let entries = {
             let guard = self
                 .entries
@@ -154,7 +161,7 @@ impl RuntimeLogHub {
                 })
             })
             .take(limit)
-            .cloned()
+            .map(|entry| entry.as_ref().clone())
             .collect()
     }
 
@@ -668,7 +675,7 @@ mod tests {
             fields(&[("nested", json!({"apiKey": "secret"}))]),
         );
         let event = events.recv().await.expect("log event should be published");
-        assert_eq!(event, entry);
+        assert_eq!(event.as_ref(), &entry);
         assert_eq!(event.message, REDACTED);
         assert_eq!(event.fields["nested"]["apiKey"], json!(REDACTED));
         assert_eq!(hub.list(&RuntimeLogQuery::default()).first(), Some(&entry));
