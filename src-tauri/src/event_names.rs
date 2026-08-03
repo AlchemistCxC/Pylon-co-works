@@ -5,11 +5,6 @@
 //! 前端注意：`pylon:agent-switched`/`pylon:model-error` 等是前端自行 dispatch 的
 //! window CustomEvent（src/App.tsx:64 等），与后端 Tauri 事件是不同通道，无冲突。
 //! 新增事件必须在本表登记（纪律：不得绕过常量表硬编码，E11）。
-//! 消费期说明（链 H 内部临时）：本表 8 个常量由本链后续步骤（H-2..H-8）逐批接线，
-//! 中间态存在未消费常量——模块级 allow(dead_code) 于 H-8 收尾时移除
-//! （与 G1 `SetModelApi::route` 的过渡标注同款先例，clippy -D warnings 兜底验收）。
-
-#![allow(dead_code)]
 
 /// Agent 生命周期状态（AgentStatusPayload，§4.5）。
 pub(crate) const AGENT_STATUS: &str = "pylon:agent-status";

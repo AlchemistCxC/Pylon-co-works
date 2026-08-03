@@ -1113,7 +1113,7 @@ gateway:
         assert!(adapter
             .deliver_event(
                 "qq:group:123",
-                "peri:done",
+                crate::event_names::SESSION_DONE,
                 &serde_json::json!({"data": {}})
             )
             .is_ok());

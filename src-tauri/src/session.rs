@@ -518,7 +518,9 @@ impl AppState {
             loop {
                 match events.recv().await {
                     Ok(entry) => match serde_json::to_value(entry) {
-                        Ok(payload) => emit_event(&window, "pylon:runtime-log", payload),
+                        Ok(payload) => {
+                            emit_event(&window, crate::event_names::RUNTIME_LOG, payload)
+                        }
                         Err(error) => tracing::warn!("serialize runtime log event failed: {error}"),
                     },
                     Err(tokio::sync::broadcast::error::RecvError::Lagged(count)) => {
@@ -1171,8 +1173,8 @@ fn advance_round<R: tauri::Runtime>(flow: &mut PromptFlow<'_, R>) {
 }
 
 /// R33c：Response 成功路径收尾——stop reason 校验（M5 感知）、generation 复核、
-/// 首轮标记、peri:done 广播、B11.2 完成持久化、完成日志。wire/事件顺序与
-/// 拆分前内联路径完全一致（peri:error 先于 pet 感知、done 先于 persist）。
+/// 首轮标记、pylon:done 广播、B11.2 完成持久化、完成日志。wire/事件顺序与
+/// 拆分前内联路径完全一致（pylon:error 先于 pet 感知、done 先于 persist）。
 /// G2-06：11 参收敛为 (flow, data) 两参；函数体经局部别名访问 flow 派生字段。
 async fn finalize_response<R: tauri::Runtime>(
     flow: &mut PromptFlow<'_, R>,
@@ -1195,7 +1197,7 @@ async fn finalize_response<R: tauri::Runtime>(
                 window,
                 gateway,
                 source,
-                "peri:error",
+                crate::event_names::SESSION_ERROR,
                 serde_json::json!({"source": source, "error": error}),
             );
         }
@@ -1225,7 +1227,7 @@ async fn finalize_response<R: tauri::Runtime>(
                 window,
                 gateway,
                 source,
-                "peri:error",
+                crate::event_names::SESSION_ERROR,
                 serde_json::json!({"source": source, "error": error}),
             );
         }
@@ -1239,7 +1241,7 @@ async fn finalize_response<R: tauri::Runtime>(
             window,
             gateway,
             source,
-            "peri:done",
+            crate::event_names::SESSION_DONE,
             serde_json::json!({"source": source, "data": data}),
         );
     }
@@ -1333,7 +1335,7 @@ pub(crate) fn prompt_error_indicates_missing_session(error: &str) -> bool {
 
 /// S3：Response 错误分支的幽灵映射清理——错误含"会话不存在"语义时，按
 /// (peri_id, generation) 复核删除本地映射（O1：锁表同步收敛）；下一条消息
-/// 自动走会话重建路径。返回是否删除了映射。事件（peri:error）与 pet 感知
+/// 自动走会话重建路径。返回是否删除了映射。事件（pylon:error）与 pet 感知
 /// 由调用方保持原顺序，本函数只负责映射收敛与日志。
 pub(crate) fn cleanup_ghost_session_mapping(
     state: &AppState,
@@ -1449,7 +1451,7 @@ pub(crate) async fn send_prompt_core<R: tauri::Runtime>(
                 window,
                 gateway,
                 source,
-                "peri:error",
+                crate::event_names::SESSION_ERROR,
                 serde_json::json!({"source": source, "error": PylonError::AgentCrashed.to_string()}),
             );
         }
@@ -1511,7 +1513,7 @@ pub(crate) async fn send_prompt_core<R: tauri::Runtime>(
                     .collect(),
             );
         }
-        emit_event(window, "peri:user", user_payload);
+        emit_event(window, crate::event_names::USER_ECHO, user_payload);
     }
     let rpc = {
         let acp = runtime.acp.lock().await;
@@ -1569,7 +1571,7 @@ pub(crate) async fn send_prompt_core<R: tauri::Runtime>(
                         window,
                         gateway,
                         source,
-                        "peri:error",
+                        crate::event_names::SESSION_ERROR,
                         serde_json::json!({"source": source, "error": error}),
                     );
                 }
@@ -1587,7 +1589,7 @@ pub(crate) async fn send_prompt_core<R: tauri::Runtime>(
                 Err(PylonError::Protocol(error))
             } else {
                 // R33c：成功路径收尾（stop reason 校验 / generation 复核 / 首轮标记 /
-                // peri:done 广播 / B11.2 完成持久化）委托阶段函数，顺序不变。
+                // pylon:done 广播 / B11.2 完成持久化）委托阶段函数，顺序不变。
                 let data = raw.result.unwrap_or(serde_json::Value::Null);
                 finalize_response(&mut flow, data).await
             }
@@ -1658,7 +1660,7 @@ pub(crate) async fn send_prompt_core<R: tauri::Runtime>(
                     window,
                     gateway,
                     source,
-                    "peri:error",
+                    crate::event_names::SESSION_ERROR,
                     serde_json::json!({"source": source, "error": error}),
                 );
             }
