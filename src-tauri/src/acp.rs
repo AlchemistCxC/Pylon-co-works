@@ -445,6 +445,9 @@ impl Drop for ManagedChild {
 
 pub struct AcpClient {
     child: ManagedChild,
+    /// G1-02：per-agent 协议行为配置（connect_with_logs 从 agent.protocol() clone；
+    /// disconnected() 用默认实例）。超时/限额/握手参数唯一读取点。
+    protocol: crate::agent_config::AcpProtocolConfig,
     /// mpsc channel for writing JSON-RPC lines to stdin. Single consumer = no lock contention.
     pub(crate) write_tx: mpsc::Sender<String>,
     /// R4：writer tokio 任务句柄——kill/替换 agent 时 abort 掉可能阻塞在 stdin
@@ -483,6 +486,9 @@ pub struct PreparedRpc {
     pending: Arc<[Mutex<Pending>; PENDING_SHARDS]>,
     /// 写超时收敛目标：send_line 超时置位，让上层快速失败并触发自动重连。
     crashed: Arc<AtomicBool>,
+    /// G1-02：RPC 超时（complete 读此值；prepare 时从 client 协议配置解析，
+    /// 缺省 30s——句柄自足，锁外等待不依赖 client）。
+    rpc_timeout: std::time::Duration,
 }
 
 /// 从 pending 分片移除指定 id（R3：发送失败 / 超时 / 连接关闭等失败路径统一清理入口，
@@ -506,6 +512,7 @@ impl PreparedRpc {
             rx,
             pending,
             crashed,
+            ..
         } = self;
         if let Err(error) = send_line(write_tx, line, &crashed).await {
             remove_pending_from(&pending, id);
@@ -522,7 +529,8 @@ impl PreparedRpc {
     }
 
     /// 通用 RPC 结算（R3：原 `AcpClient::complete_rpc` 提取为 PreparedRpc 方法）：
-    /// 发送 + 30s 超时等待匹配响应 + 错误/结果解析。不依赖 AcpClient 实例，可在锁外执行。
+    /// 发送 + RPC 超时等待匹配响应（G1-02：超时值来自协议配置，缺省 30s）+ 错误/结果解析。
+    /// 不依赖 AcpClient 实例，可在锁外执行。
     pub async fn complete(self) -> Result<serde_json::Value, AcpError> {
         let PreparedRpc {
             id,
@@ -531,18 +539,19 @@ impl PreparedRpc {
             rx,
             pending,
             crashed,
+            rpc_timeout,
         } = self;
         if let Err(error) = send_line(write_tx, line, &crashed).await {
             remove_pending_from(&pending, id);
             return Err(error);
         }
         // A6：与 send_keep_rx 相同的发送后复检，避免注册后于 drain 的 pending
-        // 悬挂满 30s 假超时（同一次崩溃窗口内保持快速 ConnectionClosed 收敛）。
+        // 悬挂满超时假超时（同一次崩溃窗口内保持快速 ConnectionClosed 收敛）。
         if crashed.load(Ordering::Acquire) {
             remove_pending_from(&pending, id);
             return Err(AcpError::ConnectionClosed);
         }
-        let msg = match tokio::time::timeout(std::time::Duration::from_secs(30), rx).await {
+        let msg = match tokio::time::timeout(rpc_timeout, rx).await {
             Ok(Ok(msg)) => msg,
             Ok(Err(_)) => {
                 remove_pending_from(&pending, id);
@@ -657,6 +666,7 @@ impl AcpClient {
         let (crashed_watch, crashed_watch_rx) = watch::channel(false);
         Self {
             child: ManagedChild::empty(),
+            protocol: crate::agent_config::AcpProtocolConfig::default(),
             write_tx,
             writer_task: None,
             next_id: Arc::new(AtomicU64::new(1)),
@@ -745,6 +755,7 @@ impl AcpClient {
             rx,
             pending: self.pending.clone(),
             crashed: self.crashed.clone(),
+            rpc_timeout: std::time::Duration::from_secs(self.protocol.rpc_timeout()),
         })
     }
 
@@ -897,6 +908,7 @@ impl AcpClient {
             rx,
             pending: self.pending.clone(),
             crashed: self.crashed.clone(),
+            rpc_timeout: std::time::Duration::from_secs(self.protocol.rpc_timeout()),
         })
     }
 
@@ -1183,6 +1195,7 @@ impl AcpClient {
 
                 let client = AcpClient {
                     child,
+                    protocol: agent.protocol().clone(),
                     write_tx,
                     writer_task: Some(writer_task),
                     next_id: Arc::new(AtomicU64::new(1)),
@@ -1267,8 +1280,7 @@ impl AcpClient {
             if handles.crashed.load(Ordering::Relaxed) {
                 return Err(AcpError::ConnectionClosed);
             }
-            let raw = match tokio::time::timeout(std::time::Duration::from_secs(30), events.recv())
-                .await
+            let raw = match tokio::time::timeout(handles.rpc_timeout, events.recv()).await
             {
                 Ok(Ok(raw)) => raw,
                 Ok(Err(tokio::sync::broadcast::error::RecvError::Lagged(count))) => {
@@ -1282,9 +1294,10 @@ impl AcpClient {
                     ));
                 }
                 Err(_) => {
-                    return Err(AcpError::Child(
-                        "session/load replay timed out after 30s".to_string(),
-                    ));
+                    return Err(AcpError::Child(format!(
+                        "session/load replay timed out after {}s",
+                        handles.rpc_timeout.as_secs()
+                    )));
                 }
             };
             if raw.method.as_deref() == Some(NOTIF_SESSION_UPDATE)
@@ -1299,11 +1312,15 @@ impl AcpClient {
                     // O4：收集上限——超长历史回放截断，防止 Vec 无界增长。
                     // 达到上限后继续等待响应（不得 break 提前返回——响应缺失
                     // 会让调用方把 Null 当 session/load 结果，破坏会话配置）。
-                    if replay.len() < 10_000 {
+                    // G1-02：上限来自协议配置 replay_max（缺省 10_000，wire 文案不变）。
+                    if replay.len() < handles.replay_max {
                         replay.push(params);
-                    } else if replay.len() == 10_000 {
-                        tracing::warn!("session/load replay 超过 10000 条，截断");
-                        replay.truncate(10_000);
+                    } else if replay.len() == handles.replay_max {
+                        tracing::warn!(
+                            "session/load replay 超过 {} 条，截断",
+                            handles.replay_max
+                        );
+                        replay.truncate(handles.replay_max);
                     }
                 }
                 continue;
@@ -1320,13 +1337,17 @@ impl AcpClient {
 }
 
 /// O3：锁外执行 session/load 回放所需的句柄（写通道 / id 计数器 / 崩溃标记 /
-/// 广播订阅）。调用方在锁内经 [`AcpClient::replay_handles`] 一次性提取，
-/// 锁外交给 [`AcpClient::load_session_with_replay`] 等待回放完成。
+/// 广播订阅 / G1-02 超时与收集上限）。调用方在锁内经 [`AcpClient::replay_handles`]
+/// 一次性提取，锁外交给 [`AcpClient::load_session_with_replay`] 等待回放完成。
 pub struct ReplayHandles {
     write_tx: mpsc::Sender<String>,
     next_id: Arc<AtomicU64>,
     crashed: Arc<AtomicBool>,
     rx: broadcast::Receiver<RawMessage>,
+    /// G1-02：回放等待超时（缺省 30s，替代 H9 字面量）。
+    rpc_timeout: std::time::Duration,
+    /// G1-02：回放收集上限（缺省 10_000，替代 H12 字面量）。
+    replay_max: usize,
 }
 
 impl AcpClient {
@@ -1337,6 +1358,8 @@ impl AcpClient {
             next_id: self.next_id.clone(),
             crashed: self.crashed.clone(),
             rx: self.rx.resubscribe(),
+            rpc_timeout: std::time::Duration::from_secs(self.protocol.rpc_timeout()),
+            replay_max: self.protocol.replay_max(),
         }
     }
 }
@@ -1802,6 +1825,89 @@ for line in sys.stdin:
         assert_eq!(replay[1]["update"]["content"]["text"], "history-2");
     }
 
+    /// G1-02：rpc_timeout 参数化——配置短 rpc_timeout 的 client 在 fake 慢响应上
+    /// 必须按配置超时返回 RpcTimeout（而非默认 30s 等待）。
+    #[tokio::test]
+    async fn rpc_timeout_from_config_is_used() {
+        let script = r#"import json,sys
+for line in sys.stdin:
+    request=json.loads(line)
+    if request.get('method') == 'initialize':
+        print(json.dumps({'jsonrpc':'2.0','id':request.get('id'),'result':{}}), flush=True)
+    else:
+        pass
+"#;
+        let mut agent =
+            crate::test_utils::fake_acp_agent_with("fake-acp-rpc-timeout", script, Vec::new(), HashMap::new());
+        agent.acp = Some(crate::agent_config::AcpProtocolConfig {
+            rpc_timeout_secs: Some(1),
+            ..Default::default()
+        });
+        let client = AcpClient::connect_with_logs(&agent, None)
+            .await
+            .expect("fake ACP must initialize");
+        let start = std::time::Instant::now();
+        let result = client
+            .prepare_rpc(METHOD_SESSION_NEW, serde_json::json!({"cwd": ".", "mcpServers": []}))
+            .expect("session/new must prepare")
+            .complete()
+            .await;
+        assert!(
+            matches!(result, Err(AcpError::RpcTimeout)),
+            "慢响应必须按配置短超时超时，实际: {result:?}"
+        );
+        assert!(
+            start.elapsed() < std::time::Duration::from_secs(10),
+            "必须用配置的短超时（1s）而非默认 30s，实际耗时 {:?}",
+            start.elapsed()
+        );
+    }
+
+    /// G1-02：replay_max 参数化——回放超过配置上限时截断且继续等响应（响应不得丢）。
+    #[tokio::test]
+    async fn replay_max_truncation_respects_config() {
+        let script = r#"import json,sys
+for line in sys.stdin:
+    request=json.loads(line)
+    if request.get('method') == 'initialize':
+        print(json.dumps({'jsonrpc':'2.0','id':request.get('id'),'result':{}}), flush=True)
+    elif request.get('method') == 'session/load':
+        session_id=request['params']['sessionId']
+        for i in range(3):
+            print(json.dumps({'jsonrpc':'2.0','method':'session/update','params':{'sessionId':session_id,'update':{'sessionUpdate':'agent_message_chunk','content':{'text':'h%d' % i}}}}), flush=True)
+        print(json.dumps({'jsonrpc':'2.0','id':request.get('id'),'result':{'loaded':True}}), flush=True)
+"#;
+        let mut agent = crate::test_utils::fake_acp_agent_with(
+            "fake-acp-replay-cap",
+            script,
+            Vec::new(),
+            HashMap::new(),
+        );
+        agent.acp = Some(crate::agent_config::AcpProtocolConfig {
+            replay_max_events: Some(2),
+            ..Default::default()
+        });
+        let client = AcpClient::connect_with_logs(&agent, None)
+            .await
+            .expect("fake ACP replay cap agent must initialize");
+        let (response, replay) = AcpClient::load_session_with_replay(
+            client.replay_handles(),
+            "target-cap",
+            ".",
+            Vec::new(),
+        )
+        .await
+        .expect("session/load must return after replay response");
+        assert_eq!(response, serde_json::json!({"loaded": true}));
+        assert_eq!(
+            replay.len(),
+            2,
+            "回放必须按 replay_max=2 截断（3 条 fake 事件）"
+        );
+        assert_eq!(replay[0]["update"]["content"]["text"], "h0");
+        assert_eq!(replay[1]["update"]["content"]["text"], "h1");
+    }
+
     #[tokio::test]
     async fn fake_acp_cancel_and_close_send_expected_notifications() {
         let trace_path =
@@ -2082,6 +2188,7 @@ for line in sys.stdin:
                 rx,
                 pending: pending.clone(),
                 crashed,
+                rpc_timeout: std::time::Duration::from_secs(30),
             };
             let result = tokio::time::timeout(std::time::Duration::from_secs(2), async move {
                 if complete {
