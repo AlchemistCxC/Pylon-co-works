@@ -1,8 +1,12 @@
 // 仅类型导入（编译期擦除），运行时零开销：starry-night 核心（vscode-textmate /
 // oniguruma wasm 加载器）与 hast-util-to-html 直到首块代码真正高亮时才按需加载，
 // 避免把高亮引擎拖进主 chunk。
+// S1-CSP：onig.wasm 本地化（?url 让 vite 打包为 asset）——starry-night 默认
+// fetch('https://esm.sh/vscode-oniguruma@2/release/onig.wasm') 是远程 CDN 依赖
+// （断网/墙内高亮挂 + 被 CSP connect-src 拦截），getOnigurumaUrlFetch 指向本地。
 import type { createStarryNight, Grammar } from '@wooorm/starry-night'
 import type { toHtml } from 'hast-util-to-html'
+import onigWasmUrl from 'vscode-oniguruma/release/onig.wasm?url'
 
 type StarryCore = {
   createStarryNight: typeof createStarryNight
@@ -105,7 +109,9 @@ async function highlightCodeUncached(language: string, code: string): Promise<st
   if (!highlighter) {
     highlighter = load().then(async ({ default: grammar }) => {
       const { createStarryNight: create } = await core
-      return create([grammar])
+      return create([grammar], {
+        getOnigurumaUrlFetch: () => new URL(onigWasmUrl, window.location.href),
+      })
     })
     highlighters.set(scope, highlighter)
   }
