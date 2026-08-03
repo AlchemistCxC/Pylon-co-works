@@ -67,6 +67,15 @@ assert.match(store, /normalizeThemeState\(pickCustomPresetTheme/, 'applyCustomPr
 assert.match(renderer, /set-field-reset/, '字段级恢复默认按钮必须存在')
 assert.match(renderer, /Object\.is\(value, def\.default\)/, '恢复默认判定必须比对 defs default')
 
+// ── 死字段清理：动态波形未实现，7 个动画细节字段必须删除；ekgWidth 走 --ekg-w ──
+for (const dead of ['ekgFontSize', 'ekgLineWidth', 'ekgAmplitudeMax', 'ekgSpeedBase', 'ekgSpeedMax', 'ekgLeftColor', 'ekgMovingColor']) {
+  assert.doesNotMatch(defs, new RegExp(`\\b${dead}\\b`), `死字段 ${dead} 必须从 defs 删除`)
+  assert.doesNotMatch(store, new RegExp(`\\b${dead}\\b`), `死字段 ${dead} 必须从 ThemeSettings 删除`)
+}
+assert.match(defs, /ekgWidth: \{[\s\S]*?cssVar: '--ekg-w'/, 'ekgWidth 必须注入 --ekg-w（StatusBar 消费）')
+assert.match(store, /ekgConsumedColor: string; tokenDisplay: string/, 'ekgConsumedColor/tokenDisplay 保留')
+assert.doesNotMatch(store, /ekgLeftColor: string; ekgMovingColor/, 'store 不得残留 ekgLeftColor/ekgMovingColor')
+
 // ── 骨架：手写组声明式化（个人信息/强调色/布局骨架进 defs）──
 assert.match(defs, /userName: \{[\s\S]*?group: "个人信息"/, '显示名必须进个人信息组')
 assert.match(defs, /userColor: \{[\s\S]*?group: "个人信息"/, '名字颜色必须进个人信息组')

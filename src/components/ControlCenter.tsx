@@ -331,14 +331,9 @@ function PropertyPanel({ id, onClose, onExit }: { id: string; onClose: () => voi
     cliLinePadding: s.cliLinePadding,
     ccStyle: s.ccStyle,
     ekgWidth: s.ekgWidth,
-    ekgFontSize: s.ekgFontSize,
     ekgGreen: s.ekgGreen,
     ekgYellow: s.ekgYellow,
     ekgRed: s.ekgRed,
-    ekgLineWidth: s.ekgLineWidth,
-    ekgAmplitudeMax: s.ekgAmplitudeMax,
-    ekgSpeedBase: s.ekgSpeedBase,
-    ekgSpeedMax: s.ekgSpeedMax,
     barTrackColor: s.barTrackColor,
     barHeight: s.barHeight,
     barFillFollow: s.barFillFollow,
@@ -418,15 +413,10 @@ function PropertyPanel({ id, onClose, onExit }: { id: string; onClose: () => voi
             </div>
           </div>
           <div className="cc-prop-field"><label>宽度</label><input type="number" value={theme.ekgWidth} onChange={v => up('ekgWidth', +v.target.value)} step={0.1} className="set-num" min={80} max={400} /></div>
-          <div className="cc-prop-field"><label>字号</label><input type="number" value={theme.ekgFontSize} onChange={v => up('ekgFontSize', +v.target.value)} step={0.1} className="set-num" min={12} max={22} /></div>
           {theme.ccStyle === 'wave' && <>
             <div className="cc-prop-field"><label>绿色</label><ColorPopover value={theme.ekgGreen || ''} onChange={v => up('ekgGreen', v)} /></div>
             <div className="cc-prop-field"><label>黄色</label><ColorPopover value={theme.ekgYellow || ''} onChange={v => up('ekgYellow', v)} /></div>
             <div className="cc-prop-field"><label>红色</label><ColorPopover value={theme.ekgRed || ''} onChange={v => up('ekgRed', v)} /></div>
-            <div className="cc-prop-field"><label>线宽</label><input type="number" value={theme.ekgLineWidth} onChange={v => up('ekgLineWidth', +v.target.value)} step={0.1} className="set-num" min={2} max={20} /></div>
-            <div className="cc-prop-field"><label>振幅</label><input type="number" value={theme.ekgAmplitudeMax} onChange={v => up('ekgAmplitudeMax', +v.target.value)} step={0.1} className="set-num" min={5} max={30} /></div>
-            <div className="cc-prop-field"><label>波速基</label><input type="number" value={theme.ekgSpeedBase} onChange={v => up('ekgSpeedBase', +v.target.value)} step={0.1} className="set-num" min={0} max={3} /></div>
-            <div className="cc-prop-field"><label>波速最</label><input type="number" value={theme.ekgSpeedMax} onChange={v => up('ekgSpeedMax', +v.target.value)} step={0.1} className="set-num" min={0} max={5} /></div>
           </>}
           {theme.ccStyle === 'bar' && <>
             <div className="cc-prop-field"><label>外壳背景</label><ColorPopover value={theme.barTrackColor || ''} onChange={v => up('barTrackColor', v)} /></div>
