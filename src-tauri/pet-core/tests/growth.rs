@@ -1518,3 +1518,68 @@ fn unknown_recent_event_loads_without_reset_and_never_persists() {
         "未知 pending_action 不得落盘: {json}"
     );
 }
+
+// ── G6-12：测试钉子（G6-01/G6-03 行为等价的安全网）──
+
+#[test]
+fn catalog_cache_does_not_leak_state_between_calls() {
+    // 钉住 G6-01「骨架 OnceLock 缓存 + 标志现算」语义：两次调用间改 state，
+    // 第二次的 unlocked/owned 标志必须反映新状态（骨架缓存不得串态）。
+    let mut pet = PetState::new_at(1);
+    pet.unlocked = vec!["first_step".into()];
+    let first = pet.achievement_info();
+    assert!(first.iter().find(|a| a.id == "first_step").unwrap().unlocked);
+    assert!(!first.iter().find(|a| a.id == "luminary").unwrap().unlocked);
+
+    // 两次调用之间解锁一枚 + 掉落入栏一件
+    pet.unlocked.push("night_watcher".into());
+    pet.maybe_drop_cosmetic(1, 0);
+    let second = pet.achievement_info();
+    assert!(
+        second.iter().find(|a| a.id == "night_watcher").unwrap().unlocked,
+        "第二次调用必须反映新解锁（缓存不串态）"
+    );
+    assert!(second.iter().find(|a| a.id == "first_step").unwrap().unlocked);
+    assert_eq!(second.len(), first.len(), "目录骨架必须一致");
+
+    let cosmetic_first = pet.cosmetic_info();
+    let owned_id = pet.inventory[0].clone();
+    assert!(
+        cosmetic_first.iter().find(|c| c.id == owned_id).unwrap().owned,
+        "掉落入栏必须标记 owned"
+    );
+    assert!(!cosmetic_first.iter().find(|c| c.id == "code_crown").unwrap().owned);
+    pet.bond = 300;
+    let cosmetic_second = pet.cosmetic_info();
+    assert!(
+        cosmetic_second
+            .iter()
+            .find(|c| c.id == "code_crown")
+            .unwrap()
+            .owned,
+        "成长解锁条件变化后第二次调用必须反映（缓存不串态）"
+    );
+}
+
+#[test]
+fn achievement_index_ordinals_are_unique_and_in_bounds() {
+    // 钉住 G6-03 的 AchievementId::index 稳定序号：表内所有成就 index 互异且
+    // < 表长（判重数组越界即 panic——本钉子防未来加成就时序号错位）。
+    use pylon_pet_core::achievements::AchievementId;
+    use pylon_pet_core::ACHIEVEMENTS;
+    let mut seen = std::collections::HashSet::new();
+    for def in ACHIEVEMENTS {
+        let idx = def.id.index();
+        assert!(
+            idx < ACHIEVEMENTS.len(),
+            "index 必须小于表长 {}: {idx}",
+            ACHIEVEMENTS.len()
+        );
+        assert!(seen.insert(idx), "index 必须互异: {idx}");
+    }
+    assert_eq!(seen.len(), ACHIEVEMENTS.len(), "23 枚成就 index 全唯一");
+    // 全部变体可经 index 回取（序号稳定：变体声明序 == index）
+    let ids: Vec<usize> = ACHIEVEMENTS.iter().map(|d| d.id.index()).collect();
+    assert_eq!(ids[0], AchievementId::FirstStep.index());
+    assert_eq!(ids[22], AchievementId::Luminary.index());
+}
