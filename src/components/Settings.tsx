@@ -13,7 +13,6 @@ import { useShallow } from 'zustand/react/shallow'
 import type { ThemeSettings } from '../store'
 import { GLOBAL_PRESETS, pickZoneFields } from '../presets'
 import { pickCustomPresetTheme } from '../customPresets'
-import ColorPopover from './ColorPopover'
 import SettingsPreview from './SettingsPreview'
 import { reportRuntimeError } from '../runtimeError'
 import { runAgentSwitchTransaction } from './agentSwitchTransaction'
@@ -39,9 +38,6 @@ function Sel({ value, onChange, options }: { value:string; onChange:(v:string)=>
   </select>
 }
 
-function Txt({ value, onChange }: { value:string; onChange:(v:string)=>void }) {
-  return <input type="text" value={value} onChange={e => onChange(e.target.value)} className="set-input"/>
-}
 
 // 窗口尺寸：显示当前值 + 重置（记忆由 App 的 onResized 防抖持久化负责）
 function WindowSizeRow() {
@@ -330,18 +326,6 @@ export default function Settings({ onClose, activeSessionId }: { onClose?: () =>
 
             {/* ═══ 全局 ═══ */}
             <Tabs.Content value="global">
-              {!isSearching && <h3>用户信息</h3>}
-              {!isSearching && (
-              <Group title="个人信息">
-                <Row label="显示名"><Txt value={t.userName} onChange={v=>onSettingChange({userName:v})}/></Row>
-                <Row label="前缀"><Txt value={t.userPrefix} onChange={v=>onSettingChange({userPrefix:v})}/></Row>
-                <Row label="名字颜色">
-                  <ColorPopover value={t.userColor} onChange={v=>onSettingChange({userColor:v})}/>
-                </Row>
-              </Group>
-              )}
-
-              {!isSearching && <h3>外观</h3>}
               {!isSearching && <Group title="全局预设">
                 <div className="set-preset-row">
                   {GLOBAL_PRESETS.map(p => (
@@ -375,25 +359,11 @@ export default function Settings({ onClose, activeSessionId }: { onClose?: () =>
                 </div>}
               </Group>}
 
-              {!isSearching && <Group title="强调色">
-                <Row label="强调色">
-                  <ColorPopover value={t.accent || '#3b82f6'} onChange={v=>onSettingChange({accent:v})}/>
-                </Row>
-                <div className="set-hint">链接、用户前缀、选中/焦点、spinner 光扫的统一取色</div>
-              </Group>}
-
-              {!isSearching && <Group title="布局骨架">
-                <Row label="Tab 条"><Sel value={t.showTabBar === false ? 'hidden' : 'shown'} onChange={v=>onSettingChange({showTabBar: v === 'shown'})} options={['shown','hidden']}/></Row>
-                <Row label="侧栏"><Sel value={t.showSidebar === false ? 'hidden' : 'shown'} onChange={v=>onSettingChange({showSidebar: v === 'shown'})} options={['shown','hidden']}/></Row>
-                <Row label="宠物"><Sel value={t.showPet === false ? 'hidden' : 'shown'} onChange={v=>onSettingChange({showPet: v === 'shown'})} options={['shown','hidden']}/></Row>
-                <div className="set-hint">隐藏 Tab/侧栏/宠物可拼出 CC 式纯聊天单流</div>
-              </Group>}
-
+              {/* 个人信息/强调色/布局骨架/玻璃效果/字体 已声明式化（defs 组），自动获得搜索/dirty/恢复默认 */}
               <ZoneGroupFields zone="global" ctx={renderCtx} />
 
               {!isSearching && <><WindowSizeRow />
               <ConfigBackupRow /></>}
-              <ConfigBackupRow />
             </Tabs.Content>
 
             {/* ═══ 左栏 ═══ */}

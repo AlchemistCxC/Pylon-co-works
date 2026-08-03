@@ -8,7 +8,7 @@ import { normalizeThemeMigrationState } from './themeMigration'
 import { markZoneCustom } from './themePresetState'
 import { ZONES, ZONE_FIELDS } from './themeFields'
 import { clampCcHeight, resolveVisibleStatusWidgetCount } from './ccHeightState'
-import { THEME_DEFAULTS } from './themeFieldDefs'
+import { normalizeThemeState, THEME_DEFAULTS } from './themeFieldDefs'
 import type { CustomPreset } from './customPresets'
 import { useIdentityStore } from './identityStore'
 import type { Profile } from './identityStore'
@@ -224,7 +224,8 @@ export const useStore = create<ThemeState>()(persist(
   applyCustomPreset: (id) => set(state => {
     const preset = state.customPresets.find(item => item.id === id)
     if (!preset) return state
-    const theme = pickCustomPresetTheme(preset.theme)
+    // 防御性归一化：自定义预设可能来自旧版本/脏数据，按 defs 规则修正
+    const theme = normalizeThemeState(pickCustomPresetTheme(preset.theme) as Record<string, unknown>) as Partial<ThemeSettings>
     return {
       ...theme,
       ccLayout: normalizeCcLayout(theme.ccLayout),
@@ -252,60 +253,29 @@ export const useStore = create<ThemeState>()(persist(
     ccLayout: DEFAULTS.ccLayout,
   })
   Object.assign(state, normalizedTheme)
-  state.spinnerFramePreset = state.spinnerFramePreset === 'ascii-line'
-    || state.spinnerFramePreset === 'braille'
-    || state.spinnerFramePreset === 'dots'
-    || state.spinnerFramePreset === 'orbit'
-    || state.spinnerFramePreset === 'clock'
-    || state.spinnerFramePreset === 'wave'
-    || state.spinnerFramePreset === 'blocks'
-    || state.spinnerFramePreset === 'scan'
-    || state.spinnerFramePreset === 'cc'
-    || state.spinnerFramePreset === 'custom'
-    ? state.spinnerFramePreset
-    : 'sparkles'
-  state.spinnerCustomFrames = typeof state.spinnerCustomFrames === 'string' ? state.spinnerCustomFrames : ''
-  state.spinnerVerbSet = state.spinnerVerbSet === 'en'
-    || state.spinnerVerbSet === 'analysis'
-    || state.spinnerVerbSet === 'engineering'
-    || state.spinnerVerbSet === 'cc'
-    || state.spinnerVerbSet === 'custom'
-    ? state.spinnerVerbSet
-    : 'zh'
-  state.spinnerCustomVerbs = typeof state.spinnerCustomVerbs === 'string' ? state.spinnerCustomVerbs : ''
-  state.spinnerDoneMarker = typeof state.spinnerDoneMarker === 'string' ? state.spinnerDoneMarker : '✓'
-  state.spinnerCancelledMarker = typeof state.spinnerCancelledMarker === 'string' ? state.spinnerCancelledMarker : '■'
-  state.spinnerErrorMarker = typeof state.spinnerErrorMarker === 'string' ? state.spinnerErrorMarker : '!'
-  state.spinnerDoneMarkerMode = state.spinnerDoneMarkerMode === 'frame' ? 'frame' : 'custom'
-  state.spinnerCancelledMarkerMode = state.spinnerCancelledMarkerMode === 'frame' ? 'frame' : 'custom'
-  state.spinnerErrorMarkerMode = state.spinnerErrorMarkerMode === 'frame' ? 'frame' : 'custom'
-  state.spinnerIntervalMs = typeof state.spinnerIntervalMs === 'number' && Number.isFinite(state.spinnerIntervalMs)
-    ? Math.max(40, Math.min(1000, state.spinnerIntervalMs))
-    : 120
-  state.messageLayout = state.messageLayout === 'claude' || state.messageLayout === 'bubble' ? state.messageLayout : 'classic'
+  // defs 驱动的通用值归一化（select 枚举/number 范围/boolean/color/text 类型 → def.default）
+  Object.assign(state, normalizeThemeState(state))
+  // 历史字段特殊规则（与 defs 类型不完全一致，保留既有语义）
+  state.inputShowPlaceholder = state.inputShowPlaceholder !== false
+  state.inputShowHistoryHint = state.inputShowHistoryHint !== false
   state.inputVariant = state.inputVariant === 'cli' || state.inputVariant === 'composer' || state.inputVariant === 'compact' || state.inputVariant === 'command'
     ? state.inputVariant
     : state.inputMode === 'cli' ? 'cli' : 'composer'
-  state.inputShowPlaceholder = state.inputShowPlaceholder !== false
-  state.inputShowHistoryHint = state.inputShowHistoryHint !== false
-  state.inputSubmitButtonMode = state.inputSubmitButtonMode === 'external' || state.inputSubmitButtonMode === 'hidden'
-    ? state.inputSubmitButtonMode
-    : 'inline'
   state.inputMode = state.inputVariant === 'cli' ? 'cli' : 'default'
-  state.footerLayout = state.footerLayout === 'peri' ? 'peri' : 'free'
-  state.cliOverflowMode = state.cliOverflowMode === 'grow' || state.cliOverflowMode === 'overlay' ? state.cliOverflowMode : 'fixed-scroll'
   const migratedInputMode = typeof state.inputMode === 'string' ? state.inputMode : DEFAULTS.inputMode
   const migratedHintMode = state.cliHintMode === 'hidden' || state.cliHintMode === 'compact' ? state.cliHintMode : 'full'
+  const migratedFooterLayout = state.footerLayout === 'peri' ? 'peri' : 'free'
+  const migratedOverflowMode = state.cliOverflowMode === 'grow' || state.cliOverflowMode === 'overlay' ? state.cliOverflowMode : 'fixed-scroll'
   state.ccHeight = clampCcHeight(typeof state.ccHeight === 'number' ? state.ccHeight : DEFAULTS.ccHeight, {
     inputMode: migratedInputMode,
-    footerLayout: state.footerLayout,
+    footerLayout: migratedFooterLayout,
     hintMode: migratedHintMode,
     visibleStatusWidgets: resolveVisibleStatusWidgetCount({
       hiddenIds: Array.isArray(state.ccHidden) ? state.ccHidden : [],
       inputMode: migratedInputMode,
       ccStyle: state.ccStyle || 'wave',
     }),
-    cliOverflowMode: state.cliOverflowMode,
+    cliOverflowMode: migratedOverflowMode,
   })
   state.customPresets = normalizeCustomPresets(state.customPresets)
   return state as ThemeState

@@ -188,9 +188,15 @@ function FieldControl({ def, ctx, keyName }: { def: ThemeFieldDef; ctx: RenderCt
 }
 
 function FieldRow({ def, ctx, keyName }: { def: ThemeFieldDef; ctx: RenderCtx; keyName: ThemeFieldKey }) {
+  const value = ctx.t[keyName]
+  const atDefault = def.default !== undefined && Object.is(value, def.default)
   return (
     <Row label={def.label}>
       <FieldControl def={def} ctx={ctx} keyName={keyName} />
+      {def.default !== undefined && !atDefault && (
+        <button type="button" className="set-field-reset" aria-label="恢复默认"
+          title={`恢复默认`} onClick={() => ctx.onChange({ [keyName]: def.default } as Partial<ThemeSettings>)}>↺</button>
+      )}
       {def.hint && <div className="set-hint">{def.hint}</div>}
     </Row>
   )
@@ -229,10 +235,16 @@ function renderCompactGroup(fields: ThemeFieldKey[], ctx: RenderCtx) {
     <div className="set-compact-row">
       {regular.map(key => {
         const def = THEME_FIELD_DEFS[key] as ThemeFieldDef
+        const value = ctx.t[key]
+        const atDefault = def.default !== undefined && Object.is(value, def.default)
         return (
           <Fragment key={key}>
             <span className="set-compact-label">{def.label}</span>
             <FieldControl def={def} ctx={ctx} keyName={key} />
+            {def.default !== undefined && !atDefault && (
+              <button type="button" className="set-field-reset compact" aria-label="恢复默认"
+                onClick={() => ctx.onChange({ [key]: def.default } as Partial<ThemeSettings>)}>↺</button>
+            )}
           </Fragment>
         )
       })}

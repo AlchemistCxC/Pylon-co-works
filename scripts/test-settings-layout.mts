@@ -50,4 +50,33 @@ assert.match(store, /dirty: \{ \.\.\.state\.dirty, \[zone\]: false \}/, 'resetZo
 assert.match(defs, /spinnerStalledColor: \{[\s\S]*?'停滞颜色'/, '停滞字段不得再叫"停滞变红色"')
 assert.doesNotMatch(defs, /'停滞变红色'/, '旧标签"停滞变红色"必须移除')
 
-console.log('Settings 排布优化（折叠/合并/搜索/dirty/重置）回归测试通过')
+// ── 骨架：default 进 defs + THEME_DEFAULTS 派生 ──
+assert.match(defs, /default\?: string \| number \| boolean/, 'ThemeFieldDef 必须声明 default')
+assert.match(defs, /export const THEME_DEFAULTS[\s\S]*THEME_FIELD_DEFS\[key\][\s\S]*?\.default/, 'THEME_DEFAULTS 必须由 defs 派生')
+assert.match(defs, /ccLayout[\s\S]*?(?:\n|$)[\s\S]*?ccEditMode: \{[\s\S]*?default: false/, 'ccEditMode 必须有默认值')
+assert.doesNotMatch(defs, /export const THEME_DEFAULTS[\s\S]*?=\s*\{\s*\n  accent:/, 'THEME_DEFAULTS 不得再是手工对象字面量')
+
+// ── 骨架：声明式校验器（normalizeThemeValue/normalizeThemeState）──
+assert.match(defs, /export function normalizeThemeValue\(/, '必须有 defs 驱动的值归一化')
+assert.match(defs, /export function normalizeThemeState</, '必须有全字段归一化')
+assert.match(defs, /key === 'toolIndicator'/, 'normalizeThemeState 必须跳过 registry 动态选项字段')
+assert.match(store, /normalizeThemeState\(state\)/, 'migrate 必须调用 defs 驱动的归一化')
+assert.match(store, /normalizeThemeState\(pickCustomPresetTheme/, 'applyCustomPreset 必须防御性归一化')
+
+// ── 骨架：字段级恢复默认 ──
+assert.match(renderer, /set-field-reset/, '字段级恢复默认按钮必须存在')
+assert.match(renderer, /Object\.is\(value, def\.default\)/, '恢复默认判定必须比对 defs default')
+
+// ── 骨架：手写组声明式化（个人信息/强调色/布局骨架进 defs）──
+assert.match(defs, /userName: \{[\s\S]*?group: "个人信息"/, '显示名必须进个人信息组')
+assert.match(defs, /userColor: \{[\s\S]*?group: "个人信息"/, '名字颜色必须进个人信息组')
+assert.match(defs, /accent: \{[\s\S]*?group: "强调色"/, '强调色必须进强调色组')
+assert.match(defs, /showTabBar: \{[\s\S]*?B\('global'[\s\S]*?group: "布局骨架"/, 'Tab 条必须并入 global/布局骨架')
+assert.match(defs, /showPet: \{[\s\S]*?group: "布局骨架", hint: '隐藏 Tab\/侧栏\/宠物/, '布局骨架 hint 必须保留')
+assert.match(defs, /global: \[\{ groups: \[\{ title: '个人信息' \}, \{ title: '强调色' \}, \{ title: '布局骨架' \}/, 'GROUP_ORDER.global 必须含新声明式组')
+assert.doesNotMatch(settings, /<Group title="个人信息">/, 'Settings 不得再手写个人信息组')
+assert.doesNotMatch(settings, /<Group title="强调色">/, 'Settings 不得再手写强调色组')
+assert.doesNotMatch(settings, /<Group title="布局骨架">/, 'Settings 不得再手写布局骨架组')
+assert.equal((settings.match(/<ConfigBackupRow \/>/g) ?? []).length, 1, 'ConfigBackupRow 不得重复渲染')
+
+console.log('Settings 骨架优化（default 派生/校验器/字段恢复/手写组声明式化）回归测试通过')

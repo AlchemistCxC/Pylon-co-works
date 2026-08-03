@@ -37,8 +37,8 @@ assert.equal((themeDefs.match(/'frame', 'custom'/g) ?? []).length >= 3, true)
 
 // Interval wiring is covered through the persisted setting and the live footer timer/frame path.
 assert.match(store, /spinnerIntervalMs: number/)
-assert.match(themeDefs, /spinnerIntervalMs: 120/)
-assert.match(store, /state\.spinnerIntervalMs = typeof state\.spinnerIntervalMs === 'number'/)
+assert.match(themeDefs, /spinnerIntervalMs: \{[\s\S]*?default: 120/)
+assert.match(store, /normalizeThemeState\(state\)/, 'migrate 必须走 defs 驱动的通用归一化')
 assert.match(footer, /const spinnerIntervalMs = useStore\(s => s\.spinnerIntervalMs\)/)
 assert.match(footer, /setInterval\([\s\S]*?Math\.max\(40, Math\.min\(1000, spinnerIntervalMs \|\| 120\)\)/)
 assert.match(footer, /resolveFrame\(frames, elapsedMs, spinnerIntervalMs/)

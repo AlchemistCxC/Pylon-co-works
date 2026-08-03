@@ -18,12 +18,11 @@ const inputBarCss = readFileSync(new URL('src/components/chat/InputBar.css', roo
 assert.match(store, /messageLayout:\s*'classic' \| 'claude' \| 'bubble'/)
 assert.match(store, /footerLayout:\s*'free' \| 'peri'/)
 assert.match(store, /cliOverflowMode:\s*'fixed-scroll' \| 'grow' \| 'overlay'/)
-assert.match(presets, /messageLayout: 'classic'/)
-assert.match(presets, /footerLayout: 'free'/)
-assert.match(presets, /cliOverflowMode: 'fixed-scroll'/)
-assert.match(store, /state\.messageLayout = state\.messageLayout === 'claude' \|\| state\.messageLayout === 'bubble' \? state\.messageLayout : 'classic'/)
-assert.match(store, /state\.footerLayout = state\.footerLayout === 'peri' \? 'peri' : 'free'/)
-assert.match(store, /state\.cliOverflowMode = state\.cliOverflowMode === 'grow' \|\| state\.cliOverflowMode === 'overlay' \? state\.cliOverflowMode : 'fixed-scroll'/)
+assert.match(presets, /messageLayout: \{[\s\S]*?default: 'classic'/)
+assert.match(presets, /footerLayout: \{[\s\S]*?default: 'free'/)
+assert.match(presets, /cliOverflowMode: \{[\s\S]*?default: 'fixed-scroll'/)
+// migrate 走 defs 驱动的通用归一化（normalizeThemeState），布局字段回退由 defs default 承担
+assert.match(store, /normalizeThemeState\(state\)/, 'migrate 必须调用 defs 驱动的通用归一化')
 
 {
   const chatFields = ZONE_FIELDS.chat.map(f => String(f))

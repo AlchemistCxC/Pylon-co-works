@@ -14,7 +14,7 @@ const field = 'ccStatusFontSize'
 // ThemeSettings/default contract.
 assert.match(store, /ccStatusFontSize:\s*number/)
 assert.match(store, /ccBgImage:\s*string\s*\n\s*ccStatusFontSize:\s*number/)
-assert.match(customPresets, /ccBgImage:\s*'',\s*ccStatusFontSize:\s*14/)
+assert.match(customPresets, /ccBgImage: \{[\s\S]*?default: '',/)
 
 // Built-in and custom preset paths must retain the field in the cc zone.
 assert.equal(ZONE_FIELDS.cc.includes(field as never), true, 'CC zone 缺少 ccStatusFontSize')

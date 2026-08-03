@@ -38,11 +38,11 @@ for (const field of spinnerFields) {
   check(new RegExp(`\\b${field}\\b`).test(themeType), `ThemeSettings missing ${field}`)
 }
 
-// Defaults must initialize every field（DEFAULTS 由 THEME_DEFAULTS 派生，真值源在 defs）。
-const defaults = section(themeFields, 'export const THEME_DEFAULTS:', '')
+// Defaults must initialize every field（THEME_DEFAULTS 由 defs 的 default 派生，真值源在 defs）。
 for (const field of spinnerFields) {
-  check(new RegExp(`\\b${field}\\s*:`).test(defaults), `DEFAULTS missing ${field}`)
+  check(THEME_FIELD_DEFS[field].default !== undefined, `DEFAULTS missing ${field}`)
 }
+check(/export const THEME_DEFAULTS[\s\S]*THEME_FIELD_DEFS\[key\][\s\S]*?\.default/.test(themeFields), 'THEME_DEFAULTS 必须由 defs 派生')
 
 // Migration starts with normalizeThemeMigrationState(base: DEFAULTS), then applies spinner-specific validation.
 const migrate = section(store, "migrate: persisted => {", '}, partialize:')

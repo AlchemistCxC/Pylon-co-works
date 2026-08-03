@@ -78,6 +78,15 @@
 .set-search-clear:hover { color:var(--text); }
 .set-zone-reset { flex-shrink:0; }
 
+/* ── 中：字段级恢复默认（值 ≠ defs default 时显示）── */
+.set-field-reset {
+  flex-shrink:0; width:22px; height:22px; padding:0;
+  border:1px solid transparent; border-radius:5px; background:none;
+  color:var(--text-dim); font-size:13px; cursor:pointer; line-height:1;
+}
+.set-field-reset:hover { border-color:var(--border); color:var(--text); background:var(--bg-hover); }
+.set-field-reset.compact { width:16px; height:16px; font-size:10px; margin-left:2px; }
+
 /* ── 中：设置内容 ── */
 .settings-body {
   flex:1 1 720px; overflow-y:auto;
