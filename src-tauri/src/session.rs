@@ -2032,7 +2032,6 @@ pub(crate) async fn list_persisted_sessions(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::sync::Mutex;
 
     /// 测试桩适配器（G4 §3-9 适配）：platform_key="qq"——注册后 is_platform_source
     /// 对 qq:* 前缀命中（C3/C4 拒绝语义依赖注册态；E14 放行语义依赖未注册态）。
@@ -2059,22 +2058,10 @@ mod tests {
     }
 
     /// A10：无 active agent 的裸状态（active_agent 指向不存在的 runtime）。
+    /// E-9（G5-3 遗留）：字面量收敛为 TestStateBuilder::bare()——默认值逐字段 =
+    /// run() 现值（active_agent="ghost-agent" 等，E18 纪律见 test_utils.rs doc）。
     fn state_without_active_runtime() -> AppState {
-        AppState {
-            runtimes: Arc::new(crate::runtime::AgentRuntimeManager::new()),
-            agents: Arc::new(Mutex::new(HashMap::new())),
-            active_agent: Arc::new(Mutex::new("ghost-agent".to_string())),
-            pet: Arc::new(Mutex::new(crate::pet::PetState::default())),
-            runtime_logs: crate::runtime_log::RuntimeLogHub::default(),
-            runtime_mcp: Mutex::new(None),
-            prism: crate::prism::PrismClient::unavailable("test".to_string()),
-            gateway: Arc::new(GatewayCore::new()),
-            approval_mode: Arc::new(Mutex::new("default".to_string())),
-            pet_last_persist_ms: std::sync::atomic::AtomicU64::new(0),
-            pet_write_lock: tokio::sync::Mutex::new(()),
-            switch_lock: tokio::sync::Mutex::new(()),
-            mcp_write_lock: tokio::sync::Mutex::new(()),
-        }
+        crate::test_utils::TestStateBuilder::bare().build()
     }
 
     #[test]
