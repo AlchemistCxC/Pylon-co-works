@@ -39,6 +39,9 @@ export const GLOBAL_PRESETS: GlobalPreset[] = [
       globalBgImage: '', globalBgColor: '#000000', uiScheme: 'dark',
       userName: '', userPrefix: '❯', userColor: '#D77757',
 
+      // layout — 全功能界面
+      showTabBar: true, showSidebar: true, showPet: true,
+
       // sidebar
       sidebarBg: '#000000', sidebarBgImage: '', sidebarWidth: 240,
       sidebarTransparency: 1, sidebarBlur: 0,
@@ -53,7 +56,8 @@ export const GLOBAL_PRESETS: GlobalPreset[] = [
       synKeyword: '#e5a75b', synString: '#d4c05a', synComment: '#8a9199', synLiteral: '#e0964e',
       synEntity: '#d7ba7d', synFunction: '#8fa1b3', synVariable: '#c9d1d9', synProperty: '#c9d1d9',
       synRegex: '#e0964e', synMarkupHeading: '#61afef', synCoReference: '#8a9199', synSupport: '#8fa1b3',
-      // diff 词级（CC dark diffAddedWord/diffRemovedWord）
+      // diff（CC dark 行级/词级同色系）
+      diffAdded: '#38A660', diffRemoved: '#B3596B',
       diffAddedWord: '#38A660', diffRemovedWord: '#B3596B',
       toolOk: '#4EBA65', toolRun: '#93A5FF', toolErr: '#FF6B80',
       toolNameColor: '#4EBA65', toolSummaryColor: '#999999',
@@ -61,8 +65,12 @@ export const GLOBAL_PRESETS: GlobalPreset[] = [
       userTagBg: '#373737', userTagText: '#FFFFFF',
       toolIndicator: '●', toolIndicatorGlow: 0, toolIndicatorGlowColor: '',
       toolConnectorMode: 'none', toolConnectorColor: '#505050',
+      toolConnectorStyle: 'solid', toolConnectorWidth: 2, toolConnectorOpacity: 1,
       // CC spinner：cc 帧（·✢*✶✻✽）+ cc 幽默动词集 + 停滞渐变红
       spinnerFramePreset: 'cc', spinnerColor: '#D77757', spinnerSize: 14, spinnerVerbSet: 'cc',
+      spinnerStalledColor: '#FF6B80', spinnerIntervalMs: 120, spinnerCustomFrames: '', spinnerCustomVerbs: '',
+      spinnerDoneMarker: '✓', spinnerCancelledMarker: '■', spinnerErrorMarker: '!',
+      spinnerDoneMarkerMode: 'custom', spinnerCancelledMarkerMode: 'custom', spinnerErrorMarkerMode: 'custom',
       msgStyle: 'terminal', msgFont: 'mono', msgTextColor: '#FFFFFF', msgLineHeight: 1.3,
       messageLayout: 'claude', footerLayout: 'peri', cliOverflowMode: 'fixed-scroll',
       // CC 视觉还原：助手 ● 圆点
@@ -76,7 +84,8 @@ export const GLOBAL_PRESETS: GlobalPreset[] = [
       inputTextColor: '#FFFFFF', inputPlaceholder: '#999999',
       inputSendBg: 'transparent', inputFocusBorder: '#505050',
       inputFontSize: 15, inputMinHeight: 56,
-      inputMode: 'cli', cliLineWidth: 1, cliLineColor: '#888888', cliTextColor: '#FFFFFF', cliPromptColor: '#999999', cliLinePadding: 3, cliContentOffsetY: 0, cliHintMode: 'full',
+      inputMode: 'cli', inputVariant: 'cli', inputShowPlaceholder: true, inputShowHistoryHint: true, inputSubmitButtonMode: 'inline',
+      cliLineWidth: 1, cliLineColor: '#888888', cliTextColor: '#FFFFFF', cliPromptColor: '#999999', cliLinePadding: 3, cliContentOffsetY: 0, cliHintMode: 'full',
       ccHidden: ['send', 'attach'],
       ccScale: { ekg: 90, pct: 90, tokens: 90, model: 90, mode: 90 },
       statusBg: 'transparent', statusBgImage: '',
@@ -87,6 +96,7 @@ export const GLOBAL_PRESETS: GlobalPreset[] = [
       tokenDisplay: 'ekg',
       pillBg: 'rgba(255,255,255,0.05)', pillText: 'rgba(205,214,244,0.6)', prismOnColor: '#4ade80',
       modelVariant: 'minimal', modeVariant: 'minimal', sendVariant: 'minimal', attachVariant: 'minimal',
+      modeAutoColor: '#FFC107', modeEditColor: '#A2A9E4',
 
       // right
       rightBg: '#000000', rightBgImage: '', rightWidth: 260,
@@ -105,6 +115,9 @@ export const GLOBAL_PRESETS: GlobalPreset[] = [
       globalBgImage: '', globalBgColor: '#f0f0f5', uiScheme: 'light',
       userName: '', userPrefix: '❯', userColor: '#6366f1',
 
+      // layout — 全功能界面
+      showTabBar: true, showSidebar: true, showPet: true,
+
       // sidebar — 半透轻灰
       sidebarBg: 'rgba(245,245,250,0.55)', sidebarBgImage: '', sidebarWidth: 240,
       sidebarTransparency: 1, sidebarBlur: 0,
@@ -114,15 +127,26 @@ export const GLOBAL_PRESETS: GlobalPreset[] = [
       chatBg: 'rgba(255,255,255,0.28)', chatBgImage: '', chatTransparency: 1, chatBlur: 0,
       chatFont: 'system', chatFontSize: 15, chatLineHeight: 1.65,
       chatTextColor: 'rgba(0,0,0,0.82)', chatCodeColor: '#7c3aed', chatCodeBg: 'rgba(124,58,237,0.06)',
+      // 语法高亮（亮色柔和系）
+      synKeyword: '#7c3aed', synString: '#15803d', synComment: 'rgba(0,0,0,0.45)', synLiteral: '#b45309',
+      synEntity: '#0f766e', synFunction: '#1d4ed8', synVariable: 'rgba(0,0,0,0.82)', synProperty: 'rgba(0,0,0,0.82)',
+      synRegex: '#b45309', synMarkupHeading: '#7c3aed', synSupport: '#1d4ed8',
       // 工具：柔和现代色
       toolOk: '#22c55e', toolRun: '#6366f1', toolErr: '#f43f5e',
       toolNameColor: 'rgba(0,0,0,0.75)', toolSummaryColor: 'rgba(0,0,0,0.38)',
       userTagBg: 'rgba(99,102,241,0.08)', userTagText: '#6366f1',
       toolIndicator: '●', toolIndicatorGlow: 2, toolIndicatorGlowColor: '',
       toolConnectorMode: 'follow', toolConnectorColor: 'rgba(0,0,0,0.12)',
+      toolConnectorStyle: 'solid', toolConnectorWidth: 2, toolConnectorOpacity: 1,
+      // diff（亮色）
+      diffAdded: '#22c55e', diffRemoved: '#f43f5e', diffAddedWord: '#16a34a', diffRemovedWord: '#e11d48',
       spinnerFramePreset: 'clock', spinnerColor: '#f59e0b', spinnerSize: 14,
+      spinnerVerbSet: 'zh', spinnerStalledColor: '#ef4444', spinnerIntervalMs: 120, spinnerCustomFrames: '', spinnerCustomVerbs: '',
+      spinnerDoneMarker: '✓', spinnerCancelledMarker: '■', spinnerErrorMarker: '!',
+      spinnerDoneMarkerMode: 'custom', spinnerCancelledMarkerMode: 'custom', spinnerErrorMarkerMode: 'custom',
       msgStyle: 'terminal', msgFont: 'system', msgTextColor: '', msgLineHeight: 1.75,
       messageLayout: 'classic', footerLayout: 'free', cliOverflowMode: 'fixed-scroll',
+      assistantDot: false, assistantDotGlyph: '●', assistantDotColor: '',
 
       // cc — 亮色玻璃工作台
       ccHeight: 96, ccBgHeight: 96, ccBg: 'rgba(255,255,255,0.20)', ccBgImage: '', ccStatusFontSize: 14,
@@ -132,7 +156,8 @@ export const GLOBAL_PRESETS: GlobalPreset[] = [
       inputTextColor: 'rgba(0,0,0,0.80)', inputPlaceholder: 'rgba(0,0,0,0.22)',
       inputSendBg: 'rgba(99,102,241,0.12)', inputFocusBorder: 'rgba(99,102,241,0.35)',
       inputFontSize: 15, inputMinHeight: 52,
-      inputMode: 'cli', cliLineWidth: 1, cliLineColor: '#9a9a9a', cliTextColor: 'rgba(0,0,0,0.80)', cliPromptColor: '#6b7280', cliLinePadding: 3, cliContentOffsetY: 0, cliHintMode: 'full',
+      inputMode: 'cli', inputVariant: 'cli', inputShowPlaceholder: true, inputShowHistoryHint: true, inputSubmitButtonMode: 'inline',
+      cliLineWidth: 1, cliLineColor: '#9a9a9a', cliTextColor: 'rgba(0,0,0,0.80)', cliPromptColor: '#6b7280', cliLinePadding: 3, cliContentOffsetY: 0, cliHintMode: 'full',
       ccHidden: ['send', 'attach'],
       ccScale: { ekg: 105, pct: 105, tokens: 100, model: 100, mode: 100 },
       statusBg: 'transparent', statusBgImage: '',
@@ -143,6 +168,7 @@ export const GLOBAL_PRESETS: GlobalPreset[] = [
       tokenDisplay: 'ekg',
       pillBg: 'rgba(0,0,0,0.04)', pillText: 'rgba(0,0,0,0.50)', prismOnColor: '#22c55e',
       modelVariant: 'badge', modeVariant: 'pill', sendVariant: 'icon', attachVariant: 'icon',
+      modeAutoColor: '#f59e0b', modeEditColor: '#6366f1',
 
       // right
       rightBg: 'rgba(245,245,250,0.55)', rightBgImage: '', rightWidth: 250,
@@ -161,6 +187,9 @@ export const GLOBAL_PRESETS: GlobalPreset[] = [
       globalBgImage: '', globalBgColor: '#1e2130', uiScheme: 'dark',
       userName: '', userPrefix: '❯', userColor: '#88c0d0',
 
+      // layout — 全功能界面
+      showTabBar: true, showSidebar: true, showPet: true,
+
       // sidebar — 深空蓝灰
       sidebarBg: '#252838', sidebarBgImage: '', sidebarWidth: 240,
       sidebarTransparency: 1, sidebarBlur: 0,
@@ -170,15 +199,26 @@ export const GLOBAL_PRESETS: GlobalPreset[] = [
       chatBg: '#1e2130', chatBgImage: '', chatTransparency: 1, chatBlur: 0,
       chatFont: 'mono', chatFontSize: 14.5, chatLineHeight: 1.7,
       chatTextColor: '#e5e9f0', chatCodeColor: '#ebcb8b', chatCodeBg: 'rgba(136,192,208,0.06)',
+      // 语法高亮（Nord 编辑器配色）
+      synKeyword: '#b48ead', synString: '#a3be8c', synComment: '#4c566a', synLiteral: '#d08770',
+      synEntity: '#ebcb8b', synFunction: '#88c0d0', synVariable: '#d8dee9', synProperty: '#d8dee9',
+      synRegex: '#d08770', synMarkupHeading: '#81a1c1', synSupport: '#8fbcbb',
       // 工具：Nord 极光色
       toolOk: '#a3be8c', toolRun: '#88c0d0', toolErr: '#bf616a',
       toolNameColor: '#e5e9f0', toolSummaryColor: 'rgba(229,233,240,0.40)',
       userTagBg: 'rgba(136,192,208,0.12)', userTagText: '#88c0d0',
       toolIndicator: '◆', toolIndicatorGlow: 3, toolIndicatorGlowColor: '',
       toolConnectorMode: 'follow', toolConnectorColor: '#4c566a',
+      toolConnectorStyle: 'solid', toolConnectorWidth: 2, toolConnectorOpacity: 1,
+      // diff（Nord）
+      diffAdded: '#a3be8c', diffRemoved: '#bf616a', diffAddedWord: '#a3be8c', diffRemovedWord: '#bf616a',
       spinnerFramePreset: 'sparkles', spinnerColor: '#88c0d0', spinnerSize: 13,
+      spinnerVerbSet: 'zh', spinnerStalledColor: '#bf616a', spinnerIntervalMs: 120, spinnerCustomFrames: '', spinnerCustomVerbs: '',
+      spinnerDoneMarker: '✓', spinnerCancelledMarker: '■', spinnerErrorMarker: '!',
+      spinnerDoneMarkerMode: 'custom', spinnerCancelledMarkerMode: 'custom', spinnerErrorMarkerMode: 'custom',
       msgStyle: 'terminal', msgFont: 'mono', msgTextColor: '', msgLineHeight: 1.7,
       messageLayout: 'classic', footerLayout: 'free', cliOverflowMode: 'fixed-scroll',
+      assistantDot: false, assistantDotGlyph: '●', assistantDotColor: '',
 
       // cc — 冰蓝开发终端
       ccHeight: 96, ccBgHeight: 96, ccBg: '#252838', ccBgImage: '', ccStatusFontSize: 14,
@@ -188,7 +228,8 @@ export const GLOBAL_PRESETS: GlobalPreset[] = [
       inputTextColor: '#e5e9f0', inputPlaceholder: 'rgba(229,233,240,0.20)',
       inputSendBg: 'rgba(136,192,208,0.15)', inputFocusBorder: 'rgba(136,192,208,0.45)',
       inputFontSize: 15, inputMinHeight: 52,
-      inputMode: 'cli', cliLineWidth: 1, cliLineColor: '#7f8ea3', cliTextColor: '#e5e9f0', cliPromptColor: '#9aa7bd', cliLinePadding: 3, cliContentOffsetY: 0, cliHintMode: 'full',
+      inputMode: 'cli', inputVariant: 'cli', inputShowPlaceholder: true, inputShowHistoryHint: true, inputSubmitButtonMode: 'inline',
+      cliLineWidth: 1, cliLineColor: '#7f8ea3', cliTextColor: '#e5e9f0', cliPromptColor: '#9aa7bd', cliLinePadding: 3, cliContentOffsetY: 0, cliHintMode: 'full',
       ccHidden: ['send', 'attach'],
       ccScale: { ekg: 100, pct: 95, tokens: 95, model: 95, mode: 95 },
       statusBg: 'transparent', statusBgImage: '',
@@ -199,6 +240,7 @@ export const GLOBAL_PRESETS: GlobalPreset[] = [
       tokenDisplay: 'ekg',
       pillBg: 'rgba(136,192,208,0.08)', pillText: 'rgba(136,192,208,0.75)', prismOnColor: '#a3be8c',
       modelVariant: 'minimal', modeVariant: 'pill', sendVariant: 'icon', attachVariant: 'icon',
+      modeAutoColor: '#ebcb8b', modeEditColor: '#88c0d0',
 
       // right
       rightBg: '#252838', rightBgImage: '', rightWidth: 250,
@@ -209,12 +251,21 @@ export const GLOBAL_PRESETS: GlobalPreset[] = [
     name: 'tokyo', label: 'Tokyo Night', theme: {
       accent: '#7aa2f7',
       transparency: 1, bgBlur: 0, globalFont: 'mono', globalFontSize: 15, globalBgImage: '', globalBgColor: '#1a1b26', uiScheme: 'dark', userName: '', userPrefix: '❯', userColor: '#bb9af7',
+      showTabBar: true, showSidebar: true, showPet: true,
       sidebarBg: '#16161e', sidebarBgImage: '', sidebarWidth: 240, sidebarTransparency: 1, sidebarBlur: 0, sidebarTextColor: '#a9b1d6', sidebarNameSize: 13, sidebarGroupSize: 11,
       chatBg: '#1a1b26', chatBgImage: '', chatTransparency: 1, chatBlur: 0, chatFont: 'mono', chatFontSize: 15, chatLineHeight: 1.6, chatTextColor: '#c0caf5', chatCodeColor: '#e0af68', chatCodeBg: 'rgba(122,162,247,0.06)',
-      toolOk: '#9ece6a', toolRun: '#7aa2f7', toolErr: '#f7768e', toolNameColor: '#7dcfff', toolSummaryColor: '#565f89', userTagBg: '#24283b', userTagText: '#bb9af7', toolIndicator: '●', toolIndicatorGlow: 0, toolIndicatorGlowColor: '', toolConnectorMode: 'none', toolConnectorColor: '#414868', spinnerFramePreset: 'clock', spinnerColor: '#bb9af7', spinnerSize: 14, msgStyle: 'terminal', msgFont: 'mono', msgTextColor: '#c0caf5', msgLineHeight: 1.6, messageLayout:'classic',footerLayout:'free',cliOverflowMode:'fixed-scroll',
+      synKeyword:'#bb9af7',synString:'#9ece6a',synComment:'#565f89',synLiteral:'#ff9e64',synEntity:'#7dcfff',synFunction:'#2ac3de',synVariable:'#c0caf5',synProperty:'#c0caf5',synRegex:'#b4f9f8',synMarkupHeading:'#7aa2f7',synSupport:'#2ac3de',
+      toolOk: '#9ece6a', toolRun: '#7aa2f7', toolErr: '#f7768e', toolNameColor: '#7dcfff', toolSummaryColor: '#565f89', userTagBg: '#24283b', userTagText: '#bb9af7', toolIndicator: '●', toolIndicatorGlow: 0, toolIndicatorGlowColor: '', toolConnectorMode: 'none', toolConnectorColor: '#414868',
+      diffAdded:'#9ece6a',diffRemoved:'#f7768e',diffAddedWord:'#73daca',diffRemovedWord:'#f7768e',
+      toolConnectorStyle:'solid',toolConnectorWidth:2,toolConnectorOpacity:1,
+      spinnerFramePreset: 'clock', spinnerColor: '#bb9af7', spinnerSize: 14, spinnerVerbSet:'zh',spinnerStalledColor:'#f7768e',spinnerIntervalMs:120,spinnerCustomFrames:'',spinnerCustomVerbs:'',
+      spinnerDoneMarker:'✓',spinnerCancelledMarker:'■',spinnerErrorMarker:'!',spinnerDoneMarkerMode:'custom',spinnerCancelledMarkerMode:'custom',spinnerErrorMarkerMode:'custom',
+      msgStyle: 'terminal', msgFont: 'mono', msgTextColor: '#c0caf5', msgLineHeight: 1.6, messageLayout:'classic',footerLayout:'free',cliOverflowMode:'fixed-scroll',
+      assistantDot:false,assistantDotGlyph:'●',assistantDotColor:'',
       ccHeight: 96, ccBgHeight: 96, ccBg: '#1a1b26', ccBgImage: '', ccStatusFontSize: 14, ccStyle: 'numeric', ccVariant: 'terminal', ccHidden: ['send','attach'], ccScale: { pct:95,tokens:95,model:95,mode:95 },
-      inputBg:'transparent',inputBgImage:'',inputTextColor:'#c0caf5',inputPlaceholder:'#565f89',inputSendBg:'transparent',inputFocusBorder:'#7aa2f7',inputFontSize:15,inputMinHeight:56,inputMode:'cli',cliLineWidth:1,cliLineColor:'#565f89',cliTextColor:'#c0caf5',cliPromptColor:'#7f89b0',cliLinePadding:3,cliContentOffsetY:0,cliHintMode:'full',
+      inputBg:'transparent',inputBgImage:'',inputTextColor:'#c0caf5',inputPlaceholder:'#565f89',inputSendBg:'transparent',inputFocusBorder:'#7aa2f7',inputFontSize:15,inputMinHeight:56,inputMode:'cli',inputVariant:'cli',inputShowPlaceholder:true,inputShowHistoryHint:true,inputSubmitButtonMode:'inline',cliLineWidth:1,cliLineColor:'#565f89',cliTextColor:'#c0caf5',cliPromptColor:'#7f89b0',cliLinePadding:3,cliContentOffsetY:0,cliHintMode:'full',
       statusBg:'transparent',statusBgImage:'',ekgWidth:140,ekgFontSize:13,ekgGreen:'#9ece6a',ekgYellow:'#e0af68',ekgRed:'#f7768e',ekgLineWidth:2,ekgAmplitudeMax:10,ekgSpeedBase:.5,ekgSpeedMax:2.5,ekgLeftColor:'#414868',ekgMovingColor:'',ekgConsumedColor:'#24283b',barTrackColor:'#24283b',barFillColor:'#7aa2f7',barFillFollow:true,barHeight:8,tokenDisplay:'ekg',pillBg:'#24283b',pillText:'#a9b1d6',prismOnColor:'#9ece6a',modelVariant:'minimal',modeVariant:'minimal',sendVariant:'minimal',attachVariant:'minimal',
+      modeAutoColor:'#e0af68',modeEditColor:'#7aa2f7',
       rightBg:'#16161e',rightBgImage:'',rightWidth:260,rightTransparency:1,rightBlur:0,
     }
   },
@@ -222,16 +273,25 @@ export const GLOBAL_PRESETS: GlobalPreset[] = [
     name: 'solarized', label: 'Solarized Light', theme: {
       accent:'#268bd2',
       transparency:1,bgBlur:0,globalFont:'mono',globalFontSize:15,globalBgImage:'',globalBgColor:'#fdf6e3',uiScheme:'light',userName:'',userPrefix:'❯',userColor:'#268bd2',
+      showTabBar:true,showSidebar:true,showPet:true,
       sidebarBg:'#eee8d5',sidebarBgImage:'',sidebarWidth:240,sidebarTransparency:1,sidebarBlur:0,sidebarTextColor:'#586e75',sidebarNameSize:13,sidebarGroupSize:11,
-      chatBg:'#fdf6e3',chatBgImage:'',chatTransparency:1,chatBlur:0,chatFont:'mono',chatFontSize:15,chatLineHeight:1.6,chatTextColor:'#657b83',chatCodeColor:'#b58900',chatCodeBg:'rgba(38,139,210,.06)',toolOk:'#859900',toolRun:'#268bd2',toolErr:'#dc322f',toolNameColor:'#268bd2',toolSummaryColor:'#93a1a1',userTagBg:'#eee8d5',userTagText:'#268bd2',toolIndicator:'●',toolIndicatorGlow:0,toolIndicatorGlowColor:'',toolConnectorMode:'none',toolConnectorColor:'#93a1a1',spinnerFramePreset:'wave',spinnerColor:'#b58900',spinnerSize:14,msgStyle:'terminal',msgFont:'mono',msgTextColor:'#657b83',msgLineHeight:1.6,messageLayout:'classic',footerLayout:'free',cliOverflowMode:'fixed-scroll',
-      ccHeight:96,ccBgHeight:96,ccBg:'#fdf6e3',ccBgImage:'',ccStatusFontSize:14,ccStyle:'numeric',ccVariant:'terminal',ccHidden:['send','attach'],ccScale:{pct:95,tokens:95,model:95,mode:95},inputBg:'transparent',inputBgImage:'',inputTextColor:'#657b83',inputPlaceholder:'#93a1a1',inputSendBg:'transparent',inputFocusBorder:'#268bd2',inputFontSize:15,inputMinHeight:56,inputMode:'cli',cliLineWidth:1,cliLineColor:'#93a1a1',cliTextColor:'#657b83',cliPromptColor:'#657b83',cliLinePadding:3,cliContentOffsetY:0,cliHintMode:'full',statusBg:'transparent',statusBgImage:'',ekgWidth:140,ekgFontSize:13,ekgGreen:'#859900',ekgYellow:'#b58900',ekgRed:'#dc322f',ekgLineWidth:2,ekgAmplitudeMax:10,ekgSpeedBase:.5,ekgSpeedMax:2.5,ekgLeftColor:'#93a1a1',ekgMovingColor:'',ekgConsumedColor:'#eee8d5',barTrackColor:'#eee8d5',barFillColor:'#268bd2',barFillFollow:true,barHeight:8,tokenDisplay:'ekg',pillBg:'#eee8d5',pillText:'#586e75',prismOnColor:'#859900',modelVariant:'minimal',modeVariant:'minimal',sendVariant:'minimal',attachVariant:'minimal',rightBg:'#eee8d5',rightBgImage:'',rightWidth:260,rightTransparency:1,rightBlur:0,
+      chatBg:'#fdf6e3',chatBgImage:'',chatTransparency:1,chatBlur:0,chatFont:'mono',chatFontSize:15,chatLineHeight:1.6,chatTextColor:'#657b83',chatCodeColor:'#b58900',chatCodeBg:'rgba(38,139,210,.06)',
+      synKeyword:'#859900',synString:'#2aa198',synComment:'#93a1a1',synLiteral:'#d33682',synEntity:'#268bd2',synFunction:'#268bd2',synVariable:'#657b83',synProperty:'#657b83',synRegex:'#d33682',synMarkupHeading:'#268bd2',synSupport:'#6c71c4',
+      toolOk:'#859900',toolRun:'#268bd2',toolErr:'#dc322f',toolNameColor:'#268bd2',toolSummaryColor:'#93a1a1',userTagBg:'#eee8d5',userTagText:'#268bd2',toolIndicator:'●',toolIndicatorGlow:0,toolIndicatorGlowColor:'',toolConnectorMode:'none',toolConnectorColor:'#93a1a1',
+      diffAdded:'#859900',diffRemoved:'#dc322f',diffAddedWord:'#859900',diffRemovedWord:'#dc322f',
+      toolConnectorStyle:'solid',toolConnectorWidth:2,toolConnectorOpacity:1,
+      spinnerFramePreset:'wave',spinnerColor:'#b58900',spinnerSize:14,spinnerVerbSet:'zh',spinnerStalledColor:'#dc322f',spinnerIntervalMs:120,spinnerCustomFrames:'',spinnerCustomVerbs:'',
+      spinnerDoneMarker:'✓',spinnerCancelledMarker:'■',spinnerErrorMarker:'!',spinnerDoneMarkerMode:'custom',spinnerCancelledMarkerMode:'custom',spinnerErrorMarkerMode:'custom',
+      msgStyle:'terminal',msgFont:'mono',msgTextColor:'#657b83',msgLineHeight:1.6,messageLayout:'classic',footerLayout:'free',cliOverflowMode:'fixed-scroll',
+      assistantDot:false,assistantDotGlyph:'●',assistantDotColor:'',
+      ccHeight:96,ccBgHeight:96,ccBg:'#fdf6e3',ccBgImage:'',ccStatusFontSize:14,ccStyle:'numeric',ccVariant:'terminal',ccHidden:['send','attach'],ccScale:{pct:95,tokens:95,model:95,mode:95},inputBg:'transparent',inputBgImage:'',inputTextColor:'#657b83',inputPlaceholder:'#93a1a1',inputSendBg:'transparent',inputFocusBorder:'#268bd2',inputFontSize:15,inputMinHeight:56,inputMode:'cli',inputVariant:'cli',inputShowPlaceholder:true,inputShowHistoryHint:true,inputSubmitButtonMode:'inline',cliLineWidth:1,cliLineColor:'#93a1a1',cliTextColor:'#657b83',cliPromptColor:'#657b83',cliLinePadding:3,cliContentOffsetY:0,cliHintMode:'full',statusBg:'transparent',statusBgImage:'',ekgWidth:140,ekgFontSize:13,ekgGreen:'#859900',ekgYellow:'#b58900',ekgRed:'#dc322f',ekgLineWidth:2,ekgAmplitudeMax:10,ekgSpeedBase:.5,ekgSpeedMax:2.5,ekgLeftColor:'#93a1a1',ekgMovingColor:'',ekgConsumedColor:'#eee8d5',barTrackColor:'#eee8d5',barFillColor:'#268bd2',barFillFollow:true,barHeight:8,tokenDisplay:'ekg',pillBg:'#eee8d5',pillText:'#586e75',prismOnColor:'#859900',modelVariant:'minimal',modeVariant:'minimal',sendVariant:'minimal',attachVariant:'minimal',modeAutoColor:'#b58900',modeEditColor:'#268bd2',rightBg:'#eee8d5',rightBgImage:'',rightWidth:260,rightTransparency:1,rightBlur:0,
     }
   },
   {
     name:'amber',label:'Amber CRT',theme:{
       accent:'#ffb000',
-      transparency:1,bgBlur:0,globalFont:'mono',globalFontSize:15,globalBgImage:'',globalBgColor:'#120b00',uiScheme:'dark',userName:'',userPrefix:'>',userColor:'#ffb000',sidebarBg:'#120b00',sidebarBgImage:'',sidebarWidth:240,sidebarTransparency:1,sidebarBlur:0,sidebarTextColor:'#cc8c00',sidebarNameSize:13,sidebarGroupSize:11,      chatBg:'#120b00',chatBgImage:'',chatTransparency:1,chatBlur:0,chatFont:'mono',chatFontSize:15,chatLineHeight:1.55,chatTextColor:'#ffcc55',chatCodeColor:'#ffe0a3',chatCodeBg:'transparent',toolOk:'#ffc24b',toolRun:'#ffb000',toolErr:'#ff6b35',toolNameColor:'#ffb000',toolSummaryColor:'#9b6b00',userTagBg:'#2b1900',userTagText:'#ffcc55',toolIndicator:'■',toolIndicatorGlow:3,toolIndicatorGlowColor:'#ffb000',toolConnectorMode:'none',toolConnectorColor:'#5c3900',spinnerFramePreset:'orbit',spinnerColor:'#ffb000',spinnerSize:14,msgStyle:'terminal',msgFont:'mono',msgTextColor:'#ffcc55',msgLineHeight:1.55,messageLayout:'classic',footerLayout:'free',cliOverflowMode:'fixed-scroll',
-      ccHeight:96,ccBgHeight:96,ccBg:'#120b00',ccBgImage:'',ccStatusFontSize:14,ccStyle:'numeric',ccVariant:'terminal',ccHidden:['send','attach'],ccScale:{pct:95,tokens:95,model:95,mode:95},inputBg:'transparent',inputBgImage:'',inputTextColor:'#ffcc55',inputPlaceholder:'#7a5200',inputSendBg:'transparent',inputFocusBorder:'#ffb000',inputFontSize:15,inputMinHeight:56,inputMode:'cli',cliLineWidth:1,cliLineColor:'#9b6b00',cliTextColor:'#ffcc55',cliPromptColor:'#cc8c00',cliLinePadding:3,cliContentOffsetY:0,cliHintMode:'full',statusBg:'transparent',statusBgImage:'',ekgWidth:140,ekgFontSize:13,ekgGreen:'#ffc24b',ekgYellow:'#ffb000',ekgRed:'#ff6b35',ekgLineWidth:2,ekgAmplitudeMax:10,ekgSpeedBase:.5,ekgSpeedMax:2.5,ekgLeftColor:'#9b6b00',ekgMovingColor:'',ekgConsumedColor:'#2b1900',barTrackColor:'#2b1900',barFillColor:'#ffb000',barFillFollow:true,barHeight:8,tokenDisplay:'ekg',pillBg:'#2b1900',pillText:'#cc8c00',prismOnColor:'#ffc24b',modelVariant:'minimal',modeVariant:'minimal',sendVariant:'minimal',attachVariant:'minimal',rightBg:'#120b00',rightBgImage:'',rightWidth:260,rightTransparency:1,rightBlur:0,
+      transparency:1,bgBlur:0,globalFont:'mono',globalFontSize:15,globalBgImage:'',globalBgColor:'#120b00',uiScheme:'dark',userName:'',userPrefix:'>',userColor:'#ffb000',showTabBar:true,showSidebar:true,showPet:true,sidebarBg:'#120b00',sidebarBgImage:'',sidebarWidth:240,sidebarTransparency:1,sidebarBlur:0,sidebarTextColor:'#cc8c00',sidebarNameSize:13,sidebarGroupSize:11,      chatBg:'#120b00',chatBgImage:'',chatTransparency:1,chatBlur:0,chatFont:'mono',chatFontSize:15,chatLineHeight:1.55,chatTextColor:'#ffcc55',chatCodeColor:'#ffe0a3',chatCodeBg:'transparent',synKeyword:'#ffb000',synString:'#ffe0a3',synComment:'#9b6b00',synLiteral:'#ffb000',synEntity:'#ffcc55',synFunction:'#ffb000',synVariable:'#ffcc55',synProperty:'#ffcc55',synRegex:'#ffb000',synMarkupHeading:'#ffb000',synSupport:'#ffcc55',toolOk:'#ffc24b',toolRun:'#ffb000',toolErr:'#ff6b35',toolNameColor:'#ffb000',toolSummaryColor:'#9b6b00',userTagBg:'#2b1900',userTagText:'#ffcc55',toolIndicator:'■',toolIndicatorGlow:3,toolIndicatorGlowColor:'#ffb000',toolConnectorMode:'none',toolConnectorColor:'#5c3900',toolConnectorStyle:'solid',toolConnectorWidth:2,toolConnectorOpacity:1,diffAdded:'#ffc24b',diffRemoved:'#ff6b35',diffAddedWord:'#ffe0a3',diffRemovedWord:'#ff6b35',spinnerFramePreset:'orbit',spinnerColor:'#ffb000',spinnerSize:14,spinnerVerbSet:'zh',spinnerStalledColor:'#ff6b35',spinnerIntervalMs:120,spinnerCustomFrames:'',spinnerCustomVerbs:'',spinnerDoneMarker:'✓',spinnerCancelledMarker:'■',spinnerErrorMarker:'!',spinnerDoneMarkerMode:'custom',spinnerCancelledMarkerMode:'custom',spinnerErrorMarkerMode:'custom',msgStyle:'terminal',msgFont:'mono',msgTextColor:'#ffcc55',msgLineHeight:1.55,messageLayout:'classic',footerLayout:'free',cliOverflowMode:'fixed-scroll',assistantDot:false,assistantDotGlyph:'●',assistantDotColor:'',
+      ccHeight:96,ccBgHeight:96,ccBg:'#120b00',ccBgImage:'',ccStatusFontSize:14,ccStyle:'numeric',ccVariant:'terminal',ccHidden:['send','attach'],ccScale:{pct:95,tokens:95,model:95,mode:95},inputBg:'transparent',inputBgImage:'',inputTextColor:'#ffcc55',inputPlaceholder:'#7a5200',inputSendBg:'transparent',inputFocusBorder:'#ffb000',inputFontSize:15,inputMinHeight:56,inputMode:'cli',inputVariant:'cli',inputShowPlaceholder:true,inputShowHistoryHint:true,inputSubmitButtonMode:'inline',cliLineWidth:1,cliLineColor:'#9b6b00',cliTextColor:'#ffcc55',cliPromptColor:'#cc8c00',cliLinePadding:3,cliContentOffsetY:0,cliHintMode:'full',statusBg:'transparent',statusBgImage:'',ekgWidth:140,ekgFontSize:13,ekgGreen:'#ffc24b',ekgYellow:'#ffb000',ekgRed:'#ff6b35',ekgLineWidth:2,ekgAmplitudeMax:10,ekgSpeedBase:.5,ekgSpeedMax:2.5,ekgLeftColor:'#9b6b00',ekgMovingColor:'',ekgConsumedColor:'#2b1900',barTrackColor:'#2b1900',barFillColor:'#ffb000',barFillFollow:true,barHeight:8,tokenDisplay:'ekg',pillBg:'#2b1900',pillText:'#cc8c00',prismOnColor:'#ffc24b',modelVariant:'minimal',modeVariant:'minimal',sendVariant:'minimal',attachVariant:'minimal',modeAutoColor:'#ffb000',modeEditColor:'#ffcc55',rightBg:'#120b00',rightBgImage:'',rightWidth:260,rightTransparency:1,rightBlur:0,
     }
   },
 ]
