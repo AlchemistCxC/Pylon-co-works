@@ -248,8 +248,7 @@ impl GatewayCore {
     /// "有注册适配器 OR 有 binding"（与 deliver_all 出站白名单的前置条件等价，E14 封闭）。
     /// 注意：QQ 适配器未注册（无 PYLON_QQ_APP_ID 凭据启动）时，qq:* 源仅 binding
     /// 命中才返回 true；两者皆无 → false。若未来引入运行时注册（B10.5），需同步收严。
-    /// §3-9 跨组消费（session.rs/lib.rs 平台判定收敛，W2/W3 波执行）前无生产调用者。
-    #[allow(dead_code)]
+    /// 消费：session.rs（C1/C3/C4 GUI 冒名校验与平台判定）+ lib.rs（C5 回滚）。
     pub fn is_platform_source(&self, source: &str) -> bool {
         let prefix_hit = {
             let key = Self::platform_key_of(source);

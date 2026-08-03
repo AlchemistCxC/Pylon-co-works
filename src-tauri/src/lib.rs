@@ -2597,15 +2597,14 @@ pub fn run() {
                                 // resume 重放可重新 ingest（防故障期消息永久丢失）。
                                 // 经 PlatformAdapter::rollback_seen（trait 默认空实现，
                                 // QQ 适配器覆盖为 dedup 回滚；未注册适配器时无操作）。
-                                // 优化-6：回滚按 source 前缀取适配器（首段 == platform_key，
-                                // 与 deliver_all/会话重置通知同语义）——不再硬编码 "qq"，
-                                // 接入 wechat 等新平台自动生效；未注册适配器时无操作。
+                                // G4 §3-9（C5）：统一入口 adapter_for_source（空 key 返回
+                                // None，与旧 platform_key 判空等价；接入 wechat 等新平台
+                                // 自动生效，未注册适配器无操作）。
                                 if let Some(msg_id) = resolved.msg_id.as_deref() {
-                                    let platform_key = resolved.source.split(':').next().unwrap_or("");
-                                    if !platform_key.is_empty() {
-                                        if let Some(adapter) = state.gateway.adapter(platform_key) {
-                                            adapter.rollback_seen(msg_id);
-                                        }
+                                    if let Some(adapter) =
+                                        state.gateway.adapter_for_source(&resolved.source)
+                                    {
+                                        adapter.rollback_seen(msg_id);
                                     }
                                 }
                             }

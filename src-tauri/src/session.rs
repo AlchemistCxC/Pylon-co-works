@@ -606,18 +606,8 @@ pub(crate) async fn check_session_expiry(state: &AppState) {
     let now = Timestamp::now();
     // 核验修复：平台 source 判定（适配器前缀或静态绑定命中）。GUI local 会话
     // 由前端/用户管理，不参与后台过期重置（watcher 是 B10.3b 为平台会话设计）。
-    let platform_keys: Vec<String> = state.gateway.adapter_keys();
-    // P3：前缀循环外预构造，避免闭包内每 session 每 key 重复 format 分配。
-    let platform_prefixes: Vec<String> = platform_keys
-        .into_iter()
-        .map(|key| format!("{key}:"))
-        .collect();
-    let is_platform_source = |source: &str| -> bool {
-        platform_prefixes
-            .iter()
-            .any(|prefix| source.starts_with(prefix))
-            || state.gateway.binding(source).is_some()
-    };
+    // G4 §3-9（C1）：统一入口 is_platform_source（注册适配器前缀命中 OR 绑定命中，
+    // E14 语义与 deliver_all 出站白名单前置条件等价——原 adapter_keys 前缀闭包删除）。
     for runtime in state.runtimes.all() {
         let sessions: Vec<(String, String, Option<Timestamp>)> = runtime
             .sessions
@@ -630,7 +620,7 @@ pub(crate) async fn check_session_expiry(state: &AppState) {
             })
             .unwrap_or_default();
         for (source, peri_id, updated_at) in sessions {
-            if !is_platform_source(&source) {
+            if !state.gateway.is_platform_source(&source) {
                 continue;
             }
             // 活跃豁免：生成中（prompt 锁被占用）永不视为过期
@@ -710,14 +700,10 @@ pub(crate) async fn check_session_expiry(state: &AppState) {
             // 审查修复：应答该 session 挂起的权限请求为 Cancelled（协议要求）
             crate::permission::respond_pending_permissions_cancelled(&runtime, &peri_id).await;
             // 平台通知（用户可见重置原因）：投递给 source 归属的适配器。
-            // 2026-08-02 修复：原硬编码 gateway.adapter("qq") 只有 QQ 能收到通知；
-            // 泛化为与 deliver_all 同语义的前缀匹配（source 首段 == platform_key），
-            // 未来新增平台适配器自动生效。
-            let platform_key = source.split(':').next().unwrap_or("");
-            if !platform_key.is_empty() {
-                if let Some(adapter) = state.gateway.adapter(platform_key) {
-                    let _ = adapter.deliver_text(&source, &format!("[会话已重置] {reason}"));
-                }
+            // G4 §3-9（C2）：统一入口 adapter_for_source（None 跳过——空 key 与
+            // 未注册适配器同语义，替代 split(':') + adapter(key) 样板）。
+            if let Some(adapter) = state.gateway.adapter_for_source(&source) {
+                let _ = adapter.deliver_text(&source, &format!("[会话已重置] {reason}"));
             }
             state.log_runtime_summary(
                 "warn",
@@ -942,8 +928,11 @@ pub(crate) async fn new_session(
     mcp_servers: Option<Vec<crate::mcp::McpServerConfig>>,
 ) -> Result<serde_json::Value, PylonError> {
     let runtime = state.inner().require_runtime()?;
-    // B1：GUI 不得冒名平台源——qq:* 无 binding → 拒绝（防会话建立后出站投递到 QQ）。
-    if source.starts_with("qq:") && state.gateway.binding(&source).is_none() {
+    // B1：GUI 不得冒名平台源——is_platform_source（注册适配器 OR 绑定命中）且
+    // 无 binding → 拒绝（防会话建立后出站投递到 QQ）。G4 §3-9（C3）：E14 语义——
+    // QQ 适配器未注册时 qq:* 未绑定源放行（无注册 = 无投递路径，安全等价，见
+    // gateway/mod.rs is_platform_source doc）。
+    if state.gateway.is_platform_source(&source) && state.gateway.binding(&source).is_none() {
         return Err(PylonError::Protocol(format!(
             "invalid GUI source: {source}"
         )));
@@ -1397,9 +1386,11 @@ pub(crate) async fn send_prompt_core<R: tauri::Runtime>(
         cwd,
         ..
     } = ctx;
-    // B1：GUI source 不得冒名平台源——qq:* 无 binding → 拒绝（防冒名出站投递到 QQ）。
-    // 平台 ingest 的 qq:* 必带 binding（绑定命中），不受影响。
-    if source.starts_with("qq:") && gateway.binding(source).is_none() {
+    // B1：GUI source 不得冒名平台源——is_platform_source（注册适配器 OR 绑定命中）
+    // 且无 binding → 拒绝（防冒名出站投递到 QQ）。平台 ingest 的 qq:* 必带 binding
+    // （绑定命中），不受影响。G4 §3-9（C4）：E14 语义——QQ 适配器未注册时 qq:*
+    // 未绑定源放行（无注册 = 无投递路径，安全等价）。
+    if gateway.is_platform_source(source) && gateway.binding(source).is_none() {
         return Err(PylonError::Protocol(format!(
             "invalid GUI source: {source}"
         )));
@@ -2043,6 +2034,30 @@ mod tests {
     use super::*;
     use std::sync::Mutex;
 
+    /// 测试桩适配器（G4 §3-9 适配）：platform_key="qq"——注册后 is_platform_source
+    /// 对 qq:* 前缀命中（C3/C4 拒绝语义依赖注册态；E14 放行语义依赖未注册态）。
+    struct QqFakeAdapter;
+
+    impl crate::gateway::PlatformAdapter for QqFakeAdapter {
+        fn platform_key(&self) -> &str {
+            "qq"
+        }
+        fn max_message_len(&self) -> usize {
+            4000
+        }
+        fn deliver_text(&self, _source: &str, _text: &str) -> Result<(), String> {
+            Ok(())
+        }
+        fn deliver_event(
+            &self,
+            _source: &str,
+            _event: &str,
+            _payload: &serde_json::Value,
+        ) -> Result<(), String> {
+            Ok(())
+        }
+    }
+
     /// A10：无 active agent 的裸状态（active_agent 指向不存在的 runtime）。
     fn state_without_active_runtime() -> AppState {
         AppState {
@@ -2077,11 +2092,15 @@ mod tests {
 
     /// B1：GUI source 冒名平台源（qq:* 无 binding）必须在 send_prompt_core 入口被拒绝，
     /// 不得建立会话（与 deliver_all 出站白名单构成双防线）。
+    /// G4 §3-9（C4）适配：判定改走 is_platform_source（注册适配器前缀 OR 绑定命中）——
+    /// 测试注册 FakeAdapter("qq") 保持拒绝语义；E14 安全等价（无适配器注册时放行）
+    /// 由本测试第三段单独钉住。
     #[tokio::test]
     async fn send_prompt_core_rejects_unbound_qq_gui_source() {
         let state = state_without_active_runtime();
         let runtime = AgentRuntime::new_disconnected();
-        // gateway 只绑定 qq:group:123；qq:group:999 无 binding（GUI 冒名）
+        // gateway 只绑定 qq:group:123；qq:group:999 无 binding（GUI 冒名）。
+        // C4 后需"注册适配器 OR 绑定"命中才判定平台源——注册 FakeAdapter("qq")。
         let gateway = GatewayCore::from_config(
             crate::gateway::route::parse_config(
                 r#"
@@ -2095,6 +2114,9 @@ gateway:
             )
             .expect("合法配置"),
         );
+        gateway
+            .register(Arc::new(QqFakeAdapter))
+            .expect("register fake qq adapter");
         let error = send_prompt_core::<tauri::test::MockRuntime>(
             &state,
             &runtime,
@@ -2132,6 +2154,38 @@ gateway:
         assert!(
             !bound_error.to_string().contains("invalid GUI source"),
             "绑定命中的 qq:* source 不得被 source 校验拒绝，实际: {bound_error}"
+        );
+        // E14 语义钉住：无适配器注册 + 无 binding 的 qq:* GUI source 放行入口校验
+        // （安全等价：无注册适配器 = 无 deliver_all 投递路径，gateway/mod.rs doc）。
+        let bare_gateway = GatewayCore::from_config(
+            crate::gateway::route::parse_config(
+                r#"
+gateway:
+  routes:
+    - source: qq:group:123
+      agent: peri
+      profile: trpg
+      session: 战役1
+"#,
+            )
+            .expect("合法配置"),
+        );
+        let pass_error = send_prompt_core::<tauri::test::MockRuntime>(
+            &state,
+            &runtime,
+            None,
+            &bare_gateway,
+            &PromptContext {
+                source: "qq:group:999".to_string(),
+                content: "你好".to_string(),
+                ..Default::default()
+            },
+        )
+        .await
+        .expect_err("无适配器注册时 qq:* 应放行入口校验，继续管线直到连接层失败");
+        assert!(
+            !pass_error.to_string().contains("invalid GUI source"),
+            "无适配器注册的 qq:* source 不得被入口校验拒绝（E14），实际: {pass_error}"
         );
     }
 
