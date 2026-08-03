@@ -333,10 +333,11 @@ impl QqAdapter {
             // O40：复合键 `{chat_type}:{chat_id}` 隔离——群聊与私聊同 id
             // （如 group:123 / c2c:123）不得互串回复锚点；无法解析 kind 时
             // 回退原裸 id 键（保留旧行为，此类 source 会被白名单拒绝）。
-            let key = match source.split(':').nth(1) {
-                Some("group") => format!("group:{chat_id}"),
-                Some("user") => format!("c2c:{chat_id}"),
-                _ => chat_id.to_string(),
+            // §3-3：复用 parse_source 消除重复 kind 匹配（原 split(':').nth(1)
+            // 手工匹配 "group"/"user" 字面量）；parse_source Err → 同一回退分支。
+            let key = match parse_source(source) {
+                Ok((chat_type, _)) => format!("{chat_type}:{chat_id}"),
+                Err(_) => chat_id.to_string(),
             };
             dedup.set_latest(&key, msg_id);
         }
