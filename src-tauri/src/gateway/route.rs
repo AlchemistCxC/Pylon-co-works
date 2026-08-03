@@ -61,12 +61,16 @@ pub struct EntityBinding {
     extra: HashMap<String, serde_json::Value>,
 }
 
-/// QQ 平台网关配置（B10.3：群级白名单）。
+/// QQ 平台网关配置（B10.3：群级白名单 + §3-7：max_message_len 参数外置）。
 #[derive(Debug, Clone, Default, PartialEq, Eq, Deserialize)]
 pub struct QqGatewayConfig {
     /// 群级白名单：列出的 group_openid 才允许 ingest；None = 不限。
     #[serde(default)]
     pub group_allow_from: Option<Vec<String>>,
+    /// 单条文本上限（字符，deliver 分段依据）；None = 默认 QQ_MAX_MESSAGE_LEN(4000)。
+    /// 取值校验（E16）：必须 ≥ 1（0/负值会让 truncate 预算退化硬切）。
+    #[serde(default)]
+    pub max_message_len: Option<usize>,
     /// 段内未知字段（配置拼错可见，parse_config 告警）。
     #[serde(flatten)]
     extra: HashMap<String, serde_json::Value>,
@@ -209,18 +213,27 @@ pub fn parse_config(input: &str) -> Result<GatewayConfig, String> {
         route.allow_from = route.allow_from.filter(|v| !v.is_empty());
         entries.push(route);
     }
-    let qq = section
-        .qq
-        .map(|mut q| {
+    let qq = match section.qq {
+        Some(mut q) => {
             if !q.extra.is_empty() {
                 let mut keys: Vec<&String> = q.extra.keys().collect();
                 keys.sort();
                 tracing::warn!("gateway.qq 段含未知字段（可能拼错）: {keys:?}");
             }
+            // E16：max_message_len 取值校验——0/负值（usize 只可能为 0）会让
+            // truncate 预算退化为硬切（max_length/2），明确拒绝并指明配置键。
+            if let Some(len) = q.max_message_len {
+                if len < 1 {
+                    return Err(format!(
+                        "gateway.qq.max_message_len 非法: {len}（必须 ≥ 1，建议 ≥ 100）"
+                    ));
+                }
+            }
             q.group_allow_from = q.group_allow_from.filter(|v| !v.is_empty());
             q
-        })
-        .unwrap_or_default();
+        }
+        None => QqGatewayConfig::default(),
+    };
     let inject = match section.inject {
         Some(mut inject) => {
             // §3-6：gateway.inject 段未知键告警（此前静默丢弃，与 qq 段行为不一致）。
@@ -632,6 +645,42 @@ gateway:
     scenario: ""
 "#;
         assert!(parse_config(yaml).is_err(), "空 scenario 应报错");
+    }
+
+    #[test]
+    fn qq_max_message_len_defaults_to_none_and_parses_configured() {
+        // §3-7：gateway.qq.max_message_len 参数外置——缺省 None（适配器回退 4000），
+        // 配置后原样保留。
+        let missing = parse_config("some_other: 1").expect("无 gateway 段应解析成功");
+        assert_eq!(
+            missing.qq.max_message_len, None,
+            "缺省 max_message_len 必须为 None（适配器回退 QQ_MAX_MESSAGE_LEN）"
+        );
+        let yaml = r#"
+gateway:
+  qq:
+    group_allow_from: [group-a]
+    max_message_len: 2000
+"#;
+        let config = parse_config(yaml).expect("合法 max_message_len 应解析成功");
+        assert_eq!(config.qq.max_message_len, Some(2000));
+        assert_eq!(config.qq.group_allow_from.as_deref(), Some(&["group-a".to_string()][..]));
+    }
+
+    #[test]
+    fn qq_max_message_len_rejects_zero() {
+        // E16：max_message_len=0 → truncate 预算退化硬切（max_length/2），必须拒绝
+        // 并指明 gateway.qq.max_message_len（与 route reset 校验同款错误文案风格）。
+        let yaml = r#"
+gateway:
+  qq:
+    max_message_len: 0
+"#;
+        let error = parse_config(yaml).expect_err("max_message_len=0 必须拒绝");
+        assert!(
+            error.contains("gateway.qq.max_message_len"),
+            "错误信息必须指明配置键，实际: {error}"
+        );
     }
 
     #[test]

@@ -358,7 +358,13 @@ impl PlatformAdapter for QqAdapter {
     }
 
     fn max_message_len(&self) -> usize {
-        QQ_MAX_MESSAGE_LEN
+        // §3-7：分段上限参数外置（gateway.qq.max_message_len，缺省 = QQ_MAX_MESSAGE_LEN
+        // 4000，行为零变化）。qq_config() 每次调用 clone 整个配置——deliver_all 每
+        // chunk 调用一次，可接受；若在意可改读锁访问器（方案 §3-7 留方案）。
+        self.core
+            .qq_config()
+            .max_message_len
+            .unwrap_or(QQ_MAX_MESSAGE_LEN)
     }
 
     /// 回滚 seen 标记（C14）：ingest 发送失败时撤销 msg_id 的去重记录，
