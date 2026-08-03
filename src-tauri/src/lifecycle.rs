@@ -511,7 +511,6 @@ pub(crate) fn load_mcp_persisted(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::sync::Mutex;
 
     fn agent() -> AgentDef {
         crate::test_utils::fake_acp_agent("peri", "print('x')")
@@ -608,37 +607,12 @@ mod tests {
 
     #[tokio::test]
     async fn switch_to_same_agent_already_connected_is_idempotent() {
-        use crate::runtime::AgentRuntimeManager;
-        use std::collections::HashMap;
-
-        let mut agents = HashMap::new();
-        agents.insert(
-            "peri".to_string(),
-            crate::test_utils::fake_acp_agent("peri", "print('x')"),
-        );
-        let runtimes = Arc::new(AgentRuntimeManager::new());
-        let runtime = AgentRuntime::new_disconnected();
-        *runtime.agent_runtime.lock().unwrap() = crate::agent_runtime::AgentRuntimeState {
-            status: AgentLifecycleStatus::Connected,
-            last_error: None,
-            last_connected_at: None,
-        };
-        runtimes.insert("peri".into(), runtime.clone());
-        let state = AppState {
-            runtimes,
-            agents: Arc::new(Mutex::new(agents)),
-            active_agent: Arc::new(Mutex::new("peri".to_string())),
-            pet: Arc::new(Mutex::new(crate::pet::PetState::default())),
-            runtime_logs: crate::runtime_log::RuntimeLogHub::default(),
-            runtime_mcp: Mutex::new(None),
-            prism: crate::prism::PrismClient::unavailable("test".to_string()),
-            gateway: Arc::new(crate::gateway::GatewayCore::new()),
-            approval_mode: Arc::new(Mutex::new("default".to_string())),
-            pet_last_persist_ms: std::sync::atomic::AtomicU64::new(0),
-            pet_write_lock: tokio::sync::Mutex::new(()),
-            switch_lock: tokio::sync::Mutex::new(()),
-            mcp_write_lock: tokio::sync::Mutex::new(()),
-        };
+        let runtime = crate::test_utils::connected_runtime();
+        let state = crate::test_utils::TestStateBuilder::bare()
+            .with_active_agent("peri")
+            .with_agent(crate::test_utils::fake_acp_agent("peri", "print('x')"))
+            .with_runtime("peri", runtime.clone())
+            .build();
         let app = tauri::test::mock_builder()
             .build(tauri::test::mock_context(tauri::test::noop_assets()))
             .expect("mock app must build");
@@ -668,48 +642,15 @@ mod tests {
 
     #[tokio::test]
     async fn switch_to_non_active_agent_already_connected_skips_reconnect() {
-        use crate::runtime::AgentRuntimeManager;
-        use std::collections::HashMap;
-
-        let mut agents = HashMap::new();
-        agents.insert(
-            "a".to_string(),
-            crate::test_utils::fake_acp_agent("a", "print('x')"),
-        );
-        agents.insert(
-            "b".to_string(),
-            crate::test_utils::fake_acp_agent("b", "print('x')"),
-        );
-        let runtimes = Arc::new(AgentRuntimeManager::new());
-        let runtime_a = AgentRuntime::new_disconnected();
-        let runtime_b = AgentRuntime::new_disconnected();
-        *runtime_a.agent_runtime.lock().unwrap() = crate::agent_runtime::AgentRuntimeState {
-            status: AgentLifecycleStatus::Connected,
-            last_error: None,
-            last_connected_at: None,
-        };
-        *runtime_b.agent_runtime.lock().unwrap() = crate::agent_runtime::AgentRuntimeState {
-            status: AgentLifecycleStatus::Connected,
-            last_error: None,
-            last_connected_at: None,
-        };
-        runtimes.insert("a".into(), runtime_a.clone());
-        runtimes.insert("b".into(), runtime_b.clone());
-        let state = AppState {
-            runtimes,
-            agents: Arc::new(Mutex::new(agents)),
-            active_agent: Arc::new(Mutex::new("a".to_string())),
-            pet: Arc::new(Mutex::new(crate::pet::PetState::default())),
-            runtime_logs: crate::runtime_log::RuntimeLogHub::default(),
-            runtime_mcp: Mutex::new(None),
-            prism: crate::prism::PrismClient::unavailable("test".to_string()),
-            gateway: Arc::new(crate::gateway::GatewayCore::new()),
-            approval_mode: Arc::new(Mutex::new("default".to_string())),
-            pet_last_persist_ms: std::sync::atomic::AtomicU64::new(0),
-            pet_write_lock: tokio::sync::Mutex::new(()),
-            switch_lock: tokio::sync::Mutex::new(()),
-            mcp_write_lock: tokio::sync::Mutex::new(()),
-        };
+        let runtime_a = crate::test_utils::connected_runtime();
+        let runtime_b = crate::test_utils::connected_runtime();
+        let state = crate::test_utils::TestStateBuilder::bare()
+            .with_active_agent("a")
+            .with_agent(crate::test_utils::fake_acp_agent("a", "print('x')"))
+            .with_agent(crate::test_utils::fake_acp_agent("b", "print('x')"))
+            .with_runtime("a", runtime_a.clone())
+            .with_runtime("b", runtime_b.clone())
+            .build();
         let app = tauri::test::mock_builder()
             .build(tauri::test::mock_context(tauri::test::noop_assets()))
             .expect("mock app must build");
@@ -748,9 +689,6 @@ mod tests {
 
     #[tokio::test]
     async fn reload_agents_cleans_up_ghost_runtimes_of_deleted_agents() {
-        use crate::runtime::AgentRuntimeManager;
-        use std::collections::HashMap;
-
         let dir = std::env::temp_dir().join(format!("pylon-reload-{}", std::process::id()));
         std::fs::create_dir_all(&dir).unwrap();
         let path = dir.join("agents.yaml");
@@ -759,34 +697,16 @@ mod tests {
             "agents:\n  keep:\n    name: Keep\n    transport: subprocess\n    exe: keep-agent\n",
         )
         .unwrap();
-        let mut agents = HashMap::new();
-        agents.insert(
-            "keep".to_string(),
-            crate::test_utils::fake_acp_agent("Keep", "print('x')"),
-        );
-        agents.insert(
-            "remove-me".to_string(),
-            crate::test_utils::fake_acp_agent("RemoveMe", "print('x')"),
-        );
-        let runtimes = Arc::new(AgentRuntimeManager::new());
-        runtimes.insert("keep".into(), AgentRuntime::new_disconnected());
+        // G5-3：with_agent 以 AgentDef.name 为键——agents 键与 name 一致（"keep"/"remove-me"），
+        // reload 后 agents 表整体替换为配置文件内容（name=Keep），断言不受影响。
         let doomed = AgentRuntime::new_disconnected();
-        runtimes.insert("remove-me".into(), doomed.clone());
-        let state = AppState {
-            runtimes,
-            agents: Arc::new(Mutex::new(agents)),
-            active_agent: Arc::new(Mutex::new("keep".to_string())),
-            pet: Arc::new(Mutex::new(crate::pet::PetState::default())),
-            runtime_logs: crate::runtime_log::RuntimeLogHub::default(),
-            runtime_mcp: Mutex::new(None),
-            prism: crate::prism::PrismClient::unavailable("test".to_string()),
-            gateway: Arc::new(crate::gateway::GatewayCore::new()),
-            approval_mode: Arc::new(Mutex::new("default".to_string())),
-            pet_last_persist_ms: std::sync::atomic::AtomicU64::new(0),
-            pet_write_lock: tokio::sync::Mutex::new(()),
-            switch_lock: tokio::sync::Mutex::new(()),
-            mcp_write_lock: tokio::sync::Mutex::new(()),
-        };
+        let state = crate::test_utils::TestStateBuilder::bare()
+            .with_active_agent("keep")
+            .with_agent(crate::test_utils::fake_acp_agent("keep", "print('x')"))
+            .with_agent(crate::test_utils::fake_acp_agent("remove-me", "print('x')"))
+            .with_runtime("keep", AgentRuntime::new_disconnected())
+            .with_runtime("remove-me", doomed.clone())
+            .build();
         let app = tauri::test::mock_builder()
             .build(tauri::test::mock_context(tauri::test::noop_assets()))
             .unwrap();

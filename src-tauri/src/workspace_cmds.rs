@@ -103,27 +103,12 @@ pub(crate) async fn git_history(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::sync::Mutex;
 
     /// A10：git 只读命令保持 git_error 契约——无 active agent 也报 git_error，
     /// 不泄出 no_active_agent（前端 git 面板按 git_error 分支）。
     #[test]
     fn git_workspace_root_without_active_agent_reports_git_error() {
-        let state = AppState {
-            runtimes: std::sync::Arc::new(crate::runtime::AgentRuntimeManager::new()),
-            agents: std::sync::Arc::new(Mutex::new(std::collections::HashMap::new())),
-            active_agent: std::sync::Arc::new(Mutex::new("ghost-agent".to_string())),
-            pet: std::sync::Arc::new(Mutex::new(crate::pet::PetState::default())),
-            runtime_logs: crate::runtime_log::RuntimeLogHub::default(),
-            runtime_mcp: Mutex::new(None),
-            prism: crate::prism::PrismClient::unavailable("test".to_string()),
-            gateway: std::sync::Arc::new(crate::gateway::GatewayCore::new()),
-            approval_mode: std::sync::Arc::new(Mutex::new("default".to_string())),
-            pet_last_persist_ms: std::sync::atomic::AtomicU64::new(0),
-            pet_write_lock: tokio::sync::Mutex::new(()),
-            switch_lock: tokio::sync::Mutex::new(()),
-            mcp_write_lock: tokio::sync::Mutex::new(()),
-        };
+        let state = crate::test_utils::TestStateBuilder::bare().build();
         match git_workspace_root(&state, "source-a") {
             Ok(_) => panic!("git_workspace_root must fail without an active agent"),
             Err(error) => {
