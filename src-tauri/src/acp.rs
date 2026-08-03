@@ -1205,30 +1205,18 @@ impl AcpClient {
                     crashed_watch,
                     _crashed_watch_rx: crashed_watch_rx,
                 };
-                // Initialize——clientCapabilities 支持 per-agent 覆盖（差异字典外置，
-                // agents.yaml `acp.initialize_caps`）；缺省 = 统一默认（tokenStats +
-                // _meta.peri.*，Hermes 忽略无害）。差异适配表见 acp.rs 头部注释与手册 §3.3。
-                let capabilities = agent
-                    .acp
-                    .as_ref()
-                    .and_then(|acp| acp.initialize_caps.clone())
-                    .unwrap_or_else(|| {
-                        serde_json::json!({
-                            "tokenStats": true,
-                            "_meta": {
-                                "peri.tokenStats": true,
-                                "peri.skillNames": true,
-                                "peri.replay": true
-                            }
-                        })
-                    });
+                // Initialize——G1-03：握手三段全部来自协议配置（覆盖制，缺省 = 现状
+                // 现值，wire 逐字节不变）：clientCapabilities（D1，agents.yaml
+                // `acp.initialize_caps` 覆盖；缺省 = 统一默认 tokenStats + _meta.peri.*，
+                // Hermes 忽略无害）、protocolVersion（H3）、clientInfo（H4）。
+                // 差异适配表见 acp.rs 头部注释与手册 §3.3。
                 client
                     .call_async(
                         METHOD_INITIALIZE,
                         serde_json::json!({
-                            "protocolVersion": 1,
-                            "clientCapabilities": capabilities,
-                            "clientInfo": {"name": "Pylon", "version": "0.1.0"}
+                            "protocolVersion": client.protocol.protocol_version(),
+                            "clientCapabilities": client.protocol.initialize_caps(),
+                            "clientInfo": client.protocol.client_info()
                         }),
                     )
                     .await?;
@@ -2452,6 +2440,12 @@ for line in sys.stdin:
                 .is_none(),
             "覆盖后不再带统一默认 caps"
         );
+        // G1-03：未配置的 protocolVersion/clientInfo 保持默认现值（wire 不变）
+        assert_eq!(request["params"]["protocolVersion"], serde_json::json!(1));
+        assert_eq!(
+            request["params"]["clientInfo"],
+            serde_json::json!({"name": "Pylon", "version": "0.1.0"})
+        );
     }
 
     #[tokio::test]
@@ -2494,6 +2488,80 @@ for line in sys.stdin:
         );
         assert_eq!(
             request["params"]["clientCapabilities"]["_meta"]["peri.replay"],
+            serde_json::json!(true)
+        );
+        // G1-03：默认路径 protocolVersion/clientInfo 为现状现值（wire 逐字节不变）
+        assert_eq!(request["params"]["protocolVersion"], serde_json::json!(1));
+        assert_eq!(
+            request["params"]["clientInfo"],
+            serde_json::json!({"name": "Pylon", "version": "0.1.0"})
+        );
+    }
+
+    /// G1-03：声明 protocol_version/client_info 后按声明进 wire（覆盖路径）。
+    #[tokio::test]
+    async fn custom_protocol_version_and_client_info_reach_wire() {
+        let trace_path = std::env::temp_dir().join(format!(
+            "pylon-acp-handshake-{}.jsonl",
+            std::process::id()
+        ));
+        let script = r#"import json,sys
+trace=open(sys.argv[1],'w',encoding='utf-8')
+for line in sys.stdin:
+    request=json.loads(line)
+    trace.write(json.dumps(request)+'\n')
+    trace.flush()
+    print(json.dumps({'jsonrpc':'2.0','id':request.get('id'),'result':{}}), flush=True)
+"#;
+        let agent = crate::agent_config::AgentDef {
+            name: "fake-acp-handshake".to_string(),
+            transport: "subprocess".to_string(),
+            exe: crate::test_utils::test_python_exe().to_string(),
+            args: vec![
+                "-u".to_string(),
+                "-c".to_string(),
+                script.to_string(),
+                trace_path.to_string_lossy().into_owned(),
+            ],
+            cwd: None,
+            env: HashMap::new(),
+            default: false,
+            set_model_api: false,
+            model: None,
+            acp_args: Vec::new(),
+            acp: Some(crate::agent_config::AcpProtocolConfig {
+                protocol_version: Some(2),
+                client_info: Some(serde_json::json!({"name": "Pylon", "version": "9.9.9"})),
+                ..Default::default()
+            }),
+        };
+        let mut client = AcpClient::connect_with_logs(&agent, None)
+            .await
+            .expect("fake ACP with custom handshake must initialize");
+        client.kill().expect("cleanup");
+        tokio::time::sleep(std::time::Duration::from_millis(200)).await;
+        let trace = std::fs::read_to_string(&trace_path).expect("read trace");
+        std::fs::remove_file(&trace_path).ok();
+        let request: serde_json::Value = trace
+            .lines()
+            .map(|line| serde_json::from_str(line).expect("trace line"))
+            .find(|value: &serde_json::Value| {
+                value.get("method").and_then(|m| m.as_str()) == Some(METHOD_INITIALIZE)
+            })
+            .expect("initialize must be traced");
+        assert_eq!(
+            request["params"]["protocolVersion"],
+            serde_json::json!(2),
+            "声明的 protocol_version 必须进 wire"
+        );
+        assert_eq!(
+            request["params"]["clientInfo"],
+            serde_json::json!({"name": "Pylon", "version": "9.9.9"}),
+            "声明的 client_info 必须进 wire"
+        );
+        // caps 未声明 → 默认统一 caps 不受影响
+        assert_eq!(
+            request["params"]["clientCapabilities"]["tokenStats"],
             serde_json::json!(true)
         );
     }
