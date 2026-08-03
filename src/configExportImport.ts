@@ -59,9 +59,12 @@ export function applyImportPayload(storage: StorageLike, json: string): ImportRe
   }
   const data = envelope.data
   if (!data || typeof data !== 'object') return { ok: false, error: '配置内容缺失' }
+  // key 白名单：只接受 CONFIG_STORAGE_KEYS（导出对等集合），
+  // 防恶意/损坏文件注入任意 localStorage key（如 pylon-msgs-* 运行态）
+  const allowed = new Set<string>(CONFIG_STORAGE_KEYS)
   const keys: string[] = []
   for (const [key, value] of Object.entries(data)) {
-    if (typeof value !== 'string') continue
+    if (!allowed.has(key) || typeof value !== 'string') continue
     try {
       storage.setItem(key, value)
       keys.push(key)

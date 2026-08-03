@@ -260,6 +260,44 @@ function apply(state: ChatRuntimeState, event: ChatEvent, now = 1_000_000): Chat
   assert.equal(r.seq, 1, 'clear 不动 seq')
 }
 
+// ── 双路径修复：非 rendered 期间 chunks 直写 + rendered 缓冲，done flush 合并不拆条 ──
+{
+  let s = initialState()
+  s = apply(s, { type: 'user', source: SOURCE, content: 'hi' }, 1_000_000)
+  // rendered 缓冲一段
+  s = applyChatEvent(s, { type: 'message-chunk', source: SOURCE, text: '前半' }, { knownSources: [SOURCE], renderedSource: SOURCE, now: 1_000_100 })
+  assert.equal(s[SOURCE].streamingText, '前半')
+  // 切走后直写 messages（running assistant）
+  s = applyChatEvent(s, { type: 'message-chunk', source: SOURCE, text: '后半' }, { knownSources: [SOURCE], renderedSource: null, now: 1_000_200 })
+  const r1 = s[SOURCE]
+  assert.equal(r1.messages.at(-1)?.content, '后半', '非 rendered 直写为 running assistant 消息')
+  assert.equal(r1.streamingText, '前半', 'rendered 缓冲保留')
+  // done flush：缓冲并入 running 消息，同一回复只有一条
+  s = apply(s, { type: 'done', source: SOURCE }, 2_000_000)
+  const r2 = s[SOURCE]
+  const assistantMsgs = r2.messages.filter(m => m.role === 'assistant')
+  assert.equal(assistantMsgs.length, 1, '同一回复不得拆成两条 assistant 消息')
+  assert.equal(assistantMsgs[0].content, '后半前半', '缓冲文本必须并入直写消息')
+  assert.equal(r2.streamingText, '')
+}
+
+// ── done 解析 cancelState：cancel 在途时 done 到达置 cancelled，cancel-success 不再覆盖 ──
+{
+  let s = initialState()
+  s = apply(s, { type: 'user', source: SOURCE, content: 'hi' }, 1_000_000)
+  s = apply(s, { type: 'begin-cancel', source: SOURCE })
+  assert.equal(s[SOURCE].cancelState.status, 'canceling')
+  s = apply(s, { type: 'done', source: SOURCE }, 1_500_000)
+  const afterDone = s[SOURCE]
+  assert.equal(afterDone.cancelState.status, 'cancelled', 'done 必须解析在途 cancel 为 cancelled')
+  assert.equal(afterDone.lastSummary?.reason, 'done', 'summary 保持 done（不被晚到 cancel-success 覆盖）')
+  // 晚到 cancel-success 必须 no-op（不覆盖 summary/清 generationStart）
+  s = apply(s, { type: 'cancel-success', source: SOURCE }, 2_000_000)
+  const afterCancel = s[SOURCE]
+  assert.equal(afterCancel.cancelState.status, 'cancelled')
+  assert.equal(afterCancel.lastSummary?.reason, 'done', 'cancel-success 不得把 summary 改成 cancelled')
+}
+
 // ── 未知 source 忽略 ──
 {
   const s = initialState()

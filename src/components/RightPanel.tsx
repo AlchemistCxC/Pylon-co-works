@@ -31,11 +31,14 @@ export default function RightPanel({ sessionId, onClose }: RightPanelProps) {
   const [logsState, setLogsState] = useState<LogsViewState>(() => (
     createLogsViewState(sessionSource ? { sessionId: sessionId as string, source: sessionSource } : null)
   ))
-  const requestGeneration = useRef(0)
+  // 展开与读文件各自独立 generation：共享一个会让读文件取消在途目录展开（反之亦然）
+  const expandGeneration = useRef(0)
+  const readGeneration = useRef(0)
 
   useEffect(() => {
     setWorkspaceState(createWorkspaceViewState(sessionSource))
-    requestGeneration.current += 1
+    expandGeneration.current += 1
+    readGeneration.current += 1
   }, [sessionSource])
 
   useEffect(() => {
@@ -85,10 +88,10 @@ export default function RightPanel({ sessionId, onClose }: RightPanelProps) {
 
   const expandWorkspace = (path: string) => {
     if (!sessionSource) return
-    const generation = ++requestGeneration.current
+    const generation = ++expandGeneration.current
     invoke<unknown>('list_workspace_entries', { source: sessionSource, relativePath: path })
       .then(entries => {
-        if (generation !== requestGeneration.current) return
+        if (generation !== expandGeneration.current) return
         const children = workspaceTreeFromEntries(entries).entries
         setWorkspaceState(state => {
           if (!('tree' in state) || !state.tree) return state
@@ -97,7 +100,7 @@ export default function RightPanel({ sessionId, onClose }: RightPanelProps) {
         })
       })
       .catch(error => {
-        if (generation !== requestGeneration.current) return
+        if (generation !== expandGeneration.current) return
         setWorkspaceState(state => transitionWorkspaceView(state, {
           type: 'failed',
           message: error instanceof Error ? error.message : String(error),
@@ -107,16 +110,16 @@ export default function RightPanel({ sessionId, onClose }: RightPanelProps) {
 
   const readWorkspaceText = (path: string) => {
     if (!sessionSource) return
-    const generation = ++requestGeneration.current
+    const generation = ++readGeneration.current
     invoke<unknown>('read_workspace_text', { source: sessionSource, relativePath: path })
       .then(payload => {
-        if (generation !== requestGeneration.current) return
+        if (generation !== readGeneration.current) return
         const normalized = normalizeWorkspaceText(payload)
         if (!normalized) throw new Error('工作区文本响应格式无效')
         setWorkspaceState(state => transitionWorkspaceView(state, { type: 'loaded-text', text: normalized }))
       })
       .catch(error => {
-        if (generation !== requestGeneration.current) return
+        if (generation !== readGeneration.current) return
         setWorkspaceState(state => transitionWorkspaceView(state, {
           type: 'failed',
           message: error instanceof Error ? error.message : String(error),

@@ -35,8 +35,8 @@ export interface ChatControllerHandle {
   commitReplay: (source: string, cached: Message[]) => Message[]
   /** load 失败 fallback：清 replay 状态，后续事件按 live 处理 */
   clearReplay: (source: string) => void
-  /** 渲染期读取该 source 的 spinner 帧（user 事件后由接线层写入） */
-  getFrames: (source: string) => string[]
+  /** 渲染期读取该 source 的 spinner 帧（user 事件后由接线层写入）；空时返回 undefined 让调用方回退主题帧 */
+  getFrames: (source: string) => string[] | undefined
   /** 渲染期读取该 source 的 token 计数（usage-update 维护） */
   getTokenCount: (source: string) => number
   /** 渲染期读取该 source 的生成起点（elapsed 显示用） */
@@ -213,7 +213,10 @@ export function attachChatEventController(refs: ChatEventControllerRefs): ChatCo
     }
   }
 
-  const getFrames = (source: string): string[] => runtimeState[source]?.generationFrames ?? []
+  const getFrames = (source: string): string[] | undefined => {
+    const frames = runtimeState[source]?.generationFrames
+    return frames && frames.length > 0 ? frames : undefined
+  }
 
   const getTokenCount = (source: string): number => runtimeState[source]?.tokenCount ?? 0
 

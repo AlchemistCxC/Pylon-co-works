@@ -7,7 +7,7 @@ import { createCustomPreset, deleteCustomPreset, normalizeCustomPresets, pickCus
 import { normalizeThemeMigrationState } from './themeMigration'
 import { markZoneCustom } from './themePresetState'
 import { ZONES, ZONE_FIELDS } from './themeFields'
-import { clampCcHeight, resolveVisibleStatusWidgetCount } from './ccHeightState'
+import { clampCcHeight, resolveVisibleStatusWidgetCount, type CcFooterLayout, type CcHintMode, type CcInputMode, type CcOverflowMode } from './ccHeightState'
 import { normalizeThemeState, THEME_DEFAULTS } from './themeFieldDefs'
 import type { CustomPreset } from './customPresets'
 import { useIdentityStore } from './identityStore'
@@ -108,6 +108,31 @@ type ThemeState = ThemeSettings & {
 }
 
 /**
+ * 预设应用的 ccHeight 收敛：用合并主题自身的布局上下文（缺省回退 DEFAULTS）
+ * 过 clampCcHeight。预设 ccHeight（如 claude 76）低于最小高（cli+peri+full 为 109）
+ * 会破坏 ccHeightState 声明的"布局约束真值"不变式。
+ */
+function clampPresetCcHeight(theme: Partial<ThemeSettings>): number {
+  const inputMode = (theme.inputMode ?? DEFAULTS.inputMode) as CcInputMode
+  const footerLayout = (theme.footerLayout ?? DEFAULTS.footerLayout) as CcFooterLayout
+  const hintMode = (theme.cliHintMode ?? DEFAULTS.cliHintMode) as CcHintMode
+  const ccStyle = theme.ccStyle ?? DEFAULTS.ccStyle
+  const cliOverflowMode = (theme.cliOverflowMode ?? DEFAULTS.cliOverflowMode) as CcOverflowMode
+  const visibleStatusWidgets = resolveVisibleStatusWidgetCount({
+    hiddenIds: Array.isArray(theme.ccHidden) ? theme.ccHidden : [],
+    inputMode,
+    ccStyle,
+  })
+  return clampCcHeight(typeof theme.ccHeight === 'number' ? theme.ccHeight : DEFAULTS.ccHeight, {
+    inputMode,
+    footerLayout,
+    hintMode,
+    visibleStatusWidgets,
+    cliOverflowMode,
+  })
+}
+
+/**
  * DEFAULTS 由 defs 派生（THEME_DEFAULTS 标量默认值）+
  * 对象/复合字段（ccLayout/ccHidden/ccScale/META 路由）保留显式声明。
  * 加标量字段：defs 加声明 + THEME_DEFAULTS 加默认值即可，此处自动。
@@ -194,6 +219,7 @@ export const useStore = create<ThemeState>()(persist(
   applyZonePreset: (zone, presetName, presetTheme) => set(state => ({
     ...presetTheme,
     ...(presetTheme.ccLayout ? { ccLayout: normalizeCcLayout(presetTheme.ccLayout) } : {}),
+    ...(zone === 'cc' && presetTheme.ccHeight !== undefined ? { ccHeight: clampPresetCcHeight(presetTheme) } : {}),
     activePreset: { ...state.activePreset, [zone]: presetName },
     dirty: { ...state.dirty, [zone]: false },
   })),
@@ -209,6 +235,7 @@ export const useStore = create<ThemeState>()(persist(
     // 预设不携带 ccLayout 时保留用户现有排布（与 applyZonePreset 一致；无条件
     // normalizeCcLayout(undefined) 会重置用户拖拽/排序的自定义 widget 布局）
     ...(theme.ccLayout ? { ccLayout: normalizeCcLayout(theme.ccLayout) } : {}),
+    ...(theme.ccHeight !== undefined ? { ccHeight: clampPresetCcHeight(theme) } : {}),
     activePreset: Object.fromEntries(ZONES.map(zone => [zone, name])),
     dirty: Object.fromEntries(ZONES.map(zone => [zone, false])),
   })),
@@ -230,17 +257,21 @@ export const useStore = create<ThemeState>()(persist(
     return {
       ...theme,
       ccLayout: normalizeCcLayout(theme.ccLayout),
+      ...(theme.ccHeight !== undefined ? { ccHeight: clampPresetCcHeight(theme) } : {}),
       activePreset: Object.fromEntries(ZONES.map(zone => [zone, id])),
       dirty: Object.fromEntries(ZONES.map(zone => [zone, false])),
     }
   }),
   removeCustomPreset: (id) => set(state => {
-    const activePreset = Object.fromEntries(
-      Object.entries(state.activePreset).map(([zone, value]) => [zone, value === id ? '' : value]),
-    )
+    const activePreset = { ...state.activePreset }
     const dirty = { ...state.dirty }
-    for (const [zone, value] of Object.entries(state.activePreset)) {
-      if (value === id) dirty[zone] = true
+    // 删除正在应用的预设后，该 zone 保留其值但不再跟随命名预设 → 语义为 'custom'（与
+    // markZoneCustom 一致）；置 '' 会丢失"已自定义"指示（Settings 预设区显示异常）
+    for (const [zone, value] of Object.entries(activePreset)) {
+      if (value === id) {
+        activePreset[zone] = 'custom'
+        dirty[zone] = true
+      }
     }
     return { customPresets: deleteCustomPreset(state.customPresets, id), activePreset, dirty }
   }),

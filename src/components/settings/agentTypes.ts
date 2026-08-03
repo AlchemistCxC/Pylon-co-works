@@ -15,7 +15,7 @@ export interface AgentStatus {
   cwd?: string
   recentError?: string
   generation?: number
-  lastConnectedAt?: number
+  lastConnectedAt?: string | number
 }
 
 export interface AgentStatusPayload {
@@ -27,7 +27,7 @@ export interface AgentStatusPayload {
   cwd?: string
   error?: string
   generation?: number
-  lastConnectedAt?: number
+  lastConnectedAt?: string | number
 }
 
 export function normalizeAgentStatus(payload: AgentStatusPayload, fallbackAgent = ''): AgentStatus {

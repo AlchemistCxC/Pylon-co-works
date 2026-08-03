@@ -76,6 +76,28 @@ assert.match(defs, /ekgWidth: \{[\s\S]*?cssVar: '--ekg-w'/, 'ekgWidth 必须注�
 assert.match(store, /ekgConsumedColor: string; tokenDisplay: string/, 'ekgConsumedColor/tokenDisplay 保留')
 assert.doesNotMatch(store, /ekgLeftColor: string; ekgMovingColor/, 'store 不得残留 ekgLeftColor/ekgMovingColor')
 
+// ── 中低危修复契约（2026-08-03 逻辑检测二轮）──
+const controller = read('../src/components/chat/chatEventController.ts')
+// 预设应用必须 clamp ccHeight（claude 预设 76 < 最小高）
+assert.match(store, /clampPresetCcHeight\(/, '预设应用必须过 ccHeight clamp')
+assert.match(store, /ccHeight !== undefined \? \{ ccHeight: clampPresetCcHeight\(theme\) \}/, 'setGlobalPreset/applyCustomPreset 必须 clamp ccHeight')
+assert.match(store, /zone === 'cc' && presetTheme\.ccHeight !== undefined/, 'applyZonePreset 必须 clamp cc zone ccHeight')
+// removeCustomPreset 删除已应用预设 → 'custom'（与 markZoneCustom 一致）
+assert.match(store, /activePreset\[zone\] = 'custom'/, '删除已应用预设必须标记为 custom')
+// getFrames 空帧返回 undefined（spinner fallback 生效）
+assert.match(controller, /frames && frames\.length > 0 \? frames : undefined/, 'getFrames 空帧必须返回 undefined')
+// 配置导入 key 白名单
+const configImport = read('../src/configExportImport.ts')
+assert.match(configImport, /allowed\.has\(key\)/, '导入必须按 CONFIG_STORAGE_KEYS 白名单过滤')
+// RightPanel 展开/读文件独立 generation
+const rightPanel = read('../src/components/RightPanel.tsx')
+assert.doesNotMatch(rightPanel, /requestGeneration/, 'RightPanel 不得再共享单一 generation')
+assert.match(rightPanel, /expandGeneration/, '展开必须独立 generation')
+assert.match(rightPanel, /readGeneration/, '读文件必须独立 generation')
+// lastConnectedAt 类型对应用户端 string 序列化
+const agentTypes = read('../src/components/settings/agentTypes.ts')
+assert.match(agentTypes, /lastConnectedAt\?: string \| number/, 'lastConnectedAt 必须标注 string | number')
+
 // ── 骨架：手写组声明式化（个人信息/强调色/布局骨架进 defs）──
 assert.match(defs, /userName: \{[\s\S]*?group: "个人信息"/, '显示名必须进个人信息组')
 assert.match(defs, /userColor: \{[\s\S]*?group: "个人信息"/, '名字颜色必须进个人信息组')
@@ -99,7 +121,6 @@ assert.match(configPanel, /if \(latestReqRef\.current\[id\] !== seq\) return/, '
 const app = read('../src/App.tsx')
 assert.match(app, /profileRestoredRef/, 'App 必须防止启动覆写 profile 选择')
 // commitReplay 合并 load 期间 live 消息
-const controller = read('../src/components/chat/chatEventController.ts')
 assert.match(controller, /liveAdditions = existing \? existing\.messages\.slice\(cached\.length\)/, 'commitReplay 必须保留 load 期间 live 消息')
 assert.match(controller, /seq: maxSeq/, 'initSource 必须从缓存推进 seq（live/replay id 不撞）')
 

@@ -164,15 +164,26 @@ function flushStreaming(runtime: SourceChatRuntime, replay: boolean, now: number
     }, seq)
   }
   if (text) {
-    seq += 1
-    next = appendMessage(next, replay, {
-      id: `msg-${seq}`,
-      role: 'assistant',
-      sender: 'peri',
-      content: text,
-      time: nowTime(now),
-      running: false,
-    }, seq)
+    // 双路径修复：非 rendered 期间 message-chunk 已直写为 assistant 消息，
+    // 缓冲文本并入该消息而不是新建——否则生成中切走 source 会把同一回复拆成两条。
+    // 仅按 role 判定：flush 前 settleMessages 已清 running，且"末条 assistant + 有缓冲"
+    // 只可能来自当前生成的直写续段（完成态 assistant 的缓冲必为空）
+    const last = targetMessages(next, replay).messages.at(-1)
+    if (last?.role === 'assistant') {
+      next = mapMessages(next, replay, (m, i, arr) => i === arr.length - 1 && m.role === 'assistant'
+        ? { ...m, content: m.content + text, running: false }
+        : m)
+    } else {
+      seq += 1
+      next = appendMessage(next, replay, {
+        id: `msg-${seq}`,
+        role: 'assistant',
+        sender: 'peri',
+        content: text,
+        time: nowTime(now),
+        running: false,
+      }, seq)
+    }
   }
   return {
     ...next,
@@ -350,11 +361,16 @@ export function applyChatEvent(
         runtime = flushStreaming(runtime, false, now)
       }
       // 终态收敛：无论作用域都复位 generating（replay/live 交错时 user 事件先置 true、
-      // replay 作用域 done 不收敛会导致 spinner 常转）；summary 仅 live 作用域写
+      // replay 作用域 done 不收敛会导致 spinner 常转）；summary 仅 live 作用域写。
+      // cancelState 解析：cancel 在途时 done 到达 = 生成已实际完成 → 置 cancelled，
+      // 后续 cancel-success 不再覆盖 summary/elapsed=0，cancel-rejected 不再弹回 generating
       runtime = {
         ...runtime,
         generating: false,
         generationStart: undefined,
+        cancelState: terminationScope === 'live' && current.cancelState.status === 'canceling'
+          ? { ...current.cancelState, status: 'cancelled' }
+          : current.cancelState,
         ...(terminationScope === 'live' ? {
           lastSummary: {
             elapsedMs: now - (current.generationStart ?? now),
