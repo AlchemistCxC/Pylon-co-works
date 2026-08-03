@@ -14,13 +14,14 @@ import { extractMode, extractModelConfig, sessionResponseObject, type SessionRes
 import { highlightCode } from './codeHighlight'
 import { sanitizeHtml } from './htmlSanitizer'
 import { reportRuntimeError } from '../../runtimeError'
-import { measureRender, recordMeasuredAsync, recordRender } from './renderMetrics'
+import { recordMeasuredAsync, recordRender } from './renderMetrics'
 import { prepareRenderableMessages, isMessageStatic } from './messagePipeline'
 import type { Message as PipelineMessage, RenderMessage } from './messageTypes'
 import { buildMessageLookups } from './messageLookups'
+import { buildChatRowDescriptors } from './chatRowPipeline'
 import { resolveConnectorColor } from './toolPresentation'
 import { buildToolPresentationModel, toolPresentationStatus, truncateToolSummary } from './toolPresentationModel'
-import { normalizeToolStatus, resolveToolVisualStatus } from './toolStatus'
+import { normalizeToolStatus } from './toolStatus'
 import { toolIndicatorMotionClass } from './toolIndicatorMotion'
 import { resolveToolIndicatorAsset } from './toolIndicatorAssets'
 import { isPlainTextContent } from './markdownFastPath'
@@ -135,6 +136,16 @@ const ChatView = React.memo(function ChatView({ sessionId }: Props) {
     if (!searchQuery.trim()) return []
     return messages.filter(message => messageMatchesQuery(message, searchQuery))
   }, [messages, searchQuery])
+
+  // 渲染编排（chatRowPipeline 纯函数）：preparedMessages + lookups + 搜索命中 →
+  // 行描述符列表。输入引用不变则输出不变，行渲染由描述符驱动。
+  const rowDescriptors = useMemo(
+    () => {
+      recordRender('messages.map')
+      return buildChatRowDescriptors(preparedMessages, messageLookups, searchMatches[searchIndex]?.id)
+    },
+    [preparedMessages, messageLookups, searchMatches, searchIndex],
+  )
 
   useEffect(() => {
     if (searchMatches.length === 0) {
@@ -408,41 +419,25 @@ const ChatView = React.memo(function ChatView({ sessionId }: Props) {
       />}
       <div className="term">
         <AnimatePresence initial={false}>
-          {measureRender('messages.map', () => {
-            recordRender('messages.map')
-            return preparedMessages.map((renderMessage, index) => {
-              const previous = preparedMessages[index - 1]
-              const isToolRow = isToolRenderMessage(renderMessage)
-              const hasPreviousTool = isToolRow && isToolRenderMessage(previous)
-              const currentVisualState = resolveRowToolVisualState(renderMessage.message, messageLookups)
-              // 连接线从上一个连续 Tool 延伸，因此 follow 色也取上一个 Tool 的状态。
-              const previousConnectorStatus = hasPreviousTool
-                ? resolveRowToolConnectorStatus(previous.message)
-                : undefined
-              const previousConnectorVisualState = hasPreviousTool
-                ? resolveRowToolVisualState(previous.message, messageLookups)
-                : undefined
-              return (
-                <React.Fragment key={renderMessage.message.id}>
-                  {hasPreviousTool && <ToolConnector
-                    status={previousConnectorStatus || 'run'}
-                    visualState={normalizeToolStatus(previousConnectorVisualState)}
-                  />}
-                  <MemoMessageRow
-                    renderMessage={renderMessage}
-                    reduceMotion={reduceMotion === true}
-                    isStatic={isMessageStatic(renderMessage)}
-                    toolVisualState={currentVisualState}
-                    rowRef={node => {
-                      if (node) messageRefs.current.set(renderMessage.message.id, node)
-                      else messageRefs.current.delete(renderMessage.message.id)
-                    }}
-                    highlighted={searchMatches[searchIndex]?.id === renderMessage.message.id}
-                  />
-                </React.Fragment>
-              )
-            })
-          })}
+          {rowDescriptors.map(desc => (
+            <React.Fragment key={desc.key}>
+              {desc.showConnector && <ToolConnector
+                status={desc.connectorStatus || 'run'}
+                visualState={normalizeToolStatus(desc.connectorVisualState)}
+              />}
+              <MemoMessageRow
+                renderMessage={desc.renderMessage}
+                reduceMotion={reduceMotion === true}
+                isStatic={isMessageStatic(desc.renderMessage)}
+                toolVisualState={desc.toolVisualState}
+                rowRef={node => {
+                  if (node) messageRefs.current.set(desc.key, node)
+                  else messageRefs.current.delete(desc.key)
+                }}
+                highlighted={desc.isSearchMatch}
+              />
+            </React.Fragment>
+          ))}
         </AnimatePresence>
         {streamingThinking && <StreamingThinking text={streamingThinking} />}
         {streamingText && <StreamingAssistantText text={streamingText} />}
@@ -524,27 +519,6 @@ function areMessageRowPropsEqual(
 }
 
 const MemoMessageRow = React.memo(MessageRow, areMessageRowPropsEqual)
-
-function isToolRenderMessage(renderMessage: RenderMessage | undefined): renderMessage is RenderMessage {
-  return renderMessage?.type === 'tool_call' || renderMessage?.type === 'tool_result'
-}
-
-function resolveRowToolVisualState(message: Message | undefined, lookups: ReturnType<typeof buildMessageLookups>): string | undefined {
-  if (!message || message.role !== 'tool') return undefined
-  if (message.id.startsWith('tool-')) {
-    const toolId = message.id.slice('tool-'.length)
-    if (lookups.failedToolIds.has(toolId)) return 'failed'
-    if (lookups.runningToolIds.has(toolId)) return 'running'
-    if (lookups.resolvedToolIds.has(toolId)) return 'completed'
-  }
-  if (message.running === true) return 'running'
-  return normalizeToolStatus(message.toolStatus)
-}
-
-function resolveRowToolConnectorStatus(message: Message | undefined): 'ok' | 'err' | 'run' {
-  if (!message || message.role !== 'tool') return 'run'
-  return resolveToolVisualStatus(message.toolStatus, message.toolOutput !== undefined)
-}
 
 function AssistantContent({ text, isStreaming = false }: { text: string; isStreaming?: boolean }) {
   recordRender('AssistantContent.render')

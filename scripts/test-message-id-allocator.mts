@@ -19,6 +19,6 @@ assert.equal(controller.includes("'msg-' + Date.now()"), false)
 assert.equal(controller.includes("'user-' + Date.now()"), false)
 assert.equal(controller.includes("'thought-' + Date.now()"), false)
 assert.equal(controller.includes("'err-' + Date.now()"), false)
-assert.match(chatView, /key=\{renderMessage\.message\.id\}/, 'React key 仍使用 message.id 单一真值')
+assert.match(chatView, /React\.Fragment key=\{desc\.key\}/, 'React key 仍使用 message.id 单一真值（经描述符）')
 
 console.log('messageIdAllocator 回归测试通过')

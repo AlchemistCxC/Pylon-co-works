@@ -48,7 +48,7 @@ assert.match(pet, /document\.visibilityState !== 'visible'/, 'Pet 轮询必须�
 
 // ── D1 ChatView 接线断言 ──
 const chatView = readFileSync(new URL('../src/components/chat/ChatView.tsx', import.meta.url), 'utf8')
-assert.equal(chatView.includes('isStatic={isMessageStatic(renderMessage)}'), true, 'MessageRow 必须接收静态判定')
+assert.equal(chatView.includes('isStatic={isMessageStatic(desc.renderMessage)}'), true, 'MessageRow 必须接收静态判定')
 assert.match(chatView, /const skipEntrance = reduceMotion \|\| isStatic === true/, '静态行必须跳过入场动画')
 
 // ── D7 助手圆点 CC 对齐（flex 列 + 消息文字色链 + 单块一圆点）──

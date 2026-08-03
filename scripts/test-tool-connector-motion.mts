@@ -3,6 +3,7 @@ import { readFileSync } from 'node:fs'
 import { toolConnectorMotionClass } from '../src/components/chat/toolIndicatorMotion.ts'
 
 const chatView = readFileSync(new URL('../src/components/chat/ChatView.tsx', import.meta.url), 'utf8')
+const pipeline = readFileSync(new URL('../src/components/chat/chatRowPipeline.ts', import.meta.url), 'utf8')
 const connector = readFileSync(new URL('../src/components/chat/ToolConnector.tsx', import.meta.url), 'utf8')
 const css = readFileSync(new URL('../src/components/chat/ChatView.css', import.meta.url), 'utf8')
 
@@ -13,8 +14,8 @@ assert.equal(toolConnectorMotionClass('completed'), 'term-tool-connector--settle
 assert.equal(toolConnectorMotionClass('failed'), 'term-tool-connector--flash')
 assert.equal(toolConnectorMotionClass('cancelled'), 'term-tool-connector--static')
 
-assert.match(chatView, /const previousConnectorVisualState = hasPreviousTool[\s\S]*?resolveRowToolVisualState\(previous\.message, messageLookups\)/, '连接线必须读取上一个 Tool 的视觉状态')
-assert.match(chatView, /<ToolConnector[\s\S]*?status=\{previousConnectorStatus \|\| 'run'\}[\s\S]*?visualState=\{normalizeToolStatus\(previousConnectorVisualState\)\}/, '连接线颜色与动画必须都继承上一个 Tool')
+assert.match(pipeline, /const previousConnectorVisualState = hasPreviousTool[\s\S]*?resolveRowToolVisualState\(previous\.message, messageLookups\)/, '连接线必须读取上一个 Tool 的视觉状态')
+assert.match(chatView, /<ToolConnector[\s\S]*?status=\{desc\.connectorStatus \|\| 'run'\}[\s\S]*?visualState=\{normalizeToolStatus\(desc\.connectorVisualState\)\}/, '连接线颜色与动画必须都继承上一个 Tool')
 assert.match(connector, /toolConnectorMotionClass\(visualState\)/, 'ToolConnector 必须生成动画 class')
 assert.match(connector, /className=\{`term-tool-connector term-tool-connector-style--\$\{connectorStyle \|\| 'solid'\} \$\{toolConnectorMotionClass\(visualState\)\}`\}/, '动画与样式 class 必须挂在 connector 元素')
 assert.match(connector, /const connectorStyle = useStore/, 'connector 必须消费持久化样式')

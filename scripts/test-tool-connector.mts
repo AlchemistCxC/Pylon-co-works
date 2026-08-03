@@ -4,6 +4,7 @@ import { resolveConnectorColor } from '../src/components/chat/toolPresentation.t
 
 const css = readFileSync(new URL('../src/components/chat/ChatView.css', import.meta.url), 'utf8')
 const chatView = readFileSync(new URL('../src/components/chat/ChatView.tsx', import.meta.url), 'utf8')
+const pipeline = readFileSync(new URL('../src/components/chat/chatRowPipeline.ts', import.meta.url), 'utf8')
 const connector = readFileSync(new URL('../src/components/chat/ToolConnector.tsx', import.meta.url), 'utf8')
 const preview = readFileSync(new URL('../src/components/SettingsPreview.tsx', import.meta.url), 'utf8')
 
@@ -14,16 +15,16 @@ assert.equal(resolveConnectorColor('follow', 'ok', { toolOk: '#a', toolRun: '#b'
 assert.equal(resolveConnectorColor('follow', 'run', { toolOk: '#a', toolRun: '#b', toolErr: '#c' }, '#f'), '#b')
 assert.equal(resolveConnectorColor('follow', 'err', { toolOk: '#a', toolRun: '#b', toolErr: '#c' }, '#f'), '#c')
 
-// ── 线色跟随连续调用中的上一个 Tool 状态 ──
-assert.match(chatView, /const previousConnectorStatus = hasPreviousTool\s*\? resolveRowToolConnectorStatus\(previous\.message\)/, '必须由上一个工具消息直接解析连接线状态')
-assert.match(chatView, /<ToolConnector[\s\S]*?status=\{previousConnectorStatus \|\| 'run'\}[\s\S]*?visualState=\{normalizeToolStatus\(previousConnectorVisualState\)\}/, '线色和动画必须使用上一个工具的解析状态')
-assert.match(chatView, /function resolveRowToolVisualState[\s\S]*?if \(!message \|\| message\.role !== 'tool'\) return undefined[\s\S]*?return normalizeToolStatus\(message\.toolStatus\)/, '状态动画必须兼容真实 tool-* id 与浏览器 mock id')
-assert.match(chatView, /return resolveToolVisualStatus\(message\.toolStatus, message\.toolOutput !== undefined\)/, '连接线状态必须兼容无 tool- 前缀的 mock/真实消息 id')
+// ── 线色跟随连续调用中的上一个 Tool 状态（编排在 chatRowPipeline 纯模块）──
+assert.match(pipeline, /const previousConnectorStatus = hasPreviousTool\s*\? resolveRowToolConnectorStatus\(previous\.message\)/, '必须由上一个工具消息直接解析连接线状态')
+assert.match(chatView, /<ToolConnector[\s\S]*?status=\{desc\.connectorStatus \|\| 'run'\}[\s\S]*?visualState=\{normalizeToolStatus\(desc\.connectorVisualState\)\}/, '线色和动画必须使用上一个工具的解析状态')
+assert.match(pipeline, /function resolveRowToolVisualState[\s\S]*?if \(!message \|\| message\.role !== 'tool'\) return undefined[\s\S]*?return normalizeToolStatus\(message\.toolStatus\)/, '状态动画必须兼容真实 tool-* id 与浏览器 mock id')
+assert.match(pipeline, /return resolveToolVisualStatus\(message\.toolStatus, message\.toolOutput !== undefined\)/, '连接线状态必须兼容无 tool- 前缀的 mock/真实消息 id')
 assert.match(connector, /resolveConnectorColor\(connectorMode, status, \{ toolOk, toolRun, toolErr \}, connectorColor\)/, '连接线组件必须用状态色')
 
-// ── 真实 DOM 连接线元素 ──
-assert.match(chatView, /hasPreviousTool && <ToolConnector/, '仅前一行也是 tool 时渲染连接线')
-assert.match(chatView, /React\.Fragment key=\{renderMessage\.message\.id\}/, '行与连接线共享稳定 key')
+// ── 真实 DOM 连接线元素（ChatView 消费描述符）──
+assert.match(chatView, /desc\.showConnector && <ToolConnector/, '仅前一行也是 tool 时渲染连接线')
+assert.match(chatView, /React\.Fragment key=\{desc\.key\}/, '行与连接线共享稳定 key')
 
 // ── 测量：展开的工具仍保持连接 ──
 assert.doesNotMatch(chatView, /previousRow\.querySelector\('\.term-tool-body'\) !== null/, '展开 body 不应截断连接线')
