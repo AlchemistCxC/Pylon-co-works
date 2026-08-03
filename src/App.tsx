@@ -13,11 +13,13 @@ import { getCurrentWindow } from '@tauri-apps/api/window'
 import { PhysicalSize } from '@tauri-apps/api/dpi'
 import { invoke } from '@tauri-apps/api/core'
 import { loadWindowSize, persistWindowSize } from './windowSizePersistence'
-import { reportRuntimeError, type RuntimeErrorDetail } from './runtimeError'
+import { reportRuntimeError } from './runtimeError'
 import { toCssBackgroundImage } from './backgroundImage'
 import { THEME_CSS_VAR_MAP, THEME_FIELD_DEFS } from './themeFieldDefs'
 import { listen } from '@tauri-apps/api/event'
 import { normalizeAgentStatus, type AgentStatusPayload } from './components/settings/agentTypes'
+import DevMetricsOverlay from './components/DevMetricsOverlay'
+import ErrorCenter from './components/ErrorCenter'
 
 // 非首屏 Dialog/Sheet 懒加载：Settings/ProfileEditor/SessionSettings 与 Prism Sheet 按需分包
 const Settings = lazy(() => import('./components/Settings'))
@@ -49,7 +51,6 @@ export default function App() {
   const [sessionSettingsId, setSessionSettingsId] = useState<string | null>(null)
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false)
   const [showSheetLauncher, setShowSheetLauncher] = useState(false)
-  const [runtimeError, setRuntimeError] = useState<RuntimeErrorDetail | null>(null)
   const activeProfileId = useIdentityStore(s => s.activeProfileId)
   const sessions = useIdentityStore(s => s.sessions)
   const workspaceSheets = useWorkspaceStore(s => s.workspaceSheets)
@@ -65,11 +66,6 @@ export default function App() {
     return () => window.removeEventListener('pylon:agent-switched', clearActiveSession)
   }, [])
 
-  useEffect(() => {
-    const onRuntimeError = (event: Event) => setRuntimeError((event as CustomEvent<RuntimeErrorDetail>).detail)
-    window.addEventListener('pylon:runtime-error', onRuntimeError)
-    return () => window.removeEventListener('pylon:runtime-error', onRuntimeError)
-  }, [])
 
   useEffect(() => {
     if (!belongsToProfile(activeSession, activeProfileId, sessions)) setActiveSession(null)
@@ -241,6 +237,7 @@ export default function App() {
 
   return (
     <div className="app" data-ui-scheme={s.uiScheme || 'light'} data-msg-style={s.msgStyle || 'terminal'} data-message-layout={s.messageLayout || 'classic'} data-footer-layout={s.footerLayout || 'free'} data-cli-overflow-mode={s.cliOverflowMode || 'fixed-scroll'} style={cssVars}>
+      {import.meta.env.DEV && <DevMetricsOverlay />}
       <WorkspaceTitlebar
         sheets={workspaceSheets.sheets}
         activeSheetId={workspaceSheets.activeSheetId}
@@ -280,13 +277,7 @@ export default function App() {
         )}
       </Suspense>
 
-      {runtimeError && (
-        <div className="runtime-error-banner" role="alert">
-          <strong>{runtimeError.action}失败</strong>
-          <span>{runtimeError.message}</span>
-          <button type="button" onClick={() => setRuntimeError(null)} aria-label="关闭错误提示">✕</button>
-        </div>
-      )}
+      <ErrorCenter />
 
       <div className={`layout ${ccEditMode ? 'cc-editing-app' : ''}`}>
         <SheetHost

@@ -184,3 +184,50 @@
 .cc-editing-app .main-body {
   overflow: visible;
 }
+
+/* ── dev-only 渲染指标悬浮面板 ── */
+.dev-metrics-toggle {
+  position: fixed; right: 12px; bottom: 12px; z-index: 999;
+  width: 30px; height: 30px; border-radius: 8px; border: 1px solid var(--border);
+  background: var(--bg-panel); cursor: pointer; font-size: 14px;
+}
+.dev-metrics {
+  position: fixed; right: 12px; bottom: 12px; z-index: 999;
+  min-width: 320px; max-height: 60vh; overflow: auto;
+  padding: 10px 12px; border: 1px solid var(--border); border-radius: 10px;
+  background: var(--bg-panel); box-shadow: 0 8px 24px rgba(0,0,0,0.2);
+  font-family: var(--mono); font-size: 11px;
+}
+.dev-metrics-head { display: flex; align-items: center; gap: 8px; margin-bottom: 6px; font-weight: 700; }
+.dev-metrics-action {
+  border: 1px solid var(--border); border-radius: 4px; background: none;
+  color: var(--text-dim); font-size: 10px; cursor: pointer; padding: 1px 6px;
+}
+.dev-metrics-table { width: 100%; border-collapse: collapse; }
+.dev-metrics-table th, .dev-metrics-table td { text-align: right; padding: 2px 4px; border-bottom: 1px solid rgba(0,0,0,0.05); }
+.dev-metrics-table th { color: var(--text-dim); font-weight: 600; }
+.dev-metrics-name { text-align: left; color: var(--text-dim); }
+
+/* ── 全局运行错误中心 ── */
+.error-center-badge {
+  position: fixed; top: 44px; right: 12px; z-index: 998;
+  padding: 3px 10px; border-radius: 999px; border: 1px solid var(--tool-err, #be2828);
+  background: color-mix(in srgb, var(--tool-err, #be2828) 12%, transparent);
+  color: var(--tool-err, #be2828); font-size: 12px; font-weight: 700; cursor: pointer;
+}
+.error-center {
+  position: fixed; top: 76px; right: 12px; z-index: 998;
+  width: 380px; max-height: 60vh; overflow: auto;
+  padding: 10px 12px; border: 1px solid var(--border); border-radius: 10px;
+  background: var(--bg-panel); box-shadow: 0 8px 24px rgba(0,0,0,0.2);
+  font-size: 12px;
+}
+.error-center-head { display: flex; align-items: center; gap: 8px; margin-bottom: 6px; font-weight: 700; }
+.error-center-action {
+  border: 1px solid var(--border); border-radius: 4px; background: none;
+  color: var(--text-dim); font-size: 11px; cursor: pointer; padding: 1px 6px;
+}
+.error-center-list { list-style: none; margin: 0; padding: 0; }
+.error-center-item { display: flex; align-items: baseline; gap: 8px; padding: 4px 0; border-bottom: 1px solid rgba(0,0,0,0.05); }
+.error-center-item strong { color: var(--tool-err, #be2828); flex-shrink: 0; }
+.error-center-msg { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--text-dim); }
