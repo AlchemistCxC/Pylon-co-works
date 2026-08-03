@@ -971,8 +971,13 @@ async fn prepare_prompt_blocks(
     // clippy needless_borrow 误报（2026-08-02）：建议去掉 & 直接传 attachment_paths，
     // 但 prompt_blocks 参数是 &[String]，Vec 不会自动借用（编译失败）；&Vec → &[T]
     // 是 deref coercion 的惯用写法，allow 保留。
+    // G1-04：附件限制按 active agent 协议配置解析（缺省 = 现状 8/10MB，wire 不变）。
     #[allow(clippy::needless_borrow)]
-    let prompt_blocks = AcpClient::prompt_blocks(prompt_text, &attachment_paths)?;
+    let prompt_blocks = AcpClient::prompt_blocks(
+        prompt_text,
+        &attachment_paths,
+        crate::agent_config::AttachmentLimits::from_agent(&state.get_active_agent()?),
+    )?;
     Ok((prompt_blocks, inject_activated, message_round))
 }
 
