@@ -12,6 +12,86 @@ const MAX_SETTLE_MINUTES: u64 = 24 * 60;
 /// 感知窗口容量（环形）：情绪推导的最近事件输入。
 const RECENT_EVENTS_CAP: usize = 8;
 
+// ── G6-09：设计书语义常量具名收敛（值不变，机械替换；方案 06 §1.7 清单）──
+
+/// 捏朋友延迟完成窗口（设计书 M6）。
+const CRAFT_FRIEND_DELAY_MS: u64 = 30_000;
+/// 需求衰减速率（设计书 §4，每分钟；个性修正）——小数以整数形态存储，
+/// 数值与注释逐字保留：
+/// hunger 0.6×(1+greed/100)       → HUNGER_DECAY_RATE×(100+greed)/HUNGER_DECAY_SCALE
+/// energy 0.5×(1-activity/200)    → (ENERGY_DECAY_BASE-activity)/ENERGY_DECAY_SCALE
+/// fun    0.35×(1+activity/200)   → FUN_DECAY_RATE×(200+activity)/FUN_DECAY_SCALE
+/// lonely 0.25×(1+clinginess/100) → LONELY_DECAY_RATE×(100+clinginess)/LONELY_DECAY_SCALE
+const HUNGER_DECAY_RATE: u64 = 6;
+const HUNGER_DECAY_SCALE: u64 = 1000;
+const ENERGY_DECAY_BASE: u64 = 200;
+const ENERGY_DECAY_SCALE: u64 = 400;
+const FUN_DECAY_RATE: u64 = 35;
+const FUN_DECAY_SCALE: u64 = 20_000;
+const LONELY_DECAY_RATE: u64 = 25;
+const LONELY_DECAY_SCALE: u64 = 10_000;
+/// 饥饿/冷落持续 → 羁绊惩罚（0.5/tick = dt/2，封顶 10；设计书 §4）。
+const BOND_PENALTY_PER_TICK_DIVISOR: u64 = 2;
+const BOND_PENALTY_CAP: u64 = 10;
+/// 冷落判定：孤独 ≥80 持续掉 bond（设计书 §4）。
+const LONELY_NEGLECT_THRESHOLD: u8 = 80;
+/// 情绪阈值（设计书 §6）：hunger<20 hungry / energy<20 tired / loneliness>60 lonely。
+const MOOD_HUNGRY_THRESHOLD: u8 = 20;
+const MOOD_TIRED_THRESHOLD: u8 = 20;
+const MOOD_LONELY_THRESHOLD: u8 = 60;
+/// 主动说话阈值（设计书 §9）：hunger<25 / loneliness>70 / energy<20 / fun<20
+/// （Night 时段豁免 BORED，见 poll_voice）。
+const VOICE_HUNGRY_THRESHOLD: u8 = 25;
+const VOICE_LONELY_THRESHOLD: u8 = 70;
+const VOICE_TIRED_THRESHOLD: u8 = 20;
+const VOICE_BORED_THRESHOLD: u8 = 20;
+/// 入睡阈值（设计书 T1/T8）：energy≤15 且无活动 ≥30s（或 energy=0 强制入睡）。
+const SLEEP_ENERGY_THRESHOLD: u8 = 15;
+const SLEEP_IDLE_MS: u64 = 30_000;
+/// 唤醒 energy 恢复（设计书 T2）。
+const WAKE_ENERGY_GAIN: u16 = 30;
+/// 喂食防刷（设计书 §13.5）：30s 窗口内收益递减 [100%,50%,25%,0%]；hunger 固定 +20。
+const FEED_SPAM_WINDOW_MS: u64 = 30_000;
+const FEED_SPAM_MULTIPLIERS: [u16; 4] = [100, 50, 25, 0];
+const FEED_HUNGER_GAIN: u16 = 20;
+/// 玩耍（设计书 §13.5）：60s bond 冷却；消耗 hunger 5 / energy 10；fun 恢复 25×好奇。
+const PLAY_BOND_COOLDOWN_MS: u64 = 60_000;
+const PLAY_HUNGER_COST: u8 = 5;
+const PLAY_ENERGY_COST: u8 = 10;
+const PLAY_FUN_BASE_GAIN: u16 = 25;
+/// 互动 bond 冷却（Poke/Feed/Play/UserSent 共用）。
+const INTERACTION_BOND_COOLDOWN_MS: u64 = 30_000;
+/// 每日访问结算（设计书）：energy +20；孤独 +2/离群天（封顶 5 天）；7 天连续相伴记忆。
+const VISIT_ENERGY_GAIN: u8 = 20;
+const VISIT_LONELY_PER_DAY: u64 = 2;
+const STREAK_MEMORY_DAYS: u32 = 7;
+/// 工具收益（设计书）：成功 xp+2 / 失败 xp+1 / 成功 bond+1。
+const TOOL_XP_SUCCESS: u32 = 2;
+const TOOL_XP_FAIL: u32 = 1;
+const TOOL_BOND: u32 = 1;
+/// 任务完成收益（设计书）：xp+3 / bond+2。
+const PROMPT_XP: u32 = 3;
+const PROMPT_BOND: u32 = 2;
+
+// ── G6-09：restore/数值上限（A13 防注入；与 gain_xp/gain_bond 封顶一致）──
+
+/// xp 封顶。
+const XP_CAP: u32 = 999_999;
+/// bond 封顶。
+const BOND_CAP: u32 = 9_999;
+/// 统计计数统一封顶（restore 防注入）。
+const STATS_CAP: u64 = 10_000_000;
+/// 记忆条数上限（滚动）。
+const MEMORY_CAP: usize = 10;
+/// 代码文件名记录上限（滚动）。
+const CODE_FILES_CAP: usize = 10;
+/// unlocked 成就 id 上限（restore 防注入）。
+const UNLOCKED_CAP: usize = 64;
+/// 装扮物品栏上限（restore 防注入）。
+const INVENTORY_CAP: usize = 128;
+/// 名字最大字符数（截断）。
+const NAME_MAX_CHARS: usize = 12;
+
 // ── v2 类型（设计书 §3/§5/§7）──
 
 /// 个性参数（0-100；出生随机、restore 保留；serde 缺失时用中性值 50）。
@@ -543,42 +623,42 @@ impl PetState {
         saved.loneliness = saved.loneliness.min(100);
         saved.traits = saved.traits.clamp();
         saved.recent_events.truncate(RECENT_EVENTS_CAP);
-        saved.stats.code_files.truncate(10);
+        saved.stats.code_files.truncate(CODE_FILES_CAP);
         // A13：数值上限——手改/损坏存档注入的天文数字钳制到合法上限
         //（xp/bond 上限与 gain_xp/gain_bond 的封顶一致，stats 统一 10M 上限）
-        saved.xp = saved.xp.min(999_999);
-        saved.bond = saved.bond.min(9_999);
-        saved.stats.messages = saved.stats.messages.min(10_000_000);
-        saved.stats.prompts_completed = saved.stats.prompts_completed.min(10_000_000);
-        saved.stats.prompts_failed = saved.stats.prompts_failed.min(10_000_000);
-        saved.stats.tokens_total = saved.stats.tokens_total.min(10_000_000);
-        saved.stats.token_xp = saved.stats.token_xp.min(10_000_000);
-        saved.stats.tools_started = saved.stats.tools_started.min(10_000_000);
-        saved.stats.tools_succeeded = saved.stats.tools_succeeded.min(10_000_000);
-        saved.stats.tools_failed = saved.stats.tools_failed.min(10_000_000);
-        saved.stats.interactions = saved.stats.interactions.min(10_000_000);
-        saved.stats.active_days = saved.stats.active_days.min(10_000_000);
-        saved.stats.streak_days = saved.stats.streak_days.min(10_000_000);
-        saved.stats.longest_streak = saved.stats.longest_streak.min(10_000_000);
-        saved.stats.code_sessions = saved.stats.code_sessions.min(10_000_000);
-        saved.stats.code_eaten = saved.stats.code_eaten.min(10_000_000);
-        saved.stats.code_watched = saved.stats.code_watched.min(10_000_000);
-        saved.stats.friends_made = saved.stats.friends_made.min(10_000_000);
-        saved.stats.dazes = saved.stats.dazes.min(10_000_000);
-        saved.stats.feed_count = saved.stats.feed_count.min(10_000_000);
-        saved.stats.play_count = saved.stats.play_count.min(10_000_000);
-        saved.stats.night_visits = saved.stats.night_visits.min(10_000_000);
-        saved.stats.cosmetics_collected = saved.stats.cosmetics_collected.min(10_000_000);
+        saved.xp = saved.xp.min(XP_CAP);
+        saved.bond = saved.bond.min(BOND_CAP);
+        saved.stats.messages = saved.stats.messages.min(STATS_CAP);
+        saved.stats.prompts_completed = saved.stats.prompts_completed.min(STATS_CAP);
+        saved.stats.prompts_failed = saved.stats.prompts_failed.min(STATS_CAP);
+        saved.stats.tokens_total = saved.stats.tokens_total.min(STATS_CAP);
+        saved.stats.token_xp = saved.stats.token_xp.min(STATS_CAP as u32);
+        saved.stats.tools_started = saved.stats.tools_started.min(STATS_CAP);
+        saved.stats.tools_succeeded = saved.stats.tools_succeeded.min(STATS_CAP);
+        saved.stats.tools_failed = saved.stats.tools_failed.min(STATS_CAP);
+        saved.stats.interactions = saved.stats.interactions.min(STATS_CAP);
+        saved.stats.active_days = saved.stats.active_days.min(STATS_CAP as u32);
+        saved.stats.streak_days = saved.stats.streak_days.min(STATS_CAP as u32);
+        saved.stats.longest_streak = saved.stats.longest_streak.min(STATS_CAP as u32);
+        saved.stats.code_sessions = saved.stats.code_sessions.min(STATS_CAP);
+        saved.stats.code_eaten = saved.stats.code_eaten.min(STATS_CAP);
+        saved.stats.code_watched = saved.stats.code_watched.min(STATS_CAP);
+        saved.stats.friends_made = saved.stats.friends_made.min(STATS_CAP);
+        saved.stats.dazes = saved.stats.dazes.min(STATS_CAP);
+        saved.stats.feed_count = saved.stats.feed_count.min(STATS_CAP);
+        saved.stats.play_count = saved.stats.play_count.min(STATS_CAP);
+        saved.stats.night_visits = saved.stats.night_visits.min(STATS_CAP);
+        saved.stats.cosmetics_collected = saved.stats.cosmetics_collected.min(STATS_CAP);
         // A13：id 白名单——未知成就/装扮 id 一律剔除（防注入假解锁）；
         // 必须在 unlock_achievements 补查**之前**执行，保证补查只基于合法 id。
         saved
             .unlocked
             .retain(|id| ACHIEVEMENTS.iter().any(|a| a.id.as_str() == id.as_str()));
-        saved.unlocked.truncate(64);
+        saved.unlocked.truncate(UNLOCKED_CAP);
         saved
             .inventory
             .retain(|id| COSMETICS.iter().any(|c| c.id == id));
-        saved.inventory.truncate(128);
+        saved.inventory.truncate(INVENTORY_CAP);
         // S7 审查修复：equipped 校验与 equip() 语义一致——合法 id **且拥有**
         //（掉落入栏 / bond / stage 成长条件）。手改/损坏存档注入"未拥有"装备
         //（如 equipped=code_crown + bond=50）→ 置 None；C10"掉落不顶装备"使
@@ -604,7 +684,7 @@ impl PetState {
                 saved.pending_action = None;
             }
         }
-        saved.memories.truncate(10);
+        saved.memories.truncate(MEMORY_CAP);
         saved.first_chunk_at_ms = None;
         saved.last_interaction_at_ms = 0;
         saved.last_activity_at_ms = 0;
@@ -690,8 +770,8 @@ impl PetState {
                 self.machine = PetMachineState::Awake(MachineSub::Idle);
                 self.first_chunk_at_ms = None;
                 self.stats.prompts_completed = self.stats.prompts_completed.saturating_add(1);
-                self.gain_xp(3);
-                self.gain_bond(2);
+                self.gain_xp(PROMPT_XP);
+                self.gain_bond(PROMPT_BOND);
                 self.happiness = (self.happiness as u16 + 2).min(100) as u8;
                 self.energy = self.energy.saturating_sub(2);
                 self.fun = (self.fun as u16 + 3).min(100) as u8;
@@ -753,7 +833,7 @@ impl PetState {
                         // 审查修复：已有 crafting 时不覆盖（连续 spawn 不会无限推迟完成）。
                         if self.pending_action.is_none() {
                             self.pending_action = Some(PendingAction::CraftFriend {
-                                until_ms: now_ms + 30_000,
+                                until_ms: now_ms + CRAFT_FRIEND_DELAY_MS,
                             });
                         }
                         self.msg = Some(lines::pick(
@@ -860,16 +940,18 @@ impl PetState {
                 self.stats.feed_count = self.stats.feed_count.saturating_add(1);
                 // M4 防刷：30s 内重复喂食收益递减（100%→50%→25%→0），30s 后重置
                 // （last_feed_at_ms==0 = 从未喂过，首次不视为 spam）
-                if self.last_feed_at_ms > 0 && now_ms.saturating_sub(self.last_feed_at_ms) < 30_000
+                if self.last_feed_at_ms > 0
+                    && now_ms.saturating_sub(self.last_feed_at_ms) < FEED_SPAM_WINDOW_MS
                 {
                     self.feed_spam_count = (self.feed_spam_count + 1).min(3);
                 } else {
                     self.feed_spam_count = 0;
                 }
                 self.last_feed_at_ms = now_ms;
-                let multiplier = [100_u16, 50, 25, 0][self.feed_spam_count as usize];
+                let multiplier =
+                    FEED_SPAM_MULTIPLIERS[self.feed_spam_count as usize];
                 // 审查修复：hunger 收益固定 +20（贪吃改作用于 bond，见 reward 调用）
-                let hunger_gain = 20_u16 * multiplier / 100;
+                let hunger_gain = FEED_HUNGER_GAIN * multiplier / 100;
                 self.hunger = (self.hunger as u16 + hunger_gain).min(100) as u8;
                 self.energy = (self.energy as u16 + 20 * multiplier / 100).min(100) as u8;
                 self.fun = (self.fun as u16 + 3 * multiplier / 100).min(100) as u8;
@@ -903,15 +985,15 @@ impl PetState {
                 self.stats.play_count = self.stats.play_count.saturating_add(1);
                 // M4 防刷：玩耍 60s 冷却（bond 收益；数值恢复不受限；首次不视为冷却中）
                 let play_cooled = self.last_play_at_ms == 0
-                    || now_ms.saturating_sub(self.last_play_at_ms) >= 60_000;
+                    || now_ms.saturating_sub(self.last_play_at_ms) >= PLAY_BOND_COOLDOWN_MS;
                 self.last_play_at_ms = now_ms;
                 // 审查修复：玩耍也是互动——刷新互动基准（bond 冷却用；睡眠判定见 apply 顶部统一基准）
                 self.last_interaction_at_ms = now_ms;
-                self.hunger = self.hunger.saturating_sub(5);
-                self.energy = self.energy.saturating_sub(10);
+                self.hunger = self.hunger.saturating_sub(PLAY_HUNGER_COST);
+                self.energy = self.energy.saturating_sub(PLAY_ENERGY_COST);
                 // M4 个性：好奇 → 玩耍 fun 收益 ×(1+curiosity/100)（100%~200%）
                 let curiosity_factor = 100 + self.traits.curiosity as u16;
-                let fun_gain = 25_u16 * curiosity_factor / 100;
+                let fun_gain = PLAY_FUN_BASE_GAIN * curiosity_factor / 100;
                 self.fun = (self.fun as u16 + fun_gain).min(100) as u8;
                 self.loneliness = self.loneliness.saturating_sub(30);
                 self.happiness = (self.happiness as u16 + 4).min(100) as u8;
@@ -965,7 +1047,8 @@ impl PetState {
             PetMachineState::Asleep | PetMachineState::Awake(MachineSub::Distress)
         ) {
             let idle_for = now_ms.saturating_sub(self.last_activity_at_ms);
-            if self.energy <= 15 && (idle_for >= 30_000 || self.energy == 0) {
+            if self.energy <= SLEEP_ENERGY_THRESHOLD && (idle_for >= SLEEP_IDLE_MS || self.energy == 0)
+            {
                 self.machine = PetMachineState::Asleep;
                 self.msg = Some(lines::pick(
                     lines::LineKey::Sleep,
@@ -997,25 +1080,30 @@ impl PetState {
         } else {
             // 速率（每分钟）× dt；所有 delta 先 min(100) 再 cast 防 u8 截断
             // hunger -= dt×0.6×(1+greed/100)
-            let hunger_delta = (dt * 6 * (100 + traits.greed as u64) / 1000).min(100);
+            let hunger_delta =
+                (dt * HUNGER_DECAY_RATE * (100 + traits.greed as u64) / HUNGER_DECAY_SCALE).min(100);
             self.hunger = self.hunger.saturating_sub(hunger_delta as u8);
-            // energy -= dt×0.5×(1-activity/200) = dt×(200-activity)/400
-            let energy_delta = (dt * (200 - traits.activity as u64) / 400).min(100);
+            // energy -= dt×0.5×(1-activity/200)
+            let energy_delta =
+                (dt * (ENERGY_DECAY_BASE - traits.activity as u64) / ENERGY_DECAY_SCALE).min(100);
             self.energy = self.energy.saturating_sub(energy_delta as u8);
-            // fun -= dt×0.35×(1+activity/200) = dt×35×(200+activity)/20000
-            let fun_delta = (dt * 35 * (200 + traits.activity as u64) / 20_000).min(100);
+            // fun -= dt×0.35×(1+activity/200)
+            let fun_delta =
+                (dt * FUN_DECAY_RATE * (200 + traits.activity as u64) / FUN_DECAY_SCALE).min(100);
             self.fun = self.fun.saturating_sub(fun_delta as u8);
-            // loneliness += dt×0.25×(1+clinginess/100) = dt×25×(100+clinginess)/10000
-            let lonely_delta = (dt * 25 * (100 + traits.clinginess as u64) / 10_000).min(100);
+            // loneliness += dt×0.25×(1+clinginess/100)
+            let lonely_delta = (dt * LONELY_DECAY_RATE * (100 + traits.clinginess as u64)
+                / LONELY_DECAY_SCALE)
+                .min(100);
             self.loneliness = (self.loneliness as u64 + lonely_delta).min(100) as u8;
             // hunger=0 持续：羁绊惩罚（0.5/tick，封顶 10）
             if self.hunger == 0 {
-                let penalty = (dt / 2).min(10);
+                let penalty = (dt / BOND_PENALTY_PER_TICK_DIVISOR).min(BOND_PENALTY_CAP);
                 self.bond = self.bond.saturating_sub(penalty as u32);
             }
             // M4 个性：黏人被冷落（孤独≥80）持续 → bond 惩罚（0.5/tick，封顶 10）
-            if self.loneliness >= 80 {
-                let penalty = (dt / 2).min(10);
+            if self.loneliness >= LONELY_NEGLECT_THRESHOLD {
+                let penalty = (dt / BOND_PENALTY_PER_TICK_DIVISOR).min(BOND_PENALTY_CAP);
                 self.bond = self.bond.saturating_sub(penalty as u32);
             }
         }
@@ -1041,13 +1129,13 @@ impl PetState {
             return "error";
         }
         // 2. 需求危机
-        if self.hunger < 20 {
+        if self.hunger < MOOD_HUNGRY_THRESHOLD {
             return "hungry";
         }
-        if self.energy < 20 {
+        if self.energy < MOOD_TIRED_THRESHOLD {
             return "tired";
         }
-        if self.loneliness > 60 {
+        if self.loneliness > MOOD_LONELY_THRESHOLD {
             return "lonely";
         }
         // 3. 短时事件情绪（近 3 条）
@@ -1112,13 +1200,13 @@ impl PetState {
         if name.is_empty() || self.stats.code_files.contains(&name) {
             return;
         }
-        push_capped(&mut self.stats.code_files, name, 10);
+        push_capped(&mut self.stats.code_files, name, CODE_FILES_CAP);
     }
 
     /// v2 唤醒（T2 转移动作）：状态置 Idle，energy +30，文案（mood 由推导决定）。
     fn wake(&mut self, now_ms: u64) {
         self.machine = PetMachineState::Awake(MachineSub::Idle);
-        self.energy = (self.energy as u16 + 30).min(100) as u8;
+        self.energy = (self.energy as u16 + WAKE_ENERGY_GAIN).min(100) as u8;
         let part = self.day_part(now_ms);
         self.msg = Some(lines::pick(
             lines::LineKey::Wake,
@@ -1239,13 +1327,13 @@ impl PetState {
         }
         // M8：深夜不打扰——Night 时段不说 BORED（深夜不制造陪伴压力）
         let night = part == DayPart::Night;
-        let key = if self.hunger < 25 {
+        let key = if self.hunger < VOICE_HUNGRY_THRESHOLD {
             Some(lines::LineKey::Hungry)
-        } else if self.loneliness > 70 {
+        } else if self.loneliness > VOICE_LONELY_THRESHOLD {
             Some(lines::LineKey::Lonely)
-        } else if self.energy < 20 {
+        } else if self.energy < VOICE_TIRED_THRESHOLD {
             Some(lines::LineKey::Tired)
-        } else if !night && self.fun < 20 {
+        } else if !night && self.fun < VOICE_BORED_THRESHOLD {
             Some(lines::LineKey::Bored)
         } else if self.mood == "dazed" {
             Some(lines::LineKey::Dazed)
@@ -1277,7 +1365,7 @@ impl PetState {
         // 审查修复：发呆判定基于"无任何活动"——last_activity_at_ms 由任何 apply 事件
         // （除 Visit/Sleepy）刷新；不再依赖 first_chunk_at_ms（长生成期间不刷新，
         // 曾导致 30s 后误入睡 → 流式 TokenUsage 唤醒 +30 → 再入睡的振荡与能量农场）。
-        if now_ms.saturating_sub(self.last_activity_at_ms) > 30_000 {
+        if now_ms.saturating_sub(self.last_activity_at_ms) > SLEEP_IDLE_MS {
             self.apply(AiEvent::Sleepy, now_ms);
             return true;
         }
@@ -1310,8 +1398,8 @@ impl PetState {
             ToolOutcome::Succeeded => {
                 self.stats.tools_started = self.stats.tools_started.saturating_add(1);
                 self.stats.tools_succeeded = self.stats.tools_succeeded.saturating_add(1);
-                self.gain_xp(2);
-                self.gain_bond(1);
+                self.gain_xp(TOOL_XP_SUCCESS);
+                self.gain_bond(TOOL_BOND);
                 self.fun = (self.fun as u16 + 2).min(100) as u8;
                 self.happiness = (self.happiness as u16 + 1).min(100) as u8;
                 self.push_event(RecentEvent::ToolOk);
@@ -1321,7 +1409,7 @@ impl PetState {
             ToolOutcome::Failed => {
                 self.stats.tools_started = self.stats.tools_started.saturating_add(1);
                 self.stats.tools_failed = self.stats.tools_failed.saturating_add(1);
-                self.gain_xp(1);
+                self.gain_xp(TOOL_XP_FAIL);
                 self.fun = self.fun.saturating_sub(2);
                 self.happiness = self.happiness.saturating_sub(2);
                 // mood 由 derive_mood 推导
@@ -1349,11 +1437,11 @@ impl PetState {
             1
         };
         self.stats.longest_streak = self.stats.longest_streak.max(self.stats.streak_days);
-        if self.stats.streak_days == 7 {
+        if self.stats.streak_days == STREAK_MEMORY_DAYS {
             self.remember("和你连续相伴了 7 天".into());
         }
-        self.energy = self.energy.saturating_add(20).min(100);
-        let loneliness = (elapsed.min(5) * 2) as u8;
+        self.energy = self.energy.saturating_add(VISIT_ENERGY_GAIN).min(100);
+        let loneliness = (elapsed.min(5) * VISIT_LONELY_PER_DAY) as u8;
         self.happiness = self.happiness.saturating_sub(loneliness);
         self.last_seen_day = today;
     }
@@ -1361,7 +1449,7 @@ impl PetState {
     fn reward_interaction(&mut self, now_ms: u64, amount: u32) {
         // 审查修复：last_interaction==0（从未互动）视为首次，不触发冷却
         if self.last_interaction_at_ms == 0
-            || now_ms.saturating_sub(self.last_interaction_at_ms) >= 30_000
+            || now_ms.saturating_sub(self.last_interaction_at_ms) >= INTERACTION_BOND_COOLDOWN_MS
         {
             self.gain_bond(amount);
             self.last_interaction_at_ms = now_ms;
@@ -1370,7 +1458,7 @@ impl PetState {
 
     fn gain_xp(&mut self, amount: u32) {
         let previous = self.stage();
-        self.xp = self.xp.saturating_add(amount).min(999_999);
+        self.xp = self.xp.saturating_add(amount).min(XP_CAP);
         let evolved = self.stage();
         if evolved != previous && evolved > previous {
             self.remember(format!("蜕变为{}", evolved.title()));
@@ -1378,14 +1466,14 @@ impl PetState {
     }
 
     fn gain_bond(&mut self, amount: u32) {
-        self.bond = self.bond.saturating_add(amount).min(9_999);
+        self.bond = self.bond.saturating_add(amount).min(BOND_CAP);
     }
 
     fn remember(&mut self, memory: String) {
         if self.memories.back() == Some(&memory) {
             return;
         }
-        push_capped(&mut self.memories, memory, 10);
+        push_capped(&mut self.memories, memory, MEMORY_CAP);
     }
 
     fn recompute_stats(&mut self) {
@@ -1408,7 +1496,7 @@ impl PetState {
 }
 
 fn sanitize_name(value: &str) -> String {
-    let name: String = value.trim().chars().take(12).collect();
+    let name: String = value.trim().chars().take(NAME_MAX_CHARS).collect();
     if name.is_empty() {
         "微栖".into()
     } else {
