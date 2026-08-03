@@ -739,10 +739,12 @@ pub(crate) async fn check_session_expiry(state: &AppState) {
         }
     }
 }
-/// R32：会话槽位替换——MAX_SESSIONS 上限检查 + 插入新 SessionInfo +
+/// R32：会话槽位替换——上限检查 + 插入新 SessionInfo +
 /// 返回被替换的旧会话（None = 新槽位）。`allow_same_source_replace`：
 /// true = 同 source 替换不占新名额（load_persisted_session 既有语义）；
 /// false = 满额即拒绝，无论是否替换（new_session 既有语义）。
+/// G2-07：上限参数化（E9 拍板 per-agent——调用方传 SessionSlotPolicy::default()
+/// 解析值，每 runtime 100；G1 acp.max_sessions 落地后按 agent 解析覆盖）。
 /// 检查与插入在同一写锁内完成；会话创建路径由 session_creation 串行化，
 /// 与原先"读锁检查 + 写锁插入"行为等价。
 pub(crate) fn replace_session_slot(
@@ -750,12 +752,13 @@ pub(crate) fn replace_session_slot(
     source: &str,
     session: SessionInfo,
     allow_same_source_replace: bool,
+    max_sessions: usize,
 ) -> Result<Option<SessionInfo>, PylonError> {
     let mut sessions = runtime
         .sessions
         .lock()
         .map_err(|error| PylonError::Protocol(error.to_string()))?;
-    if sessions.len() >= MAX_SESSIONS
+    if sessions.len() >= max_sessions
         && !(allow_same_source_replace && sessions.contains_key(source))
     {
         return Err(PylonError::Protocol("max sessions reached".to_string()));
@@ -794,17 +797,27 @@ async fn create_session_slot(
 ) -> Result<SessionMapping, PylonError> {
     {
         let sessions = runtime.sessions.lock().map_err(|e| e.to_string())?;
-        if sessions.len() >= MAX_SESSIONS {
+        if sessions.len() >= crate::agent_runtime::SessionSlotPolicy::default().max_sessions {
             return Err(PylonError::Protocol("max sessions reached".to_string()));
         }
     }
     let generation = state.current_generation(runtime);
+    // G2-07：McpServersMode 消费（G1 入口，E4 警告语义见 acp.rs 构造器 doc）——
+    // per-agent 协议配置解析，缺省 Always = 现状 wire。
+    // Always 走 2 参包装（session_new_params = Always 恒发语义；G1 交付未带
+    // allow(dead_code) 且 acp.rs 禁碰，本分支保持其生产消费——登记偏差 4）；
+    // OmitIfEmpty 走 with_mode 显式删键路径（v2 语义）。
+    let mode = state.protocol_for_runtime(runtime).mcp_servers;
+    let params = match mode {
+        crate::agent_config::McpServersMode::Always => {
+            acp::session_new_params(session_cwd, wire_mcp_servers.to_vec())?
+        }
+        crate::agent_config::McpServersMode::OmitIfEmpty => {
+            acp::session_new_params_with_mode(session_cwd, wire_mcp_servers.to_vec(), mode)?
+        }
+    };
     let response = match state
-        .acp_rpc(
-            runtime,
-            acp::METHOD_SESSION_NEW,
-            acp::session_new_params(session_cwd, wire_mcp_servers.to_vec())?,
-        )
+        .acp_rpc(runtime, acp::METHOD_SESSION_NEW, params)
         .await
     {
         Ok(response) => response,
@@ -829,7 +842,13 @@ async fn create_session_slot(
         generation,
     );
     session.apply_session_response(&response);
-    let replaced = replace_session_slot(runtime, source, session, false)?;
+    let replaced = replace_session_slot(
+        runtime,
+        source,
+        session,
+        false,
+        crate::agent_runtime::SessionSlotPolicy::default().max_sessions,
+    )?;
     if close_replaced {
         if let Some(old) = replaced {
             // G2-03：D3 消费——close_via_rpc()=false 时跳过 RPC（本地清理语义不变）
@@ -1983,6 +2002,7 @@ pub(crate) async fn load_persisted_session(
             generation,
         ),
         true,
+        crate::agent_runtime::SessionSlotPolicy::default().max_sessions,
     )?;
     // O3：锁内仅提取回放句柄，等待在锁外进行——回放最长 30s，不阻塞其他命令。
     let handles = runtime.acp.lock().await.replay_handles();

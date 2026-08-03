@@ -22,12 +22,54 @@ impl AgentLifecycleStatus {
 }
 
 /// 自动重连：最大尝试次数（2s+4s+8s+16s+30s ≈ 60s 后放弃；2^5=32s 被 30s 封顶）
+/// G2-07：默认值来源（ReconnectPolicy::default 引用），dispatcher 消费经 policy。
 pub const MAX_RECONNECT_ATTEMPTS: u32 = 5;
 
-/// 指数退避：attempt 从 1 开始 → 2s/4s/8s/16s/30s（2^5=32s 封顶 30s）
-pub fn reconnect_backoff_ms(attempt: u32) -> u64 {
-    let exp = 1u64 << attempt.min(5); // 2^attempt，封顶 2^5=32s
-    (exp * 1000).min(30_000)
+/// G2-07：重连策略（参数化；默认值 = 现值 5 次 / 2s 基 / 30s 封顶，行为零变化）。
+/// G1 `acp.reconnect.*` 配置字段落地后按 agent 解析覆盖（现无字段，恒 Default）。
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct ReconnectPolicy {
+    /// 最大尝试次数（现状 5）。
+    pub max_attempts: u32,
+    /// 指数退避基数毫秒（现状 2000）。
+    pub backoff_base_ms: u64,
+    /// 退避封顶毫秒（现状 30000）。
+    pub backoff_cap_ms: u64,
+}
+
+impl Default for ReconnectPolicy {
+    fn default() -> Self {
+        Self {
+            max_attempts: MAX_RECONNECT_ATTEMPTS,
+            backoff_base_ms: 2000,
+            backoff_cap_ms: 30_000,
+        }
+    }
+}
+
+impl ReconnectPolicy {
+    /// 指数退避：attempt 从 1 开始 → 2s/4s/8s/16s/30s（2^4=32s 封顶 30s；
+    /// 算法 = 2^(attempt-1)·base 封顶 cap，与旧 reconnect_backoff_ms 逐值一致——
+    /// 1→2000 / 2→4000 / 3→8000 / 4→16000 / 5→30000(封顶) / 6→30000）。
+    pub fn backoff_ms(&self, attempt: u32) -> u64 {
+        ((1u64 << attempt.saturating_sub(1)) * self.backoff_base_ms).min(self.backoff_cap_ms)
+    }
+}
+
+/// G2-07：会话槽位策略（E9 拍板 per-agent：sessions 表本就在 runtime 内，上限按
+/// runtime 生效，默认 100 = 现状全局常量值；G1 `acp.max_sessions` 落地后按 agent
+/// 解析覆盖）。消费：session.rs replace_session_slot / create_session_slot。
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct SessionSlotPolicy {
+    pub max_sessions: usize,
+}
+
+impl Default for SessionSlotPolicy {
+    fn default() -> Self {
+        Self {
+            max_sessions: crate::session::MAX_SESSIONS,
+        }
+    }
 }
 
 use crate::time::Timestamp;
@@ -135,11 +177,22 @@ mod tests {
 
     #[test]
     fn reconnect_backoff_is_exponential_and_capped() {
-        assert_eq!(reconnect_backoff_ms(1), 2_000);
-        assert_eq!(reconnect_backoff_ms(2), 4_000);
-        assert_eq!(reconnect_backoff_ms(3), 8_000);
-        assert_eq!(reconnect_backoff_ms(5), 30_000); // 2^5=32s 封顶 30s
-        assert_eq!(reconnect_backoff_ms(6), 30_000); // 封顶
+        let policy = ReconnectPolicy::default();
+        assert_eq!(policy.max_attempts, 5, "默认策略 = 现状 5 次");
+        assert_eq!(policy.backoff_ms(1), 2_000);
+        assert_eq!(policy.backoff_ms(2), 4_000);
+        assert_eq!(policy.backoff_ms(3), 8_000);
+        assert_eq!(policy.backoff_ms(5), 30_000); // 2^5=32s 封顶 30s
+        assert_eq!(policy.backoff_ms(6), 30_000); // 封顶
+    }
+
+    #[test]
+    fn session_slot_policy_defaults_to_current_limit() {
+        assert_eq!(
+            SessionSlotPolicy::default().max_sessions,
+            crate::session::MAX_SESSIONS,
+            "默认会话上限 = 现状常量值（E9：per-agent，每 runtime 100）"
+        );
     }
 
     #[test]

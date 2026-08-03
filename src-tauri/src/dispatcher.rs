@@ -548,7 +548,9 @@ pub(crate) fn start_notification_dispatcher<R: tauri::Runtime>(
                         .map(|v| v.clone())
                         .unwrap_or_default();
                     // R7：remaining_attempts 局部预算 + attempt 退避指数。
-                    let mut remaining_attempts = agent_runtime::MAX_RECONNECT_ATTEMPTS;
+                    // G2-07：重连策略参数化（默认值 = 现值 5/2000/30000，行为零变化）。
+                    let mut remaining_attempts =
+                        agent_runtime::ReconnectPolicy::default().max_attempts;
                     let mut attempt: u32 = 1;
                     // O-4：退出闸门（外层循环）——内层循环因成功复查通过/提前放弃/
                     // 预算耗尽退出时，期间可能恰有一轮崩溃通知被处理（epoch 已变，
@@ -570,11 +572,12 @@ pub(crate) fn start_notification_dispatcher<R: tauri::Runtime>(
                             );
                                 // 放弃旧 ticket：以最新 epoch 重新武装。
                                 scheduled_epoch = epoch_for_reconnect.load(Ordering::Acquire);
-                                remaining_attempts = agent_runtime::MAX_RECONNECT_ATTEMPTS;
+                                remaining_attempts =
+                                    agent_runtime::ReconnectPolicy::default().max_attempts;
                                 attempt = 1;
                             }
                             tokio::time::sleep(std::time::Duration::from_millis(
-                                agent_runtime::reconnect_backoff_ms(attempt),
+                                agent_runtime::ReconnectPolicy::default().backoff_ms(attempt),
                             ))
                             .await;
                             // 用户已手动 reconnect（状态非 Crashed）或已 switch（active_agent
@@ -669,7 +672,7 @@ pub(crate) fn start_notification_dispatcher<R: tauri::Runtime>(
                         "auto-reconnect ended but a newer crash arrived; re-arming from attempt 1"
                     );
                         scheduled_epoch = epoch_for_reconnect.load(Ordering::Acquire);
-                        remaining_attempts = agent_runtime::MAX_RECONNECT_ATTEMPTS;
+                        remaining_attempts = agent_runtime::ReconnectPolicy::default().max_attempts;
                         attempt = 1;
                     }
                     // R7：成功/放弃消费 ticket——循环结束（成功、提前放弃或预算耗尽）
