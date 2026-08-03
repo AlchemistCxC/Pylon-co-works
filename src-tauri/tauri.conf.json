@@ -21,10 +21,25 @@
       }
     ],
     "security": {
-      "csp": null,
-      "dangerousDisableAssetCspModification": true
+      "csp": {
+        "default-src": "'self' asset:",
+        "connect-src": "ipc: http://ipc.localhost",
+        "img-src": "'self' asset: http://asset.localhost blob: data: https: http:",
+        "style-src": "'self' 'unsafe-inline' asset:",
+        "script-src": "'self' 'wasm-unsafe-eval'",
+        "font-src": "'self' asset: data:"
+      },
+      "devCsp": {
+        "default-src": "'self' asset: http://localhost:5173",
+        "connect-src": "ipc: http://ipc.localhost ws://localhost:5173 http://localhost:5173",
+        "img-src": "'self' asset: http://asset.localhost blob: data: https: http: http://localhost:5173",
+        "style-src": "'self' 'unsafe-inline' asset: http://localhost:5173",
+        "script-src": "'self' 'wasm-unsafe-eval' http://localhost:5173",
+        "font-src": "'self' asset: data: http://localhost:5173"
+      },
+      "dangerousDisableAssetCspModification": false
     },
-    "withGlobalTauri": true
+    "withGlobalTauri": false
   },
   "bundle": {
     "icon": ["icons/icon.ico"],
