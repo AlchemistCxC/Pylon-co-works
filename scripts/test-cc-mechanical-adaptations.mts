@@ -51,4 +51,13 @@ const chatView = readFileSync(new URL('../src/components/chat/ChatView.tsx', imp
 assert.equal(chatView.includes('isStatic={isMessageStatic(renderMessage)}'), true, 'MessageRow 必须接收静态判定')
 assert.match(chatView, /const skipEntrance = reduceMotion \|\| isStatic === true/, '静态行必须跳过入场动画')
 
-console.log('CC 机械变换 D1-D6 回归测试通过')
+// ── D7 助手圆点 CC 对齐（flex 列 + 消息文字色链 + 单块一圆点）──
+assert.match(chatView, /<div className="term-assistant-body">/, '助手内容必须包裹在 body 列（flex row 第二列）')
+assert.match(chatView, /className=\{`term-assistant\$\{assistantDot \? ' has-dot' : ''\}`\}/, 'has-dot 开关必须驱动圆点结构')
+const dotCss = readFileSync(new URL('../src/components/chat/ChatView.css', import.meta.url), 'utf8')
+assert.match(dotCss, /\.term-assistant\.has-dot\s*\{\s*[^}]*display:flex/, '圆点列必须 flex 布局（CC 基线对齐）')
+assert.match(dotCss, /color:var\(--assistant-dot-color,\s*var\(--msg-text,/, '圆点颜色必须随消息文字链（claude 预设纯白）')
+assert.match(dotCss, /\.term-assistant\.has-dot\s*>\s*\.term-assistant-body\s*>\s*:first-child\s*\{\s*margin-top:0/, '首内容块必须无上边距（圆点贴首行，同 CC Markdown column gap）')
+assert.doesNotMatch(dotCss, /\.term-assistant-dot\s*\{\s*position:absolute/, '圆点不得再绝对定位（改用 flex 共享 line box）')
+
+console.log('CC 机械变换 D1-D7 回归测试通过')

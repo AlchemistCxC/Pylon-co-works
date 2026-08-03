@@ -562,15 +562,17 @@ function AssistantContent({ text, isStreaming = false }: { text: string; isStrea
     copiedTimerRef.current = window.setTimeout(() => setCopied(false), 2000)
   }
   // CC 视觉还原：assistantDot 时助手消息左侧圆点（claude 预设启用）。
-  // has-dot：内容整块左缩进圆点列宽，多行对齐圆点右侧（CC minWidth 语义）。
-  // 形状/颜色可自定义（assistantDotGlyph 注册表 + assistantDotColor）。
+  // 结构同 CC AssistantTextMessage：flex row 圆点列 + 内容列，圆点与首行共享 line box 基线对齐；
+  // 圆点列宽 --dot-col-width 与工具指示共列；颜色随消息文字（--msg-text 链，claude 预设为纯白）。
+  // 单条消息一个圆点（多段落 markdown 共用一个，首块无上边距，圆点贴首行）。
   const assistantDot = useStore(s => s.assistantDot)
   const assistantDotGlyph = useStore(s => s.assistantDotGlyph)
   return (
     <div className={`term-assistant${assistantDot ? ' has-dot' : ''}`}>
       {assistantDot && <span className="term-assistant-dot" aria-hidden="true">{assistantDotGlyph || '●'}</span>}
       <button className="copy-btn" onClick={copy}>{copied ? '✓' : '⎘'}</button>
-      {isStreaming || !isPlainTextContent(text) ? (
+      <div className="term-assistant-body">
+        {isStreaming || !isPlainTextContent(text) ? (
         <Suspense fallback={<p className="term-p term-plain-text">{text}</p>}>
           <MarkdownRenderer components={{
             code({ className, children, ...props }) {
@@ -584,9 +586,10 @@ function AssistantContent({ text, isStreaming = false }: { text: string; isStrea
             table({ children }) { return <div className="term-table-wrap"><table className="term-table">{children}</table></div> },
           }}>{text}</MarkdownRenderer>
         </Suspense>
-      ) : (
-        <p className="term-p term-plain-text">{text}</p>
-      )}
+        ) : (
+          <p className="term-p term-plain-text">{text}</p>
+        )}
+      </div>
     </div>
   )
 }
