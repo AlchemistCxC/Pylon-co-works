@@ -123,6 +123,8 @@ fn consume_dirty() -> bool {
 }
 
 /// lazily spawn（get_pet 首次调用）：进程生命周期内只启动一个后台任务。
+/// G6-07a：任务自启动检查存量 dirty——首个 get_pet 懒启动前 restore()/pet_action
+/// 产生的突变（通知在无等待者时丢失）由 pet_flush_loop 的外层 while 先消费。
 fn ensure_flush_task(app: &tauri::AppHandle) {
     if PET_FLUSH_SPAWNED.swap(true, Ordering::AcqRel) {
         return;
@@ -134,21 +136,28 @@ fn ensure_flush_task(app: &tauri::AppHandle) {
 /// 后台 coalescing 落盘任务：唤醒后 debounce 2s；期间新突变再次置 dirty 则
 /// 继续合并；dirty 静默后写盘一次。写失败恢复 dirty 并回到等待（下次唤醒
 /// ≤60s：新突变 / get_pet re-arm），避免失败热循环刷日志。
+/// G6-07a：外层先消费存量 dirty 再等待通知——覆盖"任务 spawn 前 notify 已丢失"
+/// 的启动窗口（首个 get_pet 懒启动前 restore()/pet_action 产生的突变，最长
+/// 延迟 ~60s 才落盘）。修正说明（§3 偏差）：判空检查移到写盘之后——写盘先于
+/// 判空，单次突变（含正常路径唤醒）必落盘，与现实现"唤醒 → debounce →
+/// consume → 写"逐段对应；失败路径与现实现一致（恢复 dirty + break 不热循环）。
 async fn pet_flush_loop(app: tauri::AppHandle) {
     loop {
-        PET_NOTIFY.notified().await;
-        loop {
+        // 存量 dirty 立即处理（while 条件消费）：启动窗口与正常唤醒统一走
+        // 同一条"debounce → 写盘 → 静默检查"批次。
+        while consume_dirty() {
             tokio::time::sleep(Duration::from_millis(PET_FLUSH_DEBOUNCE_MS)).await;
-            if !consume_dirty() {
-                break;
-            }
             let state = app.state::<AppState>();
             let now_ms = crate::time::Timestamp::now().as_u64();
             if !persist_and_mark(&state, &app, now_ms).await {
                 PET_DIRTY.store(true, Ordering::Release);
                 break;
             }
+            if !consume_dirty() {
+                break;
+            }
         }
+        PET_NOTIFY.notified().await;
     }
 }
 
