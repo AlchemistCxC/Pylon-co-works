@@ -93,7 +93,7 @@ pub(crate) fn fake_acp_agent_with(
 /// 测试字面量并集：runtimes 空表 / agents 空表 / active_agent="ghost-agent" /
 /// pet=PetState::default() / runtime_logs 新建 / runtime_mcp=None /
 /// prism=PrismClient::unavailable("test") / gateway=GatewayCore::new() /
-/// approval_mode="default" / pet_last_persist_ms=0 / 三把锁新建。
+/// approval_mode="default" / 三把锁新建（G6-07b：pet_last_persist_ms 已删，写盘自愈归后台任务）。
 /// **AppState 增加字段时必须同步本 builder**——字面量构造点会编译失败强制同步，
 /// 而 builder 需手工同步（纪律登记：后端手册 §2.1；E18 封闭）。
 pub(crate) struct TestStateBuilder {
