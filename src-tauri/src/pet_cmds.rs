@@ -71,31 +71,13 @@ pub(crate) async fn persist_pet_async(state: &AppState, app: &tauri::AppHandle) 
     }
 }
 
-/// 统一刷新语义（O21）：写盘成功后刷新 `pet_last_persist_ms`——get_pet 轮询与
-/// pet_action 突变共用，消除 pet_action 写盘不刷新时间戳导致的活跃期冗余写
-/// （写盘后 get_pet 在 60s 节流窗口外仍会再次序列化 + 落盘）。
-/// O20：persist 失败不 store（false 时不更新时间戳）——写失败可重试。
-async fn persist_and_mark(state: &AppState, app: &tauri::AppHandle, now_ms: u64) -> bool {
-    if persist_pet_async(state, app).await {
-        state.pet_last_persist_ms.store(now_ms, Ordering::Release);
-        true
-    } else {
-        false
-    }
-}
-
-/// get_pet 轮询路径的写盘节流间隔（P3 语义保留为 R17 re-arm 兜底）：宠物状态
-/// 只在有意义的变更时变化；距上次成功落盘 ≥60s 时重触发一次 coalescing 写盘，
-/// 保证最坏丢失窗口 ≤60s（写失败也由该窗口重试）。
-const PET_PERSIST_THROTTLE_MS: u64 = 60_000;
+/// 失败自愈重试间隔（G6-07b）：写盘失败后恢复 dirty 并 sleep 本间隔再重试——
+/// 无新突变时 notify 无人唤醒，自愈计时器保证失败不悬挂（最坏丢失窗口 ≤60s）。
+/// 取代 G6-07b 前的 get_pet re-arm 兜底（三层机制 → 两层：coalescing + Exit）。
+const PET_FLUSH_RETRY_MS: u64 = 60_000;
 
 /// R17：coalescing 落盘后台任务的 debounce 间隔——唤醒后合并 2s 内的连续突变。
 const PET_FLUSH_DEBOUNCE_MS: u64 = 2_000;
-
-/// 节流判定：距上次写盘不足 throttle_ms 视为在节流窗口内，不再落盘。
-fn within_throttle(last_persist_ms: u64, now_ms: u64, throttle_ms: u64) -> bool {
-    now_ms.saturating_sub(last_persist_ms) < throttle_ms
-}
 
 // R17：进程级单例（宠物全局唯一）——状态突变路径不直接写盘，只置 dirty 并
 // 唤醒后台任务；后台任务 debounce 后统一落盘（coalescing）。
@@ -134,13 +116,12 @@ fn ensure_flush_task(app: &tauri::AppHandle) {
 }
 
 /// 后台 coalescing 落盘任务：唤醒后 debounce 2s；期间新突变再次置 dirty 则
-/// 继续合并；dirty 静默后写盘一次。写失败恢复 dirty 并回到等待（下次唤醒
-/// ≤60s：新突变 / get_pet re-arm），避免失败热循环刷日志。
+/// 继续合并；dirty 静默后写盘一次。写失败恢复 dirty 并 sleep PET_FLUSH_RETRY_MS
+/// 自愈重试（G6-07b：无新突变时 notify 无人唤醒，自愈计时器兜底，不热循环）。
 /// G6-07a：外层先消费存量 dirty 再等待通知——覆盖"任务 spawn 前 notify 已丢失"
 /// 的启动窗口（首个 get_pet 懒启动前 restore()/pet_action 产生的突变，最长
-/// 延迟 ~60s 才落盘）。修正说明（§3 偏差）：判空检查移到写盘之后——写盘先于
-/// 判空，单次突变（含正常路径唤醒）必落盘，与现实现"唤醒 → debounce →
-/// consume → 写"逐段对应；失败路径与现实现一致（恢复 dirty + break 不热循环）。
+/// 延迟 PET_FLUSH_RETRY_MS 才落盘）。判空检查在写盘之后——写盘先于判空，
+/// 单次突变（含正常路径唤醒）必落盘；失败路径恢复 dirty + 自愈重试。
 async fn pet_flush_loop(app: tauri::AppHandle) {
     loop {
         // 存量 dirty 立即处理（while 条件消费）：启动窗口与正常唤醒统一走
@@ -148,9 +129,10 @@ async fn pet_flush_loop(app: tauri::AppHandle) {
         while consume_dirty() {
             tokio::time::sleep(Duration::from_millis(PET_FLUSH_DEBOUNCE_MS)).await;
             let state = app.state::<AppState>();
-            let now_ms = crate::time::Timestamp::now().as_u64();
-            if !persist_and_mark(&state, &app, now_ms).await {
+            if !persist_pet_async(&state, &app).await {
                 PET_DIRTY.store(true, Ordering::Release);
+                // G6-07b：自愈重试——sleep 后回到外层 while 重新消费存量 dirty
+                tokio::time::sleep(Duration::from_millis(PET_FLUSH_RETRY_MS)).await;
                 break;
             }
             if !consume_dirty() {
@@ -183,14 +165,9 @@ pub(crate) async fn get_pet(
         value
     };
     // R17：get_pet 首次调用 lazily spawn coalescing 后台落盘任务（进程级单例）。
+    // G6-07b：re-arm 兜底已删——失败自愈由 pet_flush_loop 的 PET_FLUSH_RETRY_MS
+    // 计时器承担（三层机制 → 两层：coalescing + Exit）。
     ensure_flush_task(&app);
-    // P3 节流语义保留为 re-arm 兜底：距上次成功落盘 ≥60s 时 mark_dirty 强制
-    // 一次 flush——最坏丢失窗口 ≤60s；写失败时间戳不刷新，下一轮 re-arm 重试。
-    let now_ms = crate::time::Timestamp::now().as_u64();
-    let last_persist = state.pet_last_persist_ms.load(Ordering::Acquire);
-    if !within_throttle(last_persist, now_ms, PET_PERSIST_THROTTLE_MS) {
-        mark_dirty();
-    }
     Ok(value)
 }
 
@@ -260,8 +237,7 @@ pub(crate) async fn pet_action(
     };
     // R6a：状态突变路径不直接写盘（磁盘 IO 全量移出 pet 锁 + 命令路径）。
     // R17：统一 mark_dirty——poke/play 连点等高频突变由后台任务 debounce 合并
-    // 为一次写盘（O18/O19 的命令路径节流/CAS 语义被 coalescing 任务承担）；
-    // 写失败不刷新时间戳（O20），由 60s re-arm 兜底重试。
+    // 为一次写盘；写失败恢复 dirty 由后台任务 PET_FLUSH_RETRY_MS 自愈重试。
     mark_dirty();
     Ok(result)
 }
@@ -269,14 +245,6 @@ pub(crate) async fn pet_action(
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    #[test]
-    fn throttle_window_covers_only_sub_throttle_elapsed() {
-        assert!(within_throttle(1_000, 5_999, 5_000));
-        assert!(!within_throttle(1_000, 6_000, 5_000));
-        assert!(within_throttle(0, 0, 5_000));
-        assert!(within_throttle(10_000, 1_000, 5_000));
-    }
 
     #[test]
     fn dirty_flag_mark_consume_and_drain_round_trips() {
@@ -290,13 +258,5 @@ mod tests {
         drain_pet_dirty();
         assert!(!PET_DIRTY.load(Ordering::Acquire));
         PET_DIRTY.store(false, Ordering::Release);
-    }
-
-    #[test]
-    fn rearm_fires_only_after_throttle_elapsed() {
-        // 距上次成功落盘 <60s → 在节流窗口内，get_pet 不 re-arm
-        assert!(within_throttle(1_000, 60_999, PET_PERSIST_THROTTLE_MS));
-        // ≥60s → 窗口已过，get_pet 触发 mark_dirty
-        assert!(!within_throttle(1_000, 61_000, PET_PERSIST_THROTTLE_MS));
     }
 }

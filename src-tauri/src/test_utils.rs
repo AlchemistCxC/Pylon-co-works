@@ -11,7 +11,6 @@ use crate::prism::PrismClient;
 use crate::runtime::{AgentRuntime, AgentRuntimeManager};
 use crate::AppState;
 use std::collections::HashMap;
-use std::sync::atomic::AtomicU64;
 use std::sync::{Arc, Mutex, OnceLock};
 
 /// 探测结果进程级缓存：`py -3 --version` 探测本身有子进程启动开销，单测多次
@@ -164,7 +163,6 @@ impl TestStateBuilder {
             prism: self.prism,
             gateway: self.gateway,
             approval_mode: Arc::new(Mutex::new(self.approval_mode)),
-            pet_last_persist_ms: AtomicU64::new(0),
             pet_write_lock: tokio::sync::Mutex::new(()),
             switch_lock: tokio::sync::Mutex::new(()),
             mcp_write_lock: tokio::sync::Mutex::new(()),
@@ -222,12 +220,6 @@ mod tests {
             state.prism.status().await["status"],
             "configuration_error",
             "默认 prism 必须为 unavailable(\"test\")（与既有测试字面量一致）"
-        );
-        assert_eq!(
-            state
-                .pet_last_persist_ms
-                .load(std::sync::atomic::Ordering::Acquire),
-            0
         );
     }
 

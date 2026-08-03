@@ -33,7 +33,7 @@ use gateway::GatewayCore;
 use prism::PrismClient;
 use runtime::{AgentRuntime, AgentRuntimeManager};
 use std::collections::HashMap;
-use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::atomic::Ordering;
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 use tauri::{Emitter, Manager, Runtime};
@@ -112,8 +112,6 @@ pub(crate) struct AppState {
     pub(crate) gateway: Arc<GatewayCore>,
     /// 权限审批模式（B9.3）：bypass/auto 自动批准；edit/default 挂起询问。
     pub(crate) approval_mode: Arc<Mutex<String>>,
-    /// 宠物状态最近一次落盘时间（Unix 毫秒）——get_pet 12s 轮询路径写盘节流用。
-    pub(crate) pet_last_persist_ms: AtomicU64,
     /// R6a：宠物落盘写序锁（tokio Mutex）——序列化在临界区内执行，保证
     /// 后写状态 ≥ 先写状态（无乱序覆盖）；fs 写经 spawn_blocking 移出 async 运行时。
     pub(crate) pet_write_lock: tokio::sync::Mutex<()>,
@@ -2502,7 +2500,6 @@ pub fn run() {
                 prism,
                 gateway,
                 approval_mode: Arc::new(Mutex::new("default".to_string())),
-                pet_last_persist_ms: AtomicU64::new(0),
                 pet_write_lock: tokio::sync::Mutex::new(()),
             switch_lock: tokio::sync::Mutex::new(()),
             mcp_write_lock: tokio::sync::Mutex::new(()),
