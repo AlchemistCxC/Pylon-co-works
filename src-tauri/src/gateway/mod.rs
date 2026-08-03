@@ -40,7 +40,7 @@ pub trait PlatformAdapter: Send + Sync {
     fn max_message_len(&self) -> usize;
     /// 向平台会话投递一段文本（已分段，未接线实现返回 Err 由调用方告警）。
     fn deliver_text(&self, source: &str, text: &str) -> Result<(), String>;
-    /// 向平台会话投递非文本事件（peri:done / peri:error 等）。
+    /// 向平台会话投递非文本事件（pylon:done / pylon:error 等）。
     fn deliver_event(
         &self,
         source: &str,
@@ -299,7 +299,7 @@ impl GatewayCore {
 
     /// 出站分发：把 agent 事件投递给 source 前缀匹配的平台适配器。
     ///
-    /// - peri:update 的 agent_message_chunk → 提取文本 → 按适配器上限分段 →
+    /// - pylon:update 的 agent_message_chunk → 提取文本 → 按适配器上限分段 →
     ///   逐段 deliver_text（truncate 分段管线，平台无关，在核心层完成）
     /// - 其他事件 → deliver_event
     ///   投递失败（含未接线适配器）只告警，不阻断 WebView 事件。
@@ -354,10 +354,10 @@ impl Default for GatewayCore {
     }
 }
 
-/// 从 agent 事件中提取可投递的平台文本：仅 peri:update 的 agent_message_chunk。
+/// 从 agent 事件中提取可投递的平台文本：仅 pylon:update 的 agent_message_chunk。
 /// R4：sessionUpdate 变体经枚举解析（wire 字符串契约不变）。
 fn extract_deliver_text(event: &str, payload: &serde_json::Value) -> Option<String> {
-    if event != "peri:update" {
+    if event != crate::event_names::SESSION_UPDATE {
         return None;
     }
     let update = payload.get("update")?;
@@ -504,7 +504,7 @@ gateway:
                 "content": {"text": "word word word word word word word"}
             }
         });
-        core.deliver_all("qq:group:1", "peri:update", &payload);
+        core.deliver_all("qq:group:1", crate::event_names::SESSION_UPDATE, &payload);
         assert!(qq.delivered.load(Ordering::SeqCst) > 1, "长文本必须分段");
         assert_eq!(
             qq.events.lock().unwrap().len(),
@@ -533,10 +533,13 @@ gateway:
         // 非文本事件：仅 qq source 到达 qq 适配器
         core.deliver_all(
             "qq:group:1",
-            "peri:done",
+            crate::event_names::SESSION_DONE,
             &serde_json::json!({"source": "qq:group:1", "data": {}}),
         );
-        assert_eq!(*qq.events.lock().unwrap(), vec!["peri:done".to_string()]);
+        assert_eq!(
+            *qq.events.lock().unwrap(),
+            vec![crate::event_names::SESSION_DONE.to_string()]
+        );
         assert!(
             wechat.events.lock().unwrap().is_empty(),
             "wechat 不得收到 qq 事件"
@@ -544,7 +547,7 @@ gateway:
         // local source（GUI 会话）不投递给任何平台
         core.deliver_all(
             "local",
-            "peri:done",
+            crate::event_names::SESSION_DONE,
             &serde_json::json!({"source": "local", "data": {}}),
         );
         assert!(qq.events.lock().unwrap().len() == 1);
@@ -559,14 +562,14 @@ gateway:
         core.register(qq.clone()).unwrap();
         core.deliver_all(
             "qq:group:999",
-            "peri:update",
+            crate::event_names::SESSION_UPDATE,
             &serde_json::json!({
                 "update": {"sessionUpdate": "agent_message_chunk", "content": {"text": "hi"}}
             }),
         );
         core.deliver_all(
             "qq:group:999",
-            "peri:done",
+            crate::event_names::SESSION_DONE,
             &serde_json::json!({"data": {}}),
         );
         assert_eq!(
@@ -593,12 +596,12 @@ gateway:
         bound.register(bound_qq.clone()).unwrap();
         bound.deliver_all(
             "qq:group:123",
-            "peri:done",
+            crate::event_names::SESSION_DONE,
             &serde_json::json!({"data": {}}),
         );
         assert_eq!(
             *bound_qq.events.lock().unwrap(),
-            vec!["peri:done".to_string()],
+            vec![crate::event_names::SESSION_DONE.to_string()],
             "绑定命中的平台源必须照常投递"
         );
     }
@@ -620,7 +623,7 @@ gateway:
         core.register(qq.clone()).unwrap();
         core.deliver_all(
             "qq:group:1",
-            "peri:update",
+            crate::event_names::SESSION_UPDATE,
             &serde_json::json!({
                 "source": "qq:group:1",
                 "update": {"sessionUpdate": "agent_message_chunk", "content": {"text": ""}}
@@ -638,7 +641,7 @@ gateway:
         let core = GatewayCore::new();
         core.deliver_all(
             "qq:group:1",
-            "peri:update",
+            crate::event_names::SESSION_UPDATE,
             &serde_json::json!({"update": {}}),
         );
         assert!(core.adapter_keys().is_empty());
@@ -753,14 +756,14 @@ gateway:
         core.register(Arc::new(FailingAdapter)).unwrap();
         core.deliver_all(
             "failing:user:1",
-            "peri:update",
+            crate::event_names::SESSION_UPDATE,
             &serde_json::json!({
                 "update": {"sessionUpdate": "agent_message_chunk", "content": {"text": "hi"}}
             }),
         );
         core.deliver_all(
             "failing:user:1",
-            "peri:done",
+            crate::event_names::SESSION_DONE,
             &serde_json::json!({"data": {}}),
         );
     }

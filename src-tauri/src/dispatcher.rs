@@ -21,10 +21,16 @@ use crate::{emit_event, emit_event_all};
 
 /// C11/O7：一条 session/update 事件需要施加到宠物的感知事件。
 /// 按收集顺序产出，调用方在 sessions 锁外逐条应用——收集顺序 = 应用顺序。
+/// G3 §2.2.1：agent_message_chunk 的 FirstChunk/CodeSeen 与 apply_update_event 产出
+/// 统一走收集路径（原 :366/:374 语句级独立锁 → 同锁收集、锁外按序应用，E12 接受）。
 /// C11：回放（is_replay）事件仅同步 session 状态，不产生宠物感知
 /// （回放不刷 xp/bond/掉落）。
 #[derive(Debug)]
 enum PetEvent {
+    /// 原 agent_message_chunk 分支 on_first_chunk（每 !replay chunk 一次）。
+    FirstChunk,
+    /// 原 on_code_seen（text.contains("```")）。
+    CodeSeen,
     UsageUpdate(u64),
     ToolStarted(crate::pet::ToolKind),
     CodeFile(String),
@@ -38,6 +44,8 @@ enum PetEvent {
 impl PetEvent {
     fn apply(self, state: &mut crate::pet::PetState) {
         match self {
+            PetEvent::FirstChunk => crate::pet::on_first_chunk(state),
+            PetEvent::CodeSeen => crate::pet::on_code_seen(state),
             PetEvent::UsageUpdate(total) => crate::pet::on_usage_update(state, total),
             PetEvent::ToolStarted(kind) => crate::pet::on_tool_started_kind(state, kind),
             PetEvent::CodeFile(file) => crate::pet::record_code_file(state, &file),
@@ -240,7 +248,7 @@ async fn handle_permission_request<R: tauri::Runtime>(
         });
         emit_event(
             window,
-            "pylon:permission-request",
+            crate::event_names::PERMISSION_REQUEST,
             serde_json::json!({
                 "requestId": request_id,
                 "sessionId": permission.session_id,
@@ -341,101 +349,89 @@ async fn handle_session_update<R: tauri::Runtime>(
         .and_then(|meta| meta.get("periReplay"))
         .and_then(|value| value.as_bool())
         .unwrap_or(false);
-    let mapping_is_current = || {
-        client_generation.load(Ordering::Acquire) == generation
-            && sessions.lock().ok().and_then(|items| {
-                items.get(&source).map(|session| {
-                    session_mapping_matches(
-                        &session.peri_id,
-                        session.generation,
-                        &peri_id,
-                        generation,
-                    )
-                })
-            }) == Some(true)
-    };
-    if !mapping_is_current() {
-        tracing::warn!("ACP notification rejected for stale session {}", peri_id);
-        return true;
-    }
-    if variant == Some(crate::acp::SessionUpdateVariant::AgentMessageChunk) {
-        // C11：回放事件不触发宠物感知（on_first_chunk/on_code_seen）也不流式
-        // 收集回复文本（last_response_text 不得被回放内容污染）。事件本身仍
-        // 照常转发前端（emit_event_all 不变）。
-        if !is_replay {
-            let _ = pet.lock().map(|mut p| crate::pet::on_first_chunk(&mut p));
-            // M5 感知：输出含代码块 → 宠物蹲在屏幕前看
+    // G3 §2.2.1 锁收敛：单一临界区取代原 mapping_is_current 预检（锁 2）、
+    // received_round 读取（锁 3）、collect_response_chunk（锁 4）、mutation（锁 5）四段。
+    // early return 语义逐一保持：stale → return true（保持主循环）；user_message_chunk
+    // → 回显后 return true（不转发 emit_event_all）；mutation 后 generation 变化 →
+    // return false（结束主循环）。副作用顺序不变：FirstChunk → CodeSeen →
+    // apply_update_event 产出（收集顺序 = 应用顺序，锁外统一 apply）。
+    // 良性竞态修正：received_round 读取与 collect 合锁原子（原两次独立锁间
+    // advance_round 可能推进回合——collect 内 round 比对兜底，行为只会更保守）。
+    // C11：回放（is_replay）事件不触发宠物感知也不流式收集回复文本，事件照常转发。
+    let mut pet_events: Vec<PetEvent> = Vec::new();
+    let mut user_echo: Option<String> = None; // replay user_message_chunk 文本，锁外 emit
+    let mut is_user_chunk = false;
+    {
+        let Ok(mut items) = sessions.lock() else {
+            // 锁中毒：丢弃本事件（原 mapping_is_current 同语义）
+            return true;
+        };
+        if client_generation.load(Ordering::Acquire) != generation {
+            tracing::warn!("ACP notification rejected for stale session {}", peri_id);
+            return true;
+        }
+        let current = items.get(&source).is_some_and(|session| {
+            session_mapping_matches(&session.peri_id, session.generation, &peri_id, generation)
+        });
+        if !current {
+            tracing::warn!("ACP notification rejected for stale session {}", peri_id);
+            return true;
+        }
+        if variant == Some(crate::acp::SessionUpdateVariant::AgentMessageChunk) && !is_replay {
+            pet_events.push(PetEvent::FirstChunk); // 原 :366 on_first_chunk
+                                                   // M5 感知：输出含代码块 → 宠物蹲在屏幕前看
             if let Some(text) = update
                 .get("content")
                 .and_then(|c| c.get("text"))
                 .and_then(|v| v.as_str())
             {
                 if text.contains("```") {
-                    let _ = pet.lock().map(|mut p| crate::pet::on_code_seen(&mut p));
+                    pet_events.push(PetEvent::CodeSeen); // 原 :374 on_code_seen
                 }
                 // B11.2：流式收集当前回合回复文本（完成持久化 POST /persist 用）。
                 // 回合绑定：接收事件时捕获 session.inject_round，collect_response_chunk
                 // 内与追加时刻的当前回合比对——Round N 迟到 chunk 在 Round N+1
                 // 推进（clear）之后才被追加 → 丢弃，防跨回合污染。截断逻辑在方法内。
-                let received_round = sessions
-                    .lock()
-                    .ok()
-                    .and_then(|items| items.get(&source).map(|session| session.inject_round))
-                    .unwrap_or(0);
-                if let Ok(mut items) = sessions.lock() {
-                    if let Some(session) = items.get_mut(&source) {
-                        session.collect_response_chunk(text, received_round);
-                    }
+                if let Some(session) = items.get_mut(&source) {
+                    let received_round = session.inject_round; // 原 :380-384（同锁读取）
+                    session.collect_response_chunk(text, received_round); // 原 :385-389
                 }
             }
         }
+        if variant == Some(crate::acp::SessionUpdateVariant::UserMessageChunk) {
+            is_user_chunk = true;
+            if is_replay {
+                user_echo = update
+                    .get("content")
+                    .and_then(|c| c.get("text"))
+                    .and_then(|v| v.as_str())
+                    .map(str::to_string);
+            }
+        } else if let Some(session) = items.get_mut(&source) {
+            pet_events.extend(apply_update_event(session, update, variant, is_replay));
+            // 原 :417-433
+        }
     }
-    if variant == Some(crate::acp::SessionUpdateVariant::UserMessageChunk) {
-        if is_replay {
-            if let Some(text) = update
-                .get("content")
-                .and_then(|c| c.get("text"))
-                .and_then(|v| v.as_str())
-            {
-                emit_event(
-                    window,
-                    "peri:user",
-                    serde_json::json!({
-                        "source": source,
-                        "content": text,
-                        "replay": is_replay,
-                    }),
-                );
-            }
-        }
-        return true;
+    // 锁外副作用（原 :400-409 emit 本就在锁外；pet 感知 O7 锁外应用）
+    if let Some(text) = user_echo {
+        emit_event(
+            window,
+            crate::event_names::USER_ECHO,
+            serde_json::json!({
+                "source": source,
+                "content": text,
+                "replay": true,
+            }),
+        );
     }
-    let mut mapping_current_at_mutation = false;
-    // O7：pet 感知事件在 sessions 锁内收集、锁外统一应用——
-    // 消除 sessions → pet 锁嵌套；收集顺序 = 应用顺序，行为等价。
-    let mut pet_events: Vec<PetEvent> = Vec::new();
-    if let Ok(mut items) = sessions.lock() {
-        if client_generation.load(Ordering::Acquire) == generation {
-            if let Some(session) = items.get(&source) {
-                mapping_current_at_mutation = session_mapping_matches(
-                    &session.peri_id,
-                    session.generation,
-                    &peri_id,
-                    generation,
-                );
-            }
-        }
-        if mapping_current_at_mutation {
-            if let Some(session) = items.get_mut(&source) {
-                pet_events = apply_update_event(session, update, variant, is_replay);
-            }
-        }
+    if is_user_chunk {
+        return true; // 原 :411 语义：user_message_chunk 不转发 emit_event_all
     }
     for event in pet_events {
         let _ = pet.lock().map(|mut p| event.apply(&mut p));
     }
     if client_generation.load(Ordering::Acquire) != generation {
-        return false;
+        return false; // 原 :437-439 语义：mutation 后本代已结束，主循环退出
     }
     if let serde_json::Value::Object(ref mut map) = payload {
         map.insert(
@@ -443,7 +439,13 @@ async fn handle_session_update<R: tauri::Runtime>(
             serde_json::Value::String(source.clone()),
         );
     }
-    emit_event_all(window, gateway, &source, "peri:update", payload);
+    emit_event_all(
+        window,
+        gateway,
+        &source,
+        crate::event_names::SESSION_UPDATE,
+        payload,
+    );
     true
 }
 
@@ -517,7 +519,7 @@ pub(crate) fn start_notification_dispatcher<R: tauri::Runtime>(
             };
             emit_event(
                 &window,
-                "peri:agent-status",
+                crate::event_names::AGENT_STATUS,
                 reconnect_handles.agent_status_payload(Some(runtime_for_reconnect.as_ref())),
             );
             // R7：每次崩溃通知推进 reconnect_epoch（防重入标志无论是否持有）——
