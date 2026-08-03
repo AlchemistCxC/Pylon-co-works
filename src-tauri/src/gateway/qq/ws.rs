@@ -6,7 +6,7 @@
 //!
 //! 与 Prism 差异：
 //! - 事件不再回传 HTTP callback——`process_dispatch_event` 提取干净消息后
-//!   直接调用 QqAdapter::handle_incoming（去重 → gateway.ingest）
+//!   直接调用 QqAdapter::handle_incoming（去重 → dispatch_ingest）
 //! - 无 shutdown 机制：循环任务随 tokio runtime 终止（桌面进程退出即清理）
 
 use std::sync::Arc;

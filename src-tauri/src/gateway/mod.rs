@@ -5,6 +5,17 @@
 //!
 //! B10.1 骨架：PlatformAdapter trait + GatewayCore（适配器注册表、
 //! 入站 ingest 路由解析、出站 deliver 分段分发）。B10.2 起逐个接入平台适配器。
+//!
+//! # 入站契约（E15 封闭，§3-4）
+//!
+//! 入站消息解析的唯一生产入口是适配器层的单快照路径（QQ 适配器
+//! [`QqAdapter::handle_incoming`]）：在 **一次** [`GatewayCore::with_routes_and_qq`]
+//! 读锁快照内完成白名单判定与 binding 提取，白名单拒绝/空文本不占去重窗口，
+//! `msg_id` 由适配器填充，经 [`GatewayCore::dispatch_ingest`] 触发发送。
+//! 公共解析入口 [`build_resolved`] 只做纯组装（无锁、无状态），供测试/其他
+//! 适配器构造解析结果，**不得**用它在白名单之后二次读锁解析 binding——
+//! reload 热重载窗口下"旧绑定放行 → 新绑定投递"的混搭即二次读锁 bug
+//! （历史教训：`ingest()` 因此被删除，S5）。
 
 pub mod qq;
 pub mod route;
@@ -20,7 +31,8 @@ use route::{GatewayConfig, QqGatewayConfig};
 /// 出站（agent → 平台）：GatewayCore 把 agent 事件按文本/非文本分类后调用
 /// [`Self::deliver_text`]（已按 [`Self::max_message_len`] 分段）或
 /// [`Self::deliver_event`]。入站（平台 → agent）：平台连接层解析事件后调用
-/// GatewayCore::ingest（QQ 适配器经 handle_incoming 去重+白名单后进入）。
+/// 适配器的入站入口（QQ 适配器经 handle_incoming 单快照去重+白名单后进入，
+/// 见模块头入站契约——唯一入口，不得引入二次读锁路径）。
 pub trait PlatformAdapter: Send + Sync {
     /// 平台标识（"qq"/"wechat"…），同时是 source 前缀（"qq:group:123"）。
     fn platform_key(&self) -> &str;
@@ -48,17 +60,40 @@ pub struct ResolvedIngest {
     /// 静态绑定命中；未配置实体时为 None（回退默认绑定 = active agent）。
     pub binding: Option<route::EntityBinding>,
     /// 平台消息去重 id（C14：ingest 发送失败经 [`PlatformAdapter::rollback_seen`]
-    /// 回滚去重窗口用）。`ingest()` 构造为 None；适配器层 handle_incoming 组装时填充。
+    /// 回滚去重窗口用）。`build_resolved` 构造为 None；适配器层 handle_incoming 组装时填充。
     pub msg_id: Option<String>,
 }
 
 /// 入站消息字符上限：超长截断再进 prompt（防超长消息打爆 agent 输入）。
 pub const MAX_INGEST_CHARS: usize = 64 * 1024;
 
-/// 入站文本超长截断（S5 修复：ingest() 与 handle_incoming 共用同一上限与实现，
-/// 避免适配器单快照路径与公共解析入口的截断行为漂移）。
+/// 入站文本超长截断（S5 修复：build_resolved 与 handle_incoming 共用同一上限与实现，
+/// 避免适配器单快照路径与纯组装入口的截断行为漂移）。
 pub(crate) fn truncate_ingest_content(content: &str) -> String {
     content.chars().take(MAX_INGEST_CHARS).collect()
+}
+
+/// 入站解析结果纯组装（§3-4，替代已删除的 `GatewayCore::ingest`）：非空 source
+/// 校验 + 超长截断 + 组装。纯函数——无锁、无状态、不查询配置、不触发发送。
+///
+/// binding 由调用方在**单快照**内取得后传入（白名单判定与 binding 提取必须出自
+/// 同一配置快照，见模块头入站契约/E15）；本函数绝不自行二次读锁。
+pub(crate) fn build_resolved(
+    source: &str,
+    content: &str,
+    binding: Option<route::EntityBinding>,
+) -> Result<ResolvedIngest, String> {
+    if source.trim().is_empty() {
+        return Err("ingest requires a non-empty source".to_string());
+    }
+    let content = truncate_ingest_content(content);
+    Ok(ResolvedIngest {
+        source: source.to_string(),
+        content,
+        binding,
+        // C14：纯组装层不知道平台 msg_id，由适配器层 handle_incoming 组装时填充
+        msg_id: None,
+    })
 }
 
 /// ingest 发送处理器：解析结果 → ACP 发送（B10.3 由 lib.rs 注册，
@@ -253,32 +288,6 @@ impl GatewayCore {
             .unwrap_or_default()
     }
 
-    /// 入站解析：source 路由查询 + 超长截断。纯解析，不触发发送。
-    ///
-    /// 平台相关去重（resume 重放）与白名单由各适配器层完成，本入口只见干净消息；
-    /// 白名单通过后由调用方 [`Self::dispatch_ingest`] 触发 ACP 发送。
-    // S5 修复后 QQ 适配器 handle_incoming 走单快照路径（不经本入口二次读锁）；
-    // 本方法仍是公共解析入口（测试直调 + 其他平台适配器/调用方契约），行为不变。
-    #[allow(dead_code)]
-    pub fn ingest(&self, source: &str, content: &str) -> Result<ResolvedIngest, String> {
-        if source.trim().is_empty() {
-            return Err("ingest requires a non-empty source".to_string());
-        }
-        let content = truncate_ingest_content(content);
-        let binding = self
-            .config
-            .read()
-            .ok()
-            .and_then(|c| c.routes.lookup(source).cloned());
-        Ok(ResolvedIngest {
-            source: source.to_string(),
-            content,
-            binding,
-            // C14：纯解析层不知道平台 msg_id，由适配器层 handle_incoming 组装时填充
-            msg_id: None,
-        })
-    }
-
     /// 触发 ingest 发送（B10.3：按 binding 路由到 runtime，未绑定回退 active agent）。
     /// 由适配器在白名单/去重通过后调用。
     pub fn dispatch_ingest(&self, resolved: &ResolvedIngest) {
@@ -437,6 +446,7 @@ mod tests {
 
     #[test]
     fn ingest_resolves_static_binding_from_gateway_config() {
+        // §3-4：ingest() 已删除——binding 由调用方单快照取得，经 build_resolved 纯组装
         let yaml = r#"
 gateway:
   routes:
@@ -446,27 +456,27 @@ gateway:
       session: 战役1
 "#;
         let core = GatewayCore::from_config(crate::gateway::route::parse_config(yaml).unwrap());
-        let resolved = core
-            .ingest("qq:group:123", "你好")
-            .expect("ingest must resolve");
+        let binding = core.binding("qq:group:123");
+        let resolved = build_resolved("qq:group:123", "你好", binding)
+            .expect("build_resolved must assemble");
         assert_eq!(resolved.source, "qq:group:123");
         assert_eq!(resolved.content, "你好");
         let binding = resolved.binding.expect("static binding must hit");
         assert_eq!(binding.agent_id, "peri");
         assert_eq!(binding.profile_id, "trpg");
         assert_eq!(binding.session_key, "战役1");
-        let unbound = core
-            .ingest("qq:user:999", "hi")
-            .expect("unbound source must resolve to default");
+        let unbound = build_resolved("qq:user:999", "hi", None)
+            .expect("unbound source must assemble to default");
         assert!(unbound.binding.is_none());
     }
 
     #[test]
     fn ingest_rejects_empty_source_and_truncates_overlong_content() {
-        let core = GatewayCore::new();
-        assert!(core.ingest("", "x").is_err());
+        // §3-4：build_resolved 纯函数直测（原 ingest() 测试改写）
+        assert!(build_resolved("", "x", None).is_err());
+        assert!(build_resolved("   ", "x", None).is_err(), "空白 source 同样拒绝");
         let long = "a".repeat(MAX_INGEST_CHARS + 1000);
-        let resolved = core.ingest("qq:group:1", &long).unwrap();
+        let resolved = build_resolved("qq:group:1", &long, None).unwrap();
         assert_eq!(resolved.content.chars().count(), MAX_INGEST_CHARS);
     }
 
@@ -757,11 +767,12 @@ gateway:
         core.set_ingest_handler(Arc::new(move |_resolved: &ResolvedIngest| {
             calls_clone.fetch_add(1, Ordering::SeqCst);
         }));
-        let resolved = core.ingest("qq:group:1", "hello").expect("ingest");
+        // §3-4：输入经 build_resolved 纯组装（原 ingest() 直调改写）
+        let resolved = build_resolved("qq:group:1", "hello", None).expect("build_resolved");
         assert_eq!(
             calls.load(Ordering::SeqCst),
             0,
-            "ingest 纯解析不得触发 handler"
+            "build_resolved 纯组装不得触发 handler"
         );
         core.dispatch_ingest(&resolved);
         assert_eq!(calls.load(Ordering::SeqCst), 1, "dispatch 必须触发 handler");

@@ -18,7 +18,7 @@ use reqwest::Client;
 use tokio::sync::mpsc;
 use tokio_util::sync::CancellationToken;
 
-use crate::gateway::{route, truncate_ingest_content, GatewayCore, PlatformAdapter, ResolvedIngest};
+use crate::gateway::{build_resolved, route, GatewayCore, PlatformAdapter, ResolvedIngest};
 
 use self::auth::QqAuth;
 
@@ -151,7 +151,7 @@ struct SendWorker {
     token: CancellationToken,
 }
 
-/// QQ 适配器：入站（handle_incoming）去重后进入 gateway.ingest；
+/// QQ 适配器：入站（handle_incoming）去重后经 dispatch_ingest 进入 ACP 发送；
 /// 出站 deliver 经 per-chat 发送队列串行投递（重试/死目标/回复锚点）。
 pub struct QqAdapter {
     dedup: Mutex<DedupState>,
@@ -274,7 +274,7 @@ impl QqAdapter {
     /// - 白名单拒绝 → Ok(None)，不 dispatch
     /// - msg_id 已见（resume 重放）→ Ok(None)，不重复 ingest
     /// - 新消息 → 记录 seen + last_msg_id，dispatch 发送并返回解析结果
-    ///   ws.rs 事件分发后调用本方法；去重/白名单在适配器层完成，ingest 层只见干净消息。
+    ///   ws.rs 事件分发后调用本方法；去重/白名单在适配器层完成，解析结果见干净消息。
     pub fn handle_incoming(
         &self,
         source: &str,
@@ -318,10 +318,10 @@ impl QqAdapter {
         if !allowed {
             return Ok(None);
         }
-        // S5：截断与 ingest() 共用 truncate_ingest_content（行为一致）；ResolvedIngest
-        // 用快照 binding 构造——不经 ingest() 二次读锁。ingest() 仍是公共解析入口
-        // （测试直接调用，保持原行为），本热路径改为单快照构造。
-        let content = truncate_ingest_content(content);
+        // S5：截断与组装统一走 build_resolved 纯函数（§3-4，替代已删除的
+        // ingest() 公共入口）——用快照 binding 构造，不经二次读锁。截断在
+        // 白名单判定之后（O38：拒绝路径不产生截断分配）、去重判重之后
+        // （重放路径同样不产生截断分配），行为与旧单快照路径逐字一致。
         let mut dedup = self
             .dedup
             .lock()
@@ -344,12 +344,9 @@ impl QqAdapter {
         drop(dedup);
         // C14：组装带 msg_id 的解析结果再 dispatch——ingest 发送失败时 lib.rs 可经
         // rollback_seen 撤销 seen 标记（故障期消息不永久丢失，resume 重放可重入）。
-        let dispatched = ResolvedIngest {
-            source: source.to_string(),
-            content,
-            binding,
-            msg_id: Some(msg_id.to_string()),
-        };
+        // source 非空已在上方校验，build_resolved 必成功（Err 分支为防御性兜底）。
+        let mut dispatched = build_resolved(source, content, binding)?;
+        dispatched.msg_id = Some(msg_id.to_string());
         self.core.dispatch_ingest(&dispatched);
         Ok(Some(dispatched))
     }
