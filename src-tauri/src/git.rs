@@ -5,6 +5,9 @@
 //! - 固定 cwd（调用方传入已校验的工作区 root）
 //! - diff 的 path 参数做相对路径 + containment 校验（复用 workspace 语义）
 //! - 输出截断（diff 256KB / status 2000 条 / history 200 条）
+//! - 输出有界（G5-4）：读任务分块 drain，stdout 只保留前 MAX_READ_BYTES（16MB）、
+//!   stderr 保留前 64KB；超限继续读入丢弃直到 EOF（防 git 阻塞写管道 = A1 不回归、
+//!   防 EPIPE 误报失败），内存有界、超限保留头部（E17：截断标记文案不变）
 //! - tokio process + 超时（大仓库防挂起）
 //! - 非 git 仓库 / git 不可用 → 明确错误（code=git_error）
 //!
@@ -25,6 +28,13 @@ pub const MAX_STATUS_ENTRIES: usize = 2000;
 pub const MAX_HISTORY: usize = 200;
 /// git 命令超时。
 pub const GIT_TIMEOUT: Duration = Duration::from_secs(10);
+/// G5-4：stdout 读取保留上限——超大 diff/status 只保留头部，其余继续读入丢弃。
+/// pub（新测试引用）；≥ MAX_DIFF_BYTES 且覆盖巨型 diff 首段（E17：16MB 上限远超现实场景）。
+pub const MAX_READ_BYTES: usize = 16 * 1024 * 1024;
+/// G5-4：stderr 读取保留上限（64KB > 512 字节错误截断点）。
+const MAX_STDERR_KEEP_BYTES: usize = 64 * 1024;
+/// G5-4：读任务单次 read 分块大小。
+const READ_CHUNK_BYTES: usize = 64 * 1024;
 
 #[derive(Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -64,6 +74,31 @@ fn is_relative_safe_path(path: &str) -> bool {
     true
 }
 
+/// G5-4：有界 drain——分块读取，只保留前 keep_bytes，超限继续读入并丢弃直到 EOF。
+/// 禁止用 `tokio::io::take` 提前关流：take 达上限即关闭读端，git 继续写管道会
+/// EPIPE/SIGPIPE（写失败），超限输出被误报为"git 命令失败"；本循环读到 EOF，
+/// 管道始终被消费（不回归 A1 管道缓冲死锁），内存有界（保留上限 + 分块缓冲）。
+async fn drain_bounded<R>(out: &mut R, keep_bytes: usize) -> Vec<u8>
+where
+    R: tokio::io::AsyncRead + Unpin,
+{
+    let mut buf = Vec::with_capacity(keep_bytes.min(8192));
+    let mut chunk = [0u8; READ_CHUNK_BYTES];
+    loop {
+        match tokio::io::AsyncReadExt::read(out, &mut chunk).await {
+            Ok(0) => break,
+            Ok(n) => {
+                if buf.len() < keep_bytes {
+                    let keep = n.min(keep_bytes - buf.len());
+                    buf.extend_from_slice(&chunk[..keep]);
+                }
+            }
+            Err(_) => break,
+        }
+    }
+    buf
+}
+
 async fn run_git(cwd: &Path, args: &[&str]) -> Result<(String, String), String> {
     // 审查修复：超时必须 kill 子进程（Command::output 默认 kill_on_drop=false，
     // 超时后 git 会滞留并占用 index 锁）。
@@ -82,29 +117,32 @@ async fn run_git(cwd: &Path, args: &[&str]) -> Result<(String, String), String> 
     // 阻塞在 write 上永不退出 → 必现 10s 超时。这里 take 出管道句柄后用
     // tokio::spawn 启动两个读任务与 wait 并发消费（各自 5s 超时防挂死，
     // 进程退出即 EOF），读任务返回 Vec<u8> 而非共享缓冲。
+    // G5-4：读任务从 read_to_end（内存无界，大仓库可 GB 级）改为手动 drain 循环
+    // （drain_bounded）：stdout 只保留前 MAX_READ_BYTES、stderr 保留前
+    // MAX_STDERR_KEEP_BYTES，超限继续读入丢弃直到 EOF——禁止 take 提前关流
+    // （git EPIPE → 误报失败），管道始终被消费（A1 不回归）。
     let mut stdout = child.stdout.take();
     let mut stderr = child.stderr.take();
     let read_stdout_task = tokio::spawn(async move {
-        let mut buf = Vec::new();
         if let Some(out) = stdout.as_mut() {
-            let _ = tokio::time::timeout(
-                Duration::from_secs(5),
-                tokio::io::AsyncReadExt::read_to_end(out, &mut buf),
-            )
-            .await;
+            tokio::time::timeout(Duration::from_secs(5), drain_bounded(out, MAX_READ_BYTES))
+                .await
+                .unwrap_or_default()
+        } else {
+            Vec::new()
         }
-        buf
     });
     let read_stderr_task = tokio::spawn(async move {
-        let mut buf = Vec::new();
         if let Some(err) = stderr.as_mut() {
-            let _ = tokio::time::timeout(
+            tokio::time::timeout(
                 Duration::from_secs(5),
-                tokio::io::AsyncReadExt::read_to_end(err, &mut buf),
+                drain_bounded(err, MAX_STDERR_KEEP_BYTES),
             )
-            .await;
+            .await
+            .unwrap_or_default()
+        } else {
+            Vec::new()
         }
-        buf
     });
     // 审查修复：超时必须 kill 子进程（Command::output 默认 kill_on_drop=false，
     // 超时后 git 会滞留并占用 index 锁）。
@@ -444,5 +482,50 @@ mod tests {
             diff.contains("已截断"),
             "超过 {MAX_DIFF_BYTES} 的输出必须截断"
         );
+    }
+
+    #[tokio::test]
+    async fn oversized_output_is_bounded_keeps_head_and_marker() {
+        // G5-4（E17）：>16MB 输出——run_git 读任务有界化：直接调 run_git 断言
+        // 返回 stdout ≤ MAX_READ_BYTES（内存有界）且保留头部（不是尾部）；git_diff
+        // 的截断标记文案不变。若回归为 read_to_end 或 take 提前关流：前者返回
+        // 18MB+ 全量（断言失败），后者 git EPIPE 误报失败（expect 失败）。
+        let repo = temp_repo("oversize-diff");
+        let line = "line_aaaaaaaaaa_bbbbbbbbbb_cccccccccc_dddddddddd_eeeeeeeeee\n";
+        // 150k 行 ≈ 9MB/侧：diff 输出 ≈ 18MB > MAX_READ_BYTES(16MB)
+        let old = line.repeat(150_000);
+        std::fs::write(repo.0.join("huge.txt"), &old).unwrap();
+        let run = |args: &[&str]| {
+            let status = std::process::Command::new("git")
+                .args(args)
+                .current_dir(&repo.0)
+                .stdout(Stdio::null())
+                .stderr(Stdio::null())
+                .status()
+                .expect("git must run");
+            assert!(status.success(), "git {args:?} failed");
+        };
+        run(&["add", "huge.txt"]);
+        run(&["commit", "-q", "-m", "init"]);
+        let new = line.repeat(150_000).replace('a', "x");
+        std::fs::write(repo.0.join("huge.txt"), &new).unwrap();
+
+        let (stdout, _) = run_git(&repo.0, &["diff", "--", "huge.txt"])
+            .await
+            .expect(">16MB 输出不得因 EPIPE/超时误报失败");
+        assert!(
+            stdout.len() <= MAX_READ_BYTES,
+            "run_git 输出必须 ≤ MAX_READ_BYTES（内存有界），实际 {}",
+            stdout.len()
+        );
+        assert!(
+            stdout.starts_with("diff --git"),
+            "超限输出必须保留头部（E17），实际前缀: {}",
+            &stdout[..stdout.len().min(40)]
+        );
+        let diff = git_diff(&repo.0, None, false)
+            .await
+            .expect("git_diff 超限场景必须成功");
+        assert!(diff.contains("已截断"), "截断标记文案必须仍在（E17）");
     }
 }
