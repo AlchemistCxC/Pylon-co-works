@@ -19,6 +19,7 @@ import { prepareRenderableMessages, isMessageStatic } from './messagePipeline'
 import type { Message as PipelineMessage, RenderMessage } from './messageTypes'
 import { buildMessageLookups } from './messageLookups'
 import { buildChatRowDescriptors } from './chatRowPipeline'
+import { beginProgrammaticScroll, createScrollFollowState, onUserScroll, shouldAutoScroll, type ScrollFollowState } from './scrollFollowState'
 import { resolveConnectorColor } from './toolPresentation'
 import { buildToolPresentationModel, toolPresentationStatus, truncateToolSummary } from './toolPresentationModel'
 import { normalizeToolStatus } from './toolStatus'
@@ -36,8 +37,6 @@ import { attachChatEventController, registerChatController, type ChatControllerH
 import './ChatView.css'
 
 interface Props { sessionId: string | null }
-
-type ScrollFollowState = 'sticky' | 'user_scrolled' | 'jumping'
 
 type Message = PipelineMessage
 
@@ -81,9 +80,8 @@ const ChatView = React.memo(function ChatView({ sessionId }: Props) {
   const sessions = useIdentityStore(state => state.sessions)
   const chatViewRef = useRef<HTMLDivElement>(null)
   const bottomRef = useRef<HTMLDivElement>(null)
-  const scrollFollowRef = useRef<ScrollFollowState>('sticky')
+  const scrollFollowRef = useRef<ScrollFollowState>(createScrollFollowState())
   const scrollRafRef = useRef<number | null>(null)
-  const scrollLockUntilRef = useRef(0)
   const scrollToBottomRef = useRef<((behavior?: ScrollBehavior) => void) | null>(null)
   const [messages, setMessages] = useState<Message[]>(!IS_TAURI ? resolveInitialBrowserMessages() : [])
   const preparedMessages = useMemo(() => prepareRenderableMessages(messages), [messages])
@@ -301,9 +299,9 @@ const ChatView = React.memo(function ChatView({ sessionId }: Props) {
     if (!container) return
     const updateFollowState = () => {
       scrollRafRef.current = null
-      if (performance.now() < scrollLockUntilRef.current) return
       const distanceFromBottom = container.scrollHeight - container.scrollTop - container.clientHeight
-      scrollFollowRef.current = distanceFromBottom <= 48 ? 'sticky' : 'user_scrolled'
+      // 状态机纯函数：锁窗内不更新相位，相位不变返回原引用
+      scrollFollowRef.current = onUserScroll(scrollFollowRef.current, distanceFromBottom, performance.now())
     }
     const handleScroll = () => {
       if (scrollRafRef.current !== null) return
@@ -372,18 +370,17 @@ const ChatView = React.memo(function ChatView({ sessionId }: Props) {
   }, [messages])
 
   const scrollToBottom = useCallback((behavior: ScrollBehavior = 'smooth') => {
-    scrollFollowRef.current = 'jumping'
-    scrollLockUntilRef.current = performance.now() + (behavior === 'smooth' ? 500 : 50)
+    // 置 sticky + 写锁窗（smooth 动画期间用户 scroll 不推翻跟随）
+    scrollFollowRef.current = beginProgrammaticScroll(performance.now(), behavior === 'smooth')
     if (!bottomRef.current) return
     recordRender('scrollIntoView.call')
     bottomRef.current.scrollIntoView({ behavior })
-    scrollFollowRef.current = 'sticky'
   }, [])
   scrollToBottomRef.current = scrollToBottom
 
   useEffect(() => {
     if (!bottomRef.current) return
-    if (scrollFollowRef.current !== 'sticky') return
+    if (!shouldAutoScroll(scrollFollowRef.current)) return
     scrollToBottomRef.current?.()
   }, [messages, generating, streamingText, streamingThinking])
 
