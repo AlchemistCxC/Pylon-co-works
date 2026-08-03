@@ -1,6 +1,8 @@
 //! 成就系统（M9）：静态目录表 + 解锁判定 + PetState 成就方法。
 //! R6c 自 lib.rs 拆分（纯搬移，零行为变化）。
 
+use std::sync::OnceLock;
+
 use serde::Serialize;
 
 use crate::{GrowthStage, PetState};
@@ -351,8 +353,12 @@ pub struct AchievementInfo {
 
 impl PetState {
     /// M9：成就全量目录 + 解锁标志（前端展示进度用）。
+    /// G6-01：骨架缓存下沉（O15）——静态 def 引用只构建一次；unlocked 标志
+    /// 每次调用由当前 state 现算（行为等价，省去每次 view 全量重建）。
     pub fn achievement_info(&self) -> Vec<AchievementInfo> {
-        ACHIEVEMENTS
+        static ACHIEVEMENT_SKELETON: OnceLock<Vec<&'static AchievementDef>> = OnceLock::new();
+        ACHIEVEMENT_SKELETON
+            .get_or_init(|| ACHIEVEMENTS.iter().collect())
             .iter()
             .map(|def| AchievementInfo {
                 id: def.id.as_str(),

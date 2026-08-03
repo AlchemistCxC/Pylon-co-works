@@ -1,11 +1,9 @@
 //! Tauri 与独立宠物核心状态机之间的薄适配层。
 
 pub use pylon_pet_core::{
-    AchievementInfo, AiEvent, CosmeticDef, CosmeticInfo, DayPart, GrowthStage, PetState, ToolKind,
-    ToolOutcome, ACHIEVEMENTS, COSMETICS,
+    AchievementInfo, AiEvent, CosmeticInfo, DayPart, GrowthStage, PetState, ToolKind, ToolOutcome,
 };
 use serde::Serialize;
-use std::sync::OnceLock;
 use std::time::{SystemTime, UNIX_EPOCH};
 
 #[derive(Debug, Serialize)]
@@ -41,52 +39,11 @@ pub fn view(state: &PetState) -> PetView<'_> {
         growth_progress: state.growth_progress(),
         crafting: state.pending_action.is_some(),
         day_part: state.day_part(now),
-        achievements: achievement_directory(state),
-        cosmetics: cosmetic_directory(state),
+        // G6-01：目录构建知识收敛到 pet-core（骨架 OnceLock 缓存 + 现算标志，
+        // 桥接层双轨实现删除——原 achievement_directory/cosmetic_directory）。
+        achievements: state.achievement_info(),
+        cosmetics: state.cosmetic_info(),
     }
-}
-
-/// 成就目录骨架缓存（O15）：静态字段（id/name/desc/icon）仅构建一次；
-/// unlocked 标志每次调用由当前 state 现算——行为等价，省去每次 view 全量重建。
-static ACHIEVEMENT_SKELETON: OnceLock<
-    Vec<(&'static str, &'static str, &'static str, &'static str)>,
-> = OnceLock::new();
-
-fn achievement_directory(state: &PetState) -> Vec<AchievementInfo> {
-    ACHIEVEMENT_SKELETON
-        .get_or_init(|| {
-            ACHIEVEMENTS
-                .iter()
-                .map(|def| (def.id.as_str(), def.name, def.desc, def.icon))
-                .collect()
-        })
-        .iter()
-        .map(|(id, name, desc, icon)| AchievementInfo {
-            id,
-            name,
-            desc,
-            icon,
-            unlocked: state.unlocked.iter().any(|u| u == id),
-        })
-        .collect()
-}
-
-/// 装扮目录骨架缓存（O15）：静态 def 引用仅构建一次；
-/// owned 标志每次调用由当前 state 现算——行为等价。
-static COSMETIC_SKELETON: OnceLock<Vec<&'static CosmeticDef>> = OnceLock::new();
-
-fn cosmetic_directory(state: &PetState) -> Vec<CosmeticInfo> {
-    COSMETIC_SKELETON
-        .get_or_init(|| COSMETICS.iter().collect())
-        .iter()
-        .map(|def| CosmeticInfo {
-            id: def.id,
-            name: def.name,
-            kind: def.kind,
-            icon: def.icon,
-            owned: state.owns_cosmetic(def),
-        })
-        .collect()
 }
 
 /// 统一事件入口：注入本地时区偏移（M8 时段感知）后 apply。

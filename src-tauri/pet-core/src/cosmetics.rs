@@ -1,6 +1,8 @@
 //! 装扮系统（M10）：静态目录表 + 掉落/装备 + PetState 装扮方法。
 //! R6c 自 lib.rs 拆分（纯搬移，零行为变化）。
 
+use std::sync::OnceLock;
+
 use serde::{Deserialize, Serialize};
 
 use crate::{GrowthStage, PetState};
@@ -136,8 +138,12 @@ const DROP_PROBABILITY_PERMILLE: u32 = 10;
 impl PetState {
     /// M10：装扮全量目录 + 拥有标志。拥有 = 掉落入栏 或 成长条件满足
     /// （成长解锁确定性，可随时装备，不需要提前获得）。
+    /// G6-01：骨架缓存下沉（O15）——静态 def 引用只构建一次；owned 标志
+    /// 每次调用由当前 state 现算（行为等价）。
     pub fn cosmetic_info(&self) -> Vec<CosmeticInfo> {
-        COSMETICS
+        static COSMETIC_SKELETON: OnceLock<Vec<&'static CosmeticDef>> = OnceLock::new();
+        COSMETIC_SKELETON
+            .get_or_init(|| COSMETICS.iter().collect())
             .iter()
             .map(|def| CosmeticInfo {
                 id: def.id,
