@@ -2276,13 +2276,15 @@ gateway:
                     &runtime,
                     Some(&window),
                     &state.gateway,
-                    &resolved.source,
-                    &resolved.content,
-                    "",
-                    None,
-                    None,
-                    None,
-                    None,
+                    &crate::session::PromptContext {
+                        source: resolved.source.clone(),
+                        content: resolved.content.clone(),
+                        persona: String::new(),
+                        session_prompt: None,
+                        attachments: None,
+                        mcp_servers: None,
+                        cwd: None,
+                    },
                 )
                 .await
                 {
@@ -2587,18 +2589,21 @@ pub fn run() {
                             let agent_cwd = state.inner().agents.lock().ok()
                                 .and_then(|agents| agents.get(&agent_id).cloned())
                                 .and_then(|agent| agent.cwd);
+                            // G2-05：PromptContext 构造（source 需 clone——失败回滚仍用）
                             if let Err(error) = send_prompt_core(
                                 state.inner(),
                                 &runtime,
                                 window.as_ref(),
                                 &state.gateway,
-                                &resolved.source,
-                                &resolved.content,
-                                "",
-                                None,
-                                None,
-                                None,
-                                agent_cwd.as_deref(),
+                                &crate::session::PromptContext {
+                                    source: resolved.source.clone(),
+                                    content: resolved.content.clone(),
+                                    persona: String::new(),
+                                    session_prompt: None,
+                                    attachments: None,
+                                    mcp_servers: None,
+                                    cwd: agent_cwd,
+                                },
                             ).await {
                                 tracing::warn!("gateway ingest 发送失败 ({}): {error}", resolved.source);
                                 // C14：发送失败回滚去重 seen——故障期消息不占去重窗口，

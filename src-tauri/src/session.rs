@@ -983,20 +983,17 @@ pub(crate) async fn send_message<R: tauri::Runtime>(
     mcp_servers: Option<Vec<crate::mcp::McpServerConfig>>,
 ) -> Result<String, PylonError> {
     let runtime = state.inner().require_runtime()?;
-    send_prompt_core(
-        state.inner(),
-        &runtime,
-        Some(&window),
-        &state.gateway,
-        &source,
-        &content,
-        &persona,
-        session_prompt.as_deref(),
-        attachments.as_deref(),
+    // G2-05：PromptContext 内联构造（IPC 签名锁定；字段全部 move，零 clone）。
+    let ctx = PromptContext {
+        source,
+        content,
+        persona,
+        session_prompt,
+        attachments,
         mcp_servers,
-        None,
-    )
-    .await
+        cwd: None,
+    };
+    send_prompt_core(state.inner(), &runtime, Some(&window), &state.gateway, &ctx).await
 }
 
 /// R33a：prompt 阶段纯函数——content 构造 + persona 拼接 + B11.1 注入调用 +
@@ -1321,28 +1318,44 @@ pub(crate) fn cleanup_ghost_session_mapping(
     }
 }
 
+/// G2-05：一次 prompt 发送的不可变输入（来源无关：GUI send_message / 平台 ingest 共用）。
+/// 字段 = 原 send_prompt_core 8 个业务参数一对一搬运，零语义变化。
+/// E8 封闭：纯 owned 字段（不持 &AppState 引用）——derive Clone/Default 无冲突；
+/// 构造点 send_message 全部 move 无 clone，ingest 调用点 source 需 clone（回滚仍用）。
+#[derive(Clone, Default)]
+pub(crate) struct PromptContext {
+    pub(crate) source: String,
+    pub(crate) content: String,
+    pub(crate) persona: String,
+    pub(crate) session_prompt: Option<String>,
+    pub(crate) attachments: Option<Vec<String>>,
+    pub(crate) mcp_servers: Option<Vec<crate::mcp::McpServerConfig>>,
+    pub(crate) cwd: Option<String>,
+}
+
 /// 公共发送管线（GUI `send_message` 与 gateway 平台 ingest 共用，B10.3）：
 /// per-runtime 会话创建/映射/prompt 锁/等待/cancel/事件广播。
 /// 平台 ingest 经 handler 路由到绑定 agent 的 runtime 后调用本函数。
-/// `cwd`：自动建会话时的工作目录——平台路由必须传绑定 agent 的 cwd
+/// `ctx.cwd`：自动建会话时的工作目录——平台路由必须传绑定 agent 的 cwd
 /// （绑定 agent ≠ GUI active agent 时 agent_cwd() 会读错）；None 回退 active agent。
-// clippy 2026-08-02：11 参为管线全参数（state/runtime/window/gateway/source/content/persona/
-// session_prompt/attachments/mcp_servers/cwd），GUI 与平台双调用点共享签名；收敛为参数
-// 结构体需同步重构调用方与测试，收益低于风险，保持显式。
-#[allow(clippy::too_many_arguments)]
+/// G2-05：11 参 → 5 参（state/runtime/window/gateway + ctx 上下文对象，E8 封闭）。
 pub(crate) async fn send_prompt_core<R: tauri::Runtime>(
     state: &AppState,
     runtime: &Arc<AgentRuntime>,
     window: Option<&tauri::Window<R>>,
     gateway: &GatewayCore,
-    source: &str,
-    content: &str,
-    persona: &str,
-    session_prompt: Option<&str>,
-    attachments: Option<&[String]>,
-    mcp_servers: Option<Vec<crate::mcp::McpServerConfig>>,
-    cwd: Option<&str>,
+    ctx: &PromptContext,
 ) -> Result<String, PylonError> {
+    // 解构 ctx 业务参数（引用形态，管线内只读）。
+    let PromptContext {
+        source,
+        content,
+        persona,
+        session_prompt,
+        attachments,
+        mcp_servers,
+        cwd,
+    } = ctx;
     // B1：GUI source 不得冒名平台源——qq:* 无 binding → 拒绝（防冒名出站投递到 QQ）。
     // 平台 ingest 的 qq:* 必带 binding（绑定命中），不受影响。
     if source.starts_with("qq:") && gateway.binding(source).is_none() {
@@ -1362,12 +1375,15 @@ pub(crate) async fn send_prompt_core<R: tauri::Runtime>(
             ),
             (
                 "attachmentCount".to_string(),
-                serde_json::Value::from(attachments.map_or(0, <[String]>::len)),
+                serde_json::Value::from(attachments.as_deref().map_or(0, <[String]>::len)),
             ),
         ]),
     );
-    let requested_mcp_servers =
-        mcp::validate_and_serialize(mcp_servers.or_else(|| state.current_mcp_servers().ok()))?;
+    let requested_mcp_servers = mcp::validate_and_serialize(
+        mcp_servers
+            .clone()
+            .or_else(|| state.current_mcp_servers().ok()),
+    )?;
     let prompt_lock = prompt_lock_for(&runtime.prompt_locks, source);
     let _prompt_guard = prompt_lock.lock().await;
 
@@ -1396,7 +1412,10 @@ pub(crate) async fn send_prompt_core<R: tauri::Runtime>(
     // create_session_slot（自动建会话，E7 拍板 close_replaced=true）。
     // P1-1：会话 cwd 优先取调用方显式绑定（平台路由 = 绑定 agent 的 cwd，
     // 可能 ≠ GUI active agent）；无则回退 active agent cwd。
-    let session_cwd = cwd.map(str::to_string).unwrap_or_else(|| state.agent_cwd());
+    let session_cwd = cwd
+        .as_deref()
+        .map(str::to_string)
+        .unwrap_or_else(|| state.agent_cwd());
     let (peri_id, is_first) = {
         let mapping = ensure_session_mapping(
             state,
@@ -1419,8 +1438,8 @@ pub(crate) async fn send_prompt_core<R: tauri::Runtime>(
         source,
         content,
         persona,
-        session_prompt,
-        attachments,
+        session_prompt.as_deref(),
+        attachments.as_deref(),
         is_first,
     )
     .await?;
@@ -2040,13 +2059,11 @@ gateway:
             &runtime,
             None,
             &gateway,
-            "qq:group:999",
-            "你好",
-            "",
-            None,
-            None,
-            None,
-            None,
+            &PromptContext {
+                source: "qq:group:999".to_string(),
+                content: "你好".to_string(),
+                ..Default::default()
+            },
         )
         .await
         .expect_err("无 binding 的 qq:* source 必须被拒绝");
@@ -2063,13 +2080,11 @@ gateway:
             &runtime,
             None,
             &gateway,
-            "qq:group:123",
-            "你好",
-            "",
-            None,
-            None,
-            None,
-            None,
+            &PromptContext {
+                source: "qq:group:123".to_string(),
+                content: "你好".to_string(),
+                ..Default::default()
+            },
         )
         .await
         .expect_err("绑定命中应放行 source 校验，继续管线直到连接层失败");
