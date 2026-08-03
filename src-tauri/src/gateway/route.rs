@@ -32,20 +32,21 @@
 
 use std::collections::{HashMap, HashSet};
 
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 
 /// 平台绑定实体：source（平台路由 key）→ agent/profile/session 三元组 + 白名单 + 重置策略。
 ///
 /// yaml 键名为 `agent`/`profile`/`session`（与 Prism/前端 Session 语义对齐），
 /// Rust 侧统一为 `agent_id`/`profile_id`/`session_key` 命名。
-#[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct EntityBinding {
     pub source: String,
-    #[serde(rename = "agent")]
+    #[serde(rename(deserialize = "agent"))]
     pub agent_id: String,
-    #[serde(rename = "profile")]
+    #[serde(rename(deserialize = "profile"))]
     pub profile_id: String,
-    #[serde(rename = "session")]
+    #[serde(rename(deserialize = "session"))]
     pub session_key: String,
     /// 成员白名单（群消息按 member_openid，私聊按 user_openid）；缺省 = 不限。
     #[serde(default)]
@@ -56,8 +57,8 @@ pub struct EntityBinding {
     /// idle 模式无活动阈值（分钟）；缺省 1440（1 天）。
     #[serde(default)]
     pub idle_minutes: Option<u64>,
-    /// 段内未知字段（配置拼错可见，parse_config 告警）。
-    #[serde(flatten)]
+    /// 段内未知字段（配置拼错可见，parse_config 告警；不参与序列化——gateway_status 契约）。
+    #[serde(flatten, skip)]
     extra: HashMap<String, serde_json::Value>,
 }
 

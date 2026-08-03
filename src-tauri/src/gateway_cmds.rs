@@ -10,20 +10,12 @@ pub(crate) async fn gateway_status(
     state: tauri::State<'_, AppState>,
 ) -> Result<serde_json::Value, PylonError> {
     let gateway = &state.gateway;
+    // B4：Binding 序列化（camelCase + extra skip）——手工 JSON 组装曾与
+    // EntityBinding 字段无编译期同步保护（G5 C5），现在增字段即编译期强制。
     let routes: Vec<serde_json::Value> = gateway
         .routes()
         .iter()
-        .map(|binding| {
-            serde_json::json!({
-                "source": binding.source,
-                "agentId": binding.agent_id,
-                "profileId": binding.profile_id,
-                "sessionKey": binding.session_key,
-                "allowFrom": binding.allow_from,
-                "reset": binding.reset,
-                "idleMinutes": binding.idle_minutes,
-            })
-        })
+        .map(|binding| serde_json::to_value(binding).unwrap_or(serde_json::Value::Null))
         .collect();
     let qq = gateway.qq_config();
     Ok(serde_json::json!({
