@@ -35,9 +35,6 @@ const RECONNECT_BACKOFF_MAX: Duration = Duration::from_secs(60);
 const MAX_RECONNECT_ATTEMPTS: usize = 100;
 const QUICK_DISCONNECT_THRESHOLD: f64 = 5.0;
 const MAX_QUICK_DISCONNECTS: u32 = 3;
-const RATE_LIMIT_DELAY: u64 = 60;
-/// 连续限流断开超过该次数后停止重连（防 60s 无限重试）。
-const MAX_RATE_LIMITS: u32 = 5;
 /// 连续帧解析失败超过该次数后断开连接（防止格式错乱的流无限悬挂，O47）。
 const MAX_PARSE_FAILURES: u32 = 8;
 /// 等待服务器 Hello 的最长时间：半开连接（平台静默失效）超时后走统一重连路径。
@@ -50,16 +47,14 @@ const CONNECT_TIMEOUT: Duration = Duration::from_secs(10);
 const OP9_DEGRADE_THRESHOLD: u32 = 3;
 
 /// QQ WebSocket close code 对应的重连策略。
+/// §3-5：限流 close code 曾走 60s 重试（ReconnectRateLimit 分支 + MAX_RATE_LIMITS=5
+/// 上限），4008 已改判退避后无 close code 触发该路径，死分支已删除（可 git 恢复）。
 #[derive(Debug, PartialEq, Eq)]
 enum CloseAction {
     Fatal(&'static str),
     ReconnectBackoff,
     ReconnectClearToken,
     ReconnectClearSession,
-    // B5：4008 心跳失败改判 ReconnectBackoff 后，当前无 close code 触发限流路径；
-    // 保留分支（含 MAX_RATE_LIMITS 次数上限）供未来限流 code 使用。
-    #[allow(dead_code)]
-    ReconnectRateLimit,
 }
 
 fn classify_close_code(code: u16) -> CloseAction {
@@ -193,7 +188,6 @@ pub async fn run_ws_loop(http_client: Client, auth: Arc<QqAuth>, adapter: Arc<Qq
         last_seq: None,
     };
     let mut quick_count = 0u32;
-    let mut rate_limit_streak = 0u32;
     let mut op9_streak = 0u32;
 
     loop {
@@ -215,7 +209,6 @@ pub async fn run_ws_loop(http_client: Client, auth: Arc<QqAuth>, adapter: Arc<Qq
                 sleep(Duration::from_secs(1)).await;
                 backoff = reconnect_backoff();
                 quick_count = 0;
-                rate_limit_streak = 0;
                 tracing::info!("QQ WS: 协议层重连、保持 session");
             }
             Err(ref e) if e.contains("op 9") => {
@@ -236,7 +229,6 @@ pub async fn run_ws_loop(http_client: Client, auth: Arc<QqAuth>, adapter: Arc<Qq
                 } else {
                     backoff = reconnect_backoff();
                     quick_count = 0;
-                    rate_limit_streak = 0;
                     tracing::info!("QQ WS: op 9 重连、保持 session (第 {op9_streak} 次)");
                 }
             }
@@ -278,22 +270,8 @@ pub async fn run_ws_loop(http_client: Client, auth: Arc<QqAuth>, adapter: Arc<Qq
                         session.session_id = None;
                         session.last_seq = None;
                     }
-                    CloseAction::ReconnectRateLimit => {
-                        rate_limit_streak += 1;
-                        if rate_limit_streak >= MAX_RATE_LIMITS {
-                            tracing::error!("QQ WS: 连续 {rate_limit_streak} 次限流断开，停止重连");
-                            return;
-                        }
-                        sleep(Duration::from_secs(RATE_LIMIT_DELAY)).await;
-                        backoff = reconnect_backoff();
-                        quick_count = 0;
-                        continue;
-                    }
                     CloseAction::ReconnectBackoff => {}
                 }
-                // 非限流断开路径：重置连续限流计数。
-                rate_limit_streak = 0;
-
                 if !wait_backoff(&mut backoff).await {
                     return;
                 }
