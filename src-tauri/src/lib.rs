@@ -81,7 +81,7 @@ where
 }
 
 /// 事件广播（B10.1）：WebView 始终接收；平台 source 同时经 gateway 投递平台适配器。
-/// peri:user 回显/agent-status/runtime-log 不投平台（仅 update/done/error）。
+/// pylon:user 回显/agent-status/runtime-log 不投平台（仅 update/done/error）。
 pub(crate) fn emit_event_all<R, W>(
     window: &W,
     gateway: &GatewayCore,
@@ -146,6 +146,47 @@ pub(crate) struct AppStateHandles {
     pub(crate) approval_mode: Arc<Mutex<String>>,
 }
 
+/// acp 已死判定（P2-3 语义：try_lock 失败视为未崩溃，读路径不等待）。
+/// 收敛 detect_and_record_crashes 与 agent_status_payload 的双写点（G3 §2.2.4）。
+fn acp_is_crashed(runtime: Option<&AgentRuntime>) -> bool {
+    runtime
+        .map(|runtime| {
+            runtime
+                .acp
+                .try_lock()
+                .ok()
+                .map(|acp| acp.is_crashed())
+                .unwrap_or(false)
+        })
+        .unwrap_or(false)
+}
+
+/// P3-12 后处理（纯函数）：只在 payload 未报告崩溃时覆盖——payload 内
+/// status/crashed 必须一致；lastError/recentError/error 三别名同步覆写。
+/// 逻辑保留自 emit_agent_status（行为契约：announce 的状态/错误必定上事件）。
+fn apply_announce_override(
+    payload: &mut serde_json::Value,
+    status: AgentLifecycleStatus,
+    last_error: Option<String>,
+) {
+    if let serde_json::Value::Object(ref mut map) = payload {
+        let payload_crashed = map.get("status").and_then(|value| value.as_str())
+            == Some(AgentLifecycleStatus::Crashed.as_str());
+        if !payload_crashed {
+            map.insert(
+                "status".to_string(),
+                serde_json::Value::String(status.as_str().to_string()),
+            );
+            if let Some(error) = last_error {
+                let error = serde_json::Value::String(error);
+                map.insert("lastError".to_string(), error.clone());
+                map.insert("recentError".to_string(), error.clone());
+                map.insert("error".to_string(), error);
+            }
+        }
+    }
+}
+
 impl AppStateHandles {
     fn from_state(state: &AppState) -> Self {
         Self {
@@ -203,13 +244,7 @@ impl AppStateHandles {
     /// getter 不再有副作用。try_lock 失败（acp 锁正被占用）视为未崩溃（读路径不等待）。
     fn detect_and_record_crashes(runtime: Option<&AgentRuntime>) {
         let Some(runtime) = runtime else { return };
-        let crashed = runtime
-            .acp
-            .try_lock()
-            .ok()
-            .map(|acp| acp.is_crashed())
-            .unwrap_or(false);
-        if crashed {
+        if acp_is_crashed(Some(runtime)) {
             if let Ok(mut state) = runtime.agent_runtime.lock() {
                 state.status = AgentLifecycleStatus::Crashed;
                 if state.last_error.is_none() {
@@ -235,11 +270,7 @@ impl AppStateHandles {
             .lock()
             .ok()
             .and_then(|agents| agents.get(&active_agent_id).cloned());
-        let crashed = matches!(status, AgentLifecycleStatus::Crashed)
-            || runtime
-                .and_then(|runtime| runtime.acp.try_lock().ok())
-                .map(|acp| acp.is_crashed())
-                .unwrap_or(false);
+        let crashed = matches!(status, AgentLifecycleStatus::Crashed) || acp_is_crashed(runtime);
         let status = if crashed {
             AgentLifecycleStatus::Crashed
         } else {
@@ -282,27 +313,10 @@ impl AppStateHandles {
         // P2-3：崩溃检测在状态写入之后执行——acp 已死时崩溃状态优先于本次
         // announce 的状态（避免"status=reconnecting 但 crashed=true"的自我矛盾）。
         Self::detect_and_record_crashes(Some(runtime));
-        emit_event(window, "peri:agent-status", {
-            let mut payload = self.agent_status_payload(Some(runtime));
-            if let serde_json::Value::Object(ref mut map) = payload {
-                // P3-12：只在 payload 未报告崩溃时覆盖——payload 内 status/crashed 必须一致。
-                let payload_crashed = map.get("status").and_then(|value| value.as_str())
-                    == Some(AgentLifecycleStatus::Crashed.as_str());
-                if !payload_crashed {
-                    map.insert(
-                        "status".to_string(),
-                        serde_json::Value::String(status.as_str().to_string()),
-                    );
-                    if let Some(error) = last_error {
-                        let error = serde_json::Value::String(error);
-                        map.insert("lastError".to_string(), error.clone());
-                        map.insert("recentError".to_string(), error.clone());
-                        map.insert("error".to_string(), error);
-                    }
-                }
-            }
-            payload
-        });
+        let mut payload = self.agent_status_payload(Some(runtime));
+        // P3-12：announce 后处理（payload 未报告崩溃时按 announce 覆写状态/错误）
+        apply_announce_override(&mut payload, status, last_error);
+        emit_event(window, event_names::AGENT_STATUS, payload);
     }
 
     async fn replace_agent_client<R: tauri::Runtime>(
