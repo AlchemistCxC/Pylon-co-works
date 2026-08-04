@@ -6,8 +6,9 @@ import { createCustomPresetId } from './customPresets'
 import { markZoneCustom } from './themePresetState'
 import { ZONE_FIELDS } from './themeFields'
 import { clampCcHeight, resolveVisibleStatusWidgetCount } from './ccHeightState'
-import { THEME_DEFAULTS, THEME_SETTING_KEYS } from './themeFieldDefs'
+import { THEME_SETTING_KEYS } from './themeFieldDefs'
 import { THEME_SCHEMA_VERSION, themeDomainMigrate } from './domains/theme/migration'
+import { DEFAULTS } from './domains/theme/themeDefaults'
 import type { CustomPreset } from './customPresets'
 import {
   applyCustomPresetReducer,
@@ -115,20 +116,7 @@ type ThemeState = ThemeSettings & {
 
 // clampPresetCcHeight / syncPresetCcHeight 已随预设动作迁入 domains/theme/presetReducer.ts
 
-/**
- * DEFAULTS 由 defs 派生（THEME_DEFAULTS 标量默认值）+
- * 对象/复合字段（ccLayout/ccHidden/ccScale/META 路由）保留显式声明。
- * 加标量字段：defs 加声明 + THEME_DEFAULTS 加默认值即可，此处自动。
- */
-export const DEFAULTS: ThemeSettings = {
-  ...THEME_DEFAULTS,
-  ccHidden: [],
-  ccLayout: cloneCcLayout(DEFAULT_CC_LAYOUT),
-  ccEditMode: false,
-  ccScale: {},
-  appliedPreset: { global: '', sidebar: '', chat: '', cc: '', right: '' },
-  custom: { global: false, sidebar: false, chat: false, cc: false, right: false },
-} as unknown as ThemeSettings
+// DEFAULTS 定义移入 domains/theme/themeDefaults.ts（可被 node import → 完整性断言测试）
 
 export const useStore = create<ThemeState>()(persist(
   (set, get) => ({

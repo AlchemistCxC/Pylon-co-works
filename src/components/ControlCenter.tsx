@@ -163,7 +163,8 @@ export default function ControlCenter({ sessionId }: Props) {
         '--cc-min-height': `${minHeight}px`,
         // 背景高度不得小于容器最小高：预设 ccBgHeight(76) 与 clamp 后的 ccHeight(84)
         // 不一致时，背景短于容器会露出底部无背景条
-        '--cc-bg-height': `${Math.max(ccBgHeight, minHeight)}px`,
+        // D2：漏斗/setCcHeight/migrate 已保证 ccBgHeight ≥ ccHeight ≥ minHeight，渲染期补丁移除
+        '--cc-bg-height': `${ccBgHeight}px`,
         '--cc-bg': ccBg,
         '--cc-bg-image': toCssBackgroundImage(ccBgImage),
       } as React.CSSProperties}>
@@ -347,7 +348,8 @@ function PropertyPanel({ id, onClose, onExit }: { id: string; onClose: () => voi
     model: '模型', mode: '权限模式', send: '发送按钮', attach: '附件按钮',
   }
 
-  const up = (k: string, v: any) => u('cc', { [k]: v } as Partial<ThemeSettings>)
+  // D2：key 收窄为 keyof ThemeSettings（C4 schema 提供），值收窄为标量联合——消灭 `v: any`
+  const up = (k: keyof ThemeSettings, v: string | number | boolean) => u('cc', { [k]: v } as Partial<ThemeSettings>)
   const upOffset = (key: 'offsetX' | 'offsetY', value: number) => updateCcPlacement(id, { [key]: value })
 
   return (
@@ -380,11 +382,10 @@ function PropertyPanel({ id, onClose, onExit }: { id: string; onClose: () => voi
         {/* C4：属性表单由 WIDGET_PROPERTY_FIELDS schema 驱动（ColorPopover/数字/chips），
             inputMode↔inputVariant 双写经 chips.sync 表达，与 Settings 双写一致 */}
         {(WIDGET_PROPERTY_FIELDS[id as CcWidgetId] || []).filter(field => !field.showIf || field.showIf(theme as unknown as ThemeSettings)).map((field, index) => {
-          const key = 'key' in field ? (field.key as string) : ''
-          const val = key ? (theme as Record<string, unknown>)[key] : undefined
+          if (field.kind === 'section') return <div key={index} className="cc-prop-sec">{field.title}</div>
+          const key = field.key as keyof ThemeSettings
+          const val = (theme as Record<string, unknown>)[key]
           switch (field.kind) {
-            case 'section':
-              return <div key={index} className="cc-prop-sec">{field.title}</div>
             case 'color':
               return <div key={index} className="cc-prop-field"><label>{field.label}</label><ColorPopover value={String(val ?? '')} onChange={v => up(key, v)} /></div>
             case 'number':
@@ -395,7 +396,7 @@ function PropertyPanel({ id, onClose, onExit }: { id: string; onClose: () => voi
                   <div className="set-preset-row">
                     {field.options.map(opt => (
                       <button key={opt.value} className={`set-preset-chip ${val === opt.value ? 'active' : ''}`}
-                        onClick={() => { up(key, opt.value); if (opt.sync) up(opt.sync.key as string, opt.sync.value) }}>{opt.label}</button>
+                        onClick={() => { up(key, opt.value); if (opt.sync) up(opt.sync.key as keyof ThemeSettings, opt.sync.value) }}>{opt.label}</button>
                     ))}
                   </div>
                 </div>

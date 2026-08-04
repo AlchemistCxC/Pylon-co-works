@@ -121,6 +121,8 @@ export function themeDomainMigrate(persisted: unknown, defaults: ThemeMigrationD
     }),
     cliOverflowMode: migratedOverflowMode as CcOverflowMode,
   })
+  // D2：ccBgHeight ≥ ccHeight 不变量跨重启成立（与 setZoneField 漏斗/setCcHeight 一致）
+  state.ccBgHeight = Math.max(Number(state.ccBgHeight ?? 150), Number(state.ccHeight))
   state.customPresets = normalizeCustomPresets(state.customPresets)
   return state
 }
