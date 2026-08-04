@@ -7,7 +7,7 @@ type LegacyState = Record<string, unknown> & {
 }
 
 const store = readFileSync(new URL('../src/store.ts', import.meta.url), 'utf8')
-const migration = readFileSync(new URL('../src/themeMigration.ts', import.meta.url), 'utf8')
+const migration = readFileSync(new URL('../src/domains/theme/migration.ts', import.meta.url), 'utf8')
 
 assert.equal(/ccLayout:\s*cloneCcLayout\(DEFAULT_CC_LAYOUT\)/.test(store), true, '默认状态必须保留 v3 context 布局')
 assert.equal(/ccSizes:\s*\{/.test(store), false, '默认状态不得继续保存废弃尺寸字段')
