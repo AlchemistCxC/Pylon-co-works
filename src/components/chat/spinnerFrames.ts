@@ -64,7 +64,3 @@ export function frameAt(
     direction,
   })]
 }
-
-export function completionFrame(frames: string[], elapsedMs: number): string {
-  return frameAt(frames, elapsedMs)
-}

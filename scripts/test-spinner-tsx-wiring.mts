@@ -1,7 +1,6 @@
 import { strict as assert } from 'node:assert'
 import { readFileSync } from 'node:fs'
 import {
-  completionFrame,
   frameAt,
   normalizeSpinnerFrames,
   resolveSpinnerFrames,
@@ -26,7 +25,7 @@ assert.equal(resolveSpinnerMarker(['◴', '◷'], 'custom', ' ✓ '), '✓')
 assert.equal(resolveSpinnerMarker(['◴', '◷'], 'custom', ''), '◴')
 assert.equal(frameAt(['a', 'b', 'c'], 0, 120), 'a')
 assert.equal(frameAt(['a', 'b', 'c'], 120, 120), 'b')
-assert.equal(completionFrame(['←', '↑', '→'], 240), '→')
+assert.equal(frameAt(['←', '↑', '→'], 240), '→')
 
 // Settings non-Preview wiring: 声明式渲染器分发 spinnerMarker 控件到专用组件。
 const themeDefs = source('../src/themeFieldDefs.ts')

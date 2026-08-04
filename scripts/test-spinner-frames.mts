@@ -1,5 +1,5 @@
 import { strict as assert } from 'node:assert'
-import { completionFrame, frameAt, resolveSpinnerFrames, resolveSpinnerMarker, splitSpinnerFrames } from '../src/components/chat/spinnerFrames.ts'
+import { frameAt, resolveSpinnerFrames, resolveSpinnerMarker, splitSpinnerFrames } from '../src/components/chat/spinnerFrames.ts'
 import { readFileSync } from 'node:fs'
 
 const fallback = splitSpinnerFrames('')
@@ -17,8 +17,8 @@ assert.equal(resolveSpinnerMarker(['◴', '◷'], 'custom', ''), '◴')
 assert.equal(frameAt(['a', 'b', 'c'], 0), 'a')
 assert.equal(frameAt(['a', 'b', 'c'], 120), 'b')
 assert.equal(frameAt(['a', 'b', 'c'], 360), 'a')
-assert.equal(completionFrame(['←', '↑', '→'], 240), '→')
-assert.equal(completionFrame([], 1000), fallback[Math.floor(1000 / 120) % fallback.length])
+assert.equal(frameAt(['←', '↑', '→'], 240), '→')
+assert.equal(frameAt([], 1000), fallback[Math.floor(1000 / 120) % fallback.length])
 
 const css = readFileSync(new URL('../src/components/chat/ChatView.css', import.meta.url), 'utf8')
 const store = readFileSync(new URL('../src/store.ts', import.meta.url), 'utf8')

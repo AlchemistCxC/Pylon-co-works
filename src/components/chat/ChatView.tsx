@@ -218,7 +218,9 @@ const ChatView = React.memo(function ChatView({ sessionId }: Props) {
     messageOwnerRef.current = s.id
 
     const cached = (() => {
-      const stored = localStorage.getItem(messageStorageKey(s.id))
+      // H3：存储不可用（受限 WebView）时守卫，与全库其他 localStorage 读取一致
+      let stored: string | null = null
+      try { stored = localStorage.getItem(messageStorageKey(s.id)) } catch { /* 存储不可用：按空缓存 */ }
       if (!stored) return []
       // 2026-08-02：parseMessageSnapshot 兼容版本 envelope 与旧裸数组（损坏返回 null → 空）
       return (parseMessageSnapshot<Message>(stored) ?? []).map(message => ({ ...message, running: false }))

@@ -65,18 +65,3 @@ export function toRenderMessage(message: Message): RenderMessage {
       return { type: 'system', reason: 'unknown-role', message }
   }
 }
-
-export function renderMessageType(message: RenderMessage): RenderMessage['type'] {
-  switch (message.type) {
-    case 'user':
-    case 'assistant':
-    case 'reasoning':
-    case 'tool_call':
-    case 'tool_result':
-    case 'error':
-    case 'system':
-      return message.type
-    default:
-      return assertNever(message, '未处理的 RenderMessage 类型')
-  }
-}
