@@ -10,13 +10,16 @@ import {
   INSTANT_LOCK_MS,
 } from '../src/components/chat/scrollFollowState.ts'
 
-// ── 接线断言：ChatView 必须消费状态机，不得残留本地 jumping/锁 ──
+// ── 接线断言：CV-1 后状态机消费收敛到 useScrollFollow，ChatView 不得残留本地 jumping/锁 ──
 const chatView = readFileSync(new URL('../src/components/chat/ChatView.tsx', import.meta.url), 'utf8')
+const scrollHook = readFileSync(new URL('../src/components/chat/useScrollFollow.ts', import.meta.url), 'utf8')
 assert.doesNotMatch(chatView, /'jumping'/, 'jumping 死状态必须移除')
 assert.doesNotMatch(chatView, /scrollLockUntilRef/, '锁必须由状态机持有')
-assert.match(chatView, /onUserScroll\(scrollFollowRef\.current,/, '滚动监听必须走状态机')
-assert.match(chatView, /beginProgrammaticScroll\(/, '回到底部必须走状态机')
-assert.match(chatView, /shouldAutoScroll\(scrollFollowRef\.current\)/, '自动滚动判定必须走状态机')
+assert.doesNotMatch(chatView, /scrollFollowRef/, 'scrollFollowRef 必须收敛到 useScrollFollow')
+assert.match(chatView, /useScrollFollow\(/, 'ChatView 必须消费 useScrollFollow hook')
+assert.match(scrollHook, /onUserScroll\(scrollFollowRef\.current,/, '滚动监听必须走状态机')
+assert.match(scrollHook, /beginProgrammaticScroll\(/, '回到底部必须走状态机')
+assert.match(scrollHook, /shouldAutoScroll\(scrollFollowRef\.current\)/, '自动滚动判定必须走状态机')
 
 // ── 初始态：sticky（默认跟随新消息）──
 const initial = createScrollFollowState(0)

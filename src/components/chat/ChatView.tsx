@@ -20,7 +20,6 @@ import { prepareRenderableMessages, isMessageStatic } from './messagePipeline'
 import type { Message as PipelineMessage, RenderMessage } from './messageTypes'
 import { buildMessageLookups } from './messageLookups'
 import { buildChatRowDescriptors } from './chatRowPipeline'
-import { beginProgrammaticScroll, createScrollFollowState, onUserScroll, shouldAutoScroll, type ScrollFollowState } from './scrollFollowState'
 import { useSessionUiState } from './sessionUiState'
 import { resolveConnectorColor } from './toolPresentation'
 import { buildToolPresentationModel, truncateToolSummary } from './toolPresentationModel'
@@ -36,6 +35,7 @@ import { messageMatchesQuery } from './messageSearchIndex'
 import MessageSearchBar from './MessageSearchBar'
 import ToolConnector from './ToolConnector'
 import { attachChatEventController, registerChatController, type ChatControllerHandle, type ChatEventControllerRefs } from './chatEventController'
+import { useScrollFollow } from './useScrollFollow'
 import './ChatView.css'
 
 interface Props { sessionId: string | null }
@@ -80,11 +80,6 @@ const ChatView = React.memo(function ChatView({ sessionId }: Props) {
   const reduceMotion = useReducedMotion()
   const sessions = useIdentityStore(state => state.sessions)
   const chatViewRef = useRef<HTMLDivElement>(null)
-  const bottomRef = useRef<HTMLDivElement>(null)
-  const scrollFollowRef = useRef<ScrollFollowState>(createScrollFollowState())
-  const scrollRafRef = useRef<number | null>(null)
-  const scrollBoundRef = useRef(false)
-  const scrollToBottomRef = useRef<((behavior?: ScrollBehavior) => void) | null>(null)
   const [messages, setMessages] = useState<Message[]>(!IS_TAURI ? resolveInitialBrowserMessages() : [])
   const preparedMessages = useMemo(() => prepareRenderableMessages(messages), [messages])
   const messageLookups = useMemo(() => buildMessageLookups(messages), [messages])
@@ -94,6 +89,8 @@ const ChatView = React.memo(function ChatView({ sessionId }: Props) {
   const [lastTokenAt, setLastTokenAt] = useState(0)
   const [summary, setSummary] = useState<GenerationSummary | null>(null)
   const [generationPhase, setGenerationPhase] = useState<GenerationPhase | null>(null)
+  // CV-1：滚动跟随（状态机 + 监听 + 自动跟随 + 回底）抽入 useScrollFollow
+  const { bottomRef, scrollToBottomRef } = useScrollFollow(chatViewRef, sessionId, messages, generating, streamingText, streamingThinking)
   const [mockPhaseIndex, setMockPhaseIndex] = useState(0)
   const mockGenerationStartRef = useRef(Date.now())
   // 搜索状态按会话作用域（多会话基建）：切会话保留各会话的搜索词/开关/位置
@@ -288,11 +285,6 @@ const ChatView = React.memo(function ChatView({ sessionId }: Props) {
     }
   }, [sessionId])
 
-  // 会话级滚动跟随：切会话重置为 sticky（新会话从底部开始，不继承上一会话的 user_scrolled）
-  useEffect(() => {
-    scrollFollowRef.current = createScrollFollowState()
-  }, [sessionId])
-
   useEffect(() => {
     const activeSources = sessions.map(session => session.source)
     controllerHandleRef.current?.pruneSources(activeSources)
@@ -300,34 +292,6 @@ const ChatView = React.memo(function ChatView({ sessionId }: Props) {
       if (!activeSources.includes(source)) delete loadGenerationRef.current[source]
     }
   }, [sessions, sessionId])
-
-  // 依赖 sessionId：空状态（无会话）时 .chat-view 未渲染、ref 为 null，effect 首跑直接
-  // return；选中会话后 .chat-view 挂载，必须重跑才能绑定 scroll listener。
-  useEffect(() => {
-    const container = chatViewRef.current
-    if (!container) return
-    const updateFollowState = () => {
-      scrollRafRef.current = null
-      const distanceFromBottom = container.scrollHeight - container.scrollTop - container.clientHeight
-      // 状态机纯函数：锁窗内不更新相位，相位不变返回原引用
-      scrollFollowRef.current = onUserScroll(scrollFollowRef.current, distanceFromBottom, performance.now())
-    }
-    const handleScroll = () => {
-      if (scrollRafRef.current !== null) return
-      scrollRafRef.current = requestAnimationFrame(updateFollowState)
-    }
-    container.addEventListener('scroll', handleScroll, { passive: true })
-    // 仅首次绑定时 eager 判定初始相位；会话切换（重绑定）时容器仍停留在上一会话的
-    // 滚动位置，eager 判定会基于过期位置把刚重置的 sticky 翻成 user_scrolled
-    if (!scrollBoundRef.current) {
-      scrollBoundRef.current = true
-      updateFollowState()
-    }
-    return () => {
-      container.removeEventListener('scroll', handleScroll)
-      if (scrollRafRef.current !== null) cancelAnimationFrame(scrollRafRef.current)
-    }
-  }, [sessionId])
 
   // 连续 Tool 连接线（真实 DOM 元素）：测量每对相邻 tool 行 head 中心间距，
   // 写入 connector 的 top/height。.chat-view 是 flex 固定高，行展开只改 scrollHeight
@@ -382,21 +346,6 @@ const ChatView = React.memo(function ChatView({ sessionId }: Props) {
       if (raf !== 0) cancelAnimationFrame(raf)
     }
   }, [messages])
-
-  const scrollToBottom = useCallback((behavior: ScrollBehavior = 'smooth') => {
-    // 置 sticky + 写锁窗（smooth 动画期间用户 scroll 不推翻跟随）
-    scrollFollowRef.current = beginProgrammaticScroll(performance.now(), behavior === 'smooth')
-    if (!bottomRef.current) return
-    recordRender('scrollIntoView.call')
-    bottomRef.current.scrollIntoView({ behavior })
-  }, [])
-  scrollToBottomRef.current = scrollToBottom
-
-  useEffect(() => {
-    if (!bottomRef.current) return
-    if (!shouldAutoScroll(scrollFollowRef.current)) return
-    scrollToBottomRef.current?.()
-  }, [messages, generating, streamingText, streamingThinking])
 
   // 当前可见会话的消息同步到 localStorage；后台会话在事件入口直接持久化
   useEffect(() => {

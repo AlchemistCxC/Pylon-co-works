@@ -26,8 +26,10 @@ const chatView = readFileSync(new URL('../src/components/chat/ChatView.tsx', imp
 assert.match(chatView, /useSessionUiState\(sessionId, 'search-query'/, '搜索词必须按会话作用域')
 assert.match(chatView, /useSessionUiState\(sessionId, 'search-open'/, '搜索开关必须按会话作用域')
 assert.doesNotMatch(chatView, /setSearchQuery\(''\)\s*\n\s*setSearchIndex\(0\)\s*\n\s*setSearchOpen\(false\)\s*\n\s*\}, \[sessionId\]\)/, '不得再在切会话时清空搜索（由注册表恢复）')
-assert.match(chatView, /scrollFollowRef\.current = createScrollFollowState\(\)/, '切会话必须重置滚动跟随')
-assert.match(chatView, /scrollBoundRef/, 'eager 相位判定必须仅首次绑定')
+// CV-1：滚动重置/eager 相位判定收敛到 useScrollFollow
+const scrollHook = readFileSync(new URL('../src/components/chat/useScrollFollow.ts', import.meta.url), 'utf8')
+assert.match(scrollHook, /createScrollFollowState\(\)/, '切会话必须重置滚动跟随')
+assert.match(scrollHook, /scrollBoundRef/, 'eager 相位判定必须仅首次绑定')
 const identity = readFileSync(new URL('../src/identityStore.ts', import.meta.url), 'utf8')
 assert.match(identity, /clearSessionUiState\(id\)/, '会话删除必须清理 UI 状态')
 
