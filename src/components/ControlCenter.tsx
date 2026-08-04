@@ -9,7 +9,7 @@ import AttachWidget from './chat/AttachWidget'
 import ColorPopover from './ColorPopover'
 import { toCssBackgroundImage } from '../backgroundImage'
 import { resolveCcMinHeight, resolveVisibleStatusWidgetCount } from '../ccHeightState'
-import { isWidgetVisible } from '../domains/cc/widgetDefinitions'
+import { isWidgetVisible, WIDGET_PROPERTY_FIELDS, type CcWidgetId } from '../domains/cc/widgetDefinitions'
 import { CC_WIDGET_REGISTRY as WIDGET_REGISTRY } from './cc/widgetRegistry'
 import './ControlCenter.css'
 import './chat/StatusBar.css'  // model/mode/send/attach widget 样式
@@ -377,111 +377,46 @@ function PropertyPanel({ id, onClose, onExit }: { id: string; onClose: () => voi
           </div>
         )}
 
-        {id === 'input' && <>
-          <div className="cc-prop-sec">输入栏设置</div>
-          <div className="cc-prop-field"><label>背景色</label><ColorPopover value={theme.inputBg || ''} onChange={v => up('inputBg', v)} /></div>
-          <div className="cc-prop-field"><label>文字色</label><ColorPopover value={theme.inputTextColor || ''} onChange={v => up('inputTextColor', v)} /></div>
-          <div className="cc-prop-field"><label>字号</label><input type="number" value={theme.inputFontSize} onChange={v => up('inputFontSize', +v.target.value)} step={0.1} className="set-num" min={12} max={22} /></div>
-          <div className="cc-prop-field"><label>最小高</label><input type="number" value={theme.inputMinHeight} onChange={v => up('inputMinHeight', +v.target.value)} step={0.1} className="set-num" min={36} max={120} /></div>
-          <div className="cc-prop-field"><label>模式</label>
-            <div className="set-preset-row">
-              {/* 与 Settings 双写保持一致：inputMode 与 inputVariant 必须同步，否则
-                  ControlCenter（读 inputMode）与 InputBar（读 inputVariant）会分叉 */}
-              <button className={`set-preset-chip ${theme.inputMode === 'default' ? 'active' : ''}`} onClick={() => u('cc', { inputMode: 'default', inputVariant: 'composer' })}>默认</button>
-              <button className={`set-preset-chip ${theme.inputMode === 'cli' ? 'active' : ''}`} onClick={() => u('cc', { inputMode: 'cli', inputVariant: 'cli' })}>CLI</button>
-            </div>
-          </div>
-          {theme.inputMode === 'cli' && <>
-            <div className="cc-prop-field"><label>线宽</label><input type="number" value={theme.cliLineWidth} onChange={v => up('cliLineWidth', +v.target.value)} step={0.1} className="set-num" min={1} max={6} /></div>
-            <div className="cc-prop-field"><label>线色</label><ColorPopover value={theme.cliLineColor || ''} onChange={v => up('cliLineColor', v)} /></div>
-            <div className="cc-prop-field"><label>行距</label><input type="number" value={theme.cliLinePadding ?? 6} onChange={v => up('cliLinePadding', +v.target.value)} step={0.1} className="set-num" min={0} max={24} /></div>
-          </>}
-        </>}
-
-        {id === 'ekg' && <>
-          <div className="cc-prop-sec">用量条显示</div>
-          <div className="cc-prop-field"><label>仪表类型</label>
-            <div className="set-preset-row">
-              {(['wave', 'bar', 'ring', 'numeric'] as const).map(s => (
-                <button key={s} className={`set-preset-chip ${theme.ccStyle === s ? 'active' : ''}`} onClick={() => up('ccStyle', s)}>
-                  {s === 'wave' ? '心电图' : s === 'bar' ? '柱状' : s === 'ring' ? '环形' : '数值'}
-                </button>
-              ))}
-            </div>
-          </div>
-          <div className="cc-prop-field"><label>宽度</label><input type="number" value={theme.ekgWidth} onChange={v => up('ekgWidth', +v.target.value)} step={0.1} className="set-num" min={80} max={400} /></div>
-          {theme.ccStyle === 'wave' && <>
-            <div className="cc-prop-field"><label>绿色</label><ColorPopover value={theme.ekgGreen || ''} onChange={v => up('ekgGreen', v)} /></div>
-            <div className="cc-prop-field"><label>黄色</label><ColorPopover value={theme.ekgYellow || ''} onChange={v => up('ekgYellow', v)} /></div>
-            <div className="cc-prop-field"><label>红色</label><ColorPopover value={theme.ekgRed || ''} onChange={v => up('ekgRed', v)} /></div>
-          </>}
-          {theme.ccStyle === 'bar' && <>
-            <div className="cc-prop-field"><label>外壳背景</label><ColorPopover value={theme.barTrackColor || ''} onChange={v => up('barTrackColor', v)} /></div>
-            <div className="cc-prop-field"><label>高度</label><input type="number" value={theme.barHeight ?? 10} onChange={v => up('barHeight', +v.target.value)} step={0.1} className="set-num" min={4} max={40} /></div>
-            <div className="cc-prop-field"><label>柱子跟随用量</label>
-              <div className="set-preset-row">
-                <button className={`set-preset-chip ${theme.barFillFollow !== false ? 'active' : ''}`} onClick={() => up('barFillFollow', true)}>三段色</button>
-                <button className={`set-preset-chip ${theme.barFillFollow === false ? 'active' : ''}`} onClick={() => up('barFillFollow', false)}>固定色</button>
-              </div>
-            </div>
-            {theme.barFillFollow === false && (
-              <div className="cc-prop-field"><label>柱子颜色</label><ColorPopover value={theme.barFillColor || ''} onChange={v => up('barFillColor', v)} /></div>
-            )}
-          </>}
-        </>}
-
-        {id === 'model' && <>
-          <div className="cc-prop-sec">模型控件外观</div>
-          <div className="cc-prop-field"><label>外观风格</label>
-            <div className="set-preset-row">
-              {(['dropdown', 'minimal', 'badge'] as const).map(v => (
-                <button key={v} className={`set-preset-chip ${theme.modelVariant === v ? 'active' : ''}`} onClick={() => up('modelVariant', v)}>
-                  {v === 'dropdown' ? '下拉' : v === 'minimal' ? '简洁' : '徽章'}
-                </button>
-              ))}
-            </div>
-          </div>
-        </>}
-
-        {id === 'mode' && <>
-          <div className="cc-prop-sec">模式控件外观</div>
-          <div className="cc-prop-field"><label>外观风格</label>
-            <div className="set-preset-row">
-              {(['pill', 'badge', 'minimal'] as const).map(v => (
-                <button key={v} className={`set-preset-chip ${theme.modeVariant === v ? 'active' : ''}`} onClick={() => up('modeVariant', v)}>
-                  {v === 'pill' ? '胶囊' : v === 'badge' ? '方括号' : '极简'}
-                </button>
-              ))}
-            </div>
-          </div>
+        {/* C4：属性表单由 WIDGET_PROPERTY_FIELDS schema 驱动（ColorPopover/数字/chips），
+            inputMode↔inputVariant 双写经 chips.sync 表达，与 Settings 双写一致 */}
+        {(WIDGET_PROPERTY_FIELDS[id as CcWidgetId] || []).filter(field => !field.showIf || field.showIf(theme as unknown as ThemeSettings)).map((field, index) => {
+          const key = 'key' in field ? (field.key as string) : ''
+          const val = key ? (theme as Record<string, unknown>)[key] : undefined
+          switch (field.kind) {
+            case 'section':
+              return <div key={index} className="cc-prop-sec">{field.title}</div>
+            case 'color':
+              return <div key={index} className="cc-prop-field"><label>{field.label}</label><ColorPopover value={String(val ?? '')} onChange={v => up(key, v)} /></div>
+            case 'number':
+              return <div key={index} className="cc-prop-field"><label>{field.label}</label><input type="number" value={Number(val) || 0} onChange={e => up(key, +e.target.value)} step={field.step ?? 1} className="set-num" min={field.min} max={field.max} />{field.suffix && <span>{field.suffix}</span>}</div>
+            case 'chips':
+              return (
+                <div key={index} className="cc-prop-field"><label>{field.label}</label>
+                  <div className="set-preset-row">
+                    {field.options.map(opt => (
+                      <button key={opt.value} className={`set-preset-chip ${val === opt.value ? 'active' : ''}`}
+                        onClick={() => { up(key, opt.value); if (opt.sync) up(opt.sync.key as string, opt.sync.value) }}>{opt.label}</button>
+                    ))}
+                  </div>
+                </div>
+              )
+            case 'chipsBool':
+              return (
+                <div key={index} className="cc-prop-field"><label>{field.label}</label>
+                  <div className="set-preset-row">
+                    <button className={`set-preset-chip ${val !== false ? 'active' : ''}`} onClick={() => up(key, true)}>{field.trueLabel}</button>
+                    <button className={`set-preset-chip ${val === false ? 'active' : ''}`} onClick={() => up(key, false)}>{field.falseLabel}</button>
+                  </div>
+                </div>
+              )
+            default:
+              return null
+          }
+        })}
+        {/* mode widget 的运行时只读读数（非主题属性，保留特判） */}
+        {id === 'mode' && (
           <div className="cc-prop-field"><label>当前</label><span style={{ fontSize: 13, color: liveMode === 'bypass' ? '#FF6B80' : liveMode === 'auto' ? '#FFC107' : liveMode === 'edit' ? '#A2A9E4' : '#999' }}>{liveMode || 'default'}</span></div>
-        </>}
-
-        {id === 'send' && <>
-          <div className="cc-prop-sec">发送按钮外观</div>
-          <div className="cc-prop-field"><label>外观风格</label>
-            <div className="set-preset-row">
-              {(['icon', 'square', 'minimal'] as const).map(v => (
-                <button key={v} className={`set-preset-chip ${theme.sendVariant === v ? 'active' : ''}`} onClick={() => up('sendVariant', v)}>
-                  {v === 'icon' ? '圆形' : v === 'square' ? '方形' : '极简'}
-                </button>
-              ))}
-            </div>
-          </div>
-        </>}
-
-        {id === 'attach' && <>
-          <div className="cc-prop-sec">附件按钮外观</div>
-          <div className="cc-prop-field"><label>外观风格</label>
-            <div className="set-preset-row">
-              {(['icon', 'square', 'minimal'] as const).map(v => (
-                <button key={v} className={`set-preset-chip ${theme.attachVariant === v ? 'active' : ''}`} onClick={() => up('attachVariant', v)}>
-                  {v === 'icon' ? '圆形' : v === 'square' ? '方形' : '极简'}
-                </button>
-              ))}
-            </div>
-          </div>
-        </>}
+        )}
       </div>
       <div className="cc-prop-footer">
         <button className="ps-btn sm" onClick={onExit}>退出自定义</button>
