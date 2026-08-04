@@ -1,4 +1,6 @@
-export type CcWidgetId = 'input' | 'ekg' | 'pct' | 'tokens' | 'model' | 'mode' | 'send' | 'attach'
+import { type CcWidgetId } from './domains/cc/widgetDefinitions.ts'
+
+export type { CcWidgetId } from './domains/cc/widgetDefinitions.ts'
 export type CcSlot = 'input' | 'status-primary' | 'status-secondary' | 'actions'
 
 export interface CcWidgetPlacement {

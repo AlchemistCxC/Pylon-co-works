@@ -1,3 +1,5 @@
+import { STATUS_WIDGET_IDS } from './domains/cc/widgetDefinitions.ts'
+
 export type CcInputMode = 'cli' | 'default' | string
 export type CcFooterLayout = 'free' | 'peri' | string
 export type CcHintMode = 'hidden' | 'compact' | 'full' | string
@@ -10,8 +12,6 @@ export interface CcMinHeightOptions {
   visibleStatusWidgets: number
   cliOverflowMode: CcOverflowMode
 }
-
-const STATUS_WIDGET_IDS = ['ekg', 'pct', 'tokens', 'model', 'mode', 'send', 'attach'] as const
 
 export function resolveVisibleStatusWidgetCount({
   hiddenIds,
