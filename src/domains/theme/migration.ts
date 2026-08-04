@@ -15,7 +15,7 @@ import {
   type CcOverflowMode,
 } from '../../ccHeightState.ts'
 import { normalizeThemeState } from '../../themeFieldDefs.ts'
-import { PRESET_ZONES } from './presetReducer.ts'
+import { PRESET_ZONES, resolveInputMode } from './presetReducer.ts'
 
 /**
  * 主题域 schema 版本（A4：独立于 PROFILE_SCHEMA_VERSION=4）。
@@ -104,7 +104,7 @@ export function themeDomainMigrate(persisted: unknown, defaults: ThemeMigrationD
   state.inputVariant = state.inputVariant === 'cli' || state.inputVariant === 'composer' || state.inputVariant === 'compact' || state.inputVariant === 'command'
     ? state.inputVariant
     : state.inputMode === 'cli' ? 'cli' : 'composer'
-  state.inputMode = state.inputVariant === 'cli' ? 'cli' : 'default'
+  state.inputMode = resolveInputMode(String(state.inputVariant))
   const migratedInputMode = typeof state.inputMode === 'string' ? state.inputMode : String((defaults.base as Record<string, unknown>).inputMode ?? 'cli')
   const migratedHintMode = state.cliHintMode === 'hidden' || state.cliHintMode === 'compact' ? state.cliHintMode : 'full'
   const migratedFooterLayout = state.footerLayout === 'peri' ? 'peri' : 'free'

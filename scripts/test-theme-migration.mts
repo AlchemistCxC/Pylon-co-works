@@ -55,3 +55,21 @@ assert.equal('ccPositions' in empty, false, '空状态不得出现 ccPositions')
 assert.deepEqual(empty.ccLayout, DEFAULT_CC_LAYOUT)
 
 console.log('theme migration 回归测试通过（A1 模型：旧键映射 + custom 值 + id 命名空间）')
+
+// MEDIUM 5：完整迁移（themeDomainMigrate）输出必须满足 inputVariant↔inputMode 联动不变量
+import { themeDomainMigrate } from '../src/domains/theme/migration.ts'
+const migrateDefaults = {
+  base: {
+    inputMode: 'cli', inputVariant: 'cli', inputSubmitButtonMode: 'inline',
+    ccHeight: 150, ccBgHeight: 150, footerLayout: 'free', cliHintMode: 'full',
+    ccHidden: [], ccStyle: 'wave', cliOverflowMode: 'fixed-scroll',
+  },
+  appliedPreset: defaults.appliedPreset,
+  custom: defaults.custom,
+  ccLayout: DEFAULT_CC_LAYOUT,
+}
+const fullMigrated = themeDomainMigrate({ inputVariant: 'composer' }, migrateDefaults)
+assert.equal(fullMigrated.inputMode, 'default', 'inputVariant=composer → inputMode=default')
+assert.equal(fullMigrated.inputVariant, 'composer')
+const cliMigrated = themeDomainMigrate({ inputVariant: 'cli' }, migrateDefaults)
+assert.equal(cliMigrated.inputMode, 'cli', 'inputVariant=cli → inputMode=cli')

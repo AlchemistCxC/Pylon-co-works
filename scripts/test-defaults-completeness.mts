@@ -11,3 +11,10 @@ for (const key of THEME_FIELD_KEYS) {
 assert.deepEqual(missing, [], `DEFAULTS 缺少必填键：${missing.join(', ')}`)
 
 console.log(`DEFAULTS 完整性断言通过（${THEME_FIELD_KEYS.length} 个主题字段全有默认值）`)
+
+// 守门：appliedPreset/custom 键集必须精确等于 PRESET_ZONES（新增 zone 漏改即红）
+const { PRESET_ZONES } = await import('../src/domains/theme/presetReducer.ts')
+const appliedKeys = Object.keys(DEFAULTS.appliedPreset).sort()
+const zoneKeys = [...PRESET_ZONES].sort()
+assert.deepEqual(appliedKeys, zoneKeys, 'DEFAULTS.appliedPreset 键集必须等于 PRESET_ZONES')
+assert.deepEqual(Object.keys(DEFAULTS.custom).sort(), zoneKeys, 'DEFAULTS.custom 键集必须等于 PRESET_ZONES')

@@ -7,6 +7,7 @@
  */
 import { THEME_DEFAULTS } from '../../themeFieldDefs.ts'
 import { cloneCcLayout, DEFAULT_CC_LAYOUT } from '../../ccLayoutState.ts'
+import { PRESET_ZONES } from './presetReducer.ts'
 import type { ThemeSettings } from '../../store.ts'
 
 export const DEFAULTS: ThemeSettings = {
@@ -15,6 +16,7 @@ export const DEFAULTS: ThemeSettings = {
   ccLayout: cloneCcLayout(DEFAULT_CC_LAYOUT),
   ccEditMode: false,
   ccScale: {},
-  appliedPreset: { global: '', sidebar: '', chat: '', cc: '', right: '' },
-  custom: { global: false, sidebar: false, chat: false, cc: false, right: false },
+  // appliedPreset/custom 键集由 PRESET_ZONES 派生（单一真值，不平行维护）
+  appliedPreset: Object.fromEntries(PRESET_ZONES.map(zone => [zone, ''])) as Record<string, string>,
+  custom: Object.fromEntries(PRESET_ZONES.map(zone => [zone, false])) as Record<string, boolean>,
 } as unknown as ThemeSettings

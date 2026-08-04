@@ -1,4 +1,5 @@
 import { strict as assert } from 'node:assert'
+import { readFileSync } from 'node:fs'
 import { GLOBAL_PRESETS, ZONE_FIELDS } from '../src/presets.ts'
 import { DEFAULT_CC_LAYOUT } from '../src/ccLayoutState.ts'
 import {
@@ -189,3 +190,10 @@ function makeState(overrides: Partial<ThemePresetState> = {}): ThemePresetState 
 }
 
 console.log('预设路由纯 reducer 行为回归测试通过（5 zones，确定性）')
+
+// ── MEDIUM 5：UI 层 chips sync 必须满足同一联动不变量（cli→cli / default→composer）──
+{
+  const ccDefs = readFileSync(new URL('../src/domains/cc/widgetDefinitions.ts', import.meta.url), 'utf8')
+  assert.match(ccDefs, /value: 'cli', label: 'CLI', sync: \{ key: 'inputVariant', value: 'cli' \}/, 'CLI chip 必须同步 inputVariant=cli')
+  assert.match(ccDefs, /value: 'default', label: '默认', sync: \{ key: 'inputVariant', value: 'composer' \}/, '默认 chip 必须同步 inputVariant=composer')
+}

@@ -10,6 +10,7 @@
 import type { Message, RenderMessage } from './messageTypes.ts'
 import type { MessageLookups } from './messageLookups.ts'
 import { normalizeToolStatus, resolveToolPresentationState } from '../../domains/tool/status.ts'
+import { toolIdFromMessage } from '../../domains/tool/id.ts'
 
 export interface ChatRowDescriptor {
   /** 稳定 key：行与连接线共享（React key 语义不变） */
@@ -31,8 +32,8 @@ export function isToolRenderMessage(renderMessage: RenderMessage | undefined): r
 
 export function resolveRowToolVisualState(message: Message | undefined, lookups: MessageLookups): string | undefined {
   if (!message || message.role !== 'tool') return undefined
-  if (message.id.startsWith('tool-')) {
-    const toolId = message.id.slice('tool-'.length)
+  const toolId = toolIdFromMessage(message)
+  if (toolId) {
     if (lookups.failedToolIds.has(toolId)) return 'failed'
     if (lookups.runningToolIds.has(toolId)) return 'running'
     if (lookups.resolvedToolIds.has(toolId)) return 'completed'

@@ -28,10 +28,6 @@ function outputLineCount(output: string): number {
   return output.split('\n').filter(line => line.trim().length > 0).length
 }
 
-function isDiffCandidate(name: string, output: string): boolean {
-  return (name === 'Edit' || name === 'Write') && output.length > 0
-}
-
 function outputLabelFor(name: string, outputLines: number): string {
   if (outputLines <= 0) return ''
   if (name === 'Grep' || name === 'Glob') return `${outputLines} matches`
@@ -78,9 +74,8 @@ export function buildToolPresentationModel(
     state,
     hasOutput,
     canCollapseOutput,
-    isDiffCandidate: renderer.isDiffCandidate
-      ? renderer.isDiffCandidate(outputText)
-      : isDiffCandidate(name, outputText),
+    // 仅 renderer 定义 diff 判定（Edit/Write）；本地回退恒 false（已删死代码）
+    isDiffCandidate: renderer.isDiffCandidate ? renderer.isDiffCandidate(outputText) : false,
     statusLabel: toolStatePresentation(state, hasOutput).label,
     outputLabel: renderer.outputLabel
       ? renderer.outputLabel(outputLines, outputText)

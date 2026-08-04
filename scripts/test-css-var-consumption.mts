@@ -27,26 +27,10 @@ function walk(dir: string) {
 walk(ROOT)
 const cssAll = cssFiles.map(read).join('\n')
 const tsxAll = tsxFiles.map(read).join('\n')
-const kebab = (k: string) => `--${k.replace(/[A-Z]/g, m => `-${m.toLowerCase()}`)}`
-
-// ── 注入集（复刻 THEME_CSS_VAR_MAP 生成规则）──
-const defs = read(join(ROOT, 'themeFieldDefs.ts'))
-const defsBlock = defs.slice(defs.indexOf('export const THEME_FIELD_DEFS'))
-const matches = [...defsBlock.matchAll(/^\s{2}([A-Za-z0-9]+): \{/gm)]
-const injected = new Set<string>()
-const injectedFields = new Set<string>()
-for (let i = 0; i < matches.length; i += 1) {
-  const key = matches[i][1]
-  const start = matches[i].index + matches[i][0].length
-  const end = i + 1 < matches.length ? matches[i + 1].index : defsBlock.length
-  const body = defsBlock.slice(start, end)
-  if (/\bnoCssVar:\s*true/.test(body)) continue
-  // type 经辅助函数表达：C=color N=number（可注入）；显式 type 字段兜底
-  if (!(/\btype:\s*'(color|number)'/.test(body) || /\.\.\.(?:C|N)\(/.test(body))) continue
-  const explicit = body.match(/cssVar:\s*'(--[a-z0-9-]+)'/)
-  injected.add(explicit ? explicit[1] : kebab(key))
-  injectedFields.add(key)
-}
+// ── 注入集：直接 import THEME_CSS_VAR_MAP 单一真值（消灭正则镜像第二实现）──
+const { THEME_CSS_VAR_MAP } = await import('../src/themeFieldDefs.ts')
+const injected = new Set<string>(Object.keys(THEME_CSS_VAR_MAP))
+const injectedFields = new Set<string>(Object.values(THEME_CSS_VAR_MAP))
 // App.tsx 手写注入 var（cssVars 对象键）
 const app = read(join(ROOT, 'App.tsx'))
 for (const m of app.matchAll(/'((?:--[a-z0-9-]+))':/g)) injected.add(m[1])

@@ -6,7 +6,8 @@
  * normalize：按字段类型兜底，未知值回默认，杜绝脏数据入库。
  */
 
-export type PetGrowthStage = 'seed' | 'sprout' | 'hopper' | 'guardian' | 'luminary'
+export const PET_GROWTH_STAGES = ['seed', 'sprout', 'hopper', 'guardian', 'luminary'] as const
+export type PetGrowthStage = (typeof PET_GROWTH_STAGES)[number]
 
 export interface PetStats {
   messages: number
@@ -83,7 +84,7 @@ export function normalizePetState(raw: unknown): PetState {
     first_chunk_at_ms: maybeNum(r.first_chunk_at_ms),
     stats: normalizePetStats(r.stats),
     memories: stringList(r.memories),
-    stage: ['seed', 'sprout', 'hopper', 'guardian', 'luminary'].includes(stage) ? stage : 'seed',
+    stage: (PET_GROWTH_STAGES as readonly string[]).includes(stage) ? stage : 'seed',
     title: str(r.title),
     age_days: num(r.age_days),
     next_stage_xp: maybeNum(r.next_stage_xp),

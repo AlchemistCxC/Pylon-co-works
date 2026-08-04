@@ -91,6 +91,30 @@ function syncPresetCcHeight(theme: Partial<ThemeSettings>): { ccHeight: number; 
 }
 
 /**
+ * inputVariant↔inputMode 联动不变量（MEDIUM 5 收敛）：inputMode==='cli' ⟺ inputVariant==='cli'。
+ * 单一真值：setZoneFieldReducer 漏斗 / migration 派生 / UI 层 chips sync 全部满足同一关系。
+ */
+export function resolveInputMode(inputVariant: string): 'cli' | 'default' {
+  return inputVariant === 'cli' ? 'cli' : 'default'
+}
+
+export function applyInputVariantInvariant(
+  partial: Record<string, unknown>,
+  current: { inputMode: string; inputVariant: string },
+): Record<string, unknown> {
+  const patch = { ...partial }
+  if ('inputVariant' in patch) {
+    patch.inputMode = resolveInputMode(String(patch.inputVariant))
+  } else if ('inputMode' in patch) {
+    const inputMode = String(patch.inputMode)
+    patch.inputVariant = inputMode === 'cli'
+      ? 'cli'
+      : (current.inputVariant !== 'cli' ? current.inputVariant : 'composer')
+  }
+  return patch
+}
+
+/**
  * 单字段写入（D1 校验漏斗）：写入字段 + 该 zone 标记 custom（基准不动）。
  * 漏斗内聚三条布局不变量（此前只在 setCcHeight/预设 action/migrate 各自维护）：
  * - inputVariant↔inputMode 联动（cli ⟺ cli，否则 inputMode=default）
@@ -98,17 +122,8 @@ function syncPresetCcHeight(theme: Partial<ThemeSettings>): { ccHeight: number; 
  * - ccBgHeight ≥ ccHeight（背景不短于容器）
  */
 export function setZoneFieldReducer(state: ThemePresetState, zone: string, partial: Record<string, unknown>): ThemePresetPatch {
-  const patch: Record<string, unknown> = { ...partial }
-
   // 联动：先于 cc 高度 clamp（clamp 需要同步后的 inputMode）
-  if ('inputVariant' in patch) {
-    patch.inputMode = patch.inputVariant === 'cli' ? 'cli' : 'default'
-  } else if ('inputMode' in patch) {
-    const inputMode = String(patch.inputMode)
-    patch.inputVariant = inputMode === 'cli'
-      ? 'cli'
-      : (typeof state.inputVariant === 'string' && state.inputVariant !== 'cli' ? state.inputVariant : 'composer')
-  }
+  const patch = applyInputVariantInvariant(partial, state)
 
   // cc 高度不变量：任一高度字段被写即整组收敛
   if ('ccHeight' in patch || 'ccBgHeight' in patch) {

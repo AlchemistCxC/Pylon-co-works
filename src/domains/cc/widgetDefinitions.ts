@@ -145,8 +145,16 @@ export function isWidgetVisible(id: string, ctx: WidgetVisibilityCtx): boolean {
   if (!edit && ctx.ccStyle === 'ring' && id === 'pct' && !ctx.hidden.includes('ekg')) return false
   // 独立 send/attach widget 仅在"外部按钮模式"下渲染；CLI/内联模式走 InputBar 自带按钮
   if (id === 'send' || id === 'attach') {
-    const externalBtnMode = ctx.inputMode !== 'cli' && ctx.submitButtonMode === 'external'
-    if (!edit && !externalBtnMode) return false
+    if (!edit && !isExternalSubmitMode(ctx)) return false
   }
   return true
+}
+
+/**
+ * 外部按钮模式（send/attach 独立 widget 渲染的前提）：非 CLI + submitButtonMode=external。
+ * 单一真值：isWidgetVisible 与 ControlCenter 的 InputBar externalSend/externalAttach 传参
+ * 共同消费，改判定一处即可。
+ */
+export function isExternalSubmitMode(ctx: Pick<WidgetVisibilityCtx, 'inputMode' | 'submitButtonMode'>): boolean {
+  return ctx.inputMode !== 'cli' && ctx.submitButtonMode === 'external'
 }

@@ -1,11 +1,17 @@
 import { strict as assert } from 'node:assert'
 import { readFileSync } from 'node:fs'
 import { DEFAULT_CC_LAYOUT, normalizeCcLayout } from '../src/ccLayoutState.ts'
+import { CC_WIDGET_IDS } from '../src/domains/cc/widgetDefinitions.ts'
 
 const registry = readFileSync(new URL('../src/components/cc/widgetRegistry.tsx', import.meta.url), 'utf8')
 const controlCenter = readFileSync(new URL('../src/components/ControlCenter.tsx', import.meta.url), 'utf8')
 
-for (const id of ['input', 'ekg', 'pct', 'tokens', 'model', 'mode', 'send', 'attach']) {
+// 守门：registry 注册的 id 集合必须精确等于 CC_WIDGET_IDS 单一真值
+// （新增 widget 到 domain 漏注册、或 registry 多余 id 均红）
+const registryIds = [...registry.matchAll(/id: '([a-z-]+)'/g)].map(m => m[1]).sort()
+assert.deepEqual(registryIds, [...CC_WIDGET_IDS].sort(), 'registry id 集合必须精确等于 CC_WIDGET_IDS')
+
+for (const id of CC_WIDGET_IDS) {
   assert.match(registry, new RegExp(`id: '${id}'`), `${id} 必须注册`)
   assert.ok(DEFAULT_CC_LAYOUT.placements[id as keyof typeof DEFAULT_CC_LAYOUT.placements], `${id} 必须有默认布局`)
 }
@@ -28,7 +34,7 @@ const normalized = normalizeCcLayout({ version: 3, placements: {
 } })
 assert.deepEqual(normalized.placements.input, { slot: 'input', order: 0, offsetX: 6, offsetY: -3 })
 assert.deepEqual(normalized.placements.tokens, { slot: 'status-secondary', order: 4, offsetX: -8, offsetY: 5 })
-assert.deepEqual(normalized.placements['context-ring'], DEFAULT_CC_LAYOUT.placements['context-ring'])
+assert.equal('context-ring' in normalized.placements, false, '废弃 context-ring 必须被归一化丢弃')
 assert.match(controlCenter, /from '\.\/cc\/widgetRegistry'/, 'ControlCenter 必须消费外置 registry')
 assert.match(controlCenter, /const isNatural = def\.naturalSize/, '自然尺寸必须由 registry metadata 决定')
 assert.match(controlCenter, /body = def\.render\?\.\(\{ sessionId \}\)/, 'renderer 必须使用统一 render props（render 可选：input/send/attach 由特判渲染）')

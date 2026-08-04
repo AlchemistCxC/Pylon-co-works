@@ -11,7 +11,7 @@ import AttachWidget from './chat/AttachWidget'
 import ColorPopover from './ColorPopover'
 import { toCssBackgroundImage } from '../backgroundImage'
 import { resolveCcMinHeight, resolveVisibleStatusWidgetCount } from '../ccHeightState'
-import { isWidgetVisible, WIDGET_PROPERTY_FIELDS, type CcWidgetId } from '../domains/cc/widgetDefinitions'
+import { isExternalSubmitMode, isWidgetVisible, WIDGET_PROPERTY_FIELDS, type CcWidgetId } from '../domains/cc/widgetDefinitions'
 import { CC_WIDGET_REGISTRY as WIDGET_REGISTRY } from './cc/widgetRegistry'
 import './ControlCenter.css'
 import './chat/StatusBar.css'  // model/mode/send/attach widget 样式
@@ -51,8 +51,9 @@ export default function ControlCenter({ sessionId }: Props) {
     // externalBtnMode 判定），修此前"计数把不渲染的 send/attach 算入最小高"的失真。
     if (!isWidgetVisible(id, { hidden, inputMode, submitButtonMode, ccStyle, editMode })) return null
 
-    // externalSend/externalAttach 逐按钮决定 InputBar 是否隐藏自带按钮，避免重复或丢失
-    const externalBtnMode = inputMode !== 'cli' && submitButtonMode === 'external'
+    // externalSend/externalAttach 逐按钮决定 InputBar 是否隐藏自带按钮，避免重复或丢失；
+    // 外部按钮模式判定消费域单一真值（isExternalSubmitMode，与 isWidgetVisible 同源）
+    const externalBtnMode = isExternalSubmitMode({ inputMode, submitButtonMode })
     const externalSend = externalBtnMode && !hidden.includes('send')
     const externalAttach = externalBtnMode && !hidden.includes('attach')
 
