@@ -30,8 +30,8 @@ const BUILTIN: Record<string, { name: string; label: string }[]> = {
 export default function PresetRow({ area }: Props) {
   const builtin = BUILTIN[area] || []
   const zone = AREA_TO_ZONE[area] || area
-  const activeName = useStore(s => s.activePreset[zone] || '')
-  const dirty = useStore(s => s.dirty[zone] || false)
+  const activeName = useStore(s => s.appliedPreset[zone] || '')
+  const custom = useStore(s => s.custom[zone] || false)
   const applyZonePreset = useStore(s => s.applyZonePreset)
 
   const apply = (name: string) => {
@@ -47,10 +47,10 @@ export default function PresetRow({ area }: Props) {
       <span className="preset-label">预设</span>
       <div className="preset-chips">
         {builtin.map(p => (
-          <button key={p.name} className={`preset-chip ${!dirty && activeName === p.name ? 'active' : ''}`}
+          <button key={p.name} className={`preset-chip ${!custom && activeName === p.name ? 'active' : ''}`}
             onClick={() => apply(p.name)}>{p.label}</button>
         ))}
-        {dirty && <span className="preset-chip active">自定义</span>}
+        {custom && <span className="preset-chip active">自定义</span>}
       </div>
     </div>
   )

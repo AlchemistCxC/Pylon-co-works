@@ -32,8 +32,8 @@ const mixedState = {
   barFillFollow: true,
   spinnerSize: 18,
   ccScale: { ekg: 95 },
-  activePreset: { global: 'glass' },
-  dirty: { global: true },
+  appliedPreset: { global: 'glass' },
+  custom: { global: true },
   ccEditMode: true,
   customPresets: [first],
   profiles: [{ id: 'profile-1' }],
@@ -52,8 +52,8 @@ assert.deepEqual(picked, {
   spinnerSize: 18,
   ccScale: { ekg: 95 },
 })
-assert.equal('activePreset' in picked, false)
-assert.equal('dirty' in picked, false)
+assert.equal('appliedPreset' in picked, false)
+assert.equal('custom' in picked, false)
 assert.equal('ccEditMode' in picked, false)
 assert.equal('customPresets' in picked, false)
 assert.equal('profiles' in picked, false)
@@ -70,8 +70,8 @@ assert.equal('sessions' in savedMixedPreset.theme, false)
 assert.equal('users' in savedMixedPreset.theme, false)
 assert.equal('runtime' in savedMixedPreset.theme, false)
 assert.equal('customPresets' in savedMixedPreset.theme, false)
-assert.equal('activePreset' in savedMixedPreset.theme, false)
-assert.equal('dirty' in savedMixedPreset.theme, false)
+assert.equal('appliedPreset' in savedMixedPreset.theme, false)
+assert.equal('custom' in savedMixedPreset.theme, false)
 assert.equal('ccEditMode' in savedMixedPreset.theme, false)
 
 console.log('customPresets 回归测试通过')

@@ -55,9 +55,9 @@ export interface ThemeFieldDef {
   noCssVar?: boolean
   /** 不在 Settings UI 自动渲染（特殊控件或内部字段） */
   hidden?: boolean
-  /** META 字段：仅持久化、不进预设白名单（ccEditMode/activePreset/dirty） */
+  /** META 字段：仅持久化、不进预设白名单（ccEditMode/appliedPreset/dirty） */
   meta?: boolean
-  /** 字段默认值（THEME_DEFAULTS 由 defs 派生；对象字段 ccLayout/ccHidden/ccScale 及 activePreset/dirty 无标量默认） */
+  /** 字段默认值（THEME_DEFAULTS 由 defs 派生；对象字段 ccLayout/ccHidden/ccScale 及 appliedPreset/custom 无标量默认） */
   default?: string | number | boolean
 }
 
@@ -246,8 +246,8 @@ export const THEME_FIELD_DEFS = {
 
   // ── META（持久化但非预设内容）──
   ccEditMode: { default: false, type: 'text', label: '编辑模式', zone: 'cc', noCssVar: true, hidden: true, meta: true },
-  activePreset: { type: 'text', label: '活动预设', zone: 'global', noCssVar: true, hidden: true, meta: true },
-  dirty: { type: 'text', label: '脏标记', zone: 'global', noCssVar: true, hidden: true, meta: true },
+  appliedPreset: { type: 'text', label: '活动预设', zone: 'global', noCssVar: true, hidden: true, meta: true },
+  custom: { type: 'text', label: '脏标记', zone: 'global', noCssVar: true, hidden: true, meta: true },
 } as const satisfies Record<keyof ThemeSettings, ThemeFieldDef>
 
 export type ThemeFieldKey = keyof typeof THEME_FIELD_DEFS

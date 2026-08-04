@@ -34,8 +34,8 @@ assert.deepEqual(deleteCustomPreset(upserted, first.id).map(preset => preset.id)
 const pickedTheme = pickCustomPresetTheme({
   globalBgColor: '#abcdef',
   ccScale: { input: 100 },
-  activePreset: { global: 'stale' },
-  dirty: { global: true },
+  appliedPreset: { global: 'stale' },
+  custom: { global: true },
   ccEditMode: true,
   customPresets: [],
   callback: () => 'ignored',

@@ -19,7 +19,7 @@ const themeFields = [...themeInterface.matchAll(/([A-Za-z_$][\w$]*)\s*\??\s*:/g)
   .map(match => match[1])
 assert.ok(themeFields.length > 0, 'ThemeSettings 字段集合不得为空')
 
-const explicitMetaFields = new Set(['activePreset', 'dirty', 'ccEditMode'])
+const explicitMetaFields = new Set(['appliedPreset', 'custom', 'ccEditMode'])
 const allowedZones = new Set(['global', 'layout', 'sidebar', 'chat', 'cc', 'right'])
 const themeFieldSet = new Set(themeFields)
 const mappedEntries = Object.entries(ZONE_FIELDS)

@@ -66,7 +66,9 @@ export function normalizeCustomPresets(value: unknown): CustomPreset[] {
     const createdAt = typeof candidate.createdAt === 'number' ? candidate.createdAt : Date.now()
     const updatedAt = typeof candidate.updatedAt === 'number' ? candidate.updatedAt : createdAt
     return [{
-      id: candidate.id,
+      // A1：id 命名空间强制——配置导入/旧数据可带任意 id（如 'claude' 撞内置预设名），
+      // 非 custom- 前缀的重新前缀，保证 appliedPreset 值与内置预设名永不冲突。
+      id: /^custom-/.test(candidate.id) ? candidate.id : `custom-${candidate.id}`,
       name: candidate.name.trim().slice(0, 40),
       theme: candidate.theme as Partial<ThemeSettings>,
       createdAt,

@@ -16,8 +16,8 @@ assert.doesNotMatch(reducerSource, /\.\.\.preset\.theme\s*,[\s\S]*profiles|profi
 
 function makeState(customPresets: ThemePresetState['customPresets']): ThemePresetState {
   return {
-    activePreset: { global: '', sidebar: '', chat: '', cc: '', right: '' },
-    dirty: { global: false, sidebar: false, chat: false, cc: false, right: false },
+    appliedPreset: { global: '', sidebar: '', chat: '', cc: '', right: '' },
+    custom: { global: false, sidebar: false, chat: false, cc: false, right: false },
     customPresets,
     ccLayout: DEFAULT_CC_LAYOUT,
     ccHeight: 150,
@@ -78,10 +78,10 @@ assert.equal((patch as Record<string, unknown>).customPresets, undefined, 'custo
 assert.equal(patch.ccLayout?.version, DEFAULT_CC_LAYOUT.version)
 assert.deepEqual(patch.ccLayout?.placements.input, { slot: 'input', order: 99, offsetX: 48, offsetY: -16 })
 
-// 路由：全 zone 记 id + 全 dirty 清
-assert.equal(patch.activePreset?.global, 'custom-isolation')
-assert.equal(patch.activePreset?.chat, 'custom-isolation')
-assert.equal(patch.dirty?.global, false)
+// 路由：全 zone 记 id + 全 custom 清
+assert.equal(patch.appliedPreset?.global, 'custom-isolation')
+assert.equal(patch.appliedPreset?.chat, 'custom-isolation')
+assert.equal(patch.custom?.global, false)
 
 // 不存在的预设 → null（无操作）
 assert.equal(applyCustomPresetReducer(makeState([preset]), 'custom-missing'), null)

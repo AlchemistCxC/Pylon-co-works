@@ -1,12 +1,17 @@
 /**
- * presetReducer — 预设路由的纯计算层（A0，行为保持）。
+ * presetReducer — 预设路由的纯计算层（A0 抽出，A1 改模型）。
  *
  * 六个预设 action 的全部状态转换从 store.ts 迁到这里，store 只留
  * set(reducer(state, args)) 薄壳。依赖全部显式 .ts：node --experimental-strip-types
  * 可直接 import 本模块 → 预设语义可做确定性行为测试（save 的 id/now 由 shell 注入）。
  *
- * A1 将在此基础上改模型（dirty→custom、activePreset→appliedPreset、PRESET_ZONES）。
+ * A1 模型：appliedPreset（基准名，无 'custom' 值）+ custom（触碰标记，事件驱动）+
+ * PRESET_ZONES（5 zone，layout 无字段排除）。字段写入只标 custom，不动基准。
  */
+
+/** 参与预设路由的 zone：layout 无字段（实证 zone:'layout'=0）排除 */
+export const PRESET_ZONES = ['global', 'sidebar', 'chat', 'cc', 'right'] as const
+export type PresetZone = (typeof PRESET_ZONES)[number]
 import type { CcLayoutV3 } from '../../ccLayoutState.ts'
 import { normalizeCcLayout } from '../../ccLayoutState.ts'
 import {
@@ -25,7 +30,6 @@ import {
 } from '../../customPresets.ts'
 import { normalizeThemeState, THEME_DEFAULTS } from '../../themeFieldDefs.ts'
 import { markZoneCustom } from '../../themePresetState.ts'
-import { ZONES } from '../../themeFields.ts'
 import type { ThemeSettings } from '../../store.ts'
 
 const DEFAULTS = THEME_DEFAULTS as Record<string, string | number | boolean>
@@ -35,8 +39,8 @@ const DEFAULTS = THEME_DEFAULTS as Record<string, string | number | boolean>
  * ThemeState → ThemePresetState 无需断言；patch 用 ThemePresetPatch（兼容 Partial<ThemeState>）。
  */
 export interface ThemePresetState {
-  activePreset: Record<string, string>
-  dirty: Record<string, boolean>
+  appliedPreset: Record<string, string>
+  custom: Record<string, boolean>
   customPresets: CustomPreset[]
   ccLayout: CcLayoutV3
   ccHeight: number
@@ -50,7 +54,7 @@ export interface ThemePresetState {
 }
 
 /** reducer 返回的 patch：主题字段 + 预设路由/cc 同步字段（可赋值给 Partial<ThemeState>） */
-export type ThemePresetPatch = Partial<ThemeSettings> & Partial<Pick<ThemePresetState, 'activePreset' | 'dirty' | 'customPresets' | 'ccLayout' | 'ccHeight' | 'ccBgHeight'>>
+export type ThemePresetPatch = Partial<ThemeSettings> & Partial<Pick<ThemePresetState, 'appliedPreset' | 'custom' | 'customPresets' | 'ccLayout' | 'ccHeight' | 'ccBgHeight'>>
 
 /** cc 高度 clamp（迁自 store.ts，行为不变）：布局约束真值来自 ccHeightState */
 function clampPresetCcHeight(theme: Partial<ThemeSettings>): number {
@@ -83,7 +87,7 @@ function syncPresetCcHeight(theme: Partial<ThemeSettings>): { ccHeight: number; 
   return { ccHeight, ccBgHeight: Math.max(bgHeight, ccHeight) }
 }
 
-/** 单字段写入：写入字段 + 该 zone 标记 custom/dirty */
+/** 单字段写入：写入字段 + 该 zone 标记 custom（基准不动） */
 export function setZoneFieldReducer(state: ThemePresetState, zone: string, partial: Record<string, unknown>): ThemePresetPatch {
   return {
     ...partial,
@@ -91,41 +95,42 @@ export function setZoneFieldReducer(state: ThemePresetState, zone: string, parti
   }
 }
 
-/** 应用 zone 预设：写字段 + 记录预设名 + 清 dirty；切离全局 → 全局标 custom */
+/** 应用 zone 预设：写字段 + 记基准名 + 清 custom；切离全局 → 全局失基准 + 标 custom */
 export function applyZonePresetReducer(
   state: ThemePresetState,
   zone: string,
   presetName: string,
   presetTheme: Partial<ThemeSettings>,
 ): ThemePresetPatch {
-  const globalPreset = state.activePreset.global
-  const breaksGlobal = Boolean(globalPreset) && globalPreset !== 'custom' && globalPreset !== presetName
+  const globalPreset = state.appliedPreset.global
+  const breaksGlobal = Boolean(globalPreset) && globalPreset !== presetName
   return {
     ...presetTheme,
     // cc zone 预设即恢复规范排布（预设不携带 ccLayout → 默认布局），与其他 zone 预设一致
     ...(zone === 'cc' ? { ccLayout: normalizeCcLayout(presetTheme.ccLayout) } : {}),
     ...(zone === 'cc' && presetTheme.ccHeight !== undefined ? syncPresetCcHeight(presetTheme) : {}),
-    activePreset: {
-      ...state.activePreset,
+    appliedPreset: {
+      ...state.appliedPreset,
       [zone]: presetName,
-      ...(breaksGlobal ? { global: 'custom' } : {}),
+      // A1：global 不再是可枚举的 'custom'，切离全局 = 全局失去基准（''）+ 标 custom
+      ...(breaksGlobal ? { global: '' } : {}),
     },
-    dirty: {
-      ...state.dirty,
+    custom: {
+      ...state.custom,
       [zone]: false,
       ...(breaksGlobal ? { global: true } : {}),
     },
   }
 }
 
-/** 切换全局预设：全 zone 记名 + 全 dirty 清零 + 恢复规范排布 */
+/** 切换全局预设：全 PRESET_ZONES 记名 + 全 custom 清零 + 恢复规范排布 */
 export function setGlobalPresetReducer(name: string, theme: Partial<ThemeSettings>): ThemePresetPatch {
   return {
     ...theme,
     ccLayout: normalizeCcLayout(theme.ccLayout),
     ...(theme.ccHeight !== undefined ? syncPresetCcHeight(theme) : {}),
-    activePreset: Object.fromEntries(ZONES.map(zone => [zone, name])),
-    dirty: Object.fromEntries(ZONES.map(zone => [zone, false])),
+    appliedPreset: Object.fromEntries(PRESET_ZONES.map(zone => [zone, name])),
+    custom: Object.fromEntries(PRESET_ZONES.map(zone => [zone, false])),
   }
 }
 
@@ -152,7 +157,7 @@ export function saveCustomPresetReducer(
   return { patch: { customPresets: upsertCustomPreset(state.customPresets, preset) }, savedId: preset.id }
 }
 
-/** 应用自定义预设：防御性归一化 + 全 zone 记 id + 全 dirty 清零；找不到返回 null（无操作） */
+/** 应用自定义预设：防御性归一化 + 全 PRESET_ZONES 记 id + 全 custom 清零；找不到返回 null（无操作） */
 export function applyCustomPresetReducer(state: ThemePresetState, id: string): ThemePresetPatch | null {
   const preset = state.customPresets.find(item => item.id === id)
   if (!preset) return null
@@ -161,20 +166,23 @@ export function applyCustomPresetReducer(state: ThemePresetState, id: string): T
     ...theme,
     ccLayout: normalizeCcLayout(theme.ccLayout),
     ...(theme.ccHeight !== undefined ? syncPresetCcHeight(theme) : {}),
-    activePreset: Object.fromEntries(ZONES.map(zone => [zone, id])),
-    dirty: Object.fromEntries(ZONES.map(zone => [zone, false])),
+    appliedPreset: Object.fromEntries(PRESET_ZONES.map(zone => [zone, id])),
+    custom: Object.fromEntries(PRESET_ZONES.map(zone => [zone, false])),
   }
 }
 
-/** 删除自定义预设：正在应用的 zone 保留其值但不再跟随命名预设 → 语义为 custom */
+/**
+ * 删除自定义预设：引用该 id 的 zone 失去基准（appliedPreset=''）且 custom=true——
+ * 字段保留已删预设的值 = 失去基准的自定义快照（不是默认态）。
+ */
 export function removeCustomPresetReducer(state: ThemePresetState, id: string): ThemePresetPatch {
-  const activePreset = { ...state.activePreset }
-  const dirty = { ...state.dirty }
-  for (const [zone, value] of Object.entries(activePreset)) {
+  const appliedPreset = { ...state.appliedPreset }
+  const custom = { ...state.custom }
+  for (const [zone, value] of Object.entries(appliedPreset)) {
     if (value === id) {
-      activePreset[zone] = 'custom'
-      dirty[zone] = true
+      appliedPreset[zone] = ''
+      custom[zone] = true
     }
   }
-  return { customPresets: deleteCustomPreset(state.customPresets, id), activePreset, dirty }
+  return { customPresets: deleteCustomPreset(state.customPresets, id), appliedPreset, custom }
 }

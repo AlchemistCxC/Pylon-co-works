@@ -34,19 +34,19 @@ assert.match(renderer, /def\.label\.toLowerCase\(\)\.includes\(query\)/, '字段
 assert.match(renderer, /defaultOpen=\{group\.defaultOpen\} forceOpen=\{searching\}/, '搜索时强制展开折叠组')
 assert.match(renderer, /const searching = \(ctx\.search\?\.trim\(\) \?\? ''\)\.length > 0[\s\S]*?searching[\s\S]*?\? advancedRows/, '搜索时 advanced 字段内联展开')
 
-// ── Settings：工具栏（搜索 + 重置本区）+ nav dirty 圆点 ──
+// ── Settings：工具栏（搜索 + 重置本区）+ nav custom 圆点 ──
 assert.match(settings, /className="set-search"/, '设置页必须有搜索输入框')
 assert.match(settings, /set-zone-reset/, '必须有重置本区按钮')
 assert.match(settings, /resetZone\(TAB_ZONE_MAP\[activeTab\]/, '重置本区必须接线到 store.resetZone')
-assert.match(settings, /\$\{dirty\[TAB_ZONE_MAP\[tab\]\] \? ' dirty' : ''\}/, '导航按钮必须显示 dirty 圆点')
+assert.match(settings, /\$\{custom\[TAB_ZONE_MAP\[tab\]\] \? ' custom' : ''\}/, '导航按钮必须显示 custom 圆点')
 assert.match(settings, /const isSearching = searchQuery\.trim\(\)\.length > 0/, '搜索状态必须驱动手写组隐藏')
 
 // ── store：resetZone 只重置标量主题字段 ──
 assert.match(store, /resetZone: \(zone\) => set\(state => \{/, 'store 必须实现 resetZone')
 assert.match(store, /ZONE_FIELDS\[zone\]/, 'resetZone 必须按 zone 字段表重置')
 assert.match(store, /typeof value === 'string' \|\| typeof value === 'number' \|\| typeof value === 'boolean'/, 'resetZone 必须只重置标量（不碰 ccLayout/ccHidden/ccScale）')
-assert.match(store, /activePreset: \{ \.\.\.state\.activePreset, \[zone\]: '' \}/, 'resetZone 必须清 activePreset[zone]')
-assert.match(store, /dirty: \{ \.\.\.state\.dirty, \[zone\]: false \}/, 'resetZone 必须清 dirty[zone]')
+assert.match(store, /appliedPreset: \{ \.\.\.state\.appliedPreset, \[zone\]: '' \}/, 'resetZone 必须清 appliedPreset[zone]')
+assert.match(store, /custom: \{ \.\.\.state\.custom, \[zone\]: false \}/, 'resetZone 必须清 custom[zone]')
 
 // ── 停滞颜色标签中性化 ──
 assert.match(defs, /spinnerStalledColor: \{[\s\S]*?'停滞颜色'/, '停滞字段不得再叫"停滞变红色"')
@@ -90,7 +90,7 @@ assert.match(presetReducer, /syncPresetCcHeight\(/, '预设应用必须过 ccHei
 assert.match(presetReducer, /ccHeight !== undefined \? syncPresetCcHeight\(theme\) : \{\}/, 'setGlobalPreset/applyCustomPreset 必须 clamp ccHeight')
 assert.match(presetReducer, /zone === 'cc' && presetTheme\.ccHeight !== undefined/, 'applyZonePreset 必须 clamp cc zone ccHeight')
 // removeCustomPreset 删除已应用预设 → 'custom'（与 markZoneCustom 一致）
-assert.match(presetReducer, /activePreset\[zone\] = 'custom'/, '删除已应用预设必须标记为 custom')
+assert.match(presetReducer, /appliedPreset\[zone\] = ''/, '删除已应用预设必须清除基准')
 // getFrames 空帧返回 undefined（spinner fallback 生效）
 assert.match(controller, /frames && frames\.length > 0 \? frames : undefined/, 'getFrames 空帧必须返回 undefined')
 // 配置导入 key 白名单

@@ -85,8 +85,8 @@ export interface ThemeSettings {
   ccLayout: CcLayoutV3
   ccEditMode: boolean
   ccScale: Record<string, number>  // naturalSize 控件独立缩放% (50-200) key=widget id
-  activePreset: Record<string, string>
-  dirty: Record<string, boolean>
+  appliedPreset: Record<string, string>
+  custom: Record<string, boolean>
 }
 
 /**
@@ -104,7 +104,7 @@ type ThemeState = ThemeSettings & {
   setCcHidden: (id: string, hidden: boolean) => void
   setCcScale: (id: string, scale: number) => void
   resetTheme: () => void
-  /** 重置单个 zone 的字段到默认值（不清其他 zone），并清该 zone 的 dirty/activePreset */
+  /** 重置单个 zone 的字段到默认值（不清其他 zone），并清该 zone 的 custom/appliedPreset */
   resetZone: (zone: string) => void
   applyZonePreset: (zone: string, presetName: string, presetTheme: Partial<ThemeSettings>) => void
   setZoneField: (zone: string, partial: Partial<ThemeSettings>) => void
@@ -127,8 +127,8 @@ export const DEFAULTS: ThemeSettings = {
   ccLayout: cloneCcLayout(DEFAULT_CC_LAYOUT),
   ccEditMode: false,
   ccScale: {},
-  activePreset: { global: '', layout: '', sidebar: '', chat: '', cc: '', right: '' },
-  dirty: { global: false, layout: false, sidebar: false, chat: false, cc: false, right: false },
+  appliedPreset: { global: '', sidebar: '', chat: '', cc: '', right: '' },
+  custom: { global: false, sidebar: false, chat: false, cc: false, right: false },
 } as unknown as ThemeSettings
 
 export const useStore = create<ThemeState>()(persist(
@@ -185,8 +185,8 @@ export const useStore = create<ThemeState>()(persist(
     )
     return {
       ...reset,
-      activePreset: { ...state.activePreset, [zone]: '' },
-      dirty: { ...state.dirty, [zone]: false },
+      appliedPreset: { ...state.appliedPreset, [zone]: '' },
+      custom: { ...state.custom, [zone]: false },
     }
   }),
 
@@ -211,8 +211,8 @@ export const useStore = create<ThemeState>()(persist(
   const state = (persisted || {}) as Partial<ThemeState> & { profiles?: Profile[]; activeProfileId?: string }
   const normalizedTheme = normalizeThemeMigrationState(state, {
     base: DEFAULTS,
-    activePreset: DEFAULTS.activePreset,
-    dirty: DEFAULTS.dirty,
+    appliedPreset: DEFAULTS.appliedPreset,
+    custom: DEFAULTS.custom,
     ccLayout: DEFAULTS.ccLayout,
   })
   Object.assign(state, normalizedTheme)
@@ -244,8 +244,8 @@ export const useStore = create<ThemeState>()(persist(
   return state as ThemeState
 }, partialize: (state) => {
   // 2026-08-02 修复：customPresets 不再剔除——用户保存的自定义预设必须跨重启保留
-  // （Settings 提供完整保存/应用/删除 UI，此前重启即丢属缺陷）。ccEditMode/dirty/函数照旧排除。
-  const { ccEditMode, setCcEditMode, setCcHeight, updateCcPlacement, resetCcLayout, setCcHidden, setCcScale, resetTheme, applyZonePreset, setZoneField, setGlobalPreset, saveCustomPreset, applyCustomPreset, removeCustomPreset, dirty, ...persisted } = state as ThemeState
+  // （Settings 提供完整保存/应用/删除 UI，此前重启即丢属缺陷）。ccEditMode/custom/函数照旧排除。
+  const { ccEditMode, setCcEditMode, setCcHeight, updateCcPlacement, resetCcLayout, setCcHidden, setCcScale, resetTheme, applyZonePreset, setZoneField, setGlobalPreset, saveCustomPreset, applyCustomPreset, removeCustomPreset, custom, ...persisted } = state as ThemeState
   return persisted
 }, onRehydrateStorage: () => state => {
   // 阶段 1 迁移：旧 pylon-theme 里的 profiles/activeProfileId 迁入 identityStore（一次性）

@@ -21,8 +21,8 @@ const solarized = GLOBAL_PRESETS.find(p => p.name === 'solarized')!
 
 function makeState(overrides: Partial<ThemePresetState> = {}): ThemePresetState {
   return {
-    activePreset: { global: '', sidebar: '', chat: '', cc: '', right: '' },
-    dirty: { global: false, sidebar: false, chat: false, cc: false, right: false },
+    appliedPreset: { global: '', sidebar: '', chat: '', cc: '', right: '' },
+    custom: { global: false, sidebar: false, chat: false, cc: false, right: false },
     customPresets: [],
     ccLayout: DEFAULT_CC_LAYOUT,
     ccHeight: 150,
@@ -37,47 +37,45 @@ function makeState(overrides: Partial<ThemePresetState> = {}): ThemePresetState 
   }
 }
 
-// ── setZoneField：写入字段 + 标记 zone custom/dirty，不污染其他 zone ──
+// ── setZoneField：写入字段 + 标 zone custom，不污染其他 zone、不带 appliedPreset（基准不动）──
 {
   const state = makeState()
   const patch = setZoneFieldReducer(state, 'chat', { chatFontSize: 99 })
   assert.equal(patch.chatFontSize, 99, 'setZoneField 应写入字段')
-  assert.equal(patch.activePreset?.chat, 'custom')
-  assert.equal(patch.dirty?.chat, true)
+  assert.equal(patch.custom?.chat, true)
+  assert.equal('appliedPreset' in patch, false, '字段写入不得带 appliedPreset（基准不动）')
   for (const zone of zones) {
-    if (zone === 'chat') continue
-    assert.equal(patch.activePreset?.[zone], state.activePreset[zone], `${zone}: 不污染 activePreset`)
-    assert.equal(patch.dirty?.[zone], state.dirty[zone], `${zone}: 不污染 dirty`)
+    if (zone !== 'chat') assert.equal(patch.custom?.[zone], state.custom[zone], `${zone}: 不污染 custom`)
   }
 }
 
-// ── applyZonePreset：写字段 + 记名 + 清 dirty ──
+// ── applyZonePreset：写字段 + 记名 + 清 custom ──
 {
   const state = makeState()
   const zoneTheme = Object.fromEntries(ZONE_FIELDS.chat.map(f => [f, nord.theme[f]]))
   const patch = applyZonePresetReducer(state, 'chat', 'nord', zoneTheme)
-  assert.equal(patch.activePreset?.chat, 'nord')
-  assert.equal(patch.dirty?.chat, false)
+  assert.equal(patch.appliedPreset?.chat, 'nord')
+  assert.equal(patch.custom?.chat, false)
   for (const field of ZONE_FIELDS.chat) {
     assert.deepEqual(patch[field], nord.theme[field], `chat.${String(field)} 应写入预设字段`)
   }
   // 无全局预设时不影响 global
-  assert.equal(patch.activePreset?.global, '')
+  assert.equal(patch.appliedPreset?.global, '')
 }
 
 // ── applyZonePreset + breaksGlobal：切离全局 → global custom+dirty；同源不破 ──
 {
-  const withGlobal = (name: string) => makeState({ activePreset: { ...makeState().activePreset, global: name } })
+  const withGlobal = (name: string) => makeState({ appliedPreset: { ...makeState().appliedPreset, global: name } })
   const nordZoneTheme = Object.fromEntries(ZONE_FIELDS.chat.map(f => [f, nord.theme[f]]))
   const glassZoneTheme = Object.fromEntries(ZONE_FIELDS.chat.map(f => [f, glass.theme[f]]))
 
   const breaking = applyZonePresetReducer(withGlobal('nord'), 'chat', 'glass', glassZoneTheme)
-  assert.equal(breaking.activePreset?.global, 'custom', 'zone 预设切离全局 → global 标 custom')
-  assert.equal(breaking.dirty?.global, true, 'global dirty 置 true')
+  assert.equal(breaking.appliedPreset?.global, '', 'zone 预设切离全局 → global 失去基准')
+  assert.equal(breaking.custom?.global, true, 'global custom 置 true')
 
   const sameName = applyZonePresetReducer(withGlobal('nord'), 'chat', 'nord', nordZoneTheme)
-  assert.equal(sameName.activePreset?.global, 'nord', 'zone 预设与全局同源 → 不破 global')
-  assert.equal(sameName.dirty?.global, false)
+  assert.equal(sameName.appliedPreset?.global, 'nord', 'zone 预设与全局同源 → 不破 global')
+  assert.equal(sameName.custom?.global, false)
 }
 
 // ── applyZonePreset cc 同步：ccLayout 恢复规范 + ccHeight clamp 且 ccBgHeight 跟随 ──
@@ -92,13 +90,13 @@ function makeState(overrides: Partial<ThemePresetState> = {}): ThemePresetState 
   }
 }
 
-// ── setGlobalPreset：全 zone 记名 + 全 dirty 清 + 规范排布 ──
+// ── setGlobalPreset：全 zone 记名 + 全 custom 清 + 规范排布 ──
 {
   const state = makeState()
   const patch = setGlobalPresetReducer('solarized', solarized.theme)
   for (const zone of zones) {
-    assert.equal(patch.activePreset?.[zone], 'solarized', `${zone}: 全局预设应同步名称`)
-    assert.equal(patch.dirty?.[zone], false, `${zone}: 全局预设应清 dirty`)
+    assert.equal(patch.appliedPreset?.[zone], 'solarized', `${zone}: 全局预设应同步名称`)
+    assert.equal(patch.custom?.[zone], false, `${zone}: 全局预设应清 custom`)
   }
   assert.equal(patch.ccLayout?.version, DEFAULT_CC_LAYOUT.version, '全局预设应恢复规范排布')
 }
@@ -129,7 +127,7 @@ function makeState(overrides: Partial<ThemePresetState> = {}): ThemePresetState 
   const state = makeState({ customPresets: saved.patch.customPresets })
   const patch = applyCustomPresetReducer(state, 'custom-9')
   assert.ok(patch, '存在的自定义预设应返回 patch')
-  for (const zone of zones) assert.equal(patch!.activePreset?.[zone], 'custom-9')
+  for (const zone of zones) assert.equal(patch!.appliedPreset?.[zone], 'custom-9')
   assert.equal(applyCustomPresetReducer(state, 'custom-missing'), null, '不存在的预设应返回 null（无操作）')
 }
 
@@ -138,15 +136,16 @@ function makeState(overrides: Partial<ThemePresetState> = {}): ThemePresetState 
   const saved = saveCustomPresetReducer(makeState(), { id: 'custom-3', name: 'P', now: 1000 })
   const state = makeState({
     customPresets: saved.patch.customPresets,
-    activePreset: { global: 'custom-3', sidebar: 'custom-3', chat: '', cc: '', right: '' },
-    dirty: { global: false, sidebar: false, chat: false, cc: false, right: false },
+    appliedPreset: { global: 'custom-3', sidebar: 'custom-3', chat: '', cc: '', right: '' },
+    custom: { global: false, sidebar: false, chat: false, cc: false, right: false },
   })
   const patch = removeCustomPresetReducer(state, 'custom-3')
   assert.deepEqual(patch.customPresets, [], '预设应从列表删除')
-  assert.equal(patch.activePreset?.global, 'custom', '引用该预设的 zone 应转 custom')
-  assert.equal(patch.activePreset?.sidebar, 'custom')
-  assert.equal(patch.dirty?.global, true, '转 custom 的 zone dirty 置 true')
-  assert.equal(patch.activePreset?.chat, '', '未引用的 zone 不受影响')
+  assert.equal(patch.appliedPreset?.global, '', '引用该预设的 zone 失去基准')
+  assert.equal(patch.appliedPreset?.sidebar, '')
+  assert.equal(patch.custom?.global, true, '失去基准的 zone custom 置 true（自定义快照）')
+  assert.equal(patch.appliedPreset?.chat, '', '未引用的 zone 不受影响')
+  assert.equal(patch.custom?.chat, false)
 }
 
 // ── 业务实体不干扰：patch 只含主题/预设路由键 ──
@@ -155,7 +154,7 @@ function makeState(overrides: Partial<ThemePresetState> = {}): ThemePresetState 
   const patch = setZoneFieldReducer(state, 'chat', { chatFontSize: 1 })
   const patchKeys = new Set(Object.keys(patch))
   for (const key of patchKeys) {
-    assert.ok(key === 'chatFontSize' || key === 'activePreset' || key === 'dirty', `patch 不得含业务键: ${key}`)
+    assert.ok(key === 'chatFontSize' || key === 'appliedPreset' || key === 'custom', `patch 不得含业务键: ${key}`)
   }
 }
 
