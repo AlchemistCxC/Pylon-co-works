@@ -7,7 +7,6 @@ import { AnimatePresence, motion, useReducedMotion } from 'motion/react'
 import Anser from 'anser'
 import GenerationFooter, { type GenerationPhase, type GenerationSummary } from './GenerationFooter'
 import { resolveSpinnerFrames } from './spinnerFrames'
-import { canPersistMessages, persistMessageSnapshot } from './messagePersistence'
 import { highlightCode } from './codeHighlight'
 import { sanitizeHtml } from './htmlSanitizer'
 import { recordMeasuredAsync, recordRender } from './renderMetrics'
@@ -31,6 +30,7 @@ import { useSessionLifecycle } from './useSessionLifecycle'
 import { useScrollFollow } from './useScrollFollow'
 import { useToolConnectors } from './useToolConnectors'
 import { useMessageSearch } from './useMessageSearch'
+import { useMessagePersistence } from './useMessagePersistence'
 import './ChatView.css'
 
 interface Props { sessionId: string | null }
@@ -96,6 +96,8 @@ const ChatView = React.memo(function ChatView({ sessionId }: Props) {
   const { sessionRef, messageOwnerRef, controllerHandleRef } = useSessionLifecycle(sessionId, sessions, {
     setMessages, setStreamingText, setStreamingThinking, setGenerating, setGenerationPhase, setSummary, setLastTokenAt,
   })
+  // CV-5：当前可见会话消息持久化收敛为 hook
+  useMessagePersistence(sessionId, messages, { sessionRef, messageOwnerRef })
   useEffect(() => {
     if (IS_TAURI) return
     const id = window.setInterval(() => setMockPhaseIndex(index => (index + 1) % MOCK_GENERATION_PHASES.length), 1800)
@@ -116,15 +118,6 @@ const ChatView = React.memo(function ChatView({ sessionId }: Props) {
   )
 
   // 当前可见会话的消息同步到 localStorage；后台会话在事件入口直接持久化
-  useEffect(() => {
-    const ownerId = messageOwnerRef.current
-    const source = sessionRef.current
-    const renderedSource = sessionRef.current
-    if (!canPersistMessages({ ownerId, source, renderedSessionId: sessionId, renderedSource }) || messages.length === 0) return
-    const ownedSessionId = ownerId as string
-    try { persistMessageSnapshot(ownedSessionId, messages, localStorage) } catch {}
-  }, [messages, sessionId])
-
   // dev/浏览器模式（无 Tauri）即使无 session 也渲染 mock 对话，方便调样式
   if (!sessionId && IS_TAURI) return (
     <div className="chat-empty">
