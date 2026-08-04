@@ -22,8 +22,8 @@ import { buildChatRowDescriptors } from './chatRowPipeline'
 import { beginProgrammaticScroll, createScrollFollowState, onUserScroll, shouldAutoScroll, type ScrollFollowState } from './scrollFollowState'
 import { useSessionUiState } from './sessionUiState'
 import { resolveConnectorColor } from './toolPresentation'
-import { buildToolPresentationModel, toolPresentationStatus, truncateToolSummary } from './toolPresentationModel'
-import { normalizeToolStatus } from './toolStatus'
+import { buildToolPresentationModel, truncateToolSummary } from './toolPresentationModel'
+import { normalizeToolStatus, toolStatePresentation } from '../../domains/tool/status.ts'
 import { toolIndicatorMotionClass } from './toolIndicatorMotion'
 import { resolveToolIndicatorAsset } from './toolIndicatorAssets'
 import { isPlainTextContent } from './markdownFastPath'
@@ -691,7 +691,7 @@ function ToolCard({ model }: { model: ReturnType<typeof buildToolPresentationMod
   const toolErr = useStore(s => s.toolErr)
   const connectorMode = useStore(s => s.toolConnectorMode) || 'none'
   const connectorColor = useStore(s => s.toolConnectorColor) || 'rgba(0,0,0,0.12)'
-  const status = toolPresentationStatus(model)
+  const status = toolStatePresentation(model.state, model.hasOutput).tone
   const displaySummary = truncateToolSummary(model.summary)
   const displayStatus = model.state !== 'unknown' ? model.statusLabel : ''
   const glowCss = glow > 0

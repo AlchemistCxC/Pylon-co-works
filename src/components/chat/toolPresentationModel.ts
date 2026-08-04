@@ -1,5 +1,5 @@
 import type { Message } from './messageTypes.ts'
-import { normalizeToolStatus, type ToolVisualState } from './toolStatus.ts'
+import { normalizeToolStatus, toolStatePresentation, type ToolVisualState } from '../../domains/tool/status.ts'
 import { toolIdFromMessage } from '../../domains/tool/id.ts'
 import { truncateToWidth } from '../../utils/textWidth.ts'
 import { resolveToolRenderer } from './toolPresentation.ts'
@@ -30,18 +30,6 @@ function outputLineCount(output: string): number {
 
 function isDiffCandidate(name: string, output: string): boolean {
   return (name === 'Edit' || name === 'Write') && output.length > 0
-}
-
-function statusLabelFor(state: ToolVisualState): string {
-  switch (state) {
-    case 'queued': return '排队中'
-    case 'running': return '运行中'
-    case 'waiting': return '等待中'
-    case 'completed': return '已完成'
-    case 'failed': return '失败'
-    case 'cancelled': return '已取消'
-    case 'unknown': return '状态未知'
-  }
 }
 
 function outputLabelFor(name: string, outputLines: number): string {
@@ -93,26 +81,11 @@ export function buildToolPresentationModel(
     isDiffCandidate: renderer.isDiffCandidate
       ? renderer.isDiffCandidate(outputText)
       : isDiffCandidate(name, outputText),
-    statusLabel: statusLabelFor(state),
+    statusLabel: toolStatePresentation(state, hasOutput).label,
     outputLabel: renderer.outputLabel
       ? renderer.outputLabel(outputLines, outputText)
       : outputLabelFor(name, outputLines),
     errorText: state === 'failed' || state === 'cancelled' ? outputText || undefined : undefined,
-  }
-}
-
-export function toolPresentationStatus(model: ToolPresentationModel): 'run' | 'ok' | 'err' {
-  switch (model.state) {
-    case 'failed':
-    case 'cancelled':
-      return 'err'
-    case 'completed':
-      return 'ok'
-    case 'queued':
-    case 'running':
-    case 'waiting':
-    case 'unknown':
-      return 'run'
   }
 }
 

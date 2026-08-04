@@ -1,6 +1,6 @@
 import { strict as assert } from 'node:assert'
 import { readFileSync } from 'node:fs'
-import { resolveToolVisualStatus } from '../src/components/chat/toolStatus.ts'
+import { resolveToolPresentationState } from '../src/domains/tool/status.ts'
 import { resolveToolIndicatorMotion, toolIndicatorMotionClass } from '../src/components/chat/toolIndicatorMotion.ts'
 
 const css = readFileSync(new URL('../src/components/chat/ChatView.css', import.meta.url), 'utf8')
@@ -15,10 +15,12 @@ assert.equal(resolveToolIndicatorMotion('cancelled'), 'static')
 assert.equal(resolveToolIndicatorMotion('unknown'), 'static')
 assert.equal(toolIndicatorMotionClass('running'), 'term-tool-indicator--breathe')
 
-// 状态动画与颜色解析分离：相同的主题颜色 resolver 仍然负责状态颜色。
-assert.equal(resolveToolVisualStatus('completed'), 'ok')
-assert.equal(resolveToolVisualStatus('running'), 'run')
-assert.equal(resolveToolVisualStatus('failed'), 'err')
+// 状态动画与颜色解析分离：相同的主题颜色 resolver 仍然负责状态颜色（B2：唯一 API）。
+assert.equal(resolveToolPresentationState('completed').tone, 'ok')
+assert.equal(resolveToolPresentationState('running').tone, 'run')
+assert.equal(resolveToolPresentationState('failed').tone, 'err')
+assert.equal(resolveToolPresentationState(undefined, true).tone, 'ok', 'unknown+有输出 → ok')
+assert.equal(resolveToolPresentationState(undefined, false).tone, 'run', 'unknown+无输出 → run')
 
 assert.match(chatView, /toolIndicatorMotionClass\(model\.state\)/, 'ToolCard 必须按归一化状态接入动画 class')
 assert.match(chatView, /term-tool-indicator \$\{status\} \$\{toolIndicatorMotionClass/, 'indicator 必须同时保留现有颜色 status class')

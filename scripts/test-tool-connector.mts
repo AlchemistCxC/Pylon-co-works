@@ -19,7 +19,7 @@ assert.equal(resolveConnectorColor('follow', 'err', { toolOk: '#a', toolRun: '#b
 assert.match(pipeline, /const previousConnectorStatus = hasPreviousTool\s*\? resolveRowToolConnectorStatus\(previous\.message\)/, '必须由上一个工具消息直接解析连接线状态')
 assert.match(chatView, /<ToolConnector[\s\S]*?status=\{desc\.connectorStatus \|\| 'run'\}[\s\S]*?visualState=\{normalizeToolStatus\(desc\.connectorVisualState\)\}/, '线色和动画必须使用上一个工具的解析状态')
 assert.match(pipeline, /function resolveRowToolVisualState[\s\S]*?if \(!message \|\| message\.role !== 'tool'\) return undefined[\s\S]*?return normalizeToolStatus\(message\.toolStatus\)/, '状态动画必须兼容真实 tool-* id 与浏览器 mock id')
-assert.match(pipeline, /return resolveToolVisualStatus\(message\.toolStatus, message\.toolOutput !== undefined\)/, '连接线状态必须兼容无 tool- 前缀的 mock/真实消息 id')
+assert.match(pipeline, /return resolveToolPresentationState\(message\.toolStatus, message\.toolOutput !== undefined\)\.tone/, '连接线状态必须兼容无 tool- 前缀的 mock/真实消息 id（B2 唯一 API）')
 assert.match(connector, /resolveConnectorColor\(connectorMode, status, \{ toolOk, toolRun, toolErr \}, connectorColor\)/, '连接线组件必须用状态色')
 
 // ── 真实 DOM 连接线元素（ChatView 消费描述符）──

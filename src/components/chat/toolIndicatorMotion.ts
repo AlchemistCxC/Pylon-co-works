@@ -1,4 +1,4 @@
-import type { ToolVisualState } from './toolStatus.ts'
+import type { ToolVisualState } from '../../domains/tool/status.ts'
 
 export type ToolIndicatorMotion = 'static' | 'breathe' | 'pulse' | 'settle' | 'flash'
 

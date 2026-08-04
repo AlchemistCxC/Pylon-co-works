@@ -2,7 +2,7 @@ import { memo } from 'react'
 import { useStore } from '../../store'
 import { resolveConnectorColor, type ToolConnectorStatus } from './toolPresentation'
 import { toolConnectorMotionClass } from './toolIndicatorMotion'
-import type { ToolVisualState } from './toolStatus'
+import type { ToolVisualState } from '../../domains/tool/status.ts'
 
 /**
  * 连续 Tool 之间的连接线（真实 DOM 元素）。

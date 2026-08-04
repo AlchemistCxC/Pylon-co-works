@@ -2,9 +2,9 @@ import { strict as assert } from 'node:assert'
 import {
   buildToolPresentationModel,
   TOOL_PRESENTATION_LIMITS,
-  toolPresentationStatus,
   truncateToolSummary,
 } from '../src/components/chat/toolPresentationModel.ts'
+import { toolStatePresentation } from '../src/domains/tool/status.ts'
 
 const base = {
   id: 'tool-abc',
@@ -23,7 +23,7 @@ assert.equal(running.summary, 'src/main.ts')
 assert.equal(running.state, 'running')
 assert.equal(running.hasOutput, false)
 assert.equal(running.canCollapseOutput, false)
-assert.equal(toolPresentationStatus(running), 'run')
+assert.equal(toolStatePresentation(running.state, running.hasOutput).tone, 'run')
 
 const completed = buildToolPresentationModel({
   ...base,
@@ -37,7 +37,7 @@ assert.equal(completed.hasOutput, true)
 assert.equal(completed.isDiffCandidate, false)
 assert.equal(completed.statusLabel, '已完成')
 assert.equal(completed.outputLabel, '2 lines')
-assert.equal(toolPresentationStatus(completed), 'ok')
+assert.equal(toolStatePresentation(completed.state, completed.hasOutput).tone, 'ok')
 
 const longOutput = Array.from({ length: TOOL_PRESENTATION_LIMITS.collapsibleOutputLineLimit + 1 }, (_, i) => `line ${i}`).join('\n')
 const edit = buildToolPresentationModel({
@@ -81,7 +81,7 @@ const failed = buildToolPresentationModel({
 assert.equal(failed.state, 'failed')
 assert.equal(failed.errorText, 'permission denied')
 assert.equal(failed.statusLabel, '失败')
-assert.equal(toolPresentationStatus(failed), 'err')
+assert.equal(toolStatePresentation(failed.state, failed.hasOutput).tone, 'err')
 
 const fallback = buildToolPresentationModel({
   ...base,
@@ -98,7 +98,7 @@ assert.equal(fallback.state, 'unknown')
 assert.equal(fallback.statusLabel, '状态未知')
 assert.equal(fallback.outputLabel, '')
 assert.equal(fallback.hasOutput, false)
-assert.equal(toolPresentationStatus(fallback), 'run')
+assert.equal(toolStatePresentation(fallback.state, fallback.hasOutput).tone, 'run')
 
 assert.equal(truncateToolSummary('short'), 'short')
 assert.equal(truncateToolSummary('abcdefgh', 6), 'abcde…')

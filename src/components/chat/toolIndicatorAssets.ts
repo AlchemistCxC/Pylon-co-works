@@ -1,4 +1,4 @@
-import type { ToolVisualState } from './toolStatus.ts'
+import { TOOL_STATE_LABELS, type ToolVisualState } from '../../domains/tool/status.ts'
 
 export interface ToolIndicatorAsset {
   id: string
@@ -10,15 +10,11 @@ export interface ToolIndicatorAsset {
   ariaLabel: Record<ToolVisualState, string>
 }
 
-const ariaLabel = (label: string): Record<ToolVisualState, string> => ({
-  queued: `${label}，排队中`,
-  running: `${label}，运行中`,
-  waiting: `${label}，等待中`,
-  completed: `${label}，已完成`,
-  failed: `${label}，失败`,
-  cancelled: `${label}，已取消`,
-  unknown: `${label}，状态未知`,
-})
+const TOOL_STATES: readonly ToolVisualState[] = ['queued', 'running', 'waiting', 'completed', 'failed', 'cancelled', 'unknown']
+
+// B2：aria 后缀派生自单一状态标签表（TOOL_STATE_LABELS），不再平行维护
+const ariaLabel = (label: string): Record<ToolVisualState, string> =>
+  Object.fromEntries(TOOL_STATES.map(state => [state, `${label}，${TOOL_STATE_LABELS[state]}`])) as Record<ToolVisualState, string>
 
 const createAsset = (id: string, label: string, glyph: string): ToolIndicatorAsset => ({
   id,

@@ -9,7 +9,7 @@
 
 import type { Message, RenderMessage } from './messageTypes.ts'
 import type { MessageLookups } from './messageLookups.ts'
-import { normalizeToolStatus, resolveToolVisualStatus } from './toolStatus.ts'
+import { normalizeToolStatus, resolveToolPresentationState } from '../../domains/tool/status.ts'
 
 export interface ChatRowDescriptor {
   /** 稳定 key：行与连接线共享（React key 语义不变） */
@@ -43,7 +43,7 @@ export function resolveRowToolVisualState(message: Message | undefined, lookups:
 
 export function resolveRowToolConnectorStatus(message: Message | undefined): 'ok' | 'err' | 'run' {
   if (!message || message.role !== 'tool') return 'run'
-  return resolveToolVisualStatus(message.toolStatus, message.toolOutput !== undefined)
+  return resolveToolPresentationState(message.toolStatus, message.toolOutput !== undefined).tone
 }
 
 /**
