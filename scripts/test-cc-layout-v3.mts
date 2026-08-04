@@ -43,6 +43,6 @@ assert.match(css, /grid-template-rows:minmax\([^,]+,\s*1fr\) auto/)
 assert.equal(css.includes('.cc-status-row'), true)
 assert.equal(css.includes('.cc-flow-row'), false)
 assert.equal(store.includes('ccLayout: CcLayoutV3'), true)
-assert.equal(store.includes('normalizeThemeMigrationState(state,'), true)
+assert.equal(store.includes('themeDomainMigrate(persisted,'), true)
 
 console.log('ccLayoutV3 回归测试通过')

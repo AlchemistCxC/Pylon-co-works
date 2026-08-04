@@ -45,11 +45,11 @@ for (const field of spinnerFields) {
 }
 check(/export const THEME_DEFAULTS[\s\S]*THEME_FIELD_DEFS\[key\][\s\S]*?\.default/.test(themeFields), 'THEME_DEFAULTS 必须由 defs 派生')
 
-// Migration starts with normalizeThemeMigrationState(base: DEFAULTS), then applies spinner-specific validation.
-const migrate = section(store, "migrate: persisted => {", '}, partialize:')
-check(/normalizeThemeMigrationState\(state,/.test(migrate), 'migrate does not normalize from DEFAULTS')
+// Migration lives in domains/theme/migration.ts (A4)：themeDomainMigrate → normalizeThemeMigrationState + normalizeThemeState 通用归一化。
+const migrate = read('src/domains/theme/migration.ts')
+check(/normalizeThemeMigrationState\(persisted, defaults\)/.test(migrate), 'migrate does not normalize from DEFAULTS')
 for (const field of spinnerFields) {
-  check(new RegExp(`\\b${field}\\b`).test(migrate) || /normalizeThemeMigrationState\(state,/.test(migrate), `migrate does not cover ${field}`)
+  check(new RegExp(`\\b${field}\\b`).test(migrate) || /normalizeThemeMigrationState\(persisted, defaults\)/.test(migrate), `migrate does not cover ${field}`)
 }
 
 // partialize persists the remaining state through ...persisted; spinner fields must not be excluded.

@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict'
-import { normalizeThemeMigrationState } from '../src/themeMigration.ts'
+import { normalizeThemeMigrationState } from '../src/domains/theme/migration.ts'
 import { DEFAULT_CC_LAYOUT } from '../src/ccLayoutState.ts'
 
 const defaults = {

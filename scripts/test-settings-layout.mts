@@ -7,6 +7,7 @@ const renderer = read('../src/themeFieldRenderer.tsx')
 const settings = read('../src/components/Settings.tsx')
 const store = read('../src/store.ts')
 const presetReducer = read('../src/domains/theme/presetReducer.ts')
+const migration = read('../src/domains/theme/migration.ts')
 const presets = read('../src/presets.ts')
 
 // ── 低频组默认折叠 + 组粒度合并 ──
@@ -62,7 +63,7 @@ assert.doesNotMatch(defs, /export const THEME_DEFAULTS[\s\S]*?=\s*\{\s*\n  accen
 assert.match(defs, /export function normalizeThemeValue\(/, '必须有 defs 驱动的值归一化')
 assert.match(defs, /export function normalizeThemeState</, '必须有全字段归一化')
 assert.match(defs, /key === 'toolIndicator'/, 'normalizeThemeState 必须跳过 registry 动态选项字段')
-assert.match(store, /normalizeThemeState\(state\)/, 'migrate 必须调用 defs 驱动的归一化')
+assert.match(migration, /normalizeThemeState\(state\)/, 'migrate 必须调用 defs 驱动的归一化')
 assert.match(presetReducer, /normalizeThemeState\(pickCustomPresetTheme/, 'applyCustomPreset 必须防御性归一化')
 
 // ── 骨架：字段级恢复默认 ──

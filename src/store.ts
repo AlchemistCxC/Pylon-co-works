@@ -1,14 +1,13 @@
 import { create } from 'zustand'
 import { persist } from 'zustand/middleware'
-import { PROFILE_SCHEMA_VERSION } from './profilePersistence'
 import { DEFAULT_CC_LAYOUT, cloneCcLayout, setCcHiddenState, setCcScaleState, updateCcPlacementState } from './ccLayoutState'
 import type { CcLayoutV3, CcWidgetPlacement } from './ccLayoutState'
-import { createCustomPresetId, normalizeCustomPresets } from './customPresets'
-import { normalizeThemeMigrationState } from './themeMigration'
+import { createCustomPresetId } from './customPresets'
 import { markZoneCustom } from './themePresetState'
 import { ZONE_FIELDS } from './themeFields'
 import { clampCcHeight, resolveVisibleStatusWidgetCount } from './ccHeightState'
-import { normalizeThemeState, THEME_DEFAULTS } from './themeFieldDefs'
+import { THEME_DEFAULTS, THEME_SETTING_KEYS } from './themeFieldDefs'
+import { THEME_SCHEMA_VERSION, themeDomainMigrate } from './domains/theme/migration'
 import type { CustomPreset } from './customPresets'
 import {
   applyCustomPresetReducer,
@@ -207,47 +206,24 @@ export const useStore = create<ThemeState>()(persist(
   applyCustomPreset: (id) => set(state => applyCustomPresetReducer(state, id) ?? {}),
   removeCustomPreset: (id) => set(state => removeCustomPresetReducer(state, id)),
 }),
-{ name: 'pylon-theme', version: PROFILE_SCHEMA_VERSION, migrate: persisted => {
-  const state = (persisted || {}) as Partial<ThemeState> & { profiles?: Profile[]; activeProfileId?: string }
-  const normalizedTheme = normalizeThemeMigrationState(state, {
+{ name: 'pylon-theme', version: THEME_SCHEMA_VERSION, migrate: persisted =>
+  themeDomainMigrate(persisted, {
     base: DEFAULTS,
     appliedPreset: DEFAULTS.appliedPreset,
     custom: DEFAULTS.custom,
     ccLayout: DEFAULTS.ccLayout,
-  })
-  Object.assign(state, normalizedTheme)
-  // defs 驱动的通用值归一化（select 枚举/number 范围/boolean/color/text 类型 → def.default）
-  Object.assign(state, normalizeThemeState(state))
-  // 历史字段特殊规则（与 defs 类型不完全一致，保留既有语义）
-  state.inputShowPlaceholder = state.inputShowPlaceholder !== false
-  state.inputShowHistoryHint = state.inputShowHistoryHint !== false
-  state.inputVariant = state.inputVariant === 'cli' || state.inputVariant === 'composer' || state.inputVariant === 'compact' || state.inputVariant === 'command'
-    ? state.inputVariant
-    : state.inputMode === 'cli' ? 'cli' : 'composer'
-  state.inputMode = state.inputVariant === 'cli' ? 'cli' : 'default'
-  const migratedInputMode = typeof state.inputMode === 'string' ? state.inputMode : DEFAULTS.inputMode
-  const migratedHintMode = state.cliHintMode === 'hidden' || state.cliHintMode === 'compact' ? state.cliHintMode : 'full'
-  const migratedFooterLayout = state.footerLayout === 'peri' ? 'peri' : 'free'
-  const migratedOverflowMode = state.cliOverflowMode === 'grow' || state.cliOverflowMode === 'overlay' ? state.cliOverflowMode : 'fixed-scroll'
-  state.ccHeight = clampCcHeight(typeof state.ccHeight === 'number' ? state.ccHeight : DEFAULTS.ccHeight, {
-    inputMode: migratedInputMode,
-    footerLayout: migratedFooterLayout,
-    hintMode: migratedHintMode,
-    visibleStatusWidgets: resolveVisibleStatusWidgetCount({
-      hiddenIds: Array.isArray(state.ccHidden) ? state.ccHidden : [],
-      inputMode: migratedInputMode,
-      ccStyle: state.ccStyle || 'wave',
-    }),
-    cliOverflowMode: migratedOverflowMode,
-  })
-  state.customPresets = normalizeCustomPresets(state.customPresets)
-  return state as ThemeState
-}, partialize: (state) => {
-  // 2026-08-02 修复：customPresets 不再剔除——用户保存的自定义预设必须跨重启保留
-  // （Settings 提供完整保存/应用/删除 UI，此前重启即丢属缺陷）。ccEditMode/custom/函数照旧排除。
-  const { ccEditMode, setCcEditMode, setCcHeight, updateCcPlacement, resetCcLayout, setCcHidden, setCcScale, resetTheme, applyZonePreset, setZoneField, setGlobalPreset, saveCustomPreset, applyCustomPreset, removeCustomPreset, custom, ...persisted } = state as ThemeState
-  return persisted
-}, onRehydrateStorage: () => state => {
+  }),
+  partialize: (state) => {
+    // A4 白名单：THEME_SETTING_KEYS（主题字段，含 ccLayout/ccHidden/ccScale 对象）+ 显式 meta。
+    // 取代"排除式 partialize"——杜绝新增 action/临时字段误持久化，并修剪迁移遗留的旧键。
+    const persisted: Record<string, unknown> = {}
+    for (const key of THEME_SETTING_KEYS) persisted[key] = state[key]
+    persisted.appliedPreset = state.appliedPreset
+    persisted.custom = state.custom
+    persisted.customPresets = state.customPresets
+    return persisted
+  },
+  onRehydrateStorage: () => state => {
   // 阶段 1 迁移：旧 pylon-theme 里的 profiles/activeProfileId 迁入 identityStore（一次性）
   const legacy = state as unknown as { profiles?: Profile[]; activeProfileId?: string }
   if (legacy?.profiles && Array.isArray(legacy.profiles) && legacy.profiles.length > 0) {
