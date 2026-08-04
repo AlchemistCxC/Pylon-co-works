@@ -1,3 +1,5 @@
+import { toolIdFromMessage } from '../../domains/tool/id.ts'
+
 export function assertNever(value: never, context = '未处理的消息状态'): never {
   throw new Error(`${context}: ${String(value)}`)
 }
@@ -32,12 +34,6 @@ export type RenderDecision =
   | { kind: 'skip'; reason: VisibilityReason }
 
 export type VisibilityReason = 'empty-assistant'
-
-function toolIdFromMessage(message: Message): string | null {
-  if (message.role !== 'tool' || !message.id.startsWith('tool-')) return null
-  const toolId = message.id.slice('tool-'.length)
-  return toolId || null
-}
 
 export function renderDecisionKind(decision: RenderDecision): RenderDecision['kind'] {
   switch (decision.kind) {

@@ -1,15 +1,10 @@
 import type { Message } from './messageTypes'
+import { toolIdFromMessage } from '../../domains/tool/id.ts'
 
 export interface MessageLookups {
   resolvedToolIds: Set<string>
   failedToolIds: Set<string>
   runningToolIds: Set<string>
-}
-
-function toolIdFromMessage(message: Message): string | null {
-  if (message.role !== 'tool' || !message.id.startsWith('tool-')) return null
-  const id = message.id.slice('tool-'.length)
-  return id || null
 }
 
 export function buildMessageLookups(messages: readonly Message[]): MessageLookups {

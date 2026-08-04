@@ -1,5 +1,6 @@
 import type { Message } from './messageTypes.ts'
 import { normalizeToolStatus, type ToolVisualState } from './toolStatus.ts'
+import { toolIdFromMessage } from '../../domains/tool/id.ts'
 import { truncateToWidth } from '../../utils/textWidth.ts'
 import { resolveToolRenderer } from './toolPresentation.ts'
 
@@ -21,12 +22,6 @@ export interface ToolPresentationModel {
 
 const COLLAPSIBLE_OUTPUT_CHAR_LIMIT = 1200
 const COLLAPSIBLE_OUTPUT_LINE_LIMIT = 30
-
-function toolIdFromMessage(message: Message): string | null {
-  if (message.role !== 'tool' || !message.id.startsWith('tool-')) return null
-  const toolId = message.id.slice('tool-'.length)
-  return toolId || null
-}
 
 function outputLineCount(output: string): number {
   if (!output) return 0
