@@ -346,12 +346,13 @@ export default function Settings({ onClose, activeSessionId }: { onClose?: () =>
                 </div>
                 <div className="set-custom-preset-save">
                   <input className="set-input" value={customPresetName} onChange={event => setCustomPresetName(event.target.value)} placeholder="自定义预设名称" />
-                  <button className="ps-btn sm" onClick={() => {
-                    if (!customPresetName.trim()) return
-                    const id = saveCustomPreset(customPresetName)
-                    applyCustomPreset(id)
-                    setCustomPresetName('')
-                  }}>保存当前</button>
+                  {/* A3：保存必须命名——空名禁用按钮（数据层 saveCustomPresetReducer 抛错兜底），不再静默 return */}
+                  <button className="ps-btn sm" disabled={!customPresetName.trim()} title={customPresetName.trim() ? undefined : '保存必须命名'}
+                    onClick={() => {
+                      const id = saveCustomPreset(customPresetName)
+                      applyCustomPreset(id)
+                      setCustomPresetName('')
+                    }}>保存当前</button>
                 </div>
                 {customPresets.length > 0 && <div className="set-custom-presets">
                   {customPresets.map(preset => <div className="set-custom-preset" key={preset.id}>
