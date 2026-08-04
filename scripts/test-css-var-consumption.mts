@@ -34,6 +34,7 @@ const defs = read(join(ROOT, 'themeFieldDefs.ts'))
 const defsBlock = defs.slice(defs.indexOf('export const THEME_FIELD_DEFS'))
 const matches = [...defsBlock.matchAll(/^\s{2}([A-Za-z0-9]+): \{/gm)]
 const injected = new Set<string>()
+const injectedFields = new Set<string>()
 for (let i = 0; i < matches.length; i += 1) {
   const key = matches[i][1]
   const start = matches[i].index + matches[i][0].length
@@ -44,10 +45,28 @@ for (let i = 0; i < matches.length; i += 1) {
   if (!(/\btype:\s*'(color|number)'/.test(body) || /\.\.\.(?:C|N)\(/.test(body))) continue
   const explicit = body.match(/cssVar:\s*'(--[a-z0-9-]+)'/)
   injected.add(explicit ? explicit[1] : kebab(key))
+  injectedFields.add(key)
 }
 // App.tsx 手写注入 var（cssVars 对象键）
 const app = read(join(ROOT, 'App.tsx'))
 for (const m of app.matchAll(/'((?:--[a-z0-9-]+))':/g)) injected.add(m[1])
+
+// ── F：App 订阅集必须精确覆盖注入集（缺订阅 = var 不注入 → 主题值落 fallback；
+//    死订阅 = 无谓重渲染。两侧都不允许）──
+const appSelectorStart = app.indexOf('const s = useStore(useShallow(s => ({')
+const appSelector = app.slice(appSelectorStart, app.indexOf('})))', appSelectorStart))
+const subscribed = new Set<string>()
+for (const m of appSelector.matchAll(/s\.([A-Za-z0-9]+)/g)) subscribed.add(m[1])
+// 手写/data 属性字段（App 直读，不经 THEME_CSS_VAR_MAP）
+const DATA_ATTR_FIELDS = new Set([
+  'uiScheme', 'msgStyle', 'messageLayout', 'footerLayout', 'cliOverflowMode',
+  'globalBgImage', 'globalBgColor', 'globalFont', 'chatFont', 'msgFont', 'msgTextColor',
+  'sidebarBgImage', 'chatBgImage', 'inputBgImage', 'statusBgImage', 'rightBgImage',
+])
+const missingSub = [...injectedFields].filter(f => !subscribed.has(f)).sort()
+assert.deepEqual(missingSub, [], `缺订阅（var 不注入，主题值落 fallback）：\n${missingSub.join('\n')}`)
+const deadSub = [...subscribed].filter(f => !injectedFields.has(f) && !DATA_ATTR_FIELDS.has(f)).sort()
+assert.deepEqual(deadSub, [], `死订阅（订阅但无消费）：\n${deadSub.join('\n')}`)
 
 // ── 消费集 / 声明集 ──
 const consumed = new Set<string>()
