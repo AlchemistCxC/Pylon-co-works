@@ -19,7 +19,6 @@
 /* ── ModelWidget variants ── */
 .model-tag { font-size:12px; color:var(--pill-text,#999); padding:0; border:none; background:transparent; cursor:pointer; font-family:var(--mono); }
 .model-tag:hover { text-decoration:underline; }
-.model-dropdown { position:relative; }
 .model-menu { position:absolute; bottom:100%; left:0; margin-bottom:4px; background:#000; border:1px solid #505050; border-radius:0; overflow:hidden; min-width:180px; z-index:100; }
 .model-item { padding:6px 14px; font-size:12px; font-family:var(--mono); color:#999; cursor:pointer; }
 .model-item:hover { background:#373737; color:#fff; }
@@ -77,7 +76,6 @@
 .cc-send-minimal:hover, .cc-attach-minimal:hover { color:var(--text); }
 
 /* ── cc widget separators (controlled by cc layout in ControlCenter) ── */
-.cc-model-widget { display:flex; align-items:center; }
 
 .cc-variant-terminal .cc-model-minimal,
 .cc-variant-terminal .cc-mode-minimal,

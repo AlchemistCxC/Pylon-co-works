@@ -10,7 +10,7 @@
  */
 
 import type { ThemeSettings } from './store'
-import { ZONE_FIELDS } from './themeFields.ts'
+import { ZONE_FIELDS } from './themeFieldDefs.ts'
 
 // ── 区域字段映射 ────────────────────────────────────────────────
 // 单一真值表在 themeFields.ts；本文件仅 re-export，保证旧导入路径不变。

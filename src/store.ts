@@ -4,7 +4,7 @@ import { DEFAULT_CC_LAYOUT, cloneCcLayout, setCcHiddenState, setCcScaleState, up
 import type { CcLayoutV3, CcWidgetPlacement } from './ccLayoutState'
 import { createCustomPresetId } from './customPresets'
 import { markZoneCustom } from './themePresetState'
-import { ZONE_FIELDS } from './themeFields'
+import { ZONE_FIELDS } from './themeFieldDefs'
 import { clampCcHeight, resolveVisibleStatusWidgetCount } from './ccHeightState'
 import { THEME_SETTING_KEYS } from './themeFieldDefs'
 import { THEME_SCHEMA_VERSION, themeDomainMigrate } from './domains/theme/migration'

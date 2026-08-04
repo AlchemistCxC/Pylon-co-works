@@ -12,6 +12,5 @@
 .panel-status { min-height:180px; display:flex; flex-direction:column; align-items:center; justify-content:center; gap:8px; padding:24px 16px; text-align:center; color:var(--text-dim); }
 .panel-status-title { color:var(--text); font-size:14px; }
 .panel-status-detail { max-width:280px; font-size:12px; line-height:1.6; }
-.panel-status-error .panel-status-title { color:var(--danger, #c94f5f); }
 .panel-status-retry { padding:5px 12px; border:1px solid var(--border); border-radius:4px; background:var(--bg-panel); color:var(--text); cursor:pointer; }
 .panel-status-retry:hover { background:var(--bg-hover); }
