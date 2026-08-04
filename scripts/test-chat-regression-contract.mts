@@ -9,7 +9,11 @@ const replayState = readFileSync(new URL('replayState.ts', root), 'utf8')
 const persistence = readFileSync(new URL('messagePersistence.ts', root), 'utf8')
 const eventState = readFileSync(new URL('sessionEventState.ts', root), 'utf8')
 
-assert.match(chatView, /attachChatEventController\(controllerRefs\)/, 'ChatView 必须挂载事件控制器')
+// CV-4：事件控制器挂接收敛到 useSessionLifecycle（attach 必须先于切换 effect）
+const lifecycleHook = readFileSync(new URL('useSessionLifecycle.ts', root), 'utf8')
+assert.match(chatView, /useSessionLifecycle\(/, 'ChatView 必须消费会话生命周期 hook')
+assert.match(lifecycleHook, /attachChatEventController\(controllerRefs\)/, 'hook 必须挂载事件控制器')
+assert.ok(lifecycleHook.indexOf('attachChatEventController(controllerRefs)') < lifecycleHook.indexOf('if (sessionId === prevSessionRef.current) return'), 'controller attach 必须先于 session 切换 effect 声明')
 assert.match(store, /resolveReplayEventMode/, 'reducer 必须使用 replay/live 事件归一化')
 assert.match(store, /terminationScope/, 'reducer 必须区分 replay/live 终止事件')
 assert.match(store, /message\.role === 'tool' && message\.running/, '历史 Tool 必须有稳定终态收敛')
