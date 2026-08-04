@@ -17,7 +17,7 @@ assert.match(lifecycle, /listen<AgentStatusPayload>\('pylon:agent-status'/, '必
 assert.match(lifecycle, /const activeAgent = useIdentityStore\.getState\(\)\.activeAgent/, 'listener 必须从最新 identity store 读取 activeAgent')
 assert.match(lifecycle, /normalizeAgentStatus\(event\.payload, activeAgent\)/, 'listener 必须按当前 activeAgent 规范化 payload')
 assert.match(lifecycle, /useRuntimeStore\.getState\(\)\.setAgentStatus\(status\.agentId \|\| status\.agent \|\| activeAgent, status\)/, 'listener 必须按 payload.agentId 路由状态，缺省回退 agent/activeAgent')
-assert.match(lifecycle, /return \(\) => \{ disposed = true; unlisten\.then\(stop => stop\(\)\) \}/, '卸载时必须先设置 disposed 并清理 resolved unlisten')
+assert.match(lifecycle, /return \(\) => \{ disposed = true; unlisten\.then\(stop => stop\(\)\)\.catch\(\(\) => \{\}\) \}/, '卸载时必须先设置 disposed 并清理 resolved unlisten（H1 加 catch 兜底）')
 
 assert.match(runtimeStore, /agentStatuses: Record<string, AgentStatus>/)
 assert.match(runtimeStore, /setAgentStatus: \(id: string, status: AgentStatus\)/)

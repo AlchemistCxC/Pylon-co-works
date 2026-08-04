@@ -3,6 +3,7 @@ import React from 'react'
 import { invoke } from '@tauri-apps/api/core'
 import { useStore } from '../../store'
 import { useIdentityStore } from '../../identityStore'
+import { IS_TAURI } from '../../infrastructure/tauri/env'
 import { useRuntimeStore } from '../../runtimeStore'
 import { AnimatePresence, motion, useReducedMotion } from 'motion/react'
 import Anser from 'anser'
@@ -42,7 +43,6 @@ interface Props { sessionId: string | null }
 type Message = PipelineMessage
 
 // dev/浏览器 mock：无 Tauri 后端时（预览调样式用）展示的演示对话
-const IS_TAURI = typeof (window as any).__TAURI_INTERNALS__ !== 'undefined' || typeof (window as any).__TAURI__ !== 'undefined'
 const MOCK_GENERATION_PHASES: GenerationPhase[] = [
   { kind: 'thinking' },
   { kind: 'tool', name: 'Read' },

@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { IS_TAURI } from '../infrastructure/tauri/env'
 import { invoke } from '@tauri-apps/api/core'
 import { advanceCodeEatingBehavior, getCodeComment, shouldStartCodeEating, shouldStartTabletCoding, type PetBehavior } from './petBehavior'
 import { classifyPetPointerGesture, choosePetDestination, clampPetPosition, resolvePetClick } from './petMotion'
@@ -57,7 +58,6 @@ interface PointerSession {
 
 const STORAGE_KEY = PET_STORAGE_KEY
 const POSITION_KEY = PET_POSITION_KEY
-const IS_TAURI = typeof (window as any).__TAURI_INTERNALS__ !== 'undefined' || typeof (window as any).__TAURI__ !== 'undefined'
 
 const EMPTY_STATS: PetStats = {
   messages: 0, prompts_completed: 0, prompts_failed: 0, tokens_total: 0, token_xp: 0,

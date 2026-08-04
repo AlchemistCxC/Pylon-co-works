@@ -5,6 +5,7 @@ import { useStore } from './store'
 import { useIdentityStore, type AgentEntry } from './identityStore'
 import { useRuntimeStore } from './runtimeStore'
 import { useWorkspaceStore } from './workspaceStore'
+import { IS_TAURI } from './infrastructure/tauri/env'
 import { belongsToProfile } from './components/chat/sessionProfile'
 import { useShallow } from 'zustand/react/shallow'
 import './App.css'
@@ -41,7 +42,6 @@ function LazyDialogFallback() {
 const appWindowSingleton = (() => { try { return getCurrentWindow() } catch { return { minimize() {}, isFullscreen() { return Promise.resolve(false) }, setFullscreen(_v: boolean) { return Promise.resolve() }, destroy() {} } } })()
 
 // 非 Tauri（浏览器预览）时 @tauri-apps/api 的 listen/invoke 会 reject，统一守卫
-const IS_TAURI = typeof (window as any).__TAURI_INTERNALS__ !== 'undefined' || typeof (window as any).__TAURI__ !== 'undefined'
 
 export default function App() {
   const [activeSession, setActiveSession] = useState<string | null>(null)
@@ -117,7 +117,7 @@ export default function App() {
       const status = normalizeAgentStatus(event.payload, activeAgent)
       useRuntimeStore.getState().setAgentStatus(status.agentId || status.agent || activeAgent, status)
     })
-    return () => { disposed = true; unlisten.then(stop => stop()) }
+    return () => { disposed = true; unlisten.then(stop => stop()).catch(() => {}) }
   }, [])
 
   // 窗口尺寸记忆：启动恢复上次尺寸，resize 防抖持久化（纯前端，不依赖后端）

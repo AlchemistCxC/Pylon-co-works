@@ -1,5 +1,6 @@
 import { strict as assert } from 'node:assert'
-import { hasTauriRuntime, resolveBackgroundImage } from '../src/backgroundImage.ts'
+import { resolveBackgroundImage } from '../src/backgroundImage.ts'
+import { hasTauriRuntime } from '../src/infrastructure/tauri/env.ts'
 
 assert.equal(hasTauriRuntime({ __TAURI_INTERNALS__: {} }), true)
 assert.equal(hasTauriRuntime({ __TAURI__: {} }), true, 'withGlobalTauri 环境也必须识别为 Tauri runtime')

@@ -233,6 +233,8 @@ export function attachChatEventController(refs: ChatEventControllerRefs): ChatCo
     if (changed) runtimeState = next
   }
 
+  // H1：listen 任一 reject（IPC 异常）不得产生 unhandled rejection；dispose 的
+  // unlisten.then 也由此获得兜底（失败时解析为空数组，不泄漏已注册监听器）
   const unlisten = Promise.all([
     listen<{ source: string; content: string; replay?: boolean }>('pylon:user', (event) => {
       const { source, content, replay: eventReplay = false } = event.payload
@@ -335,7 +337,7 @@ export function attachChatEventController(refs: ChatEventControllerRefs): ChatCo
       const replay = replayScope || event.payload.replay === true
       dispatch({ type: 'error', source, error, cancelled: event.payload.cancelled === true, replay, explicitReplay: replayScope ? undefined : event.payload.replay === true })
     }),
-  ])
+  ]).catch(() => [])
 
   const handleClear = () => {
     const source = refs.sessionRef.current

@@ -1,4 +1,5 @@
 import { useState, useEffect, useRef } from 'react'
+import { IS_TAURI } from '../infrastructure/tauri/env'
 import * as Tabs from '@radix-ui/react-tabs'
 import { invoke } from '@tauri-apps/api/core'
 import { getCurrentWindow } from '@tauri-apps/api/window'
@@ -44,7 +45,7 @@ function Sel({ value, onChange, options }: { value:string; onChange:(v:string)=>
 function WindowSizeRow() {
   const [size, setSize] = useState('—')
   useEffect(() => {
-    if (typeof (window as any).__TAURI_INTERNALS__ === 'undefined') return
+    if (!IS_TAURI) return
     let cancelled = false
     getCurrentWindow().outerSize().then(({ width, height }) => {
       if (!cancelled) setSize(`${width}×${height}`)
@@ -83,7 +84,7 @@ function Group({ title, children, defaultOpen }: { title:string; children:React.
 function ConfigBackupRow() {
   const [msg, setMsg] = useState<string | null>(null)
   const fileRef = useRef<HTMLInputElement>(null)
-  const isTauri = typeof (window as any).__TAURI_INTERNALS__ !== 'undefined'
+  const isTauri = IS_TAURI
   const doExport = async () => {
     try {
       const json = buildExportPayload(localStorage)
