@@ -4,6 +4,7 @@ import { resolveConnectorColor } from '../src/components/chat/toolPresentation.t
 
 const css = readFileSync(new URL('../src/components/chat/ChatView.css', import.meta.url), 'utf8')
 const chatView = readFileSync(new URL('../src/components/chat/ChatView.tsx', import.meta.url), 'utf8')
+const connectorHook = readFileSync(new URL('../src/components/chat/useToolConnectors.ts', import.meta.url), 'utf8')
 const pipeline = readFileSync(new URL('../src/components/chat/chatRowPipeline.ts', import.meta.url), 'utf8')
 const connector = readFileSync(new URL('../src/components/chat/ToolConnector.tsx', import.meta.url), 'utf8')
 const preview = readFileSync(new URL('../src/components/SettingsPreview.tsx', import.meta.url), 'utf8')
@@ -29,15 +30,15 @@ assert.match(chatView, /React\.Fragment key=\{desc\.key\}/, '行与连接线共�
 // ── 测量：展开的工具仍保持连接 ──
 assert.doesNotMatch(chatView, /previousRow\.querySelector\('\.term-tool-body'\) !== null/, '展开 body 不应截断连接线')
 assert.doesNotMatch(chatView, /connector\.style\.display = 'none'/, '展开 body 不应隐藏连接线')
-assert.match(chatView, /connector\.style\.display = 'block'/, '连接线始终保持显示')
-assert.match(chatView, /connector\.previousElementSibling/, '上一行 = 连接线前兄弟')
-assert.match(chatView, /const connectorParent = connector\.offsetParent as HTMLElement \| null/, '连接线必须相对自身实际定位父级测量')
-assert.match(chatView, /const previousCenter = previousRect\.top - parentTop \+ previousRect\.height \/ 2/, '线起点必须是上一个 head 的真实中心')
-assert.match(chatView, /const currentCenter = currentRect\.top - parentTop \+ currentRect\.height \/ 2/, '线终点必须是当前 head 的真实中心')
-assert.match(chatView, /for \(const row of container\.querySelectorAll\('\.term-row'\)\)/, '必须观察所有消息行，reasoning 展开后才能触发后续 connector 重测')
-assert.match(chatView, /observer\.observe\(row\)/, '必须观察消息行')
-assert.match(chatView, /Tool 或 reasoning body 展开、字号变化由行 RO 触发重测/, '注释必须明确 reasoning 展开会触发重测')
-assert.match(chatView, /}, \[messages\]\)/, 'messages 变化必须重跑绑定')
+assert.match(connectorHook, /connector\.style\.display = 'block'/, '连接线始终保持显示')
+assert.match(connectorHook, /connector\.previousElementSibling/, '上一行 = 连接线前兄弟')
+assert.match(connectorHook, /const connectorParent = connector\.offsetParent as HTMLElement \| null/, '连接线必须相对自身实际定位父级测量')
+assert.match(connectorHook, /const previousCenter = previousRect\.top - parentTop \+ previousRect\.height \/ 2/, '线起点必须是上一个 head 的真实中心')
+assert.match(connectorHook, /const currentCenter = currentRect\.top - parentTop \+ currentRect\.height \/ 2/, '线终点必须是当前 head 的真实中心')
+assert.match(connectorHook, /for \(const row of container\.querySelectorAll\('\.term-row'\)\)/, '必须观察所有消息行，reasoning 展开后才能触发后续 connector 重测')
+assert.match(connectorHook, /observer\.observe\(row\)/, '必须观察消息行')
+assert.match(connectorHook, /Tool 或 reasoning body 展开、字号变化由行 RO 触发重测/, '注释必须明确 reasoning 展开会触发重测')
+assert.match(connectorHook, /}, \[messages, containerRef\]\)/, 'messages 变化必须重跑绑定')
 
 // ── Preview 独立渲染：由行伪元素读取真实主题状态颜色 ──
 assert.match(preview, /const connectorStatus = previous\?\.status/, '预览连接线必须取上一个工具状态')
