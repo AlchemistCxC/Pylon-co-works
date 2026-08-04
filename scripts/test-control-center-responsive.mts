@@ -23,7 +23,10 @@ assert.equal(inputCss.includes('var(--cli-prompt-color,var(--cli-text-color,#999
 assert.equal(inputCss.includes('var(--cli-content-offset-y,0px)'), true)
 assert.equal(inputCss.includes('box-sizing:border-box'), true)
 assert.equal(controlCenter.includes('className="cc-command-hint"'), true)
-assert.equal(controlCenter.includes('<div className="cc-status-secondary">{renderSlot(\'status-secondary\')}</div>\n                <div className="cc-status-primary">{renderSlot(\'status-primary\')}</div>'), true)
+// C3：三槽位抽为 statusSlots 片段，peri 分支引用之（结构断言改为片段存在 + 引用点）
+assert.equal(controlCenter.includes('<div className="cc-status-secondary">{renderSlot(\'status-secondary\')}</div>'), true)
+assert.equal(controlCenter.includes('<div className="cc-status-primary">{renderSlot(\'status-primary\')}</div>'), true)
+assert.equal(controlCenter.includes('<div className="cc-footer-status-row">{statusSlots}</div>'), true, 'peri 分支必须消费共享 statusSlots')
 assert.equal(controlCenter.includes("cliHintMode !== 'hidden'"), true)
 assert.equal(controlCenter.includes("cliHintMode === 'full'"), true)
 assert.equal(controlCenter.includes('<span className="cc-command-hint-key">/: 命令</span>'), true)

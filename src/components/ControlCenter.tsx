@@ -140,6 +140,22 @@ export default function ControlCenter({ sessionId }: Props) {
     return () => window.removeEventListener('keydown', onKey)
   }, [editMode, selected, setCcEditMode])
 
+  // C3：peri/free 两分支共享的三槽位与命令提示，抽为片段；仅外层结构（hint 位置）保留差异
+  const statusSlots = (
+    <>
+      <div className="cc-status-secondary">{renderSlot('status-secondary')}</div>
+      <div className="cc-status-primary">{renderSlot('status-primary')}</div>
+      <div className="cc-actions">{renderSlot('actions')}</div>
+    </>
+  )
+  const commandHint = inputMode === 'cli' && cliHintMode !== 'hidden' ? (
+    <div className="cc-command-hint" id={hintId} aria-label="输入快捷键提示">
+      <span className="cc-command-hint-key">/: 命令</span>
+      <span className="cc-hint-secondary"><i>|</i> Shift+Enter: 换行</span>
+      {cliHintMode === 'full' && <span className="cc-hint-tertiary"><i>|</i> Shift+Tab: 模式</span>}
+    </div>
+  ) : null
+
   return (
     <div className={`control-center ${inputMode === 'cli' ? 'cli-mode' : ''} ${editMode ? 'cc-editing' : ''} cc-variant-${ccVariant}`}
       style={{
@@ -163,34 +179,16 @@ export default function ControlCenter({ sessionId }: Props) {
           <div className="cc-footer cc-footer-peri">
             <div className="cc-input-slot">{renderWidget('input')}</div>
             <div className="cc-footer-status">
-              <div className="cc-footer-status-row">
-                <div className="cc-status-secondary">{renderSlot('status-secondary')}</div>
-                <div className="cc-status-primary">{renderSlot('status-primary')}</div>
-                <div className="cc-actions">{renderSlot('actions')}</div>
-              </div>
-              {inputMode === 'cli' && cliHintMode !== 'hidden' && (
-                <div className="cc-command-hint" id={hintId} aria-label="输入快捷键提示">
-                  <span className="cc-command-hint-key">/: 命令</span>
-                  <span className="cc-hint-secondary"><i>|</i> Shift+Enter: 换行</span>
-                  {cliHintMode === 'full' && <span className="cc-hint-tertiary"><i>|</i> Shift+Tab: 模式</span>}
-                </div>
-              )}
+              <div className="cc-footer-status-row">{statusSlots}</div>
+              {commandHint}
             </div>
           </div>
         ) : (
           <>
             <div className="cc-input-slot">{renderWidget('input')}</div>
             <div className="cc-status-row">
-              <div className="cc-status-secondary">{renderSlot('status-secondary')}</div>
-              <div className="cc-status-primary">{renderSlot('status-primary')}</div>
-              <div className="cc-actions">{renderSlot('actions')}</div>
-              {inputMode === 'cli' && cliHintMode !== 'hidden' && (
-                <div className="cc-command-hint" id={hintId} aria-label="输入快捷键提示">
-                  <span className="cc-command-hint-key">/: 命令</span>
-                  <span className="cc-hint-secondary"><i>|</i> Shift+Enter: 换行</span>
-                  {cliHintMode === 'full' && <span className="cc-hint-tertiary"><i>|</i> Shift+Tab: 模式</span>}
-                </div>
-              )}
+              {statusSlots}
+              {commandHint}
             </div>
           </>
         )}
