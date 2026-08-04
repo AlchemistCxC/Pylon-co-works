@@ -164,6 +164,8 @@ export function useSessionLifecycle(
       controllerHandleRef.current?.clearReplay(s.source)
       createSession()
     }
+    // setters 是 useState 稳定函数（经 setters 参数传入，eslint 无法识别稳定性），无需加入 deps
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [sessionId])
 
   useEffect(() => {

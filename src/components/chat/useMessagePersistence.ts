@@ -11,13 +11,14 @@ export function useMessagePersistence(
   messages: Message[],
   refs: { sessionRef: React.MutableRefObject<string | null>; messageOwnerRef: React.MutableRefObject<string | null> },
 ) {
-  const { sessionRef, messageOwnerRef } = refs
   useEffect(() => {
-    const ownerId = messageOwnerRef.current
-    const source = sessionRef.current
-    const renderedSource = sessionRef.current
+    const ownerId = refs.messageOwnerRef.current
+    const source = refs.sessionRef.current
+    const renderedSource = refs.sessionRef.current
     if (!canPersistMessages({ ownerId, source, renderedSessionId: sessionId, renderedSource }) || messages.length === 0) return
     const ownedSessionId = ownerId as string
     try { persistMessageSnapshot(ownedSessionId, messages, localStorage) } catch {}
+    // refs 是稳定 ref 对象（来自 useSessionLifecycle），无需加入 deps
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [messages, sessionId])
 }
