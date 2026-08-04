@@ -7,43 +7,11 @@ import { readPetPosition, writePetPosition, clearPetPosition, persistPetState, P
 import { useRuntimeStore } from '../runtimeStore'
 import './PetCompanion.css'
 
-type GrowthStage = 'seed' | 'sprout' | 'hopper' | 'guardian' | 'luminary'
+import { normalizePetState, type PetGrowthStage, type PetState, type PetStats } from '../infrastructure/tauri/petContracts'
 
-interface PetStats {
-  messages: number
-  prompts_completed: number
-  prompts_failed: number
-  tokens_total: number
-  token_xp: number
-  tools_started: number
-  tools_succeeded: number
-  tools_failed: number
-  tool_success_rate: number
-  interactions: number
-  active_days: number
-  streak_days: number
-  longest_streak: number
-}
-
-interface PetState {
-  name: string
-  mood: string
-  happiness: number
-  energy: number
-  xp: number
-  bond: number
-  born_at_ms: number
-  last_seen_day: number
-  first_chunk_at_ms: number | null
-  stats: PetStats
-  memories: string[]
-  stage: GrowthStage
-  title: string
-  age_days: number
-  next_stage_xp: number | null
-  growth_progress: number
-  msg?: string
-}
+// H2：宠物 DTO 集中 + 收窄（petContracts），invoke 结果一律经 normalize 兜底再入库
+type GrowthStage = PetGrowthStage
+const fetchPet = (cmd: string, args?: Record<string, unknown>) => invoke<unknown>(cmd, args).then(normalizePetState)
 
 interface Position { x: number; y: number }
 interface PointerSession {
@@ -173,8 +141,8 @@ export default function PetCompanion({ rightInset = 0 }: { rightInset?: number }
       try {
         const saved = localStorage.getItem(STORAGE_KEY)
         save(saved
-          ? await invoke<PetState>('pet_action', { action: 'restore', value: saved })
-          : await invoke<PetState>('get_pet'))
+          ? await fetchPet('pet_action', { action: 'restore', value: saved })
+          : await fetchPet('get_pet'))
       } catch (cause) { setError(String(cause)) }
     }
     restore()
@@ -184,7 +152,7 @@ export default function PetCompanion({ rightInset = 0 }: { rightInset?: number }
     if (!IS_TAURI) return
     const poll = async () => {
       if (document.visibilityState !== 'visible') return
-      try { save(await invoke<PetState>('get_pet')) } catch { /* 下一轮重试 */ }
+      try { save(await fetchPet('get_pet')) } catch { /* 下一轮重试 */ }
     }
     const timer = window.setInterval(poll, 12_000)
     const onVisibility = () => { if (document.visibilityState === 'visible') poll() }
@@ -359,7 +327,7 @@ export default function PetCompanion({ rightInset = 0 }: { rightInset?: number }
       setComment('')
     }, 1200)
     if (IS_TAURI) {
-      invoke<PetState>('pet_action', { action: 'poke' })
+      fetchPet('pet_action', { action: 'poke' })
         .then(save)
         .catch(cause => setError(String(cause)))
     }

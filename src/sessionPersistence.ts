@@ -1,22 +1,10 @@
-export interface PersistedProfile {
-  id: string
-}
+import type { PersistedProfile } from './profilePersistence.ts'
+import type { Session } from './identityStore.ts'
 
-export interface PersistedSession {
-  id: string
-  periId?: string
-  name: string
-  source: string
-  profileId: string
-  createdAt: number
-  lastActiveAt: number
-  platform: string
-  workdir: string
-  sessionPrompt: string
-  skills: string[]
-  hooks: string[]
-  autoName: string
-}
+// H2：DTO 单源——Session 定义在 identityStore（域类型），持久化层引用之；
+// PersistedProfile 定义在 profilePersistence。删除逐字节重复的本地声明，
+// normalizeSession 的返回类型 = Session 后，新增字段漏归一化即编译期报错。
+export type PersistedSession = Session
 
 export const SESSION_SCHEMA_VERSION = 1
 export const SESSION_STORAGE_KEY = 'pylon-sessions'
