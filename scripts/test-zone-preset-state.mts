@@ -30,6 +30,8 @@ function makeState(overrides: Partial<ThemePresetState> = {}): ThemePresetState 
     ccHeight: 150,
     ccBgHeight: 150,
     inputMode: 'cli',
+    inputVariant: 'cli',
+    inputSubmitButtonMode: 'inline',
     footerLayout: 'free',
     cliHintMode: 'full',
     ccHidden: [],
@@ -37,6 +39,23 @@ function makeState(overrides: Partial<ThemePresetState> = {}): ThemePresetState 
     cliOverflowMode: 'fixed-scroll',
     ...overrides,
   }
+}
+
+// ── D1 校验漏斗：ccHeight clamp + ccBgHeight 跟随 + inputVariant↔inputMode 联动 ──
+{
+  const state = makeState()
+  // ccHeight 低于最小高（64 base）→ clamp 上调，ccBgHeight 跟随
+  const lowPatch = setZoneFieldReducer(state, 'cc', { ccHeight: 5 })
+  assert.equal(typeof lowPatch.ccHeight, 'number')
+  assert.ok((lowPatch.ccHeight as number) >= 64, 'ccHeight 必须 clamp 到最小高')
+  assert.ok((lowPatch.ccBgHeight as number) >= (lowPatch.ccHeight as number), 'ccBgHeight 必须 ≥ ccHeight')
+  // inputVariant → inputMode 联动
+  const variantPatch = setZoneFieldReducer(state, 'cc', { inputVariant: 'composer' })
+  assert.equal(variantPatch.inputMode, 'default', 'inputVariant=composer → inputMode=default')
+  assert.equal(variantPatch.inputVariant, 'composer')
+  // inputMode → inputVariant 联动（cli ⟺ cli）
+  const modePatch = setZoneFieldReducer(makeState({ inputVariant: 'composer' }), 'cc', { inputMode: 'cli' })
+  assert.equal(modePatch.inputVariant, 'cli', 'inputMode=cli → inputVariant=cli')
 }
 
 // ── setZoneField：写入字段 + 标 zone custom，不污染其他 zone、不带 appliedPreset（基准不动）──

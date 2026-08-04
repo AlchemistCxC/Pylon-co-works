@@ -138,8 +138,9 @@ export const useStore = create<ThemeState>()(persist(
 
   setZoneField: (zone, partial) => set(state => setZoneFieldReducer(state, zone, partial)),
   setCcEditMode: (enabled) => set({ ccEditMode: enabled }),
-  setCcHeight: (height) => set(state => ({
-    ccHeight: clampCcHeight(height, {
+  setCcHeight: (height) => set(state => {
+    // D1：ccBgHeight 必须 ≥ ccHeight（背景不短于容器，与 setZoneField 漏斗同不变量）
+    const ccHeight = clampCcHeight(height, {
       inputMode: state.inputMode,
       footerLayout: state.footerLayout,
       hintMode: state.cliHintMode,
@@ -150,9 +151,9 @@ export const useStore = create<ThemeState>()(persist(
         submitButtonMode: state.inputSubmitButtonMode,
       }),
       cliOverflowMode: state.cliOverflowMode,
-    }),
-    ...markZoneCustom(state, 'cc'),
-  })),
+    })
+    return { ccHeight, ccBgHeight: Math.max(state.ccBgHeight, ccHeight), ...markZoneCustom(state, 'cc') }
+  }),
   updateCcPlacement: (id, partial) => set(state => ({
     ccLayout: updateCcPlacementState(state.ccLayout, id, partial),
     ...markZoneCustom(state, 'cc'),
