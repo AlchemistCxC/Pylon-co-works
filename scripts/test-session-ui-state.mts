@@ -23,9 +23,11 @@ assert.equal(sessionUiStateGet('sess-b', 'draft'), 'B 的草稿', '清除 A 不�
 const inputBar = readFileSync(new URL('../src/components/chat/InputBar.tsx', import.meta.url), 'utf8')
 assert.match(inputBar, /useSessionUiState\(sessionId, 'draft', ''\)/, 'InputBar 草稿必须按会话作用域')
 const chatView = readFileSync(new URL('../src/components/chat/ChatView.tsx', import.meta.url), 'utf8')
-assert.match(chatView, /useSessionUiState\(sessionId, 'search-query'/, '搜索词必须按会话作用域')
-assert.match(chatView, /useSessionUiState\(sessionId, 'search-open'/, '搜索开关必须按会话作用域')
-assert.doesNotMatch(chatView, /setSearchQuery\(''\)\s*\n\s*setSearchIndex\(0\)\s*\n\s*setSearchOpen\(false\)\s*\n\s*\}, \[sessionId\]\)/, '不得再在切会话时清空搜索（由注册表恢复）')
+const searchHook = readFileSync(new URL('../src/components/chat/useMessageSearch.ts', import.meta.url), 'utf8')
+// CV-3：搜索状态收敛到 useMessageSearch（会话作用域注册表）
+assert.match(searchHook, /useSessionUiState\(sessionId, 'search-query'/, '搜索词必须按会话作用域')
+assert.match(searchHook, /useSessionUiState\(sessionId, 'search-open'/, '搜索开关必须按会话作用域')
+assert.doesNotMatch(searchHook, /setSearchQuery\(''\)\s*\n\s*setSearchIndex\(0\)\s*\n\s*setSearchOpen\(false\)\s*\n\s*\}, \[sessionId\]\)/, '不得再在切会话时清空搜索（由注册表恢复）')
 // CV-1：滚动重置/eager 相位判定收敛到 useScrollFollow
 const scrollHook = readFileSync(new URL('../src/components/chat/useScrollFollow.ts', import.meta.url), 'utf8')
 assert.match(scrollHook, /createScrollFollowState\(\)/, '切会话必须重置滚动跟随')

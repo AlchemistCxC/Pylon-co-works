@@ -1,4 +1,4 @@
-import { useRef, useEffect, useState, useMemo, useId, useCallback, Suspense } from 'react'
+import { useRef, useEffect, useState, useMemo, useId, Suspense } from 'react'
 import React from 'react'
 import { invoke } from '@tauri-apps/api/core'
 import { useStore } from '../../store'
@@ -20,7 +20,6 @@ import { prepareRenderableMessages, isMessageStatic } from './messagePipeline'
 import type { Message as PipelineMessage, RenderMessage } from './messageTypes'
 import { buildMessageLookups } from './messageLookups'
 import { buildChatRowDescriptors } from './chatRowPipeline'
-import { useSessionUiState } from './sessionUiState'
 import { resolveConnectorColor } from './toolPresentation'
 import { buildToolPresentationModel, truncateToolSummary } from './toolPresentationModel'
 import { normalizeToolStatus, toolStatePresentation } from '../../domains/tool/status.ts'
@@ -31,12 +30,12 @@ import { MarkdownRenderer } from './markdownLazy'
 import { MessageRenderBoundary } from './MessageRenderBoundary'
 import { createMockMessages } from './chatMockData'
 import DiffCard from './DiffCard'
-import { messageMatchesQuery } from './messageSearchIndex'
 import MessageSearchBar from './MessageSearchBar'
 import ToolConnector from './ToolConnector'
 import { attachChatEventController, registerChatController, type ChatControllerHandle, type ChatEventControllerRefs } from './chatEventController'
 import { useScrollFollow } from './useScrollFollow'
 import { useToolConnectors } from './useToolConnectors'
+import { useMessageSearch } from './useMessageSearch'
 import './ChatView.css'
 
 interface Props { sessionId: string | null }
@@ -96,11 +95,8 @@ const ChatView = React.memo(function ChatView({ sessionId }: Props) {
   useToolConnectors(chatViewRef, messages)
   const [mockPhaseIndex, setMockPhaseIndex] = useState(0)
   const mockGenerationStartRef = useRef(Date.now())
-  // 搜索状态按会话作用域（多会话基建）：切会话保留各会话的搜索词/开关/位置
-  const [searchOpen, setSearchOpen] = useSessionUiState(sessionId, 'search-open', false)
-  const [searchQuery, setSearchQuery] = useSessionUiState(sessionId, 'search-query', '')
-  const [searchIndex, setSearchIndex] = useSessionUiState(sessionId, 'search-index', 0)
-  const messageRefs = useRef(new Map<string, HTMLDivElement>())
+  // CV-3：搜索（状态/快捷键/匹配/索引/滚动定位/refs）收敛为 hook
+  const { searchOpen, setSearchOpen, searchQuery, setSearchQuery, searchIndex, setSearchIndex, searchMatches, moveSearch, messageRefs } = useMessageSearch(sessionId, messages)
   const sessionRef = useRef<string | null>(null)
   const messageOwnerRef = useRef<string | null>(null)
   const loadGenerationRef = useRef<Record<string, number>>({})
@@ -108,18 +104,6 @@ const ChatView = React.memo(function ChatView({ sessionId }: Props) {
   // 否则初始化被跳过、sessionRef 恒 null、事件永不 sync 到 UI。
   const prevSessionRef = useRef<string | null>(null)
   const controllerHandleRef = useRef<ChatControllerHandle | null>(null)
-  useEffect(() => {
-    const onSearchShortcut = (event: globalThis.KeyboardEvent) => {
-      if (!(event.ctrlKey || event.metaKey) || event.key.toLowerCase() !== 'f') return
-      event.preventDefault()
-      setSearchOpen(true)
-    }
-    window.addEventListener('keydown', onSearchShortcut)
-    return () => window.removeEventListener('keydown', onSearchShortcut)
-    // setSearchOpen 按会话作用域（useSessionUiState）：切会话必须重绑快捷键，
-    // 否则捕获首个会话的 setter，Ctrl+F 会操作旧会话的搜索状态
-  }, [sessionId, setSearchOpen])
-
   useEffect(() => {
     if (IS_TAURI) return
     const id = window.setInterval(() => setMockPhaseIndex(index => (index + 1) % MOCK_GENERATION_PHASES.length), 1800)
@@ -129,11 +113,6 @@ const ChatView = React.memo(function ChatView({ sessionId }: Props) {
   const browserMockPhase = !IS_TAURI ? MOCK_GENERATION_PHASES[mockPhaseIndex] : undefined
   const browserMockStart = mockGenerationStartRef.current
   const browserMockTokenCount = browserMockPhase?.kind === 'thinking' ? 320 : browserMockPhase?.kind === 'responding' ? 1480 : 860
-  const searchMatches = useMemo(() => {
-    if (!searchQuery.trim()) return []
-    return messages.filter(message => messageMatchesQuery(message, searchQuery))
-  }, [messages, searchQuery])
-
   // 渲染编排（chatRowPipeline 纯函数）：preparedMessages + lookups + 搜索命中 →
   // 行描述符列表。输入引用不变则输出不变，行渲染由描述符驱动。
   const rowDescriptors = useMemo(
@@ -143,28 +122,6 @@ const ChatView = React.memo(function ChatView({ sessionId }: Props) {
     },
     [preparedMessages, messageLookups, searchMatches, searchIndex],
   )
-
-  useEffect(() => {
-    if (searchMatches.length === 0) {
-      setSearchIndex(0)
-      return
-    }
-    setSearchIndex(index => Math.min(index, searchMatches.length - 1))
-    // setSearchIndex 按会话作用域：跨会话需重绑（同快捷键 effect 的理由）
-  }, [searchMatches.length, setSearchIndex])
-
-  const moveSearch = useCallback((direction: 1 | -1) => {
-    if (searchMatches.length === 0) return
-    setSearchIndex(index => (index + direction + searchMatches.length) % searchMatches.length)
-  }, [searchMatches.length, setSearchIndex])
-
-  useEffect(() => {
-    const message = searchMatches[searchIndex]
-    if (!message) return
-    const node = messageRefs.current.get(message.id)
-    if (!node) return
-    node.scrollIntoView({ behavior: 'smooth', block: 'center' })
-  }, [searchMatches, searchIndex])
 
   // 2026-08-02 加固：controller attach 必须先于 sessionId 切换 effect 声明——
   // React effect 按声明顺序执行，首挂载时若 controller 未就绪，initSource 被跳过
