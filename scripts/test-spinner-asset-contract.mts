@@ -6,6 +6,7 @@ const root = resolve(process.cwd())
 const read = (path: string) => readFileSync(resolve(root, path), 'utf8')
 
 const store = read('src/store.ts')
+const presetReducer = read('src/domains/theme/presetReducer.ts')
 const presets = read('src/presets.ts')
 const themeFields = read('src/themeFieldDefs.ts')
 const customPresets = read('src/customPresets.ts')
@@ -83,8 +84,8 @@ check(/pickZoneFields\([\s\S]*zone/.test(settings), 'Settings local preset path 
 for (const field of spinnerFields) {
   check(THEME_SETTING_KEYS.includes(field as never), 'custom preset allowlist missing ' + field)
 }
-check(/pickCustomPresetTheme\(state/.test(store), 'saveCustomPreset is not wired to pickCustomPresetTheme')
-check(/pickCustomPresetTheme\(preset\.theme/.test(store), 'applyCustomPreset is not wired to pickCustomPresetTheme')
+check(/pickCustomPresetTheme\(state/.test(presetReducer), 'saveCustomPreset is not wired to pickCustomPresetTheme')
+check(/pickCustomPresetTheme\(preset\.theme/.test(presetReducer), 'applyCustomPreset is not wired to pickCustomPresetTheme')
 check(/normalizeCustomPresets\(state\.customPresets\)/.test(migrate), 'migrate does not normalize customPresets')
 
 // Footer must consume all render-relevant spinner assets and spinnerFrames must provide frame resolution.

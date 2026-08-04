@@ -9,6 +9,7 @@ import {
 
 const source = (path: string) => readFileSync(new URL(path, import.meta.url), 'utf8')
 const store = source('../src/store.ts')
+const reducer = source('../src/domains/theme/presetReducer.ts')
 const controlCenter = source('../src/components/ControlCenter.tsx')
 const presets = source('../src/themeFieldDefs.ts')
 
@@ -47,8 +48,8 @@ assert.equal(updateCcPlacementState(DEFAULT_CC_LAYOUT, 'unknown', { order: 1 }),
 // Store actions must all read/write the same ccLayout placement source of truth.
 assert.match(store, /updateCcPlacement:\s*\(id, partial\) =>[\s\S]*?ccLayout:\s*updateCcPlacementState\(state\.ccLayout, id, partial\)/)
 assert.match(store, /resetCcLayout:\s*\(\) => set\(state => \(\{[\s\S]*?ccLayout:\s*cloneCcLayout\(DEFAULT_CC_LAYOUT\)/)
-assert.match(store, /setGlobalPreset:[\s\S]*?ccLayout:\s*normalizeCcLayout\(theme\.ccLayout\)/)
-assert.match(store, /applyCustomPreset:[\s\S]*?ccLayout:\s*normalizeCcLayout\(theme\.ccLayout\)/)
+assert.match(reducer, /function setGlobalPresetReducer\([\s\S]*?ccLayout:\s*normalizeCcLayout\(theme\.ccLayout\)/)
+assert.match(reducer, /function applyCustomPresetReducer\([\s\S]*?ccLayout:\s*normalizeCcLayout\(theme\.ccLayout\)/)
 assert.equal(controlCenter.includes('const layout = useStore(s => s.ccLayout)'), true)
 assert.equal(controlCenter.includes('useStore.getState().ccLayout'), true)
 assert.equal(controlCenter.includes('updateCcPlacement(id, {'), true)

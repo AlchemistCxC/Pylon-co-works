@@ -1,15 +1,23 @@
 import { create } from 'zustand'
 import { persist } from 'zustand/middleware'
 import { PROFILE_SCHEMA_VERSION } from './profilePersistence'
-import { DEFAULT_CC_LAYOUT, cloneCcLayout, normalizeCcLayout, setCcHiddenState, setCcScaleState, updateCcPlacementState } from './ccLayoutState'
+import { DEFAULT_CC_LAYOUT, cloneCcLayout, setCcHiddenState, setCcScaleState, updateCcPlacementState } from './ccLayoutState'
 import type { CcLayoutV3, CcWidgetPlacement } from './ccLayoutState'
-import { createCustomPreset, deleteCustomPreset, normalizeCustomPresets, pickCustomPresetTheme, upsertCustomPreset } from './customPresets'
+import { createCustomPresetId, normalizeCustomPresets } from './customPresets'
 import { normalizeThemeMigrationState } from './themeMigration'
 import { markZoneCustom } from './themePresetState'
-import { ZONES, ZONE_FIELDS } from './themeFields'
-import { clampCcHeight, resolveVisibleStatusWidgetCount, type CcFooterLayout, type CcHintMode, type CcInputMode, type CcOverflowMode } from './ccHeightState'
+import { ZONE_FIELDS } from './themeFields'
+import { clampCcHeight, resolveVisibleStatusWidgetCount } from './ccHeightState'
 import { normalizeThemeState, THEME_DEFAULTS } from './themeFieldDefs'
 import type { CustomPreset } from './customPresets'
+import {
+  applyCustomPresetReducer,
+  applyZonePresetReducer,
+  removeCustomPresetReducer,
+  saveCustomPresetReducer,
+  setGlobalPresetReducer,
+  setZoneFieldReducer,
+} from './domains/theme/presetReducer'
 import { useIdentityStore } from './identityStore'
 import type { Profile } from './identityStore'
 
@@ -106,40 +114,7 @@ type ThemeState = ThemeSettings & {
   removeCustomPreset: (id: string) => void
 }
 
-/**
- * 预设应用的 ccHeight 收敛：用合并主题自身的布局上下文（缺省回退 DEFAULTS）
- * 过 clampCcHeight。预设 ccHeight（如 claude 76）低于最小高（cli+peri+full 为 109）
- * 会破坏 ccHeightState 声明的"布局约束真值"不变式。
- */
-function clampPresetCcHeight(theme: Partial<ThemeSettings>): number {
-  const inputMode = (theme.inputMode ?? DEFAULTS.inputMode) as CcInputMode
-  const footerLayout = (theme.footerLayout ?? DEFAULTS.footerLayout) as CcFooterLayout
-  const hintMode = (theme.cliHintMode ?? DEFAULTS.cliHintMode) as CcHintMode
-  const ccStyle = theme.ccStyle ?? DEFAULTS.ccStyle
-  const cliOverflowMode = (theme.cliOverflowMode ?? DEFAULTS.cliOverflowMode) as CcOverflowMode
-  const visibleStatusWidgets = resolveVisibleStatusWidgetCount({
-    hiddenIds: Array.isArray(theme.ccHidden) ? theme.ccHidden : [],
-    inputMode,
-    ccStyle,
-  })
-  return clampCcHeight(typeof theme.ccHeight === 'number' ? theme.ccHeight : DEFAULTS.ccHeight, {
-    inputMode,
-    footerLayout,
-    hintMode,
-    visibleStatusWidgets,
-    cliOverflowMode,
-  })
-}
-
-/**
- * 预设应用的 cc 高度同步：ccHeight 被 clamp 上调时，ccBgHeight 必须跟随
- * （否则背景比容器短，露出底部无背景条）。返回两者。
- */
-function syncPresetCcHeight(theme: Partial<ThemeSettings>): { ccHeight: number; ccBgHeight: number } {
-  const ccHeight = clampPresetCcHeight(theme)
-  const bgHeight = typeof theme.ccBgHeight === 'number' ? theme.ccBgHeight : DEFAULTS.ccBgHeight
-  return { ccHeight, ccBgHeight: Math.max(bgHeight, ccHeight) }
-}
+// clampPresetCcHeight / syncPresetCcHeight 已随预设动作迁入 domains/theme/presetReducer.ts
 
 /**
  * DEFAULTS 由 defs 派生（THEME_DEFAULTS 标量默认值）+
@@ -162,10 +137,7 @@ export const useStore = create<ThemeState>()(persist(
 
   customPresets: [],
 
-  setZoneField: (zone, partial) => set(state => ({
-    ...partial,
-    ...markZoneCustom(state, zone),
-  })),
+  setZoneField: (zone, partial) => set(state => setZoneFieldReducer(state, zone, partial)),
   setCcEditMode: (enabled) => set({ ccEditMode: enabled }),
   setCcHeight: (height) => set(state => ({
     ccHeight: clampCcHeight(height, {
@@ -218,86 +190,22 @@ export const useStore = create<ThemeState>()(persist(
     }
   }),
 
-  /**
-   * 应用某个 zone 的预设（来自全局预设的子集）
-   * 1. 写入该 zone 的所有字段
-   * 2. 记录 activePreset[zone] = presetName
-   * 3. 清除 dirty[zone]
-   * 4. 不影响其他 zone
-   */
-  applyZonePreset: (zone, presetName, presetTheme) => set(state => {
-    // 局部预设把某 zone 切离当前全局预设 → 全局预设不再完整，标记 global 为 custom
-    const globalPreset = state.activePreset.global
-    const breaksGlobal = Boolean(globalPreset) && globalPreset !== 'custom' && globalPreset !== presetName
-    return {
-      ...presetTheme,
-      // cc zone 预设即恢复规范排布（预设不携带 ccLayout → 默认布局），与其他 zone 预设一致
-      ...(zone === 'cc' ? { ccLayout: normalizeCcLayout(presetTheme.ccLayout) } : {}),
-      ...(zone === 'cc' && presetTheme.ccHeight !== undefined ? syncPresetCcHeight(presetTheme) : {}),
-      activePreset: {
-        ...state.activePreset,
-        [zone]: presetName,
-        ...(breaksGlobal ? { global: 'custom' } : {}),
-      },
-      dirty: {
-        ...state.dirty,
-        [zone]: false,
-        ...(breaksGlobal ? { global: true } : {}),
-      },
-    }
-  }),
-
-  /**
-   * 切换全局预设
-   * 1. 把全局预设的全部字段写入 store
-   * 2. 把每个 zone 的 activePreset 设为同名的 zone-preset（即该 zone 的子集应用）
-   * 3. 所有 zone 的 dirty 清零
-   */
-  setGlobalPreset: (name, theme) => set(_ => ({
-    ...theme,
-    // 预设是规范快照：点击预设即恢复其规范排布（预设不携带 ccLayout → 默认布局）。
-    // 否则编辑过的 widget 排布会残留，预设"覆盖不生效"且无法恢复原预设状态。
-    ccLayout: normalizeCcLayout(theme.ccLayout),
-    ...(theme.ccHeight !== undefined ? syncPresetCcHeight(theme) : {}),
-    activePreset: Object.fromEntries(ZONES.map(zone => [zone, name])),
-    dirty: Object.fromEntries(ZONES.map(zone => [zone, false])),
-  })),
+  // 六个预设动作：纯计算在 domains/theme/presetReducer.ts，此处只留 set(reducer(state, args)) 薄壳
+  applyZonePreset: (zone, presetName, presetTheme) => set(state => applyZonePresetReducer(state, zone, presetName, presetTheme)),
+  setGlobalPreset: (name, theme) => set(() => setGlobalPresetReducer(name, theme)),
   saveCustomPreset: (name, id) => {
     const state = get()
-    const existing = id ? state.customPresets.find(preset => preset.id === id) : undefined
     const now = Date.now()
-    const preset = existing
-      ? { ...existing, name: name.trim().slice(0, 40), theme: pickCustomPresetTheme(state), updatedAt: now }
-      : createCustomPreset(name, pickCustomPresetTheme(state), now)
-    set({ customPresets: upsertCustomPreset(state.customPresets, preset) })
-    return preset.id
+    // id/now 由 shell 注入：reducer 保持确定性（A0 起，预设逻辑可做确定性行为测试）
+    const resolvedId = id && state.customPresets.some(preset => preset.id === id)
+      ? id
+      : createCustomPresetId(now, Object.keys(state.customPresets))
+    const { patch, savedId } = saveCustomPresetReducer(state, { id: resolvedId, name, now })
+    set(patch)
+    return savedId
   },
-  applyCustomPreset: (id) => set(state => {
-    const preset = state.customPresets.find(item => item.id === id)
-    if (!preset) return state
-    // 防御性归一化：自定义预设可能来自旧版本/脏数据，按 defs 规则修正
-    const theme = normalizeThemeState(pickCustomPresetTheme(preset.theme) as Record<string, unknown>) as Partial<ThemeSettings>
-    return {
-      ...theme,
-      ccLayout: normalizeCcLayout(theme.ccLayout),
-      ...(theme.ccHeight !== undefined ? syncPresetCcHeight(theme) : {}),
-      activePreset: Object.fromEntries(ZONES.map(zone => [zone, id])),
-      dirty: Object.fromEntries(ZONES.map(zone => [zone, false])),
-    }
-  }),
-  removeCustomPreset: (id) => set(state => {
-    const activePreset = { ...state.activePreset }
-    const dirty = { ...state.dirty }
-    // 删除正在应用的预设后，该 zone 保留其值但不再跟随命名预设 → 语义为 'custom'（与
-    // markZoneCustom 一致）；置 '' 会丢失"已自定义"指示（Settings 预设区显示异常）
-    for (const [zone, value] of Object.entries(activePreset)) {
-      if (value === id) {
-        activePreset[zone] = 'custom'
-        dirty[zone] = true
-      }
-    }
-    return { customPresets: deleteCustomPreset(state.customPresets, id), activePreset, dirty }
-  }),
+  applyCustomPreset: (id) => set(state => applyCustomPresetReducer(state, id) ?? {}),
+  removeCustomPreset: (id) => set(state => removeCustomPresetReducer(state, id)),
 }),
 { name: 'pylon-theme', version: PROFILE_SCHEMA_VERSION, migrate: persisted => {
   const state = (persisted || {}) as Partial<ThemeState> & { profiles?: Profile[]; activeProfileId?: string }

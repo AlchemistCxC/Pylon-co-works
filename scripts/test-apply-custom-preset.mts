@@ -1,41 +1,39 @@
 import { strict as assert } from 'node:assert'
 import { readFileSync } from 'node:fs'
 import { DEFAULT_CC_LAYOUT } from '../src/ccLayoutState.ts'
+import {
+  applyCustomPresetReducer,
+  type ThemePresetState,
+} from '../src/domains/theme/presetReducer.ts'
 
-const storeSource = readFileSync(new URL('../src/store.ts', import.meta.url), 'utf8')
-const applyBody = storeSource.match(/applyCustomPreset:\s*\(id\) => set\(state => \{([\s\S]*?)\n\s*\}\),/)?.[1] ?? ''
-assert.match(applyBody, /pickCustomPresetTheme\(preset\.theme/)
-assert.match(applyBody, /\.\.\.theme/)
-assert.match(applyBody, /normalizeCcLayout\(theme\.ccLayout\)/)
-assert.doesNotMatch(applyBody, /\.\.\.preset\.theme\s*,[\s\S]*profiles|profiles\s*:/)
+// A0：applyCustomPreset 纯计算在 presetReducer，本测试直接调真实 reducer
+// （替代旧版"复刻 harness + store 源码断言"），验证业务状态隔离 + ccLayout 归一化。
 
-const profiles = [{ id: 'profile-1' }]
-const sessions = [{ id: 'session-1' }]
-const sessionLiveStats = { 'source-1': { tokensUsed: 3 } }
-const sessionModes = { 'source-1': 'thinking' }
-const sessionConfig = { 'source-1': { model: 'model-a' } }
-const liveGeneratingSources = ['source-1']
-const agents = [{ id: 'peri', name: 'Peri' }]
-const agentStatuses = { peri: { status: 'connected' } }
-const customPresets = [{ id: 'custom-isolation' }]
+const reducerSource = readFileSync(new URL('../src/domains/theme/presetReducer.ts', import.meta.url), 'utf8')
+assert.match(reducerSource, /pickCustomPresetTheme\(preset\.theme/, 'reducer 必须经白名单捕获预设主题')
+assert.match(reducerSource, /normalizeCcLayout\(theme\.ccLayout\)/, 'reducer 必须归一化 ccLayout')
+assert.doesNotMatch(reducerSource, /\.\.\.preset\.theme\s*,[\s\S]*profiles|profiles\s*:/, 'reducer 不得直铺预设主题')
 
-type State = Record<string, unknown> & {
-  activePreset: Record<string, string>
-  dirty: Record<string, boolean>
-  ccLayout: typeof DEFAULT_CC_LAYOUT
+function makeState(customPresets: ThemePresetState['customPresets']): ThemePresetState {
+  return {
+    activePreset: { global: '', sidebar: '', chat: '', cc: '', right: '' },
+    dirty: { global: false, sidebar: false, chat: false, cc: false, right: false },
+    customPresets,
+    ccLayout: DEFAULT_CC_LAYOUT,
+    ccHeight: 150,
+    ccBgHeight: 150,
+    inputMode: 'cli',
+    footerLayout: 'free',
+    cliHintMode: 'full',
+    ccHidden: [],
+    ccStyle: 'wave',
+    cliOverflowMode: 'fixed-scroll',
+    globalBgColor: '#before',
+  }
 }
 
-const initial: State = {
-  globalBgColor: '#before',
-  profiles, activeProfileId: 'profile-1', sessions,
-  sessionLiveStats, sessionModes, sessionConfig, liveGeneratingSources,
-  agents, activeAgent: 'peri', agentStatuses, customPresets,
-  activePreset: { global: '', sidebar: '', chat: '', cc: '', right: '' },
-  dirty: { global: false, sidebar: false, chat: false, cc: false, right: false },
-  ccLayout: DEFAULT_CC_LAYOUT,
-}
-
-const presetTheme = {
+// 被"投毒"的预设主题：合法主题字段 + 越界排布 + 业务键（不应进入 patch）
+const poisonedTheme = {
   globalBgColor: '#123456',
   ccLayout: {
     version: 3 as const,
@@ -57,46 +55,35 @@ const presetTheme = {
   customPresets: [{ id: 'overwritten' }],
 }
 
-// 复刻 applyCustomPreset 的无副作用状态事务；源代码结构断言保证真实 action 使用同一边界。
-const applyCustomPreset = (state: State, theme: Record<string, unknown>): State => {
-  const allowedTheme = Object.fromEntries(Object.entries(theme).filter(([key]) => [
-    'globalBgColor', 'ccLayout',
-  ].includes(key)))
-  const layout = allowedTheme.ccLayout && typeof allowedTheme.ccLayout === 'object'
-    ? allowedTheme.ccLayout as typeof DEFAULT_CC_LAYOUT
-    : DEFAULT_CC_LAYOUT
-  return {
-    ...state,
-    ...allowedTheme,
-    ccLayout: {
-      version: 3,
-      placements: Object.fromEntries(Object.entries(layout.placements).map(([id, placement]) => [id, {
-        ...placement,
-        order: Math.max(0, Math.min(99, Math.round(Number.isFinite(placement.order) ? placement.order : 0))),
-        offsetX: Math.max(-48, Math.min(48, Number.isFinite(placement.offsetX) ? placement.offsetX : 0)),
-        offsetY: Math.max(-16, Math.min(16, Number.isFinite(placement.offsetY) ? placement.offsetY : 0)),
-      }])) as typeof DEFAULT_CC_LAYOUT.placements,
-    },
-    activePreset: { global: 'custom-isolation', sidebar: 'custom-isolation', chat: 'custom-isolation', cc: 'custom-isolation', right: 'custom-isolation' },
-    dirty: { global: false, sidebar: false, chat: false, cc: false, right: false },
-  }
+const preset = {
+  id: 'custom-isolation',
+  name: '隔离测试',
+  theme: poisonedTheme as unknown as ThemePresetState['customPresets'][number]['theme'],
+  createdAt: 1,
+  updatedAt: 1,
 }
 
-const state = applyCustomPreset(initial, presetTheme)
-assert.equal(state.globalBgColor, '#123456')
-assert.equal(state.profiles, profiles)
-assert.equal(state.activeProfileId, 'profile-1')
-assert.equal(state.sessions, sessions)
-assert.equal(state.sessionLiveStats, sessionLiveStats)
-assert.equal(state.sessionModes, sessionModes)
-assert.equal(state.sessionConfig, sessionConfig)
-assert.equal(state.liveGeneratingSources, liveGeneratingSources)
-assert.equal(state.agents, agents)
-assert.equal(state.activeAgent, 'peri')
-assert.equal(state.agentStatuses, agentStatuses)
-assert.equal(state.customPresets, customPresets)
-assert.deepEqual(state.ccLayout.placements.input, { slot: 'input', order: 99, offsetX: 48, offsetY: -16 })
-assert.equal(state.activePreset.global, 'custom-isolation')
-assert.equal(state.dirty.global, false)
+const patch = applyCustomPresetReducer(makeState([preset]), 'custom-isolation')
+assert.ok(patch, '存在的自定义预设应返回 patch')
 
-console.log('applyCustomPreset 业务状态隔离回归测试通过')
+// 主题字段应用 + 业务键隔离（pickCustomPresetTheme 白名单过滤）
+assert.equal(patch.globalBgColor, '#123456')
+assert.equal((patch as Record<string, unknown>).profiles, undefined, 'profiles 不得进入 patch')
+assert.equal((patch as Record<string, unknown>).sessions, undefined, 'sessions 不得进入 patch')
+assert.equal((patch as Record<string, unknown>).sessionModes, undefined, 'sessionModes 不得进入 patch')
+assert.equal((patch as Record<string, unknown>).agents, undefined, 'agents 不得进入 patch')
+assert.equal((patch as Record<string, unknown>).customPresets, undefined, 'customPresets 不得被预设覆盖')
+
+// ccLayout 归一化（越界排布被 clamp）
+assert.equal(patch.ccLayout?.version, DEFAULT_CC_LAYOUT.version)
+assert.deepEqual(patch.ccLayout?.placements.input, { slot: 'input', order: 99, offsetX: 48, offsetY: -16 })
+
+// 路由：全 zone 记 id + 全 dirty 清
+assert.equal(patch.activePreset?.global, 'custom-isolation')
+assert.equal(patch.activePreset?.chat, 'custom-isolation')
+assert.equal(patch.dirty?.global, false)
+
+// 不存在的预设 → null（无操作）
+assert.equal(applyCustomPresetReducer(makeState([preset]), 'custom-missing'), null)
+
+console.log('applyCustomPreset 业务状态隔离回归测试通过（真实 reducer）')

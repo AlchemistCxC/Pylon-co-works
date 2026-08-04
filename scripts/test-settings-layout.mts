@@ -6,6 +6,7 @@ const defs = read('../src/themeFieldDefs.ts')
 const renderer = read('../src/themeFieldRenderer.tsx')
 const settings = read('../src/components/Settings.tsx')
 const store = read('../src/store.ts')
+const presetReducer = read('../src/domains/theme/presetReducer.ts')
 const presets = read('../src/presets.ts')
 
 // ── 低频组默认折叠 + 组粒度合并 ──
@@ -62,7 +63,7 @@ assert.match(defs, /export function normalizeThemeValue\(/, '必须有 defs 驱�
 assert.match(defs, /export function normalizeThemeState</, '必须有全字段归一化')
 assert.match(defs, /key === 'toolIndicator'/, 'normalizeThemeState 必须跳过 registry 动态选项字段')
 assert.match(store, /normalizeThemeState\(state\)/, 'migrate 必须调用 defs 驱动的归一化')
-assert.match(store, /normalizeThemeState\(pickCustomPresetTheme/, 'applyCustomPreset 必须防御性归一化')
+assert.match(presetReducer, /normalizeThemeState\(pickCustomPresetTheme/, 'applyCustomPreset 必须防御性归一化')
 
 // ── 骨架：字段级恢复默认 ──
 assert.match(renderer, /set-field-reset/, '字段级恢复默认按钮必须存在')
@@ -85,11 +86,11 @@ assert.doesNotMatch(store, /ekgLeftColor: string; ekgMovingColor/, 'store 不得
 // ── 中低危修复契约（2026-08-03 逻辑检测二轮）──
 const controller = read('../src/components/chat/chatEventController.ts')
 // 预设应用必须 clamp ccHeight（claude 预设 76 < 最小高）
-assert.match(store, /syncPresetCcHeight\(/, '预设应用必须过 ccHeight clamp')
-assert.match(store, /ccHeight !== undefined \? syncPresetCcHeight\(theme\) : \{\}/, 'setGlobalPreset/applyCustomPreset 必须 clamp ccHeight')
-assert.match(store, /zone === 'cc' && presetTheme\.ccHeight !== undefined/, 'applyZonePreset 必须 clamp cc zone ccHeight')
+assert.match(presetReducer, /syncPresetCcHeight\(/, '预设应用必须过 ccHeight clamp')
+assert.match(presetReducer, /ccHeight !== undefined \? syncPresetCcHeight\(theme\) : \{\}/, 'setGlobalPreset/applyCustomPreset 必须 clamp ccHeight')
+assert.match(presetReducer, /zone === 'cc' && presetTheme\.ccHeight !== undefined/, 'applyZonePreset 必须 clamp cc zone ccHeight')
 // removeCustomPreset 删除已应用预设 → 'custom'（与 markZoneCustom 一致）
-assert.match(store, /activePreset\[zone\] = 'custom'/, '删除已应用预设必须标记为 custom')
+assert.match(presetReducer, /activePreset\[zone\] = 'custom'/, '删除已应用预设必须标记为 custom')
 // getFrames 空帧返回 undefined（spinner fallback 生效）
 assert.match(controller, /frames && frames\.length > 0 \? frames : undefined/, 'getFrames 空帧必须返回 undefined')
 // 配置导入 key 白名单
@@ -119,7 +120,7 @@ assert.equal((settings.match(/<ConfigBackupRow \/>/g) ?? []).length, 1, 'ConfigB
 // ── 高危修复契约（2026-08-03 逻辑检测）──
 // setGlobalPreset 是规范快照：点击预设总是恢复其排布（预设不携带 ccLayout → 默认布局）。
 // 用户报告：编辑过的 widget 排布残留导致"预设覆盖不生效、无法恢复原预设"
-assert.match(store, /setGlobalPreset[\s\S]*?ccLayout: normalizeCcLayout\(theme\.ccLayout\),/, 'setGlobalPreset 必须无条件恢复规范排布')
+assert.match(presetReducer, /function setGlobalPresetReducer\([\s\S]*?ccLayout: normalizeCcLayout\(theme\.ccLayout\),/, 'setGlobalPreset 必须无条件恢复规范排布')
 // ConfigOptionsPanel 按 option 序列号守卫回滚
 const configPanel = read('../src/components/settings/ConfigOptionsPanel.tsx')
 assert.match(configPanel, /latestReqRef/, 'ConfigOptionsPanel 必须维护请求序列号')
