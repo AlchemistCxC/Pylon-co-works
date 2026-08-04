@@ -20,29 +20,19 @@ export interface SessionConfig {
  * 跨域联动（会话删除清 runtime 等）由调用方（identityStore 组合 action）经 getState 触发。
  */
 
+// EG：顶层 live* 死镜像清理——用量/模式/命令数据一律走 session 作用域
+// （sessionLiveStats/sessionModes/sessionConfig），顶层只保留生成源（InputBar 取消用）
 export interface LiveStatsPayload {
-  liveTokensUsed?: number
-  liveTokensMax?: number
-  liveCacheReadTokens?: number
-  liveMode?: string
-  livePrismOn?: boolean
   liveGenerating?: string | null
   liveGeneratingSources?: string[]
-  liveCommands?: { name: string; input_hint?: string; description?: string }[]
 }
 
 interface RuntimeStoreState {
-  liveTokensUsed: number
-  liveTokensMax: number
-  liveCacheReadTokens: number
-  liveMode: string
-  livePrismOn: boolean
   liveGenerating: string | null
   liveGeneratingSources: string[]
   sessionLiveStats: Record<string, SessionLiveStats>
   sessionModes: Record<string, string>
   sessionConfig: Record<string, SessionConfig>
-  liveCommands: { name: string; input_hint?: string; description?: string }[]
   agentStatuses: Record<string, AgentStatus>
   setLiveStats: (stats: Partial<LiveStatsPayload>) => void
   setSessionLiveStats: (source: string, stats: Partial<SessionLiveStats>) => void
@@ -57,17 +47,11 @@ interface RuntimeStoreState {
 }
 
 export const useRuntimeStore = create<RuntimeStoreState>()((set, get) => ({
-  liveTokensUsed: 0,
-  liveTokensMax: 131072,
-  liveCacheReadTokens: 0,
-  liveMode: 'auto',
-  livePrismOn: true,
   liveGenerating: null,
   liveGeneratingSources: [],
   sessionLiveStats: {},
   sessionModes: {},
   sessionConfig: {},
-  liveCommands: [],
   agentStatuses: {},
 
   setLiveStats: (stats) => set(stats as Partial<RuntimeStoreState>),

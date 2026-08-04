@@ -1,6 +1,8 @@
 import { useRef, useState, useCallback, useEffect, useId } from 'react'
 import { useStore } from '../store'
 import { useRuntimeStore } from '../runtimeStore'
+import { useIdentityStore } from '../identityStore'
+import { resolveSessionSource } from './chat/sessionCommandState'
 import { useShallow } from 'zustand/react/shallow'
 import type { ThemeSettings } from '../store'
 import InputBar from './chat/InputBar'
@@ -194,7 +196,7 @@ export default function ControlCenter({ sessionId }: Props) {
           </>
         )}
       </div>
-      {editMode && selected && <PropertyPanel id={selected} onClose={() => setSelected(null)} onExit={() => { setCcEditMode(false); setSelected(null) }} />}
+      {editMode && selected && <PropertyPanel id={selected} sessionId={sessionId} onClose={() => setSelected(null)} onExit={() => { setCcEditMode(false); setSelected(null) }} />}
       {editMode && (
         <WidgetToolbar
           selected={selected}
@@ -311,11 +313,17 @@ function WidgetToolbar({ selected, onSelect }: { selected: string | null; onSele
 // PropertyPanel — 选中控件的属性编辑面板
 // ───────────────────────────────────────────────────────────────
 
-function PropertyPanel({ id, onClose, onExit }: { id: string; onClose: () => void; onExit: () => void }) {
+function PropertyPanel({ id, sessionId, onClose, onExit }: { id: string; sessionId: string | null; onClose: () => void; onExit: () => void }) {
   const placement = useStore(s => s.ccLayout.placements[id as keyof typeof s.ccLayout.placements])
   const u = useStore(s => s.setZoneField)
   const updateCcPlacement = useStore(s => s.updateCcPlacement)
   const setCcScale = useStore(s => s.setCcScale)
+  // EG：模式读数走 session 作用域（顶层 liveMode 死镜像已删）；sessionModes 由 config_option_update 写入
+  const sessions = useIdentityStore(s => s.sessions)
+  const currentMode = useRuntimeStore(s => {
+    const source = resolveSessionSource(sessionId, sessions)
+    return source ? s.sessionModes[source] || 'default' : 'default'
+  })
   // 只订阅属性面板实际读取的字段：拖拽/生成期间的 live 状态变化不再重渲染面板。
   const theme = useStore(useShallow(s => ({
     ccScale: s.ccScale,
@@ -341,8 +349,6 @@ function PropertyPanel({ id, onClose, onExit }: { id: string; onClose: () => voi
     sendVariant: s.sendVariant,
     attachVariant: s.attachVariant,
   })))
-  // liveMode 是运行时状态（runtimeStore 域）
-  const liveMode = useRuntimeStore(s => s.liveMode)
   const labels: Record<string, string> = {
     input: '输入栏', ekg: '用量条', pct: '百分比', tokens: 'Token数',
     model: '模型', mode: '权限模式', send: '发送按钮', attach: '附件按钮',
@@ -416,7 +422,7 @@ function PropertyPanel({ id, onClose, onExit }: { id: string; onClose: () => voi
         })}
         {/* mode widget 的运行时只读读数（非主题属性，保留特判） */}
         {id === 'mode' && (
-          <div className="cc-prop-field"><label>当前</label><span style={{ fontSize: 13, color: liveMode === 'bypass' ? '#FF6B80' : liveMode === 'auto' ? '#FFC107' : liveMode === 'edit' ? '#A2A9E4' : '#999' }}>{liveMode || 'default'}</span></div>
+          <div className="cc-prop-field"><label>当前</label><span style={{ fontSize: 13, color: currentMode === 'bypass' ? '#FF6B80' : currentMode === 'auto' ? '#FFC107' : currentMode === 'edit' ? '#A2A9E4' : '#999' }}>{currentMode}</span></div>
         )}
       </div>
       <div className="cc-prop-footer">

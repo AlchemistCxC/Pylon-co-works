@@ -75,20 +75,23 @@ export default function App() {
     hydrateWorkspaceSheets()
   }, [hydrateWorkspaceSheets])
 
-  // 2026-08-03 修复：启动时不得用默认 activeProfileId 覆盖持久化的该 agent profile 选择。
-  // 首次运行从 sheetAgentStates 恢复；之后（用户切换 profile/agent）才写回。
-  const profileRestoredRef = useRef(false)
+  // EG：启动时从权威记忆（sheetAgentStates）恢复当前 agent 的 profile 投影与会话，不写回——
+  // 写回只发生在用户显式 setActiveProfile（action 内同步记忆）/选会话（下方 effect）；切 agent 的
+  // 投影恢复由 identityStore.setActiveAgent 承担。删除旧的 profileRestoredRef 双向手写同步。
   useEffect(() => {
-    if (!profileRestoredRef.current) {
-      profileRestoredRef.current = true
-      const restored = useWorkspaceStore.getState().sheetAgentStates[activeAgent]?.activeProfileId
-      if (restored && restored !== activeProfileId) {
-        useIdentityStore.getState().setActiveProfile(restored)
-      }
-      return
+    const memory = useWorkspaceStore.getState().sheetAgentStates[activeAgent]
+    if (memory?.activeProfileId && memory.activeProfileId !== activeProfileId) {
+      useIdentityStore.getState().setActiveProfile(memory.activeProfileId)
     }
-    setSheetAgentState(activeAgent, { activeProfileId, activeSessionId: activeSession || undefined })
-  }, [activeAgent, activeProfileId, activeSession, setSheetAgentState])
+    if (memory?.activeSessionId && memory.activeSessionId !== activeSession) {
+      setActiveSession(memory.activeSessionId)
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
+  // 会话选择持久化到该 agent 记忆（profile 已由 setActiveProfile 同步，无需此处写）
+  useEffect(() => {
+    setSheetAgentState(activeAgent, { activeSessionId: activeSession || undefined })
+  }, [activeAgent, activeSession, setSheetAgentState])
 
   // 仅在 activeAgent 切换时聚焦该 agent 的 sheet；普通 sheet 导航（打开 Prism/工具 sheet、
   // 点击其他 tab）不受影响。用 ref 对比避免 workspaceSheets 每次新引用触发重复聚焦。
