@@ -100,6 +100,37 @@ pub(crate) fn build_resolved(
 /// 按 binding.agent_id 路由到对应 runtime，未绑定回退 active agent）。
 pub type IngestHandler = Arc<dyn Fn(&ResolvedIngest) + Send + Sync>;
 
+/// Gateway 领域错误（R7/P2-1 补全）。code() 稳定供前端分支。
+/// InvalidConfig/AdapterUnavailable/DeliveryFailed 为后续迁移预留（生命周期/
+/// 投递路径逐步改 Result<_, GatewayError>），当前仅 ConfigLockPoisoned 被构造。
+#[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
+#[allow(dead_code)]
+pub enum GatewayError {
+    /// reload 写锁中毒（reload 未生效，保持原配置）。
+    #[error("gateway 配置锁中毒（reload 未生效，保持原配置）")]
+    ConfigLockPoisoned,
+    /// 配置解析/校验失败。
+    #[error("gateway 配置非法: {0}")]
+    InvalidConfig(String),
+    /// 适配器不可用（未注册/已下线）。
+    #[error("gateway 适配器不可用: {0}")]
+    AdapterUnavailable(String),
+    /// 出站投递失败。
+    #[error("gateway 投递失败: {0}")]
+    DeliveryFailed(String),
+}
+
+impl GatewayError {
+    pub fn code(&self) -> &'static str {
+        match self {
+            Self::ConfigLockPoisoned => "gateway_config_lock_poisoned",
+            Self::InvalidConfig(_) => "gateway_invalid_config",
+            Self::AdapterUnavailable(_) => "gateway_adapter_unavailable",
+            Self::DeliveryFailed(_) => "gateway_delivery_failed",
+        }
+    }
+}
+
 /// Gateway 核心：适配器注册表 + 静态路由表 + 平台配置 + 入站解析 + 出站分发。
 /// 配置段（routes/qq/inject）收进 RwLock——`reload()` 支持热重载（B10.5 预留，
 /// reload_gateway 命令接线）。
@@ -131,15 +162,16 @@ impl GatewayCore {
 
     /// 热重载配置（reload_gateway 命令）：替换路由表/平台配置/注入配置。
     /// 已注册适配器不受影响（凭据/连接级配置仍启动生效）。
-    /// 修复（P3）：写锁失败（中毒）不再误报"已热重载"，改走错误日志分支。
-    pub fn reload(&self, config: GatewayConfig) {
-        match self.config.write() {
-            Ok(mut slot) => {
-                *slot = config;
-                tracing::info!("gateway 配置已热重载");
-            }
-            Err(_) => tracing::error!("gateway 配置热重载失败（配置锁中毒），保持原配置"),
-        }
+    /// R4（P1-2）：写锁失败（中毒）返回 Err——上层 command 必须向调用方如实
+    /// 报告"reload 未生效"，不得继续返回成功。调用点仅 gateway_cmds.rs 与测试。
+    pub fn reload(&self, config: GatewayConfig) -> Result<(), GatewayError> {
+        let mut slot = self
+            .config
+            .write()
+            .map_err(|_| GatewayError::ConfigLockPoisoned)?;
+        *slot = config;
+        tracing::info!("gateway 配置已热重载");
+        Ok(())
     }
 
     /// 注册 ingest 发送处理器（run() 接线 ACP 发送；可重复注册覆盖）。
@@ -792,5 +824,47 @@ gateway:
         assert_eq!(calls.load(Ordering::SeqCst), 1, "dispatch 必须触发 handler");
         core.dispatch_ingest(&resolved);
         assert_eq!(calls.load(Ordering::SeqCst), 2, "handler 可重复调用");
+    }
+
+    // ── R6（P1-4）：reload 成功/失败语义 ──
+
+    #[test]
+    fn reload_updates_config_on_success() {
+        let core = GatewayCore::new();
+        let config = route::parse_config(
+            r#"
+gateway:
+  routes:
+    - source: qq:group:123
+      agent: peri
+      profile: trpg
+      session: 战役1
+"#,
+        )
+        .expect("合法配置");
+        core.reload(config).expect("reload 必须成功");
+        let binding = core.binding("qq:group:123").expect("binding 必须生效");
+        assert_eq!(binding.agent_id, "peri");
+        assert_eq!(binding.session_key, "战役1");
+    }
+
+    #[test]
+    fn reload_reports_poisoned_config_lock_and_keeps_running() {
+        let core = Arc::new(GatewayCore::new());
+        let core_for_poison = core.clone();
+        // 毒化 config 写锁：持锁线程 panic（RwLock 中毒后所有后续写均失败）。
+        let handle = std::thread::spawn(move || {
+            let _guard = core_for_poison.config.write().unwrap();
+            panic!("intentional lock poison for reload test");
+        });
+        let _ = handle.join();
+        let result = core.reload(GatewayConfig::empty());
+        assert!(
+            matches!(result, Err(GatewayError::ConfigLockPoisoned)),
+            "锁中毒必须返回 Err，不得误报成功"
+        );
+        // 中毒后服务仍可运行（fail-closed 读路径），不 panic。
+        assert!(core.adapter_keys().is_empty());
+        assert!(!core.is_platform_source("qq:group:999"));
     }
 }

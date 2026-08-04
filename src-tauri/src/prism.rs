@@ -103,6 +103,12 @@ impl PrismClient {
         })
     }
 
+    /// 构造期配置是否有效（from_env 成功 = true；unavailable/配置错误 = false）。
+    /// R5（P1-3）startup diagnostics 用；运行期可达性请用 status()/health。
+    pub(crate) fn has_valid_configuration(&self) -> bool {
+        self.configuration_error.is_none()
+    }
+
     pub fn unavailable(error: String) -> Self {
         // P3：不直接 expect。DEFAULT_BASE_URL 为编译期常量（单测
         // default_base_url_parses 钉死可解析）；万一被误改，把解析错误并入

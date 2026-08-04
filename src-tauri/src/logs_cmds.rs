@@ -24,17 +24,32 @@ pub(crate) async fn clear_runtime_logs(
 pub(crate) async fn push_frontend_log(
     state: tauri::State<'_, AppState>,
     level: String,
-    source: Option<String>,
+    _source: Option<String>,
     session: Option<String>,
     message: String,
     fields: Option<serde_json::Map<String, serde_json::Value>>,
 ) -> Result<runtime_log::RuntimeLogEntry, PylonError> {
+    // R8（P2-3）：前端日志收紧——source 固定为 "frontend"（忽略前端传入，防伪造
+    // source 污染过滤），message/fields 限长，每秒限流（超限丢弃并返回错误）。
+    let now = crate::time::Timestamp::now().as_u64();
+    {
+        let mut throttle = state
+            .frontend_log_throttle
+            .lock()
+            .map_err(|error| error.to_string())?;
+        if !runtime_log::frontend_log_allowed(&mut throttle, now) {
+            return Err(PylonError::Protocol(format!(
+                "frontend log rate limited（每秒 {} 条上限，本条日志已丢弃）",
+                runtime_log::FRONTEND_LOG_RATE_LIMIT
+            )));
+        }
+    }
     Ok(state.runtime_logs.push(
         crate::time::Timestamp::now(),
         level,
-        source.unwrap_or_else(|| "frontend".into()),
+        "frontend",
         session,
-        message,
-        fields.unwrap_or_default(),
+        runtime_log::truncate_frontend_message(&message),
+        runtime_log::truncate_frontend_fields(fields.unwrap_or_default()),
     ))
 }

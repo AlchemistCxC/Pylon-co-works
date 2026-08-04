@@ -102,6 +102,7 @@ pub(crate) struct TestStateBuilder {
     active_agent: String,
     prism: PrismClient,
     gateway: Arc<GatewayCore>,
+    startup: Arc<crate::startup::StartupDiagnostics>,
     approval_mode: String,
 }
 
@@ -116,6 +117,7 @@ impl TestStateBuilder {
             active_agent: "ghost-agent".to_string(),
             prism: PrismClient::unavailable("test".to_string()),
             gateway: Arc::new(GatewayCore::new()),
+            startup: Arc::new(crate::startup::StartupDiagnostics::test_default()),
             approval_mode: "default".to_string(),
         }
     }
@@ -162,12 +164,14 @@ impl TestStateBuilder {
             runtime_mcp: Mutex::new(None),
             prism: self.prism,
             gateway: self.gateway,
+            startup: self.startup,
             approval_mode: Arc::new(Mutex::new(self.approval_mode)),
             pet_write_lock: tokio::sync::Mutex::new(()),
             switch_lock: tokio::sync::Mutex::new(()),
             mcp_write_lock: tokio::sync::Mutex::new(()),
             // E18 纪律：默认值 = run() 现值（mcp_wire 初始 None）。
             mcp_wire: Mutex::new(None),
+            frontend_log_throttle: Mutex::new(crate::runtime_log::FrontendLogThrottle::default()),
         }
     }
 }

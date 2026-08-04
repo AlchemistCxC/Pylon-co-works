@@ -168,7 +168,7 @@ pub(crate) async fn export_session(
         crate::mcp::validate_and_serialize(Some(state.inner().current_mcp_servers()?))?;
     // O3：锁内仅提取回放句柄，等待在锁外进行——回放最长 30s，不阻塞其他命令。
     let handles = runtime.acp.lock().await.replay_handles();
-    let (_, messages) = crate::acp::AcpClient::load_session_with_replay(
+    let (_, messages) = crate::acp::load_session_with_replay(
         handles,
         &peri_id,
         &cwd,

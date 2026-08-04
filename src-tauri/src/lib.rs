@@ -26,8 +26,11 @@ mod prism;
 mod prism_cmds;
 mod runtime;
 mod runtime_log;
+#[cfg(test)]
+mod real_acp_smoke;
 mod sanitize;
 mod session;
+mod startup;
 #[cfg(test)]
 mod session_expiry_platform_tests;
 #[cfg(test)]
@@ -122,6 +125,8 @@ pub(crate) struct AppState {
     pub(crate) runtime_mcp: Mutex<Option<Vec<mcp::McpServerConfig>>>,
     pub(crate) prism: PrismClient,
     pub(crate) gateway: Arc<GatewayCore>,
+    /// R5（P1-3）：启动诊断快照（只读，run() 构建一次）。
+    pub(crate) startup: Arc<crate::startup::StartupDiagnostics>,
     /// 权限审批模式（B9.3）：bypass/auto 自动批准；edit/default 挂起询问。
     pub(crate) approval_mode: Arc<Mutex<String>>,
     /// R6a：宠物落盘写序锁（tokio Mutex）——序列化在临界区内执行，保证
@@ -139,6 +144,8 @@ pub(crate) struct AppState {
     /// （send_prompt_core None 路径）miss 时回退全量重算并回填（E3 自愈：启动
     /// 恢复路径直写 runtime_mcp 不经 set_mcp_servers，缓存为 None，首次读取即回填）。
     pub(crate) mcp_wire: Mutex<Option<Vec<serde_json::Value>>>,
+    /// R8（P2-3）：前端日志限流窗口（每秒上限，超限丢弃）。
+    pub(crate) frontend_log_throttle: Mutex<runtime_log::FrontendLogThrottle>,
 }
 
 /// 供 async 闭包/静态辅助持有的 AppState 字段子集。
@@ -430,7 +437,14 @@ pub fn init_tracing() {
 ///   updated_at 缺失（历史数据）视为未过期（保守，防误杀）。
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
-    let agents = match agent_config::load() {
+    // R1-R3（P1-1）：启动配置统一装载——同一份 YAML 文本分域解析
+    // （Agent/Gateway 部分成功，互不绑定成败）。
+    let loaded = agent_config::load_app_config();
+    let agents_error = loaded.agents.as_ref().err().map(ToString::to_string);
+    let gateway_error = loaded.gateway.as_ref().err().map(ToString::to_string);
+    let config_source = loaded.source.clone();
+    let gateway_result = loaded.gateway;
+    let agents = match loaded.agents {
         Ok(agents) => agents,
         Err(error) => {
             eprintln!("Pylon agent configuration error: {error}");
@@ -447,6 +461,21 @@ pub fn run() {
     };
     let default_agent = agents.get(&default_agent_id).cloned();
     let agents_for_state = agents;
+    // R5（P1-3）：prism 构造为纯同步，移出 async 块以便诊断快照一次构建。
+    let prism = match PrismClient::from_env() {
+        Ok(client) => client,
+        Err(error) => {
+            eprintln!("Pylon Prism client unavailable: {error}");
+            PrismClient::unavailable(error)
+        }
+    };
+    let startup = Arc::new(crate::startup::build_startup_diagnostics(
+        config_source,
+        agents_error,
+        gateway_error,
+        prism.has_valid_configuration(),
+        (!default_agent_id.is_empty()).then(|| default_agent_id.clone()),
+    ));
 
     let rt = match tokio::runtime::Runtime::new() {
         Ok(rt) => rt,
@@ -456,16 +485,18 @@ pub fn run() {
         }
     };
     rt.block_on(async {
-        let prism = match PrismClient::from_env() {
-            Ok(client) => client,
-            Err(error) => {
-                eprintln!("Pylon Prism client unavailable: {error}");
-                PrismClient::unavailable(error)
-            }
-        };
+        let prism = prism;
         let runtime_logs = runtime_log::RuntimeLogHub::default();
         runtime_log::register_hub(runtime_logs.clone());
-        let gateway = Arc::new(GatewayCore::new());
+        // R3（P1-1）：Gateway 使用启动同源配置快照（不再各自 include_str 另一份）；
+        // gateway 域失败 → 空配置 degraded 启动（诊断快照已记录原因）。
+        let gateway = Arc::new(match gateway_result {
+            Ok(config) => GatewayCore::from_config(config),
+            Err(error) => {
+                eprintln!("Pylon gateway configuration error: {error}");
+                GatewayCore::from_config(crate::gateway::route::GatewayConfig::empty())
+            }
+        });
         // QQ 适配器（B10.2）：凭据存在时创建 auth + adapter + WS 循环并注册进 gateway。
         // PYLON_QQ_CLIENT_SECRET 为 secret：只读入 QqAuth，不进任何输出。
         if let (Ok(qq_app_id), Ok(qq_client_secret)) = (
@@ -542,6 +573,7 @@ pub fn run() {
                 runtime_mcp: Mutex::new(None),
                 prism,
                 gateway,
+                startup,
                 approval_mode: Arc::new(Mutex::new("default".to_string())),
                 pet_write_lock: tokio::sync::Mutex::new(()),
             switch_lock: tokio::sync::Mutex::new(()),
@@ -549,6 +581,7 @@ pub fn run() {
             // P1（E10）：wire 缓存初始 None——启动恢复路径（setup load_mcp_persisted
             // 直写 runtime_mcp）后首次读取 miss 回退全量重算并回填（E3 自愈）。
             mcp_wire: Mutex::new(None),
+            frontend_log_throttle: Mutex::new(runtime_log::FrontendLogThrottle::default()),
             })
             .invoke_handler(tauri::generate_handler![
                 crate::prism_cmds::prism_health, crate::prism_cmds::prism_status, crate::prism_cmds::prism_state, crate::prism_cmds::prism_scenarios, crate::prism_cmds::prism_sources, crate::prism_cmds::prism_aliases, crate::prism_cmds::prism_config,
@@ -572,6 +605,7 @@ pub fn run() {
                 crate::workspace_cmds::get_workspace_root, crate::workspace_cmds::list_workspace_entries, crate::workspace_cmds::read_workspace_text,
                 crate::workspace_cmds::git_status, crate::workspace_cmds::git_diff, crate::workspace_cmds::git_history,
                 crate::gateway_cmds::gateway_status, crate::gateway_cmds::reload_gateway,
+                crate::startup::startup_diagnostics,
             ])
             .setup(|app| {
                 let window = app.get_webview_window("main").ok_or("main window not found")?;

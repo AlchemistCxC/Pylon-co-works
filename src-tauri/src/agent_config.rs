@@ -2,6 +2,35 @@ use serde::Deserialize;
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 
+/// 启动/加载配置的领域错误（R7/P2-1）。Display 透传原文案（前端/日志依赖文案
+/// 不变），code() 提供机器可读细分（前端分支依据，稳定不拼写变更）。
+#[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
+pub enum ConfigError {
+    /// 配置文件读取失败（含完整路径；诊断 DTO 出口由 startup::sanitize_message 脱敏）。
+    #[error("{0}")]
+    Read(String),
+    /// YAML 语法/结构解析失败。
+    #[error("{0}")]
+    Parse(String),
+    /// 单个 agent 语义校验失败（空 name/exe、非法 env/transport、acp 段非法等）。
+    #[error("{0}")]
+    InvalidAgent(String),
+    /// 其他配置级错误（空 agents 表、默认 agent 冲突等）。
+    #[error("{0}")]
+    Invalid(String),
+}
+
+impl ConfigError {
+    pub fn code(&self) -> &'static str {
+        match self {
+            Self::Read(_) => "config_read_error",
+            Self::Parse(_) => "config_parse_error",
+            Self::InvalidAgent(_) => "config_invalid_agent",
+            Self::Invalid(_) => "config_error",
+        }
+    }
+}
+
 #[derive(Debug, Clone, Deserialize)]
 struct AgentConfigFile {
     /// E1：agents 先以宽松值解析，再在 parse() 内逐 agent 反序列化——
@@ -314,7 +343,7 @@ pub(crate) fn default_client_info() -> serde_json::Value {
 
 /// E1：acp 段取值校验——数值字段必须 > 0（负数在反序列化层已被 u64 拒绝，
 /// 此处拦截 0 并指明 agent id；风格对齐 route.rs reset 校验）。
-fn validate_acp_section(id: &str, acp: &AcpProtocolConfig) -> Result<(), String> {
+fn validate_acp_section(id: &str, acp: &AcpProtocolConfig) -> Result<(), ConfigError> {
     let numeric = [
         (
             "prompt_timeout_secs",
@@ -337,7 +366,9 @@ fn validate_acp_section(id: &str, acp: &AcpProtocolConfig) -> Result<(), String>
     ];
     for (field, value) in numeric {
         if value == Some(0) {
-            return Err(format!("agent {id} 的 acp.{field} 非法: 0（必须大于 0）"));
+            return Err(ConfigError::InvalidAgent(format!(
+                "agent {id} 的 acp.{field} 非法: 0（必须大于 0）"
+            )));
         }
     }
     Ok(())
@@ -485,43 +516,177 @@ pub fn effective_config_path() -> Option<PathBuf> {
         .clone()
 }
 
-pub fn load() -> Result<HashMap<String, AgentDef>, String> {
-    if let Some(path) = effective_config_path() {
-        return load_from_path(&path);
+pub fn load() -> Result<HashMap<String, AgentDef>, ConfigError> {
+    // R1/R2：与 Gateway 共享同一读取入口（read_config_document 单次读文本），
+    // 外部配置经 base_dir 绝对化相对 exe/cwd，embedded 不做路径解析（语义同旧实现）。
+    match read_config_document() {
+        Ok(doc) => parse_agents(&doc.content, doc.base_dir.as_deref()),
+        Err(error) => Err(error),
     }
-    parse(include_str!("../../agents.yaml"))
 }
 
 /// 网关配置读取统一入口（R35）：effective_config_path 优先读文件，无路径时回退
 /// 编译期嵌入（include_str）。reload 路径的异步读（tokio::fs）在 gateway_cmds 内
 /// 实现，本入口承载"路径选择 + 兜底"语义供复用。
-/// 登记说明：启动路径 GatewayCore::new 已含 include_str 兜底 + reload 热更新覆盖，
-/// 本次只统一 reload 路径（gateway/mod.rs 属另一链，禁碰）。
-pub fn load_gateway_config() -> Result<String, String> {
-    match effective_config_path() {
-        Some(path) => std::fs::read_to_string(&path)
-            .map_err(|error| format!("读取 {} 失败: {error}", path.display())),
-        None => Ok(include_str!("../../agents.yaml").to_string()),
+pub fn load_gateway_config() -> Result<String, ConfigError> {
+    // R1：共享 read_config_document（单次读文本），语义与旧实现一致。
+    read_config_document().map(|doc| doc.content)
+}
+
+// ── R1/R2：启动配置统一装载（分域部分成功，P1-1）──
+
+/// 启动配置来源（R1）。
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum ConfigSource {
+    /// `PYLON_AGENTS_CONFIG` 环境变量指定。
+    Environment(PathBuf),
+    /// exe 同目录的 `agents.yaml`。
+    ExecutableDirectory(PathBuf),
+    /// 编译期嵌入配置（无外部文件）。
+    Embedded,
+}
+
+impl ConfigSource {
+    /// 来源类型标识（startup diagnostics 用）。
+    pub fn kind(&self) -> &'static str {
+        match self {
+            Self::Environment(_) => "environment",
+            Self::ExecutableDirectory(_) => "executable_directory",
+            Self::Embedded => "embedded",
+        }
+    }
+
+    /// 配置文件名（embedded 无真实路径，返回 "agents.yaml"）。
+    pub fn file_name(&self) -> Option<String> {
+        match self {
+            Self::Environment(path) | Self::ExecutableDirectory(path) => {
+                path.file_name().map(|name| name.to_string_lossy().into_owned())
+            }
+            Self::Embedded => Some("agents.yaml".to_string()),
+        }
     }
 }
 
-fn parse(content: &str) -> Result<HashMap<String, AgentDef>, String> {
+/// R1：一次读取到的原始配置文档（路径解析 + 文本读取各一次）。
+pub struct ConfigDocument {
+    pub source: ConfigSource,
+    /// 外部配置的 base_dir（相对 exe/cwd 解析基准 = 配置文件父目录）；Embedded 为 None。
+    pub base_dir: Option<PathBuf>,
+    pub content: String,
+}
+
+/// R1：解析配置来源并单次读取文本。仅"读取失败"返回 Err——调用方把该错误并入
+/// 两个域（agents/gateway 同时失败），应用仍可 degraded 启动。
+pub fn read_config_document() -> Result<ConfigDocument, ConfigError> {
+    let (source, base_dir) = resolve_config_source();
+    let content = match &source {
+        ConfigSource::Embedded => include_str!("../../agents.yaml").to_string(),
+        ConfigSource::Environment(path) | ConfigSource::ExecutableDirectory(path) => {
+            std::fs::read_to_string(path).map_err(|error| {
+                ConfigError::Read(format!("读取 {} 失败: {error}", path.display()))
+            })?
+        }
+    };
+    Ok(ConfigDocument { source, base_dir, content })
+}
+
+/// R2：启动配置分域装载结果——Agent 与 Gateway 独立解析，允许部分成功。
+pub struct LoadedAppConfig {
+    pub source: ConfigSource,
+    pub agents: Result<HashMap<String, AgentDef>, ConfigError>,
+    pub gateway: Result<crate::gateway::route::GatewayConfig, ConfigError>,
+}
+
+/// R2：启动配置装载——同一份 YAML 文本分域解析（P1-1 不变量：同一轮启动的
+/// Agent 与 Gateway 基于同一份文本，而非必须同时成功）。无顶层 Result：
+/// 文件读取失败也进入两个域的 Err（degraded 启动，可恢复）。
+pub fn load_app_config() -> LoadedAppConfig {
+    match read_config_document() {
+        Ok(doc) => {
+            let (agents, gateway) = parse_domains(&doc.content, doc.base_dir.as_deref());
+            LoadedAppConfig {
+                source: doc.source,
+                agents,
+                gateway,
+            }
+        }
+        Err(error) => {
+            let (source, _) = resolve_config_source();
+            let message = format!("配置读取失败: {error}");
+            LoadedAppConfig {
+                source,
+                agents: Err(ConfigError::Read(message.clone())),
+                gateway: Err(ConfigError::Read(message)),
+            }
+        }
+    }
+}
+
+/// 分域解析（纯函数）：agents 语义错误不影响 gateway 解析结果，反之亦然。
+fn parse_domains(
+    content: &str,
+    base_dir: Option<&Path>,
+) -> (
+    Result<HashMap<String, AgentDef>, ConfigError>,
+    Result<crate::gateway::route::GatewayConfig, ConfigError>,
+) {
+    (
+        parse_agents(content, base_dir),
+        crate::gateway::route::GatewayConfig::from_yaml_str(content)
+            .map_err(ConfigError::Invalid),
+    )
+}
+
+/// 分域解析 agents（外部配置对相对 exe/cwd 做 base_dir 绝对化；embedded 不解析）。
+fn parse_agents(
+    content: &str,
+    base_dir: Option<&Path>,
+) -> Result<HashMap<String, AgentDef>, ConfigError> {
+    let agents = parse(content)?;
+    match base_dir {
+        Some(dir) => Ok(agents
+            .into_iter()
+            .map(|(id, agent)| (id, agent.resolve_paths(dir)))
+            .collect()),
+        None => Ok(agents),
+    }
+}
+
+/// 解析配置来源：PYLON_AGENTS_CONFIG → exe 旁 agents.yaml → Embedded。
+fn resolve_config_source() -> (ConfigSource, Option<PathBuf>) {
+    match effective_config_path() {
+        Some(path) => {
+            let base_dir = path.parent().map(Path::to_path_buf);
+            let source = if std::env::var_os("PYLON_AGENTS_CONFIG").is_some() {
+                ConfigSource::Environment(path)
+            } else {
+                ConfigSource::ExecutableDirectory(path)
+            };
+            (source, base_dir)
+        }
+        None => (ConfigSource::Embedded, None),
+    }
+}
+
+fn parse(content: &str) -> Result<HashMap<String, AgentDef>, ConfigError> {
     // R27b：serde_yaml → serde_yml（API 兼容：serde_yml::from_str）。
     // 自定义错误前缀 "failed to parse agents.yaml" 保持（不依赖上游错误文案）。
     // E1：agents 先以宽松值解析再逐 agent 反序列化——非法字段（负数值/未知枚举/
     // 类型错误）的报错带 agent id 上下文（风格对齐 route.rs reset 校验）。
     let config: AgentConfigFile = serde_yml::from_str(content)
-        .map_err(|error| format!("failed to parse agents.yaml: {error}"))?;
+        .map_err(|error| ConfigError::Parse(format!("failed to parse agents.yaml: {error}")))?;
     if config.agents.is_empty() {
-        return Err("agents.yaml contains no agents".to_string());
+        return Err(ConfigError::Invalid("agents.yaml contains no agents".to_string()));
     }
     let mut agents = HashMap::with_capacity(config.agents.len());
     for (id, raw) in config.agents {
         if id.trim().is_empty() {
-            return Err("agents.yaml contains an agent with an empty id".to_string());
+            return Err(ConfigError::Invalid(
+                "agents.yaml contains an agent with an empty id".to_string(),
+            ));
         }
-        let mut agent: AgentDef =
-            serde_yml::from_value(raw).map_err(|error| format!("agent {id} 配置非法: {error}"))?;
+        let mut agent: AgentDef = serde_yml::from_value(raw)
+            .map_err(|error| ConfigError::InvalidAgent(format!("agent {id} 配置非法: {error}")))?;
         // D2 兼容合并：acp 段未声明 set_model_api 时回退顶层 legacy bool
         // （agents.yaml 现状 hermes 即顶层 `set_model_api: true`——旧键保留，
         // bool 双格式兼容；acp 段显式声明优先）。
@@ -542,32 +707,38 @@ fn parse(content: &str) -> Result<HashMap<String, AgentDef>, String> {
             _ => {}
         }
         if agent.name.trim().is_empty() {
-            return Err(format!("agent {id} has an empty name"));
+            return Err(ConfigError::InvalidAgent(format!(
+                "agent {id} has an empty name"
+            )));
         }
         if agent.exe.trim().is_empty() {
-            return Err(format!("agent {id} has an empty executable"));
+            return Err(ConfigError::InvalidAgent(format!(
+                "agent {id} has an empty executable"
+            )));
         }
         if agent.transport != "subprocess" {
-            return Err(format!(
+            return Err(ConfigError::InvalidAgent(format!(
                 "agent {id} uses unsupported transport: {}",
                 agent.transport
-            ));
+            )));
         }
         // A11：env 键/值未校验时 `cmd.env(k, v)` 会 panic（含 '=' 或 NUL 的键、
         // NUL 值均触发）——非法配置从启动 panic 变为启动报错降级。
         for (key, value) in &agent.env {
             if key.is_empty() {
-                return Err(format!("agent {id} has invalid env entry: empty key"));
+                return Err(ConfigError::InvalidAgent(format!(
+                    "agent {id} has invalid env entry: empty key"
+                )));
             }
             if key.contains('=') {
-                return Err(format!(
+                return Err(ConfigError::InvalidAgent(format!(
                     "agent {id} has invalid env entry: key contains '=': {key:?}"
-                ));
+                )));
             }
             if key.contains('\0') || value.contains('\0') {
-                return Err(format!(
+                return Err(ConfigError::InvalidAgent(format!(
                     "agent {id} has invalid env entry: NUL byte in key or value: {key:?}"
-                ));
+                )));
             }
         }
         if let Some(acp) = &agent.acp {
@@ -578,9 +749,13 @@ fn parse(content: &str) -> Result<HashMap<String, AgentDef>, String> {
     Ok(agents)
 }
 
-pub fn load_from_path(path: &Path) -> Result<HashMap<String, AgentDef>, String> {
-    let content = std::fs::read_to_string(path)
-        .map_err(|error| format!("read agent config {} failed: {error}", path.display()))?;
+pub fn load_from_path(path: &Path) -> Result<HashMap<String, AgentDef>, ConfigError> {
+    let content = std::fs::read_to_string(path).map_err(|error| {
+        ConfigError::Read(format!(
+            "read agent config {} failed: {error}",
+            path.display()
+        ))
+    })?;
     let agents = parse(&content)?;
     // A11：相对 exe/cwd 以配置所在目录为基准绝对化（否则相对路径随进程 cwd 变化，
     // 落库/回放错位）。connect_with_logs 的临时 resolve 保留（幂等，双保险）。
@@ -591,7 +766,7 @@ pub fn load_from_path(path: &Path) -> Result<HashMap<String, AgentDef>, String> 
         .collect())
 }
 
-pub fn default_agent_id(agents: &HashMap<String, AgentDef>) -> Result<Option<String>, String> {
+pub fn default_agent_id(agents: &HashMap<String, AgentDef>) -> Result<Option<String>, ConfigError> {
     let mut defaults: Vec<&String> = agents
         .iter()
         .filter(|(_, agent)| agent.default)
@@ -599,14 +774,14 @@ pub fn default_agent_id(agents: &HashMap<String, AgentDef>) -> Result<Option<Str
         .collect();
     if defaults.len() > 1 {
         defaults.sort();
-        return Err(format!(
+        return Err(ConfigError::Invalid(format!(
             "multiple default agents configured: {}",
             defaults
                 .iter()
                 .map(|id| id.as_str())
                 .collect::<Vec<_>>()
                 .join(", ")
-        ));
+        )));
     }
     if let Some(id) = defaults.pop() {
         return Ok(Some(id.clone()));
@@ -656,7 +831,7 @@ mod tests {
         agents.insert("a".to_string(), agent(true));
         agents.insert("b".to_string(), agent(true));
         let error = default_agent_id(&agents).expect_err("multiple defaults must fail");
-        assert!(error.contains("a, b"));
+        assert!(error.to_string().contains("a, b"));
     }
 
     #[test]
@@ -686,7 +861,7 @@ mod tests {
             "agents:\n  bad:\n    name: Bad\n    transport: subprocess\n    exe: agent\n    env:\n      \"\": \"value\"\n",
         )
         .expect_err("empty env key must be rejected");
-        assert!(error.contains("agent bad has invalid env entry"));
+        assert!(error.to_string().contains("agent bad has invalid env entry"));
     }
 
     #[test]
@@ -695,7 +870,7 @@ mod tests {
             "agents:\n  bad:\n    name: Bad\n    transport: subprocess\n    exe: agent\n    env:\n      \"a=b\": \"value\"\n",
         )
         .expect_err("env key containing '=' must be rejected");
-        assert!(error.contains("agent bad has invalid env entry"));
+        assert!(error.to_string().contains("agent bad has invalid env entry"));
     }
 
     #[test]
@@ -1011,7 +1186,7 @@ mod tests {
         )
         .expect_err("负数值必须拒绝");
         assert!(
-            error.contains("agent bad"),
+            error.to_string().contains("agent bad"),
             "报错必须指明 agent id: {error}"
         );
         // 0：parse 校验层拒绝（u64 可解析，语义非法）
@@ -1020,11 +1195,11 @@ mod tests {
         )
         .expect_err("0 必须拒绝");
         assert!(
-            error.contains("agent bad"),
+            error.to_string().contains("agent bad"),
             "报错必须指明 agent id: {error}"
         );
         assert!(
-            error.contains("prompt_timeout_secs"),
+            error.to_string().contains("prompt_timeout_secs"),
             "报错必须指明字段: {error}"
         );
         // 全部数值字段 0 均拒绝
@@ -1039,8 +1214,8 @@ mod tests {
                 "agents:\n  bad:\n    name: Bad\n    transport: subprocess\n    exe: agent\n    acp:\n      {field}: 0\n"
             ))
             .expect_err("{field} 为 0 必须拒绝");
-            assert!(error.contains("agent bad"), "{field}: {error}");
-            assert!(error.contains(field), "{field}: {error}");
+            assert!(error.to_string().contains("agent bad"), "{field}: {error}");
+            assert!(error.to_string().contains(field), "{field}: {error}");
         }
         // 未知枚举值：反序列化层拒绝，报错带 agent id
         let error = parse(
@@ -1048,19 +1223,19 @@ mod tests {
         )
         .expect_err("未知 set_model_api 必须拒绝");
         assert!(
-            error.contains("agent bad"),
+            error.to_string().contains("agent bad"),
             "报错必须指明 agent id: {error}"
         );
-        assert!(error.contains("set_model_api"), "报错必须指明字段: {error}");
+        assert!(error.to_string().contains("set_model_api"), "报错必须指明字段: {error}");
         let error = parse(
             "agents:\n  bad:\n    name: Bad\n    transport: subprocess\n    exe: agent\n    acp:\n      mcp_servers: sometimes\n",
         )
         .expect_err("未知 mcp_servers 必须拒绝");
         assert!(
-            error.contains("agent bad"),
+            error.to_string().contains("agent bad"),
             "报错必须指明 agent id: {error}"
         );
-        assert!(error.contains("mcp_servers"), "报错必须指明字段: {error}");
+        assert!(error.to_string().contains("mcp_servers"), "报错必须指明字段: {error}");
         // 合法值不受影响（正对照）
         assert!(
             parse(
@@ -1069,5 +1244,145 @@ mod tests {
             .is_ok(),
             "合法 >0 值必须通过"
         );
+    }
+
+    // ── R6（P1-4）：分域部分成功与统一装载 ──
+
+    #[test]
+    fn config_error_codes_are_stable_and_machine_readable() {
+        assert_eq!(ConfigError::Read("x".into()).code(), "config_read_error");
+        assert_eq!(
+            ConfigError::Parse("x".into()).code(),
+            "config_parse_error"
+        );
+        assert_eq!(
+            ConfigError::InvalidAgent("x".into()).code(),
+            "config_invalid_agent"
+        );
+        assert_eq!(ConfigError::Invalid("x".into()).code(), "config_error");
+    }
+
+    #[test]
+    fn config_error_display_preserves_original_message() {
+        // R7：Display 透传原文案（前端/日志文案不变），code 独立细分。
+        let error = ConfigError::InvalidAgent("agent bad has an empty name".into());
+        assert_eq!(error.to_string(), "agent bad has an empty name");
+        assert_eq!(error.code(), "config_invalid_agent");
+    }
+
+    #[test]
+    fn parse_domains_both_domains_ok() {
+        let content = r#"
+agents:
+  peri:
+    name: Peri
+    transport: subprocess
+    exe: peri
+gateway:
+  routes:
+    - source: qq:group:1
+      agent: peri
+      profile: trpg
+      session: 战役1
+"#;
+        let (agents, gateway) = parse_domains(content, None);
+        assert_eq!(agents.expect("agents 必须可解析").len(), 1);
+        assert_eq!(
+            gateway
+                .expect("gateway 必须可解析")
+                .routes
+                .iter()
+                .count(),
+            1
+        );
+    }
+
+    #[test]
+    fn parse_domains_agent_error_does_not_block_gateway() {
+        let content = r#"
+agents:
+  bad:
+    name: ""
+    transport: subprocess
+    exe: peri
+gateway:
+  routes:
+    - source: qq:group:1
+      agent: peri
+      profile: trpg
+      session: 战役1
+"#;
+        let (agents, gateway) = parse_domains(content, None);
+        assert!(agents.is_err(), "空 name 必须使 agents 失败");
+        assert!(gateway.is_ok(), "agents 失败不得拖垮 gateway（P1-1 部分成功）");
+    }
+
+    #[test]
+    fn parse_domains_gateway_error_does_not_block_agents() {
+        let content = r#"
+agents:
+  peri:
+    name: Peri
+    transport: subprocess
+    exe: peri
+gateway:
+  routes:
+    - source: qq:group:1
+      agent: peri
+      profile: trpg
+      session: 战役1
+      reset: banana
+"#;
+        let (agents, gateway) = parse_domains(content, None);
+        assert!(agents.is_ok(), "gateway 失败不得拖垮 agents（P1-1 部分成功）");
+        let error = gateway.expect_err("非法 reset 必须使 gateway 失败");
+        assert!(error.to_string().contains("reset"), "报错必须指明 reset: {error}");
+    }
+
+    #[test]
+    fn parse_domains_broken_yaml_fails_both_domains() {
+        let (agents, gateway) = parse_domains("{{{ not yaml", None);
+        assert!(agents.is_err(), "语法损坏必须使 agents 失败");
+        assert!(gateway.is_err(), "语法损坏必须使 gateway 失败");
+    }
+
+    #[test]
+    fn load_app_config_is_structured_and_source_identifiable() {
+        // 环境无关的结构断言：来源三选一、两个域结果都存在（成败由测试环境决定，
+        // 不在此断言）。同一份文本分域解析由 parse_domains 测试覆盖。
+        let loaded = load_app_config();
+        assert!(matches!(
+            loaded.source,
+            ConfigSource::Environment(_)
+                | ConfigSource::ExecutableDirectory(_)
+                | ConfigSource::Embedded
+        ));
+        let _ = loaded.agents.is_ok();
+        let _ = loaded.gateway.is_ok();
+    }
+
+    #[test]
+    fn load_and_load_gateway_config_share_read_entry() {
+        // R1：load() 与 load_gateway_config() 都经 read_config_document 单次读文本——
+        // 同一来源下两域读取的是同一份内容（P1-1 不变量）。
+        let doc = read_config_document();
+        let agents = load();
+        let gateway_text = load_gateway_config();
+        match doc {
+            Ok(doc) => {
+                // 有来源 → load 解析成功则 gateway 文本即该内容
+                if let Ok(agents) = agents {
+                    assert!(!agents.is_empty());
+                }
+                assert_eq!(
+                    gateway_text.as_ref().map(|text| text.as_str()),
+                    Ok(doc.content.as_str())
+                );
+            }
+            Err(_) => {
+                // 无来源（embedded 恒可用，正常不可达）——防回归
+                assert!(gateway_text.is_err());
+            }
+        }
     }
 }

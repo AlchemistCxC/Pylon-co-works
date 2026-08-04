@@ -6,7 +6,7 @@ use std::sync::atomic::Ordering;
 use std::sync::Arc;
 use std::time::Duration;
 
-use crate::acp::{self, AcpClient, PromptWaitOutcome};
+use crate::acp::{self, PromptWaitOutcome};
 use crate::agent_config::AgentDef;
 use crate::agent_runtime::{session_mapping_matches, AgentLifecycleStatus, AgentRuntimeState};
 use crate::error::PylonError;
@@ -820,7 +820,7 @@ async fn create_session_slot(
         }
     };
     state.ensure_generation(runtime, generation)?;
-    let peri_id = AcpClient::session_id_from(&response)?;
+    let peri_id = crate::acp::session_id_from(&response)?;
     let mut session = SessionInfo::new(
         peri_id.clone(),
         persona.to_string(),
@@ -1143,7 +1143,7 @@ async fn prepare_prompt_blocks<R: tauri::Runtime>(
         None => crate::agent_config::AttachmentLimits::from_agent(&state.get_active_agent()?),
     };
     #[allow(clippy::needless_borrow)]
-    let prompt_blocks = AcpClient::prompt_blocks(prompt_text, &attachment_paths, limits)?;
+    let prompt_blocks = crate::acp::prompt_blocks(prompt_text, &attachment_paths, limits)?;
     flow.message_round = message_round;
     flow.inject_activated = inject_activated;
     flow.prompt_blocks = prompt_blocks;
@@ -1183,7 +1183,7 @@ async fn finalize_response<R: tauri::Runtime>(
     let prompt_generation = flow.generation;
     let is_first = flow.is_first;
     let message_round = flow.message_round;
-    AcpClient::prompt_stop_reason(&data).map_err(|error| {
+    crate::acp::prompt_stop_reason(&data).map_err(|error| {
         let error = error.to_string();
         if let Some(window) = window {
             emit_event_all(
@@ -2004,7 +2004,7 @@ pub(crate) async fn load_persisted_session(
     )?;
     // O3：锁内仅提取回放句柄，等待在锁外进行——回放最长 30s，不阻塞其他命令。
     let handles = runtime.acp.lock().await.replay_handles();
-    let load_result = AcpClient::load_session_with_replay(
+    let load_result = crate::acp::load_session_with_replay(
         handles,
         &peri_id,
         &cwd,
@@ -2269,7 +2269,7 @@ for line in sys.stdin:
             ..Default::default()
         });
         let runtime = AgentRuntime::new_disconnected();
-        *runtime.acp.lock().await = AcpClient::connect_with_logs(&runtime_def, None)
+        *runtime.acp.lock().await = crate::acp::AcpClient::connect_with_logs(&runtime_def, None)
             .await
             .expect("fake ACP must initialize");
         let state = crate::test_utils::TestStateBuilder::bare()

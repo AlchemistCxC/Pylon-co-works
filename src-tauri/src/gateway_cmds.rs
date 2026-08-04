@@ -42,10 +42,11 @@ pub(crate) async fn reload_gateway(state: tauri::State<'_, AppState>) -> Result<
         Some(path) => tokio::fs::read_to_string(&path)
             .await
             .map_err(|error| PylonError::Io(format!("读取 {} 失败: {error}", path.display())))?,
-        None => agent_config::load_gateway_config().map_err(PylonError::Io)?,
+        None => agent_config::load_gateway_config().map_err(PylonError::from)?,
     };
     let config = crate::gateway::route::parse_config(&content).map_err(PylonError::Protocol)?;
-    state.gateway.reload(config);
+    // R4（P1-2）：reload 失败（配置锁中毒）必须如实返回错误，不得继续报成功。
+    state.gateway.reload(config).map_err(PylonError::from)?;
     state.inner().log_runtime_summary(
         "info",
         "gateway",

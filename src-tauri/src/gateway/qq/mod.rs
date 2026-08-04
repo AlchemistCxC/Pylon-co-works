@@ -1009,7 +1009,8 @@ gateway:
 "#,
             )
             .expect("合法路由配置"),
-        );
+        )
+        .expect("reload 必须成功");
         let rejected = adapter
             .handle_incoming("qq:group:123", "msg-1", "hi", Some("old-member"), None)
             .expect("ingest");

@@ -29,6 +29,12 @@ pub enum PylonError {
     /// B5：Git 只读操作错误（非 git 仓库 / git 不可用 / 命令失败）。
     #[error("Git error: {0}")]
     Git(String),
+    /// R7（P2-1）：配置加载领域错误（细分 code 经 ConfigError::code 委派）。
+    #[error("Config error: {0}")]
+    Config(#[from] crate::agent_config::ConfigError),
+    /// R4/R7（P1-2/P2-1）：Gateway 域错误（细分 code 经 GatewayError::code 委派）。
+    #[error("Gateway error: {0}")]
+    Gateway(#[from] crate::gateway::GatewayError),
 }
 
 impl PylonError {
@@ -45,6 +51,8 @@ impl PylonError {
             Self::Workspace(_) => "workspace_error",
             Self::Prism(_) => "prism_error",
             Self::Git(_) => "git_error",
+            Self::Config(error) => error.code(),
+            Self::Gateway(error) => error.code(),
         }
     }
 }
@@ -117,6 +125,14 @@ mod tests {
         assert_eq!(PylonError::Workspace("x".into()).code(), "workspace_error");
         assert_eq!(PylonError::Prism("x".into()).code(), "prism_error");
         assert_eq!(PylonError::Git("x".into()).code(), "git_error");
+        assert_eq!(
+            PylonError::Gateway(crate::gateway::GatewayError::ConfigLockPoisoned).code(),
+            "gateway_config_lock_poisoned"
+        );
+        assert_eq!(
+            PylonError::Config(crate::agent_config::ConfigError::Parse("x".into())).code(),
+            "config_parse_error"
+        );
     }
 
     #[test]

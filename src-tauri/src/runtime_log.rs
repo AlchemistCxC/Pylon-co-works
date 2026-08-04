@@ -301,6 +301,55 @@ impl tracing::field::Visit for EventCapture {
     }
 }
 
+// ── R8（P2-3）：前端日志输入限制 ──
+
+/// 前端日志 message 限长（比通用 8KB 更紧，前端日志仅调试用途）。
+pub const FRONTEND_LOG_MAX_MESSAGE: usize = 1024;
+/// 前端日志 fields 单个字符串值限长。
+pub const FRONTEND_LOG_MAX_FIELD_STRING: usize = 512;
+/// 前端日志每秒上限（超限丢弃并返回错误，防刷掉重要后端日志）。
+pub const FRONTEND_LOG_RATE_LIMIT: u32 = 20;
+
+/// R8：前端日志限流窗口（AppState 持有；每秒最多 [`FRONTEND_LOG_RATE_LIMIT`] 条）。
+#[derive(Debug, Default)]
+pub struct FrontendLogThrottle {
+    pub window_start_ms: u64,
+    pub count: u32,
+}
+
+/// R8：前端日志限流判定——放行则计数 +1 返回 true；超限返回 false（调用方丢弃）。
+/// 窗口滚动逻辑内聚于此（可单测）；logs_cmds::push_frontend_log 使用。
+pub fn frontend_log_allowed(throttle: &mut FrontendLogThrottle, now_ms: u64) -> bool {
+    if now_ms.saturating_sub(throttle.window_start_ms) >= 1000 {
+        throttle.window_start_ms = now_ms;
+        throttle.count = 0;
+    }
+    if throttle.count >= FRONTEND_LOG_RATE_LIMIT {
+        return false;
+    }
+    throttle.count += 1;
+    true
+}
+
+/// R8：前端日志 message 限长截断。
+pub fn truncate_frontend_message(message: &str) -> String {
+    truncate(message.to_string(), FRONTEND_LOG_MAX_MESSAGE)
+}
+
+/// R8：fields 字符串值限长截断（数字/布尔本就远小于上限，保持类型不变）。
+pub fn truncate_frontend_fields(fields: Map<String, Value>) -> Map<String, Value> {
+    fields
+        .into_iter()
+        .map(|(key, value)| {
+            let value = match value {
+                Value::String(text) => Value::String(truncate(text, FRONTEND_LOG_MAX_FIELD_STRING)),
+                other => other,
+            };
+            (key, value)
+        })
+        .collect()
+}
+
 fn truncate(value: String, max_bytes: usize) -> String {
     if value.len() <= max_bytes {
         return value;
@@ -327,6 +376,48 @@ mod tests {
     use super::*;
     use serde_json::json;
     use tracing_subscriber::layer::Layer;
+
+    // ── R8（P2-3）：前端日志限流与截断 ──
+
+    #[test]
+    fn frontend_log_allows_limit_per_second_then_denies() {
+        let mut throttle = FrontendLogThrottle::default();
+        let now = 1_000_000u64;
+        for i in 0..FRONTEND_LOG_RATE_LIMIT {
+            assert!(frontend_log_allowed(&mut throttle, now), "第 {i} 条应放行");
+        }
+        assert!(
+            !frontend_log_allowed(&mut throttle, now),
+            "同窗口超限必须拒绝"
+        );
+        // 下一窗口滚动后恢复
+        assert!(frontend_log_allowed(&mut throttle, now + 1000));
+    }
+
+    #[test]
+    fn frontend_log_truncates_message_and_field_strings() {
+        let long = "x".repeat(FRONTEND_LOG_MAX_MESSAGE + 100);
+        let truncated = truncate_frontend_message(&long);
+        assert!(truncated.len() < long.len());
+        assert!(truncated.ends_with("..."));
+
+        let fields = truncate_frontend_fields(Map::from_iter([
+            ("big".to_string(), Value::String("y".repeat(FRONTEND_LOG_MAX_FIELD_STRING + 100))),
+            ("num".to_string(), Value::from(42)),
+            ("flag".to_string(), Value::Bool(true)),
+        ]));
+        let big = fields.get("big").unwrap().as_str().unwrap();
+        assert!(big.len() < FRONTEND_LOG_MAX_FIELD_STRING + 100);
+        assert!(big.ends_with("..."));
+        assert_eq!(fields.get("num").unwrap(), &Value::from(42), "数字类型不变");
+        assert_eq!(fields.get("flag").unwrap(), &Value::Bool(true), "布尔类型不变");
+    }
+
+    #[test]
+    fn frontend_log_short_messages_pass_through_unchanged() {
+        let message = "short message";
+        assert_eq!(truncate_frontend_message(message), message);
+    }
 
     fn fields(values: &[(&str, Value)]) -> Map<String, Value> {
         values
