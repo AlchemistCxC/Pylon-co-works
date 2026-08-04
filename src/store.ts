@@ -147,6 +147,7 @@ export const useStore = create<ThemeState>()(persist(
         hiddenIds: state.ccHidden,
         inputMode: state.inputMode,
         ccStyle: state.ccStyle,
+        submitButtonMode: state.inputSubmitButtonMode,
       }),
       cliOverflowMode: state.cliOverflowMode,
     }),

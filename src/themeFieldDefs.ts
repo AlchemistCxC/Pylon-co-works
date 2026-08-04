@@ -178,6 +178,7 @@ export const THEME_FIELD_DEFS = {
         hiddenIds: t.ccHidden || [],
         inputMode: t.inputMode,
         ccStyle: t.ccStyle || 'wave',
+        submitButtonMode: t.inputSubmitButtonMode || 'inline',
       }),
       cliOverflowMode: t.cliOverflowMode || 'fixed-scroll',
     }),

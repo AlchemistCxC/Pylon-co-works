@@ -1,4 +1,4 @@
-import { STATUS_WIDGET_IDS } from './domains/cc/widgetDefinitions.ts'
+import { isWidgetVisible, STATUS_WIDGET_IDS } from './domains/cc/widgetDefinitions.ts'
 
 export type CcInputMode = 'cli' | 'default' | string
 export type CcFooterLayout = 'free' | 'peri' | string
@@ -17,18 +17,16 @@ export function resolveVisibleStatusWidgetCount({
   hiddenIds,
   inputMode,
   ccStyle,
+  submitButtonMode,
 }: {
   hiddenIds: readonly string[]
   inputMode: CcInputMode
   ccStyle: string
+  submitButtonMode: string
 }): number {
-  return STATUS_WIDGET_IDS.filter(id => {
-    if (hiddenIds.includes(id)) return false
-    if (inputMode === 'cli' && (id === 'send' || id === 'attach')) return false
-    if (ccStyle === 'numeric' && id === 'ekg' && !hiddenIds.includes('pct')) return false
-    if (ccStyle === 'ring' && id === 'pct' && !hiddenIds.includes('ekg')) return false
-    return true
-  }).length
+  // C2：与渲染共用一个可见性谓词（含 submitButtonMode 的 send/attach 判定），
+  // 修此前"计数把不渲染的 send/attach 算入最小高"的失真。
+  return STATUS_WIDGET_IDS.filter(id => isWidgetVisible(id, { hidden: hiddenIds, inputMode, submitButtonMode, ccStyle })).length
 }
 
 const BASE_MIN_HEIGHT = 64

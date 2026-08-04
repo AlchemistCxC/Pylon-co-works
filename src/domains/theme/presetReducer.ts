@@ -67,6 +67,7 @@ function clampPresetCcHeight(theme: Partial<ThemeSettings>): number {
     hiddenIds: Array.isArray(theme.ccHidden) ? theme.ccHidden : [],
     inputMode,
     ccStyle,
+    submitButtonMode: String(theme.inputSubmitButtonMode ?? DEFAULTS.inputSubmitButtonMode),
   })
   return clampCcHeight(typeof theme.ccHeight === 'number' ? theme.ccHeight : Number(DEFAULTS.ccHeight), {
     inputMode,

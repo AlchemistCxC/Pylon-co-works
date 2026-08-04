@@ -9,6 +9,7 @@ import AttachWidget from './chat/AttachWidget'
 import ColorPopover from './ColorPopover'
 import { toCssBackgroundImage } from '../backgroundImage'
 import { resolveCcMinHeight, resolveVisibleStatusWidgetCount } from '../ccHeightState'
+import { isWidgetVisible } from '../domains/cc/widgetDefinitions'
 import { CC_WIDGET_REGISTRY as WIDGET_REGISTRY } from './cc/widgetRegistry'
 import './ControlCenter.css'
 import './chat/StatusBar.css'  // model/mode/send/attach widget 样式
@@ -44,19 +45,14 @@ export default function ControlCenter({ sessionId }: Props) {
   const renderWidget = (id: string) => {
     const def = WIDGET_REGISTRY.find(w => w.id === id)
     if (!def) return null
-    if (!editMode && hidden.includes(id)) return null
-    // numeric 由 pct 表达；ring 由用量 widget 表达，避免重复上下文百分比。
-    if (!editMode && ccStyle === 'numeric' && id === 'ekg' && !hidden.includes('pct')) return null
-    if (!editMode && ccStyle === 'ring' && id === 'pct' && !hidden.includes('ekg')) return null
+    // C2：可见性判定与 ccHeightState 计数消费同一谓词（isWidgetVisible，含 send/attach 的
+    // externalBtnMode 判定），修此前"计数把不渲染的 send/attach 算入最小高"的失真。
+    if (!isWidgetVisible(id, { hidden, inputMode, submitButtonMode, ccStyle, editMode })) return null
 
-    // 独立 send/attach widget 仅在"外部按钮模式"下渲染；CLI/内联模式走 InputBar 自带按钮。
-    // externalSend/externalAttach 逐按钮决定 InputBar 是否隐藏自带按钮，避免重复或丢失。
-    // 可见性判定与 ccHeightState 统一使用 inputMode（Settings 双写保证 inputVariant 与 inputMode 同步）。
-    // 编辑模式保持原行为：只要任一外部按钮启用，InputBar 整体让位（画布此时显示全部控件）。
+    // externalSend/externalAttach 逐按钮决定 InputBar 是否隐藏自带按钮，避免重复或丢失
     const externalBtnMode = inputMode !== 'cli' && submitButtonMode === 'external'
     const externalSend = externalBtnMode && !hidden.includes('send')
     const externalAttach = externalBtnMode && !hidden.includes('attach')
-    if (!editMode && (id === 'send' || id === 'attach') && !externalBtnMode) return null
 
     let body: React.ReactNode
     switch (id) {
@@ -101,6 +97,7 @@ export default function ControlCenter({ sessionId }: Props) {
     hiddenIds: hidden,
     inputMode,
     ccStyle,
+    submitButtonMode,
   })
   const minHeight = resolveCcMinHeight({
     inputMode,

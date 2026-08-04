@@ -117,6 +117,7 @@ export function themeDomainMigrate(persisted: unknown, defaults: ThemeMigrationD
       hiddenIds: Array.isArray(state.ccHidden) ? state.ccHidden : [],
       inputMode: migratedInputMode as CcInputMode,
       ccStyle: (state.ccStyle as string) || 'wave',
+      submitButtonMode: String(state.inputSubmitButtonMode ?? 'inline'),
     }),
     cliOverflowMode: migratedOverflowMode as CcOverflowMode,
   })
