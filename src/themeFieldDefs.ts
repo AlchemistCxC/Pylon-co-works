@@ -80,7 +80,8 @@ export const THEME_FIELD_DEFS = {
   uiScheme: { ...S('global', 'UI 配色', ['light', 'dark']), default: 'light', group: "玻璃效果", control: 'schemeChip' },
   userName: { ...T('global', '显示名'), default: '', group: "个人信息" },
   userPrefix: { ...T('global', '前缀'), default: '❯', group: "个人信息" },
-  userColor: { ...C('global', '名字颜色'), default: '', group: "个人信息" },
+  // ChatView 内联 style 应用（style={{color: userColor}}），不注入 CSS var
+  userColor: { ...C('global', '名字颜色'), default: '', group: "个人信息", noCssVar: true },
   // 布局显隐并入 global zone（布局骨架组渲染在全局 tab），layout zone 无独立 tab/预设
   showTabBar: { ...B('global', 'Tab 条'), default: true, group: "布局骨架" },
   showSidebar: { ...B('global', '侧栏'), default: true, group: "布局骨架" },
@@ -122,8 +123,6 @@ export const THEME_FIELD_DEFS = {
   toolOk: { ...C('chat', '工具·完成'), default: '#4EBA65', group: "指示器 & 连接线", },
   toolRun: { ...C('chat', '工具·运行中'), default: '#93A5FF', group: "指示器 & 连接线", },
   toolErr: { ...C('chat', '工具·错误'), default: '#FF6B80', group: "指示器 & 连接线", },
-  toolNameColor: { ...C('chat', '工具名'), default: 'rgba(0,0,0,0.85)', group: "文字 & 标签", },
-  toolSummaryColor: { ...C('chat', '工具摘要'), default: 'rgba(0,0,0,0.40)', group: "文字 & 标签", },
   userTagBg: { ...C('chat', '标签背景'), default: 'rgba(168,85,247,0.08)', group: "文字 & 标签", },
   userTagText: { ...C('chat', '标签文字'), default: '#a855f7', group: "文字 & 标签", },
   diffAdded: { ...C('chat', 'Diff·新增'), default: '#4EBA65', group: "Diff", },
@@ -132,8 +131,9 @@ export const THEME_FIELD_DEFS = {
   diffRemovedWord: { ...C('chat', 'Diff·词级删除'), default: '#E0556B', group: "Diff", advanced: true },
   // toolIndicator 走 widgetRegistry 动态选项（toolIndicatorOptions），不进声明式 UI
   toolIndicator: { ...S('chat', '指示器形状', ['●', '■', '◆', '▶', '✦']), default: '●', hidden: true },
-  toolIndicatorGlow: { ...N('chat', '指示器辉光', 0, 20, 1), default: 0, group: "指示器 & 连接线", suffix: 'px' },
-  toolIndicatorGlowColor: { ...C('chat', '辉光色'), default: '', group: "指示器 & 连接线", },
+  // CSS 变量走 --pv-connector-*（ChatView 内联计算），字段不注入独立 var
+  toolIndicatorGlow: { ...N('chat', '指示器辉光', 0, 20, 1), default: 0, group: "指示器 & 连接线", suffix: 'px', noCssVar: true },
+  toolIndicatorGlowColor: { ...C('chat', '辉光色'), default: '', group: "指示器 & 连接线", noCssVar: true },
   toolConnectorMode: { ...S('chat', '连接线', ['none', 'fixed', 'follow']), default: 'none', group: "指示器 & 连接线", },
   toolConnectorColor: { ...C('chat', '连接线色'), default: 'rgba(0,0,0,0.12)', group: "指示器 & 连接线", showIf: t => t.toolConnectorMode === 'fixed' },
   toolConnectorStyle: { ...S('chat', '线样式', ['solid', 'dotted', 'pulse']), default: 'solid', group: "指示器 & 连接线", },
@@ -152,12 +152,14 @@ export const THEME_FIELD_DEFS = {
   spinnerDoneMarkerMode: { ...S('chat', '完成标记模式', ['frame', 'custom']), default: 'custom', group: "Spinner", hidden: true },
   spinnerCancelledMarkerMode: { ...S('chat', '取消标记模式', ['frame', 'custom']), default: 'custom', group: "Spinner", hidden: true },
   spinnerErrorMarkerMode: { ...S('chat', '错误标记模式', ['frame', 'custom']), default: 'custom', group: "Spinner", hidden: true },
-  spinnerIntervalMs: { ...N('chat', '动画间隔', 40, 1000, 10), default: 120, group: "Spinner", suffix: 'ms' },
+  // 动画间隔 JS 驱动（setInterval），无 CSS var 消费 → 不注入
+  spinnerIntervalMs: { ...N('chat', '动画间隔', 40, 1000, 10), default: 120, group: "Spinner", suffix: 'ms', noCssVar: true },
   spinnerColor: { ...C('chat', 'Spinner 颜色'), default: '', group: "Spinner", },
   spinnerSize: { ...N('chat', 'Spinner 大小', 10, 32), default: 14, group: "Spinner", unit: 'px' },
   msgStyle: { ...S('chat', '消息风格', ['terminal', 'bubble']), default: 'terminal', group: "风格", },
   msgFont: { ...S('chat', '消息字体', ['mono', 'system']), default: 'mono', group: "风格", },
-  msgTextColor: { ...C('chat', '消息文字'), default: '', group: "风格", },
+  // 经 App.tsx 手写 --msg-text 注入，自动派生 --msg-text-color 冗余 → 不注入
+  msgTextColor: { ...C('chat', '消息文字'), default: '', group: "风格", noCssVar: true },
   msgLineHeight: { ...N('chat', '消息行距', 1.2, 2.5, 0.1), default: 1.8, group: "风格", },
   messageLayout: { ...S('chat', '信息层级', ['classic', 'claude', 'bubble']), default: 'classic', group: "风格", },
   // CC 视觉还原（claude 预设启用）：助手消息 ● 圆点
@@ -186,7 +188,8 @@ export const THEME_FIELD_DEFS = {
   ccBgImage: { ...T('cc', '背景图'), default: '', control: 'bgImage', group: "外观风格", },
   ccStatusFontSize: { ...N('cc', '信息字号', 14, 20), default: 14, group: "中控背景", unit: 'px' },
   ccStyle: { ...S('cc', '上下文', ['wave', 'bar', 'ring', 'numeric']), default: 'wave', group: "控件样式", },
-  ccVariant: { ...S('cc', '整体风格', ['terminal', 'glass', 'pill']), default: 'terminal', group: "外观风格", },
+  // 变体切换组件读 store 值（data-cc-variant），不注入 CSS var
+  ccVariant: { ...S('cc', '整体风格', ['terminal', 'glass', 'pill']), default: 'terminal', group: "外观风格", noCssVar: true },
   ccLayout: H({ type: 'text', label: '布局', zone: 'cc', noCssVar: true }),
   ccHidden: H({ type: 'text', label: '隐藏控件', zone: 'cc', noCssVar: true }),
   ccScale: H({ type: 'text', label: '控件缩放', zone: 'cc', noCssVar: true }),
@@ -216,15 +219,14 @@ export const THEME_FIELD_DEFS = {
   statusBgImage: { ...T('cc', '状态背景图'), default: '', control: 'bgImage', group: "输入与状态", },
   // ekgWidth 注入 --ekg-w（StatusBar 消费）；动态波形未实现，动画细节字段已删除
   ekgWidth: { ...N('cc', '波形宽度', 60, 300), default: 150, group: "波形与用量", unit: 'px', cssVar: '--ekg-w' },
+  // ekg/bar 三色与柱参数由 widgetRegistry 读 store 内联成 --bar-*/--ekg-*，注入独立 var 无消费
   ekgGreen: { ...C('cc', '波形·正常'), default: '#4EBA65', group: "波形与用量", },
-  ekgYellow: { ...C('cc', '波形·警示'), default: '#FFC107', group: "波形与用量", },
-  ekgRed: { ...C('cc', '波形·危险'), default: '#FF6B80', group: "波形与用量", },
-  ekgConsumedColor: { ...C('cc', '波形·已耗'), default: 'rgba(0,0,0,0.08)', group: "波形与用量", advanced: true },
-  barTrackColor: { ...C('cc', '柱·轨道'), default: 'rgba(0,0,0,0.18)', group: "波形与用量", advanced: true },
-  barFillColor: { ...C('cc', '柱·填充'), default: '#4EBA65', group: "波形与用量", advanced: true },
+  ekgYellow: { ...C('cc', '波形·警示'), default: '#FFC107', group: "波形与用量", noCssVar: true },
+  ekgRed: { ...C('cc', '波形·危险'), default: '#FF6B80', group: "波形与用量", noCssVar: true },
+  barTrackColor: { ...C('cc', '柱·轨道'), default: 'rgba(0,0,0,0.18)', group: "波形与用量", advanced: true, noCssVar: true },
+  barFillColor: { ...C('cc', '柱·填充'), default: '#4EBA65', group: "波形与用量", advanced: true, noCssVar: true },
   barFillFollow: { ...B('cc', '柱·跟随用量'), default: true, group: "波形与用量", },
-  barHeight: { ...N('cc', '柱高', 4, 24), default: 10, group: "波形与用量", advanced: true },
-  tokenDisplay: { ...S('cc', 'Token 显示', ['ekg', 'pct', 'bar', 'ring', 'tokens']), default: 'ekg', group: "波形与用量", },
+  barHeight: { ...N('cc', '柱高', 4, 24), default: 10, group: "波形与用量", advanced: true, noCssVar: true },
   pillBg: { ...C('cc', '胶囊背景'), default: '#373737', group: "波形与用量", },
   pillText: { ...C('cc', '胶囊文字'), default: '#999999', group: "波形与用量", },
   prismOnColor: { ...C('cc', 'Prism 开启'), default: '#4EBA65', group: "波形与用量", },

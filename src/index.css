@@ -16,9 +16,8 @@
   --text-dim: rgba(0,0,0,0.40);
   --text-placeholder: rgba(0,0,0,0.28);
   --success: rgba(30,150,70,0.70);
-  --warn: rgba(180,120,20,0.70);
+  --warning: rgba(180,120,20,0.70);
   --danger: rgba(190,40,40,0.75);
-  --radius: 8px;
   --global-bg-color: #e8e8ec;
   --font: -apple-system, 'Segoe UI', 'PingFang SC', 'Microsoft YaHei', sans-serif;
   /* 终端等宽栈：西文等宽 + CJK 等宽 fallback（Sarasa/更纱 → 微软雅黑 → 系统） */

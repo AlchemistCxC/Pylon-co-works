@@ -28,7 +28,7 @@ export interface ThemeSettings {
   // 语法高亮（starry-night pl-* 映射，默认 base16-ocean.dark 配色）
   synKeyword: string; synString: string; synComment: string; synLiteral: string; synEntity: string; synFunction: string
   synVariable: string; synProperty: string; synRegex: string; synMarkupHeading: string; synCoReference: string; synSupport: string
-  toolOk: string; toolRun: string; toolErr: string; toolNameColor: string; toolSummaryColor: string; userTagBg: string; userTagText: string
+  toolOk: string; toolRun: string; toolErr: string; userTagBg: string; userTagText: string
   /** diff 块级色（此前复用 toolOk/toolErr，CC 系为独立柔和色） */
   diffAdded: string; diffRemoved: string
   /** diff 词级高亮色（CC 双层：整行背景 + 变更词背景） */
@@ -41,7 +41,6 @@ export interface ThemeSettings {
   cliHintMode: 'hidden' | 'compact' | 'full'
   statusBg: string; statusBgImage: string; ekgWidth: number; ekgGreen: string; ekgYellow: string; ekgRed: string; pillBg: string; pillText: string; prismOnColor: string
   barTrackColor: string; barFillColor: string; barFillFollow: boolean; barHeight: number  // 柱状图：外壳背景/柱子色/是否跟随用量三段色/高度
-  ekgConsumedColor: string; tokenDisplay: string
   rightBg: string; rightBgImage: string; rightWidth: number
   sidebarTransparency: number; sidebarBlur: number; chatTransparency: number; chatBlur: number; rightTransparency: number; rightBlur: number
   userName: string; userPrefix: string; userColor: string

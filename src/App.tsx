@@ -167,7 +167,6 @@ export default function App() {
     synRegex: s.synRegex, synMarkupHeading: s.synMarkupHeading, synCoReference: s.synCoReference, synSupport: s.synSupport,
     msgStyle: s.msgStyle, msgFont: s.msgFont, msgTextColor: s.msgTextColor, msgLineHeight: s.msgLineHeight, messageLayout: s.messageLayout,
     toolOk: s.toolOk, toolRun: s.toolRun, toolErr: s.toolErr,
-    toolNameColor: s.toolNameColor, toolSummaryColor: s.toolSummaryColor,
     userTagBg: s.userTagBg, userTagText: s.userTagText,
     diffAdded: s.diffAdded, diffRemoved: s.diffRemoved,
     inputBg: s.inputBg, inputBgImage: s.inputBgImage,
@@ -180,7 +179,6 @@ export default function App() {
     ekgWidth: s.ekgWidth,
     ekgGreen: s.ekgGreen, ekgYellow: s.ekgYellow, ekgRed: s.ekgRed,
     pillBg: s.pillBg, pillText: s.pillText, prismOnColor: s.prismOnColor,
-    ekgConsumedColor: s.ekgConsumedColor, tokenDisplay: s.tokenDisplay, ccVariant: s.ccVariant,
     modeAutoColor: s.modeAutoColor, modeEditColor: s.modeEditColor,
     spinnerColor: s.spinnerColor, spinnerSize: s.spinnerSize,
     rightBg: s.rightBg, rightBgImage: s.rightBgImage, rightWidth: s.rightWidth,
@@ -201,10 +199,9 @@ export default function App() {
       '--global-font': s.globalFont === 'mono' ? 'var(--mono)' : 'var(--font)',
       '--chat-font': s.chatFont === 'mono' ? 'var(--mono)' : 'var(--font)',
       '--msg-font': s.msgFont === 'mono' ? 'var(--mono)' : 'var(--font)',
-      '--msg-text': s.msgTextColor || 'var(--chat-text,var(--text))',
+      // chatTextColor 经 --chat-text-color 注入（THEME_CSS_VAR_MAP），此处作 msg 兜底链
+      '--msg-text': s.msgTextColor || 'var(--chat-text-color,var(--text))',
       '--titlebar-sidebar-width': `${sidebarCollapsed ? 42 : s.sidebarWidth}px`,
-      '--token-display': s.tokenDisplay,
-      '--cc-variant': s.ccVariant,
     }
     // color/number 字段由 THEME_CSS_VAR_MAP 循环注入（unit 格式化）；空 color 省略
     for (const [cssVar, key] of Object.entries(THEME_CSS_VAR_MAP)) {

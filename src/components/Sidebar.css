@@ -39,7 +39,7 @@ details[open] > .group-header::before { content:'▾'; }
 .session-dot { width:5px; height:5px; border-radius:50%; background:var(--text-dim); flex-shrink:0; }
 .session-item.active .session-dot { background:var(--accent); box-shadow:0 0 4px var(--accent); }
 .session-info { min-width:0; }
-.session-name { font-size:var(--sidebar-name-size,14px); white-space:nowrap; overflow:hidden; text-overflow:ellipsis; font-weight:500; color:var(--sidebar-text,var(--text)); }
+.session-name { font-size:var(--sidebar-name-size,14px); white-space:nowrap; overflow:hidden; text-overflow:ellipsis; font-weight:500; color:var(--sidebar-text-color,var(--text)); }
 .session-item.active .session-name { font-weight:600; }
 .session-meta { font-size:12px; color:var(--text-dim); margin-top:1px; }
 .session-del { opacity:0; background:none; border:none; color:var(--danger); cursor:pointer; font-size:14px; padding:2px 4px; transition:opacity 0.15s; flex-shrink:0; margin-left:auto; }

@@ -33,7 +33,7 @@
   background:var(--bg-panel); border:1px solid var(--border);
   border-radius:8px; color:var(--text-dim); cursor:pointer; display:flex; align-items:center;
   justify-content:center; flex-shrink:0; transition:all 0.15s; padding:0;
-  width:var(--input-min-h,56px); height:var(--input-min-h,56px);
+  width:var(--input-min-height,56px); height:var(--input-min-height,56px);
 }
 .input-btn svg { opacity:0.4; }
 .input-btn:hover { background:var(--bg-hover); border-color:var(--border-focus); }
@@ -43,17 +43,18 @@
 
 .input-textarea {
   flex:1; background:var(--input-bg,var(--bg-input)); border:1px solid var(--border);
-  border-radius:8px; padding:12px 16px; color:var(--input-text,var(--text));
+  background-image:var(--input-bg-image,none); background-size:cover; background-position:center;
+  border-radius:8px; padding:12px 16px; color:var(--input-text-color,var(--text));
   font-family:var(--font); font-size:var(--input-font-size,17px); line-height:1.6;
-  resize:none; outline:none; min-height:var(--input-min-h,56px); max-height:240px;
+  resize:none; outline:none; min-height:var(--input-min-height,56px); max-height:240px;
 }
-.input-textarea:focus { border-color:var(--input-focus,var(--border-focus)); }
+.input-textarea:focus { border-color:var(--input-focus-border,var(--border-focus)); }
 .input-textarea::placeholder { color:var(--input-placeholder,var(--text-placeholder)); }
 
 .input-bar.input-variant-compact .input-row { gap:5px; }
 .input-bar.input-variant-compact .input-textarea { min-height:36px; max-height:120px; padding:7px 10px; border-radius:6px; line-height:1.4; }
 .input-bar.input-variant-compact .input-btn { width:36px; height:36px; border-radius:6px; }
-.input-bar.input-variant-command .input-row { border:1px solid var(--input-focus,var(--border-focus)); border-radius:8px; padding:2px 6px; background:color-mix(in srgb, var(--input-bg,var(--bg-input)) 88%, var(--accent) 12%); }
+.input-bar.input-variant-command .input-row { border:1px solid var(--input-focus-border,var(--border-focus)); border-radius:8px; padding:2px 6px; background:color-mix(in srgb, var(--input-bg,var(--bg-input)) 88%, var(--accent) 12%); }
 .input-bar.input-variant-command .input-textarea { border:0; background:transparent; min-height:42px; padding:9px 8px; }
 .input-command-kicker { position:absolute; bottom:calc(100% + 5px); left:0; color:var(--accent); font:600 10px var(--mono); letter-spacing:0.12em; }
 

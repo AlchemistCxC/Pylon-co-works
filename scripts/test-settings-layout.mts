@@ -6,6 +6,7 @@ const defs = read('../src/themeFieldDefs.ts')
 const renderer = read('../src/themeFieldRenderer.tsx')
 const settings = read('../src/components/Settings.tsx')
 const store = read('../src/store.ts')
+const presets = read('../src/presets.ts')
 
 // ── 低频组默认折叠 + 组粒度合并 ──
 assert.match(defs, /defaultOpen: false/, '低频组必须声明默认折叠')
@@ -73,7 +74,12 @@ for (const dead of ['ekgFontSize', 'ekgLineWidth', 'ekgAmplitudeMax', 'ekgSpeedB
   assert.doesNotMatch(store, new RegExp(`\\b${dead}\\b`), `死字段 ${dead} 必须从 ThemeSettings 删除`)
 }
 assert.match(defs, /ekgWidth: \{[\s\S]*?cssVar: '--ekg-w'/, 'ekgWidth 必须注入 --ekg-w（StatusBar 消费）')
-assert.match(store, /ekgConsumedColor: string; tokenDisplay: string/, 'ekgConsumedColor/tokenDisplay 保留')
+// CSS 消费审计（2026-08-04）：无渲染消费的死字段必须删除（含预设/类型）
+for (const dead of ['toolNameColor', 'toolSummaryColor', 'ekgConsumedColor', 'tokenDisplay']) {
+  assert.doesNotMatch(defs, new RegExp(`\\b${dead}\\b`), `死字段 ${dead} 必须从 defs 删除`)
+  assert.doesNotMatch(store, new RegExp(`\\b${dead}\\b`), `死字段 ${dead} 必须从 ThemeSettings 删除`)
+  assert.doesNotMatch(presets, new RegExp(`\\b${dead}\\b`), `死字段 ${dead} 必须从全部预设删除`)
+}
 assert.doesNotMatch(store, /ekgLeftColor: string; ekgMovingColor/, 'store 不得残留 ekgLeftColor/ekgMovingColor')
 
 // ── 中低危修复契约（2026-08-03 逻辑检测二轮）──
