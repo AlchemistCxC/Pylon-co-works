@@ -95,31 +95,20 @@ export function setZoneFieldReducer(state: ThemePresetState, zone: string, parti
   }
 }
 
-/** 应用 zone 预设：写字段 + 记基准名 + 清 custom；切离全局 → 全局失基准 + 标 custom */
+/** 应用 zone 预设：写字段 + 记基准名 + 清该 zone custom（A2：不再手写 global 标记，全局由 deriveGlobalStatus 派生） */
 export function applyZonePresetReducer(
   state: ThemePresetState,
   zone: string,
   presetName: string,
   presetTheme: Partial<ThemeSettings>,
 ): ThemePresetPatch {
-  const globalPreset = state.appliedPreset.global
-  const breaksGlobal = Boolean(globalPreset) && globalPreset !== presetName
   return {
     ...presetTheme,
     // cc zone 预设即恢复规范排布（预设不携带 ccLayout → 默认布局），与其他 zone 预设一致
     ...(zone === 'cc' ? { ccLayout: normalizeCcLayout(presetTheme.ccLayout) } : {}),
     ...(zone === 'cc' && presetTheme.ccHeight !== undefined ? syncPresetCcHeight(presetTheme) : {}),
-    appliedPreset: {
-      ...state.appliedPreset,
-      [zone]: presetName,
-      // A1：global 不再是可枚举的 'custom'，切离全局 = 全局失去基准（''）+ 标 custom
-      ...(breaksGlobal ? { global: '' } : {}),
-    },
-    custom: {
-      ...state.custom,
-      [zone]: false,
-      ...(breaksGlobal ? { global: true } : {}),
-    },
+    appliedPreset: { ...state.appliedPreset, [zone]: presetName },
+    custom: { ...state.custom, [zone]: false },
   }
 }
 
@@ -169,6 +158,29 @@ export function applyCustomPresetReducer(state: ThemePresetState, id: string): T
     appliedPreset: Object.fromEntries(PRESET_ZONES.map(zone => [zone, id])),
     custom: Object.fromEntries(PRESET_ZONES.map(zone => [zone, false])),
   }
+}
+
+/**
+ * 全局预设状态派生（A2，覆盖规则 1/2 的单一真值）：
+ * - 全空且无触碰 → ''
+ * - 任一 zone 触碰（custom=true）→ 'custom'（规则 1：改字段 → 全局变 custom）
+ * - 所有非空基准一致且无空 zone → 跟随该基准（空 zone 视为偏离 → custom，规则 2）
+ */
+export function deriveGlobalStatus(state: Pick<ThemePresetState, 'appliedPreset' | 'custom'>): string {
+  const zones = PRESET_ZONES
+  if (zones.every(zone => state.appliedPreset[zone] === '' && state.custom[zone] === false)) return ''
+  if (zones.some(zone => state.custom[zone])) return 'custom'
+  const first = state.appliedPreset[zones[0]]
+  if (first !== '' && zones.every(zone => state.appliedPreset[zone] === first)) return first
+  return 'custom'
+}
+
+/** 单 zone 状态派生：基准名 + 是否自定义 */
+export function deriveZoneStatus(
+  state: Pick<ThemePresetState, 'appliedPreset' | 'custom'>,
+  zone: PresetZone,
+): { appliedName: string; isCustom: boolean } {
+  return { appliedName: state.appliedPreset[zone] ?? '', isCustom: state.custom[zone] === true }
 }
 
 /**

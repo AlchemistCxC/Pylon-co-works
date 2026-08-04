@@ -4,6 +4,8 @@ import { DEFAULT_CC_LAYOUT } from '../src/ccLayoutState.ts'
 import {
   applyCustomPresetReducer,
   applyZonePresetReducer,
+  deriveGlobalStatus,
+  deriveZoneStatus,
   removeCustomPresetReducer,
   saveCustomPresetReducer,
   setGlobalPresetReducer,
@@ -63,19 +65,28 @@ function makeState(overrides: Partial<ThemePresetState> = {}): ThemePresetState 
   assert.equal(patch.appliedPreset?.global, '')
 }
 
-// ── applyZonePreset + breaksGlobal：切离全局 → global custom+dirty；同源不破 ──
+// ── applyZonePreset（A2）：只写 zone 基准/custom，不手写 global 标记（全局由派生承担）──
 {
   const withGlobal = (name: string) => makeState({ appliedPreset: { ...makeState().appliedPreset, global: name } })
-  const nordZoneTheme = Object.fromEntries(ZONE_FIELDS.chat.map(f => [f, nord.theme[f]]))
   const glassZoneTheme = Object.fromEntries(ZONE_FIELDS.chat.map(f => [f, glass.theme[f]]))
 
-  const breaking = applyZonePresetReducer(withGlobal('nord'), 'chat', 'glass', glassZoneTheme)
-  assert.equal(breaking.appliedPreset?.global, '', 'zone 预设切离全局 → global 失去基准')
-  assert.equal(breaking.custom?.global, true, 'global custom 置 true')
+  const patch = applyZonePresetReducer(withGlobal('nord'), 'chat', 'glass', glassZoneTheme)
+  assert.equal(patch.appliedPreset?.chat, 'glass')
+  assert.equal(patch.appliedPreset?.global, 'nord', 'applyZonePreset 不手写 global 标记')
+  assert.equal(patch.custom?.global, false)
+}
 
-  const sameName = applyZonePresetReducer(withGlobal('nord'), 'chat', 'nord', nordZoneTheme)
-  assert.equal(sameName.appliedPreset?.global, 'nord', 'zone 预设与全局同源 → 不破 global')
-  assert.equal(sameName.custom?.global, false)
+// ── deriveGlobalStatus（A2，覆盖规则 1/2 单一真值）──
+{
+  const base = makeState()
+  assert.equal(deriveGlobalStatus(base), '', '全空无触碰 → 无预设')
+  const allNord = { ...base, appliedPreset: { ...base.appliedPreset, global: 'nord', sidebar: 'nord', chat: 'nord', cc: 'nord', right: 'nord' } }
+  assert.equal(deriveGlobalStatus(allNord), 'nord', '全 5 zone 一致 → 跟随该基准')
+  assert.equal(deriveGlobalStatus({ ...allNord, appliedPreset: { ...allNord.appliedPreset, cc: '' } }), 'custom', '空 zone 算偏离 → custom')
+  assert.equal(deriveGlobalStatus({ ...allNord, appliedPreset: { ...allNord.appliedPreset, cc: 'glass' } }), 'custom', 'zone 基准不一致 → custom')
+  assert.equal(deriveGlobalStatus({ ...base, custom: { ...base.custom, chat: true } }), 'custom', '任一 zone 触碰 → custom（规则 1）')
+  assert.equal(deriveGlobalStatus({ ...base, appliedPreset: { ...base.appliedPreset, chat: 'nord' } }), 'custom', '只 apply 单 zone → 全局 custom（规则 2）')
+  assert.deepEqual(deriveZoneStatus({ ...allNord, custom: { ...allNord.custom, chat: true } }, 'chat'), { appliedName: 'nord', isCustom: true })
 }
 
 // ── applyZonePreset cc 同步：ccLayout 恢复规范 + ccHeight clamp 且 ccBgHeight 跟随 ──

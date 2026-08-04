@@ -13,6 +13,7 @@ import { useShallow } from 'zustand/react/shallow'
 import type { ThemeSettings } from '../store'
 import { GLOBAL_PRESETS, pickZoneFields } from '../presets'
 import { pickCustomPresetTheme } from '../customPresets'
+import { deriveGlobalStatus, deriveZoneStatus } from '../domains/theme/presetReducer'
 import SettingsPreview from './SettingsPreview'
 import { reportRuntimeError } from '../runtimeError'
 import { runAgentSwitchTransaction } from './agentSwitchTransaction'
@@ -187,6 +188,8 @@ export default function Settings({ onClose, activeSessionId }: { onClose?: () =>
   const applyZonePreset = useStore(s => s.applyZonePreset)
   const appliedPreset = useStore(s => s.appliedPreset)
   const custom = useStore(s => s.custom)
+  // A2：全局预设状态派生（任一 zone 触碰/基准不一致 → custom），原 appliedPreset.global 直读退役
+  const globalStatus = useStore(s => deriveGlobalStatus(s))
   const agents = useIdentityStore(s => s.agents)
   const activeAgent = useIdentityStore(s => s.activeAgent)
   const agentStatuses = useRuntimeStore(s => s.agentStatuses)
@@ -329,15 +332,15 @@ export default function Settings({ onClose, activeSessionId }: { onClose?: () =>
               {!isSearching && <Group title="全局预设">
                 <div className="set-preset-row">
                   {GLOBAL_PRESETS.map(p => (
-                    <button key={p.name} className={`set-preset-chip ${appliedPreset.global === p.name ? 'active' : ''}`}
+                    <button key={p.name} className={`set-preset-chip ${globalStatus === p.name ? 'active' : ''}`}
                       onClick={() => applyGlobalPreset(p.name)}>{p.label}</button>
                   ))}
-                  {appliedPreset.global && !GLOBAL_PRESETS.some(p => p.name === appliedPreset.global) && (
-                    <button className="set-preset-chip active">{appliedPreset.global}</button>
+                  {globalStatus && !GLOBAL_PRESETS.some(p => p.name === globalStatus) && (
+                    <button className="set-preset-chip active">{globalStatus}</button>
                   )}
                 </div>
                 <div className="set-hint">
-                  {custom.global
+                  {globalStatus === 'custom'
                     ? '当前为自定义 — 可保存为新预设或覆盖已有预设'
                     : '选择预设后修改任意外观参数，自动切换为自定义'}
                 </div>
@@ -352,7 +355,7 @@ export default function Settings({ onClose, activeSessionId }: { onClose?: () =>
                 </div>
                 {customPresets.length > 0 && <div className="set-custom-presets">
                   {customPresets.map(preset => <div className="set-custom-preset" key={preset.id}>
-                    <button className={`set-preset-chip ${appliedPreset.global === preset.id ? 'active' : ''}`} onClick={() => applyCustomPreset(preset.id)}>{preset.name}</button>
+                    <button className={`set-preset-chip ${globalStatus === preset.id ? 'active' : ''}`} onClick={() => applyCustomPreset(preset.id)}>{preset.name}</button>
                     <button className="ps-btn sm" onClick={() => saveCustomPreset(preset.name, preset.id)}>覆盖</button>
                     <button className="ps-btn sm danger" onClick={() => removeCustomPreset(preset.id)}>删除</button>
                   </div>)}
@@ -369,13 +372,13 @@ export default function Settings({ onClose, activeSessionId }: { onClose?: () =>
             {/* ═══ 左栏 ═══ */}
             <Tabs.Content value="sidebar">
               {!isSearching && <h3>左侧栏</h3>}
-              {!isSearching && <ZonePresetRow zone="sidebar" activeName={appliedPreset.sidebar} isDirty={custom.sidebar} onApply={applyLocalPreset}/>}
+              {!isSearching && <ZonePresetRow zone="sidebar" activeName={deriveZoneStatus({ appliedPreset, custom }, 'sidebar').appliedName} isDirty={deriveZoneStatus({ appliedPreset, custom }, 'sidebar').isCustom} onApply={applyLocalPreset}/>}
               <ZoneGroupFields zone="sidebar" ctx={renderCtx} />
             </Tabs.Content>
 
             {/* ═══ 终端 ═══ */}
             <Tabs.Content value="terminal">
-              {!isSearching && <ZonePresetRow zone="chat" activeName={appliedPreset.chat} isDirty={custom.chat} onApply={applyLocalPreset}/>}
+              {!isSearching && <ZonePresetRow zone="chat" activeName={deriveZoneStatus({ appliedPreset, custom }, 'chat').appliedName} isDirty={deriveZoneStatus({ appliedPreset, custom }, 'chat').isCustom} onApply={applyLocalPreset}/>}
 
               {!isSearching && <Group title="指示器形状">
                 <Row label="形状"><Sel value={resolveToolIndicatorAsset(t.toolIndicator).id} onChange={v=>onSettingChange({toolIndicator:v})} options={toolIndicatorOptions()} /></Row>
@@ -386,7 +389,7 @@ export default function Settings({ onClose, activeSessionId }: { onClose?: () =>
             {/* ═══ 中控区 ═══ */}
             <Tabs.Content value="cc">
               {!isSearching && <h3>中控区</h3>}
-              {!isSearching && <ZonePresetRow zone="cc" activeName={appliedPreset.cc} isDirty={custom.cc} onApply={applyLocalPreset}/>}
+              {!isSearching && <ZonePresetRow zone="cc" activeName={deriveZoneStatus({ appliedPreset, custom }, 'cc').appliedName} isDirty={deriveZoneStatus({ appliedPreset, custom }, 'cc').isCustom} onApply={applyLocalPreset}/>}
 
               <ZoneGroupFields zone="cc" ctx={renderCtx} />
               {!isSearching && <Group title="布局编辑">
@@ -405,7 +408,7 @@ export default function Settings({ onClose, activeSessionId }: { onClose?: () =>
             {/* ═══ 右栏 ═══ */}
             <Tabs.Content value="right">
               {!isSearching && <h3>右侧栏</h3>}
-              {!isSearching && <ZonePresetRow zone="right" activeName={appliedPreset.right} isDirty={custom.right} onApply={applyLocalPreset}/>}
+              {!isSearching && <ZonePresetRow zone="right" activeName={deriveZoneStatus({ appliedPreset, custom }, 'right').appliedName} isDirty={deriveZoneStatus({ appliedPreset, custom }, 'right').isCustom} onApply={applyLocalPreset}/>}
 
               <ZoneGroupFields zone="right" ctx={renderCtx} />
             </Tabs.Content>
