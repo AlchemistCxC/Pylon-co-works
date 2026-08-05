@@ -1,11 +1,15 @@
-import { lazy, Suspense } from 'react'
 import { useWorkspaceStore } from '../workspaceStore'
-import { SHEET_REGISTRY } from './sheetRegistry'
-import AgentSheetView from '../sheets/AgentSheetView'
-import type { SheetRecord } from './sheetTypes'
+import { useIdentityStore } from '../identityStore'
+import { resolveSheetRender } from './sheetRegistry.tsx'
+import { resolveSessionSource } from '../components/chat/sessionCommandState'
+import type { SheetContext, SheetRecord } from './sheetTypes'
 
-// Prism 管理 Sheet 非首屏：按需分包
-const PrismManagerSheetView = lazy(() => import('../sheets/PrismManagerSheetView'))
+/**
+ * SheetHost — registry 驱动渲染（W1-02，F1-B）。
+ *
+ * 不再 switch(renderKey)：按 activeSheet.kind 查 SHEET_RENDER_REGISTRY 调用 entry.render。
+ * 负责构建 SheetContext（布局层提供的 13 字段；sheet 自己能读的 store 不塞进 ctx）。
+ */
 
 interface SheetHostProps {
   activeSession: string | null
@@ -17,34 +21,33 @@ interface SheetHostProps {
   ccEditMode: boolean
 }
 
+function buildSheetContext(props: SheetHostProps): SheetContext {
+  const { openSheet, focusSheet, closeSheet } = useWorkspaceStore.getState()
+  return {
+    openSheet,
+    focusSheet,
+    closeSheet,
+    activeSession: props.activeSession,
+    selectSession: props.onSelectSession,
+    openProfileEdit: props.onProfileEdit,
+    openSessionSettings: props.onSessionSettings,
+    sidebarCollapsed: props.sidebarCollapsed,
+    rightInset: props.rightInset,
+    ccEditMode: props.ccEditMode,
+    sessionSource: sessionId => resolveSessionSource(sessionId, useIdentityStore.getState().sessions),
+    sessionBySource: source => useIdentityStore.getState().sessions.find(session => session.source === source),
+  }
+}
+
 export default function SheetHost(props: SheetHostProps) {
   const sheets = useWorkspaceStore(s => s.workspaceSheets.sheets)
   const activeSheetId = useWorkspaceStore(s => s.workspaceSheets.activeSheetId)
-  const activeSheet = sheets.find(sheet => sheet.id === activeSheetId)
+  const activeSheet: SheetRecord | undefined = sheets.find(sheet => sheet.id === activeSheetId)
 
   if (!activeSheet) return <EmptySheetHost />
-  return <SheetRenderer sheet={activeSheet} {...props} />
-}
-
-function SheetRenderer({ sheet, ...props }: { sheet: SheetRecord } & SheetHostProps) {
-  const renderKey = SHEET_REGISTRY[sheet.kind]?.renderKey ?? 'unknown'
-  switch (renderKey) {
-    case 'agent-sheet':
-      return <AgentSheetView sheet={sheet} {...props} />
-    case 'prism-manager-sheet':
-      return (
-        <Suspense fallback={
-          <div className="sheet-empty-host">
-            <div className="sheet-empty-kicker">LOADING</div>
-            <p>加载模块…</p>
-          </div>
-        }>
-          <PrismManagerSheetView />
-        </Suspense>
-      )
-    default:
-      return <UnavailableSheet kind={sheet.kind} />
-  }
+  const entry = resolveSheetRender(activeSheet.kind)
+  if (!entry) return <UnavailableSheet kind={activeSheet.kind} />
+  return entry.render(activeSheet, buildSheetContext(props))
 }
 
 function EmptySheetHost() {
