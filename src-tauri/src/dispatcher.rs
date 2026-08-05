@@ -720,6 +720,14 @@ pub(crate) fn start_notification_dispatcher<R: tauri::Runtime>(
                         raw.params.as_ref(),
                     )
                     .await;
+                } else {
+                    // A3（探查修复，降级版）：string/null id 的 request_permission
+                    // 被静默丢弃——记录以便定位。完整类型化（RawMessage.id 改官方
+                    // RequestId，见 docs/ACP-id类型化探查记录.md）留到真遇
+                    // string-id agent 时触发式实施。
+                    tracing::warn!(
+                        "ACP 收到无数字 id 的 request_permission（id 非 u64，当前不支持，已丢弃）"
+                    );
                 }
                 continue;
             }
