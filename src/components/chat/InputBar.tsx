@@ -4,6 +4,9 @@ import { open, save } from '@tauri-apps/plugin-dialog'
 import { useStore } from '../../store'
 import { useIdentityStore } from '../../identityStore'
 import { useRuntimeStore } from '../../runtimeStore'
+import { useAgentCapabilities } from '../../infrastructure/acp/useAgentCapabilities'
+import { resolveAttachGate, resolveAttachFilters } from '../../infrastructure/acp/agentContracts'
+import { reportRuntimeError } from '../../runtimeError'
 import { setSessionModel } from './sessionModel'
 import { setSessionMode } from './sessionMode'
 import { nextSessionMode } from './sessionModeState'
@@ -57,6 +60,9 @@ export default forwardRef<{ send: () => void; attachFile: () => void; cancel: ()
     : EMPTY_COMMANDS)
   // 当前 session 是否正在生成（用于把发送按钮切成"停止"）
   const generating = useRuntimeStore(s => sessionSource != null && (s.liveGeneratingSources || []).includes(sessionSource))
+  // 附件能力（F4-C）：gate 拦截未连接；filters 按 promptImage 降级 accept
+  const attachCapabilities = useAgentCapabilities()
+  const attachImageUnsupported = attachCapabilities.connected && !attachCapabilities.promptImage
 
   useEffect(() => {
     historyDraftRef.current = ''
@@ -295,8 +301,13 @@ export default forwardRef<{ send: () => void; attachFile: () => void; cancel: ()
   }
 
   const attachFile = async () => {
+    const gate = resolveAttachGate(attachCapabilities)
+    if (!gate.allowed) {
+      reportRuntimeError('打开附件选择器', gate.reason)
+      return
+    }
     try {
-      const selected = await open({ multiple: false })
+      const selected = await open({ multiple: false, filters: resolveAttachFilters(attachCapabilities) })
       if (!selected) return
       const path = selected as string
       const name = path.replace(/^.*[\\\\/]/, '')
@@ -308,7 +319,7 @@ export default forwardRef<{ send: () => void; attachFile: () => void; cancel: ()
   // 在生成状态翻转瞬间使用过期闭包（enqueue 与直接发送二选一错位）。
   // send/cancel 是稳定 useCallback，无需入 deps
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  useImperativeHandle(ref, () => ({ send, attachFile, cancel }), [value, attached, sessionId, sessionSource, isCmd, filtered, generating, persona])
+  useImperativeHandle(ref, () => ({ send, attachFile, cancel }), [value, attached, sessionId, sessionSource, isCmd, filtered, generating, persona, attachCapabilities])
 
   const onKey = (e: KeyboardEvent) => {
     if (e.key === 'Escape' && generating) { e.preventDefault(); cancel(); return }
@@ -414,7 +425,8 @@ export default forwardRef<{ send: () => void; attachFile: () => void; cancel: ()
       <div className="input-row">
         {inputVariant === 'cli' && <span className="cli-prefix">❯</span>}
         {inputVariant !== 'cli' && !split && !externalAttach && (
-          <button className="input-btn attach" onClick={attachFile} title="Attach file (Ctrl+O)">
+          <button className="input-btn attach" onClick={attachFile}
+            title={attachImageUnsupported ? '当前 Agent 不支持图片（文本附件可用）(Ctrl+O)' : 'Attach file (Ctrl+O)'}>
             <Paperclip size={16} />
           </button>
         )}

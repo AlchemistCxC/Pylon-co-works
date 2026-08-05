@@ -1,6 +1,7 @@
 import { strict as assert } from 'node:assert'
 import { readFileSync } from 'node:fs'
 const input = readFileSync(new URL('../src/components/chat/InputBar.tsx', import.meta.url), 'utf8')
+const attachWidget = readFileSync(new URL('../src/components/chat/AttachWidget.tsx', import.meta.url), 'utf8')
 const css = readFileSync(new URL('../src/components/chat/InputBar.css', import.meta.url), 'utf8')
 const settings = readFileSync(new URL('../src/components/Settings.tsx', import.meta.url), 'utf8')
 const store = readFileSync(new URL('../src/store.ts', import.meta.url), 'utf8')
@@ -26,5 +27,13 @@ for (const field of ['inputVariant', 'inputShowPlaceholder', 'inputShowHistoryHi
   assert.match(presets, new RegExp(`\\b${field}\\b`), `${field} 必须进入 cc zone`)
   assert.match(customPresets, new RegExp(`\\b${field}\\b`), `${field} 必须进入 custom preset allowlist`)
 }
+
+// P2-03：附件入口能力降级——gate 拦截 + filters 动态 accept + 图片提示 title/aria
+assert.match(input, /resolveAttachGate\(attachCapabilities\)/, 'InputBar 附件必须经 gate 拦截未连接')
+assert.match(input, /reportRuntimeError\('打开附件选择器'/, 'InputBar 附件拦截必须走 reportRuntimeError')
+assert.match(input, /filters: resolveAttachFilters\(attachCapabilities\)/, 'InputBar 必须按快照动态设 accept filters')
+assert.match(input, /当前 Agent 不支持图片（文本附件可用）\(Ctrl\+O\)/, 'InputBar 内联附件按钮必须写图片能力提示到 title')
+assert.match(attachWidget, /当前 Agent 不支持图片（文本附件可用）/, 'AttachWidget 必须写图片能力提示到 title')
+assert.match(attachWidget, /aria-label=\{imageUnsupported \?/, 'AttachWidget 降级时必须写 aria-label')
 
 console.log('input variants 契约测试通过')

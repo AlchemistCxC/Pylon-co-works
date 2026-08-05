@@ -52,3 +52,29 @@ export function resolveCapabilitySnapshot(status: AgentStatus | null | undefined
     hasAuthMethods: Array.isArray(authMethods) && authMethods.length > 0,
   }
 }
+
+// —— 附件入口能力降级（F4-C：promptImage 只控制图片 mime，同一入口降级而非两个按钮）——
+
+const ATTACH_TEXT_EXTENSIONS = ['txt', 'md', 'log', 'json', 'yaml', 'yml', 'csv']
+
+const ATTACH_FILTERS_TEXT: { name: string; extensions: string[] }[] = [
+  { name: '文本', extensions: ATTACH_TEXT_EXTENSIONS },
+]
+
+const ATTACH_FILTERS_IMAGE_TEXT: { name: string; extensions: string[] }[] = [
+  { name: '图片', extensions: ['png', 'jpg', 'jpeg', 'gif', 'webp'] },
+  { name: '文本', extensions: ATTACH_TEXT_EXTENSIONS },
+]
+
+export type AttachGate = { allowed: true } | { allowed: false; reason: string }
+
+/** 附件入口 gate（F4-B）：未连接/能力未到 → 拦截并给原因；已连接 → 放行 */
+export function resolveAttachGate(snapshot: AgentCapabilitySnapshot): AttachGate {
+  if (!snapshot.connected) return { allowed: false, reason: 'Agent 未连接，附件暂不可用' }
+  return { allowed: true }
+}
+
+/** 附件选择器 filters：promptImage=true → 图片+文本；false → 仅文本（accept 降级） */
+export function resolveAttachFilters(snapshot: AgentCapabilitySnapshot): { name: string; extensions: string[] }[] {
+  return snapshot.promptImage ? ATTACH_FILTERS_IMAGE_TEXT : ATTACH_FILTERS_TEXT
+}

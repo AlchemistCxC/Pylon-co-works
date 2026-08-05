@@ -1,6 +1,6 @@
 import { strict as assert } from 'node:assert'
 import { normalizeAgentStatus } from '../src/components/settings/agentTypes.ts'
-import { resolveCapabilitySnapshot } from '../src/infrastructure/acp/agentContracts.ts'
+import { resolveCapabilitySnapshot, resolveAttachGate, resolveAttachFilters } from '../src/infrastructure/acp/agentContracts.ts'
 
 // P2-01：capabilities 原始字段透传——normalize 只搬运不解释，不丢未知键
 
@@ -166,4 +166,28 @@ assert.deepEqual(resolveCapabilitySnapshot(statusOf({
 // authMethods 非数组（漂移）不当 hasAuthMethods
 assert.equal(resolveCapabilitySnapshot(statusOf({ authMethods: 'api_key' })).hasAuthMethods, false)
 
-console.log('agent contracts（capabilities 透传 + 快照推导）守卫通过')
+// ===== P2-03：附件入口能力降级（gate + filters 三态） =====
+
+// 态 1：capabilities null（未连接）→ 状态拦截，不放行
+const notConnected = resolveCapabilitySnapshot(statusOf(null))
+assert.deepEqual(resolveAttachGate(notConnected), { allowed: false, reason: 'Agent 未连接，附件暂不可用' })
+
+// 态 2：connected 且 promptImage=false → 放行 + accept 仅文本
+const textOnly = resolveCapabilitySnapshot(statusOf({ promptCapabilities: {} }))
+assert.deepEqual(resolveAttachGate(textOnly), { allowed: true })
+const textFilters = resolveAttachFilters(textOnly)
+assert.equal(textFilters.length, 1)
+assert.equal(textFilters[0].name, '文本')
+assert.equal(textFilters[0].extensions.includes('png'), false, '无图片能力时 filters 不得含图片')
+
+// 态 3：connected 且 promptImage=true → 放行 + accept 图片+文本
+const imageOk = resolveCapabilitySnapshot(statusOf({ promptCapabilities: { image: true } }))
+assert.deepEqual(resolveAttachGate(imageOk), { allowed: true })
+const imageFilters = resolveAttachFilters(imageOk)
+assert.equal(imageFilters.length, 2)
+assert.equal(imageFilters.some(f => f.name === '图片' && f.extensions.includes('png')), true, '有图片能力时 filters 必须含图片')
+
+// gate 对缺失快照（status 整体缺失）同样拦截
+assert.equal(resolveAttachGate(resolveCapabilitySnapshot(undefined)).allowed, false)
+
+console.log('agent contracts（capabilities 透传 + 快照推导 + 附件降级）守卫通过')
