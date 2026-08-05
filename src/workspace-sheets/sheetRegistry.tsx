@@ -1,6 +1,7 @@
 import { lazy, Suspense } from 'react'
 import type { SheetKind, SheetRecord, SheetContext, SheetRenderEntry } from './sheetTypes.ts'
 import AgentSheetView from '../sheets/AgentSheetView'
+import OverviewSheetView from '../sheets/OverviewSheetView'
 import Sidebar from '../components/Sidebar'
 
 /**
@@ -42,7 +43,8 @@ export const SHEET_RENDER_REGISTRY: Record<SheetKind, SheetRenderEntry> = {
   prism: { render: () => <Suspense fallback={LOADING_FALLBACK}><PrismManagerSheetView /></Suspense> },
   runtime: { render: () => <UnavailableSheet kind="runtime" /> },
   file: { render: () => <UnavailableSheet kind="file" /> },
-  overview: { render: () => <UnavailableSheet kind="overview" /> },
+  // W1-05：overview 启动选择器（虚拟空态，不写入持久 sheet 数组）
+  overview: { render: (sheet, ctx) => <OverviewSheetView sheet={sheet} ctx={ctx} /> },
   search: { render: () => <UnavailableSheet kind="search" /> },
   history: { render: () => <UnavailableSheet kind="history" /> },
   browser: { render: () => <UnavailableSheet kind="browser" /> },

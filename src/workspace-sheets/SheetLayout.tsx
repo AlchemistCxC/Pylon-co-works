@@ -4,10 +4,11 @@ import { useIdentityStore } from '../identityStore'
 import { useStore } from '../store'
 import { resolveSessionSource } from '../components/chat/sessionCommandState'
 import { belongsToProfile } from '../components/chat/sessionProfile'
+import { resolveSheetRender } from './sheetRegistry.tsx'
 import SheetHost from './SheetHost'
 import SheetSidebarSlot from './SheetSidebarSlot'
 import SheetRightSlot from './SheetRightSlot'
-import type { SheetContext } from './sheetTypes'
+import type { SheetContext, SheetRecord } from './sheetTypes'
 
 /**
  * SheetLayout — sheet 布局层（W1-03 侧栏上移，行为敏感）。
@@ -82,9 +83,11 @@ export default function SheetLayout(props: SheetLayoutProps) {
   const ccEditMode = useStore(s => s.ccEditMode)
 
   if (!activeSheet) {
+    // W1-05：无 active sheet → 虚拟 overview 接管空态（不写入持久 sheet 数组）
+    const overviewEntry = resolveSheetRender('overview')
     return (
       <div className={`layout ${ccEditMode ? 'cc-editing-app' : ''}`}>
-        <EmptySheetHost />
+        {overviewEntry ? overviewEntry.render(VIRTUAL_OVERVIEW_SHEET, ctx) : <EmptySheetHost />}
       </div>
     )
   }
@@ -96,6 +99,15 @@ export default function SheetLayout(props: SheetLayoutProps) {
       <SheetRightSlot sheet={activeSheet} ctx={ctx} />
     </div>
   )
+}
+
+/** 虚拟 overview sheet（空态专用，不持久化） */
+const VIRTUAL_OVERVIEW_SHEET: SheetRecord = {
+  id: 'overview-virtual',
+  kind: 'overview',
+  title: 'Overview',
+  createdAt: 0,
+  lastFocusedAt: 0,
 }
 
 function EmptySheetHost() {
