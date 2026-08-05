@@ -1,6 +1,6 @@
 import { strict as assert } from 'node:assert'
 import { readFileSync } from 'node:fs'
-import { extractToolKind, extractContentBlocks, extractPlanEntries, type ContentBlock } from '../src/components/chat/acpTypes.ts'
+import { extractToolKind, extractContentBlocks, extractPlanEntries, type ContentBlock } from '../src/infrastructure/acp/chatContracts.ts'
 
 // P1-03：三份 wire mock（Peri/Hermes/第三方漂移）均可解析——kind/content/plan 提取宽容不抛错
 
@@ -57,8 +57,23 @@ assert.equal(extractContentBlocks({ content: 'not-array' }), undefined)
 assert.deepEqual(extractContentBlocks({ content: [null, 'str', { type: 'text' }] }), [{ type: 'text' }], '非对象项丢弃')
 
 // 类型层验证：三份 mock 均可赋给 SessionUpdate（编译期不抛错）
-const _check: import('../src/components/chat/acpTypes.ts').SessionUpdate[] = [periToolCall, hermesToolUpdate, thirdParty]
+const _check: import('../src/infrastructure/acp/chatContracts.ts').SessionUpdate[] = [periToolCall, hermesToolUpdate, thirdParty]
 void _check
+
+// P1-09：归一化层归属——wire 类型与 extract 真实定义在 infrastructure/acp/chatContracts；
+// acpTypes 仅为兼容 re-export；组件不直接解析 _meta/content 私有键
+const chatContracts = readFileSync(new URL('../src/infrastructure/acp/chatContracts.ts', import.meta.url), 'utf8')
+assert.match(chatContracts, /export interface ContentBlock/, 'chatContracts 必须持有 ContentBlock 真实定义')
+assert.match(chatContracts, /export type SessionUpdate/, 'chatContracts 必须持有 SessionUpdate 真实定义')
+assert.match(chatContracts, /export function extractToolKind/, 'chatContracts 必须持有 extract 函数真实定义')
+const acpTypes = readFileSync(new URL('../src/components/chat/acpTypes.ts', import.meta.url), 'utf8')
+assert.match(acpTypes, /export \* from '\.\.\/\.\.\/infrastructure\/acp\/chatContracts\.ts'/, 'acpTypes 必须仅为兼容 re-export')
+assert.equal(acpTypes.includes('export interface'), false, 'acpTypes 不得再有真实定义')
+const chatController = readFileSync(new URL('../src/components/chat/chatEventController.ts', import.meta.url), 'utf8')
+assert.match(chatController, /infrastructure\/acp\/chatContracts/, 'controller 必须消费 chatContracts')
+// 渲染组件不直接解析 wire 私有键（_meta 只由边界层经 extract 读取）
+const chatView = readFileSync(new URL('../src/components/chat/ChatView.tsx', import.meta.url), 'utf8')
+assert.equal(chatView.includes('_meta'), false, 'ChatView 不得直接解析 _meta 私有键')
 
 // P1-04：controller 接线——plan 分支 + tool_call/update 传 kind/content 不丢
 const controller = readFileSync(new URL('../src/components/chat/chatEventController.ts', import.meta.url), 'utf8')

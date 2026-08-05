@@ -8,7 +8,7 @@ import {
 import { getToolSummary } from './toolPresentation.ts'
 import { applyPlanEntries } from '../../domains/tasks/taskStatusMachine.ts'
 import type { PlanEntry } from '../../domains/tasks/planTypes.ts'
-import type { ContentBlock } from './acpTypes.ts'
+import type { ContentBlock } from '../../infrastructure/acp/chatContracts.ts'
 
 /**
  * sessionRuntimeStore — Chat 会话运行时状态（阶段 2：Chat 状态收敛）。

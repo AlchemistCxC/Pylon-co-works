@@ -1,5 +1,5 @@
 import { create } from 'zustand'
-import type { ConfigOption } from './components/chat/acpTypes'
+import type { ConfigOption } from './infrastructure/acp/chatContracts'
 import { clearSessionSourceState, updateSessionLiveStats, type SessionLiveStats } from './components/chat/sessionRuntime'
 import type { AgentStatus } from './components/settings/agentTypes'
 import { permissionReducer, EMPTY_PERMISSION_STATE, type PermissionAction, type PermissionState } from './domains/permission/permissionState'

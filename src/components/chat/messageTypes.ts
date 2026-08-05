@@ -1,5 +1,5 @@
 import { toolIdFromMessage } from '../../domains/tool/id.ts'
-import type { ContentBlock } from './acpTypes.ts'
+import type { ContentBlock } from '../../infrastructure/acp/chatContracts.ts'
 
 export function assertNever(value: never, context = '未处理的消息状态'): never {
   throw new Error(`${context}: ${String(value)}`)

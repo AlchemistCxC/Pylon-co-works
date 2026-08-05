@@ -1,4 +1,4 @@
-import type { ConfigOption, ConfigOptionChoice } from '../chat/acpTypes'
+import type { ConfigOption, ConfigOptionChoice } from '../../infrastructure/acp/chatContracts'
 
 export interface NormalizedConfigOptionChoice {
   id: string

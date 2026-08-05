@@ -1,6 +1,6 @@
 import { strict as assert } from 'node:assert'
 import { readFileSync } from 'node:fs'
-import { extractMode, extractModelConfig, sessionResponseObject } from '../src/components/chat/acpTypes.ts'
+import { extractMode, extractModelConfig, sessionResponseObject } from '../src/infrastructure/acp/chatContracts.ts'
 
 const response = sessionResponseObject({
   sessionId: 'peri-a',
@@ -13,8 +13,8 @@ assert.equal(extractMode(response), 'edit')
 assert.deepEqual(sessionResponseObject('legacy-id'), { sessionId: 'legacy-id' })
 assert.deepEqual(extractModelConfig(undefined), {})
 
-// P1-03：契约扩展——SessionUpdate 联合含 plan 变体、tool_call/update 补 kind/content
-const src = readFileSync(new URL('../src/components/chat/acpTypes.ts', import.meta.url), 'utf8')
+// P1-03：契约扩展——SessionUpdate 联合含 plan 变体、tool_call/update 补 kind/content（真实定义在 chatContracts）
+const src = readFileSync(new URL('../src/infrastructure/acp/chatContracts.ts', import.meta.url), 'utf8')
 assert.match(src, /sessionUpdate: 'plan'/, 'SessionUpdate 必须含 plan 变体')
 assert.match(src, /interface ContentBlock/, '必须定义 ContentBlock')
 assert.match(src, /sessionUpdate: 'tool_call'[\s\S]*?kind\?: string/, 'tool_call 必须补 kind')

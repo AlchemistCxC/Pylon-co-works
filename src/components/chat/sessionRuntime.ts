@@ -1,5 +1,5 @@
 import type { Session, SessionConfig } from '../../store'
-import type { AvailableCommand } from './acpTypes'
+import type { AvailableCommand } from '../../infrastructure/acp/chatContracts'
 
 export interface SessionLiveStats {
   tokensUsed: number

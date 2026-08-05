@@ -1,4 +1,4 @@
-import type { AvailableCommand } from './acpTypes.ts'
+import type { AvailableCommand } from '../../infrastructure/acp/chatContracts.ts'
 
 export interface CommandSuggestion {
   cmd: string
