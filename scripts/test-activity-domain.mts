@@ -1,4 +1,5 @@
 import { strict as assert } from 'node:assert'
+import { readFileSync } from 'node:fs'
 import { resolveActivityLine, FALLBACK_ACTIVITY_VERBS } from '../src/domains/activity/activityLine.ts'
 import { resolveTaskPill } from '../src/domains/activity/taskPill.ts'
 
@@ -58,6 +59,17 @@ import { resolveTaskPill } from '../src/domains/activity/taskPill.ts'
     resolveTaskPill([{ content: 'a', status: 'completed' }, { content: 'b', status: 'in_progress' }]),
     { visible: true, label: '⇅ 2 任务 · 1 完成' },
   )
+}
+
+// 7. P1-08：GenerationFooter 消费接线——activityLine 输入完整（plan/tool/thinking/fallback）
+{
+  const footer = readFileSync(new URL('../src/components/chat/GenerationFooter.tsx', import.meta.url), 'utf8')
+  assert.match(footer, /activeTaskContent/, 'Footer 必须把 plan activeTask.content 传给 activityLine')
+  assert.match(footer, /toolTitle: phase\?\.kind === 'tool' \? phase\.name : undefined/, 'Footer 必须传 tool title')
+  assert.match(footer, /phase: phase\?\.kind === 'tool' \? 'tool' : phase\?\.kind === 'thinking' \? 'thinking' : phase\?\.kind === 'responding' \? 'responding' : undefined/, 'Footer 必须传 phase')
+  assert.match(footer, /thinkingStart/, 'Footer 必须传 thinkingStart（D30）')
+  assert.match(footer, /fallbackVerb: randomVerb/, 'Footer 必须传随机动词回退（无 plan/phase）')
+  assert.match(footer, /stallSuppressed \? 'active' : resolveActivity\(idleMs\)/, 'Footer 必须消费 stallSuppressed 抑制 stall')
 }
 
 console.log('activity domain 守卫通过')

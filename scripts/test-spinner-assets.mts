@@ -25,6 +25,8 @@ const footer = readFileSync(new URL('../src/components/chat/GenerationFooter.tsx
 assert.match(themeDefs, /\bspinnerFramePreset\b[\s\S]*?'orbit', 'clock', 'wave', 'blocks', 'scan', 'cc', 'custom'/)
 assert.match(themeDefs, /\bspinnerVerbSet\b[\s\S]*?'zh', 'en', 'analysis', 'engineering', 'cc', 'custom'/)
 assert.match(footer, /getSpinnerAssetPreset/)
-assert.match(footer, /reduceMotion \? 'static' : frameAsset\.motion/)
+// P1-08：motion policy 移入 SpinnerFrame 叶子（frameAsset.motion 由父级传入）
+assert.match(footer, /motion=\{frameAsset\.motion\}/)
+assert.match(footer, /reduceMotion \? 'static' : motion/)
 
 console.log('spinner asset registry 与 motion policy 回归测试通过')

@@ -170,6 +170,7 @@ const ChatView = React.memo(function ChatView({ sessionId }: Props) {
           lastTokenAt={browserMockPhase ? Date.now() : lastTokenAt}
           summary={summary}
           phase={browserMockPhase || generationPhase || undefined}
+          source={sessionRef.current}
           onStop={generating ? () => {
             if (!sessionRef.current) return
             controllerHandleRef.current?.requestCancel(sessionRef.current)

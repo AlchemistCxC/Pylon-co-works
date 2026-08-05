@@ -254,7 +254,12 @@
 .term-spinner .spinner-frame,
 .term-spinner .spinner-verb { transition:color 1.2s ease; }
 .term-spinner[data-activity="waiting"] .spinner-verb { opacity:0.68; }
-.term-spinner[data-activity="stalled"] .spinner-verb { opacity:0.52; color:var(--spinner-stalled-color,#FF6B80); }
+/* P1-08：stalled 渐变红插值——颜色/不透明度随 --stall-progress（StallProbe 持 tick 写）渐进，
+   非快照式切红；无 probe（progress 缺省 0）时保持原色 */
+.term-spinner[data-activity="stalled"] .spinner-verb {
+  opacity: calc(0.52 + 0.48 * var(--stall-progress, 0));
+  color: color-mix(in srgb, var(--spinner-stalled-color, #FF6B80) calc(var(--stall-progress, 0) * 100%), var(--spinner-color, var(--text)));
+}
 .spinner-meta { color:var(--text-dim); }
 .term-spinner[data-phase="thinking"] .spinner-frame { color:var(--accent) !important; animation:spinner-thinking-pulse 1.8s ease-in-out infinite; }
 .term-spinner[data-phase="tool"] .spinner-frame { color:var(--tool-run,#3b82f6) !important; animation:spinner-tool-pulse 0.9s ease-in-out infinite; }
@@ -264,7 +269,12 @@
 @keyframes spinner-thinking-pulse { 0%,100% { opacity:0.62; filter:none; } 50% { opacity:1; filter:drop-shadow(0 0 0.35em color-mix(in srgb, var(--accent) 62%, transparent)); } }
 @keyframes spinner-tool-pulse { 0%,100% { opacity:0.7; } 50% { opacity:1; filter:drop-shadow(0 0 0.42em color-mix(in srgb, var(--tool-run,#3b82f6) 65%, transparent)); } }
 .term-spinner[data-activity="waiting"] .spinner-frame { animation-duration:1.8s; opacity:0.72; }
-.term-spinner[data-activity="stalled"] .spinner-frame { animation:none; opacity:0.55; color:var(--spinner-stalled-color,#FF6B80); }
+.term-spinner[data-activity="stalled"] .spinner-frame {
+  animation: none;
+  opacity: calc(0.55 + 0.45 * var(--stall-progress, 0));
+  color: color-mix(in srgb, var(--spinner-stalled-color, #FF6B80) calc(var(--stall-progress, 0) * 100%), var(--spinner-color, var(--text-dim)));
+}
+.spinner-stall-probe { display: contents; }
 .spinner-activity { color:var(--text-dim); letter-spacing:0.12em; }
 /* 停止按钮：小尺寸、低调、右对齐，不抢视觉 */
 .spinner-stop-btn {

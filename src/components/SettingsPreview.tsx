@@ -186,10 +186,10 @@ function PvSpinner() {
     reason,
   })
   return <>
-    <GenerationFooter running frames={frames} tokenCount={1200} startTime={Date.now() - 3000} summary={null} />
-    <GenerationFooter running={false} frames={frames} tokenCount={1200} startTime={Date.now() - 3000} summary={previewSummary('done')} />
-    <GenerationFooter running={false} frames={frames} tokenCount={1200} startTime={Date.now() - 3000} summary={previewSummary('cancelled')} />
-    <GenerationFooter running={false} frames={frames} tokenCount={1200} startTime={Date.now() - 3000} summary={previewSummary('error')} />
+    <GenerationFooter running frames={frames} tokenCount={1200} startTime={Date.now() - 3000} summary={null} source={null} />
+    <GenerationFooter running={false} frames={frames} tokenCount={1200} startTime={Date.now() - 3000} summary={previewSummary('done')} source={null} />
+    <GenerationFooter running={false} frames={frames} tokenCount={1200} startTime={Date.now() - 3000} summary={previewSummary('cancelled')} source={null} />
+    <GenerationFooter running={false} frames={frames} tokenCount={1200} startTime={Date.now() - 3000} summary={previewSummary('error')} source={null} />
     <span className="term-preview-spinner-markers" aria-hidden="true">
       {doneMode}:{doneMarker} {cancelledMode}:{cancelledMarker} {errorMode}:{errorMarker}
     </span>

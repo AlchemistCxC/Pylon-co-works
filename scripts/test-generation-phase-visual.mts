@@ -1,5 +1,8 @@
 import { strict as assert } from 'node:assert'
 import { readFileSync } from 'node:fs'
+import { resolveStallProgress, ACTIVITY_THRESHOLDS, STALL_RAMP_MS } from '../src/components/chat/spinnerMachine.ts'
+import { nextTokenCatchUp } from '../src/components/chat/tokenCatchUp.ts'
+import { resolveActivityLine } from '../src/domains/activity/activityLine.ts'
 
 const footer = readFileSync('src/components/chat/GenerationFooter.tsx', 'utf8')
 const view = readFileSync('src/components/chat/ChatView.tsx', 'utf8')
@@ -15,14 +18,12 @@ requireToken(footer, "| { kind: 'thinking' }", '思考阶段')
 requireToken(footer, "| { kind: 'tool'; name: string }", '工具阶段')
 requireToken(footer, "| { kind: 'responding' }", '回复阶段')
 requireToken(footer, "data-phase={spinnerFramePreset === 'cc' ? undefined : phase?.kind || 'idle'}", 'spinner 阶段状态标记（cc 帧恒色不设 phase）')
-requireToken(footer, "? '思考中'", '思考状态文案')
-requireToken(footer, '`调用 ${phase.name}`', '工具状态文案')
-requireToken(footer, "? '正在回复'", '回复状态文案')
 requireToken(view, 'const [generationPhase, setGenerationPhase]', 'ChatView 阶段状态')
 requireToken(view, 'const MOCK_GENERATION_PHASES: GenerationPhase[]', '浏览器 mock 阶段序列')
 requireToken(view, 'setMockPhaseIndex(index => (index + 1) % MOCK_GENERATION_PHASES.length)', '浏览器 mock 阶段轮换')
 requireToken(view, 'running={generating || browserMockPhase !== undefined}', '浏览器 mock spinner 接线')
 requireToken(view, 'phase={browserMockPhase || generationPhase || undefined}', 'Footer 阶段接线')
+requireToken(view, 'source={sessionRef.current}', 'Footer source 接线（横向订阅读 plan）')
 requireToken(controller, "refs.setGenerationPhase({ kind: 'thinking' })", 'thought 阶段切换')
 requireToken(controller, "refs.setGenerationPhase({ kind: 'tool', name: upd.title || '?' })", 'tool 阶段切换')
 requireToken(controller, "refs.setGenerationPhase({ kind: 'responding' })", '回复阶段切换')
@@ -31,5 +32,44 @@ requireToken(css, '.term-spinner[data-phase="thinking"] .spinner-frame', '思考
 requireToken(css, '.term-spinner[data-phase="tool"] .spinner-frame', '工具 spinner 样式')
 requireToken(css, '@keyframes spinner-thinking-pulse', '思考动画')
 requireToken(css, '@keyframes spinner-tool-pulse', '工具动画')
+
+// ── P1-08：activityLine 覆盖链消费 + D29 stall 抑制 + D30 thinking 时长 + 热路径叶子 ──
+requireToken(footer, 'resolveActivityLine(', 'Footer 必须消费 activityLine')
+requireToken(footer, 'activeTask(tasks)?.content', 'plan activeTask 覆盖链最高优先')
+requireToken(footer, 'stallSuppressed ? \'active\' : resolveActivity(idleMs)', 'tool 阶段必须抑制 stall（D29）')
+requireToken(footer, 'useChatRuntimeSnapshot(source)', 'Footer 必须经横向订阅读 plan/thinkingStart')
+requireToken(footer, 'thinkingStart', 'thinking 时长输入（D30）')
+requireToken(footer, '<SpinnerFrame ', '帧动画叶子（热路径隔离）')
+requireToken(footer, '<TokenCounter ', 'token 追赶叶子')
+requireToken(footer, '<ThinkingDuration ', '思考时长叶子')
+requireToken(footer, '<ElapsedTimer ', '总耗时叶子')
+requireToken(footer, '<StallProbe ', 'stalled 强度叶子')
+requireToken(css, '--stall-progress', 'stalled 渐变红插值必须消费 --stall-progress')
+requireToken(footer, 'function StallProbe', 'StallProbe 持 tick 写 --stall-progress')
+
+// 纯断言：4s 无 tool stalled 强度递增（resolveStallProgress）
+assert.equal(resolveStallProgress(0), 0)
+assert.equal(resolveStallProgress(ACTIVITY_THRESHOLDS.stalledMs), 0, 'stalledMs 边界仍为 0')
+const p4s = resolveStallProgress(4000)
+assert.ok(p4s > 0 && p4s < 1, `4s 无 tool 必须进入渐变红斜坡（${p4s}）`)
+assert.ok(resolveStallProgress(6000) > p4s, 'stalled 强度必须随 idleMs 递增')
+assert.equal(resolveStallProgress(ACTIVITY_THRESHOLDS.stalledMs + STALL_RAMP_MS * 2), 1, '封顶 1')
+
+// 纯断言：token 追赶（几何步进）不超真实值
+assert.equal(nextTokenCatchUp(0, 100), 25, '余量/4 步进')
+assert.equal(nextTokenCatchUp(90, 100), 93)
+assert.equal(nextTokenCatchUp(98, 100), 99)
+assert.equal(nextTokenCatchUp(99, 100), 100)
+assert.equal(nextTokenCatchUp(100, 100), 100)
+assert.equal(nextTokenCatchUp(150, 100), 100, '显示值永不超过真实值')
+assert.ok(nextTokenCatchUp(0, 0) <= 0)
+// 单调逼近：连续追赶最终封顶真实值
+let v = 0
+while (v < 100) v = nextTokenCatchUp(v, 100)
+assert.equal(v, 100, '追赶必须最终达到真实值')
+
+// 纯断言：D5 覆盖链一致性（activityLine 与 Footer 消费同源）
+assert.equal(resolveActivityLine({ activeTaskContent: '重构状态机' }).activity, '正在重构状态机 …')
+assert.equal(resolveActivityLine({ phase: 'tool', toolTitle: 'Grep' }).stallSuppressed, true)
 
 console.log('Generation phase 状态视觉回归测试通过')

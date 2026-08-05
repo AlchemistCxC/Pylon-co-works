@@ -40,8 +40,9 @@ assert.match(store, /spinnerIntervalMs: number/)
 assert.match(themeDefs, /spinnerIntervalMs: \{[\s\S]*?default: 120/)
 assert.match(migration, /normalizeThemeState\(state\)/, 'migrate 必须走 defs 驱动的通用归一化')
 assert.match(footer, /const spinnerIntervalMs = useStore\(s => s\.spinnerIntervalMs\)/)
-assert.match(footer, /setInterval\([\s\S]*?Math\.max\(40, Math\.min\(1000, spinnerIntervalMs \|\| 120\)\)/)
-assert.match(footer, /resolveFrame\(frames, elapsedMs, spinnerIntervalMs/)
+// P1-08：帧时序移入 SpinnerFrame 叶子（热路径隔离），叶子持 tick 推进 elapsed
+assert.match(footer, /setInterval\([\s\S]*?Math\.max\(40, Math\.min\(1000, intervalMs \|\| 120\)\)/)
+assert.match(footer, /resolveFrame\(frames, baseElapsedMs \+ tick \* \(intervalMs \|\| 120\), intervalMs/)
 
 // GenerationFooter frame/custom marker parsing and terminal-state color isolation.
 assert.doesNotMatch(footer, /summary\.completedFrame \|\|/)

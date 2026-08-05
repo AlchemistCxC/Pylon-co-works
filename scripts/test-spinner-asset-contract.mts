@@ -95,7 +95,8 @@ for (const field of ['spinnerColor', 'spinnerSize', 'spinnerVerbSet', 'spinnerCu
 for (const symbol of ['resolveSpinnerFrames', 'frameAt', 'resolveSpinnerMarker']) {
   check(new RegExp(`export function ${symbol}\\b`).test(spinnerFrames), `spinnerFrames missing ${symbol}`)
 }
-check(/resolveFrame\(frames, elapsedMs, spinnerIntervalMs/.test(footer), 'GenerationFooter does not use spinner frame timing')
+// P1-08：帧时序移入 SpinnerFrame 叶子（baseElapsedMs + tick 推进，intervalMs 传入）
+check(/resolveFrame\(frames, baseElapsedMs \+ tick \* \(intervalMs \|\| 120\), intervalMs/.test(footer), 'GenerationFooter does not use spinner frame timing')
 check(/resolveSpinnerMarker\(\s*frames,\s*summary\.reason === 'cancelled'/s.test(footer), 'GenerationFooter does not resolve terminal markers from settings')
 
 if (failures.length > 0) {

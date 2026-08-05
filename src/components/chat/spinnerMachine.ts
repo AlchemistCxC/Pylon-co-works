@@ -1,4 +1,4 @@
-import { resolveFrameIndex, type SpinnerMotionKind } from './spinnerMotion'
+import { resolveFrameIndex, type SpinnerMotionKind } from './spinnerMotion.ts'
 
 /**
  * spinnerMachine — CC 对齐的 spinner 纯状态机（无 React 依赖，可单测）。
@@ -14,10 +14,20 @@ export type SpinnerActivity = 'active' | 'waiting' | 'stalled'
 /** CC 对齐阈值：3s stalled（渐变红）、1.2s waiting（Pylon 两级） */
 export const ACTIVITY_THRESHOLDS = { waitingMs: 1200, stalledMs: 3000 } as const
 
+/** stalled 渐变红斜坡：超过 stalledMs 后 3s 内从 0 渐进到 1（P1-08 强度递增） */
+export const STALL_RAMP_MS = 3000
+
 export function resolveActivity(idleMs: number): SpinnerActivity {
   if (idleMs > ACTIVITY_THRESHOLDS.stalledMs) return 'stalled'
   if (idleMs > ACTIVITY_THRESHOLDS.waitingMs) return 'waiting'
   return 'active'
+}
+
+/** stalled 颜色插值强度：stalledMs 前 0，之后按斜坡线性递增，封顶 1（P1-08） */
+export function resolveStallProgress(idleMs: number): number {
+  const over = idleMs - ACTIVITY_THRESHOLDS.stalledMs
+  if (over <= 0) return 0
+  return Math.min(1, over / STALL_RAMP_MS)
 }
 
 export interface FrameState {

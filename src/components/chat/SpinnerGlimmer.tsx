@@ -1,20 +1,27 @@
-import { useMemo, type CSSProperties } from 'react'
+import { useEffect, useMemo, useState, type CSSProperties } from 'react'
 import { segmentGraphemes } from '../../utils/textWidth'
 import { glimmerIntensity, resolveGlimmer } from './spinnerMachine'
 
 interface SpinnerGlimmerProps {
   text: string
-  elapsedMs: number
+  /** P1-08：光扫时间由本组件持 tick 推进（热路径隔离到叶子） */
+  running: boolean
   activity: 'active' | 'waiting' | 'stalled'
   reducedMotion: boolean
   color?: string
   cycleMs: number
 }
 
-export default function SpinnerGlimmer({ text, elapsedMs, activity, reducedMotion, color, cycleMs }: SpinnerGlimmerProps) {
+export default function SpinnerGlimmer({ text, running, activity, reducedMotion, color, cycleMs }: SpinnerGlimmerProps) {
+  const [tick, setTick] = useState(0)
+  useEffect(() => {
+    if (!running) return
+    const id = setInterval(() => setTick(value => value + 1), 120)
+    return () => clearInterval(id)
+  }, [running])
   const graphemes = useMemo(() => segmentGraphemes(text), [text])
-  // CC 光扫状态机：±1 字符窗口（core + 两侧 edge）
-  const { glimmerIndex } = resolveGlimmer(text, elapsedMs, cycleMs)
+  // CC 光扫状态机：±1 字符窗口（core + 两侧 edge）；elapsed = tick * 120 近似推进
+  const { glimmerIndex } = resolveGlimmer(text, tick * 120, cycleMs)
   const activeIndex = reducedMotion || activity !== 'active' || graphemes.length === 0
     ? -1
     : glimmerIndex
