@@ -4,6 +4,8 @@ import { useIdentityStore } from '../../identityStore'
 import { useRuntimeStore } from '../../runtimeStore'
 import ModelWidget from '../chat/ModelWidget'
 import ModeWidget from '../chat/ModeWidget'
+import { useChatRuntimeSnapshot } from '../chat/useChatRuntimeSnapshot'
+import { resolveTaskPill } from '../../domains/activity/taskPill.ts'
 import { formatCacheReadTokens, formatTokenCount } from '../../tokenFormat'
 import { emptySessionLiveStats } from '../chat/sessionRuntime'
 import type { SessionLiveStats } from '../chat/sessionRuntime'
@@ -102,6 +104,20 @@ function ModeWidgetRenderer() {
   return <ModeWidget />
 }
 
+function TasksWidgetRenderer({ sessionId }: CcWidgetRenderProps) {
+  // P1-07：任务 pill（§8.2）——横向订阅读当前 source 的 plan；点击跨区桥展开 TaskTree
+  const sessionSource = useIdentityStore(s => s.sessions.find(item => item.id === sessionId)?.source)
+  const { tasks } = useChatRuntimeSnapshot(sessionSource || null)
+  const pill = resolveTaskPill(tasks)
+  if (!pill.visible) return null
+  return (
+    <button type="button" className="cc-tasks-pill" title="任务列表（点击展开/收起）"
+      onClick={() => window.dispatchEvent(new CustomEvent('pylon:tasks-toggle'))}>
+      {pill.label}
+    </button>
+  )
+}
+
 const placement = (slot: CcSlot, order: number): CcWidgetPlacement => ({ slot, order, offsetX: 0, offsetY: 0 })
 
 export const CC_WIDGET_REGISTRY: readonly CcWidgetDef[] = [
@@ -114,4 +130,5 @@ export const CC_WIDGET_REGISTRY: readonly CcWidgetDef[] = [
   { id: 'mode', label: '权限模式', category: 'runtime', defaultPlacement: placement('status-secondary', 1), naturalSize: true, render: () => <ModeWidgetRenderer /> },
   { id: 'send', label: '发送按钮', category: 'action', defaultPlacement: placement('actions', 0), naturalSize: true },
   { id: 'attach', label: '附件按钮', category: 'action', defaultPlacement: placement('actions', 1), naturalSize: true },
+  { id: 'tasks', label: '任务', category: 'status', defaultPlacement: placement('status-primary', 3), naturalSize: true, render: props => <TasksWidgetRenderer {...props} /> },
 ]

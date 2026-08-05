@@ -235,3 +235,16 @@
 .cc-editing-app .main .chat-view { filter:blur(4px); opacity:0.4; pointer-events:none; }
 .cc-editing-app .main .chat-empty { filter:blur(4px); opacity:0.4; }
 .cc-edit-overlay { position:fixed; inset:0; z-index:15; pointer-events:none; background:transparent; }
+/* ── P1-07 任务 pill（tasks widget）── */
+.cc-tasks-pill {
+  font-family: var(--mono);
+  font-size: 12px;
+  color: var(--text-dim);
+  background: transparent;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  padding: 2px 10px;
+  cursor: pointer;
+  white-space: nowrap;
+}
+.cc-tasks-pill:hover { color: var(--text); border-color: var(--border-focus); }

@@ -1,10 +1,13 @@
 import { strict as assert } from 'node:assert'
 import { clampCcHeight, resolveCcMinHeight, resolveVisibleStatusWidgetCount } from '../src/ccHeightState.ts'
 
-assert.equal(resolveVisibleStatusWidgetCount({ hiddenIds: [], inputMode: 'cli', ccStyle: 'wave' }), 5)
-assert.equal(resolveVisibleStatusWidgetCount({ hiddenIds: ['model', 'mode'], inputMode: 'cli', ccStyle: 'wave' }), 3)
-assert.equal(resolveVisibleStatusWidgetCount({ hiddenIds: [], inputMode: 'cli', ccStyle: 'numeric' }), 4)
-assert.equal(resolveVisibleStatusWidgetCount({ hiddenIds: ['pct'], inputMode: 'cli', ccStyle: 'numeric' }), 4)
+// P1-07：tasks widget 登记进 STATUS_WIDGET_IDS（由 CC_WIDGET_IDS 派生），计数 +1；
+// 走通用 isWidgetVisible（hidden/numeric/外部按钮机制自动覆盖）
+assert.equal(resolveVisibleStatusWidgetCount({ hiddenIds: [], inputMode: 'cli', ccStyle: 'wave' }), 6)
+assert.equal(resolveVisibleStatusWidgetCount({ hiddenIds: ['model', 'mode'], inputMode: 'cli', ccStyle: 'wave' }), 4)
+assert.equal(resolveVisibleStatusWidgetCount({ hiddenIds: [], inputMode: 'cli', ccStyle: 'numeric' }), 5)
+assert.equal(resolveVisibleStatusWidgetCount({ hiddenIds: ['pct'], inputMode: 'cli', ccStyle: 'numeric' }), 5)
+assert.equal(resolveVisibleStatusWidgetCount({ hiddenIds: ['tasks'], inputMode: 'cli', ccStyle: 'wave' }), 5)
 
 assert.equal(resolveCcMinHeight({
   inputMode: 'default', footerLayout: 'free', hintMode: 'full', visibleStatusWidgets: 7, cliOverflowMode: 'fixed-scroll',

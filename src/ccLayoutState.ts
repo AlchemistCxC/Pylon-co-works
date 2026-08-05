@@ -29,6 +29,7 @@ export const DEFAULT_CC_LAYOUT: CcLayoutV3 = {
     mode: { slot: 'status-secondary', order: 1, offsetX: 0, offsetY: 0 },
     send: { slot: 'actions', order: 0, offsetX: 0, offsetY: 0 },
     attach: { slot: 'actions', order: 1, offsetX: 0, offsetY: 0 },
+    tasks: { slot: 'status-primary', order: 3, offsetX: 0, offsetY: 0 },
   },
 }
 
