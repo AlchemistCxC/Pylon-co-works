@@ -248,16 +248,60 @@ function apply(state: ChatRuntimeState, event: ChatEvent, now = 1_000_000): Chat
   assert.equal(s[SOURCE].cancelState.status, 'idle', '非 generating 不允许 begin-cancel')
 }
 
-// ── clear：只清消息与 summary ──
+// ── clear：只清消息、summary 与 planEntries（D4 同生命周期）；不动 cancelState/seq ──
 {
   let s = initialState()
   s = apply(s, { type: 'user', source: SOURCE, content: 'hi' }, 1_000_000)
+  s = apply(s, { type: 'plan', source: SOURCE, entries: [{ content: '任务', status: 'in_progress' }] }, 1_000_100)
+  assert.equal(s[SOURCE].planEntries.length, 1)
   s = apply(s, { type: 'clear', source: SOURCE })
   const r = s[SOURCE]
   assert.equal(r.messages.length, 0)
   assert.equal(r.lastSummary, undefined)
+  assert.deepEqual(r.planEntries, [], 'clear 必须清 planEntries')
   assert.equal(r.cancelState.status, 'generating', 'clear 不动 cancelState（与现状一致）')
   assert.equal(r.seq, 1, 'clear 不动 seq')
+}
+
+// ── plan：D1 全量替换；空快照清空；replay/live 一致；深等返回原引用 ──
+{
+  let s = initialState()
+  s = apply(s, { type: 'plan', source: SOURCE, entries: [{ content: 'A', status: 'pending' }, { content: 'B', status: 'in_progress' }] }, 1_000_000)
+  assert.deepEqual(s[SOURCE].planEntries.map(e => e.content), ['A', 'B'])
+  // 全量替换（无合并）
+  s = apply(s, { type: 'plan', source: SOURCE, entries: [{ content: 'C', status: 'completed' }] }, 1_000_100)
+  assert.deepEqual(s[SOURCE].planEntries.map(e => e.content), ['C'])
+  // 空快照清空
+  s = apply(s, { type: 'plan', source: SOURCE, entries: [] }, 1_000_200)
+  assert.deepEqual(s[SOURCE].planEntries, [])
+  // replay 与 live 输入一致输出一致
+  const live = apply(initialState(), { type: 'plan', source: SOURCE, entries: [{ content: 'X', status: 'pending' }] }, 1_000_000)
+  const replay = apply(initialState(), { type: 'plan', source: SOURCE, entries: [{ content: 'X', status: 'pending' }], replay: true }, 1_000_000)
+  assert.deepEqual(live[SOURCE].planEntries, replay[SOURCE].planEntries)
+  // 深等快照返回原状态引用（供 P1-05 横向版本戳）
+  const before = s
+  const unchanged = apply(s, { type: 'plan', source: SOURCE, entries: [] }, 1_000_300)
+  assert.equal(unchanged, before, 'plan 深等时必须返回原状态引用')
+}
+
+// ── tool-call/tool-call-update：toolKind/contentBlocks 携带与补丁 ──
+{
+  let s = initialState()
+  s = apply(s, { type: 'tool-call', source: SOURCE, toolCallId: 'c1', title: 'Bash', toolKind: 'execute', contentBlocks: [{ type: 'text', text: 'ls' }] })
+  const tool = s[SOURCE].messages[0]
+  assert.equal(tool.toolKind, 'execute')
+  assert.deepEqual(tool.contentBlocks, [{ type: 'text', text: 'ls' }])
+  // update 携带 diff content → 补丁到既有消息
+  s = apply(s, { type: 'tool-call-update', source: SOURCE, toolCallId: 'c1', rawOutput: 'out', status: 'completed', contentBlocks: [{ type: 'tool_diff_content', path: 'a.ts' }] })
+  const updated = s[SOURCE].messages[0]
+  assert.equal(updated.toolStatus, 'completed')
+  assert.deepEqual(updated.contentBlocks, [{ type: 'tool_diff_content', path: 'a.ts' }])
+  assert.equal(updated.toolKind, 'execute', 'update 无 kind 时保留 tool-call 的 kind')
+  // update 无 contentBlocks 时保留既有（undefined 回退，旧消息兼容）
+  s = apply(initialState(), { type: 'tool-call', source: SOURCE, toolCallId: 'c2', title: 'Read' })
+  s = apply(s, { type: 'tool-call-update', source: SOURCE, toolCallId: 'c2', rawOutput: 'ok', status: 'completed' })
+  assert.equal(s[SOURCE].messages[0].contentBlocks, undefined)
+  assert.equal(s[SOURCE].messages[0].toolKind, undefined, '旧消息无字段必须保持 undefined（向后兼容）')
 }
 
 // ── 双路径修复：非 rendered 期间 chunks 直写 + rendered 缓冲，done flush 合并不拆条 ──

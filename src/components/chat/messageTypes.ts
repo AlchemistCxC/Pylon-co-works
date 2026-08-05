@@ -1,4 +1,5 @@
 import { toolIdFromMessage } from '../../domains/tool/id.ts'
+import type { ContentBlock } from './acpTypes.ts'
 
 export function assertNever(value: never, context = '未处理的消息状态'): never {
   throw new Error(`${context}: ${String(value)}`)
@@ -18,6 +19,10 @@ export interface Message {
   thoughtStartedAt?: number
   thoughtDurationMs?: number
   toolStatus?: string
+  /** P1-04：语义工具 kind（协议化渲染主键；旧消息无此字段 → 渲染回退按名字，向后兼容） */
+  toolKind?: string
+  /** P1-04：结构化内容块（含 tool_diff_content；raw 保留，消费方式后变） */
+  contentBlocks?: ContentBlock[]
 }
 
 export type RenderMessage =

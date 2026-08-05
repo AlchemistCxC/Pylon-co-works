@@ -186,6 +186,19 @@ function randomEvent(rng: () => number, activeSources: string[], toolSeq: Map<st
     return { type: 'error', source, error: cancelled ? 'cancelled' : 'err', cancelled, replay: rng() < 0.2, explicitReplay: rng() < 0.1 }
   }
   if (roll < 0.95) return { type: 'done', source, replay: rng() < 0.2, explicitReplay: rng() < 0.1 }
+  if (roll < 0.975) {
+    // P1-04：plan 全量替换事件（含空快照清空）
+    const count = Math.floor(rng() * 4)
+    return {
+      type: 'plan',
+      source,
+      entries: Array.from({ length: count }, (_, i) => ({
+        content: `任务${i}`,
+        status: rng() < 0.3 ? 'pending' : rng() < 0.5 ? 'in_progress' : 'completed',
+      })),
+      replay: rng() < 0.2,
+    }
+  }
   return { type: 'begin-cancel', source }
 }
 
@@ -217,6 +230,8 @@ function assertInvariants(s: ChatRuntimeState) {
         assert.ok(m.toolInput !== undefined, `${source}: running tool 行缺 toolInput ${m.id}`)
       }
     }
+    // P1-04：planEntries 恒为数组（替换语义不变量，含初值）
+    assert.ok(Array.isArray(r.planEntries), `${source}: planEntries 必须是数组`)
   }
 }
 

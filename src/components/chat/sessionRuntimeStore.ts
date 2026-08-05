@@ -6,6 +6,9 @@ import {
   shouldAcceptToolCall,
 } from './replayState.ts'
 import { getToolSummary } from './toolPresentation.ts'
+import { applyPlanEntries } from '../../domains/tasks/taskStatusMachine.ts'
+import type { PlanEntry } from '../../domains/tasks/planTypes.ts'
+import type { ContentBlock } from './acpTypes.ts'
 
 /**
  * sessionRuntimeStore — Chat 会话运行时状态（阶段 2：Chat 状态收敛）。
@@ -47,6 +50,8 @@ export interface SourceChatRuntime {
   seq: number
   tokenCount: number
   lastSummary?: ChatSummary
+  /** P1-04：plan 任务快照（横向，不持久化；D1 全量替换，D4 会话生命周期） */
+  planEntries: PlanEntry[]
 }
 
 export type ChatRuntimeState = Record<string, SourceChatRuntime>
@@ -61,14 +66,15 @@ export type ChatEvent =
   | { type: 'user'; source: string; content: string; eventReplay?: boolean; loadInProgress?: boolean }
   | { type: 'message-chunk'; source: string; text: string; replay?: boolean }
   | { type: 'thought-chunk'; source: string; text: string; replay?: boolean }
-  | { type: 'tool-call'; source: string; toolCallId?: string; title?: string; rawInput?: unknown; replay?: boolean }
-  | { type: 'tool-call-update'; source: string; toolCallId?: string; rawOutput?: unknown; status?: string; replay?: boolean }
+  | { type: 'tool-call'; source: string; toolCallId?: string; title?: string; toolKind?: string; contentBlocks?: ContentBlock[]; rawInput?: unknown; replay?: boolean }
+  | { type: 'tool-call-update'; source: string; toolCallId?: string; toolKind?: string; contentBlocks?: ContentBlock[]; rawOutput?: unknown; status?: string; replay?: boolean }
   | { type: 'usage-update'; source: string; tokensUsed: number }
   | { type: 'done'; source: string; replay?: boolean; explicitReplay?: boolean }
   | { type: 'error'; source: string; error: string; cancelled?: boolean; replay?: boolean; explicitReplay?: boolean }
   | { type: 'begin-cancel'; source: string }
   | { type: 'cancel-success'; source: string }
   | { type: 'cancel-rejected'; source: string; error: string }
+  | { type: 'plan'; source: string; entries: unknown; replay?: boolean }
   | { type: 'clear'; source: string }
 
 export function createSourceChatRuntime(source: string): SourceChatRuntime {
@@ -85,6 +91,7 @@ export function createSourceChatRuntime(source: string): SourceChatRuntime {
     replayToolIds: [],
     seq: 0,
     tokenCount: 0,
+    planEntries: [],
   }
 }
 
@@ -211,12 +218,13 @@ export function applyChatEvent(
   const source = event.source
 
   if (event.type === 'clear') {
-    // 与 peri:clear 现状一致：只清消息与 summary，不动 cancelState/generating/streaming 缓冲
+    // 与 peri:clear 现状一致：只清消息、summary 与 planEntries（D4 同生命周期），
+    // 不动 cancelState/generating/streaming 缓冲
     const existing = state[source]
     if (!existing) return state
     return {
       ...state,
-      [source]: { ...existing, messages: [], lastSummary: undefined },
+      [source]: { ...existing, messages: [], lastSummary: undefined, planEntries: [] },
     }
   }
   if (!knownSources.includes(source)) {
@@ -328,6 +336,8 @@ export function applyChatEvent(
         time: nowTime(now),
         toolName: title,
         toolInput: inputStr,
+        toolKind: event.toolKind,
+        contentBlocks: event.contentBlocks,
         running: true,
       }, seq)
       return { ...state, [source]: runtime }
@@ -343,9 +353,25 @@ export function applyChatEvent(
       return {
         ...state,
         [source]: mapMessages(current, replay, m => m.id === 'tool-' + toolId && m.running
-          ? { ...m, toolOutput: outputStr, toolOutputLines: lines, toolStatus: event.status, running: false }
+          ? {
+              ...m,
+              toolOutput: outputStr,
+              toolOutputLines: lines,
+              toolStatus: event.status,
+              toolKind: event.toolKind ?? m.toolKind,
+              contentBlocks: event.contentBlocks ?? m.contentBlocks,
+              running: false,
+            }
           : m),
       }
+    }
+
+    case 'plan': {
+      // D1 全量替换语义（replay/live 一致——回放即重建任务树）；深等快照返回原引用
+      const current = state[source] ?? createSourceChatRuntime(source)
+      const planState = applyPlanEntries({ entries: current.planEntries }, event.entries)
+      if (planState.entries === current.planEntries) return state
+      return { ...state, [source]: { ...current, planEntries: planState.entries } }
     }
 
     case 'usage-update': {

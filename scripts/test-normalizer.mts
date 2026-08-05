@@ -1,4 +1,5 @@
 import { strict as assert } from 'node:assert'
+import { readFileSync } from 'node:fs'
 import { extractToolKind, extractContentBlocks, extractPlanEntries, type ContentBlock } from '../src/components/chat/acpTypes.ts'
 
 // P1-03：三份 wire mock（Peri/Hermes/第三方漂移）均可解析——kind/content/plan 提取宽容不抛错
@@ -59,4 +60,22 @@ assert.deepEqual(extractContentBlocks({ content: [null, 'str', { type: 'text' }]
 const _check: import('../src/components/chat/acpTypes.ts').SessionUpdate[] = [periToolCall, hermesToolUpdate, thirdParty]
 void _check
 
-console.log('normalizer（三份 wire mock 解析）守卫通过')
+// P1-04：controller 接线——plan 分支 + tool_call/update 传 kind/content 不丢
+const controller = readFileSync(new URL('../src/components/chat/chatEventController.ts', import.meta.url), 'utf8')
+assert.match(controller, /case 'plan':/, 'controller 必须映射 plan 变体')
+assert.match(controller, /extractPlanEntries\(upd\)/, 'controller 必须经 extractPlanEntries 提取')
+assert.match(controller, /type: 'plan', source, entries, replay/, 'controller 必须 dispatch plan 事件')
+assert.match(controller, /toolKind: upd\.kind/, 'tool_call 必须携带 kind')
+assert.match(controller, /contentBlocks: upd\.content/, 'tool_call 必须携带 content')
+assert.match(controller, /type: 'tool-call-update'[\s\S]*?contentBlocks: upd\.content/, 'tool_call_update 必须携带 content')
+
+// reducer：plan 全量替换 + clear 清空 + 旧消息字段 undefined 兼容
+const reducer = readFileSync(new URL('../src/components/chat/sessionRuntimeStore.ts', import.meta.url), 'utf8')
+assert.match(reducer, /case 'plan':/, 'reducer 必须处理 plan 事件')
+assert.match(reducer, /applyPlanEntries\(/, 'reducer 必须经 applyPlanEntries 全量替换')
+assert.match(reducer, /planEntries: \[\]/, 'clear 必须清空 planEntries')
+const messageTypes = readFileSync(new URL('../src/components/chat/messageTypes.ts', import.meta.url), 'utf8')
+assert.match(messageTypes, /toolKind\?: string/, 'Message 持久模型必须补可选 toolKind')
+assert.match(messageTypes, /contentBlocks\?: ContentBlock\[\]/, 'Message 持久模型必须补可选 contentBlocks')
+
+console.log('normalizer（三份 wire mock 解析 + P1-04 接线）守卫通过')

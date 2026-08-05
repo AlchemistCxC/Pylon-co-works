@@ -5,7 +5,7 @@ import { useStore } from '../../store'
 import { useIdentityStore } from '../../identityStore'
 import { useRuntimeStore } from '../../runtimeStore'
 import { resolveSpinnerFrames } from './spinnerFrames'
-import { extractModelConfig, extractUsage, type PeriDonePayload, type PeriUpdatePayload } from './acpTypes'
+import { extractModelConfig, extractUsage, extractPlanEntries, type PeriDonePayload, type PeriUpdatePayload } from './acpTypes'
 import { clearMessageStorage, persistMessageSnapshot } from './messagePersistence'
 import { addGeneratingSource, removeGeneratingSource } from './sessionEventState'
 import { reportRuntimeError } from '../../runtimeError'
@@ -289,11 +289,11 @@ export function attachChatEventController(refs: ChatEventControllerRefs): ChatCo
         }
         case 'tool_call': {
           if (!replay && rendered) refs.setGenerationPhase({ kind: 'tool', name: upd.title || '?' })
-          dispatch({ type: 'tool-call', source, toolCallId: upd.toolCallId, title: upd.title, rawInput: upd.rawInput, replay })
+          dispatch({ type: 'tool-call', source, toolCallId: upd.toolCallId, title: upd.title, toolKind: upd.kind, contentBlocks: upd.content, rawInput: upd.rawInput, replay })
           break
         }
         case 'tool_call_update':
-          dispatch({ type: 'tool-call-update', source, toolCallId: upd.toolCallId, rawOutput: upd.rawOutput, status: upd.status, replay })
+          dispatch({ type: 'tool-call-update', source, toolCallId: upd.toolCallId, toolKind: upd.kind, contentBlocks: upd.content, rawOutput: upd.rawOutput, status: upd.status, replay })
           break
         case 'usage_update': {
           const usage = extractUsage(upd)
@@ -317,6 +317,13 @@ export function attachChatEventController(refs: ChatEventControllerRefs): ChatCo
             if (key === 'model' && val != null) useRuntimeStore.getState().setSessionConfig(source, { model: String(val) })
             if (key === 'mode' && val != null) useRuntimeStore.getState().setSessionMode(source, String(val))
           }
+          break
+        }
+        case 'plan': {
+          // D1 全量快照替换；entries 缺失（undefined）与空快照（[]）区分，交由 reducer 处理
+          const entries = extractPlanEntries(upd)
+          if (entries === undefined) break
+          dispatch({ type: 'plan', source, entries, replay })
           break
         }
       }
