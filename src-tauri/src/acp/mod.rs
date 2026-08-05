@@ -167,6 +167,11 @@ pub struct AcpClient {
     /// G1-02：per-agent 协议行为配置（connect_with_logs 从 agent.protocol() clone；
     /// disconnected() 用默认实例）。超时/限额/握手参数唯一读取点。
     protocol: crate::agent_config::AcpProtocolConfig,
+    /// P1（能力协商暴露）：initialize 握手返回的 agentCapabilities（原始 Value，
+    /// 含 loadSession/promptCapabilities/sessionCapabilities/mcpCapabilities 及
+    /// _meta 私有扩展）。连接成功才有；断开/未连接为 None。客户端替换时随新
+    /// AcpClient 自然更新（generation 隔离保证旧客户端不污染）。
+    agent_capabilities: Option<serde_json::Value>,
     /// mpsc channel for writing JSON-RPC lines to stdin. Single consumer = no lock contention.
     pub(crate) write_tx: mpsc::Sender<String>,
     /// R4：writer tokio 任务句柄——kill/替换 agent 时 abort 掉可能阻塞在 stdin
@@ -237,6 +242,7 @@ impl AcpClient {
         Self {
             child: ManagedChild::empty(),
             protocol: crate::agent_config::AcpProtocolConfig::default(),
+            agent_capabilities: None,
             write_tx,
             writer_task: None,
             next_id: Arc::new(AtomicU64::new(1)),
@@ -367,6 +373,11 @@ impl AcpClient {
         self.crashed.load(Ordering::Relaxed)
     }
 
+    /// P1：initialize 握手返回的 agentCapabilities（连接成功才有）。
+    pub(crate) fn agent_capabilities(&self) -> Option<&serde_json::Value> {
+        self.agent_capabilities.as_ref()
+    }
+
     /// A7：订阅崩溃信号（EOF 后为 true）。watch 保留最新值——订阅晚于崩溃时
     /// `has_changed`/`borrow` 仍能读到 true，不依赖时序。
     pub fn crashed_receiver(&self) -> watch::Receiver<bool> {
@@ -488,9 +499,10 @@ impl AcpClient {
                     &runtime_logs,
                 );
 
-                let client = AcpClient {
+                let mut client = AcpClient {
                     child,
                     protocol: agent.protocol().clone(),
+                    agent_capabilities: None,
                     write_tx,
                     writer_task: Some(writer_task),
                     next_id: Arc::new(AtomicU64::new(1)),
@@ -505,7 +517,7 @@ impl AcpClient {
                 // `acp.initialize_caps` 覆盖；缺省 = 统一默认 tokenStats + _meta.peri.*，
                 // Hermes 忽略无害）、protocolVersion（H3）、clientInfo（H4）。
                 // 差异适配表见 acp.rs 头部注释与手册 §3.3。
-                client
+                let initialize_response = client
                     .call_async(
                         METHOD_INITIALIZE,
                         serde_json::json!({
@@ -515,6 +527,12 @@ impl AcpClient {
                         }),
                     )
                     .await?;
+                // P1（能力协商暴露）：握手响应的 agentCapabilities 存起来——前端
+                // 能力驱动 UI（loadSession/image/fork/resume/mcp）经 agent_status
+                // 读取；未声明时保持 None。
+                client.agent_capabilities = initialize_response
+                    .get("agentCapabilities")
+                    .cloned();
                 Ok(client)
             }
             other => Err(AcpError::Child(format!("unsupported transport: {}", other))),
@@ -1093,6 +1111,32 @@ for line in sys.stdin:
             !process_exists(child_id),
             "fake ACP child must exit after kill_and_wait"
         );
+    }
+
+    #[tokio::test]
+    async fn fake_acp_initialize_stores_agent_capabilities() {
+        // P1（能力协商暴露）：initialize 响应里的 agentCapabilities 必须存进
+        // AcpClient——前端能力驱动 UI（agent_status.capabilities）依赖此存储。
+        let script = r#"import json,sys
+for line in sys.stdin:
+    request=json.loads(line)
+    method=request.get('method')
+    response={'jsonrpc':'2.0','id':request.get('id'),'result':{}}
+    if method == 'initialize':
+        response['result']={'protocolVersion':1,'agentCapabilities':{'loadSession':True,'promptCapabilities':{'image':True}}}
+    print(json.dumps(response), flush=True)
+"#;
+        let agent = crate::test_utils::fake_acp_agent("fake-acp-caps", script);
+        let client = AcpClient::connect_with_logs(&agent, None)
+            .await
+            .expect("fake ACP must initialize");
+        let caps = client
+            .agent_capabilities()
+            .expect("agentCapabilities 必须从握手响应存储");
+        assert_eq!(caps["loadSession"], true);
+        assert_eq!(caps["promptCapabilities"]["image"], true);
+        // 断开态无 capabilities
+        assert!(AcpClient::disconnected().agent_capabilities().is_none());
     }
 
     #[tokio::test]

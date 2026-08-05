@@ -297,6 +297,11 @@ impl AppStateHandles {
         let generation = runtime
             .map(|runtime| runtime.client_generation.load(Ordering::Acquire))
             .unwrap_or(0);
+        // P1（能力协商暴露）：agentCapabilities 原始 Value（try_lock 同步读 acp——
+        // 与 acp_is_crashed 同模式；断开/未连接为 null）。前端能力驱动 UI 读此字段。
+        let capabilities = runtime
+            .and_then(|runtime| runtime.acp.try_lock().ok())
+            .and_then(|acp| acp.agent_capabilities().cloned());
         // O2：三个别名（lastError/recentError/error）共用同一份引用（as_deref），
         // json! 序列化时各自转 Value——消除 3 次显式 clone（last_error 是
         // agent_runtime 锁内 state.clone() 的产物，自身 clone 是必须的）。
@@ -313,6 +318,7 @@ impl AppStateHandles {
             "error": last_error_ref,
             "lastConnectedAt": last_connected_at,
             "generation": generation,
+            "capabilities": capabilities,
             "active": agent.is_some(),
             "available": available,
             "crashed": crashed,
