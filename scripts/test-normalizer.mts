@@ -75,6 +75,18 @@ assert.match(chatController, /infrastructure\/acp\/chatContracts/, 'controller �
 const chatView = readFileSync(new URL('../src/components/chat/ChatView.tsx', import.meta.url), 'utf8')
 assert.equal(chatView.includes('_meta'), false, 'ChatView 不得直接解析 _meta 私有键')
 
+// P1-10：三份 wire mock → 统一渲染模型（kind 归一不抛错）
+{
+  const { buildToolRenderModel } = await import('../src/domains/tool/toolPresentation.ts')
+  const peri = buildToolRenderModel({ name: 'Bash', toolKind: 'execute', input: { command: 'ls' }, output: 'a\nb' })
+  const hermes = buildToolRenderModel({ name: 'read_file', input: { file_path: 'x.ts' }, contentBlocks: [{ type: 'tool_diff_content', old_content: '1', new_content: '2' }] })
+  const thirdParty = buildToolRenderModel({ name: 'custom_thing', input: { note: 'hello' } })
+  assert.equal(peri.kind, 'execute')
+  assert.equal(hermes.kind, 'read')
+  assert.equal(thirdParty.kind, 'other')
+  assert.equal(hermes.diffPayload?.lines.length, 2, 'contentBlocks snake_case diff 必须解析')
+}
+
 // P1-04：controller 接线——plan 分支 + tool_call/update 传 kind/content 不丢
 const controller = readFileSync(new URL('../src/components/chat/chatEventController.ts', import.meta.url), 'utf8')
 assert.match(controller, /case 'plan':/, 'controller 必须映射 plan 变体')

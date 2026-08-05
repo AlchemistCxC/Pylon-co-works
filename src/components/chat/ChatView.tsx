@@ -416,15 +416,16 @@ function ToolCard({ model }: { model: ReturnType<typeof buildToolPresentationMod
   const connCss: React.CSSProperties = {
     ['--tool-conn' as never]: resolveConnectorColor(connectorMode, status, { toolOk, toolRun, toolErr }, connectorColor),
   }
-  const isBash = model.name === 'Bash'
+  // P1-10：语义 kind 判定（Hermes terminal 等 execute 类工具同样获得 ANSI 渲染，不再按 Peri 工具名碰运气）
+  const isExecute = model.kind === 'execute'
   const suffix = model.state === 'completed' && model.outputLines > 0 ? ` — ${model.outputLabel}` : ''
-  // isBash = model.name === 'Bash'，name 已在 deps（传递依赖）
+  // isExecute = model.kind === 'execute'，kind 已在 deps（传递依赖）
   const outputHtml = useMemo(() => {
-    if (!model.outputText || !isBash) return ''
+    if (!model.outputText || !isExecute) return ''
     return sanitizeHtml(new Anser().ansiToHtml(Anser.escapeForHtml(model.outputText)))
-  }, [model.outputText, model.name]) // eslint-disable-line react-hooks/exhaustive-deps
+  }, [model.outputText, model.kind]) // eslint-disable-line react-hooks/exhaustive-deps
   return (
-    <div className="term-tool" data-status={status} data-tool-state={model.state}
+    <div className="term-tool" data-status={status} data-tool-state={model.state} data-kind={model.kind}
       data-output-collapsible={model.canCollapseOutput ? 'true' : 'false'} style={connCss}>
       <button className="term-tool-head" type="button" onClick={() => setOpen(!open)} aria-expanded={open} aria-controls={bodyId}>
         <span className={`term-tool-indicator ${status} ${toolIndicatorMotionClass(model.state)}`} style={glowCss} aria-label={indicatorAsset.ariaLabel[model.state]} role="img">{indicatorAsset.glyph}</span>
@@ -438,8 +439,8 @@ function ToolCard({ model }: { model: ReturnType<typeof buildToolPresentationMod
           <span className={`term-tool-label${model.errorText ? ' term-tool-label-error' : ''}`}>
             {model.errorText ? '错误' : '输出'}{model.outputLabel ? ` · ${model.outputLabel}` : ''}
           </span>
-          {model.isDiffCandidate && <DiffCard output={model.outputText} />}
-          {model.name === 'Bash' && outputHtml
+          {model.isDiffCandidate && <DiffCard output={model.outputText} payload={model.diffPayload} />}
+          {isExecute && outputHtml
             ? <div className="term-ansi" dangerouslySetInnerHTML={{ __html: outputHtml }} />
             : <pre><code>{model.outputText}</code></pre>}
         </div>

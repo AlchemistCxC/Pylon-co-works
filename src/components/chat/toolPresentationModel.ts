@@ -2,11 +2,13 @@ import type { Message } from './messageTypes.ts'
 import { normalizeToolStatus, toolStatePresentation, type ToolVisualState } from '../../domains/tool/status.ts'
 import { toolIdFromMessage } from '../../domains/tool/id.ts'
 import { truncateToWidth } from '../../utils/textWidth.ts'
-import { resolveToolRenderer } from './toolPresentation.ts'
+import { buildToolRenderModel, type ToolKind } from '../../domains/tool/toolPresentation.ts'
+import type { DiffPayload } from '../../domains/tool/diffPresentation.ts'
 
 export interface ToolPresentationModel {
   toolId: string | null
   name: string
+  /** P1-10：kind 归一后摘要（title 直通回退） */
   summary: string
   inputText: string
   outputText: string
@@ -18,6 +20,10 @@ export interface ToolPresentationModel {
   statusLabel: string
   outputLabel: string
   errorText?: string
+  /** P1-10：语义 kind（工具卡 data-kind） */
+  kind: ToolKind
+  /** P1-10：contentBlocks 携带的结构化 diff（tool_diff_content） */
+  diffPayload: DiffPayload | null
 }
 
 const COLLAPSIBLE_OUTPUT_CHAR_LIMIT = 1200
@@ -28,24 +34,23 @@ function outputLineCount(output: string): number {
   return output.split('\n').filter(line => line.trim().length > 0).length
 }
 
-function outputLabelFor(name: string, outputLines: number): string {
-  if (outputLines <= 0) return ''
-  if (name === 'Grep' || name === 'Glob') return `${outputLines} matches`
-  if (name === 'Read') return `${outputLines} lines`
-  if (name === 'Edit' || name === 'Write') return `${outputLines} lines changed`
-  return `${outputLines} lines`
-}
-
 /**
  * 将持久化 Message 转成 ToolCard 使用的展示模型。
- * 这里只处理当前前端已经保存的字符串 input/output，不假设原始 ACP object 仍然存在。
+ * 展示模型经 domains/tool 的 KIND_RENDERERS（kind 归一，title 直通，contentBlocks 按 type）；
+ * 不假设原始 ACP object 仍然存在（input/output 为已保存字符串）。
  */
 export function buildToolPresentationModel(
   message: Message,
   visualState?: ToolVisualState,
 ): ToolPresentationModel {
   const name = message.toolName || message.sender.replace(/^tool:/, '') || '未知工具'
-  const renderer = resolveToolRenderer(name)
+  const render = buildToolRenderModel({
+    name,
+    toolKind: message.toolKind,
+    input: message.toolInput,
+    output: message.toolOutput,
+    contentBlocks: message.contentBlocks,
+  })
   const inputText = message.toolInput || ''
   const outputText = message.toolOutput || ''
   const outputLines = message.toolOutputLines ?? outputLineCount(outputText)
@@ -66,21 +71,20 @@ export function buildToolPresentationModel(
 
   return {
     toolId: toolIdFromMessage(message),
-    name,
-    summary: inputText,
+    name: render.name,
+    summary: render.summary,
     inputText,
     outputText,
     outputLines,
     state,
     hasOutput,
     canCollapseOutput,
-    // 仅 renderer 定义 diff 判定（Edit/Write）；本地回退恒 false（已删死代码）
-    isDiffCandidate: renderer.isDiffCandidate ? renderer.isDiffCandidate(outputText) : false,
+    isDiffCandidate: render.isDiffCandidate,
     statusLabel: toolStatePresentation(state, hasOutput).label,
-    outputLabel: renderer.outputLabel
-      ? renderer.outputLabel(outputLines, outputText)
-      : outputLabelFor(name, outputLines),
+    outputLabel: render.outputLabel,
     errorText: state === 'failed' || state === 'cancelled' ? outputText || undefined : undefined,
+    kind: render.kind,
+    diffPayload: render.diffPayload,
   }
 }
 

@@ -1,5 +1,5 @@
 import { useId, useMemo, useState } from 'react'
-import { normalizeDiffPayload, wordDiff, type DiffLine } from './diffPresentation'
+import { normalizeDiffPayload, wordDiff, type DiffLine, type DiffPayload } from './diffPresentation'
 import './DiffCard.css'
 
 /** 词级片段渲染（common 普通、added/removed 词色背景） */
@@ -22,16 +22,17 @@ function DiffLineRow({ line }: { line: DiffLine }) {
   )
 }
 
-export default function DiffCard({ output }: { output: string }) {
-  // payload 解析（含 JSON.parse）与计数都是 output 的纯函数：只在 output 变化时重算
+export default function DiffCard({ output, payload: payloadProp }: { output: string; payload?: DiffPayload | null }) {
+  // payload 解析（含 JSON.parse）与计数都是 output 的纯函数：只在 output 变化时重算；
+  // P1-10：调用方可直接传入已解析 payload（contentBlocks 的 tool_diff_content），免二次解析
   const { payload, addedCount, removedCount } = useMemo(() => {
-    const parsed = normalizeDiffPayload(output)
+    const parsed = payloadProp ?? normalizeDiffPayload(output)
     return {
       payload: parsed,
       addedCount: parsed ? parsed.lines.filter(line => line.kind === 'added').length : 0,
       removedCount: parsed ? parsed.lines.filter(line => line.kind === 'removed').length : 0,
     }
-  }, [output])
+  }, [output, payloadProp])
   const [open, setOpen] = useState(true)
   const bodyId = useId()
   if (!payload) return null

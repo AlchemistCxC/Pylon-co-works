@@ -1,73 +1,29 @@
-import { normalizeDiffPayload } from './diffPresentation.ts'
+/**
+ * toolPresentation — 兼容层（P1-10）。
+ *
+ * 渲染字典（KIND_RENDERERS）与统一模型真实定义已迁入 `domains/tool/toolPresentation.ts`；
+ * 本文件保留连接线颜色（UI 主题派生，非字典）并转发导出工具展示函数，供既有 import 面使用。
+ */
 
-export interface ToolRenderer {
-  getSummary(input: unknown): string
-  getSearchText?(output: unknown): string
-  normalizeInput?(input: unknown): unknown
-  /** 输出行数标签（如 "N matches" / "N lines changed"），缺省回退通用行数 */
-  outputLabel?(outputLines: number, output: string): string
-  /** 输出是否为可渲染的结构化 diff，缺省按工具名 + 非空输出判定 */
-  isDiffCandidate?(output: string): boolean
-}
+export {
+  KIND_RENDERERS,
+  TOOL_KINDS,
+  buildToolRenderModel,
+  contentBlockToDiffPayload,
+  getKindToolSummary,
+  resolveKindRenderer,
+  resolveToolKind,
+  type KindRenderer,
+  type ToolKind,
+  type ToolRenderInput,
+  type ToolRenderModel,
+} from '../../domains/tool/toolPresentation.ts'
 
-const firstString = (...values: unknown[]): string =>
-  values.find((value): value is string => typeof value === 'string' && value.length > 0) || ''
+import { getKindToolSummary, resolveKindRenderer, resolveToolKind, type KindRenderer } from '../../domains/tool/toolPresentation.ts'
 
-function objectInput(input: unknown): Record<string, unknown> {
-  return typeof input === 'object' && input !== null ? input as Record<string, unknown> : {}
-}
-
-function fieldSummary(...fields: string[]) {
-  return (input: unknown) => firstString(...fields.map(field => objectInput(input)[field]))
-}
-
-const TOOL_RENDERERS: Record<string, ToolRenderer> = {
-  Bash: {
-    getSummary: fieldSummary('command', 'cmd'),
-    outputLabel: (outputLines, _output) => outputLines <= 0 ? '' : `${outputLines} lines`,
-  },
-  Read: {
-    getSummary: fieldSummary('path', 'file_path', 'filePath'),
-    outputLabel: (outputLines, _output) => outputLines <= 0 ? '' : `${outputLines} lines`,
-  },
-  Write: {
-    getSummary: fieldSummary('path', 'file_path', 'filePath'),
-    outputLabel: (outputLines, _output) => outputLines <= 0 ? '' : `${outputLines} lines changed`,
-    isDiffCandidate: output => output.length > 0 && normalizeDiffPayload(output) !== null,
-  },
-  Edit: {
-    getSummary: fieldSummary('path', 'file_path', 'filePath'),
-    outputLabel: (outputLines, _output) => outputLines <= 0 ? '' : `${outputLines} lines changed`,
-    isDiffCandidate: output => output.length > 0 && normalizeDiffPayload(output) !== null,
-  },
-  Grep: {
-    getSummary: fieldSummary('pattern', 'regex', 'glob'),
-    outputLabel: (outputLines, _output) => outputLines <= 0 ? '' : `${outputLines} matches`,
-  },
-  Glob: {
-    getSummary: fieldSummary('pattern', 'regex', 'glob'),
-    outputLabel: (outputLines, _output) => outputLines <= 0 ? '' : `${outputLines} matches`,
-  },
-  Task: {
-    getSummary: fieldSummary('description', 'prompt', 'goal'),
-  },
-}
-
-const FALLBACK_RENDERER: ToolRenderer = {
-  getSummary: input => {
-    for (const value of Object.values(objectInput(input))) {
-      if (typeof value === 'string' && value.length > 0 && value.length < 200) return value
-    }
-    return typeof input === 'string' ? input.slice(0, 80) : ''
-  },
-}
-
-export function resolveToolRenderer(toolName: string): ToolRenderer {
-  return TOOL_RENDERERS[toolName] || FALLBACK_RENDERER
-}
-
-export function getToolSummary(toolName: string, input: unknown): string {
-  return resolveToolRenderer(toolName).getSummary(input)
+/** 兼容：按工具名解析渲染器（内部经 kind 归一） */
+export function resolveToolRenderer(toolName: string): KindRenderer {
+  return resolveKindRenderer(resolveToolKind(toolName))
 }
 
 export type ToolConnectorStatus = 'ok' | 'err' | 'run'
@@ -95,4 +51,7 @@ export function resolveConnectorColor(
   return fallback
 }
 
-export const TOOL_RENDERER_NAMES = Object.freeze(Object.keys(TOOL_RENDERERS))
+/** 兼容：按工具名取摘要（内部经 kind 归一；Hermes snake_case 不再落 FALLBACK） */
+export function getToolSummary(toolName: string, input: unknown): string {
+  return getKindToolSummary(toolName, input)
+}
