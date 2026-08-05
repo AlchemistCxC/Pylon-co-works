@@ -16,6 +16,8 @@ export interface AgentStatus {
   recentError?: string
   generation?: number
   lastConnectedAt?: string | number
+  /** 后端能力信息：原样透传不解释；null 表示断线，缺失表示未提供 */
+  capabilities?: unknown | null
 }
 
 export interface AgentStatusPayload {
@@ -28,6 +30,7 @@ export interface AgentStatusPayload {
   error?: string
   generation?: number
   lastConnectedAt?: string | number
+  capabilities?: unknown | null
 }
 
 export function normalizeAgentStatus(payload: AgentStatusPayload, fallbackAgent = ''): AgentStatus {
@@ -46,6 +49,7 @@ export function normalizeAgentStatus(payload: AgentStatusPayload, fallbackAgent 
     recentError: payload.error || (payload.status !== undefined && status === 'error' ? `未知 Agent 状态：${payload.status}` : undefined),
     generation: payload.generation,
     lastConnectedAt: payload.lastConnectedAt,
+    capabilities: payload.capabilities,
   }
 }
 
