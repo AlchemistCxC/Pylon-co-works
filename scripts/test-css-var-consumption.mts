@@ -75,7 +75,13 @@ for (const f of tsxFiles) {
 }
 
 // ── A：注入必消费（死注入 = 字段无渲染效果）──
-const deadInjected = [...injected].filter(v => !consumed.has(v)).sort()
+// W2-01（F3-D defs 先行）：FileSheet 编辑器 8 字段注入的 var 由 FileSheet（W2-04）消费，
+// 中间期暂列待消费清单（届时移除，字段进 defs 即被预设覆盖的目的不变）
+const PENDING_CONSUMPTION = new Set([
+  '--editor-font-size', '--editor-line-height', '--editor-gutter-color', '--editor-gutter-bg',
+  '--editor-selection', '--editor-active-line', '--editor-tab-active', '--editor-modified-mark',
+])
+const deadInjected = [...injected].filter(v => !consumed.has(v) && !PENDING_CONSUMPTION.has(v)).sort()
 assert.deepEqual(deadInjected, [], `以下注入 var 从未被 var() 消费（字段改了没效果）：\n${deadInjected.join('\n')}`)
 
 // ── B：悬空引用必须有 fallback（否则静默回退到 initial）──

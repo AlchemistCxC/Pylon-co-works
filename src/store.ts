@@ -41,6 +41,10 @@ export interface ThemeSettings {
   diffAdded: string; diffRemoved: string
   /** diff 词级高亮色（CC 双层：整行背景 + 变更词背景） */
   diffAddedWord: string; diffRemovedWord: string
+  /** W2-01（F3-D）：FileSheet 编辑器 8 字段（defs 先行，W2-04 消费） */
+  editorFontSize: number; editorLineHeight: number
+  editorGutterColor: string; editorGutterBg: string; editorSelection: string; editorActiveLine: string
+  editorTabActive: string; editorModifiedMark: string
   toolIndicatorGlow: number; toolIndicatorGlowColor: string
   toolConnectorMode: string; toolConnectorColor: string
   toolConnectorStyle: 'solid' | 'dotted' | 'pulse'; toolConnectorWidth: number; toolConnectorOpacity: number

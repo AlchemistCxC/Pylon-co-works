@@ -129,6 +129,15 @@ export const THEME_FIELD_DEFS = {
   diffRemoved: { ...C('chat', 'Diff·删除'), default: '#FF6B80', group: "Diff", },
   diffAddedWord: { ...C('chat', 'Diff·词级新增'), default: '#3EA15E', group: "Diff", advanced: true },
   diffRemovedWord: { ...C('chat', 'Diff·词级删除'), default: '#E0556B', group: "Diff", advanced: true },
+  // W2-01（F3-D/T4）：FileSheet 编辑器 8 字段预留（defs 先行、W2-04 消费；语法高亮复用 syn* 已有字段）
+  editorFontSize: { ...N('chat', '编辑器字号', 10, 24), default: 13, group: "编辑器（FileSheet）", unit: 'px' },
+  editorLineHeight: { ...N('chat', '编辑器行高', 1.2, 2.5, 0.1), default: 1.5, group: "编辑器（FileSheet）", },
+  editorGutterColor: { ...C('chat', '行号文字'), default: '#65737e', group: "编辑器（FileSheet）", },
+  editorGutterBg: { ...C('chat', '行号栏底色'), default: 'rgba(0,0,0,0.03)', group: "编辑器（FileSheet）", },
+  editorSelection: { ...C('chat', '选中区背景'), default: 'rgba(59,130,246,0.25)', group: "编辑器（FileSheet）", },
+  editorActiveLine: { ...C('chat', '当前行高亮'), default: 'rgba(0,0,0,0.04)', group: "编辑器（FileSheet）", },
+  editorTabActive: { ...C('chat', '激活 Tab'), default: '#3b82f6', group: "编辑器（FileSheet）", },
+  editorModifiedMark: { ...C('chat', '改动标记'), default: '#b47814', group: "编辑器（FileSheet）", },
   // toolIndicator 走 widgetRegistry 动态选项（toolIndicatorOptions），不进声明式 UI
   toolIndicator: { ...S('chat', '指示器形状', ['●', '■', '◆', '▶', '✦']), default: '●', hidden: true },
   // CSS 变量走 --pv-connector-*（ChatView 内联计算），字段不注入独立 var

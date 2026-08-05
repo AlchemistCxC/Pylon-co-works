@@ -166,6 +166,7 @@ export default function App() {
     toolConnectorColor: s.toolConnectorColor, toolConnectorWidth: s.toolConnectorWidth, toolConnectorOpacity: s.toolConnectorOpacity,
     userTagBg: s.userTagBg, userTagText: s.userTagText,
     diffAdded: s.diffAdded, diffRemoved: s.diffRemoved, diffAddedWord: s.diffAddedWord, diffRemovedWord: s.diffRemovedWord,
+    editorFontSize: s.editorFontSize, editorLineHeight: s.editorLineHeight, editorGutterColor: s.editorGutterColor, editorGutterBg: s.editorGutterBg, editorSelection: s.editorSelection, editorActiveLine: s.editorActiveLine, editorTabActive: s.editorTabActive, editorModifiedMark: s.editorModifiedMark,
     inputBg: s.inputBg, inputBgImage: s.inputBgImage,
     inputTextColor: s.inputTextColor, inputPlaceholder: s.inputPlaceholder,
     inputSendBg: s.inputSendBg, inputFocusBorder: s.inputFocusBorder,
