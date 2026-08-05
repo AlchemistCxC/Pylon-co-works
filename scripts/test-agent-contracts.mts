@@ -1,5 +1,6 @@
 import { strict as assert } from 'node:assert'
 import { normalizeAgentStatus } from '../src/components/settings/agentTypes.ts'
+import { resolveCapabilitySnapshot } from '../src/infrastructure/acp/agentContracts.ts'
 
 // P2-01：capabilities 原始字段透传——normalize 只搬运不解释，不丢未知键
 
@@ -46,4 +47,123 @@ assert.equal(enriched.generation, 3)
 assert.equal(enriched.lastConnectedAt, 99)
 assert.deepEqual(enriched.capabilities, { promptImage: true })
 
-console.log('agent contracts（capabilities 透传）守卫通过')
+// ===== P2-02：resolveCapabilitySnapshot 快照推导（Peri/Hermes/第三方/null 四样本） =====
+
+const statusOf = (capabilities: unknown | null): Parameters<typeof resolveCapabilitySnapshot>[0] => ({
+  agent: 'a',
+  agentId: 'a',
+  status: 'connected',
+  capabilities,
+})
+
+// 样本 1：Peri 实测形状（无 authMethods、无 mcpCapabilities、promptCapabilities 空对象）
+const peri = resolveCapabilitySnapshot(statusOf({
+  loadSession: true,
+  promptCapabilities: {},
+  sessionCapabilities: { list: true, close: true, resume: true, fork: true },
+  _meta: { 'peri.*': true },
+}))
+assert.deepEqual(peri, {
+  connected: true,
+  loadSession: true,
+  promptImage: false,
+  sessionFork: true,
+  sessionResume: true,
+  sessionClose: true,
+  sessionList: true,
+  mcpHttp: true,
+  mcpSse: true,
+  hasAuthMethods: false,
+})
+
+// 样本 2：Hermes 实测形状（mcp 显式 false 关闭、authMethods 非空、close 未声明按缺省 true）
+const hermes = resolveCapabilitySnapshot(statusOf({
+  loadSession: true,
+  promptCapabilities: { image: true },
+  sessionCapabilities: { fork: true, list: true, resume: true },
+  mcpCapabilities: { http: false, sse: false },
+  authMethods: ['api_key'],
+}))
+assert.deepEqual(hermes, {
+  connected: true,
+  loadSession: true,
+  promptImage: true,
+  sessionFork: true,
+  sessionResume: true,
+  sessionClose: true,
+  sessionList: true,
+  mcpHttp: false,
+  mcpSse: false,
+  hasAuthMethods: true,
+})
+
+// 样本 3：第三方未知 agent 漂移形状——未知键不崩，缺省语义正确
+const thirdParty = resolveCapabilitySnapshot(statusOf({
+  loadSession: false,
+  sessionCapabilities: { fork: true },
+  weirdField: { a: 1 },
+}))
+assert.deepEqual(thirdParty, {
+  connected: true,
+  loadSession: false,
+  promptImage: false,
+  sessionFork: true,
+  sessionResume: false,
+  sessionClose: true,
+  sessionList: false,
+  mcpHttp: true,
+  mcpSse: true,
+  hasAuthMethods: false,
+})
+
+// 样本 4：capabilities null（断线）→ connected:false + 保守缺省
+assert.deepEqual(resolveCapabilitySnapshot(statusOf(null)), {
+  connected: false,
+  loadSession: false,
+  promptImage: false,
+  sessionFork: false,
+  sessionResume: false,
+  sessionClose: true,
+  sessionList: false,
+  mcpHttp: true,
+  mcpSse: true,
+  hasAuthMethods: false,
+})
+
+// 边界：status 整体缺失（hook 初始态）与 null 同语义；空对象不断线
+assert.deepEqual(resolveCapabilitySnapshot(undefined).connected, false)
+assert.deepEqual(resolveCapabilitySnapshot(null).connected, false)
+assert.deepEqual(resolveCapabilitySnapshot(statusOf({})), {
+  connected: true,
+  loadSession: false,
+  promptImage: false,
+  sessionFork: false,
+  sessionResume: false,
+  sessionClose: true,
+  sessionList: false,
+  mcpHttp: true,
+  mcpSse: true,
+  hasAuthMethods: false,
+})
+
+// 缺省 vs 显式：sessionClose 显式 false 才关；mcp 显式 false 才关，显式 true 保持 true
+assert.deepEqual(resolveCapabilitySnapshot(statusOf({
+  sessionCapabilities: { close: false },
+  mcpCapabilities: { http: false, sse: true },
+})), {
+  connected: true,
+  loadSession: false,
+  promptImage: false,
+  sessionFork: false,
+  sessionResume: false,
+  sessionClose: false,
+  sessionList: false,
+  mcpHttp: false,
+  mcpSse: true,
+  hasAuthMethods: false,
+})
+
+// authMethods 非数组（漂移）不当 hasAuthMethods
+assert.equal(resolveCapabilitySnapshot(statusOf({ authMethods: 'api_key' })).hasAuthMethods, false)
+
+console.log('agent contracts（capabilities 透传 + 快照推导）守卫通过')
