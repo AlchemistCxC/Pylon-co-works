@@ -5,6 +5,7 @@ import { useIdentityStore, type AgentEntry } from '../identityStore'
 import { useRuntimeStore } from '../runtimeStore'
 import { reportRuntimeError } from '../runtimeError'
 import { runAgentSwitchTransaction } from '../components/agentSwitchTransaction'
+import AgentConfigEditor from '../components/settings/AgentConfigEditor'
 import { recentPersistedSessions, type PersistedSessionSummary } from '../domains/overview/persistedSessions.ts'
 import type { SheetContext, SheetRecord } from '../workspace-sheets/sheetTypes'
 import './OverviewSheetView.css'
@@ -24,6 +25,7 @@ export default function OverviewSheetView({ ctx }: { sheet: SheetRecord; ctx: Sh
   const [switchingId, setSwitchingId] = useState<string | null>(null)
   const [error, setError] = useState('')
   const [recent, setRecent] = useState<PersistedSessionSummary[]>([])
+  const [showConfigEditor, setShowConfigEditor] = useState(false)
 
   // W1-06：加载最近会话（宽松 normalize，形状漂移不崩）
   useEffect(() => {
@@ -115,7 +117,11 @@ export default function OverviewSheetView({ ctx }: { sheet: SheetRecord; ctx: Sh
         </section>
         <section className="overview-entry">
           <h2 className="overview-entry-title">配置 Agent</h2>
-          <p className="overview-hint">编辑 Agent 配置（W1-07 接线）</p>
+          <p className="overview-hint">编辑 Agent 配置（update_agents_config 待后端）</p>
+          <button type="button" className="overview-agent-btn" onClick={() => setShowConfigEditor(value => !value)}>
+            {showConfigEditor ? '收起编辑器' : '编辑配置'}
+          </button>
+          {showConfigEditor && <AgentConfigEditor agentId={activeAgent} />}
         </section>
         <section className="overview-entry">
           <h2 className="overview-entry-title">继续会话</h2>
