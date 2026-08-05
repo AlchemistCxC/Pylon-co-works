@@ -1,0 +1,109 @@
+/* W2-03 FileSheet 分区壳：消费现有主题变量，零新样式体系 */
+
+.file-sheet {
+  flex: 1;
+  display: flex;
+  min-width: 0;
+  color: var(--text);
+  font-family: var(--font);
+}
+
+.file-sidebar {
+  display: flex;
+  flex: 0 0 48px;
+  border-right: 1px solid var(--border);
+  background: var(--bg-panel);
+}
+
+.file-activity-bar {
+  display: flex;
+  flex-direction: column;
+  width: 48px;
+  flex: 0 0 48px;
+  border-right: 1px solid var(--border);
+}
+
+.file-activity-item {
+  padding: 8px 4px;
+  font-size: 11px;
+  font-family: var(--font);
+  color: var(--text-dim);
+  background: transparent;
+  border: none;
+  cursor: pointer;
+  writing-mode: vertical-lr;
+}
+
+.file-activity-item.active {
+  color: var(--text);
+  background: var(--bg-hover);
+}
+
+.file-section-panel {
+  flex: 1;
+  padding: 12px;
+  overflow-y: auto;
+}
+
+.file-section-title {
+  font-size: 12px;
+  font-weight: 600;
+  margin-bottom: 8px;
+}
+
+.file-section-hint {
+  font-size: 12px;
+  color: var(--text-dim);
+}
+
+.file-source-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.file-source-item {
+  width: 100%;
+  text-align: left;
+  padding: 6px 8px;
+  font-size: 12px;
+  font-family: var(--font);
+  color: var(--text);
+  background: var(--bg-active);
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  cursor: pointer;
+}
+
+.file-source-item.active {
+  border-color: var(--border-focus);
+  background: var(--bg-hover);
+}
+
+.file-main {
+  flex: 1;
+  min-width: 0;
+  padding: 24px;
+  overflow-y: auto;
+}
+
+.file-main-kicker {
+  font-family: var(--mono);
+  font-size: 12px;
+  letter-spacing: 0.2em;
+  color: var(--text-dim);
+}
+
+.file-main-title {
+  font-size: 20px;
+  font-weight: 700;
+  margin: 8px 0;
+}
+
+.file-main-hint {
+  font-size: 12px;
+  color: var(--text-dim);
+}

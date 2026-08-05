@@ -3,6 +3,7 @@ import type { SheetKind, SheetRecord, SheetContext, SheetRenderEntry } from './s
 import AgentSheetView from '../sheets/AgentSheetView'
 import OverviewSheetView from '../sheets/OverviewSheetView'
 import RuntimeSheetView from '../sheets/RuntimeSheetView'
+import FileSheetView from '../sheets/file/FileSheetView'
 import Sidebar from '../components/Sidebar'
 
 /**
@@ -44,7 +45,8 @@ export const SHEET_RENDER_REGISTRY: Record<SheetKind, SheetRenderEntry> = {
   prism: { render: () => <Suspense fallback={LOADING_FALLBACK}><PrismManagerSheetView /></Suspense> },
   // W1-08：runtime 日志观察面（list 回放 + runtime-log 增量，无右栏）
   runtime: { render: (sheet, ctx) => <RuntimeSheetView sheet={sheet} ctx={ctx} /> },
-  file: { render: () => <UnavailableSheet kind="file" /> },
+  // W2-03：FileSheet 分区壳（singletonKey file:{source}，内部指向可改）
+  file: { render: (sheet, ctx) => <FileSheetView sheet={sheet} ctx={ctx} /> },
   // W1-05：overview 启动选择器（虚拟空态，不写入持久 sheet 数组）
   overview: { render: (sheet, ctx) => <OverviewSheetView sheet={sheet} ctx={ctx} /> },
   search: { render: () => <UnavailableSheet kind="search" /> },
