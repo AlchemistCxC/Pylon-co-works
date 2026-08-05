@@ -20,6 +20,7 @@ import { THEME_CSS_VAR_MAP, THEME_FIELD_DEFS } from './themeFieldDefs'
 import { listen } from '@tauri-apps/api/event'
 import { normalizeAgentStatus, type AgentStatusPayload } from './components/settings/agentTypes'
 import { createPermissionController, registerPermissionController } from './infrastructure/acp/permissionController'
+import PermissionDialog from './components/PermissionDialog'
 import DevMetricsOverlay from './components/DevMetricsOverlay'
 import ErrorCenter from './components/ErrorCenter'
 
@@ -314,6 +315,8 @@ export default function App() {
           {profilesOpen && <ProfileEditor onClose={() => setShowProfileEdit(false)} />}
           {sessionSettingsId && <SessionSettings sessionId={sessionSettingsId} open={!!sessionSettingsId} onClose={() => setSessionSettingsId(null)} onDeleted={() => setActiveSession(null)} />}
         </Suspense>
+        {/* 权限请求弹窗：store 驱动（无 active 请求返回 null），App 单例挂载不随 sheet 卸载 */}
+        <PermissionDialog />
       </div>
     </div>
   )
