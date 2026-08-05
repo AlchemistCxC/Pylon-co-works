@@ -3,14 +3,17 @@ import type { SheetInput, SheetRegistryEntry, SheetKind } from './sheetTypes.ts'
 const singleton = (key: string) => (_input: Pick<SheetInput, 'agentId' | 'singletonKey' | 'metadata'>) => key
 const agentSingleton = (input: Pick<SheetInput, 'agentId' | 'singletonKey' | 'metadata'>) => input.agentId ? `agent:${input.agentId}` : undefined
 
+// W1-01（F1-A）：9 kind 注册表（diff/changes/git-history 删除；overview/search/history/browser/gateway 新增）
 export const SHEET_REGISTRY: Record<SheetKind, SheetRegistryEntry> = {
   agent: { kind: 'agent', label: 'Agent', renderKey: 'agent-sheet', singleton: true, getSingletonKey: agentSingleton },
   prism: { kind: 'prism', label: 'Prism', renderKey: 'prism-manager-sheet', singleton: true, getSingletonKey: singleton('prism') },
   runtime: { kind: 'runtime', label: 'Runtime', renderKey: 'runtime-sheet', singleton: true, getSingletonKey: singleton('runtime') },
   file: { kind: 'file', label: 'File', renderKey: 'file-sheet', singleton: false, getSingletonKey: input => input.singletonKey },
-  diff: { kind: 'diff', label: 'Diff', renderKey: 'diff-sheet', singleton: false, getSingletonKey: input => input.singletonKey },
-  changes: { kind: 'changes', label: 'Changes', renderKey: 'changes-sheet', singleton: true, getSingletonKey: singleton('changes') },
-  'git-history': { kind: 'git-history', label: 'Git History', renderKey: 'git-history-sheet', singleton: true, getSingletonKey: singleton('git-history') },
+  overview: { kind: 'overview', label: 'Overview', renderKey: 'overview-sheet', singleton: true, getSingletonKey: singleton('overview') },
+  search: { kind: 'search', label: 'Search', renderKey: 'search-sheet', singleton: true, getSingletonKey: singleton('search') },
+  history: { kind: 'history', label: 'History', renderKey: 'history-sheet', singleton: true, getSingletonKey: singleton('history') },
+  browser: { kind: 'browser', label: 'Browser', renderKey: 'browser-sheet', singleton: true, getSingletonKey: singleton('browser') },
+  gateway: { kind: 'gateway', label: 'Gateway', renderKey: 'gateway-sheet', singleton: true, getSingletonKey: singleton('gateway') },
 }
 
 export function getSheetRegistryEntry(kind: unknown): SheetRegistryEntry | undefined {

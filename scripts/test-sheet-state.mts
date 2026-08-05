@@ -18,7 +18,12 @@ const prism = sheetReducer(agentB, { type: 'open', now: 400, sheet: { kind: 'pri
 assert.equal(prism.sheets.length, 3)
 assert.equal(resolveSheetSingletonKey({ kind: 'prism' }), 'prism')
 assert.equal(getSheetRegistryEntry('unknown'), undefined)
-assert.equal(Object.keys(SHEET_REGISTRY).length, 7)
+assert.equal(Object.keys(SHEET_REGISTRY).length, 9, 'W1-01：9 kind 注册表（删 diff/changes/git-history，增 overview/search/history/browser/gateway）')
+assert.equal('diff' in SHEET_REGISTRY, false)
+assert.equal('changes' in SHEET_REGISTRY, false)
+assert.equal('git-history' in SHEET_REGISTRY, false)
+assert.equal(getSheetRegistryEntry('overview')?.singleton, true)
+assert.equal(resolveSheetSingletonKey({ kind: 'gateway' }), 'gateway')
 
 const focused = sheetReducer(prism, { type: 'focus', id: agentB.sheets[0].id, now: 500 })
 assert.equal(focused.activeSheetId, agentB.sheets[0].id)

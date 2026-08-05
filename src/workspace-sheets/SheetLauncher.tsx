@@ -20,8 +20,7 @@ interface SheetLauncherProps {
 const TOOL_OPTIONS: Array<{ kind: SheetKind; title: string; description: string; enabled: boolean }> = [
   { kind: 'prism', title: 'Prism', description: 'Prism 管理 API 尚未接入', enabled: false },
   { kind: 'runtime', title: 'Runtime', description: '后端能力尚未接入', enabled: false },
-  { kind: 'changes', title: 'Changes', description: 'Git 只读能力尚未接入', enabled: false },
-  { kind: 'git-history', title: 'Git History', description: 'Git 只读能力尚未接入', enabled: false },
+  // W1-01（F1-A）：changes/git-history 旧 kind 已删（FileSheet 分区化），占位移除
 ]
 
 export default function SheetLauncher({

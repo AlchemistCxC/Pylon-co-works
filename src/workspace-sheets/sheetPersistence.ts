@@ -1,7 +1,10 @@
 import { createSheetState, type SheetState } from './sheetState.ts'
 import { isSheetKind, type SheetRecord } from './sheetTypes.ts'
 
-export const SHEET_SCHEMA_VERSION = 1
+// W1-01：schema v1→v2（F1-A 方案 A + F2-B 布局搬家）——9 kind 清洗旧 kind；
+// v2 envelope 加 layout 三字段（sidebarWidth/sidebarCollapsed/rightPanelCollapsed）；
+// v1 parser 保留为迁移源，parse 按 version 分支，serialize 只输出 v2。
+export const SHEET_SCHEMA_VERSION = 2
 export const SHEET_STORAGE_KEY = 'pylon-workspace-sheets'
 
 export interface SheetWorkspaceState {
@@ -13,9 +16,23 @@ export interface PersistedSheetState extends SheetState {
   agentStates: Record<string, SheetWorkspaceState>
 }
 
-interface SheetEnvelope {
+/** v2 layout 三字段（F2-B：布局状态从主题迁出，预设不覆盖） */
+export interface SheetLayoutState {
+  sidebarWidth: number
+  sidebarCollapsed: boolean
+  rightPanelCollapsed: boolean
+}
+
+export const DEFAULT_SHEET_LAYOUT: SheetLayoutState = {
+  sidebarWidth: 250,
+  sidebarCollapsed: false,
+  rightPanelCollapsed: false,
+}
+
+interface SheetEnvelopeV2 {
   version: typeof SHEET_SCHEMA_VERSION
   state: PersistedSheetState
+  layout: SheetLayoutState
 }
 
 interface StorageLike {
@@ -98,34 +115,99 @@ function normalizeState(value: unknown, agentIds?: readonly string[]): Persisted
   return { ...base, agentStates }
 }
 
-export function serializeSheetState(state: PersistedSheetState): string {
-  const envelope: SheetEnvelope = { version: SHEET_SCHEMA_VERSION, state }
-  return JSON.stringify(envelope)
-}
-
-export function parseSheetState(raw: string | null, agentIds?: readonly string[]): PersistedSheetState {
-  if (!raw) return EMPTY_PERSISTED_SHEET_STATE
-  try {
-    const parsed: unknown = JSON.parse(raw)
-    if (!parsed || typeof parsed !== 'object') return EMPTY_PERSISTED_SHEET_STATE
-    const envelope = parsed as Record<string, unknown>
-    if (envelope.version !== SHEET_SCHEMA_VERSION) return EMPTY_PERSISTED_SHEET_STATE
-    return normalizeState(envelope.state, agentIds)
-  } catch {
-    return EMPTY_PERSISTED_SHEET_STATE
+/** v2 layout 容错：宽度 finite + clamp；collapsed 只接受 boolean（细化路线 §4 步骤 2） */
+function normalizeLayout(value: unknown): SheetLayoutState {
+  const raw = value && typeof value === 'object' ? value as Record<string, unknown> : {}
+  const rawWidth = raw.sidebarWidth
+  const width = typeof rawWidth === 'number' && Number.isFinite(rawWidth)
+    ? Math.min(520, Math.max(160, rawWidth))
+    : DEFAULT_SHEET_LAYOUT.sidebarWidth
+  return {
+    sidebarWidth: width,
+    sidebarCollapsed: typeof raw.sidebarCollapsed === 'boolean' ? raw.sidebarCollapsed : DEFAULT_SHEET_LAYOUT.sidebarCollapsed,
+    rightPanelCollapsed: typeof raw.rightPanelCollapsed === 'boolean' ? raw.rightPanelCollapsed : DEFAULT_SHEET_LAYOUT.rightPanelCollapsed,
   }
 }
 
-export function persistSheetState(storage: StorageLike, state: PersistedSheetState): void {
+export interface SheetHydrateResult {
+  state: PersistedSheetState
+  layout: SheetLayoutState
+  /** 输入为 v1（或缺失 layout）：true——调用方应立即 serialize 写回 v2 */
+  migrated: boolean
+}
+
+/**
+ * 解析 v2 envelope；v1 输入走迁移（normalize sheets 清洗旧 kind，layout 取默认，
+ * sidebarWidth 由调用方读旧主题一次性迁移）。损坏/未知 version 返回空状态（不抛错）。
+ */
+export function parseSheetStateV2(raw: string | null, agentIds?: readonly string[]): SheetHydrateResult {
+  if (!raw) return { state: EMPTY_PERSISTED_SHEET_STATE, layout: { ...DEFAULT_SHEET_LAYOUT }, migrated: false }
   try {
-    storage.setItem(SHEET_STORAGE_KEY, serializeSheetState(normalizeState(state)))
+    const parsed: unknown = JSON.parse(raw)
+    if (!parsed || typeof parsed !== 'object') return { state: EMPTY_PERSISTED_SHEET_STATE, layout: { ...DEFAULT_SHEET_LAYOUT }, migrated: false }
+    const envelope = parsed as Record<string, unknown>
+    if (envelope.version === SHEET_SCHEMA_VERSION) {
+      return {
+        state: normalizeState(envelope.state, agentIds),
+        layout: normalizeLayout(envelope.layout),
+        migrated: false,
+      }
+    }
+    // v1 迁移（细化路线 §4 步骤 4）：先 normalize sheets，layout 取默认（sidebarWidth 由调用方读旧主题）
+    if (envelope.version === 1) {
+      return {
+        state: normalizeState(envelope.state, agentIds),
+        layout: { ...DEFAULT_SHEET_LAYOUT },
+        migrated: true,
+      }
+    }
+    return { state: EMPTY_PERSISTED_SHEET_STATE, layout: { ...DEFAULT_SHEET_LAYOUT }, migrated: false }
+  } catch {
+    return { state: EMPTY_PERSISTED_SHEET_STATE, layout: { ...DEFAULT_SHEET_LAYOUT }, migrated: false }
+  }
+}
+
+/** 只输出 v2，不再生成 v1（细化路线 §4 步骤 6） */
+export function serializeSheetStateV2(state: PersistedSheetState, layout: SheetLayoutState): string {
+  const envelope: SheetEnvelopeV2 = { version: SHEET_SCHEMA_VERSION, state, layout }
+  return JSON.stringify(envelope)
+}
+
+export function persistSheetStateV2(storage: StorageLike, state: PersistedSheetState, layout: SheetLayoutState): void {
+  try {
+    storage.setItem(SHEET_STORAGE_KEY, serializeSheetStateV2(normalizeState(state), normalizeLayout(layout)))
   } catch {
     // 存储不可用/写满：静默降级——写盘失败不应让 workspace action（zustand set 内）抛异常
   }
 }
 
-export function loadSheetState(storage: StorageLike, agentIds?: readonly string[]): PersistedSheetState {
+export function loadSheetStateV2(storage: StorageLike, agentIds?: readonly string[]): SheetHydrateResult {
   let raw: string | null = null
   try { raw = storage.getItem(SHEET_STORAGE_KEY) } catch { /* 存储不可用：按空状态处理 */ }
-  return parseSheetState(raw, agentIds)
+  return parseSheetStateV2(raw, agentIds)
+}
+
+// ── v1 保留（迁移源 fixture）：旧 schema normalize/roundtrip 由 test-sheet-persistence 锁定 ──
+
+interface SheetEnvelopeV1 {
+  version: 1
+  state: PersistedSheetState
+}
+
+export function serializeSheetStateV1(state: PersistedSheetState): string {
+  const envelope: SheetEnvelopeV1 = { version: 1, state }
+  return JSON.stringify(envelope)
+}
+
+export function parseSheetStateV1(raw: string | null, agentIds?: readonly string[]): PersistedSheetState {
+  if (!raw) return EMPTY_PERSISTED_SHEET_STATE
+  try {
+    const parsed: unknown = JSON.parse(raw)
+    if (!parsed || typeof parsed !== 'object') return EMPTY_PERSISTED_SHEET_STATE
+    const envelope = parsed as Record<string, unknown>
+    if (envelope.version !== 1) return EMPTY_PERSISTED_SHEET_STATE
+    return normalizeState(envelope.state, agentIds)
+  } catch {
+    return EMPTY_PERSISTED_SHEET_STATE
+  }
 }

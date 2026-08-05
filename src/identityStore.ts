@@ -1,6 +1,6 @@
 import { create } from 'zustand'
 import { loadSessions, persistSessions } from './sessionPersistence'
-import { loadSheetState } from './workspace-sheets/sheetPersistence'
+import { loadSheetStateV2 } from './workspace-sheets/sheetPersistence'
 import { useWorkspaceStore } from './workspaceStore'
 import { useRuntimeStore } from './runtimeStore'
 import { clearSessionUiState } from './components/chat/sessionUiState'
@@ -165,9 +165,9 @@ export const useIdentityStore = create<IdentityStoreState>()((set, get) => ({
   },
   getUser: (source) => get().users.find(u => u.id === source),
   setAgents: (a) => set(() => {
-    // 联动：Agent 列表变化时按新列表重载 sheets
-    const workspaceSheets = loadSheetState(localStorage, a.map(agent => agent.id))
-    useWorkspaceStore.getState().replaceSheets(workspaceSheets, workspaceSheets.agentStates)
+    // 联动：Agent 列表变化时按新列表重载 sheets（W1-01 v2：layout 由 workspaceStore 持有）
+    const result = loadSheetStateV2(localStorage, a.map(agent => agent.id))
+    useWorkspaceStore.getState().replaceSheets(result.state, result.state.agentStates)
     return { agents: a }
   }),
   setActiveAgent: (id) => set(() => {

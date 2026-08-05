@@ -1,11 +1,15 @@
+// W1-01（F1-A 方案 A）：9 kind 原地替换——删 diff/changes/git-history（FileSheet 分区化，
+// 从未有内容），增 overview/search/history/browser/gateway；旧 kind 由 schema v2 normalize 清洗
 export const SHEET_KINDS = [
   'agent',
   'prism',
   'runtime',
   'file',
-  'diff',
-  'changes',
-  'git-history',
+  'overview',
+  'search',
+  'history',
+  'browser',
+  'gateway',
 ] as const
 
 export type SheetKind = typeof SHEET_KINDS[number]
