@@ -1,0 +1,122 @@
+/* W1-08 Runtime 观察面：消费现有主题变量，零新样式体系 */
+
+.runtime-sheet {
+  flex: 1;
+  display: flex;
+  min-width: 0;
+  color: var(--text);
+  font-family: var(--font);
+}
+
+.runtime-sidebar {
+  width: 180px;
+  flex: 0 0 180px;
+  border-right: 1px solid var(--border);
+  padding: 12px;
+  overflow-y: auto;
+}
+
+.runtime-filter {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.runtime-filter-label {
+  font-size: 11px;
+  color: var(--text-dim);
+}
+
+.runtime-filter-select,
+.runtime-filter-input {
+  font-family: var(--font);
+  font-size: 12px;
+  color: var(--text);
+  background: var(--bg-input);
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  padding: 4px 6px;
+}
+
+.runtime-clear {
+  margin-top: 8px;
+  padding: 4px 8px;
+  font-size: 12px;
+  font-family: var(--font);
+  color: var(--text);
+  background: var(--bg-active);
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  cursor: pointer;
+}
+
+.runtime-clear:hover {
+  background: var(--bg-hover);
+  border-color: var(--border-focus);
+}
+
+.runtime-main {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+}
+
+.runtime-count {
+  padding: 6px 12px;
+  font-size: 11px;
+  color: var(--text-dim);
+  border-bottom: 1px solid var(--border);
+}
+
+.runtime-log-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  overflow-y: auto;
+  flex: 1;
+}
+
+.runtime-log-row {
+  display: flex;
+  gap: 8px;
+  align-items: baseline;
+  width: 100%;
+  text-align: left;
+  padding: 4px 12px;
+  font-size: 12px;
+  font-family: var(--mono);
+  color: var(--text);
+  background: transparent;
+  border: none;
+  cursor: pointer;
+}
+
+.runtime-log-row:hover {
+  background: var(--bg-hover);
+}
+
+.runtime-log-error { color: var(--danger, #e5484d); }
+.runtime-log-warn { color: var(--ekgYellow, #fbbf24); }
+.runtime-log-debug, .runtime-log-trace { color: var(--text-dim); }
+
+.runtime-log-id { color: var(--text-dim); width: 3em; flex: 0 0 3em; }
+.runtime-log-level { width: 4em; flex: 0 0 4em; }
+.runtime-log-source { width: 6em; flex: 0 0 6em; overflow: hidden; text-overflow: ellipsis; }
+.runtime-log-time { color: var(--text-dim); width: 8em; flex: 0 0 8em; }
+.runtime-log-message { flex: 1; min-width: 0; word-break: break-word; }
+
+.runtime-log-detail {
+  margin: 0 12px 6px 12px;
+  padding: 6px 8px;
+  font-size: 11px;
+  background: var(--bg-input);
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  color: var(--text-dim);
+}
+
+.runtime-log-field code {
+  font-family: var(--mono);
+  color: var(--accent);
+}

@@ -2,6 +2,7 @@ import { lazy, Suspense } from 'react'
 import type { SheetKind, SheetRecord, SheetContext, SheetRenderEntry } from './sheetTypes.ts'
 import AgentSheetView from '../sheets/AgentSheetView'
 import OverviewSheetView from '../sheets/OverviewSheetView'
+import RuntimeSheetView from '../sheets/RuntimeSheetView'
 import Sidebar from '../components/Sidebar'
 
 /**
@@ -41,7 +42,8 @@ export const SHEET_RENDER_REGISTRY: Record<SheetKind, SheetRenderEntry> = {
   // W1-03：侧栏上移——agent 的 Sidebar 由布局层经 slot 渲染（entry.sidebar 声明）
   agent: { render: agentRender, sidebar: Sidebar },
   prism: { render: () => <Suspense fallback={LOADING_FALLBACK}><PrismManagerSheetView /></Suspense> },
-  runtime: { render: () => <UnavailableSheet kind="runtime" /> },
+  // W1-08：runtime 日志观察面（list 回放 + runtime-log 增量，无右栏）
+  runtime: { render: (sheet, ctx) => <RuntimeSheetView sheet={sheet} ctx={ctx} /> },
   file: { render: () => <UnavailableSheet kind="file" /> },
   // W1-05：overview 启动选择器（虚拟空态，不写入持久 sheet 数组）
   overview: { render: (sheet, ctx) => <OverviewSheetView sheet={sheet} ctx={ctx} /> },
