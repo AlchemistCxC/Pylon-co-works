@@ -724,6 +724,15 @@ pub(crate) fn start_notification_dispatcher<R: tauri::Runtime>(
                 continue;
             }
             if raw.kind != crate::acp::AcpKind::SessionUpdate {
+                // A1（探查修复）：未知通知不再静默丢弃——记 method，接新 agent 时
+                // 从 runtime log 直接看到它发了哪些私有通道（如 peri/*），按需接入。
+                // 正常响应（Response，method=None）已在 reader 经 pending 结算，不产生噪音。
+                if raw.kind == crate::acp::AcpKind::OtherNotification {
+                    tracing::warn!(
+                        "ACP 收到未知通知 method={:?}（当前不处理，已丢弃）",
+                        raw.method
+                    );
+                }
                 continue;
             }
             let payload = match raw.params {
