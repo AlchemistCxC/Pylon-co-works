@@ -47,3 +47,39 @@ export function normalizeRuntimeLogList(raw: unknown): RuntimeLogEntry[] {
   if (!Array.isArray(raw)) return []
   return raw.map(normalizeRuntimeLogEntry).filter((entry): entry is RuntimeLogEntry => entry !== null)
 }
+// ── W1-09：startup_diagnostics（§5.10）宽容 normalize ──
+
+export interface StartupDiagnosticEntry {
+  status: string
+  message?: string
+}
+
+export interface StartupDiagnostics {
+  agentConfig: StartupDiagnosticEntry | null
+  gatewayConfig: StartupDiagnosticEntry | null
+  prism: StartupDiagnosticEntry | null
+  defaultAgentId?: string
+  configSource?: { kind: string; fileName?: string }
+}
+
+function normalizeDiagnosticEntry(value: unknown): StartupDiagnosticEntry | null {
+  if (!isPlainObject(value)) return null
+  const status = typeof value.status === 'string' && value.status.length > 0 ? value.status : 'unknown'
+  return {
+    status,
+    ...(typeof value.message === 'string' && value.message.length > 0 ? { message: value.message } : {}),
+  }
+}
+
+export function normalizeStartupDiagnostics(raw: unknown): StartupDiagnostics {
+  if (!isPlainObject(raw)) return { agentConfig: null, gatewayConfig: null, prism: null }
+  return {
+    agentConfig: normalizeDiagnosticEntry(raw.agentConfig),
+    gatewayConfig: normalizeDiagnosticEntry(raw.gatewayConfig),
+    prism: normalizeDiagnosticEntry(raw.prism),
+    ...(typeof raw.defaultAgentId === 'string' && raw.defaultAgentId.length > 0 ? { defaultAgentId: raw.defaultAgentId } : {}),
+    ...(isPlainObject(raw.configSource)
+      ? { configSource: { kind: typeof raw.configSource.kind === 'string' ? raw.configSource.kind : 'unknown', ...(typeof raw.configSource.fileName === 'string' ? { fileName: raw.configSource.fileName } : {}) } }
+      : {}),
+  }
+}

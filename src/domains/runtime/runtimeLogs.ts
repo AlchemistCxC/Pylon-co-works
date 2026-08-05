@@ -61,3 +61,44 @@ export function collectRuntimeLogFacets(entries: RuntimeLogEntry[]): { levels: s
     sources: [...sources].sort(),
   }
 }
+// ── W1-09：crashed/error 本地诊断 marker（不伪造成后端日志，独立卡片展示） ──
+
+export interface CrashMarker {
+  key: string
+  agentId: string
+  status: string
+  detail?: string
+  at: number
+}
+
+export interface AgentStatusLike {
+  status: string
+  recentError?: string
+  generation?: number
+}
+
+export const CRASH_MARKER_LIMIT = 20
+
+/** 从 agentStatuses 派生 crashed/error 本地诊断 marker；按 agentId:status:generation 去重 */
+export function deriveCrashMarkers(
+  previous: readonly CrashMarker[],
+  statuses: Record<string, AgentStatusLike | undefined>,
+  now = Date.now(),
+): CrashMarker[] {
+  const known = new Set(previous.map(marker => marker.key))
+  const next: CrashMarker[] = [...previous]
+  for (const [agentId, status] of Object.entries(statuses)) {
+    if (!status || (status.status !== 'crashed' && status.status !== 'error')) continue
+    const key = `${agentId}:${status.status}:${status.generation ?? 0}`
+    if (known.has(key)) continue
+    known.add(key)
+    next.push({
+      key,
+      agentId,
+      status: status.status,
+      ...(status.recentError ? { detail: status.recentError } : {}),
+      at: now,
+    })
+  }
+  return next.length > CRASH_MARKER_LIMIT ? next.slice(-CRASH_MARKER_LIMIT) : next
+}

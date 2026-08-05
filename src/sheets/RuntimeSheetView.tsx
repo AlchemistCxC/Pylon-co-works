@@ -1,10 +1,11 @@
 import { useEffect, useMemo, useState } from 'react'
 import { invoke } from '@tauri-apps/api/core'
 import { listen } from '@tauri-apps/api/event'
+import { useRuntimeStore } from '../runtimeStore'
 import { IS_TAURI } from '../infrastructure/tauri/env'
 import { reportRuntimeError } from '../runtimeError'
-import { normalizeRuntimeLogEntry, normalizeRuntimeLogList } from '../infrastructure/tauri/runtimeLogContracts.ts'
-import { collectRuntimeLogFacets, filterRuntimeLogs, mergeRuntimeLogs, type RuntimeLogEntry, type RuntimeLogFilter } from '../domains/runtime/runtimeLogs.ts'
+import { normalizeRuntimeLogEntry, normalizeRuntimeLogList, normalizeStartupDiagnostics, type StartupDiagnostics } from '../infrastructure/tauri/runtimeLogContracts.ts'
+import { collectRuntimeLogFacets, deriveCrashMarkers, filterRuntimeLogs, mergeRuntimeLogs, type CrashMarker, type RuntimeLogEntry, type RuntimeLogFilter } from '../domains/runtime/runtimeLogs.ts'
 import type { SheetContext, SheetRecord } from '../workspace-sheets/sheetTypes'
 import './RuntimeSheetView.css'
 
@@ -18,10 +19,20 @@ export default function RuntimeSheetView({ sheet: _sheet, ctx: _ctx }: { sheet: 
   const [entries, setEntries] = useState<RuntimeLogEntry[]>([])
   const [filter, setFilter] = useState<RuntimeLogFilter>({})
   const [expandedId, setExpandedId] = useState<number | null>(null)
+  const [diagnostics, setDiagnostics] = useState<StartupDiagnostics | null>(null)
+  const [markers, setMarkers] = useState<CrashMarker[]>([])
+  const agentStatuses = useRuntimeStore(state => state.agentStatuses)
+  // W1-09：crashed/error → 本地诊断 marker（按 agentId:status:generation 去重）
+  useEffect(() => {
+    setMarkers(previous => deriveCrashMarkers(previous, agentStatuses))
+  }, [agentStatuses])
 
   useEffect(() => {
     if (!IS_TAURI) return
     let disposed = false
+    invoke<unknown>('startup_diagnostics').then(raw => {
+      if (!disposed) setDiagnostics(normalizeStartupDiagnostics(raw))
+    }).catch(error => reportRuntimeError('读取启动诊断', error))
     invoke<unknown>('list_runtime_logs').then(raw => {
       if (!disposed) setEntries(previous => mergeRuntimeLogs(previous, normalizeRuntimeLogList(raw)))
     }).catch(error => reportRuntimeError('读取运行日志', error))
@@ -69,6 +80,29 @@ export default function RuntimeSheetView({ sheet: _sheet, ctx: _ctx }: { sheet: 
         </div>
       </aside>
       <main className="runtime-main">
+        {diagnostics && (
+          <div className="runtime-diagnostics">
+            <div className="runtime-diagnostics-title">启动诊断</div>
+            <div className="runtime-diagnostics-row">
+              <DiagnosticChip label="agent" entry={diagnostics.agentConfig} />
+              <DiagnosticChip label="gateway" entry={diagnostics.gatewayConfig} />
+              <DiagnosticChip label="prism" entry={diagnostics.prism} />
+              {diagnostics.configSource && <span className="runtime-diagnostics-source">config: {diagnostics.configSource.fileName || diagnostics.configSource.kind}</span>}
+            </div>
+          </div>
+        )}
+        {markers.length > 0 && (
+          <div className="runtime-markers">
+            <div className="runtime-markers-title">本地诊断标记（非后端日志）</div>
+            {markers.map(marker => (
+              <div key={marker.key} className="runtime-marker">
+                <span className="runtime-marker-status">{marker.status}</span>
+                <span className="runtime-marker-agent">{marker.agentId}</span>
+                {marker.detail && <span className="runtime-marker-detail">{marker.detail}</span>}
+              </div>
+            ))}
+          </div>
+        )}
         <div className="runtime-count">{filtered.length} 条日志</div>
         <ul className="runtime-log-list">
           {filtered.map(entry => (
@@ -103,4 +137,15 @@ function formatTime(timestamp: number): string {
   if (!timestamp) return ''
   const date = new Date(timestamp)
   return `${String(date.getHours()).padStart(2, '0')}:${String(date.getMinutes()).padStart(2, '0')}:${String(date.getSeconds()).padStart(2, '0')}`
+}
+
+
+function DiagnosticChip({ label, entry }: { label: string; entry: { status: string; message?: string } | null }) {
+  if (!entry) return null
+  const ok = entry.status === 'ready'
+  return (
+    <span className={`runtime-diag-chip ${ok ? 'runtime-diag-ok' : 'runtime-diag-bad'}`} title={entry.message || ''}>
+      {label}: {entry.status}
+    </span>
+  )
 }

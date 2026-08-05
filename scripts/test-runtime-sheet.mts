@@ -1,7 +1,7 @@
 import { strict as assert } from 'node:assert'
 import { readFileSync } from 'node:fs'
-import { filterRuntimeLogs, mergeRuntimeLogs, collectRuntimeLogFacets, RUNTIME_LOG_LIMIT, type RuntimeLogEntry } from '../src/domains/runtime/runtimeLogs.ts'
-import { normalizeRuntimeLogEntry, normalizeRuntimeLogList } from '../src/infrastructure/tauri/runtimeLogContracts.ts'
+import { filterRuntimeLogs, mergeRuntimeLogs, collectRuntimeLogFacets, deriveCrashMarkers, RUNTIME_LOG_LIMIT, type RuntimeLogEntry } from '../src/domains/runtime/runtimeLogs.ts'
+import { normalizeRuntimeLogEntry, normalizeRuntimeLogList, normalizeStartupDiagnostics } from '../src/infrastructure/tauri/runtimeLogContracts.ts'
 
 // W1-08：runtime 日志——list 回放 + 增量去重排序、纯过滤、上限、normalize 容错
 
@@ -51,6 +51,42 @@ const entry = (id: number, message: string, level = 'info', source = 'acp'): Run
   assert.equal(normalizeRuntimeLogList([{ id: 1, message: 'ok' }, null]).length, 1)
 }
 
+// 4.5 W1-09：deriveCrashMarkers——crashed/error → marker，按 agentId:status:generation 去重
+{
+  const statuses = {
+    peri: { status: 'crashed', generation: 3, recentError: '进程崩溃' },
+    hermes: { status: 'error', generation: 1 },
+    ok: { status: 'connected' },
+  }
+  const markers = deriveCrashMarkers([], statuses, 1000)
+  assert.equal(markers.length, 2, 'connected 不产生 marker')
+  assert.ok(markers.some(m => m.agentId === 'peri' && m.status === 'crashed' && m.key === 'peri:crashed:3'))
+  assert.ok(markers.some(m => m.agentId === 'hermes' && m.detail === undefined))
+  // 重复状态（同 generation）不重复 marker；新 generation 才新增
+  const again = deriveCrashMarkers(markers, { peri: { status: 'crashed', generation: 3 } }, 2000)
+  assert.equal(again.length, 2, '同 key 去重')
+  const newGen = deriveCrashMarkers(markers, { peri: { status: 'crashed', generation: 4 } }, 3000)
+  assert.equal(newGen.length, 3, 'generation 变化新增 marker')
+}
+
+// 4.6 W1-09：normalizeStartupDiagnostics 宽容
+{
+  const d = normalizeStartupDiagnostics({
+    agentConfig: { status: 'ready', message: null },
+    gatewayConfig: { status: 'configuration_error', message: '读取失败' },
+    prism: { status: 'ready' },
+    defaultAgentId: 'peri',
+    configSource: { kind: 'embedded', fileName: 'agents.yaml' },
+  })
+  assert.equal(d.agentConfig?.status, 'ready')
+  assert.equal(d.agentConfig?.message, undefined, 'null message 省略')
+  assert.equal(d.gatewayConfig?.message, '读取失败')
+  assert.equal(d.defaultAgentId, 'peri')
+  assert.equal(d.configSource?.fileName, 'agents.yaml')
+  assert.deepEqual(normalizeStartupDiagnostics(null), { agentConfig: null, gatewayConfig: null, prism: null })
+  assert.equal(normalizeStartupDiagnostics({ gatewayConfig: { status: '' } }).gatewayConfig?.status, 'unknown')
+}
+
 // 5. RuntimeSheetView 接线：list 回放 + 增量 listen + unmount 清理 + clear
 const sheet = readFileSync(new URL('../src/sheets/RuntimeSheetView.tsx', import.meta.url), 'utf8')
 assert.match(sheet, /invoke<unknown>\('list_runtime_logs'\)/, '必须 list 回放')
@@ -61,6 +97,14 @@ assert.match(sheet, /unlisten\.then\(stop => stop\(\)\)/, 'unmount 必须清理 
 assert.match(sheet, /invoke\('clear_runtime_logs'\)/, '必须支持 clear')
 assert.match(sheet, /filterRuntimeLogs\(entries, filter\)/, '必须纯过滤')
 assert.equal(sheet.includes('rightPanel'), false, 'runtime 无右栏')
+
+// 5.5 W1-09：startup_diagnostics + agentStatuses 订阅 → marker；不伪造成后端日志
+assert.match(sheet, /invoke<unknown>\('startup_diagnostics'\)/, '必须调用启动诊断')
+assert.match(sheet, /normalizeStartupDiagnostics\(raw\)/, '诊断必须经宽容 normalize')
+assert.match(sheet, /agentStatuses = useRuntimeStore\(state => state\.agentStatuses\)/, '必须订阅 agentStatuses')
+assert.match(sheet, /deriveCrashMarkers\(previous, agentStatuses\)/, 'crashed/error 必须派生本地 marker')
+assert.match(sheet, /本地诊断标记（非后端日志）/, 'marker 必须独立展示（不伪造成后端日志）')
+assert.equal(sheet.includes('setEntries(previous => mergeRuntimeLogs(previous, markers))'), false, 'marker 不得混入日志列表')
 
 // 6. registry runtime 条目渲染 RuntimeSheetView
 const registry = readFileSync(new URL('../src/workspace-sheets/sheetRegistry.tsx', import.meta.url), 'utf8')

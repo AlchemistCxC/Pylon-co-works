@@ -120,3 +120,58 @@
   font-family: var(--mono);
   color: var(--accent);
 }
+
+/* W1-09：启动诊断卡 + crashed/error 本地标记（非后端日志） */
+.runtime-diagnostics {
+  padding: 8px 12px;
+  border-bottom: 1px solid var(--border);
+  background: var(--bg-panel);
+}
+
+.runtime-diagnostics-title,
+.runtime-markers-title {
+  font-size: 11px;
+  color: var(--text-dim);
+  margin-bottom: 6px;
+}
+
+.runtime-diagnostics-row {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  flex-wrap: wrap;
+}
+
+.runtime-diag-chip {
+  font-family: var(--mono);
+  font-size: 11px;
+  padding: 2px 8px;
+  border-radius: 4px;
+  border: 1px solid var(--border);
+}
+
+.runtime-diag-ok { color: var(--tool-ok, #1e9646); }
+.runtime-diag-bad { color: var(--danger, #e5484d); }
+
+.runtime-diagnostics-source {
+  font-size: 11px;
+  color: var(--text-dim);
+}
+
+.runtime-markers {
+  padding: 8px 12px;
+  border-bottom: 1px solid var(--border);
+  background: var(--bg-input);
+}
+
+.runtime-marker {
+  display: flex;
+  gap: 8px;
+  font-family: var(--mono);
+  font-size: 11px;
+  padding: 2px 0;
+}
+
+.runtime-marker-status { color: var(--danger, #e5484d); }
+.runtime-marker-agent { color: var(--accent); }
+.runtime-marker-detail { color: var(--text-dim); }
