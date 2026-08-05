@@ -19,6 +19,7 @@ import { toCssBackgroundImage } from './backgroundImage'
 import { THEME_CSS_VAR_MAP, THEME_FIELD_DEFS } from './themeFieldDefs'
 import { listen } from '@tauri-apps/api/event'
 import { normalizeAgentStatus, type AgentStatusPayload } from './components/settings/agentTypes'
+import { createPermissionController, registerPermissionController } from './infrastructure/acp/permissionController'
 import DevMetricsOverlay from './components/DevMetricsOverlay'
 import ErrorCenter from './components/ErrorCenter'
 
@@ -118,6 +119,22 @@ export default function App() {
       useRuntimeStore.getState().setAgentStatus(status.agentId || status.agent || activeAgent, status)
     })
     return () => { disposed = true; unlisten.then(stop => stop()).catch(() => {}) }
+  }, [])
+
+  // 权限请求 controller：只挂生命周期（listen → store 纯 reducer；approve invoke），不内嵌业务分支
+  useEffect(() => {
+    if (!IS_TAURI) return
+    const controller = createPermissionController({
+      dispatch: action => useRuntimeStore.getState().setPermission(action),
+      getState: () => useRuntimeStore.getState().permission,
+      listen: (event, handler) => listen(event, handler),
+      invoke: (cmd, args) => invoke(cmd, args),
+    })
+    registerPermissionController(controller)
+    return () => {
+      registerPermissionController(null)
+      void controller.dispose()
+    }
   }, [])
 
   // 窗口尺寸记忆：启动恢复上次尺寸，resize 防抖持久化（纯前端，不依赖后端）

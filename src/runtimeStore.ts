@@ -2,6 +2,7 @@ import { create } from 'zustand'
 import type { ConfigOption } from './components/chat/acpTypes'
 import { clearSessionSourceState, updateSessionLiveStats, type SessionLiveStats } from './components/chat/sessionRuntime'
 import type { AgentStatus } from './components/settings/agentTypes'
+import { permissionReducer, EMPTY_PERMISSION_STATE, type PermissionAction, type PermissionState } from './domains/permission/permissionState'
 
 // 后端配置选项（来自 new_session 返回 & config_option_update 事件）
 export interface SessionConfig {
@@ -34,6 +35,9 @@ interface RuntimeStoreState {
   sessionModes: Record<string, string>
   sessionConfig: Record<string, SessionConfig>
   agentStatuses: Record<string, AgentStatus>
+  /** 权限请求状态（非持久化；P0-02 controller 经 setPermission 驱动纯 reducer） */
+  permission: PermissionState
+  setPermission: (action: PermissionAction) => void
   setLiveStats: (stats: Partial<LiveStatsPayload>) => void
   setSessionLiveStats: (source: string, stats: Partial<SessionLiveStats>) => void
   clearSessionRuntime: (source: string) => void
@@ -53,7 +57,9 @@ export const useRuntimeStore = create<RuntimeStoreState>()((set, get) => ({
   sessionModes: {},
   sessionConfig: {},
   agentStatuses: {},
+  permission: EMPTY_PERMISSION_STATE,
 
+  setPermission: (action) => set(state => ({ permission: permissionReducer(state.permission, action) })),
   setLiveStats: (stats) => set(stats as Partial<RuntimeStoreState>),
   setSessionLiveStats: (source, stats) => set(state => ({
     sessionLiveStats: updateSessionLiveStats(state.sessionLiveStats, source, stats),
@@ -92,5 +98,6 @@ export const useRuntimeStore = create<RuntimeStoreState>()((set, get) => ({
     liveGenerating: null,
     liveGeneratingSources: [],
     agentStatuses: {},
+    permission: EMPTY_PERMISSION_STATE,
   }),
 }))
