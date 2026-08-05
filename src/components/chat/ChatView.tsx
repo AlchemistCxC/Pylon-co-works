@@ -26,6 +26,7 @@ import { createMockMessages } from './chatMockData'
 import DiffCard from './DiffCard'
 import MessageSearchBar from './MessageSearchBar'
 import ToolConnector from './ToolConnector'
+import TaskTree from './TaskTree'
 import { useSessionLifecycle } from './useSessionLifecycle'
 import { useScrollFollow } from './useScrollFollow'
 import { useToolConnectors } from './useToolConnectors'
@@ -173,6 +174,8 @@ const ChatView = React.memo(function ChatView({ sessionId }: Props) {
             if (!sessionRef.current) return
             controllerHandleRef.current?.requestCancel(sessionRef.current)
           } : undefined} />
+        {/* P1-06：任务树在 spinner 下方、滚动锚点之前；无任务返回 null */}
+        <TaskTree source={sessionRef.current} />
         <div ref={bottomRef} />
       </div>
       <button className="scroll-bottom-btn" onClick={() => scrollToBottomRef.current?.()}

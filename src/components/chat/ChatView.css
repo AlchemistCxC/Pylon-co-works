@@ -341,3 +341,41 @@
 }
 /* 用户标签跟随终端字体（此前 var(--font) 混入 GUI 字体） */
 .term-user-tag { font-family:var(--mono); }
+
+/* ── P1-06 任务树（零新主题字段，消费现有变量）── */
+.task-tree { margin: 4px 0 4px 1.6em; }
+.task-tree-summary {
+  font-family: var(--mono);
+  font-size: 12px;
+  color: var(--text-dim);
+  background: transparent;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  padding: 2px 8px;
+  cursor: pointer;
+}
+.task-tree-summary:hover { color: var(--text); border-color: var(--border-focus); }
+.task-tree-list {
+  list-style: none;
+  margin: 6px 0 0;
+  padding: 6px 8px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--bg-panel);
+  max-height: 240px;
+  overflow-y: auto;
+}
+.task-tree-item {
+  display: flex;
+  gap: 8px;
+  align-items: baseline;
+  font-size: 12px;
+  color: var(--text);
+  padding: 3px 0;
+}
+.task-tree-status { font-family: var(--mono); color: var(--text-dim); width: 1em; flex: 0 0 1em; }
+.task-tree-item[data-status="in_progress"] .task-tree-status { color: var(--accent); }
+.task-tree-item[data-status="completed"] .task-tree-status { color: var(--accent); }
+.task-tree-item[data-status="failed"] .task-tree-status,
+.task-tree-item[data-status="cancelled"] .task-tree-status { color: var(--danger, #e5484d); }
+.task-tree-content { flex: 1; min-width: 0; word-break: break-word; }
