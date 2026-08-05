@@ -13,6 +13,8 @@ import { applyChatEvent, createSourceChatRuntime, type ChatEvent, type ChatRunti
 import { resolveLoadedMessages } from './replayState.ts'
 import type { Message } from './messageTypes.ts'
 import type { GenerationPhase, GenerationSummary } from './GenerationFooter'
+import type { PlanEntry } from '../../domains/tasks/planTypes.ts'
+import { createHorizontalSubscription } from './horizontalSubscription.ts'
 
 export interface ChatEventControllerRefs {
   sessionRef: React.RefObject<string | null>
@@ -41,6 +43,14 @@ export interface ChatControllerHandle {
   getTokenCount: (source: string) => number
   /** 渲染期读取该 source 的生成起点（elapsed 显示用） */
   getStartTime: (source: string) => number
+  /** 横向订阅（D23）：订阅 source 状态变化，返回退订函数 */
+  subscribe: (source: string, listener: () => void) => () => void
+  /** 横向版本戳（useSyncExternalStore getSnapshot；source 状态变化即递增） */
+  getSnapshot: (source: string) => number
+  /** 横向读取：任务快照（planEntries） */
+  getTasks: (source: string) => PlanEntry[]
+  /** 横向读取：思考开始时间戳（thinking 时长显示用） */
+  getThinkingStart: (source: string) => number | undefined
   /** 会话集合变化后清理孤儿 source 状态（替代 clearChatSourceRefs） */
   pruneSources: (activeSources: readonly string[]) => void
   dispose: () => void
@@ -76,6 +86,8 @@ export function attachChatEventController(refs: ChatEventControllerRefs): ChatCo
   const knownSources = () => useIdentityStore.getState().sessions.map(session => session.source)
   const isActiveSource = (source: string) => source.length > 0 && knownSources().includes(source)
   const renderedSource = () => refs.sessionRef.current
+  // 横向订阅注册表（D23 方案 B）：dispatch 后对状态引用变化的 source 递增版本并通知
+  const horizontal = createHorizontalSubscription()
 
   const dispatch = (event: ChatEvent) => {
     const before = runtimeState
@@ -86,6 +98,8 @@ export function attachChatEventController(refs: ChatEventControllerRefs): ChatCo
     })
     if (after === before) return
     runtimeState = after
+    // 仅该事件 source 的状态引用变化才递增版本并通知（source A 不影响 B）
+    horizontal.bump(event.source, after[event.source] !== before[event.source])
     syncSideEffects(before, after, event)
   }
 
@@ -231,6 +245,7 @@ export function attachChatEventController(refs: ChatEventControllerRefs): ChatCo
       else changed = true
     }
     if (changed) runtimeState = next
+    horizontal.prune(activeSources)
   }
 
   // H1：listen 任一 reject（IPC 异常）不得产生 unhandled rejection；dispose 的
@@ -365,10 +380,15 @@ export function attachChatEventController(refs: ChatEventControllerRefs): ChatCo
     getFrames,
     getTokenCount,
     getStartTime,
+    subscribe: horizontal.subscribe,
+    getSnapshot: horizontal.getSnapshot,
+    getTasks: (source) => runtimeState[source]?.planEntries ?? [],
+    getThinkingStart: (source) => runtimeState[source]?.thinkingStart,
     pruneSources,
     dispose: () => {
       unlisten.then(fns => fns.forEach(f => f()))
       window.removeEventListener('peri:clear', handleClear)
+      horizontal.dispose()
     },
   }
 }
