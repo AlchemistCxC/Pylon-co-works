@@ -1,28 +1,36 @@
 import { useStore } from '../../store'
 import { useRuntimeStore } from '../../runtimeStore'
-import { setSessionMode } from './sessionMode'
-import { nextSessionMode } from './sessionModeState'
+import { invoke } from '@tauri-apps/api/core'
+import { applyApprovalModeChange, nextApprovalMode } from '../../domains/permission/approvalMode.ts'
 
 /**
+ * Approval mode widget（P0-04）：
+ *   - 循环值限定 bypass/auto/edit/default，invoke set_approval_mode（全局，无 source）
+ *   - approval mode 存 runtimeStore 不持久化；失败回滚显示值并走现有 pylon:mode-error 错误中心
+ *   - session mode（plan/code）由 slash command/sessionMode 链消费 set_mode，不混用
+ *
  * modeVariant 取值：
  *   - 'pill'    : 圆角胶囊背景，点击循环切模式（默认）
  *   - 'badge'   : 方括号包裹 [mode]
  *   - 'minimal' : 纯文本，仅颜色区分
  */
-interface Props { sessionSource?: string }
-
-export default function ModeWidget({ sessionSource }: Props) {
+export default function ModeWidget() {
   const variant = useStore(s => s.modeVariant) || 'pill'
   const ccScale = useStore(s => (s.ccScale || {})['mode'] ?? 100)
-  const mode = useRuntimeStore(s => sessionSource ? (s.sessionModes[sessionSource] || 'auto') : 'auto')
+  const mode = useRuntimeStore(s => s.approvalMode)
+  const setApprovalMode = useRuntimeStore(s => s.setApprovalMode)
 
   const cycle = () => {
-    const next = nextSessionMode(mode)
-    if (sessionSource) {
-      setSessionMode(sessionSource, next).catch(error => {
-        window.dispatchEvent(new CustomEvent('pylon:mode-error', { detail: String(error) }))
-      })
-    }
+    const next = nextApprovalMode(mode)
+    const previousMode = mode
+    applyApprovalModeChange({
+      nextMode: next,
+      previousMode,
+      writeMode: setApprovalMode,
+      invokeSet: targetMode => invoke('set_approval_mode', { mode: targetMode }),
+    }).catch(error => {
+      window.dispatchEvent(new CustomEvent('pylon:mode-error', { detail: String(error) }))
+    })
   }
 
   if (variant === 'badge') {

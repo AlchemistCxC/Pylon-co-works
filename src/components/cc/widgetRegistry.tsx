@@ -97,9 +97,9 @@ function ModelWidgetRenderer({ sessionId }: CcWidgetRenderProps) {
   return <ModelWidget sessionSource={sessionSource} />
 }
 
-function ModeWidgetRenderer({ sessionId }: CcWidgetRenderProps) {
-  const sessionSource = useIdentityStore(s => s.sessions.find(item => item.id === sessionId)?.source)
-  return <ModeWidget sessionSource={sessionSource} />
+function ModeWidgetRenderer() {
+  // P0-04：mode widget = 全局 approval mode（set_approval_mode 无 source），不读会话
+  return <ModeWidget />
 }
 
 const placement = (slot: CcSlot, order: number): CcWidgetPlacement => ({ slot, order, offsetX: 0, offsetY: 0 })
@@ -111,7 +111,7 @@ export const CC_WIDGET_REGISTRY: readonly CcWidgetDef[] = [
   { id: 'pct', label: '百分比', category: 'context', defaultPlacement: placement('status-primary', 1), naturalSize: true, render: props => <PctWidget {...props} /> },
   { id: 'tokens', label: 'Token数', category: 'context', defaultPlacement: placement('status-primary', 2), naturalSize: true, render: props => <TokensWidget {...props} /> },
   { id: 'model', label: '模型', category: 'runtime', defaultPlacement: placement('status-secondary', 0), naturalSize: true, render: props => <ModelWidgetRenderer {...props} /> },
-  { id: 'mode', label: '权限模式', category: 'runtime', defaultPlacement: placement('status-secondary', 1), naturalSize: true, render: props => <ModeWidgetRenderer {...props} /> },
+  { id: 'mode', label: '权限模式', category: 'runtime', defaultPlacement: placement('status-secondary', 1), naturalSize: true, render: () => <ModeWidgetRenderer /> },
   { id: 'send', label: '发送按钮', category: 'action', defaultPlacement: placement('actions', 0), naturalSize: true },
   { id: 'attach', label: '附件按钮', category: 'action', defaultPlacement: placement('actions', 1), naturalSize: true },
 ]

@@ -3,6 +3,7 @@ import type { ConfigOption } from './components/chat/acpTypes'
 import { clearSessionSourceState, updateSessionLiveStats, type SessionLiveStats } from './components/chat/sessionRuntime'
 import type { AgentStatus } from './components/settings/agentTypes'
 import { permissionReducer, EMPTY_PERMISSION_STATE, type PermissionAction, type PermissionState } from './domains/permission/permissionState'
+import { normalizeApprovalMode, type ApprovalMode } from './domains/permission/approvalMode'
 
 // 后端配置选项（来自 new_session 返回 & config_option_update 事件）
 export interface SessionConfig {
@@ -38,6 +39,9 @@ interface RuntimeStoreState {
   /** 权限请求状态（非持久化；P0-02 controller 经 setPermission 驱动纯 reducer） */
   permission: PermissionState
   setPermission: (action: PermissionAction) => void
+  /** 全局审批模式（P0-04，set_approval_mode；非持久化，默认 default） */
+  approvalMode: ApprovalMode
+  setApprovalMode: (mode: string) => void
   setLiveStats: (stats: Partial<LiveStatsPayload>) => void
   setSessionLiveStats: (source: string, stats: Partial<SessionLiveStats>) => void
   clearSessionRuntime: (source: string) => void
@@ -58,8 +62,12 @@ export const useRuntimeStore = create<RuntimeStoreState>()((set, get) => ({
   sessionConfig: {},
   agentStatuses: {},
   permission: EMPTY_PERMISSION_STATE,
+  approvalMode: 'default',
 
   setPermission: (action) => set(state => ({ permission: permissionReducer(state.permission, action) })),
+  setApprovalMode: (mode) => set(state => ({
+    approvalMode: normalizeApprovalMode(mode) || state.approvalMode,
+  })),
   setLiveStats: (stats) => set(stats as Partial<RuntimeStoreState>),
   setSessionLiveStats: (source, stats) => set(state => ({
     sessionLiveStats: updateSessionLiveStats(state.sessionLiveStats, source, stats),
@@ -99,5 +107,6 @@ export const useRuntimeStore = create<RuntimeStoreState>()((set, get) => ({
     liveGeneratingSources: [],
     agentStatuses: {},
     permission: EMPTY_PERMISSION_STATE,
+    approvalMode: 'default',
   }),
 }))
