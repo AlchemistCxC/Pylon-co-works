@@ -74,8 +74,10 @@ export interface SheetContext {
 /** W1-02：渲染注册表条目（F1-B/F2-A）——主区渲染器 + 侧栏/右栏声明（W1-03/04 消费） */
 export interface SheetRenderEntry {
   render: (sheet: SheetRecord, ctx: SheetContext) => ReactNode
-  sidebar?: ComponentType
-  rightPanel?: 'none' | ComponentType
+  /** 侧栏组件（W1-03：AgentSheetView 上移；经 ctx 注入，不传平铺 props） */
+  sidebar?: ComponentType<{ ctx: SheetContext }>
+  /** 右栏组件（W1-04 ContextPanel；'none' 或缺失 = 无右栏） */
+  rightPanel?: 'none' | ComponentType<{ ctx: SheetContext }>
 }
 
 export function isSheetKind(value: unknown): value is SheetKind {

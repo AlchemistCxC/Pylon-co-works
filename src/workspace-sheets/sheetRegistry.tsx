@@ -1,6 +1,7 @@
 import { lazy, Suspense } from 'react'
 import type { SheetKind, SheetRecord, SheetContext, SheetRenderEntry } from './sheetTypes.ts'
 import AgentSheetView from '../sheets/AgentSheetView'
+import Sidebar from '../components/Sidebar'
 
 /**
  * sheetRegistry — 渲染注册表（W1-02，F1-B/F2-A）。
@@ -32,22 +33,12 @@ function UnavailableSheet({ kind }: { kind: string }) {
   )
 }
 
-// agent 直挂（主工作台首屏）；W1-03 前经 ctx 桥接现有 props，避免在 W1-02 扩大挂载层改动
-const agentRender = (sheet: SheetRecord, ctx: SheetContext) => (
-  <AgentSheetView
-    sheet={sheet}
-    activeSession={ctx.activeSession}
-    onSelectSession={ctx.selectSession}
-    onProfileEdit={ctx.openProfileEdit}
-    onSessionSettings={ctx.openSessionSettings}
-    sidebarCollapsed={ctx.sidebarCollapsed}
-    rightInset={ctx.rightInset}
-    ccEditMode={ctx.ccEditMode}
-  />
-)
+// agent 直挂（主工作台首屏）；W1-03：AgentSheetView 收窄为 { sheet, ctx }，只渲染主区
+const agentRender = (sheet: SheetRecord, ctx: SheetContext) => <AgentSheetView sheet={sheet} ctx={ctx} />
 
 export const SHEET_RENDER_REGISTRY: Record<SheetKind, SheetRenderEntry> = {
-  agent: { render: agentRender },
+  // W1-03：侧栏上移——agent 的 Sidebar 由布局层经 slot 渲染（entry.sidebar 声明）
+  agent: { render: agentRender, sidebar: Sidebar },
   prism: { render: () => <Suspense fallback={LOADING_FALLBACK}><PrismManagerSheetView /></Suspense> },
   runtime: { render: () => <UnavailableSheet kind="runtime" /> },
   file: { render: () => <UnavailableSheet kind="file" /> },

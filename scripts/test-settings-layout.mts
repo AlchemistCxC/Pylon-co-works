@@ -126,9 +126,9 @@ assert.match(presetReducer, /function setGlobalPresetReducer\([\s\S]*?ccLayout: 
 const configPanel = read('../src/components/settings/ConfigOptionsPanel.tsx')
 assert.match(configPanel, /latestReqRef/, 'ConfigOptionsPanel 必须维护请求序列号')
 assert.match(configPanel, /if \(latestReqRef\.current\[id\] !== seq\) return/, '旧请求失败不得回滚')
-// App 启动恢复 profile 选择（防默认值覆写）
-const app = read('../src/App.tsx')
-assert.match(app, /profileRestoredRef/, 'App 必须防止启动覆写 profile 选择')
+// W1-03：启动恢复 profile 选择（防默认值覆写）effect 随布局层下移 SheetLayout
+const sheetLayout = read('../src/workspace-sheets/SheetLayout.tsx')
+assert.match(sheetLayout, /setActiveProfile\(memory\.activeProfileId\)/, '启动恢复必须只从权威记忆覆写 profile（防默认值）')
 // commitReplay 合并 load 期间 live 消息
 assert.match(controller, /liveAdditions = existing \? existing\.messages\.slice\(cached\.length\)/, 'commitReplay 必须保留 load 期间 live 消息')
 assert.match(controller, /seq: maxSeq/, 'initSource 必须从缓存推进 seq（live/replay id 不撞）')

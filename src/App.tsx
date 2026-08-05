@@ -1,12 +1,11 @@
 import { useState, useEffect, lazy, Suspense, useRef, useMemo } from 'react'
-import SheetHost from './workspace-sheets/SheetHost'
+import SheetLayout from './workspace-sheets/SheetLayout'
 import WorkspaceTitlebar from './workspace-sheets/WorkspaceTitlebar'
 import { useStore } from './store'
 import { useIdentityStore, type AgentEntry } from './identityStore'
 import { useRuntimeStore } from './runtimeStore'
 import { useWorkspaceStore } from './workspaceStore'
 import { IS_TAURI } from './infrastructure/tauri/env'
-import { belongsToProfile } from './components/chat/sessionProfile'
 import { useShallow } from 'zustand/react/shallow'
 import './App.css'
 
@@ -51,14 +50,13 @@ export default function App() {
   const [rightOpen, setRightOpen] = useState(false)
   const [showProfileEdit, setShowProfileEdit] = useState(false)
   const [sessionSettingsId, setSessionSettingsId] = useState<string | null>(null)
-  const [sidebarCollapsed, setSidebarCollapsed] = useState(false)
   const [showSheetLauncher, setShowSheetLauncher] = useState(false)
-  const activeProfileId = useIdentityStore(s => s.activeProfileId)
-  const sessions = useIdentityStore(s => s.sessions)
+  // W1-03（F2-B）：折叠/宽度状态迁入 workspaceStore（预设不覆盖布局），App 只读
+  const sidebarCollapsed = useWorkspaceStore(s => s.sidebarCollapsed)
+  const sidebarWidth = useWorkspaceStore(s => s.sidebarWidth)
   const workspaceSheets = useWorkspaceStore(s => s.workspaceSheets)
   const agents = useIdentityStore(s => s.agents)
   const hydrateWorkspaceSheets = useWorkspaceStore(s => s.hydrateWorkspaceSheets)
-  const setSheetAgentState = useWorkspaceStore(s => s.setSheetAgentState)
   const activeAgent = useIdentityStore(s => s.activeAgent) || 'peri'
   const prevActiveAgentRef = useRef<string>(activeAgent)
 
@@ -68,32 +66,9 @@ export default function App() {
     return () => window.removeEventListener('pylon:agent-switched', clearActiveSession)
   }, [])
 
-
-  useEffect(() => {
-    if (!belongsToProfile(activeSession, activeProfileId, sessions)) setActiveSession(null)
-  }, [activeProfileId, activeSession, sessions])
-
   useEffect(() => {
     hydrateWorkspaceSheets()
   }, [hydrateWorkspaceSheets])
-
-  // EG：启动时从权威记忆（sheetAgentStates）恢复当前 agent 的 profile 投影与会话，不写回——
-  // 写回只发生在用户显式 setActiveProfile（action 内同步记忆）/选会话（下方 effect）；切 agent 的
-  // 投影恢复由 identityStore.setActiveAgent 承担。删除旧的 profileRestoredRef 双向手写同步。
-  useEffect(() => {
-    const memory = useWorkspaceStore.getState().sheetAgentStates[activeAgent]
-    if (memory?.activeProfileId && memory.activeProfileId !== activeProfileId) {
-      useIdentityStore.getState().setActiveProfile(memory.activeProfileId)
-    }
-    if (memory?.activeSessionId && memory.activeSessionId !== activeSession) {
-      setActiveSession(memory.activeSessionId)
-    }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [])
-  // 会话选择持久化到该 agent 记忆（profile 已由 setActiveProfile 同步，无需此处写）
-  useEffect(() => {
-    setSheetAgentState(activeAgent, { activeSessionId: activeSession || undefined })
-  }, [activeAgent, activeSession, setSheetAgentState])
 
   // 仅在 activeAgent 切换时聚焦该 agent 的 sheet；普通 sheet 导航（打开 Prism/工具 sheet、
   // 点击其他 tab）不受影响。用 ref 对比避免 workspaceSheets 每次新引用触发重复聚焦。
@@ -224,7 +199,8 @@ export default function App() {
       '--msg-font': s.msgFont === 'mono' ? 'var(--mono)' : 'var(--font)',
       // chatTextColor 经 --chat-text-color 注入（THEME_CSS_VAR_MAP），此处作 msg 兜底链
       '--msg-text': s.msgTextColor || 'var(--chat-text-color,var(--text))',
-      '--titlebar-sidebar-width': `${sidebarCollapsed ? 42 : s.sidebarWidth}px`,
+      // W1-03（F2-B）：宽度读 workspaceStore（预设不覆盖布局），非主题
+      '--titlebar-sidebar-width': `${sidebarCollapsed ? 42 : sidebarWidth}px`,
     }
     // color/number 字段由 THEME_CSS_VAR_MAP 循环注入（unit 格式化）；空 color 省略
     for (const [cssVar, key] of Object.entries(THEME_CSS_VAR_MAP)) {
@@ -236,8 +212,6 @@ export default function App() {
     }
     return vars as React.CSSProperties
   }, [s, sidebarCollapsed])
-
-  const ccEditMode = useStore(s => s.ccEditMode)
 
   // body::before 玻璃层挂在 <body> 上，读不到 .app 子元素的 CSS 变量 —
   // 把全局背景相关变量 + scheme 提到 <html>(:root) 与 <body>，让玻璃层生效
@@ -264,7 +238,7 @@ export default function App() {
         activeAgent={activeAgent}
         sidebarCollapsed={sidebarCollapsed}
         canReopenSheet={workspaceSheets.recentlyClosed.length > 0}
-        onToggleSidebar={() => setSidebarCollapsed(value => !value)}
+        onToggleSidebar={() => useWorkspaceStore.getState().setSidebarCollapsed(!useWorkspaceStore.getState().sidebarCollapsed)}
         onFocusSheet={id => useWorkspaceStore.getState().focusSheet(id)}
         onCloseSheet={id => useWorkspaceStore.getState().closeSheet(id)}
         menuActions={{
@@ -299,25 +273,22 @@ export default function App() {
 
       <ErrorCenter />
 
-      <div className={`layout ${ccEditMode ? 'cc-editing-app' : ''}`}>
-        <SheetHost
-          activeSession={activeSession}
-          onSelectSession={setActiveSession}
-          onProfileEdit={() => setShowProfileEdit(true)}
-          onSessionSettings={setSessionSettingsId}
-          sidebarCollapsed={sidebarCollapsed}
-          rightInset={rightPanelInset}
-          ccEditMode={ccEditMode}
-        />
-        <Suspense fallback={<LazyDialogFallback />}>
-          {settingsOpen && <Settings activeSessionId={activeSession} onClose={() => setShowSettings(false)} />}
-          {rightOpen && <RightPanel sessionId={activeSession} onClose={() => setRightOpen(false)} />}
-          {profilesOpen && <ProfileEditor onClose={() => setShowProfileEdit(false)} />}
-          {sessionSettingsId && <SessionSettings sessionId={sessionSettingsId} open={!!sessionSettingsId} onClose={() => setSessionSettingsId(null)} onDeleted={() => setActiveSession(null)} />}
-        </Suspense>
-        {/* 权限请求弹窗：store 驱动（无 active 请求返回 null），App 单例挂载不随 sheet 卸载 */}
-        <PermissionDialog />
-      </div>
+      {/* W1-03：布局段下移 SheetLayout（侧栏壳/主区/右栏壳 + profile 投影 effects） */}
+      <SheetLayout
+        activeSession={activeSession}
+        onSelectSession={setActiveSession}
+        onProfileEdit={() => setShowProfileEdit(true)}
+        onSessionSettings={setSessionSettingsId}
+        rightInset={rightPanelInset}
+      />
+      <Suspense fallback={<LazyDialogFallback />}>
+        {settingsOpen && <Settings activeSessionId={activeSession} onClose={() => setShowSettings(false)} />}
+        {rightOpen && <RightPanel sessionId={activeSession} onClose={() => setRightOpen(false)} />}
+        {profilesOpen && <ProfileEditor onClose={() => setShowProfileEdit(false)} />}
+        {sessionSettingsId && <SessionSettings sessionId={sessionSettingsId} open={!!sessionSettingsId} onClose={() => setSessionSettingsId(null)} onDeleted={() => setActiveSession(null)} />}
+      </Suspense>
+      {/* 权限请求弹窗：store 驱动（无 active 请求返回 null），App 单例挂载不随 sheet 卸载 */}
+      <PermissionDialog />
     </div>
   )
 }

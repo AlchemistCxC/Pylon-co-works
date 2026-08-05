@@ -5,19 +5,14 @@ import { formatTime } from '../utils'
 import { reportRuntimeError } from '../runtimeError'
 import { runCloseSessionTransaction } from './chat/closeSessionTransaction'
 import { clearMessageStorage } from './chat/messagePersistence'
+import type { SheetContext } from '../workspace-sheets/sheetTypes'
 import './Sidebar.css'
 
 const PLATFORM_LABELS: Record<string, string> = { local: '本地', 'qq-group': 'QQ 群聊', 'qq-dm': 'QQ 私聊', terminal: '终端' }
 
-interface Props {
-  activeSession: string | null
-  onSelectSession: (id: string | null) => void
-  onProfileEdit: () => void
-  onSessionSettings: (id: string) => void
-  collapsed: boolean
-}
-
-export default function Sidebar({ activeSession, onSelectSession, onProfileEdit, onSessionSettings, collapsed }: Props) {
+// W1-03：侧栏上移——props 收敛为 ctx（由布局层注入），内部行为原样
+export default function Sidebar({ ctx }: { ctx: SheetContext }) {
+  const { activeSession, selectSession: onSelectSession, openProfileEdit: onProfileEdit, openSessionSettings: onSessionSettings, sidebarCollapsed: collapsed } = ctx
   const [search, setSearch] = useState('')
   const [renaming, setRenaming] = useState<string | null>(null)
   const [renameValue, setRenameValue] = useState('')

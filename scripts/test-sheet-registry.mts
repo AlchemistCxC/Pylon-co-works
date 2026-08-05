@@ -23,12 +23,17 @@ assert.deepEqual(renderKeys, [...SHEET_KINDS].sort(), 'SHEET_RENDER_REGISTRY 必
 // 3. 渲染表满足 Record<SheetKind, SheetRenderEntry> 类型守卫（satisfies，tsc 层兜底）
 assert.match(registryTsx, /satisfies Record<SheetKind, SheetRenderEntry>/, '渲染表必须带 satisfies 类型守卫')
 
-// 4. SheetHost 无 switch(renderKey)：查表调用
+// 4. SheetHost 无 switch(renderKey)：查表调用（W1-03：activeSheet 解析/ctx 构建上移 SheetLayout）
 const sheetHost = readFileSync(new URL('../src/workspace-sheets/SheetHost.tsx', import.meta.url), 'utf8')
 assert.equal(sheetHost.includes('switch (renderKey)'), false, 'SheetHost 不得再有 switch(renderKey)')
 assert.equal(sheetHost.includes('switch ('), false, 'SheetHost 不得有任何 switch 语句')
-assert.match(sheetHost, /resolveSheetRender\(activeSheet\.kind\)/, 'SheetHost 必须查渲染注册表调用')
-assert.match(sheetHost, /entry\.render\(activeSheet, buildSheetContext\(props\)\)/, 'SheetHost 必须经 ctx 调用 entry.render')
+assert.match(sheetHost, /resolveSheetRender\(sheet\.kind\)/, 'SheetHost 必须查渲染注册表调用')
+assert.match(sheetHost, /entry\.render\(sheet, ctx\)/, 'SheetHost 必须经 ctx 调用 entry.render')
+// SheetLayout 负责 activeSheet 解析 + ctx 构建 + 侧栏/右栏壳
+const sheetLayout = readFileSync(new URL('../src/workspace-sheets/SheetLayout.tsx', import.meta.url), 'utf8')
+assert.match(sheetLayout, /<SheetSidebarSlot sheet=\{activeSheet\} ctx=\{ctx\} \/>/, 'SheetLayout 必须渲染侧栏壳')
+assert.match(sheetLayout, /<SheetRightSlot sheet=\{activeSheet\} ctx=\{ctx\} \/>/, 'SheetLayout 必须渲染右栏壳')
+assert.match(sheetLayout, /<SheetHost sheet=\{activeSheet\} ctx=\{ctx\} \/>/, 'SheetLayout 必须渲染主区')
 
 // 5. SheetContext 13 字段齐备（源码断言）
 const sheetTypes = readFileSync(new URL('../src/workspace-sheets/sheetTypes.ts', import.meta.url), 'utf8')
