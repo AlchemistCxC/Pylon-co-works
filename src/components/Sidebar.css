@@ -67,3 +67,30 @@
 .sidebar.collapsed .session-list,
 .sidebar.collapsed .profile-avatar:not(.active),
 .sidebar.collapsed .profile-edit { display:none; }
+
+/* W2-11（S8）：agent 三色状态灯（异常可见装置）——绿呼吸/黄常亮/红常亮/平时全灰 */
+.sidebar-status-bar {
+  display: flex; align-items: center; gap: 6px;
+  padding: 6px 14px;
+  border-bottom: 1px solid var(--border);
+}
+.sidebar-status-light {
+  width: 8px; height: 8px; border-radius: 50%;
+  background: var(--text-dim);
+  opacity: 0.35;
+}
+.sidebar-status-ok.active { background: var(--tool-ok, #1e9646); opacity: 1; animation: sidebar-status-breathe 2s ease-in-out infinite; }
+.sidebar-status-warn.active { background: var(--ekgYellow, #fbbf24); opacity: 1; }
+.sidebar-status-error.active { background: var(--spinner-stalled-color, #FF6B80); opacity: 1; }
+@keyframes sidebar-status-breathe { 0%,100% { opacity: 1; } 50% { opacity: 0.5; } }
+.sidebar-status-label {
+  font-family: var(--mono); font-size: 10px; color: var(--text-dim);
+  margin-left: auto; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+
+/* W2-11：showPet toggle（写 workspaceStore，非主题） */
+.profile-pet {
+  background: none; border: none; color: var(--text-dim);
+  cursor: pointer; font-size: 13px; padding: 4px;
+}
+.profile-pet[aria-pressed="true"] { color: var(--text); }

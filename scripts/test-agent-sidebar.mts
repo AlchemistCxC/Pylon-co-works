@@ -1,5 +1,6 @@
 import { strict as assert } from 'node:assert'
 import { readFileSync } from 'node:fs'
+import { agentStatusLight } from '../src/domains/agent/statusLight.ts'
 
 // W2-10：侧栏平铺（F2-C，行为敏感）——删平台分组、按 lastActiveAt、运行点读 liveGeneratingSources
 
@@ -31,3 +32,31 @@ assert.match(css, /\.session-dot\[data-running="true"\]/, '运行点必须读 da
 assert.equal(css.includes('.group-header'), false, '死分组样式必须清理')
 
 console.log('agent sidebar 平铺守卫通过')
+// ── W2-11：三色状态灯 + showPet toggle ──
+
+// 6. 六 status → 三灯状态纯断言
+assert.equal(agentStatusLight('connected'), 'ok')
+assert.equal(agentStatusLight('connecting'), 'warn')
+assert.equal(agentStatusLight('reconnecting'), 'warn')
+assert.equal(agentStatusLight('crashed'), 'error')
+assert.equal(agentStatusLight('disconnected'), 'error')
+assert.equal(agentStatusLight('error'), 'error')
+assert.equal(agentStatusLight('inactive'), 'off')
+assert.equal(agentStatusLight('unknown'), 'off')
+assert.equal(agentStatusLight(''), 'off')
+
+// 7. 状态条接线：读 agentStatuses + 经纯函数 + 现有变量色
+assert.match(sidebar, /agentStatuses\[activeAgent\]/, '状态条必须读当前 agent 状态')
+assert.match(sidebar, /agentStatusLight\(agentStatus\?\.status \|\| ''\)/, '必须经纯函数映射三灯')
+assert.match(css, /\.sidebar-status-ok\.active \{ background: var\(--tool-ok/, 'ok 灯必须沿现有变量')
+assert.match(css, /var\(--ekgYellow/, 'warn 灯必须沿现有变量')
+assert.match(css, /var\(--spinner-stalled-color/, 'error 灯必须沿现有变量')
+assert.equal(css.includes('--sidebar-status-ok-color'), false, '零新主题字段')
+
+// 8. showPet toggle 写 workspaceStore（非主题）；换主题后不变
+assert.match(sidebar, /useWorkspaceStore\(s => s\.showPet\)/, 'toggle 必须读 workspaceStore.showPet')
+assert.match(sidebar, /setShowPet\(!showPet\)/, 'toggle 必须写 workspaceStore')
+assert.match(sidebar, /aria-pressed=\{showPet\}/, 'toggle 必须有 aria-pressed')
+const agentSheet = readFileSync(new URL('../src/sheets/AgentSheetView.tsx', import.meta.url), 'utf8')
+assert.match(agentSheet, /useWorkspaceStore\(s => s\.showPet\)/, '消费点必须切 workspaceStore（防双真值）')
+assert.equal(agentSheet.includes('useStore(s => s.showPet'), false, '消费点不得再读主题 showPet')

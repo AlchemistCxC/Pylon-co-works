@@ -2,6 +2,8 @@ import { useState, useMemo } from 'react'
 import { invoke } from '@tauri-apps/api/core'
 import { useIdentityStore } from '../identityStore'
 import { useRuntimeStore } from '../runtimeStore'
+import { useWorkspaceStore } from '../workspaceStore'
+import { agentStatusLight, type AgentLight } from '../domains/agent/statusLight.ts'
 import { formatTime } from '../utils'
 import { reportRuntimeError } from '../runtimeError'
 import { runCloseSessionTransaction } from './chat/closeSessionTransaction'
@@ -25,6 +27,13 @@ export default function Sidebar({ ctx }: { ctx: SheetContext }) {
 
   // W2-10（F2-C）：平铺 + 按 lastActiveAt 倒序（删平台分组）；运行点读 liveGeneratingSources
   const liveGeneratingSources = useRuntimeStore(s => s.liveGeneratingSources || [])
+  // W2-11（S8）：agent 三色状态灯（异常可见装置）+ showPet toggle（workspaceStore 非主题）
+  const activeAgent = useIdentityStore(s => s.activeAgent) || 'peri'
+  const agentStatus = useRuntimeStore(s => s.agentStatuses[activeAgent])
+  const showPet = useWorkspaceStore(s => s.showPet)
+  const setShowPet = useWorkspaceStore(s => s.setShowPet)
+  const lights: AgentLight[] = ['ok', 'warn', 'error']
+  const activeLight = agentStatusLight(agentStatus?.status || '')
   const sortedSessions = useMemo(() => {
     return sessions
       .filter(s => s.profileId === activeProfileId)
@@ -65,6 +74,12 @@ export default function Sidebar({ ctx }: { ctx: SheetContext }) {
 
   return (
     <aside className={`sidebar ${collapsed ? 'collapsed' : ''}`}>
+      <div className="sidebar-status-bar" aria-label="Agent 状态灯">
+        {lights.map(light => (
+          <span key={light} className={`sidebar-status-light sidebar-status-${light} ${activeLight === light ? 'active' : ''}`} />
+        ))}
+        {agentStatus?.status && <span className="sidebar-status-label">{agentStatus.status}</span>}
+      </div>
       <div className="sidebar-header">
         {!collapsed && <input className="search-input" placeholder="搜索会话..." value={search} onChange={e => setSearch(e.target.value)} />}
         <button className="sidebar-action" onClick={newSession} title="New Session">+</button>
@@ -110,6 +125,7 @@ export default function Sidebar({ ctx }: { ctx: SheetContext }) {
           </button>
         ))}
         <button className="profile-edit" title="Edit Profile" onClick={onProfileEdit}>✎</button>
+        <button className="profile-pet" title={showPet ? '隐藏宠物' : '显示宠物'} aria-pressed={showPet} onClick={() => setShowPet(!showPet)}>🐾</button>
       </div>
     </aside>
   )

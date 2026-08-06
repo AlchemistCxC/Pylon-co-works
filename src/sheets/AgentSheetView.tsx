@@ -1,7 +1,7 @@
 import ChatView from '../components/chat/ChatView'
 import ControlCenter from '../components/ControlCenter'
 import PetCompanion from '../components/PetCompanion'
-import { useStore } from '../store'
+import { useWorkspaceStore } from '../workspaceStore'
 import type { SheetContext, SheetRecord } from '../workspace-sheets/sheetTypes'
 
 /**
@@ -11,7 +11,8 @@ import type { SheetContext, SheetRecord } from '../workspace-sheets/sheetTypes'
  * （ChatView + PetCompanion + ControlCenter），props 收敛为 { sheet, ctx }。
  */
 export default function AgentSheetView({ ctx }: { sheet: SheetRecord; ctx: SheetContext }) {
-  const showPet = useStore(s => s.showPet !== false)
+  // W2-11：showPet 消费点切 workspaceStore（W1-01 迁出主题，防换主题/toggle 双真值）
+  const showPet = useWorkspaceStore(s => s.showPet)
   return (
     <div className="main">
       <div className={`main-body ${ctx.ccEditMode ? 'blur-bg' : ''}`} style={{
