@@ -1,3 +1,46 @@
+/// 方案 9：本地 client 代际（= runtime.client_generation 的类型化包装）。
+/// 显式区分"本地 client 代际"与"远端 session 延续性"（keep_sessions 混合了两者）。
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) struct ClientEpoch(pub(crate) u64);
+
+/// 方案 9：远端 session 延续性。
+/// - Preserved：新 client 确认旧 session 仍有效（有真实协议能力/回放证据）；
+///   **首期不构造**（需真实协议能力与运行证据，方案 §② 后置）；
+/// - Invalidated：switch 不同 agent / 手动 reconnect（旧 session 大概率失效）；
+/// - Unknown：自动重连（首期保持旧行为——Unknown 仍按 keep_sessions=true 迁移，
+///   仅内部标记待验证 + runtime log，不进入前端 wire）。
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum SessionContinuity {
+    #[allow(dead_code)] // 方案 9 首期预留：需真实协议证据才启用
+    Preserved,
+    Invalidated,
+    Unknown,
+}
+
+/// 方案 9：client 激活结果——代际 + 远端延续性语义。
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) struct ClientActivation {
+    pub(crate) epoch: ClientEpoch,
+    pub(crate) continuity: SessionContinuity,
+}
+
+/// 方案 9：按连接动作推导延续性（首期只观测，不改迁移行为）。
+/// auto-reconnect → Unknown（自动重连保留旧映射，语义待验证）；
+/// 其他（手动 switch/reconnect/平台懒启动）→ Invalidated。
+pub(crate) fn client_activation_for_action(
+    current_generation: u64,
+    log_action: &str,
+) -> ClientActivation {
+    let continuity = match log_action {
+        "auto-reconnect" => SessionContinuity::Unknown,
+        _ => SessionContinuity::Invalidated,
+    };
+    ClientActivation {
+        epoch: ClientEpoch(current_generation + 1),
+        continuity,
+    }
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum AgentLifecycleStatus {
     Connecting,
@@ -165,6 +208,34 @@ mod tests {
         assert_eq!(AgentLifecycleStatus::Crashed.as_str(), "crashed");
         assert_eq!(AgentLifecycleStatus::Disconnected.as_str(), "disconnected");
         assert_eq!(AgentLifecycleStatus::Error.as_str(), "error");
+    }
+
+    #[test]
+    fn client_activation_continuity_maps_actions() {
+        // 方案 9：auto-reconnect → Unknown（保留旧映射待验证）；
+        // 手动 switch/reconnect → Invalidated。
+        let auto = client_activation_for_action(7, "auto-reconnect");
+        assert_eq!(auto.epoch, ClientEpoch(8));
+        assert_eq!(auto.continuity, SessionContinuity::Unknown);
+        for action in ["switch", "reconnect", "lazy-start"] {
+            let act = client_activation_for_action(3, action);
+            assert_eq!(act.epoch, ClientEpoch(4));
+            assert_eq!(
+                act.continuity,
+                SessionContinuity::Invalidated,
+                "{action} 必须标记 Invalidated"
+            );
+        }
+    }
+
+    #[test]
+    fn client_epoch_is_distinct_from_continuity() {
+        // 方案 9 核心：本地代际（u64 类型）与远端延续性（枚举）显式区分，
+        // 不再由 keep_sessions 布尔混同表达。
+        let epoch = ClientEpoch(5);
+        assert_eq!(epoch.0, 5);
+        assert_ne!(SessionContinuity::Preserved, SessionContinuity::Unknown);
+        assert_ne!(SessionContinuity::Invalidated, SessionContinuity::Unknown);
     }
 
     #[test]

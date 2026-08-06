@@ -33,7 +33,9 @@ use std::sync::Arc;
 
 use crate::acp::AcpClient;
 use crate::agent_config::AgentDef;
-use crate::agent_runtime::{status_after_connection_failure, AgentLifecycleStatus};
+use crate::agent_runtime::{
+    client_activation_for_action, status_after_connection_failure, AgentLifecycleStatus,
+};
 use crate::error::PylonError;
 use crate::runtime::AgentRuntime;
 use crate::AppState;
@@ -93,6 +95,19 @@ pub(crate) async fn do_connect_and_replace<R: tauri::Runtime>(
                 return Err(error.into());
             }
         };
+    // 方案 9（首期只观测）：显式记录远端 session 延续性语义——不再把
+    // keep_sessions 混同"远端 session 仍有效"。auto-reconnect → Unknown
+    // （仍按 keep_sessions=true 迁移，仅标记待验证）；手动 switch/reconnect →
+    // Invalidated。只打日志，不改变任何行为（不进前端 wire）。
+    let activation = client_activation_for_action(
+        runtime.client_generation.load(std::sync::atomic::Ordering::Acquire),
+        log_action,
+    );
+    tracing::debug!(
+        "client activation: epoch={:?} continuity={:?} keep_sessions={keep_sessions} log_action={log_action}",
+        activation.epoch.0,
+        activation.continuity
+    );
     if let Err(error) = handles
         .replace_agent_client(runtime, agent_id, new_acp, window.clone(), keep_sessions)
         .await
