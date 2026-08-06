@@ -15,6 +15,8 @@ import type { Message } from './messageTypes.ts'
 import type { GenerationPhase, GenerationSummary } from './GenerationFooter'
 import type { PlanEntry } from '../../domains/tasks/planTypes.ts'
 import { createHorizontalSubscription } from './horizontalSubscription.ts'
+import { extractTouchedPath } from '../../infrastructure/acp/touchedFiles.ts'
+import { useWorkspaceStore } from '../../workspaceStore'
 
 export interface ChatEventControllerRefs {
   sessionRef: React.RefObject<string | null>
@@ -304,6 +306,12 @@ export function attachChatEventController(refs: ChatEventControllerRefs): ChatCo
         }
         case 'tool_call': {
           if (!replay && rendered) refs.setGenerationPhase({ kind: 'tool', name: upd.title || '?' })
+          // W2-09：touchedFiles 记录（kind 优先/工具名兼容；提取失败 null 不误记）——刷新跟随数据源
+          const touchedSession = useIdentityStore.getState().sessions.find(session => session.source === source)
+          const touchedPath = extractTouchedPath({ kind: upd.kind, title: upd.title, rawInput: upd.rawInput, cwd: touchedSession?.workdir })
+          if (touchedPath) {
+            useWorkspaceStore.getState().recordTouchedFile(source, { path: touchedPath, toolKind: upd.kind || upd.title || '', at: Date.now() })
+          }
           dispatch({ type: 'tool-call', source, toolCallId: upd.toolCallId, title: upd.title, toolKind: upd.kind, contentBlocks: upd.content, rawInput: upd.rawInput, replay })
           break
         }

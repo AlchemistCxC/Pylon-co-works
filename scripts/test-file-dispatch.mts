@@ -1,6 +1,8 @@
 import { strict as assert } from 'node:assert'
 import { DISPATCH_THRESHOLD_LINES, buildDispatchMessage, extractLines, fenceFor } from '../src/domains/fileDispatch/dispatchMessage.ts'
 import { changedLineNumbers } from '../src/domains/fileDispatch/fileDiff.ts'
+import { extractTouchedPath, pushTouchedFile, relativizePath, TOUCHED_FILE_LIMIT, type TouchedFile } from '../src/infrastructure/acp/touchedFiles.ts'
+import { readFileSync } from 'node:fs'
 
 // W2-07：发令消息纯函数——T=200 边界、整文件/选区/md/truncated 四规则、围栏升级、行级 changed sets
 
@@ -78,6 +80,51 @@ import { changedLineNumbers } from '../src/domains/fileDispatch/fileDiff.ts'
   assert.deepEqual(changedLineNumbers('a\nb\nc', 'a\nb\nc'), [], '无变更')
   assert.deepEqual(changedLineNumbers('a\nb\nc\nd', 'a\nb\nc'), [], '纯 removed 行在 new 中不存在则跳过')
   assert.deepEqual(changedLineNumbers('', 'x\ny'), [1, 2], '整文件新增')
+}
+
+// ── W2-09：touchedFiles 提取 + LRU + 版本戳接线 ──
+
+// 9. extractTouchedPath：kind 优先/工具名兼容；多键兜底；绝对路径→相对 cwd；取不到 null 不误记
+{
+  assert.equal(extractTouchedPath({ kind: 'edit', rawInput: { path: 'src/a.ts' } }), 'src/a.ts', 'kind 优先')
+  assert.equal(extractTouchedPath({ title: 'Edit', rawInput: { file_path: 'b.ts' } }), 'b.ts', '工具名回退 + file_path 键')
+  assert.equal(extractTouchedPath({ title: 'Write', rawInput: { filePath: 'c.ts' } }), 'c.ts', 'filePath 键')
+  assert.equal(extractTouchedPath({ title: 'write_file', rawInput: { relativePath: 'd.ts' } }), 'd.ts', 'Hermes snake_case 工具名')
+  assert.equal(extractTouchedPath({ title: 'patch', rawInput: { path: 'e.ts' } }), 'e.ts')
+  assert.equal(extractTouchedPath({ kind: 'read', rawInput: { path: 'a.ts' } }), null, '非 edit kind → null')
+  assert.equal(extractTouchedPath({ title: 'Grep', rawInput: { path: 'a.ts' } }), null, '非 edit 工具名 → null')
+  assert.equal(extractTouchedPath({ kind: 'edit', rawInput: {} }), null, '无路径 → null 不误记')
+  assert.equal(extractTouchedPath({ kind: 'edit', rawInput: null }), null)
+  assert.equal(extractTouchedPath({ kind: 'edit', rawInput: 'str' }), null)
+  assert.equal(extractTouchedPath({ kind: 'edit', rawInput: { path: 'G:/work/src/a.ts' }, cwd: 'G:/work' }), 'src/a.ts', '绝对路径对 cwd 求相对')
+  assert.equal(extractTouchedPath({ kind: 'edit', rawInput: { path: 'G:/work/src/a.ts' } }), null, '绝对路径无 cwd → null（不记录，防匹配不到）')
+  assert.equal(relativizePath('src/a.ts', 'G:/work'), 'src/a.ts', '相对原样')
+}
+
+// 10. pushTouchedFile：51 条 LRU（上限 50）、同 path 去重顶替
+{
+  const files: TouchedFile[] = Array.from({ length: TOUCHED_FILE_LIMIT + 1 }, (_, i) => ({ source: 'local:a', path: `f${i}.ts`, toolKind: 'edit', at: i }))
+  const lru = pushTouchedFile(files.slice(0, -1), files[files.length - 1])
+  assert.equal(lru.length, TOUCHED_FILE_LIMIT, '51 条截断到 50')
+  assert.equal(lru[lru.length - 1]?.path, 'f50.ts', '最新在后')
+  const dedup = pushTouchedFile([{ source: 'local:a', path: 'x.ts', toolKind: 'edit', at: 1 }], { source: 'local:a', path: 'x.ts', toolKind: 'edit', at: 2 })
+  assert.equal(dedup.length, 1, '同 path 去重顶替')
+  assert.equal(dedup[0]?.at, 2)
+}
+
+// 11. 接线：controller tool_call 分支 recordTouchedFile；workspaceStore touchedFiles/touchVersions；FileTabView 300ms debounce + data-changed
+{
+  const controller = readFileSync(new URL('../src/components/chat/chatEventController.ts', import.meta.url), 'utf8')
+  assert.match(controller, /extractTouchedPath\(\{ kind: upd\.kind, title: upd\.title, rawInput: upd\.rawInput, cwd: touchedSession\?\.workdir \}\)/, 'controller 必须经 extractTouchedPath')
+  assert.match(controller, /recordTouchedFile\(source, \{ path: touchedPath/, '提取成功必须记录 touchedFile')
+  const store = readFileSync(new URL('../src/workspaceStore.ts', import.meta.url), 'utf8')
+  assert.match(store, /touchedFiles: Record<string, TouchedFile\[\]>/, 'workspaceStore 必须持会话级 touchedFiles')
+  assert.match(store, /touchVersions: Record<string, number>/, '必须持版本戳')
+  const tabView = readFileSync(new URL('../src/sheets/file/FileTabView.tsx', import.meta.url), 'utf8')
+  assert.match(tabView, /touchVersions\[`\$\{source\}:\$\{path\}`\]/, 'FileTabView 必须订阅版本戳')
+  assert.match(tabView, /window\.setTimeout\(\(\) => loadContent\(true\), 300\)/, '必须 300ms debounce 重拉')
+  assert.match(tabView, /data-changed=\{changedLines\.includes\(index \+ 1\)/, '改动行必须挂 data-changed 高亮')
+  assert.match(tabView, /changedLineNumbers\(previous, text\.content\)/, '重拉必须行级 diff')
 }
 
 console.log('file dispatch 发令消息守卫通过')

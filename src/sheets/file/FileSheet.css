@@ -222,3 +222,7 @@
 .dispatch-send:hover:not(:disabled) { background: var(--bg-hover); border-color: var(--border-focus); }
 .dispatch-generating { font-size: 11px; color: var(--text-dim); }
 .dispatch-error { font-size: 11px; color: var(--danger, #e5484d); }
+
+/* W2-09：刷新跟随改动行高亮（agent 工具改动标记，F3-D editorModifiedMark） */
+.file-tab-line[data-changed="true"] { background: var(--editor-active-line, rgba(0,0,0,0.04)); }
+.file-tab-line[data-changed="true"]::before { content: '·'; color: var(--editor-modified-mark, #b47814); margin-right: 4px; }

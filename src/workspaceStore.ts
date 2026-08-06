@@ -8,6 +8,7 @@ import {
   type SheetWorkspaceState,
 } from './workspace-sheets/sheetPersistence'
 import { readShowPet, writeShowPet } from './workspace-sheets/showPetPersistence.ts'
+import { pushTouchedFile, type TouchedFile } from './infrastructure/acp/touchedFiles.ts'
 import type { SheetInput, SheetId } from './workspace-sheets/sheetTypes'
 
 /**
@@ -52,6 +53,10 @@ interface WorkspaceStoreState {
   setSheetAgentState: (agentId: string, partial: Partial<SheetWorkspaceState>) => void
   /** W2-04：原子合并 sheet metadata（openTabs/activeFile 等）并持久化 */
   patchSheetMetadata: (id: SheetId, partial: Record<string, string>) => void
+  /** W2-09：工具改动文件（会话级 50 LRU，不持久化）+ 刷新版本戳 */
+  touchedFiles: Record<string, TouchedFile[]>
+  touchVersions: Record<string, number>
+  recordTouchedFile: (source: string, file: Omit<TouchedFile, 'source'>) => void
   replaceSheets: (workspaceSheets: ReturnType<typeof createSheetState>, sheetAgentStates: Record<string, SheetWorkspaceState>) => void
   patchSheetAgentState: (agentId: string, partial: Partial<SheetWorkspaceState>) => void
   patchSheetAgentStates: (agentStates: Record<string, SheetWorkspaceState>) => void
@@ -76,6 +81,8 @@ function persistWorkspace(state: WorkspaceStoreState): void {
 export const useWorkspaceStore = create<WorkspaceStoreState>()((set, get) => ({
   workspaceSheets: createSheetState(),
   sheetAgentStates: {},
+  touchedFiles: {},
+  touchVersions: {},
   sidebarWidth: DEFAULT_SHEET_LAYOUT.sidebarWidth,
   sidebarCollapsed: DEFAULT_SHEET_LAYOUT.sidebarCollapsed,
   rightPanelCollapsed: DEFAULT_SHEET_LAYOUT.rightPanelCollapsed,
@@ -140,6 +147,12 @@ export const useWorkspaceStore = create<WorkspaceStoreState>()((set, get) => ({
     persistWorkspace(state)
     return workspaceSheets.activeSheetId
   },
+  recordTouchedFile: (source, file) => set(state => {
+    const key = `${source}:${file.path}`
+    const touchedFiles = { ...state.touchedFiles, [source]: pushTouchedFile(state.touchedFiles[source] ?? [], { ...file, source }) }
+    const touchVersions = { ...state.touchVersions, [key]: (state.touchVersions[key] ?? 0) + 1 }
+    return { touchedFiles, touchVersions }
+  }),
   patchSheetMetadata: (id, partial) => set(state => {
     const sheets = state.workspaceSheets.sheets.map(sheet => sheet.id === id
       ? { ...sheet, metadata: { ...sheet.metadata, ...partial }, lastFocusedAt: Date.now() }

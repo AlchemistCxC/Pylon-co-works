@@ -1,10 +1,11 @@
 import { useEffect, useMemo, useState, Suspense } from 'react'
 import { invoke } from '@tauri-apps/api/core'
-import { reportRuntimeError } from '../../runtimeError'
 import { sanitizeHtml } from '../../components/chat/htmlSanitizer'
 import { highlightCode } from '../../components/chat/codeHighlight'
 import { MarkdownRenderer } from '../../components/chat/markdownLazy'
 import { normalizeWorkspaceText } from '../../infrastructure/tauri/workspaceContracts.ts'
+import { changedLineNumbers } from '../../domains/fileDispatch/fileDiff.ts'
+import { useWorkspaceStore } from '../../workspaceStore'
 import { languageFromPath } from './fileSheetState.ts'
 
 /**
@@ -14,40 +15,55 @@ import { languageFromPath } from './fileSheetState.ts'
  * markdown（复用导出 MarkdownRenderer，无 gutter）；truncated 状态可读（内容不完整
  * 明确标注）。消费 8 编辑器 cssVar（F3-D）。
  */
-export default function FileTabView({ source, path, onTruncated, onContentReady }: {
+export default function FileTabView({ source, path, onTruncated, onContentReady, onSelectionInvalidated }: {
   source: string | null
   path: string
   onTruncated: (truncated: boolean) => void
   onContentReady?: (content: string) => void
+  onSelectionInvalidated?: () => void
 }) {
   const [content, setContent] = useState('')
   const [highlighted, setHighlighted] = useState<{ html: string; lang: string } | null>(null)
   const [error, setError] = useState('')
-
-  useEffect(() => {
-    let cancelled = false
-    setContent('')
-    setHighlighted(null)
-    setError('')
+  const [changedLines, setChangedLines] = useState<number[]>([])
+  // W2-09：版本戳订阅——agent 工具改动该文件时递增，触发 300ms debounce 重拉
+  const touchVersion = useWorkspaceStore(s => (source && path) ? s.touchVersions[`${source}:${path}`] : undefined)
+  const loadContent = (showChanged: boolean) => {
     if (!source || !path) return
     invoke<unknown>('read_workspace_text', { source, relativePath: path }).then(raw => {
-      if (cancelled) return
       const text = normalizeWorkspaceText(raw)
-      if (!text) { setError('读取失败'); return }
-      setContent(text.content)
+      if (!text) return
+      setContent(previous => {
+        if (showChanged && previous && previous !== text.content) {
+          setChangedLines(previous.split('\n').length <= 5000 ? changedLineNumbers(previous, text.content) : [])
+          onSelectionInvalidated?.()
+        }
+        return text.content
+      })
       onTruncated(text.truncated)
       onContentReady?.(text.content)
       const lang = languageFromPath(path)
-      highlightCode(lang, text.content).then(html => {
-        if (!cancelled && html) setHighlighted({ html, lang })
-      }).catch(() => { /* 高亮失败回退纯文本 */ })
-    }).catch(err => {
-      if (cancelled) return
-      setError(err instanceof Error ? err.message : String(err))
-      reportRuntimeError('读取文件', err)
-    })
-    return () => { cancelled = true }
-  }, [source, path, onTruncated])
+      highlightCode(lang, text.content).then(html => { if (html) setHighlighted({ html, lang }) }).catch(() => {})
+    }).catch(err => { setError(err instanceof Error ? err.message : String(err)) })
+  }
+
+  useEffect(() => {
+    setContent('')
+    setHighlighted(null)
+    setError('')
+    setChangedLines([])
+    if (!source || !path) return
+    loadContent(false)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [source, path])
+
+  // W2-09：版本戳变化 → 300ms debounce 重拉（agent 连续编辑合并为一次）+ 改动行高亮 + 选区失效
+  useEffect(() => {
+    if (touchVersion === undefined || !source || !path) return
+    const timer = window.setTimeout(() => loadContent(true), 300)
+    return () => window.clearTimeout(timer)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [touchVersion, source, path])
 
   const isMarkdown = useMemo(() => /\.(md|markdown)$/i.test(path), [path])
 
@@ -69,7 +85,7 @@ export default function FileTabView({ source, path, onTruncated, onContentReady 
           </div>
           <pre className="file-tab-pre">
             {highlighted.html.split('\n').map((line, index) => (
-              <code key={index} className="file-tab-line" data-line={index + 1} dangerouslySetInnerHTML={{ __html: sanitizeHtml(line || '&nbsp;') }} />
+              <code key={index} className="file-tab-line" data-line={index + 1} data-changed={changedLines.includes(index + 1) ? 'true' : undefined} dangerouslySetInnerHTML={{ __html: sanitizeHtml(line || '&nbsp;') }} />
             ))}
           </pre>
         </div>
