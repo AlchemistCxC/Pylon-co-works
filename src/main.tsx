@@ -6,6 +6,11 @@ import ErrorBoundary from './components/ErrorBoundary'
 import '@fontsource/jetbrains-mono/400.css'
 import '@fontsource/jetbrains-mono/700.css'
 import './index.css'
+// 浏览器模式假 Tauri 后端（静态演示全景）。必须在 env.ts（IS_TAURI）求值之后安装：
+// 本文件静态 import 已全部求值（App → env.ts 已冻结 IS_TAURI=false），此刻装 globals 安全。
+import { installMockTauri } from './demo/mockTauri'
+
+installMockTauri()
 
 ReactDOM.createRoot(document.getElementById('root')!).render(
   <React.StrictMode>
