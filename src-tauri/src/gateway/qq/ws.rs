@@ -74,6 +74,35 @@ fn classify_close_code(code: u16) -> CloseAction {
     }
 }
 
+/// 快速断开决策结果。
+#[derive(Debug, PartialEq, Eq)]
+enum ReconnectOutcome {
+    /// 致命 close code（Fatal）：停止重连。
+    Stop(&'static str),
+    /// 普通网络故障/可恢复 close code：退避重连。
+    Continue,
+}
+
+/// 快速断开决策（方案 1B）：先按 close code 分类，再累计快速断开次数。
+/// - Fatal code（4001/4003/4005/4914/4915…）→ Stop，永不重连；
+/// - 其余（含 code=0、DNS/代理/TLS 故障、4008、1000 等）→ Continue，继续退避重连；
+/// - quick_count 仅返回新累计值供日志警示，**不**导致永久停机；
+/// - 健康连接（>60s）清零累计。
+fn decide_quick_reconnect(duration_secs: f64, close_code: u16, quick_count: u32) -> (ReconnectOutcome, u32) {
+    let new_count = if duration_secs > 60.0 {
+        0
+    } else if duration_secs < QUICK_DISCONNECT_THRESHOLD {
+        quick_count + 1
+    } else {
+        0
+    };
+    let outcome = match classify_close_code(close_code) {
+        CloseAction::Fatal(desc) => ReconnectOutcome::Stop(desc),
+        _ => ReconnectOutcome::Continue,
+    };
+    (outcome, new_count)
+}
+
 /// 从 WS 错误消息中提取 close code。
 fn parse_ws_close_code(err: &str) -> u16 {
     if let Some(pos) = err.find("code=") {
@@ -238,31 +267,30 @@ pub async fn run_ws_loop(http_client: Client, auth: Arc<QqAuth>, adapter: Arc<Qq
             Ok(()) => unreachable!("run_connection 不应返回 Ok"),
             Err(e) => {
                 let duration = connect_time.elapsed().as_secs_f64();
-                // 审查修复：连接存活足够久（>60s）说明本次是健康断线（服务端维护等），
-                // 重置退避/快速断开计数——否则任何正常断开都会累积，100 次后永久死亡。
+                let code = parse_ws_close_code(&e);
+                // 方案 1B：先按 close code 分类再决定停否——普通网络故障
+                // （code=0/DNS/代理/TLS）只累计警示，不得因快速断开永久停机；
+                // 健康连接（>60s）清零快速断开计数（服务端维护等正常断开）。
+                let (outcome, new_quick_count) = decide_quick_reconnect(duration, code, quick_count);
                 if duration > 60.0 {
                     backoff = reconnect_backoff();
-                    quick_count = 0;
                 }
-                if duration < QUICK_DISCONNECT_THRESHOLD {
-                    quick_count += 1;
-                    if quick_count >= MAX_QUICK_DISCONNECTS {
-                        tracing::error!("QQ WS: {quick_count} 次快速断开，检查凭证和权限");
-                        return;
-                    }
-                } else {
-                    quick_count = 0;
+                quick_count = new_quick_count;
+                if quick_count >= MAX_QUICK_DISCONNECTS {
+                    tracing::warn!("QQ WS: {quick_count} 次快速断开，仍继续退避重连");
                 }
+                tracing::warn!("QQ WS: 连接断开 (code={code}, action={:?}): {e}", classify_close_code(code));
 
-                let code = parse_ws_close_code(&e);
-                let action = classify_close_code(code);
-                tracing::warn!("QQ WS: 连接断开 (code={code}, action={action:?}): {e}");
-
-                match action {
-                    CloseAction::Fatal(desc) => {
+                match outcome {
+                    ReconnectOutcome::Stop(desc) => {
                         tracing::error!("QQ WS: 致命错误 — {desc}，停止重连");
                         return;
                     }
+                    ReconnectOutcome::Continue => {}
+                }
+
+                match classify_close_code(code) {
+                    CloseAction::Fatal(_) => unreachable!("Stop 已在上面 return"),
                     CloseAction::ReconnectClearToken => {
                         auth.invalidate();
                     }
@@ -824,6 +852,43 @@ mod tests {
     fn ws_close_code_is_parsed_from_error_message() {
         assert_eq!(parse_ws_close_code("code=4008 rate limited"), 4008);
         assert_eq!(parse_ws_close_code("no code here"), 0);
+    }
+
+    #[test]
+    fn quick_reconnect_continues_on_plain_network_failure_after_three_fast() {
+        // 方案 1B 测试门：code=0 + 3 次快速失败 → 第 4 次仍 Retry（不永久停机）。
+        for count in 0..3 {
+            let (outcome, new_count) = decide_quick_reconnect(0.5, 0, count);
+            assert_eq!(outcome, ReconnectOutcome::Continue);
+            assert_eq!(new_count, count + 1);
+        }
+        let (outcome, new_count) = decide_quick_reconnect(0.5, 0, 3);
+        assert_eq!(outcome, ReconnectOutcome::Continue, "第 4 次快速断开仍须重连");
+        assert_eq!(new_count, 4);
+    }
+
+    #[test]
+    fn quick_reconnect_stops_on_fatal_close_code_first() {
+        // Fatal code（4001/4003）首次即停止，且不因之前累计而延迟。
+        let (outcome, count) = decide_quick_reconnect(0.5, 4001, 2);
+        assert_eq!(outcome, ReconnectOutcome::Stop("invalid auth/permission"));
+        assert_eq!(count, 3, "Stop 时累计照常更新（日志用）");
+    }
+
+    #[test]
+    fn quick_reconnect_backoff_retry_on_rate_limit() {
+        // 4008/限流 → 退避重连，非永久停机。
+        let (outcome, count) = decide_quick_reconnect(0.5, 4008, 3);
+        assert_eq!(outcome, ReconnectOutcome::Continue);
+        assert_eq!(count, 4);
+    }
+
+    #[test]
+    fn quick_reconnect_resets_count_on_healthy_connection() {
+        // 健康连接 >60s → quick_count/backoff 清零。
+        let (outcome, count) = decide_quick_reconnect(61.0, 0, 3);
+        assert_eq!(outcome, ReconnectOutcome::Continue);
+        assert_eq!(count, 0, "健康断开应清零快速断开计数");
     }
 
     #[test]
