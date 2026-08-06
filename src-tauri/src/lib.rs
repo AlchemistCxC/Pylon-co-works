@@ -1,6 +1,8 @@
 mod acp;
 mod agent_config;
 mod agent_runtime;
+mod browser;
+mod browser_cmds;
 #[cfg(test)]
 mod auto_reconnect_integration_tests;
 #[cfg(test)]
@@ -138,6 +140,11 @@ pub(crate) struct AppState {
     /// C8：MCP 写序锁（tokio Mutex）——set_mcp_servers 写 runtime_mcp + 落盘
     /// 全程持锁，并发设置时磁盘必为最后一次设置（重启不回滚到旧配置）。
     pub(crate) mcp_write_lock: tokio::sync::Mutex<()>,
+    /// Phase 3：配置写序锁（tokio Mutex）——update_agents_config 读当前→生成候选→
+    /// 校验→写盘→内存提交全程持锁，两个写请求不基于同一旧版本互相覆盖。
+    pub(crate) config_write_lock: tokio::sync::Mutex<()>,
+    /// Phase 4：浏览器会话管理（WebView 方案 §6.0；setup() 注入主窗口）。
+    pub(crate) browser: Arc<browser::BrowserManager>,
     /// P1（E10）：MCP wire 序列化缓存（Vec<Value>，session/new 的 mcpServers 载荷）。
     /// 每消息省一次全量 validate+serialize（≤32 server × 字段校验 + 一次 clone）。
     /// 写入 = set_mcp_servers 与 runtime_mcp 同 mcp_write_lock 下同步；读取
@@ -584,6 +591,8 @@ pub fn run() {
                 pet_write_lock: tokio::sync::Mutex::new(()),
             switch_lock: tokio::sync::Mutex::new(()),
             mcp_write_lock: tokio::sync::Mutex::new(()),
+            config_write_lock: tokio::sync::Mutex::new(()),
+            browser: Arc::new(browser::BrowserManager::new()),
             // P1（E10）：wire 缓存初始 None——启动恢复路径（setup load_mcp_persisted
             // 直写 runtime_mcp）后首次读取 miss 回退全量重算并回填（E3 自愈）。
             mcp_wire: Mutex::new(None),
@@ -603,6 +612,7 @@ pub fn run() {
                 crate::session::new_session, crate::session::send_message, crate::session::set_mode, crate::session::set_config_option, crate::session::close_session, crate::session::cancel_prompt, crate::session::load_sessions,
                 crate::session::session_inspector, crate::lifecycle::list_agents, crate::lifecycle::switch_agent, crate::lifecycle::reconnect_agent, crate::lifecycle::agent_status, crate::lifecycle::reload_agents, crate::lifecycle::set_mcp_servers,
                 crate::lifecycle::validate_agents,
+                crate::lifecycle::update_agents_config,
                 crate::permission::approve_tool_call, crate::permission::set_approval_mode,
                 crate::pet_cmds::get_pet, crate::pet_cmds::pet_action,
                 crate::session::load_persisted_session, crate::session::list_persisted_sessions,
@@ -613,11 +623,19 @@ pub fn run() {
                 crate::workspace_cmds::workspace_search,
                 crate::gateway_cmds::gateway_status, crate::gateway_cmds::reload_gateway,
                 crate::gateway_cmds::gateway_sessions,
+                crate::browser_cmds::browser_start, crate::browser_cmds::browser_status, crate::browser_cmds::browser_navigate,
+                crate::browser_cmds::browser_back, crate::browser_cmds::browser_forward, crate::browser_cmds::browser_reload,
+                crate::browser_cmds::browser_set_bounds, crate::browser_cmds::browser_close,
                 crate::startup::startup_diagnostics,
             ])
             .setup(|app| {
                 let window = app.get_webview_window("main").ok_or("main window not found")?;
                 if let Err(error) = window.set_title("Pylon") { tracing::warn!("set window title failed: {error}"); }
+                // Phase 4：浏览器管理器注入主窗口（子 WebView add_child 需要）。
+                app.state::<AppState>().browser.register_host(
+                    window.as_ref().window(),
+                    app.handle().clone(),
+                );
                 // 宠物状态落盘加载：文件缺失/损坏时保持新宠物（静默降级）
                 match pet_persist_path(app.handle()) {
                     Ok(path) => {

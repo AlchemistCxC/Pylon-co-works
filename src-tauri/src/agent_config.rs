@@ -25,6 +25,12 @@ pub enum ConfigError {
     /// 配置写入失败（临时文件/同步/rename 等）。
     #[error("config_write_error: {0}")]
     Write(String),
+    /// 候选配置删除当前 active agent（保护语义，与 reload_agents 一致）。
+    #[error("config_active_agent_protected: {0}")]
+    ActiveAgentProtected(String),
+    /// 磁盘已提交但内存域 reload 未完成（禁止返回成功）。
+    #[error("config_not_applied: {0}")]
+    NotApplied(String),
 }
 
 impl ConfigError {
@@ -36,6 +42,8 @@ impl ConfigError {
             Self::Invalid(_) => "config_error",
             Self::ReadOnly => "config_read_only",
             Self::Write(_) => "config_write_error",
+            Self::ActiveAgentProtected(_) => "config_active_agent_protected",
+            Self::NotApplied(_) => "config_not_applied",
         }
     }
 }
@@ -857,14 +865,15 @@ pub(crate) fn apply_gateway_patch(
 
 /// 候选配置双域校验（§5.3.A）：agents 经 parse_agents（A11 env/NUL、transport、
 /// 空 name/exe 等），gateway 经 GatewayConfig::from_yaml_str；任一侧失败即 Err。
+/// 返回解析后的 agents 表（写盘前 active agent 保护检查复用，避免二次解析）。
 pub(crate) fn validate_candidate(
     content: &str,
     base_dir: Option<&Path>,
-) -> Result<(), ConfigError> {
+) -> Result<HashMap<String, AgentDef>, ConfigError> {
     let (agents, gateway) = parse_domains(content, base_dir);
-    agents?;
+    let agents = agents?;
     gateway?;
-    Ok(())
+    Ok(agents)
 }
 
 /// 原子写入（§5.3.A）：唯一临时文件 + 写全 + sync_all + rename 覆盖；失败清理

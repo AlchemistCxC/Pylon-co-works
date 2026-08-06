@@ -24,3 +24,7 @@ pub(crate) const RUNTIME_LOG: &str = "pylon:runtime-log";
 /// acp.rs 以 `pub use` 别名暴露为 NOTIF_AGENT_CRASHED（保持既有引用不变）——
 /// 重导出要求本常量 pub（crate 为 cdylib，无外部 Rust API 面，pub 无泄漏）。
 pub const AGENT_CRASHED: &str = "pylon:agent-crashed";
+/// 浏览器 phase 迁移（Phase 4 WebView 方案，§6.0）。
+pub(crate) const BROWSER_STATUS: &str = "pylon:browser-status";
+/// 浏览器 url/title 变化（on_page_load 触发，§6.0）。
+pub(crate) const BROWSER_PAGE: &str = "pylon:browser-page";

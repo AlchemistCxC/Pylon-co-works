@@ -433,6 +433,114 @@ pub(crate) async fn reload_agents(
     Ok(())
 }
 
+/// Phase 3：update_agents_config（意见稿 §5.1 显式 scope 契约，用户拍板）。
+///
+/// scope="agent"：config 为 agent 整块 YAML 字符串（agentId 必填）；
+/// scope="gateway"：config 为 `{ gateway: { routes: [...] } }` JSON。
+/// 事务（§5.3.B）：写序锁 → embedded 只读检查 → 读当前 → 生成候选 → 双域校验 +
+/// active agent 保护（写盘前）→ 原子写盘 → 内存提交（agents 域刷新 + 幽灵 runtime
+/// 清理对齐 reload_agents；gateway 域 reload，失败报 config_not_applied）。
+#[tauri::command]
+pub(crate) async fn update_agents_config(
+    state: tauri::State<'_, AppState>,
+    scope: String,
+    agent_id: Option<String>,
+    config: serde_json::Value,
+) -> Result<serde_json::Value, PylonError> {
+    use crate::agent_config::ConfigError;
+    let inner = state.inner();
+    // 写序锁：读当前→生成候选→校验→写盘→内存提交全程串行，防基于旧版本互相覆盖
+    let _write_guard = inner.config_write_lock.lock().await;
+    // 1. 来源检查：embedded 无外部写入目标 → config_read_only（绝不 fallback 当前目录）
+    let path = crate::agent_config::effective_config_path()
+        .ok_or_else(|| PylonError::Config(ConfigError::ReadOnly))?;
+    // 2. 读当前原文（tokio::fs 异步读，不阻塞 async 运行时）
+    let content = tokio::fs::read_to_string(&path)
+        .await
+        .map_err(|error| PylonError::Config(ConfigError::Read(format!("读取 {} 失败: {error}", path.display()))))?;
+    // 3. 生成候选 + 双域校验 + 解析 agents（同步 YAML/fs，spawn_blocking；base_dir 绝对化）
+    let scope_owned = scope.clone();
+    let agent_id_owned = agent_id.clone();
+    let config_owned = config.clone();
+    let base_dir = path.parent().map(|p| p.to_path_buf());
+    let candidate = tokio::task::spawn_blocking(move || {
+        let candidate = match scope_owned.as_str() {
+            "agent" => {
+                let agent_id = agent_id_owned
+                    .ok_or_else(|| ConfigError::Invalid("scope=agent 缺少 agentId".to_string()))?;
+                let patch_yaml = config_owned.as_str().ok_or_else(|| {
+                    ConfigError::Invalid("scope=agent 的 config 必须为 YAML 字符串".to_string())
+                })?;
+                crate::agent_config::apply_agent_patch(&content, &agent_id, patch_yaml)?
+            }
+            "gateway" => crate::agent_config::apply_gateway_patch(&content, &config_owned)?,
+            other => return Err(ConfigError::Invalid(format!("未知 scope: {other}"))),
+        };
+        let agents = crate::agent_config::validate_candidate(&candidate, base_dir.as_deref())?;
+        Ok::<(String, std::collections::HashMap<String, crate::agent_config::AgentDef>), ConfigError>(
+            (candidate, agents),
+        )
+    })
+    .await
+    .map_err(|error| PylonError::Io(error.to_string()))??;
+    let (candidate, new_agents) = candidate;
+    crate::agent_config::default_agent_id(&new_agents)?;
+    // 4. active agent 保护（写盘前）：沿用 reload_agents 语义，候选不得删除当前 active agent
+    let removed: Vec<String> = {
+        let active = inner.active_agent.lock().map_err(|e| e.to_string())?;
+        let mut agents = inner.agents.lock().map_err(|e| e.to_string())?;
+        if !new_agents.contains_key(&*active) {
+            return Err(PylonError::Config(ConfigError::ActiveAgentProtected(format!(
+                "候选配置删除了当前 active agent: {}",
+                *active
+            ))));
+        }
+        let removed = agents
+            .keys()
+            .filter(|id| !new_agents.contains_key(*id) && **id != *active)
+            .cloned()
+            .collect();
+        *agents = new_agents;
+        removed
+    };
+    // 5. 原子写盘（替换语义）
+    let write_content = candidate.clone();
+    let write_path = path.clone();
+    tokio::task::spawn_blocking(move || crate::agent_config::write_config_atomically(&write_path, &write_content))
+        .await
+        .map_err(|error| PylonError::Io(error.to_string()))??;
+    // 6. 幽灵 runtime 清理（与 reload_agents 同款：abort + kill + 移除）
+    for id in removed {
+        stop_agent_runtime(&id, inner).await;
+        inner.runtimes.remove(&id);
+    }
+    // 7. gateway 域提交（scope=gateway 才需要；失败=磁盘已写但未生效 → config_not_applied）
+    if scope == "gateway" {
+        let gateway_config = crate::gateway::route::parse_config(&candidate)
+            .map_err(|e| PylonError::Config(ConfigError::NotApplied(format!("gateway reload 失败: {e}"))))?;
+        inner.gateway.reload(gateway_config).map_err(|e| {
+            PylonError::Config(ConfigError::NotApplied(format!("gateway reload 失败: {e}")))
+        })?;
+    }
+    inner.log_runtime_summary(
+        "info",
+        "config",
+        None,
+        &format!("Config updated (scope={scope})"),
+        serde_json::Map::from_iter([(
+            "scope".to_string(),
+            serde_json::Value::String(scope.clone()),
+        )]),
+    );
+    // 8. 返回摘要（不返回完整敏感配置）
+    let agent_count = inner.agents.lock().map(|a| a.len()).unwrap_or(0);
+    Ok(serde_json::json!({
+        "applied": true,
+        "scope": scope,
+        "agentCount": agent_count,
+    }))
+}
+
 // ── B4.2 MCP 配置持久化 ──
 
 /// MCP 配置落盘路径：app_config_dir/pylon-mcp.json。
