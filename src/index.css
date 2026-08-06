@@ -97,6 +97,28 @@ body::before {
 }
 #root { background:transparent; position:relative; z-index:1; }
 
+/* A5-01：跨面统一键盘焦点、禁用与 selected 反馈。组件仍可用更具体规则覆盖。 */
+:where(button, [role="button"], [role="tab"], [role="option"], [role="treeitem"], a, input, textarea, select):focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+
+:where(button, input, textarea, select):disabled,
+:where([role="button"], [role="tab"], [role="option"], [role="treeitem"])[aria-disabled="true"] {
+  opacity: .42;
+  cursor: not-allowed;
+}
+
+:where(button, [role="button"], [role="tab"], [role="option"], [role="treeitem"]):disabled:hover,
+:where([role="button"], [role="tab"], [role="option"], [role="treeitem"])[aria-disabled="true"]:hover {
+  transform: none;
+  box-shadow: none;
+}
+
+:where([role="tab"][aria-selected="true"], [role="option"][aria-selected="true"], [role="treeitem"][aria-selected="true"], [aria-current="page"]) {
+  color: var(--text);
+}
+
 ::-webkit-scrollbar { width:4px; }
 ::-webkit-scrollbar-track { background:transparent; }
 ::-webkit-scrollbar-thumb { background:rgba(0,0,0,0.12); border-radius:2px; }

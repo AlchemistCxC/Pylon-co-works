@@ -226,7 +226,7 @@ export default function App() {
       vars[cssVar] = def.type === 'number' && def.unit ? `${value}${def.unit}` : String(value)
     }
     return vars as React.CSSProperties
-  }, [s, sidebarCollapsed])
+  }, [s, sidebarCollapsed, sidebarWidth])
 
   // body::before 玻璃层挂在 <body> 上，读不到 .app 子元素的 CSS 变量 —
   // 把全局背景相关变量 + scheme 提到 <html>(:root) 与 <body>，让玻璃层生效

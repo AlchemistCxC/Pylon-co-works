@@ -126,6 +126,10 @@
 .runtime-log-row:hover {
   background: var(--bg-hover);
 }
+.runtime-log-row[aria-expanded="true"] {
+  background: var(--bg-active);
+  box-shadow: inset 3px 0 0 var(--accent);
+}
 .runtime-log-row:focus-visible { box-shadow: inset 3px 0 0 var(--accent); background: var(--bg-hover); }
 
 .runtime-log-error { color: var(--danger, #e5484d); }

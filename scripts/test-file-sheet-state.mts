@@ -41,7 +41,7 @@ assert.match(view, /const selectSource = \(source: string\) => dispatch\(\{ type
 const sidebar = readFileSync(new URL('../src/sheets/file/FileSheetSidebar.tsx', import.meta.url), 'utf8')
 assert.match(sidebar, /FILE_SHEET_SECTIONS\.map/, '五分区必须经单一真值枚举')
 assert.match(sidebar, /onSelectSource\(session\.source\)/, '会话列表点击必须切 source')
-assert.match(sidebar, /48px/, '分区栏必须 48px 窄条（拍板）')
+assert.match(sidebar, /48px Activity Bar/, '分区栏必须保持 48px 窄条')
 
 // 6. registry file 条目渲染 FileSheetView
 const registry = readFileSync(new URL('../src/workspace-sheets/sheetRegistry.tsx', import.meta.url), 'utf8')

@@ -26,6 +26,6 @@ export function pagePersistedSessions(raw: unknown, page: number, pageSize = HIS
 /** 导出参数校验：outputPath 必须绝对路径（预检，后端仍权威） */
 export function validateExportPath(outputPath: string): string | null {
   if (!outputPath.trim()) return '导出路径不能为空'
-  if (!/^[a-zA-Z]:[\/]/.test(outputPath)) return '导出路径必须是绝对路径'
+  if (!/^[a-zA-Z]:[\\/]/.test(outputPath)) return '导出路径必须是绝对路径'
   return null
 }

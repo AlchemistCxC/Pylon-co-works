@@ -11,16 +11,59 @@
 .file-sidebar {
   display: flex;
   flex: 0 0 var(--sheet-sidebar-width, 250px);
+  min-width: 0;
+  max-width: var(--sheet-sidebar-width, 250px);
+  overflow: hidden;
   border-right: 1px solid var(--border);
   background: var(--bg-panel);
+  transition: flex-basis 180ms ease, max-width 180ms ease;
 }
+
+.file-sidebar.collapsed {
+  flex-basis: 48px;
+  max-width: 48px;
+}
+
+.file-sidebar.hidden {
+  flex-basis: 0;
+  max-width: 0;
+  border-right: 0;
+  visibility: hidden;
+  pointer-events: none;
+}
+
+.file-sidebar-panel {
+  display: flex;
+  min-width: 0;
+  flex: 1;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+.file-sidebar-header {
+  display: flex;
+  min-height: 54px;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 8px 10px 8px 12px;
+  border-bottom: 1px solid var(--border);
+}
+
+.file-sidebar-header > div { min-width: 0; }
+.file-sidebar-kicker { display: block; margin-bottom: 2px; color: var(--accent); font: 700 10px/1 var(--mono); letter-spacing: .12em; }
+.file-sidebar-header strong { display: block; overflow: hidden; color: var(--text); font-size: 12px; font-weight: 600; text-overflow: ellipsis; white-space: nowrap; }
+.file-sidebar-close { display: grid; width: 28px; height: 28px; flex: 0 0 28px; place-items: center; border: 0; border-radius: var(--ui-radius-xs); color: var(--text-dim); background: transparent; cursor: pointer; }
+.file-sidebar-close:hover { color: var(--text); background: var(--bg-hover); }
 
 .file-activity-bar {
   display: flex;
+  flex: 0 0 48px;
   flex-direction: column;
   width: 48px;
-  flex: 0 0 48px;
+  padding-top: 4px;
   border-right: 1px solid var(--border);
+  background: color-mix(in srgb, var(--bg-panel) 72%, transparent);
 }
 
 .file-activity-item {
@@ -42,10 +85,19 @@
 }
 
 .file-section-panel {
+  min-width: 0;
   flex: 1;
-  padding: 12px;
-  overflow-y: auto;
+  overflow: auto hidden;
 }
+
+.file-session-panel { padding: 8px; }
+.file-source-item { display: flex; align-items: center; gap: 8px; min-width: 0; }
+.file-source-icon { display: grid; width: 28px; height: 28px; flex: 0 0 28px; place-items: center; border: 1px solid var(--border); border-radius: var(--ui-radius-sm); color: var(--text-dim); background: var(--bg-panel); }
+.file-source-copy { min-width: 0; flex: 1; }
+.file-source-copy strong, .file-source-copy small { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.file-source-copy strong { color: var(--text); font-size: 12px; }
+.file-source-copy small { margin-top: 2px; color: var(--text-dim); font: 10px/1.35 var(--mono); }
+.file-source-item.active .file-source-icon { color: var(--accent); border-color: color-mix(in srgb, var(--accent) 42%, var(--border)); }
 
 .file-section-title {
   font-size: 12px;
@@ -114,17 +166,33 @@
 /* D-08：文件树移入左栏（VS Code 风格），主区恒为编辑器 */
 
 .file-main { display: flex; flex-direction: column; }
-.file-section-content { flex: 1; min-height: 0; display: flex; flex-direction: column; overflow-y: auto; }
+.file-section-content {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  padding: 0;
+}
+.file-section-content > * { min-width: 0; }
 .file-section-content .file-tree { flex: 1; overflow-y: auto; padding: 0; }
-.file-tree { overflow-y: auto; }
-.file-tree-node { display: flex; flex-direction: column; }
+.file-tree {
+  min-width: 0;
+  overflow: auto hidden;
+}
+.file-tree > .file-panel-heading { margin: 4px 10px 0; }
+.file-tree-rows { min-width: 0; padding: 4px 6px 10px; }
+.file-tree-node { display: block; min-width: 0; }
+.file-tree-children { min-width: 0; }
 .file-tree-row {
   display: flex;
+  min-width: 0;
+  max-width: 100%;
   align-items: center;
-  gap: 6px;
+  gap: 4px;
   width: 100%;
-  min-height: 30px;
-  padding: 4px 8px;
+  min-height: 28px;
+  padding: 3px 6px 3px calc(4px + min(var(--file-tree-depth, 0), 8) * 12px);
   color: var(--text);
   background: transparent;
   border: 1px solid transparent;
@@ -136,13 +204,21 @@
   transition: background-color 120ms ease, border-color 120ms ease;
 }
 .file-tree-row:hover { background: var(--bg-hover); }
-.file-tree-row:active { background: var(--bg-active); }
-.file-tree-caret { width: 12px; flex: 0 0 12px; color: var(--text-dim); font-family: var(--mono); text-align: center; }
+.file-tree-row.active {
+  color: var(--text);
+  background: var(--bg-active);
+  border-color: color-mix(in srgb, var(--accent) 34%, var(--border));
+  box-shadow: inset 2px 0 0 var(--accent);
+}
+.file-tree-row.active .file-tree-kind { color: var(--accent); }
+.file-tree-caret { display: grid; width: 16px; height: 18px; flex: 0 0 16px; place-items: center; color: var(--text-dim); }
 .file-tree-caret-spacer { visibility: hidden; }
 .file-tree-kind {
+  display: grid;
   width: 18px;
   height: 18px;
   flex: 0 0 18px;
+  place-items: center;
   border: 1px solid var(--border);
   border-radius: 3px;
   color: var(--text-dim);
@@ -153,9 +229,35 @@
   text-align: center;
 }
 .file-tree-folder .file-tree-kind { color: var(--accent); border-color: color-mix(in srgb, var(--accent) 42%, var(--border)); }
-.file-tree-label { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.file-tree-label { min-width: 0; flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.file-panel-heading {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  min-height: 28px;
+  color: var(--text-dim);
+  font: 700 10px/1 var(--mono);
+  letter-spacing: .1em;
+}
+.file-panel-count { min-width: 20px; padding: 3px 6px; border-radius: var(--ui-radius-pill); color: var(--text-dim); background: var(--bg-active); font-size: 10px; text-align: center; }
 .file-tree-error { margin: 4px; padding: 8px; border: 1px solid color-mix(in srgb, var(--tool-err, var(--danger)) 34%, var(--border)); border-radius: var(--ui-radius-sm); font-size: 12px; color: var(--tool-err, var(--danger)); background: color-mix(in srgb, var(--tool-err, var(--danger)) 7%, transparent); }
 .file-tree-hint { padding: 8px; font-size: 12px; color: var(--text-dim); }
+.file-tree-empty-state {
+  display: flex;
+  align-items: center;
+  flex-direction: column;
+  gap: var(--ui-space-2);
+  margin: var(--ui-space-4) 10px;
+  padding: var(--ui-space-5) var(--ui-space-3);
+  border: 1px dashed var(--border);
+  border-radius: var(--ui-radius-md);
+  color: var(--text-dim);
+  background: color-mix(in srgb, var(--bg-panel) 72%, transparent);
+  text-align: center;
+}
+.file-tree-empty-state strong { color: var(--text); font-size: 12px; }
+.file-tree-empty-state span { font-size: 11px; line-height: 1.5; }
+.file-tree-empty-state .sheet-empty-mark { display: grid; width: 36px; height: 36px; place-items: center; margin-bottom: var(--ui-space-1); border: 1px solid color-mix(in srgb, var(--accent) 38%, var(--border)); border-radius: var(--ui-radius-sm); color: var(--accent); background: color-mix(in srgb, var(--accent) 8%, var(--bg-panel)); font: 700 17px var(--mono); }
 
 .file-tab-bar {
   display: flex; gap: 2px; overflow-x: auto;
@@ -291,26 +393,12 @@
   transition: background-color 120ms ease, color 120ms ease, border-color 120ms ease;
 }
 
-.file-activity-glyph {
-  display: block;
-  width: 24px;
-  height: 22px;
+.file-activity-icon {
+  display: grid;
+  width: 28px;
+  height: 28px;
+  place-items: center;
   color: currentColor;
-  font-family: var(--mono);
-  font-size: 15px;
-  font-weight: 700;
-  line-height: 22px;
-  text-align: center;
-  border: 1px solid currentColor;
-  border-radius: var(--ui-radius-xs);
-  opacity: 0.82;
-}
-
-.file-activity-label {
-  margin-top: 2px;
-  font-size: 9px;
-  line-height: 12px;
-  letter-spacing: 0.02em;
 }
 
 .file-activity-item:hover {
@@ -340,7 +428,14 @@
 
 .file-section-panel,
 .file-section-content {
-  padding: var(--ui-space-3);
+  padding: 0;
+}
+
+.file-section-panel > .file-panel-heading,
+.file-section-panel > .file-section-title,
+.file-section-panel > .file-section-hint,
+.file-section-panel > .file-tree-error {
+  margin-inline: 10px;
 }
 
 .file-section-title {
@@ -736,10 +831,33 @@
   font-weight: 700;
 }
 
-.git-status-list,
-.search-result-list {
-  gap: 2px;
-}
+.git-summary-card { display: flex; align-items: center; justify-content: space-between; gap: 8px; min-height: 52px; margin-bottom: 12px; padding: 10px; border: 1px solid var(--border); border-radius: var(--ui-radius-sm); background: var(--bg-input); }
+.git-summary-card > div { min-width: 0; }
+.git-summary-kicker { display: block; color: var(--text-dim); font: 10px/1.2 var(--mono); letter-spacing: .08em; }
+.git-summary-card strong { display: block; margin-top: 4px; font-size: 13px; }
+.git-branch-badge { padding: 4px 8px; border: 1px solid color-mix(in srgb, var(--tool-ok) 35%, var(--border)); border-radius: var(--ui-radius-pill); color: var(--tool-ok); font: 10px var(--mono); }
+.git-section { margin-top: 14px; }
+.git-status-row-static { display: flex; align-items: center; gap: 8px; min-width: 0; min-height: 30px; padding: 5px 6px; border-radius: var(--ui-radius-xs); }
+.git-status-row-static:hover { background: var(--bg-hover); }
+.git-status-row-static .git-status-path { min-width: 0; flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.git-history-list { display: grid; gap: 2px; margin: 0; padding: 0; list-style: none; }
+.git-history-row { display: grid; grid-template-columns: 50px minmax(0, 1fr); gap: 6px; min-width: 0; padding: 6px; border-radius: var(--ui-radius-xs); }
+.git-history-row:hover { background: var(--bg-hover); }
+.git-history-hash { color: var(--accent); font: 10px var(--mono); }
+.git-history-subject { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 11px; }
+.git-history-row small { grid-column: 2; color: var(--text-dim); font: 10px var(--mono); }
+.file-views-panel { padding: 10px; }
+.file-view-section + .file-view-section { margin-top: 18px; padding-top: 12px; border-top: 1px solid var(--border); }
+.file-view-list { display: grid; gap: 2px; margin: 0; padding: 0; list-style: none; }
+.file-view-row, .file-agent-change-row { display: flex; align-items: center; gap: 7px; min-width: 0; width: 100%; min-height: 32px; padding: 6px; border: 1px solid transparent; border-radius: var(--ui-radius-xs); color: var(--text); background: transparent; font-size: 11px; text-align: left; }
+.file-view-row { cursor: pointer; }
+.file-view-row:hover, .file-view-row.active, .file-agent-change-row:hover { background: var(--bg-hover); }
+.file-view-row.active { border-color: color-mix(in srgb, var(--accent) 40%, var(--border)); box-shadow: inset 2px 0 var(--accent); }
+.file-view-path { min-width: 0; flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-family: var(--mono); }
+.file-agent-change-row small { color: var(--text-dim); font: 10px var(--mono); }
+.file-view-close { display: inline-flex; align-items: center; gap: 5px; margin-top: 8px; padding: 5px 7px; border: 1px solid var(--border); border-radius: var(--ui-radius-xs); color: var(--text-dim); background: transparent; cursor: pointer; font-size: 10px; }
+.file-view-close:hover { color: var(--text); background: var(--bg-hover); }
+.file-section-muted { opacity: .75; }
 
 .git-status-row,
 .search-result-row {
@@ -799,3 +917,50 @@
   .file-tab-md { padding-inline: 24px; }
   .dispatch-target { display: none; }
 }
+
+/* A4-03 refine：语言图标、紧凑搜索、Git 树 */
+.file-tree-rows { padding-left: 1px; padding-right: 4px; }
+.file-tree-row { padding-left: calc(1px + min(var(--file-tree-depth, 0), 8) * 11px); }
+.file-tree-kind { border: 0; background: transparent; }
+.file-tree-folder .file-tree-kind { border: 0; }
+.file-type-icon { flex: 0 0 auto; color: var(--text-dim); }
+.file-type-icon.type-ts { color: #3178c6; }
+.file-type-icon.type-js { color: #c5a900; }
+.file-type-icon.type-rust { color: #ce6b36; }
+.file-type-icon.type-c { color: #659ad2; }
+.file-type-icon.type-json { color: #d4a72c; }
+.file-type-icon.type-style { color: #a855f7; }
+.file-type-icon.type-text { color: var(--text-dim); }
+
+.file-search-panel { padding: 8px; }
+.file-search-toolbar { display: flex; gap: 4px; margin-bottom: 8px; }
+.file-search-input { min-width: 0; flex: 1; height: 32px; padding: 0 9px; border: 1px solid var(--border); border-radius: var(--ui-radius-xs); color: var(--text); background: var(--bg-input); font-size: 12px; outline: none; }
+.file-search-input:focus { border-color: var(--accent); box-shadow: 0 0 0 2px color-mix(in srgb, var(--accent) 18%, transparent); }
+.file-search-submit { display: grid; width: 32px; height: 32px; flex: 0 0 32px; place-items: center; border: 1px solid var(--border); border-radius: var(--ui-radius-xs); color: var(--text-dim); background: transparent; cursor: pointer; }
+.file-search-submit:hover:not(:disabled) { color: var(--text); background: var(--bg-hover); }
+.file-search-submit:disabled { opacity: .38; cursor: default; }
+.search-result-list { display: grid; gap: 3px; margin: 4px 0 0; padding: 0; list-style: none; }
+.search-result-row { display: grid; grid-template-columns: minmax(82px, .8fr) minmax(0, 1.5fr); gap: 8px; width: 100%; min-width: 0; min-height: 40px; align-items: center; padding: 5px 7px; border: 1px solid transparent; border-radius: var(--ui-radius-xs); color: var(--text); background: transparent; text-align: left; cursor: pointer; }
+.search-result-row:hover { border-color: var(--border); background: var(--bg-hover); }
+.search-result-file { display: flex; min-width: 0; align-items: center; gap: 6px; }
+.search-result-file > span { min-width: 0; }
+.search-result-file strong, .search-result-file small { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.search-result-file strong { color: var(--text); font: 11px/1.3 var(--mono); }
+.search-result-file small { color: var(--text-dim); font: 9px/1.25 var(--mono); }
+.search-result-text { min-width: 0; max-width: none; overflow: hidden; color: var(--text-dim); font-size: 10px; text-overflow: ellipsis; white-space: nowrap; }
+.search-result-text mark { padding: 0 1px; color: var(--text); background: color-mix(in srgb, var(--accent) 28%, transparent); border-radius: 2px; }
+
+.git-panel { padding: 8px; }
+.git-summary-card { justify-content: flex-start; }
+.git-summary-card > div { flex: 1; }
+.git-tree-list { display: grid; margin: 0; padding: 0; list-style: none; }
+.git-tree-node { min-width: 0; }
+.git-tree-row { display: flex; min-width: 0; width: 100%; min-height: 27px; align-items: center; gap: 4px; padding: 3px 4px 3px calc(1px + min(var(--git-tree-depth, 0), 7) * 10px); border: 0; border-radius: var(--ui-radius-xs); color: var(--text); background: transparent; text-align: left; cursor: pointer; }
+.git-tree-row:hover { background: var(--bg-hover); }
+.git-tree-caret { display: grid; width: 14px; height: 16px; flex: 0 0 14px; place-items: center; color: var(--text-dim); }
+.git-tree-folder { display: grid; width: 16px; height: 16px; flex: 0 0 16px; place-items: center; border-radius: 3px; color: var(--accent); background: color-mix(in srgb, var(--accent) 12%, transparent); font: 700 9px/1 var(--mono); }
+.git-tree-label { min-width: 0; flex: 1; overflow: hidden; font: 10px/1.35 var(--mono); text-overflow: ellipsis; white-space: nowrap; }
+.git-history-row { grid-template-columns: 16px minmax(0, 1fr) auto; align-items: center; }
+.git-history-row small { grid-column: 2; }
+.git-history-hash { grid-column: 3; grid-row: 1; }
+.file-view-row, .file-agent-change-row { padding-left: 4px; }

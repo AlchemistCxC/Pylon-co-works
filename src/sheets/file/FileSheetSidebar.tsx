@@ -1,19 +1,25 @@
+import { Clock3, Files, GitBranch, MessageSquare, Search, X } from 'lucide-react'
 import { useIdentityStore } from '../../identityStore'
 import { FILE_SHEET_SECTIONS, type FileSheetSection } from './fileSheetState.ts'
 
-/**
- * FileSheetSidebar — 48px 活动栏 + 分区内容面板（W2-03，VS Code 风格改造 D-08）。
- *
- * 左侧 48px 窄条五分区（会话/文件/搜索/SCM/视图）；会话分区列出当前 profile 的会话
- * 供切换 targetSource（内部指向，不改 singletonKey）；其余分区内容由 FileSheetView
- * 经 children 注入（文件树/SCM 状态/搜索——都在左栏），主区恒为文件视图。
- * 全局 sidebarWidth 面板由布局层（SheetSidebarSlot）承载——本分区栏独立窄条。
- */
-export default function FileSheetSidebar({ activeSection, targetSource, onSelectSection, onSelectSource, children }: {
+/** FileSheetSidebar — 48px Activity Bar + Explorer 内容面板；支持收成仅图标栏。 */
+export default function FileSheetSidebar({
+  activeSection,
+  targetSource,
+  collapsed,
+  hidden,
+  onSelectSection,
+  onSelectSource,
+  onCollapse,
+  children,
+}: {
   activeSection: FileSheetSection
   targetSource: string | null
+  collapsed: boolean
+  hidden: boolean
   onSelectSection: (section: FileSheetSection) => void
   onSelectSource: (source: string) => void
+  onCollapse: () => void
   children?: React.ReactNode
 }) {
   const sessions = useIdentityStore(s => s.sessions)
@@ -24,55 +30,82 @@ export default function FileSheetSidebar({ activeSection, targetSource, onSelect
     scm: 'SCM',
     views: '视图',
   }
-  const activityMeta: Record<FileSheetSection, { glyph: string; description: string }> = {
-    sessions: { glyph: 'S', description: '切换工作区会话' },
-    files: { glyph: 'F', description: '浏览工作区文件' },
-    search: { glyph: '/', description: '搜索工作区内容' },
-    scm: { glyph: 'G', description: '查看 Git 状态和 diff' },
-    views: { glyph: 'V', description: '切换编辑器视图' },
+  const activityMeta: Record<FileSheetSection, { icon: React.ReactNode; description: string }> = {
+    sessions: { icon: <MessageSquare size={21} />, description: '切换工作区会话' },
+    files: { icon: <Files size={21} />, description: '浏览工作区文件' },
+    search: { icon: <Search size={21} />, description: '搜索工作区内容' },
+    scm: { icon: <GitBranch size={21} />, description: '查看完整 Git 状态和历史' },
+    views: { icon: <Clock3 size={21} />, description: '查看 Agent 改动与 diff' },
   }
+
+  const selectSection = (section: FileSheetSection) => {
+    onSelectSection(section)
+    if (collapsed) onCollapse()
+  }
+
   return (
-    <div className="file-sidebar">
-      <div className="file-activity-bar">
+    <aside className={`file-sidebar ${collapsed ? 'collapsed' : ''} ${hidden ? 'hidden' : ''}`}>
+      <nav className="file-activity-bar" aria-label="FileSheet 分区">
         {FILE_SHEET_SECTIONS.map(section => (
           <button
             key={section}
             type="button"
             className={`file-activity-item ${activeSection === section ? 'active' : ''}`}
-            onClick={() => onSelectSection(section)}
+            onClick={() => selectSection(section)}
             title={`${labels[section]}：${activityMeta[section].description}`}
             aria-label={`${labels[section]}：${activityMeta[section].description}`}
           >
-            <span className="file-activity-glyph" aria-hidden="true">{activityMeta[section].glyph}</span>
-            <span className="file-activity-label">{labels[section]}</span>
+            <span className="file-activity-icon" aria-hidden="true">{activityMeta[section].icon}</span>
           </button>
         ))}
-      </div>
-      {activeSection === 'sessions' ? (
-        <div className="file-section-panel">
-          <div className="file-section-title">会话</div>
-          {sessions.length === 0 ? (
-            <p className="file-section-hint">没有会话</p>
+      </nav>
+
+      {!collapsed && (
+        <div className="file-sidebar-panel">
+          <header className="file-sidebar-header">
+            <div>
+              <span className="file-sidebar-kicker">{labels[activeSection]}</span>
+              <strong>{activityMeta[activeSection].description}</strong>
+            </div>
+            <button type="button" className="file-sidebar-close" onClick={onCollapse} title="收起左栏" aria-label="收起左栏">
+              <X size={15} />
+            </button>
+          </header>
+
+          {activeSection === 'sessions' ? (
+            <div className="file-section-panel file-session-panel">
+              <div className="file-panel-heading">
+                <span>WORKSPACES</span>
+                <span className="file-panel-count">{sessions.length}</span>
+              </div>
+              {sessions.length === 0 ? (
+                <p className="file-section-hint">没有可用会话</p>
+              ) : (
+                <ul className="file-source-list">
+                  {sessions.map(session => (
+                    <li key={session.id}>
+                      <button
+                        type="button"
+                        className={`file-source-item ${targetSource === session.source ? 'active' : ''}`}
+                        onClick={() => onSelectSource(session.source)}
+                        title={session.source}
+                      >
+                        <span className="file-source-icon" aria-hidden="true"><MessageSquare size={15} /></span>
+                        <span className="file-source-copy">
+                          <strong>{session.name}</strong>
+                          <small>{session.source}</small>
+                        </span>
+                      </button>
+                    </li>
+                  ))}
+                </ul>
+              )}
+            </div>
           ) : (
-            <ul className="file-source-list">
-              {sessions.map(session => (
-                <li key={session.id}>
-                  <button
-                    type="button"
-                    className={`file-source-item ${targetSource === session.source ? 'active' : ''}`}
-                    onClick={() => onSelectSource(session.source)}
-                    title={session.source}
-                  >
-                    {session.name}
-                  </button>
-                </li>
-              ))}
-            </ul>
+            <div className="file-section-content">{children}</div>
           )}
         </div>
-      ) : (
-        <div className="file-section-content">{children}</div>
       )}
-    </div>
+    </aside>
   )
 }

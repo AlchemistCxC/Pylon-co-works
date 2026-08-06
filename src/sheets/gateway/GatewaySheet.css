@@ -152,6 +152,10 @@
 }
 
 .gateway-route-head:hover { background: var(--bg-hover); }
+.gateway-route-head[aria-expanded="true"] {
+  background: var(--bg-active);
+  box-shadow: inset 3px 0 0 var(--accent);
+}
 .gateway-route-head:focus-visible,
 .gateway-edit-row input:focus-visible,
 .gateway-edit-row button:focus-visible {

@@ -39,6 +39,6 @@ assert.equal(panel.includes("invoke('read_workspace_text'"), false, '不得用�
 const view = readFileSync(new URL('../src/sheets/file/FileSheetView.tsx', import.meta.url), 'utf8')
 assert.match(view, /state\.activeSection === 'search' && \(/, '搜索分区必须接线（左栏）')
 assert.match(view, /<WorkspaceSearchPanel source=\{state\.targetSource\} onOpenResult=\{openTab\} \/>/, '结果点击必须打开 tab')
-assert.match(view, /<FileTree source=\{state\.targetSource\} onOpen=\{openTab\} \/>/, '文件树必须接当前 source（左栏）')
+assert.match(view, /<FileTree source=\{state\.targetSource\} activeFile=\{activeFile\} onOpen=\{openTab\} \/>/, '文件树必须接当前 source 与 activeFile（左栏）')
 
 console.log('workspace search（桩化）守卫通过')

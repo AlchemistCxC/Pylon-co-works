@@ -1,14 +1,29 @@
 import { useState } from 'react'
+import { Search } from 'lucide-react'
 import { invoke } from '@tauri-apps/api/core'
 import { reportRuntimeError } from '../../runtimeError'
 import { classifyWorkspaceSearchError, normalizeWorkspaceSearchResults, type WorkspaceSearchResult, type WorkspaceSearchSaveStatus } from '../../infrastructure/tauri/workspaceSearchContracts.ts'
+import FileTypeIcon from './FileTypeIcon'
 
-/**
- * WorkspaceSearchPanel — 工作区搜索分区（W2-06 桩化）。
- *
- * 只消费正式 workspace_search 命令（不以前端遍历文件冒充搜索）；命令不可用 → 明确
- * 「待后端」阻塞态。结果点击打开 tab（定位行由 W2-08/09 后续增强）。
- */
+function highlightedText(text: string, query: string): React.ReactNode {
+  const keyword = query.trim()
+  if (!keyword) return text
+  const lower = text.toLowerCase()
+  const needle = keyword.toLowerCase()
+  const parts: React.ReactNode[] = []
+  let cursor = 0
+  let index = lower.indexOf(needle)
+  while (index >= 0) {
+    if (index > cursor) parts.push(text.slice(cursor, index))
+    parts.push(<mark key={`${index}-${cursor}`}>{text.slice(index, index + keyword.length)}</mark>)
+    cursor = index + keyword.length
+    index = lower.indexOf(needle, cursor)
+  }
+  if (cursor < text.length) parts.push(text.slice(cursor))
+  return parts
+}
+
+/** WorkspaceSearchPanel — 工作区全文搜索与横向结果列表。 */
 export default function WorkspaceSearchPanel({ source, onOpenResult }: {
   source: string | null
   onOpenResult: (path: string, line: number) => void
@@ -21,7 +36,6 @@ export default function WorkspaceSearchPanel({ source, onOpenResult }: {
     if (!source || !query.trim()) return
     setStatus({ kind: 'searching' })
     try {
-      // 契约：workspace_search（待产品侧后端命令）；参数形状以后端实际契约为准
       const raw = await invoke<unknown>('workspace_search', { source, query: query.trim() })
       setResults(normalizeWorkspaceSearchResults(raw))
       setStatus({ kind: 'idle' })
@@ -33,37 +47,45 @@ export default function WorkspaceSearchPanel({ source, onOpenResult }: {
   }
 
   return (
-    <div className="file-section-panel">
-      <div className="file-section-title">搜索</div>
-      <input
-        className="runtime-filter-input"
-        type="search"
-        placeholder="搜索文件内容…"
-        value={query}
-        onChange={event => setQuery(event.target.value)}
-        onKeyDown={event => { if (event.key === 'Enter') void search() }}
-        aria-label="工作区搜索"
-      />
-      <button type="button" className="runtime-clear" onClick={() => void search()} disabled={status.kind === 'searching' || !source}>
-        {status.kind === 'searching' ? '搜索中…' : '搜索'}
-      </button>
-      {status.kind === 'blocked' && (
-        <p className="file-section-hint" role="status">待后端：workspace_search 命令尚未提供，无法搜索</p>
-      )}
+    <div className="file-section-panel file-search-panel">
+      <div className="file-search-toolbar">
+        <input
+          className="file-search-input"
+          type="search"
+          placeholder="搜索文件内容…"
+          value={query}
+          onChange={event => setQuery(event.target.value)}
+          onKeyDown={event => { if (event.key === 'Enter') void search() }}
+          aria-label="工作区搜索"
+        />
+        <button type="button" className="file-search-submit" onClick={() => void search()} disabled={status.kind === 'searching' || !source || !query.trim()} aria-label="搜索">
+          <Search size={15} />
+        </button>
+      </div>
+      <div className="file-panel-heading"><span>RESULTS</span><span className="file-panel-count">{results.length}</span></div>
+      {status.kind === 'blocked' && <p className="file-section-hint" role="status">待后端：workspace_search 命令尚未提供，无法搜索</p>}
       {status.kind === 'error' && <div className="file-tree-error" role="alert">{status.message}</div>}
-      {status.kind === 'idle' && results.length > 0 && (
-        <ul className="search-result-list">
-          {results.map((result, index) => (
+      {status.kind === 'searching' && <p className="file-section-hint">正在搜索…</p>}
+      {status.kind === 'idle' && query.trim() && results.length === 0 && <p className="file-section-hint">没有匹配结果</p>}
+      <ul className="search-result-list">
+        {results.map((result, index) => {
+          const fileName = result.path.split('/').pop() || result.path
+          return (
             <li key={`${result.path}:${result.line}:${index}`}>
-              <button type="button" className="search-result-row" onClick={() => onOpenResult(result.path, result.line)}>
-                <span className="search-result-path">{result.path}</span>
-                <span className="search-result-line">{result.line}</span>
-                <span className="search-result-text">{result.lineText}</span>
+              <button type="button" className="search-result-row" onClick={() => onOpenResult(result.path, result.line)} title={`${result.path}:${result.line}`}>
+                <span className="search-result-file">
+                  <FileTypeIcon path={result.path} size={15} />
+                  <span>
+                    <strong>{fileName}</strong>
+                    <small>L{result.line}</small>
+                  </span>
+                </span>
+                <span className="search-result-text">{highlightedText(result.lineText, query)}</span>
               </button>
             </li>
-          ))}
-        </ul>
-      )}
+          )
+        })}
+      </ul>
     </div>
   )
 }

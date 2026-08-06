@@ -30,6 +30,7 @@
 .session-item:hover { background:var(--bg-hover); }
 .session-item.active { border-color:var(--border); background:var(--bg-active); }
 .session-item.active::before { content:''; position:absolute; left:-1px; top:10px; bottom:10px; width:2px; border-radius:var(--ui-radius-pill); background:var(--accent); }
+.session-item:focus-visible { outline:2px solid var(--accent); outline-offset:-2px; }
 .session-item:focus-within { border-color:var(--border-focus); }
 /* W2-10（F2-C）：运行点读 liveGeneratingSources——运行中绿，periId 存在不再着色 */
 .session-dot { width:5px; height:5px; border-radius:50%; background:var(--text-dim); flex-shrink:0; }

@@ -74,7 +74,12 @@
   border-color: var(--border-focus);
 }
 
+.permission-dialog-btn:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+
 .permission-dialog-btn:disabled {
-  opacity: 0.5;
+  opacity: 0.42;
   cursor: not-allowed;
 }

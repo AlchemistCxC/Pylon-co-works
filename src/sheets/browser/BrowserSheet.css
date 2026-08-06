@@ -1,5 +1,86 @@
-/* W4-03 browser 壳：消费现有主题变量，零新样式体系 */
+/* A5-03 Browser WebView 工作区：主区放大，左栏承载浏览器工具入口并可折叠。 */
+.browser-sheet {
+  display: flex;
+  flex: 1;
+  min-width: 0;
+  min-height: 0;
+  color: var(--text);
+  font-family: var(--font);
+  overflow: hidden;
+}
 
-.browser-sheet { flex: 1; padding: 24px; color: var(--text); font-family: var(--font); }
-.browser-phase { font-family: var(--mono); font-size: 12px; margin: 12px 0; color: var(--accent); }
-.browser-actions { display: flex; gap: 8px; }
+.browser-sidebar {
+  display: flex;
+  flex: 0 0 184px;
+  min-width: 0;
+  flex-direction: column;
+  border-right: 1px solid var(--border);
+  background: color-mix(in srgb, var(--bg-panel) 88%, var(--global-bg-color) 12%);
+  transition: flex-basis 180ms ease;
+}
+.browser-sidebar-collapsed .browser-sidebar { flex-basis: 48px; }
+.browser-sidebar-head {
+  display: flex;
+  min-height: 40px;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--ui-space-2);
+  padding: 6px 8px 6px 12px;
+  border-bottom: 1px solid var(--border);
+}
+.browser-sidebar-title { color: var(--accent); font: 700 10px/1 var(--mono); letter-spacing: .14em; }
+.browser-sidebar-toggle,
+.browser-tool-item {
+  display: flex;
+  align-items: center;
+  border: 1px solid transparent;
+  border-radius: var(--ui-radius-xs);
+  color: var(--text-dim);
+  background: transparent;
+  cursor: pointer;
+}
+.browser-sidebar-toggle { display: grid; width: 28px; height: 28px; place-items: center; padding: 0; }
+.browser-sidebar-toggle:hover,
+.browser-tool-item:hover { color: var(--text); background: var(--bg-hover); }
+.browser-sidebar-toggle:focus-visible,
+.browser-tool-item:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+.browser-tool-list { display: grid; gap: 2px; padding: 8px; }
+.browser-tool-item { min-height: 36px; gap: 10px; width: 100%; padding: 0 10px; font-size: 12px; text-align: left; }
+.browser-tool-item.active { border-color: color-mix(in srgb, var(--accent) 38%, var(--border)); color: var(--text); background: color-mix(in srgb, var(--accent) 10%, var(--bg-active)); box-shadow: inset 2px 0 var(--accent); }
+.browser-sidebar-collapsed .browser-sidebar-head { justify-content: center; padding: 6px; }
+.browser-sidebar-collapsed .browser-tool-item { justify-content: center; padding: 0; }
+.browser-sidebar-note { margin: auto 12px 12px; padding-top: 10px; border-top: 1px solid var(--border); color: var(--text-placeholder); font: 10px/1.5 var(--mono); }
+.browser-sidebar-note span { color: var(--accent); }
+
+.browser-main { display: flex; flex: 1; min-width: 0; min-height: 0; flex-direction: column; padding: var(--ui-space-4) var(--ui-space-5) var(--ui-space-5); overflow: hidden; }
+.browser-header { display: flex; flex: 0 0 auto; align-items: flex-start; justify-content: space-between; gap: var(--ui-space-4); margin-bottom: var(--ui-space-3); }
+.browser-status { padding: 4px 8px; border: 1px solid var(--border); border-radius: var(--ui-radius-pill); color: var(--text-dim); background: var(--bg-panel); font: 10px var(--mono); text-transform: uppercase; }
+.browser-status[data-phase="ready"] { color: var(--tool-ok); border-color: color-mix(in srgb, var(--tool-ok) 38%, var(--border)); }
+.browser-status[data-phase="starting"] { color: var(--tool-run); border-color: color-mix(in srgb, var(--tool-run) 38%, var(--border)); }
+.browser-status[data-phase="error"] { color: var(--tool-err, var(--danger)); border-color: color-mix(in srgb, var(--tool-err, var(--danger)) 38%, var(--border)); }
+
+.browser-toolbar { display: flex; flex: 0 0 auto; align-items: center; gap: var(--ui-space-1); min-height: 40px; margin-bottom: var(--ui-space-3); padding: 4px 6px; border: 1px solid var(--border); border-radius: var(--ui-radius-md); background: var(--bg-panel); }
+.browser-toolbar-button, .browser-toolbar-menu { display: grid; width: 30px; height: 30px; flex: 0 0 30px; place-items: center; border: 1px solid transparent; border-radius: var(--ui-radius-xs); color: var(--text-dim); background: transparent; cursor: pointer; }
+.browser-toolbar-button:hover:not(:disabled), .browser-toolbar-menu:hover { color: var(--text); background: var(--bg-hover); }
+.browser-toolbar-button:disabled { opacity: .35; cursor: not-allowed; }
+.browser-address-wrap { display: flex; min-width: 0; flex: 1; align-items: center; gap: 6px; height: 30px; padding: 0 9px; border: 1px solid var(--border); border-radius: var(--ui-radius-sm); color: var(--text-dim); background: var(--bg-input); }
+.browser-address { min-width: 0; flex: 1; height: 28px; padding: 0; border: 0; outline: 0; color: var(--text); background: transparent; font: 12px var(--mono); }
+.browser-address::placeholder { color: var(--text-placeholder); }
+.browser-address-wrap:focus-within { border-color: var(--accent); box-shadow: 0 0 0 2px color-mix(in srgb, var(--accent) 16%, transparent); }
+
+.browser-viewport { position: relative; display: flex; flex: 1; min-width: 0; min-height: 0; align-items: center; justify-content: center; overflow: hidden; border: 1px solid var(--border); border-radius: var(--ui-radius-md); background: var(--bg-panel); }
+.browser-empty-state { display: flex; align-items: center; justify-content: center; flex-direction: column; gap: var(--ui-space-2); width: min(560px, calc(100% - 48px)); padding: var(--ui-space-7); border: 1px dashed var(--border); border-radius: var(--ui-radius-md); color: var(--text-dim); background: color-mix(in srgb, var(--bg-panel) 72%, transparent); text-align: center; }
+.browser-empty-state strong { color: var(--text); font-size: 15px; }
+.browser-empty-hidden { visibility: hidden; pointer-events: none; }
+.browser-empty-mark { display: grid; width: 52px; height: 52px; place-items: center; margin-bottom: var(--ui-space-2); border: 1px solid color-mix(in srgb, var(--accent) 42%, var(--border)); border-radius: var(--ui-radius-md); color: var(--accent); background: color-mix(in srgb, var(--accent) 8%, var(--bg-panel)); font: 700 24px var(--mono); }
+.browser-empty-note { margin-top: var(--ui-space-2); color: var(--text-placeholder); font: 10px var(--mono); }
+.browser-actions { display: flex; gap: var(--ui-space-2); margin-top: var(--ui-space-4); }
+.browser-error { flex: 0 0 auto; margin-top: var(--ui-space-3); }
+
+@media (max-width: 720px) {
+  .browser-sidebar { flex-basis: 48px; }
+  .browser-sidebar-head { justify-content: center; padding: 6px; }
+  .browser-sidebar-title, .browser-tool-item span, .browser-sidebar-note { display: none; }
+  .browser-tool-item { justify-content: center; padding: 0; }
+  .browser-main { padding: var(--ui-space-3); }
+}

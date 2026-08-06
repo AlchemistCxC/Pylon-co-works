@@ -10,6 +10,7 @@ import GitPanel from './GitPanel'
 import DiffView from './DiffView'
 import WorkspaceSearchPanel from './WorkspaceSearchPanel'
 import DispatchBar from './DispatchBar'
+import ViewsPanel from './ViewsPanel'
 import type { SheetContext, SheetRecord } from '../../workspace-sheets/sheetTypes'
 import './FileSheet.css'
 
@@ -32,6 +33,7 @@ export default function FileSheetView({ sheet, ctx }: { sheet: SheetRecord; ctx:
   const activeFile = sheet.metadata?.activeFile ?? null
   const [truncated, setTruncated] = useState(false)
   const [activeDiff, setActiveDiff] = useState<{ path: string; staged: boolean } | null>(null)
+  const [sidebarCollapsed, setSidebarCollapsed] = useState(false)
   const [instruction, setInstruction] = useState('')
   const [selection, setSelection] = useState<DispatchSelection | null>(null)
   const [fileContent, setFileContent] = useState('')
@@ -69,26 +71,29 @@ export default function FileSheetView({ sheet, ctx }: { sheet: SheetRecord; ctx:
       <FileSheetSidebar
         activeSection={state.activeSection}
         targetSource={state.targetSource}
+        collapsed={sidebarCollapsed}
+        hidden={ctx.sidebarCollapsed}
         onSelectSection={selectSection}
         onSelectSource={selectSource}
+        onCollapse={() => setSidebarCollapsed(value => !value)}
       >
-        {state.activeSection === 'files' && <FileTree source={state.targetSource} onOpen={openTab} />}
-        {state.activeSection === 'scm' && (
-          <GitPanel source={state.targetSource} onOpenDiff={(path, staged) => setActiveDiff({ path, staged })} />
-        )}
+        {state.activeSection === 'files' && <FileTree source={state.targetSource} activeFile={activeFile} onOpen={openTab} />}
+        {state.activeSection === 'scm' && <GitPanel source={state.targetSource} />}
         {state.activeSection === 'search' && (
           <WorkspaceSearchPanel source={state.targetSource} onOpenResult={openTab} />
         )}
         {state.activeSection === 'views' && (
-          <div className="file-section-panel">
-            <div className="file-section-title">视图</div>
-            <p className="file-section-hint">视图分区（W2-04 起接线）</p>
-          </div>
+          <ViewsPanel
+            source={state.targetSource}
+            activeDiff={activeDiff}
+            onOpenDiff={(path, staged) => setActiveDiff({ path, staged })}
+            onCloseDiff={() => setActiveDiff(null)}
+          />
         )}
       </FileSheetSidebar>
       <main className="file-editor">
         <FileTabBar openTabs={openTabs} activeFile={activeFile} onSelect={selectTab} onClose={closeTab} />
-        {activeDiff ? (
+        {state.activeSection === 'views' && activeDiff ? (
           <DiffView source={state.targetSource} path={activeDiff.path} staged={activeDiff.staged} onClose={() => setActiveDiff(null)} />
         ) : activeFile ? (
           <>
