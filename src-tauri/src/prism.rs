@@ -52,29 +52,37 @@ pub struct InjectResult {
 }
 
 impl InjectResult {
+    /// 方案 1E：严格校验 Prism /inject 响应，识别 sidecar 协议漂移。
+    /// - `context` 必须是 string；`activated` 必须是 string 数组——缺失或类型错误
+    ///   一律 Err（不伪装成"成功的空注入"）；
+    /// - `source` 按兼容策略处理：缺失时保留空字符串（辅助字段，不缺失语义）。
+    /// 调用方（session.rs）对 Err 走 fail-open：不注入、原 prompt 照发、日志标记。
     fn from_value(value: &Value) -> Result<Self, String> {
+        let context = value
+            .get("context")
+            .and_then(|v| v.as_str())
+            .ok_or_else(|| format!("Prism inject response 缺 string 字段 context: {value}"))?
+            .to_string();
+        let activated = value
+            .get("activated")
+            .and_then(|v| v.as_array())
+            .ok_or_else(|| format!("Prism inject response 缺 array 字段 activated: {value}"))?
+            .iter()
+            .map(|item| {
+                item.as_str()
+                    .ok_or_else(|| format!("Prism inject activated 条目非 string: {value}"))
+                    .map(str::to_string)
+            })
+            .collect::<Result<Vec<_>, _>>()?;
+        let source = value
+            .get("source")
+            .and_then(|v| v.as_str())
+            .unwrap_or_default()
+            .to_string();
         Ok(Self {
-            context: value
-                .get("context")
-                .and_then(|v| v.as_str())
-                .unwrap_or_default()
-                .to_string(),
-            activated: value
-                .get("activated")
-                .and_then(|v| v.as_array())
-                .map(|items| {
-                    items
-                        .iter()
-                        .filter_map(|item| item.as_str())
-                        .map(str::to_string)
-                        .collect()
-                })
-                .unwrap_or_default(),
-            source: value
-                .get("source")
-                .and_then(|v| v.as_str())
-                .unwrap_or_default()
-                .to_string(),
+            context,
+            activated,
+            source,
         })
     }
 }
@@ -658,18 +666,61 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn inject_tolerates_missing_response_fields() {
+    async fn inject_rejects_malformed_empty_response() {
+        // 方案 1E：`{}` 是畸形响应（协议漂移），必须 Err，不得伪装成空注入成功。
         let (address, server) = spawn_response_server(
             b"HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: 2\r\nConnection: close\r\n\r\n{}",
+        );
+        let error = test_client(address, Some("t"))
+            .inject("", &[], "", 0)
+            .await
+            .expect_err("{} 必须视为畸形响应");
+        assert!(error.contains("context"), "错误应指明缺字段: {error}");
+        server.join().expect("server thread");
+    }
+
+    #[tokio::test]
+    async fn inject_accepts_fully_empty_valid_shape() {
+        // 方案 1E 矩阵：{"context":"","activated":[],"source":""} 是合法空注入 → Ok。
+        let (address, server) = spawn_response_server(
+            b"HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: 41\r\nConnection: close\r\n\r\n{\"context\":\"\",\"activated\":[],\"source\":\"\"}",
         );
         let result = test_client(address, Some("t"))
             .inject("", &[], "", 0)
             .await
-            .expect("empty response must parse");
+            .expect("合法空注入必须成功");
         assert_eq!(result.context, "");
         assert!(result.activated.is_empty());
         assert_eq!(result.source, "");
         server.join().expect("server thread");
+    }
+
+    #[test]
+    fn inject_from_value_rejects_type_mismatches() {
+        // 方案 1E 矩阵：类型错误一律 Err（漂移识别），不静默默认。
+        let err = InjectResult::from_value(&serde_json::json!({"context": 42, "activated": []}));
+        assert!(err.is_err(), "context:number 必须 Err");
+        let err = InjectResult::from_value(&serde_json::json!({"context": "", "activated": "ok"}));
+        assert!(err.is_err(), "activated:string 必须 Err");
+        let err = InjectResult::from_value(&serde_json::json!({"context": "", "activated": ["ok", 1]}));
+        assert!(err.is_err(), "activated 混合类型必须 Err");
+        let err = InjectResult::from_value(&serde_json::json!({"context": "x"}));
+        assert!(err.is_err(), "缺 activated 必须 Err");
+        let err = InjectResult::from_value(&serde_json::json!({"activated": []}));
+        assert!(err.is_err(), "缺 context 必须 Err");
+    }
+
+    #[test]
+    fn inject_from_value_tolerates_missing_source() {
+        // 方案 1E：source 缺失按兼容策略处理（辅助字段），context/activated 合法即可。
+        let result = InjectResult::from_value(&serde_json::json!({
+            "context": "ctx",
+            "activated": ["a", "b"],
+        }))
+        .expect("缺 source 必须兼容");
+        assert_eq!(result.context, "ctx");
+        assert_eq!(result.activated, vec!["a".to_string(), "b".to_string()]);
+        assert_eq!(result.source, "");
     }
 
     #[tokio::test]
