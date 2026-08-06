@@ -584,6 +584,21 @@ fn parse_proxy(proxy_raw: &str) -> Result<ProxyConfig, String> {
     Ok((host, port, userinfo))
 }
 
+/// 构造 HTTP CONNECT 请求行。有 userinfo 时写入真实 Proxy-Authorization Basic
+/// （明文 base64，仅出现在 wire，禁止进入任何日志/错误字符串）。
+fn build_connect_request(target_host: &str, target_port: u16, userinfo: Option<(&str, &str)>) -> String {
+    let mut req = format!(
+        "CONNECT {target_host}:{target_port} HTTP/1.1\r\n\
+         Host: {target_host}:{target_port}\r\n"
+    );
+    if let Some((user, pass)) = userinfo {
+        let basic = base64::engine::general_purpose::STANDARD.encode(format!("{user}:{pass}"));
+        req.push_str(&format!("Proxy-Authorization: Basic {basic}\r\n"));
+    }
+    req.push_str("\r\n");
+    req
+}
+
 async fn tunnel(
     proxy_raw: &str,
     target_host: &str,
@@ -599,15 +614,8 @@ async fn tunnel(
     .map_err(|_| format!("连代理超时（{}s）", CONNECT_TIMEOUT.as_secs()))?
     .map_err(|e| format!("连代理: {e}"))?;
 
-    let mut req = format!(
-        "CONNECT {target_host}:{target_port} HTTP/1.1\r\n\
-         Host: {target_host}:{target_port}\r\n"
-    );
-    if let Some((user, pass)) = userinfo {
-        let basic = base64::engine::general_purpose::STANDARD.encode(format!("{user}:{pass}"));
-        req.push_str(&format!("Proxy-Authorization: Basic {basic}\r\n"));
-    }
-    req.push_str("\r\n");
+    let userinfo_ref = userinfo.as_ref().map(|(u, p)| (u.as_str(), p.as_str()));
+    let req = build_connect_request(target_host, target_port, userinfo_ref);
     use tokio::io::AsyncWriteExt;
     stream
         .write_all(req.as_bytes())
@@ -848,6 +856,37 @@ mod tests {
         let _ = b.next();
         b = reconnect_backoff();
         assert_eq!(b.next(), Some(RECONNECT_BACKOFF_MIN), "重建后从头开始");
+    }
+
+    #[test]
+    fn connect_request_writes_real_basic_auth_wire() {
+        // 方案 1A：Proxy-Authorization 必须是真实 base64（wire），不得是占位 ***。
+        // "user:pass" 的 base64 = dXNlcjpwYXNz（方案 §5.3 capture 值）。
+        let req = build_connect_request("api.sgroup.qq.com", 443, Some(("user", "pass")));
+        assert!(
+            req.contains("Proxy-Authorization: Basic dXNlcjpwYXNz\r\n"),
+            "CONNECT 请求必须含真实 Basic wire: {req:?}"
+        );
+        assert!(req.starts_with("CONNECT api.sgroup.qq.com:443 HTTP/1.1\r\n"));
+        assert!(req.contains("Host: api.sgroup.qq.com:443\r\n"));
+        assert!(req.ends_with("\r\n\r\n"), "请求应以空行结束: {req:?}");
+    }
+
+    #[test]
+    fn connect_request_omits_auth_header_without_userinfo() {
+        let req = build_connect_request("api.sgroup.qq.com", 443, None);
+        assert!(
+            !req.contains("Proxy-Authorization"),
+            "无认证代理不得出现该 header: {req:?}"
+        );
+    }
+
+    #[test]
+    fn connect_request_never_leaks_credentials_into_loggable_string() {
+        // 密码不得出现在任何可日志字符串：wire 只含 base64，不含明文。
+        let req = build_connect_request("api.sgroup.qq.com", 443, Some(("user", "s3cret")));
+        assert!(!req.contains("s3cret"), "wire 不得含明文密码: {req:?}");
+        assert!(!req.contains("Basic s3cret"));
     }
 
     #[test]
