@@ -130,7 +130,8 @@ pub(crate) fn pick_option(options: &[String], prefer_reject: bool) -> Option<&st
 }
 
 /// 锁外应答发送共享 helper（G3 §2.2.2）：构造 {jsonrpc,id,result} 信封 → 序列化 →
-/// 10s 超时发送 → 超时置 crashed（语义对齐 acp::send_line / WRITE_TIMEOUT_SECS）。
+/// 超时发送（方案 2B：超时值与 acp::DEFAULT_WRITE_TIMEOUT_SECS 单一来源）→
+/// 超时置 crashed（语义对齐 acp::send_line）。
 /// 收敛 dispatcher::send_direct_permission_response 与 resolve_pending 的锁外发送段
 /// （三份同形拷贝 → 一份）；调用方（resolve_pending）在返回 false 时恢复 pending。
 pub(crate) async fn send_agent_response(
@@ -146,11 +147,19 @@ pub(crate) async fn send_agent_response(
     let Ok(line) = serde_json::to_string(&line) else {
         return false;
     };
-    match tokio::time::timeout(std::time::Duration::from_secs(10), write_tx.send(line)).await {
+    match tokio::time::timeout(
+        std::time::Duration::from_secs(crate::acp::DEFAULT_WRITE_TIMEOUT_SECS),
+        write_tx.send(line),
+    )
+    .await
+    {
         Ok(Ok(())) => true,
         Ok(Err(_)) => false,
         Err(_) => {
-            tracing::warn!("ACP write timeout after 10s: connection presumed dead");
+            tracing::warn!(
+                "ACP write timeout after {}s: connection presumed dead",
+                crate::acp::DEFAULT_WRITE_TIMEOUT_SECS
+            );
             crashed.store(true, Ordering::Release);
             false
         }
