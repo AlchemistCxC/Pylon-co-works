@@ -1,4 +1,4 @@
-/* W1-08 Runtime 观察面：消费现有主题变量，零新样式体系 */
+/* A3-04a Runtime：外层轻量产品型，日志数据区保持紧凑专业型。 */
 
 .runtime-sheet {
   flex: 1;
@@ -12,48 +12,70 @@
   width: var(--sheet-sidebar-width, 250px);
   flex: 0 0 var(--sheet-sidebar-width, 250px);
   border-right: 1px solid var(--border);
-  padding: 12px;
+  background: color-mix(in srgb, var(--bg-panel) 70%, transparent);
   overflow-y: auto;
 }
+
+.runtime-sidebar-head {
+  padding: var(--ui-space-4) var(--ui-space-3) var(--ui-space-3);
+  border-bottom: 1px solid var(--border);
+}
+.runtime-sidebar-kicker { color: var(--accent); font: 700 10px/1 var(--mono); letter-spacing: 0.14em; opacity: 0.8; }
+.runtime-sidebar-title { margin-top: var(--ui-space-2); font-size: 15px; font-weight: 650; }
+.runtime-sidebar-summary { margin-top: var(--ui-space-1); color: var(--text-dim); font: 11px/1.4 var(--mono); }
 
 .runtime-filter {
   display: flex;
   flex-direction: column;
-  gap: 6px;
+  gap: var(--ui-space-2);
+  padding: var(--ui-space-3);
 }
 
 .runtime-filter-label {
+  margin-top: var(--ui-space-1);
   font-size: 11px;
+  font-weight: 600;
   color: var(--text-dim);
 }
 
 .runtime-filter-select,
 .runtime-filter-input {
+  width: 100%;
+  height: var(--ui-control-standard);
   font-family: var(--font);
-  font-size: 12px;
+  font-size: 13px;
   color: var(--text);
   background: var(--bg-input);
   border: 1px solid var(--border);
-  border-radius: 4px;
-  padding: 4px 6px;
+  border-radius: var(--ui-radius-sm);
+  padding: 0 var(--ui-space-3);
+  outline: none;
+  transition: border-color 150ms ease, box-shadow 150ms ease, background 150ms ease;
 }
+.runtime-filter-select:hover,
+.runtime-filter-input:hover { border-color: var(--border-focus); }
+.runtime-filter-select:focus,
+.runtime-filter-input:focus { border-color: var(--accent); box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent) 14%, transparent); }
 
 .runtime-clear {
-  margin-top: 8px;
-  padding: 4px 8px;
-  font-size: 12px;
+  height: var(--ui-control-standard);
+  margin-top: var(--ui-space-2);
+  padding: 0 var(--ui-space-3);
+  font-size: 13px;
   font-family: var(--font);
   color: var(--text);
-  background: var(--bg-active);
+  background: var(--bg-panel);
   border: 1px solid var(--border);
-  border-radius: 4px;
+  border-radius: var(--ui-radius-sm);
   cursor: pointer;
+  transition: background 150ms ease, border-color 150ms ease;
 }
 
 .runtime-clear:hover {
   background: var(--bg-hover);
   border-color: var(--border-focus);
 }
+.runtime-clear:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
 
 .runtime-main {
   flex: 1;
@@ -63,10 +85,13 @@
 }
 
 .runtime-count {
-  padding: 6px 12px;
-  font-size: 11px;
+  min-height: var(--ui-control-standard);
+  display: flex; align-items: center; justify-content: space-between;
+  padding: 0 var(--ui-space-3);
+  font: 11px/1 var(--mono);
   color: var(--text-dim);
   border-bottom: 1px solid var(--border);
+  background: color-mix(in srgb, var(--bg-panel) 46%, transparent);
 }
 
 .runtime-log-list {
@@ -75,46 +100,54 @@
   padding: 0;
   overflow-y: auto;
   flex: 1;
+  background: color-mix(in srgb, var(--global-bg-color) 16%, transparent);
 }
+.runtime-log-list > li { border-bottom: 1px solid color-mix(in srgb, var(--border) 64%, transparent); }
 
 .runtime-log-row {
   display: flex;
-  gap: 8px;
+  gap: var(--ui-space-2);
   align-items: baseline;
+  min-height: 30px;
   width: 100%;
   text-align: left;
-  padding: 4px 12px;
+  padding: 5px var(--ui-space-3);
   font-size: 12px;
+  line-height: 1.55;
   font-family: var(--mono);
   color: var(--text);
   background: transparent;
   border: none;
   cursor: pointer;
+  outline: none;
+  transition: background 100ms ease;
 }
 
 .runtime-log-row:hover {
   background: var(--bg-hover);
 }
+.runtime-log-row:focus-visible { box-shadow: inset 3px 0 0 var(--accent); background: var(--bg-hover); }
 
 .runtime-log-error { color: var(--danger, #e5484d); }
 .runtime-log-warn { color: var(--ekgYellow, #fbbf24); }
 .runtime-log-debug, .runtime-log-trace { color: var(--text-dim); }
 
 .runtime-log-id { color: var(--text-dim); width: 3em; flex: 0 0 3em; }
-.runtime-log-level { width: 4em; flex: 0 0 4em; }
+.runtime-log-level { width: 4em; flex: 0 0 4em; font-weight: 700; text-transform: uppercase; }
 .runtime-log-source { width: 6em; flex: 0 0 6em; overflow: hidden; text-overflow: ellipsis; }
 .runtime-log-time { color: var(--text-dim); width: 8em; flex: 0 0 8em; }
 .runtime-log-message { flex: 1; min-width: 0; word-break: break-word; }
 
 .runtime-log-detail {
-  margin: 0 12px 6px 12px;
-  padding: 6px 8px;
+  margin: var(--ui-space-1) var(--ui-space-3) var(--ui-space-2);
+  padding: var(--ui-space-2) var(--ui-space-3);
   font-size: 11px;
   background: var(--bg-input);
   border: 1px solid var(--border);
-  border-radius: 4px;
+  border-radius: var(--ui-radius-sm);
   color: var(--text-dim);
 }
+.runtime-log-field + .runtime-log-field { margin-top: var(--ui-space-1); }
 
 .runtime-log-field code {
   font-family: var(--mono);
@@ -123,21 +156,22 @@
 
 /* W1-09：启动诊断卡 + crashed/error 本地标记（非后端日志） */
 .runtime-diagnostics {
-  padding: 8px 12px;
+  padding: var(--ui-space-3);
   border-bottom: 1px solid var(--border);
-  background: var(--bg-panel);
+  background: color-mix(in srgb, var(--bg-panel) 78%, transparent);
 }
 
 .runtime-diagnostics-title,
 .runtime-markers-title {
-  font-size: 11px;
-  color: var(--text-dim);
-  margin-bottom: 6px;
+  font-size: 12px;
+  font-weight: 650;
+  color: var(--text);
+  margin-bottom: var(--ui-space-2);
 }
 
 .runtime-diagnostics-row {
   display: flex;
-  gap: 8px;
+  gap: var(--ui-space-2);
   align-items: center;
   flex-wrap: wrap;
 }
@@ -145,13 +179,14 @@
 .runtime-diag-chip {
   font-family: var(--mono);
   font-size: 11px;
-  padding: 2px 8px;
-  border-radius: 4px;
+  padding: 4px 9px;
+  border-radius: var(--ui-radius-pill);
   border: 1px solid var(--border);
+  background: color-mix(in srgb, var(--bg-input) 80%, transparent);
 }
 
-.runtime-diag-ok { color: var(--tool-ok, #1e9646); }
-.runtime-diag-bad { color: var(--danger, #e5484d); }
+.runtime-diag-ok { color: var(--tool-ok, #1e9646); border-color: color-mix(in srgb, var(--tool-ok, #1e9646) 30%, var(--border)); }
+.runtime-diag-bad { color: var(--danger, #e5484d); border-color: color-mix(in srgb, var(--danger, #e5484d) 30%, var(--border)); }
 
 .runtime-diagnostics-source {
   font-size: 11px;
@@ -159,17 +194,17 @@
 }
 
 .runtime-markers {
-  padding: 8px 12px;
+  padding: var(--ui-space-3);
   border-bottom: 1px solid var(--border);
-  background: var(--bg-input);
+  background: color-mix(in srgb, var(--danger) 5%, var(--bg-input));
 }
 
 .runtime-marker {
   display: flex;
-  gap: 8px;
+  gap: var(--ui-space-2);
   font-family: var(--mono);
   font-size: 11px;
-  padding: 2px 0;
+  padding: var(--ui-space-1) 0;
 }
 
 .runtime-marker-status { color: var(--danger, #e5484d); }

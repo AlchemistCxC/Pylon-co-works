@@ -61,6 +61,11 @@ export default function RuntimeSheetView({ sheet: _sheet, ctx: _ctx }: { sheet: 
   return (
     <div className="runtime-sheet">
       <aside className="runtime-sidebar">
+        <div className="runtime-sidebar-head">
+          <div className="runtime-sidebar-kicker">OBSERVE</div>
+          <div className="runtime-sidebar-title">日志筛选</div>
+          <div className="runtime-sidebar-summary">{filtered.length} / {entries.length} 条</div>
+        </div>
         <div className="runtime-filter">
           <label className="runtime-filter-label">级别</label>
           <select className="runtime-filter-select" value={filter.level || ''} onChange={event => setFilter(f => ({ ...f, level: event.target.value || undefined }))}>
@@ -102,7 +107,10 @@ export default function RuntimeSheetView({ sheet: _sheet, ctx: _ctx }: { sheet: 
             ))}
           </div>
         )}
-        <div className="runtime-count">{filtered.length} 条日志</div>
+        <div className="runtime-count">
+          <span>实时日志</span>
+          <span>{filtered.length} 条</span>
+        </div>
         <ul className="runtime-log-list">
           {filtered.map(entry => (
             <li key={entry.id}>
