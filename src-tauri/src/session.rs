@@ -1710,9 +1710,11 @@ pub(crate) async fn set_config_option(
     let peri_id = state.get_peri_id(&runtime, &source)?;
     // G2-03：D2 路由收敛——set_model_api 枚举三路（ConfigOption 默认 / SetModel /
     // Disabled）；route() 收编了 key=="model" 特判（G1 交付，agent_config.rs）。
+    // 方案 4：路由按 target runtime 归属 agent 的 protocol 决定（protocol_for_runtime），
+    // 而非 active agent 的协议——多 runtime/agents 表与注册不同步时避免跨 runtime
+    // 读取错误协议策略；无 active runtime 时 require_runtime 已返回 no_active_agent。
     let target = state
-        .get_active_agent()?
-        .protocol()
+        .protocol_for_runtime(&runtime)
         .set_model_api()
         .route(&key);
     let response = match target {
@@ -2052,6 +2054,7 @@ pub(crate) async fn list_persisted_sessions(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use tauri::Manager;
 
     /// 测试桩适配器（G4 §3-9 适配）：platform_key="qq"——注册后 is_platform_source
     /// 对 qq:* 前缀命中（C3/C4 拒绝语义依赖注册态；E14 放行语义依赖未注册态）。
@@ -2304,6 +2307,108 @@ for line in sys.stdin:
         std::fs::remove_dir_all(&dir).ok();
         result
             .expect("3 附件必须按 runtime 归属 agent 的 8 上限放行（active agent 上限 1 被忽略）");
+    }
+
+    /// 方案 4：set_config_option 的 RPC 路由必须按 target runtime 归属 agent 的
+    /// protocol（protocol_for_runtime）决定，而非 get_active_agent() 的协议——
+    /// 修复前按 active agent 读取，在 agents 表与 runtimes 注册不同步/多 runtime
+    /// 场景会错发 RPC。此处验证：runtime 归属 agent 声明 ConfigOption 时走
+    /// session/set_config_option，绝不走 session/set_model。
+    #[tokio::test]
+    async fn set_config_option_uses_runtime_agent_protocol_not_active_agent() {
+        const FAKE_SCRIPT: &str = r#"import json,sys
+trace=open(sys.argv[1],'w',encoding='utf-8')
+for line in sys.stdin:
+    request = json.loads(line)
+    trace.write(json.dumps(request)+'\n')
+    trace.flush()
+    method = request.get('method')
+    if method == 'session/new':
+        response = {'jsonrpc':'2.0','id':request.get('id'),'result':{'sessionId':'p4-session'}}
+    elif method == 'session/set_config_option':
+        response = {'jsonrpc':'2.0','id':request.get('id'),'result':{'configOptions':[{'key':'model','value':'gpt-4'}]}}
+    else:
+        response = {'jsonrpc':'2.0','id':request.get('id'),'result':{}}
+    print(json.dumps(response), flush=True)
+"#;
+        let trace_path = std::env::temp_dir()
+            .join(format!("pylon-p4-{}.jsonl", std::process::id()));
+        // active agent A：set_model_api = SetModel（若误用其协议 → 走 session/set_model）
+        let mut active_def =
+            crate::test_utils::fake_acp_agent_with("active-a", FAKE_SCRIPT, vec![], HashMap::new());
+        active_def.acp = Some(crate::agent_config::AcpProtocolConfig {
+            set_model_api: Some(crate::agent_config::SetModelApi::SetModel),
+            ..Default::default()
+        });
+        // runtime 归属 agent B：set_model_api = ConfigOption（正确应走 set_config_option）
+        let mut runtime_def = crate::test_utils::fake_acp_agent_with(
+            "runtime-b",
+            FAKE_SCRIPT,
+            vec![trace_path.to_string_lossy().into_owned()],
+            HashMap::new(),
+        );
+        runtime_def.acp = Some(crate::agent_config::AcpProtocolConfig {
+            set_model_api: Some(crate::agent_config::SetModelApi::ConfigOption),
+            ..Default::default()
+        });
+        let runtime = AgentRuntime::new_disconnected();
+        *runtime.acp.lock().await = crate::acp::AcpClient::connect_with_logs(&runtime_def, None)
+            .await
+            .expect("fake ACP must initialize");
+        let state = crate::test_utils::TestStateBuilder::bare()
+            .with_active_agent("runtime-b")
+            .with_agent(active_def)
+            .with_agent(runtime_def)
+            .with_runtime("runtime-b", runtime.clone())
+            .build();
+        let app = tauri::test::mock_builder()
+            .build(tauri::test::mock_context(tauri::test::noop_assets()))
+            .expect("mock app must build");
+        app.manage(state);
+        let state = app.state::<AppState>();
+        // 预置会话映射（set_config_option 经 get_peri_id 查表；绕过 session/new
+        // command 的完整注册流程，聚焦本测试的协议路由断言）。
+        {
+            let mut sessions = runtime.sessions.lock().unwrap();
+            sessions.insert(
+                "p4-session".to_string(),
+                SessionInfo::new("p4-peri".to_string(), String::new(), ".".to_string(), false, 0),
+            );
+        }
+        let result = set_config_option(
+            state,
+            "p4-session".to_string(),
+            "model".to_string(),
+            "gpt-4".to_string(),
+        )
+        .await
+        .expect("set_config_option 必须成功");
+        assert_eq!(
+            result["configOptions"][0]["value"], "gpt-4",
+            "响应应含 configOptions"
+        );
+        // 回读 trace：必须出现 session/set_config_option，不得出现 session/set_model
+        let trace = std::fs::read_to_string(&trace_path).expect("read trace");
+        std::fs::remove_file(&trace_path).ok();
+        let methods: Vec<String> = trace
+            .lines()
+            .map(|line| {
+                let value: serde_json::Value = serde_json::from_str(line).unwrap();
+                value
+                    .get("method")
+                    .and_then(|m| m.as_str())
+                    .unwrap_or("")
+                    .to_string()
+            })
+            .collect();
+        assert!(
+            methods.iter().any(|m| m == "session/set_config_option"),
+            "必须按 runtime 归属 agent 走 set_config_option: {methods:?}"
+        );
+        assert!(
+            !methods.iter().any(|m| m == "session/set_model"),
+            "不得按 active agent 走 set_model: {methods:?}"
+        );
     }
 
     /// A3：Round N 迟到 chunk 在 Round N+1 推进（clear）之后才被 dispatcher 追加
