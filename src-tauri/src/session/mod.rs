@@ -289,13 +289,16 @@ impl AppState {
         peri_id: &str,
     ) -> Result<(String, u64, String), String> {
         let generation = self.current_generation(runtime);
-        let sessions = runtime.sessions.lock().map_err(|error| error.to_string())?;
-        let matches: Vec<(&String, &SessionInfo)> = sessions
+        // 方案 8 步骤 5：snapshot 锁内 clone、锁外组装（SessionStore 纪律）。
+        let sessions = crate::session_store::snapshot(runtime)
+            .map_err(|error| error.to_string())?;
+        let matches: Vec<(String, String)> = sessions
             .iter()
             .filter(|(_, session)| session.peri_id == peri_id && session.generation == generation)
+            .map(|(source, session)| (source.clone(), session.cwd.clone()))
             .collect();
         match matches.as_slice() {
-            [(source, session)] => Ok(((*source).clone(), generation, session.cwd.clone())),
+            [(source, cwd)] => Ok((source.clone(), generation, cwd.clone())),
             [] => Err("export session not found in the active generation".to_string()),
             _ => Err("export session owner is ambiguous".to_string()),
         }

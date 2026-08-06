@@ -97,6 +97,41 @@ pub(crate) fn remove_if_current(
     Ok(removed)
 }
 
+/// 条件删除（方案 8 步骤 4，expiry 场景）：(peri_id, generation) 匹配 + 锁内
+/// updated_at 复核——快照值与删除时点之间新消息到达会刷新 updated_at，不得
+/// 误杀刚活跃的会话。复核函数由调用方传入（expiry 域的 session_expired 纯函数），
+/// store 保持无域依赖；锁外收敛 prompt 锁（锁序单向）。
+pub(crate) fn remove_if_current_expired<F>(
+    runtime: &AgentRuntime,
+    source: &str,
+    peri_id: &str,
+    generation: u64,
+    still_expired: F,
+) -> Result<bool, SessionStoreError>
+where
+    F: FnOnce(&SessionInfo) -> bool,
+{
+    let removed = {
+        let mut sessions = runtime
+            .sessions
+            .lock()
+            .map_err(|e| SessionStoreError::LockPoisoned(e.to_string()))?;
+        let current = sessions.get(source);
+        let matches = current.map(|session| {
+            session_mapping_matches(&session.peri_id, session.generation, peri_id, generation)
+        }) == Some(true);
+        if matches && current.is_some_and(still_expired) {
+            sessions.remove(source).is_some()
+        } else {
+            false
+        }
+    };
+    if removed {
+        runtime.remove_prompt_lock(source);
+    }
+    Ok(removed)
+}
+
 /// migrate epoch（方案 8，对应 apply_client_replacement_sessions 的 keep=true 语义）：
 /// 全部映射的 generation 迁移到 new_generation；keep=false 时清空。返回被清空的旧 source 键。
 pub(crate) fn migrate_or_clear(
@@ -120,7 +155,6 @@ pub(crate) fn migrate_or_clear(
     Ok(stale_sources)
 }
 
-#[cfg(test)]
 pub(crate) fn snapshot(
     runtime: &AgentRuntime,
 ) -> Result<Vec<(String, SessionInfo)>, SessionStoreError> {

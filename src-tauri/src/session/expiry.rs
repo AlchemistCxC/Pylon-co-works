@@ -74,38 +74,25 @@ pub(crate) async fn check_session_expiry(state: &AppState) {
             // 审查修复：删除前按 (peri_id, generation) 复核映射——close RPC 期间若
             // 同 source 新建了会话，不得把新映射误删（旧映射已被 new_session 替换）。
             // generation 提到循环体（close_session_rpc 复用；块内删除复核同值）。
+            // 方案 8 步骤 4：删除委托 SessionStore（generation 匹配 + 锁内 updated_at
+            // 复核防误杀刚活跃会话 + 锁外 prompt 锁收敛）。
             let generation = runtime.client_generation.load(Ordering::Acquire);
-            let removed = {
-                let mut sessions = match runtime.sessions.lock() {
-                    Ok(guard) => guard,
-                    Err(poisoned) => poisoned.into_inner(),
-                };
-                let current = sessions.get(&source);
-                if current.map(|session| {
-                    session_mapping_matches(
-                        &session.peri_id,
-                        session.generation,
-                        &peri_id,
-                        generation,
-                    )
-                }) != Some(true)
-                {
-                    false
-                } else {
-                    let current = current.expect("已确认存在");
-                    // 锁内用最新 updated_at 复核——快照值与删除时点之间新消息到达会刷新
-                    // updated_at，不得误杀刚活跃的会话。
-                    if session_expired(current.updated_at, now, reset, idle_minutes).is_some() {
-                        sessions.remove(&source).is_some()
-                    } else {
-                        false
-                    }
-                }
-            };
-            if removed {
-                // O1：映射删除 = 该 source 生命周期结束 → 锁表同步收敛
-                runtime.remove_prompt_lock(&source);
-            }
+            let removed = crate::session_store::remove_if_current_expired(
+                &runtime,
+                &source,
+                &peri_id,
+                generation,
+                |current| {
+                    // 锁内用最新 updated_at 复核——快照值与删除时点之间新消息到达
+                    // 会刷新 updated_at，不得误杀刚活跃的会话。
+                    session_expired(current.updated_at, now, reset, idle_minutes).is_some()
+                },
+            )
+            .map_err(|e| {
+                tracing::warn!("会话过期删除失败 ({source}): {e}");
+                e
+            })
+            .unwrap_or(false);
             if !removed {
                 // 映射已变更（新会话已接管 source）——不 close、不通知
                 continue;
