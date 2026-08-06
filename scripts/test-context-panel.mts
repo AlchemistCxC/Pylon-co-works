@@ -41,3 +41,38 @@ assert.match(slot, /if \(!rightPanel \|\| rightPanel === 'none' \|\| rightPanelC
 assert.match(slot, /rightPanelCollapsed = useWorkspaceStore\(s => s\.rightPanelCollapsed\)/, 'slot 必须读折叠状态')
 
 console.log('context panel 壳守卫通过')
+// W2-12：右栏退役——AgentContextPanel/FileContextPanel 接线 + 无旧 RightPanel 残留
+
+// 6. AgentContextPanel：搜索经共享 sessionUiState（hook 行为不变）+ 关联读 touchedFiles
+{
+  const acp = readFileSync(new URL('../src/components/right-panel/AgentContextPanel.tsx', import.meta.url), 'utf8')
+  assert.match(acp, /useSessionUiState\(sessionId, 'search-query'/, '搜索必须经共享 sessionUiState（ChatView hook 行为不变）')
+  assert.match(acp, /getChatController\(\)\?\.getMessages\(source\)/, '消息快照必须经 handle.getMessages')
+  assert.match(acp, /s\.touchedFiles\[source\]/, '关联必须读 touchedFiles（正向）')
+  assert.match(acp, /import MessageSearchBar/, '必须复用 MessageSearchBar')
+  const fcp = readFileSync(new URL('../src/components/right-panel/FileContextPanel.tsx', import.meta.url), 'utf8')
+  assert.match(fcp, /touchedFiles\[source\]/, 'file 右栏必须反查 touchedFiles')
+}
+
+// 7. 搜索定位行为不变：useMessageSearch 仍在 ChatView（匹配/滚动定位）
+{
+  const chatView = readFileSync(new URL('../src/components/chat/ChatView.tsx', import.meta.url), 'utf8')
+  assert.match(chatView, /useMessageSearch\(sessionId, messages\)/, 'hook 仍在 ChatView（行为不变）')
+  assert.match(chatView, /searchMatches\[searchIndex\]\?\.id/, '活动命中高亮保留')
+  assert.equal(chatView.includes('<MessageSearchBar'), false, '搜索 UI 已迁右栏')
+}
+
+// 8. 旧 RightPanel 整体退役：无 import/class 残留
+{
+  const walk = ['src/components/RightPanel.tsx', 'src/components/right-panel/LogsPanel.tsx', 'src/components/right-panel/WorkspacePanel.tsx', 'src/components/right-panel/RightPanelTabs.tsx', 'src/components/right-panel/logsApi.ts']
+  for (const path of walk) {
+    try {
+      readFileSync(new URL('../' + path, import.meta.url), 'utf8')
+      assert.fail(path + ' 不应存在')
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error
+    }
+  }
+  const app = readFileSync(new URL('../src/App.tsx', import.meta.url), 'utf8')
+  assert.equal(app.includes('components/RightPanel'), false, 'App 不得引用旧 RightPanel')
+}

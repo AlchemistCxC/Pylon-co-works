@@ -51,6 +51,8 @@ export interface ChatControllerHandle {
   getSnapshot: (source: string) => number
   /** 横向读取：任务快照（planEntries） */
   getTasks: (source: string) => PlanEntry[]
+  /** W2-12：消息快照访问器（右栏搜索消费；hook 行为不变） */
+  getMessages: (source: string) => Message[]
   /** 横向读取：思考开始时间戳（thinking 时长显示用） */
   getThinkingStart: (source: string) => number | undefined
   /** 会话集合变化后清理孤儿 source 状态（替代 clearChatSourceRefs） */
@@ -391,6 +393,7 @@ export function attachChatEventController(refs: ChatEventControllerRefs): ChatCo
     subscribe: horizontal.subscribe,
     getSnapshot: horizontal.getSnapshot,
     getTasks: (source) => runtimeState[source]?.planEntries ?? [],
+    getMessages: (source) => runtimeState[source]?.messages ?? [],
     getThinkingStart: (source) => runtimeState[source]?.thinkingStart,
     pruneSources,
     dispose: () => {

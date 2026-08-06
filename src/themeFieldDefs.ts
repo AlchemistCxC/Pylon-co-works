@@ -249,11 +249,13 @@ export const THEME_FIELD_DEFS = {
   modeEditColor: { ...C('cc', '模式·edit'), default: '#A2A9E4', group: "控件样式", advanced: true },
 
   // ── right ──
-  rightBg: { ...C('right', '背景色'), default: 'rgba(0,0,0,0.02)', group: "外观", },
-  rightBgImage: { ...T('right', '背景图'), default: '', control: 'bgImage', group: "外观", },
-  rightWidth: { ...N('right', '宽度', 200, 400), default: 260, group: "外观", unit: 'px' },
-  rightTransparency: { ...N('right', '透明度', 0, 1, 0.05), default: 1, group: "玻璃效果", percent: true, suffix: '%' },
-  rightBlur: { ...N('right', '模糊', 0, 40, 2), default: 0, group: "玻璃效果", unit: 'px', suffix: 'px' },
+  // W2-12：旧 RightPanel 退役——右栏背景字段保留兼容预设，不再注入 cssVar（防死注入）
+  rightBg: { ...C('right', '背景色'), default: 'rgba(0,0,0,0.02)', group: "外观", noCssVar: true, hidden: true },
+  rightBgImage: { ...T('right', '背景图'), default: '', control: 'bgImage', group: "外观", noCssVar: true, hidden: true },
+  // W2-12：宽度经 App 计算 rightInset inline 应用，不注入 cssVar
+  rightWidth: { ...N('right', '宽度', 200, 400), default: 260, group: "外观", unit: 'px', noCssVar: true },
+  rightTransparency: { ...N('right', '透明度', 0, 1, 0.05), default: 1, group: "玻璃效果", percent: true, suffix: '%', noCssVar: true, hidden: true },
+  rightBlur: { ...N('right', '模糊', 0, 40, 2), default: 0, group: "玻璃效果", unit: 'px', suffix: 'px', noCssVar: true, hidden: true },
 
   // ── META（持久化但非预设内容）──
   ccEditMode: { default: false, type: 'text', label: '编辑模式', zone: 'cc', noCssVar: true, hidden: true, meta: true },

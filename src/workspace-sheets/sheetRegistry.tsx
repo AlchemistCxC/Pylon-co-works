@@ -5,6 +5,8 @@ import OverviewSheetView from '../sheets/OverviewSheetView'
 import RuntimeSheetView from '../sheets/RuntimeSheetView'
 import FileSheetView from '../sheets/file/FileSheetView'
 import Sidebar from '../components/Sidebar'
+import AgentContextPanel from '../components/right-panel/AgentContextPanel'
+import FileContextPanel from '../components/right-panel/FileContextPanel'
 
 /**
  * sheetRegistry — 渲染注册表（W1-02，F1-B/F2-A）。
@@ -41,12 +43,13 @@ const agentRender = (sheet: SheetRecord, ctx: SheetContext) => <AgentSheetView s
 
 export const SHEET_RENDER_REGISTRY: Record<SheetKind, SheetRenderEntry> = {
   // W1-03：侧栏上移——agent 的 Sidebar 由布局层经 slot 渲染（entry.sidebar 声明）
-  agent: { render: agentRender, sidebar: Sidebar },
+  // W2-12：agent/file 右栏（F2-F）——搜索/关联；旧 RightPanel 退役
+  agent: { render: agentRender, sidebar: Sidebar, rightPanel: AgentContextPanel },
   prism: { render: () => <Suspense fallback={LOADING_FALLBACK}><PrismManagerSheetView /></Suspense> },
   // W1-08：runtime 日志观察面（list 回放 + runtime-log 增量，无右栏）
   runtime: { render: (sheet, ctx) => <RuntimeSheetView sheet={sheet} ctx={ctx} /> },
   // W2-03：FileSheet 分区壳（singletonKey file:{source}，内部指向可改）
-  file: { render: (sheet, ctx) => <FileSheetView sheet={sheet} ctx={ctx} /> },
+  file: { render: (sheet, ctx) => <FileSheetView sheet={sheet} ctx={ctx} />, rightPanel: FileContextPanel },
   // W1-05：overview 启动选择器（虚拟空态，不写入持久 sheet 数组）
   overview: { render: (sheet, ctx) => <OverviewSheetView sheet={sheet} ctx={ctx} /> },
   search: { render: () => <UnavailableSheet kind="search" /> },

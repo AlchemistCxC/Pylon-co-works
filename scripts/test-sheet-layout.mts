@@ -27,7 +27,7 @@ assert.match(sidebar, /sidebarCollapsed: collapsed/, 'Sidebar 折叠读 ctx.side
 assert.match(sidebar, /activeSession, selectSession: onSelectSession/, 'Sidebar 会话/对话框从 ctx 解构')
 
 // 4. 侧栏挂载点上移：registry entry.sidebar + SheetLayout 经 slot 渲染
-assert.match(registry, /agent: \{ render: agentRender, sidebar: Sidebar \}/, 'agent entry 必须声明 sidebar')
+assert.match(registry, /agent: \{ render: agentRender, sidebar: Sidebar, rightPanel: AgentContextPanel \}/, 'agent entry 必须声明 sidebar + 右栏（W2-12）')
 assert.match(slot, /showSidebar/, 'slot 必须消费 showSidebar 主题开关')
 assert.match(layout, /<SheetSidebarSlot sheet=\{activeSheet\} ctx=\{ctx\} \/>/, 'SheetLayout 渲染侧栏壳')
 

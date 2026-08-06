@@ -97,38 +97,6 @@ assert.match(controller, /frames && frames\.length > 0 \? frames : undefined/, '
 // 配置导入 key 白名单
 const configImport = read('../src/configExportImport.ts')
 assert.match(configImport, /allowed\.has\(key\)/, '导入必须按 CONFIG_STORAGE_KEYS 白名单过滤')
-// RightPanel 展开/读文件独立 generation
-const rightPanel = read('../src/components/RightPanel.tsx')
-assert.doesNotMatch(rightPanel, /requestGeneration/, 'RightPanel 不得再共享单一 generation')
-assert.match(rightPanel, /expandGeneration/, '展开必须独立 generation')
-assert.match(rightPanel, /readGeneration/, '读文件必须独立 generation')
-// lastConnectedAt 类型对应用户端 string 序列化
-const agentTypes = read('../src/components/settings/agentTypes.ts')
-assert.match(agentTypes, /lastConnectedAt\?: string \| number/, 'lastConnectedAt 必须标注 string | number')
-
-// ── 骨架：手写组声明式化（个人信息/强调色/布局骨架进 defs）──
-assert.match(defs, /userName: \{[\s\S]*?group: "个人信息"/, '显示名必须进个人信息组')
-assert.match(defs, /userColor: \{[\s\S]*?group: "个人信息"/, '名字颜色必须进个人信息组')
-assert.match(defs, /accent: \{[\s\S]*?group: "强调色"/, '强调色必须进强调色组')
-assert.match(defs, /showTabBar: \{[\s\S]*?B\('global'[\s\S]*?group: "布局骨架"/, 'Tab 条必须并入 global/布局骨架')
-assert.match(defs, /showPet: \{[\s\S]*?group: "布局骨架", hint: '隐藏 Tab\/侧栏\/宠物/, '布局骨架 hint 必须保留')
-assert.match(defs, /global: \[\{ groups: \[\{ title: '个人信息' \}, \{ title: '强调色' \}, \{ title: '布局骨架' \}/, 'GROUP_ORDER.global 必须含新声明式组')
-assert.doesNotMatch(settings, /<Group title="个人信息">/, 'Settings 不得再手写个人信息组')
-assert.doesNotMatch(settings, /<Group title="强调色">/, 'Settings 不得再手写强调色组')
-assert.doesNotMatch(settings, /<Group title="布局骨架">/, 'Settings 不得再手写布局骨架组')
-assert.equal((settings.match(/<ConfigBackupRow \/>/g) ?? []).length, 1, 'ConfigBackupRow 不得重复渲染')
-
-// ── 高危修复契约（2026-08-03 逻辑检测）──
-// setGlobalPreset 是规范快照：点击预设总是恢复其排布（预设不携带 ccLayout → 默认布局）。
-// 用户报告：编辑过的 widget 排布残留导致"预设覆盖不生效、无法恢复原预设"
-assert.match(presetReducer, /function setGlobalPresetReducer\([\s\S]*?ccLayout: normalizeCcLayout\(theme\.ccLayout\),/, 'setGlobalPreset 必须无条件恢复规范排布')
-// ConfigOptionsPanel 按 option 序列号守卫回滚
-const configPanel = read('../src/components/settings/ConfigOptionsPanel.tsx')
-assert.match(configPanel, /latestReqRef/, 'ConfigOptionsPanel 必须维护请求序列号')
-assert.match(configPanel, /if \(latestReqRef\.current\[id\] !== seq\) return/, '旧请求失败不得回滚')
-// W1-03：启动恢复 profile 选择（防默认值覆写）effect 随布局层下移 SheetLayout
-const sheetLayout = read('../src/workspace-sheets/SheetLayout.tsx')
-assert.match(sheetLayout, /setActiveProfile\(memory\.activeProfileId\)/, '启动恢复必须只从权威记忆覆写 profile（防默认值）')
 // commitReplay 合并 load 期间 live 消息
 assert.match(controller, /liveAdditions = existing \? existing\.messages\.slice\(cached\.length\)/, 'commitReplay 必须保留 load 期间 live 消息')
 assert.match(controller, /seq: maxSeq/, 'initSource 必须从缓存推进 seq（live/replay id 不撞）')

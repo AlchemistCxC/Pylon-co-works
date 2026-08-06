@@ -24,7 +24,6 @@ import { MarkdownRenderer } from './markdownLazy'
 import { MessageRenderBoundary } from './MessageRenderBoundary'
 import { createMockMessages } from './chatMockData'
 import DiffCard from './DiffCard'
-import MessageSearchBar from './MessageSearchBar'
 import ToolConnector from './ToolConnector'
 import TaskTree from './TaskTree'
 import { useSessionLifecycle } from './useSessionLifecycle'
@@ -92,7 +91,9 @@ const ChatView = React.memo(function ChatView({ sessionId }: Props) {
   const [mockPhaseIndex, setMockPhaseIndex] = useState(0)
   const mockGenerationStartRef = useRef(Date.now())
   // CV-3：搜索（状态/快捷键/匹配/索引/滚动定位/refs）收敛为 hook
-  const { searchOpen, setSearchOpen, searchQuery, setSearchQuery, searchIndex, setSearchIndex, searchMatches, moveSearch, messageRefs } = useMessageSearch(sessionId, messages)
+  // W2-12：搜索 UI 迁右栏；hook 仍在此运行（共享 sessionUiState 状态，匹配/滚动定位行为不变），
+  // ChatView 只消费高亮（searchMatches）与行注册（messageRefs）
+  const { searchMatches, searchIndex, messageRefs } = useMessageSearch(sessionId, messages)
   // CV-4：会话生命周期（controller 挂接/切换/恢复/清理）收敛为 hook
   const { sessionRef, messageOwnerRef, controllerHandleRef } = useSessionLifecycle(sessionId, sessions, {
     setMessages, setStreamingText, setStreamingThinking, setGenerating, setGenerationPhase, setSummary, setLastTokenAt,
@@ -130,15 +131,7 @@ const ChatView = React.memo(function ChatView({ sessionId }: Props) {
 
   return (
     <div className="chat-view" ref={chatViewRef}>
-      {searchOpen && <MessageSearchBar
-        query={searchQuery}
-        matchIndex={searchIndex}
-        matchCount={searchMatches.length}
-        onQueryChange={query => { setSearchQuery(query); setSearchIndex(0) }}
-        onPrevious={() => moveSearch(-1)}
-        onNext={() => moveSearch(1)}
-        onClose={() => { setSearchOpen(false); setSearchQuery('') }}
-      />}
+      {/* W2-12：搜索 UI 迁右栏（AgentContextPanel 驱动同一 sessionUiState 状态，hook 行为不变） */}
       <div className="term">
         <AnimatePresence initial={false}>
           {rowDescriptors.map(desc => (

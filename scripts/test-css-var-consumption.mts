@@ -45,7 +45,7 @@ for (const m of appSelector.matchAll(/s\.([A-Za-z0-9]+)/g)) subscribed.add(m[1])
 const DATA_ATTR_FIELDS = new Set([
   'uiScheme', 'msgStyle', 'messageLayout', 'footerLayout', 'cliOverflowMode',
   'globalBgImage', 'globalBgColor', 'globalFont', 'chatFont', 'msgFont', 'msgTextColor',
-  'sidebarBgImage', 'chatBgImage', 'inputBgImage', 'statusBgImage', 'rightBgImage',
+  'sidebarBgImage', 'chatBgImage', 'inputBgImage', 'statusBgImage', 'rightBgImage', 'rightWidth',
 ])
 const missingSub = [...injectedFields].filter(f => !subscribed.has(f)).sort()
 assert.deepEqual(missingSub, [], `缺订阅（var 不注入，主题值落 fallback）：\n${missingSub.join('\n')}`)

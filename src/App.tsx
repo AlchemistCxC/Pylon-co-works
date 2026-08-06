@@ -28,7 +28,6 @@ const Settings = lazy(() => import('./components/Settings'))
 const ProfileEditor = lazy(() => import('./components/ProfileEditor'))
 const SessionSettings = lazy(() => import('./components/SessionSettings'))
 const SheetLauncher = lazy(() => import('./workspace-sheets/SheetLauncher'))
-const RightPanel = lazy(() => import('./components/RightPanel'))
 
 function LazyDialogFallback() {
   return (
@@ -47,7 +46,7 @@ const appWindowSingleton = (() => { try { return getCurrentWindow() } catch { re
 export default function App() {
   const [activeSession, setActiveSession] = useState<string | null>(null)
   const [showSettings, setShowSettings] = useState(false)
-  const [rightOpen, setRightOpen] = useState(false)
+  // W2-12：右栏折叠迁 workspaceStore（右栏按 sheet 声明挂载），旧 RightPanel 退役
   const [showProfileEdit, setShowProfileEdit] = useState(false)
   const [sessionSettingsId, setSessionSettingsId] = useState<string | null>(null)
   const [showSheetLauncher, setShowSheetLauncher] = useState(false)
@@ -180,8 +179,8 @@ export default function App() {
     pillBg: s.pillBg, pillText: s.pillText, prismOnColor: s.prismOnColor,
     modeAutoColor: s.modeAutoColor, modeEditColor: s.modeEditColor,
     spinnerColor: s.spinnerColor, spinnerSize: s.spinnerSize, spinnerStalledColor: s.spinnerStalledColor, assistantDotColor: s.assistantDotColor,
-    rightBg: s.rightBg, rightBgImage: s.rightBgImage, rightWidth: s.rightWidth,
-    rightTransparency: s.rightTransparency, rightBlur: s.rightBlur,
+    rightWidth: s.rightWidth,
+
   })))
 
   // cssVars 只依赖 s（useShallow 稳定引用）与 sidebarCollapsed：避免 sessions/agents 等无关
@@ -194,7 +193,6 @@ export default function App() {
       '--chat-bg-image': toCssBackgroundImage(s.chatBgImage),
       '--input-bg-image': toCssBackgroundImage(s.inputBgImage),
       '--status-bg-image': toCssBackgroundImage(s.statusBgImage),
-      '--right-bg-image': toCssBackgroundImage(s.rightBgImage),
       '--global-font': s.globalFont === 'mono' ? 'var(--mono)' : 'var(--font)',
       '--chat-font': s.chatFont === 'mono' ? 'var(--mono)' : 'var(--font)',
       '--msg-font': s.msgFont === 'mono' ? 'var(--mono)' : 'var(--font)',
@@ -226,7 +224,7 @@ export default function App() {
   }, [s.globalBgColor, s.globalBgImage, s.transparency, s.bgBlur, s.uiScheme])
 
   const appWindow = appWindowSingleton
-  const rightPanelInset = rightOpen ? s.rightWidth : 0
+  const rightPanelInset = useWorkspaceStore.getState().rightPanelCollapsed ? 0 : s.rightWidth
   const profilesOpen = showProfileEdit
   const settingsOpen = showSettings
 
@@ -251,7 +249,7 @@ export default function App() {
         }}
         onOpenSheet={() => setShowSheetLauncher(true)}
         onReopenSheet={() => useWorkspaceStore.getState().reopenSheet()}
-        onToggleRightPanel={() => setRightOpen(value => !value)}
+        onToggleRightPanel={() => useWorkspaceStore.getState().setRightPanelCollapsed(!useWorkspaceStore.getState().rightPanelCollapsed)}
         onToggleSettings={() => setShowSettings(value => !value)}
         onMinimize={() => appWindow.minimize()}
         onToggleFullscreen={() => appWindow.isFullscreen().then(fullscreen => appWindow.setFullscreen(!fullscreen)).catch(error => console.error('全屏切换失败', error))}
@@ -284,7 +282,7 @@ export default function App() {
       />
       <Suspense fallback={<LazyDialogFallback />}>
         {settingsOpen && <Settings activeSessionId={activeSession} onClose={() => setShowSettings(false)} />}
-        {rightOpen && <RightPanel sessionId={activeSession} onClose={() => setRightOpen(false)} />}
+
         {profilesOpen && <ProfileEditor onClose={() => setShowProfileEdit(false)} />}
         {sessionSettingsId && <SessionSettings sessionId={sessionSettingsId} open={!!sessionSettingsId} onClose={() => setSessionSettingsId(null)} onDeleted={() => setActiveSession(null)} />}
       </Suspense>
