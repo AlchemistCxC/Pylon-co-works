@@ -144,7 +144,11 @@ function makeState(overrides: Partial<ThemePresetState> = {}): ThemePresetState 
   assert.equal(saved.name, '我的预设')
   assert.equal(saved.createdAt, 1000)
   assert.equal(saved.updatedAt, 1000)
-  assert.equal((saved.theme as Record<string, unknown>).ccHeight, 150, '保存应捕获当前全主题（含 ccHeight）')
+  // W2-15（F3-B）：保存存 delta——ccHeight 150 与默认相等被过滤；非默认值必须捕获
+  assert.equal((saved.theme as Record<string, unknown>).ccHeight, undefined, '默认相等字段不进 delta')
+  const customState = makeState({ ccHeight: 200, ccBgHeight: 200 })
+  const createdCustom = saveCustomPresetReducer(customState, { id: 'custom-x', name: '带高度', now: 1000 })
+  assert.equal((createdCustom.patch.customPresets![0].theme as Record<string, unknown>).ccHeight, 200, '保存应捕获非默认全主题（含 ccHeight）')
 
   const updated = saveCustomPresetReducer(makeState({ customPresets: created.patch.customPresets }), { id: 'custom-1', name: '改名', now: 2000 })
   assert.equal(updated.patch.customPresets?.length, 1)

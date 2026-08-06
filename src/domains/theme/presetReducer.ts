@@ -34,6 +34,16 @@ import type { ThemeSettings } from '../../store.ts'
 
 const DEFAULTS = THEME_DEFAULTS as Record<string, string | number | boolean>
 
+/** W2-15（F3-B）：全量主题 → 相对 DEFAULTS 的 delta（过滤与默认相等键；自定义预设存储用） */
+export function toThemeDelta(theme: Record<string, unknown> | Partial<ThemeSettings>): Partial<ThemeSettings> {
+  const delta: Record<string, unknown> = {}
+  for (const [key, value] of Object.entries(theme)) {
+    if (key in DEFAULTS && value === DEFAULTS[key]) continue
+    delta[key] = value
+  }
+  return delta as Partial<ThemeSettings>
+}
+
 /**
  * 预设路由所需的状态切片。字段类型与 ThemeState 兼容（结构可赋值）：
  * ThemeState → ThemePresetState 无需断言；patch 用 ThemePresetPatch（兼容 Partial<ThemeState>）。
@@ -173,6 +183,7 @@ export function applyZonePresetReducer(
 /** 切换全局预设：全 PRESET_ZONES 记名 + 全 custom 清零 + 恢复规范排布 */
 export function setGlobalPresetReducer(name: string, theme: Partial<ThemeSettings>): ThemePresetPatch {
   return {
+    ...DEFAULTS,
     ...theme,
     ccLayout: normalizeCcLayout(theme.ccLayout),
     ...(theme.ccHeight !== undefined ? syncPresetCcHeight(theme) : {}),
@@ -199,8 +210,8 @@ export function saveCustomPresetReducer(
   if (!cleanName) throw new Error('预设名称不能为空')
   const existing = state.customPresets.find(preset => preset.id === id)
   const preset = existing
-    ? { ...existing, name: cleanName.slice(0, 40), theme: pickCustomPresetTheme(state), updatedAt: now }
-    : { id, name: cleanName.slice(0, 40), theme: structuredClone(pickCustomPresetTheme(state)), createdAt: now, updatedAt: now }
+    ? { ...existing, name: cleanName.slice(0, 40), theme: toThemeDelta(pickCustomPresetTheme(state)), updatedAt: now }
+    : { id, name: cleanName.slice(0, 40), theme: structuredClone(toThemeDelta(pickCustomPresetTheme(state))), createdAt: now, updatedAt: now }
   return { patch: { customPresets: upsertCustomPreset(state.customPresets, preset) }, savedId: preset.id }
 }
 
@@ -210,6 +221,7 @@ export function applyCustomPresetReducer(state: ThemePresetState, id: string): T
   if (!preset) return null
   const theme = normalizeThemeState(pickCustomPresetTheme(preset.theme) as Record<string, unknown>) as Partial<ThemeSettings>
   return {
+    ...DEFAULTS,
     ...theme,
     ccLayout: normalizeCcLayout(theme.ccLayout),
     ...(theme.ccHeight !== undefined ? syncPresetCcHeight(theme) : {}),

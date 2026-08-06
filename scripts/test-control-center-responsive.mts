@@ -53,9 +53,10 @@ assert.equal(css.includes('var(--right-panel-inset, 0px)'), true)
 assert.equal(controlCenter.includes('--cc-right-inset'), false)
 assert.equal(store.includes('cliPromptColor: string'), true)
 assert.equal(store.includes("cliHintMode: 'hidden' | 'compact' | 'full'"), true)
+// W2-15（F3-B）：delta 格式（双引号、每行一字段）
 assert.equal(presets.includes('ccHeight: 76'), true)
 assert.equal(presets.includes('inputFontSize: 15'), true)
-assert.equal(presets.includes("cliPromptColor: '#999999'"), true)
-assert.equal(presets.includes("cliLineColor: '#888888'"), true)
+assert.equal(presets.includes('cliPromptColor: "#999999"'), true)
+assert.equal(presets.includes('cliLineColor: "#888888"'), true)
 
 console.log('controlCenterResponsive 回归测试通过')

@@ -35,8 +35,11 @@ assert.match(migration, /normalizeThemeState\(state\)/, 'migrate 必须调用 de
   const ccIndexes = ccOrder.map(f => ccFields.indexOf(f))
   assert.ok(ccIndexes.every(i => i >= 0) && ccIndexes.every((v, i) => i === 0 || v > ccIndexes[i - 1]), 'cc zone 布局字段顺序契约')
 }
-assert.match(presetThemes, /messageLayout: 'claude', footerLayout: 'peri', cliOverflowMode: 'fixed-scroll'/)
-assert.ok((presetThemes.match(/messageLayout/g) || []).length >= 6, '每个内建预设都应声明 messageLayout')
+// W2-15（F3-B）：delta 格式（每行一字段、双引号）；cliOverflowMode 与默认相等被过滤（展开后为默认）
+assert.match(presetThemes, /messageLayout: "claude"/)
+assert.match(presetThemes, /footerLayout: "peri"/)
+// W2-15（F3-B）：messageLayout 与默认 'classic' 相等的预设不进 delta（展开后为默认）；非默认者必须声明
+assert.ok((presetThemes.match(/messageLayout/g) || []).length >= 1, '非默认 messageLayout 预设必须声明')
 
 assert.ok(ZONE_FIELDS.chat.includes('ccScale' as never) || ZONE_FIELDS.cc.includes('ccScale' as never), 'ccScale 必须在某 zone')
 assert.ok(ZONE_FIELDS.cc.includes('footerLayout' as never), 'footerLayout 必须在 cc zone')

@@ -1,9 +1,13 @@
 import { strict as assert } from 'node:assert'
 import { GLOBAL_PRESETS, ZONE_FIELDS } from '../src/presets.ts'
+import { THEME_DEFAULTS } from '../src/themeFieldDefs.ts'
+
+// W2-15（F3-B）：预设是 delta——断言经 { ...THEME_DEFAULTS, ...delta } 展开后的有效值
+const expand = (theme: Record<string, unknown>) => ({ ...THEME_DEFAULTS, ...theme })
 
 assert.deepEqual(GLOBAL_PRESETS.map(preset => preset.label), ['Claude 风格', 'Glass Light', 'Nord Frost', 'Tokyo Night', 'Solarized Light', 'Amber CRT'])
 
-const [claude, glass, nord, tokyo, solarized, amber] = GLOBAL_PRESETS.map(preset => preset.theme)
+const [claude, glass, nord, tokyo, solarized, amber] = GLOBAL_PRESETS.map(preset => expand(preset.theme as Record<string, unknown>))
 assert.equal(claude.uiScheme, 'dark')
 assert.equal(claude.globalFont, 'mono')
 assert.equal(claude.inputMode, 'cli')
@@ -56,17 +60,18 @@ for (const field of [
 }
 
 for (const preset of GLOBAL_PRESETS) {
-  assert.equal(Array.isArray(preset.theme.ccHidden), true)
-  assert.equal(typeof preset.theme.ccScale, 'object')
+  const expanded = expand(preset.theme as Record<string, unknown>)
+  assert.equal(Array.isArray(expanded.ccHidden), true)
+  assert.equal(typeof expanded.ccScale, 'object')
   assert.equal('ccCliCustomized' in preset.theme, false, '预设不得携带废弃 ccCliCustomized')
   assert.equal('ccPositions' in preset.theme, false, '预设不得携带废弃 ccPositions')
-  assert.equal(preset.theme.ccStatusFontSize, 14)
-  assert.equal(preset.theme.inputFontSize, 15)
-  assert.equal(preset.theme.cliLineWidth, 1)
-  assert.equal(preset.theme.cliLinePadding, 3)
-  assert.equal(preset.theme.cliContentOffsetY, 0)
-  assert.equal(preset.theme.cliHintMode, 'full')
-  assert.equal(typeof preset.theme.cliPromptColor, 'string')
+  assert.equal(expanded.ccStatusFontSize, 14)
+  assert.equal(expanded.inputFontSize, 15)
+  assert.equal(expanded.cliLineWidth, 1)
+  assert.equal(expanded.cliLinePadding, 3)
+  assert.equal(expanded.cliContentOffsetY, 0)
+  assert.equal(expanded.cliHintMode, 'full')
+  assert.equal(typeof expanded.cliPromptColor, 'string')
 }
 
 for (const preset of [glass, nord, tokyo, solarized, amber]) {
