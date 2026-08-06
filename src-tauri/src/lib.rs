@@ -610,6 +610,7 @@ pub fn run() {
                 crate::logs_cmds::list_runtime_logs, crate::logs_cmds::clear_runtime_logs, crate::logs_cmds::push_frontend_log,
                 crate::workspace_cmds::get_workspace_root, crate::workspace_cmds::list_workspace_entries, crate::workspace_cmds::read_workspace_text,
                 crate::workspace_cmds::git_status, crate::workspace_cmds::git_diff, crate::workspace_cmds::git_history,
+                crate::workspace_cmds::workspace_search,
                 crate::gateway_cmds::gateway_status, crate::gateway_cmds::reload_gateway,
                 crate::startup::startup_diagnostics,
             ])

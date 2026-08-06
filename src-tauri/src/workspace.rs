@@ -325,6 +325,165 @@ fn decode_text(bytes: &[u8]) -> Result<(String, &'static str), WorkspaceError> {
     Ok((text.into_owned(), "gbk"))
 }
 
+// ── workspace_search（后端施工计划书 Phase 1 §3）────────────────────────────
+
+pub const SEARCH_MAX_RESULTS: usize = 200;
+pub const SEARCH_MAX_FILES: usize = 400;
+pub const SEARCH_MAX_BYTES_PER_FILE: usize = 256 * 1024;
+pub const SEARCH_MAX_LINE_CHARS: usize = 500;
+
+/// 搜索结果 DTO（wire camelCase：{path, line, lineText}；path 相对 root、`/` 分隔）。
+#[derive(Debug, Serialize, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct WorkspaceSearchResult {
+    pub path: String,
+    pub line: usize,
+    pub line_text: String,
+}
+
+/// 搜索硬上限（防无界 IO/超大 payload；结果数 max_results 仅允许向下 clamp）。
+#[derive(Debug, Clone, Copy)]
+pub(crate) struct SearchLimits {
+    pub max_results: usize,
+    pub max_files: usize,
+    pub max_bytes_per_file: usize,
+    pub max_line_chars: usize,
+}
+
+/// 默认上限：max_results 参数只可向下 clamp 到硬上限 200。
+pub(crate) fn default_search_limits(max_results: Option<usize>) -> SearchLimits {
+    SearchLimits {
+        max_results: max_results.unwrap_or(SEARCH_MAX_RESULTS).min(SEARCH_MAX_RESULTS),
+        max_files: SEARCH_MAX_FILES,
+        max_bytes_per_file: SEARCH_MAX_BYTES_PER_FILE,
+        max_line_chars: SEARCH_MAX_LINE_CHARS,
+    }
+}
+
+/// 工作区全文行匹配（同步纯函数，command 应经 spawn_blocking 调用）。
+/// 规则：空 query → 空列表；逐行大小写不敏感 contains（to_lowercase 折叠，
+/// 中文恒等/ASCII 折叠/Unicode 边界由测试锁定）；忽略清单/隐藏过滤沿用
+/// list_entries；目录 symlink 仅在 canonical 目标仍在 root 内时进入；文件
+/// 打开沿用 open_workspace_file 的 containment 复核（TOCTOU）；GBK 复用
+/// decode_text 解码后搜索；命中达 max_results 或扫描文件达 max_files 即停。
+pub(crate) fn search(
+    root: &Path,
+    query: &str,
+    limits: SearchLimits,
+) -> Result<Vec<WorkspaceSearchResult>, WorkspaceError> {
+    let query = query.trim();
+    if query.is_empty() || limits.max_results == 0 {
+        return Ok(Vec::new());
+    }
+    let query_lower = query.to_lowercase();
+    let mut results = Vec::new();
+    let mut scanned_files = 0usize;
+    walk_search(root, root, "", query, &query_lower, limits, &mut results, &mut scanned_files)?;
+    results.sort_by(|a, b| a.path.cmp(&b.path).then(a.line.cmp(&b.line)));
+    Ok(results)
+}
+
+fn walk_search(
+    root: &Path,
+    dir: &Path,
+    dir_relative: &str,
+    query: &str,
+    query_lower: &str,
+    limits: SearchLimits,
+    results: &mut Vec<WorkspaceSearchResult>,
+    scanned_files: &mut usize,
+) -> Result<(), WorkspaceError> {
+    if results.len() >= limits.max_results || *scanned_files >= limits.max_files {
+        return Ok(());
+    }
+    let canonical_root = root.canonicalize().map_err(|e| {
+        if e.kind() == std::io::ErrorKind::NotFound {
+            WorkspaceError::NotFound
+        } else {
+            WorkspaceError::NotReadable
+        }
+    })?;
+    let entries = fs::read_dir(dir).map_err(|e| WorkspaceError::Io(e.to_string()))?;
+    for item in entries {
+        if results.len() >= limits.max_results || *scanned_files >= limits.max_files {
+            break;
+        }
+        let item = item.map_err(|e| WorkspaceError::Io(e.to_string()))?;
+        let name = item.file_name().to_string_lossy().into_owned();
+        if is_ignored(&name) || name.starts_with('.') {
+            continue;
+        }
+        let metadata = fs::symlink_metadata(item.path()).map_err(|e| WorkspaceError::Io(e.to_string()))?;
+        let relative = if dir_relative.is_empty() {
+            name.clone()
+        } else {
+            format!("{dir_relative}/{name}")
+        };
+        if metadata.file_type().is_symlink() {
+            // 目录 symlink 仅在 canonical 目标仍在 root 内时进入；断链/外部/文件链接跳过
+            let target = item.path().canonicalize().ok();
+            if let Some(target) = target {
+                if target.starts_with(&canonical_root) && target.is_dir() {
+                    walk_search(root, &item.path(), &relative, query, query_lower, limits, results, scanned_files)?;
+                }
+            }
+            continue;
+        }
+        if metadata.is_dir() {
+            walk_search(root, &item.path(), &relative, query, query_lower, limits, results, scanned_files)?;
+        } else if metadata.is_file() {
+            if *scanned_files >= limits.max_files {
+                break;
+            }
+            *scanned_files += 1;
+            search_file(root, &relative, query, query_lower, limits, results)?;
+        }
+    }
+    Ok(())
+}
+
+fn search_file(
+    root: &Path,
+    relative: &str,
+    _query: &str,
+    query_lower: &str,
+    limits: SearchLimits,
+    results: &mut Vec<WorkspaceSearchResult>,
+) -> Result<(), WorkspaceError> {
+    // 沿用 open_workspace_file 的 containment 复核（TOCTOU：walk 与 open 之间
+    // 路径可能被替换为指向 root 外的链接）。
+    let (file, _) = open_workspace_file(root, relative)?;
+    let mut bytes = Vec::with_capacity(limits.max_bytes_per_file.min(64 * 1024));
+    file.take(limits.max_bytes_per_file as u64 + 1)
+        .read_to_end(&mut bytes)
+        .map_err(|e| WorkspaceError::Io(e.to_string()))?;
+    if bytes.contains(&0) {
+        return Ok(()); // 二进制跳过（不参与匹配）
+    }
+    let (content, _) = match decode_text(&bytes) {
+        Ok(decoded) => decoded,
+        Err(_) => return Ok(()), // 不可解码跳过
+    };
+    for (index, raw_line) in content.split('\n').enumerate() {
+        if results.len() >= limits.max_results {
+            break;
+        }
+        let line = raw_line.trim_end_matches('\r');
+        if line.to_lowercase().contains(query_lower) {
+            let mut line_text = line.to_string();
+            if line_text.chars().count() > limits.max_line_chars {
+                line_text = line_text.chars().take(limits.max_line_chars).collect();
+            }
+            results.push(WorkspaceSearchResult {
+                path: relative.replace('\\', "/"),
+                line: index + 1,
+                line_text,
+            });
+        }
+    }
+    Ok(())
+}
+
 pub fn workspace_root(source: String, root: &Path) -> WorkspaceRoot {
     match root.canonicalize() {
         Ok(path) => WorkspaceRoot {
@@ -486,6 +645,96 @@ mod tests {
         assert_eq!(preview.encoding, "gbk");
         assert_eq!(preview.bytes_read, DEFAULT_PREVIEW_BYTES);
         assert_eq!(preview.content, "啊".repeat(DEFAULT_PREVIEW_BYTES / 2));
+    }
+
+    // ── workspace_search（Phase 1 §3.3）──
+
+    fn search_fixture() -> (TempDir, PathBuf) {
+        let (dir, root) = fixture();
+        fs::write(root.join("src/main.ts"), "hello world needle\nHELLO Rust\n中文内容 needle\n").unwrap();
+        fs::write(root.join("docs.md"), "needle in docs\nplain\n").unwrap();
+        fs::create_dir_all(root.join("src/node_modules")).unwrap();
+        fs::write(root.join("src/node_modules/deep.txt"), "needle nested\n").unwrap();
+        fs::create_dir_all(root.join("node_modules")).unwrap();
+        fs::write(root.join("node_modules/pkg.txt"), "needle in node_modules\n").unwrap();
+        fs::write(root.join(".hidden.txt"), "needle hidden\n").unwrap();
+        fs::write(root.join("gbk.txt"), [0xB2, 0xE2, 0xCE, 0xC4, 0x20, 0x6E, 0x65, 0x65, 0x64, 0x6C, 0x65, 0x0A]).unwrap(); // "中文 needle\n" GBK
+        fs::write(root.join("bom.md"), "\u{FEFF}needle bom\n").unwrap();
+        fs::write(root.join("binary.bin"), [1u8, 0, 2, b'n', b'e', b'e', b'd', b'l', b'e']).unwrap();
+        (dir, root)
+    }
+
+    #[test]
+    fn search_matches_case_insensitive_and_line_numbers() {
+        let (_dir, root) = search_fixture();
+        let limits = default_search_limits(None);
+        let found = search(&root, "NEEDLE", limits).unwrap();
+        // 命中文件：src/main.ts（两行 needle 大小写）、docs.md、gbk.txt、bom.md；
+        // 忽略 node_modules / .hidden / src/ignored；binary.bin 含 NUL 跳过
+        let paths: Vec<&str> = found.iter().map(|r| r.path.as_str()).collect();
+        assert!(paths.contains(&"src/main.ts"), "UTF-8 必须命中（{paths:?}）");
+        assert!(paths.contains(&"docs.md"), "普通文件必须命中");
+        assert!(paths.contains(&"gbk.txt"), "GBK 解码后必须命中");
+        assert!(paths.contains(&"bom.md"), "BOM 必须命中");
+        assert!(!paths.iter().any(|p| p.contains("node_modules")), "忽略目录（含嵌套）不得进入");
+        assert!(!paths.iter().any(|p| p.contains(".hidden")), "隐藏文件不得进入");
+        assert!(!paths.iter().any(|p| *p == "binary.bin"), "二进制不得命中");
+        let main_hits: Vec<_> = found.iter().filter(|r| r.path == "src/main.ts").collect();
+        assert_eq!(main_hits.len(), 2, "多行命中逐行计（{main_hits:?}）");
+        assert_eq!(main_hits[0].line, 1);
+        assert_eq!(main_hits[1].line, 3);
+        assert!(main_hits.iter().all(|r| !r.line_text.contains('\r')));
+    }
+
+    #[test]
+    fn search_empty_query_and_limits() {
+        let (_dir, root) = search_fixture();
+        assert_eq!(search(&root, "   ", default_search_limits(None)).unwrap(), Vec::new(), "空 query 必须空列表不扫描");
+        let tiny = SearchLimits { max_results: 1, max_files: 400, max_bytes_per_file: 256 * 1024, max_line_chars: 500 };
+        let found = search(&root, "needle", tiny).unwrap();
+        assert!(found.len() <= 1, "max_results 必须截断");
+        let clamped = default_search_limits(Some(9999));
+        assert_eq!(clamped.max_results, SEARCH_MAX_RESULTS, "max_results 只能向下 clamp");
+        let zero = SearchLimits { max_results: 0, max_files: 400, max_bytes_per_file: 256 * 1024, max_line_chars: 500 };
+        assert_eq!(search(&root, "needle", zero).unwrap(), Vec::new());
+    }
+
+    #[test]
+    fn search_truncates_long_lines_and_sorts_stable() {
+        let (_dir, root) = search_fixture();
+        fs::write(root.join("long.txt"), format!("needle {}\n", "长".repeat(1200))).unwrap();
+        let limits = SearchLimits { max_results: 200, max_files: 400, max_bytes_per_file: 256 * 1024, max_line_chars: 500 };
+        let found = search(&root, "needle", limits).unwrap();
+        let long = found.iter().find(|r| r.path == "long.txt").expect("long.txt 必须命中");
+        assert!(long.line_text.chars().count() <= 500, "单行返回必须截断");
+        let pairs: Vec<_> = found.iter().map(|r| (r.path.as_str(), r.line)).collect();
+        let mut sorted = pairs.clone();
+        sorted.sort_by(|a, b| a.0.cmp(&b.0).then(a.1.cmp(&b.1)));
+        assert_eq!(pairs, sorted, "输出必须稳定排序");
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn search_skips_symlinks_outside_root_and_broken() {
+        use std::os::unix::fs::symlink;
+        let (dir, root) = search_fixture();
+        let outside = dir.path().join("outside.txt");
+        fs::write(&outside, "needle outside\n").unwrap();
+        symlink(&outside, root.join("evil.txt")).unwrap();
+        symlink(root.join("missing-target"), root.join("broken-link")).unwrap();
+        let found = search(&root, "needle", default_search_limits(None)).unwrap();
+        assert!(!found.iter().any(|r| r.path == "evil.txt"), "root 外文件 symlink 不得进入");
+        assert!(!found.iter().any(|r| r.path == "broken-link"), "断链必须跳过");
+    }
+
+    #[test]
+    fn search_missing_root_reports_not_found() {
+        let (_dir, root) = search_fixture();
+        let missing = root.join("no-such-dir");
+        assert_eq!(
+            search(&missing, "needle", default_search_limits(None)),
+            Err(WorkspaceError::NotFound)
+        );
     }
 
     #[test]

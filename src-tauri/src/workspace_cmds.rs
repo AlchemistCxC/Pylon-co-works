@@ -48,6 +48,28 @@ pub(crate) async fn read_workspace_text(
         .map_err(|e| PylonError::Workspace(e.to_string()))
 }
 
+/// Phase 1：工作区全文行匹配（后端施工计划书 §3）。
+/// source 绑定 runtime 会话（workspace_root_for_source，缺失 session_not_found）；
+/// 同步遍历放 spawn_blocking（意见稿 §2.1：大文件扫描不得阻塞 async 运行时）；
+/// 硬上限（结果 200 / 扫描文件 400 / 单文件 256KB / 单行 500 字符）。
+#[tauri::command]
+pub(crate) async fn workspace_search(
+    state: tauri::State<'_, AppState>,
+    source: String,
+    query: String,
+    max_results: Option<usize>,
+) -> Result<Vec<workspace::WorkspaceSearchResult>, PylonError> {
+    let runtime = state.inner().require_runtime()?;
+    let root = state.inner().workspace_root_for_source(&runtime, &source)?;
+    let limits = workspace::default_search_limits(max_results);
+    let root_path = std::path::PathBuf::from(root);
+    let found = tokio::task::spawn_blocking(move || workspace::search(&root_path, &query, limits))
+        .await
+        .map_err(|e| PylonError::Workspace(e.to_string()))?
+        .map_err(|e| PylonError::Workspace(e.to_string()))?;
+    Ok(found)
+}
+
 /// B5：解析 source 对应的 git 工作区 root（会话 cwd，失败回退 active agent cwd）。
 /// 只读操作；非 git 仓库 / git 不可用 → PylonError::Git（code=git_error）。
 pub(crate) fn git_workspace_root(
