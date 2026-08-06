@@ -25,6 +25,7 @@ import './Settings.css'
 import { normalizeAgentStatus, statusLabel } from './settings/agentTypes'
 import { beginReconnect, failReconnect, normalizeAgentList } from './settings/agentState'
 import ConfigOptionsPanel from './settings/ConfigOptionsPanel'
+import TemplateLibrary from './settings/TemplateLibrary'
 import { resolveToolIndicatorAsset, toolIndicatorOptions } from './chat/toolIndicatorAssets'
 
 // ── helpers ──
@@ -304,13 +305,8 @@ export default function Settings({ onClose, activeSessionId }: { onClose?: () =>
       </div>
       {tier === 'quick' && (
         <div className="settings-quick">
-          <Group title="一键换装">
-            <div className="set-preset-row">
-              {GLOBAL_PRESETS.map(p => (
-                <button key={p.name} className={`set-preset-chip ${globalStatus === p.name ? 'active' : ''}`}
-                  onClick={() => applyGlobalPreset(p.name)}>{p.label}</button>
-              ))}
-            </div>
+          <Group title="模板库">
+            <TemplateLibrary onApply={applyGlobalPreset} onRestore={applyGlobalPreset} />
           </Group>
           <Group title="宠物">
             <div className="set-preset-row">

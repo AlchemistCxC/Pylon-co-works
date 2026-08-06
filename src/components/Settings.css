@@ -232,3 +232,33 @@
 }
 .settings-quick { padding: 16px; overflow-y: auto; }
 .set-basic-fields { margin-top: 16px; }
+
+/* W2-14：模板库（官方 6 + 自定义，预览局部 cssVars 不触全局） */
+.template-library { display: flex; flex-direction: column; gap: 16px; }
+.template-section { display: flex; flex-direction: column; gap: 8px; }
+.template-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(200px, 1fr)); gap: 12px; }
+.template-card {
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 8px;
+  background: var(--bg-panel);
+  display: flex; flex-direction: column; gap: 8px;
+}
+.template-card:hover { border-color: var(--border-focus); }
+.template-preview {
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  overflow: hidden;
+  min-height: 90px;
+  transform-origin: top left;
+  transform: scale(0.35);
+  width: 285%;
+}
+.template-actions { display: flex; gap: 6px; }
+.template-apply, .template-restore {
+  padding: 3px 10px; font-size: 12px; font-family: var(--font);
+  color: var(--text); background: var(--bg-active);
+  border: 1px solid var(--border); border-radius: 4px; cursor: pointer;
+}
+.template-apply:hover, .template-restore:hover { background: var(--bg-hover); border-color: var(--border-focus); }
+.template-label { font-size: 12px; color: var(--text); }
