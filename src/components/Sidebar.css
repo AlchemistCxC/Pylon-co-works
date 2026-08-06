@@ -26,7 +26,7 @@
 
 .session-list { flex:1; overflow-y:auto; padding:var(--ui-space-2); }
 
-.session-item { position:relative; display:flex; align-items:center; gap:var(--ui-space-2); min-height:48px; padding:var(--ui-space-2); border:1px solid transparent; border-radius:var(--ui-radius-md); cursor:pointer; transition:background 150ms ease,border-color 150ms ease; }
+.session-item { position:relative; display:flex; align-items:center; gap:var(--ui-space-2); min-height:48px; padding:var(--ui-space-2); border:1px solid transparent; border-radius:var(--ui-radius-xs); cursor:pointer; transition:background 150ms ease,border-color 150ms ease; }
 .session-item:hover { background:var(--bg-hover); }
 .session-item.active { border-color:var(--border); background:var(--bg-active); }
 .session-item.active::before { content:''; position:absolute; left:-1px; top:10px; bottom:10px; width:2px; border-radius:var(--ui-radius-pill); background:var(--accent); }
