@@ -47,19 +47,46 @@ pub(crate) async fn send_line(
     }
 }
 
+/// 方案 2A：ACP 故障统一结算入口（幂等）。
+/// - `crashed=true`（状态快照）；
+/// - `crashed_watch` 发 true（可靠最新值通知，dispatcher 依赖它触发自动重连）；
+/// - pending drain 一次（返回 drained 数；重复调用 pending 已空返回 0，不 double-resolve）。
+/// 与 reader EOF 并发时天然幂等：两个结算方先后 drain，第二次无 pending。
+/// 不删 AtomicBool + watch 双通道（§4.2）：前者状态快照、后者可靠通知。
+/// reason 用于 NOTIF_AGENT_CRASHED 的 payload 区分（writer_failed / stdout_closed），
+/// 由调用方以 params 传入，本函数只负责结算核心。
+pub(crate) fn fail_connection(
+    crashed: &AtomicBool,
+    crashed_watch: &watch::Sender<bool>,
+    pending: &Arc<[Mutex<Pending>; PENDING_SHARDS]>,
+) -> usize {
+    crashed.store(true, Ordering::Release);
+    let _ = crashed_watch.send(true);
+    drain_pending(pending)
+}
+
 /// G1-05：writer 任务启动（S3 拆分；R4 自 std 线程改 tokio 任务：
 /// spawn_blocking + 写超时）。每行经独立的 blocking 段写入并以 write_timeout
 /// 竞争超时——agent 不读 stdin 时管道填满，旧 std 线程的 flush 永久阻塞
 /// （无超时路径），写通道填满后 send_line 的超时兜底前已有多条命令排队失败。
-/// 单消费者 + 逐行等待保证写入顺序不变。超时语义与 send_line 一致：
-/// 置位 crashed 让上层快速失败并触发自动重连。
+/// 单消费者 + 逐行等待保证写入顺序不变。超时语义与 send_line 一致。
+/// 方案 2A：写超时/EPIPE/JoinError 统一走 fail_connection（crashed + watch +
+/// drain + NOTIF_AGENT_CRASHED），不再只置 crashed——writer 故障可被
+/// dispatcher 感知，不等下次 EOF；与 reader EOF 并发结算幂等。
+#[allow(clippy::too_many_arguments)]
 pub(crate) fn spawn_writer_task(
     stdin: std::process::ChildStdin,
     mut write_rx: mpsc::Receiver<String>,
     crashed: &Arc<AtomicBool>,
+    crashed_watch: &watch::Sender<bool>,
+    pending: &Arc<[Mutex<Pending>; PENDING_SHARDS]>,
+    tx: &broadcast::Sender<RawMessage>,
     write_timeout: u64,
 ) -> tokio::task::JoinHandle<()> {
     let writer_crashed = crashed.clone();
+    let writer_watch = crashed_watch.clone();
+    let writer_pending = pending.clone();
+    let writer_tx = tx.clone();
     tokio::task::spawn(async move {
         let stdin_writer = Arc::new(Mutex::new(BufWriter::new(stdin)));
         while let Some(line) = write_rx.recv().await {
@@ -75,16 +102,37 @@ pub(crate) fn spawn_writer_task(
             match tokio::time::timeout(std::time::Duration::from_secs(write_timeout), write).await {
                 // 写入成功 → 取下一条
                 Ok(Ok(Ok(()))) => {}
-                // EPIPE 等写失败 → reader 线程经 EOF 置位 crashed + watch
-                Ok(Ok(Err(_))) | Ok(Err(_)) => break,
+                // EPIPE/JoinError 等写失败 → 统一结算（与 EOF 并发幂等）
+                Ok(Ok(Err(_))) | Ok(Err(_)) => {
+                    let drained = fail_connection(&writer_crashed, &writer_watch, &writer_pending);
+                    tracing::warn!("ACP: writer failed, drained {drained} pending");
+                    let _ = writer_tx.send(RawMessage {
+                        id: None,
+                        method: Some(NOTIF_AGENT_CRASHED.to_string()),
+                        kind: AcpKind::Crashed,
+                        result: None,
+                        params: Some(serde_json::json!({"reason": "writer_failed"})),
+                        error: None,
+                    });
+                    break;
+                }
                 // 写超时：agent 存活但不读 stdin，reader 不会收到 EOF——
-                // writer 自行置位 crashed（与 send_line 超时语义一致），
+                // writer 自行统一结算（与 send_line 超时语义一致），
                 // 上层快速失败并触发自动重连。
                 Err(_) => {
                     tracing::warn!(
                         "ACP writer timeout after {write_timeout}s: connection presumed dead"
                     );
-                    writer_crashed.store(true, Ordering::Release);
+                    let drained = fail_connection(&writer_crashed, &writer_watch, &writer_pending);
+                    tracing::warn!("ACP: writer timeout, drained {drained} pending");
+                    let _ = writer_tx.send(RawMessage {
+                        id: None,
+                        method: Some(NOTIF_AGENT_CRASHED.to_string()),
+                        kind: AcpKind::Crashed,
+                        result: None,
+                        params: Some(serde_json::json!({"reason": "writer_failed"})),
+                        error: None,
+                    });
                     break;
                 }
             }
@@ -202,12 +250,9 @@ pub(crate) fn spawn_stdout_reader(
                 }
             }
         }
-        crashed_reader.store(true, Ordering::Relaxed);
-        // A7：EOF 崩溃信号经 watch 通道可靠投递——broadcast 在洪泛
-        // Lagged 时会丢 NOTIF_AGENT_CRASHED，watch 保留最新值不丢，
-        // 自动重连依赖此信号（dispatcher select! 双路监听）。
-        let _ = crashed_watch_reader.send(true);
-        let drained = drain_pending(&pending_clone);
+        // 方案 2A：EOF 结算复用统一入口（crashed + watch + drain，幂等）——
+        // 与 writer failure 并发结算时第二次 drain 返回 0，不 double-resolve。
+        let drained = fail_connection(&crashed_reader, &crashed_watch_reader, &pending_clone);
         tracing::warn!(
             "ACP: drained {} pending requests after stdout closed",
             drained

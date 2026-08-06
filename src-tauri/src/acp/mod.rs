@@ -476,19 +476,26 @@ impl AcpClient {
                 let stdin = child.take_stdin()?;
                 let (write_tx, write_rx) = mpsc::channel::<String>(WRITE_CHAN_CAP);
                 let crashed = Arc::new(AtomicBool::new(false));
+                let pending: Arc<[Mutex<Pending>; PENDING_SHARDS]> =
+                    Arc::new(std::array::from_fn(|_| Mutex::new(HashMap::new())));
+                let (tx, rx) = broadcast::channel(BROADCAST_CAP);
+                let (crashed_watch, crashed_watch_rx) = watch::channel(false);
                 // G1-05：三线程启动收敛为私有函数（S3 卫生，行为零变化）。
-                let writer_task =
-                    spawn_writer_task(stdin, write_rx, &crashed, DEFAULT_WRITE_TIMEOUT_SECS);
+                // 方案 2A：writer 持有结算句柄（watch/pending/tx），写失败统一结算。
+                let writer_task = spawn_writer_task(
+                    stdin,
+                    write_rx,
+                    &crashed,
+                    &crashed_watch,
+                    &pending,
+                    &tx,
+                    DEFAULT_WRITE_TIMEOUT_SECS,
+                );
                 let stdout = BufReader::new(child.take_stdout()?);
 
                 // Drain stderr（防管道缓冲死锁）
                 let stderr = child.take_stderr()?;
                 spawn_stderr_reader(stderr, &agent.name, &runtime_logs);
-
-                let pending: Arc<[Mutex<Pending>; PENDING_SHARDS]> =
-                    Arc::new(std::array::from_fn(|_| Mutex::new(HashMap::new())));
-                let (tx, rx) = broadcast::channel(BROADCAST_CAP);
-                let (crashed_watch, crashed_watch_rx) = watch::channel(false);
 
                 spawn_stdout_reader(
                     stdout,
@@ -1574,6 +1581,100 @@ for line in sys.stdin:
             crashed.load(Ordering::Relaxed),
             "write timeout must mark the connection as crashed"
         );
+    }
+
+    #[tokio::test]
+    async fn writer_failure_signals_watch_and_pending_settles() {
+        // 方案 2A 测试门：writer 写失败（EPIPE）必须经 fail_connection 统一结算——
+        // crashed=true、watch 发 true、pending waiter 立即 ConnectionClosed，
+        // 不再只置 crashed 等下次 EOF（agent 僵死时 EOF 永不来）。
+        let trace_path =
+            std::env::temp_dir().join(format!("pylon-acp-writer-fail-{}.jsonl", std::process::id()));
+        // 读一行后立即退出：initialize 写入成功，后续写触发 EPIPE。
+        let script = r#"import json,sys
+trace=open(sys.argv[1],'w',encoding='utf-8')
+line=sys.stdin.readline()
+request=json.loads(line)
+trace.write(json.dumps(request)+'\n')
+trace.flush()
+print(json.dumps({'jsonrpc':'2.0','id':request.get('id'),'result':{}}), flush=True)
+"#;
+        let agent = crate::agent_config::AgentDef {
+            name: "fake-acp-writer-fail".to_string(),
+            transport: "subprocess".to_string(),
+            exe: crate::test_utils::test_python_exe().to_string(),
+            args: vec![
+                "-u".to_string(),
+                "-c".to_string(),
+                script.to_string(),
+                trace_path.to_string_lossy().into_owned(),
+            ],
+            cwd: None,
+            env: HashMap::new(),
+            default: false,
+            set_model_api: false,
+            model: None,
+            acp_args: Vec::new(),
+            acp: None,
+        };
+        let mut client = AcpClient::connect_with_logs(&agent, None)
+            .await
+            .expect("initialize 应成功（首行写入正常）");
+        let mut crashed_rx = client.crashed_receiver();
+        // 子进程已退出，writer 下次写必 EPIPE → fail_connection → watch 发 true。
+        let rpc = client
+            .prepare_rpc(
+                METHOD_SESSION_NEW,
+                serde_json::json!({"cwd": ".", "mcpServers": []}),
+            )
+            .expect("prepare_rpc 不依赖进程状态");
+        let outcome = tokio::time::timeout(
+            std::time::Duration::from_secs(5),
+            rpc.complete(),
+        )
+        .await
+        .expect("写失败必须在 5s 内收敛（不得悬挂）");
+        assert!(outcome.is_err(), "写失败必须返回 Err");
+        assert!(client.is_crashed(), "crashed 必须置位");
+        // watch 通道必须送达 true（dispatcher 依赖它触发自动重连）
+        let watch_hit = tokio::time::timeout(std::time::Duration::from_secs(5), async {
+            if *crashed_rx.borrow_and_update() {
+                return true;
+            }
+            crashed_rx.changed().await.is_ok() && *crashed_rx.borrow_and_update()
+        })
+        .await
+        .unwrap_or(false);
+        assert!(watch_hit, "writer failure 必须经 watch 信号送达");
+        client.kill().expect("cleanup");
+        std::fs::remove_file(&trace_path).ok();
+    }
+
+    #[tokio::test]
+    async fn fail_connection_signals_watch_drains_pending_and_is_idempotent() {
+        // 方案 2A：fail_connection 统一结算——crashed=true、watch 发 true、
+        // pending drain 一次、重复调用幂等（不 double-resolve）。
+        let crashed = Arc::new(AtomicBool::new(false));
+        let (crashed_watch, mut crashed_rx) = watch::channel(false);
+        let pending: Arc<[Mutex<Pending>; PENDING_SHARDS]> =
+            Arc::new(std::array::from_fn(|_| Mutex::new(HashMap::new())));
+        // 预注册 2 个 pending waiter
+        for id in [3u64, 9] {
+            let (tx, _rx) = tokio::sync::oneshot::channel();
+            pending[id as usize % PENDING_SHARDS]
+                .lock()
+                .unwrap()
+                .insert(id, tx);
+        }
+        let drained = super::transport::fail_connection(&crashed, &crashed_watch, &pending);
+        assert_eq!(drained, 2, "首次结算必须 drain 全部 pending");
+        assert!(crashed.load(Ordering::Relaxed), "crashed 必须置位");
+        // watch 通道已送达最新值 true（dispatcher 依赖它触发自动重连）
+        assert!(*crashed_rx.borrow_and_update(), "watch 最新值必须为 true");
+        // 幂等：重复调用不 double-resolve
+        let drained_again = super::transport::fail_connection(&crashed, &crashed_watch, &pending);
+        assert_eq!(drained_again, 0, "重复调用不得重复 drain");
+        assert!(*crashed_rx.borrow_and_update());
     }
 
     #[tokio::test]
