@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState } from 'react'
 import { useIdentityStore } from '../../identityStore'
+import PylonMark from '../../components/PylonMark'
 import { isMessageSnapshotKey, snapshotSearch, type SnapshotSearchResult } from '../../domains/search/snapshotSearch.ts'
 import type { SheetContext, SheetRecord } from '../../workspace-sheets/sheetTypes'
 import './SearchSheet.css'
@@ -68,7 +69,20 @@ export default function SearchSheetView({ sheet: _sheet, ctx }: { sheet: SheetRe
           </li>
         ))}
       </ul>
-      {query.trim() && results.length === 0 && <p className="file-section-hint">无匹配</p>}
+      {query.trim() && results.length === 0 && (
+        <div className="sheet-empty-state search-empty-state" role="status">
+          <div className="sheet-empty-mark"><PylonMark size={30} title="Pylon 搜索" /></div>
+          <strong>没有匹配结果</strong>
+          <span>换一个关键词，或检查本地会话是否已经保存消息快照。</span>
+        </div>
+      )}
+      {!query.trim() && (
+        <div className="sheet-empty-state search-empty-state" role="status">
+          <div className="sheet-empty-mark"><PylonMark size={30} title="Pylon 搜索" /></div>
+          <strong>搜索本地会话消息</strong>
+          <span>输入关键词后，从结果回到对应会话与消息位置。</span>
+        </div>
+      )}
     </div>
   )
 }
