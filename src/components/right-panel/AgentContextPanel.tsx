@@ -30,7 +30,10 @@ export default function AgentContextPanel({ ctx }: { ctx: SheetContext }) {
     if (matches.length === 0) return
     setSearchIndex(index => (index + direction + matches.length) % matches.length)
   }
-  const touchedFiles = useWorkspaceStore(s => (source ? s.touchedFiles[source] ?? [] : []))
+  // zustand v5 useStore 的 selector 返回值即 useSyncExternalStore 快照：`?? []` 每次返回
+  // 新数组 → Object.is 不等 → forceStoreRerender 死循环。选整个 record（引用稳定），派生留组件体。
+  const touchedFilesRecord = useWorkspaceStore(s => s.touchedFiles)
+  const touchedFiles = source ? touchedFilesRecord[source] ?? [] : []
 
   return (
     <div className="context-panel-body">

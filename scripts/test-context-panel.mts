@@ -48,10 +48,13 @@ console.log('context panel 壳守卫通过')
   const acp = readFileSync(new URL('../src/components/right-panel/AgentContextPanel.tsx', import.meta.url), 'utf8')
   assert.match(acp, /useSessionUiState\(sessionId, 'search-query'/, '搜索必须经共享 sessionUiState（ChatView hook 行为不变）')
   assert.match(acp, /getChatController\(\)\?\.getMessages\(source\)/, '消息快照必须经 handle.getMessages')
-  assert.match(acp, /s\.touchedFiles\[source\]/, '关联必须读 touchedFiles（正向）')
+  // 2026-08-06 修复：touchedFiles 必须选整个 record（`?? []` 在 selector 内每次新数组 →
+  // zustand useSyncExternalStore 快照不稳 → Maximum update depth 死循环）；派生留组件体
+  assert.match(acp, /useWorkspaceStore\(s => s\.touchedFiles\)/, '关联必须读 touchedFiles（正向，稳定 record）')
+  assert.match(acp, /touchedFilesRecord\[source\]/, '关联必须读 touchedFiles（正向）')
   assert.match(acp, /import MessageSearchBar/, '必须复用 MessageSearchBar')
   const fcp = readFileSync(new URL('../src/components/right-panel/FileContextPanel.tsx', import.meta.url), 'utf8')
-  assert.match(fcp, /touchedFiles\[source\]/, 'file 右栏必须反查 touchedFiles')
+  assert.match(fcp, /useWorkspaceStore\(s => s\.touchedFiles\)/, 'file 右栏必须反查 touchedFiles（稳定 record）')
 }
 
 // 7. 搜索定位行为不变：useMessageSearch 仍在 ChatView（匹配/滚动定位）
