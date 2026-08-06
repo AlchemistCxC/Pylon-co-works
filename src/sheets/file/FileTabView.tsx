@@ -75,14 +75,7 @@ export default function FileTabView({ source, path, onTruncated, onContentReady,
       {isMarkdown ? (
         <div className="file-tab-md">
           <Suspense fallback={<p className="file-tab-hint">加载 Markdown…</p>}>
-            <MarkdownRenderer components={{
-              // 与 ChatView 同款守卫：文件 markdown 的 asset:/file: 图片不得加载本地文件
-              img({ src, alt, ...props }) {
-                const allowed = typeof src === 'string' && /^(https?:|data:)/i.test(src)
-                if (!allowed) return null
-                return <img src={src} alt={alt || ''} {...props} />
-              },
-            }}>{content}</MarkdownRenderer>
+            <MarkdownRenderer>{content}</MarkdownRenderer>
           </Suspense>
         </div>
       ) : highlighted ? (

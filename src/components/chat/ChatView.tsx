@@ -276,13 +276,6 @@ export function AssistantContent({ text, isStreaming = false }: { text: string; 
             a({ href, children }) { return <a href={href} target="_blank" rel="noopener noreferrer" className="term-link">{children}</a> },
             blockquote({ children }) { return <blockquote className="term-blockquote">{children}</blockquote> },
             table({ children }) { return <div className="term-table-wrap"><table className="term-table">{children}</table></div> },
-            // asset 协议全放开后：Agent markdown 的 asset:/file: 图片不得加载本地文件
-            // （用户自定义背景走 UI/convertFileSrc，不经 markdown，不受此限制）
-            img({ src, alt, ...props }) {
-              const allowed = typeof src === 'string' && /^(https?:|data:)/i.test(src)
-              if (!allowed) return null
-              return <img src={src} alt={alt || ''} {...props} />
-            },
           }}>{text}</MarkdownRenderer>
         </Suspense>
         ) : (
