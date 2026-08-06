@@ -508,8 +508,10 @@ where
     S: Stream<Item = Result<Message, E>> + Unpin,
     E: std::fmt::Display,
 {
+    // 方案 1C：绝对 deadline，而非每帧续期——持续收到非 Hello 帧不能无限延长等待。
+    let deadline = tokio::time::Instant::now() + hello_timeout;
     loop {
-        let msg = tokio::time::timeout(hello_timeout, read.next())
+        let msg = tokio::time::timeout_at(deadline, read.next())
             .await
             .map_err(|_| "WS Hello 等待超时")?
             .ok_or("WS 提前关闭")?
@@ -1056,5 +1058,85 @@ mod tests {
             .await
             .expect_err("流提前关闭应返回 Err");
         assert!(err.contains("提前关闭"), "错误消息应含提前关闭提示: {err}");
+    }
+
+    /// 受时序控制的流：由测试 task 在 schedule 时刻向 channel 喂帧，
+    /// 便于验证 deadline 语义（帧到达间隔 < 总 deadline 也无法续期）。
+    struct ChannelStream(tokio::sync::mpsc::UnboundedReceiver<Message>);
+
+    impl Stream for ChannelStream {
+        type Item = Result<Message, tokio_tungstenite::tungstenite::Error>;
+        fn poll_next(
+            mut self: std::pin::Pin<&mut Self>,
+            cx: &mut std::task::Context<'_>,
+        ) -> std::task::Poll<Option<Self::Item>> {
+            match self.0.poll_recv(cx) {
+                std::task::Poll::Ready(Some(m)) => std::task::Poll::Ready(Some(Ok(m))),
+                std::task::Poll::Ready(None) => std::task::Poll::Ready(None),
+                std::task::Poll::Pending => std::task::Poll::Pending,
+            }
+        }
+    }
+
+    /// 每 interval 毫秒发送一帧非 op10 帧，发送 count 次后悬挂（等待 deadline 触发）。
+    fn spawn_interval_frames(
+        tx: tokio::sync::mpsc::UnboundedSender<Message>,
+        interval: Duration,
+        count: u32,
+    ) {
+        tokio::spawn(async move {
+            for _ in 0..count {
+                tokio::time::sleep(interval).await;
+                if tx
+                    .send(Message::Text(
+                        serde_json::json!({"op": 0, "t": "READY", "d": {}}).to_string(),
+                    ))
+                    .is_err()
+                {
+                    return;
+                }
+            }
+        });
+    }
+
+    #[tokio::test]
+    async fn hello_uses_absolute_deadline_not_per_frame_renewal() {
+        // 方案 1C 测试门：100ms 总 deadline，每 40ms 收到非 op10 帧（续期会无限
+        // 拖长），最终必须按绝对 deadline 失败。
+        let (tx, rx) = tokio::sync::mpsc::unbounded_channel();
+        spawn_interval_frames(tx, Duration::from_millis(40), 10);
+        let mut stream = ChannelStream(rx);
+        let start = std::time::Instant::now();
+        let err = await_hello(&mut stream, Duration::from_millis(100))
+            .await
+            .expect_err("持续非 Hello 帧应按绝对 deadline 失败");
+        assert!(err.contains("超时"), "错误消息应含超时提示: {err}");
+        let elapsed = start.elapsed();
+        assert!(
+            elapsed >= Duration::from_millis(100),
+            "应至少等满总 deadline: {elapsed:?}"
+        );
+        assert!(
+            elapsed < Duration::from_millis(200),
+            "不得被非 Hello 帧无限续期: {elapsed:?}"
+        );
+    }
+
+    #[tokio::test]
+    async fn hello_succeeds_when_op10_arrives_before_deadline() {
+        // 99ms 到达 op10 → 成功（deadline 内合法）。
+        let (tx, rx) = tokio::sync::mpsc::unbounded_channel();
+        let tx2 = tx.clone();
+        tokio::spawn(async move {
+            tokio::time::sleep(Duration::from_millis(99)).await;
+            let _ = tx2.send(Message::Text(
+                serde_json::json!({"op": 10, "d": {"heartbeat_interval": 30000}}).to_string(),
+            ));
+        });
+        let mut stream = ChannelStream(rx);
+        let interval = await_hello(&mut stream, Duration::from_millis(120))
+            .await
+            .expect("deadline 内到达 op10 应成功");
+        assert_eq!(interval, Duration::from_millis(24000));
     }
 }
