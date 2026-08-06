@@ -147,13 +147,13 @@ export default function App() {
     return () => window.removeEventListener('keydown', onKeyDown)
   }, [])
 
-  // 浏览器模式静态演示全景（用户直派，非施工项）：种 4 会话/多 sheet/每会话对话缓存。
-  // 声明在所有现有 effect 之后（SheetLayout 子 effect 先跑）；幂等（seededRef + sessions 非空跳过）。
+  // 浏览器模式静态演示全景（用户直派，非施工项）：每次启动补 agents/状态灯（非持久化），
+  // 仅首次种会话/sheets。声明在所有现有 effect 之后（SheetLayout 子 effect 先跑）；
+  // 幂等=seedDemo 内部（sessions 空才种会话）+ seededRef（StrictMode 双跑）。
   const demoSeededRef = useRef(false)
   useEffect(() => {
     if (IS_TAURI) return
     if (demoSeededRef.current) return
-    if (useIdentityStore.getState().sessions.length > 0) return
     demoSeededRef.current = true
     seedDemo(setActiveSession, {
       withPermission: new URLSearchParams(window.location.search).get('demo-permission') === '1',
