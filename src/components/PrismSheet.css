@@ -10,8 +10,8 @@
 }
 
 .ps-nav {
-  width: 196px;
-  flex: 0 0 196px;
+  width: var(--sheet-sidebar-width, 250px);
+  flex: 0 0 var(--sheet-sidebar-width, 250px);
   display: flex;
   flex-direction: column;
   gap: var(--ui-space-1);
@@ -235,7 +235,7 @@
 .ml { margin-left: var(--ui-space-2); }
 
 @media (max-width: 820px) {
-  .ps-nav { width: 156px; flex-basis: 156px; }
+  .ps-nav { width: var(--sheet-sidebar-width, 250px); flex-basis: var(--sheet-sidebar-width, 250px); }
   .ps-body { padding: var(--ui-space-5) var(--ui-space-4); }
   .ps-split, .ps-split3 { flex-direction: column; }
   .ps-list { flex-basis: auto; width: 100% !important; }
