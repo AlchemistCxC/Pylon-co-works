@@ -98,6 +98,7 @@ for (const entry of buildGitStatus()) {
   assert.match(seed, /persistSessions\(localStorage, sessions\)/, '会话必须持久化（幂等）')
   assert.match(seed, /persistMessageSnapshot\(session\.id/, '每会话必须种消息缓存')
   assert.match(seed, /openSheet\(\{ kind: 'agent'/, '必须先开 agent sheet')
+  assert.match(seed, /singletonKey: `file:\$\{sessions\[0\]\.source\}`/, 'file sheet 必须绑演示会话 source（打开即见文件树/git/搜索）')
   assert.match(seed, /focusSheet\(agentSheetId\)/, '必须聚焦 agent sheet')
   assert.match(seed, /setActiveSession\(sessions\[0\]\.id\)/, 'setActiveSession 必须随会话种入（写回 effect 持久化）')
   assert.match(seed, /runtime\.setAgentStatus\('peri'/, '状态灯必须每次补（非持久化）')

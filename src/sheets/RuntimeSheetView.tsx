@@ -2,7 +2,6 @@ import { useEffect, useMemo, useState } from 'react'
 import { invoke } from '@tauri-apps/api/core'
 import { listen } from '@tauri-apps/api/event'
 import { useRuntimeStore } from '../runtimeStore'
-import { IS_TAURI } from '../infrastructure/tauri/env'
 import { reportRuntimeError } from '../runtimeError'
 import { normalizeRuntimeLogEntry, normalizeRuntimeLogList, normalizeStartupDiagnostics, type StartupDiagnostics } from '../infrastructure/tauri/runtimeLogContracts.ts'
 import { collectRuntimeLogFacets, deriveCrashMarkers, filterRuntimeLogs, mergeRuntimeLogs, type CrashMarker, type RuntimeLogEntry, type RuntimeLogFilter } from '../domains/runtime/runtimeLogs.ts'
@@ -28,7 +27,7 @@ export default function RuntimeSheetView({ sheet: _sheet, ctx: _ctx }: { sheet: 
   }, [agentStatuses])
 
   useEffect(() => {
-    if (!IS_TAURI) return
+    // 浏览器模式 mock 后端已装（demo）：invoke/listen 经假 __TAURI_INTERNALS__ 返回 mock 数据
     let disposed = false
     invoke<unknown>('startup_diagnostics').then(raw => {
       if (!disposed) setDiagnostics(normalizeStartupDiagnostics(raw))

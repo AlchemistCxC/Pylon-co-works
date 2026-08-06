@@ -17,10 +17,15 @@ interface SheetLauncherProps {
   onOpenProfiles: () => void
 }
 
+// 全部 sheet kind 可打开（未接后端的显示占位态，不创建假数据）；agent 由上方 Agent 组承载
 const TOOL_OPTIONS: Array<{ kind: SheetKind; title: string; description: string; enabled: boolean }> = [
-  { kind: 'prism', title: 'Prism', description: 'Prism 管理 API 尚未接入', enabled: false },
-  { kind: 'runtime', title: 'Runtime', description: '后端能力尚未接入', enabled: false },
-  // W1-01（F1-A）：changes/git-history 旧 kind 已删（FileSheet 分区化），占位移除
+  { kind: 'file', title: 'File', description: '工作区文件 / SCM / 搜索', enabled: true },
+  { kind: 'gateway', title: 'Gateway', description: '网关适配器与路由概览', enabled: true },
+  { kind: 'history', title: 'History', description: '存档会话列表与导出', enabled: true },
+  { kind: 'search', title: 'Search', description: '跨会话快照搜索', enabled: true },
+  { kind: 'runtime', title: 'Runtime', description: '运行日志与启动诊断', enabled: true },
+  { kind: 'browser', title: 'Browser', description: '浏览器会话（CDP 待后端）', enabled: true },
+  { kind: 'prism', title: 'Prism', description: 'Prism 管理（静态演示）', enabled: true },
 ]
 
 export default function SheetLauncher({
@@ -130,7 +135,7 @@ export default function SheetLauncher({
       <div className="sheet-launcher-footer">
         <span><kbd>↑↓</kbd> 选择</span>
         <span><kbd>Enter</kbd> 打开</span>
-        <span>未接入能力不会创建假 Sheet</span>
+        <span>全部 Sheet 均可打开，未接后端能力显示占位</span>
       </div>
     </Command.Dialog>
   )

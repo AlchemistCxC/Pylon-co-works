@@ -37,7 +37,8 @@ export function seedDemo(setActiveSession: (id: string | null) => void, options:
     }
     const workspace = useWorkspaceStore.getState()
     const agentSheetId = workspace.openSheet({ kind: 'agent', title: 'Peri', agentId: 'peri' })
-    workspace.openSheet({ kind: 'file', title: 'File', agentId: 'peri' })
+    // file sheet 绑演示会话 source（singletonKey=file:<source>），打开即见文件树/git/搜索
+    workspace.openSheet({ kind: 'file', title: 'File', agentId: 'peri', singletonKey: `file:${sessions[0].source}` })
     workspace.openSheet({ kind: 'gateway', title: 'Gateway' })
     workspace.openSheet({ kind: 'history', title: 'History' })
     workspace.openSheet({ kind: 'runtime', title: 'Runtime' })
