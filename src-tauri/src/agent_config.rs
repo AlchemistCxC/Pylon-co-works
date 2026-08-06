@@ -1,5 +1,6 @@
 use serde::Deserialize;
 use std::collections::HashMap;
+use std::io::Write;
 use std::path::{Path, PathBuf};
 
 /// 启动/加载配置的领域错误（R7/P2-1）。Display 透传原文案（前端/日志依赖文案
@@ -18,6 +19,12 @@ pub enum ConfigError {
     /// 其他配置级错误（空 agents 表、默认 agent 冲突等）。
     #[error("{0}")]
     Invalid(String),
+    /// 配置不可写（embedded 无外部写入目标；后端施工计划书 Phase 3 §5.4）。
+    #[error("config_read_only: 当前为嵌入配置，无外部写入目标")]
+    ReadOnly,
+    /// 配置写入失败（临时文件/同步/rename 等）。
+    #[error("config_write_error: {0}")]
+    Write(String),
 }
 
 impl ConfigError {
@@ -27,6 +34,8 @@ impl ConfigError {
             Self::Parse(_) => "config_parse_error",
             Self::InvalidAgent(_) => "config_invalid_agent",
             Self::Invalid(_) => "config_error",
+            Self::ReadOnly => "config_read_only",
+            Self::Write(_) => "config_write_error",
         }
     }
 }
@@ -766,6 +775,131 @@ pub fn load_from_path(path: &Path) -> Result<HashMap<String, AgentDef>, ConfigEr
         .collect())
 }
 
+// ── Phase 3：配置写入纯函数层（后端施工计划书 §5.3.A；command/事务层待 scope 契约拍板）──
+
+/// 解析整份配置文档为可编辑 Value。YAML round-trip 会丢注释/缩进/键序——
+/// 这是产品层明确接受的代价（§5.3.A），不默认引入 CST 保留方案。
+pub(crate) fn parse_config_document(content: &str) -> Result<serde_yml::Value, ConfigError> {
+    serde_yml::from_str::<serde_yml::Value>(content)
+        .map_err(|error| ConfigError::Parse(format!("failed to parse agents.yaml: {error}")))
+}
+
+/// 应用 agent 补丁（§5.3.A）：patch 为 agent 整块 YAML 字符串（前端 AgentConfigEditor
+/// 形态）；仅替换目标 agent，默认禁止创建不存在 agent（产品拍板项，默认禁止）。
+pub(crate) fn apply_agent_patch(
+    content: &str,
+    agent_id: &str,
+    patch_yaml: &str,
+) -> Result<String, ConfigError> {
+    let mut document = parse_config_document(content)?;
+    let agents = document
+        .get_mut("agents")
+        .and_then(|value| value.as_mapping_mut())
+        .ok_or_else(|| ConfigError::Invalid("配置缺少 agents 段".to_string()))?;
+    let key = agent_id.to_string();
+    if !agents.contains_key(&key) {
+        return Err(ConfigError::Invalid(format!(
+            "agent {agent_id} 不存在（默认禁止创建，待拍板）"
+        )));
+    }
+    let patch_value: serde_yml::Value = serde_yml::from_str(patch_yaml)
+        .map_err(|error| ConfigError::Parse(format!("agent {agent_id} 补丁 YAML 非法: {error}")))?;
+    agents.insert(key, patch_value);
+    serde_yml::to_string(&document)
+        .map_err(|error| ConfigError::Invalid(format!("配置序列化失败: {error}")))
+}
+
+/// 应用 gateway 补丁（§5.3.A）：patch 为前端 JSON `{ gateway: { routes: [...] } }`；
+/// 只允许 routes 键整段替换（显式 patch，不做不透明深 merge，保留 qq/inject 段）。
+pub(crate) fn apply_gateway_patch(
+    content: &str,
+    patch: &serde_json::Value,
+) -> Result<String, ConfigError> {
+    let gateway = patch
+        .get("gateway")
+        .ok_or_else(|| ConfigError::Invalid("补丁缺少 gateway 段".to_string()))?;
+    let routes = gateway
+        .get("routes")
+        .ok_or_else(|| ConfigError::Invalid("gateway 补丁缺少 routes".to_string()))?;
+    let extra_keys = gateway
+        .as_object()
+        .map(|object| object.keys().filter(|key| *key != "routes").count())
+        .unwrap_or(0);
+    if extra_keys > 0 {
+        return Err(ConfigError::Invalid(
+            "gateway 补丁只允许 routes 键（防隐式深 merge）".to_string(),
+        ));
+    }
+    // JSON → YAML Value：JSON 是合法 YAML 子集，经字符串往返转换。
+    let routes_yaml: serde_yml::Value = serde_yml::from_str(
+        &serde_json::to_string(routes)
+            .map_err(|error| ConfigError::Invalid(format!("routes 序列化失败: {error}")))?,
+    )
+    .map_err(|error| ConfigError::Parse(format!("gateway routes 非法: {error}")))?;
+    let mut document = parse_config_document(content)?;
+    let mapping = document
+        .as_mapping_mut()
+        .ok_or_else(|| ConfigError::Invalid("配置顶层必须为 mapping".to_string()))?;
+    let gateway_key = "gateway".to_string();
+    if !mapping.contains_key(&gateway_key) {
+        mapping.insert(gateway_key.clone(), serde_yml::Value::Mapping(serde_yml::Mapping::new()));
+    }
+    let gateway_node = mapping.get_mut(&gateway_key).ok_or_else(|| {
+        ConfigError::Invalid("gateway 段不可变".to_string())
+    })?;
+    let gateway_map = gateway_node
+        .as_mapping_mut()
+        .ok_or_else(|| ConfigError::Invalid("gateway 段非法".to_string()))?;
+    gateway_map.insert("routes".to_string(), routes_yaml);
+    serde_yml::to_string(&document)
+        .map_err(|error| ConfigError::Invalid(format!("配置序列化失败: {error}")))
+}
+
+/// 候选配置双域校验（§5.3.A）：agents 经 parse_agents（A11 env/NUL、transport、
+/// 空 name/exe 等），gateway 经 GatewayConfig::from_yaml_str；任一侧失败即 Err。
+pub(crate) fn validate_candidate(
+    content: &str,
+    base_dir: Option<&Path>,
+) -> Result<(), ConfigError> {
+    let (agents, gateway) = parse_domains(content, base_dir);
+    agents?;
+    gateway?;
+    Ok(())
+}
+
+/// 原子写入（§5.3.A）：唯一临时文件 + 写全 + sync_all + rename 覆盖；失败清理
+/// 临时文件。与 export::write_export_atomically 的 create_new（拒绝覆盖）语义
+/// 不同——本函数是替换目标语义。Windows rename 覆盖/目标占用返回明确错误。
+pub(crate) fn write_config_atomically(path: &Path, content: &str) -> Result<(), ConfigError> {
+    let dir = path
+        .parent()
+        .ok_or_else(|| ConfigError::Write(format!("{} 无父目录", path.display())))?;
+    let file_name = path
+        .file_name()
+        .ok_or_else(|| ConfigError::Write(format!("{} 无文件名", path.display())))?;
+    let temp = dir.join(format!(
+        ".{}.tmp-{}",
+        file_name.to_string_lossy(),
+        std::process::id()
+    ));
+    let write_result = (|| -> std::io::Result<()> {
+        let mut file = std::fs::File::create(&temp)?;
+        file.write_all(content.as_bytes())?;
+        file.sync_all()?;
+        drop(file);
+        std::fs::rename(&temp, path)?;
+        Ok(())
+    })();
+    if let Err(error) = write_result {
+        let _ = std::fs::remove_file(&temp);
+        return Err(ConfigError::Write(format!(
+            "写配置 {} 失败: {error}",
+            path.display()
+        )));
+    }
+    Ok(())
+}
+
 pub fn default_agent_id(agents: &HashMap<String, AgentDef>) -> Result<Option<String>, ConfigError> {
     let mut defaults: Vec<&String> = agents
         .iter()
@@ -1384,5 +1518,92 @@ gateway:
                 assert!(gateway_text.is_err());
             }
         }
+    }
+
+    // ── Phase 3 配置写入纯函数层（§5.5）──
+
+    const SAMPLE: &str = "agents:\n  peri:\n    name: Peri\n    transport: subprocess\n    exe: python\n  hermes:\n    name: Hermes\n    transport: subprocess\n    exe: python\n    default: true\ngateway:\n  qq:\n    group_allow_from: [g1]\n  routes:\n    - source: qq:user:14CE\n      agent: peri\n      profile: p\n      session: s\n";
+
+    #[test]
+    fn agent_patch_replaces_target_and_preserves_others() {
+        let patched = apply_agent_patch(
+            SAMPLE,
+            "peri",
+            "name: Peri2\ntransport: subprocess\nexe: python3\n",
+        )
+        .unwrap();
+        assert!(patched.contains("name: Peri2"), "目标 agent 必须替换");
+        assert!(patched.contains("name: Hermes"), "其余 agent 必须保留");
+        // round-trip：重解析后 peri 更新、hermes 不变
+        let agents = parse(&patched).unwrap();
+        assert_eq!(agents["peri"].name, "Peri2");
+        assert_eq!(agents["hermes"].name, "Hermes");
+        assert_eq!(agents["hermes"].default, true);
+    }
+
+    #[test]
+    fn agent_patch_rejects_missing_agent_and_bad_patch() {
+        assert!(apply_agent_patch(SAMPLE, "ghost", "name: X\nexe: y\ntransport: subprocess\n").is_err(), "不存在 agent 默认禁止创建");
+        assert!(apply_agent_patch(SAMPLE, "peri", "name: [unclosed").is_err(), "非法 YAML 补丁必须报错");
+    }
+
+    #[test]
+    fn gateway_patch_replaces_routes_keeps_qq() {
+        let patch = serde_json::json!({ "gateway": { "routes": [{ "source": "qq:user:new", "agent": "hermes", "profile": "p", "session": "s" }] } });
+        let patched = apply_gateway_patch(SAMPLE, &patch).unwrap();
+        assert!(patched.contains("qq:user:new"), "routes 必须整段替换");
+        assert!(!patched.contains("qq:user:14CE"), "旧 routes 必须移除");
+        assert!(patched.contains("group_allow_from"), "qq 段必须保留（显式 patch 不做深 merge）");
+        // round-trip：gateway 域重解析校验通过
+        validate_candidate(&patched, None).unwrap();
+    }
+
+    #[test]
+    fn gateway_patch_rejects_unknown_keys() {
+        let patch = serde_json::json!({ "gateway": { "routes": [], "inject": {} } });
+        assert!(apply_gateway_patch(SAMPLE, &patch).is_err(), "只允许 routes 键");
+        let no_routes = serde_json::json!({ "gateway": { "qq": {} } });
+        assert!(apply_gateway_patch(SAMPLE, &no_routes).is_err(), "缺少 routes 必须报错");
+    }
+
+    #[test]
+    fn validate_candidate_rejects_bad_agent_and_bad_gateway() {
+        let bad_env = "agents:\n  a:\n    name: A\n    transport: subprocess\n    exe: python\n    env:\n      \"k=v\": x\n";
+        assert!(validate_candidate(bad_env, None).is_err(), "env 键含 = 必须拒绝");
+        let bad_route = "agents:\n  a:\n    name: A\n    transport: subprocess\n    exe: python\ngateway:\n  routes:\n    - source: x\n";
+        assert!(validate_candidate(bad_route, None).is_err(), "route 缺 agent/profile/session 必须拒绝");
+    }
+
+    #[test]
+    fn write_config_atomically_creates_replaces_and_cleans_temp() {
+        let dir = std::env::temp_dir().join(format!("pylon-cfg-test-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("agents.yaml");
+        // 新建
+        write_config_atomically(&path, "agents:\n  a:\n    name: A\n    transport: subprocess\n    exe: python\n").unwrap();
+        assert_eq!(std::fs::read_to_string(&path).unwrap().trim(), "agents:\n  a:\n    name: A\n    transport: subprocess\n    exe: python\n".trim());
+        // 覆盖（替换语义）
+        write_config_atomically(&path, "agents:\n  b:\n    name: B\n    transport: subprocess\n    exe: python\n").unwrap();
+        assert!(std::fs::read_to_string(&path).unwrap().contains("name: B"));
+        // 无临时残留
+        let leftovers: Vec<_> = std::fs::read_dir(&dir).unwrap()
+            .filter_map(|entry| entry.ok())
+            .filter(|entry| entry.file_name().to_string_lossy().contains(".tmp-"))
+            .collect();
+        assert!(leftovers.is_empty(), "失败/成功后不得残留临时文件");
+        // 写后重解析等价（§5.5 round-trip）
+        let content = std::fs::read_to_string(&path).unwrap();
+        assert!(parse(&content).is_ok());
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn write_config_atomically_fails_on_missing_dir() {
+        let dir = std::env::temp_dir().join(format!("pylon-cfg-missing-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        let path = dir.join("agents.yaml");
+        let result = write_config_atomically(&path, "x");
+        assert!(matches!(result, Err(ConfigError::Write(_))), "目标目录缺失必须 config_write_error");
     }
 }
