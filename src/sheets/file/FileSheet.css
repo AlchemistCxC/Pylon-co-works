@@ -109,9 +109,12 @@
 }
 
 /* W2-04：文件树 / 多 tab / 只读代码视图（消费 8 编辑器 cssVar，F3-D） */
+/* D-08：文件树移入左栏（VS Code 风格），主区恒为编辑器 */
 
 .file-main { display: flex; flex-direction: column; }
-.file-tree { flex: 0 0 auto; max-height: 30%; overflow-y: auto; border-bottom: 1px solid var(--border); }
+.file-section-content { flex: 1; min-height: 0; display: flex; flex-direction: column; overflow-y: auto; }
+.file-section-content .file-tree { flex: 1; overflow-y: auto; padding: 8px 0; }
+.file-tree { overflow-y: auto; }
 .file-tree-node { display: flex; flex-direction: column; }
 .file-tree-row {
   display: flex; align-items: center; gap: 4px;
@@ -155,6 +158,7 @@
 .file-tab-plain { font-family: var(--mono); color: var(--text); white-space: pre-wrap; }
 .file-tab-md { padding: 12px; color: var(--text); }
 .file-tab-md p { margin: 0 0 8px; }
+.file-editor { flex: 1; min-width: 0; display: flex; flex-direction: column; }
 .file-tab-empty { padding: 12px; font-size: 12px; color: var(--text-dim); }
 .file-tab-hint { font-size: 12px; color: var(--text-dim); }
 .file-truncated-hint { padding: 4px 12px; font-size: 11px; color: var(--editor-modified-mark, #b47814); background: var(--editor-active-line); }
@@ -174,7 +178,7 @@
 .git-status-row:hover { background: var(--bg-hover); }
 .git-status-code { font-family: var(--mono); color: var(--accent); width: 1.5em; }
 .git-status-path { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; }
-.git-diff-view { flex: 1; min-width: 0; border-left: 1px solid var(--border); padding: 8px; overflow: auto; }
+.git-diff-view { flex: 1; min-width: 0; padding: 8px; overflow: auto; }
 .git-diff-head { display: flex; align-items: center; gap: 8px; margin-bottom: 8px; }
 .git-diff-path { font-family: var(--mono); font-size: 12px; flex: 1; word-break: break-all; }
 .git-diff-close { background: none; border: none; color: var(--text-dim); cursor: pointer; font-size: 12px; }

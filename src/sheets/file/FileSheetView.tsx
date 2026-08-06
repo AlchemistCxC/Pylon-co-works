@@ -14,12 +14,13 @@ import type { SheetContext, SheetRecord } from '../../workspace-sheets/sheetType
 import './FileSheet.css'
 
 /**
- * FileSheetView — FileSheet 主视图（W2-03/04）。
+ * FileSheetView — FileSheet 主视图（W2-03/04，D-08 VS Code 风格改造）。
  *
  * singletonKey = file:{初始 source}（同工作区复用）；内部 targetSource 本地态。
  * metadata 承载 openTabs（JSON 串）/activeFile/truncated（W2-04 组合 action
- * patchSheetMetadata 原子合并、损坏 JSON normalize 为空）。文件树懒加载 + 多 tab +
- * 只读代码/md 视图（消费 8 编辑器 cssVar）。
+ * patchSheetMetadata 原子合并、损坏 JSON normalize 为空）。
+ * 布局（D-08）：左栏=活动栏 + 分区内容（文件树/SCM/搜索，随分区切换）；
+ * 主区=恒定文件视图（tab 条 + 编辑器 + 发令栏），SCM 打开 diff 时主区显示 diff。
  */
 export default function FileSheetView({ sheet, ctx }: { sheet: SheetRecord; ctx: SheetContext }) {
   const initialSource = sheet.singletonKey?.replace(/^file:/, '') ?? ctx.sessionSource(ctx.activeSession)
@@ -57,49 +58,6 @@ export default function FileSheetView({ sheet, ctx }: { sheet: SheetRecord; ctx:
     if (!nextActive) setTruncated(false)
   }
 
-  const filesSection = (
-    <main className="file-main">
-      {state.targetSource && (
-        <>
-          <FileTree source={state.targetSource} onOpen={openTab} />
-          <FileTabBar openTabs={openTabs} activeFile={activeFile} onSelect={selectTab} onClose={closeTab} />
-          {activeFile ? (
-            <>
-              <DispatchBar
-                targetSource={state.targetSource}
-                filePath={activeFile}
-                selection={selection}
-                content={fileContent}
-                instruction={instruction}
-                onInstructionChange={setInstruction}
-                onSelectionChange={setSelection}
-                onClearSelection={() => setSelection(null)}
-              />
-              {truncated && <div className="file-truncated-hint" role="status">内容不完整（truncated）</div>}
-              <FileTabView source={state.targetSource} path={activeFile} onTruncated={setTruncated} onContentReady={setFileContent} />
-            </>
-          ) : (
-            <div className="file-tab-empty">打开一个文件开始阅读</div>
-          )}
-        </>
-      )}
-    </main>
-  )
-
-  const scmSection = state.targetSource ? (
-    <main className="file-main file-main-split">
-      <GitPanel source={state.targetSource} onOpenDiff={(path, staged) => setActiveDiff({ path, staged })} />
-      {activeDiff && (
-        <DiffView
-          source={state.targetSource}
-          path={activeDiff.path}
-          staged={activeDiff.staged}
-          onClose={() => setActiveDiff(null)}
-        />
-      )}
-    </main>
-  ) : <main className="file-main"><p className="file-section-hint">未指向会话</p></main>
-
   return (
     <div className="file-sheet">
       <FileSheetSidebar
@@ -107,16 +65,44 @@ export default function FileSheetView({ sheet, ctx }: { sheet: SheetRecord; ctx:
         targetSource={state.targetSource}
         onSelectSection={selectSection}
         onSelectSource={selectSource}
-      />
-      {state.activeSection === 'files' ? filesSection : state.activeSection === 'scm' ? scmSection : state.activeSection === 'search' ? (
-        <main className="file-main"><WorkspaceSearchPanel source={state.targetSource} onOpenResult={openTab} /></main>
-      ) : (
-        <main className="file-main">
-          <div className="file-main-kicker">FILE SHEET</div>
-          <h2 className="file-main-title">{state.targetSource || '未指向会话'}</h2>
-          <p className="file-main-hint">当前分区：{state.activeSection}（W2-06 接线）</p>
-        </main>
-      )}
+      >
+        {state.activeSection === 'files' && <FileTree source={state.targetSource} onOpen={openTab} />}
+        {state.activeSection === 'scm' && (
+          <GitPanel source={state.targetSource} onOpenDiff={(path, staged) => setActiveDiff({ path, staged })} />
+        )}
+        {state.activeSection === 'search' && (
+          <WorkspaceSearchPanel source={state.targetSource} onOpenResult={openTab} />
+        )}
+        {state.activeSection === 'views' && (
+          <div className="file-section-panel">
+            <div className="file-section-title">视图</div>
+            <p className="file-section-hint">视图分区（W2-04 起接线）</p>
+          </div>
+        )}
+      </FileSheetSidebar>
+      <main className="file-editor">
+        <FileTabBar openTabs={openTabs} activeFile={activeFile} onSelect={selectTab} onClose={closeTab} />
+        {activeDiff ? (
+          <DiffView source={state.targetSource} path={activeDiff.path} staged={activeDiff.staged} onClose={() => setActiveDiff(null)} />
+        ) : activeFile ? (
+          <>
+            <DispatchBar
+              targetSource={state.targetSource}
+              filePath={activeFile}
+              selection={selection}
+              content={fileContent}
+              instruction={instruction}
+              onInstructionChange={setInstruction}
+              onSelectionChange={setSelection}
+              onClearSelection={() => setSelection(null)}
+            />
+            {truncated && <div className="file-truncated-hint" role="status">内容不完整（truncated）</div>}
+            <FileTabView source={state.targetSource} path={activeFile} onTruncated={setTruncated} onContentReady={setFileContent} />
+          </>
+        ) : (
+          <div className="file-tab-empty">打开一个文件开始阅读</div>
+        )}
+      </main>
     </div>
   )
 }

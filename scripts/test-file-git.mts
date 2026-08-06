@@ -30,9 +30,10 @@ assert.match(diffView, /invoke<string>\('git_diff', \{ source, path, staged \}\)
 assert.match(diffView, /import DiffCard from '\.\.\/\.\.\/components\/chat\/DiffCard'/, '必须复用 DiffCard（不新造 diff 渲染器）')
 assert.match(diffView, /<DiffCard output=\{output\} \/>/, 'diff 经 DiffPayload 统一渲染')
 
-// 4. FileSheetView：scm 分区接线
+// 4. FileSheetView：scm 分区接线（D-08 VS Code 布局：SCM 内容在左栏，diff 开主区）
 const view = readFileSync(new URL('../src/sheets/file/FileSheetView.tsx', import.meta.url), 'utf8')
-assert.match(view, /state\.activeSection === 'scm' \? scmSection/, 'scm 分区必须接线')
+assert.match(view, /state\.activeSection === 'scm' && \(/, 'scm 分区必须接线（左栏）')
 assert.match(view, /<GitPanel source=\{state\.targetSource\} onOpenDiff=\{\(path, staged\) => setActiveDiff/, 'GitPanel 必须接当前 source')
+assert.match(view, /<DiffView source=\{state\.targetSource\} path=\{activeDiff\.path\} staged=\{activeDiff\.staged\} onClose=\{\(\) => setActiveDiff\(null\)\} \/>/, 'diff 必须在主区渲染')
 
 console.log('file git 分区守卫通过')

@@ -35,9 +35,10 @@ assert.match(panel, /normalizeWorkspaceSearchResults\(raw\)/, '结果必须经 n
 assert.equal(panel.includes('readdir'), false, '不得以前端遍历文件冒充搜索')
 assert.equal(panel.includes("invoke('read_workspace_text'"), false, '不得用读文件冒充搜索')
 
-// 4. FileSheetView 搜索分区接线：结果打开 tab
+// 4. FileSheetView 搜索分区接线（D-08 VS Code 布局：搜索内容在左栏）：结果打开 tab
 const view = readFileSync(new URL('../src/sheets/file/FileSheetView.tsx', import.meta.url), 'utf8')
-assert.match(view, /state\.activeSection === 'search'/, '搜索分区必须接线')
+assert.match(view, /state\.activeSection === 'search' && \(/, '搜索分区必须接线（左栏）')
 assert.match(view, /<WorkspaceSearchPanel source=\{state\.targetSource\} onOpenResult=\{openTab\} \/>/, '结果点击必须打开 tab')
+assert.match(view, /<FileTree source=\{state\.targetSource\} onOpen=\{openTab\} \/>/, '文件树必须接当前 source（左栏）')
 
 console.log('workspace search（桩化）守卫通过')

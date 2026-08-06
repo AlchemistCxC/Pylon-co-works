@@ -2,17 +2,19 @@ import { useIdentityStore } from '../../identityStore'
 import { FILE_SHEET_SECTIONS, type FileSheetSection } from './fileSheetState.ts'
 
 /**
- * FileSheetSidebar — 五分区 activity bar（W2-03）。
+ * FileSheetSidebar — 48px 活动栏 + 分区内容面板（W2-03，VS Code 风格改造 D-08）。
  *
- * 48px 窄条 + 五分区（会话/文件/搜索/SCM/视图）；会话分区列出当前 profile 的会话
- * 供切换 targetSource（内部指向，不改 singletonKey）。全局 sidebarWidth 面板由
- * 布局层（SheetSidebarSlot）承载——本分区栏独立窄条。
+ * 左侧 48px 窄条五分区（会话/文件/搜索/SCM/视图）；会话分区列出当前 profile 的会话
+ * 供切换 targetSource（内部指向，不改 singletonKey）；其余分区内容由 FileSheetView
+ * 经 children 注入（文件树/SCM 状态/搜索——都在左栏），主区恒为文件视图。
+ * 全局 sidebarWidth 面板由布局层（SheetSidebarSlot）承载——本分区栏独立窄条。
  */
-export default function FileSheetSidebar({ activeSection, targetSource, onSelectSection, onSelectSource }: {
+export default function FileSheetSidebar({ activeSection, targetSource, onSelectSection, onSelectSource, children }: {
   activeSection: FileSheetSection
   targetSource: string | null
   onSelectSection: (section: FileSheetSection) => void
   onSelectSource: (source: string) => void
+  children?: React.ReactNode
 }) {
   const sessions = useIdentityStore(s => s.sessions)
   const labels: Record<FileSheetSection, string> = {
@@ -37,7 +39,7 @@ export default function FileSheetSidebar({ activeSection, targetSource, onSelect
           </button>
         ))}
       </div>
-      {activeSection === 'sessions' && (
+      {activeSection === 'sessions' ? (
         <div className="file-section-panel">
           <div className="file-section-title">会话</div>
           {sessions.length === 0 ? (
@@ -59,12 +61,8 @@ export default function FileSheetSidebar({ activeSection, targetSource, onSelect
             </ul>
           )}
         </div>
-      )}
-      {activeSection !== 'sessions' && (
-        <div className="file-section-panel">
-          <div className="file-section-title">{labels[activeSection]}</div>
-          <p className="file-section-hint">{labels[activeSection]}分区（W2-04 起接线）</p>
-        </div>
+      ) : (
+        <div className="file-section-content">{children}</div>
       )}
     </div>
   )
