@@ -18,6 +18,10 @@ const DERIVED_KEYS = new Set([
   'age_days',
   'next_stage_xp',
   'growth_progress',
+  'crafting',
+  'day_part',
+  'achievements',
+  'cosmetics',
   'msg',
 ])
 
@@ -45,8 +49,8 @@ export function clearPetPosition(storage: PetStorage): void {
   } catch { /* 存储不可用：跳过清除 */ }
 }
 
-export function persistPetState<T extends object>(state: T): Omit<T, 'stage' | 'title' | 'age_days' | 'next_stage_xp' | 'growth_progress' | 'msg'> {
-  return Object.fromEntries(Object.entries(state).filter(([key]) => !DERIVED_KEYS.has(key))) as Omit<T, 'stage' | 'title' | 'age_days' | 'next_stage_xp' | 'growth_progress' | 'msg'>
+export function persistPetState<T extends object>(state: T): Omit<T, 'stage' | 'title' | 'age_days' | 'next_stage_xp' | 'growth_progress' | 'crafting' | 'day_part' | 'achievements' | 'cosmetics' | 'msg'> {
+  return Object.fromEntries(Object.entries(state).filter(([key]) => !DERIVED_KEYS.has(key))) as Omit<T, 'stage' | 'title' | 'age_days' | 'next_stage_xp' | 'growth_progress' | 'crafting' | 'day_part' | 'achievements' | 'cosmetics' | 'msg'>
 }
 
 function isPetPosition(value: unknown): value is PetPosition {

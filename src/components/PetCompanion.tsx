@@ -5,6 +5,7 @@ import { advanceCodeEatingBehavior, getCodeComment, shouldStartCodeEating, shoul
 import { classifyPetPointerGesture, choosePetDestination, clampPetPosition, resolvePetClick } from './petMotion'
 import { readPetPosition, writePetPosition, clearPetPosition, persistPetState, PET_POSITION_KEY, PET_STORAGE_KEY } from './petPersistence'
 import { useRuntimeStore } from '../runtimeStore'
+import { resolvePetVisualPose, type PetVisualPose } from './petVisualPose'
 import './PetCompanion.css'
 
 import { normalizePetState, type PetGrowthStage, type PetState, type PetStats } from '../infrastructure/tauri/petContracts'
@@ -14,6 +15,7 @@ type GrowthStage = PetGrowthStage
 const fetchPet = (cmd: string, args?: Record<string, unknown>) => invoke<unknown>(cmd, args).then(normalizePetState)
 
 interface Position { x: number; y: number }
+type PetDirection = 'left' | 'right'
 interface PointerSession {
   pointerId: number
   startX: number
@@ -31,18 +33,43 @@ const EMPTY_STATS: PetStats = {
   messages: 0, prompts_completed: 0, prompts_failed: 0, tokens_total: 0, token_xp: 0,
   tools_started: 0, tools_succeeded: 0, tools_failed: 0, tool_success_rate: 0,
   interactions: 0, active_days: 1, streak_days: 1, longest_streak: 1,
+  code_sessions: 0, code_eaten: 0, code_watched: 0, friends_made: 0, dazes: 0,
+  code_files: [], feed_count: 0, play_count: 0, night_visits: 0, cosmetics_collected: 0,
 }
 
 const MOCK_PET: PetState = {
   name: '微栖', mood: 'idle', happiness: 65, energy: 80, xp: 0, bond: 0,
   born_at_ms: Date.now(), last_seen_day: Math.floor(Date.now() / 86400000), first_chunk_at_ms: null,
+  hunger: 80, fun: 70, loneliness: 0,
+  traits: { activity: 60, clinginess: 60, greed: 60, curiosity: 60 },
+  machine: 'awake.idle', last_tick_at_ms: Date.now(), recent_events: [],
+  last_agent_mode: null, last_agent_model: null, pending_action: null,
+  unlocked: [], inventory: [], equipped: null, last_drop_at_ms: 0,
   stats: EMPTY_STATS, memories: [], stage: 'seed', title: '微光种', age_days: 1,
-  next_stage_xp: 25, growth_progress: 0, msg: '一粒微光落在了这里。',
+  next_stage_xp: 25, growth_progress: 0, crafting: false, day_part: 'day',
+  achievements: [], cosmetics: [
+    { id: 'beret', name: '夜光贝雷帽', kind: 'hat', icon: '', owned: true },
+    { id: 'pixel_hat', name: '像素渔夫帽', kind: 'hat', icon: '', owned: false },
+    { id: 'pixel_cape', name: '像素披风', kind: 'cape', icon: '', owned: true },
+    { id: 'star_scarf', name: '星光围巾', kind: 'cape', icon: '', owned: false },
+    { id: 'glow_band', name: '光点手环', kind: 'glow', icon: '', owned: true },
+    { id: 'code_pin', name: '代码胸针', kind: 'glow', icon: '', owned: false },
+    { id: 'phantom_cat', name: '幻影猫', kind: 'companion', icon: '', owned: true },
+    { id: 'mini_orb', name: '迷你光球', kind: 'companion', icon: '', owned: false },
+    { id: 'code_crown', name: '代码之冕', kind: 'hat', icon: '', owned: false },
+    { id: 'bond_glow', name: '羁绊之光', kind: 'glow', icon: '', owned: false },
+    { id: 'luminary_wings', name: '长明之翼', kind: 'cape', icon: '', owned: false },
+  ], msg: '一粒微光落在了这里。',
 }
 
 const STAGE_SCALE: Record<GrowthStage, number> = {
-  seed: .72, sprout: .84, hopper: .96, guardian: 1.08, luminary: 1.18,
+  seed: .88, sprout: .94, hopper: 1, guardian: 1.04, luminary: 1.06,
 }
+
+const VISUAL_MOODS = new Set([
+  'idle', 'sleepy', 'error', 'hungry', 'tired', 'lonely', 'dazed',
+  'confused', 'startled', 'happy', 'excited', 'focused', 'curious',
+])
 
 function readPosition(): Position | null {
   return readPetPosition(localStorage)
@@ -52,43 +79,105 @@ function persistable(pet: PetState) {
   return persistPetState(pet)
 }
 
-function PixelCreature({ stage, mood, walking }: { stage: GrowthStage; mood: string; walking: boolean }) {
-  const advanced = stage === 'guardian' || stage === 'luminary'
-  const grown = stage !== 'seed'
-  const body = stage === 'luminary' ? 'var(--pet-glow)' : 'var(--pet-body)'
-  const eyeY = mood === 'sleepy' ? 8 : 7
+function CosmeticOverlay({ id }: { id: string | null }) {
+  if (!id) return null
+  return <g className={`pet-cosmetic pet-cosmetic-${id}`} data-cosmetic={id} aria-hidden="true">
+    {id === 'beret' && <><path className="cosmetic-dark" d="M10 8h17v3H8V9h2zM14 5h10v3H12V7h2z" /><rect className="cosmetic-glow" x="13" y="7" width="11" height="1" /></>}
+    {id === 'pixel_hat' && <><path className="cosmetic-warm" d="M8 8h21v3H7V9h1zM12 5h13v3H10V7h2zM16 3h5v2h-5z" /><rect className="cosmetic-accent" x="12" y="8" width="13" height="1" /></>}
+    {id === 'pixel_cape' && <path className="cosmetic-cape" d="M7 15h5v11H8v-3H6v-7h1zm22 0h-5v11h4v-3h2v-7h-1zM10 24h16v5H10z" />}
+    {id === 'star_scarf' && <><path className="cosmetic-scarf" d="M8 14h20v3h-3v8h-4v-8H8z" /><rect className="cosmetic-glow" x="11" y="15" width="12" height="1" /></>}
+    {id === 'glow_band' && <><rect className="cosmetic-glow" x="6" y="23" width="3" height="2" /><rect className="cosmetic-glow" x="28" y="23" width="3" height="2" /></>}
+    {id === 'code_pin' && <><rect className="cosmetic-accent" x="16" y="18" width="6" height="5" /><path className="cosmetic-cutout" d="M17 19h2v1h-1v1h1v1h-2zm4 0h-2v1h1v1h-1v1h2z" /></>}
+    {id === 'phantom_cat' && <><path className="cosmetic-companion" d="M30 20h5v8h-6v-6h1zM30 18h2v3h-2zm3 0h2v3h-2z" /><rect className="cosmetic-glow" x="32" y="22" width="1" height="1" /></>}
+    {id === 'mini_orb' && <><rect className="cosmetic-glow" x="31" y="11" width="4" height="4" /><rect className="cosmetic-glow" x="32" y="10" width="2" height="6" /><rect className="cosmetic-glow" x="30" y="12" width="6" height="2" /></>}
+    {id === 'code_crown' && <><path className="cosmetic-accent" d="M10 9h4l3-5 3 5 4-5 3 5h2v4H9V9z" /><rect className="cosmetic-glow" x="12" y="11" width="14" height="1" /></>}
+    {id === 'bond_glow' && <><rect className="cosmetic-glow" x="3" y="7" width="2" height="2" /><rect className="cosmetic-glow" x="31" y="6" width="2" height="2" /><rect className="cosmetic-glow" x="32" y="26" width="1" height="1" /><rect className="cosmetic-glow" x="4" y="27" width="1" height="1" /></>}
+    {id === 'luminary_wings' && <><path className="cosmetic-glow" d="M7 12H3v3H1v8h3v4h6v-5h2v-8H7zm22 0h4v3h2v8h-3v4h-6v-5h-2v-8h5z" /><path className="cosmetic-wing" d="M6 15H4v7h3v-4h2v-3zm24 0h2v7h-3v-4h-2v-3z" /></>}
+  </g>
+}
+
+function PixelCreature({ stage, mood, walking, direction, pose, cosmetic }: { stage: GrowthStage; mood: string; walking: boolean; direction: PetDirection; pose: PetVisualPose; cosmetic: string | null }) {
+  const visualMood = VISUAL_MOODS.has(mood) ? mood : 'idle'
   return (
-    <svg className={`pixel-creature stage-${stage} mood-${mood} ${walking ? 'walking' : ''}`}
-      viewBox="0 0 24 22" role="img" aria-label={`${stage}阶段像素生物`} shapeRendering="crispEdges">
-      <g className="pixel-shadow"><rect x="5" y="19" width="14" height="2" /></g>
-      {grown && <g className="pixel-tail"><rect x="18" y="12" width="3" height="2" /><rect x="20" y="10" width="2" height="3" /></g>}
-      {advanced && <g className="pixel-antenna"><rect x="7" y="1" width="2" height="3" /><rect x="15" y="1" width="2" height="3" /><rect x="6" y="0" width="2" height="2" /><rect x="16" y="0" width="2" height="2" /></g>}
-      <g className="pixel-body" fill={body}>
-        {stage === 'seed' ? <>
-          <rect x="7" y="6" width="10" height="11" />
-          <rect x="5" y="9" width="14" height="6" />
-        </> : <>
-          <rect x="5" y="5" width="14" height="12" />
-          <rect x="3" y="8" width="18" height="7" />
-          <rect x="6" y="3" width="4" height="4" />
-          <rect x="14" y="3" width="4" height="4" />
-        </>}
-        {advanced && <><rect x="4" y="14" width="4" height="5" /><rect x="16" y="14" width="4" height="5" /></>}
+    <svg className={`pixel-creature stage-${stage} mood-${visualMood} pose-${pose} direction-${direction} ${walking ? 'walking' : ''}`}
+      data-direction={direction}
+      data-pose={pose}
+      viewBox="0 0 36 32" role="img" aria-label={`${stage}阶段像素生物，${visualMood}状态`} shapeRendering="crispEdges">
+      {stage === 'seed' && <>
+        <ellipse className="pixel-shadow" cx="18" cy="28" rx="8" ry="2" />
+        <g className="pixel-body">
+          <path className="pixel-body-dark" d="M12 13h12v2h3v10h-3v3H12v-3H9V15h3z" />
+          <path className="pixel-body-fill" d="M13 11h10v2h3v11h-3v3H13v-3h-3V14h3z" />
+          <path className="pixel-body-light" d="M14 12h7v2h-7zM12 15h3v7h-3z" />
+          <g className="pixel-core"><rect x="16" y="9" width="4" height="4" /><rect className="pixel-core-light" x="17" y="10" width="2" height="2" /></g>
+          <rect className="pixel-eye pixel-eye-a" x="14" y="17" width="2" height="2" /><rect className="pixel-eye pixel-eye-b" x="21" y="17" width="2" height="2" /><rect className="pixel-mouth" x="17" y="22" width="3" height="1" />
+          <g className="pixel-arm pixel-arm-a"><path className="pixel-body-fill" d="M10 19h3v4h-2v-2h-1z" /><rect className="pixel-body-light" x="10" y="22" width="3" height="2" /></g>
+          <g className="pixel-arm pixel-arm-b"><path className="pixel-body-fill" d="M24 19h3v4h-1v-2h-2z" /><rect className="pixel-body-light" x="24" y="22" width="3" height="2" /></g>
+          <g className="pixel-leg pixel-leg-a"><rect className="pixel-body-dark" x="12" y="25" width="4" height="3" /></g><g className="pixel-leg pixel-leg-b"><rect className="pixel-body-dark" x="21" y="25" width="4" height="3" /></g>
+        </g>
+      </>}
+      {stage === 'sprout' && <>
+        <ellipse className="pixel-shadow" cx="18" cy="29" rx="10" ry="2" />
+        <g className="pixel-tail"><path className="pixel-body-light" d="M27 20h4v-3h2v6h-5z" /></g>
+        <g className="pixel-body">
+          <g className="pixel-ear"><path className="pixel-body-dark" d="M10 7h5v6h-5zM22 7h5v6h-5z" /><path className="pixel-body-light" d="M11 8h2v3h-2zM23 8h2v3h-2z" /></g>
+          <path className="pixel-body-dark" d="M9 13h19v12h-3v3H11v-3H8V16h1z" /><path className="pixel-body-fill" d="M10 12h17v13h-3v2H12v-2H9V15h1z" />
+          <path className="pixel-body-light" d="M11 13h6v2h-6zM10 16h3v6h-3z" /><rect className="pixel-core" x="17" y="11" width="3" height="3" />
+          <rect className="pixel-eye pixel-eye-a" x="13" y="17" width="2" height="2" /><rect className="pixel-eye pixel-eye-b" x="22" y="17" width="2" height="2" /><rect className="pixel-mouth" x="17" y="21" width="3" height="1" />
+          <g className="pixel-arm pixel-arm-a"><path className="pixel-body-dark" d="M8 18h4v6H9v-2H8z" /><rect className="pixel-body-light" x="8" y="23" width="4" height="2" /></g><g className="pixel-arm pixel-arm-b"><path className="pixel-body-dark" d="M26 18h4v6h-1v-2h-3z" /><rect className="pixel-body-light" x="26" y="23" width="4" height="2" /></g>
+          <g className="pixel-leg pixel-leg-a"><path className="pixel-body-dark" d="M11 24h5v5h-4v-2h-1z" /></g><g className="pixel-leg pixel-leg-b"><path className="pixel-body-dark" d="M22 24h5v5h-4v-2h-1z" /></g>
+        </g>
+      </>}
+      {stage === 'hopper' && <>
+        <ellipse className="pixel-shadow" cx="18" cy="29" rx="13" ry="2" />
+        <g className="pixel-tail"><path className="pixel-body-dark" d="M26 18h5v-3h3v-3h2v7h-3v3h-7z" /><rect className="pixel-body-light" x="33" y="12" width="2" height="3" /></g>
+        <g className="pixel-body">
+          <g className="pixel-ear"><path className="pixel-body-dark" d="M8 8h4v7H8zM15 6h4v8h-4z" /><path className="pixel-body-light" d="M9 9h2v4H9zM16 7h2v5h-2z" /></g>
+          <path className="pixel-body-dark" d="M6 14h21v3h4v8h-4v3H8v-2H4v-8h2z" /><path className="pixel-body-fill" d="M7 13h19v3h4v8h-4v3H9v-2H5v-7h2z" />
+          <path className="pixel-body-light" d="M8 14h9v2H8zM6 18h3v5H6z" /><rect className="pixel-eye pixel-eye-a" x="11" y="18" width="2" height="2" /><rect className="pixel-eye pixel-eye-b" x="20" y="18" width="2" height="2" /><rect className="pixel-mouth" x="15" y="22" width="3" height="1" />
+          <g className="pixel-arm pixel-arm-a"><path className="pixel-body-dark" d="M4 18h4v7H5v-2H4z" /><rect className="pixel-body-light" x="4" y="24" width="4" height="2" /></g><g className="pixel-arm pixel-arm-b"><path className="pixel-body-dark" d="M27 17h4v7h-1v-2h-3z" /><rect className="pixel-body-light" x="27" y="23" width="4" height="2" /></g>
+          <g className="pixel-leg pixel-leg-a"><path className="pixel-body-dark" d="M8 24h5v6H8v-2H6v-2h2zM21 24h4v6h-5v-2h1z" /></g><g className="pixel-leg pixel-leg-b"><path className="pixel-body-dark" d="M14 24h4v5h-5v-2h1zM26 23h4v5h-5v-2h1z" /></g>
+        </g>
+      </>}
+      {stage === 'guardian' && <>
+        <ellipse className="pixel-shadow" cx="18" cy="29" rx="12" ry="2" />
+        <g className="pixel-tail"><path className="pixel-body-dark" d="M27 20h5v-4h3v7h-3v3h-5z" /></g>
+        <g className="pixel-body">
+          <g className="pixel-antenna"><path className="pixel-glow" d="M11 3h2v5h-2zM24 3h2v5h-2zM9 2h3v2H9zM25 2h3v2h-3z" /></g>
+          <path className="pixel-body-dark" d="M8 9h20v4h3v13h-4v3H9v-3H6V13h2z" /><path className="pixel-body-fill" d="M9 8h18v4h3v13h-4v3H10v-3H7V12h2z" />
+          <path className="pixel-body-light" d="M10 10h7v2h-7zM8 14h3v8H8z" /><rect className="pixel-eye pixel-eye-a" x="12" y="15" width="2" height="2" /><rect className="pixel-eye pixel-eye-b" x="23" y="15" width="2" height="2" /><rect className="pixel-mouth" x="17" y="20" width="3" height="1" />
+          <g className="pixel-arm pixel-arm-a"><path className="pixel-body-dark" d="M6 17h5v8H8v-3H6z" /><rect className="pixel-body-light" x="6" y="24" width="5" height="2" /></g><g className="pixel-arm pixel-arm-b"><path className="pixel-body-dark" d="M27 17h5v8h-2v-3h-3z" /><rect className="pixel-body-light" x="27" y="24" width="5" height="2" /></g>
+          <g className="pixel-core"><rect className="pixel-glow" x="15" y="22" width="7" height="5" /><rect className="pixel-core-light" x="17" y="23" width="3" height="3" /></g>
+          <g className="pixel-leg pixel-leg-a"><path className="pixel-body-dark" d="M9 24h6v6h-5v-2H9z" /></g><g className="pixel-leg pixel-leg-b"><path className="pixel-body-dark" d="M23 24h6v6h-5v-2h-1z" /></g>
+        </g>
+      </>}
+      {stage === 'luminary' && <>
+        <ellipse className="pixel-shadow" cx="18" cy="29" rx="12" ry="2" />
+        <g className="pixel-wing"><path className="pixel-glow" d="M7 13H3v3H1v6h3v3h5v-4h2v-7H7z" /><path className="pixel-body-light" d="M6 15H4v6h3v-3h2v-3z" /></g><g className="pixel-wing"><path className="pixel-glow" d="M29 13h4v3h2v6h-3v3h-5v-4h-2v-7h4z" /><path className="pixel-body-light" d="M30 15h2v6h-3v-3h-2v-3z" /></g>
+        <g className="pixel-tail"><path className="pixel-glow" d="M27 21h4v-3h3v-3h2v7h-3v3h-6z" /></g>
+        <g className="pixel-body">
+          <g className="pixel-antenna"><path className="pixel-glow" d="M10 2h2v6h-2zM25 2h2v6h-2zM8 1h3v2H8zM26 1h3v2h-3z" /></g>
+          <path className="pixel-body-dark" d="M8 9h20v4h3v13h-4v3H9v-3H6V13h2z" /><path className="pixel-body-fill" d="M9 8h18v4h3v13h-4v3H10v-3H7V12h2z" />
+          <path className="pixel-body-light" d="M10 9h7v2h-7zM8 13h3v9H8zM26 12h2v8h-2z" /><rect className="pixel-eye pixel-eye-a" x="12" y="15" width="2" height="2" /><rect className="pixel-eye pixel-eye-b" x="23" y="15" width="2" height="2" /><rect className="pixel-mouth" x="17" y="19" width="3" height="1" />
+          <g className="pixel-arm pixel-arm-a"><path className="pixel-body-dark" d="M6 17h5v8H8v-3H6z" /><rect className="pixel-body-light" x="6" y="24" width="5" height="2" /><rect className="pixel-glow" x="7" y="25" width="3" height="1" /></g><g className="pixel-arm pixel-arm-b"><path className="pixel-body-dark" d="M27 17h5v8h-2v-3h-3z" /><rect className="pixel-body-light" x="27" y="24" width="5" height="2" /><rect className="pixel-glow" x="28" y="25" width="3" height="1" /></g>
+          <g className="pixel-core"><rect className="pixel-glow" x="14" y="21" width="9" height="7" /><rect className="pixel-core-light" x="16" y="22" width="5" height="5" /><rect className="pixel-glow" x="18" y="23" width="1" height="3" /></g>
+          <g className="pixel-leg pixel-leg-a"><path className="pixel-body-dark" d="M9 24h6v6h-5v-2H9z" /></g><g className="pixel-leg pixel-leg-b"><path className="pixel-body-dark" d="M23 24h6v6h-5v-2h-1z" /></g>
+          <g className="pixel-sparks"><rect className="pixel-glow" x="3" y="8" width="2" height="2" /><rect className="pixel-glow" x="32" y="7" width="2" height="2" /><rect className="pixel-glow" x="31" y="27" width="1" height="1" /></g>
+        </g>
+      </>}
+      <g className="pixel-mood-marks" aria-hidden="true">
+        <path className="mood-brows" d="M11 13h5v1h-5zm10 0h5v1h-5z" />
+        <path className="mood-smile" d="M15 20h2v1h4v-1h2v2h-2v1h-4v-1h-2z" />
+        <rect className="mood-open-mouth" x="17" y="20" width="3" height="3" />
+        <path className="mood-tear" d="M25 18h2v3h-1v2h-2v-2h1z" />
+        <path className="mood-drool" d="M21 22h2v3h-1v2h-2v-2h1z" />
+        <path className="mood-question" d="M28 8h4v1h1v3h-2v2h-2v-3h2v-1h-3zm1 8h2v2h-2z" />
+        <path className="mood-z" d="M27 6h6v2h-3l3 3v2h-6v-2h3l-3-3z" />
+        <path className="mood-spark" d="M4 9h2v2h2v2H6v2H4v-2H2v-2h2zm27 7h1v2h2v1h-2v2h-1v-2h-2v-1h2z" />
+        <path className="mood-daze" d="M28 7h4v1h1v3h-1v1h-3v-1h2V9h-2v1h-2V8h1z" />
+        <path className="mood-focus" d="M10 13h6v2h-4v1h-2zm11 0h6v3h-2v-1h-4z" />
       </g>
-      <g className="pixel-mark" fill="var(--pet-mark)">
-        <rect x="10" y="4" width="4" height="2" />
-        {stage === 'luminary' && <><rect x="3" y="11" width="2" height="2" /><rect x="19" y="11" width="2" height="2" /></>}
-      </g>
-      <g className="pixel-face" fill="var(--pet-eye)">
-        <rect x="8" y={eyeY} width="2" height={mood === 'sleepy' ? 1 : 2} />
-        <rect x="14" y={eyeY} width="2" height={mood === 'sleepy' ? 1 : 2} />
-        <rect x="11" y="11" width="2" height="1" />
-      </g>
-      <g className="pixel-feet" fill="var(--pet-body)">
-        <rect x="7" y="16" width="3" height="3" />
-        <rect x="14" y="16" width="3" height="3" />
-      </g>
-      {stage === 'luminary' && <g className="pixel-sparks" fill="var(--pet-glow)"><rect x="1" y="5" width="2" height="2" /><rect x="21" y="4" width="2" height="2" /><rect x="20" y="16" width="1" height="1" /></g>}
+      <CosmeticOverlay id={cosmetic} />
     </svg>
   )
 }
@@ -101,6 +190,7 @@ export default function PetCompanion({ rightInset = 0 }: { rightInset?: number }
     try { return localStorage.getItem(POSITION_KEY) === null } catch { return true }
   })
   const [walking, setWalking] = useState(false)
+  const [direction, setDirection] = useState<PetDirection>('right')
   const [perched, setPerched] = useState(false)
   const [behavior, setBehavior] = useState<PetBehavior>('idle')
   const [comment, setComment] = useState('')
@@ -108,6 +198,7 @@ export default function PetCompanion({ rightInset = 0 }: { rightInset?: number }
   const [dragging, setDragging] = useState(false)
   const [poking, setPoking] = useState(false)
   const [error, setError] = useState('')
+  const [panelOpen, setPanelOpen] = useState(false)
   const shellRef = useRef<HTMLElement>(null)
   const pointerRef = useRef<PointerSession | null>(null)
   const positionRef = useRef<Position | null>(position)
@@ -193,7 +284,12 @@ export default function PetCompanion({ rightInset = 0 }: { rightInset?: number }
         rightInset,
       })
       setWalking(true)
+      const currentX = positionRef.current?.x
+      if (currentX != null && destination.position.x !== currentX) {
+        setDirection(destination.position.x < currentX ? 'left' : 'right')
+      }
       setPerched(false)
+      positionRef.current = destination.position
       setPosition(destination.position)
       if (wanderSettleTimerRef.current != null) window.clearTimeout(wanderSettleTimerRef.current)
       wanderSettleTimerRef.current = window.setTimeout(() => {
@@ -306,6 +402,7 @@ export default function PetCompanion({ rightInset = 0 }: { rightInset?: number }
       x: event.clientX - hostRect.left - pointer.dx,
       y: event.clientY - hostRect.top - pointer.dy,
     }, { width: hostRect.width, height: hostRect.height }, { width: shell.offsetWidth, height: shell.offsetHeight }, rightInset)
+    if (next.x !== positionRef.current?.x) setDirection(next.x < (positionRef.current?.x ?? next.x) ? 'left' : 'right')
     positionRef.current = next
     setPosition(next)
     setDragging(true)
@@ -331,6 +428,21 @@ export default function PetCompanion({ rightInset = 0 }: { rightInset?: number }
         .then(save)
         .catch(cause => setError(String(cause)))
     }
+  }
+
+  const runAction = (action: 'feed' | 'play' | 'equip' | 'unequip', value?: string) => {
+    if (!IS_TAURI) {
+      setPet(current => current ? {
+        ...current,
+        equipped: action === 'equip' ? value || null : action === 'unequip' ? null : current.equipped,
+        mood: action === 'feed' || action === 'play' ? 'happy' : current.mood,
+        recent_events: action === 'feed' ? [...current.recent_events, 'Feed'] : action === 'play' ? [...current.recent_events, 'Play'] : current.recent_events,
+      } : current)
+      return
+    }
+    fetchPet('pet_action', { action, ...(value ? { value } : {}) })
+      .then(save)
+      .catch(cause => setError(String(cause)))
   }
 
   const onPointerUp = (event: React.PointerEvent) => {
@@ -396,22 +508,48 @@ export default function PetCompanion({ rightInset = 0 }: { rightInset?: number }
     ? { left: `${position.x}px`, top: `${position.y}px`, right: 'auto', bottom: 'auto', '--pet-scale': STAGE_SCALE[pet?.stage || 'seed'] } as React.CSSProperties
     : { '--pet-scale': STAGE_SCALE[pet?.stage || 'seed'] } as React.CSSProperties, [position, pet?.stage])
 
+  const pose = resolvePetVisualPose({
+    machine: pet?.machine || 'awake.idle',
+    recentEvents: pet?.recent_events || [],
+    crafting: pet?.crafting || false,
+    poking,
+    behaviorActive: behavior !== 'idle',
+    tabletCoding,
+  })
+
   if (!pet) return error ? <div className="pet-load-error">宠物加载失败：{error}</div> : null
 
   return (
-    <section ref={shellRef} className={`pet-companion ${dragging ? 'dragging' : ''} ${poking ? 'poking' : ''} ${perched ? 'perched' : ''} ${tabletCoding ? 'tablet-coding' : ''} behavior-${behavior}`}
+    <section ref={shellRef} className={`pet-companion ${dragging ? 'dragging' : ''} ${poking ? 'poking' : ''} ${perched ? 'perched' : ''} ${tabletCoding ? 'tablet-coding' : ''} behavior-${behavior} pose-${pose}`}
       style={style} aria-label="长期陪伴宠物"
+      data-stage={pet.stage} data-machine={pet.machine} data-mood={pet.mood} data-pose={pose} data-direction={direction}
       onPointerDown={onPointerDown} onPointerMove={onPointerMove} onPointerUp={onPointerUp}
       onPointerCancel={onPointerCancel} onLostPointerCapture={onLostPointerCapture}>
       {behavior === 'spitting-fragment' && <span className="pet-code-fragment" aria-hidden="true">{'{}'}</span>}
       {comment && <div className="pet-speech-bubble" role="status">{comment}</div>}
+      <button className="pet-panel-toggle" type="button" aria-label="打开宠物状态与衣橱" aria-expanded={panelOpen} onClick={() => setPanelOpen(open => !open)}>◆</button>
+      {panelOpen && <div className="pet-panel" onPointerDown={event => event.stopPropagation()}>
+        <header><div><strong>{pet.name}</strong><span>{pet.title} · 羁绊 {pet.bond}</span></div><span className={`pet-day pet-day-${pet.day_part}`}>{pet.day_part}</span></header>
+        <div className="pet-needs">
+          {([['饥饿', pet.hunger, 'hunger'], ['趣味', pet.fun, 'fun'], ['陪伴', 100 - pet.loneliness, 'loneliness']] as const).map(([label, value, kind]) => <div className="pet-need" key={kind}><span>{label}</span><i><b className={`need-${kind}`} style={{ width: `${value}%` }} /></i><em>{value}</em></div>)}
+        </div>
+        <div className="pet-care-controls"><button type="button" onClick={() => runAction('feed')}>喂食</button><button type="button" onClick={() => runAction('play')}>玩耍</button></div>
+        {pet.crafting && <div className="pet-crafting"><span>正在捏朋友</span><i><b /></i></div>}
+        <div className="pet-wardrobe" aria-label="宠物衣橱">
+          <div className="pet-panel-label">衣橱</div>
+          <div className="pet-cosmetic-list">
+            {pet.cosmetics.map(item => <button key={item.id} type="button" disabled={!item.owned} className={pet.equipped === item.id ? 'equipped' : ''} title={item.owned ? item.name : `${item.name}（未解锁）`} onClick={() => runAction(pet.equipped === item.id ? 'unequip' : 'equip', item.id)}><span className={`pet-cosmetic-swatch swatch-${item.kind}`} />{item.name}</button>)}
+            {pet.cosmetics.length === 0 && <span className="pet-panel-empty">装扮目录将在 Tauri 中载入</span>}
+          </div>
+        </div>
+      </div>}
       {tabletCoding && <div className="pet-tablet" aria-label="宠物正在平板电脑上敲代码">
         <span className="pet-tablet-screen"><i /><i /><i /></span>
         <span className="pet-tablet-keyboard" />
       </div>}
       <div className="pet-creature-hitbox"
         title={`${pet.name}：单击互动，拖拽固定位置，双击恢复自主漫游`}>
-        <PixelCreature stage={pet.stage} mood={pet.mood} walking={walking} />
+        <PixelCreature stage={pet.stage} mood={pet.mood} walking={walking} direction={direction} pose={pose} cosmetic={pet.equipped} />
       </div>
     </section>
   )
