@@ -14,10 +14,11 @@ import { languageFromPath } from './fileSheetState.ts'
  * markdown（复用导出 MarkdownRenderer，无 gutter）；truncated 状态可读（内容不完整
  * 明确标注）。消费 8 编辑器 cssVar（F3-D）。
  */
-export default function FileTabView({ source, path, onTruncated }: {
+export default function FileTabView({ source, path, onTruncated, onContentReady }: {
   source: string | null
   path: string
   onTruncated: (truncated: boolean) => void
+  onContentReady?: (content: string) => void
 }) {
   const [content, setContent] = useState('')
   const [highlighted, setHighlighted] = useState<{ html: string; lang: string } | null>(null)
@@ -35,6 +36,7 @@ export default function FileTabView({ source, path, onTruncated }: {
       if (!text) { setError('读取失败'); return }
       setContent(text.content)
       onTruncated(text.truncated)
+      onContentReady?.(text.content)
       const lang = languageFromPath(path)
       highlightCode(lang, text.content).then(html => {
         if (!cancelled && html) setHighlighted({ html, lang })
@@ -67,7 +69,7 @@ export default function FileTabView({ source, path, onTruncated }: {
           </div>
           <pre className="file-tab-pre">
             {highlighted.html.split('\n').map((line, index) => (
-              <code key={index} className="file-tab-line" dangerouslySetInnerHTML={{ __html: sanitizeHtml(line || '&nbsp;') }} />
+              <code key={index} className="file-tab-line" data-line={index + 1} dangerouslySetInnerHTML={{ __html: sanitizeHtml(line || '&nbsp;') }} />
             ))}
           </pre>
         </div>

@@ -1,6 +1,7 @@
 import { useMemo, useReducer, useState } from 'react'
 import { useWorkspaceStore } from '../../workspaceStore'
 import { createFileSheetState, fileSheetReducer, parseOpenTabs, serializeOpenTabs, type FileSheetSection } from './fileSheetState.ts'
+import type { DispatchSelection } from '../../domains/fileDispatch/dispatchMessage.ts'
 import FileSheetSidebar from './FileSheetSidebar'
 import FileTree from './FileTree'
 import FileTabBar from './FileTabBar'
@@ -8,6 +9,7 @@ import FileTabView from './FileTabView'
 import GitPanel from './GitPanel'
 import DiffView from './DiffView'
 import WorkspaceSearchPanel from './WorkspaceSearchPanel'
+import DispatchBar from './DispatchBar'
 import type { SheetContext, SheetRecord } from '../../workspace-sheets/sheetTypes'
 import './FileSheet.css'
 
@@ -29,6 +31,9 @@ export default function FileSheetView({ sheet, ctx }: { sheet: SheetRecord; ctx:
   const activeFile = sheet.metadata?.activeFile ?? null
   const [truncated, setTruncated] = useState(false)
   const [activeDiff, setActiveDiff] = useState<{ path: string; staged: boolean } | null>(null)
+  const [instruction, setInstruction] = useState('')
+  const [selection, setSelection] = useState<DispatchSelection | null>(null)
+  const [fileContent, setFileContent] = useState('')
 
   const selectSection = (section: FileSheetSection) => dispatch({ type: 'set-section', section })
   const selectSource = (source: string) => dispatch({ type: 'set-source', source })
@@ -60,8 +65,18 @@ export default function FileSheetView({ sheet, ctx }: { sheet: SheetRecord; ctx:
           <FileTabBar openTabs={openTabs} activeFile={activeFile} onSelect={selectTab} onClose={closeTab} />
           {activeFile ? (
             <>
+              <DispatchBar
+                targetSource={state.targetSource}
+                filePath={activeFile}
+                selection={selection}
+                content={fileContent}
+                instruction={instruction}
+                onInstructionChange={setInstruction}
+                onSelectionChange={setSelection}
+                onClearSelection={() => setSelection(null)}
+              />
               {truncated && <div className="file-truncated-hint" role="status">内容不完整（truncated）</div>}
-              <FileTabView source={state.targetSource} path={activeFile} onTruncated={setTruncated} />
+              <FileTabView source={state.targetSource} path={activeFile} onTruncated={setTruncated} onContentReady={setFileContent} />
             </>
           ) : (
             <div className="file-tab-empty">打开一个文件开始阅读</div>

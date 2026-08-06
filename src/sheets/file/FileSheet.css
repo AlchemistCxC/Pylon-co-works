@@ -191,3 +191,34 @@
 .search-result-path { font-family: var(--mono); color: var(--accent); flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; }
 .search-result-line { color: var(--text-dim); width: 3em; flex: 0 0 3em; text-align: right; }
 .search-result-text { color: var(--text-dim); max-width: 40%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+/* W2-08：发令指令栏 */
+.dispatch-bar {
+  display: flex; align-items: center; gap: 8px;
+  padding: 6px 12px;
+  border-bottom: 1px solid var(--border);
+  background: var(--bg-panel);
+}
+.dispatch-bar-collapsed { color: var(--text-dim); font-size: 12px; }
+.dispatch-target { font-family: var(--mono); font-size: 11px; color: var(--text-dim); flex: 0 0 auto; }
+.dispatch-chip {
+  display: inline-flex; align-items: center; gap: 4px;
+  font-size: 12px; font-family: var(--font);
+  background: var(--bg-active); border: 1px solid var(--border); border-radius: 4px;
+  padding: 2px 6px; max-width: 40%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.dispatch-chip-lines { color: var(--accent); font-family: var(--mono); }
+.dispatch-chip-clear { background: none; border: none; color: var(--text-dim); cursor: pointer; }
+.dispatch-input {
+  flex: 1; min-width: 0;
+  font-size: 12px; font-family: var(--font); color: var(--text);
+  background: var(--bg-input); border: 1px solid var(--border); border-radius: 4px; padding: 4px 8px;
+}
+.dispatch-send {
+  padding: 4px 12px; font-size: 12px; font-family: var(--font);
+  color: var(--text); background: var(--bg-active); border: 1px solid var(--border); border-radius: 4px; cursor: pointer;
+}
+.dispatch-send:disabled { opacity: 0.5; cursor: not-allowed; }
+.dispatch-send:hover:not(:disabled) { background: var(--bg-hover); border-color: var(--border-focus); }
+.dispatch-generating { font-size: 11px; color: var(--text-dim); }
+.dispatch-error { font-size: 11px; color: var(--danger, #e5484d); }
