@@ -5,6 +5,7 @@ import { messageMatchesQuery } from '../chat/messageSearchIndex'
 import { getChatController } from '../chat/chatEventController'
 import MessageSearchBar from '../chat/MessageSearchBar'
 import type { SheetContext } from '../../workspace-sheets/sheetTypes'
+import './ContextPanel.css'
 
 /**
  * AgentContextPanel — agent 右栏（W2-12，F2-F）。

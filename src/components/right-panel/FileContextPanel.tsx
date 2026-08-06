@@ -1,5 +1,6 @@
 import { useWorkspaceStore } from '../../workspaceStore'
 import type { SheetContext } from '../../workspace-sheets/sheetTypes'
+import './ContextPanel.css'
 
 /**
  * FileContextPanel — file 右栏（W2-12，F2-F 反查）。

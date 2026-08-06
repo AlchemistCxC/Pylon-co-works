@@ -1,12 +1,18 @@
 .message-search-bar {
   position:sticky; top:10px; z-index:8; display:flex; align-items:center; gap:6px;
-  width:min(420px, calc(100% - 20px)); margin:0 auto 8px; padding:6px 8px;
+  width:min(420px, calc(100% - 20px)); min-height:var(--ui-control-standard); margin:0 auto 8px; padding:4px 6px 4px 10px;
   color:var(--text-dim); background:var(--bg-panel); border:1px solid var(--border);
-  border-radius:6px; box-shadow:0 4px 16px rgba(0,0,0,0.16);
+  border-radius:var(--ui-radius-sm); box-shadow:0 4px 16px rgba(0,0,0,0.12);
 }
-.message-search-bar input { min-width:0; flex:1; border:0; outline:0; background:transparent; color:var(--text); font:inherit; }
+.message-search-bar:focus-within { border-color:var(--accent); box-shadow:0 0 0 3px color-mix(in srgb,var(--accent) 14%,transparent); }
+.message-search-bar input { min-width:0; flex:1; border:0; outline:0; background:transparent; color:var(--text); font:13px/1.4 var(--font); }
 .message-search-bar input::placeholder { color:var(--text-dim); }
 .message-search-count { flex-shrink:0; min-width:42px; text-align:right; font-size:12px; }
-.message-search-bar button { display:inline-flex; align-items:center; justify-content:center; flex-shrink:0; padding:3px; color:var(--text-dim); background:transparent; border:0; border-radius:4px; cursor:pointer; }
+.message-search-bar button { display:inline-flex; align-items:center; justify-content:center; flex:0 0 var(--ui-control-compact); width:var(--ui-control-compact); height:var(--ui-control-compact); padding:0; color:var(--text-dim); background:transparent; border:0; border-radius:var(--ui-radius-xs); cursor:pointer; }
 .message-search-bar button:hover:not(:disabled) { color:var(--text); background:var(--border); }
 .message-search-bar button:disabled { opacity:0.35; cursor:default; }
+.message-search-bar button:focus-visible { outline:2px solid var(--accent); outline-offset:1px; }
+
+.layout > .context-panel-body .message-search-bar {
+  position:static; width:100%; margin:0 0 var(--ui-space-3); box-shadow:none;
+}
