@@ -68,23 +68,12 @@ function userMsg(text: string, seq: number): Message {
   return { id: `user-${seq}`, role: 'user', sender: 'local:demo', content: text, time: '11:01' }
 }
 
+// diffPayloadFromObject 从块上读 oldText/newText（camel/snake 兜底）→ DiffCard payload
 const DIFF_BLOCK = {
   type: 'tool_diff_content',
   title: 'AgentSheetView.tsx',
-  payload: {
-    diff: 'diff --git a/src/sheets/AgentSheetView.tsx b/src/sheets/AgentSheetView.tsx\n' +
-      'index 1a2b3c4..5d6e7f8 100644\n' +
-      '--- a/src/sheets/AgentSheetView.tsx\n' +
-      '+++ b/src/sheets/AgentSheetView.tsx\n' +
-      '@@ -21,7 +21,7 @@ export default function AgentSheetView({ ctx }: { sheet: SheetRecord; ctx: SheetContext }) {\n' +
-      '         <ChatView sessionId={ctx.activeSession} />\n' +
-      '         {showPet && <PetCompanion rightInset={ctx.rightInset} />}\n' +
-      '-        <ControlCenter sessionId={ctx.activeSession} />\n' +
-      '+        {isReplay ? <ReplayContinueBar /> : <ControlCenter sessionId={ctx.activeSession} />}\n' +
-      '       </div>\n',
-    path: 'src/sheets/AgentSheetView.tsx',
-    language: 'diff',
-  },
+  oldText: '        <ControlCenter sessionId={ctx.activeSession} />\n',
+  newText: '        {isReplay ? <ReplayContinueBar /> : <ControlCenter sessionId={ctx.activeSession} />}\n',
 }
 
 const ANSI_BUILD = '\u001b[32m✓\u001b[0m 161 modules transformed\n\u001b[33m! package.json:5:1\u001b[0m 警告：scripts.build 未排序\n\u001b[2m  dist/\u001b[0m 4.2 MiB / gzip 1.1 MiB\n\u001b[36m▲ 构建完成，耗时 2.4s\u001b[0m'
