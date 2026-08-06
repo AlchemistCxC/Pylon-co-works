@@ -249,6 +249,8 @@ pub(crate) fn session_expired(
 
 /// 客户端替换后的 sessions 处理：keep=false 清空（跨 agent/全新进程语义）；
 /// keep=true 保留映射但迁移 generation——通知路由按新代际匹配，旧 session 才能继续收事件。
+/// 生产路径已委托 SessionStore::migrate_or_clear；本纯函数保留供测试锁定语义。
+#[cfg(test)]
 pub(crate) fn apply_client_replacement_sessions(
     sessions: &mut HashMap<String, SessionInfo>,
     keep_sessions: bool,
@@ -527,14 +529,9 @@ impl AppState {
         update: impl FnOnce(&mut SessionInfo) -> T,
     ) -> Result<T, String> {
         self.ensure_generation(runtime, generation)?;
-        let mut sessions = runtime.sessions.lock().map_err(|error| error.to_string())?;
-        let session = sessions
-            .get_mut(source)
-            .ok_or_else(|| format!("stale session mapping for source: {source}"))?;
-        if !session_mapping_matches(&session.peri_id, session.generation, peri_id, generation) {
-            return Err(format!("stale session mapping for source: {source}"));
-        }
-        Ok(update(session))
+        // 方案 8：委托 SessionStore（(peri_id, generation) 匹配 + 锁序纪律）。
+        crate::session_store::update_if_current(runtime, source, peri_id, generation, update)
+            .map_err(|e| e.to_string())
     }
 
     pub(crate) fn mark_first_prompt_if_matches(
@@ -556,22 +553,9 @@ impl AppState {
         peri_id: &str,
         generation: u64,
     ) -> Result<bool, String> {
-        let removed = {
-            let mut sessions = runtime.sessions.lock().map_err(|error| error.to_string())?;
-            if sessions.get(source).map(|session| {
-                session_mapping_matches(&session.peri_id, session.generation, peri_id, generation)
-            }) == Some(true)
-            {
-                sessions.remove(source).is_some()
-            } else {
-                false
-            }
-        };
-        if removed {
-            // O1：映射删除 = 该 source 生命周期结束 → 锁表同步收敛（锁序单向，不嵌套）。
-            runtime.remove_prompt_lock(source);
-        }
-        Ok(removed)
+        // 方案 8：委托 SessionStore（匹配删除 + 锁外 prompt 锁收敛）。
+        crate::session_store::remove_if_current(runtime, source, peri_id, generation)
+            .map_err(|e| e.to_string())
     }
 
     pub(crate) fn start_runtime_log_dispatcher(&self, window: tauri::WebviewWindow) {
@@ -802,22 +786,9 @@ pub(crate) fn replace_session_slot(
     allow_same_source_replace: bool,
     max_sessions: usize,
 ) -> Result<Option<SessionInfo>, PylonError> {
-    let mut sessions = runtime
-        .sessions
-        .lock()
-        .map_err(|error| PylonError::Protocol(error.to_string()))?;
-    if sessions.len() >= max_sessions
-        && !(allow_same_source_replace && sessions.contains_key(source))
-    {
-        return Err(PylonError::Protocol("max sessions reached".to_string()));
-    }
-    let replaced = sessions.insert(source.to_string(), session);
-    drop(sessions);
-    // R6：映射就绪事件化（吸收 O5）——insert 成功后通知 dispatcher（未知 periId
-    // 等待由 20×5ms 轮询改为事件驱动）。new_session / load_persisted_session
-    // 共用本槽位辅助，两条链路均在此通知。
-    runtime.mapping_ready.notify_waiters();
-    Ok(replaced)
+    // 方案 8：委托 SessionStore（满额策略 + mapping_ready 通知 + 锁序纪律）。
+    crate::session_store::insert(runtime, source, session, allow_same_source_replace, max_sessions)
+        .map_err(|e| PylonError::Protocol(e.to_string()))
 }
 
 /// G2-04：会话建立结果——peri_id + 是否首轮 + session/new 原始响应（new_session 命令回传前端）。

@@ -32,6 +32,7 @@ mod runtime_log;
 mod real_acp_smoke;
 mod sanitize;
 mod session;
+mod session_store;
 mod startup;
 #[cfg(test)]
 mod session_expiry_platform_tests;
@@ -70,7 +71,7 @@ use crate::dispatcher::start_notification_dispatcher;
 use crate::lifecycle::{load_mcp_persisted, mcp_persist_path};
 use crate::permission::check_pending_permission_timeouts;
 use crate::pet_cmds::{persist_pet_if_possible, pet_persist_path};
-use crate::session::{apply_client_replacement_sessions, check_session_expiry, send_prompt_core};
+use crate::session::{check_session_expiry, send_prompt_core};
 
 #[cfg(test)]
 use crate::export::{is_export_sensitive_key, sanitize_export_messages, write_export_atomically};
@@ -83,9 +84,9 @@ use crate::permission::{
 };
 #[cfg(test)]
 use crate::session::{
-    build_full_inspector_payload, compose_inject_prompt, config_option_current_value,
-    extract_tool_file_name, inject_applies_to, send_message, session_expired,
-    InspectorSessionRow, SessionListRow,
+    apply_client_replacement_sessions, build_full_inspector_payload, compose_inject_prompt,
+    config_option_current_value, extract_tool_file_name, inject_applies_to, send_message,
+    session_expired, InspectorSessionRow, SessionListRow,
 };
 
 fn emit_event<R, W>(window: &W, event: &str, payload: serde_json::Value)
@@ -366,13 +367,9 @@ impl AppStateHandles {
         // 锁条目必须同步收敛（O1 语义，与 remove_session_if_matches/check_session_expiry
         // 一致）——否则旧 source 条目随任意命名的 GUI source 无限累积。锁内先快照
         // 旧 source 键，映射清空后在锁外逐个清理（锁序单向：sessions → prompt_locks）。
-        let mut stale_sources: Vec<String> = Vec::new();
-        let mut old_acp = {
+        // 方案 8：sessions 迁移委托 SessionStore（migrate_or_clear 返回旧 source 键）。
+        let (mut old_acp, stale_sources) = {
             let mut acp = runtime.acp.lock().await;
-            let mut sessions = runtime.sessions.lock().map_err(|error| error.to_string())?;
-            if !keep_sessions {
-                stale_sources = sessions.keys().cloned().collect();
-            }
             let old_acp = std::mem::replace(&mut *acp, new_acp);
             let new_generation = runtime.client_generation.fetch_add(1, Ordering::AcqRel) + 1;
             self.set_agent_runtime_status(runtime, AgentLifecycleStatus::Connected, None);
@@ -381,7 +378,12 @@ impl AppStateHandles {
                     *active = agent_id;
                 }
             }
-            apply_client_replacement_sessions(&mut sessions, keep_sessions, new_generation);
+            let stale_sources = crate::session_store::migrate_or_clear(
+                &runtime,
+                keep_sessions,
+                new_generation,
+            )
+            .map_err(|error| error.to_string())?;
             // 审查修复：客户端替换（switch/重连/自动重连）后旧进程的挂起权限请求
             // 全部失效——清空，避免 300s 超时把 reject 写到新进程（且可能撞新 id）。
             if let Ok(mut pending) = runtime.pending_permissions.lock() {
@@ -392,7 +394,7 @@ impl AppStateHandles {
                 }
             }
             tracing::info!("ACP client activated; generation is now {}", new_generation);
-            old_acp
+            (old_acp, stale_sources)
         };
         // 优化-1：sessions 锁已释放——清理旧 source 的 prompt 锁条目。
         // G2-08：lib.rs 本地 drop_stale_prompt_locks 删除，收敛为 runtime 方法。
