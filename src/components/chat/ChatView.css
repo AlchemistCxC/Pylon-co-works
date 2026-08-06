@@ -498,9 +498,6 @@
 .term-spinner-row {
   gap: var(--ui-space-3);
   padding: var(--ui-space-2) var(--ui-space-3);
-  border: 1px solid color-mix(in srgb, var(--tool-run) 28%, var(--border));
-  border-radius: var(--ui-radius-sm);
-  background: color-mix(in srgb, var(--tool-run) 5%, transparent);
 }
 .spinner-stop-btn {
   min-height: var(--ui-control-compact);
