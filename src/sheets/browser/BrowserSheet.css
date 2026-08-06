@@ -1,0 +1,5 @@
+/* W4-03 browser 壳：消费现有主题变量，零新样式体系 */
+
+.browser-sheet { flex: 1; padding: 24px; color: var(--text); font-family: var(--font); }
+.browser-phase { font-family: var(--mono); font-size: 12px; margin: 12px 0; color: var(--accent); }
+.browser-actions { display: flex; gap: 8px; }

@@ -6,6 +6,7 @@ import RuntimeSheetView from '../sheets/RuntimeSheetView'
 import GatewaySheetView from '../sheets/gateway/GatewaySheetView'
 import SearchSheetView from '../sheets/search/SearchSheetView'
 import HistorySheetView from '../sheets/history/HistorySheetView'
+import BrowserSheetView from '../sheets/browser/BrowserSheetView'
 import FileSheetView from '../sheets/file/FileSheetView'
 import Sidebar from '../components/Sidebar'
 import AgentContextPanel from '../components/right-panel/AgentContextPanel'
@@ -31,16 +32,6 @@ const LOADING_FALLBACK = (
   </div>
 )
 
-function UnavailableSheet({ kind }: { kind: string }) {
-  return (
-    <div className="sheet-empty-host">
-      <div className="sheet-empty-kicker">SHEET</div>
-      <h2>{kind} 尚未接入</h2>
-      <p>当前只建立了 Sheet 状态与导航壳，运行内容尚未接入。</p>
-    </div>
-  )
-}
-
 // agent 直挂（主工作台首屏）；W1-03：AgentSheetView 收窄为 { sheet, ctx }，只渲染主区
 const agentRender = (sheet: SheetRecord, ctx: SheetContext) => <AgentSheetView sheet={sheet} ctx={ctx} />
 
@@ -59,7 +50,8 @@ export const SHEET_RENDER_REGISTRY: Record<SheetKind, SheetRenderEntry> = {
   search: { render: (sheet, ctx) => <SearchSheetView sheet={sheet} ctx={ctx} /> },
   // W4-01：历史列表/导出（回放 W4-02 待产品拍板）
   history: { render: (sheet, ctx) => <HistorySheetView sheet={sheet} ctx={ctx} /> },
-  browser: { render: () => <UnavailableSheet kind="browser" /> },
+  // W4-03：browser 壳（CDP 契约未定，W4-04 接真实）
+  browser: { render: (sheet, ctx) => <BrowserSheetView sheet={sheet} ctx={ctx} /> },
   // W3-01：gateway 只读概览（适配器/平台会话分区；写回 W3-02 桩化）
   gateway: { render: (sheet, ctx) => <GatewaySheetView sheet={sheet} ctx={ctx} /> },
 } satisfies Record<SheetKind, SheetRenderEntry>
