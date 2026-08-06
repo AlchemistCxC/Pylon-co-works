@@ -378,7 +378,10 @@ pub(crate) fn search(
     let query_lower = query.to_lowercase();
     let mut results = Vec::new();
     let mut scanned_files = 0usize;
-    walk_search(root, root, "", query, &query_lower, limits, &mut results, &mut scanned_files)?;
+    // 方案 1D：canonical visited 集合防环——同 canonical 目录只扫描一次，
+    // 内部目录 symlink/junction 环（指向自身/祖先）在此截断，避免无限递归。
+    let mut visited = std::collections::HashSet::new();
+    walk_search(root, root, "", query, &query_lower, limits, &mut results, &mut scanned_files, &mut visited)?;
     results.sort_by(|a, b| a.path.cmp(&b.path).then(a.line.cmp(&b.line)));
     Ok(results)
 }
@@ -392,6 +395,7 @@ fn walk_search(
     limits: SearchLimits,
     results: &mut Vec<WorkspaceSearchResult>,
     scanned_files: &mut usize,
+    visited: &mut std::collections::HashSet<PathBuf>,
 ) -> Result<(), WorkspaceError> {
     if results.len() >= limits.max_results || *scanned_files >= limits.max_files {
         return Ok(());
@@ -403,6 +407,12 @@ fn walk_search(
             WorkspaceError::NotReadable
         }
     })?;
+    // 方案 1D：目录进入前 canonicalize 去重。注意这里对真实目录与 symlink 目录
+    // 一视同仁——real 目录与指向它的 symlink canonical 后同键，只扫一次。
+    let canonical_dir = dir.canonicalize().map_err(|e| WorkspaceError::Io(e.to_string()))?;
+    if !visited.insert(canonical_dir) {
+        return Ok(());
+    }
     let entries = fs::read_dir(dir).map_err(|e| WorkspaceError::Io(e.to_string()))?;
     for item in entries {
         if results.len() >= limits.max_results || *scanned_files >= limits.max_files {
@@ -420,17 +430,18 @@ fn walk_search(
             format!("{dir_relative}/{name}")
         };
         if metadata.file_type().is_symlink() {
-            // 目录 symlink 仅在 canonical 目标仍在 root 内时进入；断链/外部/文件链接跳过
+            // 目录 symlink 仅在 canonical 目标仍在 root 内时进入；断链/外部/文件链接跳过。
+            // 进入后由 visited 去重防环（目标已在遍历路径上 → 跳过）。
             let target = item.path().canonicalize().ok();
             if let Some(target) = target {
                 if target.starts_with(&canonical_root) && target.is_dir() {
-                    walk_search(root, &item.path(), &relative, query, query_lower, limits, results, scanned_files)?;
+                    walk_search(root, &item.path(), &relative, query, query_lower, limits, results, scanned_files, visited)?;
                 }
             }
             continue;
         }
         if metadata.is_dir() {
-            walk_search(root, &item.path(), &relative, query, query_lower, limits, results, scanned_files)?;
+            walk_search(root, &item.path(), &relative, query, query_lower, limits, results, scanned_files, visited)?;
         } else if metadata.is_file() {
             if *scanned_files >= limits.max_files {
                 break;
@@ -725,6 +736,59 @@ mod tests {
         let found = search(&root, "needle", default_search_limits(None)).unwrap();
         assert!(!found.iter().any(|r| r.path == "evil.txt"), "root 外文件 symlink 不得进入");
         assert!(!found.iter().any(|r| r.path == "broken-link"), "断链必须跳过");
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn search_terminates_on_internal_directory_cycle() {
+        // 方案 1D 测试门：目录内 symlink 指向祖先（环，canonical 仍在 root 内）
+        // 必须有限时间返回，不得无限递归/栈溢出。
+        use std::os::unix::fs::symlink;
+        let (_dir, root) = search_fixture();
+        fs::create_dir(root.join("sub")).unwrap();
+        fs::write(root.join("sub/file.txt"), "needle in sub\n").unwrap();
+        // sub/loop -> .. 即 root：walk 进入 sub 后再进入 root 会形成环。
+        symlink("..", root.join("sub/loop")).unwrap();
+        let found = search(&root, "needle", default_search_limits(None)).unwrap();
+        assert!(found.iter().any(|r| r.path == "sub/file.txt"), "环内正常文件仍应命中");
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn search_scans_same_canonical_directory_once() {
+        // 方案 1D：同 canonical 目录只扫一次——两个目录 symlink 指向同一真实目录，
+        // 命中文件不重复出现。
+        use std::os::unix::fs::symlink;
+        let (_dir, root) = search_fixture();
+        fs::create_dir(root.join("target")).unwrap();
+        fs::write(root.join("target/only.txt"), "needle shared\n").unwrap();
+        symlink("target", root.join("alias-a")).unwrap();
+        symlink("target", root.join("alias-b")).unwrap();
+        let found = search(&root, "needle", default_search_limits(None)).unwrap();
+        let hits: Vec<&str> = found.iter().map(|r| r.path.as_str()).collect();
+        assert_eq!(
+            hits.iter().filter(|p| p.contains("only.txt")).count(),
+            1,
+            "同 canonical 目录只贡献一份结果: {hits:?}"
+        );
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn search_terminates_on_internal_junction_cycle() {
+        // 方案 1D（Windows）：目录 junction 环同样必须有限时间返回。
+        // junction/symlink 创建可能因权限不足（需开发者模式/管理员）失败——
+        // 此时明确 skip 而非失败（方案标注：Windows junction 权限不满足时明确 skip）。
+        use std::os::windows::fs::symlink_dir;
+        let (_dir, root) = search_fixture();
+        fs::create_dir(root.join("sub")).unwrap();
+        fs::write(root.join("sub/file.txt"), "needle in sub\n").unwrap();
+        if symlink_dir("..", root.join("sub/loop")).is_err() {
+            eprintln!("skip: 创建 junction/symlink 无权限（需要开发者模式）");
+            return;
+        }
+        let found = search(&root, "needle", default_search_limits(None)).unwrap();
+        assert!(found.iter().any(|r| r.path == "sub/file.txt"), "环内正常文件仍应命中");
     }
 
     #[test]
