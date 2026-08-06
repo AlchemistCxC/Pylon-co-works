@@ -5,6 +5,7 @@ import OverviewSheetView from '../sheets/OverviewSheetView'
 import RuntimeSheetView from '../sheets/RuntimeSheetView'
 import GatewaySheetView from '../sheets/gateway/GatewaySheetView'
 import SearchSheetView from '../sheets/search/SearchSheetView'
+import HistorySheetView from '../sheets/history/HistorySheetView'
 import FileSheetView from '../sheets/file/FileSheetView'
 import Sidebar from '../components/Sidebar'
 import AgentContextPanel from '../components/right-panel/AgentContextPanel'
@@ -56,7 +57,8 @@ export const SHEET_RENDER_REGISTRY: Record<SheetKind, SheetRenderEntry> = {
   overview: { render: (sheet, ctx) => <OverviewSheetView sheet={sheet} ctx={ctx} /> },
   // W3-03：跨会话快照搜索（仅本地会话；平台范围产品未决）
   search: { render: (sheet, ctx) => <SearchSheetView sheet={sheet} ctx={ctx} /> },
-  history: { render: () => <UnavailableSheet kind="history" /> },
+  // W4-01：历史列表/导出（回放 W4-02 待产品拍板）
+  history: { render: (sheet, ctx) => <HistorySheetView sheet={sheet} ctx={ctx} /> },
   browser: { render: () => <UnavailableSheet kind="browser" /> },
   // W3-01：gateway 只读概览（适配器/平台会话分区；写回 W3-02 桩化）
   gateway: { render: (sheet, ctx) => <GatewaySheetView sheet={sheet} ctx={ctx} /> },

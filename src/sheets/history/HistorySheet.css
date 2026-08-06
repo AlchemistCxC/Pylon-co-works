@@ -1,0 +1,5 @@
+/* W4-01 历史列表/导出：消费现有主题变量，零新样式体系 */
+
+.history-sheet { flex: 1; padding: 24px; overflow-y: auto; color: var(--text); font-family: var(--font); }
+.history-row { display: flex; gap: 8px; align-items: center; padding: 6px 0; border-bottom: 1px solid var(--border); }
+.history-pager { display: flex; gap: 8px; align-items: center; margin-top: 16px; }
