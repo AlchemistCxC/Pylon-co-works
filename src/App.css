@@ -14,9 +14,13 @@
 }
 .workspace-titlebar.sidebar-collapsed .workspace-titlebar-sidebar { justify-content:center; padding:0; }
 .workspace-titlebar-brand {
-  color:var(--text-dim); font-size:10px; font-weight:700; letter-spacing:0.14em;
-  white-space:nowrap; user-select:none;
+  display:flex; align-items:center; gap:var(--ui-space-2); color:var(--text-dim);
+  font-size:10px; font-weight:700; letter-spacing:0.14em; white-space:nowrap; user-select:none;
 }
+.workspace-titlebar-mark { flex:0 0 auto; color:var(--accent); }
+.pylon-mark-frame { fill:color-mix(in srgb,currentColor 10%,transparent); stroke:currentColor; stroke-width:2; }
+.pylon-mark-node { fill:currentColor; }
+.pylon-mark-links { fill:none; stroke:currentColor; stroke-width:4; stroke-linecap:round; }
 .workspace-titlebar-workspace { min-width:0; display:flex; align-items:stretch; overflow:hidden; }
 .workspace-titlebar-drag { min-width:18px; flex:1; -webkit-app-region:drag; }
 .workspace-titlebar-launchers,

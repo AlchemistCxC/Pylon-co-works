@@ -2,6 +2,7 @@ import { type MouseEventHandler } from 'react'
 import SheetTabStrip from './SheetTabStrip'
 import { useRuntimeStore } from '../runtimeStore'
 import { useStore } from '../store'
+import PylonMark from '../components/PylonMark'
 import type { SheetRecord } from './sheetTypes'
 import type { WorkspaceMenuActions } from './WorkspaceMenu'
 
@@ -57,7 +58,12 @@ export default function WorkspaceTitlebar({
         >
           <span aria-hidden="true">☰</span>
         </button>
-        {!sidebarCollapsed && <span className="workspace-titlebar-brand" aria-hidden="true">PYLON</span>}
+        {!sidebarCollapsed && (
+          <span className="workspace-titlebar-brand" aria-label="Pylon">
+            <PylonMark size={18} className="workspace-titlebar-mark" title="Pylon" />
+            <span aria-hidden="true">PYLON</span>
+          </span>
+        )}
       </div>
 
       <div className="workspace-titlebar-workspace">

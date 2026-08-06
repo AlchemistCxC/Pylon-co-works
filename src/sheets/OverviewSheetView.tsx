@@ -6,6 +6,7 @@ import { useRuntimeStore } from '../runtimeStore'
 import { reportRuntimeError } from '../runtimeError'
 import { runAgentSwitchTransaction } from '../components/agentSwitchTransaction'
 import AgentConfigEditor from '../components/settings/AgentConfigEditor'
+import PylonMark from '../components/PylonMark'
 import { recentPersistedSessions, type PersistedSessionSummary } from '../domains/overview/persistedSessions.ts'
 import type { SheetContext, SheetRecord } from '../workspace-sheets/sheetTypes'
 import './OverviewSheetView.css'
@@ -91,9 +92,14 @@ export default function OverviewSheetView({ ctx }: { sheet: SheetRecord; ctx: Sh
   return (
     <div className="overview-sheet">
       <div className="overview-shell">
-        <div className="overview-kicker">PYLON WORKSPACE</div>
-        <h1 className="overview-title">开始工作</h1>
-        <p className="overview-lede">选择 Agent、调整配置，或从最近会话继续。工作区会保留你的 Sheet 与上下文。</p>
+        <header className="overview-hero">
+          <PylonMark size={56} className="overview-brand-mark" title="Pylon" />
+          <div className="overview-hero-copy">
+            <div className="overview-kicker">PYLON WORKSPACE</div>
+            <h1 className="overview-title">开始工作</h1>
+            <p className="overview-lede">选择 Agent、调整配置，或从最近会话继续。工作区会保留你的 Sheet 与上下文。</p>
+          </div>
+        </header>
         <div className="overview-entries">
           <section className="overview-entry">
             <span className="overview-entry-index">01</span>
