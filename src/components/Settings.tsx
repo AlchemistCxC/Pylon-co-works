@@ -13,6 +13,8 @@ import { useRuntimeStore } from '../runtimeStore'
 import { useShallow } from 'zustand/react/shallow'
 import type { ThemeSettings } from '../store'
 import { GLOBAL_PRESETS, pickZoneFields } from '../presets'
+import { THEME_FIELD_KEYS, THEME_FIELD_DEFS, type ThemeFieldDef } from '../themeFieldDefs'
+import { useWorkspaceStore } from '../workspaceStore'
 import { pickCustomPresetTheme } from '../customPresets'
 import { deriveGlobalStatus, deriveZoneStatus } from '../domains/theme/presetReducer'
 import SettingsPreview from './SettingsPreview'
@@ -162,6 +164,10 @@ const TAB_LABELS: Record<string, string> = {
   global: '全局', sidebar: '左栏', terminal: '终端', cc: '中控区', right: '右栏',
   agent: 'Agent', session: '会话',
 }
+// W2-13（F3-A）：设置三层（快速/进阶/专家）——进阶 = 现状原样；快速 = 一键换装 + basic 字段
+const TIERS = ['quick', 'advanced', 'expert'] as const
+const TIER_LABELS: Record<string, string> = { quick: '快速', advanced: '进阶', expert: '专家' }
+
 // tab → 预览 zone（agent/session 无预览）
 const TAB_PREVIEW: Record<string, string> = {
   global: 'global', sidebar: 'sidebar', terminal: 'chat', cc: 'cc', right: 'right',
@@ -202,7 +208,10 @@ export default function Settings({ onClose, activeSessionId }: { onClose?: () =>
   const saveCustomPreset = useStore(s => s.saveCustomPreset)
   const applyCustomPreset = useStore(s => s.applyCustomPreset)
   const removeCustomPreset = useStore(s => s.removeCustomPreset)
+  const [tier, setTier] = useState<'quick' | 'advanced' | 'expert'>('quick')
   const [activeTab, setActiveTab] = useState('global')
+  const showPet = useWorkspaceStore(s => s.showPet)
+  const setShowPet = useWorkspaceStore(s => s.setShowPet)
   const [searchQuery, setSearchQuery] = useState('')
   const [customPresetName, setCustomPresetName] = useState('')
   const [switchingAgentId, setSwitchingAgentId] = useState<string | null>(null)
@@ -286,6 +295,39 @@ export default function Settings({ onClose, activeSessionId }: { onClose?: () =>
         </div>
         <button type="button" className="settings-close" onClick={onClose} aria-label="关闭设置">✕</button>
       </header>
+      <div className="settings-tier-nav">
+        {TIERS.map(item => (
+          <button key={item} type="button" className={`set-nav-btn ${tier === item ? 'active' : ''}`} onClick={() => setTier(item)}>
+            {TIER_LABELS[item]}
+          </button>
+        ))}
+      </div>
+      {tier === 'quick' && (
+        <div className="settings-quick">
+          <Group title="一键换装">
+            <div className="set-preset-row">
+              {GLOBAL_PRESETS.map(p => (
+                <button key={p.name} className={`set-preset-chip ${globalStatus === p.name ? 'active' : ''}`}
+                  onClick={() => applyGlobalPreset(p.name)}>{p.label}</button>
+              ))}
+            </div>
+          </Group>
+          <Group title="宠物">
+            <div className="set-preset-row">
+              <button className="set-preset-chip" onClick={() => setShowPet(!showPet)}>
+                {showPet ? '宠物显示中 — 点击隐藏' : '宠物已隐藏 — 点击显示'}
+              </button>
+            </div>
+          </Group>
+          <div className="set-basic-fields">
+            {(['global', 'sidebar', 'chat', 'cc'] as const).map(zone => {
+              const hasBasic = THEME_FIELD_KEYS.some(key => { const def = THEME_FIELD_DEFS[key] as ThemeFieldDef; return def.zone === zone && def.tier === 'basic' })
+              return hasBasic ? <ZoneGroupFields key={zone} zone={zone} ctx={renderCtx} basicOnly /> : null
+            })}
+          </div>
+        </div>
+      )}
+      {tier !== 'quick' && (
       <div className="settings-tabs-root">
         <div className="settings-nav">
           <div className="settings-nav-group">
@@ -469,6 +511,7 @@ export default function Settings({ onClose, activeSessionId }: { onClose?: () =>
           </div>
         )}
       </div>
+      )}
     </div>
   )
 }

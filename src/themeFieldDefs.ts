@@ -59,6 +59,8 @@ export interface ThemeFieldDef {
   meta?: boolean
   /** 字段默认值（THEME_DEFAULTS 由 defs 派生；对象字段 ccLayout/ccHidden/ccScale 及 appliedPreset/custom 无标量默认） */
   default?: string | number | boolean
+  /** W2-13（F3-A）：快速层基础字段标记（basic 清单来自 defs，组件不硬编码） */
+  tier?: 'basic'
 }
 
 const C = (zone: ZoneName, label: string): ThemeFieldDef => ({ type: 'color', label, zone })
@@ -70,14 +72,14 @@ const H = (def: ThemeFieldDef): ThemeFieldDef => ({ ...def, hidden: true })
 
 export const THEME_FIELD_DEFS = {
   // ── global ──
-  accent: { ...C('global', '强调色'), default: '#3b82f6', cssVar: '--accent', group: "强调色", hint: '链接、用户前缀、选中/焦点、spinner 光扫的统一取色' },
+  accent: { ...C('global', '强调色'), tier: 'basic', default: '#3b82f6', cssVar: '--accent', group: "强调色", hint: '链接、用户前缀、选中/焦点、spinner 光扫的统一取色' },
   transparency: { ...N('global', '透明度', 0, 1, 0.05), default: 0.85, group: "玻璃效果", cssVar: '--t', percent: true, suffix: '%' },
   bgBlur: { ...N('global', '模糊', 0, 40, 2), default: 16, group: "玻璃效果", unit: 'px', cssVar: '--blur', suffix: 'px' },
   globalFont: { ...S('global', '字体', ['system', 'mono']), default: 'system', group: "字体", },
-  globalFontSize: { ...N('global', '基础字号', 12, 24), default: 18, group: "字体", unit: 'px' },
+  globalFontSize: { ...N('global', '基础字号', 12, 24), tier: 'basic', default: 18, group: "字体", unit: 'px' },
   globalBgImage: { ...T('global', '背景图'), default: '', control: 'bgImage', group: "玻璃效果", },
-  globalBgColor: { ...C('global', '背景底色'), default: '#e8e8ec', group: "玻璃效果", hint: '终端/桌面背景模拟色' },
-  uiScheme: { ...S('global', 'UI 配色', ['light', 'dark']), default: 'light', group: "玻璃效果", control: 'schemeChip' },
+  globalBgColor: { ...C('global', '背景底色'), tier: 'basic', default: '#e8e8ec', group: "玻璃效果", hint: '终端/桌面背景模拟色' },
+  uiScheme: { ...S('global', 'UI 配色', ['light', 'dark']), tier: 'basic', default: 'light', group: "玻璃效果", control: 'schemeChip' },
   userName: { ...T('global', '显示名'), default: '', group: "个人信息" },
   userPrefix: { ...T('global', '前缀'), default: '❯', group: "个人信息" },
   // ChatView 内联 style 应用（style={{color: userColor}}），不注入 CSS var
@@ -93,8 +95,8 @@ export const THEME_FIELD_DEFS = {
   sidebarWidth: { ...N('sidebar', '栏宽', 160, 400), default: 250, group: "布局", unit: 'px' },
   sidebarTransparency: { ...N('sidebar', '透明度', 0, 1, 0.05), default: 1, group: "玻璃效果", percent: true, suffix: '%' },
   sidebarBlur: { ...N('sidebar', '模糊', 0, 40, 2), default: 0, group: "玻璃效果", unit: 'px', suffix: 'px' },
-  sidebarTextColor: { ...C('sidebar', '文字颜色'), default: 'rgba(0,0,0,0.85)', group: "文字", },
-  sidebarNameSize: { ...N('sidebar', '会话名字号', 11, 20), default: 14, group: "文字", unit: 'px' },
+  sidebarTextColor: { ...C('sidebar', '文字颜色'), tier: 'basic', default: 'rgba(0,0,0,0.85)', group: "文字", },
+  sidebarNameSize: { ...N('sidebar', '会话名字号', 11, 20), tier: 'basic', default: 14, group: "文字", unit: 'px' },
   // W2-10：侧栏平铺后无分组——字段保留兼容预设，不再注入 cssVar（防死注入）
   sidebarGroupSize: { ...N('sidebar', '分组标题字号', 10, 16), default: 12, group: "文字", unit: 'px', noCssVar: true, hidden: true },
 
@@ -104,9 +106,9 @@ export const THEME_FIELD_DEFS = {
   chatTransparency: { ...N('chat', '透明度', 0, 1, 0.05), default: 1, group: "背景", percent: true, suffix: '%' },
   chatBlur: { ...N('chat', '模糊', 0, 40, 2), default: 0, group: "背景", unit: 'px', suffix: 'px' },
   chatFont: { ...S('chat', '字体', ['mono', 'system']), default: 'mono', group: "字体", },
-  chatFontSize: { ...N('chat', '字号', 12, 22), default: 15, group: "字体", unit: 'px' },
+  chatFontSize: { ...N('chat', '字号', 12, 22), tier: 'basic', default: 15, group: "字体", unit: 'px' },
   chatLineHeight: { ...N('chat', '行高', 1.2, 2.5, 0.1), default: 1.4, group: "字体", },
-  chatTextColor: { ...C('chat', '文字'), default: 'rgba(0,0,0,0.85)', group: "颜色", },
+  chatTextColor: { ...C('chat', '文字'), tier: 'basic', default: 'rgba(0,0,0,0.85)', group: "颜色", },
   chatCodeColor: { ...C('chat', '内联代码'), default: '#b47814', group: "颜色", },
   chatCodeBg: { ...C('chat', '代码背景'), default: 'rgba(0,0,0,0.03)', group: "颜色", },
   synKeyword: { ...C('chat', '语法·关键字'), default: '#b48ead', cssVar: '--syn-kw', group: "语法高亮", },
@@ -149,7 +151,7 @@ export const THEME_FIELD_DEFS = {
   toolConnectorStyle: { ...S('chat', '线样式', ['solid', 'dotted', 'pulse']), default: 'solid', group: "指示器 & 连接线", },
   toolConnectorWidth: { ...N('chat', '线宽', 1, 6), default: 2, group: "指示器 & 连接线", suffix: 'px' },
   toolConnectorOpacity: { ...N('chat', '线透明度', 0.1, 1, 0.05), default: 1, group: "指示器 & 连接线", percent: true, suffix: '%' },
-  spinnerFramePreset: { ...S('chat', '动画预设', ['sparkles', 'ascii-line', 'braille', 'dots', 'orbit', 'clock', 'wave', 'blocks', 'scan', 'cc', 'custom']), default: 'sparkles', group: "Spinner", },
+  spinnerFramePreset: { ...S('chat', '动画预设', ['sparkles', 'ascii-line', 'braille', 'dots', 'orbit', 'clock', 'wave', 'blocks', 'scan', 'cc', 'custom']), tier: 'basic', default: 'sparkles', group: "Spinner", },
   spinnerCustomFrames: { ...T('chat', '自定义帧'), default: '', group: "Spinner", showIf: t => t.spinnerFramePreset === 'custom' },
   spinnerVerbSet: { ...S('chat', '文案语言', ['zh', 'en', 'analysis', 'engineering', 'cc', 'custom']), default: 'zh', group: "Spinner", },
   spinnerCustomVerbs: { ...T('chat', '自定义文案'), default: '', group: "Spinner", showIf: t => t.spinnerVerbSet === 'custom' },
@@ -164,12 +166,12 @@ export const THEME_FIELD_DEFS = {
   spinnerErrorMarkerMode: { ...S('chat', '错误标记模式', ['frame', 'custom']), default: 'custom', group: "Spinner", hidden: true },
   // 动画间隔 JS 驱动（setInterval），无 CSS var 消费 → 不注入
   spinnerIntervalMs: { ...N('chat', '动画间隔', 40, 1000, 10), default: 120, group: "Spinner", suffix: 'ms', noCssVar: true },
-  spinnerColor: { ...C('chat', 'Spinner 颜色'), default: '', group: "Spinner", },
+  spinnerColor: { ...C('chat', 'Spinner 颜色'), tier: 'basic', default: '', group: "Spinner", },
   spinnerSize: { ...N('chat', 'Spinner 大小', 10, 32), default: 14, group: "Spinner", unit: 'px' },
   msgStyle: { ...S('chat', '消息风格', ['terminal', 'bubble']), default: 'terminal', group: "风格", },
   msgFont: { ...S('chat', '消息字体', ['mono', 'system']), default: 'mono', group: "风格", },
   // 经 App.tsx 手写 --msg-text 注入，自动派生 --msg-text-color 冗余 → 不注入
-  msgTextColor: { ...C('chat', '消息文字'), default: '', group: "风格", noCssVar: true },
+  msgTextColor: { ...C('chat', '消息文字'), tier: 'basic', default: '', group: "风格", noCssVar: true },
   msgLineHeight: { ...N('chat', '消息行距', 1.2, 2.5, 0.1), default: 1.8, group: "风格", },
   messageLayout: { ...S('chat', '信息层级', ['classic', 'claude', 'bubble']), default: 'classic', group: "风格", },
   // CC 视觉还原（claude 预设启用）：助手消息 ● 圆点
@@ -206,11 +208,11 @@ export const THEME_FIELD_DEFS = {
   ccScale: H({ type: 'text', label: '控件缩放', zone: 'cc', noCssVar: true }),
   inputBg: { ...C('cc', '输入背景'), default: 'rgba(0,0,0,0.02)', group: "输入与状态", },
   inputBgImage: { ...T('cc', '输入背景图'), default: '', control: 'bgImage', group: "输入与状态", },
-  inputTextColor: { ...C('cc', '输入文字'), default: 'rgba(0,0,0,0.85)', group: "输入与状态", },
+  inputTextColor: { ...C('cc', '输入文字'), tier: 'basic', default: 'rgba(0,0,0,0.85)', group: "输入与状态", },
   inputPlaceholder: { ...C('cc', '占位符'), default: 'rgba(0,0,0,0.28)', group: "输入与状态", },
   inputSendBg: { ...C('cc', '发送按钮'), default: 'rgba(0,0,0,0.10)', group: "输入与状态", },
   inputFocusBorder: { ...C('cc', '焦点边框'), default: 'rgba(0,0,0,0.22)', group: "输入与状态", },
-  inputFontSize: { ...N('cc', '输入字号', 12, 22), default: 17, group: "输入与状态", unit: 'px' },
+  inputFontSize: { ...N('cc', '输入字号', 12, 22), tier: 'basic', default: 17, group: "输入与状态", unit: 'px' },
   inputMinHeight: { ...N('cc', '输入最小高', 32, 120), default: 56, group: "输入与状态", unit: 'px', advanced: true },
   inputMode: { ...S('cc', '输入模式', ['cli', 'default']), default: 'cli', group: "输入与状态", },
   inputVariant: { ...S('cc', '输入栏', ['cli', 'composer', 'compact', 'command']), default: 'cli', syncOnChange: ['inputMode'], group: "控件样式", },
@@ -308,6 +310,11 @@ export const GROUP_ORDER: Record<string, readonly { heading?: string; groups: re
   cc: [{ groups: [{ title: '外观风格' }, { title: '控件样式' }, { title: '输入与状态' }, { title: '波形与用量' }, { title: '中控背景', defaultOpen: false }] }],
   right: [{ groups: [{ title: '外观' }, { title: '玻璃效果' }] }],
 }
+/** W2-13（F3-A）：快速层基础字段清单（来自 defs 单一真值，组件不硬编码） */
+export function resolveBasicThemeFields(): string[] {
+  return THEME_FIELD_KEYS.filter(key => (THEME_FIELD_DEFS[key] as ThemeFieldDef).tier === 'basic')
+}
+
 export const THEME_DEFAULTS: Record<string, string | number | boolean> = Object.fromEntries(
   THEME_FIELD_KEYS
     .filter(key => (THEME_FIELD_DEFS[key] as ThemeFieldDef).default !== undefined)

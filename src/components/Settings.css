@@ -223,3 +223,12 @@
 .set-advanced summary::-webkit-details-marker { display:none; }
 .set-advanced summary::before { content:'▸ '; font-size:9px; }
 .set-advanced[open] summary::before { content:'▾ '; }
+
+/* W2-13（F3-A）：设置三层导航 + 快速层 */
+.settings-tier-nav {
+  display: flex; gap: 4px;
+  padding: 8px 16px;
+  border-bottom: 1px solid var(--border);
+}
+.settings-quick { padding: 16px; overflow-y: auto; }
+.set-basic-fields { margin-top: 16px; }
