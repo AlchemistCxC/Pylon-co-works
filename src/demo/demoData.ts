@@ -124,6 +124,15 @@ export function buildDemoMessages(sessionId: string): Message[] {
   }
 }
 
+// ── 平台会话（gateway_sessions，Phase 2）────────────────────────────────
+
+export function buildPlatformSessions() {
+  return [
+    { agentId: 'peri', source: 'qq:user:14CE', periId: 'peri-demo-1', title: '平台会话', model: 'deepseek-v4-flash', mode: 'auto', updatedAt: String(Date.now()), reset: 'daily', allowFrom: ['14CE'], idleMinutes: 60 },
+    { agentId: 'serina', source: 'qq:group:8080', periId: 'peri-demo-3', title: 'TRPG 战役群', model: 'deepseek-v4-flash', mode: null, updatedAt: String(Date.now() - 3600_000), reset: 'off', allowFrom: null, idleMinutes: null },
+  ]
+}
+
 // ── history 列表（list_persisted_sessions）───────────────────────────────
 
 export function buildSessionSummaries(): Array<{ id: string; source?: string; title?: string; periId?: string; updatedAt: number }> {

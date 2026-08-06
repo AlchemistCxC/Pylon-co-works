@@ -34,6 +34,41 @@ export type GatewayWriteStatus =
   | { kind: 'lock-poisoned' }
   | { kind: 'error'; message: string }
 
+/** Phase 2（后端施工计划书 §4）：平台会话行（gateway_sessions 响应，宽容 normalize） */
+export interface PlatformSession {
+  agentId: string
+  source: string
+  periId: string
+  title: string
+  model: string
+  mode: string | null
+  updatedAt: string | null
+  reset: string
+  allowFrom: string[] | null
+  idleMinutes: number | null
+}
+
+export function normalizeGatewaySessions(raw: unknown): PlatformSession[] {
+  if (!Array.isArray(raw)) return []
+  return raw.flatMap((item): PlatformSession[] => {
+    if (!isPlainObject(item)) return []
+    const value = item as Record<string, unknown>
+    if (typeof value.agentId !== 'string' || typeof value.source !== 'string') return []
+    return [{
+      agentId: value.agentId,
+      source: value.source,
+      periId: typeof value.periId === 'string' ? value.periId : '',
+      title: typeof value.title === 'string' ? value.title : '',
+      model: typeof value.model === 'string' ? value.model : '',
+      mode: typeof value.mode === 'string' ? value.mode : null,
+      updatedAt: typeof value.updatedAt === 'string' ? value.updatedAt : null,
+      reset: typeof value.reset === 'string' ? value.reset : 'idle',
+      allowFrom: Array.isArray(value.allowFrom) ? value.allowFrom.filter((x): x is string => typeof x === 'string') : null,
+      idleMinutes: typeof value.idleMinutes === 'number' && Number.isFinite(value.idleMinutes) ? value.idleMinutes : null,
+    }]
+  })
+}
+
 /** W3-02 桩化：写回错误分类（命令缺失 blocked；gateway_config_lock_poisoned 锁中毒） */
 export function classifyGatewayWriteError(error: unknown): Exclude<GatewayWriteStatus, { kind: 'idle' } | { kind: 'saving' } | { kind: 'ok' }> {
   const message = error instanceof Error ? error.message : String(error)

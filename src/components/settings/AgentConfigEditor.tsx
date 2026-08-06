@@ -22,8 +22,8 @@ export default function AgentConfigEditor({ agentId }: { agentId: string }) {
     }
     setStatus({ kind: 'saving' })
     try {
-      // 契约：update_agents_config（待产品侧后端命令）；参数形状以后端实际契约为准
-      await invoke('update_agents_config', { agentId, config })
+      // Phase 3：显式 scope 契约（用户拍板）——agent 整块 YAML 替换
+      await invoke('update_agents_config', { scope: 'agent', agentId, config })
       setStatus({ kind: 'ok' })
     } catch (error) {
       const classified = classifyAgentConfigSaveError(error)

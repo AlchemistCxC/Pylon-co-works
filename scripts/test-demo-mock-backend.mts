@@ -39,6 +39,13 @@ import { mockInvokeCommand } from '../src/demo/mockTauri.ts'
   assert.ok(Array.isArray(gateway.adapters), 'gateway adapters 必须为数组')
   assert.ok(Array.isArray(gateway.routes) && gateway.routes.length > 0, 'gateway routes 必须有路由')
   assert.ok('inject' in gateway, 'gateway 必须含 inject')
+  const platformSessions = await mockInvokeCommand('gateway_sessions') as Array<{ agentId: string; source: string; periId: string }>
+  assert.ok(platformSessions.length >= 2, 'gateway_sessions 必须有平台会话行')
+  for (const row of platformSessions) {
+    assert.equal(typeof row.agentId, 'string')
+    assert.equal(typeof row.source, 'string')
+    assert.equal(typeof row.periId, 'string')
+  }
 
   const sessions = await mockInvokeCommand('list_persisted_sessions') as Array<{ id: string; updatedAt: number }>
   assert.ok(sessions.length >= 4, '存档列表必须≥4 条')

@@ -14,7 +14,7 @@
  */
 import {
   buildDemoAgents, buildGatewayStatus, buildGitDiff, buildGitHistory, buildGitStatus,
-  buildRuntimeLogs, buildSessionResponse, buildSessionSummaries, buildStartupDiagnostics,
+  buildPlatformSessions, buildRuntimeLogs, buildSessionResponse, buildSessionSummaries, buildStartupDiagnostics,
   buildWorkspaceFileText, buildWorkspaceSearchResults, resolveWorkspaceEntries,
 } from './demoData.ts'
 
@@ -30,6 +30,7 @@ export async function mockInvokeCommand(cmd: string, args: Record<string, unknow
     case 'git_history': return buildGitHistory()
     case 'git_diff': return buildGitDiff()
     case 'gateway_status': return buildGatewayStatus()
+    case 'gateway_sessions': return buildPlatformSessions()
     case 'list_persisted_sessions': return buildSessionSummaries()
     case 'startup_diagnostics': return buildStartupDiagnostics()
     case 'list_runtime_logs': return buildRuntimeLogs()

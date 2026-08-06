@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react'
 import { invoke } from '@tauri-apps/api/core'
 import { reportRuntimeError } from '../../runtimeError'
-import { classifyGatewayWriteError, normalizeGatewayStatus, type GatewayStatus, type GatewayWriteStatus } from '../../infrastructure/tauri/gatewayContracts.ts'
+import { classifyGatewayWriteError, normalizeGatewaySessions, normalizeGatewayStatus, type GatewayStatus, type GatewayWriteStatus, type PlatformSession } from '../../infrastructure/tauri/gatewayContracts.ts'
 import type { SheetContext, SheetRecord } from '../../workspace-sheets/sheetTypes'
 import './GatewaySheet.css'
 
@@ -13,6 +13,7 @@ import './GatewaySheet.css'
  */
 export default function GatewaySheetView({ sheet: _sheet, ctx: _ctx }: { sheet: SheetRecord; ctx: SheetContext }) {
   const [status, setStatus] = useState<GatewayStatus | null>(null)
+  const [sessions, setSessions] = useState<PlatformSession[]>([])
   const [error, setError] = useState('')
   const [expandedRoute, setExpandedRoute] = useState<number | null>(null)
   const [editSource, setEditSource] = useState('')
@@ -24,8 +25,8 @@ export default function GatewaySheetView({ sheet: _sheet, ctx: _ctx }: { sheet: 
     if (!editSource.trim() || !editAgentId.trim()) return
     setWriteStatus({ kind: 'saving' })
     try {
-      // 契约：update_agents_config（待产品侧后端命令）；成功后 reload_gateway
-      await invoke('update_agents_config', { config: { gateway: { routes: [{ source: editSource, agentId: editAgentId }] } } })
+      // Phase 3：显式 scope 契约（用户拍板）；成功后 reload_gateway
+      await invoke('update_agents_config', { scope: 'gateway', config: { gateway: { routes: [{ source: editSource, agentId: editAgentId }] } } })
       try {
         await invoke('reload_gateway')
       } catch (reloadError) {
@@ -55,6 +56,17 @@ export default function GatewaySheetView({ sheet: _sheet, ctx: _ctx }: { sheet: 
     return () => { disposed = true }
   }, [])
 
+  // Phase 2：平台会话（gateway_sessions 只读快照）
+  useEffect(() => {
+    let disposed = false
+    invoke<unknown>('gateway_sessions').then(raw => {
+      if (!disposed) setSessions(normalizeGatewaySessions(raw))
+    }).catch(err => {
+      if (!disposed) reportRuntimeError('读取平台会话', err)
+    })
+    return () => { disposed = true }
+  }, [])
+
   return (
     <div className="gateway-sheet">
       <aside className="gateway-sidebar">
@@ -67,7 +79,18 @@ export default function GatewaySheetView({ sheet: _sheet, ctx: _ctx }: { sheet: 
           </ul>
         ) : <p className="file-section-hint">无适配器</p>}
         <div className="file-section-title">平台会话</div>
-        <p className="file-section-hint" role="status">待后端：gateway_sessions 命令尚未提供</p>
+        {sessions.length === 0 ? (
+          <p className="file-section-hint">无平台会话</p>
+        ) : (
+          <ul className="search-result-list">
+            {sessions.map(session => (
+              <li key={session.source}>
+                <span className="search-result-path">{session.source}</span>
+                <span className="search-result-text">→ {session.agentId} · {session.reset}</span>
+              </li>
+            ))}
+          </ul>
+        )}
       </aside>
       <main className="gateway-main">
         {error && <div className="file-tree-error" role="alert">{error}</div>}
@@ -76,7 +99,7 @@ export default function GatewaySheetView({ sheet: _sheet, ctx: _ctx }: { sheet: 
         <div className="gateway-routes">
           {status?.routes.map((route, index) => (
             <div key={route.source} className="gateway-route">
-              <button type="button" className="gateway-route-head" onClick={() => setExpandedRoute(expandedRoute === index ? null : index)}>
+              <button type="button" className="gateway-route-head" aria-expanded={expandedRoute === index} onClick={() => setExpandedRoute(expandedRoute === index ? null : index)}>
                 <span className="search-result-path">{route.source}</span>
                 <span className="search-result-text">→ {route.agentId}</span>
                 <span className="gateway-route-reset">{route.reset}</span>
