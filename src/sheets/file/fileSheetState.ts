@@ -30,3 +30,26 @@ export function fileSheetReducer(state: FileSheetState, action: FileSheetAction)
       return { ...state, targetSource: action.source }
   }
 }
+// ── W2-04：metadata openTabs/activeFile 编解码（metadata 为 Record<string,string>，JSON 串承载） ──
+
+export function serializeOpenTabs(paths: readonly string[]): string {
+  return JSON.stringify(paths)
+}
+
+/** 宽容解析：损坏 JSON/非数组 → 空（metadata JSON 损坏需 normalize 为空，不使整个 persistence 变 EMPTY） */
+export function parseOpenTabs(raw: string | undefined): string[] {
+  if (!raw) return []
+  try {
+    const parsed: unknown = JSON.parse(raw)
+    return Array.isArray(parsed) ? parsed.filter((item): item is string => typeof item === 'string') : []
+  } catch {
+    return []
+  }
+}
+
+/** 由文件路径推断高亮语言（md 走渲染器；其余走 highlightCode scope） */
+export function languageFromPath(path: string): string {
+  const ext = path.split('.').pop()?.toLowerCase() ?? ''
+  const map: Record<string, string> = { ts: 'typescript', tsx: 'typescript', js: 'javascript', jsx: 'javascript', json: 'json', css: 'css', html: 'html', rs: 'rust', py: 'python', go: 'go', md: 'markdown', yaml: 'yaml', yml: 'yaml', toml: 'toml', sh: 'shell' }
+  return map[ext] ?? 'text'
+}

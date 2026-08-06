@@ -33,7 +33,9 @@ import { createFileSheetState, fileSheetReducer, FILE_SHEET_SECTIONS, type FileS
 const view = readFileSync(new URL('../src/sheets/file/FileSheetView.tsx', import.meta.url), 'utf8')
 assert.match(view, /singletonKey\?\.replace\(\/\^file:\/, ''\)/, 'singletonKey file:{source} 作初始 source')
 assert.match(view, /useReducer\(fileSheetReducer, initialSource \?\? null, createFileSheetState\)/, '初始态必须收 initial source')
-assert.equal(view.includes('patchSheetMetadata'), false, 'W2-03 targetSource 本地态（metadata patch 由 W2-04 承接）')
+assert.match(view, /patchSheetMetadata/, 'W2-04：openTabs/activeFile 经组合 action 写 metadata')
+assert.equal(view.includes('selectSource = (source) => dispatch'), false, 'selectSource 不再引用 patchSheetMetadata')
+assert.match(view, /const selectSource = \(source: string\) => dispatch\(\{ type: 'set-source', source \}\)/, 'targetSource 仍为本地态（不写 metadata）')
 
 // 5. FileSheetSidebar 五分区 + 会话列表切 source
 const sidebar = readFileSync(new URL('../src/sheets/file/FileSheetSidebar.tsx', import.meta.url), 'utf8')

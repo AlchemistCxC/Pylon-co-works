@@ -50,6 +50,8 @@ interface WorkspaceStoreState {
   closeRightSheets: (id: SheetId) => void
   reopenSheet: () => SheetId | null
   setSheetAgentState: (agentId: string, partial: Partial<SheetWorkspaceState>) => void
+  /** W2-04：原子合并 sheet metadata（openTabs/activeFile 等）并持久化 */
+  patchSheetMetadata: (id: SheetId, partial: Record<string, string>) => void
   replaceSheets: (workspaceSheets: ReturnType<typeof createSheetState>, sheetAgentStates: Record<string, SheetWorkspaceState>) => void
   patchSheetAgentState: (agentId: string, partial: Partial<SheetWorkspaceState>) => void
   patchSheetAgentStates: (agentStates: Record<string, SheetWorkspaceState>) => void
@@ -138,6 +140,14 @@ export const useWorkspaceStore = create<WorkspaceStoreState>()((set, get) => ({
     persistWorkspace(state)
     return workspaceSheets.activeSheetId
   },
+  patchSheetMetadata: (id, partial) => set(state => {
+    const sheets = state.workspaceSheets.sheets.map(sheet => sheet.id === id
+      ? { ...sheet, metadata: { ...sheet.metadata, ...partial }, lastFocusedAt: Date.now() }
+      : sheet)
+    const workspaceSheets = { ...state.workspaceSheets, sheets }
+    persistWorkspace({ ...state, workspaceSheets })
+    return { workspaceSheets }
+  }),
   setSheetAgentState: (agentId, partial) => set(state => {
     const sheetAgentStates = {
       ...state.sheetAgentStates,
