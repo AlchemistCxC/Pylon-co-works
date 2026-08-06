@@ -1,5 +1,8 @@
 import { useReducer } from 'react'
 import { browserReducer, createBrowserState } from '../../domains/browser/browserState.ts'
+import { invoke } from '@tauri-apps/api/core'
+import { classifyBrowserStartError } from '../../infrastructure/tauri/browserContracts.ts'
+import { reportRuntimeError } from '../../runtimeError'
 import type { SheetContext, SheetRecord } from '../../workspace-sheets/sheetTypes'
 import './BrowserSheet.css'
 
@@ -12,10 +15,18 @@ import './BrowserSheet.css'
 export default function BrowserSheetView({ sheet: _sheet, ctx: _ctx }: { sheet: SheetRecord; ctx: SheetContext }) {
   const [state, dispatch] = useReducer(browserReducer, undefined, createBrowserState)
 
-  const start = () => {
+  const start = async () => {
     dispatch({ type: 'start' })
-    // W4-03 壳：不虚构 CDP 命令名；W4-04 接真实契约后在此 invoke
-    window.setTimeout(() => dispatch({ type: 'failed', error: '待后端：CDP 命令契约尚未提供' }), 0)
+    // W4-04 桩化：CDP 命令契约未定——invoke 调用点就位（命令名以后端契约为准），
+    // 命令不可用 → classifyBrowserStartError blocked 明确「待后端」
+    try {
+      await invoke('browser_start', { lazy: true })
+      dispatch({ type: 'started' })
+    } catch (error) {
+      const classified = classifyBrowserStartError(error)
+      dispatch({ type: 'failed', error: classified.kind === 'blocked' ? '待后端：CDP 命令契约尚未提供' : classified.message })
+      if (classified.kind === 'error') reportRuntimeError('启动浏览器', error)
+    }
   }
 
   return (

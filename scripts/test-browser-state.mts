@@ -1,6 +1,7 @@
 import { strict as assert } from 'node:assert'
 import { readFileSync } from 'node:fs'
 import { browserReducer, createBrowserState, type BrowserState } from '../src/domains/browser/browserState.ts'
+import { classifyBrowserStartError } from '../src/infrastructure/tauri/browserContracts.ts'
 
 // W4-03：browser 状态机——idle/starting/ready/error、单实例（重复 start no-op）
 
@@ -39,3 +40,14 @@ const registry = readFileSync(new URL('../src/workspace-sheets/sheetRegistry.tsx
 assert.match(registry, /browser: \{ render: \(sheet, ctx\) => <BrowserSheetView sheet=\{sheet\} ctx=\{ctx\} \/> \}/, 'registry browser 必须渲染')
 
 console.log('browser state 守卫通过')
+// ── W4-04（桩化）：启动调用点 + 命令缺失 blocked ──
+
+// 4. 启动错误分类
+assert.deepEqual(classifyBrowserStartError(new Error('Command not found: browser_start')), { kind: 'blocked' })
+assert.deepEqual(classifyBrowserStartError('browser_start 不存在'), { kind: 'blocked' })
+assert.deepEqual(classifyBrowserStartError('protocol_error'), { kind: 'error', message: 'protocol_error' })
+
+// 5. 组件接线：启动 invoke 调用点就位；命令缺失明确「待后端」
+assert.match(view, /invoke\('browser_start'/, '必须预留启动 invoke 调用点')
+assert.match(view, /classifyBrowserStartError\(error\)/, '失败必须经分类')
+assert.match(view, /待后端：CDP 命令契约尚未提供/, '命令缺失必须明确「待后端」')
