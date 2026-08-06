@@ -37,7 +37,11 @@
         "script-src": "'self' 'unsafe-inline' 'wasm-unsafe-eval' http://localhost:5173",
         "font-src": "'self' asset: data: http://localhost:5173"
       },
-      "dangerousDisableAssetCspModification": false
+      "dangerousDisableAssetCspModification": false,
+      "assetProtocol": {
+        "enable": true,
+        "scope": ["**"]
+      }
     },
     "withGlobalTauri": false
   },
