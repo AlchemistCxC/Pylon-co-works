@@ -284,6 +284,30 @@ impl AppState {
         rpc.complete().await
     }
 
+    /// 方案 5：generation-bound 控制 RPC——锁内 prepare 前断言 generation，
+    /// stale（客户端已替换）时**不发送**直接返回错误。防止旧 periId 的
+    /// session/close、session/cancel 等控制请求写入新 ACP（发送后复核只能
+    /// "检测到"竞态，不能"隔离"竞态）。调用方在发送后仍需 ensure_generation
+    /// 复核本地状态修改。正常路径（generation 匹配）行为与 acp_rpc 一致。
+    pub(crate) async fn acp_rpc_generation_checked(
+        &self,
+        runtime: &AgentRuntime,
+        method: &str,
+        params: serde_json::Value,
+        expected_generation: u64,
+    ) -> Result<serde_json::Value, crate::acp::AcpError> {
+        let rpc = {
+            let acp = runtime.acp.lock().await;
+            if self.current_generation(runtime) != expected_generation {
+                return Err(crate::acp::AcpError::Rpc(format!(
+                    "stale ACP client generation: expected {expected_generation}"
+                )));
+            }
+            acp.prepare_rpc(method, params)?
+        };
+        rpc.complete().await
+    }
+
     /// 按 runtime 实例解析归属 agent 的 AgentDef（per-agent 协议参数消费：
     /// 附件限制 / close_via_rpc / 超时 / mcp mode 等）。
     /// runtime 注册表按 agent id 键控；平台 ingest 的绑定 agent ≠ GUI active agent，
@@ -1770,6 +1794,8 @@ pub(crate) async fn close_session(
     let peri_id = state.get_peri_id(&runtime, &source)?;
     // 若该 session 有在途 prompt，先发 cancel（fire-and-forget）让 Peri 侧 settle，
     // 否则 pending oneshot 会挂到 PROMPT_TIMEOUT 才结束——close 后 prompt 卡死 300s。
+    // 方案 5：cancel 在 acp 锁内发送，replacement（同样持 acp 锁）无法插入——
+    // 旧 periId 的 cancel 不会写入新 ACP。
     {
         let acp = runtime.acp.lock().await;
         let _ = acp.cancel_session(&peri_id).await;
@@ -1777,13 +1803,16 @@ pub(crate) async fn close_session(
     // G2-03：D3 类型化——close_via_rpc()=false（声明式配置）时跳过 RPC 直接本地
     // 清理；-32601 / "Method not found" 经 is_method_not_found() 类型化降级（不再
     // 裸字符串 contains，G1-06 交付）。
+    // 方案 5：close RPC 用 generation-bound 版本——锁内复核 generation，stale
+    // （客户端已替换）时不发送，旧 periId 不进入新 ACP（发送后复核只能检测竞态）。
     if state.protocol_for_runtime(&runtime).close_via_rpc() {
         if let Err(error) = state
             .inner()
-            .acp_rpc(
+            .acp_rpc_generation_checked(
                 &runtime,
                 acp::METHOD_SESSION_CLOSE,
                 acp::session_close_params(&peri_id)?,
+                generation,
             )
             .await
         {
@@ -1791,6 +1820,10 @@ pub(crate) async fn close_session(
                 tracing::warn!(
                     "agent does not support session/close ({error}); local cleanup only"
                 );
+            } else if error.to_string().contains("stale ACP client generation") {
+                // 客户端已替换：本地清理仍执行（本地映射迁移到新代际），远端旧
+                // session 由新 client 的会话清单/替换流程处理，不再发旧 periId。
+                tracing::warn!("close skipped: ACP client replaced (stale generation)");
             } else {
                 return Err(error.into());
             }
@@ -1817,7 +1850,8 @@ pub(crate) async fn cancel_prompt(
     let generation = state.current_generation(&runtime);
     let peri_id = state.get_peri_id(&runtime, &source)?;
     // Fire-and-forget notification — Peri will respond with stopReason=cancelled
-    runtime.acp.lock().await.cancel_session(&peri_id).await?;
+    // 方案 5：cancel 在 acp 锁内发送，replacement（同样持 acp 锁）无法插入——
+    // 旧 periId 的 cancel 不会写入新 ACP。锁外无发送窗口。
     // B9：cancel 时应答该 session 全部挂起的权限请求为 Cancelled（协议要求）
     crate::permission::respond_pending_permissions_cancelled(&runtime, &peri_id).await;
     state.ensure_generation(&runtime, generation)?;
@@ -2307,6 +2341,59 @@ for line in sys.stdin:
         std::fs::remove_dir_all(&dir).ok();
         result
             .expect("3 附件必须按 runtime 归属 agent 的 8 上限放行（active agent 上限 1 被忽略）");
+    }
+
+    /// 方案 5：acp_rpc_generation_checked 在 generation 不匹配（客户端已替换）
+    /// 时锁内拦截，不发送——旧 periId 的控制请求不进入新 ACP。
+    #[tokio::test]
+    async fn generation_checked_rpc_blocks_stale_control_request() {
+        const FAKE_SCRIPT: &str = r#"import json,sys
+trace=open(sys.argv[1],'w',encoding='utf-8')
+for line in sys.stdin:
+    request = json.loads(line)
+    trace.write(json.dumps(request)+'\n')
+    trace.flush()
+    print(json.dumps({'jsonrpc':'2.0','id':request.get('id'),'result':{}}), flush=True)
+"#;
+        let trace_path = std::env::temp_dir()
+            .join(format!("pylon-p5-{}.jsonl", std::process::id()));
+        let agent = crate::test_utils::fake_acp_agent_with(
+            "p5-agent",
+            FAKE_SCRIPT,
+            vec![trace_path.to_string_lossy().into_owned()],
+            HashMap::new(),
+        );
+        let runtime = AgentRuntime::new_disconnected();
+        *runtime.acp.lock().await = crate::acp::AcpClient::connect_with_logs(&agent, None)
+            .await
+            .expect("fake ACP must initialize");
+        let state = crate::test_utils::TestStateBuilder::bare()
+            .with_active_agent("p5-agent")
+            .with_agent(agent)
+            .with_runtime("p5-agent", runtime.clone())
+            .build();
+        // 模拟客户端替换：generation 前进（旧 periId 的控制请求必须被拦截）。
+        runtime.client_generation.fetch_add(1, Ordering::AcqRel);
+        let result = state
+            .acp_rpc_generation_checked(
+                &runtime,
+                acp::METHOD_SESSION_CLOSE,
+                acp::session_close_params("old-peri").expect("params"),
+                0,
+            )
+            .await;
+        assert!(
+            result.is_err(),
+            "generation 不匹配时必须拒绝（不发送）"
+        );
+        // 短暂等待 writer 排空，确认 trace 无 session/close。
+        tokio::time::sleep(std::time::Duration::from_millis(200)).await;
+        let trace = std::fs::read_to_string(&trace_path).expect("read trace");
+        std::fs::remove_file(&trace_path).ok();
+        assert!(
+            !trace.contains("session/close"),
+            "stale 控制请求不得发送到 ACP: {trace}"
+        );
     }
 
     /// 方案 4：set_config_option 的 RPC 路由必须按 target runtime 归属 agent 的
