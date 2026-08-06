@@ -153,7 +153,7 @@ export default function App() {
     globalFont: s.globalFont, globalFontSize: s.globalFontSize,
     sidebarBg: s.sidebarBg, sidebarBgImage: s.sidebarBgImage, sidebarWidth: s.sidebarWidth,
     sidebarTransparency: s.sidebarTransparency, sidebarBlur: s.sidebarBlur,
-    sidebarTextColor: s.sidebarTextColor, sidebarNameSize: s.sidebarNameSize, sidebarGroupSize: s.sidebarGroupSize,
+    sidebarTextColor: s.sidebarTextColor, sidebarNameSize: s.sidebarNameSize,
     chatBg: s.chatBg, chatBgImage: s.chatBgImage,
     chatTransparency: s.chatTransparency, chatBlur: s.chatBlur,
     chatFont: s.chatFont, chatFontSize: s.chatFontSize, chatLineHeight: s.chatLineHeight,

@@ -95,7 +95,8 @@ export const THEME_FIELD_DEFS = {
   sidebarBlur: { ...N('sidebar', '模糊', 0, 40, 2), default: 0, group: "玻璃效果", unit: 'px', suffix: 'px' },
   sidebarTextColor: { ...C('sidebar', '文字颜色'), default: 'rgba(0,0,0,0.85)', group: "文字", },
   sidebarNameSize: { ...N('sidebar', '会话名字号', 11, 20), default: 14, group: "文字", unit: 'px' },
-  sidebarGroupSize: { ...N('sidebar', '分组标题字号', 10, 16), default: 12, group: "文字", unit: 'px' },
+  // W2-10：侧栏平铺后无分组——字段保留兼容预设，不再注入 cssVar（防死注入）
+  sidebarGroupSize: { ...N('sidebar', '分组标题字号', 10, 16), default: 12, group: "文字", unit: 'px', noCssVar: true, hidden: true },
 
   // ── chat ──
   chatBg: { ...C('chat', '背景色'), default: '', group: "背景", },

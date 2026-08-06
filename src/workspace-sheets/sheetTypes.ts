@@ -49,7 +49,7 @@ export interface SheetRegistryEntry {
   getSingletonKey: (input: Pick<SheetInput, 'agentId' | 'singletonKey' | 'metadata'>) => string | undefined
 }
 
-// ── W1-02：SheetContext（§1.4.1 定稿，13 字段）——只含「sheet 无法自己获得、必须由布局层给」的东西 ──
+// ── W1-02：SheetContext（§1.4.1 定稿，12 字段）——只含「sheet 无法自己获得、必须由布局层给」的东西 ──
 
 export interface SheetContext {
   // sheet 间导航（F1-D 联动的公开面）

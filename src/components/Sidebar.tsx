@@ -1,14 +1,13 @@
 import { useState, useMemo } from 'react'
 import { invoke } from '@tauri-apps/api/core'
 import { useIdentityStore } from '../identityStore'
+import { useRuntimeStore } from '../runtimeStore'
 import { formatTime } from '../utils'
 import { reportRuntimeError } from '../runtimeError'
 import { runCloseSessionTransaction } from './chat/closeSessionTransaction'
 import { clearMessageStorage } from './chat/messagePersistence'
 import type { SheetContext } from '../workspace-sheets/sheetTypes'
 import './Sidebar.css'
-
-const PLATFORM_LABELS: Record<string, string> = { local: '本地', 'qq-group': 'QQ 群聊', 'qq-dm': 'QQ 私聊', terminal: '终端' }
 
 // W1-03：侧栏上移——props 收敛为 ctx（由布局层注入），内部行为原样
 export default function Sidebar({ ctx }: { ctx: SheetContext }) {
@@ -24,21 +23,17 @@ export default function Sidebar({ ctx }: { ctx: SheetContext }) {
   const removeSession = useIdentityStore(s => s.removeSession)
   const updateSession = useIdentityStore(s => s.updateSession)
 
-  // filter 在 memo 内：sessions/activeProfileId 变化时才重算，避免每次渲染新数组引用让 memo 失效
-  const groups = useMemo(() => {
-    const profileSessions = sessions.filter(s => s.profileId === activeProfileId)
-    const map = new Map<string, typeof profileSessions>()
-    profileSessions.forEach(s => {
-      const label = PLATFORM_LABELS[s.platform] || s.platform || '其他'
-      if (!map.has(label)) map.set(label, [])
-      map.get(label)!.push(s)
-    })
-    return map
+  // W2-10（F2-C）：平铺 + 按 lastActiveAt 倒序（删平台分组）；运行点读 liveGeneratingSources
+  const liveGeneratingSources = useRuntimeStore(s => s.liveGeneratingSources || [])
+  const sortedSessions = useMemo(() => {
+    return sessions
+      .filter(s => s.profileId === activeProfileId)
+      .sort((a, b) => (b.lastActiveAt || 0) - (a.lastActiveAt || 0))
   }, [sessions, activeProfileId])
 
-  const filteredGroups = search
-    ? [...groups].filter(([,items]) => items.some(s => s.name.toLowerCase().includes(search.toLowerCase())))
-    : [...groups]
+  const filteredSessions = search
+    ? sortedSessions.filter(s => s.name.toLowerCase().includes(search.toLowerCase()))
+    : sortedSessions
 
   const newSession = () => addSession(`session-${Date.now().toString(36)}`)
 
@@ -76,14 +71,11 @@ export default function Sidebar({ ctx }: { ctx: SheetContext }) {
       </div>
       {!collapsed && (
         <div className="session-list">
-          {filteredGroups.map(([group, items]) => (
-            <details key={group} className="session-group" open>
-              <summary className="group-header">{group}</summary>
-              {items.map(s => (
+          {filteredSessions.map(s => (
                 <div key={s.id} className={`session-item ${activeSession === s.id ? 'active' : ''}`}
                   onClick={() => handleSelect(s.id)}
                   onDoubleClick={(e) => { e.stopPropagation(); setRenaming(s.id); setRenameValue(s.name) }}>
-                  <span className="session-dot" style={s.periId ? { background: 'var(--tool-ok,#1e9646)' } : {}} />
+                  <span className="session-dot" data-running={liveGeneratingSources.includes(s.source) ? 'true' : undefined} />
                   <div className="session-info">
                     {renaming === s.id ? (
                       <input className="session-rename-input" value={renameValue}
@@ -105,9 +97,7 @@ export default function Sidebar({ ctx }: { ctx: SheetContext }) {
                   <button className="session-del" onClick={e => { e.stopPropagation(); handleDelete(s.id) }}>✕</button>
                 </div>
               ))}
-            </details>
-          ))}
-          {filteredGroups.length === 0 && (
+          {filteredSessions.length === 0 && (
             <div className="session-empty">无会话 — 点击 + 新建</div>
           )}
         </div>
