@@ -612,6 +612,7 @@ pub fn run() {
                 crate::workspace_cmds::git_status, crate::workspace_cmds::git_diff, crate::workspace_cmds::git_history,
                 crate::workspace_cmds::workspace_search,
                 crate::gateway_cmds::gateway_status, crate::gateway_cmds::reload_gateway,
+                crate::gateway_cmds::gateway_sessions,
                 crate::startup::startup_diagnostics,
             ])
             .setup(|app| {
