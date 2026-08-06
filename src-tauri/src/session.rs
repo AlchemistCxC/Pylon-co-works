@@ -691,8 +691,9 @@ pub(crate) async fn check_session_expiry(state: &AppState) {
             tracing::info!("会话过期 ({source}): {reason}");
             // 审查修复：删除前按 (peri_id, generation) 复核映射——close RPC 期间若
             // 同 source 新建了会话，不得把新映射误删（旧映射已被 new_session 替换）。
+            // generation 提到循环体（close_session_rpc 复用；块内删除复核同值）。
+            let generation = runtime.client_generation.load(Ordering::Acquire);
             let removed = {
-                let generation = runtime.client_generation.load(Ordering::Acquire);
                 let mut sessions = match runtime.sessions.lock() {
                     Ok(guard) => guard,
                     Err(poisoned) => poisoned.into_inner(),
@@ -728,17 +729,8 @@ pub(crate) async fn check_session_expiry(state: &AppState) {
                 continue;
             }
             // close ACP session（失败不阻断本地清理；旧 peri_id 独立于映射）。
-            // G2-03：D3 消费——close_via_rpc()=false 时跳过 RPC（本地清理语义不变）。
-            if state.protocol_for_runtime(&runtime).close_via_rpc() {
-                if let Ok(close_params) = acp::session_close_params(&peri_id) {
-                    if let Err(error) = state
-                        .acp_rpc(&runtime, acp::METHOD_SESSION_CLOSE, close_params)
-                        .await
-                    {
-                        tracing::warn!("close expired session {peri_id}: {error}");
-                    }
-                }
-            }
+            // 方案 6：统一 close RPC 入口（LocalFirstBestEffort，吞错误）。
+            let _ = close_session_rpc(&state, &runtime, &peri_id, generation, false).await;
             // 审查修复：应答该 session 挂起的权限请求为 Cancelled（协议要求）
             crate::permission::respond_pending_permissions_cancelled(&runtime, &peri_id).await;
             // 平台通知（用户可见重置原因）：投递给 source 归属的适配器。
@@ -862,17 +854,8 @@ async fn create_session_slot(
     )?;
     if close_replaced {
         if let Some(old) = replaced {
-            // G2-03：D3 消费——close_via_rpc()=false 时跳过 RPC（本地清理语义不变）
-            if state.protocol_for_runtime(runtime).close_via_rpc() {
-                if let Ok(close_params) = acp::session_close_params(&old.peri_id) {
-                    if let Err(error) = state
-                        .acp_rpc(runtime, acp::METHOD_SESSION_CLOSE, close_params)
-                        .await
-                    {
-                        tracing::warn!("close replaced session: {}", error);
-                    }
-                }
-            }
+            // 方案 6：统一 close RPC 入口（LocalFirstBestEffort，吞错误）。
+            let _ = close_session_rpc(state, runtime, &old.peri_id, generation, false).await;
         }
     }
     Ok(SessionMapping {
@@ -1649,21 +1632,15 @@ pub(crate) async fn send_prompt_core<R: tauri::Runtime>(
                             flow.peri_id,
                             cancel_settle_timeout_secs
                         );
-                        if let Ok(close_params) = acp::session_close_params(&flow.peri_id) {
-                            // G2-03：D3 消费——close_via_rpc()=false 时跳过 RPC
-                            if state.protocol_for_runtime(runtime).close_via_rpc() {
-                                if let Err(close_error) = state
-                                    .acp_rpc(runtime, acp::METHOD_SESSION_CLOSE, close_params)
-                                    .await
-                                {
-                                    tracing::warn!(
-                                        "close unsettled prompt session {}: {}",
-                                        flow.peri_id,
-                                        close_error
-                                    );
-                                }
-                            }
-                        }
+                        // 方案 6：统一 close RPC 入口（LocalFirstBestEffort，吞错误）。
+                        let _ = close_session_rpc(
+                            state,
+                            runtime,
+                            &flow.peri_id,
+                            flow.generation,
+                            false,
+                        )
+                        .await;
                     }
                     Ok(false) => {}
                     Err(error) => return Err(error.into()),
@@ -1783,6 +1760,51 @@ pub(crate) async fn set_config_option(
     Ok(response)
 }
 
+/// 方案 6：统一 close RPC 发送入口（四处 close 路径复用）。
+/// 统一：close_via_rpc 判定、params 构造、method-not-found 类型化降级、
+/// generation-bound（方案 5，旧 periId 不进入新 ACP）、日志。
+/// 保留差异：strict=true（close_session，RemoteFirst）普通 RPC 错误上抛；
+/// strict=false（expiry/replaced/unsettled，LocalFirstBestEffort）吞错误
+/// （失败不阻断本地清理）。返回 Ok(实际尝试了 RPC)。
+pub(crate) async fn close_session_rpc(
+    state: &AppState,
+    runtime: &Arc<AgentRuntime>,
+    peri_id: &str,
+    generation: u64,
+    strict: bool,
+) -> Result<bool, PylonError> {
+    if !state.protocol_for_runtime(runtime).close_via_rpc() {
+        return Ok(false); // 声明式配置跳过 RPC，仅本地清理
+    }
+    let close_params = acp::session_close_params(peri_id).map_err(|e| PylonError::Protocol(e))?;
+    let result = state
+        .acp_rpc_generation_checked(
+            runtime,
+            acp::METHOD_SESSION_CLOSE,
+            close_params,
+            generation,
+        )
+        .await;
+    match result {
+        Ok(_) => Ok(true),
+        Err(error) if error.is_method_not_found() => {
+            tracing::warn!("agent does not support session/close ({error}); local cleanup only");
+            Ok(true)
+        }
+        Err(error) if error.to_string().contains("stale ACP client generation") => {
+            // 客户端已替换：本地清理仍执行（本地映射迁移到新代际），远端旧
+            // session 由新 client 的会话清单/替换流程处理，不再发旧 periId。
+            tracing::warn!("close skipped: ACP client replaced (stale generation)");
+            Ok(true)
+        }
+        Err(error) if strict => Err(error.into()),
+        Err(error) => {
+            tracing::warn!("close session {peri_id}: {error}");
+            Ok(true)
+        }
+    }
+}
+
 #[tauri::command]
 pub(crate) async fn close_session(
     state: tauri::State<'_, AppState>,
@@ -1800,35 +1822,10 @@ pub(crate) async fn close_session(
         let acp = runtime.acp.lock().await;
         let _ = acp.cancel_session(&peri_id).await;
     }
-    // G2-03：D3 类型化——close_via_rpc()=false（声明式配置）时跳过 RPC 直接本地
-    // 清理；-32601 / "Method not found" 经 is_method_not_found() 类型化降级（不再
-    // 裸字符串 contains，G1-06 交付）。
-    // 方案 5：close RPC 用 generation-bound 版本——锁内复核 generation，stale
-    // （客户端已替换）时不发送，旧 periId 不进入新 ACP（发送后复核只能检测竞态）。
-    if state.protocol_for_runtime(&runtime).close_via_rpc() {
-        if let Err(error) = state
-            .inner()
-            .acp_rpc_generation_checked(
-                &runtime,
-                acp::METHOD_SESSION_CLOSE,
-                acp::session_close_params(&peri_id)?,
-                generation,
-            )
-            .await
-        {
-            if error.is_method_not_found() {
-                tracing::warn!(
-                    "agent does not support session/close ({error}); local cleanup only"
-                );
-            } else if error.to_string().contains("stale ACP client generation") {
-                // 客户端已替换：本地清理仍执行（本地映射迁移到新代际），远端旧
-                // session 由新 client 的会话清单/替换流程处理，不再发旧 periId。
-                tracing::warn!("close skipped: ACP client replaced (stale generation)");
-            } else {
-                return Err(error.into());
-            }
-        }
-    }
+    // 方案 6：统一 close RPC 入口（close_via_rpc 判定 + params + method-not-found
+    // 降级 + generation-bound 隔离）。close_session 为 RemoteFirst：普通 RPC 错误
+    // 上抛（strict=true）；-32601 / stale generation 降级为本地清理。
+    close_session_rpc(&state, &runtime, &peri_id, generation, true).await?;
     // B9：close 时应答该 session 全部挂起的权限请求为 Cancelled
     crate::permission::respond_pending_permissions_cancelled(&runtime, &peri_id).await;
     state.ensure_generation(&runtime, generation)?;
@@ -2341,6 +2338,55 @@ for line in sys.stdin:
         std::fs::remove_dir_all(&dir).ok();
         result
             .expect("3 附件必须按 runtime 归属 agent 的 8 上限放行（active agent 上限 1 被忽略）");
+    }
+
+    /// 方案 6：close_session_rpc 统一入口矩阵——close_via_rpc=false 不发 RPC、
+    /// method-not-found 降级不报错、普通 RPC 错误按 strict 决定上抛/吞掉。
+    #[tokio::test]
+    async fn close_session_rpc_respects_policy_and_method_not_found() {
+        const FAKE_SCRIPT: &str = r#"import json,sys
+for line in sys.stdin:
+    request = json.loads(line)
+    if request.get('method') == 'session/close':
+        response = {'jsonrpc':'2.0','id':request.get('id'),'error':{'code':-32601,'message':'Method not found'}}
+    else:
+        response = {'jsonrpc':'2.0','id':request.get('id'),'result':{}}
+    print(json.dumps(response), flush=True)
+"#;
+        let agent = crate::test_utils::fake_acp_agent("p6-agent", FAKE_SCRIPT);
+        let runtime = AgentRuntime::new_disconnected();
+        *runtime.acp.lock().await = crate::acp::AcpClient::connect_with_logs(&agent, None)
+            .await
+            .expect("fake ACP must initialize");
+        // close_via_rpc=false：跳过 RPC，返回 Ok(false)
+        let mut no_rpc_def = agent.clone();
+        no_rpc_def.name = "p6-no-rpc".to_string();
+        no_rpc_def.acp = Some(crate::agent_config::AcpProtocolConfig {
+            session_close: Some(false),
+            ..Default::default()
+        });
+        let no_rpc_runtime = AgentRuntime::new_disconnected();
+        *no_rpc_runtime.acp.lock().await =
+            crate::acp::AcpClient::connect_with_logs(&no_rpc_def, None)
+                .await
+                .expect("fake ACP must initialize");
+        let state = crate::test_utils::TestStateBuilder::bare()
+            .with_active_agent("p6-agent")
+            .with_agent(agent)
+            .with_agent(no_rpc_def)
+            .with_runtime("p6-agent", runtime.clone())
+            .with_runtime("p6-no-rpc", no_rpc_runtime.clone())
+            .build();
+        // method-not-found：降级 Ok(true)，不报错（RemoteFirst 与 best-effort 同）。
+        let attempted = close_session_rpc(&state, &runtime, "peri-1", 0, true)
+            .await
+            .expect("-32601 必须降级而非报错");
+        assert!(attempted, "close_via_rpc=true 必须尝试 RPC");
+        // close_via_rpc=false：跳过 RPC 仅本地清理。
+        let attempted = close_session_rpc(&state, &no_rpc_runtime, "peri-1", 0, true)
+            .await
+            .expect("close_via_rpc=false 必须 Ok");
+        assert!(!attempted, "close_via_rpc=false 不得尝试 RPC");
     }
 
     /// 方案 5：acp_rpc_generation_checked 在 generation 不匹配（客户端已替换）
