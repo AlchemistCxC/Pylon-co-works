@@ -260,6 +260,175 @@ fn inspector_full_aggregates_across_runtimes() {
     );
 }
 
+/// 方案 7：load_sessions DTO 完整 wire 等价 + 稳定排序 + 敏感字段不泄露。
+#[test]
+fn session_list_row_serializes_exact_wire_and_sorts_by_source() {
+    let mut sessions: HashMap<String, SessionInfo> = HashMap::new();
+    let mut s_b = SessionInfo::new("peri-b".into(), "persona-b".into(), "/b".into(), true, 9);
+    s_b.title = "B 会话".into();
+    s_b.mode = Some("plan".into());
+    s_b.config_options = vec![serde_json::json!({"id": "model", "currentValue": "gpt-4"})];
+    s_b.model = "gpt-4".into();
+    s_b.tokens_in = 10;
+    s_b.tokens_out = 20;
+    s_b.tokens_total = 30;
+    s_b.context_size = 8192;
+    s_b.inject_round = 5;
+    s_b.last_response_text = "secret-reply".into();
+    let s_a = SessionInfo::new("peri-a".into(), "persona-a".into(), "/a".into(), false, 3);
+    sessions.insert("z-source".into(), s_a);
+    sessions.insert("a-source".into(), s_b);
+    // 稳定排序：按 source。
+    let mut rows: Vec<SessionListRow> = sessions
+        .iter()
+        .map(|(source, info)| SessionListRow {
+            source: source.clone(),
+            peri_id: info.peri_id.clone(),
+            persona: info.persona.clone(),
+            cwd: info.cwd.clone(),
+            title: info.title.clone(),
+            mode: info.mode.clone(),
+            config_options: info.config_options.clone(),
+            model: info.model.clone(),
+            tokens_in: info.tokens_in,
+            tokens_out: info.tokens_out,
+            tokens_total: info.tokens_total,
+            context_size: info.context_size,
+        })
+        .collect();
+    rows.sort_by(|a, b| a.source.cmp(&b.source));
+    let values: Vec<serde_json::Value> = rows
+        .iter()
+        .map(|r| serde_json::to_value(r).expect("serialize"))
+        .collect();
+    assert_eq!(values[0]["source"], "a-source");
+    assert_eq!(values[1]["source"], "z-source");
+    assert_eq!(
+        values[0],
+        serde_json::json!({
+            "source": "a-source",
+            "periId": "peri-b",
+            "persona": "persona-b",
+            "cwd": "/b",
+            "title": "B 会话",
+            "mode": "plan",
+            "configOptions": [{"id": "model", "currentValue": "gpt-4"}],
+            "model": "gpt-4",
+            "tokensIn": 10,
+            "tokensOut": 20,
+            "tokensTotal": 30,
+            "contextSize": 8192,
+        }),
+        "load_sessions wire 必须逐字段等价"
+    );
+    // 敏感/内部字段不泄露
+    assert!(values[0].get("generation").is_none(), "generation 不得落 wire");
+    assert!(values[0].get("injectRound").is_none(), "inject_round 不得落 wire");
+    assert!(values[0].get("lastResponseText").is_none(), "reply cache 不得落 wire");
+    assert!(values[0].get("agentId").is_none(), "load 不出现 agentId");
+}
+
+/// 方案 7：inspector session 行 DTO 完整 wire 等价 + 排序 + 不泄露。
+#[test]
+fn inspector_row_serializes_exact_wire_and_sorts() {
+    let mut s = SessionInfo::new("peri-1".into(), "persona".into(), "/cwd".into(), true, 7);
+    s.title = "T".into();
+    s.model = "m".into();
+    s.mode = Some("code".into());
+    s.tokens_in = 1;
+    s.tokens_out = 2;
+    s.tokens_total = 3;
+    s.context_size = 4096;
+    s.config_options = vec![serde_json::json!({"id": "x"})];
+    let row = InspectorSessionRow {
+        agent_id: "agent-x".into(),
+        source: "src".into(),
+        peri_id: s.peri_id.clone(),
+        title: s.title.clone(),
+        model: s.model.clone(),
+        mode: s.mode.clone(),
+        tokens_in: s.tokens_in,
+        tokens_out: s.tokens_out,
+        tokens_total: s.tokens_total,
+        context_size: s.context_size,
+        cwd: s.cwd.clone(),
+    };
+    let value = serde_json::to_value(&row).expect("serialize");
+    assert_eq!(
+        value,
+        serde_json::json!({
+            "agentId": "agent-x",
+            "source": "src",
+            "periId": "peri-1",
+            "title": "T",
+            "model": "m",
+            "mode": "code",
+            "tokensIn": 1,
+            "tokensOut": 2,
+            "tokensTotal": 3,
+            "contextSize": 4096,
+            "cwd": "/cwd",
+        }),
+        "inspector 行 wire 必须逐字段等价"
+    );
+    assert!(value.get("persona").is_none(), "inspector 不出现 persona");
+    assert!(value.get("configOptions").is_none(), "inspector 不出现 configOptions");
+    assert!(value.get("generation").is_none(), "generation 不得落 wire");
+    // 稳定排序：agentId → source → periId
+    let mut rows = vec![
+        InspectorSessionRow {
+            agent_id: "b".into(),
+            source: "s2".into(),
+            peri_id: "p2".into(),
+            title: String::new(),
+            model: String::new(),
+            mode: None,
+            tokens_in: 0,
+            tokens_out: 0,
+            tokens_total: 0,
+            context_size: 0,
+            cwd: String::new(),
+        },
+        InspectorSessionRow {
+            agent_id: "a".into(),
+            source: "s1".into(),
+            peri_id: "p1".into(),
+            title: String::new(),
+            model: String::new(),
+            mode: None,
+            tokens_in: 0,
+            tokens_out: 0,
+            tokens_total: 0,
+            context_size: 0,
+            cwd: String::new(),
+        },
+        InspectorSessionRow {
+            agent_id: "a".into(),
+            source: "s1".into(),
+            peri_id: "p0".into(),
+            title: String::new(),
+            model: String::new(),
+            mode: None,
+            tokens_in: 0,
+            tokens_out: 0,
+            tokens_total: 0,
+            context_size: 0,
+            cwd: String::new(),
+        },
+    ];
+    rows.sort_by(|a, b| {
+        a.agent_id
+            .cmp(&b.agent_id)
+            .then(a.source.cmp(&b.source))
+            .then(a.peri_id.cmp(&b.peri_id))
+    });
+    let keys: Vec<&str> = rows
+        .iter()
+        .map(|r| r.peri_id.as_str())
+        .collect();
+    assert_eq!(keys, vec!["p0", "p1", "p2"], "inspector 排序 (agentId, source, periId)");
+}
+
 #[test]
 fn session_expiry_idle_threshold_and_off_mode() {
     let now = Timestamp::new(1722500000000);

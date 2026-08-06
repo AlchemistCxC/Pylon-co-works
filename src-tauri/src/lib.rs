@@ -85,6 +85,7 @@ use crate::permission::{
 use crate::session::{
     build_full_inspector_payload, compose_inject_prompt, config_option_current_value,
     extract_tool_file_name, inject_applies_to, send_message, session_expired,
+    InspectorSessionRow, SessionListRow,
 };
 
 fn emit_event<R, W>(window: &W, event: &str, payload: serde_json::Value)

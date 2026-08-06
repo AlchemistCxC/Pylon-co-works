@@ -6,6 +6,7 @@ use std::sync::atomic::Ordering;
 use std::sync::Arc;
 use std::time::Duration;
 
+use serde::Serialize;
 use crate::acp::{self, PromptWaitOutcome};
 use crate::agent_config::AgentDef;
 use crate::agent_runtime::{session_mapping_matches, AgentLifecycleStatus, AgentRuntimeState};
@@ -41,6 +42,43 @@ pub(crate) struct SessionInfo {
     pub(crate) last_response_round: u64,
     /// B11.2：当前回合 agent 回复文本（dispatcher 流式收集，完成持久化用）。
     pub(crate) last_response_text: String,
+}
+
+/// 方案 7：load_sessions wire DTO（替代手写 json!；wire 字段/形状逐字不变）。
+/// 只暴露会话快照字段；generation/inject_round/last_response_*/updated_at 不落 wire。
+#[derive(Debug, Clone, Serialize, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct SessionListRow {
+    pub(crate) source: String,
+    pub(crate) peri_id: String,
+    pub(crate) persona: String,
+    pub(crate) cwd: String,
+    pub(crate) title: String,
+    pub(crate) mode: Option<String>,
+    pub(crate) config_options: Vec<serde_json::Value>,
+    pub(crate) model: String,
+    pub(crate) tokens_in: u64,
+    pub(crate) tokens_out: u64,
+    pub(crate) tokens_total: u64,
+    pub(crate) context_size: u64,
+}
+
+/// 方案 7：inspector session 行 wire DTO（替代手写 json!；形状逐字不变）。
+/// 含 agentId（跨 runtime 区分来源）；不含 persona/config_options/generation。
+#[derive(Debug, Clone, Serialize, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct InspectorSessionRow {
+    pub(crate) agent_id: String,
+    pub(crate) source: String,
+    pub(crate) peri_id: String,
+    pub(crate) title: String,
+    pub(crate) model: String,
+    pub(crate) mode: Option<String>,
+    pub(crate) tokens_in: u64,
+    pub(crate) tokens_out: u64,
+    pub(crate) tokens_total: u64,
+    pub(crate) context_size: u64,
+    pub(crate) cwd: String,
 }
 
 impl SessionInfo {
@@ -1866,11 +1904,30 @@ pub(crate) async fn load_sessions(
 ) -> Result<Vec<serde_json::Value>, PylonError> {
     let runtime = state.inner().require_runtime()?;
     let sessions = runtime.sessions.lock().map_err(|e| e.to_string())?;
-    Ok(sessions.iter().map(|(source, info)| {
-        serde_json::json!({"source": source, "periId": info.peri_id, "persona": info.persona, "cwd": info.cwd,
-            "title": info.title, "mode": info.mode, "configOptions": info.config_options, "model": info.model, "tokensIn": info.tokens_in, "tokensOut": info.tokens_out,
-            "tokensTotal": info.tokens_total, "contextSize": info.context_size})
-    }).collect())
+    // 方案 7：typed DTO + 稳定排序（source）——wire 字段/形状不变，HashMap
+    // 遍历顺序不再影响数组顺序。
+    let mut rows: Vec<SessionListRow> = sessions
+        .iter()
+        .map(|(source, info)| SessionListRow {
+            source: source.clone(),
+            peri_id: info.peri_id.clone(),
+            persona: info.persona.clone(),
+            cwd: info.cwd.clone(),
+            title: info.title.clone(),
+            mode: info.mode.clone(),
+            config_options: info.config_options.clone(),
+            model: info.model.clone(),
+            tokens_in: info.tokens_in,
+            tokens_out: info.tokens_out,
+            tokens_total: info.tokens_total,
+            context_size: info.context_size,
+        })
+        .collect();
+    rows.sort_by(|a, b| a.source.cmp(&b.source));
+    Ok(rows
+        .into_iter()
+        .map(|row| serde_json::to_value(row).unwrap_or(serde_json::Value::Null))
+        .collect())
 }
 
 /// B2 Inspector 完整版：全量（所有 runtime）聚合 + per-agent runtimes 增量 +
@@ -1931,23 +1988,33 @@ pub(crate) fn build_full_inspector_payload(
         }));
     }
 
-    let session_rows: Vec<serde_json::Value> = all_sessions
+    // 方案 7：typed DTO + 稳定排序（agentId, source, periId）——wire 字段/形状
+    // 不变（含 agentId 区分来源），HashMap 遍历顺序不再影响数组顺序。
+    let mut session_rows: Vec<InspectorSessionRow> = all_sessions
         .iter()
-        .map(|(agent_id, source, s)| {
-            serde_json::json!({
-                "agentId": agent_id,
-                "source": source,
-                "periId": s.peri_id,
-                "title": s.title,
-                "model": s.model,
-                "mode": s.mode,
-                "tokensIn": s.tokens_in,
-                "tokensOut": s.tokens_out,
-                "tokensTotal": s.tokens_total,
-                "contextSize": s.context_size,
-                "cwd": s.cwd,
-            })
+        .map(|(agent_id, source, s)| InspectorSessionRow {
+            agent_id: agent_id.clone(),
+            source: source.clone(),
+            peri_id: s.peri_id.clone(),
+            title: s.title.clone(),
+            model: s.model.clone(),
+            mode: s.mode.clone(),
+            tokens_in: s.tokens_in,
+            tokens_out: s.tokens_out,
+            tokens_total: s.tokens_total,
+            context_size: s.context_size,
+            cwd: s.cwd.clone(),
         })
+        .collect();
+    session_rows.sort_by(|a, b| {
+        a.agent_id
+            .cmp(&b.agent_id)
+            .then(a.source.cmp(&b.source))
+            .then(a.peri_id.cmp(&b.peri_id))
+    });
+    let session_rows: Vec<serde_json::Value> = session_rows
+        .into_iter()
+        .map(|row| serde_json::to_value(row).unwrap_or(serde_json::Value::Null))
         .collect();
 
     serde_json::json!({
