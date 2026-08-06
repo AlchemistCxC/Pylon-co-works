@@ -3,6 +3,7 @@ import type { SheetKind, SheetRecord, SheetContext, SheetRenderEntry } from './s
 import AgentSheetView from '../sheets/AgentSheetView'
 import OverviewSheetView from '../sheets/OverviewSheetView'
 import RuntimeSheetView from '../sheets/RuntimeSheetView'
+import GatewaySheetView from '../sheets/gateway/GatewaySheetView'
 import FileSheetView from '../sheets/file/FileSheetView'
 import Sidebar from '../components/Sidebar'
 import AgentContextPanel from '../components/right-panel/AgentContextPanel'
@@ -55,7 +56,8 @@ export const SHEET_RENDER_REGISTRY: Record<SheetKind, SheetRenderEntry> = {
   search: { render: () => <UnavailableSheet kind="search" /> },
   history: { render: () => <UnavailableSheet kind="history" /> },
   browser: { render: () => <UnavailableSheet kind="browser" /> },
-  gateway: { render: () => <UnavailableSheet kind="gateway" /> },
+  // W3-01：gateway 只读概览（适配器/平台会话分区；写回 W3-02 桩化）
+  gateway: { render: (sheet, ctx) => <GatewaySheetView sheet={sheet} ctx={ctx} /> },
 } satisfies Record<SheetKind, SheetRenderEntry>
 
 export function resolveSheetRender(kind: SheetKind): SheetRenderEntry | undefined {
