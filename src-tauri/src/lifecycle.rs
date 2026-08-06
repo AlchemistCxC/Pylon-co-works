@@ -134,16 +134,17 @@ pub(crate) fn agent_summary_payload(
     active_status: Option<AgentLifecycleStatus>,
     crashed: bool,
 ) -> serde_json::Value {
-    let available = active_id.is_some_and(|aid| id == aid)
-        && active_status == Some(AgentLifecycleStatus::Connected);
+    // 方案 3（漂移修复）：统一状态推导与 agent_status_payload 一致——
+    // process_crashed 时有效状态为 crashed，available 只看有效状态是否 Connected。
+    // 修复前 crashed=true, available=true 的矛盾（前端状态灯误判可用）。
+    let effective_connected = !crashed && active_status == Some(AgentLifecycleStatus::Connected);
+    let available = active_id.is_some_and(|aid| id == aid) && effective_connected;
     let active = active_id.is_some_and(|aid| id == aid);
     serde_json::json!({
         // list_agents 的 id 是 registry key，name 仅用于展示。
         "id": id,
         "name": agent.name,
         "transport": agent.transport,
-        // O11：crashed 只做状态透传（acp 已死）；available/active 是前端契约，
-        // 计算逻辑保持不变（crashed 不改变 available 判定）。
         "crashed": crashed,
         "available": available,
         "active": active,
@@ -679,7 +680,10 @@ mod tests {
     }
 
     #[test]
-    fn summary_exposes_crashed_without_touching_available() {
+    fn summary_available_follows_effective_status() {
+        // 方案 3（漂移修复）：crashed=true 时 status 有效值为 crashed、available=false
+        // ——与 agent_status_payload 的推导一致（修复前 crashed=true, available=true
+        // 的矛盾组合，前端状态灯会误判可用）。
         let a = agent();
         let payload = agent_summary_payload(
             "peri",
@@ -690,9 +694,17 @@ mod tests {
         );
         assert_eq!(payload["crashed"], true, "crashed 必须透传");
         assert_eq!(
-            payload["available"], true,
-            "available 是前端契约，crashed 不改变其计算（active+Connected 即可用）"
+            payload["available"], false,
+            "process_crashed 时即使 lifecycle=Connected 也不可用"
         );
+        let alive = agent_summary_payload(
+            "peri",
+            &a,
+            Some("peri"),
+            Some(AgentLifecycleStatus::Connected),
+            false,
+        );
+        assert_eq!(alive["available"], true, "未崩溃 + active + Connected 可用");
         let crashed_disconnected = agent_summary_payload(
             "peri",
             &a,
@@ -702,6 +714,31 @@ mod tests {
         );
         assert_eq!(crashed_disconnected["available"], false);
         assert_eq!(crashed_disconnected["crashed"], true);
+    }
+
+    #[test]
+    fn summary_matrix_matches_agent_status_semantics() {
+        // 方案 3 一致性矩阵（与 agent_status_payload 的 effective_status/available
+        // 语义一致）：lifecycle + process_crashed → (status 是否 crashed, available)。
+        let a = agent();
+        // (lifecycle, crashed, status 是否为 crashed —— 与 agent_status_payload
+        // 的 effective_status 语义参照，list_agents wire 不输出 status 字段,
+        // expected_available)
+        let cases: &[(AgentLifecycleStatus, bool, bool, bool)] = &[
+            (AgentLifecycleStatus::Connected, false, false, true),
+            (AgentLifecycleStatus::Connected, true, true, false),
+            (AgentLifecycleStatus::Reconnecting, false, false, false),
+            (AgentLifecycleStatus::Disconnected, false, false, false),
+            (AgentLifecycleStatus::Crashed, true, true, false),
+        ];
+        for (lifecycle, crashed, _status_crashed, available) in cases {
+            let payload = agent_summary_payload("peri", &a, Some("peri"), Some(*lifecycle), *crashed);
+            assert_eq!(
+                payload["available"], serde_json::Value::Bool(*available),
+                "lifecycle={lifecycle:?} crashed={crashed} available 不符"
+            );
+            assert_eq!(payload["crashed"], serde_json::Value::Bool(*crashed));
+        }
     }
 
     async fn mock_window() -> tauri::WebviewWindow<tauri::test::MockRuntime> {
