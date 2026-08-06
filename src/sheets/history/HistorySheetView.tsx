@@ -2,20 +2,27 @@ import { useEffect, useMemo, useState } from 'react'
 import { invoke } from '@tauri-apps/api/core'
 import { save } from '@tauri-apps/plugin-dialog'
 import { reportRuntimeError } from '../../runtimeError'
+import { useIdentityStore } from '../../identityStore'
+import { useReplayPostureStore } from '../../components/chat/replayPostureStore'
 import { pagePersistedSessions, validateExportPath } from '../../domains/history/persistedHistory.ts'
+import { type PersistedSessionSummary } from '../../domains/overview/persistedSessions.ts'
 import type { SheetContext, SheetRecord } from '../../workspace-sheets/sheetTypes'
 import './HistorySheet.css'
 
 /**
- * HistorySheetView — 存档会话列表 + 导出（W4-01）。
+ * HistorySheetView — 存档会话列表 + 导出（W4-01）+ 回放入口（W4-02）。
  *
  * list_persisted_sessions 分页/排序（复用 overview normalize）；导出经 save 对话框
  * 取绝对路径 → export_session（预检路径绝对；目标文件已存在错误明确展示，后端权威）。
+ * W4-02（姿态二拍板）：行「回放」复用 Overview resumeSession 机制（找/建 identity 行）
+ * → 进入只读姿态 → 开 agent sheet；消息 load 由 ChatView 挂载后 lifecycle 承担
+ * （load_persisted_session，listener 先于 load），姿态下无输入面直至点击继续。
  */
-export default function HistorySheetView({ sheet: _sheet, ctx: _ctx }: { sheet: SheetRecord; ctx: SheetContext }) {
+export default function HistorySheetView({ sheet: _sheet, ctx }: { sheet: SheetRecord; ctx: SheetContext }) {
   const [raw, setRaw] = useState<unknown>(null)
   const [page, setPage] = useState(1)
   const [exportError, setExportError] = useState('')
+  const activeAgent = useIdentityStore(s => s.activeAgent) || 'peri'
 
   useEffect(() => {
     let disposed = false
@@ -42,6 +49,38 @@ export default function HistorySheetView({ sheet: _sheet, ctx: _ctx }: { sheet: 
     }
   }
 
+  // W4-02（姿态二）：复用 Overview resumeSession 的找/建 identity 行机制（source/periId 匹配），
+  // 进入只读姿态后开 agent sheet；load 由 ChatView 挂载后的 lifecycle 承担
+  const openReplay = (entry: PersistedSessionSummary) => {
+    setExportError('')
+    if (!entry.periId) return
+    const store = useIdentityStore.getState()
+    const existing = store.sessions.find(s => s.source === entry.source || s.periId === entry.periId)
+    let id: string | null
+    if (existing) {
+      id = existing.id
+    } else {
+      const before = store.sessions.length
+      const name = entry.title || `session-${Date.now().toString(36)}`
+      useIdentityStore.getState().addSession(name)
+      const created = useIdentityStore.getState().sessions[before]
+      if (created) {
+        useIdentityStore.getState().updateSession(created.id, {
+          ...(entry.source ? { source: entry.source } : {}),
+          ...(entry.periId ? { periId: entry.periId } : {}),
+          lastActiveAt: entry.updatedAt || Date.now(),
+        })
+        id = created.id
+      } else {
+        id = null
+      }
+    }
+    if (!id) return
+    useReplayPostureStore.getState().enter(id)
+    ctx.selectSession(id)
+    ctx.openSheet({ kind: 'agent', title: entry.title || 'Agent', agentId: activeAgent })
+  }
+
   return (
     <div className="history-sheet">
       <div className="file-main-kicker">HISTORY</div>
@@ -53,6 +92,7 @@ export default function HistorySheetView({ sheet: _sheet, ctx: _ctx }: { sheet: 
             <div className="history-row">
               <span className="search-result-path">{entry.title || entry.source || entry.id}</span>
               <span className="search-result-text">{new Date(entry.updatedAt).toLocaleString()}</span>
+              <button type="button" className="template-apply" disabled={!entry.periId} title={entry.periId ? '只读回放，点击继续转 live' : '该存档无 periId，无法回放'} onClick={() => openReplay(entry)}>回放</button>
               <button type="button" className="template-apply" onClick={() => void exportSession(entry.periId || entry.id)}>导出</button>
             </div>
           </li>
