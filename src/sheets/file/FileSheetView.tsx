@@ -5,6 +5,8 @@ import FileSheetSidebar from './FileSheetSidebar'
 import FileTree from './FileTree'
 import FileTabBar from './FileTabBar'
 import FileTabView from './FileTabView'
+import GitPanel from './GitPanel'
+import DiffView from './DiffView'
 import type { SheetContext, SheetRecord } from '../../workspace-sheets/sheetTypes'
 import './FileSheet.css'
 
@@ -25,6 +27,7 @@ export default function FileSheetView({ sheet, ctx }: { sheet: SheetRecord; ctx:
   const openTabs = useMemo(() => parseOpenTabs(sheet.metadata?.openTabs), [sheet.metadata?.openTabs])
   const activeFile = sheet.metadata?.activeFile ?? null
   const [truncated, setTruncated] = useState(false)
+  const [activeDiff, setActiveDiff] = useState<{ path: string; staged: boolean } | null>(null)
 
   const selectSection = (section: FileSheetSection) => dispatch({ type: 'set-section', section })
   const selectSource = (source: string) => dispatch({ type: 'set-source', source })
@@ -67,6 +70,20 @@ export default function FileSheetView({ sheet, ctx }: { sheet: SheetRecord; ctx:
     </main>
   )
 
+  const scmSection = state.targetSource ? (
+    <main className="file-main file-main-split">
+      <GitPanel source={state.targetSource} onOpenDiff={(path, staged) => setActiveDiff({ path, staged })} />
+      {activeDiff && (
+        <DiffView
+          source={state.targetSource}
+          path={activeDiff.path}
+          staged={activeDiff.staged}
+          onClose={() => setActiveDiff(null)}
+        />
+      )}
+    </main>
+  ) : <main className="file-main"><p className="file-section-hint">未指向会话</p></main>
+
   return (
     <div className="file-sheet">
       <FileSheetSidebar
@@ -75,11 +92,11 @@ export default function FileSheetView({ sheet, ctx }: { sheet: SheetRecord; ctx:
         onSelectSection={selectSection}
         onSelectSource={selectSource}
       />
-      {state.activeSection === 'files' ? filesSection : (
+      {state.activeSection === 'files' ? filesSection : state.activeSection === 'scm' ? scmSection : (
         <main className="file-main">
           <div className="file-main-kicker">FILE SHEET</div>
           <h2 className="file-main-title">{state.targetSource || '未指向会话'}</h2>
-          <p className="file-main-hint">当前分区：{state.activeSection}（W2-05/06 接线）</p>
+          <p className="file-main-hint">当前分区：{state.activeSection}（W2-06 接线）</p>
         </main>
       )}
     </div>

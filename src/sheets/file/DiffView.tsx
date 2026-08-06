@@ -1,0 +1,47 @@
+import { useEffect, useState } from 'react'
+import { invoke } from '@tauri-apps/api/core'
+import { reportRuntimeError } from '../../runtimeError'
+import { classifyGitError } from '../../infrastructure/tauri/gitContracts.ts'
+import DiffCard from '../../components/chat/DiffCard'
+
+/**
+ * DiffView — Git diff 展示（W2-05）。
+ *
+ * 点击 staged/unstaged 条目 → git_diff(source, path, staged) → 复用 DiffCard
+ * （DiffPayload 统一渲染，不新造 diff 渲染器）。只读。
+ */
+export default function DiffView({ source, path, staged, onClose }: {
+  source: string | null
+  path: string
+  staged: boolean
+  onClose: () => void
+}) {
+  const [output, setOutput] = useState('')
+  const [error, setError] = useState('')
+
+  useEffect(() => {
+    if (!source) return
+    let disposed = false
+    setOutput('')
+    setError('')
+    invoke<string>('git_diff', { source, path, staged }).then(text => {
+      if (!disposed) setOutput(typeof text === 'string' ? text : '')
+    }).catch(err => {
+      if (disposed) return
+      setError(classifyGitError(err).message)
+      reportRuntimeError('读取 Git diff', err)
+    })
+    return () => { disposed = true }
+  }, [source, path, staged])
+
+  return (
+    <div className="git-diff-view">
+      <div className="git-diff-head">
+        <span className="git-diff-path">{path}（{staged ? 'staged' : 'unstaged'}）</span>
+        <button type="button" className="git-diff-close" onClick={onClose} aria-label="关闭 diff">✕</button>
+      </div>
+      {error && <div className="file-tree-error" role="alert">{error}</div>}
+      {!error && <DiffCard output={output} />}
+    </div>
+  )
+}

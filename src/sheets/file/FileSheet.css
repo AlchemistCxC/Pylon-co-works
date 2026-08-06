@@ -161,3 +161,20 @@
 
 /* 编辑器选中反馈（发令闭环框选核心反馈，W2-08 消费） */
 .file-tab-view ::selection { background: var(--editor-selection, rgba(59,130,246,0.25)); }
+
+/* W2-05：Git 分区（只读） */
+.file-main-split { display: flex; }
+.git-status-list { list-style: none; margin: 0 0 12px; padding: 0; display: flex; flex-direction: column; gap: 2px; }
+.git-status-row {
+  display: flex; gap: 8px; align-items: baseline;
+  width: 100%; text-align: left;
+  padding: 3px 8px; font-size: 12px; font-family: var(--font);
+  color: var(--text); background: transparent; border: none; cursor: pointer;
+}
+.git-status-row:hover { background: var(--bg-hover); }
+.git-status-code { font-family: var(--mono); color: var(--accent); width: 1.5em; }
+.git-status-path { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+.git-diff-view { flex: 1; min-width: 0; border-left: 1px solid var(--border); padding: 8px; overflow: auto; }
+.git-diff-head { display: flex; align-items: center; gap: 8px; margin-bottom: 8px; }
+.git-diff-path { font-family: var(--mono); font-size: 12px; flex: 1; word-break: break-all; }
+.git-diff-close { background: none; border: none; color: var(--text-dim); cursor: pointer; font-size: 12px; }
