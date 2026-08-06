@@ -178,3 +178,16 @@
 .git-diff-head { display: flex; align-items: center; gap: 8px; margin-bottom: 8px; }
 .git-diff-path { font-family: var(--mono); font-size: 12px; flex: 1; word-break: break-all; }
 .git-diff-close { background: none; border: none; color: var(--text-dim); cursor: pointer; font-size: 12px; }
+
+/* W2-06：工作区搜索分区（桩化） */
+.search-result-list { list-style: none; margin: 8px 0 0; padding: 0; display: flex; flex-direction: column; gap: 2px; }
+.search-result-row {
+  display: flex; gap: 8px; align-items: baseline;
+  width: 100%; text-align: left;
+  padding: 3px 8px; font-size: 12px; font-family: var(--font);
+  color: var(--text); background: transparent; border: none; cursor: pointer;
+}
+.search-result-row:hover { background: var(--bg-hover); }
+.search-result-path { font-family: var(--mono); color: var(--accent); flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+.search-result-line { color: var(--text-dim); width: 3em; flex: 0 0 3em; text-align: right; }
+.search-result-text { color: var(--text-dim); max-width: 40%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }

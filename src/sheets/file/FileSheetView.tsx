@@ -7,6 +7,7 @@ import FileTabBar from './FileTabBar'
 import FileTabView from './FileTabView'
 import GitPanel from './GitPanel'
 import DiffView from './DiffView'
+import WorkspaceSearchPanel from './WorkspaceSearchPanel'
 import type { SheetContext, SheetRecord } from '../../workspace-sheets/sheetTypes'
 import './FileSheet.css'
 
@@ -92,7 +93,9 @@ export default function FileSheetView({ sheet, ctx }: { sheet: SheetRecord; ctx:
         onSelectSection={selectSection}
         onSelectSource={selectSource}
       />
-      {state.activeSection === 'files' ? filesSection : state.activeSection === 'scm' ? scmSection : (
+      {state.activeSection === 'files' ? filesSection : state.activeSection === 'scm' ? scmSection : state.activeSection === 'search' ? (
+        <main className="file-main"><WorkspaceSearchPanel source={state.targetSource} onOpenResult={openTab} /></main>
+      ) : (
         <main className="file-main">
           <div className="file-main-kicker">FILE SHEET</div>
           <h2 className="file-main-title">{state.targetSource || '未指向会话'}</h2>
