@@ -4,6 +4,7 @@ import AgentSheetView from '../sheets/AgentSheetView'
 import OverviewSheetView from '../sheets/OverviewSheetView'
 import RuntimeSheetView from '../sheets/RuntimeSheetView'
 import GatewaySheetView from '../sheets/gateway/GatewaySheetView'
+import SearchSheetView from '../sheets/search/SearchSheetView'
 import FileSheetView from '../sheets/file/FileSheetView'
 import Sidebar from '../components/Sidebar'
 import AgentContextPanel from '../components/right-panel/AgentContextPanel'
@@ -53,7 +54,8 @@ export const SHEET_RENDER_REGISTRY: Record<SheetKind, SheetRenderEntry> = {
   file: { render: (sheet, ctx) => <FileSheetView sheet={sheet} ctx={ctx} />, rightPanel: FileContextPanel },
   // W1-05：overview 启动选择器（虚拟空态，不写入持久 sheet 数组）
   overview: { render: (sheet, ctx) => <OverviewSheetView sheet={sheet} ctx={ctx} /> },
-  search: { render: () => <UnavailableSheet kind="search" /> },
+  // W3-03：跨会话快照搜索（仅本地会话；平台范围产品未决）
+  search: { render: (sheet, ctx) => <SearchSheetView sheet={sheet} ctx={ctx} /> },
   history: { render: () => <UnavailableSheet kind="history" /> },
   browser: { render: () => <UnavailableSheet kind="browser" /> },
   // W3-01：gateway 只读概览（适配器/平台会话分区；写回 W3-02 桩化）
