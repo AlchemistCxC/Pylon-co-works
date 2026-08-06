@@ -37,7 +37,7 @@ export default function WorkspaceTitlebar({
   onCloseSheet,
   menuActions,
   onOpenSheet,
-  onReopenSheet,
+  onReopenSheet: _onReopenSheet,
   onToggleRightPanel,
   onToggleSettings,
   onMinimize,
