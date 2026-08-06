@@ -23,17 +23,22 @@ export function useToolConnectors(
         const row = connector.nextElementSibling as HTMLElement | null
         const previousHead = previousRow?.querySelector<HTMLElement>('.term-tool-head')
         const head = row?.querySelector<HTMLElement>('.term-tool-head')
+        const indicator = previousHead?.querySelector<HTMLElement>('.term-tool-indicator')
         const connectorParent = connector.offsetParent as HTMLElement | null
-        if (!previousRow || !row || !previousHead || !head || !connectorParent) continue
+        if (!previousRow || !row || !previousHead || !head || !indicator || !connectorParent) continue
         // 展开 Tool body 也保持连接，线会自然跨过 body 延伸至下一项。
         connector.style.display = 'block'
         // 所有几何值都从 viewport rect 换算到 connector 的实际 offsetParent，
         // 不依赖 motion wrapper 的 offsetTop 坐标系，避免缩放/动画/嵌套定位导致偏移。
-        const parentTop = connectorParent.getBoundingClientRect().top
+        const parentRect = connectorParent.getBoundingClientRect()
         const previousRect = previousHead.getBoundingClientRect()
         const currentRect = head.getBoundingClientRect()
-        const previousCenter = previousRect.top - parentTop + previousRect.height / 2
-        const currentCenter = currentRect.top - parentTop + currentRect.height / 2
+        const indicatorRect = indicator.getBoundingClientRect()
+        const previousCenter = previousRect.top - parentRect.top + previousRect.height / 2
+        const currentCenter = currentRect.top - parentRect.top + currentRect.height / 2
+        // 横坐标直接取真实 indicator 中心，避免 Tool head padding / 字号 / glyph 变化后
+        // CSS 硬编码轨道漂移。线宽由 CSS 变量控制，因此减去自身半宽。
+        connector.style.left = `${indicatorRect.left - parentRect.left + indicatorRect.width / 2 - connector.offsetWidth / 2}px`
         connector.style.top = `${previousCenter}px`
         connector.style.height = `${Math.max(0, currentCenter - previousCenter)}px`
       }

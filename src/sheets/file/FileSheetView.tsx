@@ -78,7 +78,7 @@ export default function FileSheetView({ sheet, ctx }: { sheet: SheetRecord; ctx:
         onCollapse={() => setSidebarCollapsed(value => !value)}
       >
         {state.activeSection === 'files' && <FileTree source={state.targetSource} activeFile={activeFile} onOpen={openTab} />}
-        {state.activeSection === 'scm' && <GitPanel source={state.targetSource} />}
+        {state.activeSection === 'scm' && <GitPanel source={state.targetSource} onOpenDiff={(path, staged) => setActiveDiff({ path, staged })} />}
         {state.activeSection === 'search' && (
           <WorkspaceSearchPanel source={state.targetSource} onOpenResult={openTab} />
         )}
@@ -93,7 +93,7 @@ export default function FileSheetView({ sheet, ctx }: { sheet: SheetRecord; ctx:
       </FileSheetSidebar>
       <main className="file-editor">
         <FileTabBar openTabs={openTabs} activeFile={activeFile} onSelect={selectTab} onClose={closeTab} />
-        {state.activeSection === 'views' && activeDiff ? (
+        {(state.activeSection === 'views' || state.activeSection === 'scm') && activeDiff ? (
           <DiffView source={state.targetSource} path={activeDiff.path} staged={activeDiff.staged} onClose={() => setActiveDiff(null)} />
         ) : activeFile ? (
           <>

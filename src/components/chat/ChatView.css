@@ -7,9 +7,16 @@
 
 .term { flex:1; min-width:0; position:relative; padding:16px 24px; font-family:var(--chat-font,var(--mono)); font-size:var(--chat-font-size,15px); line-height:var(--chat-line-height,1.4); color:var(--chat-text,var(--text)); background:var(--chat-bg,transparent); background-image:var(--chat-bg-image,none); background-size:cover; background-position:center; opacity:var(--chat-transparency,1); backdrop-filter:blur(var(--chat-blur,0px)); text-rendering:optimizeLegibility; letter-spacing:0.01em; font-variant-ligatures:contextual; -webkit-font-smoothing:antialiased; font-feature-settings:'calt' 1,'liga' 1; }
 
-.term-user { padding:2px 0; }
+.term-user { display:flex; align-items:baseline; min-width:0; padding:2px 0; }
 .term-user-prefix { color:var(--accent); font-weight:700; margin-right:6px; }
 .term-user-name { font-weight:700; color:var(--accent); margin-right:8px; }
+.term-user-prefix,
+.term-user-name { flex:0 0 auto; }
+.term-user-content { min-width:0; flex:1 1 auto; }
+.term-user-content > p,
+.term-user-content > ul,
+.term-user-content > ol,
+.term-user-content > blockquote { margin-top:0; margin-bottom:0; }
 .term-user-tag { background:var(--user-tag-bg,rgba(0,0,0,0.03)); color:var(--user-tag-text,var(--accent)); font-weight:600; margin-right:8px; padding:2px 8px; border-radius:4px; font-family:var(--mono); }
 .term-user .term-p { display:inline; margin:0; }
 .term-user code { font-family:var(--mono); font-size:inherit; }
@@ -63,19 +70,19 @@
 .term-reasoning-line { color:var(--text-dim); font-style:italic; font-size:0.93em; line-height:1.6; white-space:pre-wrap; }
 
 /* Claude 风格：用户整行底色，但所有消息内容共用 .term 左侧轨道 */
-.app[data-message-layout="claude"] .term-row { margin:0 0 1em; }
+.app[data-message-layout="claude"] .term-row { margin:0 0 0.35em; }
+.app[data-message-layout="claude"] .term-row + .term-row { margin-top:0; }
 .app[data-message-layout="claude"] .term-row:last-of-type { margin-bottom:0; }
 .app[data-message-layout="claude"] .term-user {
   padding:8px 0;
   background:var(--user-tag-bg, #373737);
-  /* flex：❯ + 名字固定列，文本换行对齐前缀后（CC 内容列语义） */
-  display:flex; align-items:baseline; flex-wrap:wrap;
+  /* flex：❯ + 名字固定列，文本换行对齐正文列（CC 内容列语义） */
 }
 .app[data-message-layout="claude"] .term-user .term-user-prefix,
 .app[data-message-layout="claude"] .term-user .term-user-name {
   flex-shrink:0;
 }
-.app[data-message-layout="claude"] .term-user p {
+.app[data-message-layout="claude"] .term-user-content > p {
   min-width:0; margin:0;
 }
 .app[data-message-layout="claude"] .term-user-tag {
@@ -87,7 +94,7 @@
    用元素选择器（react-markdown 的 p/li 无 .term-p/.term-li 类）。 */
 .app[data-message-layout="claude"] .term-assistant p,
 .app[data-message-layout="claude"] .term-assistant ul,
-.app[data-message-layout="claude"] .term-assistant ol { margin:0.5em 0; }
+.app[data-message-layout="claude"] .term-assistant ol { margin:0.25em 0; }
 .app[data-message-layout="claude"] .term-assistant li { margin:0.15em 0; }
 .app[data-message-layout="claude"] .term-assistant h2,
 .app[data-message-layout="claude"] .term-assistant h3 { margin:0.7em 0 0.3em; }
@@ -110,7 +117,7 @@
    .term-tool-head(2) 在线之上（指示器覆盖线）。颜色由 ToolConnector 组件 inline 写入。 */
 .term-tool-connector {
   position:absolute;
-  left:calc(24px + 0.3em - 1px);
+  left:calc(var(--ui-space-6, 24px) + 0.3em - 1px);
   width:var(--tool-connector-width,2px); z-index:1; pointer-events:none;
   opacity:var(--tool-connector-opacity,1);
   transform-origin:top center;
@@ -361,6 +368,7 @@
 .app[data-message-layout="claude"] .term-tool-head .term-tool-indicator {
   min-width:var(--dot-col-width, 1.6em); text-align:left; margin-right:0;
 }
+.app[data-message-layout="claude"] .term-tool-head { padding-left:0; }
 /* 用户标签跟随终端字体（此前 var(--font) 混入 GUI 字体） */
 .term-user-tag { font-family:var(--mono); }
 
@@ -497,8 +505,9 @@
 
 .term-spinner-row {
   gap: var(--ui-space-3);
-  padding: var(--ui-space-2) var(--ui-space-3);
+  padding: var(--ui-space-1) 0;
 }
+.term-spinner { padding-block: var(--ui-space-1); }
 .spinner-stop-btn {
   min-height: var(--ui-control-compact);
   padding: 0 var(--ui-space-2);
@@ -520,14 +529,14 @@
 .scroll-bottom-btn {
   width: var(--ui-control-compact);
   height: var(--ui-control-compact);
-  border: 1px solid var(--border);
-  border-radius: var(--ui-radius-pill);
+  border: 0;
+  border-radius: var(--ui-radius-xs);
   color: var(--text-dim);
-  background: var(--bg-panel);
+  background: transparent;
   opacity: .72;
   mix-blend-mode: normal;
 }
-.scroll-bottom-btn:hover { color: var(--text); background: var(--bg-hover); opacity: 1; }
+.scroll-bottom-btn:hover { color: var(--text); background: transparent; opacity: 1; }
 .scroll-bottom-btn:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
 
 .task-tree-summary {

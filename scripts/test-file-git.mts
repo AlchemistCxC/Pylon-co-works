@@ -15,12 +15,12 @@ import { normalizeGitStatus } from '../src/infrastructure/tauri/gitContracts.ts'
   assert.deepEqual(entries.filter(e => !e.staged).map(e => e.path), ['b.ts', 'c.ts'])
 }
 
-// 2. GitPanel：git_status/git_history 完整只读信息；diff 入口移动到 ViewsPanel
+// 2. GitPanel：git_status/git_history 完整只读信息；状态文件可展开到 diff
 const panel = readFileSync(new URL('../src/sheets/file/GitPanel.tsx', import.meta.url), 'utf8')
 assert.match(panel, /invoke<unknown>\('git_status', \{ source \}\)/, '必须调 git_status 带 source')
 assert.match(panel, /invoke<unknown>\('git_history', \{ source \}\)/, '必须调 git_history 带 source')
 assert.match(panel, /entries\.filter\(entry => entry\.staged\)/, '必须分 staged/unstaged')
-assert.equal(panel.includes('onOpenDiff'), false, 'SCM 不得继续承担 diff 入口')
+assert.match(panel, /onOpenDiff\(node\.path, entries\.find/, 'SCM 文件节点点击必须打开对应 diff')
 assert.equal(panel.includes("invoke('git_add'"), false, '不得提供写 Git 操作')
 assert.equal(panel.includes("invoke('git_commit'"), false, '不得提供写 Git 操作')
 assert.match(panel, /当前工作区不是 Git 仓库/, '非 git 仓库必须明确错误态')
@@ -36,7 +36,7 @@ assert.match(diffView, /<DiffCard output=\{output\} \/>/, 'diff 经 DiffPayload 
 // 4. FileSheetView：SCM/Views 分区接线（D-08 VS Code 布局：内容在左栏）
 const view = readFileSync(new URL('../src/sheets/file/FileSheetView.tsx', import.meta.url), 'utf8')
 assert.match(view, /state\.activeSection === 'scm' && <GitPanel/, 'scm 分区必须接线（左栏）')
-assert.match(view, /<GitPanel source=\{state\.targetSource\} \/>/, 'GitPanel 必须接当前 source')
+assert.match(view, /<GitPanel source=\{state\.targetSource\} onOpenDiff=/, 'GitPanel 必须接当前 source 与 diff 入口')
 assert.match(view, /<ViewsPanel/, 'diff/change 必须由视图分区承载')
 
 console.log('file git 分区守卫通过')

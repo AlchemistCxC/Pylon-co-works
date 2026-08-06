@@ -32,10 +32,12 @@ export default function AgentSheetView({ ctx }: { sheet: SheetRecord; ctx: Sheet
   return (
     <div className="main">
       <div className={`main-body ${ctx.ccEditMode ? 'blur-bg' : ''}`} style={{
-        '--right-panel-inset': `${ctx.rightInset}px`,
+        // 右栏已是 .layout 的 flex sibling，主区宽度天然扣除右栏；此处不得再次预留，
+        // 否则首次启动时中控输入栏会被重复挤压。
+        '--right-panel-inset': '0px',
       } as React.CSSProperties}>
         <ChatView sessionId={ctx.activeSession} />
-        {showPet && !isReplay && <PetCompanion rightInset={ctx.rightInset} />}
+        {showPet && !isReplay && <PetCompanion rightInset={0} />}
         {isReplay ? (
           <button type="button" className="replay-continue-bar" role="status" onClick={() => useReplayPostureStore.getState().clear()}>
             <span className="replay-continue-hint">只读回放 · 会话已加载</span>

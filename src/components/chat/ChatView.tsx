@@ -453,9 +453,11 @@ function UserLine({ sender, content }: { sender: string; content: string }) {
     <div className="term-user">
       <span className="term-user-prefix" style={userColor ? { color: userColor } : {}}>{prefix}</span>
       <span className="term-user-name" style={userColor ? { color: userColor } : {}}>{name}</span>
-      <Suspense fallback={<p className="term-p term-plain-text">{content}</p>}>
-        <MarkdownRenderer>{content}</MarkdownRenderer>
-      </Suspense>
+      <div className="term-user-content">
+        <Suspense fallback={<span className="term-p term-plain-text">{content}</span>}>
+          <MarkdownRenderer>{content}</MarkdownRenderer>
+        </Suspense>
+      </div>
     </div>
   )
 }

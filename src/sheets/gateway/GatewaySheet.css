@@ -277,7 +277,7 @@
 }
 
 @media (max-width: 720px) {
-  .gateway-sidebar { width: 190px; flex-basis: 190px; padding: var(--ui-space-4) var(--ui-space-3); }
+  .gateway-sidebar { width: var(--sheet-sidebar-width, 250px); flex-basis: var(--sheet-sidebar-width, 250px); padding: var(--ui-space-4) var(--ui-space-3); }
   .gateway-main { padding: var(--ui-space-5) var(--ui-space-4); }
   .gateway-edit-row { flex-wrap: wrap; }
   .gateway-edit-row .runtime-filter-input { flex-basis: calc(50% - var(--ui-space-2)); }
