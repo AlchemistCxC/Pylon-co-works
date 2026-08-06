@@ -495,7 +495,13 @@
 .term-link { text-underline-offset: 2px; }
 .term-link:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
 
-.term-spinner-row { gap: var(--ui-space-3); padding-block: var(--ui-space-2); }
+.term-spinner-row {
+  gap: var(--ui-space-3);
+  padding: var(--ui-space-2) var(--ui-space-3);
+  border: 1px solid color-mix(in srgb, var(--tool-run) 28%, var(--border));
+  border-radius: var(--ui-radius-sm);
+  background: color-mix(in srgb, var(--tool-run) 5%, transparent);
+}
 .spinner-stop-btn {
   min-height: var(--ui-control-compact);
   padding: 0 var(--ui-space-2);
@@ -507,6 +513,8 @@
 
 .replay-continue-bar {
   border-radius: var(--ui-radius-md);
+  border-color: color-mix(in srgb, var(--accent) 38%, var(--border));
+  background: color-mix(in srgb, var(--accent) 6%, var(--input-bg, var(--bg-input)));
   transition: border-color 120ms ease, background-color 120ms ease;
 }
 .replay-continue-bar:hover { background: var(--bg-hover); }
@@ -526,14 +534,28 @@
 .scroll-bottom-btn:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
 
 .task-tree-summary {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--ui-space-2);
   min-height: var(--ui-control-compact);
   padding-inline: var(--ui-space-3);
   border-radius: var(--ui-radius-xs);
 }
+.task-tree-summary::before {
+  content: 'TASKS';
+  color: var(--accent);
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: .08em;
+}
 .task-tree-summary:hover { background: var(--bg-hover); }
 .task-tree-summary:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
-.task-tree-list { padding: var(--ui-space-2) var(--ui-space-3); border-radius: var(--ui-radius-sm); }
-.task-tree-item { gap: var(--ui-space-2); padding-block: var(--ui-space-1); }
+.task-tree-list {
+  padding: var(--ui-space-2) var(--ui-space-3);
+  border-radius: var(--ui-radius-sm);
+  box-shadow: inset 3px 0 0 color-mix(in srgb, var(--accent) 55%, transparent);
+}
+.task-tree-item { gap: var(--ui-space-2); min-height: var(--ui-control-compact); padding-block: var(--ui-space-1); }
 .task-tree-item[data-status="in_progress"] .task-tree-status { color: var(--tool-run); }
 .task-tree-item[data-status="completed"] .task-tree-status { color: var(--tool-ok); }
 .task-tree-item[data-status="failed"] .task-tree-status,

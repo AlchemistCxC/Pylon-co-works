@@ -248,3 +248,62 @@
   white-space: nowrap;
 }
 .cc-tasks-pill:hover { color: var(--text); border-color: var(--border-focus); }
+
+/* A4-02：任务、上下文和运行态控件共享 compact 状态语言。 */
+.cc-status-row,
+.cc-footer-status-row {
+  gap: var(--ui-space-1);
+  min-height: var(--ui-control-compact);
+  padding-inline: var(--ui-space-1);
+}
+
+.cc-status-primary,
+.cc-status-secondary,
+.cc-actions {
+  gap: var(--ui-space-1);
+}
+
+.cc-status-row .cc-widget + .cc-widget::before,
+.cc-footer-status-row .cc-widget + .cc-widget::before,
+.cc-status-row > :is(.cc-status-secondary,.cc-status-primary,.cc-actions):not(:empty) ~ :is(.cc-status-secondary,.cc-status-primary,.cc-actions):not(:empty)::before,
+.cc-footer-status-row > :is(.cc-status-secondary,.cc-status-primary,.cc-actions):not(:empty) ~ :is(.cc-status-secondary,.cc-status-primary,.cc-actions):not(:empty)::before {
+  padding-inline: var(--ui-space-2);
+  opacity: .48;
+}
+
+.cc-widget.cc-natural > button,
+.cc-widget.cc-natural > [role="button"] {
+  min-height: var(--ui-control-compact);
+}
+
+.cc-context-ring {
+  width: var(--ui-control-compact);
+  height: var(--ui-control-compact);
+}
+
+.cc-tasks-pill {
+  display: inline-flex;
+  align-items: center;
+  min-height: var(--ui-control-compact);
+  padding: 0 var(--ui-space-3);
+  border-radius: var(--ui-radius-pill);
+  background: color-mix(in srgb, var(--accent) 6%, transparent);
+  transition: color 120ms ease, border-color 120ms ease, background-color 120ms ease;
+}
+.cc-tasks-pill::before {
+  content: 'TASKS';
+  margin-right: var(--ui-space-2);
+  color: var(--accent);
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: .08em;
+}
+.cc-tasks-pill:hover {
+  color: var(--text);
+  border-color: color-mix(in srgb, var(--accent) 45%, var(--border));
+  background: color-mix(in srgb, var(--accent) 12%, transparent);
+}
+.cc-tasks-pill:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+
+.cc-variant-glass .cc-tasks-pill { border-radius: var(--ui-radius-md) !important; }
+.cc-variant-pill .cc-tasks-pill { border-radius: var(--ui-radius-pill) !important; }
