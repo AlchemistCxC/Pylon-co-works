@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react'
 import { invoke } from '@tauri-apps/api/core'
 import { reportRuntimeError } from '../../runtimeError'
-import { normalizeGatewayStatus, type GatewayStatus } from '../../infrastructure/tauri/gatewayContracts.ts'
+import { classifyGatewayWriteError, normalizeGatewayStatus, type GatewayStatus, type GatewayWriteStatus } from '../../infrastructure/tauri/gatewayContracts.ts'
 import type { SheetContext, SheetRecord } from '../../workspace-sheets/sheetTypes'
 import './GatewaySheet.css'
 
@@ -15,6 +15,32 @@ export default function GatewaySheetView({ sheet: _sheet, ctx: _ctx }: { sheet: 
   const [status, setStatus] = useState<GatewayStatus | null>(null)
   const [error, setError] = useState('')
   const [expandedRoute, setExpandedRoute] = useState<number | null>(null)
+  const [editSource, setEditSource] = useState('')
+  const [editAgentId, setEditAgentId] = useState('')
+  const [writeStatus, setWriteStatus] = useState<GatewayWriteStatus>({ kind: 'idle' })
+
+  // W3-02 桩化：update_agents_config 成功后 reload_gateway；命令缺失 → 明确「待后端」；锁中毒展示失败
+  const saveRoute = async () => {
+    if (!editSource.trim() || !editAgentId.trim()) return
+    setWriteStatus({ kind: 'saving' })
+    try {
+      // 契约：update_agents_config（待产品侧后端命令）；成功后 reload_gateway
+      await invoke('update_agents_config', { config: { gateway: { routes: [{ source: editSource, agentId: editAgentId }] } } })
+      try {
+        await invoke('reload_gateway')
+      } catch (reloadError) {
+        const classified = classifyGatewayWriteError(reloadError)
+        setWriteStatus(classified)
+        if (classified.kind === 'lock-poisoned') reportRuntimeError('重载网关', '磁盘已更新、运行态仍旧配置')
+        return
+      }
+      setWriteStatus({ kind: 'ok' })
+    } catch (error) {
+      const classified = classifyGatewayWriteError(error)
+      setWriteStatus(classified)
+      if (classified.kind === 'error') reportRuntimeError('保存网关配置', error)
+    }
+  }
 
   useEffect(() => {
     let disposed = false
@@ -41,7 +67,7 @@ export default function GatewaySheetView({ sheet: _sheet, ctx: _ctx }: { sheet: 
           </ul>
         ) : <p className="file-section-hint">无适配器</p>}
         <div className="file-section-title">平台会话</div>
-        <p className="file-section-hint">平台会话流（W3-02 接线，待 gateway_sessions）</p>
+        <p className="file-section-hint" role="status">待后端：gateway_sessions 命令尚未提供</p>
       </aside>
       <main className="gateway-main">
         {error && <div className="file-tree-error" role="alert">{error}</div>}
@@ -66,6 +92,18 @@ export default function GatewaySheetView({ sheet: _sheet, ctx: _ctx }: { sheet: 
             </div>
           ))}
           {status && status.routes.length === 0 && <p className="file-section-hint">无路由</p>}
+        </div>
+        <div className="gateway-route-edit">
+          <div className="file-section-title">新增路由（写回待后端）</div>
+          <div className="gateway-edit-row">
+            <input className="runtime-filter-input" placeholder="source（如 qq:group:123）" value={editSource} onChange={e => setEditSource(e.target.value)} aria-label="路由 source" />
+            <input className="runtime-filter-input" placeholder="agentId（如 peri）" value={editAgentId} onChange={e => setEditAgentId(e.target.value)} aria-label="路由 agentId" />
+            <button type="button" className="template-apply" onClick={() => void saveRoute()}>保存</button>
+          </div>
+          {writeStatus.kind === 'blocked' && <p className="file-section-hint" role="status">待后端：update_agents_config 命令尚未提供</p>}
+          {writeStatus.kind === 'lock-poisoned' && <div className="file-tree-error" role="alert">网关配置锁中毒：磁盘已更新、运行态仍旧配置</div>}
+          {writeStatus.kind === 'error' && <div className="file-tree-error" role="alert">{writeStatus.message}</div>}
+          {writeStatus.kind === 'ok' && <p className="file-section-hint" role="status">已保存并重载</p>}
         </div>
         {status?.inject && (
           <div className="gateway-inject">

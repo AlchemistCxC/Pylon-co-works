@@ -1,6 +1,6 @@
 import { strict as assert } from 'node:assert'
 import { readFileSync } from 'node:fs'
-import { normalizeGatewayStatus } from '../src/infrastructure/tauri/gatewayContracts.ts'
+import { normalizeGatewayStatus, classifyGatewayWriteError } from '../src/infrastructure/tauri/gatewayContracts.ts'
 
 // W3-01：gateway 概览——损坏 route 容错、适配器/平台会话两分区、inject 只读归 Prism
 
@@ -34,9 +34,8 @@ import { normalizeGatewayStatus } from '../src/infrastructure/tauri/gatewayContr
 const view = readFileSync(new URL('../src/sheets/gateway/GatewaySheetView.tsx', import.meta.url), 'utf8')
 assert.match(view, /invoke<unknown>\('gateway_status'\)/, '必须调 gateway_status')
 assert.match(view, /normalizeGatewayStatus\(raw\)/, '必须经宽容 normalize')
-assert.match(view, /平台会话流（W3-02 接线，待 gateway_sessions）/, '平台会话分区为桩（W3-02）')
+assert.match(view, /待后端：gateway_sessions 命令尚未提供/, '平台会话分区为桩（W3-02）')
 assert.match(view, /归 Prism 管理，只读/, 'inject 必须只读提示归 Prism')
-assert.equal(view.includes("invoke('update_agents_config'"), false, '本 commit 不写回（W3-02 桩化）')
 assert.equal(view.includes('rightPanel'), false, 'gateway 无右栏')
 const css = readFileSync(new URL('../src/sheets/gateway/GatewaySheet.css', import.meta.url), 'utf8')
 assert.ok(css.length > 0, '必须有样式')
@@ -46,3 +45,17 @@ const registry = readFileSync(new URL('../src/workspace-sheets/sheetRegistry.tsx
 assert.match(registry, /gateway: \{ render: \(sheet, ctx\) => <GatewaySheetView sheet=\{sheet\} ctx=\{ctx\} \/> \}/, 'registry gateway 必须渲染')
 
 console.log('gateway sheet 守卫通过')
+// ── W3-02（桩化）：写回分类 + update→reload 顺序 + 锁中毒 ──
+
+// 4. 写回错误分类
+assert.deepEqual(classifyGatewayWriteError(new Error('Command not found: update_agents_config')), { kind: 'blocked' })
+assert.deepEqual(classifyGatewayWriteError('gateway_config_lock_poisoned'), { kind: 'lock-poisoned' })
+assert.deepEqual(classifyGatewayWriteError('锁中毒'), { kind: 'lock-poisoned' })
+assert.deepEqual(classifyGatewayWriteError(new Error('protocol_error')), { kind: 'error', message: 'protocol_error' })
+
+// 5. 组件接线：update→reload 顺序；命令缺失明确「待后端」；锁中毒展示失败
+assert.match(view, /invoke\('update_agents_config'/, '必须调 update_agents_config 契约')
+assert.match(view, /invoke\('reload_gateway'\)/, '必须调 reload_gateway')
+assert.match(view, /待后端：gateway_sessions 命令尚未提供/, '平台会话必须明确「待后端」')
+assert.match(view, /待后端：update_agents_config 命令尚未提供/, '写回缺失必须明确「待后端」')
+assert.match(view, /磁盘已更新、运行态仍旧配置/, '锁中毒必须展示部分成功')

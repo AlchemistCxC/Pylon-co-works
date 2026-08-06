@@ -15,3 +15,7 @@
 .gateway-route-reset { color: var(--text-dim); font-family: var(--mono); margin-left: auto; }
 .gateway-route-detail { padding: 6px 10px; border-top: 1px solid var(--border); font-size: 11px; color: var(--text-dim); }
 .gateway-inject { margin-top: 16px; }
+
+/* W3-02：路由写回（桩化） */
+.gateway-route-edit { margin-top: 16px; }
+.gateway-edit-row { display: flex; gap: 8px; margin: 8px 0; }

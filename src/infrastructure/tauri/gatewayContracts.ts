@@ -26,6 +26,22 @@ export interface GatewayStatus {
 const isPlainObject = (value: unknown): value is Record<string, unknown> =>
   typeof value === 'object' && value !== null && !Array.isArray(value)
 
+export type GatewayWriteStatus =
+  | { kind: 'idle' }
+  | { kind: 'saving' }
+  | { kind: 'ok' }
+  | { kind: 'blocked' }
+  | { kind: 'lock-poisoned' }
+  | { kind: 'error'; message: string }
+
+/** W3-02 桩化：写回错误分类（命令缺失 blocked；gateway_config_lock_poisoned 锁中毒） */
+export function classifyGatewayWriteError(error: unknown): Exclude<GatewayWriteStatus, { kind: 'idle' } | { kind: 'saving' } | { kind: 'ok' }> {
+  const message = error instanceof Error ? error.message : String(error)
+  if (/not ?found|不存在|unknown command|no such command/i.test(message)) return { kind: 'blocked' }
+  if (/lock_poisoned|锁中毒/i.test(message)) return { kind: 'lock-poisoned' }
+  return { kind: 'error', message: message && message !== '[object Object]' ? message : '网关配置保存失败' }
+}
+
 export function normalizeGatewayStatus(raw: unknown): GatewayStatus {
   if (!isPlainObject(raw)) return { adapters: [], routes: [], qq: null, inject: null }
   return {
