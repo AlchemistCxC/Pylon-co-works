@@ -60,14 +60,21 @@ enum SendFailure {
     Transient(String),
     /// 平台限流（429/rate）：等 60s 重试一次，超限放弃告警。
     RateLimited(String),
-    /// 死目标（403/404/forbidden/not found：群被删/拉黑/注销）：标记不可达，短路投递。
+    /// 死目标（404/not found：群被删/拉黑/注销）：标记不可达，短路投递。
     DeadTarget(String),
+    /// 认证/权限（401/403/禁言/无权限）：不得标记死目标——禁言是临时状态，
+    /// 标记死目标会短路掉后续投递（方案 10 修复原 403/禁言误归 DeadTarget）。
+    AuthOrPermission(String),
+    /// 协议漂移（HTTP 200 缺有效 id，方案 1F）：不重试不标记死目标。
+    InvalidResponse(String),
 }
 
 fn classify_send_error(error: &str) -> SendFailure {
     // 修复（P2-2）：QQ 真实错误是中文（如 {"code":304023,"message":"发送消息频率限制"}），
     // 原实现只匹配英文/数字子串会误判为 Transient（限流丢消息 / 死目标永不标记）。
-    // 匹配原则：明确限流词 → RateLimited；明确权限/对象不存在 → DeadTarget；其余 Transient。
+    // 方案 10：明确限流词 → RateLimited；404/对象不存在 → DeadTarget；
+    // 401/403/禁言/无权限 → AuthOrPermission（非死目标）；缺有效 id → InvalidResponse；
+    // 其余 Transient。
     let lower = error.to_lowercase();
     if lower.contains("429")
         || lower.contains("rate")
@@ -76,19 +83,24 @@ fn classify_send_error(error: &str) -> SendFailure {
         || error.contains("限流")
     {
         SendFailure::RateLimited(error.to_string())
-    } else if lower.contains("403")
-        || lower.contains("404")
-        || lower.contains("forbidden")
+    } else if error.contains("缺有效 id") {
+        SendFailure::InvalidResponse(error.to_string())
+    } else if lower.contains("404")
         || lower.contains("not found")
+        || error.contains("不存在")
+        || error.contains("失效")
+    {
+        SendFailure::DeadTarget(error.to_string())
+    } else if lower.contains("401")
+        || lower.contains("403")
+        || lower.contains("forbidden")
         || lower.contains("not allowed")
         || error.contains("被禁")
         || error.contains("禁言")
         || error.contains("无权限")
         || error.contains("无操作权限")
-        || error.contains("不存在")
-        || error.contains("失效")
     {
-        SendFailure::DeadTarget(error.to_string())
+        SendFailure::AuthOrPermission(error.to_string())
     } else {
         SendFailure::Transient(error.to_string())
     }
@@ -625,6 +637,14 @@ impl QqAdapter {
                         .ok()
                         .map(|mut d| d.insert(key.clone(), (error.clone(), Instant::now())));
                     tracing::warn!("QQ deliver 目标不可达（{key}），标记死目标: {error}");
+                }
+                // 方案 10：AuthOrPermission（禁言/无权限）不标记死目标——临时状态，
+                // 标记会短路后续投递；InvalidResponse 是协议漂移，均按普通失败告警。
+                Err(SendFailure::AuthOrPermission(error)) => {
+                    tracing::warn!("QQ deliver 权限/禁言（{key}，不标记死目标）: {error}");
+                }
+                Err(SendFailure::InvalidResponse(error)) => {
+                    tracing::warn!("QQ deliver 响应协议漂移（{key}）: {error}");
                 }
                 Err(SendFailure::Transient(error)) => {
                     tracing::warn!("QQ deliver 发送失败（{key}）: {error}");
@@ -1197,11 +1217,12 @@ gateway:
 
     #[tokio::test]
     async fn rate_retry_dead_target_failure_is_marked() {
-        // O42：rate 限流重试一次后仍失败且为死目标（403）→ 标记死目标
-        // （原实现重试失败只 log，永不标记）。
+        // O42（方案 10 修正）：rate 限流重试一次后仍失败且为死目标（404 对象不存在）
+        // → 标记死目标（原实现重试失败只 log，永不标记；403 已从死目标中移出，
+        // 真正的死目标语义由 404 承担）。
         let (address, server) = spawn_sequence_server(&[
             b"HTTP/1.1 429 Too Many Requests\r\nContent-Length: 0\r\nConnection: close\r\n\r\n",
-            b"HTTP/1.1 403 Forbidden\r\nContent-Length: 0\r\nConnection: close\r\n\r\n",
+            b"HTTP/1.1 404 Not Found\r\nContent-Length: 0\r\nConnection: close\r\n\r\n",
         ]);
         let core = core_with_route();
         let auth = Arc::new(QqAuth::for_testing("test-token".to_string()));
@@ -1220,12 +1241,39 @@ gateway:
                 .get("group:123")
                 .map(|(reason, _)| reason.clone());
             if let Some(reason) = marked {
-                assert!(reason.contains("403"), "死目标原因应为 403: {reason}");
+                assert!(reason.contains("404"), "死目标原因应为 404: {reason}");
                 break;
             }
             assert!(Instant::now() < deadline, "rate 重试后死目标未在限期内标记");
             tokio::time::sleep(Duration::from_millis(50)).await;
         }
+        server.join().expect("server thread");
+    }
+
+    #[tokio::test]
+    async fn auth_permission_failure_does_not_mark_dead_target() {
+        // 方案 10：403（禁言/无权限）不标记死目标——临时状态，标记会短路后续投递。
+        let (address, server) = spawn_sequence_server(&[
+            b"HTTP/1.1 403 Forbidden\r\nContent-Length: 0\r\nConnection: close\r\n\r\n",
+        ]);
+        let core = core_with_route();
+        let auth = Arc::new(QqAuth::for_testing("test-token".to_string()));
+        let adapter =
+            QqAdapter::for_testing(core, Client::new(), auth, format!("http://{}", address));
+        adapter
+            .deliver_text("qq:group:123", "hi")
+            .expect("deliver must enqueue");
+        // 等待 worker 完成（发送 + 失败分类），断言 dead_targets 无此 key。
+        tokio::time::sleep(Duration::from_millis(500)).await;
+        assert!(
+            adapter
+                .dead_targets
+                .lock()
+                .unwrap()
+                .get("group:123")
+                .is_none(),
+            "403 不得标记死目标"
+        );
         server.join().expect("server thread");
     }
 
@@ -1393,22 +1441,40 @@ gateway:
             classify_send_error("触发限流"),
             SendFailure::RateLimited(_)
         ));
-        // 死目标：HTTP 状态码 / 中文权限 / 对象不存在
-        assert!(matches!(
-            classify_send_error("HTTP 403: 无操作权限"),
-            SendFailure::DeadTarget(_)
-        ));
+        // 死目标（方案 10）：仅对象不存在类 → DeadTarget（404/not found/不存在）
         assert!(matches!(
             classify_send_error("HTTP 404: {\"message\":\"群不存在\"}"),
             SendFailure::DeadTarget(_)
         ));
         assert!(matches!(
-            classify_send_error("账号被禁言"),
+            classify_send_error("HTTP 404: 目标用户不存在"),
             SendFailure::DeadTarget(_)
         ));
         assert!(matches!(
-            classify_send_error("not allowed"),
+            classify_send_error("not found"),
             SendFailure::DeadTarget(_)
+        ));
+        // 权限/禁言（方案 10）：403/401/禁言/无权限/not allowed → AuthOrPermission，
+        // 不再是 DeadTarget（禁言是临时状态，标记死目标会短路掉后续投递）。
+        assert!(matches!(
+            classify_send_error("HTTP 403: 无操作权限"),
+            SendFailure::AuthOrPermission(_)
+        ));
+        assert!(matches!(
+            classify_send_error("HTTP 401: unauthorized"),
+            SendFailure::AuthOrPermission(_)
+        ));
+        assert!(matches!(
+            classify_send_error("账号被禁言"),
+            SendFailure::AuthOrPermission(_)
+        ));
+        assert!(matches!(
+            classify_send_error("not allowed"),
+            SendFailure::AuthOrPermission(_)
+        ));
+        assert!(matches!(
+            classify_send_error("无权限"),
+            SendFailure::AuthOrPermission(_)
         ));
         // 其余 → Transient
         assert!(matches!(
@@ -1418,6 +1484,11 @@ gateway:
         assert!(matches!(
             classify_send_error("connect timeout"),
             SendFailure::Transient(_)
+        ));
+        // 200 缺有效 id（方案 1F）→ InvalidResponse
+        assert!(matches!(
+            classify_send_error("HTTP 200 响应缺有效 id 字段: {}"),
+            SendFailure::InvalidResponse(_)
         ));
     }
 }
