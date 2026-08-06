@@ -4,7 +4,7 @@ interface PylonMarkProps {
   title?: string
 }
 
-/** Pylon 品牌标记：正三角形中的三个对称 Agent 节点。 */
+/** Pylon 品牌标记：六边形外框中的三个正三角对称 Agent 节点。 */
 export default function PylonMark({ size = 24, className, title = 'Pylon' }: PylonMarkProps) {
   return (
     <svg
@@ -16,11 +16,11 @@ export default function PylonMark({ size = 24, className, title = 'Pylon' }: Pyl
       aria-label={title}
       focusable="false"
     >
-      <path className="pylon-mark-frame" d="M32 9.48 58 54.52H6Z" />
-      <circle className="pylon-mark-node" cx="32" cy="18.88" r="4" />
-      <circle className="pylon-mark-node" cx="18" cy="43.12" r="4" />
-      <circle className="pylon-mark-node" cx="46" cy="43.12" r="4" />
-      <path className="pylon-mark-links" d="m30 22.34-10 17.32m24 0-10-17.32M22 43.12h20" />
+      <path className="pylon-mark-frame" d="M32 7 53 19v26L32 57 11 45V19Z" />
+      <circle className="pylon-mark-node" cx="32" cy="21.215" r="4" />
+      <circle className="pylon-mark-node" cx="20" cy="42" r="4" />
+      <circle className="pylon-mark-node" cx="44" cy="42" r="4" />
+      <path className="pylon-mark-links" d="m30 24.679-8 13.857m20 0-8-13.857M24 42h16" />
     </svg>
   )
 }
