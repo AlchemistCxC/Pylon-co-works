@@ -90,57 +90,63 @@ export default function OverviewSheetView({ ctx }: { sheet: SheetRecord; ctx: Sh
 
   return (
     <div className="overview-sheet">
-      <div className="overview-kicker">PYLON WORKSPACE</div>
-      <h1 className="overview-title">开始工作</h1>
-      <div className="overview-entries">
-        <section className="overview-entry">
-          <h2 className="overview-entry-title">选择 Agent</h2>
-          {agents.length === 0 ? (
-            <p className="overview-hint">等待 Agent 列表…</p>
-          ) : (
-            <ul className="overview-agent-list">
-              {agents.map(agent => (
-                <li key={agent.id}>
-                  <button
-                    type="button"
-                    className="overview-agent-btn"
-                    disabled={switchingId === agent.id}
-                    onClick={() => selectAgent(agent)}
-                  >
-                    {agent.name}
-                    {switchingId === agent.id && <span className="overview-switching">切换中…</span>}
-                  </button>
-                </li>
-              ))}
-            </ul>
-          )}
-        </section>
-        <section className="overview-entry">
-          <h2 className="overview-entry-title">配置 Agent</h2>
-          <p className="overview-hint">编辑 Agent 配置（update_agents_config 待后端）</p>
-          <button type="button" className="overview-agent-btn" onClick={() => setShowConfigEditor(value => !value)}>
-            {showConfigEditor ? '收起编辑器' : '编辑配置'}
-          </button>
-          {showConfigEditor && <AgentConfigEditor agentId={activeAgent} />}
-        </section>
-        <section className="overview-entry">
-          <h2 className="overview-entry-title">继续会话</h2>
-          {recent.length === 0 ? (
-            <p className="overview-hint">最近没有可恢复的会话</p>
-          ) : (
-            <ul className="overview-agent-list">
-              {recent.map(p => (
-                <li key={p.id}>
-                  <button type="button" className="overview-agent-btn" onClick={() => resumeSession(p)}>
-                    {p.title || p.source || p.id}
-                  </button>
-                </li>
-              ))}
-            </ul>
-          )}
-        </section>
+      <div className="overview-shell">
+        <div className="overview-kicker">PYLON WORKSPACE</div>
+        <h1 className="overview-title">开始工作</h1>
+        <p className="overview-lede">选择 Agent、调整配置，或从最近会话继续。工作区会保留你的 Sheet 与上下文。</p>
+        <div className="overview-entries">
+          <section className="overview-entry">
+            <span className="overview-entry-index">01</span>
+            <h2 className="overview-entry-title">选择 Agent</h2>
+            {agents.length === 0 ? (
+              <p className="overview-hint">等待 Agent 列表…</p>
+            ) : (
+              <ul className="overview-agent-list">
+                {agents.map(agent => (
+                  <li key={agent.id}>
+                    <button
+                      type="button"
+                      className="overview-agent-btn"
+                      disabled={switchingId === agent.id}
+                      onClick={() => selectAgent(agent)}
+                    >
+                      {agent.name}
+                      {switchingId === agent.id && <span className="overview-switching">切换中…</span>}
+                    </button>
+                  </li>
+                ))}
+              </ul>
+            )}
+          </section>
+          <section className="overview-entry">
+            <span className="overview-entry-index">02</span>
+            <h2 className="overview-entry-title">配置 Agent</h2>
+            <p className="overview-hint">编辑 Agent 配置（update_agents_config 待后端）</p>
+            <button type="button" className="overview-agent-btn" onClick={() => setShowConfigEditor(value => !value)}>
+              {showConfigEditor ? '收起编辑器' : '编辑配置'}
+            </button>
+            {showConfigEditor && <AgentConfigEditor agentId={activeAgent} />}
+          </section>
+          <section className="overview-entry">
+            <span className="overview-entry-index">03</span>
+            <h2 className="overview-entry-title">继续会话</h2>
+            {recent.length === 0 ? (
+              <p className="overview-hint">最近没有可恢复的会话</p>
+            ) : (
+              <ul className="overview-agent-list">
+                {recent.map(p => (
+                  <li key={p.id}>
+                    <button type="button" className="overview-agent-btn" onClick={() => resumeSession(p)}>
+                      {p.title || p.source || p.id}
+                    </button>
+                  </li>
+                ))}
+              </ul>
+            )}
+          </section>
+        </div>
+        {error && <div className="overview-error" role="alert">{error}</div>}
       </div>
-      {error && <div className="overview-error" role="alert">{error}</div>}
     </div>
   )
 }
