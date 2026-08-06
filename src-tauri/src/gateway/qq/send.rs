@@ -99,13 +99,16 @@ pub async fn send_message(
         return Err(format!("HTTP 200 业务错误 code={biz_code}: {message}"));
     }
 
+    // 方案 1F：HTTP 200 但缺有效 id（缺失/null/空串/全空白）视为协议漂移，
+    // 不得报发送成功——否则消息实际未送达却返回成功，错误静默。
     let msg_id = data
         .get("id")
         .and_then(|v| v.as_str())
-        .unwrap_or("unknown")
-        .to_string();
+        .map(str::trim)
+        .filter(|s| !s.is_empty())
+        .ok_or_else(|| format!("HTTP 200 响应缺有效 id 字段: {data}"))?;
 
-    Ok(msg_id)
+    Ok(msg_id.to_string())
 }
 
 #[cfg(test)]
@@ -269,6 +272,72 @@ mod tests {
         .expect_err("code!=0 必须失败");
         assert!(error.contains("code=304023"));
         assert!(error.contains("发送消息频率限制"));
+        server.join().expect("server thread");
+    }
+
+    async fn expect_send_error(response: &'static [u8]) -> String {
+        let (address, _request_rx, server) = spawn_capture_server(response);
+        let client = test_client();
+        let error = send_message(
+            &client,
+            &format!("http://{}", address),
+            "t",
+            "chat-1",
+            &QqChatType::C2C,
+            "x",
+            None,
+            QqMsgType::Text,
+        )
+        .await
+        .expect_err("缺有效 id 必须失败");
+        server.join().expect("server thread");
+        error
+    }
+
+    #[tokio::test]
+    async fn send_message_rejects_missing_or_blank_id_on_http_200() {
+        // 方案 1F：HTTP 200 但缺有效 id = 协议漂移，不得报发送成功。
+        let err = expect_send_error(
+            b"HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: 2\r\nConnection: close\r\n\r\n{}",
+        ).await;
+        assert!(err.contains("id"), "空对象必须指明缺 id: {err}");
+
+        let err = expect_send_error(
+            b"HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: 11\r\nConnection: close\r\n\r\n{\"id\":null}",
+        ).await;
+        assert!(err.contains("id"), "id:null 必须失败: {err}");
+
+        let err = expect_send_error(
+            b"HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: 9\r\nConnection: close\r\n\r\n{\"id\":\"\"}",
+        ).await;
+        assert!(err.contains("id"), "id 空串必须失败: {err}");
+
+        let err = expect_send_error(
+            b"HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: 11\r\nConnection: close\r\n\r\n{\"id\":\"  \"}",
+        ).await;
+        assert!(err.contains("id"), "id 全空白必须失败: {err}");
+    }
+
+    #[tokio::test]
+    async fn send_message_accepts_non_blank_id() {
+        // 方案 1F：有效 id 判成功。
+        let (address, _request_rx, server) = spawn_capture_server(
+            b"HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: 14\r\nConnection: close\r\n\r\n{\"id\":\"msg-1\"}",
+        );
+        let client = test_client();
+        let msg_id = send_message(
+            &client,
+            &format!("http://{}", address),
+            "t",
+            "chat-1",
+            &QqChatType::C2C,
+            "x",
+            None,
+            QqMsgType::Text,
+        )
+        .await
+        .expect("有效 id 必须成功");
+        assert_eq!(msg_id, "msg-1");
         server.join().expect("server thread");
     }
 
