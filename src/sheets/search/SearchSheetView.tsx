@@ -46,6 +46,9 @@ export default function SearchSheetView({ sheet: _sheet, ctx }: { sheet: SheetRe
 
   return (
     <div className="search-sheet">
+      <div className="file-main-kicker">SEARCH</div>
+      <h2 className="file-main-title">跨会话搜索</h2>
+      <p className="search-sheet-description">在本地会话快照中查找消息，点击结果返回对应会话。</p>
       <input
         className="runtime-filter-input search-sheet-input"
         type="search"

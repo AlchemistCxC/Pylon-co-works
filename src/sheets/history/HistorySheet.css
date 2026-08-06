@@ -1,5 +1,144 @@
-/* W4-01 历史列表/导出：消费现有主题变量，零新样式体系 */
+/* A3-04c History：存档管理面采用统一 sheet header、列表行与操作控件。 */
 
-.history-sheet { flex: 1; padding: 24px; overflow-y: auto; color: var(--text); font-family: var(--font); }
-.history-row { display: flex; gap: 8px; align-items: center; padding: 6px 0; border-bottom: 1px solid var(--border); }
-.history-pager { display: flex; gap: 8px; align-items: center; margin-top: 16px; }
+.history-sheet {
+  flex: 1;
+  min-width: 0;
+  max-width: 1120px;
+  padding: var(--ui-space-6) clamp(var(--ui-space-5), 4vw, var(--ui-space-7));
+  overflow-y: auto;
+  color: var(--text);
+  font-family: var(--font);
+}
+
+.history-sheet .file-main-kicker,
+.search-sheet .file-main-kicker {
+  color: var(--accent);
+  font-family: var(--mono);
+  font-size: 11px;
+  font-weight: 650;
+  letter-spacing: .12em;
+}
+
+.history-sheet .file-main-title,
+.search-sheet .file-main-title {
+  margin: var(--ui-space-1) 0 var(--ui-space-5);
+  color: var(--text);
+  font-size: 24px;
+  font-weight: 700;
+  letter-spacing: -.025em;
+}
+
+.history-sheet > .search-result-list {
+  display: grid;
+  gap: var(--ui-space-2);
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.history-sheet > .search-result-list > li {
+  border: 1px solid var(--border);
+  border-radius: var(--ui-radius-md);
+  background: var(--bg-panel);
+  transition: border-color 120ms ease, background-color 120ms ease;
+}
+
+.history-sheet > .search-result-list > li:hover {
+  border-color: var(--border-focus);
+  background: var(--bg-hover);
+}
+
+.history-row {
+  display: flex;
+  gap: var(--ui-space-3);
+  align-items: center;
+  min-height: var(--ui-control-emphasis);
+  padding: var(--ui-space-2) var(--ui-space-3);
+}
+
+.history-row .search-result-path {
+  min-width: 0;
+  overflow: hidden;
+  flex: 1;
+  color: var(--text);
+  font-size: 13px;
+  font-weight: 600;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.history-row .search-result-text {
+  flex: 0 0 auto;
+  color: var(--text-dim);
+  font: 11px var(--mono);
+  white-space: nowrap;
+}
+
+.history-row .template-apply,
+.history-pager .template-apply {
+  min-width: 56px;
+  height: var(--ui-control-compact);
+  padding: 0 var(--ui-space-3);
+  border: 1px solid var(--border);
+  border-radius: var(--ui-radius-sm);
+  color: var(--text-dim);
+  background: var(--bg-input);
+  cursor: pointer;
+  font: 12px var(--font);
+  transition: background-color 120ms ease, border-color 120ms ease, color 120ms ease;
+}
+
+.history-row .template-apply:hover,
+.history-pager .template-apply:hover:not(:disabled) {
+  border-color: var(--border-focus);
+  color: var(--text);
+  background: var(--bg-hover);
+}
+
+.history-row .template-apply:first-of-type {
+  border-color: color-mix(in srgb, var(--accent) 45%, var(--border));
+  color: var(--accent);
+  background: color-mix(in srgb, var(--accent) 9%, transparent);
+}
+
+.history-row .template-apply:first-of-type:hover {
+  background: color-mix(in srgb, var(--accent) 16%, transparent);
+}
+
+.history-row .template-apply:focus-visible,
+.history-pager .template-apply:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+
+.history-row .template-apply:disabled,
+.history-pager .template-apply:disabled {
+  opacity: .42;
+  cursor: not-allowed;
+}
+
+.history-sheet > .file-tree-error {
+  margin-bottom: var(--ui-space-4);
+}
+
+.history-pager {
+  display: flex;
+  gap: var(--ui-space-2);
+  align-items: center;
+  margin-top: var(--ui-space-4);
+}
+
+.history-pager .file-section-hint {
+  min-width: 56px;
+  padding: 0 var(--ui-space-2);
+  color: var(--text-dim);
+  font: 11px/var(--ui-control-compact) var(--mono);
+  text-align: center;
+}
+
+@media (max-width: 720px) {
+  .history-sheet { padding: var(--ui-space-5) var(--ui-space-4); }
+  .history-row { flex-wrap: wrap; }
+  .history-row .search-result-path { flex-basis: calc(100% - var(--ui-space-3)); }
+  .history-row .search-result-text { margin-right: auto; }
+}
