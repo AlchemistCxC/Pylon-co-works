@@ -9,8 +9,8 @@
 }
 
 .runtime-sidebar {
-  width: 180px;
-  flex: 0 0 180px;
+  width: var(--sheet-sidebar-width, 250px);
+  flex: 0 0 var(--sheet-sidebar-width, 250px);
   border-right: 1px solid var(--border);
   padding: 12px;
   overflow-y: auto;

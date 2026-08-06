@@ -1,7 +1,7 @@
 /* W3-01 Gateway 概览：消费现有主题变量，零新样式体系 */
 
 .gateway-sheet { flex: 1; display: flex; min-width: 0; color: var(--text); font-family: var(--font); }
-.gateway-sidebar { width: 200px; flex: 0 0 200px; border-right: 1px solid var(--border); padding: 12px; overflow-y: auto; }
+.gateway-sidebar { width: var(--sheet-sidebar-width, 250px); flex: 0 0 var(--sheet-sidebar-width, 250px); border-right: 1px solid var(--border); padding: 12px; overflow-y: auto; }
 .gateway-main { flex: 1; min-width: 0; padding: 24px; overflow-y: auto; }
 .gateway-routes { display: flex; flex-direction: column; gap: 4px; margin: 12px 0; }
 .gateway-route { border: 1px solid var(--border); border-radius: 6px; }

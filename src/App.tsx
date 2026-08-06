@@ -214,6 +214,8 @@ export default function App() {
       '--msg-text': s.msgTextColor || 'var(--chat-text-color,var(--text))',
       // W1-03（F2-B）：宽度读 workspaceStore（预设不覆盖布局），非主题
       '--titlebar-sidebar-width': `${sidebarCollapsed ? 42 : sidebarWidth}px`,
+      // 各 sheet 左栏（agent/gateway/runtime/file）统一宽度，随 sidebarWidth 一致
+      '--sheet-sidebar-width': `${sidebarWidth}px`,
     }
     // color/number 字段由 THEME_CSS_VAR_MAP 循环注入（unit 格式化）；空 color 省略
     for (const [cssVar, key] of Object.entries(THEME_CSS_VAR_MAP)) {
