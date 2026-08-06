@@ -125,7 +125,7 @@ export function buildDemoMessages(sessionId: string): Message[] {
         reasoning('回放姿态（W4-02）已拍板姿态二：历史行进入 agent sheet 时只读，点击占位条转 live。需要改 AgentSheetView 的输入面门控，并把占位条组件抽出来复用。', 1),
         toolMsg(2, 'read', 'read', 'completed', '{ path: "src/sheets/AgentSheetView.tsx" }', 'import ChatView from "../components/chat/ChatView"\nimport ControlCenter from "../components/ControlCenter"\nexport default function AgentSheetView({ ctx }) {\n  return (\n    <div className="main">\n      <ChatView sessionId={ctx.activeSession} />\n      <ControlCenter sessionId={ctx.activeSession} />\n    </div>\n  )\n}'),
         reasoning('当前主区无条件渲染 ControlCenter。方案：引入只读姿态 store，姿态激活时隐藏 ControlCenter、渲染占位条；点击占位条 clear 姿态即转 live。', 3),
-        toolMsg(4, 'bash', 'execute', 'completed', '{ command: "npx tsc --noEmit" }', ANSI_BUILD, { contentBlocks: undefined }),
+        toolMsg(4, 'bash', 'execute', 'completed', '{ command: "npx tsc --noEmit" }', ANSI_BUILD),
         toolMsg(5, 'write', 'write', 'completed', '{ path: "src/sheets/AgentSheetView.tsx" }', '已写入回放姿态门控 + 占位条', {
           contentBlocks: [DIFF_BLOCK],
         }),
@@ -295,6 +295,24 @@ export function buildWorkspaceSearchResults(query: string): Array<{ path: string
     { path: 'docs/施工日志.md', line: 52, lineText: 'W4-02 接入只读回放视图 | 完成 | 姿态二' },
   ]
   return haystack.filter(item => item.lineText.toLowerCase().includes(q) || item.path.toLowerCase().includes(q))
+}
+
+// ── 权限请求（?demo-permission=1 opt-in，PermissionDialog 无关闭路径故不默认种）──
+
+export function buildDemoPermissionRequest() {
+  return {
+    requestId: 1,
+    sessionId: 'demo-fe',
+    toolCallId: 'tool-perm-1',
+    title: '执行 Bash 命令',
+    prompt: 'Peri 请求在 G:/work/prism-desktop 执行：pnpm install --frozen-lockfile',
+    options: [
+      { optionId: 'allow_once', label: '允许一次', kind: 'allow_once' },
+      { optionId: 'allow_always', label: '始终允许', kind: 'allow_always' },
+      { optionId: 'reject_once', label: '拒绝一次', kind: 'reject_once' },
+    ],
+    requestedAt: Date.now(),
+  }
 }
 
 // ── 会话恢复响应（new_session / load_persisted_session）─────────────────
