@@ -24,6 +24,13 @@ export default function FileSheetSidebar({ activeSection, targetSource, onSelect
     scm: 'SCM',
     views: '视图',
   }
+  const activityMeta: Record<FileSheetSection, { glyph: string; description: string }> = {
+    sessions: { glyph: 'S', description: '切换工作区会话' },
+    files: { glyph: 'F', description: '浏览工作区文件' },
+    search: { glyph: '/', description: '搜索工作区内容' },
+    scm: { glyph: 'G', description: '查看 Git 状态和 diff' },
+    views: { glyph: 'V', description: '切换编辑器视图' },
+  }
   return (
     <div className="file-sidebar">
       <div className="file-activity-bar">
@@ -33,9 +40,11 @@ export default function FileSheetSidebar({ activeSection, targetSource, onSelect
             type="button"
             className={`file-activity-item ${activeSection === section ? 'active' : ''}`}
             onClick={() => onSelectSection(section)}
-            title={labels[section]}
+            title={`${labels[section]}：${activityMeta[section].description}`}
+            aria-label={`${labels[section]}：${activityMeta[section].description}`}
           >
-            {labels[section]}
+            <span className="file-activity-glyph" aria-hidden="true">{activityMeta[section].glyph}</span>
+            <span className="file-activity-label">{labels[section]}</span>
           </button>
         ))}
       </div>

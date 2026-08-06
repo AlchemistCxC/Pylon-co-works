@@ -35,6 +35,12 @@ export default function FileSheetView({ sheet, ctx }: { sheet: SheetRecord; ctx:
   const [instruction, setInstruction] = useState('')
   const [selection, setSelection] = useState<DispatchSelection | null>(null)
   const [fileContent, setFileContent] = useState('')
+  const lineCount = fileContent ? fileContent.split('\n').length : 0
+  const selectionLabel = selection
+    ? selection.startLine === selection.endLine
+      ? `L${selection.startLine}`
+      : `L${selection.startLine}–L${selection.endLine}`
+    : null
 
   const selectSection = (section: FileSheetSection) => dispatch({ type: 'set-section', section })
   const selectSource = (source: string) => dispatch({ type: 'set-source', source })
@@ -97,10 +103,31 @@ export default function FileSheetView({ sheet, ctx }: { sheet: SheetRecord; ctx:
               onClearSelection={() => setSelection(null)}
             />
             {truncated && <div className="file-truncated-hint" role="status">内容不完整（truncated）</div>}
-            <FileTabView source={state.targetSource} path={activeFile} onTruncated={setTruncated} onContentReady={setFileContent} />
+            <FileTabView
+              source={state.targetSource}
+              path={activeFile}
+              onTruncated={setTruncated}
+              onContentReady={setFileContent}
+              onSelectionInvalidated={() => setSelection(null)}
+            />
+            <div className="file-status-bar" role="status" aria-live="polite">
+              <span className="file-status-path" title={activeFile}>{activeFile}</span>
+              <span>{lineCount} 行</span>
+              <span className={selectionLabel ? 'file-status-selection active' : 'file-status-selection'}>
+                {selectionLabel ? `已选择 ${selectionLabel}` : '拖选代码以回传会话'}
+              </span>
+              <span>{state.targetSource || '未指向会话'}</span>
+            </div>
           </>
         ) : (
-          <div className="file-tab-empty">打开一个文件开始阅读</div>
+          <div className="file-tab-empty">
+            <div className="file-empty-card">
+              <div className="file-empty-mark" aria-hidden="true">{'</>'}</div>
+              <strong>打开一个文件开始阅读</strong>
+              <span>从左侧文件树选择文件，或切换到 SCM 查看改动。</span>
+              <span className="file-empty-shortcut">选中文本后，可在下方发令栏发送给当前会话</span>
+            </div>
+          </div>
         )}
       </main>
     </div>

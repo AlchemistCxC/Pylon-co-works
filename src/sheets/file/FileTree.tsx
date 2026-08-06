@@ -46,11 +46,14 @@ export default function FileTree({ source, onOpen }: { source: string | null; on
   const renderEntries = (entries: readonly WorkspaceEntry[], depth: number): React.ReactNode[] => entries.map(entry => (
     <div key={entry.path} className="file-tree-node" style={{ paddingLeft: depth * 14 + 8 }}>
       {entry.kind === 'folder'
-        ? <button type="button" className="file-tree-row file-tree-folder" onClick={() => load(entry.path)}>
+        ? <button type="button" className="file-tree-row file-tree-folder" onClick={() => load(entry.path)} title={entry.path}>
             <span className="file-tree-caret">{entry.expandable === false ? '▾' : '▸'}</span>
+            <span className="file-tree-kind" aria-hidden="true">D</span>
             <span className="file-tree-label">{entry.label}</span>
           </button>
-        : <button type="button" className="file-tree-row file-tree-file" onClick={() => openFile(entry.path)}>
+        : <button type="button" className="file-tree-row file-tree-file" onClick={() => openFile(entry.path)} title={entry.path}>
+            <span className="file-tree-caret file-tree-caret-spacer" aria-hidden="true" />
+            <span className="file-tree-kind" aria-hidden="true">F</span>
             <span className="file-tree-label">{entry.label}</span>
           </button>}
       {entry.kind === 'folder' && entry.entries && renderEntries(entry.entries, depth + 1)}
