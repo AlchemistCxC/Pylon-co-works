@@ -41,7 +41,7 @@ const reconnectSection = settings.slice(reconnectStart, reloadStart)
 assert.match(reconnectSection, /if \(reconnecting\) return/)
 assert.match(reconnectSection, /setReconnecting\(true\)/)
 assert.match(reconnectSection, /beginReconnect\(/)
-assert.match(reconnectSection, /await invoke\('reconnect_agent'\)/)
+assert.match(reconnectSection, /await agentClient\.reconnectAgent\(\)/)
 assert.match(reconnectSection, /finally \{ setReconnecting\(false\) \}/)
 
 const tryStart = reconnectSection.indexOf('    try {')
@@ -50,7 +50,7 @@ assert.ok(tryStart >= 0 && catchStart > tryStart, 'reconnect command try/catch m
 const commandResolvePath = reconnectSection.slice(tryStart, catchStart)
 assert.doesNotMatch(commandResolvePath, /setAgentStatus\([^\n]*status:\s*['"]connected['"]/)
 assert.doesNotMatch(commandResolvePath, /completeReconnect\(/)
-assert.match(commandResolvePath, /await invoke\('reconnect_agent'\)/)
+assert.match(commandResolvePath, /await agentClient\.reconnectAgent\(\)/)
 
 const commandFailurePath = reconnectSection.slice(catchStart)
 assert.match(commandFailurePath, /reportRuntimeError\('重连 Agent', error\)/)

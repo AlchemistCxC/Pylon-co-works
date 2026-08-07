@@ -7,6 +7,7 @@ import { PhysicalSize } from '@tauri-apps/api/dpi'
 import { clearWindowSize } from '../windowSizePersistence'
 import { buildExportPayload, configFileName, preflightImportPayload } from '../configExportImport'
 import { importConfigurationTransaction } from '../application/transactions/importConfigurationTransaction'
+import { createAgentClient } from '../infrastructure/acp/agentClient'
 import { ZoneGroupFields } from '../themeFieldRenderer'
 import { useStore } from '../store'
 import { useIdentityStore } from '../identityStore'
@@ -24,10 +25,13 @@ import { switchAgentTransaction } from '../application/transactions/switchAgentT
 import './SettingsCommon.css'
 import './Settings.css'
 import { normalizeAgentStatus, statusLabel } from './settings/agentTypes'
-import { beginReconnect, failReconnect, normalizeAgentList } from './settings/agentState'
+import { beginReconnect, failReconnect } from './settings/agentState'
 import ConfigOptionsPanel from './settings/ConfigOptionsPanel'
 import TemplateLibrary from './settings/TemplateLibrary'
 import { resolveToolIndicatorAsset, toolIndicatorOptions } from './chat/toolIndicatorAssets'
+
+// FE-AUD-008：typed client 收口 agent 域 command literal
+const agentClient = createAgentClient({ invoke: (cmd, args) => invoke(cmd, args as Record<string, unknown> | undefined) })
 
 // ── helpers ──
 
@@ -261,7 +265,7 @@ export default function Settings({ onClose, activeSessionId }: { onClose?: () =>
     if (switchingAgentId || agentId === activeAgent) return
     setSwitchingAgentId(agentId)
     await switchAgentTransaction(agentId, agentId, {
-      switchAgent: () => invoke('switch_agent', { name: agentId }),
+      switchAgent: () => agentClient.switchAgent(agentId),
       resetRuntime: () => useRuntimeStore.getState().resetAll(),
       setActiveAgent: id => setActiveAgent(id),
       reportError: (action, error) => reportRuntimeError(action, error),
@@ -275,7 +279,7 @@ export default function Settings({ onClose, activeSessionId }: { onClose?: () =>
     setReconnecting(true)
     setAgentStatus(activeAgent, { ...beginReconnect({ ...currentStatus, pending: false }), agent: activeAgent })
     try {
-      await invoke('reconnect_agent')
+      await agentClient.reconnectAgent()
       // command resolve 只代表请求已接受，最终状态由 pylon:agent-status 事件确认。
     } catch (error) {
       const detail = reportRuntimeError('重连 Agent', error)
@@ -287,9 +291,9 @@ export default function Settings({ onClose, activeSessionId }: { onClose?: () =>
     if (reloading) return
     setReloading(true)
     try {
-      await invoke('reload_agents')
-      const list = await invoke<unknown>('list_agents')
-      useIdentityStore.getState().setAgents(normalizeAgentList(list))
+      await agentClient.reloadAgents()
+      const list = await agentClient.listAgents()
+      useIdentityStore.getState().setAgents(list)
     } catch (error) {
       reportRuntimeError('重载 Agent 配置', error)
     } finally { setReloading(false) }

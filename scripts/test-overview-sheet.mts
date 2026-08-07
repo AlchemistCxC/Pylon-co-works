@@ -17,7 +17,7 @@ assert.match(overview, /配置 Agent/, '必须含配置 Agent 入口')
 assert.match(overview, /继续会话/, '必须含继续会话入口')
 
 // 2. 选择 Agent：list → switch_agent → 成功后 open agent sheet（无缝进 sheet）
-assert.match(overview, /invoke\('switch_agent', \{ name: agent\.id \}\)/, '选择 Agent 必须调 switch_agent')
+assert.match(overview, /agentClient\.switchAgent\(agent\.id\)/, '选择 Agent 必须经 typed client 调 switch_agent')
 assert.match(overview, /switchAgentTransaction\(agent\.id, agent\.name, \{/, '必须经 switch 事务（application/transactions）')
 assert.match(overview, /ctx\.openSheet\(\{ kind: 'agent', title, agentId: id \}\)/, '成功后必须 open agent sheet')
 assert.match(overview, /pylon:agent-switched/, '切换后必须广播 agent-switched')

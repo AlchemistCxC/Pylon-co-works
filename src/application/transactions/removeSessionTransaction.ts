@@ -10,7 +10,7 @@ import type { TransactionResult } from './transactionResult'
 
 export interface RemoveSessionDeps {
   findSession: (id: string) => Session | undefined
-  closeSession: (source: string) => Promise<void>
+  closeSession: (source: string) => Promise<unknown>
   removeSession: (id: string) => void
   clearMessages: (id: string) => void
   reportError: (action: string, error: unknown) => void

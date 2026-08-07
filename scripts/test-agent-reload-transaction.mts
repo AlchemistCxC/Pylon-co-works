@@ -16,9 +16,9 @@ assert.ok(reloadEnd > reloadStart, 'reloadAgents source section must be bounded'
 const reloadSource = settings.slice(reloadStart, reloadEnd)
 
 const callOrder = [
-  "invoke('reload_agents')",
-  "invoke<unknown>('list_agents')",
-  'useIdentityStore.getState().setAgents(normalizeAgentList(list))',
+  'agentClient.reloadAgents()',
+  'agentClient.listAgents()',
+  'useIdentityStore.getState().setAgents(list)',
 ]
 let previous = -1
 for (const token of callOrder) {

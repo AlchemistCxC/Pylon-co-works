@@ -8,6 +8,7 @@ import { normalizeAgentStatus } from '../src/components/settings/agentTypes.ts'
 
 const app = readFileSync(new URL('../src/App.tsx', import.meta.url), 'utf8')
 const bootstrap = readFileSync(new URL('../src/app/bootstrap/bootstrapApplication.ts', import.meta.url), 'utf8')
+const agentClient = readFileSync(new URL('../src/infrastructure/acp/agentClient.ts', import.meta.url), 'utf8')
 const runtimeStore = readFileSync(new URL('../src/runtimeStore.ts', import.meta.url), 'utf8')
 
 // FE-AUD-005：App 只保留单一 bootstrap effect（hydrate → agents → listener），
@@ -19,7 +20,8 @@ assert.notEqual(effectEnd, -1, 'bootstrap effect 必须有清理边界')
 const lifecycle = app.slice(effectStart, effectEnd + '\n  }, [bootstrapRetry])'.length)
 
 assert.match(lifecycle, /bootstrapApplication\(\{/, 'App 必须走单一 bootstrap 事务')
-assert.match(lifecycle, /fetchAgents: \(\) => invoke(?:<[^>]+>)?\('list_agents'\)/, 'bootstrap 必须异步加载 list_agents')
+assert.match(lifecycle, /fetchAgents: \(\) => agentClient\.listAgents\(\)/, 'bootstrap 必须经 typed client 加载 list_agents')
+assert.match(agentClient, /invoke\('list_agents'\)/, 'list_agents command literal 收口在 client')
 assert.match(lifecycle, /cancelled: \(\) => disposed/, 'bootstrap 结果必须受 disposed guard 保护')
 assert.match(lifecycle, /listen<AgentStatusPayload>\('pylon:agent-status'/, '必须注册 pylon:agent-status listener（H-9 事件前缀同步）')
 assert.match(lifecycle, /const activeAgent = useIdentityStore\.getState\(\)\.activeAgent/, 'listener 必须从最新 identity store 读取 activeAgent')

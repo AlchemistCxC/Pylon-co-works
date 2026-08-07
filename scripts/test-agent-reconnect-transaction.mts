@@ -19,7 +19,7 @@ const agentState = readFileSync(new URL('../src/components/settings/agentState.t
 assert.match(settings, /const reconnectAgent = async \(\) => \{[\s\S]*?if \(reconnecting\) return/)
 assert.match(settings, /setReconnecting\(true\)/)
 assert.match(settings, /setAgentStatus\(activeAgent, \{ \.\.\.beginReconnect\(\{ \.\.\.currentStatus, pending: false \}\), agent: activeAgent \}\)/)
-assert.match(settings, /await invoke\('reconnect_agent'\)/)
+assert.match(settings, /await agentClient\.reconnectAgent\(\)/)
 assert.match(settings, /setAgentStatus\(activeAgent, \{ \.\.\.failReconnect\(\{ \.\.\.currentStatus, pending: false \}, detail\.message\), agent: activeAgent \}\)/)
 assert.match(settings, /finally \{ setReconnecting\(false\) \}/)
 assert.match(settings, /disabled=\{reconnecting\}/)

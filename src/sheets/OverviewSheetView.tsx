@@ -4,6 +4,8 @@ import { IS_TAURI } from '../infrastructure/tauri/env'
 import { useIdentityStore, type AgentEntry } from '../identityStore'
 import { useRuntimeStore } from '../runtimeStore'
 import { reportRuntimeError } from '../runtimeError'
+import { createAgentClient } from '../infrastructure/acp/agentClient'
+import { createSessionClient } from '../infrastructure/acp/sessionClient'
 import { switchAgentTransaction } from '../application/transactions/switchAgentTransaction'
 import { resumePersistedSessionTransaction } from '../application/transactions/resumePersistedSessionTransaction'
 import AgentConfigEditor from '../components/settings/AgentConfigEditor'
@@ -29,12 +31,13 @@ export default function OverviewSheetView({ ctx }: { sheet: SheetRecord; ctx: Sh
   const [recent, setRecent] = useState<PersistedSessionSummary[]>([])
   const [showConfigEditor, setShowConfigEditor] = useState(false)
 
-  // W1-06：加载最近会话（宽松 normalize，形状漂移不崩）
+  // W1-06：加载最近会话（client 已 normalize，取最近 5 个展示）
   useEffect(() => {
     if (!IS_TAURI) return
     let disposed = false
-    invoke('list_persisted_sessions').then(raw => {
-      if (!disposed) setRecent(recentPersistedSessions(raw))
+    const client = createSessionClient({ invoke: (cmd, args) => invoke(cmd, args as Record<string, unknown> | undefined) })
+    client.listPersistedSessions().then(all => {
+      if (!disposed) setRecent(recentPersistedSessions(all))
     }).catch(err => reportRuntimeError('读取最近会话', err))
     return () => { disposed = true }
   }, [])
@@ -43,8 +46,9 @@ export default function OverviewSheetView({ ctx }: { sheet: SheetRecord; ctx: Sh
     if (switchingId) return
     setSwitchingId(agent.id)
     setError('')
+    const agentClient = createAgentClient({ invoke: (cmd, args) => invoke(cmd, args as Record<string, unknown> | undefined) })
     const result = await switchAgentTransaction(agent.id, agent.name, {
-      switchAgent: () => invoke('switch_agent', { name: agent.id }),
+      switchAgent: () => agentClient.switchAgent(agent.id),
       resetRuntime: () => useRuntimeStore.getState().resetAll(),
       setActiveAgent: id => useIdentityStore.getState().setActiveAgent(id),
       reportError: (action, err) => {

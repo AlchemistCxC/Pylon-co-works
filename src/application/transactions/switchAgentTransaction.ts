@@ -9,7 +9,7 @@
 import type { TransactionResult } from './transactionResult'
 
 export interface SwitchAgentDeps {
-  switchAgent: (agentId: string) => Promise<void>
+  switchAgent: (agentId: string) => Promise<unknown>
   resetRuntime: () => void
   setActiveAgent: (agentId: string) => void
   reportError: (action: string, error: unknown) => void

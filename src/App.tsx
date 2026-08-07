@@ -2,7 +2,7 @@ import { useState, useEffect, lazy, Suspense, useRef, useMemo } from 'react'
 import SheetLayout from './workspace-sheets/SheetLayout'
 import WorkspaceTitlebar from './workspace-sheets/WorkspaceTitlebar'
 import { useStore } from './store'
-import { useIdentityStore, type AgentEntry } from './identityStore'
+import { useIdentityStore } from './identityStore'
 import { useRuntimeStore } from './runtimeStore'
 import { useWorkspaceStore } from './workspaceStore'
 import { IS_TAURI } from './infrastructure/tauri/env'
@@ -18,6 +18,7 @@ import { toCssBackgroundImage } from './backgroundImage'
 import { THEME_CSS_VAR_MAP, THEME_FIELD_DEFS } from './themeFieldDefs'
 import { listen } from '@tauri-apps/api/event'
 import { normalizeAgentStatus, type AgentStatusPayload } from './components/settings/agentTypes'
+import { createAgentClient } from './infrastructure/acp/agentClient'
 import { createPermissionController, registerPermissionController } from './infrastructure/acp/permissionController'
 import { seedDemo } from './demo/seed'
 import { bootstrapApplication } from './app/bootstrap/bootstrapApplication'
@@ -40,6 +41,9 @@ function LazyDialogFallback() {
     </div>
   )
 }
+
+// FE-AUD-008：typed client 收口 command literal（注入真实 transport）
+const agentClient = createAgentClient({ invoke: (cmd, args) => invoke(cmd, args as Record<string, unknown> | undefined) })
 
 // 窗口控制句柄：非 Tauri 环境（浏览器预览）降级为无操作 stub。模块级单例，避免每 render 重建。
 const appWindowSingleton = (() => { try { return getCurrentWindow() } catch { return { minimize() {}, isFullscreen() { return Promise.resolve(false) }, setFullscreen(_v: boolean) { return Promise.resolve() }, destroy() {} } } })()
@@ -74,7 +78,7 @@ export default function App() {
     void bootstrapApplication({
       isTauri: IS_TAURI,
       hydrateDomains: () => useWorkspaceStore.getState().hydrateWorkspaceSheets(),
-      fetchAgents: () => invoke<AgentEntry[]>('list_agents').then((list: AgentEntry[]) => (Array.isArray(list) ? list : [])),
+      fetchAgents: () => agentClient.listAgents(),
       applyAgents: list => useIdentityStore.getState().setAgents(list),
       registerListeners: async () => {
         const unlisten = await listen<AgentStatusPayload>('pylon:agent-status', event => {

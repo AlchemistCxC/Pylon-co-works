@@ -50,8 +50,10 @@ assert.deepEqual(normalizePersistedSessions([null, 'str', { title: 'no-id' }]), 
 // 3. Overview 接线：list_persisted_sessions → recentPersistedSessions；不直接 load
 const overview = readFileSync(new URL('../src/sheets/OverviewSheetView.tsx', import.meta.url), 'utf8')
 const resumeTxn = readFileSync(new URL('../src/application/transactions/resumePersistedSessionTransaction.ts', import.meta.url), 'utf8')
-assert.match(overview, /invoke\('list_persisted_sessions'\)/, '必须调 list_persisted_sessions')
-assert.match(overview, /recentPersistedSessions\(raw\)/, '必须经纯函数取最近')
+const sessionClient = readFileSync(new URL('../src/infrastructure/acp/sessionClient.ts', import.meta.url), 'utf8')
+assert.match(overview, /client\.listPersistedSessions\(\)/, '必须经 session client 调 list_persisted_sessions')
+assert.match(sessionClient, /invoke\('list_persisted_sessions'\)/, 'list_persisted_sessions command literal 收口在 client')
+assert.match(overview, /recentPersistedSessions\(all\)/, '必须经纯函数取最近')
 assert.equal(overview.includes("invoke('load_persisted_session'"), false, 'overview 不得直接 load（由 ChatView 挂载后 lifecycle 承担，listener 就绪）')
 assert.match(overview, /resumePersistedSessionTransaction\(/, '恢复必须经 resume 事务')
 assert.match(overview, /ctx\.selectSession\(result\.value\)/, '恢复必须 selectSession')
