@@ -24,6 +24,11 @@ export function clearSessionUiState(sessionId: string): void {
   registry.delete(sessionId)
 }
 
+/** 清空全部会话 UI 状态（测试夹具 resetStores 用；生产代码不调用） */
+export function clearAllSessionUiState(): void {
+  registry.clear()
+}
+
 /**
  * 按会话作用域的 UI 状态。sessionId 变化时从注册表恢复（无存档用 initial）。
  * 注意：initial 只在首次/无存档时生效，后续被注册表覆盖；不必担心 initial
