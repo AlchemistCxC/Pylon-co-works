@@ -98,7 +98,7 @@ assert.match(sheet, /listen<unknown>\('pylon:runtime-log'/, '必须订阅实时�
 assert.match(sheet, /mergeRuntimeLogs\(previous, normalizeRuntimeLogList\(raw\)\)/, 'list 必须经去重合并')
 assert.match(sheet, /mergeRuntimeLogs\(previous, \[entry\]\)/, '增量必须经去重合并')
 assert.match(sheet, /unlisten\.then\(stop => stop\(\)\)/, 'unmount 必须清理 listener')
-assert.match(sheet, /invoke\('clear_runtime_logs'\)/, '必须支持 clear')
+assert.match(sheet, /\.clearRuntimeLogs\(\)/, '必须经 typed client 支持 clear')
 assert.match(sheet, /filterRuntimeLogs\(entries, filter\)/, '必须纯过滤')
 assert.equal(sheet.includes('rightPanel'), false, 'runtime 无右栏')
 

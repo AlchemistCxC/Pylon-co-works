@@ -4,6 +4,7 @@ import { browserReducer, createBrowserState } from '../../domains/browser/browse
 import { invoke } from '@tauri-apps/api/core'
 import { listen } from '@tauri-apps/api/event'
 import { classifyBrowserStartError } from '../../infrastructure/tauri/browserContracts.ts'
+import { createBrowserClient } from '../../infrastructure/tauri/browserClient'
 import { IS_TAURI } from '../../infrastructure/tauri/env.ts'
 import { reportRuntimeError } from '../../runtimeError'
 import type { SheetContext, SheetRecord } from '../../workspace-sheets/sheetTypes'
@@ -45,7 +46,7 @@ export default function BrowserSheetView({ sheet: _sheet, ctx: _ctx }: { sheet: 
     if (!element || !IS_TAURI || snapshot.phase !== 'ready') return
     const rect = element.getBoundingClientRect()
     if (rect.width < 1 || rect.height < 1) return
-    void invoke('browser_set_bounds', {
+    void createBrowserClient({ invoke: (cmd, args) => invoke(cmd, args as Record<string, unknown> | undefined) }).setBounds({
       bounds: {
         x: Math.round(rect.left),
         y: Math.round(rect.top),
@@ -136,7 +137,9 @@ export default function BrowserSheetView({ sheet: _sheet, ctx: _ctx }: { sheet: 
   }
 
   useEffect(() => () => {
-    if (IS_TAURI && snapshotRef.current.phase === 'ready') void invoke('browser_close').catch(() => {})
+    if (IS_TAURI && snapshotRef.current.phase === 'ready') {
+      void createBrowserClient({ invoke: (cmd, args) => invoke(cmd, args as Record<string, unknown> | undefined) }).close().catch(() => {})
+    }
   }, [])
 
   return (

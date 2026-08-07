@@ -19,7 +19,7 @@ assert.match(chatView, /controllerHandleRef\.current\?\.requestCancel/, 'ChatVie
 
 assert.match(controller, /requestCancel = \(source: string\) => \{/, 'controller 必须提供 requestCancel')
 assert.match(controller, /dispatch\(\{ type: 'begin-cancel', source \}\)/, '取消必须先进入 canceling 状态')
-assert.match(controller, /invoke\('cancel_prompt', \{ source \}\)/, 'controller 必须调用后端取消命令')
+assert.match(controller, /\.cancelPrompt\(source\)/, 'controller 必须经 typed client 调用后端取消命令')
 assert.match(controller, /dispatch\(\{ type: 'cancel-success', source \}\)/, '命令 resolve 必须收敛为 cancel-success')
 assert.match(controller, /dispatch\(\{ type: 'cancel-rejected', source, error/, '命令 reject 必须收敛为 cancel-rejected')
 assert.match(controller, /event\.payload\.cancelled === true/, '事件控制器必须识别 cancelled 终止事件')

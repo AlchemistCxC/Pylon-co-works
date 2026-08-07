@@ -3,6 +3,7 @@ import { useRuntimeStore } from '../../runtimeStore'
 import { normalizeConfigOptions } from './configOptionState'
 import ConfigOptionField from './ConfigOptionField'
 import { invoke } from '@tauri-apps/api/core'
+import { createChatClient } from '../../infrastructure/acp/chatClient'
 import { reportRuntimeError } from '../../runtimeError'
 
 export default function ConfigOptionsPanel({ sessionSource }: { sessionSource?: string }) {
@@ -34,7 +35,7 @@ export default function ConfigOptionsPanel({ sessionSource }: { sessionSource?: 
     })
     patch(value)
     try {
-      await invoke('set_config_option', { source: sessionSource, key: id, value })
+      await createChatClient({ invoke: (cmd, args) => invoke(cmd, args as Record<string, unknown> | undefined) }).setConfigOption({ source: sessionSource, key: id, value })
     } catch (error) {
       if (latestReqRef.current[id] !== seq) return
       patch(previous)

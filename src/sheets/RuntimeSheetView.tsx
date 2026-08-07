@@ -3,6 +3,7 @@ import { invoke } from '@tauri-apps/api/core'
 import { listen } from '@tauri-apps/api/event'
 import { useRuntimeStore } from '../runtimeStore'
 import { reportRuntimeError } from '../runtimeError'
+import { createRuntimeClient } from '../infrastructure/tauri/runtimeClient'
 import { normalizeRuntimeLogEntry, normalizeRuntimeLogList, normalizeStartupDiagnostics, type StartupDiagnostics } from '../infrastructure/tauri/runtimeLogContracts.ts'
 import { collectRuntimeLogFacets, deriveCrashMarkers, filterRuntimeLogs, mergeRuntimeLogs, type CrashMarker, type RuntimeLogEntry, type RuntimeLogFilter } from '../domains/runtime/runtimeLogs.ts'
 import type { SheetContext, SheetRecord } from '../workspace-sheets/sheetTypes'
@@ -51,7 +52,7 @@ export default function RuntimeSheetView({ sheet: _sheet, ctx: _ctx }: { sheet: 
 
   const clear = async () => {
     try {
-      await invoke('clear_runtime_logs')
+      await createRuntimeClient({ invoke: (cmd, args) => invoke(cmd, args as Record<string, unknown> | undefined) }).clearRuntimeLogs()
       setEntries([])
     } catch (error) {
       reportRuntimeError('清空运行日志', error)

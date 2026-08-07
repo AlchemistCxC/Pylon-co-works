@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react'
 import { invoke } from '@tauri-apps/api/core'
 import { useRuntimeStore } from '../../runtimeStore'
 import { reportRuntimeError } from '../../runtimeError'
+import { createChatClient } from '../../infrastructure/acp/chatClient'
 import { buildDispatchMessage, type DispatchSelection } from '../../domains/fileDispatch/dispatchMessage.ts'
 import { lineFromDataNode, normalizeSelectionRange } from './selectionCapture.ts'
 
@@ -60,7 +61,7 @@ export default function DispatchBar({
       truncated: false,
     })
     try {
-      await invoke('send_message', { source: targetSource, content: message, persona: '' })
+      await createChatClient({ invoke: (cmd, args) => invoke(cmd, args as Record<string, unknown> | undefined) }).sendMessage({ source: targetSource, content: message, persona: '', sessionPrompt: '', attachments: [] })
       // invoke 已发出（同步创建成功即清）——不等 resolve，保留选区
       onInstructionChange('')
     } catch (err) {

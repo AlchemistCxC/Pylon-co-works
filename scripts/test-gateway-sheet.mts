@@ -36,10 +36,10 @@ import { normalizeGatewayStatus, classifyGatewayWriteError } from '../src/infras
 
 // 2. 组件接线：gateway_status 只读概览；适配器/平台会话两分区；inject 归 Prism 不编辑
 const view = readFileSync(new URL('../src/sheets/gateway/GatewaySheetView.tsx', import.meta.url), 'utf8')
-assert.match(view, /invoke<unknown>\('gateway_status'\)/, '必须调 gateway_status')
-assert.match(view, /normalizeGatewayStatus\(raw\)/, '必须经宽容 normalize')
-assert.match(view, /invoke<unknown>\('gateway_sessions'\)/, '必须调 gateway_sessions（Phase 2 接线）')
-assert.match(view, /normalizeGatewaySessions\(raw\)/, '平台会话必须经宽容 normalize')
+assert.match(view, /\.status\(\)/, '必须经 gateway client 调 gateway_status')
+assert.match(view, /raw as GatewayStatus/, '状态必须 typed 消费')
+assert.match(view, /\.sessions\(\)/, '必须经 gateway client 调 gateway_sessions（Phase 2 接线）')
+assert.match(view, /raw as PlatformSession\[\]/, '平台会话必须 typed 消费')
 assert.match(view, /归 Prism 管理，只读/, 'inject 必须只读提示归 Prism')
 assert.equal(view.includes('rightPanel'), false, 'gateway 无右栏')
 const css = readFileSync(new URL('../src/sheets/gateway/GatewaySheet.css', import.meta.url), 'utf8')
@@ -59,7 +59,7 @@ assert.deepEqual(classifyGatewayWriteError('锁中毒'), { kind: 'lock-poisoned'
 assert.deepEqual(classifyGatewayWriteError(new Error('protocol_error')), { kind: 'error', message: 'protocol_error' })
 
 // 5. 组件接线：update→reload 顺序（显式 scope 契约）；命令缺失明确「待后端」；锁中毒展示失败
-assert.match(view, /invoke\('update_agents_config', \{ scope: 'gateway'/, 'update_agents_config 必须带显式 scope=gateway（Phase 3 拍板）')
-assert.match(view, /invoke\('reload_gateway'\)/, '必须调 reload_gateway')
+assert.match(view, /\.updateAgentsConfig\(\{ scope: 'gateway'/, 'update_agents_config 必须经 typed client 带显式 scope=gateway（Phase 3 拍板）')
+assert.match(view, /\.reload\(\)/, '必须经 gateway client 调 reload_gateway')
 assert.match(view, /待后端：update_agents_config 命令尚未提供/, '写回缺失必须明确「待后端」')
 assert.match(view, /磁盘已更新、运行态仍旧配置/, '锁中毒必须展示部分成功')

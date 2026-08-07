@@ -1,6 +1,7 @@
 import { useStore } from '../../store'
 import { useRuntimeStore } from '../../runtimeStore'
 import { invoke } from '@tauri-apps/api/core'
+import { createRuntimeClient } from '../../infrastructure/tauri/runtimeClient'
 import { applyApprovalModeChange, nextApprovalMode } from '../../domains/permission/approvalMode.ts'
 
 /**
@@ -27,7 +28,7 @@ export default function ModeWidget() {
       nextMode: next,
       previousMode,
       writeMode: setApprovalMode,
-      invokeSet: targetMode => invoke('set_approval_mode', { mode: targetMode }),
+      invokeSet: targetMode => createRuntimeClient({ invoke: (cmd, args) => invoke(cmd, args as Record<string, unknown> | undefined) }).setApprovalMode(targetMode),
     }).catch(error => {
       window.dispatchEvent(new CustomEvent('pylon:mode-error', { detail: String(error) }))
     })

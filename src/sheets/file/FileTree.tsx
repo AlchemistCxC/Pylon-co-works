@@ -2,6 +2,7 @@ import { useCallback, useEffect, useState } from 'react'
 import { ChevronDown, ChevronRight, Folder, FolderOpen } from 'lucide-react'
 import { invoke } from '@tauri-apps/api/core'
 import { reportRuntimeError } from '../../runtimeError'
+import { createWorkspaceClient } from '../../infrastructure/tauri/workspaceClient'
 import { classifyWorkspaceError, mergeWorkspaceEntries, normalizeWorkspaceEntries } from '../../infrastructure/tauri/workspaceContracts.ts'
 import type { WorkspaceEntry, WorkspaceTree } from '../../components/right-panel/rightPanelTypes'
 import FileTypeIcon from './FileTypeIcon'
@@ -27,7 +28,7 @@ export default function FileTree({ source, activeFile, onOpen }: {
     const key = relativePath ?? ''
     setLoading(previous => new Set(previous).add(key))
     try {
-      const raw = await invoke('list_workspace_entries', { source, relativePath })
+      const raw = await createWorkspaceClient({ invoke: (cmd, args) => invoke(cmd, args as Record<string, unknown> | undefined) }).listEntries(relativePath ?? '')
       const entries = normalizeWorkspaceEntries(raw)
       setTree(previous => relativePath
         ? { entries: mergeWorkspaceEntries(previous.entries, relativePath, entries), selectedPath: previous.selectedPath }
@@ -68,7 +69,7 @@ export default function FileTree({ source, activeFile, onOpen }: {
   const openFile = (path: string) => {
     if (!source) return
     setTree(previous => ({ ...previous, selectedPath: path }))
-    void invoke('read_workspace_text', { source, relativePath: path }).catch(err => {
+    void createWorkspaceClient({ invoke: (cmd, args) => invoke(cmd, args as Record<string, unknown> | undefined) }).readText(path).catch(err => {
       reportRuntimeError('读取文件', err)
     })
     onOpen(path)

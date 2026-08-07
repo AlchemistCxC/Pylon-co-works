@@ -1,4 +1,5 @@
 import { invoke } from '@tauri-apps/api/core'
+import { createChatClient } from '../../infrastructure/acp/chatClient'
 import { useRuntimeStore } from '../../runtimeStore'
 import { applySessionModeChange, normalizeSessionMode } from './sessionModeState'
 
@@ -11,7 +12,7 @@ export function setSessionMode(source: string, nextMode: string): Promise<void> 
     nextMode: normalizedMode,
     previousMode,
     writeMode: mode => useRuntimeStore.getState().setSessionMode(source, mode),
-    invokeSet: (targetSource, mode) => invoke('set_mode', {
+    invokeSet: (targetSource, mode) => createChatClient({ invoke: (cmd, args) => invoke(cmd, args as Record<string, unknown> | undefined) }).setMode({
       source: targetSource,
       mode,
     }),

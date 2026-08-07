@@ -47,7 +47,7 @@ assert.match(tabView, /sanitizeHtml\(line/, '高亮 HTML 必须走 sanitize 安�
 
 // 5. FileTree：list 带 source/relativePath；打开传后端相对 path（symlink 不自行 resolve）
 const tree = readFileSync(new URL('../src/sheets/file/FileTree.tsx', import.meta.url), 'utf8')
-assert.match(tree, /invoke\('list_workspace_entries', \{ source, relativePath \}\)/, 'list 必须带 source/relativePath')
+assert.match(tree, /\.listEntries\(relativePath \?\? ''\)/, 'list 必须经 typed client（相对路径）')
 assert.match(tree, /mergeWorkspaceEntries\(previous\.entries, relativePath, entries\)/, '目录展开必须合并子树')
 assert.equal(tree.includes('readlink'), false, 'symlink 不自行 resolve')
 

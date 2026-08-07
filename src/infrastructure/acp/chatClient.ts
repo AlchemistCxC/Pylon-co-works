@@ -17,6 +17,7 @@ export interface SendMessagePayload {
 export function createChatClient(transport: ClientTransport) {
   return {
     sendMessage: (payload: SendMessagePayload): Promise<unknown> => transport.invoke('send_message', payload),
+    cancelPrompt: (source: string): Promise<unknown> => transport.invoke('cancel_prompt', { source }),
     approveToolCall: (payload: Record<string, unknown>): Promise<unknown> => transport.invoke('approve_tool_call', payload),
     setConfigOption: (payload: Record<string, unknown>): Promise<unknown> => transport.invoke('set_config_option', payload),
     setMode: (payload: Record<string, unknown>): Promise<unknown> => transport.invoke('set_mode', payload),

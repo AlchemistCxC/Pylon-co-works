@@ -5,6 +5,8 @@ import { useStore } from '../../store'
 import { useIdentityStore } from '../../identityStore'
 import { useRuntimeStore } from '../../runtimeStore'
 import { useAgentCapabilities } from '../../infrastructure/acp/useAgentCapabilities'
+import { createChatClient } from '../../infrastructure/acp/chatClient'
+import { createSessionClient } from '../../infrastructure/acp/sessionClient'
 import { resolveAttachGate, resolveAttachFilters } from '../../infrastructure/acp/agentContracts'
 import { reportRuntimeError } from '../../runtimeError'
 import { setSessionModel } from './sessionModel'
@@ -189,7 +191,7 @@ export default forwardRef<{ send: () => void; attachFile: () => void; cancel: ()
           return false
         }
         return runSendTransaction({
-          send: () => invoke('send_message', buildSendMessagePayload({
+          send: () => createChatClient({ invoke: (cmd, args) => invoke(cmd, args as Record<string, unknown> | undefined) }).sendMessage(buildSendMessagePayload({
             session: s,
             content: '/compact',
             persona,
@@ -214,7 +216,7 @@ export default forwardRef<{ send: () => void; attachFile: () => void; cancel: ()
               filters: [{ name: 'Markdown', extensions: ['md'] }],
             })
             if (outputPath) {
-              await invoke('export_session', { periId: s.periId, format: 'markdown', outputPath })
+              await createSessionClient({ invoke: (cmd, args) => invoke(cmd, args as Record<string, unknown> | undefined) }).exportSession({ periId: s.periId, format: 'markdown', outputPath })
               setSendError('')
             }
           } catch (error) {
@@ -251,7 +253,7 @@ export default forwardRef<{ send: () => void; attachFile: () => void; cancel: ()
     }
 
     await runSendTransaction({
-      send: () => invoke('send_message', buildSendMessagePayload({
+      send: () => createChatClient({ invoke: (cmd, args) => invoke(cmd, args as Record<string, unknown> | undefined) }).sendMessage(buildSendMessagePayload({
         session: s,
         content: stripHiddenUnicode(text),
         persona,

@@ -63,7 +63,7 @@ assert.equal(normalizeApprovalMode('code'), null)
 
 // 4. ModeWidget 源码断言：set_approval_mode、不再出现 set_mode、读全局 approvalMode
 const widget = readFileSync(new URL('../src/components/chat/ModeWidget.tsx', import.meta.url), 'utf8')
-assert.match(widget, /invoke\('set_approval_mode'/, '必须调用 set_approval_mode')
+assert.match(widget, /\.setApprovalMode\(targetMode\)/, '必须经 typed client 调用 set_approval_mode')
 assert.equal(widget.includes("invoke('set_mode'"), false, '不得再出现 set_mode')
 assert.equal(widget.includes('setSessionMode'), false, '不得再消费 session mode 链')
 assert.match(widget, /useRuntimeStore\(s => s\.approvalMode\)/, '必须读全局 approvalMode')
@@ -73,7 +73,7 @@ assert.equal(widget.includes('sessionSource'), false, 'approval mode 无 source�
 
 // 5. session mode 链保留 set_mode（不混用）
 const sessionMode = readFileSync(new URL('../src/components/chat/sessionMode.ts', import.meta.url), 'utf8')
-assert.match(sessionMode, /invoke\('set_mode'/, 'session mode 链必须继续消费 set_mode')
+assert.match(sessionMode, /\.setMode\(\{/, 'session mode 链必须经 typed client 消费 set_mode')
 
 // 6. registry 不再传 sessionSource
 const registry = readFileSync(new URL('../src/components/cc/widgetRegistry.tsx', import.meta.url), 'utf8')

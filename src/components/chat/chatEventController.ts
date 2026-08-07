@@ -6,6 +6,7 @@ import { useIdentityStore } from '../../identityStore'
 import { useRuntimeStore } from '../../runtimeStore'
 import { resolveSpinnerFrames } from './spinnerFrames'
 import { extractModelConfig, extractUsage, extractPlanEntries, type PeriDonePayload, type PeriUpdatePayload } from '../../infrastructure/acp/chatContracts'
+import { createChatClient } from '../../infrastructure/acp/chatClient'
 import { clearMessageStorage, persistMessageSnapshot } from './messagePersistence'
 import { addGeneratingSource, removeGeneratingSource } from './sessionEventState'
 import { reportRuntimeError } from '../../runtimeError'
@@ -178,7 +179,7 @@ export function attachChatEventController(refs: ChatEventControllerRefs): ChatCo
     // 2026-08-02 修复：begin-cancel 去重失败（非 generating/canceling 状态）时不白调后端。
     // 旧实现 dispatch 后无条件 invoke，footer 停止按钮/全局 Esc 在非生成态点击会发无效请求。
     if (runtimeState[source]?.cancelState.status !== 'canceling') return
-    invoke('cancel_prompt', { source }).then(() => {
+    createChatClient({ invoke: (cmd, args) => invoke(cmd, args as Record<string, unknown> | undefined) }).cancelPrompt(source).then(() => {
       // 取消失败/成功均由 reducer 收敛；liveGenerating 清理走 syncGenerating
       dispatch({ type: 'cancel-success', source })
     }).catch(error => {

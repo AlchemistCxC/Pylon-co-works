@@ -26,7 +26,7 @@ assert.equal(validateAgentConfig('agents:\n  peri:\n    exe: peri'), null)
 
 // 4. 组件接线：invoke update_agents_config；不调 reload_agents 冒充写回；blocked 明确展示
 const editor = readFileSync(new URL('../src/components/settings/AgentConfigEditor.tsx', import.meta.url), 'utf8')
-assert.match(editor, /invoke\('update_agents_config'/, '必须调用 update_agents_config 契约')
+assert.match(editor, /updateAgentsConfig\(\{ scope: 'agent', agentId, config \}\)/, '必须经 typed client 调用 update_agents_config 契约')
 assert.equal(editor.includes("invoke('reload_agents'"), false, '不得用 reload_agents 冒充写回')
 assert.equal(editor.includes("invoke('reload_gateway'"), false, '不得冒充 gateway 写回')
 assert.match(editor, /classifyAgentConfigSaveError\(error\)/, '保存失败必须经分类')

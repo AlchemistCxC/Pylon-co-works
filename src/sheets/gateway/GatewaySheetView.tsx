@@ -1,7 +1,8 @@
 import { useEffect, useState } from 'react'
 import { invoke } from '@tauri-apps/api/core'
 import { reportRuntimeError } from '../../runtimeError'
-import { classifyGatewayWriteError, normalizeGatewaySessions, normalizeGatewayStatus, type GatewayStatus, type GatewayWriteStatus, type PlatformSession } from '../../infrastructure/tauri/gatewayContracts.ts'
+import { createGatewayClient } from '../../infrastructure/tauri/gatewayClient'
+import { classifyGatewayWriteError, type GatewayStatus, type GatewayWriteStatus, type PlatformSession } from '../../infrastructure/tauri/gatewayContracts.ts'
 import type { SheetContext, SheetRecord } from '../../workspace-sheets/sheetTypes'
 import './GatewaySheet.css'
 
@@ -21,14 +22,15 @@ export default function GatewaySheetView({ sheet: _sheet, ctx: _ctx }: { sheet: 
   const [writeStatus, setWriteStatus] = useState<GatewayWriteStatus>({ kind: 'idle' })
 
   // W3-02 桩化：update_agents_config 成功后 reload_gateway；命令缺失 → 明确「待后端」；锁中毒展示失败
+  const gatewayClient = createGatewayClient({ invoke: (cmd, args) => invoke(cmd, args as Record<string, unknown> | undefined) })
   const saveRoute = async () => {
     if (!editSource.trim() || !editAgentId.trim()) return
     setWriteStatus({ kind: 'saving' })
     try {
       // Phase 3：显式 scope 契约（用户拍板）；成功后 reload_gateway
-      await invoke('update_agents_config', { scope: 'gateway', config: { gateway: { routes: [{ source: editSource, agentId: editAgentId }] } } })
+      await gatewayClient.updateAgentsConfig({ scope: 'gateway', config: { gateway: { routes: [{ source: editSource, agentId: editAgentId }] } } })
       try {
-        await invoke('reload_gateway')
+        await gatewayClient.reload()
       } catch (reloadError) {
         const classified = classifyGatewayWriteError(reloadError)
         setWriteStatus(classified)
@@ -45,8 +47,8 @@ export default function GatewaySheetView({ sheet: _sheet, ctx: _ctx }: { sheet: 
 
   useEffect(() => {
     let disposed = false
-    invoke<unknown>('gateway_status').then(raw => {
-      if (!disposed) setStatus(normalizeGatewayStatus(raw))
+    gatewayClient.status().then(raw => {
+      if (!disposed) setStatus(raw as GatewayStatus)
     }).catch(err => {
       if (!disposed) {
         setError(err instanceof Error ? err.message : String(err))
@@ -59,8 +61,8 @@ export default function GatewaySheetView({ sheet: _sheet, ctx: _ctx }: { sheet: 
   // Phase 2：平台会话（gateway_sessions 只读快照）
   useEffect(() => {
     let disposed = false
-    invoke<unknown>('gateway_sessions').then(raw => {
-      if (!disposed) setSessions(normalizeGatewaySessions(raw))
+    gatewayClient.sessions().then(raw => {
+      if (!disposed) setSessions(raw as PlatformSession[])
     }).catch(err => {
       if (!disposed) reportRuntimeError('读取平台会话', err)
     })

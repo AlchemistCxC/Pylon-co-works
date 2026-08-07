@@ -28,7 +28,7 @@ assert.equal(normalizeSelectionRange(undefined as unknown as number | null, 3), 
 
 // 3. DispatchBar：send_message 显式 source + persona:''；发出后清 instruction 保留选区；错误内联；生成中仅提示
 const bar = readFileSync(new URL('../src/sheets/file/DispatchBar.tsx', import.meta.url), 'utf8')
-assert.match(bar, /invoke\('send_message', \{ source: targetSource, content: message, persona: '' \}\)/, '必须显式 source + persona 空串')
+assert.match(bar, /\.sendMessage\(\{ source: targetSource, content: message, persona: ''/, '必须经 typed client 显式 source + persona 空串')
 assert.match(bar, /buildDispatchMessage\(\{/, '必须经纯函数组装消息')
 assert.match(bar, /onInstructionChange\(''\)/, '发出后清 instruction')
 assert.equal(bar.includes("onSelectionChange(null)"), false, '发出后保留选区')

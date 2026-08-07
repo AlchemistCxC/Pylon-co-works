@@ -2,6 +2,7 @@ import { useState } from 'react'
 import { invoke } from '@tauri-apps/api/core'
 import { reportRuntimeError } from '../../runtimeError'
 import { classifyAgentConfigSaveError, validateAgentConfig, type AgentConfigSaveStatus } from './agentConfigStatus.ts'
+import { createAgentClient } from '../../infrastructure/acp/agentClient'
 
 /**
  * AgentConfigEditor — Agent 配置编辑入口（W1-07 桩化）。
@@ -23,7 +24,7 @@ export default function AgentConfigEditor({ agentId }: { agentId: string }) {
     setStatus({ kind: 'saving' })
     try {
       // Phase 3：显式 scope 契约（用户拍板）——agent 整块 YAML 替换
-      await invoke('update_agents_config', { scope: 'agent', agentId, config })
+      await createAgentClient({ invoke: (cmd, args) => invoke(cmd, args as Record<string, unknown> | undefined) }).updateAgentsConfig({ scope: 'agent', agentId, config })
       setStatus({ kind: 'ok' })
     } catch (error) {
       const classified = classifyAgentConfigSaveError(error)
