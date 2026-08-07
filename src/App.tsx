@@ -19,6 +19,7 @@ import { THEME_CSS_VAR_MAP, THEME_FIELD_DEFS } from './themeFieldDefs'
 import { listen } from '@tauri-apps/api/event'
 import { normalizeAgentStatus, type AgentStatusPayload } from './components/settings/agentTypes'
 import { createAgentClient } from './infrastructure/acp/agentClient'
+import { getChatController } from './components/chat/chatEventController'
 import { createPermissionController, registerPermissionController } from './infrastructure/acp/permissionController'
 import { seedDemo } from './demo/seed'
 import { bootstrapApplication } from './app/bootstrap/bootstrapApplication'
@@ -69,6 +70,11 @@ export default function App() {
     const clearActiveSession = () => setActiveSession(null)
     window.addEventListener('pylon:agent-switched', clearActiveSession)
     return () => window.removeEventListener('pylon:agent-switched', clearActiveSession)
+  }, [])
+
+  // G0：Chat controller 应用级宿主——listener 随应用生命周期（卸载才 dispose）
+  useEffect(() => () => {
+    getChatController()?.dispose()
   }, [])
 
   // FE-AUD-005：单一 bootstrap 事务（阶段 2）——hydrate domains → agents → prune → listener

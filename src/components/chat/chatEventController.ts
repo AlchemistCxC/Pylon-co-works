@@ -74,6 +74,17 @@ export function getChatController(): ChatControllerHandle | null {
   return activeController
 }
 
+// G0：ChatRuntimeBridge 应用级宿主——controller 全局单例（listener 只注册一次），
+// 渲染 refs 可重绑定（ChatView 重挂载复用，卸载不销毁 controller）
+let currentRefs: ChatEventControllerRefs | null = null
+let singletonController: ChatControllerHandle | null = null
+
+/** 重绑定当前渲染 refs（ChatView 重挂载时调用；controller 内部经此读最新 refs） */
+export function bindChatControllerRefs(refs: ChatEventControllerRefs): void {
+  currentRefs = refs
+}
+
+
 /**
  * FE-AUD-024：并行注册的 listener 用 allSettled 收敛——保留成功 stop handle
  * （不全丢弃），失败逐个回调报告（ErrorCenter），dispose 只清理成功项。
@@ -104,10 +115,13 @@ function isReplayScope(runtime: SourceChatRuntime | undefined): boolean {
  * 行为等价源：收敛前的 refs 版控制器（commit 927f963 之前）。
  */
 export function attachChatEventController(refs: ChatEventControllerRefs): ChatControllerHandle {
+  // G0：首次创建（listener 注册一次）；重挂载复用并重绑定渲染 refs
+  currentRefs = refs
+  if (singletonController) return singletonController
   let runtimeState: ChatRuntimeState = {}
   const knownSources = () => useIdentityStore.getState().sessions.map(session => session.source)
   const isActiveSource = (source: string) => source.length > 0 && knownSources().includes(source)
-  const renderedSource = () => refs.sessionRef.current
+  const renderedSource = () => currentRefs!.sessionRef.current
   // 横向订阅注册表（D23 方案 B）：dispatch 后对状态引用变化的 source 递增版本并通知
   const horizontal = createHorizontalSubscription()
 
@@ -128,16 +142,16 @@ export function attachChatEventController(refs: ChatEventControllerRefs): ChatCo
   /** 渲染态同步：rendered source 的消息/流式/生成态/summary 变化 → setState */
   const syncRendered = (prev: SourceChatRuntime | undefined, next: SourceChatRuntime | undefined) => {
     if (!next) return
-    if (prev?.messages !== next.messages) refs.setMessages(next.messages)
-    if ((prev?.streamingText ?? '') !== next.streamingText) refs.setStreamingText(next.streamingText)
-    if ((prev?.streamingThinking ?? '') !== next.streamingThinking) refs.setStreamingThinking(next.streamingThinking)
-    if ((prev?.generating ?? false) !== next.generating) refs.setGenerating(next.generating)
+    if (prev?.messages !== next.messages) currentRefs!.setMessages(next.messages)
+    if ((prev?.streamingText ?? '') !== next.streamingText) currentRefs!.setStreamingText(next.streamingText)
+    if ((prev?.streamingThinking ?? '') !== next.streamingThinking) currentRefs!.setStreamingThinking(next.streamingThinking)
+    if ((prev?.generating ?? false) !== next.generating) currentRefs!.setGenerating(next.generating)
     const prevSummary = prev?.lastSummary
     const nextSummary = next.lastSummary
     if (prevSummary !== nextSummary) {
       // 终态收敛（done/error/cancel-success 生成 summary）时同步清空阶段标记
-      if (prevSummary === undefined && nextSummary !== undefined) refs.setGenerationPhase(null)
-      refs.setSummary(nextSummary
+      if (prevSummary === undefined && nextSummary !== undefined) currentRefs!.setGenerationPhase(null)
+      currentRefs!.setSummary(nextSummary
         ? { elapsedMs: nextSummary.elapsedMs, tokenCount: nextSummary.tokenCount, completedFrame: '', reason: nextSummary.reason }
         : null)
     }
@@ -290,8 +304,8 @@ export function attachChatEventController(refs: ChatEventControllerRefs): ChatCo
       if (next?.generating) {
         runtimeState = { ...runtimeState, [source]: { ...next, generationFrames: resolveFrames() } }
         if (isRenderedSource(source, renderedSource())) {
-          refs.setLastTokenAt(Date.now())
-          refs.setGenerationPhase({ kind: 'thinking' })
+          currentRefs!.setLastTokenAt(Date.now())
+          currentRefs!.setGenerationPhase({ kind: 'thinking' })
         }
       }
       const store = useIdentityStore.getState()
@@ -313,21 +327,21 @@ export function attachChatEventController(refs: ChatEventControllerRefs): ChatCo
         case 'agent_message_chunk': {
           const text = upd.content?.text || ''
           if (!text) return
-          if (rendered) refs.setLastTokenAt(Date.now())
-          if (!replay && rendered) refs.setGenerationPhase({ kind: 'responding' })
+          if (rendered) currentRefs!.setLastTokenAt(Date.now())
+          if (!replay && rendered) currentRefs!.setGenerationPhase({ kind: 'responding' })
           dispatch({ type: 'message-chunk', source, text, replay })
           break
         }
         case 'agent_thought_chunk': {
           const text = upd.content?.text || ''
           if (!text) return
-          if (rendered) refs.setLastTokenAt(Date.now())
-          if (!replay && rendered) refs.setGenerationPhase({ kind: 'thinking' })
+          if (rendered) currentRefs!.setLastTokenAt(Date.now())
+          if (!replay && rendered) currentRefs!.setGenerationPhase({ kind: 'thinking' })
           dispatch({ type: 'thought-chunk', source, text, replay })
           break
         }
         case 'tool_call': {
-          if (!replay && rendered) refs.setGenerationPhase({ kind: 'tool', name: upd.title || '?' })
+          if (!replay && rendered) currentRefs!.setGenerationPhase({ kind: 'tool', name: upd.title || '?' })
           // W2-09：touchedFiles 记录（kind 优先/工具名兼容；提取失败 null 不误记）——刷新跟随数据源
           const touchedSession = useIdentityStore.getState().sessions.find(session => session.source === source)
           const touchedPath = extractTouchedPath({ kind: upd.kind, title: upd.title, rawInput: upd.rawInput, cwd: touchedSession?.workdir })
@@ -392,8 +406,8 @@ export function attachChatEventController(refs: ChatEventControllerRefs): ChatCo
   ], (reason) => reportRuntimeError('注册聊天事件监听', reason))
 
   const handleClear = () => {
-    const source = refs.sessionRef.current
-    const ownerId = refs.messageOwnerRef.current
+    const source = currentRefs!.sessionRef.current
+    const ownerId = currentRefs!.messageOwnerRef.current
     if (!source || !ownerId) return
     const session = useIdentityStore.getState().sessions.find(item => item.id === ownerId && item.source === source)
     if (!session) return
@@ -402,7 +416,7 @@ export function attachChatEventController(refs: ChatEventControllerRefs): ChatCo
   }
   window.addEventListener('peri:clear', handleClear)
 
-  return {
+  const handle: ChatControllerHandle = {
     requestCancel,
     initSource,
     commitReplay,
@@ -420,6 +434,11 @@ export function attachChatEventController(refs: ChatEventControllerRefs): ChatCo
       unlisten.then(fns => fns.forEach(f => f()))
       window.removeEventListener('peri:clear', handleClear)
       horizontal.dispose()
+      // G0：应用级 dispose 后重置单例，允许下次重新创建
+      if (singletonController === handle) singletonController = null
+      currentRefs = null
     },
   }
+  singletonController = handle
+  return handle
 }

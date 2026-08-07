@@ -8,7 +8,7 @@ import { createSessionClient } from '../../infrastructure/acp/sessionClient'
 import { extractMode, extractModelConfig, sessionResponseObject } from '../../infrastructure/acp/chatContracts'
 import { isCurrentLoadGeneration, nextLoadGeneration, resolveLoadedMessages, serializeLoadedMessages } from './replayState'
 import { clearMessageStorage, messageStorageKey, parseMessageSnapshot } from './messagePersistence'
-import { attachChatEventController, registerChatController, type ChatControllerHandle, type ChatEventControllerRefs } from './chatEventController'
+import { attachChatEventController, bindChatControllerRefs, getChatController, registerChatController, type ChatControllerHandle, type ChatEventControllerRefs } from './chatEventController'
 import type { Session } from '../../identityStore'
 import type { Message } from './messageTypes'
 import type { GenerationPhase, GenerationSummary } from './GenerationFooter'
@@ -70,11 +70,18 @@ export function useSessionLifecycle(
     // rejection 且 dispose 的 unlisten.then 永不执行。所有消费点（initSource/
     // commitReplay/clearReplay/pruneSources/requestCancel）均有可选链或 fallback。
     if (!IS_TAURI) return
-    controllerHandleRef.current = attachChatEventController(controllerRefs)
-    registerChatController(controllerHandleRef.current)
+    // G0：controller 全局单例（listener 只注册一次）——首次创建注册，
+    // ChatView 重挂载只重绑定渲染 refs，不重复注册 listener
+    const existing = getChatController()
+    if (existing) {
+      bindChatControllerRefs(controllerRefs)
+      controllerHandleRef.current = existing
+    } else {
+      controllerHandleRef.current = attachChatEventController(controllerRefs)
+      registerChatController(controllerHandleRef.current)
+    }
     return () => {
-      registerChatController(null)
-      controllerHandleRef.current?.dispose()
+      // G0：卸载不 dispose（应用级保活，后台事件继续处理）；只解绑 handle 引用
       controllerHandleRef.current = null
     }
     // controllerRefs 是稳定 ref 对象（内部 .current 由接线层填充），无需加入 deps
