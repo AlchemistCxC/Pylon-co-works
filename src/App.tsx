@@ -15,7 +15,7 @@ import { invoke } from '@tauri-apps/api/core'
 import { loadWindowSize, persistWindowSize } from './windowSizePersistence'
 import { reportRuntimeError } from './runtimeError'
 import { toCssBackgroundImage } from './backgroundImage'
-import { THEME_CSS_VAR_MAP, THEME_FIELD_DEFS } from './themeFieldDefs'
+import { selectThemeCssSnapshot } from './domains/theme/themeCssSnapshot'
 import { listen } from '@tauri-apps/api/event'
 import { normalizeAgentStatus, type AgentStatusPayload } from './components/settings/agentTypes'
 import { createAgentClient } from './infrastructure/acp/agentClient'
@@ -210,36 +210,12 @@ export default function App() {
 
   })))
 
-  // cssVars 只依赖 s（useShallow 稳定引用）与 sidebarCollapsed：避免 sessions/agents 等无关
-  // 状态 tick 时整棵 App 树重建 60+ CSS 变量与 6 次背景图解析。
-  const cssVars = useMemo(() => {
-    // 派生/函数值保留手写（背景图转换、字体选择、fallback、窗口宽度、select 直通）
-    const vars: Record<string, string> = {
-      '--global-bg-image': toCssBackgroundImage(s.globalBgImage),
-      '--sidebar-bg-image': toCssBackgroundImage(s.sidebarBgImage),
-      '--chat-bg-image': toCssBackgroundImage(s.chatBgImage),
-      '--input-bg-image': toCssBackgroundImage(s.inputBgImage),
-      '--status-bg-image': toCssBackgroundImage(s.statusBgImage),
-      '--global-font': s.globalFont === 'mono' ? 'var(--mono)' : 'var(--font)',
-      '--chat-font': s.chatFont === 'mono' ? 'var(--mono)' : 'var(--font)',
-      '--msg-font': s.msgFont === 'mono' ? 'var(--mono)' : 'var(--font)',
-      // chatTextColor 经 --chat-text-color 注入（THEME_CSS_VAR_MAP），此处作 msg 兜底链
-      '--msg-text': s.msgTextColor || 'var(--chat-text-color,var(--text))',
-      // W1-03（F2-B）：宽度读 workspaceStore（预设不覆盖布局），非主题
-      '--titlebar-sidebar-width': `${sidebarCollapsed ? 42 : sidebarWidth}px`,
-      // 各 sheet 左栏（agent/gateway/runtime/file）统一宽度，随 sidebarWidth 一致
-      '--sheet-sidebar-width': `${sidebarWidth}px`,
-    }
-    // color/number 字段由 THEME_CSS_VAR_MAP 循环注入（unit 格式化）；空 color 省略
-    for (const [cssVar, key] of Object.entries(THEME_CSS_VAR_MAP)) {
-      if (cssVar in vars) continue
-      const def = THEME_FIELD_DEFS[key]
-      const value = (s as Record<string, unknown>)[key]
-      if (value === undefined || (def.type === 'color' && value === '')) continue
-      vars[cssVar] = def.type === 'number' && def.unit ? `${value}${def.unit}` : String(value)
-    }
-    return vars as React.CSSProperties
-  }, [s, sidebarCollapsed, sidebarWidth])
+  // FE-AUD-013：CSS 变量快照经纯 selector 派生（defs 驱动 + 显式派生），
+  // App 只依赖 s（useShallow 稳定引用）与布局宽度，派生逻辑可 node 测
+  const cssVars = useMemo(
+    () => selectThemeCssSnapshot(s as Readonly<Record<string, unknown>>, { sidebarCollapsed, sidebarWidth }) as React.CSSProperties,
+    [s, sidebarCollapsed, sidebarWidth],
+  )
 
   // body::before 玻璃层挂在 <body> 上，读不到 .app 子元素的 CSS 变量 —
   // 把全局背景相关变量 + scheme 提到 <html>(:root) 与 <body>，让玻璃层生效

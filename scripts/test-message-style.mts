@@ -10,9 +10,10 @@ const chatView = readFileSync(new URL('../src/components/chat/ChatView.tsx', imp
 const css = readFileSync(new URL('../src/components/chat/ChatView.css', import.meta.url), 'utf8')
 const defs = readFileSync(new URL('../src/themeFieldDefs.ts', import.meta.url), 'utf8')
 
-// --msg-font/--msg-text 由 App 手写注入（派生值）；--msg-line-height 由 defs 声明驱动循环注入
+// --msg-font/--msg-text 由 themeCssSnapshot 派生（显式派生）；--msg-line-height 由 defs 声明驱动循环注入
+const snapshot = readFileSync(new URL('../src/domains/theme/themeCssSnapshot.ts', import.meta.url), 'utf8')
 for (const variable of ['--msg-font', '--msg-text']) {
-  assert.equal(app.includes(variable), true, `${variable} 必须由 App 注入`)
+  assert.equal(snapshot.includes(variable), true, `${variable} 必须由 CSS snapshot 派生`)
 }
 assert.equal(defs.includes('msgLineHeight'), true, '--msg-line-height 必须由 defs 声明（循环注入）')
 for (const variable of ['--msg-font', '--msg-text', '--msg-line-height']) {
