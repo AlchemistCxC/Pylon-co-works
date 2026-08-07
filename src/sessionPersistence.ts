@@ -97,11 +97,14 @@ export function parseSessions(raw: string | null, profiles: PersistedProfile[]):
   return parseStoredSessions(raw, profiles) ?? []
 }
 
-export function persistSessions(storage: StorageLike, sessions: PersistedSession[]): void {
+export function persistSessions(storage: StorageLike, sessions: PersistedSession[]): boolean {
   try {
     storage.setItem(SESSION_STORAGE_KEY, serializeSessions(sessions))
+    return true
   } catch {
-    // 存储不可用/写满：静默降级——写盘失败不应让 identityStore action 抛异常
+    // 存储不可用/写满：写盘失败不应让 identityStore action 抛异常；
+    // 返回 false 供调用方把"未保存"提升为可见状态（报告 1C L1）
+    return false
   }
 }
 

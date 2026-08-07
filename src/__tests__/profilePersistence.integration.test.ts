@@ -8,6 +8,7 @@
 import { describe, expect, it, beforeEach } from 'vitest'
 import { useIdentityStore } from '../identityStore'
 import { resetStores } from '../test/resetStores'
+import { MemoryStorage } from '../test/memoryStorage'
 import { buildExportPayload, applyImportPayload } from '../configExportImport'
 
 const PROFILE_KEY = 'pylon-profiles'
@@ -105,5 +106,30 @@ describe('FE-AUD-002 Profile 持久化', () => {
     const state = useIdentityStore.getState()
     expect(state.profiles.some(profile => profile.id === 'neo')).toBe(true)
     expect(state.activeProfileId).toBe('neo')
+  })
+
+  it('配置写盘失败时 lastPersistError 可见且内存继续（1C L1）', () => {
+    Object.defineProperty(globalThis, 'localStorage', {
+      value: new MemoryStorage({ quotaExceeded: true }),
+      configurable: true,
+      writable: true,
+    })
+    useIdentityStore.getState().addProfile(NEO)
+    const state = useIdentityStore.getState()
+    expect(state.profiles.some(profile => profile.id === 'neo')).toBe(true)
+    expect(state.lastPersistError).not.toBeNull()
+  })
+
+  it('写盘恢复后 lastPersistError 清空（1C L1）', () => {
+    const storage = new MemoryStorage()
+    Object.defineProperty(globalThis, 'localStorage', { value: storage, configurable: true, writable: true })
+    useIdentityStore.getState().addProfile(NEO)
+    expect(useIdentityStore.getState().lastPersistError).toBeNull()
+    storage.setQuotaExceeded(true)
+    useIdentityStore.getState().setActiveProfile('neo')
+    expect(useIdentityStore.getState().lastPersistError).not.toBeNull()
+    storage.setQuotaExceeded(false)
+    useIdentityStore.getState().addProfile({ ...NEO, name: 'Neo 改' })
+    expect(useIdentityStore.getState().lastPersistError).toBeNull()
   })
 })

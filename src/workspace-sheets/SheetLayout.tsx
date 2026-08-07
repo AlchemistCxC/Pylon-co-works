@@ -81,10 +81,11 @@ export default function SheetLayout(props: SheetLayoutProps) {
 
   const ctx = buildSheetContext(props)
   const ccEditMode = useStore(s => s.ccEditMode)
-  // FE-AUD-001：工作区写盘失败可见（报告 1A.5）
-  const lastPersistError = useWorkspaceStore(s => s.lastPersistError)
-  const persistWarning = lastPersistError
-    ? <div className="workspace-persist-warning" role="status">工作区状态未能保存到本地存储（本次操作仅在内存生效）</div>
+  // FE-AUD-001 / 1C L1：工作区与用户配置（Profile/Session）写盘失败可见（报告 1A.5/1C）
+  const workspacePersistError = useWorkspaceStore(s => s.lastPersistError)
+  const identityPersistError = useIdentityStore(s => s.lastPersistError)
+  const persistWarning = (workspacePersistError ?? identityPersistError)
+    ? <div className="workspace-persist-warning" role="status">配置未能保存到本地存储（本次操作仅在内存生效）</div>
     : null
 
   if (!activeSheet) {

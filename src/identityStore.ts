@@ -58,6 +58,8 @@ interface IdentityStoreState {
   users: UserMapping[]
   agents: AgentEntry[]
   activeAgent: string
+  /** 报告 1C L1：最近一次用户配置（Profile/Session）写盘失败的可见状态 */
+  lastPersistError: string | null
   setActiveProfile: (id: string) => void
   addProfile: (p: Profile) => string
   removeProfile: (id: string) => void
@@ -78,6 +80,12 @@ const DEFAULT_PROFILES: Profile[] = [
   { id: 'serina', name: 'Serina', persona: '你是 Serina，TRPG 叙世引擎 GM。', model: 'deepseek-v4-flash' },
 ]
 
+/** 报告 1C L1：写盘结果 → 配置未保存状态（失败设提示；成功且旧错则清空） */
+function persistFlag(success: boolean, prevError: string | null): string | null {
+  if (!success) return '配置未能保存到本地存储'
+  return prevError ? null : prevError
+}
+
 export const useIdentityStore = create<IdentityStoreState>()((set, get) => ({
   profiles: DEFAULT_PROFILES,
   activeProfileId: DEFAULT_PROFILES[0].id,
@@ -89,6 +97,7 @@ export const useIdentityStore = create<IdentityStoreState>()((set, get) => ({
   ],
   agents: [],
   activeAgent: 'peri',
+  lastPersistError: null,
 
   setActiveProfile: (id) => set(state => {
     if (!state.profiles.some(profile => profile.id === id)) return state
@@ -96,13 +105,14 @@ export const useIdentityStore = create<IdentityStoreState>()((set, get) => ({
     // 联动：同步当前 agent 的 sheet 状态并持久化
     useWorkspaceStore.getState().patchSheetAgentState(state.activeAgent, { activeProfileId })
     // FE-AUD-002：activeProfileId 落 pylon-profiles
-    persistProfiles(localStorage, { profiles: state.profiles, activeProfileId })
-    return { activeProfileId }
+    const ok = persistProfiles(localStorage, { profiles: state.profiles, activeProfileId })
+    return { activeProfileId, lastPersistError: persistFlag(ok, state.lastPersistError) }
   }),
   addProfile: (p) => {
-    const profiles = [...get().profiles.filter(profile => profile.id !== p.id), p]
-    persistProfiles(localStorage, { profiles, activeProfileId: get().activeProfileId })
-    set({ profiles })
+    const state = get()
+    const profiles = [...state.profiles.filter(profile => profile.id !== p.id), p]
+    const ok = persistProfiles(localStorage, { profiles, activeProfileId: state.activeProfileId })
+    set({ profiles, lastPersistError: persistFlag(ok, state.lastPersistError) })
     return p.id
   },
   removeProfile: (id) => set(state => {
@@ -110,7 +120,7 @@ export const useIdentityStore = create<IdentityStoreState>()((set, get) => ({
     const profiles = state.profiles.filter(profile => profile.id !== id)
     const fallbackProfileId = profiles[0].id
     const sessions = state.sessions.map(session => session.profileId === id ? { ...session, profileId: fallbackProfileId } : session)
-    persistSessions(localStorage, sessions)
+    const sessionsOk = persistSessions(localStorage, sessions)
     // 联动：sheet 状态里的 activeProfileId 同步
     const agentStates = Object.fromEntries(Object.entries(useWorkspaceStore.getState().sheetAgentStates).map(([agentId, sheetState]) => [
       agentId,
@@ -119,8 +129,13 @@ export const useIdentityStore = create<IdentityStoreState>()((set, get) => ({
     useWorkspaceStore.getState().patchSheetAgentStates(agentStates)
     // FE-AUD-002：删除原子完成 active fallback 并写盘
     const activeProfileId = state.activeProfileId === id ? fallbackProfileId : state.activeProfileId
-    persistProfiles(localStorage, { profiles, activeProfileId })
-    return { profiles, sessions, activeProfileId }
+    const profilesOk = persistProfiles(localStorage, { profiles, activeProfileId })
+    return {
+      profiles,
+      sessions,
+      activeProfileId,
+      lastPersistError: persistFlag(sessionsOk && profilesOk, state.lastPersistError),
+    }
   }),
   hydrateProfiles: (legacy) => set(() => {
     // 1B.5：新 key 存在时以存储为准，旧数据不得反向覆盖
@@ -148,15 +163,15 @@ export const useIdentityStore = create<IdentityStoreState>()((set, get) => ({
     const s: Session = { id, name, source: 'local:' + name, profileId, createdAt: now, lastActiveAt: now, platform: 'local', workdir: '', sessionPrompt: '', skills: [], hooks: [], autoName: '' }
     set(state => {
       const sessions = [...state.sessions, s]
-      persistSessions(localStorage, sessions)
-      return { sessions }
+      const ok = persistSessions(localStorage, sessions)
+      return { sessions, lastPersistError: persistFlag(ok, state.lastPersistError) }
     })
   },
   removeSession: (id) => set(state => {
     const removed = state.sessions.find(session => session.id === id)
     const sessions = state.sessions.filter(session => session.id !== id)
-    persistSessions(localStorage, sessions)
-    if (!removed) return { sessions }
+    const sessionsOk = persistSessions(localStorage, sessions)
+    if (!removed) return { sessions, lastPersistError: persistFlag(sessionsOk, state.lastPersistError) }
     // 联动：清 runtime（live stats/modes/config/generating）、sheet 状态与会话级 UI 状态
     useRuntimeStore.getState().clearSessionSource(removed.source)
     clearSessionUiState(id)
@@ -165,17 +180,17 @@ export const useIdentityStore = create<IdentityStoreState>()((set, get) => ({
       sheetState.activeSessionId === id ? { ...sheetState, activeSessionId: undefined } : sheetState,
     ]))
     useWorkspaceStore.getState().patchSheetAgentStates(agentStates)
-    return { sessions }
+    return { sessions, lastPersistError: persistFlag(sessionsOk, state.lastPersistError) }
   }),
   updateSession: (id, partial) => set(s => {
     const sessions = s.sessions.map(session => session.id === id ? { ...session, ...partial } : session)
-    persistSessions(localStorage, sessions)
-    return { sessions }
+    const ok = persistSessions(localStorage, sessions)
+    return { sessions, lastPersistError: persistFlag(ok, s.lastPersistError) }
   }),
   setSessionPeriId: (id, periId) => set(s => {
     const sessions = s.sessions.map(ss => ss.id === id ? { ...ss, periId } : ss)
-    persistSessions(localStorage, sessions)
-    return { sessions }
+    const ok = persistSessions(localStorage, sessions)
+    return { sessions, lastPersistError: persistFlag(ok, s.lastPersistError) }
   }),
   hydrateSessions: () => {
     try {
