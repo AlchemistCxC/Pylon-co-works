@@ -89,6 +89,7 @@ function buildWorkspaceSnapshot(state: WorkspaceStoreState): PersistedSheetState
  */
 function commitWorkspaceMutation(state: WorkspaceStoreState, patch: Partial<WorkspaceStoreState>): Partial<WorkspaceStoreState> {
   const next = { ...state, ...patch }
+
   const ok = persistSheetStateV2(localStorage, buildWorkspaceSnapshot(next), layoutOf(next))
   if (!ok) return { ...patch, lastPersistError: '工作区状态未能保存到本地存储' }
   // 写盘恢复成功：清掉旧错误提示

@@ -2,6 +2,7 @@ import { useEffect } from 'react'
 import { useWorkspaceStore } from '../workspaceStore'
 import { useIdentityStore } from '../identityStore'
 import { useStore } from '../store'
+import { useHydrationStore } from '../app/bootstrap/hydrationState'
 import { resolveSessionSource } from '../components/chat/sessionCommandState'
 import { belongsToProfile } from '../components/chat/sessionProfile'
 import { resolveSheetRender } from './sheetRegistry.tsx'
@@ -53,10 +54,14 @@ export default function SheetLayout(props: SheetLayoutProps) {
   const activeProfileId = useIdentityStore(s => s.activeProfileId)
   const sessions = useIdentityStore(s => s.sessions)
   const setSheetAgentState = useWorkspaceStore(s => s.setSheetAgentState)
+  // 报告 2.3：ready 前禁止 Workspace 写操作——避免启动期用未 hydrate 状态覆盖持久化
+  const hydrationReady = useHydrationStore(s => s.status === 'ready')
 
   // W1-03 原样搬运：启动时从权威记忆（sheetAgentStates）恢复当前 agent 的 profile 投影与会话，
-  // 不写回——写回只发生在用户显式 setActiveProfile / 选会话（下方 effect）
+  // 不写回——写回只发生在用户显式 setActiveProfile / 选会话（下方 effect）。
+  // 修复：hydrate 就绪后才恢复（子 effect 先于 bootstrap hydrate 执行会读到空记忆）
   useEffect(() => {
+    if (!hydrationReady) return
     const memory = useWorkspaceStore.getState().sheetAgentStates[activeAgent]
     if (memory?.activeProfileId && memory.activeProfileId !== activeProfileId) {
       useIdentityStore.getState().setActiveProfile(memory.activeProfileId)
@@ -65,12 +70,14 @@ export default function SheetLayout(props: SheetLayoutProps) {
       props.onSelectSession(memory.activeSessionId)
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [])
+  }, [hydrationReady])
 
-  // W1-03 原样搬运：会话选择持久化到该 agent 记忆（profile 已由 setActiveProfile 同步）
+  // W1-03 原样搬运：会话选择持久化到该 agent 记忆（profile 已由 setActiveProfile 同步）。
+  // 修复：hydrate 就绪前跳过——否则用初始空 sheets 覆盖持久化（刷新丢 sheets → 启动页）
   useEffect(() => {
+    if (!hydrationReady) return
     setSheetAgentState(activeAgent, { activeSessionId: props.activeSession || undefined })
-  }, [activeAgent, props.activeSession, setSheetAgentState])
+  }, [hydrationReady, activeAgent, props.activeSession, setSheetAgentState])
 
   // W1-03 原样搬运：profile 越界清理（切 profile 后 activeSession 不属于新 profile → 清空）
   useEffect(() => {
