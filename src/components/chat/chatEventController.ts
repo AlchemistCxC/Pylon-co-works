@@ -1,6 +1,6 @@
 import type React from 'react'
 import { invoke } from '@tauri-apps/api/core'
-import { listen } from '@tauri-apps/api/event'
+import { listen, type UnlistenFn } from '@tauri-apps/api/event'
 import { useStore } from '../../store'
 import { useIdentityStore } from '../../identityStore'
 import { useRuntimeStore } from '../../runtimeStore'
@@ -57,6 +57,8 @@ export interface ChatControllerHandle {
   getMessages: (source: string) => Message[]
   /** 横向读取：思考开始时间戳（thinking 时长显示用） */
   getThinkingStart: (source: string) => number | undefined
+  /** G1：重试注册失败的 listener，返回是否有新成功项（报告 8.5） */
+  retryListeners: () => Promise<boolean>
   /** 会话集合变化后清理孤儿 source 状态（替代 clearChatSourceRefs） */
   pruneSources: (activeSources: readonly string[]) => void
   dispose: () => void
@@ -89,16 +91,29 @@ export function bindChatControllerRefs(refs: ChatEventControllerRefs): void {
  * FE-AUD-024：并行注册的 listener 用 allSettled 收敛——保留成功 stop handle
  * （不全丢弃），失败逐个回调报告（ErrorCenter），dispose 只清理成功项。
  */
+export interface ListenerSettleResult<T> {
+  fns: T[]
+  /** G1：失败项（index/reason），供调用方重试注册（报告 8.5） */
+  failures: Array<{ index: number; reason: unknown }>
+}
+
 export function settleListeners<T>(
   listeners: Array<Promise<T>>,
   onRejected: (reason: unknown, index: number) => void,
-): Promise<T[]> {
-  return Promise.allSettled(listeners).then(results =>
-    results.flatMap((result, index) => {
-      if (result.status === 'fulfilled') return [result.value]
-      onRejected(result.reason, index)
-      return []
-    }))
+): Promise<ListenerSettleResult<T>> {
+  return Promise.allSettled(listeners).then(results => {
+    const fns: T[] = []
+    const failures: Array<{ index: number; reason: unknown }> = []
+    results.forEach((result, index) => {
+      if (result.status === 'fulfilled') {
+        fns.push(result.value)
+      } else {
+        failures.push({ index, reason: result.reason })
+        onRejected(result.reason, index)
+      }
+    })
+    return { fns, failures }
+  })
 }
 
 function isRenderedSource(source: string, renderedSource: string | null): boolean {
@@ -288,8 +303,9 @@ export function attachChatEventController(refs: ChatEventControllerRefs): ChatCo
   // H1 + FE-AUD-024：listen 任一 reject（IPC 异常）不得产生 unhandled rejection；
   // allSettled 保留已成功注册的 stop handle（不全丢弃），失败逐个报告（ErrorCenter），
   // dispose 只清理成功 handle，不泄漏未注册监听器
-  const unlisten = settleListeners([
-    listen<{ source: string; content: string; replay?: boolean }>('pylon:user', (event) => {
+  // G1：listener 工厂数组（重试注册失败项，报告 8.5）
+  const listenerFactories: Array<() => Promise<UnlistenFn>> = [
+    () => listen<{ source: string; content: string; replay?: boolean }>('pylon:user', (event) => {
       const { source, content, replay: eventReplay = false } = event.payload
       if (!isActiveSource(source)) return
       dispatch({
@@ -316,7 +332,7 @@ export function attachChatEventController(refs: ChatEventControllerRefs): ChatCo
       }
     }),
 
-    listen<PeriUpdatePayload>('pylon:update', (event) => {
+    () => listen<PeriUpdatePayload>('pylon:update', (event) => {
       const source = event.payload.source
       const upd = event.payload?.update
       if (!isActiveSource(source) || !source || !upd) return
@@ -388,7 +404,7 @@ export function attachChatEventController(refs: ChatEventControllerRefs): ChatCo
       }
     }),
 
-    listen<PeriDonePayload>('pylon:done', (event) => {
+    () => listen<PeriDonePayload>('pylon:done', (event) => {
       const source = event.payload.source
       if (!isActiveSource(source) || !source) return
       const replayScope = isReplayScope(runtimeState[source])
@@ -396,14 +412,43 @@ export function attachChatEventController(refs: ChatEventControllerRefs): ChatCo
       dispatch({ type: 'done', source, replay, explicitReplay: replayScope ? undefined : event.payload.replay === true })
     }),
 
-    listen<{ source: string; error: string; cancelled?: boolean; replay?: boolean }>('pylon:error', (event) => {
+    () => listen<{ source: string; error: string; cancelled?: boolean; replay?: boolean }>('pylon:error', (event) => {
       const { source, error } = event.payload
       if (!isActiveSource(source) || !source) return
       const replayScope = isReplayScope(runtimeState[source])
       const replay = replayScope || event.payload.replay === true
       dispatch({ type: 'error', source, error, cancelled: event.payload.cancelled === true, replay, explicitReplay: replayScope ? undefined : event.payload.replay === true })
     }),
-  ], (reason) => reportRuntimeError('注册聊天事件监听', reason))
+  ]
+
+  let stopFns: Array<() => void> = []
+  let failedListenerFactories: Array<{ factory: () => Promise<UnlistenFn>; index: number }> = []
+  void settleListeners(
+    listenerFactories.map(factory => factory()),
+    (reason, index) => {
+      failedListenerFactories.push({ factory: listenerFactories[index], index })
+      reportRuntimeError('注册聊天事件监听', reason)
+    },
+  ).then(result => {
+    stopFns = result.fns
+    return result.fns
+  })
+
+  // G1：重试注册失败的 listener；成功者并入 stopFns
+  const retryListeners = async (): Promise<boolean> => {
+    if (failedListenerFactories.length === 0) return false
+    const pending = failedListenerFactories
+    failedListenerFactories = []
+    const result = await settleListeners(
+      pending.map(p => p.factory()),
+      (reason, index) => {
+        failedListenerFactories.push(pending[index])
+        reportRuntimeError('重试注册聊天事件监听', reason)
+      },
+    )
+    stopFns.push(...result.fns)
+    return result.fns.length > 0
+  }
 
   const handleClear = () => {
     const source = currentRefs!.sessionRef.current
@@ -417,6 +462,7 @@ export function attachChatEventController(refs: ChatEventControllerRefs): ChatCo
   window.addEventListener('peri:clear', handleClear)
 
   const handle: ChatControllerHandle = {
+    retryListeners,
     requestCancel,
     initSource,
     commitReplay,
@@ -431,7 +477,8 @@ export function attachChatEventController(refs: ChatEventControllerRefs): ChatCo
     getThinkingStart: (source) => runtimeState[source]?.thinkingStart,
     pruneSources,
     dispose: () => {
-      unlisten.then(fns => fns.forEach(f => f()))
+      stopFns.forEach(f => f())
+      stopFns = []
       window.removeEventListener('peri:clear', handleClear)
       horizontal.dispose()
       // G0：应用级 dispose 后重置单例，允许下次重新创建
