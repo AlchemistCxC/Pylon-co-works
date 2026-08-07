@@ -515,7 +515,7 @@
   margin: var(--ui-space-2) 0;
   padding: var(--ui-space-2) var(--ui-space-3);
   border: 1px solid var(--border);
-  border-radius: var(--ui-radius-sm);
+  border-radius: 0;
   background: var(--bg-input);
 }
 .term-code-line { min-height: 1.25em; line-height: 1.4; }

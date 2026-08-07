@@ -37,14 +37,19 @@ export default function AgentSheetView({ ctx }: { sheet: SheetRecord; ctx: Sheet
         '--right-panel-inset': '0px',
       } as React.CSSProperties}>
         <ChatView sessionId={ctx.activeSession} />
-        {showPet && !isReplay && <PetCompanion rightInset={0} />}
-        {isReplay ? (
-          <button type="button" className="replay-continue-bar" role="status" onClick={() => useReplayPostureStore.getState().clear()}>
-            <span className="replay-continue-hint">只读回放 · 会话已加载</span>
-            <span className="replay-continue-cta">点击继续此会话</span>
-          </button>
-        ) : (
-          <ControlCenter sessionId={ctx.activeSession} />
+        {/* 无会话（品牌空态）时不显示中控与宠物 */}
+        {ctx.activeSession !== null && (
+          <>
+            {showPet && !isReplay && <PetCompanion rightInset={0} />}
+            {isReplay ? (
+              <button type="button" className="replay-continue-bar" role="status" onClick={() => useReplayPostureStore.getState().clear()}>
+                <span className="replay-continue-hint">只读回放 · 会话已加载</span>
+                <span className="replay-continue-cta">点击继续此会话</span>
+              </button>
+            ) : (
+              <ControlCenter sessionId={ctx.activeSession} />
+            )}
+          </>
         )}
       </div>
       {ctx.ccEditMode && <div className="cc-edit-overlay" />}
