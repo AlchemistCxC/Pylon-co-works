@@ -206,6 +206,9 @@
 .term-assistant li { margin:0; }
 .term-inline-code { font-family:var(--mono); color:var(--chat-code-color,#b47814); font-size:inherit; }
 
+/* markdown 代码块容器：背景/圆角归零（覆盖 ReactMarkdown 默认 pre UA 样式） */
+.term-assistant pre { margin:2px 0; background:transparent; border-radius:0; }
+
 /* ── 代码块（│ gutter 风格 — 对齐 Peri TUI code_block_lines）── */
 .term-code-block { margin:2px 0; font-family:var(--mono); }
 .term-code-line { display:flex; align-items:stretch; line-height:1.25; }

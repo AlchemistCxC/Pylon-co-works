@@ -131,9 +131,8 @@ const ChatView = React.memo(function ChatView({ sessionId }: Props) {
     [preparedMessages, messageLookups, searchMatches, searchIndex, locateId],
   )
 
-  // 当前可见会话的消息同步到 localStorage；后台会话在事件入口直接持久化
-  // dev/浏览器模式（无 Tauri）即使无 session 也渲染 mock 对话，方便调样式
-  if (!sessionId && IS_TAURI) return (
+  // 无会话（含切换 Profile 未指定会话）→ 品牌空态；有会话才渲染消息
+  if (!sessionId) return (
     <div className="chat-empty">
       <PylonMark size={48} title="Pylon" />
       <div className="empty-title">Pylon</div>
