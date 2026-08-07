@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from 'react'
 import { useIdentityStore } from '../../identityStore'
 import PylonMark from '../../components/PylonMark'
+import { sessionUiStateSet } from '../../components/chat/sessionUiState'
 import { isMessageSnapshotKey, snapshotSearch, type SnapshotSearchResult } from '../../domains/search/snapshotSearch.ts'
 import type { SheetContext, SheetRecord } from '../../workspace-sheets/sheetTypes'
 import './SearchSheet.css'
@@ -39,8 +40,9 @@ export default function SearchSheetView({ sheet: _sheet, ctx }: { sheet: SheetRe
   const openResult = (result: SnapshotSearchResult) => {
     const session = sessions.find(item => item.id === result.sessionId)
     if (!session) return
-    // 定位 message id：CustomEvent 供 ChatView 消费（滚动/高亮）
-    window.dispatchEvent(new CustomEvent('pylon:locate-message', { detail: { sessionId: result.sessionId, messageId: result.messageId } }))
+    // FE-AUD-003：持久导航意图（按 sessionId+messageId），ChatView 消息恢复后消费并清除——
+    // 不依赖瞬时 CustomEvent（先发事件后挂载 ChatView 会丢）
+    sessionUiStateSet(result.sessionId, 'pendingMessageLocation', { sessionId: result.sessionId, messageId: result.messageId })
     ctx.selectSession(session.id)
     ctx.openSheet({ kind: 'agent', title: session.name, agentId: activeAgent })
   }

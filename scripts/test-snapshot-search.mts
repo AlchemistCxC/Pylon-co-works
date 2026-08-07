@@ -44,7 +44,7 @@ import { snapshotSearch, SNAPSHOT_SCAN_LIMIT, isMessageSnapshotKey, parseMessage
 const view = readFileSync(new URL('../src/sheets/search/SearchSheetView.tsx', import.meta.url), 'utf8')
 assert.match(view, /isMessageSnapshotKey\(key\)/, '必须扫 pylon-msgs-* 快照')
 assert.match(view, /snapshotSearch\(localStorage, query, snapshotKeys\)/, '必须经纯域搜索')
-assert.match(view, /pylon:locate-message/, '必须发定位 message id 事件')
+assert.match(view, /sessionUiStateSet\(result\.sessionId, 'pendingMessageLocation'/, '必须保存持久定位意图（FE-AUD-003）')
 assert.match(view, /ctx\.selectSession\(session\.id\)/, '结果点击必须 selectSession')
 assert.match(view, /ctx\.openSheet\(\{ kind: 'agent'/, '结果点击必须 open agent')
 assert.match(view, /仅本地会话/, '范围必须标注仅本地（平台未决）')

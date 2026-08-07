@@ -20,6 +20,7 @@ import { normalizeToolStatus, toolStatePresentation } from '../../domains/tool/s
 import { toolIndicatorMotionClass } from './toolIndicatorMotion'
 import { resolveToolIndicatorAsset } from './toolIndicatorAssets'
 import { isPlainTextContent } from './markdownFastPath'
+import { sessionUiStateGet, sessionUiStateSet } from './sessionUiState'
 import { MarkdownRenderer } from './markdownLazy'
 import { MessageRenderBoundary } from './MessageRenderBoundary'
 import { createMockMessages } from './chatMockData'
@@ -100,6 +101,32 @@ const ChatView = React.memo(function ChatView({ sessionId }: Props) {
   })
   // CV-5：当前可见会话消息持久化收敛为 hook
   useMessagePersistence(sessionId, messages, { sessionRef, messageOwnerRef })
+  // FE-AUD-003：跨会话搜索定位消费——消息就绪后定位目标并高亮，一次性清除意图
+  const [locateId, setLocateId] = useState<string | null>(null)
+  const [locateError, setLocateError] = useState('')
+  useEffect(() => {
+    if (!sessionId) return
+    const pending = sessionUiStateGet<{ sessionId: string; messageId: string }>(sessionId, 'pendingMessageLocation')
+    if (!pending) return
+    sessionUiStateSet(sessionId, 'pendingMessageLocation', undefined)
+    if (pending.sessionId !== sessionId) return
+    if (!messages.some(message => message.id === pending.messageId)) {
+      setLocateError('快照已过期：目标消息已不在该会话')
+      return
+    }
+    setLocateId(pending.messageId)
+  }, [messages, sessionId])
+  useEffect(() => {
+    if (!locateId) return
+    const node = messageRefs.current.get(locateId)
+    if (node) {
+      node.scrollIntoView({ block: 'center' })
+      const timer = window.setTimeout(() => setLocateId(null), 1800)
+      return () => window.clearTimeout(timer)
+    }
+    setLocateError('快照已过期：目标消息已不在该会话')
+    setLocateId(null)
+  }, [locateId, messageRefs])
   useEffect(() => {
     if (IS_TAURI) return
     const id = window.setInterval(() => setMockPhaseIndex(index => (index + 1) % MOCK_GENERATION_PHASES.length), 1800)
@@ -114,9 +141,10 @@ const ChatView = React.memo(function ChatView({ sessionId }: Props) {
   const rowDescriptors = useMemo(
     () => {
       recordRender('messages.map')
-      return buildChatRowDescriptors(preparedMessages, messageLookups, searchMatches[searchIndex]?.id)
+      // locateId 并入搜索高亮（FE-AUD-003 定位目标同样高亮）
+      return buildChatRowDescriptors(preparedMessages, messageLookups, searchMatches[searchIndex]?.id ?? locateId)
     },
-    [preparedMessages, messageLookups, searchMatches, searchIndex],
+    [preparedMessages, messageLookups, searchMatches, searchIndex, locateId],
   )
 
   // 当前可见会话的消息同步到 localStorage；后台会话在事件入口直接持久化
@@ -132,6 +160,7 @@ const ChatView = React.memo(function ChatView({ sessionId }: Props) {
   return (
     <div className="chat-view" ref={chatViewRef}>
       {/* W2-12：搜索 UI 迁右栏（AgentContextPanel 驱动同一 sessionUiState 状态，hook 行为不变） */}
+      {locateError && <div className="chat-locate-error" role="status">{locateError}</div>}
       <div className="term">
         <AnimatePresence initial={false}>
           {rowDescriptors.map(desc => (
