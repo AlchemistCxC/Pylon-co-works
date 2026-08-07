@@ -2,7 +2,8 @@
  * 配置导出/导入：把应用配置整体备份为 JSON，可在本机迁移或分享。
  *
  * 覆盖的持久化 key：主题（pylon-theme）、工作区 sheets（pylon-workspace-sheets）、
- * 窗口尺寸（pylon-window-size）、会话（pylon-sessions）。
+ * 窗口尺寸（pylon-window-size）、会话（pylon-sessions）、Profile（pylon-profiles，
+ * FE-AUD-002）。
  * 其他 key（pylon-pet-v3、pylon-msgs-* 等运行态）不导出。
  */
 
@@ -14,6 +15,7 @@ export const CONFIG_STORAGE_KEYS = [
   'pylon-workspace-sheets',
   'pylon-window-size',
   'pylon-sessions',
+  'pylon-profiles',
 ] as const
 
 export interface ConfigEnvelope {

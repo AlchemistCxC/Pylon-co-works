@@ -79,4 +79,31 @@ describe('FE-AUD-002 Profile 持久化', () => {
     expect(result.ok).toBe(true)
     expect(localStorage.getItem(PROFILE_KEY)).not.toBeNull()
   })
+
+  it('旧 pylon-theme 内嵌 profile 一次性迁移落新 key（报告 1B.5）', () => {
+    const legacy = { id: 'legacy', name: 'Legacy', persona: 'p', model: 'm' }
+    localStorage.setItem('pylon-theme', JSON.stringify({ state: { profiles: [legacy], activeProfileId: 'legacy' } }))
+    useIdentityStore.getState().hydrateProfiles({ profiles: [legacy], activeProfileId: 'legacy' })
+    const persisted = readPersistedProfiles()
+    expect(persisted.profiles.some(profile => profile.id === 'legacy')).toBe(true)
+    expect(persisted.activeProfileId).toBe('legacy')
+  })
+
+  it('新 key 存在时旧 theme 数据不反向覆盖（报告 1B.5）', () => {
+    localStorage.setItem(PROFILE_KEY, JSON.stringify({ version: 1, profiles: [NEO], activeProfileId: 'neo' }))
+    useIdentityStore.getState().hydrateProfiles({ profiles: [{ id: 'legacy', name: 'Legacy', persona: 'p', model: 'm' }], activeProfileId: 'legacy' })
+    const state = useIdentityStore.getState()
+    expect(state.profiles.some(profile => profile.id === 'neo')).toBe(true)
+    expect(state.profiles.some(profile => profile.id === 'legacy')).toBe(false)
+  })
+
+  it('Profile roundtrip：addProfile → 模拟重启 hydrate 恢复', () => {
+    useIdentityStore.getState().addProfile(NEO)
+    useIdentityStore.getState().setActiveProfile('neo')
+    resetStores()
+    useIdentityStore.getState().hydrateProfiles()
+    const state = useIdentityStore.getState()
+    expect(state.profiles.some(profile => profile.id === 'neo')).toBe(true)
+    expect(state.activeProfileId).toBe('neo')
+  })
 })
