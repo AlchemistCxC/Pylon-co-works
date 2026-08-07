@@ -51,4 +51,19 @@ describe('removeSessionTransaction', () => {
     if (!result.ok) expect(result.kind).toBe('validation')
     expect(calls).toEqual([])
   })
+
+  it('duplicate：删除成功后再次删除 → validation（幂等不重复 close）', async () => {
+    let exists = true
+    const { deps, calls } = createDeps({
+      findSession: () => (exists ? SESSION : undefined),
+      removeSession: () => { exists = false },
+    })
+    const first = await removeSessionTransaction('s1', deps)
+    expect(first.ok).toBe(true)
+    // 第二次：session 已不存在 → validation，close 不重复调用
+    const second = await removeSessionTransaction('s1', deps)
+    expect(second.ok).toBe(false)
+    if (!second.ok) expect(second.kind).toBe('validation')
+    expect(calls.filter(call => call.startsWith('close:')).length).toBe(1)
+  })
 })
