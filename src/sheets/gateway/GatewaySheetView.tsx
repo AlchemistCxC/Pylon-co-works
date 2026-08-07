@@ -40,7 +40,9 @@ export default function GatewaySheetView({ sheet: _sheet, ctx: _ctx }: { sheet: 
       },
     )
     if (!result.ok) {
-      if (result.kind === 'mismatch') setWriteStatus({ kind: 'lock-poisoned' })
+      // G3：命令缺失 → blocked（「待后端」分支可达）；锁中毒/回读 mismatch 明确展示
+      if (result.kind === 'blocked') setWriteStatus({ kind: 'blocked' })
+      else if (result.kind === 'mismatch') setWriteStatus({ kind: 'lock-poisoned' })
       else setWriteStatus({ kind: 'error', message: result.message })
       return
     }

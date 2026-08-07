@@ -62,6 +62,11 @@ export async function saveGatewayRouteTransaction(
     await deps.saveRoutes({ scope: 'gateway', config: { gateway: { routes } } })
   } catch (error) {
     deps.reportError('保存网关配置', error)
+    const message = error instanceof Error ? error.message : String(error)
+    // G3：命令缺失（后端未提供）→ blocked，UI 显示「待后端」（报告 5B）
+    if (/command not found/i.test(message)) {
+      return { ok: false, kind: 'blocked', message: '待后端：update_agents_config 命令尚未提供', cause: error }
+    }
     return { ok: false, kind: 'transport', message: '保存网关配置失败', cause: error }
   }
 
