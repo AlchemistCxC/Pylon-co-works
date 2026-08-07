@@ -73,6 +73,22 @@ export function getChatController(): ChatControllerHandle | null {
   return activeController
 }
 
+/**
+ * FE-AUD-024：并行注册的 listener 用 allSettled 收敛——保留成功 stop handle
+ * （不全丢弃），失败逐个回调报告（ErrorCenter），dispose 只清理成功项。
+ */
+export function settleListeners<T>(
+  listeners: Array<Promise<T>>,
+  onRejected: (reason: unknown, index: number) => void,
+): Promise<T[]> {
+  return Promise.allSettled(listeners).then(results =>
+    results.flatMap((result, index) => {
+      if (result.status === 'fulfilled') return [result.value]
+      onRejected(result.reason, index)
+      return []
+    }))
+}
+
 function isRenderedSource(source: string, renderedSource: string | null): boolean {
   return source.length > 0 && renderedSource === source
 }
@@ -253,9 +269,10 @@ export function attachChatEventController(refs: ChatEventControllerRefs): ChatCo
     horizontal.prune(activeSources)
   }
 
-  // H1：listen 任一 reject（IPC 异常）不得产生 unhandled rejection；dispose 的
-  // unlisten.then 也由此获得兜底（失败时解析为空数组，不泄漏已注册监听器）
-  const unlisten = Promise.all([
+  // H1 + FE-AUD-024：listen 任一 reject（IPC 异常）不得产生 unhandled rejection；
+  // allSettled 保留已成功注册的 stop handle（不全丢弃），失败逐个报告（ErrorCenter），
+  // dispose 只清理成功 handle，不泄漏未注册监听器
+  const unlisten = settleListeners([
     listen<{ source: string; content: string; replay?: boolean }>('pylon:user', (event) => {
       const { source, content, replay: eventReplay = false } = event.payload
       if (!isActiveSource(source)) return
@@ -370,7 +387,7 @@ export function attachChatEventController(refs: ChatEventControllerRefs): ChatCo
       const replay = replayScope || event.payload.replay === true
       dispatch({ type: 'error', source, error, cancelled: event.payload.cancelled === true, replay, explicitReplay: replayScope ? undefined : event.payload.replay === true })
     }),
-  ]).catch(() => [])
+  ], (reason) => reportRuntimeError('注册聊天事件监听', reason))
 
   const handleClear = () => {
     const source = refs.sessionRef.current
