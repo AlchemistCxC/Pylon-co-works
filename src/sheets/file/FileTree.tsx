@@ -28,7 +28,7 @@ export default function FileTree({ source, activeFile, onOpen }: {
     const key = relativePath ?? ''
     setLoading(previous => new Set(previous).add(key))
     try {
-      const raw = await createWorkspaceClient({ invoke: (cmd, args) => invoke(cmd, args as Record<string, unknown> | undefined) }).listEntries(relativePath ?? '')
+      const raw = await createWorkspaceClient({ invoke: (cmd, args) => invoke(cmd, args as Record<string, unknown> | undefined) }).listEntries(source, relativePath ?? '')
       const entries = normalizeWorkspaceEntries(raw)
       setTree(previous => relativePath
         ? { entries: mergeWorkspaceEntries(previous.entries, relativePath, entries), selectedPath: previous.selectedPath }
@@ -69,7 +69,7 @@ export default function FileTree({ source, activeFile, onOpen }: {
   const openFile = (path: string) => {
     if (!source) return
     setTree(previous => ({ ...previous, selectedPath: path }))
-    void createWorkspaceClient({ invoke: (cmd, args) => invoke(cmd, args as Record<string, unknown> | undefined) }).readText(path).catch(err => {
+    void createWorkspaceClient({ invoke: (cmd, args) => invoke(cmd, args as Record<string, unknown> | undefined) }).readText(source, path).catch(err => {
       reportRuntimeError('读取文件', err)
     })
     onOpen(path)

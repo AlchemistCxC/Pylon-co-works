@@ -3,8 +3,8 @@
  *
  * 目标行为：Workspace hydrate 是单一 bootstrap transaction——App 首挂载 hydrate 后，
  * list_agents 到达（setAgents）只 prune 无效 agent sheet，不得全量替换并覆盖启动期
- * 用户操作或内存态。当前实现（2026-08-07）setAgents 内 loadSheetStateV2 +
- * replaceSheets 全量替换 → 本文件应 RED。
+ * 用户操作或内存态。阶段 0 以 RED 锁定缺陷（setAgents 全量替换）；阶段 2（F13
+ * pruneAgentSheets）后全绿。
  */
 import { describe, expect, it, beforeEach } from 'vitest'
 import { useWorkspaceStore } from '../workspaceStore'
@@ -48,7 +48,7 @@ describe('FE-AUD-005 hydrate 双路径', () => {
     resetStores()
   })
 
-  it('agents 到达后的 hydrate 不覆盖启动期用户操作（当前 replaceSheets 覆盖 → RED）', () => {
+  it('agents 到达后的 hydrate 不覆盖启动期用户操作', () => {
     seedPersisted()
     hydrateThenUserOpensHistory()
     expect(useWorkspaceStore.getState().workspaceSheets.sheets.some(sheet => sheet.id === 'h1')).toBe(true)

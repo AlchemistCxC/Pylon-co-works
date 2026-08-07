@@ -52,6 +52,6 @@ assert.deepEqual(classifyBrowserStartError('browser_start 不存在'), { kind: '
 assert.deepEqual(classifyBrowserStartError('protocol_error'), { kind: 'error', message: 'protocol_error' })
 
 // 5. 组件接线：启动 invoke 调用点就位；命令缺失明确「待后端」
-assert.match(view, /invoke(?:<[^>]+>)?\('browser_start'/, '必须接入 browser_start invoke')
+assert.match(view, /\.start\(\{/, '必须经 typed client 接入 browser_start invoke')
 assert.match(view, /classifyBrowserStartError\(error\)/, '失败必须经分类')
 assert.match(view, /浏览器 WebView 命令不可用|WebView2 子进程由 Browser Sheet 生命周期管理/, '命令错误必须明确 WebView 生命周期状态')

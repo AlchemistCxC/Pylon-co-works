@@ -32,7 +32,7 @@ assert.deepEqual(classifyWorkspaceSearchError('[object Object]'), { kind: 'error
 
 // 3. 组件接线：只消费正式命令、missing 明确「待后端」、不以前端遍历冒充搜索
 const panel = readFileSync(new URL('../src/sheets/file/WorkspaceSearchPanel.tsx', import.meta.url), 'utf8')
-assert.match(panel, /invoke<unknown>\('workspace_search', \{ source, query: query\.trim\(\) \}\)/, '必须只调正式 workspace_search 命令')
+assert.match(panel, /\.search\(source, query\.trim\(\)\)/, '必须只经 typed client 调正式 workspace_search 命令')
 assert.match(panel, /待后端：workspace_search 命令尚未提供/, '命令缺失必须明确「待后端」')
 assert.match(panel, /classifyWorkspaceSearchError\(error\)/, '失败必须经分类')
 assert.match(panel, /normalizeWorkspaceSearchResults\(raw\)/, '结果必须经 normalize')

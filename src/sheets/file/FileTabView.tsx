@@ -3,6 +3,7 @@ import { invoke } from '@tauri-apps/api/core'
 import { sanitizeHtml } from '../../components/chat/htmlSanitizer'
 import { highlightCode } from '../../components/chat/codeHighlight'
 import { MarkdownRenderer } from '../../components/chat/markdownLazy'
+import { createWorkspaceClient } from '../../infrastructure/tauri/workspaceClient'
 import { normalizeWorkspaceText } from '../../infrastructure/tauri/workspaceContracts.ts'
 import { changedLineNumbers } from '../../domains/fileDispatch/fileDiff.ts'
 import { useWorkspaceStore } from '../../workspaceStore'
@@ -30,7 +31,7 @@ export default function FileTabView({ source, path, onTruncated, onContentReady,
   const touchVersion = useWorkspaceStore(s => (source && path) ? s.touchVersions[`${source}:${path}`] : undefined)
   const loadContent = (showChanged: boolean) => {
     if (!source || !path) return
-    invoke<unknown>('read_workspace_text', { source, relativePath: path }).then(raw => {
+    createWorkspaceClient({ invoke: (cmd, args) => invoke(cmd, args as Record<string, unknown> | undefined) }).readText(source, path).then(raw => {
       const text = normalizeWorkspaceText(raw)
       if (!text) return
       setContent(previous => {

@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState } from 'react'
 import { ChevronDown, ChevronRight, GitBranch, GitCommitHorizontal } from 'lucide-react'
 import { invoke } from '@tauri-apps/api/core'
 import { reportRuntimeError } from '../../runtimeError'
+import { createWorkspaceClient } from '../../infrastructure/tauri/workspaceClient'
 import { classifyGitError, normalizeGitHistory, normalizeGitStatus, type GitCommit, type GitErrorDetail, type GitStatusEntry } from '../../infrastructure/tauri/gitContracts.ts'
 import FileTypeIcon from './FileTypeIcon'
 
@@ -76,7 +77,8 @@ export default function GitPanel({ source, onOpenDiff }: { source: string | null
     if (!source) return
     let disposed = false
     setError(null)
-    Promise.all([invoke<unknown>('git_status', { source }), invoke<unknown>('git_history', { source })]).then(([statusRaw, historyRaw]) => {
+    const wc = createWorkspaceClient({ invoke: (cmd, args) => invoke(cmd, args as Record<string, unknown> | undefined) })
+    Promise.all([wc.gitStatus(source), wc.gitHistory(source)]).then(([statusRaw, historyRaw]) => {
       if (disposed) return
       const entries = normalizeGitStatus(statusRaw)
       setStaged(entries.filter(entry => entry.staged))

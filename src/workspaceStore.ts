@@ -60,7 +60,6 @@ interface WorkspaceStoreState {
   touchedFiles: Record<string, TouchedFile[]>
   touchVersions: Record<string, number>
   recordTouchedFile: (source: string, file: Omit<TouchedFile, 'source'>) => void
-  replaceSheets: (workspaceSheets: ReturnType<typeof createSheetState>, sheetAgentStates: Record<string, SheetWorkspaceState>) => void
   /** FE-AUD-005：agents 到达后仅 prune 无效 agent sheet（不重复全量 hydrate） */
   pruneAgentSheets: (agentIds: readonly string[]) => void
   patchSheetAgentState: (agentId: string, partial: Partial<SheetWorkspaceState>) => void
@@ -179,7 +178,6 @@ export const useWorkspaceStore = create<WorkspaceStoreState>()((set, get) => ({
     }
     return commitWorkspaceMutation(state, { sheetAgentStates })
   }),
-  replaceSheets: (workspaceSheets, sheetAgentStates) => set({ workspaceSheets, sheetAgentStates }),
   pruneAgentSheets: (agentIds) => set(state => {
     const allowed = new Set(agentIds)
     const sheets = state.workspaceSheets.sheets.filter(sheet =>

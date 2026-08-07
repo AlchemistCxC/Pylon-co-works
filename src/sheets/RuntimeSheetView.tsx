@@ -30,10 +30,10 @@ export default function RuntimeSheetView({ sheet: _sheet, ctx: _ctx }: { sheet: 
   useEffect(() => {
     // 浏览器模式 mock 后端已装（demo）：invoke/listen 经假 __TAURI_INTERNALS__ 返回 mock 数据
     let disposed = false
-    invoke<unknown>('startup_diagnostics').then(raw => {
+    createRuntimeClient({ invoke: (cmd, args) => invoke(cmd, args as Record<string, unknown> | undefined) }).startupDiagnostics().then(raw => {
       if (!disposed) setDiagnostics(normalizeStartupDiagnostics(raw))
     }).catch(error => reportRuntimeError('读取启动诊断', error))
-    invoke<unknown>('list_runtime_logs').then(raw => {
+    createRuntimeClient({ invoke: (cmd, args) => invoke(cmd, args as Record<string, unknown> | undefined) }).listRuntimeLogs().then(raw => {
       if (!disposed) setEntries(previous => mergeRuntimeLogs(previous, normalizeRuntimeLogList(raw)))
     }).catch(error => reportRuntimeError('读取运行日志', error))
     const unlisten = listen<unknown>('pylon:runtime-log', event => {

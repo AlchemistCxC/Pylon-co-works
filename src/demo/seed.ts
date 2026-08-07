@@ -4,7 +4,7 @@
  * 内部幂等：agents/状态灯/模式不持久化（agents 来自 list_agents 后端，runtime 是瞬态），
  * 每次启动都必须补；sessions/消息缓存/sheets 持久化（hydrateSessions/openSheet 落盘），
  * 仅首次（sessions 为空）种入——否则二次启动 agents 空 → 主页「没有可用 Agent」。
- * 顺序关键：① setAgents 必须先（内部 loadSheetStateV2+replaceSheets 清 sheets）
+ * 顺序关键：① setAgents 必须先（内部 pruneAgentSheets 清无效 agent sheets）
  * ② sessions 持久化 ③ 每会话消息缓存（ChatView 恢复 + search 快照可查）
  * ④ sheets（agent 先开聚焦）⑤ setActiveSession（SheetLayout 子 effect 先跑，
  * 写回 effect 随其持久化）⑥ 每次补 runtime 状态灯/模式/权限。

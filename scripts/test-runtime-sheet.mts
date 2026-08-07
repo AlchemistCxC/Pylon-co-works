@@ -93,7 +93,7 @@ const entry = (id: number, message: string, level = 'info', source = 'acp'): Run
 
 // 5. RuntimeSheetView 接线：list 回放 + 增量 listen + unmount 清理 + clear
 const sheet = readFileSync(new URL('../src/sheets/RuntimeSheetView.tsx', import.meta.url), 'utf8')
-assert.match(sheet, /invoke<unknown>\('list_runtime_logs'\)/, '必须 list 回放')
+assert.match(sheet, /\.listRuntimeLogs\(\)/, '必须经 typed client list 回放')
 assert.match(sheet, /listen<unknown>\('pylon:runtime-log'/, '必须订阅实时增量')
 assert.match(sheet, /mergeRuntimeLogs\(previous, normalizeRuntimeLogList\(raw\)\)/, 'list 必须经去重合并')
 assert.match(sheet, /mergeRuntimeLogs\(previous, \[entry\]\)/, '增量必须经去重合并')
@@ -103,7 +103,7 @@ assert.match(sheet, /filterRuntimeLogs\(entries, filter\)/, '必须纯过滤')
 assert.equal(sheet.includes('rightPanel'), false, 'runtime 无右栏')
 
 // 5.5 W1-09：startup_diagnostics + agentStatuses 订阅 → marker；不伪造成后端日志
-assert.match(sheet, /invoke<unknown>\('startup_diagnostics'\)/, '必须调用启动诊断')
+assert.match(sheet, /\.startupDiagnostics\(\)/, '必须经 typed client 调用启动诊断')
 assert.match(sheet, /normalizeStartupDiagnostics\(raw\)/, '诊断必须经宽容 normalize')
 assert.match(sheet, /agentStatuses = useRuntimeStore\(state => state\.agentStatuses\)/, '必须订阅 agentStatuses')
 assert.match(sheet, /deriveCrashMarkers\(previous, agentStatuses\)/, 'crashed/error 必须派生本地 marker')

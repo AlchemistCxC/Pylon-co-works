@@ -2,6 +2,7 @@ import { useState } from 'react'
 import { Search } from 'lucide-react'
 import { invoke } from '@tauri-apps/api/core'
 import { reportRuntimeError } from '../../runtimeError'
+import { createWorkspaceClient } from '../../infrastructure/tauri/workspaceClient'
 import { classifyWorkspaceSearchError, normalizeWorkspaceSearchResults, type WorkspaceSearchResult, type WorkspaceSearchSaveStatus } from '../../infrastructure/tauri/workspaceSearchContracts.ts'
 import FileTypeIcon from './FileTypeIcon'
 
@@ -36,7 +37,7 @@ export default function WorkspaceSearchPanel({ source, onOpenResult }: {
     if (!source || !query.trim()) return
     setStatus({ kind: 'searching' })
     try {
-      const raw = await invoke<unknown>('workspace_search', { source, query: query.trim() })
+      const raw = await createWorkspaceClient({ invoke: (cmd, args) => invoke(cmd, args as Record<string, unknown> | undefined) }).search(source, query.trim())
       setResults(normalizeWorkspaceSearchResults(raw))
       setStatus({ kind: 'idle' })
     } catch (error) {

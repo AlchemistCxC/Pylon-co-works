@@ -39,7 +39,7 @@ assert.match(view, /closeTab = \(path: string\) =>/, '必须支持关闭 tab')
 
 // 4. FileTabView：read invoke 参数带 source/relativePath；md 复用渲染器；代码 highlight+sanitize
 const tabView = readFileSync(new URL('../src/sheets/file/FileTabView.tsx', import.meta.url), 'utf8')
-assert.match(tabView, /invoke<unknown>\('read_workspace_text', \{ source, relativePath: path \}\)/, 'read 必须带 source/relativePath')
+assert.match(tabView, /\.readText\(source, path\)/, 'read 必须经 typed client 带 source/relativePath')
 assert.match(tabView, /normalizeWorkspaceText\(raw\)/, 'read 响应必须经 normalize')
 assert.match(tabView, /MarkdownRenderer/, 'md 必须复用导出渲染器')
 assert.equal(tabView.includes('gutter'), true, '代码视图必须带行号 gutter')
@@ -47,7 +47,7 @@ assert.match(tabView, /sanitizeHtml\(line/, '高亮 HTML 必须走 sanitize 安�
 
 // 5. FileTree：list 带 source/relativePath；打开传后端相对 path（symlink 不自行 resolve）
 const tree = readFileSync(new URL('../src/sheets/file/FileTree.tsx', import.meta.url), 'utf8')
-assert.match(tree, /\.listEntries\(relativePath \?\? ''\)/, 'list 必须经 typed client（相对路径）')
+assert.match(tree, /\.listEntries\(source, relativePath \?\? ''\)/, 'list 必须经 typed client 带 source/相对路径')
 assert.match(tree, /mergeWorkspaceEntries\(previous\.entries, relativePath, entries\)/, '目录展开必须合并子树')
 assert.equal(tree.includes('readlink'), false, 'symlink 不自行 resolve')
 

@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState } from 'react'
 import { invoke } from '@tauri-apps/api/core'
 import { X } from 'lucide-react'
 import { reportRuntimeError } from '../../runtimeError'
+import { createWorkspaceClient } from '../../infrastructure/tauri/workspaceClient'
 import { classifyGitError, normalizeGitStatus, type GitStatusEntry } from '../../infrastructure/tauri/gitContracts.ts'
 import { useWorkspaceStore } from '../../workspaceStore'
 import FileTypeIcon from './FileTypeIcon'
@@ -21,7 +22,7 @@ export default function ViewsPanel({ source, activeDiff, onOpenDiff, onCloseDiff
   useEffect(() => {
     if (!source) return
     let disposed = false
-    invoke<unknown>('git_status', { source }).then(raw => {
+    createWorkspaceClient({ invoke: (cmd, args) => invoke(cmd, args as Record<string, unknown> | undefined) }).gitStatus(source).then(raw => {
       if (!disposed) setEntries(normalizeGitStatus(raw))
     }).catch(err => {
       if (disposed) return

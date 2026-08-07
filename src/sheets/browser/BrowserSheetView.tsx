@@ -67,7 +67,7 @@ export default function BrowserSheetView({ sheet: _sheet, ctx: _ctx }: { sheet: 
       else if (next.phase === 'error') dispatch({ type: 'failed', error: next.error || '浏览器启动失败' })
       if (next.url) setAddress(next.url)
     }
-    void invoke<BrowserSnapshot>('browser_status').then(applySnapshot).catch(() => {})
+    void createBrowserClient({ invoke: (cmd, args) => invoke(cmd, args as Record<string, unknown> | undefined) }).status().then(raw => applySnapshot(raw as BrowserSnapshot)).catch(() => {})
     const status = listen<BrowserSnapshot>('pylon:browser-status', event => applySnapshot(event.payload))
     const page = listen<Pick<BrowserSnapshot, 'instanceId' | 'url' | 'title'>>('pylon:browser-page', event => {
       if (!disposed && event.payload.url) setAddress(event.payload.url)
@@ -97,14 +97,12 @@ export default function BrowserSheetView({ sheet: _sheet, ctx: _ctx }: { sheet: 
     try {
       const element = viewportRef.current
       const rect = element?.getBoundingClientRect()
-      const next = await invoke<BrowserSnapshot>('browser_start', {
-        bounds: {
-          x: Math.round(rect?.left ?? 0),
-          y: Math.round(rect?.top ?? 0),
-          width: Math.max(1, Math.round(rect?.width ?? 1)),
-          height: Math.max(1, Math.round(rect?.height ?? 1)),
-        },
-      })
+      const next = await createBrowserClient({ invoke: (cmd, args) => invoke(cmd, args as Record<string, unknown> | undefined) }).start({
+        x: Math.round(rect?.left ?? 0),
+        y: Math.round(rect?.top ?? 0),
+        width: Math.max(1, Math.round(rect?.width ?? 1)),
+        height: Math.max(1, Math.round(rect?.height ?? 1)),
+      }) as BrowserSnapshot
       setSnapshot(next)
       setAddress(next.url || '')
       dispatch({ type: 'started', instanceId: String(next.instanceId) })
@@ -120,7 +118,7 @@ export default function BrowserSheetView({ sheet: _sheet, ctx: _ctx }: { sheet: 
     const url = address.trim()
     if (!url) return
     try {
-      const next = await invoke<BrowserSnapshot>('browser_navigate', { url: /^https?:\/\//i.test(url) ? url : `https://${url}` })
+      const next = await createBrowserClient({ invoke: (cmd, args) => invoke(cmd, args as Record<string, unknown> | undefined) }).navigate(/^https?:\/\//i.test(url) ? url : `https://${url}`) as BrowserSnapshot
       setSnapshot(next)
     } catch (error) {
       reportRuntimeError('浏览器导航', error)
@@ -129,7 +127,8 @@ export default function BrowserSheetView({ sheet: _sheet, ctx: _ctx }: { sheet: 
 
   const browserCommand = async (command: 'browser_back' | 'browser_forward' | 'browser_reload') => {
     try {
-      const next = await invoke<BrowserSnapshot>(command)
+      const bc = createBrowserClient({ invoke: (cmd, args) => invoke(cmd, args as Record<string, unknown> | undefined) })
+      const next = await (command === 'browser_back' ? bc.back() : command === 'browser_forward' ? bc.forward() : bc.reload()) as BrowserSnapshot
       setSnapshot(next)
     } catch (error) {
       reportRuntimeError('浏览器操作', error)

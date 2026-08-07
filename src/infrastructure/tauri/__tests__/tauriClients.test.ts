@@ -16,7 +16,7 @@ describe('workspaceClient', () => {
       { name: 'no-kind', relativePath: '/a/x' },
     ])
     const client = createWorkspaceClient({ invoke: (cmd, args) => invoke.invoke(cmd, args) })
-    const entries = (await client.listEntries('/a')) as Array<{ path?: string }>
+    const entries = (await client.listEntries('local:一', '/a')) as Array<{ path?: string }>
     expect(entries.some(entry => entry.path === '/a/b.ts')).toBe(true)
   })
 
@@ -25,9 +25,9 @@ describe('workspaceClient', () => {
       { path: 'a.ts', status: 'M' },
     ])
     const client = createWorkspaceClient({ invoke: (cmd, args) => invoke.invoke(cmd, args) })
-    const status = (await client.gitStatus()) as Array<{ path?: string }>
+    const status = (await client.gitStatus('local:一')) as Array<{ path?: string }>
     expect(status[0]?.path).toBe('a.ts')
-    expect(invoke.calls).toEqual([{ cmd: 'git_status', args: {} }])
+    expect(invoke.calls).toEqual([{ cmd: 'git_status', args: { source: 'local:一' } }])
   })
 })
 

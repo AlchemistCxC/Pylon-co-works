@@ -11,15 +11,16 @@ import { normalizeWorkspaceSearchResults } from './workspaceSearchContracts'
 
 export function createWorkspaceClient(transport: ClientTransport) {
   return {
-    listEntries: (relativePath: string): Promise<unknown> =>
-      transport.invoke('list_workspace_entries', { relativePath }).then(normalizeWorkspaceEntries),
-    readText: (relativePath: string): Promise<unknown> =>
-      transport.invoke('read_workspace_text', { relativePath }).then(normalizeWorkspaceText),
-    search: (query: string): Promise<unknown> =>
-      transport.invoke('workspace_search', { query }).then(normalizeWorkspaceSearchResults),
-    gitStatus: (): Promise<unknown> => transport.invoke('git_status').then(normalizeGitStatus),
-    gitHistory: (): Promise<unknown> => transport.invoke('git_history').then(normalizeGitHistory),
-    gitDiff: (payload: Record<string, unknown>): Promise<unknown> => transport.invoke('git_diff', payload),
+    listEntries: (source: string, relativePath: string): Promise<unknown> =>
+      transport.invoke('list_workspace_entries', { source, relativePath }).then(normalizeWorkspaceEntries),
+    readText: (source: string, relativePath: string): Promise<unknown> =>
+      transport.invoke('read_workspace_text', { source, relativePath }).then(normalizeWorkspaceText),
+    search: (source: string, query: string): Promise<unknown> =>
+      transport.invoke('workspace_search', { source, query }).then(normalizeWorkspaceSearchResults),
+    gitStatus: (source: string): Promise<unknown> => transport.invoke('git_status', { source }).then(normalizeGitStatus),
+    gitHistory: (source: string): Promise<unknown> => transport.invoke('git_history', { source }).then(normalizeGitHistory),
+    gitDiff: (source: string, path: string, staged: boolean): Promise<unknown> =>
+      transport.invoke('git_diff', { source, path, staged }),
   }
 }
 

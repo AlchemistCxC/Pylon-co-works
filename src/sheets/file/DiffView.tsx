@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react'
 import { invoke } from '@tauri-apps/api/core'
 import { reportRuntimeError } from '../../runtimeError'
+import { createWorkspaceClient } from '../../infrastructure/tauri/workspaceClient'
 import { classifyGitError } from '../../infrastructure/tauri/gitContracts.ts'
 import DiffCard from '../../components/chat/DiffCard'
 
@@ -24,7 +25,7 @@ export default function DiffView({ source, path, staged, onClose }: {
     let disposed = false
     setOutput('')
     setError('')
-    invoke<string>('git_diff', { source, path, staged }).then(text => {
+    createWorkspaceClient({ invoke: (cmd, args) => invoke(cmd, args as Record<string, unknown> | undefined) }).gitDiff(source, path, staged).then(text => {
       if (!disposed) setOutput(typeof text === 'string' ? text : '')
     }).catch(err => {
       if (disposed) return

@@ -97,7 +97,7 @@ for (const entry of buildGitStatus()) {
   const hydrateIdx = app.indexOf('hydrateWorkspaceSheets()')
   assert.ok(seedEffect.includes('useEffect') && app.indexOf('demoSeededRef') > hydrateIdx, 'seed effect 必须声明在 hydrate 之后')
   const seed = readFileSync(new URL('../src/demo/seed.ts', import.meta.url), 'utf8')
-  assert.match(seed, /setAgents\(buildDemoAgents\(\)\)/, 'setAgents 必须最先（内部 replaceSheets 清 sheets）')
+  assert.match(seed, /setAgents\(buildDemoAgents\(\)\)/, 'setAgents 必须最先（内部 pruneAgentSheets 清无效 sheets）')
   assert.match(seed, /identity\.sessions\.length === 0/, '会话种入必须二次启动跳过（agents/状态灯每次补——非持久化）')
   assert.match(seed, /persistSessions\(localStorage, sessions\)/, '会话必须持久化（幂等）')
   assert.match(seed, /persistMessageSnapshot\(session\.id/, '每会话必须种消息缓存')

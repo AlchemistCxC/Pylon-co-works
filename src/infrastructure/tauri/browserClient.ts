@@ -9,6 +9,12 @@ import { ClientTransport } from '../acp/agentClient'
 
 export function createBrowserClient(transport: ClientTransport) {
   return {
+    status: (): Promise<unknown> => transport.invoke('browser_status'),
+    start: (bounds: Record<string, unknown>): Promise<unknown> => transport.invoke('browser_start', { bounds }),
+    navigate: (url: string): Promise<unknown> => transport.invoke('browser_navigate', { url }),
+    back: (): Promise<unknown> => transport.invoke('browser_back'),
+    forward: (): Promise<unknown> => transport.invoke('browser_forward'),
+    reload: (): Promise<unknown> => transport.invoke('browser_reload'),
     setBounds: (bounds: Record<string, unknown>): Promise<unknown> => transport.invoke('browser_set_bounds', bounds),
     close: (): Promise<unknown> => transport.invoke('browser_close'),
   }
