@@ -43,7 +43,8 @@ export default forwardRef<{ send: () => void; attachFile: () => void; cancel: ()
   const [attached, setAttached] = useState<{path:string;name:string}[]>([])
   const [historyIndex, setHistoryIndex] = useState(-1)
   const [historyLength, setHistoryLength] = useState(0)
-  const [queuedMessages, setQueuedMessages] = useState<QueuedMessage[]>([])
+  // FE-AUD-020：队列按 session 保存（sessionUiState）——切 Sheet/重挂载不丢，删除 session 清理
+  const [queuedMessages, setQueuedMessages] = useSessionUiState<QueuedMessage[]>(sessionId, 'queued-messages', [])
   const lastMsg = useRef('')
   const historyBySourceRef = useRef<Record<string, string[]>>({})
   const historyDraftRef = useRef('')
@@ -412,7 +413,7 @@ export default forwardRef<{ send: () => void; attachFile: () => void; cancel: ()
                 <button type="button" onClick={() => setQueuedMessages(previous => previous.map(queued => queued.id === item.id ? { ...queued, editing: !queued.editing } : queued))} aria-label="编辑待发送消息" title="编辑">
                   <Pencil size={13} />
                 </button>
-                <button type="button" onClick={() => sendQueued(item)} disabled={generating || !item.text.trim()} aria-label="发送待发送消息" title={generating ? '当前生成完成后发送' : '发送'}>
+                <button type="button" onClick={() => sendQueued(item)} disabled={generating || !item.text.trim()} aria-label="发送待发送消息" title={generating ? '稍后发送（手动）' : '发送'}>
                   <Send size={13} />
                 </button>
                 <button type="button" onClick={() => setQueuedMessages(previous => previous.filter(queued => queued.id !== item.id))} aria-label="取消待发送消息" title="取消">
