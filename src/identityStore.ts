@@ -33,7 +33,9 @@ export interface Session {
   platform: string
   workdir: string
   sessionPrompt: string
+  /** @deprecated legacy/reserved：后端会话级配置链路未确定（FE-AUD-023），只读说明不编辑不发送 */
   skills: string[]
+  /** @deprecated legacy/reserved：同 skills，契约确定前不提供编辑 */
   hooks: string[]
   autoName: string
 }
