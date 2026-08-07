@@ -218,14 +218,14 @@ export const useStore = create<ThemeState>()(persist(
     return persisted
   },
   onRehydrateStorage: () => state => {
-  // 阶段 1 迁移：旧 pylon-theme 里的 profiles/activeProfileId 迁入 identityStore（一次性）
+  // FE-AUD-002：旧 pylon-theme 内嵌 profile 一次性迁移到独立 pylon-profiles key
+  // （迁移逻辑在 hydrateProfiles：新 key 存在时旧数据不反向覆盖）
   const legacy = state as unknown as { profiles?: Profile[]; activeProfileId?: string }
-  if (legacy?.profiles && Array.isArray(legacy.profiles) && legacy.profiles.length > 0) {
-    useIdentityStore.setState({
-      profiles: legacy.profiles,
-      activeProfileId: typeof legacy.activeProfileId === 'string' ? legacy.activeProfileId : legacy.profiles[0].id,
-    })
-  }
+  useIdentityStore.getState().hydrateProfiles(
+    legacy?.profiles && Array.isArray(legacy.profiles) && legacy.profiles.length > 0
+      ? { profiles: legacy.profiles, activeProfileId: typeof legacy.activeProfileId === 'string' ? legacy.activeProfileId : legacy.profiles[0].id }
+      : undefined,
+  )
   useIdentityStore.getState().hydrateSessions()
 }}))
 

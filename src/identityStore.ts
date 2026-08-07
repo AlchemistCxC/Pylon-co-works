@@ -1,6 +1,7 @@
 import { create } from 'zustand'
 import { loadSessions, persistSessions } from './sessionPersistence'
 import { loadSheetStateV2 } from './workspace-sheets/sheetPersistence'
+import { loadProfiles, persistProfiles, PROFILE_STORAGE_KEY, type PersistedProfile, type ProfilePersistenceState } from './profilePersistence'
 import { useWorkspaceStore } from './workspaceStore'
 import { useRuntimeStore } from './runtimeStore'
 import { clearSessionUiState } from './components/chat/sessionUiState'
@@ -58,8 +59,10 @@ interface IdentityStoreState {
   agents: AgentEntry[]
   activeAgent: string
   setActiveProfile: (id: string) => void
-  addProfile: (p: Profile) => void
+  addProfile: (p: Profile) => string
   removeProfile: (id: string) => void
+  /** FE-AUD-002：从 pylon-profiles 恢复；旧 theme 数据仅在无新 key 时一次性迁移落盘 */
+  hydrateProfiles: (legacy?: ProfilePersistenceState) => void
   addSession: (name: string) => void
   removeSession: (id: string) => void
   updateSession: (id: string, partial: Partial<Session>) => void
@@ -92,9 +95,16 @@ export const useIdentityStore = create<IdentityStoreState>()((set, get) => ({
     const activeProfileId = id
     // 联动：同步当前 agent 的 sheet 状态并持久化
     useWorkspaceStore.getState().patchSheetAgentState(state.activeAgent, { activeProfileId })
+    // FE-AUD-002：activeProfileId 落 pylon-profiles
+    persistProfiles(localStorage, { profiles: state.profiles, activeProfileId })
     return { activeProfileId }
   }),
-  addProfile: (p) => set(s => ({ profiles: [...s.profiles.filter(x => x.id !== p.id), p] })),
+  addProfile: (p) => {
+    const profiles = [...get().profiles.filter(profile => profile.id !== p.id), p]
+    persistProfiles(localStorage, { profiles, activeProfileId: get().activeProfileId })
+    set({ profiles })
+    return p.id
+  },
   removeProfile: (id) => set(state => {
     if (!state.profiles.some(profile => profile.id === id) || state.profiles.length <= 1) return state
     const profiles = state.profiles.filter(profile => profile.id !== id)
@@ -107,11 +117,23 @@ export const useIdentityStore = create<IdentityStoreState>()((set, get) => ({
       sheetState.activeProfileId === id ? { ...sheetState, activeProfileId: fallbackProfileId } : sheetState,
     ]))
     useWorkspaceStore.getState().patchSheetAgentStates(agentStates)
-    return {
-      profiles,
-      sessions,
-      activeProfileId: state.activeProfileId === id ? fallbackProfileId : state.activeProfileId,
+    // FE-AUD-002：删除原子完成 active fallback 并写盘
+    const activeProfileId = state.activeProfileId === id ? fallbackProfileId : state.activeProfileId
+    persistProfiles(localStorage, { profiles, activeProfileId })
+    return { profiles, sessions, activeProfileId }
+  }),
+  hydrateProfiles: (legacy) => set(() => {
+    // 1B.5：新 key 存在时以存储为准，旧数据不得反向覆盖
+    const loaded = loadProfiles(localStorage, DEFAULT_PROFILES)
+    if (localStorage.getItem(PROFILE_STORAGE_KEY) !== null) {
+      return { profiles: loaded.profiles, activeProfileId: loaded.activeProfileId }
     }
+    // 迁移：旧 theme 内嵌 profile 一次性落新 key（无 legacy 时用默认值）
+    const source = legacy && legacy.profiles.length > 0
+      ? { profiles: legacy.profiles as PersistedProfile[], activeProfileId: legacy.activeProfileId }
+      : { profiles: DEFAULT_PROFILES, activeProfileId: DEFAULT_PROFILES[0].id }
+    persistProfiles(localStorage, source)
+    return { profiles: source.profiles, activeProfileId: source.activeProfileId }
   }),
   addSession: (name) => {
     const profileId = get().activeProfileId
