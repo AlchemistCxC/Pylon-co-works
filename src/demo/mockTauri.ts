@@ -18,6 +18,9 @@ import {
   buildWorkspaceFileText, buildWorkspaceSearchResults, resolveWorkspaceEntries,
 } from './demoData.ts'
 
+// 浏览器 mock 有状态网关 routes：gateway 保存后 read-back 一致（浏览器可验 FE-AUD-004 安全写回）
+let mockGatewayRoutes = buildGatewayStatus().routes
+
 /** 纯命令路由（node 可测，无 window）。未知命令 reject（含 browser_start/CDP 组）。 */
 export async function mockInvokeCommand(cmd: string, args: Record<string, unknown> = {}): Promise<unknown> {
   switch (cmd) {
@@ -29,8 +32,15 @@ export async function mockInvokeCommand(cmd: string, args: Record<string, unknow
     case 'git_status': return buildGitStatus()
     case 'git_history': return buildGitHistory()
     case 'git_diff': return buildGitDiff()
-    case 'gateway_status': return buildGatewayStatus()
+    case 'gateway_status': return { ...buildGatewayStatus(), routes: mockGatewayRoutes }
     case 'gateway_sessions': return buildPlatformSessions()
+    case 'update_agents_config': {
+      // G4 验收：gateway 保存有状态——更新 mock routes，read-back 一致（浏览器可验安全写回）
+      const routes = (args.config as { gateway?: { routes?: unknown[] } } | undefined)?.gateway?.routes
+      if (Array.isArray(routes)) mockGatewayRoutes = routes as never[]
+      return null
+    }
+    case 'reload_gateway': return null
     case 'list_persisted_sessions': return buildSessionSummaries()
     case 'startup_diagnostics': return buildStartupDiagnostics()
     case 'list_runtime_logs': return buildRuntimeLogs()
@@ -42,8 +52,6 @@ export async function mockInvokeCommand(cmd: string, args: Record<string, unknow
     case 'switch_agent':
     case 'reconnect_agent':
     case 'reload_agents':
-    case 'update_agents_config':
-    case 'reload_gateway':
     case 'set_approval_mode':
     case 'set_mode':
     case 'set_config_option':

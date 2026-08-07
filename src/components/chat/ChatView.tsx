@@ -24,6 +24,7 @@ import { useMessageLocation } from './useMessageLocation'
 import { MarkdownRenderer } from './markdownLazy'
 import { MessageRenderBoundary } from './MessageRenderBoundary'
 import { createMockMessages } from './chatMockData'
+import { messageStorageKey, parseMessageSnapshot } from './messagePersistence'
 import DiffCard from './DiffCard'
 import ToolConnector from './ToolConnector'
 import TaskTree from './TaskTree'
@@ -77,6 +78,12 @@ const ChatView = React.memo(function ChatView({ sessionId }: Props) {
   const sessions = useIdentityStore(state => state.sessions)
   const chatViewRef = useRef<HTMLDivElement>(null)
   const [messages, setMessages] = useState<Message[]>(!IS_TAURI ? resolveInitialBrowserMessages() : [])
+  // 浏览器 demo：按会话恢复真实快照消息（搜索定位依赖快照内容；demo seed 已写 pylon-msgs-*）
+  useEffect(() => {
+    if (IS_TAURI || !sessionId) return
+    const cached = parseMessageSnapshot<Message>(localStorage.getItem(messageStorageKey(sessionId)))
+    setMessages(cached && cached.length > 0 ? cached : [])
+  }, [sessionId])
   const preparedMessages = useMemo(() => prepareRenderableMessages(messages), [messages])
   const messageLookups = useMemo(() => buildMessageLookups(messages), [messages])
   const [streamingText, setStreamingText] = useState('')

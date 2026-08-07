@@ -18,6 +18,15 @@ export default function ProfileEditor({ onClose }: { onClose: () => void }) {
   const [avatar, setAvatar] = useState(profile?.avatar || '')
   const [persona, setPersona] = useState(profile?.persona || '')
   const [model, setModel] = useState(profile?.model || 'deepseek-v4-flash')
+  // 新建模式：清空表单，save 走 addProfile 新 id（FE-AUD-002 新增入口）
+  const [creating, setCreating] = useState(false)
+  const startCreate = () => {
+    setName('')
+    setAvatar('')
+    setPersona('')
+    setModel('deepseek-v4-flash')
+    setCreating(true)
+  }
 
   // 从任意session的config里拿model列表，否则用fallback
   const models = (() => {
@@ -29,9 +38,10 @@ export default function ProfileEditor({ onClose }: { onClose: () => void }) {
 
   const save = () => {
     if (!name.trim()) return
-    const id = (profile && profiles.includes(profile)) ? profile.id : Date.now().toString(36)
+    const id = creating ? Date.now().toString(36) : (profile && profiles.includes(profile) ? profile.id : Date.now().toString(36))
     addProfile({ id, name, avatar, persona, model })
     setActiveProfile(id)
+    setCreating(false)
     onClose()
   }
 
@@ -50,10 +60,13 @@ export default function ProfileEditor({ onClose }: { onClose: () => void }) {
       <div className="profile-editor settings-surface settings-dialog" role="dialog" aria-modal="true" aria-labelledby="profile-editor-title">
         <div className="pe-header settings-dialog-header">
           <div>
-            <h3 id="profile-editor-title" className="settings-dialog-title">编辑 Profile</h3>
+            <h3 id="profile-editor-title" className="settings-dialog-title">{creating ? '新建 Profile' : '编辑 Profile'}</h3>
             <p className="settings-dialog-description">定义这个 Profile 的身份信息、Persona 与默认模型。</p>
           </div>
-          <button className="pe-close settings-dialog-close" onClick={requestClose} aria-label="关闭 Profile 设置">✕</button>
+          <div className="pe-header-actions">
+            <button className="pe-btn" onClick={startCreate} disabled={creating}>新建 Profile</button>
+            <button className="pe-close settings-dialog-close" onClick={requestClose} aria-label="关闭 Profile 设置">✕</button>
+          </div>
         </div>
         <div className="pe-body">
           <div className="pe-identity-preview">
