@@ -1,3 +1,7 @@
+/**
+ * STRUCTURE GUARD（结构守卫）：本文件含源码 token/正则断言，不单独构成行为证据；
+ * 新业务完成度须配行为级测试（审计报告阶段 0："新业务完成度不得只靠源码 token"）。
+ */
 import { strict as assert } from 'node:assert'
 import { readFileSync } from 'node:fs'
 import { THEME_FIELD_DEFS, THEME_DEFAULTS, THEME_CSS_VAR_MAP, ZONE_FIELDS } from '../src/themeFieldDefs.ts'
