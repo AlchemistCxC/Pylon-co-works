@@ -9,6 +9,7 @@ import { createChatClient } from '../../infrastructure/acp/chatClient'
 import { createSessionClient } from '../../infrastructure/acp/sessionClient'
 import { resolveAttachGate, resolveAttachFilters } from '../../infrastructure/acp/agentContracts'
 import { createAttachment, validateAttachment, type AttachmentItem } from '../../domains/attachment/attachmentItem'
+import { resolveFeatureAvailability, availabilityReason } from '../../domains/feature/featureAvailability'
 import { reportRuntimeError } from '../../runtimeError'
 import { setSessionModel } from './sessionModel'
 import { setSessionMode } from './sessionMode'
@@ -69,6 +70,9 @@ export default forwardRef<{ send: () => void; attachFile: () => void; cancel: ()
   // 附件能力（F4-C）：gate 拦截未连接；filters 按 promptImage 降级 accept
   const attachCapabilities = useAgentCapabilities()
   const attachImageUnsupported = attachCapabilities.connected && !attachCapabilities.promptImage
+  // G7：availability 统一——未连接/能力未确认时附件与发送按钮 disabled（原因可见）
+  const attachAvailability = resolveFeatureAvailability(attachCapabilities.connected ? true : undefined, attachCapabilities.connected)
+  const unavailableReason = availabilityReason(attachAvailability)
 
   useEffect(() => {
     historyDraftRef.current = ''
@@ -437,8 +441,8 @@ export default forwardRef<{ send: () => void; attachFile: () => void; cancel: ()
       <div className="input-row">
         {inputVariant === 'cli' && <span className="cli-prefix">❯</span>}
         {inputVariant !== 'cli' && !split && !externalAttach && (
-          <button className="input-btn attach" onClick={attachFile}
-            title={attachImageUnsupported ? '当前 Agent 不支持图片（文本附件可用）(Ctrl+O)' : 'Attach file (Ctrl+O)'}>
+          <button className="input-btn attach" onClick={attachFile} disabled={attachAvailability !== 'available'}
+            title={attachAvailability !== 'available' ? (unavailableReason ?? '附件暂不可用') : (attachImageUnsupported ? '当前 Agent 不支持图片（文本附件可用）(Ctrl+O)' : 'Attach file (Ctrl+O)')}>
             <Paperclip size={16} />
           </button>
         )}
@@ -456,7 +460,8 @@ export default forwardRef<{ send: () => void; attachFile: () => void; cancel: ()
           rows={1} />
         {inputVariant !== 'cli' && !split && submitButtonMode !== 'hidden' && !externalSend && (
           <button className={`input-btn ${generating ? 'stop' : 'send'}`} onClick={generating ? cancel : send}
-            title={generating ? '停止生成 (Esc / Ctrl+C)' : 'Send (Enter)'} aria-label={generating ? '停止生成' : '发送'}>
+            disabled={!generating && attachAvailability !== 'available'}
+            title={generating ? '停止生成 (Esc / Ctrl+C)' : (attachAvailability !== 'available' ? (unavailableReason ?? 'Agent 不可用') : 'Send (Enter)')} aria-label={generating ? '停止生成' : '发送'}>
             {generating ? <Square size={16} /> : <ArrowUp size={18} />}
           </button>
         )}
