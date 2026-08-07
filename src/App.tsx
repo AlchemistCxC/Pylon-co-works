@@ -25,7 +25,6 @@ import { seedDemo } from './demo/seed'
 import { bootstrapApplication } from './app/bootstrap/bootstrapApplication'
 import { useHydrationStore } from './app/bootstrap/hydrationState'
 import PermissionDialog from './components/PermissionDialog'
-import DevMetricsOverlay from './components/DevMetricsOverlay'
 import ErrorCenter from './components/ErrorCenter'
 
 // 非首屏 Dialog/Sheet 懒加载：Settings/ProfileEditor/SessionSettings 与 Prism Sheet 按需分包
@@ -240,7 +239,6 @@ export default function App() {
 
   return (
     <div className="app" data-ui-scheme={s.uiScheme || 'light'} data-msg-style={s.msgStyle || 'terminal'} data-message-layout={s.messageLayout || 'classic'} data-footer-layout={s.footerLayout || 'free'} data-cli-overflow-mode={s.cliOverflowMode || 'fixed-scroll'} style={cssVars}>
-      {import.meta.env.DEV && <DevMetricsOverlay />}
       <WorkspaceTitlebar
         sheets={workspaceSheets.sheets}
         activeSheetId={workspaceSheets.activeSheetId}

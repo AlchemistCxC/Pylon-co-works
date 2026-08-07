@@ -128,7 +128,7 @@
   color: var(--text);
   background: var(--bg-active);
   border: 1px solid var(--border);
-  border-radius: var(--ui-radius-xs);
+  border-radius: 0;
   cursor: pointer;
 }
 
