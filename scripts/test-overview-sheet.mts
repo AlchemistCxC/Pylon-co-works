@@ -18,15 +18,15 @@ assert.match(overview, /继续会话/, '必须含继续会话入口')
 
 // 2. 选择 Agent：list → switch_agent → 成功后 open agent sheet（无缝进 sheet）
 assert.match(overview, /invoke\('switch_agent', \{ name: agent\.id \}\)/, '选择 Agent 必须调 switch_agent')
-assert.match(overview, /runAgentSwitchTransaction/, '必须经 switch 事务')
-assert.match(overview, /ctx\.openSheet\(\{ kind: 'agent', title: agent\.name, agentId: agent\.id \}\)/, '成功后必须 open agent sheet')
+assert.match(overview, /switchAgentTransaction\(agent\.id, agent\.name, \{/, '必须经 switch 事务（application/transactions）')
+assert.match(overview, /ctx\.openSheet\(\{ kind: 'agent', title, agentId: id \}\)/, '成功后必须 open agent sheet')
 assert.match(overview, /pylon:agent-switched/, '切换后必须广播 agent-switched')
 assert.match(overview, /useRuntimeStore\.getState\(\)\.resetAll\(\)/, '切换必须清运行时状态')
 
 // 3. 失败：保持 overview 并报错
-assert.match(overview, /reportRuntimeError\('选择 Agent', err\)/, '失败必须走错误中心')
+assert.match(overview, /reportRuntimeError\(action, err\)/, '失败必须走错误中心')
 assert.match(overview, /setError\(err instanceof Error \? err\.message : String\(err\)\)/, '失败必须记录错误')
-assert.match(overview, /if \(!ok\) setSwitchingId\(null\)/, '失败必须恢复可再选（保持 overview）')
+assert.match(overview, /if \(!result\.ok\) setSwitchingId\(null\)/, '失败必须恢复可再选（保持 overview）')
 assert.match(overview, /role="alert"/, '错误必须可审计展示')
 
 // 4. 虚拟空态：不把 overview 写入持久 sheet 数组

@@ -19,7 +19,7 @@ import { pickCustomPresetTheme } from '../customPresets'
 import { deriveGlobalStatus, deriveZoneStatus } from '../domains/theme/presetReducer'
 import SettingsPreview from './SettingsPreview'
 import { reportRuntimeError } from '../runtimeError'
-import { runAgentSwitchTransaction } from './agentSwitchTransaction'
+import { switchAgentTransaction } from '../application/transactions/switchAgentTransaction'
 import './SettingsCommon.css'
 import './Settings.css'
 import { normalizeAgentStatus, statusLabel } from './settings/agentTypes'
@@ -250,14 +250,12 @@ export default function Settings({ onClose, activeSessionId }: { onClose?: () =>
   const switchAgent = async (agentId: string) => {
     if (switchingAgentId || agentId === activeAgent) return
     setSwitchingAgentId(agentId)
-    await runAgentSwitchTransaction({
+    await switchAgentTransaction(agentId, agentId, {
       switchAgent: () => invoke('switch_agent', { name: agentId }),
-      onSuccess: () => {
-        useRuntimeStore.getState().resetAll()
-        setActiveAgent(agentId)
-        window.dispatchEvent(new CustomEvent('pylon:agent-switched'))
-      },
-      onError: error => reportRuntimeError('切换 Agent', error),
+      resetRuntime: () => useRuntimeStore.getState().resetAll(),
+      setActiveAgent: id => setActiveAgent(id),
+      reportError: (action, error) => reportRuntimeError(action, error),
+      dispatchSwitched: () => window.dispatchEvent(new CustomEvent('pylon:agent-switched')),
     })
     setSwitchingAgentId(null)
   }

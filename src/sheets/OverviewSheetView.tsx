@@ -4,7 +4,7 @@ import { IS_TAURI } from '../infrastructure/tauri/env'
 import { useIdentityStore, type AgentEntry } from '../identityStore'
 import { useRuntimeStore } from '../runtimeStore'
 import { reportRuntimeError } from '../runtimeError'
-import { runAgentSwitchTransaction } from '../components/agentSwitchTransaction'
+import { switchAgentTransaction } from '../application/transactions/switchAgentTransaction'
 import AgentConfigEditor from '../components/settings/AgentConfigEditor'
 import PylonMark from '../components/PylonMark'
 import { recentPersistedSessions, type PersistedSessionSummary } from '../domains/overview/persistedSessions.ts'
@@ -42,21 +42,19 @@ export default function OverviewSheetView({ ctx }: { sheet: SheetRecord; ctx: Sh
     if (switchingId) return
     setSwitchingId(agent.id)
     setError('')
-    const ok = await runAgentSwitchTransaction({
+    const result = await switchAgentTransaction(agent.id, agent.name, {
       switchAgent: () => invoke('switch_agent', { name: agent.id }),
-      onSuccess: () => {
-        useRuntimeStore.getState().resetAll()
-        useIdentityStore.getState().setActiveAgent(agent.id)
-        window.dispatchEvent(new CustomEvent('pylon:agent-switched'))
-        // 无缝进 sheet：成功后 open agent sheet（失败保持 overview 由 return false 承载）
-        ctx.openSheet({ kind: 'agent', title: agent.name, agentId: agent.id })
-      },
-      onError: err => {
+      resetRuntime: () => useRuntimeStore.getState().resetAll(),
+      setActiveAgent: id => useIdentityStore.getState().setActiveAgent(id),
+      reportError: (action, err) => {
         setError(err instanceof Error ? err.message : String(err))
-        reportRuntimeError('选择 Agent', err)
+        reportRuntimeError(action, err)
       },
+      dispatchSwitched: () => window.dispatchEvent(new CustomEvent('pylon:agent-switched')),
+      // 无缝进 sheet：成功后 open agent sheet（失败保持 overview）
+      openAgentSheet: (id, title) => ctx.openSheet({ kind: 'agent', title, agentId: id }),
     })
-    if (!ok) setSwitchingId(null)
+    if (!result.ok) setSwitchingId(null)
   }
 
   // W1-06：复用现有 identity session；无则创建 row 并纠正 source/periId（不直接 load——
