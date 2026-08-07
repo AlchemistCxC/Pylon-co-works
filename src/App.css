@@ -75,7 +75,7 @@
 }
 .sheet-tab-title { overflow:hidden; text-overflow:ellipsis; white-space:nowrap; letter-spacing:0.02em; }
 .sheet-tab-status {
-  width:6px; height:6px; margin-left:auto; flex-shrink:0; border-radius: 0;
+  width:6px; height:6px; margin-left:auto; flex-shrink:0; border-radius: 50%;
   background:var(--text-dim); border:1px solid color-mix(in srgb,var(--text) 42%,transparent);
   box-shadow:none;
 }

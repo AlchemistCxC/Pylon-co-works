@@ -22,6 +22,15 @@
   padding:4px calc(12px + var(--right-panel-inset, 0px)) 6px 12px;
   overflow:hidden;
 }
+/* 输入栏弹出层（命令列表/发送错误/历史提示/待发队列）绝对定位在 input 上方（bottom:100%），
+   .cc-body 的 overflow:hidden 会把弹出层上半部裁掉（视觉上表现为被 ChatView 遮蔽）。
+   弹出层均为条件挂载（关闭时不在 DOM），:has() 精确放开裁剪，不影响输入框正常增长时的裁剪。 */
+.control-center:has(.command-palette) .cc-body,
+.control-center:has(.input-error) .cc-body,
+.control-center:has(.input-history-hint) .cc-body,
+.control-center:has(.queued-message-list) .cc-body {
+  overflow: visible;
+}
 .cc-input-slot { display:flex; align-items:flex-end; min-width:0; min-height:0; }
 .cc-input-slot .cc-widget { position:relative; inset:auto; width:100%; height:auto; }
 .cc-footer { display:contents; }

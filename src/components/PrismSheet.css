@@ -99,7 +99,7 @@
   height: 16px;
   place-items: center;
   border: 1px solid var(--tool-run);
-  border-radius: 0;
+  border-radius: 50%;
   color: var(--tool-run);
   font: 700 11px var(--mono);
 }
@@ -146,7 +146,7 @@
 }
 
 .ps-card-head strong { font-size: 13px; }
-.ps-status { width: 7px; height: 7px; flex: 0 0 7px; border-radius: 0; }
+.ps-status { width: 7px; height: 7px; flex: 0 0 7px; border-radius: 50%; }
 .ps-status.online { background: var(--tool-ok); box-shadow: 0 0 0 3px color-mix(in srgb, var(--tool-ok) 14%, transparent); }
 .ps-status.offline { background: var(--text-dim); }
 .ps-mono { color: var(--text-dim); font: 11px var(--mono); }
@@ -213,10 +213,10 @@
 .ps-block-actions { display: flex; gap: var(--ui-space-1); }
 .ps-block-meta { max-width: 180px; overflow: hidden; color: var(--text-dim); font: 11px var(--mono); text-overflow: ellipsis; white-space: nowrap; }
 
-.ps-toggle { position: relative; width: 32px; height: 18px; flex: 0 0 32px; border-radius: 0; }
+.ps-toggle { position: relative; width: 32px; height: 18px; flex: 0 0 32px; border-radius: var(--ui-radius-pill); }
 .ps-toggle.on { background: var(--tool-ok); }
 .ps-toggle.off { background: var(--bg-active); }
-.ps-toggle::after { content: ''; position: absolute; top: 2px; left: 2px; width: 14px; height: 14px; border-radius: 0; background: var(--text); }
+.ps-toggle::after { content: ''; position: absolute; top: 2px; left: 2px; width: 14px; height: 14px; border-radius: 50%; background: var(--text); }
 .ps-toggle.on::after { transform: translateX(14px); }
 
 .ps-section-title { margin-bottom: var(--ui-space-2); color: var(--text-dim); font: 650 11px var(--mono); letter-spacing: .08em; text-transform: uppercase; }

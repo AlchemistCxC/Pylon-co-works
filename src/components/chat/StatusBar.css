@@ -63,7 +63,7 @@
   font-family:var(--mono); transition:background 0.15s, color 0.15s;
 }
 .cc-send-icon, .cc-attach-icon {
-  border-radius: 0; background:var(--input-send-bg,rgba(0,0,0,0.1)); color:var(--input-text-color,rgba(0,0,0,0.85));
+  border-radius: 50%; background:var(--input-send-bg,rgba(0,0,0,0.1)); color:var(--input-text-color,rgba(0,0,0,0.85));
 }
 .cc-send-icon:hover, .cc-attach-icon:hover { background:rgba(0,0,0,0.18); }
 .cc-send-square, .cc-attach-square {
