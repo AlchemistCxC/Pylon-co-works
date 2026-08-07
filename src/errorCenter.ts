@@ -11,6 +11,10 @@ import type { RuntimeErrorDetail } from './runtimeError'
 export interface ErrorEntry extends RuntimeErrorDetail {
   id: number
   at: number
+  /** 报告 8.3：同指纹（action+message）出现次数/首次/最后时间——去重聚合 */
+  count: number
+  firstAt: number
+  lastAt: number
 }
 
 const MAX_ERRORS = 50
@@ -22,8 +26,21 @@ function emit(): void {
   for (const listener of listeners) listener()
 }
 
+function fingerprint(detail: { action: string; message: string }): string {
+  return `${detail.action}:${detail.message}`
+}
+
 export function addError(detail: RuntimeErrorDetail): void {
-  errors = [{ id: nextId++, at: Date.now(), ...detail }, ...errors].slice(0, MAX_ERRORS)
+  const now = Date.now()
+  const existing = errors.find(entry => fingerprint(entry) === fingerprint(detail))
+  if (existing) {
+    errors = errors.map(entry => entry === existing
+      ? { ...entry, count: entry.count + 1, lastAt: now, at: now }
+      : entry)
+    emit()
+    return
+  }
+  errors = [{ id: nextId++, at: now, count: 1, firstAt: now, lastAt: now, ...detail }, ...errors].slice(0, MAX_ERRORS)
   emit()
 }
 
@@ -42,7 +59,7 @@ function subscribe(listener: () => void): () => void {
   return () => { listeners.delete(listener) }
 }
 
-function getErrors(): readonly ErrorEntry[] {
+export function getErrors(): readonly ErrorEntry[] {
   return errors
 }
 
