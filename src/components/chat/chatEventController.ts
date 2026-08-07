@@ -7,7 +7,8 @@ import { useRuntimeStore } from '../../runtimeStore'
 import { resolveSpinnerFrames } from './spinnerFrames'
 import { extractModelConfig, extractUsage, extractPlanEntries, type PeriDonePayload, type PeriUpdatePayload } from '../../infrastructure/acp/chatContracts'
 import { createChatClient } from '../../infrastructure/acp/chatClient'
-import { clearMessageStorage, persistMessageSnapshot } from './messagePersistence'
+import { clearMessageStorage } from './messagePersistence'
+import { messagePersistScheduler } from './messagePersistScheduler'
 import { addGeneratingSource, removeGeneratingSource } from './sessionEventState'
 import { reportRuntimeError } from '../../runtimeError'
 import { applyChatEvent, createSourceChatRuntime, type ChatEvent, type ChatRuntimeState, type SourceChatRuntime } from './sessionRuntimeStore.ts'
@@ -142,19 +143,18 @@ export function attachChatEventController(refs: ChatEventControllerRefs): ChatCo
     }
   }
 
-  /** 持久化：live 路径（非 replay scope）且消息数组变化时写盘（失败静默，不中断事件流）。
+  /** 持久化：live 路径（非 replay scope）且消息数组变化时写盘（报告 6C/FE-AUD-014）。
    *  2026-08-02 收敛双写：rendered source 的消息由 ChatView 渲染 effect（messages 变化后）
    *  统一落盘（覆盖 initSource/commitReplay 等非事件注入路径），此处只负责后台会话
-   *  （非 rendered source）的事件驱动写入——两处各司其职，不再同 key 重复 JSON.stringify。 */
-  const syncPersistence = (source: string, prev: SourceChatRuntime | undefined, next: SourceChatRuntime | undefined) => {
+   *  （非 rendered source）的事件驱动写入——两处走统一 scheduler（trailing debounce）；
+   *  终态事件（done/error）强制 flush，不丢尾。 */
+  const syncPersistence = (source: string, prev: SourceChatRuntime | undefined, next: SourceChatRuntime | undefined, force = false) => {
     if (!next || isReplayScope(next)) return
     if (prev?.messages === next.messages) return
     if (isRenderedSource(source, renderedSource())) return
     const session = useIdentityStore.getState().sessions.find(item => item.source === source)
     if (!session) return
-    try {
-      persistMessageSnapshot(session.id, next.messages, localStorage)
-    } catch { /* 跳过本次持久化，内存态不受影响 */ }
+    messagePersistScheduler.markDirty(session.id, next.messages, force)
   }
 
   /** store 同步：generating 变化 → liveGeneratingSources 增删 */
@@ -180,7 +180,9 @@ export function attachChatEventController(refs: ChatEventControllerRefs): ChatCo
     const prev = before[source]
     const next = after[source]
     if (isRenderedSource(source, renderedSource())) syncRendered(prev, next)
-    syncPersistence(source, prev, next)
+    // 终态事件强制 flush（消息不丢尾，报告 6C.3）
+    const terminal = event.type === 'done' || event.type === 'error' || event.type === 'cancel-success'
+    syncPersistence(source, prev, next, terminal)
     syncGenerating(source, prev, next)
   }
 

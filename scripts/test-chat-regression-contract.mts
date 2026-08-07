@@ -24,7 +24,7 @@ assert.match(store, /message\.role === 'tool' && message\.running/, '历史 Tool
 assert.match(store, /normalizeToolId/, 'Tool 事件必须归一化 ID')
 assert.match(store, /shouldAcceptToolCall/, 'Tool replay 必须防重复/乱序污染')
 assert.match(controller, /knownSources\(\)\.includes\(source\)/, '事件必须按已存在 source 路由')
-assert.match(controller, /persistMessageSnapshot/, '后台与当前消息必须走统一持久化入口')
+assert.match(controller, /messagePersistScheduler\.markDirty/, '后台与当前消息必须走统一持久化入口（scheduler）')
 assert.match(controller, /clearMessageStorage/, 'clear 必须清理消息缓存')
 assert.match(store, /cancelState: CancelState/, 'cancel 状态必须按 source 保存')
 assert.match(replayState, /export function resolveReplayEventMode/, 'replay 状态 helper 必须存在')
