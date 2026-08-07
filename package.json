@@ -10,6 +10,11 @@
     "tauri": "tauri",
     "test": "vitest run",
     "test:legacy": "node --experimental-strip-types scripts/run-frontend-tests.mts",
+    "test:unit": "vitest run src/domains src/infrastructure --passWithNoTests",
+    "test:integration": "vitest run",
+    "test:frontend": "vitest run",
+    "test:coverage": "vitest run --coverage",
+    "check:frontend": "npm run lint && npm run test:frontend && npm run build",
     "lint": "eslint src/"
   },
   "dependencies": {
