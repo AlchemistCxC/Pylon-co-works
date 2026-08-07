@@ -55,7 +55,7 @@ const inputBar = readFileSync(new URL('../src/components/chat/InputBar.tsx', imp
 assert.match(inputBar, /case '\/compact': \{[\s\S]*?buildSendMessagePayload\(/, 'compact 必须使用统一发送 payload helper')
 assert.match(inputBar, /case '\/compact': \{[\s\S]*?runSendTransaction\(/, 'compact 必须使用统一发送事务')
 assert.match(inputBar, /case '\/compact': \{[\s\S]*?onError: error => setSendError\(String\(error\)\)/, 'compact 必须复用统一错误显示路径')
-assert.match(inputBar, /case '\/compact': \{[\s\S]*?attachments: attached\.map\(file => file\.path\)/, 'compact 必须保留附件 payload 语义')
+assert.match(inputBar, /case '\/compact': \{[\s\S]*?attachments: attached\.filter\(file => file\.status !== 'error'\)\.map\(file => file\.path\)/, 'compact 必须保留附件 payload 语义（过滤 error）')
 assert.match(inputBar, /case '\/compact': \{[\s\S]*?s\.source !== sessionSource/, 'compact 必须校验 Session 实体和解析 source 一致')
 
 console.log('compact 发送事务回归测试通过')

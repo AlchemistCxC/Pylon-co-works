@@ -8,6 +8,7 @@ import { useAgentCapabilities } from '../../infrastructure/acp/useAgentCapabilit
 import { createChatClient } from '../../infrastructure/acp/chatClient'
 import { createSessionClient } from '../../infrastructure/acp/sessionClient'
 import { resolveAttachGate, resolveAttachFilters } from '../../infrastructure/acp/agentContracts'
+import { createAttachment, validateAttachment, type AttachmentItem } from '../../domains/attachment/attachmentItem'
 import { reportRuntimeError } from '../../runtimeError'
 import { setSessionModel } from './sessionModel'
 import { setSessionMode } from './sessionMode'
@@ -40,7 +41,7 @@ export default forwardRef<{ send: () => void; attachFile: () => void; cancel: ()
   const [value, setValue] = useSessionUiState(sessionId, 'draft', '')
   const [cmdIdx, setCmdIdx] = useState(0)
   const [sendError, setSendError] = useState('')
-  const [attached, setAttached] = useState<{path:string;name:string}[]>([])
+  const [attached, setAttached] = useState<AttachmentItem[]>([])
   const [historyIndex, setHistoryIndex] = useState(-1)
   const [historyLength, setHistoryLength] = useState(0)
   // FE-AUD-020：队列按 session 保存（sessionUiState）——切 Sheet/重挂载不丢，删除 session 清理
@@ -196,7 +197,7 @@ export default forwardRef<{ send: () => void; attachFile: () => void; cancel: ()
             session: s,
             content: '/compact',
             persona,
-            attachments: attached.map(file => file.path),
+            attachments: attached.filter(file => file.status !== 'error').map(file => file.path),
           })),
           onSuccess: () => {
             recordHistory('/compact')
@@ -258,7 +259,7 @@ export default forwardRef<{ send: () => void; attachFile: () => void; cancel: ()
         session: s,
         content: stripHiddenUnicode(text),
         persona,
-        attachments: attached.map(file => file.path),
+        attachments: attached.filter(file => file.status !== 'error').map(file => file.path),
       })),
       onSuccess: () => {
         lastMsg.current = text
@@ -314,7 +315,10 @@ export default forwardRef<{ send: () => void; attachFile: () => void; cancel: ()
       if (!selected) return
       const path = selected as string
       const name = path.replace(/^.*[\\\\/]/, '')
-      setAttached(prev => [...prev, { path, name }])
+      // FE-AUD-019：选择后校验（重复/未知类型）——error 附件保留并显示原因
+      const item = createAttachment(path, name)
+      const validation = validateAttachment(item, { existingPaths: new Set(attached.map(file => file.path)) })
+      setAttached(prev => [...prev, validation.ok ? { ...item, status: 'ready' } : { ...item, status: 'error', error: validation.error }])
     } catch { /* cancelled */ }
   }
 
