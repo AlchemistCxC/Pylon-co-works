@@ -1,11 +1,36 @@
 import '@testing-library/jest-dom/vitest'
 
 // 组件测试（jsdom）所需的最小浏览器 API 垫片
-import { afterEach } from 'vitest'
+import { afterAll, afterEach } from 'vitest'
 import { cleanup } from '@testing-library/react'
 
 afterEach(() => {
   cleanup()
+})
+
+// 阶段 0（报告 §2.3.9）：测试结束断言无未处理 Promise rejection。
+// 每个测试文件（setup 每文件执行）注册收集器，afterAll 断言；意外 console.error
+// 先收集并打印，阶段 8 错误分层后再转硬断言（现有代码存在预期的 console.error）。
+const unhandledRejections: unknown[] = []
+const onUnhandledRejection = (reason: unknown): void => { unhandledRejections.push(reason) }
+process.on('unhandledRejection', onUnhandledRejection)
+
+const consoleErrors: unknown[] = []
+const originalConsoleError = console.error
+console.error = (...args: unknown[]) => {
+  consoleErrors.push(args)
+  originalConsoleError(...args)
+}
+
+afterAll(() => {
+  process.removeListener('unhandledRejection', onUnhandledRejection)
+  if (consoleErrors.length > 0) {
+    console.log(`[setup] 本测试文件出现 ${consoleErrors.length} 次 console.error（阶段 8 前仅记录）`)
+  }
+  if (unhandledRejections.length > 0) {
+    console.error(`[setup] 检测到 ${unhandledRejections.length} 个未处理的 Promise rejection`)
+    throw new Error(`存在 ${unhandledRejections.length} 个未处理的 Promise rejection`)
+  }
 })
 
 // Node 26 的全局 localStorage 是实验性 getter：未传 --localstorage-file 时访问即触发
