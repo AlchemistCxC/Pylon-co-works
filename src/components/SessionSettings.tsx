@@ -3,7 +3,7 @@ import * as Dialog from '@radix-ui/react-dialog'
 import { invoke } from '@tauri-apps/api/core'
 import { useIdentityStore } from '../identityStore'
 import { reportRuntimeError } from '../runtimeError'
-import { runCloseSessionTransaction } from './chat/closeSessionTransaction'
+import { removeSessionTransaction } from '../application/transactions/removeSessionTransaction'
 import { clearMessageStorage } from './chat/messagePersistence'
 import { createSessionSettingsValues, isSessionSettingsDirty } from './sessionSettingsForm'
 import './SettingsCommon.css'
@@ -13,7 +13,6 @@ interface Props { sessionId: string; open: boolean; onClose: () => void; onDelet
 
 export default function SessionSettings({ sessionId, open, onClose, onDeleted }: Props) {
   const updateSession = useIdentityStore(state => state.updateSession)
-  const removeSession = useIdentityStore(state => state.removeSession)
   const activeAgent = useIdentityStore(state => state.activeAgent)
   // 只订阅目标会话对象：其他会话的更新（消息/改名/活跃时间）不再重渲染本对话框
   const session = useIdentityStore(state => sessionId ? state.sessions.find(item => item.id === sessionId) : undefined)
@@ -71,14 +70,14 @@ export default function SessionSettings({ sessionId, open, onClose, onDeleted }:
 
   const del = async () => {
     if (!window.confirm(`删除会话“${session.name}”？此操作无法撤销。`)) return
-    const closed = await runCloseSessionTransaction({
-      close: () => invoke('close_session', { source: session.source }),
-      onSuccess: () => {},
-      onError: error => reportRuntimeError('关闭会话', error),
+    const result = await removeSessionTransaction(sessionId, {
+      findSession: id => useIdentityStore.getState().sessions.find(s => s.id === id),
+      closeSession: source => invoke('close_session', { source }),
+      removeSession: id => useIdentityStore.getState().removeSession(id),
+      clearMessages: id => clearMessageStorage(id, localStorage),
+      reportError: (action, error) => reportRuntimeError(action, error),
     })
-    if (!closed) return
-    removeSession(sessionId)
-    clearMessageStorage(sessionId, localStorage)
+    if (!result.ok) return
     onClose()
     onDeleted?.()
   }

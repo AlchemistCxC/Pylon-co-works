@@ -6,7 +6,7 @@ import { useWorkspaceStore } from '../workspaceStore'
 import { agentStatusLight, type AgentLight } from '../domains/agent/statusLight.ts'
 import { formatTime } from '../utils'
 import { reportRuntimeError } from '../runtimeError'
-import { runCloseSessionTransaction } from './chat/closeSessionTransaction'
+import { removeSessionTransaction } from '../application/transactions/removeSessionTransaction'
 import { clearMessageStorage } from './chat/messagePersistence'
 import type { SheetContext } from '../workspace-sheets/sheetTypes'
 import './Sidebar.css'
@@ -52,17 +52,14 @@ export default function Sidebar({ ctx }: { ctx: SheetContext }) {
 
   const handleDelete = async (id: string) => {
     if (!window.confirm('删除会话？')) return
-    const s = sessions.find(x => x.id === id)
-    if (s) {
-      const closed = await runCloseSessionTransaction({
-        close: () => invoke('close_session', { source: s.source }),
-        onSuccess: () => {},
-        onError: error => reportRuntimeError('关闭会话', error),
-      })
-      if (!closed) return
-    }
-    removeSession(id)
-    clearMessageStorage(id, localStorage)
+    const result = await removeSessionTransaction(id, {
+      findSession: sessionId => sessions.find(s => s.id === sessionId),
+      closeSession: source => invoke('close_session', { source }),
+      removeSession: sessionId => removeSession(sessionId),
+      clearMessages: sessionId => clearMessageStorage(sessionId, localStorage),
+      reportError: (action, error) => reportRuntimeError(action, error),
+    })
+    if (!result.ok) return
     if (activeSession === id) onSelectSession(null)
   }
 
