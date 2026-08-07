@@ -3,6 +3,7 @@ import { invoke } from '@tauri-apps/api/core'
 import { save } from '@tauri-apps/plugin-dialog'
 import { reportRuntimeError } from '../../runtimeError'
 import { useIdentityStore } from '../../identityStore'
+import { resumePersistedSessionTransaction } from '../../application/transactions/resumePersistedSessionTransaction'
 import { useReplayPostureStore } from '../../components/chat/replayPostureStore'
 import { pagePersistedSessions, validateExportPath } from '../../domains/history/persistedHistory.ts'
 import { type PersistedSessionSummary } from '../../domains/overview/persistedSessions.ts'
@@ -49,35 +50,19 @@ export default function HistorySheetView({ sheet: _sheet, ctx }: { sheet: SheetR
     }
   }
 
-  // W4-02（姿态二）：复用 Overview resumeSession 的找/建 identity 行机制（source/periId 匹配），
-  // 进入只读姿态后开 agent sheet；load 由 ChatView 挂载后的 lifecycle 承担
+  // W4-02（姿态二）：复用 Overview 的找/建 identity 行机制（resumePersistedSessionTransaction，
+  // FE-AUD-010），进入只读姿态后开 agent sheet；load 由 ChatView 挂载后的 lifecycle 承担
   const openReplay = (entry: PersistedSessionSummary) => {
     setExportError('')
     if (!entry.periId) return
-    const store = useIdentityStore.getState()
-    const existing = store.sessions.find(s => s.source === entry.source || s.periId === entry.periId)
-    let id: string | null
-    if (existing) {
-      id = existing.id
-    } else {
-      const before = store.sessions.length
-      const name = entry.title || `session-${Date.now().toString(36)}`
-      useIdentityStore.getState().addSession(name)
-      const created = useIdentityStore.getState().sessions[before]
-      if (created) {
-        useIdentityStore.getState().updateSession(created.id, {
-          ...(entry.source ? { source: entry.source } : {}),
-          ...(entry.periId ? { periId: entry.periId } : {}),
-          lastActiveAt: entry.updatedAt || Date.now(),
-        })
-        id = created.id
-      } else {
-        id = null
-      }
-    }
-    if (!id) return
-    useReplayPostureStore.getState().enter(id)
-    ctx.selectSession(id)
+    const result = resumePersistedSessionTransaction(entry.source, entry.periId, entry.title, entry.updatedAt, {
+      sessions: useIdentityStore.getState().sessions,
+      addSession: name => useIdentityStore.getState().addSession(name),
+      updateSession: (id, partial) => useIdentityStore.getState().updateSession(id, partial),
+    })
+    if (!result.ok) return
+    useReplayPostureStore.getState().enter(result.value)
+    ctx.selectSession(result.value)
     ctx.openSheet({ kind: 'agent', title: entry.title || 'Agent', agentId: activeAgent })
   }
 

@@ -64,7 +64,7 @@ interface IdentityStoreState {
   removeProfile: (id: string) => void
   /** FE-AUD-002：从 pylon-profiles 恢复；旧 theme 数据仅在无新 key 时一次性迁移落盘 */
   hydrateProfiles: (legacy?: ProfilePersistenceState) => void
-  addSession: (name: string) => void
+  addSession: (name: string) => string
   removeSession: (id: string) => void
   updateSession: (id: string, partial: Partial<Session>) => void
   setSessionPeriId: (id: string, periId: string) => void
@@ -165,6 +165,7 @@ export const useIdentityStore = create<IdentityStoreState>()((set, get) => ({
       const ok = persistSessions(localStorage, sessions)
       return { sessions, lastPersistError: persistFlag(ok, state.lastPersistError) }
     })
+    return id
   },
   removeSession: (id) => set(state => {
     const removed = state.sessions.find(session => session.id === id)

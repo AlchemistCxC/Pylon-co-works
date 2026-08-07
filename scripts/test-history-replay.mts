@@ -37,14 +37,16 @@ import { useReplayPostureStore } from '../src/components/chat/replayPostureStore
   assert.match(sheet, /postureSession !== null && postureSession !== ctx\.activeSession/, '离开该会话必须清姿态')
 }
 
-// 3. HistorySheetView：行有回放入口 → 复用 resumeSession 找/建 identity 行 → enter 姿态 →
+// 3. HistorySheetView：行有回放入口 → 复用 resume 事务找/建 identity 行 → enter 姿态 →
 //    selectSession + openSheet agent；无 periId 不得回放
 {
   const view = readFileSync(new URL('../src/sheets/history/HistorySheetView.tsx', import.meta.url), 'utf8')
+  const txn = readFileSync(new URL('../src/application/transactions/resumePersistedSessionTransaction.ts', import.meta.url), 'utf8')
   assert.match(view, /回放/, '行必须有回放入口')
-  assert.match(view, /store\.sessions\.find\(s => s\.source === entry\.source \|\| s\.periId === entry\.periId\)/, '必须复用 resumeSession 找/建机制')
-  assert.match(view, /useReplayPostureStore\.getState\(\)\.enter\(id\)/, '回放必须进入姿态')
-  assert.match(view, /ctx\.selectSession\(id\)/, '必须选会话')
+  assert.match(view, /resumePersistedSessionTransaction\(/, '必须复用 resume 事务（FE-AUD-010 找/建收敛）')
+  assert.match(txn, /session\.source === source/, '事务内按 source/periId 找 identity 行')
+  assert.match(view, /useReplayPostureStore\.getState\(\)\.enter\(result\.value\)/, '回放必须进入姿态')
+  assert.match(view, /ctx\.selectSession\(result\.value\)/, '必须选会话')
   assert.match(view, /ctx\.openSheet\(\{ kind: 'agent'/, '必须开 agent sheet')
   assert.match(view, /disabled=\{!entry\.periId\}/, '无 periId 不得回放')
 }

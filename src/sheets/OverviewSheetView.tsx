@@ -5,6 +5,7 @@ import { useIdentityStore, type AgentEntry } from '../identityStore'
 import { useRuntimeStore } from '../runtimeStore'
 import { reportRuntimeError } from '../runtimeError'
 import { switchAgentTransaction } from '../application/transactions/switchAgentTransaction'
+import { resumePersistedSessionTransaction } from '../application/transactions/resumePersistedSessionTransaction'
 import AgentConfigEditor from '../components/settings/AgentConfigEditor'
 import PylonMark from '../components/PylonMark'
 import { recentPersistedSessions, type PersistedSessionSummary } from '../domains/overview/persistedSessions.ts'
@@ -58,32 +59,17 @@ export default function OverviewSheetView({ ctx }: { sheet: SheetRecord; ctx: Sh
   }
 
   // W1-06：复用现有 identity session；无则创建 row 并纠正 source/periId（不直接 load——
-  // 由 ChatView 挂载后的 lifecycle 执行 load，保证 listener/controller 就绪）
+  // 由 ChatView 挂载后的 lifecycle 执行 load，保证 listener/controller 就绪）。
+  // FE-AUD-010：找/建逻辑收敛到 resumePersistedSessionTransaction，不靠数组长度定位。
   const resumeSession = (p: PersistedSessionSummary) => {
     setError('')
-    const store = useIdentityStore.getState()
-    const existing = store.sessions.find(s => s.source === p.source || (p.periId && s.periId === p.periId))
-    let id: string | null
-    if (existing) {
-      id = existing.id
-    } else {
-      const before = store.sessions.length
-      const name = p.title || `session-${Date.now().toString(36)}`
-      useIdentityStore.getState().addSession(name)
-      const created = useIdentityStore.getState().sessions[before]
-      if (created) {
-        useIdentityStore.getState().updateSession(created.id, {
-          ...(p.source ? { source: p.source } : {}),
-          ...(p.periId ? { periId: p.periId } : {}),
-          lastActiveAt: p.updatedAt || Date.now(),
-        })
-        id = created.id
-      } else {
-        id = null
-      }
-    }
-    if (!id) return
-    ctx.selectSession(id)
+    const result = resumePersistedSessionTransaction(p.source, p.periId, p.title, p.updatedAt, {
+      sessions: useIdentityStore.getState().sessions,
+      addSession: name => useIdentityStore.getState().addSession(name),
+      updateSession: (id, partial) => useIdentityStore.getState().updateSession(id, partial),
+    })
+    if (!result.ok) return
+    ctx.selectSession(result.value)
     ctx.openSheet({ kind: 'agent', title: p.title || 'Agent', agentId: activeAgent })
   }
 

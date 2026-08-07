@@ -49,12 +49,14 @@ assert.deepEqual(normalizePersistedSessions([null, 'str', { title: 'no-id' }]), 
 
 // 3. Overview 接线：list_persisted_sessions → recentPersistedSessions；不直接 load
 const overview = readFileSync(new URL('../src/sheets/OverviewSheetView.tsx', import.meta.url), 'utf8')
+const resumeTxn = readFileSync(new URL('../src/application/transactions/resumePersistedSessionTransaction.ts', import.meta.url), 'utf8')
 assert.match(overview, /invoke\('list_persisted_sessions'\)/, '必须调 list_persisted_sessions')
 assert.match(overview, /recentPersistedSessions\(raw\)/, '必须经纯函数取最近')
 assert.equal(overview.includes("invoke('load_persisted_session'"), false, 'overview 不得直接 load（由 ChatView 挂载后 lifecycle 承担，listener 就绪）')
-assert.match(overview, /ctx\.selectSession\(id\)/, '恢复必须 selectSession')
+assert.match(overview, /resumePersistedSessionTransaction\(/, '恢复必须经 resume 事务')
+assert.match(overview, /ctx\.selectSession\(result\.value\)/, '恢复必须 selectSession')
 assert.match(overview, /ctx\.openSheet\(\{ kind: 'agent'/, '恢复必须 open agent sheet')
-assert.match(overview, /updateSession\(created\.id, \{/, '创建 row 必须纠正 source/periId')
+assert.match(resumeTxn, /deps\.updateSession\(id, \{/, '创建 row 必须纠正 source/periId（事务内）')
 assert.match(overview, /recent\.length === 0/, '无最近会话显示空态')
 
 console.log('overview sessions 守卫通过')
