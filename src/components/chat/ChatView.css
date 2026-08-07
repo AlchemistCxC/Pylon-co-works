@@ -380,7 +380,9 @@
 .term-assistant.has-dot > .term-assistant-body > :first-child { margin-top:0; }
 /* 工具指示与助手圆点同列：指示占圆点列宽（margin 归零），工具名从第 3 列起 */
 .app[data-message-layout="claude"] .term-tool-head .term-tool-indicator {
-  min-width:var(--dot-col-width, 1.6em); text-align:left; margin-right:0;
+  flex:0 0 var(--dot-col-width, 1.6em);
+  width:var(--dot-col-width, 1.6em);
+  text-align:left; margin-right:0;
 }
 .app[data-message-layout="claude"] .term-tool-head { padding-left:0; }
 /* 用户标签跟随终端字体（此前 var(--font) 混入 GUI 字体） */
