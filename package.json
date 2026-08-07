@@ -15,6 +15,7 @@
     "test:frontend": "vitest run",
     "test:coverage": "vitest run --coverage",
     "check:frontend": "npm run lint && npm run test:frontend && npm run build",
+    "check:bundle": "node scripts/check-bundle-size.mjs",
     "lint": "eslint src/"
   },
   "dependencies": {
