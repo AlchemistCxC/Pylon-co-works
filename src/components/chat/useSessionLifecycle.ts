@@ -113,6 +113,8 @@ export function useSessionLifecycle(
 
     const profile = useIdentityStore.getState().profiles.find(p => p.id === s.profileId)
     const persona = profile?.persona || ''
+    // FE-AUD-018：Profile 默认模型只作为新会话默认（new_session payload 权威路径一），
+    // 不覆盖已存在会话；实际生效模型以 config_option 回读为准（下方 syncMode/config 同步）
 
     // new_session 返回可能是 string(periId) 或 { sessionId, configOptions } — 兼容处理
     const syncMode = (source: string, res: ReturnType<typeof sessionResponseObject>) => {
@@ -124,7 +126,7 @@ export function useSessionLifecycle(
       const loadGeneration = nextLoadGeneration(loadGenerationRef.current[s.source])
       loadGenerationRef.current[s.source] = loadGeneration
       const sessionClient = createSessionClient({ invoke: (cmd, args) => invoke(cmd, args as Record<string, unknown> | undefined) })
-      sessionClient.newSession({ source: s.source, persona, cwd: s.workdir || undefined }).then((response: unknown) => {
+      sessionClient.newSession({ source: s.source, persona, cwd: s.workdir || undefined, model: profile?.model || undefined }).then((response: unknown) => {
         if (!isCurrentLoadGeneration(loadGenerationRef.current[s.source], loadGeneration)) return
         const res = sessionResponseObject(response)
         const periId = res.sessionId ?? res.periId

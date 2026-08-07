@@ -11,6 +11,8 @@ export interface NewSessionPayload {
   source: string
   persona?: string
   cwd?: string
+  /** FE-AUD-018：Profile 默认模型（仅新会话默认，不覆盖已存在会话） */
+  model?: string
 }
 
 export interface LoadPersistedSessionPayload {
