@@ -49,13 +49,17 @@ assert.equal(agentStatusLight('inactive'), 'off')
 assert.equal(agentStatusLight('unknown'), 'off')
 assert.equal(agentStatusLight(''), 'off')
 
-// 7. 状态条接线：读 agentStatuses + 经纯函数 + 现有变量色
-assert.match(sidebar, /agentStatuses\[activeAgent\]/, '状态条必须读当前 agent 状态')
-assert.match(sidebar, /agentStatusLight\(agentStatus\?\.status \|\| ''\)/, '必须经纯函数映射三灯')
-assert.match(css, /\.sidebar-status-ok\.active \{ background: var\(--tool-ok/, 'ok 灯必须沿现有变量')
-assert.match(css, /var\(--ekgYellow/, 'warn 灯必须沿现有变量')
-assert.match(css, /var\(--spinner-stalled-color/, 'error 灯必须沿现有变量')
-assert.equal(css.includes('--sidebar-status-ok-color'), false, '零新主题字段')
+// 7. 状态灯接线（视觉调整：灯移 Titlebar 左上角）：agentStatuses + 纯函数 + 辉光模式
+const titlebar = readFileSync(new URL('../src/workspace-sheets/WorkspaceTitlebar.tsx', import.meta.url), 'utf8')
+const statusLight = readFileSync(new URL('../src/domains/agent/statusLight.ts', import.meta.url), 'utf8')
+const appCss = readFileSync(new URL('../src/App.css', import.meta.url), 'utf8')
+assert.match(titlebar, /AgentStatusLights status=\{agentStatuses\[activeAgent\]\?\.status/, 'Titlebar 必须经 AgentStatusLights 读当前 agent 状态')
+assert.match(statusLight, /agentLightDisplay\(status: string\)/, '必须提供三灯辉光展示模型')
+assert.match(appCss, /data-mode="cascade"/, 'ok 必须 cascade 辉光（左→右传播）')
+assert.match(appCss, /data-mode="sync"/, 'error 必须 sync 辉光')
+assert.match(appCss, /data-mode="steady"/, 'warn 必须 steady 辉光（黄常亮）')
+assert.match(appCss, /--tool-ok/, '灯色必须沿现有变量')
+assert.equal(appCss.includes('--sidebar-status-ok-color'), false, '零新主题字段')
 
 // 8. showPet toggle 写 workspaceStore（非主题）；换主题后不变
 assert.match(sidebar, /useWorkspaceStore\(s => s\.showPet\)/, 'toggle 必须读 workspaceStore.showPet')

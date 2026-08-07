@@ -23,3 +23,25 @@ export function agentStatusLight(status: string): AgentLight {
       return 'off'
   }
 }
+
+/**
+ * 三灯辉光展示模型（视觉调整）：
+ * - ok（连接良好）：三灯全亮，辉光从左到右传播（各灯周期同、启动时间递增）
+ * - warn（连接中）：黄灯辉光常亮，其余两灯灰
+ * - error（断开/崩溃）：三灯全红，统一周期辉光
+ * - off（未知/闲置）：全灰无辉光
+ */
+export type AgentLightMode = 'cascade' | 'sync' | 'steady' | 'none'
+
+export interface AgentLightDisplay {
+  lights: AgentLight[]
+  mode: AgentLightMode
+}
+
+export function agentLightDisplay(status: string): AgentLightDisplay {
+  const light = agentStatusLight(status)
+  if (light === 'ok') return { lights: ['ok', 'warn', 'error'], mode: 'cascade' }
+  if (light === 'warn') return { lights: ['warn', 'off', 'off'], mode: 'steady' }
+  if (light === 'error') return { lights: ['error', 'error', 'error'], mode: 'sync' }
+  return { lights: ['off', 'off', 'off'], mode: 'none' }
+}

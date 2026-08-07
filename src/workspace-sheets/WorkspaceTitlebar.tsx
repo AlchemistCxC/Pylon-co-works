@@ -2,7 +2,7 @@ import { type MouseEventHandler, useState } from 'react'
 import SheetTabStrip from './SheetTabStrip'
 import { useRuntimeStore } from '../runtimeStore'
 import { useStore } from '../store'
-import PylonMark from '../components/PylonMark'
+import AgentStatusLights from '../components/AgentStatusLights'
 import type { SheetRecord } from './sheetTypes'
 import type { WorkspaceMenuActions } from './WorkspaceMenu'
 import WorkspaceMenu from './WorkspaceMenu'
@@ -62,9 +62,8 @@ export default function WorkspaceTitlebar({
           <span aria-hidden="true">☰</span>
         </button>
         {!sidebarCollapsed && (
-          <span className="workspace-titlebar-brand" aria-label="Pylon">
-            <PylonMark size={18} className="workspace-titlebar-mark" title="Pylon" />
-            <span aria-hidden="true">PYLON</span>
+          <span className="workspace-titlebar-brand" aria-label="Agent 状态">
+            <AgentStatusLights status={agentStatuses[activeAgent]?.status ?? ''} size={12} />
           </span>
         )}
       </div>

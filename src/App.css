@@ -249,3 +249,23 @@
   color: var(--tool-err, var(--danger));
   background: color-mix(in srgb, var(--tool-err, var(--danger)) 8%, transparent);
 }
+
+/* ── Agent 状态三灯（左上角品牌区，视觉调整）── */
+.agent-status-lights { display:flex; align-items:center; }
+.agent-status-light { border-radius:50%; background:var(--text-dim); opacity:0.3; }
+.agent-light-ok { background:var(--tool-ok, #1e9646); }
+.agent-light-warn { background:var(--ekgYellow, #fbbf24); }
+.agent-light-error { background:var(--spinner-stalled-color, #FF6B80); }
+/* 连接良好：三灯（绿黄红），辉光左→右传播（周期同、启动间隔小） */
+.agent-status-lights[data-mode="cascade"] .agent-status-light {
+  opacity:1; animation:agent-glow 2s ease-in-out infinite;
+  animation-delay:calc(var(--light-i) * 0.2s);
+}
+/* error：三灯全红，统一周期辉光 */
+.agent-status-lights[data-mode="sync"] .agent-status-light {
+  opacity:1; animation:agent-glow 1.35s ease-in-out infinite;
+}
+/* warn：黄灯辉光常亮，其余灰（无动画） */
+.agent-status-lights[data-mode="steady"] .agent-status-light { opacity:0.3; }
+.agent-status-lights[data-mode="steady"] .agent-light-warn { opacity:1; box-shadow:0 0 6px var(--ekgYellow, #fbbf24); }
+@keyframes agent-glow { 0%,100% { opacity:0.35; box-shadow:none; } 50% { opacity:1; box-shadow:0 0 6px currentColor; } }
