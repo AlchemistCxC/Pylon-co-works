@@ -256,6 +256,7 @@ export default function App() {
           onReopen: () => useWorkspaceStore.getState().reopenSheet(),
         }}
         onOpenSheet={() => setShowSheetLauncher(true)}
+        onOpenRuntime={() => useWorkspaceStore.getState().openSheet({ kind: 'runtime', title: 'Runtime' })}
         onReopenSheet={() => useWorkspaceStore.getState().reopenSheet()}
         onToggleRightPanel={() => useWorkspaceStore.getState().setRightPanelCollapsed(!useWorkspaceStore.getState().rightPanelCollapsed)}
         onToggleSettings={() => setShowSettings(value => !value)}

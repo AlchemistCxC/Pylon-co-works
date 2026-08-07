@@ -1,11 +1,10 @@
-import { type MouseEventHandler, useState } from 'react'
+import { type MouseEventHandler } from 'react'
 import SheetTabStrip from './SheetTabStrip'
 import { useRuntimeStore } from '../runtimeStore'
 import { useStore } from '../store'
 import AgentStatusLights from '../components/AgentStatusLights'
 import type { SheetRecord } from './sheetTypes'
 import type { WorkspaceMenuActions } from './WorkspaceMenu'
-import WorkspaceMenu from './WorkspaceMenu'
 
 interface WorkspaceTitlebarProps {
   sheets: SheetRecord[]
@@ -18,6 +17,7 @@ interface WorkspaceTitlebarProps {
   onCloseSheet: (id: string) => void
   menuActions: WorkspaceMenuActions
   onOpenSheet: () => void
+  onOpenRuntime: () => void
   onReopenSheet: () => void
   onToggleRightPanel: () => void
   onToggleSettings: () => void
@@ -37,6 +37,7 @@ export default function WorkspaceTitlebar({
   onCloseSheet,
   menuActions,
   onOpenSheet,
+  onOpenRuntime,
   onReopenSheet: _onReopenSheet,
   onToggleRightPanel,
   onToggleSettings,
@@ -47,8 +48,6 @@ export default function WorkspaceTitlebar({
   // 在标题栏内部订阅 agent 状态：状态 tick 不再触发 App 整树（SheetHost）重渲染
   const agentStatuses = useRuntimeStore(s => s.agentStatuses)
   const showTabBar = useStore(s => s.showTabBar !== false)
-  const [workspaceMenuOpen, setWorkspaceMenuOpen] = useState(false)
-  const activeSheet = sheets.find(sheet => sheet.id === activeSheetId) ?? null
   return (
     <header className={`workspace-titlebar ${sidebarCollapsed ? 'sidebar-collapsed' : ''}`} data-tauri-drag-region>
       <div className="workspace-titlebar-sidebar" data-tauri-drag-region>
@@ -82,8 +81,7 @@ export default function WorkspaceTitlebar({
         <div className="workspace-titlebar-launchers">
           <button type="button" className="workspace-titlebar-icon workspace-open-trigger" onClick={onOpenSheet} title="打开 Sheet" aria-label="打开 Sheet">+</button>
           <span className="workspace-launcher-separator" aria-hidden="true" />
-          <button type="button" className="workspace-titlebar-icon workspace-reopen-trigger" onClick={() => setWorkspaceMenuOpen(value => !value)} title="Sheet 操作菜单" aria-label="Sheet 操作菜单">⌄</button>
-          <WorkspaceMenu {...menuActions} sheet={activeSheet} canReopen={canReopenSheet} open={workspaceMenuOpen} onCloseMenu={() => setWorkspaceMenuOpen(false)} className="workspace-menu-workspace" />
+          <button type="button" className="workspace-titlebar-icon workspace-reopen-trigger" onClick={onOpenRuntime} title="调试/日志（Runtime）" aria-label="调试/日志">⌄</button>
         </div>
         <div className="workspace-titlebar-drag" data-tauri-drag-region />
       </div>
