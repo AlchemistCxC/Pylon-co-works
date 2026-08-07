@@ -10,7 +10,7 @@ export type InvokeHandler = (args: Record<string, unknown>) => unknown | Promise
 
 export interface InvokeCall {
   cmd: string
-  args: Record<string, unknown>
+  args: unknown
 }
 
 export interface FakeInvokeOptions {
@@ -57,8 +57,8 @@ export class FakeInvoke {
     return this
   }
 
-  /** 与 @tauri-apps/api/core 的 invoke 同签名 */
-  invoke(cmd: string, args: Record<string, unknown> = {}): Promise<unknown> {
+  /** 与 @tauri-apps/api/core 的 invoke 同签名（args 宽松接受 typed payload） */
+  invoke(cmd: string, args: unknown = {}): Promise<unknown> {
     this.calls.push({ cmd, args })
     if (this.neverCmds.has(cmd)) {
       return new Promise<never>(() => {})
@@ -68,7 +68,7 @@ export class FakeInvoke {
       if (this.rejectAllMessage !== null) throw new Error(this.rejectAllMessage)
       const handler = this.handlers.get(cmd)
       if (!handler) throw new Error(`Command not found: ${cmd}`)
-      return handler(args)
+      return handler(args as Record<string, unknown>)
     }
     if (delay > 0) {
       return new Promise((resolve, reject) => {

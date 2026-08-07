@@ -64,7 +64,7 @@ describe('FE-AUD-004 Gateway 安全写回', () => {
     await waitFor(() => {
       const call = fakeInvoke.calls.find(call => call.cmd === 'update_agents_config')
       expect(call).toBeDefined()
-      const routes = (call!.args.config as { gateway: { routes: Array<{ source: string; agentId: string }> } }).gateway.routes
+      const routes = (call!.args as { config: { gateway: { routes: Array<{ source: string; agentId: string }> } } }).config.gateway.routes
       expect(routes.map(route => route.source).sort()).toEqual(['qq:group:1', 'qq:group:2', 'qq:group:3'])
     })
   })
