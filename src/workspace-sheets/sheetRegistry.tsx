@@ -1,13 +1,7 @@
-import { lazy, Suspense } from 'react'
+import { lazy, Suspense, type ComponentType, type LazyExoticComponent } from 'react'
 import type { SheetKind, SheetRecord, SheetContext, SheetRenderEntry } from './sheetTypes.ts'
 import AgentSheetView from '../sheets/AgentSheetView'
 import OverviewSheetView from '../sheets/OverviewSheetView'
-import RuntimeSheetView from '../sheets/RuntimeSheetView'
-import GatewaySheetView from '../sheets/gateway/GatewaySheetView'
-import SearchSheetView from '../sheets/search/SearchSheetView'
-import HistorySheetView from '../sheets/history/HistorySheetView'
-import BrowserSheetView from '../sheets/browser/BrowserSheetView'
-import FileSheetView from '../sheets/file/FileSheetView'
 import Sidebar from '../components/Sidebar'
 import AgentContextPanel from '../components/right-panel/AgentContextPanel'
 import FileContextPanel from '../components/right-panel/FileContextPanel'
@@ -22,8 +16,14 @@ import FileContextPanel from '../components/right-panel/FileContextPanel'
  * renderKey 保留（调试用 + 持久化不存组件引用）。
  */
 
-// Prism 管理 Sheet 非首屏：按需分包
+// FE-AUD-016：除 agent/overview 外，全部 Sheet renderer lazy（首屏只载 Agent 工作台）
 const PrismManagerSheetView = lazy(() => import('../sheets/PrismManagerSheetView'))
+const RuntimeSheetView = lazy(() => import('../sheets/RuntimeSheetView'))
+const GatewaySheetView = lazy(() => import('../sheets/gateway/GatewaySheetView'))
+const SearchSheetView = lazy(() => import('../sheets/search/SearchSheetView'))
+const HistorySheetView = lazy(() => import('../sheets/history/HistorySheetView'))
+const BrowserSheetView = lazy(() => import('../sheets/browser/BrowserSheetView'))
+const FileSheetView = lazy(() => import('../sheets/file/FileSheetView'))
 
 const LOADING_FALLBACK = (
   <div className="sheet-empty-host">
@@ -35,25 +35,34 @@ const LOADING_FALLBACK = (
 // agent 直挂（主工作台首屏）；W1-03：AgentSheetView 收窄为 { sheet, ctx }，只渲染主区
 const agentRender = (sheet: SheetRecord, ctx: SheetContext) => <AgentSheetView sheet={sheet} ctx={ctx} />
 
+/** lazy sheet 渲染包装：Suspense + 加载态 */
+function lazyRender(Component: LazyExoticComponent<ComponentType<{ sheet: SheetRecord; ctx: SheetContext }>>) {
+  return (sheet: SheetRecord, ctx: SheetContext) => (
+    <Suspense fallback={LOADING_FALLBACK}>
+      <Component sheet={sheet} ctx={ctx} />
+    </Suspense>
+  )
+}
+
 export const SHEET_RENDER_REGISTRY: Record<SheetKind, SheetRenderEntry> = {
   // W1-03：侧栏上移——agent 的 Sidebar 由布局层经 slot 渲染（entry.sidebar 声明）
   // W2-12：agent/file 右栏（F2-F）——搜索/关联；旧 RightPanel 退役
   agent: { render: agentRender, sidebar: Sidebar, rightPanel: AgentContextPanel },
-  prism: { render: () => <Suspense fallback={LOADING_FALLBACK}><PrismManagerSheetView /></Suspense> },
+  prism: { render: lazyRender(PrismManagerSheetView) },
   // W1-08：runtime 日志观察面（list 回放 + runtime-log 增量，无右栏）
-  runtime: { render: (sheet, ctx) => <RuntimeSheetView sheet={sheet} ctx={ctx} /> },
+  runtime: { render: lazyRender(RuntimeSheetView) },
   // W2-03：FileSheet 分区壳（singletonKey file:{source}，内部指向可改）
-  file: { render: (sheet, ctx) => <FileSheetView sheet={sheet} ctx={ctx} />, rightPanel: FileContextPanel },
+  file: { render: lazyRender(FileSheetView), rightPanel: FileContextPanel },
   // W1-05：overview 启动选择器（虚拟空态，不写入持久 sheet 数组）
   overview: { render: (sheet, ctx) => <OverviewSheetView sheet={sheet} ctx={ctx} /> },
   // W3-03：跨会话快照搜索（仅本地会话；平台范围产品未决）
-  search: { render: (sheet, ctx) => <SearchSheetView sheet={sheet} ctx={ctx} /> },
+  search: { render: lazyRender(SearchSheetView) },
   // W4-01：历史列表/导出（回放 W4-02 待产品拍板）
-  history: { render: (sheet, ctx) => <HistorySheetView sheet={sheet} ctx={ctx} /> },
+  history: { render: lazyRender(HistorySheetView) },
   // W4-03：browser 壳（CDP 契约未定，W4-04 接真实）
-  browser: { render: (sheet, ctx) => <BrowserSheetView sheet={sheet} ctx={ctx} /> },
+  browser: { render: lazyRender(BrowserSheetView) },
   // W3-01：gateway 只读概览（适配器/平台会话分区；写回 W3-02 桩化）
-  gateway: { render: (sheet, ctx) => <GatewaySheetView sheet={sheet} ctx={ctx} /> },
+  gateway: { render: lazyRender(GatewaySheetView) },
 } satisfies Record<SheetKind, SheetRenderEntry>
 
 export function resolveSheetRender(kind: SheetKind): SheetRenderEntry | undefined {

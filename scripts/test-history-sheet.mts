@@ -38,6 +38,6 @@ assert.match(view, /client\.exportSession\(\{ periId, format: 'markdown', output
 assert.match(view, /validateExportPath\(outputPath\)/, '导出前必须预检路径')
 assert.match(view, /role="alert"/, '导出错误必须明确展示')
 const registry = readFileSync(new URL('../src/workspace-sheets/sheetRegistry.tsx', import.meta.url), 'utf8')
-assert.match(registry, /history: \{ render: \(sheet, ctx\) => <HistorySheetView sheet=\{sheet\} ctx=\{ctx\} \/> \}/, 'registry history 必须渲染')
+assert.match(registry, /history: \{ render: lazyRender\(HistorySheetView\) \}/, 'registry history 必须渲染')
 
 console.log('history sheet 守卫通过')

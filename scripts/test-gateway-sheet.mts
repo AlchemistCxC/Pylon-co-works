@@ -47,7 +47,7 @@ assert.ok(css.length > 0, '必须有样式')
 
 // 3. registry gateway 条目渲染
 const registry = readFileSync(new URL('../src/workspace-sheets/sheetRegistry.tsx', import.meta.url), 'utf8')
-assert.match(registry, /gateway: \{ render: \(sheet, ctx\) => <GatewaySheetView sheet=\{sheet\} ctx=\{ctx\} \/> \}/, 'registry gateway 必须渲染')
+assert.match(registry, /gateway: \{ render: lazyRender\(GatewaySheetView\) \}/, 'registry gateway 必须渲染')
 
 console.log('gateway sheet 守卫通过')
 // ── W3-02（桩化）：写回分类 + update→reload 顺序 + 锁中毒 ──
