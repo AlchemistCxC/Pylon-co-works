@@ -1,6 +1,5 @@
 import { create } from 'zustand'
 import { loadSessions, persistSessions } from './sessionPersistence'
-import { loadSheetStateV2 } from './workspace-sheets/sheetPersistence'
 import { loadProfiles, persistProfiles, PROFILE_STORAGE_KEY, type PersistedProfile, type ProfilePersistenceState } from './profilePersistence'
 import { useWorkspaceStore } from './workspaceStore'
 import { useRuntimeStore } from './runtimeStore'
@@ -202,9 +201,9 @@ export const useIdentityStore = create<IdentityStoreState>()((set, get) => ({
   },
   getUser: (source) => get().users.find(u => u.id === source),
   setAgents: (a) => set(() => {
-    // 联动：Agent 列表变化时按新列表重载 sheets（W1-01 v2：layout 由 workspaceStore 持有）
-    const result = loadSheetStateV2(localStorage, a.map(agent => agent.id))
-    useWorkspaceStore.getState().replaceSheets(result.state, result.state.agentStates)
+    // FE-AUD-005：agents 到达后仅 prune 无效 agent sheet，不重复全量 hydrate
+    //（hydrate 已由 bootstrap hydrateDomains 完成；全量替换会覆盖启动期用户操作）
+    useWorkspaceStore.getState().pruneAgentSheets(a.map(agent => agent.id))
     return { agents: a }
   }),
   setActiveAgent: (id) => set(() => {

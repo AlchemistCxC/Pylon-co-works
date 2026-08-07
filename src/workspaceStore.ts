@@ -61,6 +61,8 @@ interface WorkspaceStoreState {
   touchVersions: Record<string, number>
   recordTouchedFile: (source: string, file: Omit<TouchedFile, 'source'>) => void
   replaceSheets: (workspaceSheets: ReturnType<typeof createSheetState>, sheetAgentStates: Record<string, SheetWorkspaceState>) => void
+  /** FE-AUD-005：agents 到达后仅 prune 无效 agent sheet（不重复全量 hydrate） */
+  pruneAgentSheets: (agentIds: readonly string[]) => void
   patchSheetAgentState: (agentId: string, partial: Partial<SheetWorkspaceState>) => void
   patchSheetAgentStates: (agentStates: Record<string, SheetWorkspaceState>) => void
   setSidebarWidth: (width: number) => void
@@ -178,6 +180,16 @@ export const useWorkspaceStore = create<WorkspaceStoreState>()((set, get) => ({
     return commitWorkspaceMutation(state, { sheetAgentStates })
   }),
   replaceSheets: (workspaceSheets, sheetAgentStates) => set({ workspaceSheets, sheetAgentStates }),
+  pruneAgentSheets: (agentIds) => set(state => {
+    const allowed = new Set(agentIds)
+    const sheets = state.workspaceSheets.sheets.filter(sheet =>
+      sheet.kind !== 'agent' || (sheet.agentId !== undefined && allowed.has(sheet.agentId)))
+    // createSheetState 收尾：activeSheetId 指向被删 sheet 时回退到保留的最后一个
+    const workspaceSheets = createSheetState(sheets, state.workspaceSheets.activeSheetId, state.workspaceSheets.recentlyClosed)
+    const sheetAgentStates = Object.fromEntries(
+      Object.entries(state.sheetAgentStates).filter(([agentId]) => allowed.has(agentId)))
+    return commitWorkspaceMutation(state, { workspaceSheets, sheetAgentStates })
+  }),
   patchSheetAgentState: (agentId, partial) => set(state => {
     const sheetAgentStates = {
       ...state.sheetAgentStates,

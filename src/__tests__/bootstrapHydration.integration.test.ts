@@ -67,4 +67,18 @@ describe('FE-AUD-005 hydrate 双路径', () => {
     expect(sheets.some(sheet => sheet.agentId === 'old-agent')).toBe(false)
     expect(sheets.some(sheet => sheet.kind === 'search')).toBe(true)
   })
+
+  it('prune 后 activeSheetId 回退到保留 sheet（createSheetState 收尾）', () => {
+    localStorage.setItem('pylon-workspace-sheets', JSON.stringify({
+      ...PERSISTED_V2,
+      state: { ...PERSISTED_V2.state, activeSheetId: 'agent-old' },
+    }))
+    useWorkspaceStore.getState().hydrateWorkspaceSheets()
+    expect(useWorkspaceStore.getState().workspaceSheets.activeSheetId).toBe('agent-old')
+    useIdentityStore.getState().setAgents([{ id: 'peri', name: 'Peri' }])
+    const state = useWorkspaceStore.getState()
+    expect(state.workspaceSheets.sheets.some(sheet => sheet.agentId === 'old-agent')).toBe(false)
+    expect(state.workspaceSheets.activeSheetId).not.toBe('agent-old')
+    expect(state.workspaceSheets.activeSheetId).not.toBeNull()
+  })
 })
