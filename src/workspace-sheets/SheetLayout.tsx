@@ -105,6 +105,13 @@ export default function SheetLayout(props: SheetLayoutProps) {
       <SheetSidebarSlot sheet={activeSheet} ctx={ctx} />
       <SheetHost sheet={activeSheet} ctx={ctx} />
       <SheetRightSlot sheet={activeSheet} ctx={ctx} />
+      {/* G5（FE-AUD-006）：browser sheet 保活——非 active 时隐藏渲染（WebView 不销毁），
+          真正 close sheet（从 sheets 移除）才卸载触发 browser_close */}
+      {sheets.filter(sheet => sheet.kind === 'browser' && sheet.id !== activeSheetId).map(sheet => (
+        <div key={sheet.id} className="browser-keep-alive" style={{ display: 'none' }} aria-hidden="true">
+          {resolveSheetRender('browser')?.render(sheet, ctx)}
+        </div>
+      ))}
     </div>
   )
 }
