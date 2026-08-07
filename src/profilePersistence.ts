@@ -51,38 +51,39 @@ export function normalizePersistedProfile(raw: unknown): PersistedProfile | null
   }
 }
 
-/** 列表规范化：过滤无效项，重复 id 保留首个；空列表回退 defaults */
-export function normalizeProfileState(
-  profiles: unknown,
-  activeProfileId: unknown,
-  defaults: PersistedProfile[],
-): ProfilePersistenceState {
-  const seen = new Set<string>()
-  const valid: PersistedProfile[] = []
-  if (Array.isArray(profiles)) {
-    for (const raw of profiles) {
-      const profile = normalizePersistedProfile(raw)
-      if (!profile || seen.has(profile.id)) continue
-      seen.add(profile.id)
-      valid.push(profile)
-    }
-  }
-  const list = valid.length > 0 ? valid : defaults
-  const activeId = typeof activeProfileId === 'string' ? activeProfileId : ''
+/** 宽容列表规范化（legacy 契约）：profiles 非空则原样保留，仅做 active fallback */
+export function normalizeProfileState<T extends PersistedProfile>(
+  profiles: T[],
+  activeProfileId: string,
+  defaults: T[],
+): ProfilePersistenceState<T> {
+  const validProfiles = profiles.length > 0 ? profiles : defaults
+  const hasActive = validProfiles.some(profile => profile.id === activeProfileId)
   return {
-    profiles: list,
-    activeProfileId: list.some(profile => profile.id === activeId) ? activeId : (list[0]?.id || ''),
+    profiles: validProfiles,
+    activeProfileId: hasActive ? activeProfileId : (validProfiles[0]?.id || ''),
   }
 }
 
-/** 解析 envelope；缺失/损坏/未知版本回退 defaults */
+/** 解析 envelope：逐条严格 normalize（拒绝空 id/损坏，重复 id 保留首个）+ 宽容聚合；缺失/损坏回退 defaults */
 export function parseProfileEnvelope(raw: string | null, defaults: PersistedProfile[]): ProfilePersistenceState {
   if (!raw) return { profiles: defaults, activeProfileId: defaults[0]?.id || '' }
   try {
     const parsed: unknown = JSON.parse(raw)
     if (!parsed || typeof parsed !== 'object') return { profiles: defaults, activeProfileId: defaults[0]?.id || '' }
     const envelope = parsed as { profiles?: unknown; activeProfileId?: unknown }
-    return normalizeProfileState(envelope.profiles, envelope.activeProfileId, defaults)
+    const seen = new Set<string>()
+    const valid: PersistedProfile[] = []
+    if (Array.isArray(envelope.profiles)) {
+      for (const rawProfile of envelope.profiles) {
+        const profile = normalizePersistedProfile(rawProfile)
+        if (!profile || seen.has(profile.id)) continue
+        seen.add(profile.id)
+        valid.push(profile)
+      }
+    }
+    const activeId = typeof envelope.activeProfileId === 'string' ? envelope.activeProfileId : ''
+    return normalizeProfileState(valid, activeId, defaults)
   } catch {
     return { profiles: defaults, activeProfileId: defaults[0]?.id || '' }
   }
