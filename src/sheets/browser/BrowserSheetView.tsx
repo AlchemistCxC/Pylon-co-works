@@ -24,11 +24,12 @@ interface BrowserSnapshot {
   error?: string | null
 }
 
+// FE-AUD-021：未实现工具 disabled 并标注 unavailable（不保留可点击无行为的假完成态）
 const TOOL_ITEMS = [
-  { id: 'history', label: '历史', icon: Clock3 },
-  { id: 'bookmarks', label: '书签', icon: Bookmark },
-  { id: 'downloads', label: '下载', icon: Download },
-  { id: 'console', label: '控制台', icon: Code2 },
+  { id: 'history', label: '历史', icon: Clock3, available: false },
+  { id: 'bookmarks', label: '书签', icon: Bookmark, available: false },
+  { id: 'downloads', label: '下载', icon: Download, available: false },
+  { id: 'console', label: '控制台', icon: Code2, available: false },
 ] as const
 
 export default function BrowserSheetView({ sheet: _sheet, ctx: _ctx }: { sheet: SheetRecord; ctx: SheetContext }) {
@@ -153,7 +154,7 @@ export default function BrowserSheetView({ sheet: _sheet, ctx: _ctx }: { sheet: 
         <nav className="browser-tool-list" aria-label="浏览器工具栏">
           {TOOL_ITEMS.map(item => {
             const Icon = item.icon
-            return <button key={item.id} type="button" className={`browser-tool-item ${activeTool === item.id ? 'active' : ''}`} onClick={() => setActiveTool(item.id)} title={item.label} aria-label={item.label} aria-pressed={activeTool === item.id}><Icon size={18} />{!sidebarCollapsed && <span>{item.label}</span>}</button>
+            return <button key={item.id} type="button" className={`browser-tool-item ${activeTool === item.id ? 'active' : ''}`} onClick={() => setActiveTool(item.id)} disabled={!item.available} title={item.available ? item.label : `${item.label}（未实现）`} aria-label={item.available ? item.label : `${item.label}（未实现）`} aria-pressed={activeTool === item.id}><Icon size={18} />{!sidebarCollapsed && <span>{item.label}</span>}{!item.available && <span className="browser-tool-unavailable">unavailable</span>}</button>
           })}
         </nav>
         {!sidebarCollapsed && <div className="browser-sidebar-note">WebView session<br /><span>{snapshot.phase}</span></div>}
