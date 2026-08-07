@@ -312,8 +312,8 @@
 
 /* ── 回底按钮（Peri ⌄ 风格）── */
 .scroll-bottom-btn {
-  /* 视觉调整：回到底部按钮移到中控区右上方边缘（原右下） */
-  position:absolute; top:8px; right:calc(8px + var(--right-panel-inset, 0px));
+  /* 聊天区右下、紧贴中控区上方 */
+  position:absolute; bottom:calc(var(--cc-height, 130px) + 8px); right:calc(8px + var(--right-panel-inset, 0px));
   width:24px; height:24px; display:flex; align-items:center; justify-content:center;
   background:transparent; border:none;
   color:#fff; cursor:pointer; font-size:14px; opacity:0.35;
