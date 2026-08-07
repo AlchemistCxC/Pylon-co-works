@@ -353,8 +353,9 @@
    （CC Markdown column gap 只在块之间，首块无上间距，圆点贴首行）。 */
 .term-assistant.has-dot { position:relative; display:flex; align-items:flex-start; }
 .app[data-message-layout="claude"] { --dot-col-width: 1.6em; }
-/* 统一指示列（claude 布局）：助手/thinking/工具 内容列一律从 1.6em 起——
-   无圆点助手也占指示列（内容与工具名/thinking 对齐），不再贴左缘 */
+/* 统一指示列（claude 布局）：助手/thinking/工具/底部生成 spinner 内容列
+   一律从 1.6em 起——无圆点助手也占指示列，底部生成中标志与 tool 指示同列 */
+.app[data-message-layout="claude"] .term-spinner-row { padding-left: var(--dot-col-width, 1.6em); }
 .app[data-message-layout="claude"] .term-reasoning { padding-left: var(--dot-col-width, 1.6em); }
 .app[data-message-layout="claude"] .term-assistant:not(.has-dot) { padding-left: var(--dot-col-width, 1.6em); }
 /* 圆点列固定宽；颜色随消息文字链（claude 预设 --msg-text/--chat-text 为纯白，
