@@ -59,7 +59,7 @@ import { useReplayPostureStore } from '../src/components/chat/replayPostureStore
   assert.match(chat, /function ChatView\(\{ sessionId \}: Props\)/, 'ChatView 签名不得扩大')
   const lifecycle = readFileSync(new URL('../src/components/chat/useSessionLifecycle.ts', import.meta.url), 'utf8')
   const attachIdx = lifecycle.indexOf('attachChatEventController(')
-  const loadIdx = lifecycle.indexOf("load_persisted_session'")
+  const loadIdx = lifecycle.indexOf('loadPersistedSession(')
   assert.ok(attachIdx !== -1 && loadIdx !== -1 && attachIdx < loadIdx, 'controller/listener 必须先于 load 挂接（回放 load 前 listener 就绪）')
 }
 

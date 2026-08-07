@@ -4,7 +4,8 @@ import { IS_TAURI } from '../../infrastructure/tauri/env'
 import { useIdentityStore } from '../../identityStore'
 import { useRuntimeStore } from '../../runtimeStore'
 import { reportRuntimeError } from '../../runtimeError'
-import { extractMode, extractModelConfig, sessionResponseObject, type SessionResponse } from '../../infrastructure/acp/chatContracts'
+import { createSessionClient } from '../../infrastructure/acp/sessionClient'
+import { extractMode, extractModelConfig, sessionResponseObject } from '../../infrastructure/acp/chatContracts'
 import { isCurrentLoadGeneration, nextLoadGeneration, resolveLoadedMessages, serializeLoadedMessages } from './replayState'
 import { clearMessageStorage, messageStorageKey, parseMessageSnapshot } from './messagePersistence'
 import { attachChatEventController, registerChatController, type ChatControllerHandle, type ChatEventControllerRefs } from './chatEventController'
@@ -122,7 +123,8 @@ export function useSessionLifecycle(
     const createSession = () => {
       const loadGeneration = nextLoadGeneration(loadGenerationRef.current[s.source])
       loadGenerationRef.current[s.source] = loadGeneration
-      invoke<SessionResponse>('new_session', { source: s.source, persona, cwd: s.workdir || undefined }).then(response => {
+      const sessionClient = createSessionClient({ invoke: (cmd, args) => invoke(cmd, args as Record<string, unknown> | undefined) })
+      sessionClient.newSession({ source: s.source, persona, cwd: s.workdir || undefined }).then((response: unknown) => {
         if (!isCurrentLoadGeneration(loadGenerationRef.current[s.source], loadGeneration)) return
         const res = sessionResponseObject(response)
         const periId = res.sessionId ?? res.periId
@@ -139,7 +141,8 @@ export function useSessionLifecycle(
     if (s.periId) {
       const loadGeneration = nextLoadGeneration(loadGenerationRef.current[s.source])
       loadGenerationRef.current[s.source] = loadGeneration
-      invoke<SessionResponse>('load_persisted_session', { source: s.source, periId: s.periId, cwd: s.workdir || undefined }).then(response => {
+      const sessionClient = createSessionClient({ invoke: (cmd, args) => invoke(cmd, args as Record<string, unknown> | undefined) })
+      sessionClient.loadPersistedSession({ source: s.source, periId: s.periId, cwd: s.workdir || undefined }).then((response: unknown) => {
         const res = sessionResponseObject(response)
         if (!isCurrentLoadGeneration(loadGenerationRef.current[s.source], loadGeneration)) return
         const resolved = controllerHandleRef.current

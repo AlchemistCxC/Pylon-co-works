@@ -30,9 +30,11 @@ assert.equal(validateExportPath('G:/work/out.md'), null)
 
 // 3. 组件接线：list_persisted_sessions 分页 + export_session 绝对路径参数 + 错误明确展示
 const view = readFileSync(new URL('../src/sheets/history/HistorySheetView.tsx', import.meta.url), 'utf8')
-assert.match(view, /invoke<unknown>\('list_persisted_sessions'\)/, '必须调 list_persisted_sessions')
+const sessionClient = readFileSync(new URL('../src/infrastructure/acp/sessionClient.ts', import.meta.url), 'utf8')
+assert.match(view, /client\.listPersistedSessions\(\)/, '必须经 session client 调 list_persisted_sessions')
+assert.match(sessionClient, /invoke\('list_persisted_sessions'\)/, 'list_persisted_sessions command literal 收口在 client')
 assert.match(view, /pagePersistedSessions\(raw, page\)/, '必须经分页纯函数')
-assert.match(view, /invoke\('export_session', \{ periId, format: 'markdown', outputPath \}\)/, '导出必须带绝对路径参数')
+assert.match(view, /client\.exportSession\(\{ periId, format: 'markdown', outputPath \}\)/, '导出必须带绝对路径参数')
 assert.match(view, /validateExportPath\(outputPath\)/, '导出前必须预检路径')
 assert.match(view, /role="alert"/, '导出错误必须明确展示')
 const registry = readFileSync(new URL('../src/workspace-sheets/sheetRegistry.tsx', import.meta.url), 'utf8')

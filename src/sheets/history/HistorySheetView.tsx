@@ -3,6 +3,7 @@ import { invoke } from '@tauri-apps/api/core'
 import { save } from '@tauri-apps/plugin-dialog'
 import { reportRuntimeError } from '../../runtimeError'
 import { useIdentityStore } from '../../identityStore'
+import { createSessionClient } from '../../infrastructure/acp/sessionClient'
 import { resumePersistedSessionTransaction } from '../../application/transactions/resumePersistedSessionTransaction'
 import { useReplayPostureStore } from '../../components/chat/replayPostureStore'
 import { pagePersistedSessions, validateExportPath } from '../../domains/history/persistedHistory.ts'
@@ -27,7 +28,8 @@ export default function HistorySheetView({ sheet: _sheet, ctx }: { sheet: SheetR
 
   useEffect(() => {
     let disposed = false
-    invoke<unknown>('list_persisted_sessions').then(value => {
+    const client = createSessionClient({ invoke: (cmd, args) => invoke(cmd, args as Record<string, unknown> | undefined) })
+    client.listPersistedSessions().then(value => {
       if (!disposed) setRaw(value)
     }).catch(error => reportRuntimeError('读取存档会话', error))
     return () => { disposed = true }
@@ -42,7 +44,8 @@ export default function HistorySheetView({ sheet: _sheet, ctx }: { sheet: SheetR
     const validation = validateExportPath(outputPath)
     if (validation) { setExportError(validation); return }
     try {
-      await invoke('export_session', { periId, format: 'markdown', outputPath })
+      const client = createSessionClient({ invoke: (cmd, args) => invoke(cmd, args as Record<string, unknown> | undefined) })
+      await client.exportSession({ periId, format: 'markdown', outputPath })
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error)
       setExportError(message)

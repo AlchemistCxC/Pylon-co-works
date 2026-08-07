@@ -6,6 +6,7 @@ import { useWorkspaceStore } from '../workspaceStore'
 import { agentStatusLight, type AgentLight } from '../domains/agent/statusLight.ts'
 import { formatTime } from '../utils'
 import { reportRuntimeError } from '../runtimeError'
+import { createSessionClient } from '../infrastructure/acp/sessionClient'
 import { removeSessionTransaction } from '../application/transactions/removeSessionTransaction'
 import { clearMessageStorage } from './chat/messagePersistence'
 import type { SheetContext } from '../workspace-sheets/sheetTypes'
@@ -52,9 +53,10 @@ export default function Sidebar({ ctx }: { ctx: SheetContext }) {
 
   const handleDelete = async (id: string) => {
     if (!window.confirm('删除会话？')) return
+    const sessionClient = createSessionClient({ invoke: (cmd, args) => invoke(cmd, args as Record<string, unknown> | undefined) })
     const result = await removeSessionTransaction(id, {
       findSession: sessionId => sessions.find(s => s.id === sessionId),
-      closeSession: source => invoke('close_session', { source }),
+      closeSession: source => sessionClient.closeSession(source),
       removeSession: sessionId => removeSession(sessionId),
       clearMessages: sessionId => clearMessageStorage(sessionId, localStorage),
       reportError: (action, error) => reportRuntimeError(action, error),

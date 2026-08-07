@@ -3,6 +3,7 @@ import * as Dialog from '@radix-ui/react-dialog'
 import { invoke } from '@tauri-apps/api/core'
 import { useIdentityStore } from '../identityStore'
 import { reportRuntimeError } from '../runtimeError'
+import { createSessionClient } from '../infrastructure/acp/sessionClient'
 import { removeSessionTransaction } from '../application/transactions/removeSessionTransaction'
 import { clearMessageStorage } from './chat/messagePersistence'
 import { createSessionSettingsValues, isSessionSettingsDirty } from './sessionSettingsForm'
@@ -70,9 +71,10 @@ export default function SessionSettings({ sessionId, open, onClose, onDeleted }:
 
   const del = async () => {
     if (!window.confirm(`删除会话“${session.name}”？此操作无法撤销。`)) return
+    const sessionClient = createSessionClient({ invoke: (cmd, args) => invoke(cmd, args as Record<string, unknown> | undefined) })
     const result = await removeSessionTransaction(sessionId, {
       findSession: id => useIdentityStore.getState().sessions.find(s => s.id === id),
-      closeSession: source => invoke('close_session', { source }),
+      closeSession: source => sessionClient.closeSession(source),
       removeSession: id => useIdentityStore.getState().removeSession(id),
       clearMessages: id => clearMessageStorage(id, localStorage),
       reportError: (action, error) => reportRuntimeError(action, error),

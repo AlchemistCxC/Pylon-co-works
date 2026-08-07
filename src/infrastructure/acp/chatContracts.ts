@@ -92,8 +92,9 @@ export interface PeriDonePayload {
   replay?: boolean
 }
 
-export function sessionResponseObject(response: SessionResponse): SessionResponseObject {
-  return typeof response === 'string' ? { sessionId: response } : response
+export function sessionResponseObject(response: unknown): SessionResponseObject {
+  if (typeof response === 'string') return { sessionId: response }
+  return (response ?? {}) as SessionResponseObject
 }
 
 export function extractModelConfig(configOptions: ConfigOption[] | undefined): { model?: string; models?: string[] } {
