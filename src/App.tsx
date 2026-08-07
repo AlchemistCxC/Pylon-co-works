@@ -247,7 +247,9 @@ export default function App() {
   }, [s.globalBgColor, s.globalBgImage, s.transparency, s.bgBlur, s.uiScheme])
 
   const appWindow = appWindowSingleton
-  const rightPanelInset = useWorkspaceStore.getState().rightPanelCollapsed ? 0 : s.rightWidth
+  // FE-AUD-017：窄 selector 订阅折叠状态（原 getState 不响应式，rightInset 会陈旧）
+  const rightPanelCollapsed = useWorkspaceStore(state => state.rightPanelCollapsed)
+  const rightPanelInset = rightPanelCollapsed ? 0 : s.rightWidth
   // FE-AUD-005：bootstrap 降级提示（报告阶段 2.4：Agent 列表失败可重试，不清空本地工作区）
   const hydrationStatus = useHydrationStore(state => state.status)
   const hydrationError = useHydrationStore(state => state.error)
