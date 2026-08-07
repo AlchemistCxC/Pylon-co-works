@@ -78,6 +78,8 @@ export default forwardRef<{ send: () => void; attachFile: () => void; cancel: ()
 
   useEffect(() => {
     setQueuedMessages([])
+    // setter 来自 useSessionUiState（useCallback 稳定），切会话清空队列不串 source
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [sessionSource])
 
   const sessionProfile = resolveSessionProfile(sessionId, sessions, profiles)

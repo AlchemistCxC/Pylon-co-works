@@ -107,11 +107,9 @@ export function persistProfiles(storage: StorageLike, state: ProfilePersistenceS
 }
 
 export function loadProfiles(storage: StorageLike, defaults: PersistedProfile[]): ProfilePersistenceState {
-  let raw: string | null = null
   try {
-    raw = storage.getItem(PROFILE_STORAGE_KEY)
+    return parseProfileEnvelope(storage.getItem(PROFILE_STORAGE_KEY), defaults)
   } catch {
     return { profiles: defaults, activeProfileId: defaults[0]?.id || '' }
   }
-  return parseProfileEnvelope(raw, defaults)
 }

@@ -13,6 +13,8 @@ import './GatewaySheet.css'
  * gateway_status 只读概览：适配器/平台会话两分区（GatewaySidebar）；主区平台概览
  * （routes 表 + inject 只读提示「归 Prism」不编辑）。route 写回在 W3-02（桩化）。
  */
+const gatewayClient = createGatewayClient({ invoke: (cmd, args) => invoke(cmd, args as Record<string, unknown> | undefined) })
+
 export default function GatewaySheetView({ sheet: _sheet, ctx: _ctx }: { sheet: SheetRecord; ctx: SheetContext }) {
   const [status, setStatus] = useState<GatewayStatus | null>(null)
   const [sessions, setSessions] = useState<PlatformSession[]>([])
@@ -24,7 +26,6 @@ export default function GatewaySheetView({ sheet: _sheet, ctx: _ctx }: { sheet: 
 
   // W3-02 + FE-AUD-004：保存 = saveGatewayRouteTransaction（合并既有 routes → 保存 →
   // reload → read-back 一致才 ok）；锁中毒/回读 mismatch 明确展示
-  const gatewayClient = createGatewayClient({ invoke: (cmd, args) => invoke(cmd, args as Record<string, unknown> | undefined) })
   const saveRoute = async () => {
     if (!editSource.trim() || !editAgentId.trim()) return
     setWriteStatus({ kind: 'saving' })

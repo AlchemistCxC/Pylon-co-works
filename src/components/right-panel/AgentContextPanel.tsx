@@ -23,8 +23,10 @@ export default function AgentContextPanel({ ctx }: { ctx: SheetContext }) {
   const [searchIndex, setSearchIndex] = useSessionUiState(sessionId, 'search-index', 0)
   const [mode, setMode] = useState<'search' | 'relations'>('search')
 
-  // FE-AUD-012：横向订阅消息版本戳——消息 append 立即进入右栏搜索计数（不再只读一次）
+  // FE-AUD-012：横向订阅消息版本戳——消息 append 立即进入右栏搜索计数（不再只读一次）。
+  // version 是必要依赖（变化时重读消息），eslint 误判为多余（组件已因 version 重渲染）
   const { version } = useChatRuntimeSnapshot(source)
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   const messages = useMemo(() => (source ? getChatController()?.getMessages(source) ?? [] : []), [source, version])
   const matches = useMemo(() => {
     if (!searchQuery.trim()) return []
