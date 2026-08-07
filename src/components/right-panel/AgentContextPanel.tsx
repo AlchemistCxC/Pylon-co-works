@@ -1,6 +1,7 @@
 import { useMemo, useState } from 'react'
 import { useWorkspaceStore } from '../../workspaceStore'
 import { useSessionUiState } from '../chat/sessionUiState'
+import { useChatRuntimeSnapshot } from '../chat/useChatRuntimeSnapshot'
 import { messageMatchesQuery } from '../chat/messageSearchIndex'
 import { getChatController } from '../chat/chatEventController'
 import MessageSearchBar from '../chat/MessageSearchBar'
@@ -22,7 +23,9 @@ export default function AgentContextPanel({ ctx }: { ctx: SheetContext }) {
   const [searchIndex, setSearchIndex] = useSessionUiState(sessionId, 'search-index', 0)
   const [mode, setMode] = useState<'search' | 'relations'>('search')
 
-  const messages = useMemo(() => (source ? getChatController()?.getMessages(source) ?? [] : []), [source])
+  // FE-AUD-012：横向订阅消息版本戳——消息 append 立即进入右栏搜索计数（不再只读一次）
+  const { version } = useChatRuntimeSnapshot(source)
+  const messages = useMemo(() => (source ? getChatController()?.getMessages(source) ?? [] : []), [source, version])
   const matches = useMemo(() => {
     if (!searchQuery.trim()) return []
     return messages.filter(message => messageMatchesQuery(message, searchQuery))
