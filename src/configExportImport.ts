@@ -47,7 +47,10 @@ export function buildExportPayload(storage: StorageLike): string {
 
 export type ImportResult = { ok: true; keys: string[] } | { ok: false; error: string }
 
-export function applyImportPayload(storage: StorageLike, json: string): ImportResult {
+/** 全量预检（报告 1B.7）：parse envelope + key 白名单 + 值校验，收集 data 但不写盘 */
+export type ImportPreflight = { ok: true; data: Record<string, string>; keys: string[] } | { ok: false; error: string }
+
+export function preflightImportPayload(json: string): ImportPreflight {
   let parsed: unknown
   try {
     parsed = JSON.parse(json)
@@ -64,18 +67,27 @@ export function applyImportPayload(storage: StorageLike, json: string): ImportRe
   // key 白名单：只接受 CONFIG_STORAGE_KEYS（导出对等集合），
   // 防恶意/损坏文件注入任意 localStorage key（如 pylon-msgs-* 运行态）
   const allowed = new Set<string>(CONFIG_STORAGE_KEYS)
-  const keys: string[] = []
+  const collected: Record<string, string> = {}
   for (const [key, value] of Object.entries(data)) {
-    if (!allowed.has(key) || typeof value !== 'string') continue
+    if (allowed.has(key) && typeof value === 'string') collected[key] = value
+  }
+  const keys = Object.keys(collected)
+  if (keys.length === 0) return { ok: false, error: '没有可导入的配置项' }
+  return { ok: true, data: collected, keys }
+}
+
+/** 旧语义入口（保留兼容）：逐 key 写，单个失败跳过——F17 事务用 preflight + 全量写 + 回滚 */
+export function applyImportPayload(storage: StorageLike, json: string): ImportResult {
+  const preflight = preflightImportPayload(json)
+  if (!preflight.ok) return { ok: false, error: preflight.error }
+  for (const [key, value] of Object.entries(preflight.data)) {
     try {
       storage.setItem(key, value)
-      keys.push(key)
     } catch {
       // 单个 key 写入失败不阻断其余
     }
   }
-  if (keys.length === 0) return { ok: false, error: '没有可导入的配置项' }
-  return { ok: true, keys }
+  return { ok: true, keys: preflight.keys }
 }
 
 export function configFileName(): string {

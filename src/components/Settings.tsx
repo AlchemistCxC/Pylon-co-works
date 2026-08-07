@@ -5,7 +5,8 @@ import { invoke } from '@tauri-apps/api/core'
 import { getCurrentWindow } from '@tauri-apps/api/window'
 import { PhysicalSize } from '@tauri-apps/api/dpi'
 import { clearWindowSize } from '../windowSizePersistence'
-import { applyImportPayload, buildExportPayload, configFileName } from '../configExportImport'
+import { buildExportPayload, configFileName, preflightImportPayload } from '../configExportImport'
+import { importConfigurationTransaction } from '../application/transactions/importConfigurationTransaction'
 import { ZoneGroupFields } from '../themeFieldRenderer'
 import { useStore } from '../store'
 import { useIdentityStore } from '../identityStore'
@@ -123,10 +124,19 @@ function ConfigBackupRow() {
         json = await readTextFile(selected as string)
       }
       if (json === null) return
-      const result = applyImportPayload(localStorage, json)
+      const result = await importConfigurationTransaction(json, {
+        storage: localStorage,
+        preflight: preflightImportPayload,
+        rehydrate: () => {
+          useIdentityStore.getState().hydrateProfiles()
+          useIdentityStore.getState().hydrateSessions()
+          useWorkspaceStore.getState().hydrateWorkspaceSheets()
+        },
+        reportError: (action, error) => reportRuntimeError(action, error),
+      })
       setMsg(result.ok
-        ? `已导入 ${result.keys.length} 项配置，刷新后生效`
-        : `导入失败：${result.error}`)
+        ? `已导入 ${result.value.length} 项配置`
+        : `导入失败：${result.message}`)
     } catch (cause) { setMsg(`导入失败：${String(cause)}`) }
   }
   return (
