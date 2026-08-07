@@ -36,7 +36,7 @@ function hydrateThenUserOpensHistory(): void {
   useWorkspaceStore.setState(state => ({
     workspaceSheets: sheetReducer(state.workspaceSheets, {
       type: 'open',
-      sheet: { id: 'h1', kind: 'history', title: '历史', createdAt: 0, lastFocusedAt: 0 },
+      sheet: { id: 'h1', kind: 'history', title: '历史' },
       now: Date.now(),
     }),
   }))
@@ -53,7 +53,7 @@ describe('FE-AUD-005 hydrate 双路径', () => {
     hydrateThenUserOpensHistory()
     expect(useWorkspaceStore.getState().workspaceSheets.sheets.some(sheet => sheet.id === 'h1')).toBe(true)
     // agents 到达（list_agents 返回）——第二条 hydrate 路径
-    useIdentityStore.getState().setAgents([{ id: 'peri' }])
+    useIdentityStore.getState().setAgents([{ id: 'peri', name: 'Peri' }])
     const sheets = useWorkspaceStore.getState().workspaceSheets.sheets
     expect(sheets.some(sheet => sheet.id === 'h1')).toBe(true)
     expect(sheets.some(sheet => sheet.id === 'search')).toBe(true)
@@ -62,7 +62,7 @@ describe('FE-AUD-005 hydrate 双路径', () => {
   it('agents 到达后 prune 无效 agent sheet（当前经全量替换实现 — 基线绿）', () => {
     seedPersisted()
     useWorkspaceStore.getState().hydrateWorkspaceSheets()
-    useIdentityStore.getState().setAgents([{ id: 'peri' }])
+    useIdentityStore.getState().setAgents([{ id: 'peri', name: 'Peri' }])
     const sheets = useWorkspaceStore.getState().workspaceSheets.sheets
     expect(sheets.some(sheet => sheet.agentId === 'old-agent')).toBe(false)
     expect(sheets.some(sheet => sheet.kind === 'search')).toBe(true)

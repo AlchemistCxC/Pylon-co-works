@@ -238,3 +238,19 @@
 .error-center-item { display: flex; align-items: baseline; gap: 8px; padding: 4px 0; border-bottom: 1px solid rgba(0,0,0,0.05); }
 .error-center-item strong { color: var(--tool-err, #be2828); flex-shrink: 0; }
 .error-center-msg { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--text-dim); }
+
+/* FE-AUD-001：工作区写盘失败提示（SheetLayout 顶部） */
+.workspace-persist-warning {
+  margin: 6px 12px;
+  padding: 6px 10px;
+  border: 1px solid color-mix(in srgb, var(--tool-err, var(--danger)) 40
+/* FE-AUD-001：工作区写盘失败提示（SheetLayout 顶部） */
+.workspace-persist-warning {
+  margin: 6px 12px;
+  padding: 6px 10px;
+  border: 1px solid color-mix(in srgb, var(--tool-err, var(--danger)) 40%, var(--border));
+  border-radius: var(--ui-radius-sm);
+  font-size: 12px;
+  color: var(--tool-err, var(--danger));
+  background: color-mix(in srgb, var(--tool-err, var(--danger)) 8%, transparent);
+}

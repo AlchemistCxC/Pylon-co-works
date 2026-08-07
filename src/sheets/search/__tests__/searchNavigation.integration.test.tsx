@@ -28,11 +28,10 @@ function seedLocalSnapshot(): void {
   ]))
 }
 
-function setupCtx(): { selectSession: ReturnType<typeof vi.fn>; openSheet: ReturnType<typeof vi.fn> } {
+function setupCtx(): SheetContext {
   const selectSession = vi.fn()
   const openSheet = vi.fn()
-  const ctx = { selectSession, openSheet } as unknown as SheetContext
-  return { selectSession, openSheet }
+  return { selectSession, openSheet } as unknown as SheetContext
 }
 
 function renderSearch(ctx: SheetContext): void {
@@ -61,9 +60,9 @@ describe('FE-AUD-003 搜索定位消费者', () => {
 
   it('点击结果打开对应会话（当前已实现 — 基线绿）', async () => {
     seedLocalSnapshot()
-    const { selectSession, openSheet } = setupCtx()
-    await searchAndClick('定位', { selectSession, openSheet } as unknown as SheetContext)
-    expect(selectSession).toHaveBeenCalledWith('s1')
-    expect(openSheet).toHaveBeenCalledWith(expect.objectContaining({ kind: 'agent', agentId: 'peri' }))
+    const ctx = setupCtx()
+    await searchAndClick('定位', ctx)
+    expect(ctx.selectSession as ReturnType<typeof vi.fn>).toHaveBeenCalledWith('s1')
+    expect(ctx.openSheet as ReturnType<typeof vi.fn>).toHaveBeenCalledWith(expect.objectContaining({ kind: 'agent', agentId: 'peri' }))
   })
 })

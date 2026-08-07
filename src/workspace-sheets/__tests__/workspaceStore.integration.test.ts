@@ -8,6 +8,7 @@
 import { describe, expect, it, beforeEach } from 'vitest'
 import { useWorkspaceStore } from '../../workspaceStore'
 import { resetStores } from '../../test/resetStores'
+import { MemoryStorage } from '../../test/memoryStorage'
 import { SHEET_STORAGE_KEY, type PersistedSheetState, type SheetLayoutState } from '../sheetPersistence'
 import type { SheetRecord } from '../sheetTypes'
 
@@ -49,8 +50,9 @@ function expectPersistedMatchesMemory(): void {
 
 describe('FE-AUD-001 Workspace action 持久化一致性', () => {
   beforeEach(() => {
-    localStorage.clear()
     resetStores()
+    // 每个用例独立的干净 MemoryStorage（可注入故障，且不污染其他用例）
+    Object.defineProperty(globalThis, 'localStorage', { value: new MemoryStorage(), configurable: true, writable: true })
   })
 
   it('openSheet 后持久化与内存一致', () => {
@@ -108,13 +110,16 @@ describe('FE-AUD-001 Workspace action 持久化一致性', () => {
   })
 
   it('closeRightSheets 后持久化与内存一致', () => {
-    openAgentSheet('peri')
+    const anchor = openAgentSheet('peri')
     openToolSheet('search', '搜索')
     const right = openToolSheet('history', '历史')
-    useWorkspaceStore.getState().closeRightSheets(right)
+    // closeRightSheets(anchor) 关闭 anchor 右侧的 sheet（不含 anchor 本身）
+    useWorkspaceStore.getState().closeRightSheets(anchor)
     const memory = useWorkspaceStore.getState().workspaceSheets
     expect(memory.sheets.some(sheet => sheet.id === right)).toBe(false)
+    expect(memory.sheets.some(sheet => sheet.id === anchor)).toBe(true)
     expect(readPersisted().state.sheets.some(sheet => sheet.id === right)).toBe(false)
+    expect(readPersisted().state.sheets.some(sheet => sheet.id === anchor)).toBe(true)
   })
 
   it('reopenSheet 后持久化与内存一致', () => {
@@ -150,5 +155,30 @@ describe('FE-AUD-001 Workspace action 持久化一致性', () => {
     useWorkspaceStore.getState().hydrateWorkspaceSheets()
     const afterReload = useWorkspaceStore.getState().workspaceSheets.sheets.length
     expect(afterReload).toBe(memSheets)
+  })
+
+  it('写盘失败时内存操作继续且 lastPersistError 可见（报告 1A.5）', () => {
+    Object.defineProperty(globalThis, 'localStorage', {
+      value: new MemoryStorage({ quotaExceeded: true }),
+      configurable: true,
+      writable: true,
+    })
+    openAgentSheet('peri')
+    const state = useWorkspaceStore.getState()
+    expect(state.workspaceSheets.sheets.length).toBe(1)
+    expect(state.lastPersistError).not.toBeNull()
+  })
+
+  it('写盘恢复后 lastPersistError 清空', () => {
+    const storage = new MemoryStorage()
+    Object.defineProperty(globalThis, 'localStorage', { value: storage, configurable: true, writable: true })
+    openAgentSheet('peri')
+    expect(useWorkspaceStore.getState().lastPersistError).toBeNull()
+    storage.setQuotaExceeded(true)
+    openToolSheet('search', '搜索')
+    expect(useWorkspaceStore.getState().lastPersistError).not.toBeNull()
+    storage.setQuotaExceeded(false)
+    openToolSheet('history', '历史')
+    expect(useWorkspaceStore.getState().lastPersistError).toBeNull()
   })
 })

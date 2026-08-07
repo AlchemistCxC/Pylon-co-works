@@ -40,6 +40,10 @@ export class MemoryStorage {
     return this.data.size
   }
 
+  key(index: number): string | null {
+    return [...this.data.keys()][index] ?? null
+  }
+
   getItem(key: string): string | null {
     this.calls.push({ op: 'getItem', key })
     return this.data.has(key) ? this.data.get(key)! : null

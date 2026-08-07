@@ -173,11 +173,14 @@ export function serializeSheetStateV2(state: PersistedSheetState, layout: SheetL
   return JSON.stringify(envelope)
 }
 
-export function persistSheetStateV2(storage: StorageLike, state: PersistedSheetState, layout: SheetLayoutState): void {
+export function persistSheetStateV2(storage: StorageLike, state: PersistedSheetState, layout: SheetLayoutState): boolean {
   try {
     storage.setItem(SHEET_STORAGE_KEY, serializeSheetStateV2(normalizeState(state), normalizeLayout(layout)))
+    return true
   } catch {
-    // 存储不可用/写满：静默降级——写盘失败不应让 workspace action（zustand set 内）抛异常
+    // 存储不可用/写满：写盘失败不应让 workspace action（zustand set 内）抛异常；
+    // 返回 false 供调用方把"未保存"提升为可见状态（报告 FE-AUD-001/阶段 1A.5）
+    return false
   }
 }
 

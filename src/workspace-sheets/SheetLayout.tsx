@@ -81,12 +81,18 @@ export default function SheetLayout(props: SheetLayoutProps) {
 
   const ctx = buildSheetContext(props)
   const ccEditMode = useStore(s => s.ccEditMode)
+  // FE-AUD-001：工作区写盘失败可见（报告 1A.5）
+  const lastPersistError = useWorkspaceStore(s => s.lastPersistError)
+  const persistWarning = lastPersistError
+    ? <div className="workspace-persist-warning" role="status">工作区状态未能保存到本地存储（本次操作仅在内存生效）</div>
+    : null
 
   if (!activeSheet) {
     // W1-05：无 active sheet → 虚拟 overview 接管空态（不写入持久 sheet 数组）
     const overviewEntry = resolveSheetRender('overview')
     return (
       <div className={`layout ${ccEditMode ? 'cc-editing-app' : ''}`}>
+        {persistWarning}
         {overviewEntry ? overviewEntry.render(VIRTUAL_OVERVIEW_SHEET, ctx) : <EmptySheetHost />}
       </div>
     )
@@ -94,6 +100,7 @@ export default function SheetLayout(props: SheetLayoutProps) {
 
   return (
     <div className={`layout ${ccEditMode ? 'cc-editing-app' : ''}`}>
+      {persistWarning}
       <SheetSidebarSlot sheet={activeSheet} ctx={ctx} />
       <SheetHost sheet={activeSheet} ctx={ctx} />
       <SheetRightSlot sheet={activeSheet} ctx={ctx} />
