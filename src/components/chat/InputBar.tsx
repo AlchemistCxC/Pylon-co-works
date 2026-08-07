@@ -49,6 +49,8 @@ export default forwardRef<{ send: () => void; attachFile: () => void; cancel: ()
   const lastMsg = useRef('')
   const historyBySourceRef = useRef<Record<string, string[]>>({})
   const historyDraftRef = useRef('')
+  // 报告 10.7：IME composition 进行中（Enter 为候选确认键，不发送）
+  const composingRef = useRef(false)
   const textareaRef = useRef<HTMLTextAreaElement>(null)
   const profiles = useIdentityStore(s => s.profiles)
   const sessions = useIdentityStore(s => s.sessions)
@@ -368,7 +370,8 @@ export default forwardRef<{ send: () => void; attachFile: () => void; cancel: ()
       setValue(historyDraftRef.current)
       return
     }
-    if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); send() }
+    // 报告 10.7：IME composition 期间 Enter 不发送（输入法候选确认键）
+    if (e.key === 'Enter' && !e.shiftKey && !composingRef.current) { e.preventDefault(); send() }
   }
 
   return (
@@ -444,6 +447,8 @@ export default forwardRef<{ send: () => void; attachFile: () => void; cancel: ()
             if (historyIndex >= 0) setHistoryIndex(-1)
           }}
           onKeyDown={onKey}
+          onCompositionStart={() => { composingRef.current = true }}
+          onCompositionEnd={() => { composingRef.current = false }}
           aria-describedby={ariaDescribedBy}
           placeholder={showPlaceholder ? (inputVariant === 'cli' ? '' : inputVariant === 'command' ? '/ 命令或消息…' : '输入消息...（Enter 发送，Shift+Enter 换行，/ 命令）') : ''}
           rows={1} />
