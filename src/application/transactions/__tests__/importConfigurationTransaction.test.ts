@@ -56,6 +56,34 @@ describe('importConfigurationTransaction', () => {
     expect(storage.getItem(PROFILES_KEY)).toContain('"old"')
   })
 
+  it('超大配置拒绝（报告 8.10 大小限制）', async () => {
+    const { deps, calls } = createDeps()
+    const huge = '{"app":"pylon","version":1,"data":{"pylon-theme":"' + 'x'.repeat(600 * 1024) + '"}}'
+    const result = await importConfigurationTransaction(huge, deps)
+    expect(result.ok).toBe(false)
+    if (!result.ok) expect(result.message).toContain('过大')
+    expect(calls).toEqual([])
+  })
+
+  it('原型污染字段（__proto__/constructor）被白名单拒绝', async () => {
+    const { deps, calls } = createDeps()
+    const payload = JSON.stringify({
+      app: 'pylon',
+      version: 1,
+      data: {
+        'pylon-theme': '{}',
+        '__proto__': '{polluted:true}',
+        'constructor': 'x',
+        'prototype': 'y',
+      },
+    })
+    const result = await importConfigurationTransaction(payload, deps)
+    expect(result.ok).toBe(true)
+    if (result.ok) expect(result.value).toEqual(['pylon-theme'])
+    expect(calls).toEqual(['rehydrate'])
+    expect(Object.prototype.hasOwnProperty.call(Object.getPrototypeOf({}), 'polluted')).toBe(false)
+  })
+
   it('写入失败：回滚恢复旧值、新增 key 删除，transport', async () => {
     const { deps, calls } = createDeps()
     const failing = new MemoryStorage({ initial: { [PROFILES_KEY]: '{"version":1,"profiles":[{"id":"old"}],"activeProfileId":"old"}' } })

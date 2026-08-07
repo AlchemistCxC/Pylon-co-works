@@ -50,7 +50,10 @@ export type ImportResult = { ok: true; keys: string[] } | { ok: false; error: st
 /** 全量预检（报告 1B.7）：parse envelope + key 白名单 + 值校验，收集 data 但不写盘 */
 export type ImportPreflight = { ok: true; data: Record<string, string>; keys: string[] } | { ok: false; error: string }
 
+const MAX_IMPORT_BYTES = 512 * 1024
+
 export function preflightImportPayload(json: string): ImportPreflight {
+  if (json.length > MAX_IMPORT_BYTES) return { ok: false, error: '配置文件过大（>512KB）' }
   let parsed: unknown
   try {
     parsed = JSON.parse(json)
