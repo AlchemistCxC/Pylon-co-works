@@ -20,6 +20,8 @@ import { listen } from '@tauri-apps/api/event'
 import { normalizeAgentStatus, type AgentStatusPayload } from './components/settings/agentTypes'
 import { createPermissionController, registerPermissionController } from './infrastructure/acp/permissionController'
 import { seedDemo } from './demo/seed'
+import { bootstrapApplication } from './app/bootstrap/bootstrapApplication'
+import { useHydrationStore } from './app/bootstrap/hydrationState'
 import PermissionDialog from './components/PermissionDialog'
 import DevMetricsOverlay from './components/DevMetricsOverlay'
 import ErrorCenter from './components/ErrorCenter'
@@ -56,7 +58,6 @@ export default function App() {
   const sidebarWidth = useWorkspaceStore(s => s.sidebarWidth)
   const workspaceSheets = useWorkspaceStore(s => s.workspaceSheets)
   const agents = useIdentityStore(s => s.agents)
-  const hydrateWorkspaceSheets = useWorkspaceStore(s => s.hydrateWorkspaceSheets)
   const activeAgent = useIdentityStore(s => s.activeAgent) || 'peri'
   const prevActiveAgentRef = useRef<string>(activeAgent)
 
@@ -66,9 +67,29 @@ export default function App() {
     return () => window.removeEventListener('pylon:agent-switched', clearActiveSession)
   }, [])
 
+  // FE-AUD-005：单一 bootstrap 事务（阶段 2）——hydrate domains → agents → prune → listener
+  const [bootstrapRetry, setBootstrapRetry] = useState(0)
   useEffect(() => {
-    hydrateWorkspaceSheets()
-  }, [hydrateWorkspaceSheets])
+    let disposed = false
+    void bootstrapApplication({
+      isTauri: IS_TAURI,
+      hydrateDomains: () => useWorkspaceStore.getState().hydrateWorkspaceSheets(),
+      fetchAgents: () => invoke<AgentEntry[]>('list_agents').then((list: AgentEntry[]) => (Array.isArray(list) ? list : [])),
+      applyAgents: list => useIdentityStore.getState().setAgents(list),
+      registerListeners: async () => {
+        const unlisten = await listen<AgentStatusPayload>('pylon:agent-status', event => {
+          const activeAgent = useIdentityStore.getState().activeAgent
+          const status = normalizeAgentStatus(event.payload, activeAgent)
+          useRuntimeStore.getState().setAgentStatus(status.agentId || status.agent || activeAgent, status)
+        })
+        return () => { unlisten() }
+      },
+      reportError: (action, error) => reportRuntimeError(action, error),
+      setStatus: (status, error) => useHydrationStore.getState().setStatus(status, error),
+      cancelled: () => disposed,
+    })
+    return () => { disposed = true }
+  }, [bootstrapRetry])
 
   // 仅在 activeAgent 切换时聚焦该 agent 的 sheet；普通 sheet 导航（打开 Prism/工具 sheet、
   // 点击其他 tab）不受影响。用 ref 对比避免 workspaceSheets 每次新引用触发重复聚焦。
@@ -78,24 +99,6 @@ export default function App() {
     const agentSheet = workspaceSheets.sheets.find(sheet => sheet.kind === 'agent' && sheet.agentId === activeAgent)
     if (agentSheet) useWorkspaceStore.getState().focusSheet(agentSheet.id)
   }, [activeAgent, workspaceSheets])
-
-  useEffect(() => {
-    let disposed = false
-    // 浏览器预览无 Tauri 后端：list_agents/listen 都会 reject，整体跳过
-    if (!IS_TAURI) return
-    // 2026-08-02：list_agents 返回类型收窄为 AgentEntry[]（后端契约 {id, name, ...}），
-    // 非数组/异常形状由 setAgents 内部 normalizeAgentList 兜底，不再 any。
-    const load = () => invoke<AgentEntry[]>('list_agents').then((list: AgentEntry[]) => {
-      if (!disposed) useIdentityStore.getState().setAgents(Array.isArray(list) ? list : [])
-    }).catch(error => reportRuntimeError('读取 Agent 列表', error))
-    load()
-    const unlisten = listen<AgentStatusPayload>('pylon:agent-status', event => {
-      const activeAgent = useIdentityStore.getState().activeAgent
-      const status = normalizeAgentStatus(event.payload, activeAgent)
-      useRuntimeStore.getState().setAgentStatus(status.agentId || status.agent || activeAgent, status)
-    })
-    return () => { disposed = true; unlisten.then(stop => stop()).catch(() => {}) }
-  }, [])
 
   // 权限请求 controller：只挂生命周期（listen → store 纯 reducer；approve invoke），不内嵌业务分支
   useEffect(() => {
@@ -241,6 +244,9 @@ export default function App() {
 
   const appWindow = appWindowSingleton
   const rightPanelInset = useWorkspaceStore.getState().rightPanelCollapsed ? 0 : s.rightWidth
+  // FE-AUD-005：bootstrap 降级提示（报告阶段 2.4：Agent 列表失败可重试，不清空本地工作区）
+  const hydrationStatus = useHydrationStore(state => state.status)
+  const hydrationError = useHydrationStore(state => state.error)
   const profilesOpen = showProfileEdit
   const settingsOpen = showSettings
 
@@ -271,6 +277,12 @@ export default function App() {
         onToggleFullscreen={() => appWindow.isFullscreen().then(fullscreen => appWindow.setFullscreen(!fullscreen)).catch(error => console.error('全屏切换失败', error))}
         onCloseWindow={() => appWindow.destroy()}
       />
+      {hydrationStatus === 'degraded' && (
+        <div className="workspace-persist-warning" role="alert">
+          启动降级：{hydrationError ?? '读取 Agent 列表失败'}
+          <button type="button" className="template-apply" onClick={() => setBootstrapRetry(retry => retry + 1)}>重试</button>
+        </div>
+      )}
       <Suspense fallback={null}>
         {showSheetLauncher && (
           <SheetLauncher

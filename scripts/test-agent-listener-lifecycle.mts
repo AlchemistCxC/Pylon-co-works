@@ -7,21 +7,27 @@ import { readFileSync } from 'node:fs'
 import { normalizeAgentStatus } from '../src/components/settings/agentTypes.ts'
 
 const app = readFileSync(new URL('../src/App.tsx', import.meta.url), 'utf8')
+const bootstrap = readFileSync(new URL('../src/app/bootstrap/bootstrapApplication.ts', import.meta.url), 'utf8')
 const runtimeStore = readFileSync(new URL('../src/runtimeStore.ts', import.meta.url), 'utf8')
 
+// FE-AUD-005：App 只保留单一 bootstrap effect（hydrate → agents → listener），
+// guard 语义迁入 bootstrapApplication.ts 的 cancelled 检查。
 const effectStart = app.indexOf("  useEffect(() => {\n    let disposed = false")
-assert.notEqual(effectStart, -1, 'Agent 初始化 effect 必须声明 disposed guard')
-const effectEnd = app.indexOf('\n  }, [])', effectStart)
-assert.notEqual(effectEnd, -1, 'Agent 初始化 effect 必须有空依赖清理边界')
-const lifecycle = app.slice(effectStart, effectEnd + '\n  }, [])'.length)
+assert.notEqual(effectStart, -1, 'bootstrap effect 必须声明 disposed guard')
+const effectEnd = app.indexOf('\n  }, [bootstrapRetry])', effectStart)
+assert.notEqual(effectEnd, -1, 'bootstrap effect 必须有清理边界')
+const lifecycle = app.slice(effectStart, effectEnd + '\n  }, [bootstrapRetry])'.length)
 
-assert.match(lifecycle, /invoke(?:<[^>]+>)?\('list_agents'\)/, '必须异步加载 list_agents')
-assert.match(lifecycle, /if \(!disposed\) useIdentityStore\.getState\(\)\.setAgents\(/, 'list_agents 结果必须受 disposed guard 保护')
+assert.match(lifecycle, /bootstrapApplication\(\{/, 'App 必须走单一 bootstrap 事务')
+assert.match(lifecycle, /fetchAgents: \(\) => invoke(?:<[^>]+>)?\('list_agents'\)/, 'bootstrap 必须异步加载 list_agents')
+assert.match(lifecycle, /cancelled: \(\) => disposed/, 'bootstrap 结果必须受 disposed guard 保护')
 assert.match(lifecycle, /listen<AgentStatusPayload>\('pylon:agent-status'/, '必须注册 pylon:agent-status listener（H-9 事件前缀同步）')
 assert.match(lifecycle, /const activeAgent = useIdentityStore\.getState\(\)\.activeAgent/, 'listener 必须从最新 identity store 读取 activeAgent')
 assert.match(lifecycle, /normalizeAgentStatus\(event\.payload, activeAgent\)/, 'listener 必须按当前 activeAgent 规范化 payload')
 assert.match(lifecycle, /useRuntimeStore\.getState\(\)\.setAgentStatus\(status\.agentId \|\| status\.agent \|\| activeAgent, status\)/, 'listener 必须按 payload.agentId 路由状态，缺省回退 agent/activeAgent')
-assert.match(lifecycle, /return \(\) => \{ disposed = true; unlisten\.then\(stop => stop\(\)\)\.catch\(\(\) => \{\}\) \}/, '卸载时必须先设置 disposed 并清理 resolved unlisten（H1 加 catch 兜底）')
+assert.match(lifecycle, /return \(\) => \{ disposed = true \}/, '卸载时必须先设置 disposed')
+assert.match(bootstrap, /if \(deps\.cancelled\(\)\) return 'cancelled'/, '迟到的 agents 结果不得应用（cancelled 守卫）')
+assert.match(bootstrap, /deps\.applyAgents\(agents\)/, 'applyAgents 必须在 fetch 成功后')
 
 assert.match(runtimeStore, /agentStatuses: Record<string, AgentStatus>/)
 assert.match(runtimeStore, /setAgentStatus: \(id: string, status: AgentStatus\)/)
