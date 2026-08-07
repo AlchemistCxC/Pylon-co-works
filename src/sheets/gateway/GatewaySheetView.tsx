@@ -46,6 +46,8 @@ export default function GatewaySheetView({ sheet: _sheet, ctx: _ctx }: { sheet: 
       else setWriteStatus({ kind: 'error', message: result.message })
       return
     }
+    // FE-AUD-004：保存成功后用事务回读结果刷新 UI（status 不只挂载时读一次）
+    setStatus({ ...(status ?? { adapters: [], routes: [], qq: null, inject: null }), routes: result.value as GatewayStatus['routes'] })
     setWriteStatus({ kind: 'ok' })
   }
 
