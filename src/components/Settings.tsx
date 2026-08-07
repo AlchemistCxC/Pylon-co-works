@@ -246,6 +246,13 @@ export default function Settings({ onClose, activeSessionId }: { onClose?: () =>
     const zone = TAB_ZONE_MAP[activeTab] || 'global'
     setZoneField(zone, partial)
   }
+  // 助手头像：Tauri 文件选择 → 存路径到 assistantDotImage（zone=chat）
+  const pickAssistantAvatar = async () => {
+    if (!IS_TAURI) return
+    const { open } = await import('@tauri-apps/plugin-dialog')
+    const selected = await open({ multiple: false, filters: [{ name: '图片', extensions: ['png', 'jpg', 'jpeg', 'gif', 'webp'] }] })
+    if (selected) setZoneField('chat', { assistantDotImage: selected as string })
+  }
   // 声明式字段渲染上下文（骨架 3）：纯字段组由 themeFieldRenderer 自动渲染
   const renderCtx = { t, onChange: onSettingChange, search: searchQuery }
   // 搜索时隐藏手写组（预设/布局骨架/窗口/配置备份等非主题字段），只留命中的自动字段组
@@ -444,6 +451,16 @@ export default function Settings({ onClose, activeSessionId }: { onClose?: () =>
               {!isSearching && <ZonePresetRow zone="cc" activeName={deriveZoneStatus({ appliedPreset, custom }, 'cc').appliedName} isDirty={deriveZoneStatus({ appliedPreset, custom }, 'cc').isCustom} onApply={applyLocalPreset}/>}
 
               <ZoneGroupFields zone="cc" ctx={renderCtx} />
+              {!isSearching && (
+                <Group title="助手头像">
+                  <div className="set-preset-row">
+                    <button type="button" className="ps-btn sm" onClick={() => void pickAssistantAvatar()}>选择图片文件…</button>
+                    {useStore.getState().assistantDotImage && (
+                      <button type="button" className="ps-btn sm" onClick={() => useStore.getState().setZoneField('chat', { assistantDotImage: '' })}>清除</button>
+                    )}
+                  </div>
+                </Group>
+              )}
               {!isSearching && <Group title="布局编辑">
                 <button className="ps-btn primary"
                   onClick={() => {

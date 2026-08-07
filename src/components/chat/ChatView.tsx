@@ -271,9 +271,12 @@ export function AssistantContent({ text, isStreaming = false }: { text: string; 
   // 单条消息一个圆点（多段落 markdown 共用一个，首块无上边距，圆点贴首行）。
   const assistantDot = useStore(s => s.assistantDot)
   const assistantDotGlyph = useStore(s => s.assistantDotGlyph)
+  const assistantDotImage = useStore(s => s.assistantDotImage)
   return (
     <div className={`term-assistant${assistantDot ? ' has-dot' : ''}`}>
-      {assistantDot && <span className="term-assistant-dot" aria-hidden="true">{assistantDotGlyph || '●'}</span>}
+      {assistantDot && (assistantDotImage
+        ? <img className="term-assistant-dot-img" src={assistantDotImage} alt="" aria-hidden="true" />
+        : <span className="term-assistant-dot" aria-hidden="true">{assistantDotGlyph || '●'}</span>)}
       <button className="copy-btn" onClick={copy}>{copied ? '✓' : '⎘'}</button>
       <div className="term-assistant-body">
         {isStreaming || !isPlainTextContent(text) ? (

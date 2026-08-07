@@ -76,6 +76,8 @@ export interface ThemeSettings {
   messageLayout: 'classic' | 'claude' | 'bubble'
   /** CC 视觉还原：助手消息 ● 圆点 */
   assistantDot: boolean; assistantDotGlyph: string; assistantDotColor: string
+  /** 自定义头像/图标路径（非空时替代圆点字形，列宽随图） */
+  assistantDotImage: string
   footerLayout: 'free' | 'peri'
   cliOverflowMode: 'fixed-scroll' | 'grow' | 'overlay'
   ccHeight: number; ccBgHeight: number; ccBg: string

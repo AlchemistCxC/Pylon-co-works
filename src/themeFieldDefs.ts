@@ -178,6 +178,7 @@ export const THEME_FIELD_DEFS = {
   assistantDot: { ...B('chat', '助手圆点'), default: false, group: "CC 风格" },
   assistantDotGlyph: { ...S('chat', '圆点形状', ['●', '■', '✦', '◆', '▶', '❯']), default: '●', group: "CC 风格" },
   assistantDotColor: { ...C('chat', '圆点颜色'), default: '', group: "CC 风格" },
+  assistantDotImage: { ...T('chat', '头像/图标路径'), default: '', group: "CC 风格", hint: '留空用圆点字形；填本地图片路径或 URL 显示自定义头像（圆点列随图缩放）' },
 
   // ── cc ──
   ccHeight: {
