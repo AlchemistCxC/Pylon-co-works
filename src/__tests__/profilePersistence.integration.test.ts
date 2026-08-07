@@ -3,7 +3,7 @@
  *
  * 目标行为：addProfile/setActiveProfile/removeProfile 的变更落 `pylon-profiles`
  * versioned envelope；删除 Profile 时 active 原子 fallback；配置导出/导入白名单
- * 包含 profiles。当前实现（2026-08-07）无任何 Profile 写盘 → 本文件应 RED。
+ * 包含 profiles。阶段 0 以 RED 锁定缺陷（无写盘）；阶段 1（F09-F11）后全绿。
  */
 import { describe, expect, it, beforeEach } from 'vitest'
 import { useIdentityStore } from '../identityStore'

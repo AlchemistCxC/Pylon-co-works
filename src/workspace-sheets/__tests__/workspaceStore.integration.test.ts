@@ -3,7 +3,7 @@
  *
  * 目标行为：open/focus/pin/close/closeOthers/closeRight/reopen/metadata/layout 任一
  * action 之后，`pylon-workspace-sheets` 的序列化内容必须与 store 内存 next state 一致。
- * 当前实现（2026-08-07）在多个 action 中持久化的是 action 前旧 state → 本文件应 RED。
+ * 阶段 0 以 RED 锁定缺陷（持久化旧 state）；阶段 1（F07 commitWorkspaceMutation）后全绿。
  */
 import { describe, expect, it, beforeEach } from 'vitest'
 import { useWorkspaceStore } from '../../workspaceStore'

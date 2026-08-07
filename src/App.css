@@ -243,11 +243,6 @@
 .workspace-persist-warning {
   margin: 6px 12px;
   padding: 6px 10px;
-  border: 1px solid color-mix(in srgb, var(--tool-err, var(--danger)) 40
-/* FE-AUD-001：工作区写盘失败提示（SheetLayout 顶部） */
-.workspace-persist-warning {
-  margin: 6px 12px;
-  padding: 6px 10px;
   border: 1px solid color-mix(in srgb, var(--tool-err, var(--danger)) 40%, var(--border));
   border-radius: var(--ui-radius-sm);
   font-size: 12px;
