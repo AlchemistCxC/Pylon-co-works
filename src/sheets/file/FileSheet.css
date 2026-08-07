@@ -257,7 +257,7 @@
 }
 .file-tree-empty-state strong { color: var(--text); font-size: 12px; }
 .file-tree-empty-state span { font-size: 11px; line-height: 1.5; }
-.file-tree-empty-state .sheet-empty-mark { display: grid; width: 36px; height: 36px; place-items: center; margin-bottom: var(--ui-space-1); border: 1px solid color-mix(in srgb, var(--accent) 38%, var(--border)); border-radius: var(--ui-radius-sm); color: var(--accent); background: color-mix(in srgb, var(--accent) 8%, var(--bg-panel)); font: 700 17px var(--mono); }
+.file-tree-empty-state .sheet-empty-mark { display: grid; width: 36px; height: 36px; place-items: center; margin-bottom: var(--ui-space-1); border: 1px solid color-mix(in srgb, var(--accent) 38%, var(--border)); border-radius: 0; color: var(--accent); background: color-mix(in srgb, var(--accent) 8%, var(--bg-panel)); font: 700 17px var(--mono); }
 
 .file-tab-bar {
   display: flex; gap: 2px; overflow-x: auto;

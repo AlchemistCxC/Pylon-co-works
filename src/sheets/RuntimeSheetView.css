@@ -47,7 +47,7 @@
   color: var(--text);
   background: var(--bg-input);
   border: 1px solid var(--border);
-  border-radius: var(--ui-radius-sm);
+  border-radius: 0;
   padding: 0 var(--ui-space-3);
   outline: none;
   transition: border-color 150ms ease, box-shadow 150ms ease, background 150ms ease;
@@ -66,7 +66,7 @@
   color: var(--text);
   background: var(--bg-panel);
   border: 1px solid var(--border);
-  border-radius: var(--ui-radius-sm);
+  border-radius: 0;
   cursor: pointer;
   transition: background 150ms ease, border-color 150ms ease;
 }
@@ -148,7 +148,7 @@
   font-size: 11px;
   background: var(--bg-input);
   border: 1px solid var(--border);
-  border-radius: var(--ui-radius-sm);
+  border-radius: 0;
   color: var(--text-dim);
 }
 .runtime-log-field + .runtime-log-field { margin-top: var(--ui-space-1); }
@@ -184,7 +184,7 @@
   font-family: var(--mono);
   font-size: 11px;
   padding: 4px 9px;
-  border-radius: var(--ui-radius-pill);
+  border-radius: 0;
   border: 1px solid var(--border);
   background: color-mix(in srgb, var(--bg-input) 80%, transparent);
 }

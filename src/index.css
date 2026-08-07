@@ -121,11 +121,11 @@ body::before {
 
 ::-webkit-scrollbar { width:4px; }
 ::-webkit-scrollbar-track { background:transparent; }
-::-webkit-scrollbar-thumb { background:rgba(0,0,0,0.12); border-radius:2px; }
+::-webkit-scrollbar-thumb { background:rgba(0,0,0,0.12); border-radius: 0; }
 
 /* ── Radix Dialog ── */
 .dialog-overlay { position:fixed; inset:0; z-index:90; background:rgba(0,0,0,0.3); backdrop-filter:blur(4px); }
-.dialog-content { position:fixed; top:50%; left:50%; transform:translate(-50%,-50%); z-index:91; background:var(--dialog-bg,rgba(255,255,255,0.97)); color:var(--text); border:1px solid var(--border); border-radius:10px; box-shadow:0 12px 40px rgba(0,0,0,0.15); padding:0; min-width:400px; max-width:90vw; }
+.dialog-content { position:fixed; top:50%; left:50%; transform:translate(-50%,-50%); z-index:91; background:var(--dialog-bg,rgba(255,255,255,0.97)); color:var(--text); border:1px solid var(--border); border-radius: 0; box-shadow:0 12px 40px rgba(0,0,0,0.15); padding:0; min-width:400px; max-width:90vw; }
 .app[data-ui-scheme="dark"] .dialog-content,
 body[data-ui-scheme="dark"] .dialog-content { --dialog-bg:#1a1a2e; }
 .modal-close { background:none; border:none; color:var(--text-dim); font-size:16px; cursor:pointer; }

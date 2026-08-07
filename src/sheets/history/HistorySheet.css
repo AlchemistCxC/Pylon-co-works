@@ -38,7 +38,7 @@
 
 .history-sheet > .search-result-list > li {
   border: 1px solid var(--border);
-  border-radius: var(--ui-radius-md);
+  border-radius: 0;
   background: var(--bg-panel);
   transition: border-color 120ms ease, background-color 120ms ease;
 }
@@ -80,7 +80,7 @@
   height: var(--ui-control-compact);
   padding: 0 var(--ui-space-3);
   border: 1px solid var(--border);
-  border-radius: var(--ui-radius-sm);
+  border-radius: 0;
   color: var(--text-dim);
   background: var(--bg-input);
   cursor: pointer;

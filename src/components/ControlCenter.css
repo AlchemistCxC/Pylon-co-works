@@ -140,13 +140,13 @@
 .cc-variant-glass .cc-widget .pill,
 .cc-variant-glass .cc-widget button,
 .cc-variant-glass .cc-widget [class*="pill"] {
-  border-radius:8px !important; backdrop-filter:blur(10px); background:rgba(255,255,255,0.06) !important;
+  border-radius: 0; backdrop-filter:blur(10px); background:rgba(255,255,255,0.06) !important;
   color:rgba(255,255,255,0.85) !important; border:1px solid rgba(255,255,255,0.08) !important;
 }
 .cc-variant-pill .cc-widget .pill,
 .cc-variant-pill .cc-widget button,
 .cc-variant-pill .cc-widget [class*="pill"] {
-  border-radius:999px !important;
+  border-radius: 0;
 }
 
 /* ── Edit mode shell ── */
@@ -154,7 +154,7 @@
 .control-center.cc-editing .cc-body { overflow:visible; }
 .control-center.cc-editing .cc-bg { opacity:0.5; }
 .cc-edit-hdr { position:absolute; top:-18px; left:0; right:0; height:20px; z-index:25; cursor:ns-resize; display:flex; align-items:center; justify-content:center; }
-.cc-edit-hdr-bar { width:40px; height:4px; border-radius:2px; background:var(--accent); opacity:0.6; }
+.cc-edit-hdr-bar { width:40px; height:4px; border-radius: 0; background:var(--accent); opacity:0.6; }
 .cc-edit-hdr-label { font-size:10px; color:var(--accent); margin-left:6px; }
 
 /* ── Widget box in edit mode ── */
@@ -179,7 +179,7 @@
 .cc-prop-header button:hover { color:var(--text); }
 .cc-prop-body { flex:1; overflow-y:auto; padding:16px; }
 .cc-prop-footer { padding:12px 16px; border-top:1px solid var(--border); }
-.cc-prop-footer .ps-btn { width:100%; background:var(--accent); color:#fff; border:none; padding:8px; border-radius:6px; cursor:pointer; font-size:13px; }
+.cc-prop-footer .ps-btn { width:100%; background:var(--accent); color:#fff; border:none; padding:8px; border-radius: 0; cursor:pointer; font-size:13px; }
 .cc-prop-footer .ps-btn:hover { opacity:0.9; }
 .cc-prop-sec { font-size:11px; font-weight:600; color:var(--text-dim); text-transform:uppercase; letter-spacing:0.5px; margin:16px 0 8px; padding-top:12px; border-top:1px solid var(--border); }
 .cc-prop-sec:first-child { border-top:none; padding-top:0; margin-top:0; }
@@ -196,7 +196,7 @@
   z-index:60; display:flex; align-items:center; justify-content:center; gap:6px;
   background:var(--bg-panel,rgba(255,255,255,0.94));
   border:1px solid var(--border);
-  padding:10px 16px; border-radius:12px;
+  padding:10px 16px; border-radius: 0;
   box-shadow:0 8px 32px rgba(0,0,0,0.24);
   font-family:var(--mono);
   flex-wrap:wrap;
@@ -207,7 +207,7 @@
 .cc-edit-toolbar-chip {
   font-size:11px; padding:3px 9px;
   background:transparent; border:1px solid var(--border);
-  border-radius:12px; cursor:pointer;
+  border-radius: 0; cursor:pointer;
   color:var(--text); font-family:var(--mono);
 }
 .cc-edit-toolbar-chip:hover { border-color:var(--accent); color:var(--accent); }
@@ -216,14 +216,14 @@
 .cc-chip-toggle {
   font-size:10px; padding:1px 6px;
   background:transparent; border:1px solid var(--border);
-  border-radius:8px; cursor:pointer;
+  border-radius: 0; cursor:pointer;
   color:var(--text-dim); font-family:var(--mono);
 }
 .cc-chip-toggle:hover { border-color:var(--accent); color:var(--accent); }
 .cc-edit-toolbar-btn {
   font-size:11px; padding:3px 9px;
   background:transparent; border:1px solid var(--border);
-  border-radius:4px; cursor:pointer;
+  border-radius: 0; cursor:pointer;
   color:var(--text);
 }
 
@@ -242,7 +242,7 @@
   color: var(--text-dim);
   background: transparent;
   border: 1px solid var(--border);
-  border-radius: 999px;
+  border-radius: 0;
   padding: 2px 10px;
   cursor: pointer;
   white-space: nowrap;
@@ -286,7 +286,7 @@
   align-items: center;
   min-height: var(--ui-control-compact);
   padding: 0 var(--ui-space-3);
-  border-radius: var(--ui-radius-pill);
+  border-radius: 0;
   background: color-mix(in srgb, var(--accent) 6%, transparent);
   transition: color 120ms ease, border-color 120ms ease, background-color 120ms ease;
 }
@@ -305,5 +305,5 @@
 }
 .cc-tasks-pill:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
 
-.cc-variant-glass .cc-tasks-pill { border-radius: var(--ui-radius-md) !important; }
-.cc-variant-pill .cc-tasks-pill { border-radius: var(--ui-radius-pill) !important; }
+.cc-variant-glass .cc-tasks-pill { border-radius: 0; }
+.cc-variant-pill .cc-tasks-pill { border-radius: 0; }

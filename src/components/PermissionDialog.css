@@ -15,7 +15,7 @@
   max-width: 480px;
   padding: 16px;
   border: 1px solid var(--border);
-  border-radius: var(--settings-radius-md);
+  border-radius: 0;
   background: var(--settings-surface);
   box-shadow: var(--settings-shadow);
   color: var(--text);
@@ -41,7 +41,7 @@
   color: var(--text);
   background: var(--bg-input);
   border: 1px solid var(--border);
-  border-radius: var(--settings-radius-sm);
+  border-radius: 0;
   padding: 8px 10px;
   margin-bottom: 12px;
   max-height: 200px;
@@ -65,7 +65,7 @@
   color: var(--text);
   background: var(--bg-active);
   border: 1px solid var(--border);
-  border-radius: var(--settings-radius-sm);
+  border-radius: 0;
   cursor: pointer;
 }
 

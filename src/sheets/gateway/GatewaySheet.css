@@ -48,7 +48,7 @@
   width: 3px;
   height: 14px;
   flex: 0 0 3px;
-  border-radius: var(--ui-radius-pill);
+  border-radius: 0;
   background: var(--accent);
   opacity: .8;
 }
@@ -67,7 +67,7 @@
   min-height: var(--ui-control-compact);
   padding: 0 var(--ui-space-3);
   border: 1px solid transparent;
-  border-radius: var(--ui-radius-sm);
+  border-radius: 0;
   color: var(--text-dim);
   font-size: 12px;
   transition: background-color 120ms ease, border-color 120ms ease, color 120ms ease;
@@ -78,7 +78,7 @@
   width: 6px;
   height: 6px;
   margin-right: var(--ui-space-2);
-  border-radius: 50%;
+  border-radius: 0;
   background: var(--tool-ok);
   box-shadow: 0 0 0 3px color-mix(in srgb, var(--tool-ok) 14%, transparent);
 }
@@ -93,7 +93,7 @@
   margin: 0;
   padding: var(--ui-space-3);
   border: 1px dashed var(--border);
-  border-radius: var(--ui-radius-sm);
+  border-radius: 0;
   color: var(--text-dim);
   font-size: 12px;
   line-height: 1.5;
@@ -125,7 +125,7 @@
 .gateway-route {
   overflow: hidden;
   border: 1px solid var(--border);
-  border-radius: var(--ui-radius-md);
+  border-radius: 0;
   background: var(--bg-panel);
   transition: border-color 120ms ease, background-color 120ms ease;
 }
@@ -214,7 +214,7 @@
   margin-top: var(--ui-space-5);
   padding: var(--ui-space-4);
   border: 1px solid var(--border);
-  border-radius: var(--ui-radius-md);
+  border-radius: 0;
   background: var(--bg-panel);
 }
 
@@ -231,7 +231,7 @@
   height: var(--ui-control-standard);
   padding: 0 var(--ui-space-3);
   border: 1px solid var(--border);
-  border-radius: var(--ui-radius-sm);
+  border-radius: 0;
   color: var(--text);
   background: var(--bg-input);
   font: 12px var(--mono);
@@ -246,7 +246,7 @@
   height: var(--ui-control-standard);
   padding: 0 var(--ui-space-4);
   border: 1px solid color-mix(in srgb, var(--accent) 55%, var(--border));
-  border-radius: var(--ui-radius-sm);
+  border-radius: 0;
   color: var(--accent);
   background: color-mix(in srgb, var(--accent) 10%, transparent);
   cursor: pointer;

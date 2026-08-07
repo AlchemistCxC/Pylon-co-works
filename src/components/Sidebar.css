@@ -11,29 +11,29 @@
 .sidebar-header { padding:var(--ui-space-3); display:flex; gap:var(--ui-space-2); align-items:center; border-bottom:1px solid var(--border); }
 .search-input {
   flex:1; min-width:0; height:var(--ui-control-standard); background:var(--bg-input); border:1px solid var(--border);
-  border-radius:var(--ui-radius-sm); padding:0 var(--ui-space-3); color:var(--text); font-size:13px; outline:none;
+  border-radius: 0; padding:0 var(--ui-space-3); color:var(--text); font-size:13px; outline:none;
   transition:border-color 150ms ease, box-shadow 150ms ease, background 150ms ease;
 }
 .search-input:hover { border-color:var(--border-focus); }
 .search-input:focus { border-color:var(--accent); box-shadow:0 0 0 3px color-mix(in srgb,var(--accent) 14%,transparent); }
 .search-input::placeholder { color:var(--text-placeholder); }
 .sidebar-actions { display:flex; gap:2px; }
-.sidebar-actions button { width:var(--ui-control-compact); height:var(--ui-control-compact); background:none; border:none; color:var(--text-dim); cursor:pointer; padding:0; border-radius:var(--ui-radius-xs); font-size:15px; }
+.sidebar-actions button { width:var(--ui-control-compact); height:var(--ui-control-compact); background:none; border:none; color:var(--text-dim); cursor:pointer; padding:0; border-radius: 0; font-size:15px; }
 .sidebar-actions button:hover { background:var(--bg-hover); color:var(--text); }
 
-.sidebar-action { width:var(--ui-control-compact); height:var(--ui-control-compact); background:none; border:none; color:var(--text-dim); cursor:pointer; padding:0; border-radius:var(--ui-radius-xs); font-size:15px; }
+.sidebar-action { width:var(--ui-control-compact); height:var(--ui-control-compact); background:none; border:none; color:var(--text-dim); cursor:pointer; padding:0; border-radius: 0; font-size:15px; }
 .sidebar-action:hover { background:var(--bg-hover); color:var(--text); }
 
 .session-list { flex:1; overflow-y:auto; padding:var(--ui-space-2); }
 
-.session-item { position:relative; display:flex; align-items:center; gap:var(--ui-space-2); min-height:48px; padding:var(--ui-space-2); border:1px solid transparent; border-radius:0; cursor:pointer; transition:background 150ms ease,border-color 150ms ease; }
+.session-item { position:relative; display:flex; align-items:center; gap:var(--ui-space-2); min-height:48px; padding:var(--ui-space-2); border:1px solid transparent; border-radius: 0; cursor:pointer; transition:background 150ms ease,border-color 150ms ease; }
 .session-item:hover { background:var(--bg-hover); }
 .session-item.active { border-color:var(--border); background:var(--bg-active); }
-.session-item.active::before { content:''; position:absolute; left:-1px; top:10px; bottom:10px; width:2px; border-radius:var(--ui-radius-pill); background:var(--accent); }
+.session-item.active::before { content:''; position:absolute; left:-1px; top:10px; bottom:10px; width:2px; border-radius: 0; background:var(--accent); }
 .session-item:focus-visible { outline:2px solid var(--accent); outline-offset:-2px; }
 .session-item:focus-within { border-color:var(--border-focus); }
 /* W2-10（F2-C）：运行点读 liveGeneratingSources——运行中绿，periId 存在不再着色 */
-.session-dot { width:5px; height:5px; border-radius:50%; background:var(--text-dim); flex-shrink:0; }
+.session-dot { width:5px; height:5px; border-radius: 0; background:var(--text-dim); flex-shrink:0; }
 .session-dot[data-running="true"] { background:var(--tool-ok,#1e9646); box-shadow:0 0 4px var(--tool-ok,#1e9646); }
 .session-item.active .session-dot { background:var(--accent); box-shadow:0 0 4px var(--accent); }
 .session-info { min-width:0; flex:1; }
@@ -47,20 +47,20 @@
 .session-item:focus-within .session-del,
 .session-item:focus-within .session-gear { opacity:1; }
 .session-del:focus-visible, .session-gear:focus-visible, .sidebar-action:focus-visible, .profile-avatar:focus-visible, .profile-edit:focus-visible { opacity:1; outline:2px solid var(--accent); outline-offset:2px; }
-.session-del:hover { background:color-mix(in srgb,var(--danger) 10%,transparent); border-radius:var(--ui-radius-xs); }
+.session-del:hover { background:color-mix(in srgb,var(--danger) 10%,transparent); border-radius: 0; }
 
 .profile-bar { display:flex; align-items:center; gap:var(--ui-space-2); padding:var(--ui-space-2) var(--ui-space-3); border-top:1px solid var(--border); }
-.profile-avatar { width:var(--ui-control-standard); height:var(--ui-control-standard); border-radius:var(--ui-radius-sm); border:2px solid transparent; background:var(--bg-panel); cursor:pointer; display:flex; align-items:center; justify-content:center; font-size:15px; font-weight:600; color:var(--text-dim); transition:border-color 0.15s; }
+.profile-avatar { width:var(--ui-control-standard); height:var(--ui-control-standard); border-radius: 0; border:2px solid transparent; background:var(--bg-panel); cursor:pointer; display:flex; align-items:center; justify-content:center; font-size:15px; font-weight:600; color:var(--text-dim); transition:border-color 0.15s; }
 .profile-avatar:hover { border-color:var(--border); }
 .profile-avatar.active { border-color:var(--accent); color:var(--text); }
 .profile-avatar.add { font-size:18px; }
-.profile-avatar img { width:100%; height:100%; object-fit:cover; border-radius:4px; }
-.profile-edit { width:var(--ui-control-compact); height:var(--ui-control-compact); background:none; border:none; color:var(--text-dim); cursor:pointer; font-size:14px; padding:0; border-radius:var(--ui-radius-xs); margin-left:auto; }
+.profile-avatar img { width:100%; height:100%; object-fit:cover; border-radius: 0; }
+.profile-edit { width:var(--ui-control-compact); height:var(--ui-control-compact); background:none; border:none; color:var(--text-dim); cursor:pointer; font-size:14px; padding:0; border-radius: 0; margin-left:auto; }
 .profile-edit:hover { background:var(--bg-hover); color:var(--text); }
 
 .session-rename-input {
   background:var(--bg-input); border:1px solid var(--accent);
-  border-radius:4px; padding:2px 6px; font-size:var(--sidebar-name-size,14px);
+  border-radius: 0; padding:2px 6px; font-size:var(--sidebar-name-size,14px);
   color:var(--text); width:100%; outline:none; font-weight:500;
 }
 
@@ -80,7 +80,7 @@
   border-bottom: 1px solid var(--border);
 }
 .sidebar-status-light {
-  width: 8px; height: 8px; border-radius: 50%;
+  width: 8px; height: 8px; border-radius: 0;
   background: var(--text-dim);
   opacity: 0.35;
 }

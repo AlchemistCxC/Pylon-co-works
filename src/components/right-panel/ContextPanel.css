@@ -29,7 +29,7 @@
   color: var(--text-dim);
   background: transparent;
   border: 1px solid transparent;
-  border-radius: var(--ui-radius-sm);
+  border-radius: 0;
   cursor: pointer;
   transition: color 150ms ease, background 150ms ease, border-color 150ms ease;
 }
@@ -53,7 +53,7 @@
   color: var(--text-dim);
   background: transparent;
   border: 1px solid transparent;
-  border-radius: var(--ui-radius-xs);
+  border-radius: 0;
   cursor: pointer;
 }
 
@@ -93,7 +93,7 @@
   margin: 0;
   padding: var(--ui-space-3);
   border: 1px dashed var(--border);
-  border-radius: var(--ui-radius-md);
+  border-radius: 0;
   color: var(--text-dim);
   font-size: 12px;
   line-height: 1.5;
@@ -102,6 +102,6 @@
 .context-panel-body .search-result-list { gap: var(--ui-space-1); margin-top: var(--ui-space-2); }
 .context-panel-body .search-result-list li {
   display: flex; align-items: center; gap: var(--ui-space-2); min-height: var(--ui-control-standard);
-  padding: var(--ui-space-2); border: 1px solid transparent; border-radius: var(--ui-radius-sm);
+  padding: var(--ui-space-2); border: 1px solid transparent; border-radius: 0;
 }
 .context-panel-body .search-result-list li:hover { border-color: var(--border); background: var(--bg-hover); }
