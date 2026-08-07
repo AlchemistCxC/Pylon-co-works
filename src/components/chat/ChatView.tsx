@@ -22,6 +22,7 @@ import { resolveToolIndicatorAsset } from './toolIndicatorAssets'
 import { isPlainTextContent } from './markdownFastPath'
 import { useMessageLocation } from './useMessageLocation'
 import { MarkdownRenderer } from './markdownLazy'
+import PylonMark from '../PylonMark'
 import { MessageRenderBoundary } from './MessageRenderBoundary'
 import { createMockMessages } from './chatMockData'
 import { messageStorageKey, parseMessageSnapshot } from './messagePersistence'
@@ -134,7 +135,7 @@ const ChatView = React.memo(function ChatView({ sessionId }: Props) {
   // dev/浏览器模式（无 Tauri）即使无 session 也渲染 mock 对话，方便调样式
   if (!sessionId && IS_TAURI) return (
     <div className="chat-empty">
-      <div className="empty-icon">◆</div>
+      <PylonMark size={48} title="Pylon" />
       <div className="empty-title">Pylon</div>
       <div className="empty-sub">选择一个会话开始</div>
     </div>
