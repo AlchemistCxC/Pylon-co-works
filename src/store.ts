@@ -1,5 +1,6 @@
 import { create } from 'zustand'
-import { persist } from 'zustand/middleware'
+import { createJSONStorage, persist } from 'zustand/middleware'
+import { reportRuntimeError } from './runtimeError'
 import { DEFAULT_CC_LAYOUT, cloneCcLayout, setCcHiddenState, setCcScaleState, updateCcPlacementState } from './ccLayoutState'
 import type { CcLayoutV3, CcWidgetPlacement } from './ccLayoutState'
 import { createCustomPresetId } from './customPresets'
@@ -200,7 +201,21 @@ export const useStore = create<ThemeState>()(persist(
   applyCustomPreset: (id) => set(state => applyCustomPresetReducer(state, id) ?? {}),
   removeCustomPreset: (id) => set(state => removeCustomPresetReducer(state, id)),
 }),
-{ name: 'pylon-theme', version: THEME_SCHEMA_VERSION, migrate: persisted =>
+{ name: 'pylon-theme', version: THEME_SCHEMA_VERSION,
+  // G9（1C L1）：主题写盘失败可见（ErrorCenter 指纹去重聚合为一次性告警）
+  storage: createJSONStorage(() => ({
+    getItem: key => localStorage.getItem(key),
+    setItem: (key, value) => {
+      try {
+        localStorage.setItem(key, value)
+      } catch (error) {
+        // 写盘失败可见（ErrorCenter 指纹去重聚合）；不 throw——内存态继续（1C）
+        reportRuntimeError('保存主题配置', error)
+      }
+    },
+    removeItem: key => localStorage.removeItem(key),
+  })),
+  migrate: persisted =>
   themeDomainMigrate(persisted, {
     base: DEFAULTS,
     appliedPreset: DEFAULTS.appliedPreset,
