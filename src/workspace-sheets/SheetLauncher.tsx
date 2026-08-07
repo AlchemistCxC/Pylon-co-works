@@ -1,4 +1,5 @@
 import { Command } from 'cmdk'
+import { SHEET_LAUNCH_OPTIONS } from './sheetRegistry'
 import type { SheetRecord, SheetKind } from './sheetTypes'
 
 interface AgentOption {
@@ -17,17 +18,7 @@ interface SheetLauncherProps {
   onOpenProfiles: () => void
 }
 
-// 全部 sheet kind 可打开（未接后端的显示占位态，不创建假数据）；agent 由上方 Agent 组承载
-const TOOL_OPTIONS: Array<{ kind: SheetKind; title: string; description: string; enabled: boolean }> = [
-  { kind: 'file', title: 'File', description: '工作区文件 / SCM / 搜索', enabled: true },
-  { kind: 'gateway', title: 'Gateway', description: '网关适配器与路由概览', enabled: true },
-  { kind: 'history', title: 'History', description: '存档会话列表与导出', enabled: true },
-  { kind: 'search', title: 'Search', description: '跨会话快照搜索', enabled: true },
-  { kind: 'runtime', title: 'Runtime', description: '运行日志与启动诊断', enabled: true },
-  { kind: 'browser', title: 'Browser', description: '浏览器会话（CDP 待后端）', enabled: true },
-  { kind: 'prism', title: 'Prism', description: 'Prism 管理（静态演示）', enabled: true },
-]
-
+// FE-AUD-007：工具项从 SHEET_LAUNCH_OPTIONS（sheetRegistry 纯数据）派生，不维护第二份手写清单
 export default function SheetLauncher({
   open,
   agents,
@@ -104,11 +95,11 @@ export default function SheetLauncher({
         </Command.Group>
 
         <Command.Group heading="工具">
-          {TOOL_OPTIONS.map(tool => (
+          {SHEET_LAUNCH_OPTIONS.map(tool => (
             <Command.Item
               key={tool.kind}
               value={`tool ${tool.title} ${tool.kind}`}
-              disabled={!tool.enabled}
+              disabled={!tool.launchable}
               onSelect={() => closeThen(() => onOpenSheet(tool.kind, tool.title))}
             >
               <span className="sheet-launcher-kind">{tool.kind}</span>
@@ -116,7 +107,7 @@ export default function SheetLauncher({
                 <strong>{tool.title}</strong>
                 <small>{tool.description}</small>
               </span>
-              {!tool.enabled && <span className="sheet-launcher-badge">unavailable</span>}
+              {!tool.launchable && <span className="sheet-launcher-badge">unavailable</span>}
             </Command.Item>
           ))}
         </Command.Group>
