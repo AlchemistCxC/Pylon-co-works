@@ -23,7 +23,13 @@ for (const path of ['src/components/right-panel/AgentContextPanel.tsx', 'src/com
     false,
     `${path} 不得在 selector 内做数组派生`,
   )
-  assert.match(source, /const touchedFiles = source \? touchedFilesRecord\[source\] \?\? \[\] : \[\]/, `${path} 派生必须留组件体`)
+  if (path.includes('AgentContextPanel')) {
+    assert.match(source, /const touchedFiles = source \? touchedFilesRecord\[source\] \?\? \[\] : \[\]/, `${path} 派生必须留组件体`)
+  } else {
+    // FileContextPanel（FE-AUD-022 反查）：activeFile 稳定 selector + sourcesForPath 组件体派生
+    assert.match(source, /useWorkspaceStore\(state => \{/, `${path} activeFile 必须经稳定 selector`)
+    assert.match(source, /sourcesForPath\(touchedFilesRecord, activeFile\)/, `${path} 反查必须在组件体（sourcesForPath）`)
+  }
 }
 
 console.log('context panel selector 守卫通过')
