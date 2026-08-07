@@ -2,7 +2,8 @@ import { useEffect, useState } from 'react'
 import { invoke } from '@tauri-apps/api/core'
 import { reportRuntimeError } from '../../runtimeError'
 import { createGatewayClient } from '../../infrastructure/tauri/gatewayClient'
-import { classifyGatewayWriteError, type GatewayStatus, type GatewayWriteStatus, type PlatformSession } from '../../infrastructure/tauri/gatewayContracts.ts'
+import { saveGatewayRouteTransaction, type GatewayRouteShape } from '../../application/transactions/saveGatewayRouteTransaction'
+import { type GatewayStatus, type GatewayWriteStatus, type PlatformSession } from '../../infrastructure/tauri/gatewayContracts.ts'
 import type { SheetContext, SheetRecord } from '../../workspace-sheets/sheetTypes'
 import './GatewaySheet.css'
 
@@ -21,28 +22,28 @@ export default function GatewaySheetView({ sheet: _sheet, ctx: _ctx }: { sheet: 
   const [editAgentId, setEditAgentId] = useState('')
   const [writeStatus, setWriteStatus] = useState<GatewayWriteStatus>({ kind: 'idle' })
 
-  // W3-02 桩化：update_agents_config 成功后 reload_gateway；命令缺失 → 明确「待后端」；锁中毒展示失败
+  // W3-02 + FE-AUD-004：保存 = saveGatewayRouteTransaction（合并既有 routes → 保存 →
+  // reload → read-back 一致才 ok）；锁中毒/回读 mismatch 明确展示
   const gatewayClient = createGatewayClient({ invoke: (cmd, args) => invoke(cmd, args as Record<string, unknown> | undefined) })
   const saveRoute = async () => {
     if (!editSource.trim() || !editAgentId.trim()) return
     setWriteStatus({ kind: 'saving' })
-    try {
-      // Phase 3：显式 scope 契约（用户拍板）；成功后 reload_gateway
-      await gatewayClient.updateAgentsConfig({ scope: 'gateway', config: { gateway: { routes: [{ source: editSource, agentId: editAgentId }] } } })
-      try {
-        await gatewayClient.reload()
-      } catch (reloadError) {
-        const classified = classifyGatewayWriteError(reloadError)
-        setWriteStatus(classified)
-        if (classified.kind === 'lock-poisoned') reportRuntimeError('重载网关', '磁盘已更新、运行态仍旧配置')
-        return
-      }
-      setWriteStatus({ kind: 'ok' })
-    } catch (error) {
-      const classified = classifyGatewayWriteError(error)
-      setWriteStatus(classified)
-      if (classified.kind === 'error') reportRuntimeError('保存网关配置', error)
+    const result = await saveGatewayRouteTransaction(
+      { source: editSource.trim(), agentId: editAgentId.trim() },
+      {
+        readRoutes: async () => (await gatewayClient.status() as GatewayStatus).routes as unknown as GatewayRouteShape[],
+        saveRoutes: payload => gatewayClient.updateAgentsConfig(payload),
+        reload: () => gatewayClient.reload(),
+        readBackRoutes: async () => (await gatewayClient.status() as GatewayStatus).routes as unknown as GatewayRouteShape[],
+        reportError: (action, error) => reportRuntimeError(action, error),
+      },
+    )
+    if (!result.ok) {
+      if (result.kind === 'mismatch') setWriteStatus({ kind: 'lock-poisoned' })
+      else setWriteStatus({ kind: 'error', message: result.message })
+      return
     }
+    setWriteStatus({ kind: 'ok' })
   }
 
   useEffect(() => {

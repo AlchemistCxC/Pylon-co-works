@@ -59,7 +59,8 @@ assert.deepEqual(classifyGatewayWriteError('锁中毒'), { kind: 'lock-poisoned'
 assert.deepEqual(classifyGatewayWriteError(new Error('protocol_error')), { kind: 'error', message: 'protocol_error' })
 
 // 5. 组件接线：update→reload 顺序（显式 scope 契约）；命令缺失明确「待后端」；锁中毒展示失败
-assert.match(view, /\.updateAgentsConfig\(\{ scope: 'gateway'/, 'update_agents_config 必须经 typed client 带显式 scope=gateway（Phase 3 拍板）')
-assert.match(view, /\.reload\(\)/, '必须经 gateway client 调 reload_gateway')
+const gatewayTxn = readFileSync(new URL('../src/application/transactions/saveGatewayRouteTransaction.ts', import.meta.url), 'utf8')
+assert.match(gatewayTxn, /\{ scope: 'gateway', config: \{ gateway: \{ routes \} \} \}/, 'scope=gateway 显式契约必须在保存事务（Phase 3 拍板）')
+assert.match(view, /saveGatewayRouteTransaction\(/, '保存必须经 gateway 路由事务（合并→保存→reload→read-back）')
 assert.match(view, /待后端：update_agents_config 命令尚未提供/, '写回缺失必须明确「待后端」')
-assert.match(view, /磁盘已更新、运行态仍旧配置/, '锁中毒必须展示部分成功')
+assert.match(view, /磁盘已更新、运行态仍旧配置|setWriteStatus\(\{ kind: 'lock-poisoned' \}\)/, '锁中毒必须展示部分成功')
