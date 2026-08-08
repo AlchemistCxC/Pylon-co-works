@@ -1966,7 +1966,7 @@ for line in sys.stdin:
         assert_eq!(request["params"]["protocolVersion"], serde_json::json!(1));
         assert_eq!(
             request["params"]["clientInfo"],
-            serde_json::json!({"name": "Pylon", "version": "0.1.0"})
+            serde_json::json!({"name": "Pylon", "version": "1.0.0"})
         );
     }
 
@@ -2016,7 +2016,7 @@ for line in sys.stdin:
         assert_eq!(request["params"]["protocolVersion"], serde_json::json!(1));
         assert_eq!(
             request["params"]["clientInfo"],
-            serde_json::json!({"name": "Pylon", "version": "0.1.0"})
+            serde_json::json!({"name": "Pylon", "version": "1.0.0"})
         );
     }
 

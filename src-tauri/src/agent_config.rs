@@ -355,7 +355,7 @@ pub(crate) fn default_initialize_caps() -> serde_json::Value {
 
 /// H4 默认 clientInfo（现值 {"name":"Pylon","version":"0.1.0"}）。
 pub(crate) fn default_client_info() -> serde_json::Value {
-    serde_json::json!({"name": "Pylon", "version": "0.1.0"})
+    serde_json::json!({"name": "Pylon", "version": "1.0.0"})
 }
 
 /// E1：acp 段取值校验——数值字段必须 > 0（负数在反序列化层已被 u64 拒绝，
@@ -1252,7 +1252,7 @@ mod tests {
         );
         assert_eq!(
             protocol.client_info(),
-            serde_json::json!({"name": "Pylon", "version": "0.1.0"})
+            serde_json::json!({"name": "Pylon", "version": "1.0.0"})
         );
         // DEFAULT_ACCPROTOCOL 静态与解析结果一致（AgentDef::protocol 缺省回退）
         assert_eq!(
