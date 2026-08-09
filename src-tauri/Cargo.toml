@@ -45,6 +45,8 @@ tracing-subscriber = "0.3.23"
 serde_yml = "0.0.13"
 chrono = "0.4.45"
 windows-sys = { version = "0.61.2", features = ["Win32_System_JobObjects", "Win32_Foundation", "Win32_System_Threading"] }
+# I06-A-DATA-01：SQLite 消息仓库（bundled 离线编译，无系统 sqlite 依赖）
+rusqlite = { version = "0.40", default-features = false, features = ["bundled"] }
 
 [build-dependencies]
 tauri-build = { version = "2", features = [] }
