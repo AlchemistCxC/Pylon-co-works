@@ -21,6 +21,8 @@ export async function activateAgentSheet(
     switchAgent: () => agentClient.switchAgent(agentId),
     resetRuntime: () => useRuntimeStore.getState().resetAll(),
     setActiveAgent: id => useIdentityStore.getState().setActiveAgent(id),
+    fetchAgentStatus: () => agentClient.agentStatus(),
+    applyAgentStatus: (id, status) => useRuntimeStore.getState().setAgentStatus(id, status),
     reportError: (action, error) => reportRuntimeError(action, error),
     dispatchSwitched: () => window.dispatchEvent(new CustomEvent('pylon:agent-switched')),
     openAgentSheet: onActivated,
