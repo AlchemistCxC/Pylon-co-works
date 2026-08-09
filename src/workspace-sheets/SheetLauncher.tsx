@@ -1,5 +1,8 @@
+import { useRef, useState } from 'react'
 import { Command } from 'cmdk'
+import { useIdentityStore } from '../identityStore'
 import { SHEET_LAUNCH_OPTIONS } from './sheetRegistry'
+import { activateAgentSheet } from './activateAgentSheet'
 import type { SheetRecord, SheetKind } from './sheetTypes'
 
 interface AgentOption {
@@ -29,9 +32,42 @@ export default function SheetLauncher({
   onOpenSettings,
   onOpenProfiles,
 }: SheetLauncherProps) {
+  const activeAgent = useIdentityStore(state => state.activeAgent)
+  const switchingAgentRef = useRef(false)
+  const [switchingAgentId, setSwitchingAgentId] = useState<string | null>(null)
   const closeThen = (action: () => void) => {
     action()
     onOpenChange(false)
+  }
+  const focusSheet = async (sheet: SheetRecord) => {
+    const targetAgentId = sheet.kind === 'agent' ? sheet.agentId : undefined
+    if (!targetAgentId || targetAgentId === activeAgent) {
+      onFocusSheet(sheet.id)
+      onOpenChange(false)
+      return
+    }
+    if (switchingAgentRef.current) return
+    switchingAgentRef.current = true
+    setSwitchingAgentId(targetAgentId)
+    const agentName = agents.find(agent => agent.id === targetAgentId)?.name || sheet.title || targetAgentId
+    await activateAgentSheet(targetAgentId, agentName, () => onFocusSheet(sheet.id))
+    switchingAgentRef.current = false
+    setSwitchingAgentId(null)
+    if (useIdentityStore.getState().activeAgent === targetAgentId) onOpenChange(false)
+  }
+  const openAgentSheet = async (agent: AgentOption) => {
+    if (agent.id === activeAgent) {
+      onOpenSheet('agent', agent.name, agent.id)
+      onOpenChange(false)
+      return
+    }
+    if (switchingAgentRef.current) return
+    switchingAgentRef.current = true
+    setSwitchingAgentId(agent.id)
+    await activateAgentSheet(agent.id, agent.name, () => onOpenSheet('agent', agent.name, agent.id))
+    switchingAgentRef.current = false
+    setSwitchingAgentId(null)
+    if (useIdentityStore.getState().activeAgent === agent.id) onOpenChange(false)
   }
   const recentSheets = [...sheets].sort((a, b) => b.lastFocusedAt - a.lastFocusedAt).slice(0, 5)
 
@@ -58,7 +94,8 @@ export default function SheetLauncher({
               <Command.Item
                 key={`recent:${sheet.id}`}
                 value={`recent ${sheet.title} ${sheet.kind}`}
-                onSelect={() => closeThen(() => onFocusSheet(sheet.id))}
+                disabled={switchingAgentId !== null}
+                onSelect={() => { void focusSheet(sheet) }}
               >
                 <span className="sheet-launcher-kind">{sheet.kind}</span>
                 <span className="sheet-launcher-copy">
@@ -75,7 +112,8 @@ export default function SheetLauncher({
             <Command.Item
               key={agent.id}
               value={`agent ${agent.name} ${agent.id}`}
-              onSelect={() => closeThen(() => onOpenSheet('agent', agent.name, agent.id))}
+              disabled={switchingAgentId !== null}
+              onSelect={() => { void openAgentSheet(agent) }}
             >
               <span className="sheet-launcher-kind">agent</span>
               <span className="sheet-launcher-copy">

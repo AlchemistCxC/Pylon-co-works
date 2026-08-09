@@ -1,10 +1,11 @@
-import { useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { Search } from 'lucide-react'
 import { invoke } from '@tauri-apps/api/core'
 import { reportRuntimeError } from '../../runtimeError'
 import { createWorkspaceClient } from '../../infrastructure/tauri/workspaceClient'
 import { classifyWorkspaceSearchError, normalizeWorkspaceSearchResults, type WorkspaceSearchResult, type WorkspaceSearchSaveStatus } from '../../infrastructure/tauri/workspaceSearchContracts.ts'
 import FileTypeIcon from './FileTypeIcon'
+import { advanceSourceContext, beginSourceRequest, isCurrentSourceRequest, type SourceRequestContext } from './sourceRequestGuard'
 
 function highlightedText(text: string, query: string): React.ReactNode {
   const keyword = query.trim()
@@ -32,15 +33,28 @@ export default function WorkspaceSearchPanel({ source, onOpenResult }: {
   const [query, setQuery] = useState('')
   const [results, setResults] = useState<WorkspaceSearchResult[]>([])
   const [status, setStatus] = useState<WorkspaceSearchSaveStatus>({ kind: 'idle' })
+  const requestContext = useRef<SourceRequestContext>({ source: null, generation: 0 })
+  const searchRequestId = useRef(0)
+
+  useEffect(() => {
+    requestContext.current = advanceSourceContext(requestContext.current, source)
+    searchRequestId.current += 1
+    setResults([])
+    setStatus({ kind: 'idle' })
+  }, [source])
 
   const search = async () => {
     if (!source || !query.trim()) return
+    const token = beginSourceRequest(requestContext.current, source)
+    const requestId = ++searchRequestId.current
     setStatus({ kind: 'searching' })
     try {
       const raw = await createWorkspaceClient({ invoke: (cmd, args) => invoke(cmd, args as Record<string, unknown> | undefined) }).search(source, query.trim())
+      if (!isCurrentSourceRequest(requestContext.current, token) || searchRequestId.current !== requestId) return
       setResults(normalizeWorkspaceSearchResults(raw))
       setStatus({ kind: 'idle' })
     } catch (error) {
+      if (!isCurrentSourceRequest(requestContext.current, token) || searchRequestId.current !== requestId) return
       const classified = classifyWorkspaceSearchError(error)
       setStatus(classified)
       if (classified.kind === 'error') reportRuntimeError('搜索工作区', error)

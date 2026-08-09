@@ -11,6 +11,8 @@ function createDeps() {
     switchAgent: async (id: string) => { calls.push(`switch:${id}`) },
     resetRuntime: () => { calls.push('reset') },
     setActiveAgent: (id: string) => { calls.push(`setActive:${id}`) },
+    fetchAgentStatus: async () => { calls.push('fetchStatus'); return { status: 'connected', generation: 4 } },
+    applyAgentStatus: (id: string, status: { status: string }) => { calls.push(`applyStatus:${id}:${status.status}`) },
     reportError: vi.fn(),
     dispatchSwitched: () => { calls.push('dispatch') },
     openAgentSheet: (id: string, name: string) => { calls.push(`open:${id}:${name}`) },
@@ -19,11 +21,11 @@ function createDeps() {
 }
 
 describe('switchAgentTransaction', () => {
-  it('成功：switch → reset → setActive → dispatch → openAgentSheet，返回 ok', async () => {
+  it('成功：switch → reset → setActive → fetch/apply 快照 → dispatch → openAgentSheet，返回 ok', async () => {
     const { deps, calls } = createDeps()
     const result = await switchAgentTransaction('peri', 'Peri', deps)
     expect(result).toEqual({ ok: true, value: 'peri' })
-    expect(calls).toEqual(['switch:peri', 'reset', 'setActive:peri', 'dispatch', 'open:peri:Peri'])
+    expect(calls).toEqual(['switch:peri', 'reset', 'setActive:peri', 'fetchStatus', 'applyStatus:peri:connected', 'dispatch', 'open:peri:Peri'])
   })
 
   it('失败：不 setActive/dispatch/open，返回 transport 并报告错误', async () => {
@@ -40,6 +42,17 @@ describe('switchAgentTransaction', () => {
     const { openAgentSheet: _omitted, ...withoutOpen } = deps
     const result = await switchAgentTransaction('peri', 'Peri', withoutOpen)
     expect(result.ok).toBe(true)
-    expect(calls).toEqual(['switch:peri', 'reset', 'setActive:peri', 'dispatch'])
+    expect(calls).toEqual(['switch:peri', 'reset', 'setActive:peri', 'fetchStatus', 'applyStatus:peri:connected', 'dispatch'])
+  })
+
+  it('快照查询失败不伪造 connected，切换仍成功并报告对账错误', async () => {
+    const { deps, calls } = createDeps()
+    deps.fetchAgentStatus = async () => { calls.push('fetchStatus'); throw new Error('status unavailable') }
+
+    const result = await switchAgentTransaction('peri', 'Peri', deps)
+
+    expect(result).toEqual({ ok: true, value: 'peri' })
+    expect(calls).toEqual(['switch:peri', 'reset', 'setActive:peri', 'fetchStatus', 'dispatch', 'open:peri:Peri'])
+    expect(deps.reportError).toHaveBeenCalledWith('对账 Agent 状态', expect.any(Error))
   })
 })

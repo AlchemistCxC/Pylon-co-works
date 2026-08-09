@@ -1,98 +1,71 @@
 /**
  * STRUCTURE GUARD（结构守卫）：本文件含源码 token/正则断言，不单独构成行为证据；
- * 新业务完成度须配行为级测试（审计报告阶段 0："新业务完成度不得只靠源码 token"）。
+ * 新业务完成度须配行为级测试。
  */
 import { strict as assert } from 'node:assert'
 import { readFileSync } from 'node:fs'
-import {
-  beginReconnect,
-  completeReconnect,
-  failReconnect,
-  type AgentStatusTransactionState,
-} from '../src/components/settings/agentState.ts'
+import { runReconnectCommand } from '../src/components/settings/reconnectCommand.ts'
+import { shouldAcceptAgentStatus, type AgentStatus } from '../src/components/settings/agentTypes.ts'
 
 const settings = readFileSync(new URL('../src/components/Settings.tsx', import.meta.url), 'utf8')
-const agentState = readFileSync(new URL('../src/components/settings/agentState.ts', import.meta.url), 'utf8')
 
-// The reconnect command is deliberately checked without assuming any agent-id
-// payload: the production command is the active-agent transaction's command.
-assert.match(settings, /const reconnectAgent = async \(\) => \{[\s\S]*?if \(reconnecting\) return/)
-assert.match(settings, /setReconnecting\(true\)/)
-assert.match(settings, /setAgentStatus\(activeAgent, \{ \.\.\.beginReconnect\(\{ \.\.\.currentStatus, pending: false \}\), agent: activeAgent \}\)/)
-assert.match(settings, /await agentClient\.reconnectAgent\(\)/)
-assert.match(settings, /setAgentStatus\(activeAgent, \{ \.\.\.failReconnect\(\{ \.\.\.currentStatus, pending: false \}, detail\.message\), agent: activeAgent \}\)/)
-assert.match(settings, /finally \{ setReconnecting\(false\) \}/)
-assert.match(settings, /disabled=\{reconnecting\}/)
-assert.match(agentState, /status: 'reconnecting', pending: true, error: undefined/)
-assert.match(agentState, /status: 'connected', pending: false, error: undefined/)
-assert.match(agentState, /status: 'error', pending: false, error/)
+assert.match(settings, /const reconnectAgent = async \(\) => \{[\s\S]*?if \(reconnectPending\) return/)
+assert.match(settings, /setReconnectPending\(true\)/)
+assert.match(settings, /runReconnectCommand\(\{/)
+assert.match(settings, /readSnapshot: async \(\) => normalizeAgentStatus\(await agentClient\.agentStatus\(\), targetAgent\)/)
+assert.match(settings, /applySnapshot: snapshot => setAgentStatus\(targetAgent, snapshot\)/)
+assert.match(settings, /setReconnectCommandError\(detail\.message\)/)
+assert.match(settings, /disabled=\{reconnectPending\}/)
+assert.equal(settings.includes('beginReconnect'), false, 'Settings 不得伪造 reconnecting lifecycle')
+assert.equal(settings.includes('failReconnect'), false, 'Settings catch 不得伪造 error lifecycle')
 
-const idle: AgentStatusTransactionState = {
+let lifecycle: AgentStatus = {
+  agent: 'peri',
+  agentId: 'peri',
   status: 'connected',
-  pending: false,
-  error: 'stale error',
+  generation: 3,
+  capabilities: { promptCapabilities: { image: true } },
 }
 
-// A minimal harness models the component's guard, status updates, command and
-// finally behavior while using the real dependency-free transaction helpers.
-async function runReconnect(
-  state: AgentStatusTransactionState,
-  command: () => Promise<unknown>,
-  setStatus: (next: AgentStatusTransactionState) => void,
-  getPending: () => boolean,
-  setPending: (value: boolean) => void,
-  report: (error: unknown) => string,
-): Promise<boolean> {
-  if (getPending()) return false
-  setPending(true)
-  setStatus(beginReconnect({ ...state, pending: false }))
-  try {
-    await command()
-  } catch (error) {
-    setStatus(failReconnect({ ...state, pending: false }, report(error)))
-  } finally {
-    setPending(false)
-  }
-  return true
-}
-
-let state = idle
-let pending = false
-let calls = 0
-const setStatus = (next: AgentStatusTransactionState) => { state = next }
-const setPending = (value: boolean) => { pending = value }
-const report = (error: unknown) => error instanceof Error ? error.message : String(error)
-
-let release!: () => void
-const blocked = new Promise<void>(resolve => { release = resolve })
-const first = runReconnect(state, async () => {
-  calls += 1
-  await blocked
-}, setStatus, () => pending, setPending, report)
+let rejectCommand!: (error: unknown) => void
+const command = new Promise<never>((_resolve, reject) => { rejectCommand = reject })
+const pending = runReconnectCommand({
+  reconnect: () => command,
+  readSnapshot: async () => ({
+    agent: 'peri',
+    agentId: 'peri',
+    status: 'disconnected',
+    generation: 4,
+    capabilities: null,
+  }),
+  applySnapshot: snapshot => { lifecycle = snapshot },
+})
 
 await Promise.resolve()
-assert.equal(pending, true, 'reconnect sets the pending guard')
-assert.equal(state.status, 'reconnecting', 'idle/connected enters reconnecting')
-assert.equal(state.pending, true)
-assert.equal(state.error, undefined)
-assert.equal(await runReconnect(state, async () => { calls += 1 }, setStatus, () => pending, setPending, report), false, 'duplicate reconnect is guarded')
-assert.equal(calls, 1)
-release()
-assert.equal(await first, true)
-assert.equal(pending, false, 'finally restores the pending guard')
+assert.equal(lifecycle.status, 'connected', 'command pending 不得覆盖最后权威 lifecycle')
+rejectCommand(new Error('command rejected'))
+const rejected = await pending
+assert.equal((rejected.commandError as Error).message, 'command rejected')
+assert.equal(lifecycle.status, 'disconnected', 'command reject 后必须应用 agent_status 权威快照')
+assert.equal(lifecycle.generation, 4)
+assert.equal(lifecycle.capabilities, null, '不得把旧 capabilities 展开进新快照')
 
-state = completeReconnect(state)
-assert.deepEqual(state, { status: 'connected', pending: false, error: undefined })
+const lastAuthoritative = lifecycle
+const failedReconciliation = await runReconnectCommand({
+  reconnect: async () => { throw new Error('command rejected again') },
+  readSnapshot: async () => { throw new Error('status unavailable') },
+  applySnapshot: snapshot => { lifecycle = snapshot },
+})
+assert.equal((failedReconciliation.reconciliationError as Error).message, 'status unavailable')
+assert.equal(lifecycle, lastAuthoritative, '快照查询失败时必须保留最后权威 lifecycle')
 
-state = idle
-pending = false
-let rejectedCalls = 0
-assert.equal(await runReconnect(state, async () => {
-  rejectedCalls += 1
-  throw new Error('command rejected')
-}, setStatus, () => pending, setPending, report), true)
-assert.equal(rejectedCalls, 1)
-assert.deepEqual(state, { status: 'error', pending: false, error: 'command rejected' })
-assert.equal(pending, false, 'reject path also restores the pending guard in finally')
+assert.equal(shouldAcceptAgentStatus(
+  { agent: 'peri', status: 'connected', generation: 4 },
+  { agent: 'peri', status: 'reconnecting', generation: 3 },
+), false, '旧 generation 事件不得覆盖新 runtime 快照')
+assert.equal(shouldAcceptAgentStatus(
+  { agent: 'peri', status: 'reconnecting', generation: 4 },
+  { agent: 'peri', status: 'connected', generation: 4 },
+), true, '同 generation 仍按事件到达顺序更新')
 
-console.log('agent reconnect transaction 回归测试通过')
+console.log('agent reconnect command/lifecycle 分离回归测试通过')

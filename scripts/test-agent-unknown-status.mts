@@ -1,11 +1,11 @@
 import { strict as assert } from 'node:assert'
-import { normalizeAgentStatus } from '../src/components/settings/agentTypes.ts'
+import { normalizeAgentStatus, selectAgentStatus } from '../src/components/settings/agentTypes.ts'
 
 const fallbackAgent = 'peri'
 
 const missingStatus = normalizeAgentStatus({ agent: 'missing-status' }, fallbackAgent)
 assert.equal(missingStatus.agent, 'missing-status')
-assert.equal(missingStatus.status, 'connected')
+assert.equal(missingStatus.status, 'unknown')
 assert.equal(missingStatus.recentError, undefined)
 
 const legacyCrashed = normalizeAgentStatus({ agent: 'legacy-crashed', crashed: true }, fallbackAgent)
@@ -32,5 +32,10 @@ const fallbackAgentStatus = normalizeAgentStatus({ status: 'mystery' }, fallback
 assert.equal(fallbackAgentStatus.agent, fallbackAgent)
 assert.equal(fallbackAgentStatus.status, 'error')
 assert.match(fallbackAgentStatus.recentError || '', /未知 Agent 状态：mystery/)
+
+assert.equal(selectAgentStatus('peri', 'peri', {}).status, 'unknown')
+assert.equal(selectAgentStatus('hermes', 'peri', {
+  hermes: { agent: 'hermes', agentId: 'hermes', status: 'connected' },
+}).status, 'inactive')
 
 console.log('agent unknown status 安全处理专项回归通过')

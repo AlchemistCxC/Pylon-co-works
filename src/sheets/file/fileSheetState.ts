@@ -22,6 +22,15 @@ export function createFileSheetState(source: string | null): FileSheetState {
   return { activeSection: 'files', targetSource: source }
 }
 
+export function resetFileSheetTransientState() {
+  return {
+    activeDiff: null as { path: string; staged: boolean } | null,
+    truncated: false,
+    instruction: '',
+    fileContent: '',
+  }
+}
+
 export function fileSheetReducer(state: FileSheetState, action: FileSheetAction): FileSheetState {
   switch (action.type) {
     case 'set-section':

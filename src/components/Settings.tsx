@@ -24,8 +24,8 @@ import { reportRuntimeError } from '../runtimeError'
 import { switchAgentTransaction } from '../application/transactions/switchAgentTransaction'
 import './SettingsCommon.css'
 import './Settings.css'
-import { normalizeAgentStatus, statusLabel } from './settings/agentTypes'
-import { beginReconnect, failReconnect } from './settings/agentState'
+import { normalizeAgentStatus, selectAgentStatus, statusLabel } from './settings/agentTypes'
+import { runReconnectCommand } from './settings/reconnectCommand'
 import ConfigOptionsPanel from './settings/ConfigOptionsPanel'
 import TemplateLibrary from './settings/TemplateLibrary'
 import { resolveToolIndicatorAsset, toolIndicatorOptions } from './chat/toolIndicatorAssets'
@@ -230,9 +230,10 @@ export default function Settings({ onClose, activeSessionId }: { onClose?: () =>
   const [searchQuery, setSearchQuery] = useState('')
   const [customPresetName, setCustomPresetName] = useState('')
   const [switchingAgentId, setSwitchingAgentId] = useState<string | null>(null)
-  const [reconnecting, setReconnecting] = useState(false)
+  const [reconnectPending, setReconnectPending] = useState(false)
+  const [reconnectCommandError, setReconnectCommandError] = useState<string | null>(null)
   const [reloading, setReloading] = useState(false)
-  const currentStatus = agentStatuses[activeAgent] || normalizeAgentStatus({}, activeAgent)
+  const currentStatus = selectAgentStatus(activeAgent, activeAgent, agentStatuses)
 
   // 应用全局预设
   const applyGlobalPreset = (name: string) => {
@@ -275,6 +276,8 @@ export default function Settings({ onClose, activeSessionId }: { onClose?: () =>
       switchAgent: () => agentClient.switchAgent(agentId),
       resetRuntime: () => useRuntimeStore.getState().resetAll(),
       setActiveAgent: id => setActiveAgent(id),
+      fetchAgentStatus: () => agentClient.agentStatus(),
+      applyAgentStatus: (id, status) => useRuntimeStore.getState().setAgentStatus(id, status),
       reportError: (action, error) => reportRuntimeError(action, error),
       dispatchSwitched: () => window.dispatchEvent(new CustomEvent('pylon:agent-switched')),
     })
@@ -282,16 +285,23 @@ export default function Settings({ onClose, activeSessionId }: { onClose?: () =>
   }
 
   const reconnectAgent = async () => {
-    if (reconnecting) return
-    setReconnecting(true)
-    setAgentStatus(activeAgent, { ...beginReconnect({ ...currentStatus, pending: false }), agent: activeAgent })
-    try {
-      await agentClient.reconnectAgent()
-      // command resolve 只代表请求已接受，最终状态由 pylon:agent-status 事件确认。
-    } catch (error) {
-      const detail = reportRuntimeError('重连 Agent', error)
-      setAgentStatus(activeAgent, { ...failReconnect({ ...currentStatus, pending: false }, detail.message), agent: activeAgent })
-    } finally { setReconnecting(false) }
+    if (reconnectPending) return
+    const targetAgent = activeAgent
+    setReconnectPending(true)
+    setReconnectCommandError(null)
+    const result = await runReconnectCommand({
+      reconnect: () => agentClient.reconnectAgent(),
+      readSnapshot: async () => normalizeAgentStatus(await agentClient.agentStatus(), targetAgent),
+      applySnapshot: snapshot => setAgentStatus(targetAgent, snapshot),
+    })
+    if (result.commandError !== undefined) {
+      const detail = reportRuntimeError('重连 Agent', result.commandError)
+      setReconnectCommandError(detail.message)
+    }
+    if (result.reconciliationError !== undefined) {
+      reportRuntimeError('对账 Agent 状态', result.reconciliationError)
+    }
+    setReconnectPending(false)
   }
 
   const reloadAgents = async () => {
@@ -493,8 +503,9 @@ export default function Settings({ onClose, activeSessionId }: { onClose?: () =>
                 {currentStatus.transport && <div className="set-hint">Transport：{currentStatus.transport}</div>}
                 {currentStatus.cwd && <div className="set-hint">CWD：{currentStatus.cwd}</div>}
                 {currentStatus.recentError && <div className="set-hint" role="alert">最近错误：{currentStatus.recentError}</div>}
+                {reconnectCommandError && <div className="set-hint" role="alert">重连操作失败：{reconnectCommandError}</div>}
                 <div className="set-preset-row">
-                  <button className="ps-btn sm" disabled={reconnecting} onClick={reconnectAgent}>{reconnecting ? '重连中…' : '重连'}</button>
+                  <button className="ps-btn sm" disabled={reconnectPending} onClick={reconnectAgent}>{reconnectPending ? '重连中…' : '重连'}</button>
                   <button className="ps-btn sm" disabled={reloading} onClick={reloadAgents}>{reloading ? '重载中…' : '重载配置'}</button>
                 </div>
               </Group>

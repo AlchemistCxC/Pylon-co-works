@@ -1,10 +1,11 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import { ChevronDown, ChevronRight, GitBranch, GitCommitHorizontal } from 'lucide-react'
 import { invoke } from '@tauri-apps/api/core'
 import { reportRuntimeError } from '../../runtimeError'
 import { createWorkspaceClient } from '../../infrastructure/tauri/workspaceClient'
 import { classifyGitError, normalizeGitHistory, normalizeGitStatus, type GitCommit, type GitErrorDetail, type GitStatusEntry } from '../../infrastructure/tauri/gitContracts.ts'
 import FileTypeIcon from './FileTypeIcon'
+import { advanceSourceContext, beginSourceRequest, isCurrentSourceRequest, type SourceRequestContext } from './sourceRequestGuard'
 
 interface GitPathNode {
   key: string
@@ -72,20 +73,30 @@ export default function GitPanel({ source, onOpenDiff }: { source: string | null
   const [history, setHistory] = useState<GitCommit[]>([])
   const [error, setError] = useState<GitErrorDetail | null>(null)
   const [expandedCommit, setExpandedCommit] = useState<string | null>(null)
+  const requestContext = useRef<SourceRequestContext>({ source: null, generation: 0 })
 
   useEffect(() => {
-    if (!source) return
+    requestContext.current = advanceSourceContext(requestContext.current, source)
+    const token = source ? beginSourceRequest(requestContext.current, source) : null
     let disposed = false
+    if (!source) {
+      setStaged([])
+      setUnstaged([])
+      setHistory([])
+      setError(null)
+      setExpandedCommit(null)
+      return () => { disposed = true }
+    }
     setError(null)
     const wc = createWorkspaceClient({ invoke: (cmd, args) => invoke(cmd, args as Record<string, unknown> | undefined) })
     Promise.all([wc.gitStatus(source), wc.gitHistory(source)]).then(([statusRaw, historyRaw]) => {
-      if (disposed) return
+      if (disposed || !token || !isCurrentSourceRequest(requestContext.current, token)) return
       const entries = normalizeGitStatus(statusRaw)
       setStaged(entries.filter(entry => entry.staged))
       setUnstaged(entries.filter(entry => !entry.staged))
       setHistory(normalizeGitHistory(historyRaw))
     }).catch(err => {
-      if (disposed) return
+      if (disposed || !token || !isCurrentSourceRequest(requestContext.current, token)) return
       setError(classifyGitError(err))
       reportRuntimeError('读取 Git 信息', err)
     })

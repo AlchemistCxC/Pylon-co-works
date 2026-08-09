@@ -4,9 +4,13 @@ title: 生命周期与 capabilities selector 解耦
 type: FE
 owner: A
 mode: longrun-a
-status: planned
+status: review_pending
 priority: P1
-assignee: null
+assignee: codex-role-a
+base:
+  branch: main
+  commit: c0eddb9
+integration_base: null
 depends_on:
 - I01-A-BE-01
 contract_refs: []
@@ -18,6 +22,8 @@ scope:
   - src/runtimeStore.ts
   - scripts/test-agent-contracts.mts
   - docs/Issue Library/ISSUE-02.md
+  - docs/Issue Library/harness/tasks/I02-A-FE-01.yaml
+  - docs/Issue Library/harness/handoffs/I02-A-FE-01.md
   deny:
   - docs/archive/**
   - .env*
@@ -25,6 +31,24 @@ scope:
   read_only: []
 shared_touchpoints: []
 objective: 生命周期与 capabilities selector 解耦
+implementation_contract:
+  inputs:
+  - AgentStatus lifecycle status 与可选 capabilities payload
+  - 现有 resolveCapabilitySnapshot/useAgentCapabilities consumer
+  outputs:
+  - connected 只由 lifecycle status 判定
+  - capabilitiesKnown 与单项能力 gate 独立表达
+  invariants:
+  - 非 connected 代际不得继承旧 capabilities 的 connected 语义
+  - connected 且未声明 capabilities 仍允许基础文本发送
+  - 扩展能力未确认时保持保守 gate，不反推连接状态
+tests:
+  red:
+  - command: npm run test -- --run src/infrastructure/acp/__tests__/agentContracts.test.ts
+    expected: connected + null capabilities 被错误判为 disconnected，或非 connected + 旧 capabilities 被判为 connected
+  green:
+  - command: npm run test -- --run src/infrastructure/acp/__tests__/agentContracts.test.ts
+    expected: 生命周期/capabilities 状态矩阵与 consumer gate 通过
 acceptance:
 - id: AC-1
   behavior: 生命周期与 capabilities selector 解耦；connecting/error/crashed 等代际不继承旧 capabilities；基础文本发送不因能力缺失禁用。
@@ -35,11 +59,36 @@ evidence:
   - docs/Issue Library/harness/handoffs/I02-A-FE-01.md
 commands:
   focused:
-  - npm run test
+  - npm run test -- --run src/infrastructure/acp/__tests__/agentContracts.test.ts
+  - node --experimental-strip-types scripts/test-agent-contracts.mts
   broader:
   - npm run lint
   - npm run build
   - git diff --check
 questions: []
 decision_log: []
-handoff: null
+last_progress_commit: 6ce048f
+review:
+  pull_request: PR-4
+  status: pending
+verification:
+  level: L1
+  commit: 6ce048f
+  results:
+  - command: npm run test -- --run src/infrastructure/acp/__tests__/agentContracts.test.ts
+    result: passed; 2 passed
+  - command: npm run test
+    result: passed; 39 files; 199 passed
+  - command: npm run test:legacy
+    result: passed; all frontend legacy guards passed
+  - command: node --experimental-strip-types scripts/test-agent-contracts.mts
+    result: passed
+  - command: npm run lint
+    result: passed
+  - command: npm run build
+    result: passed; 3505 modules transformed
+  - command: python docs/Issue Library/harness/scripts/validate_harness.py
+    result: passed; 45 task cards; dependency DAG acyclic
+  - command: git diff --check
+    result: passed
+handoff: docs/Issue Library/harness/handoffs/I02-A-FE-01.md

@@ -4,9 +4,13 @@ title: 校验 runtime generation 迟到事件收敛
 type: BE
 owner: A
 mode: longrun-a
-status: planned
+status: review_pending
 priority: P1
-assignee: null
+assignee: codex-role-a
+base:
+  branch: main
+  commit: 413fb5b
+integration_base: null
 depends_on:
 - I03-A-FE-01
 contract_refs: []
@@ -19,7 +23,10 @@ scope:
   - src/runtimeStore.ts
   - src-tauri/src/lifecycle/**
   - scripts/test-agent-reconnect-transaction.mts
+  - scripts/test-agent-listener-lifecycle.mts
   - docs/Issue Library/ISSUE-04.md
+  - docs/Issue Library/harness/tasks/I04-A-BE-01.yaml
+  - docs/Issue Library/harness/handoffs/I04-A-BE-01.md
   deny:
   - docs/archive/**
   - .env*
@@ -27,6 +34,16 @@ scope:
   read_only: []
 shared_touchpoints: []
 objective: 校验 runtime generation 迟到事件收敛
+implementation_contract:
+  inputs:
+  - agent_status lifecycle snapshot/event with optional generation
+  - frontend runtimeStore status write path
+  outputs:
+  - lower-generation payloads cannot overwrite newer per-Agent snapshots
+  - same-generation events remain arrival-ordered
+  invariants:
+  - generation advances only on successful backend client replacement
+  - unversioned payloads remain admissible because ordering is incomparable
 acceptance:
 - id: AC-1
   behavior: 校验 runtime generation 迟到事件收敛；旧 generation 事件不能覆盖新 runtime；快照与事件语义一致。
@@ -38,10 +55,41 @@ evidence:
 commands:
   focused:
   - cd src-tauri && cargo test --lib --no-run
+  - cd src-tauri && cargo test --lib --offline
+  - npm run test -- --run src/components/settings/__tests__/agentStatusGeneration.test.ts
+  - node --experimental-strip-types scripts/test-agent-reconnect-transaction.mts
   broader:
   - npm run lint
   - npm run build
   - git diff --check
 questions: []
 decision_log: []
-handoff: null
+last_progress_commit: c2f24d6
+review:
+  pull_request: PR-7
+  status: pending
+verification:
+  level: L1
+  commit: c2f24d6
+  results:
+  - command: npm run test -- --run src/components/settings/__tests__/agentStatusGeneration.test.ts
+    result: passed; 3 passed
+  - command: cd src-tauri && cargo test --lib --no-run --offline
+    result: passed
+  - command: cd src-tauri && cargo test --lib --offline
+    result: passed; 425 passed; 4 ignored
+  - command: npm run test
+    result: passed; 42 files; 208 passed
+  - command: npm run test:legacy
+    result: passed; all frontend legacy guards passed
+  - command: npm run lint
+    result: passed
+  - command: npm run build
+    result: passed; 3505 modules transformed
+  - command: cargo build --release --offline
+    result: passed
+  - command: python docs/Issue Library/harness/scripts/validate_harness.py
+    result: passed; 45 task cards; dependency DAG acyclic
+  - command: git diff --check
+    result: passed
+handoff: docs/Issue Library/harness/handoffs/I04-A-BE-01.md

@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState, Suspense } from 'react'
+import { useEffect, useMemo, useRef, useState, Suspense } from 'react'
 import { invoke } from '@tauri-apps/api/core'
 import { sanitizeHtml } from '../../components/chat/htmlSanitizer'
 import { highlightCode } from '../../components/chat/codeHighlight'
@@ -8,6 +8,7 @@ import { normalizeWorkspaceText } from '../../infrastructure/tauri/workspaceCont
 import { changedLineNumbers } from '../../domains/fileDispatch/fileDiff.ts'
 import { useWorkspaceStore } from '../../workspaceStore'
 import { languageFromPath } from './fileSheetState.ts'
+import { advanceSourceContext, beginSourceRequest, isCurrentSourceRequest, type SourceRequestContext } from './sourceRequestGuard'
 
 /**
  * FileTabView — 只读文件视图（W2-04）。
@@ -27,11 +28,16 @@ export default function FileTabView({ source, path, onTruncated, onContentReady,
   const [highlighted, setHighlighted] = useState<{ html: string; lang: string } | null>(null)
   const [error, setError] = useState('')
   const [changedLines, setChangedLines] = useState<number[]>([])
+  const requestContext = useRef<SourceRequestContext>({ source: null, generation: 0 })
   // W2-09：版本戳订阅——agent 工具改动该文件时递增，触发 300ms debounce 重拉
   const touchVersion = useWorkspaceStore(s => (source && path) ? s.touchVersions[`${source}:${path}`] : undefined)
   const loadContent = (showChanged: boolean) => {
     if (!source || !path) return
+    requestContext.current = { source, generation: requestContext.current.generation + 1 }
+    const token = beginSourceRequest(requestContext.current, source)
+    const requestPath = path
     createWorkspaceClient({ invoke: (cmd, args) => invoke(cmd, args as Record<string, unknown> | undefined) }).readText(source, path).then(raw => {
+      if (!isCurrentSourceRequest(requestContext.current, token) || requestPath !== path) return
       const text = normalizeWorkspaceText(raw)
       if (!text) return
       setContent(previous => {
@@ -43,18 +49,26 @@ export default function FileTabView({ source, path, onTruncated, onContentReady,
       })
       onTruncated(text.truncated)
       onContentReady?.(text.content)
-      const lang = languageFromPath(path)
-      highlightCode(lang, text.content).then(html => { if (html) setHighlighted({ html, lang }) }).catch(() => {})
-    }).catch(err => { setError(err instanceof Error ? err.message : String(err)) })
+      const lang = languageFromPath(requestPath)
+      highlightCode(lang, text.content).then(html => {
+        if (html && isCurrentSourceRequest(requestContext.current, token) && requestPath === path) setHighlighted({ html, lang })
+      }).catch(() => {})
+    }).catch(err => {
+      if (isCurrentSourceRequest(requestContext.current, token) && requestPath === path) setError(err instanceof Error ? err.message : String(err))
+    })
   }
 
   useEffect(() => {
+    requestContext.current = advanceSourceContext(requestContext.current, source)
     setContent('')
     setHighlighted(null)
     setError('')
     setChangedLines([])
     if (!source || !path) return
     loadContent(false)
+    return () => {
+      requestContext.current = advanceSourceContext(requestContext.current, null)
+    }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [source, path])
 

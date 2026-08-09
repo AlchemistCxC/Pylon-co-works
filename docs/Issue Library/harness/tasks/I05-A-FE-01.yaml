@@ -4,9 +4,13 @@ title: 切换事务末尾 agent_status 对账
 type: FE
 owner: A
 mode: longrun-a
-status: planned
+status: review_pending
 priority: P1
-assignee: null
+assignee: codex-role-a
+base:
+  branch: main
+  commit: 7cbb792
+integration_base: null
 depends_on:
 - I04-A-FE-01
 contract_refs: []
@@ -19,6 +23,8 @@ scope:
   - src/components/Settings.tsx
   - src/sheets/OverviewSheetView.tsx
   - docs/Issue Library/ISSUE-05.md
+  - docs/Issue Library/harness/tasks/I05-A-FE-01.yaml
+  - docs/Issue Library/harness/handoffs/I05-A-FE-01.md
   deny:
   - docs/archive/**
   - .env*
@@ -36,11 +42,31 @@ evidence:
   - docs/Issue Library/harness/handoffs/I05-A-FE-01.md
 commands:
   focused:
-  - npm run test
+  - npm run test -- --run src/application/transactions/__tests__/switchAgentTransaction.test.ts
   broader:
   - npm run lint
   - npm run build
   - git diff --check
 questions: []
 decision_log: []
-handoff: null
+last_progress_commit: f5bc9e6
+review:
+  pull_request: PR-10
+  status: pending
+verification:
+  level: L1
+  commit: f5bc9e6
+  results:
+  - command: npm run test -- --run src/application/transactions/__tests__/switchAgentTransaction.test.ts
+    result: passed; 4 passed
+  - command: npm run test
+    result: passed; 45 files; 213 passed
+  - command: npm run lint
+    result: passed
+  - command: npm run build
+    result: passed; built in 11.18s
+  - command: python docs/Issue Library/harness/scripts/validate_harness.py
+    result: passed; 45 task cards; dependency DAG acyclic
+  - command: git diff --check
+    result: passed
+handoff: docs/Issue Library/harness/handoffs/I05-A-FE-01.md

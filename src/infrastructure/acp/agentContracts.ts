@@ -11,11 +11,12 @@ import type { AgentStatus } from '../../components/settings/agentTypes'
  * - 快照键一律「能力存在 = true」命名，读取宽容（?. + 缺省）。
  * - 例外① sessionClose 缺省 true（Peri 有、Hermes 显式无、未来 agent 未声明按 ACP 基线有）。
  * - 例外② mcpHttp/mcpSse 缺省 true，显式 false 才关闭（未声明 ≠ 不支持）。
- * - null/缺失 capabilities = 未连接，connected:false，其余键取保守缺省。
+ * - lifecycle status 是 connected 唯一真值；capabilities 缺失只表示能力未协商。
  */
 
 export interface AgentCapabilitySnapshot {
   connected: boolean
+  capabilitiesKnown: boolean
   loadSession: boolean
   promptImage: boolean
   sessionFork: boolean
@@ -30,10 +31,11 @@ export interface AgentCapabilitySnapshot {
 const isPlainObject = (value: unknown): value is Record<string, unknown> =>
   typeof value === 'object' && value !== null && !Array.isArray(value)
 
-/** 能力快照派生：null/缺失 capabilities → connected:false + 保守缺省；空对象不断线 */
+/** 能力快照派生：lifecycle 决定连接，capabilities 独立表达协商是否完成。 */
 export function resolveCapabilitySnapshot(status: AgentStatus | null | undefined): AgentCapabilitySnapshot {
   const capabilities = status == null ? undefined : status.capabilities
-  const connected = capabilities !== null && capabilities !== undefined
+  const connected = status?.status === 'connected'
+  const capabilitiesKnown = isPlainObject(capabilities)
   const caps = isPlainObject(capabilities) ? capabilities : null
   const session = isPlainObject(caps?.sessionCapabilities) ? caps.sessionCapabilities : null
   const prompt = isPlainObject(caps?.promptCapabilities) ? caps.promptCapabilities : null
@@ -41,6 +43,7 @@ export function resolveCapabilitySnapshot(status: AgentStatus | null | undefined
   const authMethods = caps?.authMethods
   return {
     connected,
+    capabilitiesKnown,
     loadSession: caps?.loadSession === true,
     promptImage: prompt?.image === true,
     sessionFork: session?.fork === true,

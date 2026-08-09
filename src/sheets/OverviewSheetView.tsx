@@ -51,6 +51,8 @@ export default function OverviewSheetView({ ctx }: { sheet: SheetRecord; ctx: Sh
       switchAgent: () => agentClient.switchAgent(agent.id),
       resetRuntime: () => useRuntimeStore.getState().resetAll(),
       setActiveAgent: id => useIdentityStore.getState().setActiveAgent(id),
+      fetchAgentStatus: () => agentClient.agentStatus(),
+      applyAgentStatus: (id, status) => useRuntimeStore.getState().setAgentStatus(id, status),
       reportError: (action, err) => {
         setError(err instanceof Error ? err.message : String(err))
         reportRuntimeError(action, err)

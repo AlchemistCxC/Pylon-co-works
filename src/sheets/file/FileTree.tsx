@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import { ChevronDown, ChevronRight, Folder, FolderOpen } from 'lucide-react'
 import { invoke } from '@tauri-apps/api/core'
 import { reportRuntimeError } from '../../runtimeError'
@@ -6,6 +6,7 @@ import { createWorkspaceClient } from '../../infrastructure/tauri/workspaceClien
 import { classifyWorkspaceError, mergeWorkspaceEntries, normalizeWorkspaceEntries } from '../../infrastructure/tauri/workspaceContracts.ts'
 import type { WorkspaceEntry, WorkspaceTree } from '../../components/right-panel/rightPanelTypes'
 import FileTypeIcon from './FileTypeIcon'
+import { advanceSourceContext, beginSourceRequest, isCurrentSourceRequest, type SourceRequestContext } from './sourceRequestGuard'
 
 /**
  * FileTree — 懒加载、可双向折叠的工作区文件树。
@@ -22,36 +23,46 @@ export default function FileTree({ source, activeFile, onOpen }: {
   const [expanded, setExpanded] = useState<Set<string>>(new Set())
   const [loading, setLoading] = useState<Set<string>>(new Set())
   const [error, setError] = useState('')
+  const requestContext = useRef<SourceRequestContext>({ source: null, generation: 0 })
 
   const load = useCallback(async (relativePath?: string) => {
     if (!source) return
+    const token = beginSourceRequest(requestContext.current, source)
     const key = relativePath ?? ''
     setLoading(previous => new Set(previous).add(key))
     try {
       const raw = await createWorkspaceClient({ invoke: (cmd, args) => invoke(cmd, args as Record<string, unknown> | undefined) }).listEntries(source, relativePath ?? '')
+      if (!isCurrentSourceRequest(requestContext.current, token)) return
       const entries = normalizeWorkspaceEntries(raw)
       setTree(previous => relativePath
         ? { entries: mergeWorkspaceEntries(previous.entries, relativePath, entries), selectedPath: previous.selectedPath }
         : { entries, selectedPath: previous.selectedPath })
       setError('')
     } catch (err) {
+      if (!isCurrentSourceRequest(requestContext.current, token)) return
       setError(classifyWorkspaceError(err).message)
       reportRuntimeError('读取工作区', err)
     } finally {
-      setLoading(previous => {
-        const next = new Set(previous)
-        next.delete(key)
-        return next
-      })
+      if (isCurrentSourceRequest(requestContext.current, token)) {
+        setLoading(previous => {
+          const next = new Set(previous)
+          next.delete(key)
+          return next
+        })
+      }
     }
   }, [source])
 
   useEffect(() => {
+    requestContext.current = advanceSourceContext(requestContext.current, source)
     setTree({ entries: [], selectedPath: null })
     setExpanded(new Set())
     setLoading(new Set())
     void load()
-  }, [load])
+    return () => {
+      requestContext.current = advanceSourceContext(requestContext.current, null)
+    }
+  }, [load, source])
 
   const toggleFolder = async (entry: WorkspaceEntry) => {
     if (expanded.has(entry.path)) {
