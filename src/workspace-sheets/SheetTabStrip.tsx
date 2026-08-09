@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { useIdentityStore } from '../identityStore'
 import { useWorkspaceStore } from '../workspaceStore'
+import { activateAgentSheet } from './activateAgentSheet'
 import type { AgentStatus } from '../components/settings/agentTypes'
 import type { SheetRecord } from './sheetTypes'
 import WorkspaceMenu, { type WorkspaceMenuActions } from './WorkspaceMenu'
@@ -53,6 +54,8 @@ export default function SheetTabStrip({
   const activeProfileId = useIdentityStore(state => state.activeProfileId)
   const sheetAgentStates = useWorkspaceStore(state => state.sheetAgentStates)
   const tabRefs = useRef(new Map<string, HTMLDivElement>())
+  const switchingSheetRef = useRef<string | null>(null)
+  const [switchingSheetId, setSwitchingSheetId] = useState<string | null>(null)
   const [menuSheetId, setMenuSheetId] = useState<string | null>(null)
   const [menuPosition, setMenuPosition] = useState<{ x: number; y: number } | null>(null)
   // 稳定回调：避免菜单打开期间父组件重渲染导致 document 监听反复重绑
@@ -66,12 +69,31 @@ export default function SheetTabStrip({
     tabRefs.current.get(activeSheetId)?.scrollIntoView({ block: 'nearest', inline: 'nearest' })
   }, [activeSheetId, sheets.length])
 
+  const focusSheet = useCallback(async (sheet: SheetRecord): Promise<boolean> => {
+    const targetAgentId = sheet.kind === 'agent' ? sheet.agentId : undefined
+    const currentActiveAgent = useIdentityStore.getState().activeAgent || activeAgent
+    if (!targetAgentId || targetAgentId === currentActiveAgent) {
+      onFocus(sheet.id)
+      return true
+    }
+    if (switchingSheetRef.current) return false
+
+    switchingSheetRef.current = sheet.id
+    setSwitchingSheetId(sheet.id)
+    const agentName = agents.find(agent => agent.id === targetAgentId)?.name || sheet.title || targetAgentId
+    const activated = await activateAgentSheet(targetAgentId, agentName, () => onFocus(sheet.id))
+    switchingSheetRef.current = null
+    setSwitchingSheetId(null)
+    return activated
+  }, [activeAgent, agents, onFocus])
+
   const moveFocus = (sheetId: string, direction: -1 | 1) => {
     const index = sheets.findIndex(sheet => sheet.id === sheetId)
     if (index < 0 || sheets.length < 2) return
     const next = sheets[(index + direction + sheets.length) % sheets.length]
-    onFocus(next.id)
-    requestAnimationFrame(() => tabRefs.current.get(next.id)?.querySelector<HTMLButtonElement>('.sheet-tab-focus')?.focus())
+    void focusSheet(next).then(focused => {
+      if (focused) requestAnimationFrame(() => tabRefs.current.get(next.id)?.querySelector<HTMLButtonElement>('.sheet-tab-focus')?.focus())
+    })
   }
 
   return (
@@ -107,8 +129,10 @@ export default function SheetTabStrip({
               className="sheet-tab-focus"
               role="tab"
               aria-selected={active}
+              aria-busy={switchingSheetId === sheet.id}
+              disabled={switchingSheetId === sheet.id}
               tabIndex={active ? 0 : -1}
-              onClick={() => onFocus(sheet.id)}
+              onClick={() => { void focusSheet(sheet) }}
               onKeyDown={event => {
                 if (event.key === 'ArrowLeft') {
                   event.preventDefault()
