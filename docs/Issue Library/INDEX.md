@@ -201,8 +201,8 @@ Release 1.x 先明确为“多 Agent 可配置、GUI 单活切换”，而不是
    - 限制：网页模式没有真实 Tauri IPC、child WebView、ACP 子进程和系统窗口能力；涉及这些能力时，只验收前端壳、禁用态、mock 数据或错误提示，不得据此标记真实功能完成。
 3. **等级 3：真实应用验收通过**
    - 范围：真实 Tauri 应用、Release 或等价打包环境、真实 Peri/Hermes、真实 WebView2、真实 Gateway Adapter、真实文件系统和 Git 仓库。
-   - 开发入口：在 `G:/Project/prism-desktop` 执行 `npm run tauri dev`。
-   - Release 入口：`G:/Project/prism-desktop/src-tauri/target/release/pylon.exe` 或本次待发布 zip 解压后的 `pylon.exe`。
+   - 开发入口：在仓库根目录执行 `npm run tauri dev`。
+   - Release 入口：`src-tauri/target/release/pylon.exe` 或本次待发布 zip 解压后的 `pylon.exe`。
    - 通过标准：按问题触发步骤复现，保存运行日志、Tauri event、ACP wire、截图/录屏或真实平台收发证据；只有 UI 看起来正常但无运行链证据，不得标记通过。
 
 验收结果统一填写：
