@@ -4,9 +4,9 @@ title: 异步请求 generation/source guard
 type: FE
 owner: A
 mode: longrun-a
-status: planned
+status: in_progress
 priority: P1
-assignee: null
+assignee: codex-role-a
 depends_on:
 - I07-A-FE-01
 contract_refs: []
@@ -42,4 +42,4 @@ commands:
   - git diff --check
 questions: []
 decision_log: []
-handoff: null
+handoff: docs/Issue Library/harness/handoffs/I07-A-FE-02.md
