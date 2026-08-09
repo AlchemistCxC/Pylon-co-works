@@ -1,6 +1,6 @@
-import { useMemo, useReducer, useState } from 'react'
+import { useEffect, useMemo, useReducer, useState } from 'react'
 import { useWorkspaceStore } from '../../workspaceStore'
-import { createFileSheetState, fileSheetReducer, parseOpenTabs, serializeOpenTabs, type FileSheetSection } from './fileSheetState.ts'
+import { createFileSheetState, fileSheetReducer, parseOpenTabs, resetFileSheetTransientState, serializeOpenTabs, type FileSheetSection } from './fileSheetState.ts'
 import type { DispatchSelection } from '../../domains/fileDispatch/dispatchMessage.ts'
 import FileSheetSidebar from './FileSheetSidebar'
 import FileTree from './FileTree'
@@ -45,7 +45,17 @@ export default function FileSheetView({ sheet, ctx }: { sheet: SheetRecord; ctx:
     : null
 
   const selectSection = (section: FileSheetSection) => dispatch({ type: 'set-section', section })
-  const selectSource = (source: string) => dispatch({ type: 'set-source', source })
+  const selectSource = (source: string | null) => dispatch({ type: 'set-source', source })
+
+  useEffect(() => {
+    if (state.targetSource !== null) return
+    const cleared = resetFileSheetTransientState()
+    setActiveDiff(cleared.activeDiff)
+    setTruncated(cleared.truncated)
+    setSelection(null)
+    setFileContent(cleared.fileContent)
+    setInstruction(cleared.instruction)
+  }, [state.targetSource])
 
   const openTab = (path: string) => {
     const next = openTabs.includes(path) ? openTabs : [...openTabs, path]

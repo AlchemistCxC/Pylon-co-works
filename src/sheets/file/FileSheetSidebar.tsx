@@ -18,7 +18,7 @@ export default function FileSheetSidebar({
   collapsed: boolean
   hidden: boolean
   onSelectSection: (section: FileSheetSection) => void
-  onSelectSource: (source: string) => void
+  onSelectSource: (source: string | null) => void
   onCollapse: () => void
   children?: React.ReactNode
 }) {
@@ -77,6 +77,7 @@ export default function FileSheetSidebar({
               <div className="file-panel-heading">
                 <span>WORKSPACES</span>
                 <span className="file-panel-count">{sessions.length}</span>
+                {targetSource && <button type="button" className="file-source-clear" onClick={() => onSelectSource(null)}>清除选择</button>}
               </div>
               {sessions.length === 0 ? (
                 <p className="file-section-hint">没有可用会话</p>

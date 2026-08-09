@@ -4,9 +4,13 @@ title: FileSheet source null 清理状态
 type: FE
 owner: A
 mode: longrun-a
-status: planned
+status: review_pending
 priority: P1
-assignee: null
+assignee: codex-role-a
+base:
+  branch: main
+  commit: 723b6c9
+integration_base: null
 depends_on:
 - I01-A-BE-01
 contract_refs: []
@@ -18,6 +22,8 @@ scope:
   - src/workspaceStore.ts
   - scripts/**
   - docs/Issue Library/ISSUE-07.md
+  - docs/Issue Library/harness/tasks/I07-A-FE-01.yaml
+  - docs/Issue Library/harness/handoffs/I07-A-FE-01.md
   deny:
   - docs/archive/**
   - .env*
@@ -25,6 +31,16 @@ scope:
   read_only: []
 shared_touchpoints: []
 objective: FileSheet source null 清理状态
+implementation_contract:
+  inputs:
+  - FileSheet targetSource selection, including explicit null clear
+  - Git/Views local state and in-flight source-bound effects
+  outputs:
+  - clear selection resets FileSheet transient editor/diff state
+  - source null clears Git and Views data/error state before empty rendering
+  invariants:
+  - source null never displays stale Git/Views entries
+  - disposed source requests cannot write after source changes
 acceptance:
 - id: AC-1
   behavior: FileSheet source null 清理状态；source A→null 清除 Git/Views/diff/file state；空态无旧数据。
@@ -35,11 +51,35 @@ evidence:
   - docs/Issue Library/harness/handoffs/I07-A-FE-01.md
 commands:
   focused:
-  - npm run test
+  - npm run test -- --run src/sheets/file/__tests__/fileSheetSourceReset.test.ts
+  - node --experimental-strip-types scripts/test-file-sheet-state.mts
+  - node --experimental-strip-types scripts/test-file-git.mts
   broader:
   - npm run lint
   - npm run build
   - git diff --check
 questions: []
 decision_log: []
-handoff: null
+last_progress_commit: pending
+review:
+  pull_request: null
+  status: pending
+verification:
+  level: L1
+  commit: pending
+  results:
+  - command: npm run test -- --run src/sheets/file/__tests__/fileSheetSourceReset.test.ts
+    result: passed; 1 passed
+  - command: npm run test
+    result: passed; 43 files; 209 passed
+  - command: npm run test:legacy
+    result: passed; all frontend legacy guards passed
+  - command: npm run lint
+    result: passed
+  - command: npm run build
+    result: passed; 3505 modules transformed
+  - command: python docs/Issue Library/harness/scripts/validate_harness.py
+    result: passed; 45 task cards; dependency DAG acyclic
+  - command: git diff --check
+    result: passed
+handoff: docs/Issue Library/harness/handoffs/I07-A-FE-01.md

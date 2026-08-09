@@ -4,7 +4,7 @@
  */
 import { strict as assert } from 'node:assert'
 import { readFileSync } from 'node:fs'
-import { createFileSheetState, fileSheetReducer, FILE_SHEET_SECTIONS, type FileSheetState } from '../src/sheets/file/fileSheetState.ts'
+import { createFileSheetState, fileSheetReducer, FILE_SHEET_SECTIONS, resetFileSheetTransientState, type FileSheetState } from '../src/sheets/file/fileSheetState.ts'
 
 // W2-03：FileSheet 分区状态——五分区、targetSource 本地态、切 source 不串
 
@@ -39,10 +39,14 @@ assert.match(view, /singletonKey\?\.replace\(\/\^file:\/, ''\)/, 'singletonKey f
 assert.match(view, /useReducer\(fileSheetReducer, initialSource \?\? null, createFileSheetState\)/, '初始态必须收 initial source')
 assert.match(view, /patchSheetMetadata/, 'W2-04：openTabs/activeFile 经组合 action 写 metadata')
 assert.equal(view.includes('selectSource = (source) => dispatch'), false, 'selectSource 不再引用 patchSheetMetadata')
-assert.match(view, /const selectSource = \(source: string\) => dispatch\(\{ type: 'set-source', source \}\)/, 'targetSource 仍为本地态（不写 metadata）')
+assert.match(view, /const selectSource = \(source: string \| null\) => dispatch\(\{ type: 'set-source', source \}\)/, 'targetSource 仍为本地态（不写 metadata）')
+assert.match(view, /resetFileSheetTransientState\(\)/, 'source 清空必须重置 FileSheet 瞬态')
 
 // 5. FileSheetSidebar 五分区 + 会话列表切 source
 const sidebar = readFileSync(new URL('../src/sheets/file/FileSheetSidebar.tsx', import.meta.url), 'utf8')
+assert.match(sidebar, /onSelectSource\(null\)/, '会话分区必须提供清除选择入口')
+
+assert.deepEqual(resetFileSheetTransientState(), { activeDiff: null, truncated: false, instruction: '', fileContent: '' })
 assert.match(sidebar, /FILE_SHEET_SECTIONS\.map/, '五分区必须经单一真值枚举')
 assert.match(sidebar, /onSelectSource\(session\.source\)/, '会话列表点击必须切 source')
 assert.match(sidebar, /48px Activity Bar/, '分区栏必须保持 48px 窄条')
