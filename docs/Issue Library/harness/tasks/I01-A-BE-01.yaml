@@ -4,9 +4,13 @@ title: 结构化 AgentContextKey 与 workspace 路由 guard
 type: BE
 owner: A
 mode: longrun-a
-status: planned
+status: review_pending
 priority: P1
-assignee: null
+assignee: codex-role-a
+base:
+  branch: main
+  commit: 572fcd6
+integration_base: null
 depends_on: []
 contract_refs: []
 inspect_first:
@@ -22,6 +26,8 @@ scope:
   - src-tauri/src/workspace*.rs
   - scripts/**
   - docs/Issue Library/ISSUE-01.md
+  - docs/Issue Library/harness/tasks/I01-A-BE-01.yaml
+  - docs/Issue Library/harness/handoffs/I01-A-BE-01.md
   deny:
   - docs/archive/**
   - .env*
@@ -29,6 +35,24 @@ scope:
   read_only: []
 shared_touchpoints: []
 objective: 结构化 AgentContextKey 与 workspace 路由 guard
+implementation_contract:
+  inputs:
+  - ISSUE-01 冻结的 AgentContextKey 与单活兼容边界
+  - 当前 AppState runtime/session/workspace 路由实现
+  outputs:
+  - 后端可验证的 AgentContextKey helper/guard
+  - workspace/Git source 归属错误的显式 PylonError
+  invariants:
+  - agentId 与 source 必须成对校验
+  - source 不属于目标 runtime 时不得读取另一个 runtime 或 agent_cwd
+  - 旧 GUI command 兼容路径不能静默改变目标上下文
+tests:
+  red:
+  - command: cd src-tauri && cargo test --lib git_workspace_root_rejects_missing_source_in_active_runtime
+    expected: 修复前不存在该拒绝行为或稳定失败
+  green:
+  - command: cd src-tauri && cargo test --lib workspace_cmds::tests
+    expected: workspace/Git 路由 guard focused tests 通过
 acceptance:
 - id: AC-1
   behavior: 结构化 AgentContextKey 与 workspace 路由 guard；同名 source/session 在错误 Agent 上返回显式错误，不回退
@@ -40,6 +64,7 @@ evidence:
   - docs/Issue Library/harness/handoffs/I01-A-BE-01.md
 commands:
   focused:
+  - python "docs/Issue Library/harness/scripts/validate_harness.py"
   - cd src-tauri && cargo test --lib --no-run
   broader:
   - npm run lint
@@ -47,4 +72,26 @@ commands:
   - git diff --check
 questions: []
 decision_log: []
-handoff: null
+last_progress_commit: b5def0f
+review:
+  pull_request: PR-2
+  status: pending
+verification:
+  level: L1
+  commit: b5def0f
+  results:
+  - command: cargo test --lib workspace_cmds::tests
+    result: passed; 3 passed
+  - command: cargo test --lib --no-run
+    result: passed
+  - command: cargo test --lib
+    result: passed; 425 passed; 4 ignored; 0 failed
+  - command: cargo build --release
+    result: passed
+  - command: npm run lint
+    result: passed
+  - command: npm run build
+    result: passed; 3504 modules transformed
+  - command: git diff --check
+    result: passed
+handoff: docs/Issue Library/harness/handoffs/I01-A-BE-01.md
