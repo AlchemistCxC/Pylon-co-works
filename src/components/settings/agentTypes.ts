@@ -33,6 +33,17 @@ export interface AgentStatusPayload {
   capabilities?: unknown | null
 }
 
+/**
+ * Versioned snapshots/events are monotonic per Agent. Payloads without a
+ * generation remain admissible because their ordering cannot be compared.
+ */
+export function shouldAcceptAgentStatus(previous: AgentStatus | undefined, incoming: AgentStatus): boolean {
+  const previousGeneration = previous?.generation
+  const incomingGeneration = incoming.generation
+  if (typeof previousGeneration !== 'number' || typeof incomingGeneration !== 'number') return true
+  return incomingGeneration >= previousGeneration
+}
+
 export function normalizeAgentStatus(payload: AgentStatusPayload, fallbackAgent = ''): AgentStatus {
   const knownStatus: AgentConnectionStatus[] = ['connected', 'connecting', 'reconnecting', 'disconnected', 'error', 'crashed', 'inactive']
   const status: AgentConnectionStatus = payload.status === undefined

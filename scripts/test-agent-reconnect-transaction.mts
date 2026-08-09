@@ -5,7 +5,7 @@
 import { strict as assert } from 'node:assert'
 import { readFileSync } from 'node:fs'
 import { runReconnectCommand } from '../src/components/settings/reconnectCommand.ts'
-import type { AgentStatus } from '../src/components/settings/agentTypes.ts'
+import { shouldAcceptAgentStatus, type AgentStatus } from '../src/components/settings/agentTypes.ts'
 
 const settings = readFileSync(new URL('../src/components/Settings.tsx', import.meta.url), 'utf8')
 
@@ -58,5 +58,14 @@ const failedReconciliation = await runReconnectCommand({
 })
 assert.equal((failedReconciliation.reconciliationError as Error).message, 'status unavailable')
 assert.equal(lifecycle, lastAuthoritative, '快照查询失败时必须保留最后权威 lifecycle')
+
+assert.equal(shouldAcceptAgentStatus(
+  { agent: 'peri', status: 'connected', generation: 4 },
+  { agent: 'peri', status: 'reconnecting', generation: 3 },
+), false, '旧 generation 事件不得覆盖新 runtime 快照')
+assert.equal(shouldAcceptAgentStatus(
+  { agent: 'peri', status: 'reconnecting', generation: 4 },
+  { agent: 'peri', status: 'connected', generation: 4 },
+), true, '同 generation 仍按事件到达顺序更新')
 
 console.log('agent reconnect command/lifecycle 分离回归测试通过')
