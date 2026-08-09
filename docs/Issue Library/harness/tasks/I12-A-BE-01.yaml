@@ -4,7 +4,7 @@ title: 冻结 adapter catalog/instance/route domain contract
 type: BE
 owner: A
 mode: longrun-a
-status: planned
+status: review_pending
 priority: P1
 assignee: null
 depends_on:
