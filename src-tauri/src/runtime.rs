@@ -15,6 +15,26 @@ use crate::agent_runtime::AgentRuntimeState;
 use crate::permission::PendingPermission;
 use crate::session::SessionInfo;
 
+/// Stable identity for a GUI/runtime session context.
+///
+/// `source` is only unique within one Agent runtime. Keeping `agent_id` as a
+/// separate field prevents two agents that use the same source string from
+/// being treated as the same workspace/session.
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+pub(crate) struct AgentContextKey {
+    pub(crate) agent_id: String,
+    pub(crate) source: String,
+}
+
+impl AgentContextKey {
+    pub(crate) fn new(agent_id: impl Into<String>, source: impl Into<String>) -> Self {
+        Self {
+            agent_id: agent_id.into(),
+            source: source.into(),
+        }
+    }
+}
+
 /// 单个 agent 的运行时状态（per-agent 隔离）。
 pub struct AgentRuntime {
     pub acp: Arc<tokio::sync::Mutex<AcpClient>>,
@@ -139,6 +159,14 @@ impl Default for AgentRuntimeManager {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn agent_context_key_keeps_agent_dimension() {
+        let peri = AgentContextKey::new("peri", "local:shared");
+        let hermes = AgentContextKey::new("hermes", "local:shared");
+        assert_ne!(peri, hermes, "同名 source 必须按 agentId 隔离");
+        assert_eq!(peri, AgentContextKey::new("peri", "local:shared"));
+    }
 
     #[test]
     fn manager_insert_get_and_isolate_runtimes() {
