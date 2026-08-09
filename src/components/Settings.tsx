@@ -24,7 +24,7 @@ import { reportRuntimeError } from '../runtimeError'
 import { switchAgentTransaction } from '../application/transactions/switchAgentTransaction'
 import './SettingsCommon.css'
 import './Settings.css'
-import { normalizeAgentStatus, statusLabel } from './settings/agentTypes'
+import { selectAgentStatus, statusLabel } from './settings/agentTypes'
 import { beginReconnect, failReconnect } from './settings/agentState'
 import ConfigOptionsPanel from './settings/ConfigOptionsPanel'
 import TemplateLibrary from './settings/TemplateLibrary'
@@ -232,7 +232,7 @@ export default function Settings({ onClose, activeSessionId }: { onClose?: () =>
   const [switchingAgentId, setSwitchingAgentId] = useState<string | null>(null)
   const [reconnecting, setReconnecting] = useState(false)
   const [reloading, setReloading] = useState(false)
-  const currentStatus = agentStatuses[activeAgent] || normalizeAgentStatus({}, activeAgent)
+  const currentStatus = selectAgentStatus(activeAgent, activeAgent, agentStatuses)
 
   // 应用全局预设
   const applyGlobalPreset = (name: string) => {
