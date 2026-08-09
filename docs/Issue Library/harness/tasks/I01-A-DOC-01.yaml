@@ -4,7 +4,7 @@ title: 冻结 Release 单活边界与 AgentContext 兼容约束
 type: DOC
 owner: A
 mode: longrun-a
-status: implemented
+status: review_pending
 priority: P1
 assignee: codex-role-a
 base:
@@ -66,6 +66,9 @@ commands:
 questions: []
 decision_log: []
 last_progress_commit: c1b664c
+review:
+  pull_request: https://github.com/AlchemistCxC/Pylon-co-works/pull/1
+  status: pending
 verification:
   level: L1
   commit: c1b664c
