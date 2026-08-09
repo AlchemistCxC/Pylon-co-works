@@ -1,0 +1,19 @@
+id: CT-UI-0001
+version: 1
+status: proposed
+owner: B
+reviewers: [A]
+product_decision_required: false
+summary: 契约变化摘要
+current_evidence:
+  - path: src/path.tsx
+    lines: 1-10
+change:
+  producers: []
+  consumers: []
+  compatibility: 向后兼容策略
+  removals: []
+affected_tasks: []
+tests: []
+frozen_at_commit: null
+supersedes: null

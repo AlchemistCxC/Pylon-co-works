@@ -1,0 +1,50 @@
+id: I01-A-FE-01
+issue: ISSUE-01
+title: Sheet 聚焦非 active Agent 的切换事务
+type: FE
+owner: A
+mode: longrun-a
+status: planned
+priority: P1
+assignee: null
+depends_on:
+- I01-A-BE-01
+contract_refs: []
+inspect_first:
+- docs/Issue Library/ISSUE-01.md
+scope:
+  allow:
+  - src/identityStore.ts
+  - src/runtimeStore.ts
+  - src/application/transactions/**
+  - src/workspace-sheets/**
+  - src-tauri/src/runtime.rs
+  - src-tauri/src/session/**
+  - src-tauri/src/workspace*.rs
+  - scripts/**
+  - docs/Issue Library/ISSUE-01.md
+  deny:
+  - docs/archive/**
+  - .env*
+  - src-tauri/target/**
+  read_only: []
+shared_touchpoints: []
+objective: Sheet 聚焦非 active Agent 的切换事务
+acceptance:
+- id: AC-1
+  behavior: Sheet 聚焦非 active Agent 的切换事务；点击非 active Agent 先完成 switch，再允许发送/业务 command。
+  address: docs/Issue Library/ISSUE-01.md
+evidence:
+  required_level: L2
+  artifacts:
+  - docs/Issue Library/harness/handoffs/I01-A-FE-01.md
+commands:
+  focused:
+  - npm run test
+  broader:
+  - npm run lint
+  - npm run build
+  - git diff --check
+questions: []
+decision_log: []
+handoff: null

@@ -1,0 +1,47 @@
+id: I11-A-TEST-01
+issue: ISSUE-11
+title: Browser fixture 与真实 WebView 验收
+type: TEST
+owner: S
+mode: longrun-a
+status: planned
+priority: P1
+assignee: null
+depends_on:
+- I11-A-BE-02
+contract_refs: []
+inspect_first:
+- docs/Issue Library/ISSUE-11.md
+scope:
+  allow:
+  - src-tauri/src/browser.rs
+  - src-tauri/src/browser_cmds.rs
+  - src/sheets/browser/**
+  - scripts/**
+  - docs/Issue Library/ISSUE-11.md
+  deny:
+  - docs/archive/**
+  - .env*
+  - src-tauri/target/**
+  read_only: []
+shared_touchpoints: []
+objective: Browser fixture 与真实 WebView 验收
+acceptance:
+- id: AC-1
+  behavior: Browser fixture 与真实 WebView 验收；fixture 覆盖 target blank/window.open/恶意
+    scheme/后退；真实应用验证拦截。
+  address: docs/Issue Library/ISSUE-11.md
+evidence:
+  required_level: L3
+  artifacts:
+  - docs/Issue Library/harness/handoffs/I11-A-TEST-01.md
+commands:
+  focused:
+  - npm run test
+  broader:
+  - npm run lint
+  - npm run build
+  - git diff --check
+questions: []
+decision_log: []
+handoff: null

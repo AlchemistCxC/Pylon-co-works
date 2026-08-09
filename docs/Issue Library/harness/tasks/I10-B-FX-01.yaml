@@ -1,0 +1,44 @@
+id: I10-B-FX-01
+issue: ISSUE-10
+title: Browser sidebar 折叠/展开过渡
+type: FX
+owner: B
+mode: interactive-b
+status: planned
+priority: P1
+assignee: null
+depends_on:
+- I10-A-FE-01
+contract_refs: []
+inspect_first:
+- docs/Issue Library/ISSUE-10.md
+scope:
+  allow:
+  - src/sheets/browser/**
+  - scripts/**
+  - docs/Issue Library/ISSUE-10.md
+  deny:
+  - docs/archive/**
+  - .env*
+  - src-tauri/target/**
+  read_only: []
+shared_touchpoints: []
+objective: Browser sidebar 折叠/展开过渡
+acceptance:
+- id: AC-1
+  behavior: Browser sidebar 折叠/展开过渡；动效不改变 disabled 语义和 WebView bounds，支持 reduced-motion。
+  address: docs/Issue Library/ISSUE-10.md
+evidence:
+  required_level: L2
+  artifacts:
+  - docs/Issue Library/harness/handoffs/I10-B-FX-01.md
+commands:
+  focused:
+  - npm run build
+  broader:
+  - npm run lint
+  - npm run build
+  - git diff --check
+questions: []
+decision_log: []
+handoff: null

@@ -1,0 +1,47 @@
+id: I08-A-FE-01
+issue: ISSUE-08
+title: Views 只消费 touchedFiles 并统一 file/diff tab identity
+type: FE
+owner: A
+mode: longrun-a
+status: planned
+priority: P1
+assignee: null
+depends_on:
+- I07-A-FE-02
+contract_refs: []
+inspect_first:
+- docs/Issue Library/ISSUE-08.md
+scope:
+  allow:
+  - src/sheets/file/**
+  - src/workspaceStore.ts
+  - src-tauri/src/workspace*.rs
+  - scripts/**
+  - docs/Issue Library/ISSUE-08.md
+  deny:
+  - docs/archive/**
+  - .env*
+  - src-tauri/target/**
+  read_only: []
+shared_touchpoints: []
+objective: Views 只消费 touchedFiles 并统一 file/diff tab identity
+acceptance:
+- id: AC-1
+  behavior: Views 只消费 touchedFiles 并统一 file/diff tab identity；SCM 独占 Git，Views 不维护
+    gitStatus；同路径 file/diff tab 不互相覆盖。
+  address: docs/Issue Library/ISSUE-08.md
+evidence:
+  required_level: L1
+  artifacts:
+  - docs/Issue Library/harness/handoffs/I08-A-FE-01.md
+commands:
+  focused:
+  - npm run test
+  broader:
+  - npm run lint
+  - npm run build
+  - git diff --check
+questions: []
+decision_log: []
+handoff: null

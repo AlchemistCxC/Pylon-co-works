@@ -1,0 +1,50 @@
+id: I13-B-FX-01
+issue: ISSUE-13
+title: Settings domain 切换与 preview 动效
+type: FX
+owner: B
+mode: interactive-b
+status: blocked_contract
+priority: P1
+assignee: null
+depends_on:
+- I13-A-FE-01
+contract_refs:
+- proposal-required
+inspect_first:
+- docs/Issue Library/ISSUE-13.md
+scope:
+  allow:
+  - src/components/Settings.tsx
+  - src/components/Settings.css
+  - src/components/settings/**
+  - src/themeFieldDefs.ts
+  - src-tauri/src/session/**
+  - scripts/**
+  - docs/Issue Library/ISSUE-13.md
+  deny:
+  - docs/archive/**
+  - .env*
+  - src-tauri/target/**
+  read_only: []
+shared_touchpoints:
+- contract-proposal-required
+objective: Settings domain 切换与 preview 动效
+acceptance:
+- id: AC-1
+  behavior: Settings domain 切换与 preview 动效；不改变设置 schema/行为，支持 reduced-motion，预览区域稳定。
+  address: docs/Issue Library/ISSUE-13.md
+evidence:
+  required_level: L2
+  artifacts:
+  - docs/Issue Library/harness/handoffs/I13-B-FX-01.md
+commands:
+  focused:
+  - npm run build
+  broader:
+  - npm run lint
+  - npm run build
+  - git diff --check
+questions: []
+decision_log: []
+handoff: null

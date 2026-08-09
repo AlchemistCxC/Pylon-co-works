@@ -1,0 +1,48 @@
+id: I06-A-FE-03
+issue: ISSUE-06
+title: 真实 replay 失败证据采集与模型重建
+type: FE
+owner: A
+mode: longrun-a
+status: planned
+priority: P1
+assignee: null
+depends_on:
+- I06-A-FE-02
+contract_refs: []
+inspect_first:
+- docs/Issue Library/ISSUE-06.md
+scope:
+  allow:
+  - src/app/bootstrap/**
+  - src/components/chat/**
+  - src-tauri/src/session/**
+  - src-tauri/src/acp/**
+  - scripts/**
+  - docs/Issue Library/ISSUE-06.md
+  deny:
+  - docs/archive/**
+  - .env*
+  - src-tauri/target/**
+  read_only: []
+shared_touchpoints: []
+objective: 真实 replay 失败证据采集与模型重建
+acceptance:
+- id: AC-1
+  behavior: 真实 replay 失败证据采集与模型重建；在继续补丁前保存精确切换序列、source/session、IPC replay、localStorage、runtime
+    摘要；未取得证据不得宣称修复。
+  address: docs/Issue Library/ISSUE-06.md
+evidence:
+  required_level: L3
+  artifacts:
+  - docs/Issue Library/harness/handoffs/I06-A-FE-03.md
+commands:
+  focused:
+  - npm run test
+  broader:
+  - npm run lint
+  - npm run build
+  - git diff --check
+questions: []
+decision_log: []
+handoff: null

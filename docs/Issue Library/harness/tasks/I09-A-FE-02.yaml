@@ -1,0 +1,50 @@
+id: I09-A-FE-02
+issue: ISSUE-09
+title: 冻结 sidebar width token 与 WebView bounds contract
+type: FE
+owner: A
+mode: longrun-a
+status: planned
+priority: P1
+assignee: null
+depends_on:
+- I09-A-FE-01
+contract_refs: []
+inspect_first:
+- docs/Issue Library/ISSUE-09.md
+scope:
+  allow:
+  - src/workspace-sheets/**
+  - src/workspaceStore.ts
+  - src/domains/theme/**
+  - src/App.tsx
+  - src/App.css
+  - scripts/**
+  - docs/Issue Library/ISSUE-09.md
+  - docs/Issue Library/harness/contracts/**
+  deny:
+  - docs/archive/**
+  - .env*
+  - src-tauri/target/**
+  read_only: []
+shared_touchpoints: []
+objective: 冻结 sidebar width token 与 WebView bounds contract
+acceptance:
+- id: AC-1
+  behavior: 冻结 sidebar width token 与 WebView bounds contract；统一 token 后 resize/折叠时
+    bounds 与 CSS 一致。
+  address: docs/Issue Library/ISSUE-09.md
+evidence:
+  required_level: L2
+  artifacts:
+  - docs/Issue Library/harness/handoffs/I09-A-FE-02.md
+commands:
+  focused:
+  - npm run test
+  broader:
+  - npm run lint
+  - npm run build
+  - git diff --check
+questions: []
+decision_log: []
+handoff: null

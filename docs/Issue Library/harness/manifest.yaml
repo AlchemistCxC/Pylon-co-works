@@ -1,0 +1,30 @@
+version: 2
+status: active
+source_of_truth:
+  issues: docs/Issue Library/INDEX.md
+  decisions: docs/Issue Library/未决策项.md
+roles: [A, B, S]
+modes: [longrun-a, longrun-b, interactive-b]
+branch_prefixes:
+  A: a/
+  B: b/
+  S: contract/
+protected_paths:
+  - .env
+  - .env.*
+  - .git/**
+  - docs/archive/**
+  - node_modules/**
+  - dist/**
+  - src-tauri/target/**
+required_task_fields:
+  - id
+  - issue
+  - type
+  - owner
+  - mode
+  - status
+  - depends_on
+  - scope
+  - acceptance
+  - evidence

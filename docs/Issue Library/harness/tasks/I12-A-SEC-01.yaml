@@ -1,0 +1,49 @@
+id: I12-A-SEC-01
+issue: ISSUE-12
+title: 凭据加密文件与备份实施契约
+type: SEC
+owner: A
+mode: longrun-a
+status: planned
+priority: P1
+assignee: null
+depends_on:
+- I12-A-BE-01
+contract_refs: []
+inspect_first:
+- docs/Issue Library/ISSUE-12.md
+scope:
+  allow:
+  - src-tauri/src/gateway/**
+  - src-tauri/src/gateway_cmds.rs
+  - src-tauri/src/export.rs
+  - src/infrastructure/tauri/gatewayClient.ts
+  - src/sheets/gateway/**
+  - scripts/**
+  - docs/Issue Library/ISSUE-12.md
+  - docs/Issue Library/未决策项.md
+  deny:
+  - docs/archive/**
+  - .env*
+  - src-tauri/target/**
+  read_only: []
+shared_touchpoints: []
+objective: 凭据加密文件与备份实施契约
+acceptance:
+- id: AC-1
+  behavior: 凭据加密文件与备份实施契约；先完成算法、格式、ACL、损坏恢复和备份风险契约；不得自行改变已拍板备份行为。
+  address: docs/Issue Library/ISSUE-12.md
+evidence:
+  required_level: L3
+  artifacts:
+  - docs/Issue Library/harness/handoffs/I12-A-SEC-01.md
+commands:
+  focused:
+  - cd src-tauri && cargo test --lib --no-run
+  broader:
+  - npm run lint
+  - npm run build
+  - git diff --check
+questions: []
+decision_log: []
+handoff: null

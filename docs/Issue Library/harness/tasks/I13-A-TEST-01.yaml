@@ -1,0 +1,49 @@
+id: I13-A-TEST-01
+issue: ISSUE-13
+title: Settings 全域回归与真实应用验收
+type: TEST
+owner: S
+mode: longrun-a
+status: planned
+priority: P1
+assignee: null
+depends_on:
+- I13-A-FE-02
+- I13-A-FE-03
+contract_refs: []
+inspect_first:
+- docs/Issue Library/ISSUE-13.md
+scope:
+  allow:
+  - src/components/Settings.tsx
+  - src/components/Settings.css
+  - src/components/settings/**
+  - src/themeFieldDefs.ts
+  - src-tauri/src/session/**
+  - scripts/**
+  - docs/Issue Library/ISSUE-13.md
+  deny:
+  - docs/archive/**
+  - .env*
+  - src-tauri/target/**
+  read_only: []
+shared_touchpoints: []
+objective: Settings 全域回归与真实应用验收
+acceptance:
+- id: AC-1
+  behavior: Settings 全域回归与真实应用验收；导航、搜索、保存、备份提示在真实应用可验收。
+  address: docs/Issue Library/ISSUE-13.md
+evidence:
+  required_level: L3
+  artifacts:
+  - docs/Issue Library/harness/handoffs/I13-A-TEST-01.md
+commands:
+  focused:
+  - npm run test
+  broader:
+  - npm run lint
+  - npm run build
+  - git diff --check
+questions: []
+decision_log: []
+handoff: null

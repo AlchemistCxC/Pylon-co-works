@@ -1,0 +1,48 @@
+id: I06-A-DATA-01
+issue: ISSUE-06
+title: 消息仓库 schema 与 attempt/interrupted 契约
+type: DATA
+owner: A
+mode: longrun-a
+status: planned
+priority: P1
+assignee: null
+depends_on:
+- I05-A-FE-01
+contract_refs: []
+inspect_first:
+- docs/Issue Library/ISSUE-06.md
+scope:
+  allow:
+  - src/app/bootstrap/**
+  - src/components/chat/**
+  - src-tauri/src/session/**
+  - src-tauri/src/acp/**
+  - scripts/**
+  - docs/Issue Library/ISSUE-06.md
+  deny:
+  - docs/archive/**
+  - .env*
+  - src-tauri/target/**
+  read_only: []
+shared_touchpoints: []
+objective: 消息仓库 schema 与 attempt/interrupted 契约
+acceptance:
+- id: AC-1
+  behavior: 消息仓库 schema 与 attempt/interrupted 契约；当前源码无 SQLite 实现时不得宣称已完成；先冻结 schema、事务和
+    recovery 状态。
+  address: docs/Issue Library/ISSUE-06.md
+evidence:
+  required_level: L1
+  artifacts:
+  - docs/Issue Library/harness/handoffs/I06-A-DATA-01.md
+commands:
+  focused:
+  - cd src-tauri && cargo test --lib --no-run
+  broader:
+  - npm run lint
+  - npm run build
+  - git diff --check
+questions: []
+decision_log: []
+handoff: null

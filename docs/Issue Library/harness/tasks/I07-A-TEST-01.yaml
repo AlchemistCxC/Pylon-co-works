@@ -1,0 +1,45 @@
+id: I07-A-TEST-01
+issue: ISSUE-07
+title: source 清空与异步代际回归
+type: TEST
+owner: S
+mode: longrun-a
+status: planned
+priority: P1
+assignee: null
+depends_on:
+- I07-A-FE-02
+contract_refs: []
+inspect_first:
+- docs/Issue Library/ISSUE-07.md
+scope:
+  allow:
+  - src/sheets/file/**
+  - src/workspaceStore.ts
+  - scripts/**
+  - docs/Issue Library/ISSUE-07.md
+  deny:
+  - docs/archive/**
+  - .env*
+  - src-tauri/target/**
+  read_only: []
+shared_touchpoints: []
+objective: source 清空与异步代际回归
+acceptance:
+- id: AC-1
+  behavior: source 清空与异步代际回归；覆盖 A→null→B、迟到 Git/Views 响应和切换期间关闭组件。
+  address: docs/Issue Library/ISSUE-07.md
+evidence:
+  required_level: L2
+  artifacts:
+  - docs/Issue Library/harness/handoffs/I07-A-TEST-01.md
+commands:
+  focused:
+  - npm run test
+  broader:
+  - npm run lint
+  - npm run build
+  - git diff --check
+questions: []
+decision_log: []
+handoff: null

@@ -1,0 +1,45 @@
+id: I07-B-UX-01
+issue: ISSUE-07
+title: FileSheet 空态与切换过渡视觉
+type: UX
+owner: B
+mode: interactive-b
+status: planned
+priority: P1
+assignee: null
+depends_on:
+- I07-A-FE-01
+contract_refs: []
+inspect_first:
+- docs/Issue Library/ISSUE-07.md
+scope:
+  allow:
+  - src/sheets/file/**
+  - src/workspaceStore.ts
+  - scripts/**
+  - docs/Issue Library/ISSUE-07.md
+  deny:
+  - docs/archive/**
+  - .env*
+  - src-tauri/target/**
+  read_only: []
+shared_touchpoints: []
+objective: FileSheet 空态与切换过渡视觉
+acceptance:
+- id: AC-1
+  behavior: FileSheet 空态与切换过渡视觉；仅改局部视觉层，保留现有布局契约，过渡可关闭且不遮挡操作。
+  address: docs/Issue Library/ISSUE-07.md
+evidence:
+  required_level: L2
+  artifacts:
+  - docs/Issue Library/harness/handoffs/I07-B-UX-01.md
+commands:
+  focused:
+  - npm run build
+  broader:
+  - npm run lint
+  - npm run build
+  - git diff --check
+questions: []
+decision_log: []
+handoff: null

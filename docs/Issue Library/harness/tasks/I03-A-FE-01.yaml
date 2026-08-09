@@ -1,0 +1,47 @@
+id: I03-A-FE-01
+issue: ISSUE-03
+title: 引入 unknown 并统一状态 selector
+type: FE
+owner: A
+mode: longrun-a
+status: planned
+priority: P1
+assignee: null
+depends_on:
+- I02-A-FE-01
+contract_refs: []
+inspect_first:
+- docs/Issue Library/ISSUE-03.md
+scope:
+  allow:
+  - src/components/settings/**
+  - src/runtimeStore.ts
+  - src/workspace-sheets/**
+  - scripts/test-agent-unknown-status.mts
+  - docs/Issue Library/ISSUE-03.md
+  deny:
+  - docs/archive/**
+  - .env*
+  - src-tauri/target/**
+  read_only: []
+shared_touchpoints: []
+objective: 引入 unknown 并统一状态 selector
+acceptance:
+- id: AC-1
+  behavior: 引入 unknown 并统一状态 selector；无权威快照显示 unknown，不伪造 connected/disconnected；所有消费点使用同一
+    selector。
+  address: docs/Issue Library/ISSUE-03.md
+evidence:
+  required_level: L1
+  artifacts:
+  - docs/Issue Library/harness/handoffs/I03-A-FE-01.md
+commands:
+  focused:
+  - npm run test
+  broader:
+  - npm run lint
+  - npm run build
+  - git diff --check
+questions: []
+decision_log: []
+handoff: null

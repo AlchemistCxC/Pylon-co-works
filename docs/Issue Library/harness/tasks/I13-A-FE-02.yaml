@@ -1,0 +1,48 @@
+id: I13-A-FE-02
+issue: ISSUE-13
+title: 历史保留策略设置契约与影响提示
+type: FE
+owner: A
+mode: longrun-a
+status: planned
+priority: P1
+assignee: null
+depends_on:
+- I06-A-DATA-01
+contract_refs: []
+inspect_first:
+- docs/Issue Library/ISSUE-13.md
+scope:
+  allow:
+  - src/components/Settings.tsx
+  - src/components/Settings.css
+  - src/components/settings/**
+  - src/themeFieldDefs.ts
+  - src-tauri/src/session/**
+  - scripts/**
+  - docs/Issue Library/ISSUE-13.md
+  deny:
+  - docs/archive/**
+  - .env*
+  - src-tauri/target/**
+  read_only: []
+shared_touchpoints: []
+objective: 历史保留策略设置契约与影响提示
+acceptance:
+- id: AC-1
+  behavior: 历史保留策略设置契约与影响提示；设置只写策略，不绕过 Rust 删除；默认值/档位必须与实施契约一致。
+  address: docs/Issue Library/ISSUE-13.md
+evidence:
+  required_level: L1
+  artifacts:
+  - docs/Issue Library/harness/handoffs/I13-A-FE-02.md
+commands:
+  focused:
+  - npm run test
+  broader:
+  - npm run lint
+  - npm run build
+  - git diff --check
+questions: []
+decision_log: []
+handoff: null

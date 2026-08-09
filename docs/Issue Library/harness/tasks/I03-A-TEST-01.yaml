@@ -1,0 +1,46 @@
+id: I03-A-TEST-01
+issue: ISSUE-03
+title: 状态缺失/失败/事件矩阵测试
+type: TEST
+owner: S
+mode: longrun-a
+status: planned
+priority: P1
+assignee: null
+depends_on:
+- I03-A-FE-01
+contract_refs: []
+inspect_first:
+- docs/Issue Library/ISSUE-03.md
+scope:
+  allow:
+  - src/components/settings/**
+  - src/runtimeStore.ts
+  - src/workspace-sheets/**
+  - scripts/test-agent-unknown-status.mts
+  - docs/Issue Library/ISSUE-03.md
+  deny:
+  - docs/archive/**
+  - .env*
+  - src-tauri/target/**
+  read_only: []
+shared_touchpoints: []
+objective: 状态缺失/失败/事件矩阵测试
+acceptance:
+- id: AC-1
+  behavior: 状态缺失/失败/事件矩阵测试；Settings、titlebar、SheetTabStrip、InputBar 表现一致。
+  address: docs/Issue Library/ISSUE-03.md
+evidence:
+  required_level: L2
+  artifacts:
+  - docs/Issue Library/harness/handoffs/I03-A-TEST-01.md
+commands:
+  focused:
+  - npm run test
+  broader:
+  - npm run lint
+  - npm run build
+  - git diff --check
+questions: []
+decision_log: []
+handoff: null

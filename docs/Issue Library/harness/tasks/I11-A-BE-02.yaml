@@ -1,0 +1,46 @@
+id: I11-A-BE-02
+issue: ISSUE-11
+title: 单 Browser WebView 新窗口复用
+type: BE
+owner: A
+mode: longrun-a
+status: planned
+priority: P1
+assignee: null
+depends_on:
+- I11-A-BE-01
+contract_refs: []
+inspect_first:
+- docs/Issue Library/ISSUE-11.md
+scope:
+  allow:
+  - src-tauri/src/browser.rs
+  - src-tauri/src/browser_cmds.rs
+  - src/sheets/browser/**
+  - scripts/**
+  - docs/Issue Library/ISSUE-11.md
+  deny:
+  - docs/archive/**
+  - .env*
+  - src-tauri/target/**
+  read_only: []
+shared_touchpoints: []
+objective: 单 Browser WebView 新窗口复用
+acceptance:
+- id: AC-1
+  behavior: 单 Browser WebView 新窗口复用；http/https 导航到现有 child WebView，恶意 scheme 拒绝，不创建第二实例。
+  address: docs/Issue Library/ISSUE-11.md
+evidence:
+  required_level: L3
+  artifacts:
+  - docs/Issue Library/harness/handoffs/I11-A-BE-02.md
+commands:
+  focused:
+  - cd src-tauri && cargo test --lib --no-run
+  broader:
+  - npm run lint
+  - npm run build
+  - git diff --check
+questions: []
+decision_log: []
+handoff: null

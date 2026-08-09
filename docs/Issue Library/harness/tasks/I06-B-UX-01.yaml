@@ -1,0 +1,47 @@
+id: I06-B-UX-01
+issue: ISSUE-06
+title: 消息流式/中断状态的沉浸视觉承载
+type: UX
+owner: B
+mode: interactive-b
+status: planned
+priority: P1
+assignee: null
+depends_on:
+- I06-A-FE-02
+contract_refs: []
+inspect_first:
+- docs/Issue Library/ISSUE-06.md
+scope:
+  allow:
+  - src/app/bootstrap/**
+  - src/components/chat/**
+  - src-tauri/src/session/**
+  - src-tauri/src/acp/**
+  - scripts/**
+  - docs/Issue Library/ISSUE-06.md
+  deny:
+  - docs/archive/**
+  - .env*
+  - src-tauri/target/**
+  read_only: []
+shared_touchpoints: []
+objective: 消息流式/中断状态的沉浸视觉承载
+acceptance:
+- id: AC-1
+  behavior: 消息流式/中断状态的沉浸视觉承载；只改已冻结视觉承载层，interrupted/pending/streaming 可辨识，提供 reduced-motion。
+  address: docs/Issue Library/ISSUE-06.md
+evidence:
+  required_level: L2
+  artifacts:
+  - docs/Issue Library/harness/handoffs/I06-B-UX-01.md
+commands:
+  focused:
+  - npm run build
+  broader:
+  - npm run lint
+  - npm run build
+  - git diff --check
+questions: []
+decision_log: []
+handoff: null

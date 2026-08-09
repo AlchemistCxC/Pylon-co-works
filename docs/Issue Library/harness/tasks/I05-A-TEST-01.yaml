@@ -1,0 +1,46 @@
+id: I05-A-TEST-01
+issue: ISSUE-05
+title: 切换状态竞态测试
+type: TEST
+owner: S
+mode: longrun-a
+status: planned
+priority: P1
+assignee: null
+depends_on:
+- I05-A-FE-01
+contract_refs: []
+inspect_first:
+- docs/Issue Library/ISSUE-05.md
+scope:
+  allow:
+  - src/application/transactions/**
+  - src/runtimeStore.ts
+  - src/components/Settings.tsx
+  - src/sheets/OverviewSheetView.tsx
+  - docs/Issue Library/ISSUE-05.md
+  deny:
+  - docs/archive/**
+  - .env*
+  - src-tauri/target/**
+  read_only: []
+shared_touchpoints: []
+objective: 切换状态竞态测试
+acceptance:
+- id: AC-1
+  behavior: 切换状态竞态测试；覆盖事件早到/晚到和查询失败，不伪造 connected。
+  address: docs/Issue Library/ISSUE-05.md
+evidence:
+  required_level: L2
+  artifacts:
+  - docs/Issue Library/harness/handoffs/I05-A-TEST-01.md
+commands:
+  focused:
+  - npm run test
+  broader:
+  - npm run lint
+  - npm run build
+  - git diff --check
+questions: []
+decision_log: []
+handoff: null

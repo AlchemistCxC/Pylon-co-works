@@ -1,0 +1,47 @@
+id: I08-B-FX-01
+issue: ISSUE-08
+title: FileViewHost 动效与沉浸层接入
+type: FX
+owner: B
+mode: interactive-b
+status: planned
+priority: P1
+assignee: null
+depends_on:
+- I08-A-FE-01
+contract_refs: []
+inspect_first:
+- docs/Issue Library/ISSUE-08.md
+scope:
+  allow:
+  - src/sheets/file/**
+  - src/workspaceStore.ts
+  - src-tauri/src/workspace*.rs
+  - scripts/**
+  - docs/Issue Library/ISSUE-08.md
+  deny:
+  - docs/archive/**
+  - .env*
+  - src-tauri/target/**
+  read_only: []
+shared_touchpoints: []
+objective: FileViewHost 动效与沉浸层接入
+acceptance:
+- id: AC-1
+  behavior: FileViewHost 动效与沉浸层接入；只通过已冻结 host/selector 接入，不改业务状态；低性能与 reduced-motion
+    降级。
+  address: docs/Issue Library/ISSUE-08.md
+evidence:
+  required_level: L2
+  artifacts:
+  - docs/Issue Library/harness/handoffs/I08-B-FX-01.md
+commands:
+  focused:
+  - npm run build
+  broader:
+  - npm run lint
+  - npm run build
+  - git diff --check
+questions: []
+decision_log: []
+handoff: null

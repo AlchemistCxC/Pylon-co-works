@@ -1,0 +1,53 @@
+id: I00-A-FE-01
+issue: ISSUE-00
+title: 可验收结果标题
+type: FE
+owner: A
+mode: longrun-a
+status: planned
+priority: P1
+assignee: null
+base:
+  branch: main
+  commit: null
+integration_base: null
+depends_on: []
+contract_refs: []
+inspect_first:
+  - src/path/to/minimal/source.ts
+scope:
+  allow:
+    - src/path/**
+    - scripts/test-example.mts
+  deny:
+    - src-tauri/**
+    - docs/archive/**
+  read_only: []
+shared_touchpoints: []
+objective: 一个能独立验证、独立 commit 的结果
+implementation_contract:
+  inputs: []
+  outputs: []
+  invariants: []
+tests:
+  red:
+    - command: npm run test -- example
+      expected: 修复前稳定失败
+  green:
+    - command: npm run test -- example
+      expected: 通过
+commands:
+  focused: []
+  broader:
+    - npm run build
+    - git diff --check
+acceptance:
+  - id: AC-1
+    behavior: 可观察行为
+    address: 测试文件或界面入口
+evidence:
+  required_level: L1
+  artifacts: []
+questions: []
+decision_log: []
+handoff: null

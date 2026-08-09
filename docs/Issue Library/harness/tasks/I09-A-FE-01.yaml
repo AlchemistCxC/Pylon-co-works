@@ -1,0 +1,50 @@
+id: I09-A-FE-01
+issue: ISSUE-09
+title: 统一 Sheet sidebar capability/context 响应式订阅
+type: FE
+owner: A
+mode: longrun-a
+status: planned
+priority: P1
+assignee: null
+depends_on:
+- I01-A-FE-01
+contract_refs: []
+inspect_first:
+- docs/Issue Library/ISSUE-09.md
+scope:
+  allow:
+  - src/workspace-sheets/**
+  - src/workspaceStore.ts
+  - src/domains/theme/**
+  - src/App.tsx
+  - src/App.css
+  - scripts/**
+  - docs/Issue Library/ISSUE-09.md
+  - docs/Issue Library/harness/contracts/**
+  deny:
+  - docs/archive/**
+  - .env*
+  - src-tauri/target/**
+  read_only: []
+shared_touchpoints: []
+objective: 统一 Sheet sidebar capability/context 响应式订阅
+acceptance:
+- id: AC-1
+  behavior: 统一 Sheet sidebar capability/context 响应式订阅；sidebarCollapsed 使用响应式订阅；无 sidebar
+    不生成可操作折叠按钮。
+  address: docs/Issue Library/ISSUE-09.md
+evidence:
+  required_level: L1
+  artifacts:
+  - docs/Issue Library/harness/handoffs/I09-A-FE-01.md
+commands:
+  focused:
+  - npm run test
+  broader:
+  - npm run lint
+  - npm run build
+  - git diff --check
+questions: []
+decision_log: []
+handoff: null

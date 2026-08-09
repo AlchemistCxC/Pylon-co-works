@@ -1,0 +1,44 @@
+id: I10-A-TEST-01
+issue: ISSUE-10
+title: Browser 折叠 DOM 与真实 bounds 回归
+type: TEST
+owner: S
+mode: longrun-a
+status: planned
+priority: P1
+assignee: null
+depends_on:
+- I10-A-FE-01
+contract_refs: []
+inspect_first:
+- docs/Issue Library/ISSUE-10.md
+scope:
+  allow:
+  - src/sheets/browser/**
+  - scripts/**
+  - docs/Issue Library/ISSUE-10.md
+  deny:
+  - docs/archive/**
+  - .env*
+  - src-tauri/target/**
+  read_only: []
+shared_touchpoints: []
+objective: Browser 折叠 DOM 与真实 bounds 回归
+acceptance:
+- id: AC-1
+  behavior: Browser 折叠 DOM 与真实 bounds 回归；网页验证 DOM，真实应用验证 child WebView bounds。
+  address: docs/Issue Library/ISSUE-10.md
+evidence:
+  required_level: L3
+  artifacts:
+  - docs/Issue Library/harness/handoffs/I10-A-TEST-01.md
+commands:
+  focused:
+  - npm run test
+  broader:
+  - npm run lint
+  - npm run build
+  - git diff --check
+questions: []
+decision_log: []
+handoff: null

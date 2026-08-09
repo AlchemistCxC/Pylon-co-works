@@ -1,0 +1,46 @@
+id: I08-A-BE-01
+issue: ISSUE-08
+title: workspace/Git source 与 runtime 一致性 guard
+type: BE
+owner: A
+mode: longrun-a
+status: planned
+priority: P1
+assignee: null
+depends_on:
+- I01-A-BE-01
+contract_refs: []
+inspect_first:
+- docs/Issue Library/ISSUE-08.md
+scope:
+  allow:
+  - src/sheets/file/**
+  - src/workspaceStore.ts
+  - src-tauri/src/workspace*.rs
+  - scripts/**
+  - docs/Issue Library/ISSUE-08.md
+  deny:
+  - docs/archive/**
+  - .env*
+  - src-tauri/target/**
+  read_only: []
+shared_touchpoints: []
+objective: workspace/Git source 与 runtime 一致性 guard
+acceptance:
+- id: AC-1
+  behavior: workspace/Git source 与 runtime 一致性 guard；source/Agent 不一致返回错误，不回退当前 runtime。
+  address: docs/Issue Library/ISSUE-08.md
+evidence:
+  required_level: L1
+  artifacts:
+  - docs/Issue Library/harness/handoffs/I08-A-BE-01.md
+commands:
+  focused:
+  - cd src-tauri && cargo test --lib --no-run
+  broader:
+  - npm run lint
+  - npm run build
+  - git diff --check
+questions: []
+decision_log: []
+handoff: null

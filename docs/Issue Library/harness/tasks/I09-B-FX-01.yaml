@@ -1,0 +1,52 @@
+id: I09-B-FX-01
+issue: ISSUE-09
+title: 公共 sidebar 动效 contract proposal
+type: FX
+owner: B
+mode: interactive-b
+status: blocked_contract
+priority: P1
+assignee: null
+depends_on:
+- I09-A-FE-01
+contract_refs:
+- proposal-required
+inspect_first:
+- docs/Issue Library/ISSUE-09.md
+scope:
+  allow:
+  - src/workspace-sheets/**
+  - src/workspaceStore.ts
+  - src/domains/theme/**
+  - src/App.tsx
+  - src/App.css
+  - scripts/**
+  - docs/Issue Library/ISSUE-09.md
+  - docs/Issue Library/harness/contracts/**
+  deny:
+  - docs/archive/**
+  - .env*
+  - src-tauri/target/**
+  read_only: []
+shared_touchpoints:
+- contract-proposal-required
+objective: 公共 sidebar 动效 contract proposal
+acceptance:
+- id: AC-1
+  behavior: 公共 sidebar 动效 contract proposal；先 Preview/提案，未冻结不得改公共布局；包含 reduced-motion
+    和性能预算。
+  address: docs/Issue Library/ISSUE-09.md
+evidence:
+  required_level: L2
+  artifacts:
+  - docs/Issue Library/harness/handoffs/I09-B-FX-01.md
+commands:
+  focused:
+  - npm run build
+  broader:
+  - npm run lint
+  - npm run build
+  - git diff --check
+questions: []
+decision_log: []
+handoff: null

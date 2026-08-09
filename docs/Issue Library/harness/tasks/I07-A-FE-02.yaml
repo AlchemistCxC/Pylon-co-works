@@ -1,0 +1,45 @@
+id: I07-A-FE-02
+issue: ISSUE-07
+title: 异步请求 generation/source guard
+type: FE
+owner: A
+mode: longrun-a
+status: planned
+priority: P1
+assignee: null
+depends_on:
+- I07-A-FE-01
+contract_refs: []
+inspect_first:
+- docs/Issue Library/ISSUE-07.md
+scope:
+  allow:
+  - src/sheets/file/**
+  - src/workspaceStore.ts
+  - scripts/**
+  - docs/Issue Library/ISSUE-07.md
+  deny:
+  - docs/archive/**
+  - .env*
+  - src-tauri/target/**
+  read_only: []
+shared_touchpoints: []
+objective: 异步请求 generation/source guard
+acceptance:
+- id: AC-1
+  behavior: 异步请求 generation/source guard；旧 source 响应不能回写新 source；disposed 后不更新 state。
+  address: docs/Issue Library/ISSUE-07.md
+evidence:
+  required_level: L1
+  artifacts:
+  - docs/Issue Library/harness/handoffs/I07-A-FE-02.md
+commands:
+  focused:
+  - npm run test
+  broader:
+  - npm run lint
+  - npm run build
+  - git diff --check
+questions: []
+decision_log: []
+handoff: null
