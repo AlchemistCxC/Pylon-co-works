@@ -1,0 +1,84 @@
+id: I01-A-DOC-01
+issue: ISSUE-01
+title: 冻结 Release 单活边界与 AgentContext 兼容约束
+type: DOC
+owner: A
+mode: longrun-a
+status: review_pending
+priority: P1
+assignee: codex-role-a
+base:
+  branch: main
+  commit: 3c95f709bc0cdc97b97603f338b44637fdf51143
+integration_base: null
+depends_on: []
+contract_refs: []
+inspect_first:
+- docs/Issue Library/ISSUE-01.md
+scope:
+  allow:
+  - src/identityStore.ts
+  - src/runtimeStore.ts
+  - src/application/transactions/**
+  - src/workspace-sheets/**
+  - src-tauri/src/runtime.rs
+  - src-tauri/src/session/**
+  - src-tauri/src/workspace*.rs
+  - scripts/**
+  - docs/Issue Library/ISSUE-01.md
+  - docs/Issue Library/harness/tasks/I01-A-DOC-01.yaml
+  - docs/Issue Library/harness/handoffs/I01-A-DOC-01.md
+  deny:
+  - docs/archive/**
+  - .env*
+  - src-tauri/target/**
+  read_only: []
+shared_touchpoints: []
+objective: 冻结 Release 单活边界与 AgentContext 兼容约束
+implementation_contract:
+  inputs:
+  - INDEX 中的 Release 1.x 单活边界
+  - 当前 source-only 与 active_agent 路由源码证据
+  outputs:
+  - ISSUE-01 的 Release 1.x 冻结契约
+  invariants:
+  - 不宣称当前 GUI 支持多 Agent 并行
+  - AgentContext 同时包含 agentId 与完整 source
+  - source 或归属错误时显式失败，不回退 agent_cwd
+  - 旧 source-only 数据必须通过版本化兼容迁移
+acceptance:
+- id: AC-1
+  behavior: 冻结 Release 单活边界与 AgentContext 兼容约束；INDEX 与任务卡明确单活/不承诺并行，禁止 source/cwd
+    fallback 串线。
+  address: docs/Issue Library/ISSUE-01.md
+evidence:
+  required_level: L1
+  artifacts:
+  - docs/Issue Library/harness/handoffs/I01-A-DOC-01.md
+commands:
+  focused:
+  - python "docs/Issue Library/harness/scripts/validate_harness.py"
+  - git diff --check
+  broader:
+  - npm run lint
+  - npm run build
+  - git diff --check
+questions: []
+decision_log: []
+last_progress_commit: c1b664c
+review:
+  pull_request: PR-1
+  status: pending
+verification:
+  level: L1
+  commit: c1b664c
+  results:
+  - command: python "docs/Issue Library/harness/scripts/validate_harness.py"
+    result: passed; 45 task cards; dependency DAG acyclic
+  - command: npm run lint
+    result: passed
+  - command: npm run build
+    result: passed; 3504 modules transformed
+  - command: git diff --check
+    result: passed
+handoff: docs/Issue Library/harness/handoffs/I01-A-DOC-01.md
