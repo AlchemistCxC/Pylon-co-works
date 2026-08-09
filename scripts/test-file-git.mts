@@ -28,10 +28,12 @@ assert.match(panel, /onOpenDiff\(node\.path, entries\.find/, 'SCM 文件节点�
 assert.equal(panel.includes("invoke('git_add'"), false, '不得提供写 Git 操作')
 assert.equal(panel.includes("invoke('git_commit'"), false, '不得提供写 Git 操作')
 assert.match(panel, /当前工作区不是 Git 仓库/, '非 git 仓库必须明确错误态')
+assert.match(panel, /if \(!source\) \{[\s\S]*?setStaged\(\[\]\)[\s\S]*?setUnstaged\(\[\]\)[\s\S]*?setHistory\(\[\]\)/, 'source 清空必须重置 Git 状态')
 
 // 3. ViewsPanel：change/diff 入口带 staged 参数；DiffView 继续复用 DiffCard
 const viewsPanel = readFileSync(new URL('../src/sheets/file/ViewsPanel.tsx', import.meta.url), 'utf8')
 assert.match(viewsPanel, /onOpenDiff\(entry\.path, entry\.staged\)/, '视图分区点击变更必须带 staged 参数')
+assert.match(viewsPanel, /if \(!source\) \{[\s\S]*?setEntries\(\[\]\)[\s\S]*?setError\(''\)/, 'source 清空必须重置 Views 状态')
 const diffView = readFileSync(new URL('../src/sheets/file/DiffView.tsx', import.meta.url), 'utf8')
 assert.match(diffView, /\.gitDiff\(source, path, staged\)/, 'git_diff 必须经 typed client 带 source/path/staged')
 assert.match(diffView, /import DiffCard from '\.\.\/\.\.\/components\/chat\/DiffCard'/, '必须复用 DiffCard（不新造 diff 渲染器）')

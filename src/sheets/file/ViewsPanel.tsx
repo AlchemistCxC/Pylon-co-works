@@ -20,8 +20,12 @@ export default function ViewsPanel({ source, activeDiff, onOpenDiff, onCloseDiff
   const touchedFiles = useMemo(() => source ? touchedFilesRecord[source] ?? [] : [], [source, touchedFilesRecord])
 
   useEffect(() => {
-    if (!source) return
     let disposed = false
+    if (!source) {
+      setEntries([])
+      setError('')
+      return () => { disposed = true }
+    }
     createWorkspaceClient({ invoke: (cmd, args) => invoke(cmd, args as Record<string, unknown> | undefined) }).gitStatus(source).then(raw => {
       if (!disposed) setEntries(normalizeGitStatus(raw))
     }).catch(err => {

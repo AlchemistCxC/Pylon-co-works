@@ -74,8 +74,15 @@ export default function GitPanel({ source, onOpenDiff }: { source: string | null
   const [expandedCommit, setExpandedCommit] = useState<string | null>(null)
 
   useEffect(() => {
-    if (!source) return
     let disposed = false
+    if (!source) {
+      setStaged([])
+      setUnstaged([])
+      setHistory([])
+      setError(null)
+      setExpandedCommit(null)
+      return () => { disposed = true }
+    }
     setError(null)
     const wc = createWorkspaceClient({ invoke: (cmd, args) => invoke(cmd, args as Record<string, unknown> | undefined) })
     Promise.all([wc.gitStatus(source), wc.gitHistory(source)]).then(([statusRaw, historyRaw]) => {
