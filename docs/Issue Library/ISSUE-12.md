@@ -214,10 +214,10 @@ Route（source/entity → adapter instance → agent/profile/session）
 
 | 相关功能 | 验收行为表现 | 验收地址 | 结果 |
 |---|---|---|---|
-| catalog/instance DTO | 平台类型与 Bot 实例分离；未实现平台状态稳定；secret 不序列化回前端 | `src-tauri/src/gateway*` Rust tests；gatewayContracts tests | [ ] |
-| QQ factory/lifecycle | configure/start/stop/restart 后 registry、task handle、状态一致 | Gateway Rust focused tests/fake adapter | [ ] |
-| route 绑定 | route 引用 adapter instance id；不存在/未连接实例返回明确错误 | Gateway route/command tests | [ ] |
-| secret 与错误码 | 错误凭据不泄露 secret，返回结构化 error/status | Gateway command tests | [ ] |
+| catalog/instance DTO | 平台类型与 Bot 实例分离；未实现平台状态稳定；secret 不序列化回前端 | `src-tauri/src/gateway*` Rust tests；gatewayContracts tests | [x]（I12-A-BE-01：`gateway/catalog.rs`+`gateway/instance.rs` wire 形状/secret 丢弃/未实现平台稳定测试；`gatewayClient.ts` 冻结 typed client 面。gatewayContracts 测试不在卡 scope.allow，未改） |
+| QQ factory/lifecycle | configure/start/stop/restart 后 registry、task handle、状态一致 | Gateway Rust focused tests/fake adapter | [ ]（I12-A-BE-02） |
+| route 绑定 | route 引用 adapter instance id；不存在/未连接实例返回明确错误 | Gateway route/command tests | [x]（I12-A-BE-01：`EntityBinding.instance_id` + wire `instanceId` + `resolve_route_status`（Active/Unbound/InstanceMissing/InstanceNotConnected）+ `GatewayError::InstanceNotFound/InstanceNotConnected` 稳定码） |
+| secret 与错误码 | 错误凭据不泄露 secret，返回结构化 error/status | Gateway command tests | [x]（I12-A-BE-01：`InstanceState::to_dto` 丢弃 secret、DTO 无凭据值字段、`to_dto_drops_credential_secret_never_serialized` + `instance_contract_error_codes_are_stable`） |
 
 #### 等级 2：前端网页验收通过（仅限前端）
 
@@ -243,7 +243,7 @@ Route（source/entity → adapter instance → agent/profile/session）
 | 2026-08-09 | 拍板决策同步 | 已将本轮已确认的产品决策与当前实施成熟度写入“已拍板决策”。未形成措施的内容明确标注为仅有决策。 | 关联未决策项见 `未决策项.md` |
 | 日期 | 类型 | 记录 | 证据/备注 |
 |---|---|---|---|
-| 2026-08-09 | 文档拆分 | 从 `docs/release-issues.md` 拆分为 `ISSUE-12`；保留原问题记录、追加调查、修复记录与三级验收内容。 | 本文件生成于 Issue Library 初始化 |
+| 2026-08-10 | BE-01 契约冻结 | I12-A-BE-01：冻结 adapter catalog/instance/route domain contract——`gateway/catalog.rs`（PlatformAvailability/CredentialField/AdapterCapabilities/AdapterCatalogItem + `builtin_catalog`）、`gateway/instance.rs`（InstanceStatus/CredentialStatus/AdapterInstance + `InstanceState::to_dto` secret 丢弃）、`EntityBinding.instance_id`（yaml `instance`/wire `instanceId`）+ `resolve_route_status`（D-04 disabled 语义）、`GatewayError::InstanceNotFound/InstanceNotConnected` 稳定码、`gateway_catalog` 只读命令、`gatewayClient.ts` catalog/instances typed 面。证据：`cargo test --lib` 439 passed / 0 failed；focused `cargo test --lib --no-run` 绿（本机内存受限以 `--jobs 1` 跑）。QQ factory/lifecycle 留待 I12-A-BE-02。 | I12-A-BE-01 |
 | 2026-08-09 | 产品拍板 | 删除 Gateway adapter instance 后保留引用 Route，标记 disabled/实例不存在，不级联删除。 | 对应未决策项：Gateway 删除实例后的 Route 处理 |
 | 2026-08-09 | 产品拍板 | 停止 Gateway Bot 实例时同时关闭其平台 Session；Route 保留，重启后重新建立 Session。 | 对应未决策项：Gateway stop 后平台 Session 处理 |
 | 2026-08-09 | 产品拍板 | Gateway 每个 adapter instance 独立 autoStart；新实例默认关闭，只有显式开启后才在 Pylon 重启时自动启动。 | 对应未决策项：Gateway 实例重启后的自动启动 |

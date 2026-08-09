@@ -67,6 +67,16 @@ pub(crate) async fn gateway_sessions(
     collect_gateway_sessions(state.inner())
 }
 
+/// 平台 catalog（只读；I12-A-BE-01 契约冻结，D-01）：平台类型能力描述，
+/// 与实例分离；凭据字段只描述不携带值（D-02）。未实现平台状态稳定（不可启用）。
+/// 注：命令注册（lib.rs invoke_handler）不在 BE 卡 scope——本命令与
+/// [`crate::gateway::catalog::builtin_catalog`] 函数级测试冻结 wire 形状；
+/// BE-02 生命周期接线时注册。
+#[tauri::command]
+pub(crate) async fn gateway_catalog() -> Result<Vec<crate::gateway::catalog::AdapterCatalogItem>, PylonError> {
+    Ok(crate::gateway::catalog::builtin_catalog())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -97,6 +107,23 @@ mod tests {
         }
         drop(map);
         runtime
+    }
+
+    #[test]
+    fn gateway_catalog_returns_builtin_platforms_deterministic() {
+        // I12-A-BE-01：catalog 只读快照——qq built-in、wechat 未安装，顺序稳定
+        let catalog = crate::gateway::catalog::builtin_catalog();
+        let platforms: Vec<&str> = catalog.iter().map(|c| c.platform.as_str()).collect();
+        assert_eq!(platforms, vec!["qq", "wechat"], "catalog 顺序必须稳定");
+        let wire = serde_json::to_value(&catalog).expect("serialize");
+        assert!(wire.is_array());
+        assert_eq!(wire[0]["availability"], "builtIn");
+        assert_eq!(wire[1]["availability"], "notInstalled");
+        let text = serde_json::to_string(&catalog).unwrap();
+        assert!(
+            !text.contains("sk-"),
+            "catalog 命令不得泄露任何凭据值: {text}"
+        );
     }
 
     #[test]

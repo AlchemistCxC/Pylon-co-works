@@ -17,6 +17,8 @@
 //! reload 热重载窗口下"旧绑定放行 → 新绑定投递"的混搭即二次读锁 bug
 //! （历史教训：`ingest()` 因此被删除，S5）。
 
+pub mod catalog;
+pub mod instance;
 pub mod qq;
 pub mod route;
 pub mod truncate;
@@ -118,6 +120,12 @@ pub enum GatewayError {
     /// 出站投递失败。
     #[error("gateway 投递失败: {0}")]
     DeliveryFailed(String),
+    /// 引用的 adapter instance 不存在（I12-A-BE-01；D-04：route 保留 + disabled）。
+    #[error("gateway adapter instance 不存在: {0}")]
+    InstanceNotFound(String),
+    /// 引用的 adapter instance 未连接（stopped/starting/error）。
+    #[error("gateway adapter instance 未连接: {0}")]
+    InstanceNotConnected(String),
 }
 
 impl GatewayError {
@@ -127,6 +135,8 @@ impl GatewayError {
             Self::InvalidConfig(_) => "gateway_invalid_config",
             Self::AdapterUnavailable(_) => "gateway_adapter_unavailable",
             Self::DeliveryFailed(_) => "gateway_delivery_failed",
+            Self::InstanceNotFound(_) => "gateway_instance_not_found",
+            Self::InstanceNotConnected(_) => "gateway_instance_not_connected",
         }
     }
 }
@@ -451,6 +461,25 @@ mod tests {
             self.events.lock().unwrap().push(event.to_string());
             Ok(())
         }
+    }
+
+    #[test]
+    fn instance_contract_error_codes_are_stable() {
+        // I12-A-BE-01：route 引用不存在/未连接实例 → 结构化错误（稳定 code，不泄露 secret）
+        assert_eq!(
+            GatewayError::InstanceNotFound("qq-bot-1".into()).code(),
+            "gateway_instance_not_found"
+        );
+        assert_eq!(
+            GatewayError::InstanceNotConnected("qq-bot-1".into()).code(),
+            "gateway_instance_not_connected"
+        );
+        // message 是结构化上下文；错误对象 wire 形状 {code,message} 由 PylonError 承载
+        let message = GatewayError::InstanceNotFound("qq-bot-1".into()).to_string();
+        assert!(
+            message.contains("qq-bot-1") && !message.contains("secret"),
+            "错误信息不得携带 secret"
+        );
     }
 
     #[test]

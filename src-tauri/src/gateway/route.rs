@@ -34,6 +34,8 @@ use std::collections::{HashMap, HashSet};
 
 use serde::{Deserialize, Serialize};
 
+use crate::gateway::instance::InstanceStatus;
+
 /// 平台绑定实体：source（平台路由 key）→ agent/profile/session 三元组 + 白名单 + 重置策略。
 ///
 /// yaml 键名为 `agent`/`profile`/`session`（与 Prism/前端 Session 语义对齐），
@@ -47,6 +49,11 @@ pub struct EntityBinding {
     pub profile_id: String,
     #[serde(rename = "session")]
     pub session_key: String,
+    /// 引用 adapter instance id（I12-A-BE-01 契约冻结；D-01：route 以稳定
+    /// instanceId 绑定实例）。缺省 None = 未绑定实例（旧配置兼容）。
+    /// yaml 键 `instance`，wire 键 `instanceId`（手写 Serialize 输出）。
+    #[serde(default, rename = "instance")]
+    pub instance_id: Option<String>,
     /// 成员白名单（群消息按 member_openid，私聊按 user_openid）；缺省 = 不限。
     #[serde(default)]
     pub allow_from: Option<Vec<String>>,
@@ -68,11 +75,12 @@ pub struct EntityBinding {
 impl Serialize for EntityBinding {
     fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
         use serde::ser::SerializeStruct;
-        let mut st = serializer.serialize_struct("EntityBinding", 7)?;
+        let mut st = serializer.serialize_struct("EntityBinding", 8)?;
         st.serialize_field("source", &self.source)?;
         st.serialize_field("agentId", &self.agent_id)?;
         st.serialize_field("profileId", &self.profile_id)?;
         st.serialize_field("sessionKey", &self.session_key)?;
+        st.serialize_field("instanceId", &self.instance_id)?;
         st.serialize_field("allowFrom", &self.allow_from)?;
         st.serialize_field("reset", &self.reset)?;
         st.serialize_field("idleMinutes", &self.idle_minutes)?;
@@ -320,6 +328,40 @@ impl EntityRouteTable {
     /// 遍历全部绑定（gateway_status 展示 / 热重载快照用）。
     pub fn iter(&self) -> impl Iterator<Item = &EntityBinding> {
         self.entries.iter()
+    }
+}
+
+/// Route 解析状态（I12-A-BE-01 契约冻结；D-04：实例删除后 route 保留并
+/// disabled，不级联删除）。上游按本状态决定 ingest/deliver 是否放行。
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum RouteResolveStatus {
+    /// 实例存在且已连接 → 可 ingest/deliver。
+    Active,
+    /// binding 未引用实例（instance_id = None，旧配置）——按 legacy 行为处理。
+    Unbound,
+    /// 引用的实例不存在（已删除/未创建）→ disabled，明确显示"适配器实例不存在"。
+    InstanceMissing,
+    /// 实例存在但未连接（stopped/starting/error）→ 不可 ingest/deliver。
+    InstanceNotConnected,
+}
+
+/// 冻结 route→instance 解析：给定 binding 与"按 instance id 查实例状态"的闭包，
+/// 返回 route 可用性。纯函数（无锁、无状态）——BE-02 生命周期接入真实实例
+/// 注册表后沿用本契约。
+///
+/// 语义（D-04）：引用的实例不存在 → InstanceMissing（route 保留 + disabled）；
+/// 实例存在但未连接 → InstanceNotConnected；未引用实例 → Unbound（legacy 兼容）。
+pub fn resolve_route_status(
+    binding: &EntityBinding,
+    instance_status: impl FnOnce(&str) -> Option<InstanceStatus>,
+) -> RouteResolveStatus {
+    let Some(instance_id) = binding.instance_id.as_deref() else {
+        return RouteResolveStatus::Unbound;
+    };
+    match instance_status(instance_id) {
+        Some(InstanceStatus::Connected) => RouteResolveStatus::Active,
+        Some(_) => RouteResolveStatus::InstanceNotConnected,
+        None => RouteResolveStatus::InstanceMissing,
     }
 }
 
@@ -745,11 +787,13 @@ gateway:
     #[test]
     fn binding_serializes_with_camel_case_wire_contract() {
         // B4：gateway_status wire 契约钉死（手写 Serialize impl 的字段/键集合）。
+        // I12-A-BE-01：契约含 instanceId 引用（D-01 route 以 instanceId 绑定实例）。
         let binding = EntityBinding {
             source: "qq:group:1".into(),
             agent_id: "peri".into(),
             profile_id: "trpg".into(),
             session_key: "战役1".into(),
+            instance_id: None,
             allow_from: Some(vec!["member-1".into()]),
             reset: Some("daily".into()),
             idle_minutes: Some(60),
@@ -763,11 +807,107 @@ gateway:
                 "agentId": "peri",
                 "profileId": "trpg",
                 "sessionKey": "战役1",
+                "instanceId": null,
                 "allowFrom": ["member-1"],
                 "reset": "daily",
                 "idleMinutes": 60,
             }),
             "gateway_status wire 形状（extra 不得输出）: {value}"
+        );
+    }
+
+    #[test]
+    fn binding_with_instance_reference_serializes_instance_id() {
+        // I12-A-BE-01：route 引用 adapter instance id → wire 键 instanceId
+        let binding = EntityBinding {
+            source: "qq:group:1".into(),
+            agent_id: "peri".into(),
+            profile_id: "trpg".into(),
+            session_key: "战役1".into(),
+            instance_id: Some("qq-bot-1".into()),
+            allow_from: None,
+            reset: None,
+            idle_minutes: None,
+            extra: HashMap::new(),
+        };
+        let value = serde_json::to_value(&binding).expect("serialize");
+        assert_eq!(
+            value["instanceId"], "qq-bot-1",
+            "route 必须序列化 instanceId 引用: {value}"
+        );
+    }
+
+    #[test]
+    fn route_instance_reference_parses_from_yaml_and_defaults_none() {
+        let yaml = r#"
+gateway:
+  routes:
+    - source: qq:group:123
+      instance: qq-bot-1
+      agent: peri
+      profile: trpg
+      session: 战役1
+    - source: qq:user:456
+      agent: hermes
+      profile: default
+      session: dm
+"#;
+        let config = parse_config(yaml).expect("含 instance 引用的配置应解析成功");
+        let bound = config.routes.lookup("qq:group:123").expect("路由应命中");
+        assert_eq!(
+            bound.instance_id.as_deref(),
+            Some("qq-bot-1"),
+            "yaml instance → instance_id"
+        );
+        let legacy = config.routes.lookup("qq:user:456").expect("路由应命中");
+        assert_eq!(
+            legacy.instance_id, None,
+            "缺 instance 的旧配置必须兼容（None）"
+        );
+    }
+
+    #[test]
+    fn route_resolution_separates_active_missing_and_not_connected() {
+        use crate::gateway::instance::InstanceStatus;
+        let binding = |instance_id: Option<&str>| EntityBinding {
+            source: "qq:group:1".into(),
+            agent_id: "peri".into(),
+            profile_id: "trpg".into(),
+            session_key: "战役1".into(),
+            instance_id: instance_id.map(str::to_string),
+            allow_from: None,
+            reset: None,
+            idle_minutes: None,
+            extra: HashMap::new(),
+        };
+        let registry = |id: &str| match id {
+            "qq-bot-online" => Some(InstanceStatus::Connected),
+            "qq-bot-stopped" => Some(InstanceStatus::Stopped),
+            "qq-bot-starting" => Some(InstanceStatus::Starting),
+            "qq-bot-error" => Some(InstanceStatus::Error),
+            _ => None,
+        };
+        assert_eq!(
+            resolve_route_status(&binding(Some("qq-bot-online")), registry),
+            RouteResolveStatus::Active,
+            "实例已连接 → Active"
+        );
+        assert_eq!(
+            resolve_route_status(&binding(Some("qq-bot-deleted")), registry),
+            RouteResolveStatus::InstanceMissing,
+            "D-04：实例不存在 → disabled（route 保留，不级联删除）"
+        );
+        for id in ["qq-bot-stopped", "qq-bot-starting", "qq-bot-error"] {
+            assert_eq!(
+                resolve_route_status(&binding(Some(id)), registry),
+                RouteResolveStatus::InstanceNotConnected,
+                "{id} 未连接必须返回 InstanceNotConnected"
+            );
+        }
+        assert_eq!(
+            resolve_route_status(&binding(None), registry),
+            RouteResolveStatus::Unbound,
+            "未引用实例 → Unbound（legacy 兼容）"
         );
     }
 
