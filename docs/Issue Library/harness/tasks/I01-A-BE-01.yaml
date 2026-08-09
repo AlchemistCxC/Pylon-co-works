@@ -4,7 +4,7 @@ title: 结构化 AgentContextKey 与 workspace 路由 guard
 type: BE
 owner: A
 mode: longrun-a
-status: implemented
+status: review_pending
 priority: P1
 assignee: codex-role-a
 base:
@@ -73,6 +73,9 @@ commands:
 questions: []
 decision_log: []
 last_progress_commit: b5def0f
+review:
+  pull_request: PR-2
+  status: pending
 verification:
   level: L1
   commit: b5def0f
