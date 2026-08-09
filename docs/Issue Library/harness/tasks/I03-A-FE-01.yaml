@@ -4,7 +4,7 @@ title: 引入 unknown 并统一状态 selector
 type: FE
 owner: A
 mode: longrun-a
-status: active
+status: review_pending
 priority: P1
 assignee: codex-role-a
 base:
@@ -52,13 +52,13 @@ commands:
   - git diff --check
 questions: []
 decision_log: []
-last_progress_commit: pending
+last_progress_commit: f7f34c7
 review:
   pull_request: null
   status: pending
 verification:
   level: L1
-  commit: pending
+  commit: f7f34c7
   results:
   - command: npm run test -- --run src/components/settings/__tests__/agentStatusSelector.test.ts
     result: passed; 3 passed
