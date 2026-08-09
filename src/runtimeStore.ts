@@ -1,7 +1,7 @@
 import { create } from 'zustand'
 import type { ConfigOption } from './infrastructure/acp/chatContracts'
 import { clearSessionSourceState, updateSessionLiveStats, type SessionLiveStats } from './components/chat/sessionRuntime'
-import type { AgentStatus } from './components/settings/agentTypes'
+import { shouldAcceptAgentStatus, type AgentStatus } from './components/settings/agentTypes'
 import { permissionReducer, EMPTY_PERMISSION_STATE, type PermissionAction, type PermissionState } from './domains/permission/permissionState'
 import { normalizeApprovalMode, type ApprovalMode } from './domains/permission/approvalMode'
 
@@ -97,7 +97,10 @@ export const useRuntimeStore = create<RuntimeStoreState>()((set, get) => ({
   setSessionConfig: (source, cfg) => set(s => ({
     sessionConfig: { ...s.sessionConfig, [source]: { ...s.sessionConfig[source], ...cfg } },
   })),
-  setAgentStatus: (id, status) => set(state => ({ agentStatuses: { ...state.agentStatuses, [id]: status } })),
+  setAgentStatus: (id, status) => set(state => {
+    if (!shouldAcceptAgentStatus(state.agentStatuses[id], status)) return state
+    return { agentStatuses: { ...state.agentStatuses, [id]: status } }
+  }),
   clearSessionSource: (source) => get().clearSessionRuntime(source),
   resetAll: () => set({
     sessionConfig: {},

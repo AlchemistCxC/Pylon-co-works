@@ -33,7 +33,7 @@ assert.match(bootstrap, /deps\.applyAgents\(agents\)/, 'applyAgents 必须在 fe
 
 assert.match(runtimeStore, /agentStatuses: Record<string, AgentStatus>/)
 assert.match(runtimeStore, /setAgentStatus: \(id: string, status: AgentStatus\)/)
-assert.match(runtimeStore, /setAgentStatus: \(id, status\) => set\(state => \(\{ agentStatuses: \{ \.\.\.state\.agentStatuses, \[id\]: status \} \}\)\)/)
+assert.match(runtimeStore, /setAgentStatus: \(id, status\) => set\(state => \{[\s\S]*?shouldAcceptAgentStatus\(state\.agentStatuses\[id\], status\)/)
 
 // Dependency-free lifecycle probe: proves the guarded async completion cannot write after dispose.
 let disposed = false
