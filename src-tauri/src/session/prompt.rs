@@ -479,7 +479,10 @@ pub(crate) async fn send_prompt_core<R: tauri::Runtime>(
         .map(str::to_string)
         .unwrap_or_else(|| state.agent_cwd());
     let (peri_id, is_first) = {
-        let mapping = ensure_session_mapping(
+        // 方案 I：session/new（建会话/复用）失败必须立即向前端广播 pylon:error，
+        // 不能静默传播 Err——否则用户看到的是"消息滞留 + 生成指示器空转"而非明确错误
+        // （Hermes 无 provider/401 等均在此时失败）。错误同时进 runtime 日志带上下文。
+        let mapping = match ensure_session_mapping(
             state,
             runtime,
             source,
@@ -487,7 +490,34 @@ pub(crate) async fn send_prompt_core<R: tauri::Runtime>(
             &session_cwd,
             &requested_mcp_servers,
         )
-        .await?;
+        .await
+        {
+            Ok(mapping) => mapping,
+            Err(error) => {
+                let message = error.to_string();
+                if let Some(window) = window {
+                    emit_event_all(
+                        window,
+                        gateway,
+                        source,
+                        crate::event_names::SESSION_ERROR,
+                        serde_json::json!({"source": source, "error": message}),
+                    );
+                }
+                let _ = state.pet.lock().map(|mut p| crate::pet::on_error(&mut p));
+                state.log_runtime_summary(
+                    "error",
+                    "prompt",
+                    Some(source.to_string()),
+                    "Prompt session ensure failed",
+                    serde_json::Map::from_iter([(
+                        "error".to_string(),
+                        serde_json::Value::String(message.clone()),
+                    )]),
+                );
+                return Err(PylonError::Protocol(message));
+            }
+        };
         (mapping.peri_id, mapping.is_first)
     };
 
@@ -612,12 +642,20 @@ pub(crate) async fn send_prompt_core<R: tauri::Runtime>(
             // generation 并恢复事件路由；此处删除映射会让重连后的活跃会话
             // 丢失绑定（与 keep_sessions 语义相悖）。已知限制：若重连后
             // 事件无匹配（幽灵映射），session_matches 复核会拒绝陈旧消息。
+            // 方案 I：连接关闭日志携带 request/session/agent 上下文，便于
+            // 对齐 ACP wire 时间线定位终态缺失点。
             state.log_runtime_summary(
                 "error",
                 "prompt",
                 Some(source.to_string()),
                 "Prompt connection closed",
-                serde_json::Map::new(),
+                serde_json::Map::from_iter([
+                    ("requestId".to_string(), serde_json::Value::from(flow.request_id)),
+                    ("sessionId".to_string(), serde_json::Value::String(flow.peri_id.clone())),
+                    ("agentId".to_string(), serde_json::Value::String(
+                        state.agent_for_runtime(runtime).map(|a| a.name).unwrap_or_default(),
+                    )),
+                ]),
             );
             Err(PylonError::Protocol("ACP connection closed".to_string()))
         }
@@ -660,6 +698,15 @@ pub(crate) async fn send_prompt_core<R: tauri::Runtime>(
             }
             // G2-06：超时文案参数化（缺省 300 时与旧文案逐字一致——session.rs:2108
             // 负例表 "timed out after 300s" 依赖此不变量）。
+            // 方案 I：区分"流式内容已到、终态缺失"与"完全无输出"——本回合是否收到过
+            // assistant 内容（dispatcher 经 collect_response_chunk 写入 last_response_text）。
+            let has_streamed_content = {
+                let sessions = runtime.sessions.lock().map_err(|e| e.to_string())?;
+                sessions
+                    .get(source)
+                    .map(|s| !s.last_response_text.trim().is_empty())
+                    .unwrap_or(false)
+            };
             let error = format!("timed out after {prompt_timeout_secs}s");
             if let Some(window) = window {
                 emit_event_all(
@@ -672,15 +719,31 @@ pub(crate) async fn send_prompt_core<R: tauri::Runtime>(
             }
             // M5 感知：超时 → 发呆（区别于普通失败）
             let _ = state.pet.lock().map(|mut p| crate::pet::on_timeout(&mut p));
+            // 方案 I：超时日志区分内容状态 + 携带 request/session/agent 上下文。
             state.log_runtime_summary(
                 "error",
                 "prompt",
                 Some(source.to_string()),
-                "Prompt timed out",
-                serde_json::Map::from_iter([(
-                    "result".to_string(),
-                    serde_json::Value::String("timeout".to_string()),
-                )]),
+                if has_streamed_content {
+                    "Prompt timed out (streamed content, missing final response)"
+                } else {
+                    "Prompt timed out (no content streamed)"
+                },
+                serde_json::Map::from_iter([
+                    (
+                        "result".to_string(),
+                        serde_json::Value::String("timeout".to_string()),
+                    ),
+                    (
+                        "hasStreamedContent".to_string(),
+                        serde_json::Value::Bool(has_streamed_content),
+                    ),
+                    ("requestId".to_string(), serde_json::Value::from(flow.request_id)),
+                    ("sessionId".to_string(), serde_json::Value::String(flow.peri_id.clone())),
+                    ("agentId".to_string(), serde_json::Value::String(
+                        state.agent_for_runtime(runtime).map(|a| a.name).unwrap_or_default(),
+                    )),
+                ]),
             );
             Err(PylonError::Protocol(error))
         }

@@ -79,6 +79,7 @@ pub(crate) fn fake_acp_agent_with(
         default: false,
         set_model_api: false,
         model: None,
+        hermes_profile: None,
         acp_args: Vec::new(),
         acp: None,
     }

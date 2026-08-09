@@ -2,6 +2,13 @@
 //! 方案 11 机械拆分自 session/mod.rs（纯搬移，行为零变化）。
 
 use super::*;
+#[derive(Debug, serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+struct PersistedSessionLoadResult {
+    response: serde_json::Value,
+    replay: Vec<serde_json::Value>,
+}
+
 #[tauri::command]
 pub(crate) async fn load_persisted_session(
     state: tauri::State<'_, AppState>,
@@ -19,16 +26,18 @@ pub(crate) async fn load_persisted_session(
     let mcp_servers = mcp::validate_and_serialize(mcp_servers)?;
     // 与 new_session / send_message 自动创建一致，恢复历史会话也受上限约束；
     // 同 source 重载（替换）不占新名额（R32：检查与插入统一在槽位辅助内）。
+    let mut loading_session = SessionInfo::new(
+        peri_id.clone(),
+        String::new(),
+        cwd.clone(),
+        true,
+        generation,
+    );
+    loading_session.replay_loading = true;
     let previous = replace_session_slot(
         &runtime,
         &source,
-        SessionInfo::new(
-            peri_id.clone(),
-            String::new(),
-            cwd.clone(),
-            true,
-            generation,
-        ),
+        loading_session,
         true,
         crate::agent_runtime::SessionSlotPolicy::default().max_sessions,
     )?;
@@ -43,15 +52,17 @@ pub(crate) async fn load_persisted_session(
     )
     .await;
     match load_result {
-        Ok((response, _replay)) => {
+        Ok((response, replay)) => {
             if let Err(error) = state.ensure_generation(&runtime, generation) {
                 restore_previous_slot(&runtime, &source, &peri_id, generation, previous)?;
                 return Err(error.into());
             }
             state.with_session_if_matches(&runtime, &source, &peri_id, generation, |session| {
                 session.apply_session_response(&response);
+                session.replay_loading = false;
             })?;
-            Ok(response)
+            serde_json::to_value(PersistedSessionLoadResult { response, replay })
+                .map_err(|error| PylonError::from(error.to_string()))
         }
         Err(error) => {
             restore_previous_slot(&runtime, &source, &peri_id, generation, previous)?;

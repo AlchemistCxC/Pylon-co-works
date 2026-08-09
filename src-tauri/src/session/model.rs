@@ -13,6 +13,9 @@ pub(crate) struct SessionInfo {
     pub(crate) has_first_prompt: bool,
     pub(crate) title: String,
     pub(crate) generation: u64,
+    /// session/load 正在由 command 收集完整 replay snapshot；期间 dispatcher 只更新
+    /// 后端会话状态，不向前端广播 replay 增量，避免全局事件流与 command response 双写。
+    pub(crate) replay_loading: bool,
     pub(crate) mode: Option<String>,
     pub(crate) config_options: Vec<serde_json::Value>,
     pub(crate) model: String,
@@ -83,6 +86,7 @@ impl SessionInfo {
             has_first_prompt,
             title: String::new(),
             generation,
+            replay_loading: false,
             mode: None,
             config_options: Vec::new(),
             model: String::new(),

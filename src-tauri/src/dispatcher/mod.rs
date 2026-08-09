@@ -247,6 +247,31 @@ async fn handle_permission_request<R: tauri::Runtime>(
     }
 }
 
+/// 剥离 replay 的 user 消息 persona/session_prompt 前缀（验收回归 D3）。
+/// Pylon 首条消息发送"{effective_persona}\n\n---\n\n{content}"给 Hermes（prompt.rs
+/// 的 effective_persona = session_prompt 优先于 persona），Hermes 持久化该完整
+/// prompt;load 重放时 content 带前缀,与前端 live 的原文不一致导致内容签名去重
+/// 失效（每次回到会话消息累积）。
+///
+/// 剥离策略：不依赖精确 persona 匹配（session_prompt 场景 persona 不匹配），
+/// 而是检测 `\n\n---\n\n` 分隔符——它是 Pylon 发送首条消息时的固定分隔。存在
+/// 则取分隔符后的原文；不存在（后续轮次消息无前缀）原样返回。用户原文若自身
+/// 含该分隔符会误剥，但概率极低且仅影响重放去重。
+pub(crate) fn strip_persona_prefix(text: &str, _persona: &str) -> String {
+    const SEP: &str = "\n\n---\n\n";
+    match text.find(SEP) {
+        Some(idx) => {
+            let content = &text[idx + SEP.len()..];
+            if content.is_empty() {
+                text.to_string()
+            } else {
+                content.to_string()
+            }
+        }
+        None => text.to_string(),
+    }
+}
+
 /// NOTIF_SESSION_UPDATE 处理（R8 自主循环拆分）：source 解析（重试循环）→ 代际
 /// 复核 → session 状态 + 宠物感知应用（C11 回放守卫 / O7 锁外应用）→ 前端+平台
 /// 转发（B10.1）。返回 false 表示本代已结束（主循环应退出）。
@@ -386,13 +411,32 @@ async fn handle_session_update<R: tauri::Runtime>(
         if variant == Some(crate::acp::SessionUpdateVariant::UserMessageChunk) {
             is_user_chunk = true;
             if is_replay {
-                user_echo = update
+                // session/load 的历史由 load_persisted_session command 原子返回，
+                // dispatcher 不再把 replay 事件广播给前端，避免与 snapshot 双写。
+                let text = update
                     .get("content")
                     .and_then(|c| c.get("text"))
                     .and_then(|v| v.as_str())
                     .map(str::to_string);
+                user_echo = if items
+                    .get(&source)
+                    .is_some_and(|session| session.replay_loading)
+                {
+                    None
+                } else {
+                    text.map(|text| {
+                        let persona = items
+                            .get(&source)
+                            .map(|session| session.persona.clone())
+                            .unwrap_or_default();
+                        strip_persona_prefix(&text, &persona)
+                    })
+                };
             }
         } else if let Some(session) = items.get_mut(&source) {
+            if is_replay && session.replay_loading {
+                return true;
+            }
             pet_events.extend(apply_update_event(session, update, variant, is_replay));
             // 原 :417-433
         }
@@ -771,6 +815,37 @@ pub(crate) fn start_notification_dispatcher<R: tauri::Runtime>(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// 验收回归 D3：replay 的 user 消息 persona 前缀剥离（基于分隔符）。
+    #[test]
+    fn strip_persona_prefix_removes_separator_prefix() {
+        let persona = "你是 Riccati，宫木云的全栈开发助手。说话直接，不废话。";
+        let text = format!("{persona}\n\n---\n\n你好");
+        assert_eq!(strip_persona_prefix(&text, persona), "你好");
+    }
+
+    #[test]
+    fn strip_persona_prefix_works_for_session_prompt_too() {
+        // session_prompt 场景：persona 不匹配 session_prompt，但分隔符剥离不依赖 persona
+        let persona = "profile persona";
+        let session_prompt = "自定义会话提示";
+        let text = format!("{session_prompt}\n\n---\n\n你好");
+        assert_eq!(strip_persona_prefix(&text, persona), "你好");
+    }
+
+    #[test]
+    fn strip_persona_prefix_keeps_non_prefixed_text() {
+        // 后续轮次消息无前缀（无分隔符）→ 原样返回
+        assert_eq!(strip_persona_prefix("你好", "persona"), "你好");
+        // persona 为空也剥离分隔符（分隔符才是依据）
+        assert_eq!(strip_persona_prefix("p\n\n---\n\n你好", ""), "你好");
+    }
+
+    #[test]
+    fn strip_persona_prefix_keeps_text_with_trailing_separator() {
+        // 分隔符后为空 → 原样返回（防误剥成空串）
+        assert_eq!(strip_persona_prefix("persona\n\n---\n\n", "persona"), "persona\n\n---\n\n");
+    }
 
     /// C11：带 `_meta.periReplay=true` 的事件不产生宠物感知事件——pet xp/bond/
     /// recent_events 快照不变（回放不刷宠物状态）。覆盖 usage/tool 全部门控 +

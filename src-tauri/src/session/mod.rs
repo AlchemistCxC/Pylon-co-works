@@ -464,6 +464,7 @@ impl AppState {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::acp::AcpClient;
     use tauri::Manager;
 
     /// 测试桩适配器（G4 §3-9 适配）：platform_key="qq"——注册后 is_platform_source
@@ -1146,5 +1147,129 @@ for line in sys.stdin:
         );
         assert!(!removed, "peri_id 不匹配不得误删新会话映射");
         assert_eq!(runtime.sessions.lock().unwrap().len(), 1);
+    }
+
+    /// 方案 I：session/new 失败时 send_prompt_core 必须返回 Err 且 runtime 日志
+    /// 记录 "Prompt session ensure failed"（前端经 pylon:error 看到明确错误，
+    /// 而非消息滞留 + 生成指示器空转 300s）。
+    #[tokio::test]
+    async fn session_new_failure_logs_ensure_failed_and_returns_error() {
+        const FAIL_SCRIPT: &str = r#"import json,sys
+for line in sys.stdin:
+    request = json.loads(line)
+    if request.get('method') == 'session/new':
+        response = {'jsonrpc':'2.0','id':request.get('id'),'error':{'code':-32603,'message':'No LLM provider configured'}}
+    else:
+        response = {'jsonrpc':'2.0','id':request.get('id'),'result':{}}
+    print(json.dumps(response), flush=True)
+"#;
+        let agent = crate::test_utils::fake_acp_agent("i1-fail-agent", FAIL_SCRIPT);
+        let runtime = AgentRuntime::new_disconnected();
+        *runtime.acp.lock().await = AcpClient::connect_with_logs(&agent, None)
+            .await
+            .expect("fake ACP must initialize");
+        let state = crate::test_utils::TestStateBuilder::bare()
+            .with_active_agent("i1-fail-agent")
+            .with_agent(agent)
+            .with_runtime("i1-fail-agent", runtime.clone())
+            .build();
+        let gateway = Arc::new(GatewayCore::new());
+        let error = send_prompt_core::<tauri::test::MockRuntime>(
+            &state,
+            &runtime,
+            None,
+            &gateway,
+            &PromptContext {
+                source: "i1-source".to_string(),
+                content: "你好".to_string(),
+                ..Default::default()
+            },
+        )
+        .await
+        .expect_err("session/new 失败必须传播错误");
+        assert!(
+            error.to_string().contains("No LLM provider configured"),
+            "错误必须透传 session/new 的 JSON-RPC error，实际: {error}"
+        );
+        // 方案 I：日志必须记录 ensure failed（前端错误可见性的日志侧证据）
+        let entries = state.runtime_logs.list(&crate::runtime_log::RuntimeLogQuery::default());
+        assert!(
+            entries.iter().any(|entry| entry.message == "Prompt session ensure failed"),
+            "session/new 失败必须记 'Prompt session ensure failed' 日志"
+        );
+    }
+
+    /// 方案 I：prompt 超时（无任何内容流式）→ 返回超时错误，日志区分
+    /// "no content streamed" 且携带 requestId/sessionId/agentId 上下文。
+    /// fake agent 对 session/prompt 永不响应（挂起），配 1s 超时 + 1s settle。
+    #[tokio::test]
+    async fn prompt_timeout_without_content_logs_distinguished_fields() {
+        const HANG_SCRIPT: &str = r#"import json,sys
+for line in sys.stdin:
+    request = json.loads(line)
+    method = request.get('method')
+    if method == 'session/new':
+        response = {'jsonrpc':'2.0','id':request.get('id'),'result':{'sessionId':'i2-session'}}
+        print(json.dumps(response), flush=True)
+    elif method != 'session/prompt':
+        # initialize 等握手方法统一应答；session/prompt 永不响应 → 触发超时
+        response = {'jsonrpc':'2.0','id':request.get('id'),'result':{}}
+        print(json.dumps(response), flush=True)
+"#;
+        let mut agent = crate::test_utils::fake_acp_agent("i2-hang-agent", HANG_SCRIPT);
+        agent.acp = Some(crate::agent_config::AcpProtocolConfig {
+            prompt_timeout_secs: Some(1),
+            cancel_settle_timeout_secs: Some(1),
+            ..Default::default()
+        });
+        let runtime = AgentRuntime::new_disconnected();
+        *runtime.acp.lock().await = AcpClient::connect_with_logs(&agent, None)
+            .await
+            .expect("fake ACP must initialize");
+        let state = crate::test_utils::TestStateBuilder::bare()
+            .with_active_agent("i2-hang-agent")
+            .with_agent(agent)
+            .with_runtime("i2-hang-agent", runtime.clone())
+            .build();
+        let gateway = Arc::new(GatewayCore::new());
+        let start = std::time::Instant::now();
+        let error = send_prompt_core::<tauri::test::MockRuntime>(
+            &state,
+            &runtime,
+            None,
+            &gateway,
+            &PromptContext {
+                source: "i2-source".to_string(),
+                content: "你好".to_string(),
+                ..Default::default()
+            },
+        )
+        .await
+        .expect_err("prompt 挂起必须超时");
+        assert!(
+            error.to_string().contains("timed out after 1s"),
+            "超时文案必须参数化，实际: {error}"
+        );
+        assert!(
+            start.elapsed().as_secs() < 10,
+            "超时必须在参数化时长内返回（不应等 300s），实际 {:?}",
+            start.elapsed()
+        );
+        let entries = state.runtime_logs.list(&crate::runtime_log::RuntimeLogQuery::default());
+        let timeout_entry = entries
+            .iter()
+            .find(|entry| entry.message.starts_with("Prompt timed out"))
+            .expect("超时必须记录 Prompt timed out 日志");
+        assert_eq!(
+            timeout_entry
+                .fields
+                .get("hasStreamedContent")
+                .and_then(|v| v.as_bool()),
+            Some(false),
+            "无内容流式时必须标记 hasStreamedContent=false"
+        );
+        assert!(timeout_entry.fields.contains_key("requestId"));
+        assert!(timeout_entry.fields.contains_key("sessionId"));
+        assert!(timeout_entry.fields.contains_key("agentId"));
     }
 }
