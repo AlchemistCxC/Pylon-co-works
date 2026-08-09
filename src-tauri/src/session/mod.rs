@@ -12,7 +12,7 @@ use crate::agent_runtime::{session_mapping_matches, AgentLifecycleStatus, AgentR
 use crate::error::PylonError;
 use crate::gateway::GatewayCore;
 use crate::mcp;
-use crate::runtime::AgentRuntime;
+use crate::runtime::{AgentContextKey, AgentRuntime};
 use crate::time::Timestamp;
 use crate::workspace;
 use crate::{emit_event, emit_event_all, prompt_lock_for, AppState, AppStateHandles};
@@ -248,18 +248,81 @@ impl AppState {
 
     pub(crate) fn workspace_root_for_source(
         &self,
-        runtime: &AgentRuntime,
+        runtime: &Arc<AgentRuntime>,
         source: &str,
     ) -> Result<String, PylonError> {
+        let (context, _) = self.active_context_for_source(source)?;
+        self.workspace_root_for_context(runtime, &context)
+    }
+
+    /// Resolve the GUI's active Agent context without allowing a source-only
+    /// lookup to select another runtime. This is the compatibility bridge for
+    /// existing commands that still receive only `source`.
+    pub(crate) fn active_context_for_source(
+        &self,
+        source: &str,
+    ) -> Result<(AgentContextKey, Arc<AgentRuntime>), PylonError> {
+        let agent_id = self
+            .active_agent
+            .lock()
+            .map_err(|error| PylonError::Protocol(error.to_string()))?
+            .clone();
+        let context = AgentContextKey::new(agent_id, source);
+        let runtime = self.runtime_for_context(&context)?;
+        Ok((context, runtime))
+    }
+
+    /// Resolve a context to the currently active runtime. A context from any
+    /// other Agent is rejected explicitly in the Release 1.x single-active
+    /// compatibility boundary.
+    pub(crate) fn runtime_for_context(
+        &self,
+        context: &AgentContextKey,
+    ) -> Result<Arc<AgentRuntime>, PylonError> {
+        let active_agent = self
+            .active_agent
+            .lock()
+            .map_err(|error| PylonError::Protocol(error.to_string()))?
+            .clone();
+        if active_agent != context.agent_id {
+            return Err(PylonError::SessionNotFound(format!(
+                "agent context mismatch: active={} requested={} source={}",
+                active_agent, context.agent_id, context.source
+            )));
+        }
+        self.runtimes
+            .get(&context.agent_id)
+            .ok_or(PylonError::NoActiveAgent)
+    }
+
+    /// Read a workspace root only when both the context Agent and runtime
+    /// instance match. The source must be present in that runtime's session
+    /// map; callers must never fall back to the active Agent cwd.
+    pub(crate) fn workspace_root_for_context(
+        &self,
+        runtime: &Arc<AgentRuntime>,
+        context: &AgentContextKey,
+    ) -> Result<String, PylonError> {
+        let expected_runtime = self.runtime_for_context(context)?;
+        if !Arc::ptr_eq(&expected_runtime, runtime) {
+            return Err(PylonError::SessionNotFound(format!(
+                "agent context runtime mismatch: agent={} source={}",
+                context.agent_id, context.source
+            )));
+        }
         // A10（2026-08-02）：Mutex 中毒视为协议层错误（Acp 变体只留给 ACP 客户端层）。
         let sessions = runtime
             .sessions
             .lock()
             .map_err(|e| PylonError::Protocol(e.to_string()))?;
         sessions
-            .get(source)
+            .get(&context.source)
             .map(|session| session.cwd.clone())
-            .ok_or_else(|| PylonError::SessionNotFound(source.to_string()))
+            .ok_or_else(|| {
+                PylonError::SessionNotFound(format!(
+                    "agent={} source={}", context.agent_id, context.source
+                ))
+            })
     }
 
     pub(crate) fn agent_status_payload(&self) -> serde_json::Value {

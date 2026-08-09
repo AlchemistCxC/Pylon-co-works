@@ -70,7 +70,7 @@ pub(crate) async fn workspace_search(
     Ok(found)
 }
 
-/// B5：解析 source 对应的 git 工作区 root（会话 cwd，失败回退 active agent cwd）。
+/// B5：解析 source 对应的 git 工作区 root（会话 cwd）。
 /// 只读操作；非 git 仓库 / git 不可用 → PylonError::Git（code=git_error）。
 pub(crate) fn git_workspace_root(
     state: &AppState,
@@ -83,8 +83,7 @@ pub(crate) fn git_workspace_root(
         .map_err(|error| PylonError::Git(error.to_string()))?;
     let root = state
         .workspace_root_for_source(&runtime, source)
-        .or_else(|_| Ok::<String, String>(state.agent_cwd()))
-        .map_err(PylonError::Git)?;
+        .map_err(|error| PylonError::Git(error.to_string()))?;
     Ok(std::path::PathBuf::from(root))
 }
 
@@ -141,5 +140,54 @@ mod tests {
                 );
             }
         }
+    }
+
+    #[test]
+    fn git_workspace_root_rejects_missing_source_in_active_runtime() {
+        let mut agent = crate::test_utils::fake_acp_agent("agent-a", "");
+        agent.cwd = Some("fallback-cwd-must-not-be-used".to_string());
+        let state = crate::test_utils::TestStateBuilder::bare()
+            .with_active_agent("agent-a")
+            .with_agent(agent)
+            .with_runtime("agent-a", crate::runtime::AgentRuntime::new_disconnected())
+            .build();
+
+        let error = git_workspace_root(&state, "same-source-on-another-agent")
+            .expect_err("未知 source 必须显式失败，不能回退 active agent cwd");
+        assert_eq!(error.code(), "git_error");
+        assert!(!error.to_string().contains("fallback-cwd-must-not-be-used"));
+    }
+
+    #[test]
+    fn workspace_context_rejects_source_from_another_agent_runtime() {
+        let mut agent_a = crate::test_utils::fake_acp_agent("agent-a", "");
+        agent_a.cwd = Some("agent-a-cwd".to_string());
+        let mut agent_b = crate::test_utils::fake_acp_agent("agent-b", "");
+        agent_b.cwd = Some("agent-b-cwd".to_string());
+        let runtime_a = crate::runtime::AgentRuntime::new_disconnected();
+        runtime_a.sessions.lock().unwrap().insert(
+            "shared-source".to_string(),
+            crate::session::SessionInfo::new(
+                "peri-a".to_string(),
+                String::new(),
+                "agent-a-workspace".to_string(),
+                false,
+                0,
+            ),
+        );
+        let state = crate::test_utils::TestStateBuilder::bare()
+            .with_active_agent("agent-a")
+            .with_agent(agent_a)
+            .with_agent(agent_b)
+            .with_runtime("agent-a", runtime_a.clone())
+            .with_runtime("agent-b", crate::runtime::AgentRuntime::new_disconnected())
+            .build();
+
+        let context = crate::runtime::AgentContextKey::new("agent-b", "shared-source");
+        let error = state
+            .workspace_root_for_context(&runtime_a, &context)
+            .expect_err("context 与 runtime Agent 不一致时必须显式失败");
+        assert_eq!(error.code(), "session_not_found");
+        assert!(!error.to_string().contains("agent-a-workspace"));
     }
 }
