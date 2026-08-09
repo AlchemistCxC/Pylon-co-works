@@ -50,7 +50,9 @@ interface RuntimeStoreState {
   setAgentStatus: (id: string, status: AgentStatus) => void
   /** 会话删除：清该 source 的全部 runtime 状态（identityStore.removeSession 联动调用） */
   clearSessionSource: (source: string) => void
-  /** Agent 切换成功：清空全部运行时状态（Settings.switchAgent 联动调用） */
+  /** Agent 切换成功：只清会话运行时状态，保留 agentStatuses 供末尾快照对账。 */
+  resetSessionRuntime: () => void
+  /** @deprecated 使用 resetSessionRuntime；保留兼容入口但不清 agentStatuses。 */
   resetAll: () => void
 }
 
@@ -102,14 +104,14 @@ export const useRuntimeStore = create<RuntimeStoreState>()((set, get) => ({
     return { agentStatuses: { ...state.agentStatuses, [id]: status } }
   }),
   clearSessionSource: (source) => get().clearSessionRuntime(source),
-  resetAll: () => set({
+  resetSessionRuntime: () => set({
     sessionConfig: {},
     sessionModes: {},
     sessionLiveStats: {},
     liveGenerating: null,
     liveGeneratingSources: [],
-    agentStatuses: {},
     permission: EMPTY_PERMISSION_STATE,
     approvalMode: 'default',
   }),
+  resetAll: () => get().resetSessionRuntime(),
 }))
