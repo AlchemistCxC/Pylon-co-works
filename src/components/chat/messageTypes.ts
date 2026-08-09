@@ -23,6 +23,9 @@ export interface Message {
   toolKind?: string
   /** P1-04：结构化内容块（含 tool_diff_content；raw 保留，消费方式后变） */
   contentBlocks?: ContentBlock[]
+  /** 乐观渲染标识（release-issues #1 方案 B）：发送即渲染的用户消息带 clientMsgId，
+   * 后端 `pylon:user` 到达时按 id 去重确认，避免重复显示。 */
+  clientMsgId?: string
 }
 
 export type RenderMessage =

@@ -48,6 +48,11 @@ export interface SourceChatRuntime {
   replayToolIds: string[]
   /** 单调消息 ID 序列（'user-N'/'msg-N'/'thought-N'/'err-N'/'tool-missing-N' 共享） */
   seq: number
+  /** load 开始时已有消息 ID 集合。commit 只允许合并本轮之后新增的 live 消息，
+   * 不再依赖数字 seq，也不会把已有缓存/上轮 replay 重新拼回权威 snapshot。 */
+  loadBaseMessageIds?: string[]
+  /** load 开始时的 seq 快照：兼容旧测试/迁移；不再作为 live 边界真值。 */
+  loadBaseSeq?: number
   tokenCount: number
   lastSummary?: ChatSummary
   /** P1-04：plan 任务快照（横向，不持久化；D1 全量替换，D4 会话生命周期） */
@@ -64,6 +69,8 @@ export interface ChatRuntimeContext {
 
 export type ChatEvent =
   | { type: 'user'; source: string; content: string; eventReplay?: boolean; loadInProgress?: boolean }
+  | { type: 'optimistic-user'; source: string; content: string; clientMsgId: string }
+  | { type: 'confirm-user'; source: string; clientMsgId: string }
   | { type: 'message-chunk'; source: string; text: string; replay?: boolean }
   | { type: 'thought-chunk'; source: string; text: string; replay?: boolean }
   | { type: 'tool-call'; source: string; toolCallId?: string; title?: string; toolKind?: string; contentBlocks?: ContentBlock[]; rawInput?: unknown; replay?: boolean }
@@ -234,18 +241,32 @@ export function applyChatEvent(
   const current = state[source] ?? createSourceChatRuntime(source)
 
   switch (event.type) {
-    case 'user': {
+    case 'user':
+    case 'optimistic-user': {
       const replayMode = resolveReplayEventMode({
-        eventReplay: event.eventReplay === true,
-        loadInProgress: event.loadInProgress === true,
+        eventReplay: event.type === 'user' && event.eventReplay === true,
+        loadInProgress: event.type === 'user' && event.loadInProgress === true,
       })
       const replay = replayMode !== 'live'
       // 与现状一致：新 user 消息前清空所有 running 标记
       const { runtime: target, messages } = targetMessages(current, replay)
       const seq = current.seq + 1
+      const optimistic = event.type === 'optimistic-user'
+      // 乐观消息去重（方案 B）：若末尾已存在同 clientMsgId 的 user 消息（如
+      // 迟到 pylon:user 又触发一次），直接返回不重复追加。
+      if (optimistic && messages.some(m => m.role === 'user' && m.clientMsgId === event.clientMsgId)) {
+        return state
+      }
       let runtime = withMessages({ ...target, seq }, replay, [
         ...messages.map(m => ({ ...m, running: false })),
-        { id: `user-${seq}`, role: 'user' as const, sender: source, content: event.content, time: nowTime(now) },
+        {
+          id: `user-${seq}`,
+          role: 'user' as const,
+          sender: source,
+          content: event.content,
+          time: nowTime(now),
+          ...(optimistic ? { clientMsgId: event.clientMsgId } : {}),
+        },
       ])
       // shouldStartLiveGeneration({ replay })：buffer/late 模式不启动生成
       if (!replay) {
@@ -257,6 +278,23 @@ export function applyChatEvent(
         }
       }
       return { ...state, [source]: runtime }
+    }
+
+    case 'confirm-user': {
+      // 后端 pylon:user 已到：按 clientMsgId 确认乐观消息（清除 clientMsgId，
+      // 使其成为普通持久化消息）。找不到匹配（已被 clear/切换）则无操作。
+      const matched = current.messages.some(
+        m => m.role === 'user' && m.clientMsgId === event.clientMsgId,
+      )
+      if (!matched) return state
+      return {
+        ...state,
+        [source]: mapMessages(current, false, m =>
+          m.role === 'user' && m.clientMsgId === event.clientMsgId
+            ? { ...m, clientMsgId: undefined }
+            : m,
+        ),
+      }
     }
 
     case 'message-chunk': {

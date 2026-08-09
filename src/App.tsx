@@ -85,6 +85,14 @@ export default function App() {
       hydrateDomains: () => useWorkspaceStore.getState().hydrateWorkspaceSheets(),
       fetchAgents: () => agentClient.listAgents(),
       applyAgents: list => useIdentityStore.getState().setAgents(list),
+      // 冷启动 Agent 状态快照（方案 A）：listener 注册前先查询一次初始状态，
+      // 避免 titlebar 状态灯/发送能力 gate 因初始状态缺失而全灰/禁用。
+      fetchAgentStatus: () => agentClient.agentStatus(),
+      applyAgentStatus: payload => {
+        const activeAgent = useIdentityStore.getState().activeAgent
+        const status = normalizeAgentStatus(payload as AgentStatusPayload, activeAgent)
+        useRuntimeStore.getState().setAgentStatus(status.agentId || status.agent || activeAgent, status)
+      },
       registerListeners: async () => {
         const unlisten = await listen<AgentStatusPayload>('pylon:agent-status', event => {
           const activeAgent = useIdentityStore.getState().activeAgent

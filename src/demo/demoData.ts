@@ -196,6 +196,11 @@ export function buildStartupDiagnostics() {
     prism: { status: 'warn', message: 'Prism 管理端未连接' },
     defaultAgentId: 'peri',
     configSource: { kind: 'file', fileName: 'agents.yaml' },
+    hermesProfile: {
+      profiles: ['claude-code-dev', 'l-m', 'riccati', 'shared', 'vesper', 'yjd'],
+      configured: 'riccati',
+      resolved: true,
+    },
   }
 }
 

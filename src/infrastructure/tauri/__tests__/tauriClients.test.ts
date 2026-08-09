@@ -7,6 +7,7 @@ import { FakeInvoke } from '../../../test/fakeInvoke'
 import { createWorkspaceClient } from '../workspaceClient'
 import { createGatewayClient } from '../gatewayClient'
 import { createBrowserClient } from '../browserClient'
+import { normalizeStartupDiagnostics } from '../runtimeLogContracts'
 
 describe('workspaceClient', () => {
   it('listEntries 宽容 normalize（损坏项过滤）', async () => {
@@ -49,6 +50,37 @@ describe('gatewayClient', () => {
     const payload = { scope: 'gateway', config: { gateway: { routes: [] } } }
     await client.updateAgentsConfig(payload)
     expect(invoke.calls).toEqual([{ cmd: 'update_agents_config', args: payload }])
+  })
+})
+
+describe('normalizeStartupDiagnostics', () => {
+  it('hermesProfile 宽容 normalize（含 configured/resolved/profiles）', () => {
+    const diagnostics = normalizeStartupDiagnostics({
+      agentConfig: { status: 'ready' },
+      gatewayConfig: { status: 'ready' },
+      prism: { status: 'ready' },
+      hermesProfile: {
+        profiles: ['l-m', 'riccati'],
+        configured: 'riccati',
+        resolved: true,
+      },
+    })
+    expect(diagnostics.hermesProfile).toEqual({
+      profiles: ['l-m', 'riccati'],
+      configured: 'riccati',
+      resolved: true,
+    })
+  })
+
+  it('hermesProfile 缺失/损坏时保持缺省（不抛错）', () => {
+    const diagnostics = normalizeStartupDiagnostics({
+      agentConfig: { status: 'ready' },
+      gatewayConfig: { status: 'ready' },
+      prism: { status: 'ready' },
+    })
+    expect(diagnostics.hermesProfile).toBeUndefined()
+    const broken = normalizeStartupDiagnostics({ agentConfig: null, gatewayConfig: null, prism: null, hermesProfile: 'bad' })
+    expect(broken.hermesProfile).toBeUndefined()
   })
 })
 

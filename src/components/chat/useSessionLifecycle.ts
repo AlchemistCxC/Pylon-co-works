@@ -152,10 +152,12 @@ export function useSessionLifecycle(
       loadGenerationRef.current[s.source] = loadGeneration
       const sessionClient = createSessionClient({ invoke: (cmd, args) => invoke(cmd, args as Record<string, unknown> | undefined) })
       sessionClient.loadPersistedSession({ source: s.source, periId: s.periId, cwd: s.workdir || undefined }).then((response: unknown) => {
-        const res = sessionResponseObject(response)
+        const raw = response && typeof response === 'object' ? response as { response?: unknown; replay?: unknown[] } : {}
+        const res = sessionResponseObject(raw.response ?? response)
         if (!isCurrentLoadGeneration(loadGenerationRef.current[s.source], loadGeneration)) return
+        const replay = Array.isArray(raw.replay) ? raw.replay : []
         const resolved = controllerHandleRef.current
-          ? controllerHandleRef.current.commitReplay(s.source, cached)
+          ? controllerHandleRef.current.commitReplaySnapshot(s.source, replay, cached)
           : resolveLoadedMessages({ loadSucceeded: true, cached, replayed: [] })
         const serialized = serializeLoadedMessages(resolved)
         try {

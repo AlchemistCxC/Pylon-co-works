@@ -34,6 +34,14 @@ describe('agentClient', () => {
     expect(invoke.calls).toEqual([{ cmd: 'switch_agent', args: { name: 'peri' } }])
   })
 
+  it('agentStatus 发送 agent_status 并原样透传 payload', async () => {
+    const payload = { agentId: 'peri', agent: 'Peri', status: 'connected' }
+    const invoke = new FakeInvoke().register('agent_status', () => payload)
+    const client = createAgentClient({ invoke: (cmd, args) => invoke.invoke(cmd, args) })
+    await expect(client.agentStatus()).resolves.toEqual(payload)
+    expect(invoke.calls).toEqual([{ cmd: 'agent_status', args: {} }])
+  })
+
   it('错误原样上抛（不吞）', async () => {
     const invoke = new FakeInvoke().register('switch_agent', () => { throw new Error('down') })
     const client = createAgentClient({ invoke: (cmd, args) => invoke.invoke(cmd, args) })

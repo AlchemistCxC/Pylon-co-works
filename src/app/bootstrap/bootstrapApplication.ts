@@ -18,6 +18,12 @@ export interface BootstrapDeps {
   fetchAgents: () => Promise<AgentEntry[]>
   /** 应用 agents 结果（阶段 2 后为 prune 语义，不再全量替换 hydrate） */
   applyAgents: (agents: AgentEntry[]) => void
+  /** 冷启动 Agent 状态快照（release-issues #1 方案 A）：list_agents 后查询一次
+   * agent_status，补上 listener 注册前的初始状态缺失。可选——失败不降级，
+   * 状态灯保持缺失态直到后续事件增量（纯函数便于测试）。 */
+  fetchAgentStatus?: () => Promise<unknown>
+  /** 应用初始状态快照：写入 runtimeStore.agentStatuses（与事件 listener 同构） */
+  applyAgentStatus?: (payload: unknown) => void
   /** 注册全局 controller/listener，返回 dispose handle（阶段 2.8） */
   registerListeners: () => Promise<() => void>
   reportError: (action: string, error: unknown) => void
@@ -52,6 +58,18 @@ export async function bootstrapApplication(deps: BootstrapDeps): Promise<Bootstr
   }
   if (deps.cancelled()) return 'cancelled'
   deps.applyAgents(agents)
+
+  // 冷启动状态快照（方案 A）：list_agents 之后、listener 注册之前查询一次初始状态。
+  // 失败不降级——缺失状态只影响启动首帧的状态灯，后续事件增量会补齐。
+  if (deps.fetchAgentStatus && deps.applyAgentStatus) {
+    try {
+      const payload = await deps.fetchAgentStatus()
+      if (deps.cancelled()) return 'cancelled'
+      deps.applyAgentStatus(payload)
+    } catch (error) {
+      deps.reportError('读取 Agent 状态', error)
+    }
+  }
 
   let dispose: () => void
   try {

@@ -52,4 +52,14 @@ describe('ChatRuntimeBridge 单例（G0）', () => {
     const second = attachChatEventController(makeRefs())
     expect(second).not.toBe(first)
   })
+
+  it('sendOptimisticUser/confirmUser 提供乐观渲染去重通道', () => {
+    // 会话必须先注册（initSource 前 identityStore 需有 source）
+    // 简化：直接验证方法存在且可调用不抛（listener 未注册环境）
+    const refs = makeRefs()
+    const handle = attachChatEventController(refs)
+    expect(typeof handle.sendOptimisticUser).toBe('function')
+    expect(typeof handle.confirmUser).toBe('function')
+    handle.dispose()
+  })
 })

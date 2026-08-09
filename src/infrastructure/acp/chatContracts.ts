@@ -74,7 +74,7 @@ export interface ContentBlock {
 }
 
 export type SessionUpdate =
-  | (UpdateBase & { sessionUpdate: 'agent_message_chunk' | 'agent_thought_chunk'; content?: { text?: string } })
+  | (UpdateBase & { sessionUpdate: 'user_message_chunk' | 'agent_message_chunk' | 'agent_thought_chunk'; content?: { text?: string } })
   | (UpdateBase & { sessionUpdate: 'tool_call'; toolCallId?: string; title?: string; kind?: string; content?: ContentBlock[]; rawInput?: unknown; locations?: unknown })
   | (UpdateBase & { sessionUpdate: 'tool_call_update'; toolCallId?: string; title?: string; kind?: string; content?: ContentBlock[]; rawOutput?: unknown; status?: string })
   | (UpdateBase & { sessionUpdate: 'usage_update'; used?: number; value?: number; size?: number })

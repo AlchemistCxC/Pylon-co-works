@@ -261,24 +261,32 @@ export default forwardRef<{ send: () => void; attachFile: () => void; cancel: ()
       setSendError('当前会话不可用')
       return
     }
+    const source = s.source
 
-    await runSendTransaction({
+    // 方案 B（乐观渲染）：发送动作进入 pending 后立即把用户消息 dispatch 到 Chat
+    // runtime 并清空输入——不等 `send_message` 整回合返回（最长 300s）。后端
+    // `pylon:user` 到达时按 clientMsgId 去重确认（见 chatEventController）。
+    const clientMsgId = `${source}:${Date.now()}:${Math.random().toString(36).slice(2, 8)}`
+    const controller = getChatController()
+    controller?.sendOptimisticUser(source, stripHiddenUnicode(text), clientMsgId)
+    lastMsg.current = text
+    recordHistory(text)
+    setValue('')
+    setAttached([])
+    setSendError('')
+
+    const sendError = await runSendTransaction({
       send: () => createChatClient({ invoke: (cmd, args) => invoke(cmd, args as Record<string, unknown> | undefined) }).sendMessage(buildSendMessagePayload({
         session: s,
         content: stripHiddenUnicode(text),
         persona,
         attachments: attached.filter(file => file.status !== 'error').map(file => file.path),
       })),
-      onSuccess: () => {
-        lastMsg.current = text
-        recordHistory(text)
-        setValue('')
-        setAttached([])
-        setSendError('')
-      },
+      onSuccess: () => {},
+      // 失败保留乐观用户消息（已渲染），错误由后端 pylon:error 或此处可见提示呈现
       onError: error => setSendError(String(error)),
     })
-    return true
+    return sendError
   }
 
   const enqueue = (text: string) => {

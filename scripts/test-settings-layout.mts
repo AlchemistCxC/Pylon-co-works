@@ -101,8 +101,11 @@ assert.match(controller, /frames && frames\.length > 0 \? frames : undefined/, '
 // 配置导入 key 白名单
 const configImport = read('../src/configExportImport.ts')
 assert.match(configImport, /allowed\.has\(key\)/, '导入必须按 CONFIG_STORAGE_KEYS 白名单过滤')
-// commitReplay 合并 load 期间 live 消息
-assert.match(controller, /liveAdditions = existing \? existing\.messages\.slice\(cached\.length\)/, 'commitReplay 必须保留 load 期间 live 消息')
+// commitReplay 合并 load 期间 live 消息（验收回归 D3 重放重新设计）：
+// 不再按位置 slice(cached.length)（切换会话时位置对应破坏→串会话/复读叠加），
+// 改为 loadBaseSeq 基准 + 内容签名去重合并 replay 权威与 live 增量
+assert.match(controller, /loadBaseSeq/, 'commitReplay 必须用 loadBaseSeq 识别 load 期间 live 增量')
+assert.match(controller, /mergeReplayMessages\(replayed, liveAdditions\)/, 'commitReplay 必须按内容签名合并 replay 权威与 live 增量')
 assert.match(controller, /seq: maxSeq/, 'initSource 必须从缓存推进 seq（live/replay id 不撞）')
 
 console.log('Settings 骨架优化（default 派生/校验器/字段恢复/手写组声明式化）回归测试通过')
