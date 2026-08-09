@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import { invoke } from '@tauri-apps/api/core'
 import { X } from 'lucide-react'
 import { reportRuntimeError } from '../../runtimeError'
@@ -6,6 +6,7 @@ import { createWorkspaceClient } from '../../infrastructure/tauri/workspaceClien
 import { classifyGitError, normalizeGitStatus, type GitStatusEntry } from '../../infrastructure/tauri/gitContracts.ts'
 import { useWorkspaceStore } from '../../workspaceStore'
 import FileTypeIcon from './FileTypeIcon'
+import { advanceSourceContext, beginSourceRequest, isCurrentSourceRequest, type SourceRequestContext } from './sourceRequestGuard'
 
 /** ViewsPanel — FileSheet 的 change/diff 工作面，和 SCM 的 Git 总览职责分离。 */
 export default function ViewsPanel({ source, activeDiff, onOpenDiff, onCloseDiff }: {
@@ -16,10 +17,13 @@ export default function ViewsPanel({ source, activeDiff, onOpenDiff, onCloseDiff
 }) {
   const [entries, setEntries] = useState<GitStatusEntry[]>([])
   const [error, setError] = useState('')
+  const requestContext = useRef<SourceRequestContext>({ source: null, generation: 0 })
   const touchedFilesRecord = useWorkspaceStore(s => s.touchedFiles)
   const touchedFiles = useMemo(() => source ? touchedFilesRecord[source] ?? [] : [], [source, touchedFilesRecord])
 
   useEffect(() => {
+    requestContext.current = advanceSourceContext(requestContext.current, source)
+    const token = source ? beginSourceRequest(requestContext.current, source) : null
     let disposed = false
     if (!source) {
       setEntries([])
@@ -27,9 +31,9 @@ export default function ViewsPanel({ source, activeDiff, onOpenDiff, onCloseDiff
       return () => { disposed = true }
     }
     createWorkspaceClient({ invoke: (cmd, args) => invoke(cmd, args as Record<string, unknown> | undefined) }).gitStatus(source).then(raw => {
-      if (!disposed) setEntries(normalizeGitStatus(raw))
+      if (!disposed && token && isCurrentSourceRequest(requestContext.current, token)) setEntries(normalizeGitStatus(raw))
     }).catch(err => {
-      if (disposed) return
+      if (disposed || !token || !isCurrentSourceRequest(requestContext.current, token)) return
       setError(classifyGitError(err).message)
       reportRuntimeError('读取 Git 变更', err)
     })

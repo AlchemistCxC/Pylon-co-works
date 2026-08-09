@@ -1,9 +1,10 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { invoke } from '@tauri-apps/api/core'
 import { reportRuntimeError } from '../../runtimeError'
 import { createWorkspaceClient } from '../../infrastructure/tauri/workspaceClient'
 import { classifyGitError } from '../../infrastructure/tauri/gitContracts.ts'
 import DiffCard from '../../components/chat/DiffCard'
+import { advanceSourceContext, beginSourceRequest, isCurrentSourceRequest, type SourceRequestContext } from './sourceRequestGuard'
 
 /**
  * DiffView — Git diff 展示（W2-05）。
@@ -19,16 +20,19 @@ export default function DiffView({ source, path, staged, onClose }: {
 }) {
   const [output, setOutput] = useState('')
   const [error, setError] = useState('')
+  const requestContext = useRef<SourceRequestContext>({ source: null, generation: 0 })
 
   useEffect(() => {
+    requestContext.current = advanceSourceContext(requestContext.current, source)
     if (!source) return
+    const token = beginSourceRequest(requestContext.current, source)
     let disposed = false
     setOutput('')
     setError('')
     createWorkspaceClient({ invoke: (cmd, args) => invoke(cmd, args as Record<string, unknown> | undefined) }).gitDiff(source, path, staged).then(text => {
-      if (!disposed) setOutput(typeof text === 'string' ? text : '')
+      if (!disposed && isCurrentSourceRequest(requestContext.current, token)) setOutput(typeof text === 'string' ? text : '')
     }).catch(err => {
-      if (disposed) return
+      if (disposed || !isCurrentSourceRequest(requestContext.current, token)) return
       setError(classifyGitError(err).message)
       reportRuntimeError('读取 Git diff', err)
     })
