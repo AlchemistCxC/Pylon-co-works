@@ -4,9 +4,13 @@ title: 引入 unknown 并统一状态 selector
 type: FE
 owner: A
 mode: longrun-a
-status: planned
+status: active
 priority: P1
-assignee: null
+assignee: codex-role-a
+base:
+  branch: main
+  commit: 2b623f3
+integration_base: null
 depends_on:
 - I02-A-FE-01
 contract_refs: []
@@ -18,6 +22,8 @@ scope:
   - src/runtimeStore.ts
   - src/workspace-sheets/**
   - scripts/test-agent-unknown-status.mts
+  - scripts/test-agent-sidebar.mts
+  - src/components/settings/__tests__/agentStatusSelector.test.ts
   - docs/Issue Library/ISSUE-03.md
   deny:
   - docs/archive/**
@@ -37,11 +43,37 @@ evidence:
   - docs/Issue Library/harness/handoffs/I03-A-FE-01.md
 commands:
   focused:
-  - npm run test
+  - npm run test -- --run src/components/settings/__tests__/agentStatusSelector.test.ts
+  - node --experimental-strip-types scripts/test-agent-unknown-status.mts
+  - node --experimental-strip-types scripts/test-agent-sidebar.mts
   broader:
   - npm run lint
   - npm run build
   - git diff --check
 questions: []
 decision_log: []
-handoff: null
+last_progress_commit: pending
+review:
+  pull_request: null
+  status: pending
+verification:
+  level: L1
+  commit: pending
+  results:
+  - command: npm run test -- --run src/components/settings/__tests__/agentStatusSelector.test.ts
+    result: passed; 3 passed
+  - command: npm run test
+    result: passed; 40 files; 202 passed
+  - command: npm run test:legacy
+    result: passed; all frontend legacy guards passed
+  - command: node --experimental-strip-types scripts/test-agent-unknown-status.mts
+    result: passed
+  - command: npm run lint
+    result: passed
+  - command: npm run build
+    result: passed; 3505 modules transformed
+  - command: python docs/Issue Library/harness/scripts/validate_harness.py
+    result: passed; 45 task cards; dependency DAG acyclic
+  - command: git diff --check
+    result: passed
+handoff: docs/Issue Library/harness/handoffs/I03-A-FE-01.md

@@ -5,6 +5,7 @@ import { useStore } from '../store'
 import AgentStatusLights from '../components/AgentStatusLights'
 import type { SheetRecord } from './sheetTypes'
 import type { WorkspaceMenuActions } from './WorkspaceMenu'
+import { selectAgentStatus } from '../components/settings/agentTypes'
 
 interface WorkspaceTitlebarProps {
   sheets: SheetRecord[]
@@ -47,6 +48,7 @@ export default function WorkspaceTitlebar({
 }: WorkspaceTitlebarProps) {
   // 在标题栏内部订阅 agent 状态：状态 tick 不再触发 App 整树（SheetHost）重渲染
   const agentStatuses = useRuntimeStore(s => s.agentStatuses)
+  const activeStatus = selectAgentStatus(activeAgent, activeAgent, agentStatuses)
   const showTabBar = useStore(s => s.showTabBar !== false)
   return (
     <header className={`workspace-titlebar ${sidebarCollapsed ? 'sidebar-collapsed' : ''}`} data-tauri-drag-region>
@@ -62,7 +64,7 @@ export default function WorkspaceTitlebar({
         </button>
         {!sidebarCollapsed && (
           <span className="workspace-titlebar-brand" aria-label="Agent 状态">
-            <AgentStatusLights status={agentStatuses[activeAgent]?.status ?? ''} size={12} />
+            <AgentStatusLights status={activeStatus.status} size={12} />
           </span>
         )}
       </div>

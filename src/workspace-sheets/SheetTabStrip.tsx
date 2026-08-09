@@ -2,7 +2,7 @@ import { useCallback, useEffect, useRef, useState } from 'react'
 import { useIdentityStore } from '../identityStore'
 import { useWorkspaceStore } from '../workspaceStore'
 import { activateAgentSheet } from './activateAgentSheet'
-import type { AgentStatus } from '../components/settings/agentTypes'
+import { selectAgentStatus, type AgentStatus } from '../components/settings/agentTypes'
 import type { SheetRecord } from './sheetTypes'
 import WorkspaceMenu, { type WorkspaceMenuActions } from './WorkspaceMenu'
 
@@ -19,8 +19,7 @@ interface SheetTabStripProps {
 
 function resolveAgentState(sheet: SheetRecord, activeAgent: string, agentStatuses: Record<string, AgentStatus>) {
   if (sheet.kind !== 'agent' || !sheet.agentId) return undefined
-  if (sheet.agentId !== activeAgent) return 'inactive'
-  return agentStatuses[sheet.agentId]?.status || 'disconnected'
+  return selectAgentStatus(sheet.agentId, activeAgent, agentStatuses).status
 }
 
 function resolveSheetTitle(
