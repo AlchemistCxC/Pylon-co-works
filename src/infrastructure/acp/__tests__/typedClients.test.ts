@@ -8,6 +8,7 @@ import { createAgentClient } from '../agentClient'
 import { createSessionClient } from '../sessionClient'
 import { createChatClient } from '../chatClient'
 import { createRuntimeClient } from '../../tauri/runtimeClient'
+import { normalizeAgentStatus } from '../../../components/settings/agentTypes'
 
 describe('agentClient', () => {
   it('listAgents 宽容 normalize（非数组/损坏项/空 id 过滤）', async () => {
@@ -85,6 +86,47 @@ describe('chatClient', () => {
       cmd: 'send_message',
       args: { source: 'local:一', content: 'hi', persona: 'p', sessionPrompt: 'sp', attachments: ['/a.txt'] },
     }])
+  })
+})
+
+describe('typed status payload：lifecycle 与 capabilities 分字段 normalize，不相互反推', () => {
+  it('connected + capabilities null → status 保持 connected，capabilities 原样为 null', () => {
+    const normalized = normalizeAgentStatus({ agentId: 'peri', status: 'connected', capabilities: null }, 'peri')
+    expect(normalized.status).toBe('connected')
+    expect(normalized.capabilities).toBeNull()
+  })
+
+  it('非 connected 携带 capabilities 对象 → status 不被 capabilities 反推为 connected', () => {
+    const normalized = normalizeAgentStatus({
+      agentId: 'peri',
+      status: 'reconnecting',
+      capabilities: { promptCapabilities: { image: true } },
+    }, 'peri')
+    expect(normalized.status).toBe('reconnecting')
+    expect(normalized.capabilities).toEqual({ promptCapabilities: { image: true } })
+  })
+
+  it('缺失 status → 归 unknown（非 connected），capabilities 缺失为 undefined', () => {
+    const normalized = normalizeAgentStatus({ agentId: 'peri' }, 'peri')
+    expect(normalized.status).toBe('unknown')
+    expect(normalized.capabilities).toBeUndefined()
+  })
+
+  it('非法 status 字符串 → 归 error 并带诊断，capabilities 原样保留', () => {
+    const normalized = normalizeAgentStatus({
+      agentId: 'peri',
+      status: 'bogus-status',
+      capabilities: { promptImage: true },
+    }, 'peri')
+    expect(normalized.status).toBe('error')
+    expect(normalized.recentError).toMatch(/未知 Agent 状态/)
+    expect(normalized.capabilities).toEqual({ promptImage: true })
+  })
+
+  it('crashed 派生路径同样保留 capabilities，不改变生命周期语义', () => {
+    const normalized = normalizeAgentStatus({ agentId: 'peri', crashed: true, capabilities: null }, 'peri')
+    expect(normalized.status).toBe('crashed')
+    expect(normalized.capabilities).toBeNull()
   })
 })
 

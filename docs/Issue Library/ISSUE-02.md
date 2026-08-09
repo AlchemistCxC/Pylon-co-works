@@ -110,9 +110,9 @@ Availability：由 lifecycle + 单项 capability 派生
 
 | 相关功能 | 验收行为表现 | 验收地址 | 结果 |
 |---|---|---|---|
-| capability snapshot 矩阵 | `connected + null capabilities` 仍 connected；非 connected + 旧 capabilities 必须 disconnected | `src/infrastructure/acp/agentContracts.ts` 及对应 Vitest | [ ] |
-| 基础文本与扩展能力 gate | 基础文本只依赖 lifecycle；图片只依赖 `promptImage`；能力未知时扩展项保守禁用 | `src/components/chat/InputBar.tsx`、`useAgentCapabilities.ts` 测试 | [ ] |
-| typed status payload | lifecycle 与 capabilities 分字段 normalize，不相互反推 | `src/infrastructure/acp/__tests__/typedClients.test.ts` | [ ] |
+| capability snapshot 矩阵 | `connected + null capabilities` 仍 connected；非 connected + 旧 capabilities 必须 disconnected | `src/infrastructure/acp/agentContracts.ts` 及对应 Vitest | [x] ✅ `agentContracts.test.ts`（I02-A-TEST-01） |
+| 基础文本与扩展能力 gate | 基础文本只依赖 lifecycle；图片只依赖 `promptImage`；能力未知时扩展项保守禁用 | `src/components/chat/InputBar.tsx`、`useAgentCapabilities.ts` 测试 | [x] ✅ `useAgentCapabilities.test.tsx` + `agentContracts.test.ts` gate（I02-A-TEST-01） |
+| typed status payload | lifecycle 与 capabilities 分字段 normalize，不相互反推 | `src/infrastructure/acp/__tests__/typedClients.test.ts` | [x] ✅ `typedClients.test.ts`（I02-A-TEST-01） |
 
 #### 等级 2：前端网页验收通过（仅限前端）
 
