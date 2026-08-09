@@ -65,6 +65,7 @@ const peri = resolveCapabilitySnapshot(statusOf({
 }))
 assert.deepEqual(peri, {
   connected: true,
+  capabilitiesKnown: true,
   loadSession: true,
   promptImage: false,
   sessionFork: true,
@@ -86,6 +87,7 @@ const hermes = resolveCapabilitySnapshot(statusOf({
 }))
 assert.deepEqual(hermes, {
   connected: true,
+  capabilitiesKnown: true,
   loadSession: true,
   promptImage: true,
   sessionFork: true,
@@ -105,6 +107,7 @@ const thirdParty = resolveCapabilitySnapshot(statusOf({
 }))
 assert.deepEqual(thirdParty, {
   connected: true,
+  capabilitiesKnown: true,
   loadSession: false,
   promptImage: false,
   sessionFork: true,
@@ -116,9 +119,10 @@ assert.deepEqual(thirdParty, {
   hasAuthMethods: false,
 })
 
-// 样本 4：capabilities null（断线）→ connected:false + 保守缺省
+// 样本 4：生命周期 connected 但 capabilities null → 仍 connected，能力未确认
 assert.deepEqual(resolveCapabilitySnapshot(statusOf(null)), {
-  connected: false,
+  connected: true,
+  capabilitiesKnown: false,
   loadSession: false,
   promptImage: false,
   sessionFork: false,
@@ -135,6 +139,7 @@ assert.deepEqual(resolveCapabilitySnapshot(undefined).connected, false)
 assert.deepEqual(resolveCapabilitySnapshot(null).connected, false)
 assert.deepEqual(resolveCapabilitySnapshot(statusOf({})), {
   connected: true,
+  capabilitiesKnown: true,
   loadSession: false,
   promptImage: false,
   sessionFork: false,
@@ -152,6 +157,7 @@ assert.deepEqual(resolveCapabilitySnapshot(statusOf({
   mcpCapabilities: { http: false, sse: true },
 })), {
   connected: true,
+  capabilitiesKnown: true,
   loadSession: false,
   promptImage: false,
   sessionFork: false,
@@ -168,11 +174,20 @@ assert.equal(resolveCapabilitySnapshot(statusOf({ authMethods: 'api_key' })).has
 
 // ===== P2-03：附件入口能力降级（gate + filters 三态） =====
 
-// 态 1：capabilities null（未连接）→ 状态拦截，不放行
-const notConnected = resolveCapabilitySnapshot(statusOf(null))
+// 态 1：非 connected 生命周期即使携带旧 capabilities 也拦截
+const notConnected = resolveCapabilitySnapshot({
+  agent: 'a',
+  status: 'disconnected',
+  capabilities: { promptCapabilities: { image: true } },
+})
 assert.deepEqual(resolveAttachGate(notConnected), { allowed: false, reason: 'Agent 未连接，附件暂不可用' })
 
-// 态 2：connected 且 promptImage=false → 放行 + accept 仅文本
+// 态 2：connected 且能力未确认 → 放行文本附件，图片能力保守关闭
+const unknownCapabilities = resolveCapabilitySnapshot(statusOf(null))
+assert.deepEqual(resolveAttachGate(unknownCapabilities), { allowed: true })
+assert.equal(resolveAttachFilters(unknownCapabilities).some(f => f.name === '图片'), false)
+
+// 态 3：connected 且 promptImage=false → 放行 + accept 仅文本
 const textOnly = resolveCapabilitySnapshot(statusOf({ promptCapabilities: {} }))
 assert.deepEqual(resolveAttachGate(textOnly), { allowed: true })
 const textFilters = resolveAttachFilters(textOnly)
@@ -180,7 +195,7 @@ assert.equal(textFilters.length, 1)
 assert.equal(textFilters[0].name, '文本')
 assert.equal(textFilters[0].extensions.includes('png'), false, '无图片能力时 filters 不得含图片')
 
-// 态 3：connected 且 promptImage=true → 放行 + accept 图片+文本
+// 态 4：connected 且 promptImage=true → 放行 + accept 图片+文本
 const imageOk = resolveCapabilitySnapshot(statusOf({ promptCapabilities: { image: true } }))
 assert.deepEqual(resolveAttachGate(imageOk), { allowed: true })
 const imageFilters = resolveAttachFilters(imageOk)
