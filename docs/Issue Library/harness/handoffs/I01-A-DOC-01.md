@@ -4,7 +4,7 @@
 - 远端分支：`a/I01-A-DOC-01-release-boundary`
 - Base commit：`3c95f709bc0cdc97b97603f338b44637fdf51143`
 - HEAD commit：`c1b664c`
-- 状态：`review_pending`，L1 已通过；PR：`https://github.com/AlchemistCxC/Pylon-co-works/pull/1`
+- 状态：`review_pending`，L1 已通过；PR：`#1`
 
 ## 已完成
 

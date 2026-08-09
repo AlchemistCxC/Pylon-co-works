@@ -67,7 +67,7 @@ questions: []
 decision_log: []
 last_progress_commit: c1b664c
 review:
-  pull_request: https://github.com/AlchemistCxC/Pylon-co-works/pull/1
+  pull_request: PR-1
   status: pending
 verification:
   level: L1
