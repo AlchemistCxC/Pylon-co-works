@@ -76,6 +76,20 @@ pub enum ConfigSourceKind {
     Embedded,
 }
 
+/// Hermes profile 探测结果（release-issues #1 方案 G 演进）：只暴露 profile 名
+/// 列表与配置的 profile 名称，不暴露 Hermes 根目录绝对路径（本地日志另记）。
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct HermesProfileView {
+    /// 探测到的可用 profile 名（`<hermes_home>/profiles/*`）。
+    pub profiles: Vec<String>,
+    /// agents.yaml `hermes_profile` 配置值（未配置为 None）。
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub configured: Option<String>,
+    /// 是否已解析出应注入的 HERMES_HOME（配置了 profile 且能定位）。
+    pub resolved: bool,
+}
+
 /// 启动诊断快照（只读；AppState.startup 持有，一次构建）。
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -86,6 +100,8 @@ pub struct StartupDiagnostics {
     pub default_agent_id: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub config_source: Option<ConfigSourceView>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub hermes_profile: Option<HermesProfileView>,
 }
 
 /// run() 构建：配置来源 + 分域错误 + prism 构造状态 + 默认 agent。
@@ -95,6 +111,7 @@ pub(crate) fn build_startup_diagnostics(
     gateway_error: Option<String>,
     prism_ready: bool,
     default_agent_id: Option<String>,
+    hermes_profile: Option<HermesProfileView>,
 ) -> StartupDiagnostics {
     let source_view = ConfigSourceView {
         kind: config_source_kind(&source),
@@ -129,6 +146,7 @@ pub(crate) fn build_startup_diagnostics(
         },
         default_agent_id,
         config_source: Some(source_view),
+        hermes_profile,
     }
 }
 
@@ -154,6 +172,7 @@ impl StartupDiagnostics {
                 kind: ConfigSourceKind::Embedded,
                 file_name: Some("agents.yaml".to_string()),
             }),
+            hermes_profile: None,
         }
     }
 }
@@ -192,6 +211,7 @@ mod tests {
             None,
             false,
             None,
+            None,
         );
         let serialized = serde_json::to_string(&diagnostics).unwrap();
         assert!(
@@ -212,6 +232,7 @@ mod tests {
             None,
             true,
             Some("peri".to_string()),
+            None,
         );
         let value = serde_json::to_value(&diagnostics).expect("serialize");
         assert_eq!(value["agentConfig"]["status"], "configuration_error");
@@ -241,6 +262,29 @@ mod tests {
     }
 
     #[test]
+    fn hermes_profile_view_serializes_without_home_path() {
+        let diagnostics = build_startup_diagnostics(
+            crate::agent_config::ConfigSource::Embedded,
+            None,
+            None,
+            false,
+            None,
+            Some(HermesProfileView {
+                profiles: vec!["l-m".to_string(), "riccati".to_string()],
+                configured: Some("riccati".to_string()),
+                resolved: true,
+            }),
+        );
+        let serialized = serde_json::to_string(&diagnostics).unwrap();
+        assert!(serialized.contains("riccati"), "profile 名必须可见: {serialized}");
+        assert!(
+            !serialized.contains("HERMES_HOME") && !serialized.contains("F:\\Hermes"),
+            "不得泄露 Hermes 根目录路径: {serialized}"
+        );
+        assert!(serialized.contains("\"resolved\":true"));
+    }
+
+    #[test]
     fn startup_diagnostics_command_returns_snapshot() {
         // command 依赖 Tauri State，无法在此构造；仅钉住 DTO 形状（序列化契约）。
         let diagnostics = build_startup_diagnostics(
@@ -248,6 +292,7 @@ mod tests {
             None,
             None,
             false,
+            None,
             None,
         );
         let value = serde_json::to_value(&diagnostics).unwrap();

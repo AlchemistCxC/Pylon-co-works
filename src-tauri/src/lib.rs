@@ -16,6 +16,7 @@ mod export;
 mod gateway;
 mod gateway_cmds;
 mod git;
+mod hermes;
 mod lifecycle;
 mod logs_cmds;
 mod mcp;
@@ -97,6 +98,34 @@ where
     if let Err(error) = window.emit(event, payload) {
         tracing::warn!("emit {event} failed: {error}");
     }
+}
+
+/// 构建 Hermes profile 诊断视图（方案 G 演进）：探测可用 profiles + 记录配置的
+/// `hermes_profile` 是否可解析。诊断只暴露 profile 名，不暴露 Hermes 根路径。
+fn build_hermes_profile_view(
+    agents: &HashMap<String, AgentDef>,
+) -> Option<crate::startup::HermesProfileView> {
+    let home = crate::hermes::detect_hermes_home();
+    let profiles = home
+        .as_deref()
+        .map(crate::hermes::list_profiles)
+        .unwrap_or_default();
+    let configured = agents.values().find_map(|agent| agent.hermes_profile.clone());
+    let agent_with_profile = agents
+        .values()
+        .find(|agent| agent.hermes_profile.is_some());
+    // 有 Hermes 探测信息或配置了 profile 才进诊断（避免无关配置塞空视图）。
+    if home.is_none() && configured.is_none() {
+        return None;
+    }
+    let resolved = agent_with_profile.is_some_and(|agent| {
+        crate::hermes::resolve_profile_dir(agent, None).is_some()
+    });
+    Some(crate::startup::HermesProfileView {
+        profiles,
+        configured,
+        resolved,
+    })
 }
 
 /// 事件广播（B10.1）：WebView 始终接收；平台 source 同时经 gateway 投递平台适配器。
@@ -485,12 +514,16 @@ pub fn run() {
             PrismClient::unavailable(error)
         }
     };
+    // Hermes profile 探测（方案 G 演进）：agents 解析成功后，探测可用 profiles 并
+    // 记录配置的 hermes_profile 是否可解析（诊断只暴露 profile 名，不暴露路径）。
+    let hermes_profile = build_hermes_profile_view(&agents_for_state);
     let startup = Arc::new(crate::startup::build_startup_diagnostics(
         config_source,
         agents_error,
         gateway_error,
         prism.has_valid_configuration(),
         (!default_agent_id.is_empty()).then(|| default_agent_id.clone()),
+        hermes_profile,
     ));
 
     let rt = match tokio::runtime::Runtime::new() {

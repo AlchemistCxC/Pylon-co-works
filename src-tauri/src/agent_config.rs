@@ -78,6 +78,14 @@ pub struct AgentDef {
     /// 结构化 acp 参数：初始模型，展开为 `--model <value>` 追加在 args 后。
     #[serde(default)]
     pub model: Option<String>,
+    /// Hermes profile 固定（release-issues #1 方案 G 演进）：值为 profile 名称
+    /// （如 `riccati`，经 Hermes 根目录解析为 `<home>/profiles/<name>`）或
+    /// profile 目录路径（绝对路径原样使用，相对路径按配置目录解析）。
+    /// 设置后启动 ACP 子进程时注入 `HERMES_HOME=<profile 目录>`，确保 Hermes
+    /// 加载该 profile 的 provider/密钥，而不是继承启动器环境或 active_profile
+    /// 机制（当前机器 active_profile=l-m 会导致 401）。缺省不注入（现状行为）。
+    #[serde(default)]
+    pub hermes_profile: Option<String>,
     /// 结构化 acp 参数：附加任意参数（如 `--verbose`），追加在 args 后。
     #[serde(default)]
     pub acp_args: Vec<String>,
@@ -947,6 +955,7 @@ mod tests {
             default,
             set_model_api: false,
             model: None,
+            hermes_profile: None,
             acp_args: Vec::new(),
             acp: None,
         }
@@ -1083,6 +1092,27 @@ mod tests {
         assert!(
             !agents["peri"].set_model_api,
             "缺省必须为 false（官方 set_config_option 路径）"
+        );
+    }
+
+    #[test]
+    fn parses_hermes_profile_field() {
+        let path = std::env::temp_dir().join(format!("pylon-agents-profile-{}.yaml", std::process::id()));
+        std::fs::write(
+            &path,
+            "agents:\n  hermes:\n    name: Hermes\n    transport: subprocess\n    exe: hermes\n    hermes_profile: riccati\n  peri:\n    name: Peri\n    transport: subprocess\n    exe: peri\n",
+        )
+        .expect("write temp agent config");
+        let agents = load_from_path(&path).expect("load runtime agent config");
+        std::fs::remove_file(&path).ok();
+        assert_eq!(
+            agents["hermes"].hermes_profile.as_deref(),
+            Some("riccati"),
+            "hermes_profile 字段必须解析"
+        );
+        assert!(
+            agents["peri"].hermes_profile.is_none(),
+            "未配置的 agent 缺省为 None"
         );
     }
 

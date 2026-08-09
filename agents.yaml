@@ -1,5 +1,14 @@
 # Pylon agent 配置（战役 2 后：协议差异全部配置化，覆盖制——无声明=默认值，有声明=覆盖默认）
 #
+# hermes_profile: <profile-name | profile-path>   # Hermes profile 固定（release-issues #1 方案 G）
+#   # 值为 profile 名称（如 `riccati`，经 Hermes 根目录自动解析为 <home>/profiles/<name>）
+#   # 或 profile 目录路径（绝对路径原样使用；相对路径按本配置文件所在目录解析）。
+#   # 设置后启动 Hermes ACP 子进程时注入 HERMES_HOME=<profile 目录>，确保 Hermes 使用
+#   # 该 profile 的 provider/密钥——不设置时 Hermes 走 active_profile 机制（当前机器
+#   # active_profile=l-m 的 provider 无效，导致“有余额但 401/无回应”）。
+#   # 缺省不注入（现状行为）。可用 profile 列表由 Pylon 启动时自动探测
+#   # （%LOCALAPPDATA%\hermes / HERMES_HOME / PATH 中 hermes 脚本），见 startup diagnostics。
+#
 # acp: 段（AcpProtocolConfig，全字段可选）：
 #   set_model_api: config_option | set_model | none | true | false
 #       # 切 model 途径（D2）。config_option=Peri 官方路径（默认）；set_model=Hermes
@@ -42,6 +51,15 @@ agents:
     args: ["acp"]
     cwd: G:\Project\prism-desktop
     set_model_api: true
+    # 固定到可用 profile（deepseek provider + opencode.ai base_url）；当前机器
+    # active_profile=l-m 的 provider 无效会导致 401。换机器时改为该机可用 profile 名。
+    hermes_profile: riccati
+    # 方案 I：Hermes 专用 prompt 超时（默认 300s；实测 Hermes+opencode.ai 首 token
+    # 延迟可达 ~92s，90s 会误杀——留 2 倍余量设 180s）。Hermes 无 provider/401/
+    # 错误 profile 时通常在 session/new 即失败（方案 I 已让该错误即时可见），
+    # 不必靠超时兜底。Peri 保持默认 300s。
+    acp:
+      prompt_timeout_secs: 180
     # legacy 顶层布尔（= acp.set_model_api: set_model）。显式化等价写法：
     # acp:
     #   set_model_api: set_model        # Hermes 切 model 走 unstable session/set_model

@@ -6,6 +6,7 @@
 
 use std::collections::HashMap;
 use std::io::BufReader;
+use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
 #[cfg(test)]
 use crate::agent_config::McpServersMode;
@@ -446,10 +447,9 @@ impl AcpClient {
         runtime_logs: Option<Arc<crate::runtime_log::RuntimeLogHub>>,
     ) -> Result<Self, AcpError> {
         let resolved_agent;
-        let agent = if let Some(config_path) = crate::agent_config::effective_config_path() {
-            let base_dir = config_path
-                .parent()
-                .unwrap_or_else(|| std::path::Path::new("."));
+        let base_dir: Option<PathBuf> = crate::agent_config::effective_config_path()
+            .and_then(|path| path.parent().map(Path::to_path_buf));
+        let agent = if let Some(base_dir) = &base_dir {
             resolved_agent = agent.resolve_paths(base_dir);
             &resolved_agent
         } else {
@@ -467,6 +467,18 @@ impl AcpClient {
                 }
                 for (k, v) in &agent.env {
                     cmd.env(k, v);
+                }
+                // hermes_profile（方案 G 演进）：注入 HERMES_HOME=<profile 目录>，
+                // 确保 Hermes 使用指定 profile 的 provider/密钥（见 hermes.rs doc）。
+                if let Some(hermes_home) =
+                    crate::hermes::hermes_home_override(agent, base_dir.as_deref())
+                {
+                    cmd.env("HERMES_HOME", &hermes_home);
+                    tracing::info!(
+                        "agent {}: HERMES_HOME set to {} (hermes_profile)",
+                        agent.name,
+                        hermes_home
+                    );
                 }
                 let child = cmd
                     .spawn()
@@ -1614,6 +1626,7 @@ print(json.dumps({'jsonrpc':'2.0','id':request.get('id'),'result':{}}), flush=Tr
             default: false,
             set_model_api: false,
             model: None,
+            hermes_profile: None,
             acp_args: Vec::new(),
             acp: None,
         };
@@ -1924,6 +1937,7 @@ for line in sys.stdin:
             default: false,
             set_model_api: false,
             model: None,
+            hermes_profile: None,
             acp_args: Vec::new(),
             acp: Some(crate::agent_config::AcpProtocolConfig {
                 initialize_caps: Some(serde_json::json!({
@@ -2048,6 +2062,7 @@ for line in sys.stdin:
             default: false,
             set_model_api: false,
             model: None,
+            hermes_profile: None,
             acp_args: Vec::new(),
             acp: Some(crate::agent_config::AcpProtocolConfig {
                 protocol_version: Some(2),
@@ -2083,6 +2098,106 @@ for line in sys.stdin:
         assert_eq!(
             request["params"]["clientCapabilities"]["tokenStats"],
             serde_json::json!(true)
+        );
+    }
+
+    /// 方案 G 演进：hermes_profile 绝对路径 → 子进程 HERMES_HOME 注入。
+    /// fake 脚本把 HERMES_HOME 写入 trace 文件，回读断言注入生效。
+    #[tokio::test]
+    async fn hermes_profile_injects_hermes_home_env() {
+        let profile_dir = std::env::temp_dir().join(format!("pylon-profile-{}", std::process::id()));
+        std::fs::create_dir_all(&profile_dir).unwrap();
+        let trace_path = std::env::temp_dir()
+            .join(format!("pylon-hermes-env-{}.jsonl", std::process::id()));
+        let script = r#"import json,sys,os
+with open(sys.argv[1],'w',encoding='utf-8') as f:
+    f.write(os.environ.get('HERMES_HOME','')+'\n')
+print(json.dumps({'jsonrpc':'2.0','id':1,'result':{}}), flush=True)
+"#;
+        let mut agent = crate::agent_config::AgentDef {
+            name: "fake-hermes".to_string(),
+            transport: "subprocess".to_string(),
+            exe: crate::test_utils::test_python_exe().to_string(),
+            args: vec![
+                "-u".to_string(),
+                "-c".to_string(),
+                script.to_string(),
+                trace_path.to_string_lossy().into_owned(),
+            ],
+            cwd: None,
+            env: HashMap::new(),
+            default: false,
+            set_model_api: true,
+            model: None,
+            hermes_profile: Some(profile_dir.to_string_lossy().into_owned()),
+            acp_args: Vec::new(),
+            acp: None,
+        };
+        // 绝对路径形态不需要 Hermes home 探测，测试不依赖本机环境。
+        agent.hermes_profile = Some(profile_dir.to_string_lossy().into_owned());
+        let mut client = AcpClient::connect_with_logs(&agent, None)
+            .await
+            .expect("fake hermes must initialize");
+        client.kill().expect("cleanup");
+        tokio::time::sleep(std::time::Duration::from_millis(200)).await;
+        let trace = std::fs::read_to_string(&trace_path).expect("read env trace");
+        std::fs::remove_file(&trace_path).ok();
+        std::fs::remove_dir_all(&profile_dir).ok();
+        assert_eq!(
+            trace.trim(),
+            profile_dir.to_string_lossy(),
+            "HERMES_HOME 必须注入为 hermes_profile 解析目录"
+        );
+    }
+
+    /// 方案 G 演进：未配置 hermes_profile 时不注入 HERMES_HOME（现状行为不回归）。
+    #[tokio::test]
+    async fn unset_hermes_profile_does_not_inject_env() {
+        let trace_path = std::env::temp_dir()
+            .join(format!("pylon-hermes-noenv-{}.jsonl", std::process::id()));
+        let script = r#"import json,sys,os
+with open(sys.argv[1],'w',encoding='utf-8') as f:
+    f.write(os.environ.get('HERMES_HOME','<absent>')+'\n')
+print(json.dumps({'jsonrpc':'2.0','id':1,'result':{}}), flush=True)
+"#;
+        let agent = crate::agent_config::AgentDef {
+            name: "fake-hermes-plain".to_string(),
+            transport: "subprocess".to_string(),
+            exe: crate::test_utils::test_python_exe().to_string(),
+            args: vec![
+                "-u".to_string(),
+                "-c".to_string(),
+                script.to_string(),
+                trace_path.to_string_lossy().into_owned(),
+            ],
+            cwd: None,
+            env: HashMap::new(),
+            default: false,
+            set_model_api: true,
+            model: None,
+            hermes_profile: None,
+            acp_args: Vec::new(),
+            acp: None,
+        };
+        let mut client = AcpClient::connect_with_logs(&agent, None)
+            .await
+            .expect("fake hermes must initialize");
+        client.kill().expect("cleanup");
+        tokio::time::sleep(std::time::Duration::from_millis(200)).await;
+        let trace = std::fs::read_to_string(&trace_path).expect("read env trace");
+        std::fs::remove_file(&trace_path).ok();
+        // 子进程默认继承 Pylon 进程环境——测试进程若本身有 HERMES_HOME 则透传。
+        // 断言只能区分"显式注入的 profile 路径"与"未注入"两种：未配置时子进程
+        // 读到的是进程环境原值（非注入产物），不可能等于临时 profile 目录。
+        assert_ne!(
+            trace.trim(),
+            format!(
+                "{}",
+                std::env::temp_dir()
+                    .join(format!("pylon-profile-{}", std::process::id()))
+                    .to_string_lossy()
+            ),
+            "未配置 hermes_profile 时不得注入临时 profile 路径"
         );
     }
 

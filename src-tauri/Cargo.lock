@@ -2547,7 +2547,7 @@ dependencies = [
 
 [[package]]
 name = "pylon"
-version = "0.1.0"
+version = "1.0.0"
 dependencies = [
  "agent-client-protocol-schema",
  "backon",
@@ -2587,7 +2587,7 @@ dependencies = [
 
 [[package]]
 name = "pylon-pet-core"
-version = "0.1.0"
+version = "1.0.0"
 dependencies = [
  "rand 0.10.2",
  "serde",
