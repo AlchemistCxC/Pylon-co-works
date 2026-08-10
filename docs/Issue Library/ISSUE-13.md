@@ -63,6 +63,20 @@ execution_rule: "先完成任务卡依赖，再领取本 Issue 的 ready slice�
 
 实施方案成熟度：**仅有设置入口决策，字段 schema 与交互尚待设计。**
 
+#### I13-A-FE-02 实施契约（2026-08-10 落地，验收地址）
+
+历史保留策略设置契约：**设置只写策略，不绕过 Rust 删除；默认值/档位与实施契约一致**（AC-1）。
+
+- 保留模式（D-03 三档）：`permanent` 永久保存 / `by_time` 按时间保留 / `by_count` 按每个 Session 消息数量保留。
+- 默认值（D-15）：**永久保存**。新安装、旧版本迁移、配置字段缺失、解析失败、未知模式、越档值一律回退永久保存；不得因默认值变化自动删除历史。
+- 档位（实施契约，前后端一致；越档值视为非法 → 回退永久保存）：
+  - 按时间保留（天）：`7 / 30 / 90 / 180 / 365`，切换时默认 `30`。
+  - 按数量保留（条 / 每 Session）：`100 / 500 / 1000 / 5000 / 10000`，切换时默认 `1000`。
+- 影响提示（D-15）：选择非永久策略必须显示预计影响（自动清理范围），并明确“保存策略不等于立即清理，自动清理由后端在事务边界安全执行”。
+- 只写不删（D-03/D-15）：设置页仅持久化策略（独立 localStorage key `pylon-history-retention`），**无任何删除命令/删除路径**；实际删除由 Rust 消息仓库（`msg_repo`）在事务边界执行。
+- 立即清理入口：**本卡不实施**——后端清理调度 command 未实现；后续后端清理卡必须消费本契约（Rust：`src-tauri/src/session/retention.rs`；前端：`src/components/settings/historyRetentionPolicy.ts`），并满足 D-15 的“独立显式操作 + 预计删除范围 + 确认”要求。
+- 代码位置：Rust 实施契约 `src-tauri/src/session/retention.rs`；前端契约 `src/components/settings/historyRetentionPolicy.ts`；UI 组件 `src/components/settings/HistoryRetention.tsx`（当前挂载于设置「全局」页，与窗口/配置备份同区；I13-A-FE-01 落地后迁入“工作区”域）。
+
 ### D-04：配置备份导出显示普通凭据风险提示
 
 - 设置页导出包含 Gateway 凭据和主密钥的备份时，显示普通提示，不增加强制二次确认。
@@ -179,7 +193,7 @@ execution_rule: "先完成任务卡依赖，再领取本 Issue 的 ready slice�
 | 2026-08-09 | 文档拆分 | 从 `docs/release-issues.md` 拆分为 `ISSUE-13`；保留原问题记录、追加调查、修复记录与三级验收内容。 | 本文件生成于 Issue Library 初始化 |
 | 2026-08-09 | 产品拍板 | Settings 增加消息历史保留策略入口。 | 与 ISSUE-06 D-11 对齐 |
 | 2026-08-09 | 产品拍板 | 配置备份导出显示普通凭据风险提示，不强制二次确认。 | 与 ISSUE-12 D-07 对齐 |
-|  |  |  |  |
+| 2026-08-10 | 实施落地 | I13-A-FE-02 建立历史保留策略实施契约（模式/档位/默认永久保存/回退语义/影响提示，只写不删）。 | `docs/Issue Library/harness/handoffs/I13-A-FE-02.md` |
 
 
 ## 本轮源码核验与可验收子任务（2026-08-09）
