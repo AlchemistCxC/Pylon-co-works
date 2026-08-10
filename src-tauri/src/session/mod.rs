@@ -530,6 +530,7 @@ impl AppState {
 mod tests {
     use super::*;
     use crate::acp::AcpClient;
+    use crate::start_notification_dispatcher;
     use tauri::Manager;
 
     /// 测试桩适配器（G4 §3-9 适配）：platform_key="qq"——注册后 is_platform_source
@@ -1332,6 +1333,136 @@ for line in sys.stdin:
                 .and_then(|v| v.as_bool()),
             Some(false),
             "无内容流式时必须标记 hasStreamedContent=false"
+        );
+        assert!(timeout_entry.fields.contains_key("requestId"));
+        assert!(timeout_entry.fields.contains_key("sessionId"));
+        assert!(timeout_entry.fields.contains_key("agentId"));
+    }
+
+    /// 方案 I：prompt 超时但已流式部分内容 → 仍超时返回，但日志必须走
+    /// "streamed content, missing final response" 分支且 hasStreamedContent=true
+    /// （区别于完全无输出的 no-content 分支）。
+    /// fake agent：session/prompt 先推一条 agent_message_chunk 通知（dispatcher
+    /// 经 collect_response_chunk 写入 last_response_text）再挂起；session/cancel
+    /// 用原始 prompt 的 id 应答 → cancel settle（response=Some）→ 会话保留，
+    /// has_streamed_content 读真实 last_response_text。dispatcher 必须运行
+    /// （mock app + webview），chunk 才能被收集。
+    #[tokio::test]
+    async fn prompt_timeout_with_streamed_content_logs_has_content_true() {
+        const STREAM_SCRIPT: &str = r#"import json,sys
+prompt_id = None
+for line in sys.stdin:
+    request = json.loads(line)
+    method = request.get('method')
+    if method == 'session/new':
+        response = {'jsonrpc':'2.0','id':request.get('id'),'result':{'sessionId':'i3-session'}}
+        print(json.dumps(response), flush=True)
+    elif method == 'session/prompt':
+        prompt_id = request.get('id')
+        # 先推送一条流式内容通知（dispatcher 收集进 last_response_text），再挂起 → 触发超时
+        notification = {'jsonrpc':'2.0','method':'session/update','params':{'sessionId':'i3-session','update':{'sessionUpdate':'agent_message_chunk','content':{'text':'部分回复'}}}}
+        print(json.dumps(notification), flush=True)
+    elif method == 'session/cancel':
+        # 用原始 prompt 的 id 应答 → cancel settle（response=Some）→ 会话保留，
+        # 超时分支读取的是 dispatcher 真实收集的 last_response_text
+        response = {'jsonrpc':'2.0','id':prompt_id,'result':{'sessionId':'i3-session'}}
+        print(json.dumps(response), flush=True)
+    else:
+        response = {'jsonrpc':'2.0','id':request.get('id'),'result':{}}
+        print(json.dumps(response), flush=True)
+"#;
+        let mut agent = crate::test_utils::fake_acp_agent("i3-stream-agent", STREAM_SCRIPT);
+        agent.acp = Some(crate::agent_config::AcpProtocolConfig {
+            prompt_timeout_secs: Some(1),
+            cancel_settle_timeout_secs: Some(1),
+            ..Default::default()
+        });
+        let runtime = AgentRuntime::new_disconnected();
+        *runtime.acp.lock().await = AcpClient::connect_with_logs(&agent, None)
+            .await
+            .expect("fake ACP must initialize");
+        let state = crate::test_utils::TestStateBuilder::bare()
+            .with_active_agent("i3-stream-agent")
+            .with_agent(agent)
+            .with_runtime("i3-stream-agent", runtime.clone())
+            .build();
+        // dispatcher 需要真实 window（mock app）才能收集通知 → last_response_text
+        let app = tauri::test::mock_builder()
+            .build(tauri::test::mock_context(tauri::test::noop_assets()))
+            .expect("mock app must build");
+        app.manage(state);
+        let webview = tauri::WebviewWindowBuilder::new(
+            &app,
+            "main",
+            tauri::WebviewUrl::External("https://example.com".parse().unwrap()),
+        )
+        .build()
+        .expect("mock webview must build");
+        let handles = AppStateHandles::from_state(app.state::<AppState>().inner());
+        let runtime = handles.active_runtime().expect("active runtime");
+        start_notification_dispatcher(&handles, &runtime, webview.clone());
+        let main_window = webview.as_ref().window();
+
+        let gateway = Arc::new(GatewayCore::new());
+        let start = std::time::Instant::now();
+        let error = send_prompt_core::<tauri::test::MockRuntime>(
+            app.state::<AppState>().inner(),
+            &runtime,
+            Some(&main_window),
+            &gateway,
+            &PromptContext {
+                source: "i3-source".to_string(),
+                content: "你好".to_string(),
+                ..Default::default()
+            },
+        )
+        .await
+        .expect_err("prompt 挂起必须超时");
+        assert!(
+            error.to_string().contains("timed out after 1s"),
+            "超时文案必须参数化，实际: {error}"
+        );
+        assert!(
+            start.elapsed().as_secs() < 10,
+            "超时必须在参数化时长内返回，实际 {:?}",
+            start.elapsed()
+        );
+        // cancel settle（response=Some）→ 会话保留，且 dispatcher 已收集流式内容
+        {
+            let sessions = runtime.sessions.lock().unwrap();
+            assert!(
+                sessions.contains_key("i3-source"),
+                "cancel settle 后会话映射必须保留（区别于无内容分支的移除）"
+            );
+            assert!(
+                sessions
+                    .get("i3-source")
+                    .map(|s| !s.last_response_text.trim().is_empty())
+                    .unwrap_or(false),
+                "last_response_text 必须包含 dispatcher 收集的流式内容"
+            );
+        }
+        let entries = app
+            .state::<AppState>()
+            .inner()
+            .runtime_logs
+            .list(&crate::runtime_log::RuntimeLogQuery::default());
+        let timeout_entry = entries
+            .iter()
+            .find(|entry| entry.message.starts_with("Prompt timed out"))
+            .expect("超时必须记录 Prompt timed out 日志");
+        assert_eq!(
+            timeout_entry.message,
+            "Prompt timed out (streamed content, missing final response)",
+            "已有流式内容时必须走 streamed 分支文案"
+        );
+        assert_eq!(
+            timeout_entry
+                .fields
+                .get("hasStreamedContent")
+                .and_then(|v| v.as_bool()),
+            Some(true),
+            "已有流式内容时必须标记 hasStreamedContent=true"
         );
         assert!(timeout_entry.fields.contains_key("requestId"));
         assert!(timeout_entry.fields.contains_key("sessionId"));
