@@ -31,7 +31,8 @@ export function classifySaveError(error: unknown): SaveErrorDetail {
   if (/conflict/.test(normalized)) return { code: 'conflict', message }
   if (/too_large/.test(normalized)) return { code: 'too_large', message }
   const fallback = classifyWorkspaceError(error)
-  const fallbackCode = fallback.code
+  // classifyWorkspaceError 运行时可能产出下划线变体（not_a_file/io_error），声明类型未枚举
+  const fallbackCode = fallback.code as string
   const code: SaveErrorCode = fallbackCode === 'not_found'
     ? 'not_found'
     : fallbackCode === 'not_file' || fallbackCode === 'not_a_file'
