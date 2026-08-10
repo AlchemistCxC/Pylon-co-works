@@ -23,6 +23,7 @@ scope:
   - docs/Issue Library/ISSUE-09.md
   - docs/Issue Library/harness/contracts/**
   - docs/Issue Library/harness/handoffs/I09-A-FE-01.md
+  - docs/Issue Library/harness/tasks/I09-A-FE-01.yaml
   deny:
   - docs/archive/**
   - .env*
