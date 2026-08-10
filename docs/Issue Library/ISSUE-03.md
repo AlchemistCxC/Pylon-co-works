@@ -103,16 +103,16 @@ execution_rule: "先完成任务卡依赖，再领取本 Issue 的 ready slice�
 
 | 相关功能 | 验收行为表现 | 验收地址 | 结果 |
 |---|---|---|---|
-| status normalize | payload 缺少 status 时返回 `unknown`，不再默认 connected | `src/components/settings/agentTypes.ts` Vitest | [ ] |
-| 单一 selector | active 无快照→unknown；非 active→inactive；非法字符串→error | Agent status selector 测试文件 | [ ] |
-| 全消费方一致性 | Settings、titlebar、SheetTabStrip、capability hook 对同一输入得到同一语义 | 对应组件/contract tests | [ ] |
+| status normalize | payload 缺少 status 时返回 `unknown`，不再默认 connected | `src/components/settings/agentTypes.ts` Vitest | [x] ✅ `agentStatusSelector.test.ts` + `agentStatusEventMatrix.test.ts`（I03-A-TEST-01） |
+| 单一 selector | active 无快照→unknown；非 active→inactive；非法字符串→error | Agent status selector 测试文件 | [x] ✅ `agentStatusSelector.test.ts` 矩阵（I03-A-TEST-01） |
+| 全消费方一致性 | Settings、titlebar、SheetTabStrip、capability hook 对同一输入得到同一语义 | 对应组件/contract tests | [x] ✅ `agentStatusConsumerMatrix.test.tsx` + 事件矩阵契约（I03-A-TEST-01） |
 
 #### 等级 2：前端网页验收通过（仅限前端）
 
 | 相关功能 | 验收行为表现 | 验收地址 | 结果 |
 |---|---|---|---|
-| 无快照首帧 | Settings、titlebar、Agent tab 同时显示“状态未知/等待状态”，不出现假绿或明确断开 | `http://localhost:5173/` → titlebar + Settings + Agent tab | [ ] |
-| 快照到达 | 注入 connected/error mock event 后，所有位置同一帧更新为相同状态 | `http://localhost:5173/` → 全局 Agent 状态区域 | [ ] |
+| 无快照首帧 | Settings、titlebar、Agent tab 同时显示“状态未知/等待状态”，不出现假绿或明确断开 | `http://localhost:5173/` → titlebar + Settings + Agent tab | [x] ✅ Playwright 14 项 DOM 断言 + 截图（I03-A-TEST-01；实际端口 5174，5173 被无关进程占用） |
+| 快照到达 | 注入 connected/error mock event 后，所有位置同一帧更新为相同状态 | `http://localhost:5173/` → 全局 Agent 状态区域 | [x] ✅ Playwright 注入 mock event 同一帧更新 + 截图（I03-A-TEST-01；实际端口 5174） |
 
 #### 等级 3：真实应用验收通过
 
