@@ -4,7 +4,7 @@ title: 统一 Sheet sidebar capability/context 响应式订阅
 type: FE
 owner: A
 mode: longrun-a
-status: planned
+status: review_pending
 priority: P1
 assignee: null
 depends_on:
@@ -22,6 +22,7 @@ scope:
   - scripts/**
   - docs/Issue Library/ISSUE-09.md
   - docs/Issue Library/harness/contracts/**
+  - docs/Issue Library/harness/handoffs/I09-A-FE-01.md
   deny:
   - docs/archive/**
   - .env*
