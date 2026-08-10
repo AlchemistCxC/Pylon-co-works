@@ -4,20 +4,36 @@
  */
 import { strict as assert } from 'node:assert'
 import { readFileSync } from 'node:fs'
-import { parseOpenTabs, serializeOpenTabs, languageFromPath } from '../src/sheets/file/fileSheetState.ts'
+import { fileTabKey, parseFileTabs, serializeFileTabs, languageFromPath } from '../src/sheets/file/fileSheetState.ts'
 
-// W2-04：多 tab + metadata roundtrip + read invoke 参数 + truncated
+// W2-04→v2（ISSUE-08 D-02/D-04）：统一 file/diff tab identity 版本化 schema
 
-// 1. openTabs 编解码 roundtrip；损坏 JSON → 空（不清整个 persistence）
+// 1. v2 tab 编解码 roundtrip；v1 string[] 迁移；损坏 JSON → 空（不清整个 persistence）
 {
-  const paths = ['src/a.ts', 'src/b.md']
-  const serialized = serializeOpenTabs(paths)
-  assert.deepEqual(parseOpenTabs(serialized), paths)
-  assert.deepEqual(parseOpenTabs(undefined), [])
-  assert.deepEqual(parseOpenTabs(''), [])
-  assert.deepEqual(parseOpenTabs('{broken json'), [], '损坏 JSON normalize 为空')
-  assert.deepEqual(parseOpenTabs(JSON.stringify({ not: 'array' })), [])
-  assert.deepEqual(parseOpenTabs(JSON.stringify(['ok', 42, null, 'x'])), ['ok', 'x'], '非字符串项丢弃')
+  const state = {
+    version: 2 as const,
+    tabs: [
+      { path: 'src/a.ts', mode: 'file' as const },
+      { path: 'src/a.ts', mode: 'diff' as const, staged: true },
+    ],
+    activeKey: 'diff:src/a.ts',
+  }
+  assert.deepEqual(parseFileTabs(serializeFileTabs(state)), state)
+  assert.deepEqual(parseFileTabs(undefined), { version: 2, tabs: [], activeKey: null })
+  assert.deepEqual(parseFileTabs(''), { version: 2, tabs: [], activeKey: null })
+  assert.deepEqual(parseFileTabs('{broken json'), { version: 2, tabs: [], activeKey: null }, '损坏 JSON normalize 为空')
+  assert.deepEqual(parseFileTabs(JSON.stringify({ not: 'array' })), { version: 2, tabs: [], activeKey: null })
+  // v1 openTabs:string[] → file-mode tabs
+  assert.deepEqual(parseFileTabs(JSON.stringify(['a.ts', 'b.ts'])), {
+    version: 2,
+    tabs: [
+      { path: 'a.ts', mode: 'file' },
+      { path: 'b.ts', mode: 'file' },
+    ],
+    activeKey: 'file:b.ts',
+  })
+  // tab 单例 key 区分 path+mode：同路径 file/diff 不互相覆盖
+  assert.notEqual(fileTabKey({ path: 'x.ts', mode: 'file' }), fileTabKey({ path: 'x.ts', mode: 'diff' }))
 }
 
 // 2. 语言推断
@@ -29,7 +45,7 @@ import { parseOpenTabs, serializeOpenTabs, languageFromPath } from '../src/sheet
   assert.equal(languageFromPath('x.rs'), 'rust')
 }
 
-// 3. FileSheetView：metadata openTabs/activeFile 组合 action + truncated + close 行为
+// 3. FileSheetView：metadata openTabs（v2 版本化 tab 记录）/activeFile 组合 action + truncated + close 行为
 const view = readFileSync(new URL('../src/sheets/file/FileSheetView.tsx', import.meta.url), 'utf8')
 assert.match(view, /patchSheetMetadata\(sheet\.id, \{ openTabs: serializeOpenTabs\(next\), activeFile: path \}\)/, '打开 tab 必须原子合并 metadata')
 assert.match(view, /patchSheetMetadata\(sheet\.id, \{ activeFile: path \}\)/, '切 tab 必须写 activeFile')
