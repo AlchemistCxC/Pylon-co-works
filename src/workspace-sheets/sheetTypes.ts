@@ -71,10 +71,15 @@ export interface SheetContext {
   sessionBySource: (source: string) => Session | undefined
 }
 
+/** I09-A-FE-01：Sheet 左栏能力（方案 A，ISSUE-09.md）——'workspace'=布局层公共左栏 / 'sheet'=Sheet 内部自绘侧栏 / 'none'=无侧栏 */
+export type SidebarMode = 'workspace' | 'sheet' | 'none'
+
 /** W1-02：渲染注册表条目（F1-B/F2-A）——主区渲染器 + 侧栏/右栏声明（W1-03/04 消费） */
 export interface SheetRenderEntry {
   render: (sheet: SheetRecord, ctx: SheetContext) => ReactNode
-  /** 侧栏组件（W1-03：AgentSheetView 上移；经 ctx 注入，不传平铺 props） */
+  /** I09-A-FE-01：侧栏能力显式声明（9 种 SheetKind 必填，禁止隐式缺失；完整性测试防漂移） */
+  sidebarMode: SidebarMode
+  /** 侧栏组件（W1-03：AgentSheetView 上移；经 ctx 注入，不传平铺 props；仅 mode='workspace' 注册） */
   sidebar?: ComponentType<{ ctx: SheetContext }>
   /** 右栏组件（W1-04 ContextPanel；'none' 或缺失 = 无右栏） */
   rightPanel?: 'none' | ComponentType<{ ctx: SheetContext }>

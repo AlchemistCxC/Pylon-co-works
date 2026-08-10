@@ -3,9 +3,9 @@
  * 显式派生（背景/字体/布局）+ defs 循环注入 + 空 color 省略 + 布局宽度。
  */
 import { describe, expect, it } from 'vitest'
-import { selectThemeCssSnapshot } from '../themeCssSnapshot'
+import { selectThemeCssSnapshot, WORKSPACE_SIDEBAR_COLLAPSED_WIDTH } from '../themeCssSnapshot'
 
-const LAYOUT = { sidebarCollapsed: false, sidebarWidth: 250 }
+const LAYOUT = { sidebarCollapsed: false, sidebarWidth: 250, sidebarEnabled: true }
 
 function makeState(overrides: Record<string, unknown> = {}): Record<string, unknown> {
   return { ...overrides }
@@ -20,9 +20,9 @@ describe('selectThemeCssSnapshot', () => {
   })
 
   it('布局宽度派生（折叠 42 / 展开 宽度）', () => {
-    const vars = selectThemeCssSnapshot(makeState(), { sidebarCollapsed: true, sidebarWidth: 250 })
+    const vars = selectThemeCssSnapshot(makeState(), { sidebarCollapsed: true, sidebarWidth: 250, sidebarEnabled: true })
     expect(vars['--titlebar-sidebar-width']).toBe('42px')
-    const expanded = selectThemeCssSnapshot(makeState(), { sidebarCollapsed: false, sidebarWidth: 320 })
+    const expanded = selectThemeCssSnapshot(makeState(), { sidebarCollapsed: false, sidebarWidth: 320, sidebarEnabled: true })
     expect(expanded['--titlebar-sidebar-width']).toBe('320px')
     expect(expanded['--sheet-sidebar-width']).toBe('320px')
   })
@@ -43,5 +43,23 @@ describe('selectThemeCssSnapshot', () => {
   it('msgTextColor 空时走兜底链', () => {
     const vars = selectThemeCssSnapshot(makeState(), LAYOUT)
     expect(vars['--msg-text']).toContain('var(--chat-text-color')
+  })
+})
+
+describe('I09-A-FE-01 统一折叠宽度 token 契约（D-08：42px）', () => {
+  it('token 冻结为 42px 且快照发出 --workspace-sidebar-collapsed-width', () => {
+    expect(WORKSPACE_SIDEBAR_COLLAPSED_WIDTH).toBe(42)
+    const vars = selectThemeCssSnapshot(makeState(), LAYOUT)
+    expect(vars['--workspace-sidebar-collapsed-width']).toBe('42px')
+  })
+
+  it('titlebar 折叠宽度消费同一 token（折叠 = token 而非各自硬编码）', () => {
+    const vars = selectThemeCssSnapshot(makeState(), { sidebarCollapsed: true, sidebarWidth: 320, sidebarEnabled: true })
+    expect(vars['--titlebar-sidebar-width']).toBe(`${WORKSPACE_SIDEBAR_COLLAPSED_WIDTH}px`)
+  })
+
+  it('无 sidebar 时 titlebar 第一列固定为 42px 控制区（不占展开宽度，方案 B）', () => {
+    const vars = selectThemeCssSnapshot(makeState(), { sidebarCollapsed: false, sidebarWidth: 320, sidebarEnabled: false })
+    expect(vars['--titlebar-sidebar-width']).toBe('42px')
   })
 })

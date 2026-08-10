@@ -47,22 +47,23 @@ function lazyRender(Component: LazyExoticComponent<ComponentType<{ sheet: SheetR
 export const SHEET_RENDER_REGISTRY: Record<SheetKind, SheetRenderEntry> = {
   // W1-03：侧栏上移——agent 的 Sidebar 由布局层经 slot 渲染（entry.sidebar 声明）
   // W2-12：agent/file 右栏（F2-F）——搜索/关联；旧 RightPanel 退役
-  agent: { render: agentRender, sidebar: Sidebar, rightPanel: AgentContextPanel },
-  prism: { render: lazyRender(PrismManagerSheetView) },
+  // I09-A-FE-01：sidebarMode 显式声明（agent=workspace 公共左栏；file/browser=sheet 内栏；其余 none）
+  agent: { render: agentRender, sidebarMode: 'workspace', sidebar: Sidebar, rightPanel: AgentContextPanel },
+  prism: { render: lazyRender(PrismManagerSheetView), sidebarMode: 'none' },
   // W1-08：runtime 日志观察面（list 回放 + runtime-log 增量，无右栏）
-  runtime: { render: lazyRender(RuntimeSheetView) },
+  runtime: { render: lazyRender(RuntimeSheetView), sidebarMode: 'none' },
   // W2-03：FileSheet 分区壳（singletonKey file:{source}，内部指向可改）
-  file: { render: lazyRender(FileSheetView), rightPanel: FileContextPanel },
+  file: { render: lazyRender(FileSheetView), sidebarMode: 'sheet', rightPanel: FileContextPanel },
   // W1-05：overview 启动选择器（虚拟空态，不写入持久 sheet 数组）
-  overview: { render: (sheet, ctx) => <OverviewSheetView sheet={sheet} ctx={ctx} /> },
+  overview: { render: (sheet, ctx) => <OverviewSheetView sheet={sheet} ctx={ctx} />, sidebarMode: 'none' },
   // W3-03：跨会话快照搜索（仅本地会话；平台范围产品未决）
-  search: { render: lazyRender(SearchSheetView) },
+  search: { render: lazyRender(SearchSheetView), sidebarMode: 'none' },
   // W4-01：历史列表/导出（回放 W4-02 待产品拍板）
-  history: { render: lazyRender(HistorySheetView) },
+  history: { render: lazyRender(HistorySheetView), sidebarMode: 'none' },
   // W4-03：browser 壳（CDP 契约未定，W4-04 接真实）
-  browser: { render: lazyRender(BrowserSheetView) },
+  browser: { render: lazyRender(BrowserSheetView), sidebarMode: 'sheet' },
   // W3-01：gateway 只读概览（适配器/平台会话分区；写回 W3-02 桩化）
-  gateway: { render: lazyRender(GatewaySheetView) },
+  gateway: { render: lazyRender(GatewaySheetView), sidebarMode: 'none' },
 } satisfies Record<SheetKind, SheetRenderEntry>
 
 export function resolveSheetRender(kind: SheetKind): SheetRenderEntry | undefined {

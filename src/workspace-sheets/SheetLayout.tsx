@@ -27,7 +27,7 @@ interface SheetLayoutProps {
   rightInset: number
 }
 
-function buildSheetContext(props: SheetLayoutProps): SheetContext {
+function buildSheetContext(props: SheetLayoutProps, sidebarCollapsed: boolean): SheetContext {
   const { openSheet, focusSheet, closeSheet } = useWorkspaceStore.getState()
   return {
     openSheet,
@@ -37,7 +37,8 @@ function buildSheetContext(props: SheetLayoutProps): SheetContext {
     selectSession: props.onSelectSession,
     openProfileEdit: props.onProfileEdit,
     openSessionSettings: props.onSessionSettings,
-    sidebarCollapsed: useWorkspaceStore.getState().sidebarCollapsed,
+    // I09-A-FE-01（L1）：响应式订阅——原 getState() 快照在折叠变化后不触发重渲染（ctx 陈旧）
+    sidebarCollapsed,
     rightInset: props.rightInset,
     ccEditMode: useStore.getState().ccEditMode,
     sessionSource: sessionId => resolveSessionSource(sessionId, useIdentityStore.getState().sessions),
@@ -49,6 +50,8 @@ export default function SheetLayout(props: SheetLayoutProps) {
   const sheets = useWorkspaceStore(s => s.workspaceSheets.sheets)
   const activeSheetId = useWorkspaceStore(s => s.workspaceSheets.activeSheetId)
   const activeSheet = sheets.find(sheet => sheet.id === activeSheetId)
+  // I09-A-FE-01（L1）：sidebarCollapsed 响应式订阅——折叠变化必须触发本层重渲染并注入新 ctx
+  const sidebarCollapsed = useWorkspaceStore(s => s.sidebarCollapsed)
 
   const activeAgent = useIdentityStore(s => s.activeAgent) || 'peri'
   const activeProfileId = useIdentityStore(s => s.activeProfileId)
@@ -86,7 +89,7 @@ export default function SheetLayout(props: SheetLayoutProps) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [activeProfileId, props.activeSession, sessions])
 
-  const ctx = buildSheetContext(props)
+  const ctx = buildSheetContext(props, sidebarCollapsed)
   const ccEditMode = useStore(s => s.ccEditMode)
   // FE-AUD-001 / 1C L1：工作区与用户配置（Profile/Session）写盘失败可见（报告 1A.5/1C）
   const workspacePersistError = useWorkspaceStore(s => s.lastPersistError)

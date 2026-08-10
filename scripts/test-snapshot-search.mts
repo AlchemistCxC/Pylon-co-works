@@ -49,6 +49,6 @@ assert.match(view, /ctx\.selectSession\(session\.id\)/, '结果点击必须 sele
 assert.match(view, /ctx\.openSheet\(\{ kind: 'agent'/, '结果点击必须 open agent')
 assert.match(view, /仅本地会话/, '范围必须标注仅本地（平台未决）')
 const registry = readFileSync(new URL('../src/workspace-sheets/sheetRegistry.tsx', import.meta.url), 'utf8')
-assert.match(registry, /search: \{ render: lazyRender\(SearchSheetView\) \}/, 'registry search 必须渲染')
+assert.match(registry, /search: \{ render: lazyRender\(SearchSheetView\), sidebarMode: 'none' \}/, 'registry search 必须渲染（无侧栏显式声明）')
 
 console.log('snapshot search 守卫通过')
