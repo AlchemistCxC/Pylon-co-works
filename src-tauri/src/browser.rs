@@ -4,7 +4,9 @@
 //! 关闭 sheet → `browser_close` → `Webview::close()` 销毁子 WebView，渲染进程树随之回收。
 //! 命令只做参数校验 + manager 调用；状态机 idle→starting→ready→error，close 回 idle。
 //! 单实例：重复 start 幂等返回同一 instanceId；generation 丢弃旧实例迟到回调。
-//! 安全：navigate 只放行 http/https（on_navigation 二次拦截非 http(s)/about 跳转）。
+//! 安全：navigate/on_navigation/on_new_window 共用 is_allowed_browser_url 白名单
+//! （http/https，about 仅初始化约定 about:blank）；新窗口请求一律取消原创建，
+//! 白名单内 URL 复用当前 WebView 导航（ISSUE-11 方案 A）。
 
 use serde::Serialize;
 use std::sync::{Arc, Mutex};
@@ -51,6 +53,17 @@ pub(crate) struct BrowserBounds {
     pub(crate) y: i32,
     pub(crate) width: u32,
     pub(crate) height: u32,
+}
+
+/// 共享 URL scheme 白名单（ISSUE-11 实施细化第 3 条）：地址栏 navigate、on_navigation、
+/// 新窗口回调共用一套规则；http/https 放行，about 仅允许初始化约定 about:blank，
+/// file/javascript/data/devtools/chrome 等一律拒绝。
+pub(crate) fn is_allowed_browser_url(url: &url::Url) -> bool {
+    match url.scheme() {
+        "http" | "https" => true,
+        "about" => url.as_str() == BROWSER_INITIAL_URL,
+        _ => false,
+    }
 }
 
 pub(crate) struct BrowserManager {
@@ -131,14 +144,24 @@ impl BrowserManager {
         inner.phase = BrowserPhase::Starting;
         inner.error = None;
         let this = self.clone();
+        let new_window_this = this.clone();
         let builder = tauri::WebviewBuilder::new(
             BROWSER_WEBVIEW_LABEL,
             tauri::WebviewUrl::External(
                 url::Url::parse(BROWSER_INITIAL_URL).expect("about:blank 恒可解析"),
             ),
         )
-            // 二次拦截：非 http(s)/about 跳转（file://、devtools:// 等拒绝）
-            .on_navigation(|url| matches!(url.scheme(), "http" | "https" | "about"))
+            // 二次拦截：与 navigate/新窗口回调共用同一白名单（file://、data:// 等拒绝）
+            .on_navigation(|url| is_allowed_browser_url(&url))
+            // 方案 A（ISSUE-11）：签名已按 tauri 2.11.5 webview/mod.rs:585 确认
+            // Fn(Url, NewWindowFeatures) -> NewWindowResponse<R>；一律返回 Deny 取消原
+            // 窗口创建，白名单内 http/https（及初始化 about:blank）复用当前 WebView 导航。
+            .on_new_window(move |url, _features| {
+                if is_allowed_browser_url(&url) {
+                    let _ = new_window_this.navigate(url.as_str());
+                }
+                tauri::webview::NewWindowResponse::Deny
+            })
             .on_page_load(move |webview, payload| {
                 let url = payload.url().to_string();
                 // 尝试取标题（eval_with_callback 在受限环境可能失败，静默降级）
@@ -202,9 +225,8 @@ impl BrowserManager {
     /// browser_navigate：http/https 白名单 + 导航。
     pub(crate) fn navigate(&self, url: &str) -> Result<BrowserSnapshot, String> {
         let parsed = url::Url::parse(url).map_err(|e| format!("URL 非法: {e}"))?;
-        match parsed.scheme() {
-            "http" | "https" => {}
-            other => return Err(format!("仅允许 http/https，收到 scheme={other}")),
+        if !is_allowed_browser_url(&parsed) {
+            return Err(format!("仅允许 http/https，收到 scheme={}", parsed.scheme()));
         }
         let mut inner = self.inner.lock().map_err(|e| e.to_string())?;
         let webview = inner
@@ -297,6 +319,25 @@ mod tests {
         let manager = Arc::new(BrowserManager::new());
         let err = manager.start(BrowserBounds { x: 0, y: 0, width: 100, height: 100 }).unwrap_err();
         assert!(err.contains("host 未注册"), "未注入主窗口必须报错（真实创建需真机）");
+    }
+
+    #[test]
+    fn url_whitelist_allows_http_https_and_init_about_blank() {
+        for raw in ["https://example.com", "http://example.com", "about:blank"] {
+            let url = url::Url::parse(raw).unwrap();
+            assert!(is_allowed_browser_url(&url), "应放行 {raw}");
+        }
+        for raw in [
+            "file:///etc/passwd",
+            "javascript:alert(1)",
+            "data:text/html,hi",
+            "devtools://devtools/bundled/inspector.html",
+            "chrome://settings",
+            "about:config",
+        ] {
+            let url = url::Url::parse(raw).unwrap();
+            assert!(!is_allowed_browser_url(&url), "应拒绝 {raw}");
+        }
     }
 
     #[test]
