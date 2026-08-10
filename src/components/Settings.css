@@ -150,6 +150,14 @@
 
 .set-hint { font-size:12px; color:var(--text-dim); margin-top:4px; }
 
+/* I13-A-FE-02：历史保留策略组内标题（非折叠组，与可折叠 set-group-title 同视觉） */
+.set-group-inner-title {
+  font-size:12px; font-weight:680; letter-spacing:.02em;
+  color:var(--text); margin:0 0 10px; user-select:none;
+}
+/* 非永久策略影响提示（D-15：选择非永久策略必须显示预计影响） */
+.set-impact { color:var(--warning); }
+
 .set-preset-row { display:flex; gap:4px; flex-wrap:wrap; }
 .set-preset-chip { padding:3px 10px; border:1px solid var(--border); border-radius:4px; background:var(--bg-panel); color:var(--text-dim); font-size:13px; cursor:pointer; transition:all 0.15s; font-family:var(--mono); }
 .set-preset-chip:hover { background:var(--bg-hover); color:var(--text); }
