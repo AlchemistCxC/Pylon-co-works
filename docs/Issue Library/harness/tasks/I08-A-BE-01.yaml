@@ -4,7 +4,7 @@ title: workspace/Git source 与 runtime 一致性 guard
 type: BE
 owner: A
 mode: longrun-a
-status: planned
+status: review_pending
 priority: P1
 assignee: null
 depends_on:
