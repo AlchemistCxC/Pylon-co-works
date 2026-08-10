@@ -1,5 +1,6 @@
 import { beforeEach, describe, expect, it } from 'vitest'
 import { useRuntimeStore } from '../../../runtimeStore'
+import { resolveCapabilitySnapshot } from '../../../infrastructure/acp/agentContracts'
 import {
   normalizeAgentStatus,
   selectAgentStatus,
@@ -63,7 +64,17 @@ describe('agent status 事件矩阵（连接→失败→断开→清空 → 统�
     expect(display('hermes', 'peri').status).toBe('inactive')
   })
 
-  it('capability hook 契约：无快照时 raw store 无记录 → 能力层按未连接 gate（InputBar 一致）', () => {
+  it('capability hook 契约：能力快照 gate 与 store 状态同源（无快照→未连接，connected→连接，error→收回）', () => {
+    // 无快照（beforeEach 已清空）：能力层 gate 未连接——useAgentCapabilities 只读 store 状态喂给该快照（InputBar 依赖）
     expect(useRuntimeStore.getState().agentStatuses.peri).toBeUndefined()
+    expect(resolveCapabilitySnapshot(useRuntimeStore.getState().agentStatuses.peri).connected).toBe(false)
+
+    // connected 事件写入 store：能力层 gate 同帧打开
+    useRuntimeStore.getState().setAgentStatus('peri', event({ agent: 'peri', status: 'connected' }, 1))
+    expect(resolveCapabilitySnapshot(useRuntimeStore.getState().agentStatuses.peri).connected).toBe(true)
+
+    // error 事件后：gate 收回（connected 唯一真值 = status === 'connected'）
+    useRuntimeStore.getState().setAgentStatus('peri', event({ agent: 'peri', status: 'error', error: '心跳超时' }, 2))
+    expect(resolveCapabilitySnapshot(useRuntimeStore.getState().agentStatuses.peri).connected).toBe(false)
   })
 })

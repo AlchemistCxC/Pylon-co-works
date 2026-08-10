@@ -38,6 +38,11 @@ describe('normalizeAgentStatus — 状态缺失/非法归一化矩阵（ISSUE-03
     expect(normalizeAgentStatus({ agent: 'peri', status }, 'peri').status).toBe(status)
   })
 
+  it('status 存在时优先于 crashed（{status: connected, crashed: true} → connected），固化设计意图', () => {
+    const result = normalizeAgentStatus({ agent: 'peri', status: 'connected', crashed: true }, 'peri')
+    expect(result.status).toBe('connected')
+  })
+
   it('非法字符串（如 paused）→ error，recentError 携带原始值诊断', () => {
     const result = normalizeAgentStatus({ agent: 'peri', status: 'paused' }, 'peri')
     expect(result.status).toBe('error')
