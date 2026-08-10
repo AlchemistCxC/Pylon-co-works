@@ -41,7 +41,8 @@ assert.match(app, /const sidebarCollapsed = useWorkspaceStore\(s => s\.sidebarCo
 assert.match(app, /const sidebarWidth = useWorkspaceStore\(s => s\.sidebarWidth\)/, 'App 宽度必须读 workspaceStore')
 assert.match(app, /setSidebarCollapsed\(!useWorkspaceStore\.getState\(\)\.sidebarCollapsed\)/, '折叠 toggle 必须写 workspaceStore')
 const snapshot = readFileSync(new URL('../src/domains/theme/themeCssSnapshot.ts', import.meta.url), 'utf8')
-assert.match(snapshot, /'--titlebar-sidebar-width': `\$\{sidebarCollapsed \? 42 : sidebarWidth\}px`/, 'titlebar 宽度读 workspaceStore（CSS snapshot）')
+assert.match(snapshot, /\$\{sidebarEnabled && !sidebarCollapsed \? sidebarWidth : WORKSPACE_SIDEBAR_COLLAPSED_WIDTH\}px/, 'titlebar 宽度读 workspaceStore（CSS snapshot 消费统一折叠 token）')
+assert.match(snapshot, /WORKSPACE_SIDEBAR_COLLAPSED_WIDTH = 42/, '折叠宽度必须由单一 token 冻结（D-08：42px）')
 
 // 6. profile 投影 effects 原样搬运到 SheetLayout（行为不变）
 assert.match(layout, /setActiveProfile\(memory\.activeProfileId\)/, '启动恢复 effect 必须随布局层')

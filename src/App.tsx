@@ -16,6 +16,7 @@ import { loadWindowSize, persistWindowSize } from './windowSizePersistence'
 import { reportRuntimeError } from './runtimeError'
 import { toCssBackgroundImage } from './backgroundImage'
 import { selectThemeCssSnapshot } from './domains/theme/themeCssSnapshot'
+import { resolveSheetRender } from './workspace-sheets/sheetRegistry.tsx'
 import { listen } from '@tauri-apps/api/event'
 import { normalizeAgentStatus, type AgentStatusPayload } from './components/settings/agentTypes'
 import { createAgentClient } from './infrastructure/acp/agentClient'
@@ -61,6 +62,10 @@ export default function App() {
   const sidebarCollapsed = useWorkspaceStore(s => s.sidebarCollapsed)
   const sidebarWidth = useWorkspaceStore(s => s.sidebarWidth)
   const workspaceSheets = useWorkspaceStore(s => s.workspaceSheets)
+  // I09-A-FE-01（方案 B）：active Sheet 无侧栏能力（sidebarMode='none'）→ 折叠按钮禁用 + titlebar 第一列 42px 控制区
+  const activeSheet = workspaceSheets.sheets.find(sheet => sheet.id === workspaceSheets.activeSheetId)
+  const activeSidebarMode = activeSheet ? resolveSheetRender(activeSheet.kind)?.sidebarMode : undefined
+  const sidebarEnabled = activeSidebarMode !== undefined && activeSidebarMode !== 'none'
   const agents = useIdentityStore(s => s.agents)
   const activeAgent = useIdentityStore(s => s.activeAgent) || 'peri'
   const prevActiveAgentRef = useRef<string>(activeAgent)
@@ -220,8 +225,8 @@ export default function App() {
   // FE-AUD-013：CSS 变量快照经纯 selector 派生（defs 驱动 + 显式派生），
   // App 只依赖 s（useShallow 稳定引用）与布局宽度，派生逻辑可 node 测
   const cssVars = useMemo(
-    () => selectThemeCssSnapshot(s as Readonly<Record<string, unknown>>, { sidebarCollapsed, sidebarWidth }) as React.CSSProperties,
-    [s, sidebarCollapsed, sidebarWidth],
+    () => selectThemeCssSnapshot(s as Readonly<Record<string, unknown>>, { sidebarCollapsed, sidebarWidth, sidebarEnabled }) as React.CSSProperties,
+    [s, sidebarCollapsed, sidebarWidth, sidebarEnabled],
   )
 
   // body::before 玻璃层挂在 <body> 上，读不到 .app 子元素的 CSS 变量 —

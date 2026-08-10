@@ -7,16 +7,21 @@
 import { THEME_CSS_VAR_MAP, THEME_FIELD_DEFS } from '../../themeFieldDefs'
 import { toCssBackgroundImage } from '../../backgroundImage'
 
+/** I09-A-FE-01（D-08 冻结）：统一折叠宽度 token——titlebar cell / workspace sidebar / Browser/File 内栏共用，组件不得各自硬编码 */
+export const WORKSPACE_SIDEBAR_COLLAPSED_WIDTH = 42
+
 export interface ThemeCssLayout {
   sidebarCollapsed: boolean
   sidebarWidth: number
+  /** I09-A-FE-01（方案 B）：active Sheet 是否有侧栏能力——无侧栏时 titlebar 第一列固定为 42px 控制区 */
+  sidebarEnabled: boolean
 }
 
 export function selectThemeCssSnapshot(
   s: Readonly<Record<string, unknown>>,
   layout: ThemeCssLayout,
 ): Record<string, string> {
-  const { sidebarCollapsed, sidebarWidth } = layout
+  const { sidebarCollapsed, sidebarWidth, sidebarEnabled } = layout
   const vars: Record<string, string> = {
     '--global-bg-image': toCssBackgroundImage(s.globalBgImage as string | undefined),
     '--sidebar-bg-image': toCssBackgroundImage(s.sidebarBgImage as string | undefined),
@@ -27,7 +32,10 @@ export function selectThemeCssSnapshot(
     '--chat-font': s.chatFont === 'mono' ? 'var(--mono)' : 'var(--font)',
     '--msg-font': s.msgFont === 'mono' ? 'var(--mono)' : 'var(--font)',
     '--msg-text': (s.msgTextColor as string) || 'var(--chat-text-color,var(--text))',
-    '--titlebar-sidebar-width': `${sidebarCollapsed ? 42 : sidebarWidth}px`,
+    // 统一折叠 token：内部侧栏（Browser/File）FE-02 迁移消费点
+    '--workspace-sidebar-collapsed-width': `${WORKSPACE_SIDEBAR_COLLAPSED_WIDTH}px`,
+    // 无侧栏（sidebarEnabled=false）→ 固定 42px 控制区，不占展开宽度
+    '--titlebar-sidebar-width': `${sidebarEnabled && !sidebarCollapsed ? sidebarWidth : WORKSPACE_SIDEBAR_COLLAPSED_WIDTH}px`,
     '--sheet-sidebar-width': `${sidebarWidth}px`,
   }
   for (const [cssVar, key] of Object.entries(THEME_CSS_VAR_MAP)) {
