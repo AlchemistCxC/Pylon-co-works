@@ -9,7 +9,6 @@ describe('FileSheet source clearing', () => {
       targetSource: null,
     })
     expect(resetFileSheetTransientState()).toEqual({
-      activeDiff: null,
       truncated: false,
       instruction: '',
       fileContent: '',

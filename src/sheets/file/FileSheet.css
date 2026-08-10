@@ -272,6 +272,8 @@
 }
 .file-tab.active { color: var(--editor-tab-active); background: var(--bg-panel); }
 .file-tab-close { background: none; border: none; color: var(--text-dim); cursor: pointer; font-size: 10px; padding: 0 2px; }
+.file-tab-diff { color: var(--syn-fn, #8fa1b3); }
+.file-tab-mode { font-size: 10px; line-height: 1; padding: 2px 4px; color: var(--text-dim); background: var(--bg-hover); border: 1px solid var(--border); border-radius: 2px; white-space: nowrap; }
 
 .file-tab-view {
   flex: 1; min-height: 0; overflow: auto;

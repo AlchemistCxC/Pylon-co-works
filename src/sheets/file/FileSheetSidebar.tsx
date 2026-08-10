@@ -35,7 +35,7 @@ export default function FileSheetSidebar({
     files: { icon: <Files size={21} />, description: '浏览工作区文件' },
     search: { icon: <Search size={21} />, description: '搜索工作区内容' },
     scm: { icon: <GitBranch size={21} />, description: '查看完整 Git 状态和历史' },
-    views: { icon: <Clock3 size={21} />, description: '查看 Agent 改动与 diff' },
+    views: { icon: <Clock3 size={21} />, description: '查看 Agent 最近触碰文件' },
   }
 
   const selectSection = (section: FileSheetSection) => {
