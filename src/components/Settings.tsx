@@ -28,6 +28,7 @@ import { normalizeAgentStatus, selectAgentStatus, statusLabel } from './settings
 import { runReconnectCommand } from './settings/reconnectCommand'
 import ConfigOptionsPanel from './settings/ConfigOptionsPanel'
 import TemplateLibrary from './settings/TemplateLibrary'
+import HistoryRetention from './settings/HistoryRetention'
 import { resolveToolIndicatorAsset, toolIndicatorOptions } from './chat/toolIndicatorAssets'
 
 // FE-AUD-008：typed client 收口 agent 域 command literal
@@ -435,6 +436,7 @@ export default function Settings({ onClose, activeSessionId }: { onClose?: () =>
               <ZoneGroupFields zone="global" ctx={renderCtx} />
 
               {!isSearching && <><WindowSizeRow />
+              <HistoryRetention />
               <ConfigBackupRow /></>}
             </Tabs.Content>
 
