@@ -190,4 +190,122 @@ mod tests {
         assert_eq!(error.code(), "session_not_found");
         assert!(!error.to_string().contains("agent-a-workspace"));
     }
+
+    // ── I08-A-BE-01：workspace/Git source 与 runtime 一致性 guard（命令层 L1 证据）──
+    // 4 个非 Git workspace 命令（get_workspace_root / list_workspace_entries /
+    // read_workspace_text / workspace_search）共用 workspace_root_for_source 做
+    // source→runtime 解析；以下直接对该解析链断言 AC-1——source/Agent 不一致、
+    // 未知 source、active runtime 未注册都返回错误，绝不回退 active agent cwd。
+
+    #[test]
+    fn workspace_root_for_source_without_registered_runtime_errors() {
+        // active agent 已设但其 runtime 未注册：必须返回错误，不能静默用任何 cwd。
+        let agent = crate::test_utils::fake_acp_agent("agent-a", "");
+        let state = crate::test_utils::TestStateBuilder::bare()
+            .with_active_agent("agent-a")
+            .with_agent(agent)
+            .build();
+        let runtime = crate::runtime::AgentRuntime::new_disconnected();
+        let error = state
+            .workspace_root_for_source(&runtime, "any-source")
+            .expect_err("active agent 的 runtime 未注册时必须显式失败");
+        assert_eq!(error.code(), "no_active_agent");
+    }
+
+    #[test]
+    fn workspace_root_for_source_rejects_unknown_source_without_cwd_fallback() {
+        let mut agent = crate::test_utils::fake_acp_agent("agent-a", "");
+        agent.cwd = Some("fallback-cwd-must-not-be-used".to_string());
+        let runtime = crate::runtime::AgentRuntime::new_disconnected();
+        let state = crate::test_utils::TestStateBuilder::bare()
+            .with_active_agent("agent-a")
+            .with_agent(agent)
+            .with_runtime("agent-a", runtime.clone())
+            .build();
+
+        let error = state
+            .workspace_root_for_source(&runtime, "unknown-source")
+            .expect_err("未知 source 必须显式失败，不能回退 active agent cwd");
+        assert_eq!(error.code(), "session_not_found");
+        assert!(!error.to_string().contains("fallback-cwd-must-not-be-used"));
+    }
+
+    #[test]
+    fn workspace_root_for_source_rejects_runtime_instance_mismatch() {
+        // AC-1 核心：source 属于 active agent A，但调用方传入另一个 agent 的
+        // runtime 实例（如竞态/旧引用）——必须报错，绝不能读取 B 的会话 cwd。
+        let mut agent_a = crate::test_utils::fake_acp_agent("agent-a", "");
+        agent_a.cwd = Some("agent-a-cwd".to_string());
+        let mut agent_b = crate::test_utils::fake_acp_agent("agent-b", "");
+        agent_b.cwd = Some("agent-b-cwd".to_string());
+        let runtime_a = crate::runtime::AgentRuntime::new_disconnected();
+        runtime_a.sessions.lock().unwrap().insert(
+            "shared-source".to_string(),
+            crate::session::SessionInfo::new(
+                "peri-a".to_string(),
+                String::new(),
+                "agent-a-workspace".to_string(),
+                false,
+                0,
+            ),
+        );
+        let runtime_b = crate::runtime::AgentRuntime::new_disconnected();
+        runtime_b.sessions.lock().unwrap().insert(
+            "shared-source".to_string(),
+            crate::session::SessionInfo::new(
+                "peri-b".to_string(),
+                String::new(),
+                "agent-b-workspace".to_string(),
+                false,
+                0,
+            ),
+        );
+        let state = crate::test_utils::TestStateBuilder::bare()
+            .with_active_agent("agent-a")
+            .with_agent(agent_a)
+            .with_agent(agent_b)
+            .with_runtime("agent-a", runtime_a.clone())
+            .with_runtime("agent-b", runtime_b.clone())
+            .build();
+
+        let error = state
+            .workspace_root_for_source(&runtime_b, "shared-source")
+            .expect_err("source 与 runtime 实例不一致时必须返回错误");
+        assert_eq!(error.code(), "session_not_found");
+        assert!(
+            error.to_string().contains("mismatch"),
+            "错误应明确标注 runtime 不一致：{error}"
+        );
+        assert!(
+            !error.to_string().contains("agent-b-workspace"),
+            "不得回退到传入 runtime 的工作区：{error}"
+        );
+    }
+
+    #[test]
+    fn workspace_root_for_source_resolves_active_session_cwd() {
+        // 正常路径：source 属于 active agent 的会话时返回该会话 cwd（guard 不破坏正常解析）。
+        let agent = crate::test_utils::fake_acp_agent("agent-a", "");
+        let runtime = crate::runtime::AgentRuntime::new_disconnected();
+        runtime.sessions.lock().unwrap().insert(
+            "active-source".to_string(),
+            crate::session::SessionInfo::new(
+                "peri-a".to_string(),
+                String::new(),
+                "agent-a-workspace".to_string(),
+                false,
+                0,
+            ),
+        );
+        let state = crate::test_utils::TestStateBuilder::bare()
+            .with_active_agent("agent-a")
+            .with_agent(agent)
+            .with_runtime("agent-a", runtime.clone())
+            .build();
+
+        let root = state
+            .workspace_root_for_source(&runtime, "active-source")
+            .expect("active agent 会话内的 source 必须解析成功");
+        assert_eq!(root, "agent-a-workspace");
+    }
 }
