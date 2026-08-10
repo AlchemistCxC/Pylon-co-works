@@ -75,9 +75,16 @@ function isFileTabRecord(value: unknown): value is FileTabRecord {
     (record.mode === 'file' || record.mode === 'diff')
 }
 
-/** v2 规范化：过滤非法条目；activeKey 失效 → 回退最后一个 tab 的 key */
+/** 按 tab 单例 key 去重：同 key 只保留一条（保留最后一条），非法/重复记录不产生双 tab */
+function dedupeTabs(tabs: FileTabRecord[]): FileTabRecord[] {
+  const seen = new Map<string, FileTabRecord>()
+  for (const tab of tabs) seen.set(fileTabKey(tab), tab)
+  return [...seen.values()]
+}
+
+/** v2 规范化：过滤非法条目 + 按 key 去重；activeKey 失效 → 回退最后一个 tab 的 key */
 function normalizeFileTabState(parsed: { tabs?: unknown; activeKey?: unknown }): FileTabState {
-  const tabs = Array.isArray(parsed.tabs) ? parsed.tabs.filter(isFileTabRecord) : []
+  const tabs = Array.isArray(parsed.tabs) ? dedupeTabs(parsed.tabs.filter(isFileTabRecord)) : []
   const lastKey = tabs.length > 0 ? fileTabKey(tabs[tabs.length - 1]) : null
   const activeKey = typeof parsed.activeKey === 'string' && tabs.some(tab => fileTabKey(tab) === parsed.activeKey)
     ? parsed.activeKey
@@ -96,9 +103,9 @@ export function parseFileTabs(raw: string | undefined): FileTabState {
   try {
     const parsed: unknown = JSON.parse(raw)
     if (Array.isArray(parsed)) {
-      const tabs = parsed
+      const tabs = dedupeTabs(parsed
         .filter((item): item is string => typeof item === 'string' && item.length > 0)
-        .map(path => ({ path, mode: 'file' as const }))
+        .map(path => ({ path, mode: 'file' as const })))
       return { version: 2, tabs, activeKey: tabs.length > 0 ? fileTabKey(tabs[tabs.length - 1]) : null }
     }
     if (typeof parsed === 'object' && parsed !== null) {

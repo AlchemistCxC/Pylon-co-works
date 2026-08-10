@@ -37,6 +37,38 @@ describe('file/diff tab identity 版本化 schema', () => {
     })
   })
 
+  it('v2 同 key 重复记录只保留一条（保留最后一条，含 staged 差异）', () => {
+    const raw = JSON.stringify({
+      version: 2,
+      tabs: [
+        { path: 'src/a.ts', mode: 'file' },
+        { path: 'src/a.ts', mode: 'diff', staged: true },
+        { path: 'src/a.ts', mode: 'diff', staged: false },
+        { path: 'src/a.ts', mode: 'file' },
+      ],
+      activeKey: 'file:src/a.ts',
+    })
+    expect(parseFileTabs(raw)).toEqual({
+      version: 2,
+      tabs: [
+        { path: 'src/a.ts', mode: 'file' },
+        { path: 'src/a.ts', mode: 'diff', staged: false },
+      ],
+      activeKey: 'file:src/a.ts',
+    })
+  })
+
+  it('v1 数组重复路径按 tab key 去重（只保留一条 file tab）', () => {
+    expect(parseFileTabs('["a.ts","b.ts","a.ts"]')).toEqual({
+      version: 2,
+      tabs: [
+        { path: 'a.ts', mode: 'file' },
+        { path: 'b.ts', mode: 'file' },
+      ],
+      activeKey: 'file:b.ts',
+    })
+  })
+
   it('v1 数组中非字符串条目被过滤', () => {
     expect(parseFileTabs('["a.ts", 42, "", "b.ts"]')).toEqual({
       version: 2,
