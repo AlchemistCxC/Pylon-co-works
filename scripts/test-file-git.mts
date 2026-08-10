@@ -30,10 +30,13 @@ assert.equal(panel.includes("invoke('git_commit'"), false, '不得提供写 Git 
 assert.match(panel, /当前工作区不是 Git 仓库/, '非 git 仓库必须明确错误态')
 assert.match(panel, /if \(!source\) \{[\s\S]*?setStaged\(\[\]\)[\s\S]*?setUnstaged\(\[\]\)[\s\S]*?setHistory\(\[\]\)/, 'source 清空必须重置 Git 状态')
 
-// 3. ViewsPanel：change/diff 入口带 staged 参数；DiffView 继续复用 DiffCard
+// 3. ViewsPanel（ISSUE-08 D-04）：只消费 touchedFiles，不承担 Git/diff 入口（SCM 独占 Git）；DiffView 继续复用 DiffCard
 const viewsPanel = readFileSync(new URL('../src/sheets/file/ViewsPanel.tsx', import.meta.url), 'utf8')
-assert.match(viewsPanel, /onOpenDiff\(entry\.path, entry\.staged\)/, '视图分区点击变更必须带 staged 参数')
-assert.match(viewsPanel, /if \(!source\) \{[\s\S]*?setEntries\(\[\]\)[\s\S]*?setError\(''\)/, 'source 清空必须重置 Views 状态')
+assert.equal(viewsPanel.includes('gitStatus'), false, 'Views 不得调用 git_status')
+assert.equal(viewsPanel.includes('activeDiff'), false, 'Views 不得维护 activeDiff/onOpenDiff')
+assert.equal(viewsPanel.includes('onOpenDiff'), false, 'Views 不得提供 diff 入口')
+assert.match(viewsPanel, /useWorkspaceStore\(s => s\.touchedFiles\)/, 'Views 只消费 touchedFiles')
+assert.match(viewsPanel, /onOpenFile\(file\.path\)/, '触碰文件行点击必须进入普通文件视图')
 const diffView = readFileSync(new URL('../src/sheets/file/DiffView.tsx', import.meta.url), 'utf8')
 assert.match(diffView, /\.gitDiff\(source, path, staged\)/, 'git_diff 必须经 typed client 带 source/path/staged')
 assert.match(diffView, /import DiffCard from '\.\.\/\.\.\/components\/chat\/DiffCard'/, '必须复用 DiffCard（不新造 diff 渲染器）')

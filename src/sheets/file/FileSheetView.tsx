@@ -93,12 +93,7 @@ export default function FileSheetView({ sheet, ctx }: { sheet: SheetRecord; ctx:
           <WorkspaceSearchPanel source={state.targetSource} onOpenResult={openTab} />
         )}
         {state.activeSection === 'views' && (
-          <ViewsPanel
-            source={state.targetSource}
-            activeDiff={activeDiff}
-            onOpenDiff={(path, staged) => setActiveDiff({ path, staged })}
-            onCloseDiff={() => setActiveDiff(null)}
-          />
+          <ViewsPanel source={state.targetSource} onOpenFile={openTab} />
         )}
       </FileSheetSidebar>
       <main className="file-editor">
