@@ -4,7 +4,7 @@ title: 确认 Tauri Webview 新窗口 API 与安全 scheme contract
 type: BE
 owner: A
 mode: longrun-a
-status: planned
+status: review_pending
 priority: P1
 assignee: null
 depends_on: []
