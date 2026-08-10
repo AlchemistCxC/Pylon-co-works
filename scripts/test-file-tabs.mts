@@ -70,7 +70,7 @@ assert.match(host, /内容不完整（truncated）/, 'truncated 状态必须可�
 
 // 4. FileTabView：read invoke 参数带 source/relativePath；md 复用渲染器；代码 highlight+sanitize
 const tabView = readFileSync(new URL('../src/sheets/file/FileTabView.tsx', import.meta.url), 'utf8')
-assert.match(tabView, /\.readText\(source, path\)/, 'read 必须经 typed client 带 source/relativePath')
+assert.match(tabView, /\.readText\(requestSource, requestPath\)/, 'read 必须经 typed client 带 source/relativePath')
 assert.match(tabView, /normalizeWorkspaceText\(raw\)/, 'read 响应必须经 normalize')
 assert.match(tabView, /MarkdownRenderer/, 'md 必须复用导出渲染器')
 assert.equal(tabView.includes('gutter'), true, '代码视图必须带行号 gutter')

@@ -126,9 +126,11 @@ import { readFileSync } from 'node:fs'
   assert.match(store, /touchVersions: Record<string, number>/, '必须持版本戳')
   const tabView = readFileSync(new URL('../src/sheets/file/FileTabView.tsx', import.meta.url), 'utf8')
   assert.match(tabView, /touchVersions\[`\$\{source\}:\$\{path\}`\]/, 'FileTabView 必须订阅版本戳')
-  assert.match(tabView, /window\.setTimeout\(\(\) => loadContent\(true\), 300\)/, '必须 300ms debounce 重拉')
+  assert.match(tabView, /window\.setTimeout\(\(\) => \{/, '版本戳变化必须 debounce 重拉/探针')
+  assert.match(tabView, /}, 300\)/, '必须 300ms debounce')
+  assert.match(tabView, /if \(editing\) probeDisk\(\)\s+else loadContent\(true\)/, 'I08-A-FE-02：编辑中探针不静默覆盖，只读保持重拉')
   assert.match(tabView, /data-changed=\{changedLines\.includes\(index \+ 1\)/, '改动行必须挂 data-changed 高亮')
-  assert.match(tabView, /changedLineNumbers\(previous, text\.content\)/, '重拉必须行级 diff')
+  assert.match(tabView, /changedLineNumbers\(previous, loaded\.text\)/, '重拉必须行级 diff')
 }
 
 console.log('file dispatch 发令消息守卫通过')
