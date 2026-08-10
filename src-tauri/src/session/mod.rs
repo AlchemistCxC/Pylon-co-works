@@ -38,6 +38,8 @@ pub(crate) use expiry::*;
 // 方案 11：会话持久化域搬移至子模块。
 mod persist;
 pub(crate) use persist::*;
+// I06-A-DATA-01：消息仓库域（SQLite 持久化：sessions/messages/send_attempts，D-02/D-17）。
+mod msg_repo;
 
 pub(crate) const MAX_SESSIONS: usize = 100;
 
