@@ -207,9 +207,9 @@ SheetHost main content
 
 | 相关功能 | 验收行为表现 | 验收地址 | 结果 |
 |---|---|---|---|
-| registry 完整性 | 9 种 SheetKind 均显式声明 sidebar mode/capability | `src/workspace-sheets/sheetRegistry.tsx` registry tests | [ ] |
-| 响应式 SheetContext | `sidebarCollapsed` 变化后 active Sheet 立即收到新 ctx，不依赖 `getState()` 旧快照 | `SheetLayout.tsx` component tests | [ ] |
-| 统一宽度 token | titlebar cell、workspace sidebar、Browser/File 内栏使用同一 collapsed width | theme/layout contract tests | [ ] |
+| registry 完整性 | 9 种 SheetKind 均显式声明 sidebar mode/capability | `src/workspace-sheets/sheetRegistry.tsx` registry tests | [x] ✅ `sheetRegistrySidebarMode.test.tsx`（I09-A-FE-01，v1.0.6） |
+| 响应式 SheetContext | `sidebarCollapsed` 变化后 active Sheet 立即收到新 ctx，不依赖 `getState()` 旧快照 | `SheetLayout.tsx` component tests | [x] ✅ `sheetLayoutSidebarCollapsedReactive.test.tsx`（I09-A-FE-01，v1.0.6） |
+| 统一宽度 token | titlebar cell、workspace sidebar、Browser/File 内栏使用同一 collapsed width | theme/layout contract tests | [x] ✅ `themeCssSnapshot.test.ts`（I09-A-FE-01，v1.0.6） |
 
 #### 等级 2：前端网页验收通过（仅限前端）
 
