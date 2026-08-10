@@ -35,6 +35,7 @@
 #### decision_log
 
 - **I08-A-FE-01（2026-08-10）——「同路径 file/diff 共存两 tab」与「Git diff 不是独立 tab」的解释关系**：本卡落地 tab 单例 key = `${mode}:${path}`（同路径 file/diff 并存为两个 tab、不互相覆盖，满足卡 AC-1"同路径 file/diff tab 不互相覆盖"）。这与 D-02"Git diff 不是独立 tab"不冲突：D-02 的根因语义是 Git diff 不得脱离 FileSheet 的 tab strip 与主区宿主成为顶层独立面板（旧实现 `activeDiff` 顶层替换主区、无 tab 归属）；实现中 diff-mode 是统一 `FileViewHost` 内的一种视图模式，与 file 共用 tab strip、路径、状态栏、加载/错误态与快捷键，SCM 打开或聚焦同一文件即切换到该文件的 Git diff 视图（复用已存在的 diff-mode tab 则只更新 staged 范围）。供 L2/L3 验收与后续卡（I08-A-FE-02）参照。
+- **I08-A-FE-02（2026-08-10）——真实编辑/save/working-diff 语义落地（D-03/D-05）**：本卡在 `FileTabView`/`FileViewHost` 内启用真实文本编辑（受控 textarea，与只读视图共用同一文件 tab identity 与状态栏，不另建平行编辑页）。`working-diff` 基线 = 最近一次成功保存（或加载）的磁盘文本，目标 = 当前未保存编辑；`workspaceWrite.ts` 保存时把基线作为 `expectedBaseline` 传给后端 `write_workspace_text`，后端在磁盘文本级做冲突检测（AC-1：磁盘 ≠ 基线 → `Conflict` 拒绝且不写盘），前端冲突条提供「覆盖保存」（force=true 跳过基线）与「重新加载」（丢弃本地编辑）。保存成功更新磁盘基线并推进 `saveAnchorToken` 使编辑锚点对齐；保存失败保留 dirty 与用户编辑。编辑中 agent 工具写入（touchVersion 递增）走探测路径：用户有未保存编辑 → 上报冲突不静默覆盖；无编辑 → 安全刷新。编码/大文件策略：GBK 原编码回写、UTF-8 BOM 保留、`MAX_SAVE_BYTES=256KB` 超限文件保持只读（编辑按钮禁用）且后端二次拒绝。
 
 ### D-03：统一 Diff 渲染能力
 
@@ -183,6 +184,10 @@ FileViewHost
 | versioned tab schema | 旧 `openTabs:string[]` 可迁移为 file-mode tabs；损坏数据回退为空 | `src/sheets/file/fileSheetState.ts` / tab persistence tests | [ ] |
 | file/diff tab identity | 同路径 file/diff 按拍板规则并存或复用，关闭/切换不串 mode | `FileTabBar.tsx`、`FileViewHost` tests | [ ] |
 | SCM diff | SCM 点击变更打开 diff-mode tab，不在顶层替换整个主区 | FileSheet integration tests | [ ] |
+| 真实编辑/保存 | 编辑开关 + 受控 textarea；保存带 expectedBaseline 走基线校验；成功更新磁盘基线、失败保留 dirty | `workspaceWrite.ts` / `FileTabView.edit` / `FileViewHost.save` tests | [✓] I08-A-FE-02 |
+| 外部修改冲突流程 | 外部修改不静默覆盖：保存拒绝出冲突条，覆盖保存（force）/重新加载（丢本地编辑） | `FileViewHost.save` tests + `workspace.rs` write_text 冲突测试 | [✓] I08-A-FE-02 |
+| working-diff | 基线 vs 未保存编辑的 `+N −M` 统计与变更预览面板；保存后基线推进、dirty 清除 | `workingDiff` / `FileViewHost.save` tests | [✓] I08-A-FE-02 |
+| 编码/大文件策略 | GBK 原编码回写、UTF-8 BOM 保留、超 256KB 保持只读不可编辑 | `workspace.rs` write_text 测试 / `FileViewHost.save` truncated 测试 | [✓] I08-A-FE-02 |
 
 #### 等级 2：前端网页验收通过（仅限前端）
 
@@ -199,6 +204,8 @@ FileViewHost
 | 真实 touched file | Agent 实际读/改文件后，Views 出现对应路径，点击打开真实内容 | 真实应用 → Agent 对话 → File Sheet → 视图 | [ ] |
 | 真实 Git diff | SCM 读取真实仓库 status/history，diff tab 内容与命令行 Git 一致 | 真实应用 → File Sheet → SCM；目标仓库 | [ ] |
 | source 切换 | 切换会话后 SCM/Views/tab 不显示旧工作区数据 | 真实应用 → File Sheet | [ ] |
+| 真实编辑/保存 | 真实文件编辑保存后磁盘内容更新、dirty 清除；GBK/BOM 回归无乱码 | 真实应用 → File Sheet → 编辑/保存（handoff I08-A-FE-02 L3 步骤 1/3） | [ ] 待开阳 |
+| 真实冲突流程 | 外部程序改文件后保存被拒、冲突条覆盖/重新加载生效；agent 工具写入不静默覆盖用户编辑 | 真实应用 → File Sheet → 编辑 + 外部修改（handoff I08-A-FE-02 L3 步骤 2/4） | [ ] 待开阳 |
 
 ## 施工日志
 
