@@ -9,6 +9,9 @@ use std::time::UNIX_EPOCH;
 pub const DEFAULT_PREVIEW_BYTES: usize = 256 * 1024;
 pub const MAX_PREVIEW_BYTES: usize = 1024 * 1024;
 pub const MAX_DIRECTORY_ENTRIES: usize = 1000;
+/// I08-A-FE-02：可编辑保存的文件大小上限——与 DEFAULT_PREVIEW_BYTES 一致：
+/// 能完整预览（未 truncated）的文本文件才可编辑保存；更大的文件保持只读。
+pub const MAX_SAVE_BYTES: usize = DEFAULT_PREVIEW_BYTES;
 
 /// R5b：Display/Error 改 thiserror derive（与手写 impl 文案逐字一致——
 /// 每个变体输出 `code: message`，`Io` 变体**保留原行为**：内部 String 不参与
@@ -31,6 +34,12 @@ pub enum WorkspaceError {
     BinaryFile,
     #[error("too_many_entries: 目录条目超过限制")]
     TooManyEntries,
+    /// I08-A-FE-02：保存基线冲突——磁盘内容已在基线之后被外部修改，拒绝静默覆盖。
+    #[error("conflict: 磁盘文件已被外部修改，保存已拒绝")]
+    Conflict,
+    /// I08-A-FE-02：文件过大，编辑保存超出安全上限（保持只读）。
+    #[error("too_large: 文件过大，无法编辑保存")]
+    TooLarge,
     #[error("io_error: 工作区 I/O 操作失败")]
     Io(String),
 }
@@ -323,6 +332,105 @@ fn decode_text(bytes: &[u8]) -> Result<(String, &'static str), WorkspaceError> {
         return Err(WorkspaceError::BinaryFile);
     }
     Ok((text.into_owned(), "gbk"))
+}
+
+// ── I08-A-FE-02：真实编辑/save vertical slice（write_text，AC-1）──────────────
+// 保存语义：
+// - 目标必须已存在（保存 = 覆盖已打开的文件），目录目标拒绝。
+// - expected_baseline（前端"最近一次成功保存/加载的文本"）与磁盘当前解码文本不一致
+//   → Conflict，绝不静默覆盖外部修改；force=true 显式跳过（冲突流程的"覆盖保存"）。
+// - 编码 round-trip：UTF-8 BOM 保留；GBK 文件按 GBK 重新编码写回（不悄悄转码）。
+// - > MAX_SAVE_BYTES 的文件/内容拒绝（TooLarge）——大文件本轮保持只读。
+
+/// 原子写：同目录临时文件 + rename。Windows rename 不覆盖已存在目标时先移除
+/// 再重命名（小窗口，基线冲突守卫已在前置）；失败清理临时文件。
+fn write_atomic(path: &Path, bytes: &[u8]) -> Result<(), WorkspaceError> {
+    let parent = path.parent().ok_or_else(|| WorkspaceError::Io("无法定位文件目录".into()))?;
+    let file_name = path
+        .file_name()
+        .map(|name| name.to_string_lossy().into_owned())
+        .unwrap_or_default();
+    let tmp = parent.join(format!(".{file_name}.pylon-save-{}", std::process::id()));
+    fs::write(&tmp, bytes).map_err(|e| WorkspaceError::Io(e.to_string()))?;
+    match fs::rename(&tmp, path) {
+        Ok(()) => Ok(()),
+        Err(first)
+            if first.kind() == std::io::ErrorKind::AlreadyExists
+                || first.kind() == std::io::ErrorKind::PermissionDenied =>
+        {
+            fs::remove_file(path).map_err(|e| WorkspaceError::Io(e.to_string()))?;
+            if let Err(e) = fs::rename(&tmp, path) {
+                let _ = fs::remove_file(&tmp);
+                return Err(WorkspaceError::Io(e.to_string()));
+            }
+            Ok(())
+        }
+        Err(first) => {
+            let _ = fs::remove_file(&tmp);
+            Err(WorkspaceError::Io(first.to_string()))
+        }
+    }
+}
+
+pub fn write_text(
+    root: &Path,
+    relative: &str,
+    content: &str,
+    expected_baseline: Option<&str>,
+    force: bool,
+) -> Result<WorkspaceTextPreview, WorkspaceError> {
+    let relative = normalize_relative(relative)?;
+    let canonical_root = root.canonicalize().map_err(|e| {
+        if e.kind() == std::io::ErrorKind::NotFound {
+            WorkspaceError::NotFound
+        } else {
+            WorkspaceError::NotReadable
+        }
+    })?;
+    let target = canonical_root.join(&relative);
+    if !target.exists() {
+        return Err(WorkspaceError::NotFound);
+    }
+    if target.is_dir() {
+        return Err(WorkspaceError::NotFile);
+    }
+    if content.len() > MAX_SAVE_BYTES {
+        return Err(WorkspaceError::TooLarge);
+    }
+    let bytes = fs::read(&target).map_err(|e| WorkspaceError::Io(e.to_string()))?;
+    if bytes.len() > MAX_SAVE_BYTES {
+        return Err(WorkspaceError::TooLarge);
+    }
+    // 编码 round-trip：记录磁盘原文的 BOM 与解码编码，写回时保持一致
+    let had_bom = bytes.starts_with(b"\xEF\xBB\xBF");
+    let (disk_text, encoding) = decode_text(&bytes)?;
+    if !force {
+        if let Some(expected) = expected_baseline {
+            if disk_text != expected {
+                return Err(WorkspaceError::Conflict);
+            }
+        }
+    }
+    let out_bytes: Vec<u8> = if encoding == "gbk" {
+        let (encoded, _, had_errors) = encoding_rs::GBK.encode(content);
+        if had_errors {
+            return Err(WorkspaceError::Io(
+                "内容包含无法以 GBK 编码保存的字符".to_string(),
+            ));
+        }
+        encoded.into_owned()
+    } else {
+        let mut out = Vec::with_capacity(content.len() + 3);
+        if had_bom {
+            out.extend_from_slice(b"\xEF\xBB\xBF");
+        }
+        out.extend_from_slice(content.as_bytes());
+        out
+    };
+    write_atomic(&target, &out_bytes)?;
+    // 返回保存后的新 preview：前端以此作为下一次保存的新基线
+    let relative_str = relative.to_string_lossy().into_owned();
+    read_text(root, &relative_str, None)
 }
 
 // ── workspace_search（后端施工计划书 Phase 1 §3）────────────────────────────
@@ -840,6 +948,170 @@ mod tests {
         assert_eq!(
             WorkspaceError::Io("detail".into()).to_string(),
             "io_error: 工作区 I/O 操作失败"
+        );
+        // I08-A-FE-02：保存域错误码文案锁定（前端按 conflict/too_large 分类）
+        assert_eq!(
+            WorkspaceError::Conflict.to_string(),
+            "conflict: 磁盘文件已被外部修改，保存已拒绝"
+        );
+        assert_eq!(
+            WorkspaceError::TooLarge.to_string(),
+            "too_large: 文件过大，无法编辑保存"
+        );
+    }
+
+    // ── I08-A-FE-02：真实编辑/save vertical slice（write_text L1 证据，AC-1）──
+    // 契约：write_text(root, relative, content, expected_baseline, force)
+    // - 保存成功更新磁盘内容并返回新 preview（前端以此作新基线）
+    // - expected_baseline 与磁盘当前文本不一致 → Conflict（外部修改不得被静默覆盖）
+    // - force=true 显式跳过基线检查（冲突流程的"覆盖保存"）
+    // - BOM/GBK 编码 round-trip；> MAX_SAVE_BYTES 拒绝（大文件保持只读）
+
+    #[test]
+    fn write_text_round_trips_content_and_returns_preview() {
+        let (_dir, root) = fixture();
+        fs::write(root.join("src/main.ts"), "const a = 1\n").unwrap();
+        let preview = write_text(
+            &root,
+            "src/main.ts",
+            "const a = 2\nconst b = 3\n",
+            Some("const a = 1\n"),
+            false,
+        )
+        .unwrap();
+        assert_eq!(preview.content, "const a = 2\nconst b = 3\n");
+        assert!(!preview.truncated);
+        assert_eq!(preview.relative_path, "src/main.ts");
+        let on_disk = fs::read_to_string(root.join("src/main.ts")).unwrap();
+        assert_eq!(on_disk, "const a = 2\nconst b = 3\n", "保存必须真实写盘");
+    }
+
+    #[test]
+    fn write_text_preserves_utf8_bom() {
+        let (_dir, root) = fixture();
+        fs::write(root.join("bom.ts"), b"\xEF\xBB\xBFhello\n").unwrap();
+        write_text(&root, "bom.ts", "hello world\n", Some("hello\n"), false).unwrap();
+        let bytes = fs::read(root.join("bom.ts")).unwrap();
+        assert!(
+            bytes.starts_with(b"\xEF\xBB\xBF"),
+            "UTF-8 BOM 文件保存后必须保留 BOM"
+        );
+        let preview = read_text(&root, "bom.ts", None).unwrap();
+        assert_eq!(preview.content, "hello world\n");
+        assert_eq!(preview.encoding, "utf-8");
+    }
+
+    #[test]
+    fn write_text_round_trips_gbk_encoding() {
+        let (_dir, root) = fixture();
+        let gbk = [0xD6, 0xD0, 0xCE, 0xC4, 0xB2, 0xE2, 0xCA, 0xD4, 0x0A]; // "中文测试\n"（GBK）
+        fs::write(root.join("gbk.txt"), gbk).unwrap();
+        write_text(&root, "gbk.txt", "新内容\n", Some("中文测试\n"), false).unwrap();
+        let preview = read_text(&root, "gbk.txt", None).unwrap();
+        assert_eq!(preview.content, "新内容\n");
+        assert_eq!(
+            preview.encoding, "gbk",
+            "GBK 文件保存后必须仍以 GBK 编码写盘（不悄悄转 UTF-8）"
+        );
+    }
+
+    #[test]
+    fn write_text_rejects_traversal_and_absolute_paths() {
+        let (_dir, root) = fixture();
+        assert_eq!(
+            write_text(&root, "../secret", "x", Some("x"), false),
+            Err(WorkspaceError::TraversalRejected)
+        );
+        assert_eq!(
+            write_text(&root, "C:\\Windows\\win.ini", "x", Some("x"), false),
+            Err(WorkspaceError::AbsolutePathRejected)
+        );
+        assert_eq!(
+            write_text(&root, "a\0b.txt", "x", Some("x"), false),
+            Err(WorkspaceError::AbsolutePathRejected)
+        );
+    }
+
+    #[test]
+    fn write_text_missing_file_returns_not_found() {
+        let (_dir, root) = fixture();
+        assert_eq!(
+            write_text(&root, "nope.txt", "x", Some("x"), false),
+            Err(WorkspaceError::NotFound)
+        );
+    }
+
+    #[test]
+    fn write_text_directory_target_returns_not_file() {
+        let (_dir, root) = fixture();
+        fs::create_dir(root.join("adir")).unwrap();
+        assert_eq!(
+            write_text(&root, "adir", "x", Some("x"), false),
+            Err(WorkspaceError::NotFile)
+        );
+    }
+
+    #[test]
+    fn write_text_detects_external_modification_conflict_without_writing() {
+        let (_dir, root) = fixture();
+        fs::write(root.join("a.txt"), "v1\n").unwrap();
+        // 磁盘内容已在基线之后被外部程序修改
+        fs::write(root.join("a.txt"), "external change\n").unwrap();
+        let error = write_text(&root, "a.txt", "user edit\n", Some("v1\n"), false)
+            .expect_err("基线不匹配必须进入冲突流程");
+        assert_eq!(error, WorkspaceError::Conflict);
+        assert_eq!(
+            fs::read_to_string(root.join("a.txt")).unwrap(),
+            "external change\n",
+            "冲突时不得静默覆盖磁盘内容"
+        );
+    }
+
+    #[test]
+    fn write_text_force_overwrites_despite_conflict() {
+        let (_dir, root) = fixture();
+        fs::write(root.join("a.txt"), "external change\n").unwrap();
+        let preview = write_text(
+            &root,
+            "a.txt",
+            "user overwrite\n",
+            Some("old baseline\n"),
+            true,
+        )
+        .unwrap();
+        assert_eq!(preview.content, "user overwrite\n");
+        assert_eq!(
+            fs::read_to_string(root.join("a.txt")).unwrap(),
+            "user overwrite\n"
+        );
+    }
+
+    #[test]
+    fn write_text_without_baseline_skips_conflict_check() {
+        let (_dir, root) = fixture();
+        fs::write(root.join("a.txt"), "whatever\n").unwrap();
+        let preview = write_text(&root, "a.txt", "saved\n", None, false).unwrap();
+        assert_eq!(preview.content, "saved\n");
+    }
+
+    #[test]
+    fn write_text_rejects_oversized_content() {
+        let (_dir, root) = fixture();
+        fs::write(root.join("big.txt"), "small\n").unwrap();
+        let huge = "x".repeat(MAX_SAVE_BYTES + 1);
+        assert_eq!(
+            write_text(&root, "big.txt", &huge, Some("small\n"), false),
+            Err(WorkspaceError::TooLarge)
+        );
+    }
+
+    #[test]
+    fn write_text_rejects_oversized_existing_file() {
+        let (_dir, root) = fixture();
+        fs::write(root.join("big.txt"), "x".repeat(MAX_SAVE_BYTES + 1)).unwrap();
+        assert_eq!(
+            write_text(&root, "big.txt", "y", Some("y"), false),
+            Err(WorkspaceError::TooLarge)
         );
     }
 }

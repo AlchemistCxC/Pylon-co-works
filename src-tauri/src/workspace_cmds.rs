@@ -48,6 +48,31 @@ pub(crate) async fn read_workspace_text(
         .map_err(|e| PylonError::Workspace(e.to_string()))
 }
 
+/// I08-A-FE-02：真实编辑保存——写入工作区文本文件。
+/// source 经 workspace_root_for_source 解析（I08-A-BE-01 一致性 guard 同链）；
+/// expected_baseline（前端最近一次成功保存/加载的文本）与磁盘不一致 → conflict；
+/// force=true 显式跳过基线检查（冲突流程的"覆盖保存"）。
+#[tauri::command]
+pub(crate) async fn write_workspace_text(
+    state: tauri::State<'_, AppState>,
+    source: String,
+    relative_path: String,
+    content: String,
+    expected_baseline: Option<String>,
+    force: Option<bool>,
+) -> Result<workspace::WorkspaceTextPreview, PylonError> {
+    let runtime = state.inner().require_runtime()?;
+    let root = state.inner().workspace_root_for_source(&runtime, &source)?;
+    workspace::write_text(
+        std::path::Path::new(&root),
+        &relative_path,
+        &content,
+        expected_baseline.as_deref(),
+        force.unwrap_or(false),
+    )
+    .map_err(|e| PylonError::Workspace(e.to_string()))
+}
+
 /// Phase 1：工作区全文行匹配（后端施工计划书 §3）。
 /// source 绑定 runtime 会话（workspace_root_for_source，缺失 session_not_found）；
 /// 同步遍历放 spawn_blocking（意见稿 §2.1：大文件扫描不得阻塞 async 运行时）；
