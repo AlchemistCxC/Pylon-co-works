@@ -45,13 +45,28 @@ import { fileTabKey, parseFileTabs, serializeFileTabs, languageFromPath } from '
   assert.equal(languageFromPath('x.rs'), 'rust')
 }
 
-// 3. FileSheetView：metadata openTabs（v2 版本化 tab 记录）/activeFile 组合 action + truncated + close 行为
+// 3. FileSheetView：metadata openTabs（v2 版本化 tab 记录）/activeFile 组合 action + close 行为
 const view = readFileSync(new URL('../src/sheets/file/FileSheetView.tsx', import.meta.url), 'utf8')
-assert.match(view, /patchSheetMetadata\(sheet\.id, \{ openTabs: serializeOpenTabs\(next\), activeFile: path \}\)/, '打开 tab 必须原子合并 metadata')
-assert.match(view, /patchSheetMetadata\(sheet\.id, \{ activeFile: path \}\)/, '切 tab 必须写 activeFile')
-assert.match(view, /parseOpenTabs\(sheet\.metadata\?\.openTabs\)/, 'openTabs 必须从 metadata 恢复')
-assert.match(view, /内容不完整（truncated）/, 'truncated 状态必须可读')
-assert.match(view, /closeTab = \(path: string\) =>/, '必须支持关闭 tab')
+assert.match(view, /parseFileTabs\(sheet\.metadata\?\.openTabs\)/, 'openTabs 必须经版本化解析从 metadata 恢复')
+assert.match(view, /serializeFileTabs\(\{ version: 2, tabs, activeKey \}\)/, '打开/关闭 tab 必须写版本化 openTabs')
+assert.match(view, /persistTabs\(next, fileTabKey\(\{ path, mode: 'file' \}\)\)/, '文件 tab 单例 key = file:{path}')
+assert.match(view, /persistTabs\(next, fileTabKey\(\{ path, mode: 'diff' \}\)\)/, 'SCM diff tab 单例 key = diff:{path}（不覆盖同路径 file tab）')
+assert.match(view, /closeTab = \(key: string\) =>/, '必须支持按 key 关闭 tab')
+assert.match(view, /<FileViewHost source=\{state\.targetSource\} tab=\{activeTab\} onCloseTab=\{closeTab\} \/>/, '主区必须经 FileViewHost 统一渲染 file/diff')
+
+// 3b. FileTabBar：key 区分 path+mode；diff 带 mode 标记；选中按 key 判定
+const tabBar = readFileSync(new URL('../src/sheets/file/FileTabBar.tsx', import.meta.url), 'utf8')
+assert.match(tabBar, /const key = fileTabKey\(tab\)/, 'tab React key 必须区分 path+mode')
+assert.match(tabBar, /key=\{key\}/, 'tab React key 必须用 mode 区分 key')
+assert.match(tabBar, /file-tab-diff/, 'diff tab 必须带 mode 标记')
+assert.match(tabBar, /aria-selected=\{activeKey === key\}/, '选中态必须按 key 判定')
+
+// 3c. FileViewHost：按 mode 统一渲染 file/diff；diff 复用 DiffView；truncated 可读
+const host = readFileSync(new URL('../src/sheets/file/FileViewHost.tsx', import.meta.url), 'utf8')
+assert.match(host, /tab\.mode === 'diff'/, 'diff 分支按 mode 渲染')
+assert.match(host, /<DiffView\n\s+source=\{source\}\n\s+path=\{tab\.path\}\n\s+staged=\{tab\.staged \?\? false\}/, 'diff 经 DiffView 复用渲染（带 staged 兜底）')
+assert.match(host, /<FileTabView/, 'file 分支复用 FileTabView')
+assert.match(host, /内容不完整（truncated）/, 'truncated 状态必须可读')
 
 // 4. FileTabView：read invoke 参数带 source/relativePath；md 复用渲染器；代码 highlight+sanitize
 const tabView = readFileSync(new URL('../src/sheets/file/FileTabView.tsx', import.meta.url), 'utf8')

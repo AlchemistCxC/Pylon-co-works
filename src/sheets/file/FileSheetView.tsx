@@ -1,80 +1,82 @@
-import { useEffect, useMemo, useReducer, useState } from 'react'
+import { useMemo, useReducer, useState } from 'react'
 import { useWorkspaceStore } from '../../workspaceStore'
-import { createFileSheetState, fileSheetReducer, parseOpenTabs, resetFileSheetTransientState, serializeOpenTabs, type FileSheetSection } from './fileSheetState.ts'
-import type { DispatchSelection } from '../../domains/fileDispatch/dispatchMessage.ts'
+import { createFileSheetState, fileSheetReducer, fileTabKey, parseFileTabs, serializeFileTabs, type FileSheetSection, type FileTabRecord } from './fileSheetState.ts'
 import FileSheetSidebar from './FileSheetSidebar'
 import FileTree from './FileTree'
 import FileTabBar from './FileTabBar'
-import FileTabView from './FileTabView'
+import FileViewHost from './FileViewHost'
 import GitPanel from './GitPanel'
-import DiffView from './DiffView'
 import WorkspaceSearchPanel from './WorkspaceSearchPanel'
-import DispatchBar from './DispatchBar'
 import ViewsPanel from './ViewsPanel'
 import type { SheetContext, SheetRecord } from '../../workspace-sheets/sheetTypes'
 import './FileSheet.css'
 
 /**
- * FileSheetView — FileSheet 主视图（W2-03/04，D-08 VS Code 风格改造）。
+ * FileSheetView — FileSheet 主视图（W2-03/04，D-08 VS Code 风格改造；ISSUE-08 D-02/D-04）。
  *
  * singletonKey = file:{初始 source}（同工作区复用）；内部 targetSource 本地态。
- * metadata 承载 openTabs（JSON 串）/activeFile/truncated（W2-04 组合 action
- * patchSheetMetadata 原子合并、损坏 JSON normalize 为空）。
- * 布局（D-08）：左栏=活动栏 + 分区内容（文件树/SCM/搜索，随分区切换）；
- * 主区=恒定文件视图（tab 条 + 编辑器 + 发令栏），SCM 打开 diff 时主区显示 diff。
+ * metadata 承载 openTabs（版本化 tab 记录 `{version:2,tabs:[{path,mode,staged?}],activeKey}`，
+ * v1 openTabs:string[] 在 parseFileTabs 内迁移为 file-mode tabs、损坏 normalize 为空）
+ * 与 activeFile（右栏 FileContextPanel 反查关联会话）。
+ * 布局（D-08）：左栏=活动栏 + 分区内容（文件树/SCM/搜索/视图，随分区切换）；
+ * 主区=恒定 tab 条 + FileViewHost 统一渲染（文件视图 / SCM diff / 空态）。
+ * SCM 点击变更 → openDiffTab（diff-mode tab，同路径 file/diff 不互相覆盖）。
  */
 export default function FileSheetView({ sheet, ctx }: { sheet: SheetRecord; ctx: SheetContext }) {
   const initialSource = sheet.singletonKey?.replace(/^file:/, '') ?? ctx.sessionSource(ctx.activeSession)
   const [state, dispatch] = useReducer(fileSheetReducer, initialSource ?? null, createFileSheetState)
+  const [sidebarCollapsed, setSidebarCollapsed] = useState(false)
   const patchSheetMetadata = useWorkspaceStore(s => s.patchSheetMetadata)
 
-  // metadata 容错：损坏 JSON → 空（不清整个 persistence）
-  const openTabs = useMemo(() => parseOpenTabs(sheet.metadata?.openTabs), [sheet.metadata?.openTabs])
-  const activeFile = sheet.metadata?.activeFile ?? null
-  const [truncated, setTruncated] = useState(false)
-  const [activeDiff, setActiveDiff] = useState<{ path: string; staged: boolean } | null>(null)
-  const [sidebarCollapsed, setSidebarCollapsed] = useState(false)
-  const [instruction, setInstruction] = useState('')
-  const [selection, setSelection] = useState<DispatchSelection | null>(null)
-  const [fileContent, setFileContent] = useState('')
-  const lineCount = fileContent ? fileContent.split('\n').length : 0
-  const selectionLabel = selection
-    ? selection.startLine === selection.endLine
-      ? `L${selection.startLine}`
-      : `L${selection.startLine}–L${selection.endLine}`
-    : null
+  // 版本化 tab 从 metadata 恢复（损坏 → 空；v1 → file-mode tabs）
+  const tabsState = useMemo(() => parseFileTabs(sheet.metadata?.openTabs), [sheet.metadata?.openTabs])
+  const activeTab = useMemo(() => {
+    if (tabsState.activeKey) {
+      const active = tabsState.tabs.find(tab => fileTabKey(tab) === tabsState.activeKey)
+      if (active) return active
+    }
+    return tabsState.tabs[tabsState.tabs.length - 1] ?? null
+  }, [tabsState])
+
+  const persistTabs = (tabs: FileTabRecord[], activeKey: string | null) => {
+    const activeFile = tabs.find(tab => fileTabKey(tab) === activeKey)?.path
+    const fallback = tabs.length > 0 ? tabs[tabs.length - 1].path : ''
+    patchSheetMetadata(sheet.id, {
+      openTabs: serializeFileTabs({ version: 2, tabs, activeKey }),
+      activeFile: activeFile ?? fallback,
+    })
+  }
+
+  const openFileTab = (path: string) => {
+    const next = tabsState.tabs.some(tab => tab.mode === 'file' && tab.path === path)
+      ? tabsState.tabs
+      : [...tabsState.tabs, { path, mode: 'file' as const }]
+    persistTabs(next, fileTabKey({ path, mode: 'file' }))
+  }
+
+  const openDiffTab = (path: string, staged: boolean) => {
+    const index = tabsState.tabs.findIndex(tab => tab.mode === 'diff' && tab.path === path)
+    const next = index >= 0
+      ? tabsState.tabs.map((tab, i) => (i === index ? { ...tab, staged } : tab))
+      : [...tabsState.tabs, { path, mode: 'diff' as const, staged }]
+    persistTabs(next, fileTabKey({ path, mode: 'diff' }))
+  }
+
+  const selectTab = (key: string) => {
+    if (!tabsState.tabs.some(tab => fileTabKey(tab) === key)) return
+    persistTabs(tabsState.tabs, key)
+  }
+
+  const closeTab = (key: string) => {
+    const remaining = tabsState.tabs.filter(tab => fileTabKey(tab) !== key)
+    const activeKey = tabsState.activeKey === key
+      ? (remaining.length > 0 ? fileTabKey(remaining[remaining.length - 1]) : null)
+      : tabsState.activeKey
+    persistTabs(remaining, activeKey)
+  }
 
   const selectSection = (section: FileSheetSection) => dispatch({ type: 'set-section', section })
   const selectSource = (source: string | null) => dispatch({ type: 'set-source', source })
-
-  useEffect(() => {
-    if (state.targetSource !== null) return
-    const cleared = resetFileSheetTransientState()
-    setActiveDiff(cleared.activeDiff)
-    setTruncated(cleared.truncated)
-    setSelection(null)
-    setFileContent(cleared.fileContent)
-    setInstruction(cleared.instruction)
-  }, [state.targetSource])
-
-  const openTab = (path: string) => {
-    const next = openTabs.includes(path) ? openTabs : [...openTabs, path]
-    patchSheetMetadata(sheet.id, { openTabs: serializeOpenTabs(next), activeFile: path })
-    setTruncated(false)
-  }
-  const selectTab = (path: string) => {
-    patchSheetMetadata(sheet.id, { activeFile: path })
-    setTruncated(false)
-  }
-  const closeTab = (path: string) => {
-    const next = openTabs.filter(tab => tab !== path)
-    const nextActive = activeFile === path ? (next[next.length - 1] ?? null) : activeFile
-    patchSheetMetadata(sheet.id, {
-      openTabs: serializeOpenTabs(next),
-      ...(nextActive ? { activeFile: nextActive } : {}),
-    })
-    if (!nextActive) setTruncated(false)
-  }
 
   return (
     <div className="file-sheet">
@@ -87,58 +89,18 @@ export default function FileSheetView({ sheet, ctx }: { sheet: SheetRecord; ctx:
         onSelectSource={selectSource}
         onCollapse={() => setSidebarCollapsed(value => !value)}
       >
-        {state.activeSection === 'files' && <FileTree source={state.targetSource} activeFile={activeFile} onOpen={openTab} />}
-        {state.activeSection === 'scm' && <GitPanel source={state.targetSource} onOpenDiff={(path, staged) => setActiveDiff({ path, staged })} />}
+        {state.activeSection === 'files' && <FileTree source={state.targetSource} activeFile={activeTab?.path ?? null} onOpen={openFileTab} />}
+        {state.activeSection === 'scm' && <GitPanel source={state.targetSource} onOpenDiff={openDiffTab} />}
         {state.activeSection === 'search' && (
-          <WorkspaceSearchPanel source={state.targetSource} onOpenResult={openTab} />
+          <WorkspaceSearchPanel source={state.targetSource} onOpenResult={openFileTab} />
         )}
         {state.activeSection === 'views' && (
-          <ViewsPanel source={state.targetSource} onOpenFile={openTab} />
+          <ViewsPanel source={state.targetSource} onOpenFile={openFileTab} />
         )}
       </FileSheetSidebar>
       <main className="file-editor">
-        <FileTabBar openTabs={openTabs} activeFile={activeFile} onSelect={selectTab} onClose={closeTab} />
-        {(state.activeSection === 'views' || state.activeSection === 'scm') && activeDiff ? (
-          <DiffView source={state.targetSource} path={activeDiff.path} staged={activeDiff.staged} onClose={() => setActiveDiff(null)} />
-        ) : activeFile ? (
-          <>
-            <DispatchBar
-              targetSource={state.targetSource}
-              filePath={activeFile}
-              selection={selection}
-              content={fileContent}
-              instruction={instruction}
-              onInstructionChange={setInstruction}
-              onSelectionChange={setSelection}
-              onClearSelection={() => setSelection(null)}
-            />
-            {truncated && <div className="file-truncated-hint" role="status">内容不完整（truncated）</div>}
-            <FileTabView
-              source={state.targetSource}
-              path={activeFile}
-              onTruncated={setTruncated}
-              onContentReady={setFileContent}
-              onSelectionInvalidated={() => setSelection(null)}
-            />
-            <div className="file-status-bar" role="status" aria-live="polite">
-              <span className="file-status-path" title={activeFile}>{activeFile}</span>
-              <span>{lineCount} 行</span>
-              <span className={selectionLabel ? 'file-status-selection active' : 'file-status-selection'}>
-                {selectionLabel ? `已选择 ${selectionLabel}` : '拖选代码以回传会话'}
-              </span>
-              <span>{state.targetSource || '未指向会话'}</span>
-            </div>
-          </>
-        ) : (
-          <div className="file-tab-empty">
-            <div className="file-empty-card">
-              <div className="file-empty-mark" aria-hidden="true">{'</>'}</div>
-              <strong>打开一个文件开始阅读</strong>
-              <span>从左侧文件树选择文件，或切换到 SCM 查看改动。</span>
-              <span className="file-empty-shortcut">选中文本后，可在下方发令栏发送给当前会话</span>
-            </div>
-          </div>
-        )}
+        <FileTabBar tabs={tabsState.tabs} activeKey={tabsState.activeKey} onSelect={selectTab} onClose={closeTab} />
+        <FileViewHost source={state.targetSource} tab={activeTab} onCloseTab={closeTab} />
       </main>
     </div>
   )

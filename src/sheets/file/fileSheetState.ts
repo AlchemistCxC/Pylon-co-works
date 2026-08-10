@@ -24,7 +24,6 @@ export function createFileSheetState(source: string | null): FileSheetState {
 
 export function resetFileSheetTransientState() {
   return {
-    activeDiff: null as { path: string; staged: boolean } | null,
     truncated: false,
     instruction: '',
     fileContent: '',
@@ -59,22 +58,6 @@ export interface FileTabState {
 }
 
 export const EMPTY_FILE_TAB_STATE: FileTabState = { version: 2, tabs: [], activeKey: null }
-
-// ── 已弃用：v1 openTabs:string[] 编解码，仅保留至 FileSheetView 迁移到版本化 tab（临时，勿新增消费） ──
-export function serializeOpenTabs(paths: readonly string[]): string {
-  return JSON.stringify(paths)
-}
-
-/** 宽容解析：损坏 JSON/非数组 → 空 */
-export function parseOpenTabs(raw: string | undefined): string[] {
-  if (!raw) return []
-  try {
-    const parsed: unknown = JSON.parse(raw)
-    return Array.isArray(parsed) ? parsed.filter((item): item is string => typeof item === 'string') : []
-  } catch {
-    return []
-  }
-}
 
 /** tab 单例 key：mode 参与 identity——同路径 file/diff 不互相覆盖 */
 export function fileTabKey(tab: Pick<FileTabRecord, 'path' | 'mode'>): string {

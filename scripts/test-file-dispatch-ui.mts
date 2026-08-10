@@ -43,9 +43,9 @@ const tabView = readFileSync(new URL('../src/sheets/file/FileTabView.tsx', impor
 assert.match(tabView, /data-line=\{index \+ 1\}/, '代码行必须带 1-based data-line')
 assert.match(tabView, /onContentReady\?\.\(text\.content\)/, '内容必须回传（组装消息用）')
 
-// 5. FileSheetView 接线：DispatchBar 在代码区上方
-const view = readFileSync(new URL('../src/sheets/file/FileSheetView.tsx', import.meta.url), 'utf8')
-assert.match(view, /<DispatchBar/, 'FileSheetView 必须挂 DispatchBar')
-assert.match(view, /onClearSelection=\{\(\) => setSelection\(null\)\}/, '✕ 清选区')
+// 5. FileViewHost 接线：DispatchBar 在代码区上方（FileSheetView 统一经 FileViewHost 渲染）
+const host = readFileSync(new URL('../src/sheets/file/FileViewHost.tsx', import.meta.url), 'utf8')
+assert.match(host, /<DispatchBar/, 'FileViewHost 必须挂 DispatchBar')
+assert.match(host, /onClearSelection=\{\(\) => setSelection\(null\)\}/, '✕ 清选区')
 
 console.log('file dispatch UI 守卫通过')

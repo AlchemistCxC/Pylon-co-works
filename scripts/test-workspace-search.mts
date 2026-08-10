@@ -42,7 +42,7 @@ assert.equal(panel.includes("invoke('read_workspace_text'"), false, '不得用�
 // 4. FileSheetView 搜索分区接线（D-08 VS Code 布局：搜索内容在左栏）：结果打开 tab
 const view = readFileSync(new URL('../src/sheets/file/FileSheetView.tsx', import.meta.url), 'utf8')
 assert.match(view, /state\.activeSection === 'search' && \(/, '搜索分区必须接线（左栏）')
-assert.match(view, /<WorkspaceSearchPanel source=\{state\.targetSource\} onOpenResult=\{openTab\} \/>/, '结果点击必须打开 tab')
-assert.match(view, /<FileTree source=\{state\.targetSource\} activeFile=\{activeFile\} onOpen=\{openTab\} \/>/, '文件树必须接当前 source 与 activeFile（左栏）')
+assert.match(view, /<WorkspaceSearchPanel source=\{state\.targetSource\} onOpenResult=\{openFileTab\} \/>/, '结果点击必须打开 tab')
+assert.match(view, /<FileTree source=\{state\.targetSource\} activeFile=\{activeTab\?\.path \?\? null\} onOpen=\{openFileTab\} \/>/, '文件树必须接当前 source 与 activeFile（左栏）')
 
 console.log('workspace search（桩化）守卫通过')
