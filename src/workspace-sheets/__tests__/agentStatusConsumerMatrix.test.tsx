@@ -118,6 +118,7 @@ describe('全消费方一致性（ISSUE-03 §6.4 L1：Settings、titlebar、Shee
           activeSheetId="peri-sheet"
           activeAgent="peri"
           sidebarCollapsed={false}
+          sidebarEnabled={false}
           canReopenSheet={false}
         />,
       )
@@ -136,6 +137,7 @@ describe('全消费方一致性（ISSUE-03 §6.4 L1：Settings、titlebar、Shee
           activeSheetId="peri-sheet"
           activeAgent="peri"
           sidebarCollapsed={false}
+          sidebarEnabled={false}
           canReopenSheet={false}
         />,
       )
