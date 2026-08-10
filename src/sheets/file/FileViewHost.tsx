@@ -87,6 +87,10 @@ export default function FileViewHost({ source, tab, onCloseTab }: {
         setSaveState('saved')
         setSaveAnchor(anchor => anchor + 1)
         setSelection(null)
+      } else {
+        // 响应损坏（normalize 为 null）：不卡 saving，置 error 态并可重试
+        setSaveError('保存响应异常，请重试')
+        setSaveState('error')
       }
     } catch (err) {
       const detail = classifySaveError(err)

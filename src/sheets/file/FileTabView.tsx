@@ -44,6 +44,10 @@ export default function FileTabView({ source, path, editing, onTruncated, onCont
   const contentRef = useRef('')
   const diskRef = useRef<string | null>(null)
   const saveAnchorRef = useRef<number>(0)
+  // 编辑模式 ref：touchVersion 重载 effect 不依赖 editing（否则切编辑模式重跑 effect，
+  // 退出编辑会 300ms 后 loadContent 静默覆盖未保存修改、重进编辑会误报冲突）
+  const editingRef = useRef(false)
+  useEffect(() => { editingRef.current = editing === true }, [editing])
   // W2-09：版本戳订阅——agent 工具改动该文件时递增，触发 300ms debounce 重拉
   const touchVersion = useWorkspaceStore(s => (source && path) ? s.touchVersions[`${source}:${path}`] : undefined)
 
@@ -90,6 +94,8 @@ export default function FileTabView({ source, path, editing, onTruncated, onCont
     fetchText(source, path).then(loaded => {
       if (!loaded || !isCurrentSourceRequest(requestContext.current, token) || requestPath !== path) return
       if (loaded.text === contentRef.current) return
+      // 磁盘内容与上次锚点一致 → 无外部修改：保留未保存编辑，不误报冲突
+      if (loaded.text === diskRef.current) return
       if (diskRef.current === contentRef.current) {
         // 无用户编辑：刷新显示到磁盘（不产生冲突）
         setContent(loaded.text)
@@ -119,16 +125,18 @@ export default function FileTabView({ source, path, editing, onTruncated, onCont
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [source, path])
 
-  // W2-09：版本戳变化 → 300ms debounce；编辑中改走探测（不静默覆盖），只读保持重拉
+  // W2-09：版本戳变化 → 300ms debounce；编辑中改走探测（不静默覆盖），只读保持重拉。
+  // 依赖不含 editing（否则切编辑模式重跑 effect → 退出编辑静默覆盖未保存修改、重进编辑误报冲突）；
+  // 定时器回调内读 editingRef 取最新编辑态，且 contentRef !== diskRef（存在未保存编辑）时也走探测路径。
   useEffect(() => {
     if (touchVersion === undefined || !source || !path) return
     const timer = window.setTimeout(() => {
-      if (editing) probeDisk()
+      if (editingRef.current || contentRef.current !== diskRef.current) probeDisk()
       else loadContent(true)
     }, 300)
     return () => window.clearTimeout(timer)
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [touchVersion, source, path, editing])
+  }, [touchVersion, source, path])
 
   // I08-A-FE-02：保存成功/覆盖/重新加载后磁盘锚点推进 → 重拉对齐（changedLines 归零、内容与磁盘一致）
   useEffect(() => {

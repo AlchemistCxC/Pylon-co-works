@@ -127,6 +127,35 @@ describe('FileTabView 编辑器模式（I08-A-FE-02）', () => {
     expect(onContentReady).toHaveBeenCalledWith('const x = 2')
   })
 
+  it('退出编辑模式不静默覆盖未保存修改：touchVersion 已定义时退出编辑，磁盘内容不得替换未保存编辑', async () => {
+    const onExternalChange = vi.fn()
+    const onContentReady = vi.fn()
+    const { rerender } = renderEditor({ editing: true, onExternalChange, onContentReady })
+    await waitFor(() => textareaOf())
+    fireEvent.change(textareaOf(), { target: { value: 'const x = 999' } })
+    // agent 已触碰（touchVersion 定义）；磁盘仍为 'const x = 1'
+    useWorkspaceStore.setState({ touchVersions: { 'ws-a:src/a.ts': 7 } })
+    // 退出编辑：旧实现因 editing 在 effect 依赖里重跑 → 300ms 后 loadContent 静默覆盖
+    rerender(<FileTabView source="ws-a" path="src/a.ts" onTruncated={vi.fn()} onContentReady={onContentReady} onExternalChange={onExternalChange} />)
+    await new Promise(resolve => setTimeout(resolve, 400))
+    expect(screen.getByText('const x = 999')).toBeTruthy()
+    expect(onExternalChange).not.toHaveBeenCalled()
+  })
+
+  it('带未保存内容重进编辑模式不误报冲突：touchVersion 已定义且磁盘未变，probeDisk 不触发 onExternalChange', async () => {
+    const onExternalChange = vi.fn()
+    const { rerender } = renderEditor({ editing: true, onExternalChange })
+    await waitFor(() => textareaOf())
+    fireEvent.change(textareaOf(), { target: { value: 'const x = 999' } })
+    useWorkspaceStore.setState({ touchVersions: { 'ws-a:src/a.ts': 7 } })
+    // 退出编辑 → 重新进入编辑模式
+    rerender(<FileTabView source="ws-a" path="src/a.ts" onTruncated={vi.fn()} onContentReady={vi.fn()} />)
+    rerender(<FileTabView source="ws-a" path="src/a.ts" onTruncated={vi.fn()} onContentReady={vi.fn()} editing onExternalChange={onExternalChange} />)
+    await new Promise(resolve => setTimeout(resolve, 400))
+    expect(onExternalChange).not.toHaveBeenCalled()
+    expect(textareaOf().value).toBe('const x = 999')
+  })
+
   it('saveAnchorToken 递增 → 重拉磁盘对齐（保存后的磁盘锚点推进）', async () => {
     const onContentReady = vi.fn()
     const { rerender } = renderEditor({ editing: true, onContentReady })

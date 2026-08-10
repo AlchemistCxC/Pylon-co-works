@@ -156,6 +156,22 @@ describe('FileViewHost 真实编辑/save/working-diff（I08-A-FE-02）', () => {
     expect(textarea.value).toBe('const x = 2')
   })
 
+  it('保存响应损坏（normalize 为 null）→ 置 error 态并给通用文案，可重试（不卡 saving）', async () => {
+    invoke.mockImplementation((cmd: string) => {
+      if (cmd === 'read_workspace_text') return Promise.resolve(readTextResult('const x = 1'))
+      if (cmd === 'write_workspace_text') return Promise.resolve({ nope: true }) // 损坏 DTO → normalizeWorkspaceText 返回 null
+      return Promise.reject(new Error(`unexpected invoke ${cmd}`))
+    })
+    render(<FileViewHost source="ws-a" tab={fileTab} onCloseTab={vi.fn()} />)
+    await screen.findByText('const x = 1')
+    editAndType()
+    fireEvent.click(screen.getByRole('button', { name: '保存' }))
+    await screen.findByText('保存响应异常，请重试')
+    const saveBtn = screen.getByRole('button', { name: '保存' }) as HTMLButtonElement
+    expect(saveBtn.disabled).toBe(false)
+    expect(screen.queryByText('保存中…')).toBeNull()
+  })
+
   it('tab 切换重置编辑瞬态（退出编辑、dirty 清除、保存态归 idle）', async () => {
     const { rerender } = render(<FileViewHost source="ws-a" tab={fileTab} onCloseTab={vi.fn()} />)
     await screen.findByText('const x = 1')
