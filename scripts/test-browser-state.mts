@@ -41,7 +41,7 @@ assert.equal(view.includes("invoke('cdp"), false, '不得虚构 CDP 命令名')
 assert.match(view, /浏览器 WebView 命令不可用|WebView2 子进程由 Browser Sheet 生命周期管理/, '必须明确 WebView 生命周期状态')
 assert.match(view, /browserReducer, undefined, createBrowserState/, '必须经纯状态机')
 const registry = readFileSync(new URL('../src/workspace-sheets/sheetRegistry.tsx', import.meta.url), 'utf8')
-assert.match(registry, /browser: \{ render: lazyRender\(BrowserSheetView\) \}/, 'registry browser 必须渲染')
+assert.match(registry, /browser: \{ render: lazyRender\(BrowserSheetView\), sidebarMode: 'sheet' \}/, 'registry browser 必须渲染（sheet 内栏显式声明）')
 
 console.log('browser state 守卫通过')
 // ── W4-04（桩化）：启动调用点 + 命令缺失 blocked ──

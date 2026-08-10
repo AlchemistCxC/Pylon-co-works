@@ -112,6 +112,6 @@ assert.equal(sheet.includes('setEntries(previous => mergeRuntimeLogs(previous, m
 
 // 6. registry runtime 条目渲染 RuntimeSheetView
 const registry = readFileSync(new URL('../src/workspace-sheets/sheetRegistry.tsx', import.meta.url), 'utf8')
-assert.match(registry, /runtime: \{ render: lazyRender\(RuntimeSheetView\) \}/, 'registry runtime 必须渲染 RuntimeSheetView')
+assert.match(registry, /runtime: \{ render: lazyRender\(RuntimeSheetView\), sidebarMode: 'none' \}/, 'registry runtime 必须渲染 RuntimeSheetView（无侧栏显式声明）')
 
 console.log('runtime sheet 守卫通过')

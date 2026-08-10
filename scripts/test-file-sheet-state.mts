@@ -56,6 +56,6 @@ assert.match(sidebar, /48px Activity Bar/, '分区栏必须保持 48px 窄条')
 
 // 6. registry file 条目渲染 FileSheetView
 const registry = readFileSync(new URL('../src/workspace-sheets/sheetRegistry.tsx', import.meta.url), 'utf8')
-assert.match(registry, /file: \{ render: lazyRender\(FileSheetView\), rightPanel: FileContextPanel \}/, 'registry file 必须渲染 FileSheetView + 右栏（W2-12）')
+assert.match(registry, /file: \{ render: lazyRender\(FileSheetView\), sidebarMode: 'sheet', rightPanel: FileContextPanel \}/, 'registry file 必须渲染 FileSheetView + 右栏（W2-12，sheet 内栏显式声明）')
 
 console.log('file sheet state 守卫通过')

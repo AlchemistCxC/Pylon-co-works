@@ -35,6 +35,6 @@ assert.match(layout, /VIRTUAL_OVERVIEW_SHEET/, '空态用虚拟 overview sheet�
 assert.match(layout, /overviewEntry\.render\(VIRTUAL_OVERVIEW_SHEET, ctx\)/, '空态必须渲染 overview 而非占位空态')
 
 // 5. registry overview 条目渲染 OverviewSheetView
-assert.match(registry, /overview: \{ render: \(sheet, ctx\) => <OverviewSheetView sheet=\{sheet\} ctx=\{ctx\} \/> \}/, 'registry overview 必须渲染 OverviewSheetView')
+assert.match(registry, /overview: \{ render: \(sheet, ctx\) => <OverviewSheetView sheet=\{sheet\} ctx=\{ctx\} \/\>, sidebarMode: 'none' \}/, 'registry overview 必须渲染 OverviewSheetView（无侧栏显式声明）')
 
 console.log('overview sheet 空态接管守卫通过')
