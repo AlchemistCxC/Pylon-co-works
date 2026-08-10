@@ -40,6 +40,8 @@ mod persist;
 pub(crate) use persist::*;
 // I06-A-DATA-01：消息仓库域（SQLite 持久化：sessions/messages/send_attempts，D-02/D-17）。
 mod msg_repo;
+// I13-A-FE-02：消息历史保留策略契约（模式/档位/默认值/回退语义；不含删除逻辑）。
+mod retention;
 
 pub(crate) const MAX_SESSIONS: usize = 100;
 
