@@ -2570,7 +2570,7 @@ dependencies = [
 
 [[package]]
 name = "pylon"
-version = "1.0.6"
+version = "1.0.7"
 dependencies = [
  "agent-client-protocol-schema",
  "backon",

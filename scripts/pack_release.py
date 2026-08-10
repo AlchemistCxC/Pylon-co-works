@@ -1,4 +1,4 @@
-"""Pylon release 打包：exe + resources 全部必要组件 → pylon-1.0.6-win64.zip。
+"""Pylon release 打包：exe + resources 全部必要组件 → pylon-1.0.7-win64.zip。
 
 路径显式解析（不依赖调用方 cwd）：脚本自身位于 <repo>/scripts/，
 release 产物位于 <repo>/src-tauri/target/release/。
@@ -9,7 +9,7 @@ import zipfile
 SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
 REPO_DIR = os.path.dirname(SCRIPT_DIR)
 RELEASE_DIR = os.path.join(REPO_DIR, "src-tauri", "target", "release")
-OUT_ZIP = os.path.join(REPO_DIR, "pylon-1.0.6-win64.zip")
+OUT_ZIP = os.path.join(REPO_DIR, "pylon-1.0.7-win64.zip")
 
 EXE = "pylon.exe"
 
