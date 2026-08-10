@@ -1,0 +1,141 @@
+// @vitest-environment jsdom
+import { describe, expect, it, vi, beforeEach } from 'vitest'
+import { render, screen, fireEvent, waitFor } from '@testing-library/react'
+import FileTabView from '../FileTabView'
+import { useWorkspaceStore } from '../../../workspaceStore'
+import { resetStores } from '../../../test/resetStores'
+
+// I08-A-FE-02：编辑器模式——textarea 受控编辑、选区行号上报、dirty 感知的
+// touchVersion 重载（不静默覆盖用户编辑，冲突经 onExternalChange 上报）。
+
+const { invoke } = vi.hoisted(() => ({ invoke: vi.fn() }))
+vi.mock('@tauri-apps/api/core', () => ({ invoke }))
+vi.mock('../../../components/chat/codeHighlight', () => ({ highlightCode: vi.fn().mockResolvedValue(null) }))
+
+function readTextResult(content: string) {
+  return { relativePath: 'src/a.ts', content, bytesRead: content.length, totalBytes: content.length, truncated: false }
+}
+
+function renderEditor(props: Record<string, unknown> = {}) {
+  return render(
+    <FileTabView
+      source="ws-a"
+      path="src/a.ts"
+      onTruncated={vi.fn()}
+      onContentReady={vi.fn()}
+      editing={false}
+      {...props}
+    />,
+  )
+}
+
+function textareaOf(): HTMLTextAreaElement {
+  return document.querySelector('.file-edit-textarea') as HTMLTextAreaElement
+}
+
+describe('FileTabView 编辑器模式（I08-A-FE-02）', () => {
+  beforeEach(() => {
+    resetStores()
+    localStorage.clear()
+    invoke.mockReset()
+    invoke.mockImplementation((cmd: string, args: { relativePath?: string } | undefined) => {
+      if (cmd === 'read_workspace_text') {
+        const content = args?.relativePath === 'other.ts' ? 'const other = 9' : 'const x = 1'
+        return Promise.resolve(readTextResult(content))
+      }
+      return Promise.reject(new Error(`unexpected invoke ${cmd}`))
+    })
+  })
+
+  it('editing=true → 受控 textarea 承载已加载内容，输入经 onContentChange 上报（不改文件）', async () => {
+    const onContentChange = vi.fn()
+    renderEditor({ editing: true, onContentChange })
+    const textarea = await waitFor(() => textareaOf())
+    expect(textarea.value).toBe('const x = 1')
+    fireEvent.change(textarea, { target: { value: 'const x = 2' } })
+    expect(onContentChange).toHaveBeenCalledWith('const x = 2')
+    expect(textarea.value).toBe('const x = 2')
+    expect(invoke).not.toHaveBeenCalledWith('write_workspace_text', expect.anything())
+  })
+
+  it('editing=false → 只读视图（无 textarea）', async () => {
+    renderEditor({ editing: false })
+    await screen.findByText('const x = 1')
+    expect(document.querySelector('.file-edit-textarea')).toBeNull()
+  })
+
+  it('textarea 选区 → onSelectionChange 报 1-based 行号区间', async () => {
+    invoke.mockImplementation((cmd: string) => {
+      if (cmd === 'read_workspace_text') return Promise.resolve(readTextResult('a\nb\nc\nd'))
+      return Promise.reject(new Error(`unexpected invoke ${cmd}`))
+    })
+    const onSelectionChange = vi.fn()
+    renderEditor({ editing: true, onSelectionChange })
+    const textarea = await waitFor(() => textareaOf())
+    textarea.selectionStart = 2
+    textarea.selectionEnd = 6
+    fireEvent.select(textarea)
+    expect(onSelectionChange).toHaveBeenCalledWith({ startLine: 2, endLine: 4 })
+  })
+
+  it('编辑中 touchVersion 递增且磁盘 ≠ 编辑内容 → onExternalChange 上报，编辑内容不被覆盖', async () => {
+    const onExternalChange = vi.fn()
+    const onContentChange = vi.fn()
+    const { rerender } = renderEditor({ editing: true, onExternalChange, onContentChange })
+    await waitFor(() => textareaOf())
+    // 用户编辑
+    fireEvent.change(textareaOf(), { target: { value: 'const x = 999' } })
+    expect(onContentChange).toHaveBeenCalledWith('const x = 999')
+    // agent 工具写入同文件 → touchVersion 递增 → 磁盘变为 'const x = 2'
+    invoke.mockImplementation((cmd: string) => {
+      if (cmd === 'read_workspace_text') return Promise.resolve(readTextResult('const x = 2'))
+      return Promise.reject(new Error(`unexpected invoke ${cmd}`))
+    })
+    useWorkspaceStore.setState({ touchVersions: { 'ws-a:src/a.ts': 7 } })
+    rerender(<FileTabView source="ws-a" path="src/a.ts" onTruncated={vi.fn()} onContentReady={vi.fn()} editing onExternalChange={onExternalChange} onContentChange={onContentChange} />)
+    await waitFor(() => expect(onExternalChange).toHaveBeenCalled())
+    expect(textareaOf().value).toBe('const x = 999')
+  })
+
+  it('编辑中 touchVersion 递增但用户未改 → 内容安全刷新到磁盘', async () => {
+    const onExternalChange = vi.fn()
+    const onContentReady = vi.fn()
+    const { rerender } = renderEditor({ editing: true, onExternalChange, onContentReady })
+    await waitFor(() => textareaOf())
+    invoke.mockImplementation((cmd: string) => {
+      if (cmd === 'read_workspace_text') return Promise.resolve(readTextResult('const x = 2'))
+      return Promise.reject(new Error(`unexpected invoke ${cmd}`))
+    })
+    useWorkspaceStore.setState({ touchVersions: { 'ws-a:src/a.ts': 7 } })
+    rerender(<FileTabView source="ws-a" path="src/a.ts" onTruncated={vi.fn()} onContentReady={onContentReady} editing onExternalChange={onExternalChange} />)
+    await waitFor(() => expect(textareaOf().value).toBe('const x = 2'))
+    expect(onExternalChange).not.toHaveBeenCalled()
+    expect(onContentReady).toHaveBeenCalledWith('const x = 2')
+  })
+
+  it('只读模式 touchVersion 递增 → 保持 W2-09 重拉语义（内容替换 + onContentReady）', async () => {
+    const onContentReady = vi.fn()
+    const { rerender } = renderEditor({ editing: false, onContentReady })
+    await screen.findByText('const x = 1')
+    invoke.mockImplementation((cmd: string) => {
+      if (cmd === 'read_workspace_text') return Promise.resolve(readTextResult('const x = 2'))
+      return Promise.reject(new Error(`unexpected invoke ${cmd}`))
+    })
+    useWorkspaceStore.setState({ touchVersions: { 'ws-a:src/a.ts': 7 } })
+    rerender(<FileTabView source="ws-a" path="src/a.ts" onTruncated={vi.fn()} onContentReady={onContentReady} />)
+    await waitFor(() => expect(screen.getByText('const x = 2')).toBeTruthy())
+    expect(onContentReady).toHaveBeenCalledWith('const x = 2')
+  })
+
+  it('saveAnchorToken 递增 → 重拉磁盘对齐（保存后的磁盘锚点推进）', async () => {
+    const onContentReady = vi.fn()
+    const { rerender } = renderEditor({ editing: true, onContentReady })
+    await waitFor(() => textareaOf())
+    invoke.mockImplementation((cmd: string) => {
+      if (cmd === 'read_workspace_text') return Promise.resolve(readTextResult('const x = 3'))
+      return Promise.reject(new Error(`unexpected invoke ${cmd}`))
+    })
+    rerender(<FileTabView source="ws-a" path="src/a.ts" onTruncated={vi.fn()} onContentReady={onContentReady} editing saveAnchorToken={1} />)
+    await waitFor(() => expect(textareaOf().value).toBe('const x = 3'))
+  })
+})
