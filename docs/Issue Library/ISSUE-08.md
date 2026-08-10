@@ -32,6 +32,10 @@
 
 实施方案成熟度：**已有领域方案，当前源码 `openTabs:string[]` 的 versioned migration 尚未设计。**
 
+#### decision_log
+
+- **I08-A-FE-01（2026-08-10）——「同路径 file/diff 共存两 tab」与「Git diff 不是独立 tab」的解释关系**：本卡落地 tab 单例 key = `${mode}:${path}`（同路径 file/diff 并存为两个 tab、不互相覆盖，满足卡 AC-1"同路径 file/diff tab 不互相覆盖"）。这与 D-02"Git diff 不是独立 tab"不冲突：D-02 的根因语义是 Git diff 不得脱离 FileSheet 的 tab strip 与主区宿主成为顶层独立面板（旧实现 `activeDiff` 顶层替换主区、无 tab 归属）；实现中 diff-mode 是统一 `FileViewHost` 内的一种视图模式，与 file 共用 tab strip、路径、状态栏、加载/错误态与快捷键，SCM 打开或聚焦同一文件即切换到该文件的 Git diff 视图（复用已存在的 diff-mode tab 则只更新 staged 范围）。供 L2/L3 验收与后续卡（I08-A-FE-02）参照。
+
 ### D-03：统一 Diff 渲染能力
 
 - Diff 布局采用自动模式：宽度足够时左右对比，窄窗口使用 inline。
