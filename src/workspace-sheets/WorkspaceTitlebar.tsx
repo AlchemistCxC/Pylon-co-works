@@ -12,6 +12,8 @@ interface WorkspaceTitlebarProps {
   activeSheetId: string | null
   activeAgent: string
   sidebarCollapsed: boolean
+  /** I09-A-FE-01（方案 B）：active Sheet 是否有侧栏能力——无侧栏禁用折叠按钮（titlebar 第一列固定 42px 控制区） */
+  sidebarEnabled: boolean
   canReopenSheet: boolean
   onToggleSidebar: () => void
   onFocusSheet: (id: string) => void
@@ -32,6 +34,7 @@ export default function WorkspaceTitlebar({
   activeSheetId,
   activeAgent,
   sidebarCollapsed,
+  sidebarEnabled,
   canReopenSheet,
   onToggleSidebar,
   onFocusSheet,
@@ -50,6 +53,10 @@ export default function WorkspaceTitlebar({
   const agentStatuses = useRuntimeStore(s => s.agentStatuses)
   const activeStatus = selectAgentStatus(activeAgent, activeAgent, agentStatuses)
   const showTabBar = useStore(s => s.showTabBar !== false)
+  // I09-A-FE-01（方案 B）：无侧栏 Sheet 折叠按钮禁用（不生成可操作按钮），titlebar 第一列 42px 控制区
+  const sidebarToggleLabel = !sidebarEnabled
+    ? '当前 Sheet 无侧栏'
+    : sidebarCollapsed ? '展开左栏' : '收起左栏'
   return (
     <header className={`workspace-titlebar ${sidebarCollapsed ? 'sidebar-collapsed' : ''}`} data-tauri-drag-region>
       <div className="workspace-titlebar-sidebar" data-tauri-drag-region>
@@ -57,8 +64,9 @@ export default function WorkspaceTitlebar({
           type="button"
           className="workspace-titlebar-icon workspace-sidebar-toggle"
           onClick={onToggleSidebar}
-          title={sidebarCollapsed ? '展开左栏' : '收起左栏'}
-          aria-label={sidebarCollapsed ? '展开左栏' : '收起左栏'}
+          disabled={!sidebarEnabled}
+          title={sidebarToggleLabel}
+          aria-label={sidebarToggleLabel}
         >
           <span aria-hidden="true">☰</span>
         </button>

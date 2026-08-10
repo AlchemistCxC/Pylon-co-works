@@ -257,6 +257,7 @@ export default function App() {
         activeSheetId={workspaceSheets.activeSheetId}
         activeAgent={activeAgent}
         sidebarCollapsed={sidebarCollapsed}
+        sidebarEnabled={sidebarEnabled}
         canReopenSheet={workspaceSheets.recentlyClosed.length > 0}
         onToggleSidebar={() => useWorkspaceStore.getState().setSidebarCollapsed(!useWorkspaceStore.getState().sidebarCollapsed)}
         onFocusSheet={id => useWorkspaceStore.getState().focusSheet(id)}
