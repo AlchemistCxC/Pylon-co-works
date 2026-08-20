@@ -44,6 +44,37 @@ describe('bootstrapApplication', () => {
     expect(deps.setStatus).toHaveBeenLastCalledWith('degraded', expect.any(String))
   })
 
+  it('必需 Agent sink 不可用时进入可重试 degraded，而不是卡在 loading', async () => {
+    const error = Object.assign(new Error('必需插件服务不可用'), {
+      code: 'plugin_service_unavailable',
+    })
+    const { deps, calls } = createDeps({ applyAgents: () => { throw error } })
+
+    expect(await bootstrapApplication(deps)).toBe('degraded')
+    expect(calls).toEqual(['hydrate', 'fetch'])
+    expect(deps.reportError).toHaveBeenCalledWith('应用 Agent 列表', error)
+    expect(deps.setStatus).toHaveBeenLastCalledWith('degraded', 'Agent 插件服务不可用')
+  })
+
+  it('sink implementation failure is degraded without being mislabeled unavailable', async () => {
+    const { deps } = createDeps({ applyAgents: () => { throw new Error('projection rejected') } })
+
+    expect(await bootstrapApplication(deps)).toBe('degraded')
+    expect(deps.setStatus).toHaveBeenLastCalledWith('degraded', '应用 Agent 列表失败')
+  })
+
+  it('字典已读取但必需 dictionary sink 不可用时进入可重试 degraded', async () => {
+    const error = Object.assign(new Error('必需插件服务不可用'), {
+      code: 'plugin_service_unavailable',
+    })
+    const { deps, calls } = createDeps({ applyToolDictionary: () => { throw error } })
+
+    expect(await bootstrapApplication(deps)).toBe('degraded')
+    expect(calls).toEqual(['hydrate', 'fetch', 'apply:1'])
+    expect(deps.reportError).toHaveBeenCalledWith('应用工具归一化字典', error)
+    expect(deps.setStatus).toHaveBeenLastCalledWith('degraded', '工具字典插件服务不可用')
+  })
+
   it('hydrateDomains 抛错 → degraded（单域损坏不拖垮全局）', async () => {
     const { deps } = createDeps({ hydrateDomains: () => { throw new Error('corrupt storage') } })
     expect(await bootstrapApplication(deps)).toBe('degraded')

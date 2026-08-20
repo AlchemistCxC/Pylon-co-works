@@ -1,4 +1,4 @@
-import type { AgentEntry } from '../../identityStore.ts'
+import type { AgentEntry } from './agentEntry.ts'
 import type {
   AgentDescriptor,
   AgentInstanceDescriptor,

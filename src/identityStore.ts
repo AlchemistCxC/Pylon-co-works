@@ -18,6 +18,9 @@ import { registerPluginSessionDataPort } from './plugin-runtime/sessionData/sess
 import { getSessionCreationRegistry } from './plugin-runtime/runtimeServices.ts'
 import { compileSessionCreationSnapshot } from './plugin-runtime/session-creation/compileSessionCreationSnapshot.ts'
 import type { SessionCreationSnapshot } from './plugin-runtime/session-creation/sessionCreationTypes.ts'
+import type { AgentEntry } from './domains/agent/agentEntry.ts'
+
+export type { AgentEntry } from './domains/agent/agentEntry.ts'
 
 /**
  * identityStore — 身份与会话状态域（阶段 1：store 按域拆分）。
@@ -79,26 +82,6 @@ export interface UserMapping {
   id: string
   name: string
   avatar?: string
-}
-
-export interface AgentEntry {
-  id: string
-  name: string
-  /** 协议/实现类别；与配置实例 id 分离。旧后端缺字段时保留 undefined。 */
-  provider?: string
-  /** 施工文档 §4.2：list_agents 扩充字段（结构化表单/状态展示）。 */
-  transport?: string
-  exe?: string
-  /** 用户可编辑的原始进程参数；始终保持数组边界。 */
-  args?: string[]
-  /** 后端按 AgentDef::command_args() 计算的真实启动参数。 */
-  effectiveArgs?: string[]
-  default?: boolean
-  active?: boolean
-  available?: boolean
-  crashed?: boolean
-  cwd?: string
-  configActivationState?: 'stored' | 'pendingRestart' | 'activated'
 }
 
 /**

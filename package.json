@@ -6,7 +6,7 @@
   "scripts": {
     "dev": "vite",
     "build": "tsc -b && vite build",
-    "check:solid": "tsc -p tsconfig.solid.json && node scripts/check-solid-workbench-boundaries.mjs && node --experimental-strip-types scripts/check-workbench-theme-contract.mts",
+    "check:solid": "tsc -p tsconfig.solid.json && node scripts/check-solid-workbench-boundaries.mjs && node --experimental-strip-types scripts/check-workbench-theme-contract.mts && node --experimental-strip-types scripts/check-product-contribution-boundary.mts",
     "build:solid-smoke": "vite build --config vite.solid-smoke.config.ts && node scripts/check-solid-smoke-build.mjs",
     "preview": "vite preview",
     "tauri": "tauri",

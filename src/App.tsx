@@ -34,9 +34,16 @@ import { useHydrationStore } from './app/bootstrap/hydrationState'
 import PermissionDialog from './components/PermissionDialog'
 import ErrorCenter from './components/ErrorCenter'
 import SessionOwnerRecoveryDialog from './components/SessionOwnerRecoveryDialog'
-import { applyPylonAgentInstances } from './plugins/product/builtinPylonAgentAdapters'
-import { applyPylonToolDictionary } from './plugins/product/builtinPylonTools'
-import { getContextPanelRegistry, getFontContributionRegistry, getInterfaceModeRegistry } from './plugin-runtime/runtimeServices.ts'
+import {
+  applyAgentInstancesThroughPort,
+  applyToolDictionaryThroughPort,
+} from './app/ports/productContributionPorts.ts'
+import {
+  getContextPanelRegistry,
+  getFontContributionRegistry,
+  getInterfaceModeRegistry,
+  getPluginServiceRegistry,
+} from './plugin-runtime/runtimeServices.ts'
 import { projectFontContributions } from './infrastructure/fonts/fontProjection.ts'
 import { getWorkspaceRegistrySnapshot, subscribeWorkspaceRegistry } from './workspace-sheets/workspaceRegistry.ts'
 import { activateInterfaceMode, ensureInterfaceModeProfile, interfaceModeQuickTarget } from './application/transactions/activateInterfaceMode.ts'
@@ -169,11 +176,11 @@ export default function App() {
       },
       fetchAgents: () => agentClient.listAgents(),
       applyAgents: list => {
-        applyPylonAgentInstances(list)
+        applyAgentInstancesThroughPort(getPluginServiceRegistry(), list)
         useIdentityStore.getState().setAgents(list)
       },
       fetchToolDictionary: () => agentClient.listToolDictionary(),
-      applyToolDictionary: payload => applyPylonToolDictionary(payload),
+      applyToolDictionary: payload => applyToolDictionaryThroughPort(getPluginServiceRegistry(), payload),
       // 冷启动 Agent 状态快照（方案 A）：listener 注册前先查询一次初始状态，
       // 避免 titlebar 状态灯/发送能力 gate 因初始状态缺失而全灰/禁用。
       fetchAgentStatus: () => agentClient.agentStatus(),

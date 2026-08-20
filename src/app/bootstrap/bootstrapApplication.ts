@@ -9,6 +9,13 @@
 import type { AgentEntry } from '../../identityStore'
 import type { HydrationStatus } from './hydrationState'
 
+function isPluginServiceUnavailable(error: unknown): boolean {
+  return typeof error === 'object'
+    && error !== null
+    && 'code' in error
+    && error.code === 'plugin_service_unavailable'
+}
+
 export type BootstrapResult = 'ready' | 'degraded' | 'fatal' | 'cancelled'
 
 export interface BootstrapDeps {
@@ -63,17 +70,38 @@ export async function bootstrapApplication(deps: BootstrapDeps): Promise<Bootstr
     return 'degraded'
   }
   if (deps.cancelled()) return 'cancelled'
-  deps.applyAgents(agents)
+  try {
+    deps.applyAgents(agents)
+  } catch (error) {
+    deps.reportError('应用 Agent 列表', error)
+    deps.setStatus('degraded', isPluginServiceUnavailable(error)
+      ? 'Agent 插件服务不可用'
+      : '应用 Agent 列表失败')
+    return 'degraded'
+  }
 
   // 工具归一化字典：后端下发的字典覆盖前端内置注册项；读取失败不降级
   // （保留前端 builtin fallback，后续 reload 可重试）。
   if (deps.fetchToolDictionary && deps.applyToolDictionary) {
+    let dictionary: unknown
+    let dictionaryLoaded = false
     try {
-      const dictionary = await deps.fetchToolDictionary()
+      dictionary = await deps.fetchToolDictionary()
+      dictionaryLoaded = true
       if (deps.cancelled()) return 'cancelled'
-      deps.applyToolDictionary(dictionary)
     } catch (error) {
       deps.reportError('读取工具归一化字典', error)
+    }
+    if (dictionaryLoaded) {
+      try {
+        deps.applyToolDictionary(dictionary)
+      } catch (error) {
+        deps.reportError('应用工具归一化字典', error)
+        deps.setStatus('degraded', isPluginServiceUnavailable(error)
+          ? '工具字典插件服务不可用'
+          : '应用工具归一化字典失败')
+        return 'degraded'
+      }
     }
   }
 

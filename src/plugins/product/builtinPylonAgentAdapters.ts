@@ -1,4 +1,4 @@
-import type { AgentEntry } from '../../identityStore.ts'
+import type { AgentEntry } from '../../domains/agent/agentEntry.ts'
 import {
   replaceAgentInstances,
   registerAgentDescriptor,
@@ -11,6 +11,10 @@ import { createSharedLogicalActivation } from './sharedLogicalActivation.ts'
 import { BUILTIN_PYLON_AGENT_ADAPTERS_ID } from './productPluginIds.ts'
 import { BUILTIN_AGENT_DETECTORS } from '../../domains/agent/agentDetector.ts'
 import { registerBuiltinSessionCreationContributions } from '../core/sessionCreation/builtinSessionCreation.ts'
+import {
+  AGENT_INSTANCE_SINK_ID,
+  type AgentInstanceSink,
+} from '../../app/ports/productContributionPorts.ts'
 
 let latestAgentEntries: readonly AgentEntry[] = Object.freeze([])
 let active = false
@@ -25,6 +29,7 @@ const bindAgentAdapters = createSharedLogicalActivation(
   },
   () => {
     active = false
+    replaceAgentInstances([])
     for (const descriptor of BUILTIN_AGENT_DESCRIPTORS) {
       unregisterAgentDescriptorProvider(descriptor.provider)
     }
@@ -50,6 +55,11 @@ export function createBuiltinPylonAgentAdaptersPlugin(): BuiltinPluginDefinition
         'session-state',
         BUILTIN_SESSION_STATE_SYNC_PROVIDER.providerId,
         BUILTIN_SESSION_STATE_SYNC_PROVIDER,
+      )
+      services.register<AgentInstanceSink>(
+        'agent-instance-sink',
+        AGENT_INSTANCE_SINK_ID,
+        Object.freeze({ apply: applyPylonAgentInstances }),
       )
       for (const detector of BUILTIN_AGENT_DETECTORS) services.register('agent-detector', detector.id, detector)
     },

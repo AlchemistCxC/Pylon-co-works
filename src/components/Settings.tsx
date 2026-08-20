@@ -12,7 +12,7 @@ import { ZoneGroupFields } from '../themeFieldRenderer'
 import { useStore } from '../store'
 import { useIdentityStore } from '../identityStore'
 import { useRuntimeStore } from '../runtimeStore'
-import { applyPylonToolDictionary } from '../plugins/product/builtinPylonTools'
+import { applyToolDictionaryThroughPort } from '../app/ports/productContributionPorts.ts'
 import { useShallow } from 'zustand/react/shallow'
 import type { ThemeSettings } from '../store'
 import { GLOBAL_PRESETS, pickZoneFields } from '../presets'
@@ -34,7 +34,7 @@ import PluginManager from './settings/PluginManager'
 import PresentationProfilePicker from './settings/PresentationProfilePicker'
 import PluginSettingsPageHost from './settings/PluginSettingsPageHost'
 import InterfaceModePicker from './settings/InterfaceModePicker.tsx'
-import { getPluginSettingsPageRegistry } from '../plugin-runtime/runtimeServices.ts'
+import { getPluginServiceRegistry, getPluginSettingsPageRegistry } from '../plugin-runtime/runtimeServices.ts'
 import { loadRetentionPolicyPayload, syncImportedRetentionPolicy } from '../retentionPolicyRepository'
 import { resolveToolIndicatorAsset, toolIndicatorOptions } from './chat/toolIndicatorAssets'
 import Select from './ui/Select.tsx'
@@ -374,7 +374,7 @@ export default function Settings({ onClose, activeSessionId, initialDomain, init
       const list = await agentClient.listAgents()
       useIdentityStore.getState().setAgents(list)
       const dictionary = await agentClient.listToolDictionary()
-      applyPylonToolDictionary(dictionary)
+      applyToolDictionaryThroughPort(getPluginServiceRegistry(), dictionary)
       const providerCount = Object.keys(dictionary as Record<string, unknown> ?? {}).length
       setDictFeedback(providerCount > 0 ? `工具归一化字典已加载（${providerCount} 个 provider）` : '工具归一化字典为空，已使用内置 fallback')
     } catch (error) {
