@@ -34,6 +34,17 @@ function installedPackage(enabled = true): InstalledPluginPackage {
 }
 
 function fakeService(items: InstalledPluginPackage[] = []) {
+  const contractSnapshot = {
+    revision: 0,
+    eligibleIds: [] as readonly string[],
+    diagnostics: [] as readonly {
+      pluginId: string
+      code: 'waiting_activation'
+      message: string
+      blocking: boolean
+      relatedPluginIds: readonly string[]
+    }[],
+  }
   return {
     initialize: vi.fn(async () => ({ activated: [], failed: [] })),
     list: vi.fn(async () => items),
@@ -41,6 +52,8 @@ function fakeService(items: InstalledPluginPackage[] = []) {
     setEnabled: vi.fn(async () => ({ ok: true as const })),
     reload: vi.fn(async () => ({ ok: true as const })),
     uninstall: vi.fn(async () => ({ ok: true as const })),
+    getContractSnapshot: vi.fn(() => contractSnapshot),
+    subscribeContracts: vi.fn(() => () => undefined),
   }
 }
 
@@ -79,7 +92,7 @@ describe('PluginManager v2-only', () => {
   })
 
   it('外置包启停、重载和卸载全部走 v2 service', async () => {
-    const service = fakeService([installedPackage()])
+    const service = fakeService([installedPackage(false)])
     render(<PluginManager service={service as unknown as PackageInstallationService} />)
 
     expect(await screen.findByText('feature.demo')).toBeInTheDocument()
@@ -166,5 +179,25 @@ describe('PluginManager v2-only', () => {
 
     expect(await screen.findByText('启用 builtin.skin成功')).toBeInTheDocument()
     expect(retryPlugin).toHaveBeenCalledWith('builtin.skin')
+  })
+
+  it('distinguishes an enabled package waiting for an activation event', async () => {
+    const service = fakeService([installedPackage()])
+    service.getContractSnapshot.mockReturnValue({
+      revision: 1,
+      eligibleIds: [],
+      diagnostics: [{
+        pluginId: 'feature.demo',
+        code: 'waiting_activation',
+        message: '等待激活事件：workspace.opened',
+        blocking: false,
+        relatedPluginIds: [],
+      }],
+    })
+
+    render(<PluginManager service={service as unknown as PackageInstallationService} />)
+
+    expect(await screen.findByText('等待激活事件')).toBeInTheDocument()
+    expect(screen.getByText('等待激活事件：workspace.opened')).toBeInTheDocument()
   })
 })

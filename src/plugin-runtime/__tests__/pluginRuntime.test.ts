@@ -3,6 +3,49 @@ import { TestPluginRuntime as PluginRuntime } from '../testing/pluginRuntimeHarn
 import { getCommandRegistry, getHookRuntime } from '../runtimeServices'
 
 describe('PluginRuntime 静态内置插件 Harness', () => {
+  it('rejects direct activation when a required dependency is not active', async () => {
+    const runtime = new PluginRuntime()
+    const activate = vi.fn()
+
+    await expect(runtime.activateBuiltin({
+      id: 'feature.consumer',
+      version: '1.0.0',
+      dependencies: { 'service.missing': '*' },
+      activate,
+    })).rejects.toMatchObject({
+      name: 'PluginContractBlockedError',
+      code: 'plugin_contract_blocked',
+      pluginId: 'feature.consumer',
+    })
+    expect(activate).not.toHaveBeenCalled()
+  })
+
+  it('rejects an update that would break an active dependent version range', async () => {
+    const runtime = new PluginRuntime()
+    await runtime.activateBuiltin({ id: 'service.clock', version: '1.5.0', activate: () => {} })
+    await runtime.activateBuiltin({
+      id: 'feature.consumer',
+      version: '1.0.0',
+      dependencies: { 'service.clock': '^1.0.0' },
+      activate: () => {},
+    })
+    const candidateActivate = vi.fn()
+
+    await expect(runtime.update({
+      id: 'service.clock',
+      version: '2.0.0',
+      hotSwapMode: 'restart-required',
+      activate: candidateActivate,
+    })).rejects.toMatchObject({ code: 'plugin_contract_blocked' })
+
+    expect(candidateActivate).not.toHaveBeenCalled()
+    expect(runtime.snapshot().active.map(item => item.pluginId)).toEqual([
+      'feature.consumer',
+      'service.clock',
+    ])
+  })
+
+
   it('同步激活路径在返回前提交实例，并拒绝 async activate', async () => {
     const runtime = new PluginRuntime()
     const instance = runtime.activateBuiltinSync({

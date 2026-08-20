@@ -4,7 +4,7 @@
 //! native source of truth. V2 commands exchange descriptors only; package
 //! bytes are copied on disk and served by the `pylon-plugin` URI protocol.
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 use std::fs::{self, File};
 use std::io::{Read, Seek, SeekFrom};
 use std::path::{Component, Path, PathBuf};
@@ -71,6 +71,11 @@ fn plugin_id_regex() -> &'static Regex {
 fn version_regex() -> &'static Regex {
     static RE: OnceLock<Regex> = OnceLock::new();
     RE.get_or_init(|| Regex::new(r"^[0-9A-Za-z]+(?:[.+-][0-9A-Za-z]+)*$").unwrap())
+}
+
+fn version_range_regex() -> &'static Regex {
+    static RE: OnceLock<Regex> = OnceLock::new();
+    RE.get_or_init(|| Regex::new(r"^(?:\*|\^?[0-9]+\.[0-9]+\.[0-9]+)$").unwrap())
 }
 
 async fn write_lock() -> tokio::sync::MutexGuard<'static, ()> {
@@ -414,6 +419,7 @@ fn manifest_details(
     }
     let id = manifest_string(&manifest, "id")?.to_string();
     validate_plugin_id(&id)?;
+    validate_manifest_contract_shape(&manifest, &id)?;
     if manifest_string(&manifest, "name")?.trim().is_empty() {
         return Err(PluginError::ManifestInvalid(
             "name must not be empty".into(),
@@ -457,6 +463,73 @@ fn manifest_details(
         )));
     }
     Ok((manifest, id, version, entry))
+}
+
+fn validate_manifest_contract_shape(
+    manifest: &serde_json::Value,
+    plugin_id: &str,
+) -> Result<(), PluginError> {
+    for field in ["dependencies", "optionalDependencies"] {
+        let Some(value) = manifest.get(field) else {
+            continue;
+        };
+        let entries = value
+            .as_object()
+            .ok_or_else(|| PluginError::ManifestInvalid(format!("{field} must be an object")))?;
+        for (dependency_id, range) in entries {
+            if !plugin_id_regex().is_match(dependency_id) {
+                return Err(PluginError::ManifestInvalid(format!(
+                    "{field}.{dependency_id} has an invalid plugin id"
+                )));
+            }
+            let range = range.as_str().ok_or_else(|| {
+                PluginError::ManifestInvalid(format!("{field}.{dependency_id} must be a string"))
+            })?;
+            if !version_range_regex().is_match(range) {
+                return Err(PluginError::ManifestInvalid(format!(
+                    "{field}.{dependency_id} only supports exact, caret or * ranges"
+                )));
+            }
+        }
+    }
+
+    if let Some(value) = manifest.get("conflicts") {
+        let conflicts = value
+            .as_array()
+            .ok_or_else(|| PluginError::ManifestInvalid("conflicts must be an array".into()))?;
+        for (index, conflict) in conflicts.iter().enumerate() {
+            let conflict = conflict.as_str().ok_or_else(|| {
+                PluginError::ManifestInvalid(format!("conflicts.{index} must be a string"))
+            })?;
+            if !plugin_id_regex().is_match(conflict) || conflict == plugin_id {
+                return Err(PluginError::ManifestInvalid(format!(
+                    "conflicts.{index} must be a valid non-self plugin id"
+                )));
+            }
+        }
+    }
+
+    if let Some(value) = manifest.get("activation") {
+        let events = value
+            .as_object()
+            .and_then(|activation| activation.get("events"))
+            .and_then(|events| events.as_array())
+            .ok_or_else(|| {
+                PluginError::ManifestInvalid("activation.events must be an array".into())
+            })?;
+        let mut unique = BTreeSet::new();
+        if events.is_empty()
+            || events.iter().any(|value| match value.as_str() {
+                Some(event) if !event.trim().is_empty() => !unique.insert(event),
+                _ => true,
+            })
+        {
+            return Err(PluginError::ManifestInvalid(
+                "activation.events must contain unique non-empty strings".into(),
+            ));
+        }
+    }
+    Ok(())
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -1516,6 +1589,22 @@ mod tests {
         assert!(matches!(
             manifest_details(&dir),
             Err(PluginError::ManifestInvalid(message)) if message.contains("signature")
+        ));
+        fs::remove_dir_all(dir).ok();
+    }
+
+    #[test]
+    fn rejects_invalid_dependency_range_in_manifest_shape_validation() {
+        let dir = temp("invalid-dependency-range");
+        fixture(&dir, "1.0.0", &[]);
+        let mut manifest = read_manifest(&dir).unwrap();
+        manifest["dependencies"] = serde_json::json!({ "service.clock": ">=1.0.0" });
+        fs::write(dir.join(MANIFEST), serde_json::to_vec(&manifest).unwrap()).unwrap();
+
+        assert!(matches!(
+            manifest_details(&dir),
+            Err(PluginError::ManifestInvalid(message))
+                if message.contains("dependencies.service.clock")
         ));
         fs::remove_dir_all(dir).ok();
     }

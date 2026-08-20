@@ -1,6 +1,6 @@
 # Pylon Kernel 加固施工台账
 
-> 最新完成（2026-08-21）：`WI-P1 / PLG-001、PLG-002、PLG-005`——Kernel recovery surface 先于 Plugin Host 激活可见；内置插件改由显式 bootstrap 事务激活，失败隔离、依赖跳过、可重试 degraded 状态与 Safe Mode 已闭环。五个 Product Plugin 标记为 `product-required` 并拒绝普通停用；Plugin Runtime 通过显式 `PluginHostServices` 获取 Kernel/registry 能力，移除 activation path 对全局服务与 Kernel 的反向依赖；用户包初始化归 Kernel bootstrap 管理。55 项定向回归、全项目 TS build、目标 ESLint 与 diff check 通过。下一项 `WI-P2`。
+> 最新完成（2026-08-21）：`WI-P2 / PLG-003`——新增单一 Plugin Contract Resolver，完整执行 exact/caret/* 版本范围、required/optional dependency、依赖环、双向 conflict 与 activation event；manifest 契约完整穿透第一方/外置 definition，Runtime 在 activate/enable/update 前做二次防线。Package mutation 在触碰 Runtime/native authority 前校验候选图，dependent disable/uninstall 与破坏依赖范围的 update 被结构化拒绝；waiting-activation 与 blocked diagnostics 可由 PluginManager 观察。Rust 仅做对称 manifest shape 校验，不复制依赖图业务。TS 71 项、Rust plugin_cmds 12 项定向回归、全项目 TS build、目标 ESLint、rustfmt 与 diff check 通过。下一项 `WI-P3`。
 >
 > 长程目标：在保留现有五个第一方 Product Plugin 构造的前提下，持续加固 Pylon Kernel 的持久化、重放、生命周期、Agent Runtime、插件故障隔离和结构化错误。  
 > 基线提交：`a38145b chore: establish kernel hardening baseline`  

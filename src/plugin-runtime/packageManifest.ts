@@ -4,6 +4,18 @@ import type { HotSwapMode } from './shadowUpdate.ts'
 export const PYLON_PLUGIN_API_VERSION = '1.0' as const
 export const PYLON_PLUGIN_MANIFEST_FILE = 'pylon-plugin.json' as const
 
+export class PluginManifestError extends Error {
+  readonly code = 'plugin_manifest_invalid'
+
+  constructor(
+    readonly field: string,
+    message: string,
+  ) {
+    super(`pylon-plugin.json ${field} ${message}`)
+    this.name = 'PluginManifestError'
+  }
+}
+
 export interface PylonPluginManifest {
   readonly schema: 1
   readonly id: string
@@ -28,6 +40,7 @@ export interface PylonPluginManifest {
 }
 
 const ID_PATTERN = /^[a-z0-9]+(?:[.-][a-z0-9]+)*$/
+const VERSION_RANGE_PATTERN = /^(?:\*|\^?\d+\.\d+\.\d+)$/
 const KINDS = new Set([
   'shell', 'workspace', 'feature', 'hook', 'renderer', 'skin', 'agent-adapter',
   'tool-provider', 'service', 'automation',
@@ -46,7 +59,16 @@ function record(value: unknown, field: string): Record<string, unknown> {
 function stringMap(value: unknown, field: string): void {
   const map = record(value, field)
   for (const [key, entry] of Object.entries(map)) {
+    if (!ID_PATTERN.test(key)) {
+      throw new PluginManifestError(`${field}.${key}`, '依赖 id 必须是点分小写命名')
+    }
     if (typeof entry !== 'string') throw new Error(`pylon-plugin.json ${field}.${key} 必须是字符串`)
+    if (!VERSION_RANGE_PATTERN.test(entry)) {
+      throw new PluginManifestError(
+        `${field}.${key}`,
+        '只支持 exact、caret 或 * 版本范围',
+      )
+    }
   }
 }
 
@@ -77,6 +99,29 @@ export function parsePylonPluginManifest(source: string | unknown): PylonPluginM
   if (manifest.conflicts !== undefined
     && (!Array.isArray(manifest.conflicts) || manifest.conflicts.some(value => typeof value !== 'string'))) {
     throw new Error('pylon-plugin.json conflicts 必须是字符串数组')
+  }
+  if (Array.isArray(manifest.conflicts)) {
+    manifest.conflicts.forEach((conflict, index) => {
+      if (typeof conflict !== 'string' || !ID_PATTERN.test(conflict)) {
+        throw new PluginManifestError(`conflicts.${index}`, '必须是合法插件 id')
+      }
+      if (conflict === manifest.id) {
+        throw new PluginManifestError(`conflicts.${index}`, '不能与插件自身冲突')
+      }
+    })
+  }
+  if (manifest.activation !== undefined) {
+    const activation = record(manifest.activation, 'activation')
+    const events = activation.events
+    if (!Array.isArray(events)
+      || events.length === 0
+      || events.some(event => typeof event !== 'string' || !event.trim())
+      || new Set(events).size !== events.length) {
+      throw new PluginManifestError(
+        'activation.events',
+        '必须是非空且不重复的字符串数组',
+      )
+    }
   }
   if (manifest.hotSwap !== undefined) {
     const hotSwap = record(manifest.hotSwap, 'hotSwap')

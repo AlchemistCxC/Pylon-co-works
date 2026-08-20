@@ -21,7 +21,6 @@ export function createBuiltinPylonWorkspacePlugin(): BuiltinPluginDefinition {
     id: BUILTIN_PYLON_WORKSPACE_ID,
     kind: 'workspace',
     firstParty: true,
-    dependencies: [],
     hotSwapMode: 'parallel',
     activate: context => {
       mountFirstPartyStyleAssets(BUILTIN_PYLON_WORKSPACE_ID, context.identity.key, context.scope, loadBuiltinPylonWorkspaceStyles())

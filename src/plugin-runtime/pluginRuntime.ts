@@ -12,6 +12,11 @@ import {
   type PluginActivationContextFactory,
 } from './pluginActivationContext.ts'
 import type { PluginHostServices } from './pluginHostServices.ts'
+import {
+  resolvePluginContracts,
+  type PluginContract,
+  type PluginContractDiagnostic,
+} from './pluginContractResolver.ts'
 import { PluginScope } from './pluginScope.ts'
 import {
   PluginContributionTransaction,
@@ -24,7 +29,10 @@ export interface BuiltinPluginDefinition {
   kind?: 'shell' | 'workspace' | 'feature' | 'hook' | 'renderer' | 'skin' | 'agent-adapter' | 'tool-provider' | 'service' | 'automation'
   firstParty?: boolean
   criticality?: 'kernel-required' | 'product-required' | 'optional'
-  dependencies?: readonly string[]
+  dependencies?: Readonly<Record<string, string>>
+  optionalDependencies?: Readonly<Record<string, string>>
+  conflicts?: readonly string[]
+  activationEvents?: readonly string[]
   version?: string
   packageInstanceId?: string
   runtimeInstanceId?: string
@@ -85,6 +93,18 @@ export class PluginDisableRejectedError extends Error {
   }
 }
 
+export class PluginContractBlockedError extends Error {
+  readonly code = 'plugin_contract_blocked'
+
+  constructor(
+    readonly pluginId: string,
+    readonly diagnostics: readonly PluginContractDiagnostic[],
+  ) {
+    super(`插件契约阻止操作：${pluginId}（${diagnostics.map(item => `${item.pluginId}: ${item.message}`).join('；')}）`)
+    this.name = 'PluginContractBlockedError'
+  }
+}
+
 export class PluginRuntime {
   private readonly instances = new Map<string, PluginInstance>()
   private readonly definitions = new Map<string, BuiltinPluginDefinition>()
@@ -113,6 +133,13 @@ export class PluginRuntime {
 
   snapshot(): PluginRuntimeSnapshot {
     return this.currentSnapshot
+  }
+
+  contractSnapshot(): readonly PluginContract[] {
+    return Object.freeze(this.currentSnapshot.active.flatMap(identity => {
+      const definition = this.definitions.get(identity.key)
+      return definition ? [Object.freeze(this.toContract(definition))] : []
+    }))
   }
 
   subscribe(listener: () => void): () => void {
@@ -149,6 +176,7 @@ export class PluginRuntime {
 
   async activateBuiltin(definition: BuiltinPluginDefinition): Promise<PluginInstance> {
     this.assertInactive(definition.id)
+    this.assertContractGraph(definition)
     const identity = createPluginIdentity(definition.id, `builtin-${++this.instanceSequence}`)
     const instance = await activateBuiltinPlugin(identity, async context => {
       const prepared = await definition.prepare?.(context)
@@ -163,6 +191,7 @@ export class PluginRuntime {
 
   async activatePackage(definition: BuiltinPluginDefinition, identity?: PluginIdentity): Promise<PluginInstance> {
     this.assertInactive(definition.id)
+    this.assertContractGraph(definition)
     const resolvedIdentity = identity ?? this.createIdentity(definition)
     const instance = await activateBuiltinPlugin(resolvedIdentity, async context => {
       const prepared = await definition.prepare?.(context)
@@ -178,6 +207,7 @@ export class PluginRuntime {
   /** 仅供明确要求同步完成的集成入口；Kernel bootstrap 不使用此路径。 */
   activateBuiltinSync(definition: BuiltinPluginDefinition): PluginInstance {
     this.assertInactive(definition.id)
+    this.assertContractGraph(definition)
     if (definition.prepare) throw new Error(`同步激活不支持 prepare：${definition.id}`)
     const identity = definition.version && definition.packageInstanceId
       ? this.createIdentity(definition)
@@ -219,6 +249,7 @@ export class PluginRuntime {
       instance.identity.pluginId === definition.id && instance.status === 'active'
     ))
     if (!oldInstance) throw new Error(`插件未激活：${definition.id}`)
+    this.assertContractGraph(definition)
     if ((definition.hotSwapMode ?? 'parallel') === 'restart-required') {
       this.switchRecords.set(definition.id, Object.freeze({
         pluginId: definition.id,
@@ -365,6 +396,37 @@ export class PluginRuntime {
   private withFreshRuntimeIdentity(definition: BuiltinPluginDefinition): BuiltinPluginDefinition {
     const { runtimeInstanceId: _runtimeInstanceId, ...fresh } = definition
     return fresh
+  }
+
+  private assertContractGraph(candidate: BuiltinPluginDefinition): void {
+    const contracts = new Map<string, PluginContract>()
+    for (const identity of this.currentSnapshot.active) {
+      const definition = this.definitions.get(identity.key)
+      if (definition) contracts.set(definition.id, {
+        ...this.toContract(definition),
+        activationEvents: undefined,
+      })
+    }
+    contracts.set(candidate.id, {
+      ...this.toContract(candidate),
+      activationEvents: undefined,
+    })
+    const resolution = resolvePluginContracts([...contracts.values()])
+    if (resolution.blocked.length > 0) {
+      throw new PluginContractBlockedError(candidate.id, resolution.blocked)
+    }
+  }
+
+  private toContract(definition: BuiltinPluginDefinition): PluginContract {
+    return {
+      id: definition.id,
+      version: definition.version ?? '0.0.0',
+      enabled: true,
+      dependencies: definition.dependencies,
+      optionalDependencies: definition.optionalDependencies,
+      conflicts: definition.conflicts,
+      activationEvents: definition.activationEvents,
+    }
   }
 
   private createIdentity(definition: BuiltinPluginDefinition): PluginIdentity {

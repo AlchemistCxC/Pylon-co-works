@@ -48,7 +48,6 @@ export function createBuiltinPylonToolsPlugin(): BuiltinPluginDefinition {
     id: BUILTIN_PYLON_TOOLS_ID,
     kind: 'tool-provider',
     firstParty: true,
-    dependencies: [],
     hotSwapMode: 'parallel',
     activate: context => {
       bindToolDictionary(context.scope, context.identity.key)

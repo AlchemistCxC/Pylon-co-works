@@ -73,7 +73,7 @@ export async function retryBuiltinPlugin(pluginId: string): Promise<BuiltinPlugi
     if (closure.has(id)) return
     const definition = definitions.get(id)
     if (!definition) throw new Error(`内置插件依赖不存在：${id}`)
-    for (const dependency of definition.dependencies ?? []) include(dependency)
+    for (const dependency of Object.keys(definition.dependencies ?? {})) include(dependency)
     closure.add(id)
   }
   include(pluginId)

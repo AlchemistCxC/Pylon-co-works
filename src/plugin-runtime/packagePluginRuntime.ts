@@ -137,7 +137,10 @@ export class PackagePluginRuntimeService {
     return {
       id: descriptor.pluginId,
       kind: manifest.kind,
-      dependencies: Object.keys(manifest.dependencies ?? {}),
+      dependencies: Object.freeze({ ...manifest.dependencies }),
+      optionalDependencies: Object.freeze({ ...manifest.optionalDependencies }),
+      conflicts: Object.freeze([...(manifest.conflicts ?? [])]),
+      activationEvents: Object.freeze([...(manifest.activation?.events ?? [])]),
       version: descriptor.version,
       packageInstanceId: descriptor.packageInstanceId,
       runtimeInstanceId,

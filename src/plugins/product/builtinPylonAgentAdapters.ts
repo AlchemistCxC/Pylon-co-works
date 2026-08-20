@@ -8,10 +8,7 @@ import { BUILTIN_AGENT_DESCRIPTORS } from '../../domains/agent/builtinAgentDescr
 import { BUILTIN_SESSION_STATE_SYNC_PROVIDER } from '../core/sessionState/runtimeStoreSessionState.ts'
 import type { BuiltinPluginDefinition } from '../../plugin-runtime/pluginRuntime.ts'
 import { createSharedLogicalActivation } from './sharedLogicalActivation.ts'
-import {
-  BUILTIN_PYLON_AGENT_ADAPTERS_ID,
-  BUILTIN_PYLON_TOOLS_ID,
-} from './productPluginIds.ts'
+import { BUILTIN_PYLON_AGENT_ADAPTERS_ID } from './productPluginIds.ts'
 import { BUILTIN_AGENT_DETECTORS } from '../../domains/agent/agentDetector.ts'
 import { registerBuiltinSessionCreationContributions } from '../core/sessionCreation/builtinSessionCreation.ts'
 
@@ -45,7 +42,6 @@ export function createBuiltinPylonAgentAdaptersPlugin(): BuiltinPluginDefinition
     id: BUILTIN_PYLON_AGENT_ADAPTERS_ID,
     kind: 'agent-adapter',
     firstParty: true,
-    dependencies: [BUILTIN_PYLON_TOOLS_ID],
     hotSwapMode: 'parallel',
     activate: ({ identity, scope, services, sessionCreation }) => {
       bindAgentAdapters(scope, identity.key)

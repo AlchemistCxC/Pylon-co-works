@@ -53,6 +53,15 @@ export default function PluginManager({
     bootstrap.getSnapshot,
     bootstrap.getSnapshot,
   )
+  const subscribeContracts = useCallback(
+    (listener: () => void) => service.subscribeContracts(listener),
+    [service],
+  )
+  const contractSnapshot = useSyncExternalStore(
+    subscribeContracts,
+    () => service.getContractSnapshot(),
+    () => service.getContractSnapshot(),
+  )
   const [installed, setInstalled] = useState<InstalledPluginPackage[]>([])
   const [busy, setBusy] = useState<string | null>(null)
   const [log, setLog] = useState<string[]>([])
@@ -121,6 +130,9 @@ export default function PluginManager({
     const enabled = builtin ? Boolean(identity) : (installedItem?.enabled ?? false)
     const manifest = installedItem?.package.manifest
     const productRequired = builtin && getBuiltinPluginCriticality(pluginId) === 'product-required'
+    const contractDiagnostic = !builtin
+      ? contractSnapshot.diagnostics.find(diagnostic => diagnostic.pluginId === pluginId)
+      : undefined
     const bootstrapFailure = bootstrapSnapshot.kind === 'degraded'
       ? bootstrapSnapshot.failures.find(failure => failure.pluginId === pluginId)
       : undefined
@@ -142,9 +154,12 @@ export default function PluginManager({
           <span className={`plugin-state-badge ${identity ? 'is-active' : ''}`}>
             {identity ? '运行中'
               : bootstrapFailure ? '启动失败'
+                : contractDiagnostic?.code === 'waiting_activation' ? '等待激活事件'
+                  : contractDiagnostic?.blocking ? '契约阻止'
                 : bootstrapSnapshot.kind === 'safe-mode' && builtin ? '安全模式未启动'
                   : enabled ? '等待激活' : '已停用'}
           </span>
+          {contractDiagnostic && <span className="set-hint">{contractDiagnostic.message}</span>}
           <details className="plugin-technical">
             <summary>技术信息</summary>
             <div>API {PYLON_PLUGIN_API_VERSION} · {identity
@@ -156,13 +171,13 @@ export default function PluginManager({
           <button
             type="button"
             className="ps-btn sm"
-            aria-label={`${identity ? '停用' : '启用'} ${pluginId}`}
+            aria-label={`${(builtin ? Boolean(identity) : enabled) ? '停用' : '启用'} ${pluginId}`}
             disabled={busy !== null || Boolean(identity && productRequired)}
             onClick={() => void (builtin
               ? setBuiltinEnabled(pluginId, !identity)
-              : run(`${identity ? '停用' : '启用'} ${pluginId}`, () => service.setEnabled(pluginId, !identity)))}
+              : run(`${enabled ? '停用' : '启用'} ${pluginId}`, () => service.setEnabled(pluginId, !enabled)))}
           >
-            {identity ? '停用' : '启用'}
+            {(builtin ? Boolean(identity) : enabled) ? '停用' : '启用'}
           </button>
           {installedItem && identity && (
             <button type="button" className="ps-btn sm" disabled={busy !== null} onClick={() => void run(`重新加载 ${pluginId}`, () => service.reload(pluginId))}>

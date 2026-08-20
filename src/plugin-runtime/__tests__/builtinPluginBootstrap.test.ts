@@ -16,7 +16,7 @@ describe('Builtin plugin bootstrap', () => {
       },
       {
         id: 'product.dependent',
-        dependencies: ['product.base'],
+        dependencies: { 'product.base': '*' },
         criticality: 'product-required',
         activate: dependent,
       },

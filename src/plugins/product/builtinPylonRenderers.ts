@@ -22,7 +22,6 @@ export function createBuiltinPylonRenderersPlugin(): BuiltinPluginDefinition {
     id: BUILTIN_PYLON_RENDERERS_ID,
     kind: 'renderer',
     firstParty: true,
-    dependencies: [],
     hotSwapMode: 'parallel',
     activate: context => {
       mountFirstPartyStyleAssets(BUILTIN_PYLON_RENDERERS_ID, context.identity.key, context.scope, loadBuiltinPylonRendererStyles())

@@ -13,6 +13,6 @@ export const kernelBootstrap = createKernelBootstrap({
   mountApplication: applicationId => applicationRuntime.mount(applicationId),
   unmountApplication: () => applicationRuntime.unmount(),
   initializeUserPackages: () => IS_TAURI
-    ? getPackageInstallationService().initialize()
+    ? getPackageInstallationService().emitActivationEvent('kernel.ready')
     : Promise.resolve({ activated: [], failed: [] }),
 })

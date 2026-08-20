@@ -1,5 +1,9 @@
 import { describe, expect, it } from 'vitest'
-import { parsePylonPluginManifest, PYLON_PLUGIN_API_VERSION } from '../packageManifest.ts'
+import {
+  parsePylonPluginManifest,
+  PluginManifestError,
+  PYLON_PLUGIN_API_VERSION,
+} from '../packageManifest.ts'
 
 const valid = {
   schema: 1,
@@ -31,4 +35,45 @@ describe('api=1.0 package manifest', () => {
         .toThrow(new RegExp(`${removed}.*API 1\\.0`))
     },
   )
+
+  it('rejects unsupported dependency ranges with a stable manifest error', () => {
+    expect(() => parsePylonPluginManifest({
+      ...valid,
+      dependencies: { 'service.clock': '>=1.0.0' },
+    })).toThrow(expect.objectContaining<Partial<PluginManifestError>>({
+      name: 'PluginManifestError',
+      code: 'plugin_manifest_invalid',
+      field: 'dependencies.service.clock',
+    }))
+  })
+
+  it('rejects invalid dependency ids before contract resolution', () => {
+    expect(() => parsePylonPluginManifest({
+      ...valid,
+      dependencies: { 'Not A Plugin': '*' },
+    })).toThrow(expect.objectContaining<Partial<PluginManifestError>>({
+      code: 'plugin_manifest_invalid',
+      field: 'dependencies.Not A Plugin',
+    }))
+  })
+
+  it('rejects self-conflicts with a stable field diagnostic', () => {
+    expect(() => parsePylonPluginManifest({
+      ...valid,
+      conflicts: ['feature.example'],
+    })).toThrow(expect.objectContaining<Partial<PluginManifestError>>({
+      code: 'plugin_manifest_invalid',
+      field: 'conflicts.0',
+    }))
+  })
+
+  it('rejects empty or duplicate activation events', () => {
+    expect(() => parsePylonPluginManifest({
+      ...valid,
+      activation: { events: ['kernel.ready', 'kernel.ready'] },
+    })).toThrow(expect.objectContaining<Partial<PluginManifestError>>({
+      code: 'plugin_manifest_invalid',
+      field: 'activation.events',
+    }))
+  })
 })

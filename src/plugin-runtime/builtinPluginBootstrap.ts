@@ -40,7 +40,7 @@ export async function bootstrapPluginDefinitions(
   const skipped: string[] = []
   for (const definition of definitions) {
     if (active.has(definition.id)) continue
-    const unavailable = (definition.dependencies ?? []).filter(dependency => !active.has(dependency))
+    const unavailable = Object.keys(definition.dependencies ?? {}).filter(dependency => !active.has(dependency))
     if (unavailable.length > 0) {
       skipped.push(definition.id)
       failures.push(Object.freeze({

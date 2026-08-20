@@ -13,7 +13,6 @@ export function createBuiltinPylonShellPlugin(): BuiltinPluginDefinition {
     id: BUILTIN_PYLON_SHELL_ID,
     kind: 'shell',
     firstParty: true,
-    dependencies: ['builtin.pylon-workspace', 'builtin.pylon-renderers', 'builtin.pylon-agent-adapters', 'builtin.pylon-tools'],
     hotSwapMode: 'soft-remount',
     activate: ({ application, commands, identity, scope }) => {
       mountFirstPartyStyleAssets(BUILTIN_PYLON_SHELL_ID, identity.key, scope, loadBuiltinPylonShellStyles())
