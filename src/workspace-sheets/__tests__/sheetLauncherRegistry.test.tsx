@@ -3,7 +3,7 @@ import { fireEvent, render, screen } from '@testing-library/react'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import SheetLauncher from '../SheetLauncher'
 import { resetStores } from '../../test/resetStores'
-import '../../plugin-runtime/pluginCompositionRoot'
+import '../../plugin-runtime/testing/productPluginTestBootstrap.ts'
 import { createPluginIdentity } from '../../plugin-runtime/pluginIdentity'
 import { registerWorkspace } from '../workspaceRegistry'
 

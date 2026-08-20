@@ -6,7 +6,7 @@
  * 自绘侧栏 / 'none'=无侧栏。sidebar 组件声明仅当 mode='workspace'（SheetSidebarSlot 消费）。
  */
 import { describe, expect, it } from 'vitest'
-import '../../plugin-runtime/pluginCompositionRoot'
+import '../../plugin-runtime/testing/productPluginTestBootstrap.ts'
 import { SHEET_KINDS } from '../sheetTypes'
 import { resolveSheetRender } from '../sheetRegistry.tsx'
 

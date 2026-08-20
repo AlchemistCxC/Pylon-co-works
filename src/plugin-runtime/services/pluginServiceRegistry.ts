@@ -16,18 +16,29 @@ export type PluginServiceResolutionErrorCode =
   | 'plugin_service_ambiguous'
 
 export class PluginServiceResolutionError extends Error {
+  readonly code: PluginServiceResolutionErrorCode
+  readonly kind: PluginServiceKind
+  readonly serviceId: string | undefined
+  readonly matchCount: number
+  readonly matchingServiceIds: readonly string[]
+
   constructor(
-    readonly code: PluginServiceResolutionErrorCode,
-    readonly kind: PluginServiceKind,
-    readonly serviceId: string | undefined,
-    readonly matchCount: number,
-    readonly matchingServiceIds: readonly string[],
+    code: PluginServiceResolutionErrorCode,
+    kind: PluginServiceKind,
+    serviceId: string | undefined,
+    matchCount: number,
+    matchingServiceIds: readonly string[],
   ) {
     const target = serviceId ? `${kind}:${serviceId}` : kind
     super(code === 'plugin_service_unavailable'
       ? `必需插件服务不可用：${target}`
       : `必需插件服务不唯一：${target}（匹配 ${matchCount} 项：${matchingServiceIds.join(', ')}）`)
     this.name = 'PluginServiceResolutionError'
+    this.code = code
+    this.kind = kind
+    this.serviceId = serviceId
+    this.matchCount = matchCount
+    this.matchingServiceIds = matchingServiceIds
   }
 }
 

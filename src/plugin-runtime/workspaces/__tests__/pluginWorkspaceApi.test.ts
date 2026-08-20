@@ -58,7 +58,7 @@ describe('PluginWorkspaceApi', () => {
 
     const result = await runtime.deactivate(instance.identity.key)
 
-    expect(result.scope).toEqual({ disposed: 1, errors: [] })
+    expect(result.scope).toEqual({ disposed: 1, remaining: 0, errors: [] })
     expect(resolveWorkspace(kind)).toBeUndefined()
   })
 

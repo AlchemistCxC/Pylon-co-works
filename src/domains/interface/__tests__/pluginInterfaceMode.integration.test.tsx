@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 import { fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
-import '../../../plugin-runtime/pluginCompositionRoot.ts'
+import '../../../plugin-runtime/testing/productPluginTestBootstrap.ts'
 import { activateInterfaceMode, ensureInterfaceModeProfile } from '../../../application/transactions/activateInterfaceMode.ts'
 import InterfaceModePicker from '../../../components/settings/InterfaceModePicker.tsx'
 import { createPluginIdentity } from '../../../plugin-runtime/pluginIdentity.ts'

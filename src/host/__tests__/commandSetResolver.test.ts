@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it } from 'vitest'
-import '../../plugin-runtime/pluginCompositionRoot.ts'
+import '../../plugin-runtime/testing/productPluginTestBootstrap.ts'
 import {
   CORE_COMMAND_SET_PLUGIN_ID,
   type CommandSetDescriptor,

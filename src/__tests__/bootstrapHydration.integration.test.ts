@@ -7,7 +7,7 @@
  * pruneAgentSheets）后全绿。
  */
 import { describe, expect, it, beforeEach } from 'vitest'
-import '../plugin-runtime/pluginCompositionRoot.ts'
+import '../plugin-runtime/testing/productPluginTestBootstrap.ts'
 import { useWorkspaceStore } from '../workspaceStore'
 import { useIdentityStore } from '../identityStore'
 import { resetStores } from '../test/resetStores'

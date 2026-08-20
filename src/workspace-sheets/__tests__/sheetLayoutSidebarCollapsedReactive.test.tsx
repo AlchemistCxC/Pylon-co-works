@@ -7,7 +7,7 @@
  * ctx.sidebarCollapsed 直连折叠类）。
  */
 import { describe, expect, it, beforeEach } from 'vitest'
-import '../../plugin-runtime/pluginCompositionRoot'
+import '../../plugin-runtime/testing/productPluginTestBootstrap.ts'
 import { render, act, waitFor } from '@testing-library/react'
 import SheetLayout from '../SheetLayout'
 import { useWorkspaceStore } from '../../workspaceStore'

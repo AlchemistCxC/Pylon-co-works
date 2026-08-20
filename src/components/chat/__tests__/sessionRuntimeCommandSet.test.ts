@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import '../../../plugin-runtime/pluginCompositionRoot.ts'
+import '../../../plugin-runtime/testing/productPluginTestBootstrap.ts'
 import { buildSendMessagePayload } from '../sessionRuntime'
 import { CORE_COMMAND_SET_PLUGIN_ID } from '../../../contracts/agentCommandSet'
 import type { Session } from '../../../identityStore'

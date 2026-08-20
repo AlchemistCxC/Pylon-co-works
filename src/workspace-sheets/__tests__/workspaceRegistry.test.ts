@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import { createPluginIdentity } from '../../plugin-runtime/pluginIdentity'
-import '../../plugin-runtime/pluginCompositionRoot'
+import '../../plugin-runtime/testing/productPluginTestBootstrap.ts'
 import { BUILTIN_WORKSPACE_TYPES } from '../../plugins/core/sheet/builtinWorkspacePlugins'
 import type { WorkspaceTypeDefinition } from '../workspaceTypes'
 import {

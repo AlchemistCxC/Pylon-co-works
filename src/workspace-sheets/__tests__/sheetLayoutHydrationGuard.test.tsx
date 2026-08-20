@@ -5,7 +5,7 @@
  * sheets 覆盖持久化（子 effect 先于 bootstrap hydrate 执行）。
  */
 import { describe, expect, it, beforeEach } from 'vitest'
-import '../../plugin-runtime/pluginCompositionRoot'
+import '../../plugin-runtime/testing/productPluginTestBootstrap.ts'
 import { render, act } from '@testing-library/react'
 import SheetLayout from '../SheetLayout'
 import { useWorkspaceStore } from '../../workspaceStore'

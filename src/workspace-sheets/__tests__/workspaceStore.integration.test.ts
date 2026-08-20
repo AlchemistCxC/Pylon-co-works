@@ -6,7 +6,7 @@
  * 阶段 0 以 RED 锁定缺陷（持久化旧 state）；阶段 1（F07 commitWorkspaceMutation）后全绿。
  */
 import { describe, expect, it, beforeEach } from 'vitest'
-import '../../plugin-runtime/pluginCompositionRoot'
+import '../../plugin-runtime/testing/productPluginTestBootstrap.ts'
 import { useWorkspaceStore } from '../../workspaceStore'
 import { resetStores } from '../../test/resetStores'
 import { MemoryStorage } from '../../test/memoryStorage'

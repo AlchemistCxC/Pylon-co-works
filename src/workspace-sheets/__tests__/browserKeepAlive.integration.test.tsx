@@ -4,7 +4,7 @@
  * （不卸载，WebView 不销毁）；真正 close（从 sheets 移除）才卸载。
  */
 import { describe, expect, it, beforeEach } from 'vitest'
-import '../../plugin-runtime/pluginCompositionRoot'
+import '../../plugin-runtime/testing/productPluginTestBootstrap.ts'
 import { render } from '@testing-library/react'
 import SheetLayout from '../SheetLayout'
 import { useWorkspaceStore } from '../../workspaceStore'

@@ -5,7 +5,7 @@
  * 并显示 owner Agent 状态；Agent connected → binding_ready → 解锁。
  */
 import { beforeEach, describe, expect, it, vi } from 'vitest'
-import '../../../plugin-runtime/pluginCompositionRoot'
+import '../../../plugin-runtime/testing/productPluginTestBootstrap.ts'
 import { act, fireEvent, render, screen } from '@testing-library/react'
 import InputBar from '../InputBar'
 import { useIdentityStore } from '../../../identityStore'

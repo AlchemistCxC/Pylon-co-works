@@ -14,7 +14,7 @@
  *   R6 冷启动 agent 状态快照未达 → restoring 锁定（Sheet 恢复 ≠ Agent 已连）
  */
 import { beforeEach, describe, expect, it } from 'vitest'
-import '../plugin-runtime/pluginCompositionRoot'
+import '../plugin-runtime/testing/productPluginTestBootstrap.ts'
 import { useWorkspaceStore } from '../workspaceStore'
 import { useIdentityStore } from '../identityStore'
 import { useRuntimeStore } from '../runtimeStore'

@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import { describe, expect, it, vi, beforeEach } from 'vitest'
-import '../../../plugin-runtime/pluginCompositionRoot'
+import '../../../plugin-runtime/testing/productPluginTestBootstrap.ts'
 import { render, screen, fireEvent, waitFor } from '@testing-library/react'
 import FileSheetView from '../FileSheetView'
 import { useWorkspaceStore } from '../../../workspaceStore'

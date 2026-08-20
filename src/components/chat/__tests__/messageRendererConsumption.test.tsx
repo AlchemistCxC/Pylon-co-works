@@ -7,7 +7,7 @@ import { getRendererRegistry } from '../../../plugin-runtime/runtimeServices.ts'
 import type { AsyncDisposable } from '../../../plugin-runtime/registry/types.ts'
 import { resetStores } from '../../../test/resetStores.ts'
 import { MessageRendererHost } from '../ChatView.tsx'
-import '../../../plugin-runtime/pluginCompositionRoot.ts'
+import '../../../plugin-runtime/testing/productPluginTestBootstrap.ts'
 import { CORE_SOLID_RENDERER_PLUGIN_ID } from '../../../plugins/core/renderer/solidRenderer.ts'
 
 const { invoke } = vi.hoisted(() => ({ invoke: vi.fn().mockResolvedValue(undefined) }))

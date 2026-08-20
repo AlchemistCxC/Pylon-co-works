@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, it } from 'vitest'
-import '../../../../plugin-runtime/pluginCompositionRoot.ts'
+import '../../../../plugin-runtime/testing/productPluginTestBootstrap.ts'
 import { useIdentityStore } from '../../../../identityStore.ts'
 import { createPluginIdentity } from '../../../../plugin-runtime/pluginIdentity.ts'
 import { getSessionCreationRegistry } from '../../../../plugin-runtime/runtimeServices.ts'
@@ -68,4 +68,3 @@ describe('builtin Session creation contributions', () => {
     }
   })
 })
-

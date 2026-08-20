@@ -7,7 +7,7 @@
  * - branch 显示 / 附件超限错误态依赖冻结中的 WI04，不在此文件覆盖（WI04 解冻后补）。
  */
 import { describe, expect, it, vi, beforeEach } from 'vitest'
-import '../../../plugin-runtime/pluginCompositionRoot'
+import '../../../plugin-runtime/testing/productPluginTestBootstrap.ts'
 import { render, screen, fireEvent } from '@testing-library/react'
 import FileSheetView from '../FileSheetView'
 import { useWorkspaceStore } from '../../../workspaceStore'
