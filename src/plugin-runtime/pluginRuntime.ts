@@ -56,7 +56,14 @@ export interface PluginSwitchDescriptor extends PluginUpdateResult {
 export interface PluginRuntimeSnapshot {
   readonly revision: number
   readonly active: readonly PluginIdentity[]
+  readonly instances: readonly PluginRuntimeInstanceSnapshot[]
   readonly switches: readonly PluginSwitchDescriptor[]
+}
+
+export interface PluginRuntimeInstanceSnapshot {
+  readonly identity: PluginIdentity
+  readonly status: PluginInstance['status']
+  readonly cleanup?: PluginDeactivateResult
 }
 
 export interface PluginRuntimeOptions {
@@ -120,6 +127,7 @@ export class PluginRuntime {
   private currentSnapshot: PluginRuntimeSnapshot = Object.freeze({
     revision: 0,
     active: Object.freeze([]),
+    instances: Object.freeze([]),
     switches: Object.freeze([]),
   })
 
@@ -160,6 +168,14 @@ export class PluginRuntime {
         .filter(instance => instance.status === 'active')
         .map(instance => instance.identity)
         .sort((a, b) => a.key < b.key ? -1 : a.key > b.key ? 1 : 0)),
+      instances: Object.freeze([...this.instances.values()]
+        .filter(instance => instance.status !== 'inactive')
+        .map(instance => Object.freeze({
+          identity: instance.identity,
+          status: instance.status,
+          cleanup: instance.cleanup,
+        }))
+        .sort((a, b) => a.identity.key.localeCompare(b.identity.key))),
       switches: Object.freeze([...this.switchRecords.values()]
         .sort((a, b) => a.pluginId < b.pluginId ? -1 : a.pluginId > b.pluginId ? 1 : 0)),
     })
@@ -316,8 +332,6 @@ export class PluginRuntime {
       await options.commitActivePointer?.()
 
       const candidate: PluginInstance = { identity: candidateIdentity, scope, status: 'active' }
-      this.instances.delete(oldInstance.identity.key)
-      this.definitions.delete(oldInstance.identity.key)
       this.instances.set(candidateIdentity.key, candidate)
       this.definitions.set(candidateIdentity.key, definition)
       this.knownDefinitions.set(definition.id, definition)
@@ -328,10 +342,13 @@ export class PluginRuntime {
         declaredMode: mode,
         adoptedMode: mode,
       }
+      const oldCleanup = await deactivatePluginInstance(oldInstance, oldDefinition.deactivate)
+      if (oldCleanup.complete) {
+        this.instances.delete(oldInstance.identity.key)
+        this.definitions.delete(oldInstance.identity.key)
+      }
       this.switchRecords.set(definition.id, Object.freeze({ ...result, committedAt: Date.now() }))
       this.publishSnapshot()
-
-      await deactivatePluginInstance(oldInstance, oldDefinition.deactivate)
       return result
     } catch (error) {
       if (committed) contributions.revert()
@@ -350,20 +367,34 @@ export class PluginRuntime {
   async deactivate(instanceKey: string): Promise<PluginDeactivateResult> {
     const instance = this.instances.get(instanceKey)
     if (!instance) {
-      return { alreadyInactive: true, scope: { disposed: 0, errors: [] } }
+      return {
+        complete: true,
+        alreadyInactive: true,
+        scope: { disposed: 0, remaining: 0, errors: [] },
+      }
     }
     const result = await deactivatePluginInstance(instance, this.definitions.get(instanceKey)?.deactivate)
-    this.instances.delete(instanceKey)
-    this.definitions.delete(instanceKey)
+    if (result.complete) {
+      this.instances.delete(instanceKey)
+      this.definitions.delete(instanceKey)
+    }
     this.publishSnapshot()
     return result
+  }
+
+  retryCleanup(instanceKey: string): Promise<PluginDeactivateResult> {
+    return this.deactivate(instanceKey)
   }
 
   async disable(pluginId: string): Promise<PluginDeactivateResult> {
     const active = [...this.instances.values()].find(instance => (
       instance.identity.pluginId === pluginId && instance.status === 'active'
     ))
-    if (!active) return { alreadyInactive: true, scope: { disposed: 0, errors: [] } }
+    if (!active) return {
+      complete: true,
+      alreadyInactive: true,
+      scope: { disposed: 0, remaining: 0, errors: [] },
+    }
     if (this.definitions.get(active.identity.key)?.criticality === 'product-required') {
       throw new PluginDisableRejectedError(pluginId)
     }

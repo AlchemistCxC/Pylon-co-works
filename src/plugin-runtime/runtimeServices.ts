@@ -53,7 +53,23 @@ export function createRuntimeServices(options: CreateRuntimeServicesOptions = {}
   })
 }
 
-const runtimeServices = createRuntimeServices({ workspaceRegistry: getWorkspaceRegistryStore() })
+type PluginDisableHandler = (pluginId: string) => void | Promise<void>
+
+let pluginDisableHandler: PluginDisableHandler | undefined
+const runtimeServices = createRuntimeServices({
+  workspaceRegistry: getWorkspaceRegistryStore(),
+  hookRuntime: new HookRuntime(undefined, {
+    onDisablePlugin: pluginId => {
+      if (!pluginDisableHandler) throw new Error('Plugin Runtime disable handler is not bound')
+      return pluginDisableHandler(pluginId)
+    },
+  }),
+})
+
+/** Composition-root seam: binds hook failure isolation to the single product runtime. */
+export function bindPluginDisableHandler(handler: PluginDisableHandler): void {
+  pluginDisableHandler = handler
+}
 
 export function getRuntimeServices(): RuntimeServices {
   return runtimeServices

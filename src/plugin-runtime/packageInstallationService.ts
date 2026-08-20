@@ -174,7 +174,11 @@ export class PackageInstallationService {
         : item)
       const resolution = this.assertContractMutation(pluginId, candidateItems)
       if (!enabled) {
-        if (this.isActive(pluginId)) await this.runtime.disable(pluginId)
+        this.assertNoIncompleteCleanup(pluginId)
+        if (this.isActive(pluginId)) {
+          const cleanup = await this.runtime.disable(pluginId)
+          if (!cleanup.complete) throw new Error(this.cleanupFailureMessage(pluginId, cleanup))
+        }
         try {
           await this.packages.setEnabled(pluginId, false)
         } catch (error) {
@@ -218,8 +222,10 @@ export class PackageInstallationService {
         installed.filter(item => item.package.pluginId !== pluginId),
         [pluginId],
       )
+      this.assertNoIncompleteCleanup(pluginId)
       if (wasActive) {
-        await this.runtime.disable(pluginId)
+        const cleanup = await this.runtime.disable(pluginId)
+        if (!cleanup.complete) throw new Error(this.cleanupFailureMessage(pluginId, cleanup))
         deactivated = true
       }
       await this.packages.uninstall(pluginId, purgeData)
@@ -232,6 +238,18 @@ export class PackageInstallationService {
 
   private isActive(pluginId: string): boolean {
     return this.runtime.snapshot().active.some(identity => identity.pluginId === pluginId)
+  }
+
+  private assertNoIncompleteCleanup(pluginId: string): void {
+    const residuals = this.runtime.snapshot().instances.filter(instance => (
+      instance.identity.pluginId === pluginId && instance.status !== 'active'
+    ))
+    if (residuals.length === 0) return
+    const errors = residuals.flatMap(instance => [
+      instance.cleanup?.deactivateError?.message,
+      ...(instance.cleanup?.scope.errors.map(error => error.message) ?? []),
+    ]).filter((message): message is string => Boolean(message))
+    throw new Error(`插件 ${pluginId} 仍有未完成清理：${errors.join('；') || '请先重试清理残留资源'}`)
   }
 
   private toContract(item: InstalledPluginPackage): PluginContract {
@@ -297,5 +315,16 @@ export class PackageInstallationService {
       }
     }
     return { ok: false, message: errorMessage(error) }
+  }
+
+  private cleanupFailureMessage(
+    pluginId: string,
+    result: Awaited<ReturnType<PluginRuntime['disable']>>,
+  ): string {
+    const errors = [
+      result.deactivateError?.message,
+      ...result.scope.errors.map(error => error.message),
+    ].filter((message): message is string => Boolean(message))
+    return `插件 ${pluginId} 清理未完成：${errors.join('；') || `${result.scope.remaining} 个资源残留`}`
   }
 }

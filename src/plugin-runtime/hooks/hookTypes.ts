@@ -59,7 +59,7 @@ export interface HookTraceEntry {
   handlerId: string
   startedAt: number
   durationMs: number
-  outcome: 'continued' | 'transformed' | 'cancelled' | 'responded' | 'failed' | 'timed-out' | 'skipped'
+  outcome: 'continued' | 'transformed' | 'cancelled' | 'responded' | 'failed' | 'timed-out' | 'skipped' | 'plugin-disable-failed'
   error?: string
 }
 

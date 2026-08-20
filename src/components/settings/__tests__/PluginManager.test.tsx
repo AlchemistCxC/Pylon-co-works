@@ -63,8 +63,11 @@ beforeEach(async () => {
 
 afterEach(async () => {
   const runtime = getPluginRuntime()
-  const demo = runtime.snapshot().active.find(identity => identity.pluginId === 'phase12.ui-mode')
-  if (demo) await runtime.deactivate(demo.runtimeInstanceId)
+  for (const instance of runtime.snapshot().instances.filter(item => (
+    item.identity.pluginId === 'phase12.ui-mode' || item.identity.pluginId === 'feature.cleanup-ui'
+  ))) {
+    await runtime.retryCleanup(instance.identity.key)
+  }
 })
 
 describe('PluginManager v2-only', () => {
@@ -199,5 +202,37 @@ describe('PluginManager v2-only', () => {
 
     expect(await screen.findByText('等待激活事件')).toBeInTheDocument()
     expect(screen.getByText('等待激活事件：workspace.opened')).toBeInTheDocument()
+  })
+
+  it('shows cleanup residuals and retries the failed runtime instance', async () => {
+    const runtime = getPluginRuntime()
+    let cleanupAttempts = 0
+    const instance = await runtime.activateBuiltin({
+      id: 'feature.cleanup-ui',
+      activate: ({ scope }) => {
+        scope.add(() => {
+          cleanupAttempts += 1
+          if (cleanupAttempts === 1) throw new Error('resource is busy')
+        }, { resourceId: 'locked-resource' })
+      },
+    })
+    await runtime.deactivate(instance.identity.key)
+    const original = installedPackage()
+    const item: InstalledPluginPackage = {
+      ...original,
+      package: {
+        ...original.package,
+        pluginId: 'feature.cleanup-ui',
+        manifest: { ...original.package.manifest, id: 'feature.cleanup-ui' },
+      },
+    }
+
+    render(<PluginManager service={fakeService([item]) as unknown as PackageInstallationService} />)
+
+    expect(await screen.findByText('清理失败')).toBeInTheDocument()
+    expect(screen.getByText(/locked-resource: resource is busy/)).toBeInTheDocument()
+    fireEvent.click(screen.getByRole('button', { name: '重试清理 feature.cleanup-ui' }))
+    expect(await screen.findByText('重试清理 feature.cleanup-ui成功')).toBeInTheDocument()
+    expect(runtime.snapshot().instances.some(value => value.identity.key === instance.identity.key)).toBe(false)
   })
 })

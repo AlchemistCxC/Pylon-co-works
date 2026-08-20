@@ -18,7 +18,7 @@ import {
   bootstrapPluginDefinitions,
   type BuiltinPluginBootstrapResult,
 } from './builtinPluginBootstrap.ts'
-import { getRuntimeServices } from './runtimeServices.ts'
+import { bindPluginDisableHandler, getRuntimeServices } from './runtimeServices.ts'
 import { BUILTIN_SKIN_PLUGIN_ID, createBuiltinSkinPluginDefinition } from './skin/builtinSkinPlugin.ts'
 
 const runtimeServices = getRuntimeServices()
@@ -30,6 +30,14 @@ const pluginHostServices = Object.freeze({
   requestSoftRemount: requestApplicationSoftRemount,
 })
 const pluginRuntime = new PluginRuntime({ host: pluginHostServices })
+bindPluginDisableHandler(async pluginId => {
+  const result = await pluginRuntime.disable(pluginId)
+  if (result.complete) return
+  const messages = [result.deactivateError, ...result.scope.errors]
+    .filter(error => error !== undefined)
+    .map(error => `${error.resourceId}: ${error.message}`)
+  throw new Error(`Plugin cleanup incomplete: ${pluginId}${messages.length > 0 ? ` (${messages.join('; ')})` : ''}`)
+})
 const definitions = new Map<string, BuiltinPluginDefinition>()
 
 for (const definition of createBuiltinProductPluginDefinitions()) definitions.set(definition.id, definition)

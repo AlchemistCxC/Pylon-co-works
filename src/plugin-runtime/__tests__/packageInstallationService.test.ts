@@ -3,6 +3,19 @@ import type { PluginPackageClient, PluginPackageDescriptor } from '../../infrast
 import { PackageInstallationService } from '../packageInstallationService.ts'
 import type { PackagePluginRuntimeService } from '../packagePluginRuntime.ts'
 import type { PluginRuntime } from '../pluginRuntime.ts'
+import type { PluginIdentity } from '../pluginIdentity.ts'
+
+function identity(pluginId: string): PluginIdentity {
+  const packageInstanceId = `${pluginId}@1.0.0-hash`
+  return {
+    pluginId,
+    version: '1.0.0',
+    packageInstanceId,
+    instanceId: 'run-1',
+    runtimeInstanceId: `${packageInstanceId}#run-1`,
+    key: `${packageInstanceId}#run-1`,
+  }
+}
 
 const descriptor: PluginPackageDescriptor = {
   pluginId: 'feature.demo',
@@ -24,14 +37,23 @@ const descriptor: PluginPackageDescriptor = {
 
 function fixture(active = false) {
   const runtime = {
-    snapshot: vi.fn(() => ({ active: active ? [{ pluginId: descriptor.pluginId }] : [] })),
+    snapshot: vi.fn<PluginRuntime['snapshot']>(() => ({
+      revision: 0,
+      active: active ? [identity(descriptor.pluginId)] : [],
+      instances: [],
+      switches: [],
+    })),
     contractSnapshot: vi.fn(() => [] as Array<{
       id: string
       version: string
       enabled: boolean
       dependencies?: Readonly<Record<string, string>>
     }>),
-    disable: vi.fn(async () => undefined),
+    disable: vi.fn<PluginRuntime['disable']>(async () => ({
+      complete: true,
+      alreadyInactive: false,
+      scope: { disposed: 0, remaining: 0, errors: [] },
+    })),
     enable: vi.fn(async () => undefined),
     reload: vi.fn(async () => undefined),
   }
@@ -181,7 +203,10 @@ describe('PackageInstallationService', () => {
       { package: consumer, enabled: true },
     ])
     runtime.snapshot.mockReturnValue({
-      active: [{ pluginId: 'feature.demo' }, { pluginId: 'feature.consumer' }],
+      revision: 1,
+      active: [identity('feature.demo'), identity('feature.consumer')],
+      instances: [],
+      switches: [],
     })
     runtime.contractSnapshot.mockReturnValue([
       { id: 'feature.demo', version: '1.0.0', enabled: true },
@@ -207,6 +232,49 @@ describe('PackageInstallationService', () => {
     })
     expect(runtime.disable).not.toHaveBeenCalled()
     expect(runtime.enable).not.toHaveBeenCalled()
+    expect(packages.uninstall).not.toHaveBeenCalled()
+  })
+
+  it('keeps native enabled state and package bytes when runtime cleanup is incomplete', async () => {
+    const { service, runtime, packages } = fixture(true)
+    runtime.disable.mockResolvedValue({
+      complete: false,
+      alreadyInactive: false,
+      scope: {
+        disposed: 1,
+        remaining: 1,
+        errors: [{ resourceId: 'locked', message: 'resource locked' }],
+      },
+    })
+
+    await expect(service.setEnabled('feature.demo', false)).resolves.toMatchObject({
+      ok: false,
+      message: expect.stringContaining('resource locked'),
+    })
+    expect(packages.setEnabled).not.toHaveBeenCalled()
+
+    runtime.snapshot.mockReturnValue({
+      revision: 1,
+      active: [],
+      instances: [{
+        identity: {
+          pluginId: descriptor.pluginId,
+          version: descriptor.version,
+          packageInstanceId: descriptor.packageInstanceId,
+          instanceId: 'run-1',
+          runtimeInstanceId: `${descriptor.packageInstanceId}#run-1`,
+          key: `${descriptor.packageInstanceId}#run-1`,
+        },
+        status: 'cleanup-failed',
+        cleanup: await runtime.disable('feature.demo'),
+      }],
+      switches: [],
+    })
+
+    await expect(service.uninstall('feature.demo')).resolves.toMatchObject({
+      ok: false,
+      message: expect.stringContaining('resource locked'),
+    })
     expect(packages.uninstall).not.toHaveBeenCalled()
   })
 

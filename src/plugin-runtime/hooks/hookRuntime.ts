@@ -247,7 +247,21 @@ export class HookRuntime {
     if (policy === 'disable-hook') this.disabledHandlers.add(entry.contributionId)
     if (policy === 'disable-plugin') {
       this.disabledHandlers.add(entry.contributionId)
-      await this.onDisablePlugin?.(entry.ownerPluginId)
+      try {
+        await this.onDisablePlugin?.(entry.ownerPluginId)
+      } catch (disableError) {
+        this.pushTrace({
+          invocationId,
+          hookName: entry.value.hookName,
+          pluginId: entry.ownerPluginId,
+          runtimeInstanceId: entry.ownerRuntimeInstanceId,
+          handlerId: entry.value.id,
+          startedAt,
+          durationMs: Date.now() - startedAt,
+          outcome: 'plugin-disable-failed',
+          error: disableError instanceof Error ? disableError.message : String(disableError),
+        })
+      }
     }
     if (policy === 'abort') {
       return { action: 'cancel', reason: error instanceof Error ? error.message : String(error) }

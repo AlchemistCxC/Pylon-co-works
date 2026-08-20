@@ -2,6 +2,29 @@ import { describe, expect, it, vi } from 'vitest'
 import { PluginScope } from '../pluginScope'
 
 describe('PluginScope', () => {
+  it('disposeNow waits for async disposal and returns stable cleanup errors', async () => {
+    let rejectDisposal!: (error: Error) => void
+    const scope = new PluginScope('builtin.test@async-dispose')
+    scope.add(
+      () => new Promise<void>((_resolve, reject) => { rejectDisposal = reject }),
+      { resourceId: 'async-resource', label: 'async fixture' },
+    )
+
+    const disposal = scope.disposeNow()
+    expect(disposal).toBeInstanceOf(Promise)
+    let settled = false
+    void disposal.then(() => { settled = true })
+    await Promise.resolve()
+    expect(settled).toBe(false)
+
+    rejectDisposal(new Error('late cleanup failure'))
+    await expect(disposal).resolves.toMatchObject({
+      disposed: 0,
+      remaining: 1,
+      errors: [{ resourceId: 'async-resource', message: 'late cleanup failure' }],
+    })
+  })
+
   it('按注册逆序统一回收 Disposable，重复 dispose 幂等', async () => {
     const calls: string[] = []
     const scope = new PluginScope('builtin.test@instance-1')
@@ -26,8 +49,29 @@ describe('PluginScope', () => {
     const result = await scope.dispose()
 
     expect(calls).toEqual(['survivor'])
-    expect(result.disposed).toBe(2)
-    expect(result.errors).toHaveLength(1)
+    expect(result).toMatchObject({
+      disposed: 1,
+      remaining: 1,
+      errors: [{ message: 'dispose boom' }],
+    })
+  })
+
+  it('retry disposes only residual failures and never repeats successful resources', async () => {
+    const calls: string[] = []
+    let failingAttempts = 0
+    const scope = new PluginScope('builtin.test@retry')
+    scope.add(() => { calls.push('first') }, { resourceId: 'first' })
+    scope.add(() => {
+      calls.push('failing')
+      failingAttempts += 1
+      if (failingAttempts === 1) throw new Error('transient')
+    }, { resourceId: 'failing' })
+    scope.add(() => { calls.push('last') }, { resourceId: 'last' })
+
+    await expect(scope.dispose()).resolves.toMatchObject({ disposed: 2, remaining: 1 })
+    await expect(scope.dispose()).resolves.toMatchObject({ disposed: 1, remaining: 0, errors: [] })
+
+    expect(calls).toEqual(['last', 'failing', 'first', 'failing'])
   })
 
   it('统一管理 event listener、timer 与 AbortController', async () => {

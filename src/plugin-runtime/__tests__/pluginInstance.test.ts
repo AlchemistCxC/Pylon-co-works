@@ -57,9 +57,39 @@ describe('PluginInstance 静态内置插件纵向 Harness', () => {
       throw new Error('deactivate boom')
     })
 
-    expect(result.deactivateError).toBeInstanceOf(Error)
+    expect(result).toMatchObject({
+      complete: false,
+      alreadyInactive: false,
+      deactivateError: { resourceId: 'deactivate-hook', message: 'deactivate boom' },
+    })
     expect(result.scope.disposed).toBe(1)
     expect(calls).toEqual(['resource'])
+    expect(instance.status).toBe('cleanup-failed')
+  })
+
+  it('scope cleanup failure stays retryable until the residual succeeds', async () => {
+    const identity = createPluginIdentity('builtin.scope-fixture', 'instance-retry')
+    let attempts = 0
+    const instance = await activateBuiltinPlugin(identity, context => {
+      context.scope.add(() => {
+        attempts += 1
+        if (attempts === 1) throw new Error('resource busy')
+      }, { resourceId: 'busy-resource' })
+    })
+
+    await expect(deactivatePluginInstance(instance)).resolves.toMatchObject({
+      complete: false,
+      scope: {
+        remaining: 1,
+        errors: [{ resourceId: 'busy-resource', message: 'resource busy' }],
+      },
+    })
+    expect(instance.status).toBe('cleanup-failed')
+
+    await expect(deactivatePluginInstance(instance)).resolves.toMatchObject({
+      complete: true,
+      scope: { disposed: 1, remaining: 0, errors: [] },
+    })
     expect(instance.status).toBe('inactive')
   })
 

@@ -7,6 +7,7 @@ import {
 } from '../../plugin-runtime/pluginCompositionRoot.ts'
 import { PYLON_PLUGIN_API_VERSION } from '../../plugin-runtime/packageManifest.ts'
 import type { PackageInstallationService } from '../../plugin-runtime/packageInstallationService.ts'
+import type { PluginDeactivateResult } from '../../plugin-runtime/pluginInstance.ts'
 import type { InstalledPluginPackage } from '../../infrastructure/plugins/pluginPackageClient.ts'
 import { IS_TAURI } from '../../infrastructure/tauri/env.ts'
 import { kernelBootstrap } from '../../kernel/kernelBootstrapServices.ts'
@@ -33,6 +34,13 @@ async function pickPluginDirectory(): Promise<string | null> {
   const { open } = await import('@tauri-apps/plugin-dialog')
   const selected = await open({ directory: true, multiple: false, title: '选择 api=1.0 插件包' })
   return typeof selected === 'string' ? selected : null
+}
+
+function cleanupResultMessage(result: PluginDeactivateResult): string {
+  const errors = [result.deactivateError, ...result.scope.errors]
+    .filter(error => error !== undefined)
+    .map(error => `${error.resourceId}: ${error.message}`)
+  return errors.length > 0 ? errors.join('；') : `${result.scope.remaining} 个资源仍待清理`
 }
 
 export default function PluginManager({
@@ -109,6 +117,14 @@ export default function PluginManager({
     () => new Map(snapshot.active.map(identity => [identity.pluginId, identity])),
     [snapshot],
   )
+  const cleanupFailuresById = useMemo(() => {
+    const failures = new Map<string, typeof snapshot.instances>()
+    for (const instance of snapshot.instances) {
+      if (instance.status !== 'cleanup-failed') continue
+      failures.set(instance.identity.pluginId, [...(failures.get(instance.identity.pluginId) ?? []), instance])
+    }
+    return failures
+  }, [snapshot])
   const installedById = useMemo(
     () => new Map(installed.map(item => [item.package.pluginId, item])),
     [installed],
@@ -119,7 +135,10 @@ export default function PluginManager({
   const setBuiltinEnabled = async (pluginId: string, enabled: boolean) => {
     await run(`${enabled ? '启用' : '停用'} ${pluginId}`, async () => {
       if (enabled) await bootstrap.retryPlugin(pluginId)
-      else await runtime.disable(pluginId)
+      else {
+        const result = await runtime.disable(pluginId)
+        if (!result.complete) return { ok: false, message: cleanupResultMessage(result) }
+      }
       return { ok: true }
     })
   }
@@ -127,6 +146,8 @@ export default function PluginManager({
   const renderPlugin = (pluginId: string, builtin: boolean) => {
     const identity = activeById.get(pluginId)
     const installedItem = installedById.get(pluginId)
+    const cleanupFailures = cleanupFailuresById.get(pluginId) ?? []
+    const hasCleanupFailure = cleanupFailures.length > 0
     const enabled = builtin ? Boolean(identity) : (installedItem?.enabled ?? false)
     const manifest = installedItem?.package.manifest
     const productRequired = builtin && getBuiltinPluginCriticality(pluginId) === 'product-required'
@@ -152,13 +173,22 @@ export default function PluginManager({
           </span>
           {productRequired && <span className="plugin-type-badge type-first-party">产品运行必需</span>}
           <span className={`plugin-state-badge ${identity ? 'is-active' : ''}`}>
-            {identity ? '运行中'
+            {hasCleanupFailure ? (identity ? '运行中（有清理残留）' : '清理失败')
+              : identity ? '运行中'
               : bootstrapFailure ? '启动失败'
                 : contractDiagnostic?.code === 'waiting_activation' ? '等待激活事件'
                   : contractDiagnostic?.blocking ? '契约阻止'
                 : bootstrapSnapshot.kind === 'safe-mode' && builtin ? '安全模式未启动'
                   : enabled ? '等待激活' : '已停用'}
           </span>
+          {cleanupFailures.map(failure => (
+            <span className="set-hint" key={failure.identity.key}>
+              {[failure.cleanup?.deactivateError, ...(failure.cleanup?.scope.errors ?? [])]
+                .filter(error => error !== undefined)
+                .map(error => `${error.resourceId}: ${error.message}`)
+                .join('；') || `${failure.cleanup?.scope.remaining ?? 0} 个资源仍待清理`}
+            </span>
+          ))}
           {contractDiagnostic && <span className="set-hint">{contractDiagnostic.message}</span>}
           <details className="plugin-technical">
             <summary>技术信息</summary>
@@ -172,20 +202,37 @@ export default function PluginManager({
             type="button"
             className="ps-btn sm"
             aria-label={`${(builtin ? Boolean(identity) : enabled) ? '停用' : '启用'} ${pluginId}`}
-            disabled={busy !== null || Boolean(identity && productRequired)}
+            disabled={busy !== null || hasCleanupFailure || Boolean(identity && productRequired)}
             onClick={() => void (builtin
               ? setBuiltinEnabled(pluginId, !identity)
               : run(`${enabled ? '停用' : '启用'} ${pluginId}`, () => service.setEnabled(pluginId, !enabled)))}
           >
             {(builtin ? Boolean(identity) : enabled) ? '停用' : '启用'}
           </button>
+          {hasCleanupFailure && (
+            <button
+              type="button"
+              className="ps-btn sm"
+              aria-label={`重试清理 ${pluginId}`}
+              disabled={busy !== null}
+              onClick={() => void run(`重试清理 ${pluginId}`, async () => {
+                for (const failure of cleanupFailures) {
+                  const result = await runtime.retryCleanup(failure.identity.key)
+                  if (!result.complete) return { ok: false, message: cleanupResultMessage(result) }
+                }
+                return { ok: true }
+              })}
+            >
+              重试清理
+            </button>
+          )}
           {installedItem && identity && (
             <button type="button" className="ps-btn sm" disabled={busy !== null} onClick={() => void run(`重新加载 ${pluginId}`, () => service.reload(pluginId))}>
               重载
             </button>
           )}
           {installedItem && (
-            <button type="button" className="ps-btn sm danger" disabled={busy !== null} onClick={() => {
+            <button type="button" className="ps-btn sm danger" disabled={busy !== null || hasCleanupFailure} onClick={() => {
               if (window.confirm(`确认卸载插件 ${pluginId}？`)) void run(`卸载 ${pluginId}`, () => service.uninstall(pluginId))
             }}>
               卸载

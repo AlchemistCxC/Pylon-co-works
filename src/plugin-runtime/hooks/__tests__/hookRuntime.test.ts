@@ -131,4 +131,41 @@ describe('HookRuntime v2', () => {
       vi.useRealTimers()
     }
   })
+
+  it('disable-plugin policy delegates plugin shutdown to the runtime owner', async () => {
+    const disablePlugin = vi.fn(async () => undefined)
+    const runtime = new HookRuntime(undefined, { onDisablePlugin: disablePlugin })
+    const owner = createPluginIdentity('p.unhealthy', 'run-1')
+    runtime.registry.register(owner, 'turn.failed', {
+      id: 'always-fails',
+      mode: 'notification',
+      failurePolicy: 'disable-plugin',
+      handler: () => { throw new Error('hook exploded') },
+    })
+
+    await expect(runtime.invoke('turn.failed', {})).resolves.toMatchObject({ action: 'continue' })
+    expect(disablePlugin).toHaveBeenCalledOnce()
+    expect(disablePlugin).toHaveBeenCalledWith('p.unhealthy')
+  })
+
+  it('records a stable diagnostic when disable-plugin cleanup cannot complete', async () => {
+    const runtime = new HookRuntime(undefined, {
+      onDisablePlugin: async () => { throw new Error('scope resource cleanup failed') },
+    })
+    const owner = createPluginIdentity('p.cleanup-failed', 'run-1')
+    runtime.registry.register(owner, 'turn.failed', {
+      id: 'always-fails',
+      mode: 'notification',
+      failurePolicy: 'disable-plugin',
+      handler: () => { throw new Error('hook exploded') },
+    })
+
+    await expect(runtime.invoke('turn.failed', {})).resolves.toMatchObject({ action: 'continue' })
+    expect(runtime.traceSnapshot().entries.at(-1)).toMatchObject({
+      pluginId: 'p.cleanup-failed',
+      handlerId: 'always-fails',
+      outcome: 'plugin-disable-failed',
+      error: 'scope resource cleanup failed',
+    })
+  })
 })

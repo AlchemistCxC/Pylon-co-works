@@ -52,4 +52,30 @@ describe('Plugin composition root bootstrap boundary', () => {
     ])
     expect(result.skippedPluginIds).toEqual(['builtin.skin'])
   })
+
+  it('wires hook disable-plugin policy to the single product runtime', async () => {
+    vi.resetModules()
+    const composition = await import('../pluginCompositionRoot.ts')
+    const { getHookRuntime } = await import('../runtimeServices.ts')
+    await composition.getPluginRuntime().activateBuiltin({
+      id: 'user.failing-hook',
+      activate: ({ hooks }) => {
+        hooks.register('turn.failed', {
+          id: 'faulty-handler',
+          mode: 'notification',
+          failurePolicy: 'disable-plugin',
+          handler: () => { throw new Error('handler failed') },
+        })
+      },
+    })
+
+    await getHookRuntime().invoke('turn.failed', {})
+
+    expect(composition.getPluginRuntime().snapshot().active)
+      .not.toEqual(expect.arrayContaining([expect.objectContaining({ pluginId: 'user.failing-hook' })]))
+    expect(composition.getPluginRuntime().snapshot().instances)
+      .not.toEqual(expect.arrayContaining([expect.objectContaining({
+        identity: expect.objectContaining({ pluginId: 'user.failing-hook' }),
+      })]))
+  })
 })

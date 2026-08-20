@@ -85,6 +85,61 @@ describe('PluginRuntime 静态内置插件 Harness', () => {
     expect(runtime.snapshot().active).toEqual([])
   })
 
+  it('retains cleanup-failed instances and removes them only after retry succeeds', async () => {
+    const runtime = new PluginRuntime()
+    let cleanupBlocked = true
+    const instance = await runtime.activateBuiltin({
+      id: 'feature.cleanup-retry',
+      activate: ({ scope }) => {
+        scope.add(() => {
+          if (cleanupBlocked) throw new Error('resource locked')
+        }, { resourceId: 'locked-resource' })
+      },
+    })
+
+    await expect(runtime.deactivate(instance.identity.key)).resolves.toMatchObject({ complete: false })
+    expect(runtime.snapshot().active).toEqual([])
+    expect(runtime.snapshot().instances).toEqual([expect.objectContaining({
+      identity: instance.identity,
+      status: 'cleanup-failed',
+      cleanup: expect.objectContaining({
+        scope: expect.objectContaining({ remaining: 1 }),
+      }),
+    })])
+
+    cleanupBlocked = false
+    await expect(runtime.retryCleanup(instance.identity.key)).resolves.toMatchObject({ complete: true })
+    expect(runtime.snapshot().instances).toEqual([])
+  })
+
+  it('keeps a failed old-instance cleanup observable after a successful shadow update', async () => {
+    const runtime = new PluginRuntime()
+    let cleanupBlocked = true
+    const old = await runtime.activateBuiltin({
+      id: 'feature.shadow-cleanup',
+      activate: ({ scope }) => {
+        scope.add(() => {
+          if (cleanupBlocked) throw new Error('old resource busy')
+        }, { resourceId: 'old-resource' })
+      },
+    })
+
+    const updated = await runtime.update({
+      id: 'feature.shadow-cleanup',
+      activate: () => {},
+    })
+
+    expect(runtime.snapshot().active.map(item => item.key)).toEqual([updated.runtimeInstanceId])
+    expect(runtime.snapshot().instances).toEqual(expect.arrayContaining([
+      expect.objectContaining({ identity: old.identity, status: 'cleanup-failed' }),
+      expect.objectContaining({ status: 'active' }),
+    ]))
+
+    cleanupBlocked = false
+    await runtime.retryCleanup(old.identity.key)
+    expect(runtime.snapshot().instances).toHaveLength(1)
+  })
+
   it('同 pluginId 活跃时拒绝重复实例', async () => {
     const runtime = new PluginRuntime()
     await runtime.activateBuiltin({ id: 'builtin.scope-fixture', activate: () => {} })
