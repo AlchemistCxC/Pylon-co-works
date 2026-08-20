@@ -10,7 +10,7 @@
 >
 > 约束：不启用子 Agent；不改变五个第一方 Product Plugin 的粗粒度构造；第三方插件是完全可信本机代码；canonical journal 仍是唯一 durable history。
 >
-> 最近完成：WI-P4 已于 `de21bc6` 收敛（187 项定向测试、TypeScript、ESLint、静态 boundary、diff check 通过）；当前进入 WI-V1。
+> 最近完成：WI-V1 已于 `7d4de28` 完成验收收口；插件相关全量 harness 漂移已修，production build 与 Rust 828 项测试通过。剩余非本施工范围的 Solid/legacy 门禁债务见 §6.5。
 
 ## 0. 如何使用本文档
 
@@ -30,14 +30,14 @@
 |---|---|---|---|---|
 | WI-A1 | AGT-003 | 参数数组编辑器与 effective invocation 预览 | 无 | 已完成 |
 | WI-A2 | AGT-004–008 | 有预算、可诊断、不泄漏进程的 Agent detection report | WI-A1 | 已完成 |
-| WI-A3 | AGT-010、AGT-012 | 配置 CAS、备份、原子替换与数值 hard max | WI-A1 | 待施工 |
-| WI-A4 | AGT-009、AGT-011 | Stored/PendingRestart/Activated 与类型化连接错误 | WI-A3 | 待施工 |
-| WI-A5 | AGT-013 | 重连后逐 Session continuity probe 与 detached 收敛 | WI-A4 | 待施工 |
+| WI-A3 | AGT-010、AGT-012 | 配置 CAS、备份、原子替换与数值 hard max | WI-A1 | 已完成 |
+| WI-A4 | AGT-009、AGT-011 | Stored/PendingRestart/Activated 与类型化连接错误 | WI-A3 | 已完成 |
+| WI-A5 | AGT-013 | 重连后逐 Session continuity probe 与 detached 收敛 | WI-A4 | 已完成 |
 | WI-P1 | PLG-001、PLG-002、PLG-005 | Kernel-first bootstrap、Safe Mode、显式 host seam | 无 | 已完成 |
 | WI-P2 | PLG-003 | dependencies/conflicts/activation events 硬契约 | WI-P1 | 已完成 |
 | WI-P3 | PLG-004、PLG-007、PLG-008 | 可观察的部分 cleanup 与 hook disable-plugin 一致性 | WI-P1 | 已完成 |
 | WI-P4 | PLG-006 | Product Shell 只消费稳定 contribution/interface | WI-P1、WI-P2 | 已完成 |
-| WI-V1 | Phase 5 | 台账对账、故障矩阵、一次全链路验收 | 全部 WI | 待施工 |
+| WI-V1 | Phase 5 | 台账对账、故障矩阵、一次全链路验收 | 全部 WI | 已完成（有基线限制） |
 
 推荐顺序：`A1 → A2 → A3 → A4 → A5 → P1 → P2 → P3 → P4 → V1`。A 线与 P 线源码交集小，但本 harness 是单执行者，不做并行超前施工。
 
@@ -114,30 +114,30 @@ flowchart TD
 
 ```mermaid
 flowchart TD
-  KR[KernelRoot module evaluation] -->|side-effect import| CR[pluginCompositionRoot]
-  CR -->|activateBuiltinSync loop| PR[PluginRuntime]
+  KR[KernelRoot recovery surface] --> KB[KernelBootstrap]
+  KB -->|显式 bootstrap/retry/safe-mode| CR[pluginCompositionRoot]
+  CR -->|唯一 product runtime| PR[PluginRuntime]
   PR --> PAC[createPluginActivationContext]
   PAC --> RS[runtimeServices globals]
   PAC --> AR[Kernel applicationRuntime]
-  PR -->|update drain| RS
-  CR --> AR
+  PR -->|manifest contract + lifecycle| RS
   AR --> AM[ApplicationMount]
   AM --> App[App.tsx / Product Shell]
-  App -->|direct calls| AA[builtinPylonAgentAdapters]
-  App -->|direct calls| Tools[builtinPylonTools]
+  App --> Ports[Product contribution ports]
+  Ports -->|resolveRequired| Services[PluginServiceRegistry]
+  Services --> AA[builtinPylonAgentAdapters]
+  Services --> Tools[builtinPylonTools]
+  RS -->|disable-plugin| PR
 ```
 
 当前事实：
 
-- `KernelRoot.tsx` 顶层 side-effect import `pluginCompositionRoot.ts`；后者模块求值时构造 runtime 并对全部内置 definition 调用 `activateBuiltinSync`。任何 throw 都发生在 Recovery UI 可渲染之前。
-- `PluginRuntime.activateBuiltinSync` 的 catch 使用 `void scope.dispose()` 后立即 rethrow，rollback 自身也可能在后台失败。
-- `PluginRuntime` 接收 definition 的 `dependencies`，但 activate/enable/disable/update 都没有执行依赖、冲突或 activation event 契约。
-- `packageManifest.ts` 解析 dependencies/conflicts，但没有完整校验 `activation`；`PackageInstallationService` 只检查 enabled/active。
-- `PluginRuntime.deactivate` 不论 `deactivateError` 或 `scope.errors` 都删除 instance，并发布 inactive snapshot。
-- `PluginScope.disposeNow` 对 Promise 只挂异步 catch；返回时 `errors` 尚未稳定。
-- 全局 `HookRuntime` 在 `runtimeServices.ts` 以 `new HookRuntime()` 创建，没有 `onDisablePlugin`，所以 `failurePolicy='disable-plugin'` 只禁用一个 handler。
-- `pluginActivationContext.ts` 直接读取全部 global registry 和 Kernel `applicationRuntime`；`PluginRuntime.ts` 又直接读取 `getHookRuntime`，形成 Kernel/plugin-runtime 双向和初始化顺序耦合。
-- `App.tsx` 直接 import/call `applyPylonAgentInstances`、`applyPylonToolDictionary`；`Settings.tsx` 也直接调用 tools implementation，Product Shell 知道具体 Product Plugin 实现。
+- `KernelRoot.tsx` 先渲染 recovery surface，再由 `KernelBootstrap` 显式调用 `bootstrapBuiltins`；失败进入 degraded，可按插件 retry 或进入 Safe Mode，不依赖 ESM side effect ordering。
+- `pluginCompositionRoot.ts` 只构造一个产品 `PluginRuntime`。Kernel bootstrap、外置 package service、Hook `disable-plugin` 与 Product contribution resolution 都回到这个实例，没有第二个状态权威。
+- `pluginContractResolver.ts` 对 required/optional dependency、版本范围、依赖环、双向 conflict 与 activation event 形成单一决策；Runtime 与 package mutation 在改状态前复用该契约。
+- `PluginScope` 使用稳定 resource id、逆序 awaited dispose；成功项移除，失败 residual 保留。`PluginRuntime` 将不完整停用保留为 `cleanup-failed`，`retryCleanup` 可重试，Package disable/uninstall 不得绕过残留。
+- Hook `failurePolicy='disable-plugin'` 已绑定唯一 `PluginRuntime`；停用不完整会写 `plugin-disable-failed` trace，不能伪装成成功。
+- `App.tsx` 与 Settings 通过 `AgentInstanceSink` / `ToolDictionarySink` 和 `PluginServiceRegistry.resolveRequired` 消费产品贡献；静态 boundary guard 禁止重新 import `builtinPylon*` implementation。
 - 五个第一方包已经有独立 `pylon-plugin.json` 与 entry；`builtinProductPlugins.ts` 已做第一方依赖拓扑排序，这部分构造必须保留。
 
 ### 2.4 Plugin 源码地图
@@ -145,18 +145,20 @@ flowchart TD
 | 层 | 文件 / symbol | 当前责任 | 后续 WI |
 |---|---|---|---|
 | Kernel | `src/kernel/KernelRoot.tsx`、`KernelRecoveryLayer.tsx`、`ApplicationMount.tsx` | Kernel surface 与 Application mount | P1 |
-| Composition | `src/plugin-runtime/pluginCompositionRoot.ts` | 全局实例与模块求值期激活 | P1、P2 |
+| Bootstrap | `src/kernel/kernelBootstrap.ts`、`kernelBootstrapServices.ts` | 显式启动、degraded/retry/Safe Mode | 已由 P1 收敛 |
+| Composition | `src/plugin-runtime/pluginCompositionRoot.ts` | 唯一产品 Runtime、内置定义与 package service composition | 已由 P1/P2 收敛 |
 | Host | `src/plugin-runtime/pluginRuntime.ts` | activate/update/deactivate/enable/reload | P1–P3 |
 | Instance | `src/plugin-runtime/pluginInstance.ts` | activation transaction 与 deactivate result | P3 |
 | Resource | `src/plugin-runtime/pluginScope.ts` | resource ownership/dispose | P3 |
 | Context | `src/plugin-runtime/pluginActivationContext.ts`、`runtimeServices.ts` | activation context 与全局 registries | P1 |
-| Manifest | `src/plugin-runtime/packageManifest.ts`、`firstPartyProductPackage.ts` | manifest parse 与第一方映射 | P2 |
+| Manifest | `src/plugin-runtime/packageManifest.ts`、`pluginContractResolver.ts`、`firstPartyProductPackage.ts` | manifest parse、图契约与第一方映射 | 已由 P2 收敛 |
 | Package runtime | `src/plugin-runtime/packagePluginRuntime.ts` | 动态 import、style、native runtime dir | P2、P3 |
 | Package orchestration | `src/plugin-runtime/packageInstallationService.ts` | startup/install/enable/disable/uninstall | P1–P3 |
 | Native package | `src-tauri/src/plugin_cmds.rs` | package/state/journal/runtime directory authority | P2、P3 |
 | Hook | `src/plugin-runtime/hooks/hookRuntime.ts`、`runtimeServices.ts` | failure policy/circuit/drain | P3 |
 | UI | `src/components/settings/PluginManager.tsx` | active/enabled 操作和日志 | P1–P3 |
-| Product | `src/App.tsx`、`src/components/Settings.tsx`、`builtinPylonAgentAdapters.ts`、`builtinPylonTools.ts` | Product Shell 与具体插件直连 | P4 |
+| Product port | `src/app/ports/productContributionPorts.ts`、`pluginServiceRegistry.ts` | Product Shell 到 Agent/Tool 插件的稳定接口 | 已由 P4 收敛 |
+| Product implementation | `builtinPylonAgentAdapters.ts`、`builtinPylonTools.ts` | 注册 sink 并维护激活期 projection | 已由 P4 收敛 |
 
 ### 2.5 本文档的源码核验边界
 
@@ -166,7 +168,7 @@ flowchart TD
 - Plugin：`KernelRoot.tsx`、`KernelRecoveryLayer.tsx`、`ApplicationMount.tsx`、`applicationRuntime.ts`、`pluginCompositionRoot.ts`、`pluginRuntime.ts`、`pluginInstance.ts`、`pluginScope.ts`、`pluginActivationContext.ts`、`runtimeServices.ts`、`packageManifest.ts`、`packagePluginRuntime.ts`、`packageInstallationService.ts`、`hookRuntime.ts`、`plugin_cmds.rs`、`App.tsx`、`Settings.tsx`、五个第一方 package manifest/entry 及其定向测试。
 - 决策与历史：`Pylon-Kernel-施工台账.md` 的 D1–D17/剩余问题表，以及 `Pylon-项目架构参考.md` 的 Agent、Plugin、Session/canonical 拓扑。
 
-源码核验基准是 `25455fc`。若 `git diff <本 WI base> -- <上述相关路径>` 没有 interface/ownership 漂移，禁止以“保险”为由重新全仓扫描。
+本轮实现核验基准是 `7d4de28`；第五阶段又按上述 Plugin 纵向链完成 79/79 定向架构测试、静态 contribution boundary 与 production artifact smoke。若 `git diff <本 WI base> -- <上述相关路径>` 没有 interface/ownership 漂移，禁止以“保险”为由重新全仓扫描。
 
 ## 3. Work Item 施工规格
 
@@ -675,13 +677,13 @@ git diff --check
 
 ```yaml
 active_wi: WI-V1
-state: 施工中
+state: 已完成
 baseline_sha: 25455fc
-implementation_target_sha: de21bc666b81fc86ebd8b28feecb3b5ae9935c76
+implementation_target_sha: 7d4de28
 review_verdict: APPROVED_WITH_NOTES
-test_verdict: TEST_PASSED
+test_verdict: TEST_PASSED_WITH_BASELINE_LIMITATIONS
 blocker: null
-next_wi: WI-V1
+next_wi: null
 ```
 
 ### 6.2 执行记录
@@ -691,15 +693,15 @@ next_wi: WI-V1
 | WI | base | implementation target | review | tests | evidence checkpoint | 状态 |
 |---|---|---|---|---|---|---|
 | WI-A1 | 25455fc | 9e0260c | APPROVED_WITH_NOTES | TEST_PASSED | invocation editor + structured args tests | 已完成 |
-| WI-A2 | 9e0260c | 9e0260c | APPROVED_WITH_NOTES | TEST_PASSED | detection report budget/diagnostic/process cleanup tests | 已完成 |
-| WI-A3 | — | — | — | — | — | 待施工 |
-| WI-A4 | — | — | — | — | — | 待施工 |
-| WI-A5 | — | — | — | — | — | 待施工 |
+| WI-A2 | 9e0260c | f8e4208 | APPROVED_WITH_NOTES | TEST_PASSED | detection report budget/diagnostic/process cleanup tests | 已完成 |
+| WI-A3 | f8e4208 | 9a4180b | APPROVED | TEST_PASSED | CAS/backup/hard-max Rust tests | 已完成 |
+| WI-A4 | 9a4180b | ea0bb42 | APPROVED | TEST_PASSED | activation state/rollback/typed connection tests | 已完成 |
+| WI-A5 | ea0bb42 | 7aabb95 | APPROVED | TEST_PASSED | bounded continuity probe/detached tests | 已完成 |
 | WI-P1 | 7aabb95 | 21b5955 | APPROVED | TEST_PASSED | bootstrap/safe-mode/host seam focused tests | 已完成 |
 | WI-P2 | 21b5955 | e0e0245 | APPROVED | TEST_PASSED | 71 TS + 12 Rust focused tests | 已完成 |
 | WI-P3 | e0e0245 | 3320114 | APPROVED_WITH_NOTES | TEST_PASSED | 62 focused tests + tsc/eslint/diff | 已完成 |
 | WI-P4 | 476b48f | de21bc6 | APPROVED_WITH_NOTES | TEST_PASSED | 187 focused + tsc/eslint/boundary/diff | 已完成 |
-| WI-V1 | — | — | — | — | — | 待施工 |
+| WI-V1 | 998068b | 7d4de28 | APPROVED_WITH_NOTES | TEST_PASSED_WITH_BASELINE_LIMITATIONS | §6.5 fault matrix/full-gate evidence | 已完成 |
 
 ### 6.3 自审 finding 台账
 
@@ -709,6 +711,7 @@ next_wi: WI-V1
 |---|---|---|---|---|---|
 | P3-R1 | WI-P3 | IMPORTANT | `PackageInstallationService.uninstall` | 已有 cleanup residual 时禁止二次卸载绕过 | 已补回归测试并关闭 |
 | P4-R1 | WI-P4 | IMPORTANT | Product Agent/Tool projection dispose | 停用时清除未知 Agent 与外置字典 provider 残留 | 已补生命周期测试并关闭 |
+| V1-R1 | WI-V1 | IMPORTANT | product contribution test harness | P1 后测试不得靠 composition-root import side effect 获得内置贡献 | 17 文件改为显式 test bootstrap；77/77 通过并关闭 |
 
 ### 6.4 建议台账
 
@@ -717,6 +720,21 @@ next_wi: WI-V1
 | Note | 来源 WI | 下一 WI 处理 | 状态/理由 |
 |---|---|---|---|
 | P4-N1 | WI-P4 | WI-V1 | `check:solid` 被既有 `MarkdownContent.solid.tsx:30` 类型错误阻断；P4 自身 boundary/tsc/lint 绿色，V1 复核 |
+
+### 6.5 WI-V1 验收证据与基线限制
+
+| 门禁/矩阵 | 结果 | 结论 |
+|---|---|---|
+| Agent/Plugin 前端故障矩阵 | 99/99；P4 扩展矩阵 187/187 | 通过 |
+| pylon-core detection | 12/12 | budget、unknown detector、process-tree cleanup 通过 |
+| Rust agent config / lifecycle | 57/57、21/21 | CAS/backup/hard max、restart rollback、continuity 通过 |
+| `npm run check:all`（本轮唯一一次） | frontend 阶段 1560/1634；74 失败后停止 | 非零；其中 67 项为插件显式 bootstrap/Scope 契约漂移，本轮已定向修复并以 77/77 复验 |
+| production build | `npm run build` 通过 | 通过 |
+| Rust 全门禁 | 828 passed、4 ignored；`cargo build` 通过 | 通过（仅既有 warning） |
+| Product contribution boundary | 静态 guard 通过，且内置失败 fixture | 通过 |
+| Plugin 架构基线复核 | 13 files、79/79；production artifact smoke 扫描 231 个 JS assets | 唯一 Runtime、显式 bootstrap、契约/cleanup、ports 与五包边界通过 |
+
+未在本施工内扩修的基线门禁：Solid Markdown/renderer 3 个行为测试与 `MarkdownContent.solid.tsx:30` 类型错误；legacy runner 四个聚合组仍含陈旧源码断言/Node extension-resolution 问题。它们不在 AGT-003–013 或 PLG-001–008 验收范围内；本轮没有第二次运行 `check:all`，避免违反一次全量约束。新 `PluginServiceResolutionError` 的 Node strip-types 语法问题已修，代表脚本已越过该错误并暴露其原有 extension-resolution 债务。
 
 ## 7. 单执行者长程自主施工 Harness
 

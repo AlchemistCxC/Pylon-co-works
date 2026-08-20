@@ -1,7 +1,7 @@
 # Pylon 项目架构参考
 
 > 状态：当前实现地图，不是目标架构承诺  
-> 最后核验：2026-08-20
+> 最后核验：2026-08-21
 > 适用仓库：`prism-desktop`  
 > 阅读规则：后续任务先读本文，再只核验涉及区域；除非命中“全量复核触发条件”，不要重新扫描整个仓库。
 
@@ -39,7 +39,8 @@ Pylon 是通过 ACP 连接多个本地 Agent runtime 的桌面工作台。它以
 ```mermaid
 flowchart TB
   Entry["src/main.tsx"] --> KR["src/kernel/KernelRoot.tsx<br/>Application mount / Recovery"]
-  KR -->|模块求值时激活| CR["src/plugin-runtime/pluginCompositionRoot.ts"]
+  KR --> KB["KernelBootstrap<br/>starting / ready / degraded / safe-mode"]
+  KB -->|显式 bootstrap/retry| CR["src/plugin-runtime/pluginCompositionRoot.ts"]
   CR --> PR["PluginRuntime + PluginScope + Registries<br/>Kernel 扩展机制"]
 
   PR --> Tools["builtin.pylon-tools"]
@@ -58,6 +59,10 @@ flowchart TB
   App --> Chat["Chat controller / Session lifecycle"]
   App --> AcpClients["Tauri ACP clients"]
   App --> PluginConsumers["Workspace / Renderer / UI registries"]
+  App --> ProductPorts["Product contribution ports"]
+  ProductPorts --> ServiceRegistry["PluginServiceRegistry.resolveRequired"]
+  ServiceRegistry --> Tools
+  ServiceRegistry --> Agents
 
   AcpClients --> IPC["Tauri commands"]
   IPC --> RustKernel["Rust AppState / lifecycle / ACP / session"]
@@ -65,16 +70,16 @@ flowchart TB
   RustKernel --> SQLite[("SQLite")]
   RustKernel --> NativePlugins["Package store / process supervisor"]
 
-  Chat --> CanonicalSink["CanonicalEventSink<br/>当前在 WebView"]
-  CanonicalSink --> IPC
+  RustKernel --> KernelIngest["Kernel-owned event ingest<br/>commit before publish"]
+  KernelIngest --> SQLite
+  Chat --> LegacySink["CanonicalEventSink<br/>旧后端兼容路径"]
+  LegacySink --> IPC
   Identity --> IPC
 
-  Shell -.直接引用 Kernel singleton.-> KR
-  App -.跨插件直接调用 implementation.-> Tools
-  App -.跨插件直接调用 implementation.-> Agents
+  Shell -.Application contribution.-> KR
 ```
 
-虚线表示当前需要逐步收紧的反向或跨层依赖。
+虚线表示 Shell 通过稳定 Application contribution 被 Kernel mount，而不是业务层直接控制 Kernel。
 
 ## 5. 目录地图与 ownership
 
@@ -113,20 +118,22 @@ sequenceDiagram
 
   Main->>Main: 恢复 Skin / 启动 CLI bridge
   Main->>Kernel: render
-  Kernel->>Composition: side-effect import
-  Composition->>Runtime: 构造全局 runtime
+  Kernel->>Composition: 调用显式 bootstrap action
+  Composition->>Runtime: 构造唯一 product runtime
   loop 五个第一方插件
-    Composition->>Runtime: activateBuiltinSync
+    Composition->>Runtime: 按依赖图异步 activate
   end
   Shell->>Runtime: register Application contribution
-  Kernel->>Runtime: mount builtin shell id
+  alt 全部 product-required 成功
+    Kernel->>Runtime: mount builtin shell id
+  else 单插件失败
+    Kernel->>Kernel: degraded / retry / Safe Mode
+  end
   Runtime->>App: lazy mount
   App->>Tauri: hydration / listeners / external plugin initialize
 ```
 
-当前事实：第一方插件激活发生在 React recovery layer 挂载之前。任一同步激活异常都可能阻止 Kernel UI 出现。
-
-目标方向：启动 ordering、readiness、失败隔离、retry 和 Safe Mode 应由可观察的 Kernel bootstrap supervisor 统一持有，而不是依赖 ESM import 顺序。
+当前事实：Kernel recovery layer 先可见；第一方插件由 `KernelBootstrap` 显式启动。单插件失败进入可观察 degraded 状态，可定向 retry 或进入 Safe Mode，不再依赖 ESM import 副作用。
 
 ## 7. 第一方 Product Plugin 拓扑
 
@@ -241,7 +248,7 @@ flowchart TB
 2. 可执行文件旁的 `agents.yaml`。
 3. embedded 配置。
 
-当前交互能力与模型不对称：后端支持 args、cwd、env、model、profile、ACP timeout 等字段，UI 主要暴露 name、exe、provider，args 仍以空白字符切割。
+当前交互能力：Agent Runtime UI 使用参数数组编辑器并预览 effective invocation；发现报告把 identity confidence 与 ACP validation 分离。配置保存使用 revision CAS、`.bak` 和 hard max，并区分 Stored/PendingRestart/Activated；显式 restart 失败保留旧 generation，未知连续性逐 Session 有界 probe 后收敛为 attached/detached。
 
 ## 10. Plugin Runtime 生命周期
 
@@ -256,23 +263,36 @@ stateDiagram-v2
   Updating --> Active: rollback old instance
   Active --> Deactivating
   Deactivating --> Inactive: dispose scope
+  Deactivating --> CleanupFailed: hook/resource residual
+  CleanupFailed --> Deactivating: retryCleanup
   Inactive --> Activating: enable
 ```
 
 已有的可靠机制：
 
 - registry entry 带 plugin/runtime ownership，可精确回收。
-- `PluginScope` 管理 listeners、timers、abort controllers 和 registration handles。
+- `PluginScope` 以稳定 resource id 管理 listeners、timers、abort controllers 和 registration handles；逆序 dispose，成功项移除、失败 residual 可重试。
 - shadow update 支持 validate、commit、revert 和批量发布。
 - Native package store 有 staging、journal 和恢复流程。
+- manifest dependency/conflict/activation event 由单一 resolver 执行，Runtime 与 package mutation 均有防线。
+- Hook `disable-plugin` 接入唯一 PluginRuntime；cleanup 失败进入 `cleanup-failed` 并写 trace。
+- Product Shell 通过 `AgentInstanceSink`/`ToolDictionarySink` contribution port 消费插件能力，静态 guard 禁止重新直调 `builtinPylon*` implementation。
 
-当前缺口：
+当前约束：第三方插件按 D16 视为完全可信本机代码，不建设权限沙箱；故障隔离、资源清理、依赖兼容与诊断仍由 Kernel Plugin Host 负责。
 
-- 内置插件激活错误发生在 Kernel recovery UI 之前。
-- manifest dependencies、conflicts 和 activation events 尚未形成完整运行时契约。
-- 第三方与第一方目前共享过宽的 activation context。
-- deactivate cleanup 失败可能仍被上层显示为成功。
-- Product Shell 仍直接调用其他 Product Plugin 的 implementation。
+### 插件架构验收基线（2026-08-21）
+
+| 边界 | 当前权威与入口 | 回归护栏 |
+|---|---|---|
+| Runtime authority | `pluginCompositionRoot.ts` 中唯一 `PluginRuntime`；Kernel、package、Hook 均引用该实例 | 搜索生产源码不得出现第二个 `new PluginRuntime` |
+| Kernel 启动 | `KernelRoot` → `KernelBootstrap` → `bootstrapBuiltins/retryBuiltinPlugin` | `kernelBootstrap.test.ts`、`builtinPluginBootstrap.test.ts` |
+| Manifest 契约 | `pluginContractResolver.ts`；Runtime 与 package mutation 共同执行 | resolver/runtime/package tests |
+| Cleanup | `PluginScope` stable resource id + awaited reverse dispose；`cleanup-failed` residual + `retryCleanup` | scope/instance/runtime/hook tests |
+| Product 数据入口 | `productContributionPorts.ts` → `PluginServiceRegistry.resolveRequired` → Agent/Tool sink | port/sink tests + `check-product-contribution-boundary.mts` |
+| 第一方包构造 | `builtinProductPlugins.ts` 保留五个粗粒度物理包及依赖排序 | `builtinProductPlugins.test.ts` + production artifact smoke |
+| 第三方信任 | D16 完全信任本机代码；不设第二权限中心 | lifecycle/contract/cleanup 仍由同一 Host 执行 |
+
+本基线定向验证为 13 个测试文件、79/79；静态 Product contribution boundary 通过；production artifact smoke 扫描 231 个 JS assets，未把 Solid smoke 带入生产构建。后续普通插件改动从本表入口局部核验，不再全量侦察。
 
 ## 11. Kernel ownership：当前与目标
 
@@ -281,7 +301,7 @@ stateDiagram-v2
 | Agent lifecycle | Rust lifecycle/dispatcher | Kernel |
 | ACP transport/JSON-RPC | Rust `acp` | Kernel |
 | Session create/load/prompt | Rust session + React lifecycle | Kernel，UI 只消费 projection |
-| canonical sequencing/persistence | React sink + Rust EventService | Kernel durable journal |
+| canonical sequencing/persistence | Rust ACP/session ingest + EventService；WebView 仅兼容旧后端与 gap projection | Kernel durable journal |
 | Session metadata persistence | identityStore + UserDataService | Kernel persistence module |
 | PluginRuntime/Scope/registries | `src/plugin-runtime` | Kernel extension mechanism |
 | Product Shell/UI | `App.tsx`、components | First-party Product Plugin |
@@ -312,7 +332,6 @@ stateDiagram-v2
 
 - 单插件失败不应阻止 Kernel recovery surface 出现。
 - Scope cleanup 的部分失败必须可观察，不能报告假成功。
-- public plugin context 与 first-party context 的能力应可区分。
 - 依赖、停用和更新策略必须由 Plugin Host 执行，不能只存在于 manifest 文本。
 
 ## 13. 已知高风险点索引
@@ -325,7 +344,7 @@ stateDiagram-v2
 | P1（已修复） | `deleted_sessions` 曾以裸 session/source 为主键且删除 wire 误用 metadata id；v12 改为 owner_key 主键并让 begin/finalize 统一使用 Session.source | session/msg_repo.rs、event_repo.rs、removeSessionTransaction.ts |
 | P0（已修复） | DB services 曾异步初始化，首次 unavailable 可演变为永久失败；现由 setup readiness barrier 串行打开并一次安装 | `src-tauri/src/session/persistence_bootstrap.rs`、`src-tauri/src/lib.rs` |
 | P0（已修复） | Tauri Identity 读取失败曾回退 localStorage 并可反向覆盖较新 SQLite；现为带 revision cache + degraded-readonly，权威重读清失败 pending | identityStore.ts、userDataRepository.ts |
-| P0 | 内置插件异常可阻止 Kernel 渲染 | KernelRoot、pluginCompositionRoot |
+| P0（已修复） | 内置插件异常曾可阻止 Kernel 渲染；现由 KernelBootstrap 暴露 degraded/retry/Safe Mode | KernelRoot、kernelBootstrap、pluginCompositionRoot |
 | P1（已修复） | session/load 失败曾自动创建新远端 Session；现为显式重试或独立本地分叉 | useSessionLifecycle、identityStore、ChatView |
 | P1（已修复） | replay 超限曾无完整性信息且保留最早窗口；现返回边界并保留最近窗口 | Rust acp/replay.rs、sessionClient、ChatView |
 | P1（已修复） | replay/live reconciliation 曾可能按 role+content 猜测重复；现仅使用协议明确支持的外部 identity，无 identity 的重复正文保留 | messageIdentity.ts、chatEventController.ts |
@@ -333,18 +352,18 @@ stateDiagram-v2
 | P1（已修复） | canonical JSON 损坏曾静默归一 null/none；现按 event/column 报 corrupt，并可 `evt_export_raw` 隔离取证 | session/event_repo.rs、canonicalEventRepository.ts |
 | P1（已修复） | v9 migration 曾删除 legacy message tables；v11 现将可证明基础消息回填至同一 canonical journal，全部旧表保留为 forensic archive，失败整事务回滚 | session/msg_repo.rs |
 | P1（已修复） | external `agent_create` 曾发送错误 YAML 形状；现使用结构化单 Agent DTO | AgentRuntimePanel、agentClient、agent_config.rs |
-| P1 | active Agent 配置保存后 live runtime 仍可能使用旧配置 | lifecycle/mod.rs |
-| P1 | detection high confidence 不等于 ACP 可用 | pylon-core/agent_detection.rs |
-| P1 | 第三方 context 暴露第一方内部能力 | sdk、pluginActivationContext、packagePluginRuntime |
-| P2 | Kernel/plugin-runtime 双向依赖及跨插件直调 | KernelRoot、builtinPylonShell、App.tsx |
+| P1（已修复） | active Agent 配置保存与 live runtime 曾混淆；现区分 Stored/PendingRestart/Activated 并显式 restart rollback | lifecycle/mod.rs、AgentRuntimePanel.tsx |
+| P1（已修复） | detection high confidence 曾与 ACP 可用混合；现为 identityConfidence + validationStatus | pylon-core/agent_detection.rs、AgentRuntimePanel.tsx |
+| P2（按决策关闭） | 第三方 context 能力较宽 | D16：第三方插件完全可信；不建设权限沙箱，保留 lifecycle/contract 隔离 |
+| P2（已修复） | Kernel/plugin-runtime ESM ordering 与 Product Shell 跨插件直调 | KernelBootstrap、productContributionPorts、静态 boundary guard |
 
 ## 14. 已确认产品决策
 
 D1–D17 已全部确认，以 [`Pylon-Kernel-施工台账.md`](Pylon-Kernel-施工台账.md) 第 2 节为唯一决策记录。特别是：canonical journal 是唯一 durable history；重放只深化同一 journal，不另建中央；第三方插件视为完全可信本机代码，但仍须故障隔离。
 
-## 15. 推荐加固顺序
+## 15. 已完成的加固顺序
 
-在不改变五个 Product Plugin 构造的前提下：
+以下顺序已经在不改变五个 Product Plugin 粗粒度构造的前提下完成，可作为提交历史与回归定位顺序：
 
 1. 统一 Session durable identity，修复 state 写读契约。
 2. 建立 DB readiness 与 retryable initialization 状态。
@@ -353,7 +372,7 @@ D1–D17 已全部确认，以 [`Pylon-Kernel-施工台账.md`](Pylon-Kernel-施
 5. 修复 Agent create 的结构化契约和参数数组编辑。
 6. 将 canonical persistence 前移到 Rust Kernel 的 ACP/Session seam。
 7. 建立 Kernel bootstrap supervisor 和 Safe Mode。
-8. 收紧 public/first-party plugin context 与依赖执行策略。
+8. 建立 Kernel bootstrap、manifest/cleanup 硬契约与 Product contribution ports；按 D16 不建设第三方权限沙箱。
 
 ## 16. 测试入口
 
@@ -378,6 +397,7 @@ cargo test --manifest-path src-tauri/pylon-core/Cargo.toml
 | Agent detection | `src-tauri/pylon-core` detection tests + AgentRuntimePanel tests |
 | Agent config | AgentRuntimePanel、typedClients + Rust `agent_config`/lifecycle tests |
 | Plugin Runtime | `src/plugin-runtime/__tests__` + package/plugin process tests |
+| Plugin 架构边界 | Kernel bootstrap + contract/scope/runtime/package + product port/sink 13 文件矩阵；静态 contribution boundary |
 | Kernel mount/recovery | `src/kernel/__tests__` + application runtime tests |
 | Renderer/Workbench | Solid Workbench tests + `check:solid` |
 
@@ -404,7 +424,8 @@ cargo test --manifest-path src-tauri/pylon-core/Cargo.toml
 | Agent 配置 | `AgentRuntimePanel.tsx` → lifecycle config commands → `agent_config.rs` |
 | 内置插件 | `builtinProductPlugins.ts` → 目标 package activation → 目标 implementation |
 | 外置插件 | packageInstallationService/packagePluginRuntime → PluginRuntime → native plugin commands |
-| Kernel 启动 | `main.tsx` → `KernelRoot.tsx` → `pluginCompositionRoot.ts` → `App.tsx` |
+| Kernel 启动 | `main.tsx` → `KernelRoot.tsx` → `kernelBootstrapServices.ts` → `pluginCompositionRoot.ts` → `App.tsx` |
+| Product contribution | `productContributionPorts.ts` → `PluginServiceRegistry.resolveRequired` → Agent/Tool sink |
 
 ## 18. 禁止默认全量侦察的工作规则
 

@@ -1,6 +1,6 @@
 # Pylon Kernel 加固施工台账
 
-> 最新完成（2026-08-21）：`WI-P2 / PLG-003`——新增单一 Plugin Contract Resolver，完整执行 exact/caret/* 版本范围、required/optional dependency、依赖环、双向 conflict 与 activation event；manifest 契约完整穿透第一方/外置 definition，Runtime 在 activate/enable/update 前做二次防线。Package mutation 在触碰 Runtime/native authority 前校验候选图，dependent disable/uninstall 与破坏依赖范围的 update 被结构化拒绝；waiting-activation 与 blocked diagnostics 可由 PluginManager 观察。Rust 仅做对称 manifest shape 校验，不复制依赖图业务。TS 71 项、Rust plugin_cmds 12 项定向回归、全项目 TS build、目标 ESLint、rustfmt 与 diff check 通过。下一项 `WI-P3`。
+> 最新完成（2026-08-21）：`WI-V1`——AGT-003–013 与 PLG-001–008 全部完成对账。Kernel-first bootstrap、Safe Mode、manifest 硬契约、部分 cleanup 重试、真实 hook disable-plugin 与 Product contribution ports 已落地；五个第一方包构造与第三方完全信任模型保持不变。production build、Rust 828 项与专项故障矩阵通过；一次 `check:all` 的非本施工 Solid/legacy 基线限制已记录在剩余任务施工书 §6.5。
 >
 > 长程目标：在保留现有五个第一方 Product Plugin 构造的前提下，持续加固 Pylon Kernel 的持久化、重放、生命周期、Agent Runtime、插件故障隔离和结构化错误。  
 > 基线提交：`a38145b chore: establish kernel hardening baseline`  
@@ -107,30 +107,30 @@ flowchart LR
 |---|---|---|---|
 | AGT-001 | 已完成 | `agent_create` 前端发送整份 document，Rust 期望单 Agent node | typed client 发送结构化 node；初始化 whole document 单独处理；TS/Rust tests 通过 |
 | AGT-002 | 已完成 | UI 手拼 YAML，特殊字符可破坏结构 | UI 传 DTO；Rust 负责序列化；特殊字符 round-trip |
-| AGT-003 | 待施工 | args 以空白切割，不能表达 quoted/spaced 参数 | 使用数组编辑器；effective invocation 可预览与验证 |
-| AGT-004 | 待施工 | high confidence 混合身份与协议可用性 | 两个独立字段与 UI 状态；伪造 version 不能显示已验证 |
-| AGT-005 | 待施工 | 首个 alias 命中后遮蔽后续有效 alias | 返回所有候选并排序；stale-first 测试 |
-| AGT-006 | 待施工 | version timeout 不终止子进程 | timeout 后杀 process tree；无泄漏测试 |
-| AGT-007 | 待施工 | discovery 阻塞扫描且缺总预算/并发限制 | blocking pool、总预算、候选/并发上限、逐 detector diagnostics |
-| AGT-008 | 待施工 | unknown detector 静默返回空 | 返回结构化 unknown_detector_id diagnostic |
-| AGT-009 | 待施工 | active Agent 配置保存后仍运行旧进程 | Stored/PendingRestart/Activated 状态明确；重启操作与测试 |
-| AGT-010 | 待施工 | 配置写入无跨进程 CAS/备份 | hash/generation CAS、`.bak`、原子替换、冲突错误 |
-| AGT-011 | 待施工 | connection test 通过字符串判断失败阶段 | preflight/spawn/initialize/capability 类型化错误 |
-| AGT-012 | 待施工 | 配置数值缺合理 hard max | timeout/attachment/replay 等 hard max + warning threshold |
-| AGT-013 | 待施工 | runtime 重启后 ghost remote session mapping | Unknown continuity 逐 Session probe，失败 detached |
+| AGT-003 | 已完成 | args 以空白切割，不能表达 quoted/spaced 参数 | 使用数组编辑器；effective invocation 可预览与验证 |
+| AGT-004 | 已完成 | high confidence 混合身份与协议可用性 | 两个独立字段与 UI 状态；伪造 version 不能显示已验证 |
+| AGT-005 | 已完成 | 首个 alias 命中后遮蔽后续有效 alias | 返回所有候选并排序；stale-first 测试 |
+| AGT-006 | 已完成 | version timeout 不终止子进程 | timeout 后杀 process tree；无泄漏测试 |
+| AGT-007 | 已完成 | discovery 阻塞扫描且缺总预算/并发限制 | blocking pool、总预算、候选/并发上限、逐 detector diagnostics |
+| AGT-008 | 已完成 | unknown detector 静默返回空 | 返回结构化 unknown_detector_id diagnostic |
+| AGT-009 | 已完成 | active Agent 配置保存后仍运行旧进程 | Stored/PendingRestart/Activated 状态明确；重启操作与测试 |
+| AGT-010 | 已完成 | 配置写入无跨进程 CAS/备份 | hash/generation CAS、`.bak`、原子替换、冲突错误 |
+| AGT-011 | 已完成 | connection test 通过字符串判断失败阶段 | preflight/spawn/initialize/capability 类型化错误 |
+| AGT-012 | 已完成 | 配置数值缺合理 hard max | timeout/attachment/replay 等 hard max + warning threshold |
+| AGT-013 | 已完成 | runtime 重启后 ghost remote session mapping | Unknown continuity 逐 Session probe，失败 detached |
 
 ### 5.3 Plugin Host 与 Kernel 生命周期
 
 | ID | 状态 | 问题 | 验收标准 |
 |---|---|---|---|
-| PLG-001 | 待施工 | 内置插件在 Recovery UI 前同步激活 | Kernel 先可见；单插件失败进入 degraded/Safe Mode |
-| PLG-002 | 待施工 | shell 可停用但现有恢复按钮无法重新激活 | kernel-critical 不可普通停用；Safe Mode 可恢复 |
-| PLG-003 | 待施工 | dependencies/conflicts/activation events 未执行 | Plugin Host 对安装、启停、更新执行硬契约 |
-| PLG-004 | 待施工 | cleanup 失败被显示为停用成功 | partial cleanup 状态、残留资源和恢复动作可见 |
-| PLG-005 | 待施工 | Kernel/plugin-runtime 双向依赖和 ESM ordering | 显式 bootstrap seam；删除 side-effect ordering 依赖 |
-| PLG-006 | 待施工 | Product Shell 跨插件直调 implementation | 通过稳定 contribution/interface 调用，保留五包构造 |
-| PLG-007 | 待施工 | Hook disable-plugin 未真正停用插件 | failure policy 与 PluginRuntime 状态一致 |
-| PLG-008 | 待施工 | `disposeNow` 异步 cleanup 错误可能迟到 | dispose result 在上报前稳定收敛或明确 pending |
+| PLG-001 | 已完成 | 内置插件在 Recovery UI 前同步激活 | Kernel 先可见；单插件失败进入 degraded/Safe Mode |
+| PLG-002 | 已完成 | shell 可停用但现有恢复按钮无法重新激活 | kernel-critical 不可普通停用；Safe Mode 可恢复 |
+| PLG-003 | 已完成 | dependencies/conflicts/activation events 未执行 | Plugin Host 对安装、启停、更新执行硬契约 |
+| PLG-004 | 已完成 | cleanup 失败被显示为停用成功 | partial cleanup 状态、残留资源和恢复动作可见 |
+| PLG-005 | 已完成 | Kernel/plugin-runtime 双向依赖和 ESM ordering | 显式 bootstrap seam；删除 side-effect ordering 依赖 |
+| PLG-006 | 已完成 | Product Shell 跨插件直调 implementation | 通过稳定 contribution/interface 调用，保留五包构造 |
+| PLG-007 | 已完成 | Hook disable-plugin 未真正停用插件 | failure policy 与 PluginRuntime 状态一致 |
+| PLG-008 | 已完成 | `disposeNow` 异步 cleanup 错误可能迟到 | dispose result 在上报前稳定收敛或明确 pending |
 
 第三方插件已被产品定义为完全可信代码，因此不创建权限沙箱或安全 capability 项目；其故障隔离、资源清理、依赖兼容和错误诊断仍属于本台账范围。
 
@@ -139,11 +139,11 @@ flowchart LR
 | 阶段 | 状态 | 范围 | 完成条件 |
 |---|---|---|---|
 | Phase 0 | 已完成 | 全量审计、架构参考、基线提交、产品决策 | `a38145b` + D1–D17 |
-| Phase 1 | 施工中 | 配置契约与现有持久化链确定性缺陷 | AGT-001/002、KER-001/003–011/015–018 中不依赖新 ingest 的项目完成 |
+| Phase 1 | 已完成 | 配置契约与现有持久化链确定性缺陷 | AGT-001/002、KER-001/003–011/015–018 中不依赖新 ingest 的项目完成 |
 | Phase 2 | 已完成 | 新重放模型与 Kernel Event Ingest | KER-002/012：journal 是唯一历史权威，lag 可补读，partial history 可 append-only 对账 |
-| Phase 3 | 待施工 | Agent detection、pending restart、重连连续性 | AGT-003–013 |
-| Phase 4 | 待施工 | Kernel bootstrap supervisor 与 Plugin Host 硬契约 | PLG-001–008 |
-| Phase 5 | 待施工 | corruption recovery、迁移演练、全链路验收 | KER-013/014/016/019，check:all 与故障注入矩阵 |
+| Phase 3 | 已完成 | Agent detection、pending restart、重连连续性 | AGT-003–013 |
+| Phase 4 | 已完成 | Kernel bootstrap supervisor 与 Plugin Host 硬契约 | PLG-001–008 |
+| Phase 5 | 已完成（有基线限制） | corruption recovery、迁移演练、全链路验收 | KER-013/014/016/019，check:all 与故障注入矩阵 |
 
 ## 7. 施工切片
 
@@ -404,6 +404,11 @@ flowchart LR
 | 2026-08-20 | Slice 20：Tauri Identity SQLite 单一权威、cache revision metadata、degraded-readonly 与权威重读 recovery boundary | 定向 Vitest 78；TypeScript build；targeted ESLint | `fix: prevent stale identity cache from overwriting sqlite` | 已完成 |
 | 2026-08-20 | Slice 21：核验既有 ACP identity-only reconciliation，关闭漏登记 KER-018 | 定向 Vitest 36 | `docs: close replay identity dedup ledger gap` | 已完成 |
 | 2026-08-20 | Slice 22：v12 owner-keyed tombstone、legacy scope/forensic archive、source-based delete/finalize wire | Rust tombstone/schema 定向 25；Vitest 10；TypeScript build；targeted ESLint | `fix: key session tombstones by durable owner` | 已完成 |
+| 2026-08-21 | WI-P1：Kernel-first bootstrap、Safe Mode、显式 host seam | Kernel/bootstrap/plugin focused tests | `21b5955` | 已完成 |
+| 2026-08-21 | WI-P2：manifest dependency/conflict/activation event 硬契约 | TS 71；Rust plugin_cmds 12；tsc/eslint/rustfmt | `e0e0245` | 已完成 |
+| 2026-08-21 | WI-P3：稳定 dispose、partial cleanup、真实 hook disable-plugin | focused 62；tsc/eslint/diff | `3320114` | 已完成 |
+| 2026-08-21 | WI-P4：Agent/tool product contribution ports 与静态 import boundary | focused 187；production build；boundary | `de21bc6` | 已完成 |
+| 2026-08-21 | WI-V1：故障矩阵、显式测试 bootstrap、全量门禁对账、插件架构基线复核 | Rust 828/4 ignored；plugin harness 77/77；架构矩阵 79/79；静态 boundary；production artifact smoke | `7d4de28` + 文档收口提交 | 已完成（有基线限制） |
 
 ## 9. 每个切片的完成纪律
 
