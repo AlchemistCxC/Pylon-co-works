@@ -716,10 +716,24 @@ async fn send_prompt_core_impl<R: tauri::Runtime>(
     let protocol = state.protocol_for_runtime(runtime);
     let prompt_timeout_secs = protocol.prompt_timeout();
     let cancel_settle_timeout_secs = protocol.cancel_settle_timeout();
+    let idle_timeout_secs = protocol.idle_timeout();
+    let first_token_timeout_secs = protocol.first_token_timeout();
+    // R-t5：liveness 探针——读本会话最近一次 ACP 活动时刻（dispatcher 刷新）。
+    // 用作"闲置超时"判据：活动即续命，只有持续无输出才截。
+    let source_for_liveness = source.to_string();
+    let liveness_activity = move || {
+        let sessions = runtime.sessions.lock().map_err(|e| e.to_string()).ok()?;
+        sessions
+            .get(&source_for_liveness)
+            .and_then(|s| s.last_activity)
+    };
     let result = acp::wait_prompt_with_cancel(
         &mut rx,
         Duration::from_secs(prompt_timeout_secs),
         Duration::from_secs(cancel_settle_timeout_secs),
+        Duration::from_secs(idle_timeout_secs),
+        Duration::from_secs(first_token_timeout_secs),
+        liveness_activity,
         move || async move {
             // R6e：cancel 闭包契约是 Result<(), String>（wait_prompt_with_cancel 泛型边界）
             acp_for_cancel

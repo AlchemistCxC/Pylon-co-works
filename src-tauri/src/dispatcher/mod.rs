@@ -454,6 +454,13 @@ async fn handle_session_update<R: tauri::Runtime>(
                 return true;
             }
         };
+        // R-t5：任意被接受的 live ACP update 都刷新 liveness（活动即续命）。
+        // 仅跳过回放事件（历史重放不是本回合的实时产出，不应当作活动信号）。
+        if !is_replay {
+            if let Some(session) = items.get_mut(&source) {
+                session.last_activity = Some(std::time::Instant::now());
+            }
+        }
         if variant == Some(crate::acp::SessionUpdateVariant::AgentMessageChunk) && !is_replay {
             pet_events.push(PetEvent::FirstChunk); // 原 :366 on_first_chunk
                                                    // M5 感知：输出含代码块 → 宠物蹲在屏幕前看

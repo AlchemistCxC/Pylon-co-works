@@ -1067,6 +1067,9 @@ mod tests {
             &mut rx,
             std::time::Duration::from_millis(10),
             std::time::Duration::from_millis(200),
+            std::time::Duration::from_millis(10),
+            std::time::Duration::from_millis(10),
+            || None,
             move || async move {
                 cancel_called_for_task.store(true, Ordering::SeqCst);
                 tx.send(response())
@@ -1104,6 +1107,9 @@ mod tests {
             &mut rx,
             std::time::Duration::from_secs(1),
             std::time::Duration::from_millis(10),
+            std::time::Duration::from_secs(1),
+            std::time::Duration::from_secs(1),
+            || None,
             move || async move {
                 cancel_called_for_task.store(true, Ordering::SeqCst);
                 Ok(())
@@ -1808,6 +1814,9 @@ for line in sys.stdin:
             &mut response_rx,
             std::time::Duration::from_millis(20),
             std::time::Duration::from_millis(200),
+            std::time::Duration::from_millis(20),
+            std::time::Duration::from_millis(20),
+            || None,
             move || async move {
                 cancel_tx
                     .send(
@@ -2101,6 +2110,9 @@ for line in sys.stdin:
             &mut response_rx,
             std::time::Duration::from_millis(20),
             std::time::Duration::from_millis(200),
+            std::time::Duration::from_millis(20),
+            std::time::Duration::from_millis(20),
+            || None,
             move || async move {
                 cancel_tx
                     .send(

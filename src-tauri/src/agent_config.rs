@@ -165,12 +165,24 @@ pub struct AcpProtocolConfig {
     /// H4 initialize clientInfo；None = {"name":"Pylon","version":"0.1.0"}。
     #[serde(default)]
     pub client_info: Option<serde_json::Value>,
-    /// H5 prompt 超时（秒）；None = 300。
+    /// H5 prompt 总墙钟兜底上限（秒）；None = 300。仅当回合超过该绝对时长才强制
+    /// cancel（最后防线）。正常工作回合被此值截断属于"兜底触发"，不是常规路径：
+    /// 常规截断改由 idle_timeout / first_token_timeout 决定（见下两字段）。
+    /// （语义 2026-08-20 重定义：不再作为"活动回合"的常规超时。）
     #[serde(default)]
     pub prompt_timeout_secs: Option<u64>,
     /// H6 cancel settle 超时（秒）；None = 30。
     #[serde(default)]
     pub cancel_settle_timeout_secs: Option<u64>,
+    /// R-t5 闲置超时（秒）；None = prompt_timeout（300）。回合内距最后一次活动
+    /// （文本 chunk / thinking / 工具事件 / usage 任一）超过此值仍无终态 →
+    /// 判死 cancel。活动即续命：只要持续产出，回合永不因"总时长"被截。
+    #[serde(default)]
+    pub idle_timeout_secs: Option<u64>,
+    /// R-t5 首 token 超时（秒）；None = idle_timeout。发出后到首次活动的最长等待，
+    /// 治"静默失败"（如 Hermes+opencode.ai 错误 profile 导致 session/prompt 无声）。
+    #[serde(default)]
+    pub first_token_timeout_secs: Option<u64>,
     /// H8/H9 通用 RPC 超时（秒，complete + session/load 回放共用）；None = 30。
     #[serde(default)]
     pub rpc_timeout_secs: Option<u64>,
@@ -270,6 +282,8 @@ pub static DEFAULT_ACCPROTOCOL: AcpProtocolConfig = AcpProtocolConfig {
     client_info: None,
     prompt_timeout_secs: None,
     cancel_settle_timeout_secs: None,
+    idle_timeout_secs: None,
+    first_token_timeout_secs: None,
     rpc_timeout_secs: None,
     max_attachments: None,
     max_attachment_bytes: None,
@@ -290,10 +304,22 @@ impl AcpProtocolConfig {
         self.session_close.unwrap_or(true)
     }
 
-    /// H5 prompt 超时（秒，缺省 300）。G2（W2 链 E）消费：wait_prompt_with_cancel。
+    /// H5 prompt 总墙钟兜底上限（秒，缺省 300）。G2（W2 链 E）消费：wait_prompt_with_cancel。
+    /// 语义 2026-08-20：仅作"活动回合"的最后防线；常规截断由 idle_timeout 决定。
     pub fn prompt_timeout(&self) -> u64 {
         self.prompt_timeout_secs
             .unwrap_or(crate::acp::DEFAULT_PROMPT_TIMEOUT_SECS)
+    }
+
+    /// R-t5 闲置超时（秒，缺省 = prompt_timeout）。距最后一次活动超过此值仍无终态 → 判死。
+    /// 活动即续命：持续产出的回合永不因"总时长"被截。
+    pub fn idle_timeout(&self) -> u64 {
+        self.idle_timeout_secs.unwrap_or_else(|| self.prompt_timeout())
+    }
+
+    /// R-t5 首 token 超时（秒，缺省 = idle_timeout）。发出后到首次活动的最长等待。
+    pub fn first_token_timeout(&self) -> u64 {
+        self.first_token_timeout_secs.unwrap_or_else(|| self.idle_timeout())
     }
 
     /// H6 cancel settle 超时（秒，缺省 30）。G2（W2 链 E）消费。
@@ -406,6 +432,8 @@ pub(crate) fn default_client_info() -> serde_json::Value {
 /// 此处拦截 0 并指明 agent id；风格对齐 route.rs reset 校验）。
 const MAX_PROMPT_TIMEOUT_SECS: u64 = 3600;
 const MAX_CANCEL_SETTLE_TIMEOUT_SECS: u64 = 300;
+const MAX_IDLE_TIMEOUT_SECS: u64 = 3600;
+const MAX_FIRST_TOKEN_TIMEOUT_SECS: u64 = 3600;
 const MAX_RPC_TIMEOUT_SECS: u64 = 300;
 const MAX_ATTACHMENTS: usize = 64;
 const MAX_ATTACHMENT_BYTES: u64 = 256 * 1024 * 1024;
@@ -421,6 +449,11 @@ fn validate_acp_section(id: &str, acp: &AcpProtocolConfig) -> Result<(), ConfigE
             "cancel_settle_timeout_secs",
             acp.cancel_settle_timeout_secs.map(|v| v as u128),
         ),
+        ("idle_timeout_secs", acp.idle_timeout_secs.map(|v| v as u128)),
+        (
+            "first_token_timeout_secs",
+            acp.first_token_timeout_secs.map(|v| v as u128),
+        ),
         ("rpc_timeout_secs", acp.rpc_timeout_secs.map(|v| v as u128)),
         ("max_attachments", acp.max_attachments.map(|v| v as u128)),
         (
@@ -432,9 +465,11 @@ fn validate_acp_section(id: &str, acp: &AcpProtocolConfig) -> Result<(), ConfigE
             acp.replay_max_events.map(|v| v as u128),
         ),
     ];
-    let maxima: [(&str, u128); 6] = [
+    let maxima: [(&str, u128); 8] = [
         ("prompt_timeout_secs", MAX_PROMPT_TIMEOUT_SECS as u128),
         ("cancel_settle_timeout_secs", MAX_CANCEL_SETTLE_TIMEOUT_SECS as u128),
+        ("idle_timeout_secs", MAX_IDLE_TIMEOUT_SECS as u128),
+        ("first_token_timeout_secs", MAX_FIRST_TOKEN_TIMEOUT_SECS as u128),
         ("rpc_timeout_secs", MAX_RPC_TIMEOUT_SECS as u128),
         ("max_attachments", MAX_ATTACHMENTS as u128),
         ("max_attachment_bytes", MAX_ATTACHMENT_BYTES as u128),
@@ -1895,6 +1930,9 @@ mod tests {
             protocol.cancel_settle_timeout(),
             crate::acp::DEFAULT_CANCEL_SETTLE_TIMEOUT_SECS
         );
+        // R-t5 缺省：idle/first_token 回退到 prompt_timeout（300）
+        assert_eq!(protocol.idle_timeout(), protocol.prompt_timeout());
+        assert_eq!(protocol.first_token_timeout(), protocol.idle_timeout());
         assert_eq!(protocol.rpc_timeout(), DEFAULT_RPC_TIMEOUT_SECS);
         assert_eq!(protocol.replay_max(), DEFAULT_REPLAY_MAX_EVENTS);
         assert_eq!(protocol.protocol_version(), DEFAULT_PROTOCOL_VERSION);

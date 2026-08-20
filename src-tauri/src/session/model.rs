@@ -31,6 +31,10 @@ pub(crate) struct SessionInfo {
     pub(crate) context_size: u64,
     /// 最后活动时间（B10.3b 会话超时/重置判定；R4：Timestamp，仅内部使用不落 wire）。
     pub(crate) updated_at: Option<Timestamp>,
+    /// R-t5 liveness：本会话最近一次收到 ACP 活动信号（文本/思考/工具/usage 任一）
+    /// 的单调时刻。dispatcher 每次处理 session/update 刷新；prompt 等待据此做
+    /// "闲置超时"判定（活动即续命）。不落 wire / 不序列化。
+    pub(crate) last_activity: Option<std::time::Instant>,
     /// CWD-03：Workspace 实体绑定（方案 C）。Some = Session 绑定 Workspace，
     /// root 解析以 Workspace.root_path 为单一来源（workspace_root_for_context 优先分支）；
     /// None = legacy 未绑定，root 解析回退 session.cwd（兼容分支）。
@@ -108,6 +112,7 @@ impl SessionInfo {
             tokens_total: 0,
             context_size: 0,
             updated_at: Some(Timestamp::now()),
+            last_activity: None,
             workspace_id: None,
             inject_round: 0,
             last_response_round: 0,

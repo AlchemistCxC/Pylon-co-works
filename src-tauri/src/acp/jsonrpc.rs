@@ -130,22 +130,42 @@ pub enum PromptWaitOutcome {
     ConnectionClosed,
 }
 
-/// Wait for a prompt response. On timeout, send session/cancel and keep the
+/// Wait for a prompt response. On truncation, send session/cancel and keep the
 /// response receiver alive until Peri confirms the cancelled turn has settled.
+///
+/// R-t5（2026-08-20）正确的截断语义——活动续命、无输出才截：
+/// - `last_activity` 探针返回本回合会话最近一次活动（文本/思考/工具/usage）的单调时刻，
+///   `None` 表示从未有活动。等待循环以"距上次活动"判闲置，而非"回合总时长"。
+/// - 任一 ACP 活动即续命：只要持续产出，回合永不因总时长被截。
+/// - 首次活动始终未出现（`activity` 不晚于 `start`）且超过 `first_token_timeout` → 判死（首 token 超时）。
+/// - 已活动但距最近活动超过 `idle_timeout` 仍无终态 → 判死（闲置超时）。
+/// - 兜底：总墙钟超过 `prompt_timeout` → 强制判死（最后防线）。
+/// 任一判死后进入 cancel + settle（与旧路径一致）。
 pub async fn wait_prompt_with_cancel<F, Fut>(
     rx: &mut oneshot::Receiver<RawMessage>,
     prompt_timeout: std::time::Duration,
     cancel_settle_timeout: std::time::Duration,
+    idle_timeout: std::time::Duration,
+    first_token_timeout: std::time::Duration,
+    last_activity: impl Fn() -> Option<std::time::Instant>,
     cancel: F,
 ) -> PromptWaitOutcome
 where
     F: FnOnce() -> Fut,
     Fut: Future<Output = Result<(), String>>,
 {
-    match tokio::time::timeout(prompt_timeout, &mut *rx).await {
-        Ok(Ok(raw)) => PromptWaitOutcome::Response(raw),
-        Ok(Err(_)) => PromptWaitOutcome::ConnectionClosed,
-        Err(_) => {
+    let start = std::time::Instant::now();
+    // 轮询粒度：取待判定的最小非零超时的一小段，既及时又不忙转。
+    let poll = smallest_nonzero([idle_timeout, first_token_timeout, prompt_timeout]) / 8;
+    loop {
+        // 先评估是否该判死（在 sleep 前，避免刚发完就等一个轮询周期的空档）。
+        if let Some(fire_reason) = evaluate_truncation(
+            start,
+            idle_timeout,
+            first_token_timeout,
+            prompt_timeout,
+            last_activity(),
+        ) {
             let cancel_error = match tokio::time::timeout(
                 std::time::Duration::from_secs(DEFAULT_WRITE_TIMEOUT_SECS),
                 cancel(),
@@ -162,12 +182,92 @@ where
                 Ok(Ok(raw)) => Some(raw),
                 Ok(Err(_)) | Err(_) => None,
             };
-            PromptWaitOutcome::CancelledAfterTimeout {
+            // fire_reason 用于日志（多少秒后因何截断）；对外文案仍是统一超时语义。
+            tracing::warn!(
+                "ACP: prompt truncated ({:?}) after {}s",
+                fire_reason.reason,
+                fire_reason.elapsed_secs
+            );
+            return PromptWaitOutcome::CancelledAfterTimeout {
                 response,
                 cancel_error,
+            };
+        }
+        tokio::select! {
+            r = &mut *rx => {
+                match r {
+                    Ok(raw) => return PromptWaitOutcome::Response(raw),
+                    Err(_) => return PromptWaitOutcome::ConnectionClosed,
+                }
             }
+            _ = tokio::time::sleep(poll) => {}
         }
     }
+}
+
+/// 截断判据的触发结果。
+struct TruncationFire {
+    /// 触发的语义类别（首 token / 闲置 / 总上限）。
+    reason: &'static str,
+    /// 触发时的已等待秒数。
+    elapsed_secs: u64,
+}
+
+/// 评估是否该判死；返回 Some = 应立即截断。
+fn evaluate_truncation(
+    start: std::time::Instant,
+    idle_timeout: std::time::Duration,
+    first_token_timeout: std::time::Duration,
+    prompt_timeout: std::time::Duration,
+    last_activity: Option<std::time::Instant>,
+) -> Option<TruncationFire> {
+    let now = std::time::Instant::now();
+    let elapsed = now.duration_since(start);
+    // 活动"在本回合发送之后"才算本回合已开始（dispatcher 对历史回合的活动不计入）。
+    let active_after_start = last_activity
+        .map(|t| t >= start)
+        .unwrap_or(false);
+    let reason = if active_after_start {
+        // 已开始：按闲置判定。
+        if let Some(last) = last_activity {
+            if now.duration_since(last) >= idle_timeout {
+                Some(("idle", idle_timeout))
+            } else {
+                None
+            }
+        } else {
+            None
+        }
+    } else if elapsed >= first_token_timeout {
+        // 从未开始：按首 token 判定。
+        Some(("first_token", first_token_timeout))
+    } else {
+        None
+    };
+    if let Some((reason, bound)) = reason {
+        return Some(TruncationFire {
+            reason,
+            elapsed_secs: bound.as_secs().max(1),
+        });
+    }
+    // 总墙钟兜底上限（最后防线）——活动回合也只有超此值才强制截断。
+    if elapsed >= prompt_timeout && !prompt_timeout.is_zero() {
+        return Some(TruncationFire {
+            reason: "total_ceiling",
+            elapsed_secs: prompt_timeout.as_secs().max(1),
+        });
+    }
+    None
+}
+
+/// 取一组非零 Duration 的最小值；全零则返回 1ms（避免除以零 / 忙转）。
+fn smallest_nonzero(durations: [std::time::Duration; 3]) -> std::time::Duration {
+    durations
+        .iter()
+        .copied()
+        .filter(|d| !d.is_zero())
+        .min()
+        .unwrap_or(std::time::Duration::from_millis(1))
 }
 
 /// EOF/崩溃时唤醒全部挂起请求（发送 connection_closed 哨兵），返回 drained 数量。

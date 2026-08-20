@@ -1770,4 +1770,78 @@ for line in sys.stdin:
         assert!(timeout_entry.fields.contains_key("sessionId"));
         assert!(timeout_entry.fields.contains_key("agentId"));
     }
+
+    /// R-t5 回归（Bug 1）：agent 持续流式产出（agent_message_chunk）但迟迟不返回终态
+    /// 响应时，回合【不得】因"已等待时长"被截——活动即续命。只有真正停止输出才设超时。
+    /// fake agent 每 ~150ms 发一个 chunk、永不回 session/prompt 终态；配置
+    /// idle=1s / first_token=2s（chunk 持续到达 → idle 永不触发）。2.5s 内不得超时。
+    #[tokio::test]
+    async fn prompt_sustained_by_streaming_activity_is_not_truncated() {
+        const STREAM_SCRIPT: &str = r#"import json,sys,time
+for line in sys.stdin:
+    request = json.loads(line)
+    method = request.get('method')
+    if method == 'session/new':
+        response = {'jsonrpc':'2.0','id':request.get('id'),'result':{'sessionId':'s2-stream'}}
+        print(json.dumps(response), flush=True)
+    elif method == 'session/prompt':
+        # 持续流式 chunk，永不回终态 → 只应靠"停止输出"才截，活动期间不截
+        try:
+            for i in range(100):
+                print(json.dumps({'jsonrpc':'2.0','method':'session/update',
+                    'params':{'sessionId':'s2-stream','update':{'sessionUpdate':'agent_message_chunk',
+                    'content':{'text':'chunk%d' % i}}}}), flush=True)
+                time.sleep(0.15)
+        except Exception:
+            pass
+    else:
+        # initialize 等握手方法统一应答；永不给 session/prompt 终态响应
+        response = {'jsonrpc':'2.0','id':request.get('id'),'result':{}}
+        print(json.dumps(response), flush=True)
+"#;
+        let mut agent = crate::test_utils::fake_acp_agent("i2-stream-agent", STREAM_SCRIPT);
+        agent.acp = Some(crate::agent_config::AcpProtocolConfig {
+            // 关键：把"闲置超时"与"首 token 超时"设短，但仍在 chunk 持续到达下永不触发。
+            idle_timeout_secs: Some(1),
+            first_token_timeout_secs: Some(2),
+            cancel_settle_timeout_secs: Some(1),
+            ..Default::default()
+        });
+        let runtime = AgentRuntime::new_disconnected();
+        *runtime.acp.lock().await = AcpClient::connect_with_logs(&agent, None)
+            .await
+            .expect("fake ACP must initialize");
+        let state = crate::test_utils::TestStateBuilder::bare()
+            .with_active_agent("i2-stream-agent")
+            .with_agent(agent)
+            .with_runtime("i2-stream-agent", runtime.clone())
+            .build();
+        let gateway = Arc::new(GatewayCore::new());
+        let prompt_ctx = PromptContext {
+            source: "s2-source".to_string(),
+            content: "hello".to_string(),
+            ..Default::default()
+        };
+
+        let prompt = send_prompt_core::<tauri::test::MockRuntime>(
+            &state,
+            &runtime,
+            None,
+            &gateway,
+            &prompt_ctx,
+        );
+        // 让 prompt 跑 2.5s：chunk 持续到达（~150ms 一发），idle(1s)/first_token(2s) 都不该触发。
+        // 通过带超时地 await 来观察它「仍在进行而非返回超时」。
+        let outcome = tokio::time::timeout(
+            std::time::Duration::from_millis(2500),
+            prompt,
+        )
+        .await;
+        // 2.5s 后仍在执行 = 未被截断（若旧语义把 2s 当总超时，此处早已返回 timed out）。
+        assert!(
+            outcome.is_err(),
+            "持续流式产出的回合不得被截断：提前返回 = {:?}",
+            outcome
+        );
+    }
 }
