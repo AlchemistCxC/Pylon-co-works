@@ -35,4 +35,20 @@ describe('MarkdownContent heading class contract（CSS-02，CSS-04 回归门）'
     expect(paragraph.className).toContain('term-p')
     expect(paragraph.className).not.toContain('term-h')
   })
+
+  it('Bug4：streaming 增量渲染——切分后内容完整、结构正确（标题+段落+代码围栏）', async () => {
+    // 流式文本含已完成块 + 增长尾部；增量切分后必须仍完整渲染出所有内容，结构不被劈坏。
+    render(() => (
+      <MarkdownContent
+        text={'# 标题\n\n第一段已完成\n\n```js\nconst x = 1\n```\n\n正在增长的新段落'}
+        streaming
+      />
+    ))
+    const h1 = await waitFor(() => screen.getByRole('heading', { level: 1 }))
+    expect(h1).toBeTruthy()
+    expect(screen.getByText('第一段已完成')).toBeTruthy()
+    // 代码块内容与增长尾部都应出现
+    expect(screen.getByText(/const x = 1/)).toBeTruthy()
+    expect(screen.getByText('正在增长的新段落')).toBeTruthy()
+  })
 })

@@ -1,5 +1,5 @@
 import { Dynamic } from 'solid-js/web'
-import { For, Show, createResource, type JSX } from 'solid-js'
+import { For, Show, createMemo, createResource, type JSX } from 'solid-js'
 import { highlightCode } from '../../../components/chat/codeHighlight.ts'
 import { sanitizeHtml } from '../../../components/chat/htmlSanitizer.ts'
 import { isPlainTextContent } from '../../../components/chat/markdownFastPath.ts'
@@ -8,6 +8,7 @@ import {
   type MarkdownElement,
   type MarkdownRenderNode,
 } from './markdownRenderModel.ts'
+import { splitStreamingMarkdown } from './streamingMarkdownSplit.ts'
 
 export interface MarkdownContentProps {
   text: string
@@ -16,7 +17,32 @@ export interface MarkdownContentProps {
 }
 
 export function MarkdownContent(props: MarkdownContentProps) {
-  const shouldParse = () => props.streaming === true || !isPlainTextContent(props.text)
+  // Bug4 流式主瓶颈：streaming 时每次 token 都对整段文本重解析/重高亮 → O(n²)。
+  // 流式中把文本切成 "已完成块 stable + 增长尾块 unstable"（参考 claude-code StreamingMarkdown），
+  // stable 由 content-keyed LRU 缓存复用（不重解析），unstable 是短尾只解析这一小段。
+  // 非 streaming（已提交消息）保持整段一次解析，行为不变。
+  const split = createMemo(() => props.streaming === true
+    ? splitStreamingMarkdown(props.text)
+    : null)
+
+  return (
+    <Show when={props.streaming === true && split() !== null} fallback={<MarkdownSegment text={props.text} inline={props.inline} />}>
+      {() => {
+        const { stable, unstable } = split()!
+        return (
+          <>
+            {stable ? <MarkdownSegment text={stable} inline={props.inline} /> : <MarkdownSegment text="" inline={props.inline} />}
+            {unstable ? <MarkdownSegment text={unstable} inline={props.inline} /> : null}
+          </>
+        )
+      }}
+    </Show>
+  )
+}
+
+/** 把一段文本解析为 markdown 渲染。streaming 稳定前缀复用 LRU 缓存，不重解析。 */
+function MarkdownSegment(props: { text: string; inline?: boolean }) {
+  const shouldParse = () => !isPlainTextContent(props.text)
   const [model] = createResource(
     () => shouldParse() ? props.text : undefined,
     getMarkdownRenderModel,
