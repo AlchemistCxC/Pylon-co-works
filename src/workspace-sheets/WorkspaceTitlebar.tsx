@@ -36,6 +36,8 @@ interface WorkspaceTitlebarProps {
   onMinimize: MouseEventHandler<HTMLButtonElement>
   onToggleFullscreen: MouseEventHandler<HTMLButtonElement>
   onCloseWindow: MouseEventHandler<HTMLButtonElement>
+  /** 设置页打开时：除最小化/全屏/关闭外，标题栏其它交互禁用（视觉保留，且不产生新依赖链） */
+  settingsOpen?: boolean
 }
 
 export default function WorkspaceTitlebar({
@@ -62,6 +64,7 @@ export default function WorkspaceTitlebar({
   onMinimize,
   onToggleFullscreen,
   onCloseWindow,
+  settingsOpen = false,
 }: WorkspaceTitlebarProps) {
   const agentStatuses = useRuntimeStore(s => s.agentStatuses)
   const activeStatus = selectAgentStatus(activeAgent, activeAgent, agentStatuses)
@@ -71,7 +74,7 @@ export default function WorkspaceTitlebar({
     ? '当前 Sheet 无侧栏'
     : sidebarCollapsed ? '展开左栏' : '收起左栏'
   return (
-    <header className={`workspace-titlebar ${sidebarExpandedTrack ? 'sidebar-expanded-track' : 'sidebar-compact-track'} ${sidebarEnabled ? 'sidebar-enabled' : 'sidebar-disabled'}`} data-tauri-drag-region>
+    <header className={`workspace-titlebar ${sidebarExpandedTrack ? 'sidebar-expanded-track' : 'sidebar-compact-track'} ${sidebarEnabled ? 'sidebar-enabled' : 'sidebar-disabled'}${settingsOpen ? ' titlebar-settings-open' : ''}`} data-tauri-drag-region>
       <div className="workspace-titlebar-sidebar" data-tauri-drag-region>
         <button
           type="button"
@@ -117,9 +120,9 @@ export default function WorkspaceTitlebar({
           {chromeStyle === 'icons' ? <Terminal size={15} aria-hidden="true" /> : <PanelsTopLeft size={15} aria-hidden="true" />}
         </button>}
         <button type="button" onClick={onToggleSettings} title="设置" aria-label="切换设置">{chromeStyle === 'icons' ? <Settings size={15} aria-hidden="true" /> : '⚙'}</button>
-        <button type="button" onClick={onMinimize} title="最小化" aria-label="最小化">{chromeStyle === 'icons' ? <Minus size={14} aria-hidden="true" /> : '─'}</button>
-        <button type="button" onClick={onToggleFullscreen} title="最大化或还原" aria-label="最大化或还原">{chromeStyle === 'icons' ? <Square size={12} aria-hidden="true" /> : '□'}</button>
-        <button type="button" className="close" onClick={onCloseWindow} title="关闭" aria-label="关闭窗口">{chromeStyle === 'icons' ? <X size={15} aria-hidden="true" /> : '×'}</button>
+        <button type="button" className="titlebar-window-btn" onClick={onMinimize} title="最小化" aria-label="最小化">{chromeStyle === 'icons' ? <Minus size={14} aria-hidden="true" /> : '─'}</button>
+        <button type="button" className="titlebar-window-btn" onClick={onToggleFullscreen} title="最大化或还原" aria-label="最大化或还原">{chromeStyle === 'icons' ? <Square size={12} aria-hidden="true" /> : '□'}</button>
+        <button type="button" className="titlebar-window-btn close" onClick={onCloseWindow} title="关闭" aria-label="关闭窗口">{chromeStyle === 'icons' ? <X size={15} aria-hidden="true" /> : '×'}</button>
       </div>
     </header>
   )

@@ -33,6 +33,9 @@ import { hydrateIdentityAndWorkspace } from './app/bootstrap/hydrateIdentityAndW
 import { useHydrationStore } from './app/bootstrap/hydrationState'
 import PermissionDialog from './components/PermissionDialog'
 import ErrorCenter from './components/ErrorCenter'
+// B 临时调试层：布局草图画布（?sketch=1 激活）；UI DEMO（?demo=1 激活）。布局完成后整目录删除/转正
+import LayoutSketch from './layout-sketch/LayoutSketch'
+import UiDemo from './ui-demo/UiDemo'
 import SessionOwnerRecoveryDialog from './components/SessionOwnerRecoveryDialog'
 import { applyPylonAgentInstances } from './plugins/product/builtinPylonAgentAdapters'
 import { applyPylonToolDictionary } from './plugins/product/builtinPylonTools'
@@ -105,6 +108,9 @@ export default function App() {
   useEffect(() => { ensureInterfaceModeProfile() }, [interfaceMode, interfaceModeSnapshot])
   const [activeSession, setActiveSession] = useState<string | null>(null)
   const [showSettings, setShowSettings] = useState(false)
+  // B 临时调试层：URL ?sketch=1 挂载布局草图画布，?demo=1 挂载 UI DEMO
+  const sketchMode = new URLSearchParams(window.location.search).get('sketch') === '1'
+  const demoMode = new URLSearchParams(window.location.search).get('demo') === '1'
   const [settingsIntent, setSettingsIntent] = useState<{ domain?: string; section?: string; agentId?: string } | null>(null)
   // W2-12：右栏折叠迁 workspaceStore（右栏按 sheet 声明挂载），旧 RightPanel 退役
   const [showProfileEdit, setShowProfileEdit] = useState(false)
@@ -373,6 +379,7 @@ export default function App() {
         onReopenSheet={() => useWorkspaceStore.getState().reopenSheet()}
         onToggleRightPanel={() => { if (rightPanelEnabled) useWorkspaceStore.getState().setRightPanelCollapsed(!useWorkspaceStore.getState().rightPanelCollapsed) }}
         onToggleSettings={() => setShowSettings(value => !value)}
+        settingsOpen={settingsOpen}
         interfaceMode={interfaceMode}
         chromeStyle={interfaceModeContribution.chromeStyle}
         quickSwitchLabel={quickInterfaceMode?.label}
@@ -435,6 +442,9 @@ export default function App() {
       </Suspense>
       {/* 权限请求弹窗：store 驱动（无 active 请求返回 null），App 单例挂载不随 sheet 卸载 */}
       <PermissionDialog />
+      {/* B 临时调试层：布局草图画布（?sketch=1）/ UI DEMO（?demo=1），盖在最上层 */}
+      {sketchMode && <LayoutSketch />}
+      {demoMode && <UiDemo />}
     </div>
   )
 }
