@@ -1,0 +1,48 @@
+/**
+ * STRUCTURE GUARD（结构守卫）：本文件含源码 token/正则断言，不单独构成行为证据；
+ * 新业务完成度须配行为级测试（审计报告阶段 0："新业务完成度不得只靠源码 token"）。
+ */
+import { strict as assert } from 'node:assert'
+import { frameAt, resolveSpinnerFrames, resolveSpinnerMarker, splitSpinnerFrames } from '../src/components/chat/spinnerFrames.ts'
+import { readFileSync } from 'node:fs'
+
+const fallback = splitSpinnerFrames('')
+assert.ok(fallback.length > 0)
+assert.deepEqual(splitSpinnerFrames('◴◷◶◵'), ['◴', '◷', '◶', '◵'])
+assert.deepEqual(resolveSpinnerFrames('ascii-line', ''), ['|', '/', '-', '\\'])
+assert.deepEqual(resolveSpinnerFrames('custom', 'aabb'), ['a', 'b'])
+assert.deepEqual(resolveSpinnerFrames('custom', ''), fallback)
+assert.deepEqual(splitSpinnerFrames('😀👨‍💻🇨🇳'), ['😀', '👨‍💻', '🇨🇳'])
+assert.deepEqual(splitSpinnerFrames('a👨‍💻a'), ['a', '👨‍💻'])
+assert.equal(resolveSpinnerMarker(['◴', '◷'], 'frame', '◷'), '◷')
+assert.equal(resolveSpinnerMarker(['◴', '◷'], 'frame', 'missing'), '◴')
+assert.equal(resolveSpinnerMarker(['◴', '◷'], 'custom', '✓'), '✓')
+assert.equal(resolveSpinnerMarker(['◴', '◷'], 'custom', ''), '◴')
+assert.equal(frameAt(['a', 'b', 'c'], 0), 'a')
+assert.equal(frameAt(['a', 'b', 'c'], 120), 'b')
+assert.equal(frameAt(['a', 'b', 'c'], 360), 'a')
+assert.equal(frameAt(['←', '↑', '→'], 240), '→')
+assert.equal(frameAt([], 1000), fallback[Math.floor(1000 / 120) % fallback.length])
+
+const css = readFileSync(new URL('../src/plugins/product/packages/builtin.pylon-renderers/styles/components/chat/ChatView.css', import.meta.url), 'utf8')
+const store = readFileSync(new URL('../src/store.ts', import.meta.url), 'utf8')
+assert.equal(store.includes("spinnerFramePreset: 'sparkles'"), true)
+assert.equal(store.includes('spinnerCustomFrames: string'), true)
+assert.equal(store.includes("spinnerVerbSet: 'zh'"), true)
+assert.equal(store.includes('spinnerDoneMarkerMode'), true)
+assert.equal(store.includes('spinnerCancelledMarkerMode'), true)
+assert.equal(store.includes('spinnerErrorMarkerMode'), true)
+const themeDefs = readFileSync(new URL('../src/themeFieldDefs.ts', import.meta.url), 'utf8')
+assert.equal(themeDefs.includes("spinnerDoneMarkerMode: { ...S('chat', '完成标记模式', ['frame', 'custom']), default: 'custom'"), true)
+assert.match(themeDefs, /\bspinnerDoneMarker\b[\s\S]*?control: 'spinnerMarker'/)
+assert.match(themeDefs, /\bspinnerCancelledMarker\b[\s\S]*?control: 'spinnerMarker'/)
+assert.match(themeDefs, /\bspinnerErrorMarker\b[\s\S]*?control: 'spinnerMarker'/)
+assert.match(themeDefs, /\bspinnerDoneMarkerMode:\s*\{\s*\.\.\.S\('chat', '完成标记模式', \['frame', 'custom'\]\)/)
+
+const summaryRule = css.match(/\.term-summary \{[^}]+\}/)?.[0] || ''
+assert.equal(summaryRule.includes('font-size:var(--spinner-size, var(--font-size-md))'), true)
+assert.equal(summaryRule.includes('color:var(--text-dim)'), true)
+assert.equal(css.includes('.term-summary-frame { color:inherit; font-size:1.15em;'), true)
+assert.equal(summaryRule.includes('var(--spinner-color'), false, '完成态不得继续使用运行中 spinner 颜色')
+
+console.log('spinnerFrames 回归测试通过')

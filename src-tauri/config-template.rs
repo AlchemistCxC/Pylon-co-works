@@ -1,0 +1,30 @@
+pub const PLUGINS: &[&str] = &["shell","dialog","fs"];
+pub const CONFIG: &str = "{
+  \"$schema\": \"https://raw.githubusercontent.com/tauri-apps/tauri/dev/crates/tauri-config-schema/schema.json\",
+  \"productName\": \"Prism Desktop\",
+  \"version\": \"0.1.0\",
+  \"identifier\": \"com.prism.desktop\",
+  \"build\": {
+    \"frontendDist\": \"../dist\",
+    \"beforeBuildCommand\": \"npm run build\"
+  },
+  \"app\": {
+    \"windows\": [
+      {
+        \"title\": \"Prism Desktop\",
+        \"width\": 1200,
+        \"height\": 800,
+        \"minWidth\": 800,
+        \"minHeight\": 600,
+        \"decorations\": false,
+        \"transparent\": true,
+        \"center\": true
+      }
+    ],
+    \"security\": {
+      \"csp\": null,
+      \"dangerousDisableAssetCspModification\": true
+    },
+    \"withGlobalTauri\": true
+  }
+}";

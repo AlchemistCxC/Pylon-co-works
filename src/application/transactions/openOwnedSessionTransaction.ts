@@ -1,0 +1,115 @@
+/**
+ * openOwnedSessionTransaction — owner-aware 会话打开事务（ISSUE-01 W4）。
+ *
+ * History/Search/Overview/File 等入口统一走本事务：先确定目标 Session 的 owner（agentId），
+ * 若与当前 active Agent 不同则先 await 切换 owner（成功才继续），再复查 Session 仍存在且
+ * owner 未变，最后 selectSession + 以 owner 打开 agent sheet。任一步失败保持原页面，
+ * 不静默归到 active Agent（ISSUE-01 目标行为 4/5）。
+ *
+ * 结果 kinds：
+ * - blocked          owner 无法确定（存档无归属）→ 显式要求恢复选择
+ * - validation       目标 Session 不存在 / 创建失败
+ * - transport        切换 owner Agent 失败
+ * - mismatch         复查时 Session 已变化（删除/owner 变更）
+ */
+import { invoke } from '@tauri-apps/api/core'
+import type { Session } from '../../identityStore'
+import { useIdentityStore } from '../../identityStore'
+import { useRuntimeStore } from '../../runtimeStore'
+import { reportRuntimeError } from '../../runtimeError'
+import { createAgentClient } from '../../infrastructure/acp/agentClient'
+import { switchAgentTransaction } from './switchAgentTransaction'
+import type { TransactionResult } from './transactionResult'
+import { resumePersistedSessionTransaction } from './resumePersistedSessionTransaction'
+import { resolveArchivedSessionOwner } from './archiveOwnerResolver'
+
+/**
+ * 标准 owner 切换实现：复用 switchAgentTransaction 完整流程（invoke → reset runtime →
+ * setActiveAgent → 对账 agent_status → 广播 agent-switched）。不在此开 sheet——
+ * openOwnedSessionTransaction 负责最后以 owner 打开 agent sheet。
+ */
+export function createStandardSwitchAgent(getAgentName: (agentId: string) => string | undefined): (agentId: string) => Promise<TransactionResult<string>> {
+  return (agentId: string) => switchAgentTransaction(agentId, getAgentName(agentId) ?? agentId, {
+    switchAgent: id => createAgentClient({ invoke: (cmd, args) => invoke(cmd, args as Record<string, unknown> | undefined) }).switchAgent(id),
+    resetRuntime: () => useRuntimeStore.getState().resetAll(),
+    setActiveAgent: id => useIdentityStore.getState().setActiveAgent(id),
+    fetchAgentStatus: () => createAgentClient({ invoke: (cmd, args) => invoke(cmd, args as Record<string, unknown> | undefined) }).agentStatus(),
+    applyAgentStatus: (id, status) => useRuntimeStore.getState().setAgentStatus(id, status),
+    reportError: (action, error) => reportRuntimeError(action, error),
+    dispatchSwitched: () => window.dispatchEvent(new CustomEvent('pylon:agent-switched')),
+  })
+}
+
+export interface OpenOwnedSessionDeps {
+  /** 新鲜读取 sessions（切换后复查需最新状态，不用静态快照——CR-002） */
+  getSessions: () => readonly Session[]
+  activeAgent: string | null
+  addSession: (name: string, agentId?: string) => string
+  updateSession: (id: string, partial: Partial<Session>) => void
+  /** 返回 switchAgentTransaction 判别结果（{ok:false} 而非抛异常——CR-001） */
+  switchAgent: (agentId: string) => Promise<TransactionResult<string>>
+  selectSession: (id: string) => void
+  openAgentSheet: (opts: { title: string; agentId: string }) => void
+}
+
+export interface OpenOwnedSessionInput {
+  /** 已知 Session id（Search/File/Overview 本地会话路径） */
+  targetId?: string
+  /** 存档恢复路径（History/Overview 存档条目，无本地 identity 行） */
+  source?: string
+  periId?: string
+  title?: string
+  updatedAt?: number
+  /** 调用方已知的显式 owner（存档条目若携带 agentId） */
+  ownerAgentId?: string
+}
+
+export async function openOwnedSessionTransaction(
+  input: OpenOwnedSessionInput,
+  deps: OpenOwnedSessionDeps,
+): Promise<TransactionResult<string>> {
+  let target: Session | undefined
+  let ownerAgentId: string | undefined
+
+  if (input.targetId) {
+    target = deps.getSessions().find(session => session.id === input.targetId)
+    if (!target) return { ok: false, kind: 'validation', message: '会话不存在' }
+    ownerAgentId = target.agentId
+  } else {
+    // 存档恢复：预查与实际恢复共用同一 resolver，避免 either-match 与 conflict 语义漂移。
+    const resolution = resolveArchivedSessionOwner(input, deps.getSessions())
+    if (resolution.kind === 'conflict') {
+      return { ok: false, kind: 'conflict', message: '存档会话归属冲突：source/periId 指向多个本地会话' }
+    }
+    ownerAgentId = input.ownerAgentId ?? (resolution.kind === 'resolved' ? resolution.agentId : undefined)
+    if (!ownerAgentId) {
+      return { ok: false, kind: 'blocked', message: '存档会话归属不明，无法自动打开（请先指定 Agent）' }
+    }
+    const resume = resumePersistedSessionTransaction(input.source, input.periId, input.title, input.updatedAt, {
+      sessions: deps.getSessions(),
+      addSession: deps.addSession,
+      updateSession: deps.updateSession,
+    }, ownerAgentId)
+    if (!resume.ok) return resume
+    target = deps.getSessions().find(session => session.id === resume.value)
+  }
+  if (!target) return { ok: false, kind: 'validation', message: '会话创建失败' }
+
+  // owner 与当前 active 不同 → 先切 owner；失败保持原页面（判别结果非抛异常——CR-001）
+  if (ownerAgentId !== deps.activeAgent) {
+    const switchResult = await deps.switchAgent(ownerAgentId)
+    if (!switchResult.ok) {
+      return { ok: false, kind: 'transport', message: `切换 Agent 失败：${switchResult.message}`, cause: switchResult.cause }
+    }
+  }
+
+  // 复查：Session 仍存在且 owner 未变（切换期间可能被删除/重绑）
+  const after = deps.getSessions().find(session => session.id === target!.id)
+  if (!after || after.agentId !== ownerAgentId) {
+    return { ok: false, kind: 'mismatch', message: '会话在切换期间已变化，请重试' }
+  }
+
+  deps.selectSession(after.id)
+  deps.openAgentSheet({ title: after.name, agentId: ownerAgentId })
+  return { ok: true, value: after.id }
+}

@@ -1,0 +1,69 @@
+import type { BuiltinPluginDefinition } from '../../plugin-runtime/pluginRuntime.ts'
+import { createCoreReactRendererPluginDefinition } from '../core/renderer/reactRenderer.ts'
+import { createCoreSolidRendererPluginDefinition } from '../core/renderer/solidRenderer.ts'
+import { createBuiltinRendererContentPluginDefinitions } from '../core/renderer/builtinRenderContent.ts'
+import { createBuiltinToolRendererPluginDefinition } from '../core/renderer/builtinToolRenderers.ts'
+import { BUILTIN_PYLON_RENDERERS_ID } from './productPluginIds.ts'
+import { mountFirstPartyStyleAssets } from './firstPartyStyleRuntime.ts'
+import { loadBuiltinPylonRendererStyles } from './packages/builtin.pylon-renderers/styleAssets.ts'
+import { BUILTIN_PRESENTATION_PROFILES } from '../core/renderer/builtinPresentationProfiles.ts'
+import { createBuiltinPresentationCommandDefinitions } from '../core/renderer/builtinPresentationCommands.ts'
+import { BUILTIN_INTERFACE_MODES } from '../core/interfaceMode/builtinInterfaceModes.ts'
+
+const rendererDefinitions = Object.freeze([
+  createCoreReactRendererPluginDefinition(),
+  createCoreSolidRendererPluginDefinition(),
+  ...createBuiltinRendererContentPluginDefinitions(),
+  createBuiltinToolRendererPluginDefinition(),
+])
+
+export function createBuiltinPylonRenderersPlugin(): BuiltinPluginDefinition {
+  return {
+    id: BUILTIN_PYLON_RENDERERS_ID,
+    kind: 'renderer',
+    firstParty: true,
+    dependencies: [],
+    hotSwapMode: 'parallel',
+    activate: context => {
+      mountFirstPartyStyleAssets(BUILTIN_PYLON_RENDERERS_ID, context.identity.key, context.scope, loadBuiltinPylonRendererStyles())
+      for (const definition of rendererDefinitions) {
+        const result = definition.activate(context)
+        if (result && typeof (result as PromiseLike<unknown>).then === 'function') {
+          throw new Error(`内置 renderer 必须同步激活：${definition.id}`)
+        }
+      }
+      for (const profile of BUILTIN_PRESENTATION_PROFILES) context.presentation.registerProfile(profile)
+      for (const mode of BUILTIN_INTERFACE_MODES) context.interfaceModes.registerMode(mode)
+      context.fonts.registerFont({
+        id: 'system',
+        label: '系统无衬线',
+        description: 'Segoe UI / 苹方 / 微软雅黑，适合导航与设置。',
+        family: "-apple-system, 'Segoe UI', 'PingFang SC', 'Microsoft YaHei', sans-serif",
+        roles: ['interface', 'content'],
+        order: 10,
+        sample: '清晰、自然、适合长时间工作',
+      })
+      context.fonts.registerFont({
+        id: 'serif',
+        label: '低对比阅读衬线',
+        description: '适合长篇 Markdown 与审阅。',
+        family: "'Iowan Old Style', 'Noto Serif SC', 'Source Han Serif SC', 'Songti SC', Georgia, serif",
+        roles: ['interface', 'content'],
+        order: 20,
+        sample: '让长篇内容更接近纸张阅读',
+      })
+      context.fonts.registerFont({
+        id: 'mono',
+        label: 'JetBrains Mono',
+        description: '用于代码、路径、终端与 Agent 记录流。',
+        family: "'JetBrains Mono', 'Cascadia Code', Consolas, 'Sarasa Mono SC', monospace",
+        roles: ['content', 'code'],
+        order: 30,
+        sample: 'const pylon = await connect()'
+      })
+      for (const command of createBuiltinPresentationCommandDefinitions()) {
+        context.commands.register(command, { contributionId: `${BUILTIN_PYLON_RENDERERS_ID}.${command.id}`, layer: 'feature', priority: command.priority })
+      }
+    },
+  }
+}

@@ -1,0 +1,323 @@
+//! Phase D（R2-WI03，交接 §7）：provider-scoped 协议适配器注册表。
+//!
+//! 最小垂直切片：interaction request/response 的 classify / normalize / respond。
+//! 当前只注册 Peri 适配器（wire 与既有 `parse_permission_request_with_generation` /
+//! `resolve_pending` 完全一致）；未注册 provider 由调用方明确返回 unsupported、
+//! runtime-log 可观察，不生成 RPC（交接纪律：不生成未经实证的 Hermes/新 Agent response）。
+
+use std::collections::HashMap;
+use std::future::Future;
+use std::pin::Pin;
+use std::sync::{Arc, Mutex, OnceLock};
+
+use crate::error::PylonError;
+use crate::permission::{
+    parse_permission_request_with_generation, resolve_permission, InteractionAnswerInput,
+    InteractionIdentityInput, PendingPermission,
+};
+use crate::runtime::AgentRuntime;
+
+/// interaction 请求分类结果（dispatcher 按此决定处理路径）。
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum InteractionClassification {
+    /// interaction 请求（normalize 后挂起/发送）
+    Interaction,
+    /// 非 interaction 请求/通知（dispatcher 按既有语义继续/丢弃）
+    NotInteraction,
+}
+
+/// provider-scoped 协议适配器（R2-WI03 最小垂直切片）。
+pub(crate) trait AgentProtocolAdapter: Send + Sync {
+    /// 协议/实现类别（如 peri/hermes）。
+    fn provider(&self) -> &'static str;
+    /// 按 ACP method 名分类 interaction 请求。
+    fn classify(&self, method: Option<&str>) -> InteractionClassification;
+    /// normalize interaction 请求参数 → 统一挂起数据；None = 解析失败（调用方按
+    /// protocol error 处理，ACP-04 §5.6：JSON-RPC error 应答，不伪造 optionId）。
+    fn normalize_request(
+        &self,
+        params: Option<&serde_json::Value>,
+        client_generation: u64,
+    ) -> Option<PendingPermission>;
+    /// 应答 interaction（kind/身份/选项校验 + 锁外发送）。
+    fn respond_interaction<'a>(
+        &'a self,
+        runtime: &'a AgentRuntime,
+        identity: &'a InteractionIdentityInput,
+        kind: &'a str,
+        answer: &'a InteractionAnswerInput,
+    ) -> Pin<Box<dyn Future<Output = Result<(), PylonError>> + Send + 'a>>;
+}
+
+/// request_permission 协议适配器（provider 参数化）：
+/// 复用既有 request_permission 解析与 resolve_pending 应答核心（wire 不变）。
+/// R2-WI06（Phase F 源码实证）：Peri 与 Hermes 的审批 wire 逐字段一致——
+/// 均走 ACP `session/request_permission` + `RequestPermissionResponse` +
+/// 同一 optionId 语义集，故同一实现按 provider 注册即可。
+pub(crate) struct RequestPermissionAdapter {
+    pub(crate) provider: &'static str,
+}
+
+impl AgentProtocolAdapter for RequestPermissionAdapter {
+    fn provider(&self) -> &'static str {
+        self.provider
+    }
+
+    fn classify(&self, method: Option<&str>) -> InteractionClassification {
+        match method {
+            Some(crate::acp::METHOD_SESSION_REQUEST_PERMISSION) => {
+                InteractionClassification::Interaction
+            }
+            _ => InteractionClassification::NotInteraction,
+        }
+    }
+
+    fn normalize_request(
+        &self,
+        params: Option<&serde_json::Value>,
+        client_generation: u64,
+    ) -> Option<PendingPermission> {
+        parse_permission_request_with_generation(params, client_generation)
+    }
+
+    fn respond_interaction<'a>(
+        &'a self,
+        runtime: &'a AgentRuntime,
+        identity: &'a InteractionIdentityInput,
+        kind: &'a str,
+        answer: &'a InteractionAnswerInput,
+    ) -> Pin<Box<dyn Future<Output = Result<(), PylonError>> + Send + 'a>> {
+        Box::pin(respond_request_permission(
+            self.provider(),
+            runtime,
+            identity,
+            kind,
+            answer,
+        ))
+    }
+}
+
+/// request_permission 应答核心（原 respond_interaction 命令主体；provider 查找上移到调用方）。
+async fn respond_request_permission(
+    provider: &str,
+    runtime: &AgentRuntime,
+    identity: &InteractionIdentityInput,
+    kind: &str,
+    answer: &InteractionAnswerInput,
+) -> Result<(), PylonError> {
+    if kind != "approval" {
+        return Err(PylonError::Protocol(format!(
+            "interaction response unsupported: provider={provider} kind={kind}"
+        )));
+    }
+    let option_id = answer.option_id.clone().ok_or_else(|| {
+        PylonError::Protocol("permission interaction requires optionId".to_string())
+    })?;
+    // ACP-01：前端回显为字符串——数字形态还原为 Number（命中原 numeric 请求），
+    // 否则 String；最终 variant 由 pending 规范键决定（原 string-id 请求不被转数）。
+    let candidate = crate::acp::RequestId::from_echo_string(&identity.request_id);
+    let canonical_id = {
+        let pending = runtime
+            .pending_permissions
+            .lock()
+            .map_err(|e| e.to_string())?;
+        let canonical_id = crate::permission::canonical_pending_key(&pending, &candidate)
+            .ok_or_else(|| {
+                PylonError::Protocol(format!(
+                    "permission request not found: {}",
+                    identity.request_id
+                ))
+            })?;
+        let permission = pending.get(&canonical_id).ok_or_else(|| {
+            PylonError::Protocol(format!(
+                "permission request not found: {}",
+                identity.request_id
+            ))
+        })?;
+        if permission.session_id != identity.session_id
+            || identity
+                .tool_call_id
+                .as_deref()
+                .is_some_and(|id| id != permission.tool_call_id)
+            || permission.client_generation != identity.client_generation
+        {
+            return Err(PylonError::Protocol(
+                "stale interaction identity".to_string(),
+            ));
+        }
+        canonical_id
+    };
+    let _ = (&answer.text, &answer.values);
+    resolve_permission(runtime, canonical_id, &option_id).await
+}
+
+type AdapterRef = Arc<dyn AgentProtocolAdapter>;
+
+static PROTOCOL_ADAPTERS: OnceLock<Mutex<HashMap<String, AdapterRef>>> = OnceLock::new();
+
+fn registry() -> &'static Mutex<HashMap<String, AdapterRef>> {
+    PROTOCOL_ADAPTERS.get_or_init(|| Mutex::new(HashMap::new()))
+}
+
+fn normalize_provider(provider: &str) -> String {
+    provider.trim().to_lowercase()
+}
+
+/// 注册 provider 适配器（应用启动时；同 provider 重复注册覆盖）。
+pub(crate) fn register_protocol_adapter(adapter: AdapterRef) {
+    let _ = registry()
+        .lock()
+        .map(|mut adapters| adapters.insert(normalize_provider(adapter.provider()), adapter));
+}
+
+/// 按 provider 取适配器；未注册返回 None（调用方返回明确 unsupported，不生成 RPC）。
+pub(crate) fn get_protocol_adapter(provider: &str) -> Option<AdapterRef> {
+    registry()
+        .lock()
+        .ok()
+        .and_then(|adapters| adapters.get(&normalize_provider(provider)).cloned())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn identity(provider: &str, request_id: &str) -> InteractionIdentityInput {
+        InteractionIdentityInput {
+            provider: provider.to_string(),
+            agent_id: provider.to_string(),
+            request_id: request_id.to_string(),
+            session_id: "s1".to_string(),
+            tool_call_id: None,
+            client_generation: 0,
+        }
+    }
+
+    #[test]
+    fn registry_returns_only_registered_providers() {
+        // 探测 provider 专用名——避免与 peri/hermes（run()/test_state_with_acp 注册、
+        // 其他测试并发注册）冲突；本测试不调用全局 clear（防跨测试注册表 wipe 竞态）。
+        register_protocol_adapter(Arc::new(RequestPermissionAdapter {
+            provider: "test-probe",
+        }));
+        let adapter = get_protocol_adapter("test-probe").expect("注册的 provider 必须可取");
+        assert_eq!(adapter.provider(), "test-probe");
+        assert!(
+            get_protocol_adapter("nope").is_none(),
+            "未注册 provider 必须明确 unsupported"
+        );
+        assert!(
+            get_protocol_adapter("TEST-PROBE").is_some(),
+            "provider 查找必须大小写不敏感"
+        );
+    }
+
+    #[test]
+    fn hermes_adapter_reuses_request_permission_wire() {
+        // R2-WI06（Phase F 源码实证）：Hermes 审批 wire 与 Peri 逐字段一致
+        // （session/request_permission + RequestPermissionResponse + optionId 语义集），
+        // 同一 request_permission 实现按 provider 注册即可。不调用全局 clear（防竞态）。
+        register_protocol_adapter(Arc::new(RequestPermissionAdapter { provider: "hermes" }));
+        let adapter = get_protocol_adapter("hermes").expect("hermes 适配器必须已注册");
+        assert_eq!(adapter.provider(), "hermes");
+        let params = serde_json::json!({
+            "sessionId": "s1",
+            "toolCall": {"toolCallId": "perm-check-1", "title": "edit"},
+            "options": [{"optionId": "allow_once"}, {"optionId": "deny"}]
+        });
+        let permission = adapter
+            .normalize_request(Some(&params), 5)
+            .expect("hermes request_permission 必须按同款 wire 解析");
+        assert_eq!(permission.session_id, "s1");
+        assert_eq!(permission.tool_call_id, "perm-check-1");
+        assert_eq!(
+            permission.options,
+            vec![
+                crate::permission::PermissionOption::plain("allow_once"),
+                crate::permission::PermissionOption::plain("deny"),
+            ]
+        );
+    }
+
+    #[test]
+    fn peri_classifies_only_request_permission_as_interaction() {
+        let adapter = RequestPermissionAdapter { provider: "peri" };
+        assert_eq!(
+            adapter.classify(Some(crate::acp::METHOD_SESSION_REQUEST_PERMISSION)),
+            InteractionClassification::Interaction
+        );
+        assert_eq!(
+            adapter.classify(Some("session/new")),
+            InteractionClassification::NotInteraction
+        );
+        assert_eq!(
+            adapter.classify(None),
+            InteractionClassification::NotInteraction
+        );
+    }
+
+    #[test]
+    fn peri_normalize_reuses_permission_parser() {
+        let adapter = RequestPermissionAdapter { provider: "peri" };
+        let params = serde_json::json!({
+            "sessionId": "s1",
+            "toolCall": {"toolCallId": "call-1", "title": "t"},
+            "options": [{"optionId": "allow_once"}, {"optionId": "reject_once"}]
+        });
+        let permission = adapter
+            .normalize_request(Some(&params), 3)
+            .expect("合法 request_permission 必须解析");
+        assert_eq!(permission.session_id, "s1");
+        assert_eq!(permission.tool_call_id, "call-1");
+        assert_eq!(permission.client_generation, 3);
+        assert_eq!(
+            permission.options,
+            vec![
+                crate::permission::PermissionOption::plain("allow_once"),
+                crate::permission::PermissionOption::plain("reject_once"),
+            ]
+        );
+        assert!(
+            adapter
+                .normalize_request(Some(&serde_json::json!({"sessionId": "s"})), 0)
+                .is_none(),
+            "缺 options 必须解析失败（调用方按 protocol error 处理）"
+        );
+    }
+
+    #[tokio::test]
+    async fn peri_respond_rejects_non_approval_kind() {
+        let runtime = AgentRuntime::new_disconnected();
+        let answer = InteractionAnswerInput {
+            option_id: Some("allow_once".to_string()),
+            text: None,
+            values: None,
+        };
+        let error = RequestPermissionAdapter { provider: "peri" }
+            .respond_interaction(&runtime, &identity("peri", "7"), "clarify", &answer)
+            .await
+            .expect_err("非 approval kind 必须拒绝");
+        assert!(
+            error.to_string().contains("unsupported"),
+            "kind 门禁文案必须含 unsupported，实际: {error}"
+        );
+    }
+
+    #[tokio::test]
+    async fn peri_respond_rejects_missing_option_id() {
+        let runtime = AgentRuntime::new_disconnected();
+        let answer = InteractionAnswerInput {
+            option_id: None,
+            text: None,
+            values: None,
+        };
+        let error = RequestPermissionAdapter { provider: "peri" }
+            .respond_interaction(&runtime, &identity("peri", "7"), "approval", &answer)
+            .await
+            .expect_err("approval 应答必须要求 optionId");
+        assert!(
+            error.to_string().contains("optionId"),
+            "缺 optionId 必须明确报错，实际: {error}"
+        );
+    }
+}

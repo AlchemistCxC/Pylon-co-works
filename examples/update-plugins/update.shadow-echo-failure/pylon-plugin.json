@@ -1,0 +1,19 @@
+{
+  "schema": 1,
+  "id": "update.shadow-echo",
+  "name": "Shadow Echo failing candidate",
+  "version": "2.0.0-failure",
+  "api": "1.0",
+  "kind": "service",
+  "web": { "entry": "./index.js", "styles": [] },
+  "dependencies": {},
+  "optionalDependencies": {},
+  "conflicts": [],
+  "activation": { "events": ["kernel.ready"] },
+  "hotSwap": { "mode": "parallel", "drainTimeoutMs": 10000 },
+  "executables": {
+    "echo": {
+      "windows-x86_64": "./bin/windows-x86_64/echo.cmd"
+    }
+  }
+}

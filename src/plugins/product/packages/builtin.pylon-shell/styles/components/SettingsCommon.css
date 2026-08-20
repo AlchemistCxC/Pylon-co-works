@@ -1,0 +1,132 @@
+.settings-surface {
+  --settings-surface: var(--surface-overlay);
+  --settings-raised: var(--surface-raised);
+  --settings-subtle: var(--surface-panel);
+  --settings-border: var(--stroke-subtle);
+  --settings-shadow: var(--shadow-float);
+  --settings-radius-lg: var(--ui-radius-lg);
+  --settings-radius-md: var(--ui-radius-md);
+  --settings-radius-sm: var(--ui-radius-sm);
+  color: var(--text);
+}
+
+.font-contribution-picker {
+  display: grid;
+  grid-template-columns: minmax(150px, 210px) minmax(180px, 1fr);
+  align-items: center;
+  gap: var(--ui-space-2) var(--ui-space-3);
+  width: min(100%, 560px);
+}
+.font-setting-row { align-items:flex-start; flex-wrap:wrap; }
+.font-setting-row .font-contribution-picker { flex:1 1 360px; }
+.font-setting-row > .set-hint { flex:1 0 calc(100% - 106px); margin-left:106px; }
+.font-contribution-sample {
+  min-width: 0;
+  overflow: hidden;
+  color: var(--text);
+  font-size: 13px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.font-contribution-picker > small {
+  grid-column: 2;
+  color: var(--text-dim);
+  font-size: 11px;
+  line-height: 1.45;
+}
+
+.settings-dialog {
+  background: var(--settings-surface);
+  border: 1px solid var(--settings-border);
+  border-radius: var(--settings-radius-lg);
+  box-shadow: var(--settings-shadow);
+  color: var(--text);
+  overflow: hidden;
+}
+
+.settings-dialog-header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 24px;
+  padding: 20px 24px 18px;
+  border-bottom: 1px solid var(--settings-border);
+}
+
+.settings-dialog-title { margin: 0; color: var(--text); font-size: 18px; font-weight: 680; letter-spacing: -0.01em; }
+.settings-dialog-description { margin: 5px 0 0; color: var(--text-dim); font-size: 13px; line-height: 1.5; }
+.settings-dialog-close {
+  display: grid; place-items: center; flex: 0 0 32px; width: 32px; height: 32px;
+  border: 1px solid transparent; border-radius: var(--settings-radius-md); background: transparent;
+  color: var(--text-dim); font-size: 17px; cursor: pointer;
+}
+.settings-dialog-close:hover { color: var(--text); background: var(--bg-hover); border-color: var(--settings-border); }
+.settings-dialog-close:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+
+.settings-section {
+  min-width: 0;
+  padding: 18px;
+  border: 1px solid var(--settings-border);
+  border-radius: var(--settings-radius-md);
+  background: var(--settings-raised);
+}
+.settings-section-heading { display: flex; align-items: flex-start; justify-content: space-between; gap: 16px; margin-bottom: 14px; }
+.settings-section-title { margin: 0; color: var(--text); font-size: 14px; font-weight: 650; }
+.settings-section-description { margin: 4px 0 0; color: var(--text-dim); font-size: 12px; line-height: 1.5; }
+.settings-badge {
+  flex: 0 0 auto; padding: 4px 9px; border: 1px solid var(--settings-border);
+  border-radius: var(--ui-radius-pill); background: var(--settings-subtle); color: var(--text-dim);
+  font: 11px/1.2 var(--mono);
+}
+
+.settings-field { min-width: 0; }
+.settings-field-label { display: block; margin-bottom: 6px; color: var(--text); font-size: 12px; font-weight: 620; }
+.settings-field-hint { margin: 6px 0 0; color: var(--text-dim); font-size: 12px; line-height: 1.5; }
+.settings-control {
+  width: 100%; min-width: 0; min-height: 38px; padding: 8px 11px;
+  border: 1px solid var(--settings-border); border-radius: var(--settings-radius-sm);
+  outline: none; background: var(--bg-input); color: var(--text);
+  font: 14px/1.4 var(--font); transition: border-color var(--motion-fast) var(--ease-standard), box-shadow var(--motion-fast) var(--ease-standard), background var(--motion-fast) var(--ease-standard);
+}
+.settings-control:hover { border-color: var(--border-focus); }
+.settings-control:focus { border-color: var(--accent); box-shadow: 0 0 0 3px var(--state-focus-ring); }
+.settings-control::placeholder { color: var(--text-placeholder); }
+textarea.settings-control { resize: vertical; line-height: 1.6; }
+select.settings-control { cursor: pointer; }
+select.settings-control option { background: var(--global-bg-color); color: var(--text); }
+
+.settings-action {
+  min-height: 34px; padding: 7px 14px; border: 1px solid var(--settings-border);
+  border-radius: var(--settings-radius-sm); background: var(--settings-subtle); color: var(--text);
+  font: 13px/1 var(--font); cursor: pointer; transition: background var(--motion-fast) var(--ease-standard), border-color var(--motion-fast) var(--ease-standard), opacity var(--motion-fast) var(--ease-standard);
+}
+.settings-action:hover { background: var(--bg-hover); border-color: var(--border-focus); }
+.settings-action.primary { color: #fff; background: var(--accent); border-color: var(--accent); }
+.settings-action.danger { color: var(--state-danger); border-color: color-mix(in srgb, var(--state-danger) 38%, var(--settings-border)); background:var(--state-danger-surface); }
+.settings-action:disabled { opacity: .42; cursor: not-allowed; }
+.settings-action:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+
+.settings-dialog-footer {
+  display: flex; align-items: center; justify-content: space-between; gap: 18px;
+  padding: 14px 24px; border-top: 1px solid var(--settings-border);
+  background: var(--settings-surface);
+}
+.settings-dialog-actions { display: flex; align-items: center; gap: 8px; }
+.settings-dirty-state { color: var(--text-dim); font-size: 12px; }
+.settings-dirty-state.active { color: var(--accent); }
+
+@media (max-width: 680px) {
+  .font-contribution-picker { grid-template-columns: 1fr; }
+  .font-contribution-picker > small { grid-column: 1; }
+  .settings-dialog-header, .settings-dialog-footer { padding-left: 18px; padding-right: 18px; }
+  .settings-dialog-footer { align-items: stretch; flex-direction: column; }
+  .settings-dialog-actions { justify-content: flex-end; }
+}
+
+/* 从 Kernel index.css 拆出的产品 Dialog 基线。Kernel Recovery 不依赖这些 class。 */
+.dialog-overlay { position:fixed; inset:0; z-index:90; background:rgba(0,0,0,0.3); backdrop-filter:blur(4px); }
+.dialog-content { position:fixed; top:50%; left:50%; transform:translate(-50%,-50%); z-index:91; background:var(--dialog-bg,var(--surface-overlay)); color:var(--text); border:1px solid var(--stroke-subtle); border-radius:var(--ui-radius-lg); box-shadow:var(--shadow-float); padding:0; min-width:400px; max-width:90vw; }
+.app[data-ui-scheme="dark"] .dialog-content,
+body[data-ui-scheme="dark"] .dialog-content { --dialog-bg:#1a1a2e; }
+.modal-close { background:none; border:none; color:var(--text-dim); font-size:16px; cursor:pointer; }
+.modal-close:hover { color:var(--text); }

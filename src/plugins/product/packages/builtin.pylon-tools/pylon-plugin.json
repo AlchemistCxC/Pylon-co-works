@@ -1,0 +1,14 @@
+{
+  "schema": 1,
+  "id": "builtin.pylon-tools",
+  "name": "Pylon Tools",
+  "version": "1.0.0",
+  "api": "1.0",
+  "kind": "tool-provider",
+  "web": { "entry": "./entry.ts", "styles": [] },
+  "dependencies": {},
+  "optionalDependencies": {},
+  "conflicts": [],
+  "activation": { "events": ["kernel.ready"] },
+  "hotSwap": { "mode": "parallel", "drainTimeoutMs": 10000 }
+}

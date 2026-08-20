@@ -1,0 +1,122 @@
+/* W1-04 ContextPanel 右栏壳：消费现有主题变量，零新样式体系 */
+
+.context-panel {
+  position:relative;
+  isolation:isolate;
+  display: flex;
+  flex-direction: column;
+  width: var(--right-width, 260px);
+  border-left: 1px solid var(--border);
+  background: transparent;
+  color: var(--text);
+  font-family: var(--font);
+}
+.context-panel::before,.layout > .context-panel-body::before {
+  content:''; position:absolute; inset:0; z-index:-1; pointer-events:none;
+  background-color:var(--right-bg,var(--bg-panel));
+  background-image:var(--right-bg-image,none); background-size:cover; background-position:center;
+  opacity:var(--right-transparency,1);
+  backdrop-filter:blur(var(--right-blur,0px)); -webkit-backdrop-filter:blur(var(--right-blur,0px));
+}
+
+.context-panel-head {
+  display: flex;
+  align-items: center;
+  gap: var(--ui-space-1);
+  min-height: 48px;
+  padding: var(--ui-space-2);
+  border-bottom: 1px solid var(--border);
+}
+.context-panel-tabs { display:flex; flex:1; min-width:0; gap:var(--ui-space-1); }
+.context-panel-subnav { display:flex; align-items:center; gap:var(--ui-space-1); margin-bottom:var(--ui-space-3); }
+.context-panel-contribution { min-width:0; }
+.context-panel-plugin-surface { min-width:0; min-height:80px; }
+
+.context-panel-mode {
+  flex: 1;
+  min-height: var(--ui-control-compact);
+  padding: 0 var(--ui-space-2);
+  font-size: 12px;
+  font-weight: 560;
+  font-family: var(--font);
+  color: var(--text-dim);
+  background: transparent;
+  border: 1px solid transparent;
+  border-radius: 0;
+  cursor: pointer;
+  transition: color 150ms ease, background 150ms ease, border-color 150ms ease;
+}
+
+.context-panel-mode:hover { color: var(--text); background: var(--bg-hover); }
+
+.context-panel-mode.active {
+  color: var(--text);
+  border-color: var(--border);
+  background: var(--bg-active);
+}
+
+.context-panel-mode:focus-visible,
+.context-panel-collapse:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+
+.context-panel-collapse {
+  width: var(--ui-control-compact);
+  height: var(--ui-control-compact);
+  padding: 0;
+  font-size: 12px;
+  color: var(--text-dim);
+  background: transparent;
+  border: 1px solid transparent;
+  border-radius: 0;
+  cursor: pointer;
+}
+
+.context-panel-collapse:hover {
+  color: var(--text);
+  background: var(--bg-hover);
+}
+
+.context-panel-body {
+  flex: 1;
+  min-width: 0;
+  overflow-y: auto;
+  padding: var(--ui-space-3);
+}
+
+/* Agent/File 注册表直接挂载 panel body；保持与 ContextPanel 壳相同的表面和边界。 */
+.layout > .context-panel-body {
+  position:relative;
+  isolation:isolate;
+  width: var(--right-width, 280px);
+  flex: 0 0 var(--right-width, 280px);
+  border-left: 1px solid var(--border);
+  background: transparent;
+}
+
+.layout > .context-panel-body > .context-panel-head {
+  margin: calc(-1 * var(--ui-space-3)) calc(-1 * var(--ui-space-3)) var(--ui-space-3);
+}
+
+.context-panel-body .file-section-title {
+  margin: 0 0 var(--ui-space-2);
+  color: var(--text);
+  font-size: 12px;
+  font-weight: 650;
+}
+
+.context-panel-body .file-section-hint,
+.context-panel-placeholder {
+  margin: 0;
+  padding: var(--ui-space-3);
+  border: 1px dashed var(--border);
+  border-radius: 0;
+  color: var(--text-dim);
+  font-size: 12px;
+  line-height: 1.5;
+}
+
+.context-panel-body .search-result-list { gap: var(--ui-space-1); margin-top: var(--ui-space-2); }
+.context-panel-body .search-result-list li {
+  display: flex; align-items: center; gap: var(--ui-space-2); min-height: var(--ui-control-standard);
+  padding: var(--ui-space-2); border: 1px solid transparent; border-radius: 0;
+}
+.context-panel-body .search-result-list li:hover { border-color: var(--border); background: var(--bg-hover); }

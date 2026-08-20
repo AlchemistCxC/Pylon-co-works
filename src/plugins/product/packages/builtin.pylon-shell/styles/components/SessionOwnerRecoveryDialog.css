@@ -1,0 +1,76 @@
+/* ISSUE-01：复用现有主题变量，不引入新设计系统。 */
+.session-owner-dialog-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 210;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: color-mix(in srgb, var(--bg-panel) 60%, transparent);
+}
+
+.session-owner-dialog {
+  width: min(560px, calc(100vw - 32px));
+  max-height: calc(100vh - 32px);
+  overflow: auto;
+  padding: 16px;
+  border: 1px solid var(--border);
+  background: var(--settings-surface);
+  box-shadow: var(--settings-shadow);
+  color: var(--text);
+  font-family: var(--font);
+}
+
+.session-owner-dialog h2 {
+  margin: 0 0 8px;
+  font-size: 16px;
+}
+
+.session-owner-dialog p {
+  margin: 0 0 12px;
+  color: var(--text-dim);
+  font-size: 13px;
+  line-height: 1.5;
+}
+
+.session-owner-dialog ul {
+  display: grid;
+  gap: 8px;
+  margin: 0 0 12px;
+  padding: 0;
+  list-style: none;
+}
+
+.session-owner-dialog li {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 160px auto;
+  align-items: center;
+  gap: 8px;
+}
+
+.session-owner-dialog .session-owner-select,
+.session-owner-dialog button {
+  min-height: 32px;
+  border: 1px solid var(--border);
+  border-radius: 0;
+  background: var(--bg-input);
+  color: var(--text);
+  font: inherit;
+}
+.session-owner-select .pylon-select { width:100%; }
+
+.session-owner-dialog button {
+  padding: 6px 12px;
+  cursor: pointer;
+}
+
+.session-owner-dialog button:disabled {
+  cursor: not-allowed;
+  opacity: 0.42;
+}
+
+@media (max-width: 640px) {
+  .session-owner-dialog li {
+    grid-template-columns: 1fr;
+  }
+}

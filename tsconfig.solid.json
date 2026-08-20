@@ -1,0 +1,13 @@
+{
+  "extends": "./tsconfig.json",
+  "compilerOptions": {
+    "jsx": "preserve",
+    "jsxImportSource": "solid-js",
+    "types": ["vite/client", "vitest/globals", "@testing-library/jest-dom"]
+  },
+  "include": [
+    "src/renderers/solid-workbench/**/*.solid.tsx",
+    "src/renderers/solid-workbench/**/*.solid.test.tsx"
+  ],
+  "exclude": []
+}

@@ -1,0 +1,419 @@
+"""Pylon Windows ZIP release packager（施工文档 Phase 1）。
+
+产物布局：
+    release/pylon-<version>-win64/
+      pylon.exe
+      pylon-detect.exe         # 独立 Agent 检测程序
+      pylon-cli.exe            # CLI 工具（若存在）
+      WebView2Loader.dll       # Tauri 启动必需（缺失 → 0xC0000135）
+      resources/...            # 来自 src-tauri/target/release/resources
+      agents.example.yaml      # 占位配置，绝不含真实 agents.yaml
+      README.txt
+      portable.flag
+      data/                    # 空目录，触发 portable 模式
+      tools/install-webview2.bat
+      tools/MicrosoftEdgeWebview2Setup.exe   # 受控 release 资源，默认必须存在
+    release/pylon-<version>-win64.zip
+    release/pylon-<version>-win64.zip.sha256
+    release/pylon-<version>-win64.manifest.json
+
+脚本只负责收集、审计、压缩，不隐式执行构建；构建由 npm script 编排：
+    npm run release:portable  =  build + tauri build --no-bundle + pylon-detect + pack
+"""
+
+from __future__ import annotations
+
+import argparse
+import hashlib
+import json
+import os
+import re
+import shutil
+import sys
+import zipfile
+from pathlib import Path
+
+SCRIPT_DIR = Path(__file__).resolve().parent
+REPO_DIR = SCRIPT_DIR.parent
+SRC_TAURI_DIR = REPO_DIR / "src-tauri"
+RELEASE_DIR = SRC_TAURI_DIR / "target" / "release"
+TEMPLATE_DIR = REPO_DIR / "resources" / "release"
+OUT_ROOT = REPO_DIR / "release"
+
+EXE_NAME = "pylon.exe"
+DETECT_EXE_NAME = "pylon-detect.exe"
+TOP_DIR_PATTERN = re.compile(r"^pylon-[^/\\]+-win64/?$")
+
+FORBIDDEN_NAMES = {
+    "agents.yaml",
+    ".env",
+}
+FORBIDDEN_SUFFIXES = (".pdb", ".rlib", ".d", ".key")
+SENSITIVE_KEY_RE = re.compile(
+    r"(?i)\b(api[_-]?key|access[_-]?token|client[_-]?secret|password|secret|token)\b\s*[:=]"
+)
+DRIVE_PATH_RE = re.compile(r"\b[A-Za-z]:[\\/]")
+PLACEHOLDER_MARKERS = ("path\\to", "path/to", "your-", "example", "占位", "...")
+
+
+class PackError(Exception):
+    pass
+
+
+# ── 版本解析 ──
+
+def parse_version_from_package_json() -> str:
+    data = json.loads((REPO_DIR / "package.json").read_text(encoding="utf-8"))
+    return str(data.get("version", "")).strip()
+
+
+def parse_version_from_tauri_conf() -> str:
+    data = json.loads((SRC_TAURI_DIR / "tauri.conf.json").read_text(encoding="utf-8"))
+    return str(data.get("version", "")).strip()
+
+
+def parse_version_from_cargo_toml() -> str:
+    text = (SRC_TAURI_DIR / "Cargo.toml").read_text(encoding="utf-8")
+    in_package = False
+    for line in text.splitlines():
+        if line.startswith("["):
+            in_package = line.strip() == "[package]"
+            continue
+        if in_package:
+            match = re.match(r'^\s*version\s*=\s*"([^"]+)"\s*$', line)
+            if match:
+                return match.group(1).strip()
+    raise PackError("Cargo.toml [package] 段缺少 version")
+
+
+def resolve_version() -> str:
+    versions = {
+        "package.json": parse_version_from_package_json(),
+        "tauri.conf.json": parse_version_from_tauri_conf(),
+        "Cargo.toml": parse_version_from_cargo_toml(),
+    }
+    unique = set(versions.values())
+    if len(unique) != 1 or "" in unique:
+        raise PackError(f"三处版本不一致: {versions}")
+    return unique.pop()
+
+
+# ── 文件审计 ──
+
+def is_text_file(path: Path) -> bool:
+    return path.suffix.lower() in {".txt", ".yaml", ".yml", ".bat", ".json", ".md"}
+
+
+def scan_text_file(rel_path: str, text: str) -> None:
+    for line_no, line in enumerate(text.splitlines(), 1):
+        stripped = line.strip()
+        if not stripped:
+            continue
+        if DRIVE_PATH_RE.search(stripped):
+            if not any(marker in stripped for marker in PLACEHOLDER_MARKERS):
+                raise PackError(
+                    f"包内文本文件含疑似本机绝对路径 {rel_path}:{line_no}: {stripped}"
+                )
+        if SENSITIVE_KEY_RE.search(stripped):
+            if not any(marker in stripped for marker in PLACEHOLDER_MARKERS):
+                raise PackError(
+                    f"包内文本文件含疑似敏感配置 {rel_path}:{line_no}: {stripped}"
+                )
+
+
+def reject_forbidden(rel_path: str) -> None:
+    name = Path(rel_path).name
+    posix = rel_path.replace("\\", "/")
+    if name in FORBIDDEN_NAMES or name.endswith(FORBIDDEN_SUFFIXES):
+        raise PackError(f"包内出现禁止文件: {rel_path}")
+    if name.endswith(".env"):
+        raise PackError(f"包内出现禁止文件: {rel_path}")
+    if (
+        posix == "src"
+        or posix.startswith("src/")
+        or posix == "src-tauri/src"
+        or posix.startswith("src-tauri/src/")
+        or posix == ".git"
+        or posix.startswith(".git/")
+        or posix == "node_modules"
+        or posix.startswith("node_modules/")
+    ):
+        raise PackError(f"包内出现禁止路径: {rel_path}")
+
+
+def collect_source_files(version: str, without_webview2: bool) -> list[tuple[Path, str]]:
+    """返回 [(源文件绝对路径, 包内相对路径（不含顶层目录）), ...]"""
+    exe_path = RELEASE_DIR / EXE_NAME
+    if not exe_path.is_file():
+        raise PackError(f"release exe 不存在: {exe_path}（先跑 npx tauri build --no-bundle）")
+
+    detector_path = RELEASE_DIR / DETECT_EXE_NAME
+    if not detector_path.is_file():
+        raise PackError(
+            f"Agent detector 不存在: {detector_path}（先构建 --release --bin pylon-detect）"
+        )
+
+    files: list[tuple[Path, str]] = [
+        (exe_path, EXE_NAME),
+        (detector_path, DETECT_EXE_NAME),
+    ]
+
+    # Tauri release 必带组件：WebView2Loader.dll（exe 启动必需，缺失 → 0xC0000135
+    # DLL 缺失）；pylon-cli.exe（标准组件，命令行管理界面）。
+    loader_path = RELEASE_DIR / "WebView2Loader.dll"
+    if not loader_path.is_file():
+        raise PackError(f"release WebView2Loader.dll 不存在: {loader_path}")
+    files.append((loader_path, "WebView2Loader.dll"))
+
+    cli_path = RELEASE_DIR / "pylon-cli.exe"
+    if cli_path.is_file():
+        files.append((cli_path, "pylon-cli.exe"))
+    else:
+        print("warn: 未找到 pylon-cli.exe，跳过该组件（不影响 GUI 启动）")
+
+    resources_dir = RELEASE_DIR / "resources"
+    if resources_dir.is_dir():
+        for root, _dirs, names in os.walk(resources_dir):
+            for name in names:
+                full = Path(root) / name
+                rel = full.relative_to(RELEASE_DIR).as_posix()
+                files.append((full, rel))
+    else:
+        print("warn: release resources 目录不存在，仅打包 exe")
+
+    for template_name in ["agents.example.yaml", "README.txt"]:
+        src = TEMPLATE_DIR / template_name
+        if not src.is_file():
+            raise PackError(f"缺少 release 模板: {src}")
+        files.append((src, template_name))
+
+    bat_src = TEMPLATE_DIR / "tools" / "install-webview2.bat"
+    if not bat_src.is_file():
+        raise PackError(f"缺少 release 模板: {bat_src}")
+    files.append((bat_src, "tools/install-webview2.bat"))
+
+    bootstrapper = TEMPLATE_DIR / "tools" / "MicrosoftEdgeWebview2Setup.exe"
+    if without_webview2:
+        if bootstrapper.is_file():
+            print("warn: --without-webview2 已指定，忽略已存在的 WebView2 bootstrapper")
+    else:
+        if not bootstrapper.is_file():
+            raise PackError(
+                f"缺少 WebView2 bootstrapper: {bootstrapper}\n"
+                "请将微软 Evergreen Bootstrapper 放到该路径，或显式 --without-webview2 降级打包。"
+            )
+        files.append((bootstrapper, "tools/MicrosoftEdgeWebview2Setup.exe"))
+
+    return files
+
+
+# ── staging / 压缩 ──
+
+def file_sha256(path: Path) -> str:
+    digest = hashlib.sha256()
+    with path.open("rb") as handle:
+        for chunk in iter(lambda: handle.read(1024 * 1024), b""):
+            digest.update(chunk)
+    return digest.hexdigest()
+
+
+def build_staging(version: str, files: list[tuple[Path, str]]) -> Path:
+    top_dir = f"pylon-{version}-win64"
+    staging_root = OUT_ROOT / top_dir
+    if staging_root.exists():
+        shutil.rmtree(staging_root)
+    staging_root.mkdir(parents=True)
+
+    # 空 data/ + portable.flag：ZIP 解压后首次启动即请求 portable。
+    (staging_root / "data").mkdir()
+    (staging_root / "portable.flag").touch()
+
+    for src, rel in files:
+        dest = staging_root / rel
+        dest.parent.mkdir(parents=True, exist_ok=True)
+        if dest.exists():
+            raise PackError(f"staging 目标已存在（重复文件）: {rel}")
+        shutil.copy2(src, dest)
+    return staging_root
+
+
+def audit_staging(staging_root: Path, top_dir: str) -> None:
+    for root, _dirs, names in os.walk(staging_root):
+        for name in names:
+            full = Path(root) / name
+            rel = full.relative_to(staging_root).as_posix()
+            reject_forbidden(rel)
+            if is_text_file(full):
+                scan_text_file(rel, full.read_text(encoding="utf-8", errors="strict"))
+
+
+def build_manifest(
+    top_dir: str,
+    files: list[tuple[Path, str]],
+    staging_root: Path,
+    webview2_bootstrapper: bool,
+) -> list[dict]:
+    entries: list[dict] = []
+    # 固定目录项也进入 manifest（portable.flag 与 data/ 目录）
+    for rel in ["portable.flag"]:
+        full = staging_root / rel
+        entries.append(
+            {"path": rel, "size": full.stat().st_size, "sha256": file_sha256(full)}
+        )
+    for src, rel in files:
+        full = staging_root / rel
+        entries.append(
+            {"path": rel, "size": full.stat().st_size, "sha256": file_sha256(full)}
+        )
+    entries.sort(key=lambda item: item["path"])
+    return entries
+
+
+def write_zip(
+    staging_root: Path,
+    top_dir: str,
+    version: str,
+    files: list[tuple[Path, str]],
+    webview2_bootstrapper: bool,
+) -> None:
+    OUT_ROOT.mkdir(parents=True, exist_ok=True)
+    zip_path = OUT_ROOT / f"{top_dir}.zip"
+    if zip_path.exists():
+        zip_path.unlink()
+
+    entries = build_manifest(top_dir, files, staging_root, webview2_bootstrapper)
+
+    with zipfile.ZipFile(zip_path, "w", zipfile.ZIP_DEFLATED) as zf:
+        # 顶层目录条目
+        zf.writestr(f"{top_dir}/", b"")
+        zf.writestr(f"{top_dir}/data/", b"")
+        for root, _dirs, names in os.walk(staging_root):
+            for name in names:
+                full = Path(root) / name
+                rel = full.relative_to(staging_root).as_posix()
+                zf.write(full, f"{top_dir}/{rel}")
+
+    # hash 文件
+    zip_sha256 = file_sha256(zip_path)
+    sha_path = Path(str(zip_path) + ".sha256")
+    sha_path.write_text(f"{zip_sha256}  {top_dir}.zip\n", encoding="utf-8")
+
+    # manifest
+    manifest = {
+        "product": "Pylon",
+        "version": version,
+        "platform": "win64",
+        "portable": True,
+        "webview2Bootstrapper": webview2_bootstrapper,
+        "files": entries,
+    }
+    manifest_path = OUT_ROOT / f"{top_dir}.manifest.json"
+    manifest_path.write_text(json.dumps(manifest, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+
+    print(f"OK: {zip_path} ({zip_path.stat().st_size:,} bytes)")
+    print(f"OK: {sha_path}")
+    print(f"OK: {manifest_path}")
+    for item in entries:
+        print(f"{item['size']:>12,}  {item['path']}")
+
+
+def verify_zip(zip_path: Path) -> None:
+    if not zip_path.is_file():
+        raise PackError(f"zip 不存在: {zip_path}")
+    with zipfile.ZipFile(zip_path) as zf:
+        bad = zf.testzip()
+        if bad is not None:
+            raise PackError(f"ZIP testzip 失败: {bad}")
+        names = zf.namelist()
+        if not names:
+            raise PackError("ZIP 为空")
+        top_dirs = {name.split("/", 1)[0] for name in names}
+        top_dirs.discard("")
+        if len(top_dirs) != 1:
+            raise PackError(f"ZIP 顶层目录不唯一: {sorted(top_dirs)}")
+        top_dir = top_dirs.pop()
+        if not TOP_DIR_PATTERN.match(top_dir):
+            raise PackError(f"ZIP 顶层目录名非法: {top_dir}")
+
+        prefix = top_dir + "/"
+        for name in names:
+            if not name.startswith(prefix) or name == prefix:
+                continue
+            rel = name[len(prefix):]
+            if name.endswith("/"):
+                continue
+            reject_forbidden(rel)
+            if rel not in {"portable.flag"}:
+                continue
+        # 文本扫描（不扫描 exe/字体）
+        for info in zf.infolist():
+            if info.is_dir():
+                continue
+            rel = info.filename[len(prefix):]
+            if is_text_file(Path(rel)):
+                text = zf.read(info).decode("utf-8", errors="strict")
+                scan_text_file(rel, text)
+
+    manifest_path = Path(str(zip_path).removesuffix(".zip") + ".manifest.json")
+    if manifest_path.is_file():
+        manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+        with zipfile.ZipFile(zip_path) as zf:
+            for entry in manifest.get("files", []):
+                rel = entry["path"]
+                info = zf.getinfo(f"{manifest['version'] and 'pylon-' + manifest['version'] + '-win64'}/{rel}")
+                actual_size = info.file_size
+                actual_hash = hashlib.sha256(zf.read(info)).hexdigest()
+                if actual_size != entry.get("size") or actual_hash != entry.get("sha256"):
+                    raise PackError(f"manifest 文件不匹配: {rel}")
+        print(f"verify OK: manifest 与 ZIP 内容一致（{len(manifest.get('files', []))} 项）")
+    else:
+        print("warn: manifest 不存在，跳过 manifest 核对")
+
+    print(f"verify OK: {zip_path}")
+
+
+# ── main ──
+
+def parse_args(argv: list[str]) -> argparse.Namespace:
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument(
+        "--without-webview2",
+        action="store_true",
+        help="降级打包：不包含 WebView2 bootstrapper（manifest 记录 false）",
+    )
+    parser.add_argument(
+        "--verify-only",
+        metavar="ZIP",
+        help="仅审计已存在的 release ZIP，不重新打包",
+    )
+    return parser.parse_args(argv)
+
+
+def main(argv: list[str] | None = None) -> int:
+    args = parse_args(argv if argv is not None else sys.argv[1:])
+
+    if args.verify_only:
+        verify_zip(Path(args.verify_only))
+        return 0
+
+    version = resolve_version()
+    top_dir = f"pylon-{version}-win64"
+    files = collect_source_files(version, args.without_webview2)
+    webview2_bootstrapper = not args.without_webview2
+
+    staging_root = build_staging(version, files)
+    try:
+        audit_staging(staging_root, top_dir)
+        write_zip(staging_root, top_dir, version, files, webview2_bootstrapper)
+    finally:
+        # 连续执行两次不混入旧 staging 内容
+        if staging_root.exists():
+            shutil.rmtree(staging_root)
+
+    # 压缩后审计：生成物自身再过一遍 allowlist/hash
+    verify_zip(OUT_ROOT / f"{top_dir}.zip")
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

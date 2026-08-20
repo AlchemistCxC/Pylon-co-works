@@ -1,0 +1,12 @@
+# Pylon Agent 配置示例。
+# 使用方法：把本文件复制为 agents.yaml（与 pylon.exe 同目录），按需修改后保存。
+# 注意：发布包不会加载 agents.example.yaml；只有 agents.yaml 才会被读取。
+agents:
+  example:
+    name: Example Agent
+    provider: custom
+    transport: subprocess
+    # 把下面占位路径改成你的 Agent 可执行文件绝对路径。
+    exe: C:\\path\\to\\your-agent.exe
+    args: ["acp"]
+    default: true

@@ -1,0 +1,14 @@
+{
+  "schema": 1,
+  "id": "builtin.pylon-agent-adapters",
+  "name": "Pylon Agent Adapters",
+  "version": "1.0.0",
+  "api": "1.0",
+  "kind": "agent-adapter",
+  "web": { "entry": "./entry.ts", "styles": [] },
+  "dependencies": { "builtin.pylon-tools": "^1.0.0" },
+  "optionalDependencies": {},
+  "conflicts": [],
+  "activation": { "events": ["kernel.ready"] },
+  "hotSwap": { "mode": "parallel", "drainTimeoutMs": 10000 }
+}

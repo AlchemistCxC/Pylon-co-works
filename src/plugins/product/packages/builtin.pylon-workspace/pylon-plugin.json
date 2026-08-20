@@ -1,0 +1,15 @@
+{
+  "schema": 1,
+  "id": "builtin.pylon-workspace",
+  "name": "Pylon Workspace",
+  "version": "1.0.0",
+  "api": "1.0",
+  "kind": "workspace",
+  "web": { "entry": "./entry.ts", "styles": [] },
+  "dependencies": {},
+  "optionalDependencies": {},
+  "conflicts": [],
+  "activation": { "events": ["kernel.ready"] },
+  "hotSwap": { "mode": "parallel", "drainTimeoutMs": 10000 },
+  "reactVersion": "19"
+}

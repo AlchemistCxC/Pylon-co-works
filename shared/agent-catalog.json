@@ -1,0 +1,134 @@
+{
+  "schemaVersion": 1,
+  "providers": [
+    {
+      "provider": "peri",
+      "displayName": "Peri",
+      "protocol": "acp",
+      "capabilities": {
+        "sessionUpdates": true,
+        "interactionEvents": true,
+        "permissionRequests": true,
+        "replay": true,
+        "responseMethods": ["session/request_permission"]
+      },
+      "interactionKinds": ["approval", "ask-question"],
+      "protocolDefaults": { "setModelApi": "config_option" },
+      "detection": {
+        "detectorId": "builtin.detector.peri",
+        "priority": 100,
+        "invocations": [{ "command": "peri", "args": ["acp"] }],
+        "configDirs": [".peri"],
+        "configEvidence": [
+          { "relativePath": "config.json", "format": "json", "fields": ["provider", "model", "models"] },
+          { "relativePath": "config.yaml", "format": "yaml", "fields": ["provider", "model", "models"] },
+          { "relativePath": "settings.json", "format": "json", "fields": ["provider", "model", "models"] }
+        ]
+      },
+      "tools": [
+        { "name": "Read", "displayName": "Read", "kind": "read", "action": "read", "summaryFields": ["path", "file_path"] },
+        { "name": "Write", "displayName": "Write", "kind": "edit", "action": "write", "summaryFields": ["path", "file_path"] },
+        { "name": "Edit", "displayName": "Edit", "kind": "edit", "action": "edit", "summaryFields": ["path", "file_path"] },
+        { "name": "Bash", "displayName": "Bash", "kind": "execute", "action": "execute", "summaryFields": ["command"] },
+        { "name": "Grep", "displayName": "Grep", "kind": "search", "action": "search", "summaryFields": ["pattern"] },
+        { "name": "Glob", "displayName": "Glob", "kind": "search", "action": "search", "summaryFields": ["pattern"] },
+        { "name": "WebFetch", "displayName": "WebFetch", "kind": "fetch", "action": "fetch", "summaryFields": ["url"] },
+        { "name": "WebSearch", "displayName": "WebSearch", "kind": "fetch", "action": "fetch", "summaryFields": ["query"] },
+        { "name": "folder_operations", "displayName": "Folder Operations", "kind": "edit", "action": "edit", "summaryFields": ["folder_path"] },
+        { "name": "SkillTool", "displayName": "Skill", "kind": "read", "action": "skill", "summaryFields": ["skill_name"] },
+        { "name": "TodoWrite", "displayName": "TodoWrite", "kind": "other", "action": "plan", "summaryFields": ["todos"] },
+        { "name": "Agent", "displayName": "Agent", "kind": "execute", "action": "delegate", "summaryFields": ["prompt"] },
+        { "name": "DiscoverSkillsTool", "displayName": "Skills", "kind": "read", "action": "skill", "summaryFields": ["query"] },
+        { "name": "SearchExtraTools", "displayName": "Search", "kind": "search", "action": "search", "summaryFields": ["query"] },
+        { "name": "ExecuteExtraTool", "displayName": "Execute", "kind": "execute", "action": "execute", "summaryFields": ["tool_name"] },
+        { "name": "ArtifactTool", "displayName": "Artifact", "kind": "execute", "action": "write", "summaryFields": ["name"] }
+      ]
+    },
+    {
+      "provider": "hermes",
+      "displayName": "Hermes",
+      "protocol": "acp",
+      "capabilities": {
+        "sessionUpdates": true,
+        "interactionEvents": true,
+        "permissionRequests": false,
+        "replay": true,
+        "responseMethods": []
+      },
+      "interactionKinds": ["clarify"],
+      "protocolDefaults": { "setModelApi": "set_model" },
+      "detection": {
+        "detectorId": "builtin.detector.hermes",
+        "priority": 100,
+        "invocations": [
+          { "command": "hermes", "args": ["acp"] },
+          { "command": "hermes-acp", "args": [] }
+        ],
+        "configDirs": [".hermes"],
+        "configEvidence": [
+          { "relativePath": "config.yaml", "format": "yaml", "fields": ["provider", "model", "default_model", "model.provider", "model.default"] },
+          { "relativePath": "config.yml", "format": "yaml", "fields": ["provider", "model", "default_model", "model.provider", "model.default"] }
+        ]
+      },
+      "tools": [
+        { "name": "read_file", "displayName": "Read File", "kind": "read", "action": "read", "summaryFields": ["path"] },
+        { "name": "write_file", "displayName": "Write File", "kind": "edit", "action": "write", "summaryFields": ["path"] },
+        { "name": "patch", "displayName": "Patch", "kind": "edit", "action": "edit", "summaryFields": ["path"] },
+        { "name": "search_files", "displayName": "Search Files", "kind": "search", "action": "search", "summaryFields": ["pattern"] },
+        { "name": "terminal", "displayName": "Terminal", "kind": "execute", "action": "execute", "summaryFields": ["command"] },
+        { "name": "process", "displayName": "Process", "kind": "execute", "action": "execute", "summaryFields": ["action"] },
+        { "name": "execute_code", "displayName": "Execute Code", "kind": "execute", "action": "execute", "summaryFields": ["code"] },
+        { "name": "todo", "displayName": "Todo", "kind": "other", "action": "plan", "summaryFields": ["todos"] },
+        { "name": "skill_view", "displayName": "Skill View", "kind": "read", "action": "skill", "summaryFields": ["name"] },
+        { "name": "skill_manage", "displayName": "Skill Manage", "kind": "edit", "action": "skill", "summaryFields": ["name"] },
+        { "name": "web_search", "displayName": "Web Search", "kind": "fetch", "action": "fetch", "summaryFields": ["query"] },
+        { "name": "web_extract", "displayName": "Web Extract", "kind": "fetch", "action": "fetch", "summaryFields": ["urls"] },
+        { "name": "delegate_task", "displayName": "Delegate Task", "kind": "execute", "action": "delegate", "summaryFields": ["goal"] },
+        { "name": "skills_list", "displayName": "Skills List", "kind": "read", "action": "skill", "summaryFields": ["category"] },
+        { "name": "session_search", "displayName": "Session Search", "kind": "search", "action": "search", "summaryFields": ["query"] },
+        { "name": "memory", "displayName": "Memory", "kind": "edit", "action": "edit", "summaryFields": ["action"] },
+        { "name": "cronjob", "displayName": "Cron Job", "kind": "execute", "action": "execute", "summaryFields": ["action"] },
+        { "name": "vision_analyze", "displayName": "Vision Analyze", "kind": "read", "action": "read", "summaryFields": ["image"] },
+        { "name": "image_generate", "displayName": "Image Generate", "kind": "execute", "action": "execute", "summaryFields": ["prompt"] },
+        { "name": "text_to_speech", "displayName": "Text To Speech", "kind": "execute", "action": "execute", "summaryFields": ["text"] }
+      ]
+    },
+    {
+      "provider": "claude-code",
+      "displayName": "Claude Code",
+      "protocol": "acp",
+      "capabilities": {
+        "sessionUpdates": true,
+        "interactionEvents": true,
+        "permissionRequests": true,
+        "replay": true,
+        "responseMethods": ["session/request_permission"]
+      },
+      "interactionKinds": ["approval", "ask-question"],
+      "protocolDefaults": { "setModelApi": "config_option" },
+      "detection": {
+        "detectorId": "builtin.detector.claude-code",
+        "priority": 100,
+        "invocations": [
+          { "command": "ccb", "args": ["--acp"] },
+          { "command": "ccb-bun", "args": ["--acp"] },
+          { "command": "claude-code-best", "args": ["--acp"] }
+        ],
+        "configDirs": [".claude"],
+        "configEvidence": [
+          { "relativePath": "settings.json", "format": "json", "fields": ["model", "apiKeyHelper", "env.ANTHROPIC_API_KEY", "permissions"] }
+        ]
+      },
+      "tools": [
+        { "name": "Read", "displayName": "Read", "kind": "read", "action": "read", "summaryFields": ["file_path", "path"] },
+        { "name": "Write", "displayName": "Write", "kind": "edit", "action": "write", "summaryFields": ["file_path", "path"] },
+        { "name": "Edit", "displayName": "Edit", "kind": "edit", "action": "edit", "summaryFields": ["file_path", "path"] },
+        { "name": "Bash", "displayName": "Bash", "kind": "execute", "action": "execute", "summaryFields": ["command"] },
+        { "name": "Grep", "displayName": "Grep", "kind": "search", "action": "search", "summaryFields": ["pattern"] },
+        { "name": "Glob", "displayName": "Glob", "kind": "search", "action": "search", "summaryFields": ["pattern"] },
+        { "name": "WebFetch", "displayName": "WebFetch", "kind": "fetch", "action": "fetch", "summaryFields": ["url"] },
+        { "name": "WebSearch", "displayName": "WebSearch", "kind": "fetch", "action": "fetch", "summaryFields": ["query"] }
+      ]
+    }
+  ]
+}

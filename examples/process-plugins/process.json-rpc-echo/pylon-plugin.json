@@ -1,0 +1,21 @@
+{
+  "schema": 1,
+  "id": "process.json-rpc-echo",
+  "name": "JSON-RPC Echo Process",
+  "version": "1.0.0",
+  "api": "1.0",
+  "kind": "service",
+  "web": { "entry": "./index.js", "styles": [] },
+  "dependencies": {},
+  "optionalDependencies": {},
+  "conflicts": [],
+  "activation": { "events": ["kernel.ready"] },
+  "hotSwap": { "mode": "parallel", "drainTimeoutMs": 10000 },
+  "executables": {
+    "echo": {
+      "windows-x86_64": "./bin/windows-x86_64/echo.cmd",
+      "linux-x86_64": "./bin/linux-x86_64/echo",
+      "macos-aarch64": "./bin/macos-aarch64/echo"
+    }
+  }
+}

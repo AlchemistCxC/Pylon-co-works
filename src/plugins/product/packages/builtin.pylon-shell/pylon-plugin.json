@@ -1,0 +1,20 @@
+{
+  "schema": 1,
+  "id": "builtin.pylon-shell",
+  "name": "Pylon Shell",
+  "version": "1.0.0",
+  "api": "1.0",
+  "kind": "shell",
+  "web": { "entry": "./entry.ts", "styles": [] },
+  "dependencies": {
+    "builtin.pylon-workspace": "^1.0.0",
+    "builtin.pylon-renderers": "^1.0.0",
+    "builtin.pylon-agent-adapters": "^1.0.0",
+    "builtin.pylon-tools": "^1.0.0"
+  },
+  "optionalDependencies": {},
+  "conflicts": [],
+  "activation": { "events": ["kernel.ready"] },
+  "hotSwap": { "mode": "soft-remount", "drainTimeoutMs": 10000 },
+  "reactVersion": "19"
+}

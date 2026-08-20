@@ -1,0 +1,209 @@
+/* ═══════════════════════════════════════════════════════════
+   Pylon — 宿主视觉语义与玻璃材质基线
+   ═══════════════════════════════════════════════════════════ */
+
+*, *::before, *::after { margin:0; padding:0; box-sizing:border-box; }
+
+/* 无障碍隐藏文本：项目此前缺失该工具类，导致多处 sr-only 文案可见。 */
+.sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border: 0;
+}
+
+:root {
+  /* 美化规范 A3-01：全 UI 共用的视觉尺度 token；不进入 ThemeSettings，避免新增主题字段。 */
+  --ui-space-1: 4px;
+  --ui-space-2: 8px;
+  --ui-space-3: 12px;
+  --ui-space-4: 16px;
+  --ui-space-5: 24px;
+  --ui-space-6: 32px;
+  --ui-space-7: 48px;
+  /* 聊天对齐 token：统一指示列宽度与行内间隙（与 ui-space 同属设计 token，不进 ThemeSettings） */
+  --dot-col-width: 1.6em;
+  --inline-gap: .35em;
+  /* 字号/线宽 token：组件级字阶与描边宽度，避免 10/11/12/14px、1/2/3px 散落 */
+  --font-size-2xs: 10px;
+  --font-size-xs: 11px;
+  --font-size-sm: 12px;
+  --font-size-base: 13px;
+  --font-size-md: 14px;
+  --font-size-lg: 15px;
+  --font-size-xl: 17px;
+  --font-size-1xl: 18px;
+  --font-size-2xl: 20px;
+  --font-size-3xl: 36px;
+  --font-size-4xs: 8px;
+  --font-size-3xs: 9px;
+  --line-width-1: 1px;
+  --line-width-2: 2px;
+  --line-width-3: 3px;
+  --ui-radius-xs: 2px;
+  --ui-radius-sm: 4px;
+  --ui-radius-md: 6px;
+  --ui-radius-lg: 8px;
+  --ui-radius-pill: 999px;
+  --ui-control-compact: 28px;
+  --ui-control-standard: 36px;
+  --ui-control-emphasis: 40px;
+
+  /* 视觉革命 · Material v1：组件消费语义层级，不自行猜透明度和阴影。 */
+  --surface-canvas: color-mix(in srgb, var(--global-bg-color) 68%, transparent);
+  --surface-panel: color-mix(in srgb, var(--global-bg-color) 78%, transparent);
+  --surface-raised: color-mix(in srgb, var(--global-bg-color) 88%, var(--text) 2%);
+  --surface-overlay: color-mix(in srgb, var(--global-bg-color) 94%, var(--text) 3%);
+  --surface-sunken: color-mix(in srgb, var(--global-bg-color) 62%, #000 4%);
+  --surface-glass: color-mix(in srgb, var(--global-bg-color) 76%, transparent);
+  --stroke-subtle: color-mix(in srgb, var(--border) 72%, transparent);
+  --stroke-default: var(--border);
+  --stroke-strong: color-mix(in srgb, var(--border-focus) 78%, transparent);
+  --shadow-soft: 0 8px 28px color-mix(in srgb, #000 13%, transparent);
+  --shadow-raised: 0 12px 36px color-mix(in srgb, #000 16%, transparent);
+  --shadow-float: 0 24px 72px color-mix(in srgb, #000 22%, transparent);
+  --glass-blur-sm: 8px;
+  --glass-blur-md: 16px;
+  --glass-blur-lg: 28px;
+  --state-hover-bg: var(--bg-hover);
+  --state-selected-bg: color-mix(in srgb, var(--accent) 13%, var(--surface-raised));
+  --state-selected-stroke: color-mix(in srgb, var(--accent) 48%, var(--stroke-default));
+  --state-focus-ring: color-mix(in srgb, var(--accent) 34%, transparent);
+  --state-danger: var(--danger);
+  --state-danger-surface: color-mix(in srgb, var(--danger) 11%, var(--surface-raised));
+  --state-warning-surface: color-mix(in srgb, var(--warning) 11%, var(--surface-raised));
+  --state-success-surface: color-mix(in srgb, var(--success) 10%, var(--surface-raised));
+  --brand-node-ready: var(--tool-ok, #56d38b);
+  --brand-node-warn: var(--ekgYellow, #f2c94c);
+  --brand-node-error: var(--spinner-stalled-color, #ff7188);
+  --brand-halo: color-mix(in srgb, var(--accent) 32%, transparent);
+  --motion-fast: 120ms;
+  --motion-standard: 180ms;
+  --motion-slow: 260ms;
+  --ease-standard: cubic-bezier(.2, 0, 0, 1);
+  --ease-emphasized: cubic-bezier(.2, .8, .2, 1);
+  --ease-decelerate: cubic-bezier(0, 0, 0, 1);
+
+  --accent: #3b82f6;
+  --bg-panel: rgba(0,0,0,0.03);
+  --bg-hover: rgba(0,0,0,0.06);
+  --bg-active: rgba(0,0,0,0.10);
+  --bg-input: rgba(0,0,0,0.03);
+  --border: rgba(0,0,0,0.10);
+  --border-focus: rgba(0,0,0,0.22);
+  --text: rgba(0,0,0,0.85);
+  --text-dim: rgba(0,0,0,0.40);
+  --text-placeholder: rgba(0,0,0,0.28);
+  --success: rgba(30,150,70,0.70);
+  --warning: rgba(180,120,20,0.70);
+  --danger: rgba(190,40,40,0.75);
+  --global-bg-color: #e8e8ec;
+  --font-system: -apple-system, 'Segoe UI', 'PingFang SC', 'Microsoft YaHei', sans-serif;
+  --font-serif-default: 'Iowan Old Style', 'Noto Serif SC', 'Source Han Serif SC', 'Songti SC', 'SimSun', Georgia, serif;
+  --font-mono-default: 'JetBrains Mono', 'Cascadia Code', 'Consolas', 'Sarasa Mono SC', 'Sarasa Term SC', 'Maple Mono', 'PingFang SC', 'Microsoft YaHei', monospace;
+  --font: var(--font-system);
+  --serif: var(--font-serif-default);
+  /* 终端等宽栈：西文等宽 + CJK 等宽 fallback（Sarasa/更纱 → 微软雅黑 → 系统） */
+  --mono: var(--font-mono-default);
+}
+
+/* ── 暗色 UI scheme ── */
+.app[data-ui-scheme="dark"],
+body[data-ui-scheme="dark"] {
+  --bg-panel: rgba(255,255,255,0.04);
+  --bg-hover: rgba(255,255,255,0.10);
+  --bg-active: rgba(255,255,255,0.14);
+  --bg-input: rgba(255,255,255,0.08);
+  --border: rgba(255,255,255,0.14);
+  --border-focus: rgba(255,255,255,0.30);
+  --text: rgba(255,255,255,0.90);
+  --text-dim: rgba(255,255,255,0.48);
+  --text-placeholder: rgba(255,255,255,0.32);
+  --surface-canvas: color-mix(in srgb, color-mix(in srgb, #11131a 82%, var(--global-bg-color) 18%) 76%, transparent);
+  --surface-panel: color-mix(in srgb, color-mix(in srgb, #171923 86%, var(--global-bg-color) 14%) 84%, transparent);
+  --surface-raised: color-mix(in srgb, #20232f 88%, var(--global-bg-color) 12%);
+  --surface-overlay: color-mix(in srgb, #171923 94%, var(--global-bg-color) 6%);
+  --surface-sunken: color-mix(in srgb, #0d0f15 90%, var(--global-bg-color) 10%);
+  --surface-glass: color-mix(in srgb, #1c1f2a 72%, transparent);
+}
+.app[data-ui-scheme="light"],
+body[data-ui-scheme="light"] {
+  --surface-canvas: color-mix(in srgb, color-mix(in srgb, #f6f7fb 84%, var(--global-bg-color) 16%) 78%, transparent);
+  --surface-panel: color-mix(in srgb, color-mix(in srgb, #f7f8fc 88%, var(--global-bg-color) 12%) 86%, transparent);
+  --surface-raised: color-mix(in srgb, #fff 90%, var(--global-bg-color) 10%);
+  --surface-overlay: color-mix(in srgb, #fbfbfd 96%, var(--global-bg-color) 4%);
+  --surface-sunken: color-mix(in srgb, #e9ebf1 90%, var(--global-bg-color) 10%);
+  --surface-glass: color-mix(in srgb, #f7f8fc 74%, transparent);
+}
+body[data-ui-scheme="dark"] .dialog-content {
+  background:#17191f;
+  color:var(--text);
+}
+html, body, #root { height:100%; width:100%; overflow:hidden; font-family:var(--global-font,var(--font)); font-size:var(--global-font-size,18px); color:var(--text); background:transparent; }
+
+body {
+  position:relative;
+  isolation:isolate;
+}
+body::before {
+  content:''; position:fixed; inset:-48px;
+  background-color:var(--global-bg-color,#e8e8ec);
+  background-image:var(--global-bg-image,none);
+  background-position:center;
+  background-size:cover;
+  /* backdrop-filter 不会模糊元素自己的背景图；filter 才是背景设置的真实合成链。 */
+  filter:blur(var(--blur,16px));
+  transform:scale(1.025);
+  opacity:var(--t,.85);
+  transition:opacity var(--motion-standard) ease,filter var(--motion-standard) ease;
+  will-change:opacity,filter;
+  z-index:-1;
+  pointer-events:none;
+}
+#root { background:transparent; position:relative; z-index:1; }
+
+@media (prefers-reduced-motion: reduce) {
+  :root {
+    --motion-fast: 1ms;
+    --motion-standard: 1ms;
+    --motion-slow: 1ms;
+  }
+  *, *::before, *::after {
+    scroll-behavior:auto !important;
+    animation-duration:1ms !important;
+    animation-iteration-count:1 !important;
+    transition-duration:1ms !important;
+  }
+}
+
+/* A5-01：跨面统一键盘焦点、禁用与 selected 反馈。组件仍可用更具体规则覆盖。 */
+:where(button, [role="button"], [role="tab"], [role="option"], [role="treeitem"], a, input, textarea, select):focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+  box-shadow: 0 0 0 3px var(--state-focus-ring);
+}
+
+:where(button, input, textarea, select):disabled,
+:where([role="button"], [role="tab"], [role="option"], [role="treeitem"])[aria-disabled="true"] {
+  opacity: .42;
+  cursor: not-allowed;
+}
+
+:where(button, [role="button"], [role="tab"], [role="option"], [role="treeitem"]):disabled:hover,
+:where([role="button"], [role="tab"], [role="option"], [role="treeitem"])[aria-disabled="true"]:hover {
+  transform: none;
+  box-shadow: none;
+}
+
+:where([role="tab"][aria-selected="true"], [role="option"][aria-selected="true"], [role="treeitem"][aria-selected="true"], [aria-current="page"]) {
+  color: var(--text);
+}
+
+::-webkit-scrollbar { width:4px; }
+::-webkit-scrollbar-track { background:transparent; }
+::-webkit-scrollbar-thumb { background:rgba(0,0,0,0.12); border-radius: 0; }

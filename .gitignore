@@ -1,0 +1,39 @@
+node_modules/
+dist/
+src-tauri/target/
+src-tauri/tests-harness/target/
+src-tauri/pet-core/target/
+src-tauri/pylon-core/target/
+*.log
+.DS_Store
+*.tsbuildinfo
+__pycache__/
+*.py[cod]
+
+# 内部协作文档不入库（保留本地）
+AGENTS.md
+/references/
+/.hermes/
+
+# 测试产物
+/coverage/
+
+# ISSUE-20：Solid smoke 构建目录（生成物不入库）
+dist-solid-smoke/
+
+# ISSUE-20：发布 zip 不入库（二进制移至 release，不继续提交）
+# 注意：git 2.50.1 wildmatch 对 pylon-*.win64.zip 匹配失效（实测 check-ignore rc=1），用 pylon-*win64.zip
+pylon-*win64.zip
+
+# 施工文档 Phase 1：release 产物目录与受控 WebView2 bootstrapper 不入库
+/release/
+resources/release/tools/MicrosoftEdgeWebview2Setup.exe
+
+# tauri 生成 schema（构建时自动再生成，不入库）
+/src-tauri/gen/
+
+# 示例插件交叉编译产物（Linux/macOS 二进制，不入库；echo.cmd/service.mjs 脚本保留）
+examples/process-plugins/*/bin/*/echo
+
+# 本地 agent 配置（真实路径/密钥，不入库；模板见 agents.example.yaml）
+agents.yaml

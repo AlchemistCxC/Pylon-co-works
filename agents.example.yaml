@@ -1,0 +1,568 @@
+# Pylon agent 配置（战役 2 后：协议差异全部配置化，覆盖制——无声明=默认值，有声明=覆盖默认）
+#
+# hermes_profile: <profile-name | profile-path>   # Hermes profile 固定（release-issues #1 方案 G）
+#   # 值为 profile 名称（如 `my-profile`，经 Hermes 根目录自动解析为 <home>/profiles/<name>）
+#   # 或 profile 目录路径（绝对路径原样使用；相对路径按本配置文件所在目录解析）。
+#   # 设置后启动 Hermes ACP 子进程时注入 HERMES_HOME=<profile 目录>，确保 Hermes 使用
+#   # 该 profile 的 provider/密钥——不设置时 Hermes 走 active_profile 机制（当前机器
+#   # active_profile 的 provider 可能无效，导致“有余额但 401/无回应”）。
+#   # 缺省不注入（现状行为）。可用 profile 列表由 Pylon 启动时自动探测
+#   # （%LOCALAPPDATA%\hermes / HERMES_HOME / PATH 中 hermes 脚本），见 startup diagnostics。
+#
+# acp: 段（AcpProtocolConfig，全字段可选）：
+#   set_model_api: config_option | set_model | none | true | false
+#       # 切 model 途径（D2）。config_option=Peri 官方路径（默认）；set_model=Hermes
+#       # unstable session/set_model；none=禁用切 model；true/false 为 legacy 布尔
+#       # 兼容形态（true=set_model，false=config_option）。顶层 set_model_api: true
+#       # 为 legacy 写法，等价于 acp.set_model_api: set_model。
+#   session_close: true | false
+#       # D3。true=总是尝试 session/close RPC + -32601 防御降级（默认）；
+#       # false=跳过 RPC 直接本地清理（旧版 Hermes 无此方法时用）。
+#   mcp_servers: always | omit_if_empty
+#       # D4。always=恒发 mcpServers 字段（默认，现状 wire）；omit_if_empty=空配置
+#       # 时省略字段（协议 v2 语义——仅当 agent 容忍缺字段时使用，Hermes Pydantic
+#       # 必填会拒绝）。
+#   initialize_caps: {...}     # D1 clientCapabilities 覆盖（默认：tokenStats +
+#                               # _meta.peri.*，Hermes 忽略无害）
+#   protocol_version: 1        # H3 initialize 协议版本（默认 1）
+#   client_info: {...}         # H4 initialize clientInfo（默认 {"name":"Pylon","version":"0.1.0"}）
+#   prompt_timeout_secs: 300   # H5 prompt 超时（默认 300）
+#   cancel_settle_timeout_secs: 30  # H6 cancel 后等待 settle 超时（默认 30）
+#   rpc_timeout_secs: 30       # H8/H9 通用 RPC 超时（默认 30）
+#   max_attachments: 8         # H10 附件数上限（默认 8）
+#   max_attachment_bytes: 10485760  # H11 单附件上限（默认 10MB）
+#   replay_max_events: 10000   # H12 session/load 回放收集上限（默认 10000）
+
+agents:
+  # provider: 协议/实现类别（如 peri/hermes）。旧配置缺省时后端按协议依据推断：
+  # hermes_profile 存在 → hermes；exe 文件名（去扩展名小写）命中 peri/hermes → 对应
+  # provider；无信号保持缺省（前端显式降级 invalid-instance，不按 agentId 名称猜）。
+  peri:
+    name: Peri
+    provider: peri
+    transport: subprocess
+    exe: <PERI_EXE_PATH>
+    args: ["acp"]
+    model: deepseek-v4-flash
+    default: true
+    # acp: 段缺省 = 官方 schema 行为（config_option 切 model / close 总是尝试 /
+    # mcpServers 恒发 / protocolVersion 1 / 超时 300-30-30-10s）——无需声明。
+  hermes:
+    name: Hermes
+    provider: hermes
+    transport: subprocess
+    exe: hermes
+    args: ["acp"]
+    set_model_api: true
+    # 固定到可用 profile（deepseek provider + opencode.ai base_url）；当前机器
+    # active_profile 的 provider 可能无效会导致 401。换机器时改为该机可用 profile 名。
+    # 用绝对路径（非纯名称）：避免 Pylon 进程继承的 HERMES_HOME 环境变量
+    # （Hermes 启动器设的 profile 目录）污染 detect_hermes_home → 嵌套 profiles\<name>。
+    hermes_profile: <HERMES_PROFILE_PATH>
+    # 方案 I：Hermes 专用 prompt 超时（默认 300s；实测 Hermes+opencode.ai 首 token
+    # 延迟可达 ~92s，90s 会误杀——留 2 倍余量设 180s）。Hermes 无 provider/401/
+    # 错误 profile 时通常在 session/new 即失败（方案 I 已让该错误即时可见），
+    # 不必靠超时兜底。Peri 保持默认 300s。
+    acp:
+      prompt_timeout_secs: 180
+    # legacy 顶层布尔（= acp.set_model_api: set_model）。显式化等价写法：
+    # acp:
+    #   set_model_api: set_model        # Hermes 切 model 走 unstable session/set_model
+    #   session_close: false            # 旧版 Hermes 无 session/close——跳过 RPC 本地清理
+
+# 工具归一化字典（provider → tools）：后端 list_tool_dictionary 下发，前端注册到 toolRegistry。
+# 语义：name=wire 工具名；aliases=等价别名；kind=归一化分类；action=渲染动作；
+#       summary_fields=参数摘要提取字段（按顺序取第一个命中）；output_label=输出行标签。
+tool_dictionary:
+  peri:
+    - name: Read
+      display_name: Read
+      aliases: [read, reading]
+      kind: read
+      action: read
+      summary_fields: [file_path]
+      output_label: lines
+    - name: Write
+      display_name: Write
+      aliases: [write]
+      kind: edit
+      action: write
+      summary_fields: [file_path]
+      output_label: changed-lines
+    - name: Edit
+      display_name: Edit
+      aliases: [edit]
+      kind: edit
+      action: edit
+      summary_fields: [file_path]
+      output_label: changed-lines
+    - name: Glob
+      display_name: Glob
+      aliases: [glob]
+      kind: search
+      action: search
+      summary_fields: [pattern]
+      output_label: matches
+    - name: Grep
+      display_name: Grep
+      aliases: [grep]
+      kind: search
+      action: search
+      summary_fields: [pattern]
+      output_label: matches
+    - name: folder_operations
+      display_name: Folder Operations
+      aliases: []
+      kind: edit
+      action: edit
+      summary_fields: [folder_path]
+      output_label: lines
+    - name: Bash
+      display_name: Bash
+      aliases: [Shell, shell]
+      kind: execute
+      action: execute
+      summary_fields: [command]
+      output_label: lines
+    - name: WebFetch
+      display_name: WebFetch
+      aliases: [webfetch]
+      kind: fetch
+      action: fetch
+      summary_fields: [url]
+      output_label: lines
+    - name: WebSearch
+      display_name: WebSearch
+      aliases: [websearch]
+      kind: fetch
+      action: fetch
+      summary_fields: [query]
+      output_label: matches
+    - name: Agent
+      display_name: Agent
+      aliases: [task]
+      kind: execute
+      action: delegate
+      summary_fields: [prompt]
+      output_label: lines
+    - name: AskUserQuestion
+      display_name: AskUserQuestion
+      aliases: []
+      kind: other
+      action: unknown
+      summary_fields: []
+      output_label: lines
+    - name: TodoWrite
+      display_name: TodoWrite
+      aliases: []
+      kind: other
+      action: plan
+      summary_fields: []
+      output_label: lines
+    - name: SkillTool
+      display_name: SkillTool
+      aliases: []
+      kind: read
+      action: skill
+      summary_fields: [skill_name]
+      output_label: lines
+    - name: DiscoverSkillsTool
+      display_name: DiscoverSkillsTool
+      aliases: []
+      kind: read
+      action: skill
+      summary_fields: [query]
+      output_label: lines
+    - name: ExecuteExtraTool
+      display_name: ExecuteExtraTool
+      aliases: []
+      kind: execute
+      action: execute
+      summary_fields: [tool_name]
+      output_label: lines
+    - name: SearchExtraTools
+      display_name: SearchExtraTools
+      aliases: []
+      kind: search
+      action: search
+      summary_fields: [query]
+      output_label: matches
+    - name: goal
+      display_name: Goal
+      aliases: []
+      kind: other
+      action: plan
+      summary_fields: [objective]
+      output_label: lines
+    - name: cron_register
+      display_name: Cron Register
+      aliases: []
+      kind: other
+      action: plan
+      summary_fields: [schedule]
+      output_label: lines
+    - name: cron_list
+      display_name: Cron List
+      aliases: []
+      kind: other
+      action: plan
+      summary_fields: []
+      output_label: lines
+    - name: cron_remove
+      display_name: Cron Remove
+      aliases: []
+      kind: other
+      action: plan
+      summary_fields: [task_id]
+      output_label: lines
+    - name: WriteSandboxTool
+      display_name: WriteSandboxTool
+      aliases: []
+      kind: edit
+      action: write
+      summary_fields: [file_path]
+      output_label: changed-lines
+  hermes:
+    - name: read_file
+      display_name: Read File
+      aliases: []
+      kind: read
+      action: read
+      summary_fields: [path]
+      output_label: lines
+    - name: write_file
+      display_name: Write File
+      aliases: []
+      kind: edit
+      action: write
+      summary_fields: [path]
+      output_label: changed-lines
+    - name: patch
+      display_name: Patch
+      aliases: []
+      kind: edit
+      action: edit
+      summary_fields: [path]
+      output_label: changed-lines
+    - name: search_files
+      display_name: Search Files
+      aliases: []
+      kind: search
+      action: search
+      summary_fields: [pattern]
+      output_label: matches
+    - name: terminal
+      display_name: Terminal
+      aliases: []
+      kind: execute
+      action: execute
+      summary_fields: [command]
+      output_label: lines
+    - name: process
+      display_name: Process
+      aliases: []
+      kind: execute
+      action: execute
+      summary_fields: [action]
+      output_label: lines
+    - name: execute_code
+      display_name: Execute Code
+      aliases: []
+      kind: execute
+      action: execute
+      summary_fields: [code]
+      output_label: lines
+    - name: web_search
+      display_name: Web Search
+      aliases: []
+      kind: fetch
+      action: fetch
+      summary_fields: [query]
+      output_label: matches
+    - name: web_extract
+      display_name: Web Extract
+      aliases: []
+      kind: fetch
+      action: fetch
+      summary_fields: [urls]
+      output_label: lines
+    - name: skill_view
+      display_name: Skill View
+      aliases: []
+      kind: read
+      action: skill
+      summary_fields: [name]
+      output_label: lines
+    - name: skills_list
+      display_name: Skills List
+      aliases: []
+      kind: read
+      action: skill
+      summary_fields: [category]
+      output_label: lines
+    - name: skill_manage
+      display_name: Skill Manage
+      aliases: []
+      kind: edit
+      action: edit
+      summary_fields: [name]
+      output_label: lines
+    - name: todo
+      display_name: Todo
+      aliases: []
+      kind: other
+      action: plan
+      summary_fields: []
+      output_label: lines
+    - name: delegate_task
+      display_name: Delegate Task
+      aliases: []
+      kind: execute
+      action: delegate
+      summary_fields: [goal]
+      output_label: lines
+    - name: clarify
+      display_name: Clarify
+      aliases: []
+      kind: other
+      action: unknown
+      summary_fields: [question]
+      output_label: lines
+    - name: session_search
+      display_name: Session Search
+      aliases: []
+      kind: search
+      action: search
+      summary_fields: [query]
+      output_label: matches
+    - name: memory
+      display_name: Memory
+      aliases: []
+      kind: other
+      action: unknown
+      summary_fields: [action]
+      output_label: lines
+    - name: browser_navigate
+      display_name: Browser Navigate
+      aliases: []
+      kind: fetch
+      action: navigate
+      summary_fields: [url]
+      output_label: lines
+    - name: browser_snapshot
+      display_name: Browser Snapshot
+      aliases: []
+      kind: read
+      action: unknown
+      summary_fields: []
+      output_label: lines
+    - name: browser_click
+      display_name: Browser Click
+      aliases: []
+      kind: execute
+      action: click
+      summary_fields: [ref]
+      output_label: lines
+    - name: browser_type
+      display_name: Browser Type
+      aliases: []
+      kind: execute
+      action: type
+      summary_fields: [text]
+      output_label: lines
+    - name: browser_scroll
+      display_name: Browser Scroll
+      aliases: []
+      kind: execute
+      action: type
+      summary_fields: [direction]
+      output_label: lines
+    - name: browser_press
+      display_name: Browser Press
+      aliases: []
+      kind: execute
+      action: type
+      summary_fields: []
+      output_label: lines
+    - name: browser_back
+      display_name: Browser Back
+      aliases: []
+      kind: execute
+      action: unknown
+      summary_fields: []
+      output_label: lines
+    - name: browser_get_images
+      display_name: Browser Get Images
+      aliases: []
+      kind: read
+      action: unknown
+      summary_fields: []
+      output_label: lines
+    - name: browser_vision
+      display_name: Browser Vision
+      aliases: []
+      kind: read
+      action: unknown
+      summary_fields: [question]
+      output_label: lines
+    - name: browser_console
+      display_name: Browser Console
+      aliases: []
+      kind: execute
+      action: unknown
+      summary_fields: []
+      output_label: lines
+    - name: vision_analyze
+      display_name: Vision Analyze
+      aliases: []
+      kind: read
+      action: unknown
+      summary_fields: []
+      output_label: lines
+    - name: image_generate
+      display_name: Image Generate
+      aliases: []
+      kind: execute
+      action: unknown
+      summary_fields: []
+      output_label: lines
+    - name: text_to_speech
+      display_name: Text To Speech
+      aliases: []
+      kind: execute
+      action: unknown
+      summary_fields: []
+      output_label: lines
+    - name: send_message
+      display_name: Send Message
+      aliases: []
+      kind: execute
+      action: unknown
+      summary_fields: []
+      output_label: lines
+    - name: cronjob
+      display_name: Cronjob
+      aliases: []
+      kind: other
+      action: unknown
+      summary_fields: []
+      output_label: lines
+    - name: _thinking
+      display_name: Thinking
+      aliases: []
+      kind: think
+      action: unknown
+      summary_fields: []
+      output_label: lines
+    - name: discord
+      display_name: Discord
+      aliases: []
+      kind: execute
+      action: unknown
+      summary_fields: []
+      output_label: lines
+    - name: discord_admin
+      display_name: Discord Admin
+      aliases: []
+      kind: execute
+      action: unknown
+      summary_fields: []
+      output_label: lines
+    - name: feishu_doc_read
+      display_name: Feishu Doc Read
+      aliases: []
+      kind: read
+      action: unknown
+      summary_fields: []
+      output_label: lines
+    - name: ha_list_entities
+      display_name: Ha List Entities
+      aliases: []
+      kind: read
+      action: unknown
+      summary_fields: []
+      output_label: lines
+    - name: ha_get_state
+      display_name: Ha Get State
+      aliases: []
+      kind: read
+      action: unknown
+      summary_fields: []
+      output_label: lines
+    - name: ha_list_services
+      display_name: Ha List Services
+      aliases: []
+      kind: read
+      action: unknown
+      summary_fields: []
+      output_label: lines
+    - name: ha_call_service
+      display_name: Ha Call Service
+      aliases: []
+      kind: execute
+      action: unknown
+      summary_fields: []
+      output_label: lines
+    - name: kanban_create
+      display_name: Kanban Create
+      aliases: []
+      kind: other
+      action: unknown
+      summary_fields: []
+      output_label: lines
+    - name: kanban_show
+      display_name: Kanban Show
+      aliases: []
+      kind: read
+      action: unknown
+      summary_fields: []
+      output_label: lines
+    - name: kanban_comment
+      display_name: Kanban Comment
+      aliases: []
+      kind: other
+      action: unknown
+      summary_fields: []
+      output_label: lines
+    - name: kanban_complete
+      display_name: Kanban Complete
+      aliases: []
+      kind: other
+      action: unknown
+      summary_fields: []
+      output_label: lines
+    - name: kanban_block
+      display_name: Kanban Block
+      aliases: []
+      kind: other
+      action: unknown
+      summary_fields: []
+      output_label: lines
+    - name: kanban_link
+      display_name: Kanban Link
+      aliases: []
+      kind: other
+      action: unknown
+      summary_fields: []
+      output_label: lines
+    - name: kanban_heartbeat
+      display_name: Kanban Heartbeat
+      aliases: []
+      kind: other
+      action: unknown
+      summary_fields: []
+      output_label: lines
+    - name: yb_send_dm
+      display_name: Yb Send Dm
+      aliases: []
+      kind: execute
+      action: unknown
+      summary_fields: []
+      output_label: lines
+    - name: yb_send_sticker
+      display_name: Yb Send Sticker
+      aliases: []
+      kind: execute
+      action: unknown
+      summary_fields: []
+      output_label: lines

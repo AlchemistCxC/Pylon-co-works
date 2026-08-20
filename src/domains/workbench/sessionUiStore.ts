@@ -1,0 +1,98 @@
+export type SessionUiKey =
+  | 'draft'
+  | 'queued-messages'
+  | 'search-open'
+  | 'search-query'
+  | 'search-index'
+  | 'locate-target'
+  | 'locate-error'
+  | 'pendingMessageLocation'
+  | 'task-tree-open'
+  | 'input-history'
+  | 'input-history-index'
+  | 'message-expansion'
+
+export interface SessionUiStore {
+  get<T>(sessionId: string, key: SessionUiKey, fallback: T): T
+  set<T>(sessionId: string, key: SessionUiKey, value: T): void
+  update<T>(sessionId: string, key: SessionUiKey, fallback: T, updater: (previous: T) => T): T
+  subscribe(sessionId: string, key: SessionUiKey, listener: () => void): () => void
+  clear(sessionId: string): void
+  clearAll(): void
+  destroy(): void
+}
+
+function entryKey(sessionId: string, key: SessionUiKey): string {
+  return `${sessionId}\u0000${key}`
+}
+
+export function createSessionUiStore(): SessionUiStore {
+  const registry = new Map<string, Map<SessionUiKey, unknown>>()
+  const listeners = new Map<string, Set<() => void>>()
+  let destroyed = false
+
+  const publish = (sessionId: string, key: SessionUiKey) => {
+    if (destroyed) return
+    const current = listeners.get(entryKey(sessionId, key))
+    if (!current) return
+    for (const listener of [...current]) listener()
+  }
+
+  const get = <T>(sessionId: string, key: SessionUiKey, fallback: T): T => {
+    const session = registry.get(sessionId)
+    return session?.has(key) ? session.get(key) as T : fallback
+  }
+
+  const set = <T>(sessionId: string, key: SessionUiKey, value: T): void => {
+    if (destroyed) return
+    const session = registry.get(sessionId) ?? new Map<SessionUiKey, unknown>()
+    const previous = session.get(key)
+    const existed = session.has(key)
+    if (existed && Object.is(previous, value)) return
+    session.set(key, value)
+    registry.set(sessionId, session)
+    publish(sessionId, key)
+  }
+
+  return {
+    get,
+    set,
+    update<T>(sessionId: string, key: SessionUiKey, fallback: T, updater: (previous: T) => T): T {
+      const next = updater(get(sessionId, key, fallback))
+      set(sessionId, key, next)
+      return next
+    },
+    subscribe(sessionId, key, listener) {
+      if (destroyed) return () => {}
+      const id = entryKey(sessionId, key)
+      const current = listeners.get(id) ?? new Set<() => void>()
+      current.add(listener)
+      listeners.set(id, current)
+      return () => {
+        current.delete(listener)
+        if (current.size === 0) listeners.delete(id)
+      }
+    },
+    clear(sessionId) {
+      if (destroyed) return
+      const session = registry.get(sessionId)
+      if (!session) return
+      const keys = [...session.keys()]
+      registry.delete(sessionId)
+      for (const key of keys) publish(sessionId, key)
+    },
+    clearAll() {
+      if (destroyed || registry.size === 0) return
+      const affected = [...registry].flatMap(([sessionId, session]) =>
+        [...session.keys()].map(key => [sessionId, key] as const))
+      registry.clear()
+      for (const [sessionId, key] of affected) publish(sessionId, key)
+    },
+    destroy() {
+      if (destroyed) return
+      destroyed = true
+      registry.clear()
+      listeners.clear()
+    },
+  }
+}

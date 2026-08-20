@@ -1,0 +1,63 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  frontend:
+    name: 前端（tsc + 测试 + build）
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: 安装依赖
+        run: npm ci
+
+      # ISSUE-20 W1：统一入口——lint + vitest（含 legacy 套件，经 legacy-runner.test.mts）+ 覆盖率 + tsc/build
+      # legacy 套件只经 vitest 跑一次（原 test:legacy 独立步骤移除，消除双跑）
+      - name: 统一前端门禁（check:frontend）
+        run: npm run check:frontend
+
+  rust:
+    name: Rust（测试 + clippy + 构建）
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: 安装依赖
+        run: npm ci
+
+      # tauri::generate_context! 编译期要求 ../dist 存在（frontendDist），先构建前端
+      - name: 前端构建（tauri generate_context 前置）
+        run: npm run build
+
+      # ISSUE-20 W1：同一 check:rust 入口（cargo test --lib + cargo build），不复制命令
+      - name: Rust 测试与构建（check:rust）
+        run: npm run check:rust
+
+      # ISSUE-20 W2：clippy 按项目 toolchain；不设 -D warnings（既有 33 条警告基线，独立清理）
+      - name: clippy
+        run: cd src-tauri && cargo clippy --lib
+
+      # 必要 bundle（debug 二进制），不上传 secret/data
+      - name: 上传 debug 构建产物
+        uses: actions/upload-artifact@v4
+        with:
+          name: pylon-debug-windows
+          path: src-tauri/target/debug/pylon.exe

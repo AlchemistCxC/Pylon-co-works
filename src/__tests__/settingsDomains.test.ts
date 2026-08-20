@@ -1,0 +1,121 @@
+/**
+ * ISSUE-13 W1（T13-1）settingsDomains 测试：
+ * - 完整性：现有全部设置块唯一归属 domain/section（新增块必须同步登记）
+ * - 唯一性：section 全局唯一，无跨 domain 重复归属
+ * - 搜索路径：domain › section 路径唯一且格式正确
+ * - 字段归属派生：SECTION_ZONES（zone → section）覆盖 Settings 渲染的全部主题 zone
+ */
+import { describe, expect, it } from 'vitest'
+import {
+  SECTION_ZONES,
+  SETTINGS_DOMAIN_BY_ID,
+  SETTINGS_DOMAINS,
+  SETTINGS_SECTION_LABELS,
+  domainOfSection,
+  searchPathFor,
+  sectionZone,
+  type SettingsSectionId,
+} from '../settingsDomains'
+import { ZONES } from '../themeFieldDefs'
+
+/** 当前 Settings 的全部设置块（Settings.tsx 各分区枚举；新增块必须在此登记） */
+const EXPECTED_BLOCKS: readonly SettingsSectionId[] = [
+  // 外观
+  'templates', 'global', 'sidebar', 'chat', 'cc', 'right',
+  // 工作区
+  'window', 'pet', 'history', 'backup',
+  // Agent 与连接
+  'agent', 'session', 'gateway',
+  // 插件
+  'pluginManager',
+]
+
+const allSections = (): SettingsSectionId[] =>
+  SETTINGS_DOMAINS.flatMap(domain => domain.sections)
+
+describe('ISSUE-13 W1 domain config 完整性', () => {
+  it('domain 形状：外观/工作区/Agent 与连接/插件，与参考方案一致', () => {
+    expect(SETTINGS_DOMAINS.map(d => d.id)).toEqual(['appearance', 'workspace', 'agents-connections', 'plugins'])
+    expect(SETTINGS_DOMAINS.map(d => d.label)).toEqual(['外观', '工作区', 'Agent 与连接', '插件'])
+    expect(SETTINGS_DOMAINS.map(d => d.sections)).toEqual([
+      ['templates', 'global', 'sidebar', 'chat', 'cc', 'right'],
+      ['window', 'pet', 'history', 'backup'],
+      ['agent', 'session', 'gateway'],
+      ['pluginManager'],
+    ])
+  })
+
+  it('全部设置块都登记且每块恰好归属一次（无遗漏、无重复）', () => {
+    const sections = allSections()
+    expect([...new Set(sections)]).toHaveLength(EXPECTED_BLOCKS.length)
+    expect(new Set(sections)).toEqual(new Set(EXPECTED_BLOCKS))
+    // 每个期望块至少出现一次且不重复
+    for (const block of EXPECTED_BLOCKS) {
+      const hits = sections.filter(s => s === block).length
+      expect(hits).toBe(1)
+    }
+  })
+
+  it('每个 section 都有非空中文标签', () => {
+    for (const section of allSections()) {
+      expect(SETTINGS_SECTION_LABELS[section].trim().length).toBeGreaterThan(0)
+    }
+  })
+
+  it('section 唯一归属：domainOfSection 判定正确', () => {
+    expect(domainOfSection('global')).toBe('appearance')
+    expect(domainOfSection('chat')).toBe('appearance')
+    expect(domainOfSection('window')).toBe('workspace')
+    expect(domainOfSection('history')).toBe('workspace')
+    expect(domainOfSection('agent')).toBe('agents-connections')
+    expect(domainOfSection('gateway')).toBe('agents-connections')
+    expect(domainOfSection('pluginManager')).toBe('plugins')
+  })
+
+  it('config 完整性守卫：未登记的 section 抛错（防止静默缺失）', () => {
+    expect(() => domainOfSection('nope' as SettingsSectionId)).toThrow(/未归属/)
+  })
+})
+
+describe('ISSUE-13 W1 搜索路径', () => {
+  it('每个 section 生成 domain › section 路径且唯一', () => {
+    const paths = allSections().map(searchPathFor)
+    expect(new Set(paths)).toHaveLength(paths.length)
+    expect(searchPathFor('global')).toBe('外观 › 全局')
+    expect(searchPathFor('history')).toBe('工作区 › 历史保留')
+    expect(searchPathFor('agent')).toBe('Agent 与连接 › Agent')
+  })
+
+  it('SETTINGS_DOMAIN_BY_ID 与 SETTINGS_DOMAINS 一致', () => {
+    for (const domain of SETTINGS_DOMAINS) {
+      expect(SETTINGS_DOMAIN_BY_ID[domain.id]).toBe(domain)
+    }
+  })
+})
+
+describe('ISSUE-13 W1 字段归属派生', () => {
+  it('Settings 渲染的主题 zone（global/sidebar/chat/cc/right）都经 SECTION_ZONES 归属 section', () => {
+    const themed = ZONES.filter(zone => zone !== 'layout')
+    for (const zone of themed) {
+      const section = (Object.keys(SECTION_ZONES) as SettingsSectionId[])
+        .find(s => SECTION_ZONES[s] === zone)
+      expect(section, `zone ${zone} 应归属某 section`).toBeDefined()
+    }
+  })
+
+  it('SECTION_ZONES 的键都是合法 section、值都是合法 zone', () => {
+    const validSections = new Set(allSections())
+    for (const [section, zone] of Object.entries(SECTION_ZONES)) {
+      expect(validSections.has(section as SettingsSectionId)).toBe(true)
+      expect(ZONES).toContain(zone)
+    }
+  })
+
+  it('sectionZone 对主题 section 返回 zone，非主题返回 undefined', () => {
+    expect(sectionZone('cc')).toBe('cc')
+    expect(sectionZone('sidebar')).toBe('sidebar')
+    expect(sectionZone('templates')).toBeUndefined()
+    expect(sectionZone('window')).toBeUndefined()
+    expect(sectionZone('gateway')).toBeUndefined()
+  })
+})

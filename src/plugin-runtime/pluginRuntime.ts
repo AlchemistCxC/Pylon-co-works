@@ -1,0 +1,347 @@
+import { createPackagePluginIdentity, createPluginIdentity, type PluginIdentity } from './pluginIdentity.ts'
+import {
+  activateBuiltinPlugin,
+  deactivatePluginInstance,
+  type BuiltinPluginActivate,
+  type BuiltinPluginActivationContext,
+  type PluginDeactivateResult,
+  type PluginInstance,
+} from './pluginInstance.ts'
+import { createPluginActivationContext } from './pluginActivationContext.ts'
+import { PluginScope } from './pluginScope.ts'
+import {
+  PluginContributionTransaction,
+  type HotSwapMode,
+  type PluginUpdateResult,
+} from './shadowUpdate.ts'
+import { getHookRuntime } from './runtimeServices.ts'
+
+export interface BuiltinPluginDefinition {
+  id: string
+  kind?: 'shell' | 'workspace' | 'feature' | 'hook' | 'renderer' | 'skin' | 'agent-adapter' | 'tool-provider' | 'service' | 'automation'
+  firstParty?: boolean
+  dependencies?: readonly string[]
+  version?: string
+  packageInstanceId?: string
+  runtimeInstanceId?: string
+  hotSwapMode?: HotSwapMode
+  drainTimeoutMs?: number
+  prepare?: (context: BuiltinPluginActivationContext) => unknown | Promise<unknown>
+  activate: BuiltinPluginActivate
+  suspend?: () => void | Promise<void>
+  resume?: () => void | Promise<void>
+  deactivate?: () => void | Promise<void>
+}
+
+export type BuiltinPluginDefinitionFactory = (
+  context: BuiltinPluginActivationContext,
+) => BuiltinPluginDefinition
+
+export interface PluginSwitchDescriptor extends PluginUpdateResult {
+  readonly committedAt: number
+}
+
+export interface PluginRuntimeSnapshot {
+  readonly revision: number
+  readonly active: readonly PluginIdentity[]
+  readonly switches: readonly PluginSwitchDescriptor[]
+}
+
+export interface PluginRuntimeOptions {
+  requestSoftRemount?: () => void | Promise<void>
+}
+
+export interface PluginUpdateOptions {
+  identity?: PluginIdentity
+  commitActivePointer?: () => void | Promise<void>
+  requestSoftRemount?: () => void | Promise<void>
+}
+
+export class PluginRestartRequiredError extends Error {
+  readonly pluginId: string
+  readonly declaredMode: HotSwapMode = 'restart-required'
+  readonly adoptedMode: HotSwapMode = 'restart-required'
+
+  constructor(pluginId: string) {
+    super(`插件 ${pluginId} 声明 restart-required，不能执行进程内切换`)
+    this.name = 'PluginRestartRequiredError'
+    this.pluginId = pluginId
+  }
+}
+
+export class PluginRuntime {
+  private readonly instances = new Map<string, PluginInstance>()
+  private readonly definitions = new Map<string, BuiltinPluginDefinition>()
+  private readonly knownDefinitions = new Map<string, BuiltinPluginDefinition>()
+  private readonly listeners = new Set<() => void>()
+  private readonly updateQueues = new Map<string, Promise<void>>()
+  private readonly switchRecords = new Map<string, PluginSwitchDescriptor>()
+  private readonly options: PluginRuntimeOptions
+  private instanceSequence = 0
+  private revision = 0
+  private currentSnapshot: PluginRuntimeSnapshot = Object.freeze({
+    revision: 0,
+    active: Object.freeze([]),
+    switches: Object.freeze([]),
+  })
+
+  constructor(options: PluginRuntimeOptions = {}) {
+    this.options = options
+  }
+
+  snapshot(): PluginRuntimeSnapshot {
+    return this.currentSnapshot
+  }
+
+  subscribe(listener: () => void): () => void {
+    this.listeners.add(listener)
+    let disposed = false
+    return () => {
+      if (disposed) return
+      disposed = true
+      this.listeners.delete(listener)
+    }
+  }
+
+  private publishSnapshot(): void {
+    this.revision += 1
+    this.currentSnapshot = Object.freeze({
+      revision: this.revision,
+      active: Object.freeze([...this.instances.values()]
+        .filter(instance => instance.status === 'active')
+        .map(instance => instance.identity)
+        .sort((a, b) => a.key < b.key ? -1 : a.key > b.key ? 1 : 0)),
+      switches: Object.freeze([...this.switchRecords.values()]
+        .sort((a, b) => a.pluginId < b.pluginId ? -1 : a.pluginId > b.pluginId ? 1 : 0)),
+    })
+    for (const listener of [...this.listeners]) listener()
+  }
+
+  private assertInactive(pluginId: string): void {
+    if ([...this.instances.values()].some(instance => (
+      instance.identity.pluginId === pluginId && instance.status !== 'inactive'
+    ))) {
+      throw new Error(`插件已激活：${pluginId}`)
+    }
+  }
+
+  async activateBuiltin(definition: BuiltinPluginDefinition): Promise<PluginInstance> {
+    this.assertInactive(definition.id)
+    const identity = createPluginIdentity(definition.id, `builtin-${++this.instanceSequence}`)
+    const instance = await activateBuiltinPlugin(identity, async context => {
+      const prepared = await definition.prepare?.(context)
+      await definition.activate(context, prepared)
+    })
+    this.instances.set(identity.key, instance)
+    this.definitions.set(identity.key, definition)
+    this.knownDefinitions.set(definition.id, definition)
+    this.publishSnapshot()
+    return instance
+  }
+
+  async activatePackage(definition: BuiltinPluginDefinition, identity?: PluginIdentity): Promise<PluginInstance> {
+    this.assertInactive(definition.id)
+    const resolvedIdentity = identity ?? this.createIdentity(definition)
+    const instance = await activateBuiltinPlugin(resolvedIdentity, async context => {
+      const prepared = await definition.prepare?.(context)
+      await definition.activate(context, prepared)
+    })
+    this.instances.set(resolvedIdentity.key, instance)
+    this.definitions.set(resolvedIdentity.key, definition)
+    this.knownDefinitions.set(definition.id, definition)
+    this.publishSnapshot()
+    return instance
+  }
+
+  /** 模块启动期内置插件路径：只接受同步 activate，避免首帧贡献空窗。 */
+  activateBuiltinSync(definition: BuiltinPluginDefinition): PluginInstance {
+    this.assertInactive(definition.id)
+    if (definition.prepare) throw new Error(`同步激活不支持 prepare：${definition.id}`)
+    const identity = definition.version && definition.packageInstanceId
+      ? this.createIdentity(definition)
+      : createPluginIdentity(definition.id, `builtin-${++this.instanceSequence}`)
+    const scope = new PluginScope(identity.key)
+    try {
+      const result = definition.activate(createPluginActivationContext(identity, scope))
+      if (result && typeof (result as PromiseLike<unknown>).then === 'function') {
+        throw new Error(`同步激活要求 activate 同步返回：${definition.id}`)
+      }
+    } catch (error) {
+      void scope.dispose()
+      throw error
+    }
+    const instance: PluginInstance = { identity, scope, status: 'active' }
+    this.instances.set(identity.key, instance)
+    this.definitions.set(identity.key, definition)
+    this.knownDefinitions.set(definition.id, definition)
+    this.publishSnapshot()
+    return instance
+  }
+
+  update(definition: BuiltinPluginDefinition, options: PluginUpdateOptions = {}): Promise<PluginUpdateResult> {
+    const previous = this.updateQueues.get(definition.id) ?? Promise.resolve()
+    const operation = previous.catch(() => undefined).then(() => this.performUpdate(definition, options))
+    const tail = operation.then(() => undefined, () => undefined)
+    this.updateQueues.set(definition.id, tail)
+    void tail.finally(() => {
+      if (this.updateQueues.get(definition.id) === tail) this.updateQueues.delete(definition.id)
+    })
+    return operation
+  }
+
+  private async performUpdate(
+    definition: BuiltinPluginDefinition,
+    options: PluginUpdateOptions,
+  ): Promise<PluginUpdateResult> {
+    const oldInstance = [...this.instances.values()].find(instance => (
+      instance.identity.pluginId === definition.id && instance.status === 'active'
+    ))
+    if (!oldInstance) throw new Error(`插件未激活：${definition.id}`)
+    if ((definition.hotSwapMode ?? 'parallel') === 'restart-required') {
+      this.switchRecords.set(definition.id, Object.freeze({
+        pluginId: definition.id,
+        previousRuntimeInstanceId: oldInstance.identity.key,
+        runtimeInstanceId: oldInstance.identity.key,
+        declaredMode: 'restart-required',
+        adoptedMode: 'restart-required',
+        committedAt: Date.now(),
+      }))
+      this.publishSnapshot()
+      throw new PluginRestartRequiredError(definition.id)
+    }
+
+    const oldDefinition = this.definitions.get(oldInstance.identity.key)
+    if (!oldDefinition) throw new Error(`插件定义丢失：${oldInstance.identity.key}`)
+    const candidateIdentity = options.identity ?? this.createIdentity(definition)
+    if (candidateIdentity.pluginId !== definition.id) {
+      throw new Error(`候选 identity 与 definition.id 不匹配：${candidateIdentity.pluginId}`)
+    }
+    if (candidateIdentity.key === oldInstance.identity.key) {
+      throw new Error(`候选 runtimeInstanceId 必须唯一：${candidateIdentity.key}`)
+    }
+
+    const mode = definition.hotSwapMode ?? 'parallel'
+    const scope = new PluginScope(candidateIdentity.key)
+    const contributions = new PluginContributionTransaction(candidateIdentity, oldInstance.identity.key)
+    const context = createPluginActivationContext(candidateIdentity, scope, contributions.transactions)
+    let committed = false
+    let suspended = false
+    let remounted = false
+
+    try {
+      const prepared = await definition.prepare?.(context)
+      await definition.activate(context, prepared)
+      contributions.validate()
+
+      if (mode === 'exclusive') {
+        if (!oldDefinition.suspend || !oldDefinition.resume) {
+          throw new Error(`exclusive 更新要求旧插件实现 suspend/resume：${definition.id}`)
+        }
+        await oldDefinition.suspend()
+        suspended = true
+      }
+
+      contributions.commit()
+      committed = true
+
+      if (mode === 'soft-remount') {
+        const remount = options.requestSoftRemount ?? this.options.requestSoftRemount
+        if (!remount) throw new Error(`soft-remount 更新缺少 Application 重挂入口：${definition.id}`)
+        await remount()
+        remounted = true
+      }
+
+      await getHookRuntime().drain(oldInstance.identity.key, definition.drainTimeoutMs)
+
+      // Final fallible state commit. Old resources remain resumable until this succeeds.
+      await options.commitActivePointer?.()
+
+      const candidate: PluginInstance = { identity: candidateIdentity, scope, status: 'active' }
+      this.instances.delete(oldInstance.identity.key)
+      this.definitions.delete(oldInstance.identity.key)
+      this.instances.set(candidateIdentity.key, candidate)
+      this.definitions.set(candidateIdentity.key, definition)
+      this.knownDefinitions.set(definition.id, definition)
+      const result: PluginUpdateResult = {
+        pluginId: definition.id,
+        previousRuntimeInstanceId: oldInstance.identity.key,
+        runtimeInstanceId: candidateIdentity.key,
+        declaredMode: mode,
+        adoptedMode: mode,
+      }
+      this.switchRecords.set(definition.id, Object.freeze({ ...result, committedAt: Date.now() }))
+      this.publishSnapshot()
+
+      await deactivatePluginInstance(oldInstance, oldDefinition.deactivate)
+      return result
+    } catch (error) {
+      if (committed) contributions.revert()
+      else contributions.rollback()
+      await scope.dispose()
+      if (suspended) await oldDefinition.resume?.()
+      if (remounted) await (options.requestSoftRemount ?? this.options.requestSoftRemount)?.()
+      throw error
+    }
+  }
+
+  async deactivate(instanceKey: string): Promise<PluginDeactivateResult> {
+    const instance = this.instances.get(instanceKey)
+    if (!instance) {
+      return { alreadyInactive: true, scope: { disposed: 0, errors: [] } }
+    }
+    const result = await deactivatePluginInstance(instance, this.definitions.get(instanceKey)?.deactivate)
+    this.instances.delete(instanceKey)
+    this.definitions.delete(instanceKey)
+    this.publishSnapshot()
+    return result
+  }
+
+  async disable(pluginId: string): Promise<PluginDeactivateResult> {
+    const active = [...this.instances.values()].find(instance => (
+      instance.identity.pluginId === pluginId && instance.status === 'active'
+    ))
+    if (!active) return { alreadyInactive: true, scope: { disposed: 0, errors: [] } }
+    return this.deactivate(active.identity.key)
+  }
+
+  async enable(pluginId: string): Promise<PluginInstance> {
+    this.assertInactive(pluginId)
+    const definition = this.knownDefinitions.get(pluginId)
+    if (!definition) throw new Error(`插件没有可恢复定义：${pluginId}`)
+    const fresh = this.withFreshRuntimeIdentity(definition)
+    return definition.version && definition.packageInstanceId
+      ? this.activatePackage(fresh)
+      : this.activateBuiltin(fresh)
+  }
+
+  async reload(pluginId: string, mode?: HotSwapMode): Promise<PluginUpdateResult> {
+    const active = [...this.instances.values()].find(instance => (
+      instance.identity.pluginId === pluginId && instance.status === 'active'
+    ))
+    if (!active) throw new Error(`插件未激活：${pluginId}`)
+    const definition = this.definitions.get(active.identity.key)
+    if (!definition) throw new Error(`插件定义丢失：${active.identity.key}`)
+    return this.update({
+      ...this.withFreshRuntimeIdentity(definition),
+      ...(mode ? { hotSwapMode: mode } : {}),
+    })
+  }
+
+  private withFreshRuntimeIdentity(definition: BuiltinPluginDefinition): BuiltinPluginDefinition {
+    const { runtimeInstanceId: _runtimeInstanceId, ...fresh } = definition
+    return fresh
+  }
+
+  private createIdentity(definition: BuiltinPluginDefinition): PluginIdentity {
+    if (definition.version && definition.packageInstanceId) {
+      return createPackagePluginIdentity({
+        pluginId: definition.id,
+        version: definition.version,
+        packageInstanceId: definition.packageInstanceId,
+        runtimeInstanceId: definition.runtimeInstanceId
+          ?? `${definition.packageInstanceId}#run-${++this.instanceSequence}`,
+      })
+    }
+    return createPluginIdentity(definition.id, `builtin-${++this.instanceSequence}`)
+  }
+}

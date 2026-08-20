@@ -1,0 +1,85 @@
+/* ── StatusBar ── */
+.status-bar { display:flex; align-items:center; gap:10px; padding:6px 0; cursor:pointer; user-select:none; background:var(--status-bg,transparent); background-image:var(--status-bg-image,none); background-size:cover; background-position:center; }
+
+.ekg-svg { width:var(--ekg-w,140px); height:30px; flex-shrink:0; }
+
+.ekg-bar { position:relative; width:var(--ekg-w,140px); height:var(--bar-h,10px); border-radius: 0; overflow:hidden; flex-shrink:0; }
+.ekg-bar-track { position:absolute; inset:0; background:var(--bar-track,rgba(0,0,0,0.18)); }
+.ekg-bar-fill { position:absolute; left:0; top:0; bottom:0; width:var(--bar-fill,0%); background:var(--bar-color,var(--ekg-green,#4EBA65)); transition:width 0.3s; }
+
+.ekg-pct { font-size:inherit; font-weight:400; font-family:var(--mono); min-width:0; transition:color 0.3s; flex-shrink:0; }
+.pill-mono { font-size:inherit; color:var(--text-dim); padding:0; border-radius: 0; background:transparent; font-family:var(--mono); border:0; flex-shrink:0; }
+
+/* ── Prism tag ── */
+.prism-tag { font-size:12px; font-weight:400; padding:0; border:none; cursor:pointer; background:transparent; color:var(--text-dim); font-family:var(--mono); }
+.prism-tag.on { color:var(--prism-on-color,#4EBA65); }
+.prism-tag.off { color:var(--text-dim); }
+.prism-tag:hover { text-decoration:underline; }
+
+/* ── ModelWidget variants ── */
+.model-tag { font-size:12px; color:var(--pill-text,#999); padding:0; border:none; background:transparent; cursor:pointer; font-family:var(--mono); }
+.model-tag:hover { text-decoration:underline; }
+.model-menu { position:absolute; bottom:100%; left:0; margin-bottom:4px; background:#000; border:1px solid #505050; border-radius: 0; overflow:hidden; min-width:180px; z-index:100; }
+.model-item { padding:6px 14px; font-size:12px; font-family:var(--mono); color:#999; cursor:pointer; }
+.model-item:hover { background:#373737; color:#fff; }
+.model-item.active { color:var(--pill-text,#999); font-weight:600; }
+
+.cc-model-minimal { font-family:var(--mono); font-size:inherit; color:var(--accent,#D77757); cursor:pointer; padding:0; }
+.cc-model-minimal:hover { color:var(--text); text-decoration:underline; }
+.cc-model-badge { font-family:var(--mono); font-size:11px; padding:2px 8px; border-radius: 0; background:var(--pill-bg,rgba(0,0,0,0.05)); color:var(--pill-text,#999); border:1px solid rgba(0,0,0,0.1); }
+
+/* ── ModeWidget variants ── */
+.cc-mode-widget { display:flex; align-items:center; background:transparent; border:none; padding:0; cursor:pointer; color:inherit; font:inherit; }
+.mode-pill { font-size:11px; font-family:var(--mono); padding:2px 8px; border-radius: 0; background:var(--pill-bg,rgba(0,0,0,0.05)); border:1px solid rgba(0,0,0,0.08); }
+.mode-pill[data-mode="bypass"] { color:var(--tool-err,#FF6B80); }
+.mode-pill[data-mode="auto"]   { color:var(--mode-auto-color,#FFC107); }
+.mode-pill[data-mode="edit"]   { color:var(--mode-edit-color,#A2A9E4); }
+.mode-pill[data-mode="default"]{ color:var(--text-dim,#999); }
+
+.cc-mode-badge { font-family:var(--mono); font-size:12px; cursor:pointer; color:var(--text-dim); background:transparent; border:0; padding:0; }
+.cc-mode-badge[data-mode="bypass"] { color:var(--tool-err,#FF6B80); }
+.cc-mode-badge[data-mode="auto"]   { color:var(--mode-auto-color,#FFC107); }
+.cc-mode-badge[data-mode="edit"]   { color:var(--mode-edit-color,#A2A9E4); }
+.cc-mode-badge[data-mode="default"]{ color:var(--text-dim,#999); }
+
+.cc-mode-minimal { font-family:var(--mono); font-size:inherit; cursor:pointer; background:transparent; border:0; padding:0; color:inherit; }
+.cc-mode-minimal[data-mode="bypass"] { color:var(--tool-err,#FF6B80); }
+.cc-mode-minimal[data-mode="auto"]   { color:var(--mode-auto-color,#FFC107); }
+.cc-mode-minimal[data-mode="edit"]   { color:var(--mode-edit-color,#A2A9E4); }
+.cc-mode-minimal[data-mode="default"]{ color:var(--text-dim,#999); }
+
+.cc-model-minimal { background:transparent; border:0; color:var(--pill-text,#999); font-family:var(--mono); cursor:pointer; }
+
+@media (prefers-reduced-motion:reduce) {
+  .ekg-bar-fill,
+  .ekg-pct,
+  .status-bar button { transition:none!important; }
+}
+
+/* ── Send / Attach widget variants ── */
+.cc-send-icon, .cc-send-square, .cc-send-minimal,
+.cc-attach-icon, .cc-attach-square, .cc-attach-minimal {
+  display:flex; align-items:center; justify-content:center; border:none; cursor:pointer;
+  font-family:var(--mono); transition:background 0.15s, color 0.15s;
+}
+.cc-send-icon, .cc-attach-icon {
+  border-radius: 50%; background:var(--input-send-bg,rgba(0,0,0,0.1)); color:var(--input-text-color,rgba(0,0,0,0.85));
+}
+.cc-send-icon:hover, .cc-attach-icon:hover { background:rgba(0,0,0,0.18); }
+.cc-send-square, .cc-attach-square {
+  border-radius: 0; background:var(--input-send-bg,rgba(0,0,0,0.1)); color:var(--input-text-color,rgba(0,0,0,0.85));
+}
+.cc-send-square:hover, .cc-attach-square:hover { background:rgba(0,0,0,0.18); }
+.cc-send-minimal, .cc-attach-minimal {
+  background:transparent; color:var(--text-dim); border-radius: 0;
+}
+.cc-send-minimal:hover, .cc-attach-minimal:hover { color:var(--text); }
+
+/* ── cc widget separators (controlled by cc layout in ControlCenter) ── */
+
+.cc-variant-terminal .cc-model-minimal,
+.cc-variant-terminal .cc-mode-minimal,
+.cc-variant-terminal .ekg-pct,
+.cc-variant-terminal .pill-mono {
+  border:0; border-radius: 0; background:transparent; padding:0;
+}

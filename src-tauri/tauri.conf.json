@@ -1,0 +1,62 @@
+{
+  "$schema": "https://raw.githubusercontent.com/tauri-apps/tauri/dev/crates/tauri-config-schema/schema.json",
+  "productName": "Pylon",
+  "version": "1.3.1",
+  "identifier": "com.prism.desktop",
+  "build": {
+    "frontendDist": "../dist",
+    "beforeBuildCommand": "npm run build"
+  },
+  "app": {
+    "windows": [
+      {
+        "title": "Prism Desktop",
+        "width": 1200,
+        "height": 800,
+        "minWidth": 800,
+        "minHeight": 600,
+        "decorations": false,
+        "transparent": true,
+        "center": true
+      }
+    ],
+    "security": {
+      "csp": {
+        "default-src": "'self' asset:",
+        "connect-src": "ipc: http://ipc.localhost asset: http://asset.localhost pylon-plugin: http://pylon-plugin.localhost",
+        "img-src": "'self' asset: http://asset.localhost pylon-plugin: http://pylon-plugin.localhost blob: data: https: http:",
+        "style-src": "'self' 'unsafe-inline' asset: pylon-plugin: http://pylon-plugin.localhost",
+        "script-src": "'self' 'wasm-unsafe-eval' pylon-plugin: http://pylon-plugin.localhost",
+        "font-src": "'self' asset: pylon-plugin: http://pylon-plugin.localhost data:"
+      },
+      "devCsp": {
+        "default-src": "'self' asset: http://localhost:5173",
+        "connect-src": "ipc: http://ipc.localhost asset: http://asset.localhost pylon-plugin: http://pylon-plugin.localhost ws://localhost:5173 http://localhost:5173",
+        "img-src": "'self' asset: http://asset.localhost pylon-plugin: http://pylon-plugin.localhost blob: data: https: http: http://localhost:5173",
+        "style-src": "'self' 'unsafe-inline' asset: pylon-plugin: http://pylon-plugin.localhost http://localhost:5173",
+        "script-src": "'self' 'unsafe-inline' 'wasm-unsafe-eval' pylon-plugin: http://pylon-plugin.localhost http://localhost:5173",
+        "font-src": "'self' asset: pylon-plugin: http://pylon-plugin.localhost data: http://localhost:5173"
+      },
+      "dangerousDisableAssetCspModification": false,
+      "assetProtocol": {
+        "enable": true,
+        "scope": ["**"]
+      }
+    },
+    "withGlobalTauri": false
+  },
+  "bundle": {
+    "icon": [
+      "icons/icon.ico"
+    ],
+    "resources": [
+      "resources/fonts/*"
+    ],
+    "windows": {
+      "webviewInstallMode": {
+        "type": "downloadBootstrapper",
+        "silent": true
+      }
+    }
+  }
+}

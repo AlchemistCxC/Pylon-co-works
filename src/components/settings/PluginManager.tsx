@@ -1,0 +1,229 @@
+import { useCallback, useEffect, useMemo, useState, useSyncExternalStore } from 'react'
+import {
+  getBuiltinPluginIds,
+  getPackageInstallationService,
+  getPluginRuntime,
+} from '../../plugin-runtime/pluginCompositionRoot.ts'
+import { PYLON_PLUGIN_API_VERSION } from '../../plugin-runtime/packageManifest.ts'
+import type { PackageInstallationService } from '../../plugin-runtime/packageInstallationService.ts'
+import type { InstalledPluginPackage } from '../../infrastructure/plugins/pluginPackageClient.ts'
+import { IS_TAURI } from '../../infrastructure/tauri/env.ts'
+
+const LOG_LIMIT = 12
+
+const BUILTIN_PLUGIN_NAMES: Record<string, string> = {
+  'builtin.pylon-agent-adapters': 'Agent 适配器',
+  'builtin.pylon-renderers': '聊天与内容渲染器',
+  'builtin.pylon-shell': '应用外壳',
+  'builtin.pylon-tools': '工具字典',
+  'builtin.pylon-workspace': '工作区与 Sheet',
+  'builtin.skin': '主题与皮肤',
+}
+
+export interface PluginManagerProps {
+  service?: PackageInstallationService
+  pickDirectory?: () => Promise<string | null>
+}
+
+async function pickPluginDirectory(): Promise<string | null> {
+  const { open } = await import('@tauri-apps/plugin-dialog')
+  const selected = await open({ directory: true, multiple: false, title: '选择 api=1.0 插件包' })
+  return typeof selected === 'string' ? selected : null
+}
+
+export default function PluginManager({
+  service: serviceProp,
+  pickDirectory = pickPluginDirectory,
+}: PluginManagerProps = {}) {
+  const runtime = getPluginRuntime()
+  const service = serviceProp ?? getPackageInstallationService()
+  const browserMockAvailable = import.meta.env.DEV
+    && typeof window !== 'undefined'
+    && '__TAURI_INTERNALS__' in window
+  const nativePackagesAvailable = serviceProp !== undefined || IS_TAURI || browserMockAvailable
+  const subscribe = useCallback((listener: () => void) => runtime.subscribe(listener), [runtime])
+  const snapshot = useSyncExternalStore(subscribe, () => runtime.snapshot(), () => runtime.snapshot())
+  const [installed, setInstalled] = useState<InstalledPluginPackage[]>([])
+  const [busy, setBusy] = useState<string | null>(null)
+  const [log, setLog] = useState<string[]>([])
+
+  const appendLog = useCallback((line: string) => {
+    setLog(previous => [...previous.slice(-(LOG_LIMIT - 1)), line])
+  }, [])
+
+  const refresh = useCallback(async () => {
+    if (!nativePackagesAvailable) {
+      setInstalled([])
+      return
+    }
+    setInstalled(await service.list())
+  }, [nativePackagesAvailable, service])
+
+  useEffect(() => {
+    if (!nativePackagesAvailable) return
+    void service.initialize()
+      .then(result => {
+        for (const failure of result.failed) appendLog(`启动 ${failure.pluginId} 失败：${failure.message}`)
+        return refresh()
+      })
+      .catch(error => appendLog(`读取 API 1.0 插件包失败：${error instanceof Error ? error.message : String(error)}`))
+  }, [appendLog, nativePackagesAvailable, refresh, service])
+
+  const run = async (label: string, task: () => Promise<{ ok: boolean; message?: string }>) => {
+    if (busy) return
+    setBusy(label)
+    try {
+      const result = await task()
+      appendLog(result.ok ? `${label}成功` : `${label}失败：${result.message ?? '未知错误'}`)
+      await refresh()
+    } catch (error) {
+      appendLog(`${label}失败：${error instanceof Error ? error.message : String(error)}`)
+    } finally {
+      setBusy(null)
+    }
+  }
+
+  const installOrUpdate = async () => {
+    if (!nativePackagesAvailable) return
+    const sourcePath = await pickDirectory()
+    if (!sourcePath) return
+    await run('安装/更新', () => service.installOrUpdate(sourcePath))
+  }
+
+  const activeById = useMemo(
+    () => new Map(snapshot.active.map(identity => [identity.pluginId, identity])),
+    [snapshot],
+  )
+  const installedById = useMemo(
+    () => new Map(installed.map(item => [item.package.pluginId, item])),
+    [installed],
+  )
+  const builtinIds = getBuiltinPluginIds()
+  const packageIds = installed.map(item => item.package.pluginId).sort()
+
+  const setBuiltinEnabled = async (pluginId: string, enabled: boolean) => {
+    await run(`${enabled ? '启用' : '停用'} ${pluginId}`, async () => {
+      if (enabled) await runtime.enable(pluginId)
+      else await runtime.disable(pluginId)
+      return { ok: true }
+    })
+  }
+
+  const renderPlugin = (pluginId: string, builtin: boolean) => {
+    const identity = activeById.get(pluginId)
+    const installedItem = installedById.get(pluginId)
+    const enabled = builtin ? Boolean(identity) : (installedItem?.enabled ?? false)
+    const manifest = installedItem?.package.manifest
+    const displayName = builtin
+      ? BUILTIN_PLUGIN_NAMES[pluginId] ?? pluginId
+      : (typeof manifest?.name === 'string' ? manifest.name : pluginId)
+    return (
+      <article className="plugin-row" key={pluginId} data-plugin-runtime="v2" data-plugin-id={pluginId}>
+        <div className="plugin-row-main">
+          <span className={`plugin-status-dot ${identity ? 'is-active' : ''}`} aria-hidden="true" />
+          <span className="plugin-row-copy">
+            <span className="plugin-row-title">{displayName}</span>
+            <span className="plugin-row-id">{pluginId}</span>
+          </span>
+          <span className={`plugin-type-badge ${builtin ? 'type-first-party' : 'type-package'}`}>
+            {builtin ? '内置' : (typeof manifest?.kind === 'string' ? manifest.kind : '外置')}
+          </span>
+          <span className={`plugin-state-badge ${identity ? 'is-active' : ''}`}>{identity ? '运行中' : enabled ? '等待激活' : '已停用'}</span>
+          <details className="plugin-technical">
+            <summary>技术信息</summary>
+            <div>API {PYLON_PLUGIN_API_VERSION} · {identity
+              ? `${identity.version} · ${identity.packageInstanceId} · ${identity.runtimeInstanceId}`
+              : '当前没有 Runtime 实例'}</div>
+          </details>
+        </div>
+        <div className="plugin-row-actions">
+          <button
+            type="button"
+            className="ps-btn sm"
+            aria-label={`${identity ? '停用' : '启用'} ${pluginId}`}
+            disabled={busy !== null}
+            onClick={() => void (builtin
+              ? setBuiltinEnabled(pluginId, !identity)
+              : run(`${identity ? '停用' : '启用'} ${pluginId}`, () => service.setEnabled(pluginId, !identity)))}
+          >
+            {identity ? '停用' : '启用'}
+          </button>
+          {installedItem && identity && (
+            <button type="button" className="ps-btn sm" disabled={busy !== null} onClick={() => void run(`重新加载 ${pluginId}`, () => service.reload(pluginId))}>
+              重载
+            </button>
+          )}
+          {installedItem && (
+            <button type="button" className="ps-btn sm danger" disabled={busy !== null} onClick={() => {
+              if (window.confirm(`确认卸载插件 ${pluginId}？`)) void run(`卸载 ${pluginId}`, () => service.uninstall(pluginId))
+            }}>
+              卸载
+            </button>
+          )}
+        </div>
+      </article>
+    )
+  }
+
+  return (
+    <div className="plugin-manager">
+      <h3>插件</h3>
+      <div className="set-hint">
+        Pylon Plugin API {PYLON_PLUGIN_API_VERSION}；安装、停用、启用与热更新全部由统一 Runtime 执行。
+      </div>
+      <div className="plugin-overview" aria-label="插件概览">
+        <span><strong>{snapshot.active.length}</strong> 个运行中</span>
+        <span><strong>{installed.length}</strong> 个用户插件</span>
+      </div>
+
+      <div className="set-group">
+        <div className="set-group-title" aria-expanded="true">
+          <span className="set-group-arrow">▾</span>
+          用户插件
+        </div>
+        <div className="set-preset-row">
+          <button type="button" className="ps-btn primary sm" disabled={busy !== null || !nativePackagesAvailable} onClick={() => void installOrUpdate()}>
+            {busy === '安装/更新' ? '处理中…' : '安装/更新 api=1.0 包…'}
+          </button>
+          <button type="button" className="ps-btn sm" disabled={busy !== null || !nativePackagesAvailable} onClick={() => void refresh().catch(error => appendLog(String(error)))}>
+            刷新
+          </button>
+        </div>
+        {installed.length === 0
+          ? <div className="plugin-empty"><span aria-hidden="true">◇</span><strong>尚无用户插件</strong><small>从本地目录安装符合 API 1.0 的插件包。</small></div>
+          : <div className="plugin-list">{packageIds.map(pluginId => renderPlugin(pluginId, false))}</div>}
+      </div>
+
+      <div className="set-group">
+        <div className="set-group-title" aria-expanded="true">
+          <span className="set-group-arrow">▾</span>
+          内置组件
+        </div>
+        <div className="plugin-list">{builtinIds.sort().map(pluginId => renderPlugin(pluginId, true))}</div>
+      </div>
+
+      <div className="set-group">
+        <div className="set-group-title" aria-expanded="true">
+          <span className="set-group-arrow">▾</span>
+          Shadow Update 诊断
+        </div>
+        {snapshot.switches.length === 0 && <div className="set-hint">本次运行尚无 Shadow Update。</div>}
+        {snapshot.switches.map(item => (
+          <div className="plugin-row" key={item.pluginId}>
+            <span className="plugin-row-id">{item.pluginId}</span>
+            <span className="set-hint">声明 {item.declaredMode} · 实际采用 {item.adoptedMode}</span>
+          </div>
+        ))}
+      </div>
+
+      <div className="set-group">
+        <div className="set-group-title" aria-expanded="true">
+          <span className="set-group-arrow">▾</span>
+          最近日志
+        </div>
+        {log.length === 0 && <div className="set-hint">暂无操作日志。</div>}
+        {log.map((line, index) => <div className="set-hint plugin-log-line" key={`${index}-${line}`} role="log">{line}</div>)}
+      </div>
+    </div>
+  )
+}

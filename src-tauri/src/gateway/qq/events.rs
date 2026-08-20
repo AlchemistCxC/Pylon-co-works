@@ -1,0 +1,169 @@
+//! QQ Bot 事件处理辅助函数（BE-B10-005）。
+//!
+//! 移植自 Prism `src/qq/events.rs`（对应 Hermes adapter 的
+//! _process_attachments / _process_quoted_context / _parse_qq_timestamp）。
+//! 纯函数：附件分类、@剥离。无 IO、不依赖 tauri。
+//! 已接线（B10.2）：process_attachments/strip_at_mention 由 ws.rs 事件分发消费；
+//! 引用/时间戳处理为 B10.3 会话生命周期预留（未使用，可从 git 历史恢复）。
+
+use super::types::QqAttachment;
+
+/// 附件处理结果
+pub struct AttachmentResult {
+    pub image_urls: Vec<String>,
+    /// 待 B10 媒体管线（出站媒体二期）消费。
+    #[allow(dead_code)]
+    pub image_media_types: Vec<String>,
+    pub voice_transcripts: Vec<String>,
+    pub attachment_info: String,
+}
+
+/// 处理消息附件（图片、语音、文件等）
+///
+/// - image/* → image_urls + image_media_types
+/// - audio/voice/silk → voice_transcripts（首版占位，QQ asr_refer_text 后续）
+/// - video/* / 其他 → attachment_info 文本描述（带文件名）
+/// - URL 为空的附件跳过
+pub fn process_attachments(raw: &Option<Vec<QqAttachment>>) -> AttachmentResult {
+    let mut image_urls = Vec::new();
+    let mut image_media_types = Vec::new();
+    let mut voice_transcripts = Vec::new();
+    let mut other = Vec::new();
+
+    if let Some(attachments) = raw {
+        for att in attachments {
+            let ct = att.content_type.as_deref().unwrap_or("");
+            let url = att.url.as_deref().unwrap_or("");
+            let filename = att.filename.as_deref().unwrap_or("");
+
+            if url.is_empty() {
+                continue;
+            }
+
+            if ct.starts_with("image/") {
+                image_urls.push(url.to_string());
+                image_media_types.push(ct.to_string());
+            } else if ct.starts_with("audio/") || ct.contains("voice") || ct.contains("silk") {
+                // 语音: 优先使用 QQ 自带的 asr_refer_text
+                voice_transcripts.push("[Voice] [语音消息]".to_string());
+            } else if ct.starts_with("video/") {
+                other.push(format!(
+                    "[video: {}]",
+                    if filename.is_empty() { ct } else { filename }
+                ));
+            } else {
+                other.push(format!(
+                    "[file: {}]",
+                    if filename.is_empty() { ct } else { filename }
+                ));
+            }
+        }
+    }
+
+    AttachmentResult {
+        image_urls,
+        image_media_types,
+        voice_transcripts,
+        attachment_info: other.join("\n"),
+    }
+}
+
+/// 去掉消息中的 @bot 前缀（@ 后跟非空白 + 空白；无空白时剥离到首个非
+/// ASCII 标识符字符，如 `@bot你好` → `你好`）。
+pub fn strip_at_mention(content: &str) -> String {
+    let trimmed = content.trim_start();
+    // @ 开头后跟非空白字符 + 空白
+    if let Some(rest) = trimmed.strip_prefix('@') {
+        if let Some(space) = rest.find(char::is_whitespace) {
+            return rest[space..].trim().to_string();
+        }
+        // 无空白：剥离 @ 后到首个非 ASCII 字母数字字符（@bot 的 bot 为标识符）
+        let end = rest
+            .find(|c: char| !c.is_ascii_alphanumeric())
+            .unwrap_or(rest.len());
+        return rest[end..].trim().to_string();
+    }
+    content.trim().to_string()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn attachment(url: &str, content_type: &str, filename: &str) -> QqAttachment {
+        QqAttachment {
+            url: (!url.is_empty()).then(|| url.to_string()),
+            content_type: (!content_type.is_empty()).then(|| content_type.to_string()),
+            filename: (!filename.is_empty()).then(|| filename.to_string()),
+            file_type: None,
+        }
+    }
+
+    #[test]
+    fn attachments_are_classified_by_content_type() {
+        let raw = Some(vec![
+            attachment("https://cdn/img.png", "image/png", "pic.png"),
+            attachment("https://cdn/voice.silk", "audio/silk", "v.silk"),
+            attachment("https://cdn/clip.mp4", "video/mp4", "clip.mp4"),
+            attachment("https://cdn/doc.pdf", "application/pdf", "doc.pdf"),
+        ]);
+        let result = process_attachments(&raw);
+        assert_eq!(result.image_urls, vec!["https://cdn/img.png"]);
+        assert_eq!(result.image_media_types, vec!["image/png"]);
+        assert_eq!(result.voice_transcripts, vec!["[Voice] [语音消息]"]);
+        assert!(result.attachment_info.contains("[video: clip.mp4]"));
+        assert!(result.attachment_info.contains("[file: doc.pdf]"));
+    }
+
+    #[test]
+    fn empty_url_attachments_are_skipped() {
+        let raw = Some(vec![
+            attachment("", "image/png", "broken.png"),
+            attachment("https://cdn/ok.png", "image/png", "ok.png"),
+        ]);
+        let result = process_attachments(&raw);
+        assert_eq!(result.image_urls, vec!["https://cdn/ok.png"]);
+        assert_eq!(result.image_urls.len(), 1);
+    }
+
+    #[test]
+    fn missing_attachments_yield_empty_result() {
+        let result = process_attachments(&None);
+        assert!(result.image_urls.is_empty());
+        assert!(result.voice_transcripts.is_empty());
+        assert!(result.attachment_info.is_empty());
+    }
+
+    #[test]
+    fn unknown_voice_variant_detected_by_content_type_keyword() {
+        // 语音判定只看 content_type（voice/silk 关键词），不看 filename
+        let raw = Some(vec![attachment(
+            "https://cdn/v.silk",
+            "application/silk",
+            "v.silk",
+        )]);
+        let result = process_attachments(&raw);
+        assert_eq!(result.voice_transcripts, vec!["[Voice] [语音消息]"]);
+        assert!(result.image_urls.is_empty());
+        // filename 带 silk 但 content_type 不含关键词 → 归为文件
+        let raw = Some(vec![attachment(
+            "https://cdn/v.silk",
+            "application/octet-stream",
+            "v.silk",
+        )]);
+        let result = process_attachments(&raw);
+        assert!(result.voice_transcripts.is_empty());
+        assert!(result.attachment_info.contains("[file: v.silk]"));
+    }
+
+    #[test]
+    fn strips_at_mention_prefix_only() {
+        assert_eq!(strip_at_mention("@bot 你好世界"), "你好世界");
+        assert_eq!(strip_at_mention("@pylon  hello"), "hello");
+        assert_eq!(strip_at_mention("hello @bot"), "hello @bot");
+        assert_eq!(strip_at_mention("  @bot x  "), "x");
+        // 无空格 @：剥离 @ + bot 标识符，保留正文
+        assert_eq!(strip_at_mention("@bot你好"), "你好");
+        assert_eq!(strip_at_mention("@bot，早上好"), "，早上好");
+    }
+}

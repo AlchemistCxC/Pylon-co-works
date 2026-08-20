@@ -1,0 +1,69 @@
+/**
+ * STRUCTURE GUARD（结构守卫）：本文件含源码 token/正则断言，不单独构成行为证据；
+ * 新业务完成度须配行为级测试（审计报告阶段 0："新业务完成度不得只靠源码 token"）。
+ */
+import { strict as assert } from 'node:assert'
+import { readFileSync } from 'node:fs'
+
+const app = readFileSync(new URL('../src/App.tsx', import.meta.url), 'utf8')
+const css = readFileSync(new URL('../src/plugins/product/packages/builtin.pylon-renderers/styles/components/ControlCenter.css', import.meta.url), 'utf8')
+const controlCenter = readFileSync(new URL('../src/components/ControlCenter.tsx', import.meta.url), 'utf8')
+const inputCss = readFileSync(new URL('../src/plugins/product/packages/builtin.pylon-renderers/styles/components/chat/InputBar.css', import.meta.url), 'utf8')
+const inputBar = readFileSync(new URL('../src/components/chat/InputBar.tsx', import.meta.url), 'utf8')
+const store = readFileSync(new URL('../src/store.ts', import.meta.url), 'utf8')
+const presets = readFileSync(new URL('../src/presets.ts', import.meta.url), 'utf8')
+const defs = readFileSync(new URL('../src/themeFieldDefs.ts', import.meta.url), 'utf8')
+const skinServices = readFileSync(new URL('../src/infrastructure/skin/skinRuntimeServices.ts', import.meta.url), 'utf8')
+
+// S5：App 不再逐字段直读 Store；ccStatusFontSize 经 THEME_SETTING_KEYS 全量进入 Skin 基线
+assert.equal(app.includes('useSkinSurface<HTMLDivElement>('), true)
+assert.equal(skinServices.includes('for (const key of THEME_SETTING_KEYS)'), true)
+// cssVar 注入由 defs 声明驱动（unit: 'px' 自动生成 --cc-status-font-size）
+assert.equal(defs.includes("ccStatusFontSize"), true)
+assert.equal(css.includes('font-size:max(14px, var(--cc-status-font-size, 14px))'), true)
+assert.equal(css.includes('min-height:var(--cc-min-height,64px)'), true)
+assert.match(defs, /ccStatusFontSize: \{[\s\S]*?default: 16/, 'ccStatusFontSize 默认值必须在 defs')
+assert.equal(store.includes('ccStatusFontSize: number'), true)
+assert.equal(inputCss.includes('padding:var(--cli-line-padding,6px) 0'), true)
+assert.equal(inputCss.includes('padding:0 8px 0 4px'), true)
+assert.equal(inputCss.includes('var(--cli-prompt-color,var(--cli-text-color,#999))'), true)
+assert.equal(inputCss.includes('var(--cli-content-offset-y,0px)'), true)
+assert.equal(inputCss.includes('box-sizing:border-box'), true)
+assert.equal(controlCenter.includes('className="cc-command-hint"'), true)
+// C3：三槽位抽为 statusSlots 片段，peri 分支引用之（结构断言改为片段存在 + 引用点）
+assert.equal(controlCenter.includes('<div className="cc-status-secondary">{renderSlot(\'status-secondary\')}</div>'), true)
+assert.equal(controlCenter.includes('<div className="cc-status-primary">{renderSlot(\'status-primary\')}</div>'), true)
+assert.equal(controlCenter.includes('<div className="cc-footer-status-row">{statusSlots}</div>'), true, 'peri 分支必须消费共享 statusSlots')
+assert.equal(controlCenter.includes("cliHintMode !== 'hidden'"), true)
+assert.equal(controlCenter.includes("cliHintMode === 'full'"), true)
+assert.equal(controlCenter.includes('<span className="cc-command-hint-key">/: 命令</span>'), true)
+assert.equal(controlCenter.includes('<span className="cc-hint-secondary"><i>|</i> Shift+Enter: 换行</span>'), true)
+assert.equal(controlCenter.includes("cliHintMode === 'full' && <span className=\"cc-hint-tertiary\"><i>|</i> Shift+Tab: 模式</span>"), true)
+assert.equal(controlCenter.includes('id={hintId}'), true)
+assert.equal(controlCenter.includes('ariaDescribedBy={inputHintId}'), true)
+assert.equal(inputBar.includes('aria-describedby={ariaDescribedBy}'), true)
+assert.equal(css.includes('.cc-command-hint .cc-hint-tertiary { display:none; }'), true)
+assert.equal(css.includes('.cc-command-hint .cc-hint-secondary { display:none; }'), true)
+assert.equal(css.includes('.cc-footer-status-row .cc-widget + .cc-widget::before'), true)
+assert.equal(css.includes('.cc-footer-status-row > :is(.cc-status-secondary,.cc-status-primary,.cc-actions):not(:empty) ~ :is(.cc-status-secondary,.cc-status-primary,.cc-actions):not(:empty)::before'), true)
+assert.equal(css.includes('.cc-status-secondary:not(:empty)::after'), false)
+assert.equal(inputBar.includes("e.key === 'Tab' && e.shiftKey && sessionSource"), true)
+assert.equal(inputBar.includes('nextSessionMode(currentMode)'), true)
+assert.equal(css.includes('height:var(--cc-height, 76px)'), true)
+assert.equal(css.includes('min-height:var(--cc-min-height,76px)'), true)
+assert.equal(css.includes('justify-content:flex-end'), true)
+assert.equal(css.includes('gap:5px'), true)
+assert.equal(css.includes('padding:4px calc(12px + var(--right-panel-inset, 0px)) 6px 12px'), true)
+assert.equal(css.includes('row-gap:0'), true)
+assert.equal(css.includes('min-height:32px'), true)
+assert.equal(css.includes('var(--right-panel-inset, 0px)'), true)
+assert.equal(controlCenter.includes('--cc-right-inset'), false)
+assert.equal(store.includes('cliPromptColor: string'), true)
+assert.equal(store.includes("cliHintMode: 'hidden' | 'compact' | 'full'"), true)
+// W2-15（F3-B）：delta 格式（双引号、每行一字段）
+assert.equal(presets.includes('ccHeight: 76'), true)
+assert.equal(presets.includes('inputFontSize: 17'), true)
+assert.equal(presets.includes('cliPromptColor: "#999999"'), true)
+assert.equal(presets.includes('cliLineColor: "#888888"'), true)
+
+console.log('controlCenterResponsive 回归测试通过')
