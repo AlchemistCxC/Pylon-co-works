@@ -98,6 +98,7 @@ export interface AgentEntry {
   available?: boolean
   crashed?: boolean
   cwd?: string
+  configActivationState?: 'stored' | 'pendingRestart' | 'activated'
 }
 
 /**

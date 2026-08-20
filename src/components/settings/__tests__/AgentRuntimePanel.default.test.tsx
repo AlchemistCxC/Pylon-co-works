@@ -242,4 +242,44 @@ describe('AgentRuntimePanel 默认 Agent', () => {
     await waitFor(() => expect(snapshotCalls).toBe(2))
     expect(screen.getByText(/配置已重新载入；未提交草稿仍保留/)).toBeInTheDocument()
   })
+
+  it('PendingRestart 显示显式重启按钮，成功后刷新为 Activated', async () => {
+    useIdentityStore.setState({
+      activeAgent: 'peri',
+      agents: [{
+        id: 'peri', name: 'Peri', transport: 'subprocess', exe: 'peri', args: ['acp'],
+        effectiveArgs: ['acp'], default: true, configActivationState: 'pendingRestart',
+      }],
+    })
+    invoke.mockImplementation((command: string) => {
+      if (command === 'restart_agent_runtime') return Promise.resolve({ agentId: 'peri', configActivationState: 'activated' })
+      if (command === 'list_agents') return Promise.resolve([{
+        id: 'peri', name: 'Peri', transport: 'subprocess', exe: 'peri', args: ['acp'],
+        effectiveArgs: ['acp'], default: true, configActivationState: 'activated',
+      }])
+      return Promise.resolve(null)
+    })
+    render(<AgentRuntimePanel />)
+
+    expect(screen.getByText(/配置：待重启生效/)).toBeInTheDocument()
+    fireEvent.click(screen.getByRole('button', { name: '立即重启应用此配置' }))
+    await waitFor(() => expect(invoke).toHaveBeenCalledWith('restart_agent_runtime', { agentId: 'peri' }))
+    expect(await screen.findByText(/配置：已生效/)).toBeInTheDocument()
+  })
+
+  it('runtime 重启失败时保留 PendingRestart', async () => {
+    useIdentityStore.setState({
+      activeAgent: 'peri',
+      agents: [{ id: 'peri', name: 'Peri', exe: 'peri', configActivationState: 'pendingRestart' }],
+    })
+    invoke.mockImplementation((command: string) => {
+      if (command === 'restart_agent_runtime') return Promise.reject({ code: 'agent_initialize_failed', message: 'bad initialize' })
+      return Promise.resolve(null)
+    })
+    render(<AgentRuntimePanel />)
+    fireEvent.click(screen.getByRole('button', { name: '立即重启应用此配置' }))
+
+    expect(await screen.findByText(/重启 Agent runtime失败/)).toBeInTheDocument()
+    expect(screen.getByText(/配置：待重启生效/)).toBeInTheDocument()
+  })
 })

@@ -254,6 +254,7 @@ pub(crate) fn connected_runtime() -> Arc<AgentRuntime> {
         status: crate::agent_runtime::AgentLifecycleStatus::Connected,
         last_error: None,
         last_connected_at: None,
+        activated_config_fingerprint: None,
     };
     runtime
 }

@@ -175,6 +175,10 @@ export async function mockInvokeCommand(cmd: string, args: Record<string, unknow
     case 'load_persisted_session':
       return buildSessionResponse(args)
     case 'send_message': return { ok: true, mock: true }
+    case 'restart_agent_runtime': return {
+      agentId: typeof args.agentId === 'string' ? args.agentId : 'peri',
+      configActivationState: 'activated',
+    }
     case 'switch_agent':
     case 'reconnect_agent':
     case 'reload_agents':

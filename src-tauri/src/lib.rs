@@ -467,17 +467,27 @@ impl AppStateHandles {
         // 方案 8：sessions 迁移委托 SessionStore（migrate_or_clear 返回旧 source 键）。
         let (mut old_acp, stale_sources) = {
             let mut acp = runtime.acp.lock().await;
+            let mut sessions = runtime.sessions.lock().map_err(|error| error.to_string())?;
+            let new_generation = runtime
+                .client_generation
+                .load(Ordering::Acquire)
+                .checked_add(1)
+                .ok_or_else(|| "agent client generation exhausted".to_string())?;
+            let stale_sources = crate::session_store::migrate_or_clear_entries(
+                &mut sessions,
+                keep_sessions,
+                new_generation,
+            );
             let old_acp = std::mem::replace(&mut *acp, new_acp);
-            let new_generation = runtime.client_generation.fetch_add(1, Ordering::AcqRel) + 1;
+            runtime
+                .client_generation
+                .store(new_generation, Ordering::Release);
             self.set_agent_runtime_status(runtime, AgentLifecycleStatus::Connected, None);
             if let Some(agent_id) = agent_id {
                 if let Ok(mut active) = self.active_agent.lock() {
                     *active = agent_id;
                 }
             }
-            let stale_sources =
-                crate::session_store::migrate_or_clear(runtime, keep_sessions, new_generation)
-                    .map_err(|error| error.to_string())?;
             // 审查修复：客户端替换（switch/重连/自动重连）后旧进程的挂起权限请求
             // 全部失效——清空，避免 300s 超时把 reject 写到新进程（且可能撞新 id）。
             if let Ok(mut pending) = runtime.pending_permissions.lock() {
@@ -664,6 +674,8 @@ pub fn run() {
                             state.status = AgentLifecycleStatus::Connected;
                             state.last_error = None;
                             state.last_connected_at = Some(crate::time::Timestamp::now());
+                            state.activated_config_fingerprint =
+                                Some(agent.runtime_fingerprint());
                         }
                     }
                     Err(error) => {
@@ -740,7 +752,7 @@ pub fn run() {
                 crate::prism_cmds::prism_delete_block, crate::prism_cmds::prism_add_scenario_block, crate::prism_cmds::prism_edit_scenario_block,
                 crate::prism_cmds::prism_delete_scenario_block, crate::prism_cmds::prism_reorder_scenario_blocks, crate::prism_cmds::prism_reload, crate::prism_cmds::prism_llm_test,
                 crate::session::new_session, crate::session::send_message, crate::session::set_mode, crate::session::set_config_option, crate::session::close_session, crate::session::cancel_prompt, crate::session::load_sessions,
-                crate::session::session_inspector, crate::lifecycle::list_agents, crate::lifecycle::switch_agent, crate::lifecycle::reconnect_agent, crate::lifecycle::agent_status, crate::lifecycle::acp_wire_trace_snapshot, crate::lifecycle::reload_agents, crate::lifecycle::get_mcp_servers, crate::lifecycle::set_mcp_servers,
+                crate::session::session_inspector, crate::lifecycle::list_agents, crate::lifecycle::switch_agent, crate::lifecycle::reconnect_agent, crate::lifecycle::restart_agent_runtime, crate::lifecycle::agent_status, crate::lifecycle::acp_wire_trace_snapshot, crate::lifecycle::reload_agents, crate::lifecycle::get_mcp_servers, crate::lifecycle::set_mcp_servers,
                 crate::lifecycle::list_tool_dictionary,
                 crate::lifecycle::set_session_state,
                 crate::lifecycle::validate_agents,

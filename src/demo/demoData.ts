@@ -17,15 +17,19 @@ const now = Date.now()
 
 // ── agents ────────────────────────────────────────────────────────────────
 
-export interface DemoAgent { id: string; name: string }
+export interface DemoAgent {
+  id: string
+  name: string
+  configActivationState: 'activated'
+}
 
 export function buildDemoAgents(): DemoAgent[] {
   return [
-    { id: 'peri', name: 'Peri' },
-    { id: 'hermes', name: 'Hermes' },
-    { id: 'claude', name: 'Claude Code' },
-    { id: 'pi', name: 'Pi' },
-    { id: 'gm', name: 'GM' },
+    { id: 'peri', name: 'Peri', configActivationState: 'activated' },
+    { id: 'hermes', name: 'Hermes', configActivationState: 'activated' },
+    { id: 'claude', name: 'Claude Code', configActivationState: 'activated' },
+    { id: 'pi', name: 'Pi', configActivationState: 'activated' },
+    { id: 'gm', name: 'GM', configActivationState: 'activated' },
   ]
 }
 

@@ -49,6 +49,135 @@ pub use crate::event_names::AGENT_CRASHED as NOTIF_AGENT_CRASHED;
 // （wire 消息不变）。参数构造器/附件校验仍返回 String（纯序列化，低价值不类型化）。
 // 边界经 From<AcpError> for PylonError 折回 protocol_error（wire code 不变）。
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize)]
+#[serde(rename_all = "lowercase")]
+pub enum AgentConnectStage {
+    Preflight,
+    Spawn,
+    Initialize,
+    Capability,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct AgentConnectFailure {
+    pub stage: AgentConnectStage,
+    pub code: String,
+    pub message: String,
+    pub exit_code: Option<i32>,
+    pub stderr_excerpt: Option<String>,
+    pub retryable: bool,
+    pub io_kind: Option<String>,
+    pub remote_code: Option<i64>,
+    pub remote_data_summary: Option<String>,
+}
+
+impl AgentConnectFailure {
+    fn new(stage: AgentConnectStage, code: &str, message: String, retryable: bool) -> Self {
+        Self {
+            stage,
+            code: code.to_string(),
+            message,
+            exit_code: None,
+            stderr_excerpt: None,
+            retryable,
+            io_kind: None,
+            remote_code: None,
+            remote_data_summary: None,
+        }
+    }
+
+    fn preflight(code: &str, message: String) -> Self {
+        Self::new(AgentConnectStage::Preflight, code, message, false)
+    }
+
+    fn spawn(executable: &str, error: std::io::Error) -> Self {
+        let retryable = matches!(
+            error.kind(),
+            std::io::ErrorKind::Interrupted
+                | std::io::ErrorKind::WouldBlock
+                | std::io::ErrorKind::TimedOut
+        );
+        let mut failure = Self::new(
+            AgentConnectStage::Spawn,
+            "agent_spawn_failed",
+            format!("spawn {executable} failed: {error}"),
+            retryable,
+        );
+        failure.io_kind = Some(format!("{:?}", error.kind()));
+        failure
+    }
+
+    fn spawn_setup(message: String) -> Self {
+        Self::new(
+            AgentConnectStage::Spawn,
+            "agent_spawn_io_failed",
+            message,
+            false,
+        )
+    }
+
+    fn initialize(error: AcpError, exit_code: Option<i32>) -> Self {
+        let retryable = matches!(
+            &error,
+            AcpError::ConnectionClosed
+                | AcpError::WriteTimeout
+                | AcpError::RpcTimeout
+                | AcpError::Child(_)
+        );
+        let mut failure = Self::new(
+            AgentConnectStage::Initialize,
+            match &error {
+                AcpError::WriteTimeout | AcpError::RpcTimeout => "agent_connection_timeout",
+                _ => "agent_initialize_failed",
+            },
+            error.to_string(),
+            retryable,
+        );
+        failure.exit_code = exit_code;
+        if let AcpError::Rpc(raw) = &error {
+            if let Ok(value) = serde_json::from_str::<serde_json::Value>(raw) {
+                failure.remote_code = value.get("code").and_then(serde_json::Value::as_i64);
+                if let Some(message) = value.get("message").and_then(serde_json::Value::as_str) {
+                    failure.message = format!(
+                        "initialize RPC error{}: {}",
+                        failure
+                            .remote_code
+                            .map(|code| format!(" {code}"))
+                            .unwrap_or_default(),
+                        message.chars().take(512).collect::<String>()
+                    );
+                }
+                failure.remote_data_summary = value.get("data").map(|data| match data {
+                    serde_json::Value::Null => "null".to_string(),
+                    serde_json::Value::Bool(_) => "boolean".to_string(),
+                    serde_json::Value::Number(_) => "number".to_string(),
+                    serde_json::Value::String(value) => {
+                        format!("string({} chars)", value.chars().count())
+                    }
+                    serde_json::Value::Array(value) => format!("array({} items)", value.len()),
+                    serde_json::Value::Object(value) => format!("object({} keys)", value.len()),
+                });
+            }
+        }
+        failure
+    }
+
+    fn capability(message: String) -> Self {
+        Self::new(
+            AgentConnectStage::Capability,
+            "agent_capability_invalid",
+            message,
+            false,
+        )
+    }
+}
+
+impl std::fmt::Display for AgentConnectFailure {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        formatter.write_str(&self.message)
+    }
+}
+
 #[derive(Debug, PartialEq, Eq, thiserror::Error)]
 pub enum AcpError {
     #[error("ACP connection closed")]
@@ -60,6 +189,8 @@ pub enum AcpError {
     RpcTimeout,
     #[error("RPC error: {0}")]
     Rpc(String),
+    #[error("{0}")]
+    Connect(AgentConnectFailure),
     /// 其余操作错误（spawn/kill/序列化/参数/传输等）——Display 为原样消息。
     #[error("{0}")]
     Child(String),
@@ -68,6 +199,12 @@ pub enum AcpError {
 impl From<String> for AcpError {
     fn from(message: String) -> Self {
         Self::Child(message)
+    }
+}
+
+impl From<AgentConnectFailure> for AcpError {
+    fn from(failure: AgentConnectFailure) -> Self {
+        Self::Connect(failure)
     }
 }
 
@@ -512,10 +649,14 @@ impl AcpClient {
                 if (agent.exe.contains('/') || agent.exe.contains('\\'))
                     && !std::path::Path::new(&agent.exe).is_file()
                 {
-                    return Err(AcpError::Child(format!(
-                        "agent {} 的 exe 路径不存在：{}（请在 设置 → Agent 中修改 agents.yaml 配置）",
-                        agent.name, agent.exe
-                    )));
+                    return Err(AgentConnectFailure::preflight(
+                        "agent_executable_missing",
+                        format!(
+                            "agent {} 的 exe 路径不存在：{}（请在 设置 → Agent 中修改 agents.yaml 配置）",
+                            agent.name, agent.exe
+                        ),
+                    )
+                    .into());
                 }
                 let mut cmd = Command::new(&agent.exe);
                 cmd.args(agent.command_args())
@@ -542,13 +683,12 @@ impl AcpClient {
                 }
                 let child = cmd
                     .spawn()
-                    .map_err(|e| AcpError::Child(format!(
-                        "spawn {} failed: {}（请检查 agents.yaml 中该 agent 的 exe 路径是否存在/在 PATH 中）",
-                        agent.exe, e
-                    )))?;
+                    .map_err(|error| AgentConnectFailure::spawn(&agent.exe, error))?;
                 let mut child = ManagedChild::new(child);
 
-                let stdin = child.take_stdin()?;
+                let stdin = child
+                    .take_stdin()
+                    .map_err(|error| AgentConnectFailure::spawn_setup(error.to_string()))?;
                 let (write_tx, write_rx) = mpsc::channel::<String>(WRITE_CHAN_CAP);
                 let crashed = Arc::new(AtomicBool::new(false));
                 let pending: Arc<[Mutex<Pending>; PENDING_SHARDS]> =
@@ -572,10 +712,16 @@ impl AcpClient {
                     DEFAULT_WRITE_TIMEOUT_SECS,
                     Some(wire_trace.clone()),
                 );
-                let stdout = BufReader::new(child.take_stdout()?);
+                let stdout = BufReader::new(
+                    child
+                        .take_stdout()
+                        .map_err(|error| AgentConnectFailure::spawn_setup(error.to_string()))?,
+                );
 
                 // Drain stderr（防管道缓冲死锁）
-                let stderr = child.take_stderr()?;
+                let stderr = child
+                    .take_stderr()
+                    .map_err(|error| AgentConnectFailure::spawn_setup(error.to_string()))?;
                 spawn_stderr_reader(
                     stderr,
                     &agent.name,
@@ -614,7 +760,7 @@ impl AcpClient {
                 // `acp.initialize_caps` 覆盖；缺省 = 统一默认 tokenStats + _meta.peri.*，
                 // Hermes 忽略无害）、protocolVersion（H3）、clientInfo（H4）。
                 // 差异适配表见 acp.rs 头部注释与手册 §3.3。
-                let initialize_response = client
+                let initialize_response = match client
                     .call_async(
                         METHOD_INITIALIZE,
                         serde_json::json!({
@@ -623,14 +769,40 @@ impl AcpClient {
                             "clientInfo": client.protocol.client_info()
                         }),
                     )
-                    .await?;
+                    .await
+                {
+                    Ok(response) => response,
+                    Err(error) => {
+                        let exit_code = client
+                            .child
+                            .try_wait()
+                            .ok()
+                            .flatten()
+                            .and_then(|status| status.code());
+                        return Err(AgentConnectFailure::initialize(error, exit_code).into());
+                    }
+                };
                 // P1（能力协商暴露）：握手响应的 agentCapabilities 存起来——前端
                 // 能力驱动 UI（loadSession/image/fork/resume/mcp）经 agent_status
                 // 读取；未声明时保持 None。
                 client.agent_capabilities = initialize_response.get("agentCapabilities").cloned();
+                if client
+                    .agent_capabilities
+                    .as_ref()
+                    .is_some_and(|capabilities| !capabilities.is_object())
+                {
+                    return Err(AgentConnectFailure::capability(
+                        "initialize agentCapabilities 必须为 object".to_string(),
+                    )
+                    .into());
+                }
                 Ok(client)
             }
-            other => Err(AcpError::Child(format!("unsupported transport: {}", other))),
+            other => Err(AgentConnectFailure::preflight(
+                "agent_transport_unsupported",
+                format!("unsupported transport: {other}"),
+            )
+            .into()),
         }
     }
 
@@ -1387,6 +1559,83 @@ for line in sys.stdin:
         assert_eq!(caps["promptCapabilities"]["image"], true);
         // 断开态无 capabilities
         assert!(AcpClient::disconnected().agent_capabilities().is_none());
+    }
+
+    #[tokio::test]
+    async fn connect_failures_have_typed_preflight_and_spawn_stages() {
+        let mut missing = crate::test_utils::fake_acp_agent("missing", "print('x')");
+        missing.exe = std::env::temp_dir()
+            .join("definitely-missing-pylon-agent")
+            .to_string_lossy()
+            .to_string();
+        let error = AcpClient::connect_with_logs(&missing, None)
+            .await
+            .err()
+            .expect("missing executable path must fail preflight");
+        let AcpError::Connect(failure) = error else {
+            panic!("expected typed connect failure")
+        };
+        assert_eq!(failure.stage, AgentConnectStage::Preflight);
+        assert_eq!(failure.code, "agent_executable_missing");
+        assert!(!failure.retryable);
+
+        let mut spawn = crate::test_utils::fake_acp_agent("spawn", "print('x')");
+        spawn.exe = format!("pylon-command-that-does-not-exist-{}", std::process::id());
+        let error = AcpClient::connect_with_logs(&spawn, None)
+            .await
+            .err()
+            .expect("unknown PATH command must fail spawn");
+        let AcpError::Connect(failure) = error else {
+            panic!("expected typed spawn failure")
+        };
+        assert_eq!(failure.stage, AgentConnectStage::Spawn);
+        assert_eq!(failure.code, "agent_spawn_failed");
+        assert!(failure.io_kind.is_some());
+    }
+
+    #[tokio::test]
+    async fn initialize_rpc_failure_keeps_safe_remote_summary() {
+        let script = r#"import json,sys
+for line in sys.stdin:
+    request=json.loads(line)
+    print(json.dumps({'jsonrpc':'2.0','id':request.get('id'),'error':{'code':-32041,'message':'profile invalid','data':{'token':'must-not-leak','attempt':1}}}), flush=True)
+"#;
+        let agent = crate::test_utils::fake_acp_agent("typed-init-error", script);
+        let error = AcpClient::connect_with_logs(&agent, None)
+            .await
+            .err()
+            .expect("initialize RPC error must fail connect");
+        let AcpError::Connect(failure) = error else {
+            panic!("expected typed initialize failure")
+        };
+        assert_eq!(failure.stage, AgentConnectStage::Initialize);
+        assert_eq!(failure.code, "agent_initialize_failed");
+        assert_eq!(failure.remote_code, Some(-32041));
+        assert_eq!(
+            failure.remote_data_summary.as_deref(),
+            Some("object(2 keys)")
+        );
+        assert!(!failure.message.contains("must-not-leak"));
+    }
+
+    #[tokio::test]
+    async fn malformed_capabilities_have_capability_stage() {
+        let script = r#"import json,sys
+for line in sys.stdin:
+    request=json.loads(line)
+    print(json.dumps({'jsonrpc':'2.0','id':request.get('id'),'result':{'agentCapabilities':[]}}), flush=True)
+"#;
+        let agent = crate::test_utils::fake_acp_agent("typed-capability-error", script);
+        let error = AcpClient::connect_with_logs(&agent, None)
+            .await
+            .err()
+            .expect("non-object capabilities must fail connect");
+        let AcpError::Connect(failure) = error else {
+            panic!("expected typed capability failure")
+        };
+        assert_eq!(failure.stage, AgentConnectStage::Capability);
+        assert_eq!(failure.code, "agent_capability_invalid");
+        assert!(!failure.retryable);
     }
 
     #[tokio::test]

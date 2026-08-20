@@ -175,6 +175,7 @@ fn inspector_aggregates_session_stats() {
         status: AgentLifecycleStatus::Connected,
         last_error: None,
         last_connected_at: Some(Timestamp::new(1)),
+        activated_config_fingerprint: None,
     };
     let entries = vec![("agent-x".to_string(), sessions, runtime)];
     let payload = build_full_inspector_payload(&entries, "agent-x");
@@ -227,11 +228,13 @@ fn inspector_full_aggregates_across_runtimes() {
         status: AgentLifecycleStatus::Connected,
         last_error: None,
         last_connected_at: Some(Timestamp::new(1)),
+        activated_config_fingerprint: None,
     };
     let state_b = AgentRuntimeState {
         status: AgentLifecycleStatus::Crashed,
         last_error: Some("boom".into()),
         last_connected_at: None,
+        activated_config_fingerprint: None,
     };
     let entries = vec![
         ("peri".to_string(), sessions_a, state_a),

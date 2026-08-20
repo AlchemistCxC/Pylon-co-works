@@ -23,8 +23,8 @@ describe('agentClient', () => {
     const client = createAgentClient({ invoke: (cmd, args) => invoke.invoke(cmd, args) })
     const agents = await client.listAgents()
     expect(agents).toEqual([
-      { id: 'peri', name: 'Peri', provider: 'peri', exe: 'F:/peri.exe', default: true, transport: 'subprocess', active: undefined, available: undefined, crashed: undefined, cwd: undefined },
-      { id: 'profile-b', name: 'profile-b', provider: undefined, exe: undefined, default: undefined, transport: undefined, active: undefined, available: undefined, crashed: undefined, cwd: undefined },
+      { id: 'peri', name: 'Peri', provider: 'peri', exe: 'F:/peri.exe', default: true, transport: 'subprocess', active: undefined, available: undefined, crashed: undefined, cwd: undefined, configActivationState: undefined },
+      { id: 'profile-b', name: 'profile-b', provider: undefined, exe: undefined, default: undefined, transport: undefined, active: undefined, available: undefined, crashed: undefined, cwd: undefined, configActivationState: undefined },
     ])
   })
 
@@ -35,6 +35,7 @@ describe('agentClient', () => {
     invoke.register('update_agents_config', () => ({ revision: `rev-${++nextRevision}` }))
     invoke.register('initialize_agents_config', () => ({ revision: `rev-${++nextRevision}` }))
     invoke.register('test_agent_connection', () => ({ ok: true, agentId: 'peri', durationMs: 1, error: null }))
+    invoke.register('restart_agent_runtime', () => ({ configActivationState: 'activated' }))
     const client = createAgentClient({ invoke: (cmd, args) => invoke.invoke(cmd, args) })
     await client.updateAgentFieldPatch('peri', { exe: 'F:/peri.exe' })
     const newAgent = {
@@ -50,6 +51,7 @@ describe('agentClient', () => {
     await client.initializeAgentsConfig('new', document)
     await client.initializeAgentFieldPatch('hermes', { default: true })
     await client.testAgentConnection('peri')
+    await client.restartAgentRuntime('peri')
     expect(invoke.calls).toEqual([
       { cmd: 'agent_config_snapshot', args: {} },
       { cmd: 'update_agents_config', args: { scope: 'agent_fields', agentId: 'peri', config: { exe: 'F:/peri.exe' }, expectedRevision: 'rev-1' } },
@@ -57,6 +59,7 @@ describe('agentClient', () => {
       { cmd: 'initialize_agents_config', args: { agentId: 'new', config: document } },
       { cmd: 'initialize_agents_config', args: { agentId: 'hermes', config: { default: true } } },
       { cmd: 'test_agent_connection', args: { agentId: 'peri' } },
+      { cmd: 'restart_agent_runtime', args: { agentId: 'peri' } },
     ])
   })
 

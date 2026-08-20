@@ -139,11 +139,26 @@ pub(crate) fn migrate_or_clear(
     keep_sessions: bool,
     new_generation: u64,
 ) -> Result<Vec<String>, SessionStoreError> {
-    let mut stale_sources: Vec<String> = Vec::new();
     let mut sessions = runtime
         .sessions
         .lock()
         .map_err(|e| SessionStoreError::LockPoisoned(e.to_string()))?;
+    Ok(migrate_or_clear_entries(
+        &mut sessions,
+        keep_sessions,
+        new_generation,
+    ))
+}
+
+/// Same mutation as [`migrate_or_clear`], for callers that must acquire the session lock before
+/// another state transition. Keeping the infallible mutation separate lets client activation
+/// validate every fallible lock acquisition before swapping the live process.
+pub(crate) fn migrate_or_clear_entries(
+    sessions: &mut std::collections::HashMap<String, SessionInfo>,
+    keep_sessions: bool,
+    new_generation: u64,
+) -> Vec<String> {
+    let mut stale_sources: Vec<String> = Vec::new();
     if !keep_sessions {
         stale_sources = sessions.keys().cloned().collect();
         sessions.clear();
@@ -152,7 +167,7 @@ pub(crate) fn migrate_or_clear(
             session.generation = new_generation;
         }
     }
-    Ok(stale_sources)
+    stale_sources
 }
 
 pub(crate) fn snapshot(

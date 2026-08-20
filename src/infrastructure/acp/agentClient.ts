@@ -63,6 +63,11 @@ export function normalizeAgentList(raw: unknown): AgentEntry[] {
       available: typeof record.available === 'boolean' ? record.available : undefined,
       crashed: typeof record.crashed === 'boolean' ? record.crashed : undefined,
       cwd: typeof record.cwd === 'string' ? record.cwd : undefined,
+      configActivationState: record.configActivationState === 'stored'
+        || record.configActivationState === 'pendingRestart'
+        || record.configActivationState === 'activated'
+        ? record.configActivationState
+        : undefined,
     })
   }
   return agents
@@ -127,6 +132,7 @@ export function createAgentClient(transport: ClientTransport) {
     agentStatus: (): Promise<AgentStatusPayload> => transport.invoke('agent_status') as Promise<AgentStatusPayload>,
     switchAgent: (name: string): Promise<unknown> => transport.invoke('switch_agent', { name }),
     reconnectAgent: (): Promise<unknown> => transport.invoke('reconnect_agent'),
+    restartAgentRuntime: (agentId: string): Promise<unknown> => transport.invoke('restart_agent_runtime', { agentId }),
     reloadAgents: (): Promise<unknown> => transport.invoke('reload_agents'),
     /** agent 级暴露的 MCP server 配置（cwd 设置据此选择启用哪些）。 */
     getMcpServers: (): Promise<unknown[]> => transport.invoke('get_mcp_servers') as Promise<unknown[]>,

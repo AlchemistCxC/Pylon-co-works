@@ -123,6 +123,9 @@ pub struct AgentRuntimeState {
     pub last_error: Option<String>,
     /// R4：Timestamp（wire 序列化为字符串，契约不变）。
     pub last_connected_at: Option<Timestamp>,
+    /// Fingerprint of the exact AgentDef used to create the currently activated client.
+    /// `None` means no live definition has ever been activated for this runtime.
+    pub activated_config_fingerprint: Option<String>,
 }
 
 pub fn session_mapping_matches(
@@ -176,6 +179,7 @@ impl Default for AgentRuntimeState {
             status: AgentLifecycleStatus::Disconnected,
             last_error: None,
             last_connected_at: None,
+            activated_config_fingerprint: None,
         }
     }
 }
@@ -244,6 +248,7 @@ mod tests {
         assert_eq!(state.status, AgentLifecycleStatus::Disconnected);
         assert_eq!(state.last_error, None);
         assert_eq!(state.last_connected_at, None);
+        assert_eq!(state.activated_config_fingerprint, None);
     }
 
     #[test]

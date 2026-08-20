@@ -110,6 +110,10 @@ function candidateProtocolLabel(validation: AgentCandidateValidationState | unde
   return '未验证'
 }
 
+function activationLabel(state: AgentEntry['configActivationState']): string {
+  return state === 'activated' ? '已生效' : state === 'pendingRestart' ? '待重启生效' : '已存储'
+}
+
 /** 按 provider 给 exe/命令路径填写引导（任务：说明 hermes/peri 分别填什么路径）。 */
 function pathHintForProvider(provider: string | null | undefined): string {
   switch ((provider ?? '').trim().toLowerCase()) {
@@ -354,6 +358,21 @@ export default function AgentRuntimePanel() {
     }
   }
 
+  const restartRuntime = async (agentId: string) => {
+    if (savingId) return
+    setSavingId(agentId)
+    setFeedback(null)
+    try {
+      await agentClient.restartAgentRuntime(agentId)
+      await refreshAgents()
+      notify(`已重启 ${agentId} 并应用配置`)
+    } catch (error) {
+      reportConfigMutationError('重启 Agent runtime', error, agentId)
+    } finally {
+      setSavingId(null)
+    }
+  }
+
   const createAgent = async () => {
     const id = createDraft.id.trim()
     if (!id || !createDraft.name.trim() || !createDraft.exe.trim()) {
@@ -420,7 +439,7 @@ export default function AgentRuntimePanel() {
               <span>{agent.id === activeAgent ? '当前' : ''}{agent.default ? ' · 默认' : ''}</span>
             </div>
             <div className="set-hint">id：{agent.id} · provider：{agent.provider ?? '—'} · transport：{agent.transport ?? 'subprocess'}</div>
-            <div className="set-hint">状态：{statusLabel(status.status)} · exe：{isEditing ? '' : (agent.exe ?? '—')}</div>
+            <div className="set-hint">状态：{statusLabel(status.status)} · 配置：{activationLabel(agent.configActivationState)} · exe：{isEditing ? '' : (agent.exe ?? '—')}</div>
 
             {isEditing && (
               <div className="agent-runtime-edit">
@@ -449,6 +468,11 @@ export default function AgentRuntimePanel() {
               )}
               <button className="ps-btn sm" type="button" disabled={savingId !== null || agent.default === true} onClick={() => setDefault(agent.id)}>设为默认</button>
               <button className="ps-btn sm" type="button" disabled={testingId !== null} onClick={() => testConnection(agent.id)}>{testingId === agent.id ? '测试中…' : '测试连接'}</button>
+              {agent.configActivationState === 'pendingRestart' && (
+                <button className="ps-btn sm primary" type="button" disabled={savingId !== null} onClick={() => void restartRuntime(agent.id)}>
+                  {savingId === agent.id ? '正在重启…' : '立即重启应用此配置'}
+                </button>
+              )}
             </div>
           </div>
         )

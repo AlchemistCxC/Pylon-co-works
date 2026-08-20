@@ -32,7 +32,7 @@
 use std::collections::HashMap;
 use std::sync::Arc;
 
-use crate::acp::AcpClient;
+use crate::acp::{AcpClient, AcpError, AgentConnectFailure, AgentConnectStage};
 use crate::agent_config::{AgentDef, ToolDictEntry};
 use crate::agent_runtime::{
     client_activation_for_action, status_after_connection_failure, AgentLifecycleStatus,
@@ -41,6 +41,41 @@ use crate::error::PylonError;
 use crate::runtime::AgentRuntime;
 use crate::AppState;
 use crate::AppStateHandles;
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+pub(crate) enum AgentConfigActivationState {
+    Stored,
+    PendingRestart,
+    Activated,
+}
+
+fn config_activation_state(
+    agent: &AgentDef,
+    active: bool,
+    status: Option<AgentLifecycleStatus>,
+    activated_fingerprint: Option<&str>,
+) -> AgentConfigActivationState {
+    let live = active
+        && matches!(
+            status,
+            Some(
+                AgentLifecycleStatus::Connected
+                    | AgentLifecycleStatus::Connecting
+                    | AgentLifecycleStatus::Reconnecting
+            )
+        );
+    if !live {
+        return AgentConfigActivationState::Stored;
+    }
+    match activated_fingerprint {
+        Some(fingerprint) if fingerprint == agent.runtime_fingerprint() => {
+            AgentConfigActivationState::Activated
+        }
+        Some(_) => AgentConfigActivationState::PendingRestart,
+        None => AgentConfigActivationState::Stored,
+    }
+}
 
 /// 连接 + 原子替换客户端（手动/自动重连/平台懒启动共用）。
 // clippy 2026-08-02：9 参为连接全参数（handles/runtime/window/agent/agent_id/start_status/
@@ -131,11 +166,14 @@ pub(crate) async fn do_connect_and_replace<R: tauri::Runtime>(
             handles.emit_agent_status(
                 runtime,
                 window,
-                AgentLifecycleStatus::Disconnected,
+                status_after_connection_failure(previous_status),
                 Some(error.clone()),
             );
         }
         return Err(error);
+    }
+    if let Ok(mut state) = runtime.agent_runtime.lock() {
+        state.activated_config_fingerprint = Some(agent.runtime_fingerprint());
     }
     if announce {
         handles.emit_agent_status(runtime, window, AgentLifecycleStatus::Connected, None);
@@ -161,12 +199,33 @@ pub(crate) fn agent_summary_payload(
     active_status: Option<AgentLifecycleStatus>,
     crashed: bool,
 ) -> serde_json::Value {
+    agent_summary_payload_with_activation(id, agent, active_id, active_status, crashed, None)
+}
+
+fn agent_summary_payload_with_activation(
+    id: &str,
+    agent: &AgentDef,
+    active_id: Option<&str>,
+    active_status: Option<AgentLifecycleStatus>,
+    crashed: bool,
+    activated_fingerprint: Option<&str>,
+) -> serde_json::Value {
     // 方案 3（漂移修复）：统一状态推导与 agent_status_payload 一致——
     // process_crashed 时有效状态为 crashed，available 只看有效状态是否 Connected。
     // 修复前 crashed=true, available=true 的矛盾（前端状态灯误判可用）。
     let effective_connected = !crashed && active_status == Some(AgentLifecycleStatus::Connected);
     let available = active_id.is_some_and(|aid| id == aid) && effective_connected;
     let active = active_id.is_some_and(|aid| id == aid);
+    let activation = config_activation_state(
+        agent,
+        active,
+        if crashed {
+            Some(AgentLifecycleStatus::Crashed)
+        } else {
+            active_status
+        },
+        activated_fingerprint,
+    );
     serde_json::json!({
         // list_agents 的 id 是 registry key，name 仅用于展示。
         "id": id,
@@ -183,7 +242,25 @@ pub(crate) fn agent_summary_payload(
         "available": available,
         "active": active,
         "cwd": agent.cwd.clone(),
+        "configActivationState": activation,
     })
+}
+
+fn stored_agent_activation(state: &AppState, agent_id: &str) -> Option<AgentConfigActivationState> {
+    let agent = state.agents.lock().ok()?.get(agent_id)?.clone();
+    let active = state.active_agent.lock().ok()?.as_str() == agent_id;
+    let runtime = state.runtimes.get(agent_id);
+    let runtime_state = runtime
+        .as_ref()
+        .and_then(|runtime| runtime.agent_runtime.lock().ok().map(|state| state.clone()));
+    Some(config_activation_state(
+        &agent,
+        active,
+        runtime_state.as_ref().map(|state| state.status),
+        runtime_state
+            .as_ref()
+            .and_then(|state| state.activated_config_fingerprint.as_deref()),
+    ))
 }
 
 #[tauri::command]
@@ -207,14 +284,29 @@ pub(crate) async fn list_agents(
         .map(|(id, a)| {
             // O11：crashed 感知——per-agent runtime 的 acp 是否已死
             // （try_lock：读路径不等待 acp 锁；锁被占用时视为未崩溃）。
-            let crashed = state.runtimes.get(id).is_some_and(|runtime| {
+            let runtime = state.runtimes.get(id);
+            let crashed = runtime.as_ref().is_some_and(|runtime| {
                 runtime
                     .acp
                     .try_lock()
                     .map(|acp| acp.is_crashed())
                     .unwrap_or(false)
             });
-            agent_summary_payload(id, a, Some(&active_id), Some(active_status), crashed)
+            let activated_fingerprint = runtime.as_ref().and_then(|runtime| {
+                runtime
+                    .agent_runtime
+                    .lock()
+                    .ok()
+                    .and_then(|state| state.activated_config_fingerprint.clone())
+            });
+            agent_summary_payload_with_activation(
+                id,
+                a,
+                Some(&active_id),
+                Some(active_status),
+                crashed,
+                activated_fingerprint.as_deref(),
+            )
         })
         .collect())
 }
@@ -387,6 +479,54 @@ pub(crate) async fn reconnect_agent(
         )
         .await
         .map_err(PylonError::from)
+}
+
+#[tauri::command]
+pub(crate) async fn restart_agent_runtime<R: tauri::Runtime>(
+    state: tauri::State<'_, AppState>,
+    window: tauri::WebviewWindow<R>,
+    agent_id: String,
+) -> Result<serde_json::Value, PylonError> {
+    let inner = state.inner();
+    let _switch_guard = inner.switch_lock.lock().await;
+    let active_id = inner
+        .active_agent
+        .lock()
+        .map_err(|error| error.to_string())?
+        .clone();
+    if active_id != agent_id {
+        return Err(PylonError::Protocol(format!(
+            "agent runtime restart requires active agent: requested {agent_id}, active {active_id}"
+        )));
+    }
+    let runtime = inner.runtimes.get_or_create(&agent_id);
+    let _lifecycle_guard = runtime.agent_lifecycle.lock().await;
+    let agent = inner
+        .agents
+        .lock()
+        .map_err(|error| error.to_string())?
+        .get(&agent_id)
+        .cloned()
+        .ok_or_else(|| PylonError::Protocol(format!("unknown agent: {agent_id}")))?;
+    let handles = AppStateHandles::from_state(inner);
+    do_connect_and_replace(
+        &handles,
+        &runtime,
+        &window,
+        &agent,
+        None,
+        AgentLifecycleStatus::Reconnecting,
+        "config-restart",
+        false,
+        true,
+    )
+    .await
+    .map_err(PylonError::from)?;
+    Ok(serde_json::json!({
+        "agentId": agent_id,
+        "generation": runtime.client_generation.load(std::sync::atomic::Ordering::Acquire),
+        "configActivationState": stored_agent_activation(inner, &active_id),
+    }))
 }
 
 #[tauri::command]
@@ -688,11 +828,15 @@ pub(crate) async fn update_agents_config(
     // 9. 返回摘要（不返回完整敏感配置）
     let agent_count = inner.agents.lock().map(|a| a.len()).unwrap_or(0);
     let revision = crate::agent_config::config_revision_for_path(&path)?;
+    let config_activation_state = agent_id
+        .as_deref()
+        .and_then(|agent_id| stored_agent_activation(inner, agent_id));
     Ok(serde_json::json!({
         "applied": true,
         "scope": scope,
         "agentCount": agent_count,
         "revision": revision,
+        "configActivationState": config_activation_state,
     }))
 }
 
@@ -834,45 +978,51 @@ pub(crate) async fn initialize_agents_config(
     }))
 }
 
-/// 连接测试错误码映射（施工文档 §5.2）：不在 ACP 内部大改错误体系，
-/// 在 lifecycle 出口按已知错误文案/上下文映射稳定 code。
 const AGENT_VALIDATION_TIMEOUT_SECS: u64 = 15;
 
-fn connection_test_stage(error: &str) -> &'static str {
-    if error.contains("exe 路径不存在") {
-        "preflight"
-    } else if error.contains("ACP") || error.contains("RPC") {
-        "initialize"
-    } else {
-        "spawn"
-    }
-}
-
 fn connection_test_error_payload_with_diagnostics(
-    error: &str,
+    error: &AcpError,
     stderr: Option<&str>,
     exit_code: Option<i32>,
 ) -> serde_json::Value {
-    let (code, action) = if error.contains("exe 路径不存在") {
-        ("agent_executable_missing", "select_executable")
-    } else if error.contains("ACP write timeout") || error.contains("RPC timeout") {
-        ("agent_connection_timeout", "open-runtime-log")
-    } else if error.contains("ACP connection closed") {
-        ("agent_initialize_failed", "open-runtime-log")
+    let fallback;
+    let failure = match error {
+        AcpError::Connect(failure) => failure,
+        _ => {
+            fallback = AgentConnectFailure {
+                stage: AgentConnectStage::Initialize,
+                code: "agent_initialize_failed".to_string(),
+                message: error.to_string(),
+                exit_code: None,
+                stderr_excerpt: None,
+                retryable: true,
+                io_kind: None,
+                remote_code: None,
+                remote_data_summary: None,
+            };
+            &fallback
+        }
+    };
+    let action = if failure.code == "agent_executable_missing" {
+        "select_executable"
     } else {
-        ("agent_spawn_failed", "open-runtime-log")
+        "open-runtime-log"
     };
     serde_json::json!({
-        "code": code,
-        "message": error,
+        "code": failure.code,
+        "message": failure.message,
         "action": action,
-        "stage": connection_test_stage(error),
-        "exitCode": exit_code,
-        "stderr": stderr,
+        "stage": failure.stage,
+        "exitCode": exit_code.or(failure.exit_code),
+        "stderr": stderr.or(failure.stderr_excerpt.as_deref()),
+        "retryable": failure.retryable,
+        "ioKind": failure.io_kind,
+        "remoteCode": failure.remote_code,
+        "remoteDataSummary": failure.remote_data_summary,
     })
 }
 
-fn connection_test_error_payload(error: &str) -> serde_json::Value {
+fn connection_test_error_payload(error: &AcpError) -> serde_json::Value {
     connection_test_error_payload_with_diagnostics(error, None, None)
 }
 
@@ -946,7 +1096,7 @@ pub(crate) async fn test_agent_connection(
             "ok": false,
             "agentId": agent_id,
             "durationMs": duration_ms,
-            "error": connection_test_error_payload(&error.to_string()),
+            "error": connection_test_error_payload(&error),
         })),
         Err(_elapsed) => Ok(serde_json::json!({
             "ok": false,
@@ -959,6 +1109,10 @@ pub(crate) async fn test_agent_connection(
                 "stage": "timeout",
                 "exitCode": null,
                 "stderr": null,
+                "retryable": true,
+                "ioKind": null,
+                "remoteCode": null,
+                "remoteDataSummary": null,
             },
         })),
     }
@@ -997,13 +1151,13 @@ pub(crate) async fn test_agent_candidate(
                 "ok": false,
                 "agentId": agent_id,
                 "durationMs": duration_ms,
-                "error": connection_test_error_payload_with_diagnostics(&error.to_string(), stderr.as_deref(), None),
+                "error": connection_test_error_payload_with_diagnostics(&error, stderr.as_deref(), None),
             }))
         }
         Err(_) => {
             let duration_ms = started.elapsed().as_millis() as u64;
             Ok(
-                serde_json::json!({ "ok": false, "agentId": agent_id, "durationMs": duration_ms, "error": { "code": "agent_connection_timeout", "message": format!("连接测试超时（{timeout_secs}s）"), "action": "open-runtime-log", "stage": "timeout", "exitCode": null, "stderr": candidate_stderr(&diagnostic_logs) } }),
+                serde_json::json!({ "ok": false, "agentId": agent_id, "durationMs": duration_ms, "error": { "code": "agent_connection_timeout", "message": format!("连接测试超时（{timeout_secs}s）"), "action": "open-runtime-log", "stage": "timeout", "exitCode": null, "stderr": candidate_stderr(&diagnostic_logs), "retryable": true, "ioKind": null, "remoteCode": null, "remoteDataSummary": null } }),
             )
         }
     }
@@ -1161,6 +1315,55 @@ mod tests {
         assert!(payload.get("env").is_none(), "summary 不得暴露环境变量");
     }
 
+    #[test]
+    fn config_activation_state_distinguishes_display_and_runtime_changes() {
+        let stored = agent();
+        let activated = stored.runtime_fingerprint();
+        assert_eq!(
+            config_activation_state(
+                &stored,
+                true,
+                Some(AgentLifecycleStatus::Connected),
+                Some(&activated),
+            ),
+            AgentConfigActivationState::Activated
+        );
+
+        let mut display_only = stored.clone();
+        display_only.name = "renamed".into();
+        display_only.default = !display_only.default;
+        assert_eq!(
+            config_activation_state(
+                &display_only,
+                true,
+                Some(AgentLifecycleStatus::Connected),
+                Some(&activated),
+            ),
+            AgentConfigActivationState::Activated
+        );
+
+        let mut changed = stored.clone();
+        changed.args.push("--new-runtime-option".into());
+        assert_eq!(
+            config_activation_state(
+                &changed,
+                true,
+                Some(AgentLifecycleStatus::Connected),
+                Some(&activated),
+            ),
+            AgentConfigActivationState::PendingRestart
+        );
+        assert_eq!(
+            config_activation_state(
+                &changed,
+                false,
+                Some(AgentLifecycleStatus::Connected),
+                Some(&activated),
+            ),
+            AgentConfigActivationState::Stored
+        );
+    }
+
     /// P0-1：parse 推断出的 provider 必须进入 list_agents 摘要（旧配置无 provider 也能正确分类）。
     #[test]
     fn summary_reports_resolved_provider_from_parse() {
@@ -1301,6 +1504,148 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn restart_runtime_success_activates_stored_fingerprint_and_advances_generation() {
+        let script = r#"import json,sys
+for line in sys.stdin:
+    request=json.loads(line)
+    print(json.dumps({'jsonrpc':'2.0','id':request.get('id'),'result':{}}), flush=True)
+"#;
+        let agent = crate::test_utils::fake_acp_agent("peri", script);
+        let expected_fingerprint = agent.runtime_fingerprint();
+        let runtime = crate::test_utils::connected_runtime();
+        runtime
+            .client_generation
+            .store(4, std::sync::atomic::Ordering::Release);
+        runtime
+            .agent_runtime
+            .lock()
+            .unwrap()
+            .activated_config_fingerprint = Some("old-definition".into());
+        let state = crate::test_utils::TestStateBuilder::bare()
+            .with_active_agent("peri")
+            .with_agent(agent.clone())
+            .with_runtime("peri", runtime.clone())
+            .build();
+        let app = tauri::test::mock_builder()
+            .build(tauri::test::mock_context(tauri::test::noop_assets()))
+            .expect("mock app must build");
+        app.manage(state);
+
+        let payload =
+            restart_agent_runtime(app.state::<AppState>(), mock_window().await, "peri".into())
+                .await
+                .expect("restart succeeds");
+        assert_eq!(payload["generation"], 5);
+        assert_eq!(payload["configActivationState"], "activated");
+        assert_eq!(
+            runtime
+                .agent_runtime
+                .lock()
+                .unwrap()
+                .activated_config_fingerprint
+                .as_deref(),
+            Some(expected_fingerprint.as_str())
+        );
+    }
+
+    #[tokio::test]
+    async fn restart_runtime_failure_keeps_old_generation_and_pending_fingerprint() {
+        let mut agent = crate::test_utils::fake_acp_agent("peri", "print('unused')");
+        agent.exe = std::env::temp_dir()
+            .join("missing-pylon-restart-agent")
+            .to_string_lossy()
+            .to_string();
+        let runtime = crate::test_utils::connected_runtime();
+        runtime
+            .client_generation
+            .store(7, std::sync::atomic::Ordering::Release);
+        runtime
+            .agent_runtime
+            .lock()
+            .unwrap()
+            .activated_config_fingerprint = Some("old-definition".into());
+        let state = crate::test_utils::TestStateBuilder::bare()
+            .with_active_agent("peri")
+            .with_agent(agent)
+            .with_runtime("peri", runtime.clone())
+            .build();
+        let app = tauri::test::mock_builder()
+            .build(tauri::test::mock_context(tauri::test::noop_assets()))
+            .expect("mock app must build");
+        app.manage(state);
+
+        let error =
+            restart_agent_runtime(app.state::<AppState>(), mock_window().await, "peri".into())
+                .await
+                .expect_err("restart must fail");
+        assert_eq!(error.code(), "protocol_error");
+        assert_eq!(
+            runtime
+                .client_generation
+                .load(std::sync::atomic::Ordering::Acquire),
+            7
+        );
+        let state = runtime.agent_runtime.lock().unwrap();
+        assert_eq!(state.status, AgentLifecycleStatus::Connected);
+        assert_eq!(
+            state.activated_config_fingerprint.as_deref(),
+            Some("old-definition")
+        );
+    }
+
+    #[tokio::test]
+    async fn restart_runtime_session_migration_failure_is_atomic() {
+        let script = r#"import json,sys
+for line in sys.stdin:
+    request=json.loads(line)
+    print(json.dumps({'jsonrpc':'2.0','id':request.get('id'),'result':{}}), flush=True)
+"#;
+        let agent = crate::test_utils::fake_acp_agent("peri", script);
+        let runtime = crate::test_utils::connected_runtime();
+        runtime
+            .client_generation
+            .store(7, std::sync::atomic::Ordering::Release);
+        runtime
+            .agent_runtime
+            .lock()
+            .unwrap()
+            .activated_config_fingerprint = Some("old-definition".into());
+        let sessions = runtime.sessions.clone();
+        let _ = std::thread::spawn(move || {
+            let _guard = sessions.lock().expect("sessions lock starts healthy");
+            panic!("poison sessions lock");
+        })
+        .join();
+        let state = crate::test_utils::TestStateBuilder::bare()
+            .with_active_agent("peri")
+            .with_agent(agent)
+            .with_runtime("peri", runtime.clone())
+            .build();
+        let app = tauri::test::mock_builder()
+            .build(tauri::test::mock_context(tauri::test::noop_assets()))
+            .expect("mock app must build");
+        app.manage(state);
+
+        restart_agent_runtime(app.state::<AppState>(), mock_window().await, "peri".into())
+            .await
+            .expect_err("poisoned session migration must fail");
+
+        assert_eq!(
+            runtime
+                .client_generation
+                .load(std::sync::atomic::Ordering::Acquire),
+            7,
+            "failed migration must not activate the candidate client"
+        );
+        let state = runtime.agent_runtime.lock().unwrap();
+        assert_eq!(state.status, AgentLifecycleStatus::Connected);
+        assert_eq!(
+            state.activated_config_fingerprint.as_deref(),
+            Some("old-definition")
+        );
+    }
+
+    #[tokio::test]
     async fn switch_to_non_active_agent_already_connected_skips_reconnect() {
         let runtime_a = crate::test_utils::connected_runtime();
         let runtime_b = crate::test_utils::connected_runtime();
@@ -1366,18 +1711,44 @@ mod tests {
 
     #[test]
     fn connection_test_error_payload_maps_executable_missing() {
-        let payload = connection_test_error_payload(
-            "agent peri 的 exe 路径不存在：F:/x.exe（请在 设置 → Agent 中修改 agents.yaml 配置）",
-        );
+        let failure = |stage, code: &str, message: &str, retryable| {
+            AcpError::Connect(AgentConnectFailure {
+                stage,
+                code: code.into(),
+                message: message.into(),
+                exit_code: None,
+                stderr_excerpt: None,
+                retryable,
+                io_kind: None,
+                remote_code: None,
+                remote_data_summary: None,
+            })
+        };
+        let payload = connection_test_error_payload(&failure(
+            AgentConnectStage::Preflight,
+            "agent_executable_missing",
+            "missing",
+            false,
+        ));
         assert_eq!(payload["code"], "agent_executable_missing");
         assert_eq!(payload["action"], "select_executable");
         assert_eq!(payload["stage"], "preflight");
         assert!(payload["exitCode"].is_null());
         assert!(payload["stderr"].is_null());
-        let timeout = connection_test_error_payload("RPC timeout after 30s");
+        let timeout = connection_test_error_payload(&failure(
+            AgentConnectStage::Initialize,
+            "agent_connection_timeout",
+            "timeout",
+            true,
+        ));
         assert_eq!(timeout["code"], "agent_connection_timeout");
         assert_eq!(timeout["stage"], "initialize");
-        let spawn = connection_test_error_payload("CreateProcess failed: 2");
+        let spawn = connection_test_error_payload(&failure(
+            AgentConnectStage::Spawn,
+            "agent_spawn_failed",
+            "spawn",
+            false,
+        ));
         assert_eq!(spawn["code"], "agent_spawn_failed");
         assert_eq!(AGENT_VALIDATION_TIMEOUT_SECS, 15);
     }

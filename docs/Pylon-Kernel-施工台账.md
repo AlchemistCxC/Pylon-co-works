@@ -1,6 +1,6 @@
 # Pylon Kernel 加固施工台账
 
-> 最新完成（2026-08-20）：`WI-A3 / AGT-010、AGT-012`——Agent 配置写入已强制 exact-byte revision CAS，以跨进程 OS lease 覆盖读取/校验/提交窗口，使用同步临时文件、上一版本备份与平台替换原语；补齐 hard max、snapshot warnings、握手 JSON 体积上限和 UI 冲突保稿/重载。Rust 57 项定向测试、TS 43 项定向测试、类型检查和 lint 通过；下一项 `WI-A4`。
+> 最新完成（2026-08-20）：`WI-A4 / AGT-009、AGT-011`——Agent 配置现在区分 Stored/PendingRestart/Activated，以稳定 runtime fingerprint 对比已存储与已激活定义；显式 runtime 重启采用失败不替换旧客户端的原子切换，连接诊断按 preflight/spawn/initialize/capability 类型化并只暴露远端安全摘要，设置 UI 可明确应用待重启配置。Rust 9 项定向回归、TS 28 项定向回归、Rust check/format、全项目 TS build 与目标 lint 通过。下一项 `WI-A5`。
 >
 > 长程目标：在保留现有五个第一方 Product Plugin 构造的前提下，持续加固 Pylon Kernel 的持久化、重放、生命周期、Agent Runtime、插件故障隔离和结构化错误。  
 > 基线提交：`a38145b chore: establish kernel hardening baseline`  

@@ -579,6 +579,123 @@ fn validate_acp_section(id: &str, acp: &AcpProtocolConfig) -> Result<(), ConfigE
 }
 
 impl AgentDef {
+    /// Stable hash of the effective process/protocol definition. Registry entries are already
+    /// path-resolved by `parse_agents`; callers constructing definitions directly should resolve
+    /// them first. Display-only fields (`name`, `default`) intentionally do not participate.
+    pub fn runtime_fingerprint(&self) -> String {
+        fn field(hasher: &mut Sha256, name: &str, value: &str) {
+            hasher.update((name.len() as u64).to_le_bytes());
+            hasher.update(name.as_bytes());
+            hasher.update((value.len() as u64).to_le_bytes());
+            hasher.update(value.as_bytes());
+        }
+        fn json(hasher: &mut Sha256, value: &serde_json::Value) {
+            match value {
+                serde_json::Value::Null => hasher.update(b"null"),
+                serde_json::Value::Bool(value) => {
+                    hasher.update(if *value { &b"true"[..] } else { &b"false"[..] })
+                }
+                serde_json::Value::Number(value) => field(hasher, "number", &value.to_string()),
+                serde_json::Value::String(value) => field(hasher, "string", value),
+                serde_json::Value::Array(values) => {
+                    hasher.update(b"array");
+                    hasher.update((values.len() as u64).to_le_bytes());
+                    for value in values {
+                        json(hasher, value);
+                    }
+                }
+                serde_json::Value::Object(values) => {
+                    hasher.update(b"object");
+                    let mut keys = values.keys().collect::<Vec<_>>();
+                    keys.sort();
+                    for key in keys {
+                        field(hasher, "key", key);
+                        json(hasher, &values[key]);
+                    }
+                }
+            }
+        }
+
+        let mut hasher = Sha256::new();
+        field(&mut hasher, "transport", &self.transport);
+        field(&mut hasher, "exe", &self.exe);
+        field(&mut hasher, "cwd", self.cwd.as_deref().unwrap_or(""));
+        for argument in self.command_args() {
+            field(&mut hasher, "arg", &argument);
+        }
+        let mut environment = self.env.iter().collect::<Vec<_>>();
+        environment.sort_by(|left, right| left.0.cmp(right.0));
+        for (key, value) in environment {
+            field(&mut hasher, "env-key", key);
+            field(&mut hasher, "env-value", value);
+        }
+        field(
+            &mut hasher,
+            "hermes-profile",
+            self.hermes_profile.as_deref().unwrap_or(""),
+        );
+        field(
+            &mut hasher,
+            "legacy-set-model-api",
+            if self.set_model_api { "true" } else { "false" },
+        );
+
+        let protocol = self.protocol();
+        field(
+            &mut hasher,
+            "set-model-api",
+            match protocol.set_model_api() {
+                SetModelApi::ConfigOption => "config-option",
+                SetModelApi::SetModel => "set-model",
+                SetModelApi::None => "none",
+            },
+        );
+        field(
+            &mut hasher,
+            "session-close",
+            if protocol.close_via_rpc() {
+                "true"
+            } else {
+                "false"
+            },
+        );
+        field(
+            &mut hasher,
+            "mcp-servers",
+            match protocol.mcp_servers {
+                McpServersMode::Always => "always",
+                McpServersMode::OmitIfEmpty => "omit-if-empty",
+            },
+        );
+        json(&mut hasher, &protocol.initialize_caps());
+        field(
+            &mut hasher,
+            "protocol-version",
+            &protocol.protocol_version().to_string(),
+        );
+        json(&mut hasher, &protocol.client_info());
+        for (name, value) in [
+            ("prompt-timeout", protocol.prompt_timeout()),
+            ("cancel-settle-timeout", protocol.cancel_settle_timeout()),
+            ("idle-timeout", protocol.idle_timeout()),
+            ("first-token-timeout", protocol.first_token_timeout()),
+            ("rpc-timeout", protocol.rpc_timeout()),
+            (
+                "max-attachments",
+                protocol.attachment_limits().max_attachments as u64,
+            ),
+            (
+                "max-attachment-bytes",
+                protocol.attachment_limits().max_attachment_bytes,
+            ),
+            ("replay-max-events", protocol.replay_max() as u64),
+        ] {
+            field(&mut hasher, name, &value.to_string());
+        }
+        let digest = hasher.finalize();
+        digest.iter().map(|byte| format!("{byte:02x}")).collect()
+    }
+
     /// 协议行为配置（acp 段缺省 = 默认实例 [`DEFAULT_ACCPROTOCOL`]）。
     /// 生产解析路径 parse() 已把顶层 legacy `set_model_api` 布尔合并进 acp 段
     /// （D2 兼容），此处只做缺省回退。
@@ -2187,6 +2304,49 @@ mod tests {
         let merged = overridden.command_args();
         assert_eq!(merged[merged.len() - 2], "--model");
         assert_eq!(merged[merged.len() - 1], "new");
+    }
+
+    #[test]
+    fn runtime_fingerprint_ignores_display_fields_and_tracks_runtime_fields() {
+        let mut baseline = agent(false);
+        baseline.name = "Display A".into();
+        baseline.default = false;
+        baseline.env = HashMap::from([("B".into(), "2".into()), ("A".into(), "1".into())]);
+        let expected = baseline.runtime_fingerprint();
+
+        let mut display_only = baseline.clone();
+        display_only.name = "Display B".into();
+        display_only.default = true;
+        display_only.env = HashMap::from([("A".into(), "1".into()), ("B".into(), "2".into())]);
+        assert_eq!(expected, display_only.runtime_fingerprint());
+
+        for changed in [
+            {
+                let mut value = baseline.clone();
+                value.exe = "other-agent".into();
+                value
+            },
+            {
+                let mut value = baseline.clone();
+                value.args.push("--verbose".into());
+                value
+            },
+            {
+                let mut value = baseline.clone();
+                value.env.insert("A".into(), "changed".into());
+                value
+            },
+            {
+                let mut value = baseline.clone();
+                value.acp = Some(AcpProtocolConfig {
+                    rpc_timeout_secs: Some(31),
+                    ..Default::default()
+                });
+                value
+            },
+        ] {
+            assert_ne!(expected, changed.runtime_fingerprint());
+        }
     }
 
     #[test]
