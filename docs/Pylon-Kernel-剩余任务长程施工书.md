@@ -10,7 +10,7 @@
 >
 > 约束：不启用子 Agent；不改变五个第一方 Product Plugin 的粗粒度构造；第三方插件是完全可信本机代码；canonical journal 仍是唯一 durable history。
 >
-> 最近完成：WI-P3 已于 `3320114` 收敛（62 项定向测试、TypeScript、ESLint、diff check 通过）；当前进入 WI-P4。
+> 最近完成：WI-P4 已于 `de21bc6` 收敛（187 项定向测试、TypeScript、ESLint、静态 boundary、diff check 通过）；当前进入 WI-V1。
 
 ## 0. 如何使用本文档
 
@@ -36,7 +36,7 @@
 | WI-P1 | PLG-001、PLG-002、PLG-005 | Kernel-first bootstrap、Safe Mode、显式 host seam | 无 | 已完成 |
 | WI-P2 | PLG-003 | dependencies/conflicts/activation events 硬契约 | WI-P1 | 已完成 |
 | WI-P3 | PLG-004、PLG-007、PLG-008 | 可观察的部分 cleanup 与 hook disable-plugin 一致性 | WI-P1 | 已完成 |
-| WI-P4 | PLG-006 | Product Shell 只消费稳定 contribution/interface | WI-P1、WI-P2 | 待施工 |
+| WI-P4 | PLG-006 | Product Shell 只消费稳定 contribution/interface | WI-P1、WI-P2 | 已完成 |
 | WI-V1 | Phase 5 | 台账对账、故障矩阵、一次全链路验收 | 全部 WI | 待施工 |
 
 推荐顺序：`A1 → A2 → A3 → A4 → A5 → P1 → P2 → P3 → P4 → V1`。A 线与 P 线源码交集小，但本 harness 是单执行者，不做并行超前施工。
@@ -674,14 +674,14 @@ git diff --check
 ### 6.1 当前指针
 
 ```yaml
-active_wi: WI-P4
+active_wi: WI-V1
 state: 施工中
 baseline_sha: 25455fc
-implementation_target_sha: 3320114d8b53ec6955dff4c328e1c141b6cc4b35
+implementation_target_sha: de21bc666b81fc86ebd8b28feecb3b5ae9935c76
 review_verdict: APPROVED_WITH_NOTES
 test_verdict: TEST_PASSED
 blocker: null
-next_wi: WI-P4
+next_wi: WI-V1
 ```
 
 ### 6.2 执行记录
@@ -698,7 +698,7 @@ next_wi: WI-P4
 | WI-P1 | 7aabb95 | 21b5955 | APPROVED | TEST_PASSED | bootstrap/safe-mode/host seam focused tests | 已完成 |
 | WI-P2 | 21b5955 | e0e0245 | APPROVED | TEST_PASSED | 71 TS + 12 Rust focused tests | 已完成 |
 | WI-P3 | e0e0245 | 3320114 | APPROVED_WITH_NOTES | TEST_PASSED | 62 focused tests + tsc/eslint/diff | 已完成 |
-| WI-P4 | — | — | — | — | — | 待施工 |
+| WI-P4 | 476b48f | de21bc6 | APPROVED_WITH_NOTES | TEST_PASSED | 187 focused + tsc/eslint/boundary/diff | 已完成 |
 | WI-V1 | — | — | — | — | — | 待施工 |
 
 ### 6.3 自审 finding 台账
@@ -708,6 +708,7 @@ next_wi: WI-P4
 | Finding | WI | 严重度 | 文件/符号 | 要求 | disposition |
 |---|---|---|---|---|---|
 | P3-R1 | WI-P3 | IMPORTANT | `PackageInstallationService.uninstall` | 已有 cleanup residual 时禁止二次卸载绕过 | 已补回归测试并关闭 |
+| P4-R1 | WI-P4 | IMPORTANT | Product Agent/Tool projection dispose | 停用时清除未知 Agent 与外置字典 provider 残留 | 已补生命周期测试并关闭 |
 
 ### 6.4 建议台账
 
@@ -715,7 +716,7 @@ next_wi: WI-P4
 
 | Note | 来源 WI | 下一 WI 处理 | 状态/理由 |
 |---|---|---|---|
-| — | — | — | — |
+| P4-N1 | WI-P4 | WI-V1 | `check:solid` 被既有 `MarkdownContent.solid.tsx:30` 类型错误阻断；P4 自身 boundary/tsc/lint 绿色，V1 复核 |
 
 ## 7. 单执行者长程自主施工 Harness
 
