@@ -205,4 +205,37 @@ describe('canonical 投影与 replay 产物 parity（A1-c P3）', () => {
 
     expect(committed.map(message => message.content)).toEqual(['question', 'late'])
   })
+
+  it('Bug2 回归：重放按 agent 发射序还原——逐轮交错的 replay 恢复成交错的原始模样', async () => {
+    useIdentityStore.setState({ sessions: [makeSession(source)] })
+    useRuntimeStore.getState().setBindingGeneration({ agentId: 'peri', source }, CLIENT_GENERATION)
+
+    // 会话"当初"的原始顺序：用户问 → 工具 Read 执行 → 助手回复。
+    // 点进历史会话走 load_persisted_session 重放，若重放流是交错的，恢复后必须仍是这副模样：
+    // 工具卡插在 user 与 assistant 之间（不聚顶、不聚底，不随时间/分区被重排）。
+    const interleavedReplay: Array<Record<string, unknown>> = [
+      { sessionUpdate: 'user_message_chunk', content: { text: '问题' } },
+      { sessionUpdate: 'tool_call', toolCallId: 'tc-i', title: 'Read', kind: 'read_file', rawInput: { path: 'a.txt' }, content: [{ type: 'text', text: 'preview' }] },
+      { sessionUpdate: 'tool_call_update', toolCallId: 'tc-i', status: 'completed', rawOutput: { ok: true } },
+      { sessionUpdate: 'agent_message_chunk', content: { text: '回复' } },
+      { sessionUpdate: 'done' },
+    ]
+
+    const handle = attachChatEventController(refs())
+    await waitListeners()
+    handle.initSource(source, [])
+    const gen = handle.beginLoadLock(source)
+    handle.commitReplaySnapshot(source, gen, interleavedReplay.map(replayUpdate))
+    handle.finishLoadLock(source, gen)
+    const restored = handle.getMessages(source)
+    handle.dispose()
+
+    // 恢复出的顺序必须与"当初"一致：user → tool(Read, 插在user与assistant之间) → assistant。
+    expect(restored.map(message => message.role)).toEqual(['user', 'tool', 'assistant'])
+    expect(restored[1]).toMatchObject({
+      role: 'tool', toolName: 'Read', toolStatus: 'completed', running: false,
+    })
+    expect(restored[0].content).toBe('问题')
+    expect(restored[2].content).toBe('回复')
+  })
 })

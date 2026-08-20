@@ -182,7 +182,9 @@ describe('projectMessagesFromCanonical', () => {
     expect(messages[1].id).toBe('msg-2')
   })
 
-  it('latest history.snapshot replaces proven duplicates and preserves unmatched local evidence', () => {
+  it('history.snapshot 行被忽略：投影只用实时行按 sequence 展开', () => {
+    // 旧契约（snapshot 作为基线去重/补漏）已被 Bug2 修复取代：canonical_events 的权威是
+    // 实时逐 chunk 行。history.snapshot 及其 replayEvents 内容一律不纳入投影。
     const messages = projectMessagesFromCanonical([
       event({ sequence: 1, eventType: 'assistant.text.delta', text: 'answer' }),
       event({ sequence: 2, eventType: 'user.message', text: 'local-only' }),
@@ -214,11 +216,48 @@ describe('projectMessagesFromCanonical', () => {
       event({ sequence: 4, eventType: 'assistant.text.delta', text: 'after-live' }),
     ])
 
+    // snapshot 被忽略 → 只保留实时行，按 sequence 交错展开；快照内的 question/answer 不复现。
     expect(messages.map(message => [message.role, message.content])).toEqual([
-      ['user', 'question'],
       ['assistant', 'answer'],
       ['user', 'local-only'],
       ['assistant', 'after-live'],
     ])
+  })
+
+  it('Bug2：history.snapshot 不纳入投影——即便其分组内容存在，也只按 sqlite 实时行交错还原', () => {
+    // 冷启动重放的权威是 canonical_events 里的实时逐 chunk 行（dispatcher 逐条 ingest，
+    // 已按真实交错序持久化）。history.snapshot 是 Hermes 分组重放（text→tools 批量）导入
+    // 的产物，若纳入投影会整块前置、盖过实时交错序 → 工具/文字聚簇。修复后投影忽略
+    // snapshot 行，只按实时行 sequence 展开，恢复出交错原样。
+    const messages = projectMessagesFromCanonical([
+      event({ sequence: 1, eventType: 'user.message', text: '问题' }),
+      event({ sequence: 2, eventType: 'tool.call.started', identity: { toolCallId: 'tc-1' }, tool: { title: 'Read', kind: 'read_file', rawInput: { path: 'a.txt' } } }),
+      event({ sequence: 3, eventType: 'tool.call.completed', identity: { toolCallId: 'tc-1' }, tool: { rawOutput: { ok: true }, status: 'completed' } }),
+      event({ sequence: 4, eventType: 'assistant.text.delta', text: '回复' }),
+      // 一个"带内容"的 Hermes 分组重放快照（text→tools 分组）。若被纳入投影按 snapshot-first
+      // 展开，会产生 [user, assistant, tool, tool] 聚簇；修复后它必须被忽略。
+      event({
+        sequence: 5,
+        eventType: 'history.snapshot',
+        rawPayload: {
+          kind: 'complete-session-replay',
+          replayEvents: [
+            { source: 'local:s1', update: { sessionUpdate: 'user_message_chunk', content: { text: 'qX' }, _meta: { pylonReplayImport: true } } },
+            { source: 'local:s1', update: { sessionUpdate: 'agent_message_chunk', content: { text: 'aX' }, _meta: { pylonReplayImport: true } } },
+            { source: 'local:s1', update: { sessionUpdate: 'tool_call', toolCallId: 'tc-x', title: 'Read', rawInput: { path: 'x' }, _meta: { pylonReplayImport: true } } },
+            { source: 'local:s1', update: { sessionUpdate: 'tool_call_update', toolCallId: 'tc-x', status: 'completed', rawOutput: 'x', _meta: { pylonReplayImport: true } } },
+          ],
+        },
+      }),
+    ])
+
+    // 权威是实时行：user → tool(Read) → assistant 交错；快照内容 qX/aX 不得混入。
+    const roles = messages.map(message => message.role)
+    expect(roles).toEqual(['user', 'tool', 'assistant'])
+    expect(messages[1]).toMatchObject({ role: 'tool', toolName: 'Read', toolStatus: 'completed', running: false })
+    expect(messages[0].content).toBe('问题')
+    expect(messages[2].content).toBe('回复')
+    expect(messages.map(m => m.content).filter(c => c === 'qX' || c === 'aX')).toEqual([])
+    expect(messages).toHaveLength(3)
   })
 })

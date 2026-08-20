@@ -20,7 +20,6 @@ import { getPluginServiceRegistry } from '../../plugin-runtime/runtimeServices.t
 import { getToolSummary } from '../tool/toolPresentation.ts'
 import { resolveChunkAppend } from './chunkMerge.ts'
 import type { CanonicalConversationEvent } from './eventSchema.ts'
-import { normalizeRawEvent } from './canonicalNormalizer.ts'
 import { toolFieldsFromCanonical } from './toolProjection.ts'
 
 export function listCanonicalMessageProjectors(): EventProjector[] {
@@ -67,92 +66,20 @@ function stringifyOutput(rawOutput: unknown): string {
   return json ?? ''
 }
 
-function stripReplayPersonaPrefix(content: string): string {
-  const separator = '\n\n---\n\n'
-  const index = content.lastIndexOf(separator)
-  if (index < 0) return content
-  const stripped = content.slice(index + separator.length)
-  return stripped || content
-}
-
-function stableJsonValue(value: unknown): unknown {
-  if (Array.isArray(value)) return value.map(stableJsonValue)
-  if (!value || typeof value !== 'object') return value
-  return Object.fromEntries(Object.entries(value as Record<string, unknown>)
-    .sort(([left], [right]) => left.localeCompare(right))
-    .map(([key, nested]) => [key, stableJsonValue(nested)]))
-}
-
-function projectionSignature(event: CanonicalConversationEvent): string {
-  return JSON.stringify(stableJsonValue({
-    eventType: event.eventType,
-    identity: event.identity ?? null,
-    typedPayload: event.typedPayload ?? null,
-    // Unknown events have no stable typed representation; raw remains their only evidence.
-    ...(event.eventType === 'unknown' ? { rawPayload: event.rawPayload } : {}),
-  }))
-}
-
-function replayEventsFromSnapshot(marker: CanonicalConversationEvent): CanonicalConversationEvent[] | null {
-  if (marker.eventType !== 'history.snapshot' || !marker.rawPayload || typeof marker.rawPayload !== 'object') return null
-  const replayEvents = (marker.rawPayload as { replayEvents?: unknown }).replayEvents
-  if (!Array.isArray(replayEvents)) return null
-  return replayEvents.map((raw, index) => {
-    const normalized = normalizeRawEvent(raw, {
-      owner: marker.owner,
-      clientGeneration: marker.clientGeneration,
-      sequence: index + 1,
-      receivedAt: marker.receivedAt,
-    }).event
-    const typed = normalized.typedPayload as { text?: unknown } | undefined
-    const event = normalized.eventType === 'user.message' && typeof typed?.text === 'string'
-      ? { ...normalized, typedPayload: { ...typed, text: stripReplayPersonaPrefix(typed.text) } }
-      : normalized
-    // Snapshot children are projection records, not extra journal rows. Their identity is derived
-    // from the persisted marker + remote ordinal and can never collide with a real canonical row.
-    return { ...event, eventId: `${marker.eventId}/replay/${index + 1}` }
-  })
-}
-
 /**
- * Resolve the single append-only journal into one effective projection stream. The latest valid
- * history.snapshot supplies the complete remote baseline. Older rows that match that baseline are
- * consumed as duplicates by multiplicity; unmatched rows remain after it as local evidence.
+ * Resolve the single append-only journal into one effective projection stream.
+ *
+ * Bug2（2026-08-20）：不再把 `history.snapshot` 纳入投影。canonical_events 的权威数据是
+ * dispatcher 逐条 ingest 的实时逐 chunk 行（user/assistant.text/tool.call.*，已按真实交错序
+ * 持久化，sequence 单调）。`history.snapshot` 是 agent（Hermes）分组重放导入的产物
+ * （text→tools 批量），若作为"快照基线"整块前置会盖过实时交错序 → 工具/文字聚簇。
+ * 产品不做旧兼容/导入兼容，故投影严格只用实时行，snapshot 行直接忽略。
  */
 export function effectiveCanonicalProjectionEvents(
   events: readonly CanonicalConversationEvent[],
 ): CanonicalConversationEvent[] {
   const sorted = [...events].sort((left, right) => left.sequence - right.sequence)
-  let snapshotIndex = -1
-  let snapshotEvents: CanonicalConversationEvent[] | null = null
-  for (let index = sorted.length - 1; index >= 0; index -= 1) {
-    const expanded = replayEventsFromSnapshot(sorted[index])
-    if (expanded) {
-      snapshotIndex = index
-      snapshotEvents = expanded
-      break
-    }
-  }
-  if (snapshotIndex < 0 || !snapshotEvents) return sorted
-
-  const remainingSnapshotCounts = new Map<string, number>()
-  for (const event of snapshotEvents) {
-    const signature = projectionSignature(event)
-    remainingSnapshotCounts.set(signature, (remainingSnapshotCounts.get(signature) ?? 0) + 1)
-  }
-  const unmatchedBefore: CanonicalConversationEvent[] = []
-  for (const event of sorted.slice(0, snapshotIndex)) {
-    if (event.eventType === 'history.snapshot') continue
-    const signature = projectionSignature(event)
-    const remaining = remainingSnapshotCounts.get(signature) ?? 0
-    if (remaining > 0) remainingSnapshotCounts.set(signature, remaining - 1)
-    else unmatchedBefore.push(event)
-  }
-  return [
-    ...snapshotEvents,
-    ...unmatchedBefore,
-    ...sorted.slice(snapshotIndex + 1).filter(event => event.eventType !== 'history.snapshot'),
-  ].map((event, index) => ({ ...event, sequence: index + 1 }))
+  return sorted.filter(event => event.eventType !== 'history.snapshot')
 }
 
 /** 内置投影实现（core.projector.canonicalMessage 与无插件回退共用）。 */
