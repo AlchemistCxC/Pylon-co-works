@@ -9,6 +9,8 @@
 > 上游决策：以 `docs/Pylon-Kernel-施工台账.md` 的 D1–D17 为准；本文件不重开既有决策。
 >
 > 约束：不启用子 Agent；不改变五个第一方 Product Plugin 的粗粒度构造；第三方插件是完全可信本机代码；canonical journal 仍是唯一 durable history。
+>
+> 最近完成：WI-P3 已于 `3320114` 收敛（62 项定向测试、TypeScript、ESLint、diff check 通过）；当前进入 WI-P4。
 
 ## 0. 如何使用本文档
 
@@ -31,9 +33,9 @@
 | WI-A3 | AGT-010、AGT-012 | 配置 CAS、备份、原子替换与数值 hard max | WI-A1 | 待施工 |
 | WI-A4 | AGT-009、AGT-011 | Stored/PendingRestart/Activated 与类型化连接错误 | WI-A3 | 待施工 |
 | WI-A5 | AGT-013 | 重连后逐 Session continuity probe 与 detached 收敛 | WI-A4 | 待施工 |
-| WI-P1 | PLG-001、PLG-002、PLG-005 | Kernel-first bootstrap、Safe Mode、显式 host seam | 无 | 待施工 |
-| WI-P2 | PLG-003 | dependencies/conflicts/activation events 硬契约 | WI-P1 | 待施工 |
-| WI-P3 | PLG-004、PLG-007、PLG-008 | 可观察的部分 cleanup 与 hook disable-plugin 一致性 | WI-P1 | 待施工 |
+| WI-P1 | PLG-001、PLG-002、PLG-005 | Kernel-first bootstrap、Safe Mode、显式 host seam | 无 | 已完成 |
+| WI-P2 | PLG-003 | dependencies/conflicts/activation events 硬契约 | WI-P1 | 已完成 |
+| WI-P3 | PLG-004、PLG-007、PLG-008 | 可观察的部分 cleanup 与 hook disable-plugin 一致性 | WI-P1 | 已完成 |
 | WI-P4 | PLG-006 | Product Shell 只消费稳定 contribution/interface | WI-P1、WI-P2 | 待施工 |
 | WI-V1 | Phase 5 | 台账对账、故障矩阵、一次全链路验收 | 全部 WI | 待施工 |
 
@@ -672,14 +674,14 @@ git diff --check
 ### 6.1 当前指针
 
 ```yaml
-active_wi: WI-A2
-state: 已完成
+active_wi: WI-P4
+state: 施工中
 baseline_sha: 25455fc
-implementation_target_sha: 56dd8603aeda8f01237268d24f1a994e33af336d
-review_verdict: null
-test_verdict: null
+implementation_target_sha: 3320114d8b53ec6955dff4c328e1c141b6cc4b35
+review_verdict: APPROVED_WITH_NOTES
+test_verdict: TEST_PASSED
 blocker: null
-next_wi: WI-A3
+next_wi: WI-P4
 ```
 
 ### 6.2 执行记录
@@ -693,9 +695,9 @@ next_wi: WI-A3
 | WI-A3 | — | — | — | — | — | 待施工 |
 | WI-A4 | — | — | — | — | — | 待施工 |
 | WI-A5 | — | — | — | — | — | 待施工 |
-| WI-P1 | — | — | — | — | — | 待施工 |
-| WI-P2 | — | — | — | — | — | 待施工 |
-| WI-P3 | — | — | — | — | — | 待施工 |
+| WI-P1 | 7aabb95 | 21b5955 | APPROVED | TEST_PASSED | bootstrap/safe-mode/host seam focused tests | 已完成 |
+| WI-P2 | 21b5955 | e0e0245 | APPROVED | TEST_PASSED | 71 TS + 12 Rust focused tests | 已完成 |
+| WI-P3 | e0e0245 | 3320114 | APPROVED_WITH_NOTES | TEST_PASSED | 62 focused tests + tsc/eslint/diff | 已完成 |
 | WI-P4 | — | — | — | — | — | 待施工 |
 | WI-V1 | — | — | — | — | — | 待施工 |
 
@@ -705,7 +707,7 @@ next_wi: WI-A3
 
 | Finding | WI | 严重度 | 文件/符号 | 要求 | disposition |
 |---|---|---|---|---|---|
-| — | — | — | — | — | — |
+| P3-R1 | WI-P3 | IMPORTANT | `PackageInstallationService.uninstall` | 已有 cleanup residual 时禁止二次卸载绕过 | 已补回归测试并关闭 |
 
 ### 6.4 建议台账
 
