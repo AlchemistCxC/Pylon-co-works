@@ -25,6 +25,8 @@ export interface RemoveSessionDeps {
   findSession: (id: string) => Session | undefined
   /** DEL-03（§5.13 步骤 1-4）：本地优先删除（OwnerKey 校验 + deleting tombstone + 本地事务删除）；失败 → 可重试错误 */
   deleteSessionLocal: (session: Session) => Promise<unknown>
+  /** user_session_delete 会直接推进后端 sessions revision；删除后刷新前端 baseline。 */
+  refreshSessionsBackend?: () => Promise<void>
   /** DEL-04（§5.13）：删除终态——主动 cancel/mark deleted（清调度器 timer/dirty/revision 并
    *  拒绝该 session 的迟到写）；dispose() 只清 dirty 不是删除语义，必须显式调用 */
   markSessionDeleted: (sessionId: string) => void
@@ -46,6 +48,16 @@ export async function removeSessionTransaction(id: string, deps: RemoveSessionDe
   } catch (error) {
     deps.reportError('删除会话记录', error)
     return { ok: false, kind: 'transport', message: error instanceof Error ? error.message : '删除会话失败', cause: error }
+  }
+  // 删除命令已经直接修改后端 sessions envelope。先刷新 repository baseline，
+  // 再执行 removeSession 的完整快照同步，避免使用删除前 revision 自致冲突。
+  if (deps.refreshSessionsBackend) {
+    try {
+      await deps.refreshSessionsBackend()
+    } catch (error) {
+      deps.reportError('刷新用户数据 revision', error)
+      return { ok: false, kind: 'transport', message: error instanceof Error ? error.message : '刷新用户数据失败', cause: error }
+    }
   }
   // 本地删除成功即完成：DEL-04 主动 cancel 调度器未落盘写（不得复活）→ 清理 UI/localStorage
   deps.markSessionDeleted(id)

@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState } from 'react'
 import * as Dialog from '@radix-ui/react-dialog'
 import { invoke } from '@tauri-apps/api/core'
-import { useIdentityStore } from '../identityStore'
+import { refreshSessionsBackend, useIdentityStore } from '../identityStore'
 import { useWorkspaceEntityStore } from '../workspaceEntityStore'
 import { reportRuntimeError } from '../runtimeError'
 import { createSessionClient } from '../infrastructure/acp/sessionClient'
@@ -85,6 +85,7 @@ export default function SessionSettings({ sessionId, open, onClose, onDeleted }:
         sessionId: s.id,
         ownerKey: sessionDurableOwnerKey(s),
       }),
+      refreshSessionsBackend,
       // DEL-04（§5.13）删除终态：丢弃 canonical 未落盘事件（不复活；messages 表已停写）
       markSessionDeleted: id => {
         const target = useIdentityStore.getState().sessions.find(item => item.id === id)

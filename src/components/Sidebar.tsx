@@ -1,6 +1,6 @@
 import { Suspense, useMemo, useState, useSyncExternalStore, type ComponentType } from 'react'
 import { invoke } from '@tauri-apps/api/core'
-import { useIdentityStore } from '../identityStore'
+import { refreshSessionsBackend, useIdentityStore } from '../identityStore'
 import { useRuntimeStore } from '../runtimeStore'
 import { useWorkspaceStore } from '../workspaceStore'
 import { useWorkspaceEntityStore } from '../workspaceEntityStore'
@@ -68,6 +68,7 @@ export default function Sidebar({ ctx, state, sheet }: { ctx: SheetContext; stat
         sessionId: s.id,
         ownerKey: sessionDurableOwnerKey(s),
       }),
+      refreshSessionsBackend,
       markSessionDeleted: id => {
         const target = sessions.find(s => s.id === id)
         if (target) {

@@ -790,6 +790,11 @@ export async function flushIdentityBackend(): Promise<void> {
   await userDataRepository?.flush()
 }
 
+/** 删除会话等外部后端事务完成后，刷新 sessions revision baseline。 */
+export async function refreshSessionsBackend(): Promise<void> {
+  await userDataRepository?.load('sessions')
+}
+
 // I14-W6：mutation 序号——每次 identity mutation 递增；async hydration 在 load 前捕获、
 // 读回落地前比对：期间有 mutation → 丢弃过期读回（旧 response 不覆盖新 mutation）。
 let identityMutationSeq = 0
