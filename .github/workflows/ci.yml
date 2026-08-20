@@ -18,7 +18,12 @@ jobs:
           cache: npm
 
       - name: 安装依赖
-        run: npm ci
+        # react18/react-dom18 是故意 alias（npm:react@18 / npm:react-dom@18），供
+        # IsolatedPluginSurface 隔离插件同时跑 React 18/19 的测试。npm 对 alias 包的
+        # peer 解析有误报（react-dom18 的 react peer 被 dedup 到 root 的 react@19），
+        # 导致 npm ci 严格模式下 ERESOLVE。用 --legacy-peer-deps 跳过该假冲突——
+        # 不改任何依赖版本，勿删 alias。
+        run: npm ci --legacy-peer-deps
 
       # ISSUE-20 W1：统一入口——lint + vitest（含 legacy 套件，经 legacy-runner.test.mts）+ 覆盖率 + tsc/build
       # legacy 套件只经 vitest 跑一次（原 test:legacy 独立步骤移除，消除双跑）
@@ -41,7 +46,8 @@ jobs:
           cache: npm
 
       - name: 安装依赖
-        run: npm ci
+        # 同 frontend job：--legacy-peer-deps 跳过 react18/react-dom18 alias 的 npm peer 假冲突
+        run: npm ci --legacy-peer-deps
 
       # tauri::generate_context! 编译期要求 ../dist 存在（frontendDist），先构建前端
       - name: 前端构建（tauri generate_context 前置）
