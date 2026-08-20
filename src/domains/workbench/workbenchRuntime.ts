@@ -77,9 +77,32 @@ export function createPreviewWorkbenchRuntime(
 
 function runtimeSnapshotsEqual(left: WorkbenchRuntimeSnapshot, right: WorkbenchRuntimeSnapshot): boolean {
   if (left === right) return true
-  const { revision: _leftRevision, ...leftValue } = left
-  const { revision: _rightRevision, ...rightValue } = right
-  return JSON.stringify(leftValue) === JSON.stringify(rightValue)
+  // Bug4（2026-08-20）：弃用全量 JSON.stringify 深比较——流式高频 tick 会对整个含全部历史消息
+  // 的 snapshot 做一次 O(总字节) 序列化，消息越多越慢（实测 1000 条 ≈1.4ms/tick，成为流式卡顿
+  // 源头）。改为逐字段浅比较：messages/tasks/availableModels 等数组字段在 freezeSnapshot 下引用
+  // 稳定，引用相同即视为一致（避免把"仅 streamingText 变化"误当成整包变化）。
+  return (
+    left.sessionId === right.sessionId &&
+    left.status === right.status &&
+    left.messages === right.messages &&
+    left.streamingText === right.streamingText &&
+    left.streamingThinking === right.streamingThinking &&
+    left.generating === right.generating &&
+    left.generationPhase === right.generationPhase &&
+    left.generationStart === right.generationStart &&
+    left.lastTokenAt === right.lastTokenAt &&
+    left.tokenCount === right.tokenCount &&
+    left.summary === right.summary &&
+    left.tasks === right.tasks &&
+    left.thinkingStart === right.thinkingStart &&
+    left.availableModels === right.availableModels &&
+    left.activeModel === right.activeModel &&
+    left.availableModes === right.availableModes &&
+    left.activeMode === right.activeMode &&
+    left.canAttach === right.canAttach &&
+    left.promptImage === right.promptImage &&
+    left.error === right.error
+  )
 }
 
 function freezeSnapshot(snapshot: WorkbenchRuntimeSnapshot): WorkbenchRuntimeSnapshot {
