@@ -29,6 +29,11 @@ export interface AgentsConfigDocument {
   agents: Record<string, AgentCreateConfig>
 }
 
+export interface AgentConfigSnapshot {
+  revision: string
+  agents: AgentEntry[]
+}
+
 function normalizeStringArray(value: unknown): string[] | undefined {
   if (!Array.isArray(value) || !value.every(item => typeof item === 'string')) return undefined
   return [...value]
@@ -63,8 +68,29 @@ export function normalizeAgentList(raw: unknown): AgentEntry[] {
 }
 
 export function createAgentClient(transport: ClientTransport) {
+  let revision: string | null = null
+  const ensureConfigRevision = async (): Promise<void> => {
+    if (revision) return
+    try {
+      const snapshot = await transport.invoke('agent_config_snapshot')
+      const record = snapshot && typeof snapshot === 'object' ? snapshot as Record<string, unknown> : {}
+      revision = typeof record.revision === 'string' && record.revision ? record.revision : null
+    } catch {
+      // embedded 配置或旧后端没有 snapshot 时保留兼容的无 revision 写入路径。
+    }
+  }
   return {
     listAgents: (): Promise<AgentEntry[]> => transport.invoke('list_agents').then(normalizeAgentList),
+    agentConfigSnapshot: (): Promise<AgentConfigSnapshot> => transport.invoke('agent_config_snapshot').then(raw => {
+      const record = raw && typeof raw === 'object' ? raw as Record<string, unknown> : {}
+      const next: AgentConfigSnapshot = {
+        revision: typeof record.revision === 'string' ? record.revision : '',
+        agents: normalizeAgentList(record.agents),
+      }
+      revision = next.revision || null
+      return next
+    }),
+    ensureConfigRevision,
     listToolDictionary: (): Promise<unknown> => transport.invoke('list_tool_dictionary'),
     setSessionState: (owner: DurableSessionOwner, state: unknown, remoteSessionId?: string): Promise<unknown> =>
       transport.invoke('set_session_state', { owner, remoteSessionId, state }),
@@ -79,11 +105,17 @@ export function createAgentClient(transport: ClientTransport) {
     setMcpServers: (servers: unknown[]): Promise<unknown> => transport.invoke('set_mcp_servers', { servers }),
     updateAgentsConfig: (payload: Record<string, unknown>): Promise<unknown> => transport.invoke('update_agents_config', payload),
     /** 施工文档 §4.3.1：结构化字段 patch（exe/default/name/provider/transport/args）。 */
-    updateAgentFieldPatch: (agentId: string, patch: Record<string, unknown>): Promise<unknown> =>
-      transport.invoke('update_agents_config', { scope: 'agent_fields', agentId, config: patch }),
+    updateAgentFieldPatch: async (agentId: string, patch: Record<string, unknown>): Promise<unknown> => {
+      const result = await transport.invoke('update_agents_config', { scope: 'agent_fields', agentId, config: patch, ...(revision ? { expectedRevision: revision } : {}) })
+      if (result && typeof result === 'object' && typeof (result as Record<string, unknown>).revision === 'string') revision = (result as Record<string, string>).revision
+      return result
+    },
     /** 新建单个 Agent：只接受结构化 node，不能传入顶层 agents document。 */
-    createAgent: (agentId: string, config: AgentCreateConfig): Promise<unknown> =>
-      transport.invoke('update_agents_config', { scope: 'agent_create', agentId, config }),
+    createAgent: async (agentId: string, config: AgentCreateConfig): Promise<unknown> => {
+      const result = await transport.invoke('update_agents_config', { scope: 'agent_create', agentId, config, ...(revision ? { expectedRevision: revision } : {}) })
+      if (result && typeof result === 'object' && typeof (result as Record<string, unknown>).revision === 'string') revision = (result as Record<string, string>).revision
+      return result
+    },
     /** 施工文档 §4.6：embedded → exe 旁 agents.yaml 首次外部配置初始化。 */
     initializeAgentsConfig: (agentId: string | undefined, config: AgentsConfigDocument): Promise<unknown> =>
       transport.invoke('initialize_agents_config', { agentId, config }),

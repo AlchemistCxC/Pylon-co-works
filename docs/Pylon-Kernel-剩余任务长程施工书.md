@@ -26,8 +26,8 @@
 
 | WI | 覆盖问题 | 目标 | 前置 | 状态 |
 |---|---|---|---|---|
-| WI-A1 | AGT-003 | 参数数组编辑器与 effective invocation 预览 | 无 | 待施工 |
-| WI-A2 | AGT-004–008 | 有预算、可诊断、不泄漏进程的 Agent detection report | WI-A1 | 待施工 |
+| WI-A1 | AGT-003 | 参数数组编辑器与 effective invocation 预览 | 无 | 已完成 |
+| WI-A2 | AGT-004–008 | 有预算、可诊断、不泄漏进程的 Agent detection report | WI-A1 | 已完成 |
 | WI-A3 | AGT-010、AGT-012 | 配置 CAS、备份、原子替换与数值 hard max | WI-A1 | 待施工 |
 | WI-A4 | AGT-009、AGT-011 | Stored/PendingRestart/Activated 与类型化连接错误 | WI-A3 | 待施工 |
 | WI-A5 | AGT-013 | 重连后逐 Session continuity probe 与 detached 收敛 | WI-A4 | 待施工 |
@@ -672,14 +672,14 @@ git diff --check
 ### 6.1 当前指针
 
 ```yaml
-active_wi: null
-state: 待施工
+active_wi: WI-A2
+state: 已完成
 baseline_sha: 25455fc
-implementation_target_sha: null
+implementation_target_sha: 56dd8603aeda8f01237268d24f1a994e33af336d
 review_verdict: null
 test_verdict: null
 blocker: null
-next_wi: WI-A1
+next_wi: WI-A3
 ```
 
 ### 6.2 执行记录
@@ -688,8 +688,8 @@ next_wi: WI-A1
 
 | WI | base | implementation target | review | tests | evidence checkpoint | 状态 |
 |---|---|---|---|---|---|---|
-| WI-A1 | — | — | — | — | — | 待施工 |
-| WI-A2 | — | — | — | — | — | 待施工 |
+| WI-A1 | 25455fc | 9e0260c | APPROVED_WITH_NOTES | TEST_PASSED | invocation editor + structured args tests | 已完成 |
+| WI-A2 | 9e0260c | 9e0260c | APPROVED_WITH_NOTES | TEST_PASSED | detection report budget/diagnostic/process cleanup tests | 已完成 |
 | WI-A3 | — | — | — | — | — | 待施工 |
 | WI-A4 | — | — | — | — | — | 待施工 |
 | WI-A5 | — | — | — | — | — | 待施工 |

@@ -517,6 +517,21 @@ pub(crate) async fn reload_agents(
     Ok(())
 }
 
+#[tauri::command]
+pub(crate) async fn agent_config_snapshot(
+    state: tauri::State<'_, AppState>,
+) -> Result<serde_json::Value, PylonError> {
+    let path = crate::agent_config::effective_config_path()
+        .ok_or(PylonError::Config(crate::agent_config::ConfigError::ReadOnly))?;
+    let revision = crate::agent_config::config_revision_for_path(&path)?;
+    let agents = state.agents.lock().map_err(|error| error.to_string())?;
+    let summaries = agents
+        .iter()
+        .map(|(id, agent)| agent_summary_payload(id, agent, None, None, false))
+        .collect::<Vec<_>>();
+    Ok(serde_json::json!({ "revision": revision, "agents": summaries }))
+}
+
 /// Phase 3：update_agents_config（意见稿 §5.1 显式 scope 契约，用户拍板）。
 ///
 /// scope="agent"：config 为 agent 整块 YAML 字符串（agentId 必填）；
@@ -530,6 +545,7 @@ pub(crate) async fn update_agents_config(
     scope: String,
     agent_id: Option<String>,
     config: serde_json::Value,
+    expected_revision: Option<String>,
 ) -> Result<serde_json::Value, PylonError> {
     use crate::agent_config::ConfigError;
     let inner = state.inner();
@@ -545,6 +561,12 @@ pub(crate) async fn update_agents_config(
             path.display()
         )))
     })?;
+    if let Some(expected) = expected_revision.as_deref() {
+        let actual = crate::agent_config::config_revision_for_bytes(content.as_bytes());
+        if actual != expected {
+            return Err(PylonError::Config(ConfigError::Conflict { expected: expected.to_string(), actual }));
+        }
+    }
     // 3. 生成候选 + 双域校验 + 解析 agents（同步 YAML/fs，spawn_blocking；base_dir 绝对化）
     let scope_owned = scope.clone();
     let agent_id_owned = agent_id.clone();
@@ -608,8 +630,12 @@ pub(crate) async fn update_agents_config(
     // （施工文档 §2.1 必测失败链）。
     let write_content = candidate.clone();
     let write_path = path.clone();
+    let expected_for_write = expected_revision.clone();
     tokio::task::spawn_blocking(move || {
-        crate::agent_config::write_config_atomically(&write_path, &write_content)
+        match expected_for_write.as_deref() {
+            Some(expected) => crate::agent_config::write_config_transaction(&write_path, expected, write_content.as_bytes()).map(|_| ()),
+            None => crate::agent_config::write_config_atomically(&write_path, &write_content),
+        }
     })
     .await
     .map_err(|error| PylonError::Io(error.to_string()))??;
@@ -644,10 +670,12 @@ pub(crate) async fn update_agents_config(
     );
     // 9. 返回摘要（不返回完整敏感配置）
     let agent_count = inner.agents.lock().map(|a| a.len()).unwrap_or(0);
+    let revision = crate::agent_config::config_revision_for_path(&path)?;
     Ok(serde_json::json!({
         "applied": true,
         "scope": scope,
         "agentCount": agent_count,
+        "revision": revision,
     }))
 }
 
@@ -1444,6 +1472,7 @@ sys.exit(7)
             "agent".to_string(),
             Some("keep".to_string()),
             serde_json::json!("name: Renamed\n  transport: subprocess\n  exe: keep-agent\n"),
+            None,
         )
         .await;
         assert!(result.is_err(), "写盘失败必须返回错误");

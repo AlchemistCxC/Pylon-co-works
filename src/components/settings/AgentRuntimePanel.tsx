@@ -266,6 +266,7 @@ export default function AgentRuntimePanel() {
     setSavingId(agentId)
     setFeedback(null)
     try {
+      await agentClient.ensureConfigRevision()
       await agentClient.updateAgentFieldPatch(agentId, {
         name: draft.name,
         exe: draft.exe,
@@ -290,6 +291,7 @@ export default function AgentRuntimePanel() {
     setSavingId(agentId)
     setFeedback(null)
     try {
+      await agentClient.ensureConfigRevision()
       try {
         await agentClient.updateAgentFieldPatch(agentId, { default: true })
       } catch (error) {
@@ -338,6 +340,7 @@ export default function AgentRuntimePanel() {
     setFeedback(null)
     const config = agentConfig(createDraft.name, createDraft.exe, createDraft.args, agents.length === 0)
     try {
+      await agentClient.ensureConfigRevision()
       await agentClient.createAgent(id, config)
       await refreshAgents()
       setShowCreate(false)

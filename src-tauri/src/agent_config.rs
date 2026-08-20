@@ -1,4 +1,5 @@
 use serde::{Deserialize, Serialize};
+use sha2::{Digest, Sha256};
 use std::collections::HashMap;
 use std::io::Write;
 use std::path::{Path, PathBuf};
@@ -25,6 +26,15 @@ pub enum ConfigError {
     /// 配置写入失败（临时文件/同步/rename 等）。
     #[error("config_write_error: {0}")]
     Write(String),
+    /// 配置文件在读取与提交之间已被其他写入者修改。
+    #[error("config_revision_conflict: 期望 {expected}，实际 {actual}")]
+    Conflict { expected: String, actual: String },
+    /// 配置备份失败；主文件不得被替换。
+    #[error("config_backup_error: {0}")]
+    Backup(String),
+    /// 跨进程配置 lease 已被占用。
+    #[error("config_lock_busy: {0}")]
+    LockBusy(String),
     /// 候选配置删除当前 active agent（保护语义，与 reload_agents 一致）。
     #[error("config_active_agent_protected: {0}")]
     ActiveAgentProtected(String),
@@ -42,6 +52,9 @@ impl ConfigError {
             Self::Invalid(_) => "config_error",
             Self::ReadOnly => "config_read_only",
             Self::Write(_) => "config_write_error",
+            Self::Conflict { .. } => "config_revision_conflict",
+            Self::Backup(_) => "config_backup_error",
+            Self::LockBusy(_) => "config_lock_busy",
             Self::ActiveAgentProtected(_) => "config_active_agent_protected",
             Self::NotApplied(_) => "config_not_applied",
         }
@@ -391,6 +404,13 @@ pub(crate) fn default_client_info() -> serde_json::Value {
 
 /// E1：acp 段取值校验——数值字段必须 > 0（负数在反序列化层已被 u64 拒绝，
 /// 此处拦截 0 并指明 agent id；风格对齐 route.rs reset 校验）。
+const MAX_PROMPT_TIMEOUT_SECS: u64 = 3600;
+const MAX_CANCEL_SETTLE_TIMEOUT_SECS: u64 = 300;
+const MAX_RPC_TIMEOUT_SECS: u64 = 300;
+const MAX_ATTACHMENTS: usize = 64;
+const MAX_ATTACHMENT_BYTES: u64 = 256 * 1024 * 1024;
+const MAX_REPLAY_EVENTS: usize = 100_000;
+
 fn validate_acp_section(id: &str, acp: &AcpProtocolConfig) -> Result<(), ConfigError> {
     let numeric = [
         (
@@ -412,11 +432,26 @@ fn validate_acp_section(id: &str, acp: &AcpProtocolConfig) -> Result<(), ConfigE
             acp.replay_max_events.map(|v| v as u128),
         ),
     ];
-    for (field, value) in numeric {
-        if value == Some(0) {
-            return Err(ConfigError::InvalidAgent(format!(
-                "agent {id} 的 acp.{field} 非法: 0（必须大于 0）"
-            )));
+    let maxima: [(&str, u128); 6] = [
+        ("prompt_timeout_secs", MAX_PROMPT_TIMEOUT_SECS as u128),
+        ("cancel_settle_timeout_secs", MAX_CANCEL_SETTLE_TIMEOUT_SECS as u128),
+        ("rpc_timeout_secs", MAX_RPC_TIMEOUT_SECS as u128),
+        ("max_attachments", MAX_ATTACHMENTS as u128),
+        ("max_attachment_bytes", MAX_ATTACHMENT_BYTES as u128),
+        ("replay_max_events", MAX_REPLAY_EVENTS as u128),
+    ];
+    for ((field, value), (_, maximum)) in numeric.into_iter().zip(maxima) {
+        if let Some(value) = value {
+            if value == 0 {
+                return Err(ConfigError::InvalidAgent(format!(
+                    "agent {id} 的 acp.{field} 非法: 0（必须大于 0）"
+                )));
+            }
+            if value > maximum {
+                return Err(ConfigError::InvalidAgent(format!(
+                    "agent {id} 的 acp.{field} 超过 hard max {maximum}"
+                )));
+            }
         }
     }
     Ok(())
@@ -547,6 +582,96 @@ where
 /// 后，同一进程的 `update_agents_config` 仍认为配置只读。改为每次调用重新
 /// 解析，保证 embedded→external 在同一进程内可见（配置位置在无外部初始化时
 /// 稳定；每次解析仅两次 stat，远低于连接/配置写盘成本）。
+/// 配置文件精确字节 revision。只返回 SHA-256，不返回配置内容。
+pub fn config_revision_for_bytes(content: &[u8]) -> String {
+    let digest = Sha256::digest(content);
+    digest.iter().map(|byte| format!("{byte:02x}")).collect()
+}
+
+pub fn config_revision_for_path(path: &Path) -> Result<String, ConfigError> {
+    let bytes = std::fs::read(path).map_err(|error| {
+        ConfigError::Read(format!("读取 {} 失败: {error}", path.display()))
+    })?;
+    Ok(config_revision_for_bytes(&bytes))
+}
+
+struct ConfigLease {
+    path: PathBuf,
+}
+
+impl ConfigLease {
+    fn acquire(config_path: &Path) -> Result<Self, ConfigError> {
+        let lease_path = config_path.with_file_name(format!(
+            "{}.pylon.lock",
+            config_path.file_name().and_then(|name| name.to_str()).unwrap_or("agents.yaml"),
+        ));
+        std::fs::OpenOptions::new()
+            .write(true)
+            .create_new(true)
+            .open(&lease_path)
+            .map_err(|error| {
+                if error.kind() == std::io::ErrorKind::AlreadyExists {
+                    ConfigError::LockBusy(lease_path.display().to_string())
+                } else {
+                    ConfigError::Write(format!("创建配置 lease {} 失败: {error}", lease_path.display()))
+                }
+            })?;
+        Ok(Self { path: lease_path })
+    }
+}
+
+impl Drop for ConfigLease {
+    fn drop(&mut self) {
+        let _ = std::fs::remove_file(&self.path);
+    }
+}
+
+pub fn write_config_transaction(
+    path: &Path,
+    expected: &str,
+    candidate: &[u8],
+) -> Result<String, ConfigError> {
+    let _lease = ConfigLease::acquire(path)?;
+    let current = std::fs::read(path).map_err(|error| {
+        ConfigError::Read(format!("读取 {} 失败: {error}", path.display()))
+    })?;
+    let actual = config_revision_for_bytes(&current);
+    if actual != expected {
+        return Err(ConfigError::Conflict {
+            expected: expected.to_string(),
+            actual,
+        });
+    }
+    let dir = path.parent().ok_or_else(|| ConfigError::Write(format!("{} 无父目录", path.display())))?;
+    let file_name = path.file_name().ok_or_else(|| ConfigError::Write(format!("{} 无文件名", path.display())))?;
+    let pid = std::process::id();
+    let temp = dir.join(format!(".{}.tmp-{pid}", file_name.to_string_lossy()));
+    let backup_temp = dir.join(format!(".{}.bak-tmp-{pid}", file_name.to_string_lossy()));
+    let backup = dir.join(format!("{}.bak", file_name.to_string_lossy()));
+    let result = (|| -> std::io::Result<()> {
+        let mut backup_file = std::fs::File::create(&backup_temp)?;
+        backup_file.write_all(&current)?;
+        backup_file.sync_all()?;
+        drop(backup_file);
+        if backup.exists() {
+            std::fs::remove_file(&backup)?;
+        }
+        std::fs::rename(&backup_temp, &backup)?;
+        let mut file = std::fs::File::create(&temp)?;
+        file.write_all(candidate)?;
+        file.sync_all()?;
+        drop(file);
+        std::fs::rename(&temp, path)?;
+        Ok(())
+    })();
+    if let Err(error) = result {
+        let _ = std::fs::remove_file(&temp);
+        let _ = std::fs::remove_file(&backup_temp);
+        return Err(ConfigError::Backup(format!("写入 {} 失败: {error}", backup.display())));
+    }
+    Ok(config_revision_for_bytes(candidate))
+}
+
 pub fn effective_config_path() -> Option<PathBuf> {
     if let Some(path) = config_path() {
         return Some(path);
@@ -1936,6 +2061,22 @@ mod tests {
             .is_ok(),
             "合法 >0 值必须通过"
         );
+        for (field, maximum) in [
+            ("prompt_timeout_secs", 3600u64),
+            ("cancel_settle_timeout_secs", 300),
+            ("rpc_timeout_secs", 300),
+            ("max_attachments", 64),
+            ("max_attachment_bytes", 256 * 1024 * 1024),
+            ("replay_max_events", 100_000),
+        ] {
+            let error = parse(&format!(
+                "agents:\n  bad:\n    name: Bad\n    transport: subprocess\n    exe: agent\n    acp:\n      {field}: {}\n",
+                maximum + 1,
+            ))
+            .expect_err("超过 hard max 必须拒绝");
+            assert!(error.to_string().contains("agent bad"), "{field}: {error}");
+            assert!(error.to_string().contains("hard max"), "{field}: {error}");
+        }
     }
 
     // ── R6（P1-4）：分域部分成功与统一装载 ──

@@ -745,6 +745,7 @@ pub fn run() {
                 crate::lifecycle::set_session_state,
                 crate::lifecycle::validate_agents,
                 crate::lifecycle::update_agents_config,
+                crate::lifecycle::agent_config_snapshot,
                 crate::lifecycle::initialize_agents_config,
                 crate::lifecycle::test_agent_connection,
                 crate::lifecycle::test_agent_candidate,
