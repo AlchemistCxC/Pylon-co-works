@@ -1,5 +1,5 @@
 // @vitest-environment jsdom
-import { afterEach, describe, expect, it } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import { render, screen, waitFor } from '@testing-library/react'
 import { useSyncExternalStore } from 'react'
 import {
@@ -12,7 +12,7 @@ import {
 } from '../../../host/messageRendererResolver.ts'
 import { CORE_SOLID_RENDERER_PLUGIN_ID } from '../../../plugins/core/renderer/solidRenderer.ts'
 import { BUILTIN_PYLON_RENDERERS_ID } from '../../../plugins/product/productPluginIds.ts'
-import { PluginRuntime } from '../../pluginRuntime.ts'
+import { TestPluginRuntime as PluginRuntime } from '../../testing/pluginRuntimeHarness.ts'
 import type { MessageRenderer } from '../../../contracts/messageRenderer.ts'
 
 const dummyRenderer = (rendererId: string): MessageRenderer => ({
@@ -41,6 +41,7 @@ async function ensureRenderersActive() {
 }
 
 afterEach(ensureRenderersActive)
+beforeEach(ensureRenderersActive)
 
 describe('Renderer UI lifecycle', () => {
   it('产品 renderer 插件停用后 DOM 响应式回收全部贡献', async () => {

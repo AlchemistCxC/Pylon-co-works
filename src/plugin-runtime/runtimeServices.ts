@@ -15,65 +15,90 @@ import { PluginSettingOptionsRegistry } from './settings/pluginSettingOptionsReg
 import { FontContributionRegistry } from './fonts/fontContributionRegistry.ts'
 import { SessionCreationRegistry } from './session-creation/sessionCreationRegistry.ts'
 import { InterfaceModeRegistry } from './interface-mode/interfaceModeRegistry.ts'
+import {
+  getWorkspaceRegistryStore,
+  WorkspaceRegistryStore,
+} from '../workspace-sheets/workspaceRegistry.ts'
+import type { RuntimeRegistries } from './pluginHostServices.ts'
 
-const registryHub = new RegistryHub()
-const commandRegistry = new CommandRegistry()
-const eventBus = new PluginEventBus()
-const hookRuntime = new HookRuntime()
-const rendererRegistry = new RendererRegistry()
-const pluginUiRegistry = new PluginUiRegistry()
-const pluginServiceRegistry = new PluginServiceRegistry()
-const agentSidebarRegistry = new AgentSidebarRegistry()
-const fileWorkbenchRegistry = new FileWorkbenchRegistry()
-const contextPanelRegistry = new ContextPanelRegistry()
-const presentationProfileRegistry = new PresentationProfileRegistry()
-const pluginSettingsPageRegistry = new PluginSettingsPageRegistry()
-const pluginSettingsStore = new PluginSettingsStore()
-const pluginSettingOptionsRegistry = new PluginSettingOptionsRegistry()
-const fontContributionRegistry = new FontContributionRegistry()
-const sessionCreationRegistry = new SessionCreationRegistry()
-const interfaceModeRegistry = new InterfaceModeRegistry()
+export interface RuntimeServices extends RuntimeRegistries {
+  readonly hookRuntime: HookRuntime
+}
+
+export interface CreateRuntimeServicesOptions {
+  hookRuntime?: HookRuntime
+  workspaceRegistry?: WorkspaceRegistryStore
+}
+
+export function createRuntimeServices(options: CreateRuntimeServicesOptions = {}): RuntimeServices {
+  return Object.freeze({
+    registryHub: new RegistryHub(),
+    commandRegistry: new CommandRegistry(),
+    eventBus: new PluginEventBus(),
+    hookRuntime: options.hookRuntime ?? new HookRuntime(),
+    rendererRegistry: new RendererRegistry(),
+    pluginUiRegistry: new PluginUiRegistry(),
+    pluginServiceRegistry: new PluginServiceRegistry(),
+    agentSidebarRegistry: new AgentSidebarRegistry(),
+    fileWorkbenchRegistry: new FileWorkbenchRegistry(),
+    contextPanelRegistry: new ContextPanelRegistry(),
+    presentationProfileRegistry: new PresentationProfileRegistry(),
+    pluginSettingsPageRegistry: new PluginSettingsPageRegistry(),
+    pluginSettingsStore: new PluginSettingsStore(),
+    pluginSettingOptionsRegistry: new PluginSettingOptionsRegistry(),
+    fontContributionRegistry: new FontContributionRegistry(),
+    sessionCreationRegistry: new SessionCreationRegistry(),
+    interfaceModeRegistry: new InterfaceModeRegistry(),
+    workspaceRegistry: options.workspaceRegistry ?? new WorkspaceRegistryStore(),
+  })
+}
+
+const runtimeServices = createRuntimeServices({ workspaceRegistry: getWorkspaceRegistryStore() })
+
+export function getRuntimeServices(): RuntimeServices {
+  return runtimeServices
+}
 
 export function getRegistryHub(): RegistryHub {
-  return registryHub
+  return runtimeServices.registryHub
 }
 
 export function getCommandRegistry(): CommandRegistry {
-  return commandRegistry
+  return runtimeServices.commandRegistry
 }
 
 export function getPluginEventBus(): PluginEventBus {
-  return eventBus
+  return runtimeServices.eventBus
 }
 
 export function getHookRuntime(): HookRuntime {
-  return hookRuntime
+  return runtimeServices.hookRuntime
 }
 
 export function getRendererRegistry(): RendererRegistry {
-  return rendererRegistry
+  return runtimeServices.rendererRegistry
 }
 
 export function getPluginUiRegistry(): PluginUiRegistry {
-  return pluginUiRegistry
+  return runtimeServices.pluginUiRegistry
 }
 
 export function getPluginServiceRegistry(): PluginServiceRegistry {
-  return pluginServiceRegistry
+  return runtimeServices.pluginServiceRegistry
 }
 
 export function getAgentSidebarRegistry(): AgentSidebarRegistry {
-  return agentSidebarRegistry
+  return runtimeServices.agentSidebarRegistry
 }
 
-export function getFileWorkbenchRegistry(): FileWorkbenchRegistry { return fileWorkbenchRegistry }
+export function getFileWorkbenchRegistry(): FileWorkbenchRegistry { return runtimeServices.fileWorkbenchRegistry }
 
-export function getContextPanelRegistry(): ContextPanelRegistry { return contextPanelRegistry }
+export function getContextPanelRegistry(): ContextPanelRegistry { return runtimeServices.contextPanelRegistry }
 
-export function getPresentationProfileRegistry(): PresentationProfileRegistry { return presentationProfileRegistry }
-export function getPluginSettingsPageRegistry(): PluginSettingsPageRegistry { return pluginSettingsPageRegistry }
-export function getPluginSettingsStore(): PluginSettingsStore { return pluginSettingsStore }
-export function getPluginSettingOptionsRegistry(): PluginSettingOptionsRegistry { return pluginSettingOptionsRegistry }
-export function getFontContributionRegistry(): FontContributionRegistry { return fontContributionRegistry }
-export function getSessionCreationRegistry(): SessionCreationRegistry { return sessionCreationRegistry }
-export function getInterfaceModeRegistry(): InterfaceModeRegistry { return interfaceModeRegistry }
+export function getPresentationProfileRegistry(): PresentationProfileRegistry { return runtimeServices.presentationProfileRegistry }
+export function getPluginSettingsPageRegistry(): PluginSettingsPageRegistry { return runtimeServices.pluginSettingsPageRegistry }
+export function getPluginSettingsStore(): PluginSettingsStore { return runtimeServices.pluginSettingsStore }
+export function getPluginSettingOptionsRegistry(): PluginSettingOptionsRegistry { return runtimeServices.pluginSettingOptionsRegistry }
+export function getFontContributionRegistry(): FontContributionRegistry { return runtimeServices.fontContributionRegistry }
+export function getSessionCreationRegistry(): SessionCreationRegistry { return runtimeServices.sessionCreationRegistry }
+export function getInterfaceModeRegistry(): InterfaceModeRegistry { return runtimeServices.interfaceModeRegistry }

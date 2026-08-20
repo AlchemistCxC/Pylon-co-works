@@ -1,6 +1,9 @@
 /** API 1.0 plugin composition root: the only product runtime and package owner. */
 import { invoke } from '@tauri-apps/api/core'
-import { requestApplicationSoftRemount } from '../kernel/applicationRuntimeServices.ts'
+import {
+  applicationRuntime,
+  requestApplicationSoftRemount,
+} from '../kernel/applicationRuntimeServices.ts'
 import { createPluginPackageClient, type PluginPackageClient } from '../infrastructure/plugins/pluginPackageClient.ts'
 import type { PluginProcessClient } from '../infrastructure/plugins/pluginProcessClient.ts'
 import { createSkinHostPorts } from '../infrastructure/skin/skinHostPorts.ts'
@@ -11,18 +14,32 @@ import { PackagePluginRuntimeService } from './packagePluginRuntime.ts'
 import { PackageInstallationService } from './packageInstallationService.ts'
 import { getPluginProcessClient as getRuntimePluginProcessClient } from './process/processRuntimeServices.ts'
 import { PluginRuntime, type BuiltinPluginDefinition } from './pluginRuntime.ts'
-import { getCommandRegistry } from './runtimeServices.ts'
+import {
+  bootstrapPluginDefinitions,
+  type BuiltinPluginBootstrapResult,
+} from './builtinPluginBootstrap.ts'
+import { getRuntimeServices } from './runtimeServices.ts'
 import { BUILTIN_SKIN_PLUGIN_ID, createBuiltinSkinPluginDefinition } from './skin/builtinSkinPlugin.ts'
 
-const pluginRuntime = new PluginRuntime({ requestSoftRemount: requestApplicationSoftRemount })
+const runtimeServices = getRuntimeServices()
+const pluginHostServices = Object.freeze({
+  application: applicationRuntime,
+  registries: runtimeServices,
+  hooks: runtimeServices.hookRuntime,
+  processClient: getRuntimePluginProcessClient(),
+  requestSoftRemount: requestApplicationSoftRemount,
+})
+const pluginRuntime = new PluginRuntime({ host: pluginHostServices })
 const definitions = new Map<string, BuiltinPluginDefinition>()
 
 for (const definition of createBuiltinProductPluginDefinitions()) definitions.set(definition.id, definition)
 definitions.set(
   BUILTIN_SKIN_PLUGIN_ID,
-  createBuiltinSkinPluginDefinition(getSkinRuntime(), createSkinHostPorts(getSkinRuntime())),
+  {
+    ...createBuiltinSkinPluginDefinition(getSkinRuntime(), createSkinHostPorts(getSkinRuntime())),
+    criticality: 'optional',
+  },
 )
-for (const definition of definitions.values()) pluginRuntime.activateBuiltinSync(definition)
 
 export function getPluginRuntime(): PluginRuntime {
   return pluginRuntime
@@ -30,6 +47,48 @@ export function getPluginRuntime(): PluginRuntime {
 
 export function getBuiltinPluginIds(): string[] {
   return [...definitions.keys()].sort()
+}
+
+export function getBuiltinPluginCriticality(
+  pluginId: string,
+): BuiltinPluginDefinition['criticality'] | undefined {
+  return definitions.get(pluginId)?.criticality
+}
+
+export type BuiltinBootstrapMode = 'normal' | 'safe-mode'
+
+export async function bootstrapBuiltins(mode: BuiltinBootstrapMode): Promise<BuiltinPluginBootstrapResult> {
+  if (mode === 'safe-mode') {
+    for (const identity of [...pluginRuntime.snapshot().active].reverse()) {
+      if (!definitions.has(identity.pluginId)) await pluginRuntime.deactivate(identity.key)
+    }
+  }
+  return bootstrapPluginDefinitions(pluginRuntime, [...definitions.values()], mode)
+}
+
+export async function retryBuiltinPlugin(pluginId: string): Promise<BuiltinPluginBootstrapResult> {
+  if (!definitions.has(pluginId)) throw new Error(`未知内置插件：${pluginId}`)
+  const closure = new Set<string>()
+  const include = (id: string) => {
+    if (closure.has(id)) return
+    const definition = definitions.get(id)
+    if (!definition) throw new Error(`内置插件依赖不存在：${id}`)
+    for (const dependency of definition.dependencies ?? []) include(dependency)
+    closure.add(id)
+  }
+  include(pluginId)
+  const result = await bootstrapPluginDefinitions(
+    pluginRuntime,
+    [...definitions.values()].filter(definition => closure.has(definition.id)),
+    'normal',
+  )
+  const activePluginIds = pluginRuntime.snapshot().active.map(item => item.pluginId).sort()
+  const active = new Set(activePluginIds)
+  return Object.freeze({
+    activePluginIds: Object.freeze(activePluginIds),
+    failures: result.failures,
+    skippedPluginIds: Object.freeze(getBuiltinPluginIds().filter(id => !active.has(id))),
+  })
 }
 
 export async function activateBuiltinPlugin(pluginId: string): Promise<void> {
@@ -87,7 +146,7 @@ if (typeof window !== 'undefined'
       getPackagePluginRuntimeService().activateFromDirectory(sourcePath, expectedId),
     updateFromDirectory: (sourcePath, expectedId) =>
       getPackagePluginRuntimeService().updateFromDirectory(sourcePath, expectedId),
-    executeCommand: commandId => getCommandRegistry().execute(commandId),
+    executeCommand: commandId => runtimeServices.commandRegistry.execute(commandId),
     deactivate: runtimeInstanceId => pluginRuntime.deactivate(runtimeInstanceId),
     snapshot: () => pluginRuntime.snapshot(),
   }

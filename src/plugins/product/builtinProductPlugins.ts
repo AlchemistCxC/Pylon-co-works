@@ -61,6 +61,7 @@ export function createBuiltinProductPluginDefinitions(): readonly BuiltinPluginD
     packageInstanceId: pkg.packageInstanceId,
     kind: pkg.manifest.kind,
     firstParty: true,
+    criticality: 'product-required' as const,
     dependencies: Object.freeze(Object.keys(pkg.manifest.dependencies)),
     hotSwapMode: pkg.manifest.hotSwap.mode,
     drainTimeoutMs: pkg.manifest.hotSwap.drainTimeoutMs,

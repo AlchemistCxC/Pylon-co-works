@@ -1,20 +1,20 @@
 import type {
-  ApplicationContribution,
-  ApplicationRegistryTransaction,
-  ApplicationRuntime,
-} from '../../kernel/applicationRuntime.ts'
+  PluginApplicationContribution,
+  PluginApplicationHost,
+  PluginApplicationRegistryTransaction,
+} from './applicationHost.ts'
 import type { PluginIdentity } from '../pluginIdentity.ts'
 import type { PluginScope } from '../pluginScope.ts'
 
 export interface PluginApplicationApi {
-  register(contribution: ApplicationContribution): ReturnType<ApplicationRuntime['register']>
+  register(contribution: PluginApplicationContribution): ReturnType<PluginApplicationHost['register']>
 }
 
 export function createPluginApplicationApi(
-  runtime: ApplicationRuntime,
+  runtime: PluginApplicationHost,
   identity: PluginIdentity,
   scope: PluginScope,
-  transaction?: ApplicationRegistryTransaction,
+  transaction?: PluginApplicationRegistryTransaction,
 ): PluginApplicationApi {
   return {
     register: contribution => scope.add(transaction

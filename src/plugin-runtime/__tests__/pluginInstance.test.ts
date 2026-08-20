@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import { createPluginIdentity } from '../pluginIdentity'
-import { activateBuiltinPlugin, deactivatePluginInstance } from '../pluginInstance'
+import { deactivatePluginInstance } from '../pluginInstance'
+import { activateTestBuiltinPlugin as activateBuiltinPlugin } from '../testing/pluginRuntimeHarness.ts'
 
 describe('PluginInstance 静态内置插件纵向 Harness', () => {
   it('接受迁移期已有的 camelCase plugin id', async () => {

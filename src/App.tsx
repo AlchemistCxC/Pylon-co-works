@@ -157,19 +157,6 @@ export default function App() {
     getChatController()?.dispose()
   }, [])
 
-  // Plugin API 1.0：启动时读取已安装包，并激活持久化为 enabled 的版本。
-  // 单个插件失败不阻断启动。管理页会显示可操作的内联错误；冷启动不弹全局告警。
-  useEffect(() => {
-    if (!IS_TAURI) return
-    let disposed = false
-    void import('./plugin-runtime/pluginCompositionRoot').then(({ getPackageInstallationService }) => (
-      getPackageInstallationService().initialize()
-    )).catch(error => {
-      if (!disposed) console.warn('初始化用户插件失败', error)
-    })
-    return () => { disposed = true }
-  }, [])
-
   // FE-AUD-005：单一 bootstrap 事务（阶段 2）——hydrate domains → agents → prune → listener
   const [bootstrapRetry, setBootstrapRetry] = useState(0)
   useEffect(() => {

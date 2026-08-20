@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useState, useSyncExternalStore } from 'react'
 import {
   getBuiltinPluginIds,
+  getBuiltinPluginCriticality,
   getPackageInstallationService,
   getPluginRuntime,
 } from '../../plugin-runtime/pluginCompositionRoot.ts'
@@ -8,6 +9,8 @@ import { PYLON_PLUGIN_API_VERSION } from '../../plugin-runtime/packageManifest.t
 import type { PackageInstallationService } from '../../plugin-runtime/packageInstallationService.ts'
 import type { InstalledPluginPackage } from '../../infrastructure/plugins/pluginPackageClient.ts'
 import { IS_TAURI } from '../../infrastructure/tauri/env.ts'
+import { kernelBootstrap } from '../../kernel/kernelBootstrapServices.ts'
+import type { KernelBootstrap } from '../../kernel/kernelBootstrap.ts'
 
 const LOG_LIMIT = 12
 
@@ -23,6 +26,7 @@ const BUILTIN_PLUGIN_NAMES: Record<string, string> = {
 export interface PluginManagerProps {
   service?: PackageInstallationService
   pickDirectory?: () => Promise<string | null>
+  bootstrap?: KernelBootstrap
 }
 
 async function pickPluginDirectory(): Promise<string | null> {
@@ -34,6 +38,7 @@ async function pickPluginDirectory(): Promise<string | null> {
 export default function PluginManager({
   service: serviceProp,
   pickDirectory = pickPluginDirectory,
+  bootstrap = kernelBootstrap,
 }: PluginManagerProps = {}) {
   const runtime = getPluginRuntime()
   const service = serviceProp ?? getPackageInstallationService()
@@ -43,6 +48,11 @@ export default function PluginManager({
   const nativePackagesAvailable = serviceProp !== undefined || IS_TAURI || browserMockAvailable
   const subscribe = useCallback((listener: () => void) => runtime.subscribe(listener), [runtime])
   const snapshot = useSyncExternalStore(subscribe, () => runtime.snapshot(), () => runtime.snapshot())
+  const bootstrapSnapshot = useSyncExternalStore(
+    bootstrap.subscribe,
+    bootstrap.getSnapshot,
+    bootstrap.getSnapshot,
+  )
   const [installed, setInstalled] = useState<InstalledPluginPackage[]>([])
   const [busy, setBusy] = useState<string | null>(null)
   const [log, setLog] = useState<string[]>([])
@@ -61,11 +71,7 @@ export default function PluginManager({
 
   useEffect(() => {
     if (!nativePackagesAvailable) return
-    void service.initialize()
-      .then(result => {
-        for (const failure of result.failed) appendLog(`启动 ${failure.pluginId} 失败：${failure.message}`)
-        return refresh()
-      })
+    void refresh()
       .catch(error => appendLog(`读取 API 1.0 插件包失败：${error instanceof Error ? error.message : String(error)}`))
   }, [appendLog, nativePackagesAvailable, refresh, service])
 
@@ -103,7 +109,7 @@ export default function PluginManager({
 
   const setBuiltinEnabled = async (pluginId: string, enabled: boolean) => {
     await run(`${enabled ? '启用' : '停用'} ${pluginId}`, async () => {
-      if (enabled) await runtime.enable(pluginId)
+      if (enabled) await bootstrap.retryPlugin(pluginId)
       else await runtime.disable(pluginId)
       return { ok: true }
     })
@@ -114,6 +120,10 @@ export default function PluginManager({
     const installedItem = installedById.get(pluginId)
     const enabled = builtin ? Boolean(identity) : (installedItem?.enabled ?? false)
     const manifest = installedItem?.package.manifest
+    const productRequired = builtin && getBuiltinPluginCriticality(pluginId) === 'product-required'
+    const bootstrapFailure = bootstrapSnapshot.kind === 'degraded'
+      ? bootstrapSnapshot.failures.find(failure => failure.pluginId === pluginId)
+      : undefined
     const displayName = builtin
       ? BUILTIN_PLUGIN_NAMES[pluginId] ?? pluginId
       : (typeof manifest?.name === 'string' ? manifest.name : pluginId)
@@ -128,7 +138,13 @@ export default function PluginManager({
           <span className={`plugin-type-badge ${builtin ? 'type-first-party' : 'type-package'}`}>
             {builtin ? '内置' : (typeof manifest?.kind === 'string' ? manifest.kind : '外置')}
           </span>
-          <span className={`plugin-state-badge ${identity ? 'is-active' : ''}`}>{identity ? '运行中' : enabled ? '等待激活' : '已停用'}</span>
+          {productRequired && <span className="plugin-type-badge type-first-party">产品运行必需</span>}
+          <span className={`plugin-state-badge ${identity ? 'is-active' : ''}`}>
+            {identity ? '运行中'
+              : bootstrapFailure ? '启动失败'
+                : bootstrapSnapshot.kind === 'safe-mode' && builtin ? '安全模式未启动'
+                  : enabled ? '等待激活' : '已停用'}
+          </span>
           <details className="plugin-technical">
             <summary>技术信息</summary>
             <div>API {PYLON_PLUGIN_API_VERSION} · {identity
@@ -141,7 +157,7 @@ export default function PluginManager({
             type="button"
             className="ps-btn sm"
             aria-label={`${identity ? '停用' : '启用'} ${pluginId}`}
-            disabled={busy !== null}
+            disabled={busy !== null || Boolean(identity && productRequired)}
             onClick={() => void (builtin
               ? setBuiltinEnabled(pluginId, !identity)
               : run(`${identity ? '停用' : '启用'} ${pluginId}`, () => service.setEnabled(pluginId, !identity)))}
@@ -175,6 +191,36 @@ export default function PluginManager({
         <span><strong>{snapshot.active.length}</strong> 个运行中</span>
         <span><strong>{installed.length}</strong> 个用户插件</span>
       </div>
+
+      {(bootstrapSnapshot.kind === 'starting' || bootstrapSnapshot.kind === 'idle') && (
+        <div className="set-hint" role="status">Kernel Plugin Host 正在启动…</div>
+      )}
+      {bootstrapSnapshot.kind === 'safe-mode' && (
+        <div className="set-hint" role="status">Kernel 当前处于安全模式，Product Plugin 未自动启动。</div>
+      )}
+      {bootstrapSnapshot.kind === 'degraded' && (
+        <div className="set-group" aria-label="插件启动故障">
+          <div className="set-group-title" aria-expanded="true">启动故障</div>
+          {bootstrapSnapshot.failures.map(failure => (
+            <div className="plugin-row" key={`${failure.pluginId}:${failure.stage}`} role="alert">
+              <span className="plugin-row-id">{failure.pluginId}</span>
+              <span className="set-hint">{failure.stage} · {failure.message}</span>
+              {failure.retryable && (
+                <button
+                  type="button"
+                  className="ps-btn sm"
+                  onClick={() => { void bootstrap.retryPlugin(failure.pluginId) }}
+                >
+                  重试 {failure.pluginId}
+                </button>
+              )}
+            </div>
+          ))}
+          <button type="button" className="ps-btn sm" onClick={() => { void bootstrap.startSafeMode() }}>
+            进入安全模式
+          </button>
+        </div>
+      )}
 
       <div className="set-group">
         <div className="set-group-title" aria-expanded="true">

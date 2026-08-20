@@ -246,6 +246,10 @@ export class WorkspaceRegistryStore {
 
 const store = new WorkspaceRegistryStore()
 
+export function getWorkspaceRegistryStore(): WorkspaceRegistryStore {
+  return store
+}
+
 export function registerWorkspace(owner: PluginIdentity, descriptor: WorkspaceTypeDefinition): AsyncDisposable {
   return store.register(owner, descriptor)
 }

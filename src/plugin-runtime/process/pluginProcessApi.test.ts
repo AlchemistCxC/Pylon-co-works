@@ -4,7 +4,7 @@ import type {
   PluginProcessClient,
 } from '../../infrastructure/plugins/pluginProcessClient.ts'
 import { createPackagePluginIdentity, createPluginIdentity } from '../pluginIdentity.ts'
-import { PluginRuntime } from '../pluginRuntime.ts'
+import { TestPluginRuntime as PluginRuntime } from '../testing/pluginRuntimeHarness.ts'
 import { PluginScope } from '../pluginScope.ts'
 import { createPluginProcessApi } from './pluginProcessApi.ts'
 import { setPluginProcessClientForTests } from './processRuntimeServices.ts'

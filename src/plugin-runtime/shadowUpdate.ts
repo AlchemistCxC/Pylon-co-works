@@ -1,9 +1,9 @@
-import { beginWorkspaceShadowTransaction } from '../workspace-sheets/workspaceRegistry.ts'
 import type { PluginIdentity } from './pluginIdentity.ts'
-import type { PluginActivationTransactions } from './pluginActivationContext.ts'
-import { getAgentSidebarRegistry, getCommandRegistry, getContextPanelRegistry, getFileWorkbenchRegistry, getFontContributionRegistry, getHookRuntime, getInterfaceModeRegistry, getPluginServiceRegistry, getPluginSettingOptionsRegistry, getPluginSettingsPageRegistry, getPluginUiRegistry, getPresentationProfileRegistry, getRendererRegistry, getSessionCreationRegistry } from './runtimeServices.ts'
+import type {
+  PluginActivationTransactions,
+} from './pluginActivationContext.ts'
+import type { PluginHostServices } from './pluginHostServices.ts'
 import { runRegistryBatch } from './registry/registryBatch.ts'
-import { applicationRuntime } from '../kernel/applicationRuntimeServices.ts'
 
 export type HotSwapMode = 'parallel' | 'exclusive' | 'soft-remount' | 'restart-required'
 
@@ -24,24 +24,29 @@ export class PluginContributionTransaction {
   readonly transactions: PluginActivationTransactions
   private state: 'open' | 'committed' | 'rolled-back' | 'reverted' = 'open'
 
-  constructor(candidate: PluginIdentity, replacingRuntimeInstanceId: string) {
+  constructor(
+    host: PluginHostServices,
+    candidate: PluginIdentity,
+    replacingRuntimeInstanceId: string,
+  ) {
+    const { registries } = host
     this.transactions = {
-      application: applicationRuntime.beginShadowTransaction(candidate, replacingRuntimeInstanceId),
-      commands: getCommandRegistry().beginShadowTransaction(candidate, replacingRuntimeInstanceId),
-      hooks: getHookRuntime().registry.beginShadowTransaction(candidate, replacingRuntimeInstanceId),
-      renderer: getRendererRegistry().beginShadowTransaction(candidate, replacingRuntimeInstanceId),
-      workspace: beginWorkspaceShadowTransaction(candidate, replacingRuntimeInstanceId),
-      ui: getPluginUiRegistry().beginShadowTransaction(candidate, replacingRuntimeInstanceId),
-      services: getPluginServiceRegistry().beginShadowTransaction(candidate, replacingRuntimeInstanceId),
-      sidebar: getAgentSidebarRegistry().beginShadowTransaction(candidate, replacingRuntimeInstanceId),
-      fileWorkbench: getFileWorkbenchRegistry().beginShadowTransaction(candidate, replacingRuntimeInstanceId),
-      contextPanel: getContextPanelRegistry().beginShadowTransaction(candidate, replacingRuntimeInstanceId),
-      presentation: getPresentationProfileRegistry().beginShadowTransaction(candidate, replacingRuntimeInstanceId),
-      settings: getPluginSettingsPageRegistry().beginShadowTransaction(candidate, replacingRuntimeInstanceId),
-      settingOptions: getPluginSettingOptionsRegistry().beginShadowTransaction(candidate, replacingRuntimeInstanceId),
-      fonts: getFontContributionRegistry().beginShadowTransaction(candidate, replacingRuntimeInstanceId),
-      sessionCreation: getSessionCreationRegistry().beginShadowTransaction(candidate, replacingRuntimeInstanceId),
-      interfaceModes: getInterfaceModeRegistry().beginShadowTransaction(candidate, replacingRuntimeInstanceId),
+      application: host.application.beginShadowTransaction(candidate, replacingRuntimeInstanceId),
+      commands: registries.commandRegistry.beginShadowTransaction(candidate, replacingRuntimeInstanceId),
+      hooks: host.hooks.registry.beginShadowTransaction(candidate, replacingRuntimeInstanceId),
+      renderer: registries.rendererRegistry.beginShadowTransaction(candidate, replacingRuntimeInstanceId),
+      workspace: registries.workspaceRegistry.beginShadowTransaction(candidate, replacingRuntimeInstanceId),
+      ui: registries.pluginUiRegistry.beginShadowTransaction(candidate, replacingRuntimeInstanceId),
+      services: registries.pluginServiceRegistry.beginShadowTransaction(candidate, replacingRuntimeInstanceId),
+      sidebar: registries.agentSidebarRegistry.beginShadowTransaction(candidate, replacingRuntimeInstanceId),
+      fileWorkbench: registries.fileWorkbenchRegistry.beginShadowTransaction(candidate, replacingRuntimeInstanceId),
+      contextPanel: registries.contextPanelRegistry.beginShadowTransaction(candidate, replacingRuntimeInstanceId),
+      presentation: registries.presentationProfileRegistry.beginShadowTransaction(candidate, replacingRuntimeInstanceId),
+      settings: registries.pluginSettingsPageRegistry.beginShadowTransaction(candidate, replacingRuntimeInstanceId),
+      settingOptions: registries.pluginSettingOptionsRegistry.beginShadowTransaction(candidate, replacingRuntimeInstanceId),
+      fonts: registries.fontContributionRegistry.beginShadowTransaction(candidate, replacingRuntimeInstanceId),
+      sessionCreation: registries.sessionCreationRegistry.beginShadowTransaction(candidate, replacingRuntimeInstanceId),
+      interfaceModes: registries.interfaceModeRegistry.beginShadowTransaction(candidate, replacingRuntimeInstanceId),
     }
   }
 

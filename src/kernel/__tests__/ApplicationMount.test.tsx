@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import { act, fireEvent, render, screen } from '@testing-library/react'
-import { describe, expect, it } from 'vitest'
+import { describe, expect, it, vi } from 'vitest'
 import ApplicationMount from '../ApplicationMount'
 import KernelRecoveryLayer from '../KernelRecoveryLayer'
 import { createApplicationRuntime } from '../applicationRuntime'
@@ -50,5 +50,18 @@ describe('ApplicationMount', () => {
     expect(screen.getByTestId('kernel-root-host')).toBe(host)
     expect(screen.getByTestId('demo-application')).toBeInTheDocument()
     view.unmount()
+  })
+
+  it('Safe Mode lets the user explicitly start one first-party plugin', () => {
+    const onRetry = vi.fn()
+    render(<KernelRecoveryLayer
+      state={{ kind: 'safe-mode', skippedPluginIds: ['builtin.pylon-shell'] }}
+      onRetry={onRetry}
+      onStartNormal={vi.fn()}
+    />)
+
+    fireEvent.click(screen.getByRole('button', { name: '启动 builtin.pylon-shell' }))
+
+    expect(onRetry).toHaveBeenCalledWith('builtin.pylon-shell')
   })
 })

@@ -1,6 +1,6 @@
 # Pylon Kernel 加固施工台账
 
-> 最新完成（2026-08-21）：`WI-A5 / AGT-010、SES-010、OBS-004`——Agent client 代际与远端 Session 连续性已拆分为 `Preserved / Invalidated / Unknown`；未知连续性在共享 30 秒上限内以最多 4 路 `session/load` 探测收敛为 Attached/Detached，探测期与失联后的通知、发送均由 Kernel 门禁拒绝。远端 session missing 改用结构化 RPC 分类并清理幽灵映射；状态快照只暴露 agent/source/health/reason 等安全元数据，前端锁定发送并仅允许用户显式重试或分叉。Rust 20 项定向回归、TS 39 项定向回归、Rust check/format 与全项目 TS build 通过。下一项 `WI-P1`。
+> 最新完成（2026-08-21）：`WI-P1 / PLG-001、PLG-002、PLG-005`——Kernel recovery surface 先于 Plugin Host 激活可见；内置插件改由显式 bootstrap 事务激活，失败隔离、依赖跳过、可重试 degraded 状态与 Safe Mode 已闭环。五个 Product Plugin 标记为 `product-required` 并拒绝普通停用；Plugin Runtime 通过显式 `PluginHostServices` 获取 Kernel/registry 能力，移除 activation path 对全局服务与 Kernel 的反向依赖；用户包初始化归 Kernel bootstrap 管理。55 项定向回归、全项目 TS build、目标 ESLint 与 diff check 通过。下一项 `WI-P2`。
 >
 > 长程目标：在保留现有五个第一方 Product Plugin 构造的前提下，持续加固 Pylon Kernel 的持久化、重放、生命周期、Agent Runtime、插件故障隔离和结构化错误。  
 > 基线提交：`a38145b chore: establish kernel hardening baseline`  

@@ -1,12 +1,13 @@
-import { afterEach, describe, expect, it } from 'vitest'
+import { afterEach, beforeAll, describe, expect, it } from 'vitest'
 import {
   resolveRendererMountProps,
   type MessageRenderer,
   type RenderSurface,
 } from '../../contracts/messageRenderer'
-import { activateBuiltinPlugin, deactivatePluginInstance, type PluginInstance } from '../../plugin-runtime/pluginInstance'
+import { deactivatePluginInstance, type PluginInstance } from '../../plugin-runtime/pluginInstance'
+import { activateTestBuiltinPlugin as activateBuiltinPlugin } from '../../plugin-runtime/testing/pluginRuntimeHarness.ts'
 import { createPluginIdentity } from '../../plugin-runtime/pluginIdentity'
-import '../../plugin-runtime/pluginCompositionRoot'
+import { bootstrapBuiltins } from '../../plugin-runtime/pluginCompositionRoot'
 import {
   resolveActiveMessageRenderers,
   resolveDefaultMessageRenderer,
@@ -15,6 +16,8 @@ import {
 } from '../messageRendererResolver'
 
 const temporaryInstances: PluginInstance[] = []
+
+beforeAll(async () => { await bootstrapBuiltins('normal') })
 
 afterEach(async () => {
   while (temporaryInstances.length > 0) await deactivatePluginInstance(temporaryInstances.pop()!)

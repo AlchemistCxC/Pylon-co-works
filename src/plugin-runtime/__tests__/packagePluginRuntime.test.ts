@@ -2,7 +2,7 @@ import { describe, expect, it, vi } from 'vitest'
 import type { PluginPackageClient, PluginPackageDescriptor } from '../../infrastructure/plugins/pluginPackageClient.ts'
 import { getCommandRegistry } from '../runtimeServices.ts'
 import { PackagePluginRuntimeService } from '../packagePluginRuntime.ts'
-import { PluginRuntime } from '../pluginRuntime.ts'
+import { TestPluginRuntime as PluginRuntime } from '../testing/pluginRuntimeHarness.ts'
 
 function descriptor(version: string, styles: readonly string[] = []): PluginPackageDescriptor {
   return {

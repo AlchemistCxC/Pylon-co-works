@@ -2,8 +2,8 @@ import type { PluginIdentity } from './pluginIdentity.ts'
 import type { PluginScopeDisposeResult } from './pluginScope.ts'
 import { createPluginActivationTransaction } from './pluginTransaction.ts'
 import {
-  createPluginActivationContext,
   type BuiltinPluginActivationContext,
+  type PluginActivationContextFactory,
 } from './pluginActivationContext.ts'
 
 export type { BuiltinPluginActivationContext } from './pluginActivationContext.ts'
@@ -30,10 +30,11 @@ export interface PluginDeactivateResult {
 export async function activateBuiltinPlugin(
   identity: PluginIdentity,
   activate: BuiltinPluginActivate,
+  createContext: PluginActivationContextFactory,
 ): Promise<PluginInstance> {
   const transaction = createPluginActivationTransaction(identity)
   try {
-    await activate(createPluginActivationContext(identity, transaction.scope))
+    await activate(createContext(identity, transaction.scope))
     return {
       identity,
       scope: transaction.commit(),

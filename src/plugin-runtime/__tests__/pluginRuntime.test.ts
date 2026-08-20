@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from 'vitest'
-import { PluginRuntime } from '../pluginRuntime'
+import { TestPluginRuntime as PluginRuntime } from '../testing/pluginRuntimeHarness.ts'
 import { getCommandRegistry, getHookRuntime } from '../runtimeServices'
 
 describe('PluginRuntime 静态内置插件 Harness', () => {
@@ -272,5 +272,24 @@ describe('PluginRuntime 静态内置插件 Harness', () => {
     expect(reloaded.runtimeInstanceId).not.toBe(enabled.identity.key)
     expect(activated).toHaveBeenCalledTimes(3)
     await runtime.disable('phase10.lifecycle')
+  })
+
+  it('rejects ordinary disable for product-required plugins while recovery can deactivate by instance', async () => {
+    const runtime = new PluginRuntime()
+    const active = await runtime.activateBuiltin({
+      id: 'builtin.product-required',
+      criticality: 'product-required',
+      activate: () => {},
+    })
+
+    await expect(runtime.disable('builtin.product-required')).rejects.toMatchObject({
+      name: 'PluginDisableRejectedError',
+      code: 'product_plugin_required',
+      pluginId: 'builtin.product-required',
+    })
+    expect(runtime.snapshot().active).toEqual([active.identity])
+
+    await runtime.deactivate(active.identity.key)
+    expect(runtime.snapshot().active).toEqual([])
   })
 })

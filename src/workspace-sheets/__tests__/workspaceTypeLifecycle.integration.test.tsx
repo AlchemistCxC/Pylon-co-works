@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 import { act, render, screen } from '@testing-library/react'
 import { beforeEach, describe, expect, it } from 'vitest'
-import { PluginRuntime } from '../../plugin-runtime/pluginRuntime'
+import { TestPluginRuntime as PluginRuntime } from '../../plugin-runtime/testing/pluginRuntimeHarness.ts'
 import { resetStores } from '../../test/resetStores'
 import { useWorkspaceStore } from '../../workspaceStore'
 import SheetLayout from '../SheetLayout'

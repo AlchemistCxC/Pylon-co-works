@@ -1,11 +1,12 @@
 // @vitest-environment jsdom
 import { fireEvent, render, screen } from '@testing-library/react'
-import { afterEach, describe, expect, it, vi } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import PluginManager from '../PluginManager.tsx'
 import type { InstalledPluginPackage } from '../../../infrastructure/plugins/pluginPackageClient.ts'
 import type { PackageInstallationService } from '../../../plugin-runtime/packageInstallationService.ts'
+import type { KernelBootstrap } from '../../../kernel/kernelBootstrap.ts'
 import {
-  getBuiltinPluginIds,
+  bootstrapBuiltins,
   getPluginRuntime,
 } from '../../../plugin-runtime/pluginCompositionRoot.ts'
 
@@ -43,11 +44,12 @@ function fakeService(items: InstalledPluginPackage[] = []) {
   }
 }
 
+beforeEach(async () => {
+  await bootstrapBuiltins('normal')
+})
+
 afterEach(async () => {
   const runtime = getPluginRuntime()
-  for (const pluginId of getBuiltinPluginIds()) {
-    if (!runtime.snapshot().active.some(identity => identity.pluginId === pluginId)) await runtime.enable(pluginId)
-  }
   const demo = runtime.snapshot().active.find(identity => identity.pluginId === 'phase12.ui-mode')
   if (demo) await runtime.deactivate(demo.runtimeInstanceId)
 })
@@ -96,5 +98,73 @@ describe('PluginManager v2-only', () => {
     expect(screen.getByText('phase12.ui-mode')).toBeInTheDocument()
     expect(screen.getByText('声明 parallel · 实际采用 parallel')).toBeInTheDocument()
     expect(result.previousRuntimeInstanceId).toBe(initial.identity.key)
+  })
+
+  it('does not offer ordinary disable for product-required builtins', async () => {
+    await bootstrapBuiltins('normal')
+    const service = fakeService()
+
+    render(<PluginManager service={service as unknown as PackageInstallationService} />)
+
+    expect(screen.getByRole('button', { name: '停用 builtin.pylon-shell' })).toBeDisabled()
+    expect(screen.getAllByText('产品运行必需')).toHaveLength(5)
+  })
+
+  it('shows degraded bootstrap failures and delegates explicit retry to the Kernel supervisor', async () => {
+    const failure = {
+      pluginId: 'builtin.pylon-shell',
+      stage: 'activate' as const,
+      code: 'plugin_activation_failed',
+      message: 'shell entry rejected',
+      retryable: true,
+    }
+    const retryPlugin = vi.fn(async () => undefined)
+    const snapshot = {
+      kind: 'degraded' as const,
+      activePluginIds: [],
+      failures: [failure],
+      skippedPluginIds: [],
+    }
+    const bootstrap: KernelBootstrap = {
+      getSnapshot: () => snapshot,
+      subscribe: () => () => undefined,
+      startNormal: vi.fn(async () => undefined),
+      startSafeMode: vi.fn(async () => undefined),
+      retryPlugin,
+    }
+
+    render(<PluginManager
+      service={fakeService() as unknown as PackageInstallationService}
+      bootstrap={bootstrap}
+    />)
+
+    expect(screen.getByText(/shell entry rejected/)).toBeInTheDocument()
+    fireEvent.click(screen.getByRole('button', { name: '重试 builtin.pylon-shell' }))
+    expect(retryPlugin).toHaveBeenCalledWith('builtin.pylon-shell')
+  })
+
+  it('routes builtin enable through the Kernel dependency-closure retry action', async () => {
+    const retryPlugin = vi.fn(async () => undefined)
+    const snapshot = {
+      kind: 'safe-mode' as const,
+      skippedPluginIds: ['builtin.skin'],
+    }
+    const bootstrap: KernelBootstrap = {
+      getSnapshot: () => snapshot,
+      subscribe: () => () => undefined,
+      startNormal: vi.fn(async () => undefined),
+      startSafeMode: vi.fn(async () => undefined),
+      retryPlugin,
+    }
+    await bootstrapBuiltins('safe-mode')
+
+    render(<PluginManager
+      service={fakeService() as unknown as PackageInstallationService}
+      bootstrap={bootstrap}
+    />)
+    fireEvent.click(screen.getByRole('button', { name: '启用 builtin.skin' }))
+
+    expect(await screen.findByText('启用 builtin.skin成功')).toBeInTheDocument()
+    expect(retryPlugin).toHaveBeenCalledWith('builtin.skin')
   })
 })

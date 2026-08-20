@@ -7,16 +7,14 @@ import {
   type WorkspaceOpenInput,
 } from '../../workspace-sheets/workspaceController.ts'
 import {
-  listWorkspaces,
-  registerWorkspace,
-  resolveWorkspace,
+  type WorkspaceRegistryStore,
   type WorkspaceRegistryTransaction,
 } from '../../workspace-sheets/workspaceRegistry.ts'
 import type { PluginIdentity } from '../pluginIdentity.ts'
 import type { PluginScope } from '../pluginScope.ts'
 
 export interface PluginWorkspaceApi {
-  registerType(definition: WorkspaceTypeDefinition): ReturnType<typeof registerWorkspace>
+  registerType(definition: WorkspaceTypeDefinition): ReturnType<WorkspaceRegistryStore['register']>
   open(input: WorkspaceOpenInput): ReturnType<typeof openWorkspace>
   focus(id: string): boolean
   close(id: string): Promise<boolean>
@@ -27,6 +25,7 @@ export interface PluginWorkspaceApi {
 
 /** v2 workspace API；所有注册句柄自动绑定当前插件实例的 PluginScope。 */
 export function createPluginWorkspaceApi(
+  registry: WorkspaceRegistryStore,
   identity: PluginIdentity,
   scope: PluginScope,
   transaction?: WorkspaceRegistryTransaction,
@@ -36,7 +35,7 @@ export function createPluginWorkspaceApi(
       if (scope.isDisposed) throw new Error(`PluginScope 已释放：${scope.ownerKey}`)
       const registration = transaction
         ? transaction.register(definition)
-        : registerWorkspace(identity, definition)
+        : registry.register(identity, definition)
       try {
         return scope.add(registration)
       } catch (error) {
@@ -48,7 +47,7 @@ export function createPluginWorkspaceApi(
     focus: id => focusWorkspace(id),
     close: id => closeWorkspace(id),
     list: () => listOpenWorkspaces(),
-    listTypes: () => listWorkspaces(),
-    describe: type => resolveWorkspace(type),
+    listTypes: () => registry.list(),
+    describe: type => registry.resolve(type),
   }
 }

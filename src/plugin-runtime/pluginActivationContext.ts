@@ -1,6 +1,5 @@
 import { createPluginSessionDataApis, type PluginSessionsApi, type PluginTurnsApi } from './sessionData/pluginSessionDataApi.ts'
 import { createPluginProcessApi } from './process/pluginProcessApi.ts'
-import { getPluginProcessClient } from './process/processRuntimeServices.ts'
 import type { PluginProcessApi } from './process/processTypes.ts'
 import { createPluginWorkspaceApi, type PluginWorkspaceApi } from './workspaces/pluginWorkspaceApi.ts'
 import { createPluginRendererApi, type RendererApi } from './renderers/pluginRendererApi.ts'
@@ -10,11 +9,10 @@ import type { CommandRegistryTransaction } from './commands/commandRegistry.ts'
 import type { HookRegistryTransaction } from './hooks/hookRegistry.ts'
 import type { RendererRegistryTransaction } from './renderers/rendererRegistry.ts'
 import type { WorkspaceRegistryTransaction } from '../workspace-sheets/workspaceRegistry.ts'
-import type { ApplicationRegistryTransaction } from '../kernel/applicationRuntime.ts'
+import type { PluginApplicationRegistryTransaction } from './application/applicationHost.ts'
 import type { PluginIdentity } from './pluginIdentity.ts'
 import type { PluginScope } from './pluginScope.ts'
-import { getAgentSidebarRegistry, getCommandRegistry, getContextPanelRegistry, getFileWorkbenchRegistry, getFontContributionRegistry, getHookRuntime, getInterfaceModeRegistry, getPluginServiceRegistry, getPluginSettingOptionsRegistry, getPluginSettingsPageRegistry, getPluginSettingsStore, getPluginUiRegistry, getPresentationProfileRegistry, getRendererRegistry, getSessionCreationRegistry } from './runtimeServices.ts'
-import { applicationRuntime } from '../kernel/applicationRuntimeServices.ts'
+import type { PluginHostServices } from './pluginHostServices.ts'
 import {
   createPluginApplicationApi,
   type PluginApplicationApi,
@@ -43,7 +41,7 @@ import { createPluginInterfaceModeApi, type PluginInterfaceModeApi } from './int
 import type { InterfaceModeContribution } from './interface-mode/interfaceModeTypes.ts'
 
 export interface PluginActivationTransactions {
-  readonly application: ApplicationRegistryTransaction
+  readonly application: PluginApplicationRegistryTransaction
   readonly commands: CommandRegistryTransaction
   readonly hooks: HookRegistryTransaction
   readonly renderer: RendererRegistryTransaction
@@ -84,47 +82,55 @@ export interface BuiltinPluginActivationContext {
   readonly interfaceModes: PluginInterfaceModeApi
 }
 
+export type PluginActivationContextFactory = (
+  identity: PluginIdentity,
+  scope: PluginScope,
+  transactions?: PluginActivationTransactions,
+) => BuiltinPluginActivationContext
+
 export function createPluginActivationContext(
+  host: PluginHostServices,
   identity: PluginIdentity,
   scope: PluginScope,
   transactions?: PluginActivationTransactions,
 ): BuiltinPluginActivationContext {
   const dataApis = createPluginSessionDataApis(identity)
+  const { registries } = host
   return {
     identity,
     scope,
-    application: createPluginApplicationApi(applicationRuntime, identity, scope, transactions?.application),
-    workspace: createPluginWorkspaceApi(identity, scope, transactions?.workspace),
-    renderer: createPluginRendererApi(getRendererRegistry(), identity, scope, transactions?.renderer),
-    commands: createPluginCommandApi(getCommandRegistry(), identity, scope, transactions?.commands),
-    hooks: createPluginHookApi(getHookRuntime(), identity, scope, transactions?.hooks),
+    application: createPluginApplicationApi(host.application, identity, scope, transactions?.application),
+    workspace: createPluginWorkspaceApi(registries.workspaceRegistry, identity, scope, transactions?.workspace),
+    renderer: createPluginRendererApi(registries.rendererRegistry, identity, scope, transactions?.renderer),
+    commands: createPluginCommandApi(registries.commandRegistry, identity, scope, transactions?.commands),
+    hooks: createPluginHookApi(host.hooks, identity, scope, transactions?.hooks),
     sessions: dataApis.sessions,
     turns: dataApis.turns,
-    process: createPluginProcessApi(identity, scope, getPluginProcessClient()),
-    ui: createPluginUiApi(getPluginUiRegistry(), identity, scope, transactions?.ui),
-    services: createPluginServiceApi(getPluginServiceRegistry(), identity, scope, transactions?.services),
-    sidebar: createPluginSidebarApi(getAgentSidebarRegistry(), identity, scope, transactions?.sidebar),
-    fileWorkbench: createPluginFileWorkbenchApi(getFileWorkbenchRegistry(), identity, scope, transactions?.fileWorkbench),
-    contextPanel: createPluginContextPanelApi(getContextPanelRegistry(), identity, scope, transactions?.contextPanel),
-    presentation: createPluginPresentationApi(getPresentationProfileRegistry(), identity, scope, transactions?.presentation),
+    process: createPluginProcessApi(identity, scope, host.processClient),
+    ui: createPluginUiApi(registries.pluginUiRegistry, identity, scope, transactions?.ui),
+    services: createPluginServiceApi(registries.pluginServiceRegistry, identity, scope, transactions?.services),
+    sidebar: createPluginSidebarApi(registries.agentSidebarRegistry, identity, scope, transactions?.sidebar),
+    fileWorkbench: createPluginFileWorkbenchApi(registries.fileWorkbenchRegistry, identity, scope, transactions?.fileWorkbench),
+    contextPanel: createPluginContextPanelApi(registries.contextPanelRegistry, identity, scope, transactions?.contextPanel),
+    presentation: createPluginPresentationApi(registries.presentationProfileRegistry, identity, scope, transactions?.presentation),
     settings: createPluginSettingsApi(
-      getPluginSettingsPageRegistry(),
-      getPluginSettingsStore(),
+      registries.pluginSettingsPageRegistry,
+      registries.pluginSettingsStore,
       identity,
       scope,
       transactions?.settings,
-      getPluginSettingOptionsRegistry(),
+      registries.pluginSettingOptionsRegistry,
       transactions?.settingOptions,
     ),
-    fonts: createPluginFontApi(getFontContributionRegistry(), identity, scope, transactions?.fonts),
+    fonts: createPluginFontApi(registries.fontContributionRegistry, identity, scope, transactions?.fonts),
     sessionCreation: createPluginSessionCreationApi(
-      getSessionCreationRegistry(),
+      registries.sessionCreationRegistry,
       identity,
       scope,
       transactions?.sessionCreation,
     ),
     interfaceModes: createPluginInterfaceModeApi(
-      getInterfaceModeRegistry(),
+      registries.interfaceModeRegistry,
       identity,
       scope,
       transactions?.interfaceModes,

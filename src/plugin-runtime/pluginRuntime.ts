@@ -7,19 +7,23 @@ import {
   type PluginDeactivateResult,
   type PluginInstance,
 } from './pluginInstance.ts'
-import { createPluginActivationContext } from './pluginActivationContext.ts'
+import {
+  createPluginActivationContext,
+  type PluginActivationContextFactory,
+} from './pluginActivationContext.ts'
+import type { PluginHostServices } from './pluginHostServices.ts'
 import { PluginScope } from './pluginScope.ts'
 import {
   PluginContributionTransaction,
   type HotSwapMode,
   type PluginUpdateResult,
 } from './shadowUpdate.ts'
-import { getHookRuntime } from './runtimeServices.ts'
 
 export interface BuiltinPluginDefinition {
   id: string
   kind?: 'shell' | 'workspace' | 'feature' | 'hook' | 'renderer' | 'skin' | 'agent-adapter' | 'tool-provider' | 'service' | 'automation'
   firstParty?: boolean
+  criticality?: 'kernel-required' | 'product-required' | 'optional'
   dependencies?: readonly string[]
   version?: string
   packageInstanceId?: string
@@ -48,6 +52,7 @@ export interface PluginRuntimeSnapshot {
 }
 
 export interface PluginRuntimeOptions {
+  host: PluginHostServices
   requestSoftRemount?: () => void | Promise<void>
 }
 
@@ -69,6 +74,17 @@ export class PluginRestartRequiredError extends Error {
   }
 }
 
+export class PluginDisableRejectedError extends Error {
+  readonly code = 'product_plugin_required'
+  readonly pluginId: string
+
+  constructor(pluginId: string) {
+    super(`产品运行所需插件不能通过普通管理操作停用：${pluginId}`)
+    this.name = 'PluginDisableRejectedError'
+    this.pluginId = pluginId
+  }
+}
+
 export class PluginRuntime {
   private readonly instances = new Map<string, PluginInstance>()
   private readonly definitions = new Map<string, BuiltinPluginDefinition>()
@@ -77,6 +93,8 @@ export class PluginRuntime {
   private readonly updateQueues = new Map<string, Promise<void>>()
   private readonly switchRecords = new Map<string, PluginSwitchDescriptor>()
   private readonly options: PluginRuntimeOptions
+  private readonly host: PluginHostServices
+  private readonly createContext: PluginActivationContextFactory
   private instanceSequence = 0
   private revision = 0
   private currentSnapshot: PluginRuntimeSnapshot = Object.freeze({
@@ -85,8 +103,12 @@ export class PluginRuntime {
     switches: Object.freeze([]),
   })
 
-  constructor(options: PluginRuntimeOptions = {}) {
+  constructor(options: PluginRuntimeOptions) {
     this.options = options
+    this.host = options.host
+    this.createContext = (identity, scope, transactions) => (
+      createPluginActivationContext(this.host, identity, scope, transactions)
+    )
   }
 
   snapshot(): PluginRuntimeSnapshot {
@@ -131,7 +153,7 @@ export class PluginRuntime {
     const instance = await activateBuiltinPlugin(identity, async context => {
       const prepared = await definition.prepare?.(context)
       await definition.activate(context, prepared)
-    })
+    }, this.createContext)
     this.instances.set(identity.key, instance)
     this.definitions.set(identity.key, definition)
     this.knownDefinitions.set(definition.id, definition)
@@ -145,7 +167,7 @@ export class PluginRuntime {
     const instance = await activateBuiltinPlugin(resolvedIdentity, async context => {
       const prepared = await definition.prepare?.(context)
       await definition.activate(context, prepared)
-    })
+    }, this.createContext)
     this.instances.set(resolvedIdentity.key, instance)
     this.definitions.set(resolvedIdentity.key, definition)
     this.knownDefinitions.set(definition.id, definition)
@@ -153,7 +175,7 @@ export class PluginRuntime {
     return instance
   }
 
-  /** 模块启动期内置插件路径：只接受同步 activate，避免首帧贡献空窗。 */
+  /** 仅供明确要求同步完成的集成入口；Kernel bootstrap 不使用此路径。 */
   activateBuiltinSync(definition: BuiltinPluginDefinition): PluginInstance {
     this.assertInactive(definition.id)
     if (definition.prepare) throw new Error(`同步激活不支持 prepare：${definition.id}`)
@@ -162,7 +184,7 @@ export class PluginRuntime {
       : createPluginIdentity(definition.id, `builtin-${++this.instanceSequence}`)
     const scope = new PluginScope(identity.key)
     try {
-      const result = definition.activate(createPluginActivationContext(identity, scope))
+      const result = definition.activate(this.createContext(identity, scope))
       if (result && typeof (result as PromiseLike<unknown>).then === 'function') {
         throw new Error(`同步激活要求 activate 同步返回：${definition.id}`)
       }
@@ -222,8 +244,12 @@ export class PluginRuntime {
 
     const mode = definition.hotSwapMode ?? 'parallel'
     const scope = new PluginScope(candidateIdentity.key)
-    const contributions = new PluginContributionTransaction(candidateIdentity, oldInstance.identity.key)
-    const context = createPluginActivationContext(candidateIdentity, scope, contributions.transactions)
+    const contributions = new PluginContributionTransaction(
+      this.host,
+      candidateIdentity,
+      oldInstance.identity.key,
+    )
+    const context = this.createContext(candidateIdentity, scope, contributions.transactions)
     let committed = false
     let suspended = false
     let remounted = false
@@ -245,13 +271,15 @@ export class PluginRuntime {
       committed = true
 
       if (mode === 'soft-remount') {
-        const remount = options.requestSoftRemount ?? this.options.requestSoftRemount
+        const remount = options.requestSoftRemount
+          ?? this.options.requestSoftRemount
+          ?? this.host.requestSoftRemount
         if (!remount) throw new Error(`soft-remount 更新缺少 Application 重挂入口：${definition.id}`)
         await remount()
         remounted = true
       }
 
-      await getHookRuntime().drain(oldInstance.identity.key, definition.drainTimeoutMs)
+      await this.host.hooks.drain(oldInstance.identity.key, definition.drainTimeoutMs)
 
       // Final fallible state commit. Old resources remain resumable until this succeeds.
       await options.commitActivePointer?.()
@@ -279,7 +307,11 @@ export class PluginRuntime {
       else contributions.rollback()
       await scope.dispose()
       if (suspended) await oldDefinition.resume?.()
-      if (remounted) await (options.requestSoftRemount ?? this.options.requestSoftRemount)?.()
+      if (remounted) await (
+        options.requestSoftRemount
+        ?? this.options.requestSoftRemount
+        ?? this.host.requestSoftRemount
+      )?.()
       throw error
     }
   }
@@ -301,6 +333,9 @@ export class PluginRuntime {
       instance.identity.pluginId === pluginId && instance.status === 'active'
     ))
     if (!active) return { alreadyInactive: true, scope: { disposed: 0, errors: [] } }
+    if (this.definitions.get(active.identity.key)?.criticality === 'product-required') {
+      throw new PluginDisableRejectedError(pluginId)
+    }
     return this.deactivate(active.identity.key)
   }
 
