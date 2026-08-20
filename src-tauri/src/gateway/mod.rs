@@ -155,7 +155,7 @@ pub struct GatewayCore {
 impl GatewayCore {
     /// 从 agents.yaml 的 `gateway` 段构建（缺段 → 空路由表 + 默认平台配置）。
     pub fn new() -> Self {
-        let config = GatewayConfig::from_yaml_str(include_str!("../../../agents.yaml"))
+        let config = GatewayConfig::from_yaml_str(include_str!("../../../agents.example.yaml"))
             .unwrap_or_else(|error| {
                 tracing::warn!("gateway 配置解析失败，使用空配置: {error}");
                 GatewayConfig::empty()

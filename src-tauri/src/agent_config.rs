@@ -1279,7 +1279,7 @@ pub struct ConfigDocument {
 pub fn read_config_document() -> Result<ConfigDocument, ConfigError> {
     let (source, base_dir) = resolve_config_source();
     let content = match &source {
-        ConfigSource::Embedded => include_str!("../../agents.yaml").to_string(),
+        ConfigSource::Embedded => include_str!("../../agents.example.yaml").to_string(),
         ConfigSource::Environment(path) | ConfigSource::ExecutableDirectory(path) => {
             std::fs::read_to_string(path).map_err(|error| {
                 ConfigError::Read(format!("读取 {} 失败: {error}", path.display()))
@@ -3079,7 +3079,7 @@ gateway:
 
     #[test]
     fn embedded_repository_config_can_materialize_default_switch() {
-        let content = include_str!("../../agents.yaml");
+        let content = include_str!("../../agents.example.yaml");
         let patched =
             apply_agent_field_patch(content, "hermes", &serde_json::json!({ "default": true }))
                 .expect("repository config field patch must succeed");
