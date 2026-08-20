@@ -85,63 +85,35 @@ fn mode_falls_back_to_mode_config_option() {
     assert_eq!(session.mode.as_deref(), Some("code"));
 }
 
-#[test]
-fn keep_sessions_migrates_generation() {
-    let mut sessions = HashMap::new();
-    sessions.insert(
-        "source-a".into(),
-        SessionInfo::new("peri-1".into(), "persona".into(), ".".into(), true, 1),
-    );
-    sessions.insert(
-        "source-b".into(),
-        SessionInfo::new("peri-2".into(), "persona".into(), ".".into(), true, 1),
-    );
-    apply_client_replacement_sessions(&mut sessions, true, 9);
-    assert_eq!(sessions.len(), 2);
-    for session in sessions.values() {
-        assert_eq!(session.generation, 9);
-    }
-}
-
-#[test]
-fn keep_sessions_false_clears_sessions() {
-    let mut sessions = HashMap::new();
-    sessions.insert(
-        "source-a".into(),
-        SessionInfo::new("peri-1".into(), "persona".into(), ".".into(), true, 1),
-    );
-    apply_client_replacement_sessions(&mut sessions, false, 9);
-    assert!(sessions.is_empty());
-}
-
-/// 优化-1：keep=false 客户端替换（switch/重连）后 prompt 锁表必须收敛——
+/// Invalidated 客户端替换（switch/手动重连）后 prompt 锁表必须收敛——
 /// 与 replace_agent_client 同序列：锁内快照旧 source → 清空映射 → 锁外清理；
 /// 无会话映射的孤儿锁条目不在清理范围（保守作用域）。
 #[test]
-fn keep_sessions_false_drops_stale_prompt_locks() {
+fn invalidated_activation_clears_sessions_and_drops_stale_prompt_locks() {
     let runtime = AgentRuntime::new_disconnected();
-    {
-        let mut sessions = runtime.sessions.lock().unwrap();
-        sessions.insert(
-            "source-a".into(),
-            SessionInfo::new("peri-1".into(), "persona".into(), ".".into(), true, 1),
-        );
-        sessions.insert(
-            "qq:u-123".into(),
-            SessionInfo::new("peri-2".into(), "persona".into(), ".".into(), true, 1),
-        );
+    for (source, remote) in [("source-a", "peri-1"), ("qq:u-123", "peri-2")] {
+        crate::session_store::insert(
+            &runtime,
+            source,
+            SessionInfo::new(remote.into(), "persona".into(), ".".into(), true, 1),
+            true,
+            100,
+        )
+        .unwrap();
     }
     for source in ["source-a", "qq:u-123", "orphan-lock"] {
         prompt_lock_for(&runtime.prompt_locks, source);
     }
     assert_eq!(runtime.prompt_locks.lock().unwrap().len(), 3);
-    let stale_sources: Vec<String> = {
-        let mut sessions = runtime.sessions.lock().unwrap();
-        let stale = sessions.keys().cloned().collect();
-        apply_client_replacement_sessions(&mut sessions, false, 9);
-        stale
+    let activation = crate::agent_runtime::ClientActivation {
+        epoch: crate::agent_runtime::ClientEpoch(9),
+        continuity: crate::agent_runtime::SessionContinuity::Invalidated,
     };
-    // G2-08：收敛为 runtime 方法（与 replace_agent_client 同序列语义）
+    let stale = crate::session_store::apply_client_activation(&runtime, activation).unwrap();
+    let stale_sources = stale
+        .into_iter()
+        .map(|candidate| candidate.source)
+        .collect::<Vec<_>>();
     runtime.drop_prompt_locks(&stale_sources);
     assert!(runtime.sessions.lock().unwrap().is_empty());
     let locks = runtime.prompt_locks.lock().unwrap();
@@ -153,6 +125,31 @@ fn keep_sessions_false_drops_stale_prompt_locks() {
         locks.contains_key("orphan-lock"),
         "无会话映射的孤儿锁不在清理范围"
     );
+}
+
+#[test]
+fn agent_status_exposes_only_binding_health_metadata() {
+    let runtime = AgentRuntime::new_disconnected();
+    runtime.binding_health.lock().unwrap().insert(
+        "local:s1".into(),
+        crate::agent_runtime::SessionBindingHealth::Detached {
+            target_generation: 3,
+            reason: "session-probe-timeout".into(),
+            retryable: true,
+        },
+    );
+    let state = crate::test_utils::TestStateBuilder::bare()
+        .with_active_agent("peri")
+        .with_agent(crate::test_utils::fake_acp_agent("peri", "print('unused')"))
+        .with_runtime("peri", runtime)
+        .build();
+
+    let payload = state.agent_status_payload();
+    assert_eq!(payload["sessionBindings"][0]["agentId"], "peri");
+    assert_eq!(payload["sessionBindings"][0]["source"], "local:s1");
+    assert_eq!(payload["sessionBindings"][0]["health"], "detached");
+    assert_eq!(payload["sessionBindings"][0]["retryable"], true);
+    assert!(payload["sessionBindings"][0].get("periId").is_none());
 }
 
 #[test]

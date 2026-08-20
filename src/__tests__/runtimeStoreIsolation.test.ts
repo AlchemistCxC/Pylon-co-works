@@ -59,6 +59,26 @@ describe('I01-W2 runtimeStore 双 Agent 同名 source 隔离', () => {
     expect(s.sessionModes[toAgentContextKey(ctxB)]).toBe('auto')
   })
 
+  it('agent status binding snapshot 按 AgentContext 隔离并仅在 Attached 时推进 generation', () => {
+    const store = useRuntimeStore.getState()
+    store.setBindingGeneration(ctxA, 4)
+    store.setAgentStatus('agent-a', {
+      agent: 'agent-a', status: 'connected', generation: 5,
+      sessionBindings: [{ agentId: 'agent-a', source: ctxA.source, health: 'detached', generation: 5, reason: 'session-probe-timeout', retryable: true }],
+    })
+    let state = useRuntimeStore.getState()
+    expect(state.bindingGenerations[toAgentContextKey(ctxA)]).toBe(4)
+    expect(state.sessionBindingHealth[toAgentContextKey(ctxA)]?.health).toBe('detached')
+
+    store.setAgentStatus('agent-a', {
+      agent: 'agent-a', status: 'connected', generation: 5,
+      sessionBindings: [{ agentId: 'agent-a', source: ctxA.source, health: 'attached', generation: 5, retryable: false }],
+    })
+    state = useRuntimeStore.getState()
+    expect(state.bindingGenerations[toAgentContextKey(ctxA)]).toBe(5)
+    expect(state.sessionBindingHealth[toAgentContextKey(ctxA)]?.health).toBe('attached')
+  })
+
   it('resetSessionRuntime 保留 permission 切片（P1-1 停放，WI-05 CR-201 吸收）', () => {
     useRuntimeStore.setState({ permission: EMPTY_PERMISSION_STATE })
     const store = useRuntimeStore.getState()

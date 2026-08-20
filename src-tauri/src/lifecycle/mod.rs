@@ -32,10 +32,13 @@
 use std::collections::HashMap;
 use std::sync::Arc;
 
+use futures_util::{stream, StreamExt};
+
 use crate::acp::{AcpClient, AcpError, AgentConnectFailure, AgentConnectStage};
 use crate::agent_config::{AgentDef, ToolDictEntry};
 use crate::agent_runtime::{
-    client_activation_for_action, status_after_connection_failure, AgentLifecycleStatus,
+    status_after_connection_failure, AgentLifecycleStatus, ClientActivation, ClientEpoch,
+    SessionContinuity,
 };
 use crate::error::PylonError;
 use crate::runtime::AgentRuntime;
@@ -79,7 +82,7 @@ fn config_activation_state(
 
 /// 连接 + 原子替换客户端（手动/自动重连/平台懒启动共用）。
 // clippy 2026-08-02：9 参为连接全参数（handles/runtime/window/agent/agent_id/start_status/
-// log_action/keep_sessions/announce），跨 4 个调用点共享签名，保持显式（结构体重构收益低）。
+// log_action/continuity/announce），跨 4 个调用点共享签名，保持显式（结构体重构收益低）。
 #[allow(clippy::too_many_arguments)]
 pub(crate) async fn do_connect_and_replace<R: tauri::Runtime>(
     handles: &AppStateHandles,
@@ -89,7 +92,7 @@ pub(crate) async fn do_connect_and_replace<R: tauri::Runtime>(
     agent_id: Option<String>,
     start_status: AgentLifecycleStatus,
     log_action: &str,
-    keep_sessions: bool,
+    continuity: SessionContinuity,
     announce: bool,
 ) -> Result<(), String> {
     let previous_status = runtime
@@ -140,41 +143,47 @@ pub(crate) async fn do_connect_and_replace<R: tauri::Runtime>(
             return Err(error.into());
         }
     };
-    // 方案 9（首期只观测）：显式记录远端 session 延续性语义——不再把
-    // keep_sessions 混同"远端 session 仍有效"。auto-reconnect → Unknown
-    // （仍按 keep_sessions=true 迁移，仅标记待验证）；手动 switch/reconnect →
-    // Invalidated。只打日志，不改变任何行为（不进前端 wire）。
-    let activation = client_activation_for_action(
-        runtime
-            .client_generation
-            .load(std::sync::atomic::Ordering::Acquire),
-        log_action,
-    );
+    // 本地 client epoch 与远端 Session continuity 分开表达。Unknown 不迁移旧映射；
+    // replace 后由有界 probe 收敛，Invalidated 直接清除，Preserved 才直接迁移。
+    let activation = ClientActivation {
+        epoch: ClientEpoch(
+            runtime
+                .client_generation
+                .load(std::sync::atomic::Ordering::Acquire)
+                .checked_add(1)
+                .ok_or_else(|| "agent client generation exhausted".to_string())?,
+        ),
+        continuity,
+    };
     tracing::debug!(
-        "client activation: epoch={:?} continuity={:?} keep_sessions={keep_sessions} log_action={log_action}",
+        "client activation: epoch={:?} continuity={:?} log_action={log_action}",
         activation.epoch.0,
         activation.continuity
     );
-    if let Err(error) = handles
-        .replace_agent_client(runtime, agent_id, new_acp, window.clone(), keep_sessions)
+    let probe_candidates = match handles
+        .replace_agent_client(runtime, agent_id, new_acp, window.clone(), activation)
         .await
     {
-        // C7：replace 失败收敛——连接成功但客户端激活失败（如新 acp 已崩溃），
-        // 不得停留在 start_status（Connecting/Reconnecting）卡死；广播失败
-        // 状态 + 错误后返回（announce 路径才广播，事件次数不变）。
-        if announce {
-            handles.emit_agent_status(
-                runtime,
-                window,
-                status_after_connection_failure(previous_status),
-                Some(error.clone()),
-            );
+        Ok(candidates) => candidates,
+        Err(error) => {
+            // C7：replace 失败收敛——连接成功但客户端激活失败（如新 acp 已崩溃），
+            // 不得停留在 start_status（Connecting/Reconnecting）卡死；广播失败
+            // 状态 + 错误后返回（announce 路径才广播，事件次数不变）。
+            if announce {
+                handles.emit_agent_status(
+                    runtime,
+                    window,
+                    status_after_connection_failure(previous_status),
+                    Some(error.clone()),
+                );
+            }
+            return Err(error);
         }
-        return Err(error);
-    }
+    };
     if let Ok(mut state) = runtime.agent_runtime.lock() {
         state.activated_config_fingerprint = Some(agent.runtime_fingerprint());
     }
+    probe_unknown_session_continuity(runtime, agent, probe_candidates, activation.epoch.0).await;
     if announce {
         handles.emit_agent_status(runtime, window, AgentLifecycleStatus::Connected, None);
     }
@@ -190,6 +199,154 @@ pub(crate) async fn do_connect_and_replace<R: tauri::Runtime>(
         serde_json::Map::new(),
     );
     Ok(())
+}
+
+const SESSION_PROBE_CONCURRENCY: usize = 4;
+const SESSION_PROBE_HARD_CAP_SECS: u64 = 30;
+
+async fn probe_unknown_session_continuity(
+    runtime: &Arc<AgentRuntime>,
+    agent: &AgentDef,
+    candidates: Vec<crate::session_store::SessionProbeCandidate>,
+    target_generation: u64,
+) {
+    if candidates.is_empty() {
+        return;
+    }
+    let load_capability = runtime
+        .acp
+        .lock()
+        .await
+        .agent_capabilities()
+        .and_then(|capabilities| capabilities.get("loadSession"))
+        .and_then(serde_json::Value::as_bool);
+    if load_capability == Some(false) {
+        for candidate in candidates {
+            let _ = crate::session_store::mark_detached_if_current(
+                runtime,
+                &candidate.source,
+                &candidate.peri_id,
+                candidate.from_generation,
+                target_generation,
+                "session-load-capability-unavailable".into(),
+                false,
+                false,
+            );
+        }
+        return;
+    }
+
+    let budget = std::time::Duration::from_secs(
+        agent
+            .protocol()
+            .rpc_timeout()
+            .min(SESSION_PROBE_HARD_CAP_SECS),
+    );
+    let deadline = tokio::time::Instant::now() + budget;
+    let mode = agent.protocol().mcp_servers;
+    let results = stream::iter(candidates)
+        .map(|candidate| {
+            let runtime = runtime.clone();
+            async move {
+                let handles = runtime.acp.lock().await.replay_handles();
+                let probe = tokio::time::timeout_at(
+                    deadline,
+                    crate::acp::load_session_with_replay(
+                        handles,
+                        &candidate.peri_id,
+                        &candidate.cwd,
+                        Vec::new(),
+                        mode,
+                    ),
+                )
+                .await;
+                (candidate, probe)
+            }
+        })
+        .buffer_unordered(SESSION_PROBE_CONCURRENCY)
+        .collect::<Vec<_>>()
+        .await;
+
+    for (candidate, result) in results {
+        match result {
+            Ok(Ok((response, _replay))) => {
+                let returned_id = response
+                    .get("sessionId")
+                    .or_else(|| response.get("session_id"))
+                    .and_then(serde_json::Value::as_str);
+                if returned_id.is_some_and(|id| id != candidate.peri_id) {
+                    let _ = crate::session_store::mark_detached_if_current(
+                        runtime,
+                        &candidate.source,
+                        &candidate.peri_id,
+                        candidate.from_generation,
+                        target_generation,
+                        "session-probe-identity-mismatch".into(),
+                        false,
+                        false,
+                    );
+                } else {
+                    let _ = crate::session_store::mark_attached_if_current(
+                        runtime,
+                        &candidate.source,
+                        &candidate.peri_id,
+                        candidate.from_generation,
+                        target_generation,
+                    );
+                }
+            }
+            Ok(Err(error))
+                if error.rpc_failure_kind() == Some(crate::acp::RpcFailureKind::SessionMissing) =>
+            {
+                let _ = crate::session_store::mark_detached_if_current(
+                    runtime,
+                    &candidate.source,
+                    &candidate.peri_id,
+                    candidate.from_generation,
+                    target_generation,
+                    "remote-session-missing".into(),
+                    false,
+                    true,
+                );
+            }
+            Ok(Err(error)) => {
+                let retryable = error.is_retryable_transport_failure()
+                    || error.rpc_failure_kind() == Some(crate::acp::RpcFailureKind::Other);
+                let reason = match error.rpc_failure_details() {
+                    Some(details) => details
+                        .code
+                        .map(|code| format!("session-probe-rpc-{code}"))
+                        .unwrap_or_else(|| "session-probe-rpc-error".into()),
+                    None if matches!(error, AcpError::ConnectionClosed) => {
+                        "session-probe-connection-closed".into()
+                    }
+                    None => "session-probe-transport-error".into(),
+                };
+                let _ = crate::session_store::mark_detached_if_current(
+                    runtime,
+                    &candidate.source,
+                    &candidate.peri_id,
+                    candidate.from_generation,
+                    target_generation,
+                    reason,
+                    retryable,
+                    false,
+                );
+            }
+            Err(_) => {
+                let _ = crate::session_store::mark_detached_if_current(
+                    runtime,
+                    &candidate.source,
+                    &candidate.peri_id,
+                    candidate.from_generation,
+                    target_generation,
+                    "session-probe-timeout".into(),
+                    true,
+                    false,
+                );
+            }
+        }
+    }
 }
 
 pub(crate) fn agent_summary_payload(
@@ -429,7 +586,7 @@ pub(crate) async fn switch_agent<R: tauri::Runtime>(
         // connect_and_replace 会在 lifecycle 锁下收敛为新客户端。
     }
     // 直接调泛型 do_connect_and_replace（与 AppState::connect_and_replace 包装器
-    // 同一实现：keep_sessions=false + announce=true）；窗口类型随调用方 Runtime。
+    // 同一实现：continuity=Invalidated + announce=true）；窗口类型随调用方 Runtime。
     let handles = AppStateHandles::from_state(inner);
     do_connect_and_replace(
         &handles,
@@ -439,7 +596,7 @@ pub(crate) async fn switch_agent<R: tauri::Runtime>(
         Some(name.clone()),
         AgentLifecycleStatus::Connecting,
         "switch",
-        false,
+        SessionContinuity::Invalidated,
         true,
     )
     .await?;
@@ -517,7 +674,7 @@ pub(crate) async fn restart_agent_runtime<R: tauri::Runtime>(
         None,
         AgentLifecycleStatus::Reconnecting,
         "config-restart",
-        false,
+        SessionContinuity::Invalidated,
         true,
     )
     .await
@@ -1643,6 +1800,100 @@ for line in sys.stdin:
             state.activated_config_fingerprint.as_deref(),
             Some("old-definition")
         );
+    }
+
+    #[tokio::test]
+    async fn unknown_continuity_probes_each_session_and_converges_health() {
+        let script = r#"import json,sys
+for line in sys.stdin:
+    request=json.loads(line)
+    method=request.get('method')
+    if method == 'initialize':
+        result={'agentCapabilities':{'loadSession':True}}
+        print(json.dumps({'jsonrpc':'2.0','id':request.get('id'),'result':result}), flush=True)
+    elif method == 'session/load':
+        session_id=request.get('params',{}).get('sessionId')
+        if session_id == 'remote-missing':
+            print(json.dumps({'jsonrpc':'2.0','id':request.get('id'),'error':{'code':-32602,'message':'session not found'}}), flush=True)
+        elif session_id != 'remote-timeout':
+            print(json.dumps({'jsonrpc':'2.0','method':'session/update','params':{'sessionId':session_id,'update':{'sessionUpdate':'agent_message_chunk','content':{'text':'probe-replay-must-not-apply'}}}}), flush=True)
+            print(json.dumps({'jsonrpc':'2.0','id':request.get('id'),'result':{'sessionId':session_id}}), flush=True)
+    else:
+        print(json.dumps({'jsonrpc':'2.0','id':request.get('id'),'result':{}}), flush=True)
+"#;
+        let mut agent = crate::test_utils::fake_acp_agent("peri", script);
+        agent.acp = Some(crate::agent_config::AcpProtocolConfig {
+            rpc_timeout_secs: Some(1),
+            ..Default::default()
+        });
+        let runtime = crate::test_utils::connected_runtime();
+        runtime
+            .client_generation
+            .store(4, std::sync::atomic::Ordering::Release);
+        for (source, remote) in [
+            ("source-ok", "remote-ok"),
+            ("source-missing", "remote-missing"),
+            ("source-timeout", "remote-timeout"),
+        ] {
+            crate::session_store::insert(
+                &runtime,
+                source,
+                crate::session::SessionInfo::new(remote.into(), String::new(), ".".into(), true, 4),
+                true,
+                100,
+            )
+            .unwrap();
+        }
+        let state = crate::test_utils::TestStateBuilder::bare()
+            .with_active_agent("peri")
+            .with_agent(agent.clone())
+            .with_runtime("peri", runtime.clone())
+            .build();
+        let handles = AppStateHandles::from_state(&state);
+        let window = mock_window().await;
+
+        do_connect_and_replace(
+            &handles,
+            &runtime,
+            &window,
+            &agent,
+            None,
+            AgentLifecycleStatus::Reconnecting,
+            "auto-reconnect",
+            SessionContinuity::Unknown,
+            false,
+        )
+        .await
+        .expect("client reconnect succeeds even when one binding probe times out");
+
+        let sessions = runtime.sessions.lock().unwrap();
+        assert_eq!(sessions["source-ok"].generation, 5);
+        assert!(
+            sessions["source-ok"].last_response_text.is_empty(),
+            "probe replay must be rejected before the binding becomes Attached"
+        );
+        assert!(!sessions.contains_key("source-missing"));
+        assert_eq!(sessions["source-timeout"].generation, 4);
+        drop(sessions);
+        let health = runtime.binding_health.lock().unwrap();
+        assert!(matches!(
+            health["source-ok"],
+            crate::agent_runtime::SessionBindingHealth::Attached { generation: 5 }
+        ));
+        assert!(matches!(
+            health["source-missing"],
+            crate::agent_runtime::SessionBindingHealth::Detached {
+                retryable: false,
+                ..
+            }
+        ));
+        assert!(matches!(
+            health["source-timeout"],
+            crate::agent_runtime::SessionBindingHealth::Detached {
+                retryable: true,
+                ..
+            }
+        ));
     }
 
     #[tokio::test]

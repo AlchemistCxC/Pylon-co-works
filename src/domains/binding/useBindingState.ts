@@ -29,9 +29,11 @@ export function useBindingState(sessionId: string | null): BindingState {
     ? toAgentContextKey({ agentId: activeSession.agentId, source: activeSession.source })
     : undefined
   const establishedGeneration = useRuntimeStore(s => (bindingKey ? s.bindingGenerations[bindingKey] : undefined))
+  const backendHealth = useRuntimeStore(s => (bindingKey ? s.sessionBindingHealth[bindingKey] : undefined))
   const binding = resolveBindingState({ activeSheet, activeSessionId: sessionId, sessions, activeAgent, ownerStatus })
   return refineBindingGeneration(binding, {
     establishedGeneration,
     currentGeneration: ownerStatus?.generation,
+    backendHealth,
   })
 }

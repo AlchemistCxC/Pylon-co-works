@@ -1,7 +1,7 @@
 import { create } from 'zustand'
 import type { ConfigOption } from './infrastructure/acp/chatContracts.ts'
 import { clearSessionSourceState, updateSessionLiveStats, type SessionLiveStats } from './components/chat/sessionRuntime.ts'
-import { shouldAcceptAgentStatus, type AgentStatus } from './components/settings/agentTypes.ts'
+import { shouldAcceptAgentStatus, type AgentStatus, type SessionBindingSnapshot } from './components/settings/agentTypes.ts'
 import { permissionReducer, EMPTY_PERMISSION_STATE, type PermissionAction, type PermissionState } from './domains/permission/permissionState.ts'
 import { normalizeApprovalMode, type ApprovalMode } from './domains/permission/approvalMode.ts'
 import type { AgentContext, AgentContextKey } from './agentContext.ts'
@@ -46,6 +46,8 @@ interface RuntimeStoreState {
    * 旧 binding 必须 Invalidated，不能继续发送旧 remote id（§5.9 rule 4）。
    */
   bindingGenerations: Record<string, number | undefined>
+  /** Kernel continuity probe 的瞬态健康快照；不持久化、不替代 Session metadata。 */
+  sessionBindingHealth: Record<AgentContextKey, SessionBindingSnapshot | undefined>
   /**
    * CWD-03：会话原地 reload 令牌（rootPath 变更 → binding invalidate → close → load/new）。
    * useSessionLifecycle 以 [sessionId, reloadToken] 为 effect 依赖；令牌递增即强制
@@ -84,6 +86,7 @@ export const useRuntimeStore = create<RuntimeStoreState>()((set, get) => ({
   sessionConfig: {},
   agentStatuses: {},
   bindingGenerations: {},
+  sessionBindingHealth: {},
   sessionReloadTokens: {},
   permission: EMPTY_PERMISSION_STATE,
   approvalMode: 'default',
@@ -109,6 +112,8 @@ export const useRuntimeStore = create<RuntimeStoreState>()((set, get) => ({
     const bindingGenerations = { ...state.bindingGenerations }
     delete bindingGenerations[key]
     const sessionReloadTokens = { ...state.sessionReloadTokens }
+    const sessionBindingHealth = { ...state.sessionBindingHealth }
+    delete sessionBindingHealth[key]
     delete sessionReloadTokens[key]
     return {
       sessionLiveStats: cleared.sessionLiveStats,
@@ -117,6 +122,7 @@ export const useRuntimeStore = create<RuntimeStoreState>()((set, get) => ({
       liveGeneratingSources: cleared.generatingSources,
       liveGenerating: cleared.generatingSources[cleared.generatingSources.length - 1] || null,
       bindingGenerations,
+      sessionBindingHealth,
       sessionReloadTokens,
     }
   }),
@@ -133,14 +139,44 @@ export const useRuntimeStore = create<RuntimeStoreState>()((set, get) => ({
   }),
   setAgentStatus: (id, status) => set(state => {
     if (!shouldAcceptAgentStatus(state.agentStatuses[id], status)) return state
-    return { agentStatuses: { ...state.agentStatuses, [id]: status } }
+    if (status.sessionBindings === undefined) {
+      return { agentStatuses: { ...state.agentStatuses, [id]: status } }
+    }
+    const sessionBindingHealth = { ...state.sessionBindingHealth }
+    const bindingGenerations = { ...state.bindingGenerations }
+    for (const [key, value] of Object.entries(sessionBindingHealth)) {
+      if (value?.agentId === id) delete sessionBindingHealth[key as AgentContextKey]
+    }
+    for (const binding of status.sessionBindings) {
+      if (binding.agentId !== id) continue
+      const key = toAgentContextKey({ agentId: binding.agentId, source: binding.source })
+      sessionBindingHealth[key] = binding
+      if (binding.health === 'attached') bindingGenerations[key] = binding.generation
+    }
+    return {
+      agentStatuses: { ...state.agentStatuses, [id]: status },
+      sessionBindingHealth,
+      bindingGenerations,
+    }
   }),
   setBindingGeneration: (context, generation) => set(state => {
     const key = toAgentContextKey(context)
     const bindingGenerations = { ...state.bindingGenerations }
-    if (generation == null) delete bindingGenerations[key]
-    else bindingGenerations[key] = generation
-    return { bindingGenerations }
+    const sessionBindingHealth = { ...state.sessionBindingHealth }
+    if (generation == null) {
+      delete bindingGenerations[key]
+      delete sessionBindingHealth[key]
+    } else {
+      bindingGenerations[key] = generation
+      sessionBindingHealth[key] = {
+        agentId: context.agentId,
+        source: context.source,
+        health: 'attached',
+        generation,
+        retryable: false,
+      }
+    }
+    return { bindingGenerations, sessionBindingHealth }
   }),
   bumpSessionReload: (context) => set(state => {
     const key = toAgentContextKey(context)
@@ -152,6 +188,7 @@ export const useRuntimeStore = create<RuntimeStoreState>()((set, get) => ({
     sessionModes: {},
     sessionLiveStats: {},
     bindingGenerations: {},
+    sessionBindingHealth: {},
     sessionReloadTokens: {},
     liveGenerating: null,
     liveGeneratingSources: [],

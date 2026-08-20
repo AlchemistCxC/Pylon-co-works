@@ -11,7 +11,7 @@ use std::sync::{Arc, Mutex};
 use dashmap::DashMap;
 
 use crate::acp::{AcpClient, RequestId};
-use crate::agent_runtime::AgentRuntimeState;
+use crate::agent_runtime::{AgentRuntimeState, SessionBindingHealth};
 use crate::permission::PendingPermission;
 use crate::session::SessionInfo;
 
@@ -44,6 +44,9 @@ pub struct AgentRuntime {
     pub client_generation: Arc<AtomicU64>,
     pub prompt_locks: Arc<Mutex<HashMap<String, Arc<tokio::sync::Mutex<()>>>>>,
     pub sessions: Arc<Mutex<HashMap<String, SessionInfo>>>,
+    /// Runtime-only health of source -> remote-session bindings. SQLite owner metadata remains
+    /// authoritative; this map only gates use of a binding across client generations.
+    pub binding_health: Arc<Mutex<HashMap<String, SessionBindingHealth>>>,
     pub agent_runtime: Arc<Mutex<AgentRuntimeState>>,
     pub auto_reconnect_active: Arc<AtomicBool>,
     /// 挂起的权限请求（B9/ACP-01）：请求 id（number 或 string 原始形态）→ 待用户决策
@@ -66,6 +69,7 @@ impl AgentRuntime {
             client_generation: Arc::new(AtomicU64::new(0)),
             prompt_locks: Arc::new(Mutex::new(HashMap::new())),
             sessions: Arc::new(Mutex::new(HashMap::new())),
+            binding_health: Arc::new(Mutex::new(HashMap::new())),
             agent_runtime: Arc::new(Mutex::new(AgentRuntimeState::default())),
             auto_reconnect_active: Arc::new(AtomicBool::new(false)),
             pending_permissions: Arc::new(Mutex::new(HashMap::new())),

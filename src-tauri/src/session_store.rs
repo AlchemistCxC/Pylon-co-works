@@ -7,6 +7,7 @@
 //! 锁序纪律：sessions → prompt_locks 单向；mapping_ready 通知在 insert 成功后。
 
 use crate::agent_runtime::session_mapping_matches;
+use crate::agent_runtime::{ClientActivation, SessionBindingHealth, SessionContinuity};
 use crate::runtime::AgentRuntime;
 use crate::session::SessionInfo;
 
@@ -19,6 +20,14 @@ pub(crate) enum SessionStoreError {
     MaxSessions,
     /// 锁中毒。
     LockPoisoned(String),
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct SessionProbeCandidate {
+    pub(crate) source: String,
+    pub(crate) peri_id: String,
+    pub(crate) cwd: String,
+    pub(crate) from_generation: u64,
 }
 
 /// 插入会话映射（方案 8，对应 replace_session_slot）：满额策略 +
@@ -43,6 +52,169 @@ pub(crate) fn insert(
     drop(sessions);
     runtime.mapping_ready.notify_waiters();
     Ok(replaced)
+}
+
+/// Applies the remote-continuity meaning of a newly activated client. All fallible locks are
+/// acquired before either map is mutated, so callers can still keep process activation atomic.
+pub(crate) fn apply_client_activation(
+    runtime: &AgentRuntime,
+    activation: ClientActivation,
+) -> Result<Vec<SessionProbeCandidate>, SessionStoreError> {
+    let mut sessions = runtime
+        .sessions
+        .lock()
+        .map_err(|error| SessionStoreError::LockPoisoned(error.to_string()))?;
+    let mut health = runtime
+        .binding_health
+        .lock()
+        .map_err(|error| SessionStoreError::LockPoisoned(error.to_string()))?;
+    let target_generation = activation.epoch.0;
+    match activation.continuity {
+        SessionContinuity::Preserved => {
+            for (source, session) in sessions.iter_mut() {
+                session.generation = target_generation;
+                health.insert(
+                    source.clone(),
+                    SessionBindingHealth::Attached {
+                        generation: target_generation,
+                    },
+                );
+            }
+            Ok(Vec::new())
+        }
+        SessionContinuity::Invalidated => {
+            let stale = sessions
+                .keys()
+                .map(|source| SessionProbeCandidate {
+                    source: source.clone(),
+                    peri_id: sessions[source].peri_id.clone(),
+                    cwd: sessions[source].cwd.clone(),
+                    from_generation: sessions[source].generation,
+                })
+                .collect::<Vec<_>>();
+            sessions.clear();
+            for candidate in &stale {
+                health.insert(
+                    candidate.source.clone(),
+                    SessionBindingHealth::Detached {
+                        target_generation,
+                        reason: "client activation invalidated the remote session binding".into(),
+                        retryable: true,
+                    },
+                );
+            }
+            Ok(stale)
+        }
+        SessionContinuity::Unknown => {
+            let candidates = sessions
+                .iter()
+                .map(|(source, session)| SessionProbeCandidate {
+                    source: source.clone(),
+                    peri_id: session.peri_id.clone(),
+                    cwd: session.cwd.clone(),
+                    from_generation: session.generation,
+                })
+                .collect::<Vec<_>>();
+            for candidate in &candidates {
+                health.insert(
+                    candidate.source.clone(),
+                    SessionBindingHealth::Probing {
+                        from_generation: candidate.from_generation,
+                        target_generation,
+                    },
+                );
+            }
+            Ok(candidates)
+        }
+    }
+}
+
+pub(crate) fn mark_attached_if_current(
+    runtime: &AgentRuntime,
+    source: &str,
+    peri_id: &str,
+    expected_generation: u64,
+    attached_generation: u64,
+) -> Result<bool, SessionStoreError> {
+    let mut sessions = runtime
+        .sessions
+        .lock()
+        .map_err(|error| SessionStoreError::LockPoisoned(error.to_string()))?;
+    let mut health = runtime
+        .binding_health
+        .lock()
+        .map_err(|error| SessionStoreError::LockPoisoned(error.to_string()))?;
+    let Some(session) = sessions.get_mut(source) else {
+        return Ok(false);
+    };
+    if !session_mapping_matches(
+        &session.peri_id,
+        session.generation,
+        peri_id,
+        expected_generation,
+    ) {
+        return Ok(false);
+    }
+    session.generation = attached_generation;
+    health.insert(
+        source.to_string(),
+        SessionBindingHealth::Attached {
+            generation: attached_generation,
+        },
+    );
+    drop(health);
+    drop(sessions);
+    runtime.mapping_ready.notify_waiters();
+    Ok(true)
+}
+
+#[allow(clippy::too_many_arguments)]
+pub(crate) fn mark_detached_if_current(
+    runtime: &AgentRuntime,
+    source: &str,
+    peri_id: &str,
+    expected_generation: u64,
+    target_generation: u64,
+    reason: String,
+    retryable: bool,
+    remove_mapping: bool,
+) -> Result<bool, SessionStoreError> {
+    let mut sessions = runtime
+        .sessions
+        .lock()
+        .map_err(|error| SessionStoreError::LockPoisoned(error.to_string()))?;
+    let mut health = runtime
+        .binding_health
+        .lock()
+        .map_err(|error| SessionStoreError::LockPoisoned(error.to_string()))?;
+    let current = sessions.get(source).is_some_and(|session| {
+        session_mapping_matches(
+            &session.peri_id,
+            session.generation,
+            peri_id,
+            expected_generation,
+        )
+    });
+    if !current {
+        return Ok(false);
+    }
+    if remove_mapping {
+        sessions.remove(source);
+    }
+    health.insert(
+        source.to_string(),
+        SessionBindingHealth::Detached {
+            target_generation,
+            reason,
+            retryable,
+        },
+    );
+    drop(health);
+    drop(sessions);
+    if remove_mapping {
+        runtime.remove_prompt_lock(source);
+    }
+    Ok(true)
 }
 
 /// 条件更新（方案 8，对应 with_session_if_matches）：generation 复核 +
@@ -92,6 +264,9 @@ pub(crate) fn remove_if_current(
         }
     };
     if removed {
+        if let Ok(mut health) = runtime.binding_health.lock() {
+            health.remove(source);
+        }
         runtime.remove_prompt_lock(source);
     }
     Ok(removed)
@@ -127,47 +302,12 @@ where
         }
     };
     if removed {
+        if let Ok(mut health) = runtime.binding_health.lock() {
+            health.remove(source);
+        }
         runtime.remove_prompt_lock(source);
     }
     Ok(removed)
-}
-
-/// migrate epoch（方案 8，对应 apply_client_replacement_sessions 的 keep=true 语义）：
-/// 全部映射的 generation 迁移到 new_generation；keep=false 时清空。返回被清空的旧 source 键。
-pub(crate) fn migrate_or_clear(
-    runtime: &AgentRuntime,
-    keep_sessions: bool,
-    new_generation: u64,
-) -> Result<Vec<String>, SessionStoreError> {
-    let mut sessions = runtime
-        .sessions
-        .lock()
-        .map_err(|e| SessionStoreError::LockPoisoned(e.to_string()))?;
-    Ok(migrate_or_clear_entries(
-        &mut sessions,
-        keep_sessions,
-        new_generation,
-    ))
-}
-
-/// Same mutation as [`migrate_or_clear`], for callers that must acquire the session lock before
-/// another state transition. Keeping the infallible mutation separate lets client activation
-/// validate every fallible lock acquisition before swapping the live process.
-pub(crate) fn migrate_or_clear_entries(
-    sessions: &mut std::collections::HashMap<String, SessionInfo>,
-    keep_sessions: bool,
-    new_generation: u64,
-) -> Vec<String> {
-    let mut stale_sources: Vec<String> = Vec::new();
-    if !keep_sessions {
-        stale_sources = sessions.keys().cloned().collect();
-        sessions.clear();
-    } else {
-        for session in sessions.values_mut() {
-            session.generation = new_generation;
-        }
-    }
-    stale_sources
 }
 
 pub(crate) fn snapshot(
@@ -197,6 +337,9 @@ impl std::fmt::Display for SessionStoreError {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::agent_runtime::{
+        ClientActivation, ClientEpoch, SessionBindingHealth, SessionContinuity,
+    };
     use std::sync::Arc;
 
     fn runtime() -> Arc<AgentRuntime> {
@@ -275,24 +418,48 @@ mod tests {
     }
 
     #[test]
-    fn migrate_or_clear_keeps_fields_and_clears_on_false() {
+    fn unknown_activation_marks_old_bindings_probing_without_migrating_them() {
         let rt = runtime();
-        insert(rt.as_ref(), "a", session("p-a", 1), true, 100).unwrap();
-        insert(rt.as_ref(), "b", session("p-b", 1), true, 100).unwrap();
-        // keep=true：迁移 generation，字段保留
-        let stale = migrate_or_clear(rt.as_ref(), true, 9).unwrap();
-        assert!(stale.is_empty(), "keep=true 不清空");
-        let snap = snapshot(rt.as_ref()).unwrap();
-        assert_eq!(snap.len(), 2);
-        assert!(
-            snap.iter().all(|(_, s)| s.generation == 9),
-            "generation 必须迁移"
-        );
-        // keep=false：清空并返回旧 source 键
-        let stale = migrate_or_clear(rt.as_ref(), false, 10).unwrap();
-        let mut keys: Vec<&str> = stale.iter().map(|s| s.as_str()).collect();
-        keys.sort();
-        assert_eq!(keys, vec!["a", "b"]);
-        assert!(snapshot(rt.as_ref()).unwrap().is_empty());
+        insert(rt.as_ref(), "a", session("p-a", 7), true, 100).unwrap();
+        insert(rt.as_ref(), "b", session("p-b", 7), true, 100).unwrap();
+        let activation = ClientActivation {
+            epoch: ClientEpoch(8),
+            continuity: SessionContinuity::Unknown,
+        };
+
+        let candidates = apply_client_activation(rt.as_ref(), activation).expect("activation");
+
+        assert_eq!(candidates.len(), 2);
+        assert!(snapshot(rt.as_ref())
+            .unwrap()
+            .iter()
+            .all(|(_, session)| session.generation == 7));
+        let health = rt.binding_health.lock().unwrap();
+        assert!(health.values().all(|value| matches!(
+            value,
+            SessionBindingHealth::Probing {
+                from_generation: 7,
+                target_generation: 8
+            }
+        )));
+    }
+
+    #[test]
+    fn explicitly_preserved_activation_migrates_and_attaches_bindings() {
+        let rt = runtime();
+        insert(rt.as_ref(), "src", session("peri-1", 7), true, 100).unwrap();
+        let activation = ClientActivation {
+            epoch: ClientEpoch(8),
+            continuity: SessionContinuity::Preserved,
+        };
+
+        let candidates = apply_client_activation(rt.as_ref(), activation).expect("activation");
+
+        assert!(candidates.is_empty());
+        assert_eq!(snapshot(rt.as_ref()).unwrap()[0].1.generation, 8);
+        assert!(matches!(
+            rt.binding_health.lock().unwrap().get("src"),
+            Some(SessionBindingHealth::Attached { generation: 8 })
+        ));
     }
 }

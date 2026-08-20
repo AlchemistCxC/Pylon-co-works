@@ -4,14 +4,12 @@
 pub(crate) struct ClientEpoch(pub(crate) u64);
 
 /// 方案 9：远端 session 延续性。
-/// - Preserved：新 client 确认旧 session 仍有效（有真实协议能力/回放证据）；
-///   **首期不构造**（需真实协议能力与运行证据，方案 §② 后置）；
+/// - Preserved：调用方已有协议级证据，直接迁移绑定；
 /// - Invalidated：switch 不同 agent / 手动 reconnect（旧 session 大概率失效）；
-/// - Unknown：自动重连（首期保持旧行为——Unknown 仍按 keep_sessions=true 迁移，
-///   仅内部标记待验证 + runtime log，不进入前端 wire）。
+/// - Unknown：自动重连，旧映射进入 Probing，逐 Session 验证后才可迁移。
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum SessionContinuity {
-    #[allow(dead_code)] // 方案 9 首期预留：需真实协议证据才启用
+    #[allow(dead_code)] // Reserved for agents that can provide an explicit continuity guarantee.
     Preserved,
     Invalidated,
     Unknown,
@@ -24,20 +22,60 @@ pub(crate) struct ClientActivation {
     pub(crate) continuity: SessionContinuity,
 }
 
-/// 方案 9：按连接动作推导延续性（首期只观测，不改迁移行为）。
-/// auto-reconnect → Unknown（自动重连保留旧映射，语义待验证）；
-/// 其他（手动 switch/reconnect/平台懒启动）→ Invalidated。
-pub(crate) fn client_activation_for_action(
-    current_generation: u64,
-    log_action: &str,
-) -> ClientActivation {
-    let continuity = match log_action {
-        "auto-reconnect" => SessionContinuity::Unknown,
-        _ => SessionContinuity::Invalidated,
-    };
-    ClientActivation {
-        epoch: ClientEpoch(current_generation + 1),
-        continuity,
+/// Ephemeral health of one local source -> remote session binding. This is not a persistence
+/// authority: durable owner metadata and canonical history remain in SQLite.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) enum SessionBindingHealth {
+    Attached {
+        generation: u64,
+    },
+    Probing {
+        from_generation: u64,
+        target_generation: u64,
+    },
+    Detached {
+        target_generation: u64,
+        reason: String,
+        retryable: bool,
+    },
+}
+
+impl SessionBindingHealth {
+    pub(crate) fn wire_value(&self, agent_id: &str, source: &str) -> serde_json::Value {
+        match self {
+            Self::Attached { generation } => serde_json::json!({
+                "agentId": agent_id,
+                "source": source,
+                "health": "attached",
+                "generation": generation,
+                "reason": null,
+                "retryable": false,
+            }),
+            Self::Probing {
+                from_generation,
+                target_generation,
+            } => serde_json::json!({
+                "agentId": agent_id,
+                "source": source,
+                "health": "probing",
+                "fromGeneration": from_generation,
+                "generation": target_generation,
+                "reason": null,
+                "retryable": true,
+            }),
+            Self::Detached {
+                target_generation,
+                reason,
+                retryable,
+            } => serde_json::json!({
+                "agentId": agent_id,
+                "source": source,
+                "health": "detached",
+                "generation": target_generation,
+                "reason": reason,
+                "retryable": retryable,
+            }),
+        }
     }
 }
 
@@ -212,24 +250,6 @@ mod tests {
         assert_eq!(AgentLifecycleStatus::Crashed.as_str(), "crashed");
         assert_eq!(AgentLifecycleStatus::Disconnected.as_str(), "disconnected");
         assert_eq!(AgentLifecycleStatus::Error.as_str(), "error");
-    }
-
-    #[test]
-    fn client_activation_continuity_maps_actions() {
-        // 方案 9：auto-reconnect → Unknown（保留旧映射待验证）；
-        // 手动 switch/reconnect → Invalidated。
-        let auto = client_activation_for_action(7, "auto-reconnect");
-        assert_eq!(auto.epoch, ClientEpoch(8));
-        assert_eq!(auto.continuity, SessionContinuity::Unknown);
-        for action in ["switch", "reconnect", "lazy-start"] {
-            let act = client_activation_for_action(3, action);
-            assert_eq!(act.epoch, ClientEpoch(4));
-            assert_eq!(
-                act.continuity,
-                SessionContinuity::Invalidated,
-                "{action} 必须标记 Invalidated"
-            );
-        }
     }
 
     #[test]

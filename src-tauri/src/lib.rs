@@ -103,9 +103,9 @@ use crate::permission::{
 };
 #[cfg(test)]
 use crate::session::{
-    apply_client_replacement_sessions, build_full_inspector_payload, compose_inject_prompt,
-    config_option_current_value, extract_tool_file_name, inject_applies_to, send_message,
-    session_expired, InspectorSessionRow, SessionListRow,
+    build_full_inspector_payload, compose_inject_prompt, config_option_current_value,
+    extract_tool_file_name, inject_applies_to, send_message, session_expired, InspectorSessionRow,
+    SessionListRow,
 };
 
 fn emit_event<R, W>(window: &W, event: &str, payload: serde_json::Value)
@@ -408,6 +408,20 @@ impl AppStateHandles {
         let capabilities = runtime
             .and_then(|runtime| runtime.acp.try_lock().ok())
             .and_then(|acp| acp.agent_capabilities().cloned());
+        let mut session_bindings = runtime
+            .and_then(|runtime| runtime.binding_health.lock().ok())
+            .map(|health| {
+                health
+                    .iter()
+                    .map(|(source, health)| health.wire_value(&active_agent_id, source))
+                    .collect::<Vec<_>>()
+            })
+            .unwrap_or_default();
+        session_bindings.sort_by(|left, right| {
+            left.get("source")
+                .and_then(serde_json::Value::as_str)
+                .cmp(&right.get("source").and_then(serde_json::Value::as_str))
+        });
         // O2：三个别名（lastError/recentError/error）共用同一份引用（as_deref），
         // json! 序列化时各自转 Value——消除 3 次显式 clone（last_error 是
         // agent_runtime 锁内 state.clone() 的产物，自身 clone 是必须的）。
@@ -425,6 +439,7 @@ impl AppStateHandles {
             "lastConnectedAt": last_connected_at,
             "generation": generation,
             "capabilities": capabilities,
+            "sessionBindings": session_bindings,
             "active": agent.is_some(),
             "available": available,
             "crashed": crashed,
@@ -454,8 +469,8 @@ impl AppStateHandles {
         agent_id: Option<String>,
         new_acp: AcpClient,
         window: tauri::WebviewWindow<R>,
-        keep_sessions: bool,
-    ) -> Result<(), String> {
+        activation: crate::agent_runtime::ClientActivation,
+    ) -> Result<Vec<crate::session_store::SessionProbeCandidate>, String> {
         if new_acp.is_crashed() {
             return Err("new ACP client crashed before activation".to_string());
         }
@@ -465,19 +480,36 @@ impl AppStateHandles {
         // 一致）——否则旧 source 条目随任意命名的 GUI source 无限累积。锁内先快照
         // 旧 source 键，映射清空后在锁外逐个清理（锁序单向：sessions → prompt_locks）。
         // 方案 8：sessions 迁移委托 SessionStore（migrate_or_clear 返回旧 source 键）。
-        let (mut old_acp, stale_sources) = {
+        let (mut old_acp, stale_sources, probe_candidates) = {
             let mut acp = runtime.acp.lock().await;
-            let mut sessions = runtime.sessions.lock().map_err(|error| error.to_string())?;
             let new_generation = runtime
                 .client_generation
                 .load(Ordering::Acquire)
                 .checked_add(1)
                 .ok_or_else(|| "agent client generation exhausted".to_string())?;
-            let stale_sources = crate::session_store::migrate_or_clear_entries(
-                &mut sessions,
-                keep_sessions,
-                new_generation,
-            );
+            if activation.epoch.0 != new_generation {
+                return Err(format!(
+                    "stale client activation epoch: expected {new_generation}, got {}",
+                    activation.epoch.0
+                ));
+            }
+            let affected = crate::session_store::apply_client_activation(runtime, activation)
+                .map_err(|error| error.to_string())?;
+            let stale_sources =
+                if activation.continuity == crate::agent_runtime::SessionContinuity::Invalidated {
+                    affected
+                        .iter()
+                        .map(|candidate| candidate.source.clone())
+                        .collect()
+                } else {
+                    Vec::new()
+                };
+            let probe_candidates =
+                if activation.continuity == crate::agent_runtime::SessionContinuity::Unknown {
+                    affected
+                } else {
+                    Vec::new()
+                };
             let old_acp = std::mem::replace(&mut *acp, new_acp);
             runtime
                 .client_generation
@@ -498,7 +530,7 @@ impl AppStateHandles {
                 }
             }
             tracing::info!("ACP client activated; generation is now {}", new_generation);
-            (old_acp, stale_sources)
+            (old_acp, stale_sources, probe_candidates)
         };
         // 优化-1：sessions 锁已释放——清理旧 source 的 prompt 锁条目。
         // G2-08：lib.rs 本地 drop_stale_prompt_locks 删除，收敛为 runtime 方法。
@@ -507,7 +539,7 @@ impl AppStateHandles {
         if let Err(error) = old_acp.kill() {
             tracing::warn!("kill replaced agent: {}", error);
         }
-        Ok(())
+        Ok(probe_candidates)
     }
 }
 

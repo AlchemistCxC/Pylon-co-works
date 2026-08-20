@@ -2,6 +2,7 @@
 //! 方案 11 机械拆分自 session/mod.rs（纯搬移，行为零变化）。
 
 use super::*;
+use crate::acp::AcpError;
 
 /// Prompt-generated event 与 dispatcher ACP update 共用 EventService ingest；不持有
 /// 独立 sequence/normalizer。平台会话无 GUI Profile，明确跳过本地 journal。
@@ -430,28 +431,15 @@ async fn finalize_response<R: tauri::Runtime>(
 
 /// S3：prompt Response 错误是否携带"会话不存在"语义（幽灵映射自动重建判定）。
 /// agent 重启/会话回收后，本地映射的 peri_id 指向已死会话，prompt 会返回
-/// "session not found" 类 RPC 错误。对 error 的 JSON 序列化串做小写化宽松子串匹配：
-/// - 含 "not found"（排除 "method not found"——-32601 方法不支持，非会话缺失，
-///   与 close_session 的 -32601 降级语义一致）
-/// - 或含 "not exist"
-/// - 或同时含 "session" 与 ("invalid" | "unknown" | "missing")
-///   网络/临时错误（连接关闭/写超时/拒绝/取消等）不命中，不触发映射清理。
-pub(crate) fn prompt_error_indicates_missing_session(error: &str) -> bool {
-    let lower = error.to_lowercase();
-    if lower.contains("method not found") {
-        return false;
-    }
-    lower.contains("not found")
-        || lower.contains("not exist")
-        || (lower.contains("session")
-            && (lower.contains("invalid")
-                || lower.contains("unknown")
-                || lower.contains("missing")))
+/// "session not found" 类 RPC 错误。分类只读取 [`AcpError::Rpc`] 的结构化
+/// code/data/message；method-not-found 与传输/超时错误不命中。
+pub(crate) fn prompt_error_indicates_missing_session(error: &AcpError) -> bool {
+    error.rpc_failure_kind() == Some(crate::acp::RpcFailureKind::SessionMissing)
 }
 
 /// S3：Response 错误分支的幽灵映射清理——错误含"会话不存在"语义时，按
-/// (peri_id, generation) 复核删除本地映射（O1：锁表同步收敛）；下一条消息
-/// 自动走会话重建路径。返回是否删除了映射。事件（pylon:error）与 pet 感知
+/// (peri_id, generation) 复核删除本地映射（O1：锁表同步收敛），并保留 Detached
+/// 健康快照，要求用户显式 load/retry/fork。返回是否删除了映射。事件与 pet 感知
 /// 由调用方保持原顺序，本函数只负责映射收敛与日志。
 pub(crate) fn cleanup_ghost_session_mapping(
     state: &AppState,
@@ -459,18 +447,27 @@ pub(crate) fn cleanup_ghost_session_mapping(
     source: &str,
     peri_id: &str,
     prompt_generation: u64,
-    error: &str,
+    error: &AcpError,
 ) -> bool {
     if !prompt_error_indicates_missing_session(error) {
         return false;
     }
-    match state.remove_session_if_matches(runtime, source, peri_id, prompt_generation) {
+    match crate::session_store::mark_detached_if_current(
+        runtime,
+        source,
+        peri_id,
+        prompt_generation,
+        prompt_generation,
+        "remote-session-missing".into(),
+        false,
+        true,
+    ) {
         Ok(true) => {
             state.log_runtime_summary(
                 "warn",
                 "session",
                 Some(source.to_string()),
-                &format!("Agent session {peri_id} missing ({error}); removed stale mapping — next prompt will rebuild"),
+                &format!("Agent session {peri_id} missing; removed stale mapping — explicit reload is required"),
                 serde_json::Map::new(),
             );
             true
@@ -756,6 +753,7 @@ async fn send_prompt_core_impl<R: tauri::Runtime>(
             }
             if let Some(error) = raw.error {
                 let error = error.to_string();
+                let typed_error = AcpError::Rpc(error.clone());
                 let _ = state.pet.lock().map(|mut p| crate::pet::on_error(&mut p));
                 // S3：幽灵映射自动重建——agent 侧会话已不存在（重启/回收后映射滞留）
                 // 时清理本地映射，下一条消息自动走会话重建路径；网络/临时错误不清理。
@@ -765,7 +763,7 @@ async fn send_prompt_core_impl<R: tauri::Runtime>(
                     source,
                     &flow.peri_id,
                     flow.generation,
-                    &error,
+                    &typed_error,
                 );
                 Err(PylonError::Protocol(error))
             } else {
@@ -777,10 +775,8 @@ async fn send_prompt_core_impl<R: tauri::Runtime>(
         }
         PromptWaitOutcome::ConnectionClosed => {
             runtime.acp.lock().await.remove_pending(flow.request_id);
-            // A14：崩溃不删会话映射——自动重连（keep_sessions=true）会迁移
-            // generation 并恢复事件路由；此处删除映射会让重连后的活跃会话
-            // 丢失绑定（与 keep_sessions 语义相悖）。已知限制：若重连后
-            // 事件无匹配（幽灵映射），session_matches 复核会拒绝陈旧消息。
+            // 崩溃不在此删除映射：自动重连会先置 Probing，再用无 prompt 的
+            // session/load probe 收敛 Attached/Detached；删除会丢失待验证证据。
             // 方案 I：连接关闭日志携带 request/session/agent 上下文，便于
             // 对齐 ACP wire 时间线定位终态缺失点。
             state.log_runtime_summary(

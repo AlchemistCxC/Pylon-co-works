@@ -14,6 +14,11 @@ pub enum PylonError {
     AgentCrashed,
     #[error("session not found: {0}")]
     SessionNotFound(String),
+    #[error("session binding unavailable for {session_source}: {health}")]
+    SessionBindingUnavailable {
+        session_source: String,
+        health: String,
+    },
     /// OWNER-01（§5.8）：owner runtime 不存在（agent 未配置/未启动/未知）时返回，
     /// 禁止 fallback 到另一个 active runtime。agent_id 保留用于诊断（不落日志原文）。
     /// dead_code（预期）：契约卡 API——OWNER-02 起命令层显式 agentId 路由消费。
@@ -77,6 +82,7 @@ impl PylonError {
             Self::Acp(_) => "acp_error",
             Self::AgentCrashed => "agent_crashed",
             Self::SessionNotFound(_) => "session_not_found",
+            Self::SessionBindingUnavailable { .. } => "session_binding_unavailable",
             Self::AgentRuntimeUnavailable { .. } => "agent_runtime_unavailable",
             Self::NoActiveAgent => "no_active_agent",
             Self::Serialize(_) => "serialize_error",
@@ -155,6 +161,16 @@ mod tests {
         let value = serde_json::to_value(&error).expect("serialize DTO");
         assert_eq!(value["code"], "session_not_found");
         assert_eq!(value["message"], "session not found: source-a");
+
+        let unavailable = serde_json::to_value(PylonError::SessionBindingUnavailable {
+            session_source: "source-a".into(),
+            health: "probing".into(),
+        })
+        .expect("serialize binding error DTO");
+        assert_eq!(unavailable["code"], "session_binding_unavailable");
+        assert!(unavailable["message"].as_str().is_some_and(|message| {
+            message.contains("source-a") && message.contains("probing")
+        }));
 
         let truncated = serde_json::to_value(PylonError::ReplayTruncated { dropped_count: 3 })
             .expect("serialize replay error DTO");

@@ -104,6 +104,15 @@ async fn create_session_slot(
         false,
         crate::agent_runtime::SessionSlotPolicy::default().max_sessions,
     )?;
+    let attached = crate::session_store::mark_attached_if_current(
+        runtime, source, &peri_id, generation, generation,
+    )
+    .map_err(|error| PylonError::Protocol(error.to_string()))?;
+    if !attached {
+        return Err(PylonError::Protocol(format!(
+            "stale session mapping for source: {source}"
+        )));
+    }
     if close_replaced {
         if let Some(old) = replaced {
             // 方案 6：统一 close RPC 入口（LocalFirstBestEffort，吞错误）。
@@ -131,6 +140,25 @@ pub(crate) async fn ensure_session_mapping(
     wire_mcp_servers: &[serde_json::Value],
 ) -> Result<SessionMapping, PylonError> {
     let _creation_guard = runtime.session_creation.lock().await;
+    if let Some(health) = runtime
+        .binding_health
+        .lock()
+        .map_err(|error| error.to_string())?
+        .get(source)
+        .cloned()
+    {
+        let unavailable = match health {
+            crate::agent_runtime::SessionBindingHealth::Attached { .. } => None,
+            crate::agent_runtime::SessionBindingHealth::Probing { .. } => Some("probing"),
+            crate::agent_runtime::SessionBindingHealth::Detached { .. } => Some("detached"),
+        };
+        if let Some(health) = unavailable {
+            return Err(PylonError::SessionBindingUnavailable {
+                session_source: source.to_string(),
+                health: health.to_string(),
+            });
+        }
+    }
     // G2-08 锁合并：消息到达即活动（B10.3b 会话超时判定）——updated_at 刷新与
     // 存在性读取合并为 guard 内一次 sessions.lock()（每消息 7 处 sessions 锁降为
     // 6 处）。行为差异（E10 已拍板）：crashed 早退路径不再刷新 updated_at。

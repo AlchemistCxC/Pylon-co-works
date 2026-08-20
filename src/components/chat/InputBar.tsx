@@ -104,6 +104,14 @@ export default forwardRef<{ send: () => void; attachFile: () => void; cancel: ()
       setReconnectPending(false)
     }
   }
+  const handleReloadSessionBinding = () => {
+    if (!foundSession) return
+    setSendError('')
+    useRuntimeStore.getState().bumpSessionReload({
+      agentId: foundSession.agentId,
+      source: foundSession.source,
+    })
+  }
 
   useEffect(() => {
     historyDraftRef.current = ''
@@ -513,6 +521,11 @@ export default forwardRef<{ send: () => void; attachFile: () => void; cancel: ()
           {binding.kind === 'agent_disconnected' && (
             <button type="button" className="input-reconnect-btn" onClick={handleReconnectAgent} disabled={reconnectPending}>
               {reconnectPending ? '重连中…' : '重连'}
+            </button>
+          )}
+          {(binding.kind === 'binding_detached' || binding.kind === 'binding_stale') && (
+            <button type="button" className="input-reconnect-btn" onClick={handleReloadSessionBinding}>
+              重新连接会话
             </button>
           )}
         </div>

@@ -238,7 +238,7 @@ async fn fake_acp_crash_loop_keeps_reconnecting_then_flag_releases() {
         None,
         AgentLifecycleStatus::Reconnecting,
         "reconnect",
-        false,
+        crate::agent_runtime::SessionContinuity::Invalidated,
         true,
     )
     .await
@@ -380,7 +380,7 @@ async fn manual_reconnect_releases_auto_reconnect_flag() {
         None,
         AgentLifecycleStatus::Reconnecting,
         "reconnect",
-        false,
+        crate::agent_runtime::SessionContinuity::Invalidated,
         true,
     )
     .await

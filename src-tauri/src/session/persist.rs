@@ -130,6 +130,15 @@ pub(crate) async fn load_persisted_session(
                 restore_previous_slot(&runtime, &source, &peri_id, generation, previous)?;
                 return Err(error.into());
             }
+            let attached = crate::session_store::mark_attached_if_current(
+                &runtime, &source, &peri_id, generation, generation,
+            )
+            .map_err(|error| PylonError::Protocol(error.to_string()))?;
+            if !attached {
+                return Err(PylonError::Protocol(format!(
+                    "stale session mapping for source: {source}"
+                )));
+            }
             serde_json::to_value(PersistedSessionLoadResult {
                 response,
                 replay: replay.events,

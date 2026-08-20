@@ -14,7 +14,7 @@ import { useWorkspaceStore } from '../../../workspaceStore'
 import { useStore } from '../../../store'
 import { createSheetState } from '../../../workspace-sheets/sheetState'
 import { resetStores } from '../../../test/resetStores'
-import { sessionContext } from '../../../agentContext'
+import { sessionContext, toAgentContextKey } from '../../../agentContext'
 import type { Session } from '../../../identityStore'
 
 const { invokeMock } = vi.hoisted(() => ({ invokeMock: vi.fn() }))
@@ -124,6 +124,22 @@ describe('InputBar Binding gate：generation 失效（OWNER-04）', () => {
     expect((screen.getByRole('button', { name: '发送' }) as HTMLButtonElement).disabled).toBe(false)
     expect((screen.getByRole('textbox') as HTMLTextAreaElement).disabled).toBe(false)
     expect(screen.queryByRole('status')).toBeNull()
+  })
+
+  it('continuity probe detached：锁定发送并由用户显式重新连接会话', () => {
+    seedAgentSheet()
+    const context = sessionContext({ agentId: 'peri', source: SESSION.source })
+    useRuntimeStore.getState().setBindingGeneration(context, 5)
+    useRuntimeStore.getState().setAgentStatus('peri', {
+      agent: 'peri', agentId: 'peri', status: 'connected', generation: 6,
+      sessionBindings: [{ agentId: 'peri', source: SESSION.source, health: 'detached', generation: 6, reason: 'session-probe-timeout', retryable: true }],
+    })
+    render(<InputBar sessionId="s1" />)
+    expect((screen.getByRole('textbox') as HTMLTextAreaElement).disabled).toBe(true)
+    expect(screen.getByRole('status').textContent).toContain('请重新连接会话')
+    fireEvent.click(screen.getByRole('button', { name: '重新连接会话' }))
+    expect(useRuntimeStore.getState().sessionReloadTokens[toAgentContextKey(context)]).toBe(1)
+    expect(invokeMock).not.toHaveBeenCalledWith('new_session', expect.anything())
   })
 
   it('CR-1 queue 发送路径受 binding 守卫：binding_stale 时 queue 按钮禁用，load-finished 自动 flush 不触发 send_message', () => {

@@ -167,4 +167,17 @@ describe('refineBindingGeneration：binding generation 精化（OWNER-04）', ()
       kind: 'binding_stale', agentId: 'peri', sessionId: 's1', fromGeneration: 5, toGeneration: 6,
     })).toBe(true)
   })
+
+  it('后端 continuity probe 的 probing/detached 健康状态优先锁住旧 binding', () => {
+    expect(refineBindingGeneration(ready, {
+      establishedGeneration: 5,
+      currentGeneration: 6,
+      backendHealth: { health: 'probing', agentId: 'peri', source: 'local:s1', generation: 6, retryable: true },
+    })).toMatchObject({ kind: 'binding_probing', agentId: 'peri' })
+    expect(refineBindingGeneration(ready, {
+      establishedGeneration: 5,
+      currentGeneration: 6,
+      backendHealth: { health: 'detached', agentId: 'peri', source: 'local:s1', generation: 6, reason: 'session-probe-timeout', retryable: true },
+    })).toMatchObject({ kind: 'binding_detached', reason: 'session-probe-timeout', retryable: true })
+  })
 })

@@ -7,6 +7,16 @@ export interface AgentInfo {
   cwd?: string
 }
 
+export interface SessionBindingSnapshot {
+  agentId: string
+  source: string
+  health: 'attached' | 'probing' | 'detached'
+  generation: number
+  fromGeneration?: number
+  reason?: string
+  retryable: boolean
+}
+
 export interface AgentStatus {
   agent: string
   agentId?: string
@@ -18,6 +28,7 @@ export interface AgentStatus {
   lastConnectedAt?: string | number
   /** 后端能力信息：原样透传不解释；null 表示断线，缺失表示未提供 */
   capabilities?: unknown | null
+  sessionBindings?: SessionBindingSnapshot[]
 }
 
 export interface AgentStatusPayload {
@@ -31,6 +42,29 @@ export interface AgentStatusPayload {
   generation?: number
   lastConnectedAt?: string | number
   capabilities?: unknown | null
+  sessionBindings?: unknown
+}
+
+function normalizeSessionBindings(raw: unknown): SessionBindingSnapshot[] | undefined {
+  if (!Array.isArray(raw)) return undefined
+  const bindings: SessionBindingSnapshot[] = []
+  for (const value of raw) {
+    if (!value || typeof value !== 'object' || Array.isArray(value)) continue
+    const item = value as Record<string, unknown>
+    if (typeof item.agentId !== 'string' || typeof item.source !== 'string') continue
+    if (item.health !== 'attached' && item.health !== 'probing' && item.health !== 'detached') continue
+    if (typeof item.generation !== 'number' || !Number.isSafeInteger(item.generation) || item.generation < 0) continue
+    bindings.push({
+      agentId: item.agentId,
+      source: item.source,
+      health: item.health,
+      generation: item.generation,
+      fromGeneration: typeof item.fromGeneration === 'number' ? item.fromGeneration : undefined,
+      reason: typeof item.reason === 'string' ? item.reason : undefined,
+      retryable: item.retryable === true,
+    })
+  }
+  return bindings
 }
 
 /**
@@ -61,6 +95,7 @@ export function normalizeAgentStatus(payload: AgentStatusPayload, fallbackAgent 
     generation: payload.generation,
     lastConnectedAt: payload.lastConnectedAt,
     capabilities: payload.capabilities,
+    sessionBindings: normalizeSessionBindings(payload.sessionBindings),
   }
 }
 

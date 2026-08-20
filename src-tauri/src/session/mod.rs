@@ -82,24 +82,6 @@ mod del05_error_code_matrix;
 
 pub(crate) const MAX_SESSIONS: usize = 100;
 
-/// 客户端替换后的 sessions 处理：keep=false 清空（跨 agent/全新进程语义）；
-/// keep=true 保留映射但迁移 generation——通知路由按新代际匹配，旧 session 才能继续收事件。
-/// 生产路径已委托 SessionStore::migrate_or_clear；本纯函数保留供测试锁定语义。
-#[cfg(test)]
-pub(crate) fn apply_client_replacement_sessions(
-    sessions: &mut HashMap<String, SessionInfo>,
-    keep_sessions: bool,
-    new_generation: u64,
-) {
-    if !keep_sessions {
-        sessions.clear();
-    } else {
-        for session in sessions.values_mut() {
-            session.generation = new_generation;
-        }
-    }
-}
-
 /// B11.1 注入适用性：命令消息（`/` 开头，与 persona 拼接规则一致）不注入。
 pub(crate) fn inject_applies_to(content: &str) -> bool {
     !content.trim_start().starts_with('/')
@@ -517,8 +499,7 @@ impl AppState {
         start_status: AgentLifecycleStatus,
         log_action: &str,
     ) -> Result<(), String> {
-        // 手动 switch/reconnect：跨 agent/全新进程语义，keep_sessions=false（清空映射）。
-        // 实现委托给静态辅助，自动重连（keep_sessions=true）与手动路径共用同一份逻辑。
+        // 手动 switch/reconnect：跨 agent/全新进程语义，旧 remote binding 失效。
         let handles = AppStateHandles::from_state(self);
         crate::lifecycle::do_connect_and_replace(
             &handles,
@@ -528,7 +509,7 @@ impl AppState {
             agent_id,
             start_status,
             log_action,
-            false,
+            crate::agent_runtime::SessionContinuity::Invalidated,
             true,
         )
         .await
@@ -562,7 +543,11 @@ impl AppState {
             .get(agent_id)
             .cloned()
             .ok_or_else(|| format!("unknown agent: {agent_id}"))?;
-        let keep = matches!(status, AgentLifecycleStatus::Crashed);
+        let continuity = if matches!(status, AgentLifecycleStatus::Crashed) {
+            crate::agent_runtime::SessionContinuity::Unknown
+        } else {
+            crate::agent_runtime::SessionContinuity::Invalidated
+        };
         let _lifecycle_guard = runtime.agent_lifecycle.lock().await;
         // 双检查：拿到生命周期锁后重查（防并发连接）
         let status = runtime
@@ -587,7 +572,7 @@ impl AppState {
             None,
             AgentLifecycleStatus::Connecting,
             "platform-ingest",
-            keep,
+            continuity,
             false,
         )
         .await
@@ -904,7 +889,7 @@ pub(crate) async fn retention_prune(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::acp::AcpClient;
+    use crate::acp::{AcpClient, AcpError};
     use tauri::Manager;
 
     #[tokio::test]
@@ -1546,38 +1531,24 @@ for line in sys.stdin:
     #[test]
     fn prompt_error_indicates_missing_session_matching() {
         let missing = [
-            "session not found: session-42",
-            "Session not found",
             r#"{"code":-32602,"message":"session not found: session-42"}"#,
-            "unknown session: session-42",
             r#"{"code":-32602,"message":"Invalid params: unknown session: session-42"}"#,
-            "invalid session: session-42",
-            "session does not exist",
             r#"{"code":-32000,"message":"session missing"}"#,
-            "missing sessionId",
         ];
         for error in missing {
             assert!(
-                prompt_error_indicates_missing_session(error),
+                prompt_error_indicates_missing_session(&AcpError::Rpc(error.into())),
                 "必须命中会话不存在语义: {error}"
             );
         }
         let transient = [
-            "connection closed",
-            "ACP connection closed",
-            "write timeout: connection presumed dead",
-            "prompt cancelled",
-            "prompt refused by agent",
-            "timed out after 300s",
-            "method not found",
             r#"{"code":-32601,"message":"Method not found"}"#,
             r#"{"code":-32602,"message":"invalid params: missing content"}"#,
-            "rate limited",
-            "internal error",
+            r#"{"code":-32000,"message":"rate limited"}"#,
         ];
         for error in transient {
             assert!(
-                !prompt_error_indicates_missing_session(error),
+                !prompt_error_indicates_missing_session(&AcpError::Rpc(error.into())),
                 "不得误伤网络/临时/方法级错误: {error}"
             );
         }
@@ -1605,7 +1576,7 @@ for line in sys.stdin:
             "source-a",
             "peri-1",
             1,
-            r#"{"code":-32602,"message":"session not found: peri-1"}"#,
+            &AcpError::Rpc(r#"{"code":-32602,"message":"session not found: peri-1"}"#.into()),
         );
         assert!(removed, "会话不存在错误必须清理幽灵映射");
         assert!(
@@ -1616,6 +1587,13 @@ for line in sys.stdin:
             runtime.prompt_locks.lock().unwrap().is_empty(),
             "O1：锁表条目必须随映射删除收敛"
         );
+        assert!(matches!(
+            runtime.binding_health.lock().unwrap().get("source-a"),
+            Some(crate::agent_runtime::SessionBindingHealth::Detached {
+                retryable: false,
+                ..
+            })
+        ));
         // 网络/临时错误：不清理映射。
         insert(&runtime);
         let removed = cleanup_ghost_session_mapping(
@@ -1624,7 +1602,7 @@ for line in sys.stdin:
             "source-a",
             "peri-1",
             1,
-            "write timeout: connection presumed dead",
+            &AcpError::WriteTimeout,
         );
         assert!(!removed, "临时错误不得清理映射");
         assert_eq!(runtime.sessions.lock().unwrap().len(), 1);
@@ -1635,10 +1613,39 @@ for line in sys.stdin:
             "source-a",
             "peri-dead",
             1,
-            "session not found: peri-dead",
+            &AcpError::Rpc(r#"{"code":-32602,"message":"session not found: peri-dead"}"#.into()),
         );
         assert!(!removed, "peri_id 不匹配不得误删新会话映射");
         assert_eq!(runtime.sessions.lock().unwrap().len(), 1);
+    }
+
+    #[tokio::test]
+    async fn probing_binding_is_rejected_by_the_backend_send_gate() {
+        let runtime = AgentRuntime::new_disconnected();
+        crate::session_store::insert(
+            &runtime,
+            "source-a",
+            SessionInfo::new("peri-1".into(), String::new(), ".".into(), true, 4),
+            true,
+            100,
+        )
+        .unwrap();
+        runtime.binding_health.lock().unwrap().insert(
+            "source-a".into(),
+            crate::agent_runtime::SessionBindingHealth::Probing {
+                from_generation: 4,
+                target_generation: 5,
+            },
+        );
+        let state = state_without_active_runtime();
+
+        let error = ensure_session_mapping(&state, &runtime, "source-a", None, "persona", ".", &[])
+            .await
+            .err()
+            .expect("probing binding must not be reused by any backend caller");
+
+        assert_eq!(error.code(), "session_binding_unavailable");
+        assert!(runtime.sessions.lock().unwrap().contains_key("source-a"));
     }
 
     /// 方案 I：session/new 失败时 send_prompt_core 必须返回 Err 且 runtime 日志
@@ -1832,11 +1839,7 @@ for line in sys.stdin:
         );
         // 让 prompt 跑 2.5s：chunk 持续到达（~150ms 一发），idle(1s)/first_token(2s) 都不该触发。
         // 通过带超时地 await 来观察它「仍在进行而非返回超时」。
-        let outcome = tokio::time::timeout(
-            std::time::Duration::from_millis(2500),
-            prompt,
-        )
-        .await;
+        let outcome = tokio::time::timeout(std::time::Duration::from_millis(2500), prompt).await;
         // 2.5s 后仍在执行 = 未被截断（若旧语义把 2s 当总超时，此处早已返回 timed out）。
         assert!(
             outcome.is_err(),

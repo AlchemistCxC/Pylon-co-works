@@ -196,6 +196,85 @@ pub enum AcpError {
     Child(String),
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum RpcFailureKind {
+    SessionMissing,
+    MethodMissing,
+    Other,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct RpcFailureDetails {
+    pub(crate) code: Option<i64>,
+    pub(crate) message: String,
+    pub(crate) kind: RpcFailureKind,
+}
+
+impl AcpError {
+    pub(crate) fn rpc_failure_details(&self) -> Option<RpcFailureDetails> {
+        let Self::Rpc(raw) = self else {
+            return None;
+        };
+        let value = serde_json::from_str::<serde_json::Value>(raw).ok()?;
+        let code = value.get("code").and_then(serde_json::Value::as_i64);
+        let message = value
+            .get("message")
+            .and_then(serde_json::Value::as_str)
+            .unwrap_or("remote RPC error")
+            .chars()
+            .take(512)
+            .collect::<String>();
+        let normalized_message = message.to_ascii_lowercase();
+        let data_marker = value
+            .get("data")
+            .and_then(serde_json::Value::as_object)
+            .and_then(|data| {
+                ["code", "kind", "type"]
+                    .into_iter()
+                    .find_map(|field| data.get(field).and_then(serde_json::Value::as_str))
+            })
+            .map(|marker| marker.to_ascii_lowercase());
+        let kind = if code == Some(-32601) {
+            RpcFailureKind::MethodMissing
+        } else if data_marker.as_deref().is_some_and(|marker| {
+            matches!(
+                marker,
+                "session_missing" | "session_not_found" | "unknown_session"
+            )
+        }) || (normalized_message.contains("session")
+            && [
+                "not found",
+                "does not exist",
+                "unknown",
+                "missing",
+                "invalid",
+            ]
+            .into_iter()
+            .any(|term| normalized_message.contains(term)))
+        {
+            RpcFailureKind::SessionMissing
+        } else {
+            RpcFailureKind::Other
+        };
+        Some(RpcFailureDetails {
+            code,
+            message,
+            kind,
+        })
+    }
+
+    pub(crate) fn rpc_failure_kind(&self) -> Option<RpcFailureKind> {
+        self.rpc_failure_details().map(|details| details.kind)
+    }
+
+    pub(crate) fn is_retryable_transport_failure(&self) -> bool {
+        matches!(
+            self,
+            Self::ConnectionClosed | Self::WriteTimeout | Self::RpcTimeout | Self::Child(_)
+        )
+    }
+}
+
 impl From<String> for AcpError {
     fn from(message: String) -> Self {
         Self::Child(message)
@@ -1636,6 +1715,32 @@ for line in sys.stdin:
         assert_eq!(failure.stage, AgentConnectStage::Capability);
         assert_eq!(failure.code, "agent_capability_invalid");
         assert!(!failure.retryable);
+    }
+
+    #[test]
+    fn rpc_failure_kind_distinguishes_missing_session_from_method_and_transient_errors() {
+        for raw in [
+            r#"{"code":-32602,"message":"session not found: s-1"}"#,
+            r#"{"code":-32000,"message":"invalid session: s-1"}"#,
+            r#"{"code":-32000,"message":"request rejected","data":{"kind":"session_missing"}}"#,
+        ] {
+            assert_eq!(
+                AcpError::Rpc(raw.into()).rpc_failure_kind(),
+                Some(RpcFailureKind::SessionMissing),
+                "{raw}"
+            );
+        }
+        for raw in [
+            r#"{"code":-32601,"message":"Method not found"}"#,
+            r#"{"code":-32602,"message":"invalid params: missing content"}"#,
+            r#"{"code":-32001,"message":"rate limited"}"#,
+        ] {
+            assert_ne!(
+                AcpError::Rpc(raw.into()).rpc_failure_kind(),
+                Some(RpcFailureKind::SessionMissing),
+                "{raw}"
+            );
+        }
     }
 
     #[tokio::test]

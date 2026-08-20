@@ -330,6 +330,9 @@ async fn handle_session_update<R: tauri::Runtime>(
     window: &tauri::WebviewWindow<R>,
     gateway: &crate::gateway::GatewayCore,
     sessions: &SessionsLock,
+    binding_health: &std::sync::Mutex<
+        std::collections::HashMap<String, crate::agent_runtime::SessionBindingHealth>,
+    >,
     pet: &std::sync::Mutex<PetState>,
     client_generation: &AtomicU64,
     generation: u64,
@@ -345,6 +348,29 @@ async fn handle_session_update<R: tauri::Runtime>(
             return true;
         }
     };
+    let binding_blocked = match sessions.lock() {
+        Ok(items) => items
+            .iter()
+            .find(|(_, session)| session.peri_id == peri_id)
+            .is_some_and(|(source, _)| match binding_health.lock() {
+                Ok(health) => matches!(
+                    health.get(source),
+                    Some(
+                        crate::agent_runtime::SessionBindingHealth::Probing { .. }
+                            | crate::agent_runtime::SessionBindingHealth::Detached { .. }
+                    )
+                ),
+                Err(_) => true,
+            }),
+        Err(_) => true,
+    };
+    if binding_blocked {
+        tracing::warn!(
+            "ACP notification rejected while session binding is not attached: {}",
+            peri_id
+        );
+        return true;
+    }
     let source = {
         let mut mapped = None;
         let mut ambiguous = false;
@@ -614,6 +640,7 @@ pub(crate) fn start_notification_dispatcher<R: tauri::Runtime>(
     }
     let acp = runtime.acp.clone();
     let sessions = runtime.sessions.clone();
+    let binding_health = runtime.binding_health.clone();
     let pet = handles.pet.clone();
     let generation = runtime
         .client_generation
@@ -834,7 +861,7 @@ pub(crate) fn start_notification_dispatcher<R: tauri::Runtime>(
                                         None,
                                         AgentLifecycleStatus::Reconnecting,
                                         "auto-reconnect",
-                                        true,
+                                        crate::agent_runtime::SessionContinuity::Unknown,
                                         true,
                                     )
                                     .await
@@ -981,6 +1008,7 @@ pub(crate) fn start_notification_dispatcher<R: tauri::Runtime>(
                 &window,
                 &gateway,
                 &sessions,
+                &binding_health,
                 &pet,
                 &client_generation,
                 generation,

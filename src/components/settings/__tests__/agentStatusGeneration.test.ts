@@ -1,6 +1,6 @@
 import { beforeEach, describe, expect, it } from 'vitest'
 import { useRuntimeStore } from '../../../runtimeStore'
-import type { AgentStatus } from '../agentTypes'
+import { normalizeAgentStatus, type AgentStatus } from '../agentTypes'
 
 const status = (lifecycle: AgentStatus['status'], generation?: number): AgentStatus => ({
   agent: 'peri',
@@ -39,5 +39,20 @@ describe('agent status generation convergence', () => {
     store.setAgentStatus('peri', status('error'))
 
     expect(useRuntimeStore.getState().agentStatuses.peri.status).toBe('error')
+  })
+
+  it('normalizes bounded session binding metadata and rejects malformed rows', () => {
+    const normalized = normalizeAgentStatus({
+      agentId: 'peri', status: 'connected', generation: 8,
+      sessionBindings: [
+        { agentId: 'peri', source: 'local:s1', health: 'probing', generation: 8, fromGeneration: 7, retryable: true },
+        { agentId: 'peri', source: 'local:bad', health: 'unknown', generation: 8 },
+        { agentId: 'peri', source: 'local:negative', health: 'attached', generation: -1 },
+      ],
+    })
+    expect(normalized.sessionBindings).toEqual([{
+      agentId: 'peri', source: 'local:s1', health: 'probing', generation: 8,
+      fromGeneration: 7, reason: undefined, retryable: true,
+    }])
   })
 })

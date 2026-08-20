@@ -19,6 +19,7 @@
  *                     须重新加载会话后重建 binding）
  */
 import type { AgentConnectionStatus, AgentStatus } from '../../components/settings/agentTypes'
+import type { SessionBindingSnapshot } from '../../components/settings/agentTypes'
 import { statusLabel } from '../../components/settings/agentTypes'
 import type { Session } from '../../identityStore'
 
@@ -28,6 +29,8 @@ export type BindingState =
   | { kind: 'restore_error'; agentId?: string; reason: string }
   | { kind: 'agent_disconnected'; agentId: string; status: AgentConnectionStatus }
   | { kind: 'binding_ready'; agentId: string; sessionId: string }
+  | { kind: 'binding_probing'; agentId: string; sessionId: string; generation: number }
+  | { kind: 'binding_detached'; agentId: string; sessionId: string; reason: string; retryable: boolean }
   | { kind: 'binding_stale'; agentId: string; sessionId: string; fromGeneration: number; toGeneration: number }
 
 /** resolver 最小化输入：只读 kind/agentId，避免域依赖 workspace-sheets 具体类型 */
@@ -94,6 +97,8 @@ export interface BindingGenerationInput {
   establishedGeneration: number | undefined
   /** 当前 agentStatus.generation（重连后递增） */
   currentGeneration: number | undefined
+  /** Kernel auto-reconnect continuity probe snapshot for this exact agent+source. */
+  backendHealth?: SessionBindingSnapshot
 }
 
 /**
@@ -103,7 +108,24 @@ export interface BindingGenerationInput {
  */
 export function refineBindingGeneration(binding: BindingState, generations: BindingGenerationInput): BindingState {
   if (binding.kind !== 'binding_ready') return binding
-  const { establishedGeneration, currentGeneration } = generations
+  const { establishedGeneration, currentGeneration, backendHealth } = generations
+  if (backendHealth?.health === 'probing') {
+    return {
+      kind: 'binding_probing',
+      agentId: binding.agentId,
+      sessionId: binding.sessionId,
+      generation: backendHealth.generation,
+    }
+  }
+  if (backendHealth?.health === 'detached') {
+    return {
+      kind: 'binding_detached',
+      agentId: binding.agentId,
+      sessionId: binding.sessionId,
+      reason: backendHealth.reason ?? 'session-binding-detached',
+      retryable: backendHealth.retryable,
+    }
+  }
   if (establishedGeneration === undefined || currentGeneration === undefined) return binding
   if (establishedGeneration === currentGeneration) return binding
   return {
@@ -128,6 +150,8 @@ export function bindingStatusText(state: BindingState): string {
     case 'restore_error': return `会话绑定恢复失败：${state.reason}`
     case 'agent_disconnected': return `Agent ${state.agentId} ${statusLabel(state.status)}，暂不能发送`
     case 'binding_stale': return `Agent ${state.agentId} 已重连（generation ${state.toGeneration}），会话绑定已失效，需重新加载会话`
+    case 'binding_probing': return `Agent ${state.agentId} 已重连，正在验证远端会话是否仍可继续…`
+    case 'binding_detached': return `远端会话绑定不可用（${state.reason}），请重新连接会话`
     case 'binding_ready': return ''
   }
 }
