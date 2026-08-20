@@ -701,7 +701,10 @@ async fn version_probe(
                 diagnostic: Some(probe_diagnostic(
                     detector_id,
                     "version_probe_spawn_failed",
-                    format!("无法执行 {} --version: {error}", executable.to_string_lossy()),
+                    format!(
+                        "无法执行 {} --version: {error}",
+                        executable.to_string_lossy()
+                    ),
                     false,
                 )),
             };
@@ -711,11 +714,8 @@ async fn version_probe(
     let stdout = child.take_stdout().expect("version probe stdout piped");
     let stderr = child.take_stderr().expect("version probe stderr piped");
     let completed = tokio::time::timeout(budget, async {
-        let (stdout, stderr, status) = tokio::join!(
-            read_bounded(stdout),
-            read_bounded(stderr),
-            child.wait(),
-        );
+        let (stdout, stderr, status) =
+            tokio::join!(read_bounded(stdout), read_bounded(stderr), child.wait(),);
         (stdout, stderr, status)
     })
     .await;
@@ -742,7 +742,10 @@ async fn version_probe(
                 diagnostic: Some(probe_diagnostic(
                     detector_id,
                     "version_probe_wait_failed",
-                    format!("等待 {} --version 失败: {error}", executable.to_string_lossy()),
+                    format!(
+                        "等待 {} --version 失败: {error}",
+                        executable.to_string_lossy()
+                    ),
                     true,
                 )),
             };
@@ -818,7 +821,8 @@ pub async fn detect_agent_runtime_candidates_inner(
             }
         }
     }
-    let enabled: Option<HashSet<String>> = options.detector_ids.map(|ids| ids.into_iter().collect());
+    let enabled: Option<HashSet<String>> =
+        options.detector_ids.map(|ids| ids.into_iter().collect());
     let selected_rules = rules
         .iter()
         .filter(|rule| {
@@ -1061,7 +1065,6 @@ pub async fn detect_agent_runtime_candidates(
     detect_agent_runtime_candidates_inner(options, &HashMap::new()).await
 }
 
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1238,10 +1241,7 @@ mod tests {
         let candidates = report.candidates;
         assert_eq!(candidates.len(), 1);
         assert_eq!(candidates[0].provider, "hermes");
-        assert_eq!(
-            candidates[0].identity_confidence,
-            IdentityConfidence::High
-        );
+        assert_eq!(candidates[0].identity_confidence, IdentityConfidence::High);
         assert!(candidates[0]
             .evidence
             .iter()
@@ -1287,8 +1287,7 @@ mod tests {
 
         assert_eq!(report.candidates.len(), 2);
         assert_ne!(
-            report.candidates[0].candidate_id,
-            report.candidates[1].candidate_id,
+            report.candidates[0].candidate_id, report.candidates[1].candidate_id,
             "不同 invocation 必须有不同稳定 id"
         );
         assert!(report.candidates.iter().all(|candidate| {

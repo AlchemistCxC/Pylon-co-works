@@ -1,6 +1,6 @@
 # Pylon Kernel 加固施工台账
 
-> 最新完成（2026-08-20）：`WI-A1 / AGT-003`——Agent 启动参数已改为数组编辑与无损传输，后端提供 raw/effective invocation，定向测试、类型检查和 lint 通过；下一项 `WI-A2`。
+> 最新完成（2026-08-20）：`WI-A2 / AGT-004–008`——Agent discovery 已具备身份/协议分离、全 alias 候选、稳定 ID、总预算与并发/候选上限、逐 detector diagnostics，以及超时后的进程树回收；Rust/TS 定向测试、类型检查和 lint 通过；下一项 `WI-A3`。
 >
 > 长程目标：在保留现有五个第一方 Product Plugin 构造的前提下，持续加固 Pylon Kernel 的持久化、重放、生命周期、Agent Runtime、插件故障隔离和结构化错误。  
 > 基线提交：`a38145b chore: establish kernel hardening baseline`  
