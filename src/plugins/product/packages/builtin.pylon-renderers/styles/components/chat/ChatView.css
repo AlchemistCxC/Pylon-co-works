@@ -205,9 +205,9 @@
 .pv-app .pv-tool-row[data-has-connector="true"] .term-tool-head { position:relative; z-index:2; }
 /* 预览不使用真实连接线节点，避免其测量逻辑污染静态预览布局。 */
 .pv-app .term-tool-connector { display:none; }
-.term-tool-head { position:relative; z-index:2; width:100%; min-width:0; padding:0; border:0; background:transparent; color:inherit; font:inherit; text-align:left; cursor:pointer; font-size:inherit; line-height:inherit; display:flex; align-items:baseline; }
+.term-tool-head { position:relative; z-index:2; width:100%; min-width:0; padding:0; border:0; background:transparent; color:inherit; font:inherit; text-align:left; cursor:pointer; font-size:inherit; line-height:inherit; display:flex; align-items:baseline; flex-wrap:nowrap; }
 .term-tool-head:hover { opacity:0.8; }
-.term-tool-indicator { display:inline-block; transform-origin:center; }
+.term-tool-indicator { display:inline-block; transform-origin:center; flex:0 0 auto; white-space:nowrap; }
 .term-tool-indicator.ok { color:var(--tool-ok,#1e9646); }
 .term-tool-indicator.err { color:var(--tool-err,#be2828); }
 .term-tool-indicator.run { color:var(--tool-run,#3b82f6); }
@@ -223,13 +223,13 @@
 @keyframes tool-indicator-pulse { 0%,100% { opacity:0.58; } 50% { opacity:1; } }
 @keyframes tool-indicator-settle { 0% { opacity:0.48; transform:scale(0.88); } 55% { opacity:1; transform:scale(1.14); } 100% { opacity:1; transform:scale(1); } }
 @keyframes tool-indicator-flash { 0% { opacity:0.45; transform:scale(0.9); } 45% { opacity:1; transform:scale(1.12); } 100% { opacity:1; transform:scale(1); } }
-.term-tool-name { font-weight:700; color:var(--tool-name,inherit); }
+.term-tool-name { font-weight:700; color:var(--tool-name,inherit); flex:0 1 auto; min-width:0; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
 /* 工具名随状态着色（与指示器同主题变量，参考 CC 主题驱动着色；--tool-name 保持为基色） */
 .term-tool[data-status="ok"] .term-tool-name { color:var(--tool-ok,#1e9646); }
 .term-tool[data-status="err"] .term-tool-name { color:var(--tool-err,#be2828); }
 .term-tool[data-status="run"] .term-tool-name { color:var(--tool-run,#3b82f6); }
-.term-tool-summary { min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; color:var(--tool-summary,var(--text-dim)); font-size:inherit; }
-.term-tool-suffix { color:var(--text-dim); font-size:inherit; }
+.term-tool-summary { min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; color:var(--tool-summary,var(--text-dim)); font-size:inherit; flex:0 1 auto; }
+.term-tool-suffix { color:var(--text-dim); font-size:inherit; flex:0 0 auto; white-space:nowrap; }
 .term-tool-body { padding:0 0 var(--ui-space-2) var(--ui-space-4); font-family:var(--mono); }
 .term-tool[data-output-collapsible="true"] .term-tool-body { max-height:320px; overflow:auto; }
 .term-tool-body pre { font-size:inherit; font-family:inherit; background:transparent; padding:0; border-radius: 0; overflow-x:auto; white-space:pre-wrap; margin:0; }
@@ -362,7 +362,7 @@
 .term-spinner-row .term-spinner { flex:1; min-width:0; }
 .term-spinner { padding:var(--ui-space-2) 0; display:flex; align-items:center; gap:var(--ui-space-2); font-size:var(--spinner-size, var(--font-size-md)); color:var(--spinner-color,var(--text-dim)); }
 .spinner-frame { color:inherit; font-size:1.15em; min-width:1.15em; text-align:center; display:inline-block; }
-.spinner-verb { color:inherit; font-weight:500; opacity:0.85; white-space:pre; }
+.spinner-verb { color:inherit; font-weight:500; opacity:0.85; white-space:nowrap; flex:0 1 auto; min-width:0; overflow:hidden; text-overflow:ellipsis; }
 .spinner-glimmer { color:inherit; transition:color 110ms linear, text-shadow 110ms linear; }
 .spinner-glimmer-edge { color:color-mix(in srgb, currentColor 70%, var(--spinner-glimmer-color,var(--accent)) 30%); }
 .spinner-glimmer-core { color:var(--spinner-glimmer-color,var(--accent)); text-shadow:0 0 0.5em color-mix(in srgb, var(--spinner-glimmer-color,var(--accent)) 55%, transparent); }
@@ -376,7 +376,7 @@
   opacity: calc(0.52 + 0.48 * var(--stall-progress, 0));
   color: color-mix(in srgb, var(--spinner-stalled-color, #FF6B80) calc(var(--stall-progress, 0) * 100%), var(--spinner-color, var(--text)));
 }
-.spinner-meta { color:var(--text-dim); }
+.spinner-meta { color:var(--text-dim); flex:0 0 auto; white-space:nowrap; }
 .term-spinner[data-phase="thinking"] .spinner-frame { color:var(--accent) !important; animation:spinner-thinking-pulse 1.8s ease-in-out infinite; }
 .term-spinner[data-phase="tool"] .spinner-frame { color:var(--tool-run,#3b82f6) !important; animation:spinner-tool-pulse 0.9s ease-in-out infinite; }
 .term-spinner[data-phase="responding"] .spinner-frame { color:var(--spinner-color,var(--text-dim)); }
@@ -391,7 +391,7 @@
   color: color-mix(in srgb, var(--spinner-stalled-color, #FF6B80) calc(var(--stall-progress, 0) * 100%), var(--spinner-color, var(--text-dim)));
 }
 .spinner-stall-probe { display: contents; }
-.spinner-activity { color:var(--text-dim); letter-spacing:0.12em; }
+.spinner-activity { color:var(--text-dim); letter-spacing:0.12em; flex:0 0 auto; white-space:nowrap; }
 /* 停止按钮：小尺寸、低调、右对齐，不抢视觉 */
 .spinner-stop-btn {
   display:inline-flex; align-items:center; gap:3px; flex-shrink:0;
