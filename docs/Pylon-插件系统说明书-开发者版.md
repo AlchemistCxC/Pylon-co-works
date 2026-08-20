@@ -1,6 +1,6 @@
 # Pylon 插件系统说明书（开发者版）
 
-> 适用版本：Pylon 1.3.0
+> 适用版本：Pylon 1.4.0
 >
 > 生产契约：Plugin API 1.0，`pylon-plugin.json` schema 1
 
@@ -13,25 +13,31 @@
 ## 1. 架构
 
 ```text
-插件源码/构建目录
-├─ pylon-plugin.json
-├─ web.entry
-├─ web.styles
-├─ assets/resources
-└─ bin/<platform>/...
+KernelRoot / Recovery Surface
         │
         ▼
-Native Package Store
-packages / data / runtime / transactions / state.json
-        │
-        ├─ pylon-plugin:// resource protocol
-        └─ PluginPackageDescriptor
+KernelBootstrap（starting / ready / degraded / safe-mode）
+        │ 显式 bootstrap / retry
         ▼
-PackagePluginRuntimeService
-import entry → prepare → activate → commit styles/contributions
-        │
-        ▼
-PluginRuntime + PluginScope + Shadow Transactions
+pluginCompositionRoot（唯一产品 PluginRuntime authority）
+├─ 五个第一方 Product Plugin definitions
+└─ PackageInstallationService / PackagePluginRuntimeService
+          ▲
+          │
+    插件源码/构建目录
+    ├─ pylon-plugin.json
+    ├─ web.entry / web.styles
+    ├─ assets/resources
+    └─ bin/<platform>/...
+          │
+          ▼
+    Native Package Store
+    packages / data / runtime / transactions / state.json
+    ├─ pylon-plugin:// resource protocol
+    └─ PluginPackageDescriptor
+          │ import → prepare → activate → commit
+          ▼
+唯一 PluginRuntime + PluginScope + Shadow Transactions
 ├─ Application Registry
 ├─ Workspace Registry
 ├─ Renderer Registry
@@ -54,7 +60,9 @@ PluginRuntime + PluginScope + Shadow Transactions
 3. 更新先构造候选实例，成功后才原子切换；
 4. 候选失败时旧实例、active pointer 和旧进程继续保留；
 5. 外置资源不通过整包 JSON 搬运，使用 `pylon-plugin://` 与流式读取；
-6. 单个插件失败不阻断其他插件或 Kernel。
+6. 单个插件失败不会阻止 Kernel Recovery Surface 出现；它的必需依赖方可能按契约被阻止；
+7. Kernel bootstrap、外置 package、Hook `disable-plugin` 和设置页操作共享同一个 `PluginRuntime`，不得另建状态权威；
+8. cleanup 只有在 deactivate hook 与全部 Scope resource 都成功释放后才算完成，部分失败必须保留并可重试。
 
 ---
 
@@ -150,10 +158,10 @@ my-plugin/
 | `kind` | 是 | 插件角色，见下表 |
 | `web.entry` | 是 | 包内 ESM 入口路径 |
 | `web.styles` | 否 | stylesheet 路径数组 |
-| `dependencies` | 否 | plugin id → version range；当前用于激活顺序和组合校验 |
-| `optionalDependencies` | 否 | 可选依赖元数据 |
-| `conflicts` | 否 | 冲突 plugin id 列表 |
-| `activation.events` | 否 | 激活事件元数据；当前外置 enabled 包在启动时激活 |
+| `dependencies` | 否 | plugin id → version range；缺失、未启用、版本不匹配、依赖成环或依赖被阻止都会阻止激活 |
+| `optionalDependencies` | 否 | plugin id → version range；不存在不阻止激活，已启用但版本不匹配会产生非阻塞诊断 |
+| `conflicts` | 否 | 冲突 plugin id 列表；任一方声明即可双向阻止两个已启用插件同时激活 |
+| `activation.events` | 否 | 至少一个声明事件已发出后才可激活；普通启动会发出 `kernel.ready` |
 | `hotSwap.mode` | 否 | 缺省 `parallel` |
 | `hotSwap.drainTimeoutMs` | 否 | 正数；Hook lease 排空超时 |
 | `executables` | 否 | executable id → platform → 包内路径 |
@@ -187,6 +195,17 @@ automation
 ```
 
 `kind` 是角色与管理元数据，不会自动注册 contribution。真实能力取决于入口代码调用的 context API。
+
+### 3.3 运行时硬契约
+
+Plugin Host 在启动、安装、更新、启用、停用和卸载前解析同一份候选图：
+
+- version range 当前支持精确版本、caret（例如 `^1.2.3`）与 `*`；参与匹配的实际版本与精确/caret 基准必须是三段数字，否则按不匹配处理；
+- required dependency 决定拓扑顺序，dependent 存在时不能停用或卸载其依赖；
+- 更新不得把已启用 dependent 的依赖版本变成不兼容；
+- conflict 采用对称阻止，即使只有一方声明也会同时阻止双方；
+- 未收到 `activation.events` 时，包可以保持“已安装且已启用”，但状态为“等待激活事件”，不会创建 Runtime 实例；
+- 契约错误以 `plugin_contract_blocked` 和逐插件 diagnostics 返回，不应靠解析错误字符串处理。
 
 ---
 
@@ -236,7 +255,11 @@ interface PackagePluginModule<TPrepared = unknown> {
 
 - prepare / activate / contribution 校验失败：回滚候选事务并 dispose Scope；
 - deactivate 抛错：不阻断 Scope 后续回收；
-- 停用：移除所有注册项、样式、listener、timer、进程和 runtime 临时目录；
+- Scope 按资源注册逆序等待释放；成功资源从 residual 集合移除，失败资源保留稳定 resource id；
+- deactivate hook 或任一资源释放失败：实例保留为 `cleanup-failed`，返回结构化 residual，不报告停用成功；
+- `retryCleanup(instanceKey)` 只重试未完成的 hook/resource，成功后实例才进入 inactive；
+- Package disable/uninstall 在 cleanup 未完成时不会修改持久 enabled 状态或删除安装包；
+- 停用成功：移除所有注册项、样式、listener、timer、进程和 runtime 临时目录；
 - 更新：候选失败时旧实例保持 active。
 
 ---
@@ -274,6 +297,8 @@ scope.createAbortController()
 ```
 
 所有 context 注册 API 都会自动把返回句柄登记到 Scope。插件绕过 API 创建副作用时，必须手工 `scope.add()`。
+
+Host 为每个 Scope resource 分配稳定 id。释放错误会携带该 id 并显示在插件管理页；实现 disposable 时应保持幂等，以便失败后安全重试。
 
 错误示例：
 
@@ -384,7 +409,7 @@ execution: blocking | background
 failurePolicy: continue | abort | disable-hook | disable-plugin
 ```
 
-阻塞 Hook 默认超时 3000 ms。Runtime 保留最近 trace，并在连续失败达到阈值后熔断。
+阻塞 Hook 默认超时 3000 ms。Runtime 保留最近 trace，并在连续失败达到阈值后熔断。`failurePolicy: 'disable-plugin'` 会调用唯一产品 `PluginRuntime` 停用整个插件；若 cleanup 不完整，trace 会追加 `plugin-disable-failed`，实例进入 `cleanup-failed`，而不是只静默禁用当前 handler。
 
 ### 6.3 Workspace
 
@@ -602,6 +627,8 @@ search
 export
 event-projector
 session-state
+agent-instance-sink
+tool-dictionary-sink
 ```
 
 注册：
@@ -610,7 +637,7 @@ session-state
 context.services.register('search', 'example.search', provider)
 ```
 
-Service 注册会随 Scope 回收。当前公开 API 只有 `register`，没有面向外置插件的通用 `resolve/acquire`。
+Service 注册会随 Scope 回收。当前公开 API 只有 `register`，没有面向外置插件的通用 `resolve/acquire`。`agent-instance-sink:pylon.agent-instances` 与 `tool-dictionary-sink:pylon.tool-dictionary` 是 Product Shell 和第一方 Agent/Tool 插件之间的保留 contribution port；第三方插件不要注册或依赖这些保留 id。Host 通过 `PluginServiceRegistry.resolveRequired()` 解析必需端口，缺失或重复都会返回结构化错误并让 Application bootstrap 降级。
 
 ### 6.6 Session / Turn namespace
 
@@ -1134,7 +1161,9 @@ manifest：
 6. reload 并确认 runtime id 变化；
 7. 检查旧 stylesheet、Hook、进程和 runtime 目录无残留；
 8. 制作故障候选，确认旧实例回滚保留；
-9. 重启 Pylon，确认 enabled 包自动恢复。
+9. 制作 cleanup 失败，确认状态为 `cleanup-failed`、residual id 可见且“重试清理”只重试残留；
+10. 分别验证 dependency missing/version mismatch/cycle/conflict 与 waiting activation diagnostics；
+11. 重启 Pylon，确认满足契约且收到激活事件的 enabled 包自动恢复。
 
 DOM 样式诊断：
 
@@ -1156,12 +1185,15 @@ process logs
 operation inspect
 ```
 
+设置页同时显示“等待激活事件”“契约阻止”“启动失败”“清理失败”和“运行中（有清理残留）”。不要把 enabled、active 与 cleanup-complete 当作同一个状态。
+
 ---
 
 ## 16. 当前限制
 
 - Plugin API 0.1 不兼容，旧插件必须重写。
 - 没有签名、trust、capability 权限模型或插件市场。
+- 第三方插件按产品决策视为完全可信本机代码；生命周期、依赖和 cleanup 隔离不是恶意代码安全沙箱。
 - CSS 没有 selector 沙箱。
 - 第一版入口应为单 JS bundle，不支持插件入口继续拆动态 chunk。
 - UI Surface Registry、左右栏与插件设置页挂载点已完成；完整 AgentSheet Workbench 级替换仍是第一方实验边界，第三方当前从 message/content/tool renderer 粒度接入。
@@ -1177,12 +1209,22 @@ operation inspect
 开发时以这些文件为准：
 
 ```text
+src/kernel/kernelBootstrap.ts
+src/kernel/kernelBootstrapServices.ts
+src/plugin-runtime/pluginCompositionRoot.ts
+src/plugin-runtime/builtinPluginBootstrap.ts
 src/plugin-runtime/packageManifest.ts
+src/plugin-runtime/pluginContractResolver.ts
 src/plugin-runtime/packagePluginRuntime.ts
+src/plugin-runtime/packageInstallationService.ts
 src/plugin-runtime/pluginActivationContext.ts
 src/plugin-runtime/pluginRuntime.ts
+src/plugin-runtime/pluginInstance.ts
 src/plugin-runtime/pluginScope.ts
 src/plugin-runtime/hooks/hookTypes.ts
+src/plugin-runtime/hooks/hookRuntime.ts
+src/plugin-runtime/services/pluginServiceRegistry.ts
+src/app/ports/productContributionPorts.ts
 src/plugin-runtime/commands/commandRegistry.ts
 src/plugin-runtime/workspaces/pluginWorkspaceApi.ts
 src/plugin-runtime/renderers/pluginRendererApi.ts
