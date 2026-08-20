@@ -30,6 +30,7 @@ let mockPluginPackages: InstalledPluginPackage[] = buildVisualQaPluginPackages()
 let mockGitEntries = buildGitStatus()
 let mockGitBranch = 'demo'
 let mockGitHistory = buildGitHistory()
+let mockAgentConfigRevision = 1
 
 function mockGitOperation(summary: string) {
   return {
@@ -42,6 +43,11 @@ function mockGitOperation(summary: string) {
 export async function mockInvokeCommand(cmd: string, args: Record<string, unknown> = {}): Promise<unknown> {
   switch (cmd) {
     case 'list_agents': return buildDemoAgents()
+    case 'agent_config_snapshot': return {
+      revision: `demo-config-${mockAgentConfigRevision}`,
+      agents: buildDemoAgents(),
+      diagnostics: [],
+    }
     case 'list_workspace_entries':
       return resolveWorkspaceEntries(typeof args.relativePath === 'string' ? args.relativePath : '')
     case 'read_workspace_text':
@@ -100,10 +106,15 @@ export async function mockInvokeCommand(cmd: string, args: Record<string, unknow
     case 'gateway_status': return { ...buildGatewayStatus(), routes: mockGatewayRoutes }
     case 'gateway_sessions': return buildPlatformSessions()
     case 'update_agents_config': {
+      const expected = `demo-config-${mockAgentConfigRevision}`
+      if (args.expectedRevision !== expected) {
+        throw { code: 'config_revision_conflict', message: `期望 ${String(args.expectedRevision)}，实际 ${expected}` }
+      }
       // G4 验收：gateway 保存有状态——更新 mock routes，read-back 一致（浏览器可验安全写回）
       const routes = (args.config as { gateway?: { routes?: unknown[] } } | undefined)?.gateway?.routes
       if (Array.isArray(routes)) mockGatewayRoutes = routes as never[]
-      return null
+      mockAgentConfigRevision += 1
+      return { applied: true, revision: `demo-config-${mockAgentConfigRevision}` }
     }
     case 'reload_gateway': return null
     case 'list_persisted_sessions': return buildSessionSummaries()

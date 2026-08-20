@@ -519,17 +519,25 @@ pub(crate) async fn reload_agents(
 
 #[tauri::command]
 pub(crate) async fn agent_config_snapshot(
-    state: tauri::State<'_, AppState>,
+    _state: tauri::State<'_, AppState>,
 ) -> Result<serde_json::Value, PylonError> {
-    let path = crate::agent_config::effective_config_path()
-        .ok_or(PylonError::Config(crate::agent_config::ConfigError::ReadOnly))?;
-    let revision = crate::agent_config::config_revision_for_path(&path)?;
-    let agents = state.agents.lock().map_err(|error| error.to_string())?;
+    let path = crate::agent_config::effective_config_path().ok_or(PylonError::Config(
+        crate::agent_config::ConfigError::ReadOnly,
+    ))?;
+    let (revision, agents) =
+        tokio::task::spawn_blocking(move || crate::agent_config::read_config_snapshot(&path))
+            .await
+            .map_err(|error| PylonError::Io(error.to_string()))??;
     let summaries = agents
         .iter()
         .map(|(id, agent)| agent_summary_payload(id, agent, None, None, false))
         .collect::<Vec<_>>();
-    Ok(serde_json::json!({ "revision": revision, "agents": summaries }))
+    let diagnostics = crate::agent_config::config_diagnostics(&agents);
+    Ok(serde_json::json!({
+        "revision": revision,
+        "agents": summaries,
+        "diagnostics": diagnostics,
+    }))
 }
 
 /// Phase 3：update_agents_config（意见稿 §5.1 显式 scope 契约，用户拍板）。
@@ -554,6 +562,11 @@ pub(crate) async fn update_agents_config(
     // 1. 来源检查：embedded 无外部写入目标 → config_read_only（绝不 fallback 当前目录）
     let path = crate::agent_config::effective_config_path()
         .ok_or(PylonError::Config(ConfigError::ReadOnly))?;
+    let expected_revision =
+        expected_revision.ok_or(PylonError::Config(ConfigError::RevisionRequired))?;
+    // 跨进程 lease 覆盖“重读 baseline → 生成/校验候选 → 提交”整个窗口。
+    // 进程内 config_write_lock 只负责当前 AppState，不能代替文件级互斥。
+    let config_lease = crate::agent_config::ConfigLease::acquire(&path)?;
     // 2. 读当前原文（tokio::fs 异步读，不阻塞 async 运行时）
     let content = tokio::fs::read_to_string(&path).await.map_err(|error| {
         PylonError::Config(ConfigError::Read(format!(
@@ -561,11 +574,12 @@ pub(crate) async fn update_agents_config(
             path.display()
         )))
     })?;
-    if let Some(expected) = expected_revision.as_deref() {
-        let actual = crate::agent_config::config_revision_for_bytes(content.as_bytes());
-        if actual != expected {
-            return Err(PylonError::Config(ConfigError::Conflict { expected: expected.to_string(), actual }));
-        }
+    let actual = crate::agent_config::config_revision_for_bytes(content.as_bytes());
+    if actual != expected_revision {
+        return Err(PylonError::Config(ConfigError::Conflict {
+            expected: expected_revision,
+            actual,
+        }));
     }
     // 3. 生成候选 + 双域校验 + 解析 agents（同步 YAML/fs，spawn_blocking；base_dir 绝对化）
     let scope_owned = scope.clone();
@@ -632,10 +646,13 @@ pub(crate) async fn update_agents_config(
     let write_path = path.clone();
     let expected_for_write = expected_revision.clone();
     tokio::task::spawn_blocking(move || {
-        match expected_for_write.as_deref() {
-            Some(expected) => crate::agent_config::write_config_transaction(&write_path, expected, write_content.as_bytes()).map(|_| ()),
-            None => crate::agent_config::write_config_atomically(&write_path, &write_content),
-        }
+        crate::agent_config::write_config_transaction_under_lease(
+            &config_lease,
+            &write_path,
+            &expected_for_write,
+            write_content.as_bytes(),
+        )
+        .map(|_| ())
     })
     .await
     .map_err(|error| PylonError::Io(error.to_string()))??;
@@ -705,6 +722,13 @@ pub(crate) async fn initialize_agents_config(
         .map(|p| p.to_path_buf())
         .ok_or_else(|| PylonError::Io("current_exe has no parent".to_string()))?;
     let target = exe_dir.join("agents.yaml");
+    let config_lease = crate::agent_config::ConfigLease::acquire(&target)?;
+    if target.exists() {
+        return Err(PylonError::Config(ConfigError::Conflict {
+            expected: "<missing>".to_string(),
+            actual: crate::agent_config::config_revision_for_path(&target)?,
+        }));
+    }
 
     // 2. 候选生成 + 双域校验（base_dir = exe 目录；同步 YAML/fs 移出 async 运行时）
     let content_owned = if config.get("agents").is_some() {
@@ -747,8 +771,12 @@ pub(crate) async fn initialize_agents_config(
     // 3. 原子写盘（先磁盘）
     let write_content = candidate.clone();
     let write_path = target.clone();
-    tokio::task::spawn_blocking(move || {
-        crate::agent_config::write_config_atomically(&write_path, &write_content)
+    let revision = tokio::task::spawn_blocking(move || {
+        crate::agent_config::write_new_config_under_lease(
+            &config_lease,
+            &write_path,
+            write_content.as_bytes(),
+        )
     })
     .await
     .map_err(|error| PylonError::Io(error.to_string()))??;
@@ -802,6 +830,7 @@ pub(crate) async fn initialize_agents_config(
         "scope": "initialize",
         "agentCount": inner.agents.lock().map(|a| a.len()).unwrap_or(0),
         "defaultAgentId": inner.active_agent.lock().map(|a| a.clone()).unwrap_or_default(),
+        "revision": revision,
     }))
 }
 
@@ -1420,8 +1449,8 @@ sys.exit(7)
 
     #[tokio::test]
     async fn update_agents_config_write_failure_keeps_memory_and_disk_unchanged() {
-        // 施工文档 §2.1 必测失败链：目标文件可读但原子写失败（用目录占住
-        // write_config_atomically 的固定临时文件名）→ 磁盘与内存 registry 都不变。
+        // 施工文档 §2.1 必测失败链：目标文件可读但 backup replace 失败
+        // → 主文件与内存 registry 都不变。
         struct EnvGuard(Option<std::ffi::OsString>);
         impl EnvGuard {
             fn set(key: &str, value: &std::path::Path) -> Self {
@@ -1452,9 +1481,9 @@ sys.exit(7)
         let original =
             "agents:\n  keep:\n    name: Keep\n    transport: subprocess\n    exe: keep-agent\n";
         std::fs::write(&path, original).unwrap();
-        // 占住 write_config_atomically 的固定临时文件路径（目录同名）→ File::create 失败。
-        let temp_blocker = dir.join(format!(".agents.yaml.tmp-{}", std::process::id()));
-        std::fs::create_dir_all(&temp_blocker).unwrap();
+        let backup_blocker = path.with_extension("yaml.bak");
+        std::fs::create_dir_all(&backup_blocker).unwrap();
+        let revision = crate::agent_config::config_revision_for_bytes(original.as_bytes());
 
         let _guard = EnvGuard::set("PYLON_AGENTS_CONFIG", &path);
         let agent = crate::test_utils::fake_acp_agent("keep", "print('x')");
@@ -1472,7 +1501,7 @@ sys.exit(7)
             "agent".to_string(),
             Some("keep".to_string()),
             serde_json::json!("name: Renamed\n  transport: subprocess\n  exe: keep-agent\n"),
-            None,
+            Some(revision),
         )
         .await;
         assert!(result.is_err(), "写盘失败必须返回错误");
@@ -1487,7 +1516,7 @@ sys.exit(7)
         let disk = std::fs::read_to_string(&path).unwrap();
         assert_eq!(disk, original, "写盘失败后磁盘内容必须不变");
 
-        std::fs::remove_dir_all(&temp_blocker).ok();
+        std::fs::remove_dir_all(&backup_blocker).ok();
         std::fs::remove_dir_all(&dir).ok();
     }
 

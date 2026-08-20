@@ -20,8 +20,6 @@ import {
 import ArgumentListEditor from './ArgumentListEditor.tsx'
 import { describeInvocation, validateInvocation } from '../../domains/agent/invocationDraft.ts'
 
-const agentClient = createAgentClient({ invoke: (cmd, args) => invoke(cmd, args as Record<string, unknown> | undefined) })
-
 interface Draft {
   name: string
   exe: string
@@ -130,6 +128,9 @@ function pathHintForProvider(provider: string | null | undefined): string {
  * 全部走 typed client，不重建整块 YAML。
  */
 export default function AgentRuntimePanel() {
+  const [agentClient] = useState(() => createAgentClient({
+    invoke: (cmd, args) => invoke(cmd, args as Record<string, unknown> | undefined),
+  }))
   const agents = useIdentityStore(s => s.agents)
   const activeAgent = useIdentityStore(s => s.activeAgent)
   const agentStatuses = useRuntimeStore(s => s.agentStatuses)
@@ -141,6 +142,7 @@ export default function AgentRuntimePanel() {
   const [showCreate, setShowCreate] = useState(false)
   const [createDraft, setCreateDraft] = useState({ id: '', name: '', exe: '', args: ['acp'] })
   const [feedback, setFeedback] = useState<string | null>(null)
+  const [configConflict, setConfigConflict] = useState(false)
   const [toast, setToast] = useState<string | null>(null)
   // 轻量操作提示：保存/新建/导入成功等「需要弹出」的反馈走 toast，自动消失；
   // 压缩/校验等详情性提示仍走 setFeedback 内联。
@@ -155,6 +157,29 @@ export default function AgentRuntimePanel() {
   const [detecting, setDetecting] = useState(false)
   const [candidateValidation, setCandidateValidation] = useState<Record<string, AgentCandidateValidationState>>({})
   const [candidateDrafts, setCandidateDrafts] = useState<Record<string, CandidateDraft>>({})
+
+  const reportConfigMutationError = (operation: string, error: unknown, agentId?: string) => {
+    const detail = reportRuntimeError(operation, error, agentId)
+    if (wireErrorCode(error) === 'config_revision_conflict') {
+      setConfigConflict(true)
+      setFeedback('配置已被其他进程修改；你的草稿仍保留。请重新载入配置后再提交。')
+      return detail
+    }
+    setFeedback(`${operation}失败：${detail.message}`)
+    return detail
+  }
+
+  const reloadConfigSnapshot = async () => {
+    try {
+      await agentClient.agentConfigSnapshot()
+      await refreshAgents()
+      setConfigConflict(false)
+      setFeedback('配置已重新载入；未提交草稿仍保留。')
+    } catch (error) {
+      const detail = reportRuntimeError('重新载入 Agent 配置', error)
+      setFeedback(`重新载入失败：${detail.message}`)
+    }
+  }
 
   const detectRuntimes = async () => {
     if (detecting) return
@@ -216,12 +241,12 @@ export default function AgentRuntimePanel() {
         await agentClient.initializeAgentsConfig(id, agentsDocument(id, config))
       }
       await refreshAgents()
+      setConfigConflict(false)
       setFeedback(null)
       notify(`已导入 ${draft.name}（${id}）${importMode === 'unverified' ? '；状态：未验证' : ''}`)
       await detectRuntimes()
     } catch (error) {
-      reportRuntimeError('导入 Agent 候选', error, id)
-      setFeedback(`导入失败：${error instanceof Error ? error.message : String(error)}`)
+      reportConfigMutationError('导入 Agent 候选', error, id)
     }
   }
 
@@ -275,11 +300,11 @@ export default function AgentRuntimePanel() {
       })
       await refreshAgents()
       setEditingId(null)
+      setConfigConflict(false)
       setFeedback(null)
       notify(`已保存 ${agentId}`)
     } catch (error) {
-      reportRuntimeError('保存 Agent 字段', error, agentId)
-      setFeedback(`保存失败：${error instanceof Error ? error.message : String(error)}`)
+      reportConfigMutationError('保存 Agent 字段', error, agentId)
       notify(`保存失败：${agentId}`)
     } finally {
       setSavingId(null)
@@ -299,11 +324,11 @@ export default function AgentRuntimePanel() {
         await agentClient.initializeAgentFieldPatch(agentId, { default: true })
       }
       await refreshAgents()
+      setConfigConflict(false)
       setFeedback(null)
       notify(`已将 ${agentId} 设为默认`)
     } catch (error) {
-      const detail = reportRuntimeError('设置默认 Agent', error, agentId)
-      setFeedback(`设置默认失败：${detail.message}`)
+      reportConfigMutationError('设置默认 Agent', error, agentId)
     } finally {
       setSavingId(null)
     }
@@ -344,6 +369,7 @@ export default function AgentRuntimePanel() {
       await agentClient.createAgent(id, config)
       await refreshAgents()
       setShowCreate(false)
+      setConfigConflict(false)
       setCreateDraft({ id: '', name: '', exe: '', args: ['acp'] })
       setFeedback(null)
       notify(`已新建 Agent ${id}`)
@@ -358,13 +384,11 @@ export default function AgentRuntimePanel() {
           setCreateDraft({ id: '', name: '', exe: '', args: ['acp'] })
           setFeedback(`已初始化外部配置并新建 Agent ${id}`)
         } catch (initError) {
-          reportRuntimeError('初始化 Agent 配置', initError, id)
-          setFeedback(`初始化失败：${initError instanceof Error ? initError.message : String(initError)}`)
+          reportConfigMutationError('初始化 Agent 配置', initError, id)
         }
         return
       }
-      reportRuntimeError('新建 Agent', error, id)
-      setFeedback(`新建失败：${error instanceof Error ? error.message : String(error)}`)
+      reportConfigMutationError('新建 Agent', error, id)
     }
   }
 
@@ -374,6 +398,11 @@ export default function AgentRuntimePanel() {
         <div className="agent-runtime-toast" role="status" aria-live="polite">{toast}</div>
       )}
       {feedback && <div className="set-hint" role="status">{feedback}</div>}
+      {configConflict && (
+        <button type="button" className="set-btn" onClick={() => void reloadConfigSnapshot()}>
+          重新载入配置
+        </button>
+      )}
 
       {agents.length === 0 && (
         <div className="set-hint" role="status">

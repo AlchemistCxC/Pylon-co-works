@@ -32,6 +32,7 @@ export interface AgentsConfigDocument {
 export interface AgentConfigSnapshot {
   revision: string
   agents: AgentEntry[]
+  diagnostics: Array<{ agentId: string; code: string; field: string; message: string }>
 }
 
 function normalizeStringArray(value: unknown): string[] | undefined {
@@ -74,20 +75,47 @@ export function createAgentClient(transport: ClientTransport) {
     try {
       const snapshot = await transport.invoke('agent_config_snapshot')
       const record = snapshot && typeof snapshot === 'object' ? snapshot as Record<string, unknown> : {}
-      revision = typeof record.revision === 'string' && record.revision ? record.revision : null
-    } catch {
-      // embedded 配置或旧后端没有 snapshot 时保留兼容的无 revision 写入路径。
+      if (typeof record.revision !== 'string' || !record.revision) {
+        throw new Error('agent_config_snapshot 未返回有效 revision')
+      }
+      revision = record.revision
+    } catch (error) {
+      // embedded 配置没有外部 revision；随后 update 会稳定返回 config_read_only，
+      // 调用方可显式转入 initialize。其他 snapshot 故障不得降级为盲写。
+      if (!error || typeof error !== 'object' || (error as { code?: unknown }).code !== 'config_read_only') throw error
+      revision = null
+    }
+  }
+  const mutationRevision = async (): Promise<string | null> => {
+    await ensureConfigRevision()
+    return revision
+  }
+  const acceptMutationRevision = (result: unknown): void => {
+    if (result && typeof result === 'object' && typeof (result as Record<string, unknown>).revision === 'string') {
+      revision = (result as Record<string, string>).revision
     }
   }
   return {
     listAgents: (): Promise<AgentEntry[]> => transport.invoke('list_agents').then(normalizeAgentList),
     agentConfigSnapshot: (): Promise<AgentConfigSnapshot> => transport.invoke('agent_config_snapshot').then(raw => {
       const record = raw && typeof raw === 'object' ? raw as Record<string, unknown> : {}
-      const next: AgentConfigSnapshot = {
-        revision: typeof record.revision === 'string' ? record.revision : '',
-        agents: normalizeAgentList(record.agents),
+      if (typeof record.revision !== 'string' || !record.revision) {
+        throw new Error('agent_config_snapshot 未返回有效 revision')
       }
-      revision = next.revision || null
+      const next: AgentConfigSnapshot = {
+        revision: record.revision,
+        agents: normalizeAgentList(record.agents),
+        diagnostics: Array.isArray(record.diagnostics)
+          ? record.diagnostics.filter((item): item is AgentConfigSnapshot['diagnostics'][number] => (
+              !!item && typeof item === 'object'
+              && typeof (item as Record<string, unknown>).agentId === 'string'
+              && typeof (item as Record<string, unknown>).code === 'string'
+              && typeof (item as Record<string, unknown>).field === 'string'
+              && typeof (item as Record<string, unknown>).message === 'string'
+            ))
+          : [],
+      }
+      revision = next.revision
       return next
     }),
     ensureConfigRevision,
@@ -103,25 +131,38 @@ export function createAgentClient(transport: ClientTransport) {
     /** agent 级暴露的 MCP server 配置（cwd 设置据此选择启用哪些）。 */
     getMcpServers: (): Promise<unknown[]> => transport.invoke('get_mcp_servers') as Promise<unknown[]>,
     setMcpServers: (servers: unknown[]): Promise<unknown> => transport.invoke('set_mcp_servers', { servers }),
-    updateAgentsConfig: (payload: Record<string, unknown>): Promise<unknown> => transport.invoke('update_agents_config', payload),
+    updateAgentsConfig: async (payload: Record<string, unknown>): Promise<unknown> => {
+      const expectedRevision = await mutationRevision()
+      const result = await transport.invoke('update_agents_config', { ...payload, ...(expectedRevision ? { expectedRevision } : {}) })
+      acceptMutationRevision(result)
+      return result
+    },
     /** 施工文档 §4.3.1：结构化字段 patch（exe/default/name/provider/transport/args）。 */
     updateAgentFieldPatch: async (agentId: string, patch: Record<string, unknown>): Promise<unknown> => {
-      const result = await transport.invoke('update_agents_config', { scope: 'agent_fields', agentId, config: patch, ...(revision ? { expectedRevision: revision } : {}) })
-      if (result && typeof result === 'object' && typeof (result as Record<string, unknown>).revision === 'string') revision = (result as Record<string, string>).revision
+      const expectedRevision = await mutationRevision()
+      const result = await transport.invoke('update_agents_config', { scope: 'agent_fields', agentId, config: patch, ...(expectedRevision ? { expectedRevision } : {}) })
+      acceptMutationRevision(result)
       return result
     },
     /** 新建单个 Agent：只接受结构化 node，不能传入顶层 agents document。 */
     createAgent: async (agentId: string, config: AgentCreateConfig): Promise<unknown> => {
-      const result = await transport.invoke('update_agents_config', { scope: 'agent_create', agentId, config, ...(revision ? { expectedRevision: revision } : {}) })
-      if (result && typeof result === 'object' && typeof (result as Record<string, unknown>).revision === 'string') revision = (result as Record<string, string>).revision
+      const expectedRevision = await mutationRevision()
+      const result = await transport.invoke('update_agents_config', { scope: 'agent_create', agentId, config, ...(expectedRevision ? { expectedRevision } : {}) })
+      acceptMutationRevision(result)
       return result
     },
     /** 施工文档 §4.6：embedded → exe 旁 agents.yaml 首次外部配置初始化。 */
-    initializeAgentsConfig: (agentId: string | undefined, config: AgentsConfigDocument): Promise<unknown> =>
-      transport.invoke('initialize_agents_config', { agentId, config }),
+    initializeAgentsConfig: async (agentId: string | undefined, config: AgentsConfigDocument): Promise<unknown> => {
+      const result = await transport.invoke('initialize_agents_config', { agentId, config })
+      acceptMutationRevision(result)
+      return result
+    },
     /** embedded 配置首次结构化修改：物化当前完整配置后应用字段 patch。 */
-    initializeAgentFieldPatch: (agentId: string, patch: Record<string, unknown>): Promise<unknown> =>
-      transport.invoke('initialize_agents_config', { agentId, config: patch }),
+    initializeAgentFieldPatch: async (agentId: string, patch: Record<string, unknown>): Promise<unknown> => {
+      const result = await transport.invoke('initialize_agents_config', { agentId, config: patch })
+      acceptMutationRevision(result)
+      return result
+    },
     /** 施工文档 §4.5：隔离连接测试（不改 active/runtime）。 */
     testAgentConnection: (agentId: string): Promise<AgentConnectionTestResult> =>
       transport.invoke('test_agent_connection', { agentId }) as Promise<AgentConnectionTestResult>,

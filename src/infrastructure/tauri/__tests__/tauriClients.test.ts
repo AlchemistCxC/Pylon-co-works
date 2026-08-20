@@ -91,12 +91,17 @@ describe('gatewayClient', () => {
     expect(status.routes?.[0]?.source).toBe('qq:group:1')
   })
 
-  it('updateAgentsConfig 原样透传 payload', async () => {
-    const invoke = new FakeInvoke().register('update_agents_config', () => null)
+  it('updateAgentsConfig 读取 revision 后执行 CAS 写入', async () => {
+    const invoke = new FakeInvoke()
+      .register('agent_config_snapshot', () => ({ revision: 'gateway-rev-1', agents: [] }))
+      .register('update_agents_config', () => ({ revision: 'gateway-rev-2' }))
     const client = createGatewayClient({ invoke: (cmd, args) => invoke.invoke(cmd, args) })
     const payload = { scope: 'gateway', config: { gateway: { routes: [] } } }
     await client.updateAgentsConfig(payload)
-    expect(invoke.calls).toEqual([{ cmd: 'update_agents_config', args: payload }])
+    expect(invoke.calls).toEqual([
+      { cmd: 'agent_config_snapshot', args: {} },
+      { cmd: 'update_agents_config', args: { ...payload, expectedRevision: 'gateway-rev-1' } },
+    ])
   })
 
   it('I12-W5 mutation 命令映射（create/update/start/stop/restart/remove/setCredentials）', async () => {

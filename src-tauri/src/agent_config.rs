@@ -3,6 +3,7 @@ use sha2::{Digest, Sha256};
 use std::collections::HashMap;
 use std::io::Write;
 use std::path::{Path, PathBuf};
+use std::sync::atomic::{AtomicU64, Ordering};
 
 /// 启动/加载配置的领域错误（R7/P2-1）。Display 透传原文案（前端/日志依赖文案
 /// 不变），code() 提供机器可读细分（前端分支依据，稳定不拼写变更）。
@@ -29,6 +30,9 @@ pub enum ConfigError {
     /// 配置文件在读取与提交之间已被其他写入者修改。
     #[error("config_revision_conflict: 期望 {expected}，实际 {actual}")]
     Conflict { expected: String, actual: String },
+    /// 外部配置写入必须显式携带最近一次 snapshot 的 revision，禁止盲写。
+    #[error("config_revision_required: 写入外部配置前必须先读取配置快照")]
+    RevisionRequired,
     /// 配置备份失败；主文件不得被替换。
     #[error("config_backup_error: {0}")]
     Backup(String),
@@ -53,6 +57,7 @@ impl ConfigError {
             Self::ReadOnly => "config_read_only",
             Self::Write(_) => "config_write_error",
             Self::Conflict { .. } => "config_revision_conflict",
+            Self::RevisionRequired => "config_revision_required",
             Self::Backup(_) => "config_backup_error",
             Self::LockBusy(_) => "config_lock_busy",
             Self::ActiveAgentProtected(_) => "config_active_agent_protected",
@@ -314,12 +319,14 @@ impl AcpProtocolConfig {
     /// R-t5 闲置超时（秒，缺省 = prompt_timeout）。距最后一次活动超过此值仍无终态 → 判死。
     /// 活动即续命：持续产出的回合永不因"总时长"被截。
     pub fn idle_timeout(&self) -> u64 {
-        self.idle_timeout_secs.unwrap_or_else(|| self.prompt_timeout())
+        self.idle_timeout_secs
+            .unwrap_or_else(|| self.prompt_timeout())
     }
 
     /// R-t5 首 token 超时（秒，缺省 = idle_timeout）。发出后到首次活动的最长等待。
     pub fn first_token_timeout(&self) -> u64 {
-        self.first_token_timeout_secs.unwrap_or_else(|| self.idle_timeout())
+        self.first_token_timeout_secs
+            .unwrap_or_else(|| self.idle_timeout())
     }
 
     /// H6 cancel settle 超时（秒，缺省 30）。G2（W2 链 E）消费。
@@ -438,8 +445,78 @@ const MAX_RPC_TIMEOUT_SECS: u64 = 300;
 const MAX_ATTACHMENTS: usize = 64;
 const MAX_ATTACHMENT_BYTES: u64 = 256 * 1024 * 1024;
 const MAX_REPLAY_EVENTS: usize = 100_000;
+const MAX_INITIALIZE_VALUE_BYTES: usize = 256 * 1024;
+const WARN_PROMPT_TIMEOUT_SECS: u64 = 900;
+const WARN_ATTACHMENT_BYTES: u64 = 64 * 1024 * 1024;
+const WARN_REPLAY_EVENTS: usize = 50_000;
+
+#[derive(Debug, Clone, Serialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct AgentConfigDiagnostic {
+    pub agent_id: String,
+    pub code: &'static str,
+    pub field: &'static str,
+    pub message: String,
+}
+
+pub(crate) fn config_diagnostics(agents: &HashMap<String, AgentDef>) -> Vec<AgentConfigDiagnostic> {
+    let mut diagnostics = Vec::new();
+    let mut ids = agents.keys().collect::<Vec<_>>();
+    ids.sort();
+    for id in ids {
+        let protocol = agents[id].protocol();
+        for (field, value, threshold) in [
+            (
+                "prompt_timeout_secs",
+                protocol.prompt_timeout_secs.map(|value| value as u128),
+                WARN_PROMPT_TIMEOUT_SECS as u128,
+            ),
+            (
+                "max_attachment_bytes",
+                protocol.max_attachment_bytes.map(|value| value as u128),
+                WARN_ATTACHMENT_BYTES as u128,
+            ),
+            (
+                "replay_max_events",
+                protocol.replay_max_events.map(|value| value as u128),
+                WARN_REPLAY_EVENTS as u128,
+            ),
+        ] {
+            if value.is_some_and(|value| value > threshold) {
+                diagnostics.push(AgentConfigDiagnostic {
+                    agent_id: id.clone(),
+                    code: "config_high_resource_limit",
+                    field,
+                    message: format!(
+                        "agent {id} 的 acp.{field} 高于建议阈值 {threshold}；配置可保存，但可能降低稳定性"
+                    ),
+                });
+            }
+        }
+    }
+    diagnostics
+}
 
 fn validate_acp_section(id: &str, acp: &AcpProtocolConfig) -> Result<(), ConfigError> {
+    for (field, value) in [
+        ("initialize_caps", acp.initialize_caps.as_ref()),
+        ("client_info", acp.client_info.as_ref()),
+    ] {
+        if let Some(value) = value {
+            let size = serde_json::to_vec(value)
+                .map_err(|error| {
+                    ConfigError::InvalidAgent(format!(
+                        "agent {id} 的 acp.{field} 无法序列化: {error}"
+                    ))
+                })?
+                .len();
+            if size > MAX_INITIALIZE_VALUE_BYTES {
+                return Err(ConfigError::InvalidAgent(format!(
+                    "agent {id} 的 acp.{field} 序列化后 {size} bytes，超过 hard max {MAX_INITIALIZE_VALUE_BYTES}"
+                )));
+            }
+        }
+    }
     let numeric = [
         (
             "prompt_timeout_secs",
@@ -449,7 +526,10 @@ fn validate_acp_section(id: &str, acp: &AcpProtocolConfig) -> Result<(), ConfigE
             "cancel_settle_timeout_secs",
             acp.cancel_settle_timeout_secs.map(|v| v as u128),
         ),
-        ("idle_timeout_secs", acp.idle_timeout_secs.map(|v| v as u128)),
+        (
+            "idle_timeout_secs",
+            acp.idle_timeout_secs.map(|v| v as u128),
+        ),
         (
             "first_token_timeout_secs",
             acp.first_token_timeout_secs.map(|v| v as u128),
@@ -467,9 +547,15 @@ fn validate_acp_section(id: &str, acp: &AcpProtocolConfig) -> Result<(), ConfigE
     ];
     let maxima: [(&str, u128); 8] = [
         ("prompt_timeout_secs", MAX_PROMPT_TIMEOUT_SECS as u128),
-        ("cancel_settle_timeout_secs", MAX_CANCEL_SETTLE_TIMEOUT_SECS as u128),
+        (
+            "cancel_settle_timeout_secs",
+            MAX_CANCEL_SETTLE_TIMEOUT_SECS as u128,
+        ),
         ("idle_timeout_secs", MAX_IDLE_TIMEOUT_SECS as u128),
-        ("first_token_timeout_secs", MAX_FIRST_TOKEN_TIMEOUT_SECS as u128),
+        (
+            "first_token_timeout_secs",
+            MAX_FIRST_TOKEN_TIMEOUT_SECS as u128,
+        ),
         ("rpc_timeout_secs", MAX_RPC_TIMEOUT_SECS as u128),
         ("max_attachments", MAX_ATTACHMENTS as u128),
         ("max_attachment_bytes", MAX_ATTACHMENT_BYTES as u128),
@@ -624,23 +710,116 @@ pub fn config_revision_for_bytes(content: &[u8]) -> String {
 }
 
 pub fn config_revision_for_path(path: &Path) -> Result<String, ConfigError> {
-    let bytes = std::fs::read(path).map_err(|error| {
-        ConfigError::Read(format!("读取 {} 失败: {error}", path.display()))
-    })?;
+    let bytes = std::fs::read(path)
+        .map_err(|error| ConfigError::Read(format!("读取 {} 失败: {error}", path.display())))?;
     Ok(config_revision_for_bytes(&bytes))
 }
 
-struct ConfigLease {
+pub(crate) fn read_config_snapshot(
+    path: &Path,
+) -> Result<(String, HashMap<String, AgentDef>), ConfigError> {
+    let _lease = ConfigLease::acquire(path)?;
+    let bytes = std::fs::read(path)
+        .map_err(|error| ConfigError::Read(format!("读取 {} 失败: {error}", path.display())))?;
+    let content = std::str::from_utf8(&bytes).map_err(|error| {
+        ConfigError::Parse(format!("配置 {} 不是有效 UTF-8: {error}", path.display()))
+    })?;
+    let agents = parse_agents(content, path.parent())?;
+    Ok((config_revision_for_bytes(&bytes), agents))
+}
+
+pub(crate) struct ConfigLease {
     path: PathBuf,
+    _file: std::fs::File,
 }
 
 impl ConfigLease {
-    fn acquire(config_path: &Path) -> Result<Self, ConfigError> {
+    pub(crate) fn acquire(config_path: &Path) -> Result<Self, ConfigError> {
         let lease_path = config_path.with_file_name(format!(
-            "{}.pylon.lock",
-            config_path.file_name().and_then(|name| name.to_str()).unwrap_or("agents.yaml"),
+            ".{}.pylon.lock",
+            config_path
+                .file_name()
+                .and_then(|name| name.to_str())
+                .unwrap_or("agents.yaml"),
         ));
-        std::fs::OpenOptions::new()
+
+        #[cfg(windows)]
+        let file = {
+            use std::os::windows::ffi::OsStrExt;
+            use std::os::windows::io::FromRawHandle;
+            use windows_sys::Win32::Foundation::{
+                GENERIC_READ, GENERIC_WRITE, INVALID_HANDLE_VALUE,
+            };
+            use windows_sys::Win32::Storage::FileSystem::{
+                CreateFileW, FILE_ATTRIBUTE_NORMAL, FILE_FLAG_DELETE_ON_CLOSE, OPEN_ALWAYS,
+            };
+
+            let wide = lease_path
+                .as_os_str()
+                .encode_wide()
+                .chain(std::iter::once(0))
+                .collect::<Vec<_>>();
+            let handle = unsafe {
+                CreateFileW(
+                    wide.as_ptr(),
+                    GENERIC_READ | GENERIC_WRITE,
+                    0,
+                    std::ptr::null(),
+                    OPEN_ALWAYS,
+                    FILE_ATTRIBUTE_NORMAL | FILE_FLAG_DELETE_ON_CLOSE,
+                    std::ptr::null_mut(),
+                )
+            };
+            if handle == INVALID_HANDLE_VALUE {
+                let error = std::io::Error::last_os_error();
+                return Err(if matches!(error.raw_os_error(), Some(32 | 33)) {
+                    ConfigError::LockBusy(lease_path.display().to_string())
+                } else {
+                    ConfigError::Write(format!(
+                        "打开配置 lease {} 失败: {error}",
+                        lease_path.display()
+                    ))
+                });
+            }
+            unsafe { std::fs::File::from_raw_handle(handle as _) }
+        };
+
+        #[cfg(unix)]
+        let file = {
+            use std::os::fd::AsRawFd;
+            let file = std::fs::OpenOptions::new()
+                .read(true)
+                .write(true)
+                .create(true)
+                .open(&lease_path)
+                .map_err(|error| {
+                    ConfigError::Write(format!(
+                        "打开配置 lease {} 失败: {error}",
+                        lease_path.display()
+                    ))
+                })?;
+            let result = unsafe { libc::flock(file.as_raw_fd(), libc::LOCK_EX | libc::LOCK_NB) };
+            if result != 0 {
+                let error = std::io::Error::last_os_error();
+                return Err(
+                    if matches!(
+                        error.kind(),
+                        std::io::ErrorKind::WouldBlock | std::io::ErrorKind::PermissionDenied
+                    ) {
+                        ConfigError::LockBusy(lease_path.display().to_string())
+                    } else {
+                        ConfigError::Write(format!(
+                            "锁定配置 lease {} 失败: {error}",
+                            lease_path.display()
+                        ))
+                    },
+                );
+            }
+            file
+        };
+
+        #[cfg(not(any(windows, unix)))]
+        let file = std::fs::OpenOptions::new()
             .write(true)
             .create_new(true)
             .open(&lease_path)
@@ -648,17 +827,127 @@ impl ConfigLease {
                 if error.kind() == std::io::ErrorKind::AlreadyExists {
                     ConfigError::LockBusy(lease_path.display().to_string())
                 } else {
-                    ConfigError::Write(format!("创建配置 lease {} 失败: {error}", lease_path.display()))
+                    ConfigError::Write(format!(
+                        "创建配置 lease {} 失败: {error}",
+                        lease_path.display()
+                    ))
                 }
             })?;
-        Ok(Self { path: lease_path })
+
+        Ok(Self {
+            path: lease_path,
+            _file: file,
+        })
     }
 }
 
+#[cfg(not(any(windows, unix)))]
 impl Drop for ConfigLease {
     fn drop(&mut self) {
         let _ = std::fs::remove_file(&self.path);
     }
+}
+
+static CONFIG_TEMP_SEQUENCE: AtomicU64 = AtomicU64::new(1);
+
+fn unique_sibling(path: &Path, kind: &str) -> Result<PathBuf, ConfigError> {
+    let dir = path
+        .parent()
+        .ok_or_else(|| ConfigError::Write(format!("{} 无父目录", path.display())))?;
+    let file_name = path
+        .file_name()
+        .ok_or_else(|| ConfigError::Write(format!("{} 无文件名", path.display())))?;
+    let sequence = CONFIG_TEMP_SEQUENCE.fetch_add(1, Ordering::Relaxed);
+    Ok(dir.join(format!(
+        ".{}.{kind}-{}-{sequence}",
+        file_name.to_string_lossy(),
+        std::process::id()
+    )))
+}
+
+fn cleanup_stale_config_temps(path: &Path) {
+    let Some(parent) = path.parent() else { return };
+    let Some(file_name) = path.file_name().and_then(|name| name.to_str()) else {
+        return;
+    };
+    let prefixes = [
+        format!(".{file_name}.tmp-"),
+        format!(".{file_name}.bak-tmp-"),
+    ];
+    let Ok(entries) = std::fs::read_dir(parent) else {
+        return;
+    };
+    for entry in entries.flatten() {
+        let name = entry.file_name();
+        let name = name.to_string_lossy();
+        if prefixes.iter().any(|prefix| name.starts_with(prefix))
+            && entry.file_type().is_ok_and(|kind| kind.is_file())
+        {
+            let _ = std::fs::remove_file(entry.path());
+        }
+    }
+}
+
+fn write_synced_temp(path: &Path, kind: &str, content: &[u8]) -> Result<PathBuf, std::io::Error> {
+    let temp = unique_sibling(path, kind).map_err(std::io::Error::other)?;
+    let mut file = std::fs::OpenOptions::new()
+        .write(true)
+        .create_new(true)
+        .open(&temp)?;
+    if let Err(error) = file.write_all(content).and_then(|_| file.sync_all()) {
+        drop(file);
+        let _ = std::fs::remove_file(&temp);
+        return Err(error);
+    }
+    Ok(temp)
+}
+
+#[cfg(windows)]
+fn replace_file(source: &Path, target: &Path) -> std::io::Result<()> {
+    use std::os::windows::ffi::OsStrExt;
+    use windows_sys::Win32::Storage::FileSystem::{
+        MoveFileExW, MOVEFILE_REPLACE_EXISTING, MOVEFILE_WRITE_THROUGH,
+    };
+    let source_wide = source
+        .as_os_str()
+        .encode_wide()
+        .chain(std::iter::once(0))
+        .collect::<Vec<_>>();
+    let target_wide = target
+        .as_os_str()
+        .encode_wide()
+        .chain(std::iter::once(0))
+        .collect::<Vec<_>>();
+    let result = unsafe {
+        MoveFileExW(
+            source_wide.as_ptr(),
+            target_wide.as_ptr(),
+            MOVEFILE_REPLACE_EXISTING | MOVEFILE_WRITE_THROUGH,
+        )
+    };
+    if result == 0 {
+        Err(std::io::Error::last_os_error())
+    } else {
+        Ok(())
+    }
+}
+
+#[cfg(not(windows))]
+fn replace_file(source: &Path, target: &Path) -> std::io::Result<()> {
+    std::fs::rename(source, target)
+}
+
+#[cfg(unix)]
+fn sync_parent(path: &Path) -> std::io::Result<()> {
+    if let Some(parent) = path.parent() {
+        std::fs::File::open(parent)?.sync_all()?;
+    }
+    Ok(())
+}
+
+#[cfg(not(unix))]
+fn sync_parent(_path: &Path) -> std::io::Result<()> {
+    Ok(())
 }
 
 pub fn write_config_transaction(
@@ -666,10 +955,20 @@ pub fn write_config_transaction(
     expected: &str,
     candidate: &[u8],
 ) -> Result<String, ConfigError> {
-    let _lease = ConfigLease::acquire(path)?;
-    let current = std::fs::read(path).map_err(|error| {
-        ConfigError::Read(format!("读取 {} 失败: {error}", path.display()))
-    })?;
+    let lease = ConfigLease::acquire(path)?;
+    write_config_transaction_under_lease(&lease, path, expected, candidate)
+}
+
+pub(crate) fn write_config_transaction_under_lease(
+    lease: &ConfigLease,
+    path: &Path,
+    expected: &str,
+    candidate: &[u8],
+) -> Result<String, ConfigError> {
+    validate_config_lease(lease, path)?;
+    cleanup_stale_config_temps(path);
+    let current = std::fs::read(path)
+        .map_err(|error| ConfigError::Read(format!("读取 {} 失败: {error}", path.display())))?;
     let actual = config_revision_for_bytes(&current);
     if actual != expected {
         return Err(ConfigError::Conflict {
@@ -677,32 +976,100 @@ pub fn write_config_transaction(
             actual,
         });
     }
-    let dir = path.parent().ok_or_else(|| ConfigError::Write(format!("{} 无父目录", path.display())))?;
-    let file_name = path.file_name().ok_or_else(|| ConfigError::Write(format!("{} 无文件名", path.display())))?;
-    let pid = std::process::id();
-    let temp = dir.join(format!(".{}.tmp-{pid}", file_name.to_string_lossy()));
-    let backup_temp = dir.join(format!(".{}.bak-tmp-{pid}", file_name.to_string_lossy()));
-    let backup = dir.join(format!("{}.bak", file_name.to_string_lossy()));
-    let result = (|| -> std::io::Result<()> {
-        let mut backup_file = std::fs::File::create(&backup_temp)?;
-        backup_file.write_all(&current)?;
-        backup_file.sync_all()?;
-        drop(backup_file);
-        if backup.exists() {
-            std::fs::remove_file(&backup)?;
+    replace_config_with_backup(path, &current, candidate)?;
+    Ok(config_revision_for_bytes(candidate))
+}
+
+fn validate_config_lease(lease: &ConfigLease, path: &Path) -> Result<(), ConfigError> {
+    if lease.path
+        != path.with_file_name(format!(
+            ".{}.pylon.lock",
+            path.file_name()
+                .and_then(|name| name.to_str())
+                .unwrap_or("agents.yaml")
+        ))
+    {
+        return Err(ConfigError::LockBusy(format!(
+            "lease 与配置路径不匹配: {}",
+            path.display()
+        )));
+    }
+    Ok(())
+}
+
+fn replace_config_with_backup(
+    path: &Path,
+    current: &[u8],
+    candidate: &[u8],
+) -> Result<(), ConfigError> {
+    let candidate_temp = write_synced_temp(path, "tmp", candidate).map_err(|error| {
+        ConfigError::Write(format!("写候选配置 {} 失败: {error}", path.display()))
+    })?;
+    let backup = path.with_extension(format!(
+        "{}.bak",
+        path.extension()
+            .and_then(|extension| extension.to_str())
+            .unwrap_or_default()
+    ));
+    let backup_temp = match write_synced_temp(path, "bak-tmp", &current) {
+        Ok(temp) => temp,
+        Err(error) => {
+            let _ = std::fs::remove_file(&candidate_temp);
+            return Err(ConfigError::Backup(format!(
+                "写备份临时文件 {} 失败: {error}",
+                backup.display()
+            )));
         }
-        std::fs::rename(&backup_temp, &backup)?;
-        let mut file = std::fs::File::create(&temp)?;
-        file.write_all(candidate)?;
-        file.sync_all()?;
-        drop(file);
-        std::fs::rename(&temp, path)?;
-        Ok(())
-    })();
-    if let Err(error) = result {
-        let _ = std::fs::remove_file(&temp);
+    };
+    if let Err(error) = replace_file(&backup_temp, &backup).and_then(|_| sync_parent(&backup)) {
+        let _ = std::fs::remove_file(&candidate_temp);
         let _ = std::fs::remove_file(&backup_temp);
-        return Err(ConfigError::Backup(format!("写入 {} 失败: {error}", backup.display())));
+        return Err(ConfigError::Backup(format!(
+            "替换备份 {} 失败: {error}",
+            backup.display()
+        )));
+    }
+    if let Err(error) = replace_file(&candidate_temp, path).and_then(|_| sync_parent(path)) {
+        let _ = std::fs::remove_file(&candidate_temp);
+        return Err(ConfigError::Write(format!(
+            "替换配置 {} 失败: {error}",
+            path.display()
+        )));
+    }
+    Ok(())
+}
+
+pub(crate) fn write_new_config_under_lease(
+    lease: &ConfigLease,
+    path: &Path,
+    candidate: &[u8],
+) -> Result<String, ConfigError> {
+    validate_config_lease(lease, path)?;
+    cleanup_stale_config_temps(path);
+    if path.exists() {
+        let actual = config_revision_for_path(path)?;
+        return Err(ConfigError::Conflict {
+            expected: "<missing>".to_string(),
+            actual,
+        });
+    }
+    let temp = write_synced_temp(path, "tmp", candidate).map_err(|error| {
+        ConfigError::Write(format!("写配置临时文件 {} 失败: {error}", path.display()))
+    })?;
+    if path.exists() {
+        let _ = std::fs::remove_file(&temp);
+        let actual = config_revision_for_path(path)?;
+        return Err(ConfigError::Conflict {
+            expected: "<missing>".to_string(),
+            actual,
+        });
+    }
+    if let Err(error) = replace_file(&temp, path).and_then(|_| sync_parent(path)) {
+        let _ = std::fs::remove_file(&temp);
+        return Err(ConfigError::Write(format!(
+            "创建配置 {} 失败: {error}",
+            path.display()
+        )));
     }
     Ok(config_revision_for_bytes(candidate))
 }
@@ -1243,9 +1610,9 @@ pub(crate) fn apply_agent_create(
     agent_config: &serde_json::Value,
 ) -> Result<String, ConfigError> {
     validate_agent_id(agent_id)?;
-    let config_object = agent_config.as_object().ok_or_else(|| {
-        ConfigError::Invalid(format!("agent {agent_id} 配置必须为结构化 object"))
-    })?;
+    let config_object = agent_config
+        .as_object()
+        .ok_or_else(|| ConfigError::Invalid(format!("agent {agent_id} 配置必须为结构化 object")))?;
     if config_object.contains_key("agents") {
         return Err(ConfigError::Invalid(format!(
             "agent {agent_id} 配置必须是单 Agent node，不能包含顶层 agents"
@@ -1288,8 +1655,9 @@ pub(crate) fn serialize_agents_document(
             "结构化 agents document 的 agents 段不能为空".to_string(),
         ));
     }
-    serde_yml::to_string(document)
-        .map_err(|error| ConfigError::Invalid(format!("结构化 agents document 序列化失败: {error}")))
+    serde_yml::to_string(document).map_err(|error| {
+        ConfigError::Invalid(format!("结构化 agents document 序列化失败: {error}"))
+    })
 }
 
 /// 施工文档 §4.3.2：新建 Agent 的 id 字符规则。
@@ -1374,26 +1742,10 @@ pub(crate) fn validate_candidate(
 /// 临时文件。与 export::write_export_atomically 的 create_new（拒绝覆盖）语义
 /// 不同——本函数是替换目标语义。Windows rename 覆盖/目标占用返回明确错误。
 pub(crate) fn write_config_atomically(path: &Path, content: &str) -> Result<(), ConfigError> {
-    let dir = path
-        .parent()
-        .ok_or_else(|| ConfigError::Write(format!("{} 无父目录", path.display())))?;
-    let file_name = path
-        .file_name()
-        .ok_or_else(|| ConfigError::Write(format!("{} 无文件名", path.display())))?;
-    let temp = dir.join(format!(
-        ".{}.tmp-{}",
-        file_name.to_string_lossy(),
-        std::process::id()
-    ));
-    let write_result = (|| -> std::io::Result<()> {
-        let mut file = std::fs::File::create(&temp)?;
-        file.write_all(content.as_bytes())?;
-        file.sync_all()?;
-        drop(file);
-        std::fs::rename(&temp, path)?;
-        Ok(())
-    })();
-    if let Err(error) = write_result {
+    let temp = write_synced_temp(path, "tmp", content.as_bytes()).map_err(|error| {
+        ConfigError::Write(format!("写配置临时文件 {} 失败: {error}", path.display()))
+    })?;
+    if let Err(error) = replace_file(&temp, path).and_then(|_| sync_parent(path)) {
         let _ = std::fs::remove_file(&temp);
         return Err(ConfigError::Write(format!(
             "写配置 {} 失败: {error}",
@@ -2054,6 +2406,8 @@ mod tests {
         // 全部数值字段 0 均拒绝
         for field in [
             "cancel_settle_timeout_secs",
+            "idle_timeout_secs",
+            "first_token_timeout_secs",
             "rpc_timeout_secs",
             "max_attachments",
             "max_attachment_bytes",
@@ -2102,11 +2456,20 @@ mod tests {
         for (field, maximum) in [
             ("prompt_timeout_secs", 3600u64),
             ("cancel_settle_timeout_secs", 300),
+            ("idle_timeout_secs", 3600),
+            ("first_token_timeout_secs", 3600),
             ("rpc_timeout_secs", 300),
             ("max_attachments", 64),
             ("max_attachment_bytes", 256 * 1024 * 1024),
             ("replay_max_events", 100_000),
         ] {
+            assert!(
+                parse(&format!(
+                    "agents:\n  good:\n    name: Good\n    transport: subprocess\n    exe: agent\n    acp:\n      {field}: {maximum}\n"
+                ))
+                .is_ok(),
+                "{field}: hard max 本身必须允许"
+            );
             let error = parse(&format!(
                 "agents:\n  bad:\n    name: Bad\n    transport: subprocess\n    exe: agent\n    acp:\n      {field}: {}\n",
                 maximum + 1,
@@ -2115,6 +2478,27 @@ mod tests {
             assert!(error.to_string().contains("agent bad"), "{field}: {error}");
             assert!(error.to_string().contains("hard max"), "{field}: {error}");
         }
+
+        let oversized_json = "x".repeat(MAX_INITIALIZE_VALUE_BYTES + 1);
+        let error = parse(&format!(
+            "agents:\n  bad:\n    name: Bad\n    transport: subprocess\n    exe: agent\n    acp:\n      client_info:\n        blob: {oversized_json}\n"
+        ))
+        .expect_err("oversized client_info must be rejected");
+        assert!(error.to_string().contains("client_info"));
+        assert!(error.to_string().contains("hard max"));
+    }
+
+    #[test]
+    fn high_but_valid_config_limits_are_snapshot_diagnostics_not_errors() {
+        let agents = parse(
+            "agents:\n  a:\n    name: A\n    transport: subprocess\n    exe: agent\n    acp:\n      prompt_timeout_secs: 901\n      max_attachment_bytes: 67108865\n      replay_max_events: 50001\n",
+        )
+        .expect("warning thresholds must not reject the config");
+        let diagnostics = config_diagnostics(&agents);
+        assert_eq!(diagnostics.len(), 3);
+        assert!(diagnostics
+            .iter()
+            .all(|diagnostic| diagnostic.code == "config_high_resource_limit"));
     }
 
     // ── R6（P1-4）：分域部分成功与统一装载 ──
@@ -2128,6 +2512,23 @@ mod tests {
             "config_invalid_agent"
         );
         assert_eq!(ConfigError::Invalid("x".into()).code(), "config_error");
+        assert_eq!(
+            ConfigError::Conflict {
+                expected: "a".into(),
+                actual: "b".into(),
+            }
+            .code(),
+            "config_revision_conflict"
+        );
+        assert_eq!(
+            ConfigError::RevisionRequired.code(),
+            "config_revision_required"
+        );
+        assert_eq!(
+            ConfigError::Backup("x".into()).code(),
+            "config_backup_error"
+        );
+        assert_eq!(ConfigError::LockBusy("x".into()).code(), "config_lock_busy");
     }
 
     #[test]
@@ -2382,6 +2783,106 @@ gateway:
         );
     }
 
+    #[test]
+    fn config_lease_uses_os_lock_and_recovers_stale_lock_file() {
+        let dir = std::env::temp_dir().join(format!(
+            "pylon-config-lease-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        std::fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("agents.yaml");
+        let lock_path = dir.join(".agents.yaml.pylon.lock");
+        std::fs::write(&lock_path, b"stale after crash").unwrap();
+
+        let first = ConfigLease::acquire(&path).expect("stale lock file must not block OS lease");
+        assert!(
+            lock_path.exists(),
+            "lease path must be .agents.yaml.pylon.lock"
+        );
+        assert!(
+            !dir.join("agents.yaml.pylon.lock").exists(),
+            "legacy non-hidden lease path must not be used"
+        );
+        assert!(
+            matches!(ConfigLease::acquire(&path), Err(ConfigError::LockBusy(_))),
+            "a live lease must reject a concurrent writer"
+        );
+        drop(first);
+        ConfigLease::acquire(&path).expect("dropping the OS lease must make it reusable");
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn config_transaction_is_cas_and_backup_is_previous_exact_bytes() {
+        let dir = std::env::temp_dir().join(format!(
+            "pylon-config-cas-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        std::fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("agents.yaml");
+        let first = b"agents:\n  a:\n    name: A\n    transport: subprocess\n    exe: a\n";
+        let second = b"agents:\n  b:\n    name: B\n    transport: subprocess\n    exe: b\n";
+        let third = b"agents:\n  c:\n    name: C\n    transport: subprocess\n    exe: c\n";
+        std::fs::write(&path, first).unwrap();
+        let stale = dir.join(".agents.yaml.tmp-old-process-1");
+        let unrelated = dir.join(".agents.yaml.user-copy");
+        std::fs::write(&stale, b"partial").unwrap();
+        std::fs::write(&unrelated, b"keep").unwrap();
+        let baseline = config_revision_for_bytes(first);
+
+        let second_revision =
+            write_config_transaction(&path, &baseline, second).expect("first writer wins");
+        assert_eq!(std::fs::read(&path).unwrap(), second);
+        assert_eq!(
+            std::fs::read(path.with_extension("yaml.bak")).unwrap(),
+            first
+        );
+        assert!(!stale.exists(), "own stale temp naming rule must self-heal");
+        assert!(unrelated.exists(), "cleanup must not touch unrelated files");
+
+        let error = write_config_transaction(&path, &baseline, third)
+            .expect_err("stale writer must conflict");
+        assert!(matches!(error, ConfigError::Conflict { .. }));
+        assert_eq!(std::fs::read(&path).unwrap(), second);
+        assert_eq!(second_revision, config_revision_for_bytes(second));
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn config_transaction_backup_failure_preserves_current_file() {
+        let dir = std::env::temp_dir().join(format!(
+            "pylon-config-backup-failure-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        std::fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("agents.yaml");
+        let current = b"agents:\n  a:\n    name: A\n    transport: subprocess\n    exe: a\n";
+        std::fs::write(&path, current).unwrap();
+        std::fs::create_dir(path.with_extension("yaml.bak")).unwrap();
+
+        let error = write_config_transaction(
+            &path,
+            &config_revision_for_bytes(current),
+            b"agents:\n  b:\n    name: B\n    transport: subprocess\n    exe: b\n",
+        )
+        .expect_err("backup replacement must fail");
+        assert!(matches!(error, ConfigError::Backup(_)));
+        assert_eq!(std::fs::read(&path).unwrap(), current);
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
     // ── 施工文档 Phase 2：agent_fields / agent_create 纯函数 ──
 
     #[test]
@@ -2454,12 +2955,7 @@ gateway:
             "exe": "C:\\Program Files\\Agent\\agent.exe",
             "args": ["acp", "--profile", "work space"]
         });
-        let created = apply_agent_create(
-            content,
-            "b.v2",
-            &agent,
-        )
-        .unwrap();
+        let created = apply_agent_create(content, "b.v2", &agent).unwrap();
         let agents = parse(&created).unwrap();
         assert!(agents.contains_key("b.v2"));
         let created_document = parse_config_document(&created).unwrap();
@@ -2470,7 +2966,10 @@ gateway:
             created_agent.get("name").and_then(serde_yml::Value::as_str),
             Some("B: #1")
         );
-        assert!(created_agent.get("agents").is_none(), "不得嵌套完整 agents 文档");
+        assert!(
+            created_agent.get("agents").is_none(),
+            "不得嵌套完整 agents 文档"
+        );
         assert!(apply_agent_create(
             content,
             "a",

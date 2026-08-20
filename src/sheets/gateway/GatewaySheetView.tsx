@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { useCallback, useEffect, useState } from 'react'
 import { invoke } from '@tauri-apps/api/core'
 import { reportRuntimeError } from '../../runtimeError'
 import { createGatewayClient, type AdapterCatalogItem, type AdapterInstance, type GatewayInstanceInput } from '../../infrastructure/tauri/gatewayClient'
@@ -15,13 +15,14 @@ import type { SheetContext, SheetRecord } from '../../workspace-sheets/sheetType
  * 实例/状态/错误/凭据状态与启停删操作；创建仅限 builtIn 平台（未实现平台不可用）；
  * 凭据提交后清空前端 secret state（不残留明文）。
  */
-const gatewayClient = createGatewayClient({ invoke: (cmd, args) => invoke(cmd, args as Record<string, unknown> | undefined) })
-
 function statusLabel(status: AdapterInstance['status']): string {
   return status === 'connected' ? '已连接' : status === 'starting' ? '启动中' : status === 'error' ? '错误' : '已停止'
 }
 
 export default function GatewaySheetView({ sheet: _sheet, ctx }: { sheet: SheetRecord; ctx: SheetContext }) {
+  const [gatewayClient] = useState(() => createGatewayClient({
+    invoke: (cmd, args) => invoke(cmd, args as Record<string, unknown> | undefined),
+  }))
   const [status, setStatus] = useState<GatewayStatus | null>(null)
   const [sessions, setSessions] = useState<PlatformSession[]>([])
   const [error, setError] = useState('')
@@ -121,7 +122,7 @@ export default function GatewaySheetView({ sheet: _sheet, ctx }: { sheet: SheetR
       }
     })
     return () => { disposed = true }
-  }, [])
+  }, [gatewayClient])
 
   // Phase 2：平台会话（gateway_sessions 只读快照）
   useEffect(() => {
@@ -132,17 +133,17 @@ export default function GatewaySheetView({ sheet: _sheet, ctx }: { sheet: SheetR
       if (!disposed) reportRuntimeError('读取平台会话', err)
     })
     return () => { disposed = true }
-  }, [])
+  }, [gatewayClient])
 
   // I12-W5：实例列表 + 平台 catalog（创建表单可用平台来源）
-  const reloadInstances = async () => {
+  const reloadInstances = useCallback(async () => {
     try {
       setInstances(await gatewayClient.instances())
       setInstanceError('')
     } catch (err) {
       setInstanceError(err instanceof Error ? err.message : String(err))
     }
-  }
+  }, [gatewayClient])
   useEffect(() => {
     let disposed = false
     void reloadInstances()
@@ -152,7 +153,7 @@ export default function GatewaySheetView({ sheet: _sheet, ctx }: { sheet: SheetR
       if (!disposed) reportRuntimeError('读取平台目录', err)
     })
     return () => { disposed = true }
-  }, [])
+  }, [gatewayClient, reloadInstances])
 
   const runInstanceAction = async (action: () => Promise<unknown>) => {
     try {

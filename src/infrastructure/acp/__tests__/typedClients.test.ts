@@ -30,8 +30,10 @@ describe('agentClient', () => {
 
   it('Agent 结构化配置命令 payload 收口', async () => {
     const invoke = new FakeInvoke()
-    invoke.register('update_agents_config', () => null)
-    invoke.register('initialize_agents_config', () => null)
+    let nextRevision = 1
+    invoke.register('agent_config_snapshot', () => ({ revision: 'rev-1', agents: [] }))
+    invoke.register('update_agents_config', () => ({ revision: `rev-${++nextRevision}` }))
+    invoke.register('initialize_agents_config', () => ({ revision: `rev-${++nextRevision}` }))
     invoke.register('test_agent_connection', () => ({ ok: true, agentId: 'peri', durationMs: 1, error: null }))
     const client = createAgentClient({ invoke: (cmd, args) => invoke.invoke(cmd, args) })
     await client.updateAgentFieldPatch('peri', { exe: 'F:/peri.exe' })
@@ -49,12 +51,23 @@ describe('agentClient', () => {
     await client.initializeAgentFieldPatch('hermes', { default: true })
     await client.testAgentConnection('peri')
     expect(invoke.calls).toEqual([
-      { cmd: 'update_agents_config', args: { scope: 'agent_fields', agentId: 'peri', config: { exe: 'F:/peri.exe' } } },
-      { cmd: 'update_agents_config', args: { scope: 'agent_create', agentId: 'new', config: newAgent } },
+      { cmd: 'agent_config_snapshot', args: {} },
+      { cmd: 'update_agents_config', args: { scope: 'agent_fields', agentId: 'peri', config: { exe: 'F:/peri.exe' }, expectedRevision: 'rev-1' } },
+      { cmd: 'update_agents_config', args: { scope: 'agent_create', agentId: 'new', config: newAgent, expectedRevision: 'rev-2' } },
       { cmd: 'initialize_agents_config', args: { agentId: 'new', config: document } },
       { cmd: 'initialize_agents_config', args: { agentId: 'hermes', config: { default: true } } },
       { cmd: 'test_agent_connection', args: { agentId: 'peri' } },
     ])
+  })
+
+  it('snapshot 故障不得降级为无 revision 盲写', async () => {
+    const invoke = new FakeInvoke()
+      .register('agent_config_snapshot', () => { throw { code: 'config_read_error', message: 'disk down' } })
+      .register('update_agents_config', () => ({ revision: 'unexpected' }))
+    const client = createAgentClient({ invoke: (cmd, args) => invoke.invoke(cmd, args) })
+
+    await expect(client.updateAgentFieldPatch('peri', { name: 'draft' })).rejects.toMatchObject({ code: 'config_read_error' })
+    expect(invoke.calls).toEqual([{ cmd: 'agent_config_snapshot', args: {} }])
   })
 
   it('switchAgent 发送 { name } payload', async () => {

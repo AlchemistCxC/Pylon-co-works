@@ -22,6 +22,9 @@ describe('AgentRuntimePanel 默认 Agent', () => {
     invoke.mockReset()
     invoke.mockImplementation((command: string) => {
       if (command === 'detect_agent_runtimes') return Promise.resolve({ candidates: [], diagnostics: [], elapsedMs: 0, truncated: false })
+      if (command === 'agent_config_snapshot') {
+        return Promise.reject({ code: 'config_read_only', message: 'Config error: 当前为嵌入配置' })
+      }
       if (command === 'update_agents_config') {
         return Promise.reject({ code: 'config_read_only', message: 'Config error: 当前为嵌入配置' })
       }
@@ -52,7 +55,8 @@ describe('AgentRuntimePanel 默认 Agent', () => {
 
   it('外部配置新建 Agent 时发送结构化单 Agent DTO，而不是嵌套 agents 文档', async () => {
     invoke.mockImplementation((command: string) => {
-      if (command === 'update_agents_config') return Promise.resolve({ applied: true })
+      if (command === 'agent_config_snapshot') return Promise.resolve({ revision: 'rev-1', agents: [] })
+      if (command === 'update_agents_config') return Promise.resolve({ applied: true, revision: 'rev-2' })
       if (command === 'list_agents') return Promise.resolve([])
       return Promise.resolve(null)
     })
@@ -83,6 +87,7 @@ describe('AgentRuntimePanel 默认 Agent', () => {
         args: ['--profile', 'work space', '', 'a"b'],
         default: false,
       },
+      expectedRevision: 'rev-1',
     }))
   })
 
@@ -116,7 +121,8 @@ describe('AgentRuntimePanel 默认 Agent', () => {
 
   it('编辑现有 Agent 时保存参数数组并预览后端追加的 effective 参数', async () => {
     invoke.mockImplementation((command: string) => {
-      if (command === 'update_agents_config') return Promise.resolve({ applied: true })
+      if (command === 'agent_config_snapshot') return Promise.resolve({ revision: 'rev-1', agents: [] })
+      if (command === 'update_agents_config') return Promise.resolve({ applied: true, revision: 'rev-2' })
       if (command === 'list_agents') return Promise.resolve([])
       return Promise.resolve(null)
     })
@@ -139,6 +145,7 @@ describe('AgentRuntimePanel 默认 Agent', () => {
         provider: null,
         args: ['acp', 'new work space', ''],
       },
+      expectedRevision: 'rev-1',
     }))
   })
 
@@ -164,7 +171,8 @@ describe('AgentRuntimePanel 默认 Agent', () => {
         truncated: false,
       })
       if (command === 'test_agent_candidate') return Promise.resolve({ ok: true, agentId: 'detected', durationMs: 12 })
-      if (command === 'update_agents_config') return Promise.resolve({ applied: true })
+      if (command === 'agent_config_snapshot') return Promise.resolve({ revision: 'rev-1', agents: [] })
+      if (command === 'update_agents_config') return Promise.resolve({ applied: true, revision: 'rev-2' })
       if (command === 'list_agents') return Promise.resolve([])
       return Promise.resolve(null)
     })
@@ -203,6 +211,35 @@ describe('AgentRuntimePanel 默认 Agent', () => {
         args: expectedArgs,
         default: false,
       },
+      expectedRevision: 'rev-1',
     }))
+  })
+
+  it('CAS 冲突保留编辑草稿，并允许显式重新载入 revision', async () => {
+    let snapshotCalls = 0
+    invoke.mockImplementation((command: string) => {
+      if (command === 'agent_config_snapshot') {
+        snapshotCalls += 1
+        return Promise.resolve({ revision: `rev-${snapshotCalls}`, agents: [] })
+      }
+      if (command === 'update_agents_config') {
+        return Promise.reject({ code: 'config_revision_conflict', message: 'expected rev-1 actual rev-2' })
+      }
+      if (command === 'list_agents') return Promise.resolve([])
+      return Promise.resolve(null)
+    })
+    render(<AgentRuntimePanel />)
+
+    const periCard = screen.getByText('Peri').closest('.agent-runtime-card') as HTMLElement
+    fireEvent.click(within(periCard).getByRole('button', { name: '编辑' }))
+    const nameInput = within(periCard).getByLabelText('Agent name') as HTMLInputElement
+    fireEvent.change(nameInput, { target: { value: 'Peri draft' } })
+    fireEvent.click(within(periCard).getByRole('button', { name: '保存' }))
+
+    expect(await screen.findByText(/配置已被其他进程修改/)).toBeInTheDocument()
+    expect((within(periCard).getByLabelText('Agent name') as HTMLInputElement).value).toBe('Peri draft')
+    fireEvent.click(screen.getByRole('button', { name: '重新载入配置' }))
+    await waitFor(() => expect(snapshotCalls).toBe(2))
+    expect(screen.getByText(/配置已重新载入；未提交草稿仍保留/)).toBeInTheDocument()
   })
 })

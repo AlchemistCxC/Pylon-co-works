@@ -11,7 +11,7 @@
  * 接线注册；调用未注册命令会收到 "unknown command" 结构化错误
  * （gatewayContracts classifyGatewayWriteError 分类为 blocked）。
  */
-import { ClientTransport } from '../acp/agentClient'
+import type { ClientTransport } from '../acp/agentClient'
 import { normalizeGatewaySessions, normalizeGatewayStatus } from './gatewayContracts'
 
 /** 平台 catalog 凭据字段描述（只描述，不携带值；secret 字段值永不回传）。 */
@@ -69,11 +69,26 @@ export interface GatewayInstanceUpdate {
 }
 
 export function createGatewayClient(transport: ClientTransport) {
+  let configRevision: string | null = null
   return {
     status: (): Promise<unknown> => transport.invoke('gateway_status').then(normalizeGatewayStatus),
     sessions: (): Promise<unknown> => transport.invoke('gateway_sessions').then(normalizeGatewaySessions),
     reload: (): Promise<unknown> => transport.invoke('reload_gateway'),
-    updateAgentsConfig: (payload: Record<string, unknown>): Promise<unknown> => transport.invoke('update_agents_config', payload),
+    updateAgentsConfig: async (payload: Record<string, unknown>): Promise<unknown> => {
+      if (!configRevision) {
+        const snapshot = await transport.invoke('agent_config_snapshot')
+        const record = snapshot && typeof snapshot === 'object' ? snapshot as Record<string, unknown> : {}
+        if (typeof record.revision !== 'string' || !record.revision) {
+          throw new Error('agent_config_snapshot 未返回有效 revision')
+        }
+        configRevision = record.revision
+      }
+      const result = await transport.invoke('update_agents_config', { ...payload, expectedRevision: configRevision })
+      if (result && typeof result === 'object' && typeof (result as Record<string, unknown>).revision === 'string') {
+        configRevision = (result as Record<string, string>).revision
+      }
+      return result
+    },
     catalog: (): Promise<AdapterCatalogItem[]> =>
       transport.invoke('gateway_catalog') as Promise<AdapterCatalogItem[]>,
     instances: (): Promise<AdapterInstance[]> =>

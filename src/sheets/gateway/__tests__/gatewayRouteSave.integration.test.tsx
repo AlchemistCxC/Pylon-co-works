@@ -44,7 +44,8 @@ function installHandlers(): void {
     gateway_sessions: () => [],
     gateway_instances: () => INSTANCES,
     gateway_catalog: () => [{ platform: 'qq', label: 'QQ', availability: 'builtIn', credentialFields: [], capabilities: { deliverText: true, deliverEvent: false, ingest: true, maxMessageLen: 4000 } }],
-    update_agents_config: () => null,
+    agent_config_snapshot: () => ({ revision: 'gateway-rev-1', agents: [], diagnostics: [] }),
+    update_agents_config: () => ({ revision: 'gateway-rev-2' }),
     reload_gateway: () => null,
   })
 }
