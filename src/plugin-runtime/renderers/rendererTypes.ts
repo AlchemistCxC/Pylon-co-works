@@ -7,6 +7,7 @@ import type {
   SpinnerProvider,
 } from '../../contracts/rendererContentPoints.ts'
 import type { ToolKind } from '../../domains/tool/toolKinds.ts'
+import type { RendererSettingsSchema } from './rendererSettingsTypes.ts'
 
 export type RendererFailureDecision = 'fallback' | 'rethrow'
 
@@ -20,6 +21,7 @@ export interface RenderKindDefinition {
   readonly fixture: unknown
   readonly defaultTokens: unknown
   readonly settingsSchemaVersion: number
+  readonly settings?: RendererSettingsSchema
   readonly validateInput: (input: unknown) => boolean
   readonly compatibility?: Readonly<Record<string, string>>
 }
@@ -43,6 +45,8 @@ export interface RendererDefinitionBase<TInput> {
   readonly experimental?: boolean
   readonly priority: number
   readonly fallback: boolean
+  /** Optional implementation-owned settings schema; values remain host-owned. */
+  readonly settings?: RendererSettingsSchema
   canRender(input: TInput): boolean
   onError?(error: unknown, input: TInput): RendererFailureDecision
 }

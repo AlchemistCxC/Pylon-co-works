@@ -44,6 +44,21 @@ describe('plugin setting option contributions', () => {
     expect(() => registry.register(owner, { id: 'empty', target: 'theme.msgStyle' })).toThrow(/不能为空/)
   })
 
+  it('支持 kind/suite/slot namespace，拒绝缺少 field 的语义 target', async () => {
+    const registry = new PluginSettingOptionsRegistry()
+    const owner = createPluginIdentity('plugin.renderer', 'one')
+    const registration = registry.register(owner, {
+      id: 'plugin.renderer.markdown-density',
+      target: 'kind.content.markdown.density',
+      upsert: [{ value: 'compact', label: '紧凑' }],
+    })
+    expect(resolvePluginSettingOptions('kind.content.markdown.density', [], registry.getSnapshot().entries)).toEqual([
+      expect.objectContaining({ value: 'compact', label: '紧凑' }),
+    ])
+    await registration.dispose()
+    expect(() => registry.register(owner, { id: 'bad-target', target: 'kind.content.markdown', upsert: [{ value: 'x' }] })).toThrow(/target 非法/)
+  })
+
   it('水合时保留插件 select 值，不要在 Registry 激活前悄悄改回默认', () => {
     expect(normalizeThemeState({ msgStyle: 'cards' }).msgStyle).toBe('cards')
     expect(normalizeThemeState({ msgStyle: 42 }).msgStyle).toBe('terminal')

@@ -16,6 +16,7 @@ import type {
   RenderResolveContext,
 } from './rendererTypes.ts'
 import { notifyRegistryListener } from '../registry/registryBatch.ts'
+import { normalizeRendererSettingsSchema } from './rendererSettingsTypes.ts'
 
 export interface RendererRegistryTransaction {
   registerRenderKind(definition: RenderKindDefinition): AsyncDisposable
@@ -54,6 +55,14 @@ function validateDefinition<TInput>(definition: RendererDefinitionBase<TInput>):
   if (!Number.isFinite(definition.priority)) throw new Error(`Renderer priority 无效：${definition.id}`)
   if (typeof definition.fallback !== 'boolean') throw new Error(`Renderer fallback 必须显式声明：${definition.id}`)
   if (typeof definition.canRender !== 'function') throw new Error(`Renderer canRender 缺失：${definition.id}`)
+  if (definition.settings) normalizeRendererSettingsSchema(definition.settings)
+}
+
+function freezeRendererDefinition<TInput, TDefinition extends RendererDefinitionBase<TInput>>(definition: TDefinition): TDefinition {
+  return Object.freeze({
+    ...definition,
+    ...(definition.settings ? { settings: normalizeRendererSettingsSchema(definition.settings) } : {}),
+  }) as TDefinition
 }
 
 function freezeRenderKind(definition: RenderKindDefinition): RenderKindDefinition {
@@ -67,6 +76,7 @@ function freezeRenderKind(definition: RenderKindDefinition): RenderKindDefinitio
     ...(definition.aliases ? { aliases: Object.freeze([...definition.aliases]) } : {}),
     fixture: freeze(definition.fixture),
     defaultTokens: freeze(definition.defaultTokens),
+    ...(definition.settings ? { settings: normalizeRendererSettingsSchema(definition.settings) } : {}),
     ...(definition.compatibility ? { compatibility: freeze({ ...definition.compatibility }) as Readonly<Record<string, string>> } : {}),
   })
 }
@@ -84,6 +94,7 @@ function validateRenderKind(
   if (definition.id !== 'content.unknown' && !definition.fallbackKind) throw new Error(`RenderKind fallbackKind 缺失：${definition.id}`)
   if (!Number.isFinite(definition.priority)) throw new Error(`RenderKind priority 无效：${definition.id}`)
   if (!Number.isInteger(definition.settingsSchemaVersion) || definition.settingsSchemaVersion < 1) throw new Error(`RenderKind settingsSchemaVersion 无效：${definition.id}`)
+  if (definition.settings && definition.settings.schemaVersion !== definition.settingsSchemaVersion) throw new Error(`RenderKind settings schemaVersion 不匹配：${definition.id}`)
   if (typeof definition.validateInput !== 'function') throw new Error(`RenderKind validateInput 缺失：${definition.id}`)
   if (definition.fallbackKind === definition.id) throw new Error(`RenderKind fallbackKind 自引用：${definition.id}`)
   if (checkDuplicate && existing.some(entry => entry.value.id === definition.id)) throw new Error(`RenderKind id 重复：${definition.id}`)
@@ -166,7 +177,7 @@ export class RendererRegistry {
   registerMessageRenderer(owner: PluginIdentity, definition: MessageRendererDefinition): AsyncDisposable {
     validateDefinition(definition)
     if (!definition.renderer?.rendererId) throw new Error(`Message renderer 实现无 rendererId：${definition.id}`)
-    return this.messages.register(owner, Object.freeze({ ...definition }), {
+    return this.messages.register(owner, freezeRendererDefinition(definition), {
       contributionId: definition.id,
       priority: definition.priority,
     })
@@ -175,7 +186,7 @@ export class RendererRegistry {
   registerContentRenderer(owner: PluginIdentity, definition: ContentRendererDefinition): AsyncDisposable {
     validateDefinition(definition)
     if (!definition.kind || !definition.provider) throw new Error(`Content renderer 定义无效：${definition.id}`)
-    return this.contents.register(owner, Object.freeze({ ...definition }), {
+    return this.contents.register(owner, freezeRendererDefinition(definition), {
       contributionId: definition.id,
       priority: definition.priority,
     })
@@ -184,7 +195,7 @@ export class RendererRegistry {
   registerToolRenderer(owner: PluginIdentity, definition: ToolRendererDefinition): AsyncDisposable {
     validateDefinition(definition)
     if (!definition.kind || !definition.renderer) throw new Error(`Tool renderer 定义无效：${definition.id}`)
-    return this.tools.register(owner, Object.freeze({ ...definition }), {
+    return this.tools.register(owner, freezeRendererDefinition(definition), {
       contributionId: definition.id,
       priority: definition.priority,
     })
@@ -193,7 +204,7 @@ export class RendererRegistry {
   registerCodeHighlighter(owner: PluginIdentity, definition: CodeHighlighterDefinition): AsyncDisposable {
     validateDefinition(definition)
     if (typeof definition.highlight !== 'function') throw new Error(`Code highlighter 实现无效：${definition.id}`)
-    return this.highlighters.register(owner, Object.freeze({ ...definition }), {
+    return this.highlighters.register(owner, freezeRendererDefinition(definition), {
       contributionId: definition.id,
       priority: definition.priority,
     })
@@ -220,12 +231,12 @@ export class RendererRegistry {
         if (definition.renderer.kind !== 'solid') throw new Error(`Solid renderer kind 非法：${definition.id}`)
         validateDefinition(definition)
         if (!definition.renderer?.rendererId) throw new Error(`Message renderer 实现无 rendererId：${definition.id}`)
-        return messages.register(Object.freeze({ ...definition }), { contributionId: definition.id, priority: definition.priority })
+        return messages.register(freezeRendererDefinition(definition), { contributionId: definition.id, priority: definition.priority })
       },
       registerMessageRenderer: definition => {
         validateDefinition(definition)
         if (!definition.renderer?.rendererId) throw new Error(`Message renderer 实现无 rendererId：${definition.id}`)
-        return messages.register(Object.freeze({ ...definition }), {
+        return messages.register(freezeRendererDefinition(definition), {
           contributionId: definition.id,
           priority: definition.priority,
         })
@@ -233,7 +244,7 @@ export class RendererRegistry {
       registerContentRenderer: definition => {
         validateDefinition(definition)
         if (!definition.kind || !definition.provider) throw new Error(`Content renderer 定义无效：${definition.id}`)
-        return contents.register(Object.freeze({ ...definition }), {
+        return contents.register(freezeRendererDefinition(definition), {
           contributionId: definition.id,
           priority: definition.priority,
         })
@@ -241,7 +252,7 @@ export class RendererRegistry {
       registerToolRenderer: definition => {
         validateDefinition(definition)
         if (!definition.kind || !definition.renderer) throw new Error(`Tool renderer 定义无效：${definition.id}`)
-        return tools.register(Object.freeze({ ...definition }), {
+        return tools.register(freezeRendererDefinition(definition), {
           contributionId: definition.id,
           priority: definition.priority,
         })
@@ -249,7 +260,7 @@ export class RendererRegistry {
       registerCodeHighlighter: definition => {
         validateDefinition(definition)
         if (typeof definition.highlight !== 'function') throw new Error(`Code highlighter 实现无效：${definition.id}`)
-        return highlighters.register(Object.freeze({ ...definition }), {
+        return highlighters.register(freezeRendererDefinition(definition), {
           contributionId: definition.id,
           priority: definition.priority,
         })

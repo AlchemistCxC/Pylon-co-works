@@ -1,0 +1,106 @@
+import { useMemo, useSyncExternalStore } from 'react'
+import { getPluginSettingOptionsRegistry, getRendererRegistry } from '../../plugin-runtime/runtimeServices.ts'
+import { resolvePluginSettingOptions } from '../../plugin-runtime/settings/pluginSettingOptionsRegistry.ts'
+import type { PluginSettingOption } from '../../plugin-runtime/settings/pluginSettingsTypes.ts'
+import { createRendererSettingsStore, type RendererSettingsStore } from '../../plugin-runtime/renderers/rendererSettingsStore.ts'
+import { settingFieldKey, type RenderSettingField, type RendererSettingValue, type RendererSettingsSchema } from '../../plugin-runtime/renderers/rendererSettingsTypes.ts'
+import { evaluateRenderSettingCondition, default as RendererSettingField } from './RendererSettingField.tsx'
+
+export interface RendererSettingsSchemaEntry {
+  readonly id: string
+  readonly label: string
+  readonly schema: RendererSettingsSchema
+  readonly namespace?: 'kind' | 'suite' | 'slot'
+}
+
+export interface RendererSettingsPanelProps {
+  readonly schemas?: readonly RendererSettingsSchemaEntry[]
+  readonly store?: RendererSettingsStore
+  readonly search?: string
+}
+
+const defaultStore = createRendererSettingsStore({
+  storage: typeof localStorage === 'undefined' ? undefined : localStorage,
+})
+
+function catalogSchemas(): readonly RendererSettingsSchemaEntry[] {
+  const snapshot = getRendererRegistry().snapshot()
+  const kinds = snapshot.renderKinds.flatMap(entry => entry.value.settings ? [{ id: entry.value.id, label: entry.value.id, schema: entry.value.settings, namespace: 'kind' as const }] : [])
+  const renderers = snapshot.messageRenderers.flatMap(entry => entry.value.settings ? [{ id: entry.value.id, label: entry.value.label ?? entry.value.id, schema: entry.value.settings, namespace: 'slot' as const }] : [])
+  return [...kinds, ...renderers]
+}
+
+function fieldMatches(field: RenderSettingField, query: string, options: readonly PluginSettingOption[]): boolean {
+  if (!query) return true
+  const haystack = [settingFieldKey(field), field.label, field.description, ...options.flatMap(option => [option.value, option.label, option.description])].filter(Boolean).join(' ').toLowerCase()
+  return haystack.includes(query)
+}
+
+function effectiveValues(entry: RendererSettingsSchemaEntry, snapshot: ReturnType<RendererSettingsStore['getSnapshot']>): Record<string, RendererSettingValue> {
+  const namespace = `${entry.namespace ?? 'kind'}.${entry.id}`
+  return Object.fromEntries(entry.schema.groups.flatMap(group => group.fields.flatMap(field => {
+    const key = settingFieldKey(field)
+    const value = snapshot.values[`${namespace}.${key}`] ?? field.default
+    return value === undefined ? [] : [[key, value] as const]
+  })))
+}
+
+export default function RendererSettingsPanel(props: RendererSettingsPanelProps) {
+  const store = props.store ?? defaultStore
+  const storeSnapshot = useSyncExternalStore(store.subscribe, store.getSnapshot, store.getSnapshot)
+  const registrySnapshot = useSyncExternalStore(listener => getRendererRegistry().subscribe(listener), () => getRendererRegistry().snapshot(), () => getRendererRegistry().snapshot())
+  const optionSnapshot = useSyncExternalStore(listener => getPluginSettingOptionsRegistry().subscribe(listener), () => getPluginSettingOptionsRegistry().getSnapshot(), () => getPluginSettingOptionsRegistry().getSnapshot())
+  const entries = props.schemas ?? catalogSchemas()
+  const query = props.search?.trim().toLowerCase() ?? ''
+  // Keep subscriptions alive even when caller supplies fixture schemas.
+  void registrySnapshot
+  const sections = useMemo(() => entries.flatMap(entry => {
+    const namespace = `${entry.namespace ?? 'kind'}.${entry.id}`
+    const values = effectiveValues(entry, storeSnapshot)
+    return entry.schema.groups.flatMap(group => {
+      const fields = group.fields.filter(field => {
+        const target = `${namespace}.${settingFieldKey(field)}`
+        const options = 'options' in field ? resolvePluginSettingOptions(target, field.options, optionSnapshot.entries) : []
+        const matches = fieldMatches(field, query, options)
+        return matches && (!field.showIf || evaluateRenderSettingCondition(field.showIf, values) || Boolean(query && matches))
+      })
+      return fields.length > 0 || !query ? [{ entry, group, namespace, values, fields }] : []
+    })
+  }), [entries, optionSnapshot.entries, query, storeSnapshot])
+
+  return <section className="renderer-settings-panel" aria-label="渲染器设置">
+    <div className="renderer-settings-suite-picker-slot" data-settings-slot="suite-picker">
+      <span>Renderer Suite</span><small>A14 将在此接入 Suite 选择；当前仅展示声明设置。</small>
+    </div>
+    {sections.map(({ entry, group, namespace, values, fields }) => <div className="renderer-settings-group" key={`${namespace}.${group.id}`}>
+      <div className="renderer-settings-group-heading">
+        <div><h3>{entry.label} · {group.label}</h3>{group.description && <p>{group.description}</p>}</div>
+        <button type="button" onClick={() => store.reset(namespace)}>恢复本组默认</button>
+      </div>
+      {fields.map(field => {
+        const key = settingFieldKey(field)
+        const target = `${namespace}.${key}`
+        const options = 'options' in field ? resolvePluginSettingOptions(target, field.options, optionSnapshot.entries) : []
+        const hiddenByCondition = field.showIf && !evaluateRenderSettingCondition(field.showIf, values)
+        const storedValue = storeSnapshot.values[target]
+        const unavailableCurrent = 'options' in field && typeof storedValue === 'string' && !options.some(option => option.value === storedValue)
+        return <div key={key} className={hiddenByCondition ? 'renderer-settings-field-match' : undefined}>
+          {hiddenByCondition && <div className="set-hint">条件字段：当前条件未满足，但搜索命中了此字段</div>}
+          {unavailableCurrent && <div className="set-hint" role="status">当前值“{String(storedValue)}”已不可用；可恢复默认或等待插件重新加载。</div>}
+          <RendererSettingField
+            field={field}
+            value={unavailableCurrent ? field.default : values[key]}
+            options={options}
+            onChange={value => store.setOverride(target, value)}
+            onReset={() => store.removeOverride(target)}
+          />
+        </div>
+      })}
+    </div>)}
+    {Object.entries(storeSnapshot.unavailable).map(([key, value]) => <div className="renderer-setting-unavailable" key={key}>
+      <span>{key}：{String(value)}（不可用，等待插件恢复）</span>
+      <button type="button" onClick={() => store.restoreUnavailable(key)}>恢复</button>
+    </div>)}
+    {sections.length === 0 && Object.keys(storeSnapshot.unavailable).length === 0 && <div className="set-hint">暂无可配置的渲染器设置</div>}
+  </section>
+}

@@ -5,6 +5,7 @@ import type { AsyncDisposable, RegistryEntry, RegistrySnapshot, RegistryTransact
 import type { PluginSettingOption, PluginSettingOptionsContribution } from './pluginSettingsTypes.ts'
 
 const TARGET_PATTERN = /^[a-z][a-z0-9-]*(?:\.[A-Za-z][A-Za-z0-9_-]*)+$/
+const RENDERER_TARGET_PATTERN = /^(suite|slot)\.[A-Za-z0-9_.-]+\.[A-Za-z0-9_-]+$|^kind\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+$/
 
 function themeFieldFromTarget(target: string): ThemeFieldKey | null {
   if (!target.startsWith('theme.')) return null
@@ -31,7 +32,7 @@ export function validatePluginSettingOptionsContribution(
   if (!contribution.id || contribution.id !== contribution.id.trim()) {
     throw new Error('Plugin setting options contribution id 非法')
   }
-  if (!TARGET_PATTERN.test(contribution.target)) {
+  if (!TARGET_PATTERN.test(contribution.target) || (contribution.target.startsWith('kind.') || contribution.target.startsWith('suite.') || contribution.target.startsWith('slot.')) && !RENDERER_TARGET_PATTERN.test(contribution.target)) {
     throw new Error(`Plugin setting options target 非法：${contribution.id}`)
   }
   const themeField = themeFieldFromTarget(contribution.target)

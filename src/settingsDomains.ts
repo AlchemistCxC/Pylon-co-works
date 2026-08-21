@@ -24,6 +24,7 @@ export type SettingsSectionId =
   | 'global'
   | 'sidebar'
   | 'chat'
+  | 'renderers'
   | 'cc'
   | 'right'
   | 'window'
@@ -42,7 +43,7 @@ export interface SettingsDomain {
 }
 
 export const SETTINGS_DOMAINS: readonly SettingsDomain[] = [
-  { id: 'appearance', label: '外观', sections: ['templates', 'global', 'sidebar', 'chat', 'cc', 'right'] },
+  { id: 'appearance', label: '外观', sections: ['templates', 'global', 'sidebar', 'chat', 'renderers', 'cc', 'right'] },
   { id: 'workspace', label: '工作区', sections: ['window', 'pet', 'history', 'backup'] },
   { id: 'agents-connections', label: 'Agent 与连接', sections: ['agent', 'session', 'gateway'] },
   { id: 'plugins', label: '插件', sections: ['pluginManager'] },
@@ -57,6 +58,7 @@ export const SETTINGS_SECTION_LABELS: Record<SettingsSectionId, string> = {
   global: '全局',
   sidebar: '左栏',
   chat: '终端',
+  renderers: '渲染器',
   cc: '中控区',
   right: '右栏',
   window: '窗口',

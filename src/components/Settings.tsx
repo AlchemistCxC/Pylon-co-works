@@ -32,6 +32,7 @@ import HistoryRetention from './settings/HistoryRetention'
 import GatewayRiskPanel from './settings/GatewayRiskPanel'
 import PluginManager from './settings/PluginManager'
 import PresentationProfilePicker from './settings/PresentationProfilePicker'
+import RendererSettingsPanel from './settings/RendererSettingsPanel'
 import PluginSettingsPageHost from './settings/PluginSettingsPageHost'
 import InterfaceModePicker from './settings/InterfaceModePicker.tsx'
 import { getPluginServiceRegistry, getPluginSettingsPageRegistry } from '../plugin-runtime/runtimeServices.ts'
@@ -470,6 +471,8 @@ export default function Settings({ onClose, activeSessionId, initialDomain, init
             <ZoneGroupFields zone="chat" ctx={renderCtx} />
           </>
         )
+      case 'renderers':
+        return <RendererSettingsPanel search={searchQuery} />
       case 'cc':
         return (
           <>
@@ -628,16 +631,16 @@ export default function Settings({ onClose, activeSessionId, initialDomain, init
         </div>
 
         <div className="settings-body">
-          {!activePluginPageId && previewZone && (
+          {!activePluginPageId && (previewZone || activeSection === 'renderers') && (
             <div className="set-toolbar">
               <div className="set-search-wrap">
                 <input className="set-search" value={searchQuery} onChange={e => setSearchQuery(e.target.value)}
                   placeholder="搜索设置项…（如 语法、停滞、透明）" />
                 {searchQuery && <button type="button" className="set-search-clear" onClick={() => setSearchQuery('')} aria-label="清除搜索">✕</button>}
               </div>
-              <button type="button" className="ps-btn sm set-zone-reset"
+              {previewZone && <button type="button" className="ps-btn sm set-zone-reset"
                 onClick={() => resetZone(sectionZone(activeSection) || 'global')}
-                title="将该区全部字段恢复默认">重置本区</button>
+                title="将该区全部字段恢复默认">重置本区</button>}
             </div>
           )}
           {activePluginPageId ? <PluginSettingsPageHost pageId={activePluginPageId} /> : renderSection(activeSection)}

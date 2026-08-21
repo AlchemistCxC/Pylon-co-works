@@ -39,6 +39,23 @@ describe('RendererRegistry', () => {
     expect(registry.snapshot().renderKinds.some(entry => entry.value.id === 'plugin.note')).toBe(false)
   })
 
+  it('校验并冻结 render kind/renderer settings schema', () => {
+    const registry = new RendererRegistry()
+    const owner = createPluginIdentity('test.settings', 'instance-settings')
+    const settings = { schemaVersion: 1, groups: [{ id: 'main', label: 'Main', fields: [{ key: 'density', type: 'choice' as const, presentation: 'select' as const, options: [{ value: 'compact' }] }] }] }
+    registry.registerRenderKind(owner, {
+      id: 'plugin.settings', category: 'content', fallbackKind: 'content.unknown', priority: 10,
+      fixture: {}, defaultTokens: {}, settingsSchemaVersion: 1, settings, validateInput: () => true,
+    })
+    const entry = registry.snapshot().renderKinds.find(item => item.value.id === 'plugin.settings')
+    expect(entry?.value.settings).toMatchObject({ schemaVersion: 1 })
+    expect(Object.isFrozen(entry?.value.settings)).toBe(true)
+    expect(() => registry.registerRenderKind(owner, {
+      id: 'plugin.bad-settings', category: 'content', fallbackKind: 'content.unknown', priority: 10,
+      fixture: {}, defaultTokens: {}, settingsSchemaVersion: 2, settings, validateInput: () => true,
+    })).toThrow(/schemaVersion/)
+  })
+
   it('四类 API 都记录 owner instance，并随 PluginScope 原子注销', async () => {
     const registry = new RendererRegistry()
     const identity = createPluginIdentity('test.renderer', 'instance-1')

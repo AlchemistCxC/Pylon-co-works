@@ -21,7 +21,7 @@ import { ZONES } from '../themeFieldDefs'
 /** 当前 Settings 的全部设置块（Settings.tsx 各分区枚举；新增块必须在此登记） */
 const EXPECTED_BLOCKS: readonly SettingsSectionId[] = [
   // 外观
-  'templates', 'global', 'sidebar', 'chat', 'cc', 'right',
+  'templates', 'global', 'sidebar', 'chat', 'renderers', 'cc', 'right',
   // 工作区
   'window', 'pet', 'history', 'backup',
   // Agent 与连接
@@ -38,7 +38,7 @@ describe('ISSUE-13 W1 domain config 完整性', () => {
     expect(SETTINGS_DOMAINS.map(d => d.id)).toEqual(['appearance', 'workspace', 'agents-connections', 'plugins'])
     expect(SETTINGS_DOMAINS.map(d => d.label)).toEqual(['外观', '工作区', 'Agent 与连接', '插件'])
     expect(SETTINGS_DOMAINS.map(d => d.sections)).toEqual([
-      ['templates', 'global', 'sidebar', 'chat', 'cc', 'right'],
+      ['templates', 'global', 'sidebar', 'chat', 'renderers', 'cc', 'right'],
       ['window', 'pet', 'history', 'backup'],
       ['agent', 'session', 'gateway'],
       ['pluginManager'],
