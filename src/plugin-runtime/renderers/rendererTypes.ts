@@ -10,6 +10,32 @@ import type { ToolKind } from '../../domains/tool/toolKinds.ts'
 
 export type RendererFailureDecision = 'fallback' | 'rethrow'
 
+/** 开放语义 kind：kind 是内容契约，不等同于 Renderer Suite/Slot 实现。 */
+export interface RenderKindDefinition {
+  readonly id: string
+  readonly aliases?: readonly string[]
+  readonly category: string
+  readonly fallbackKind?: string
+  readonly priority: number
+  readonly fixture: unknown
+  readonly defaultTokens: unknown
+  readonly settingsSchemaVersion: number
+  readonly validateInput: (input: unknown) => boolean
+  readonly compatibility?: Readonly<Record<string, string>>
+}
+
+export interface RenderNode {
+  readonly kind?: string
+  readonly rendererId?: string
+  readonly payload?: unknown
+}
+
+export interface RenderResolveContext {
+  readonly rendererId?: string
+  readonly category?: string
+  readonly diagnostic?: (diagnostic: { code: string; message: string; kind?: string; rendererId?: string }) => void
+}
+
 export interface RendererDefinitionBase<TInput> {
   readonly id: string
   readonly label?: string
@@ -39,7 +65,8 @@ export interface MessageRendererDefinition extends RendererDefinitionBase<Messag
   readonly renderer: MessageRenderer
 }
 
-export type ContentRendererKind = 'ansi' | 'spinner' | 'content-part' | 'plan' | 'footer'
+/** 内置 kind 仍有约定，但第三方可通过 namespaced id 扩展。 */
+export type ContentRendererKind = string
 export type ContentRendererProvider =
   | AnsiProvider
   | SpinnerProvider

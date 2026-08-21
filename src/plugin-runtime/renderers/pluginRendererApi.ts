@@ -6,9 +6,12 @@ import type {
   ContentRendererDefinition,
   MessageRendererDefinition,
   ToolRendererDefinition,
+  RenderKindDefinition,
 } from './rendererTypes.ts'
 
 export interface RendererApi {
+  registerRenderKind(renderer: RenderKindDefinition): ReturnType<RendererRegistry['registerRenderKind']>
+  registerSolidRenderer(renderer: MessageRendererDefinition): ReturnType<RendererRegistry['registerSolidRenderer']>
   registerMessageRenderer(renderer: MessageRendererDefinition): ReturnType<RendererRegistry['registerMessageRenderer']>
   registerContentRenderer(renderer: ContentRendererDefinition): ReturnType<RendererRegistry['registerContentRenderer']>
   registerToolRenderer(renderer: ToolRendererDefinition): ReturnType<RendererRegistry['registerToolRenderer']>
@@ -32,6 +35,12 @@ export function createPluginRendererApi(
     }
   }
   return {
+    registerRenderKind: definition => register(() => transaction
+      ? transaction.registerRenderKind(definition)
+      : registry.registerRenderKind(identity, definition)),
+    registerSolidRenderer: definition => register(() => transaction
+      ? transaction.registerSolidRenderer(definition)
+      : registry.registerSolidRenderer(identity, definition)),
     registerMessageRenderer: definition => register(() => transaction
       ? transaction.registerMessageRenderer(definition)
       : registry.registerMessageRenderer(identity, definition)),

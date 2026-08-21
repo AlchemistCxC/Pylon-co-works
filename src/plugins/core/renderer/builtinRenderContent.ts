@@ -66,6 +66,17 @@ export function createBuiltinRendererContentPluginDefinitions(): BuiltinPluginDe
   const content = definitions.map(definition => ({
     id: definition.id,
     activate: ({ renderer }) => {
+      renderer.registerRenderKind({
+        id: `content.${definition.kind}`,
+        aliases: [definition.kind],
+        category: 'content',
+        fallbackKind: 'content.unknown',
+        priority: 1000,
+        fixture: {},
+        defaultTokens: {},
+        settingsSchemaVersion: 1,
+        validateInput: () => true,
+      })
       renderer.registerContentRenderer({
         id: `${definition.id}.provider`,
         kind: definition.kind,
