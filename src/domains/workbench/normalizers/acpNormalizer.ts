@@ -11,6 +11,7 @@ import {
   toJsonValue,
   wireKind,
 } from './normalizerSupport.ts'
+import { resolveToolSemantic } from '../../tool/toolRegistry.ts'
 import { resolveToolType } from '../../tool/toolResolution.ts'
 import type { WorkbenchSemanticEvent } from '../events/workbenchEventSchema.ts'
 
@@ -80,13 +81,17 @@ function semanticEventForUpdate(update: Record<string, unknown>, context: Normal
 
 function toolPayload(update: Record<string, unknown>, parts: readonly unknown[], context: NormalizeContext): Record<string, JsonValue> {
   const name = typeof update.title === 'string' ? update.title : typeof update.name === 'string' ? update.name : 'unknown'
-  const resolution = resolveToolType(name, typeof update.kind === 'string' ? update.kind : undefined, { provider: context.provider })
+  const semantic = resolveToolSemantic(context.provider, name, context.toolGeneration)
+  const resolution = resolveToolType(name, typeof update.kind === 'string' ? update.kind : undefined, {
+    provider: context.provider,
+    generation: context.toolGeneration,
+  })
   const meta = isRecord(update._meta) ? update._meta : undefined
   const claudeMeta = isRecord(meta?.claudeCode) ? meta.claudeCode : undefined
   return {
     toolCallId: toJsonValue(identityFromUpdate(update).toolCallId ?? ''),
     name: name,
-    canonicalName: resolution.canonicalName,
+    canonicalName: semantic?.name ?? resolution.canonicalName,
     kind: resolution.kind,
     action: resolution.action,
     provider: resolution.provider,

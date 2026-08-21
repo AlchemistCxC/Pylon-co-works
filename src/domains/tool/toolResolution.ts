@@ -1,4 +1,4 @@
-import { listToolRegistryEntries, providersForTool, resolveToolRegistryEntry } from './toolRegistry.ts'
+import { listToolRegistryEntries, providersForTool, resolveToolSemantic } from './toolRegistry.ts'
 import { TOOL_KINDS, type ToolAction, type ToolKind, type ToolProvider, type ToolResolution } from './toolKinds.ts'
 
 const ACTION_ALIASES: Array<[RegExp, ToolKind, ToolAction]> = [
@@ -92,18 +92,18 @@ export function splitToolTitle(rawName: string): { name: string; summary: string
 export function resolveToolType(
   name: string,
   wireKind?: string,
-  context?: { provider?: string },
+  context?: { provider?: string; generation?: number },
 ): ToolResolution {
   const rawName = name || 'unknown'
   let provider = (context?.provider ?? providerForName(rawName)) as ToolProvider
 
-  let entry: ReturnType<typeof resolveToolRegistryEntry> = null
+  let entry: ReturnType<typeof resolveToolSemantic> = null
   let embeddedSummary: string | undefined
 
   if (provider === 'mcp') {
-    entry = resolveToolRegistryEntry(provider, dictionaryKey(rawName))
+    entry = resolveToolSemantic(provider, dictionaryKey(rawName), context?.generation)
   } else {
-    if (provider !== 'unknown') entry = resolveToolRegistryEntry(provider, rawName)
+    if (provider !== 'unknown') entry = resolveToolSemantic(provider, rawName, context?.generation)
     if (!entry) {
       const normalizedRaw = dictionaryKey(rawName)
       const candidates = provider !== 'unknown' ? listToolRegistryEntries(provider) : listToolRegistryEntries()

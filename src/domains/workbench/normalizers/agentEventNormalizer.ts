@@ -31,6 +31,8 @@ export interface NormalizeContext {
   readonly observe?: boolean
   readonly provenance: WorkbenchEventProvenance
   readonly seenEventKeys?: Set<string>
+  /** 工具语义解析使用的 registry generation；缺省读取当前 generation。 */
+  readonly toolGeneration?: number
 }
 
 export interface NormalizeDiagnostic {

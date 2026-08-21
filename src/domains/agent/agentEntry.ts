@@ -16,4 +16,7 @@ export interface AgentEntry {
   crashed?: boolean
   cwd?: string
   configActivationState?: 'stored' | 'pendingRestart' | 'activated'
+  /** Agent Instance YAML 的工具 overlay；不改变 provider catalog baseline。 */
+  toolOverlay?: unknown
+  tools?: unknown
 }

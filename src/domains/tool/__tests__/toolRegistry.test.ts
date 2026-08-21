@@ -1,7 +1,12 @@
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import {
   clearToolRegistryForTests,
+  applyToolRegistryOverlay,
+  getEffectiveToolDictionary,
+  getToolDictionaryGeneration,
   listToolRegistryEntries,
+  removeToolRegistryOverlay,
+  resolveToolSemantic,
   registerToolDictionary,
   registerToolRegistryEntry,
   resolveToolRegistryEntry,
@@ -53,5 +58,60 @@ describe('provider-scoped tool registry', () => {
       outputLabel: 'lines',
     })
     expect(resolveToolRegistryEntry('hermes', 'read_file')).toMatchObject({ provider: 'hermes', kind: 'read' })
+  })
+
+  it('局部字典 overlay 不删除 provider 的基线工具', () => {
+    const before = getEffectiveToolDictionary()
+    expect(resolveToolRegistryEntry('peri', 'Write')).toMatchObject({ kind: 'edit', action: 'write' })
+
+    registerToolDictionary({
+      peri: [{ name: 'Read', kind: 'read', action: 'read' }],
+    })
+
+    expect(resolveToolRegistryEntry('peri', 'Read')).toMatchObject({ kind: 'read', action: 'read' })
+    expect(resolveToolRegistryEntry('peri', 'Write')).toMatchObject({ kind: 'edit', action: 'write' })
+    expect(getEffectiveToolDictionary().revision).toBe(before.revision + 1)
+  })
+
+  it('overlay 校验失败保持旧 snapshot 与 generation', () => {
+    const before = getEffectiveToolDictionary()
+    expect(() => applyToolRegistryOverlay('test', 'bad-kind', {
+      upsert: [{ provider: 'peri', name: 'Read', kind: 'bad', action: 'read' }],
+    })).toThrow(/非法 kind/)
+    expect(getEffectiveToolDictionary()).toEqual(before)
+    expect(resolveToolRegistryEntry('peri', 'Write')).toMatchObject({ action: 'write' })
+  })
+
+  it('owner/scope overlay 可独立卸载并重新计算', () => {
+    applyToolRegistryOverlay('agent', 'one', { upsert: [{ provider: 'peri', name: 'CustomOne', kind: 'read', action: 'read' }] })
+    applyToolRegistryOverlay('agent', 'two', { upsert: [{ provider: 'peri', name: 'CustomTwo', kind: 'edit', action: 'edit' }] })
+    expect(resolveToolRegistryEntry('peri', 'CustomOne')).not.toBeNull()
+    expect(resolveToolRegistryEntry('peri', 'CustomTwo')).not.toBeNull()
+    removeToolRegistryOverlay('agent', 'one')
+    expect(resolveToolRegistryEntry('peri', 'CustomOne')).toBeNull()
+    expect(resolveToolRegistryEntry('peri', 'CustomTwo')).not.toBeNull()
+  })
+
+  it('generation seam 可读取旧的不可变语义快照', () => {
+    const generation = getToolDictionaryGeneration()
+    applyToolRegistryOverlay('test', 'generation', { upsert: [{ provider: 'peri', name: 'Read', kind: 'execute', action: 'execute' }] })
+    expect(resolveToolSemantic('peri', 'Read', generation)).toMatchObject({ kind: 'read', action: 'read' })
+    expect(resolveToolSemantic('peri', 'Read')).toMatchObject({ kind: 'execute', action: 'execute' })
+  })
+
+  it('remove 与 alias 更新在单次发布后生效，并拒绝未知目标与循环', () => {
+    const before = getEffectiveToolDictionary()
+    expect(() => applyToolRegistryOverlay('test', 'bad-alias', { aliases: { peri: { missing: 'NoSuchTool' } } })).toThrow(/alias target 未知/)
+    expect(getEffectiveToolDictionary()).toEqual(before)
+    applyToolRegistryOverlay('test', 'aliases', {
+      upsert: [{ provider: 'peri', name: 'AliasTarget', kind: 'read', action: 'read' }],
+      aliases: { peri: { Alias: 'AliasTarget' } },
+    })
+    expect(resolveToolRegistryEntry('peri', 'Alias')).toMatchObject({ name: 'AliasTarget' })
+    applyToolRegistryOverlay('test', 'remove', { remove: ['peri/AliasTarget'] })
+    expect(resolveToolRegistryEntry('peri', 'AliasTarget')).toBeNull()
+    expect(() => applyToolRegistryOverlay('test', 'cycle', {
+      aliases: { peri: { one: 'two', two: 'one' } },
+    })).toThrow(/alias target 未知|alias 循环/)
   })
 })

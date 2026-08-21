@@ -1,8 +1,6 @@
 import {
-  BUILTIN_TOOL_REGISTRY,
-  registerToolDictionary,
-  registerToolRegistryEntries,
-  unregisterToolRegistryProvider,
+  applyToolRegistryOverlay,
+  removeToolRegistryOverlay,
 } from '../../domains/tool/toolRegistry.ts'
 import { createBuiltinCommandDefinitions } from '../core/commandSet/builtinCommandExecutors.ts'
 import type { BuiltinPluginDefinition } from '../../plugin-runtime/pluginRuntime.ts'
@@ -13,47 +11,25 @@ import {
   type ToolDictionarySink,
 } from '../../app/ports/productContributionPorts.ts'
 
-const BUILTIN_TOOL_PROVIDERS = Object.freeze([
-  ...new Set(BUILTIN_TOOL_REGISTRY.map(entry => entry.provider)),
-])
 let latestDictionary: unknown
-let latestDictionaryProviders: readonly string[] = Object.freeze([])
 let active = false
-
-function dictionaryProviders(dictionary: unknown): readonly string[] {
-  if (!dictionary || typeof dictionary !== 'object' || Array.isArray(dictionary)) return Object.freeze([])
-  return Object.freeze(Object.keys(dictionary as Record<string, unknown>).filter(provider => provider.trim()))
-}
-
-function registerEffectiveDictionary(): void {
-  registerToolRegistryEntries(BUILTIN_TOOL_REGISTRY)
-  if (latestDictionary !== undefined) registerToolDictionary(latestDictionary)
-}
-
-function clearEffectiveDictionary(): void {
-  for (const provider of new Set([...BUILTIN_TOOL_PROVIDERS, ...latestDictionaryProviders])) {
-    unregisterToolRegistryProvider(provider)
-  }
-}
 
 const bindToolDictionary = createSharedLogicalActivation(
   () => {
     active = true
-    registerEffectiveDictionary()
+    if (latestDictionary !== undefined) applyToolRegistryOverlay(BUILTIN_PYLON_TOOLS_ID, 'runtime-discovery', latestDictionary)
   },
   () => {
     active = false
-    clearEffectiveDictionary()
+    removeToolRegistryOverlay(BUILTIN_PYLON_TOOLS_ID, 'runtime-discovery')
   },
 )
 
 /** Backend-provided tool dictionaries update only the active logical tools plugin. */
 export function applyPylonToolDictionary(dictionary: unknown): void {
-  if (active) clearEffectiveDictionary()
   latestDictionary = dictionary
-  latestDictionaryProviders = dictionaryProviders(dictionary)
   if (!active) return
-  registerEffectiveDictionary()
+  applyToolRegistryOverlay(BUILTIN_PYLON_TOOLS_ID, 'runtime-discovery', dictionary)
 }
 
 export function createBuiltinPylonToolsPlugin(): BuiltinPluginDefinition {

@@ -9,11 +9,12 @@ import type {
 import { resolveActivity } from '../activity/activity.ts'
 import { normalizeInteractionRequest } from '../activity/interaction.ts'
 import { resolveToolType, type ToolResolution, type ToolProvider } from '../tool/toolPresentation.ts'
-import { clearToolRegistryForTests, registerToolRegistryEntries } from '../tool/toolRegistry.ts'
+import { applyToolRegistryOverlay, clearToolRegistryForTests, removeToolRegistryOverlay } from '../tool/toolRegistry.ts'
 
 const descriptors = new Map<AgentProviderId, AgentDescriptor>()
 const instances = new Map<AgentInstanceId, AgentInstanceDescriptor>()
 const adapters = new Map<string, InteractionAdapterContract>()
+const instanceToolScopes = new Set<string>()
 
 function normalizeProvider(value: string): string {
   return value.trim().toLowerCase()
@@ -28,13 +29,17 @@ export function registerAgentDescriptor(
   const normalized = { ...descriptor, provider }
   descriptors.set(provider, normalized)
   if (options.registerTools !== false) {
-    registerToolRegistryEntries(normalized.tools.map(tool => ({
-      provider,
-      name: tool.name,
-      aliases: tool.aliases,
-      kind: tool.kind,
-      action: tool.action,
-    })))
+    applyToolRegistryOverlay('agent-descriptor', provider, {
+      upsert: normalized.tools.map(tool => ({
+        provider,
+        name: tool.name,
+        aliases: tool.aliases,
+        kind: tool.kind,
+        action: tool.action,
+      })),
+    })
+  } else {
+    removeToolRegistryOverlay('agent-descriptor', provider)
   }
   for (const [agentId, instance] of instances) {
     if (instance.provider !== provider) continue
@@ -54,6 +59,7 @@ export function listAgentDescriptors(): AgentDescriptor[] {
 export function unregisterAgentDescriptorProvider(provider: AgentProviderId): void {
   const normalized = normalizeProvider(provider)
   descriptors.delete(normalized)
+  removeToolRegistryOverlay('agent-descriptor', normalized)
   for (const [agentId, instance] of instances) {
     if (instance.provider === normalized) instances.delete(agentId)
   }
@@ -63,6 +69,8 @@ export function unregisterAgentDescriptorProvider(provider: AgentProviderId): vo
 }
 
 export function replaceAgentInstances(entries: readonly AgentEntry[]): AgentInstanceDescriptor[] {
+  for (const scope of instanceToolScopes) removeToolRegistryOverlay('agent-instance', scope)
+  instanceToolScopes.clear()
   const next = new Map<AgentInstanceId, AgentInstanceDescriptor>()
   for (const entry of entries) {
     const agentId = entry.id.trim()
@@ -77,6 +85,14 @@ export function replaceAgentInstances(entries: readonly AgentEntry[]): AgentInst
         issue: 'invalid-instance',
       })
       continue
+    }
+    const toolOverlay = entry.toolOverlay ?? entry.tools
+    if (toolOverlay !== undefined) {
+      const overlay = Array.isArray(toolOverlay)
+        ? { upsert: toolOverlay.map(item => ({ ...(item as Record<string, unknown>), provider: (item as Record<string, unknown>).provider ?? provider })) }
+        : toolOverlay
+      applyToolRegistryOverlay('agent-instance', agentId, overlay)
+      instanceToolScopes.add(agentId)
     }
     const descriptor = getAgentDescriptor(provider)
     next.set(agentId, {
@@ -171,5 +187,7 @@ export function clearAgentRegistriesForTests(): void {
   descriptors.clear()
   instances.clear()
   adapters.clear()
+  for (const scope of instanceToolScopes) removeToolRegistryOverlay('agent-instance', scope)
+  instanceToolScopes.clear()
   clearToolRegistryForTests()
 }
