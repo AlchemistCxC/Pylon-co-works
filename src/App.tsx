@@ -367,6 +367,7 @@ export default function App() {
         onReopenSheet={() => useWorkspaceStore.getState().reopenSheet()}
         onToggleRightPanel={() => { if (rightPanelEnabled) useWorkspaceStore.getState().setRightPanelCollapsed(!useWorkspaceStore.getState().rightPanelCollapsed) }}
         onToggleSettings={() => setShowSettings(value => !value)}
+        settingsOpen={settingsOpen}
         interfaceMode={interfaceMode}
         chromeStyle={interfaceModeContribution.chromeStyle}
         quickSwitchLabel={quickInterfaceMode?.label}

@@ -6,7 +6,7 @@
 .ps-btn.danger { color:var(--tool-err,var(--danger)); border-color:color-mix(in srgb,var(--tool-err,var(--danger)) 45%,transparent); }
 
 .settings {
-  position:fixed; inset:0; z-index:50;
+  position:fixed; top:var(--titlebar-h, 44px); left:0; right:0; bottom:0; z-index:50;
   background:var(--surface-overlay); backdrop-filter:blur(max(var(--glass-blur-md),var(--blur,16px))) saturate(1.06);
   display:flex; flex-direction:column; font-family:var(--font);
 }
@@ -521,7 +521,8 @@
 
 /* Modern GUI settings shell: a floating three-pane studio rather than a full-screen terminal panel. */
 .app[data-interface-mode="modern-gui"] .settings {
-  inset:12px; overflow:hidden; border:1px solid color-mix(in srgb,var(--accent) 20%,var(--border)); border-radius:22px;
+  top:var(--titlebar-h, 58px); left:8px; right:8px; bottom:8px; overflow:hidden;
+  border:1px solid color-mix(in srgb,var(--accent) 20%,var(--border)); border-radius:18px;
   background:color-mix(in srgb,var(--surface-overlay) 92%,transparent); box-shadow:0 34px 100px rgba(0,0,0,.3);
 }
 .app[data-interface-mode="modern-gui"] .settings-header {
@@ -549,6 +550,6 @@
 .app[data-interface-mode="modern-gui"] .settings-preview-pane { border:1px solid var(--border); border-radius:16px; background:color-mix(in srgb,var(--surface-panel) 66%,transparent); }
 .app[data-interface-mode="modern-gui"] .set-preview-frame { border-radius:14px; }
 @media (max-width:900px) {
-  .app[data-interface-mode="modern-gui"] .settings { inset:6px; }
+  .app[data-interface-mode="modern-gui"] .settings { top:var(--titlebar-h, 58px); left:6px; right:6px; bottom:6px; }
   .app[data-interface-mode="modern-gui"] .settings-tabs-root { gap:6px; padding:6px; }
 }
