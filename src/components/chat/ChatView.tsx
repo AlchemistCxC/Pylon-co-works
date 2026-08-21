@@ -40,7 +40,12 @@ import {
   subscribeMessageRenderers,
 } from '../../host/messageRendererResolver.ts'
 import type { MessageRenderContext, MessageRendererInput } from '../../plugin-runtime/renderers/rendererTypes.ts'
-import type { RenderSurface } from '../../contracts/messageRenderer.ts'
+import type {
+  RenderAppearanceSnapshot,
+  RenderCommandPort,
+  RenderNodeSnapshot,
+  RenderSurface,
+} from '../../contracts/messageRenderer.ts'
 import { usePresentationPreferenceStore } from '../../domains/presentation/presentationPreferenceStore.ts'
 import CollapsibleRegion from './CollapsibleRegion.tsx'
 import { useShallow } from 'zustand/react/shallow'
@@ -275,15 +280,21 @@ type MessageRowProps = {
   isStatic?: boolean
 }
 
+const MESSAGE_RENDER_COMMANDS: RenderCommandPort = Object.freeze({
+  execute: () => undefined,
+})
+
 export function MessageRendererHost(props: MessageRowProps & {
   rendererContext?: MessageRenderContext
   rendererRevision: number
   rendererId?: string
   rendererAppearance?: unknown
+  rendererCommands?: RenderCommandPort
 }) {
-  const { rendererContext, rendererRevision, rendererId, rendererAppearance, ...rowProps } = props
+  const { rendererContext, rendererRevision, rendererId, rendererAppearance, rendererCommands, ...rowProps } = props
   const containerRef = useRef<HTMLDivElement>(null)
   const mountedRef = useRef<{ surface: RenderSurface; handle: unknown; unsubscribeError: () => void } | null>(null)
+  const nodeRevisionRef = useRef(0)
   const [failedContributionId, setFailedContributionId] = useState<string | null>(null)
 
   const input = useMemo<MessageRendererInput>(() => ({
@@ -298,15 +309,31 @@ export function MessageRendererHost(props: MessageRowProps & {
     : resolveMessageRendererEntry(input)
   const selectedId = selected?.contributionId
 
-  const mountPayload = useMemo(() => ({
-    component: MessageRow,
-    componentProps: rowProps,
-    messageProps: rowProps,
-    appearance: rendererAppearance,
-    input,
-  }), [rowProps, rendererAppearance, input])
-  const latestMountRef = useRef({ input, mountPayload, rowProps })
-  latestMountRef.current = { input, mountPayload, rowProps }
+  const appearance = useMemo<RenderAppearanceSnapshot>(() => {
+    const value = rendererAppearance && typeof rendererAppearance === 'object'
+      ? rendererAppearance as Record<string, unknown>
+      : {}
+    return Object.isFrozen(value) ? value : Object.freeze({ ...value })
+  }, [rendererAppearance])
+  const semanticPayload = useMemo(() => Object.freeze({
+    renderMessage: rowProps.renderMessage,
+    reduceMotion: rowProps.reduceMotion,
+    toolVisualState: rowProps.toolVisualState,
+    rowRef: rowProps.rowRef,
+    highlighted: rowProps.highlighted,
+    isStatic: rowProps.isStatic,
+  }), [
+    rowProps.renderMessage, rowProps.reduceMotion, rowProps.toolVisualState,
+    rowProps.rowRef, rowProps.highlighted, rowProps.isStatic,
+  ])
+  const semanticSnapshot = useMemo<RenderNodeSnapshot>(() => Object.freeze({
+    nodeId: rowProps.renderMessage.message.id,
+    kind: `message.${rowProps.renderMessage.message.role}`,
+    revision: ++nodeRevisionRef.current,
+    payload: semanticPayload,
+  }), [rowProps.renderMessage.message.id, rowProps.renderMessage.message.role, semanticPayload])
+  const latestMountRef = useRef({ input, semanticSnapshot, appearance, rowProps })
+  latestMountRef.current = { input, semanticSnapshot, appearance, rowProps }
 
   useLayoutEffect(() => {
     const container = containerRef.current
@@ -325,7 +352,7 @@ export function MessageRendererHost(props: MessageRowProps & {
         }
         setFailedContributionId(current => current ?? selected.contributionId)
       })
-      handle = surface.mount(container, initial.mountPayload)
+      handle = surface.mount(container, initial.semanticSnapshot, initial.appearance, rendererCommands ?? MESSAGE_RENDER_COMMANDS)
       mountedRef.current = { surface, handle, unsubscribeError }
     } catch (error) {
       unsubscribeError()
@@ -344,19 +371,19 @@ export function MessageRendererHost(props: MessageRowProps & {
         if (selected.value.onError?.(error, initial.input) === 'rethrow') throw error
       }
     }
-  }, [selected, selectedId]) // mount 只随 renderer identity 变化；props 由下方 update 推送
+  }, [selected, selectedId, rendererCommands]) // mount 只随 renderer identity/command port 变化；snapshot 由下方 update 推送
 
   useEffect(() => {
     const mounted = mountedRef.current
     if (!mounted) return
     try {
-      mounted.surface.update(mounted.handle, mountPayload)
+      mounted.surface.update(mounted.handle, semanticSnapshot, appearance)
     } catch (error) {
       const decision = selected?.value.onError?.(error, input) ?? 'fallback'
       if (decision === 'rethrow') throw error
       if (selected) setFailedContributionId(selected.contributionId)
     }
-  }, [mountPayload, input, selected])
+  }, [semanticSnapshot, appearance, input, selected])
 
   useEffect(() => {
     setFailedContributionId(null)

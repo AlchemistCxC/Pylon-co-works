@@ -124,4 +124,47 @@ describe('ChatView message renderer consumption', () => {
     expect(await screen.findByText('solid semantic message')).toBeVisible()
     expect(container.querySelector('[data-message-renderer="core.renderer.solid"]')).not.toBeNull()
   })
+
+  it('surface 接收分离的不可变 semantic snapshot、appearance 与 command port', async () => {
+    const seen: unknown[][] = []
+    const surface: RenderSurface = {
+      rendererId: 'test.renderer.semantic', kind: 'unknown',
+      mount(container, ...args) {
+        seen.push(args)
+        container.textContent = 'semantic surface'
+        return container
+      },
+      update() {},
+      destroy() {},
+      on: () => () => {},
+    }
+    registration = getRendererRegistry().registerMessageRenderer(
+      createPluginIdentity('test.renderer.semantic', 'runtime-semantic'),
+      {
+        id: 'test.renderer.semantic.contribution', priority: 1, fallback: false,
+        canRender: () => true, renderer: {
+          rendererId: 'test.renderer.semantic', kind: 'unknown',
+          renderMessage: () => surface, renderTool: () => surface, renderReasoning: () => surface,
+        },
+      },
+    )
+    const renderMessage = {
+      type: 'assistant' as const,
+      message: { id: 'm-semantic', role: 'assistant' as const, sender: 'peri', content: 'semantic', time: '10:02' },
+    }
+    const appearance = Object.freeze({ reduceMotion: true })
+    render(<MessageRendererHost
+      renderMessage={renderMessage}
+      reduceMotion
+      rendererAppearance={appearance}
+      rendererRevision={getRendererRegistry().snapshot().revision}
+    />)
+    expect(await screen.findByText('semantic surface')).toBeVisible()
+    expect(seen[0]).toEqual([
+      expect.objectContaining({ nodeId: 'm-semantic', kind: 'message.assistant', payload: expect.objectContaining({ renderMessage }) }),
+      appearance,
+      expect.objectContaining({ execute: expect.any(Function) }),
+    ])
+    expect(Object.isFrozen(seen[0][0])).toBe(true)
+  })
 })

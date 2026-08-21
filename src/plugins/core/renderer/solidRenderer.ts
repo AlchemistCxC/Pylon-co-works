@@ -2,13 +2,14 @@
  * core.renderer.solid —— 内置 Solid 渲染器 facade。
  *
  * 与 reactRenderer 同理：组合根导入期不加载 solid-js/web，
- * mount/update 时动态 import，渲染宿主传入的 Solid 组件。
- * 主 shell（SolidWorkbenchApp）仍直接消费现有 Solid 组件，行为零变化。
+ * mount 时动态 import 并建立单个 Solid root；update 只推进 semantic signals。
  */
 import {
   type MessageRenderProps,
   type MessageRenderer,
   type ReasoningRenderProps,
+  type RenderAppearanceSnapshot,
+  type RenderNodeSnapshot,
   type RenderSurface,
   type ToolRenderProps,
 } from '../../../contracts/messageRenderer.ts'
@@ -22,63 +23,67 @@ interface SolidRenderHandle {
   destroyed: boolean
   ready: Promise<void>
   readyToRender?: boolean
-  pendingProps?: unknown
-  /** ready 后可用；宿主传入新 props 时重渲染。 */
-  renderProps?: (props: unknown) => void
+  pendingSnapshot?: RenderNodeSnapshot
+  pendingAppearance?: RenderAppearanceSnapshot
+  setState?: (value: { snapshot: RenderNodeSnapshot; appearance: RenderAppearanceSnapshot }) => void
   dispose?: () => void
 }
 
-interface SolidMessageMountPayload {
-  messageProps?: MessageRenderProps & { rowRef?: (node: HTMLDivElement | null) => void }
-  appearance?: unknown
-}
-
-function createSolidSurface(): RenderSurface {
+export function createSolidSurface(): RenderSurface {
   const errorListeners = new Set<(payload: unknown) => void>()
+  let destroyed = false
   const emitError = (error: unknown) => {
+    if (destroyed) return
     for (const listener of [...errorListeners]) listener(error)
   }
   return {
     rendererId: CORE_SOLID_RENDERER_PLUGIN_ID,
     kind: 'solid',
-    mount(container, props) {
+    mount(container, snapshot, appearance) {
       const handle: SolidRenderHandle = {
         container,
         destroyed: false,
         ready: Promise.resolve(),
-        pendingProps: props,
+        pendingSnapshot: snapshot,
+        pendingAppearance: appearance,
       }
       handle.ready = (async () => {
-        const [{ createComponent, render: renderSolid }, SolidMessageRendererRow] = await Promise.all([
+        const [{ createSignal }, { createComponent, render: renderSolid }, SolidMessageRendererRow] = await Promise.all([
+          import('solid-js'),
           import('solid-js/web'),
           loadSolidMessageRendererComponent(),
         ])
         if (handle.destroyed) return
-        handle.renderProps = nextProps => {
-          const { messageProps, appearance } = (nextProps ?? {}) as SolidMessageMountPayload
-          if (!messageProps?.renderMessage || !appearance) {
+        const [state, setState] = createSignal({
+          snapshot: handle.pendingSnapshot!,
+          appearance: handle.pendingAppearance!,
+        })
+        handle.setState = setState
+        const messageProps = () => state().snapshot.payload as MessageRenderProps & { rowRef?: (node: HTMLDivElement | null) => void }
+        if (!messageProps().renderMessage || !state().appearance) {
             throw new Error('Solid message renderer 需要语义 messageProps 与 appearance')
-          }
-          handle.dispose?.()
-          handle.dispose = renderSolid(
-            () => (createComponent as (component: unknown, props: unknown) => unknown)(SolidMessageRendererRow, {
-              ...messageProps,
-              appearance: appearance as never,
-            }) as never,
-            container,
-          )
         }
+        handle.dispose = renderSolid(
+          () => (createComponent as (component: unknown, props: unknown) => unknown)(SolidMessageRendererRow, {
+            get renderMessage() { return messageProps().renderMessage },
+            get highlighted() { return messageProps().highlighted },
+            get toolVisualState() { return messageProps().toolVisualState },
+            get rowRef() { return messageProps().rowRef },
+            get appearance() { return state().appearance as never },
+          }) as never,
+          container,
+        )
         handle.readyToRender = true
-        handle.renderProps(handle.pendingProps)
       })().catch(emitError)
       return handle
     },
-    update(handle, props) {
+    update(handle, snapshot, appearance) {
       const value = handle as SolidRenderHandle
-      value.pendingProps = props
+      value.pendingSnapshot = snapshot
+      value.pendingAppearance = appearance
       if (!value.destroyed && value.readyToRender) {
         try {
-          value.renderProps?.(props)
+          value.setState?.({ snapshot, appearance })
         } catch (error) {
           emitError(error)
         }
@@ -87,6 +92,8 @@ function createSolidSurface(): RenderSurface {
     destroy(handle) {
       const value = handle as SolidRenderHandle
       value.destroyed = true
+      destroyed = true
+      errorListeners.clear()
       void value.ready.then(() => {
         value.dispose?.()
         value.dispose = undefined

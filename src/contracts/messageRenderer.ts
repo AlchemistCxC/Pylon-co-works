@@ -17,6 +17,27 @@ export const MESSAGE_RENDERER_POINT = 'renderer.message'
 /** 渲染器实现技术栈。 */
 export type MessageRendererKind = 'react' | 'solid' | 'webcomponent' | 'unknown'
 
+export interface RenderNodeSnapshot {
+  readonly nodeId: string
+  readonly kind: string
+  readonly revision: number
+  readonly payload: unknown
+}
+
+export type RenderAppearanceSnapshot = Readonly<Record<string, unknown>>
+
+export interface RenderSemanticCommand {
+  readonly type: string
+  readonly targetId?: string
+  readonly payload?: unknown
+}
+
+export interface RenderCommandPort {
+  execute(command: RenderSemanticCommand): void | Promise<void>
+}
+
+export type RenderSurfaceEvent = 'error' | 'request-action'
+
 /**
  * 命令式渲染面：由 MessageRenderer.render* 返回。
  * mount 的 props 是实现层载荷；core facade 约定 `{ component, componentProps }`，
@@ -25,14 +46,14 @@ export type MessageRendererKind = 'react' | 'solid' | 'webcomponent' | 'unknown'
 export interface RenderSurface {
   readonly rendererId: string
   readonly kind: MessageRendererKind
-  /** 挂载到容器；返回不透明句柄（update/destroy 原样消费）。 */
-  mount(container: HTMLElement, props?: unknown): unknown
-  /** 用新 props 更新已挂载句柄。 */
-  update(handle: unknown, props?: unknown): void
+  /** 单次挂载；后续流式变化只允许经 update 推送 immutable snapshot。 */
+  mount(container: HTMLElement, snapshot: RenderNodeSnapshot, appearance: RenderAppearanceSnapshot, commands: RenderCommandPort): unknown
+  /** 同步 latest-wins 更新；不得 dispose/remount。 */
+  update(handle: unknown, snapshot: RenderNodeSnapshot, appearance: RenderAppearanceSnapshot): void
   /** 销毁句柄并清理容器。 */
   destroy(handle: unknown): void
   /** 订阅渲染器事件；返回取消订阅函数。 */
-  on(event: string, listener: (payload: unknown) => void): () => void
+  on(event: RenderSurfaceEvent, listener: (payload: unknown) => void): () => void
 }
 
 /** renderMessage 的语义 props（主壳 RenderMessage 形状见 components/chat/messageTypes.ts）。 */
@@ -81,6 +102,7 @@ export interface RendererMountProps {
 }
 
 /** 从 mount 载荷中解析组件与组件 props（core facade 内部工具）。 */
+/** @deprecated 仅供旧 adapter；核心 host 不再构造 component/componentProps。 */
 export function resolveRendererMountProps(props: unknown): RendererMountProps {
   const value = (props ?? {}) as RendererMountProps
   if (!value || typeof value !== 'object' || !('component' in value) || !value.component) {
