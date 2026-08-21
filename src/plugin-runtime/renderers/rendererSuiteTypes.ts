@@ -2,6 +2,7 @@ import type { RenderNodeSnapshot, RenderSurface } from '../../contracts/messageR
 import type { RegistryEntry } from '../registry/types.ts'
 import type { RendererSettingsSchema } from './rendererSettingsTypes.ts'
 import type { RenderKindDefinition } from './rendererTypes.ts'
+import type { WorkbenchRendererFactory as PreparedWorkbenchRendererFactory } from '../../renderers/solid-workbench/workbenchContracts.ts'
 
 export type RendererSuiteId = string
 
@@ -11,7 +12,7 @@ export interface WorkbenchRendererFactoryInput {
 }
 
 /** A factory owns a complete Workbench implementation; it never receives raw stores. */
-export type WorkbenchRendererFactory = (input: WorkbenchRendererFactoryInput) => unknown
+export type WorkbenchRendererFactory = ((input: WorkbenchRendererFactoryInput) => unknown) | PreparedWorkbenchRendererFactory
 
 export interface RendererSuiteContribution {
   readonly id: RendererSuiteId

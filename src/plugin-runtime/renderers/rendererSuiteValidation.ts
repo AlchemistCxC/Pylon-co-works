@@ -72,7 +72,7 @@ export function validateRendererSuiteContribution(
     if (!allowMissingFallback && !suites.some(entry => entry.value.id === suite.fallbackSuiteId)) fail(`Suite fallback 未注册：${suite.id} -> ${suite.fallbackSuiteId}`)
   }
   validateSettingsNamespace(suite.settings, 'suite', suite.id)
-  if (typeof suite.factory !== 'function') fail(`Suite factory 缺失：${suite.id}`)
+  if (typeof suite.factory !== 'function' && (!suite.factory || typeof suite.factory.prepare !== 'function')) fail(`Suite factory 缺失：${suite.id}`)
   return Object.freeze({
     ...suite,
     requiredKinds: Object.freeze([...suite.requiredKinds]),

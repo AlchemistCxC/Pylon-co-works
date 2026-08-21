@@ -1,0 +1,107 @@
+// @vitest-environment jsdom
+import { describe, expect, it, vi } from 'vitest'
+import type { RegistryEntry } from '../../../plugin-runtime/registry/types.ts'
+import type { WorkbenchHostPort, WorkbenchMountInput, WorkbenchRendererFactory, WorkbenchRendererInstance } from '../../../renderers/solid-workbench/workbenchContracts.ts'
+import type { RendererActivationSnapshot, RendererSuiteContribution } from '../../../plugin-runtime/renderers/rendererSuiteTypes.ts'
+import { RendererSuiteHost } from '../rendererSuiteHost.ts'
+
+const input: WorkbenchMountInput = {
+  sheetId: 'sheet-a', sessionOwnerKey: 'owner-a', sessionId: 'session-a', workspaceMode: 'work',
+  replayReadonly: false, reducedMotion: false, visibility: 'active', rightInset: 0, preview: true,
+}
+
+function fakeHost(): WorkbenchHostPort {
+  const denied = async () => ({ ok: false as const, error: { code: 'renderer_not_active', message: 'inactive', recoverability: 'fallback' as const } })
+  return {
+    document: { getSnapshot: () => undefined, subscribe: () => () => {}, getSlice: <T>() => undefined as T, subscribeSlice: () => () => {} },
+    appearance: { getSnapshot: () => ({}) as never, subscribe: () => () => {} },
+    sessionUi: { get: (_, fallback) => fallback, set: () => {}, update: (_, fallback, updater) => updater(fallback), subscribe: () => () => {}, clear: () => {} },
+    commands: new Proxy({} as WorkbenchHostPort['commands'], { get: () => denied }),
+    capabilities: { getSnapshot: () => ({}), has: () => true, subscribe: () => () => {} },
+    diagnostics: { report: () => {}, getRecent: () => [], subscribe: () => () => {} },
+  }
+}
+
+function activation(id: string, factory: WorkbenchRendererFactory): RendererActivationSnapshot {
+  const suite: RendererSuiteContribution = {
+    id, label: id, apiVersion: 1, runtime: { framework: 'solid', version: '1' },
+    compatibility: { documentSchema: 'workbench.v1', renderCatalogSchema: 1 }, requiredKinds: ['content.unknown'], factory,
+  }
+  const entry = { ownerPluginId: id, ownerRuntimeInstanceId: `${id}@runtime`, contributionId: id, layer: 'feature', priority: 1, value: suite } as RegistryEntry<RendererSuiteContribution>
+  return { revision: 1, suite: entry, kinds: new Map(), slots: new Map(), diagnostics: [] }
+}
+
+function factory(id: string, options: { delay?: number; fail?: boolean } = {}): WorkbenchRendererFactory {
+  return {
+    async prepare() {
+      if (options.fail) throw new Error(`${id} prepare failed`)
+      return {
+        mount(container: HTMLElement) {
+          const listeners = new Map<string, Set<(payload: unknown) => void>>()
+          let destroyed = false
+          const instance: WorkbenchRendererInstance = {
+            update: () => {}, pause: () => {}, resume: () => {},
+            destroy: vi.fn(() => { destroyed = true }),
+            on(event, listener) {
+              const group = listeners.get(event) ?? new Set()
+              group.add(listener); listeners.set(event, group)
+              return () => group.delete(listener)
+            },
+          }
+          const handle = document.createElement('div'); handle.textContent = id; container.append(handle)
+          ;(instance as WorkbenchRendererInstance & { __handle?: HTMLElement }).__handle = handle
+          setTimeout(() => {
+            if (!destroyed) for (const listener of listeners.get('ready') ?? []) listener({ id })
+          }, options.delay ?? 0)
+          return instance
+        },
+      }
+    },
+  }
+}
+
+describe('RendererSuiteHost', () => {
+  it('keeps old Suite visible until candidate ready, then swaps and destroys old', async () => {
+    const container = document.createElement('div')
+    const host = new RendererSuiteHost({ container, hostPort: fakeHost(), input })
+    await host.mount(activation('suite.a', factory('A')))
+    expect(container.textContent).toContain('A')
+    const switching = host.switchTo(activation('suite.b', factory('B', { delay: 10 })))
+    expect(container.textContent).toContain('A')
+    await switching
+    expect(container.textContent).toContain('B')
+    expect(container.textContent).not.toContain('A')
+    await host.destroy()
+  })
+
+  it('keeps old Suite and reports diagnostic when candidate fails', async () => {
+    const container = document.createElement('div')
+    const diagnostics: unknown[] = []
+    const port = fakeHost(); port.diagnostics.report = value => diagnostics.push(value)
+    const host = new RendererSuiteHost({ container, hostPort: port, input })
+    await host.mount(activation('suite.a', factory('A')))
+    await host.switchTo(activation('suite.b', factory('B', { fail: true })))
+    expect(container.textContent).toContain('A')
+    expect(diagnostics).toEqual([expect.objectContaining({ code: 'renderer.suite.switch.failed', phase: 'prepare' })])
+  })
+
+  it('only activates latest request and destroys stale candidate', async () => {
+    const container = document.createElement('div')
+    const host = new RendererSuiteHost({ container, hostPort: fakeHost(), input })
+    await host.mount(activation('suite.a', factory('A')))
+    const b = host.switchTo(activation('suite.b', factory('B', { delay: 20 })))
+    const c = host.switchTo(activation('suite.c', factory('C', { delay: 0 })))
+    await Promise.all([b, c])
+    expect(container.textContent).toContain('C')
+    expect(container.textContent).not.toContain('B')
+  })
+
+  it('cancels a candidate waiting for ready when host is destroyed', async () => {
+    const container = document.createElement('div')
+    const host = new RendererSuiteHost({ container, hostPort: fakeHost(), input })
+    const pending = host.switchTo(activation('suite.pending', factory('P', { delay: 10_000 })))
+    await host.destroy()
+    await pending
+    expect(host.getState().phase).toBe('destroyed')
+  })
+})
