@@ -108,6 +108,13 @@ export interface LifecycleEvent {
   readonly error?: JsonValue
   readonly strategy?: string
   readonly trigger?: string
+  /** C13：compact 前后 token 与 rewind 文件/消息预览（总纲 4.4 lifecycle 字段） */
+  readonly tokensBefore?: number
+  readonly tokensAfter?: number
+  readonly summary?: string
+  readonly importedEvents?: number
+  readonly files?: readonly JsonValue[]
+  readonly messages?: readonly JsonValue[]
   readonly source?: 'canonical' | 'agent-import'
   readonly reason?: string
 }
