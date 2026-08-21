@@ -37,3 +37,7 @@ examples/process-plugins/*/bin/*/echo
 
 # 本地 agent 配置（真实路径/密钥，不入库；模板见 agents.example.yaml）
 agents.yaml
+
+# codex binaries (local only)
+codex.exe
+codex-code-mode-host.exe

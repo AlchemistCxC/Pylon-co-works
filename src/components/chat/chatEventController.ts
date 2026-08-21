@@ -948,12 +948,29 @@ export function attachChatEventController(refs: ChatEventControllerRefs): ChatCo
       const value = /-(\d+)$/.exec(message.id)?.[1]
       return value ? Math.max(max, Number(value)) : max
     }, 0)
+    // The optimistic user row can race the first canonical read: the prompt IPC may not have
+    // reached the kernel yet, while the user already switched sessions. Keep that pending row in
+    // the projected transcript until a durable user.message row catches up.
+    let projectedMessages = messages.map(message => ({ ...message, running: false }))
+    for (const pending of existing.messages.filter(message => message.role === 'user' && message.clientMsgId)) {
+      if (projectedMessages.some(message => messagesRepresentSame(message, pending))) continue
+      const firstTranscriptIndex = projectedMessages.findIndex(message => message.role !== 'user')
+      const insertionIndex = firstTranscriptIndex < 0 ? projectedMessages.length : firstTranscriptIndex
+      projectedMessages = [
+        ...projectedMessages.slice(0, insertionIndex),
+        { ...pending, running: false },
+        ...projectedMessages.slice(insertionIndex),
+      ]
+    }
     runtimeState = {
       ...runtimeState,
       [key]: {
         ...existing,
-        messages: messages.map(message => ({ ...message, running: false })),
-        seq: Math.max(existing.seq, maxMessageSeq),
+        messages: projectedMessages,
+        seq: Math.max(existing.seq, projectedMessages.reduce((max, message) => {
+          const value = /-(\d+)$/.exec(message.id)?.[1]
+          return value ? Math.max(max, Number(value)) : max
+        }, maxMessageSeq)),
         replayToolIds: [],
         loadBaseMessageIds: undefined,
         loadBaseFromCache: false,
@@ -1376,8 +1393,17 @@ export function attachChatEventController(refs: ChatEventControllerRefs): ChatCo
       ) ?? false
       if (!alreadyOptimistic) {
         const optimisticContext = resolveContext(source)
-        if (optimisticContext && !IS_TAURI) {
-          persistCanonicalEvent(optimisticContext, { source, update: { sessionUpdate: 'user_message_chunk', content: { text: content } } })
+        // The optimistic row is durable even in Tauri.  The kernel may commit its own user echo
+        // later; projection removes the temporary marker when that canonical row arrives.
+        if (optimisticContext) {
+          persistCanonicalEvent(optimisticContext, {
+            source,
+            update: {
+              sessionUpdate: 'user_message_chunk',
+              content: { text: content },
+              _meta: { pylonOptimisticUser: true, requestId: clientMsgId },
+            },
+          })
         }
       }
       dispatch({ type: 'optimistic-user', source, content, clientMsgId })

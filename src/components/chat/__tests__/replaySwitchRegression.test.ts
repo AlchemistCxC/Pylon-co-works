@@ -283,6 +283,36 @@ describe('会话重放修复回归', () => {
     handle.dispose()
   })
 
+  it('关闭/切换竞态：canonical 首屏暂缺用户行时保留 pending optimistic user', async () => {
+    const A = 'local:session-a', B = 'local:session-b'
+    useIdentityStore.setState({ sessions: [makeSession('sa', A), makeSession('sb', B)] })
+    const refs = makeRefs()
+    refs.sessionRef.current = A
+    refs.messageOwnerRef.current = 'sa'
+    const handle = attachChatEventController(refs)
+    await waitListeners()
+
+    handle.initSource(A, [])
+    handle.sendOptimisticUser(A, '尚未提交的问题', 'client-msg-1')
+
+    // 模拟切到 B 再切回 A：canonical 首屏已经有 Agent 行，但 user 行尚未完成 kernel ingest。
+    refs.sessionRef.current = B
+    refs.messageOwnerRef.current = 'sb'
+    handle.initSource(B, [])
+    refs.sessionRef.current = A
+    refs.messageOwnerRef.current = 'sa'
+    const canonicalBase: Message[] = [
+      { id: 'msg-2', role: 'assistant', sender: 'peri', content: '回复', time: 't', running: false },
+    ]
+    handle.initSource(A, canonicalBase, false, true)
+    const generation = handle.beginLoadLock(A)
+    const resolved = handle.commitCanonicalProjection(A, generation, canonicalBase, 1)
+    handle.finishLoadLock(A, generation)
+
+    expect(resolved.map(message => message.content)).toEqual(['尚未提交的问题', '回复'])
+    handle.dispose()
+  })
+
   it('canonical 读取为空时 loadBaseFromCanonical 不生效，replay 仍为权威', async () => {
     const A = 'local:session-a'
     useIdentityStore.setState({ sessions: [makeSession('sa', A)] })

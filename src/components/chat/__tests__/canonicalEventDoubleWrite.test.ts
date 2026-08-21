@@ -277,6 +277,8 @@ describe('canonical 双写（A1-c P2）', () => {
     handle.sendOptimisticUser(source, '乐观', 'cid-1')
     expect(sink.offers).toHaveLength(1)
     expect((sink.offers[0].raw as { update?: { sessionUpdate?: string } }).update?.sessionUpdate).toBe('user_message_chunk')
+    expect((sink.offers[0].raw as { update?: { _meta?: { pylonOptimisticUser?: boolean; requestId?: string } } }).update?._meta)
+      .toEqual({ pylonOptimisticUser: true, requestId: 'cid-1' })
     handle.dispose()
   })
 

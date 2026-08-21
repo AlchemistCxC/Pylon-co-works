@@ -299,6 +299,27 @@ describe('projectMessagesFromCanonical', () => {
     ])
   })
 
+  it('关闭前落盘的 optimistic user 在 kernel echo 到达后不产生重复消息', () => {
+    const optimisticRaw = {
+      source: 'local:s1',
+      update: {
+        sessionUpdate: 'user_message_chunk',
+        content: { text: '问题' },
+        _meta: { pylonOptimisticUser: true, requestId: 'client-msg-1' },
+      },
+    }
+    const messages = projectMessagesFromCanonical([
+      event({ sequence: 1, eventType: 'user.message', text: '问题', rawPayload: optimisticRaw }),
+      event({ sequence: 2, eventType: 'assistant.text.delta', text: '回复' }),
+      // Kernel echo is committed later, after the first assistant chunk.
+      event({ sequence: 3, eventType: 'user.message', text: '问题' }),
+    ])
+    expect(messages.map(message => [message.role, message.content])).toEqual([
+      ['user', '问题'],
+      ['assistant', '回复'],
+    ])
+  })
+
   it('canonical recovery user row uses its durable replay anchor without reading snapshot content', () => {
     const recoveredUserRaw = {
       source: 'local:s1',

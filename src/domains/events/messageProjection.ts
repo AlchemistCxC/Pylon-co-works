@@ -130,6 +130,40 @@ function canonicalRecoveryAnchor(event: CanonicalConversationEvent): CanonicalCo
   }).event
 }
 
+function isOptimisticUserEvent(event: CanonicalConversationEvent): boolean {
+  if (event.eventType !== 'user.message' || !event.rawPayload || typeof event.rawPayload !== 'object') return false
+  const root = event.rawPayload as { update?: unknown; params?: { update?: unknown } }
+  const update = root.update ?? root.params?.update
+  if (!update || typeof update !== 'object') return false
+  const meta = (update as { _meta?: unknown })._meta
+  return Boolean(meta && typeof meta === 'object' && (meta as { pylonOptimisticUser?: unknown }).pylonOptimisticUser === true)
+}
+
+function userProjectionKey(event: CanonicalConversationEvent): string | undefined {
+  if (event.eventType !== 'user.message') return undefined
+  const text = (event.typedPayload as { text?: unknown } | undefined)?.text
+  return typeof text === 'string' ? text : undefined
+}
+
+/** Keep the optimistic row's original position and hide the later kernel echo. */
+function reconcileOptimisticUsers(events: readonly CanonicalConversationEvent[]): CanonicalConversationEvent[] {
+  const optimisticCounts = new Map<string, number>()
+  for (const event of events) {
+    if (!isOptimisticUserEvent(event)) continue
+    const key = userProjectionKey(event)
+    if (key !== undefined) optimisticCounts.set(key, (optimisticCounts.get(key) ?? 0) + 1)
+  }
+  return events.filter(event => {
+    if (isOptimisticUserEvent(event)) return true
+    const key = userProjectionKey(event)
+    if (key === undefined) return true
+    const count = optimisticCounts.get(key) ?? 0
+    if (count <= 0) return true
+    optimisticCounts.set(key, count - 1)
+    return false
+  })
+}
+
 /**
  * Resolve the single append-only journal into one effective projection stream.
  *
@@ -144,7 +178,7 @@ export function effectiveCanonicalProjectionEvents(
   events: readonly CanonicalConversationEvent[],
 ): CanonicalConversationEvent[] {
   const sorted = [...events].sort((left, right) => left.sequence - right.sequence)
-  const live = sorted.filter(event => event.eventType !== 'history.snapshot')
+  const live = reconcileOptimisticUsers(sorted.filter(event => event.eventType !== 'history.snapshot'))
   const recoveredEvents = live
     .filter(event => canonicalRecoveryMetadata(event))
     .sort((left, right) => {
