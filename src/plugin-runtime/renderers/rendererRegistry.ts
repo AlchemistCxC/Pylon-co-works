@@ -17,14 +17,21 @@ import type {
 } from './rendererTypes.ts'
 import { notifyRegistryListener } from '../registry/registryBatch.ts'
 import { normalizeRendererSettingsSchema } from './rendererSettingsTypes.ts'
+import type { RendererSlotContribution, RendererSuiteContribution } from './rendererSuiteTypes.ts'
+import { validateRenderKindSettingsNamespace, validateRendererContributionGraph, validateRendererSlotContribution, validateRendererSuiteContribution } from './rendererSuiteValidation.ts'
+export type { RendererActivationSnapshot, RendererDiagnostic, RendererSlotContribution, RendererSuiteContribution } from './rendererSuiteTypes.ts'
 
 export interface RendererRegistryTransaction {
   registerRenderKind(definition: RenderKindDefinition): AsyncDisposable
+  registerSuite(definition: RendererSuiteContribution): AsyncDisposable
+  registerSlot(definition: RendererSlotContribution): AsyncDisposable
   registerSolidRenderer(definition: MessageRendererDefinition): AsyncDisposable
   registerMessageRenderer(definition: MessageRendererDefinition): AsyncDisposable
   registerContentRenderer(definition: ContentRendererDefinition): AsyncDisposable
   registerToolRenderer(definition: ToolRendererDefinition): AsyncDisposable
   registerCodeHighlighter(definition: CodeHighlighterDefinition): AsyncDisposable
+  /** Immutable candidate view; never published and never persisted. */
+  preview(): RendererRegistrySnapshot
   validate(): void
   commit(): void
   rollback(): void
@@ -34,10 +41,18 @@ export interface RendererRegistryTransaction {
 export interface RendererRegistrySnapshot {
   readonly revision: number
   readonly renderKinds: readonly RegistryEntry<RenderKindDefinition>[]
+  /** @deprecated compatibility adapters; new consumers resolve Suite/Slot. */
   readonly messageRenderers: readonly RegistryEntry<MessageRendererDefinition>[]
+  /** @deprecated compatibility adapters; new consumers resolve Suite/Slot. */
   readonly contentRenderers: readonly RegistryEntry<ContentRendererDefinition>[]
+  /** @deprecated compatibility adapters; new consumers resolve Suite/Slot. */
   readonly toolRenderers: readonly RegistryEntry<ToolRendererDefinition>[]
+  /** @deprecated compatibility adapters; new consumers resolve Suite/Slot. */
   readonly codeHighlighters: readonly RegistryEntry<CodeHighlighterDefinition>[]
+  /** Atomic Suite contributions. */
+  readonly rendererSuites: readonly RegistryEntry<RendererSuiteContribution>[]
+  /** Suite-local Slot contributions. */
+  readonly rendererSlots: readonly RegistryEntry<RendererSlotContribution>[]
 }
 
 export interface ResolvedRenderer {
@@ -133,6 +148,8 @@ export class RendererRegistry {
   private readonly contents = new ReactiveRegistryStore<ContentRendererDefinition>()
   private readonly tools = new ReactiveRegistryStore<ToolRendererDefinition>()
   private readonly highlighters = new ReactiveRegistryStore<CodeHighlighterDefinition>()
+  private readonly suites = new ReactiveRegistryStore<RendererSuiteContribution>()
+  private readonly slots = new ReactiveRegistryStore<RendererSlotContribution>()
   private readonly listeners = new Set<() => void>()
   private revision = 0
   private batchDepth = 0
@@ -144,6 +161,8 @@ export class RendererRegistry {
     contentRenderers: Object.freeze([]),
     toolRenderers: Object.freeze([]),
     codeHighlighters: Object.freeze([]),
+    rendererSuites: Object.freeze([]),
+    rendererSlots: Object.freeze([]),
   })
 
   constructor() {
@@ -153,6 +172,8 @@ export class RendererRegistry {
     this.contents.subscribe(publish)
     this.tools.subscribe(publish)
     this.highlighters.subscribe(publish)
+    this.suites.subscribe(publish)
+    this.slots.subscribe(publish)
     const owner = createPluginIdentity('core.renderer.catalog', 'builtin')
     this.kinds.register(owner, Object.freeze({
       id: 'content.unknown', category: 'content', priority: 10000,
@@ -163,10 +184,31 @@ export class RendererRegistry {
 
   registerRenderKind(owner: PluginIdentity, definition: RenderKindDefinition): AsyncDisposable {
     validateRenderKind(definition, this.snapshotValue.renderKinds)
+    validateRenderKindSettingsNamespace(definition)
     return this.kinds.register(owner, freezeRenderKind(definition), {
       contributionId: definition.id,
       priority: definition.priority,
     })
+  }
+
+  registerSuite(owner: PluginIdentity, definition: RendererSuiteContribution): AsyncDisposable {
+    const normalized = validateRendererSuiteContribution(definition, this.snapshotValue.rendererSuites, this.snapshotValue.renderKinds)
+    validateRendererContributionGraph({
+      suites: [...this.snapshotValue.rendererSuites, { value: normalized } as RegistryEntry<RendererSuiteContribution>],
+      slots: this.snapshotValue.rendererSlots,
+      kinds: this.snapshotValue.renderKinds,
+    })
+    return this.suites.register(owner, normalized, { contributionId: normalized.id })
+  }
+
+  registerSlot(owner: PluginIdentity, definition: RendererSlotContribution): AsyncDisposable {
+    const normalized = validateRendererSlotContribution(definition, this.snapshotValue.rendererSuites, this.snapshotValue.renderKinds)
+    validateRendererContributionGraph({
+      suites: this.snapshotValue.rendererSuites,
+      slots: [...this.snapshotValue.rendererSlots, { value: normalized } as RegistryEntry<RendererSlotContribution>],
+      kinds: this.snapshotValue.renderKinds,
+    })
+    return this.slots.register(owner, normalized, { contributionId: normalized.id, priority: normalized.priority })
   }
 
   registerSolidRenderer(owner: PluginIdentity, definition: MessageRendererDefinition): AsyncDisposable {
@@ -216,16 +258,48 @@ export class RendererRegistry {
   ): RendererRegistryTransaction {
     const kinds = this.kinds.beginShadowTransaction(owner, replacingRuntimeInstanceId)
     const stagedKinds: RenderKindDefinition[] = []
+    const stagedSuites: RendererSuiteContribution[] = []
+    const stagedSlots: RendererSlotContribution[] = []
+    const suites = this.suites.beginShadowTransaction(owner, replacingRuntimeInstanceId)
+    const slots = this.slots.beginShadowTransaction(owner, replacingRuntimeInstanceId)
     const messages = this.messages.beginShadowTransaction(owner, replacingRuntimeInstanceId)
     const contents = this.contents.beginShadowTransaction(owner, replacingRuntimeInstanceId)
     const tools = this.tools.beginShadowTransaction(owner, replacingRuntimeInstanceId)
     const highlighters = this.highlighters.beginShadowTransaction(owner, replacingRuntimeInstanceId)
-    const transactions = [kinds, messages, contents, tools, highlighters] as const
+    const transactions = [kinds, suites, slots, messages, contents, tools, highlighters] as const
+    const candidateKinds = () => [
+      ...this.snapshotValue.renderKinds.filter(entry => entry.ownerRuntimeInstanceId !== replacingRuntimeInstanceId),
+      ...stagedKinds.map(value => ({ value } as RegistryEntry<RenderKindDefinition>)),
+    ]
+    const candidateSuites = () => [
+      ...this.snapshotValue.rendererSuites.filter(entry => entry.ownerRuntimeInstanceId !== replacingRuntimeInstanceId),
+      ...stagedSuites.map(value => ({ value } as RegistryEntry<RendererSuiteContribution>)),
+    ]
+    const candidateSlots = () => [
+      ...this.snapshotValue.rendererSlots.filter(entry => entry.ownerRuntimeInstanceId !== replacingRuntimeInstanceId),
+      ...stagedSlots.map(value => ({ value } as RegistryEntry<RendererSlotContribution>)),
+    ]
     return {
       registerRenderKind: definition => {
         validateRenderKind(definition, this.snapshotValue.renderKinds, true)
+        validateRenderKindSettingsNamespace(definition)
         stagedKinds.push(definition)
         return kinds.register(freezeRenderKind(definition), { contributionId: definition.id, priority: definition.priority })
+      },
+      registerSuite: definition => {
+        const normalized = validateRendererSuiteContribution(definition, this.snapshotValue.rendererSuites, [
+          ...this.snapshotValue.renderKinds,
+          ...stagedKinds.map(value => ({ value } as RegistryEntry<RenderKindDefinition>)),
+        ], true, true)
+        stagedSuites.push(normalized)
+        return suites.register(normalized, { contributionId: normalized.id })
+      },
+      registerSlot: definition => {
+        const normalized = validateRendererSlotContribution(definition,
+          [...this.snapshotValue.rendererSuites, ...stagedSuites.map(value => ({ value } as RegistryEntry<RendererSuiteContribution>))],
+          [...this.snapshotValue.renderKinds, ...stagedKinds.map(value => ({ value } as RegistryEntry<RenderKindDefinition>))], true)
+        stagedSlots.push(normalized)
+        return slots.register(normalized, { contributionId: normalized.id, priority: normalized.priority })
       },
       registerSolidRenderer: definition => {
         if (definition.renderer.kind !== 'solid') throw new Error(`Solid renderer kind 非法：${definition.id}`)
@@ -265,6 +339,16 @@ export class RendererRegistry {
           priority: definition.priority,
         })
       },
+      preview: () => Object.freeze({
+        revision: this.snapshotValue.revision,
+        renderKinds: Object.freeze(candidateKinds()),
+        rendererSuites: Object.freeze(candidateSuites()),
+        rendererSlots: Object.freeze(candidateSlots()),
+        messageRenderers: this.snapshotValue.messageRenderers,
+        contentRenderers: this.snapshotValue.contentRenderers,
+        toolRenderers: this.snapshotValue.toolRenderers,
+        codeHighlighters: this.snapshotValue.codeHighlighters,
+      }),
       validate: () => {
         const existing = this.snapshotValue.renderKinds.filter(entry => entry.ownerRuntimeInstanceId !== replacingRuntimeInstanceId)
         const combined = [...existing, ...stagedKinds.map(definition => ({ value: definition } as RegistryEntry<RenderKindDefinition>))]
@@ -274,6 +358,11 @@ export class RendererRegistry {
           ids.add(definition.id)
         }
         for (const definition of stagedKinds) validateRenderKind(definition, combined, false, false)
+        const existingSuites = this.snapshotValue.rendererSuites.filter(entry => entry.ownerRuntimeInstanceId !== replacingRuntimeInstanceId)
+        const existingSlots = this.snapshotValue.rendererSlots.filter(entry => entry.ownerRuntimeInstanceId !== replacingRuntimeInstanceId)
+        const suiteEntries = [...existingSuites, ...stagedSuites.map(value => ({ value } as RegistryEntry<RendererSuiteContribution>))]
+        const slotEntries = [...existingSlots, ...stagedSlots.map(value => ({ value } as RegistryEntry<RendererSlotContribution>))]
+        validateRendererContributionGraph({ suites: suiteEntries, slots: slotEntries, kinds: combined })
         for (const transaction of transactions) transaction.validate()
       },
       commit: () => {
@@ -281,6 +370,13 @@ export class RendererRegistry {
         const existing = this.snapshotValue.renderKinds.filter(entry => entry.ownerRuntimeInstanceId !== replacingRuntimeInstanceId)
         const combined = [...existing, ...stagedKinds.map(definition => ({ value: definition } as RegistryEntry<RenderKindDefinition>))]
         for (const definition of stagedKinds) validateRenderKind(definition, combined, false, false)
+        const existingSuites = this.snapshotValue.rendererSuites.filter(entry => entry.ownerRuntimeInstanceId !== replacingRuntimeInstanceId)
+        const existingSlots = this.snapshotValue.rendererSlots.filter(entry => entry.ownerRuntimeInstanceId !== replacingRuntimeInstanceId)
+        validateRendererContributionGraph({
+          suites: [...existingSuites, ...stagedSuites.map(value => ({ value } as RegistryEntry<RendererSuiteContribution>))],
+          slots: [...existingSlots, ...stagedSlots.map(value => ({ value } as RegistryEntry<RendererSlotContribution>))],
+          kinds: combined,
+        })
         this.batchDepth += 1
         try {
           for (const transaction of transactions) transaction.commit()
@@ -412,6 +508,8 @@ export class RendererRegistry {
       contentRenderers: this.contents.getSnapshot().entries,
       toolRenderers: this.tools.getSnapshot().entries,
       codeHighlighters: this.highlighters.getSnapshot().entries,
+      rendererSuites: this.suites.getSnapshot().entries,
+      rendererSlots: this.slots.getSnapshot().entries,
     })
     for (const listener of [...this.listeners]) notifyRegistryListener(listener)
   }

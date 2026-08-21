@@ -1,3 +1,7 @@
 export * from './rendererTypes.ts'
 export * from './rendererRegistry.ts'
 export * from './pluginRendererApi.ts'
+export * from './rendererSuiteTypes.ts'
+export * from './rendererSuiteValidation.ts'
+export * from './rendererActivationResolver.ts'
+export * from './rendererDiagnostics.ts'

@@ -8,9 +8,12 @@ import type {
   ToolRendererDefinition,
   RenderKindDefinition,
 } from './rendererTypes.ts'
+import type { RendererSlotContribution, RendererSuiteContribution } from './rendererSuiteTypes.ts'
 
 export interface RendererApi {
   registerRenderKind(renderer: RenderKindDefinition): ReturnType<RendererRegistry['registerRenderKind']>
+  registerSuite(renderer: RendererSuiteContribution): ReturnType<RendererRegistry['registerSuite']>
+  registerSlot(renderer: RendererSlotContribution): ReturnType<RendererRegistry['registerSlot']>
   registerSolidRenderer(renderer: MessageRendererDefinition): ReturnType<RendererRegistry['registerSolidRenderer']>
   registerMessageRenderer(renderer: MessageRendererDefinition): ReturnType<RendererRegistry['registerMessageRenderer']>
   registerContentRenderer(renderer: ContentRendererDefinition): ReturnType<RendererRegistry['registerContentRenderer']>
@@ -38,6 +41,12 @@ export function createPluginRendererApi(
     registerRenderKind: definition => register(() => transaction
       ? transaction.registerRenderKind(definition)
       : registry.registerRenderKind(identity, definition)),
+    registerSuite: definition => register(() => transaction
+      ? transaction.registerSuite(definition)
+      : registry.registerSuite(identity, definition)),
+    registerSlot: definition => register(() => transaction
+      ? transaction.registerSlot(definition)
+      : registry.registerSlot(identity, definition)),
     registerSolidRenderer: definition => register(() => transaction
       ? transaction.registerSolidRenderer(definition)
       : registry.registerSolidRenderer(identity, definition)),
