@@ -184,7 +184,8 @@ describe('projectMessagesFromCanonical', () => {
 
   it('history.snapshot 行被忽略：投影只用实时行按 sequence 展开', () => {
     // 旧契约（snapshot 作为基线去重/补漏）已被 Bug2 修复取代：canonical_events 的权威是
-    // 实时逐 chunk 行。history.snapshot 及其 replayEvents 内容一律不纳入投影。
+    // 实时逐 chunk 行。只要实时 user.message 存在，history.snapshot 及其 replayEvents
+    // 内容不纳入投影，避免旧快照内容重复。
     const messages = projectMessagesFromCanonical([
       event({ sequence: 1, eventType: 'assistant.text.delta', text: 'answer' }),
       event({ sequence: 2, eventType: 'user.message', text: 'local-only' }),
@@ -259,5 +260,102 @@ describe('projectMessagesFromCanonical', () => {
     expect(messages[2].content).toBe('回复')
     expect(messages.map(m => m.content).filter(c => c === 'qX' || c === 'aX')).toEqual([])
     expect(messages).toHaveLength(3)
+  })
+
+  it('Bug2 回归：实时 canonical 缺少用户行时，从 history.snapshot 补回用户但不改变 Agent 顺序', () => {
+    const messages = projectMessagesFromCanonical([
+      // 模拟旧/部分 journal：实时行只有 Agent 内容，用户消息仅存在于重放快照。
+      event({ sequence: 1, eventType: 'assistant.text.delta', text: '回复' }),
+      event({
+        sequence: 2,
+        eventType: 'history.snapshot',
+        rawPayload: {
+          kind: 'complete-session-replay',
+          replayEvents: [
+            {
+              source: 'local:s1',
+              update: {
+                sessionUpdate: 'user_message_chunk',
+                content: { text: '问题' },
+                _meta: { pylonReplayImport: true },
+              },
+            },
+            {
+              source: 'local:s1',
+              update: {
+                sessionUpdate: 'agent_message_chunk',
+                content: { text: '回复' },
+                _meta: { pylonReplayImport: true },
+              },
+            },
+          ],
+        },
+      }),
+    ])
+
+    expect(messages.map(message => [message.role, message.content])).toEqual([
+      ['user', '问题'],
+      ['assistant', '回复'],
+    ])
+  })
+
+  it('canonical recovery user row uses its durable replay anchor without reading snapshot content', () => {
+    const recoveredUserRaw = {
+      source: 'local:s1',
+      update: {
+        sessionUpdate: 'user_message_chunk',
+        content: { text: 'question' },
+        _meta: {
+          pylonReplayImport: true,
+          pylonCanonicalRecovery: true,
+          pylonReplayOrdinal: 0,
+          pylonReplayAnchor: {
+            source: 'local:s1',
+            update: { sessionUpdate: 'agent_message_chunk', content: { text: 'answer' } },
+          },
+        },
+      },
+    }
+    const messages = projectMessagesFromCanonical([
+      event({ sequence: 1, eventType: 'assistant.text.delta', text: 'answer' }),
+      event({ sequence: 2, eventType: 'user.message', text: 'question', rawPayload: recoveredUserRaw }),
+      event({
+        sequence: 3,
+        eventType: 'history.snapshot',
+        rawPayload: {
+          kind: 'complete-session-replay',
+          replayEvents: [
+            recoveredUserRaw,
+            { source: 'local:s1', update: { sessionUpdate: 'agent_message_chunk', content: { text: 'answer' } } },
+          ],
+        },
+      }),
+    ])
+    expect(messages.map(message => [message.role, message.content])).toEqual([
+      ['user', 'question'],
+      ['assistant', 'answer'],
+    ])
+  })
+
+  it('canonical recovery rows restore missing assistant chunks before their live anchor', () => {
+    const anchorRaw = {
+      source: 'local:s1',
+      update: { sessionUpdate: 'agent_message_chunk', content: { text: 'tail' } },
+    }
+    const recoveredRaw = {
+      source: 'local:s1',
+      update: {
+        sessionUpdate: 'agent_message_chunk',
+        content: { text: 'missing' },
+        _meta: { pylonCanonicalRecovery: true, pylonReplayOrdinal: 1, pylonReplayAnchor: anchorRaw },
+      },
+    }
+    const messages = projectMessagesFromCanonical([
+      event({ sequence: 1, eventType: 'assistant.text.delta', text: 'tail' }),
+      event({ sequence: 2, eventType: 'assistant.text.delta', text: 'missing', rawPayload: recoveredRaw }),
+    ])
+    expect(messages.map(message => [message.role, message.content])).toEqual([
+      ['assistant', 'missingtail'],
+    ])
   })
 })

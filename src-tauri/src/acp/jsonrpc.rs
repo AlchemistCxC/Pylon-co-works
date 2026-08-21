@@ -139,11 +139,12 @@ pub enum PromptWaitOutcome {
 /// - 任一 ACP 活动即续命：只要持续产出，回合永不因总时长被截。
 /// - 首次活动始终未出现（`activity` 不晚于 `start`）且超过 `first_token_timeout` → 判死（首 token 超时）。
 /// - 已活动但距最近活动超过 `idle_timeout` 仍无终态 → 判死（闲置超时）。
-/// - 兜底：总墙钟超过 `prompt_timeout` → 强制判死（最后防线）。
+/// - `prompt_timeout` 仅作为未单独配置 `idle_timeout` 时的单步闲置超时；
+///   不设整轮绝对墙钟。一个回合可以包含任意多个分析、思考和工具步骤，
+///   每个步骤都必须分别获得完整的超时窗口。
 /// 任一判死后进入 cancel + settle（与旧路径一致）。
 pub async fn wait_prompt_with_cancel<F, Fut>(
     rx: &mut oneshot::Receiver<RawMessage>,
-    prompt_timeout: std::time::Duration,
     cancel_settle_timeout: std::time::Duration,
     idle_timeout: std::time::Duration,
     first_token_timeout: std::time::Duration,
@@ -156,16 +157,12 @@ where
 {
     let start = std::time::Instant::now();
     // 轮询粒度：取待判定的最小非零超时的一小段，既及时又不忙转。
-    let poll = smallest_nonzero([idle_timeout, first_token_timeout, prompt_timeout]) / 8;
+    let poll = smallest_nonzero([idle_timeout, first_token_timeout, std::time::Duration::ZERO]) / 8;
     loop {
         // 先评估是否该判死（在 sleep 前，避免刚发完就等一个轮询周期的空档）。
-        if let Some(fire_reason) = evaluate_truncation(
-            start,
-            idle_timeout,
-            first_token_timeout,
-            prompt_timeout,
-            last_activity(),
-        ) {
+        if let Some(fire_reason) =
+            evaluate_truncation(start, idle_timeout, first_token_timeout, last_activity())
+        {
             let cancel_error = match tokio::time::timeout(
                 std::time::Duration::from_secs(DEFAULT_WRITE_TIMEOUT_SECS),
                 cancel(),
@@ -218,7 +215,6 @@ fn evaluate_truncation(
     start: std::time::Instant,
     idle_timeout: std::time::Duration,
     first_token_timeout: std::time::Duration,
-    prompt_timeout: std::time::Duration,
     last_activity: Option<std::time::Instant>,
 ) -> Option<TruncationFire> {
     let now = std::time::Instant::now();
@@ -246,13 +242,6 @@ fn evaluate_truncation(
         return Some(TruncationFire {
             reason,
             elapsed_secs: bound.as_secs().max(1),
-        });
-    }
-    // 总墙钟兜底上限（最后防线）——活动回合也只有超此值才强制截断。
-    if elapsed >= prompt_timeout && !prompt_timeout.is_zero() {
-        return Some(TruncationFire {
-            reason: "total_ceiling",
-            elapsed_secs: prompt_timeout.as_secs().max(1),
         });
     }
     None

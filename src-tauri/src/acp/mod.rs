@@ -1316,7 +1316,6 @@ mod tests {
 
         let outcome = wait_prompt_with_cancel(
             &mut rx,
-            std::time::Duration::from_millis(10),
             std::time::Duration::from_millis(200),
             std::time::Duration::from_millis(10),
             std::time::Duration::from_millis(10),
@@ -1356,7 +1355,6 @@ mod tests {
 
         let outcome = wait_prompt_with_cancel(
             &mut rx,
-            std::time::Duration::from_secs(1),
             std::time::Duration::from_millis(10),
             std::time::Duration::from_secs(1),
             std::time::Duration::from_secs(1),
@@ -1370,6 +1368,29 @@ mod tests {
 
         assert!(!cancel_called.load(Ordering::SeqCst));
         assert!(matches!(outcome, PromptWaitOutcome::Response(_)));
+    }
+
+    #[tokio::test]
+    async fn sustained_activity_is_not_limited_by_prompt_total_timeout() {
+        let (_tx, mut rx) = tokio::sync::oneshot::channel();
+        let wait = wait_prompt_with_cancel(
+            &mut rx,
+            std::time::Duration::from_millis(5),
+            std::time::Duration::from_millis(20),
+            std::time::Duration::from_millis(20),
+            // A real dispatcher updates this value for every thinking/tool/output step.
+            // Returning now on every poll models an indefinitely active turn.
+            || Some(std::time::Instant::now()),
+            || async { Ok(()) },
+        );
+
+        // The whole turn must remain alive despite prompt_timeout being shorter than
+        // this observation window; only a quiet step may trigger cancellation.
+        let result = tokio::time::timeout(std::time::Duration::from_millis(80), wait).await;
+        assert!(
+            result.is_err(),
+            "持续活动不得受 prompt total timeout 截断，实际结果: {result:?}"
+        );
     }
 
     #[test]
@@ -2166,7 +2187,6 @@ for line in sys.stdin:
         let cancel_tx = client.write_tx.clone();
         let outcome = wait_prompt_with_cancel(
             &mut response_rx,
-            std::time::Duration::from_millis(20),
             std::time::Duration::from_millis(200),
             std::time::Duration::from_millis(20),
             std::time::Duration::from_millis(20),
@@ -2462,7 +2482,6 @@ for line in sys.stdin:
         let cancel_tx = client.write_tx.clone();
         let outcome = wait_prompt_with_cancel(
             &mut response_rx,
-            std::time::Duration::from_millis(20),
             std::time::Duration::from_millis(200),
             std::time::Duration::from_millis(20),
             std::time::Duration::from_millis(20),

@@ -281,10 +281,7 @@ fn mark_replay_import(
             "source".to_string(),
             serde_json::Value::String(owner.local_session_id.clone()),
         );
-        if let Some(update) = root
-            .get_mut("update")
-            .and_then(serde_json::Value::as_object_mut)
-        {
+        if let Some(update) = replay_update_mut(root) {
             let meta = update
                 .entry("_meta")
                 .or_insert_with(|| serde_json::json!({}));
@@ -293,6 +290,54 @@ fn mark_replay_import(
                     "pylonReplayImport".to_string(),
                     serde_json::Value::Bool(true),
                 );
+            }
+        }
+    }
+    raw_payload
+}
+
+fn replay_update_mut(
+    root: &mut serde_json::Map<String, serde_json::Value>,
+) -> Option<&mut serde_json::Map<String, serde_json::Value>> {
+    if root.get("update").is_some() {
+        return root
+            .get_mut("update")
+            .and_then(serde_json::Value::as_object_mut);
+    }
+    root.get_mut("params")
+        .and_then(serde_json::Value::as_object_mut)
+        .and_then(|params| params.get_mut("update"))
+        .and_then(serde_json::Value::as_object_mut)
+}
+
+/// Mark a replay event that is being migrated into the canonical journal. A partial journal can
+/// contain only some live rows while the session/load replay has additional transcript/tool
+/// events. Keep the replay ordinal and the next already-present raw event as an explicit anchor so
+/// the frontend can restore order without treating the snapshot as a second history source.
+fn mark_replay_recovery(
+    owner: &DurableSessionOwner,
+    raw_payload: serde_json::Value,
+    replay_ordinal: usize,
+    anchor: Option<serde_json::Value>,
+) -> serde_json::Value {
+    let mut raw_payload = mark_replay_import(owner, raw_payload);
+    if let serde_json::Value::Object(root) = &mut raw_payload {
+        if let Some(update) = replay_update_mut(root) {
+            let meta = update
+                .entry("_meta".to_string())
+                .or_insert_with(|| serde_json::json!({}));
+            if let Some(meta) = meta.as_object_mut() {
+                meta.insert(
+                    "pylonCanonicalRecovery".to_string(),
+                    serde_json::Value::Bool(true),
+                );
+                meta.insert(
+                    "pylonReplayOrdinal".to_string(),
+                    serde_json::Value::from(replay_ordinal),
+                );
+                if let Some(anchor) = anchor {
+                    meta.insert("pylonReplayAnchor".to_string(), anchor);
+                }
             }
         }
     }
@@ -788,8 +833,9 @@ impl EventRepo {
     }
 
     /// Existing canonical rows are immutable. A complete remote replay therefore reconciles by
-    /// appending one versioned snapshot event to the same owner journal. Projection expands the
-    /// latest snapshot and preserves pre-snapshot rows that cannot be proven duplicates.
+    /// appending missing user rows (when the partial journal has none) plus one versioned snapshot
+    /// event to the same owner journal. The snapshot remains a compatibility checkpoint for old
+    /// rows; recovered user content is durable canonical data with an explicit ordering anchor.
     fn append_replay_snapshot(
         &self,
         owner: DurableSessionOwner,
@@ -871,7 +917,7 @@ impl EventRepo {
         } else {
             false
         };
-        if snapshot_matches || imported_rows_match || replay_events.is_empty() {
+        if imported_rows_match || replay_events.is_empty() {
             tx.commit().map_err(EventError::from)?;
             return Ok(ReplayJournalIngestResult {
                 events: Vec::new(),
@@ -880,9 +926,161 @@ impl EventRepo {
             });
         }
 
-        let sequence = revision
+        // Compare replay rows with existing canonical rows by normalized type/identity/payload.
+        // Multiplicity is consumed one-for-one so repeated no-identity chunks remain distinct.
+        let mut stmt = tx
+            .prepare(
+                "SELECT event_type, identity, typed_payload
+                 FROM canonical_events
+                 WHERE owner_key = ?1 AND event_type <> 'history.snapshot'
+                 ORDER BY sequence ASC",
+            )
+            .map_err(EventError::from)?;
+        let existing_rows = stmt
+            .query_map(params![owner_key], |row| {
+                let identity: Option<String> = row.get(1)?;
+                let typed_payload: Option<String> = row.get(2)?;
+                Ok((
+                    row.get::<_, String>(0)?,
+                    identity
+                        .map(|value| serde_json::from_str::<serde_json::Value>(&value))
+                        .transpose()
+                        .map_err(|error| {
+                            rusqlite::Error::FromSqlConversionFailure(
+                                0,
+                                rusqlite::types::Type::Text,
+                                Box::new(error),
+                            )
+                        })?,
+                    typed_payload
+                        .map(|value| serde_json::from_str::<serde_json::Value>(&value))
+                        .transpose()
+                        .map_err(|error| {
+                            rusqlite::Error::FromSqlConversionFailure(
+                                0,
+                                rusqlite::types::Type::Text,
+                                Box::new(error),
+                            )
+                        })?,
+                ))
+            })
+            .map_err(EventError::from)?
+            .collect::<Result<Vec<_>, _>>()
+            .map_err(EventError::from)?;
+        drop(stmt);
+        let mut consumed_existing = vec![false; existing_rows.len()];
+        let mut recovery_indices = Vec::new();
+        for (ordinal, raw) in replay_events.iter().cloned().enumerate() {
+            let normalized = normalize_kernel_event(
+                KernelEventInput {
+                    owner: owner.clone(),
+                    remote_session_id: remote_session_id.clone(),
+                    client_generation,
+                    received_at: received_at.clone(),
+                    raw_payload: raw,
+                },
+                0,
+            )?;
+            let matched_index = existing_rows
+                .iter()
+                .enumerate()
+                .find_map(|(index, existing)| {
+                    (!consumed_existing[index]
+                        && existing.0 == normalized.event_type
+                        && existing.1 == normalized.identity
+                        && existing.2 == normalized.typed_payload)
+                        .then_some(index)
+                });
+            if let Some(index) = matched_index {
+                consumed_existing[index] = true;
+            }
+            if matched_index.is_none() {
+                recovery_indices.push(ordinal);
+            }
+        }
+        let mut recovery_mask = vec![false; replay_events.len()];
+        for &index in &recovery_indices {
+            recovery_mask[index] = true;
+        }
+        let recovery_payloads = recovery_indices
+            .iter()
+            .map(|&ordinal| {
+                let anchor = ((ordinal + 1)..replay_events.len())
+                    .find(|index| !recovery_mask[*index])
+                    .map(|index| replay_events[index].clone());
+                mark_replay_recovery(&owner, replay_events[ordinal].clone(), ordinal, anchor)
+            })
+            .collect::<Vec<_>>();
+        // An old snapshot-only journal may already contain the exact checkpoint. Once all replay
+        // rows are present canonically, it is fully repaired without appending another marker.
+        if snapshot_matches && recovery_payloads.is_empty() {
+            tx.commit().map_err(EventError::from)?;
+            return Ok(ReplayJournalIngestResult {
+                events: Vec::new(),
+                revision,
+                status: "already-present",
+            });
+        }
+        let mut committed_events = Vec::with_capacity(recovery_payloads.len() + 1);
+        let mut next_sequence = revision
             .checked_add(1)
             .ok_or_else(|| EventError::Invalid("canonical revision exceeds i64".into()))?;
+        for raw_payload in recovery_payloads {
+            let event = normalize_kernel_event(
+                KernelEventInput {
+                    owner: owner.clone(),
+                    remote_session_id: remote_session_id.clone(),
+                    client_generation,
+                    received_at: received_at.clone(),
+                    raw_payload,
+                },
+                next_sequence,
+            )?;
+            tx.execute(
+                "INSERT INTO canonical_events
+                     (event_id, owner_key, profile_id, agent_id, local_session_id,
+                      remote_session_id, client_generation, sequence, occurred_at,
+                      received_at, event_type, payload_version, identity, typed_payload,
+                      raw_payload, created_at)
+                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16)",
+                params![
+                    event.event_id,
+                    event.owner_key,
+                    event.profile_id,
+                    event.agent_id,
+                    event.local_session_id,
+                    event.remote_session_id,
+                    event.client_generation,
+                    event.sequence,
+                    event.occurred_at,
+                    event.received_at,
+                    event.event_type,
+                    event.payload_version,
+                    event.identity.as_ref().map(serde_json::Value::to_string),
+                    event
+                        .typed_payload
+                        .as_ref()
+                        .map(serde_json::Value::to_string),
+                    event.raw_payload.to_string(),
+                    event.created_at,
+                ],
+            )
+            .map_err(EventError::from)?;
+            committed_events.push(event);
+            next_sequence = next_sequence
+                .checked_add(1)
+                .ok_or_else(|| EventError::Invalid("canonical revision exceeds i64".into()))?;
+        }
+        if snapshot_matches {
+            let revision = next_sequence - 1;
+            tx.commit().map_err(EventError::from)?;
+            return Ok(ReplayJournalIngestResult {
+                events: committed_events,
+                revision,
+                status: "reconciled",
+            });
+        }
+        let sequence = next_sequence;
         let raw_payload = serde_json::json!({
             "kind": "complete-session-replay",
             "baseRevision": revision,
@@ -890,7 +1088,7 @@ impl EventRepo {
         });
         let event = CanonicalEventRow {
             event_id: format!("{owner_key}#{sequence}"),
-            owner_key,
+            owner_key: owner_key.clone(),
             profile_id: owner.profile_id,
             agent_id: owner.agent_id,
             local_session_id: owner.local_session_id,
@@ -941,8 +1139,9 @@ impl EventRepo {
         )
         .map_err(EventError::from)?;
         tx.commit().map_err(EventError::from)?;
+        committed_events.push(event.clone());
         Ok(ReplayJournalIngestResult {
-            events: vec![event],
+            events: committed_events,
             revision: sequence,
             status: "reconciled",
         })
@@ -1159,7 +1358,8 @@ impl EventService {
     }
 
     /// Import a complete session/load replay into the single owner journal. An empty journal gets
-    /// ordinary normalized rows; an existing journal gets one append-only history.snapshot row.
+    /// ordinary normalized rows; an existing partial journal gets missing normalized replay rows
+    /// plus one append-only history.snapshot compatibility checkpoint.
     pub(crate) async fn ingest_complete_replay(
         &self,
         owner: DurableSessionOwner,
@@ -1505,21 +1705,153 @@ mod tests {
             .await
             .expect("reconcile partial journal");
         assert_eq!(reconciled.status, "reconciled");
-        assert_eq!(reconciled.revision, 2);
-        assert_eq!(reconciled.events[0].event_type, "history.snapshot");
+        assert_eq!(reconciled.revision, 3);
+        assert_eq!(reconciled.events[0].event_type, "assistant.text.delta");
         assert_eq!(
-            reconciled.events[0].raw_payload["replayEvents"][0]["update"]["_meta"]
-                ["pylonReplayImport"],
+            reconciled.events[0].raw_payload["update"]["_meta"]["pylonCanonicalRecovery"],
             true
         );
+        assert_eq!(reconciled.events[1].event_type, "history.snapshot");
 
         let repeated = service
             .ingest_complete_replay(owner, Some("remote-1".to_string()), 7, replay)
             .await
             .expect("same snapshot is idempotent");
         assert_eq!(repeated.status, "already-present");
-        assert_eq!(repeated.revision, 2);
+        assert_eq!(repeated.revision, 3);
         assert!(repeated.events.is_empty());
+    }
+
+    #[tokio::test]
+    async fn partial_replay_migrates_missing_user_turns_into_canonical_rows() {
+        let service = EventService::in_memory().expect("event service");
+        let owner = DurableSessionOwner::new("p1", "peri", "local:s1");
+        service
+            .ingest_event(
+                owner.clone(),
+                Some("remote-1".to_string()),
+                7,
+                serde_json::json!({
+                    "source": "local:s1",
+                    "update": { "sessionUpdate": "agent_message_chunk", "content": { "text": "partial" } }
+                }),
+            )
+            .await
+            .expect("partial live row");
+        let replay = vec![
+            serde_json::json!({
+                "sessionId": "remote-1",
+                "update": {
+                    "sessionUpdate": "user_message_chunk",
+                    "content": { "text": "persona\n\n---\n\nquestion" }
+                }
+            }),
+            serde_json::json!({
+                "sessionId": "remote-1",
+                "update": {
+                    "sessionUpdate": "agent_message_chunk",
+                    "content": { "text": "answer" }
+                }
+            }),
+        ];
+
+        let reconciled = service
+            .ingest_complete_replay(
+                owner.clone(),
+                Some("remote-1".to_string()),
+                7,
+                replay.clone(),
+            )
+            .await
+            .expect("reconcile partial journal");
+        assert_eq!(reconciled.status, "reconciled");
+        assert_eq!(reconciled.revision, 4);
+        assert_eq!(
+            reconciled
+                .events
+                .iter()
+                .map(|event| event.event_type.as_str())
+                .collect::<Vec<_>>(),
+            vec!["user.message", "assistant.text.delta", "history.snapshot"]
+        );
+        assert_eq!(
+            reconciled.events[0].typed_payload.as_ref().unwrap()["text"],
+            "question"
+        );
+        assert_eq!(
+            reconciled.events[0].raw_payload["update"]["_meta"]["pylonCanonicalRecovery"],
+            true
+        );
+        let repeated = service
+            .ingest_complete_replay(owner, Some("remote-1".to_string()), 7, replay)
+            .await
+            .expect("recovery is idempotent");
+        assert_eq!(repeated.status, "already-present");
+        assert_eq!(repeated.revision, 4);
+        assert!(repeated.events.is_empty());
+    }
+
+    #[tokio::test]
+    async fn existing_snapshot_only_journal_is_repaired_without_a_second_snapshot() {
+        let service = EventService::in_memory().expect("event service");
+        let owner = DurableSessionOwner::new("p1", "peri", "local:s1");
+        service
+            .ingest_event(
+                owner.clone(),
+                Some("remote-1".to_string()),
+                7,
+                serde_json::json!({
+                    "source": "local:s1",
+                    "update": { "sessionUpdate": "agent_message_chunk", "content": { "text": "answer" } }
+                }),
+            )
+            .await
+            .expect("partial live row");
+        let replay = vec![
+            serde_json::json!({
+                "sessionId": "remote-1",
+                "update": {
+                    "sessionUpdate": "user_message_chunk",
+                    "content": { "text": "question" }
+                }
+            }),
+            serde_json::json!({
+                "sessionId": "remote-1",
+                "update": {
+                    "sessionUpdate": "agent_message_chunk",
+                    "content": { "text": "answer" }
+                }
+            }),
+        ];
+        let marked_replay = replay
+            .iter()
+            .cloned()
+            .map(|raw| mark_replay_import(&owner, raw))
+            .collect::<Vec<_>>();
+        let snapshot = parse_canonical_event(&event_json(
+            "peri",
+            "local:s1",
+            2,
+            "history.snapshot",
+            serde_json::json!({
+                "kind": "complete-session-replay",
+                "replayEvents": marked_replay,
+            }),
+        ))
+        .expect("snapshot row");
+        service
+            .repo
+            .append_events(&[snapshot], Some(1))
+            .expect("old snapshot-only row");
+
+        let repaired = service
+            .ingest_complete_replay(owner, Some("remote-1".to_string()), 7, replay)
+            .await
+            .expect("repair snapshot-only journal");
+        assert_eq!(repaired.status, "reconciled");
+        assert_eq!(repaired.revision, 3);
+        assert_eq!(repaired.events.len(), 1);
+        assert_eq!(repaired.events[0].event_type, "user.message");
     }
 
     #[tokio::test]

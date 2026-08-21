@@ -19,6 +19,7 @@ import type { EventProjector } from '../../contracts/eventProjector.ts'
 import { getPluginServiceRegistry } from '../../plugin-runtime/runtimeServices.ts'
 import { getToolSummary } from '../tool/toolPresentation.ts'
 import { resolveChunkAppend } from './chunkMerge.ts'
+import { normalizeRawEvent } from './canonicalNormalizer.ts'
 import type { CanonicalConversationEvent } from './eventSchema.ts'
 import { toolFieldsFromCanonical } from './toolProjection.ts'
 
@@ -66,6 +67,69 @@ function stringifyOutput(rawOutput: unknown): string {
   return json ?? ''
 }
 
+function stripReplayPersonaPrefix(content: string): string {
+  const separator = '\n\n---\n\n'
+  const index = content.lastIndexOf(separator)
+  if (index < 0) return content
+  const stripped = content.slice(index + separator.length)
+  return stripped || content
+}
+
+/** Expand only the raw replay events needed to recover missing user turns. */
+function replayEventsFromSnapshot(marker: CanonicalConversationEvent): CanonicalConversationEvent[] {
+  if (marker.eventType !== 'history.snapshot' || !marker.rawPayload || typeof marker.rawPayload !== 'object') return []
+  const replayEvents = (marker.rawPayload as { replayEvents?: unknown }).replayEvents
+  if (!Array.isArray(replayEvents)) return []
+  return replayEvents.map((raw, index) => {
+    const normalized = normalizeRawEvent(raw, {
+      owner: marker.owner,
+      clientGeneration: marker.clientGeneration,
+      sequence: index + 1,
+      receivedAt: marker.receivedAt,
+    }).event
+    const typed = normalized.typedPayload as { text?: unknown } | undefined
+    const event = normalized.eventType === 'user.message' && typeof typed?.text === 'string'
+      ? { ...normalized, typedPayload: { ...typed, text: stripReplayPersonaPrefix(typed.text) } }
+      : normalized
+    return { ...event, eventId: `${marker.eventId}/replay/${index + 1}` }
+  })
+}
+
+function eventProjectionKey(event: CanonicalConversationEvent): string {
+  const typed = event.typedPayload as { text?: unknown; tool?: { rawInput?: unknown } } | undefined
+  return JSON.stringify([
+    event.eventType,
+    event.identity ?? null,
+    typed?.text ?? null,
+    typed?.tool?.rawInput ?? null,
+  ])
+}
+
+function canonicalRecoveryMetadata(event: CanonicalConversationEvent): Record<string, unknown> | undefined {
+  if (!event.rawPayload || typeof event.rawPayload !== 'object') return undefined
+  const root = event.rawPayload as { update?: unknown; params?: { update?: unknown } }
+  const update = root.update ?? root.params?.update
+  if (!update || typeof update !== 'object') return undefined
+  const meta = (update as { _meta?: unknown })._meta
+  if (!meta || typeof meta !== 'object' || (meta as { pylonCanonicalRecovery?: unknown }).pylonCanonicalRecovery !== true) {
+    return undefined
+  }
+  return meta as Record<string, unknown>
+}
+
+function canonicalRecoveryAnchor(event: CanonicalConversationEvent): CanonicalConversationEvent | undefined {
+  const meta = canonicalRecoveryMetadata(event)
+  if (!meta) return undefined
+  const anchor = (meta as { pylonReplayAnchor?: unknown }).pylonReplayAnchor
+  if (!anchor || typeof anchor !== 'object') return undefined
+  return normalizeRawEvent(anchor, {
+    owner: event.owner,
+    clientGeneration: event.clientGeneration,
+    sequence: event.sequence,
+    receivedAt: event.receivedAt,
+  }).event
+}
+
 /**
  * Resolve the single append-only journal into one effective projection stream.
  *
@@ -73,13 +137,65 @@ function stringifyOutput(rawOutput: unknown): string {
  * dispatcher 逐条 ingest 的实时逐 chunk 行（user/assistant.text/tool.call.*，已按真实交错序
  * 持久化，sequence 单调）。`history.snapshot` 是 agent（Hermes）分组重放导入的产物
  * （text→tools 批量），若作为"快照基线"整块前置会盖过实时交错序 → 工具/文字聚簇。
- * 产品不做旧兼容/导入兼容，故投影严格只用实时行，snapshot 行直接忽略。
+ * 因此 snapshot 不作为完整投影基线；迁移标记的缺失 replay 行从 canonical 末尾按锚点归位，
+ * 更老的 snapshot-only journal 则仅补回缺失用户事件。
  */
 export function effectiveCanonicalProjectionEvents(
   events: readonly CanonicalConversationEvent[],
 ): CanonicalConversationEvent[] {
   const sorted = [...events].sort((left, right) => left.sequence - right.sequence)
-  return sorted.filter(event => event.eventType !== 'history.snapshot')
+  const live = sorted.filter(event => event.eventType !== 'history.snapshot')
+  const recoveredEvents = live
+    .filter(event => canonicalRecoveryMetadata(event))
+    .sort((left, right) => {
+      const leftOrdinal = canonicalRecoveryMetadata(left)?.pylonReplayOrdinal
+      const rightOrdinal = canonicalRecoveryMetadata(right)?.pylonReplayOrdinal
+      return (typeof leftOrdinal === 'number' ? leftOrdinal : Number.MAX_SAFE_INTEGER)
+        - (typeof rightOrdinal === 'number' ? rightOrdinal : Number.MAX_SAFE_INTEGER)
+    })
+  if (recoveredEvents.length > 0) {
+    // Recovered rows are durable canonical events. Their sequence is the migration append
+    // position, so place them back before the explicit live anchor captured in SQLite.
+    const merged = live.filter(event => !recoveredEvents.includes(event))
+    let insertionFloor = 0
+    for (const recovered of recoveredEvents) {
+      const anchor = canonicalRecoveryAnchor(recovered)
+      const anchorIndex = anchor
+        ? merged.findIndex(event => eventProjectionKey(event) === eventProjectionKey(anchor))
+        : -1
+      const position = anchorIndex >= insertionFloor ? anchorIndex : insertionFloor
+      merged.splice(Math.min(position, merged.length), 0, recovered)
+      insertionFloor = position + 1
+    }
+    return merged.map((event, index) => ({ ...event, sequence: index + 1 }))
+  }
+  // 正常路径优先使用逐条 durable live rows，避免 snapshot 的分组顺序覆盖工具/文字交错。
+  // 兼容一种已经存在的 journal：live rows 只有 Agent 事件，用户事件只留在 snapshot。
+  // 只有在 live 完全没有 user.message 时才补用户，避免把 snapshot 的旧/重复内容混入
+  // 一个已经拥有用户 canonical 行的完整 journal。
+  if (live.some(event => event.eventType === 'user.message')) return live
+  const marker = [...sorted].reverse().find(event => event.eventType === 'history.snapshot')
+  if (!marker) return live
+  const snapshot = replayEventsFromSnapshot(marker)
+  const users = snapshot.filter(event => event.eventType === 'user.message')
+  if (users.length === 0) return live
+
+  const merged = [...live]
+  let insertionFloor = 0
+  for (const user of users) {
+    const snapshotIndex = snapshot.indexOf(user)
+    const nextLiveSnapshotEvent = snapshot
+      .slice(snapshotIndex + 1)
+      .find(event => event.eventType !== 'user.message')
+    const anchor = nextLiveSnapshotEvent
+      ? live.find(event => eventProjectionKey(event) === eventProjectionKey(nextLiveSnapshotEvent))
+      : undefined
+    const anchorIndex = anchor ? merged.findIndex(event => event.eventId === anchor.eventId) : -1
+    const position = anchorIndex >= insertionFloor ? anchorIndex : insertionFloor
+    merged.splice(Math.min(position, merged.length), 0, user)
+    insertionFloor = position + 1
+  }
+  return merged.map((event, index) => ({ ...event, sequence: index + 1 }))
 }
 
 /** 内置投影实现（core.projector.canonicalMessage 与无插件回退共用）。 */

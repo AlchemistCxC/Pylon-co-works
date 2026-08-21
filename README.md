@@ -295,6 +295,8 @@ agents:
       prompt_timeout_secs: 180
 ```
 
+`prompt_timeout_secs` 是单步闲置超时：分析、思考或工具步骤每次收到 ACP 活动都会重新计时，不会限制整轮回合的总时长。需要时可用 `idle_timeout_secs` 单独覆盖单步闲置窗口。
+
 将 `exe` 修改为对应 Agent 的实际可执行文件路径。
 
 配置来源优先级：

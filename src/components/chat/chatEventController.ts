@@ -198,6 +198,54 @@ function stripReplayPersonaPrefix(content: string): string {
   return stripped || content
 }
 
+function canonicalTypedText(event: CanonicalEventRow): string | undefined {
+  const text = (event.typedPayload as { text?: unknown } | undefined)?.text
+  return typeof text === 'string' ? text : undefined
+}
+
+/** Match a load-buffered UI event to the canonical row that committed it. */
+function canonicalRepresentsChatEvent(row: CanonicalEventRow, event: ChatEvent): boolean {
+  if (row.owner.localSessionId !== event.source) return false
+  const identity = row.identity
+  switch (event.type) {
+    case 'user':
+      return row.eventType === 'user.message' && canonicalTypedText(row) === event.content
+    case 'message-chunk':
+      return row.eventType === 'assistant.text.delta'
+        && canonicalTypedText(row) === event.text
+        && (!event.externalIdentity?.messageId || identity?.messageId === event.externalIdentity.messageId)
+    case 'thought-chunk':
+      return row.eventType === 'assistant.thinking.delta'
+        && canonicalTypedText(row) === event.text
+        && (!event.externalIdentity?.turnId || identity?.turnId === event.externalIdentity.turnId)
+    case 'tool-call':
+      return row.eventType === 'tool.call.started'
+        && (!event.toolCallId || identity?.toolCallId === event.toolCallId)
+    case 'tool-call-update':
+      return ['tool.call.updated', 'tool.call.completed', 'tool.call.failed'].includes(row.eventType)
+        && (!event.toolCallId || identity?.toolCallId === event.toolCallId)
+    case 'done':
+      return row.eventType === 'turn.completed'
+    case 'error':
+      return row.eventType === 'turn.failed'
+    default:
+      return false
+  }
+}
+
+function isRepresentedByCanonical(
+  event: ChatEvent,
+  canonicalEvents: readonly CanonicalEventRow[],
+  consumed: Set<number>,
+): boolean {
+  const index = canonicalEvents.findIndex((row, rowIndex) =>
+    !consumed.has(rowIndex) && canonicalRepresentsChatEvent(row, event),
+  )
+  if (index < 0) return false
+  consumed.add(index)
+  return true
+}
+
 function isRenderedSource(source: string, renderedSource: string | null): boolean {
   return source.length > 0 && renderedSource === source
 }
@@ -660,9 +708,13 @@ export function attachChatEventController(refs: ChatEventControllerRefs): ChatCo
     }
     await canonicalCursor.accept(value, async (event, isCurrentNotification) => {
       publishPluginEvent(event)
+      // Keep every canonical notification observed during a load, including rows that were
+      // already covered by the initial canonical read.  A source may continue generating while
+      // the user switches sessions; commit-time reconciliation needs this complete set to tell a
+      // real in-flight event from a legacy uncommitted replay broadcast.
+      const transaction = loadTransactions.get(event.owner.localSessionId)
+      if (transaction) transaction.bufferedCanonicalEvents.push(event)
       if (isCurrentNotification) {
-        const transaction = loadTransactions.get(event.owner.localSessionId)
-        if (transaction) transaction.bufferedCanonicalEvents.push(event)
         await processCurrent(true)
       }
       else applyRecoveredCanonicalEvent(event)
@@ -851,9 +903,9 @@ export function attachChatEventController(refs: ChatEventControllerRefs): ChatCo
       },
     }
     loadTransactions.delete(source)
-    // canonical 权威路径：load 期间该 source 的 queued live 事件不追加。
-    // 这些事件几乎都是 replay 广播（可能未标 periReplay）或 snapshot 已有历史；
-    // canonical 占位已经是权威，追加只会造成“重放/复读”。legacy 路径保持原语义。
+    // canonical 权威路径：只丢弃已经由 canonical row 证明覆盖的 queued 事件。A 会话在
+    // 用户切到 B 后仍可能继续生成；这些真实 in-flight chunks 不能因为 load snapshot
+    // 恰好在中途读取而丢失。旧后端没有 committed rows 时仍保留 legacy 的保守策略。
     if (!existing.loadBaseFromCanonical) {
       let acceptedTranscriptEvent = false
       for (const event of queuedEvents) {
@@ -866,6 +918,14 @@ export function attachChatEventController(refs: ChatEventControllerRefs): ChatCo
         }
         if (snapshotIdentityKeys.has(identityKey)) continue
         acceptedTranscriptEvent = true
+        dispatch(event, true)
+      }
+    } else if (transaction.bufferedCanonicalEvents.length > 0) {
+      const consumedCanonical = new Set<number>()
+      for (const event of queuedEvents) {
+        if (isRepresentedByCanonical(event, transaction.bufferedCanonicalEvents, consumedCanonical)) continue
+        // No canonical counterpart means this event came from an older compatibility backend or
+        // was produced after the journal read. Preserve it in the per-source runtime.
         dispatch(event, true)
       }
     }

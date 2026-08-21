@@ -726,7 +726,6 @@ async fn send_prompt_core_impl<R: tauri::Runtime>(
     };
     let result = acp::wait_prompt_with_cancel(
         &mut rx,
-        Duration::from_secs(prompt_timeout_secs),
         Duration::from_secs(cancel_settle_timeout_secs),
         Duration::from_secs(idle_timeout_secs),
         Duration::from_secs(first_token_timeout_secs),

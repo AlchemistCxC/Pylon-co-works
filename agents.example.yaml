@@ -26,7 +26,7 @@
 #                               # _meta.peri.*，Hermes 忽略无害）
 #   protocol_version: 1        # H3 initialize 协议版本（默认 1）
 #   client_info: {...}         # H4 initialize clientInfo（默认 {"name":"Pylon","version":"0.1.0"}）
-#   prompt_timeout_secs: 300   # H5 prompt 超时（默认 300）
+#   prompt_timeout_secs: 300   # H5 单步闲置超时（默认 300，不限制整轮回合）
 #   cancel_settle_timeout_secs: 30  # H6 cancel 后等待 settle 超时（默认 30）
 #   rpc_timeout_secs: 30       # H8/H9 通用 RPC 超时（默认 30）
 #   max_attachments: 8         # H10 附件数上限（默认 8）
@@ -59,7 +59,7 @@ agents:
     # 用绝对路径（非纯名称）：避免 Pylon 进程继承的 HERMES_HOME 环境变量
     # （Hermes 启动器设的 profile 目录）污染 detect_hermes_home → 嵌套 profiles\<name>。
     hermes_profile: <HERMES_PROFILE_PATH>
-    # 方案 I：Hermes 专用 prompt 超时（默认 300s；实测 Hermes+opencode.ai 首 token
+    # 方案 I：Hermes 专用单步闲置超时（默认 300s；实测 Hermes+opencode.ai 首 token
     # 延迟可达 ~92s，90s 会误杀——留 2 倍余量设 180s）。Hermes 无 provider/401/
     # 错误 profile 时通常在 session/new 即失败（方案 I 已让该错误即时可见），
     # 不必靠超时兜底。Peri 保持默认 300s。

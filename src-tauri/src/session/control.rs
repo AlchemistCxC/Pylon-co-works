@@ -146,7 +146,7 @@ pub(crate) async fn close_session(
     let generation = state.current_generation(&runtime);
     let peri_id = state.get_peri_id(&runtime, &source)?;
     // 若该 session 有在途 prompt，先发 cancel（fire-and-forget）让 Peri 侧 settle，
-    // 否则 pending oneshot 会挂到 PROMPT_TIMEOUT 才结束——close 后 prompt 卡死 300s。
+    // 否则 pending oneshot 会等到单步闲置超时才结束——close 后 prompt 可能长时卡住。
     // 方案 5：cancel 在 acp 锁内发送，replacement（同样持 acp 锁）无法插入——
     // 旧 periId 的 cancel 不会写入新 ACP。
     {

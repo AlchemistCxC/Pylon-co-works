@@ -184,7 +184,7 @@ sequenceDiagram
   WebView->>WebView: ordered projection + plugin event（不二次 append）
 ```
 
-当前事实：具备完整 durable owner 的 ACP live update 与 prompt 的 user/success/failure boundary 由 Rust Kernel 在发布前写入现有 `canonical_events`；dispatcher 通过有背压的单消费者 inbox 无损摄取，WebView 以 owner cursor 消费 committed row 并从同一 journal 补 gap。完整 replay 在空 journal 时经同一 normalize/append transaction 逐行导入；已有 partial rows 时追加一个 `history.snapshot` checkpoint，旧行不覆盖、未匹配证据不丢失，仍只有一个 journal 与 sequence authority。
+当前事实：具备完整 durable owner 的 ACP live update 与 prompt 的 user/success/failure boundary 由 Rust Kernel 在发布前写入现有 `canonical_events`；dispatcher 通过有背压的单消费者 inbox 无损摄取，WebView 以 owner cursor 消费 committed row 并从同一 journal 补 gap。完整 replay 在空 journal 时经同一 normalize/append transaction 逐行导入；已有 partial rows 时，缺失的 replay 事件会先迁移为带回放锚点的 canonical 行，再追加一个 `history.snapshot` 兼容 checkpoint。旧行不覆盖、未匹配证据不丢失，仍只有一个 journal 与 sequence authority；snapshot 不再是用户或 Agent transcript 的唯一持久化来源。
 
 ### 8.2 当前恢复路径
 

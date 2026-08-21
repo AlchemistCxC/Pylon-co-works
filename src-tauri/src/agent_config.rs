@@ -170,10 +170,8 @@ pub struct AcpProtocolConfig {
     /// H4 initialize clientInfo；None = {"name":"Pylon","version":"0.1.0"}。
     #[serde(default)]
     pub client_info: Option<serde_json::Value>,
-    /// H5 prompt 总墙钟兜底上限（秒）；None = 300。仅当回合超过该绝对时长才强制
-    /// cancel（最后防线）。正常工作回合被此值截断属于"兜底触发"，不是常规路径：
-    /// 常规截断改由 idle_timeout / first_token_timeout 决定（见下两字段）。
-    /// （语义 2026-08-20 重定义：不再作为"活动回合"的常规超时。）
+    /// H5 单步闲置超时的缺省值（秒）；None = 300。每个分析/思考/工具步骤
+    /// 都重新获得该时间窗口，不设置整轮回合的绝对墙钟上限。
     #[serde(default)]
     pub prompt_timeout_secs: Option<u64>,
     /// H6 cancel settle 超时（秒）；None = 30。
@@ -309,8 +307,8 @@ impl AcpProtocolConfig {
         self.session_close.unwrap_or(true)
     }
 
-    /// H5 prompt 总墙钟兜底上限（秒，缺省 300）。G2（W2 链 E）消费：wait_prompt_with_cancel。
-    /// 语义 2026-08-20：仅作"活动回合"的最后防线；常规截断由 idle_timeout 决定。
+    /// H5 单步闲置超时缺省值（秒，缺省 300）。G2（W2 链 E）消费时作为
+    /// `idle_timeout` 的回退值。
     pub fn prompt_timeout(&self) -> u64 {
         self.prompt_timeout_secs
             .unwrap_or(crate::acp::DEFAULT_PROMPT_TIMEOUT_SECS)

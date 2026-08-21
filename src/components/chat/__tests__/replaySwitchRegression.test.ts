@@ -20,6 +20,7 @@ import { useIdentityStore } from '../../../identityStore'
 import { useRuntimeStore } from '../../../runtimeStore'
 import { toAgentContextKey } from '../../../agentContext'
 import { parseMessageSnapshot, messageStorageKey } from '../messagePersistence'
+import { normalizeRawEvent } from '../../../domains/events/canonicalNormalizer'
 import type { ChatEventControllerRefs } from '../chatEventController'
 import type { Message } from '../messageTypes'
 import type { Session } from '../../../identityStore'
@@ -233,6 +234,52 @@ describe('会话重放修复回归', () => {
     expect(resolved.map(m => m.content)).toEqual(['问题', '回复'])
     handle.finishLoadLock(A, gen)
     expect(handle.getMessages(A).map(m => m.content)).toEqual(['问题', '回复'])
+    handle.dispose()
+  })
+
+  it('Bug3：A 生成中切到 B 再切回，load 期间到达的 canonical 增量不能丢失', async () => {
+    const A = 'local:session-a', B = 'local:session-b'
+    useIdentityStore.setState({ sessions: [makeSession('sa', A), makeSession('sb', B)] })
+    const refs = makeRefs()
+    refs.sessionRef.current = A
+    refs.messageOwnerRef.current = 'sa'
+    const handle = attachChatEventController(refs)
+    await waitListeners()
+
+    const owner = { profileId: 'p1', agentId: 'peri', localSessionId: A }
+    const canonical = (sequence: number, update: Record<string, unknown>) => normalizeRawEvent(
+      { source: A, update },
+      { owner, clientGeneration: 7, sequence, receivedAt: '2026-08-21T00:00:00.000Z' },
+    ).event
+    const fireCommitted = (event: unknown, payload: Record<string, unknown>) => {
+      fire(payload.eventName as string, { ...payload, canonicalEvent: event })
+    }
+
+    handle.initSource(A, [])
+    fireCommitted(canonical(1, { sessionUpdate: 'user_message_chunk', content: { text: '问题' } }), { eventName: 'pylon:user', source: A, content: '问题' })
+    fireCommitted(canonical(2, { sessionUpdate: 'agent_message_chunk', content: { text: '已完成部分' } }), { eventName: 'pylon:update', source: A, update: { sessionUpdate: 'agent_message_chunk', content: { text: '已完成部分' } } })
+    await waitListeners()
+
+    // 切到 B；A 仍在生成，之后的 chunk 在 A 的新 load transaction 中到达。
+    refs.sessionRef.current = B
+    refs.messageOwnerRef.current = 'sb'
+    handle.initSource(B, [])
+    refs.sessionRef.current = A
+    refs.messageOwnerRef.current = 'sa'
+    const canonicalBase: Message[] = [
+      { id: 'user-1', role: 'user', sender: A, content: '问题', time: 't' },
+      { id: 'msg-2', role: 'assistant', sender: 'peri', content: '已完成部分', time: 't', running: false },
+    ]
+    handle.initSource(A, canonicalBase, false, true)
+    const generation = handle.beginLoadLock(A)
+
+    fireCommitted(canonical(3, { sessionUpdate: 'agent_message_chunk', content: { text: '仍在生成' } }), { eventName: 'pylon:update', source: A, update: { sessionUpdate: 'agent_message_chunk', content: { text: '仍在生成' } } })
+    await waitListeners()
+    const resolved = handle.commitCanonicalProjection(A, generation, canonicalBase, 2)
+    handle.finishLoadLock(A, generation)
+
+    expect(resolved.map(message => message.content)).toEqual(['问题', '已完成部分'])
+    expect(handle.getStreamingState(A).text).toBe('仍在生成')
     handle.dispose()
   })
 
