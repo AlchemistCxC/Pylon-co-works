@@ -1,0 +1,190 @@
+import {
+  createUnknownContentPart,
+  type ContentPart,
+  type JsonValue,
+} from '../content/contentPartSchema.ts'
+import {
+  createWorkbenchEnvelope,
+  type WorkbenchEventEnvelope,
+  type WorkbenchEventIdentity,
+  type WorkbenchEventProvenance,
+  type WorkbenchSemanticEvent,
+} from '../events/workbenchEventSchema.ts'
+import type { NormalizeContext, NormalizeDiagnostic } from './agentEventNormalizer.ts'
+
+export function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null && !Array.isArray(value)
+}
+
+export function extractUpdate(input: unknown): Record<string, unknown> | undefined {
+  if (!isRecord(input)) return undefined
+  const params = isRecord(input.params) ? input.params : undefined
+  if (isRecord(params?.update)) return params.update
+  if (isRecord(input.update)) return input.update
+  if (typeof input.sessionUpdate === 'string') return input
+  if (typeof params?.sessionUpdate === 'string') return params
+  return undefined
+}
+
+export function wireKind(update: Record<string, unknown> | undefined): string {
+  const value = update?.sessionUpdate ?? update?.type
+  return typeof value === 'string' && value.trim() ? value : 'malformed'
+}
+
+export function identityFromUpdate(update: Record<string, unknown> | undefined): WorkbenchEventIdentity {
+  if (!update) return {}
+  const content = isRecord(update.content) ? update.content : undefined
+  const meta = isRecord(update._meta) ? update._meta : undefined
+  const claudeMeta = isRecord(meta?.claudeCode) ? meta.claudeCode : undefined
+  const pick = (keys: readonly string[], records: readonly (Record<string, unknown> | undefined)[]): string | undefined => {
+    for (const record of records) {
+      for (const key of keys) {
+        const value = record?.[key]
+        if (typeof value === 'string' && value.trim()) return value.trim()
+      }
+    }
+    return undefined
+  }
+  const identity: WorkbenchEventIdentity = {
+    ...(pick(['turnId', 'turn_id'], [content, update, meta]) ? { turnId: pick(['turnId', 'turn_id'], [content, update, meta]) } : {}),
+    ...(pick(['messageId', 'message_id'], [content, update, meta]) ? { messageId: pick(['messageId', 'message_id'], [content, update, meta]) } : {}),
+    ...(pick(['toolCallId', 'tool_call_id', 'toolUseId', 'tool_use_id'], [update, content, meta]) ? { toolCallId: pick(['toolCallId', 'tool_call_id', 'toolUseId', 'tool_use_id'], [update, content, meta]) } : {}),
+    ...(pick(['taskId', 'task_id'], [content, update, meta]) ? { taskId: pick(['taskId', 'task_id'], [content, update, meta]) } : {}),
+    ...(pick(['runId', 'run_id'], [content, update, meta]) ? { runId: pick(['runId', 'run_id'], [content, update, meta]) } : {}),
+    ...(pick(['interactionId', 'interaction_id', 'requestId', 'request_id'], [content, update, meta]) ? { interactionId: pick(['interactionId', 'interaction_id', 'requestId', 'request_id'], [content, update, meta]) } : {}),
+    ...(pick(['parentToolUseId', 'parent_tool_use_id'], [claudeMeta, meta]) ? { taskId: pick(['parentToolUseId', 'parent_tool_use_id'], [claudeMeta, meta]) } : {}),
+  }
+  return identity
+}
+
+export function createDiagnostic(
+  context: NormalizeContext,
+  update: Record<string, unknown> | undefined,
+  code: string,
+  message: string,
+  path: readonly (string | number)[] = [],
+  recoverable = true,
+): NormalizeDiagnostic {
+  return {
+    provider: context.provider,
+    sessionId: context.sessionId,
+    wireKind: wireKind(update),
+    path,
+    code,
+    message,
+    recoverable,
+  }
+}
+
+export function normalizeContentBlocks(
+  raw: unknown,
+  context: NormalizeContext,
+  update: Record<string, unknown> | undefined,
+): { parts: ContentPart[]; diagnostics: NormalizeDiagnostic[] } {
+  const blocks = Array.isArray(raw) ? raw : raw === undefined ? [] : typeof raw === 'string' ? [{ type: 'text', text: raw }] : [raw]
+  const parts: ContentPart[] = []
+  const diagnostics: NormalizeDiagnostic[] = []
+  blocks.forEach((block, index) => {
+    const normalized = normalizeContentBlock(block)
+    parts.push(normalized.part)
+    if (normalized.diagnostic) diagnostics.push({
+      ...createDiagnostic(context, update, normalized.diagnostic.code, normalized.diagnostic.message, ['content', index, ...normalized.diagnostic.path]),
+      recoverable: true,
+    })
+  })
+  return { parts, diagnostics }
+}
+
+function normalizeContentBlock(raw: unknown): { part: ContentPart; diagnostic?: { code: string; message: string; path: readonly (string | number)[] } } {
+  if (!isRecord(raw)) return {
+    part: createUnknownContentPart('malformed', raw),
+    diagnostic: { code: 'content.malformed', message: 'content block is not an object', path: [] },
+  }
+  const type = typeof raw.type === 'string' ? raw.type : typeof raw.kind === 'string' ? raw.kind : typeof raw.text === 'string' ? 'text' : 'unknown'
+  switch (type) {
+    case 'text':
+      return typeof raw.text === 'string'
+        ? { part: { kind: 'text', text: raw.text } }
+        : { part: createUnknownContentPart('text', raw), diagnostic: { code: 'content.text.invalid', message: 'text block has no string text', path: ['text'] } }
+    case 'thinking':
+    case 'reasoning':
+      return typeof raw.text === 'string'
+        ? { part: { kind: 'reasoning', text: raw.text } }
+        : { part: createUnknownContentPart(type, raw), diagnostic: { code: 'content.reasoning.invalid', message: 'reasoning block has no string text', path: ['text'] } }
+    case 'image': {
+      const source = isRecord(raw.source) ? raw.source : undefined
+      const sourceValue = typeof source?.data === 'string' ? source.data : typeof source?.url === 'string' ? source.url : typeof raw.source === 'string' ? raw.source : undefined
+      if (sourceValue) return { part: { kind: 'image', source: sourceValue, ...(typeof source?.media_type === 'string' ? { mimeType: source.media_type } : typeof raw.mimeType === 'string' ? { mimeType: raw.mimeType } : {}) } }
+      return { part: createUnknownContentPart('image', raw), diagnostic: { code: 'content.image.invalid', message: 'image block has no safe source', path: ['source'] } }
+    }
+    case 'resource_link':
+      return typeof raw.uri === 'string' ? { part: { kind: 'resource', uri: raw.uri, ...(typeof raw.name === 'string' ? { title: raw.name } : {}), ...(typeof raw.mimeType === 'string' ? { mimeType: raw.mimeType } : {}) } } : { part: createUnknownContentPart(type, raw), diagnostic: { code: 'content.resource.invalid', message: 'resource link has no URI', path: ['uri'] } }
+    case 'resource': {
+      const resource = isRecord(raw.resource) ? raw.resource : raw
+      return typeof resource.uri === 'string' ? { part: { kind: 'resource', uri: resource.uri, ...(typeof resource.mimeType === 'string' ? { mimeType: resource.mimeType } : {}), ...(typeof resource.text === 'string' ? { text: resource.text } : {}), ...(typeof resource.blob === 'string' ? { blob: resource.blob } : {}) } } : { part: createUnknownContentPart(type, raw), diagnostic: { code: 'content.resource.invalid', message: 'embedded resource has no URI', path: ['resource', 'uri'] } }
+    }
+    case 'diff':
+      return { part: { kind: 'diff', ...toJsonRecord(raw) } }
+    case 'location':
+      return { part: { kind: 'location', ...toJsonRecord(raw) } }
+    case 'code':
+      return typeof raw.text === 'string' ? { part: { kind: 'code', text: raw.text, ...(typeof raw.language === 'string' ? { language: raw.language } : {}) } } : { part: createUnknownContentPart(type, raw), diagnostic: { code: 'content.code.invalid', message: 'code block has no string text', path: ['text'] } }
+    default:
+      return { part: createUnknownContentPart(type, raw) }
+  }
+}
+
+export function createUnknownEvent(
+  input: unknown,
+  update: Record<string, unknown> | undefined,
+  originalType = wireKind(update),
+): WorkbenchSemanticEvent {
+  const unknown = createUnknownContentPart(originalType, input)
+  return {
+    type: 'event.unknown',
+    originalType,
+    summary: unknown.summary,
+    raw: unknown.raw,
+    truncated: unknown.truncated,
+    ...(unknown.truncation ? { truncation: unknown.truncation } : {}),
+  }
+}
+
+export function makeEnvelope(
+  event: WorkbenchSemanticEvent,
+  input: unknown,
+  context: NormalizeContext,
+  update: Record<string, unknown> | undefined,
+  provenancePatch: Partial<WorkbenchEventProvenance> = {},
+  identity = identityFromUpdate(update),
+): WorkbenchEventEnvelope {
+  const source = isRecord(input) && typeof input.source === 'string' ? input.source : context.sourceId
+  return createWorkbenchEnvelope({
+    sessionId: context.sessionId,
+    sequence: context.sequence,
+    recordedAt: context.recordedAt,
+    ...(context.occurredAt ? { occurredAt: context.occurredAt } : {}),
+    source: {
+      provider: context.provider,
+      sourceId: source,
+      ...(context.agentId ? { agentId: context.agentId } : {}),
+      ...(context.parentAgentId ? { parentAgentId: context.parentAgentId } : {}),
+    },
+    identity,
+    provenance: { ...context.provenance, ...provenancePatch },
+    event,
+    raw: input,
+  })
+}
+
+export function toJsonValue(value: unknown): JsonValue {
+  if (value === null || typeof value === 'string' || typeof value === 'boolean') return value
+  if (typeof value === 'number') return Number.isFinite(value) ? value : null
+  if (Array.isArray(value)) return value.map(toJsonValue)
+  if (isRecord(value)) return Object.fromEntries(Object.entries(value).map(([key, child]) => [key, toJsonValue(child)]))
+  return String(value)
+}
+
+function toJsonRecord(value: Record<string, unknown>): Record<string, JsonValue> {
+  return toJsonValue(value) as Record<string, JsonValue>
+}
