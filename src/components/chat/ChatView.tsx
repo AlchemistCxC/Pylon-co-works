@@ -479,7 +479,7 @@ export function AssistantContent({ text }: { text: string; isStreaming?: boolean
           }}>{text}</MarkdownRenderer>
         </Suspense>
         ) : (
-          <p className="term-p term-plain-text">{text.replace(/^\n+/, '').replace(/\n+$/, '')}</p>
+          <p className="term-p term-plain-text">{text}</p>
         )}
       </div>
     </div>

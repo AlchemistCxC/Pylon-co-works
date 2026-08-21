@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 import { describe, expect, test } from 'vitest'
 import { render, screen } from '@testing-library/react'
-import { MessageRow } from '../ChatView'
+import { AssistantContent, MessageRow } from '../ChatView'
 import { useStore } from '../../../store'
 import type { Message } from '../messageTypes'
 import { useInterfaceModeStore } from '../../../domains/interface/interfaceModeStore'
@@ -20,6 +20,12 @@ describe('MessageRow', () => {
   test('纯文本 assistant 消息渲染内容', () => {
     row({ id: 'm1', role: 'assistant', sender: 'peri', content: '这是回复内容', time: 't' })
     expect(screen.getByText('这是回复内容')).toBeTruthy()
+  })
+
+  test('assistant 纯文本保留首尾空行与内部空行', () => {
+    const content = '\n第一行\n\n第二行\n'
+    const { container } = render(<AssistantContent text={content} />)
+    expect(container.querySelector('.term-plain-text')?.textContent).toBe(content)
   })
 
   test('assistantDot 开启时渲染圆点', () => {
