@@ -1,4 +1,5 @@
 .app {
+  --titlebar-h: 44px; /* 标题栏高度（terminal-like 44px；modern-gui 覆盖为 58px）。Settings 等全屏覆盖层用此值避让标题栏 */
   display:flex; flex-direction:column; height:100%; position:relative; z-index:1;
   background:color-mix(in srgb,var(--surface-canvas) 42%,transparent);
 }
@@ -312,6 +313,7 @@
 
 /* Modern GUI application shell. Kept mode-scoped so terminal profiles retain their exact geometry. */
 .app[data-interface-mode="modern-gui"] {
+  --titlebar-h: 58px; /* modern-gui 标题栏更高 */
   background:
     radial-gradient(circle at 18% -8%, color-mix(in srgb,var(--accent) 17%,transparent), transparent 34%),
     radial-gradient(circle at 88% 102%, color-mix(in srgb,var(--accent) 9%,transparent), transparent 32%),
@@ -370,4 +372,24 @@
 @media (prefers-reduced-motion:no-preference) {
   .app[data-interface-mode="modern-gui"] .workspace-titlebar { animation:modern-shell-enter 260ms cubic-bezier(.2,.8,.2,1); }
   @keyframes modern-shell-enter { from { opacity:0; transform:translateY(-6px); } }
+}
+
+/* ── Settings 打开态：标题栏除窗口三按钮外全部禁用（视觉保留，不产生新依赖链） ── */
+/* 设置页从上往下让出标题栏；标题栏其它交互（sidebar/sheet/launchers/右栏/界面切换/设置按钮）
+   视觉保留但 pointer-events:none（只禁输入，不变暗，避免"按下像退出"的误感）。 */
+.workspace-titlebar.titlebar-settings-open .workspace-titlebar-sidebar,
+.workspace-titlebar.titlebar-settings-open .workspace-titlebar-workspace,
+.workspace-titlebar.titlebar-settings-open .workspace-titlebar-launchers,
+.workspace-titlebar.titlebar-settings-open .workspace-titlebar-drag,
+.workspace-titlebar.titlebar-settings-open .workspace-window-controls > button:not(.titlebar-window-btn) {
+  pointer-events: none;
+}
+/* 窗口三按钮（最小化/全屏/关闭）保持可点 */
+.workspace-titlebar.titlebar-settings-open .titlebar-window-btn {
+  pointer-events: auto;
+}
+/* 设置打开时标题栏整体层级保持在设置页之上（Settings 从 44px/58px 下开始，露出标题栏） */
+.workspace-titlebar.titlebar-settings-open {
+  position: relative;
+  z-index: 60; /* 高于 Settings 的 z-index:50，确保标题栏（含窗口按钮）在最上可点 */
 }
