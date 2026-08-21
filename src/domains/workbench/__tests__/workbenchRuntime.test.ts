@@ -167,4 +167,32 @@ describe('createPreviewWorkbenchRuntime', () => {
     expect(goal).toHaveBeenCalledTimes(1)
     expect(assist).toHaveBeenCalledTimes(1)
   })
+
+  it('以同一 document 暴露 commands/config selector，并保持 session switch 后旧 generation 隔离', () => {
+    const runtime = createPreviewWorkbenchRuntime(initial())
+    const commands = vi.fn()
+    const config = vi.fn()
+    runtime.subscribeSlice('commands', commands)
+    runtime.subscribeSlice('config', config)
+    const document = createWorkbenchDocument('session-a')
+    runtime.replaceDocument({
+      ...document,
+      session: {
+        ...document.session,
+        commands: [{ name: '/compact', description: 'Compact' }],
+        options: [{ id: 'mode', value: 'fast', editable: true }],
+      },
+    }, { ownerKey: 'owner-a', generation: 4 })
+    expect(runtime.getSlice('commands')).toEqual([{ name: '/compact', description: 'Compact' }])
+    expect(runtime.getSlice('config')).toEqual([{ id: 'mode', value: 'fast', editable: true }])
+    expect(commands).toHaveBeenCalledTimes(1)
+    expect(config).toHaveBeenCalledTimes(1)
+
+    const sessionB = createWorkbenchDocument('session-b')
+    runtime.replaceDocument(sessionB, { ownerKey: 'owner-b', generation: 5 })
+    const revision = runtime.getSnapshot().revision
+    runtime.applyDocument({ ...document, revision: 99 }, { ownerKey: 'owner-a', generation: 4 })
+    expect(runtime.getSnapshot().sessionId).toBe('session-b')
+    expect(runtime.getSnapshot().revision).toBe(revision)
+  })
 })

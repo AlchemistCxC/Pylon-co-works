@@ -9,7 +9,7 @@ export type WorkbenchRuntimeStatus = 'idle' | 'loading' | 'ready' | 'degraded' |
 export type WorkbenchRuntimeSlice =
   | 'document' | 'timeline' | 'messages' | 'activities' | 'interactions'
   | 'session' | 'usage' | 'plan' | 'goal' | 'assist' | 'diagnostics'
-  | 'tasks' | 'streaming' | 'capabilities'
+  | 'config' | 'commands' | 'tasks' | 'streaming' | 'capabilities'
 
 export interface WorkbenchRuntimeSnapshot {
   revision: number
@@ -245,6 +245,8 @@ function selectSlice(snapshot: WorkbenchRuntimeSnapshot, slice: WorkbenchRuntime
     case 'interactions': return document?.interactions ?? []
     case 'session': return document?.session
     case 'usage': return document?.session.usage
+    case 'config': return document?.session.options ?? []
+    case 'commands': return document?.session.commands ?? []
     case 'plan': return document ? selectPlan(document) : undefined
     case 'goal': return document ? selectGoal(document) : undefined
     case 'assist': return document?.timeline.filter(entry => entry.kind === 'assist') ?? []
