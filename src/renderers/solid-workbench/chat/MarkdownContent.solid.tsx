@@ -26,9 +26,9 @@ export function MarkdownContent(props: MarkdownContentProps) {
     : null)
 
   return (
-    <Show when={props.streaming === true && split() !== null} fallback={<MarkdownSegment text={props.text} inline={props.inline} />}>
-      {() => {
-        const { stable, unstable } = split()!
+    <Show when={props.streaming === true ? split() : null} keyed fallback={<MarkdownSegment text={props.text} inline={props.inline} />}>
+      {value => {
+        const { stable, unstable } = value
         return (
           <>
             {stable ? <MarkdownSegment text={stable} inline={props.inline} /> : <MarkdownSegment text="" inline={props.inline} />}
