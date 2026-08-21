@@ -1,3 +1,4 @@
+pub use pylon_core::cli_client::*;
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 use std::collections::HashMap;
@@ -7,7 +8,6 @@ use std::time::Duration;
 use tauri::{AppHandle, Emitter, Manager};
 use tokio::io::{AsyncBufReadExt, AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt, BufReader};
 use tokio::sync::{mpsc, oneshot};
-pub use pylon_core::cli_client::*;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -574,7 +574,6 @@ fn windows_client_is_current_user(
         same
     }
 }
-
 
 #[cfg(unix)]
 async fn run_server(app: AppHandle, bridge: Arc<PylonCliBridge>) -> Result<(), String> {

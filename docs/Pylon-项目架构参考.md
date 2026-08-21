@@ -5,7 +5,9 @@
 > 适用仓库：`prism-desktop`  
 > 阅读规则：后续任务先读本文，再只核验涉及区域；除非命中“全量复核触发条件”，不要重新扫描整个仓库。
 
-当前 Kernel 加固的决策、问题编号、施工阶段和进度见 [`Pylon-Kernel-施工台账.md`](Pylon-Kernel-施工台账.md)。
+当前 Kernel 加固的决策、问题编号、施工阶段和进度见 [`Docs/Archive/Pylon-Kernel-施工台账.md`](../../Docs/Archive/Pylon-Kernel-施工台账.md)。
+
+插件 Host、五个 Product Plugin、前端 registries/consumers、Tauri IPC、Rust Kernel、native package/process supervisor 与外部进程的细粒度依赖见 [`Pylon-插件化前后端拓扑全图.md`](Pylon-插件化前后端拓扑全图.md)。该图同时用虚线标出 Renderer Suite 施工规划，虚线不得视为当前实现。
 
 ## 1. 文档目的
 
@@ -359,7 +361,7 @@ stateDiagram-v2
 
 ## 14. 已确认产品决策
 
-D1–D17 已全部确认，以 [`Pylon-Kernel-施工台账.md`](Pylon-Kernel-施工台账.md) 第 2 节为唯一决策记录。特别是：canonical journal 是唯一 durable history；重放只深化同一 journal，不另建中央；第三方插件视为完全可信本机代码，但仍须故障隔离。
+D1–D17 已全部确认，以 [`Docs/Archive/Pylon-Kernel-施工台账.md`](../../Docs/Archive/Pylon-Kernel-施工台账.md) 第 2 节为唯一决策记录。特别是：canonical journal 是唯一 durable history；重放只深化同一 journal，不另建中央；第三方插件视为完全可信本机代码，但仍须故障隔离。
 
 ## 15. 已完成的加固顺序
 
@@ -400,6 +402,7 @@ cargo test --manifest-path src-tauri/pylon-core/Cargo.toml
 | Plugin 架构边界 | Kernel bootstrap + contract/scope/runtime/package + product port/sink 13 文件矩阵；静态 contribution boundary |
 | Kernel mount/recovery | `src/kernel/__tests__` + application runtime tests |
 | Renderer/Workbench | Solid Workbench tests + `check:solid` |
+| Renderer Suite 基建（规划） | render kind/suite/slot registry + candidate graph + Suite Host + settings/selection + real package integration |
 
 跨层错误必须补跨层回归测试；单 module 测试通过不能证明调用方使用了相同 key、相同 ordering 或相同错误语义。
 

@@ -650,7 +650,10 @@ mod tests {
         );
         // peri：binding 命中 + GUI source（无 binding）；hermes：平台前缀但无 binding
         let peri = runtime_with(&[
-            ("qq:user:demo-user", session("peri-1", "平台会话", "deepseek")),
+            (
+                "qq:user:demo-user",
+                session("peri-1", "平台会话", "deepseek"),
+            ),
             ("local:gui", session("gui-1", "GUI", "deepseek")),
         ]);
         let hermes = runtime_with(&[(

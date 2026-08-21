@@ -1099,7 +1099,11 @@ mod tests {
             .iter()
             .filter_map(|p| p["id"].as_str())
             .collect();
-        assert_eq!(profile_ids, vec!["profile-a", "profile-b"], "profile 未被移除");
+        assert_eq!(
+            profile_ids,
+            vec!["profile-a", "profile-b"],
+            "profile 未被移除"
+        );
     }
 
     #[test]

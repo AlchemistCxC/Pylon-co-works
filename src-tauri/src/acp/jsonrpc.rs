@@ -224,9 +224,7 @@ fn evaluate_truncation(
     let now = std::time::Instant::now();
     let elapsed = now.duration_since(start);
     // 活动"在本回合发送之后"才算本回合已开始（dispatcher 对历史回合的活动不计入）。
-    let active_after_start = last_activity
-        .map(|t| t >= start)
-        .unwrap_or(false);
+    let active_after_start = last_activity.map(|t| t >= start).unwrap_or(false);
     let reason = if active_after_start {
         // 已开始：按闲置判定。
         if let Some(last) = last_activity {
