@@ -262,7 +262,7 @@ describe('projectMessagesFromCanonical', () => {
     expect(messages).toHaveLength(3)
   })
 
-  it('Bug2 回归：实时 canonical 缺少用户行时，从 history.snapshot 补回用户但不改变 Agent 顺序', () => {
+  it('A05：实时 canonical 缺少用户行时，不从 history.snapshot 合成用户消息', () => {
     const messages = projectMessagesFromCanonical([
       // 模拟旧/部分 journal：实时行只有 Agent 内容，用户消息仅存在于重放快照。
       event({ sequence: 1, eventType: 'assistant.text.delta', text: '回复' }),
@@ -294,7 +294,6 @@ describe('projectMessagesFromCanonical', () => {
     ])
 
     expect(messages.map(message => [message.role, message.content])).toEqual([
-      ['user', '问题'],
       ['assistant', '回复'],
     ])
   })

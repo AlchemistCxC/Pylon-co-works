@@ -245,6 +245,9 @@ export function useSessionLifecycle(
         }
         const observedCanonicalRevision = canonicalRows.reduce((max, row) => Math.max(max, row.sequence), 0)
         controllerHandleRef.current?.seedCanonicalCursor?.(ownerKey, observedCanonicalRevision)
+        const projectionRows = loadResult.authority === 'local-journal'
+          ? canonicalRows.filter(row => row.provenance?.origin === 'local-observed' && row.provenance.trust === 'authoritative')
+          : canonicalRows
         recordChatReplayTrace({
           kind: 'load-response',
           ownerSessionId: s.id,
@@ -262,16 +265,17 @@ export function useSessionLifecycle(
             observedCanonicalRevision,
           },
         })
-        const resolved = controllerHandleRef.current && lockGeneration !== undefined && canonicalRows.length > 0
+        const replayFallbackAllowed = replayMetadata.complete && loadResult.authority !== 'local-journal'
+        const resolved = controllerHandleRef.current && lockGeneration !== undefined && projectionRows.length > 0
           ? controllerHandleRef.current.commitCanonicalProjection(
               s.source,
               lockGeneration,
-              projectMessagesFromCanonical(canonicalRows),
+              projectMessagesFromCanonical(projectionRows),
               observedCanonicalRevision,
             )
-          : controllerHandleRef.current && lockGeneration !== undefined
+            : controllerHandleRef.current && lockGeneration !== undefined && replayFallbackAllowed
             ? controllerHandleRef.current.commitReplaySnapshot(s.source, lockGeneration, replay)
-          : resolveLoadedMessages({ loadSucceeded: true, cached, replayed: [] })
+            : resolveLoadedMessages({ loadSucceeded: true, cached, replayed: [] })
         recordChatReplayTrace({ kind: 'load-commit', ownerSessionId: s.id, source: s.source, generation: loadGeneration, ...safeContentEvidence(resolved) })
         if (sessionRef.current === s.source) {
           setReplayIntegrity(replayMetadata.complete ? null : { sessionId: s.id, metadata: replayMetadata })

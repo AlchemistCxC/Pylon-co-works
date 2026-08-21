@@ -67,34 +67,6 @@ function stringifyOutput(rawOutput: unknown): string {
   return json ?? ''
 }
 
-function stripReplayPersonaPrefix(content: string): string {
-  const separator = '\n\n---\n\n'
-  const index = content.lastIndexOf(separator)
-  if (index < 0) return content
-  const stripped = content.slice(index + separator.length)
-  return stripped || content
-}
-
-/** Expand only the raw replay events needed to recover missing user turns. */
-function replayEventsFromSnapshot(marker: CanonicalConversationEvent): CanonicalConversationEvent[] {
-  if (marker.eventType !== 'history.snapshot' || !marker.rawPayload || typeof marker.rawPayload !== 'object') return []
-  const replayEvents = (marker.rawPayload as { replayEvents?: unknown }).replayEvents
-  if (!Array.isArray(replayEvents)) return []
-  return replayEvents.map((raw, index) => {
-    const normalized = normalizeRawEvent(raw, {
-      owner: marker.owner,
-      clientGeneration: marker.clientGeneration,
-      sequence: index + 1,
-      receivedAt: marker.receivedAt,
-    }).event
-    const typed = normalized.typedPayload as { text?: unknown } | undefined
-    const event = normalized.eventType === 'user.message' && typeof typed?.text === 'string'
-      ? { ...normalized, typedPayload: { ...typed, text: stripReplayPersonaPrefix(typed.text) } }
-      : normalized
-    return { ...event, eventId: `${marker.eventId}/replay/${index + 1}` }
-  })
-}
-
 function eventProjectionKey(event: CanonicalConversationEvent): string {
   const typed = event.typedPayload as { text?: unknown; tool?: { rawInput?: unknown } } | undefined
   return JSON.stringify([
@@ -204,32 +176,10 @@ export function effectiveCanonicalProjectionEvents(
     return merged.map((event, index) => ({ ...event, sequence: index + 1 }))
   }
   // 正常路径优先使用逐条 durable live rows，避免 snapshot 的分组顺序覆盖工具/文字交错。
-  // 兼容一种已经存在的 journal：live rows 只有 Agent 事件，用户事件只留在 snapshot。
-  // 只有在 live 完全没有 user.message 时才补用户，避免把 snapshot 的旧/重复内容混入
-  // 一个已经拥有用户 canonical 行的完整 journal。
-  if (live.some(event => event.eventType === 'user.message')) return live
-  const marker = [...sorted].reverse().find(event => event.eventType === 'history.snapshot')
-  if (!marker) return live
-  const snapshot = replayEventsFromSnapshot(marker)
-  const users = snapshot.filter(event => event.eventType === 'user.message')
-  if (users.length === 0) return live
-
-  const merged = [...live]
-  let insertionFloor = 0
-  for (const user of users) {
-    const snapshotIndex = snapshot.indexOf(user)
-    const nextLiveSnapshotEvent = snapshot
-      .slice(snapshotIndex + 1)
-      .find(event => event.eventType !== 'user.message')
-    const anchor = nextLiveSnapshotEvent
-      ? live.find(event => eventProjectionKey(event) === eventProjectionKey(nextLiveSnapshotEvent))
-      : undefined
-    const anchorIndex = anchor ? merged.findIndex(event => event.eventId === anchor.eventId) : -1
-    const position = anchorIndex >= insertionFloor ? anchorIndex : insertionFloor
-    merged.splice(Math.min(position, merged.length), 0, user)
-    insertionFloor = position + 1
-  }
-  return merged.map((event, index) => ({ ...event, sequence: index + 1 }))
+  // history.snapshot is retained only as forensic evidence. It is never a second
+  // projection source: missing local facts must be reported by recovery, not synthesized
+  // in the renderer from an unverified agent replay payload.
+  return live
 }
 
 /** 内置投影实现（core.projector.canonicalMessage 与无插件回退共用）。 */

@@ -165,6 +165,7 @@ describe('session/load failure policy (D5)', () => {
       droppedCount: 1,
       boundary: { observedCount: 3, retainedStartOrdinal: 2, retainedEndOrdinal: 3 },
     }))
+    expect(mocks.controller.commitReplaySnapshot).not.toHaveBeenCalled()
     expect(result.current.recoveryFailure).toBeNull()
   })
 })

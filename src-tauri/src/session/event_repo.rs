@@ -1285,6 +1285,28 @@ impl EventRepo {
         })
     }
 
+    /// Return whether this owner already has a trusted local observation. Replay is only a
+    /// recovery source when the journal has no such row; recovery-import rows never establish
+    /// local authority and therefore cannot make a later replay overwrite local facts.
+    fn has_authoritative_local_events(&self, owner_key: &str) -> Result<bool, EventError> {
+        let conn = self
+            .conn
+            .lock()
+            .map_err(|_| EventError::Unavailable("event repo lock poisoned".into()))?;
+        conn.query_row(
+            "SELECT EXISTS(
+                SELECT 1 FROM canonical_events
+                WHERE owner_key = ?1
+                  AND provenance_origin = 'local-observed'
+                  AND provenance_trust = 'authoritative'
+            )",
+            params![owner_key],
+            |row| row.get::<_, i64>(0),
+        )
+        .map(|value| value != 0)
+        .map_err(EventError::from)
+    }
+
     /// 游标分页：返回 sequence < before_seq 的最新 limit 条（升序，无 OFFSET）。
     /// before_seq = None 取最新一页；上页最旧一条的 sequence 为下一页游标。
     pub(crate) fn list_events(
@@ -1508,9 +1530,9 @@ impl EventService {
             })?
     }
 
-    /// Import a complete session/load replay into the single owner journal. An empty journal gets
-    /// ordinary normalized rows; an existing partial journal gets missing normalized replay rows
-    /// plus one append-only history.snapshot compatibility checkpoint.
+    /// Import a complete session/load replay into the single owner journal. Only an empty journal
+    /// may be imported. Any trusted local observation wins; a revision race is treated as local
+    /// authority (or an idempotent unverified import), never as permission to append a snapshot.
     pub(crate) async fn ingest_complete_replay(
         &self,
         owner: DurableSessionOwner,
@@ -1523,6 +1545,16 @@ impl EventService {
         let received_at = chrono::Utc::now().to_rfc3339_opts(chrono::SecondsFormat::Millis, true);
         let repo = self.repo.clone();
         tokio::task::spawn_blocking(move || {
+            let owner_key = owner
+                .key()
+                .map_err(|error| EventError::Invalid(error.to_string()))?;
+            if repo.has_authoritative_local_events(&owner_key)? {
+                return Ok(ReplayJournalIngestResult {
+                    events: Vec::new(),
+                    revision: repo.revision(&owner_key)?,
+                    status: "local-authoritative",
+                });
+            }
             let replay_events = raw_events
                 .into_iter()
                 .map(|raw| mark_replay_import(&owner, raw))
@@ -1531,10 +1563,11 @@ impl EventService {
                 let owner_key = owner
                     .key()
                     .map_err(|error| EventError::Invalid(error.to_string()))?;
+                let revision = repo.revision(&owner_key)?;
                 return Ok(ReplayJournalIngestResult {
                     events: Vec::new(),
-                    revision: repo.revision(&owner_key)?,
-                    status: "already-present",
+                    revision,
+                    status: if revision == 0 { "empty" } else { "already-imported" },
                 });
             }
             let mut events = Vec::with_capacity(replay_events.len());
@@ -1559,13 +1592,18 @@ impl EventService {
                     revision: result.revision,
                     status: "imported",
                 }),
-                Err(EventError::RevisionConflict { .. }) => repo.append_replay_snapshot(
-                    owner,
-                    remote_session_id,
-                    client_generation,
-                    received_at,
-                    replay_events,
-                ),
+                Err(EventError::RevisionConflict { .. }) => {
+                    let local_authority = repo.has_authoritative_local_events(&owner_key)?;
+                    Ok(ReplayJournalIngestResult {
+                        events: Vec::new(),
+                        revision: repo.revision(&owner_key)?,
+                        status: if local_authority {
+                            "local-authoritative"
+                        } else {
+                            "already-imported"
+                        },
+                    })
+                }
                 Err(error) => Err(error),
             }
         })
@@ -1582,6 +1620,21 @@ impl EventService {
             .await
             .map_err(|error| {
                 EventError::Unavailable(format!("event repo revision task failed: {error}"))
+            })?
+    }
+
+    /// Read-only authority probe used before deciding how an incomplete replay may be surfaced.
+    /// It deliberately ignores recovery-import rows: only durable local observations establish
+    /// the local journal as the load authority.
+    pub(crate) async fn has_authoritative_local_events(
+        &self,
+        owner_key: String,
+    ) -> Result<bool, EventError> {
+        let repo = self.repo.clone();
+        tokio::task::spawn_blocking(move || repo.has_authoritative_local_events(&owner_key))
+            .await
+            .map_err(|error| {
+                EventError::Unavailable(format!("event repo authority task failed: {error}"))
             })?
     }
 
@@ -1841,14 +1894,17 @@ mod tests {
             imported.events[0].raw_payload["update"]["_meta"]["pylonReplayImport"],
             true
         );
-
+        assert!(imported.events.iter().all(|event| {
+            event.provenance_origin == "recovery-import"
+                && event.provenance_trust == "unverified"
+        }));
         let skipped = service
             .ingest_complete_replay(owner, Some("remote-1".to_string()), 7, replay)
             .await
             .expect("existing journal wins");
         assert!(skipped.events.is_empty());
         assert_eq!(skipped.revision, 2);
-        assert_eq!(skipped.status, "already-present");
+        assert_eq!(skipped.status, "already-imported");
 
         let empty_observation = service
             .ingest_complete_replay(
@@ -1861,11 +1917,24 @@ mod tests {
             .expect("empty replay still reports the journal revision");
         assert!(empty_observation.events.is_empty());
         assert_eq!(empty_observation.revision, 2);
-        assert_eq!(empty_observation.status, "already-present");
+        assert_eq!(empty_observation.status, "already-imported");
+
+        let empty_session = service
+            .ingest_complete_replay(
+                DurableSessionOwner::new("p1", "peri", "local:empty"),
+                Some("remote-empty".to_string()),
+                7,
+                Vec::new(),
+            )
+            .await
+            .expect("empty journal and replay");
+        assert_eq!(empty_session.status, "empty");
+        assert_eq!(empty_session.revision, 0);
+        assert!(empty_session.events.is_empty());
     }
 
     #[tokio::test]
-    async fn complete_replay_appends_one_idempotent_snapshot_to_a_partial_journal() {
+    async fn complete_replay_does_not_reconcile_a_partial_local_journal() {
         let service = EventService::in_memory().expect("event service");
         let owner = DurableSessionOwner::new("p1", "peri", "local:s1");
         service
@@ -1894,26 +1963,106 @@ mod tests {
             )
             .await
             .expect("reconcile partial journal");
-        assert_eq!(reconciled.status, "reconciled");
-        assert_eq!(reconciled.revision, 3);
-        assert_eq!(reconciled.events[0].event_type, "assistant.text.delta");
-        assert_eq!(
-            reconciled.events[0].raw_payload["update"]["_meta"]["pylonCanonicalRecovery"],
-            true
-        );
-        assert_eq!(reconciled.events[1].event_type, "history.snapshot");
+        assert_eq!(reconciled.status, "local-authoritative");
+        assert_eq!(reconciled.revision, 1);
+        assert!(reconciled.events.is_empty());
 
         let repeated = service
             .ingest_complete_replay(owner, Some("remote-1".to_string()), 7, replay)
             .await
             .expect("same snapshot is idempotent");
-        assert_eq!(repeated.status, "already-present");
-        assert_eq!(repeated.revision, 3);
+        assert_eq!(repeated.status, "local-authoritative");
+        assert_eq!(repeated.revision, 1);
         assert!(repeated.events.is_empty());
     }
 
     #[tokio::test]
-    async fn partial_replay_migrates_missing_user_turns_into_canonical_rows() {
+    async fn local_journal_authority_never_imports_replay_or_snapshot() {
+        let service = EventService::in_memory().expect("event service");
+        let owner = DurableSessionOwner::new("p1", "peri", "local:local-wins");
+        service
+            .ingest_event(
+                owner.clone(),
+                Some("remote-1".to_string()),
+                7,
+                serde_json::json!({
+                    "source": "local:local-wins",
+                    "update": { "sessionUpdate": "agent_message_chunk", "content": { "text": "local" } }
+                }),
+            )
+            .await
+            .expect("local row");
+
+        let result = service
+            .ingest_complete_replay(
+                owner.clone(),
+                Some("remote-1".to_string()),
+                7,
+                vec![serde_json::json!({
+                    "sessionId": "remote-1",
+                    "update": { "sessionUpdate": "agent_message_chunk", "content": { "text": "replay" } }
+                })],
+            )
+            .await
+            .expect("local authority should short-circuit replay import");
+
+        assert_eq!(result.status, "local-authoritative");
+        assert!(result.events.is_empty());
+        assert_eq!(result.revision, 1);
+
+        let page = service
+            .list_events(owner.key().expect("owner key"), None, 100)
+            .await
+            .expect("list local journal");
+        assert_eq!(page.events.len(), 1);
+        assert_eq!(page.events[0].typed_payload.as_ref().unwrap()["text"], "local");
+        assert!(page.events.iter().all(|event| event.event_type != "history.snapshot"));
+    }
+
+    #[tokio::test]
+    async fn untrusted_existing_rows_never_trigger_snapshot_reconciliation() {
+        let service = EventService::in_memory().expect("event service");
+        let owner = DurableSessionOwner::new("p1", "peri", "local:untrusted");
+        service
+            .append_events(
+                vec![event_json(
+                    "peri",
+                    "local:untrusted",
+                    1,
+                    "assistant.text.delta",
+                    serde_json::json!({ "text": "forensic" }),
+                )],
+                None,
+            )
+            .await
+            .expect("existing untrusted row");
+
+        let result = service
+            .ingest_complete_replay(
+                owner.clone(),
+                Some("remote-1".to_string()),
+                7,
+                vec![serde_json::json!({
+                    "sessionId": "remote-1",
+                    "update": { "sessionUpdate": "assistant_message_chunk", "content": { "text": "replay" } }
+                })],
+            )
+            .await
+            .expect("replay must remain non-destructive");
+        assert_eq!(result.status, "already-imported");
+        assert_eq!(result.revision, 1);
+        assert!(result.events.is_empty());
+
+        let page = service
+            .list_events(owner.key().expect("owner key"), None, 100)
+            .await
+            .expect("list journal");
+        assert_eq!(page.events.len(), 1);
+        assert!(page.events.iter().all(|event| event.event_type != "history.snapshot"));
+    }
+
+    #[tokio::test]
+    async fn partial_replay_does_not_fill_missing_user_turns_when_local_rows_exist() {
         let service = EventService::in_memory().expect("event service");
         let owner = DurableSessionOwner::new("p1", "peri", "local:s1");
         service
@@ -1954,35 +2103,20 @@ mod tests {
             )
             .await
             .expect("reconcile partial journal");
-        assert_eq!(reconciled.status, "reconciled");
-        assert_eq!(reconciled.revision, 4);
-        assert_eq!(
-            reconciled
-                .events
-                .iter()
-                .map(|event| event.event_type.as_str())
-                .collect::<Vec<_>>(),
-            vec!["user.message", "assistant.text.delta", "history.snapshot"]
-        );
-        assert_eq!(
-            reconciled.events[0].typed_payload.as_ref().unwrap()["text"],
-            "question"
-        );
-        assert_eq!(
-            reconciled.events[0].raw_payload["update"]["_meta"]["pylonCanonicalRecovery"],
-            true
-        );
+        assert_eq!(reconciled.status, "local-authoritative");
+        assert_eq!(reconciled.revision, 1);
+        assert!(reconciled.events.is_empty());
         let repeated = service
             .ingest_complete_replay(owner, Some("remote-1".to_string()), 7, replay)
             .await
             .expect("recovery is idempotent");
-        assert_eq!(repeated.status, "already-present");
-        assert_eq!(repeated.revision, 4);
+        assert_eq!(repeated.status, "local-authoritative");
+        assert_eq!(repeated.revision, 1);
         assert!(repeated.events.is_empty());
     }
 
     #[tokio::test]
-    async fn existing_snapshot_only_journal_is_repaired_without_a_second_snapshot() {
+    async fn existing_snapshot_only_journal_is_not_repaired_when_local_authority_exists() {
         let service = EventService::in_memory().expect("event service");
         let owner = DurableSessionOwner::new("p1", "peri", "local:s1");
         service
@@ -2038,10 +2172,9 @@ mod tests {
             .ingest_complete_replay(owner, Some("remote-1".to_string()), 7, replay)
             .await
             .expect("repair snapshot-only journal");
-        assert_eq!(repaired.status, "reconciled");
-        assert_eq!(repaired.revision, 3);
-        assert_eq!(repaired.events.len(), 1);
-        assert_eq!(repaired.events[0].event_type, "user.message");
+        assert_eq!(repaired.status, "local-authoritative");
+        assert_eq!(repaired.revision, 2);
+        assert!(repaired.events.is_empty());
     }
 
     #[tokio::test]

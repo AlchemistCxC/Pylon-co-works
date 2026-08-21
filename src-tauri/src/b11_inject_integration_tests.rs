@@ -356,6 +356,9 @@ async fn complete_session_load_replay_is_imported_into_the_empty_kernel_journal(
     .expect("complete replay load");
     assert_eq!(result["canonicalRevision"], 2);
     assert_eq!(result["replayJournalStatus"], "imported");
+    assert_eq!(result["authority"], "recovery-import");
+    assert_eq!(result["journalCoverage"], "unverified-import");
+    assert_eq!(result["collection"]["complete"], true);
 
     let page = events
         .list_events(owner.key().unwrap(), None, 10)

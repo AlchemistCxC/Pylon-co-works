@@ -55,7 +55,12 @@ export interface PersistedSessionLoadResult {
   replay: unknown[]
   replayMetadata: ReplayMetadata
   canonicalRevision: number
-  replayJournalStatus: 'imported' | 'reconciled' | 'already-present' | 'incomplete-not-imported' | 'metadata-unavailable'
+  replayJournalStatus: 'imported' | 'reconciled' | 'already-present' | 'already-imported' | 'local-authoritative' | 'incomplete-not-imported' | 'metadata-unavailable'
+  authority: 'local-journal' | 'recovery-import' | 'empty'
+  journalCoverage: 'local-observed' | 'unverified-import' | 'empty' | 'corrupt'
+  collection: { complete: boolean; truncated: boolean; droppedCount: number }
+  import?: { importId: string; status: 'imported' | 'already-imported'; trust: 'unverified' }
+  diagnostics: readonly unknown[]
 }
 
 function finiteNonNegativeInteger(value: unknown): number | null {
@@ -100,6 +105,14 @@ export function normalizePersistedSessionLoadResult(raw: unknown): PersistedSess
     && observedCount === replay.length + droppedCount
     && boundaryCandidate?.kind === 'session-load-response'
     && validRange
+  const replayJournalStatus: PersistedSessionLoadResult['replayJournalStatus'] = record.replayJournalStatus === 'imported'
+    || record.replayJournalStatus === 'reconciled'
+    || record.replayJournalStatus === 'already-present'
+    || record.replayJournalStatus === 'already-imported'
+    || record.replayJournalStatus === 'local-authoritative'
+    || record.replayJournalStatus === 'incomplete-not-imported'
+    ? record.replayJournalStatus
+    : 'metadata-unavailable'
 
   return {
     response: 'response' in record ? record.response : raw,
@@ -126,12 +139,58 @@ export function normalizePersistedSessionLoadResult(raw: unknown): PersistedSess
       },
     },
     canonicalRevision: finiteNonNegativeInteger(record.canonicalRevision) ?? 0,
-    replayJournalStatus: record.replayJournalStatus === 'imported'
-      || record.replayJournalStatus === 'reconciled'
-      || record.replayJournalStatus === 'already-present'
-      || record.replayJournalStatus === 'incomplete-not-imported'
-      ? record.replayJournalStatus
-      : 'metadata-unavailable',
+    replayJournalStatus,
+    authority: record.authority === 'local-journal'
+      || record.authority === 'recovery-import'
+      ? record.authority
+      : replayJournalStatus === 'local-authoritative'
+        ? 'local-journal'
+        : replayJournalStatus === 'imported'
+          || replayJournalStatus === 'already-imported'
+          || replayJournalStatus === 'already-present'
+          || replayJournalStatus === 'reconciled'
+          || (replayJournalStatus === 'incomplete-not-imported'
+            && (finiteNonNegativeInteger(record.canonicalRevision) ?? 0) > 0)
+          ? 'recovery-import'
+          : 'empty',
+    journalCoverage: record.journalCoverage === 'local-observed'
+      || record.journalCoverage === 'unverified-import'
+      || record.journalCoverage === 'corrupt'
+      ? record.journalCoverage
+      : replayJournalStatus === 'local-authoritative'
+        ? 'local-observed'
+        : replayJournalStatus === 'imported'
+          || replayJournalStatus === 'already-imported'
+          || replayJournalStatus === 'already-present'
+          || replayJournalStatus === 'reconciled'
+          || (replayJournalStatus === 'incomplete-not-imported'
+            && (finiteNonNegativeInteger(record.canonicalRevision) ?? 0) > 0)
+          ? 'unverified-import'
+          : 'empty',
+    collection: {
+      complete: typeof (record.collection as Record<string, unknown> | undefined)?.complete === 'boolean'
+        ? (record.collection as Record<string, unknown>).complete as boolean
+        : valid ? complete! : false,
+      truncated: typeof (record.collection as Record<string, unknown> | undefined)?.truncated === 'boolean'
+        ? (record.collection as Record<string, unknown>).truncated as boolean
+        : valid ? truncated! : false,
+      droppedCount: finiteNonNegativeInteger((record.collection as Record<string, unknown> | undefined)?.droppedCount)
+        ?? (valid ? droppedCount! : 0),
+    },
+    import: (() => {
+      const candidate = record.import && typeof record.import === 'object'
+        ? record.import as Record<string, unknown>
+        : undefined
+      if (typeof candidate?.importId !== 'string' || candidate.importId.length === 0) return undefined
+      if (candidate.trust !== 'unverified') return undefined
+      if (candidate.status !== 'imported' && candidate.status !== 'already-imported') return undefined
+      return {
+        importId: candidate.importId,
+        status: candidate.status,
+        trust: 'unverified' as const,
+      }
+    })(),
+    diagnostics: Array.isArray(record.diagnostics) ? record.diagnostics : [],
   }
 }
 

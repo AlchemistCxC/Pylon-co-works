@@ -10,6 +10,27 @@ struct PersistedSessionLoadResult {
     replay_metadata: crate::acp::ReplayMetadata,
     canonical_revision: i64,
     replay_journal_status: &'static str,
+    authority: &'static str,
+    journal_coverage: &'static str,
+    collection: ReplayCollection,
+    import: Option<ReplayImport>,
+    diagnostics: Vec<serde_json::Value>,
+}
+
+#[derive(Debug, serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+struct ReplayCollection {
+    complete: bool,
+    truncated: bool,
+    dropped_count: u64,
+}
+
+#[derive(Debug, serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+struct ReplayImport {
+    import_id: String,
+    status: &'static str,
+    trust: &'static str,
 }
 
 #[tauri::command]
@@ -85,10 +106,14 @@ pub(crate) async fn load_persisted_session(
                         .await?;
                     Ok((ingest.revision, ingest.status))
                 } else {
-                    let revision = crate::session::event_service_of(state.inner())?
-                        .revision(owner_key)
-                        .await?;
-                    Ok((revision, "incomplete-not-imported"))
+                    let events = crate::session::event_service_of(state.inner())?;
+                    let revision = events.revision(owner_key.clone()).await?;
+                    let status = if events.has_authoritative_local_events(owner_key.clone()).await? {
+                        "local-authoritative"
+                    } else {
+                        "incomplete-not-imported"
+                    };
+                    Ok((revision, status))
                 }
             }
             .await;
@@ -101,7 +126,7 @@ pub(crate) async fn load_persisted_session(
             };
             let persisted_state_result: Result<Option<serde_json::Value>, PylonError> = async {
                 crate::session::message_service_of(state.inner())?
-                    .get_session_state(owner)
+                    .get_session_state(owner.clone())
                     .await
                     .map_err(Into::into)
             }
@@ -139,12 +164,59 @@ pub(crate) async fn load_persisted_session(
                     "stale session mapping for source: {source}"
                 )));
             }
+            let authority = match replay_journal_status {
+                "local-authoritative" => "local-journal",
+                "imported" | "already-imported" | "already-present" | "reconciled" => "recovery-import",
+                _ if canonical_revision > 0 => "recovery-import",
+                _ => "empty",
+            };
+            let journal_coverage = match replay_journal_status {
+                "local-authoritative" => "local-observed",
+                "imported" | "already-imported" | "already-present" | "reconciled" => "unverified-import",
+                _ if canonical_revision > 0 => "unverified-import",
+                _ => "empty",
+            };
+            let collection = ReplayCollection {
+                complete: replay.metadata.complete,
+                truncated: replay.metadata.truncated,
+                dropped_count: replay.metadata.dropped_count,
+            };
+            let import = match replay_journal_status {
+                "imported" => Some(ReplayImport {
+                    import_id: format!("{}:{}:{}", owner.agent_id, owner.local_session_id, peri_id),
+                    status: "imported",
+                    trust: "unverified",
+                }),
+                "already-imported" | "already-present" => Some(ReplayImport {
+                    import_id: format!("{}:{}:{}", owner.agent_id, owner.local_session_id, peri_id),
+                    status: "already-imported",
+                    trust: "unverified",
+                }),
+                _ => None,
+            };
+            let diagnostics = if replay.metadata.complete {
+                Vec::new()
+            } else {
+                vec![serde_json::json!({
+                    "code": "replay_incomplete",
+                    "owner": owner_key,
+                    "provider": owner.agent_id,
+                    "stage": "session/load",
+                    "revision": canonical_revision,
+                    "recoverability": "retry-or-export",
+                })]
+            };
             serde_json::to_value(PersistedSessionLoadResult {
                 response,
                 replay: replay.events,
                 replay_metadata: replay.metadata,
                 canonical_revision,
                 replay_journal_status,
+                authority,
+                journal_coverage,
+                collection,
+                import,
+                diagnostics,
             })
             .map_err(|error| PylonError::from(error.to_string()))
         }

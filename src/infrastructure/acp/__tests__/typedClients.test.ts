@@ -182,6 +182,41 @@ describe('sessionClient', () => {
     expect(result.replayJournalStatus).toBe('reconciled')
   })
 
+  it('loadPersistedSession 保留 journal authority 与 unverified import contract', async () => {
+    const invoke = new FakeInvoke().register('load_persisted_session', () => ({
+      response: {},
+      replay: [],
+      replayMetadata: {
+        complete: true,
+        truncated: false,
+        droppedCount: 0,
+        boundary: {
+          kind: 'session-load-response',
+          observedCount: 0,
+          retainedStartOrdinal: null,
+          retainedEndOrdinal: null,
+        },
+      },
+      canonicalRevision: 2,
+      replayJournalStatus: 'local-authoritative',
+      authority: 'local-journal',
+      journalCoverage: 'local-observed',
+      collection: { complete: true, truncated: false, droppedCount: 0 },
+      diagnostics: [],
+    }))
+    const client = createSessionClient({ invoke: (cmd, args) => invoke.invoke(cmd, args) })
+    const result = await client.loadPersistedSession({
+      owner: { profileId: 'profile-a', agentId: 'peri', localSessionId: 'local:authority' },
+      periId: 'remote-authority',
+    })
+
+    expect(result.authority).toBe('local-journal')
+    expect(result.journalCoverage).toBe('local-observed')
+    expect(result.collection).toEqual({ complete: true, truncated: false, droppedCount: 0 })
+    expect(result.diagnostics).toEqual([])
+    expect(result.import).toBeUndefined()
+  })
+
   it('缺失 replay metadata 时明确标为不可验证，而非伪装 complete', async () => {
     const invoke = new FakeInvoke().register('load_persisted_session', () => ({
       response: {}, replay: [{ update: 1 }],
