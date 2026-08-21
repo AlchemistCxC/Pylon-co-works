@@ -2,13 +2,14 @@ import type { Message } from '../../components/chat/messageTypes.ts'
 import type { PlanEntry } from '../tasks/planTypes.ts'
 import type { GenerationPhase, GenerationSummary } from './generationFooterContracts.ts'
 import type { WorkbenchDocument, WorkbenchMessage } from './workbenchProjector.ts'
-import { createWorkbenchDocument } from './workbenchProjector.ts'
+import { createWorkbenchDocument, selectGoal, selectPlan } from './workbenchProjector.ts'
 
 export type WorkbenchRuntimeStatus = 'idle' | 'loading' | 'ready' | 'degraded' | 'error'
 
 export type WorkbenchRuntimeSlice =
   | 'document' | 'timeline' | 'messages' | 'activities' | 'interactions'
-  | 'session' | 'usage' | 'diagnostics' | 'tasks' | 'streaming' | 'capabilities'
+  | 'session' | 'usage' | 'plan' | 'goal' | 'assist' | 'diagnostics'
+  | 'tasks' | 'streaming' | 'capabilities'
 
 export interface WorkbenchRuntimeSnapshot {
   revision: number
@@ -244,6 +245,9 @@ function selectSlice(snapshot: WorkbenchRuntimeSnapshot, slice: WorkbenchRuntime
     case 'interactions': return document?.interactions ?? []
     case 'session': return document?.session
     case 'usage': return document?.session.usage
+    case 'plan': return document ? selectPlan(document) : undefined
+    case 'goal': return document ? selectGoal(document) : undefined
+    case 'assist': return document?.timeline.filter(entry => entry.kind === 'assist') ?? []
     case 'diagnostics': return document?.diagnostics ?? []
     case 'tasks': return snapshot.tasks
     case 'streaming': return { text: snapshot.streamingText, thinking: snapshot.streamingThinking }

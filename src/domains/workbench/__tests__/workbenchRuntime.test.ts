@@ -144,4 +144,27 @@ describe('createPreviewWorkbenchRuntime', () => {
     expect(listeners.session).not.toHaveBeenCalled()
     expect(listeners.diagnostics).not.toHaveBeenCalled()
   })
+
+  it('暴露 plan、goal、assist 语义 slice，并只通知受影响的 slice', () => {
+    const runtime = createPreviewWorkbenchRuntime(initial())
+    const plan = vi.fn()
+    const goal = vi.fn()
+    const assist = vi.fn()
+    runtime.subscribeSlice('plan', plan)
+    runtime.subscribeSlice('goal', goal)
+    runtime.subscribeSlice('assist', assist)
+    const document = createWorkbenchDocument('session-a')
+    runtime.replaceDocument({
+      ...document,
+      plan: { ...document.plan, entries: [{ id: 'p1', content: 'ship', status: 'in_progress' }] },
+      goal: { current: { goalId: 'g1', objective: 'ship', status: 'active' } },
+      timeline: [{ id: 'a1', sequence: 1, eventId: 'a1', kind: 'assist', summary: 'hint' }],
+    }, { ownerKey: 'owner-a', generation: 1 })
+    expect(runtime.getSlice('plan')).toMatchObject({ entries: [{ id: 'p1' }] })
+    expect(runtime.getSlice('goal')).toMatchObject({ goalId: 'g1' })
+    expect(runtime.getSlice('assist')).toMatchObject([{ id: 'a1', kind: 'assist', summary: 'hint' }])
+    expect(plan).toHaveBeenCalledTimes(1)
+    expect(goal).toHaveBeenCalledTimes(1)
+    expect(assist).toHaveBeenCalledTimes(1)
+  })
 })

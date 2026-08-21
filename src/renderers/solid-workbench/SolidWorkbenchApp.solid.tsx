@@ -12,6 +12,7 @@ import { SolidTaskTree } from './chat/TaskTree.solid.tsx'
 import { SolidToolCard } from './chat/ToolCard.solid.tsx'
 import { SolidToolConnector } from './chat/ToolConnector.solid.tsx'
 import { SolidGenerationFooter } from './chat/GenerationFooter.solid.tsx'
+import { SolidGoalCard } from './chat/GoalCard.solid.tsx'
 import { SolidInputBar } from './input/InputBar.solid.tsx'
 import { SolidAttachWidget, SolidModeWidget, SolidModelWidget, SolidSendWidget } from './input/WorkbenchWidgets.solid.tsx'
 import { SolidWorkbenchContext, type SolidWorkbenchContextValue } from './SolidWorkbenchContext.solid.tsx'
@@ -100,7 +101,7 @@ function WorkbenchContent(props: SolidWorkbenchAppProps) {
                 <div class="term-reasoning" data-state="running">{text()}</div>
               </div>}
             </Show>
-            <WorkbenchDocumentSurface document={document()} commands={props.context.commands} sessionId={props.context.input().sessionId} />
+            <WorkbenchDocumentSurface document={document()} commands={props.context.commands} sessionId={props.context.input().sessionId} reducedMotion={props.context.input().reducedMotion ?? false} />
             <Show when={snapshot().streamingText}>
               {text => <div class="term-row term-row-assistant" data-render-type="assistant">
                 <AssistantContent text={text()} appearance={appearance()} streaming />
@@ -154,6 +155,7 @@ function WorkbenchDocumentSurface(props: {
   document: WorkbenchDocument | undefined
   commands: SolidWorkbenchContextValue['commands']
   sessionId: string | null
+  reducedMotion: boolean
 }) {
   return (
     <Show when={props.document}>
@@ -161,6 +163,14 @@ function WorkbenchDocumentSurface(props: {
         <>
           <Show when={document().timeline.length > 0}>
             <div class="solid-workbench-timeline" aria-label="事件时间线" data-timeline-count={document().timeline.length} />
+          </Show>
+          <SolidGoalCard goal={document().goal.current} reducedMotion={props.reducedMotion} />
+          <Show when={document().timeline.some(entry => entry.kind === 'assist')}>
+            <div class="solid-workbench-assist" aria-label="辅助建议" role="status">
+              <For each={document().timeline.filter(entry => entry.kind === 'assist')}>{entry => (
+                <div class="solid-workbench-assist-entry" data-assist-id={entry.id}>{entry.summary || entry.title || '辅助信息'}</div>
+              )}</For>
+            </div>
           </Show>
           <Show when={document().activities.length > 0}>
             <div class="solid-workbench-activities" aria-label="活动" data-activity-count={document().activities.length}>
