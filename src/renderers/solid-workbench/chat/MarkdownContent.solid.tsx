@@ -21,40 +21,40 @@ export function MarkdownContent(props: MarkdownContentProps) {
   // 流式中把文本切成 "已完成块 stable + 增长尾块 unstable"（参考 claude-code StreamingMarkdown），
   // stable 由 content-keyed LRU 缓存复用（不重解析），unstable 是短尾只解析这一小段。
   // 非 streaming（已提交消息）保持整段一次解析，行为不变。
+  //
+  // C00 修复：不得用 <Show keyed> 包 split() 结果——每个 chunk 都是新对象引用，
+  // keyed 会把整棵子树（含 stable 段）逐 chunk 重建。改为细粒度 accessor：
+  // MarkdownSegment 只在自身 text 变化时重新解析/渲染，stable 恒定时 DOM 身份不变。
   const split = createMemo(() => props.streaming === true
     ? splitStreamingMarkdown(props.text)
     : null)
 
   return (
-    <Show when={props.streaming === true ? split() : null} keyed fallback={<MarkdownSegment text={props.text} inline={props.inline} />}>
-      {value => {
-        const { stable, unstable } = value
-        return (
-          <>
-            {stable ? <MarkdownSegment text={stable} inline={props.inline} /> : <MarkdownSegment text="" inline={props.inline} />}
-            {unstable ? <MarkdownSegment text={unstable} inline={props.inline} /> : null}
-          </>
-        )
-      }}
+    <Show when={props.streaming === true} fallback={<MarkdownSegment text={props.text} inline={props.inline} />}>
+      <MarkdownSegment text={() => split()?.stable ?? ''} inline={props.inline} />
+      <Show when={split()?.unstable}>
+        {tail => <MarkdownSegment text={tail()} inline={props.inline} />}
+      </Show>
     </Show>
   )
 }
 
 /** 把一段文本解析为 markdown 渲染。streaming 稳定前缀复用 LRU 缓存，不重解析。 */
-function MarkdownSegment(props: { text: string; inline?: boolean }) {
-  const shouldParse = () => !isPlainTextContent(props.text)
+function MarkdownSegment(props: { text: string | (() => string); inline?: boolean }) {
+  const text = () => typeof props.text === 'function' ? props.text() : props.text
+  const shouldParse = () => !isPlainTextContent(text())
   const [model] = createResource(
-    () => shouldParse() ? props.text : undefined,
+    () => shouldParse() ? text() : undefined,
     getMarkdownRenderModel,
   )
 
   return (
     <Show when={shouldParse()} fallback={props.inline
-      ? <span class="term-p term-plain-text">{props.text}</span>
-      : <p class="term-p term-plain-text">{props.text}</p>}>
+      ? <span class="term-p term-plain-text">{text()}</span>
+      : <p class="term-p term-plain-text">{text()}</p>}>
       <Show when={model()} fallback={props.inline
-        ? <span class="term-p term-plain-text">{props.text}</span>
-        : <p class="term-p term-plain-text">{props.text}</p>}>
+        ? <span class="term-p term-plain-text">{text()}</span>
+        : <p class="term-p term-plain-text">{text()}</p>}>
         {root => <For each={root().children}>{node => <MarkdownNode node={node} />}</For>}
       </Show>
     </Show>
