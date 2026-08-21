@@ -117,7 +117,25 @@ describe('RendererRegistry', () => {
       kind: 'content.unknown', fallback: true,
     })
     expect(diagnostics).toEqual([expect.objectContaining({ code: 'renderer.canRender.failed' })])
-    expect(registry.resolveSurface({ kind: 'missing.kind' })).toMatchObject({ kind: 'content.unknown', fallback: true })
+    expect(registry.resolveSurface({ kind: 'vendor.future-kind' })).toMatchObject({
+      kind: 'content.unknown', fallback: true,
+      diagnostics: [expect.objectContaining({ code: 'render-kind.unknown', kind: 'vendor.future-kind' })],
+    })
+  })
+
+  it('保留已批准 semanticKind 的 catalog 分层，并始终能回退 unknown', () => {
+    const registry = new RendererRegistry()
+    const owner = createPluginIdentity('test.semantic-kind', 'instance-semantic-kind')
+    for (const id of ['tool.read', 'content.memory', 'activity.subagent']) {
+      registry.registerRenderKind(owner, {
+        id, category: id.startsWith('activity.') ? 'activity' : id.startsWith('content.') ? 'content' : 'tool',
+        fallbackKind: 'content.unknown', priority: 100,
+        fixture: { semanticKind: id }, defaultTokens: {}, settingsSchemaVersion: 1,
+        validateInput: () => true,
+      })
+    }
+    expect(registry.snapshot().renderKinds.map(entry => entry.value.id)).toEqual(expect.arrayContaining(['tool.read', 'content.memory', 'activity.subagent']))
+    expect(registry.resolveSurface({ kind: 'tool.read', payload: { semanticKind: 'tool.read' } })).toMatchObject({ kind: 'content.unknown', fallback: true })
   })
 
   it('kind 与 renderer shadow transaction 可一起 commit，并 revert 到同一旧 snapshot', () => {

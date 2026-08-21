@@ -53,6 +53,8 @@ export interface WorkbenchMessage {
 export interface WorkbenchActivityNode {
   readonly id: string
   readonly kind: 'tool' | 'activity'
+  /** Renderer semantic kind copied from normalized payload; never derived from provider raw. */
+  readonly semanticKind?: string
   readonly title?: string
   readonly status: string
   readonly parentId?: string
@@ -284,6 +286,7 @@ function reduceTool(document: WorkbenchDocument, envelope: WorkbenchEventEnvelop
   const status = event.type === 'tool.started' ? 'running' : event.type === 'tool.failed' ? 'failed' : event.type === 'tool.completed' ? 'completed' : stringValue(tool.status) || 'progress'
   const node: WorkbenchActivityNode = {
     id, kind: 'tool', title: stringValue(tool.name) || stringValue(tool.title), status,
+    ...(stringValue(tool.semanticKind) ? { semanticKind: stringValue(tool.semanticKind) } : {}),
     ...(stringValue(tool.parentActivityId) ? { parentId: stringValue(tool.parentActivityId) } : {}),
     orphan: false, data: event, sequence: envelope.sequence,
   }

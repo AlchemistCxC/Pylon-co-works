@@ -60,12 +60,12 @@ describe('WorkbenchProjector', () => {
   it('is idempotent for duplicate event ids and keeps tool orphan relation until parent arrives', () => {
     const toolUpdate = envelope(2, {
       type: 'tool.progress',
-      tool: { toolCallId: 'tool-1', name: 'read', parentActivityId: 'parent-1', status: 'completed' },
+      tool: { toolCallId: 'tool-1', name: 'read', semanticKind: 'tool.read', parentActivityId: 'parent-1', status: 'completed' },
     }, { toolCallId: 'tool-1' })
     const duplicate = reduceWorkbenchEvent(reduceWorkbenchEvent(createWorkbenchDocument(base.sessionId), toolUpdate), toolUpdate)
     expect(duplicate.appliedEventIds).toEqual([toolUpdate.eventId])
     expect(selectActivities(duplicate)).toEqual(expect.arrayContaining([
-      expect.objectContaining({ id: 'tool-1', parentId: 'parent-1', orphan: true }),
+      expect.objectContaining({ id: 'tool-1', parentId: 'parent-1', semanticKind: 'tool.read', orphan: true }),
     ]))
 
     const parent = envelope(3, { type: 'activity.started', activityId: 'parent-1', activity: { title: 'parent' } }, { taskId: 'parent-1' })

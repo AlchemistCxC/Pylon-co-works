@@ -467,6 +467,11 @@ export class RendererRegistry {
     const requestedKind = node.kind?.trim() || 'content.unknown'
     const kinds = this.snapshotValue.renderKinds
     const kindEntry = kinds.find(entry => entry.value.id === requestedKind || entry.value.aliases?.includes(requestedKind))
+    if (!kindEntry && requestedKind !== 'content.unknown') {
+      const diagnostic = { code: 'render-kind.unknown', message: `Unknown RenderKind ${requestedKind}; using content.unknown`, kind: requestedKind }
+      diagnostics.push(diagnostic)
+      context.diagnostic?.(diagnostic)
+    }
     const candidateKinds: string[] = []
     let current = kindEntry?.value ?? kinds.find(entry => entry.value.id === 'content.unknown')?.value
     while (current) {

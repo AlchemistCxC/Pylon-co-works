@@ -12,6 +12,13 @@ import type { BuiltinPluginDefinition } from '../../../plugin-runtime/pluginRunt
 
 export const CORE_RENDERER_CONTENT_PART_PLUGIN_ID = 'core.renderer.content-part'
 
+/** A07/DIC-A07-01: semantic kinds are catalog entries, not event.type values. */
+export const BUILTIN_SEMANTIC_RENDER_KINDS = Object.freeze([
+  { id: 'tool.read', category: 'tool' },
+  { id: 'content.memory', category: 'content' },
+  { id: 'activity.subagent', category: 'activity' },
+] as const)
+
 const definitions: Array<{
   id: string
   kind: 'ansi' | 'spinner' | 'content-part' | 'plan' | 'footer'
@@ -66,6 +73,18 @@ export function createBuiltinRendererContentPluginDefinitions(): BuiltinPluginDe
   const content = definitions.map(definition => ({
     id: definition.id,
     activate: ({ renderer }) => {
+      if (definition.id === 'core.renderer.ansi') {
+        for (const semantic of BUILTIN_SEMANTIC_RENDER_KINDS) renderer.registerRenderKind({
+          ...semantic,
+          fallbackKind: 'content.unknown',
+          priority: 900,
+          fixture: { semanticKind: semantic.id },
+          defaultTokens: {},
+          settingsSchemaVersion: 1,
+          validateInput: input => typeof input === 'object' && input !== null && !Array.isArray(input)
+            && (input as Record<string, unknown>).semanticKind === semantic.id,
+        })
+      }
       renderer.registerRenderKind({
         id: `content.${definition.kind}`,
         aliases: [definition.kind],
