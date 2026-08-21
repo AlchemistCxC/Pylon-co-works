@@ -7,10 +7,13 @@
  */
 import type { ContentPart } from './content/contentPartSchema.ts'
 import { applyGoalEvents, applyPlanEvent, createEmptyGoalState, createEmptyPlanState, normalizeGoalSnapshot, type GoalSnapshot, type GoalState, type PlanState } from './plan/goalModel.ts'
+import { applyLifecycleEvent, createEmptyLifecycleState, normalizeNormalizedError, type LifecycleState, type NormalizedError } from './lifecycle/lifecycleModel.ts'
 import type {
   ActivityEvent,
+  DiagnosticEvent,
   GoalEvent,
   InteractionEvent,
+  LifecycleEvent,
   MessageEvent,
   PlanEvent,
   SessionEvent,
@@ -22,7 +25,7 @@ import type {
 
 export type WorkbenchTimelineKind =
   | 'message' | 'reasoning' | 'tool' | 'activity' | 'interaction'
-  | 'session' | 'usage' | 'plan' | 'diagnostic' | 'unknown' | 'assist'
+  | 'session' | 'usage' | 'plan' | 'lifecycle' | 'diagnostic' | 'unknown' | 'assist'
 
 export interface WorkbenchTimelineEntry {
   readonly id: string
@@ -98,6 +101,10 @@ export interface WorkbenchDocument {
   readonly diagnostics: readonly WorkbenchProjectionDiagnostic[]
   readonly plan: PlanState
   readonly goal: GoalState
+  /** C13：生命周期当前态 + 历史（恢复成功不删除历史事实） */
+  readonly lifecycle: LifecycleState
+  /** C13：system.error 级结构化错误（NormalizedError），与普通 notice 分离 */
+  readonly systemErrors: readonly NormalizedError[]
 }
 
 export interface ProjectionResult {
@@ -118,6 +125,8 @@ export function createWorkbenchDocument(sessionId: string): WorkbenchDocument {
     diagnostics: [],
     plan: createEmptyPlanState(sessionId),
     goal: createEmptyGoalState(),
+    lifecycle: createEmptyLifecycleState(),
+    systemErrors: [],
   }
 }
 
@@ -172,6 +181,15 @@ export function selectGoal(document: WorkbenchDocument): GoalSnapshot | undefine
   return document.goal.current
 }
 
+/** C13：生命周期 slice 与 system error 只读选择器。 */
+export function selectLifecycle(document: WorkbenchDocument): LifecycleState {
+  return document.lifecycle
+}
+
+export function selectSystemErrors(document: WorkbenchDocument): readonly NormalizedError[] {
+  return document.systemErrors
+}
+
 function reduceSemanticEvent(document: WorkbenchDocument, envelope: WorkbenchEventEnvelope): WorkbenchDocument {
   const event = envelope.event
   switch (event.type) {
@@ -207,6 +225,17 @@ function reduceSemanticEvent(document: WorkbenchDocument, envelope: WorkbenchEve
     case 'goal.updated':
     case 'goal.cleared':
       return reduceGoal(document, envelope, event)
+    case 'lifecycle.retrying':
+    case 'lifecycle.compact-started':
+    case 'lifecycle.compact-completed':
+    case 'lifecycle.rewind-preview':
+    case 'lifecycle.rewind-completed':
+    case 'lifecycle.suspended':
+    case 'lifecycle.recovered':
+      return reduceLifecycle(document, event)
+    case 'diagnostic.updated':
+    case 'diagnostic.notice':
+      return reduceDiagnostic(document, envelope, event)
     case 'session.started':
     case 'session.commands-updated':
     case 'session.config-updated':
@@ -215,12 +244,10 @@ function reduceSemanticEvent(document: WorkbenchDocument, envelope: WorkbenchEve
     case 'session.status-updated':
     case 'session.completed':
       return reduceSession(document, envelope, event)
-    case 'diagnostic.updated':
-    case 'diagnostic.notice':
-      return addDiagnostic(document, envelope, event.code ?? 'diagnostic.notice', event.message ?? 'diagnostic event', event.level ?? 'info', event)
     case 'event.unknown':
       return addDiagnostic(document, envelope, 'event.unknown', event.summary, 'warning', event)
     default:
+      // assist.* 等未接 slice 的事件：只保留 timeline 条目，不产生副作用
       return document
   }
 }
@@ -320,6 +347,32 @@ function reduceSession(document: WorkbenchDocument, _envelope: WorkbenchEventEnv
   }
 }
 
+/** C13：lifecycle 事件经 domain reducer 收敛；恢复成功不删除历史事实。 */
+function reduceLifecycle(document: WorkbenchDocument, event: LifecycleEvent): WorkbenchDocument {
+  const next = applyLifecycleEvent(document.lifecycle, event)
+  if (next === document.lifecycle) return document
+  return { ...document, lifecycle: next }
+}
+
+/**
+ * C13：diagnostic 事件收敛。
+ * - error 级 notice 进 systemErrors（结构化 NormalizedError），与 info/warning 分离；
+ * - 全部 notice 仍进 diagnostics 时间线（历史事实不删）；
+ * - turn.failed/provider.error 保持 A04 语义：收敛 running 消息并置 error 状态。
+ */
+function reduceDiagnostic(document: WorkbenchDocument, envelope: WorkbenchEventEnvelope, event: DiagnosticEvent): WorkbenchDocument {
+  const level = event.level ?? 'info'
+  const message = event.message ?? 'diagnostic event'
+  const code = event.code ?? 'diagnostic.notice'
+  const withError = level === 'error' && code !== 'turn.failed' && code !== 'provider.error'
+    ? (() => {
+        const normalized = normalizeNormalizedError({ userSummary: message, technicalMessage: message, code, sessionId: envelope.sessionId, eventId: envelope.eventId, recoverability: 'retry' })
+        return normalized ? { ...document, systemErrors: [...document.systemErrors, normalized] } : document
+      })()
+    : document
+  return addDiagnostic(withError, envelope, code, message, level, event)
+}
+
 function addDiagnostic(document: WorkbenchDocument, envelope: WorkbenchEventEnvelope, code: string, message: string, level: 'info' | 'warning' | 'error', data?: unknown): WorkbenchDocument {
   const diagnostic = { code, message, eventId: envelope.eventId, sequence: envelope.sequence, level, data }
   const failedTurn = code === 'turn.failed' || code === 'provider.error'
@@ -350,8 +403,9 @@ function timelineEntry(envelope: WorkbenchEventEnvelope): WorkbenchTimelineEntry
             : event.type.startsWith('session.') ? 'session'
               : event.type.startsWith('usage.') || event.type === 'budget.warning' ? 'usage'
                 : event.type.startsWith('diagnostic.') || event.type === 'event.unknown' ? (event.type === 'event.unknown' ? 'unknown' : 'diagnostic')
-                  // C08 修复：plan 与 goal 同属 plan family，不再把 goal 误判为 assist
-                  : event.type.startsWith('plan.') || event.type.startsWith('goal.') ? 'plan' : 'assist'
+                  // C08/C13：plan/goal 同属 plan family；lifecycle 独立 kind（不再误判 assist）
+                  : event.type.startsWith('plan.') || event.type.startsWith('goal.') ? 'plan'
+                    : event.type.startsWith('lifecycle.') ? 'lifecycle' : 'assist'
   return { id: envelope.eventId, sequence: envelope.sequence, eventId: envelope.eventId, kind, data: event }
 }
 
