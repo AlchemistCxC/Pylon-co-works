@@ -1,7 +1,23 @@
 import { describe, expect, it, vi } from 'vitest'
-import { createFakeWorkbenchCommandFacade } from '../workbenchCommandFacade.ts'
+import { createCapabilityGatedWorkbenchCommandFacade, createFakeWorkbenchCommandFacade } from '../workbenchCommandFacade.ts'
 
 describe('createFakeWorkbenchCommandFacade', () => {
+  it('capability denied 不触发底层 command', async () => {
+    const base = createFakeWorkbenchCommandFacade()
+    const facade = createCapabilityGatedWorkbenchCommandFacade(base, { toolAction: false, interactionResponse: false })
+    await expect(facade.toolAction('session-a', 'tool-1', 'cancel')).resolves.toEqual({ ok: false, error: 'command_capability_denied' })
+    await expect(facade.respondInteraction('session-a', 'interaction-1', { approved: true })).resolves.toEqual({ ok: false, error: 'command_capability_denied' })
+    expect(base.calls).toEqual([])
+  })
+
+  it('prompt/cancel capability denied 返回各自结果契约', async () => {
+    const base = createFakeWorkbenchCommandFacade()
+    const facade = createCapabilityGatedWorkbenchCommandFacade(base, { prompt: false, cancel: false })
+    await expect(facade.prompt('session-a', { text: 'hello' })).resolves.toEqual({ status: 'rejected', error: 'command_capability_denied' })
+    await expect(facade.cancel('session-a')).resolves.toEqual({ status: 'rejected', error: 'command_capability_denied' })
+    expect(base.calls).toEqual([])
+  })
+
   it('记录全部 command 调用并提供无副作用默认结果', async () => {
     const facade = createFakeWorkbenchCommandFacade()
 

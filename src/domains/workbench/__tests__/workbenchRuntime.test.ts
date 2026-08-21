@@ -1,5 +1,6 @@
 import { describe, expect, it, vi } from 'vitest'
 import { createPreviewWorkbenchRuntime, type WorkbenchRuntimeSnapshot } from '../workbenchRuntime.ts'
+import { createWorkbenchDocument } from '../workbenchProjector.ts'
 import type { Message } from '../../../components/chat/messageTypes.ts'
 
 function initial() {
@@ -25,6 +26,23 @@ function initial() {
 }
 
 describe('createPreviewWorkbenchRuntime', () => {
+  it('暴露只读 document view，并按 slice 局部通知', () => {
+    const runtime = createPreviewWorkbenchRuntime(initial())
+    const messages = vi.fn()
+    const usage = vi.fn()
+    runtime.subscribeSlice('messages', messages)
+    runtime.subscribeSlice('usage', usage)
+
+    expect(runtime.getSnapshot().document).toBeDefined()
+    expect(Object.isFrozen(runtime.getSnapshot().document)).toBe(true)
+    runtime.update({ streamingText: 'token' })
+    expect(messages).not.toHaveBeenCalled()
+    expect(usage).not.toHaveBeenCalled()
+    runtime.update({ messages: [{ id: 'm1', role: 'assistant', sender: 'peri', content: 'hello', time: '10:00' }] })
+    expect(messages).toHaveBeenCalledTimes(1)
+    expect(usage).not.toHaveBeenCalled()
+  })
+
   it('输出冻结 snapshot，只在内容变化时 bump revision', () => {
     const runtime = createPreviewWorkbenchRuntime(initial())
     const listener = vi.fn()
@@ -91,5 +109,39 @@ describe('createPreviewWorkbenchRuntime', () => {
     // 全程不得对含 1000 条消息的整包做 JSON.stringify（避免 O(n) 拖慢流式）。
     expect(serializedWholeSnapshot()).toBe(false)
     stringifySpy.mockRestore()
+  })
+
+  it('live/replay 共用 apply/replace，并拒绝旧 owner generation 的迟到 document', () => {
+    const runtime = createPreviewWorkbenchRuntime(initial())
+    const oldDocument = { ...createWorkbenchDocument('session-a'), revision: 1 }
+    const currentDocument = { ...createWorkbenchDocument('session-b'), revision: 2 }
+    runtime.replaceDocument(currentDocument, { ownerKey: 'owner-b', generation: 3, sessionId: 'session-b' })
+    const revision = runtime.getSnapshot().revision
+    runtime.applyDocument(oldDocument, { ownerKey: 'owner-b', generation: 2 })
+    expect(runtime.getSnapshot().sessionId).toBe('session-b')
+    expect(runtime.getSnapshot().document?.sessionId).toBe('session-b')
+    expect(runtime.getSnapshot().revision).toBe(revision)
+    runtime.applyDocument({ ...currentDocument, revision: 4 }, { ownerKey: 'owner-b', generation: 3 })
+    expect(runtime.getSnapshot().document?.revision).toBe(4)
+    runtime.replaceDocument(oldDocument, { ownerKey: 'owner-a', generation: 1, sessionId: 'session-a' })
+    expect(runtime.getSnapshot().ownerKey).toBe('owner-a')
+    expect(runtime.getSnapshot().generation).toBe(1)
+  })
+
+  it('document selector 对 timeline/activity/interaction/session/diagnostics 保持局部通知', () => {
+    const runtime = createPreviewWorkbenchRuntime(initial())
+    const initialDocument = { ...createWorkbenchDocument('session-a'), session: { ...createWorkbenchDocument('session-a').session, status: 'ready' } }
+    runtime.replaceDocument(initialDocument, { ownerKey: 'owner-a', generation: 1 })
+    const listeners = {
+      timeline: vi.fn(), activities: vi.fn(), interactions: vi.fn(), session: vi.fn(), diagnostics: vi.fn(),
+    }
+    for (const [slice, listener] of Object.entries(listeners)) runtime.subscribeSlice(slice as 'timeline', listener)
+    const current = runtime.getSnapshot().document!
+    runtime.applyDocument({ ...current, timeline: [...current.timeline, { id: 'evt-1', sequence: 1, eventId: 'evt-1', kind: 'assist' }] }, { ownerKey: 'owner-a', generation: 1 })
+    expect(listeners.timeline).toHaveBeenCalledTimes(1)
+    expect(listeners.activities).not.toHaveBeenCalled()
+    expect(listeners.interactions).not.toHaveBeenCalled()
+    expect(listeners.session).not.toHaveBeenCalled()
+    expect(listeners.diagnostics).not.toHaveBeenCalled()
   })
 })

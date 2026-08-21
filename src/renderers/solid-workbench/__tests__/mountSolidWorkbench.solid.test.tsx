@@ -3,6 +3,8 @@ import { cleanup, screen, waitFor } from '@solidjs/testing-library'
 import { afterEach, describe, expect, it } from 'vitest'
 import { mountSolidWorkbench } from '../mountSolidWorkbench.solid.tsx'
 import { createPreviewWorkbenchServices } from '../__fixtures__/previewWorkbenchServices.ts'
+import { createWorkbenchEnvelope, type WorkbenchEventEnvelope } from '../../../domains/workbench/events/workbenchEventSchema.ts'
+import { projectWorkbench } from '../../../domains/workbench/workbenchProjector.ts'
 
 const hosts: HTMLElement[] = []
 const servicesList: ReturnType<typeof createPreviewWorkbenchServices>[] = []
@@ -91,5 +93,24 @@ describe('mountSolidWorkbench', () => {
     lifecycle.destroy()
     lifecycle.destroy()
     expect(host.childElementCount).toBe(0)
+  })
+
+  it('document apply 驱动消息、活动、usage 与 diagnostics surface', async () => {
+    const { host, services } = mountPreview()
+    const envelope = (sequence: number, event: WorkbenchEventEnvelope['event']): WorkbenchEventEnvelope => createWorkbenchEnvelope({
+      sessionId: 'preview-session', recordedAt: `2026-08-21T00:00:0${sequence}.000Z`, sequence,
+      source: { provider: 'peri', sourceId: `solid-${sequence}` }, provenance: { origin: 'local-observed', trust: 'authoritative' }, event,
+    })
+    const document = projectWorkbench([
+      envelope(1, { type: 'message.delta', role: 'assistant', parts: [{ kind: 'text', text: 'canonical answer' }] }),
+      envelope(2, { type: 'tool.started', tool: { toolCallId: 'tool-1', name: 'Read', status: 'running' } }),
+      envelope(3, { type: 'usage.updated', usage: { inputTokens: 8 } }),
+      envelope(4, { type: 'diagnostic.notice', level: 'warning', code: 'demo.warning', message: 'canonical warning' }),
+    ]).document
+    services.runtime.replaceDocument(document, { ownerKey: 'owner-preview', generation: 1 })
+    await waitFor(() => expect(screen.getByText('canonical answer')).toBeTruthy())
+    expect(host.querySelector('[data-activity-count="1"]')).toBeTruthy()
+    expect(host.querySelector('[data-has-usage="true"]')).toBeTruthy()
+    expect(screen.getByText('canonical warning')).toBeTruthy()
   })
 })

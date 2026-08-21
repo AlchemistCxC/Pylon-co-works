@@ -27,6 +27,18 @@ export interface CommandResult {
   error?: string
 }
 
+export interface WorkbenchCommandCapabilities {
+  readonly prompt?: boolean
+  readonly cancel?: boolean
+  readonly toolAction?: boolean
+  readonly interactionResponse?: boolean
+  readonly resourceOpen?: boolean
+  readonly resourceReveal?: boolean
+  readonly clipboardWrite?: boolean
+  readonly retry?: boolean
+  readonly recovery?: boolean
+}
+
 export interface SessionCreateInput {
   title?: string
   profileId?: string
@@ -38,6 +50,8 @@ export interface ExportSessionInput {
 }
 
 export interface WorkbenchCommandFacade {
+  /** Semantic prompt command; send remains as a compatibility alias. */
+  prompt(sessionId: string, command: SendCommand): Promise<SendResult>
   send(sessionId: string, command: SendCommand): Promise<SendResult>
   cancel(sessionId: string): Promise<CancelResult>
   attach(sessionId: string): Promise<readonly WorkbenchAttachment[]>
@@ -47,6 +61,13 @@ export interface WorkbenchCommandFacade {
   compact(sessionId: string): Promise<CommandResult>
   exportSession(sessionId: string, input: ExportSessionInput): Promise<CommandResult>
   clearSession(sessionId: string): Promise<CommandResult>
+  toolAction(sessionId: string, toolCallId: string, action: string, payload?: unknown): Promise<CommandResult>
+  respondInteraction(sessionId: string, interactionId: string, response: unknown): Promise<CommandResult>
+  openResource(sessionId: string, resource: unknown): Promise<CommandResult>
+  revealResource(sessionId: string, resource: unknown): Promise<CommandResult>
+  copy(sessionId: string, text: string): Promise<CommandResult>
+  retry(sessionId: string, messageId?: string): Promise<CommandResult>
+  recover(sessionId: string, strategy?: string): Promise<CommandResult>
 }
 
 export interface WorkbenchCommandCall {
@@ -64,6 +85,9 @@ export interface FakeWorkbenchCommandFacade extends WorkbenchCommandFacade {
 }
 
 const defaultHandlers: WorkbenchCommandFacade = {
+  async prompt() {
+    return { status: 'sent' }
+  },
   async send() {
     return { status: 'sent' }
   },
@@ -91,6 +115,33 @@ const defaultHandlers: WorkbenchCommandFacade = {
   async clearSession() {
     return { ok: true }
   },
+  async toolAction() { return { ok: true } },
+  async respondInteraction() { return { ok: true } },
+  async openResource() { return { ok: true } },
+  async revealResource() { return { ok: true } },
+  async copy() { return { ok: true } },
+  async retry() { return { ok: true } },
+  async recover() { return { ok: true } },
+}
+
+export function createCapabilityGatedWorkbenchCommandFacade(
+  delegate: WorkbenchCommandFacade,
+  capabilities: WorkbenchCommandCapabilities,
+): WorkbenchCommandFacade {
+  const denied = async (): Promise<CommandResult> => ({ ok: false, error: 'command_capability_denied' })
+  return {
+    ...delegate,
+    prompt: (sessionId, command) => capabilities.prompt === false ? Promise.resolve({ status: 'rejected', error: 'command_capability_denied' }) : delegate.prompt(sessionId, command),
+    send: (sessionId, command) => capabilities.prompt === false ? Promise.resolve({ status: 'rejected', error: 'command_capability_denied' }) : delegate.send(sessionId, command),
+    cancel: sessionId => capabilities.cancel === false ? Promise.resolve({ status: 'rejected', error: 'command_capability_denied' }) : delegate.cancel(sessionId),
+    toolAction: (sessionId, toolCallId, action, payload) => capabilities.toolAction === false ? denied() : delegate.toolAction(sessionId, toolCallId, action, payload),
+    respondInteraction: (sessionId, interactionId, response) => capabilities.interactionResponse === false ? denied() : delegate.respondInteraction(sessionId, interactionId, response),
+    openResource: (sessionId, resource) => capabilities.resourceOpen === false ? denied() : delegate.openResource(sessionId, resource),
+    revealResource: (sessionId, resource) => capabilities.resourceReveal === false ? denied() : delegate.revealResource(sessionId, resource),
+    copy: (sessionId, text) => capabilities.clipboardWrite === false ? denied() : delegate.copy(sessionId, text),
+    retry: (sessionId, messageId) => capabilities.retry === false ? denied() : delegate.retry(sessionId, messageId),
+    recover: (sessionId, strategy) => capabilities.recovery === false ? denied() : delegate.recover(sessionId, strategy),
+  }
 }
 
 export function createFakeWorkbenchCommandFacade(
@@ -112,6 +163,7 @@ export function createFakeWorkbenchCommandFacade(
     get calls() {
       return calls
     },
+    prompt: (sessionId, command) => invoke('prompt', [sessionId, command]),
     send: (sessionId, command) => invoke('send', [sessionId, command]),
     cancel: sessionId => invoke('cancel', [sessionId]),
     attach: sessionId => invoke('attach', [sessionId]),
@@ -121,6 +173,13 @@ export function createFakeWorkbenchCommandFacade(
     compact: sessionId => invoke('compact', [sessionId]),
     exportSession: (sessionId, input) => invoke('exportSession', [sessionId, input]),
     clearSession: sessionId => invoke('clearSession', [sessionId]),
+    toolAction: (sessionId, toolCallId, action, payload) => invoke('toolAction', [sessionId, toolCallId, action, payload]),
+    respondInteraction: (sessionId, interactionId, response) => invoke('respondInteraction', [sessionId, interactionId, response]),
+    openResource: (sessionId, resource) => invoke('openResource', [sessionId, resource]),
+    revealResource: (sessionId, resource) => invoke('revealResource', [sessionId, resource]),
+    copy: (sessionId, text) => invoke('copy', [sessionId, text]),
+    retry: (sessionId, messageId) => invoke('retry', [sessionId, messageId]),
+    recover: (sessionId, strategy) => invoke('recover', [sessionId, strategy]),
     setHandler(command, handler) {
       handlers[command] = handler
     },

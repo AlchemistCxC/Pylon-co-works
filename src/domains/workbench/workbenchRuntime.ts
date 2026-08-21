@@ -1,12 +1,22 @@
 import type { Message } from '../../components/chat/messageTypes.ts'
 import type { PlanEntry } from '../tasks/planTypes.ts'
 import type { GenerationPhase, GenerationSummary } from './generationFooterContracts.ts'
+import type { WorkbenchDocument, WorkbenchMessage } from './workbenchProjector.ts'
+import { createWorkbenchDocument } from './workbenchProjector.ts'
 
 export type WorkbenchRuntimeStatus = 'idle' | 'loading' | 'ready' | 'degraded' | 'error'
+
+export type WorkbenchRuntimeSlice =
+  | 'document' | 'timeline' | 'messages' | 'activities' | 'interactions'
+  | 'session' | 'usage' | 'diagnostics' | 'tasks' | 'streaming' | 'capabilities'
 
 export interface WorkbenchRuntimeSnapshot {
   revision: number
   sessionId: string | null
+  /** Session owner identity used to reject late events after a session switch. */
+  ownerKey?: string
+  /** Agent/runtime generation associated with the current owner. */
+  generation?: number
   status: WorkbenchRuntimeStatus
   messages: readonly Message[]
   streamingText: string
@@ -26,32 +36,56 @@ export interface WorkbenchRuntimeSnapshot {
   canAttach: boolean
   promptImage: boolean
   error: string | null
+  /** A04 projection view; legacy fields remain compatibility selectors for the current Solid adapter. */
+  document?: WorkbenchDocument
 }
 
 export interface WorkbenchRuntime {
   getSnapshot(): WorkbenchRuntimeSnapshot
   subscribe(listener: () => void): () => void
+  getSlice<T = unknown>(slice: WorkbenchRuntimeSlice): T
+  subscribeSlice(slice: WorkbenchRuntimeSlice, listener: () => void): () => void
 }
 
 export interface PreviewWorkbenchRuntime extends WorkbenchRuntime {
   setSnapshot(snapshot: WorkbenchRuntimeSnapshot): void
   update(patch: Partial<Omit<WorkbenchRuntimeSnapshot, 'revision'>>): void
   destroy(): void
+  applyDocument(document: WorkbenchDocument, options?: WorkbenchDocumentApplyOptions): void
+  replaceDocument(document: WorkbenchDocument, options?: WorkbenchDocumentApplyOptions): void
+}
+
+export interface WorkbenchDocumentApplyOptions {
+  /** Owner key is stable for one session binding (agent + source + session). */
+  readonly ownerKey?: string
+  /** Lower generations are stale and are ignored once a newer one is active. */
+  readonly generation?: number
+  /** replaceDocument may explicitly clear the active session. */
+  readonly sessionId?: string | null
 }
 
 export function createPreviewWorkbenchRuntime(
   initial: Omit<WorkbenchRuntimeSnapshot, 'revision'>,
 ): PreviewWorkbenchRuntime {
   let revision = 0
-  let snapshot = freezeSnapshot({ ...initial, revision })
+  let activeOwnerKey = initial.ownerKey
+  let activeGeneration = initial.generation
+  let snapshot = freezeSnapshot({ ...initial, revision, document: initial.document ?? documentFromLegacy(initial) })
   const listeners = new Set<() => void>()
+  const sliceListeners = new Map<WorkbenchRuntimeSlice, Set<() => void>>()
   let destroyed = false
 
   const publish = (next: WorkbenchRuntimeSnapshot) => {
     if (destroyed || runtimeSnapshotsEqual(snapshot, next)) return
+    const previous = snapshot
     revision += 1
-    snapshot = freezeSnapshot({ ...next, revision })
+    snapshot = freezeSnapshot({ ...next, revision, document: next.document ?? documentFromLegacy(next) })
     for (const listener of [...listeners]) listener()
+    for (const slice of sliceListeners.keys()) {
+      if (sliceChanged(previous, snapshot, slice)) {
+        for (const listener of [...(sliceListeners.get(slice) ?? [])]) listener()
+      }
+    }
   }
 
   return {
@@ -61,17 +95,55 @@ export function createPreviewWorkbenchRuntime(
       listeners.add(listener)
       return () => listeners.delete(listener)
     },
+    getSlice<T = unknown>(slice: WorkbenchRuntimeSlice): T {
+      return selectSlice(snapshot, slice) as T
+    },
+    subscribeSlice(slice, listener) {
+      if (destroyed) return () => {}
+      const current = sliceListeners.get(slice) ?? new Set<() => void>()
+      current.add(listener)
+      sliceListeners.set(slice, current)
+      return () => {
+        current.delete(listener)
+        if (current.size === 0) sliceListeners.delete(slice)
+      }
+    },
     setSnapshot(next) {
       publish(next)
     },
     update(patch) {
-      publish({ ...snapshot, ...patch, revision })
+      const next = { ...snapshot, ...patch, revision }
+      if (!Object.prototype.hasOwnProperty.call(patch, 'document') && legacyDocumentFields.some(field => Object.prototype.hasOwnProperty.call(patch, field))) {
+        next.document = documentFromLegacy(next)
+      }
+      publish(next)
+    },
+    applyDocument(document, options = {}) {
+      if (!acceptDocument(options)) return
+      const nextDocument = freezeDocument(document, snapshot.document)
+      publish({ ...snapshot, ...legacyFieldsFromDocument(nextDocument), document: nextDocument, sessionId: nextDocument.sessionId || snapshot.sessionId, ownerKey: options.ownerKey ?? activeOwnerKey, generation: options.generation ?? activeGeneration })
+    },
+    replaceDocument(document, options = {}) {
+      if (!acceptDocument(options, true)) return
+      const nextDocument = freezeDocument(document)
+      publish({ ...snapshot, ...legacyFieldsFromDocument(nextDocument), document: nextDocument, sessionId: options.sessionId === undefined ? nextDocument.sessionId || snapshot.sessionId : options.sessionId, ownerKey: options.ownerKey ?? activeOwnerKey, generation: options.generation ?? activeGeneration })
     },
     destroy() {
       if (destroyed) return
       destroyed = true
       listeners.clear()
+      sliceListeners.clear()
     },
+  }
+
+  function acceptDocument(options: WorkbenchDocumentApplyOptions, replace = false): boolean {
+    if (options.generation !== undefined && (!Number.isSafeInteger(options.generation) || options.generation < 0)) return false
+    const ownerChanged = options.ownerKey !== undefined && options.ownerKey !== activeOwnerKey
+    if (ownerChanged && !replace) return false
+    if (options.generation !== undefined && activeGeneration !== undefined && options.generation < activeGeneration && !(replace && ownerChanged)) return false
+    if (replace && options.ownerKey !== undefined) activeOwnerKey = options.ownerKey
+    if (replace && options.generation !== undefined) activeGeneration = options.generation
+    return true
   }
 }
 
@@ -83,6 +155,8 @@ function runtimeSnapshotsEqual(left: WorkbenchRuntimeSnapshot, right: WorkbenchR
   // 稳定，引用相同即视为一致（避免把"仅 streamingText 变化"误当成整包变化）。
   return (
     left.sessionId === right.sessionId &&
+    left.ownerKey === right.ownerKey &&
+    left.generation === right.generation &&
     left.status === right.status &&
     left.messages === right.messages &&
     left.streamingText === right.streamingText &&
@@ -102,11 +176,113 @@ function runtimeSnapshotsEqual(left: WorkbenchRuntimeSnapshot, right: WorkbenchR
     left.canAttach === right.canAttach &&
     left.promptImage === right.promptImage &&
     left.error === right.error
+    && left.document === right.document
   )
 }
 
 function freezeSnapshot(snapshot: WorkbenchRuntimeSnapshot): WorkbenchRuntimeSnapshot {
-  Object.freeze(snapshot.messages)
-  Object.freeze(snapshot.tasks)
+  if (!Object.isFrozen(snapshot.messages)) snapshot.messages = Object.freeze([...snapshot.messages])
+  if (!Object.isFrozen(snapshot.tasks)) snapshot.tasks = Object.freeze([...snapshot.tasks])
+  if (snapshot.document && !Object.isFrozen(snapshot.document)) snapshot.document = freezeDocument(snapshot.document)
   return Object.freeze(snapshot)
 }
+
+function freezeDocument(document: WorkbenchDocument, previous?: WorkbenchDocument): WorkbenchDocument {
+  const freezeItems = <T extends object>(items: readonly T[], previousItems?: readonly T[]): readonly T[] => {
+    if (items === previousItems && Object.isFrozen(items)) return items
+    return Object.freeze(items.map(item => Object.freeze({ ...item })))
+  }
+  const session = document.session === previous?.session && Object.isFrozen(document.session)
+    ? document.session
+    : Object.freeze({
+      ...document.session,
+      commands: document.session.commands === previous?.session.commands && Object.isFrozen(document.session.commands) ? document.session.commands : Object.freeze([...document.session.commands]),
+      options: document.session.options === previous?.session.options && Object.isFrozen(document.session.options) ? document.session.options : Object.freeze([...document.session.options]),
+    })
+  return Object.freeze({
+    ...document,
+    appliedEventIds: document.appliedEventIds === previous?.appliedEventIds && Object.isFrozen(document.appliedEventIds) ? document.appliedEventIds : Object.freeze([...document.appliedEventIds]),
+    timeline: freezeItems(document.timeline, previous?.timeline),
+    messages: freezeItems(document.messages, previous?.messages),
+    activities: freezeItems(document.activities, previous?.activities),
+    interactions: freezeItems(document.interactions, previous?.interactions),
+    diagnostics: freezeItems(document.diagnostics, previous?.diagnostics),
+    session,
+  })
+}
+
+function legacyFieldsFromDocument(document: WorkbenchDocument): Partial<WorkbenchRuntimeSnapshot> {
+  const messages: Message[] = document.messages.map(message => ({
+    id: message.id,
+    role: message.role === 'reasoning' ? 'reasoning' : message.role === 'user' ? 'user' : 'assistant',
+    sender: message.source.provider,
+    content: message.content,
+    time: message.time,
+    running: message.running,
+  }))
+  const error = [...document.diagnostics].reverse().find(diagnostic => diagnostic.level === 'error')?.message ?? null
+  const status = document.session.status === 'error' || document.session.status === 'degraded' || document.session.status === 'loading' || document.session.status === 'ready' || document.session.status === 'idle'
+    ? document.session.status
+    : document.session.status === 'completed' ? 'ready' : 'ready'
+  return {
+    messages,
+    status,
+    activeModel: document.session.model ?? '',
+    activeMode: document.session.mode ?? 'default',
+    generating: messages.some(message => message.running),
+    error,
+  }
+}
+
+function selectSlice(snapshot: WorkbenchRuntimeSnapshot, slice: WorkbenchRuntimeSlice): unknown {
+  const document = snapshot.document
+  switch (slice) {
+    case 'document': return document
+    case 'timeline': return document?.timeline ?? []
+    case 'messages': return document?.messages ?? snapshot.messages
+    case 'activities': return document?.activities ?? []
+    case 'interactions': return document?.interactions ?? []
+    case 'session': return document?.session
+    case 'usage': return document?.session.usage
+    case 'diagnostics': return document?.diagnostics ?? []
+    case 'tasks': return snapshot.tasks
+    case 'streaming': return { text: snapshot.streamingText, thinking: snapshot.streamingThinking }
+    case 'capabilities': return { canAttach: snapshot.canAttach, promptImage: snapshot.promptImage }
+  }
+}
+
+function sliceChanged(left: WorkbenchRuntimeSnapshot, right: WorkbenchRuntimeSnapshot, slice: WorkbenchRuntimeSlice): boolean {
+  if (slice === 'streaming') return left.streamingText !== right.streamingText || left.streamingThinking !== right.streamingThinking
+  if (slice === 'capabilities') return left.canAttach !== right.canAttach || left.promptImage !== right.promptImage
+  return selectSlice(left, slice) !== selectSlice(right, slice)
+}
+
+function documentFromLegacy(snapshot: Omit<WorkbenchRuntimeSnapshot, 'revision'> | WorkbenchRuntimeSnapshot): WorkbenchDocument {
+  const base = createWorkbenchDocument(snapshot.sessionId ?? '')
+  const messages: WorkbenchMessage[] = snapshot.messages.map(message => ({
+    id: message.id,
+    role: message.role === 'reasoning' ? 'reasoning' : message.role === 'user' ? 'user' : 'assistant',
+    content: message.content,
+    parts: [],
+    identity: {},
+    source: { provider: message.sender, sessionId: snapshot.sessionId ?? '', sourceId: message.sender },
+    sequence: 0,
+    running: message.running === true,
+    time: message.time,
+  }))
+  return {
+    ...base,
+    messages,
+    session: {
+      ...base.session,
+      status: snapshot.status,
+      model: snapshot.activeModel || undefined,
+      mode: snapshot.activeMode || undefined,
+      usage: undefined,
+    },
+  }
+}
+
+const legacyDocumentFields: readonly (keyof WorkbenchRuntimeSnapshot)[] = [
+  'sessionId', 'status', 'messages', 'activeModel', 'activeMode', 'error',
+]
