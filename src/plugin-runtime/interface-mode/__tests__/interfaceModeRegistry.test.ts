@@ -52,5 +52,16 @@ describe('InterfaceModeRegistry', () => {
       workbench: { renderKind: 'isolated-surface', surfaceId: '' },
     })).toThrow(/surfaceId/)
   })
-})
 
+  it('接受正式 renderer-suite workbench，并保留 default Suite id', () => {
+    const registry = new InterfaceModeRegistry()
+    const owner = createPluginIdentity('example.suite-mode', 'one')
+    registry.register(owner, {
+      ...mode('Suite Mode'),
+      id: 'example.suite-mode',
+      workbench: { renderKind: 'renderer-suite', defaultSuiteId: 'plugin.suite' },
+    })
+    expect(registry.resolve('example.suite-mode')?.value.workbench)
+      .toEqual({ renderKind: 'renderer-suite', defaultSuiteId: 'plugin.suite' })
+  })
+})

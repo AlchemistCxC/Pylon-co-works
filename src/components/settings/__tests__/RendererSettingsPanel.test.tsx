@@ -38,6 +38,6 @@ describe('RendererSettingsPanel', () => {
     store.markUnavailable('kind.content.markdown.legacy', 'old')
     render(<RendererSettingsPanel search="宽松" schemas={[{ id: 'content.markdown', label: 'Markdown', schema }]} store={store} />)
     expect(screen.getByText('宽松')).toBeTruthy()
-    expect(screen.getByText(/不可用/)).toBeTruthy()
+    expect(screen.getByText(/kind\.content\.markdown\.legacy.*不可用/)).toBeTruthy()
   })
 })

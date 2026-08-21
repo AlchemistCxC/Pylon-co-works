@@ -77,7 +77,19 @@ export default function AgentSheetView({ sheet, ctx }: { sheet: SheetRecord; ctx
       }}
     />
   }
-  if (mode.workbench.renderer === 'modern') {
+  // Renderer Suite Host integration is staged independently; until the host
+  // owns this sheet, keep the stable modern workbench as the safe fallback.
+  if (mode.workbench.renderKind === 'renderer-suite' && mode.id !== 'terminal-like') {
+    return <ModernAgentWorkbench
+      sheet={sheet}
+      ctx={ctx}
+      workspaceMode={workspaceMode}
+      showPet={showPet}
+      isReplay={isReplay}
+      onContinueReplay={() => useReplayPostureStore.getState().clear()}
+    />
+  }
+  if (mode.workbench.renderKind === 'host' && mode.workbench.renderer === 'modern') {
     return <ModernAgentWorkbench
       sheet={sheet}
       ctx={ctx}

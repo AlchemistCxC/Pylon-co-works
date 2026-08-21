@@ -5,6 +5,12 @@ import type { PluginSettingOption } from '../../plugin-runtime/settings/pluginSe
 import { createRendererSettingsStore, type RendererSettingsStore } from '../../plugin-runtime/renderers/rendererSettingsStore.ts'
 import { settingFieldKey, type RenderSettingField, type RendererSettingValue, type RendererSettingsSchema } from '../../plugin-runtime/renderers/rendererSettingsTypes.ts'
 import { evaluateRenderSettingCondition, default as RendererSettingField } from './RendererSettingField.tsx'
+import RendererSuitePicker from './RendererSuitePicker.tsx'
+import { useInterfaceModeStore } from '../../domains/interface/interfaceModeStore.ts'
+import { usePresentationPreferenceStore } from '../../domains/presentation/presentationPreferenceStore.ts'
+import { getInterfaceModeRegistry } from '../../plugin-runtime/runtimeServices.ts'
+import { BUILTIN_INTERFACE_MODES } from '../../plugins/core/interfaceMode/builtinInterfaceModes.ts'
+import { resolveInterfaceModeSuite } from '../../application/transactions/activateInterfaceMode.ts'
 
 export interface RendererSettingsSchemaEntry {
   readonly id: string
@@ -23,11 +29,14 @@ const defaultStore = createRendererSettingsStore({
   storage: typeof localStorage === 'undefined' ? undefined : localStorage,
 })
 
-function catalogSchemas(): readonly RendererSettingsSchemaEntry[] {
+function catalogSchemas(activeSuiteId?: string): readonly RendererSettingsSchemaEntry[] {
   const snapshot = getRendererRegistry().snapshot()
   const kinds = snapshot.renderKinds.flatMap(entry => entry.value.settings ? [{ id: entry.value.id, label: entry.value.id, schema: entry.value.settings, namespace: 'kind' as const }] : [])
-  const renderers = snapshot.messageRenderers.flatMap(entry => entry.value.settings ? [{ id: entry.value.id, label: entry.value.label ?? entry.value.id, schema: entry.value.settings, namespace: 'slot' as const }] : [])
-  return [...kinds, ...renderers]
+  const suite = activeSuiteId ? snapshot.rendererSuites.find(entry => entry.value.id === activeSuiteId)?.value : undefined
+  const suiteSettings = suite?.settings ? [{ id: suite.id, label: suite.label, schema: suite.settings, namespace: 'suite' as const }] : []
+  const slots = snapshot.rendererSlots.filter(entry => activeSuiteId && (entry.value.targetSuites.includes('*') || entry.value.targetSuites.includes(activeSuiteId)))
+    .flatMap(entry => entry.value.settings ? [{ id: entry.value.id, label: entry.value.label ?? entry.value.id, schema: entry.value.settings, namespace: 'slot' as const }] : [])
+  return [...suiteSettings, ...slots, ...kinds]
 }
 
 function fieldMatches(field: RenderSettingField, query: string, options: readonly PluginSettingOption[]): boolean {
@@ -40,7 +49,7 @@ function effectiveValues(entry: RendererSettingsSchemaEntry, snapshot: ReturnTyp
   const namespace = `${entry.namespace ?? 'kind'}.${entry.id}`
   return Object.fromEntries(entry.schema.groups.flatMap(group => group.fields.flatMap(field => {
     const key = settingFieldKey(field)
-    const value = snapshot.values[`${namespace}.${key}`] ?? field.default
+    const value = snapshot.sessionPreview[`${namespace}.${key}`] ?? snapshot.values[`${namespace}.${key}`] ?? field.default
     return value === undefined ? [] : [[key, value] as const]
   })))
 }
@@ -50,7 +59,13 @@ export default function RendererSettingsPanel(props: RendererSettingsPanelProps)
   const storeSnapshot = useSyncExternalStore(store.subscribe, store.getSnapshot, store.getSnapshot)
   const registrySnapshot = useSyncExternalStore(listener => getRendererRegistry().subscribe(listener), () => getRendererRegistry().snapshot(), () => getRendererRegistry().snapshot())
   const optionSnapshot = useSyncExternalStore(listener => getPluginSettingOptionsRegistry().subscribe(listener), () => getPluginSettingOptionsRegistry().getSnapshot(), () => getPluginSettingOptionsRegistry().getSnapshot())
-  const entries = props.schemas ?? catalogSchemas()
+  const interfaceMode = useInterfaceModeStore(state => state.interfaceMode)
+  const suitePreference = usePresentationPreferenceStore(state => state.rendererSuiteIdByMode[interfaceMode])
+  const mode = getInterfaceModeRegistry().resolve(interfaceMode)?.value ?? BUILTIN_INTERFACE_MODES.find(entry => entry.id === interfaceMode)
+  const activeSuiteId = mode?.workbench.renderKind === 'renderer-suite'
+    ? resolveInterfaceModeSuite(mode, suitePreference, registrySnapshot.rendererSuites.map(entry => entry.value.id)).activeSuiteId
+    : undefined
+  const entries = props.schemas ?? catalogSchemas(activeSuiteId)
   const query = props.search?.trim().toLowerCase() ?? ''
   // Keep subscriptions alive even when caller supplies fixture schemas.
   void registrySnapshot
@@ -69,9 +84,7 @@ export default function RendererSettingsPanel(props: RendererSettingsPanelProps)
   }), [entries, optionSnapshot.entries, query, storeSnapshot])
 
   return <section className="renderer-settings-panel" aria-label="渲染器设置">
-    <div className="renderer-settings-suite-picker-slot" data-settings-slot="suite-picker">
-      <span>Renderer Suite</span><small>A14 将在此接入 Suite 选择；当前仅展示声明设置。</small>
-    </div>
+    <RendererSuitePicker />
     {sections.map(({ entry, group, namespace, values, fields }) => <div className="renderer-settings-group" key={`${namespace}.${group.id}`}>
       <div className="renderer-settings-group-heading">
         <div><h3>{entry.label} · {group.label}</h3>{group.description && <p>{group.description}</p>}</div>

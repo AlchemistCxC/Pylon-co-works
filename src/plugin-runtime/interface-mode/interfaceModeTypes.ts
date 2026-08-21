@@ -3,6 +3,7 @@ import type { RegistryEntry } from '../registry/types.ts'
 export type InterfaceModeChromeStyle = 'icons' | 'glyphs'
 
 export type InterfaceModeWorkbench =
+  | { readonly renderKind: 'renderer-suite'; readonly defaultSuiteId: string }
   | { readonly renderKind: 'host'; readonly renderer: 'modern' | 'terminal' }
   | { readonly renderKind: 'isolated-surface'; readonly surfaceId: string }
 
@@ -30,4 +31,3 @@ export interface InterfaceModeContribution {
 }
 
 export type InterfaceModeRegistryEntry = RegistryEntry<InterfaceModeContribution>
-

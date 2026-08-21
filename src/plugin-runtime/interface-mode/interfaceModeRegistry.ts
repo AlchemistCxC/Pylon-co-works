@@ -27,7 +27,11 @@ export function validateInterfaceModeContribution(
   if (contribution.chromeStyle !== 'icons' && contribution.chromeStyle !== 'glyphs') {
     throw new Error(`Interface Mode chromeStyle 非法：${contribution.id}`)
   }
-  if (contribution.workbench.renderKind === 'isolated-surface') {
+  if (contribution.workbench.renderKind === 'renderer-suite') {
+    if (!contribution.workbench.defaultSuiteId?.trim()) {
+      throw new Error(`Interface Mode ${contribution.id} workbench defaultSuiteId 不能为空`)
+    }
+  } else if (contribution.workbench.renderKind === 'isolated-surface') {
     validateSurfaceId(contribution.workbench.surfaceId, `Interface Mode ${contribution.id} workbench`)
   } else if (contribution.workbench.renderKind !== 'host'
     || (contribution.workbench.renderer !== 'modern' && contribution.workbench.renderer !== 'terminal')) {
@@ -80,4 +84,3 @@ export class InterfaceModeRegistry {
   getSnapshot(): RegistrySnapshot<InterfaceModeContribution> { return this.registry.getSnapshot() }
   resolve(id: string) { return this.registry.getSnapshot().entries.find(entry => entry.contributionId === id) }
 }
-

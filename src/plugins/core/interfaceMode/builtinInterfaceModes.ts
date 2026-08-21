@@ -10,7 +10,7 @@ export const BUILTIN_INTERFACE_MODES: readonly InterfaceModeContribution[] = Obj
     defaultPresentationProfileId: 'builtin.presentation.modern-gui',
     quickSwitchTargetId: 'terminal-like',
     chromeStyle: 'icons',
-    workbench: Object.freeze({ renderKind: 'host', renderer: 'modern' }),
+    workbench: Object.freeze({ renderKind: 'renderer-suite', defaultSuiteId: 'builtin.solid' }),
   }),
   Object.freeze({
     id: 'terminal-like',
@@ -21,7 +21,6 @@ export const BUILTIN_INTERFACE_MODES: readonly InterfaceModeContribution[] = Obj
     defaultPresentationProfileId: 'builtin.presentation.terminal-classic',
     quickSwitchTargetId: 'modern-gui',
     chromeStyle: 'glyphs',
-    workbench: Object.freeze({ renderKind: 'host', renderer: 'terminal' }),
+    workbench: Object.freeze({ renderKind: 'renderer-suite', defaultSuiteId: 'builtin.solid' }),
   }),
 ])
-

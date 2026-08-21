@@ -1,10 +1,31 @@
 import { applyPresentationProfile } from './applyPresentationProfile.ts'
 import { DEFAULT_INTERFACE_MODE, type InterfaceMode, useInterfaceModeStore } from '../../domains/interface/interfaceModeStore.ts'
 import { usePresentationPreferenceStore } from '../../domains/presentation/presentationPreferenceStore.ts'
-import { getInterfaceModeRegistry, getPluginUiRegistry, getPresentationProfileRegistry } from '../../plugin-runtime/runtimeServices.ts'
+import { getInterfaceModeRegistry, getPluginUiRegistry, getPresentationProfileRegistry, getRendererRegistry } from '../../plugin-runtime/runtimeServices.ts'
 import type { PresentationProfileContribution } from '../../plugin-runtime/presentation/presentationProfileTypes.ts'
 import type { InterfaceModeContribution } from '../../plugin-runtime/interface-mode/interfaceModeTypes.ts'
 import { useStore } from '../../store.ts'
+
+export interface InterfaceModeSuiteChoice {
+  readonly requestedSuiteId?: string
+  readonly activeSuiteId?: string
+  readonly unavailable: boolean
+}
+
+/** Resolve Suite precedence without mutating the persisted preference. */
+export function resolveInterfaceModeSuite(
+  mode: InterfaceModeContribution,
+  selectedSuiteId: string | undefined,
+  availableSuiteIds: readonly string[],
+  fallbackSuiteId = 'builtin.solid',
+): InterfaceModeSuiteChoice {
+  if (mode.workbench.renderKind !== 'renderer-suite') return { unavailable: false }
+  const requestedSuiteId = selectedSuiteId || mode.workbench.defaultSuiteId
+  const available = new Set(availableSuiteIds)
+  if (available.has(requestedSuiteId)) return { requestedSuiteId, activeSuiteId: requestedSuiteId, unavailable: false }
+  const activeSuiteId = available.has(fallbackSuiteId) ? fallbackSuiteId : availableSuiteIds[0]
+  return { requestedSuiteId, activeSuiteId, unavailable: true }
+}
 
 export function presentationProfileInterfaceMode(profile: PresentationProfileContribution): InterfaceMode {
   return profile.interfaceMode ?? 'terminal-like'
@@ -33,6 +54,13 @@ export function activateInterfaceMode(mode: InterfaceMode): boolean {
   const modeContribution = resolveInterfaceMode(mode)
   if (!modeContribution || !interfaceModeIsUsable(modeContribution)) return false
   const state = useInterfaceModeStore.getState()
+  if (modeContribution.workbench.renderKind === 'renderer-suite') {
+    // Suite activation is resolved by the Suite Host. Keep this transaction
+    // side-effect free when the catalog is still loading or a preference is
+    // unavailable; the persisted id remains recoverable for plugin reload.
+    const selectedSuiteId = usePresentationPreferenceStore.getState().rendererSuiteIdByMode[mode]
+    resolveInterfaceModeSuite(modeContribution, selectedSuiteId, getRendererRegistry().snapshot().rendererSuites.map(entry => entry.value.id))
+  }
   const profileId = state.profileByMode[mode] || modeContribution.defaultPresentationProfileId
   const registry = getPresentationProfileRegistry()
   const profile = registry.resolve(profileId)?.value

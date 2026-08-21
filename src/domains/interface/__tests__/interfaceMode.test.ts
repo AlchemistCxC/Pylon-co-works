@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
-import { activateInterfaceMode, presentationProfileInterfaceMode } from '../../../application/transactions/activateInterfaceMode.ts'
+import { activateInterfaceMode, presentationProfileInterfaceMode, resolveInterfaceModeSuite } from '../../../application/transactions/activateInterfaceMode.ts'
 import { createPluginIdentity } from '../../../plugin-runtime/pluginIdentity.ts'
 import { getInterfaceModeRegistry, getPresentationProfileRegistry } from '../../../plugin-runtime/runtimeServices.ts'
 import type { AsyncDisposable } from '../../../plugin-runtime/registry/types.ts'
@@ -21,6 +21,19 @@ afterEach(async () => {
 })
 
 describe('Interface Mode contract', () => {
+  it('resolves mode default < per-mode preference and reports unavailable without overwriting it', () => {
+    const mode = {
+      id: 'modern-gui', label: 'Modern', defaultPresentationProfileId: 'p', chromeStyle: 'icons' as const,
+      workbench: { renderKind: 'renderer-suite' as const, defaultSuiteId: 'suite.mode' },
+    }
+    expect(resolveInterfaceModeSuite(mode, 'suite.user', ['suite.user'])).toMatchObject({
+      requestedSuiteId: 'suite.user', activeSuiteId: 'suite.user', unavailable: false,
+    })
+    expect(resolveInterfaceModeSuite(mode, 'suite.missing', ['builtin.solid'])).toMatchObject({
+      requestedSuiteId: 'suite.missing', activeSuiteId: 'builtin.solid', unavailable: true,
+    })
+  })
+
   it('默认为 modern-gui，两种模式分别记忆 Presentation Profile', () => {
     expect(useInterfaceModeStore.getState().interfaceMode).toBe(DEFAULT_INTERFACE_MODE)
     expect(useInterfaceModeStore.getState().profileByMode).toEqual(DEFAULT_INTERFACE_PROFILES)
