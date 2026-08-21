@@ -31,17 +31,18 @@ function activation(id: string, factory: WorkbenchRendererFactory): RendererActi
   return { revision: 1, suite: entry, kinds: new Map(), slots: new Map(), diagnostics: [] }
 }
 
-function factory(id: string, options: { delay?: number; fail?: boolean } = {}): WorkbenchRendererFactory {
+function factory(id: string, options: { delay?: number; fail?: boolean; mountFail?: boolean; destroyFail?: boolean } = {}): WorkbenchRendererFactory {
   return {
     async prepare() {
       if (options.fail) throw new Error(`${id} prepare failed`)
       return {
         mount(container: HTMLElement) {
+          if (options.mountFail) throw new Error(`${id} mount failed`)
           const listeners = new Map<string, Set<(payload: unknown) => void>>()
           let destroyed = false
           const instance: WorkbenchRendererInstance = {
             update: () => {}, pause: () => {}, resume: () => {},
-            destroy: vi.fn(() => { destroyed = true }),
+            destroy: vi.fn(() => { destroyed = true; if (options.destroyFail) throw new Error(`${id} destroy failed`) }),
             on(event, listener) {
               const group = listeners.get(event) ?? new Set()
               group.add(listener); listeners.set(event, group)
@@ -103,5 +104,27 @@ describe('RendererSuiteHost', () => {
     await host.destroy()
     await pending
     expect(host.getState().phase).toBe('destroyed')
+  })
+
+  it('reports mount failure and keeps the previous instance as fallback', async () => {
+    const container = document.createElement('div')
+    const diagnostics: unknown[] = []
+    const port = fakeHost(); port.diagnostics.report = value => diagnostics.push(value)
+    const host = new RendererSuiteHost({ container, hostPort: port, input })
+    await host.mount(activation('suite.a', factory('A')))
+    await host.switchTo(activation('suite.b', factory('B', { mountFail: true })))
+    expect(container.textContent).toContain('A')
+    expect(diagnostics).toEqual([expect.objectContaining({ code: 'renderer.suite.switch.failed', phase: 'mount' })])
+  })
+
+  it('reports destroy failure without leaking the active DOM', async () => {
+    const container = document.createElement('div')
+    const diagnostics: unknown[] = []
+    const port = fakeHost(); port.diagnostics.report = value => diagnostics.push(value)
+    const host = new RendererSuiteHost({ container, hostPort: port, input })
+    await host.mount(activation('suite.a', factory('A', { destroyFail: true })))
+    await host.destroy()
+    expect(container.childElementCount).toBe(0)
+    expect(diagnostics).toEqual([expect.objectContaining({ code: 'renderer.suite.destroy.failed', phase: 'destroy' })])
   })
 })
