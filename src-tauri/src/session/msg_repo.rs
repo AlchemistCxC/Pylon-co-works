@@ -34,7 +34,9 @@ use crate::error::PylonError;
 ///      事务内改名为 forensic archive，并写 legacy_message_backfill_audit。
 /// v12：deleted_sessions 原表迁移为 owner_key 主键；legacy tombstone 显式标 scope，
 ///      v11 源表保留为 forensic archive，避免同 source 多 owner 互相覆盖。
-pub(crate) const SCHEMA_VERSION: i64 = 12;
+/// v13：canonical_events 增加 versioned envelope/provenance/raw 截断元数据；旧行
+///      append-only 保留并默认标记 migration/unverified。
+pub(crate) const SCHEMA_VERSION: i64 = 13;
 
 /// 当前 schema DDL（CREATE IF NOT EXISTS；升版迁移在 migrate() 内按版本补齐）。
 /// - sessions：会话行 + v8 会话级可恢复状态快照列（usage/commands 等）。
@@ -125,6 +127,16 @@ CREATE TABLE IF NOT EXISTS canonical_events (
     typed_payload TEXT,
     raw_payload TEXT NOT NULL,
     created_at INTEGER NOT NULL,
+    schema_version INTEGER NOT NULL DEFAULT 1,
+    provenance_origin TEXT NOT NULL DEFAULT 'migration',
+    provenance_trust TEXT NOT NULL DEFAULT 'unverified',
+    provenance_provider TEXT,
+    provenance_import_id TEXT,
+    raw_truncated INTEGER NOT NULL DEFAULT 0,
+    raw_original_bytes INTEGER NOT NULL DEFAULT 0,
+    raw_retained_bytes INTEGER NOT NULL DEFAULT 0,
+    raw_omitted_bytes INTEGER NOT NULL DEFAULT 0,
+    raw_truncation_reason TEXT,
     UNIQUE(owner_key, sequence)
 );
 CREATE INDEX IF NOT EXISTS idx_canonical_events_session_seq
@@ -814,6 +826,16 @@ const SCHEMA_MANIFEST: &[(&str, &[&str])] = &[
             "typed_payload",
             "raw_payload",
             "created_at",
+            "schema_version",
+            "provenance_origin",
+            "provenance_trust",
+            "provenance_provider",
+            "provenance_import_id",
+            "raw_truncated",
+            "raw_original_bytes",
+            "raw_retained_bytes",
+            "raw_omitted_bytes",
+            "raw_truncation_reason",
         ],
     ),
     (
@@ -962,6 +984,24 @@ fn migrate(conn: &mut Connection) -> Result<(), PylonError> {
     }
     if current < 12 {
         migrate_owner_keyed_tombstones(&tx)?;
+    }
+    if current < 13 {
+        for (column, statement) in [
+            ("schema_version", "ALTER TABLE canonical_events ADD COLUMN schema_version INTEGER NOT NULL DEFAULT 1"),
+            ("provenance_origin", "ALTER TABLE canonical_events ADD COLUMN provenance_origin TEXT NOT NULL DEFAULT 'migration'"),
+            ("provenance_trust", "ALTER TABLE canonical_events ADD COLUMN provenance_trust TEXT NOT NULL DEFAULT 'unverified'"),
+            ("provenance_provider", "ALTER TABLE canonical_events ADD COLUMN provenance_provider TEXT"),
+            ("provenance_import_id", "ALTER TABLE canonical_events ADD COLUMN provenance_import_id TEXT"),
+            ("raw_truncated", "ALTER TABLE canonical_events ADD COLUMN raw_truncated INTEGER NOT NULL DEFAULT 0"),
+            ("raw_original_bytes", "ALTER TABLE canonical_events ADD COLUMN raw_original_bytes INTEGER NOT NULL DEFAULT 0"),
+            ("raw_retained_bytes", "ALTER TABLE canonical_events ADD COLUMN raw_retained_bytes INTEGER NOT NULL DEFAULT 0"),
+            ("raw_omitted_bytes", "ALTER TABLE canonical_events ADD COLUMN raw_omitted_bytes INTEGER NOT NULL DEFAULT 0"),
+            ("raw_truncation_reason", "ALTER TABLE canonical_events ADD COLUMN raw_truncation_reason TEXT"),
+        ] {
+            if !has_column(&tx, "canonical_events", column) {
+                tx.execute_batch(statement).map_err(repo_err)?;
+            }
+        }
     }
     tx.execute_batch(DEL_02_TOMBSTONE_INDEX_SQL)
         .map_err(repo_err)?;

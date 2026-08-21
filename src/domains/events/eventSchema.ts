@@ -56,6 +56,21 @@ export interface CanonicalEventIdentity {
 export interface CanonicalConversationEvent {
   eventId: string
   owner: CanonicalEventOwner
+  /** Versioned journal envelope metadata (A03); absent only on pre-A03 rows. */
+  schemaVersion?: number
+  provenance?: {
+    origin: 'local-observed' | 'optimistic-local' | 'recovery-import' | 'migration' | 'plugin'
+    trust: 'authoritative' | 'unverified'
+    provider?: string
+    importId?: string
+  }
+  rawMetadata?: {
+    truncated: boolean
+    originalBytes: number
+    retainedBytes: number
+    omittedBytes: number
+    reason?: string
+  }
   clientGeneration: number
   sequence: number
   occurredAt: string

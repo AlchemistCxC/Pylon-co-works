@@ -103,7 +103,7 @@ fn user_index_names(conn: &Connection) -> Vec<String> {
 }
 
 #[test]
-fn schema_version_is_v12_owner_keyed_tombstone_baseline() {
+fn schema_version_is_v13_versioned_canonical_envelope_baseline() {
     let conn = audit_db();
     let version: i64 = conn
         .query_row("PRAGMA user_version", [], |row| row.get(0))
@@ -113,8 +113,8 @@ fn schema_version_is_v12_owner_keyed_tombstone_baseline() {
         "user_version 必须等于 SCHEMA_VERSION"
     );
     assert_eq!(
-        version, 12,
-        "审计基线 = v12（canonical_events 唯一历史；tombstone durable-owner keyed）。后续迁移必须显式递增并更新本基线"
+        version, 13,
+        "审计基线 = v13（canonical_events 唯一历史；versioned envelope provenance/raw metadata；tombstone durable-owner keyed）。后续迁移必须显式递增并更新本基线"
     );
 }
 
@@ -134,7 +134,7 @@ fn table_inventory_baseline() {
     ];
     assert_eq!(
         tables, expected,
-        "DEL-01 审计：v12 active 表清单必须与 SCHEMA_SQL 一致。旧 messages active names 不得存在"
+        "DEL-01 审计：v13 active 表清单必须与 SCHEMA_SQL 一致。旧 messages active names 不得存在"
     );
 }
 

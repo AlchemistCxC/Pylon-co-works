@@ -49,6 +49,16 @@ pub(crate) struct CanonicalEventRow {
     pub(crate) typed_payload: Option<serde_json::Value>,
     pub(crate) raw_payload: serde_json::Value,
     pub(crate) created_at: i64,
+    pub(crate) schema_version: i64,
+    pub(crate) provenance_origin: String,
+    pub(crate) provenance_trust: String,
+    pub(crate) provenance_provider: Option<String>,
+    pub(crate) provenance_import_id: Option<String>,
+    pub(crate) raw_truncated: bool,
+    pub(crate) raw_original_bytes: i64,
+    pub(crate) raw_retained_bytes: i64,
+    pub(crate) raw_omitted_bytes: i64,
+    pub(crate) raw_truncation_reason: Option<String>,
 }
 
 struct StoredCanonicalEventRow {
@@ -112,6 +122,26 @@ struct KernelEventInput {
     client_generation: i64,
     received_at: String,
     raw_payload: serde_json::Value,
+    recovery_import: bool,
+}
+
+const MAX_CANONICAL_RAW_BYTES: usize = 64 * 1024;
+
+fn retain_raw_payload(raw: serde_json::Value) -> (serde_json::Value, bool, i64, i64, i64) {
+    let encoded = raw.to_string();
+    let original = encoded.len() as i64;
+    if encoded.len() <= MAX_CANONICAL_RAW_BYTES {
+        return (raw, false, original, original, 0);
+    }
+    let preview_len = MAX_CANONICAL_RAW_BYTES.saturating_sub(96);
+    let preview = encoded.chars().take(preview_len).collect::<String>();
+    let retained = serde_json::json!({
+        "_pylonTruncated": true,
+        "preview": preview,
+        "originalBytes": original,
+    });
+    let retained_bytes = retained.to_string().len() as i64;
+    (retained, true, original, retained_bytes, original.saturating_sub(retained_bytes))
 }
 
 /// 事件页（游标分页，升序）：事件 + 下一页游标（None = 已到最早，无更旧事件）。
@@ -380,6 +410,9 @@ fn normalize_kernel_event(
     input: KernelEventInput,
     sequence: i64,
 ) -> Result<CanonicalEventRow, EventError> {
+    let raw_for_storage = input.raw_payload.clone();
+    let provenance_provider = input.owner.agent_id.clone();
+    let provenance_import_id = input.owner.local_session_id.clone();
     let owner_key = input
         .owner
         .key()
@@ -463,6 +496,8 @@ fn normalize_kernel_event(
         }
     }
 
+    let (raw_payload, raw_truncated, raw_original_bytes, raw_retained_bytes, raw_omitted_bytes) =
+        retain_raw_payload(raw_for_storage);
     Ok(CanonicalEventRow {
         event_id: format!("{owner_key}#{sequence}"),
         owner_key,
@@ -479,8 +514,18 @@ fn normalize_kernel_event(
         identity: resolve_identity(update),
         typed_payload: (!typed_payload.is_empty())
             .then_some(serde_json::Value::Object(typed_payload)),
-        raw_payload: input.raw_payload,
+        raw_payload,
         created_at: now_millis(),
+        schema_version: 1,
+        provenance_origin: if input.recovery_import { "recovery-import" } else { "local-observed" }.to_string(),
+        provenance_trust: if input.recovery_import { "unverified" } else { "authoritative" }.to_string(),
+        provenance_provider: Some(provenance_provider),
+        provenance_import_id: input.recovery_import.then_some(provenance_import_id),
+        raw_truncated,
+        raw_original_bytes,
+        raw_retained_bytes,
+        raw_omitted_bytes,
+        raw_truncation_reason: raw_truncated.then(|| "size".to_string()),
     })
 }
 
@@ -525,6 +570,15 @@ pub(crate) fn parse_canonical_event(
     let received_at = get_str("receivedAt");
     let event_type = get_str("eventType");
     let payload_version = get_i64("payloadVersion");
+    let provenance = obj.get("provenance").and_then(|value| value.as_object());
+    let provenance_origin = provenance
+        .and_then(|value| value.get("origin"))
+        .and_then(|value| value.as_str())
+        .unwrap_or("migration");
+    let provenance_trust = provenance
+        .and_then(|value| value.get("trust"))
+        .and_then(|value| value.as_str())
+        .unwrap_or("unverified");
 
     if event_id.is_none() {
         problems.push("eventId 必填".into());
@@ -553,6 +607,15 @@ pub(crate) fn parse_canonical_event(
     if !obj.contains_key("rawPayload") {
         problems.push("rawPayload 必填（unknown event 不得静默丢弃）".into());
     }
+    if !matches!(provenance_origin, "local-observed" | "optimistic-local" | "recovery-import" | "migration" | "plugin") {
+        problems.push("provenance.origin 非法".into());
+    }
+    if !matches!(provenance_trust, "authoritative" | "unverified") {
+        problems.push("provenance.trust 非法".into());
+    }
+    if (provenance_origin == "local-observed") != (provenance_trust == "authoritative") {
+        problems.push("local-observed 只能 authoritative，其他来源只能 unverified".into());
+    }
 
     if !problems.is_empty() {
         return Err(EventError::Invalid(problems.join("; ")));
@@ -573,6 +636,9 @@ pub(crate) fn parse_canonical_event(
         )));
     }
 
+    let (raw_payload, raw_truncated, raw_original_bytes, raw_retained_bytes, raw_omitted_bytes) =
+        retain_raw_payload(obj.get("rawPayload").cloned().unwrap_or(serde_json::Value::Null));
+
     Ok(CanonicalEventRow {
         event_id,
         owner_key,
@@ -588,11 +654,18 @@ pub(crate) fn parse_canonical_event(
         payload_version: payload_version.expect("checked"),
         identity: obj.get("identity").cloned(),
         typed_payload: obj.get("typedPayload").cloned(),
-        raw_payload: obj
-            .get("rawPayload")
-            .cloned()
-            .unwrap_or(serde_json::Value::Null),
+        raw_payload,
         created_at: now_millis(),
+        schema_version: obj.get("schemaVersion").and_then(|v| v.as_i64()).unwrap_or(1),
+        provenance_origin: provenance_origin.to_string(),
+        provenance_trust: provenance_trust.to_string(),
+        provenance_provider: obj.get("provenance").and_then(|p| p.get("provider")).and_then(|v| v.as_str()).map(str::to_string),
+        provenance_import_id: obj.get("provenance").and_then(|p| p.get("importId")).and_then(|v| v.as_str()).map(str::to_string),
+        raw_truncated,
+        raw_original_bytes,
+        raw_retained_bytes,
+        raw_omitted_bytes,
+        raw_truncation_reason: raw_truncated.then(|| "size".to_string()),
     })
 }
 
@@ -715,8 +788,11 @@ impl EventRepo {
                          (event_id, owner_key, profile_id, agent_id, local_session_id,
                           remote_session_id, client_generation, sequence, occurred_at,
                           received_at, event_type, payload_version, identity, typed_payload,
-                          raw_payload, created_at)
-                     VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16)
+                          raw_payload, created_at, schema_version, provenance_origin,
+                          provenance_trust, provenance_provider, provenance_import_id,
+                          raw_truncated, raw_original_bytes, raw_retained_bytes,
+                          raw_omitted_bytes, raw_truncation_reason)
+                     VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17, ?18, ?19, ?20, ?21, ?22, ?23, ?24, ?25, ?26)
                      ON CONFLICT(event_id) DO NOTHING",
                     params![
                         event.event_id,
@@ -738,6 +814,16 @@ impl EventRepo {
                             .map(serde_json::Value::to_string),
                         event.raw_payload.to_string(),
                         event.created_at,
+                        event.schema_version,
+                        event.provenance_origin,
+                        event.provenance_trust,
+                        event.provenance_provider,
+                        event.provenance_import_id,
+                        event.raw_truncated,
+                        event.raw_original_bytes,
+                        event.raw_retained_bytes,
+                        event.raw_omitted_bytes,
+                        event.raw_truncation_reason,
                     ],
                 )
                 .map_err(EventError::from)?;
@@ -799,9 +885,11 @@ impl EventRepo {
             "INSERT INTO canonical_events
                  (event_id, owner_key, profile_id, agent_id, local_session_id,
                   remote_session_id, client_generation, sequence, occurred_at,
-                  received_at, event_type, payload_version, identity, typed_payload,
-                  raw_payload, created_at)
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16)",
+                 received_at, event_type, payload_version, identity, typed_payload,
+                 raw_payload, created_at, schema_version, provenance_origin, provenance_trust,
+                 provenance_provider, provenance_import_id, raw_truncated, raw_original_bytes,
+                 raw_retained_bytes, raw_omitted_bytes, raw_truncation_reason)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17, ?18, ?19, ?20, ?21, ?22, ?23, ?24, ?25, ?26)",
             params![
                 event.event_id,
                 event.owner_key,
@@ -822,6 +910,16 @@ impl EventRepo {
                     .map(serde_json::Value::to_string),
                 event.raw_payload.to_string(),
                 event.created_at,
+                event.schema_version,
+                event.provenance_origin,
+                event.provenance_trust,
+                event.provenance_provider,
+                event.provenance_import_id,
+                event.raw_truncated,
+                event.raw_original_bytes,
+                event.raw_retained_bytes,
+                event.raw_omitted_bytes,
+                event.raw_truncation_reason,
             ],
         )
         .map_err(EventError::from)?;
@@ -978,6 +1076,7 @@ impl EventRepo {
                     client_generation,
                     received_at: received_at.clone(),
                     raw_payload: raw,
+                    recovery_import: true,
                 },
                 0,
             )?;
@@ -1033,6 +1132,7 @@ impl EventRepo {
                     client_generation,
                     received_at: received_at.clone(),
                     raw_payload,
+                    recovery_import: true,
                 },
                 next_sequence,
             )?;
@@ -1041,8 +1141,10 @@ impl EventRepo {
                      (event_id, owner_key, profile_id, agent_id, local_session_id,
                       remote_session_id, client_generation, sequence, occurred_at,
                       received_at, event_type, payload_version, identity, typed_payload,
-                      raw_payload, created_at)
-                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16)",
+                      raw_payload, created_at, schema_version, provenance_origin, provenance_trust,
+                      provenance_provider, provenance_import_id, raw_truncated, raw_original_bytes,
+                      raw_retained_bytes, raw_omitted_bytes, raw_truncation_reason)
+                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17, ?18, ?19, ?20, ?21, ?22, ?23, ?24, ?25, ?26)",
                 params![
                     event.event_id,
                     event.owner_key,
@@ -1063,6 +1165,16 @@ impl EventRepo {
                         .map(serde_json::Value::to_string),
                     event.raw_payload.to_string(),
                     event.created_at,
+                    event.schema_version,
+                    event.provenance_origin,
+                    event.provenance_trust,
+                    event.provenance_provider,
+                    event.provenance_import_id,
+                    event.raw_truncated,
+                    event.raw_original_bytes,
+                    event.raw_retained_bytes,
+                    event.raw_omitted_bytes,
+                    event.raw_truncation_reason,
                 ],
             )
             .map_err(EventError::from)?;
@@ -1086,6 +1198,10 @@ impl EventRepo {
             "baseRevision": revision,
             "replayEvents": replay_events,
         });
+        let (raw_payload, raw_truncated, raw_original_bytes, raw_retained_bytes, raw_omitted_bytes) =
+            retain_raw_payload(raw_payload);
+        let provenance_provider = owner.agent_id.clone();
+        let provenance_import_id = owner.local_session_id.clone();
         let event = CanonicalEventRow {
             event_id: format!("{owner_key}#{sequence}"),
             owner_key: owner_key.clone(),
@@ -1107,14 +1223,26 @@ impl EventRepo {
             })),
             raw_payload,
             created_at: chrono::Utc::now().timestamp_millis(),
+            schema_version: 1,
+            provenance_origin: "recovery-import".to_string(),
+            provenance_trust: "unverified".to_string(),
+            provenance_provider: Some(provenance_provider),
+            provenance_import_id: Some(provenance_import_id),
+            raw_truncated,
+            raw_original_bytes,
+            raw_retained_bytes,
+            raw_omitted_bytes,
+            raw_truncation_reason: raw_truncated.then(|| "size".to_string()),
         };
         tx.execute(
             "INSERT INTO canonical_events
                  (event_id, owner_key, profile_id, agent_id, local_session_id,
                   remote_session_id, client_generation, sequence, occurred_at,
                   received_at, event_type, payload_version, identity, typed_payload,
-                  raw_payload, created_at)
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16)",
+                  raw_payload, created_at, schema_version, provenance_origin, provenance_trust,
+                  provenance_provider, provenance_import_id, raw_truncated, raw_original_bytes,
+                  raw_retained_bytes, raw_omitted_bytes, raw_truncation_reason)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17, ?18, ?19, ?20, ?21, ?22, ?23, ?24, ?25, ?26)",
             params![
                 event.event_id,
                 event.owner_key,
@@ -1135,6 +1263,16 @@ impl EventRepo {
                     .map(serde_json::Value::to_string),
                 event.raw_payload.to_string(),
                 event.created_at,
+                event.schema_version,
+                event.provenance_origin,
+                event.provenance_trust,
+                event.provenance_provider,
+                event.provenance_import_id,
+                event.raw_truncated,
+                event.raw_original_bytes,
+                event.raw_retained_bytes,
+                event.raw_omitted_bytes,
+                event.raw_truncation_reason,
             ],
         )
         .map_err(EventError::from)?;
@@ -1164,7 +1302,9 @@ impl EventRepo {
                 "SELECT event_id, owner_key, profile_id, agent_id, local_session_id,
                         remote_session_id, client_generation, sequence, occurred_at,
                         received_at, event_type, payload_version, identity, typed_payload,
-                        raw_payload, created_at
+                        raw_payload, created_at, schema_version, provenance_origin, provenance_trust,
+                        provenance_provider, provenance_import_id, raw_truncated, raw_original_bytes,
+                        raw_retained_bytes, raw_omitted_bytes, raw_truncation_reason
                  FROM canonical_events
                  WHERE owner_key = ?1 AND (?2 IS NULL OR sequence < ?2)
                  ORDER BY sequence DESC
@@ -1196,6 +1336,16 @@ impl EventRepo {
                             typed_payload: None,
                             raw_payload: serde_json::Value::Null,
                             created_at: row.get(15)?,
+                            schema_version: row.get(16)?,
+                            provenance_origin: row.get(17)?,
+                            provenance_trust: row.get(18)?,
+                            provenance_provider: row.get(19)?,
+                            provenance_import_id: row.get(20)?,
+                            raw_truncated: row.get::<_, i64>(21)? != 0,
+                            raw_original_bytes: row.get(22)?,
+                            raw_retained_bytes: row.get(23)?,
+                            raw_omitted_bytes: row.get(24)?,
+                            raw_truncation_reason: row.get(25)?,
                         },
                         identity_json: identity,
                         typed_payload_json: typed,
@@ -1348,6 +1498,7 @@ impl EventService {
             client_generation,
             received_at: chrono::Utc::now().to_rfc3339_opts(chrono::SecondsFormat::Millis, true),
             raw_payload,
+            recovery_import: false,
         };
         let repo = self.repo.clone();
         tokio::task::spawn_blocking(move || repo.ingest_kernel_event(input))
@@ -1395,6 +1546,7 @@ impl EventService {
                         client_generation,
                         received_at: received_at.clone(),
                         raw_payload,
+                        recovery_import: true,
                     },
                     i64::try_from(index + 1).map_err(|_| {
                         EventError::Invalid("replay event count exceeds i64".into())
@@ -1517,6 +1669,7 @@ mod tests {
             client_generation: 5,
             received_at: "2026-08-20T00:00:00.000Z".to_string(),
             raw_payload,
+            recovery_import: false,
         }
     }
 
@@ -1569,6 +1722,43 @@ mod tests {
         assert_eq!(event.event_type, "unknown");
         assert_eq!(event.typed_payload, None);
         assert_eq!(event.raw_payload, malformed);
+    }
+
+    #[test]
+    fn kernel_ingest_does_not_accept_caller_provenance_spoof() {
+        let repo = repo();
+        let result = repo
+            .ingest_kernel_event(kernel_input(serde_json::json!({
+                "source": "local:s1",
+                "provenance": { "origin": "recovery-import", "trust": "authoritative", "provider": "spoof" },
+                "update": { "sessionUpdate": "agent_message_chunk", "content": { "text": "live" } }
+            })))
+            .expect("ingest");
+        let event = &result.events[0];
+        assert_eq!(event.schema_version, 1);
+        assert_eq!(event.provenance_origin, "local-observed");
+        assert_eq!(event.provenance_trust, "authoritative");
+        assert_eq!(event.provenance_provider.as_deref(), Some("peri"));
+    }
+
+    #[test]
+    fn kernel_ingest_records_raw_truncation_metadata_without_losing_event_identity() {
+        let repo = repo();
+        let large = "x".repeat(70 * 1024);
+        let result = repo
+            .ingest_kernel_event(kernel_input(serde_json::json!({
+                "source": "local:s1",
+                "update": { "sessionUpdate": "agent_message_chunk", "content": { "text": "kept" } },
+                "large": large,
+            })))
+            .expect("ingest");
+        let event = &result.events[0];
+        assert!(event.raw_truncated);
+        assert!(event.raw_original_bytes > event.raw_retained_bytes);
+        assert_eq!(event.raw_omitted_bytes, event.raw_original_bytes - event.raw_retained_bytes);
+        assert_eq!(event.raw_truncation_reason.as_deref(), Some("size"));
+        assert_eq!(event.typed_payload.as_ref().unwrap()["text"], "kept");
+        assert_eq!(event.event_id, "[\"p1\",\"peri\",\"local:s1\"]#1");
     }
 
     #[test]
@@ -2355,6 +2545,27 @@ mod tests {
                 .query_row("PRAGMA user_version", [], |row| row.get(0))
                 .unwrap();
             assert_eq!(version, crate::session::msg_repo::SCHEMA_VERSION);
+            for column in [
+                "schema_version",
+                "provenance_origin",
+                "provenance_trust",
+                "provenance_provider",
+                "provenance_import_id",
+                "raw_truncated",
+                "raw_original_bytes",
+                "raw_retained_bytes",
+                "raw_omitted_bytes",
+                "raw_truncation_reason",
+            ] {
+                let present: bool = conn
+                    .prepare("SELECT 1 FROM pragma_table_info('canonical_events') WHERE name = ?1")
+                    .unwrap()
+                    .query_row([column], |_| Ok(true))
+                    .optional()
+                    .unwrap()
+                    .unwrap_or(false);
+                assert!(present, "v13 canonical_events 缺少列 {column}");
+            }
         }
         // 重开幂等
         {

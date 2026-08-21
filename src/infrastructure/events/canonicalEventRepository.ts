@@ -51,6 +51,16 @@ export interface CanonicalEventWireRow {
   rawPayload?: unknown
   createdAt?: number
   owner?: CanonicalEventOwner
+  schemaVersion?: number
+  provenanceOrigin?: CanonicalConversationEvent['provenance'] extends infer P ? P extends { origin: infer O } ? O : never : never
+  provenanceTrust?: CanonicalConversationEvent['provenance'] extends infer P ? P extends { trust: infer T } ? T : never : never
+  provenanceProvider?: string | null
+  provenanceImportId?: string | null
+  rawTruncated?: boolean
+  rawOriginalBytes?: number | null
+  rawRetainedBytes?: number | null
+  rawOmittedBytes?: number | null
+  rawTruncationReason?: string | null
 }
 
 /** canonical 事件（嵌套 owner；测试与前端内部使用形状）。 */
@@ -63,7 +73,31 @@ export type CanonicalEventRow = CanonicalConversationEvent & { createdAt?: numbe
 export function normalizeCanonicalEventRow(value: unknown): CanonicalEventRow {
   const row = (value ?? {}) as CanonicalEventWireRow
   if (row.owner) {
-    return row as unknown as CanonicalEventRow
+    return {
+      ...(row as unknown as CanonicalEventRow),
+      ...(row.schemaVersion !== undefined ? { schemaVersion: row.schemaVersion } : {}),
+      ...(row.provenanceOrigin && row.provenanceTrust
+        ? {
+            provenance: {
+              origin: row.provenanceOrigin,
+              trust: row.provenanceTrust,
+              ...(row.provenanceProvider ? { provider: row.provenanceProvider } : {}),
+              ...(row.provenanceImportId ? { importId: row.provenanceImportId } : {}),
+            },
+          }
+        : {}),
+      ...(row.rawTruncated !== undefined
+        ? {
+            rawMetadata: {
+              truncated: row.rawTruncated,
+              originalBytes: row.rawOriginalBytes ?? 0,
+              retainedBytes: row.rawRetainedBytes ?? 0,
+              omittedBytes: row.rawOmittedBytes ?? 0,
+              ...(row.rawTruncationReason ? { reason: row.rawTruncationReason } : {}),
+            },
+          }
+        : {}),
+    }
   }
   const owner: CanonicalEventOwner = {
     profileId: row.profileId ?? '',
@@ -74,6 +108,28 @@ export function normalizeCanonicalEventRow(value: unknown): CanonicalEventRow {
   return {
     eventId: row.eventId ?? '',
     owner,
+    ...(row.schemaVersion !== undefined ? { schemaVersion: row.schemaVersion } : {}),
+    ...(row.provenanceOrigin && row.provenanceTrust
+      ? {
+          provenance: {
+            origin: row.provenanceOrigin,
+            trust: row.provenanceTrust,
+            ...(row.provenanceProvider ? { provider: row.provenanceProvider } : {}),
+            ...(row.provenanceImportId ? { importId: row.provenanceImportId } : {}),
+          },
+        }
+      : {}),
+    ...(row.rawTruncated !== undefined
+      ? {
+          rawMetadata: {
+            truncated: row.rawTruncated,
+            originalBytes: row.rawOriginalBytes ?? 0,
+            retainedBytes: row.rawRetainedBytes ?? 0,
+            omittedBytes: row.rawOmittedBytes ?? 0,
+            ...(row.rawTruncationReason ? { reason: row.rawTruncationReason } : {}),
+          },
+        }
+      : {}),
     clientGeneration: row.clientGeneration ?? 0,
     sequence: row.sequence ?? 0,
     occurredAt: row.occurredAt ?? '',

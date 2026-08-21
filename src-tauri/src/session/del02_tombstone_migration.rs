@@ -86,7 +86,7 @@ fn migrate_upgrades_v6_tombstone_to_latest_owner_state() {
         .query_row("PRAGMA user_version", [], |row| row.get(0))
         .expect("user_version");
     assert_eq!(version, SCHEMA_VERSION, "v6 库升版后必须等于当前版本");
-    assert_eq!(version, 12, "v12 tombstone 必须以 durable owner 为主键");
+    assert_eq!(version, SCHEMA_VERSION, "v13 canonical envelope migration 必须保留 durable owner tombstone");
 
     let cols: Vec<String> = {
         let mut stmt = conn
@@ -108,7 +108,7 @@ fn migrate_upgrades_v6_tombstone_to_latest_owner_state() {
             "deletion_revision",
             "reason"
         ],
-        "v6 旧表升版后必须得到 v12 owner-keyed active schema"
+        "v6 旧表升版后必须得到 v13 versioned canonical active schema"
     );
 
     // 无事件旧行：转换为唯一的会话作用域 legacy owner + state=deleted

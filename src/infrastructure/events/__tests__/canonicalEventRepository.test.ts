@@ -182,6 +182,15 @@ describe('tauriCanonicalEventRepository', () => {
         payloadVersion: 1,
         rawPayload: { text: 'hi' },
         createdAt: 1753065600000,
+        schemaVersion: 1,
+        provenanceOrigin: 'local-observed',
+        provenanceTrust: 'authoritative',
+        provenanceProvider: 'peri',
+        rawTruncated: true,
+        rawOriginalBytes: 90000,
+        rawRetainedBytes: 64000,
+        rawOmittedBytes: 26000,
+        rawTruncationReason: 'size',
       }],
       nextBeforeSequence: null,
     })
@@ -197,6 +206,9 @@ describe('tauriCanonicalEventRepository', () => {
     expect(rows[0].eventId).toBe(`${OWNER_KEY}#1`)
     expect(rows[0].sequence).toBe(1)
     expect(rows[0].eventType).toBe('user.message')
+    expect(rows[0].schemaVersion).toBe(1)
+    expect(rows[0].provenance).toEqual({ origin: 'local-observed', trust: 'authoritative', provider: 'peri' })
+    expect(rows[0].rawMetadata).toEqual({ truncated: true, originalBytes: 90000, retainedBytes: 64000, omittedBytes: 26000, reason: 'size' })
   })
 
   it('嵌套 owner 行（测试/未来 wire）原样保留', async () => {

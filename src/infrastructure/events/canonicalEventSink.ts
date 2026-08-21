@@ -86,6 +86,9 @@ export function createCanonicalEventSink(deps: CanonicalEventSinkDeps = {}): Can
       const canonicalEvents = events as CanonicalConversationEvent[]
       try {
         const revision = await repository.append(canonicalEvents, expectedRevision)
+        // durable-before-publish：插件/渲染订阅者只能看到已由 canonical_events 接受的事实。
+        // append 失败时保持 pending，绝不把未提交事件广播成 committed 事实。
+        for (const event of canonicalEvents) publishPluginEvent(event)
         // 写成功的 sequence 从 pending 移除；更新期间到达的新事件保留。
         const state = states.get(ownerKey)
         if (state) {
@@ -176,7 +179,6 @@ export function createCanonicalEventSink(deps: CanonicalEventSinkDeps = {}): Can
     })
     state.seq = normalized.event.sequence
     state.pending.push(normalized.event)
-    publishPluginEvent(normalized.event)
     scheduler.markDirty(ownerKey, [...state.pending], force)
   }
 
