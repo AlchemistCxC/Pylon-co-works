@@ -17,6 +17,25 @@ describe('Shared Agent Catalog', () => {
     ])
   })
 
+  it('covers Claude AgentTool, task/goal planning and MCP/skill/memory tool families', () => {
+    const claudeTools = new Set(
+      builtinAgentCatalog.tools()
+        .filter(entry => entry.provider === 'claude-code')
+        .map(entry => entry.name.toLowerCase()),
+    )
+    for (const required of [
+      'agent',
+      'task',
+      'todowrite',
+      'goal',
+      'mcp',
+      'skilltool',
+      'memory',
+    ]) {
+      expect(claudeTools.has(required), `Claude catalog missing ${required}`).toBe(true)
+    }
+  })
+
   it('validates structured config evidence without exposing it as a second detector registry', () => {
     expect(builtinAgentCatalog.detectors()).toHaveLength(3)
     const minimum = {

@@ -127,7 +127,14 @@
         { "name": "Grep", "displayName": "Grep", "kind": "search", "action": "search", "summaryFields": ["pattern"] },
         { "name": "Glob", "displayName": "Glob", "kind": "search", "action": "search", "summaryFields": ["pattern"] },
         { "name": "WebFetch", "displayName": "WebFetch", "kind": "fetch", "action": "fetch", "summaryFields": ["url"] },
-        { "name": "WebSearch", "displayName": "WebSearch", "kind": "fetch", "action": "fetch", "summaryFields": ["query"] }
+        { "name": "WebSearch", "displayName": "WebSearch", "kind": "fetch", "action": "fetch", "summaryFields": ["query"] },
+        { "name": "Agent", "displayName": "Agent", "kind": "execute", "action": "delegate", "summaryFields": ["prompt", "description"] },
+        { "name": "Task", "displayName": "Task", "kind": "execute", "action": "delegate", "summaryFields": ["task", "description"] },
+        { "name": "TodoWrite", "displayName": "Todo / Plan", "kind": "other", "action": "plan", "summaryFields": ["todos"] },
+        { "name": "Goal", "displayName": "Goal", "kind": "other", "action": "plan", "summaryFields": ["goal", "objective"] },
+        { "name": "MCP", "displayName": "MCP", "kind": "execute", "action": "execute", "summaryFields": ["server", "tool", "arguments"] },
+        { "name": "SkillTool", "displayName": "Skill", "kind": "read", "action": "skill", "summaryFields": ["skill_name", "query"] },
+        { "name": "Memory", "displayName": "Memory", "kind": "edit", "action": "edit", "summaryFields": ["action", "key"] }
       ]
     }
   ]
