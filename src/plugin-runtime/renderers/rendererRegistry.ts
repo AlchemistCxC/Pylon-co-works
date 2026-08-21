@@ -194,7 +194,10 @@ export class RendererRegistry {
   registerSuite(owner: PluginIdentity, definition: RendererSuiteContribution): AsyncDisposable {
     const normalized = validateRendererSuiteContribution(definition, this.snapshotValue.rendererSuites, this.snapshotValue.renderKinds)
     validateRendererContributionGraph({
-      suites: [...this.snapshotValue.rendererSuites, { value: normalized } as RegistryEntry<RendererSuiteContribution>],
+      suites: [...this.snapshotValue.rendererSuites, {
+        ownerPluginId: owner.pluginId, ownerRuntimeInstanceId: owner.key,
+        contributionId: normalized.id, layer: 'feature', priority: 1000, value: normalized,
+      }],
       slots: this.snapshotValue.rendererSlots,
       kinds: this.snapshotValue.renderKinds,
     })
@@ -205,7 +208,10 @@ export class RendererRegistry {
     const normalized = validateRendererSlotContribution(definition, this.snapshotValue.rendererSuites, this.snapshotValue.renderKinds)
     validateRendererContributionGraph({
       suites: this.snapshotValue.rendererSuites,
-      slots: [...this.snapshotValue.rendererSlots, { value: normalized } as RegistryEntry<RendererSlotContribution>],
+      slots: [...this.snapshotValue.rendererSlots, {
+        ownerPluginId: owner.pluginId, ownerRuntimeInstanceId: owner.key,
+        contributionId: normalized.id, layer: 'feature', priority: normalized.priority, value: normalized,
+      }],
       kinds: this.snapshotValue.renderKinds,
     })
     return this.slots.register(owner, normalized, { contributionId: normalized.id, priority: normalized.priority })
@@ -273,15 +279,28 @@ export class RendererRegistry {
     ]
     const candidateSuites = () => [
       ...this.snapshotValue.rendererSuites.filter(entry => entry.ownerRuntimeInstanceId !== replacingRuntimeInstanceId),
-      ...stagedSuites.map(value => ({ value } as RegistryEntry<RendererSuiteContribution>)),
+      ...stagedSuites.map(value => ({
+        ownerPluginId: owner.pluginId, ownerRuntimeInstanceId: owner.key,
+        contributionId: value.id, layer: 'feature', priority: 1000, value,
+      } as RegistryEntry<RendererSuiteContribution>)),
     ]
     const candidateSlots = () => [
       ...this.snapshotValue.rendererSlots.filter(entry => entry.ownerRuntimeInstanceId !== replacingRuntimeInstanceId),
-      ...stagedSlots.map(value => ({ value } as RegistryEntry<RendererSlotContribution>)),
+      ...stagedSlots.map(value => ({
+        ownerPluginId: owner.pluginId, ownerRuntimeInstanceId: owner.key,
+        contributionId: value.id, layer: 'feature', priority: value.priority, value,
+      } as RegistryEntry<RendererSlotContribution>)),
     ]
     return {
       registerRenderKind: definition => {
-        validateRenderKind(definition, this.snapshotValue.renderKinds, true)
+        // Shadow updates replace the previous owner atomically. Validate the
+        // candidate against the surviving catalog, otherwise the old kind is
+        // incorrectly treated as a duplicate before the transaction can stage.
+        validateRenderKind(
+          definition,
+          this.snapshotValue.renderKinds.filter(entry => entry.ownerRuntimeInstanceId !== replacingRuntimeInstanceId),
+          true,
+        )
         validateRenderKindSettingsNamespace(definition)
         stagedKinds.push(definition)
         return kinds.register(freezeRenderKind(definition), { contributionId: definition.id, priority: definition.priority })
@@ -360,8 +379,14 @@ export class RendererRegistry {
         for (const definition of stagedKinds) validateRenderKind(definition, combined, false, false)
         const existingSuites = this.snapshotValue.rendererSuites.filter(entry => entry.ownerRuntimeInstanceId !== replacingRuntimeInstanceId)
         const existingSlots = this.snapshotValue.rendererSlots.filter(entry => entry.ownerRuntimeInstanceId !== replacingRuntimeInstanceId)
-        const suiteEntries = [...existingSuites, ...stagedSuites.map(value => ({ value } as RegistryEntry<RendererSuiteContribution>))]
-        const slotEntries = [...existingSlots, ...stagedSlots.map(value => ({ value } as RegistryEntry<RendererSlotContribution>))]
+        const suiteEntries = [...existingSuites, ...stagedSuites.map(value => ({
+          ownerPluginId: owner.pluginId, ownerRuntimeInstanceId: owner.key,
+          contributionId: value.id, layer: 'feature', priority: 1000, value,
+        } as RegistryEntry<RendererSuiteContribution>))]
+        const slotEntries = [...existingSlots, ...stagedSlots.map(value => ({
+          ownerPluginId: owner.pluginId, ownerRuntimeInstanceId: owner.key,
+          contributionId: value.id, layer: 'feature', priority: value.priority, value,
+        } as RegistryEntry<RendererSlotContribution>))]
         validateRendererContributionGraph({ suites: suiteEntries, slots: slotEntries, kinds: combined })
         for (const transaction of transactions) transaction.validate()
       },
@@ -373,8 +398,14 @@ export class RendererRegistry {
         const existingSuites = this.snapshotValue.rendererSuites.filter(entry => entry.ownerRuntimeInstanceId !== replacingRuntimeInstanceId)
         const existingSlots = this.snapshotValue.rendererSlots.filter(entry => entry.ownerRuntimeInstanceId !== replacingRuntimeInstanceId)
         validateRendererContributionGraph({
-          suites: [...existingSuites, ...stagedSuites.map(value => ({ value } as RegistryEntry<RendererSuiteContribution>))],
-          slots: [...existingSlots, ...stagedSlots.map(value => ({ value } as RegistryEntry<RendererSlotContribution>))],
+          suites: [...existingSuites, ...stagedSuites.map(value => ({
+            ownerPluginId: owner.pluginId, ownerRuntimeInstanceId: owner.key,
+            contributionId: value.id, layer: 'feature', priority: 1000, value,
+          } as RegistryEntry<RendererSuiteContribution>))],
+          slots: [...existingSlots, ...stagedSlots.map(value => ({
+            ownerPluginId: owner.pluginId, ownerRuntimeInstanceId: owner.key,
+            contributionId: value.id, layer: 'feature', priority: value.priority, value,
+          } as RegistryEntry<RendererSlotContribution>))],
           kinds: combined,
         })
         this.batchDepth += 1

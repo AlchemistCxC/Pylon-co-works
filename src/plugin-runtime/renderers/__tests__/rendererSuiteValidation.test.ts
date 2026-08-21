@@ -57,6 +57,23 @@ describe('Renderer Suite contract validation', () => {
     expect(() => registry.registerSlot(owner, slot('slot.duplicate', ['suite.base'], ['plugin.note']))).toThrow(/duplicate|重复/i)
   })
 
+  it('allows cross-owner explicit overlays but keeps fallback slots globally unique', () => {
+    const registry = new RendererRegistry()
+    const baseOwner = createPluginIdentity('test.suite', 'overlay-base')
+    const overlayOwner = createPluginIdentity('test.suite', 'overlay-plugin')
+    registry.registerRenderKind(baseOwner, kind('plugin.note'))
+    registry.registerSuite(baseOwner, suite())
+    registry.registerSlot(baseOwner, slot('slot.base', ['suite.base'], ['plugin.note']))
+
+    expect(() => registry.registerSlot(overlayOwner, slot('slot.overlay', ['suite.base'], ['plugin.note']))).not.toThrow()
+
+    const fallbackRegistry = new RendererRegistry()
+    fallbackRegistry.registerRenderKind(baseOwner, kind('plugin.note'))
+    fallbackRegistry.registerSuite(baseOwner, suite())
+    fallbackRegistry.registerSlot(baseOwner, slot('slot.fallback.base', ['suite.base'], ['plugin.note'], true))
+    expect(() => fallbackRegistry.registerSlot(overlayOwner, slot('slot.fallback.overlay', ['suite.base'], ['plugin.note'], true))).toThrow(/duplicate|重复/i)
+  })
+
   it('rejects suite fallback cycles and settings namespace mismatch', () => {
     const registry = new RendererRegistry()
     const owner = createPluginIdentity('test.suite', 'cycle')

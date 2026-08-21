@@ -127,12 +127,25 @@ export function validateRendererContributionGraph(graph: RendererContributionGra
   for (const entry of graph.kinds) validateRenderKindSettingsNamespace(entry.value)
   for (const suite of graph.suites) validateRendererSuiteContribution(suite.value, graph.suites, graph.kinds)
   for (const slot of graph.slots) validateRendererSlotContribution(slot.value, graph.suites, graph.kinds)
-  const slotPairs = new Set<string>()
+  const slotPairs = new Map<string, RegistryEntry<RendererSlotContribution>>()
   for (const entry of graph.slots) {
     for (const target of entry.value.targetSuites) for (const kind of entry.value.kinds) {
       const key = `${target}|${kind}|${entry.value.fallback ? 'fallback' : 'base'}`
-      if (slotPairs.has(key)) fail(`Slot duplicate target/kind：${target} -> ${kind}`)
-      slotPairs.add(key)
+      const previous = slotPairs.get(key)
+      if (!previous) {
+        slotPairs.set(key, entry)
+        continue
+      }
+      // Fallback is a single safety net for a target/kind and must remain
+      // globally unique. Explicit (non-fallback) slots may intentionally
+      // overlay another owner; duplicate declarations from one runtime are
+      // still rejected so a package cannot shadow itself accidentally.
+      const sameOwner = !previous.ownerRuntimeInstanceId
+        || !entry.ownerRuntimeInstanceId
+        || previous.ownerRuntimeInstanceId === entry.ownerRuntimeInstanceId
+      if (entry.value.fallback || previous.value.fallback || sameOwner) {
+        fail(`Slot duplicate target/kind：${target} -> ${kind}`)
+      }
     }
   }
   // A suite fallback graph must terminate and may only point at a registered suite.

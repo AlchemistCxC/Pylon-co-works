@@ -1,0 +1,6 @@
+[data-example-solid-suite] {
+  display: block;
+  padding: 12px;
+  border: 1px solid color-mix(in srgb, currentColor 22%, transparent);
+  border-radius: 8px;
+}

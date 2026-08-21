@@ -1,0 +1,14 @@
+{
+  "schema": 1,
+  "id": "example.solid-renderer",
+  "name": "Example Solid Renderer",
+  "version": "1.0.0",
+  "api": "1.0",
+  "kind": "renderer",
+  "web": {
+    "entry": "./dist/entry.js",
+    "styles": ["./dist/styles.css"]
+  },
+  "activation": { "events": ["kernel.ready"] },
+  "hotSwap": { "mode": "parallel", "drainTimeoutMs": 10000 }
+}
