@@ -13,7 +13,7 @@ const input: WorkbenchMountInput = {
 function fakeHost(): WorkbenchHostPort {
   const denied = async () => ({ ok: false as const, error: { code: 'renderer_not_active', message: 'inactive', recoverability: 'fallback' as const } })
   return {
-    document: { getSnapshot: () => undefined, subscribe: () => () => {}, getSlice: <T>() => undefined as T, subscribeSlice: () => () => {} },
+    document: { getSnapshot: () => ({ revision: 5 } as never), subscribe: () => () => {}, getSlice: <T>() => undefined as T, subscribeSlice: () => () => {} },
     appearance: { getSnapshot: () => ({}) as never, subscribe: () => () => {} },
     sessionUi: { get: (_, fallback) => fallback, set: () => {}, update: (_, fallback, updater) => updater(fallback), subscribe: () => () => {}, clear: () => {} },
     commands: new Proxy({} as WorkbenchHostPort['commands'], { get: () => denied }),
@@ -31,7 +31,7 @@ function activation(id: string, factory: WorkbenchRendererFactory): RendererActi
   return { revision: 1, suite: entry, kinds: new Map(), slots: new Map(), diagnostics: [] }
 }
 
-function factory(id: string, options: { delay?: number; fail?: boolean; mountFail?: boolean; destroyFail?: boolean } = {}): WorkbenchRendererFactory {
+function factory(id: string, options: { delay?: number; fail?: boolean; mountFail?: boolean; destroyFail?: boolean; readyFail?: boolean } = {}): WorkbenchRendererFactory {
   return {
     async prepare() {
       if (options.fail) throw new Error(`${id} prepare failed`)
@@ -52,7 +52,10 @@ function factory(id: string, options: { delay?: number; fail?: boolean; mountFai
           const handle = document.createElement('div'); handle.textContent = id; container.append(handle)
           ;(instance as WorkbenchRendererInstance & { __handle?: HTMLElement }).__handle = handle
           setTimeout(() => {
-            if (!destroyed) for (const listener of listeners.get('ready') ?? []) listener({ id })
+            if (!destroyed) {
+              if (options.readyFail) for (const listener of listeners.get('error') ?? []) listener(new Error(`${id} slot failed`))
+              else for (const listener of listeners.get('ready') ?? []) listener({ id })
+            }
           }, options.delay ?? 0)
           return instance
         },
@@ -117,6 +120,20 @@ describe('RendererSuiteHost', () => {
     expect(diagnostics).toEqual([expect.objectContaining({ code: 'renderer.suite.switch.failed', phase: 'mount' })])
   })
 
+  it('treats slot/ready throw as mount failure with structured recoverability and revisions', async () => {
+    const container = document.createElement('div')
+    const diagnostics: unknown[] = []
+    const port = fakeHost(); port.diagnostics.report = value => diagnostics.push(value)
+    const host = new RendererSuiteHost({ container, hostPort: port, input, readyTimeoutMs: 20 })
+    await host.mount(activation('suite.a', factory('A')))
+    await host.switchTo(activation('suite.b', factory('B', { readyFail: true })))
+    expect(container.textContent).toContain('A')
+    expect(diagnostics).toEqual([expect.objectContaining({
+      code: 'renderer.suite.switch.failed', phase: 'mount', recoverability: 'fallback',
+      registryRevision: 1, documentRevision: 5,
+    })])
+  })
+
   it('reports destroy failure without leaking the active DOM', async () => {
     const container = document.createElement('div')
     const diagnostics: unknown[] = []
@@ -125,6 +142,6 @@ describe('RendererSuiteHost', () => {
     await host.mount(activation('suite.a', factory('A', { destroyFail: true })))
     await host.destroy()
     expect(container.childElementCount).toBe(0)
-    expect(diagnostics).toEqual([expect.objectContaining({ code: 'renderer.suite.destroy.failed', phase: 'destroy' })])
+    expect(diagnostics).toEqual([expect.objectContaining({ code: 'renderer.suite.destroy.failed', phase: 'destroy', recoverability: 'none', registryRevision: 1, documentRevision: 5 })])
   })
 })

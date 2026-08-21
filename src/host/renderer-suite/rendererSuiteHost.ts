@@ -161,7 +161,11 @@ export class RendererSuiteHost {
   private async destroyInstance(active: ActiveInstance): Promise<void> {
     active.gate.deactivate()
     try { await active.instance.destroy() } catch (error) {
-      this.options.hostPort.diagnostics.report({ code: 'renderer.suite.destroy.failed', message: error instanceof Error ? error.message : String(error), phase: 'destroy', recoverability: 'none', suiteId: active.activation.suite.value.id })
+      this.options.hostPort.diagnostics.report({
+        code: 'renderer.suite.destroy.failed', message: error instanceof Error ? error.message : String(error), phase: 'destroy', recoverability: 'none',
+        suiteId: active.activation.suite.value.id, registryRevision: active.activation.revision,
+        documentRevision: this.options.hostPort.document.getSnapshot()?.revision,
+      })
     }
     active.staging.remove()
   }
