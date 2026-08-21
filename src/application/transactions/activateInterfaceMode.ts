@@ -5,6 +5,7 @@ import { getInterfaceModeRegistry, getPluginUiRegistry, getPresentationProfileRe
 import type { PresentationProfileContribution } from '../../plugin-runtime/presentation/presentationProfileTypes.ts'
 import type { InterfaceModeContribution } from '../../plugin-runtime/interface-mode/interfaceModeTypes.ts'
 import { useStore } from '../../store.ts'
+import { validateRendererSuiteReferences } from '../../plugin-runtime/renderers/rendererSuiteReferences.ts'
 
 export interface InterfaceModeSuiteChoice {
   readonly requestedSuiteId?: string
@@ -53,6 +54,18 @@ function applyModeProfile(mode: InterfaceMode, profile: PresentationProfileContr
 export function activateInterfaceMode(mode: InterfaceMode): boolean {
   const modeContribution = resolveInterfaceMode(mode)
   if (!modeContribution || !interfaceModeIsUsable(modeContribution)) return false
+  try {
+    const services = {
+      suites: getRendererRegistry().snapshot().rendererSuites.map(entry => entry.value),
+      modes: getInterfaceModeRegistry().getSnapshot().entries.map(entry => entry.value),
+      profiles: getPresentationProfileRegistry().getSnapshot().entries.map(entry => entry.value),
+    }
+    validateRendererSuiteReferences(services)
+  } catch {
+    // Invalid cross-registry references make this activation unavailable;
+    // persisted preferences remain untouched for a later plugin reload.
+    return false
+  }
   const state = useInterfaceModeStore.getState()
   if (modeContribution.workbench.renderKind === 'renderer-suite') {
     // Suite activation is resolved by the Suite Host. Keep this transaction
