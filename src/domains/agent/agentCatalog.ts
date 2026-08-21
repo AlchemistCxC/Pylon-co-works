@@ -28,6 +28,7 @@ interface CatalogTool {
   action: ToolAction
   summaryFields?: string[]
   outputLabel?: 'lines' | 'matches' | 'changed-lines'
+  capabilities?: string[]
 }
 interface CatalogProvider {
   provider: string
@@ -123,6 +124,7 @@ export function parseAgentCatalog(value: unknown): CatalogDocument {
         action: tool.action as ToolAction,
         ...(tool.summaryFields === undefined ? {} : { summaryFields: stringList(tool.summaryFields, `${provider}/${name}.summaryFields`) }),
         ...(outputLabel === undefined ? {} : { outputLabel: outputLabel as CatalogTool['outputLabel'] }),
+        ...(tool.capabilities === undefined ? {} : { capabilities: stringList(tool.capabilities, `${provider}/${name}.capabilities`) }),
       }
     })
     return {
@@ -161,7 +163,7 @@ export const builtinAgentCatalog = Object.freeze({
       displayName: entry.displayName,
       protocol: entry.protocol,
       capabilities: { ...entry.capabilities, responseMethods: [...entry.capabilities.responseMethods] },
-      tools: entry.tools.map(tool => ({ name: tool.name, aliases: tool.aliases, kind: tool.kind, action: tool.action })),
+      tools: entry.tools.map(tool => ({ name: tool.name, aliases: tool.aliases, kind: tool.kind, action: tool.action, capabilities: tool.capabilities })),
       interactionKinds: [...entry.interactionKinds],
     }))
   },

@@ -22,7 +22,7 @@ describe('Claude Code normalizer', () => {
     }, context)
     expect(result.events[0].event).toMatchObject({
       type: 'tool.started',
-      tool: { toolCallId: 'tool-1', parentToolUseId: 'parent-1' },
+      tool: { toolCallId: 'tool-1', name: 'Bash', parentToolUseId: 'parent-1' },
     })
   })
 

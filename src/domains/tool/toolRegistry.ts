@@ -10,6 +10,7 @@ export interface ToolRegistryEntry {
   action: ToolAction
   summaryFields?: readonly string[]
   outputLabel?: 'lines' | 'matches' | 'changed-lines'
+  capabilities?: readonly string[]
 }
 
 export interface ToolRegistryOverlay {
@@ -54,6 +55,7 @@ function cloneEntry(entry: ToolRegistryEntry): ToolRegistryEntry {
     name: entry.name.trim(),
     ...(entry.aliases ? { aliases: Object.freeze([...entry.aliases].map(alias => alias.trim()).filter(Boolean)) } : {}),
     ...(entry.summaryFields ? { summaryFields: Object.freeze([...entry.summaryFields]) } : {}),
+    ...(entry.capabilities ? { capabilities: Object.freeze([...entry.capabilities]) } : {}),
   })
 }
 
@@ -68,6 +70,8 @@ function validateEntry(raw: unknown, providerHint?: string): ToolRegistryEntry {
   const aliases = value.aliases === undefined ? [] : value.aliases
   if (!Array.isArray(aliases) || aliases.some(alias => typeof alias !== 'string')) throw new Error(`工具字典 aliases 非法：${provider}/${name}`)
   const outputLabel = value.outputLabel ?? value.output_label
+  const capabilities = value.capabilities === undefined ? [] : value.capabilities
+  if (!Array.isArray(capabilities) || capabilities.some(capability => typeof capability !== 'string' || !capability.trim())) throw new Error(`工具字典 capabilities 非法：${provider}/${name}`)
   return cloneEntry({
     provider: provider.trim().toLowerCase(),
     name: name.trim(),
@@ -77,6 +81,7 @@ function validateEntry(raw: unknown, providerHint?: string): ToolRegistryEntry {
     action: value.action as ToolAction,
     summaryFields: Array.isArray(value.summaryFields) ? value.summaryFields.filter((item): item is string => typeof item === 'string') : Array.isArray(value.summary_fields) ? value.summary_fields.filter((item): item is string => typeof item === 'string') : [],
     outputLabel: ['lines', 'matches', 'changed-lines'].includes(String(outputLabel)) ? outputLabel as ToolRegistryEntry['outputLabel'] : undefined,
+    capabilities: capabilities as string[],
   })
 }
 

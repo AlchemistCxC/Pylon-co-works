@@ -1,5 +1,5 @@
 export type ToolKind = 'read' | 'edit' | 'execute' | 'search' | 'fetch' | 'think' | 'other'
-export type ToolProvider = 'peri' | 'hermes' | 'mcp' | 'unknown'
+export type ToolProvider = string
 export type ToolMatch = 'wire' | 'provider-dictionary' | 'alias-dictionary' | 'heuristic' | 'fallback'
 export type ToolAction =
   | 'read'
@@ -30,6 +30,8 @@ export interface ToolResolution {
   summaryFields?: readonly string[]
   /** 工具级输出标签（覆盖 kind 默认 renderer） */
   outputLabel?: 'lines' | 'matches' | 'changed-lines'
+  /** Provider-neutral capabilities used by host gating and semantic fallback. */
+  capabilities?: readonly string[]
   /** title 内嵌参数（如 "terminal: npm test" 的 "npm test"），输入为 null 时的摘要来源 */
   embeddedSummary?: string
 }

@@ -144,6 +144,7 @@ export function resolveToolType(
       summaryFields: entry?.summaryFields,
       outputLabel: entry?.outputLabel,
       embeddedSummary,
+      capabilities: entry?.capabilities,
     }
   }
 
@@ -159,16 +160,17 @@ export function resolveToolType(
       summaryFields: entry.summaryFields,
       outputLabel: entry.outputLabel,
       embeddedSummary,
+      capabilities: entry.capabilities,
     }
   }
 
   const actionName = dictionaryKey(rawName)
   const alias = ACTION_ALIASES.find(([pattern]) => pattern.test(actionName))
   if (alias) {
-    return { kind: alias[1], action: alias[2], canonicalName: rawName, rawName, provider, matchedBy: 'alias-dictionary' }
+    return { kind: alias[1], action: alias[2], canonicalName: rawName, rawName, provider, matchedBy: 'alias-dictionary', ...(provider === 'mcp' ? { capabilities: ['mcp', 'dynamic-schema'] } : {}) }
   }
 
-  return { kind: 'other', action: 'unknown', canonicalName: rawName, rawName, provider, matchedBy: 'fallback' }
+  return { kind: 'other', action: 'unknown', canonicalName: rawName, rawName, provider, matchedBy: 'fallback', ...(provider === 'mcp' ? { capabilities: ['mcp', 'dynamic-schema'] } : {}) }
 }
 
 export function resolveToolKind(name: string, toolKind?: string): ToolKind {

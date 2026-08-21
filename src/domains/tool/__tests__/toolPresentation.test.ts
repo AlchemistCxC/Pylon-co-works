@@ -52,6 +52,13 @@ describe('Peri/Hermes 工具类型字典', () => {
       action: 'navigate',
       provider: 'mcp',
     })
+    expect(resolveToolType('mcp__custom__future_tool')).toMatchObject({
+      kind: 'other',
+      action: 'unknown',
+      provider: 'mcp',
+      matchedBy: 'fallback',
+      capabilities: expect.arrayContaining(['mcp', 'dynamic-schema']),
+    })
   })
 
   it('未知工具回退 other，并保留证据', () => {

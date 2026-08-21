@@ -17,23 +17,18 @@ describe('Shared Agent Catalog', () => {
     ])
   })
 
-  it('covers Claude AgentTool, task/goal planning and MCP/skill/memory tool families', () => {
-    const claudeTools = new Set(
+  it('covers Claude canonical task/goal/MCP/skill/memory tools with aliases and capabilities', () => {
+    const claudeTools = new Map(
       builtinAgentCatalog.tools()
         .filter(entry => entry.provider === 'claude-code')
-        .map(entry => entry.name.toLowerCase()),
+        .map(entry => [entry.name.toLowerCase(), entry]),
     )
-    for (const required of [
-      'agent',
-      'task',
-      'todowrite',
-      'goal',
-      'mcp',
-      'skilltool',
-      'memory',
-    ]) {
-      expect(claudeTools.has(required), `Claude catalog missing ${required}`).toBe(true)
-    }
+    expect(claudeTools.get('agent')).toMatchObject({ aliases: ['Task'], capabilities: expect.arrayContaining(['delegate']) })
+    expect(claudeTools.get('todowrite')).toMatchObject({ capabilities: expect.arrayContaining(['plan']) })
+    expect(claudeTools.get('goaltool')).toMatchObject({ aliases: ['Goal'], capabilities: expect.arrayContaining(['goal']) })
+    expect(claudeTools.get('mcp')).toMatchObject({ capabilities: expect.arrayContaining(['mcp', 'dynamic-schema']) })
+    expect(claudeTools.get('skill')).toMatchObject({ aliases: ['SkillTool'], capabilities: expect.arrayContaining(['skill']) })
+    expect(claudeTools.get('localmemoryrecall')).toMatchObject({ aliases: ['Memory'], capabilities: expect.arrayContaining(['memory']) })
   })
 
   it('validates structured config evidence without exposing it as a second detector registry', () => {

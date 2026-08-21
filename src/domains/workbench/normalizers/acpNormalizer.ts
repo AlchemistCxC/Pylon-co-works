@@ -52,11 +52,11 @@ function semanticEventForUpdate(update: Record<string, unknown>, context: Normal
     case 'agent_thought_chunk':
       return { event: { type: 'reasoning.delta', parts: normalizedBlocks.parts }, diagnostics }
     case 'tool_call':
-      return { event: { type: 'tool.started', tool: toolPayload(update, normalizedBlocks.parts, context) }, diagnostics }
+      return { event: { type: 'tool.started', tool: toolPayload(update, normalizedBlocks.parts, context) }, diagnostics: withToolNameDiagnostic(diagnostics, update, context) }
     case 'tool_call_update': {
       const status = typeof update.status === 'string' ? update.status : 'in_progress'
       const type = status === 'completed' ? 'tool.completed' : status === 'failed' || status === 'error' ? 'tool.failed' : 'tool.progress'
-      return { event: { type, tool: toolPayload(update, normalizedBlocks.parts, context), ...(update.rawOutput !== undefined ? { result: toJsonValue(update.rawOutput) } : {}) }, diagnostics }
+      return { event: { type, tool: toolPayload(update, normalizedBlocks.parts, context), ...(update.rawOutput !== undefined ? { result: toJsonValue(update.rawOutput) } : {}) }, diagnostics: withToolNameDiagnostic(diagnostics, update, context) }
     }
     case 'plan':
       // C08：entries 结构化收窄为五状态 PlanEntryV2（cancelled 不坍缩、未知状态保留 rawStatus），
@@ -83,27 +83,44 @@ function semanticEventForUpdate(update: Record<string, unknown>, context: Normal
 }
 
 function toolPayload(update: Record<string, unknown>, parts: readonly unknown[], context: NormalizeContext): Record<string, JsonValue> {
-  const name = typeof update.title === 'string' ? update.title : typeof update.name === 'string' ? update.name : 'unknown'
+  const meta = isRecord(update._meta) ? update._meta : undefined
+  const pylonMeta = isRecord(meta?.pylon) ? meta.pylon : undefined
+  const claudeMeta = isRecord(meta?.claudeCode) ? meta.claudeCode : undefined
+  const name = typeof pylonMeta?.toolName === 'string' && pylonMeta.toolName.trim()
+    ? pylonMeta.toolName.trim()
+    : typeof update.name === 'string' && update.name.trim() ? update.name.trim() : 'unknown'
   const semantic = resolveToolSemantic(context.provider, name, context.toolGeneration)
   const resolution = resolveToolType(name, typeof update.kind === 'string' ? update.kind : undefined, {
     provider: context.provider,
     generation: context.toolGeneration,
   })
-  const meta = isRecord(update._meta) ? update._meta : undefined
-  const claudeMeta = isRecord(meta?.claudeCode) ? meta.claudeCode : undefined
   return {
     toolCallId: toJsonValue(identityFromUpdate(update).toolCallId ?? ''),
     name: name,
     canonicalName: semantic?.name ?? resolution.canonicalName,
     kind: resolution.kind,
     action: resolution.action,
+    semanticKind: `tool.${resolution.kind}`,
     provider: resolution.provider,
+    ...(typeof update.title === 'string' ? { title: update.title } : {}),
+    ...(resolution.capabilities ? { capabilities: toJsonValue(resolution.capabilities) } : {}),
     ...(update.rawInput !== undefined ? { rawInput: toJsonValue(update.rawInput) } : {}),
     ...(update.rawOutput !== undefined ? { rawOutput: toJsonValue(update.rawOutput) } : {}),
     ...(typeof update.status === 'string' ? { status: update.status } : {}),
     ...(parts.length > 0 ? { parts: toJsonValue(parts) } : {}),
     ...(typeof claudeMeta?.parentToolUseId === 'string' ? { parentToolUseId: claudeMeta.parentToolUseId } : {}),
   }
+}
+
+function withToolNameDiagnostic(
+  diagnostics: ReturnType<typeof createDiagnostic>[],
+  update: Record<string, unknown>,
+  context: NormalizeContext,
+): ReturnType<typeof createDiagnostic>[] {
+  const meta = isRecord(update._meta) ? update._meta : undefined
+  const pylon = isRecord(meta?.pylon) ? meta.pylon : undefined
+  const hasName = (typeof pylon?.toolName === 'string' && pylon.toolName.trim()) || (typeof update.name === 'string' && update.name.trim())
+  return hasName ? diagnostics : [...diagnostics, createDiagnostic(context, update, 'tool.name.missing', 'tool_call is missing _meta.pylon.toolName; generic tool fallback used', ['_meta', 'pylon', 'toolName'], true)]
 }
 
 function toJsonRecord(value: unknown): Record<string, unknown> {

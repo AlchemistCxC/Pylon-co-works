@@ -30,7 +30,7 @@ describe('ACP normalizer', () => {
 
     const tool = normalizeAcpEvent({
       source: 'peri',
-      update: { sessionUpdate: 'tool_call', toolCallId: 't-1', title: 'read_file', rawInput: { path: 'a.ts' } },
+      update: { sessionUpdate: 'tool_call', toolCallId: 't-1', title: '读取文件', _meta: { pylon: { toolName: 'read_file' } }, rawInput: { path: 'a.ts' } },
     }, { ...context, sequence: 2 })
     expect(tool.events[0].event).toMatchObject({
       type: 'tool.started',
@@ -72,5 +72,32 @@ describe('ACP normalizer', () => {
     expect(live.events[0].event).toEqual(replay.events[0].event)
     expect(live.events[0].provenance).not.toEqual(replay.events[0].provenance)
     expect(live.events[0].event.type).toBe('event.unknown')
+  })
+
+  it.each([
+    ['tool_call', undefined],
+    ['tool_call_update', 'completed'],
+  ])('uses _meta.pylon.toolName for %s and never treats localized title as machine identity', (sessionUpdate, status) => {
+    registerToolRegistryEntry({ provider: 'claude-code', name: 'Agent', aliases: ['Task'], kind: 'execute', action: 'delegate', capabilities: ['delegate'] })
+    const result = normalizeAcpEvent({
+      update: {
+        sessionUpdate,
+        toolCallId: 'tool-meta',
+        title: '启动子代理（本地化）',
+        ...(status ? { status } : {}),
+        _meta: { pylon: { toolName: 'Task' } },
+      },
+    }, { ...context, provider: 'claude-code', replay: sessionUpdate === 'tool_call_update' })
+    expect(result.events[0].event).toMatchObject({
+      tool: { name: 'Task', canonicalName: 'Agent', title: '启动子代理（本地化）', capabilities: ['delegate'] },
+    })
+  })
+
+  it('falls back to generic tool semantics and a diagnostic when machine name is missing', () => {
+    const result = normalizeAcpEvent({
+      update: { sessionUpdate: 'tool_call', toolCallId: 'tool-missing', title: 'Read file.txt' },
+    }, context)
+    expect(result.events[0].event).toMatchObject({ tool: { name: 'unknown', title: 'Read file.txt', kind: 'other', action: 'unknown' } })
+    expect(result.diagnostics).toEqual(expect.arrayContaining([expect.objectContaining({ code: 'tool.name.missing' })]))
   })
 })

@@ -11,7 +11,7 @@ export const claudeCodeNormalizer: AgentEventNormalizer = {
 export function normalizeClaudeCodeEvent(input: AgentWireEnvelope | unknown, context: NormalizeContext): NormalizeResult {
   const update = extractUpdate(input)
   const parentToolUseId = readParentToolUseId(update)
-  const result = normalizeAcpEvent(input, context)
+  const result = normalizeAcpEvent(canonicalizeToolName(input, update), context)
   if (!parentToolUseId) return result
   return {
     events: result.events.map(event => ({
@@ -23,6 +23,18 @@ export function normalizeClaudeCodeEvent(input: AgentWireEnvelope | unknown, con
     })),
     diagnostics: result.diagnostics,
   }
+}
+
+/** Adapter-local vendor metadata conversion; the shared ACP path only sees pylon.toolName. */
+function canonicalizeToolName(input: AgentWireEnvelope | unknown, update: Record<string, unknown> | undefined): AgentWireEnvelope | unknown {
+  if (!update || !isRecord(input)) return input
+  const meta = isRecord(update._meta) ? update._meta : undefined
+  const claude = isRecord(meta?.claudeCode) ? meta.claudeCode : undefined
+  const pylon = isRecord(meta?.pylon) ? meta.pylon : undefined
+  if (typeof pylon?.toolName === 'string' || typeof claude?.toolName !== 'string' || !claude.toolName.trim()) return input
+  const nextUpdate = { ...update, _meta: { ...meta, pylon: { ...(pylon ?? {}), toolName: claude.toolName.trim() } } }
+  if (isRecord(input.params) && isRecord(input.params.update)) return { ...input, params: { ...input.params, update: nextUpdate } }
+  return { ...input, update: nextUpdate }
 }
 
 function readParentToolUseId(update: Record<string, unknown> | undefined): string | undefined {

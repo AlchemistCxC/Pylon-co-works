@@ -128,13 +128,18 @@
         { "name": "Glob", "displayName": "Glob", "kind": "search", "action": "search", "summaryFields": ["pattern"] },
         { "name": "WebFetch", "displayName": "WebFetch", "kind": "fetch", "action": "fetch", "summaryFields": ["url"] },
         { "name": "WebSearch", "displayName": "WebSearch", "kind": "fetch", "action": "fetch", "summaryFields": ["query"] },
-        { "name": "Agent", "displayName": "Agent", "kind": "execute", "action": "delegate", "summaryFields": ["prompt", "description"] },
-        { "name": "Task", "displayName": "Task", "kind": "execute", "action": "delegate", "summaryFields": ["task", "description"] },
-        { "name": "TodoWrite", "displayName": "Todo / Plan", "kind": "other", "action": "plan", "summaryFields": ["todos"] },
-        { "name": "Goal", "displayName": "Goal", "kind": "other", "action": "plan", "summaryFields": ["goal", "objective"] },
-        { "name": "MCP", "displayName": "MCP", "kind": "execute", "action": "execute", "summaryFields": ["server", "tool", "arguments"] },
-        { "name": "SkillTool", "displayName": "Skill", "kind": "read", "action": "skill", "summaryFields": ["skill_name", "query"] },
-        { "name": "Memory", "displayName": "Memory", "kind": "edit", "action": "edit", "summaryFields": ["action", "key"] }
+        { "name": "Agent", "aliases": ["Task"], "displayName": "Agent", "kind": "execute", "action": "delegate", "summaryFields": ["prompt", "description"], "capabilities": ["delegate", "subagent", "background"] },
+        { "name": "TaskCreate", "displayName": "Create Task", "kind": "other", "action": "plan", "summaryFields": ["subject", "description"], "capabilities": ["plan", "task-graph"] },
+        { "name": "TaskGet", "displayName": "Get Task", "kind": "read", "action": "read", "summaryFields": ["taskId"], "capabilities": ["plan", "task-graph"] },
+        { "name": "TaskUpdate", "displayName": "Update Task", "kind": "other", "action": "plan", "summaryFields": ["taskId", "status"], "capabilities": ["plan", "task-graph"] },
+        { "name": "TaskList", "displayName": "List Tasks", "kind": "read", "action": "read", "summaryFields": ["status"], "capabilities": ["plan", "task-graph"] },
+        { "name": "TaskOutput", "displayName": "Task Output", "kind": "read", "action": "read", "summaryFields": ["task_id"], "capabilities": ["background"] },
+        { "name": "TaskStop", "displayName": "Stop Task", "kind": "execute", "action": "execute", "summaryFields": ["task_id"], "capabilities": ["background", "cancel"] },
+        { "name": "TodoWrite", "displayName": "Todo / Plan", "kind": "other", "action": "plan", "summaryFields": ["todos"], "capabilities": ["plan"] },
+        { "name": "GoalTool", "aliases": ["Goal"], "displayName": "Goal", "kind": "other", "action": "plan", "summaryFields": ["action", "objective"], "capabilities": ["goal", "plan"] },
+        { "name": "MCP", "aliases": ["ListMcpResourcesTool", "ReadMcpResourceTool", "McpAuthTool"], "displayName": "MCP", "kind": "execute", "action": "execute", "summaryFields": ["server", "tool", "arguments"], "capabilities": ["mcp", "dynamic-schema"] },
+        { "name": "Skill", "aliases": ["SkillTool"], "displayName": "Skill", "kind": "read", "action": "skill", "summaryFields": ["skill", "query"], "capabilities": ["skill"] },
+        { "name": "LocalMemoryRecall", "aliases": ["Memory"], "displayName": "Memory", "kind": "read", "action": "read", "summaryFields": ["action", "store", "key"], "capabilities": ["memory", "read-only"] }
       ]
     }
   ]

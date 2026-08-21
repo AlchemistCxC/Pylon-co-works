@@ -11,6 +11,7 @@ export interface AgentToolDefinition {
   kind: ToolKind
   action: ToolAction
   aliases?: string[]
+  capabilities?: readonly string[]
 }
 
 export interface AgentProtocolCapabilities {
