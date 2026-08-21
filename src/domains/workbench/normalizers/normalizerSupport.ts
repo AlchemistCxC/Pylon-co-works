@@ -177,6 +177,24 @@ export function makeEnvelope(
   })
 }
 
+export function makeSyntheticEnvelope(
+  event: WorkbenchSemanticEvent,
+  input: unknown,
+  context: NormalizeContext,
+  update: Record<string, unknown> | undefined,
+  reason: string,
+): WorkbenchEventEnvelope {
+  const normalizedReason = reason.trim()
+  if (!normalizedReason) throw new Error('Synthetic event reason must be non-empty')
+  const rawInput = isRecord(input)
+    ? { ...input, _pylonSynthetic: { reason: normalizedReason } }
+    : { observed: toJsonValue(input), _pylonSynthetic: { reason: normalizedReason } }
+  return makeEnvelope(event, rawInput, context, update, {
+    orderConfidence: 'observed',
+    synthetic: { reason: normalizedReason },
+  })
+}
+
 export function toJsonValue(value: unknown): JsonValue {
   if (value === null || typeof value === 'string' || typeof value === 'boolean') return value
   if (typeof value === 'number') return Number.isFinite(value) ? value : null

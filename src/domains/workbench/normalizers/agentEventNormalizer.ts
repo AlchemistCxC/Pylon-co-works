@@ -7,6 +7,7 @@ import { normalizeAcpEvent, acpNormalizer } from './acpNormalizer.ts'
 import { normalizeClaudeCodeEvent, claudeCodeNormalizer } from './claudeCodeNormalizer.ts'
 import { normalizeHermesEvent, hermesNormalizer } from './hermesNormalizer.ts'
 import { normalizePeriEvent, periNormalizer } from './periNormalizer.ts'
+import { isPylonExtension, normalizePylonExtension } from './extensionNormalizer.ts'
 
 export interface AgentWireEnvelope {
   readonly provider?: string
@@ -33,6 +34,8 @@ export interface NormalizeContext {
   readonly seenEventKeys?: Set<string>
   /** 工具语义解析使用的 registry generation；缺省读取当前 generation。 */
   readonly toolGeneration?: number
+  /** Capability-negotiated extensions on this ACP connection. */
+  readonly negotiatedExtensions?: readonly string[]
 }
 
 export interface NormalizeDiagnostic {
@@ -65,6 +68,7 @@ const normalizers: readonly AgentEventNormalizer[] = [
 ]
 
 export function normalizeAgentEvent(input: AgentWireEnvelope | unknown, context: NormalizeContext): NormalizeResult {
+  if (isPylonExtension(input)) return normalizePylonExtension(input, context)
   const adapter = normalizers.find(candidate => candidate.canNormalize(isWireEnvelope(input), context)) ?? acpNormalizer
   return adapter.normalize(input, context)
 }

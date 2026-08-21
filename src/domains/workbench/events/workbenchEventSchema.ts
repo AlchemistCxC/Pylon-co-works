@@ -178,6 +178,7 @@ export interface WorkbenchEventProvenance {
   readonly sourceOrdinal?: number
   readonly orderConfidence?: 'exact' | 'observed' | 'grouped' | 'unknown'
   readonly collectionComplete?: boolean
+  readonly synthetic?: { readonly reason: string }
 }
 
 export interface WorkbenchRawMetadata extends ContentTruncation {
@@ -435,6 +436,10 @@ function validateProvenance(value: unknown, issues: SchemaIssue[]): void {
   if (value.importId !== undefined && typeof value.importId !== 'string') issues.push(schemaIssue(['provenance', 'importId'], 'type.string', 'string', value.importId))
   if (value.orderConfidence !== undefined && !['exact', 'observed', 'grouped', 'unknown'].includes(String(value.orderConfidence))) issues.push(schemaIssue(['provenance', 'orderConfidence'], 'enum.order-confidence', 'exact|observed|grouped|unknown', value.orderConfidence))
   if (value.collectionComplete !== undefined && typeof value.collectionComplete !== 'boolean') issues.push(schemaIssue(['provenance', 'collectionComplete'], 'type.boolean', 'boolean', value.collectionComplete))
+  if (value.synthetic !== undefined) {
+    if (!isRecord(value.synthetic) || typeof value.synthetic.reason !== 'string' || !value.synthetic.reason.trim()) issues.push(schemaIssue(['provenance', 'synthetic'], 'synthetic.reason', 'non-empty reason', value.synthetic))
+    if (value.orderConfidence !== 'observed') issues.push(schemaIssue(['provenance', 'orderConfidence'], 'synthetic.order-confidence', 'observed for synthetic events', value.orderConfidence))
+  }
 }
 
 function isValidRawMetadata(value: unknown): value is WorkbenchRawMetadata {
