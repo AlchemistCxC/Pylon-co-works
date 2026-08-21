@@ -13,6 +13,7 @@ import {
 } from './normalizerSupport.ts'
 import { resolveToolSemantic } from '../../tool/toolRegistry.ts'
 import { resolveToolType } from '../../tool/toolResolution.ts'
+import { normalizePlanEntries } from '../plan/goalModel.ts'
 import type { WorkbenchSemanticEvent } from '../events/workbenchEventSchema.ts'
 
 export const acpNormalizer: AgentEventNormalizer = {
@@ -58,7 +59,9 @@ function semanticEventForUpdate(update: Record<string, unknown>, context: Normal
       return { event: { type, tool: toolPayload(update, normalizedBlocks.parts, context), ...(update.rawOutput !== undefined ? { result: toJsonValue(update.rawOutput) } : {}) }, diagnostics }
     }
     case 'plan':
-      return { event: { type: 'plan.replaced', entries: Array.isArray(update.entries) ? update.entries.map(toJsonValue) : [] }, diagnostics }
+      // C08：entries 结构化收窄为五状态 PlanEntryV2（cancelled 不坍缩、未知状态保留 rawStatus），
+      // id 按 显式 id > itemId > content 派生，非 object 条目丢弃。
+      return { event: { type: 'plan.replaced', entries: normalizePlanEntries(update.entries) as unknown as readonly JsonValue[] }, diagnostics }
     case 'usage_update':
       return { event: { type: 'usage.updated', usage: toJsonValue({ inputTokens: update.used ?? update.value, contextLimit: update.size, ...toJsonRecord(update.usage) }) }, diagnostics }
     case 'available_commands_update':

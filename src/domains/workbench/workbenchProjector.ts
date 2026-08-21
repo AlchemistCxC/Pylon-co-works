@@ -6,10 +6,13 @@
  * restart、recovery 只要喂给同一组 envelopes，就得到同一份 document。
  */
 import type { ContentPart } from './content/contentPartSchema.ts'
+import { applyGoalEvents, applyPlanEvent, createEmptyGoalState, createEmptyPlanState, normalizeGoalSnapshot, type GoalSnapshot, type GoalState, type PlanState } from './plan/goalModel.ts'
 import type {
   ActivityEvent,
+  GoalEvent,
   InteractionEvent,
   MessageEvent,
+  PlanEvent,
   SessionEvent,
   ToolEvent,
   UsageEvent,
@@ -93,6 +96,8 @@ export interface WorkbenchDocument {
   readonly interactions: readonly WorkbenchInteraction[]
   readonly session: WorkbenchSessionSurface
   readonly diagnostics: readonly WorkbenchProjectionDiagnostic[]
+  readonly plan: PlanState
+  readonly goal: GoalState
 }
 
 export interface ProjectionResult {
@@ -111,6 +116,8 @@ export function createWorkbenchDocument(sessionId: string): WorkbenchDocument {
     interactions: [],
     session: { status: 'idle', commands: [], options: [] },
     diagnostics: [],
+    plan: createEmptyPlanState(sessionId),
+    goal: createEmptyGoalState(),
   }
 }
 
@@ -156,6 +163,15 @@ export function selectSessionSurface(document: WorkbenchDocument): WorkbenchSess
   return document.session
 }
 
+/** C08：plan/goal slice 只读选择器。 */
+export function selectPlan(document: WorkbenchDocument): PlanState {
+  return document.plan
+}
+
+export function selectGoal(document: WorkbenchDocument): GoalSnapshot | undefined {
+  return document.goal.current
+}
+
 function reduceSemanticEvent(document: WorkbenchDocument, envelope: WorkbenchEventEnvelope): WorkbenchDocument {
   const event = envelope.event
   switch (event.type) {
@@ -185,6 +201,12 @@ function reduceSemanticEvent(document: WorkbenchDocument, envelope: WorkbenchEve
     case 'usage.updated':
     case 'budget.warning':
       return reduceUsage(document, envelope, event)
+    case 'plan.replaced':
+    case 'plan.entry-updated':
+      return reducePlan(document, envelope, event)
+    case 'goal.updated':
+    case 'goal.cleared':
+      return reduceGoal(document, envelope, event)
     case 'session.started':
     case 'session.commands-updated':
     case 'session.config-updated':
@@ -261,6 +283,28 @@ function reduceUsage(document: WorkbenchDocument, _envelope: WorkbenchEventEnvel
   return { ...document, session: { ...document.session, usage: event.usage ?? { used: event.used, limit: event.limit, threshold: event.threshold, percent: event.percent } } }
 }
 
+/** C08：plan 事件经 domain reducer 收敛进 document.plan；malformed entries 转可见诊断。 */
+function reducePlan(document: WorkbenchDocument, envelope: WorkbenchEventEnvelope, event: PlanEvent): WorkbenchDocument {
+  if (event.type === 'plan.replaced' && event.entries !== undefined && !Array.isArray(event.entries)) {
+    return addDiagnostic(document, envelope, 'plan.malformed', 'plan.replaced entries is not an array; plan unchanged', 'warning', event.entries)
+  }
+  if (event.type === 'plan.entry-updated' && event.entry !== undefined && (typeof event.entry !== 'object' || event.entry === null || Array.isArray(event.entry))) {
+    return addDiagnostic(document, envelope, 'plan.malformed', 'plan.entry-updated entry is not an object; plan unchanged', 'warning', event.entry)
+  }
+  const next = applyPlanEvent(document.plan, event)
+  if (next === document.plan) return document
+  return { ...document, plan: next }
+}
+
+function reduceGoal(document: WorkbenchDocument, envelope: WorkbenchEventEnvelope, event: GoalEvent): WorkbenchDocument {
+  if (event.type === 'goal.updated' && event.goal !== undefined && normalizeGoalSnapshot(event.goal) === undefined) {
+    return addDiagnostic(document, envelope, 'goal.malformed', 'goal.updated payload is not an object; goal unchanged', 'warning', event.goal)
+  }
+  const next = applyGoalEvents(document.goal, event)
+  if (next === document.goal) return document
+  return { ...document, goal: next }
+}
+
 function reduceSession(document: WorkbenchDocument, _envelope: WorkbenchEventEnvelope, event: SessionEvent): WorkbenchDocument {
   return {
     ...document,
@@ -306,7 +350,8 @@ function timelineEntry(envelope: WorkbenchEventEnvelope): WorkbenchTimelineEntry
             : event.type.startsWith('session.') ? 'session'
               : event.type.startsWith('usage.') || event.type === 'budget.warning' ? 'usage'
                 : event.type.startsWith('diagnostic.') || event.type === 'event.unknown' ? (event.type === 'event.unknown' ? 'unknown' : 'diagnostic')
-                  : event.type.startsWith('plan.') ? 'plan' : 'assist'
+                  // C08 修复：plan 与 goal 同属 plan family，不再把 goal 误判为 assist
+                  : event.type.startsWith('plan.') || event.type.startsWith('goal.') ? 'plan' : 'assist'
   return { id: envelope.eventId, sequence: envelope.sequence, eventId: envelope.eventId, kind, data: event }
 }
 
