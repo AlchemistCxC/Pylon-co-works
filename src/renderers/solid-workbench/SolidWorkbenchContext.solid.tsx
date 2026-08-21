@@ -4,6 +4,7 @@ import type { SessionUiStore } from '../../domains/workbench/sessionUiStore.ts'
 import type { WorkbenchCommandFacade } from '../../domains/workbench/workbenchCommandFacade.ts'
 import type { WorkbenchRuntime, WorkbenchRuntimeSnapshot } from '../../domains/workbench/workbenchRuntime.ts'
 import type { SolidWorkbenchInput } from './workbenchContracts.ts'
+import type { WorkbenchHostPort } from './workbenchHostPort.ts'
 
 export interface SolidWorkbenchContextValue {
   input: Accessor<SolidWorkbenchInput>
@@ -13,6 +14,8 @@ export interface SolidWorkbenchContextValue {
   appearanceSnapshot: Accessor<WorkbenchAppearanceSnapshot>
   sessionUi: SessionUiStore
   commands: WorkbenchCommandFacade
+  /** Present for mounted Suite adapters; legacy unit fixtures may omit it. */
+  hostPort?: WorkbenchHostPort
   paused: Accessor<boolean>
 }
 

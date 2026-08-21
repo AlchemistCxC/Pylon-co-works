@@ -7,14 +7,28 @@ import type {
   SolidWorkbenchLifecycle,
   SolidWorkbenchMountInput,
 } from './workbenchContracts.ts'
+import { normalizeWorkbenchMountInput } from './workbenchContracts.ts'
+import { createWorkbenchHostPort } from './workbenchHostPort.ts'
 
-export function mountSolidWorkbench({ host, input: initialInput, services }: SolidWorkbenchMountInput): SolidWorkbenchLifecycle {
+export function mountSolidWorkbench({ host, input: initialInput, services, hostPort: providedHostPort }: SolidWorkbenchMountInput): SolidWorkbenchLifecycle {
   let destroyed = false
   let paused = false
-  const [input, setInput] = createSignal<SolidWorkbenchInput>({ ...initialInput })
+  const [input, setInput] = createSignal<SolidWorkbenchInput>(normalizeWorkbenchMountInput(initialInput))
   const [runtimeSnapshot, setRuntimeSnapshot] = createSignal(services.runtime.getSnapshot())
   const [appearanceSnapshot, setAppearanceSnapshot] = createSignal(services.appearance.getSnapshot())
   const [pausedSignal, setPausedSignal] = createSignal(false)
+  const hostPort = providedHostPort ?? services.hostPort ?? createWorkbenchHostPort({
+    runtime: services.runtime,
+    appearance: services.appearance,
+    sessionUi: services.sessionUi,
+    commands: services.commands,
+    suiteId: 'builtin.solid',
+    sheetId: initialInput.sheetId,
+    sessionOwnerKey: initialInput.sessionOwnerKey ?? null,
+    sessionId: initialInput.sessionId,
+  })
+  const listeners = new Map<'ready' | 'error' | 'request-action', Set<(payload: unknown) => void>>()
+  let ready = false
 
   const unsubscribeRuntime = services.runtime.subscribe(() => {
     if (!destroyed && !paused) setRuntimeSnapshot(services.runtime.getSnapshot())
@@ -31,14 +45,16 @@ export function mountSolidWorkbench({ host, input: initialInput, services }: Sol
     appearanceSnapshot,
     sessionUi: services.sessionUi,
     commands: services.commands,
+    hostPort,
     paused: pausedSignal,
   }
   const dispose = render(() => <SolidWorkbenchApp context={context} />, host)
+  ready = true
 
   return {
     update(nextInput) {
       if (destroyed) return
-      setInput({ ...nextInput })
+      setInput(normalizeWorkbenchMountInput(nextInput))
     },
     pause() {
       if (destroyed || paused) return
@@ -59,6 +75,18 @@ export function mountSolidWorkbench({ host, input: initialInput, services }: Sol
       unsubscribeAppearance()
       dispose()
       host.replaceChildren()
+      hostPort.diagnostics.destroy?.()
+      listeners.clear()
+    },
+    on(event, listener) {
+      if (event === 'ready' && ready) listener({ suiteId: 'builtin.solid' })
+      const group = listeners.get(event) ?? new Set<(payload: unknown) => void>()
+      group.add(listener)
+      listeners.set(event, group)
+      return () => {
+        group.delete(listener)
+        if (group.size === 0) listeners.delete(event)
+      }
     },
   }
 }

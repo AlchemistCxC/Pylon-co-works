@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef, useSyncExternalStore } from 'react'
 import { getPluginUiRegistry } from '../runtimeServices.ts'
 import type { PluginUiEventBridge, PluginUiUnmount } from './pluginUiTypes.ts'
+import { resolvePluginUiRuntime } from './pluginUiTypes.ts'
 
 function createBridge(onEvent?: (event: string, detail: unknown) => void): PluginUiEventBridge & { clear(): void } {
   const listeners = new Map<string, Set<(detail: unknown) => void>>()
@@ -51,6 +52,7 @@ export function IsolatedPluginSurface({
   const containerRef = useRef<HTMLDivElement>(null)
   const inputRef = useRef(input)
   const onEventRef = useRef(onEvent)
+  const runtime = entry ? resolvePluginUiRuntime(entry.value).runtime : undefined
   const bridgeRef = useRef<(PluginUiEventBridge & { clear(): void }) | null>(null)
   inputRef.current = input
   onEventRef.current = onEvent
@@ -88,7 +90,9 @@ export function IsolatedPluginSurface({
       className={className}
       data-plugin-ui-surface={surfaceId}
       data-plugin-ui-owner={entry?.ownerPluginId}
-      data-plugin-react-version={entry?.value.reactVersion}
+      data-plugin-framework={runtime?.framework}
+      data-plugin-runtime-version={runtime?.version}
+      data-plugin-react-version={runtime?.framework === 'react' ? runtime.version : undefined}
     />
   )
 }

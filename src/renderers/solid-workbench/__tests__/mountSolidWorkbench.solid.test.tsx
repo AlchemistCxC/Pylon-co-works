@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import { cleanup, screen, waitFor } from '@solidjs/testing-library'
-import { afterEach, describe, expect, it } from 'vitest'
+import { afterEach, describe, expect, it, vi } from 'vitest'
 import { mountSolidWorkbench } from '../mountSolidWorkbench.solid.tsx'
 import { createPreviewWorkbenchServices } from '../__fixtures__/previewWorkbenchServices.ts'
 import { createWorkbenchEnvelope, type WorkbenchEventEnvelope } from '../../../domains/workbench/events/workbenchEventSchema.ts'
@@ -93,6 +93,15 @@ describe('mountSolidWorkbench', () => {
     lifecycle.destroy()
     lifecycle.destroy()
     expect(host.childElementCount).toBe(0)
+  })
+
+  it('exposes ready lifecycle event and removes listeners on destroy', () => {
+    const { lifecycle } = mountPreview()
+    const ready = vi.fn()
+    const unsubscribe = lifecycle.on('ready', ready)
+    expect(ready).toHaveBeenCalledWith({ suiteId: 'builtin.solid' })
+    unsubscribe()
+    lifecycle.destroy()
   })
 
   it('document apply 驱动消息、活动、usage 与 diagnostics surface', async () => {
