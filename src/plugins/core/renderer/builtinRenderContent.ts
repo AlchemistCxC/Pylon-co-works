@@ -139,13 +139,13 @@ export const BUILTIN_LIFECYCLE_RENDER_KINDS: readonly RenderKindDefinition[] = O
   } satisfies RenderKindDefinition)),
 )
 
-/** A07/DIC-A07-01: semantic kinds are catalog entries, not event.type values. */
+/** A07/DIC-A07-01: semantic kinds are catalog entries, not event.type values.
+ * C09 起 activity.subagent/delegation/team 的唯一 catalog authority 是 executionRenderKindCatalog，占位清单不再重复登记。 */
 export const BUILTIN_SEMANTIC_RENDER_KINDS = Object.freeze([
   { id: 'tool.read', category: 'tool' },
   { id: 'tool.search', category: 'tool' },
   { id: 'tool.fetch', category: 'tool' },
   { id: 'content.memory', category: 'content' },
-  { id: 'activity.subagent', category: 'activity' },
 ] as const)
 
 const definitions: Array<{

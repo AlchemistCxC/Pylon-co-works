@@ -105,6 +105,19 @@ export interface WorkbenchActivityNode {
   readonly result?: unknown
   readonly reason?: string
   readonly provenance?: WorkbenchEventEnvelope['provenance']
+  /** C09：子代理层级深度（来自 normalized payload，不从文本猜）。 */
+  readonly depth?: number
+  /** C09：子代理角色（如 explorer/reviewer）。 */
+  readonly role?: string
+  /** C09：执行模型与 provider（显示用，非身份）。 */
+  readonly model?: string
+  readonly provider?: string
+  /** C09：目标/prompt 摘要。 */
+  readonly goal?: string
+  /** C09：usage/cost 与文件清单等聚合指标（JsonValue 宽容）。 */
+  readonly usage?: unknown
+  readonly files?: unknown
+  readonly metadata?: unknown
   readonly orphan: boolean
   readonly data?: unknown
   readonly sequence: number
@@ -531,7 +544,10 @@ function reduceActivity(document: WorkbenchDocument, envelope: WorkbenchEventEnv
   const status = event.type.replace('activity.', '')
   const activityKind = stringValue(activity.kind) ?? stringValue(patch.kind) ?? previous?.activityKind
   const semanticKind = stringValue(activity.semanticKind) ?? stringValue(patch.semanticKind) ?? previous?.semanticKind
-    ?? (activityKind === 'process' || activityKind === 'background-task' ? `activity.${activityKind}` : undefined)
+    ?? (activityKind === 'process' || activityKind === 'background-task'
+      // C09：子代理/委派/团队家族同样从 wire family 派生渲染语义
+      || activityKind === 'subagent' || activityKind === 'delegation' || activityKind === 'team'
+      ? `activity.${activityKind}` : undefined)
   const parts = jsonSnapshot(result?.parts ?? patch.parts ?? activity.parts) ?? previous?.parts
   const error = event.error !== undefined
     ? normalizeNormalizedError(event.error)
@@ -565,9 +581,54 @@ function reduceActivity(document: WorkbenchDocument, envelope: WorkbenchEventEnv
     ...(event.result !== undefined ? { result: jsonSnapshot(event.result) } : previous?.result !== undefined ? { result: previous.result } : {}),
     ...(error !== undefined ? { error } : {}),
     ...(stringValue(event.reason) ?? previous?.reason ? { reason: stringValue(event.reason) ?? previous?.reason } : {}),
+    // C09：子代理/委派/团队 rich 字段——跨事件累积（当前缺失保留前值），缺失稳定降级为 undefined
+    ...c09RichFields(activity, patch, previous),
     provenance: envelope.provenance,
   }
-  return { ...document, activities: upsertActivity(document.activities, next) }
+  const merged = mergeActivityTerminal(previous, next)
+  return { ...document, activities: upsertActivity(document.activities, merged ?? next) }
+}
+
+/** C09：子代理/委派/团队 rich 字段收窄——只认 normalized activity/patch，缺失即 undefined（不猜）。 */
+function c09RichFields(activity: Record<string, unknown>, patch: Record<string, unknown>, previous: WorkbenchActivityNode | undefined): Partial<WorkbenchActivityNode> {
+  const pickString = (key: string): string | undefined =>
+    stringValue(activity[key]) ?? stringValue(patch[key]) ?? previous?.[key as keyof WorkbenchActivityNode] as string | undefined
+  const pickNumber = (key: string): number | undefined => {
+    const value = activity[key] ?? patch[key]
+    return (typeof value === 'number' && Number.isFinite(value)) ? value : undefined
+  }
+  const pickValue = (key: string): unknown | undefined =>
+    jsonSnapshot(activity[key] ?? patch[key]) ?? (previous?.[key as keyof WorkbenchActivityNode] as unknown | undefined)
+  const fields: Partial<Record<keyof WorkbenchActivityNode, unknown>> = {
+    depth: pickNumber('depth'),
+    role: pickString('role'),
+    model: pickString('model'),
+    provider: pickString('provider'),
+    goal: pickString('goal'),
+    usage: pickValue('usage'),
+    capabilities: pickValue('capabilities'),
+    files: pickValue('files'),
+    metadata: pickValue('metadata'),
+  }
+  const out: Record<string, unknown> = {}
+  for (const [key, value] of Object.entries(fields)) {
+    if (value !== undefined) out[key] = value
+  }
+  return out as unknown as Partial<WorkbenchActivityNode>
+}
+
+/** C09 活动终态幂等：与 mergeToolActivity 同构——终态后迟到事件仅补缺字段，不回退状态。 */
+function mergeActivityTerminal(previous: WorkbenchActivityNode | undefined, next: WorkbenchActivityNode): WorkbenchActivityNode | null {
+  if (!previous || !TERMINAL_TOOL_STATUSES.has(previous.status)) return null
+  const filled: Record<string, unknown> = { ...previous }
+  for (const [key, value] of Object.entries(next)) {
+    if (value === undefined) continue
+    if (filled[key] === undefined) { filled[key] = value; continue }
+    // 终态保护：status 不被迟到事件改写；progress 保持首个终态时刻的快照
+    if (key === 'status') continue
+  }
+  filled.orphan = next.orphan && Boolean(previous.parentId)
+  return filled as unknown as WorkbenchActivityNode
 }
 
 function reduceInteraction(document: WorkbenchDocument, envelope: WorkbenchEventEnvelope, event: InteractionEvent): WorkbenchDocument {

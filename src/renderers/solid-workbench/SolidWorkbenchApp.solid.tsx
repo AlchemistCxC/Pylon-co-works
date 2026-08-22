@@ -32,6 +32,7 @@ import { measureToolAnchor } from './chat/domToolConnectorMeasurement.ts'
 import { SolidSearchOrLink } from './chat/content/SearchResults.solid.tsx'
 import { SolidDiffContent, SolidLspDiagnosticContent } from './chat/content/DiffDiagnosticContent.solid.tsx'
 import { SolidLogBlock, SolidProcessActivity, SolidTerminalBlock } from './chat/content/TerminalBlock.solid.tsx'
+import { SolidSubagentCard } from './chat/content/SubagentCard.solid.tsx'
 import type { RenderCommandPort } from '../../contracts/messageRenderer.ts'
 
 export interface SolidWorkbenchAppProps {
@@ -360,6 +361,10 @@ function CanonicalActivitySlot(props: {
           ? <SolidToolInvocationCard snapshot={toolSnapshot()!} appearance={{ ...props.context.appearanceSnapshot() }} renderKind="tool.generic" commands={fallbackRenderCommands(props.context)} />
           : props.activity.semanticKind === 'activity.process'
             ? <SolidProcessActivity activity={props.activity}
+                appearance={{ ...props.context.appearanceSnapshot(), reducedMotion: props.context.input().reducedMotion }}
+                commands={fallbackRenderCommands(props.context)} />
+          : (props.activity.semanticKind === 'activity.subagent' || props.activity.semanticKind === 'activity.delegation' || props.activity.semanticKind === 'activity.team')
+            ? <SolidSubagentCard activity={props.activity}
                 appearance={{ ...props.context.appearanceSnapshot(), reducedMotion: props.context.input().reducedMotion }}
                 commands={fallbackRenderCommands(props.context)} />
           : <div class="solid-workbench-activity" data-activity-id={props.activity.id} data-status={props.activity.status}>

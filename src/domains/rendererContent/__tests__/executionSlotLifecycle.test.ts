@@ -20,7 +20,8 @@ describe('C07 execution Slot lifecycle', () => {
   it('keeps process overlays Suite-local and restores the base Slot after hot-update cleanup', async () => {
     const registry = new RendererRegistry()
     const builtin = createPluginIdentity('builtin.pylon-renderers', 'base')
-    registry.registerRenderKind(builtin, BUILTIN_EXECUTION_RENDER_KINDS[0]!)
+    const processKind = BUILTIN_EXECUTION_RENDER_KINDS.find(kind => kind.id === 'activity.process')!
+    registry.registerRenderKind(builtin, processKind)
     registry.registerSuite(builtin, {
       id: 'builtin.solid', label: 'builtin.solid', apiVersion: 1,
       runtime: { framework: 'solid', version: '1.0.0' },

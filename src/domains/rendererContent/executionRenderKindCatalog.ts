@@ -18,7 +18,47 @@ export function isProcessActivitySnapshotInput(input: unknown): boolean {
   return true
 }
 
+/** C09：子代理/委派/团队活动快照校验——family 三兄弟共用一套字段契约（缺失降级为 undefined，不猜）。 */
+export type SubagentActivityFamily = 'subagent' | 'delegation' | 'team'
+
+export function isSubagentActivitySnapshotInput(input: unknown): boolean {
+  if (!isRecord(input)
+    || typeof input.id !== 'string' || !input.id.trim()
+    || input.kind !== 'activity'
+    || !(input.activityKind === 'subagent' || input.activityKind === 'delegation' || input.activityKind === 'team')
+    || typeof input.status !== 'string' || !input.status.trim()) return false
+  for (const key of ['semanticKind', 'title', 'parentId', 'role', 'model', 'provider', 'goal'] as const) {
+    if (input[key] !== undefined && (typeof input[key] !== 'string' || !input[key].trim())) return false
+  }
+  if (input.depth !== undefined && (typeof input.depth !== 'number' || !Number.isFinite(input.depth) || input.depth < 0)) return false
+  for (const key of ['progress', 'result', 'usage', 'files', 'metadata', 'capabilities', 'parts'] as const) {
+    if (input[key] !== undefined && !isJsonValue(input[key])) return false
+  }
+  return true
+}
+
+/** C09：三个 family 各注册一个 kind（fixture 自校验）；缺省 semanticKind 时按 family 直译派生。 */
+function subagentKindDefinition(family: SubagentActivityFamily): RenderKindDefinition {
+  const label = family === 'subagent' ? 'Fixture subagent' : family === 'delegation' ? 'Fixture delegation' : 'Fixture team'
+  return Object.freeze({
+    id: `activity.${family}`,
+    category: 'activity',
+    fallbackKind: 'content.unknown',
+    priority: 1000,
+    fixture: {
+      id: `fixture-${family}`, kind: 'activity', activityKind: family, semanticKind: `activity.${family}`,
+      title: label, status: 'running', parentId: 'fixture-parent', depth: 1,
+      role: 'explorer', goal: label, parts: [],
+    },
+    defaultTokens: TERMINAL_LOG_DEFAULT_TOKENS,
+    settingsSchemaVersion: 1,
+    settings: TERMINAL_LOG_SETTINGS,
+    validateInput: isSubagentActivitySnapshotInput,
+  } satisfies RenderKindDefinition)
+}
+
 export const BUILTIN_EXECUTION_RENDER_KINDS: readonly RenderKindDefinition[] = Object.freeze([
+  ...(['subagent', 'delegation', 'team'] as const).map(subagentKindDefinition),
   Object.freeze({
     id: 'activity.process',
     category: 'activity',

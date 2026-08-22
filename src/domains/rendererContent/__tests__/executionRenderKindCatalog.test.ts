@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { BUILTIN_EXECUTION_RENDER_KINDS, isProcessActivitySnapshotInput } from '../executionRenderKindCatalog.ts'
+import { BUILTIN_EXECUTION_RENDER_KINDS, isProcessActivitySnapshotInput, isSubagentActivitySnapshotInput } from '../executionRenderKindCatalog.ts'
 import { BUILTIN_SOLID_CONTENT_KINDS } from '../../../renderers/solid-workbench/builtinSolidRendererSuite.ts'
 
 describe('C07 execution render kind catalog', () => {
@@ -21,5 +21,27 @@ describe('C07 execution render kind catalog', () => {
       parts: [{ kind: 'terminal', streams: [{ stream: 'stdin', text: 'bad' }] }],
     })).toBe(false)
     expect(isProcessActivitySnapshotInput({ id: 'process-1', semanticKind: 'activity.background-task' })).toBe(false)
+  })
+
+  it('registers subagent/delegation/team kinds with valid fixtures and strict validators (C09)', () => {
+    for (const family of ['subagent', 'delegation', 'team'] as const) {
+      const kind = BUILTIN_EXECUTION_RENDER_KINDS.find(k => k.id === `activity.${family}`)!
+      expect(kind).toBeDefined()
+      expect(kind.category).toBe('activity')
+      expect(kind.fallbackKind).toBe('content.unknown')
+      expect(BUILTIN_SOLID_CONTENT_KINDS).toContain(`activity.${family}`)
+      // fixture 必须通过自身 validator（C13 教训：fixture 自校验）
+      expect(kind.validateInput?.(kind.fixture)).toBe(true)
+    }
+
+    // rich 输入通过；层级/身份字段类型错误拒绝；缺 family 拒绝
+    expect(isSubagentActivitySnapshotInput({
+      id: 's1', kind: 'activity', activityKind: 'subagent', semanticKind: 'activity.subagent', status: 'running',
+      parentId: 'tool-1', depth: 2, role: 'explorer', goal: 'explore', capabilities: ['fs'], parts: [],
+    })).toBe(true)
+    expect(isSubagentActivitySnapshotInput({
+      id: 's2', kind: 'activity', activityKind: 'subagent', status: 'running', depth: -1,
+    })).toBe(false)
+    expect(isSubagentActivitySnapshotInput({ id: 's3', status: 'running' })).toBe(false)
   })
 })

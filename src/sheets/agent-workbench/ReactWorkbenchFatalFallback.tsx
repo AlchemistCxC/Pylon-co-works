@@ -100,6 +100,19 @@ export default function ReactWorkbenchFatalFallback(props: {
         const snapshot = toolInvocationSnapshot(document, activity.id)
         return snapshot && <ReactFallbackTool key={snapshot.id} snapshot={snapshot} />
       })}
+
+      {document?.activities.filter(activity => activity.kind === 'activity').map(activity => (
+        <section key={activity.id} role="status" className="react-workbench-fatal-activity"
+          data-react-activity-kind={activity.semanticKind ?? activity.activityKind ?? 'unknown'}
+          aria-label={`子代理 fallback：${activity.title || activity.id}，${activity.status}`}>
+          <strong>{activity.title || activity.id}</strong>
+          <span>{activity.status}{activity.depth !== undefined ? ` · depth ${activity.depth}` : ''}
+            {activity.parentId ? ` · parent ${activity.parentId}` : ''}</span>
+          {activity.goal && <span>目标：{activity.goal}</span>}
+          {activity.progress !== undefined && <pre>{fallbackJson(activity.progress)}</pre>}
+          {activity.error && <span>{activity.error.userSummary}</span>}
+        </section>
+      ))}
       <div className="react-workbench-fatal-history" aria-label="会话历史">
         {document?.messages.map(message => <article key={message.id} data-message-role={message.role}>
           <span>{message.role === 'user' ? 'User' : message.role === 'reasoning' ? 'Reasoning' : 'Assistant'}</span>

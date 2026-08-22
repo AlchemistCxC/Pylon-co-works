@@ -32,7 +32,8 @@ import { SolidSearchOrLink, type SearchLinkAppearance } from './content/SearchRe
 import { diffSnapshotFromPart } from '../../../domains/workbench/diffSnapshot.ts'
 import { SolidDiffContent, SolidLspDiagnosticContent } from './content/DiffDiagnosticContent.solid.tsx'
 import { SolidLogBlock, SolidProcessActivity, SolidTerminalBlock } from './content/TerminalBlock.solid.tsx'
-import { isProcessActivitySnapshotInput } from '../../../domains/rendererContent/executionRenderKindCatalog.ts'
+import { SolidSubagentCard } from './content/SubagentCard.solid.tsx'
+import { isProcessActivitySnapshotInput, isSubagentActivitySnapshotInput } from '../../../domains/rendererContent/executionRenderKindCatalog.ts'
 import type { WorkbenchActivityNode } from '../../../domains/workbench/workbenchProjector.ts'
 
 export function BuiltinSolidContentSlot(props: {
@@ -255,6 +256,15 @@ export function BuiltinSolidContentSlot(props: {
           fallback={<pre class="solid-content-unknown" data-content-kind="activity.process">Invalid process activity snapshot</pre>}
         >
           {activity => <SolidProcessActivity activity={activity()} appearance={props.appearance} commands={props.commands} />}
+        </Show>
+      </Match>
+      <Match when={kind() === 'activity.subagent' || kind() === 'activity.delegation' || kind() === 'activity.team'}>
+        <Show
+          when={isSubagentActivitySnapshotInput(props.snapshot.payload)
+            ? props.snapshot.payload as WorkbenchActivityNode : undefined}
+          fallback={<pre class="solid-content-unknown" data-content-kind={kind()}>Invalid subagent activity snapshot</pre>}
+        >
+          {activity => <SolidSubagentCard activity={activity()} appearance={props.appearance} commands={props.commands} />}
         </Show>
       </Match>
       <Match when={kind() === 'content.plan'}>

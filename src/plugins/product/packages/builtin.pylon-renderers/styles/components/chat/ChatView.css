@@ -1056,6 +1056,68 @@
 }
 .app[data-msg-style="bubble"] .term-row-assistant .copy-btn { right: var(--ui-space-1); }
 
+/* C09：子代理/委派/团队活动卡（复用 term-process 家族视觉契约 + 树层级缩进） */
+.term-subagent-card {
+  display: grid;
+  gap: var(--ui-space-2);
+  width: min(100%, 960px);
+  margin: var(--ui-space-2) 0;
+  border: var(--line-width-1) solid var(--border);
+  border-inline-start: var(--line-width-3) solid var(--accent);
+  padding: var(--ui-space-3);
+  color: var(--text);
+  background: var(--bg-panel, transparent);
+}
+.term-subagent-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: var(--ui-space-2);
+  min-width: 0;
+}
+.term-subagent-title { font-weight: 600; min-width: 0; overflow-wrap: anywhere; }
+.term-subagent-meta,
+.term-subagent-goal {
+  color: var(--text-dim);
+  font-size: var(--font-size-xs);
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+.term-subagent-stats {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--ui-space-2);
+  color: var(--text-dim);
+  font-size: var(--font-size-xs);
+}
+.term-subagent-progress {
+  margin: 0;
+  border: var(--line-width-1) solid var(--border);
+  padding: var(--ui-space-2);
+  font-family: var(--mono);
+  font-size: var(--font-size-sm);
+  overscroll-behavior: contain;
+}
+.term-subagent-error { color: var(--danger, #e5484d); }
+.term-subagent-provenance {
+  margin-top: var(--ui-space-1);
+  color: var(--warning, #d29922);
+}
+/* 树模式：depth 决定缩进（identity 边派生，不从文本猜） */
+.term-subagent-card[data-depth] { margin-inline-start: calc(var(--ui-space-4) * min(var(--subagent-depth, 0), 6)); }
+.term-subagent-card[data-status="failed"] { border-inline-start-color: var(--danger, #e5484d); }
+.term-subagent-card[data-density="compact"] { gap: var(--ui-space-1); padding: var(--ui-space-2); }
+.term-subagent-card[data-reduced-motion="true"] {
+  animation: none;
+  transition: none;
+}
+@media (prefers-reduced-motion: reduce) {
+  .term-subagent-card {
+    animation: none !important;
+    transition: none !important;
+  }
+}
+
 @media (max-width: 720px) {
   .term { padding: var(--ui-space-4); }
   .term-tool-summary { max-width: 42%; }
