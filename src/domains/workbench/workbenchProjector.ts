@@ -706,7 +706,21 @@ function reduceInteraction(document: WorkbenchDocument, envelope: WorkbenchEvent
 }
 
 function reduceUsage(document: WorkbenchDocument, _envelope: WorkbenchEventEnvelope, event: UsageEvent): WorkbenchDocument {
-  return { ...document, session: { ...document.session, usage: event.usage ?? { used: event.used, limit: event.limit, threshold: event.threshold, percent: event.percent } } }
+  if (event.type === 'budget.warning') {
+    // C14：budget 派生 exhausted 状态（used>=limit）；percent 是 wire 值或派生值，不重复写 journal
+    const used = typeof event.used === 'number' ? event.used : undefined
+    const limit = typeof event.limit === 'number' ? event.limit : undefined
+    const budget = {
+      ...(used !== undefined ? { used } : {}),
+      ...(limit !== undefined ? { limit } : {}),
+      ...(event.threshold !== undefined ? { threshold: event.threshold } : {}),
+      ...(event.percent !== undefined ? { percent: event.percent } : used !== undefined && limit ? { percent: Math.round(used / limit * 100) } : {}),
+      ...(used !== undefined && limit !== undefined ? { exhausted: used >= limit } : {}),
+    }
+    return { ...document, session: { ...document.session, usage: { ...document.session.usage as Record<string, unknown> | undefined, budget } } }
+  }
+  // C14：usage 直通 JsonValue——缺失字段保持 undefined（unknown），不伪造 0
+  return { ...document, session: { ...document.session, usage: event.usage ?? document.session.usage } }
 }
 
 /** C08：plan 事件经 domain reducer 收敛进 document.plan；malformed entries 转可见诊断。 */
