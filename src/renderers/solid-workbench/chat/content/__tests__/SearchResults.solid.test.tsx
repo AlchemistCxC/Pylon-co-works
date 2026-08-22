@@ -2,7 +2,7 @@
 import { render } from '@solidjs/testing-library'
 import { describe, expect, it, vi } from 'vitest'
 import { SolidSearchOrLink } from '../SearchResults.solid.tsx'
-import type { ContentPart } from '../../../../domains/workbench/content/contentPartSchema.ts'
+import type { ContentPart } from '../../../../../domains/workbench/content/contentPartSchema.ts'
 
 /**
  * C05 RED：搜索结果/链接卡契约。
