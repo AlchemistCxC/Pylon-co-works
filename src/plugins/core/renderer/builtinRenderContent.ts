@@ -85,17 +85,21 @@ export function createBuiltinRendererContentPluginDefinitions(): BuiltinPluginDe
             && (input as Record<string, unknown>).semanticKind === semantic.id,
         })
       }
-      renderer.registerRenderKind({
-        id: `content.${definition.kind}`,
-        aliases: [definition.kind],
-        category: 'content',
-        fallbackKind: 'content.unknown',
-        priority: 1000,
-        fixture: {},
-        defaultTokens: {},
-        settingsSchemaVersion: 1,
-        validateInput: () => true,
-      })
+      // C00 owns the canonical content.ansi declaration. The provider keeps
+      // its legacy `ansi` alias but must not publish a second kind identity.
+      if (definition.kind !== 'ansi') {
+        renderer.registerRenderKind({
+          id: `content.${definition.kind}`,
+          aliases: [definition.kind],
+          category: 'content',
+          fallbackKind: 'content.unknown',
+          priority: 1000,
+          fixture: {},
+          defaultTokens: {},
+          settingsSchemaVersion: 1,
+          validateInput: () => true,
+        })
+      }
       renderer.registerContentRenderer({
         id: `${definition.id}.provider`,
         kind: definition.kind,
