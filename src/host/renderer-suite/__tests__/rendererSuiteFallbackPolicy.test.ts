@@ -10,9 +10,10 @@ const activation = (id: string, fallbackSuiteId?: string): RendererActivationSna
 
 describe('RendererSuiteFallbackPolicy', () => {
   it('uses explicit current Suite fallback before built-in/React fallback', () => {
-    const current = activation('suite.third-party', 'suite.builtin')
+    const current = activation('suite.third-party', 'suite.explicit')
+    const explicit = activation('suite.explicit')
     const builtin = activation('suite.builtin')
     const react = activation('suite.react-fatal')
-    expect(resolveRendererSuiteFallback({ current, builtInSolid: builtin, reactFatal: react })).toBe(builtin)
+    expect(resolveRendererSuiteFallback({ current, explicitFallback: explicit, builtInSolid: builtin, reactFatal: react })).toBe(explicit)
   })
 })

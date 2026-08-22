@@ -67,6 +67,7 @@ export default function SheetLayout(props: SheetLayoutProps) {
   const activeAgent = sheetOwnerAgentId ?? (identityActiveAgent || 'peri')
   const activeProfileId = useIdentityStore(s => s.activeProfileId)
   const sessions = useIdentityStore(s => s.sessions)
+  const sheetAgentStates = useWorkspaceStore(s => s.sheetAgentStates)
   const setSheetAgentState = useWorkspaceStore(s => s.setSheetAgentState)
   // 报告 2.3：ready 前禁止 Workspace 写操作——避免启动期用未 hydrate 状态覆盖持久化
   const hydrationReady = useHydrationStore(s => s.status === 'ready')
@@ -114,6 +115,20 @@ export default function SheetLayout(props: SheetLayoutProps) {
   }, [activeProfileId, props.activeSession, sessions])
 
   const ctx = buildSheetContext(props, sidebarCollapsed)
+  const activeSessionOwner = sessions.find(session => session.id === props.activeSession)?.agentId
+  const contextForAgentSheet = (sheet: SheetRecord): SheetContext => {
+    const rememberedSession = sheet.agentId ? sheetAgentStates[sheet.agentId]?.activeSessionId ?? null : null
+    const sessionId = activeSessionOwner === sheet.agentId ? props.activeSession : rememberedSession
+    const active = sheet.id === activeSheetId
+    return {
+      ...ctx,
+      activeSession: sessionId,
+      selectSession: id => {
+        if (sheet.agentId) setSheetAgentState(sheet.agentId, { activeSessionId: id ?? undefined })
+        if (active) props.onSelectSession(id)
+      },
+    }
+  }
   const ccEditMode = useStore(s => s.ccEditMode)
   // FE-AUD-001 / 1C L1：工作区与用户配置（Profile/Session）写盘失败可见（报告 1A.5/1C）
   const workspacePersistError = useWorkspaceStore(s => s.lastPersistError)
@@ -137,7 +152,16 @@ export default function SheetLayout(props: SheetLayoutProps) {
     <div className={`layout ${ccEditMode ? 'cc-editing-app' : ''}`} data-pylon-surface="workspace" data-agent-id={activeAgent}>
       {persistWarning}
       <SheetSidebarSlot sheet={activeSheet} ctx={ctx} />
-      <SheetHost sheet={activeSheet} ctx={ctx} />
+      {activeSheet.kind !== 'agent' && <SheetHost sheet={activeSheet} ctx={ctx} />}
+      {sheets.filter(sheet => sheet.kind === 'agent').map(sheet => {
+        const active = sheet.id === activeSheetId
+        return (
+          <div key={sheet.id} className="agent-sheet-keep-alive" data-sheet-id={sheet.id}
+            aria-hidden={active ? undefined : true} style={{ display: active ? 'contents' : 'none' }}>
+            <SheetHost sheet={sheet} ctx={contextForAgentSheet(sheet)} />
+          </div>
+        )
+      })}
       <SheetRightSlot sheet={activeSheet} ctx={ctx} />
       {/* G5（FE-AUD-006）：browser sheet 保活——非 active 时隐藏渲染（WebView 不销毁），
           真正 close sheet（从 sheets 移除）才卸载触发 browser_close */}

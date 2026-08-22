@@ -11,6 +11,7 @@ import ModernAgentWorkbench from '../renderers/modern-workbench/ModernAgentWorkb
 import { getInterfaceModeRegistry } from '../plugin-runtime/runtimeServices.ts'
 import { IsolatedPluginSurface } from '../plugin-runtime/ui/IsolatedPluginSurface.tsx'
 import { BUILTIN_INTERFACE_MODES } from '../plugins/core/interfaceMode/builtinInterfaceModes.ts'
+import AgentRendererSuiteWorkbench from './agent-workbench/AgentRendererSuiteWorkbench.tsx'
 
 /**
  * AgentSheetView — agent 主工作台（W1-03 侧栏上移后只留主区）。
@@ -77,16 +78,14 @@ export default function AgentSheetView({ sheet, ctx }: { sheet: SheetRecord; ctx
       }}
     />
   }
-  // Renderer Suite Host integration is staged independently; until the host
-  // owns this sheet, keep the stable modern workbench as the safe fallback.
-  if (mode.workbench.renderKind === 'renderer-suite' && mode.id !== 'terminal-like') {
-    return <ModernAgentWorkbench
+  if (mode.workbench.renderKind === 'renderer-suite') {
+    return <AgentRendererSuiteWorkbench
       sheet={sheet}
       ctx={ctx}
+      modeId={mode.id}
+      defaultSuiteId={mode.workbench.defaultSuiteId}
       workspaceMode={workspaceMode}
-      showPet={showPet}
       isReplay={isReplay}
-      onContinueReplay={() => useReplayPostureStore.getState().clear()}
     />
   }
   if (mode.workbench.renderKind === 'host' && mode.workbench.renderer === 'modern') {

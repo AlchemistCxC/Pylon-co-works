@@ -5,6 +5,7 @@ import type { WorkbenchCommandFacade } from '../../domains/workbench/workbenchCo
 import type { WorkbenchRuntime, WorkbenchRuntimeSnapshot } from '../../domains/workbench/workbenchRuntime.ts'
 import type { SolidWorkbenchInput } from './workbenchContracts.ts'
 import type { WorkbenchHostPort } from './workbenchHostPort.ts'
+import type { RendererActivationSnapshot } from '../../plugin-runtime/renderers/rendererSuiteTypes.ts'
 
 export interface SolidWorkbenchContextValue {
   input: Accessor<SolidWorkbenchInput>
@@ -17,6 +18,9 @@ export interface SolidWorkbenchContextValue {
   /** Present for mounted Suite adapters; legacy unit fixtures may omit it. */
   hostPort?: WorkbenchHostPort
   paused: Accessor<boolean>
+  reportRendererError?(error: unknown): void
+  reportRendererAction?(action: unknown): void
+  activation?: RendererActivationSnapshot
 }
 
 export const SolidWorkbenchContext = createContext<SolidWorkbenchContextValue>()

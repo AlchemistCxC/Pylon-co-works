@@ -26,7 +26,10 @@ export interface SessionUiPort {
   clear(): void
 }
 
-export type WorkbenchCapability = 'prompt' | 'cancel' | 'attach' | 'model' | 'mode' | 'toolAction' | 'interactionResponse' | 'resourceOpen' | 'resourceReveal' | 'clipboardWrite' | 'retry' | 'recovery'
+export type WorkbenchCapability = 'prompt' | 'cancel' | 'attach' | 'model' | 'mode'
+  | 'sessionCreate' | 'compact' | 'sessionExport' | 'sessionClear'
+  | 'toolAction' | 'interactionResponse' | 'resourceOpen' | 'resourceReveal'
+  | 'clipboardWrite' | 'retry' | 'recovery'
 export type WorkbenchCapabilitySnapshot = Readonly<Partial<Record<WorkbenchCapability, boolean>>>
 
 export interface WorkbenchCapabilityReader {
@@ -110,6 +113,13 @@ export interface WorkbenchHostPortInput {
   readonly sessionId: string | null
   readonly capabilities?: WorkbenchCapabilitySnapshot
   readonly diagnostics?: ((diagnostic: RendererDiagnosticContext) => void) | Pick<RendererDiagnosticPort, 'report'>
+  /** Stable Host Port may follow session/Suite changes without replacing renderer instances. */
+  readonly binding?: () => {
+    readonly suiteId?: string
+    readonly sheetId: string
+    readonly sessionOwnerKey: string | null
+    readonly sessionId: string | null
+  }
 }
 
 function mapDocumentSlice(slice: WorkbenchDocumentSlice): WorkbenchRuntimeSlice {
@@ -129,19 +139,19 @@ function createAppearanceReader(appearance: WorkbenchAppearanceStore): ResolvedA
   return { getSnapshot: () => appearance.getSnapshot(), subscribe: listener => appearance.subscribe(listener) }
 }
 
-function createSessionUiPort(store: SessionUiStore, namespace: string): SessionUiPort {
+function createSessionUiPort(store: SessionUiStore, namespace: () => string): SessionUiPort {
   return {
-    get: (key, fallback) => store.get(namespace, key, fallback),
-    set: (key, value) => store.set(namespace, key, value),
-    update: (key, fallback, updater) => store.update(namespace, key, fallback, updater),
-    subscribe: (key, listener) => store.subscribe(namespace, key, listener),
-    clear: () => store.clear(namespace),
+    get: (key, fallback) => store.get(namespace(), key, fallback),
+    set: (key, value) => store.set(namespace(), key, value),
+    update: (key, fallback, updater) => store.update(namespace(), key, fallback, updater),
+    subscribe: (key, listener) => store.subscribe(namespace(), key, listener),
+    clear: () => store.clear(namespace()),
   }
 }
 
 const capabilityForCommand: Readonly<Record<keyof WorkbenchCommandPort, WorkbenchCapability>> = {
   prompt: 'prompt', send: 'prompt', cancel: 'cancel', attach: 'attach', setModel: 'model', setMode: 'mode',
-  createSession: 'prompt', compact: 'prompt', exportSession: 'resourceOpen', clearSession: 'prompt', toolAction: 'toolAction',
+  createSession: 'sessionCreate', compact: 'compact', exportSession: 'sessionExport', clearSession: 'sessionClear', toolAction: 'toolAction',
   respondInteraction: 'interactionResponse', openResource: 'resourceOpen', revealResource: 'resourceReveal', copy: 'clipboardWrite', retry: 'retry', recover: 'recovery',
 }
 
@@ -184,13 +194,12 @@ function createCapabilityReader(runtime: WorkbenchRuntime, declared: WorkbenchCa
     const runtimeCapabilities = runtime.getSlice<{ canAttach?: boolean; promptImage?: boolean }>('capabilities')
     return Object.freeze({
       ...declared,
-      attach: declared?.attach ?? runtimeCapabilities.canAttach ?? true,
-      prompt: declared?.prompt ?? true,
+      attach: declared?.attach ?? runtimeCapabilities.canAttach ?? false,
     })
   }
   return {
     getSnapshot,
-    has: capability => getSnapshot()[capability] !== false,
+    has: capability => getSnapshot()[capability] === true,
     subscribe: listener => runtime.subscribe(listener),
   }
 }
@@ -200,7 +209,8 @@ function createDiagnosticPort(input: WorkbenchHostPortInput): RendererDiagnostic
   const listeners = new Set<() => void>()
   return {
     report(diagnostic) {
-      const enriched = Object.freeze({ ...diagnostic, suiteId: diagnostic.suiteId ?? input.suiteId, sessionId: diagnostic.sessionId ?? input.sessionId, sheetId: input.sheetId, sessionOwnerKey: input.sessionOwnerKey })
+      const binding = input.binding?.() ?? input
+      const enriched = Object.freeze({ ...diagnostic, suiteId: diagnostic.suiteId ?? binding.suiteId ?? input.suiteId, sessionId: diagnostic.sessionId ?? binding.sessionId, sheetId: binding.sheetId, sessionOwnerKey: binding.sessionOwnerKey })
       history.push(enriched)
       if (history.length > 100) history.shift()
       if (typeof input.diagnostics === 'function') input.diagnostics(enriched)
@@ -215,7 +225,10 @@ function createDiagnosticPort(input: WorkbenchHostPortInput): RendererDiagnostic
 
 export function createWorkbenchHostPort(input: WorkbenchHostPortInput): WorkbenchHostPort {
   const capabilities = createCapabilityReader(input.runtime, input.capabilities)
-  const namespace = `${input.suiteId}\u0000${input.sheetId}\u0000${input.sessionOwnerKey ?? 'none'}`
+  const namespace = () => {
+    const binding = input.binding?.() ?? input
+    return `${binding.suiteId ?? input.suiteId}\u0000${binding.sheetId}\u0000${binding.sessionOwnerKey ?? 'none'}`
+  }
   return Object.freeze({
     document: createDocumentReader(input.runtime),
     appearance: createAppearanceReader(input.appearance),

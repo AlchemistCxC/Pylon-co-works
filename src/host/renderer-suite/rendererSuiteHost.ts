@@ -2,10 +2,13 @@ import type { RendererActivationSnapshot, RendererSuiteContribution } from '../.
 import type { WorkbenchHostPort, WorkbenchMountInput, WorkbenchRendererInstance, PreparedWorkbenchRenderer } from '../../renderers/solid-workbench/workbenchContracts.ts'
 import { createRendererSuiteCommandGate } from './rendererSuiteCommandGate.ts'
 import { createRendererSuiteHostState, type RendererSuiteHostState } from './rendererSuiteHostState.ts'
+import { executeRendererSemanticCommand, isRenderSemanticCommand } from './rendererSemanticCommand.ts'
 
 export interface RendererSuiteHostOptions {
   readonly container: HTMLElement
   readonly hostPort: WorkbenchHostPort
+  /** A Suite receives a stable, Suite-scoped port even while another candidate is preparing. */
+  readonly hostPortForActivation?: (activation: RendererActivationSnapshot) => WorkbenchHostPort
   readonly input: WorkbenchMountInput
   readonly readyTimeoutMs?: number
 }
@@ -14,11 +17,21 @@ export interface RendererSuiteHostListener {
   (state: RendererSuiteHostState): void
 }
 
+function errorMessage(error: unknown): string {
+  if (error instanceof Error) return error.message
+  if (error && typeof error === 'object' && typeof (error as { message?: unknown }).message === 'string') {
+    return (error as { message: string }).message
+  }
+  return String(error)
+}
+
 interface ActiveInstance {
   activation: RendererActivationSnapshot
   instance: WorkbenchRendererInstance
   gate: ReturnType<typeof createRendererSuiteCommandGate>
   staging: HTMLElement
+  unsubscribeError: () => void
+  unsubscribeAction: () => void
 }
 
 export class RendererSuiteHost {
@@ -57,18 +70,18 @@ export class RendererSuiteHost {
     if (this.destroyed) return
     this.currentInput = input
     try { this.active?.instance.update(input) } catch (error) {
-      this.options.hostPort.diagnostics.report({ code: 'renderer.suite.update.failed', message: error instanceof Error ? error.message : String(error), phase: 'update', recoverability: 'fallback', suiteId: this.active?.activation.suite.value.id, documentRevision: this.options.hostPort.document.getSnapshot()?.revision })
+      this.options.hostPort.diagnostics.report({ code: 'renderer.suite.update.failed', message: errorMessage(error), phase: 'update', recoverability: 'fallback', suiteId: this.active?.activation.suite.value.id, documentRevision: this.options.hostPort.document.getSnapshot()?.revision })
     }
   }
 
   pause(): void {
     try { this.active?.instance.pause() } catch (error) {
-      this.options.hostPort.diagnostics.report({ code: 'renderer.suite.pause.failed', message: error instanceof Error ? error.message : String(error), phase: 'update', recoverability: 'fallback', suiteId: this.active?.activation.suite.value.id })
+      this.options.hostPort.diagnostics.report({ code: 'renderer.suite.pause.failed', message: errorMessage(error), phase: 'update', recoverability: 'fallback', suiteId: this.active?.activation.suite.value.id })
     }
   }
   resume(): void {
     try { this.active?.instance.resume() } catch (error) {
-      this.options.hostPort.diagnostics.report({ code: 'renderer.suite.resume.failed', message: error instanceof Error ? error.message : String(error), phase: 'update', recoverability: 'fallback', suiteId: this.active?.activation.suite.value.id })
+      this.options.hostPort.diagnostics.report({ code: 'renderer.suite.resume.failed', message: errorMessage(error), phase: 'update', recoverability: 'fallback', suiteId: this.active?.activation.suite.value.id })
     }
   }
 
@@ -103,41 +116,94 @@ export class RendererSuiteHost {
     let prepared: PreparedWorkbenchRenderer | undefined
     let instance: WorkbenchRendererInstance | undefined
     let failurePhase: 'prepare' | 'mount' = 'prepare'
+    let candidateUnsubscribeError = () => {}
+    let candidateUnsubscribeAction = () => {}
+    let preCommitRuntimeError: unknown
+    let candidateCommitted = false
     const gate = createRendererSuiteCommandGate()
     try {
-      const candidateHost = Object.freeze({ ...this.options.hostPort, commands: gate.bind(this.options.hostPort.commands) })
-      prepared = await this.prepare(activation.suite.value, activation.suite.value.factory, candidateHost)
+      const activationHost = this.options.hostPortForActivation?.(activation) ?? this.options.hostPort
+      const candidateHost = Object.freeze({ ...activationHost, commands: gate.bind(activationHost.commands) })
+      prepared = await this.prepare(activation, activation.suite.value, activation.suite.value.factory, candidateHost)
       if (request !== this.requestId || this.destroyed) throw new StaleSuiteRequest()
       this.publish(createRendererSuiteHostState('mounting-candidate', { suiteId: activation.suite.value.id, previousSuiteId: old?.activation.suite.value.id, registryRevision: activation.revision, documentRevision: this.options.hostPort.document.getSnapshot()?.revision }))
       failurePhase = 'mount'
-      instance = await prepared.mount(staging, this.currentInput, candidateHost)
+      const mountedInput = this.currentInput
+      instance = await prepared.mount(staging, mountedInput, candidateHost)
+      candidateUnsubscribeError = instance.on('error', error => {
+        if (this.destroyed) return
+        if (!candidateCommitted) {
+          if (request === this.requestId) preCommitRuntimeError = error
+          return
+        }
+        if (this.active?.instance !== instance) return
+        activationHost.diagnostics.report({
+          code: 'renderer.suite.runtime.failed',
+          message: errorMessage(error),
+          phase: 'update',
+          recoverability: 'fallback',
+          suiteId: activation.suite.value.id,
+          registryRevision: activation.revision,
+          documentRevision: activationHost.document.getSnapshot()?.revision,
+        })
+      })
       await this.waitReady(instance, this.options.readyTimeoutMs ?? 10_000)
       if (request !== this.requestId || this.destroyed) throw new StaleSuiteRequest()
+      // Keep the continuous listener above for ready→error emitters, then probe
+      // once for instances that only replay a cached fatal to post-ready subscribers.
+      const unsubscribeCachedErrorProbe = instance.on('error', error => {
+        if (request === this.requestId) preCommitRuntimeError = error
+      })
+      unsubscribeCachedErrorProbe()
+      if (preCommitRuntimeError !== undefined) throw preCommitRuntimeError
+      // Session/sheet/visibility may have changed while this candidate waited
+      // for ready. Converge it before the atomic DOM commit.
+      if (this.currentInput !== mountedInput) instance.update(this.currentInput)
       gate.activate()
       const previous = this.active
+      candidateUnsubscribeAction = instance.on('request-action', action => {
+        if (this.destroyed || this.active?.instance !== instance) return
+        if (!isRenderSemanticCommand(action)) {
+          activationHost.diagnostics.report({
+            code: 'renderer_action_invalid', message: 'Renderer Suite request-action 不是 semantic command',
+            phase: 'action', recoverability: 'none', suiteId: activation.suite.value.id,
+          })
+          return
+        }
+        void executeRendererSemanticCommand({ command: action, host: candidateHost, mountInput: this.currentInput })
+      })
       this.options.container.replaceChildren(...Array.from(staging.childNodes))
       staging.remove()
-      this.active = { activation, instance, gate, staging }
+      this.active = {
+        activation, instance, gate, staging,
+        unsubscribeError: candidateUnsubscribeError,
+        unsubscribeAction: candidateUnsubscribeAction,
+      }
+      candidateCommitted = true
+      candidateUnsubscribeError = () => {}
+      candidateUnsubscribeAction = () => {}
       this.publish(createRendererSuiteHostState('active', { suiteId: activation.suite.value.id, previousSuiteId: previous?.activation.suite.value.id, registryRevision: activation.revision, documentRevision: this.options.hostPort.document.getSnapshot()?.revision }))
       if (previous) {
         try { previous.instance.pause() } catch (error) {
-          this.options.hostPort.diagnostics.report({ code: 'renderer.suite.pause.failed', message: error instanceof Error ? error.message : String(error), phase: 'switch', recoverability: 'none', suiteId: previous.activation.suite.value.id })
+          this.options.hostPort.diagnostics.report({ code: 'renderer.suite.pause.failed', message: errorMessage(error), phase: 'switch', recoverability: 'none', suiteId: previous.activation.suite.value.id })
         }
         await this.destroyInstance(previous)
       }
     } catch (error) {
       gate.deactivate()
+      candidateUnsubscribeError()
+      candidateUnsubscribeAction()
       if (instance) await this.safeDestroy(instance)
       staging.remove()
       if (error instanceof StaleSuiteRequest) return
       this.publish(createRendererSuiteHostState(old ? 'active' : 'degraded', { suiteId: old?.activation.suite.value.id, previousSuiteId: activation.suite.value.id, registryRevision: activation.revision, documentRevision: this.options.hostPort.document.getSnapshot()?.revision, error }))
-      this.options.hostPort.diagnostics.report({ code: 'renderer.suite.switch.failed', message: error instanceof Error ? error.message : String(error), phase: failurePhase, recoverability: old ? 'fallback' : 'retry', suiteId: activation.suite.value.id, oldSuiteId: old?.activation.suite.value.id, newSuiteId: activation.suite.value.id, registryRevision: activation.revision, documentRevision: this.options.hostPort.document.getSnapshot()?.revision })
+      this.options.hostPort.diagnostics.report({ code: 'renderer.suite.switch.failed', message: errorMessage(error), phase: failurePhase, recoverability: old ? 'none' : 'retry', suiteId: activation.suite.value.id, oldSuiteId: old?.activation.suite.value.id, newSuiteId: activation.suite.value.id, registryRevision: activation.revision, documentRevision: this.options.hostPort.document.getSnapshot()?.revision })
     }
   }
 
-  private async prepare(suite: RendererSuiteContribution, factory: RendererSuiteContribution['factory'], host: WorkbenchHostPort): Promise<PreparedWorkbenchRenderer> {
+  private async prepare(activation: RendererActivationSnapshot, suite: RendererSuiteContribution, factory: RendererSuiteContribution['factory'], host: WorkbenchHostPort): Promise<PreparedWorkbenchRenderer> {
     if (typeof factory === 'function') throw new Error(`Renderer Suite ${suite.id} factory 未实现 prepare`)
-    return factory.prepare({ suiteId: suite.id, host })
+    return factory.prepare({ suiteId: suite.id, host, activation })
   }
 
   private waitReady(instance: WorkbenchRendererInstance, timeoutMs: number): Promise<void> {
@@ -151,18 +217,20 @@ export class RendererSuiteHost {
       const finish = () => { if (!settled) { settled = true; cleanup(); resolve() } }
       const fail = (error: unknown) => { if (!settled) { settled = true; cleanup(); reject(error) } }
       this.readyCancellers.add(cancel)
-      unsubscribe = instance.on('ready', finish)
-      if (settled) unsubscribe()
       unsubscribeError = instance.on('error', fail)
       if (settled) unsubscribeError()
+      unsubscribe = instance.on('ready', finish)
+      if (settled) unsubscribe()
     })
   }
 
   private async destroyInstance(active: ActiveInstance): Promise<void> {
     active.gate.deactivate()
+    active.unsubscribeError()
+    active.unsubscribeAction()
     try { await active.instance.destroy() } catch (error) {
       this.options.hostPort.diagnostics.report({
-        code: 'renderer.suite.destroy.failed', message: error instanceof Error ? error.message : String(error), phase: 'destroy', recoverability: 'none',
+        code: 'renderer.suite.destroy.failed', message: errorMessage(error), phase: 'destroy', recoverability: 'none',
         suiteId: active.activation.suite.value.id, registryRevision: active.activation.revision,
         documentRevision: this.options.hostPort.document.getSnapshot()?.revision,
       })

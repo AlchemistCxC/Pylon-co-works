@@ -1,4 +1,4 @@
-import { ErrorBoundary, Show, createSignal, onCleanup } from 'solid-js'
+import { ErrorBoundary, Show, createSignal, onCleanup, type JSX } from 'solid-js'
 import type { RenderMessage } from '../../../components/chat/messageTypes.ts'
 import type { WorkbenchAppearanceSnapshot } from '../../../domains/workbench/appearance.ts'
 import { MarkdownContent } from './MarkdownContent.solid.tsx'
@@ -12,6 +12,8 @@ export interface SolidMessageRowProps {
   resolveUserName?: (sender: string) => string | undefined
   now?: () => number
   rowRef?: (node: HTMLDivElement | null) => void
+  /** Production Workbench may route canonical content parts through Suite-local Slots. */
+  semanticContent?: JSX.Element
 }
 
 export function SolidMessageRow(props: SolidMessageRowProps) {
@@ -36,21 +38,24 @@ export function SolidMessageRow(props: SolidMessageRowProps) {
             content={message().content}
             appearance={props.appearance}
             resolveUserName={props.resolveUserName}
+            semanticContent={props.semanticContent}
           />
         </Show>
         <Show when={props.renderMessage.type === 'assistant'}>
-          <AssistantContent text={message().content} appearance={props.appearance} />
+          <AssistantContent text={message().content} appearance={props.appearance} semanticContent={props.semanticContent} />
         </Show>
         <Show when={props.renderMessage.type === 'reasoning'}>
-          <ReasoningBlock
-            text={message().content}
-            running={message().running === true}
-            startedAt={message().thoughtStartedAt}
-            durationMs={message().thoughtDurationMs}
-            now={props.now}
-            redacted={message().redacted === true}
-            redactedReason={message().redactedReason}
-          />
+          <Show when={props.semanticContent !== undefined} fallback={
+            <ReasoningBlock
+              text={message().content}
+              running={message().running === true}
+              startedAt={message().thoughtStartedAt}
+              durationMs={message().thoughtDurationMs}
+              now={props.now}
+              redacted={message().redacted === true}
+              redactedReason={message().redactedReason}
+            />
+          }>{props.semanticContent}</Show>
         </Show>
         <Show when={props.renderMessage.type === 'error' || props.renderMessage.type === 'system'}>
           <div class="term-row-error" role="alert">{message().content || '系统消息'}</div>
@@ -64,6 +69,7 @@ export function AssistantContent(props: {
   text: string
   appearance: Pick<WorkbenchAppearanceSnapshot, 'assistantDot' | 'assistantDotGlyph' | 'assistantDotImage'>
   streaming?: boolean
+  semanticContent?: JSX.Element
 }) {
   const [copied, setCopied] = createSignal(false)
   let copiedTimer: number | undefined
@@ -90,7 +96,9 @@ export function AssistantContent(props: {
       </Show>
       <button class="copy-btn" type="button" onClick={copy} aria-label="复制消息">{copied() ? '✓' : '⎘'}</button>
       <div class="term-assistant-body">
-        <MarkdownContent text={props.text} streaming={props.streaming} />
+        <Show when={props.semanticContent !== undefined} fallback={<MarkdownContent text={props.text} streaming={props.streaming} />}>
+          {props.semanticContent}
+        </Show>
       </div>
     </div>
   )
@@ -101,6 +109,7 @@ function UserLine(props: {
   content: string
   appearance: Pick<WorkbenchAppearanceSnapshot, 'userName' | 'userPrefix' | 'userColor'>
   resolveUserName?: (sender: string) => string | undefined
+  semanticContent?: JSX.Element
 }) {
   const name = () => props.appearance.userName
     || props.resolveUserName?.(props.sender)
@@ -111,7 +120,11 @@ function UserLine(props: {
     <div class="term-user">
       <span class="term-user-prefix" style={colorStyle()}>{props.appearance.userPrefix || '❯'}</span>
       <span class="term-user-name" style={colorStyle()}>{name()}</span>
-      <div class="term-user-content"><MarkdownContent text={props.content} inline /></div>
+      <div class="term-user-content">
+        <Show when={props.semanticContent !== undefined} fallback={<MarkdownContent text={props.content} inline />}>
+          {props.semanticContent}
+        </Show>
+      </div>
     </div>
   )
 }

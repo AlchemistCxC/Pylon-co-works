@@ -1,11 +1,10 @@
 import { For, Show, createEffect, createSignal, onCleanup } from 'solid-js'
-import type { PlanEntry, PlanStatus } from '../../../domains/tasks/planTypes.ts'
-import { taskSummary } from '../../../domains/tasks/taskSelectors.ts'
+import type { WorkbenchTaskEntry } from '../../../domains/workbench/workbenchRuntime.ts'
 import { SolidCollapsibleRegion } from './CollapsibleRegion.solid.tsx'
 
 export interface SolidTaskTreeProps {
   sessionId: string | null
-  tasks: readonly PlanEntry[]
+  tasks: readonly WorkbenchTaskEntry[]
   toggleEventTarget?: Pick<EventTarget, 'addEventListener' | 'removeEventListener'>
 }
 
@@ -48,12 +47,19 @@ export function SolidTaskTree(props: SolidTaskTreeProps) {
   )
 }
 
-function statusGlyph(status: PlanStatus | 'unknown'): string {
+function taskSummary(entries: readonly WorkbenchTaskEntry[]): string {
+  const completed = entries.filter(entry => entry.status === 'completed').length
+  const base = `⇅ ${entries.length} 任务`
+  return completed > 0 ? `${base} · ${completed} 完成` : base
+}
+
+function statusGlyph(status: WorkbenchTaskEntry['status']): string {
   switch (status) {
     case 'in_progress': return '◐'
     case 'completed': return '✓'
     case 'failed':
     case 'cancelled': return '✕'
+    case 'blocked': return '!'
     default: return '○'
   }
 }

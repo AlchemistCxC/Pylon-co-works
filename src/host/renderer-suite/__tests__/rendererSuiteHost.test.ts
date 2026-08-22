@@ -31,7 +31,7 @@ function activation(id: string, factory: WorkbenchRendererFactory): RendererActi
   return { revision: 1, suite: entry, kinds: new Map(), slots: new Map(), diagnostics: [] }
 }
 
-function factory(id: string, options: { delay?: number; fail?: boolean; mountFail?: boolean; destroyFail?: boolean; readyFail?: boolean } = {}): WorkbenchRendererFactory {
+function factory(id: string, options: { delay?: number; fail?: boolean; mountFail?: boolean; destroyFail?: boolean; readyFail?: boolean; runtimeFail?: boolean; synchronousPostReadyFail?: boolean; cachedRuntimeFail?: boolean; runtimeAction?: unknown; onMount?: () => void; onUpdate?: (input: WorkbenchMountInput) => void } = {}): WorkbenchRendererFactory {
   return {
     async prepare() {
       if (options.fail) throw new Error(`${id} prepare failed`)
@@ -40,21 +40,36 @@ function factory(id: string, options: { delay?: number; fail?: boolean; mountFai
           if (options.mountFail) throw new Error(`${id} mount failed`)
           const listeners = new Map<string, Set<(payload: unknown) => void>>()
           let destroyed = false
+          let readyEmitted = false
           const instance: WorkbenchRendererInstance = {
-            update: () => {}, pause: () => {}, resume: () => {},
+            update: nextInput => options.onUpdate?.(nextInput), pause: () => {}, resume: () => {},
             destroy: vi.fn(() => { destroyed = true; if (options.destroyFail) throw new Error(`${id} destroy failed`) }),
             on(event, listener) {
               const group = listeners.get(event) ?? new Set()
               group.add(listener); listeners.set(event, group)
+              if (event === 'error' && options.cachedRuntimeFail && readyEmitted) listener(new Error(`${id} cached runtime failed`))
               return () => group.delete(listener)
             },
           }
           const handle = document.createElement('div'); handle.textContent = id; container.append(handle)
+          options.onMount?.()
           ;(instance as WorkbenchRendererInstance & { __handle?: HTMLElement }).__handle = handle
           setTimeout(() => {
             if (!destroyed) {
               if (options.readyFail) for (const listener of listeners.get('error') ?? []) listener(new Error(`${id} slot failed`))
-              else for (const listener of listeners.get('ready') ?? []) listener({ id })
+              else {
+                readyEmitted = true
+                for (const listener of listeners.get('ready') ?? []) listener({ id })
+                if (options.synchronousPostReadyFail) {
+                  for (const listener of listeners.get('error') ?? []) listener(new Error(`${id} synchronous post-ready failed`))
+                }
+                if (options.runtimeFail) setTimeout(() => {
+                  for (const listener of listeners.get('error') ?? []) listener(new Error(`${id} runtime failed`))
+                }, 0)
+                if (options.runtimeAction) setTimeout(() => {
+                  for (const listener of listeners.get('request-action') ?? []) listener(options.runtimeAction)
+                }, 0)
+              }
             }
           }, options.delay ?? 0)
           return instance
@@ -86,7 +101,67 @@ describe('RendererSuiteHost', () => {
     await host.mount(activation('suite.a', factory('A')))
     await host.switchTo(activation('suite.b', factory('B', { fail: true })))
     expect(container.textContent).toContain('A')
-    expect(diagnostics).toEqual([expect.objectContaining({ code: 'renderer.suite.switch.failed', phase: 'prepare' })])
+    expect(diagnostics).toEqual([expect.objectContaining({
+      code: 'renderer.suite.switch.failed', phase: 'prepare', recoverability: 'none',
+      oldSuiteId: 'suite.a', newSuiteId: 'suite.b',
+    })])
+  })
+
+  it('reports an active renderer runtime fatal after ready so the product host can fall back', async () => {
+    const container = document.createElement('div')
+    const diagnostics: unknown[] = []
+    const port = fakeHost(); port.diagnostics.report = value => diagnostics.push(value)
+    const host = new RendererSuiteHost({ container, hostPort: port, input })
+
+    await host.mount(activation('suite.a', factory('A', { runtimeFail: true })))
+    await vi.waitFor(() => expect(diagnostics).toContainEqual(expect.objectContaining({
+      code: 'renderer.suite.runtime.failed', suiteId: 'suite.a', recoverability: 'fallback',
+    })))
+  })
+
+  it('does not lose a cached runtime fatal replayed between ready and active commit', async () => {
+    const container = document.createElement('div')
+    const diagnostics: unknown[] = []
+    const port = fakeHost(); port.diagnostics.report = value => diagnostics.push(value)
+    const host = new RendererSuiteHost({ container, hostPort: port, input })
+
+    await host.mount(activation('suite.a', factory('A', { cachedRuntimeFail: true })))
+
+    expect(host.getState().phase).toBe('degraded')
+    expect(diagnostics).toContainEqual(expect.objectContaining({
+      code: 'renderer.suite.switch.failed', suiteId: 'suite.a', phase: 'mount',
+    }))
+  })
+
+  it('does not lose a non-cached fatal emitted synchronously after ready', async () => {
+    const container = document.createElement('div')
+    const diagnostics: unknown[] = []
+    const port = fakeHost(); port.diagnostics.report = value => diagnostics.push(value)
+    const host = new RendererSuiteHost({ container, hostPort: port, input })
+
+    await host.mount(activation('suite.a', factory('A', { synchronousPostReadyFail: true })))
+
+    expect(host.getState().phase).toBe('degraded')
+    expect(diagnostics).toContainEqual(expect.objectContaining({
+      code: 'renderer.suite.switch.failed', suiteId: 'suite.a', phase: 'mount',
+      message: 'A synchronous post-ready failed',
+    }))
+  })
+
+  it('routes active Suite request-action through the semantic Host command gate', async () => {
+    const container = document.createElement('div')
+    const port = fakeHost()
+    const copy = vi.fn(async () => ({ ok: true as const, value: { ok: true } }))
+    Object.defineProperty(port, 'commands', { value: new Proxy({ copy } as unknown as WorkbenchHostPort['commands'], {
+      get: (target, property) => property === 'copy' ? target.copy : async () => ({ ok: false as const, error: { code: 'denied', message: 'denied', recoverability: 'none' as const } }),
+    }) })
+    const host = new RendererSuiteHost({ container, hostPort: port, input })
+
+    await host.mount(activation('suite.a', factory('A', {
+      runtimeAction: { type: 'clipboard.write', payload: { text: 'from suite' } },
+    })))
+
+    await vi.waitFor(() => expect(copy).toHaveBeenCalledWith('session-a', 'from suite'))
   })
 
   it('only activates latest request and destroys stale candidate', async () => {
@@ -98,6 +173,28 @@ describe('RendererSuiteHost', () => {
     await Promise.all([b, c])
     expect(container.textContent).toContain('C')
     expect(container.textContent).not.toContain('B')
+  })
+
+  it('converges a preparing candidate to the latest session input before commit', async () => {
+    const container = document.createElement('div')
+    const candidateUpdates: WorkbenchMountInput[] = []
+    let candidateMounted!: () => void
+    const mounted = new Promise<void>(resolve => { candidateMounted = resolve })
+    const host = new RendererSuiteHost({ container, hostPort: fakeHost(), input })
+    await host.mount(activation('suite.a', factory('A')))
+
+    const switching = host.switchTo(activation('suite.b', factory('B', {
+      delay: 20,
+      onMount: candidateMounted,
+      onUpdate: next => candidateUpdates.push(next),
+    })))
+    await mounted
+    host.update({ ...input, sessionOwnerKey: 'owner-b', sessionId: 'session-b' })
+    await switching
+
+    expect(candidateUpdates.at(-1)).toMatchObject({
+      sessionOwnerKey: 'owner-b', sessionId: 'session-b',
+    })
   })
 
   it('cancels a candidate waiting for ready when host is destroyed', async () => {
@@ -129,7 +226,7 @@ describe('RendererSuiteHost', () => {
     await host.switchTo(activation('suite.b', factory('B', { readyFail: true })))
     expect(container.textContent).toContain('A')
     expect(diagnostics).toEqual([expect.objectContaining({
-      code: 'renderer.suite.switch.failed', phase: 'mount', recoverability: 'fallback',
+      code: 'renderer.suite.switch.failed', phase: 'mount', recoverability: 'none',
       registryRevision: 1, documentRevision: 5,
     })])
   })

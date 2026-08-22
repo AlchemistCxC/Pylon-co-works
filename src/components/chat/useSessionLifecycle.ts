@@ -76,6 +76,7 @@ export function useSessionLifecycle(
   const controllerHandleRef = useRef<ChatControllerHandle | null>(null)
   const [recoveryFailure, setRecoveryFailure] = useState<SessionRecoveryFailure | null>(null)
   const [replayIntegrity, setReplayIntegrity] = useState<SessionReplayIntegrity | null>(null)
+  const [canonicalRefresh, setCanonicalRefresh] = useState<{ sessionId: string; revision: number } | null>(null)
 
   // CWD-03：订阅当前会话的 reload 令牌——令牌递增时 effect 以 [sessionId, reloadToken]
   // 触发重跑（读取已同步的新 workdir/workspaceId 走 load/new，InputBar 随之恢复）。
@@ -145,6 +146,7 @@ export function useSessionLifecycle(
     if (!s) return
     setRecoveryFailure(null)
     setReplayIntegrity(null)
+    setCanonicalRefresh(null)
     sessionRef.current = s.source  // set BEFORE async, so incoming events match
     messageOwnerRef.current = s.id
     // I01-W2：会话运行时 store 写入一律按 AgentContext（agentId+source）隔离
@@ -291,6 +293,7 @@ export function useSessionLifecycle(
         // OWNER-04：load_persisted_session 成功 → 记录本次绑定重建时的 agent generation。
         // 上次绑定的 generation 已不同（重连/替换）时，旧 binding 必须 Invalidated。
         useRuntimeStore.getState().setBindingGeneration(context, useRuntimeStore.getState().agentStatuses[s.agentId]?.generation)
+        setCanonicalRefresh({ sessionId: s.id, revision: observedCanonicalRevision })
         if (lockGeneration !== undefined) controllerHandleRef.current?.finishLoadLock(s.source, lockGeneration)
       }).catch(error => {
         if (lockGeneration !== undefined) controllerHandleRef.current?.abortSessionLoad(s.source, lockGeneration)
@@ -369,6 +372,7 @@ export function useSessionLifecycle(
     controllerHandleRef,
     recoveryFailure,
     replayIntegrity,
+    canonicalRefresh,
     retryRecovery,
     createFork,
   }

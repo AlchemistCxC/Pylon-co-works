@@ -90,8 +90,15 @@ export function resolveRendererActivation(
   const suiteSlots = snapshot.rendererSlots.filter(entry => (
     entry.value.targetSuites.includes('*') || entry.value.targetSuites.includes(suite.value.id)
   ))
-  const requiredKinds = [...suite.value.requiredKinds, ...(suite.value.optionalKinds ?? [])]
-  for (const kind of requiredKinds) {
+  // Suite declarations describe its built-in contract; plugin Slot overlays
+  // may add any registered semantic kind targeted at this Suite. Include both
+  // sources so production consumers do not need a second registry lookup.
+  const activationKinds = new Set([
+    ...suite.value.requiredKinds,
+    ...(suite.value.optionalKinds ?? []),
+    ...suiteSlots.flatMap(entry => entry.value.kinds),
+  ])
+  for (const kind of activationKinds) {
     let resolved = resolveRendererSlot(suite.value.id, kind, suiteSlots)
     if (resolved.length === 0) {
       for (const fallbackKind of kindChain(kind, snapshot.renderKinds).slice(1)) {

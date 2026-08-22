@@ -4,9 +4,11 @@ import { buildMessageLookups } from '../../components/chat/messageLookups.ts'
 import { prepareMessages } from '../../components/chat/messagePipeline.ts'
 import type { Message, RenderMessage } from '../../components/chat/messageTypes.ts'
 import type { WorkbenchDocument } from '../../domains/workbench/workbenchProjector.ts'
+import type { ContentPart } from '../../domains/workbench/content/contentPartSchema.ts'
+import type { InteractionRequest } from '../../domains/activity/interaction.ts'
 import type { MessageListItem } from '../../domains/workbench/messageListPort.ts'
 import { createToolConnectorLayoutPort } from '../../domains/workbench/toolConnectorLayoutPort.ts'
-import { AssistantContent, SolidMessageRow } from './chat/MessageRow.solid.tsx'
+import { AssistantContent, ReasoningBlock, SolidMessageRow } from './chat/MessageRow.solid.tsx'
 import { PlainMessageList } from './chat/PlainMessageList.solid.tsx'
 import { SolidTaskTree } from './chat/TaskTree.solid.tsx'
 import { SolidToolCard } from './chat/ToolCard.solid.tsx'
@@ -16,6 +18,12 @@ import { SolidGoalCard } from './chat/GoalCard.solid.tsx'
 import { SolidInputBar } from './input/InputBar.solid.tsx'
 import { SolidAttachWidget, SolidModeWidget, SolidModelWidget, SolidSendWidget } from './input/WorkbenchWidgets.solid.tsx'
 import { SolidWorkbenchContext, type SolidWorkbenchContextValue } from './SolidWorkbenchContext.solid.tsx'
+import { SolidRendererSlotHost } from './chat/RendererSlotHost.solid.tsx'
+import { MarkdownContent } from './chat/MarkdownContent.solid.tsx'
+import { SolidCodeBlock } from './chat/CodeBlock.solid.tsx'
+import { SolidAnsiBlock } from './chat/AnsiBlock.solid.tsx'
+import { SolidFileReferenceCard } from './chat/content/FileReference.solid.tsx'
+import { SolidMediaBlock } from './chat/content/MediaBlock.solid.tsx'
 
 export interface SolidWorkbenchAppProps {
   context: SolidWorkbenchContextValue
@@ -24,11 +32,12 @@ export interface SolidWorkbenchAppProps {
 export function SolidWorkbenchApp(props: SolidWorkbenchAppProps) {
   return (
     <SolidWorkbenchContext.Provider value={props.context}>
-      <ErrorBoundary fallback={error => (
-        <div class="solid-workbench-error" role="alert">
+      <ErrorBoundary fallback={error => {
+        props.context.reportRendererError?.(error)
+        return <div class="solid-workbench-error" role="alert">
           Agent 工作台加载失败：{error instanceof Error ? error.message : String(error)}
         </div>
-      )}>
+      }}>
         <WorkbenchContent context={props.context} />
       </ErrorBoundary>
     </SolidWorkbenchContext.Provider>
@@ -70,6 +79,7 @@ function WorkbenchContent(props: SolidWorkbenchAppProps) {
       data-preview={props.context.input().preview ? 'true' : 'false'}
       data-paused={props.context.paused() ? 'true' : 'false'}
       data-session-id={props.context.input().sessionId ?? undefined}
+      data-workspace-mode={props.context.input().workspaceMode}
       data-status={snapshot().status}
       style={{ '--right-inset': `${Math.max(0, props.context.input().rightInset ?? 0)}px` }}
       aria-label="Solid Agent Workbench"
@@ -90,6 +100,7 @@ function WorkbenchContent(props: SolidWorkbenchAppProps) {
                 messages={viewMessages()}
                 appearance={appearance()}
                 connectorPort={connectorPort}
+                context={props.context}
               />}
               onPortReady={port => {
                 setMessageListPort(() => port)
@@ -101,7 +112,7 @@ function WorkbenchContent(props: SolidWorkbenchAppProps) {
                 <div class="term-reasoning" data-state="running">{text()}</div>
               </div>}
             </Show>
-            <WorkbenchDocumentSurface document={document()} commands={props.context.commands} sessionId={props.context.input().sessionId} reducedMotion={props.context.input().reducedMotion ?? false} />
+            <WorkbenchDocumentSurface document={document()} context={props.context} commands={props.context.commands} sessionId={props.context.input().sessionId} reducedMotion={props.context.input().reducedMotion ?? false} />
             <Show when={snapshot().streamingText}>
               {text => <div class="term-row term-row-assistant" data-render-type="assistant">
                 <AssistantContent text={text()} appearance={appearance()} streaming />
@@ -124,7 +135,13 @@ function WorkbenchContent(props: SolidWorkbenchAppProps) {
               }}
             />
           </div>
-          <SolidTaskTree sessionId={props.context.input().sessionId} tasks={snapshot().tasks} />
+          <WorkbenchContentSlot
+            nodeId={`${props.context.input().sessionId ?? 'none'}:plan`}
+            kind="content.plan"
+            payload={{ entries: snapshot().tasks, goal: document()?.goal.current }}
+            context={props.context}
+            fallback={<SolidTaskTree sessionId={props.context.input().sessionId} tasks={snapshot().tasks} />}
+          />
         </div>
         <Show when={appearance().showPet}>
           <div class="solid-workbench-pet-slot pet-companion" data-fixture="pending">Pet fixture slot</div>
@@ -153,6 +170,7 @@ function WorkbenchContent(props: SolidWorkbenchAppProps) {
 
 function WorkbenchDocumentSurface(props: {
   document: WorkbenchDocument | undefined
+  context: SolidWorkbenchContextValue
   commands: SolidWorkbenchContextValue['commands']
   sessionId: string | null
   reducedMotion: boolean
@@ -175,9 +193,15 @@ function WorkbenchDocumentSurface(props: {
           <Show when={document().activities.length > 0}>
             <div class="solid-workbench-activities" aria-label="活动" data-activity-count={document().activities.length}>
               <For each={document().activities}>{activity => (
-                <div class="solid-workbench-activity" data-activity-id={activity.id} data-status={activity.status}>
-                  {activity.title || activity.kind} · {activity.status}
-                </div>
+                <WorkbenchContentSlot
+                  nodeId={activity.id}
+                  kind={activity.semanticKind ?? (activity.kind === 'tool' ? 'tool.generic' : 'activity.generic')}
+                  payload={activity}
+                  context={props.context}
+                  fallback={<div class="solid-workbench-activity" data-activity-id={activity.id} data-status={activity.status}>
+                    {activity.title || activity.kind} · {activity.status}
+                  </div>}
+                />
               )}</For>
             </div>
           </Show>
@@ -185,9 +209,13 @@ function WorkbenchDocumentSurface(props: {
             <div class="solid-workbench-interactions" aria-label="待处理交互">
               <For each={document().interactions.filter(interaction => interaction.status === 'requested')}>{interaction => (
                 <div class="solid-workbench-interaction" data-interaction-id={interaction.id}>
-                  <span>{typeof interaction.request === 'string' ? interaction.request : '需要你的确认'}</span>
+                  <span>{interactionPrompt(interaction.request)}</span>
                   <Show when={props.sessionId}>
-                    {sessionId => <button type="button" onClick={() => void props.commands.respondInteraction(sessionId(), interaction.id, { approved: true })}>允许</button>}
+                    {sessionId => <For each={interactionOptions(interaction.request)}>{option => (
+                      <button type="button" onClick={() => void props.commands.respondInteraction(sessionId(), interaction.id, { optionId: option.id })}>
+                        {option.label}
+                      </button>
+                    )}</For>}
                   </Show>
                 </div>
               )}</For>
@@ -214,6 +242,23 @@ function WorkbenchDocumentSurface(props: {
   )
 }
 
+function normalizedInteractionRequest(value: unknown): InteractionRequest | undefined {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return undefined
+  const request = value as Partial<InteractionRequest>
+  return request.surface === 'interaction' && Array.isArray(request.questions) ? request as InteractionRequest : undefined
+}
+
+function interactionPrompt(value: unknown): string {
+  if (typeof value === 'string') return value
+  const request = normalizedInteractionRequest(value)
+  return request?.title || request?.questions[0]?.question || '需要你的确认'
+}
+
+function interactionOptions(value: unknown): readonly { id: string; label: string }[] {
+  const request = normalizedInteractionRequest(value)
+  return request?.questions.flatMap(question => question.options.map(option => ({ id: option.id, label: option.label }))) ?? []
+}
+
 function toSolidMessage(message: WorkbenchDocument['messages'][number]): Message {
   return {
     id: message.id,
@@ -222,7 +267,8 @@ function toSolidMessage(message: WorkbenchDocument['messages'][number]): Message
     content: message.content,
     time: message.time,
     running: message.running,
-  }
+    semanticParts: message.parts,
+  } as Message & { semanticParts: readonly ContentPart[] }
 }
 
 function WorkbenchEmptyState(props: { status: string }) {
@@ -239,6 +285,7 @@ function WorkbenchRow(props: {
   messages: readonly Message[]
   appearance: SolidWorkbenchContextValue['appearanceSnapshot'] extends () => infer T ? T : never
   connectorPort: ReturnType<typeof createToolConnectorLayoutPort>
+  context: SolidWorkbenchContextValue
 }) {
   const current = () => props.descriptor.renderMessage
   const previousTool = () => {
@@ -248,6 +295,20 @@ function WorkbenchRow(props: {
   }
   const visualState = () => normalizeToolVisualState(props.descriptor.toolVisualState)
   const connectorVisualState = () => normalizeToolVisualState(props.descriptor.connectorVisualState)
+  const semanticKind = () => current().message.role === 'user' ? 'message.user'
+    : current().message.role === 'assistant' ? 'message.assistant'
+      : current().message.role === 'reasoning' ? 'content.reasoning' : 'content.unknown'
+  const slotCandidates = () => (props.context.activation?.slots.get(semanticKind()) ?? [])
+    .filter(entry => entry.value.kinds.includes(semanticKind()))
+  const renderDefaultMessage = () => <SolidMessageRow
+    renderMessage={current()}
+    appearance={props.appearance}
+    highlighted={props.descriptor.isSearchMatch}
+    semanticContent={<WorkbenchMessageContent
+      renderMessage={current()}
+      context={props.context}
+    />}
+  />
 
   return (
     <>
@@ -264,11 +325,14 @@ function WorkbenchRow(props: {
       </Show>
       <Show
         when={current().type === 'tool_call' || current().type === 'tool_result'}
-        fallback={<SolidMessageRow
-          renderMessage={current()}
-          appearance={props.appearance}
-          highlighted={props.descriptor.isSearchMatch}
-        />}
+        fallback={<Show when={slotCandidates().length > 0} fallback={renderDefaultMessage()}>
+          <SolidRendererSlotHost
+            candidates={slotCandidates()}
+            node={{ nodeId: current().message.id, kind: semanticKind(), revision: props.context.runtimeSnapshot().revision, payload: current() }}
+            context={props.context}
+            fallback={renderDefaultMessage()}
+          />
+        </Show>}
       >
         <div class="term-row term-row-tool" data-render-type={current().type}>
           <SolidToolCard
@@ -282,6 +346,99 @@ function WorkbenchRow(props: {
       </Show>
     </>
   )
+}
+
+function WorkbenchMessageContent(props: {
+  renderMessage: RenderMessage
+  context: SolidWorkbenchContextValue
+}) {
+  const message = () => props.renderMessage.message
+  const parts = () => {
+    const canonical = (message() as Message & { semanticParts?: readonly ContentPart[] }).semanticParts
+    if (canonical && canonical.length > 0) return canonical
+    return [{ kind: 'markdown', text: message().content }] as const satisfies readonly ContentPart[]
+  }
+  if (props.renderMessage.type === 'reasoning') {
+    const redacted = message().redacted === true
+    const kind = redacted ? 'content.redacted-reasoning' : 'content.reasoning'
+    const payload = redacted
+      ? { reason: message().redactedReason ?? 'provider_redacted' }
+      : { text: message().content, state: message().running ? 'running' : message().content.trim() ? 'complete' : 'missing' }
+    return <WorkbenchContentSlot
+      nodeId={`${message().id}:reasoning`} kind={kind} payload={payload}
+      context={props.context}
+      fallback={<ReasoningBlock
+        text={message().content} running={message().running === true}
+        startedAt={message().thoughtStartedAt} durationMs={message().thoughtDurationMs}
+        redacted={redacted} redactedReason={message().redactedReason}
+      />}
+    />
+  }
+  const inline = props.renderMessage.type === 'user'
+  return <For each={parts()}>{(part, index) => (
+    <WorkbenchContentSlot
+      nodeId={`${message().id}:part:${index()}`}
+      kind={contentRenderKind(part)}
+      payload={part}
+      context={props.context}
+      fallback={renderBuiltinContentPart(part, inline, props.context)}
+    />
+  )}</For>
+}
+
+function WorkbenchContentSlot(props: {
+  nodeId: string
+  kind: string
+  payload: unknown
+  context: SolidWorkbenchContextValue
+  fallback: import('solid-js').JSX.Element
+}) {
+  const candidates = () => (props.context.activation?.slots.get(props.kind) ?? [])
+    .filter(entry => entry.value.kinds.includes(props.kind))
+  return <Show when={candidates().length > 0} fallback={props.fallback}>
+    <SolidRendererSlotHost
+      candidates={candidates()}
+      node={{ nodeId: props.nodeId, kind: props.kind, revision: props.context.runtimeSnapshot().revision, payload: props.payload }}
+      context={props.context}
+      fallback={props.fallback}
+    />
+  </Show>
+}
+
+function contentRenderKind(part: ContentPart): string {
+  if (part.kind === 'unknown') return 'content.unknown'
+  return part.kind.includes('.') ? part.kind : `content.${part.kind}`
+}
+
+function renderBuiltinContentPart(part: ContentPart, inline: boolean, context: SolidWorkbenchContextValue) {
+  if (part.kind === 'text' || part.kind === 'markdown') return <MarkdownContent text={part.text} inline={inline} />
+  if (part.kind === 'code') return <SolidCodeBlock code={part.text} language={part.language} />
+  if (part.kind === 'ansi') return <SolidAnsiBlock text={part.text} reducedMotion={context.input().reducedMotion} />
+  if (part.kind === 'file-reference' || part.kind === 'file-selection' || part.kind === 'resource') {
+    const host = context.hostPort
+    const sessionId = context.input().sessionId
+    return <SolidFileReferenceCard part={part} actions={{
+      canOpen: Boolean(sessionId && host?.capabilities.has('resourceOpen')),
+      canReveal: Boolean(sessionId && host?.capabilities.has('resourceReveal')),
+      canCopy: Boolean(sessionId && host?.capabilities.has('clipboardWrite')),
+      open: target => { if (host && sessionId) void host.commands.openResource(sessionId, target) },
+      reveal: target => { if (host && sessionId) void host.commands.revealResource(sessionId, target) },
+      copyPath: path => { if (host && sessionId) void host.commands.copy(sessionId, path) },
+    }} />
+  }
+  if (part.kind === 'image' || part.kind === 'audio' || part.kind === 'video') {
+    const host = context.hostPort
+    const sessionId = context.input().sessionId
+    const canOpenExternal = Boolean(sessionId && host?.capabilities.has('resourceOpen'))
+    return <SolidMediaBlock
+      part={part}
+      onOpenExternal={canOpenExternal && host && sessionId
+        ? url => { void host.commands.openResource(sessionId, { uri: url }) }
+        : undefined}
+    />
+  }
+  const summary = part.kind === 'unknown' ? part.summary : `Unsupported content kind: ${part.kind}`
+  return <pre class="solid-content-unknown" data-content-kind={part.kind}>{summary}</pre>
 }
 
 function normalizeToolVisualState(value: string | undefined) {

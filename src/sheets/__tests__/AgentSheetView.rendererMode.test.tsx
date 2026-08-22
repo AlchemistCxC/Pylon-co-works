@@ -1,10 +1,58 @@
 // @vitest-environment jsdom
-import { render, screen } from '@testing-library/react'
-import { beforeEach, describe, expect, it, vi } from 'vitest'
+import { render, screen, waitFor } from '@testing-library/react'
+import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest'
 import type { SheetContext, SheetRecord } from '../../workspace-sheets/sheetTypes.ts'
 import { resetStores } from '../../test/resetStores.ts'
 import AgentSheetView from '../AgentSheetView.tsx'
 import { useInterfaceModeStore } from '../../domains/interface/interfaceModeStore.ts'
+import { activateBuiltinPlugin, getPackageInstallationService, getPluginRuntime } from '../../plugin-runtime/pluginCompositionRoot.ts'
+import { getRendererRegistry } from '../../plugin-runtime/runtimeServices.ts'
+import { createPluginIdentity } from '../../plugin-runtime/pluginIdentity.ts'
+import { usePresentationPreferenceStore } from '../../domains/presentation/presentationPreferenceStore.ts'
+import { useIdentityStore, type Session } from '../../identityStore.ts'
+import type { WorkbenchRendererFactory, WorkbenchRendererInstance } from '../../renderers/solid-workbench/workbenchContracts.ts'
+import type { BuiltinPluginDefinition } from '../../plugin-runtime/pluginRuntime.ts'
+import { normalizeRawEvent } from '../../domains/events/canonicalNormalizer.ts'
+import { publishPluginEvent } from '../../infrastructure/events/pluginEventBus.ts'
+import { useWorkspaceStore } from '../../workspaceStore.ts'
+import { createWorkbenchEnvelope } from '../../domains/workbench/events/workbenchEventSchema.ts'
+import { invoke } from '@tauri-apps/api/core'
+
+vi.mock('@tauri-apps/api/core', () => ({ invoke: vi.fn(async () => undefined) }))
+
+function suitePlugin(pluginId: string, label: string, failPrepare = false, destroy = () => {}): BuiltinPluginDefinition {
+  return {
+    id: pluginId,
+    kind: 'renderer',
+    hotSwapMode: 'parallel',
+    activate: ({ renderer }) => {
+      renderer.registerSuite({
+        id: `${pluginId}.suite`, label, apiVersion: 1,
+        runtime: { framework: 'solid', version: '1.0.0' },
+        compatibility: { documentSchema: 'workbench.v1', renderCatalogSchema: 1 },
+        requiredKinds: ['content.unknown'],
+        factory: {
+          async prepare() {
+            if (failPrepare) throw new Error(`${label} prepare failed`)
+            return { mount(container) {
+              container.replaceChildren(Object.assign(document.createElement('div'), { textContent: label }))
+              return { update() {}, pause() {}, resume() {}, destroy, on(event, listener) { if (event === 'ready') listener({}); return () => {} } }
+            } }
+          },
+        },
+      })
+    },
+  }
+}
+
+beforeAll(async () => {
+  await activateBuiltinPlugin('builtin.pylon-renderers')
+})
+
+afterAll(async () => {
+  const active = getPluginRuntime().snapshot().active.find(item => item.pluginId === 'builtin.pylon-renderers')
+  if (active) await getPluginRuntime().deactivate(active.key)
+})
 
 vi.mock('../../components/chat/ChatView.tsx', () => ({
   default: (props: { sessionId: string | null; workspaceKind?: string; workspaceMode?: string; agentId?: string }) => (
@@ -35,29 +83,640 @@ function sheet(state: unknown): SheetRecord {
   }
 }
 
+function session(id: string, source: string): Session {
+  return {
+    id, source, agentId: 'peri', profileId: 'profile-a', name: id,
+    createdAt: 1, lastActiveAt: 1, platform: 'local', workdir: '',
+    sessionPrompt: '', skills: [], hooks: [], autoName: '',
+  }
+}
+
 describe('AgentSheetView renderer mode context', () => {
   beforeEach(resetStores)
 
-  it('把 Agent Workspace state 的 sidebarMode 传给 ChatView，损坏值回退 work', () => {
-    const { rerender } = render(<AgentSheetView sheet={sheet({ sidebarMode: 'chat' })} ctx={ctx} />)
-    const chat = screen.getByTestId('chat-view-props')
-    expect(chat).toHaveAttribute('data-session', 'session-1')
-    expect(chat).toHaveAttribute('data-workspace-kind', 'agent')
-    expect(chat).toHaveAttribute('data-workspace-mode', 'chat')
-    expect(chat).toHaveAttribute('data-agent', 'peri')
+  it('默认 Interface Mode 经 Renderer Suite Host 挂载内置 Solid Workbench', async () => {
+    const { container } = render(<AgentSheetView sheet={sheet({ sidebarMode: 'work' })} ctx={ctx} />)
 
-    rerender(<AgentSheetView sheet={sheet({ sidebarMode: 'broken' })} ctx={ctx} />)
-    expect(screen.getByTestId('chat-view-props')).toHaveAttribute('data-workspace-mode', 'work')
+    expect(await screen.findByLabelText('Solid Agent Workbench', {}, { timeout: 5_000 })).toHaveAttribute('data-renderer', 'solid')
+    expect(container.querySelector('[data-pylon-workbench="modern-gui"]')).toBeNull()
   })
 
-  it('按 Interface Mode 在现代工作台与冻结的终端工作台之间切换', () => {
+  it('内置 Solid Suite 在生产 Registry 注册并消费 C00–C03 base Slot', async () => {
+    const baseSlot = getRendererRegistry().snapshot().rendererSlots.find(entry => entry.value.id === 'builtin.solid.content.base')
+    expect(baseSlot?.value).toMatchObject({
+      targetSuites: ['builtin.solid'],
+      fallback: true,
+      kinds: expect.arrayContaining(['content.text', 'content.reasoning', 'content.file-reference', 'content.image']),
+    })
+
+    useIdentityStore.setState({ sessions: [session('session-1', 'local:a')] })
+    useWorkspaceStore.setState(state => ({ workspaceSheets: { ...state.workspaceSheets, activeSheetId: 'agent-sheet' } }))
+    const { container } = render(<AgentSheetView sheet={sheet({ sidebarMode: 'work' })} ctx={ctx} />)
+    await screen.findByLabelText('Solid Agent Workbench', {}, { timeout: 5_000 })
+    publishPluginEvent(normalizeRawEvent(
+      { update: { sessionUpdate: 'agent_message_chunk', content: { type: 'text', text: 'base slot answer' } } },
+      { owner: { profileId: 'profile-a', agentId: 'peri', localSessionId: 'local:a' }, clientGeneration: 1, sequence: 1, receivedAt: '2026-08-22T00:00:01.000Z' },
+    ).event)
+
+    expect(await screen.findByText('base slot answer')).toBeTruthy()
+    expect(container.querySelector('[data-renderer-slot-id="builtin.solid.content.base"]')).not.toBeNull()
+  })
+
+  it('切换 Session 只 update 当前 Suite instance，不重建 renderer', async () => {
+    const mounts: string[] = []
+    const updates: Array<string | null> = []
+    const ownerKeys: Array<string | null> = []
+    const factory: WorkbenchRendererFactory = {
+      async prepare() {
+        return {
+          mount(container, input) {
+            mounts.push(input.sessionId ?? '')
+            ownerKeys.push(input.sessionOwnerKey)
+            container.replaceChildren(Object.assign(document.createElement('div'), { textContent: 'session-aware-suite' }))
+            const instance: WorkbenchRendererInstance = {
+              update: next => updates.push(next.sessionId),
+              pause() {}, resume() {}, destroy() {},
+              on(event, listener) {
+                if (event === 'ready') listener({})
+                return () => {}
+              },
+            }
+            return instance
+          },
+        }
+      },
+    }
+    const registration = getRendererRegistry().registerSuite(
+      createPluginIdentity('test.session-suite', 'runtime'),
+      {
+        id: 'test.session-suite', label: 'Session Suite', apiVersion: 1,
+        runtime: { framework: 'solid', version: '1.0.0' },
+        compatibility: { documentSchema: 'workbench.v1', renderCatalogSchema: 1 },
+        requiredKinds: ['content.unknown'], factory,
+      },
+    )
+    try {
+      usePresentationPreferenceStore.getState().setRendererSuiteId('modern-gui', 'test.session-suite')
+      useIdentityStore.setState({ sessions: [session('session-1', 'local:a'), session('session-2', 'local:b')] })
+      const firstCtx = { ...ctx, activeSession: 'session-1' }
+      const view = render(<AgentSheetView sheet={sheet({ sidebarMode: 'work' })} ctx={firstCtx} />)
+      await screen.findByText('session-aware-suite')
+
+      view.rerender(<AgentSheetView sheet={sheet({ sidebarMode: 'work' })} ctx={{ ...ctx, activeSession: 'session-2' }} />)
+
+      await waitFor(() => expect(updates).toContain('session-2'))
+      expect(mounts).toEqual(['session-1'])
+      expect(ownerKeys).toEqual([JSON.stringify(['profile-a', 'peri', 'local:a'])])
+    } finally {
+      await registration.dispose()
+    }
+  })
+
+  it('活动 third-party package 经 production uninstall 后由同一 Host 原子回退 builtin Solid', async () => {
+    const pluginId = 'test.removable-suite'
+    const destroyed = vi.fn()
+    await getPluginRuntime().activateBuiltin(suitePlugin(pluginId, 'removable-suite', false, destroyed))
+    usePresentationPreferenceStore.getState().setRendererSuiteId('modern-gui', `${pluginId}.suite`)
+    render(<AgentSheetView sheet={sheet({ sidebarMode: 'work' })} ctx={ctx} />)
+    await screen.findByText('removable-suite')
+
+    const invokeMock = vi.mocked(invoke)
+    invokeMock.mockImplementation(async command => {
+      if (command === 'plugin_package_list') return [{
+        enabled: true,
+        package: {
+          pluginId, version: '1.0.0', packageInstanceId: `${pluginId}@1.0.0-test`, active: true,
+          manifest: { schema: 1, id: pluginId, name: 'Removable Suite', version: '1.0.0', api: '1.0', kind: 'renderer', web: { entry: './dist/entry.js' } },
+          files: [], totalBytes: 1,
+        },
+      }]
+      return undefined
+    })
+    await expect(getPackageInstallationService().uninstall(pluginId)).resolves.toEqual({ ok: true })
+
+    expect(await screen.findByLabelText('Solid Agent Workbench', {}, { timeout: 5_000 })).toHaveAttribute('data-renderer', 'solid')
+    await waitFor(() => expect(destroyed).toHaveBeenCalledOnce())
+    expect(invokeMock).toHaveBeenCalledWith('plugin_package_uninstall', { pluginId, purgeData: false })
+    expect(usePresentationPreferenceStore.getState().rendererSuiteIdByMode['modern-gui']).toBe(`${pluginId}.suite`)
+  })
+
+  it('真实插件热更新候选失败时保留健康旧实例，disable 后回退且不覆盖用户偏好', async () => {
+    const pluginId = 'test.production-suite-lifecycle'
+    const runtime = getPluginRuntime()
+    await runtime.activateBuiltin(suitePlugin(pluginId, 'healthy-suite-v1'))
+    usePresentationPreferenceStore.getState().setRendererSuiteId('modern-gui', `${pluginId}.suite`)
+    try {
+      const { container } = render(<AgentSheetView sheet={sheet({ sidebarMode: 'work' })} ctx={ctx} />)
+      await screen.findByText('healthy-suite-v1')
+
+      await runtime.update(suitePlugin(pluginId, 'broken-suite-v2', true))
+      await screen.findByRole('status', {}, { timeout: 5_000 })
+      await new Promise(resolve => setTimeout(resolve, 250))
+
+      expect(screen.getByText('healthy-suite-v1')).toBeTruthy()
+      expect(container.querySelector('[data-renderer-suite-host="true"]')).toHaveAttribute('data-suite-id', `${pluginId}.suite`)
+      expect(usePresentationPreferenceStore.getState().rendererSuiteIdByMode['modern-gui']).toBe(`${pluginId}.suite`)
+      expect(screen.getByRole('button', { name: '重试 Solid' })).toBeTruthy()
+      expect(screen.getByRole('button', { name: '切换 Suite' })).toBeTruthy()
+      expect(screen.getByRole('button', { name: '打开诊断' })).toBeTruthy()
+
+      await runtime.disable(pluginId)
+
+      expect(await screen.findByLabelText('Solid Agent Workbench', {}, { timeout: 5_000 })).toHaveAttribute('data-renderer', 'solid')
+      expect(usePresentationPreferenceStore.getState().rendererSuiteIdByMode['modern-gui']).toBe(`${pluginId}.suite`)
+    } finally {
+      await runtime.disable(pluginId)
+    }
+  })
+
+  it('Suite 候选 prepare 期间旧实例继续读写自己的 Session UI namespace', async () => {
+    let releaseCandidate!: () => void
+    const candidateReady = new Promise<void>(resolve => { releaseCandidate = resolve })
+    const oldRegistration = getRendererRegistry().registerSuite(
+      createPluginIdentity('test.namespace-old', 'runtime'),
+      {
+        id: 'test.namespace-old', label: 'Namespace Old', apiVersion: 1,
+        runtime: { framework: 'solid', version: '1.0.0' },
+        compatibility: { documentSchema: 'workbench.v1', renderCatalogSchema: 1 },
+        requiredKinds: ['content.unknown'],
+        factory: {
+          async prepare() {
+            return { mount(container, _input, host) {
+              const node = Object.assign(document.createElement('div'), { textContent: 'namespace-old' })
+              container.replaceChildren(node)
+              host.sessionUi.set('draft', 'old-owned-draft')
+              return {
+                update() { node.textContent = host.sessionUi.get('draft', 'namespace-leaked') },
+                pause() {}, resume() {}, destroy() {},
+                on(event, listener) { if (event === 'ready') listener({}); return () => {} },
+              }
+            } }
+          },
+        },
+      },
+    )
+    const candidateRegistration = getRendererRegistry().registerSuite(
+      createPluginIdentity('test.namespace-candidate', 'runtime'),
+      {
+        id: 'test.namespace-candidate', label: 'Namespace Candidate', apiVersion: 1,
+        runtime: { framework: 'solid', version: '1.0.0' },
+        compatibility: { documentSchema: 'workbench.v1', renderCatalogSchema: 1 },
+        requiredKinds: ['content.unknown'],
+        factory: {
+          async prepare() {
+            await candidateReady
+            return { mount(container) {
+              container.replaceChildren(Object.assign(document.createElement('div'), { textContent: 'namespace-candidate' }))
+              return { update() {}, pause() {}, resume() {}, destroy() {}, on(event, listener) { if (event === 'ready') listener({}); return () => {} } }
+            } }
+          },
+        },
+      },
+    )
+    try {
+      usePresentationPreferenceStore.getState().setRendererSuiteId('modern-gui', 'test.namespace-old')
+      const view = render(<AgentSheetView sheet={sheet({ sidebarMode: 'work' })} ctx={ctx} />)
+      await screen.findByText('namespace-old')
+
+      usePresentationPreferenceStore.getState().setRendererSuiteId('modern-gui', 'test.namespace-candidate')
+      await waitFor(() => expect(view.container.querySelector('[data-renderer-suite-staging="test.namespace-candidate"]')).not.toBeNull())
+      view.rerender(<AgentSheetView sheet={sheet({ sidebarMode: 'chat' })} ctx={ctx} />)
+
+      await waitFor(() => expect(screen.getByText('old-owned-draft')).toBeTruthy())
+    } finally {
+      releaseCandidate()
+      await candidateRegistration.dispose()
+      await oldRegistration.dispose()
+    }
+  })
+
+  it('third-party prepare fatal 自动回退 builtin Solid，并公开实际活动 Suite', async () => {
+    let prepareCount = 0
+    const fallbackRegistration = getRendererRegistry().registerSuite(
+      createPluginIdentity('test.missing-explicit-fallback', 'runtime'),
+      {
+        id: 'test.missing-explicit-fallback', label: 'Temporary Explicit Fallback', apiVersion: 1,
+        runtime: { framework: 'solid', version: '1.0.0' },
+        compatibility: { documentSchema: 'workbench.v1', renderCatalogSchema: 1 },
+        requiredKinds: ['content.unknown'],
+        factory: { async prepare() { throw new Error('temporary fallback must be unavailable before mount') } },
+      },
+    )
+    const registration = getRendererRegistry().registerSuite(
+      createPluginIdentity('test.failing-suite', 'runtime'),
+      {
+        id: 'test.failing-suite', label: 'Failing Suite', apiVersion: 1,
+        runtime: { framework: 'solid', version: '1.0.0' },
+        compatibility: { documentSchema: 'workbench.v1', renderCatalogSchema: 1 },
+        requiredKinds: ['content.unknown'], fallbackSuiteId: 'test.missing-explicit-fallback',
+        factory: { async prepare() { prepareCount += 1; throw new Error('third-party prepare failed') } },
+      },
+    )
+    try {
+      await fallbackRegistration.dispose()
+      usePresentationPreferenceStore.getState().setRendererSuiteId('modern-gui', 'test.failing-suite')
+      const { container } = render(<AgentSheetView sheet={sheet({ sidebarMode: 'work' })} ctx={ctx} />)
+
+      expect(await screen.findByLabelText('Solid Agent Workbench', {}, { timeout: 5_000 })).toHaveAttribute('data-renderer', 'solid')
+      expect(container.querySelector('[data-renderer-suite-host="true"]')).toHaveAttribute('data-suite-id', 'builtin.solid')
+      expect(prepareCount).toBe(3)
+    } finally {
+      await registration.dispose()
+      await fallbackRegistration.dispose()
+    }
+  })
+
+  it('targeted Slot overlay 在真实 AgentSheet 的内置 Solid 行生效，清理后恢复基础渲染', async () => {
+    const registration = getRendererRegistry().registerSlot(
+      createPluginIdentity('test.production-slot-overlay', 'runtime'),
+      {
+        id: 'test.production-slot-overlay.assistant', targetSuites: ['builtin.solid'],
+        kinds: ['message.assistant'], priority: 1, fallback: false,
+        canRender: snapshot => snapshot.kind === 'message.assistant',
+        createSurface: () => ({
+          rendererId: 'test.production-slot-overlay', kind: 'solid',
+          mount(container) {
+            const node = document.createElement('div')
+            node.dataset.productionSlotOverlay = 'true'
+            node.textContent = 'assistant rendered by overlay'
+            container.append(node)
+            return node
+          },
+          update() {}, destroy(handle) { (handle as HTMLElement).remove() }, on: () => () => {},
+        }),
+      },
+    )
+    useIdentityStore.setState({ sessions: [session('session-1', 'local:a')] })
+    useWorkspaceStore.setState(state => ({ workspaceSheets: { ...state.workspaceSheets, activeSheetId: 'agent-sheet' } }))
+    const { container } = render(<AgentSheetView sheet={sheet({ sidebarMode: 'work' })} ctx={ctx} />)
+    await screen.findByLabelText('Solid Agent Workbench', {}, { timeout: 5_000 })
+    publishPluginEvent(normalizeRawEvent(
+      { update: { sessionUpdate: 'agent_message_chunk', content: { type: 'text', text: 'slot answer' } } },
+      { owner: { profileId: 'profile-a', agentId: 'peri', localSessionId: 'local:a' }, clientGeneration: 1, sequence: 1, receivedAt: '2026-08-22T00:00:01.000Z' },
+    ).event)
+
+    await waitFor(() => expect(container.querySelector('[data-production-slot-overlay="true"]')).not.toBeNull())
+    await registration.dispose()
+
+    await waitFor(() => expect(container.querySelector('[data-production-slot-overlay="true"]')).toBeNull())
+    expect(await screen.findByText('slot answer')).toBeTruthy()
+  })
+
+  it('canonical message parts 经 content.text Slot seam 消费且保留消息 role framing', async () => {
+    const registration = getRendererRegistry().registerSlot(
+      createPluginIdentity('test.production-content-slot', 'runtime'),
+      {
+        id: 'test.production-content-slot.text', targetSuites: ['builtin.solid'],
+        kinds: ['content.text'], priority: 1, fallback: false,
+        canRender: snapshot => snapshot.kind === 'content.text',
+        createSurface: snapshot => ({
+          rendererId: 'test.production-content-slot', kind: 'solid',
+          mount(container) {
+            const node = document.createElement('div')
+            node.dataset.productionContentSlot = 'true'
+            node.textContent = `content slot: ${String((snapshot.payload as { text?: unknown }).text)}`
+            container.append(node)
+            return node
+          },
+          update() {}, destroy(handle) { (handle as HTMLElement).remove() }, on: () => () => {},
+        }),
+      },
+    )
+    try {
+      useIdentityStore.setState({ sessions: [session('session-1', 'local:a')] })
+      useWorkspaceStore.setState(state => ({ workspaceSheets: { ...state.workspaceSheets, activeSheetId: 'agent-sheet' } }))
+      const { container } = render(<AgentSheetView sheet={sheet({ sidebarMode: 'work' })} ctx={ctx} />)
+      await screen.findByLabelText('Solid Agent Workbench', {}, { timeout: 5_000 })
+      publishPluginEvent(normalizeRawEvent(
+        { update: { sessionUpdate: 'agent_message_chunk', content: { type: 'text', text: 'part payload' } } },
+        { owner: { profileId: 'profile-a', agentId: 'peri', localSessionId: 'local:a' }, clientGeneration: 1, sequence: 1, receivedAt: '2026-08-22T00:00:01.000Z' },
+      ).event)
+
+      expect(await screen.findByText('content slot: part payload')).toBeTruthy()
+      expect(container.querySelector('[data-message-role="assistant"]')).not.toBeNull()
+    } finally {
+      await registration.dispose()
+    }
+  })
+
+  it('canonical plan/goal snapshot 经 content.plan Slot seam 消费', async () => {
+    const registration = getRendererRegistry().registerSlot(
+      createPluginIdentity('test.production-plan-slot', 'runtime'),
+      {
+        id: 'test.production-plan-slot.plan', targetSuites: ['builtin.solid'],
+        kinds: ['content.plan'], priority: 1, fallback: false,
+        canRender: snapshot => snapshot.kind === 'content.plan',
+        createSurface: snapshot => ({
+          rendererId: 'test.production-plan-slot', kind: 'solid',
+          mount(container) {
+            const node = document.createElement('div')
+            node.textContent = `plan slot: ${String((snapshot.payload as { entries?: readonly unknown[] }).entries?.length ?? 0)}`
+            container.append(node)
+            return node
+          },
+          update(handle, next) {
+            ;(handle as HTMLElement).textContent = `plan slot: ${String((next.payload as { entries?: readonly unknown[] }).entries?.length ?? 0)}`
+          },
+          destroy(handle) { (handle as HTMLElement).remove() }, on: () => () => {},
+        }),
+      },
+    )
+    try {
+      useIdentityStore.setState({ sessions: [session('session-1', 'local:a')] })
+      useWorkspaceStore.setState(state => ({ workspaceSheets: { ...state.workspaceSheets, activeSheetId: 'agent-sheet' } }))
+      render(<AgentSheetView sheet={sheet({ sidebarMode: 'work' })} ctx={ctx} />)
+      await screen.findByLabelText('Solid Agent Workbench', {}, { timeout: 5_000 })
+      publishPluginEvent(normalizeRawEvent(
+        { source: 'hermes', update: { sessionUpdate: 'plan', entries: [{ id: 'task-1', content: 'Wire plan', status: 'blocked', blockedReason: 'dependency' }] } },
+        { owner: { profileId: 'profile-a', agentId: 'peri', localSessionId: 'local:a' }, clientGeneration: 1, sequence: 1, receivedAt: '2026-08-22T00:00:01.000Z' },
+      ).event)
+
+      expect(await screen.findByText('plan slot: 1')).toBeTruthy()
+    } finally {
+      await registration.dispose()
+    }
+  })
+
+  it('AgentSheet interaction command 穿过 Host gate 与统一 production transport', async () => {
+    const invokeMock = vi.mocked(invoke)
+    invokeMock.mockClear()
+    useIdentityStore.setState({ sessions: [session('session-1', 'local:a')] })
+    useWorkspaceStore.setState(state => ({ workspaceSheets: { ...state.workspaceSheets, activeSheetId: 'agent-sheet' } }))
+    render(<AgentSheetView sheet={sheet({ sidebarMode: 'work' })} ctx={ctx} />)
+    await screen.findByLabelText('Solid Agent Workbench', {}, { timeout: 5_000 })
+    publishPluginEvent(createWorkbenchEnvelope({
+      sessionId: 'local:a', recordedAt: '2026-08-22T00:00:01.000Z', sequence: 1,
+      source: { provider: 'peri', sourceId: 'interaction-a' }, identity: { interactionId: 'interaction-a' },
+      provenance: { origin: 'local-observed', trust: 'authoritative' },
+      event: {
+        type: 'interaction.requested', interactionId: 'interaction-a',
+        request: {
+          surface: 'interaction', kind: 'approval', state: 'waiting',
+          identity: { provider: 'peri', agentId: 'peri', requestId: 'request-a', sessionId: 'local:a', clientGeneration: 1 },
+          questions: [{ id: 'approval', question: 'Allow?', allowMultiple: false, allowFreeform: false,
+            options: [{ id: 'allow_once', label: 'Allow production action' }] }],
+        },
+      },
+    }) as never)
+
+    screen.getByRole('button', { name: 'Allow production action' }).click()
+
+    await waitFor(() => expect(invokeMock).toHaveBeenCalledWith('respond_interaction', {
+      identity: { provider: 'peri', agentId: 'peri', requestId: 'request-a', sessionId: 'local:a', clientGeneration: 1 },
+      kind: 'approval', answer: { optionId: 'allow_once' },
+    }))
+  })
+
+  it('Slot 运行期失败先切到同 Suite 下一 candidate，不越级触发 Suite fatal', async () => {
+    const owner = createPluginIdentity('test.production-slot-recovery', 'runtime')
+    const secondaryUnsubscribed = vi.fn()
+    const primary = getRendererRegistry().registerSlot(owner, {
+      id: 'test.production-slot-recovery.primary', targetSuites: ['builtin.solid'],
+      kinds: ['message.assistant'], priority: 1, fallback: false,
+      canRender: snapshot => snapshot.kind === 'message.assistant',
+      createSurface: () => ({
+        rendererId: 'test.production-slot-recovery.primary', kind: 'solid',
+        mount(container) {
+          const node = document.createElement('div'); node.textContent = 'primary-slot'; container.append(node); return node
+        },
+        update() {}, destroy(handle) { (handle as HTMLElement).remove() },
+        on(event, listener) {
+          if (event === 'error') listener(new Error('primary slot runtime failed'))
+          return () => {}
+        },
+      }),
+    })
+    const secondary = getRendererRegistry().registerSlot(owner, {
+      id: 'test.production-slot-recovery.secondary', targetSuites: ['builtin.solid'],
+      kinds: ['message.assistant'], priority: 2, fallback: true,
+      canRender: snapshot => snapshot.kind === 'message.assistant',
+      createSurface: () => ({
+        rendererId: 'test.production-slot-recovery.secondary', kind: 'solid',
+        mount(container) {
+          const node = document.createElement('div'); node.textContent = 'secondary-slot'; container.append(node); return node
+        },
+        update() {}, destroy(handle) { (handle as HTMLElement).remove() }, on: () => secondaryUnsubscribed,
+      }),
+    })
+    try {
+      useIdentityStore.setState({ sessions: [session('session-1', 'local:a')] })
+      useWorkspaceStore.setState(state => ({ workspaceSheets: { ...state.workspaceSheets, activeSheetId: 'agent-sheet' } }))
+      const view = render(<AgentSheetView sheet={sheet({ sidebarMode: 'work' })} ctx={ctx} />)
+      await screen.findByLabelText('Solid Agent Workbench', {}, { timeout: 5_000 })
+      publishPluginEvent(normalizeRawEvent(
+        { update: { sessionUpdate: 'agent_message_chunk', content: { type: 'text', text: 'recoverable slot answer' } } },
+        { owner: { profileId: 'profile-a', agentId: 'peri', localSessionId: 'local:a' }, clientGeneration: 1, sequence: 1, receivedAt: '2026-08-22T00:00:01.000Z' },
+      ).event)
+
+      expect(await screen.findByText('secondary-slot')).toBeTruthy()
+      expect(screen.queryByLabelText('React Workbench fatal fallback')).toBeNull()
+      view.unmount()
+      await waitFor(() => expect(secondaryUnsubscribed).toHaveBeenCalledTimes(2))
+    } finally {
+      await secondary.dispose()
+      await primary.dispose()
+    }
+  })
+
+  it('third-party update fatal 先重建同一 Suite，重试成功不越级回退', async () => {
+    let prepareCount = 0
+    const destroyed = vi.fn()
+    const registration = getRendererRegistry().registerSuite(
+      createPluginIdentity('test.update-failing-suite', 'runtime'),
+      {
+        id: 'test.update-failing-suite', label: 'Update Failing Suite', apiVersion: 1,
+        runtime: { framework: 'solid', version: '1.0.0' },
+        compatibility: { documentSchema: 'workbench.v1', renderCatalogSchema: 1 },
+        requiredKinds: ['content.unknown'],
+        factory: {
+          async prepare() {
+            prepareCount += 1
+            return {
+              mount(container) {
+                container.replaceChildren(Object.assign(document.createElement('div'), { textContent: 'update-failing-suite' }))
+                return {
+                  update() { throw new Error('third-party update failed') }, pause() {}, resume() {}, destroy: destroyed,
+                  on(event, listener) { if (event === 'ready') listener({}); return () => {} },
+                }
+              },
+            }
+          },
+        },
+      },
+    )
+    try {
+      usePresentationPreferenceStore.getState().setRendererSuiteId('modern-gui', 'test.update-failing-suite')
+      useIdentityStore.setState({ sessions: [session('session-1', 'local:a'), session('session-2', 'local:b')] })
+      const view = render(<AgentSheetView sheet={sheet({ sidebarMode: 'work' })} ctx={{ ...ctx, activeSession: 'session-1' }} />)
+      await screen.findByText('update-failing-suite')
+
+      view.rerender(<AgentSheetView sheet={sheet({ sidebarMode: 'work' })} ctx={{ ...ctx, activeSession: 'session-2' }} />)
+
+      await waitFor(() => expect(prepareCount).toBe(2), { timeout: 5_000 })
+      expect(await screen.findByText('update-failing-suite')).toBeTruthy()
+      expect(screen.queryByLabelText('Solid Agent Workbench')).toBeNull()
+      expect(destroyed).toHaveBeenCalledOnce()
+    } finally {
+      await registration.dispose()
+    }
+  })
+
+  it('third-party runtime fatal 的同 activation 重试耗尽后才回退 builtin Solid', async () => {
+    let prepareCount = 0
+    const registration = getRendererRegistry().registerSuite(
+      createPluginIdentity('test.runtime-failing-suite', 'runtime'),
+      {
+        id: 'test.runtime-failing-suite', label: 'Runtime Failing Suite', apiVersion: 1,
+        runtime: { framework: 'solid', version: '1.0.0' },
+        compatibility: { documentSchema: 'workbench.v1', renderCatalogSchema: 1 },
+        requiredKinds: ['content.unknown'],
+        factory: {
+          async prepare() {
+            prepareCount += 1
+            return {
+              mount(container) {
+                container.replaceChildren(Object.assign(document.createElement('div'), { textContent: 'runtime-failing-suite' }))
+                const listeners = new Map<string, Set<(payload: unknown) => void>>()
+                let fatalTimer: ReturnType<typeof setTimeout> | undefined
+                return {
+                  update() {}, pause() {}, resume() {}, destroy() { if (fatalTimer) clearTimeout(fatalTimer) },
+                  on(event, listener) {
+                    const group = listeners.get(event) ?? new Set()
+                    group.add(listener); listeners.set(event, group)
+                    if (event === 'ready') {
+                      listener({})
+                      fatalTimer = setTimeout(() => {
+                        for (const notify of listeners.get('error') ?? []) notify(new Error('third-party runtime failed'))
+                      }, 0)
+                    }
+                    return () => group.delete(listener)
+                  },
+                }
+              },
+            }
+          },
+        },
+      },
+    )
+    try {
+      usePresentationPreferenceStore.getState().setRendererSuiteId('modern-gui', 'test.runtime-failing-suite')
+      render(<AgentSheetView sheet={sheet({ sidebarMode: 'work' })} ctx={ctx} />)
+
+      expect(await screen.findByLabelText('Solid Agent Workbench', {}, { timeout: 5_000 })).toHaveAttribute('data-renderer', 'solid')
+      expect(prepareCount).toBe(3)
+    } finally {
+      await registration.dispose()
+    }
+  })
+
+  it('runtime fatal 后的重建候选失败继续消耗重试预算，不能误留损坏旧实例', async () => {
+    let prepareCount = 0
+    const registration = getRendererRegistry().registerSuite(
+      createPluginIdentity('test.runtime-recovery-prepare-failing-suite', 'runtime'),
+      {
+        id: 'test.runtime-recovery-prepare-failing-suite', label: 'Runtime Recovery Prepare Failing Suite', apiVersion: 1,
+        runtime: { framework: 'solid', version: '1.0.0' },
+        compatibility: { documentSchema: 'workbench.v1', renderCatalogSchema: 1 },
+        requiredKinds: ['content.unknown'],
+        factory: {
+          async prepare() {
+            prepareCount += 1
+            if (prepareCount > 1) throw new Error('recovery candidate prepare failed')
+            return {
+              mount(container) {
+                container.replaceChildren(Object.assign(document.createElement('div'), { textContent: 'runtime-recovery-source' }))
+                const listeners = new Map<string, Set<(payload: unknown) => void>>()
+                return {
+                  update() {}, pause() {}, resume() {}, destroy() {},
+                  on(event, listener) {
+                    const group = listeners.get(event) ?? new Set()
+                    group.add(listener); listeners.set(event, group)
+                    if (event === 'ready') {
+                      listener({})
+                      setTimeout(() => {
+                        for (const notify of listeners.get('error') ?? []) notify(new Error('source runtime failed'))
+                      }, 0)
+                    }
+                    return () => group.delete(listener)
+                  },
+                }
+              },
+            }
+          },
+        },
+      },
+    )
+    try {
+      usePresentationPreferenceStore.getState().setRendererSuiteId('modern-gui', 'test.runtime-recovery-prepare-failing-suite')
+      render(<AgentSheetView sheet={sheet({ sidebarMode: 'work' })} ctx={ctx} />)
+
+      expect(await screen.findByLabelText('Solid Agent Workbench', {}, { timeout: 5_000 })).toHaveAttribute('data-renderer', 'solid')
+      expect(prepareCount).toBe(3)
+      expect(screen.queryByText('runtime-recovery-source')).toBeNull()
+    } finally {
+      await registration.dispose()
+    }
+  })
+
+  it('third-party Suite 的显式完整 fallback 优先于 builtin Solid', async () => {
+    const fallbackRegistration = getRendererRegistry().registerSuite(
+      createPluginIdentity('test.explicit-fallback', 'runtime'),
+      {
+        id: 'test.explicit-fallback', label: 'Explicit Fallback', apiVersion: 1,
+        runtime: { framework: 'solid', version: '1.0.0' },
+        compatibility: { documentSchema: 'workbench.v1', renderCatalogSchema: 1 },
+        requiredKinds: ['content.unknown'],
+        factory: {
+          async prepare() {
+            return { mount(container) {
+              container.replaceChildren(Object.assign(document.createElement('div'), { textContent: 'explicit-fallback-suite' }))
+              return { update() {}, pause() {}, resume() {}, destroy() {}, on(event, listener) { if (event === 'ready') listener({}); return () => {} } }
+            } }
+          },
+        },
+      },
+    )
+    const failingRegistration = getRendererRegistry().registerSuite(
+      createPluginIdentity('test.explicit-source', 'runtime'),
+      {
+        id: 'test.explicit-source', label: 'Explicit Source', apiVersion: 1,
+        runtime: { framework: 'solid', version: '1.0.0' },
+        compatibility: { documentSchema: 'workbench.v1', renderCatalogSchema: 1 },
+        requiredKinds: ['content.unknown'], fallbackSuiteId: 'test.explicit-fallback',
+        factory: { async prepare() { throw new Error('source failed') } },
+      },
+    )
+    try {
+      usePresentationPreferenceStore.getState().setRendererSuiteId('modern-gui', 'test.explicit-source')
+      const { container } = render(<AgentSheetView sheet={sheet({ sidebarMode: 'work' })} ctx={ctx} />)
+
+      await screen.findByText('explicit-fallback-suite', {}, { timeout: 5_000 })
+      expect(container.querySelector('[data-renderer-suite-host="true"]')).toHaveAttribute('data-suite-id', 'test.explicit-fallback')
+    } finally {
+      await failingRegistration.dispose()
+      await fallbackRegistration.dispose()
+    }
+  })
+
+  it('把 Agent Workspace state 的 sidebarMode 经 Host input 传给 Solid，损坏值回退 work', async () => {
+    const { rerender } = render(<AgentSheetView sheet={sheet({ sidebarMode: 'chat' })} ctx={ctx} />)
+    const solid = await screen.findByLabelText('Solid Agent Workbench', {}, { timeout: 5_000 })
+    expect(solid).toHaveAttribute('data-session-id', 'session-1')
+    expect(solid).toHaveAttribute('data-workspace-mode', 'chat')
+
+    rerender(<AgentSheetView sheet={sheet({ sidebarMode: 'broken' })} ctx={ctx} />)
+    await waitFor(() => expect(screen.getByLabelText('Solid Agent Workbench')).toHaveAttribute('data-workspace-mode', 'work'))
+  })
+
+  it('Interface Mode 切换仍复用 Renderer Suite Host，不回到硬编码 React 工作台', async () => {
     const { container, rerender } = render(<AgentSheetView sheet={sheet({ sidebarMode: 'work' })} ctx={ctx} />)
-    expect(container.querySelector('[data-pylon-workbench="modern-gui"]')).not.toBeNull()
-    expect(screen.getByText('AGENT WORKSPACE')).toBeTruthy()
+    const firstSolid = await screen.findByLabelText('Solid Agent Workbench', {}, { timeout: 5_000 })
+    expect(container.querySelector('[data-renderer-suite-host="true"]')).toHaveAttribute('data-suite-id', 'builtin.solid')
 
     useInterfaceModeStore.setState({ interfaceMode: 'terminal-like' })
     rerender(<AgentSheetView sheet={sheet({ sidebarMode: 'work' })} ctx={ctx} />)
-    expect(container.querySelector('[data-pylon-workbench="terminal-like"]')).not.toBeNull()
-    expect(screen.queryByText('AGENT WORKSPACE')).toBeNull()
+    await waitFor(() => expect(screen.getByLabelText('Solid Agent Workbench')).toBe(firstSolid))
+    expect(container.querySelector('[data-pylon-workbench="modern-gui"]')).toBeNull()
+    expect(container.querySelector('[data-pylon-workbench="terminal-like"]')).toBeNull()
   })
 })

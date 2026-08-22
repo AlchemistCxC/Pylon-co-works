@@ -1,0 +1,82 @@
+import { Match, Switch } from 'solid-js'
+import type {
+  RenderAppearanceSnapshot,
+  RenderCommandPort,
+  RenderNodeSnapshot,
+} from '../../../contracts/messageRenderer.ts'
+import type { ContentPart } from '../../../domains/workbench/content/contentPartSchema.ts'
+import { SolidAnsiBlock } from './AnsiBlock.solid.tsx'
+import { SolidCodeBlock } from './CodeBlock.solid.tsx'
+import { MarkdownContent } from './MarkdownContent.solid.tsx'
+import { ReasoningBlock } from './MessageRow.solid.tsx'
+import { SolidFileReferenceCard } from './content/FileReference.solid.tsx'
+import { SolidMediaBlock } from './content/MediaBlock.solid.tsx'
+
+export function BuiltinSolidContentSlot(props: {
+  snapshot: RenderNodeSnapshot
+  appearance: RenderAppearanceSnapshot
+  commands: RenderCommandPort
+}) {
+  const kind = () => props.snapshot.kind
+  const payload = () => props.snapshot.payload as ContentPart
+  const record = () => props.snapshot.payload as Record<string, unknown>
+  const text = () => typeof record().text === 'string' ? record().text as string : ''
+  const can = (commandType: string) => props.commands.canExecute?.(commandType) === true
+  const execute = (type: string, payloadValue: unknown) => {
+    void props.commands.execute({ type, payload: payloadValue })
+  }
+
+  return (
+    <Switch fallback={
+      <pre class="solid-content-unknown" data-content-kind={kind()}>{unknownSummary(props.snapshot.payload, kind())}</pre>
+    }>
+      <Match when={kind() === 'content.text' || kind() === 'content.markdown'}>
+        <MarkdownContent text={text()} />
+      </Match>
+      <Match when={kind() === 'content.code'}>
+        <SolidCodeBlock code={text()} language={typeof record().language === 'string' ? record().language as string : undefined} />
+      </Match>
+      <Match when={kind() === 'content.ansi'}>
+        <SolidAnsiBlock text={text()} reducedMotion={props.appearance.reducedMotion === true} />
+      </Match>
+      <Match when={kind() === 'content.reasoning'}>
+        <ReasoningBlock text={text()} running={record().state === 'running'} />
+      </Match>
+      <Match when={kind() === 'content.redacted-reasoning'}>
+        <ReasoningBlock
+          text=""
+          running={false}
+          redacted
+          redactedReason={typeof record().reason === 'string' ? record().reason as string : 'provider_redacted'}
+        />
+      </Match>
+      <Match when={kind() === 'content.file-reference' || kind() === 'content.file-selection' || kind() === 'content.resource'}>
+        <SolidFileReferenceCard part={payload()} actions={{
+          canOpen: can('resource.open'),
+          canReveal: can('resource.reveal'),
+          canCopy: can('clipboard.write'),
+          open: target => execute('resource.open', target),
+          reveal: target => execute('resource.reveal', target),
+          copyPath: path => execute('clipboard.write', { text: path }),
+        }} />
+      </Match>
+      <Match when={kind() === 'content.image' || kind() === 'content.audio' || kind() === 'content.video'}>
+        <SolidMediaBlock
+          part={payload()}
+          onOpenExternal={can('resource.open') ? url => execute('resource.open', { uri: url }) : undefined}
+        />
+      </Match>
+      <Match when={kind() === 'content.unknown'}>
+        <pre class="solid-content-unknown" data-content-kind={kind()}>{unknownSummary(props.snapshot.payload, kind())}</pre>
+      </Match>
+    </Switch>
+  )
+}
+
+function unknownSummary(payload: unknown, kind: string): string {
+  if (payload && typeof payload === 'object' && !Array.isArray(payload)) {
+    const summary = (payload as Record<string, unknown>).summary
+    if (typeof summary === 'string' && summary.trim()) return summary
+  }
+  return `Unsupported content kind: ${kind}`
+}

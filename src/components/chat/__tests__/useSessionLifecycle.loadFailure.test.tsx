@@ -167,5 +167,6 @@ describe('session/load failure policy (D5)', () => {
     }))
     expect(mocks.controller.commitReplaySnapshot).not.toHaveBeenCalled()
     expect(result.current.recoveryFailure).toBeNull()
+    expect(result.current.canonicalRefresh).toMatchObject({ sessionId: SESSION.id })
   })
 })

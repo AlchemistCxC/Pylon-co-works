@@ -6,6 +6,9 @@ import { createStaticWorkbenchAppearanceStore } from '../../../domains/workbench
 import { DEFAULTS } from '../../../domains/theme/themeDefaults.ts'
 import { createWorkbenchHostPort } from '../workbenchHostPort.ts'
 import type { WorkbenchMessage } from '../../../domains/workbench/workbenchProjector.ts'
+import { createWorkbenchEnvelope } from '../../../domains/workbench/events/workbenchEventSchema.ts'
+import { projectWorkbench } from '../../../domains/workbench/workbenchProjector.ts'
+import { createSolidWorkbenchServicesFromHostPort } from '../hostPortSolidServices.ts'
 
 function runtime() {
   return createPreviewWorkbenchRuntime({
@@ -51,6 +54,26 @@ describe('WorkbenchHostPort', () => {
     expect(second.sessionUi.get('draft', 'missing')).toBe('missing')
   })
 
+  it('stable HostPort follows the active Suite/owner binding without replacing the port', () => {
+    const store = createSessionUiStore()
+    const binding = { suiteId: 'suite.a', sheetId: 'sheet-a', sessionOwnerKey: 'owner-a', sessionId: 's1' as string | null }
+    const host = createWorkbenchHostPort({
+      runtime: runtime(), appearance: createStaticWorkbenchAppearanceStore(structuredClone(DEFAULTS)),
+      sessionUi: store, commands: createFakeWorkbenchCommandFacade(), ...binding,
+      binding: () => binding,
+    })
+    host.sessionUi.set('draft', 'owner-a draft')
+
+    binding.suiteId = 'suite.b'
+    binding.sessionOwnerKey = 'owner-b'
+
+    expect(host.sessionUi.get('draft', 'missing')).toBe('missing')
+    host.sessionUi.set('draft', 'owner-b draft')
+    binding.suiteId = 'suite.a'
+    binding.sessionOwnerKey = 'owner-a'
+    expect(host.sessionUi.get('draft', 'missing')).toBe('owner-a draft')
+  })
+
   it('returns structured capability-denied command errors and contextual diagnostics', async () => {
     const diagnostics = vi.fn()
     const host = createWorkbenchHostPort({
@@ -63,5 +86,60 @@ describe('WorkbenchHostPort', () => {
     expect(result).toMatchObject({ ok: false, error: { code: 'command_capability_denied', recoverability: 'none' } })
     host.diagnostics.report({ code: 'render.failed', phase: 'mount', message: 'failed' })
     expect(diagnostics).toHaveBeenCalledWith(expect.objectContaining({ suiteId: 'suite.test', sheetId: 'sheet-a', sessionOwnerKey: 'owner-a', code: 'render.failed' }))
+  })
+
+  it('treats undeclared command capabilities as denied and does not alias session creation to prompt', async () => {
+    const host = createWorkbenchHostPort({
+      runtime: runtime(), appearance: createStaticWorkbenchAppearanceStore(structuredClone(DEFAULTS)),
+      sessionUi: createSessionUiStore(), commands: createFakeWorkbenchCommandFacade(),
+      suiteId: 'suite.test', sheetId: 'sheet-a', sessionOwnerKey: 'owner-a', sessionId: 's1',
+      capabilities: { prompt: true },
+    })
+
+    expect(host.capabilities.has('retry')).toBe(false)
+    await expect(host.commands.retry('s1')).resolves.toMatchObject({ ok: false, error: { code: 'command_capability_denied' } })
+    await expect(host.commands.createSession()).resolves.toMatchObject({ ok: false, error: { code: 'command_capability_denied' } })
+  })
+
+  it('production Solid adapter exposes canonical plan entries without dropping blocked metadata', () => {
+    const source = runtime()
+    const document = projectWorkbench([createWorkbenchEnvelope({
+      sessionId: 's1', sequence: 1, recordedAt: '2026-08-22T00:00:01.000Z',
+      source: { provider: 'peri', sourceId: 'plan-1' },
+      provenance: { origin: 'local-observed', trust: 'authoritative' },
+      event: { type: 'plan.replaced', entries: [{ id: 'task-1', content: '等待用户', status: 'blocked', blockedReason: '需要确认', priority: 'high' }] },
+    })]).document
+    source.replaceDocument(document, { ownerKey: 'owner-a', generation: 1 })
+    const host = createWorkbenchHostPort({
+      runtime: source, appearance: createStaticWorkbenchAppearanceStore(structuredClone(DEFAULTS)),
+      sessionUi: createSessionUiStore(), commands: createFakeWorkbenchCommandFacade(),
+      suiteId: 'builtin.solid', sheetId: 'sheet-a', sessionOwnerKey: 'owner-a', sessionId: 's1',
+    })
+
+    expect(createSolidWorkbenchServicesFromHostPort(host).runtime.getSnapshot().tasks).toEqual([
+      expect.objectContaining({ id: 'task-1', status: 'blocked', blockedReason: '需要确认', priority: 'high' }),
+    ])
+    expect(Object.isFrozen(host.document.getSnapshot()?.plan)).toBe(true)
+    expect(Object.isFrozen(host.document.getSnapshot()?.plan.entries)).toBe(true)
+    expect(Object.isFrozen(host.document.getSnapshot()?.plan.entries[0])).toBe(true)
+  })
+
+  it('production Solid adapter keeps rejected interaction structured and diagnostic instead of throwing', async () => {
+    const diagnostics = vi.fn()
+    const commands = createFakeWorkbenchCommandFacade({
+      respondInteraction: async () => ({ ok: false, error: 'interaction_expired' }),
+    })
+    const host = createWorkbenchHostPort({
+      runtime: runtime(), appearance: createStaticWorkbenchAppearanceStore(structuredClone(DEFAULTS)),
+      sessionUi: createSessionUiStore(), commands,
+      suiteId: 'builtin.solid', sheetId: 'sheet-a', sessionOwnerKey: 'owner-a', sessionId: 's1',
+      capabilities: { interactionResponse: true }, diagnostics,
+    })
+
+    await expect(createSolidWorkbenchServicesFromHostPort(host).commands.respondInteraction('s1', 'interaction-a', { optionId: 'allow' }))
+      .resolves.toEqual({ ok: false, error: 'interaction_expired' })
+    expect(diagnostics).toHaveBeenCalledWith(expect.objectContaining({
+      code: 'command_rejected', phase: 'action', command: 'respondInteraction',
+    }))
   })
 })

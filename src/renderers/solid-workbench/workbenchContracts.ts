@@ -3,6 +3,7 @@ import type { SessionUiStore } from '../../domains/workbench/sessionUiStore.ts'
 import type { WorkbenchCommandFacade } from '../../domains/workbench/workbenchCommandFacade.ts'
 import type { WorkbenchRuntime } from '../../domains/workbench/workbenchRuntime.ts'
 import type { WorkbenchHostPort } from './workbenchHostPort.ts'
+import type { RendererActivationSnapshot } from '../../plugin-runtime/renderers/rendererSuiteTypes.ts'
 export type {
   WorkbenchHostPort,
   WorkbenchCommandPort,
@@ -39,6 +40,7 @@ export interface WorkbenchMountInput {
 export interface RendererPrepareContext {
   readonly suiteId: string
   readonly host: WorkbenchHostPort
+  readonly activation: RendererActivationSnapshot
 }
 
 export interface WorkbenchRendererFactory {

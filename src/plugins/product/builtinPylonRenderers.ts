@@ -10,6 +10,7 @@ import { loadBuiltinPylonRendererStyles } from './packages/builtin.pylon-rendere
 import { BUILTIN_PRESENTATION_PROFILES } from '../core/renderer/builtinPresentationProfiles.ts'
 import { createBuiltinPresentationCommandDefinitions } from '../core/renderer/builtinPresentationCommands.ts'
 import { BUILTIN_INTERFACE_MODES } from '../core/interfaceMode/builtinInterfaceModes.ts'
+import { createBuiltinSolidContentSlot, createBuiltinSolidRendererSuite } from '../../renderers/solid-workbench/builtinSolidRendererSuite.ts'
 
 const rendererDefinitions = Object.freeze([
   createCoreReactRendererPluginDefinition(),
@@ -35,6 +36,10 @@ export function createBuiltinPylonRenderersPlugin(): BuiltinPluginDefinition {
           throw new Error(`内置 renderer 必须同步激活：${definition.id}`)
         }
       }
+      // Suite reference validation sees both canonical text kinds and legacy
+      // content.plan before the production Suite snapshot is published.
+      context.renderer.registerSuite(createBuiltinSolidRendererSuite())
+      context.renderer.registerSlot(createBuiltinSolidContentSlot())
       for (const profile of BUILTIN_PRESENTATION_PROFILES) context.presentation.registerProfile(profile)
       for (const mode of BUILTIN_INTERFACE_MODES) context.interfaceModes.registerMode(mode)
       context.fonts.registerFont({

@@ -1,10 +1,14 @@
 import type { Message } from '../../components/chat/messageTypes.ts'
 import type { PlanEntry } from '../tasks/planTypes.ts'
+import type { PlanEntryV2 } from './plan/goalModel.ts'
 import type { GenerationPhase, GenerationSummary } from './generationFooterContracts.ts'
 import type { WorkbenchDocument, WorkbenchMessage } from './workbenchProjector.ts'
 import { createWorkbenchDocument, selectGoal, selectPlan } from './workbenchProjector.ts'
 
 export type WorkbenchRuntimeStatus = 'idle' | 'loading' | 'ready' | 'degraded' | 'error'
+
+/** Legacy chat plan rows and canonical C08 plan rows coexist only at the runtime adapter boundary. */
+export type WorkbenchTaskEntry = PlanEntry | PlanEntryV2
 
 export type WorkbenchRuntimeSlice =
   | 'document' | 'timeline' | 'messages' | 'activities' | 'interactions'
@@ -28,7 +32,7 @@ export interface WorkbenchRuntimeSnapshot {
   lastTokenAt?: number
   tokenCount: number
   summary: GenerationSummary | null
-  tasks: readonly PlanEntry[]
+  tasks: readonly WorkbenchTaskEntry[]
   thinkingStart?: number
   availableModels: readonly string[]
   activeModel: string
@@ -65,7 +69,8 @@ export interface WorkbenchDocumentApplyOptions {
   readonly sessionId?: string | null
 }
 
-export function createPreviewWorkbenchRuntime(
+/** Mutable document runtime used by production composition and preview fixtures. */
+export function createWorkbenchRuntime(
   initial: Omit<WorkbenchRuntimeSnapshot, 'revision'>,
 ): PreviewWorkbenchRuntime {
   let revision = 0
@@ -148,6 +153,13 @@ export function createPreviewWorkbenchRuntime(
   }
 }
 
+/** Preview compatibility name; production callers use createWorkbenchRuntime. */
+export function createPreviewWorkbenchRuntime(
+  initial: Omit<WorkbenchRuntimeSnapshot, 'revision'>,
+): PreviewWorkbenchRuntime {
+  return createWorkbenchRuntime(initial)
+}
+
 function runtimeSnapshotsEqual(left: WorkbenchRuntimeSnapshot, right: WorkbenchRuntimeSnapshot): boolean {
   if (left === right) return true
   // Bug4（2026-08-20）：弃用全量 JSON.stringify 深比较——流式高频 tick 会对整个含全部历史消息
@@ -200,6 +212,12 @@ function freezeDocument(document: WorkbenchDocument, previous?: WorkbenchDocumen
       commands: document.session.commands === previous?.session.commands && Object.isFrozen(document.session.commands) ? document.session.commands : Object.freeze([...document.session.commands]),
       options: document.session.options === previous?.session.options && Object.isFrozen(document.session.options) ? document.session.options : Object.freeze([...document.session.options]),
     })
+  const plan = document.plan === previous?.plan && Object.isFrozen(document.plan)
+    ? document.plan
+    : Object.freeze({
+      ...document.plan,
+      entries: freezeItems(document.plan.entries, previous?.plan.entries),
+    })
   return Object.freeze({
     ...document,
     appliedEventIds: document.appliedEventIds === previous?.appliedEventIds && Object.isFrozen(document.appliedEventIds) ? document.appliedEventIds : Object.freeze([...document.appliedEventIds]),
@@ -209,6 +227,7 @@ function freezeDocument(document: WorkbenchDocument, previous?: WorkbenchDocumen
     interactions: freezeItems(document.interactions, previous?.interactions),
     diagnostics: freezeItems(document.diagnostics, previous?.diagnostics),
     session,
+    plan,
   })
 }
 

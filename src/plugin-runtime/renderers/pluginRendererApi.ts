@@ -46,14 +46,22 @@ export function createPluginRendererApi(
     registerRenderKinds: definitions => {
       if (definitions.length === 0) return
       if (transaction) {
-        for (const definition of definitions) transaction.registerRenderKind(definition)
+        // Batch registration still owns one disposable per kind. Without
+        // adding these handles to the plugin scope, deactivate/uninstall
+        // leaves the committed catalog rows behind and the next activation
+        // fails as a duplicate contribution.
+        for (const definition of definitions) {
+          register(() => transaction.registerRenderKind(definition))
+        }
         return
       }
       // 独立调用（无外层 transaction）：一次 shadow transaction 原子提交整组 kind，
       // 避免 message.user/assistant 这类互引 fallback 链出现注册中间态。
       const shadow = registry.beginShadowTransaction(identity, identity.key)
       try {
-        for (const definition of definitions) shadow.registerRenderKind(definition)
+        for (const definition of definitions) {
+          register(() => shadow.registerRenderKind(definition))
+        }
         shadow.validate()
         shadow.commit()
       } catch (error) {

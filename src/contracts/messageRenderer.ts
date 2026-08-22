@@ -34,6 +34,8 @@ export interface RenderSemanticCommand {
 
 export interface RenderCommandPort {
   execute(command: RenderSemanticCommand): void | Promise<void>
+  /** Optional capability probe so a renderer can disable unavailable actions before dispatch. */
+  canExecute?(commandType: RenderSemanticCommand['type']): boolean
 }
 
 export type RenderSurfaceEvent = 'error' | 'request-action'

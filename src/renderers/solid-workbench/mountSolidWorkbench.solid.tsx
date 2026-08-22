@@ -9,14 +9,18 @@ import type {
 } from './workbenchContracts.ts'
 import { normalizeWorkbenchMountInput } from './workbenchContracts.ts'
 import { createWorkbenchHostPort } from './workbenchHostPort.ts'
+import type { WorkbenchHostPort, WorkbenchMountInput } from './workbenchContracts.ts'
+import { createSolidWorkbenchServicesFromHostPort } from './hostPortSolidServices.ts'
+import type { RendererActivationSnapshot } from '../../plugin-runtime/renderers/rendererSuiteTypes.ts'
 
-export function mountSolidWorkbench({ host, input: initialInput, services, hostPort: providedHostPort }: SolidWorkbenchMountInput): SolidWorkbenchLifecycle {
+export function mountSolidWorkbench({ host, input: initialInput, services, hostPort: providedHostPort, activation }: SolidWorkbenchMountInput & { activation?: RendererActivationSnapshot }): SolidWorkbenchLifecycle {
   let destroyed = false
   let paused = false
   const [input, setInput] = createSignal<SolidWorkbenchInput>(normalizeWorkbenchMountInput(initialInput))
   const [runtimeSnapshot, setRuntimeSnapshot] = createSignal(services.runtime.getSnapshot())
   const [appearanceSnapshot, setAppearanceSnapshot] = createSignal(services.appearance.getSnapshot())
   const [pausedSignal, setPausedSignal] = createSignal(false)
+  const ownsHostPort = providedHostPort === undefined && services.hostPort === undefined
   const hostPort = providedHostPort ?? services.hostPort ?? createWorkbenchHostPort({
     runtime: services.runtime,
     appearance: services.appearance,
@@ -29,6 +33,10 @@ export function mountSolidWorkbench({ host, input: initialInput, services, hostP
   })
   const listeners = new Map<'ready' | 'error' | 'request-action', Set<(payload: unknown) => void>>()
   let ready = false
+  let lastError: unknown
+  const emit = (event: 'ready' | 'error' | 'request-action', payload: unknown) => {
+    for (const listener of [...(listeners.get(event) ?? [])]) listener(payload)
+  }
 
   const unsubscribeRuntime = services.runtime.subscribe(() => {
     if (!destroyed && !paused) setRuntimeSnapshot(services.runtime.getSnapshot())
@@ -47,6 +55,20 @@ export function mountSolidWorkbench({ host, input: initialInput, services, hostP
     commands: services.commands,
     hostPort,
     paused: pausedSignal,
+    reportRendererError(error) {
+      const payload = {
+        message: error instanceof Error ? error.message : String(error),
+        error,
+      }
+      lastError = payload
+      // Notify the listeners that existed when Solid reported the failure.
+      // A listener attached after mount receives lastError synchronously below,
+      // so it must not also be included in this queued delivery.
+      const current = [...(listeners.get('error') ?? [])]
+      queueMicrotask(() => { for (const listener of current) listener(payload) })
+    },
+    reportRendererAction(action) { emit('request-action', action) },
+    activation,
   }
   const dispose = render(() => <SolidWorkbenchApp context={context} />, host)
   ready = true
@@ -75,11 +97,12 @@ export function mountSolidWorkbench({ host, input: initialInput, services, hostP
       unsubscribeAppearance()
       dispose()
       host.replaceChildren()
-      hostPort.diagnostics.destroy?.()
+      if (ownsHostPort) hostPort.diagnostics.destroy?.()
       listeners.clear()
     },
     on(event, listener) {
       if (event === 'ready' && ready) listener({ suiteId: 'builtin.solid' })
+      if (event === 'error' && lastError !== undefined) listener(lastError)
       const group = listeners.get(event) ?? new Set<(payload: unknown) => void>()
       group.add(listener)
       listeners.set(event, group)
@@ -89,4 +112,19 @@ export function mountSolidWorkbench({ host, input: initialInput, services, hostP
       }
     },
   }
+}
+
+export function mountSolidWorkbenchFromHostPort(input: {
+  host: HTMLElement
+  input: WorkbenchMountInput
+  hostPort: WorkbenchHostPort
+  activation?: RendererActivationSnapshot
+}): SolidWorkbenchLifecycle {
+  return mountSolidWorkbench({
+    host: input.host,
+    input: input.input,
+    hostPort: input.hostPort,
+    activation: input.activation,
+    services: createSolidWorkbenchServicesFromHostPort(input.hostPort),
+  })
 }
