@@ -7,6 +7,8 @@
  * silently dropping it.
  */
 
+import { isNonEmptyContentLocation } from './fileContentValidation.ts'
+
 export type JsonPrimitive = string | number | boolean | null
 export type JsonValue = JsonPrimitive | JsonValue[] | { readonly [key: string]: JsonValue }
 
@@ -74,15 +76,28 @@ export interface ResourceContentPart {
   readonly title?: string
   readonly mimeType?: string
   readonly text?: string
-  readonly blob?: string
+  /** Binary presence marker only; raw base64 is excluded from canonical display content. */
+  readonly hasBlob?: boolean
+}
+
+export interface DocumentContentPart {
+  readonly kind: 'document'
+  readonly title?: string
+  readonly path?: string
+  readonly uri?: string
+  readonly mimeType?: string
+  readonly text?: string
+  /** Binary presence marker only; raw base64 is excluded from canonical display content. */
+  readonly hasBlob?: boolean
 }
 
 export type ContentPart =
   | TextContentPart
   | ImageContentPart
   | ResourceContentPart
+  | DocumentContentPart
   | UnknownContentPart
-  | { readonly kind: Exclude<ContentKind, TextContentPart['kind'] | ImageContentPart['kind'] | ResourceContentPart['kind'] | 'unknown'>; readonly [key: string]: unknown }
+  | { readonly kind: Exclude<ContentKind, TextContentPart['kind'] | ImageContentPart['kind'] | ResourceContentPart['kind'] | DocumentContentPart['kind'] | 'unknown'>; readonly [key: string]: unknown }
 
 export interface UnknownContentOptions {
   readonly maxRawBytes?: number
@@ -151,8 +166,23 @@ export function parseContentPart(value: unknown): SchemaResult<ContentPart> {
     validateOptionalString(value, 'mimeType', issues)
     validateOptionalString(value, 'alt', issues)
   } else if (kind === 'resource') {
-    if (typeof value.uri !== 'string') issues.push(issue(['uri'], 'type.string', 'string', value.uri))
+    if (!isNonEmptyContentLocation(value.uri)) issues.push(issue(['uri'], 'type.string', 'non-empty string', value.uri))
     validateOptionalString(value, 'title', issues)
+    validateOptionalString(value, 'mimeType', issues)
+    validateOptionalString(value, 'text', issues)
+    validateOptionalBoolean(value, 'hasBlob', issues)
+    rejectInlineBlob(value, issues)
+  } else if (kind === 'document') {
+    validateOptionalString(value, 'title', issues)
+    validateOptionalString(value, 'path', issues)
+    validateOptionalString(value, 'uri', issues)
+    validateOptionalString(value, 'mimeType', issues)
+    validateOptionalString(value, 'text', issues)
+    validateOptionalBoolean(value, 'hasBlob', issues)
+    if (!['path', 'uri', 'text'].some(key => isNonEmptyContentLocation(value[key]))) {
+      issues.push(issue([], 'content.document-source', 'path, uri, or text', value))
+    }
+    rejectInlineBlob(value, issues)
   } else if (kind === 'tool-result' && value.parts !== undefined) {
     if (!Array.isArray(value.parts)) {
       issues.push(issue(['parts'], 'type.array', 'array', value.parts))
@@ -206,6 +236,14 @@ function isKnownStructuredKind(kind: string): boolean {
 
 function validateOptionalString(value: Record<string, unknown>, key: string, issues: SchemaIssue[]): void {
   if (value[key] !== undefined && typeof value[key] !== 'string') issues.push(issue([key], 'type.string', 'string', value[key]))
+}
+
+function validateOptionalBoolean(value: Record<string, unknown>, key: string, issues: SchemaIssue[]): void {
+  if (value[key] !== undefined && typeof value[key] !== 'boolean') issues.push(issue([key], 'type.boolean', 'boolean', value[key]))
+}
+
+function rejectInlineBlob(value: Record<string, unknown>, issues: SchemaIssue[]): void {
+  if (value.blob !== undefined) issues.push(issue(['blob'], 'content.binary-inline', 'omitted binary payload', value.blob))
 }
 
 function isValidTruncation(value: unknown): value is ContentTruncation {

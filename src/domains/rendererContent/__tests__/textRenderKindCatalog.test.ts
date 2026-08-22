@@ -130,4 +130,48 @@ describe('C00 builtin render kind catalog', () => {
     expect(redacted.validateInput({ reason: 'provider_policy' })).toBe(true)
     expect(redacted.validateInput({ reason: 'provider_policy', text: 'private' })).toBe(false)
   })
+
+  it('publishes the complete C02 file family with concrete appearance and behaviour settings', async () => {
+    const { ensureBuiltinTextRenderKinds } = await import('../textRenderKindCatalog.ts')
+    await ensureBuiltinTextRenderKinds()
+    const kinds = new Map(getRendererRegistry().snapshot().renderKinds.map(entry => [entry.value.id, entry.value]))
+
+    for (const id of [
+      'content.file-reference', 'content.file-selection', 'content.document', 'content.resource',
+    ] as const) {
+      const kind = kinds.get(id)!
+      expect(kind.settings?.schemaVersion).toBe(kind.settingsSchemaVersion)
+      expect(kind.settings?.groups.flatMap(group => group.fields).map(field => field.key)).toEqual(
+        expect.arrayContaining([
+          'foreground', 'mutedForeground', 'background', 'borderColor', 'fontSize', 'iconSize',
+          'maxWidth', 'maxHeight', 'pathCollapse', 'previewLines', 'showAbsolutePath',
+          'showMetadata', 'fileTypePalette', 'groupLayout',
+        ]),
+      )
+      expect(kind.defaultTokens).toMatchObject({
+        pathCollapse: 'middle',
+        previewLines: 12,
+        showAbsolutePath: true,
+        showMetadata: true,
+        groupLayout: 'stack',
+      })
+    }
+  })
+
+  it('validates C02 canonical boundaries without admitting raw binary payloads', async () => {
+    const { ensureBuiltinTextRenderKinds } = await import('../textRenderKindCatalog.ts')
+    await ensureBuiltinTextRenderKinds()
+    const kinds = new Map(getRendererRegistry().snapshot().renderKinds.map(entry => [entry.value.id, entry.value]))
+
+    expect(kinds.get('content.file-reference')!.validateInput({ path: 'C:\\work\\a.ts', size: 42 })).toBe(true)
+    expect(kinds.get('content.file-reference')!.validateInput({ path: '   ' })).toBe(false)
+    expect(kinds.get('content.file-reference')!.validateInput({ path: '/a', size: Number.NaN })).toBe(false)
+    expect(kinds.get('content.file-selection')!.validateInput({ path: '/a', selection: {} })).toBe(false)
+    expect(kinds.get('content.file-selection')!.validateInput({ path: '/a', selection: { start: { line: 2 }, end: { line: 1 } } })).toBe(false)
+    expect(kinds.get('content.document')!.validateInput({ title: 'spec', text: 'safe' })).toBe(true)
+    expect(kinds.get('content.document')!.validateInput({ title: 'spec', text: '' })).toBe(false)
+    expect(kinds.get('content.document')!.validateInput({ title: 'spec', blob: 'private' })).toBe(false)
+    expect(kinds.get('content.resource')!.validateInput({ uri: '   ' })).toBe(false)
+    expect(kinds.get('content.resource')!.validateInput({ uri: 'mcp://safe', blob: 'private' })).toBe(false)
+  })
 })

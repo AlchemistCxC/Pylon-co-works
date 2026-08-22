@@ -106,7 +106,7 @@ describe('AgentSheetView renderer mode context', () => {
     expect(baseSlot?.value).toMatchObject({
       targetSuites: ['builtin.solid'],
       fallback: true,
-      kinds: expect.arrayContaining(['content.text', 'content.reasoning', 'content.file-reference', 'content.image']),
+      kinds: expect.arrayContaining(['content.text', 'content.reasoning', 'content.file-reference', 'content.document', 'content.image']),
     })
 
     useIdentityStore.setState({ sessions: [session('session-1', 'local:a')] })
@@ -498,6 +498,100 @@ describe('AgentSheetView renderer mode context', () => {
         expect(reasoning.dataset.runningAnimation).toBe('none')
       })
       expect(container.querySelector('[data-content-kind="content.reasoning"] .term-reasoning')).toBe(reasoning)
+    } finally {
+      settings.reset()
+    }
+  })
+
+  it('targeted content.document Slot receives canonical payload and owner cleanup restores the C02 base Slot', async () => {
+    const registration = getRendererRegistry().registerSlot(
+      createPluginIdentity('test.production-document-slot', 'runtime'),
+      {
+        id: 'test.production-document-slot.content', targetSuites: ['builtin.solid'],
+        kinds: ['content.document'], priority: 1, fallback: false,
+        canRender: snapshot => snapshot.kind === 'content.document',
+        createSurface: () => ({
+          rendererId: 'test.production-document-slot', kind: 'solid',
+          mount(container, snapshot) {
+            const node = document.createElement('div')
+            node.dataset.productionDocumentSlot = 'true'
+            node.textContent = `document overlay: ${String((snapshot.payload as { title?: unknown }).title)}`
+            container.append(node)
+            return node
+          },
+          update(handle, snapshot) {
+            ;(handle as HTMLElement).textContent = `document overlay: ${String((snapshot.payload as { title?: unknown }).title)}`
+          },
+          destroy(handle) { (handle as HTMLElement).remove() }, on: () => () => {},
+        }),
+      },
+    )
+    try {
+      useIdentityStore.setState({ sessions: [session('session-1', 'local:a')] })
+      useWorkspaceStore.setState(state => ({ workspaceSheets: { ...state.workspaceSheets, activeSheetId: 'agent-sheet' } }))
+      const { container } = render(<AgentSheetView sheet={sheet({ sidebarMode: 'work' })} ctx={ctx} />)
+      await screen.findByLabelText('Solid Agent Workbench', {}, { timeout: 5_000 })
+      publishPluginEvent(createWorkbenchEnvelope({
+        sessionId: 'local:a', recordedAt: '2026-08-22T00:00:01.000Z', sequence: 1,
+        source: { provider: 'peri', sourceId: 'document-a' }, identity: { messageId: 'message-document-a' },
+        provenance: { origin: 'local-observed', trust: 'authoritative' },
+        event: {
+          type: 'message.delta', role: 'assistant',
+          parts: [{ kind: 'document', title: 'canonical-spec.md', text: 'safe document body', mimeType: 'text/markdown' }],
+        },
+      }))
+
+      expect(await screen.findByText('document overlay: canonical-spec.md')).toBeTruthy()
+      expect(container.querySelector('[data-message-role="assistant"]')).not.toBeNull()
+      await registration.dispose()
+
+      await waitFor(() => expect(container.querySelector('[data-production-document-slot="true"]')).toBeNull())
+      expect(await screen.findByText('canonical-spec.md')).toBeTruthy()
+      expect(await screen.findByText('safe document body')).toBeTruthy()
+      expect(container.querySelector('[data-content-kind="content.document"] [data-part-kind="document"]')).not.toBeNull()
+    } finally {
+      await registration.dispose()
+    }
+  })
+
+  it('C02 settings update the mounted production document Slot without remounting', async () => {
+    const settings = getRendererSettingsStore()
+    settings.reset()
+    settings.setOverride('kind.content.document.fontSize', 18)
+    settings.setOverride('kind.content.document.showMetadata', false)
+    settings.setOverride('kind.content.document.groupLayout', 'grid')
+    try {
+      useIdentityStore.setState({ sessions: [session('session-1', 'local:a')] })
+      useWorkspaceStore.setState(state => ({ workspaceSheets: { ...state.workspaceSheets, activeSheetId: 'agent-sheet' } }))
+      const { container } = render(<AgentSheetView sheet={sheet({ sidebarMode: 'work' })} ctx={ctx} />)
+      await screen.findByLabelText('Solid Agent Workbench', {}, { timeout: 5_000 })
+      publishPluginEvent(createWorkbenchEnvelope({
+        sessionId: 'local:a', recordedAt: '2026-08-22T00:00:01.000Z', sequence: 1,
+        source: { provider: 'peri', sourceId: 'document-settings' }, identity: { messageId: 'message-document-settings' },
+        provenance: { origin: 'local-observed', trust: 'authoritative' },
+        event: {
+          type: 'message.delta', role: 'assistant',
+          parts: [{ kind: 'document', title: 'settings-spec.md', text: 'settings document', mimeType: 'text/markdown' }],
+        },
+      }))
+
+      const documentCard = await waitFor(() => {
+        const node = container.querySelector<HTMLElement>('[data-content-kind="content.document"] [data-part-kind="document"]')
+        expect(node?.style.fontSize).toBe('18px')
+        expect(node?.dataset.groupLayout).toBe('grid')
+        expect(node?.textContent).not.toContain('text/markdown')
+        return node!
+      })
+      settings.setOverride('kind.content.document.fontSize', 20)
+      settings.setOverride('kind.content.document.showMetadata', true)
+      settings.setOverride('kind.content.document.groupLayout', 'stack')
+
+      await waitFor(() => {
+        expect(documentCard.style.fontSize).toBe('20px')
+        expect(documentCard.dataset.groupLayout).toBe('stack')
+        expect(documentCard.textContent).toContain('text/markdown')
+      })
+      expect(container.querySelector('[data-content-kind="content.document"] [data-part-kind="document"]')).toBe(documentCard)
     } finally {
       settings.reset()
     }

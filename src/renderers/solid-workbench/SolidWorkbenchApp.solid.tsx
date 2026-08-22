@@ -429,7 +429,7 @@ function renderBuiltinContentPart(part: ContentPart, inline: boolean, context: S
   if (part.kind === 'text' || part.kind === 'markdown') return <MarkdownContent text={part.text} inline={inline} />
   if (part.kind === 'code') return <SolidCodeBlock code={part.text} language={part.language} />
   if (part.kind === 'ansi') return <SolidAnsiBlock text={part.text} reducedMotion={context.input().reducedMotion} />
-  if (part.kind === 'file-reference' || part.kind === 'file-selection' || part.kind === 'resource') {
+  if (part.kind === 'file-reference' || part.kind === 'file-selection' || part.kind === 'document' || part.kind === 'resource') {
     const host = context.hostPort
     const sessionId = context.input().sessionId
     return <SolidFileReferenceCard part={part} actions={{

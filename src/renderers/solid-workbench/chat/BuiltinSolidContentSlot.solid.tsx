@@ -118,7 +118,7 @@ export function BuiltinSolidContentSlot(props: {
           reducedMotion={props.appearance.reducedMotion === true}
         />
       </Match>
-      <Match when={kind() === 'content.file-reference' || kind() === 'content.file-selection' || kind() === 'content.resource'}>
+      <Match when={kind() === 'content.file-reference' || kind() === 'content.file-selection' || kind() === 'content.document' || kind() === 'content.resource'}>
         <SolidFileReferenceCard part={payload()} actions={{
           canOpen: can('resource.open'),
           canReveal: can('resource.reveal'),
@@ -126,6 +126,21 @@ export function BuiltinSolidContentSlot(props: {
           open: target => execute('resource.open', target),
           reveal: target => execute('resource.reveal', target),
           copyPath: path => execute('clipboard.write', { text: path }),
+        }} appearance={{
+          foreground: stringSetting('foreground', 'var(--text)'),
+          mutedForeground: stringSetting('mutedForeground', 'var(--text-dim)'),
+          background: stringSetting('background', 'transparent'),
+          borderColor: stringSetting('borderColor', 'var(--border)'),
+          fontSize: numberSetting('fontSize', 13),
+          iconSize: numberSetting('iconSize', 18),
+          maxWidth: numberSetting('maxWidth', 960),
+          maxHeight: numberSetting('maxHeight', 360),
+          pathCollapse: filePathCollapse(props.appearance.pathCollapse),
+          previewLines: numberSetting('previewLines', 12),
+          showAbsolutePath: booleanSetting('showAbsolutePath', true),
+          showMetadata: booleanSetting('showMetadata', true),
+          fileTypePalette: fileTypePalette(props.appearance.fileTypePalette),
+          groupLayout: fileGroupLayout(props.appearance.groupLayout),
         }} />
       </Match>
       <Match when={kind() === 'content.image' || kind() === 'content.audio' || kind() === 'content.video'}>
@@ -144,6 +159,18 @@ export function BuiltinSolidContentSlot(props: {
 
 function reasoningAnimation(value: unknown): 'pulse' | 'shimmer' | 'none' {
   return value === 'shimmer' || value === 'none' ? value : 'pulse'
+}
+
+function filePathCollapse(value: unknown): 'full' | 'middle' | 'basename' {
+  return value === 'full' || value === 'basename' ? value : 'middle'
+}
+
+function fileTypePalette(value: unknown): 'auto' | 'neutral' | 'accent' {
+  return value === 'neutral' || value === 'accent' ? value : 'auto'
+}
+
+function fileGroupLayout(value: unknown): 'stack' | 'grid' {
+  return value === 'grid' ? 'grid' : 'stack'
 }
 
 function unknownSummary(payload: unknown, kind: string): string {

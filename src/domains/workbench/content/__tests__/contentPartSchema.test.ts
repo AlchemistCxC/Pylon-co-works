@@ -39,6 +39,26 @@ describe('ContentPart schema', () => {
     expect(result.issues[0].received).toBe('number')
   })
 
+  it('accepts safe C02 document metadata but rejects inline blob payloads', () => {
+    expect(parseContentPart({
+      kind: 'document', title: 'spec.pdf', uri: 'file:///spec.pdf',
+      mimeType: 'application/pdf', hasBlob: true,
+    }).ok).toBe(true)
+    expect(parseContentPart({ kind: 'document', title: 'empty', text: '' }).ok).toBe(false)
+    expect(parseContentPart({ kind: 'resource', uri: '   ' }).ok).toBe(false)
+
+    for (const value of [
+      { kind: 'document', title: 'private.pdf', blob: 'JVBERi0xLjQK' },
+      { kind: 'resource', uri: 'file:///private.pdf', blob: 'JVBERi0xLjQK' },
+    ]) {
+      const parsed = parseContentPart(value)
+      expect(parsed.ok).toBe(false)
+      if (!parsed.ok) expect(parsed.issues).toEqual(expect.arrayContaining([
+        expect.objectContaining({ path: ['blob'], code: 'content.binary-inline' }),
+      ]))
+    }
+  })
+
   it('round-trips unknown raw without turning it into invalid JSON', () => {
     const unknown: ContentPart = createUnknownContentPart('provider.unknown', { nested: [1, true, null] })
     const parsed = parseContentPart(JSON.parse(JSON.stringify(unknown)))

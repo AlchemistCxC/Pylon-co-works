@@ -315,6 +315,27 @@ describe('mountSolidWorkbench', () => {
     expect(host.querySelector('[data-content-kind="content.redacted-reasoning"]')).not.toBeNull()
   })
 
+  it('keeps C02 documents visible through the built-in no-Slot fallback', async () => {
+    const { host, services } = mountPreview()
+    const projected = projectWorkbench([createWorkbenchEnvelope({
+      sessionId: 'preview-session', sequence: 1,
+      recordedAt: '2026-08-22T00:00:01.000Z', occurredAt: '2026-08-22T00:00:01.000Z',
+      source: { provider: 'peri', sourceId: 'document-fallback' }, identity: { messageId: 'document-fallback' },
+      provenance: { origin: 'local-observed', trust: 'authoritative' },
+      event: {
+        type: 'message.delta', role: 'assistant',
+        parts: [{ kind: 'document', title: 'fallback-spec.md', text: 'fallback document body', mimeType: 'text/markdown' }],
+      },
+    })]).document
+
+    services.runtime.replaceDocument(projected, { ownerKey: 'owner-preview', generation: 1 })
+
+    expect(await screen.findByText('fallback-spec.md')).toBeTruthy()
+    expect(await screen.findByText('fallback document body')).toBeTruthy()
+    expect(host.querySelector('[data-part-kind="document"]')).not.toBeNull()
+    expect(host.textContent).not.toContain('Unsupported content kind: document')
+  })
+
   it('interaction 只提交 normalized optionId，不自造 provider approval payload', async () => {
     const { services } = mountPreview()
     const document = projectWorkbench([createWorkbenchEnvelope({

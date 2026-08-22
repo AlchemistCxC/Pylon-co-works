@@ -3,6 +3,7 @@ export type {
   ContentKind,
   ContentPart,
   ContentTruncation,
+  DocumentContentPart,
   ImageContentPart,
   JsonValue,
   ResourceContentPart,

@@ -24,6 +24,12 @@ describe('C02 normalizer content classification', () => {
     expect(filePart.displayName).toBe('report.md')
   })
 
+  it.each([Number.NaN, -1, Number.POSITIVE_INFINITY])('rejects invalid file sizes instead of publishing non-JSON metadata: %s', size => {
+    const normalized = normalizeContentBlock({ type: 'file_reference', path: '/workspace/a.bin', size })
+    expect(normalized.part.kind).toBe('unknown')
+    expect(normalized.diagnostic?.code).toBe('content.file-reference.invalid')
+  })
+
   it('classifies selection blocks with line/column range as file-selection', () => {
     const { part } = normalizeContentBlock({
       type: 'file_selection',
@@ -43,6 +49,16 @@ describe('C02 normalizer content classification', () => {
     const { part } = normalizeContentBlock({ type: 'file_selection', language: 'ts' })
     // 无 path 无法定位文件——进 unknown fallback 而非猜
     expect(part.kind).toBe('unknown')
+  })
+
+  it.each([
+    { selection: {} },
+    { selection: { start: { line: -1 } } },
+    { selection: { start: { line: 24 }, end: { line: 10 } } },
+  ])('rejects invalid selection boundaries instead of publishing an empty range: $selection', input => {
+    const normalized = normalizeContentBlock({ type: 'file_selection', path: '/workspace/a.ts', ...input })
+    expect(normalized.part.kind).toBe('unknown')
+    expect(normalized.diagnostic?.code).toBe('content.file-selection.invalid')
   })
 
   it('keeps embedded resource metadata without promoting base64 into displayable text', () => {
@@ -73,5 +89,21 @@ describe('C02 normalizer content classification', () => {
     const res = part as { kind: string; uri: string; title?: string }
     expect(res.uri).toBe('https://example.com/guide')
     expect(res.title).toBe('使用指南')
+  })
+
+  it.each([
+    { type: 'resource_link', uri: '   ' },
+    { type: 'resource', resource: { uri: '' } },
+  ])('routes blank resource locations to unknown with diagnostics', input => {
+    const normalized = normalizeContentBlock(input)
+    expect(normalized.part.kind).toBe('unknown')
+    expect(normalized.diagnostic?.code).toBe('content.resource.invalid')
+  })
+
+  it('does not promote a SOURCE-ONLY document attachment without a recognized wire carrier', () => {
+    const normalized = normalizeContentBlock({
+      type: 'document', title: 'provider-only.pdf', path: '/provider/private.pdf',
+    })
+    expect(normalized.part.kind).toBe('unknown')
   })
 })

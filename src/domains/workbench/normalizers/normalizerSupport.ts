@@ -4,6 +4,11 @@ import {
   type JsonValue,
 } from '../content/contentPartSchema.ts'
 import {
+  isNonEmptyContentLocation,
+  isOptionalNonNegativeFiniteNumber,
+  isValidFileSelection,
+} from '../content/fileContentValidation.ts'
+import {
   createWorkbenchEnvelope,
   type WorkbenchEventEnvelope,
   type WorkbenchEventIdentity,
@@ -118,14 +123,14 @@ export function normalizeContentBlock(raw: unknown): { part: ContentPart; diagno
       return { part: createUnknownContentPart('image', raw), diagnostic: { code: 'content.image.invalid', message: 'image block has no safe source', path: ['source'] } }
     }
     case 'resource_link':
-      return typeof raw.uri === 'string' ? { part: { kind: 'resource', uri: raw.uri, ...(typeof raw.name === 'string' ? { title: raw.name } : {}), ...(typeof raw.mimeType === 'string' ? { mimeType: raw.mimeType } : {}) } } : { part: createUnknownContentPart(type, raw), diagnostic: { code: 'content.resource.invalid', message: 'resource link has no URI', path: ['uri'] } }
+      return isNonEmptyContentLocation(raw.uri) ? { part: { kind: 'resource', uri: raw.uri, ...(typeof raw.name === 'string' ? { title: raw.name } : {}), ...(typeof raw.mimeType === 'string' ? { mimeType: raw.mimeType } : {}) } } : { part: createUnknownContentPart(type, raw), diagnostic: { code: 'content.resource.invalid', message: 'resource link has no URI', path: ['uri'] } }
     case 'resource': {
       const resource = isRecord(raw.resource) ? raw.resource : raw
-      return typeof resource.uri === 'string' ? { part: { kind: 'resource', uri: resource.uri, ...(typeof resource.mimeType === 'string' ? { mimeType: resource.mimeType } : {}), ...(typeof resource.text === 'string' ? { text: resource.text } : {}), ...(typeof resource.blob === 'string' ? { hasBlob: true } : {}), ...(typeof resource.title === 'string' ? { title: resource.title } : {}) } } : { part: createUnknownContentPart(type, raw), diagnostic: { code: 'content.resource.invalid', message: 'embedded resource has no URI', path: ['resource', 'uri'] } }
+      return isNonEmptyContentLocation(resource.uri) ? { part: { kind: 'resource', uri: resource.uri, ...(typeof resource.mimeType === 'string' ? { mimeType: resource.mimeType } : {}), ...(typeof resource.text === 'string' ? { text: resource.text } : {}), ...(typeof resource.blob === 'string' ? { hasBlob: true } : {}), ...(typeof resource.title === 'string' ? { title: resource.title } : {}) } } : { part: createUnknownContentPart(type, raw), diagnostic: { code: 'content.resource.invalid', message: 'embedded resource has no URI', path: ['resource', 'uri'] } }
     }
     // C02：文件引用——path 保持原样（Windows/URI 不做字符串猜测互转）
     case 'file_reference': {
-      if (typeof raw.path !== 'string' || !raw.path.trim()) {
+      if (typeof raw.path !== 'string' || !raw.path.trim() || !isOptionalNonNegativeFiniteNumber(raw.size)) {
         return { part: createUnknownContentPart(type, raw), diagnostic: { code: 'content.file-reference.invalid', message: 'file reference has no path', path: ['path'] } }
       }
       return {
@@ -140,7 +145,7 @@ export function normalizeContentBlock(raw: unknown): { part: ContentPart; diagno
     }
     // C02：选择区——必须带 path 与 selection；缺 path 进 unknown 不猜
     case 'file_selection': {
-      if (typeof raw.path !== 'string' || !raw.path.trim() || !isRecord(raw.selection)) {
+      if (typeof raw.path !== 'string' || !raw.path.trim() || !isRecord(raw.selection) || !isValidFileSelection(raw.selection)) {
         return { part: createUnknownContentPart(type, raw), diagnostic: { code: 'content.file-selection.invalid', message: 'file selection needs path and selection range', path: ['path'] } }
       }
       const selection = raw.selection

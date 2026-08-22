@@ -45,4 +45,43 @@ describe('React Workbench fatal fallback', () => {
     expect(screen.getByRole('alert')).toHaveAttribute('data-document-revision', '2')
     expect(screen.getByText('after failure')).toBeInTheDocument()
   })
+
+  it('keeps canonical C02 file, document, and resource parts visible without exposing binary raw', () => {
+    const current: WorkbenchDocument = {
+      ...document(3, ''),
+      messages: [{
+        ...document(3, '').messages[0]!,
+        parts: [
+          { kind: 'file-reference', path: 'C:\\work\\report.md', displayName: 'report.md' },
+          { kind: 'file-selection', path: '/workspace/main.ts', selection: { start: { line: 4, column: 2 }, end: { line: 7 } }, language: 'ts', previewText: 'selected fallback text' },
+          { kind: 'document', title: 'inline-spec.md', text: 'safe inline body', mimeType: 'text/markdown' },
+          { kind: 'resource', uri: 'file:///docs/private.pdf', mimeType: 'application/pdf', hasBlob: true },
+        ],
+      }],
+    }
+    const reader: WorkbenchDocumentReader = {
+      getSnapshot: () => current,
+      subscribe: () => () => {},
+      getSlice: () => undefined as never,
+      subscribeSlice: () => () => {},
+    }
+    const { container } = render(<ReactWorkbenchFatalFallback
+      document={reader}
+      failure={{ suiteId: 'builtin.solid', phase: 'slot', message: 'content slot failed' }}
+      onRetry={vi.fn()}
+      onSelectSuite={vi.fn()}
+      onOpenDiagnostics={vi.fn()}
+    />)
+
+    expect(screen.getByText('report.md')).toBeInTheDocument()
+    expect(screen.getByText('C:\\work\\report.md')).toBeInTheDocument()
+    expect(screen.getByText('L4:2–L7')).toBeInTheDocument()
+    expect(screen.getByText('selected fallback text')).toBeInTheDocument()
+    expect(screen.getByText('inline-spec.md')).toBeInTheDocument()
+    expect(screen.getByText('safe inline body')).toBeInTheDocument()
+    expect(screen.getByText('file:///docs/private.pdf')).toBeInTheDocument()
+    expect(screen.getByText('二进制内容不内联展示')).toBeInTheDocument()
+    expect(container.textContent).not.toContain('JVBERi0xLjQK')
+    expect(container.querySelectorAll('[data-react-content-kind]')).toHaveLength(4)
+  })
 })

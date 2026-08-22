@@ -7,6 +7,11 @@
  */
 import type { RenderKindDefinition } from '../../plugin-runtime/renderers/rendererTypes.ts'
 import type { RendererSettingsSchema } from '../../plugin-runtime/renderers/rendererSettingsTypes.ts'
+import {
+  isNonEmptyContentLocation,
+  isOptionalNonNegativeFiniteNumber,
+  isValidFileSelection,
+} from '../workbench/content/fileContentValidation.ts'
 
 const FONT_OPTIONS = Object.freeze([
   { value: 'inherit', label: '跟随界面' },
@@ -118,6 +123,57 @@ const REASONING_DEFAULT_TOKENS = Object.freeze({
   showDuration: true,
 })
 
+const FILE_CONTENT_SETTINGS = Object.freeze({
+  schemaVersion: 1,
+  groups: [
+    {
+      id: 'appearance', label: '文件与资源外观', layout: 'grid', fields: [
+        { key: 'foreground', label: '主文字颜色', type: 'color', presentation: 'palette+picker', alpha: true, default: 'var(--text)' },
+        { key: 'mutedForeground', label: '次要文字颜色', type: 'color', presentation: 'palette+picker', alpha: true, default: 'var(--text-dim)' },
+        { key: 'background', label: '背景色', type: 'color', presentation: 'palette+picker', alpha: true, default: 'transparent' },
+        { key: 'borderColor', label: '边框颜色', type: 'color', presentation: 'palette+picker', alpha: true, default: 'var(--border)' },
+        { key: 'fontSize', label: '字号', type: 'number', presentation: 'slider+input', min: 10, max: 28, step: 1, unit: 'px', default: 13 },
+        { key: 'iconSize', label: '图标尺寸', type: 'number', presentation: 'slider+input', min: 12, max: 40, step: 1, unit: 'px', default: 18 },
+        { key: 'maxWidth', label: '最大宽度', type: 'number', presentation: 'slider+input', min: 240, max: 1600, step: 20, unit: 'px', default: 960 },
+        { key: 'fileTypePalette', label: '文件类型色板', type: 'choice', presentation: 'segmented', options: [
+          { value: 'auto', label: '自动' }, { value: 'neutral', label: '中性' }, { value: 'accent', label: '强调' },
+        ], default: 'auto' },
+      ],
+    },
+    {
+      id: 'behaviour', label: '文件与资源行为', layout: 'grid', fields: [
+        { key: 'pathCollapse', label: '路径折叠', type: 'choice', presentation: 'select', options: [
+          { value: 'full', label: '完整' }, { value: 'middle', label: '中间折叠' }, { value: 'basename', label: '仅文件名' },
+        ], default: 'middle' },
+        { key: 'previewLines', label: '预览行数', type: 'number', presentation: 'slider+input', min: 1, max: 200, step: 1, default: 12 },
+        { key: 'maxHeight', label: '最大高度', type: 'number', presentation: 'slider+input', min: 80, max: 1200, step: 20, unit: 'px', default: 360 },
+        { key: 'showAbsolutePath', label: '显示完整来源', type: 'boolean', presentation: 'toggle', default: true },
+        { key: 'showMetadata', label: '显示 metadata', type: 'boolean', presentation: 'toggle', default: true },
+        { key: 'groupLayout', label: '卡片布局', type: 'choice', presentation: 'segmented', options: [
+          { value: 'stack', label: '纵向' }, { value: 'grid', label: '网格' },
+        ], default: 'stack' },
+      ],
+    },
+  ],
+} satisfies RendererSettingsSchema)
+
+const FILE_CONTENT_DEFAULT_TOKENS = Object.freeze({
+  foreground: 'var(--text)',
+  mutedForeground: 'var(--text-dim)',
+  background: 'transparent',
+  borderColor: 'var(--border)',
+  fontSize: 13,
+  iconSize: 18,
+  maxWidth: 960,
+  maxHeight: 360,
+  pathCollapse: 'middle',
+  previewLines: 12,
+  showAbsolutePath: true,
+  showMetadata: true,
+  fileTypePalette: 'auto',
+  groupLayout: 'stack',
+})
+
 function textPayload(input: unknown): input is { readonly text: string } {
   return typeof input === 'object' && input !== null && !Array.isArray(input)
     && typeof (input as Record<string, unknown>).text === 'string'
@@ -200,12 +256,13 @@ export const BUILTIN_TEXT_RENDER_KINDS: readonly RenderKindDefinition[] = [
     fallbackKind: 'content.unknown',
     priority: 100,
     fixture: { path: '/fixture/report.md', displayName: 'report.md' },
-    defaultTokens: {},
+    defaultTokens: FILE_CONTENT_DEFAULT_TOKENS,
     settingsSchemaVersion: 1,
+    settings: FILE_CONTENT_SETTINGS,
     // C02：path 必须非空；Windows/URI 形态不在此层互转
     validateInput: input => typeof input === 'object' && input !== null && !Array.isArray(input)
-      && typeof (input as Record<string, unknown>).path === 'string'
-      && ((input as Record<string, unknown>).path as string).length > 0,
+      && isNonEmptyContentLocation((input as Record<string, unknown>).path)
+      && isOptionalNonNegativeFiniteNumber((input as Record<string, unknown>).size),
   },
   {
     id: 'content.file-selection',
@@ -213,11 +270,26 @@ export const BUILTIN_TEXT_RENDER_KINDS: readonly RenderKindDefinition[] = [
     fallbackKind: 'content.unknown',
     priority: 100,
     fixture: { path: '/fixture/main.ts', selection: { start: { line: 1 }, end: { line: 4 } }, language: 'ts' },
-    defaultTokens: {},
+    defaultTokens: FILE_CONTENT_DEFAULT_TOKENS,
     settingsSchemaVersion: 1,
+    settings: FILE_CONTENT_SETTINGS,
     validateInput: input => typeof input === 'object' && input !== null && !Array.isArray(input)
-      && typeof (input as Record<string, unknown>).path === 'string'
-      && typeof (input as Record<string, unknown>).selection === 'object',
+      && isNonEmptyContentLocation((input as Record<string, unknown>).path)
+      && isValidFileSelection((input as Record<string, unknown>).selection),
+  },
+  {
+    id: 'content.document',
+    category: 'content',
+    fallbackKind: 'content.unknown',
+    priority: 100,
+    fixture: { title: 'fixture-spec.md', mimeType: 'text/markdown', text: '# Fixture document' },
+    defaultTokens: FILE_CONTENT_DEFAULT_TOKENS,
+    settingsSchemaVersion: 1,
+    settings: FILE_CONTENT_SETTINGS,
+    // C02：document 是 renderer semantic kind；当前 provider SOURCE-ONLY 附件不在此层补造。
+    validateInput: input => typeof input === 'object' && input !== null && !Array.isArray(input)
+      && ['path', 'uri', 'text'].some(key => isNonEmptyContentLocation((input as Record<string, unknown>)[key]))
+      && typeof (input as Record<string, unknown>).blob === 'undefined',
   },
   {
     id: 'content.resource',
@@ -225,10 +297,12 @@ export const BUILTIN_TEXT_RENDER_KINDS: readonly RenderKindDefinition[] = [
     fallbackKind: 'content.unknown',
     priority: 100,
     fixture: { uri: 'file:///fixture/spec.pdf', mimeType: 'application/pdf', hasBlob: true },
-    defaultTokens: {},
+    defaultTokens: FILE_CONTENT_DEFAULT_TOKENS,
     settingsSchemaVersion: 1,
+    settings: FILE_CONTENT_SETTINGS,
     validateInput: input => typeof input === 'object' && input !== null && !Array.isArray(input)
-      && typeof (input as Record<string, unknown>).uri === 'string',
+      && isNonEmptyContentLocation((input as Record<string, unknown>).uri)
+      && typeof (input as Record<string, unknown>).blob === 'undefined',
   },
   ...(['image', 'audio', 'video'] as const).map(kind => ({
     id: `content.${kind}`,

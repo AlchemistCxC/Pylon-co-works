@@ -85,6 +85,19 @@
 .term-reasoning-body { padding:var(--ui-space-1) 0 var(--ui-space-1) var(--ui-space-4); border-left:var(--line-width-1) solid color-mix(in srgb, var(--border) 72%, transparent); margin:var(--ui-space-1) 0 var(--ui-space-1) var(--ui-space-1); max-height:320px; overflow-y:auto; overscroll-behavior:contain; }
 .term-reasoning-line { color:var(--text-dim); font-style:italic; font-size:0.93em; line-height:1.6; white-space:pre-wrap; }
 
+.term-file-card { display:grid; grid-template-columns:auto minmax(0,1fr); align-items:start; gap:var(--ui-space-2); width:min(100%,960px); padding:var(--ui-space-2); border:var(--line-width-1) solid var(--border); border-radius:var(--message-radius,0); }
+.term-file-card[data-group-layout="grid"] { grid-template-columns:auto minmax(0,1fr) auto; }
+.term-file-card[data-group-layout="stack"] .term-file-actions { grid-column:2; }
+.term-file-icon { display:inline-grid; place-items:center; flex:none; color:var(--file-muted-foreground,var(--text-dim)); }
+.term-file-card[data-file-type-palette="accent"] .term-file-icon { color:var(--accent); }
+.term-file-card[data-file-type-palette="neutral"] .term-file-icon { color:var(--text-dim); filter:grayscale(1); }
+.term-file-meta { display:flex; flex-direction:column; min-width:0; gap:var(--ui-space-1); }
+.term-file-name { font-weight:600; overflow-wrap:anywhere; }
+.term-file-path,.term-file-meta-line,.term-file-range { color:var(--file-muted-foreground,var(--text-dim)); overflow-wrap:anywhere; }
+.term-file-actions { display:flex; flex-wrap:wrap; gap:var(--ui-space-1); }
+.term-file-action { min-height:28px; }
+.term-file-preview { margin:var(--ui-space-1) 0 0; padding:var(--ui-space-2); overflow:auto; white-space:pre-wrap; overflow-wrap:anywhere; background:color-mix(in srgb,var(--bg-panel) 72%,transparent); border-radius:var(--message-radius,0); }
+
 /* 非经典 Terminal-like 的折叠缝。经典终端继续使用瞬时显隐，保持冻结视觉。 */
 .term-collapse[data-open="false"] { display:none; }
 .app[data-interface-mode="terminal-like"]:not([data-presentation-profile="builtin.presentation.terminal-classic"]) .term-collapse {
