@@ -21,8 +21,11 @@ requireToken(store, 'const thoughtDurationMs = thoughtStartedAt \? Math\.max\(0,
 requireToken(store, 'message\.role === \'reasoning\' && message\.running', '后台 thought 终态收敛')
 requireToken(source, 'function formatThoughtLabel(text: string)', '耗时标题格式化')
 requireToken(source, 'return `Thought for ${text.length} chars`', '耗时摘要标签')
-requireToken(source, "const label = running ? 'Thinking…' : formatThoughtLabel(text)", '运行中/完成态标签切换')
-requireToken(source, 'data-state={running ? \'running\' : \'complete\'}', '运行/完成状态标记')
+// C01：四态 label（redacted → 正在思考 → duration → missing），token 覆盖 running 分支与 redacted 分支
+requireToken(source, "if (state === 'redacted' || state === 'missing') {", 'C01 四态分支')
+requireToken(source, "? 'Thinking…'", '运行中标签')
+requireToken(source, 'formatThoughtLabel(text)', '完成态时长标签')
+requireToken(source, 'data-state={state}', '运行/完成状态标记（C01 四态）')
 requireToken(source, '<span className="term-reasoning-label">{label}</span>', '无前缀 thought 标题')
 assert.equal(source.includes('term-reasoning-mark'), false, 'thought 标题不得保留符号前缀')
 assert.equal(source.includes('thought-shimmer'), false, 'thought 标题不得保留 shimmer 动画')
