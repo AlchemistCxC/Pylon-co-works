@@ -14,3 +14,37 @@
 .term-diff-word { border-radius: 0; }
 .term-diff-word-added { background:var(--diff-added-word,#3EA15E); color:#fff; }
 .term-diff-word-removed { background:var(--diff-removed-word,#E0556B); color:#fff; }
+
+/* Canonical C06 content.diff presentation. The component consumes only the
+   normalized snapshot; these styles are shared by base Slot and fatal fallback. */
+.solid-diff-content { position:relative; }
+.term-diff-open { margin:0 8px 6px; padding:2px 7px; border:1px solid var(--border); color:var(--text); background:transparent; font:inherit; cursor:pointer; }
+.term-diff-open:hover:not(:disabled) { border-color:var(--accent); color:var(--accent); }
+.term-diff-open:disabled { color:var(--text-dim); cursor:not-allowed; opacity:.7; }
+.term-diff-line-number { width:4ch; flex:0 0 4ch; padding:0 6px; color:var(--text-dim); text-align:right; user-select:none; border-right:1px solid color-mix(in srgb,var(--border) 70%,transparent); }
+.term-diff-omission { padding:2px 8px; color:var(--text-dim); background:color-mix(in srgb,var(--border) 35%,transparent); font-style:italic; }
+.solid-diff-split { display:grid; grid-template-columns:minmax(0,1fr) minmax(0,1fr); min-width:640px; }
+.solid-diff-split-before { border-right:1px solid var(--border); }
+.solid-diff-split-before,.solid-diff-split-after { min-width:0; overflow:auto; }
+.solid-diff-unified-text,.solid-diff-raw pre { margin:0; padding:8px; overflow:auto; white-space:pre; font:inherit; }
+.solid-diff-hunks { display:grid; gap:4px; padding:8px; color:var(--text-dim); }
+.solid-diff-binary,.solid-diff-metadata { display:block; margin:0; padding:8px; color:var(--text-dim); }
+.solid-diff-raw { border-top:1px solid var(--border); padding:6px 8px; }
+
+.solid-lsp-diagnostic { margin:4px 0 6px; padding:8px 10px; border:1px solid var(--lsp-accent,var(--border)); border-left-width:3px; color:var(--text); background:var(--chat-code-bg,rgba(0,0,0,.02)); }
+.solid-lsp-diagnostic header { margin-bottom:3px; }
+.solid-lsp-diagnostic small,.solid-lsp-metadata { color:var(--text-dim); }
+.solid-lsp-location,.solid-lsp-diagnostic li { display:flex; align-items:baseline; gap:8px; min-width:0; }
+.solid-lsp-location code,.solid-lsp-diagnostic li code { min-width:0; overflow-wrap:anywhere; }
+.solid-lsp-location button,.solid-lsp-diagnostic li button { margin-left:auto; border:0; padding:2px 4px; color:var(--accent); background:transparent; font:inherit; cursor:pointer; }
+.solid-lsp-location button:disabled,.solid-lsp-diagnostic li button:disabled { color:var(--text-dim); cursor:not-allowed; }
+.solid-lsp-diagnostic ul { display:grid; gap:4px; margin:8px 0 0; padding-left:20px; }
+
+@media (max-width:720px) {
+  .solid-diff-split { min-width:0; grid-template-columns:1fr; }
+  .solid-diff-split-before { border-right:0; border-bottom:1px solid var(--border); }
+}
+
+@media (prefers-reduced-motion:reduce) {
+  .solid-diff-content *, .solid-lsp-diagnostic * { scroll-behavior:auto!important; transition:none!important; animation:none!important; }
+}

@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import { diffSnapshotFromPart } from '../diffSnapshot.ts'
 import { normalizeContentBlock } from '../normalizers/normalizerSupport.ts'
+import { parseContentPart } from '../content/contentPartSchema.ts'
 
 /**
  * C06 RED：content.diff 结构化快照 + LSP diagnostic 归一化契约。
@@ -19,6 +20,7 @@ describe('C06 diffSnapshotFromPart', () => {
       kind: 'diff',
       path: '/src/app.ts',
       oldPath: '/src/old.ts',
+      range: { start: { line: 9, character: 2, providerOffset: 90 }, end: { line: 14, character: 0 } },
       hunks: [
         { oldStart: 10, oldLines: 3, newStart: 10, newLines: 5 },
         { oldStart: 40, oldLines: 2, newStart: 42, newLines: 1 },
@@ -31,6 +33,7 @@ describe('C06 diffSnapshotFromPart', () => {
     if (!snapshot) return
     expect(snapshot.path).toBe('/src/app.ts')
     expect(snapshot.oldPath).toBe('/src/old.ts')
+    expect(snapshot.range).toEqual({ start: { line: 9, character: 2 }, end: { line: 14, character: 0 } })
     expect(snapshot.hunks).toHaveLength(2)
     expect(snapshot.hunks?.[0]).toEqual({ oldStart: 10, oldLines: 3, newStart: 10, newLines: 5 })
     expect(snapshot.additions).toBe(6)
@@ -57,11 +60,17 @@ describe('C06 diffSnapshotFromPart', () => {
       path: '/assets/logo.png',
       binary: true,
       truncated: true,
-      truncation: { originalBytes: 999999 },
+      truncation: {
+        truncated: true, originalBytes: 999999, retainedBytes: 8192,
+        omittedBytes: 991807, reason: 'size-limit',
+      },
     })
     expect(snapshot?.binary).toBe(true)
     expect(snapshot?.truncated).toBe(true)
-    expect(snapshot?.truncation).toEqual({ originalBytes: 999999 })
+    expect(snapshot?.truncation).toEqual({
+      truncated: true, originalBytes: 999999, retainedBytes: 8192,
+      omittedBytes: 991807, reason: 'size-limit',
+    })
   })
 
   it('rebuildable: oldText/newText round-trips into lines without re-parsing raw', () => {
@@ -80,6 +89,38 @@ describe('C06 diffSnapshotFromPart', () => {
 
   it('returns null for non-diff parts', () => {
     expect(diffSnapshotFromPart({ kind: 'text', text: 'plain' })).toBeNull()
+  })
+
+  it('normalizes diff fields without leaking provider-private values or malformed rows', () => {
+    const normalized = normalizeContentBlock({
+      type: 'diff', path: ' /src/app.ts ', status: 'modified',
+      lines: [
+        { kind: 'removed', text: 'old' },
+        { kind: 'provider-private', text: 'do not render' },
+        { kind: 'added', text: 'new', providerOffset: 42 },
+      ],
+      hunks: [{ oldStart: 1, oldLines: 1, newStart: 1, newLines: 1, providerId: 'secret-hunk' }],
+      providerSecret: 'do-not-cross-the-seam',
+    })
+
+    expect(normalized.part).toEqual({
+      kind: 'diff', path: '/src/app.ts', status: 'modified',
+      lines: [{ kind: 'removed', text: 'old' }, { kind: 'added', text: 'new' }],
+      hunks: [{ oldStart: 1, oldLines: 1, newStart: 1, newLines: 1 }],
+      unknownFields: ['providerSecret'],
+    })
+    expect(normalized.diagnostic?.code).toBe('content.diff.fields-dropped')
+    expect(JSON.stringify(normalized.part)).not.toContain('do-not-cross-the-seam')
+    expect(JSON.stringify(normalized.part)).not.toContain('secret-hunk')
+  })
+
+  it('diagnoses invalid known diff fields instead of retaining or silently dropping them', () => {
+    const normalized = normalizeContentBlock({
+      type: 'diff', path: '/src/a.ts', lines: [{ kind: 'added', text: 'new' }],
+      status: 42, additions: -1, binary: 'yes', truncation: { originalBytes: 10 },
+    })
+    expect(normalized.diagnostic?.code).toBe('content.diff.fields-dropped')
+    expect(normalized.part).toEqual({ kind: 'diff', path: '/src/a.ts', lines: [{ kind: 'added', text: 'new' }] })
   })
 })
 
@@ -115,5 +156,60 @@ describe('C06 LSP diagnostic normalization', () => {
     const { part, diagnostic } = normalizeContentBlock({ type: 'lsp_diagnostic', severity: 'warning' })
     expect(part.kind).toBe('unknown')
     expect(diagnostic?.code).toBe('content.diagnostic-lsp.invalid')
+  })
+
+  it('narrows ranges and related locations instead of passing provider objects through', () => {
+    const normalized = normalizeContentBlock({
+      type: 'lsp_diagnostic', severity: 'warning', code: 6133, source: 'typescript',
+      message: 'unused value', path: ' /src/a.ts ', providerDiagnosticId: 'private-id',
+      range: {
+        start: { line: 4, character: 2, providerOffset: 99 },
+        end: { line: 4, character: 7 },
+        providerRange: 'private-range',
+      },
+      related: [
+        { message: 'declared here', path: '/src/b.ts', range: { start: { line: 1, character: 0 } }, providerId: 'private-related' },
+        { message: '', path: '/src/invalid.ts' },
+      ],
+    })
+
+    expect(normalized.part).toEqual({
+      kind: 'diagnostic-lsp', severity: 'warning', code: '6133', source: 'typescript',
+      message: 'unused value', path: '/src/a.ts',
+      range: { start: { line: 4, character: 2 }, end: { line: 4, character: 7 } },
+      related: [{ message: 'declared here', path: '/src/b.ts', range: { start: { line: 1, character: 0 } } }],
+      unknownFields: ['providerDiagnosticId'],
+    })
+    expect(normalized.diagnostic?.code).toBe('content.diagnostic-lsp.fields-dropped')
+    expect(JSON.stringify(normalized.part)).not.toContain('private-')
+  })
+
+  it('diagnoses invalid known optional LSP fields instead of silently discarding them', () => {
+    const normalized = normalizeContentBlock({
+      type: 'lsp_diagnostic', message: 'problem', path: '/src/a.ts',
+      severity: 2, code: Number.NaN, source: false,
+    })
+    expect(normalized.part).toEqual({ kind: 'diagnostic-lsp', message: 'problem', path: '/src/a.ts' })
+    expect(normalized.diagnostic?.code).toBe('content.diagnostic-lsp.fields-dropped')
+  })
+})
+
+describe('C06 canonical content schema', () => {
+  it('accepts normalized diff/LSP snapshots and rejects malformed nested ranges or rows', () => {
+    expect(parseContentPart({
+      kind: 'diff', path: '/src/a.ts',
+      lines: [{ kind: 'removed', text: 'a' }, { kind: 'added', text: 'b' }],
+    }).ok).toBe(true)
+    expect(parseContentPart({
+      kind: 'diff', path: '/src/a.ts', lines: [{ kind: 'vendor', text: 'bad' }],
+    }).ok).toBe(false)
+    expect(parseContentPart({
+      kind: 'diagnostic-lsp', message: 'bad call', path: '/src/a.ts',
+      range: { start: { line: 2, character: 3 }, end: { line: 2, character: 7 } },
+    }).ok).toBe(true)
+    expect(parseContentPart({
+      kind: 'diagnostic-lsp', message: 'bad call', path: '/src/a.ts',
+      range: { start: { line: -1 } },
+    }).ok).toBe(false)
   })
 })

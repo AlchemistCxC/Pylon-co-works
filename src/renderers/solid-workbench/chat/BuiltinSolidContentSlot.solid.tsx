@@ -6,8 +6,11 @@ import type {
 } from '../../../contracts/messageRenderer.ts'
 import {
   isValidLinkContentInput,
+  isValidDiffContentInput,
+  isValidLspDiagnosticContentInput,
   isValidSearchResultContentInput,
   type ContentPart,
+  type LspDiagnosticContentPart,
 } from '../../../domains/workbench/content/contentPartSchema.ts'
 import { SolidAnsiBlock } from './AnsiBlock.solid.tsx'
 import { SolidCodeBlock } from './CodeBlock.solid.tsx'
@@ -24,6 +27,8 @@ import { isToolInvocationSnapshotInput } from '../../../domains/rendererContent/
 import type { ToolInvocationSnapshot } from '../../../domains/workbench/workbenchProjector.ts'
 import { SolidToolInvocationCard } from './ToolInvocationCard.solid.tsx'
 import { SolidSearchOrLink, type SearchLinkAppearance } from './content/SearchResults.solid.tsx'
+import { diffSnapshotFromPart } from '../../../domains/workbench/diffSnapshot.ts'
+import { SolidDiffContent, SolidLspDiagnosticContent } from './content/DiffDiagnosticContent.solid.tsx'
 
 export function BuiltinSolidContentSlot(props: {
   snapshot: RenderNodeSnapshot
@@ -195,6 +200,19 @@ export function BuiltinSolidContentSlot(props: {
             }}
             appearance={searchLinkAppearance(props.appearance)}
           />}
+        </Show>
+      </Match>
+      <Match when={kind() === 'content.diff'}>
+        <Show when={isValidDiffContentInput(props.snapshot.payload) ? diffSnapshotFromPart(props.snapshot.payload) : undefined}
+          fallback={<pre class="solid-content-unknown" data-content-kind="content.diff">Invalid content.diff payload</pre>}>
+          {snapshot => <SolidDiffContent snapshot={snapshot()} nodeId={props.snapshot.nodeId} appearance={props.appearance} commands={props.commands} />}
+        </Show>
+      </Match>
+      <Match when={kind() === 'diagnostic.lsp'}>
+        <Show when={isValidLspDiagnosticContentInput(props.snapshot.payload)
+          ? props.snapshot.payload as LspDiagnosticContentPart : undefined}
+          fallback={<pre class="solid-content-unknown" data-content-kind="diagnostic.lsp">Invalid diagnostic.lsp payload</pre>}>
+          {diagnostic => <SolidLspDiagnosticContent diagnostic={diagnostic()} appearance={props.appearance} commands={props.commands} />}
         </Show>
       </Match>
       <Match when={kind().startsWith('tool.')}>

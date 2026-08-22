@@ -104,3 +104,27 @@ describe('C04 SolidToolInvocationCard', () => {
     expect(execute).toHaveBeenCalledWith({ type: 'resource.open', payload: { uri: 'https://example.com/a' } })
   })
 })
+
+describe('C06 edit/write nested content', () => {
+  it('renders normalized diff result parts without falling back to JSON', () => {
+    const { container } = render(() => <SolidToolInvocationCard
+      renderKind="tool.edit"
+      appearance={{ defaultCollapsed: false, wordDiff: false }}
+      snapshot={{
+        id: 'edit-diff', name: 'Edit', title: '编辑文件', semanticKind: 'tool.edit', status: 'completed',
+        result: {
+          status: 'completed',
+          parts: [{
+            kind: 'diff', path: '/src/tool.ts',
+            lines: [{ kind: 'removed', text: 'old' }, { kind: 'added', text: 'new' }],
+          }],
+        },
+      }}
+      commands={{ execute: vi.fn(), canExecute: () => false }}
+    />)
+
+    expect(screen.getByRole('region', { name: 'Diff：/src/tool.ts' })).toBeTruthy()
+    expect(container.querySelector('[data-tool-part-kind="diff"]')).toBeNull()
+    expect(container.textContent).not.toContain('"kind": "diff"')
+  })
+})

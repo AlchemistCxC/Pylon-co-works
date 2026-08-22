@@ -1,9 +1,12 @@
 import { useSyncExternalStore } from 'react'
 import type {
   ContentPart,
+  DiffContentPart,
   ImageContentPart,
   LinkContentPart,
+  LspDiagnosticContentPart,
   SearchResultContentPart,
+  TextRange,
 } from '../../domains/workbench/content/contentPartSchema.ts'
 import { isValidMediaContentInput } from '../../domains/workbench/content/mediaContentValidation.ts'
 import {
@@ -266,6 +269,37 @@ export function ReactFallbackContentPart(props: {
       </div>
     </section>
   }
+  if (part.kind === 'diff') {
+    const value = part as DiffContentPart
+    const path = value.path || value.oldPath || '未命名文件'
+    const additions = value.additions ?? value.lines?.filter(line => line.kind === 'added').length ?? 0
+    const deletions = value.deletions ?? value.lines?.filter(line => line.kind === 'removed').length ?? 0
+    return <section data-react-content-kind="content.diff" role="region" aria-label={`Diff fallback：${path}`}>
+      <strong>{path}</strong>
+      {value.status && <span>{value.status}</span>}
+      <small>{additions} additions · {deletions} deletions</small>
+      {value.binary ? <p>二进制文件发生变更</p> : <pre>{(value.lines ?? []).map(line => (
+        `${line.kind === 'added' ? '+' : line.kind === 'removed' ? '-' : ' '} ${line.text}`
+      )).join('\n')}</pre>}
+      {value.truncated && <small>Diff 已截断</small>}
+      {value.unknownFields?.length && <small>unknown: {value.unknownFields.join(', ')}</small>}
+      {value.rawPatch !== undefined && <details><summary>Raw 审计信息</summary><pre>{fallbackJson(value.rawPatch)}</pre></details>}
+    </section>
+  }
+  if (part.kind === 'diagnostic-lsp') {
+    const value = part as LspDiagnosticContentPart
+    const severity = value.severity || 'unknown'
+    return <section data-react-content-kind="diagnostic.lsp"
+      role={severity === 'error' ? 'alert' : 'status'} aria-label={`LSP ${severity} fallback：${value.message}`}>
+      <strong>{value.message}</strong>
+      {(value.code || value.source) && <small>{[value.code, value.source].filter(Boolean).join(' · ')}</small>}
+      <code>{fallbackLocation(value.path, value.range)}</code>
+      {value.related?.length && <ul aria-label="LSP 关联位置 fallback">{value.related.map((item, index) => <li key={index}>
+        <span>{item.message}</span><code>{fallbackLocation(item.path, item.range)}</code>
+      </li>)}</ul>}
+      {value.unknownFields?.length && <small>unknown: {value.unknownFields.join(', ')}</small>}
+    </section>
+  }
   if (part.kind === 'search-result') {
     const value = part as SearchResultContentPart
     return <section data-react-content-kind="content.search-result"
@@ -298,6 +332,13 @@ function mediaSourceIdentity(part: ImageContentPart): string {
   if (part.sourceKind === 'base64' || /^data:/i.test(part.source)) return `内联 ${part.mimeType ?? part.kind}`
   if (part.sourceKind === 'blob' || /^blob:/i.test(part.source)) return '临时 blob 资源'
   return part.source
+}
+
+function fallbackLocation(path: string, range?: TextRange): string {
+  if (!range) return path
+  const start = `${range.start.line + 1}:${(range.start.character ?? 0) + 1}`
+  if (!range.end) return `${path}:${start}`
+  return `${path}:${start}–${range.end.line + 1}:${(range.end.character ?? 0) + 1}`
 }
 
 function mediaMetadata(part: ImageContentPart): string {

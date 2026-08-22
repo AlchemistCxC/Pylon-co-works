@@ -1,6 +1,7 @@
 import { For, Show, createEffect, createMemo, createSignal } from 'solid-js'
 import type { RenderAppearanceSnapshot, RenderCommandPort } from '../../../contracts/messageRenderer.ts'
-import { createUnknownContentPart, type ContentPart } from '../../../domains/workbench/content/contentPartSchema.ts'
+import { createUnknownContentPart, isValidDiffContentInput, isValidLspDiagnosticContentInput, type ContentPart, type LspDiagnosticContentPart } from '../../../domains/workbench/content/contentPartSchema.ts'
+import { diffSnapshotFromPart } from '../../../domains/workbench/diffSnapshot.ts'
 import type { ToolInvocationSnapshot } from '../../../domains/workbench/workbenchProjector.ts'
 import { normalizeToolStatus, toolStatePresentation } from '../../../domains/tool/status.ts'
 import { MarkdownContent } from './MarkdownContent.solid.tsx'
@@ -10,6 +11,9 @@ import { SolidFileReferenceCard } from './content/FileReference.solid.tsx'
 import { SolidMediaBlock } from './content/MediaBlock.solid.tsx'
 import { BUILTIN_MEDIA_RESOLVER_OPTIONS } from '../mediaAssetAdapter.ts'
 import { SolidSearchOrLink } from './content/SearchResults.solid.tsx'
+import { SolidDiffContent, SolidLspDiagnosticContent } from './content/DiffDiagnosticContent.solid.tsx'
+
+const NO_COMMANDS: RenderCommandPort = { execute: () => {}, canExecute: () => false }
 
 export function SolidToolInvocationCard(props: {
   snapshot: ToolInvocationSnapshot
@@ -90,7 +94,10 @@ export function SolidToolInvocationCard(props: {
         <Show when={parts().length > 0}>
           <section class="solid-tool-parts" aria-label="工具输出">
             <span class="term-tool-label">输出</span>
-            <For each={parts()}>{part => <ToolContentPart part={part} appearance={props.appearance} commands={props.commands} />}</For>
+            <For each={parts()}>{(part, index) => <ToolContentPart
+              part={part} appearance={props.appearance} commands={props.commands}
+              nodeId={`${props.snapshot.id}:part:${index()}`}
+            />}</For>
           </section>
         </Show>
         <Show when={props.snapshot.result?.error}>
@@ -122,7 +129,7 @@ function ToolField(props: { label: string; value: unknown; class?: string; conte
   </section>
 }
 
-function ToolContentPart(props: { part: ContentPart; appearance?: RenderAppearanceSnapshot; commands?: RenderCommandPort }) {
+function ToolContentPart(props: { part: ContentPart; appearance?: RenderAppearanceSnapshot; commands?: RenderCommandPort; nodeId?: string }) {
   if (props.part.kind === 'code' && 'text' in props.part && typeof props.part.text === 'string') {
     return <SolidCodeBlock code={props.part.text} language={props.part.language} />
   }
@@ -155,6 +162,19 @@ function ToolContentPart(props: { part: ContentPart; appearance?: RenderAppearan
       defaultExpanded: !booleanSetting(props.appearance ?? {}, 'defaultCollapsed', false),
       reducedMotion: props.appearance?.reducedMotion === true,
     }} />
+  }
+  if (props.part.kind === 'diff') {
+    const snapshot = isValidDiffContentInput(props.part) ? diffSnapshotFromPart(props.part) : null
+    return snapshot
+      ? <SolidDiffContent snapshot={snapshot} nodeId={props.nodeId ?? 'tool-diff'}
+          appearance={props.appearance ?? {}} commands={props.commands ?? NO_COMMANDS} />
+      : <pre data-tool-part-kind="diff">Invalid content.diff payload</pre>
+  }
+  if (props.part.kind === 'diagnostic-lsp') {
+    return isValidLspDiagnosticContentInput(props.part)
+      ? <SolidLspDiagnosticContent diagnostic={props.part as LspDiagnosticContentPart}
+          appearance={props.appearance ?? {}} commands={props.commands ?? NO_COMMANDS} />
+      : <pre data-tool-part-kind="diagnostic-lsp">Invalid diagnostic.lsp payload</pre>
   }
   if (props.part.kind === 'unknown') {
     return <details data-tool-part-kind="unknown"><summary>{props.part.summary}</summary><pre>{safeJson(props.part.raw)}</pre></details>

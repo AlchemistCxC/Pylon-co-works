@@ -14,7 +14,9 @@ import {
 } from '../workbench/content/fileContentValidation.ts'
 import { isValidMediaContentInput } from '../workbench/content/mediaContentValidation.ts'
 import {
+  isValidDiffContentInput,
   isValidLinkContentInput,
+  isValidLspDiagnosticContentInput,
   isValidSearchResultContentInput,
 } from '../workbench/content/contentPartSchema.ts'
 
@@ -274,6 +276,68 @@ const SEARCH_LINK_DEFAULT_TOKENS = Object.freeze({
   defaultExpanded: false, pageSize: 10, snippetLines: 3, pathDisplay: 'full', linkOpenMode: 'external', showStatus: true,
 })
 
+const DIFF_SETTINGS = Object.freeze({
+  schemaVersion: 1,
+  groups: [
+    {
+      id: 'presentation', label: 'Diff 呈现', layout: 'grid', fields: [
+        { key: 'view', label: '视图', type: 'choice', presentation: 'segmented', options: [
+          { value: 'unified', label: '统一' }, { value: 'split', label: '分栏' },
+        ], default: 'unified' },
+        { key: 'contextLines', label: '上下文行数', type: 'number', presentation: 'slider+input', min: 0, max: 100, step: 1, default: 3 },
+        { key: 'lineNumbers', label: '显示行号', type: 'boolean', presentation: 'toggle', default: true },
+        { key: 'wordDiff', label: '词级差异', type: 'boolean', presentation: 'toggle', default: true },
+        { key: 'wrap', label: '长行换行', type: 'choice', presentation: 'segmented', options: [
+          { value: 'none', label: '不换行' }, { value: 'soft', label: '软换行' },
+        ], default: 'none' },
+        { key: 'defaultExpanded', label: '默认展开', type: 'boolean', presentation: 'toggle', default: true },
+      ],
+    },
+    {
+      id: 'appearance', label: 'Diff 外观', layout: 'grid', fields: [
+        { key: 'foreground', label: '主文字颜色', type: 'color', presentation: 'palette+picker', alpha: true, default: 'var(--text)' },
+        { key: 'background', label: '背景色', type: 'color', presentation: 'palette+picker', alpha: true, default: 'transparent' },
+        { key: 'borderColor', label: '边框颜色', type: 'color', presentation: 'palette+picker', alpha: true, default: 'var(--border)' },
+        { key: 'addedColor', label: '新增颜色', type: 'color', presentation: 'palette+picker', alpha: true, default: '#4EBA65' },
+        { key: 'removedColor', label: '删除颜色', type: 'color', presentation: 'palette+picker', alpha: true, default: '#FF6B80' },
+        { key: 'fontSize', label: '字号', type: 'number', presentation: 'slider+input', min: 10, max: 28, step: 1, unit: 'px', default: 13 },
+        { key: 'maxHeight', label: '最大高度', type: 'number', presentation: 'slider+input', min: 80, max: 1600, step: 20, unit: 'px', default: 320 },
+        { key: 'showMetadata', label: '显示 metadata', type: 'boolean', presentation: 'toggle', default: true },
+        { key: 'showRaw', label: '允许查看 Raw 审计信息', type: 'boolean', presentation: 'toggle', default: false },
+      ],
+    },
+  ],
+} satisfies RendererSettingsSchema)
+
+const DIFF_DEFAULT_TOKENS = Object.freeze({
+  view: 'unified', contextLines: 3, lineNumbers: true, wordDiff: true, wrap: 'none', defaultExpanded: true,
+  foreground: 'var(--text)', background: 'transparent', borderColor: 'var(--border)',
+  addedColor: '#4EBA65', removedColor: '#FF6B80', fontSize: 13, maxHeight: 320,
+  showMetadata: true, showRaw: false,
+})
+
+const LSP_SETTINGS = Object.freeze({
+  schemaVersion: 1,
+  groups: [
+    {
+      id: 'presentation', label: 'LSP 诊断呈现', layout: 'grid', fields: [
+        { key: 'severityPalette', label: '严重级别配色', type: 'choice', presentation: 'select', options: [
+          { value: 'semantic', label: '语义色' }, { value: 'accent', label: '强调色' }, { value: 'neutral', label: '中性色' },
+        ], default: 'semantic' },
+        { key: 'maxHeight', label: '最大高度', type: 'number', presentation: 'slider+input', min: 80, max: 1200, step: 20, unit: 'px', default: 360 },
+        { key: 'showSource', label: '显示来源', type: 'boolean', presentation: 'toggle', default: true },
+        { key: 'showCode', label: '显示诊断码', type: 'boolean', presentation: 'toggle', default: true },
+        { key: 'showRelated', label: '显示关联位置', type: 'boolean', presentation: 'toggle', default: true },
+        { key: 'showMetadata', label: '显示 metadata', type: 'boolean', presentation: 'toggle', default: true },
+      ],
+    },
+  ],
+} satisfies RendererSettingsSchema)
+
+const LSP_DEFAULT_TOKENS = Object.freeze({
+  severityPalette: 'semantic', maxHeight: 360, showSource: true, showCode: true, showRelated: true, showMetadata: true,
+})
+
 function textPayload(input: unknown): input is { readonly text: string } {
   return typeof input === 'object' && input !== null && !Array.isArray(input)
     && typeof (input as Record<string, unknown>).text === 'string'
@@ -410,11 +474,10 @@ export const BUILTIN_TEXT_RENDER_KINDS: readonly RenderKindDefinition[] = [
     fallbackKind: 'content.unknown',
     priority: 100,
     fixture: { path: '/fixture/a.ts', status: 'modified', oldText: 'a\n', newText: 'b\n' },
-    defaultTokens: {},
+    defaultTokens: DIFF_DEFAULT_TOKENS,
     settingsSchemaVersion: 1,
-    // C06：结构化 diff 可重建；unified/rawPatch 只作审计
-    validateInput: (input: unknown) => typeof input === 'object' && input !== null && !Array.isArray(input)
-      && typeof (input as Record<string, unknown>).path === 'string',
+    settings: DIFF_SETTINGS,
+    validateInput: isValidDiffContentInput,
   },
   {
     id: 'diagnostic.lsp',
@@ -422,11 +485,10 @@ export const BUILTIN_TEXT_RENDER_KINDS: readonly RenderKindDefinition[] = [
     fallbackKind: 'content.unknown',
     priority: 100,
     fixture: { severity: 'error', code: 'TS1', source: 'typescript', message: 'fixture lsp diagnostic', path: '/fixture/a.ts' },
-    defaultTokens: {},
+    defaultTokens: LSP_DEFAULT_TOKENS,
     settingsSchemaVersion: 1,
-    validateInput: (input: unknown) => typeof input === 'object' && input !== null && !Array.isArray(input)
-      && typeof (input as Record<string, unknown>).message === 'string'
-      && typeof (input as Record<string, unknown>).path === 'string',
+    settings: LSP_SETTINGS,
+    validateInput: isValidLspDiagnosticContentInput,
   },
   {
     id: 'content.search-result',

@@ -144,6 +144,66 @@ export interface LinkContentPart {
   readonly status?: number
 }
 
+export interface TextPosition {
+  readonly line: number
+  readonly character?: number
+}
+
+export interface TextRange {
+  readonly start: TextPosition
+  readonly end?: TextPosition
+}
+
+export interface DiffContentLine {
+  readonly kind: 'context' | 'added' | 'removed'
+  readonly text: string
+}
+
+export interface DiffContentHunk {
+  readonly oldStart?: number
+  readonly oldLines?: number
+  readonly newStart?: number
+  readonly newLines?: number
+}
+
+export interface DiffContentPart {
+  readonly kind: 'diff'
+  readonly path?: string
+  readonly oldPath?: string
+  readonly status?: string
+  readonly range?: TextRange
+  readonly hunks?: readonly DiffContentHunk[]
+  readonly lines?: readonly DiffContentLine[]
+  readonly oldText?: string
+  readonly newText?: string
+  readonly additions?: number
+  readonly deletions?: number
+  readonly binary?: boolean
+  readonly truncated?: boolean
+  readonly truncation?: ContentTruncation
+  readonly unified?: string
+  readonly rawPatch?: JsonValue
+  readonly unknownFields?: readonly string[]
+}
+
+export interface LspRelatedInformation {
+  readonly message: string
+  readonly path: string
+  readonly range?: TextRange
+}
+
+export interface LspDiagnosticContentPart {
+  readonly kind: 'diagnostic-lsp'
+  readonly severity?: string
+  readonly code?: string
+  readonly source?: string
+  readonly message: string
+  readonly path: string
+  readonly range?: TextRange
+  readonly related?: readonly LspRelatedInformation[]
+  readonly unknownFields?: readonly string[]
+}
+
 export type ContentPart =
   | TextContentPart
   | ImageContentPart
@@ -151,8 +211,10 @@ export type ContentPart =
   | DocumentContentPart
   | SearchResultContentPart
   | LinkContentPart
+  | DiffContentPart
+  | LspDiagnosticContentPart
   | UnknownContentPart
-  | { readonly kind: Exclude<ContentKind, TextContentPart['kind'] | ImageContentPart['kind'] | ResourceContentPart['kind'] | DocumentContentPart['kind'] | SearchResultContentPart['kind'] | LinkContentPart['kind'] | 'unknown'>; readonly [key: string]: unknown }
+  | { readonly kind: Exclude<ContentKind, TextContentPart['kind'] | ImageContentPart['kind'] | ResourceContentPart['kind'] | DocumentContentPart['kind'] | SearchResultContentPart['kind'] | LinkContentPart['kind'] | DiffContentPart['kind'] | LspDiagnosticContentPart['kind'] | 'unknown'>; readonly [key: string]: unknown }
 
 export interface UnknownContentOptions {
   readonly maxRawBytes?: number
@@ -254,6 +316,10 @@ export function parseContentPart(value: unknown): SchemaResult<ContentPart> {
     if (!isValidSearchResultContentInput(value)) issues.push(issue([], 'content.search-result', 'normalized non-empty search results', value))
   } else if (kind === 'link') {
     if (!isValidLinkContentInput(value)) issues.push(issue(['url'], 'content.link', 'normalized non-empty link', value.url))
+  } else if (kind === 'diff') {
+    if (!isValidDiffContentInput(value)) issues.push(issue([], 'content.diff', 'normalized structured diff', value))
+  } else if (kind === 'diagnostic-lsp') {
+    if (!isValidLspDiagnosticContentInput(value)) issues.push(issue([], 'content.diagnostic-lsp', 'normalized LSP diagnostic', value))
   } else if (kind === 'tool-result' && value.parts !== undefined) {
     if (!Array.isArray(value.parts)) {
       issues.push(issue(['parts'], 'type.array', 'array', value.parts))
@@ -287,6 +353,62 @@ export function isValidLinkContentInput(input: unknown): input is Omit<LinkConte
   if (!isRecord(input) || typeof input.url !== 'string' || input.url.trim().length === 0) return false
   if (input.title !== undefined && typeof input.title !== 'string') return false
   return input.status === undefined || (Number.isInteger(input.status) && Number(input.status) >= 100 && Number(input.status) <= 599)
+}
+
+export function isValidDiffContentInput(input: unknown): input is Omit<DiffContentPart, 'kind'> | DiffContentPart {
+  if (!isRecord(input)) return false
+  if (![input.path, input.oldPath].some(value => typeof value === 'string' && value.trim().length > 0)) return false
+  if (input.status !== undefined && typeof input.status !== 'string') return false
+  if (input.range !== undefined && !isValidTextRange(input.range)) return false
+  if (input.lines !== undefined && (!Array.isArray(input.lines) || input.lines.length === 0 || !input.lines.every(line => (
+    isRecord(line) && ['context', 'added', 'removed'].includes(String(line.kind)) && typeof line.text === 'string'
+  )))) return false
+  if (input.hunks !== undefined && (!Array.isArray(input.hunks) || input.hunks.length === 0 || !input.hunks.every(isValidDiffHunk))) return false
+  for (const key of ['oldText', 'newText', 'unified'] as const) if (input[key] !== undefined && typeof input[key] !== 'string') return false
+  for (const key of ['additions', 'deletions'] as const) if (input[key] !== undefined && (!Number.isInteger(input[key]) || Number(input[key]) < 0)) return false
+  for (const key of ['binary', 'truncated'] as const) if (input[key] !== undefined && typeof input[key] !== 'boolean') return false
+  if (input.truncation !== undefined && !isValidTruncation(input.truncation)) return false
+  if (input.rawPatch !== undefined && !isJsonValue(input.rawPatch)) return false
+  if (input.unknownFields !== undefined && (!Array.isArray(input.unknownFields) || !input.unknownFields.every(value => typeof value === 'string'))) return false
+  return input.binary === true
+    || Array.isArray(input.lines) && input.lines.length > 0
+    || Array.isArray(input.hunks) && input.hunks.length > 0
+    || typeof input.unified === 'string' && input.unified.length > 0
+}
+
+export function isValidLspDiagnosticContentInput(input: unknown): input is Omit<LspDiagnosticContentPart, 'kind'> | LspDiagnosticContentPart {
+  if (!isRecord(input) || typeof input.message !== 'string' || !input.message.trim()
+    || typeof input.path !== 'string' || !input.path.trim()) return false
+  for (const key of ['severity', 'code', 'source'] as const) if (input[key] !== undefined && typeof input[key] !== 'string') return false
+  if (input.range !== undefined && !isValidTextRange(input.range)) return false
+  if (input.related !== undefined && (!Array.isArray(input.related) || !input.related.every(value => (
+    isRecord(value) && typeof value.message === 'string' && value.message.trim().length > 0
+    && typeof value.path === 'string' && value.path.trim().length > 0
+    && (value.range === undefined || isValidTextRange(value.range))
+  )))) return false
+  return input.unknownFields === undefined
+    || Array.isArray(input.unknownFields) && input.unknownFields.every(value => typeof value === 'string')
+}
+
+function isValidDiffHunk(value: unknown): boolean {
+  if (!isRecord(value)) return false
+  const keys = ['oldStart', 'oldLines', 'newStart', 'newLines'] as const
+  return keys.some(key => value[key] !== undefined)
+    && keys.every(key => value[key] === undefined || Number.isInteger(value[key]) && Number(value[key]) >= 0)
+}
+
+function isValidTextRange(value: unknown): value is TextRange {
+  if (!isRecord(value) || !isValidTextPosition(value.start)) return false
+  if (value.end !== undefined && !isValidTextPosition(value.end)) return false
+  if (!value.end) return true
+  const start = value.start as TextPosition
+  const end = value.end as TextPosition
+  return end.line > start.line || end.line === start.line && (end.character ?? 0) >= (start.character ?? 0)
+}
+
+function isValidTextPosition(value: unknown): value is TextPosition {
+  return isRecord(value) && Number.isInteger(value.line) && Number(value.line) >= 0
+    && (value.character === undefined || Number.isInteger(value.character) && Number(value.character) >= 0)
 }
 
 function isValidSearchResultEntry(input: unknown): input is SearchResultEntry {

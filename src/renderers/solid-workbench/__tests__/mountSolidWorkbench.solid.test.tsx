@@ -367,6 +367,29 @@ describe('mountSolidWorkbench', () => {
     )
   })
 
+  it('C06 canonical diff and LSP parts reach their production base Slot kinds', async () => {
+    const { host, services } = mountPreview()
+    const document = projectWorkbench([createWorkbenchEnvelope({
+      sessionId: 'preview-session', recordedAt: '2026-08-23T00:00:01.000Z', sequence: 1,
+      source: { provider: 'peri', sourceId: 'c06-content' }, identity: { messageId: 'c06-content' },
+      provenance: { origin: 'local-observed', trust: 'authoritative' },
+      event: {
+        type: 'message.delta', role: 'assistant', parts: [
+          { kind: 'diff', path: '/src/production.ts', lines: [{ kind: 'added', text: 'export const ready = true' }] },
+          { kind: 'diagnostic-lsp', severity: 'error', code: 'TS1005', message: 'semicolon expected', path: '/src/production.ts' },
+        ],
+      },
+    })]).document
+
+    services.runtime.replaceDocument(document, { ownerKey: 'owner-preview', generation: 1 })
+
+    expect(await screen.findByRole('region', { name: 'Diff：/src/production.ts' })).toBeTruthy()
+    expect(await screen.findByRole('alert', { name: 'LSP error：semicolon expected' })).toBeTruthy()
+    expect(host.querySelector('[data-content-kind="content.diff"] [data-renderer-slot-id="builtin.solid.content.base"]')
+      ?? host.querySelector('[data-content-kind="content.diff"]')).not.toBeNull()
+    expect(host.querySelector('[data-content-kind="diagnostic.lsp"]')).not.toBeNull()
+  })
+
   it('canonical reasoning terminal metadata reaches the production content Slot', async () => {
     const host = document.createElement('div')
     document.body.append(host)

@@ -10,7 +10,7 @@ export const BUILTIN_SOLID_SUITE_ID = 'builtin.solid'
 export const BUILTIN_SOLID_CONTENT_SLOT_ID = 'builtin.solid.content.base'
 
 export const BUILTIN_SOLID_CONTENT_KINDS = Object.freeze([
-  ...BUILTIN_TEXT_RENDER_KINDS.map(kind => kind.id).filter(kind => kind.startsWith('content.')),
+  ...BUILTIN_TEXT_RENDER_KINDS.map(kind => kind.id).filter(kind => kind.startsWith('content.') || kind.startsWith('diagnostic.')),
   ...BUILTIN_TOOL_RENDER_KINDS.map(kind => kind.id),
   'content.plan',
   'lifecycle.retry',

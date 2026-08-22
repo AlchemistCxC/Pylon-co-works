@@ -4,7 +4,8 @@ import { buildMessageLookups } from '../../components/chat/messageLookups.ts'
 import { prepareMessages } from '../../components/chat/messagePipeline.ts'
 import type { Message, RenderMessage } from '../../components/chat/messageTypes.ts'
 import { toolInvocationSnapshot, type WorkbenchActivityNode, type WorkbenchDocument } from '../../domains/workbench/workbenchProjector.ts'
-import type { ContentPart } from '../../domains/workbench/content/contentPartSchema.ts'
+import { isValidDiffContentInput, isValidLspDiagnosticContentInput, type ContentPart, type LspDiagnosticContentPart } from '../../domains/workbench/content/contentPartSchema.ts'
+import { diffSnapshotFromPart } from '../../domains/workbench/diffSnapshot.ts'
 import type { InteractionRequest } from '../../domains/activity/interaction.ts'
 import type { MessageListItem } from '../../domains/workbench/messageListPort.ts'
 import { createToolConnectorLayoutPort } from '../../domains/workbench/toolConnectorLayoutPort.ts'
@@ -29,6 +30,7 @@ import { SolidLifecycleCard, SolidSystemErrorCard, SolidSystemNoticeCard } from 
 import { SolidToolInvocationCard } from './chat/ToolInvocationCard.solid.tsx'
 import { measureToolAnchor } from './chat/domToolConnectorMeasurement.ts'
 import { SolidSearchOrLink } from './chat/content/SearchResults.solid.tsx'
+import { SolidDiffContent, SolidLspDiagnosticContent } from './chat/content/DiffDiagnosticContent.solid.tsx'
 import type { RenderCommandPort } from '../../contracts/messageRenderer.ts'
 
 export interface SolidWorkbenchAppProps {
@@ -577,6 +579,7 @@ function activityRenderKind(activity: WorkbenchActivityNode, context: SolidWorkb
 
 function contentRenderKind(part: ContentPart): string {
   if (part.kind === 'unknown') return 'content.unknown'
+  if (part.kind === 'diagnostic-lsp') return 'diagnostic.lsp'
   return part.kind.includes('.') ? part.kind : `content.${part.kind}`
 }
 
@@ -617,6 +620,21 @@ function renderBuiltinContentPart(part: ContentPart, inline: boolean, context: S
       open: commands.canExecute?.('resource.open') ? url => { void commands.execute({ type: 'resource.open', payload: { uri: url } }) } : undefined,
       copy: commands.canExecute?.('clipboard.write') ? text => { void commands.execute({ type: 'clipboard.write', payload: { text } }) } : undefined,
     }} appearance={{ reducedMotion: context.input().reducedMotion }} />
+  }
+  if (part.kind === 'diff') {
+    const snapshot = isValidDiffContentInput(part) ? diffSnapshotFromPart(part) : null
+    return snapshot
+      ? <SolidDiffContent snapshot={snapshot} nodeId={`fallback:${snapshot.path ?? snapshot.oldPath ?? 'diff'}`}
+          appearance={{ ...context.appearanceSnapshot(), reducedMotion: context.input().reducedMotion }}
+          commands={fallbackRenderCommands(context)} />
+      : <pre class="solid-content-unknown" data-content-kind="diff">Invalid content.diff payload</pre>
+  }
+  if (part.kind === 'diagnostic-lsp') {
+    return isValidLspDiagnosticContentInput(part)
+      ? <SolidLspDiagnosticContent diagnostic={part as LspDiagnosticContentPart}
+          appearance={{ ...context.appearanceSnapshot(), reducedMotion: context.input().reducedMotion }}
+          commands={fallbackRenderCommands(context)} />
+      : <pre class="solid-content-unknown" data-content-kind="diagnostic-lsp">Invalid diagnostic.lsp payload</pre>
   }
   const summary = part.kind === 'unknown' ? part.summary : `Unsupported content kind: ${part.kind}`
   return <pre class="solid-content-unknown" data-content-kind={part.kind}>{summary}</pre>

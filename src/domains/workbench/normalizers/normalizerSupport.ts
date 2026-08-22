@@ -2,10 +2,14 @@ import {
   createUnknownContentPart,
   type ContentPart,
   type JsonValue,
+  type LspRelatedInformation,
   type SearchHighlightRange,
   type SearchResultEntry,
   type SearchResultLocation,
+  type TextPosition,
+  type TextRange,
 } from '../content/contentPartSchema.ts'
+import { diffSnapshotFromPart } from '../diffSnapshot.ts'
 import {
   isNonEmptyContentLocation,
   isOptionalNonNegativeFiniteNumber,
@@ -181,17 +185,38 @@ export function normalizeContentBlock(raw: unknown): { part: ContentPart; diagno
       if (typeof raw.message !== 'string' || !raw.message.trim() || typeof raw.path !== 'string' || !raw.path.trim()) {
         return { part: createUnknownContentPart(type, raw), diagnostic: { code: 'content.diagnostic-lsp.invalid', message: 'lsp diagnostic needs message and path', path: ['message'] } }
       }
+      const range = normalizeTextRange(raw.range)
+      const sourceRelated = Array.isArray(raw.related) ? raw.related : []
+      const related = sourceRelated.flatMap(value => {
+        const item = normalizeRelatedDiagnostic(value)
+        return item ? [item] : []
+      })
+      const knownFields = new Set(['type', 'kind', 'severity', 'code', 'source', 'message', 'path', 'range', 'related'])
+      const unknownFields = Object.keys(raw).filter(key => !knownFields.has(key))
+      const fieldsDropped = unknownFields.length > 0
+        || (raw.range !== undefined && (!range || hasUnknownRangeFields(raw.range)))
+        || (raw.related !== undefined && !Array.isArray(raw.related))
+        || related.length < sourceRelated.length
+        || sourceRelated.some(hasUnknownRelatedFields)
+        || hasInvalidKnownLspField(raw)
       return {
         part: {
           kind: 'diagnostic-lsp',
-          ...(typeof raw.severity === 'string' ? { severity: raw.severity } : {}),
-          ...(typeof raw.code === 'string' ? { code: raw.code } : {}),
-          ...(typeof raw.source === 'string' ? { source: raw.source } : {}),
-          message: raw.message,
-          path: raw.path,
-          ...(isRecord(raw.range) ? { range: raw.range } : {}),
-          ...(Array.isArray(raw.related) ? { related: raw.related } : {}),
+          ...nonEmptyTrimmed(raw.severity, 'severity'),
+          ...(typeof raw.code === 'string' || typeof raw.code === 'number' && Number.isFinite(raw.code)
+            ? { code: String(raw.code) } : {}),
+          ...nonEmptyTrimmed(raw.source, 'source'),
+          message: raw.message.trim(),
+          path: raw.path.trim(),
+          ...(range ? { range } : {}),
+          ...(related.length > 0 ? { related } : {}),
+          ...(unknownFields.length > 0 ? { unknownFields } : {}),
         },
+        ...(fieldsDropped ? { diagnostic: {
+          code: 'content.diagnostic-lsp.fields-dropped',
+          message: 'malformed or provider-private LSP fields were dropped',
+          path: [],
+        } } : {}),
       }
     }
     // C02：文件引用——path 保持原样（Windows/URI 不做字符串猜测互转）
@@ -230,8 +255,36 @@ export function normalizeContentBlock(raw: unknown): { part: ContentPart; diagno
         },
       }
     }
-    case 'diff':
-      return { part: { kind: 'diff', ...toJsonRecord(raw) } }
+    case 'diff': {
+      const rawPatch = raw.rawPatch === undefined
+        ? undefined
+        : createUnknownContentPart('diff.rawPatch', raw.rawPatch).raw
+      const snapshot = diffSnapshotFromPart({
+        ...raw,
+        kind: 'diff',
+        ...(rawPatch !== undefined ? { rawPatch } : {}),
+      })
+      const hasLocation = Boolean(snapshot?.path || snapshot?.oldPath)
+      const hasDiff = Boolean(snapshot?.binary || snapshot?.lines?.length || snapshot?.hunks?.length || snapshot?.unified)
+      if (!snapshot || !hasLocation || !hasDiff) {
+        return { part: createUnknownContentPart(type, raw), diagnostic: { code: 'content.diff.invalid', message: 'diff block needs a path and structured diff content', path: ['path'] } }
+      }
+      const dropped = Boolean(
+        snapshot.unknownFields?.length
+        || (raw.range !== undefined && (!snapshot.range || hasUnknownRangeFields(raw.range)))
+        || (Array.isArray(raw.lines) && raw.lines.length !== snapshot.lines?.length)
+        || (Array.isArray(raw.hunks) && raw.hunks.length !== snapshot.hunks?.length)
+        || hasInvalidKnownDiffField(raw, snapshot),
+      )
+      return {
+        part: { kind: 'diff', ...snapshot },
+        ...(dropped ? { diagnostic: {
+          code: 'content.diff.fields-dropped',
+          message: 'malformed or provider-private diff fields were dropped',
+          path: [],
+        } } : {}),
+      }
+    }
     case 'location':
       return { part: { kind: 'location', ...toJsonRecord(raw) } }
     case 'code':
@@ -256,6 +309,72 @@ function normalizeSearchResultEntry(value: unknown): SearchResultEntry | undefin
     ...(typeof value.score === 'number' && Number.isFinite(value.score) ? { score: value.score } : {}),
     ...nonEmptyTrimmed(value.pagingToken, 'pagingToken'),
   }
+}
+
+function normalizeTextPosition(value: unknown): TextPosition | undefined {
+  if (!isRecord(value) || !Number.isInteger(value.line) || Number(value.line) < 0) return undefined
+  if (value.character !== undefined && (!Number.isInteger(value.character) || Number(value.character) < 0)) return undefined
+  return {
+    line: Number(value.line),
+    ...(value.character !== undefined ? { character: Number(value.character) } : {}),
+  }
+}
+
+function normalizeTextRange(value: unknown): TextRange | undefined {
+  if (!isRecord(value)) return undefined
+  const start = normalizeTextPosition(value.start)
+  const end = value.end === undefined ? undefined : normalizeTextPosition(value.end)
+  if (!start || value.end !== undefined && !end) return undefined
+  if (end && (end.line < start.line || end.line === start.line && (end.character ?? 0) < (start.character ?? 0))) return undefined
+  return { start, ...(end ? { end } : {}) }
+}
+
+function hasUnknownRangeFields(value: unknown): boolean {
+  if (!isRecord(value)) return true
+  if (Object.keys(value).some(key => key !== 'start' && key !== 'end')) return true
+  return [value.start, value.end].filter(item => item !== undefined)
+    .some(item => !isRecord(item) || Object.keys(item).some(key => key !== 'line' && key !== 'character'))
+}
+
+function normalizeRelatedDiagnostic(value: unknown): LspRelatedInformation | undefined {
+  if (!isRecord(value) || typeof value.message !== 'string' || !value.message.trim()
+    || typeof value.path !== 'string' || !value.path.trim()) return undefined
+  const range = value.range === undefined ? undefined : normalizeTextRange(value.range)
+  if (value.range !== undefined && !range) return undefined
+  return {
+    message: value.message.trim(),
+    path: value.path.trim(),
+    ...(range ? { range } : {}),
+  }
+}
+
+function hasUnknownRelatedFields(value: unknown): boolean {
+  if (!isRecord(value)) return false
+  if (Object.keys(value).some(key => !['message', 'path', 'range'].includes(key))) return true
+  return value.range !== undefined && hasUnknownRangeFields(value.range)
+}
+
+function hasInvalidKnownDiffField(raw: Record<string, unknown>, snapshot: NonNullable<ReturnType<typeof diffSnapshotFromPart>>): boolean {
+  for (const key of ['oldPath', 'status'] as const) {
+    if (raw[key] !== undefined && (typeof raw[key] !== 'string' || !raw[key].trim())) return true
+  }
+  for (const key of ['oldText', 'newText', 'unified'] as const) if (raw[key] !== undefined && typeof raw[key] !== 'string') return true
+  for (const key of ['additions', 'deletions'] as const) {
+    if (raw[key] !== undefined && (!Number.isInteger(raw[key]) || Number(raw[key]) < 0)) return true
+  }
+  for (const key of ['binary', 'truncated'] as const) if (raw[key] !== undefined && typeof raw[key] !== 'boolean') return true
+  if (raw.truncation !== undefined && snapshot.truncation === undefined) return true
+  if (raw.lines !== undefined && !Array.isArray(raw.lines)) return true
+  if (raw.hunks !== undefined && !Array.isArray(raw.hunks)) return true
+  return false
+}
+
+function hasInvalidKnownLspField(raw: Record<string, unknown>): boolean {
+  for (const key of ['severity', 'source'] as const) {
+    if (raw[key] !== undefined && (typeof raw[key] !== 'string' || !raw[key].trim())) return true
+  }
+  return raw.code !== undefined
+    && !(typeof raw.code === 'string' || typeof raw.code === 'number' && Number.isFinite(raw.code))
 }
 
 function normalizeSearchResultLocation(value: unknown): SearchResultLocation | undefined {
