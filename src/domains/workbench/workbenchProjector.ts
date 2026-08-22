@@ -66,6 +66,34 @@ export interface WorkbenchActivityNode {
   readonly title?: string
   readonly status: string
   readonly parentId?: string
+  /** C04：canonical machine name（_meta.pylon.toolName 优先的归一结果）。 */
+  readonly canonicalName?: string
+  /** C04：normalized input（renderer 消费字段；rawInput 只作审计兼容留在 data/rawOutput 侧）。 */
+  readonly input?: unknown
+  /** C04：normalized locations（文件/行范围数组）。 */
+  readonly locations?: unknown
+  /** C04：provider-neutral action（read/write/execute/…）。 */
+  readonly action?: string
+  /** C04：capability snapshot（如 ['fs','mcp','dynamic-schema']）。 */
+  readonly capabilities?: unknown
+  /** C04：父工具调用 id（子代理/嵌套工具关系，semantic parent）。 */
+  readonly parentToolCallId?: string
+  /** C04：终态耗时（ms），由 completed/redacted 终态事件携带。 */
+  readonly durationMs?: number
+  /** C04：failed/cancelled 的结构化错误摘要。 */
+  readonly error?: string
+  /** C04：result parts（ContentPart 数组，renderer 递归渲染）。 */
+  readonly parts?: unknown
+  /** C04：审计兼容原始输出（不进 UI 主路径）。 */
+  readonly rawOutput?: unknown
+  /** C04：wire 原始工具名（generic 卡显示；与展示 title 分离）。 */
+  readonly providerName?: string
+  /** C04：审计兼容原始 input（不进 UI 主路径）。 */
+  readonly rawInput?: unknown
+  /** C04：wire kind（ACP kind 字段直通）。 */
+  readonly toolKindWire?: string
+  /** C04：本地化显示标题（title 直通；不作为身份）。 */
+  readonly displayName?: string
   readonly orphan: boolean
   readonly data?: unknown
   readonly sequence: number
@@ -176,6 +204,77 @@ export function selectActivities(document: WorkbenchDocument): readonly Workbenc
 
 export function selectInteractions(document: WorkbenchDocument): readonly WorkbenchInteraction[] {
   return document.interactions.filter(interaction => interaction.status === 'requested')
+}
+
+/** C04：工具调用 provider-neutral snapshot（renderer 消费的唯一形态）。 */
+export interface ToolInvocationSnapshot {
+  readonly id: string
+  /** 展示名（wire title 直通；缺失时 undefined，由 generic 卡显示 provider name）。 */
+  readonly title?: string
+  /** canonical machine name（_meta.pylon.toolName 优先）。 */
+  readonly canonicalName?: string
+  /** wire 原始 name（generic 卡的 provider name 显示）。 */
+  readonly name?: string
+  readonly semanticKind?: string
+  readonly kind?: string
+  readonly action?: string
+  readonly capabilities?: unknown
+  /** normalized input（renderer 消费字段）。 */
+  readonly input?: unknown
+  /** 审计兼容原始 input（不进 UI 主路径）。 */
+  readonly rawInput?: unknown
+  readonly locations?: unknown
+  readonly status?: string
+  readonly progress?: unknown
+  readonly parentToolCallId?: string
+  readonly result?: {
+    readonly status?: string
+    readonly parts?: unknown
+    readonly rawOutput?: unknown
+    readonly error?: string
+    readonly durationMs?: number
+  }
+}
+
+/**
+ * C04 架构补全：从 document activities 收窄出 typed 工具调用快照。
+ * 缺字段保持 undefined（不伪造空值/零值）；未知 id 返回 null。
+ */
+export function toolInvocationSnapshot(document: WorkbenchDocument, toolCallId: string): ToolInvocationSnapshot | null {
+  const node = document.activities.find(entry => entry.id === toolCallId && entry.kind === 'tool')
+  if (!node) return null
+  const data = isRecord(node.data) ? node.data : {}
+  const event = isRecord(data.event) ? data.event : {}
+  const tool = isRecord(event.tool) ? event.tool : {}
+  // C04：result 只在真实结果到达后存在——running 中不伪造 {status:'running'}
+  const terminalOrHasOutput = TERMINAL_TOOL_STATUSES.has(node.status) || node.parts !== undefined || node.rawOutput !== undefined || node.error !== undefined
+  const resultFields = terminalOrHasOutput ? {
+    ...(node.status !== undefined ? { status: node.status } : {}),
+    ...(node.parts !== undefined ? { parts: node.parts } : {}),
+    ...(node.rawOutput !== undefined ? { rawOutput: node.rawOutput } : {}),
+    ...(node.error !== undefined ? { error: node.error } : {}),
+    ...(node.durationMs !== undefined ? { durationMs: node.durationMs } : {}),
+  } : {}
+  // C04：title/canonicalName/name 三者语义分离——title 是展示标题，canonicalName 是归一机器名，
+  // name 是 wire 原始名。node.title 在 reduceTool 里由 tool.name || tool.title 回填，
+  // 因此 wire name 从原始事件（data.event.tool）取回，不与展示标题混淆。
+  return Object.freeze({
+    id: node.id,
+    ...(node.displayName !== undefined ? { title: node.displayName } : node.title !== undefined ? { title: node.title } : {}),
+    ...(node.canonicalName !== undefined ? { canonicalName: node.canonicalName } : {}),
+    ...(node.providerName !== undefined ? { name: node.providerName } : {}),
+    ...(node.semanticKind !== undefined ? { semanticKind: node.semanticKind } : {}),
+    ...(node.toolKindWire !== undefined ? { kind: node.toolKindWire } : {}),
+    ...(node.action !== undefined ? { action: node.action } : {}),
+    ...(node.capabilities !== undefined ? { capabilities: node.capabilities } : {}),
+    ...(node.input !== undefined ? { input: node.input } : {}),
+    ...(node.rawInput !== undefined ? { rawInput: node.rawInput } : {}),
+    ...(node.locations !== undefined ? { locations: node.locations } : {}),
+    ...(node.status !== undefined ? { status: node.status } : {}),
+    ...(isRecord(tool.progress) ? { progress: jsonSnapshot(tool.progress) } : {}),
+    ...(node.parentToolCallId !== undefined ? { parentToolCallId: node.parentToolCallId } : {}),
+    ...(Object.keys(resultFields).length > 0 ? { result: resultFields } : {}),
+  })
 }
 
 export function selectSessionSurface(document: WorkbenchDocument): WorkbenchSessionSurface {
@@ -340,16 +439,71 @@ function reduceReasoning(document: WorkbenchDocument, envelope: WorkbenchEventEn
 function reduceTool(document: WorkbenchDocument, envelope: WorkbenchEventEnvelope, event: ToolEvent): WorkbenchDocument {
   const tool = isRecord(event.tool) ? event.tool : {}
   const id = stringValue(tool.toolCallId) || envelope.identity.toolCallId || envelope.eventId
-  const status = event.type === 'tool.started' ? 'running' : event.type === 'tool.failed' ? 'failed' : event.type === 'tool.completed' ? 'completed' : stringValue(tool.status) || 'progress'
+  const status = toolLifecycleStatus(event.type, stringValue(tool.status) || 'progress')
+  // C04 DIC-C04-01/架构补全：canonical 字段自 normalized payload 收窄进 activity node，
+  // renderer 经 toolInvocationSnapshot 消费，不再读 provider raw。
+  const previous = document.activities.find(node => node.id === id && node.kind === 'tool')
+  const terminal = status === 'completed' || status === 'failed' || status === 'cancelled'
   const node: WorkbenchActivityNode = {
-    id, kind: 'tool', title: stringValue(tool.name) || stringValue(tool.title), status,
-    ...(stringValue(tool.semanticKind) ? { semanticKind: stringValue(tool.semanticKind) } : {}),
-    ...(stringValue(tool.parentActivityId) ? { parentId: stringValue(tool.parentActivityId) } : {}),
-    orphan: false, data: event, sequence: envelope.sequence,
+    // C04/DIC：node.title 是工具身份（machine name，_meta.pylon.toolName 优先）；
+    // 本地化 title 只进 snapshot.title 供显示，不作为身份。
+    id, kind: 'tool', title: stringValue(tool.name) || previous?.title || (stringValue(tool.name) || undefined), status,
+    ...(stringValue(tool.semanticKind) ? { semanticKind: stringValue(tool.semanticKind) } : previous?.semanticKind ? { semanticKind: previous.semanticKind } : {}),
+    ...(stringValue(tool.parentToolUseId) ? { parentToolCallId: stringValue(tool.parentToolUseId) } : previous?.parentToolCallId ? { parentToolCallId: previous.parentToolCallId } : {}),
+    ...(stringValue(tool.parentActivityId) ? { parentId: stringValue(tool.parentActivityId) } : previous?.parentId ? { parentId: previous.parentId } : {}),
+    ...(stringValue(tool.canonicalName) ? { canonicalName: stringValue(tool.canonicalName) } : previous?.canonicalName ? { canonicalName: previous.canonicalName } : {}),
+    ...(stringValue(tool.kind) ? { toolKindWire: stringValue(tool.kind) } : previous?.toolKindWire ? { toolKindWire: previous.toolKindWire } : {}),
+    ...(stringValue(tool.title) ? { displayName: stringValue(tool.title) } : previous?.displayName ? { displayName: previous.displayName } : {}),
+    ...(isRecord(tool.input) ? { input: jsonSnapshot(tool.input) } : {}),
+    ...(Array.isArray(tool.locations) ? { locations: jsonSnapshot(tool.locations) } : {}),
+    ...(stringValue(tool.action) ? { action: stringValue(tool.action) } : {}),
+    ...(Array.isArray(tool.capabilities) ? { capabilities: jsonSnapshot(tool.capabilities) } : {}),
+    ...(Number.isFinite(Number(tool.durationMs)) ? { durationMs: Number(tool.durationMs) } : {}),
+    ...(stringValue(tool.error) ? { error: stringValue(tool.error) } : {}),
+    ...(Array.isArray(tool.parts) ? { parts: jsonSnapshot(tool.parts) } : {}),
+    ...(tool.rawOutput !== undefined ? { rawOutput: jsonSnapshot(tool.rawOutput) } : {}),
+    ...(stringValue(tool.name) ? { providerName: stringValue(tool.name) } : previous?.providerName ? { providerName: previous.providerName } : {}),
+    ...(tool.rawInput !== undefined ? { rawInput: jsonSnapshot(tool.rawInput) } : previous?.rawInput !== undefined ? { rawInput: previous.rawInput } : {}),
+    orphan: false,
+    // C04 终态幂等：终态一旦写入，迟到的 progress 不回退状态
+    data: event, sequence: envelope.sequence,
   }
-  const activities = upsertActivity(document.activities, node)
-  const timeline = updateTimeline(document.timeline, envelope.eventId, { status, title: node.title })
+  const merged = mergeToolActivity(previous, node, terminal)
+  const activities = upsertActivity(document.activities, merged ?? node)
+  const timeline = updateTimeline(document.timeline, envelope.eventId, { status: merged?.status ?? status, title: merged?.title ?? node.title })
   return { ...document, activities, timeline }
+}
+
+/** 工具生命周期状态机：started→running、progress 保持、终态幂等。 */
+function toolLifecycleStatus(eventType: string, payloadStatus: string): string {
+  if (eventType === 'tool.started') return 'running'
+  if (eventType === 'tool.failed') return 'failed'
+  if (eventType === 'tool.completed') return 'completed'
+  if (eventType === 'tool.cancelled') return 'cancelled'
+  return payloadStatus || 'progress'
+}
+
+const TERMINAL_TOOL_STATUSES: ReadonlySet<string> = new Set(['completed', 'failed', 'cancelled'])
+
+/**
+ * C04 终态幂等合并：previous 已是终态时，迟到事件只补充字段不回退状态
+ * （failed 不伪装 completed，progress 不复活已结束的调用）。
+ */
+function mergeToolActivity(previous: WorkbenchActivityNode | undefined, next: WorkbenchActivityNode, nextIsTerminal: boolean): WorkbenchActivityNode | null {
+  if (!previous) return null
+  const previousTerminal = TERMINAL_TOOL_STATUSES.has(previous.status)
+  if (previousTerminal && !nextIsTerminal) {
+    // 只允许补充此前缺失的输出字段，状态与标题保持终态原值
+    const filled: WorkbenchActivityNode = { ...previous }
+    for (const key of ['rawOutput', 'error', 'parts'] as const) {
+      const value = next[key]
+      if (value !== undefined && filled[key] === undefined) {
+        (filled as unknown as Record<string, unknown>)[key] = value
+      }
+    }
+    return filled
+  }
+  return next
 }
 
 function reduceActivity(document: WorkbenchDocument, envelope: WorkbenchEventEnvelope, event: ActivityEvent): WorkbenchDocument {
@@ -492,6 +646,20 @@ function textFromParts(parts: readonly ContentPart[]): string {
 function identityKeyOf(value: WorkbenchEventEnvelope | WorkbenchMessage): string {
   const identity = value.identity
   return identity.messageId || identity.turnId || identity.toolCallId || identity.taskId || identity.interactionId || ''
+}
+
+/** C04：把 normalized 字段冻结为可安全持有的 Json 快照（非 JSON 值降级为 undefined）。 */
+function jsonSnapshot(value: unknown): unknown {
+  if (value === undefined) return undefined
+  try {
+    return structuredClone(value)
+  } catch {
+    try {
+      return JSON.parse(JSON.stringify(value))
+    } catch {
+      return undefined
+    }
+  }
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {
