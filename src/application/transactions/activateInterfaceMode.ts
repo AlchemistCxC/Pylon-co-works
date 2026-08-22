@@ -96,6 +96,23 @@ export function activateInterfaceMode(mode: InterfaceMode): boolean {
   return true
 }
 
+/** Reset the Theme Store, then restore the current mode's remembered/default Presentation Profile. */
+export function resetThemeForActiveInterfaceMode(): boolean {
+  const mode = useInterfaceModeStore.getState().interfaceMode
+  const modeContribution = resolveActivatableMode(mode)
+  if (!modeContribution) return false
+  const state = useInterfaceModeStore.getState()
+  const profileId = state.profileByMode[mode] || modeContribution.defaultPresentationProfileId
+  const registry = getPresentationProfileRegistry()
+  const profile = registry.resolve(profileId)?.value
+    ?? registry.getSnapshot().entries.find(entry => presentationProfileInterfaceMode(entry.value) === mode)?.value
+  if (!profile) return false
+
+  useStore.getState().resetTheme()
+  applyModeProfile(mode, profile)
+  return true
+}
+
 /**
  * 清理指向已注销 Interface Mode 的残留 presentation profile 偏好。
  * 只动偏好存储（可重建态），不触碰 registry——registry 权威归插件生命周期所有。

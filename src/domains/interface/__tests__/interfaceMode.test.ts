@@ -1,19 +1,56 @@
 // @vitest-environment jsdom
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
-import { activateInterfaceMode, presentationProfileInterfaceMode, resolveInterfaceModeSuite } from '../../../application/transactions/activateInterfaceMode.ts'
+import { activateInterfaceMode, presentationProfileInterfaceMode, resetThemeForActiveInterfaceMode, resolveInterfaceModeSuite } from '../../../application/transactions/activateInterfaceMode.ts'
 import { createPluginIdentity } from '../../../plugin-runtime/pluginIdentity.ts'
-import { getInterfaceModeRegistry, getPresentationProfileRegistry } from '../../../plugin-runtime/runtimeServices.ts'
+import { getInterfaceModeRegistry, getPresentationProfileRegistry, getRendererRegistry } from '../../../plugin-runtime/runtimeServices.ts'
 import type { AsyncDisposable } from '../../../plugin-runtime/registry/types.ts'
 import { usePresentationPreferenceStore } from '../../presentation/presentationPreferenceStore.ts'
 import { useStore } from '../../../store.ts'
 import { DEFAULT_INTERFACE_MODE, DEFAULT_INTERFACE_PROFILES, useInterfaceModeStore } from '../interfaceModeStore.ts'
+import { BUILTIN_PRESENTATION_PROFILES } from '../../../plugins/core/renderer/builtinPresentationProfiles.ts'
+import { BUILTIN_INTERFACE_MODES } from '../../../plugins/core/interfaceMode/builtinInterfaceModes.ts'
 
 const registrations: AsyncDisposable[] = []
 
-beforeEach(() => {
-  localStorage.clear()
+const CC_INPUT_TOKEN_KEYS = [
+  'inputMode', 'inputVariant', 'inputBg', 'inputBorderColor', 'inputFocusBorder',
+  'inputRadius', 'inputFocusRingWidth', 'ccVariant', 'cliHintMode', 'footerLayout',
+] as const
+
+function resetAppearanceState(): void {
+  useStore.setState(useStore.getInitialState(), true)
   useInterfaceModeStore.setState(useInterfaceModeStore.getInitialState(), true)
   usePresentationPreferenceStore.setState(usePresentationPreferenceStore.getInitialState(), true)
+}
+
+function appearanceSnapshot(): Record<string, unknown> {
+  const theme = useStore.getState()
+  return {
+    interfaceMode: useInterfaceModeStore.getState().interfaceMode,
+    activeProfileId: usePresentationPreferenceStore.getState().activeProfileId,
+    ...Object.fromEntries(CC_INPUT_TOKEN_KEYS.map(key => [key, theme[key]])),
+  }
+}
+
+function registerBuiltinAppearanceContributions(): void {
+  const owner = createPluginIdentity('test.interface.builtins', 'one')
+  const profiles = getPresentationProfileRegistry()
+  const modes = getInterfaceModeRegistry()
+  const renderers = getRendererRegistry()
+  registrations.push(renderers.registerSuite(owner, {
+    id: 'builtin.solid', label: 'Test Solid Suite', apiVersion: 1,
+    runtime: { framework: 'solid', version: '1.0.0' },
+    compatibility: { documentSchema: 'workbench.v1', renderCatalogSchema: 1 },
+    requiredKinds: ['content.unknown'],
+    factory: () => ({}),
+  }))
+  for (const profile of BUILTIN_PRESENTATION_PROFILES) registrations.push(profiles.register(owner, profile))
+  for (const mode of BUILTIN_INTERFACE_MODES) registrations.push(modes.register(owner, mode))
+}
+
+beforeEach(() => {
+  localStorage.clear()
+  resetAppearanceState()
 })
 
 afterEach(async () => {
@@ -77,5 +114,42 @@ describe('Interface Mode contract', () => {
     expect(useInterfaceModeStore.getState().interfaceMode).toBe('modern-gui')
     expect(usePresentationPreferenceStore.getState().activeProfileId).toBe('builtin.presentation.modern-gui')
     expect(useStore.getState()).toMatchObject({ msgStyle: 'bubble', inputVariant: 'composer' })
+  })
+
+  it('四条重置/切换路径回到 Modern 后得到同一套中控与输入 token', () => {
+    registerBuiltinAppearanceContributions()
+
+    resetAppearanceState()
+    expect(resetThemeForActiveInterfaceMode()).toBe(true)
+    expect(activateInterfaceMode('modern-gui')).toBe(true)
+    const resetThenModern = appearanceSnapshot()
+
+    resetAppearanceState()
+    expect(resetThemeForActiveInterfaceMode()).toBe(true)
+    expect(activateInterfaceMode('terminal-like')).toBe(true)
+    expect(activateInterfaceMode('modern-gui')).toBe(true)
+    const terminalThenModern = appearanceSnapshot()
+
+    resetAppearanceState()
+    expect(resetThemeForActiveInterfaceMode()).toBe(true)
+    expect(activateInterfaceMode('terminal-like')).toBe(true)
+    expect(resetThemeForActiveInterfaceMode()).toBe(true)
+    expect(activateInterfaceMode('modern-gui')).toBe(true)
+    const terminalResetThenModern = appearanceSnapshot()
+
+    resetAppearanceState()
+    expect(resetThemeForActiveInterfaceMode()).toBe(true)
+    expect(activateInterfaceMode('terminal-like')).toBe(true)
+    expect(activateInterfaceMode('modern-gui')).toBe(true)
+    expect(resetThemeForActiveInterfaceMode()).toBe(true)
+    const terminalModernThenReset = appearanceSnapshot()
+
+    expect(resetThenModern).toMatchObject({
+      interfaceMode: 'modern-gui',
+      activeProfileId: 'builtin.presentation.modern-gui',
+    })
+    expect(terminalThenModern).toEqual(resetThenModern)
+    expect(terminalResetThenModern).toEqual(resetThenModern)
+    expect(terminalModernThenReset).toEqual(resetThenModern)
   })
 })
