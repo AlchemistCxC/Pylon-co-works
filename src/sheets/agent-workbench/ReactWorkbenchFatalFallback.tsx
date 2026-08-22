@@ -7,6 +7,7 @@ import {
   isBinaryFileContent,
 } from '../../domains/rendererContent/fileContentPresentation.ts'
 import type { WorkbenchDocumentReader } from '../../renderers/solid-workbench/workbenchHostPort.ts'
+import { plainGoalSummary, readablePlanLines } from '../../domains/workbench/plan/goalModel.ts'
 
 export interface WorkbenchFatalFailure {
   readonly suiteId: string
@@ -45,6 +46,24 @@ export default function ReactWorkbenchFatalFallback(props: {
           <button type="button" onClick={props.onOpenDiagnostics}>打开诊断</button>
         </div>
       </header>
+      {document && document.plan.entries.length > 0 && <section aria-label="计划 fallback" className="react-workbench-fatal-plan">
+        <strong>计划</strong>
+        <ol>{readablePlanLines(document.plan.entries).map((line, index) => <li key={`${document.plan.entries[index]?.id ?? index}`}>{line}</li>)}</ol>
+      </section>}
+      {document?.goal.current && <section role="status" aria-label="目标 fallback" className="react-workbench-fatal-goal">
+        <strong>目标</strong>
+        <p>{plainGoalSummary(document.goal.current)}</p>
+        {document.goal.current.accounting?.timeUsedSeconds !== undefined && <small>
+          耗时 {document.goal.current.accounting.timeUsedSeconds} 秒
+        </small>}
+        {(document.goal.current.metadata || document.goal.current.accounting?.metadata) && <details>
+          <summary>未知字段</summary>
+          <pre>{JSON.stringify({
+            ...document.goal.current.metadata,
+            accounting: document.goal.current.accounting?.metadata,
+          }, null, 2)}</pre>
+        </details>}
+      </section>}
       <div className="react-workbench-fatal-history" aria-label="会话历史">
         {document?.messages.map(message => <article key={message.id} data-message-role={message.role}>
           <span>{message.role === 'user' ? 'User' : message.role === 'reasoning' ? 'Reasoning' : 'Assistant'}</span>

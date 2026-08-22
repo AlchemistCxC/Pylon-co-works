@@ -91,6 +91,15 @@ function session(id: string, source: string): Session {
   }
 }
 
+function planSlotSummary(payload: unknown): string {
+  const value = payload as {
+    entries?: readonly { id?: unknown; blockedReason?: unknown }[]
+    goal?: { objective?: unknown; accounting?: { timeUsedSeconds?: unknown } }
+  }
+  const entry = value.entries?.[0]
+  return `plan slot: ${String(entry?.id)} / ${String(entry?.blockedReason)} / ${String(value.goal?.objective)} / ${String(value.goal?.accounting?.timeUsedSeconds)}`
+}
+
 describe('AgentSheetView renderer mode context', () => {
   beforeEach(resetStores)
 
@@ -101,12 +110,12 @@ describe('AgentSheetView renderer mode context', () => {
     expect(container.querySelector('[data-pylon-workbench="modern-gui"]')).toBeNull()
   })
 
-  it('内置 Solid Suite 在生产 Registry 注册并消费 C00–C03 base Slot', async () => {
+  it('内置 Solid Suite 在生产 Registry 注册并消费 C00–C08 base Slot', async () => {
     const baseSlot = getRendererRegistry().snapshot().rendererSlots.find(entry => entry.value.id === 'builtin.solid.content.base')
     expect(baseSlot?.value).toMatchObject({
       targetSuites: ['builtin.solid'],
       fallback: true,
-      kinds: expect.arrayContaining(['content.text', 'content.reasoning', 'content.file-reference', 'content.document', 'content.image']),
+      kinds: expect.arrayContaining(['content.text', 'content.reasoning', 'content.file-reference', 'content.document', 'content.image', 'content.plan']),
     })
 
     useIdentityStore.setState({ sessions: [session('session-1', 'local:a')] })
@@ -737,6 +746,7 @@ describe('AgentSheetView renderer mode context', () => {
   })
 
   it('canonical plan/goal snapshot 经 content.plan Slot seam 消费', async () => {
+    const destroyed = vi.fn()
     const registration = getRendererRegistry().registerSlot(
       createPluginIdentity('test.production-plan-slot', 'runtime'),
       {
@@ -747,14 +757,14 @@ describe('AgentSheetView renderer mode context', () => {
           rendererId: 'test.production-plan-slot', kind: 'solid',
           mount(container) {
             const node = document.createElement('div')
-            node.textContent = `plan slot: ${String((snapshot.payload as { entries?: readonly unknown[] }).entries?.length ?? 0)}`
+            node.textContent = planSlotSummary(snapshot.payload)
             container.append(node)
             return node
           },
           update(handle, next) {
-            ;(handle as HTMLElement).textContent = `plan slot: ${String((next.payload as { entries?: readonly unknown[] }).entries?.length ?? 0)}`
+            ;(handle as HTMLElement).textContent = planSlotSummary(next.payload)
           },
-          destroy(handle) { (handle as HTMLElement).remove() }, on: () => () => {},
+          destroy(handle) { destroyed(handle); (handle as HTMLElement).remove() }, on: () => () => {},
         }),
       },
     )
@@ -763,14 +773,96 @@ describe('AgentSheetView renderer mode context', () => {
       useWorkspaceStore.setState(state => ({ workspaceSheets: { ...state.workspaceSheets, activeSheetId: 'agent-sheet' } }))
       render(<AgentSheetView sheet={sheet({ sidebarMode: 'work' })} ctx={ctx} />)
       await screen.findByLabelText('Solid Agent Workbench', {}, { timeout: 5_000 })
-      publishPluginEvent(normalizeRawEvent(
-        { source: 'hermes', update: { sessionUpdate: 'plan', entries: [{ id: 'task-1', content: 'Wire plan', status: 'blocked', blockedReason: 'dependency' }] } },
-        { owner: { profileId: 'profile-a', agentId: 'peri', localSessionId: 'local:a' }, clientGeneration: 1, sequence: 1, receivedAt: '2026-08-22T00:00:01.000Z' },
-      ).event)
+      publishPluginEvent(createWorkbenchEnvelope({
+        sessionId: 'local:a', recordedAt: '2026-08-22T00:00:01.000Z', sequence: 1,
+        source: { provider: 'hermes', sourceId: 'plan-1' },
+        provenance: { origin: 'local-observed', trust: 'authoritative' },
+        event: {
+          type: 'plan.replaced',
+          entries: [{ id: 'task-1', content: 'Wire plan', status: 'blocked', blockedReason: 'dependency' }],
+        },
+      }))
+      publishPluginEvent(createWorkbenchEnvelope({
+        sessionId: 'local:a', recordedAt: '2026-08-22T00:00:02.000Z', sequence: 2,
+        source: { provider: 'peri', sourceId: 'goal-1' },
+        provenance: { origin: 'local-observed', trust: 'authoritative' },
+        event: {
+          type: 'goal.updated',
+          goal: { goalId: 'goal-1', objective: 'Production goal', status: 'active', accounting: { timeUsedSeconds: 12 } },
+        },
+      }))
 
-      expect(await screen.findByText('plan slot: 1')).toBeTruthy()
+      expect(await screen.findByText('plan slot: task-1 / dependency / Production goal / 12')).toBeTruthy()
+      await registration.dispose()
+
+      await waitFor(() => expect(screen.queryByText('plan slot: task-1 / dependency / Production goal / 12')).toBeNull())
+      screen.getByRole('button', { name: /1 任务.*1 阻塞/ }).click()
+      expect(await screen.findByRole('treeitem', { name: /Wire plan.*已阻塞/ })).toBeTruthy()
+      expect(screen.getByRole('status', { name: /目标：Production goal.*进行中/ })).toBeTruthy()
+      expect(destroyed).toHaveBeenCalled()
+      const handles = destroyed.mock.calls.map(call => call[0])
+      expect(new Set(handles).size).toBe(handles.length)
     } finally {
       await registration.dispose()
+    }
+  })
+
+  it('C08 settings update the mounted production plan Slot without remounting or changing business state', async () => {
+    const settings = getRendererSettingsStore()
+    settings.reset()
+    settings.setOverride('kind.content.plan.defaultExpanded', true)
+    settings.setOverride('kind.content.plan.collapseCompleted', false)
+    settings.setOverride('kind.content.plan.showPriority', false)
+    settings.setOverride('kind.content.plan.showBudget', false)
+    settings.setOverride('kind.content.plan.density', 'compact')
+    settings.setOverride('kind.content.plan.connectorStyle', 'dashed')
+    settings.setOverride('kind.content.plan.indent', 28)
+    settings.setOverride('kind.content.plan.activeColor', '#112233')
+    try {
+      useIdentityStore.setState({ sessions: [session('session-1', 'local:a')] })
+      useWorkspaceStore.setState(state => ({ workspaceSheets: { ...state.workspaceSheets, activeSheetId: 'agent-sheet' } }))
+      const { container } = render(<AgentSheetView sheet={sheet({ sidebarMode: 'work' })} ctx={ctx} />)
+      await screen.findByLabelText('Solid Agent Workbench', {}, { timeout: 5_000 })
+      publishPluginEvent(createWorkbenchEnvelope({
+        sessionId: 'local:a', recordedAt: '2026-08-22T00:00:01.000Z', sequence: 1,
+        source: { provider: 'claude', sourceId: 'plan-settings' },
+        provenance: { origin: 'local-observed', trust: 'authoritative' },
+        event: { type: 'plan.replaced', entries: [{ id: 'active', content: 'Stable plan state', status: 'in_progress', priority: 2 }] },
+      }))
+      publishPluginEvent(createWorkbenchEnvelope({
+        sessionId: 'local:a', recordedAt: '2026-08-22T00:00:02.000Z', sequence: 2,
+        source: { provider: 'peri', sourceId: 'goal-settings' },
+        provenance: { origin: 'local-observed', trust: 'authoritative' },
+        event: { type: 'goal.updated', goal: { goalId: 'g', objective: 'Stable goal', status: 'active', tokenBudget: 100, tokensUsed: 25 } },
+      }))
+
+      const region = await screen.findByRole('region', { name: '计划与目标' })
+      expect(region).toHaveAttribute('data-density', 'compact')
+      expect(region).toHaveAttribute('data-connector-style', 'dashed')
+      expect(region.style.getPropertyValue('--plan-indent')).toBe('28px')
+      expect(screen.getByRole('treeitem', { name: /Stable plan state/ })).toBeTruthy()
+      expect(container.querySelector('.task-tree-priority')).toBeNull()
+      expect(screen.queryByRole('progressbar')).toBeNull()
+
+      settings.setOverride('kind.content.plan.showPriority', true)
+      settings.setOverride('kind.content.plan.showBudget', true)
+      settings.setOverride('kind.content.plan.density', 'comfortable')
+      settings.setOverride('kind.content.plan.connectorStyle', 'solid')
+      settings.setOverride('kind.content.plan.indent', 36)
+      settings.setOverride('kind.content.plan.activeColor', '#445566')
+
+      await waitFor(() => {
+        expect(region).toHaveAttribute('data-density', 'comfortable')
+        expect(region).toHaveAttribute('data-connector-style', 'solid')
+        expect(region.style.getPropertyValue('--plan-indent')).toBe('36px')
+        expect(container.querySelector('.task-tree-priority')?.textContent).toBe('P2')
+        expect(screen.getByRole('progressbar')).toHaveAttribute('aria-valuenow', '25')
+      })
+      expect(screen.getByRole('region', { name: '计划与目标' })).toBe(region)
+      expect(screen.getByText('Stable plan state')).toBeTruthy()
+      expect(screen.getByText('Stable goal')).toBeTruthy()
+    } finally {
+      settings.reset()
     }
   })
 

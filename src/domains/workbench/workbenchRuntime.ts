@@ -1,6 +1,6 @@
 import type { Message } from '../../components/chat/messageTypes.ts'
 import type { PlanEntry } from '../tasks/planTypes.ts'
-import type { PlanEntryV2 } from './plan/goalModel.ts'
+import { normalizePlanEntries, type PlanEntryV2 } from './plan/goalModel.ts'
 import type { GenerationPhase, GenerationSummary } from './generationFooterContracts.ts'
 import type { WorkbenchDocument, WorkbenchMessage } from './workbenchProjector.ts'
 import { createWorkbenchDocument, selectGoal, selectPlan } from './workbenchProjector.ts'
@@ -298,6 +298,10 @@ function documentFromLegacy(snapshot: Omit<WorkbenchRuntimeSnapshot, 'revision'>
   return {
     ...base,
     messages,
+    plan: {
+      ...base.plan,
+      entries: normalizePlanEntries(snapshot.tasks),
+    },
     session: {
       ...base.session,
       status: snapshot.status,

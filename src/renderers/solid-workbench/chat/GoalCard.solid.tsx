@@ -4,6 +4,11 @@ import type { GoalSnapshot } from '../../../domains/workbench/plan/goalModel.ts'
 export interface SolidGoalCardProps {
   goal: GoalSnapshot | undefined
   reducedMotion?: boolean
+  showBudget?: boolean
+  foreground?: string
+  mutedForeground?: string
+  borderColor?: string
+  background?: string
 }
 
 function statusLabel(status: GoalSnapshot['status']): string {
@@ -21,10 +26,12 @@ function statusLabel(status: GoalSnapshot['status']): string {
  * 无动画依赖（reduced-motion 只作为 data 标记暴露给主题层）。
  */
 export function SolidGoalCard(props: SolidGoalCardProps) {
+  const tokensUsed = () => props.goal?.tokensUsed ?? props.goal?.accounting?.tokensUsed
   const percent = () => {
     const goal = props.goal
-    if (!goal?.tokenBudget || goal.tokenBudget <= 0 || goal.tokensUsed === undefined) return undefined
-    return Math.min(100, Math.round((goal.tokensUsed / goal.tokenBudget) * 100))
+    const used = tokensUsed()
+    if (!goal?.tokenBudget || goal.tokenBudget <= 0 || used === undefined) return undefined
+    return Math.min(100, Math.round((used / goal.tokenBudget) * 100))
   }
   const ariaLabel = () => {
     const goal = props.goal
@@ -41,12 +48,13 @@ export function SolidGoalCard(props: SolidGoalCardProps) {
           data-reduced-motion={props.reducedMotion ? 'true' : 'false'}
           role="status"
           aria-label={ariaLabel()}
+          style={{ color: props.foreground, background: props.background, 'border-color': props.borderColor }}
         >
           <div class="goal-card-head">
             <span class="goal-card-status" aria-hidden="true">{statusLabel(goal().status)}</span>
             <span class="goal-card-objective">{goal().objective ?? '（无 objective）'}</span>
           </div>
-          <Show when={percent() !== undefined}>
+          <Show when={props.showBudget !== false && percent() !== undefined}>
             <div
               class="goal-card-budget"
               role="progressbar"
@@ -54,7 +62,12 @@ export function SolidGoalCard(props: SolidGoalCardProps) {
               aria-valuemax={100}
               aria-valuenow={percent()}
             >
-              {`预算 ${percent()}%（${goal().tokensUsed}/${goal().tokenBudget}）`}
+              {`预算 ${percent()}%（${tokensUsed()}/${goal().tokenBudget}）`}
+            </div>
+          </Show>
+          <Show when={goal().accounting?.timeUsedSeconds !== undefined}>
+            <div class="goal-card-accounting" style={{ color: props.mutedForeground }}>
+              {`${goal().accounting!.timeUsedSeconds} 秒`}
             </div>
           </Show>
           <Show when={goal().status === 'blocked' && goal().blockedReason}>
@@ -64,6 +77,12 @@ export function SolidGoalCard(props: SolidGoalCardProps) {
             <details class="goal-card-metadata">
               <summary>未知字段</summary>
               <pre>{JSON.stringify(goal().metadata, null, 2)}</pre>
+            </details>
+          </Show>
+          <Show when={goal().accounting?.metadata !== undefined}>
+            <details class="goal-card-metadata goal-card-accounting-metadata">
+              <summary>Accounting 未知字段</summary>
+              <pre>{JSON.stringify(goal().accounting!.metadata, null, 2)}</pre>
             </details>
           </Show>
         </div>

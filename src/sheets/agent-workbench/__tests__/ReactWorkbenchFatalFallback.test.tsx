@@ -140,4 +140,44 @@ describe('React Workbench fatal fallback', () => {
     expect(screen.getByRole('button', { name: '打开媒体：危险视频' })).toBeDisabled()
     expect(screen.getByRole('button', { name: '下载媒体：危险视频' })).toBeDisabled()
   })
+
+  it('keeps canonical C08 plan and goal readable when the Solid Suite fails', () => {
+    const current: WorkbenchDocument = {
+      ...document(5, ''),
+      plan: {
+        sessionId: 'local:a', revision: 1,
+        entries: [
+          { id: 'cancelled', content: '[cancelled] 用户原文', status: 'cancelled' },
+          { id: 'blocked', content: '等待依赖', status: 'blocked', blockedReason: 'C07 未完成' },
+          { id: 'unknown', content: '供应商状态', status: 'unknown', rawStatus: 'paused-by-provider' },
+        ],
+      },
+      goal: {
+        current: {
+          goalId: 'goal-1', objective: '闭环 C08', status: 'blocked', tokenBudget: 1000, tokensUsed: 250,
+          blockedReason: '等待依赖', accounting: { tokensUsed: 250, timeUsedSeconds: 45, metadata: { cost: 0.3 } },
+        },
+      },
+    }
+    const reader: WorkbenchDocumentReader = {
+      getSnapshot: () => current,
+      subscribe: () => () => {},
+      getSlice: () => undefined as never,
+      subscribeSlice: () => () => {},
+    }
+    render(<ReactWorkbenchFatalFallback
+      document={reader}
+      failure={{ suiteId: 'builtin.solid', phase: 'mount', message: 'plan slot failed' }}
+      onRetry={vi.fn()}
+      onSelectSuite={vi.fn()}
+      onOpenDiagnostics={vi.fn()}
+    />)
+
+    const plan = screen.getByRole('region', { name: '计划 fallback' })
+    expect(plan).toHaveTextContent('[cancelled] [cancelled] 用户原文')
+    expect(plan).toHaveTextContent('[blocked] 等待依赖 — C07 未完成')
+    expect(plan).toHaveTextContent('[unknown (paused-by-provider)] 供应商状态')
+    expect(screen.getByRole('status', { name: '目标 fallback' })).toHaveTextContent('[blocked] 闭环 C08 — 预算 25%（250/1000） — 等待依赖')
+    expect(screen.getByText('耗时 45 秒')).toBeInTheDocument()
+  })
 })

@@ -822,6 +822,50 @@
 .task-tree-item[data-status="failed"] .task-tree-status,
 .task-tree-item[data-status="cancelled"] .task-tree-status { color: var(--tool-err); }
 
+/* C08：canonical Plan/Goal base Slot。纯静态样式，不引入 transition/animation。 */
+.plan-goal-content {
+  margin: var(--ui-space-2) 0;
+  border: var(--line-width-1) solid;
+  padding: var(--ui-space-2) var(--ui-space-3);
+}
+.plan-goal-content .task-tree { margin-inline-start: 0; }
+.plan-goal-content .task-tree-list {
+  padding-inline-start: var(--plan-indent, 20px);
+  border-left-color: var(--plan-connector-color, var(--border));
+  border-left-width: var(--plan-connector-width, 1px);
+}
+.plan-goal-content[data-connector-style="solid"] .task-tree-list { border-left-style: solid; }
+.plan-goal-content[data-connector-style="dashed"] .task-tree-list { border-left-style: dashed; }
+.plan-goal-content[data-connector-style="none"] .task-tree-list { border-left-width: 0; }
+.plan-goal-content .task-tree-status { color: var(--plan-status-color, var(--text-dim)); }
+.plan-goal-content .task-tree-content { display: grid; }
+.plan-goal-content .task-tree-content small,
+.goal-card-accounting { color: var(--text-dim); font-size: var(--font-size-xs); }
+.task-tree-priority {
+  color: var(--text-dim);
+  font-family: var(--mono);
+  font-size: var(--font-size-xs);
+}
+.task-tree-completed-toggle {
+  margin-top: var(--ui-space-1);
+  border: 0;
+  padding: var(--ui-space-1) 0;
+  color: var(--text-dim);
+  background: transparent;
+  cursor: pointer;
+}
+.task-tree-completed-toggle:hover { color: var(--text); }
+.task-tree-completed-toggle:focus-visible { outline: var(--line-width-2) solid var(--accent); outline-offset: 2px; }
+.goal-card { border-bottom: var(--line-width-1) solid; padding-bottom: var(--ui-space-2); }
+.goal-card-head { display: flex; gap: var(--ui-space-2); align-items: baseline; }
+.goal-card-status { color: var(--text-dim); font-size: var(--font-size-xs); }
+.goal-card-objective { font-weight: 600; }
+.goal-card-budget { margin-top: var(--ui-space-1); font-family: var(--mono); font-size: var(--font-size-xs); }
+.goal-card-blocked-reason { margin-top: var(--ui-space-1); color: var(--danger, #e5484d); }
+.goal-card-metadata,
+.task-tree-metadata { margin-top: var(--ui-space-1); color: var(--text-dim); font-size: var(--font-size-xs); }
+.plan-goal-content[data-density="compact"] .task-tree-item { min-height: 0; padding-block: 0; }
+
 .app[data-message-layout="claude"] .term-user {
   border-left: 0;
   border-radius: 0;

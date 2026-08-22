@@ -10,11 +10,9 @@ import type { MessageListItem } from '../../domains/workbench/messageListPort.ts
 import { createToolConnectorLayoutPort } from '../../domains/workbench/toolConnectorLayoutPort.ts'
 import { AssistantContent, ReasoningBlock, SolidMessageRow } from './chat/MessageRow.solid.tsx'
 import { PlainMessageList } from './chat/PlainMessageList.solid.tsx'
-import { SolidTaskTree } from './chat/TaskTree.solid.tsx'
 import { SolidToolCard } from './chat/ToolCard.solid.tsx'
 import { SolidToolConnector } from './chat/ToolConnector.solid.tsx'
 import { SolidGenerationFooter } from './chat/GenerationFooter.solid.tsx'
-import { SolidGoalCard } from './chat/GoalCard.solid.tsx'
 import { SolidInputBar } from './input/InputBar.solid.tsx'
 import { SolidAttachWidget, SolidModeWidget, SolidModelWidget, SolidSendWidget } from './input/WorkbenchWidgets.solid.tsx'
 import { SolidWorkbenchContext, type SolidWorkbenchContextValue } from './SolidWorkbenchContext.solid.tsx'
@@ -25,6 +23,7 @@ import { SolidAnsiBlock } from './chat/AnsiBlock.solid.tsx'
 import { SolidFileReferenceCard } from './chat/content/FileReference.solid.tsx'
 import { SolidMediaBlock } from './chat/content/MediaBlock.solid.tsx'
 import { BUILTIN_MEDIA_RESOLVER_OPTIONS } from './mediaAssetAdapter.ts'
+import { SolidPlanGoalContent } from './chat/content/PlanGoalContent.solid.tsx'
 
 export interface SolidWorkbenchAppProps {
   context: SolidWorkbenchContextValue
@@ -139,9 +138,9 @@ function WorkbenchContent(props: SolidWorkbenchAppProps) {
           <WorkbenchContentSlot
             nodeId={`${props.context.input().sessionId ?? 'none'}:plan`}
             kind="content.plan"
-            payload={{ entries: snapshot().tasks, goal: document()?.goal.current }}
+            payload={{ entries: document()?.plan.entries ?? [], goal: document()?.goal.current }}
             context={props.context}
-            fallback={<SolidTaskTree sessionId={props.context.input().sessionId} tasks={snapshot().tasks} />}
+            fallback={<SolidPlanGoalContent payload={{ entries: document()?.plan.entries ?? [], goal: document()?.goal.current }} />}
           />
         </div>
         <Show when={appearance().showPet}>
@@ -183,7 +182,6 @@ function WorkbenchDocumentSurface(props: {
           <Show when={document().timeline.length > 0}>
             <div class="solid-workbench-timeline" aria-label="事件时间线" data-timeline-count={document().timeline.length} />
           </Show>
-          <SolidGoalCard goal={document().goal.current} reducedMotion={props.reducedMotion} />
           <Show when={document().timeline.some(entry => entry.kind === 'assist')}>
             <div class="solid-workbench-assist" aria-label="辅助建议" role="status">
               <For each={document().timeline.filter(entry => entry.kind === 'assist')}>{entry => (

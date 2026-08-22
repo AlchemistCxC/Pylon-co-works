@@ -10,6 +10,7 @@ export const BUILTIN_SOLID_CONTENT_SLOT_ID = 'builtin.solid.content.base'
 
 export const BUILTIN_SOLID_CONTENT_KINDS = Object.freeze([
   ...BUILTIN_TEXT_RENDER_KINDS.map(kind => kind.id).filter(kind => kind.startsWith('content.')),
+  'content.plan',
   'content.unknown',
 ])
 
@@ -116,7 +117,7 @@ export function createBuiltinSolidContentSlot(): RendererSlotContribution {
   return Object.freeze({
     id: BUILTIN_SOLID_CONTENT_SLOT_ID,
     label: 'Pylon Solid built-in content',
-    description: 'C00–C03 内置 Solid Suite base Slot',
+    description: 'C00–C08 内置 Solid Suite base Slot',
     targetSuites: Object.freeze([BUILTIN_SOLID_SUITE_ID]),
     kinds: BUILTIN_SOLID_CONTENT_KINDS,
     priority: 10_000,

@@ -1,4 +1,4 @@
-import { Match, Switch } from 'solid-js'
+import { Match, Show, Switch } from 'solid-js'
 import type {
   RenderAppearanceSnapshot,
   RenderCommandPort,
@@ -12,6 +12,8 @@ import { ReasoningBlock } from './MessageRow.solid.tsx'
 import { SolidFileReferenceCard } from './content/FileReference.solid.tsx'
 import { SolidMediaBlock } from './content/MediaBlock.solid.tsx'
 import { BUILTIN_MEDIA_RESOLVER_OPTIONS } from '../mediaAssetAdapter.ts'
+import { isValidPlanContentInput } from '../../../domains/workbench/plan/goalModel.ts'
+import { SolidPlanGoalContent } from './content/PlanGoalContent.solid.tsx'
 
 export function BuiltinSolidContentSlot(props: {
   snapshot: RenderNodeSnapshot
@@ -170,6 +172,36 @@ export function BuiltinSolidContentSlot(props: {
           }}
         />
       </Match>
+      <Match when={kind() === 'content.plan'}>
+        <Show
+          when={isValidPlanContentInput(props.snapshot.payload) ? props.snapshot.payload : undefined}
+          fallback={<pre class="solid-content-unknown" data-content-kind="content.plan">Invalid content.plan payload</pre>}
+        >
+          {plan => <SolidPlanGoalContent payload={plan()} appearance={{
+            foreground: stringSetting('foreground', 'var(--text)'),
+            mutedForeground: stringSetting('mutedForeground', 'var(--text-dim)'),
+            background: stringSetting('background', 'transparent'),
+            borderColor: stringSetting('borderColor', 'var(--border)'),
+            pendingColor: stringSetting('pendingColor', 'var(--text-dim)'),
+            activeColor: stringSetting('activeColor', 'var(--accent)'),
+            completedColor: stringSetting('completedColor', 'var(--tool-ok, var(--accent))'),
+            cancelledColor: stringSetting('cancelledColor', 'var(--danger, #e5484d)'),
+            blockedColor: stringSetting('blockedColor', 'var(--warning, #d29922)'),
+            unknownColor: stringSetting('unknownColor', 'var(--text-dim)'),
+            nodeGlyph: planNodeGlyph(props.appearance.nodeGlyph),
+            connectorStyle: planConnectorStyle(props.appearance.connectorStyle),
+            connectorColor: stringSetting('connectorColor', 'var(--border)'),
+            connectorWidth: numberSetting('connectorWidth', 1),
+            indent: numberSetting('indent', 20),
+            defaultExpanded: booleanSetting('defaultExpanded', false),
+            collapseCompleted: booleanSetting('collapseCompleted', true),
+            showPriority: booleanSetting('showPriority', true),
+            showBudget: booleanSetting('showBudget', true),
+            density: props.appearance.density === 'compact' ? 'compact' : 'comfortable',
+            reducedMotion: props.appearance.reducedMotion === true,
+          }} />}
+        </Show>
+      </Match>
       <Match when={kind() === 'content.unknown'}>
         <pre class="solid-content-unknown" data-content-kind={kind()}>{unknownSummary(props.snapshot.payload, kind())}</pre>
       </Match>
@@ -200,6 +232,14 @@ function mediaFit(value: unknown): 'contain' | 'cover' | 'original' {
 
 function mediaTranscriptStyle(value: unknown): 'panel' | 'plain' | 'compact' {
   return value === 'plain' || value === 'compact' ? value : 'panel'
+}
+
+function planNodeGlyph(value: unknown): 'status' | 'dot' | 'none' {
+  return value === 'dot' || value === 'none' ? value : 'status'
+}
+
+function planConnectorStyle(value: unknown): 'solid' | 'dashed' | 'none' {
+  return value === 'dashed' || value === 'none' ? value : 'solid'
 }
 
 function unknownSummary(payload: unknown, kind: string): string {

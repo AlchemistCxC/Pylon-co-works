@@ -63,6 +63,11 @@ export interface GoalState {
   readonly current?: GoalSnapshot
 }
 
+export interface PlanContentPayload {
+  readonly entries: readonly PlanEntryV2[]
+  readonly goal?: GoalSnapshot
+}
+
 export function createEmptyGoalState(): GoalState {
   return {}
 }
@@ -315,4 +320,52 @@ export function plainGoalSummary(goal: GoalSnapshot | undefined): string {
   const reason = goal.status === 'blocked' && goal.blockedReason ? ` — ${goal.blockedReason}` : ''
   const label = goal.status === 'unknown' ? '未知' : goal.status
   return `[${label}] ${goal.objective ?? '（无 objective）'}${budget}${reason}`
+}
+
+/** Renderer boundary guard: only the normalized Plan/Goal projection may enter content.plan. */
+export function isValidPlanContentInput(input: unknown): input is PlanContentPayload {
+  if (!isRecord(input) || !hasOnlyKeys(input, ['entries', 'goal']) || !Array.isArray(input.entries)) return false
+  if (!input.entries.every(isValidPlanEntryInput)) return false
+  return input.goal === undefined || isValidGoalInput(input.goal)
+}
+
+function isValidPlanEntryInput(input: unknown): input is PlanEntryV2 {
+  if (!isRecord(input) || !hasOnlyKeys(input, [
+    'id', 'content', 'status', 'activeForm', 'priority', 'blockedReason', 'rawStatus', 'metadata',
+  ])) return false
+  if (!text(input.id) || !text(input.content)) return false
+  if (![...PLAN_ENTRY_STATUSES, 'unknown'].includes(input.status as PlanEntryStatus | 'unknown')) return false
+  if (input.status === 'unknown' && !text(input.rawStatus)) return false
+  if (input.activeForm !== undefined && typeof input.activeForm !== 'string') return false
+  if (input.priority !== undefined && typeof input.priority !== 'string'
+    && (typeof input.priority !== 'number' || !Number.isFinite(input.priority))) return false
+  if (input.blockedReason !== undefined && typeof input.blockedReason !== 'string') return false
+  if (input.rawStatus !== undefined && typeof input.rawStatus !== 'string') return false
+  return input.metadata === undefined || isRecord(input.metadata)
+}
+
+function isValidGoalInput(input: unknown): input is GoalSnapshot {
+  if (!isRecord(input) || !hasOnlyKeys(input, [
+    'goalId', 'objective', 'status', 'tokenBudget', 'tokensUsed', 'blockedReason', 'accounting', 'metadata',
+  ])) return false
+  if (![...GOAL_STATUSES, 'unknown'].includes(input.status as GoalStatus)) return false
+  if (input.goalId !== undefined && typeof input.goalId !== 'string') return false
+  if (input.objective !== undefined && typeof input.objective !== 'string') return false
+  if (input.blockedReason !== undefined && typeof input.blockedReason !== 'string') return false
+  if (!isOptionalNonNegativeFinite(input.tokenBudget) || !isOptionalNonNegativeFinite(input.tokensUsed)) return false
+  if (input.metadata !== undefined && !isRecord(input.metadata)) return false
+  if (input.accounting === undefined) return true
+  if (!isRecord(input.accounting) || !hasOnlyKeys(input.accounting, ['tokensUsed', 'timeUsedSeconds', 'metadata'])) return false
+  return isOptionalNonNegativeFinite(input.accounting.tokensUsed)
+    && isOptionalNonNegativeFinite(input.accounting.timeUsedSeconds)
+    && (input.accounting.metadata === undefined || isRecord(input.accounting.metadata))
+}
+
+function hasOnlyKeys(input: Record<string, unknown>, keys: readonly string[]): boolean {
+  const allowed = new Set(keys)
+  return Object.keys(input).every(key => allowed.has(key))
+}
+
+function isOptionalNonNegativeFinite(value: unknown): boolean {
+  return value === undefined || (typeof value === 'number' && Number.isFinite(value) && value >= 0)
 }
