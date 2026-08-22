@@ -35,6 +35,7 @@ describe('C03 mediaSourceResolver', () => {
     // 非 media mime 的 data: 一律拒绝
     const oversizeMime = `data:text/plain;base64,${'A'.repeat(16)}`
     expect(isAllowedMediaUrl(oversizeMime)).toBe(false)
+    expect(isAllowedMediaUrl(`data:image/png;base64,${'A'.repeat(MAX_INLINE_BASE64_BYTES + 1)}`)).toBe(false)
   })
 
   it('converts inline base64 to data URL when within limit, records kind=base64', () => {

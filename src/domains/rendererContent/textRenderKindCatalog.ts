@@ -12,6 +12,7 @@ import {
   isOptionalNonNegativeFiniteNumber,
   isValidFileSelection,
 } from '../workbench/content/fileContentValidation.ts'
+import { isValidMediaContentInput } from '../workbench/content/mediaContentValidation.ts'
 
 const FONT_OPTIONS = Object.freeze([
   { value: 'inherit', label: '跟随界面' },
@@ -174,6 +175,57 @@ const FILE_CONTENT_DEFAULT_TOKENS = Object.freeze({
   groupLayout: 'stack',
 })
 
+const MEDIA_CONTENT_SETTINGS = Object.freeze({
+  schemaVersion: 1,
+  groups: [
+    {
+      id: 'appearance', label: '媒体外观', layout: 'grid', fields: [
+        { key: 'foreground', label: '主文字颜色', type: 'color', presentation: 'palette+picker', alpha: true, default: 'var(--text)' },
+        { key: 'mutedForeground', label: '次要文字颜色', type: 'color', presentation: 'palette+picker', alpha: true, default: 'var(--text-dim)' },
+        { key: 'background', label: '背景色', type: 'color', presentation: 'palette+picker', alpha: true, default: 'transparent' },
+        { key: 'borderColor', label: '边框颜色', type: 'color', presentation: 'palette+picker', alpha: true, default: 'var(--border)' },
+        { key: 'maxWidth', label: '最大内联宽度', type: 'number', presentation: 'slider+input', min: 160, max: 1600, step: 20, unit: 'px', default: 960 },
+        { key: 'maxHeight', label: '最大内联高度', type: 'number', presentation: 'slider+input', min: 80, max: 1200, step: 20, unit: 'px', default: 640 },
+        { key: 'fit', label: '适配方式', type: 'choice', presentation: 'segmented', options: [
+          { value: 'contain', label: '完整显示' }, { value: 'cover', label: '填满裁切' }, { value: 'original', label: '原始尺寸' },
+        ], default: 'contain' },
+        { key: 'radius', label: '圆角', type: 'number', presentation: 'slider+input', min: 0, max: 32, step: 1, unit: 'px', default: 8 },
+        { key: 'transcriptStyle', label: '转写样式', type: 'choice', presentation: 'select', options: [
+          { value: 'panel', label: '独立面板' }, { value: 'plain', label: '纯文本' }, { value: 'compact', label: '紧凑' },
+        ], default: 'panel' },
+      ],
+    },
+    {
+      id: 'behaviour', label: '媒体行为', layout: 'grid', fields: [
+        { key: 'defaultExpanded', label: '默认展开', type: 'boolean', presentation: 'toggle', default: true },
+        { key: 'showCaption', label: '显示说明', type: 'boolean', presentation: 'toggle', default: true },
+        { key: 'showDownload', label: '显示下载动作', type: 'boolean', presentation: 'toggle', default: true },
+        { key: 'autoplay', label: '自动播放', description: '默认关闭，避免未经用户操作播放媒体。', type: 'boolean', presentation: 'toggle', default: false },
+        { key: 'controls', label: '显示播放控件', type: 'boolean', presentation: 'toggle', default: true },
+        { key: 'showMetadata', label: '显示 metadata', type: 'boolean', presentation: 'toggle', default: true },
+      ],
+    },
+  ],
+} satisfies RendererSettingsSchema)
+
+const MEDIA_CONTENT_DEFAULT_TOKENS = Object.freeze({
+  foreground: 'var(--text)',
+  mutedForeground: 'var(--text-dim)',
+  background: 'transparent',
+  borderColor: 'var(--border)',
+  maxWidth: 960,
+  maxHeight: 640,
+  fit: 'contain',
+  radius: 8,
+  defaultExpanded: true,
+  showCaption: true,
+  showDownload: true,
+  autoplay: false,
+  controls: true,
+  transcriptStyle: 'panel',
+  showMetadata: true,
+})
+
 function textPayload(input: unknown): input is { readonly text: string } {
   return typeof input === 'object' && input !== null && !Array.isArray(input)
     && typeof (input as Record<string, unknown>).text === 'string'
@@ -312,12 +364,11 @@ export const BUILTIN_TEXT_RENDER_KINDS: readonly RenderKindDefinition[] = [
     fixture: kind === 'image'
       ? { source: 'https://fixture.example.com/pic.png', mimeType: 'image/png', alt: 'fixture image' }
       : { source: `https://fixture.example.com/clip.${kind === 'audio' ? 'wav' : 'mp4'}`, mimeType: `${kind}/${kind === 'audio' ? 'wav' : 'mp4'}` },
-    defaultTokens: {},
+    defaultTokens: MEDIA_CONTENT_DEFAULT_TOKENS,
     settingsSchemaVersion: 1,
-    // C03：source/url/localPath/base64 至少一个来源字段；validateInput 不解析内容只验形态
-    validateInput: (input: unknown) => typeof input === 'object' && input !== null && !Array.isArray(input)
-      && ['source', 'url', 'localPath', 'base64'].some(key =>
-        typeof (input as Record<string, unknown>)[key] === 'string'),
+    settings: MEDIA_CONTENT_SETTINGS,
+    // C03：单一 canonical source；path/base64/blob 必须显式 sourceKind。
+    validateInput: (input: unknown) => isValidMediaContentInput(input, kind),
   })),
   {
     id: 'content.code',

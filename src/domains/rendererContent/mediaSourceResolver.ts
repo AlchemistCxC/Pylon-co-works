@@ -8,11 +8,13 @@
  * - 解析结果只含可安全交给 <img>/<audio>/<video> src 的字符串，secret header 永不进入。
  */
 
-/** 内联 base64 限额：8 MiB（解码前）。与 contentPartSchema raw 限额同一数量级的保守值。 */
-export const MAX_INLINE_BASE64_BYTES = 8 * 1024 * 1024
+import { MAX_INLINE_MEDIA_SOURCE_BYTES } from '../workbench/content/mediaContentValidation.ts'
+
+/** Backward-compatible renderer export; canonical ownership lives in the content seam. */
+export const MAX_INLINE_BASE64_BYTES = MAX_INLINE_MEDIA_SOURCE_BYTES
 
 const REMOTE_URL_SCHEMES = /^https?:\/\//i
-const DATA_URL_PREFIX = /^data:([^;,]+)/i
+const DATA_URL = /^data:([^;,]+);base64,(.*)$/i
 const BASE64_ALPHABET = /^[A-Za-z0-9+/]+={0,2}$/
 
 export interface MediaSourceInput {
@@ -34,7 +36,7 @@ export interface MediaSourceResolverOptions {
 }
 
 export type MediaSourceResult =
-  | { readonly ok: true; readonly source: string; readonly sourceKind: 'url' | 'local-path' | 'base64' }
+  | { readonly ok: true; readonly source: string; readonly sourceKind: 'url' | 'local-path' | 'base64' | 'blob' }
   | { readonly ok: false; readonly reason: string }
 
 /** URL 协议白名单判定（供组件层对任意来源字符串做快速复核）。 */
@@ -42,11 +44,21 @@ export function isAllowedMediaUrl(value: string): boolean {
   const trimmed = value.trim()
   if (REMOTE_URL_SCHEMES.test(trimmed)) return true
   if (/^data:/i.test(trimmed)) {
-    const mime = DATA_URL_PREFIX.exec(trimmed)?.[1]?.toLowerCase() ?? ''
+    const match = DATA_URL.exec(trimmed)
+    const mime = match?.[1]?.toLowerCase() ?? ''
+    const payload = match?.[2] ?? ''
     return /^(?:image|audio|video)\//.test(mime)
+      && payload.length <= MAX_INLINE_BASE64_BYTES
+      && isLikelyBase64(payload)
   }
   if (/^blob:/i.test(trimmed)) return true
   return false
+}
+
+export function isAllowedMediaPosterUrl(value: string): boolean {
+  const trimmed = value.trim()
+  if (!isAllowedMediaUrl(trimmed)) return false
+  return !/^data:/i.test(trimmed) || /^data:image\//i.test(trimmed)
 }
 
 function isLikelyBase64(value: string): boolean {
@@ -64,7 +76,11 @@ export function resolveMediaSource(
     if (!isAllowedMediaUrl(url)) {
       return { ok: false, reason: `协议不在白名单：${url.slice(0, 32)}` }
     }
-    return { ok: true, source: url, sourceKind: 'url' }
+    return {
+      ok: true,
+      source: url,
+      sourceKind: /^blob:/i.test(url) ? 'blob' : /^data:/i.test(url) ? 'base64' : 'url',
+    }
   }
 
   const localPath = input.localPath?.trim()

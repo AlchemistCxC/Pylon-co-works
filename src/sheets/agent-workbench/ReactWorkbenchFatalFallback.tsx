@@ -1,5 +1,6 @@
 import { useSyncExternalStore } from 'react'
-import type { ContentPart } from '../../domains/workbench/content/contentPartSchema.ts'
+import type { ContentPart, ImageContentPart } from '../../domains/workbench/content/contentPartSchema.ts'
+import { isValidMediaContentInput } from '../../domains/workbench/content/mediaContentValidation.ts'
 import {
   fileContentLastSegment,
   formatFileSelectionRange,
@@ -21,6 +22,8 @@ export default function ReactWorkbenchFatalFallback(props: {
   onRetry(): void
   onSelectSuite(): void
   onOpenDiagnostics(): void
+  onOpenMedia?(part: ImageContentPart): void
+  onDownloadMedia?(part: ImageContentPart): void
 }) {
   const document = useSyncExternalStore(
     listener => props.document.subscribe(listener),
@@ -46,14 +49,24 @@ export default function ReactWorkbenchFatalFallback(props: {
         {document?.messages.map(message => <article key={message.id} data-message-role={message.role}>
           <span>{message.role === 'user' ? 'User' : message.role === 'reasoning' ? 'Reasoning' : 'Assistant'}</span>
           {message.content && <p style={{ whiteSpace: 'pre-wrap' }}>{message.content}</p>}
-          {message.parts.map((part, index) => <ReactC02ContentPart key={`${message.id}:${index}`} part={part} />)}
+          {message.parts.map((part, index) => <ReactFallbackContentPart
+            key={`${message.id}:${index}`}
+            part={part}
+            onOpenMedia={props.onOpenMedia}
+            onDownloadMedia={props.onDownloadMedia}
+          />)}
         </article>)}
       </div>
     </section>
   )
 }
 
-function ReactC02ContentPart({ part }: { part: ContentPart }) {
+function ReactFallbackContentPart(props: {
+  part: ContentPart
+  onOpenMedia?: (part: ImageContentPart) => void
+  onDownloadMedia?: (part: ImageContentPart) => void
+}) {
+  const { part } = props
   if (part.kind === 'file-reference' || part.kind === 'file-selection') {
     const value = part as unknown as {
       path: string; displayName?: string; mime?: string; size?: number; language?: string; previewText?: string
@@ -90,5 +103,51 @@ function ReactC02ContentPart({ part }: { part: ContentPart }) {
       {!value.text && isBinaryFileContent(value) && <span>二进制内容不内联展示</span>}
     </section>
   }
+  if (part.kind === 'image' || part.kind === 'audio' || part.kind === 'video') {
+    const value = part as ImageContentPart
+    const valid = isValidMediaContentInput(value, value.kind)
+    const mediaLabel = value.kind === 'image' ? '图片' : value.kind === 'audio' ? '音频' : '视频'
+    const identity = value.alt || value.caption || mediaLabel
+    const metadata = mediaMetadata(value)
+    return <section data-react-content-kind={`content.${value.kind}`} aria-label={`${mediaLabel} fallback`}>
+      <strong>{mediaLabel}</strong>
+      {value.alt && <span>{value.alt}</span>}
+      {value.caption && value.caption !== value.alt && <span>{value.caption}</span>}
+      {valid
+        ? <code>{mediaSourceIdentity(value)}</code>
+        : <span role="status">媒体来源不可用</span>}
+      {metadata && <small>{metadata}</small>}
+      {value.transcript && <p style={{ whiteSpace: 'pre-wrap' }}>{value.transcript}</p>}
+      <div className="renderer-suite-fallback-actions">
+        <button type="button" aria-label={`打开媒体：${identity}`}
+          disabled={!valid || !props.onOpenMedia}
+          title={!valid ? '媒体来源不可用' : !props.onOpenMedia ? '打开能力未接入' : undefined}
+          onClick={() => { if (valid) props.onOpenMedia?.(value) }}>打开</button>
+        <button type="button" aria-label={`下载媒体：${identity}`}
+          disabled={!valid || !props.onDownloadMedia}
+          title={!valid ? '媒体来源不可用' : !props.onDownloadMedia ? '下载能力未接入' : undefined}
+          onClick={() => { if (valid) props.onDownloadMedia?.(value) }}>下载</button>
+      </div>
+    </section>
+  }
   return null
+}
+
+function mediaSourceIdentity(part: ImageContentPart): string {
+  if (part.sourceKind === 'base64' || /^data:/i.test(part.source)) return `内联 ${part.mimeType ?? part.kind}`
+  if (part.sourceKind === 'blob' || /^blob:/i.test(part.source)) return '临时 blob 资源'
+  return part.source
+}
+
+function mediaMetadata(part: ImageContentPart): string {
+  const values: string[] = []
+  if (part.width !== undefined && part.height !== undefined) values.push(`${part.width}×${part.height}`)
+  if (part.durationMs !== undefined) values.push(formatMediaDuration(part.durationMs))
+  if (part.mimeType) values.push(part.mimeType)
+  return values.join(' · ')
+}
+
+function formatMediaDuration(durationMs: number): string {
+  const seconds = Math.max(0, durationMs) / 1000
+  return Number.isInteger(seconds) ? `${seconds}s` : `${seconds.toFixed(1)}s`
 }

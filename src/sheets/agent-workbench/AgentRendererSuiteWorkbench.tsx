@@ -13,6 +13,7 @@ import type { SheetContext, SheetRecord } from '../../workspace-sheets/sheetType
 import { createAgentWorkbenchSessionRuntime } from './agentWorkbenchSession.ts'
 import { useSessionLifecycle, type ChatSessionSetters } from '../../components/chat/useSessionLifecycle.ts'
 import ReactWorkbenchFatalFallback, { type WorkbenchFatalFailure } from './ReactWorkbenchFatalFallback.tsx'
+import type { ImageContentPart } from '../../domains/workbench/content/contentPartSchema.ts'
 import { useWorkspaceStore } from '../../workspaceStore.ts'
 import { toCanonicalOwnerKey } from '../../domains/events/eventSchema.ts'
 import { resolveRendererSuiteFallback } from '../../host/renderer-suite/rendererSuiteFallbackPolicy.ts'
@@ -283,13 +284,26 @@ export default function AgentRendererSuiteWorkbench(props: AgentRendererSuiteWor
   }
   const selectSuite = () => window.dispatchEvent(new CustomEvent('pylon:open-settings', { detail: { domain: 'renderer', section: 'suite' } }))
   const openDiagnostics = () => window.dispatchEvent(new CustomEvent('pylon:open-runtime-sheet'))
+  const openFallbackMedia = (part: ImageContentPart) => {
+    const host = hostPortRef.current
+    if (!host || !input.sessionId || !host.capabilities.has('resourceOpen')) return
+    const target = part.sourceKind === 'path' ? { path: part.source } : { uri: part.source }
+    void host.commands.openResource(input.sessionId, target)
+  }
+  const downloadFallbackMedia = (part: ImageContentPart) => {
+    const host = hostPortRef.current
+    if (!host || !input.sessionId || !host.capabilities.has('resourceOpen')) return
+    void host.commands.openResource(input.sessionId, { ...part, disposition: 'download' })
+  }
 
   return <div className="main renderer-suite-workbench" data-renderer-suite-host="true" data-suite-id={activeSuiteId ?? activation?.suite.value.id}>
     <div ref={containerRef} className="renderer-suite-workbench-mount" hidden={fatal} />
     {fatal && failure && hostPortRef.current && <ReactWorkbenchFatalFallback document={hostPortRef.current.document} failure={failure}
       onRetry={retrySolid}
       onSelectSuite={selectSuite}
-      onOpenDiagnostics={openDiagnostics} />}
+      onOpenDiagnostics={openDiagnostics}
+      onOpenMedia={hostPortRef.current.capabilities.has('resourceOpen') ? openFallbackMedia : undefined}
+      onDownloadMedia={hostPortRef.current.capabilities.has('resourceOpen') ? downloadFallbackMedia : undefined} />}
     {!fatal && failure && <div className="renderer-suite-fallback-banner" role="status"
       data-failed-suite-id={failure.suiteId} data-failed-plugin-id={failure.pluginId} data-failure-phase={failure.phase}>
       {failure.retained ? 'Suite 候选未生效，继续使用健康实例' : 'Suite 已安全回退'}：{failure.suiteId} / {failure.phase} / {failure.message}

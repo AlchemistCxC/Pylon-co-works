@@ -11,6 +11,48 @@ import { normalizeContentBlock } from '../normalizerSupport.ts'
  */
 
 describe('C02 normalizer content classification', () => {
+  it('normalizes a standard base64 image block into the canonical C03 source contract', () => {
+    const normalized = normalizeContentBlock({
+      type: 'image',
+      source: { type: 'base64', data: 'iVBORw0KGgo=', media_type: 'image/png' },
+      alt: '架构图',
+      width: 640,
+      height: 480,
+    })
+
+    expect(normalized.diagnostic).toBeUndefined()
+    expect(normalized.part).toEqual({
+      kind: 'image', source: 'iVBORw0KGgo=', sourceKind: 'base64', mimeType: 'image/png',
+      alt: '架构图', width: 640, height: 480,
+    })
+  })
+
+  it('routes media blocks with secret side channels to a redacted unknown diagnostic', () => {
+    const normalized = normalizeContentBlock({
+      type: 'audio',
+      source: 'https://cdn.example.com/voice.wav',
+      mimeType: 'audio/wav',
+      headers: { authorization: 'Bearer super-secret' },
+    })
+
+    expect(normalized.part.kind).toBe('unknown')
+    expect(normalized.diagnostic?.code).toBe('content.audio.invalid')
+    expect(JSON.stringify(normalized.part)).not.toContain('Bearer super-secret')
+    expect(normalized.part).toEqual(expect.objectContaining({
+      redactions: expect.arrayContaining([
+        expect.objectContaining({ path: ['headers', 'authorization'], reason: 'sensitive' }),
+      ]),
+    }))
+  })
+
+  it.each([
+    { kind: 'audio' as const, source: '/media/voice.wav', sourceKind: 'path' as const, mimeType: 'audio/wav', durationMs: 900 },
+    { kind: 'video' as const, source: 'blob:https://app.test/video-1', sourceKind: 'blob' as const, mimeType: 'video/mp4', width: 1920, height: 1080 },
+  ])('keeps canonical $kind blocks provider-neutral', value => {
+    const normalized = normalizeContentBlock(value)
+    expect(normalized).toEqual({ part: value })
+  })
+
   it('classifies path-only blocks as file-reference preserving raw path form', () => {
     const { part } = normalizeContentBlock({
       type: 'file_reference',

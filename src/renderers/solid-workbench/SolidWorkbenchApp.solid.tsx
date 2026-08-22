@@ -24,6 +24,7 @@ import { SolidCodeBlock } from './chat/CodeBlock.solid.tsx'
 import { SolidAnsiBlock } from './chat/AnsiBlock.solid.tsx'
 import { SolidFileReferenceCard } from './chat/content/FileReference.solid.tsx'
 import { SolidMediaBlock } from './chat/content/MediaBlock.solid.tsx'
+import { BUILTIN_MEDIA_RESOLVER_OPTIONS } from './mediaAssetAdapter.ts'
 
 export interface SolidWorkbenchAppProps {
   context: SolidWorkbenchContextValue
@@ -447,8 +448,12 @@ function renderBuiltinContentPart(part: ContentPart, inline: boolean, context: S
     const canOpenExternal = Boolean(sessionId && host?.capabilities.has('resourceOpen'))
     return <SolidMediaBlock
       part={part}
+      resolverOptions={BUILTIN_MEDIA_RESOLVER_OPTIONS}
       onOpenExternal={canOpenExternal && host && sessionId
         ? url => { void host.commands.openResource(sessionId, { uri: url }) }
+        : undefined}
+      onDownload={canOpenExternal && host && sessionId
+        ? mediaPart => { void host.commands.openResource(sessionId, { ...mediaPart, disposition: 'download' }) }
         : undefined}
     />
   }

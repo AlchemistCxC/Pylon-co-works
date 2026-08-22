@@ -8,6 +8,15 @@
  */
 
 import { isNonEmptyContentLocation } from './fileContentValidation.ts'
+import {
+  hasForbiddenMediaSideChannel,
+  isMediaSourceKind,
+  isValidMediaContentInput,
+  isValidMediaDimension,
+  isValidMediaDuration,
+  isValidMediaMime,
+  type MediaSourceKind,
+} from './mediaContentValidation.ts'
 
 export type JsonPrimitive = string | number | boolean | null
 export type JsonValue = JsonPrimitive | JsonValue[] | { readonly [key: string]: JsonValue }
@@ -61,14 +70,18 @@ export interface TextContentPart {
 export interface ImageContentPart {
   readonly kind: 'image' | 'audio' | 'video'
   readonly source: string
+  readonly sourceKind?: MediaSourceKind
   readonly mimeType?: string
   readonly alt?: string
+  readonly caption?: string
   readonly width?: number
   readonly height?: number
   readonly durationMs?: number
   readonly poster?: string
   readonly transcript?: string
 }
+
+export type MediaContentPart = ImageContentPart
 
 export interface ResourceContentPart {
   readonly kind: 'resource'
@@ -162,9 +175,21 @@ export function parseContentPart(value: unknown): SchemaResult<ContentPart> {
   if (isTextKind(kind)) {
     if (typeof value.text !== 'string') issues.push(issue(['text'], 'type.string', 'string', value.text))
   } else if (kind === 'image' || kind === 'audio' || kind === 'video') {
-    if (typeof value.source !== 'string') issues.push(issue(['source'], 'type.string', 'string', value.source))
+    if (typeof value.source !== 'string') issues.push(issue(['source'], 'type.string', 'non-empty canonical media source', value.source))
+    else if (!isValidMediaContentInput(value, kind)) issues.push(issue(['source'], 'content.media-source', 'valid canonical media source', value.source))
+    if (value.sourceKind !== undefined && !isMediaSourceKind(value.sourceKind)) {
+      issues.push(issue(['sourceKind'], 'content.media-source-kind', 'url, path, base64, or blob', value.sourceKind))
+    }
     validateOptionalString(value, 'mimeType', issues)
     validateOptionalString(value, 'alt', issues)
+    validateOptionalString(value, 'caption', issues)
+    validateOptionalString(value, 'poster', issues)
+    validateOptionalString(value, 'transcript', issues)
+    if (!isValidMediaMime(kind, value.mimeType)) issues.push(issue(['mimeType'], 'content.media-mime', `${kind}/*`, value.mimeType))
+    if (!isValidMediaDimension(value.width)) issues.push(issue(['width'], 'number.positive-finite', 'positive finite number', value.width))
+    if (!isValidMediaDimension(value.height)) issues.push(issue(['height'], 'number.positive-finite', 'positive finite number', value.height))
+    if (!isValidMediaDuration(value.durationMs)) issues.push(issue(['durationMs'], 'number.non-negative-finite', 'non-negative finite number', value.durationMs))
+    if (hasForbiddenMediaSideChannel(value)) issues.push(issue([], 'content.media-side-channel', 'single canonical source without secret/raw side channels', value))
   } else if (kind === 'resource') {
     if (!isNonEmptyContentLocation(value.uri)) issues.push(issue(['uri'], 'type.string', 'non-empty string', value.uri))
     validateOptionalString(value, 'title', issues)

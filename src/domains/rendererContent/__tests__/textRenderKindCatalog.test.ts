@@ -174,4 +174,51 @@ describe('C00 builtin render kind catalog', () => {
     expect(kinds.get('content.resource')!.validateInput({ uri: '   ' })).toBe(false)
     expect(kinds.get('content.resource')!.validateInput({ uri: 'mcp://safe', blob: 'private' })).toBe(false)
   })
+
+  it('publishes concrete C03 media settings with safe playback defaults', async () => {
+    const { ensureBuiltinTextRenderKinds } = await import('../textRenderKindCatalog.ts')
+    await ensureBuiltinTextRenderKinds()
+    const kinds = new Map(getRendererRegistry().snapshot().renderKinds.map(entry => [entry.value.id, entry.value]))
+
+    for (const id of ['content.image', 'content.audio', 'content.video'] as const) {
+      const kind = kinds.get(id)!
+      expect(kind.settings?.schemaVersion).toBe(kind.settingsSchemaVersion)
+      expect(kind.settings?.groups.flatMap(group => group.fields).map(field => field.key)).toEqual(
+        expect.arrayContaining([
+          'foreground', 'mutedForeground', 'background', 'borderColor', 'maxWidth', 'maxHeight',
+          'fit', 'radius', 'defaultExpanded', 'showCaption', 'showDownload', 'autoplay',
+          'controls', 'transcriptStyle', 'showMetadata',
+        ]),
+      )
+      expect(kind.defaultTokens).toMatchObject({
+        fit: 'contain',
+        defaultExpanded: true,
+        showCaption: true,
+        showDownload: true,
+        autoplay: false,
+        controls: true,
+        transcriptStyle: 'panel',
+        showMetadata: true,
+      })
+    }
+  })
+
+  it('validates the C03 canonical source contract instead of private renderer fields', async () => {
+    const { ensureBuiltinTextRenderKinds } = await import('../textRenderKindCatalog.ts')
+    await ensureBuiltinTextRenderKinds()
+    const kinds = new Map(getRendererRegistry().snapshot().renderKinds.map(entry => [entry.value.id, entry.value]))
+
+    expect(kinds.get('content.image')!.validateInput({
+      source: 'iVBORw0KGgo=', sourceKind: 'base64', mimeType: 'image/png', width: 640, height: 480,
+    })).toBe(true)
+    expect(kinds.get('content.audio')!.validateInput({
+      source: '/media/voice.wav', sourceKind: 'path', mimeType: 'audio/wav', durationMs: 1_200,
+    })).toBe(true)
+    expect(kinds.get('content.video')!.validateInput({
+      source: 'blob:https://app.test/video-1', sourceKind: 'blob', mimeType: 'video/mp4',
+    })).toBe(true)
+    expect(kinds.get('content.image')!.validateInput({ base64: 'private-renderer-field', mimeType: 'image/png' })).toBe(false)
+    expect(kinds.get('content.audio')!.validateInput({ source: 'https://safe.test/image.png', mimeType: 'image/png' })).toBe(false)
+    expect(kinds.get('content.video')!.validateInput({ source: 'javascript:alert(1)', sourceKind: 'url' })).toBe(false)
+  })
 })

@@ -9,6 +9,13 @@ import {
   isValidFileSelection,
 } from '../content/fileContentValidation.ts'
 import {
+  hasForbiddenMediaSideChannel,
+  isMediaSourceKind,
+  isValidMediaContentInput,
+  type MediaContentKind,
+  type MediaSourceKind,
+} from '../content/mediaContentValidation.ts'
+import {
   createWorkbenchEnvelope,
   type WorkbenchEventEnvelope,
   type WorkbenchEventIdentity,
@@ -116,12 +123,10 @@ export function normalizeContentBlock(raw: unknown): { part: ContentPart; diagno
       return typeof raw.text === 'string'
         ? { part: { kind: 'reasoning', text: raw.text } }
         : { part: createUnknownContentPart(type, raw), diagnostic: { code: 'content.reasoning.invalid', message: 'reasoning block has no string text', path: ['text'] } }
-    case 'image': {
-      const source = isRecord(raw.source) ? raw.source : undefined
-      const sourceValue = typeof source?.data === 'string' ? source.data : typeof source?.url === 'string' ? source.url : typeof raw.source === 'string' ? raw.source : undefined
-      if (sourceValue) return { part: { kind: 'image', source: sourceValue, ...(typeof source?.media_type === 'string' ? { mimeType: source.media_type } : typeof raw.mimeType === 'string' ? { mimeType: raw.mimeType } : {}) } }
-      return { part: createUnknownContentPart('image', raw), diagnostic: { code: 'content.image.invalid', message: 'image block has no safe source', path: ['source'] } }
-    }
+    case 'image':
+    case 'audio':
+    case 'video':
+      return normalizeMediaContentBlock(raw, type)
     case 'resource_link':
       return isNonEmptyContentLocation(raw.uri) ? { part: { kind: 'resource', uri: raw.uri, ...(typeof raw.name === 'string' ? { title: raw.name } : {}), ...(typeof raw.mimeType === 'string' ? { mimeType: raw.mimeType } : {}) } } : { part: createUnknownContentPart(type, raw), diagnostic: { code: 'content.resource.invalid', message: 'resource link has no URI', path: ['uri'] } }
     case 'resource': {
@@ -172,6 +177,66 @@ export function normalizeContentBlock(raw: unknown): { part: ContentPart; diagno
       return typeof raw.text === 'string' ? { part: { kind: 'code', text: raw.text, ...(typeof raw.language === 'string' ? { language: raw.language } : {}) } } : { part: createUnknownContentPart(type, raw), diagnostic: { code: 'content.code.invalid', message: 'code block has no string text', path: ['text'] } }
     default:
       return { part: createUnknownContentPart(type, raw) }
+  }
+}
+
+function normalizeMediaContentBlock(
+  raw: Record<string, unknown>,
+  kind: MediaContentKind,
+): { part: ContentPart; diagnostic?: { code: string; message: string; path: readonly (string | number)[] } } {
+  if (hasForbiddenMediaSideChannel(raw)) {
+    return {
+      part: createUnknownContentPart(kind, raw),
+      diagnostic: { code: `content.${kind}.invalid`, message: `${kind} block contains a forbidden media side channel`, path: [] },
+    }
+  }
+  const sourceRecord = isRecord(raw.source) ? raw.source : undefined
+  const source = typeof raw.source === 'string'
+    ? raw.source
+    : typeof sourceRecord?.data === 'string'
+      ? sourceRecord.data
+      : typeof sourceRecord?.url === 'string'
+        ? sourceRecord.url
+        : undefined
+  const explicitSourceKind = isMediaSourceKind(raw.sourceKind) ? raw.sourceKind : undefined
+  const nestedSourceKind = canonicalMediaSourceKind(sourceRecord?.type)
+  const sourceKind = explicitSourceKind ?? nestedSourceKind
+  const mimeType = typeof sourceRecord?.media_type === 'string'
+    ? sourceRecord.media_type
+    : typeof sourceRecord?.mimeType === 'string'
+      ? sourceRecord.mimeType
+      : typeof raw.mimeType === 'string'
+        ? raw.mimeType
+        : undefined
+  const part = {
+    kind,
+    ...(source !== undefined ? { source } : {}),
+    ...(sourceKind ? { sourceKind } : {}),
+    ...(mimeType ? { mimeType } : {}),
+    ...(typeof raw.alt === 'string' ? { alt: raw.alt } : {}),
+    ...(typeof raw.caption === 'string' ? { caption: raw.caption } : {}),
+    ...(typeof raw.width === 'number' ? { width: raw.width } : {}),
+    ...(typeof raw.height === 'number' ? { height: raw.height } : {}),
+    ...(typeof raw.durationMs === 'number' ? { durationMs: raw.durationMs } : {}),
+    ...(typeof raw.poster === 'string' ? { poster: raw.poster } : {}),
+    ...(typeof raw.transcript === 'string' ? { transcript: raw.transcript } : {}),
+  }
+  return isValidMediaContentInput(part, kind)
+    ? { part: part as ContentPart }
+    : {
+        part: createUnknownContentPart(kind, raw),
+        diagnostic: { code: `content.${kind}.invalid`, message: `${kind} block has no safe canonical source`, path: ['source'] },
+      }
+}
+
+function canonicalMediaSourceKind(value: unknown): MediaSourceKind | undefined {
+  switch (value) {
+    case 'url': return 'url'
+    case 'path':
+    case 'local-path': return 'path'
+    case 'base64': return 'base64'
+    case 'blob': return 'blob'
+    default: return undefined
   }
 }
 

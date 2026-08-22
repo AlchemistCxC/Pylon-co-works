@@ -11,6 +11,7 @@ import { MarkdownContent } from './MarkdownContent.solid.tsx'
 import { ReasoningBlock } from './MessageRow.solid.tsx'
 import { SolidFileReferenceCard } from './content/FileReference.solid.tsx'
 import { SolidMediaBlock } from './content/MediaBlock.solid.tsx'
+import { BUILTIN_MEDIA_RESOLVER_OPTIONS } from '../mediaAssetAdapter.ts'
 
 export function BuiltinSolidContentSlot(props: {
   snapshot: RenderNodeSnapshot
@@ -146,7 +147,27 @@ export function BuiltinSolidContentSlot(props: {
       <Match when={kind() === 'content.image' || kind() === 'content.audio' || kind() === 'content.video'}>
         <SolidMediaBlock
           part={payload()}
+          resolverOptions={BUILTIN_MEDIA_RESOLVER_OPTIONS}
           onOpenExternal={can('resource.open') ? url => execute('resource.open', { uri: url }) : undefined}
+          onDownload={can('resource.open') ? part => execute('resource.open', { ...part, disposition: 'download' }) : undefined}
+          appearance={{
+            foreground: stringSetting('foreground', 'var(--text)'),
+            mutedForeground: stringSetting('mutedForeground', 'var(--text-dim)'),
+            background: stringSetting('background', 'transparent'),
+            borderColor: stringSetting('borderColor', 'var(--border)'),
+            maxWidth: numberSetting('maxWidth', 960),
+            maxHeight: numberSetting('maxHeight', 640),
+            fit: mediaFit(props.appearance.fit),
+            radius: numberSetting('radius', 8),
+            defaultExpanded: booleanSetting('defaultExpanded', true),
+            showCaption: booleanSetting('showCaption', true),
+            showDownload: booleanSetting('showDownload', true),
+            autoplay: booleanSetting('autoplay', false),
+            controls: booleanSetting('controls', true),
+            transcriptStyle: mediaTranscriptStyle(props.appearance.transcriptStyle),
+            showMetadata: booleanSetting('showMetadata', true),
+            reducedMotion: props.appearance.reducedMotion === true,
+          }}
         />
       </Match>
       <Match when={kind() === 'content.unknown'}>
@@ -171,6 +192,14 @@ function fileTypePalette(value: unknown): 'auto' | 'neutral' | 'accent' {
 
 function fileGroupLayout(value: unknown): 'stack' | 'grid' {
   return value === 'grid' ? 'grid' : 'stack'
+}
+
+function mediaFit(value: unknown): 'contain' | 'cover' | 'original' {
+  return value === 'cover' || value === 'original' ? value : 'contain'
+}
+
+function mediaTranscriptStyle(value: unknown): 'panel' | 'plain' | 'compact' {
+  return value === 'plain' || value === 'compact' ? value : 'panel'
 }
 
 function unknownSummary(payload: unknown, kind: string): string {

@@ -84,4 +84,60 @@ describe('React Workbench fatal fallback', () => {
     expect(container.textContent).not.toContain('JVBERi0xLjQK')
     expect(container.querySelectorAll('[data-react-content-kind]')).toHaveLength(4)
   })
+
+  it('keeps C03 media identity and command-gated actions visible without loading unsafe sources', () => {
+    const current: WorkbenchDocument = {
+      ...document(4, ''),
+      messages: [{
+        ...document(4, '').messages[0]!,
+        parts: [
+          {
+            kind: 'image', source: 'https://cdn.example.com/architecture.png', mimeType: 'image/png',
+            alt: '架构图', caption: '系统拓扑', width: 1280, height: 720,
+          },
+          {
+            kind: 'audio', source: 'C:\\media\\voice.wav', sourceKind: 'path', mimeType: 'audio/wav',
+            alt: '语音回复', durationMs: 12_300, transcript: '独立转写',
+          },
+          {
+            kind: 'video', source: 'javascript:alert(1)', sourceKind: 'url', mimeType: 'video/mp4',
+            alt: '危险视频',
+          },
+        ],
+      }],
+    }
+    const reader: WorkbenchDocumentReader = {
+      getSnapshot: () => current,
+      subscribe: () => () => {},
+      getSlice: () => undefined as never,
+      subscribeSlice: () => () => {},
+    }
+    const onOpenMedia = vi.fn()
+    const onDownloadMedia = vi.fn()
+    const { container } = render(<ReactWorkbenchFatalFallback
+      document={reader}
+      failure={{ suiteId: 'builtin.solid', phase: 'slot', message: 'media slot failed' }}
+      onRetry={vi.fn()}
+      onSelectSuite={vi.fn()}
+      onOpenDiagnostics={vi.fn()}
+      onOpenMedia={onOpenMedia}
+      onDownloadMedia={onDownloadMedia}
+    />)
+
+    expect(screen.getByText('图片')).toBeInTheDocument()
+    expect(screen.getByText('架构图')).toBeInTheDocument()
+    expect(screen.getByText('系统拓扑')).toBeInTheDocument()
+    expect(screen.getByText('1280×720 · image/png')).toBeInTheDocument()
+    expect(screen.getByText('C:\\media\\voice.wav')).toBeInTheDocument()
+    expect(screen.getByText('独立转写')).toBeInTheDocument()
+    expect(screen.getByText('媒体来源不可用')).toBeInTheDocument()
+    expect(container.querySelector('[src="javascript:alert(1)"]')).toBeNull()
+
+    screen.getByRole('button', { name: '打开媒体：架构图' }).click()
+    screen.getByRole('button', { name: '下载媒体：架构图' }).click()
+    expect(onOpenMedia).toHaveBeenCalledWith(current.messages[0]!.parts[0])
+    expect(onDownloadMedia).toHaveBeenCalledWith(current.messages[0]!.parts[0])
+    expect(screen.getByRole('button', { name: '打开媒体：危险视频' })).toBeDisabled()
+    expect(screen.getByRole('button', { name: '下载媒体：危险视频' })).toBeDisabled()
+  })
 })

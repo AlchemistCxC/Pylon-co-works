@@ -59,6 +59,29 @@ describe('ContentPart schema', () => {
     }
   })
 
+  it('validates the canonical C03 media source and metadata boundary', () => {
+    expect(parseContentPart({
+      kind: 'image', source: 'iVBORw0KGgo=', sourceKind: 'base64', mimeType: 'image/png',
+      width: 640, height: 480, caption: '架构图',
+    }).ok).toBe(true)
+    expect(parseContentPart({
+      kind: 'video', source: 'C:\\media\\demo.mp4', sourceKind: 'path', mimeType: 'video/mp4',
+      durationMs: 1_500,
+    }).ok).toBe(true)
+
+    expect(parseContentPart({ kind: 'image', source: '   ' }).ok).toBe(false)
+    expect(parseContentPart({ kind: 'image', source: 'https://safe.test/a.png', sourceKind: 'guess' }).ok).toBe(false)
+    expect(parseContentPart({ kind: 'image', source: 'https://safe.test/a.png', width: -1 }).ok).toBe(false)
+    expect(parseContentPart({ kind: 'image', source: 'https://safe.test/a.png', height: Number.NaN }).ok).toBe(false)
+    expect(parseContentPart({ kind: 'audio', source: 'https://safe.test/a.png', mimeType: 'image/png' }).ok).toBe(false)
+    expect(parseContentPart({
+      kind: 'image', source: 'https://safe.test/a.png', headers: { authorization: 'Bearer secret' },
+    }).ok).toBe(false)
+    expect(parseContentPart({
+      kind: 'image', source: 'https://safe.test/a.png', base64: 'duplicate-payload',
+    }).ok).toBe(false)
+  })
+
   it('round-trips unknown raw without turning it into invalid JSON', () => {
     const unknown: ContentPart = createUnknownContentPart('provider.unknown', { nested: [1, true, null] })
     const parsed = parseContentPart(JSON.parse(JSON.stringify(unknown)))

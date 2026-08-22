@@ -597,6 +597,105 @@ describe('AgentSheetView renderer mode context', () => {
     }
   })
 
+  it('C03 settings update the mounted production media Slot without remounting', async () => {
+    const settings = getRendererSettingsStore()
+    settings.reset()
+    settings.setOverride('kind.content.image.maxWidth', 420)
+    settings.setOverride('kind.content.image.fit', 'cover')
+    settings.setOverride('kind.content.image.showCaption', false)
+    try {
+      useIdentityStore.setState({ sessions: [session('session-1', 'local:a')] })
+      useWorkspaceStore.setState(state => ({ workspaceSheets: { ...state.workspaceSheets, activeSheetId: 'agent-sheet' } }))
+      const { container } = render(<AgentSheetView sheet={sheet({ sidebarMode: 'work' })} ctx={ctx} />)
+      await screen.findByLabelText('Solid Agent Workbench', {}, { timeout: 5_000 })
+      publishPluginEvent(createWorkbenchEnvelope({
+        sessionId: 'local:a', recordedAt: '2026-08-22T00:00:01.000Z', sequence: 1,
+        source: { provider: 'hermes', sourceId: 'media-settings' }, identity: { messageId: 'message-media-settings' },
+        provenance: { origin: 'local-observed', trust: 'authoritative' },
+        event: {
+          type: 'message.delta', role: 'assistant',
+          parts: [{
+            kind: 'image', source: 'https://cdn.example.com/settings.png', mimeType: 'image/png',
+            alt: '设置图片', caption: '可切换说明',
+          }],
+        },
+      }))
+
+      const media = await waitFor(() => {
+        const node = container.querySelector<HTMLElement>('[data-content-kind="content.image"] figure.term-media')
+        expect(node?.style.maxWidth).toBe('420px')
+        expect(node?.dataset.fit).toBe('cover')
+        expect(node?.textContent).not.toContain('可切换说明')
+        return node!
+      })
+      settings.setOverride('kind.content.image.maxWidth', 680)
+      settings.setOverride('kind.content.image.fit', 'contain')
+      settings.setOverride('kind.content.image.showCaption', true)
+
+      await waitFor(() => {
+        expect(media.style.maxWidth).toBe('680px')
+        expect(media.dataset.fit).toBe('contain')
+        expect(media.textContent).toContain('可切换说明')
+      })
+      expect(container.querySelector('[data-content-kind="content.image"] figure.term-media')).toBe(media)
+    } finally {
+      settings.reset()
+    }
+  })
+
+  it('targeted content.image Slot owner cleanup restores the C03 base Slot', async () => {
+    const destroyed = vi.fn()
+    const registration = getRendererRegistry().registerSlot(
+      createPluginIdentity('test.production-media-slot', 'runtime'),
+      {
+        id: 'test.production-media-slot.content', targetSuites: ['builtin.solid'],
+        kinds: ['content.image'], priority: 1, fallback: false,
+        canRender: snapshot => snapshot.kind === 'content.image',
+        createSurface: () => ({
+          rendererId: 'test.production-media-slot', kind: 'solid',
+          mount(container, snapshot) {
+            const node = document.createElement('div')
+            node.dataset.productionMediaSlot = 'true'
+            node.textContent = `media overlay: ${String((snapshot.payload as { alt?: unknown }).alt)}`
+            container.append(node)
+            return node
+          },
+          update(handle, snapshot) {
+            ;(handle as HTMLElement).textContent = `media overlay: ${String((snapshot.payload as { alt?: unknown }).alt)}`
+          },
+          destroy(handle) { destroyed(handle); (handle as HTMLElement).remove() }, on: () => () => {},
+        }),
+      },
+    )
+    try {
+      useIdentityStore.setState({ sessions: [session('session-1', 'local:a')] })
+      useWorkspaceStore.setState(state => ({ workspaceSheets: { ...state.workspaceSheets, activeSheetId: 'agent-sheet' } }))
+      const { container } = render(<AgentSheetView sheet={sheet({ sidebarMode: 'work' })} ctx={ctx} />)
+      await screen.findByLabelText('Solid Agent Workbench', {}, { timeout: 5_000 })
+      publishPluginEvent(createWorkbenchEnvelope({
+        sessionId: 'local:a', recordedAt: '2026-08-22T00:00:01.000Z', sequence: 1,
+        source: { provider: 'hermes', sourceId: 'media-overlay' }, identity: { messageId: 'message-media-overlay' },
+        provenance: { origin: 'local-observed', trust: 'authoritative' },
+        event: {
+          type: 'message.delta', role: 'assistant',
+          parts: [{ kind: 'image', source: 'https://cdn.example.com/overlay.png', mimeType: 'image/png', alt: '覆盖图' }],
+        },
+      }))
+
+      expect(await screen.findByText('media overlay: 覆盖图')).toBeTruthy()
+      await registration.dispose()
+
+      await waitFor(() => expect(container.querySelector('[data-production-media-slot="true"]')).toBeNull())
+      expect(await screen.findByRole('img', { name: '覆盖图' })).toHaveAttribute('src', 'https://cdn.example.com/overlay.png')
+      expect(container.querySelector('[data-renderer-slot-id="builtin.solid.content.base"]')).not.toBeNull()
+      expect(destroyed).toHaveBeenCalled()
+      const destroyedHandles = destroyed.mock.calls.map(call => call[0])
+      expect(new Set(destroyedHandles).size).toBe(destroyedHandles.length)
+    } finally {
+      await registration.dispose()
+    }
+  })
+
   it('canonical message parts 经 content.text Slot seam 消费且保留消息 role framing', async () => {
     const registration = getRendererRegistry().registerSlot(
       createPluginIdentity('test.production-content-slot', 'runtime'),

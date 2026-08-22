@@ -5,8 +5,10 @@ export type {
   ContentTruncation,
   DocumentContentPart,
   ImageContentPart,
+  MediaContentPart,
   JsonValue,
   ResourceContentPart,
   TextContentPart,
   UnknownContentPart,
 } from './contentPartSchema.ts'
+export type { MediaSourceKind } from './mediaContentValidation.ts'

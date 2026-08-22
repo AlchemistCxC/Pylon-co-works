@@ -98,6 +98,23 @@
 .term-file-action { min-height:28px; }
 .term-file-preview { margin:var(--ui-space-1) 0 0; padding:var(--ui-space-2); overflow:auto; white-space:pre-wrap; overflow-wrap:anywhere; background:color-mix(in srgb,var(--bg-panel) 72%,transparent); border-radius:var(--message-radius,0); }
 
+.term-media { display:grid; gap:var(--ui-space-2); width:min(100%,960px); margin:var(--ui-space-2) 0; padding:var(--ui-space-2); border:var(--line-width-1) solid var(--border); overflow:hidden; }
+.term-media-disclosure { display:flex; align-items:center; gap:var(--ui-space-1); min-height:30px; padding:0 var(--ui-space-1); color:inherit; background:transparent; border:0; text-align:left; cursor:pointer; }
+.term-media-disclosure:focus-visible,.term-media-image-button:focus-visible { outline:2px solid var(--accent); outline-offset:2px; }
+.term-media-image-button { display:block; max-width:100%; padding:0; border:0; border-radius:inherit; overflow:auto; background:transparent; cursor:zoom-in; }
+.term-media-image-button.term-media-zoomed { cursor:zoom-out; }
+.term-media-image-button.term-media-zoomed .term-media-img { max-width:none!important; max-height:none!important; object-fit:none!important; }
+.term-media-element { display:block; width:100%; background:color-mix(in srgb,var(--bg-panel) 78%,transparent); }
+.term-media-audio { min-height:42px; }
+.term-media-caption { display:flex; flex-wrap:wrap; align-items:center; gap:var(--ui-space-1) var(--ui-space-2); color:var(--text-dim); }
+.term-media-caption-text { color:inherit; overflow-wrap:anywhere; }
+.term-media-error { display:flex; flex-wrap:wrap; align-items:center; gap:var(--ui-space-2); padding:var(--ui-space-2); border:var(--line-width-1) solid color-mix(in srgb,var(--danger,#dc2626) 52%,var(--border)); }
+.term-media-error-text { color:var(--danger,#dc2626); overflow-wrap:anywhere; }
+.term-media-transcript { display:grid; gap:var(--ui-space-1); padding:var(--ui-space-2); border-left:var(--line-width-1) solid var(--border); white-space:pre-wrap; overflow-wrap:anywhere; }
+.term-media-transcript[data-transcript-style="plain"] { padding-inline:0; border-left:0; }
+.term-media-transcript[data-transcript-style="compact"] { grid-template-columns:auto minmax(0,1fr); padding-block:var(--ui-space-1); }
+.term-media-transcript-label { font-weight:600; }
+
 /* 非经典 Terminal-like 的折叠缝。经典终端继续使用瞬时显隐，保持冻结视觉。 */
 .term-collapse[data-open="false"] { display:none; }
 .app[data-interface-mode="terminal-like"]:not([data-presentation-profile="builtin.presentation.terminal-classic"]) .term-collapse {
