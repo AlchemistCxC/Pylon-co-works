@@ -12,6 +12,9 @@ const EXPECTED_KINDS = [
   'content.markdown',
   'content.reasoning',
   'content.redacted-reasoning',
+  'content.file-reference',
+  'content.file-selection',
+  'content.resource',
   'content.code',
   'content.ansi',
 ] as const

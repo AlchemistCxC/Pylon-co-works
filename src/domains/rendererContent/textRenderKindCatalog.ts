@@ -76,6 +76,42 @@ export const BUILTIN_TEXT_RENDER_KINDS: readonly RenderKindDefinition[] = [
       && typeof (input as Record<string, unknown>).text === 'undefined',
   },
   {
+    id: 'content.file-reference',
+    category: 'content',
+    fallbackKind: 'content.unknown',
+    priority: 100,
+    fixture: { path: '/fixture/report.md', displayName: 'report.md' },
+    defaultTokens: {},
+    settingsSchemaVersion: 1,
+    // C02：path 必须非空；Windows/URI 形态不在此层互转
+    validateInput: input => typeof input === 'object' && input !== null && !Array.isArray(input)
+      && typeof (input as Record<string, unknown>).path === 'string'
+      && ((input as Record<string, unknown>).path as string).length > 0,
+  },
+  {
+    id: 'content.file-selection',
+    category: 'content',
+    fallbackKind: 'content.unknown',
+    priority: 100,
+    fixture: { path: '/fixture/main.ts', selection: { start: { line: 1 }, end: { line: 4 } }, language: 'ts' },
+    defaultTokens: {},
+    settingsSchemaVersion: 1,
+    validateInput: input => typeof input === 'object' && input !== null && !Array.isArray(input)
+      && typeof (input as Record<string, unknown>).path === 'string'
+      && typeof (input as Record<string, unknown>).selection === 'object',
+  },
+  {
+    id: 'content.resource',
+    category: 'content',
+    fallbackKind: 'content.unknown',
+    priority: 100,
+    fixture: { uri: 'file:///fixture/spec.pdf', mimeType: 'application/pdf', hasBlob: true },
+    defaultTokens: {},
+    settingsSchemaVersion: 1,
+    validateInput: input => typeof input === 'object' && input !== null && !Array.isArray(input)
+      && typeof (input as Record<string, unknown>).uri === 'string',
+  },
+  {
     id: 'content.code',
     category: 'content',
     fallbackKind: 'content.unknown',
