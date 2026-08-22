@@ -29,6 +29,31 @@ describe('plan/goal domain model (C08)', () => {
     expect(entries[4]).toMatchObject({ blockedReason: '等待审批' })
   })
 
+  it('preserves explicit and future plan entry fields in metadata across patch and replay', () => {
+    const initial = normalizePlanEntries([{
+      id: 'meta-1',
+      content: '带扩展字段的任务',
+      status: 'pending',
+      metadata: { owner: 'peri' },
+      futureField: { priorityBand: 'urgent' },
+    }])[0]
+    expect(initial?.metadata).toEqual({ owner: 'peri', futureField: { priorityBand: 'urgent' } })
+
+    let state = createEmptyPlanState('session-meta')
+    state = applyPlanEvent(state, { type: 'plan.replaced', entries: [{
+      id: 'meta-1', content: '带扩展字段的任务', status: 'pending',
+      metadata: { owner: 'peri' }, futureField: { priorityBand: 'urgent' },
+    }] })
+    state = applyPlanEvent(state, { type: 'plan.entry-updated', entry: {
+      id: 'meta-1', content: '带扩展字段的任务', status: 'completed',
+      futureField: { priorityBand: 'urgent', reviewed: true },
+    } })
+    expect(state.entries[0]?.metadata).toEqual({
+      owner: 'peri',
+      futureField: { priorityBand: 'urgent', reviewed: true },
+    })
+  })
+
   it('patches entries by stable item id and tolerates parent-late reorder with terminal idempotence', () => {
     let state = createEmptyPlanState('session-1')
     state = applyPlanEvent(state, { type: 'plan.replaced', entries: [
@@ -71,6 +96,23 @@ describe('plan/goal domain model (C08)', () => {
     goal = applyGoalEvents(goal, { type: 'goal.cleared', goalId: 'g-1' })
     expect(goal.current).toBeUndefined()
     expect(GOAL_STATUSES).toEqual(['active', 'complete', 'blocked'])
+  })
+
+  it('projects goal accounting while retaining unknown accounting metrics', () => {
+    const parsed = normalizeGoalSnapshot({
+      goalId: 'g-accounting',
+      objective: 'ship',
+      status: 'active',
+      accounting: { tokensUsed: 20, timeUsedSeconds: 12, providerCredits: 1.5 },
+      futureMetric: { value: 1 },
+    })
+    expect(parsed?.accounting).toMatchObject({ tokensUsed: 20, timeUsedSeconds: 12 })
+    expect(parsed?.accounting?.metadata).toMatchObject({ providerCredits: 1.5 })
+    expect(parsed?.metadata).toMatchObject({ futureMetric: { value: 1 } })
+
+    const malformed = normalizeGoalSnapshot({ objective: 'safe', accounting: 'not-an-object' })
+    expect(malformed?.accounting).toBeUndefined()
+    expect(malformed?.metadata).toMatchObject({ accounting: 'not-an-object' })
   })
 
   it('preserves malformed or future goal shapes as visible unknown instead of dropping', () => {

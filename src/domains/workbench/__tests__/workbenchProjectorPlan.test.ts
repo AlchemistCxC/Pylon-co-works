@@ -78,6 +78,20 @@ describe('WorkbenchProjector plan/goal slices (C08)', () => {
     expect(JSON.stringify(live.goal)).toEqual(JSON.stringify(replay.goal))
   })
 
+  it('keeps plan metadata and goal accounting visible through live and replay projection', () => {
+    const events = [
+      envelope(1, { type: 'plan.replaced', entries: [{ id: 'm', content: '扩展任务', status: 'pending', metadata: { owner: 'peri' }, futureFlag: true }] as unknown as readonly JsonValue[] }),
+      envelope(2, { type: 'goal.updated', goal: { goalId: 'g-m', objective: '目标', status: 'active', accounting: { tokensUsed: 20, timeUsedSeconds: 12, providerCredits: 1.5 } } as unknown as JsonValue }),
+      envelope(3, { type: 'plan.entry-updated', entry: { id: 'm', content: '扩展任务', status: 'completed', futureFlag: 'reviewed' } as unknown as JsonValue }),
+    ]
+    const live = events.reduce(reduceWorkbenchEvent, createWorkbenchDocument(base.sessionId))
+    const replay = projectWorkbench(events).document
+    expect(selectPlan(live).entries[0]?.metadata).toEqual({ owner: 'peri', futureFlag: 'reviewed' })
+    expect(selectGoal(live)?.accounting).toMatchObject({ tokensUsed: 20, timeUsedSeconds: 12 })
+    expect(JSON.stringify(live.plan)).toEqual(JSON.stringify(replay.plan))
+    expect(JSON.stringify(live.goal)).toEqual(JSON.stringify(replay.goal))
+  })
+
   it('tolerates malformed plan/goal payloads with diagnostics instead of throwing', () => {
     const document = reduce([
       envelope(1, { type: 'plan.replaced', entries: 'not-an-array' as unknown as readonly JsonValue[] }),

@@ -25,6 +25,15 @@ export interface PlanEntryV2 {
   readonly blockedReason?: string
   /** provider 原始状态拼写（status 无法收窄时必填；可收窄时保留变体拼写） */
   readonly rawStatus?: string
+  /** 已知/未来 provider 字段；不得因结构化收窄而静默丢弃 */
+  readonly metadata?: Readonly<Record<string, unknown>>
+}
+
+export interface GoalAccounting {
+  readonly tokensUsed?: number
+  readonly timeUsedSeconds?: number
+  /** provider-neutral accounting 扩展字段 */
+  readonly metadata?: Readonly<Record<string, unknown>>
 }
 
 export interface GoalSnapshot {
@@ -34,6 +43,8 @@ export interface GoalSnapshot {
   readonly tokenBudget?: number
   readonly tokensUsed?: number
   readonly blockedReason?: string
+  /** 预算/时间消耗的结构化 accounting；未知 accounting 字段进入 metadata */
+  readonly accounting?: GoalAccounting
   /** 未知字段聚合处；保证未来字段可见而非丢弃 */
   readonly metadata?: Readonly<Record<string, unknown>>
 }
@@ -121,6 +132,12 @@ export function normalizePlanEntries(raw: unknown): readonly PlanEntryV2[] {
     const id = text(item.id) ?? text(item.itemId) ?? content
     const rawStatus = typeof item.rawStatus === 'string' && item.status === 'unknown' ? item.rawStatus : undefined
     const statusInfo = normalizePlanStatus(item.status)
+    const knownKeys = new Set(['id', 'itemId', 'content', 'title', 'text', 'status', 'rawStatus', 'activeForm', 'priority', 'blockedReason', 'blocked_reason', 'metadata'])
+    const metadata: Record<string, unknown> = isRecord(item.metadata) ? { ...item.metadata } : {}
+    if (item.metadata !== undefined && !isRecord(item.metadata)) metadata.metadata = item.metadata
+    for (const [key, value] of Object.entries(item)) {
+      if (!knownKeys.has(key) && value !== undefined) metadata[key] = value
+    }
     const entry: PlanEntryV2 = {
       id,
       content,
@@ -130,6 +147,7 @@ export function normalizePlanEntries(raw: unknown): readonly PlanEntryV2[] {
       ...((typeof item.priority === 'number' || typeof item.priority === 'string') && item.priority !== '' ? { priority: item.priority } : {}),
       ...(text(item.blockedReason) !== undefined ? { blockedReason: text(item.blockedReason) } : {}),
       ...(text(item.blocked_reason) !== undefined ? { blockedReason: text(item.blocked_reason) } : {}),
+      ...(Object.keys(metadata).length > 0 ? { metadata } : {}),
     }
     entries.push(entry)
   }
@@ -140,6 +158,7 @@ function entriesEqual(left: PlanEntryV2, right: PlanEntryV2): boolean {
   return left.id === right.id && left.content === right.content && left.status === right.status
     && left.activeForm === right.activeForm && left.priority === right.priority
     && left.blockedReason === right.blockedReason && left.rawStatus === right.rawStatus
+    && JSON.stringify(left.metadata ?? null) === JSON.stringify(right.metadata ?? null)
 }
 
 /**
@@ -167,6 +186,7 @@ export function applyPlanEvent(state: PlanState, event: PlanEventInput): PlanSta
     const merged: PlanEntryV2 = {
       ...state.entries[index],
       ...patch,
+      ...(patch.metadata !== undefined ? { metadata: { ...state.entries[index].metadata, ...patch.metadata } } : {}),
     }
     if (entriesEqual(state.entries[index], merged)) return state
     const entries = [...state.entries]
@@ -183,10 +203,28 @@ export function normalizeGoalSnapshot(raw: unknown): GoalSnapshot | undefined {
   const status: GoalStatus = rawStatus !== undefined
     ? (KNOWN_GOAL_STATUSES.has(rawStatus) ? rawStatus as Exclude<GoalStatus, 'unknown'> : 'unknown')
     : 'unknown'
-  const knownKeys = new Set(['goalId', 'goal_id', 'id', 'objective', 'status', 'tokenBudget', 'token_budget', 'tokensUsed', 'tokens_used', 'blockedReason', 'blocked_reason'])
-  const metadata: Record<string, unknown> = {}
+  const knownKeys = new Set(['goalId', 'goal_id', 'id', 'objective', 'status', 'tokenBudget', 'token_budget', 'tokensUsed', 'tokens_used', 'blockedReason', 'blocked_reason', 'accounting', 'metadata'])
+  const metadata: Record<string, unknown> = isRecord(raw.metadata) ? { ...raw.metadata } : {}
+  if (raw.metadata !== undefined && !isRecord(raw.metadata)) metadata.metadata = raw.metadata
   for (const [key, value] of Object.entries(raw)) {
-    if (!knownKeys.has(key)) metadata[key] = value
+    if (!knownKeys.has(key) && value !== undefined) metadata[key] = value
+  }
+  const accountingRaw = raw.accounting
+  let accounting: GoalAccounting | undefined
+  if (isRecord(accountingRaw)) {
+    const accountingMetadata: Record<string, unknown> = isRecord(accountingRaw.metadata) ? { ...accountingRaw.metadata } : {}
+    if (accountingRaw.metadata !== undefined && !isRecord(accountingRaw.metadata)) accountingMetadata.metadata = accountingRaw.metadata
+    for (const [key, value] of Object.entries(accountingRaw)) {
+      if (!new Set(['tokensUsed', 'tokens_used', 'timeUsedSeconds', 'time_used_seconds', 'metadata']).has(key) && value !== undefined) accountingMetadata[key] = value
+    }
+    accounting = {
+      ...(typeof accountingRaw.tokensUsed === 'number' ? { tokensUsed: accountingRaw.tokensUsed } : typeof accountingRaw.tokens_used === 'number' ? { tokensUsed: accountingRaw.tokens_used } : {}),
+      ...(typeof accountingRaw.timeUsedSeconds === 'number' ? { timeUsedSeconds: accountingRaw.timeUsedSeconds } : typeof accountingRaw.time_used_seconds === 'number' ? { timeUsedSeconds: accountingRaw.time_used_seconds } : {}),
+      ...(Object.keys(accountingMetadata).length > 0 ? { metadata: accountingMetadata } : {}),
+    }
+    if (Object.keys(accounting).length === 0) accounting = undefined
+  } else if (accountingRaw !== undefined) {
+    metadata.accounting = accountingRaw
   }
   const snapshot: GoalSnapshot = {
     ...(text(raw.goalId ?? raw.goal_id ?? raw.id) !== undefined ? { goalId: text(raw.goalId ?? raw.goal_id ?? raw.id) } : {}),
@@ -195,6 +233,7 @@ export function normalizeGoalSnapshot(raw: unknown): GoalSnapshot | undefined {
     ...(typeof raw.tokenBudget === 'number' ? { tokenBudget: raw.tokenBudget } : typeof raw.token_budget === 'number' ? { tokenBudget: raw.token_budget } : {}),
     ...(typeof raw.tokensUsed === 'number' ? { tokensUsed: raw.tokensUsed } : typeof raw.tokens_used === 'number' ? { tokensUsed: raw.tokens_used } : {}),
     ...(text(raw.blockedReason ?? raw.blocked_reason) !== undefined ? { blockedReason: text(raw.blockedReason ?? raw.blocked_reason) } : {}),
+    ...(accounting !== undefined ? { accounting } : {}),
     ...(Object.keys(metadata).length > 0 ? { metadata } : {}),
   }
   return snapshot
@@ -206,6 +245,7 @@ function goalsEqual(left: GoalSnapshot | undefined, right: GoalSnapshot | undefi
   return left.goalId === right.goalId && left.objective === right.objective && left.status === right.status
     && left.tokenBudget === right.tokenBudget && left.tokensUsed === right.tokensUsed
     && left.blockedReason === right.blockedReason
+    && JSON.stringify(left.accounting ?? null) === JSON.stringify(right.accounting ?? null)
     && JSON.stringify(left.metadata ?? null) === JSON.stringify(right.metadata ?? null)
 }
 
@@ -222,6 +262,7 @@ export function applyGoalEvents(state: GoalState, event: GoalEventInput): GoalSt
     const merged: GoalSnapshot = {
       ...previous,
       ...incoming,
+      ...(incoming.accounting !== undefined ? { accounting: { ...previous?.accounting, ...incoming.accounting, ...(incoming.accounting.metadata !== undefined ? { metadata: { ...previous?.accounting?.metadata, ...incoming.accounting.metadata } } : {}) } } : previous?.accounting !== undefined ? { accounting: previous.accounting } : {}),
       ...(incoming.metadata === undefined && previous?.metadata !== undefined ? { metadata: previous.metadata } : {}),
     }
     if (goalsEqual(previous, merged)) return state
