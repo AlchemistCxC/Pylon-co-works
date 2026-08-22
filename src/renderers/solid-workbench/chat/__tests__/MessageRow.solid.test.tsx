@@ -92,6 +92,15 @@ describe('SolidMessageRow', () => {
     }, { timeout: 5000 })
   })
 
+  it('reasoning duration normalizes rounded seconds across the minute boundary', () => {
+    const result = row({
+      id: 'r-minute', role: 'reasoning', sender: 'peri', content: '边界', time: 't',
+      thoughtDurationMs: 119_600,
+    })
+    expect(result.getByRole('button', { name: /Thought for 2m 0s/ })).toBeTruthy()
+    expect(result.container.textContent).not.toContain('1m 60s')
+  })
+
   it('system error 使用 alert 结构', () => {
     const result = row({ id: 'e1', role: 'assistant', sender: 'system', content: '后端错误', time: 't' })
     expect(result.getByRole('alert').textContent).toContain('后端错误')

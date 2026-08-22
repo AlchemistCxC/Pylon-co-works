@@ -51,6 +51,7 @@ import CollapsibleRegion from './CollapsibleRegion.tsx'
 import { useShallow } from 'zustand/react/shallow'
 import { Bot, BrainCircuit, Check, Copy, FilePenLine, FileSearch, Search, Terminal, UserRound, Wrench } from 'lucide-react'
 import { useInterfaceModeStore } from '../../domains/interface/interfaceModeStore.ts'
+import { formatThoughtDuration } from '../../domains/rendererContent/reasoningPresentation.ts'
 
 interface Props {
   sessionId: string | null
@@ -585,11 +586,7 @@ function CodeBlock({ language, code }: { language?: string; code: string }) {
   )
 }
 
-function formatThoughtLabel(text: string) {
-  return `Thought for ${text.length} chars`
-}
-
-function ReasoningBlock({ text, running, redacted, redactedReason }: { text: string; running: boolean; startedAt?: number; durationMs?: number; redacted?: boolean; redactedReason?: string }) {
+function ReasoningBlock({ text, running, durationMs, redacted, redactedReason }: { text: string; running: boolean; startedAt?: number; durationMs?: number; redacted?: boolean; redactedReason?: string }) {
   recordRender('ReasoningBlock.render')
   const [open, setOpen] = useState(false)
   const bodyId = useId()
@@ -602,7 +599,7 @@ function ReasoningBlock({ text, running, redacted, redactedReason }: { text: str
     ? '推理已被隐藏'
     : running
       ? 'Thinking…'
-      : text.trim() ? formatThoughtLabel(text) : '暂无思考内容'
+      : text.trim() ? durationMs !== undefined ? formatThoughtDuration(durationMs) : '思考过程' : '暂无思考内容'
   if (state === 'redacted' || state === 'missing') {
     return (
       <div className="term-reasoning" data-state={state}>

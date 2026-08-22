@@ -63,6 +63,19 @@ describe('C01 reasoning projector aggregation', () => {
     expect(thoughts[0]!.running).toBe(false)
   })
 
+  it('keeps the first terminal duration when completion is repeated with a distinct event id', () => {
+    const document = reduce([
+      delta(1, 'thought-terminal', '稳定正文', '1970-01-01T00:00:01.000Z'),
+      envelope(2, { type: 'reasoning.completed', parts: [] }, 'thought-terminal', '1970-01-01T00:00:03.000Z'),
+      envelope(3, { type: 'reasoning.completed', parts: [] }, 'thought-terminal', '1970-01-01T00:00:09.000Z'),
+    ])
+
+    const thought = document.messages.find(message => message.id === 'thought-terminal')!
+    expect(thought.content).toBe('稳定正文')
+    expect(thought.running).toBe(false)
+    expect(thought.thoughtDurationMs).toBe(2_000)
+  })
+
   it('starts a new segment when identity changes even if last message is reasoning', () => {
     const document = reduce([
       delta(1, 'thought-a', '第一段思考', '1970-01-01T00:00:01.000Z'),
@@ -73,6 +86,7 @@ describe('C01 reasoning projector aggregation', () => {
     expect(thoughts).toHaveLength(2)
     expect(thoughts[0]!.content).toBe('第一段思考')
     expect(thoughts[1]!.content).toBe('第二段独立思考')
+    expect(thoughts.every(thought => thought.running)).toBe(true)
   })
 
   it('marks redacted segments distinctly with reason and never exposes raw content', () => {
@@ -98,6 +112,7 @@ describe('C01 reasoning projector aggregation', () => {
     expect(thought.redactedReason).toBe('provider_redacted')
     // 隐藏内容不得以原文形式保留在 content 中
     expect(thought.content).not.toContain('[REDACTED]')
+    expect(JSON.stringify(thought.parts)).not.toContain('部分可见')
     // redacted 即完成态
     expect(thought.running).toBe(false)
     // duration 同样记录（首 delta → redacted 时刻）

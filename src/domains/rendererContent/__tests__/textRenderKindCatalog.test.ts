@@ -88,4 +88,46 @@ describe('C00 builtin render kind catalog', () => {
       expect.arrayContaining(['wrap', 'maxLines', 'background', 'palette']),
     )
   })
+
+  it('publishes concrete C01 reasoning appearance and behaviour settings', async () => {
+    const { ensureBuiltinTextRenderKinds } = await import('../textRenderKindCatalog.ts')
+    await ensureBuiltinTextRenderKinds()
+    const kinds = new Map(getRendererRegistry().snapshot().renderKinds.map(entry => [entry.value.id, entry.value]))
+
+    for (const id of ['content.reasoning', 'content.redacted-reasoning'] as const) {
+      const kind = kinds.get(id)!
+      expect(kind.settings?.schemaVersion).toBe(kind.settingsSchemaVersion)
+      expect(kind.settings?.groups.flatMap(group => group.fields).map(field => field.key)).toEqual(
+        expect.arrayContaining([
+          'foreground', 'background', 'borderColor', 'fontSize', 'lineHeight',
+          'defaultCollapsed', 'maxHeight', 'runningAnimation', 'showDuration',
+        ]),
+      )
+      expect(kind.defaultTokens).toMatchObject({
+        defaultCollapsed: true,
+        maxHeight: 320,
+        runningAnimation: 'pulse',
+        showDuration: true,
+      })
+    }
+  })
+
+  it('validates C01 reasoning state and rejects redacted payloads that carry raw text', async () => {
+    const { ensureBuiltinTextRenderKinds } = await import('../textRenderKindCatalog.ts')
+    await ensureBuiltinTextRenderKinds()
+    const kinds = new Map(getRendererRegistry().snapshot().renderKinds.map(entry => [entry.value.id, entry.value]))
+    const reasoning = kinds.get('content.reasoning')!
+    const redacted = kinds.get('content.redacted-reasoning')!
+
+    expect(reasoning.validateInput({ text: 'delta', state: 'running' })).toBe(true)
+    expect(reasoning.validateInput({ text: 'done', state: 'complete', durationMs: 100 })).toBe(true)
+    expect(reasoning.validateInput({ text: 'bad duration', state: 'complete', durationMs: Number.NaN })).toBe(false)
+    expect(reasoning.validateInput({ text: 'bad duration', state: 'complete', durationMs: -1 })).toBe(false)
+    expect(reasoning.validateInput({ text: 'bad duration', state: 'complete', durationMs: '100' })).toBe(false)
+    expect(reasoning.validateInput({ text: '', state: 'missing' })).toBe(true)
+    expect(reasoning.validateInput({ text: 'bad', state: 'redacted' })).toBe(false)
+    expect(reasoning.validateInput({ text: 'bad', state: 'unknown' })).toBe(false)
+    expect(redacted.validateInput({ reason: 'provider_policy' })).toBe(true)
+    expect(redacted.validateInput({ reason: 'provider_policy', text: 'private' })).toBe(false)
+  })
 })

@@ -1,8 +1,10 @@
 // @vitest-environment jsdom
 import { fireEvent, render, waitFor } from '@solidjs/testing-library'
+import { createSignal } from 'solid-js'
 import { describe, expect, it } from 'vitest'
 import type { RenderMessage } from '../../../../components/chat/messageTypes.ts'
 import type { Message } from '../../../../components/chat/messageTypes.ts'
+import { BuiltinSolidContentSlot } from '../BuiltinSolidContentSlot.solid.tsx'
 import { SolidMessageRow } from '../MessageRow.solid.tsx'
 
 /**
@@ -70,5 +72,74 @@ describe('C01 ReasoningBlock states', () => {
       if (!result.container.querySelector('.term-h1')) throw new Error('markdown not parsed yet')
     }, { timeout: 5000 })
     expect(result.container.querySelectorAll('.term-reasoning-line')).toHaveLength(0)
+  })
+
+  it('consumes resolved C01 appearance and behaviour tokens in the built-in content Slot', () => {
+    const result = render(() => <BuiltinSolidContentSlot
+      snapshot={{
+        nodeId: 'reasoning-slot', kind: 'content.reasoning', revision: 1,
+        payload: { text: '已完成推理', state: 'complete', durationMs: 2_400 },
+      }}
+      appearance={{
+        foreground: '#112233', background: '#f1f2f3', borderColor: '#445566',
+        fontSize: 17, lineHeight: 1.8, defaultCollapsed: false, maxHeight: 480,
+        runningAnimation: 'shimmer', showDuration: false,
+      }}
+      commands={{ execute: () => {} }}
+    />)
+
+    const reasoning = result.container.querySelector<HTMLElement>('.term-reasoning')!
+    expect(reasoning.style.color).toBe('rgb(17, 34, 51)')
+    expect(reasoning.style.backgroundColor).toBe('rgb(241, 242, 243)')
+    expect(reasoning.style.fontSize).toBe('17px')
+    expect(reasoning.style.lineHeight).toBe('1.8')
+    expect(reasoning.getAttribute('data-running-animation')).toBe('shimmer')
+    expect(result.getByRole('button').getAttribute('aria-expanded')).toBe('true')
+    expect(result.getByRole('button').textContent).not.toContain('2.4s')
+    const body = result.container.querySelector<HTMLElement>('.term-reasoning-body')!
+    expect(body.style.maxHeight).toBe('480px')
+    expect(body.style.borderColor).toBe('rgb(68, 85, 102)')
+  })
+
+  it('forces configured running animation off when reduced motion is active', () => {
+    const result = render(() => <BuiltinSolidContentSlot
+      snapshot={{
+        nodeId: 'reasoning-running', kind: 'content.reasoning', revision: 1,
+        payload: { text: '流式推理', state: 'running' },
+      }}
+      appearance={{ runningAnimation: 'shimmer', reducedMotion: true }}
+      commands={{ execute: () => {} }}
+    />)
+    const reasoning = result.container.querySelector('.term-reasoning')!
+    expect(reasoning.getAttribute('data-state')).toBe('running')
+    expect(reasoning.getAttribute('data-running-animation')).toBe('none')
+    expect(reasoning.querySelector('.term-reasoning-label')?.getAttribute('aria-live')).toBe('polite')
+    expect(reasoning.querySelector('.term-reasoning-body')?.getAttribute('aria-live')).toBeNull()
+  })
+
+  it('applies the configured collapse policy on running-to-complete and settings updates', async () => {
+    const [snapshot, setSnapshot] = createSignal({
+      nodeId: 'reasoning-transition', kind: 'content.reasoning', revision: 1,
+      payload: { text: '流式推理', state: 'running' },
+    })
+    const [appearance, setAppearance] = createSignal({ defaultCollapsed: true })
+    const result = render(() => <BuiltinSolidContentSlot
+      snapshot={snapshot()}
+      appearance={appearance()}
+      commands={{ execute: () => {} }}
+    />)
+    const reasoning = result.container.querySelector('.term-reasoning')!
+    expect(result.getByRole('button').getAttribute('aria-expanded')).toBe('true')
+
+    setSnapshot({
+      nodeId: 'reasoning-transition', kind: 'content.reasoning', revision: 2,
+      payload: { text: '流式推理', state: 'complete' },
+    })
+    await waitFor(() => expect(result.getByRole('button').getAttribute('aria-expanded')).toBe('false'))
+    expect(result.container.querySelector('.term-reasoning')).toBe(reasoning)
+
+    setAppearance({ defaultCollapsed: false })
+    await waitFor(() => expect(result.getByRole('button').getAttribute('aria-expanded')).toBe('true'))
+    expect(result.container.querySelector('.term-reasoning')).toBe(reasoning)
   })
 })

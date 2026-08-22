@@ -81,6 +81,43 @@ const ANSI_SETTINGS = Object.freeze({
   }],
 } satisfies RendererSettingsSchema)
 
+const REASONING_SETTINGS = Object.freeze({
+  schemaVersion: 1,
+  groups: [
+    {
+      id: 'appearance', label: '推理外观', layout: 'grid', fields: [
+        { key: 'foreground', label: '文字颜色', type: 'color', presentation: 'palette+picker', alpha: true, default: 'var(--text-dim)' },
+        { key: 'background', label: '背景色', type: 'color', presentation: 'palette+picker', alpha: true, default: 'transparent' },
+        { key: 'borderColor', label: '边框颜色', type: 'color', presentation: 'palette+picker', alpha: true, default: 'color-mix(in srgb, var(--border) 72%, transparent)' },
+        { key: 'fontSize', label: '字号', type: 'number', presentation: 'slider+input', min: 10, max: 28, step: 1, unit: 'px', default: 13 },
+        { key: 'lineHeight', label: '行高', type: 'number', presentation: 'slider+input', min: 1, max: 2.5, step: 0.1, default: 1.6 },
+      ],
+    },
+    {
+      id: 'behaviour', label: '推理行为', layout: 'grid', fields: [
+        { key: 'defaultCollapsed', label: '完成后默认折叠', type: 'boolean', presentation: 'toggle', default: true },
+        { key: 'maxHeight', label: '正文最大高度', type: 'number', presentation: 'slider+input', min: 80, max: 1200, step: 20, unit: 'px', default: 320 },
+        { key: 'runningAnimation', label: '思考中动效', type: 'choice', presentation: 'segmented', options: [
+          { value: 'pulse', label: '呼吸' }, { value: 'shimmer', label: '流光' }, { value: 'none', label: '关闭' },
+        ], default: 'pulse' },
+        { key: 'showDuration', label: '完成后显示时长', type: 'boolean', presentation: 'toggle', default: true },
+      ],
+    },
+  ],
+} satisfies RendererSettingsSchema)
+
+const REASONING_DEFAULT_TOKENS = Object.freeze({
+  foreground: 'var(--text-dim)',
+  background: 'transparent',
+  borderColor: 'color-mix(in srgb, var(--border) 72%, transparent)',
+  fontSize: 13,
+  lineHeight: 1.6,
+  defaultCollapsed: true,
+  maxHeight: 320,
+  runningAnimation: 'pulse',
+  showDuration: true,
+})
+
 function textPayload(input: unknown): input is { readonly text: string } {
   return typeof input === 'object' && input !== null && !Array.isArray(input)
     && typeof (input as Record<string, unknown>).text === 'string'
@@ -132,11 +169,16 @@ export const BUILTIN_TEXT_RENDER_KINDS: readonly RenderKindDefinition[] = [
     fallbackKind: 'content.unknown',
     priority: 100,
     fixture: { text: 'fixture reasoning delta', state: 'running' },
-    defaultTokens: {},
+    defaultTokens: REASONING_DEFAULT_TOKENS,
     settingsSchemaVersion: 1,
+    settings: REASONING_SETTINGS,
     // C01：state ∈ running|complete|missing；redacted 走独立 kind
     validateInput: input => textPayload(input)
-      && ['running', 'complete', 'missing'].includes(String((input as Record<string, unknown>).state)),
+      && ['running', 'complete', 'missing'].includes(String((input as Record<string, unknown>).state))
+      && ((input as Record<string, unknown>).durationMs === undefined
+        || (typeof (input as Record<string, unknown>).durationMs === 'number'
+          && Number.isFinite((input as Record<string, unknown>).durationMs)
+          && Number((input as Record<string, unknown>).durationMs) >= 0)),
   },
   {
     id: 'content.redacted-reasoning',
@@ -144,8 +186,9 @@ export const BUILTIN_TEXT_RENDER_KINDS: readonly RenderKindDefinition[] = [
     fallbackKind: 'content.unknown',
     priority: 100,
     fixture: { reason: 'provider_redacted' },
-    defaultTokens: {},
+    defaultTokens: REASONING_DEFAULT_TOKENS,
     settingsSchemaVersion: 1,
+    settings: REASONING_SETTINGS,
     // C01：redacted 只携带原因，不携带内容——validateInput 拒绝带正文的输入
     validateInput: input => typeof input === 'object' && input !== null && !Array.isArray(input)
       && typeof (input as Record<string, unknown>).reason === 'string'

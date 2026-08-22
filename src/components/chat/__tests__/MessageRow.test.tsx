@@ -6,7 +6,7 @@ import { useStore } from '../../../store'
 import type { Message } from '../messageTypes'
 import { useInterfaceModeStore } from '../../../domains/interface/interfaceModeStore'
 
-function row(message: Message, type: 'assistant' | 'user' = 'assistant') {
+function row(message: Message, type: 'assistant' | 'user' | 'reasoning' = 'assistant') {
   return render(
     <MessageRow
       renderMessage={{ type, message } as never}
@@ -53,5 +53,25 @@ describe('MessageRow', () => {
   test('user 消息渲染 sender 与内容', () => {
     row({ id: 'u1', role: 'user', sender: 'local:demo', content: '用户提问', time: 't' }, 'user')
     expect(screen.getByText('用户提问')).toBeTruthy()
+  })
+
+  test('React generic reasoning fallback displays canonical duration instead of character count', () => {
+    row({
+      id: 'r1', role: 'reasoning', sender: 'claude', content: '可见推理正文', time: 't',
+      thoughtDurationMs: 2_400,
+    }, 'reasoning')
+    expect(screen.getByRole('button', { name: /Thought for 2\.4s/ })).toBeTruthy()
+    expect(screen.queryByText(/chars/)).toBeNull()
+  })
+
+  test('React generic reasoning fallback never renders redacted raw text', () => {
+    const { container } = row({
+      id: 'r2', role: 'reasoning', sender: 'claude', content: 'private chain of thought', time: 't',
+      redacted: true, redactedReason: 'provider_policy',
+    }, 'reasoning')
+    expect(screen.getByText('推理已被隐藏')).toBeTruthy()
+    expect(screen.getByText('provider_policy')).toBeTruthy()
+    expect(container.textContent).not.toContain('private chain of thought')
+    expect(container.querySelector('button')).toBeNull()
   })
 })

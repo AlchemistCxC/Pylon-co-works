@@ -285,6 +285,22 @@ function reduceReasoning(document: WorkbenchDocument, envelope: WorkbenchEventEn
   const previous = document.messages.at(-1)
   const identityKey = identityKeyOf(envelope)
   const append = previous?.role === 'reasoning' && identityKey !== '' && identityKey === identityKeyOf(previous)
+  // C01：terminal 是吸收态——迟到 delta/重复 completion 不得复活或改写首次终态。
+  // redaction 是唯一可继续收紧的迁移：即使 completed 已到，也必须清除可见正文与历史 parts。
+  if (append && previous && !previous.running) {
+    if (redacted && !previous.redacted) {
+      const secured: WorkbenchMessage = {
+        ...previous,
+        content: '',
+        parts,
+        sequence: envelope.sequence,
+        redacted: true,
+        ...(event.reason !== undefined ? { redactedReason: event.reason } : {}),
+      }
+      return { ...document, messages: [...document.messages.slice(0, -1), secured] }
+    }
+    return document
+  }
   // C01：时长 = 终态 occurredAt − 首个 delta occurredAt；append 段沿用首段时间基准。
   const terminalAt = Date.parse(envelope.occurredAt ?? envelope.recordedAt)
   const startedAt = append && previous?.thoughtStartedAtMs !== undefined
@@ -297,9 +313,9 @@ function reduceReasoning(document: WorkbenchDocument, envelope: WorkbenchEventEn
     ? {
         ...previous,
         content: redacted ? content : previous.content + content,
-        parts: [...previous.parts, ...parts],
+        parts: redacted ? parts : [...previous.parts, ...parts],
         sequence: envelope.sequence,
-        running: false,
+        running: event.type === 'reasoning.delta',
         ...(durationMs !== undefined ? { thoughtDurationMs: durationMs } : {}),
         ...(redacted ? { redacted: true } : {}),
         ...(event.reason !== undefined ? { redactedReason: event.reason } : {}),
@@ -312,7 +328,7 @@ function reduceReasoning(document: WorkbenchDocument, envelope: WorkbenchEventEn
         identity: envelope.identity,
         source: envelope.source,
         sequence: envelope.sequence,
-        running: false,
+        running: event.type === 'reasoning.delta',
         time: envelope.occurredAt ?? envelope.recordedAt,
         ...(durationMs !== undefined ? { thoughtDurationMs: durationMs } : { thoughtStartedAtMs: Number.isFinite(startedAt) ? startedAt : undefined }),
         ...(redacted ? { redacted: true } : {}),

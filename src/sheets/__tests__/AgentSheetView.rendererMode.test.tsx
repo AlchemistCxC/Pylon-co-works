@@ -424,6 +424,85 @@ describe('AgentSheetView renderer mode context', () => {
     expect(await screen.findByText('slot answer')).toBeTruthy()
   })
 
+  it('targeted content.reasoning Slot receives normalized payload and owner cleanup restores C01 base Slot', async () => {
+    const registration = getRendererRegistry().registerSlot(
+      createPluginIdentity('test.production-reasoning-slot', 'runtime'),
+      {
+        id: 'test.production-reasoning-slot.content', targetSuites: ['builtin.solid'],
+        kinds: ['content.reasoning'], priority: 1, fallback: false,
+        canRender: snapshot => snapshot.kind === 'content.reasoning',
+        createSurface: () => ({
+          rendererId: 'test.production-reasoning-slot', kind: 'solid',
+          mount(container, snapshot) {
+            const node = document.createElement('div')
+            node.dataset.productionReasoningSlot = 'true'
+            node.textContent = `reasoning overlay: ${String((snapshot.payload as { text?: unknown }).text)}`
+            container.append(node)
+            return node
+          },
+          update(handle, snapshot) {
+            ;(handle as HTMLElement).textContent = `reasoning overlay: ${String((snapshot.payload as { text?: unknown }).text)}`
+          },
+          destroy(handle) { (handle as HTMLElement).remove() }, on: () => () => {},
+        }),
+      },
+    )
+    try {
+      useIdentityStore.setState({ sessions: [session('session-1', 'local:a')] })
+      useWorkspaceStore.setState(state => ({ workspaceSheets: { ...state.workspaceSheets, activeSheetId: 'agent-sheet' } }))
+      const { container } = render(<AgentSheetView sheet={sheet({ sidebarMode: 'work' })} ctx={ctx} />)
+      await screen.findByLabelText('Solid Agent Workbench', {}, { timeout: 5_000 })
+      publishPluginEvent(normalizeRawEvent(
+        { update: { sessionUpdate: 'agent_thought_chunk', content: { text: 'normalized thought payload' } } },
+        { owner: { profileId: 'profile-a', agentId: 'peri', localSessionId: 'local:a' }, clientGeneration: 1, sequence: 1, receivedAt: '2026-08-22T00:00:01.000Z' },
+      ).event)
+
+      expect(await screen.findByText('reasoning overlay: normalized thought payload')).toBeTruthy()
+      expect(container.querySelector('[data-message-role="reasoning"]')).not.toBeNull()
+      await registration.dispose()
+
+      await waitFor(() => expect(container.querySelector('[data-production-reasoning-slot="true"]')).toBeNull())
+      expect(await screen.findByText('正在思考…')).toBeTruthy()
+      expect(container.querySelector('[data-renderer-slot-id="builtin.solid.content.base"]')).not.toBeNull()
+    } finally {
+      await registration.dispose()
+    }
+  })
+
+  it('C01 settings update the mounted production reasoning Slot without remounting', async () => {
+    const settings = getRendererSettingsStore()
+    settings.reset()
+    settings.setOverride('kind.content.reasoning.fontSize', 18)
+    settings.setOverride('kind.content.reasoning.runningAnimation', 'shimmer')
+    try {
+      useIdentityStore.setState({ sessions: [session('session-1', 'local:a')] })
+      useWorkspaceStore.setState(state => ({ workspaceSheets: { ...state.workspaceSheets, activeSheetId: 'agent-sheet' } }))
+      const { container } = render(<AgentSheetView sheet={sheet({ sidebarMode: 'work' })} ctx={ctx} />)
+      await screen.findByLabelText('Solid Agent Workbench', {}, { timeout: 5_000 })
+      publishPluginEvent(normalizeRawEvent(
+        { update: { sessionUpdate: 'agent_thought_chunk', content: { text: 'configured reasoning' } } },
+        { owner: { profileId: 'profile-a', agentId: 'peri', localSessionId: 'local:a' }, clientGeneration: 1, sequence: 1, receivedAt: '2026-08-22T00:00:01.000Z' },
+      ).event)
+
+      const reasoning = await waitFor(() => {
+        const node = container.querySelector<HTMLElement>('[data-content-kind="content.reasoning"] .term-reasoning')
+        expect(node?.style.fontSize).toBe('18px')
+        expect(node?.dataset.runningAnimation).toBe('shimmer')
+        return node!
+      })
+      settings.setOverride('kind.content.reasoning.fontSize', 20)
+      settings.setOverride('kind.content.reasoning.runningAnimation', 'none')
+
+      await waitFor(() => {
+        expect(reasoning.style.fontSize).toBe('20px')
+        expect(reasoning.dataset.runningAnimation).toBe('none')
+      })
+      expect(container.querySelector('[data-content-kind="content.reasoning"] .term-reasoning')).toBe(reasoning)
+    } finally {
+      settings.reset()
+    }
+  })
+
   it('canonical message parts 经 content.text Slot seam 消费且保留消息 role framing', async () => {
     const registration = getRendererRegistry().registerSlot(
       createPluginIdentity('test.production-content-slot', 'runtime'),

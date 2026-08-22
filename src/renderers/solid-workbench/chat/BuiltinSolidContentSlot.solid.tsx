@@ -84,7 +84,21 @@ export function BuiltinSolidContentSlot(props: {
         />
       </Match>
       <Match when={kind() === 'content.reasoning'}>
-        <ReasoningBlock text={text()} running={record().state === 'running'} />
+        <ReasoningBlock
+          text={text()}
+          running={record().state === 'running'}
+          durationMs={typeof record().durationMs === 'number' ? record().durationMs as number : undefined}
+          foreground={stringSetting('foreground', 'var(--text-dim)')}
+          background={stringSetting('background', 'transparent')}
+          borderColor={stringSetting('borderColor', 'color-mix(in srgb, var(--border) 72%, transparent)')}
+          fontSize={numberSetting('fontSize', 13)}
+          lineHeight={numberSetting('lineHeight', 1.6)}
+          defaultCollapsed={booleanSetting('defaultCollapsed', true)}
+          maxHeight={numberSetting('maxHeight', 320)}
+          runningAnimation={reasoningAnimation(props.appearance.runningAnimation)}
+          showDuration={booleanSetting('showDuration', true)}
+          reducedMotion={props.appearance.reducedMotion === true}
+        />
       </Match>
       <Match when={kind() === 'content.redacted-reasoning'}>
         <ReasoningBlock
@@ -92,6 +106,16 @@ export function BuiltinSolidContentSlot(props: {
           running={false}
           redacted
           redactedReason={typeof record().reason === 'string' ? record().reason as string : 'provider_redacted'}
+          foreground={stringSetting('foreground', 'var(--text-dim)')}
+          background={stringSetting('background', 'transparent')}
+          borderColor={stringSetting('borderColor', 'color-mix(in srgb, var(--border) 72%, transparent)')}
+          fontSize={numberSetting('fontSize', 13)}
+          lineHeight={numberSetting('lineHeight', 1.6)}
+          defaultCollapsed={booleanSetting('defaultCollapsed', true)}
+          maxHeight={numberSetting('maxHeight', 320)}
+          runningAnimation={reasoningAnimation(props.appearance.runningAnimation)}
+          showDuration={booleanSetting('showDuration', true)}
+          reducedMotion={props.appearance.reducedMotion === true}
         />
       </Match>
       <Match when={kind() === 'content.file-reference' || kind() === 'content.file-selection' || kind() === 'content.resource'}>
@@ -116,6 +140,10 @@ export function BuiltinSolidContentSlot(props: {
       </Switch>
     </div>
   )
+}
+
+function reasoningAnimation(value: unknown): 'pulse' | 'shimmer' | 'none' {
+  return value === 'shimmer' || value === 'none' ? value : 'pulse'
 }
 
 function unknownSummary(payload: unknown, kind: string): string {

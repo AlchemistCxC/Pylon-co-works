@@ -267,6 +267,10 @@ function toSolidMessage(message: WorkbenchDocument['messages'][number]): Message
     content: message.content,
     time: message.time,
     running: message.running,
+    thoughtStartedAt: message.thoughtStartedAtMs,
+    thoughtDurationMs: message.thoughtDurationMs,
+    redacted: message.redacted,
+    redactedReason: message.redactedReason,
     semanticParts: message.parts,
   } as Message & { semanticParts: readonly ContentPart[] }
 }
@@ -295,11 +299,18 @@ function WorkbenchRow(props: {
   }
   const visualState = () => normalizeToolVisualState(props.descriptor.toolVisualState)
   const connectorVisualState = () => normalizeToolVisualState(props.descriptor.connectorVisualState)
-  const semanticKind = () => current().message.role === 'user' ? 'message.user'
+  // message.* Slots own row framing. Reasoning is a content.* contract and must
+  // stay inside the reasoning row, where WorkbenchMessageContent supplies its
+  // normalized payload (text/state/duration or redaction reason).
+  const messageFrameKind = () => current().message.role === 'user' ? 'message.user'
     : current().message.role === 'assistant' ? 'message.assistant'
-      : current().message.role === 'reasoning' ? 'content.reasoning' : 'content.unknown'
-  const slotCandidates = () => (props.context.activation?.slots.get(semanticKind()) ?? [])
-    .filter(entry => entry.value.kinds.includes(semanticKind()))
+      : undefined
+  const slotCandidates = () => {
+    const kind = messageFrameKind()
+    return kind
+      ? (props.context.activation?.slots.get(kind) ?? []).filter(entry => entry.value.kinds.includes(kind))
+      : []
+  }
   const renderDefaultMessage = () => <SolidMessageRow
     renderMessage={current()}
     appearance={props.appearance}
@@ -328,7 +339,7 @@ function WorkbenchRow(props: {
         fallback={<Show when={slotCandidates().length > 0} fallback={renderDefaultMessage()}>
           <SolidRendererSlotHost
             candidates={slotCandidates()}
-            node={{ nodeId: current().message.id, kind: semanticKind(), revision: props.context.runtimeSnapshot().revision, payload: current() }}
+            node={{ nodeId: current().message.id, kind: messageFrameKind() ?? 'content.unknown', revision: props.context.runtimeSnapshot().revision, payload: current() }}
             context={props.context}
             fallback={renderDefaultMessage()}
           />
@@ -363,7 +374,11 @@ function WorkbenchMessageContent(props: {
     const kind = redacted ? 'content.redacted-reasoning' : 'content.reasoning'
     const payload = redacted
       ? { reason: message().redactedReason ?? 'provider_redacted' }
-      : { text: message().content, state: message().running ? 'running' : message().content.trim() ? 'complete' : 'missing' }
+      : {
+          text: message().content,
+          state: message().running ? 'running' : message().content.trim() ? 'complete' : 'missing',
+          ...(message().thoughtDurationMs !== undefined ? { durationMs: message().thoughtDurationMs } : {}),
+        }
     return <WorkbenchContentSlot
       nodeId={`${message().id}:reasoning`} kind={kind} payload={payload}
       context={props.context}

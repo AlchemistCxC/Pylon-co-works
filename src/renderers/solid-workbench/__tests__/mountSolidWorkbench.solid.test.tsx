@@ -9,6 +9,8 @@ import { createWorkbenchHostPort } from '../workbenchHostPort.ts'
 import { RendererSuiteHost } from '../../../host/renderer-suite/rendererSuiteHost.ts'
 import type { RendererActivationSnapshot, RendererSlotContribution, RendererSuiteContribution } from '../../../plugin-runtime/renderers/rendererSuiteTypes.ts'
 import type { RegistryEntry } from '../../../plugin-runtime/registry/types.ts'
+import { BUILTIN_TEXT_RENDER_KINDS } from '../../../domains/rendererContent/textRenderKindCatalog.ts'
+import { createBuiltinSolidContentSlot } from '../builtinSolidRendererSuite.ts'
 
 const hosts: HTMLElement[] = []
 const servicesList: ReturnType<typeof createPreviewWorkbenchServices>[] = []
@@ -249,6 +251,68 @@ describe('mountSolidWorkbench', () => {
     expect(await screen.findByRole('img', { name: '架构图' })).toHaveAttribute(
       'src', 'https://cdn.example.com/architecture.png',
     )
+  })
+
+  it('canonical reasoning terminal metadata reaches the production content Slot', async () => {
+    const host = document.createElement('div')
+    document.body.append(host)
+    hosts.push(host)
+    const services = createPreviewWorkbenchServices()
+    servicesList.push(services)
+    const slot = createBuiltinSolidContentSlot()
+    const slotEntry = {
+      ownerPluginId: 'builtin.pylon-renderers', ownerRuntimeInstanceId: 'runtime',
+      contributionId: slot.id, layer: 'feature', priority: slot.priority, value: slot,
+    } as RegistryEntry<RendererSlotContribution>
+    const kindEntries = BUILTIN_TEXT_RENDER_KINDS
+      .filter(kind => kind.id === 'content.reasoning' || kind.id === 'content.redacted-reasoning')
+      .map(kind => [kind.id, {
+        ownerPluginId: 'core.renderer.text-kinds', ownerRuntimeInstanceId: 'runtime',
+        contributionId: kind.id, layer: 'feature', priority: kind.priority, value: kind,
+      } as RegistryEntry<(typeof BUILTIN_TEXT_RENDER_KINDS)[number]>] as const)
+    const suite = { id: 'builtin.solid' } as RendererSuiteContribution
+    const activation: RendererActivationSnapshot = {
+      revision: 1,
+      suite: {
+        ownerPluginId: 'builtin.pylon-renderers', ownerRuntimeInstanceId: 'runtime',
+        contributionId: suite.id, layer: 'feature', priority: 1, value: suite,
+      } as RegistryEntry<RendererSuiteContribution>,
+      kinds: new Map(kindEntries),
+      slots: new Map([
+        ['content.reasoning', [slotEntry]],
+        ['content.redacted-reasoning', [slotEntry]],
+      ]),
+      diagnostics: [],
+    }
+    mountSolidWorkbench({
+      host,
+      input: { sheetId: 'sheet-a', sessionId: 'preview-session' },
+      services,
+      activation,
+    })
+    const envelope = (
+      sequence: number,
+      event: WorkbenchEventEnvelope['event'],
+      messageId: string,
+      occurredAt: string,
+    ) => createWorkbenchEnvelope({
+      sessionId: 'preview-session', sequence, recordedAt: occurredAt, occurredAt,
+      source: { provider: 'claude', sourceId: `reasoning-${sequence}` },
+      identity: { messageId },
+      provenance: { origin: 'local-observed', trust: 'authoritative' }, event,
+    })
+    const projected = projectWorkbench([
+      envelope(1, { type: 'reasoning.delta', parts: [{ kind: 'reasoning', text: 'visible thought' }] }, 'thought-visible', '2026-08-21T00:00:01.000Z'),
+      envelope(2, { type: 'reasoning.completed', parts: [] }, 'thought-visible', '2026-08-21T00:00:03.400Z'),
+      envelope(3, { type: 'reasoning.redacted', parts: [{ kind: 'redacted-reasoning', reason: 'provider_policy' }], reason: 'provider_policy' }, 'thought-redacted', '2026-08-21T00:00:04.000Z'),
+    ]).document
+
+    services.runtime.replaceDocument(projected, { ownerKey: 'owner-preview', generation: 1 })
+
+    expect(await screen.findByRole('button', { name: /Thought for 2\.4s/ })).toBeTruthy()
+    expect(await screen.findByText('provider_policy')).toBeTruthy()
+    expect(host.querySelector('[data-content-kind="content.reasoning"]')).not.toBeNull()
+    expect(host.querySelector('[data-content-kind="content.redacted-reasoning"]')).not.toBeNull()
   })
 
   it('interaction 只提交 normalized optionId，不自造 provider approval payload', async () => {
