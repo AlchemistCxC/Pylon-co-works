@@ -28,6 +28,8 @@ import type { LifecycleState } from '../../domains/workbench/lifecycle/lifecycle
 import { SolidLifecycleCard, SolidSystemErrorCard, SolidSystemNoticeCard } from './chat/LifecycleCard.solid.tsx'
 import { SolidToolInvocationCard } from './chat/ToolInvocationCard.solid.tsx'
 import { measureToolAnchor } from './chat/domToolConnectorMeasurement.ts'
+import { SolidSearchOrLink } from './chat/content/SearchResults.solid.tsx'
+import type { RenderCommandPort } from '../../contracts/messageRenderer.ts'
 
 export interface SolidWorkbenchAppProps {
   context: SolidWorkbenchContextValue
@@ -352,7 +354,7 @@ function CanonicalActivitySlot(props: {
         payload={toolSnapshot() ?? props.activity}
         context={props.context}
         fallback={toolSnapshot()
-          ? <SolidToolInvocationCard snapshot={toolSnapshot()!} appearance={{ ...props.context.appearanceSnapshot() }} renderKind="tool.generic" />
+          ? <SolidToolInvocationCard snapshot={toolSnapshot()!} appearance={{ ...props.context.appearanceSnapshot() }} renderKind="tool.generic" commands={fallbackRenderCommands(props.context)} />
           : <div class="solid-workbench-activity" data-activity-id={props.activity.id} data-status={props.activity.status}>
               {props.activity.title || props.activity.kind} · {props.activity.status}
             </div>}
@@ -609,8 +611,36 @@ function renderBuiltinContentPart(part: ContentPart, inline: boolean, context: S
         : undefined}
     />
   }
+  if (part.kind === 'search-result' || part.kind === 'link') {
+    const commands = fallbackRenderCommands(context)
+    return <SolidSearchOrLink part={part} actions={{
+      open: commands.canExecute?.('resource.open') ? url => { void commands.execute({ type: 'resource.open', payload: { uri: url } }) } : undefined,
+      copy: commands.canExecute?.('clipboard.write') ? text => { void commands.execute({ type: 'clipboard.write', payload: { text } }) } : undefined,
+    }} appearance={{ reducedMotion: context.input().reducedMotion }} />
+  }
   const summary = part.kind === 'unknown' ? part.summary : `Unsupported content kind: ${part.kind}`
   return <pre class="solid-content-unknown" data-content-kind={part.kind}>{summary}</pre>
+}
+
+function fallbackRenderCommands(context: SolidWorkbenchContextValue): RenderCommandPort {
+  const sessionId = context.input().sessionId
+  const capabilities = context.hostPort?.capabilities
+  return {
+    canExecute: type => Boolean(sessionId && (
+      type === 'resource.open' ? capabilities?.has('resourceOpen')
+        : type === 'clipboard.write' ? capabilities?.has('clipboardWrite')
+          : false
+    )),
+    execute: command => {
+      if (!sessionId) return
+      if (command.type === 'resource.open' && command.payload && typeof command.payload === 'object') {
+        void context.commands.openResource(sessionId, command.payload)
+      } else if (command.type === 'clipboard.write' && command.payload && typeof command.payload === 'object') {
+        const text = (command.payload as { text?: unknown }).text
+        if (typeof text === 'string') void context.commands.copy(sessionId, text)
+      }
+    },
+  }
 }
 
 function normalizeToolVisualState(value: string | undefined) {

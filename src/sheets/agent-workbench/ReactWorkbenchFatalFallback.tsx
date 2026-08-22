@@ -1,5 +1,10 @@
 import { useSyncExternalStore } from 'react'
-import type { ContentPart, ImageContentPart } from '../../domains/workbench/content/contentPartSchema.ts'
+import type {
+  ContentPart,
+  ImageContentPart,
+  LinkContentPart,
+  SearchResultContentPart,
+} from '../../domains/workbench/content/contentPartSchema.ts'
 import { isValidMediaContentInput } from '../../domains/workbench/content/mediaContentValidation.ts'
 import {
   fileContentLastSegment,
@@ -192,7 +197,7 @@ function fallbackErrorDetail(error: NormalizedError): string {
   return lines.filter(Boolean).join('\n')
 }
 
-function ReactFallbackContentPart(props: {
+export function ReactFallbackContentPart(props: {
   part: ContentPart
   onOpenMedia?: (part: ImageContentPart) => void
   onDownloadMedia?: (part: ImageContentPart) => void
@@ -259,6 +264,31 @@ function ReactFallbackContentPart(props: {
           title={!valid ? '媒体来源不可用' : !props.onDownloadMedia ? '下载能力未接入' : undefined}
           onClick={() => { if (valid) props.onDownloadMedia?.(value) }}>下载</button>
       </div>
+    </section>
+  }
+  if (part.kind === 'search-result') {
+    const value = part as SearchResultContentPart
+    return <section data-react-content-kind="content.search-result"
+      aria-label={`搜索结果 fallback：${value.query || '未命名搜索'}`}>
+      <strong>{value.query || '搜索结果'}</strong>
+      <small>{value.results.length}{value.total !== undefined ? ` / ${value.total}` : ''} 条</small>
+      <ol>{value.results.map((entry, index) => <li key={`${entry.source}:${entry.rank ?? index}`}>
+        <strong>{entry.title || entry.source}</strong>
+        {entry.title && <code>{entry.source}</code>}
+        {entry.location?.line !== undefined && <span>L{entry.location.line}</span>}
+        {entry.snippet && <p style={{ whiteSpace: 'pre-wrap' }}>{entry.snippet}</p>}
+        {entry.score !== undefined && <small>score {entry.score}</small>}
+      </li>)}</ol>
+      {value.pagingToken && value.total !== undefined && value.total > value.results.length
+        && <span>其余 {value.total - value.results.length} 条需分页获取</span>}
+    </section>
+  }
+  if (part.kind === 'link') {
+    const value = part as LinkContentPart
+    return <section data-react-content-kind="content.link" aria-label={`链接 fallback：${value.title || value.url}`}>
+      <strong>{value.title || value.url}</strong>
+      <code>{value.url}</code>
+      {value.status !== undefined && <small>HTTP {value.status}</small>}
     </section>
   }
   return null

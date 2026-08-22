@@ -4,7 +4,11 @@ import type {
   RenderCommandPort,
   RenderNodeSnapshot,
 } from '../../../contracts/messageRenderer.ts'
-import type { ContentPart } from '../../../domains/workbench/content/contentPartSchema.ts'
+import {
+  isValidLinkContentInput,
+  isValidSearchResultContentInput,
+  type ContentPart,
+} from '../../../domains/workbench/content/contentPartSchema.ts'
 import { SolidAnsiBlock } from './AnsiBlock.solid.tsx'
 import { SolidCodeBlock } from './CodeBlock.solid.tsx'
 import { MarkdownContent } from './MarkdownContent.solid.tsx'
@@ -19,6 +23,7 @@ import { SolidLifecycleCard, SolidSystemErrorCard, SolidSystemNoticeCard } from 
 import { isToolInvocationSnapshotInput } from '../../../domains/rendererContent/toolRenderKindCatalog.ts'
 import type { ToolInvocationSnapshot } from '../../../domains/workbench/workbenchProjector.ts'
 import { SolidToolInvocationCard } from './ToolInvocationCard.solid.tsx'
+import { SolidSearchOrLink, type SearchLinkAppearance } from './content/SearchResults.solid.tsx'
 
 export function BuiltinSolidContentSlot(props: {
   snapshot: RenderNodeSnapshot
@@ -177,12 +182,27 @@ export function BuiltinSolidContentSlot(props: {
           }}
         />
       </Match>
+      <Match when={kind() === 'content.search-result' || kind() === 'content.link'}>
+        <Show when={kind() === 'content.search-result'
+          ? isValidSearchResultContentInput(props.snapshot.payload) ? payload() : undefined
+          : isValidLinkContentInput(props.snapshot.payload) ? payload() : undefined}
+          fallback={<pre class="solid-content-unknown" data-content-kind={kind()}>Invalid {kind()} payload</pre>}>
+          {part => <SolidSearchOrLink
+            part={part()}
+            actions={{
+              open: can('resource.open') ? url => execute('resource.open', { uri: url }) : undefined,
+              copy: can('clipboard.write') ? value => execute('clipboard.write', { text: value }) : undefined,
+            }}
+            appearance={searchLinkAppearance(props.appearance)}
+          />}
+        </Show>
+      </Match>
       <Match when={kind().startsWith('tool.')}>
         <Show
           when={isToolInvocationSnapshotInput(props.snapshot.payload) ? props.snapshot.payload as ToolInvocationSnapshot : undefined}
           fallback={<pre class="solid-content-unknown" data-content-kind={kind()}>Invalid tool snapshot</pre>}
         >
-          {snapshot => <SolidToolInvocationCard snapshot={snapshot()} appearance={props.appearance} renderKind={kind()} />}
+          {snapshot => <SolidToolInvocationCard snapshot={snapshot()} appearance={props.appearance} renderKind={kind()} commands={props.commands} />}
         </Show>
       </Match>
       <Match when={kind() === 'content.plan'}>
@@ -261,6 +281,49 @@ export function BuiltinSolidContentSlot(props: {
       </Switch>
     </div>
   )
+}
+
+function searchLinkAppearance(appearance: RenderAppearanceSnapshot): SearchLinkAppearance {
+  return {
+    foreground: appearanceString(appearance, 'foreground'),
+    mutedForeground: appearanceString(appearance, 'mutedForeground'),
+    background: appearanceString(appearance, 'background'),
+    borderColor: appearanceString(appearance, 'borderColor'),
+    fontSize: appearanceNumber(appearance, 'fontSize'),
+    maxWidth: appearanceNumber(appearance, 'maxWidth'),
+    maxHeight: appearanceNumber(appearance, 'maxHeight'),
+    density: appearanceChoice(appearance, 'density', ['comfortable', 'compact']),
+    grouped: appearanceBoolean(appearance, 'grouped'),
+    highlightPalette: appearanceChoice(appearance, 'highlightPalette', ['semantic', 'accent', 'neutral']),
+    defaultExpanded: appearanceBoolean(appearance, 'defaultExpanded'),
+    pageSize: appearanceNumber(appearance, 'pageSize'),
+    snippetLines: appearanceNumber(appearance, 'snippetLines'),
+    pathDisplay: appearanceChoice(appearance, 'pathDisplay', ['full', 'basename', 'hidden']),
+    linkOpenMode: appearanceChoice(appearance, 'linkOpenMode', ['external', 'copy-first']),
+    showStatus: appearanceBoolean(appearance, 'showStatus'),
+    reducedMotion: appearance.reducedMotion === true,
+  }
+}
+
+function appearanceString(appearance: RenderAppearanceSnapshot, key: string): string | undefined {
+  return typeof appearance[key] === 'string' ? appearance[key] : undefined
+}
+
+function appearanceNumber(appearance: RenderAppearanceSnapshot, key: string): number | undefined {
+  return typeof appearance[key] === 'number' && Number.isFinite(appearance[key]) ? appearance[key] : undefined
+}
+
+function appearanceBoolean(appearance: RenderAppearanceSnapshot, key: string): boolean | undefined {
+  return typeof appearance[key] === 'boolean' ? appearance[key] : undefined
+}
+
+function appearanceChoice<const Value extends string>(
+  appearance: RenderAppearanceSnapshot,
+  key: string,
+  values: readonly Value[],
+): Value | undefined {
+  const value = appearance[key]
+  return typeof value === 'string' && values.includes(value as Value) ? value as Value : undefined
 }
 
 function reasoningAnimation(value: unknown): 'pulse' | 'shimmer' | 'none' {

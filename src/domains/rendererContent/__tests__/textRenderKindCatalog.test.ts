@@ -225,4 +225,34 @@ describe('C00 builtin render kind catalog', () => {
     expect(kinds.get('content.audio')!.validateInput({ source: 'https://safe.test/image.png', mimeType: 'image/png' })).toBe(false)
     expect(kinds.get('content.video')!.validateInput({ source: 'javascript:alert(1)', sourceKind: 'url' })).toBe(false)
   })
+
+  it('publishes concrete C05 search/link settings and strict canonical validators', async () => {
+    const { ensureBuiltinTextRenderKinds } = await import('../textRenderKindCatalog.ts')
+    await ensureBuiltinTextRenderKinds()
+    const kinds = new Map(getRendererRegistry().snapshot().renderKinds.map(entry => [entry.value.id, entry.value]))
+
+    for (const id of ['content.search-result', 'content.link'] as const) {
+      const kind = kinds.get(id)!
+      expect(kind.settings?.schemaVersion).toBe(kind.settingsSchemaVersion)
+      expect(kind.settings?.groups.flatMap(group => group.fields).map(field => field.key)).toEqual(
+        expect.arrayContaining([
+          'foreground', 'mutedForeground', 'background', 'borderColor', 'fontSize',
+          'maxWidth', 'maxHeight', 'density', 'grouped', 'defaultExpanded', 'pageSize',
+          'snippetLines', 'pathDisplay', 'highlightPalette', 'linkOpenMode', 'showStatus',
+        ]),
+      )
+      expect(kind.defaultTokens).toMatchObject({
+        density: 'comfortable', grouped: true, defaultExpanded: false, pageSize: 10,
+        snippetLines: 3, pathDisplay: 'full', highlightPalette: 'semantic',
+        linkOpenMode: 'external', showStatus: true,
+      })
+    }
+
+    expect(kinds.get('content.search-result')!.validateInput({ results: [{ source: '/a.ts', snippet: 'hit' }] })).toBe(true)
+    expect(kinds.get('content.search-result')!.validateInput({ results: [] })).toBe(false)
+    expect(kinds.get('content.search-result')!.validateInput({ results: [{ source: '  ' }] })).toBe(false)
+    expect(kinds.get('content.search-result')!.validateInput({ results: [{ source: '/a', highlights: [{ start: -1, end: 2 }] }] })).toBe(false)
+    expect(kinds.get('content.link')!.validateInput({ url: 'https://example.com' })).toBe(true)
+    expect(kinds.get('content.link')!.validateInput({ url: '  ' })).toBe(false)
+  })
 })

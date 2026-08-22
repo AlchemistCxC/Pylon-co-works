@@ -150,12 +150,12 @@ describe('AgentSheetView renderer mode context', () => {
     expect(container.querySelector('[data-renderer-slot-id="builtin.solid.content.base"]')).not.toBeNull()
   })
 
-  it('C04 canonical tool snapshot reaches production base Slot and settings update without remount', async () => {
+  it('C04 canonical read snapshot reaches the C05 specialized tool.read Slot settings without remount', async () => {
     const settings = getRendererSettingsStore()
     settings.reset()
-    settings.setOverride('kind.tool.generic.defaultCollapsed', false)
-    settings.setOverride('kind.tool.generic.maxHeight', 180)
-    settings.setOverride('kind.tool.generic.showMetadata', true)
+    settings.setOverride('kind.tool.read.defaultCollapsed', false)
+    settings.setOverride('kind.tool.read.maxHeight', 180)
+    settings.setOverride('kind.tool.read.showMetadata', true)
     try {
       useIdentityStore.setState({ sessions: [session('session-1', 'local:a')] })
       useWorkspaceStore.setState(state => ({ workspaceSheets: { ...state.workspaceSheets, activeSheetId: 'agent-sheet' } }))
@@ -178,8 +178,8 @@ describe('AgentSheetView renderer mode context', () => {
       expect(card.querySelector('.solid-tool-metadata')).toHaveTextContent('canonical: read_file')
       expect(card.querySelector('.term-tool-body')).toHaveStyle({ maxHeight: '180px' })
 
-      settings.setOverride('kind.tool.generic.maxHeight', 260)
-      settings.setOverride('kind.tool.generic.showMetadata', false)
+      settings.setOverride('kind.tool.read.maxHeight', 260)
+      settings.setOverride('kind.tool.read.showMetadata', false)
 
       await waitFor(() => {
         expect(card.querySelector('.term-tool-body')).toHaveStyle({ maxHeight: '260px' })
@@ -242,6 +242,110 @@ describe('AgentSheetView renderer mode context', () => {
       expect(destroyed).toHaveBeenCalled()
       const handles = destroyed.mock.calls.map(call => call[0])
       expect(new Set(handles).size).toBe(handles.length)
+    } finally {
+      await registration.dispose()
+    }
+  })
+
+  it('C05 search content and semantic tool kinds reach the production base Slot with hot settings', async () => {
+    const baseSlot = getRendererRegistry().snapshot().rendererSlots.find(entry => entry.value.id === 'builtin.solid.content.base')
+    expect(baseSlot?.value.kinds).toEqual(expect.arrayContaining([
+      'content.search-result', 'content.link', 'tool.read', 'tool.search', 'tool.fetch',
+    ]))
+    const settings = getRendererSettingsStore()
+    settings.reset()
+    settings.setOverride('kind.content.search-result.defaultExpanded', true)
+    settings.setOverride('kind.content.search-result.pageSize', 1)
+    settings.setOverride('kind.content.search-result.pathDisplay', 'basename')
+    settings.setOverride('kind.content.search-result.maxWidth', 420)
+    try {
+      useIdentityStore.setState({ sessions: [session('session-1', 'local:a')] })
+      useWorkspaceStore.setState(state => ({ workspaceSheets: { ...state.workspaceSheets, activeSheetId: 'agent-sheet' } }))
+      const { container } = render(<AgentSheetView sheet={sheet({ sidebarMode: 'work' })} ctx={ctx} />)
+      await screen.findByLabelText('Solid Agent Workbench', {}, { timeout: 5_000 })
+      publishPluginEvent(createWorkbenchEnvelope({
+        sessionId: 'local:a', recordedAt: '2026-08-22T00:00:01.000Z', sequence: 1,
+        source: { provider: 'hermes', sourceId: 'search-settings' }, identity: { messageId: 'message-search-settings' },
+        provenance: { origin: 'local-observed', trust: 'authoritative' },
+        event: { type: 'message.delta', role: 'assistant', parts: [{
+          kind: 'search-result', query: 'renderer', total: 2, results: [
+            { source: '/workspace/src/app.tsx', rank: 1, snippet: 'first' },
+            { source: '/workspace/src/host.ts', rank: 2, snippet: 'second' },
+          ],
+        }] },
+      }))
+
+      const card = await waitFor(() => {
+        const node = container.querySelector<HTMLElement>('[data-content-kind="content.search-result"] .term-search-results')
+        expect(node?.style.maxWidth).toBe('420px')
+        expect(node?.textContent).toContain('app.tsx')
+        expect(node?.textContent).not.toContain('/workspace/src/app.tsx')
+        expect(node?.querySelectorAll('.term-search-item')).toHaveLength(1)
+        return node!
+      })
+      expect(card.closest('[data-renderer-slot-id="builtin.solid.content.base"]')).not.toBeNull()
+
+      settings.setOverride('kind.content.search-result.pageSize', 2)
+      settings.setOverride('kind.content.search-result.pathDisplay', 'full')
+      settings.setOverride('kind.content.search-result.maxWidth', 680)
+      await waitFor(() => {
+        expect(card.style.maxWidth).toBe('680px')
+        expect(card.textContent).toContain('/workspace/src/app.tsx')
+        expect(card.querySelectorAll('.term-search-item')).toHaveLength(2)
+      })
+      expect(container.querySelector('[data-content-kind="content.search-result"] .term-search-results')).toBe(card)
+
+      publishPluginEvent(normalizeRawEvent(
+        { update: { sessionUpdate: 'tool_call', toolCallId: 'tool-search-c05', title: '搜索代码', _meta: { pylon: { toolName: 'grep' } }, rawInput: { query: 'renderer' } } },
+        { owner: { profileId: 'profile-a', agentId: 'peri', localSessionId: 'local:a' }, clientGeneration: 1, sequence: 2, receivedAt: '2026-08-22T00:00:02.000Z' },
+      ).event)
+      expect(await screen.findByRole('status', { name: '工具：搜索代码，运行中' })).toHaveAttribute('data-content-kind', 'tool.search')
+    } finally {
+      settings.reset()
+    }
+  })
+
+  it('targeted content.link Slot owner cleanup restores the C05 base Slot', async () => {
+    const destroyed = vi.fn()
+    const registration = getRendererRegistry().registerSlot(
+      createPluginIdentity('test.production-link-slot', 'runtime'),
+      {
+        id: 'test.production-link-slot.content', targetSuites: ['builtin.solid'],
+        kinds: ['content.link'], priority: 1, fallback: false,
+        canRender: snapshot => snapshot.kind === 'content.link',
+        createSurface: () => ({
+          rendererId: 'test.production-link-slot', kind: 'solid',
+          mount(container, snapshot) {
+            const node = document.createElement('div')
+            node.dataset.productionLinkSlot = 'true'
+            node.textContent = `link overlay: ${String((snapshot.payload as { url?: unknown }).url)}`
+            container.append(node)
+            return node
+          },
+          update(handle, snapshot) { ;(handle as HTMLElement).textContent = `link overlay: ${String((snapshot.payload as { url?: unknown }).url)}` },
+          destroy(handle) { destroyed(handle); (handle as HTMLElement).remove() }, on: () => () => {},
+        }),
+      },
+    )
+    try {
+      useIdentityStore.setState({ sessions: [session('session-1', 'local:a')] })
+      useWorkspaceStore.setState(state => ({ workspaceSheets: { ...state.workspaceSheets, activeSheetId: 'agent-sheet' } }))
+      const { container } = render(<AgentSheetView sheet={sheet({ sidebarMode: 'work' })} ctx={ctx} />)
+      await screen.findByLabelText('Solid Agent Workbench', {}, { timeout: 5_000 })
+      publishPluginEvent(createWorkbenchEnvelope({
+        sessionId: 'local:a', recordedAt: '2026-08-22T00:00:01.000Z', sequence: 1,
+        source: { provider: 'hermes', sourceId: 'link-overlay' }, identity: { messageId: 'message-link-overlay' },
+        provenance: { origin: 'local-observed', trust: 'authoritative' },
+        event: { type: 'message.delta', role: 'assistant', parts: [{ kind: 'link', url: 'https://example.com/guide', title: 'Guide' }] },
+      }))
+
+      expect(await screen.findByText('link overlay: https://example.com/guide')).toBeTruthy()
+      await registration.dispose()
+      await waitFor(() => expect(container.querySelector('[data-production-link-slot="true"]')).toBeNull())
+      expect(await screen.findByText('Guide')).toBeTruthy()
+      expect(container.querySelector('[data-content-kind="content.link"] .term-link-card')).not.toBeNull()
+      expect(container.querySelector('[data-renderer-slot-id="builtin.solid.content.base"]')).not.toBeNull()
+      expect(destroyed).toHaveBeenCalled()
     } finally {
       await registration.dispose()
     }

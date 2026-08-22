@@ -104,13 +104,55 @@ export interface DocumentContentPart {
   readonly hasBlob?: boolean
 }
 
+export interface SearchHighlightRange {
+  readonly start: number
+  readonly end: number
+}
+
+export interface SearchResultLocation {
+  readonly path?: string
+  readonly uri?: string
+  readonly line?: number
+  readonly column?: number
+  readonly endLine?: number
+  readonly endColumn?: number
+}
+
+export interface SearchResultEntry {
+  readonly source: string
+  readonly rank?: number
+  readonly title?: string
+  readonly location?: SearchResultLocation
+  readonly snippet?: string
+  readonly highlights?: readonly SearchHighlightRange[]
+  readonly score?: number
+  readonly pagingToken?: string
+}
+
+export interface SearchResultContentPart {
+  readonly kind: 'search-result'
+  readonly query?: string
+  readonly total?: number
+  readonly pagingToken?: string
+  readonly results: readonly SearchResultEntry[]
+}
+
+export interface LinkContentPart {
+  readonly kind: 'link'
+  readonly url: string
+  readonly title?: string
+  readonly status?: number
+}
+
 export type ContentPart =
   | TextContentPart
   | ImageContentPart
   | ResourceContentPart
   | DocumentContentPart
+  | SearchResultContentPart
+  | LinkContentPart
   | UnknownContentPart
-  | { readonly kind: Exclude<ContentKind, TextContentPart['kind'] | ImageContentPart['kind'] | ResourceContentPart['kind'] | DocumentContentPart['kind'] | 'unknown'>; readonly [key: string]: unknown }
+  | { readonly kind: Exclude<ContentKind, TextContentPart['kind'] | ImageContentPart['kind'] | ResourceContentPart['kind'] | DocumentContentPart['kind'] | SearchResultContentPart['kind'] | LinkContentPart['kind'] | 'unknown'>; readonly [key: string]: unknown }
 
 export interface UnknownContentOptions {
   readonly maxRawBytes?: number
@@ -208,6 +250,10 @@ export function parseContentPart(value: unknown): SchemaResult<ContentPart> {
       issues.push(issue([], 'content.document-source', 'path, uri, or text', value))
     }
     rejectInlineBlob(value, issues)
+  } else if (kind === 'search-result') {
+    if (!isValidSearchResultContentInput(value)) issues.push(issue([], 'content.search-result', 'normalized non-empty search results', value))
+  } else if (kind === 'link') {
+    if (!isValidLinkContentInput(value)) issues.push(issue(['url'], 'content.link', 'normalized non-empty link', value.url))
   } else if (kind === 'tool-result' && value.parts !== undefined) {
     if (!Array.isArray(value.parts)) {
       issues.push(issue(['parts'], 'type.array', 'array', value.parts))
@@ -227,6 +273,50 @@ export function parseContentPart(value: unknown): SchemaResult<ContentPart> {
   }
 
   return issues.length > 0 ? failure(issues) : { ok: true, value: value as ContentPart }
+}
+
+export function isValidSearchResultContentInput(input: unknown): input is Omit<SearchResultContentPart, 'kind'> | SearchResultContentPart {
+  if (!isRecord(input) || !Array.isArray(input.results) || input.results.length === 0) return false
+  if (input.query !== undefined && typeof input.query !== 'string') return false
+  if (input.total !== undefined && (!Number.isInteger(input.total) || Number(input.total) < 0)) return false
+  if (input.pagingToken !== undefined && (typeof input.pagingToken !== 'string' || input.pagingToken.trim().length === 0)) return false
+  return input.results.every(isValidSearchResultEntry)
+}
+
+export function isValidLinkContentInput(input: unknown): input is Omit<LinkContentPart, 'kind'> | LinkContentPart {
+  if (!isRecord(input) || typeof input.url !== 'string' || input.url.trim().length === 0) return false
+  if (input.title !== undefined && typeof input.title !== 'string') return false
+  return input.status === undefined || (Number.isInteger(input.status) && Number(input.status) >= 100 && Number(input.status) <= 599)
+}
+
+function isValidSearchResultEntry(input: unknown): input is SearchResultEntry {
+  if (!isRecord(input) || typeof input.source !== 'string' || input.source.trim().length === 0) return false
+  const snippet = input.snippet
+  if (input.rank !== undefined && (!Number.isInteger(input.rank) || Number(input.rank) < 1)) return false
+  if (input.title !== undefined && typeof input.title !== 'string') return false
+  if (snippet !== undefined && typeof snippet !== 'string') return false
+  if (input.score !== undefined && (typeof input.score !== 'number' || !Number.isFinite(input.score))) return false
+  if (input.pagingToken !== undefined && (typeof input.pagingToken !== 'string' || input.pagingToken.trim().length === 0)) return false
+  if (input.location !== undefined && !isValidSearchResultLocation(input.location)) return false
+  if (input.highlights !== undefined) {
+    if (!Array.isArray(input.highlights) || typeof snippet !== 'string') return false
+    if (!input.highlights.every(range => isRecord(range)
+      && Number.isInteger(range.start) && Number.isInteger(range.end)
+      && Number(range.start) >= 0 && Number(range.end) > Number(range.start)
+      && Number(range.end) <= snippet.length)) return false
+  }
+  return true
+}
+
+function isValidSearchResultLocation(input: unknown): input is SearchResultLocation {
+  if (!isRecord(input)) return false
+  for (const key of ['path', 'uri'] as const) {
+    if (input[key] !== undefined && (typeof input[key] !== 'string' || input[key].trim().length === 0)) return false
+  }
+  for (const key of ['line', 'column', 'endLine', 'endColumn'] as const) {
+    if (input[key] !== undefined && (!Number.isInteger(input[key]) || Number(input[key]) < 0)) return false
+  }
+  return ['path', 'uri', 'line', 'column', 'endLine', 'endColumn'].some(key => input[key] !== undefined)
 }
 
 function parseUnknown(value: Record<string, unknown>): SchemaResult<UnknownContentPart> {

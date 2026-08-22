@@ -13,6 +13,10 @@ import {
   isValidFileSelection,
 } from '../workbench/content/fileContentValidation.ts'
 import { isValidMediaContentInput } from '../workbench/content/mediaContentValidation.ts'
+import {
+  isValidLinkContentInput,
+  isValidSearchResultContentInput,
+} from '../workbench/content/contentPartSchema.ts'
 
 const FONT_OPTIONS = Object.freeze([
   { value: 'inherit', label: '跟随界面' },
@@ -226,6 +230,50 @@ const MEDIA_CONTENT_DEFAULT_TOKENS = Object.freeze({
   showMetadata: true,
 })
 
+const SEARCH_LINK_SETTINGS = Object.freeze({
+  schemaVersion: 1,
+  groups: [
+    {
+      id: 'appearance', label: '搜索与链接外观', layout: 'grid', fields: [
+        { key: 'foreground', label: '主文字颜色', type: 'color', presentation: 'palette+picker', alpha: true, default: 'var(--text)' },
+        { key: 'mutedForeground', label: '次要文字颜色', type: 'color', presentation: 'palette+picker', alpha: true, default: 'var(--text-dim)' },
+        { key: 'background', label: '背景色', type: 'color', presentation: 'palette+picker', alpha: true, default: 'transparent' },
+        { key: 'borderColor', label: '边框颜色', type: 'color', presentation: 'palette+picker', alpha: true, default: 'var(--border)' },
+        { key: 'fontSize', label: '字号', type: 'number', presentation: 'slider+input', min: 10, max: 28, step: 1, unit: 'px', default: 13 },
+        { key: 'maxWidth', label: '最大宽度', type: 'number', presentation: 'slider+input', min: 240, max: 1600, step: 20, unit: 'px', default: 960 },
+        { key: 'maxHeight', label: '最大高度', type: 'number', presentation: 'slider+input', min: 80, max: 1200, step: 20, unit: 'px', default: 420 },
+        { key: 'density', label: '密度', type: 'choice', presentation: 'segmented', options: [
+          { value: 'comfortable', label: '舒适' }, { value: 'compact', label: '紧凑' },
+        ], default: 'comfortable' },
+        { key: 'grouped', label: '分组呈现', type: 'boolean', presentation: 'toggle', default: true },
+        { key: 'highlightPalette', label: '高亮配色', type: 'choice', presentation: 'select', options: [
+          { value: 'semantic', label: '语义色' }, { value: 'accent', label: '强调色' }, { value: 'neutral', label: '中性色' },
+        ], default: 'semantic' },
+      ],
+    },
+    {
+      id: 'behaviour', label: '搜索与链接行为', layout: 'grid', fields: [
+        { key: 'defaultExpanded', label: '默认展开搜索结果', type: 'boolean', presentation: 'toggle', default: false },
+        { key: 'pageSize', label: '每页条目', type: 'number', presentation: 'slider+input', min: 1, max: 100, step: 1, default: 10 },
+        { key: 'snippetLines', label: '摘要行数', type: 'number', presentation: 'slider+input', min: 1, max: 20, step: 1, unit: '行', default: 3 },
+        { key: 'pathDisplay', label: '来源显示', type: 'choice', presentation: 'segmented', options: [
+          { value: 'full', label: '完整' }, { value: 'basename', label: '末段' }, { value: 'hidden', label: '隐藏' },
+        ], default: 'full' },
+        { key: 'linkOpenMode', label: '链接打开方式', type: 'choice', presentation: 'segmented', options: [
+          { value: 'external', label: '外部打开' }, { value: 'copy-first', label: '优先复制' },
+        ], default: 'external' },
+        { key: 'showStatus', label: '显示 HTTP 状态', type: 'boolean', presentation: 'toggle', default: true },
+      ],
+    },
+  ],
+} satisfies RendererSettingsSchema)
+
+const SEARCH_LINK_DEFAULT_TOKENS = Object.freeze({
+  foreground: 'var(--text)', mutedForeground: 'var(--text-dim)', background: 'transparent', borderColor: 'var(--border)',
+  fontSize: 13, maxWidth: 960, maxHeight: 420, density: 'comfortable', grouped: true, highlightPalette: 'semantic',
+  defaultExpanded: false, pageSize: 10, snippetLines: 3, pathDisplay: 'full', linkOpenMode: 'external', showStatus: true,
+})
+
 function textPayload(input: unknown): input is { readonly text: string } {
   return typeof input === 'object' && input !== null && !Array.isArray(input)
     && typeof (input as Record<string, unknown>).text === 'string'
@@ -386,11 +434,10 @@ export const BUILTIN_TEXT_RENDER_KINDS: readonly RenderKindDefinition[] = [
     fallbackKind: 'content.unknown',
     priority: 100,
     fixture: { query: 'fixture query', total: 1, results: [{ source: '/fixture/a.ts', rank: 1, snippet: 'fixture snippet' }] },
-    defaultTokens: {},
+    defaultTokens: SEARCH_LINK_DEFAULT_TOKENS,
     settingsSchemaVersion: 1,
-    // C05：results 必须是非空数组；highlights 是纯文本数字 range
-    validateInput: (input: unknown) => typeof input === 'object' && input !== null && !Array.isArray(input)
-      && Array.isArray((input as Record<string, unknown>).results),
+    settings: SEARCH_LINK_SETTINGS,
+    validateInput: isValidSearchResultContentInput,
   },
   {
     id: 'content.link',
@@ -398,10 +445,10 @@ export const BUILTIN_TEXT_RENDER_KINDS: readonly RenderKindDefinition[] = [
     fallbackKind: 'content.unknown',
     priority: 100,
     fixture: { url: 'https://fixture.example.com/guide', title: 'fixture link' },
-    defaultTokens: {},
+    defaultTokens: SEARCH_LINK_DEFAULT_TOKENS,
     settingsSchemaVersion: 1,
-    validateInput: (input: unknown) => typeof input === 'object' && input !== null && !Array.isArray(input)
-      && typeof (input as Record<string, unknown>).url === 'string',
+    settings: SEARCH_LINK_SETTINGS,
+    validateInput: isValidLinkContentInput,
   },
   ...(['image', 'audio', 'video'] as const).map(kind => ({
     id: `content.${kind}`,

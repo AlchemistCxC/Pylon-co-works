@@ -142,6 +142,8 @@ export const BUILTIN_LIFECYCLE_RENDER_KINDS: readonly RenderKindDefinition[] = O
 /** A07/DIC-A07-01: semantic kinds are catalog entries, not event.type values. */
 export const BUILTIN_SEMANTIC_RENDER_KINDS = Object.freeze([
   { id: 'tool.read', category: 'tool' },
+  { id: 'tool.search', category: 'tool' },
+  { id: 'tool.fetch', category: 'tool' },
   { id: 'content.memory', category: 'content' },
   { id: 'activity.subagent', category: 'activity' },
 ] as const)
@@ -201,7 +203,11 @@ export function createBuiltinRendererContentPluginDefinitions(): BuiltinPluginDe
     id: definition.id,
     activate: ({ renderer }) => {
       if (definition.id === 'core.renderer.ansi') {
-        for (const semantic of BUILTIN_SEMANTIC_RENDER_KINDS) renderer.registerRenderKind({
+        for (const semantic of BUILTIN_SEMANTIC_RENDER_KINDS) {
+          // tool.* 的唯一 catalog authority 是 toolRenderKindCatalog；这里仅保留
+          // A07/DIC 清单，避免同一 product activation 重复注册低信息占位 kind。
+          if (semantic.category === 'tool') continue
+          renderer.registerRenderKind({
           ...semantic,
           fallbackKind: semantic.id.startsWith('tool.') ? 'tool.generic' : 'content.unknown',
           priority: 900,
@@ -210,7 +216,8 @@ export function createBuiltinRendererContentPluginDefinitions(): BuiltinPluginDe
           settingsSchemaVersion: 1,
           validateInput: input => typeof input === 'object' && input !== null && !Array.isArray(input)
             && (input as Record<string, unknown>).semanticKind === semantic.id,
-        })
+          })
+        }
         for (const lifecycleKind of BUILTIN_LIFECYCLE_RENDER_KINDS) renderer.registerRenderKind(lifecycleKind)
       }
       // C00 owns the canonical content.ansi declaration. The provider keeps

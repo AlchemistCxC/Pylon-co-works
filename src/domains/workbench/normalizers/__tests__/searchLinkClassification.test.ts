@@ -56,6 +56,33 @@ describe('C05 normalizer search-result classification', () => {
     expect(part.kind).toBe('unknown')
   })
 
+  it('narrows every result entry and drops malformed/provider-private fields', () => {
+    const normalized = normalizeContentBlock({
+      type: 'search_result', query: 'safe', total: -4, pagingToken: '  next  ',
+      results: [
+        { source: ' /src/a.ts ', rank: 1, location: { path: '/src/a.ts', line: 4, privateOffset: 99 }, snippet: 'abcd', highlights: [{ start: 0, end: 2 }, { start: -1, end: 9 }], score: 0.8, providerSecret: 'drop-me' },
+        { source: '', snippet: 'malformed' },
+        null,
+      ],
+    })
+    expect(normalized.part).toEqual({
+      kind: 'search-result', query: 'safe', pagingToken: 'next',
+      results: [{
+        source: '/src/a.ts', rank: 1, location: { path: '/src/a.ts', line: 4 },
+        snippet: 'abcd', highlights: [{ start: 0, end: 2 }], score: 0.8,
+      }],
+    })
+    expect(normalized.diagnostic?.code).toBe('content.search-result.entries-dropped')
+    expect(JSON.stringify(normalized.part)).not.toContain('drop-me')
+    expect(JSON.stringify(normalized.part)).not.toContain('privateOffset')
+  })
+
+  it('falls back to unknown when every search result entry is malformed', () => {
+    const { part, diagnostic } = normalizeContentBlock({ type: 'search_result', results: [null, {}, { source: '  ' }] })
+    expect(part.kind).toBe('unknown')
+    expect(diagnostic?.code).toBe('content.search-result.empty')
+  })
+
   it('does not interpret highlight ranges as HTML — they stay numeric ranges', () => {
     const { part } = normalizeContentBlock({
       type: 'search_result',
@@ -82,5 +109,10 @@ describe('C05 normalizer search-result classification', () => {
   it('link without url falls back to unknown', () => {
     const { part } = normalizeContentBlock({ type: 'link', title: 'no target' })
     expect(part.kind).toBe('unknown')
+  })
+
+  it('trims links and drops provider-private fields at the canonical boundary', () => {
+    const { part } = normalizeContentBlock({ type: 'link', url: '  https://example.com/a  ', title: '  Guide  ', status: 200, secret: 'drop' })
+    expect(part).toEqual({ kind: 'link', url: 'https://example.com/a', title: 'Guide', status: 200 })
   })
 })

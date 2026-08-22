@@ -99,7 +99,10 @@ export function isToolInvocationSnapshotInput(input: unknown): boolean {
   return true
 }
 
-const ids = ['tool.generic', 'tool.input', 'tool.progress', 'tool.output', 'tool.error'] as const
+const ids = [
+  'tool.generic', 'tool.input', 'tool.progress', 'tool.output', 'tool.error',
+  'tool.read', 'tool.search', 'tool.fetch',
+] as const
 
 export const BUILTIN_TOOL_RENDER_KINDS: readonly RenderKindDefinition[] = Object.freeze(ids.map(id => Object.freeze({
   id,

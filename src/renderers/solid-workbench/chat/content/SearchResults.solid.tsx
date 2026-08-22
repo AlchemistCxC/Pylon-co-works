@@ -1,6 +1,10 @@
-import { For, Show, createMemo, createSignal } from 'solid-js'
-import type { ContentPart } from '../../../../domains/workbench/content/contentPartSchema.ts'
-import { isAllowedMediaUrl } from '../../../../domains/rendererContent/mediaSourceResolver.ts'
+import { For, Show, createMemo, createSignal, type JSX } from 'solid-js'
+import type {
+  ContentPart,
+  LinkContentPart,
+  SearchResultContentPart,
+  SearchResultEntry,
+} from '../../../../domains/workbench/content/contentPartSchema.ts'
 
 /**
  * C05：搜索结果与链接卡（Solid）。
@@ -18,14 +22,24 @@ export interface SearchLinkActions {
   copy?: (text: string) => void
 }
 
-interface SearchResultEntry {
-  source?: string
-  rank?: number
-  title?: string
-  location?: { line?: number; column?: number }
-  snippet?: string
-  highlights?: readonly { start: number; end: number }[]
-  score?: number
+export interface SearchLinkAppearance {
+  foreground?: string
+  mutedForeground?: string
+  background?: string
+  borderColor?: string
+  fontSize?: number
+  maxWidth?: number
+  maxHeight?: number
+  density?: 'comfortable' | 'compact'
+  grouped?: boolean
+  highlightPalette?: 'semantic' | 'accent' | 'neutral'
+  defaultExpanded?: boolean
+  pageSize?: number
+  snippetLines?: number
+  pathDisplay?: 'full' | 'basename' | 'hidden'
+  linkOpenMode?: 'external' | 'copy-first'
+  showStatus?: boolean
+  reducedMotion?: boolean
 }
 
 function hostOf(url: string): string | undefined {
@@ -53,27 +67,50 @@ function snippetSegments(snippet: string, highlights: readonly { start: number; 
   return segments
 }
 
-export function SolidSearchResultsBlock(props: { part: ContentPart; actions?: SearchLinkActions }) {
+export function SolidSearchResultsBlock(props: { part: SearchResultContentPart; actions?: SearchLinkActions; appearance?: SearchLinkAppearance }) {
   // collapsed 是 presentation hint：初始折叠但原始条目全量可展开。
-  const [expanded, setExpanded] = createSignal(false)
-  const [visibleCount, setVisibleCount] = createSignal(10)
-
-  const parsed = createMemo(() => props.part as unknown as {
-    kind: string
-    query?: string
-    total?: number
-    pagingToken?: string
-    results?: readonly SearchResultEntry[]
+  const [expanded, setExpanded] = createSignal(props.appearance?.defaultExpanded === true)
+  const [loadedPages, setLoadedPages] = createSignal(1)
+  const results = createMemo(() => props.part.results)
+  const pageSize = () => boundedInteger(props.appearance?.pageSize, 10, 1, 100)
+  const pageLimit = () => pageSize() * loadedPages()
+  const shown = () => results().slice(0, expanded() ? pageLimit() : Math.min(3, pageLimit()))
+  const total = () => props.part.total ?? results().length
+  const hasMore = () => pageLimit() < results().length
+  const appearance = () => props.appearance ?? {}
+  const cardStyle = () => ({
+    color: appearance().foreground ?? 'var(--text)',
+    'background-color': appearance().background ?? 'transparent',
+    'border-color': appearance().borderColor ?? 'var(--border)',
+    'font-size': `${boundedNumber(appearance().fontSize, 13)}px`,
+    'max-width': `${boundedNumber(appearance().maxWidth, 960)}px`,
+    'max-height': `${boundedNumber(appearance().maxHeight, 420)}px`,
+    'border-style': 'solid',
+    'border-width': '1px',
+    padding: appearance().density === 'compact' ? '6px' : '10px',
+    overflow: 'auto',
+  })
+  const itemStyle = (): JSX.CSSProperties => ({
+    'border-left-style': appearance().grouped === false ? 'none' : 'solid',
+    'border-left-width': appearance().grouped === false ? '0' : '2px',
+    'border-left-color': appearance().borderColor ?? 'var(--border)',
+    'padding-block': appearance().density === 'compact' ? '4px' : '8px',
+    'padding-inline': appearance().grouped === false ? '0' : '8px',
   })
 
-  const results = createMemo(() => parsed().results ?? [])
-  const shown = () => expanded() ? results().slice(0, visibleCount()) : results().slice(0, Math.min(3, visibleCount()))
-  const total = () => parsed().total ?? results().length
-  const hasMore = () => visibleCount() < results().length
-
   return (
-    <div class="term-search-results" data-collapsed={expanded() ? 'false' : 'true'}>
-      <Show when={parsed().query}>
+    <div
+      class="term-search-results"
+      data-collapsed={expanded() ? 'false' : 'true'}
+      data-density={appearance().density ?? 'comfortable'}
+      data-grouped={appearance().grouped === false ? 'false' : 'true'}
+      data-highlight-palette={appearance().highlightPalette ?? 'semantic'}
+      data-reduced-motion={appearance().reducedMotion === true ? 'true' : 'false'}
+      style={cardStyle()}
+      role="region"
+      aria-label={`搜索结果：${props.part.query || '未命名搜索'}`}
+    >
+      <Show when={props.part.query}>
         {query => (
           <div class="term-search-head">
             <span class="term-search-query">{query()}</span>
@@ -81,29 +118,39 @@ export function SolidSearchResultsBlock(props: { part: ContentPart; actions?: Se
           </div>
         )}
       </Show>
-      <ol class="term-search-list">
+      <ol class="term-search-list" style={{
+        display: 'grid',
+        gap: appearance().density === 'compact' ? '4px' : '8px',
+      }}>
         <For each={shown()}>
           {(entry, index) => (
-            <li class="term-search-item">
+            <li class="term-search-item" style={itemStyle()}>
               <span class="term-search-rank">{entry.rank ?? index() + 1}</span>
               <div class="term-search-body">
-                <Show when={entry.source}>
-                  {source => <span class="term-search-source">{entry.title || source()}</span>}
+                <Show when={displaySource(entry, appearance().pathDisplay ?? 'full')}>
+                  {source => <span class="term-search-source" style={{ color: appearance().mutedForeground ?? 'var(--text-dim)' }}>{source()}</span>}
                 </Show>
                 <Show when={entry.location?.line !== undefined}>
                   <span class="term-file-range">L{entry.location!.line}</span>
                 </Show>
                 <Show when={entry.snippet}>
                   {snippet => (
-                    <p class="term-search-snippet">
+                    <p class="term-search-snippet" style={{
+                      display: '-webkit-box',
+                      '-webkit-box-orient': 'vertical',
+                      '-webkit-line-clamp': String(boundedInteger(appearance().snippetLines, 3, 1, 20)),
+                      overflow: 'hidden',
+                    }}>
                       <For each={snippetSegments(snippet(), entry.highlights)}>
-                        {segment => segment.marked ? <mark class="term-search-mark">{segment.text}</mark> : <span>{segment.text}</span>}
+                        {segment => segment.marked
+                          ? <mark class="term-search-mark" style={highlightStyle(appearance().highlightPalette)}>{segment.text}</mark>
+                          : <span>{segment.text}</span>}
                       </For>
                     </p>
                   )}
                 </Show>
                 <Show when={entry.score !== undefined}>
-                  <span class="term-file-meta-line">score {entry.score}</span>
+                  <span class="term-file-meta-line" style={{ color: appearance().mutedForeground ?? 'var(--text-dim)' }}>score {entry.score}</span>
                 </Show>
                 <Show when={entry.source && /^https?:\/\//i.test(entry.source)}>
                   <ExternalLinkButton url={entry.source!} label="打开" actions={props.actions} />
@@ -114,17 +161,17 @@ export function SolidSearchResultsBlock(props: { part: ContentPart; actions?: Se
         </For>
       </ol>
       <div class="term-search-foot">
-        <Show when={!expanded() && results().length > 3}>
+        <Show when={!expanded() && results().length > Math.min(3, pageLimit())}>
           <button class="term-file-action" type="button" onClick={() => setExpanded(true)}>
-            展开全部 {results().length} 条
+            展开结果（已载入 {Math.min(pageLimit(), results().length)}/{results().length}）
           </button>
         </Show>
         <Show when={hasMore()}>
-          <button class="term-file-action" type="button" onClick={() => setVisibleCount(count => count + 10)}>
-            加载更多（已显示 {visibleCount()}/{results().length}）
+          <button class="term-file-action" type="button" onClick={() => { setExpanded(true); setLoadedPages(count => count + 1) }}>
+            加载更多（已显示 {shown().length}/{results().length}）
           </button>
         </Show>
-        <Show when={hasMore() === false && total() > results().length && parsed().pagingToken}>
+        <Show when={hasMore() === false && total() > results().length && props.part.pagingToken}>
           <span class="term-file-meta-line">其余 {total() - results().length} 条需分页获取</span>
         </Show>
       </div>
@@ -132,46 +179,43 @@ export function SolidSearchResultsBlock(props: { part: ContentPart; actions?: Se
   )
 }
 
-export function SolidLinkBlock(props: { part: ContentPart; actions?: SearchLinkActions }) {
-  const link = createMemo(() => props.part as unknown as { kind: string; url?: string; title?: string; status?: number })
-  const url = () => link().url ?? ''
-  const allowed = () => isAllowedMediaUrl(url()) || /^https?:\/\//i.test(url())
+export function SolidLinkBlock(props: { part: LinkContentPart; actions?: SearchLinkActions; appearance?: SearchLinkAppearance }) {
+  const url = () => props.part.url
+  const allowed = () => isAllowedExternalLink(url())
+  const copyFirst = () => props.appearance?.linkOpenMode === 'copy-first'
+  const cardStyle = () => ({
+    color: props.appearance?.foreground ?? 'var(--text)',
+    'background-color': props.appearance?.background ?? 'transparent',
+    'border-color': props.appearance?.borderColor ?? 'var(--border)',
+    'font-size': `${boundedNumber(props.appearance?.fontSize, 13)}px`,
+    'max-width': `${boundedNumber(props.appearance?.maxWidth, 960)}px`,
+    'border-style': 'solid',
+    'border-width': '1px',
+    padding: props.appearance?.density === 'compact' ? '6px' : '10px',
+  })
   return (
-    <div class="term-link-card" data-part-kind={props.part.kind}>
+    <div class="term-link-card" data-part-kind={props.part.kind} data-density={props.appearance?.density ?? 'comfortable'}
+      data-open-mode={props.appearance?.linkOpenMode ?? 'external'} style={cardStyle()}>
       <span class="term-file-icon" aria-hidden="true">🔗</span>
       <div class="term-file-meta">
-        <span class="term-file-name">{link().title || hostOf(url()) || url()}</span>
-        <span class="term-file-path">{url()}</span>
-        <Show when={link().status !== undefined}>
-          <span class="term-file-meta-line">HTTP {link().status}</span>
+        <span class="term-file-name">{props.part.title || hostOf(url()) || url()}</span>
+        <span class="term-file-path" style={{ color: props.appearance?.mutedForeground ?? 'var(--text-dim)' }}>{url()}</span>
+        <Show when={props.appearance?.showStatus !== false && props.part.status !== undefined}>
+          <span class="term-file-meta-line">HTTP {props.part.status}</span>
         </Show>
       </div>
       <div class="term-file-actions" role="group" aria-label="链接操作">
-        <button
-          class="term-file-action"
-          type="button"
-          disabled={!allowed() || props.actions?.open === undefined}
-          title={allowed() ? '打开' : '协议不在白名单，已禁用'}
-          onClick={() => allowed() && props.actions?.open?.(url())}
-        >
-          打开
-        </button>
-        <button
-          class="term-file-action"
-          type="button"
-          disabled={!allowed() || props.actions?.copy === undefined}
-          title={allowed() ? '复制链接' : '协议不在白名单，已禁用'}
-          onClick={() => allowed() && props.actions?.copy?.(url())}
-        >
-          复制
-        </button>
+        <Show when={copyFirst()} fallback={<><LinkOpenButton url={url()} allowed={allowed()} actions={props.actions} /><LinkCopyButton url={url()} allowed={allowed()} actions={props.actions} /></>}>
+          <LinkCopyButton url={url()} allowed={allowed()} actions={props.actions} />
+          <LinkOpenButton url={url()} allowed={allowed()} actions={props.actions} />
+        </Show>
       </div>
     </div>
   )
 }
 
 function ExternalLinkButton(props: { url: string; label: string; actions?: SearchLinkActions }) {
-  const allowed = () => isAllowedMediaUrl(props.url) || /^https?:\/\//i.test(props.url)
+  const allowed = () => isAllowedExternalLink(props.url)
   return (
     <button
       class="term-file-action term-search-open"
@@ -186,17 +230,64 @@ function ExternalLinkButton(props: { url: string; label: string; actions?: Searc
 }
 
 /** C05 入口：search-result / link 分发；其他 part 返回 null。 */
-export function SolidSearchOrLink(props: { part: ContentPart; actions?: SearchLinkActions }) {
+export function SolidSearchOrLink(props: { part: ContentPart; actions?: SearchLinkActions; appearance?: SearchLinkAppearance }) {
   return (
     <Show
       when={props.part.kind === 'search-result'}
       fallback={
         <Show when={props.part.kind === 'link'} fallback={null}>
-          <SolidLinkBlock part={props.part} actions={props.actions} />
+          <SolidLinkBlock part={props.part as LinkContentPart} actions={props.actions} appearance={props.appearance} />
         </Show>
       }
     >
-      <SolidSearchResultsBlock part={props.part} actions={props.actions} />
+      <SolidSearchResultsBlock part={props.part as SearchResultContentPart} actions={props.actions} appearance={props.appearance} />
     </Show>
   )
+}
+
+function LinkOpenButton(props: { url: string; allowed: boolean; actions?: SearchLinkActions }) {
+  return <button class="term-file-action" type="button"
+    disabled={!props.allowed || props.actions?.open === undefined}
+    title={!props.allowed ? '协议不在白名单，已禁用' : props.actions?.open ? '打开' : '打开能力未接入'}
+    onClick={() => props.allowed && props.actions?.open?.(props.url)}>打开</button>
+}
+
+function LinkCopyButton(props: { url: string; allowed: boolean; actions?: SearchLinkActions }) {
+  return <button class="term-file-action" type="button"
+    disabled={!props.allowed || props.actions?.copy === undefined}
+    title={!props.allowed ? '协议不在白名单，已禁用' : props.actions?.copy ? '复制链接' : '复制能力未接入'}
+    onClick={() => props.allowed && props.actions?.copy?.(props.url)}>复制</button>
+}
+
+function isAllowedExternalLink(value: string): boolean {
+  try {
+    const url = new URL(value)
+    return url.protocol === 'http:' || url.protocol === 'https:'
+  } catch {
+    return false
+  }
+}
+
+function displaySource(entry: SearchResultEntry, mode: NonNullable<SearchLinkAppearance['pathDisplay']>): string | undefined {
+  if (mode === 'hidden') return entry.title
+  if (entry.title) return entry.title
+  if (mode === 'full') return entry.source
+  const normalized = entry.source.replace(/\\/g, '/')
+  return normalized.split('/').filter(Boolean).at(-1) ?? entry.source
+}
+
+function boundedInteger(value: number | undefined, fallback: number, min: number, max: number): number {
+  return Number.isInteger(value) ? Math.min(max, Math.max(min, Number(value))) : fallback
+}
+
+function boundedNumber(value: number | undefined, fallback: number): number {
+  return typeof value === 'number' && Number.isFinite(value) ? value : fallback
+}
+
+function highlightStyle(palette: SearchLinkAppearance['highlightPalette']) {
+  switch (palette) {
+    case 'accent': return { 'background-color': 'var(--accent-soft, #dbeafe)', color: 'inherit', 'font-weight': '600' }
+    case 'neutral': return { 'background-color': 'var(--surface-hover, #e5e7eb)', color: 'inherit', 'font-weight': '400' }
+    default: return { 'background-color': 'var(--selection, #fef3c7)', color: 'inherit', 'font-weight': '500' }
+  }
 }

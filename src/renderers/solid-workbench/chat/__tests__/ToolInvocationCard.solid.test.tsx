@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import { cleanup, render, screen } from '@solidjs/testing-library'
-import { afterEach, describe, expect, it } from 'vitest'
+import { afterEach, describe, expect, it, vi } from 'vitest'
 import { SolidToolInvocationCard } from '../ToolInvocationCard.solid.tsx'
 
 afterEach(cleanup)
@@ -84,5 +84,23 @@ describe('C04 SolidToolInvocationCard', () => {
     const controls = screen.getAllByRole('button').map(button => button.getAttribute('aria-controls'))
     expect(new Set(controls).size).toBe(2)
     for (const id of controls) expect(id && document.getElementById(id)).not.toBeNull()
+  })
+
+  it('deepens search/link output parts and routes them through semantic commands', () => {
+    const execute = vi.fn()
+    const { container } = render(() => <SolidToolInvocationCard
+      renderKind="tool.search"
+      appearance={{ defaultCollapsed: false, defaultExpanded: true }}
+      commands={{ canExecute: type => type === 'resource.open', execute }}
+      snapshot={{
+        id: 'tool-search', name: 'Search', semanticKind: 'tool.search', status: 'completed',
+        result: { status: 'completed', parts: [{ kind: 'search-result', results: [{ source: 'https://example.com/a', title: 'A' }] }] },
+      }}
+    />)
+
+    expect(container.querySelector('.term-search-results')).not.toBeNull()
+    expect(container.querySelector('[data-tool-part-kind="search-result"]')).toBeNull()
+    screen.getByRole('button', { name: '打开' }).click()
+    expect(execute).toHaveBeenCalledWith({ type: 'resource.open', payload: { uri: 'https://example.com/a' } })
   })
 })

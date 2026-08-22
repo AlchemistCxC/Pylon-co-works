@@ -1,5 +1,5 @@
 import { For, Show, createEffect, createMemo, createSignal } from 'solid-js'
-import type { RenderAppearanceSnapshot } from '../../../contracts/messageRenderer.ts'
+import type { RenderAppearanceSnapshot, RenderCommandPort } from '../../../contracts/messageRenderer.ts'
 import { createUnknownContentPart, type ContentPart } from '../../../domains/workbench/content/contentPartSchema.ts'
 import type { ToolInvocationSnapshot } from '../../../domains/workbench/workbenchProjector.ts'
 import { normalizeToolStatus, toolStatePresentation } from '../../../domains/tool/status.ts'
@@ -9,11 +9,13 @@ import { SolidAnsiBlock } from './AnsiBlock.solid.tsx'
 import { SolidFileReferenceCard } from './content/FileReference.solid.tsx'
 import { SolidMediaBlock } from './content/MediaBlock.solid.tsx'
 import { BUILTIN_MEDIA_RESOLVER_OPTIONS } from '../mediaAssetAdapter.ts'
+import { SolidSearchOrLink } from './content/SearchResults.solid.tsx'
 
 export function SolidToolInvocationCard(props: {
   snapshot: ToolInvocationSnapshot
   appearance: RenderAppearanceSnapshot
   renderKind: string
+  commands?: RenderCommandPort
 }) {
   const state = () => normalizeToolStatus(props.snapshot.status ?? props.snapshot.result?.status)
   const hasOutput = () => Boolean(props.snapshot.result && (
@@ -88,7 +90,7 @@ export function SolidToolInvocationCard(props: {
         <Show when={parts().length > 0}>
           <section class="solid-tool-parts" aria-label="工具输出">
             <span class="term-tool-label">输出</span>
-            <For each={parts()}>{part => <ToolContentPart part={part} />}</For>
+            <For each={parts()}>{part => <ToolContentPart part={part} appearance={props.appearance} commands={props.commands} />}</For>
           </section>
         </Show>
         <Show when={props.snapshot.result?.error}>
@@ -120,7 +122,7 @@ function ToolField(props: { label: string; value: unknown; class?: string; conte
   </section>
 }
 
-function ToolContentPart(props: { part: ContentPart }) {
+function ToolContentPart(props: { part: ContentPart; appearance?: RenderAppearanceSnapshot; commands?: RenderCommandPort }) {
   if (props.part.kind === 'code' && 'text' in props.part && typeof props.part.text === 'string') {
     return <SolidCodeBlock code={props.part.text} language={props.part.language} />
   }
@@ -135,6 +137,24 @@ function ToolContentPart(props: { part: ContentPart }) {
   }
   if (props.part.kind === 'image' || props.part.kind === 'audio' || props.part.kind === 'video') {
     return <SolidMediaBlock part={props.part} resolverOptions={BUILTIN_MEDIA_RESOLVER_OPTIONS} />
+  }
+  if (props.part.kind === 'search-result' || props.part.kind === 'link') {
+    const canOpen = props.commands?.canExecute?.('resource.open') === true
+    const canCopy = props.commands?.canExecute?.('clipboard.write') === true
+    return <SolidSearchOrLink part={props.part} actions={{
+      open: canOpen ? url => { void props.commands?.execute({ type: 'resource.open', payload: { uri: url } }) } : undefined,
+      copy: canCopy ? text => { void props.commands?.execute({ type: 'clipboard.write', payload: { text } }) } : undefined,
+    }} appearance={{
+      foreground: stringSetting(props.appearance ?? {}, 'foreground', 'var(--text)'),
+      mutedForeground: stringSetting(props.appearance ?? {}, 'mutedForeground', 'var(--text-dim)'),
+      background: stringSetting(props.appearance ?? {}, 'background', 'transparent'),
+      borderColor: stringSetting(props.appearance ?? {}, 'borderColor', 'var(--border)'),
+      maxWidth: numberSetting(props.appearance ?? {}, 'maxWidth', 960),
+      maxHeight: numberSetting(props.appearance ?? {}, 'maxHeight', 420),
+      density: props.appearance?.density === 'compact' ? 'compact' : 'comfortable',
+      defaultExpanded: !booleanSetting(props.appearance ?? {}, 'defaultCollapsed', false),
+      reducedMotion: props.appearance?.reducedMotion === true,
+    }} />
   }
   if (props.part.kind === 'unknown') {
     return <details data-tool-part-kind="unknown"><summary>{props.part.summary}</summary><pre>{safeJson(props.part.raw)}</pre></details>

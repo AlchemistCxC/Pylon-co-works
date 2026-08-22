@@ -2,6 +2,7 @@
 import { render } from '@solidjs/testing-library'
 import { describe, expect, it, vi } from 'vitest'
 import { SolidSearchOrLink } from '../SearchResults.solid.tsx'
+import { BuiltinSolidContentSlot } from '../../BuiltinSolidContentSlot.solid.tsx'
 import type { ContentPart } from '../../../../../domains/workbench/content/contentPartSchema.ts'
 
 /**
@@ -38,6 +39,7 @@ describe('C05 SolidSearchResultsBlock', () => {
     expect(result.container.textContent).toContain('L12')
     expect(result.container.textContent).toContain('score 0.93')
     expect(result.container.textContent).toContain('Lifecycle docs')
+    expect(result.container.querySelector<HTMLElement>('.term-search-item')?.style.borderLeftStyle).toBe('solid')
   })
 
   it('marks highlight ranges via <mark> split — never injects HTML into snippet', () => {
@@ -58,7 +60,7 @@ describe('C05 SolidSearchResultsBlock', () => {
     // 默认只显示前 3 条 + 展开提示
     const before = result.container.querySelectorAll('.term-search-item').length
     expect(before).toBe(3)
-    const expand = [...result.container.querySelectorAll('button')].find(b => b.textContent?.includes('展开全部'))
+    const expand = [...result.container.querySelectorAll('button')].find(b => b.textContent?.includes('展开结果'))
     await expand!.click()
     await Promise.resolve()
     const after = result.container.querySelectorAll('.term-search-item').length
@@ -74,7 +76,11 @@ describe('C05 SolidSearchResultsBlock', () => {
     const twelve = Array.from({ length: 12 }, (_, i) => ({ source: `/f/${i}.ts`, rank: i + 1, snippet: `s${i}` }))
     const result = block({ ...samplePart, results: twelve } as unknown as ContentPart)
     expect(result.container.textContent).toContain('42 条')
-    const loadMore = [...result.container.querySelectorAll('button')].find(b => b.textContent?.includes('加载更多'))
+    let loadMore = [...result.container.querySelectorAll('button')].find(b => b.textContent?.includes('加载更多'))
+    expect(loadMore?.textContent).toContain('已显示 3/12')
+    await [...result.container.querySelectorAll('button')].find(b => b.textContent?.includes('展开结果'))!.click()
+    await Promise.resolve()
+    loadMore = [...result.container.querySelectorAll('button')].find(b => b.textContent?.includes('加载更多'))
     expect(loadMore?.textContent).toContain('已显示 10/12')
     await loadMore!.click()
     await Promise.resolve()
@@ -128,5 +134,67 @@ describe('C05 SolidLinkBlock', () => {
     const result = block({ kind: 'text', text: 'plain' })
     expect(result.container.querySelector('.term-search-results')).toBeNull()
     expect(result.container.querySelector('.term-link-card')).toBeNull()
+  })
+
+  it('rejects data/blob/file schemes even when media rendering would accept them', () => {
+    for (const url of ['data:text/plain,unsafe', 'blob:https://example.com/id', 'file:///etc/passwd']) {
+      const result = block({ kind: 'link', url } as ContentPart, { open: vi.fn(), copy: vi.fn() })
+      for (const button of result.container.querySelectorAll('button')) expect(button).toBeDisabled()
+      result.unmount()
+    }
+  })
+
+  it('reaches the base Slot, consumes C05 settings, and gates semantic commands', async () => {
+    const execute = vi.fn()
+    const result = render(() => <BuiltinSolidContentSlot
+      snapshot={{ nodeId: 'search-slot', kind: 'content.search-result', revision: 1, payload: samplePart }}
+      appearance={{
+        grouped: false, defaultExpanded: true, pageSize: 2, snippetLines: 1, pathDisplay: 'basename',
+        density: 'compact', highlightPalette: 'accent', foreground: '#112233',
+        background: '#f1f2f3', borderColor: '#778899', maxWidth: 640, maxHeight: 220,
+      }}
+      commands={{ canExecute: type => type === 'resource.open', execute }}
+    />)
+
+    const card = result.container.querySelector<HTMLElement>('.term-search-results')!
+    expect(card).not.toBeNull()
+    expect(card.dataset.density).toBe('compact')
+    expect(card.dataset.grouped).toBe('false')
+    expect(card.dataset.highlightPalette).toBe('accent')
+    expect(card.style.color).toBe('rgb(17, 34, 51)')
+    expect(card.style.maxWidth).toBe('640px')
+    expect(card.style.maxHeight).toBe('220px')
+    expect(card.style.padding).toBe('6px')
+    expect(result.container.querySelector<HTMLElement>('.term-search-list')?.style.gap).toBe('4px')
+    expect(result.container.querySelector<HTMLElement>('.term-search-item')?.style.borderLeftStyle).toBe('none')
+    expect(result.container.querySelector<HTMLElement>('mark.term-search-mark')?.style.fontWeight).toBe('600')
+    expect(result.container.querySelectorAll('.term-search-item')).toHaveLength(2)
+    expect(result.container.textContent).toContain('app.tsx')
+    expect(result.container.textContent).not.toContain('/src/app.tsx')
+    expect(result.container.querySelector<HTMLElement>('.term-search-snippet')?.style.webkitLineClamp).toBe('1')
+
+    const open = result.getByRole('button', { name: '打开' })
+    open.click()
+    expect(execute).toHaveBeenCalledWith({ type: 'resource.open', payload: { uri: 'https://docs.example.com/lifecycle' } })
+
+    const linkResult = render(() => <BuiltinSolidContentSlot
+      snapshot={{ nodeId: 'link-slot', kind: 'content.link', revision: 1, payload: { kind: 'link', url: 'https://example.com/guide' } }}
+      appearance={{ linkOpenMode: 'external' }}
+      commands={{ canExecute: type => type === 'clipboard.write', execute }}
+    />)
+    expect(linkResult.getByRole('button', { name: '打开' })).toBeDisabled()
+    linkResult.getByRole('button', { name: '复制' }).click()
+    expect(execute).toHaveBeenCalledWith({ type: 'clipboard.write', payload: { text: 'https://example.com/guide' } })
+  })
+
+  it('falls back visibly when the base Slot receives a malformed C05 payload', () => {
+    const result = render(() => <BuiltinSolidContentSlot
+      snapshot={{ nodeId: 'bad-search', kind: 'content.search-result', revision: 1, payload: { kind: 'search-result', results: [{}] } }}
+      appearance={{}}
+      commands={{ execute: () => {} }}
+    />)
+    expect(result.container.querySelector('[data-content-kind="content.search-result"].solid-content-unknown')?.textContent)
+      .toContain('Invalid content.search-result payload')
+    expect(result.container.querySelector('.term-search-results')).toBeNull()
   })
 })

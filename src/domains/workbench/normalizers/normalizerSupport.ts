@@ -2,6 +2,9 @@ import {
   createUnknownContentPart,
   type ContentPart,
   type JsonValue,
+  type SearchHighlightRange,
+  type SearchResultEntry,
+  type SearchResultLocation,
 } from '../content/contentPartSchema.ts'
 import {
   isNonEmptyContentLocation,
@@ -133,23 +136,32 @@ export function normalizeContentBlock(raw: unknown): { part: ContentPart; diagno
       const resource = isRecord(raw.resource) ? raw.resource : raw
       return isNonEmptyContentLocation(resource.uri) ? { part: { kind: 'resource', uri: resource.uri, ...(typeof resource.mimeType === 'string' ? { mimeType: resource.mimeType } : {}), ...(typeof resource.text === 'string' ? { text: resource.text } : {}), ...(typeof resource.blob === 'string' ? { hasBlob: true } : {}), ...(typeof resource.title === 'string' ? { title: resource.title } : {}) } } : { part: createUnknownContentPart(type, raw), diagnostic: { code: 'content.resource.invalid', message: 'embedded resource has no URI', path: ['resource', 'uri'] } }
     }
-    // C05：搜索结果——entries 原样保留（source/rank/location/snippet/highlights/score/paging），
-    // highlights 是纯文本数字 range，不注入 HTML；无 results 进 unknown。
+    // C05：搜索结果逐条收窄为 provider-neutral snapshot；provider 私有字段不越过 seam。
     case 'search_result': {
-      if (!Array.isArray(raw.results) || raw.results.length === 0) {
+      const sourceResults = Array.isArray(raw.results) ? raw.results : []
+      const results = sourceResults.flatMap(entry => {
+        const normalized = normalizeSearchResultEntry(entry)
+        return normalized ? [normalized] : []
+      })
+      if (results.length === 0) {
         return { part: createUnknownContentPart(type, raw), diagnostic: { code: 'content.search-result.empty', message: 'search result block has no entries', path: ['results'] } }
       }
       return {
         part: {
           kind: 'search-result',
-          ...(typeof raw.query === 'string' ? { query: raw.query } : {}),
-          ...(Number.isInteger(raw.total) ? { total: raw.total } : {}),
-          ...(typeof raw.pagingToken === 'string' ? { pagingToken: raw.pagingToken } : {}),
-          results: raw.results,
+          ...nonEmptyTrimmed(raw.query, 'query'),
+          ...(Number.isInteger(raw.total) && Number(raw.total) >= 0 ? { total: Number(raw.total) } : {}),
+          ...nonEmptyTrimmed(raw.pagingToken, 'pagingToken'),
+          results,
         },
+        ...(results.length < sourceResults.length ? { diagnostic: {
+          code: 'content.search-result.entries-dropped',
+          message: `${sourceResults.length - results.length} malformed search result entries were dropped`,
+          path: ['results'],
+        } } : {}),
       }
     }
-    // C05：链接——url 必须存在；title 直通。scheme 白名单在渲染层经 resolver 裁决。
+    // C05：链接只保留 canonical URL/title/status；scheme 白名单由 command presentation 裁决。
     case 'link': {
       if (typeof raw.url !== 'string' || !raw.url.trim()) {
         return { part: createUnknownContentPart(type, raw), diagnostic: { code: 'content.link.invalid', message: 'link block has no URL', path: ['url'] } }
@@ -157,9 +169,9 @@ export function normalizeContentBlock(raw: unknown): { part: ContentPart; diagno
       return {
         part: {
           kind: 'link',
-          url: raw.url,
-          ...(typeof raw.title === 'string' ? { title: raw.title } : {}),
-          ...(typeof raw.status === 'number' ? { status: raw.status } : {}),
+          url: raw.url.trim(),
+          ...nonEmptyTrimmed(raw.title, 'title'),
+          ...(Number.isInteger(raw.status) && Number(raw.status) >= 100 && Number(raw.status) <= 599 ? { status: Number(raw.status) } : {}),
         },
       }
     }
@@ -227,6 +239,52 @@ export function normalizeContentBlock(raw: unknown): { part: ContentPart; diagno
     default:
       return { part: createUnknownContentPart(type, raw) }
   }
+}
+
+function normalizeSearchResultEntry(value: unknown): SearchResultEntry | undefined {
+  if (!isRecord(value) || typeof value.source !== 'string' || value.source.trim().length === 0) return undefined
+  const snippet = typeof value.snippet === 'string' ? value.snippet : undefined
+  const highlights = snippet === undefined ? undefined : normalizeHighlightRanges(value.highlights, snippet.length)
+  const location = normalizeSearchResultLocation(value.location)
+  return {
+    source: value.source.trim(),
+    ...(Number.isInteger(value.rank) && Number(value.rank) >= 1 ? { rank: Number(value.rank) } : {}),
+    ...nonEmptyTrimmed(value.title, 'title'),
+    ...(location ? { location } : {}),
+    ...(snippet !== undefined ? { snippet } : {}),
+    ...(highlights && highlights.length > 0 ? { highlights } : {}),
+    ...(typeof value.score === 'number' && Number.isFinite(value.score) ? { score: value.score } : {}),
+    ...nonEmptyTrimmed(value.pagingToken, 'pagingToken'),
+  }
+}
+
+function normalizeSearchResultLocation(value: unknown): SearchResultLocation | undefined {
+  if (!isRecord(value)) return undefined
+  const location: SearchResultLocation = {
+    ...nonEmptyTrimmed(value.path, 'path'),
+    ...nonEmptyTrimmed(value.uri, 'uri'),
+    ...(Number.isInteger(value.line) && Number(value.line) >= 0 ? { line: Number(value.line) } : {}),
+    ...(Number.isInteger(value.column) && Number(value.column) >= 0 ? { column: Number(value.column) } : {}),
+    ...(Number.isInteger(value.endLine) && Number(value.endLine) >= 0 ? { endLine: Number(value.endLine) } : {}),
+    ...(Number.isInteger(value.endColumn) && Number(value.endColumn) >= 0 ? { endColumn: Number(value.endColumn) } : {}),
+  }
+  return Object.keys(location).length > 0 ? location : undefined
+}
+
+function normalizeHighlightRanges(value: unknown, snippetLength: number): readonly SearchHighlightRange[] | undefined {
+  if (!Array.isArray(value)) return undefined
+  const ranges = value.flatMap(range => isRecord(range)
+    && Number.isInteger(range.start) && Number.isInteger(range.end)
+    && Number(range.start) >= 0 && Number(range.end) > Number(range.start)
+    && Number(range.end) <= snippetLength
+    ? [{ start: Number(range.start), end: Number(range.end) }]
+    : [])
+  return ranges.length > 0 ? ranges : undefined
+}
+
+function nonEmptyTrimmed<Key extends string>(value: unknown, key: Key): Partial<Record<Key, string>> {
+  if (typeof value !== 'string' || value.trim().length === 0) return {}
+  return { [key]: value.trim() } as Partial<Record<Key, string>>
 }
 
 function normalizeMediaContentBlock(
