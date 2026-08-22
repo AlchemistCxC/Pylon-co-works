@@ -81,6 +81,11 @@ struct CatalogTool {
     summary_fields: Vec<String>,
     #[serde(default)]
     output_label: Option<String>,
+    /// 2f227cc 起共享目录为工具补充 capability 标签（delegate/subagent/background 等）。
+    /// Rust 侧暂无消费者；接受该字段以保持 deny_unknown_fields 与 shared/agent-catalog.json
+    /// 单一真值同步（否则 36 个 agent_config 测试因 unknown field 拒绝整个目录）。
+    #[serde(default)]
+    capabilities: Vec<String>,
 }
 
 #[derive(Debug, Deserialize)]

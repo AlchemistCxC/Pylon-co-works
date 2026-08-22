@@ -22,6 +22,8 @@ const EXPECTED_KINDS = [
   'content.link',
   'content.diff',
   'diagnostic.lsp',
+  'content.terminal',
+  'content.log',
   'content.code',
   'content.ansi',
 ] as const
