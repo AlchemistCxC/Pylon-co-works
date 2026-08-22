@@ -15,6 +15,9 @@ const EXPECTED_KINDS = [
   'content.file-reference',
   'content.file-selection',
   'content.resource',
+  'content.image',
+  'content.audio',
+  'content.video',
   'content.code',
   'content.ansi',
 ] as const

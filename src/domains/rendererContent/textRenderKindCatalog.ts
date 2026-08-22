@@ -111,6 +111,21 @@ export const BUILTIN_TEXT_RENDER_KINDS: readonly RenderKindDefinition[] = [
     validateInput: input => typeof input === 'object' && input !== null && !Array.isArray(input)
       && typeof (input as Record<string, unknown>).uri === 'string',
   },
+  ...(['image', 'audio', 'video'] as const).map(kind => ({
+    id: `content.${kind}`,
+    category: 'content',
+    fallbackKind: 'content.unknown',
+    priority: 100,
+    fixture: kind === 'image'
+      ? { source: 'https://fixture.example.com/pic.png', mimeType: 'image/png', alt: 'fixture image' }
+      : { source: `https://fixture.example.com/clip.${kind === 'audio' ? 'wav' : 'mp4'}`, mimeType: `${kind}/${kind === 'audio' ? 'wav' : 'mp4'}` },
+    defaultTokens: {},
+    settingsSchemaVersion: 1,
+    // C03：source/url/localPath/base64 至少一个来源字段；validateInput 不解析内容只验形态
+    validateInput: (input: unknown) => typeof input === 'object' && input !== null && !Array.isArray(input)
+      && ['source', 'url', 'localPath', 'base64'].some(key =>
+        typeof (input as Record<string, unknown>)[key] === 'string'),
+  })),
   {
     id: 'content.code',
     category: 'content',
