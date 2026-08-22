@@ -363,7 +363,8 @@ function CanonicalActivitySlot(props: {
             ? <SolidProcessActivity activity={props.activity}
                 appearance={{ ...props.context.appearanceSnapshot(), reducedMotion: props.context.input().reducedMotion }}
                 commands={fallbackRenderCommands(props.context)} />
-          : (props.activity.semanticKind === 'activity.subagent' || props.activity.semanticKind === 'activity.delegation' || props.activity.semanticKind === 'activity.team')
+          : ['activity.subagent', 'activity.delegation', 'activity.team',
+             'activity.workflow', 'activity.workflow-phase', 'activity.workflow-agent'].includes(props.activity.semanticKind ?? '')
             ? <SolidSubagentCard activity={props.activity}
                 appearance={{ ...props.context.appearanceSnapshot(), reducedMotion: props.context.input().reducedMotion }}
                 commands={fallbackRenderCommands(props.context)} />

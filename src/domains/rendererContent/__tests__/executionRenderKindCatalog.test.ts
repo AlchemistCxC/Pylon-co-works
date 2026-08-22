@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { BUILTIN_EXECUTION_RENDER_KINDS, isProcessActivitySnapshotInput, isSubagentActivitySnapshotInput } from '../executionRenderKindCatalog.ts'
+import { BUILTIN_EXECUTION_RENDER_KINDS, isProcessActivitySnapshotInput, isSubagentActivitySnapshotInput, isWorkflowActivitySnapshotInput } from '../executionRenderKindCatalog.ts'
 import { BUILTIN_SOLID_CONTENT_KINDS } from '../../../renderers/solid-workbench/builtinSolidRendererSuite.ts'
 
 describe('C07 execution render kind catalog', () => {
@@ -43,5 +43,25 @@ describe('C07 execution render kind catalog', () => {
       id: 's2', kind: 'activity', activityKind: 'subagent', status: 'running', depth: -1,
     })).toBe(false)
     expect(isSubagentActivitySnapshotInput({ id: 's3', status: 'running' })).toBe(false)
+  })
+
+  it('registers workflow/workflow-phase/workflow-agent kinds with valid fixtures (C10)', () => {
+    for (const family of ['workflow', 'workflow-phase', 'workflow-agent'] as const) {
+      const kind = BUILTIN_EXECUTION_RENDER_KINDS.find(k => k.id === `activity.${family}`)!
+      expect(kind).toBeDefined()
+      expect(kind.fallbackKind).toBe('content.unknown')
+      expect(BUILTIN_SOLID_CONTENT_KINDS).toContain(`activity.${family}`)
+      expect(kind.validateInput?.(kind.fixture)).toBe(true)
+    }
+    // relation 挂接：phase/agent 携带 parentId；workflow 本体无 parentId
+    const wf = BUILTIN_EXECUTION_RENDER_KINDS.find(k => k.id === 'activity.workflow')!
+    expect((wf.fixture as Record<string, unknown>).parentId).toBeUndefined()
+    const phase = BUILTIN_EXECUTION_RENDER_KINDS.find(k => k.id === 'activity.workflow-phase')!
+    expect((phase.fixture as Record<string, unknown>).parentId).toBe('fixture-workflow')
+    expect(isWorkflowActivitySnapshotInput({
+      id: 'w1', kind: 'activity', activityKind: 'workflow-phase', status: 'running', parentId: 'wf-1',
+      progress: { completed: 1, total: 3 },
+    })).toBe(true)
+    expect(isWorkflowActivitySnapshotInput({ id: 'w2', kind: 'activity', activityKind: 'mystery', status: 'running' })).toBe(false)
   })
 })

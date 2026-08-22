@@ -547,6 +547,8 @@ function reduceActivity(document: WorkbenchDocument, envelope: WorkbenchEventEnv
     ?? (activityKind === 'process' || activityKind === 'background-task'
       // C09：子代理/委派/团队家族同样从 wire family 派生渲染语义
       || activityKind === 'subagent' || activityKind === 'delegation' || activityKind === 'team'
+      // C10：后台任务与工作流家族（workflow-phase/agent 经 parentId relation 挂接）
+      || activityKind === 'workflow' || activityKind === 'workflow-phase' || activityKind === 'workflow-agent'
       ? `activity.${activityKind}` : undefined)
   const parts = jsonSnapshot(result?.parts ?? patch.parts ?? activity.parts) ?? previous?.parts
   const error = event.error !== undefined

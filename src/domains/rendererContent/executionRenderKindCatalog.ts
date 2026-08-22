@@ -20,6 +20,8 @@ export function isProcessActivitySnapshotInput(input: unknown): boolean {
 
 /** C09：子代理/委派/团队活动快照校验——family 三兄弟共用一套字段契约（缺失降级为 undefined，不猜）。 */
 export type SubagentActivityFamily = 'subagent' | 'delegation' | 'team'
+/** C10：后台任务与工作流家族（background-task 既有 kind；workflow 三兄弟新增）。 */
+export type WorkflowActivityFamily = 'workflow' | 'workflow-phase' | 'workflow-agent'
 
 export function isSubagentActivitySnapshotInput(input: unknown): boolean {
   if (!isRecord(input)
@@ -57,8 +59,44 @@ function subagentKindDefinition(family: SubagentActivityFamily): RenderKindDefin
   } satisfies RenderKindDefinition)
 }
 
+/** C10：workflow 家族快照校验——phase/agent 经 parentId relation 挂接，缺失降级不猜。 */
+export function isWorkflowActivitySnapshotInput(input: unknown): boolean {
+  if (!isRecord(input)
+    || typeof input.id !== 'string' || !input.id.trim()
+    || input.kind !== 'activity'
+    || !(input.activityKind === 'workflow' || input.activityKind === 'workflow-phase' || input.activityKind === 'workflow-agent')
+    || typeof input.status !== 'string' || !input.status.trim()) return false
+  for (const key of ['semanticKind', 'title', 'parentId', 'role', 'model', 'provider', 'goal'] as const) {
+    if (input[key] !== undefined && (typeof input[key] !== 'string' || !input[key].trim())) return false
+  }
+  if (input.depth !== undefined && (typeof input.depth !== 'number' || !Number.isFinite(input.depth))) return false
+  for (const key of ['progress', 'result', 'usage', 'files', 'metadata', 'capabilities', 'parts'] as const) {
+    if (input[key] !== undefined && !isJsonValue(input[key])) return false
+  }
+  return true
+}
+
+function workflowKindDefinition(family: WorkflowActivityFamily): RenderKindDefinition {
+  return Object.freeze({
+    id: `activity.${family}`,
+    category: 'activity',
+    fallbackKind: 'content.unknown',
+    priority: 1000,
+    fixture: {
+      id: `fixture-${family}`, kind: 'activity', activityKind: family, semanticKind: `activity.${family}`,
+      title: `Fixture ${family}`, status: 'running', parentId: family === 'workflow' ? undefined : 'fixture-workflow',
+      role: family === 'workflow-agent' ? 'reviewer' : undefined, parts: [],
+    },
+    defaultTokens: TERMINAL_LOG_DEFAULT_TOKENS,
+    settingsSchemaVersion: 1,
+    settings: TERMINAL_LOG_SETTINGS,
+    validateInput: isWorkflowActivitySnapshotInput,
+  } satisfies RenderKindDefinition)
+}
+
 export const BUILTIN_EXECUTION_RENDER_KINDS: readonly RenderKindDefinition[] = Object.freeze([
   ...(['subagent', 'delegation', 'team'] as const).map(subagentKindDefinition),
+  ...(['workflow', 'workflow-phase', 'workflow-agent'] as const).map(workflowKindDefinition),
   Object.freeze({
     id: 'activity.process',
     category: 'activity',
