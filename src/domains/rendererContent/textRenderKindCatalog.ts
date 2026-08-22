@@ -356,6 +356,53 @@ export const BUILTIN_TEXT_RENDER_KINDS: readonly RenderKindDefinition[] = [
       && isNonEmptyContentLocation((input as Record<string, unknown>).uri)
       && typeof (input as Record<string, unknown>).blob === 'undefined',
   },
+  {
+    id: 'content.diff',
+    category: 'content',
+    fallbackKind: 'content.unknown',
+    priority: 100,
+    fixture: { path: '/fixture/a.ts', status: 'modified', oldText: 'a\n', newText: 'b\n' },
+    defaultTokens: {},
+    settingsSchemaVersion: 1,
+    // C06：结构化 diff 可重建；unified/rawPatch 只作审计
+    validateInput: (input: unknown) => typeof input === 'object' && input !== null && !Array.isArray(input)
+      && typeof (input as Record<string, unknown>).path === 'string',
+  },
+  {
+    id: 'diagnostic.lsp',
+    category: 'diagnostic',
+    fallbackKind: 'content.unknown',
+    priority: 100,
+    fixture: { severity: 'error', code: 'TS1', source: 'typescript', message: 'fixture lsp diagnostic', path: '/fixture/a.ts' },
+    defaultTokens: {},
+    settingsSchemaVersion: 1,
+    validateInput: (input: unknown) => typeof input === 'object' && input !== null && !Array.isArray(input)
+      && typeof (input as Record<string, unknown>).message === 'string'
+      && typeof (input as Record<string, unknown>).path === 'string',
+  },
+  {
+    id: 'content.search-result',
+    category: 'content',
+    fallbackKind: 'content.unknown',
+    priority: 100,
+    fixture: { query: 'fixture query', total: 1, results: [{ source: '/fixture/a.ts', rank: 1, snippet: 'fixture snippet' }] },
+    defaultTokens: {},
+    settingsSchemaVersion: 1,
+    // C05：results 必须是非空数组；highlights 是纯文本数字 range
+    validateInput: (input: unknown) => typeof input === 'object' && input !== null && !Array.isArray(input)
+      && Array.isArray((input as Record<string, unknown>).results),
+  },
+  {
+    id: 'content.link',
+    category: 'content',
+    fallbackKind: 'content.unknown',
+    priority: 100,
+    fixture: { url: 'https://fixture.example.com/guide', title: 'fixture link' },
+    defaultTokens: {},
+    settingsSchemaVersion: 1,
+    validateInput: (input: unknown) => typeof input === 'object' && input !== null && !Array.isArray(input)
+      && typeof (input as Record<string, unknown>).url === 'string',
+  },
   ...(['image', 'audio', 'video'] as const).map(kind => ({
     id: `content.${kind}`,
     category: 'content',

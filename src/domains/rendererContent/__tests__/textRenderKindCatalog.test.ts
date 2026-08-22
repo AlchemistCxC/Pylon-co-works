@@ -18,6 +18,10 @@ const EXPECTED_KINDS = [
   'content.image',
   'content.audio',
   'content.video',
+  'content.search-result',
+  'content.link',
+  'content.diff',
+  'diagnostic.lsp',
   'content.code',
   'content.ansi',
 ] as const

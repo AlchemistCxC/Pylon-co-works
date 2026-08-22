@@ -133,6 +133,55 @@ export function normalizeContentBlock(raw: unknown): { part: ContentPart; diagno
       const resource = isRecord(raw.resource) ? raw.resource : raw
       return isNonEmptyContentLocation(resource.uri) ? { part: { kind: 'resource', uri: resource.uri, ...(typeof resource.mimeType === 'string' ? { mimeType: resource.mimeType } : {}), ...(typeof resource.text === 'string' ? { text: resource.text } : {}), ...(typeof resource.blob === 'string' ? { hasBlob: true } : {}), ...(typeof resource.title === 'string' ? { title: resource.title } : {}) } } : { part: createUnknownContentPart(type, raw), diagnostic: { code: 'content.resource.invalid', message: 'embedded resource has no URI', path: ['resource', 'uri'] } }
     }
+    // C05：搜索结果——entries 原样保留（source/rank/location/snippet/highlights/score/paging），
+    // highlights 是纯文本数字 range，不注入 HTML；无 results 进 unknown。
+    case 'search_result': {
+      if (!Array.isArray(raw.results) || raw.results.length === 0) {
+        return { part: createUnknownContentPart(type, raw), diagnostic: { code: 'content.search-result.empty', message: 'search result block has no entries', path: ['results'] } }
+      }
+      return {
+        part: {
+          kind: 'search-result',
+          ...(typeof raw.query === 'string' ? { query: raw.query } : {}),
+          ...(Number.isInteger(raw.total) ? { total: raw.total } : {}),
+          ...(typeof raw.pagingToken === 'string' ? { pagingToken: raw.pagingToken } : {}),
+          results: raw.results,
+        },
+      }
+    }
+    // C05：链接——url 必须存在；title 直通。scheme 白名单在渲染层经 resolver 裁决。
+    case 'link': {
+      if (typeof raw.url !== 'string' || !raw.url.trim()) {
+        return { part: createUnknownContentPart(type, raw), diagnostic: { code: 'content.link.invalid', message: 'link block has no URL', path: ['url'] } }
+      }
+      return {
+        part: {
+          kind: 'link',
+          url: raw.url,
+          ...(typeof raw.title === 'string' ? { title: raw.title } : {}),
+          ...(typeof raw.status === 'number' ? { status: raw.status } : {}),
+        },
+      }
+    }
+    // C06：LSP diagnostic——severity/code/source/message/path/range/related 结构化保留；
+    // 缺 message 或 path 进 unknown（diagnostic 无定位与内容则不可用）。
+    case 'lsp_diagnostic': {
+      if (typeof raw.message !== 'string' || !raw.message.trim() || typeof raw.path !== 'string' || !raw.path.trim()) {
+        return { part: createUnknownContentPart(type, raw), diagnostic: { code: 'content.diagnostic-lsp.invalid', message: 'lsp diagnostic needs message and path', path: ['message'] } }
+      }
+      return {
+        part: {
+          kind: 'diagnostic-lsp',
+          ...(typeof raw.severity === 'string' ? { severity: raw.severity } : {}),
+          ...(typeof raw.code === 'string' ? { code: raw.code } : {}),
+          ...(typeof raw.source === 'string' ? { source: raw.source } : {}),
+          message: raw.message,
+          path: raw.path,
+          ...(isRecord(raw.range) ? { range: raw.range } : {}),
+          ...(Array.isArray(raw.related) ? { related: raw.related } : {}),
+        },
+      }
+    }
     // C02：文件引用——path 保持原样（Windows/URI 不做字符串猜测互转）
     case 'file_reference': {
       if (typeof raw.path !== 'string' || !raw.path.trim() || !isOptionalNonNegativeFiniteNumber(raw.size)) {
