@@ -145,7 +145,6 @@ export const BUILTIN_SEMANTIC_RENDER_KINDS = Object.freeze([
   { id: 'tool.read', category: 'tool' },
   { id: 'tool.search', category: 'tool' },
   { id: 'tool.fetch', category: 'tool' },
-  { id: 'content.memory', category: 'content' },
 ] as const)
 
 const definitions: Array<{
