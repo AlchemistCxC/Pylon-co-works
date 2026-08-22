@@ -34,7 +34,7 @@ use std::sync::Arc;
 
 use futures_util::{stream, StreamExt};
 
-use crate::acp::{AcpClient, AcpError, AgentConnectFailure, AgentConnectStage};
+use crate::acp::{AcpClient, AcpError};
 use crate::agent_config::{AgentDef, ToolDictEntry};
 use crate::agent_runtime::{
     status_after_connection_failure, AgentLifecycleStatus, ClientActivation, ClientEpoch,
@@ -403,6 +403,22 @@ fn agent_summary_payload_with_activation(
     })
 }
 
+/// registry 是否包含指定 agent（switch 前置存在性检查用，不克隆）。
+fn agent_exists_in_registry(state: &AppState, agent_id: &str) -> bool {
+    state.agents.lock().map(|agents| agents.contains_key(agent_id)).unwrap_or(false)
+}
+
+/// 从 registry 读取指定 agent 定义（克隆）；不存在报 unknown agent（多处命令共用）。
+fn agent_from_registry(state: &AppState, agent_id: &str) -> Result<AgentDef, PylonError> {
+    state
+        .agents
+        .lock()
+        .map_err(|error| error.to_string())?
+        .get(agent_id)
+        .cloned()
+        .ok_or_else(|| PylonError::Protocol(format!("unknown agent: {agent_id}")))
+}
+
 fn stored_agent_activation(state: &AppState, agent_id: &str) -> Option<AgentConfigActivationState> {
     let agent = state.agents.lock().ok()?.get(agent_id)?.clone();
     let active = state.active_agent.lock().ok()?.as_str() == agent_id;
@@ -502,6 +518,15 @@ pub(crate) async fn validate_agents() -> Result<serde_json::Value, PylonError> {
     }))
 }
 
+/// 清理被移除 agent 的幽灵 runtime（abort 通知任务 + kill + 从注册表移除）。
+/// reload/update/initialize 三条配置提交路径共用（同款清理语义）。
+async fn remove_stale_runtimes(inner: &AppState, removed: Vec<String>) {
+    for id in removed {
+        stop_agent_runtime(&id, inner).await;
+        inner.runtimes.remove(&id);
+    }
+}
+
 /// C7：停掉旧 runtime 的进程——先 abort notification_task（防 kill 触发的崩溃
 /// 通知被旧 dispatcher 处理并调度自动重连）再 kill acp，状态置 Disconnected。
 /// switch 换目标 / reload 删除 agent 共用。
@@ -533,12 +558,7 @@ pub(crate) async fn switch_agent<R: tauri::Runtime>(
     let _switch_guard = inner.switch_lock.lock().await;
     // P3：先查 registry 确认 agent 存在，再 get_or_create——未知 agent 直接报错，
     // 不得留下幽灵 runtime（disconnected 且永不连接的空注册项）。
-    if !inner
-        .agents
-        .lock()
-        .map_err(|error| error.to_string())?
-        .contains_key(&name)
-    {
+    if !agent_exists_in_registry(inner, &name) {
         return Err(PylonError::Protocol(format!("unknown agent: {name}")));
     }
     // 目标 runtime 懒启动（首次切换创建 disconnected runtime）
@@ -556,13 +576,7 @@ pub(crate) async fn switch_agent<R: tauri::Runtime>(
         .lock()
         .map(|state| state.status)
         .unwrap_or(AgentLifecycleStatus::Disconnected);
-    let agent = inner
-        .agents
-        .lock()
-        .map_err(|error| error.to_string())?
-        .get(&name)
-        .ok_or_else(|| format!("unknown agent: {name}"))?
-        .clone();
+    let agent = agent_from_registry(inner, &name)?;
     if matches!(
         target_status,
         AgentLifecycleStatus::Connected
@@ -658,13 +672,7 @@ pub(crate) async fn restart_agent_runtime<R: tauri::Runtime>(
     }
     let runtime = inner.runtimes.get_or_create(&agent_id);
     let _lifecycle_guard = runtime.agent_lifecycle.lock().await;
-    let agent = inner
-        .agents
-        .lock()
-        .map_err(|error| error.to_string())?
-        .get(&agent_id)
-        .cloned()
-        .ok_or_else(|| PylonError::Protocol(format!("unknown agent: {agent_id}")))?;
+    let agent = agent_from_registry(inner, &agent_id)?;
     let handles = AppStateHandles::from_state(inner);
     do_connect_and_replace(
         &handles,
@@ -719,679 +727,47 @@ pub(crate) async fn acp_wire_trace_snapshot(
     }))
 }
 
-/// 返回当前 agent 级暴露的 MCP server 配置（cwd 设置据此选择启用哪些）。
-#[tauri::command]
-pub(crate) async fn get_mcp_servers(
-    state: tauri::State<'_, AppState>,
-) -> Result<Vec<crate::mcp::McpServerConfig>, PylonError> {
-    state
-        .inner()
-        .current_mcp_servers()
-        .map_err(PylonError::Protocol)
-}
+pub(crate) mod config_cmds;
+pub(crate) mod connection_test;
+pub(crate) mod mcp;
 
-#[tauri::command]
-pub(crate) async fn set_mcp_servers(
-    state: tauri::State<'_, AppState>,
-    servers: Option<Vec<crate::mcp::McpServerConfig>>,
-) -> Result<Vec<serde_json::Value>, String> {
-    // O13：单次 clone（validate 消耗 clone，原值 move 进 runtime_mcp；
-    // persist 在锁内借用 guard——原实现 serialized/persisted 两次 clone）。
-    let serialized = crate::mcp::validate_and_serialize(servers.clone())?;
-    // C8：写 runtime_mcp + 落盘全程持写序锁——并发 set_mcp_servers 串行，
-    // 磁盘必为最后一次设置（重启不回滚到旧配置）。
-    let _mcp_write_guard = state.inner().mcp_write_lock.lock().await;
-    {
-        let mut guard = state
-            .runtime_mcp
-            .lock()
-            .map_err(|error| error.to_string())?;
-        *guard = servers;
-        // P1（E10）：wire 缓存与 runtime_mcp 同锁写入（读路径 miss 时回退重算并回填）。
-        if let Ok(mut cache) = state.inner().mcp_wire.lock() {
-            *cache = Some(serialized.clone());
-        }
-        // B4.2：配置落盘（重启不丢）。写失败只 warn，不阻断本次设置。
-        persist_mcp_if_possible(&state, guard.as_deref().unwrap_or_default());
-    }
-    Ok(serialized)
-}
-
-#[tauri::command]
-pub(crate) async fn reload_agents(
-    state: tauri::State<'_, AppState>,
-    config_path: Option<String>,
-) -> Result<(), PylonError> {
-    let runtime = state.inner().require_runtime()?;
-    let _lifecycle_guard = runtime.agent_lifecycle.lock().await;
-    let new_agents = if let Some(path) = config_path {
-        crate::agent_config::load_from_path(std::path::Path::new(&path))?
-    } else {
-        crate::agent_config::load()?
-    };
-    crate::agent_config::default_agent_id(&new_agents)?;
-    // O12：config 读（read_to_string + parse）在锁外完成（load_from_path/load
-    // 在取得 agents 锁之前执行）；active 存在性检查 + 新旧表 diff + 原子替换
-    // 合并为单次持锁操作——无"检查通过但替换未完成"的中间态。
-    let agent_count = new_agents.len();
-    let removed: Vec<String> = {
-        let active_agent = state
-            .active_agent
-            .lock()
-            .map_err(|error| error.to_string())?
-            .clone();
-        let mut agents = state.agents.lock().map_err(|e| e.to_string())?;
-        if !new_agents.contains_key(&active_agent) {
-            return Err(PylonError::Protocol(format!(
-                "agent config cannot remove active agent: {active_agent}"
-            )));
-        }
-        // C6：reload 删除 agent 时清理幽灵 runtime——新旧表 diff，删除且非 active 的
-        // agent 在注册表替换后 abort notification_task + kill acp（防旧进程继续
-        // 运行/崩溃通知复活；与 switch_agent 清理旧 runtime 同款操作）。
-        let removed = agents
-            .keys()
-            .filter(|id| !new_agents.contains_key(*id) && **id != active_agent)
-            .cloned()
-            .collect();
-        *agents = new_agents;
-        removed
-    };
-    for id in removed {
-        stop_agent_runtime(&id, state.inner()).await;
-        state.inner().runtimes.remove(&id);
-    }
-    state.inner().log_runtime_summary(
-        "info",
-        "agent",
-        None,
-        "Agent registry reloaded",
-        serde_json::Map::from_iter([(
-            "agentCount".to_string(),
-            serde_json::Value::from(agent_count),
-        )]),
-    );
-    Ok(())
-}
-
-#[tauri::command]
-pub(crate) async fn agent_config_snapshot(
-    _state: tauri::State<'_, AppState>,
-) -> Result<serde_json::Value, PylonError> {
-    let path = crate::agent_config::effective_config_path().ok_or(PylonError::Config(
-        crate::agent_config::ConfigError::ReadOnly,
-    ))?;
-    let (revision, agents) =
-        tokio::task::spawn_blocking(move || crate::agent_config::read_config_snapshot(&path))
-            .await
-            .map_err(|error| PylonError::Io(error.to_string()))??;
-    let summaries = agents
-        .iter()
-        .map(|(id, agent)| agent_summary_payload(id, agent, None, None, false))
-        .collect::<Vec<_>>();
-    let diagnostics = crate::agent_config::config_diagnostics(&agents);
-    Ok(serde_json::json!({
-        "revision": revision,
-        "agents": summaries,
-        "diagnostics": diagnostics,
-    }))
-}
-
-/// Phase 3：update_agents_config（意见稿 §5.1 显式 scope 契约，用户拍板）。
-///
-/// scope="agent"：config 为 agent 整块 YAML 字符串（agentId 必填）；
-/// scope="gateway"：config 为 `{ gateway: { routes: [...] } }` JSON。
-/// 事务（§5.3.B）：写序锁 → embedded 只读检查 → 读当前 → 生成候选 → 双域校验 +
-/// active agent 保护（写盘前）→ 原子写盘 → 内存提交（agents 域刷新 + 幽灵 runtime
-/// 清理对齐 reload_agents；gateway 域 reload，失败报 config_not_applied）。
-#[tauri::command]
-pub(crate) async fn update_agents_config(
-    state: tauri::State<'_, AppState>,
-    scope: String,
-    agent_id: Option<String>,
-    config: serde_json::Value,
-    expected_revision: Option<String>,
-) -> Result<serde_json::Value, PylonError> {
-    use crate::agent_config::ConfigError;
-    let inner = state.inner();
-    // 写序锁：读当前→生成候选→校验→写盘→内存提交全程串行，防基于旧版本互相覆盖
-    let _write_guard = inner.config_write_lock.lock().await;
-    // 1. 来源检查：embedded 无外部写入目标 → config_read_only（绝不 fallback 当前目录）
-    let path = crate::agent_config::effective_config_path()
-        .ok_or(PylonError::Config(ConfigError::ReadOnly))?;
-    let expected_revision =
-        expected_revision.ok_or(PylonError::Config(ConfigError::RevisionRequired))?;
-    // 跨进程 lease 覆盖“重读 baseline → 生成/校验候选 → 提交”整个窗口。
-    // 进程内 config_write_lock 只负责当前 AppState，不能代替文件级互斥。
-    let config_lease = crate::agent_config::ConfigLease::acquire(&path)?;
-    // 2. 读当前原文（tokio::fs 异步读，不阻塞 async 运行时）
-    let content = tokio::fs::read_to_string(&path).await.map_err(|error| {
-        PylonError::Config(ConfigError::Read(format!(
-            "读取 {} 失败: {error}",
-            path.display()
-        )))
-    })?;
-    let actual = crate::agent_config::config_revision_for_bytes(content.as_bytes());
-    if actual != expected_revision {
-        return Err(PylonError::Config(ConfigError::Conflict {
-            expected: expected_revision,
-            actual,
-        }));
-    }
-    // 3. 生成候选 + 双域校验 + 解析 agents（同步 YAML/fs，spawn_blocking；base_dir 绝对化）
-    let scope_owned = scope.clone();
-    let agent_id_owned = agent_id.clone();
-    let config_owned = config.clone();
-    let base_dir = path.parent().map(|p| p.to_path_buf());
-    let candidate = tokio::task::spawn_blocking(move || {
-        let candidate = match scope_owned.as_str() {
-            "agent" => {
-                let agent_id = agent_id_owned
-                    .ok_or_else(|| ConfigError::Invalid("scope=agent 缺少 agentId".to_string()))?;
-                let patch_yaml = config_owned.as_str().ok_or_else(|| {
-                    ConfigError::Invalid("scope=agent 的 config 必须为 YAML 字符串".to_string())
-                })?;
-                crate::agent_config::apply_agent_patch(&content, &agent_id, patch_yaml)?
-            }
-            "agent_fields" => {
-                let agent_id = agent_id_owned.ok_or_else(|| {
-                    ConfigError::Invalid("scope=agent_fields 缺少 agentId".to_string())
-                })?;
-                crate::agent_config::apply_agent_field_patch(&content, &agent_id, &config_owned)?
-            }
-            "agent_create" => {
-                let agent_id = agent_id_owned.ok_or_else(|| {
-                    ConfigError::Invalid("scope=agent_create 缺少 agentId".to_string())
-                })?;
-                crate::agent_config::apply_agent_create(&content, &agent_id, &config_owned)?
-            }
-            "gateway" => crate::agent_config::apply_gateway_patch(&content, &config_owned)?,
-            other => return Err(ConfigError::Invalid(format!("未知 scope: {other}"))),
-        };
-        let agents = crate::agent_config::validate_candidate(&candidate, base_dir.as_deref())?;
-        Ok::<
-            (
-                String,
-                std::collections::HashMap<String, crate::agent_config::AgentDef>,
-            ),
-            ConfigError,
-        >((candidate, agents))
-    })
-    .await
-    .map_err(|error| PylonError::Io(error.to_string()))??;
-    let (candidate, new_agents) = candidate;
-    crate::agent_config::default_agent_id(&new_agents)?;
-    // 4. active agent 保护（写盘前，只读不写）：候选不得删除当前 active agent；
-    // 同时计算 removed diff，供写盘成功后再清理（施工文档 §2.1）。
-    let removed: Vec<String> = {
-        let active = inner.active_agent.lock().map_err(|e| e.to_string())?;
-        let agents = inner.agents.lock().map_err(|e| e.to_string())?;
-        if !new_agents.contains_key(&*active) {
-            return Err(PylonError::Config(ConfigError::ActiveAgentProtected(
-                format!("候选配置删除了当前 active agent: {}", *active),
-            )));
-        }
-        agents
-            .keys()
-            .filter(|id| !new_agents.contains_key(*id) && **id != *active)
-            .cloned()
-            .collect()
-    };
-    // 5. 原子写盘（替换语义）。先落盘、后提交内存：写盘失败时 registry 不变
-    // （施工文档 §2.1 必测失败链）。
-    let write_content = candidate.clone();
-    let write_path = path.clone();
-    let expected_for_write = expected_revision.clone();
-    tokio::task::spawn_blocking(move || {
-        crate::agent_config::write_config_transaction_under_lease(
-            &config_lease,
-            &write_path,
-            &expected_for_write,
-            write_content.as_bytes(),
-        )
-        .map(|_| ())
-    })
-    .await
-    .map_err(|error| PylonError::Io(error.to_string()))??;
-    // 6. 磁盘成功后提交内存 registry（与 reload_agents 的原子替换同语义）。
-    {
-        let mut agents = inner.agents.lock().map_err(|e| e.to_string())?;
-        *agents = new_agents;
-    }
-    // 7. 幽灵 runtime 清理（与 reload_agents 同款：abort + kill + 移除）
-    for id in removed {
-        stop_agent_runtime(&id, inner).await;
-        inner.runtimes.remove(&id);
-    }
-    // 8. gateway 域提交（scope=gateway 才需要；失败=磁盘已写但未生效 → config_not_applied）
-    if scope == "gateway" {
-        let gateway_config = crate::gateway::route::parse_config(&candidate).map_err(|e| {
-            PylonError::Config(ConfigError::NotApplied(format!("gateway reload 失败: {e}")))
-        })?;
-        inner.gateway.reload(gateway_config).map_err(|e| {
-            PylonError::Config(ConfigError::NotApplied(format!("gateway reload 失败: {e}")))
-        })?;
-    }
-    inner.log_runtime_summary(
-        "info",
-        "config",
-        None,
-        &format!("Config updated (scope={scope})"),
-        serde_json::Map::from_iter([(
-            "scope".to_string(),
-            serde_json::Value::String(scope.clone()),
-        )]),
-    );
-    // 9. 返回摘要（不返回完整敏感配置）
-    let agent_count = inner.agents.lock().map(|a| a.len()).unwrap_or(0);
-    let revision = crate::agent_config::config_revision_for_path(&path)?;
-    let config_activation_state = agent_id
-        .as_deref()
-        .and_then(|agent_id| stored_agent_activation(inner, agent_id));
-    Ok(serde_json::json!({
-        "applied": true,
-        "scope": scope,
-        "agentCount": agent_count,
-        "revision": revision,
-        "configActivationState": config_activation_state,
-    }))
-}
-
-// ── 施工文档 Phase 2：首次外部配置初始化 + 连接测试 ──
-
-/// embedded → exe 旁 `agents.yaml` 的首次外部配置初始化（施工文档 §4.6）。
-/// 只允许当前 source 为 Embedded 时执行；目标固定 exe 同目录 `agents.yaml`，
-/// 不写 `data/agents.yaml`，不写 AppData。走与 `update_agents_config` 相同的
-/// 候选校验、原子写盘、内存提交与 gateway reload。
-#[tauri::command]
-pub(crate) async fn initialize_agents_config(
-    state: tauri::State<'_, AppState>,
-    agent_id: Option<String>,
-    config: serde_json::Value,
-) -> Result<serde_json::Value, PylonError> {
-    use crate::agent_config::ConfigError;
-    let inner = state.inner();
-    let _write_guard = inner.config_write_lock.lock().await;
-
-    // 1. 仅 embedded source 允许初始化（已有外部配置时直接走 update_agents_config）
-    if crate::agent_config::effective_config_path().is_some() {
-        return Err(PylonError::Config(ConfigError::ReadOnly));
-    }
-    let exe_dir = std::env::current_exe()
-        .map_err(|error| PylonError::Io(format!("resolve current_exe failed: {error}")))?
-        .parent()
-        .map(|p| p.to_path_buf())
-        .ok_or_else(|| PylonError::Io("current_exe has no parent".to_string()))?;
-    let target = exe_dir.join("agents.yaml");
-    let config_lease = crate::agent_config::ConfigLease::acquire(&target)?;
-    if target.exists() {
-        return Err(PylonError::Config(ConfigError::Conflict {
-            expected: "<missing>".to_string(),
-            actual: crate::agent_config::config_revision_for_path(&target)?,
-        }));
-    }
-
-    // 2. 候选生成 + 双域校验（base_dir = exe 目录；同步 YAML/fs 移出 async 运行时）
-    let content_owned = if config.get("agents").is_some() {
-        crate::agent_config::serialize_agents_document(&config)?
-    } else if config.is_object() {
-        let requested_id = agent_id.as_deref().ok_or_else(|| {
-            PylonError::Config(ConfigError::Invalid("结构化初始化缺少 agentId".to_string()))
-        })?;
-        let current = crate::agent_config::read_config_document()?;
-        crate::agent_config::apply_agent_field_patch(&current.content, requested_id, &config)?
-    } else {
-        return Err(PylonError::Config(ConfigError::Invalid(
-            "initialize_agents_config 的 config 必须为结构化 agents document 或字段 patch"
-                .to_string(),
-        )));
-    };
-    let base_dir = exe_dir.clone();
-    let candidate = tokio::task::spawn_blocking(move || {
-        let agents = crate::agent_config::validate_candidate(&content_owned, Some(&base_dir))?;
-        Ok::<
-            (
-                String,
-                std::collections::HashMap<String, crate::agent_config::AgentDef>,
-            ),
-            ConfigError,
-        >((content_owned, agents))
-    })
-    .await
-    .map_err(|error| PylonError::Io(error.to_string()))??;
-    let (candidate, new_agents) = candidate;
-    let default_agent_id = crate::agent_config::default_agent_id(&new_agents)?.unwrap_or_default();
-    if let Some(requested_id) = agent_id.as_deref() {
-        if !new_agents.contains_key(requested_id) {
-            return Err(PylonError::Config(ConfigError::Invalid(format!(
-                "初始化配置不包含 agentId: {requested_id}"
-            ))));
-        }
-    }
-
-    // 3. 原子写盘（先磁盘）
-    let write_content = candidate.clone();
-    let write_path = target.clone();
-    let revision = tokio::task::spawn_blocking(move || {
-        crate::agent_config::write_new_config_under_lease(
-            &config_lease,
-            &write_path,
-            write_content.as_bytes(),
-        )
-    })
-    .await
-    .map_err(|error| PylonError::Io(error.to_string()))??;
-
-    // 4. 磁盘成功后提交内存（embedded → external；active 不在新配置时切到新默认）
-    let removed: Vec<String> = {
-        let mut agents = inner.agents.lock().map_err(|e| e.to_string())?;
-        let mut active = inner.active_agent.lock().map_err(|e| e.to_string())?;
-        let removed = agents
-            .keys()
-            .filter(|id| !new_agents.contains_key(*id))
-            .cloned()
-            .collect();
-        *agents = new_agents;
-        if !agents.contains_key(&*active) {
-            *active = default_agent_id.clone();
-        }
-        removed
-    };
-    // 5. 清理被移除的旧 runtime（与 reload_agents 同款）
-    for id in removed {
-        stop_agent_runtime(&id, inner).await;
-        inner.runtimes.remove(&id);
-    }
-    // 6. gateway 域提交（配置文档已通过双域校验；reload 失败 → config_not_applied）
-    let gateway_config = crate::gateway::route::parse_config(&candidate).map_err(|e| {
-        PylonError::Config(ConfigError::NotApplied(format!("gateway reload 失败: {e}")))
-    })?;
-    inner.gateway.reload(gateway_config).map_err(|e| {
-        PylonError::Config(ConfigError::NotApplied(format!("gateway reload 失败: {e}")))
-    })?;
-
-    inner.log_runtime_summary(
-        "info",
-        "config",
-        None,
-        "Agent config initialized to external file",
-        serde_json::Map::from_iter([
-            (
-                "scope".to_string(),
-                serde_json::Value::String("initialize".to_string()),
-            ),
-            (
-                "agentCount".to_string(),
-                serde_json::Value::from(inner.agents.lock().map(|a| a.len()).unwrap_or(0)),
-            ),
-        ]),
-    );
-    Ok(serde_json::json!({
-        "applied": true,
-        "scope": "initialize",
-        "agentCount": inner.agents.lock().map(|a| a.len()).unwrap_or(0),
-        "defaultAgentId": inner.active_agent.lock().map(|a| a.clone()).unwrap_or_default(),
-        "revision": revision,
-    }))
-}
-
-const AGENT_VALIDATION_TIMEOUT_SECS: u64 = 15;
-
-fn connection_test_error_payload_with_diagnostics(
-    error: &AcpError,
-    stderr: Option<&str>,
-    exit_code: Option<i32>,
-) -> serde_json::Value {
-    let fallback;
-    let failure = match error {
-        AcpError::Connect(failure) => failure,
-        _ => {
-            fallback = AgentConnectFailure {
-                stage: AgentConnectStage::Initialize,
-                code: "agent_initialize_failed".to_string(),
-                message: error.to_string(),
-                exit_code: None,
-                stderr_excerpt: None,
-                retryable: true,
-                io_kind: None,
-                remote_code: None,
-                remote_data_summary: None,
-            };
-            &fallback
-        }
-    };
-    let action = if failure.code == "agent_executable_missing" {
-        "select_executable"
-    } else {
-        "open-runtime-log"
-    };
-    serde_json::json!({
-        "code": failure.code,
-        "message": failure.message,
-        "action": action,
-        "stage": failure.stage,
-        "exitCode": exit_code.or(failure.exit_code),
-        "stderr": stderr.or(failure.stderr_excerpt.as_deref()),
-        "retryable": failure.retryable,
-        "ioKind": failure.io_kind,
-        "remoteCode": failure.remote_code,
-        "remoteDataSummary": failure.remote_data_summary,
-    })
-}
-
-fn connection_test_error_payload(error: &AcpError) -> serde_json::Value {
-    connection_test_error_payload_with_diagnostics(error, None, None)
-}
-
-fn candidate_stderr(logs: &crate::runtime_log::RuntimeLogHub) -> Option<String> {
-    let lines = logs
-        .list(&crate::runtime_log::RuntimeLogQuery {
-            source: Some("agent-stderr".to_string()),
-            limit: Some(16),
-            ..Default::default()
-        })
-        .into_iter()
-        .rev()
-        .map(|entry| entry.message)
-        .collect::<Vec<_>>();
-    if lines.is_empty() {
-        return None;
-    }
-    let joined = lines.join("\n");
-    Some(joined.chars().take(4096).collect())
-}
-
-async fn settle_candidate_stderr(started: std::time::Instant) {
-    // stdout/RPC 关闭与 stderr reader 在不同异步任务中收敛。只使用握手总预算内
-    // 尚未消耗的极短窗口，避免错误返回抢在最后一行安全诊断之前，同时保证命令
-    // 从开始到返回仍不超过 15 秒的候选验证上限。
-    let remaining = std::time::Duration::from_secs(AGENT_VALIDATION_TIMEOUT_SECS)
-        .saturating_sub(started.elapsed());
-    let settle = remaining.min(std::time::Duration::from_millis(50));
-    if !settle.is_zero() {
-        tokio::time::sleep(settle).await;
-    }
-}
-
-/// 隔离连接测试（施工文档 §4.5）：复用 ACP connect 做一次真实握手，成功后立即
-/// kill 子进程。不修改 active agent、不写 runtimes registry、不触发 agent-switched。
-#[tauri::command]
-pub(crate) async fn test_agent_connection(
-    state: tauri::State<'_, AppState>,
-    agent_id: String,
-) -> Result<serde_json::Value, PylonError> {
-    let inner = state.inner();
-    let agent = inner
-        .agents
-        .lock()
-        .map_err(|e| e.to_string())?
-        .get(&agent_id)
-        .cloned()
-        .ok_or_else(|| PylonError::Protocol(format!("unknown agent: {agent_id}")))?;
-
-    let started = std::time::Instant::now();
-    // 施工文档 §4.5：后端用 tokio::time::timeout 包裹整个 connect；禁止无限等待。
-    let timeout_secs = AGENT_VALIDATION_TIMEOUT_SECS;
-    let result = tokio::time::timeout(
-        std::time::Duration::from_secs(timeout_secs),
-        AcpClient::connect_with_generation(&agent, Some(inner.runtime_logs.clone()), 0),
-    )
-    .await;
-    let duration_ms = started.elapsed().as_millis() as u64;
-
-    match result {
-        Ok(Ok(mut client)) => {
-            let _ = client.kill();
-            Ok(serde_json::json!({
-                "ok": true,
-                "agentId": agent_id,
-                "durationMs": duration_ms,
-                "error": null,
-            }))
-        }
-        Ok(Err(error)) => Ok(serde_json::json!({
-            "ok": false,
-            "agentId": agent_id,
-            "durationMs": duration_ms,
-            "error": connection_test_error_payload(&error),
-        })),
-        Err(_elapsed) => Ok(serde_json::json!({
-            "ok": false,
-            "agentId": agent_id,
-            "durationMs": duration_ms,
-            "error": {
-                "code": "agent_connection_timeout",
-                "message": format!("连接测试超时（{timeout_secs}s）"),
-                "action": "open-runtime-log",
-                "stage": "timeout",
-                "exitCode": null,
-                "stderr": null,
-                "retryable": true,
-                "ioKind": null,
-                "remoteCode": null,
-                "remoteDataSummary": null,
-            },
-        })),
-    }
-}
-
-/// Candidate validation is isolated like test_agent_connection, but consumes an ephemeral
-/// definition and never writes agents.yaml or mutates the runtime registry.
-#[tauri::command]
-pub(crate) async fn test_agent_candidate(
-    _state: tauri::State<'_, AppState>,
-    agent_id: String,
-    agent: AgentDef,
-) -> Result<serde_json::Value, PylonError> {
-    let started = std::time::Instant::now();
-    let timeout_secs = AGENT_VALIDATION_TIMEOUT_SECS;
-    // 候选验证使用隔离日志池：既能返回该次握手的安全 stderr，又不污染运行时日志。
-    let diagnostic_logs = crate::runtime_log::RuntimeLogHub::new(64);
-    let result = tokio::time::timeout(
-        std::time::Duration::from_secs(timeout_secs),
-        AcpClient::connect_with_generation(&agent, Some(diagnostic_logs.clone()), 0),
-    )
-    .await;
-    match result {
-        Ok(Ok(mut client)) => {
-            let _ = client.kill();
-            let duration_ms = started.elapsed().as_millis() as u64;
-            Ok(
-                serde_json::json!({ "ok": true, "agentId": agent_id, "durationMs": duration_ms, "error": null }),
-            )
-        }
-        Ok(Err(error)) => {
-            settle_candidate_stderr(started).await;
-            let duration_ms = started.elapsed().as_millis() as u64;
-            let stderr = candidate_stderr(&diagnostic_logs);
-            Ok(serde_json::json!({
-                "ok": false,
-                "agentId": agent_id,
-                "durationMs": duration_ms,
-                "error": connection_test_error_payload_with_diagnostics(&error, stderr.as_deref(), None),
-            }))
-        }
-        Err(_) => {
-            let duration_ms = started.elapsed().as_millis() as u64;
-            Ok(
-                serde_json::json!({ "ok": false, "agentId": agent_id, "durationMs": duration_ms, "error": { "code": "agent_connection_timeout", "message": format!("连接测试超时（{timeout_secs}s）"), "action": "open-runtime-log", "stage": "timeout", "exitCode": null, "stderr": candidate_stderr(&diagnostic_logs), "retryable": true, "ioKind": null, "remoteCode": null, "remoteDataSummary": null } }),
-            )
-        }
-    }
-}
-
-// ── B4.2 MCP 配置持久化 ──
-
-/// MCP 配置落盘路径（统一从 AppState 的一次性 DataDirs 取）。
-/// 注意：env/headers 可能含 secret，文件是本地用户配置（写盘是持久化目的），
-/// 但不进任何日志/输出。
-pub(crate) fn mcp_persist_path(state: &AppState) -> Result<std::path::PathBuf, String> {
-    Ok(crate::paths::mcp_persist_path(state.data_dirs()?))
-}
-
-/// 原子写 MCP 配置：临时文件 + rename，中断不留半截 JSON。
-/// 写失败只 warn，不阻断主流程（尽力持久化）。
-pub(crate) fn persist_mcp_if_possible(state: &AppState, servers: &[crate::mcp::McpServerConfig]) {
-    let path = match mcp_persist_path(state) {
-        Ok(path) => path,
-        Err(error) => {
-            tracing::warn!("resolve MCP persist path failed: {error}");
-            return;
-        }
-    };
-    let json = match serde_json::to_string(servers) {
-        Ok(json) => json,
-        Err(error) => {
-            tracing::warn!("serialize MCP config failed: {error}");
-            return;
-        }
-    };
-    if let Some(parent) = path.parent() {
-        if let Err(error) = std::fs::create_dir_all(parent) {
-            tracing::warn!("create MCP persist directory failed: {error}");
-            return;
-        }
-    }
-    // 审查修复：唯一 temp（pid+时间戳）——并发 set_mcp_servers 不得互相截断写坏
-    let unique = path.with_file_name(format!(
-        ".{}.{}.{}.tmp",
-        path.file_name().and_then(|n| n.to_str()).unwrap_or("mcp"),
-        std::process::id(),
-        std::time::SystemTime::now()
-            .duration_since(std::time::UNIX_EPOCH)
-            .map(|d| d.as_nanos())
-            .unwrap_or(0),
-    ));
-    let result = (|| {
-        std::fs::write(&unique, json.as_bytes())
-            .map_err(|error| format!("write temporary MCP config failed: {error}"))?;
-        std::fs::rename(&unique, &path)
-            .map_err(|error| format!("commit MCP config failed: {error}"))
-    })();
-    if let Err(error) = result {
-        let _ = std::fs::remove_file(&unique);
-        tracing::warn!("persist MCP config failed: {error}");
-    }
-}
-
-/// 加载 MCP 持久化配置：文件缺失/损坏 → None（启动时静默降级为空配置）。
-/// 内容过 validate_and_serialize（防手改文件注入非法配置）——校验失败视为损坏。
-pub(crate) fn load_mcp_persisted(
-    path: &std::path::Path,
-) -> Option<Vec<crate::mcp::McpServerConfig>> {
-    let raw = std::fs::read_to_string(path).ok()?;
-    let servers: Vec<crate::mcp::McpServerConfig> = serde_json::from_str(&raw).ok()?;
-    match crate::mcp::validate_and_serialize(Some(servers.clone())) {
-        Ok(_) => Some(servers),
-        Err(error) => {
-            tracing::warn!("loaded MCP config invalid; ignored: {error}");
-            None
-        }
-    }
-}
-
-// ── B9 权限审批 commands ──
-// ── Session persistence commands ──
+// 拆分后的命令经此 re-export：tauri::generate_handler 与测试的 `use super::*` 路径不变。
+// `__cmd__*` 是 tauri::command 宏生成的隐藏项，必须一并 re-export 才能被 generate_handler 解析。
+pub(crate) use config_cmds::__tauri_command_name_agent_config_snapshot;
+pub(crate) use config_cmds::__tauri_command_name_initialize_agents_config;
+pub(crate) use config_cmds::__tauri_command_name_reload_agents;
+pub(crate) use config_cmds::__tauri_command_name_update_agents_config;
+#[allow(unused_imports)]
+pub(crate) use config_cmds::__cmd__agent_config_snapshot;
+#[allow(unused_imports)]
+pub(crate) use config_cmds::__cmd__initialize_agents_config;
+#[allow(unused_imports)]
+pub(crate) use config_cmds::__cmd__reload_agents;
+#[allow(unused_imports)]
+pub(crate) use config_cmds::__cmd__update_agents_config;
+pub(crate) use config_cmds::{
+    agent_config_snapshot, initialize_agents_config, reload_agents, update_agents_config,
+};
+pub(crate) use connection_test::__tauri_command_name_test_agent_candidate;
+pub(crate) use connection_test::__tauri_command_name_test_agent_connection;
+#[allow(unused_imports)]
+pub(crate) use connection_test::__cmd__test_agent_candidate;
+#[allow(unused_imports)]
+pub(crate) use connection_test::__cmd__test_agent_connection;
+pub(crate) use connection_test::{test_agent_candidate, test_agent_connection};
+#[cfg(test)]
+use connection_test::connection_test_error_payload;
+#[cfg(test)]
+use connection_test::{candidate_stderr, AGENT_VALIDATION_TIMEOUT_SECS};
+#[cfg(test)]
+use crate::acp::{AgentConnectFailure, AgentConnectStage};
+pub(crate) use mcp::__tauri_command_name_get_mcp_servers;
+pub(crate) use mcp::__tauri_command_name_set_mcp_servers;
+#[allow(unused_imports)]
+pub(crate) use mcp::__cmd__get_mcp_servers;
+#[allow(unused_imports)]
+pub(crate) use mcp::__cmd__set_mcp_servers;
+pub(crate) use mcp::{get_mcp_servers, load_mcp_persisted, set_mcp_servers};
 
 #[cfg(test)]
 mod tests {
