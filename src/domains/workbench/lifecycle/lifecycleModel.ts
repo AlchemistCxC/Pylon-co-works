@@ -13,6 +13,7 @@ export const LIFECYCLE_PHASES = ['retry', 'compact', 'rewind', 'suspended', 'rec
 export type LifecyclePhase = (typeof LIFECYCLE_PHASES)[number]
 
 export type Recoverability = 'retry' | 'fallback' | 'reload-plugin' | 'reimport' | 'none'
+export type ErrorPhase = 'resolve' | 'prepare' | 'mount' | 'update' | 'switch' | 'action' | 'destroy' | 'settings-migrate'
 
 export interface NormalizedError {
   /** 面向用户的摘要（可理解） */
@@ -23,9 +24,18 @@ export interface NormalizedError {
   readonly provider?: string
   readonly sessionId?: string
   readonly eventId?: string
+  readonly renderKind?: string
+  readonly rendererId?: string
+  readonly rendererSuiteId?: string
+  readonly rendererSlotId?: string
+  readonly pluginId?: string
+  readonly runtimeInstanceId?: string
+  readonly phase?: ErrorPhase
   readonly recoverability: Recoverability
   /** cause chain：深度受控的嵌套原因 */
   readonly cause?: NormalizedError
+  /** provider 扩展字段；不把原始 provider 对象直接暴露给 renderer */
+  readonly metadata?: Readonly<Record<string, unknown>>
 }
 
 const MAX_CAUSE_DEPTH = 4
@@ -40,7 +50,7 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 
 /**
  * unknown → NormalizedError。字符串输入按 userSummary=technicalMessage 收窄；
- * 嵌套 cause 深度截断到 MAX_CAUSE_DEPTH，超出部分保留在末端 technicalMessage。
+ * 嵌套 cause 深度截断到 MAX_CAUSE_DEPTH，超出部分以 causeTruncated metadata 留痕。
  */
 export function normalizeNormalizedError(raw: unknown, depth = 0): NormalizedError | undefined {
   if (raw === null || raw === undefined) return undefined
@@ -51,29 +61,59 @@ export function normalizeNormalizedError(raw: unknown, depth = 0): NormalizedErr
   if (!isRecord(raw)) {
     return { userSummary: '未知错误', technicalMessage: String(raw), recoverability: 'none' }
   }
-  const technical = text(raw.technicalMessage) ?? text(raw.technical_message) ?? text(raw.message) ?? text(raw.error)
+  const knownKeys = new Set([
+    'userSummary', 'user_summary', 'userMessage',
+    'technicalMessage', 'technical_message', 'detail', 'message', 'error',
+    'code', 'provider', 'sessionId', 'session_id', 'eventId', 'event_id',
+    'renderKind', 'rendererId', 'rendererSuiteId', 'rendererSlotId', 'pluginId', 'runtimeInstanceId', 'phase',
+    'recoverability', 'retryable', 'cause', 'metadata',
+  ])
+  const metadata: Record<string, unknown> = isRecord(raw.metadata) ? { ...raw.metadata } : {}
+  if (raw.metadata !== undefined && !isRecord(raw.metadata)) metadata.metadata = raw.metadata
+  for (const [key, value] of Object.entries(raw)) {
+    if (!knownKeys.has(key) && value !== undefined) metadata[key] = value
+  }
+  const technical = text(raw.technicalMessage) ?? text(raw.technical_message) ?? text(raw.detail) ?? text(raw.message) ?? text(raw.error)
   const summary = text(raw.userSummary) ?? text(raw.user_summary) ?? text(raw.userMessage) ?? technical ?? '未知错误'
   let cause: NormalizedError | undefined
   if (depth < MAX_CAUSE_DEPTH && raw.cause !== undefined) {
     cause = normalizeNormalizedError(raw.cause, depth + 1)
+  } else if (depth >= MAX_CAUSE_DEPTH && raw.cause !== undefined) {
+    metadata.causeTruncated = true
   }
-  const recoverability = normalizeRecoverability(raw.recoverability)
+  const recoverability = normalizeRecoverability(raw.recoverability, raw.retryable)
+  const phase = normalizeErrorPhase(raw.phase)
+  if (raw.phase !== undefined && phase === undefined) metadata.phase = raw.phase
   return {
     ...(text(raw.code) !== undefined ? { code: text(raw.code) } : {}),
     ...(text(raw.provider) !== undefined ? { provider: text(raw.provider) } : {}),
-    ...(text(raw.sessionId) !== undefined ? { sessionId: text(raw.sessionId) } : {}),
-    ...(text(raw.eventId) !== undefined ? { eventId: text(raw.eventId) } : {}),
+    ...(text(raw.sessionId ?? raw.session_id) !== undefined ? { sessionId: text(raw.sessionId ?? raw.session_id) } : {}),
+    ...(text(raw.eventId ?? raw.event_id) !== undefined ? { eventId: text(raw.eventId ?? raw.event_id) } : {}),
+    ...(text(raw.renderKind) !== undefined ? { renderKind: text(raw.renderKind) } : {}),
+    ...(text(raw.rendererId) !== undefined ? { rendererId: text(raw.rendererId) } : {}),
+    ...(text(raw.rendererSuiteId) !== undefined ? { rendererSuiteId: text(raw.rendererSuiteId) } : {}),
+    ...(text(raw.rendererSlotId) !== undefined ? { rendererSlotId: text(raw.rendererSlotId) } : {}),
+    ...(text(raw.pluginId) !== undefined ? { pluginId: text(raw.pluginId) } : {}),
+    ...(text(raw.runtimeInstanceId) !== undefined ? { runtimeInstanceId: text(raw.runtimeInstanceId) } : {}),
+    ...(phase !== undefined ? { phase } : {}),
     userSummary: summary,
     ...(technical !== undefined ? { technicalMessage: technical } : {}),
     recoverability,
     ...(cause !== undefined ? { cause } : {}),
+    ...(Object.keys(metadata).length > 0 ? { metadata } : {}),
   }
 }
 
-function normalizeRecoverability(value: unknown): Recoverability {
+function normalizeRecoverability(value: unknown, retryable?: unknown): Recoverability {
   const candidates: readonly Recoverability[] = ['retry', 'fallback', 'reload-plugin', 'reimport', 'none']
   const text_ = text(value)?.trim().toLowerCase()
-  return candidates.find(candidate => candidate === text_) ?? 'none'
+  return candidates.find(candidate => candidate === text_) ?? (retryable === true ? 'retry' : 'none')
+}
+
+function normalizeErrorPhase(value: unknown): ErrorPhase | undefined {
+  const candidates: readonly ErrorPhase[] = ['resolve', 'prepare', 'mount', 'update', 'switch', 'action', 'destroy', 'settings-migrate']
+  const text_ = text(value)?.trim().toLowerCase()
+  return candidates.find(candidate => candidate === text_)
 }
 
 // —— 当前态 ——
@@ -116,11 +156,14 @@ export interface LifecycleHistoryItem {
   readonly phase?: 'started' | 'completed' | 'preview'
   readonly attempt?: number
   readonly maxAttempts?: number
+  readonly delayMs?: number
   readonly error?: NormalizedError
   readonly strategy?: string
+  readonly trigger?: string
   readonly tokensBefore?: number
   readonly tokensAfter?: number
   readonly files?: readonly JsonRecord[]
+  readonly messages?: readonly JsonRecord[]
   readonly summary?: string
   readonly source?: RecoveryInfo['source']
   readonly importedEvents?: number
@@ -201,7 +244,7 @@ export function applyLifecycleEvent(state: LifecycleState, event: LifecycleEvent
       const rewind: RewindState = {
         phase: event.type === 'lifecycle.rewind-completed' ? 'completed' : 'preview',
         ...(Array.isArray(event.files) ? { files: event.files.filter(isRecordLike) } : state.rewind?.files !== undefined ? { files: state.rewind.files } : {}),
-        ...(Array.isArray(event.messages) ? { messages: event.messages.filter(isRecordLike) } : {}),
+        ...(Array.isArray(event.messages) ? { messages: event.messages.filter(isRecordLike) } : state.rewind?.messages !== undefined ? { messages: state.rewind.messages } : {}),
         ...(text(event.summary) !== undefined ? { summary: text(event.summary) } : {}),
       }
       return {

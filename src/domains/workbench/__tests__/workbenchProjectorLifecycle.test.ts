@@ -64,4 +64,17 @@ describe('WorkbenchProjector lifecycle slices (C13)', () => {
     const replay = projectWorkbench(events).document
     expect(JSON.stringify(live.lifecycle)).toEqual(JSON.stringify(replay.lifecycle))
   })
+
+  it('keeps structured provider error metadata in lifecycle retry projection', () => {
+    const events = [
+      envelope(1, { type: 'lifecycle.retrying', attempt: 1, maxAttempts: 2, delayMs: 500, error: {
+        userSummary: '连接失败', technicalMessage: 'ECONNRESET', code: 'provider.error',
+        provider: 'hermes', recoverability: 'retry', retryAfterMs: 2000, classification: 'network',
+      } as unknown as import('../events/workbenchEventSchema.ts').JsonValue }),
+    ]
+    const live = events.reduce(reduceWorkbenchEvent, createWorkbenchDocument(base.sessionId))
+    const replay = projectWorkbench(events).document
+    expect(selectLifecycle(live).retry?.error?.metadata).toMatchObject({ retryAfterMs: 2000, classification: 'network' })
+    expect(JSON.stringify(live.lifecycle)).toEqual(JSON.stringify(replay.lifecycle))
+  })
 })
