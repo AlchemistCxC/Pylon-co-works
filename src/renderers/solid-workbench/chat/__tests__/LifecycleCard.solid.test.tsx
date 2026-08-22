@@ -62,4 +62,33 @@ describe('SolidLifecycleCard (C13)', () => {
     expect(result.container.querySelector('.lifecycle-card')?.getAttribute('data-phase')).toBe('suspended')
     expect(result.container.textContent).toContain('等待用户输入')
   })
+
+  it('keeps completed compact and rewind results visible as terminal lifecycle states', () => {
+    const compact = render(() => <SolidLifecycleCard state={{
+      history: [],
+      compact: {
+        phase: 'completed',
+        tokensBefore: 180000,
+        tokensAfter: 42000,
+        summary: '保留最近 40 条',
+      },
+    }} />)
+    expect(compact.getByRole('status', { name: '生命周期：上下文压缩完成' })).toHaveAttribute('data-phase', 'compact')
+    expect(compact.container).toHaveTextContent('180000→42000 tokens')
+    expect(compact.container).toHaveTextContent('保留最近 40 条')
+    compact.unmount()
+
+    const rewind = render(() => <SolidLifecycleCard state={{
+      history: [],
+      rewind: {
+        phase: 'completed',
+        files: [{ path: 'src/app.tsx' }],
+        messages: [{ id: 'message-1' }],
+        summary: '恢复到检查点',
+      },
+    }} />)
+    expect(rewind.getByRole('status', { name: '生命周期：回退完成' })).toHaveAttribute('data-phase', 'rewind')
+    expect(rewind.container).toHaveTextContent('已还原 1 个文件、1 条消息')
+    expect(rewind.container).toHaveTextContent('恢复到检查点')
+  })
 })

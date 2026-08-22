@@ -100,6 +100,11 @@ function planSlotSummary(payload: unknown): string {
   return `plan slot: ${String(entry?.id)} / ${String(entry?.blockedReason)} / ${String(value.goal?.objective)} / ${String(value.goal?.accounting?.timeUsedSeconds)}`
 }
 
+function systemErrorSlotSummary(payload: unknown): string {
+  const value = payload as { userSummary?: unknown; recoverability?: unknown }
+  return `system error slot: ${String(value.userSummary)} / ${String(value.recoverability)}`
+}
+
 describe('AgentSheetView renderer mode context', () => {
   beforeEach(resetStores)
 
@@ -115,7 +120,10 @@ describe('AgentSheetView renderer mode context', () => {
     expect(baseSlot?.value).toMatchObject({
       targetSuites: ['builtin.solid'],
       fallback: true,
-      kinds: expect.arrayContaining(['content.text', 'content.reasoning', 'content.file-reference', 'content.document', 'content.image', 'content.plan']),
+      kinds: expect.arrayContaining([
+        'content.text', 'content.reasoning', 'content.file-reference', 'content.document', 'content.image', 'content.plan',
+        'lifecycle.retry', 'system.notice', 'system.error',
+      ]),
     })
 
     useIdentityStore.setState({ sessions: [session('session-1', 'local:a')] })
@@ -861,6 +869,112 @@ describe('AgentSheetView renderer mode context', () => {
       expect(screen.getByRole('region', { name: '计划与目标' })).toBe(region)
       expect(screen.getByText('Stable plan state')).toBeTruthy()
       expect(screen.getByText('Stable goal')).toBeTruthy()
+    } finally {
+      settings.reset()
+    }
+  })
+
+  it('canonical systemErrors use the C13 targeted Slot and cleanup restores the base Slot', async () => {
+    const destroyed = vi.fn()
+    const registration = getRendererRegistry().registerSlot(
+      createPluginIdentity('test.production-system-error-slot', 'runtime'),
+      {
+        id: 'test.production-system-error-slot.error', targetSuites: ['builtin.solid'],
+        kinds: ['system.error'], priority: 1, fallback: false,
+        canRender: snapshot => snapshot.kind === 'system.error',
+        createSurface: snapshot => ({
+          rendererId: 'test.production-system-error-slot', kind: 'solid',
+          mount(container) {
+            const node = document.createElement('div')
+            node.dataset.productionSystemErrorSlot = 'true'
+            node.textContent = systemErrorSlotSummary(snapshot.payload)
+            container.append(node)
+            return node
+          },
+          update(handle, next) { ;(handle as HTMLElement).textContent = systemErrorSlotSummary(next.payload) },
+          destroy(handle) { destroyed(handle); (handle as HTMLElement).remove() }, on: () => () => {},
+        }),
+      },
+    )
+    try {
+      useIdentityStore.setState({ sessions: [session('session-1', 'local:a')] })
+      useWorkspaceStore.setState(state => ({ workspaceSheets: { ...state.workspaceSheets, activeSheetId: 'agent-sheet' } }))
+      const { container } = render(<AgentSheetView sheet={sheet({ sidebarMode: 'work' })} ctx={ctx} />)
+      await screen.findByLabelText('Solid Agent Workbench', {}, { timeout: 5_000 })
+      publishPluginEvent(createWorkbenchEnvelope({
+        sessionId: 'local:a', recordedAt: '2026-08-22T00:00:01.000Z', sequence: 1,
+        source: { provider: 'peri', sourceId: 'error-1' },
+        provenance: { origin: 'local-observed', trust: 'authoritative' },
+        event: { type: 'diagnostic.notice', level: 'error', code: 'agent_connection_timeout', message: '连接失败' },
+      }))
+
+      expect(await screen.findByText('system error slot: 连接失败 / retry')).toBeTruthy()
+      await registration.dispose()
+
+      await waitFor(() => expect(container.querySelector('[data-production-system-error-slot="true"]')).toBeNull())
+      expect(await screen.findByRole('alert', { name: '系统错误：连接失败' })).toBeTruthy()
+      expect(screen.queryByRole('button', { name: '重试' })).toBeNull()
+      expect(destroyed).toHaveBeenCalled()
+      const handles = destroyed.mock.calls.map(call => call[0])
+      expect(new Set(handles).size).toBe(handles.length)
+    } finally {
+      await registration.dispose()
+    }
+  })
+
+  it('C13 settings update the mounted lifecycle Slot without remounting or changing retry state', async () => {
+    const settings = getRendererSettingsStore()
+    settings.reset()
+    settings.setOverride('kind.lifecycle.retry.density', 'compact')
+    settings.setOverride('kind.lifecycle.retry.technicalDetailsExpanded', true)
+    settings.setOverride('kind.lifecycle.retry.retryCountdownStyle', 'compact')
+    settings.setOverride('kind.lifecycle.retry.showProviderIds', true)
+    settings.setOverride('kind.lifecycle.retry.showEventIds', true)
+    settings.setOverride('kind.lifecycle.retry.motion', 'subtle')
+    try {
+      useIdentityStore.setState({ sessions: [session('session-1', 'local:a')] })
+      useWorkspaceStore.setState(state => ({ workspaceSheets: { ...state.workspaceSheets, activeSheetId: 'agent-sheet' } }))
+      const { container } = render(<AgentSheetView sheet={sheet({ sidebarMode: 'work' })} ctx={ctx} />)
+      await screen.findByLabelText('Solid Agent Workbench', {}, { timeout: 5_000 })
+      publishPluginEvent(createWorkbenchEnvelope({
+        sessionId: 'local:a', recordedAt: '2026-08-22T00:00:01.000Z', sequence: 1,
+        source: { provider: 'peri', sourceId: 'retry-settings' },
+        provenance: { origin: 'local-observed', trust: 'authoritative' },
+        event: {
+          type: 'lifecycle.retrying', attempt: 2, maxAttempts: 3, delayMs: 4000,
+          error: {
+            userSummary: 'Stable retry error', technicalMessage: '429 stable', provider: 'peri', eventId: 'event-stable',
+            recoverability: 'retry',
+          },
+        },
+      }))
+
+      const card = await screen.findByRole('status', { name: /生命周期：第 2\/3 次重试/ })
+      expect(card).toHaveAttribute('data-density', 'compact')
+      expect(card).toHaveAttribute('data-motion', 'subtle')
+      expect(card).toHaveTextContent('4s')
+      expect(card).toHaveTextContent('peri')
+      expect(card).toHaveTextContent('event-stable')
+      expect(container.querySelector('details.lifecycle-technical')).toHaveAttribute('open')
+      expect(screen.queryByRole('button', { name: '重试' })).toBeNull()
+
+      settings.setOverride('kind.lifecycle.retry.density', 'comfortable')
+      settings.setOverride('kind.lifecycle.retry.technicalDetailsExpanded', false)
+      settings.setOverride('kind.lifecycle.retry.retryCountdownStyle', 'hidden')
+      settings.setOverride('kind.lifecycle.retry.showProviderIds', false)
+      settings.setOverride('kind.lifecycle.retry.showEventIds', false)
+      settings.setOverride('kind.lifecycle.retry.motion', 'none')
+
+      await waitFor(() => {
+        expect(card).toHaveAttribute('data-density', 'comfortable')
+        expect(card).toHaveAttribute('data-motion', 'none')
+        expect(card).not.toHaveTextContent('4s')
+        expect(card).not.toHaveTextContent('event-stable')
+        expect(container.querySelector('details.lifecycle-technical')).not.toHaveAttribute('open')
+      })
+      expect(screen.getByRole('status', { name: /生命周期：第 2\/3 次重试/ })).toBe(card)
+      expect(card).toHaveTextContent('Stable retry error')
+      expect(card).toHaveTextContent('429 stable')
     } finally {
       settings.reset()
     }

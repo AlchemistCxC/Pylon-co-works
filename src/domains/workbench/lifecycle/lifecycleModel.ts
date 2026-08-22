@@ -318,3 +318,112 @@ export function plainLifecycleSummary(state: LifecycleState): string {
   if (state.compact?.phase === 'started') return `[compact] 进行中${state.compact.strategy ? `（${state.compact.strategy}）` : ''}`
   return ''
 }
+
+/** Strict renderer boundary guards. Normalization happens before these functions. */
+export function isValidLifecycleStateInput(input: unknown): input is LifecycleState {
+  if (!isRecord(input) || !hasOnlyKeys(input, ['retry', 'compact', 'rewind', 'suspended', 'lastRecovery', 'history'])) return false
+  if (!Array.isArray(input.history) || !input.history.every(isValidLifecycleHistoryInput)) return false
+  if (input.retry !== undefined && !isValidRetryInput(input.retry)) return false
+  if (input.compact !== undefined && !isValidCompactInput(input.compact)) return false
+  if (input.rewind !== undefined && !isValidRewindInput(input.rewind)) return false
+  if (input.suspended !== undefined && (!isRecord(input.suspended)
+    || !hasOnlyKeys(input.suspended, ['reason']) || !optionalString(input.suspended.reason))) return false
+  return input.lastRecovery === undefined || isValidRecoveryInput(input.lastRecovery)
+}
+
+export function isValidNormalizedErrorInput(input: unknown, depth = 0): input is NormalizedError {
+  if (depth > MAX_CAUSE_DEPTH || !isRecord(input) || !hasOnlyKeys(input, [
+    'userSummary', 'technicalMessage', 'code', 'provider', 'sessionId', 'eventId', 'renderKind', 'rendererId',
+    'rendererSuiteId', 'rendererSlotId', 'pluginId', 'runtimeInstanceId', 'phase', 'recoverability', 'cause', 'metadata',
+  ])) return false
+  if (!text(input.userSummary) || !['retry', 'fallback', 'reload-plugin', 'reimport', 'none'].includes(String(input.recoverability))) return false
+  for (const key of ['technicalMessage', 'code', 'provider', 'sessionId', 'eventId', 'renderKind', 'rendererId', 'rendererSuiteId', 'rendererSlotId', 'pluginId', 'runtimeInstanceId'] as const) {
+    if (!optionalString(input[key])) return false
+  }
+  if (input.phase !== undefined && !['resolve', 'prepare', 'mount', 'update', 'switch', 'action', 'destroy', 'settings-migrate'].includes(String(input.phase))) return false
+  if (input.metadata !== undefined && !isRecord(input.metadata)) return false
+  return input.cause === undefined || isValidNormalizedErrorInput(input.cause, depth + 1)
+}
+
+export function isValidSystemNoticeInput(input: unknown): input is {
+  readonly code: string
+  readonly message: string
+  readonly eventId: string
+  readonly sequence: number
+  readonly level: 'info' | 'warning' | 'error'
+  readonly data?: unknown
+} {
+  return isRecord(input)
+    && hasOnlyKeys(input, ['code', 'message', 'eventId', 'sequence', 'level', 'data'])
+    && Boolean(text(input.code) && text(input.message) && text(input.eventId))
+    && isNonNegativeFinite(input.sequence)
+    && ['info', 'warning', 'error'].includes(String(input.level))
+}
+
+function isValidRetryInput(input: unknown): input is RetryState {
+  return isRecord(input)
+    && hasOnlyKeys(input, ['attempt', 'maxAttempts', 'delayMs', 'error'])
+    && isNonNegativeFinite(input.attempt)
+    && isOptionalNonNegativeFinite(input.maxAttempts)
+    && isOptionalNonNegativeFinite(input.delayMs)
+    && (input.error === undefined || isValidNormalizedErrorInput(input.error))
+}
+
+function isValidCompactInput(input: unknown): input is CompactState {
+  return isRecord(input)
+    && hasOnlyKeys(input, ['phase', 'strategy', 'trigger', 'tokensBefore', 'tokensAfter', 'summary'])
+    && (input.phase === 'started' || input.phase === 'completed')
+    && optionalString(input.strategy) && optionalString(input.trigger) && optionalString(input.summary)
+    && isOptionalNonNegativeFinite(input.tokensBefore) && isOptionalNonNegativeFinite(input.tokensAfter)
+}
+
+function isValidRewindInput(input: unknown): input is RewindState {
+  return isRecord(input)
+    && hasOnlyKeys(input, ['phase', 'files', 'messages', 'summary'])
+    && (input.phase === 'preview' || input.phase === 'completed')
+    && optionalRecordArray(input.files) && optionalRecordArray(input.messages) && optionalString(input.summary)
+}
+
+function isValidRecoveryInput(input: unknown): input is RecoveryInfo {
+  return isRecord(input)
+    && hasOnlyKeys(input, ['source', 'importedEvents'])
+    && (input.source === 'canonical' || input.source === 'agent-import')
+    && isOptionalNonNegativeFinite(input.importedEvents)
+}
+
+function isValidLifecycleHistoryInput(input: unknown): input is LifecycleHistoryItem {
+  if (!isRecord(input) || !hasOnlyKeys(input, [
+    'kind', 'phase', 'attempt', 'maxAttempts', 'delayMs', 'error', 'strategy', 'trigger', 'tokensBefore', 'tokensAfter',
+    'files', 'messages', 'summary', 'source', 'importedEvents', 'reason',
+  ])) return false
+  return LIFECYCLE_PHASES.includes(input.kind as LifecyclePhase)
+    && (input.phase === undefined || input.phase === 'started' || input.phase === 'completed' || input.phase === 'preview')
+    && isOptionalNonNegativeFinite(input.attempt) && isOptionalNonNegativeFinite(input.maxAttempts)
+    && isOptionalNonNegativeFinite(input.delayMs) && isOptionalNonNegativeFinite(input.tokensBefore)
+    && isOptionalNonNegativeFinite(input.tokensAfter) && isOptionalNonNegativeFinite(input.importedEvents)
+    && optionalString(input.strategy) && optionalString(input.trigger) && optionalString(input.summary) && optionalString(input.reason)
+    && optionalRecordArray(input.files) && optionalRecordArray(input.messages)
+    && (input.source === undefined || input.source === 'canonical' || input.source === 'agent-import')
+    && (input.error === undefined || isValidNormalizedErrorInput(input.error))
+}
+
+function hasOnlyKeys(input: Record<string, unknown>, keys: readonly string[]): boolean {
+  const allowed = new Set(keys)
+  return Object.keys(input).every(key => allowed.has(key))
+}
+
+function optionalString(value: unknown): boolean {
+  return value === undefined || typeof value === 'string'
+}
+
+function isNonNegativeFinite(value: unknown): value is number {
+  return typeof value === 'number' && Number.isFinite(value) && value >= 0
+}
+
+function isOptionalNonNegativeFinite(value: unknown): boolean {
+  return value === undefined || isNonNegativeFinite(value)
+}
+
+function optionalRecordArray(value: unknown): boolean {
+  return value === undefined || (Array.isArray(value) && value.every(isRecord))
+}

@@ -295,6 +295,16 @@ export default function AgentRendererSuiteWorkbench(props: AgentRendererSuiteWor
     if (!host || !input.sessionId || !host.capabilities.has('resourceOpen')) return
     void host.commands.openResource(input.sessionId, { ...part, disposition: 'download' })
   }
+  const retryFallbackMessage = () => {
+    const host = hostPortRef.current
+    if (!host || !input.sessionId || !host.capabilities.has('retry')) return
+    void host.commands.retry(input.sessionId)
+  }
+  const recoverFallbackSession = (strategy: 'reload-plugin' | 'reimport') => {
+    const host = hostPortRef.current
+    if (!host || !input.sessionId || !host.capabilities.has('recovery')) return
+    void host.commands.recover(input.sessionId, strategy)
+  }
 
   return <div className="main renderer-suite-workbench" data-renderer-suite-host="true" data-suite-id={activeSuiteId ?? activation?.suite.value.id}>
     <div ref={containerRef} className="renderer-suite-workbench-mount" hidden={fatal} />
@@ -303,7 +313,9 @@ export default function AgentRendererSuiteWorkbench(props: AgentRendererSuiteWor
       onSelectSuite={selectSuite}
       onOpenDiagnostics={openDiagnostics}
       onOpenMedia={hostPortRef.current.capabilities.has('resourceOpen') ? openFallbackMedia : undefined}
-      onDownloadMedia={hostPortRef.current.capabilities.has('resourceOpen') ? downloadFallbackMedia : undefined} />}
+      onDownloadMedia={hostPortRef.current.capabilities.has('resourceOpen') ? downloadFallbackMedia : undefined}
+      onRetryMessage={hostPortRef.current.capabilities.has('retry') ? retryFallbackMessage : undefined}
+      onRecoverSession={hostPortRef.current.capabilities.has('recovery') ? recoverFallbackSession : undefined} />}
     {!fatal && failure && <div className="renderer-suite-fallback-banner" role="status"
       data-failed-suite-id={failure.suiteId} data-failed-plugin-id={failure.pluginId} data-failure-phase={failure.phase}>
       {failure.retained ? 'Suite 候选未生效，继续使用健康实例' : 'Suite 已安全回退'}：{failure.suiteId} / {failure.phase} / {failure.message}

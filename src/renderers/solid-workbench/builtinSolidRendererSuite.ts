@@ -11,6 +11,13 @@ export const BUILTIN_SOLID_CONTENT_SLOT_ID = 'builtin.solid.content.base'
 export const BUILTIN_SOLID_CONTENT_KINDS = Object.freeze([
   ...BUILTIN_TEXT_RENDER_KINDS.map(kind => kind.id).filter(kind => kind.startsWith('content.')),
   'content.plan',
+  'lifecycle.retry',
+  'lifecycle.compact',
+  'lifecycle.rewind',
+  'lifecycle.suspended',
+  'lifecycle.recovered',
+  'system.notice',
+  'system.error',
   'content.unknown',
 ])
 
@@ -106,9 +113,11 @@ export function createBuiltinSolidRendererSuite(): RendererSuiteContribution {
     runtime: Object.freeze({ framework: 'solid', version: '1.0.0' }),
     compatibility: Object.freeze({ documentSchema: 'workbench.v1', renderCatalogSchema: 1 }),
     requiredKinds: Object.freeze(BUILTIN_TEXT_RENDER_KINDS.map(kind => kind.id)),
-    // C08's canonical plan projection is registered by the built-in content
-    // plugin and consumed through the same Suite-local Slot seam.
-    optionalKinds: Object.freeze(['content.plan']),
+    // Canonical plan/lifecycle/diagnostic projections are registered by the
+    // built-in content plugin and consumed through the same Suite-local Slot seam.
+    optionalKinds: Object.freeze(BUILTIN_SOLID_CONTENT_KINDS.filter(kind => (
+      kind === 'content.plan' || kind.startsWith('lifecycle.') || kind.startsWith('system.')
+    ))),
     factory,
   })
 }
@@ -117,7 +126,7 @@ export function createBuiltinSolidContentSlot(): RendererSlotContribution {
   return Object.freeze({
     id: BUILTIN_SOLID_CONTENT_SLOT_ID,
     label: 'Pylon Solid built-in content',
-    description: 'C00–C08 内置 Solid Suite base Slot',
+    description: 'C00–C13 内置 Solid Suite base Slot',
     targetSuites: Object.freeze([BUILTIN_SOLID_SUITE_ID]),
     kinds: BUILTIN_SOLID_CONTENT_KINDS,
     priority: 10_000,

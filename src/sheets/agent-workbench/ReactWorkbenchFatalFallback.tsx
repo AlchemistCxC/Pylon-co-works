@@ -8,6 +8,11 @@ import {
 } from '../../domains/rendererContent/fileContentPresentation.ts'
 import type { WorkbenchDocumentReader } from '../../renderers/solid-workbench/workbenchHostPort.ts'
 import { plainGoalSummary, readablePlanLines } from '../../domains/workbench/plan/goalModel.ts'
+import {
+  plainLifecycleSummary,
+  readableLifecycleLines,
+  type NormalizedError,
+} from '../../domains/workbench/lifecycle/lifecycleModel.ts'
 
 export interface WorkbenchFatalFailure {
   readonly suiteId: string
@@ -25,6 +30,8 @@ export default function ReactWorkbenchFatalFallback(props: {
   onOpenDiagnostics(): void
   onOpenMedia?(part: ImageContentPart): void
   onDownloadMedia?(part: ImageContentPart): void
+  onRetryMessage?(): void
+  onRecoverSession?(strategy: 'reload-plugin' | 'reimport'): void
 }) {
   const document = useSyncExternalStore(
     listener => props.document.subscribe(listener),
@@ -46,6 +53,18 @@ export default function ReactWorkbenchFatalFallback(props: {
           <button type="button" onClick={props.onOpenDiagnostics}>打开诊断</button>
         </div>
       </header>
+      {(plainLifecycleSummary(document?.lifecycle ?? { history: [] }) || (document?.lifecycle.history.length ?? 0) > 0) && <section
+        aria-label="生命周期 fallback" className="react-workbench-fatal-lifecycle">
+        <strong>生命周期</strong>
+        {plainLifecycleSummary(document!.lifecycle) && <p>{plainLifecycleSummary(document!.lifecycle)}</p>}
+        <ol>{readableLifecycleLines(document!.lifecycle.history).map((line, index) => <li key={index}>{line}</li>)}</ol>
+      </section>}
+      {document?.systemErrors.map((error, index) => <ReactFallbackSystemError
+        key={`${error.eventId ?? error.code ?? index}`}
+        error={error}
+        onRetry={props.onRetryMessage}
+        onRecover={props.onRecoverSession}
+      />)}
       {document && document.plan.entries.length > 0 && <section aria-label="计划 fallback" className="react-workbench-fatal-plan">
         <strong>计划</strong>
         <ol>{readablePlanLines(document.plan.entries).map((line, index) => <li key={`${document.plan.entries[index]?.id ?? index}`}>{line}</li>)}</ol>
@@ -78,6 +97,41 @@ export default function ReactWorkbenchFatalFallback(props: {
       </div>
     </section>
   )
+}
+
+function ReactFallbackSystemError(props: {
+  error: NormalizedError
+  onRetry?: () => void
+  onRecover?: (strategy: 'reload-plugin' | 'reimport') => void
+}) {
+  return <section role="alert" aria-label={`系统错误 fallback：${props.error.userSummary}`} className="react-workbench-fatal-error"
+    data-recoverability={props.error.recoverability}>
+    <strong>{props.error.userSummary}</strong>
+    <details className="react-workbench-error-technical">
+      <summary>技术详情</summary>
+      <pre>{fallbackErrorDetail(props.error)}</pre>
+    </details>
+    <div className="renderer-suite-fallback-actions">
+      {props.error.recoverability === 'retry' && props.onRetry && <button type="button" onClick={props.onRetry}>重试错误</button>}
+      {props.error.recoverability === 'reload-plugin' && props.onRecover && <button type="button" onClick={() => props.onRecover?.('reload-plugin')}>重新加载插件</button>}
+      {props.error.recoverability === 'reimport' && props.onRecover && <button type="button" onClick={() => props.onRecover?.('reimport')}>重新导入</button>}
+    </div>
+  </section>
+}
+
+function fallbackErrorDetail(error: NormalizedError): string {
+  const lines = [
+    error.technicalMessage ?? error.userSummary,
+    error.code ? `code: ${error.code}` : undefined,
+    error.provider ? `provider: ${error.provider}` : undefined,
+    error.pluginId ? `plugin: ${error.pluginId}` : undefined,
+    error.rendererSuiteId ? `suite: ${error.rendererSuiteId}` : undefined,
+    error.rendererSlotId ? `slot: ${error.rendererSlotId}` : undefined,
+    error.eventId ? `event: ${error.eventId}` : undefined,
+    error.cause ? `cause: ${fallbackErrorDetail(error.cause)}` : undefined,
+    error.metadata ? JSON.stringify(error.metadata, null, 2) : undefined,
+  ]
+  return lines.filter(Boolean).join('\n')
 }
 
 function ReactFallbackContentPart(props: {

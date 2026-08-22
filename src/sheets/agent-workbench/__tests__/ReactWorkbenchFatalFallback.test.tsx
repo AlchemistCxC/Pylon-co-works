@@ -180,4 +180,54 @@ describe('React Workbench fatal fallback', () => {
     expect(screen.getByRole('status', { name: '目标 fallback' })).toHaveTextContent('[blocked] 闭环 C08 — 预算 25%（250/1000） — 等待依赖')
     expect(screen.getByText('耗时 45 秒')).toBeInTheDocument()
   })
+
+  it('keeps C13 lifecycle history and structured recovery actions readable when the Suite fails', () => {
+    const current: WorkbenchDocument = {
+      ...document(6, ''),
+      lifecycle: {
+        retry: {
+          attempt: 2, maxAttempts: 3, delayMs: 4000,
+          error: { userSummary: 'Provider 过载', technicalMessage: '429 overloaded', recoverability: 'retry' },
+        },
+        history: [
+          { kind: 'retry', attempt: 1, maxAttempts: 3, error: { userSummary: '第一次失败', recoverability: 'retry' } },
+          { kind: 'retry', attempt: 2, maxAttempts: 3, error: { userSummary: 'Provider 过载', recoverability: 'retry' } },
+        ],
+      },
+      systemErrors: [
+        { userSummary: '可重试错误', technicalMessage: 'retry detail', code: 'retryable', recoverability: 'retry' },
+        { userSummary: '插件错误', technicalMessage: 'plugin detail', pluginId: 'plugin.example', recoverability: 'reload-plugin' },
+        { userSummary: '文案里写了重试但不可执行', technicalMessage: 'no action', recoverability: 'none' },
+      ],
+    }
+    const reader: WorkbenchDocumentReader = {
+      getSnapshot: () => current,
+      subscribe: () => () => {},
+      getSlice: () => undefined as never,
+      subscribeSlice: () => () => {},
+    }
+    const onRetryMessage = vi.fn()
+    const onRecoverSession = vi.fn()
+    const { container } = render(<ReactWorkbenchFatalFallback
+      document={reader}
+      failure={{ suiteId: 'builtin.solid', phase: 'mount', message: 'lifecycle slot failed' }}
+      onRetry={vi.fn()}
+      onSelectSuite={vi.fn()}
+      onOpenDiagnostics={vi.fn()}
+      onRetryMessage={onRetryMessage}
+      onRecoverSession={onRecoverSession}
+    />)
+
+    expect(screen.getByRole('region', { name: '生命周期 fallback' })).toHaveTextContent('[retry] 第 2/3 次重试')
+    expect(screen.getByText('[retry] 第 1/3 次重试 — 第一次失败')).toBeInTheDocument()
+    expect(screen.getByRole('alert', { name: '系统错误 fallback：插件错误' })).toHaveTextContent('plugin detail')
+    expect(container.querySelectorAll('details.react-workbench-error-technical[open]')).toHaveLength(0)
+    expect(screen.getAllByRole('button', { name: '重试错误' })).toHaveLength(1)
+    expect(screen.getAllByRole('button', { name: '重新加载插件' })).toHaveLength(1)
+
+    screen.getByRole('button', { name: '重试错误' }).click()
+    screen.getByRole('button', { name: '重新加载插件' }).click()
+    expect(onRetryMessage).toHaveBeenCalledOnce()
+    expect(onRecoverSession).toHaveBeenCalledWith('reload-plugin')
+  })
 })

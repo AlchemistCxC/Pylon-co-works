@@ -14,6 +14,8 @@ import { SolidMediaBlock } from './content/MediaBlock.solid.tsx'
 import { BUILTIN_MEDIA_RESOLVER_OPTIONS } from '../mediaAssetAdapter.ts'
 import { isValidPlanContentInput } from '../../../domains/workbench/plan/goalModel.ts'
 import { SolidPlanGoalContent } from './content/PlanGoalContent.solid.tsx'
+import { isValidLifecycleStateInput, isValidNormalizedErrorInput, isValidSystemNoticeInput } from '../../../domains/workbench/lifecycle/lifecycleModel.ts'
+import { SolidLifecycleCard, SolidSystemErrorCard, SolidSystemNoticeCard } from './LifecycleCard.solid.tsx'
 
 export function BuiltinSolidContentSlot(props: {
   snapshot: RenderNodeSnapshot
@@ -26,7 +28,7 @@ export function BuiltinSolidContentSlot(props: {
   const text = () => typeof record().text === 'string' ? record().text as string : ''
   const can = (commandType: string) => props.commands.canExecute?.(commandType) === true
   const execute = (type: string, payloadValue: unknown) => {
-    void props.commands.execute({ type, payload: payloadValue })
+    void props.commands.execute(payloadValue === undefined ? { type } : { type, payload: payloadValue })
   }
   const numberSetting = (key: string, fallback: number) => typeof props.appearance[key] === 'number'
     ? props.appearance[key] as number
@@ -202,6 +204,46 @@ export function BuiltinSolidContentSlot(props: {
           }} />}
         </Show>
       </Match>
+      <Match when={kind().startsWith('lifecycle.')}>
+        <Show
+          when={isValidLifecycleStateInput(props.snapshot.payload) ? props.snapshot.payload : undefined}
+          fallback={<pre class="solid-content-unknown" data-content-kind={kind()}>Invalid lifecycle payload</pre>}
+        >
+          {state => <SolidLifecycleCard
+            state={state()}
+            reducedMotion={props.appearance.reducedMotion === true}
+            appearance={lifecycleAppearance(props.appearance, stringSetting, booleanSetting)}
+            onRetry={can('message.retry') ? () => execute('message.retry', undefined) : undefined}
+            onRecover={can('session.recover') ? strategy => execute('session.recover', { strategy }) : undefined}
+          />}
+        </Show>
+      </Match>
+      <Match when={kind() === 'system.error'}>
+        <Show
+          when={isValidNormalizedErrorInput(props.snapshot.payload) ? props.snapshot.payload : undefined}
+          fallback={<pre class="solid-content-unknown" data-content-kind="system.error">Invalid system.error payload</pre>}
+        >
+          {error => <SolidSystemErrorCard
+            error={error()}
+            reducedMotion={props.appearance.reducedMotion === true}
+            appearance={lifecycleAppearance(props.appearance, stringSetting, booleanSetting)}
+            onRetry={can('message.retry') ? () => execute('message.retry', undefined) : undefined}
+            onRecover={can('session.recover') ? strategy => execute('session.recover', { strategy }) : undefined}
+          />}
+        </Show>
+      </Match>
+      <Match when={kind() === 'system.notice'}>
+        <Show
+          when={isValidSystemNoticeInput(props.snapshot.payload) ? props.snapshot.payload : undefined}
+          fallback={<pre class="solid-content-unknown" data-content-kind="system.notice">Invalid system.notice payload</pre>}
+        >
+          {notice => <SolidSystemNoticeCard
+            notice={notice()}
+            reducedMotion={props.appearance.reducedMotion === true}
+            appearance={lifecycleAppearance(props.appearance, stringSetting, booleanSetting)}
+          />}
+        </Show>
+      </Match>
       <Match when={kind() === 'content.unknown'}>
         <pre class="solid-content-unknown" data-content-kind={kind()}>{unknownSummary(props.snapshot.payload, kind())}</pre>
       </Match>
@@ -240,6 +282,35 @@ function planNodeGlyph(value: unknown): 'status' | 'dot' | 'none' {
 
 function planConnectorStyle(value: unknown): 'solid' | 'dashed' | 'none' {
   return value === 'dashed' || value === 'none' ? value : 'solid'
+}
+
+function lifecycleAppearance(
+  appearance: RenderAppearanceSnapshot,
+  stringSetting: (key: string, fallback: string) => string,
+  booleanSetting: (key: string, fallback: boolean) => boolean,
+) {
+  return {
+    foreground: stringSetting('foreground', 'var(--text)'), mutedForeground: stringSetting('mutedForeground', 'var(--text-dim)'),
+    background: stringSetting('background', 'transparent'), borderColor: stringSetting('borderColor', 'var(--border)'),
+    infoColor: stringSetting('infoColor', 'var(--accent)'), warningColor: stringSetting('warningColor', 'var(--warning, #d29922)'),
+    errorColor: stringSetting('errorColor', 'var(--danger, #e5484d)'), successColor: stringSetting('successColor', 'var(--tool-ok, var(--accent))'),
+    density: appearance.density === 'compact' ? 'compact' as const : 'comfortable' as const,
+    technicalDetailsExpanded: booleanSetting('technicalDetailsExpanded', false),
+    noticePlacements: lifecyclePlacements(appearance.noticePlacements),
+    retryCountdownStyle: lifecycleCountdownStyle(appearance.retryCountdownStyle),
+    showProviderIds: booleanSetting('showProviderIds', false), showEventIds: booleanSetting('showEventIds', false),
+    motion: appearance.motion === 'subtle' ? 'subtle' as const : 'none' as const,
+  }
+}
+
+function lifecyclePlacements(value: unknown): readonly ('inline' | 'timeline' | 'toast')[] {
+  if (!Array.isArray(value)) return ['inline', 'timeline']
+  const placements = value.filter((item): item is 'inline' | 'timeline' | 'toast' => item === 'inline' || item === 'timeline' || item === 'toast')
+  return placements.length > 0 ? placements : ['inline']
+}
+
+function lifecycleCountdownStyle(value: unknown): 'seconds' | 'compact' | 'hidden' {
+  return value === 'compact' || value === 'hidden' ? value : 'seconds'
 }
 
 function unknownSummary(payload: unknown, kind: string): string {

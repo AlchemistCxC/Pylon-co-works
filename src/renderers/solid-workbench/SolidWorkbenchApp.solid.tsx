@@ -24,6 +24,8 @@ import { SolidFileReferenceCard } from './chat/content/FileReference.solid.tsx'
 import { SolidMediaBlock } from './chat/content/MediaBlock.solid.tsx'
 import { BUILTIN_MEDIA_RESOLVER_OPTIONS } from './mediaAssetAdapter.ts'
 import { SolidPlanGoalContent } from './chat/content/PlanGoalContent.solid.tsx'
+import type { LifecycleState } from '../../domains/workbench/lifecycle/lifecycleModel.ts'
+import { SolidLifecycleCard, SolidSystemErrorCard, SolidSystemNoticeCard } from './chat/LifecycleCard.solid.tsx'
 
 export interface SolidWorkbenchAppProps {
   context: SolidWorkbenchContextValue
@@ -182,6 +184,42 @@ function WorkbenchDocumentSurface(props: {
           <Show when={document().timeline.length > 0}>
             <div class="solid-workbench-timeline" aria-label="事件时间线" data-timeline-count={document().timeline.length} />
           </Show>
+          <Show when={lifecycleRenderKind(document().lifecycle)}>
+            {kind => <WorkbenchContentSlot
+              nodeId={`${props.sessionId ?? 'none'}:lifecycle`}
+              kind={kind()}
+              payload={document().lifecycle}
+              context={props.context}
+              fallback={<SolidLifecycleCard
+                state={document().lifecycle}
+                reducedMotion={props.reducedMotion}
+                onRetry={props.sessionId && props.context.hostPort?.capabilities.has('retry')
+                  ? () => { void props.commands.retry(props.sessionId!) }
+                  : undefined}
+                onRecover={props.sessionId && props.context.hostPort?.capabilities.has('recovery')
+                  ? strategy => { void props.commands.recover(props.sessionId!, strategy) }
+                  : undefined}
+              />}
+            />}
+          </Show>
+          <For each={document().systemErrors}>{(error, index) => (
+            <WorkbenchContentSlot
+              nodeId={`${props.sessionId ?? 'none'}:system-error:${error.eventId ?? error.code ?? index()}`}
+              kind="system.error"
+              payload={error}
+              context={props.context}
+              fallback={<SolidSystemErrorCard
+                error={error}
+                reducedMotion={props.reducedMotion}
+                onRetry={props.sessionId && props.context.hostPort?.capabilities.has('retry')
+                  ? () => { void props.commands.retry(props.sessionId!) }
+                  : undefined}
+                onRecover={props.sessionId && props.context.hostPort?.capabilities.has('recovery')
+                  ? strategy => { void props.commands.recover(props.sessionId!, strategy) }
+                  : undefined}
+              />}
+            />
+          )}</For>
           <Show when={document().timeline.some(entry => entry.kind === 'assist')}>
             <div class="solid-workbench-assist" aria-label="辅助建议" role="status">
               <For each={document().timeline.filter(entry => entry.kind === 'assist')}>{entry => (
@@ -229,9 +267,13 @@ function WorkbenchDocumentSurface(props: {
           <Show when={document().diagnostics.length > 0}>
             <div class="solid-workbench-diagnostics" aria-label="诊断">
               <For each={document().diagnostics}>{diagnostic => (
-                <div role={diagnostic.level === 'error' ? 'alert' : 'status'} data-diagnostic-code={diagnostic.code}>
-                  {diagnostic.message}
-                </div>
+                <WorkbenchContentSlot
+                  nodeId={`${props.sessionId ?? 'none'}:notice:${diagnostic.eventId}`}
+                  kind="system.notice"
+                  payload={diagnostic}
+                  context={props.context}
+                  fallback={<SolidSystemNoticeCard notice={diagnostic} reducedMotion={props.reducedMotion} />}
+                />
               )}</For>
             </div>
           </Show>
@@ -239,6 +281,15 @@ function WorkbenchDocumentSurface(props: {
       )}
     </Show>
   )
+}
+
+function lifecycleRenderKind(state: LifecycleState): string | undefined {
+  if (state.suspended) return 'lifecycle.suspended'
+  if (state.retry) return 'lifecycle.retry'
+  if (state.rewind) return 'lifecycle.rewind'
+  if (state.compact) return 'lifecycle.compact'
+  if (state.lastRecovery) return 'lifecycle.recovered'
+  return undefined
 }
 
 function normalizedInteractionRequest(value: unknown): InteractionRequest | undefined {
