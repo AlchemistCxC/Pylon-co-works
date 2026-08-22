@@ -30,11 +30,35 @@ describe('ACP normalizer', () => {
 
     const tool = normalizeAcpEvent({
       source: 'peri',
-      update: { sessionUpdate: 'tool_call', toolCallId: 't-1', title: '读取文件', _meta: { pylon: { toolName: 'read_file' } }, rawInput: { path: 'a.ts' } },
+      update: { sessionUpdate: 'tool_call', toolCallId: 't-1', name: 'ProviderRead', title: '读取文件', _meta: { pylon: { toolName: 'read_file' } }, rawInput: { path: 'a.ts' } },
     }, { ...context, sequence: 2 })
     expect(tool.events[0].event).toMatchObject({
       type: 'tool.started',
-      tool: { toolCallId: 't-1', name: 'read_file', kind: 'read', action: 'read' },
+      tool: {
+        toolCallId: 't-1', name: 'read_file', providerName: 'ProviderRead', kind: 'read', action: 'read',
+        input: { path: 'a.ts' }, rawInput: { path: 'a.ts' },
+      },
+    })
+  })
+
+  it('narrows generic lifecycle metadata without making renderer read ACP raw', () => {
+    const result = normalizeAcpEvent({
+      update: {
+        sessionUpdate: 'tool_call_update', toolCallId: 'tool-progress', status: 'failed',
+        progress: { completed: 1, total: 3, message: 'reading' },
+        locations: [{ path: '/workspace/a.ts', line: 4 }],
+        durationMs: 1250, error: { message: 'permission denied', code: 'EACCES', retryable: false },
+      },
+    }, context)
+
+    expect(result.events[0].event).toMatchObject({
+      type: 'tool.failed',
+      tool: {
+        progress: { completed: 1, total: 3, message: 'reading' },
+        locations: [{ path: '/workspace/a.ts', line: 4 }],
+        durationMs: 1250,
+        error: { message: 'permission denied', code: 'EACCES', retryable: false },
+      },
     })
   })
 

@@ -211,6 +211,9 @@
 .term-tool-connector-style--dotted {
   background:repeating-linear-gradient(to bottom, var(--tool-connector-color,currentColor) 0 3px, transparent 3px 6px) !important;
 }
+.term-tool-connector-style--dashed {
+  background:repeating-linear-gradient(to bottom, var(--tool-connector-color,currentColor) 0 8px, transparent 8px 14px) !important;
+}
 .term-tool-connector-style--pulse { animation:tool-connector-style-pulse 1.3s ease-in-out infinite; }
 @keyframes tool-connector-style-pulse { 0%,100% { opacity:calc(var(--tool-connector-opacity,1) * 0.48); } 50% { opacity:var(--tool-connector-opacity,1); } }
 /* Connector 与起点 Tool 同步：运行/等待持续呼吸；终态只播放一次。 */
@@ -251,6 +254,8 @@
 .term-tool-head { position:relative; z-index:2; width:100%; min-width:0; padding:0; border:0; background:transparent; color:inherit; font:inherit; text-align:left; cursor:pointer; font-size:inherit; line-height:inherit; display:flex; align-items:baseline; flex-wrap:nowrap; }
 .term-tool-head:hover { opacity:0.8; }
 .term-tool-indicator { display:inline-block; transform-origin:center; flex:0 0 auto; white-space:nowrap; }
+.solid-tool-invocation[data-status-palette="neutral"] .term-tool-indicator { color:var(--text-dim) !important; }
+.solid-tool-invocation[data-status-palette="accent"] .term-tool-indicator { color:var(--accent) !important; }
 .term-tool-indicator.ok { color:var(--tool-ok,#1e9646); }
 .term-tool-indicator.err { color:var(--tool-err,#be2828); }
 .term-tool-indicator.run { color:var(--tool-run,#3b82f6); }
@@ -374,7 +379,7 @@
 .app[data-interface-mode="modern-gui"] .term-tool-name { font:650 12px var(--font); }
 .app[data-interface-mode="modern-gui"] .term-tool-summary { font-size:11px; }
 .app[data-interface-mode="modern-gui"] .term-tool-body { padding:10px 12px 12px 45px; border-top:1px solid color-mix(in srgb,var(--border) 68%,transparent); background:color-mix(in srgb,var(--surface-canvas) 50%,transparent); font-size:12px; }
-.app[data-interface-mode="modern-gui"] .term-tool-connector { display:none; }
+.app[data-interface-mode="modern-gui"] .term-tool-connector[data-connector-mode="none"] { display:none; }
 .app[data-interface-mode="modern-gui"] .chat-empty { margin:auto; width:min(480px,calc(100% - 40px)); min-height:260px; flex:0 1 420px; border:1px dashed color-mix(in srgb,var(--accent) 32%,var(--border)); border-radius:20px; background:color-mix(in srgb,var(--surface-panel) 62%,transparent); }
 @media (max-width:720px) {
   .app[data-interface-mode="modern-gui"] .modern-workbench-agent { display:none; }

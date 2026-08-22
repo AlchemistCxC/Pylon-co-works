@@ -4,12 +4,13 @@ import { afterEach, describe, expect, it, vi } from 'vitest'
 import { mountSolidWorkbench } from '../mountSolidWorkbench.solid.tsx'
 import { createPreviewWorkbenchServices } from '../__fixtures__/previewWorkbenchServices.ts'
 import { createWorkbenchEnvelope, type WorkbenchEventEnvelope } from '../../../domains/workbench/events/workbenchEventSchema.ts'
-import { projectWorkbench } from '../../../domains/workbench/workbenchProjector.ts'
+import { projectWorkbench, reduceWorkbenchEvent } from '../../../domains/workbench/workbenchProjector.ts'
 import { createWorkbenchHostPort } from '../workbenchHostPort.ts'
 import { RendererSuiteHost } from '../../../host/renderer-suite/rendererSuiteHost.ts'
 import type { RendererActivationSnapshot, RendererSlotContribution, RendererSuiteContribution } from '../../../plugin-runtime/renderers/rendererSuiteTypes.ts'
 import type { RegistryEntry } from '../../../plugin-runtime/registry/types.ts'
 import { BUILTIN_TEXT_RENDER_KINDS } from '../../../domains/rendererContent/textRenderKindCatalog.ts'
+import { BUILTIN_TOOL_RENDER_KINDS } from '../../../domains/rendererContent/toolRenderKindCatalog.ts'
 import { createBuiltinSolidContentSlot } from '../builtinSolidRendererSuite.ts'
 
 const hosts: HTMLElement[] = []
@@ -232,6 +233,119 @@ describe('mountSolidWorkbench', () => {
     expect(host.querySelector('[data-activity-count="1"]')).toBeTruthy()
     expect(host.querySelector('[data-has-usage="true"]')).toBeTruthy()
     expect(screen.getByText('canonical warning')).toBeTruthy()
+  })
+
+  it('C04 canonical unknown tool uses the typed tool.generic base Slot and updates without remount', async () => {
+    const host = document.createElement('div')
+    document.body.append(host)
+    hosts.push(host)
+    const services = createPreviewWorkbenchServices()
+    servicesList.push(services)
+    const slot = createBuiltinSolidContentSlot()
+    const slotEntry = {
+      ownerPluginId: 'builtin.pylon-renderers', ownerRuntimeInstanceId: 'runtime',
+      contributionId: slot.id, layer: 'feature', priority: slot.priority, value: slot,
+    } as RegistryEntry<RendererSlotContribution>
+    const suite = { id: 'builtin.solid' } as RendererSuiteContribution
+    const kindEntries = BUILTIN_TOOL_RENDER_KINDS.map(kind => [kind.id, {
+      ownerPluginId: 'core.renderer.tool-kinds', ownerRuntimeInstanceId: 'runtime',
+      contributionId: kind.id, layer: 'feature', priority: kind.priority, value: kind,
+    } as RegistryEntry<(typeof BUILTIN_TOOL_RENDER_KINDS)[number]>] as const)
+    const specializedToolKind = {
+      ...BUILTIN_TOOL_RENDER_KINDS[0]!, id: 'tool.unregistered', fallbackKind: 'tool.generic',
+      fixture: { id: 'fixture-specialized', name: 'SpecializedTool', status: 'running', semanticKind: 'tool.unregistered' },
+    }
+    const specializedToolEntry = {
+      ownerPluginId: 'core.renderer.semantic-kinds', ownerRuntimeInstanceId: 'runtime',
+      contributionId: specializedToolKind.id, layer: 'feature', priority: specializedToolKind.priority,
+      value: specializedToolKind,
+    } as RegistryEntry<typeof specializedToolKind>
+    const activation: RendererActivationSnapshot = {
+      revision: 1,
+      suite: {
+        ownerPluginId: 'builtin.pylon-renderers', ownerRuntimeInstanceId: 'runtime',
+        contributionId: suite.id, layer: 'feature', priority: 1, value: suite,
+      } as RegistryEntry<RendererSuiteContribution>,
+      kinds: new Map([...kindEntries, ['tool.unregistered', specializedToolEntry]]),
+      slots: new Map(BUILTIN_TOOL_RENDER_KINDS.map(kind => [kind.id, [slotEntry]])),
+      diagnostics: [],
+    }
+    mountSolidWorkbench({
+      host,
+      input: { sheetId: 'sheet-a', sessionId: 'preview-session' },
+      services,
+      activation,
+    })
+    const started = projectWorkbench([createWorkbenchEnvelope({
+      sessionId: 'preview-session', recordedAt: '2026-08-22T00:00:01.000Z', sequence: 1,
+      source: { provider: 'peri', sourceId: 'tool-start' }, identity: { toolCallId: 'tool-c04' },
+      provenance: { origin: 'local-observed', trust: 'authoritative' },
+      event: {
+        type: 'tool.started',
+        tool: {
+          name: 'ProviderRead', canonicalName: 'read_file', title: '读取文件',
+          semanticKind: 'tool.unregistered', status: 'running', input: { path: '/normalized.txt' },
+        },
+      },
+    })]).document
+
+    services.runtime.replaceDocument(started, { ownerKey: 'owner-preview', generation: 1 })
+
+    const card = await screen.findByRole('status', { name: '工具：读取文件，运行中' })
+    expect(card).toHaveAttribute('data-content-kind', 'tool.generic')
+    expect(card).toHaveTextContent('ProviderRead')
+    expect(card).toHaveTextContent('/normalized.txt')
+    expect(host.querySelector('.solid-workbench-activity')).toBeNull()
+    expect(card.closest('[data-renderer-slot-id="builtin.solid.content.base"]')).not.toBeNull()
+
+    const completed = reduceWorkbenchEvent(started, createWorkbenchEnvelope({
+      sessionId: 'preview-session', recordedAt: '2026-08-22T00:00:02.000Z', sequence: 2,
+      source: { provider: 'peri', sourceId: 'tool-complete' }, identity: { toolCallId: 'tool-c04' },
+      provenance: { origin: 'local-observed', trust: 'authoritative' },
+      event: { type: 'tool.completed', tool: { status: 'completed', parts: [{ kind: 'text', text: 'file body' }], durationMs: 1200 } },
+    }))
+    services.runtime.replaceDocument(completed, { ownerKey: 'owner-preview', generation: 1 })
+
+    await waitFor(() => expect(card).toHaveAccessibleName('工具：读取文件，已完成'))
+    expect(screen.getByRole('status', { name: '工具：读取文件，已完成' })).toBe(card)
+    expect(card).toHaveTextContent('file body')
+    expect(card).toHaveTextContent('1.2s')
+    const cardHead = card.querySelector<HTMLButtonElement>('.term-tool-head')!
+    fireEvent.click(cardHead)
+    expect(cardHead).toHaveAttribute('aria-expanded', 'false')
+
+    const nested = reduceWorkbenchEvent(completed, createWorkbenchEnvelope({
+      sessionId: 'preview-session', recordedAt: '2026-08-22T00:00:03.000Z', sequence: 3,
+      source: { provider: 'peri', sourceId: 'tool-child' }, identity: { toolCallId: 'tool-c04-child' },
+      provenance: { origin: 'local-observed', trust: 'authoritative' },
+      event: {
+        type: 'tool.started',
+        tool: { name: 'ChildTool', title: '子工具', semanticKind: 'tool.unregistered', parentToolUseId: 'tool-c04' },
+      },
+    }))
+    services.runtime.replaceDocument(nested, { ownerKey: 'owner-preview', generation: 1 })
+
+    const connector = await waitFor(() => {
+      const value = host.querySelector<HTMLElement>('[data-from-message-id="tool-c04"][data-to-message-id="tool-c04-child"]')
+      expect(value).not.toBeNull()
+      return value!
+    })
+    expect(connector).toHaveClass('term-tool-connector')
+
+    const replacement = projectWorkbench([createWorkbenchEnvelope({
+      sessionId: 'preview-session', recordedAt: '2026-08-22T00:00:04.000Z', sequence: 4,
+      source: { provider: 'peri', sourceId: 'tool-replacement' }, identity: { toolCallId: 'tool-replacement' },
+      provenance: { origin: 'local-observed', trust: 'authoritative' },
+      event: { type: 'tool.started', tool: { name: 'Replacement', title: '替换工具', semanticKind: 'tool.unregistered' } },
+    })]).document
+    services.runtime.replaceDocument(replacement, { ownerKey: 'owner-preview', generation: 2 })
+
+    const replacementCard = await screen.findByRole('status', { name: '工具：替换工具，运行中' })
+    expect(replacementCard).toBe(card)
+    expect(replacementCard.querySelector('.term-tool-head')).toHaveAttribute('aria-controls', 'solid-tool-snapshot-tool-replacement')
+    expect(replacementCard.querySelector('.term-tool-head')).toHaveAttribute('aria-expanded', 'true')
+    expect(replacementCard.querySelector('#solid-tool-snapshot-tool-replacement')).not.toBeNull()
+    expect(host.querySelector('[data-from-message-id="tool-c04"]')).toBeNull()
   })
 
   it('canonical media part reaches the committed Solid media renderer in production', async () => {

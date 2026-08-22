@@ -181,6 +181,44 @@ describe('React Workbench fatal fallback', () => {
     expect(screen.getByText('耗时 45 秒')).toBeInTheDocument()
   })
 
+  it('keeps C04 canonical tool lifecycle readable when the Solid Suite fails', () => {
+    const current: WorkbenchDocument = {
+      ...document(7, ''),
+      activities: [{
+        id: 'tool-fallback', kind: 'tool', title: 'ProviderRead', displayName: '读取文件',
+        canonicalName: 'read_file', providerName: 'ProviderRead', semanticKind: 'tool.read',
+        status: 'failed', input: { path: '/workspace/a.ts' }, progress: { completed: 1, total: 2 },
+        parts: [{ kind: 'text', text: 'partial body' }],
+        error: { userSummary: 'permission denied', technicalMessage: 'EACCES /workspace/a.ts', code: 'EACCES', recoverability: 'none' },
+        durationMs: 950,
+        orphan: false, sequence: 7,
+      }],
+    }
+    const reader: WorkbenchDocumentReader = {
+      getSnapshot: () => current,
+      subscribe: () => () => {},
+      getSlice: () => undefined as never,
+      subscribeSlice: () => () => {},
+    }
+    const { container } = render(<ReactWorkbenchFatalFallback
+      document={reader}
+      failure={{ suiteId: 'builtin.solid', phase: 'slot', message: 'tool slot failed' }}
+      onRetry={vi.fn()}
+      onSelectSuite={vi.fn()}
+      onOpenDiagnostics={vi.fn()}
+    />)
+
+    const card = screen.getByRole('status', { name: '工具 fallback：读取文件，失败' })
+    expect(card).toHaveTextContent('ProviderRead')
+    expect(card).toHaveTextContent('/workspace/a.ts')
+    expect(card).toHaveTextContent('1 / 2')
+    expect(card).toHaveTextContent('partial body')
+    expect(card).toHaveTextContent('permission denied')
+    expect(card).toHaveTextContent('EACCES')
+    expect(card).toHaveTextContent('950ms')
+    expect(container.textContent).not.toContain('undefined')
+  })
+
   it('keeps C13 lifecycle history and structured recovery actions readable when the Suite fails', () => {
     const current: WorkbenchDocument = {
       ...document(6, ''),

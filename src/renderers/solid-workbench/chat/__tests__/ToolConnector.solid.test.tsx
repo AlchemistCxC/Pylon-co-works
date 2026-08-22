@@ -54,6 +54,7 @@ describe('SolidToolConnector', () => {
     expect(connector.classList.contains('term-tool-connector-style--dotted')).toBe(true)
     expect(connector.classList.contains('term-tool-connector--settle')).toBe(true)
     expect(connector.dataset.toolState).toBe('completed')
+    expect(connector.dataset.connectorMode).toBe('follow')
     expect(connector.style.background).toBe('rgb(34, 170, 68)')
     expect(connector.style.getPropertyValue('--tool-connector-width')).toBe('6px')
     expect(connector.style.getPropertyValue('--tool-connector-opacity')).toBe('0.1')

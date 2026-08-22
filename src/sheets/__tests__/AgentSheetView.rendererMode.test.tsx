@@ -6,19 +6,30 @@ import { resetStores } from '../../test/resetStores.ts'
 import AgentSheetView from '../AgentSheetView.tsx'
 import { useInterfaceModeStore } from '../../domains/interface/interfaceModeStore.ts'
 import { activateBuiltinPlugin, getPackageInstallationService, getPluginRuntime } from '../../plugin-runtime/pluginCompositionRoot.ts'
-import { getPresentationProfileRegistry, getRendererRegistry, getRendererSettingsStore } from '../../plugin-runtime/runtimeServices.ts'
+import { getPluginEventBus, getPresentationProfileRegistry, getRendererRegistry, getRendererSettingsStore } from '../../plugin-runtime/runtimeServices.ts'
 import { createPluginIdentity } from '../../plugin-runtime/pluginIdentity.ts'
 import { usePresentationPreferenceStore } from '../../domains/presentation/presentationPreferenceStore.ts'
 import { useIdentityStore, type Session } from '../../identityStore.ts'
 import type { WorkbenchRendererFactory, WorkbenchRendererInstance } from '../../renderers/solid-workbench/workbenchContracts.ts'
 import type { BuiltinPluginDefinition } from '../../plugin-runtime/pluginRuntime.ts'
 import { normalizeRawEvent } from '../../domains/events/canonicalNormalizer.ts'
-import { publishPluginEvent } from '../../infrastructure/events/pluginEventBus.ts'
+import { publishPluginEvent as publishCanonicalPluginEvent } from '../../infrastructure/events/pluginEventBus.ts'
 import { useWorkspaceStore } from '../../workspaceStore.ts'
-import { createWorkbenchEnvelope } from '../../domains/workbench/events/workbenchEventSchema.ts'
+import { createWorkbenchEnvelope, type WorkbenchEventEnvelope } from '../../domains/workbench/events/workbenchEventSchema.ts'
 import { invoke } from '@tauri-apps/api/core'
 
 vi.mock('@tauri-apps/api/core', () => ({ invoke: vi.fn(async () => undefined) }))
+
+/**
+ * Production publishes CanonicalConversationEvent through the compatibility
+ * API. A few projector-focused integration fixtures intentionally inject an
+ * already-normalized Workbench envelope, which the session runtime also
+ * accepts during migration; keep that test-only path on the untyped bus.
+ */
+function publishPluginEvent(event: Parameters<typeof publishCanonicalPluginEvent>[0] | WorkbenchEventEnvelope): void {
+  if ('owner' in event) publishCanonicalPluginEvent(event)
+  else void getPluginEventBus().publish('canonical.conversation', event)
+}
 
 function suitePlugin(pluginId: string, label: string, failPrepare = false, destroy = () => {}): BuiltinPluginDefinition {
   return {
@@ -137,6 +148,103 @@ describe('AgentSheetView renderer mode context', () => {
 
     expect(await screen.findByText('base slot answer')).toBeTruthy()
     expect(container.querySelector('[data-renderer-slot-id="builtin.solid.content.base"]')).not.toBeNull()
+  })
+
+  it('C04 canonical tool snapshot reaches production base Slot and settings update without remount', async () => {
+    const settings = getRendererSettingsStore()
+    settings.reset()
+    settings.setOverride('kind.tool.generic.defaultCollapsed', false)
+    settings.setOverride('kind.tool.generic.maxHeight', 180)
+    settings.setOverride('kind.tool.generic.showMetadata', true)
+    try {
+      useIdentityStore.setState({ sessions: [session('session-1', 'local:a')] })
+      useWorkspaceStore.setState(state => ({ workspaceSheets: { ...state.workspaceSheets, activeSheetId: 'agent-sheet' } }))
+      const { container } = render(<AgentSheetView sheet={sheet({ sidebarMode: 'work' })} ctx={ctx} />)
+      await screen.findByLabelText('Solid Agent Workbench', {}, { timeout: 5_000 })
+      publishPluginEvent(normalizeRawEvent(
+        {
+          update: {
+            sessionUpdate: 'tool_call', toolCallId: 'tool-production-c04', title: '读取文件',
+            rawInput: { path: '/workspace/production.ts' },
+            _meta: { pylon: { toolName: 'read_file' } },
+          },
+        },
+        { owner: { profileId: 'profile-a', agentId: 'peri', localSessionId: 'local:a' }, clientGeneration: 1, sequence: 1, receivedAt: '2026-08-22T00:00:01.000Z' },
+      ).event)
+
+      const card = await screen.findByRole('status', { name: '工具：读取文件，运行中' })
+      expect(card).toHaveTextContent('/workspace/production.ts')
+      expect(card.closest('[data-renderer-slot-id="builtin.solid.content.base"]')).not.toBeNull()
+      expect(card.querySelector('.solid-tool-metadata')).toHaveTextContent('canonical: read_file')
+      expect(card.querySelector('.term-tool-body')).toHaveStyle({ maxHeight: '180px' })
+
+      settings.setOverride('kind.tool.generic.maxHeight', 260)
+      settings.setOverride('kind.tool.generic.showMetadata', false)
+
+      await waitFor(() => {
+        expect(card.querySelector('.term-tool-body')).toHaveStyle({ maxHeight: '260px' })
+        expect(card.querySelector('.solid-tool-metadata')).toBeNull()
+      })
+      expect(screen.getByRole('status', { name: '工具：读取文件，运行中' })).toBe(card)
+      expect(container.querySelector('.solid-workbench-activity')).toBeNull()
+    } finally {
+      settings.reset()
+    }
+  })
+
+  it('targeted tool.generic Slot receives typed snapshot and owner cleanup restores C04 base Slot', async () => {
+    const destroyed = vi.fn()
+    const registration = getRendererRegistry().registerSlot(
+      createPluginIdentity('test.production-tool-slot', 'runtime'),
+      {
+        id: 'test.production-tool-slot.generic', targetSuites: ['builtin.solid'],
+        kinds: ['tool.generic'], priority: 1, fallback: false,
+        canRender: snapshot => snapshot.kind === 'tool.generic',
+        createSurface: () => ({
+          rendererId: 'test.production-tool-slot', kind: 'solid',
+          mount(container, snapshot) {
+            const value = snapshot.payload as { id?: unknown; name?: unknown; input?: { path?: unknown } }
+            const node = document.createElement('div')
+            node.dataset.productionToolSlot = 'true'
+            node.textContent = `tool overlay: ${String(value.id)} / ${String(value.name)} / ${String(value.input?.path)}`
+            container.append(node)
+            return node
+          },
+          update(handle, snapshot) {
+            const value = snapshot.payload as { id?: unknown; name?: unknown; input?: { path?: unknown } }
+            ;(handle as HTMLElement).textContent = `tool overlay: ${String(value.id)} / ${String(value.name)} / ${String(value.input?.path)}`
+          },
+          destroy(handle) { destroyed(handle); (handle as HTMLElement).remove() }, on: () => () => {},
+        }),
+      },
+    )
+    try {
+      useIdentityStore.setState({ sessions: [session('session-1', 'local:a')] })
+      useWorkspaceStore.setState(state => ({ workspaceSheets: { ...state.workspaceSheets, activeSheetId: 'agent-sheet' } }))
+      const { container } = render(<AgentSheetView sheet={sheet({ sidebarMode: 'work' })} ctx={ctx} />)
+      await screen.findByLabelText('Solid Agent Workbench', {}, { timeout: 5_000 })
+      publishPluginEvent(normalizeRawEvent(
+        {
+          update: {
+            sessionUpdate: 'tool_call', toolCallId: 'tool-overlay-c04', name: 'FutureTool',
+            title: '未来工具', rawInput: { path: '/workspace/future.data' },
+          },
+        },
+        { owner: { profileId: 'profile-a', agentId: 'peri', localSessionId: 'local:a' }, clientGeneration: 1, sequence: 1, receivedAt: '2026-08-22T00:00:01.000Z' },
+      ).event)
+
+      expect(await screen.findByText('tool overlay: tool-overlay-c04 / FutureTool / /workspace/future.data')).toBeTruthy()
+      await registration.dispose()
+
+      await waitFor(() => expect(container.querySelector('[data-production-tool-slot="true"]')).toBeNull())
+      expect(await screen.findByRole('status', { name: '工具：未来工具，运行中' })).toHaveTextContent('/workspace/future.data')
+      expect(container.querySelector('[data-renderer-slot-id="builtin.solid.content.base"]')).not.toBeNull()
+      expect(destroyed).toHaveBeenCalled()
+      const handles = destroyed.mock.calls.map(call => call[0])
+      expect(new Set(handles).size).toBe(handles.length)
+    } finally {
+      await registration.dispose()
+    }
   })
 
   it('C00 kind 设置经共享 store 与 Host Port 实时作用于生产 content Slot', async () => {

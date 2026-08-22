@@ -73,11 +73,22 @@ describe('C04 tool lifecycle projection', () => {
       // 迟到的 progress 不应把 failed 改写为 running/completed
       envelope(3, { type: 'tool.progress', tool: { status: 'progress' } }, 'call-b'),
     ])
+    const afterLateCompleted = reduce([
+      envelope(1, { type: 'tool.started', tool: { name: 'Bash' } }, 'call-b'),
+      envelope(2, { type: 'tool.failed', tool: { status: 'failed', error: 'exit code 1' } }, 'call-b'),
+      envelope(3, {
+        type: 'tool.completed',
+        tool: { status: 'completed', parts: [{ kind: 'text', text: 'late evidence' }] },
+      }, 'call-b'),
+    ])
 
-    for (const document of [failedOnce, afterDoubleFail]) {
+    for (const document of [failedOnce, afterDoubleFail, afterLateCompleted]) {
       const node = document.activities.find(node => node.id === 'call-b')!
       expect(node.status).toBe('failed')
     }
+    expect(toolInvocationSnapshot(afterLateCompleted, 'call-b')?.result?.parts).toEqual([
+      { kind: 'text', text: 'late evidence' },
+    ])
   })
 
   it('unknown tool still produces a visible card with provider name', () => {
@@ -149,6 +160,41 @@ describe('C04 provider-neutral snapshot selector (toolInvocationSnapshot)', () =
     expect(snapshot?.rawInput).toBeDefined()
   })
 
+  it('accumulates start/progress fields when a terminal event only carries the result', () => {
+    const document = reduce([
+      envelope(1, {
+        type: 'tool.started',
+        tool: {
+          name: 'read_file', providerName: 'ProviderRead', canonicalName: 'read_file', semanticKind: 'tool.read',
+          input: { path: '/normalized.txt' }, locations: [{ path: '/normalized.txt', line: 4 }],
+          action: 'read', capabilities: ['fs'],
+        },
+      }, 'snap-cumulative'),
+      envelope(2, {
+        type: 'tool.progress',
+        tool: { status: 'running', progress: { completed: 2, total: 4, message: 'reading' } },
+      }, 'snap-cumulative'),
+      envelope(3, {
+        type: 'tool.completed',
+        tool: { status: 'completed', parts: [{ kind: 'text', text: 'done' }] },
+      }, 'snap-cumulative'),
+    ])
+
+    const snapshot = toolInvocationSnapshot(document, 'snap-cumulative')
+    expect(snapshot).toEqual(expect.objectContaining({
+      canonicalName: 'read_file',
+      name: 'ProviderRead',
+      semanticKind: 'tool.read',
+      input: { path: '/normalized.txt' },
+      locations: [{ path: '/normalized.txt', line: 4 }],
+      action: 'read',
+      capabilities: ['fs'],
+      progress: { completed: 2, total: 4, message: 'reading' },
+      status: 'completed',
+    }))
+    expect(snapshot?.result?.parts).toEqual([{ kind: 'text', text: 'done' }])
+  })
+
   it('missing optional fields stay undefined — no fabricated empty values', () => {
     const minimal = reduce([envelope(1, { type: 'tool.started', tool: {} }, 'snap-2')])
     const snapshot = toolInvocationSnapshot(minimal, 'snap-2')
@@ -158,6 +204,32 @@ describe('C04 provider-neutral snapshot selector (toolInvocationSnapshot)', () =
     expect(snapshot.locations).toBeUndefined()
     expect(snapshot.progress).toBeUndefined()
     expect(snapshot.result).toBeUndefined()
+  })
+
+  it('preserves scalar JSON input/progress instead of assuming provider objects', () => {
+    const document = reduce([
+      envelope(1, { type: 'tool.started', tool: { name: 'Shell', input: 'npm test' } }, 'snap-scalar'),
+      envelope(2, { type: 'tool.progress', tool: { progress: 0.5 } }, 'snap-scalar'),
+    ])
+
+    expect(toolInvocationSnapshot(document, 'snap-scalar')).toEqual(expect.objectContaining({
+      input: 'npm test',
+      progress: 0.5,
+    }))
+  })
+
+  it('narrows provider error details into the shared NormalizedError contract', () => {
+    const document = reduce([envelope(1, {
+      type: 'tool.failed',
+      tool: { error: { message: 'permission denied', code: 'EACCES', retryable: true } },
+    }, 'snap-error')])
+
+    expect(toolInvocationSnapshot(document, 'snap-error')?.result?.error).toEqual(expect.objectContaining({
+      userSummary: 'permission denied',
+      technicalMessage: 'permission denied',
+      code: 'EACCES',
+      recoverability: 'retry',
+    }))
   })
 
   it('returns null for unknown id instead of fabricating a placeholder', () => {

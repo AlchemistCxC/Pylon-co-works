@@ -4,6 +4,7 @@ import { createCoreSolidRendererPluginDefinition } from '../core/renderer/solidR
 import { createBuiltinRendererContentPluginDefinitions } from '../core/renderer/builtinRenderContent.ts'
 import { createBuiltinToolRendererPluginDefinition } from '../core/renderer/builtinToolRenderers.ts'
 import { BUILTIN_TEXT_RENDER_KINDS } from '../../domains/rendererContent/textRenderKindCatalog.ts'
+import { BUILTIN_TOOL_RENDER_KINDS } from '../../domains/rendererContent/toolRenderKindCatalog.ts'
 import { BUILTIN_PYLON_RENDERERS_ID } from './productPluginIds.ts'
 import { mountFirstPartyStyleAssets } from './firstPartyStyleRuntime.ts'
 import { loadBuiltinPylonRendererStyles } from './packages/builtin.pylon-renderers/styleAssets.ts'
@@ -29,7 +30,9 @@ export function createBuiltinPylonRenderersPlugin(): BuiltinPluginDefinition {
       mountFirstPartyStyleAssets(BUILTIN_PYLON_RENDERERS_ID, context.identity.key, context.scope, loadBuiltinPylonRendererStyles())
       // C00：六个文本族 kind 先于 renderer 实现注册（kind 是内容契约，Slot 后挂）。
       // 经 shadow transaction 原子提交，message.user/assistant 的 fallback 链不出现中间态。
-      context.renderer.registerRenderKinds(BUILTIN_TEXT_RENDER_KINDS)
+      // One owner-scoped shadow batch: a second batch from the same runtime
+      // would correctly replace the first and accidentally drop text kinds.
+      context.renderer.registerRenderKinds([...BUILTIN_TEXT_RENDER_KINDS, ...BUILTIN_TOOL_RENDER_KINDS])
       for (const definition of rendererDefinitions) {
         const result = definition.activate(context)
         if (result && typeof (result as PromiseLike<unknown>).then === 'function') {

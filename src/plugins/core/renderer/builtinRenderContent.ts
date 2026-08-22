@@ -203,7 +203,7 @@ export function createBuiltinRendererContentPluginDefinitions(): BuiltinPluginDe
       if (definition.id === 'core.renderer.ansi') {
         for (const semantic of BUILTIN_SEMANTIC_RENDER_KINDS) renderer.registerRenderKind({
           ...semantic,
-          fallbackKind: 'content.unknown',
+          fallbackKind: semantic.id.startsWith('tool.') ? 'tool.generic' : 'content.unknown',
           priority: 900,
           fixture: { semanticKind: semantic.id },
           defaultTokens: {},

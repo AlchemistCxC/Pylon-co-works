@@ -1,9 +1,9 @@
-import { ErrorBoundary, For, Show, createEffect, createMemo, createSignal, onCleanup } from 'solid-js'
+import { ErrorBoundary, For, Index, Show, createEffect, createMemo, createSignal, onCleanup, onMount } from 'solid-js'
 import { buildChatRowDescriptors } from '../../components/chat/chatRowPipeline.ts'
 import { buildMessageLookups } from '../../components/chat/messageLookups.ts'
 import { prepareMessages } from '../../components/chat/messagePipeline.ts'
 import type { Message, RenderMessage } from '../../components/chat/messageTypes.ts'
-import type { WorkbenchDocument } from '../../domains/workbench/workbenchProjector.ts'
+import { toolInvocationSnapshot, type WorkbenchActivityNode, type WorkbenchDocument } from '../../domains/workbench/workbenchProjector.ts'
 import type { ContentPart } from '../../domains/workbench/content/contentPartSchema.ts'
 import type { InteractionRequest } from '../../domains/activity/interaction.ts'
 import type { MessageListItem } from '../../domains/workbench/messageListPort.ts'
@@ -26,6 +26,8 @@ import { BUILTIN_MEDIA_RESOLVER_OPTIONS } from './mediaAssetAdapter.ts'
 import { SolidPlanGoalContent } from './chat/content/PlanGoalContent.solid.tsx'
 import type { LifecycleState } from '../../domains/workbench/lifecycle/lifecycleModel.ts'
 import { SolidLifecycleCard, SolidSystemErrorCard, SolidSystemNoticeCard } from './chat/LifecycleCard.solid.tsx'
+import { SolidToolInvocationCard } from './chat/ToolInvocationCard.solid.tsx'
+import { measureToolAnchor } from './chat/domToolConnectorMeasurement.ts'
 
 export interface SolidWorkbenchAppProps {
   context: SolidWorkbenchContextValue
@@ -114,7 +116,7 @@ function WorkbenchContent(props: SolidWorkbenchAppProps) {
                 <div class="term-reasoning" data-state="running">{text()}</div>
               </div>}
             </Show>
-            <WorkbenchDocumentSurface document={document()} context={props.context} commands={props.context.commands} sessionId={props.context.input().sessionId} reducedMotion={props.context.input().reducedMotion ?? false} />
+            <WorkbenchDocumentSurface document={document()} context={props.context} commands={props.context.commands} sessionId={props.context.input().sessionId} reducedMotion={props.context.input().reducedMotion ?? false} connectorPort={connectorPort} />
             <Show when={snapshot().streamingText}>
               {text => <div class="term-row term-row-assistant" data-render-type="assistant">
                 <AssistantContent text={text()} appearance={appearance()} streaming />
@@ -176,6 +178,7 @@ function WorkbenchDocumentSurface(props: {
   commands: SolidWorkbenchContextValue['commands']
   sessionId: string | null
   reducedMotion: boolean
+  connectorPort: ReturnType<typeof createToolConnectorLayoutPort>
 }) {
   return (
     <Show when={props.document}>
@@ -229,17 +232,14 @@ function WorkbenchDocumentSurface(props: {
           </Show>
           <Show when={document().activities.length > 0}>
             <div class="solid-workbench-activities" aria-label="活动" data-activity-count={document().activities.length}>
-              <For each={document().activities}>{activity => (
-                <WorkbenchContentSlot
-                  nodeId={activity.id}
-                  kind={activity.semanticKind ?? (activity.kind === 'tool' ? 'tool.generic' : 'activity.generic')}
-                  payload={activity}
+              <Index each={document().activities}>{activity => (
+                <CanonicalActivitySlot
+                  activity={activity()}
+                  document={document()}
                   context={props.context}
-                  fallback={<div class="solid-workbench-activity" data-activity-id={activity.id} data-status={activity.status}>
-                    {activity.title || activity.kind} · {activity.status}
-                  </div>}
+                  connectorPort={props.connectorPort}
                 />
-              )}</For>
+              )}</Index>
             </div>
           </Show>
           <Show when={document().interactions.some(interaction => interaction.status === 'requested')}>
@@ -281,6 +281,90 @@ function WorkbenchDocumentSurface(props: {
       )}
     </Show>
   )
+}
+
+function CanonicalActivitySlot(props: {
+  activity: WorkbenchActivityNode
+  document: WorkbenchDocument
+  context: SolidWorkbenchContextValue
+  connectorPort: ReturnType<typeof createToolConnectorLayoutPort>
+}) {
+  let root: HTMLDivElement | undefined
+  let unregisterTool = () => {}
+  let observer: MutationObserver | undefined
+  const toolSnapshot = () => props.activity.kind === 'tool' ? toolInvocationSnapshot(props.document, props.activity.id) : null
+  const kind = () => activityRenderKind(props.activity, props.context)
+  const connectorAppearance = () => {
+    const host = props.context.appearanceSnapshot()
+    const resolved = props.context.hostPort?.appearance.resolve?.({
+      // Connector is owned by the C04 generic lifecycle seam even when a
+      // specialized tool kind falls back to the generic base Slot.
+      kind: 'tool.generic',
+      suiteId: props.context.activation?.suite.value.id ?? '',
+      slotId: 'builtin.solid.content.base',
+    })
+    return {
+      toolConnectorMode: resolved?.connectorMode === 'none' ? 'none' : host.toolConnectorMode,
+      toolConnectorColor: host.toolConnectorColor,
+      toolConnectorStyle: typeof resolved?.connectorStyle === 'string' ? resolved.connectorStyle : host.toolConnectorStyle,
+      toolConnectorWidth: typeof resolved?.connectorWidth === 'number' ? resolved.connectorWidth : host.toolConnectorWidth,
+      toolConnectorOpacity: typeof resolved?.connectorOpacity === 'number' ? resolved.connectorOpacity : host.toolConnectorOpacity,
+    }
+  }
+
+  createEffect(() => {
+    unregisterTool()
+    unregisterTool = () => {}
+    if (props.activity.kind !== 'tool') return
+    const id = props.activity.id
+    unregisterTool = props.connectorPort.registerTool(id, () => {
+      const head = root?.querySelector<HTMLButtonElement>('.term-tool-head')
+      const indicator = root?.querySelector<HTMLSpanElement>('.term-tool-indicator')
+      return measureToolAnchor(head ?? undefined, indicator ?? undefined)
+    })
+  })
+  onMount(() => {
+    if (typeof MutationObserver === 'undefined' || !root) return
+    observer = new MutationObserver(() => props.connectorPort.invalidate('items-changed'))
+    observer.observe(root, { childList: true, subtree: true })
+  })
+  onCleanup(() => {
+    observer?.disconnect()
+    unregisterTool()
+  })
+
+  return <>
+    <Show when={toolSnapshot()?.parentToolCallId}>
+      {parentId => <SolidToolConnector
+        connectorKey={`${parentId()}->${props.activity.id}`}
+        fromMessageId={parentId()}
+        toMessageId={props.activity.id}
+        status={toolConnectorTone(props.activity.status)}
+        visualState={normalizeToolVisualState(props.activity.status)}
+        appearance={connectorAppearance()}
+        layoutPort={props.connectorPort}
+      />}
+    </Show>
+    <div ref={root} class="solid-workbench-activity-slot" data-activity-id={props.activity.id}>
+      <WorkbenchContentSlot
+        nodeId={props.activity.id}
+        kind={kind()}
+        payload={toolSnapshot() ?? props.activity}
+        context={props.context}
+        fallback={toolSnapshot()
+          ? <SolidToolInvocationCard snapshot={toolSnapshot()!} appearance={{ ...props.context.appearanceSnapshot() }} renderKind="tool.generic" />
+          : <div class="solid-workbench-activity" data-activity-id={props.activity.id} data-status={props.activity.status}>
+              {props.activity.title || props.activity.kind} · {props.activity.status}
+            </div>}
+      />
+    </div>
+  </>
+}
+
+function toolConnectorTone(status: string): 'ok' | 'err' | 'run' {
+  if (status === 'completed' || status === 'success') return 'ok'
+  if (status === 'failed' || status === 'error' || status === 'cancelled') return 'err'
+  return 'run'
 }
 
 function lifecycleRenderKind(state: LifecycleState): string | undefined {
@@ -460,7 +544,20 @@ function WorkbenchContentSlot(props: {
 }) {
   const candidates = () => (props.context.activation?.slots.get(props.kind) ?? [])
     .filter(entry => entry.value.kinds.includes(props.kind))
-  return <Show when={candidates().length > 0} fallback={props.fallback}>
+  const hasCandidate = () => {
+    if (candidates().length > 0) return true
+    const activation = props.context.activation
+    if (!activation) return false
+    const visited = new Set<string>([props.kind])
+    let fallbackKind = activation.kinds.get(props.kind)?.value.fallbackKind
+    while (fallbackKind && !visited.has(fallbackKind)) {
+      visited.add(fallbackKind)
+      if ((activation.slots.get(fallbackKind) ?? []).some(entry => entry.value.kinds.includes(fallbackKind!))) return true
+      fallbackKind = activation.kinds.get(fallbackKind)?.value.fallbackKind
+    }
+    return false
+  }
+  return <Show when={hasCandidate()} fallback={props.fallback}>
     <SolidRendererSlotHost
       candidates={candidates()}
       node={{ nodeId: props.nodeId, kind: props.kind, revision: props.context.runtimeSnapshot().revision, payload: props.payload }}
@@ -468,6 +565,12 @@ function WorkbenchContentSlot(props: {
       fallback={props.fallback}
     />
   </Show>
+}
+
+function activityRenderKind(activity: WorkbenchActivityNode, context: SolidWorkbenchContextValue): string {
+  if (activity.kind !== 'tool') return activity.semanticKind ?? 'activity.generic'
+  const semanticKind = activity.semanticKind
+  return semanticKind && context.activation?.kinds.has(semanticKind) ? semanticKind : 'tool.generic'
 }
 
 function contentRenderKind(part: ContentPart): string {

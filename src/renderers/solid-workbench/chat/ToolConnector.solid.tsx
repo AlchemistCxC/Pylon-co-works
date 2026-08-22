@@ -74,6 +74,7 @@ export function SolidToolConnector(props: SolidToolConnectorProps) {
       ref={connector}
       class={`term-tool-connector term-tool-connector-style--${props.appearance.toolConnectorStyle || 'solid'} ${toolConnectorMotionClass(state())}`}
       data-tool-state={state()}
+      data-connector-mode={props.appearance.toolConnectorMode || 'fixed'}
       data-from-message-id={props.fromMessageId}
       data-to-message-id={props.toMessageId}
       style={{

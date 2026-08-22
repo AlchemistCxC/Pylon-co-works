@@ -89,14 +89,17 @@ function toolPayload(update: Record<string, unknown>, parts: readonly unknown[],
   const name = typeof pylonMeta?.toolName === 'string' && pylonMeta.toolName.trim()
     ? pylonMeta.toolName.trim()
     : typeof update.name === 'string' && update.name.trim() ? update.name.trim() : 'unknown'
+  const providerName = typeof update.name === 'string' && update.name.trim() ? update.name.trim() : name
   const semantic = resolveToolSemantic(context.provider, name, context.toolGeneration)
   const resolution = resolveToolType(name, typeof update.kind === 'string' ? update.kind : undefined, {
     provider: context.provider,
     generation: context.toolGeneration,
   })
+  const normalizedInput = update.input !== undefined ? update.input : update.rawInput
   return {
     toolCallId: toJsonValue(identityFromUpdate(update).toolCallId ?? ''),
     name: name,
+    providerName,
     canonicalName: semantic?.name ?? resolution.canonicalName,
     kind: resolution.kind,
     action: resolution.action,
@@ -104,8 +107,15 @@ function toolPayload(update: Record<string, unknown>, parts: readonly unknown[],
     provider: resolution.provider,
     ...(typeof update.title === 'string' ? { title: update.title } : {}),
     ...(resolution.capabilities ? { capabilities: toJsonValue(resolution.capabilities) } : {}),
+    ...(normalizedInput !== undefined ? { input: toJsonValue(normalizedInput) } : {}),
     ...(update.rawInput !== undefined ? { rawInput: toJsonValue(update.rawInput) } : {}),
     ...(update.rawOutput !== undefined ? { rawOutput: toJsonValue(update.rawOutput) } : {}),
+    ...(Array.isArray(update.locations) ? { locations: toJsonValue(update.locations) } : {}),
+    ...(update.progress !== undefined ? { progress: toJsonValue(update.progress) } : {}),
+    ...(typeof update.durationMs === 'number' && Number.isFinite(update.durationMs) && update.durationMs >= 0
+      ? { durationMs: update.durationMs }
+      : {}),
+    ...(update.error !== undefined ? { error: toJsonValue(update.error) } : {}),
     ...(typeof update.status === 'string' ? { status: update.status } : {}),
     ...(parts.length > 0 ? { parts: toJsonValue(parts) } : {}),
     ...(typeof claudeMeta?.parentToolUseId === 'string' ? { parentToolUseId: claudeMeta.parentToolUseId } : {}),

@@ -13,6 +13,8 @@ import {
   readableLifecycleLines,
   type NormalizedError,
 } from '../../domains/workbench/lifecycle/lifecycleModel.ts'
+import { toolInvocationSnapshot, type ToolInvocationSnapshot } from '../../domains/workbench/workbenchProjector.ts'
+import { normalizeToolStatus, toolStatePresentation } from '../../domains/tool/status.ts'
 
 export interface WorkbenchFatalFailure {
   readonly suiteId: string
@@ -83,6 +85,10 @@ export default function ReactWorkbenchFatalFallback(props: {
           }, null, 2)}</pre>
         </details>}
       </section>}
+      {document?.activities.filter(activity => activity.kind === 'tool').map(activity => {
+        const snapshot = toolInvocationSnapshot(document, activity.id)
+        return snapshot && <ReactFallbackTool key={snapshot.id} snapshot={snapshot} />
+      })}
       <div className="react-workbench-fatal-history" aria-label="会话历史">
         {document?.messages.map(message => <article key={message.id} data-message-role={message.role}>
           <span>{message.role === 'user' ? 'User' : message.role === 'reasoning' ? 'Reasoning' : 'Assistant'}</span>
@@ -97,6 +103,58 @@ export default function ReactWorkbenchFatalFallback(props: {
       </div>
     </section>
   )
+}
+
+function ReactFallbackTool({ snapshot }: { snapshot: ToolInvocationSnapshot }) {
+  const displayName = snapshot.title || snapshot.canonicalName || snapshot.name || '未知工具'
+  const presentation = toolStatePresentation(normalizeToolStatus(snapshot.status ?? snapshot.result?.status), Boolean(snapshot.result))
+  const progress = fallbackToolProgress(snapshot.progress)
+  const duration = fallbackToolDuration(snapshot.result?.durationMs)
+  const parts = Array.isArray(snapshot.result?.parts)
+    ? snapshot.result.parts.filter((part): part is ContentPart => Boolean(part && typeof part === 'object' && !Array.isArray(part) && typeof (part as { kind?: unknown }).kind === 'string'))
+    : []
+  return <section role="status" aria-label={`工具 fallback：${displayName}，${presentation.label}`}
+    className="react-workbench-fatal-tool" data-tool-state={presentation.state}>
+    <strong>{displayName}</strong>
+    {snapshot.name && snapshot.name !== displayName && <span>{snapshot.name}</span>}
+    <span>{presentation.label}{duration && ` · ${duration}`}</span>
+    {snapshot.input !== undefined && <><span>输入</span><pre>{fallbackJson(snapshot.input)}</pre></>}
+    {progress && <><span>进度</span><pre>{progress}</pre></>}
+    {parts.length > 0 && <section aria-label="工具输出 fallback">
+      <span>输出</span>
+      {parts.map((part, index) => 'text' in part && typeof part.text === 'string'
+        ? <pre key={index}>{part.text}</pre>
+        : <ReactFallbackContentPart key={index} part={part} />)}
+    </section>}
+    {snapshot.result?.error && <section role="alert">
+      <span>错误</span><pre>{snapshot.result.error.userSummary}</pre>
+      {snapshot.result.error.code && <small>code: {snapshot.result.error.code}</small>}
+      {snapshot.result.error.technicalMessage && snapshot.result.error.technicalMessage !== snapshot.result.error.userSummary
+        && <details><summary>技术细节</summary><pre>{snapshot.result.error.technicalMessage}</pre></details>}
+    </section>}
+  </section>
+}
+
+function fallbackToolProgress(value: unknown): string {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return value === undefined ? '' : fallbackJson(value)
+  const progress = value as Record<string, unknown>
+  if (typeof progress.completed === 'number' && typeof progress.total === 'number') {
+    const suffix = typeof progress.message === 'string' && progress.message ? ` · ${progress.message}` : ''
+    return `${progress.completed} / ${progress.total}${suffix}`
+  }
+  return fallbackJson(value)
+}
+
+function fallbackToolDuration(value: number | undefined): string {
+  if (value === undefined || !Number.isFinite(value) || value < 0) return ''
+  if (value < 1000) return `${Math.round(value)}ms`
+  const seconds = value / 1000
+  return `${Number.isInteger(seconds) ? seconds : seconds.toFixed(1)}s`
+}
+
+function fallbackJson(value: unknown): string {
+  try { return JSON.stringify(value, null, 2) }
+  catch { return '[unavailable]' }
 }
 
 function ReactFallbackSystemError(props: {

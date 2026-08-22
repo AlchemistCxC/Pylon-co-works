@@ -16,6 +16,9 @@ import { isValidPlanContentInput } from '../../../domains/workbench/plan/goalMod
 import { SolidPlanGoalContent } from './content/PlanGoalContent.solid.tsx'
 import { isValidLifecycleStateInput, isValidNormalizedErrorInput, isValidSystemNoticeInput } from '../../../domains/workbench/lifecycle/lifecycleModel.ts'
 import { SolidLifecycleCard, SolidSystemErrorCard, SolidSystemNoticeCard } from './LifecycleCard.solid.tsx'
+import { isToolInvocationSnapshotInput } from '../../../domains/rendererContent/toolRenderKindCatalog.ts'
+import type { ToolInvocationSnapshot } from '../../../domains/workbench/workbenchProjector.ts'
+import { SolidToolInvocationCard } from './ToolInvocationCard.solid.tsx'
 
 export function BuiltinSolidContentSlot(props: {
   snapshot: RenderNodeSnapshot
@@ -173,6 +176,14 @@ export function BuiltinSolidContentSlot(props: {
             reducedMotion: props.appearance.reducedMotion === true,
           }}
         />
+      </Match>
+      <Match when={kind().startsWith('tool.')}>
+        <Show
+          when={isToolInvocationSnapshotInput(props.snapshot.payload) ? props.snapshot.payload as ToolInvocationSnapshot : undefined}
+          fallback={<pre class="solid-content-unknown" data-content-kind={kind()}>Invalid tool snapshot</pre>}
+        >
+          {snapshot => <SolidToolInvocationCard snapshot={snapshot()} appearance={props.appearance} renderKind={kind()} />}
+        </Show>
       </Match>
       <Match when={kind() === 'content.plan'}>
         <Show
