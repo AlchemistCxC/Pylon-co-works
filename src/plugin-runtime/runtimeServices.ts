@@ -3,6 +3,7 @@ import { PluginEventBus } from './events/pluginEventBus.ts'
 import { HookRuntime } from './hooks/hookRuntime.ts'
 import { RegistryHub } from './registry/registryHub.ts'
 import { RendererRegistry } from './renderers/rendererRegistry.ts'
+import { createRendererSettingsStore, type RendererSettingsStore } from './renderers/rendererSettingsStore.ts'
 import { PluginUiRegistry } from './ui/pluginUiRegistry.ts'
 import { PluginServiceRegistry } from './services/pluginServiceRegistry.ts'
 import { AgentSidebarRegistry } from './sidebar/sidebarRegistry.ts'
@@ -23,11 +24,13 @@ import type { RuntimeRegistries } from './pluginHostServices.ts'
 
 export interface RuntimeServices extends RuntimeRegistries {
   readonly hookRuntime: HookRuntime
+  readonly rendererSettingsStore: RendererSettingsStore
 }
 
 export interface CreateRuntimeServicesOptions {
   hookRuntime?: HookRuntime
   workspaceRegistry?: WorkspaceRegistryStore
+  rendererSettingsStore?: RendererSettingsStore
 }
 
 export function createRuntimeServices(options: CreateRuntimeServicesOptions = {}): RuntimeServices {
@@ -37,6 +40,9 @@ export function createRuntimeServices(options: CreateRuntimeServicesOptions = {}
     eventBus: new PluginEventBus(),
     hookRuntime: options.hookRuntime ?? new HookRuntime(),
     rendererRegistry: new RendererRegistry(),
+    rendererSettingsStore: options.rendererSettingsStore ?? createRendererSettingsStore({
+      storage: typeof localStorage === 'undefined' ? undefined : localStorage,
+    }),
     pluginUiRegistry: new PluginUiRegistry(),
     pluginServiceRegistry: new PluginServiceRegistry(),
     agentSidebarRegistry: new AgentSidebarRegistry(),
@@ -93,6 +99,10 @@ export function getHookRuntime(): HookRuntime {
 
 export function getRendererRegistry(): RendererRegistry {
   return runtimeServices.rendererRegistry
+}
+
+export function getRendererSettingsStore(): RendererSettingsStore {
+  return runtimeServices.rendererSettingsStore
 }
 
 export function getPluginUiRegistry(): PluginUiRegistry {

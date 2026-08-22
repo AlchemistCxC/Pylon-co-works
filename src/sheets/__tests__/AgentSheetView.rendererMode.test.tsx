@@ -6,7 +6,7 @@ import { resetStores } from '../../test/resetStores.ts'
 import AgentSheetView from '../AgentSheetView.tsx'
 import { useInterfaceModeStore } from '../../domains/interface/interfaceModeStore.ts'
 import { activateBuiltinPlugin, getPackageInstallationService, getPluginRuntime } from '../../plugin-runtime/pluginCompositionRoot.ts'
-import { getRendererRegistry } from '../../plugin-runtime/runtimeServices.ts'
+import { getPresentationProfileRegistry, getRendererRegistry, getRendererSettingsStore } from '../../plugin-runtime/runtimeServices.ts'
 import { createPluginIdentity } from '../../plugin-runtime/pluginIdentity.ts'
 import { usePresentationPreferenceStore } from '../../domains/presentation/presentationPreferenceStore.ts'
 import { useIdentityStore, type Session } from '../../identityStore.ts'
@@ -120,6 +120,68 @@ describe('AgentSheetView renderer mode context', () => {
 
     expect(await screen.findByText('base slot answer')).toBeTruthy()
     expect(container.querySelector('[data-renderer-slot-id="builtin.solid.content.base"]')).not.toBeNull()
+  })
+
+  it('C00 kind 设置经共享 store 与 Host Port 实时作用于生产 content Slot', async () => {
+    const settings = getRendererSettingsStore()
+    settings.reset()
+    settings.setOverride('kind.content.text.fontSize', 22)
+    useIdentityStore.setState({ sessions: [session('session-1', 'local:a')] })
+    useWorkspaceStore.setState(state => ({ workspaceSheets: { ...state.workspaceSheets, activeSheetId: 'agent-sheet' } }))
+    const { container } = render(<AgentSheetView sheet={sheet({ sidebarMode: 'work' })} ctx={ctx} />)
+    await screen.findByLabelText('Solid Agent Workbench', {}, { timeout: 5_000 })
+    publishPluginEvent(normalizeRawEvent(
+      { update: { sessionUpdate: 'agent_message_chunk', content: { type: 'text', text: 'configured content' } } },
+      { owner: { profileId: 'profile-a', agentId: 'peri', localSessionId: 'local:a' }, clientGeneration: 1, sequence: 1, receivedAt: '2026-08-22T00:00:01.000Z' },
+    ).event)
+
+    const configured = await waitFor(() => {
+      const node = container.querySelector<HTMLElement>('[data-content-kind="content.text"]')
+      expect(node).not.toBeNull()
+      expect(node!.style.fontSize).toBe('22px')
+      return node!
+    })
+    settings.setOverride('kind.content.text.fontSize', 18)
+    await waitFor(() => expect(configured.style.fontSize).toBe('18px'))
+    expect(container.querySelector('[data-content-kind="content.text"]')).toBe(configured)
+    settings.reset()
+  })
+
+  it('生产 content Slot 遵循 kind default < Profile < user < session preview', async () => {
+    const profile = getPresentationProfileRegistry().register(
+      createPluginIdentity('test.c00-profile', 'runtime'),
+      {
+        id: 'test.c00-profile', label: 'C00 profile', family: 'custom', tokens: {},
+        kindTokens: { 'content.text': { fontSize: 16 } },
+      },
+    )
+    const settings = getRendererSettingsStore()
+    try {
+      settings.reset()
+      settings.setSessionPreview({})
+      usePresentationPreferenceStore.setState({ activeProfileId: 'test.c00-profile' })
+      useIdentityStore.setState({ sessions: [session('session-1', 'local:a')] })
+      useWorkspaceStore.setState(state => ({ workspaceSheets: { ...state.workspaceSheets, activeSheetId: 'agent-sheet' } }))
+      const { container } = render(<AgentSheetView sheet={sheet({ sidebarMode: 'work' })} ctx={ctx} />)
+      await screen.findByLabelText('Solid Agent Workbench', {}, { timeout: 5_000 })
+      publishPluginEvent(normalizeRawEvent(
+        { update: { sessionUpdate: 'agent_message_chunk', content: { type: 'text', text: 'profile content' } } },
+        { owner: { profileId: 'profile-a', agentId: 'peri', localSessionId: 'local:a' }, clientGeneration: 1, sequence: 1, receivedAt: '2026-08-22T00:00:01.000Z' },
+      ).event)
+      const node = await waitFor(() => {
+        const value = container.querySelector<HTMLElement>('[data-content-kind="content.text"]')
+        expect(value?.style.fontSize).toBe('16px')
+        return value!
+      })
+      settings.setOverride('kind.content.text.fontSize', 18)
+      await waitFor(() => expect(node.style.fontSize).toBe('18px'))
+      settings.setSessionPreview({ 'kind.content.text.fontSize': 20 })
+      await waitFor(() => expect(node.style.fontSize).toBe('20px'))
+    } finally {
+      settings.setSessionPreview({})
+      settings.reset()
+      await profile.dispose()
+    }
   })
 
   it('切换 Session 只 update 当前 Suite instance，不重建 renderer', async () => {
@@ -394,6 +456,9 @@ describe('AgentSheetView renderer mode context', () => {
 
       expect(await screen.findByText('content slot: part payload')).toBeTruthy()
       expect(container.querySelector('[data-message-role="assistant"]')).not.toBeNull()
+      await registration.dispose()
+      await waitFor(() => expect(container.querySelector('[data-production-content-slot="true"]')).toBeNull())
+      expect(await screen.findByText('part payload')).toBeTruthy()
     } finally {
       await registration.dispose()
     }

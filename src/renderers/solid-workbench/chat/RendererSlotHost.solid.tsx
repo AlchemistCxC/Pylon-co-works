@@ -1,5 +1,5 @@
 import { Show, createEffect, createSignal, onCleanup, onMount, type JSX } from 'solid-js'
-import type { RenderCommandPort, RenderNodeSnapshot, RenderSurface } from '../../../contracts/messageRenderer.ts'
+import type { RenderAppearanceSnapshot, RenderCommandPort, RenderNodeSnapshot, RenderSurface } from '../../../contracts/messageRenderer.ts'
 import { executeRendererSemanticCommand, isRenderSemanticCommand } from '../../../host/renderer-suite/rendererSemanticCommand.ts'
 import type { RendererSlotContribution } from '../../../plugin-runtime/renderers/rendererSuiteTypes.ts'
 import type { RegistryEntry } from '../../../plugin-runtime/registry/types.ts'
@@ -112,7 +112,12 @@ export function SolidRendererSlotHost(props: {
       try {
         if (!entry.value.canRender(node)) continue
         const candidate = entry.value.createSurface(node)
-        const candidateHandle = candidate.mount(container, node, { ...props.context.appearanceSnapshot() }, commands)
+        const candidateAppearance = props.context.hostPort?.appearance.resolve?.({
+          kind,
+          suiteId: props.context.activation?.suite.value.id ?? '',
+          slotId: entry.value.id,
+        }) ?? { ...props.context.appearanceSnapshot() }
+        const candidateHandle = candidate.mount(container, node, candidateAppearance, commands)
         currentIndex = index
         currentEntry = entry
         currentKind = kind
@@ -168,10 +173,15 @@ export function SolidRendererSlotHost(props: {
 
   createEffect(() => {
     const node = props.node
-    const appearance = props.context.appearanceSnapshot()
+    const hostAppearance = props.context.appearanceSnapshot()
+    const appearance: RenderAppearanceSnapshot = props.context.hostPort?.appearance.resolve?.({
+      kind: currentKind,
+      suiteId: props.context.activation?.suite.value.id ?? '',
+      slotId: currentEntry?.value.id ?? '',
+    }) ?? { ...hostAppearance } as RenderAppearanceSnapshot
     if (!surface || !surfaceMounted) return
     const resolvedNode = currentKind === node.kind ? node : { ...node, kind: currentKind }
-    try { surface.update(handle, resolvedNode, { ...appearance }) } catch (error) { recover(error, 'update') }
+    try { surface.update(handle, resolvedNode, appearance) } catch (error) { recover(error, 'update') }
   })
 
   onCleanup(() => {

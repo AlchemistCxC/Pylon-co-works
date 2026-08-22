@@ -4,7 +4,8 @@ import { useIdentityStore } from '../../identityStore.ts'
 import { RendererSuiteHost } from '../../host/renderer-suite/rendererSuiteHost.ts'
 import { resolveRendererActivation } from '../../plugin-runtime/renderers/rendererActivationResolver.ts'
 import type { RendererActivationSnapshot } from '../../plugin-runtime/renderers/rendererSuiteTypes.ts'
-import { getRendererRegistry } from '../../plugin-runtime/runtimeServices.ts'
+import { getPluginSettingOptionsRegistry, getPresentationProfileRegistry, getRendererRegistry, getRendererSettingsStore } from '../../plugin-runtime/runtimeServices.ts'
+import { resolveProductionRenderAppearance } from '../../plugin-runtime/renderers/productionRenderAppearance.ts'
 import { usePresentationPreferenceStore } from '../../domains/presentation/presentationPreferenceStore.ts'
 import { createWorkbenchHostPort, type WorkbenchHostPort } from '../../renderers/solid-workbench/workbenchHostPort.ts'
 import type { WorkbenchMountInput } from '../../renderers/solid-workbench/workbenchContracts.ts'
@@ -39,6 +40,9 @@ export default function AgentRendererSuiteWorkbench(props: AgentRendererSuiteWor
   const session = sessions.find(item => item.id === props.ctx.activeSession)
   const selectedSuiteId = usePresentationPreferenceStore(state => state.rendererSuiteIdByMode[props.modeId])
   const registry = getRendererRegistry()
+  const rendererSettings = getRendererSettingsStore()
+  const presentationProfiles = getPresentationProfileRegistry()
+  const rendererSettingOptions = getPluginSettingOptionsRegistry()
   const catalog = useSyncExternalStore(listener => registry.subscribe(listener), () => registry.snapshot(), () => registry.snapshot())
   const input = useMemo<WorkbenchMountInput>(() => Object.freeze({
     sheetId: props.sheet.id, sessionOwnerKey: ownerKey(session), sessionId: props.ctx.activeSession,
@@ -146,6 +150,29 @@ export default function AgentRendererSuiteWorkbench(props: AgentRendererSuiteWor
         // Suite identity is fixed for the lifetime of this port. Session binding
         // may advance, but a preparing candidate cannot retarget the old instance.
         binding: () => ({ suiteId, sheetId: props.sheet.id, sessionOwnerKey: inputRef.current.sessionOwnerKey, sessionId: inputRef.current.sessionId }),
+        renderAppearance: {
+          resolve: (request, hostAppearance) => {
+            const profileId = usePresentationPreferenceStore.getState().activeProfileId
+            const profile = presentationProfiles.resolve(profileId)?.value
+            return resolveProductionRenderAppearance({
+              hostAppearance,
+              catalog: catalogRef.current,
+              settings: rendererSettings.getSnapshot(),
+              profileKindTokens: profile?.kindTokens?.[request.kind],
+              optionEntries: rendererSettingOptions.getSnapshot().entries,
+              ...request,
+            })
+          },
+          subscribe(listener) {
+            const unsubscribers = [
+              rendererSettings.subscribe(listener),
+              presentationProfiles.subscribe(listener),
+              rendererSettingOptions.subscribe(listener),
+              usePresentationPreferenceStore.subscribe(listener),
+            ]
+            return () => unsubscribers.forEach(unsubscribe => unsubscribe())
+          },
+        },
         diagnostics: diagnostic => {
           if (diagnostic.recoverability !== 'retry' && diagnostic.recoverability !== 'fallback') return
           if (diagnostic.recoverability === 'retry') return
@@ -220,7 +247,7 @@ export default function AgentRendererSuiteWorkbench(props: AgentRendererSuiteWor
       retryOrFallback(target, next)
     })
     void host.mount(activation)
-  }, [activation, activationKey, props.sheet.id, sessionRuntime])
+  }, [activation, activationKey, presentationProfiles, props.sheet.id, rendererSettingOptions, rendererSettings, sessionRuntime])
 
   useEffect(() => () => {
     const host = hostRef.current

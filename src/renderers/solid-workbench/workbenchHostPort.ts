@@ -3,6 +3,7 @@ import type { SessionUiKey, SessionUiStore } from '../../domains/workbench/sessi
 import type { WorkbenchCommandFacade, SendCommand, SendResult, CancelResult, WorkbenchAttachment, SessionCreateInput, ExportSessionInput, CommandResult } from '../../domains/workbench/workbenchCommandFacade.ts'
 import type { WorkbenchDocument, WorkbenchMessage, WorkbenchActivityNode, WorkbenchInteraction, WorkbenchTimelineEntry } from '../../domains/workbench/workbenchProjector.ts'
 import type { WorkbenchRuntime, WorkbenchRuntimeSlice } from '../../domains/workbench/workbenchRuntime.ts'
+import type { RenderAppearanceSnapshot } from '../../contracts/messageRenderer.ts'
 
 export type WorkbenchDocumentSlice = 'document' | 'timeline' | 'messages' | 'activities' | 'interactions' | 'session' | 'usage' | 'diagnostics'
 
@@ -16,6 +17,7 @@ export interface WorkbenchDocumentReader {
 export interface ResolvedAppearanceReader {
   getSnapshot(): WorkbenchAppearanceSnapshot
   subscribe(listener: () => void): () => void
+  resolve?(request: { readonly kind: string; readonly suiteId: string; readonly slotId: string }): RenderAppearanceSnapshot
 }
 
 export interface SessionUiPort {
@@ -113,6 +115,10 @@ export interface WorkbenchHostPortInput {
   readonly sessionId: string | null
   readonly capabilities?: WorkbenchCapabilitySnapshot
   readonly diagnostics?: ((diagnostic: RendererDiagnosticContext) => void) | Pick<RendererDiagnosticPort, 'report'>
+  readonly renderAppearance?: {
+    resolve(request: { readonly kind: string; readonly suiteId: string; readonly slotId: string }, host: WorkbenchAppearanceSnapshot): RenderAppearanceSnapshot
+    subscribe(listener: () => void): () => void
+  }
   /** Stable Host Port may follow session/Suite changes without replacing renderer instances. */
   readonly binding?: () => {
     readonly suiteId?: string
@@ -135,8 +141,21 @@ function createDocumentReader(runtime: WorkbenchRuntime): WorkbenchDocumentReade
   }
 }
 
-function createAppearanceReader(appearance: WorkbenchAppearanceStore): ResolvedAppearanceReader {
-  return { getSnapshot: () => appearance.getSnapshot(), subscribe: listener => appearance.subscribe(listener) }
+function createAppearanceReader(input: WorkbenchHostPortInput): ResolvedAppearanceReader {
+  let revision = 0
+  const getSnapshot = () => Object.freeze({ ...input.appearance.getSnapshot(), rendererSettingsRevision: revision })
+  return {
+    getSnapshot,
+    subscribe(listener) {
+      const notify = () => { revision += 1; listener() }
+      const unsubscribeHost = input.appearance.subscribe(notify)
+      const unsubscribeRenderer = input.renderAppearance?.subscribe(notify) ?? (() => {})
+      return () => { unsubscribeHost(); unsubscribeRenderer() }
+    },
+    resolve: input.renderAppearance
+      ? request => input.renderAppearance!.resolve(request, getSnapshot())
+      : undefined,
+  }
 }
 
 function createSessionUiPort(store: SessionUiStore, namespace: () => string): SessionUiPort {
@@ -231,7 +250,7 @@ export function createWorkbenchHostPort(input: WorkbenchHostPortInput): Workbenc
   }
   return Object.freeze({
     document: createDocumentReader(input.runtime),
-    appearance: createAppearanceReader(input.appearance),
+    appearance: createAppearanceReader(input),
     sessionUi: createSessionUiPort(input.sessionUi, namespace),
     commands: createCommandPort(input.commands, capabilities),
     capabilities,

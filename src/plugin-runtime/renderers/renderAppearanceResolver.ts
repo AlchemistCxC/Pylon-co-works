@@ -39,10 +39,10 @@ function fieldsOf(schema: RendererSettingsSchema): Map<string, RenderSettingFiel
 function validValue(field: RenderSettingField, value: RendererSettingValue, available?: readonly string[]): boolean {
   switch (field.type) {
     case 'choice':
-      return typeof value === 'string' && field.options.some(option => option.value === value) && (available === undefined || available.includes(value))
+      return typeof value === 'string' && (available ?? field.options.map(option => option.value)).includes(value)
     case 'multi-choice': {
       if (!Array.isArray(value) || !value.every(item => typeof item === 'string')) return false
-      const options = new Set(field.options.map(option => option.value))
+      const options = new Set(available ?? field.options.map(option => option.value))
       if (!value.every(item => options.has(item) && (available === undefined || available.includes(item)))) return false
       return (field.minSelected === undefined || value.length >= field.minSelected) && (field.maxSelected === undefined || value.length <= field.maxSelected)
     }
@@ -63,7 +63,7 @@ function validValue(field: RenderSettingField, value: RendererSettingValue, avai
 
 function optionUnavailable(field: RenderSettingField, value: RendererSettingValue, available?: readonly string[]): boolean {
   if (!available) return false
-  if (field.type === 'choice') return typeof value === 'string' && field.options.some(option => option.value === value) && !available.includes(value)
+  if (field.type === 'choice') return typeof value === 'string' && !available.includes(value)
   if (field.type === 'multi-choice' && Array.isArray(value)) return value.some(item => typeof item === 'string' && !available.includes(item))
   return false
 }

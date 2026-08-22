@@ -1,8 +1,8 @@
 import { useMemo, useSyncExternalStore } from 'react'
-import { getPluginSettingOptionsRegistry, getRendererRegistry } from '../../plugin-runtime/runtimeServices.ts'
+import { getPluginSettingOptionsRegistry, getRendererRegistry, getRendererSettingsStore } from '../../plugin-runtime/runtimeServices.ts'
 import { resolvePluginSettingOptions } from '../../plugin-runtime/settings/pluginSettingOptionsRegistry.ts'
 import type { PluginSettingOption } from '../../plugin-runtime/settings/pluginSettingsTypes.ts'
-import { createRendererSettingsStore, type RendererSettingsStore } from '../../plugin-runtime/renderers/rendererSettingsStore.ts'
+import type { RendererSettingsStore } from '../../plugin-runtime/renderers/rendererSettingsStore.ts'
 import { settingFieldKey, type RenderSettingField, type RendererSettingValue, type RendererSettingsSchema } from '../../plugin-runtime/renderers/rendererSettingsTypes.ts'
 import { evaluateRenderSettingCondition, default as RendererSettingField } from './RendererSettingField.tsx'
 import RendererSuitePicker from './RendererSuitePicker.tsx'
@@ -24,10 +24,6 @@ export interface RendererSettingsPanelProps {
   readonly store?: RendererSettingsStore
   readonly search?: string
 }
-
-const defaultStore = createRendererSettingsStore({
-  storage: typeof localStorage === 'undefined' ? undefined : localStorage,
-})
 
 function catalogSchemas(activeSuiteId?: string): readonly RendererSettingsSchemaEntry[] {
   const snapshot = getRendererRegistry().snapshot()
@@ -55,7 +51,7 @@ function effectiveValues(entry: RendererSettingsSchemaEntry, snapshot: ReturnTyp
 }
 
 export default function RendererSettingsPanel(props: RendererSettingsPanelProps) {
-  const store = props.store ?? defaultStore
+  const store = props.store ?? getRendererSettingsStore()
   const storeSnapshot = useSyncExternalStore(store.subscribe, store.getSnapshot, store.getSnapshot)
   const registrySnapshot = useSyncExternalStore(listener => getRendererRegistry().subscribe(listener), () => getRendererRegistry().snapshot(), () => getRendererRegistry().snapshot())
   const optionSnapshot = useSyncExternalStore(listener => getPluginSettingOptionsRegistry().subscribe(listener), () => getPluginSettingOptionsRegistry().getSnapshot(), () => getPluginSettingOptionsRegistry().getSnapshot())
@@ -75,7 +71,8 @@ export default function RendererSettingsPanel(props: RendererSettingsPanelProps)
     return entry.schema.groups.flatMap(group => {
       const fields = group.fields.filter(field => {
         const target = `${namespace}.${settingFieldKey(field)}`
-        const options = 'options' in field ? resolvePluginSettingOptions(target, field.options, optionSnapshot.entries) : []
+        const optionTarget = 'optionTarget' in field ? field.optionTarget ?? target : target
+        const options = 'options' in field ? resolvePluginSettingOptions(optionTarget, field.options, optionSnapshot.entries) : []
         const matches = fieldMatches(field, query, options)
         return matches && (!field.showIf || evaluateRenderSettingCondition(field.showIf, values) || Boolean(query && matches))
       })
@@ -93,7 +90,8 @@ export default function RendererSettingsPanel(props: RendererSettingsPanelProps)
       {fields.map(field => {
         const key = settingFieldKey(field)
         const target = `${namespace}.${key}`
-        const options = 'options' in field ? resolvePluginSettingOptions(target, field.options, optionSnapshot.entries) : []
+        const optionTarget = 'optionTarget' in field ? field.optionTarget ?? target : target
+        const options = 'options' in field ? resolvePluginSettingOptions(optionTarget, field.options, optionSnapshot.entries) : []
         const hiddenByCondition = field.showIf && !evaluateRenderSettingCondition(field.showIf, values)
         const storedValue = storeSnapshot.values[target]
         const unavailableCurrent = 'options' in field && typeof storedValue === 'string' && !options.some(option => option.value === storedValue)

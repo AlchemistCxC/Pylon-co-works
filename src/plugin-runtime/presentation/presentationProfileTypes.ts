@@ -1,4 +1,5 @@
 import type { RegistryEntry } from '../registry/types.ts'
+import type { RendererSettingValue } from '../renderers/rendererSettingsTypes.ts'
 
 export type PresentationProfileFamily = 'terminal' | 'gui' | 'reading' | 'hybrid' | 'custom'
 
@@ -25,6 +26,7 @@ export interface PresentationProfileContribution {
   readonly interfaceMode?: string
   readonly order?: number
   readonly tokens: Readonly<Record<string, unknown>>
+  readonly kindTokens?: Readonly<Record<string, Readonly<Record<string, RendererSettingValue>>>>
   readonly assets?: Readonly<PresentationProfileVisualAssets>
 }
 

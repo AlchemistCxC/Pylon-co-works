@@ -47,6 +47,20 @@ describe('SolidCodeBlock (C00)', () => {
     expect(copiedText).toBe('hello')
     expect(result.getByRole('button', { name: '已复制' })).toBeTruthy()
   })
+
+  it('applies resolved code appearance without changing the document payload', () => {
+    const code = Array.from({ length: 30 }, (_, index) => `line-${index}`).join('\n')
+    const result = render(() => <SolidCodeBlock
+      code={code} language="ts" maxLines={20}
+      showLanguage={false} showCopyButton={false} wrap="none" palette="solarized"
+    />)
+    const block = result.container.querySelector('.term-code-block')!
+    expect(block.getAttribute('data-wrap')).toBe('none')
+    expect(block.getAttribute('data-palette')).toBe('solarized')
+    expect(block.querySelector('.term-code-lang')).toBeNull()
+    expect(block.querySelector('.term-code-copy')).toBeNull()
+    expect(block.textContent).toContain('已折叠')
+  })
 })
 
 describe('SolidAnsiBlock (C00)', () => {
@@ -63,5 +77,27 @@ describe('SolidAnsiBlock (C00)', () => {
     const root = result.container.querySelector('.term-ansi-block')!
     expect(root.getAttribute('data-reduced-motion')).toBe('true')
     expect(root.getAttribute('aria-label')).toBe('OK')
+  })
+
+  it('renders validated 256/truecolor values instead of emitting unstyled dynamic class names', () => {
+    const result = render(() => <SolidAnsiBlock text={'\u001b[38;2;17;34;51mRGB\u001b[0m \u001b[48;5;196mBG\u001b[0m'} />)
+    const rgb = [...result.container.querySelectorAll<HTMLElement>('.term-ansi-block span')]
+      .find(node => node.textContent === 'RGB')!
+    const background = [...result.container.querySelectorAll<HTMLElement>('.term-ansi-block span')]
+      .find(node => node.textContent === 'BG')!
+    expect(rgb.style.color).toBe('rgb(17, 34, 51)')
+    expect(background.style.backgroundColor).toBe('rgb(255, 0, 0)')
+  })
+
+  it('applies resolved ANSI wrap, line cap, background and palette', () => {
+    const result = render(() => <SolidAnsiBlock
+      text={'one\ntwo'} wrap="none" maxLines={40} background="#112233" palette="accessible"
+    />)
+    const root = result.container.querySelector<HTMLElement>('.term-ansi-block')!
+    expect(root.getAttribute('data-wrap')).toBe('none')
+    expect(root.getAttribute('data-palette')).toBe('accessible')
+    expect(root.style.whiteSpace).toBe('pre')
+    expect(root.style.maxHeight).toBe('40em')
+    expect(root.style.backgroundColor).toBe('rgb(17, 34, 51)')
   })
 })

@@ -3,8 +3,19 @@ import type { PluginIdentity } from '../pluginIdentity.ts'
 import { ReactiveRegistryStore } from '../registry/reactiveRegistry.ts'
 import type { AsyncDisposable, RegistrySnapshot, RegistryTransaction } from '../registry/types.ts'
 import type { PresentationProfileContribution } from './presentationProfileTypes.ts'
+import type { RendererSettingValue } from '../renderers/rendererSettingsTypes.ts'
 
 const FAMILIES = new Set(['terminal', 'gui', 'reading', 'hybrid', 'custom'])
+
+function isRendererSettingValue(value: unknown, seen = new Set<unknown>()): boolean {
+  if (value === null || typeof value === 'string' || typeof value === 'boolean') return true
+  if (typeof value === 'number') return Number.isFinite(value)
+  if (!value || typeof value !== 'object' || seen.has(value)) return false
+  seen.add(value)
+  return Array.isArray(value)
+    ? value.every(item => isRendererSettingValue(item, seen))
+    : Object.values(value).every(item => isRendererSettingValue(item, seen))
+}
 
 export function validatePresentationProfile(
   contribution: PresentationProfileContribution,
@@ -27,9 +38,23 @@ export function validatePresentationProfile(
     if (normalized !== value) throw new Error(`Presentation profile token 无效：${contribution.id}.${key}`)
     tokens[key] = value
   }
+  const kindTokens: Record<string, Readonly<Record<string, RendererSettingValue>>> = {}
+  for (const [kind, values] of Object.entries(contribution.kindTokens ?? {})) {
+    if (!/^[A-Za-z0-9]+(?:[.-][A-Za-z0-9]+)+$/.test(kind)
+      || !values || typeof values !== 'object' || Array.isArray(values)) {
+      throw new Error(`Presentation profile kindTokens kind 非法：${contribution.id}.${kind}`)
+    }
+    for (const [key, value] of Object.entries(values)) {
+      if (!/^[A-Za-z][A-Za-z0-9_.-]*$/.test(key) || !isRendererSettingValue(value)) {
+        throw new Error(`Presentation profile kindTokens token 非法：${contribution.id}.${kind}.${key}`)
+      }
+    }
+    kindTokens[kind] = Object.freeze({ ...values })
+  }
   return Object.freeze({
     ...contribution,
     tokens: Object.freeze(tokens),
+    ...(contribution.kindTokens ? { kindTokens: Object.freeze(kindTokens) } : {}),
     ...(contribution.assets ? { assets: Object.freeze({ ...contribution.assets }) } : {}),
   })
 }

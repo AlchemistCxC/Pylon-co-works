@@ -4,9 +4,21 @@ import { stripAnsiControlSequences } from '../../../domains/rendererContent/text
 export interface SolidAnsiBlockProps {
   text: string
   reducedMotion?: boolean
+  wrap?: 'soft' | 'none'
+  maxLines?: number
+  background?: string
+  palette?: string
 }
 
-const CSS_HEX_CLASS = /^term-ansi-(?:fgc|bgc)-[0-9a-f]{3,6}$/
+const SAFE_CSS_HEX = /^#[0-9a-f]{6}$/i
+
+function safeCssHex(value: string | undefined): string | undefined {
+  return value && SAFE_CSS_HEX.test(value) ? value : undefined
+}
+
+function safeBackground(value: string | undefined): string | undefined {
+  return value === 'transparent' ? value : safeCssHex(value)
+}
 
 /**
  * C00：content.ansi 的 Solid surface。
@@ -22,27 +34,33 @@ export function SolidAnsiBlock(props: SolidAnsiBlockProps) {
     <div
       class="term-ansi-block"
       data-reduced-motion={props.reducedMotion ? 'true' : 'false'}
+      data-wrap={props.wrap ?? 'soft'}
+      data-palette={props.palette ?? 'terminal'}
       role="img"
       aria-label={plainText()}
       title={plainText()}
+      style={{
+        'white-space': props.wrap === 'none' ? 'pre' : 'pre-wrap',
+        'max-height': `${props.maxLines ?? 800}em`,
+        'overflow-y': 'auto',
+        'background-color': safeBackground(props.background),
+      }}
     >
       <For each={spans()}>{span => (
         <Show when={span.text} fallback={null}>
           {(() => {
             const classes: string[] = []
             if (span.fg) classes.push(`term-ansi-fg-${span.fg}`)
-            else if (span.fgCss) classes.push(`term-ansi-fgc-${span.fgCss.slice(1)}`)
             if (span.bg) classes.push(`term-ansi-bg-${span.bg}`)
-            else if (span.bgCss) classes.push(`term-ansi-bgc-${span.bgCss.slice(1)}`)
             if (span.bold) classes.push('term-ansi-bold')
             if (span.dim) classes.push('term-ansi-dim')
             if (span.italic) classes.push('term-ansi-italic')
             if (span.underline) classes.push('term-ansi-underline')
             const safeClasses = classes.filter(className => /^[a-z0-9-]+$/.test(className))
-            void CSS_HEX_CLASS
-            return safeClasses.length > 0
-              ? <span class={safeClasses.join(' ')}>{span.text}</span>
-              : <span>{span.text}</span>
+            return <span
+              class={safeClasses.length > 0 ? safeClasses.join(' ') : undefined}
+              style={{ color: safeCssHex(span.fgCss), 'background-color': safeCssHex(span.bgCss) }}
+            >{span.text}</span>
           })()}
         </Show>
       )}</For>

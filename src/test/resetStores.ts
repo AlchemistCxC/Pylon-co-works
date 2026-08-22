@@ -14,6 +14,7 @@ import { clearAllSessionUiState } from '../components/chat/sessionUiState'
 import { usePresentationPreferenceStore } from '../domains/presentation/presentationPreferenceStore.ts'
 import { useInterfaceModeStore } from '../domains/interface/interfaceModeStore.ts'
 import { useWorkspaceEntityStore } from '../workspaceEntityStore.ts'
+import { getRendererSettingsStore } from '../plugin-runtime/runtimeServices.ts'
 
 export function resetStores(): void {
   useWorkspaceStore.setState(useWorkspaceStore.getInitialState(), true)
@@ -23,6 +24,8 @@ export function resetStores(): void {
   usePresentationPreferenceStore.setState(usePresentationPreferenceStore.getInitialState(), true)
   useInterfaceModeStore.setState(useInterfaceModeStore.getInitialState(), true)
   useWorkspaceEntityStore.setState(useWorkspaceEntityStore.getInitialState(), true)
+  getRendererSettingsStore().setSessionPreview({})
+  getRendererSettingsStore().reset()
   registerChatController(null)
   clearAllSessionUiState()
 }

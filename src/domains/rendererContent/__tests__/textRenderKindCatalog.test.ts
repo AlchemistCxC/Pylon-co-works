@@ -65,4 +65,27 @@ describe('C00 builtin render kind catalog', () => {
     expect(kinds.get('message.user')!.validateInput({ role: 'user', parts: [] })).toBe(true)
     expect(kinds.get('message.user')!.validateInput({ role: 'assistant' })).toBe(false)
   })
+
+  it('publishes concrete C00 settings schemas instead of version-only placeholders', async () => {
+    const { ensureBuiltinTextRenderKinds } = await import('../textRenderKindCatalog.ts')
+    await ensureBuiltinTextRenderKinds()
+    const kinds = new Map(getRendererRegistry().snapshot().renderKinds.map(entry => [entry.value.id, entry.value]))
+
+    const markdown = kinds.get('content.markdown')!
+    expect(markdown.settings?.schemaVersion).toBe(markdown.settingsSchemaVersion)
+    expect(markdown.settings?.groups.flatMap(group => group.fields).map(field => field.key)).toEqual(
+      expect.arrayContaining(['fontFamily', 'fontSize', 'lineHeight', 'maxWidth', 'linkStyle']),
+    )
+
+    const code = kinds.get('content.code')!
+    expect(code.settings?.groups.flatMap(group => group.fields).map(field => field.key)).toEqual(
+      expect.arrayContaining(['wrap', 'maxLines', 'showLanguage', 'showCopyButton', 'palette']),
+    )
+    expect(code.defaultTokens).toMatchObject({ wrap: 'soft', maxLines: 400, showLanguage: true, showCopyButton: true })
+
+    const ansi = kinds.get('content.ansi')!
+    expect(ansi.settings?.groups.flatMap(group => group.fields).map(field => field.key)).toEqual(
+      expect.arrayContaining(['wrap', 'maxLines', 'background', 'palette']),
+    )
+  })
 })

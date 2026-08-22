@@ -352,6 +352,7 @@
 
 /* ── link ── */
 .term-link { color:var(--accent); text-decoration:underline; }
+.solid-content-kind[data-link-style='plain'] .term-link { text-decoration:none; }
 
 /* ── ANSI terminal output (anser) ── */
 .term-ansi { font-family:var(--mono); font-size:0.93em; line-height:1.6; white-space:pre-wrap; padding:var(--ui-space-2) 0; }

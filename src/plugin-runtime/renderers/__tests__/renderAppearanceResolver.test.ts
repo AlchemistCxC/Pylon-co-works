@@ -43,4 +43,14 @@ describe('render appearance resolver', () => {
     expect(result.unavailable.density).toBe('roomy')
     expect(result.diagnostics).toEqual(expect.arrayContaining([expect.objectContaining({ code: 'renderer.setting.unavailable', key: 'density' })]))
   })
+
+  it('接受 optionTarget 当前有效列表中新加入的插件候选值', () => {
+    const result = resolveRenderAppearance(input({
+      userOverrides: { density: 'experimental' },
+      sessionPreview: {},
+      availableOptions: { density: ['compact', 'roomy', 'experimental'] },
+    }))
+    expect(result.values.density).toBe('experimental')
+    expect(result.sources.density).toBe('user-override')
+  })
 })

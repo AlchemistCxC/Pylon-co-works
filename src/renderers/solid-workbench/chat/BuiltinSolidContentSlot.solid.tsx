@@ -25,19 +25,63 @@ export function BuiltinSolidContentSlot(props: {
   const execute = (type: string, payloadValue: unknown) => {
     void props.commands.execute({ type, payload: payloadValue })
   }
+  const numberSetting = (key: string, fallback: number) => typeof props.appearance[key] === 'number'
+    ? props.appearance[key] as number
+    : fallback
+  const stringSetting = (key: string, fallback: string) => typeof props.appearance[key] === 'string'
+    ? props.appearance[key] as string
+    : fallback
+  const booleanSetting = (key: string, fallback: boolean) => typeof props.appearance[key] === 'boolean'
+    ? props.appearance[key] as boolean
+    : fallback
+  const fontFamily = () => {
+    switch (props.appearance.fontFamily) {
+      case 'mono': return 'var(--mono)'
+      case 'sans': return 'var(--font)'
+      case 'serif': return 'serif'
+      default: return 'inherit'
+    }
+  }
+  const contentStyle = () => ({
+    'font-family': fontFamily(),
+    'font-size': `${numberSetting('fontSize', 14)}px`,
+    'line-height': String(numberSetting('lineHeight', 1.6)),
+    'max-width': `${numberSetting('maxWidth', 1600)}px`,
+  })
 
   return (
-    <Switch fallback={
-      <pre class="solid-content-unknown" data-content-kind={kind()}>{unknownSummary(props.snapshot.payload, kind())}</pre>
-    }>
+    <div
+      class="solid-content-kind"
+      data-content-kind={kind()}
+      data-link-style={stringSetting('linkStyle', 'underline')}
+      style={contentStyle()}
+    >
+      <Switch fallback={
+        <pre class="solid-content-unknown">{unknownSummary(props.snapshot.payload, kind())}</pre>
+      }>
       <Match when={kind() === 'content.text' || kind() === 'content.markdown'}>
         <MarkdownContent text={text()} />
       </Match>
       <Match when={kind() === 'content.code'}>
-        <SolidCodeBlock code={text()} language={typeof record().language === 'string' ? record().language as string : undefined} />
+        <SolidCodeBlock
+          code={text()}
+          language={typeof record().language === 'string' ? record().language as string : undefined}
+          maxLines={numberSetting('maxLines', 400)}
+          showLanguage={booleanSetting('showLanguage', true)}
+          showCopyButton={booleanSetting('showCopyButton', true)}
+          wrap={stringSetting('wrap', 'soft') === 'none' ? 'none' : 'soft'}
+          palette={stringSetting('palette', 'auto')}
+        />
       </Match>
       <Match when={kind() === 'content.ansi'}>
-        <SolidAnsiBlock text={text()} reducedMotion={props.appearance.reducedMotion === true} />
+        <SolidAnsiBlock
+          text={text()}
+          reducedMotion={props.appearance.reducedMotion === true}
+          wrap={stringSetting('wrap', 'soft') === 'none' ? 'none' : 'soft'}
+          maxLines={numberSetting('maxLines', 800)}
+          background={stringSetting('background', 'transparent')}
+          palette={stringSetting('palette', 'terminal')}
+        />
       </Match>
       <Match when={kind() === 'content.reasoning'}>
         <ReasoningBlock text={text()} running={record().state === 'running'} />
@@ -69,7 +113,8 @@ export function BuiltinSolidContentSlot(props: {
       <Match when={kind() === 'content.unknown'}>
         <pre class="solid-content-unknown" data-content-kind={kind()}>{unknownSummary(props.snapshot.payload, kind())}</pre>
       </Match>
-    </Switch>
+      </Switch>
+    </div>
   )
 }
 

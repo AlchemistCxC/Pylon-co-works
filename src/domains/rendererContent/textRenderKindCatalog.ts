@@ -6,6 +6,80 @@
  * 供内置 Suite 组装与设置页 schema 生成消费。
  */
 import type { RenderKindDefinition } from '../../plugin-runtime/renderers/rendererTypes.ts'
+import type { RendererSettingsSchema } from '../../plugin-runtime/renderers/rendererSettingsTypes.ts'
+
+const FONT_OPTIONS = Object.freeze([
+  { value: 'inherit', label: '跟随界面' },
+  { value: 'sans', label: '无衬线' },
+  { value: 'serif', label: '衬线' },
+  { value: 'mono', label: '等宽' },
+])
+
+const TEXT_SETTINGS = Object.freeze({
+  schemaVersion: 1,
+  groups: [{
+    id: 'typography', label: '文本排版', layout: 'grid', fields: [
+      { key: 'fontFamily', label: '字体', type: 'choice', presentation: 'select', options: FONT_OPTIONS, default: 'inherit' },
+      { key: 'fontSize', label: '字号', type: 'number', presentation: 'slider+input', min: 10, max: 32, step: 1, unit: 'px', default: 14 },
+      { key: 'lineHeight', label: '行高', type: 'number', presentation: 'slider+input', min: 1, max: 2.5, step: 0.1, default: 1.6 },
+      { key: 'maxWidth', label: '最大宽度', type: 'number', presentation: 'slider+input', min: 240, max: 1600, step: 20, unit: 'px', default: 760 },
+    ],
+  }],
+} satisfies RendererSettingsSchema)
+
+const MARKDOWN_SETTINGS = Object.freeze({
+  schemaVersion: 1,
+  groups: [{
+    id: 'typography', label: 'Markdown 排版', layout: 'grid', fields: [
+      ...TEXT_SETTINGS.groups[0].fields,
+      { key: 'linkStyle', label: '链接样式', type: 'choice', presentation: 'segmented', options: [
+        { value: 'underline', label: '下划线' },
+        { value: 'plain', label: '简洁' },
+      ], default: 'underline' },
+    ],
+  }],
+} satisfies RendererSettingsSchema)
+
+const CODE_SETTINGS = Object.freeze({
+  schemaVersion: 1,
+  groups: [{
+    id: 'code', label: '代码块', layout: 'grid', fields: [
+      { key: 'fontFamily', label: '字体', type: 'choice', presentation: 'select', options: [
+        { value: 'mono', label: '等宽' }, { value: 'inherit', label: '跟随界面' },
+      ], default: 'mono' },
+      { key: 'fontSize', label: '字号', type: 'number', presentation: 'slider+input', min: 10, max: 28, step: 1, unit: 'px', default: 13 },
+      { key: 'lineHeight', label: '行高', type: 'number', presentation: 'slider+input', min: 1, max: 2.5, step: 0.1, default: 1.5 },
+      { key: 'wrap', label: '换行', type: 'choice', presentation: 'segmented', options: [
+        { value: 'soft', label: '自动换行' }, { value: 'none', label: '不换行' },
+      ], default: 'soft' },
+      { key: 'maxLines', label: '折叠行数', type: 'number', presentation: 'slider+input', min: 20, max: 2000, step: 20, unit: '行', default: 400 },
+      { key: 'showLanguage', label: '显示语言', type: 'boolean', presentation: 'toggle', default: true },
+      { key: 'showCopyButton', label: '显示复制按钮', type: 'boolean', presentation: 'toggle', default: true },
+      { key: 'palette', label: '配色', type: 'choice', presentation: 'select', options: [
+        { value: 'auto', label: '跟随主题' }, { value: 'dark', label: '深色' }, { value: 'light', label: '浅色' },
+      ], optionTarget: 'kind.content.code.palette', default: 'auto' },
+    ],
+  }],
+} satisfies RendererSettingsSchema)
+
+const ANSI_SETTINGS = Object.freeze({
+  schemaVersion: 1,
+  groups: [{
+    id: 'terminal', label: 'ANSI 输出', layout: 'grid', fields: [
+      { key: 'fontFamily', label: '字体', type: 'choice', presentation: 'select', options: [
+        { value: 'mono', label: '等宽' }, { value: 'inherit', label: '跟随界面' },
+      ], default: 'mono' },
+      { key: 'wrap', label: '换行', type: 'choice', presentation: 'segmented', options: [
+        { value: 'soft', label: '自动换行' }, { value: 'none', label: '不换行' },
+      ], default: 'soft' },
+      { key: 'maxLines', label: '最大显示行数', type: 'number', presentation: 'slider+input', min: 20, max: 5000, step: 20, unit: '行', default: 800 },
+      { key: 'background', label: '背景色', type: 'color', presentation: 'palette+picker', alpha: true, default: 'transparent' },
+      { key: 'palette', label: '16 色调色板', type: 'choice', presentation: 'select', options: [
+        { value: 'terminal', label: '终端默认' }, { value: 'accessible', label: '高对比度' }, { value: 'dim', label: '柔和' },
+      ], optionTarget: 'kind.content.ansi.palette', default: 'terminal' },
+    ],
+  }],
+} satisfies RendererSettingsSchema)
 
 function textPayload(input: unknown): input is { readonly text: string } {
   return typeof input === 'object' && input !== null && !Array.isArray(input)
@@ -35,8 +109,9 @@ export const BUILTIN_TEXT_RENDER_KINDS: readonly RenderKindDefinition[] = [
     fallbackKind: 'content.unknown',
     priority: 100,
     fixture: { text: 'fixture content.text' },
-    defaultTokens: {},
+    defaultTokens: { fontFamily: 'inherit', fontSize: 14, lineHeight: 1.6, maxWidth: 760 },
     settingsSchemaVersion: 1,
+    settings: TEXT_SETTINGS,
     validateInput: input => textPayload(input) && input.text.length > 0,
   },
   {
@@ -45,8 +120,9 @@ export const BUILTIN_TEXT_RENDER_KINDS: readonly RenderKindDefinition[] = [
     fallbackKind: 'content.unknown',
     priority: 100,
     fixture: { text: '# fixture markdown\n\n- item **bold**' },
-    defaultTokens: {},
+    defaultTokens: { fontFamily: 'inherit', fontSize: 14, lineHeight: 1.6, maxWidth: 760, linkStyle: 'underline' },
     settingsSchemaVersion: 1,
+    settings: MARKDOWN_SETTINGS,
     // 非空 text；流式起点的空串由组件层处理，不进入 kind 校验
     validateInput: input => textPayload(input) && input.text.length > 0,
   },
@@ -132,8 +208,9 @@ export const BUILTIN_TEXT_RENDER_KINDS: readonly RenderKindDefinition[] = [
     fallbackKind: 'content.unknown',
     priority: 100,
     fixture: { text: 'const answer = 42\n', language: 'ts' },
-    defaultTokens: {},
+    defaultTokens: { fontFamily: 'mono', fontSize: 13, lineHeight: 1.5, wrap: 'soft', maxLines: 400, showLanguage: true, showCopyButton: true, palette: 'auto' },
     settingsSchemaVersion: 1,
+    settings: CODE_SETTINGS,
     validateInput: input => textPayload(input) && input.text.length > 0,
   },
   {
@@ -142,8 +219,9 @@ export const BUILTIN_TEXT_RENDER_KINDS: readonly RenderKindDefinition[] = [
     fallbackKind: 'content.unknown',
     priority: 100,
     fixture: { text: '\u001b[32mok\u001b[0m' },
-    defaultTokens: {},
+    defaultTokens: { fontFamily: 'mono', wrap: 'soft', maxLines: 800, background: 'transparent', palette: 'terminal' },
     settingsSchemaVersion: 1,
+    settings: ANSI_SETTINGS,
     validateInput: input => textPayload(input),
   },
 ]

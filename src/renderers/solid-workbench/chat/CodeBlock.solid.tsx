@@ -8,6 +8,10 @@ export interface SolidCodeBlockProps {
   /** 超过此行数折叠（默认 400）；折叠后完整文本仍可复制 */
   maxLines?: number
   onCopy?: (text: string) => void
+  showLanguage?: boolean
+  showCopyButton?: boolean
+  wrap?: 'soft' | 'none'
+  palette?: string
 }
 
 /**
@@ -44,19 +48,21 @@ export function SolidCodeBlock(props: SolidCodeBlockProps) {
   }
 
   return (
-    <div class="term-code-block" data-language={props.language ?? 'text'} data-folded={foldedCount() > 0 ? 'true' : 'false'}>
-      <div class="term-code-head">
-        <span class="term-code-lang">{props.language ?? 'text'}</span>
-        <button
-          type="button"
-          class="term-code-copy"
-          aria-label={copied() ? '已复制' : '复制代码'}
-          data-copy-text={props.code}
-          onClick={copy}
-        >{copied() ? '✓' : '⎘'}</button>
-      </div>
+    <div class="term-code-block" data-language={props.language ?? 'text'} data-folded={foldedCount() > 0 ? 'true' : 'false'} data-wrap={props.wrap ?? 'soft'} data-palette={props.palette ?? 'auto'}>
+      <Show when={props.showLanguage !== false || props.showCopyButton !== false}>
+        <div class="term-code-head">
+          <Show when={props.showLanguage !== false}><span class="term-code-lang">{props.language ?? 'text'}</span></Show>
+          <Show when={props.showCopyButton !== false}><button
+            type="button"
+            class="term-code-copy"
+            aria-label={copied() ? '已复制' : '复制代码'}
+            data-copy-text={props.code}
+            onClick={copy}
+          >{copied() ? '✓' : '⎘'}</button></Show>
+        </div>
+      </Show>
       <Show when={isMultiLine()} fallback={<code class="term-inline-code">{props.code}</code>}>
-        <pre class="term-code-body"><code>{lines().map((line, index) => (
+        <pre class="term-code-body" style={{ 'white-space': props.wrap === 'none' ? 'pre' : 'pre-wrap' }}><code>{lines().map((line, index) => (
           <span class="term-code-line">
             <span class="term-code-gutter" aria-hidden="true">│ </span>
             <Show
