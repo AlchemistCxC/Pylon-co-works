@@ -1056,6 +1056,56 @@
 }
 .app[data-msg-style="bubble"] .term-row-assistant .copy-btn { right: var(--ui-space-1); }
 
+/* C11：审批/问题/确认/权限交互卡 */
+.interaction-card {
+  display: grid;
+  gap: var(--ui-space-2);
+  width: min(100%, 720px);
+  margin: var(--ui-space-2) 0;
+  border: var(--line-width-1) solid var(--border);
+  border-inline-start: var(--line-width-3) solid var(--accent);
+  padding: var(--ui-space-3);
+  color: var(--text);
+  background: var(--bg-panel, transparent);
+}
+.interaction-card.interaction-danger { border-inline-start-color: var(--warning, #d29922); }
+.interaction-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: var(--ui-space-2);
+  min-width: 0;
+}
+.interaction-kind,
+.interaction-capability,
+.interaction-expiry {
+  color: var(--text-dim);
+  font-size: var(--font-size-xs);
+}
+.interaction-options {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--ui-space-2);
+}
+.interaction-free-text {
+  min-width: 0;
+  flex: 1;
+  border: var(--line-width-1) solid var(--border);
+  padding: var(--ui-space-2);
+  font-size: var(--font-size-sm);
+  background: transparent;
+  color: var(--text);
+}
+.interaction-terminal-state {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: var(--ui-space-2);
+  color: var(--text-dim);
+  font-size: var(--font-size-xs);
+}
+.interaction-response { font-family: var(--mono); }
+
 /* C09：子代理/委派/团队活动卡（复用 term-process 家族视觉契约 + 树层级缩进） */
 .term-subagent-card {
   display: grid;

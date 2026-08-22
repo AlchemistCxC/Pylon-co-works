@@ -53,4 +53,31 @@ describe('C09 React fatal fallback: subagent/delegation/team activities', () => 
     expect(child).toHaveTextContent('目标：find call sites')
     expect(child).toHaveTextContent('子代理连接丢失')
   })
+
+  it('keeps C11 interactions readable with status and response in the fallback list', () => {
+    const current: WorkbenchDocument = {
+      ...createWorkbenchDocument('local:c11'),
+      revision: 3,
+      interactions: [
+        { id: 'int-1', status: 'requested', request: { kind: 'permission', prompt: 'Allow deploy?' }, sequence: 1 },
+        { id: 'int-2', status: 'resolved', response: { optionId: 'deny' }, sequence: 2 },
+      ],
+    }
+    const reader: WorkbenchDocumentReader = {
+      getSnapshot: () => current,
+      subscribe: () => () => {},
+      getSlice: () => undefined as never,
+      subscribeSlice: () => () => {},
+    }
+    render(<ReactWorkbenchFatalFallback
+      document={reader}
+      failure={{ suiteId: 'builtin.solid', phase: 'slot', message: 'solid failed' }}
+      onRetry={vi.fn()}
+      onSelectSuite={vi.fn()}
+      onOpenDiagnostics={vi.fn()}
+    />)
+    expect(screen.getByText('Allow deploy?')).toBeInTheDocument()
+    expect(screen.getByText('{"optionId":"deny"}')).toBeInTheDocument()
+    expect(screen.getAllByText('requested').length).toBeGreaterThan(0)
+  })
 })

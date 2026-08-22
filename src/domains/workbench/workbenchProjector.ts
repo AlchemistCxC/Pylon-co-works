@@ -226,7 +226,12 @@ export function selectActivities(document: WorkbenchDocument): readonly Workbenc
   return document.activities
 }
 
+/** C11：全部 interaction 列表（requested/resolved/expired 均可见，供历史审计与 fallback）。 */
 export function selectInteractions(document: WorkbenchDocument): readonly WorkbenchInteraction[] {
+  return document.interactions
+}
+/** C11：待处理 interaction 队列（renderer 卡片消费；重复 response 幂等由 reducer 保证）。 */
+export function selectPendingInteractions(document: WorkbenchDocument): readonly WorkbenchInteraction[] {
   return document.interactions.filter(interaction => interaction.status === 'requested')
 }
 
@@ -633,10 +638,30 @@ function mergeActivityTerminal(previous: WorkbenchActivityNode | undefined, next
   return filled as unknown as WorkbenchActivityNode
 }
 
+/** C11：interaction 投影——结构化 request/response、终态幂等（首个 resolved/expired 权威，重复响应忽略）。 */
 function reduceInteraction(document: WorkbenchDocument, envelope: WorkbenchEventEnvelope, event: InteractionEvent): WorkbenchDocument {
   const id = event.interactionId || envelope.identity.interactionId || envelope.eventId
+  const previous = document.interactions.find(item => item.id === id)
+  // 幂等：已进入 resolved/expired 终态后，迟到的响应/过期事件只补缺字段不改写既有事实
+  if (previous && previous.status !== 'requested') {
+    if (previous.status === 'resolved') return document
+    const filled: WorkbenchInteraction = {
+      ...previous,
+      ...(previous.response === undefined && event.response !== undefined ? { response: event.response } : {}),
+      ...(previous.reason === undefined && event.reason !== undefined ? { reason: event.reason } : {}),
+    }
+    return { ...document, interactions: document.interactions.map(item => item.id === id ? filled : item) }
+  }
   const status = event.type === 'interaction.requested' ? 'requested' : event.type === 'interaction.expired' ? 'expired' : 'resolved'
-  const interaction: WorkbenchInteraction = { id, status, request: event.request, response: event.response, reason: event.reason, sequence: envelope.sequence }
+  const interaction: WorkbenchInteraction = {
+    id,
+    status,
+    // request 由 requested 事件建立；resolved/expired 事件只携带 response/reason——保留原 request 不丢失
+    request: event.type === 'interaction.requested' ? event.request : previous?.request,
+    response: event.response ?? previous?.response,
+    reason: event.reason ?? previous?.reason,
+    sequence: envelope.sequence,
+  }
   return { ...document, interactions: [...document.interactions.filter(item => item.id !== id), interaction] }
 }
 

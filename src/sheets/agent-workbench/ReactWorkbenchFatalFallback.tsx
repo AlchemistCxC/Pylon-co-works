@@ -113,6 +113,16 @@ export default function ReactWorkbenchFatalFallback(props: {
           {activity.error && <span>{activity.error.userSummary}</span>}
         </section>
       ))}
+      <section className="react-workbench-fatal-interactions" aria-label="交互 fallback">
+        {document?.interactions.map(interaction => (
+          <div key={interaction.id} data-react-interaction-status={interaction.status}>
+            <strong>{(interaction.request as {prompt?: string})?.prompt ?? interaction.id}</strong>
+            <span>{interaction.status}</span>
+            {interaction.response !== undefined && <code>{JSON.stringify(interaction.response)}</code>}
+            {interaction.reason && <span>{interaction.reason}</span>}
+          </div>
+        ))}
+      </section>
       <div className="react-workbench-fatal-history" aria-label="会话历史">
         {document?.messages.map(message => <article key={message.id} data-message-role={message.role}>
           <span>{message.role === 'user' ? 'User' : message.role === 'reasoning' ? 'Reasoning' : 'Assistant'}</span>

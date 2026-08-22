@@ -4,7 +4,7 @@ import {
   projectWorkbench,
   reduceWorkbenchEvent,
   selectActivities,
-  selectInteractions,
+  selectInteractions, selectPendingInteractions,
   selectSessionSurface,
   selectTimeline,
   type WorkbenchDocument,
@@ -84,7 +84,10 @@ describe('WorkbenchProjector', () => {
       envelope(5, { type: 'interaction.resolved', interactionId: 'ask-1', response: { answer: 'yes' } }, { interactionId: 'ask-1' }),
     ]
     const document = reduce(events)
-    expect(selectInteractions(document)).toEqual([])
+    // C11 语义升级：selectInteractions 返回全量（resolved 仍可审计）；待处理队列为空
+    expect(selectInteractions(document)).toHaveLength(1)
+    expect(selectInteractions(document)[0]).toMatchObject({ id: 'ask-1', status: 'resolved' })
+    expect(selectPendingInteractions(document)).toEqual([])
     expect(selectSessionSurface(document)).toMatchObject({ commands: [{ name: '/compact' }], usage: { inputTokens: 4 } })
     expect(document.diagnostics).toEqual(expect.arrayContaining([
       expect.objectContaining({ code: 'turn.failed', level: 'error' }),
