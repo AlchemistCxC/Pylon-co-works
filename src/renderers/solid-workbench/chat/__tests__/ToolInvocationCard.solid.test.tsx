@@ -128,3 +128,30 @@ describe('C06 edit/write nested content', () => {
     expect(container.textContent).not.toContain('"kind": "diff"')
   })
 })
+
+describe('C07 execute nested content', () => {
+  it('renders terminal and log result parts through typed components and command port', () => {
+    const execute = vi.fn()
+    const { container } = render(() => <SolidToolInvocationCard
+      renderKind="tool.execute"
+      appearance={{ defaultCollapsed: false, showCopy: true }}
+      snapshot={{
+        id: 'execute-1', name: 'Bash', semanticKind: 'tool.execute', status: 'completed',
+        result: {
+          status: 'completed',
+          parts: [
+            { kind: 'terminal', command: 'npm test', streams: [{ stream: 'stdout', text: 'passed', ordinal: 0 }] },
+            { kind: 'log', source: 'runner', entries: [{ level: 'info', text: 'finished' }] },
+          ],
+        },
+      }}
+      commands={{ execute, canExecute: type => type === 'clipboard.write' }}
+    />)
+
+    expect(container.querySelector('.term-terminal-card')).toHaveTextContent('passed')
+    expect(container.querySelector('.term-log-card')).toHaveTextContent('finished')
+    screen.getByRole('button', { name: '复制' }).click()
+    expect(execute).toHaveBeenCalledWith({ type: 'clipboard.write', payload: { text: 'passed' } })
+    expect(container.textContent).not.toContain('"kind": "terminal"')
+  })
+})

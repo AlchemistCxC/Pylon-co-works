@@ -18,9 +18,10 @@ describe('C04 tool render kind catalog', () => {
       'tool.edit',
       'tool.search',
       'tool.fetch',
+      'tool.execute',
     ])
     expect(kinds.get('tool.generic')?.fallbackKind).toBe('content.unknown')
-    for (const id of ['tool.input', 'tool.progress', 'tool.output', 'tool.error', 'tool.read', 'tool.edit', 'tool.search', 'tool.fetch']) {
+    for (const id of ['tool.input', 'tool.progress', 'tool.output', 'tool.error', 'tool.read', 'tool.edit', 'tool.search', 'tool.fetch', 'tool.execute']) {
       expect(kinds.get(id)?.fallbackKind).toBe('tool.generic')
     }
     expect(kinds.get('tool.generic')?.settings).toBeDefined()

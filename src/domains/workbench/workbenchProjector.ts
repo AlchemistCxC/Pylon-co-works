@@ -63,9 +63,14 @@ export interface WorkbenchActivityNode {
   readonly kind: 'tool' | 'activity'
   /** Renderer semantic kind copied from normalized payload; never derived from provider raw. */
   readonly semanticKind?: string
+  /** Provider-neutral activity family (for example process/background-task). */
+  readonly activityKind?: string
   readonly title?: string
   readonly status: string
   readonly parentId?: string
+  /** C07：后台执行身份；仅来自 normalized activity payload/patch。 */
+  readonly processId?: string
+  readonly sessionId?: string
   /** C04：canonical machine name（_meta.pylon.toolName 优先的归一结果）。 */
   readonly canonicalName?: string
   /** C04：normalized input（renderer 消费字段；rawInput 只作审计兼容留在 data/rawOutput 侧）。 */
@@ -96,6 +101,10 @@ export interface WorkbenchActivityNode {
   readonly toolKindWire?: string
   /** C04：本地化显示标题（title 直通；不作为身份）。 */
   readonly displayName?: string
+  /** C07：activity terminal result and cancellation reason remain separate from message history. */
+  readonly result?: unknown
+  readonly reason?: string
+  readonly provenance?: WorkbenchEventEnvelope['provenance']
   readonly orphan: boolean
   readonly data?: unknown
   readonly sequence: number
@@ -516,8 +525,49 @@ function mergeToolActivity(previous: WorkbenchActivityNode | undefined, next: Wo
 function reduceActivity(document: WorkbenchDocument, envelope: WorkbenchEventEnvelope, event: ActivityEvent): WorkbenchDocument {
   const id = event.activityId || envelope.identity.taskId || envelope.eventId
   const activity = isRecord(event.activity) ? event.activity : {}
+  const patch = isRecord(event.patch) ? event.patch : {}
+  const result = isRecord(event.result) ? event.result : undefined
+  const previous = document.activities.find(item => item.id === id && item.kind === 'activity')
   const status = event.type.replace('activity.', '')
-  return { ...document, activities: upsertActivity(document.activities, { id, kind: 'activity', title: stringValue(activity.title) || stringValue(activity.name), status, orphan: false, data: event, sequence: envelope.sequence }) }
+  const activityKind = stringValue(activity.kind) ?? stringValue(patch.kind) ?? previous?.activityKind
+  const semanticKind = stringValue(activity.semanticKind) ?? stringValue(patch.semanticKind) ?? previous?.semanticKind
+    ?? (activityKind === 'process' || activityKind === 'background-task' ? `activity.${activityKind}` : undefined)
+  const parts = jsonSnapshot(result?.parts ?? patch.parts ?? activity.parts) ?? previous?.parts
+  const error = event.error !== undefined
+    ? normalizeNormalizedError(event.error)
+    : result?.error !== undefined
+      ? normalizeNormalizedError(result.error)
+      : patch.error !== undefined
+        ? normalizeNormalizedError(patch.error)
+        : previous?.error
+  const next: WorkbenchActivityNode = {
+    id,
+    kind: 'activity',
+    status,
+    orphan: false,
+    sequence: envelope.sequence,
+    ...(semanticKind ? { semanticKind } : {}),
+    ...(activityKind ? { activityKind } : {}),
+    ...(stringValue(activity.title) ?? stringValue(activity.name) ?? stringValue(patch.title) ?? previous?.title
+      ? { title: stringValue(activity.title) ?? stringValue(activity.name) ?? stringValue(patch.title) ?? previous?.title }
+      : {}),
+    ...(stringValue(activity.parentId) ?? stringValue(patch.parentId) ?? previous?.parentId
+      ? { parentId: stringValue(activity.parentId) ?? stringValue(patch.parentId) ?? previous?.parentId }
+      : {}),
+    ...(stringValue(activity.processId) ?? stringValue(patch.processId) ?? previous?.processId
+      ? { processId: stringValue(activity.processId) ?? stringValue(patch.processId) ?? previous?.processId }
+      : {}),
+    ...(stringValue(activity.sessionId) ?? stringValue(patch.sessionId) ?? previous?.sessionId
+      ? { sessionId: stringValue(activity.sessionId) ?? stringValue(patch.sessionId) ?? previous?.sessionId }
+      : {}),
+    ...(patch.progress !== undefined ? { progress: jsonSnapshot(patch.progress) } : previous?.progress !== undefined ? { progress: previous.progress } : {}),
+    ...(parts !== undefined ? { parts } : {}),
+    ...(event.result !== undefined ? { result: jsonSnapshot(event.result) } : previous?.result !== undefined ? { result: previous.result } : {}),
+    ...(error !== undefined ? { error } : {}),
+    ...(stringValue(event.reason) ?? previous?.reason ? { reason: stringValue(event.reason) ?? previous?.reason } : {}),
+    provenance: envelope.provenance,
+  }
+  return { ...document, activities: upsertActivity(document.activities, next) }
 }
 
 function reduceInteraction(document: WorkbenchDocument, envelope: WorkbenchEventEnvelope, event: InteractionEvent): WorkbenchDocument {

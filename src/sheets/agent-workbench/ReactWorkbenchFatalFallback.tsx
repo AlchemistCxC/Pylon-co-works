@@ -4,10 +4,13 @@ import type {
   DiffContentPart,
   ImageContentPart,
   LinkContentPart,
+  LogContentPart,
   LspDiagnosticContentPart,
   SearchResultContentPart,
   TextRange,
+  TerminalContentPart,
 } from '../../domains/workbench/content/contentPartSchema.ts'
+import { stripAnsiControlSequences } from '../../domains/rendererContent/textContentContracts.ts'
 import { isValidMediaContentInput } from '../../domains/workbench/content/mediaContentValidation.ts'
 import {
   fileContentLastSegment,
@@ -300,6 +303,37 @@ export function ReactFallbackContentPart(props: {
       {value.unknownFields?.length && <small>unknown: {value.unknownFields.join(', ')}</small>}
     </section>
   }
+  if (part.kind === 'terminal') {
+    const value = part as TerminalContentPart
+    const label = value.command || value.processId || value.sessionId || '未命名终端'
+    const exit = value.terminatedBy === 'timeout' ? '超时终止'
+      : value.terminatedBy === 'killed' ? '已终止 (killed)'
+        : value.terminatedBy === 'signal' ? '信号终止'
+          : value.exitCode !== undefined ? `exit ${value.exitCode}` : value.status
+    return <section data-react-content-kind="content.terminal" role="region" aria-label={`终端 fallback：${label}`}>
+      <strong>{value.command || '终端输出'}</strong>
+      {(value.processId || value.sessionId) && <small>{[value.processId, value.sessionId].filter(Boolean).join(' · ')}</small>}
+      {exit && <span>{exit}</span>}
+      <pre>{value.streams.map(entry => `${entry.stream} · ${fallbackTerminalText(entry.text)}`).join('\n')}</pre>
+      {value.truncation && <small>
+        输出已截断
+        {value.truncation.capturedLines !== undefined && `：保留 ${value.truncation.capturedLines} 行`}
+        {value.truncation.omittedLines !== undefined && `，省略 ${value.truncation.omittedLines} 行`}
+        {value.truncation.omittedBytes !== undefined && `（${value.truncation.omittedBytes} bytes）`}
+      </small>}
+      {value.error && <span role="alert">{value.error.message}{value.error.code && ` · ${value.error.code}`}</span>}
+    </section>
+  }
+  if (part.kind === 'log') {
+    const value = part as LogContentPart
+    return <section data-react-content-kind="content.log" role="log" aria-label={`日志 fallback：${value.source || '未命名日志'}`}>
+      {value.source && <strong>{value.source}</strong>}
+      {value.entries.map((entry, index) => <div key={`${entry.ordinal ?? index}:${entry.level}`}>
+        <span>{[entry.originalLevel ?? entry.level, entry.timestamp, entry.text].filter(Boolean).join(' · ')}</span>
+        {entry.timestampConfidence === 'synthetic' && <small>时间戳为合成</small>}
+      </div>)}
+    </section>
+  }
   if (part.kind === 'search-result') {
     const value = part as SearchResultContentPart
     return <section data-react-content-kind="content.search-result"
@@ -326,6 +360,10 @@ export function ReactFallbackContentPart(props: {
     </section>
   }
   return null
+}
+
+function fallbackTerminalText(value: string): string {
+  return stripAnsiControlSequences(value).map(span => span.text).join('')
 }
 
 function mediaSourceIdentity(part: ImageContentPart): string {

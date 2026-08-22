@@ -31,6 +31,7 @@ import { SolidToolInvocationCard } from './chat/ToolInvocationCard.solid.tsx'
 import { measureToolAnchor } from './chat/domToolConnectorMeasurement.ts'
 import { SolidSearchOrLink } from './chat/content/SearchResults.solid.tsx'
 import { SolidDiffContent, SolidLspDiagnosticContent } from './chat/content/DiffDiagnosticContent.solid.tsx'
+import { SolidLogBlock, SolidProcessActivity, SolidTerminalBlock } from './chat/content/TerminalBlock.solid.tsx'
 import type { RenderCommandPort } from '../../contracts/messageRenderer.ts'
 
 export interface SolidWorkbenchAppProps {
@@ -357,6 +358,10 @@ function CanonicalActivitySlot(props: {
         context={props.context}
         fallback={toolSnapshot()
           ? <SolidToolInvocationCard snapshot={toolSnapshot()!} appearance={{ ...props.context.appearanceSnapshot() }} renderKind="tool.generic" commands={fallbackRenderCommands(props.context)} />
+          : props.activity.semanticKind === 'activity.process'
+            ? <SolidProcessActivity activity={props.activity}
+                appearance={{ ...props.context.appearanceSnapshot(), reducedMotion: props.context.input().reducedMotion }}
+                commands={fallbackRenderCommands(props.context)} />
           : <div class="solid-workbench-activity" data-activity-id={props.activity.id} data-status={props.activity.status}>
               {props.activity.title || props.activity.kind} · {props.activity.status}
             </div>}
@@ -635,6 +640,17 @@ function renderBuiltinContentPart(part: ContentPart, inline: boolean, context: S
           appearance={{ ...context.appearanceSnapshot(), reducedMotion: context.input().reducedMotion }}
           commands={fallbackRenderCommands(context)} />
       : <pre class="solid-content-unknown" data-content-kind="diagnostic-lsp">Invalid diagnostic.lsp payload</pre>
+  }
+  if (part.kind === 'terminal') {
+    const commands = fallbackRenderCommands(context)
+    return <SolidTerminalBlock part={part} appearance={{ ...context.appearanceSnapshot(), reducedMotion: context.input().reducedMotion }} actions={{
+      copy: commands.canExecute?.('clipboard.write')
+        ? text => { void commands.execute({ type: 'clipboard.write', payload: { text } }) }
+        : undefined,
+    }} />
+  }
+  if (part.kind === 'log') {
+    return <SolidLogBlock part={part} appearance={{ ...context.appearanceSnapshot(), reducedMotion: context.input().reducedMotion }} />
   }
   const summary = part.kind === 'unknown' ? part.summary : `Unsupported content kind: ${part.kind}`
   return <pre class="solid-content-unknown" data-content-kind={part.kind}>{summary}</pre>

@@ -15,9 +15,11 @@ import {
 import { isValidMediaContentInput } from '../workbench/content/mediaContentValidation.ts'
 import {
   isValidDiffContentInput,
+  isValidLogContentInput,
   isValidLinkContentInput,
   isValidLspDiagnosticContentInput,
   isValidSearchResultContentInput,
+  isValidTerminalContentInput,
 } from '../workbench/content/contentPartSchema.ts'
 
 const FONT_OPTIONS = Object.freeze([
@@ -270,6 +272,53 @@ const SEARCH_LINK_SETTINGS = Object.freeze({
   ],
 } satisfies RendererSettingsSchema)
 
+export const TERMINAL_LOG_SETTINGS = Object.freeze({
+  schemaVersion: 1,
+  groups: [
+    {
+      id: 'appearance', label: '终端与日志外观', layout: 'grid', fields: [
+        { key: 'fontFamily', label: '字体', type: 'choice', presentation: 'select', options: [
+          { value: 'mono', label: '等宽' }, { value: 'inherit', label: '跟随界面' },
+        ], default: 'mono' },
+        { key: 'fontSize', label: '字号', type: 'number', presentation: 'slider+input', min: 10, max: 28, step: 1, unit: 'px', default: 13 },
+        { key: 'lineHeight', label: '行高', type: 'number', presentation: 'slider+input', min: 1, max: 2.5, step: 0.1, default: 1.5 },
+        { key: 'wrap', label: '换行', type: 'choice', presentation: 'segmented', options: [
+          { value: 'none', label: '不换行' }, { value: 'soft', label: '自动换行' },
+        ], default: 'none' },
+        { key: 'maxHeight', label: '最大高度', type: 'number', presentation: 'slider+input', min: 80, max: 1600, step: 20, unit: 'px', default: 480 },
+        { key: 'stdoutColor', label: '标准输出颜色', type: 'color', presentation: 'palette+picker', alpha: true, default: 'var(--text)' },
+        { key: 'stderrColor', label: '错误输出颜色', type: 'color', presentation: 'palette+picker', alpha: true, default: 'var(--danger, #e5484d)' },
+        { key: 'background', label: '背景色', type: 'color', presentation: 'palette+picker', alpha: true, default: 'transparent' },
+        { key: 'density', label: '密度', type: 'choice', presentation: 'segmented', options: [
+          { value: 'comfortable', label: '舒适' }, { value: 'compact', label: '紧凑' },
+        ], default: 'comfortable' },
+      ],
+    },
+    {
+      id: 'behaviour', label: '终端与日志行为', layout: 'grid', fields: [
+        { key: 'retainedLines', label: '保留行数', type: 'number', presentation: 'slider+input', min: 100, max: 20_000, step: 100, unit: '行', default: 2000 },
+        { key: 'timestamps', label: '显示时间戳', type: 'boolean', presentation: 'toggle', default: false },
+        { key: 'followTail', label: '自动跟随末尾', description: '仅为当前视图状态，不写入 journal。', type: 'boolean', presentation: 'toggle', default: true },
+        { key: 'logLevels', label: '日志级别', type: 'multi-choice', presentation: 'checklist', options: [
+          { value: 'trace', label: 'Trace' }, { value: 'debug', label: 'Debug' }, { value: 'info', label: 'Info' },
+          { value: 'warn', label: 'Warn' }, { value: 'error', label: 'Error' }, { value: 'fatal', label: 'Fatal' },
+          { value: 'unknown', label: 'Unknown' },
+        ], default: ['trace', 'debug', 'info', 'warn', 'error', 'fatal', 'unknown'] },
+        { key: 'showCopy', label: '显示复制按钮', type: 'boolean', presentation: 'toggle', default: true },
+        { key: 'showIdentity', label: '显示进程标识', type: 'boolean', presentation: 'toggle', default: true },
+      ],
+    },
+  ],
+} satisfies RendererSettingsSchema)
+
+export const TERMINAL_LOG_DEFAULT_TOKENS = Object.freeze({
+  fontFamily: 'mono', fontSize: 13, lineHeight: 1.5, wrap: 'none', maxHeight: 480,
+  stdoutColor: 'var(--text)', stderrColor: 'var(--danger, #e5484d)', background: 'transparent',
+  density: 'comfortable', retainedLines: 2000, timestamps: false, followTail: true,
+  logLevels: ['trace', 'debug', 'info', 'warn', 'error', 'fatal', 'unknown'],
+  showCopy: true, showIdentity: true,
+})
+
 const SEARCH_LINK_DEFAULT_TOKENS = Object.freeze({
   foreground: 'var(--text)', mutedForeground: 'var(--text-dim)', background: 'transparent', borderColor: 'var(--border)',
   fontSize: 13, maxWidth: 960, maxHeight: 420, density: 'comfortable', grouped: true, highlightPalette: 'semantic',
@@ -467,6 +516,29 @@ export const BUILTIN_TEXT_RENDER_KINDS: readonly RenderKindDefinition[] = [
     validateInput: input => typeof input === 'object' && input !== null && !Array.isArray(input)
       && isNonEmptyContentLocation((input as Record<string, unknown>).uri)
       && typeof (input as Record<string, unknown>).blob === 'undefined',
+  },
+  {
+    id: 'content.terminal',
+    category: 'content',
+    fallbackKind: 'content.unknown',
+    priority: 100,
+    fixture: { command: 'fixture-cmd', streams: [{ stream: 'stdout', text: 'fixture output', ordinal: 0 }], status: 'completed' },
+    defaultTokens: TERMINAL_LOG_DEFAULT_TOKENS,
+    settingsSchemaVersion: 1,
+    settings: TERMINAL_LOG_SETTINGS,
+    // C07：streams 分条不合并；env secret-like 脱敏在 normalizer 层完成
+    validateInput: isValidTerminalContentInput,
+  },
+  {
+    id: 'content.log',
+    category: 'content',
+    fallbackKind: 'content.unknown',
+    priority: 100,
+    fixture: { source: 'fixture-worker', entries: [{ level: 'info', text: 'fixture log entry' }] },
+    defaultTokens: TERMINAL_LOG_DEFAULT_TOKENS,
+    settingsSchemaVersion: 1,
+    settings: TERMINAL_LOG_SETTINGS,
+    validateInput: isValidLogContentInput,
   },
   {
     id: 'content.diff',

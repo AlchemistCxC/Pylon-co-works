@@ -1,3 +1,10 @@
+import {
+  isValidTerminalContentInput,
+  type TerminalContentPart,
+  type TerminalOutputTruncation,
+  type TerminalStreamEntry,
+} from './content/contentPartSchema.ts'
+
 /**
  * C07：content.terminal 结构化快照收窄。
  *
@@ -7,16 +14,12 @@
  * 策略保留并标记诊断，不混入正常流计数。
  */
 
-export interface TerminalStreamEntry {
-  stream: 'stdout' | 'stderr' | string
-  text: string
-  ordinal?: number
-  /** 协议策略：终态后到达的 chunk 保留但标记，不混入正常流。 */
-  lateAfterTerminal?: boolean
-}
-
 export interface TerminalSnapshot {
   command?: string
+  processId?: string
+  sessionId?: string
+  stdout: readonly TerminalStreamEntry[]
+  stderr: readonly TerminalStreamEntry[]
   stdoutLines: readonly string[]
   stderrLines: readonly string[]
   /** 终态后到达的 chunk（协议保留 + 诊断元数据）。 */
@@ -25,7 +28,8 @@ export interface TerminalSnapshot {
   terminatedBy?: string
   status?: string
   durationMs?: number
-  truncation?: unknown
+  truncation?: TerminalOutputTruncation
+  error?: TerminalContentPart['error']
 }
 
 const isRecord = (value: unknown): value is Record<string, unknown> =>
@@ -38,29 +42,33 @@ const isRecord = (value: unknown): value is Record<string, unknown> =>
 export function terminalSnapshotFromPart(part: unknown): TerminalSnapshot | null {
   if (!isRecord(part)) return null
   if (part.kind !== 'terminal') return null
+  if (!isValidTerminalContentInput(part)) return null
 
-  const streamsRaw = Array.isArray(part.streams) ? part.streams : []
+  const streamsRaw = part.streams
+  const stdout: TerminalStreamEntry[] = []
+  const stderr: TerminalStreamEntry[] = []
   const stdoutLines: string[] = []
   const stderrLines: string[] = []
   const lateChunks: TerminalStreamEntry[] = []
 
   for (const entry of streamsRaw) {
-    if (!isRecord(entry)) continue
-    const stream = typeof entry.stream === 'string' ? entry.stream : 'stdout'
-    const text = typeof entry.text === 'string' ? entry.text : ''
+    const stream = entry.stream
+    const text = entry.text
     // C07：终态后迟到 chunk 按协议策略保留并标记，不混入正常流计数
     if (entry.lateAfterTerminal === true) {
       lateChunks.push({
         stream,
         text,
-        ...(Number.isInteger(entry.ordinal) ? { ordinal: entry.ordinal as number } : {}),
+        ...(entry.ordinal !== undefined ? { ordinal: entry.ordinal } : {}),
         lateAfterTerminal: true,
       })
       continue
     }
     if (stream === 'stderr') {
+      stderr.push(entry)
       if (text) stderrLines.push(text)
     } else {
+      stdout.push(entry)
       if (text) stdoutLines.push(text)
     }
   }
@@ -70,6 +78,10 @@ export function terminalSnapshotFromPart(part: unknown): TerminalSnapshot | null
 
   return {
     ...(typeof part.command === 'string' ? { command: part.command } : {}),
+    ...(part.processId !== undefined ? { processId: part.processId } : {}),
+    ...(part.sessionId !== undefined ? { sessionId: part.sessionId } : {}),
+    stdout,
+    stderr,
     stdoutLines,
     stderrLines,
     ...(lateChunks.length > 0 ? { lateChunks } : { lateChunks }),
@@ -78,5 +90,6 @@ export function terminalSnapshotFromPart(part: unknown): TerminalSnapshot | null
     ...(typeof part.status === 'string' ? { status: part.status } : {}),
     ...(toInt(part.durationMs) !== undefined ? { durationMs: toInt(part.durationMs) } : {}),
     ...(part.truncation !== undefined ? { truncation: part.truncation } : {}),
+    ...(part.error !== undefined ? { error: part.error } : {}),
   }
 }

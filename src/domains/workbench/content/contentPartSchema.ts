@@ -204,6 +204,59 @@ export interface LspDiagnosticContentPart {
   readonly unknownFields?: readonly string[]
 }
 
+export type TerminalStreamKind = 'stdout' | 'stderr'
+export type TerminalStatus = 'queued' | 'running' | 'completed' | 'failed' | 'cancelled'
+export type TerminalTermination = 'timeout' | 'killed' | 'signal'
+
+export interface TerminalStreamEntry {
+  readonly stream: TerminalStreamKind
+  readonly text: string
+  readonly ordinal?: number
+  readonly lateAfterTerminal?: boolean
+  readonly timestamp?: string
+  readonly timestampConfidence?: 'exact' | 'observed' | 'synthetic' | 'unknown'
+}
+
+export interface TerminalOutputTruncation {
+  readonly capturedLines?: number
+  readonly omittedLines?: number
+  readonly capturedBytes?: number
+  readonly omittedBytes?: number
+}
+
+export interface TerminalContentPart {
+  readonly kind: 'terminal'
+  readonly command?: string
+  readonly processId?: string
+  readonly sessionId?: string
+  readonly streams: readonly TerminalStreamEntry[]
+  readonly status?: TerminalStatus
+  readonly exitCode?: number
+  readonly terminatedBy?: TerminalTermination
+  readonly durationMs?: number
+  readonly env?: Readonly<Record<string, string>>
+  readonly truncation?: TerminalOutputTruncation
+  readonly error?: { readonly message: string; readonly code?: string }
+}
+
+export interface LogContentEntry {
+  readonly level: 'trace' | 'debug' | 'info' | 'warn' | 'error' | 'fatal' | 'unknown'
+  readonly originalLevel?: string
+  readonly text: string
+  readonly ordinal?: number
+  readonly timestamp?: string
+  readonly timestampConfidence?: 'exact' | 'observed' | 'synthetic' | 'unknown'
+}
+
+export interface LogContentPart {
+  readonly kind: 'log'
+  readonly source?: string
+  readonly processId?: string
+  readonly sessionId?: string
+  readonly entries: readonly LogContentEntry[]
+  readonly truncation?: TerminalOutputTruncation
+}
+
 export type ContentPart =
   | TextContentPart
   | ImageContentPart
@@ -213,8 +266,10 @@ export type ContentPart =
   | LinkContentPart
   | DiffContentPart
   | LspDiagnosticContentPart
+  | TerminalContentPart
+  | LogContentPart
   | UnknownContentPart
-  | { readonly kind: Exclude<ContentKind, TextContentPart['kind'] | ImageContentPart['kind'] | ResourceContentPart['kind'] | DocumentContentPart['kind'] | SearchResultContentPart['kind'] | LinkContentPart['kind'] | DiffContentPart['kind'] | LspDiagnosticContentPart['kind'] | 'unknown'>; readonly [key: string]: unknown }
+  | { readonly kind: Exclude<ContentKind, TextContentPart['kind'] | ImageContentPart['kind'] | ResourceContentPart['kind'] | DocumentContentPart['kind'] | SearchResultContentPart['kind'] | LinkContentPart['kind'] | DiffContentPart['kind'] | LspDiagnosticContentPart['kind'] | TerminalContentPart['kind'] | LogContentPart['kind'] | 'unknown'>; readonly [key: string]: unknown }
 
 export interface UnknownContentOptions {
   readonly maxRawBytes?: number
@@ -320,6 +375,10 @@ export function parseContentPart(value: unknown): SchemaResult<ContentPart> {
     if (!isValidDiffContentInput(value)) issues.push(issue([], 'content.diff', 'normalized structured diff', value))
   } else if (kind === 'diagnostic-lsp') {
     if (!isValidLspDiagnosticContentInput(value)) issues.push(issue([], 'content.diagnostic-lsp', 'normalized LSP diagnostic', value))
+  } else if (kind === 'terminal') {
+    if (!isValidTerminalContentInput(value)) issues.push(issue([], 'content.terminal', 'normalized terminal output', value))
+  } else if (kind === 'log') {
+    if (!isValidLogContentInput(value)) issues.push(issue([], 'content.log', 'normalized structured log', value))
   } else if (kind === 'tool-result' && value.parts !== undefined) {
     if (!Array.isArray(value.parts)) {
       issues.push(issue(['parts'], 'type.array', 'array', value.parts))
@@ -388,6 +447,68 @@ export function isValidLspDiagnosticContentInput(input: unknown): input is Omit<
   )))) return false
   return input.unknownFields === undefined
     || Array.isArray(input.unknownFields) && input.unknownFields.every(value => typeof value === 'string')
+}
+
+export function isValidTerminalContentInput(input: unknown): input is Omit<TerminalContentPart, 'kind'> | TerminalContentPart {
+  if (!isRecord(input) || !Array.isArray(input.streams)) return false
+  if (input.command !== undefined && (typeof input.command !== 'string' || !input.command.trim())) return false
+  if (input.command === undefined && input.streams.length === 0 && input.error === undefined) return false
+  for (const key of ['processId', 'sessionId'] as const) {
+    if (input[key] !== undefined && (typeof input[key] !== 'string' || !input[key].trim())) return false
+  }
+  if (input.status !== undefined && !['queued', 'running', 'completed', 'failed', 'cancelled'].includes(String(input.status))) return false
+  if (input.terminatedBy !== undefined && !['timeout', 'killed', 'signal'].includes(String(input.terminatedBy))) return false
+  if (input.exitCode !== undefined && !Number.isInteger(input.exitCode)) return false
+  if (input.durationMs !== undefined && (!Number.isFinite(input.durationMs) || Number(input.durationMs) < 0)) return false
+  if (input.env !== undefined && (!isRecord(input.env) || !Object.values(input.env).every(value => typeof value === 'string'))) return false
+  if (input.truncation !== undefined && !isValidTerminalTruncation(input.truncation)) return false
+  if (input.error !== undefined && (!isRecord(input.error) || typeof input.error.message !== 'string' || !input.error.message.trim()
+    || (input.error.code !== undefined && typeof input.error.code !== 'string'))) return false
+  return input.streams.every(isValidTerminalStreamEntry)
+}
+
+export function isValidLogContentInput(input: unknown): input is Omit<LogContentPart, 'kind'> | LogContentPart {
+  if (!isRecord(input) || !Array.isArray(input.entries) || input.entries.length === 0) return false
+  for (const key of ['source', 'processId', 'sessionId'] as const) {
+    if (input[key] !== undefined && (typeof input[key] !== 'string' || !input[key].trim())) return false
+  }
+  if (input.truncation !== undefined && !isValidTerminalTruncation(input.truncation)) return false
+  return input.entries.every(entry => isRecord(entry)
+    && ['trace', 'debug', 'info', 'warn', 'error', 'fatal', 'unknown'].includes(String(entry.level))
+    && (entry.originalLevel === undefined || typeof entry.originalLevel === 'string' && entry.originalLevel.trim().length > 0)
+    && typeof entry.text === 'string'
+    && isOptionalNonNegativeInteger(entry.ordinal)
+    && isOptionalTimestamp(entry.timestamp)
+    && isOptionalTimestampConfidence(entry.timestampConfidence))
+}
+
+function isValidTerminalStreamEntry(entry: unknown): boolean {
+  return isRecord(entry)
+    && (entry.stream === 'stdout' || entry.stream === 'stderr')
+    && typeof entry.text === 'string'
+    && isOptionalNonNegativeInteger(entry.ordinal)
+    && (entry.lateAfterTerminal === undefined || typeof entry.lateAfterTerminal === 'boolean')
+    && isOptionalTimestamp(entry.timestamp)
+    && isOptionalTimestampConfidence(entry.timestampConfidence)
+}
+
+function isValidTerminalTruncation(value: unknown): value is TerminalOutputTruncation {
+  if (!isRecord(value)) return false
+  const fields = ['capturedLines', 'omittedLines', 'capturedBytes', 'omittedBytes'] as const
+  return fields.some(key => value[key] !== undefined)
+    && fields.every(key => isOptionalNonNegativeInteger(value[key]))
+}
+
+function isOptionalNonNegativeInteger(value: unknown): boolean {
+  return value === undefined || Number.isInteger(value) && Number(value) >= 0
+}
+
+function isOptionalTimestamp(value: unknown): boolean {
+  return value === undefined || typeof value === 'string' && value.trim().length > 0
+}
+
+function isOptionalTimestampConfidence(value: unknown): boolean {
+  return value === undefined || ['exact', 'observed', 'synthetic', 'unknown'].includes(String(value))
 }
 
 function isValidDiffHunk(value: unknown): boolean {

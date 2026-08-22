@@ -6,6 +6,35 @@ import {
 } from '../contentPartSchema.ts'
 
 describe('ContentPart schema', () => {
+  it('accepts only normalized terminal streams and lifecycle metadata', () => {
+    expect(parseContentPart({
+      kind: 'terminal',
+      command: 'npm test',
+      processId: 'proc-1',
+      sessionId: 'shell-1',
+      streams: [{ stream: 'stdout', text: 'ok', ordinal: 0 }],
+      status: 'completed',
+      exitCode: 0,
+      truncation: { capturedLines: 1, omittedLines: 2, capturedBytes: 2, omittedBytes: 4 },
+    }).ok).toBe(true)
+
+    expect(parseContentPart({ kind: 'terminal', streams: [{ stream: 'stdin', text: 'secret' }] }).ok).toBe(false)
+    expect(parseContentPart({ kind: 'terminal', streams: [{ stream: 'stdout' }] }).ok).toBe(false)
+    expect(parseContentPart({ kind: 'terminal', streams: [{ stream: 'stdout', text: 'x', ordinal: -1 }] }).ok).toBe(false)
+    expect(parseContentPart({ kind: 'terminal', streams: [], terminatedBy: 'provider-magic' }).ok).toBe(false)
+  })
+
+  it('accepts only normalized structured log entries', () => {
+    expect(parseContentPart({
+      kind: 'log', source: 'worker', processId: 'proc-1',
+      entries: [{ level: 'warn', text: 'slow', ordinal: 2, timestampConfidence: 'synthetic' }],
+    }).ok).toBe(true)
+    expect(parseContentPart({ kind: 'log', entries: [] }).ok).toBe(false)
+    expect(parseContentPart({ kind: 'log', entries: [{ level: 'verbose', text: 'x' }] }).ok).toBe(false)
+    expect(parseContentPart({ kind: 'log', entries: [{ level: 'info', text: 42 }] }).ok).toBe(false)
+    expect(parseContentPart({ kind: 'log', entries: [{ level: 'info', text: 'x', timestampConfidence: 'guessed' }] }).ok).toBe(false)
+  })
+
   it.each([
     { kind: 'text', text: 'hello' },
     { kind: 'thinking', text: 'private reasoning' },

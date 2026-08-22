@@ -257,4 +257,31 @@ describe('C00 builtin render kind catalog', () => {
     expect(kinds.get('content.link')!.validateInput({ url: 'https://example.com' })).toBe(true)
     expect(kinds.get('content.link')!.validateInput({ url: '  ' })).toBe(false)
   })
+
+  it('publishes concrete C07 terminal/log settings and strict canonical validators', async () => {
+    const { ensureBuiltinTextRenderKinds } = await import('../textRenderKindCatalog.ts')
+    await ensureBuiltinTextRenderKinds()
+    const kinds = new Map(getRendererRegistry().snapshot().renderKinds.map(entry => [entry.value.id, entry.value]))
+
+    for (const id of ['content.terminal', 'content.log'] as const) {
+      const kind = kinds.get(id)!
+      expect(kind.settings?.schemaVersion).toBe(kind.settingsSchemaVersion)
+      expect(kind.settings?.groups.flatMap(group => group.fields).map(field => field.key)).toEqual(
+        expect.arrayContaining([
+          'fontFamily', 'fontSize', 'lineHeight', 'wrap', 'maxHeight', 'retainedLines',
+          'stdoutColor', 'stderrColor', 'background', 'timestamps', 'followTail',
+          'logLevels', 'density', 'showCopy', 'showIdentity',
+        ]),
+      )
+      expect(kind.defaultTokens).toMatchObject({
+        fontFamily: 'mono', wrap: 'none', retainedLines: 2000,
+        timestamps: false, followTail: true, density: 'comfortable', showCopy: true, showIdentity: true,
+      })
+    }
+
+    expect(kinds.get('content.terminal')!.validateInput({ streams: [{ stream: 'stdout', text: 'ok' }] })).toBe(true)
+    expect(kinds.get('content.terminal')!.validateInput({ streams: [{ stream: 'stdin', text: 'bad' }] })).toBe(false)
+    expect(kinds.get('content.log')!.validateInput({ entries: [{ level: 'info', text: 'ok' }] })).toBe(true)
+    expect(kinds.get('content.log')!.validateInput({ entries: [] })).toBe(false)
+  })
 })

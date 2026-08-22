@@ -46,6 +46,24 @@ describe('C07 normalizer terminal/log classification', () => {
     expect(term.durationMs).toBe(4200)
   })
 
+  it('drops malformed or unknown terminal chunks with a diagnostic', () => {
+    const { part, diagnostic } = normalizeContentBlock({
+      type: 'terminal',
+      command: 'task',
+      streams: [
+        { stream: 'stdout', text: 'kept', ordinal: 0 },
+        { stream: 'stdin', text: 'must not render', ordinal: 1 },
+        { stream: 'stderr', text: 42, ordinal: 2 },
+      ],
+    })
+    expect(part.kind).toBe('terminal')
+    expect((part as { streams: readonly unknown[] }).streams).toEqual([
+      { stream: 'stdout', text: 'kept', ordinal: 0 },
+    ])
+    expect(diagnostic?.code).toBe('content.terminal.entries-dropped')
+    expect(diagnostic?.path).toEqual(['streams'])
+  })
+
   it('records termination reason for killed/timeout separately from non-zero exit', () => {
     for (const [reason, expected] of [['timeout', 'timeout'], ['killed', 'killed'], ['exit', 'non-zero-exit']] as const) {
       const { part } = normalizeContentBlock({
@@ -87,6 +105,24 @@ describe('C07 normalizer terminal/log classification', () => {
     expect(part.kind).toBe('terminal')
   })
 
+  it('normalizes terminal identity, truncation accounting, and error', () => {
+    const { part } = normalizeContentBlock({
+      type: 'terminal',
+      process_id: 'proc-1',
+      session_id: 'shell-1',
+      streams: [{ stream: 'stderr', text: 'failed' }],
+      truncation: { capturedLines: 1, omittedLines: 99, capturedBytes: 6, omittedBytes: 800 },
+      error: { message: 'command failed', code: 'EFAIL' },
+      status: 'failed',
+    })
+    expect(terminalSnapshotFromPart(part)).toMatchObject({
+      processId: 'proc-1',
+      sessionId: 'shell-1',
+      truncation: { capturedLines: 1, omittedLines: 99, capturedBytes: 6, omittedBytes: 800 },
+      error: { message: 'command failed', code: 'EFAIL' },
+    })
+  })
+
   it('normalizes structured log entries with level/timestamp confidence', () => {
     const { part } = normalizeContentBlock({
       type: 'log',
@@ -103,6 +139,22 @@ describe('C07 normalizer terminal/log classification', () => {
     }
     expect(log.source).toBe('build-worker')
     expect(log.entries?.[1]?.timestampConfidence).toBe('synthetic')
+  })
+
+  it('normalizes unknown log levels and drops malformed entries with a diagnostic', () => {
+    const { part, diagnostic } = normalizeContentBlock({
+      type: 'log',
+      entries: [
+        { level: 'verbose', text: 'kept as unknown', ordinal: 0 },
+        { level: 'info', text: 42, ordinal: 1 },
+        { level: 'warn', text: 'bad confidence', timestampConfidence: 'guessed' },
+      ],
+    })
+    expect(part.kind).toBe('log')
+    expect((part as { entries: readonly unknown[] }).entries).toEqual([
+      { level: 'unknown', originalLevel: 'verbose', text: 'kept as unknown', ordinal: 0 },
+    ])
+    expect(diagnostic?.code).toBe('content.log.entries-dropped')
   })
 })
 
@@ -123,6 +175,8 @@ describe('C07 terminalSnapshotFromPart (stream accounting)', () => {
     if (!snapshot) return
     expect(snapshot.stdoutLines).toEqual(['one', 'two'])
     expect(snapshot.stderrLines).toEqual(['err!'])
+    expect(snapshot.stdout.map(entry => entry.ordinal)).toEqual([0, 2])
+    expect(snapshot.stderr.map(entry => entry.ordinal)).toEqual([1])
     expect(snapshot.exitCode).toBe(0)
     expect(snapshot.command).toBe('npm test')
   })
@@ -136,6 +190,21 @@ describe('C07 terminalSnapshotFromPart (stream accounting)', () => {
       status: 'completed',
     })
     expect(snapshot?.truncation).toEqual({ capturedLines: 1, omittedLines: 9999, omittedBytes: 1234567 })
+  })
+
+  it('keeps process/session identity and normalized error in the terminal snapshot', () => {
+    const snapshot = terminalSnapshotFromPart({
+      kind: 'terminal',
+      processId: 'proc-42',
+      sessionId: 'shell-7',
+      streams: [{ stream: 'stderr', text: 'permission denied', ordinal: 0 }],
+      status: 'failed',
+      error: { message: 'command failed', code: 'EACCES' },
+    })
+    expect(snapshot).toMatchObject({
+      processId: 'proc-42', sessionId: 'shell-7', status: 'failed',
+      error: { message: 'command failed', code: 'EACCES' },
+    })
   })
 
   it('flags late chunks after terminal state per protocol policy with diagnostic metadata', () => {

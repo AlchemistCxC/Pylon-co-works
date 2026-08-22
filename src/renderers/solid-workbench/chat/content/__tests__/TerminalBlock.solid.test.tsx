@@ -1,7 +1,9 @@
 // @vitest-environment jsdom
 import { render } from '@solidjs/testing-library'
+import { createSignal } from 'solid-js'
 import { describe, expect, it, vi } from 'vitest'
 import { SolidLogBlock, SolidTerminalBlock } from '../TerminalBlock.solid.tsx'
+import { BuiltinSolidContentSlot } from '../../BuiltinSolidContentSlot.solid.tsx'
 import type { ContentPart } from '../../../../../domains/workbench/content/contentPartSchema.ts'
 
 /**
@@ -63,6 +65,24 @@ describe('C07 SolidTerminalBlock', () => {
     expect(result.container.textContent).toContain('省略 9999 行')
   })
 
+  it('consumes declared typography tokens (C13: 声明必须真实消费)', () => {
+    const result = render(() => <SolidTerminalBlock part={terminalPart} appearance={{
+      fontFamily: 'inherit', fontSize: 17, lineHeight: 2,
+    }} />)
+    const body = result.container.querySelector('.term-terminal-body') as HTMLElement
+    expect(body.style.fontFamily).toBe('inherit')
+    expect(body.style.fontSize).toBe('17px')
+    expect(body.style.lineHeight).toBe('2')
+    // 非法数值回退 kind default，不产生 NaN/undefined 内联样式
+    const fallback = render(() => <SolidTerminalBlock part={terminalPart} appearance={{
+      fontSize: Number.NaN, lineHeight: undefined as unknown as number,
+    }} />)
+    const fallbackBody = fallback.container.querySelector('.term-terminal-body') as HTMLElement
+    expect(fallbackBody.style.fontSize).toBe('13px')
+    expect(fallbackBody.style.lineHeight).toBe('1.5')
+    expect(fallbackBody.innerHTML).not.toContain('NaN')
+  })
+
   it('copy goes through injected callback with sanitized text', async () => {
     const copy = vi.fn()
     const result = render(() => <SolidTerminalBlock part={terminalPart} actions={{ copy }} />)
@@ -72,6 +92,31 @@ describe('C07 SolidTerminalBlock', () => {
     const copiedText = copy.mock.calls[0]![0] as string
     expect(copiedText).toContain('[err] warning: deprecated')
     expect(copiedText).not.toContain('\u001b[')
+  })
+
+  it('follows new output only while follow-tail is enabled', async () => {
+    const [part, setPart] = createSignal(terminalPart)
+    const [followTail, setFollowTail] = createSignal(true)
+    const result = render(() => <SolidTerminalBlock part={part()} appearance={{ followTail: followTail() }} />)
+    const body = result.container.querySelector<HTMLElement>('.term-terminal-body')!
+    Object.defineProperty(body, 'scrollHeight', { configurable: true, value: 500 })
+    body.scrollTop = 0
+
+    setPart({
+      ...(terminalPart as unknown as Record<string, unknown>),
+      streams: [...(terminalPart as unknown as { streams: unknown[] }).streams, { stream: 'stdout', text: 'new chunk', ordinal: 3 }],
+    } as unknown as ContentPart)
+    await Promise.resolve()
+    expect(body.scrollTop).toBe(500)
+
+    setFollowTail(false)
+    body.scrollTop = 120
+    setPart({
+      ...(part() as unknown as Record<string, unknown>),
+      streams: [...((part() as unknown as { streams: unknown[] }).streams), { stream: 'stdout', text: 'paused chunk', ordinal: 4 }],
+    } as unknown as ContentPart)
+    await Promise.resolve()
+    expect(body.scrollTop).toBe(120)
   })
 
   it('late chunks are flagged and rendered separately', () => {
@@ -84,6 +129,9 @@ describe('C07 SolidTerminalBlock', () => {
     } as unknown as ContentPart
     const result = render(() => <SolidTerminalBlock part={late} />)
     expect(result.container.textContent).toContain('迟到输出')
+    expect(result.container.querySelectorAll('.term-terminal-line')).toHaveLength(3)
+    expect(result.container.querySelectorAll('.term-terminal-late')).toHaveLength(1)
+    expect(result.container.textContent?.match(/late arrival/g)).toHaveLength(1)
   })
 })
 
@@ -101,5 +149,116 @@ describe('C07 SolidLogBlock', () => {
     expect(result.container.textContent).toContain('compiling')
     expect(result.container.textContent).toContain('时间戳为合成')
     expect(result.container.querySelector('.term-log-warn')).not.toBeNull()
+  })
+})
+
+describe('C07 built-in content Slot', () => {
+  it('renders canonical terminal/log payloads and gates copy through the command port', async () => {
+    const execute = vi.fn()
+    const terminal = render(() => <BuiltinSolidContentSlot
+      snapshot={{ nodeId: 'terminal-slot', kind: 'content.terminal', revision: 1, payload: terminalPart }}
+      appearance={{}}
+      commands={{ execute, canExecute: type => type === 'clipboard.write' }}
+    />)
+
+    expect(terminal.container.querySelector('.term-terminal-card')).not.toBeNull()
+    await terminal.getByRole('button', { name: '复制' }).click()
+    expect(execute).toHaveBeenCalledWith(expect.objectContaining({
+      type: 'clipboard.write',
+      payload: expect.objectContaining({ text: expect.stringContaining('[err] warning: deprecated') }),
+    }))
+
+    const log = render(() => <BuiltinSolidContentSlot
+      snapshot={{
+        nodeId: 'log-slot', kind: 'content.log', revision: 1,
+        payload: { kind: 'log', source: 'worker', entries: [{ level: 'info', text: 'ready' }] },
+      }}
+      appearance={{}}
+      commands={{ execute: vi.fn(), canExecute: () => false }}
+    />)
+    expect(log.container.querySelector('.term-log-card')).toHaveTextContent('ready')
+  })
+
+  it('consumes terminal appearance and behaviour settings', () => {
+    const result = render(() => <BuiltinSolidContentSlot
+      snapshot={{
+        nodeId: 'terminal-settings', kind: 'content.terminal', revision: 1,
+        payload: {
+          kind: 'terminal', processId: 'proc-7', sessionId: 'shell-9',
+          streams: [
+            { stream: 'stdout', text: 'old', ordinal: 0, timestamp: '10:00' },
+            { stream: 'stderr', text: 'latest', ordinal: 1, timestamp: '10:01' },
+          ],
+        },
+      }}
+      appearance={{
+        wrap: 'soft', maxHeight: 222, retainedLines: 1,
+        stdoutColor: '#112233', stderrColor: '#aabbcc', background: '#010203',
+        timestamps: true, followTail: false, density: 'compact', showCopy: false, showIdentity: true,
+      }}
+      commands={{ execute: vi.fn(), canExecute: () => true }}
+    />)
+
+    const card = result.container.querySelector<HTMLElement>('.term-terminal-card')!
+    const body = result.container.querySelector<HTMLElement>('.term-terminal-body')!
+    expect(card).toHaveAttribute('data-density', 'compact')
+    expect(card).toHaveTextContent('proc-7')
+    expect(card).toHaveTextContent('shell-9')
+    expect(card).toHaveTextContent('10:01')
+    expect(card).not.toHaveTextContent('old')
+    expect(card.querySelector('button')).toBeNull()
+    expect(body).toHaveAttribute('data-wrap', 'soft')
+    expect(body).toHaveAttribute('data-follow-tail', 'false')
+    expect(body.style.maxHeight).toBe('222px')
+    expect(body.style.background).toBe('rgb(1, 2, 3)')
+    expect(card.querySelector<HTMLElement>('.term-stream-stderr')?.style.color).toBe('rgb(170, 187, 204)')
+  })
+
+  it('filters and styles structured logs from renderer settings', () => {
+    const result = render(() => <BuiltinSolidContentSlot
+      snapshot={{
+        nodeId: 'log-settings', kind: 'content.log', revision: 1,
+        payload: {
+          kind: 'log', source: 'worker',
+          entries: [
+            { level: 'info', text: 'hidden info', ordinal: 0, timestamp: '10:00' },
+            { level: 'warn', text: 'older warning', ordinal: 1, timestamp: '10:01' },
+            { level: 'error', text: 'latest error', ordinal: 2, timestamp: '10:02' },
+          ],
+        },
+      }}
+      appearance={{
+        logLevels: ['warn', 'error'], retainedLines: 1, timestamps: true,
+        density: 'compact', maxHeight: 180, background: '#010203', stderrColor: '#aabbcc',
+      }}
+      commands={{ execute: vi.fn(), canExecute: () => false }}
+    />)
+
+    const card = result.container.querySelector<HTMLElement>('.term-log-card')!
+    const entries = result.container.querySelector<HTMLElement>('.term-log-entries')!
+    expect(card).toHaveAttribute('data-density', 'compact')
+    expect(card).toHaveTextContent('latest error')
+    expect(card).toHaveTextContent('10:02')
+    expect(card).not.toHaveTextContent('hidden info')
+    expect(card).not.toHaveTextContent('older warning')
+    expect(entries.style.maxHeight).toBe('180px')
+    expect(entries.style.background).toBe('rgb(1, 2, 3)')
+    expect(card.querySelector<HTMLElement>('.term-log-error')?.style.color).toBe('rgb(170, 187, 204)')
+  })
+
+  it('shows a diagnostic fallback for malformed terminal/log payloads', () => {
+    const terminal = render(() => <BuiltinSolidContentSlot
+      snapshot={{ nodeId: 'bad-terminal', kind: 'content.terminal', revision: 1, payload: { streams: [{ stream: 'stdin', text: 'bad' }] } }}
+      appearance={{}} commands={{ execute: vi.fn(), canExecute: () => false }}
+    />)
+    expect(terminal.container.querySelector('[data-content-kind="content.terminal"]')).toHaveTextContent('Invalid content.terminal payload')
+    expect(terminal.container.querySelector('.term-terminal-card')).toBeNull()
+
+    const log = render(() => <BuiltinSolidContentSlot
+      snapshot={{ nodeId: 'bad-log', kind: 'content.log', revision: 1, payload: { entries: [] } }}
+      appearance={{}} commands={{ execute: vi.fn(), canExecute: () => false }}
+    />)
+    expect(log.container.querySelector('[data-content-kind="content.log"]')).toHaveTextContent('Invalid content.log payload')
+    expect(log.container.querySelector('.term-log-card')).toBeNull()
   })
 })

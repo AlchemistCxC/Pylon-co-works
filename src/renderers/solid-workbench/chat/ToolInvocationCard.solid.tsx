@@ -12,6 +12,7 @@ import { SolidMediaBlock } from './content/MediaBlock.solid.tsx'
 import { BUILTIN_MEDIA_RESOLVER_OPTIONS } from '../mediaAssetAdapter.ts'
 import { SolidSearchOrLink } from './content/SearchResults.solid.tsx'
 import { SolidDiffContent, SolidLspDiagnosticContent } from './content/DiffDiagnosticContent.solid.tsx'
+import { SolidLogBlock, SolidTerminalBlock } from './content/TerminalBlock.solid.tsx'
 
 const NO_COMMANDS: RenderCommandPort = { execute: () => {}, canExecute: () => false }
 
@@ -175,6 +176,15 @@ function ToolContentPart(props: { part: ContentPart; appearance?: RenderAppearan
       ? <SolidLspDiagnosticContent diagnostic={props.part as LspDiagnosticContentPart}
           appearance={props.appearance ?? {}} commands={props.commands ?? NO_COMMANDS} />
       : <pre data-tool-part-kind="diagnostic-lsp">Invalid diagnostic.lsp payload</pre>
+  }
+  if (props.part.kind === 'terminal') {
+    const canCopy = props.commands?.canExecute?.('clipboard.write') === true
+    return <SolidTerminalBlock part={props.part} appearance={props.appearance} actions={{
+      copy: canCopy ? text => { void props.commands?.execute({ type: 'clipboard.write', payload: { text } }) } : undefined,
+    }} />
+  }
+  if (props.part.kind === 'log') {
+    return <SolidLogBlock part={props.part} appearance={props.appearance} />
   }
   if (props.part.kind === 'unknown') {
     return <details data-tool-part-kind="unknown"><summary>{props.part.summary}</summary><pre>{safeJson(props.part.raw)}</pre></details>

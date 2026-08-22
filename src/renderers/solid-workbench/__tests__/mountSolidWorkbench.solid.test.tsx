@@ -11,6 +11,7 @@ import type { RendererActivationSnapshot, RendererSlotContribution, RendererSuit
 import type { RegistryEntry } from '../../../plugin-runtime/registry/types.ts'
 import { BUILTIN_TEXT_RENDER_KINDS } from '../../../domains/rendererContent/textRenderKindCatalog.ts'
 import { BUILTIN_TOOL_RENDER_KINDS } from '../../../domains/rendererContent/toolRenderKindCatalog.ts'
+import { BUILTIN_EXECUTION_RENDER_KINDS } from '../../../domains/rendererContent/executionRenderKindCatalog.ts'
 import { createBuiltinSolidContentSlot } from '../builtinSolidRendererSuite.ts'
 
 const hosts: HTMLElement[] = []
@@ -222,13 +223,13 @@ describe('mountSolidWorkbench', () => {
       sessionId: 'preview-session', recordedAt: `2026-08-21T00:00:0${sequence}.000Z`, sequence,
       source: { provider: 'peri', sourceId: `solid-${sequence}` }, provenance: { origin: 'local-observed', trust: 'authoritative' }, event,
     })
-    const document = projectWorkbench([
+    const workbenchDocument = projectWorkbench([
       envelope(1, { type: 'message.delta', role: 'assistant', parts: [{ kind: 'text', text: 'canonical answer' }] }),
       envelope(2, { type: 'tool.started', tool: { toolCallId: 'tool-1', name: 'Read', status: 'running' } }),
       envelope(3, { type: 'usage.updated', usage: { inputTokens: 8 } }),
       envelope(4, { type: 'diagnostic.notice', level: 'warning', code: 'demo.warning', message: 'canonical warning' }),
     ]).document
-    services.runtime.replaceDocument(document, { ownerKey: 'owner-preview', generation: 1 })
+    services.runtime.replaceDocument(workbenchDocument, { ownerKey: 'owner-preview', generation: 1 })
     await waitFor(() => expect(screen.getByText('canonical answer')).toBeTruthy())
     expect(host.querySelector('[data-activity-count="1"]')).toBeTruthy()
     expect(host.querySelector('[data-has-usage="true"]')).toBeTruthy()
@@ -388,6 +389,113 @@ describe('mountSolidWorkbench', () => {
     expect(host.querySelector('[data-content-kind="content.diff"] [data-renderer-slot-id="builtin.solid.content.base"]')
       ?? host.querySelector('[data-content-kind="content.diff"]')).not.toBeNull()
     expect(host.querySelector('[data-content-kind="diagnostic.lsp"]')).not.toBeNull()
+  })
+
+  it('C07 canonical terminal and log parts remain readable through the production fallback', async () => {
+    const { host, services } = mountPreview()
+    const document = projectWorkbench([createWorkbenchEnvelope({
+      sessionId: 'preview-session', recordedAt: '2026-08-23T00:00:02.000Z', sequence: 1,
+      source: { provider: 'hermes', sourceId: 'c07-content' }, identity: { messageId: 'c07-content' },
+      provenance: { origin: 'local-observed', trust: 'authoritative' },
+      event: {
+        type: 'message.delta', role: 'assistant', parts: [
+          { kind: 'terminal', command: 'npm test', streams: [{ stream: 'stderr', text: 'failed', ordinal: 0 }], exitCode: 1 },
+          { kind: 'log', source: 'runner', entries: [{ level: 'info', text: 'cleanup complete' }] },
+        ],
+      },
+    })]).document
+
+    services.runtime.replaceDocument(document, { ownerKey: 'owner-preview', generation: 1 })
+
+    await waitFor(() => expect(host.querySelector('.term-terminal-card')).toHaveTextContent('failed'))
+    expect(host.querySelector('.term-log-card')).toHaveTextContent('cleanup complete')
+    expect(host.textContent).not.toContain('Unsupported content kind')
+  })
+
+  it('C07 activity.process renders identity, output, status, and synthetic provenance outside messages', async () => {
+    const { host, services } = mountPreview()
+    const createActivity = (sequence: number, event: WorkbenchEventEnvelope['event']) => createWorkbenchEnvelope({
+      sessionId: 'preview-session', recordedAt: `2026-08-23T00:00:0${sequence}.000Z`, sequence,
+      source: { provider: 'peri', sourceId: `process-${sequence}` }, identity: { taskId: 'process-1' },
+      provenance: sequence === 1
+        ? { origin: 'local-observed', trust: 'authoritative' }
+        : { origin: 'plugin', trust: 'unverified', orderConfidence: 'observed', synthetic: { reason: 'observed exit' } },
+      event,
+    })
+    const workbenchDocument = projectWorkbench([
+      createActivity(1, {
+        type: 'activity.started', activityId: 'process-1',
+        activity: { kind: 'process', title: 'background tests', processId: 'pid-7', sessionId: 'shell-2' },
+      }),
+      createActivity(2, {
+        type: 'activity.completed', activityId: 'process-1',
+        result: { parts: [{ kind: 'terminal', streams: [{ stream: 'stdout', text: 'all passed', ordinal: 0 }], exitCode: 0 }] },
+      }),
+    ]).document
+
+    services.runtime.replaceDocument(workbenchDocument, { ownerKey: 'owner-preview', generation: 1 })
+
+    await waitFor(() => expect(host.querySelector('.term-process-activity')).toHaveTextContent('background tests'))
+    const process = host.querySelector('.term-process-activity')!
+    expect(process).toHaveTextContent('pid-7')
+    expect(process).toHaveTextContent('shell-2')
+    expect(process).toHaveTextContent('completed')
+    expect(process).toHaveTextContent('all passed')
+    expect(process).toHaveTextContent('合成生命周期：observed exit')
+    expect([...host.querySelectorAll('[data-message-role]')].map(node => node.textContent).join('')).not.toContain('all passed')
+  })
+
+  it('C07 terminal/log/process kinds mount through the production base Slot', async () => {
+    const host = document.createElement('div')
+    document.body.append(host)
+    hosts.push(host)
+    const services = createPreviewWorkbenchServices()
+    servicesList.push(services)
+    const slot = createBuiltinSolidContentSlot()
+    const slotEntry = {
+      ownerPluginId: 'builtin.pylon-renderers', ownerRuntimeInstanceId: 'runtime',
+      contributionId: slot.id, layer: 'feature', priority: slot.priority, value: slot,
+    } as RegistryEntry<RendererSlotContribution>
+    const kinds = [
+      ...BUILTIN_TEXT_RENDER_KINDS.filter(kind => kind.id === 'content.terminal' || kind.id === 'content.log'),
+      ...BUILTIN_EXECUTION_RENDER_KINDS,
+    ]
+    const activation: RendererActivationSnapshot = {
+      revision: 1,
+      suite: {
+        ownerPluginId: 'builtin.pylon-renderers', ownerRuntimeInstanceId: 'runtime',
+        contributionId: 'builtin.solid', layer: 'feature', priority: 1, value: { id: 'builtin.solid' } as RendererSuiteContribution,
+      },
+      kinds: new Map(kinds.map(kind => [kind.id, {
+        ownerPluginId: 'core.renderer.execution', ownerRuntimeInstanceId: 'runtime',
+        contributionId: kind.id, layer: 'feature', priority: kind.priority, value: kind,
+      }])),
+      slots: new Map(kinds.map(kind => [kind.id, [slotEntry]])),
+      diagnostics: [],
+    }
+    mountSolidWorkbench({
+      host, input: { sheetId: 'sheet-a', sessionId: 'preview-session' }, services, activation,
+    })
+    const make = (sequence: number, event: WorkbenchEventEnvelope['event']) => createWorkbenchEnvelope({
+      sessionId: 'preview-session', sequence, recordedAt: `2026-08-23T00:01:0${sequence}.000Z`,
+      source: { provider: 'hermes', sourceId: `c07-slot-${sequence}` },
+      identity: event.type.startsWith('message.') ? { messageId: 'message-slot' } : { taskId: 'process-slot' },
+      provenance: { origin: 'local-observed', trust: 'authoritative' }, event,
+    })
+    const workbenchDocument = projectWorkbench([
+      make(1, { type: 'message.delta', role: 'assistant', parts: [
+        { kind: 'terminal', streams: [{ stream: 'stdout', text: 'slot terminal' }] },
+        { kind: 'log', entries: [{ level: 'info', text: 'slot log' }] },
+      ] }),
+      make(2, { type: 'activity.started', activityId: 'process-slot', activity: {
+        kind: 'process', semanticKind: 'activity.process', title: 'slot process', processId: 'pid-slot',
+      } }),
+    ]).document
+    services.runtime.replaceDocument(workbenchDocument, { ownerKey: 'owner-preview', generation: 1 })
+
+    await waitFor(() => expect(host.querySelector('[data-renderer-slot-id="builtin.solid.content.base"] .term-terminal-card')).toHaveTextContent('slot terminal'))
+    expect(host.querySelector('[data-renderer-slot-id="builtin.solid.content.base"] .term-log-card')).toHaveTextContent('slot log')
+    expect(host.querySelector('[data-renderer-slot-id="builtin.solid.content.base"] .term-process-activity')).toHaveTextContent('slot process')
   })
 
   it('canonical reasoning terminal metadata reaches the production content Slot', async () => {

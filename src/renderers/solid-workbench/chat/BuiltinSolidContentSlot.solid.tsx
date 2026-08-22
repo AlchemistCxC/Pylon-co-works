@@ -7,8 +7,10 @@ import type {
 import {
   isValidLinkContentInput,
   isValidDiffContentInput,
+  isValidLogContentInput,
   isValidLspDiagnosticContentInput,
   isValidSearchResultContentInput,
+  isValidTerminalContentInput,
   type ContentPart,
   type LspDiagnosticContentPart,
 } from '../../../domains/workbench/content/contentPartSchema.ts'
@@ -29,6 +31,9 @@ import { SolidToolInvocationCard } from './ToolInvocationCard.solid.tsx'
 import { SolidSearchOrLink, type SearchLinkAppearance } from './content/SearchResults.solid.tsx'
 import { diffSnapshotFromPart } from '../../../domains/workbench/diffSnapshot.ts'
 import { SolidDiffContent, SolidLspDiagnosticContent } from './content/DiffDiagnosticContent.solid.tsx'
+import { SolidLogBlock, SolidProcessActivity, SolidTerminalBlock } from './content/TerminalBlock.solid.tsx'
+import { isProcessActivitySnapshotInput } from '../../../domains/rendererContent/executionRenderKindCatalog.ts'
+import type { WorkbenchActivityNode } from '../../../domains/workbench/workbenchProjector.ts'
 
 export function BuiltinSolidContentSlot(props: {
   snapshot: RenderNodeSnapshot
@@ -208,6 +213,26 @@ export function BuiltinSolidContentSlot(props: {
           {snapshot => <SolidDiffContent snapshot={snapshot()} nodeId={props.snapshot.nodeId} appearance={props.appearance} commands={props.commands} />}
         </Show>
       </Match>
+      <Match when={kind() === 'content.terminal'}>
+        <Show when={isValidTerminalContentInput(props.snapshot.payload) ? payload() : undefined}
+          fallback={<pre class="solid-content-unknown" data-content-kind="content.terminal">Invalid content.terminal payload</pre>}>
+          {part => <SolidTerminalBlock
+            part={part()}
+            appearance={props.appearance}
+            actions={{
+              copy: can('clipboard.write')
+                ? value => execute('clipboard.write', { text: value })
+                : undefined,
+            }}
+          />}
+        </Show>
+      </Match>
+      <Match when={kind() === 'content.log'}>
+        <Show when={isValidLogContentInput(props.snapshot.payload) ? payload() : undefined}
+          fallback={<pre class="solid-content-unknown" data-content-kind="content.log">Invalid content.log payload</pre>}>
+          {part => <SolidLogBlock part={part()} appearance={props.appearance} />}
+        </Show>
+      </Match>
       <Match when={kind() === 'diagnostic.lsp'}>
         <Show when={isValidLspDiagnosticContentInput(props.snapshot.payload)
           ? props.snapshot.payload as LspDiagnosticContentPart : undefined}
@@ -221,6 +246,15 @@ export function BuiltinSolidContentSlot(props: {
           fallback={<pre class="solid-content-unknown" data-content-kind={kind()}>Invalid tool snapshot</pre>}
         >
           {snapshot => <SolidToolInvocationCard snapshot={snapshot()} appearance={props.appearance} renderKind={kind()} commands={props.commands} />}
+        </Show>
+      </Match>
+      <Match when={kind() === 'activity.process'}>
+        <Show
+          when={isProcessActivitySnapshotInput(props.snapshot.payload)
+            ? props.snapshot.payload as WorkbenchActivityNode : undefined}
+          fallback={<pre class="solid-content-unknown" data-content-kind="activity.process">Invalid process activity snapshot</pre>}
+        >
+          {activity => <SolidProcessActivity activity={activity()} appearance={props.appearance} commands={props.commands} />}
         </Show>
       </Match>
       <Match when={kind() === 'content.plan'}>

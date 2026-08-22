@@ -3,9 +3,13 @@ import {
   type ContentPart,
   type JsonValue,
   type LspRelatedInformation,
+  type LogContentEntry,
   type SearchHighlightRange,
   type SearchResultEntry,
   type SearchResultLocation,
+  type TerminalStreamEntry,
+  type TerminalContentPart,
+  type TerminalOutputTruncation,
   type TextPosition,
   type TextRange,
 } from '../content/contentPartSchema.ts'
@@ -177,6 +181,67 @@ export function normalizeContentBlock(raw: unknown): { part: ContentPart; diagno
           ...nonEmptyTrimmed(raw.title, 'title'),
           ...(Number.isInteger(raw.status) && Number(raw.status) >= 100 && Number(raw.status) <= 599 ? { status: Number(raw.status) } : {}),
         },
+      }
+    }
+    // C07：终端——command/streams/exit/status/durationMs 结构化保留；streams 分条不合并；
+    // env 表 secret-like 值脱敏；缺 command 且缺 streams 进 unknown。
+    case 'terminal': {
+      const sourceStreams = Array.isArray(raw.streams) ? raw.streams : []
+      const streams = sourceStreams.flatMap(entry => {
+        const normalized = normalizeTerminalStreamEntry(entry)
+        return normalized ? [normalized] : []
+      })
+      const command = typeof raw.command === 'string' && raw.command.trim() ? raw.command.trim() : undefined
+      const error = normalizeTerminalError(raw.error)
+      const truncation = normalizeTerminalTruncation(raw.truncation)
+      if (!command && streams.length === 0 && !error) {
+        return { part: createUnknownContentPart(type, raw), diagnostic: { code: 'content.terminal.invalid', message: 'terminal block needs command, output, or error', path: [] } }
+      }
+      return {
+        part: {
+          kind: 'terminal',
+          ...(command ? { command } : {}),
+          ...nonEmptyTrimmed(raw.processId ?? raw.process_id, 'processId'),
+          ...nonEmptyTrimmed(raw.sessionId ?? raw.session_id, 'sessionId'),
+          streams,
+          ...(Number.isInteger(raw.exitCode) ? { exitCode: Number(raw.exitCode) } : {}),
+          ...(['timeout', 'killed', 'signal'].includes(String(raw.terminatedBy)) ? { terminatedBy: raw.terminatedBy as 'timeout' | 'killed' | 'signal' } : {}),
+          ...(['queued', 'running', 'completed', 'failed', 'cancelled'].includes(String(raw.status)) ? { status: raw.status as 'queued' | 'running' | 'completed' | 'failed' | 'cancelled' } : {}),
+          ...(typeof raw.durationMs === 'number' && Number.isFinite(raw.durationMs) && raw.durationMs >= 0 ? { durationMs: raw.durationMs } : {}),
+          ...(isRecord(raw.env) ? { env: redactSecretEnv(raw.env) } : {}),
+          ...(truncation ? { truncation } : {}),
+          ...(error ? { error } : {}),
+        },
+        ...(streams.length < sourceStreams.length ? { diagnostic: {
+          code: 'content.terminal.entries-dropped',
+          message: `${sourceStreams.length - streams.length} malformed terminal stream entries were dropped`,
+          path: ['streams'],
+        } } : {}),
+      }
+    }
+    // C07：结构化日志——source + entries（level/text/timestampConfidence）。
+    case 'log': {
+      const sourceEntries = Array.isArray(raw.entries) ? raw.entries : []
+      const entries = sourceEntries.flatMap(entry => {
+        const normalized = normalizeLogContentEntry(entry)
+        return normalized ? [normalized] : []
+      })
+      if (entries.length === 0) {
+        return { part: createUnknownContentPart(type, raw), diagnostic: { code: 'content.log.empty', message: 'log block has no entries', path: ['entries'] } }
+      }
+      return {
+        part: {
+          kind: 'log',
+          ...nonEmptyTrimmed(raw.source, 'source'),
+          ...nonEmptyTrimmed(raw.processId ?? raw.process_id, 'processId'),
+          ...nonEmptyTrimmed(raw.sessionId ?? raw.session_id, 'sessionId'),
+          entries,
+        },
+        ...(entries.length < sourceEntries.length ? { diagnostic: {
+          code: 'content.log.entries-dropped',
+          message: `${sourceEntries.length - entries.length} malformed log entries were dropped`,
+          path: ['entries'],
+        } } : {}),
       }
     }
     // C06：LSP diagnostic——severity/code/source/message/path/range/related 结构化保留；
@@ -406,6 +471,68 @@ function nonEmptyTrimmed<Key extends string>(value: unknown, key: Key): Partial<
   return { [key]: value.trim() } as Partial<Record<Key, string>>
 }
 
+function normalizeTerminalStreamEntry(value: unknown): TerminalStreamEntry | undefined {
+  if (!isRecord(value) || (value.stream !== 'stdout' && value.stream !== 'stderr') || typeof value.text !== 'string') return undefined
+  if (value.ordinal !== undefined && (!Number.isInteger(value.ordinal) || Number(value.ordinal) < 0)) return undefined
+  if (value.lateAfterTerminal !== undefined && typeof value.lateAfterTerminal !== 'boolean') return undefined
+  if (value.timestamp !== undefined && (typeof value.timestamp !== 'string' || !value.timestamp.trim())) return undefined
+  if (value.timestampConfidence !== undefined && !['exact', 'observed', 'synthetic', 'unknown'].includes(String(value.timestampConfidence))) return undefined
+  return {
+    stream: value.stream,
+    text: value.text,
+    ...(value.ordinal !== undefined ? { ordinal: Number(value.ordinal) } : {}),
+    ...(value.lateAfterTerminal === true ? { lateAfterTerminal: true } : {}),
+    ...(typeof value.timestamp === 'string' ? { timestamp: value.timestamp.trim() } : {}),
+    ...(typeof value.timestampConfidence === 'string'
+      ? { timestampConfidence: value.timestampConfidence as TerminalStreamEntry['timestampConfidence'] }
+      : {}),
+  }
+}
+
+function normalizeLogContentEntry(value: unknown): LogContentEntry | undefined {
+  if (!isRecord(value) || typeof value.text !== 'string') return undefined
+  if (value.ordinal !== undefined && (!Number.isInteger(value.ordinal) || Number(value.ordinal) < 0)) return undefined
+  if (value.timestamp !== undefined && (typeof value.timestamp !== 'string' || !value.timestamp.trim())) return undefined
+  if (value.timestampConfidence !== undefined && !['exact', 'observed', 'synthetic', 'unknown'].includes(String(value.timestampConfidence))) return undefined
+  const sourceLevel = typeof value.level === 'string' && value.level.trim() ? value.level.trim().toLowerCase() : 'unknown'
+  const level = ['trace', 'debug', 'info', 'warn', 'error', 'fatal'].includes(sourceLevel)
+    ? sourceLevel as LogContentEntry['level']
+    : 'unknown'
+  return {
+    level,
+    ...(level === 'unknown' && sourceLevel !== 'unknown' ? { originalLevel: sourceLevel } : {}),
+    text: value.text,
+    ...(value.ordinal !== undefined ? { ordinal: Number(value.ordinal) } : {}),
+    ...(typeof value.timestamp === 'string' ? { timestamp: value.timestamp.trim() } : {}),
+    ...(typeof value.timestampConfidence === 'string'
+      ? { timestampConfidence: value.timestampConfidence as LogContentEntry['timestampConfidence'] }
+      : {}),
+  }
+}
+
+function normalizeTerminalTruncation(value: unknown): TerminalOutputTruncation | undefined {
+  if (!isRecord(value)) return undefined
+  const field = (key: keyof TerminalOutputTruncation): number | undefined => {
+    const candidate = value[key]
+    return Number.isInteger(candidate) && Number(candidate) >= 0 ? Number(candidate) : undefined
+  }
+  const truncation: TerminalOutputTruncation = {
+    ...(field('capturedLines') !== undefined ? { capturedLines: field('capturedLines') } : {}),
+    ...(field('omittedLines') !== undefined ? { omittedLines: field('omittedLines') } : {}),
+    ...(field('capturedBytes') !== undefined ? { capturedBytes: field('capturedBytes') } : {}),
+    ...(field('omittedBytes') !== undefined ? { omittedBytes: field('omittedBytes') } : {}),
+  }
+  return Object.keys(truncation).length > 0 ? truncation : undefined
+}
+
+function normalizeTerminalError(value: unknown): TerminalContentPart['error'] | undefined {
+  if (!isRecord(value) || typeof value.message !== 'string' || !value.message.trim()) return undefined
+  return {
+    message: value.message.trim(),
+    ...(typeof value.code === 'string' && value.code.trim() ? { code: value.code.trim() } : {}),
+  }
+}
+
 function normalizeMediaContentBlock(
   raw: Record<string, unknown>,
   kind: MediaContentKind,
@@ -533,6 +660,19 @@ export function toJsonValue(value: unknown): JsonValue {
   if (Array.isArray(value)) return value.map(toJsonValue)
   if (isRecord(value)) return Object.fromEntries(Object.entries(value).map(([key, child]) => [key, toJsonValue(child)]))
   return String(value)
+}
+
+const SECRET_ENV_KEY = /(?:token|secret|password|api[-_]?key|credential|authorization|cookie)/i
+
+/** C07：secret-like 环境变量值脱敏（保留键名与占位，不显示 raw）。 */
+function redactSecretEnv(env: Record<string, unknown>): Record<string, string> {
+  const out: Record<string, string> = {}
+  for (const [key, value] of Object.entries(env)) {
+    out[key] = typeof value === 'string'
+      ? (SECRET_ENV_KEY.test(key) ? '[REDACTED]' : value)
+      : String(value)
+  }
+  return out
 }
 
 function toJsonRecord(value: Record<string, unknown>): Record<string, JsonValue> {
