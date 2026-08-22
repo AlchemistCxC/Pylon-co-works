@@ -1,0 +1,74 @@
+// @vitest-environment jsdom
+import { fireEvent, render, waitFor } from '@solidjs/testing-library'
+import { describe, expect, it } from 'vitest'
+import type { RenderMessage } from '../../../../components/chat/messageTypes.ts'
+import type { Message } from '../../../../components/chat/messageTypes.ts'
+import { SolidMessageRow } from '../MessageRow.solid.tsx'
+
+/**
+ * C01 RED：ReasoningBlock 四态契约。
+ *
+ * 卡面要求：用户能区分 正在思考 / 已完成 / 被 provider 隐去 / 数据缺失；
+ * redacted 只显示安全占位和可用原因；完成后按设置折叠；
+ * 正文复用 C00 markdown renderer（不建第二管线）。
+ */
+
+function row(message: Partial<Message>): ReturnType<typeof render> {
+  const full: Message = { id: 'r1', role: 'reasoning', sender: 'peri', content: '', time: 't' }
+  return render(() => (
+    <SolidMessageRow
+      renderMessage={{ type: 'reasoning', message: { ...full, ...message } } as RenderMessage}
+      appearance={{} as Parameters<typeof SolidMessageRow>[0]['appearance']}
+    />
+  ))
+}
+
+describe('C01 ReasoningBlock states', () => {
+  it('running state shows thinking label with reduced-motion safe indicator', () => {
+    const result = row({ content: '思考中内容', running: true })
+    const label = result.getByText('正在思考…')
+    expect(label).toBeTruthy()
+    // running 指示物是纯 CSS（reduced-motion 由样式层 media query 关闭），DOM 无自动动画元素
+    expect(result.container.querySelector('[data-state="running"]')).not.toBeNull()
+  })
+
+  it('completed state shows duration and collapses body until expanded', async () => {
+    const result = row({ content: '已完成思考正文', running: false, thoughtDurationMs: 2400 })
+    const button = result.getByRole('button')
+    expect(button.textContent).toContain('2.4s')
+    expect(button.getAttribute('aria-expanded')).toBe('false')
+    await fireEvent.click(button)
+    expect(button.getAttribute('aria-expanded')).toBe('true')
+    expect(result.container.textContent).toContain('已完成思考正文')
+  })
+
+  it('redacted state shows safe placeholder and reason, never raw content', () => {
+    const result = row({ content: '机密推理原文', running: false, redacted: true, redactedReason: 'provider_redacted' })
+    // 占位文案可见、原因可见
+    expect(result.container.textContent).toContain('推理已被隐藏')
+    expect(result.container.textContent).toContain('provider_redacted')
+    // 原文不得出现在 DOM 任何位置
+    expect(result.container.textContent).not.toContain('机密推理原文')
+    // 展开也不产生原文——redacted 没有 body 可展开
+    const buttons = result.container.querySelectorAll('button')
+    for (const button of buttons) {
+      expect(button.textContent).not.toContain('机密推理原文')
+    }
+  })
+
+  it('missing data state (no content, not running) shows data-unavailable hint', () => {
+    const result = row({ content: '', running: false })
+    expect(result.container.textContent).toContain('暂无')
+  })
+
+  it('renders body via C00 MarkdownContent instead of a second pipeline', async () => {
+    const result = row({ content: '# 标题思考\n\n- 要点**加粗**', running: false })
+    const button = result.getByRole('button')
+    await fireEvent.click(button)
+    // MarkdownContent 异步解析，等待 h1 出现（复用 C00 语义标签，非纯文本行）
+    await waitFor(() => {
+      if (!result.container.querySelector('.term-h1')) throw new Error('markdown not parsed yet')
+    }, { timeout: 5000 })
+    expect(result.container.querySelectorAll('.term-reasoning-line')).toHaveLength(0)
+  })
+})

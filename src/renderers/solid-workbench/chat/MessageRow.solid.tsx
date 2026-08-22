@@ -1,4 +1,4 @@
-import { ErrorBoundary, For, Show, createSignal, onCleanup } from 'solid-js'
+import { ErrorBoundary, Show, createSignal, onCleanup } from 'solid-js'
 import type { RenderMessage } from '../../../components/chat/messageTypes.ts'
 import type { WorkbenchAppearanceSnapshot } from '../../../domains/workbench/appearance.ts'
 import { MarkdownContent } from './MarkdownContent.solid.tsx'
@@ -48,6 +48,8 @@ export function SolidMessageRow(props: SolidMessageRowProps) {
             startedAt={message().thoughtStartedAt}
             durationMs={message().thoughtDurationMs}
             now={props.now}
+            redacted={message().redacted === true}
+            redactedReason={message().redactedReason}
           />
         </Show>
         <Show when={props.renderMessage.type === 'error' || props.renderMessage.type === 'system'}>
@@ -120,22 +122,53 @@ export function ReasoningBlock(props: {
   startedAt?: number
   durationMs?: number
   now?: () => number
+  /** C01：provider 隐去推理——显示安全占位与原因，正文不可见。 */
+  redacted?: boolean
+  redactedReason?: string
 }) {
   const [open, setOpen] = createSignal(false)
   const bodyId = `solid-reasoning-${Math.random().toString(36).slice(2)}`
-  const label = () => props.running ? 'Thinking…' : `Thought for ${props.text.length} chars`
+  // C01 四态：running / complete(duration) / redacted(reason) / missing(无内容且非 running)
+  const label = () => {
+    if (props.redacted) return '推理已被隐藏'
+    if (props.running) return '正在思考…'
+    if (props.durationMs !== undefined) return formatThoughtDuration(props.durationMs)
+    if (props.text.trim()) return '思考过程'
+    return '暂无思考内容'
+  }
+  const state = () => props.redacted ? 'redacted' : props.running ? 'running' : props.text.trim() ? 'complete' : 'missing'
 
   return (
-    <div class="term-reasoning" data-state={props.running ? 'running' : 'complete'}>
-      <button class="term-reasoning-head" type="button" onClick={() => setOpen(value => !value)} aria-expanded={open()} aria-controls={bodyId}>
-        <span class="term-reasoning-label">{label()}</span>
-        <span class="term-reasoning-toggle" aria-hidden="true">{open() ? '−' : '+'}</span>
-      </button>
-      <SolidCollapsibleRegion open={open()} id={bodyId}>
-        <div class="term-reasoning-body">
-          <For each={props.text.split('\n')}>{line => <div class="term-reasoning-line">{line || '\u00a0'}</div>}</For>
+    <div class="term-reasoning" data-state={state()}>
+      <Show when={state() !== 'redacted' && state() !== 'missing'} fallback={
+        // redacted/missing：无 body 可展开，原因作为可见说明文本
+        <div class="term-reasoning-head term-reasoning-static">
+          <span class="term-reasoning-label">{label()}</span>
+          <Show when={props.redacted && props.redactedReason}>
+            {reason => <span class="term-reasoning-reason">{reason()}</span>}
+          </Show>
         </div>
-      </SolidCollapsibleRegion>
+      }>
+        <button class="term-reasoning-head" type="button" onClick={() => setOpen(value => !value)} aria-expanded={open()} aria-controls={bodyId}>
+          <span class="term-reasoning-label">{label()}</span>
+          <span class="term-reasoning-toggle" aria-hidden="true">{open() ? '−' : '+'}</span>
+        </button>
+        <SolidCollapsibleRegion open={open()} id={bodyId}>
+          {/* C01 步骤4：正文复用 C00 markdown 管线，不建第二套渲染 */}
+          <div class="term-reasoning-body">
+            <MarkdownContent text={props.text} />
+          </div>
+        </SolidCollapsibleRegion>
+      </Show>
     </div>
   )
+}
+
+/** C01：时长格式化——秒内一位小数，分钟以上进位。 */
+function formatThoughtDuration(ms: number): string {
+  const clamped = Math.max(0, ms)
+  if (clamped < 60_000) return `Thought for ${(clamped / 1000).toFixed(1).replace(/\.0$/, '')}s`
+  const minutes = Math.floor(clamped / 60_000)
+  const seconds = Math.round((clamped % 60_000) / 1000)
+  return `Thought for ${minutes}m ${seconds}s`
 }

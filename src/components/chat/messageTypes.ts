@@ -25,6 +25,9 @@ export interface Message {
   running?: boolean
   thoughtStartedAt?: number
   thoughtDurationMs?: number
+  /** C01：provider 隐去推理——渲染层据此显示安全占位，不显示正文。 */
+  redacted?: boolean
+  redactedReason?: string
   toolStatus?: string
   /** P1-04：语义工具 kind（协议化渲染主键；旧消息无此字段 → 渲染回退按名字，向后兼容） */
   toolKind?: string

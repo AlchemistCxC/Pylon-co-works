@@ -48,6 +48,14 @@ export interface WorkbenchMessage {
   readonly sequence: number
   readonly running: boolean
   readonly time: string
+  /** C01：reasoning 完成/redacted 时记录的思考时长（首 delta → 终态 occurredAt）。 */
+  readonly thoughtDurationMs?: number
+  /** C01：provider 隐去推理标记——渲染层据此显示安全占位，不显示正文。 */
+  readonly redacted?: boolean
+  /** C01：隐去原因（provider 原样透传，缺失时 undefined）。 */
+  readonly redactedReason?: string
+  /** C01：内部字段——本段 reasoning 首个 delta 的 occurredAt（ms），用于终态计算 duration；不进渲染。 */
+  readonly thoughtStartedAtMs?: number
 }
 
 export interface WorkbenchActivityNode {
@@ -271,12 +279,45 @@ function reduceMessage(document: WorkbenchDocument, envelope: WorkbenchEventEnve
 
 function reduceReasoning(document: WorkbenchDocument, envelope: WorkbenchEventEnvelope, event: WorkbenchSemanticEvent & { type: 'reasoning.delta' | 'reasoning.completed' | 'reasoning.redacted' }): WorkbenchDocument {
   const parts = event.parts ?? []
-  const content = textFromParts(parts)
+  // C01：redacted 时正文不保留原文（D06——raw 不进入 projection），只保留安全占位。
+  const redacted = event.type === 'reasoning.redacted'
+  const content = redacted ? '' : textFromParts(parts)
   const previous = document.messages.at(-1)
-  const append = previous?.role === 'reasoning' && identityKeyOf(envelope) !== '' && identityKeyOf(envelope) === identityKeyOf(previous)
+  const identityKey = identityKeyOf(envelope)
+  const append = previous?.role === 'reasoning' && identityKey !== '' && identityKey === identityKeyOf(previous)
+  // C01：时长 = 终态 occurredAt − 首个 delta occurredAt；append 段沿用首段时间基准。
+  const terminalAt = Date.parse(envelope.occurredAt ?? envelope.recordedAt)
+  const startedAt = append && previous?.thoughtStartedAtMs !== undefined
+    ? previous.thoughtStartedAtMs
+    : Date.parse(envelope.occurredAt ?? envelope.recordedAt)
+  const durationMs = event.type === 'reasoning.delta'
+    ? (append ? previous?.thoughtDurationMs : undefined)
+    : Number.isFinite(terminalAt) && Number.isFinite(startedAt) ? Math.max(0, terminalAt - startedAt) : undefined
   const message: WorkbenchMessage = append
-    ? { ...previous, content: previous.content + content, parts: [...previous.parts, ...parts], sequence: envelope.sequence, running: event.type === 'reasoning.delta' }
-    : { id: identityKeyOf(envelope) || envelope.eventId, role: 'reasoning', content, parts, identity: envelope.identity, source: envelope.source, sequence: envelope.sequence, running: event.type === 'reasoning.delta', time: envelope.occurredAt ?? envelope.recordedAt }
+    ? {
+        ...previous,
+        content: redacted ? content : previous.content + content,
+        parts: [...previous.parts, ...parts],
+        sequence: envelope.sequence,
+        running: false,
+        ...(durationMs !== undefined ? { thoughtDurationMs: durationMs } : {}),
+        ...(redacted ? { redacted: true } : {}),
+        ...(event.reason !== undefined ? { redactedReason: event.reason } : {}),
+      }
+    : {
+        id: identityKey || envelope.eventId,
+        role: 'reasoning',
+        content,
+        parts,
+        identity: envelope.identity,
+        source: envelope.source,
+        sequence: envelope.sequence,
+        running: false,
+        time: envelope.occurredAt ?? envelope.recordedAt,
+        ...(durationMs !== undefined ? { thoughtDurationMs: durationMs } : { thoughtStartedAtMs: Number.isFinite(startedAt) ? startedAt : undefined }),
+        ...(redacted ? { redacted: true } : {}),
+        ...(event.reason !== undefined ? { redactedReason: event.reason } : {}),
+      }
   return { ...document, messages: append ? [...document.messages.slice(0, -1), message] : [...document.messages, message] }
 }
 

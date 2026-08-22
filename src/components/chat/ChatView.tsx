@@ -422,6 +422,8 @@ export function MessageRow({ renderMessage, reduceMotion, toolVisualState, rowRe
         running={msg.running === true}
         startedAt={msg.thoughtStartedAt}
         durationMs={msg.thoughtDurationMs}
+        redacted={msg.redacted === true}
+        redactedReason={msg.redactedReason}
       />}
       {renderMessage.type === 'assistant' && <AssistantContent text={msg.content} />}
       {(renderMessage.type === 'error' || renderMessage.type === 'system') && (
@@ -587,15 +589,32 @@ function formatThoughtLabel(text: string) {
   return `Thought for ${text.length} chars`
 }
 
-function ReasoningBlock({ text, running }: { text: string; running: boolean; startedAt?: number; durationMs?: number }) {
+function ReasoningBlock({ text, running, redacted, redactedReason }: { text: string; running: boolean; startedAt?: number; durationMs?: number; redacted?: boolean; redactedReason?: string }) {
   recordRender('ReasoningBlock.render')
   const [open, setOpen] = useState(false)
   const bodyId = useId()
   const modernGui = useInterfaceModeStore(state => state.interfaceMode === 'modern-gui')
 
-  const label = running ? 'Thinking…' : formatThoughtLabel(text)
+  // C01 四态（React generic fallback）：running / complete / redacted(reason) / missing。
+  // 卡面步骤5：至少显示"思考过程/内容已隐藏"与可见文本；redacted 不渲染正文、无展开按钮。
+  const state = redacted ? 'redacted' : running ? 'running' : text.trim() ? 'complete' : 'missing'
+  const label = redacted
+    ? '推理已被隐藏'
+    : running
+      ? 'Thinking…'
+      : text.trim() ? formatThoughtLabel(text) : '暂无思考内容'
+  if (state === 'redacted' || state === 'missing') {
+    return (
+      <div className="term-reasoning" data-state={state}>
+        <div className="term-reasoning-head term-reasoning-static">
+          <span className="term-reasoning-label">{label}</span>
+          {state === 'redacted' && redactedReason && <span className="term-reasoning-reason">{redactedReason}</span>}
+        </div>
+      </div>
+    )
+  }
   return (
-    <div className="term-reasoning" data-state={running ? 'running' : 'complete'}>
+    <div className="term-reasoning" data-state={state}>
       <button className="term-reasoning-head" type="button" onClick={() => setOpen(!open)} aria-expanded={open} aria-controls={bodyId}>
         {modernGui && <BrainCircuit className="term-reasoning-icon" size={15} aria-hidden="true" />}
         <span className="term-reasoning-label">{label}</span>

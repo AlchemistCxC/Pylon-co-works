@@ -10,6 +10,8 @@ const EXPECTED_KINDS = [
   'message.assistant',
   'content.text',
   'content.markdown',
+  'content.reasoning',
+  'content.redacted-reasoning',
   'content.code',
   'content.ansi',
 ] as const

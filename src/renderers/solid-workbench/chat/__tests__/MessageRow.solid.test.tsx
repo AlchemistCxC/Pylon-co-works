@@ -76,16 +76,20 @@ describe('SolidMessageRow', () => {
     expect(result.container.textContent).toContain('const value = 1')
   })
 
-  it('reasoning 展开后显示正文和完成时长', async () => {
+  it('reasoning 展开后显示正文和完成时长（C01：duration 标签）', async () => {
     const result = row({
       id: 'r1', role: 'reasoning', sender: 'peri', content: '第一行\n第二行', time: 't',
       thoughtDurationMs: 2400,
     })
-    const button = result.getByRole('button', { name: /Thought for \d+ chars/ })
+    // C01：label 从 chars 计数改为 duration 呈现
+    const button = result.getByRole('button', { name: /Thought for 2\.4s/ })
     expect(button.getAttribute('aria-expanded')).toBe('false')
     await fireEvent.click(button)
     expect(button.getAttribute('aria-expanded')).toBe('true')
-    expect(result.getByText('第二行')).toBeTruthy()
+    // 正文经 C00 MarkdownContent 异步渲染，等待出现
+    await waitFor(() => {
+      if (!result.container.textContent?.includes('第二行')) throw new Error('markdown not flushed')
+    }, { timeout: 5000 })
   })
 
   it('system error 使用 alert 结构', () => {

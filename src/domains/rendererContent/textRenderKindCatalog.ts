@@ -51,6 +51,31 @@ export const BUILTIN_TEXT_RENDER_KINDS: readonly RenderKindDefinition[] = [
     validateInput: input => textPayload(input) && input.text.length > 0,
   },
   {
+    id: 'content.reasoning',
+    category: 'content',
+    fallbackKind: 'content.unknown',
+    priority: 100,
+    fixture: { text: 'fixture reasoning delta', state: 'running' },
+    defaultTokens: {},
+    settingsSchemaVersion: 1,
+    // C01：state ∈ running|complete|missing；redacted 走独立 kind
+    validateInput: input => textPayload(input)
+      && ['running', 'complete', 'missing'].includes(String((input as Record<string, unknown>).state)),
+  },
+  {
+    id: 'content.redacted-reasoning',
+    category: 'content',
+    fallbackKind: 'content.unknown',
+    priority: 100,
+    fixture: { reason: 'provider_redacted' },
+    defaultTokens: {},
+    settingsSchemaVersion: 1,
+    // C01：redacted 只携带原因，不携带内容——validateInput 拒绝带正文的输入
+    validateInput: input => typeof input === 'object' && input !== null && !Array.isArray(input)
+      && typeof (input as Record<string, unknown>).reason === 'string'
+      && typeof (input as Record<string, unknown>).text === 'undefined',
+  },
+  {
     id: 'content.code',
     category: 'content',
     fallbackKind: 'content.unknown',
