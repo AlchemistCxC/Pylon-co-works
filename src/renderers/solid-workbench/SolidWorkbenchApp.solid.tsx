@@ -3,10 +3,9 @@ import { buildChatRowDescriptors } from '../../components/chat/chatRowPipeline.t
 import { buildMessageLookups } from '../../components/chat/messageLookups.ts'
 import { prepareMessages } from '../../components/chat/messagePipeline.ts'
 import type { Message, RenderMessage } from '../../components/chat/messageTypes.ts'
-import { selectActivityDisplayOrder, toolInvocationSnapshot, type WorkbenchActivityNode, type WorkbenchDocument } from '../../domains/workbench/workbenchProjector.ts'
+import { selectActivityDisplayOrder, toolInvocationSnapshot, type WorkbenchActivityNode, type WorkbenchDocument, type WorkbenchInteraction } from '../../domains/workbench/workbenchProjector.ts'
 import { isValidDiffContentInput, isValidLspDiagnosticContentInput, type ContentPart, type LspDiagnosticContentPart } from '../../domains/workbench/content/contentPartSchema.ts'
 import { diffSnapshotFromPart } from '../../domains/workbench/diffSnapshot.ts'
-import type { InteractionRequest } from '../../domains/activity/interaction.ts'
 import type { MessageListItem } from '../../domains/workbench/messageListPort.ts'
 import { createToolConnectorLayoutPort } from '../../domains/workbench/toolConnectorLayoutPort.ts'
 import { AssistantContent, ReasoningBlock, SolidMessageRow } from './chat/MessageRow.solid.tsx'
@@ -34,6 +33,7 @@ import { SolidDiffContent, SolidLspDiagnosticContent } from './chat/content/Diff
 import { SolidLogBlock, SolidProcessActivity, SolidTerminalBlock } from './chat/content/TerminalBlock.solid.tsx'
 import { SolidSubagentCard } from './chat/content/SubagentCard.solid.tsx'
 import { SolidWorkflowActivityCard } from './chat/content/WorkflowCard.solid.tsx'
+import { SolidInteractionCard } from './chat/content/InteractionCard.solid.tsx'
 import type { RenderCommandPort } from '../../contracts/messageRenderer.ts'
 import { canExecuteRendererSemanticCommand, executeRendererSemanticCommand } from '../../host/renderer-suite/rendererSemanticCommand.ts'
 import { normalizeWorkbenchMountInput } from './workbenchContracts.ts'
@@ -251,20 +251,20 @@ function WorkbenchDocumentSurface(props: {
               )}</Index>
             </div>
           </Show>
-          <Show when={document().interactions.some(interaction => interaction.status === 'requested')}>
-            <div class="solid-workbench-interactions" aria-label="待处理交互">
-              <For each={document().interactions.filter(interaction => interaction.status === 'requested')}>{interaction => (
-                <div class="solid-workbench-interaction" data-interaction-id={interaction.id}>
-                  <span>{interactionPrompt(interaction.request)}</span>
-                  <Show when={props.sessionId}>
-                    {sessionId => <For each={interactionOptions(interaction.request)}>{option => (
-                      <button type="button" onClick={() => void props.commands.respondInteraction(sessionId(), interaction.id, { optionId: option.id },
-                        { expectedRevision: interaction.sequence })}>
-                        {option.label}
-                      </button>
-                    )}</For>}
-                  </Show>
-                </div>
+          <Show when={document().interactions.length > 0}>
+            <div class="solid-workbench-interactions" aria-label="交互">
+              <For each={document().interactions}>{interaction => (
+                <WorkbenchContentSlot
+                  nodeId={`${props.sessionId ?? 'none'}:interaction:${interaction.id}`}
+                  kind={interactionRenderKind(interaction)}
+                  payload={interaction}
+                  context={props.context}
+                  fallback={<SolidInteractionCard
+                    interaction={interaction}
+                    appearance={{ ...props.context.appearanceSnapshot(), reducedMotion: props.reducedMotion }}
+                    commands={fallbackRenderCommands(props.context)}
+                  />}
+                />
               )}</For>
             </div>
           </Show>
@@ -398,21 +398,17 @@ function lifecycleRenderKind(state: LifecycleState): string | undefined {
   return undefined
 }
 
-function normalizedInteractionRequest(value: unknown): InteractionRequest | undefined {
-  if (!value || typeof value !== 'object' || Array.isArray(value)) return undefined
-  const request = value as Partial<InteractionRequest>
-  return request.surface === 'interaction' && Array.isArray(request.questions) ? request as InteractionRequest : undefined
-}
-
-function interactionPrompt(value: unknown): string {
-  if (typeof value === 'string') return value
-  const request = normalizedInteractionRequest(value)
-  return request?.title || request?.questions[0]?.question || '需要你的确认'
-}
-
-function interactionOptions(value: unknown): readonly { id: string; label: string }[] {
-  const request = normalizedInteractionRequest(value)
-  return request?.questions.flatMap(question => question.options.map(option => ({ id: option.id, label: option.label }))) ?? []
+function interactionRenderKind(interaction: WorkbenchInteraction): string {
+  if (!interaction.request || typeof interaction.request !== 'object' || Array.isArray(interaction.request)) return 'interaction.questions'
+  switch ((interaction.request as Record<string, unknown>).kind) {
+    case 'approval': return 'interaction.approval'
+    case 'confirm': return 'interaction.confirm'
+    case 'permission':
+    case 'oauth': return 'interaction.permission'
+    case 'clarify':
+    case 'ask-question':
+    default: return 'interaction.questions'
+  }
 }
 
 function toSolidMessage(message: WorkbenchDocument['messages'][number]): Message {
@@ -676,8 +672,8 @@ function fallbackRenderCommands(context: SolidWorkbenchContextValue): RenderComm
     canExecute: type => Boolean(sessionId && capabilities && canExecuteRendererSemanticCommand(type, capabilities)),
     execute: command => {
       const host = context.hostPort
-      if (!host) return
-      void executeRendererSemanticCommand({
+      if (!host) return Promise.resolve()
+      return executeRendererSemanticCommand({
         command,
         host,
         mountInput: normalizeWorkbenchMountInput(context.input()),

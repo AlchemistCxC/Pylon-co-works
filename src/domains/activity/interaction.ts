@@ -32,6 +32,7 @@ export interface InteractionOption {
   id: string
   label: string
   description?: string
+  danger?: boolean
 }
 
 export interface InteractionQuestion {
@@ -49,6 +50,14 @@ export interface InteractionRequest {
   kind: InteractionKind
   identity: InteractionIdentity
   title?: string
+  /** provider-neutral 危险操作上下文；仅从 wire 上已到达的结构化字段收窄。 */
+  reason?: string
+  scope?: string
+  command?: string
+  path?: string
+  capability?: string
+  danger?: boolean
+  expiry?: string
   questions: InteractionQuestion[]
   state: InteractionState
   /** 仅用于调试/trace 的协议来源，不保存原始 prompt 或答案。 */
@@ -168,10 +177,12 @@ function normalizeOptions(raw: unknown): InteractionOption[] {
     const option = objectValue(item)
     const label = firstString(option.label, option.name, option.title, option.value)
     if (!label) return
+    const description = stringValue(option.description)
     options.push({
       id: uniqueId(firstString(option.id, option.option_id, option.optionId, label) ?? label, index, used),
       label,
-      description: stringValue(option.description),
+      ...(description ? { description } : {}),
+      ...(option.danger === true ? { danger: true } : {}),
     })
   })
   return options
@@ -231,6 +242,13 @@ export function normalizeInteractionRequest(input: {
     kind: activity.interactionKind ?? 'unknown',
     identity: identityFrom(payload, metadata),
     title: firstString(payload.title, payload.header),
+    reason: stringValue(payload.reason),
+    scope: stringValue(payload.scope),
+    command: stringValue(payload.command),
+    path: stringValue(payload.path),
+    capability: stringValue(payload.capability),
+    danger: payload.danger === true ? true : undefined,
+    expiry: firstString(payload.expiry, payload.expiresAt, payload.expires_at),
     questions: questionsFrom(payload, activity.interactionKind ?? 'unknown'),
     state: 'waiting',
     eventType: input.eventType,

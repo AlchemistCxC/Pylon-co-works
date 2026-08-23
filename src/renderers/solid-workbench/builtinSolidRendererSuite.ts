@@ -6,6 +6,7 @@ import { loadBuiltinSolidContentSlot } from './loadBuiltinSolidContentSlot.ts'
 import { BUILTIN_TEXT_RENDER_KINDS } from '../../domains/rendererContent/textRenderKindCatalog.ts'
 import { BUILTIN_TOOL_RENDER_KINDS } from '../../domains/rendererContent/toolRenderKindCatalog.ts'
 import { BUILTIN_EXECUTION_RENDER_KINDS } from '../../domains/rendererContent/executionRenderKindCatalog.ts'
+import { BUILTIN_INTERACTION_RENDER_KINDS } from '../../domains/rendererContent/interactionRenderKindCatalog.ts'
 
 export const BUILTIN_SOLID_SUITE_ID = 'builtin.solid'
 export const BUILTIN_SOLID_CONTENT_SLOT_ID = 'builtin.solid.content.base'
@@ -14,6 +15,7 @@ export const BUILTIN_SOLID_CONTENT_KINDS = Object.freeze([
   ...BUILTIN_TEXT_RENDER_KINDS.map(kind => kind.id).filter(kind => kind.startsWith('content.') || kind.startsWith('diagnostic.')),
   ...BUILTIN_TOOL_RENDER_KINDS.map(kind => kind.id),
   ...BUILTIN_EXECUTION_RENDER_KINDS.map(kind => kind.id),
+  ...BUILTIN_INTERACTION_RENDER_KINDS.map(kind => kind.id),
   'content.plan',
   'lifecycle.retry',
   'lifecycle.compact',
@@ -120,7 +122,7 @@ export function createBuiltinSolidRendererSuite(): RendererSuiteContribution {
     // Canonical plan/lifecycle/diagnostic projections are registered by the
     // built-in content plugin and consumed through the same Suite-local Slot seam.
     optionalKinds: Object.freeze(BUILTIN_SOLID_CONTENT_KINDS.filter(kind => (
-      kind === 'content.plan' || kind.startsWith('tool.') || kind.startsWith('activity.') || kind.startsWith('lifecycle.') || kind.startsWith('system.')
+      kind === 'content.plan' || kind.startsWith('tool.') || kind.startsWith('activity.') || kind.startsWith('interaction.') || kind.startsWith('lifecycle.') || kind.startsWith('system.')
     ))),
     factory,
   })

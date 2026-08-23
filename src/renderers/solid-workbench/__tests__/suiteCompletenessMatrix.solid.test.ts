@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import { BUILTIN_TEXT_RENDER_KINDS } from '../../../domains/rendererContent/textRenderKindCatalog.ts'
 import { BUILTIN_EXECUTION_RENDER_KINDS } from '../../../domains/rendererContent/executionRenderKindCatalog.ts'
+import { BUILTIN_INTERACTION_RENDER_KINDS } from '../../../domains/rendererContent/interactionRenderKindCatalog.ts'
 import { createBuiltinSolidRendererSuite, createBuiltinSolidContentSlot } from '../builtinSolidRendererSuite.ts'
 
 /**
@@ -15,6 +16,7 @@ const ALL_BUILTIN_KINDS = [
     .filter(kind => !kind.id.startsWith('message.'))
     .map(kind => ({ id: kind.id, fallbackKind: 'fallbackKind' in kind ? (kind as { fallbackKind?: string }).fallbackKind : undefined })),
   ...BUILTIN_EXECUTION_RENDER_KINDS.map(kind => ({ id: kind.id, fallbackKind: (kind as { fallbackKind?: string }).fallbackKind })),
+  ...BUILTIN_INTERACTION_RENDER_KINDS.map(kind => ({ id: kind.id, fallbackKind: kind.fallbackKind })),
 ]
 
 describe('A17 suite completeness matrix', () => {
@@ -36,6 +38,15 @@ describe('A17 suite completeness matrix', () => {
       expect(slotKinds.has(id), `base Slot 缺 kind ${id}`).toBe(true)
     }
     expect(slot.fallback).toBe(true)
+  })
+
+  it('publishes every C11 interaction kind through the replaceable base Slot', () => {
+    expect(BUILTIN_INTERACTION_RENDER_KINDS.map(kind => kind.id)).toEqual([
+      'interaction.approval', 'interaction.questions', 'interaction.confirm', 'interaction.permission',
+    ])
+    expect(createBuiltinSolidContentSlot().kinds).toEqual(expect.arrayContaining(
+      BUILTIN_INTERACTION_RENDER_KINDS.map(kind => kind.id),
+    ))
   })
 
   it('每个 kind 的 fallback 链最终可达 content.unknown', () => {

@@ -1,5 +1,5 @@
 // @vitest-environment jsdom
-import { act, render, screen } from '@testing-library/react'
+import { act, fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { describe, expect, it, vi } from 'vitest'
 import { createWorkbenchDocument, type WorkbenchDocument } from '../../../domains/workbench/workbenchProjector.ts'
 import type { WorkbenchDocumentReader } from '../../../renderers/solid-workbench/workbenchHostPort.ts'
@@ -267,5 +267,181 @@ describe('React Workbench fatal fallback', () => {
     screen.getByRole('button', { name: '重新加载插件' }).click()
     expect(onRetryMessage).toHaveBeenCalledOnce()
     expect(onRecoverSession).toHaveBeenCalledWith('reload-plugin')
+  })
+
+  it('keeps pending normalized interactions actionable when the Solid Suite fails', () => {
+    const current: WorkbenchDocument = {
+      ...document(8, ''),
+      interactions: [{
+        id: 'fallback-approval', status: 'requested', sequence: 8,
+        request: {
+          surface: 'interaction', kind: 'approval', state: 'waiting',
+          identity: { provider: 'peri', agentId: 'agent', requestId: 'request-8', sessionId: 'session', clientGeneration: 2 },
+          questions: [{ id: 'approval', question: '允许 fallback 修改？', allowMultiple: false, allowFreeform: false,
+            options: [{ id: 'allow_once', label: '仅本次允许' }, { id: 'reject_once', label: '拒绝' }] }],
+        },
+      }],
+    }
+    const reader: WorkbenchDocumentReader = {
+      getSnapshot: () => current, subscribe: () => () => {},
+      getSlice: () => undefined as never, subscribeSlice: () => () => {},
+    }
+    const onRespondInteraction = vi.fn()
+    render(<ReactWorkbenchFatalFallback
+      document={reader}
+      failure={{ suiteId: 'builtin.solid', phase: 'mount', message: 'interaction slot failed' }}
+      onRetry={vi.fn()} onSelectSuite={vi.fn()} onOpenDiagnostics={vi.fn()}
+      onRespondInteraction={onRespondInteraction}
+    />)
+
+    expect(screen.getByText('允许 fallback 修改？')).toBeInTheDocument()
+    screen.getByRole('button', { name: '仅本次允许' }).click()
+    expect(onRespondInteraction).toHaveBeenCalledWith(
+      'fallback-approval', { optionId: 'allow_once' }, { expectedRevision: 8 },
+    )
+  })
+
+  it('shows normalized danger context in the React fallback before action', () => {
+    const current: WorkbenchDocument = {
+      ...document(13, ''), interactions: [{
+        id: 'fallback-danger', status: 'requested', sequence: 13,
+        request: { surface: 'interaction', kind: 'permission', state: 'waiting',
+          reason: '需要修改构建产物', scope: 'workspace', command: 'rm -rf dist', path: '/workspace/dist',
+          identity: { provider: 'peri', agentId: 'agent', requestId: 'request-13', sessionId: 'session', clientGeneration: 2 },
+          questions: [{ id: 'approval', question: '允许？', allowMultiple: false, allowFreeform: false,
+            options: [{ id: 'allow', label: '允许' }] }],
+        },
+      }],
+    }
+    const reader: WorkbenchDocumentReader = {
+      getSnapshot: () => current, subscribe: () => () => {},
+      getSlice: () => undefined as never, subscribeSlice: () => () => {},
+    }
+    render(<ReactWorkbenchFatalFallback document={reader}
+      failure={{ suiteId: 'builtin.solid', phase: 'mount', message: 'interaction slot failed' }}
+      onRetry={vi.fn()} onSelectSuite={vi.fn()} onOpenDiagnostics={vi.fn()} />)
+    const fallback = screen.getByRole('region', { name: '交互 fallback' })
+    expect(fallback).toHaveTextContent('需要修改构建产物')
+    expect(fallback).toHaveTextContent('workspace')
+    expect(fallback).toHaveTextContent('rm -rf dist')
+    expect(fallback).toHaveTextContent('/workspace/dist')
+  })
+
+  it('submits multi-question, multi-select, and free-text answers as one fallback response', () => {
+    const current: WorkbenchDocument = {
+      ...document(9, ''),
+      interactions: [{
+        id: 'fallback-questions', status: 'requested', sequence: 9,
+        request: {
+          surface: 'interaction', kind: 'questions', state: 'waiting',
+          identity: { provider: 'peri', agentId: 'agent', requestId: 'request-9', sessionId: 'session', clientGeneration: 2 },
+          questions: [
+            { id: 'mode', question: '运行模式？', allowMultiple: false, allowFreeform: false,
+              options: [{ id: 'safe', label: '安全' }, { id: 'fast', label: '快速' }] },
+            { id: 'scope', question: '影响范围？', allowMultiple: true, allowFreeform: true,
+              options: [{ id: 'repo', label: '仓库' }, { id: 'docs', label: '文档' }], placeholder: '补充范围' },
+          ],
+        },
+      }],
+    }
+    const reader: WorkbenchDocumentReader = {
+      getSnapshot: () => current, subscribe: () => () => {},
+      getSlice: () => undefined as never, subscribeSlice: () => () => {},
+    }
+    const onRespondInteraction = vi.fn()
+    render(<ReactWorkbenchFatalFallback document={reader}
+      failure={{ suiteId: 'builtin.solid', phase: 'mount', message: 'interaction slot failed' }}
+      onRetry={vi.fn()} onSelectSuite={vi.fn()} onOpenDiagnostics={vi.fn()}
+      onRespondInteraction={onRespondInteraction} />)
+
+    fireEvent.click(screen.getByRole('radio', { name: '安全' }))
+    fireEvent.click(screen.getByRole('checkbox', { name: '仓库' }))
+    fireEvent.click(screen.getByRole('checkbox', { name: '文档' }))
+    fireEvent.input(screen.getByPlaceholderText('补充范围'), { target: { value: '配置文件' } })
+    fireEvent.click(screen.getByRole('button', { name: '提交回答' }))
+
+    expect(onRespondInteraction).toHaveBeenCalledWith('fallback-questions', {
+      values: { mode: 'safe', scope: ['repo', 'docs', '配置文件'] },
+    }, { expectedRevision: 9 })
+  })
+
+  it('keeps fallback input and allows retry after an interaction command failure', async () => {
+    const current: WorkbenchDocument = {
+      ...document(10, ''), interactions: [{
+        id: 'fallback-freeform', status: 'requested', sequence: 10,
+        request: { surface: 'interaction', kind: 'questions', state: 'waiting',
+          identity: { provider: 'peri', agentId: 'agent', requestId: 'request-10', sessionId: 'session', clientGeneration: 2 },
+          questions: [{ id: 'answer', question: '补充说明？', allowMultiple: false, allowFreeform: true, options: [] }],
+        },
+      }],
+    }
+    const reader: WorkbenchDocumentReader = {
+      getSnapshot: () => current, subscribe: () => () => {},
+      getSlice: () => undefined as never, subscribeSlice: () => () => {},
+    }
+    const onRespondInteraction = vi.fn()
+      .mockRejectedValueOnce(new Error('host rejected'))
+      .mockResolvedValueOnce(undefined)
+    render(<ReactWorkbenchFatalFallback document={reader}
+      failure={{ suiteId: 'builtin.solid', phase: 'mount', message: 'interaction slot failed' }}
+      onRetry={vi.fn()} onSelectSuite={vi.fn()} onOpenDiagnostics={vi.fn()}
+      onRespondInteraction={onRespondInteraction} />)
+
+    const input = screen.getByPlaceholderText('补充回答')
+    fireEvent.input(input, { target: { value: '保留我的回答' } })
+    fireEvent.click(screen.getByRole('button', { name: '提交回答' }))
+    expect(await screen.findByRole('alert', { name: '交互提交失败' })).toHaveTextContent('host rejected')
+    expect(input).toHaveValue('保留我的回答')
+
+    fireEvent.click(screen.getByRole('button', { name: '提交回答' }))
+    await waitFor(() => expect(onRespondInteraction).toHaveBeenCalledTimes(2))
+  })
+
+  it('ignores a second fallback submit while the interaction command is pending', () => {
+    const current: WorkbenchDocument = {
+      ...document(11, ''), interactions: [{
+        id: 'fallback-double', status: 'requested', sequence: 11,
+        request: { surface: 'interaction', kind: 'approval', state: 'waiting',
+          identity: { provider: 'peri', agentId: 'agent', requestId: 'request-11', sessionId: 'session', clientGeneration: 2 },
+          questions: [{ id: 'approval', question: '允许？', allowMultiple: false, allowFreeform: false,
+            options: [{ id: 'allow', label: '允许' }] }],
+        },
+      }],
+    }
+    const reader: WorkbenchDocumentReader = {
+      getSnapshot: () => current, subscribe: () => () => {},
+      getSlice: () => undefined as never, subscribeSlice: () => () => {},
+    }
+    const onRespondInteraction = vi.fn(() => new Promise<void>(() => {}))
+    render(<ReactWorkbenchFatalFallback document={reader}
+      failure={{ suiteId: 'builtin.solid', phase: 'mount', message: 'interaction slot failed' }}
+      onRetry={vi.fn()} onSelectSuite={vi.fn()} onOpenDiagnostics={vi.fn()}
+      onRespondInteraction={onRespondInteraction} />)
+
+    const allow = screen.getByRole('button', { name: '允许' })
+    fireEvent.click(allow)
+    fireEvent.click(allow)
+    expect(onRespondInteraction).toHaveBeenCalledTimes(1)
+    expect(allow).toBeDisabled()
+  })
+
+  it('keeps malformed fallback questions visible without crashing on a missing question id', () => {
+    const current: WorkbenchDocument = {
+      ...document(12, ''), interactions: [{
+        id: 'fallback-malformed', status: 'requested', sequence: 12,
+        request: { surface: 'interaction', kind: 'questions', state: 'waiting',
+          identity: { provider: null, agentId: null, requestId: null, sessionId: null, toolCallId: null, clientGeneration: null },
+          questions: [{ question: '仍需可见', allowMultiple: false, allowFreeform: true, options: [] }],
+        },
+      }],
+    }
+    const reader: WorkbenchDocumentReader = {
+      getSnapshot: () => current, subscribe: () => () => {},
+      getSlice: () => undefined as never, subscribeSlice: () => () => {},
+    }
+    expect(() => render(<ReactWorkbenchFatalFallback document={reader}
+      failure={{ suiteId: 'builtin.solid', phase: 'mount', message: 'interaction slot failed' }}
+      onRetry={vi.fn()} onSelectSuite={vi.fn()} onOpenDiagnostics={vi.fn()} />)).not.toThrow()
+    expect(screen.getAllByText('仍需可见').length).toBeGreaterThan(0)
   })
 })

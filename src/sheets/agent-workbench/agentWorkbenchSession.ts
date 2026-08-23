@@ -93,6 +93,7 @@ export function createAgentWorkbenchSessionRuntime(dependencies: AgentWorkbenchS
         || typeof identity.clientGeneration !== 'number') return undefined
       return {
         kind: candidate.kind,
+        revision: interaction.sequence,
         identity: {
           provider: identity.provider,
           agentId: identity.agentId,

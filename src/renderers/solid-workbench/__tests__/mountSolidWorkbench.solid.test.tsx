@@ -6,12 +6,14 @@ import { createPreviewWorkbenchServices } from '../__fixtures__/previewWorkbench
 import { createWorkbenchEnvelope, type WorkbenchEventEnvelope } from '../../../domains/workbench/events/workbenchEventSchema.ts'
 import { projectWorkbench, reduceWorkbenchEvent } from '../../../domains/workbench/workbenchProjector.ts'
 import { createWorkbenchHostPort } from '../workbenchHostPort.ts'
+import type { WorkbenchCapabilitySnapshot } from '../workbenchHostPort.ts'
 import { RendererSuiteHost } from '../../../host/renderer-suite/rendererSuiteHost.ts'
 import type { RendererActivationSnapshot, RendererSlotContribution, RendererSuiteContribution } from '../../../plugin-runtime/renderers/rendererSuiteTypes.ts'
 import type { RegistryEntry } from '../../../plugin-runtime/registry/types.ts'
 import { BUILTIN_TEXT_RENDER_KINDS } from '../../../domains/rendererContent/textRenderKindCatalog.ts'
 import { BUILTIN_TOOL_RENDER_KINDS } from '../../../domains/rendererContent/toolRenderKindCatalog.ts'
 import { BUILTIN_EXECUTION_RENDER_KINDS } from '../../../domains/rendererContent/executionRenderKindCatalog.ts'
+import { BUILTIN_INTERACTION_RENDER_KINDS } from '../../../domains/rendererContent/interactionRenderKindCatalog.ts'
 import { createBuiltinSolidContentSlot } from '../builtinSolidRendererSuite.ts'
 
 const hosts: HTMLElement[] = []
@@ -23,12 +25,20 @@ afterEach(() => {
   for (const host of hosts.splice(0)) host.remove()
 })
 
-function mountPreview() {
+function mountPreview(capabilities?: WorkbenchCapabilitySnapshot) {
   const host = document.createElement('div')
   document.body.append(host)
   hosts.push(host)
   const services = createPreviewWorkbenchServices()
   servicesList.push(services)
+  const hostPort = capabilities ? createWorkbenchHostPort({
+    ...services,
+    suiteId: 'builtin.solid',
+    sheetId: 'sheet-a',
+    sessionOwnerKey: 'owner-preview',
+    sessionId: 'preview-session',
+    capabilities,
+  }) : undefined
   const lifecycle = mountSolidWorkbench({
     host,
     input: {
@@ -39,6 +49,7 @@ function mountPreview() {
       reducedMotion: true,
     },
     services,
+    hostPort,
   })
   return { host, services, lifecycle }
 }
@@ -600,7 +611,7 @@ describe('mountSolidWorkbench', () => {
   })
 
   it('interaction 只提交 normalized optionId，不自造 provider approval payload', async () => {
-    const { services } = mountPreview()
+    const { services } = mountPreview({ interactionResponse: true })
     const document = projectWorkbench([createWorkbenchEnvelope({
       sessionId: 'preview-session', recordedAt: '2026-08-21T00:00:01.000Z', sequence: 1,
       source: { provider: 'peri', sourceId: 'interaction-1' }, identity: { interactionId: 'interaction-1' },
@@ -616,14 +627,89 @@ describe('mountSolidWorkbench', () => {
       },
     })]).document
     services.runtime.replaceDocument(document, { ownerKey: 'owner-preview', generation: 1 })
-    await waitFor(() => expect(screen.getByRole('button', { name: 'Allow once' })).toBeTruthy())
+    const allowButton = await screen.findByRole('button', { name: 'Allow once' })
+    expect(allowButton.closest('.interaction-card')).not.toBeNull()
 
-    fireEvent.click(screen.getByRole('button', { name: 'Allow once' }))
+    fireEvent.click(allowButton)
 
     await waitFor(() => expect(services.commands.calls).toContainEqual({
       // A09 补全：按钮随响应携带 expectedRevision（document.sequence）供 transport 层 stale 防护
       command: 'respondInteraction', args: ['preview-session', 'interaction-1', { optionId: 'allow_once' }, { expectedRevision: 1 }],
     }))
+  })
+
+  it('interaction command failure keeps the answer editable and reports the rejection', async () => {
+    const { services } = mountPreview({ interactionResponse: true })
+    services.commands.setHandler('respondInteraction', async () => ({ ok: false, error: 'policy denied' }))
+    services.runtime.replaceDocument(projectWorkbench([createWorkbenchEnvelope({
+      sessionId: 'preview-session', recordedAt: '2026-08-21T00:00:01.000Z', sequence: 2,
+      source: { provider: 'peri', sourceId: 'interaction-failure' }, identity: { interactionId: 'interaction-failure' },
+      provenance: { origin: 'local-observed', trust: 'authoritative' },
+      event: {
+        type: 'interaction.requested', interactionId: 'interaction-failure',
+        request: {
+          surface: 'interaction', kind: 'ask-question', state: 'waiting',
+          identity: { provider: 'peri', agentId: 'peri', requestId: 'request-failure', sessionId: 'preview-session', clientGeneration: 3 },
+          questions: [{ id: 'reason', question: '为什么继续？', allowMultiple: false, allowFreeform: true, options: [] }],
+        },
+      },
+    })]).document, { ownerKey: 'owner-preview', generation: 1 })
+
+    const input = await screen.findByPlaceholderText('输入回答后回车') as HTMLInputElement
+    fireEvent.input(input, { target: { value: '仍需完成验证' } })
+    fireEvent.keyDown(input, { key: 'Enter' })
+
+    expect(await screen.findByRole('alert')).toHaveTextContent('policy denied')
+    expect(input).toHaveValue('仍需完成验证')
+  })
+
+  it('routes canonical interactions through a Suite-local replaceable Slot', async () => {
+    const host = document.createElement('div')
+    document.body.append(host)
+    hosts.push(host)
+    const services = createPreviewWorkbenchServices()
+    servicesList.push(services)
+    const kind = BUILTIN_INTERACTION_RENDER_KINDS.find(item => item.id === 'interaction.approval')!
+    const slot: RendererSlotContribution = {
+      id: 'plugin.interaction.approval', targetSuites: ['builtin.solid'], kinds: [kind.id], priority: 20_000,
+      fallback: false, canRender: () => true,
+      createSurface: () => ({
+        rendererId: 'plugin.interaction.approval', kind: 'solid',
+        mount(container) {
+          const node = document.createElement('div')
+          node.textContent = 'Plugin approval surface'
+          container.append(node)
+          return node
+        },
+        update() {}, destroy(handle) { (handle as HTMLElement).remove() }, on: () => () => {},
+      }),
+    }
+    const suite = { id: 'builtin.solid' } as RendererSuiteContribution
+    const kindEntry = { ownerPluginId: 'core.interaction', ownerRuntimeInstanceId: 'runtime', contributionId: kind.id,
+      layer: 'feature', priority: kind.priority, value: kind } as RegistryEntry<typeof kind>
+    const slotEntry = { ownerPluginId: 'plugin.interaction', ownerRuntimeInstanceId: 'runtime', contributionId: slot.id,
+      layer: 'feature', priority: slot.priority, value: slot } as RegistryEntry<RendererSlotContribution>
+    const activation: RendererActivationSnapshot = {
+      revision: 1,
+      suite: { ownerPluginId: 'builtin.pylon-renderers', ownerRuntimeInstanceId: 'runtime', contributionId: suite.id,
+        layer: 'feature', priority: 1, value: suite } as RegistryEntry<RendererSuiteContribution>,
+      kinds: new Map([[kind.id, kindEntry]]), slots: new Map([[kind.id, [slotEntry]]]), diagnostics: [],
+    }
+    mountSolidWorkbench({ host, input: { sheetId: 'sheet-a', sessionId: 'preview-session' }, services, activation })
+    services.runtime.replaceDocument(projectWorkbench([createWorkbenchEnvelope({
+      sessionId: 'preview-session', recordedAt: '2026-08-21T00:00:01.000Z', sequence: 1,
+      source: { provider: 'peri', sourceId: 'replaceable-interaction' }, identity: { interactionId: 'replaceable-interaction' },
+      provenance: { origin: 'local-observed', trust: 'authoritative' },
+      event: {
+        type: 'interaction.requested', interactionId: 'replaceable-interaction',
+        request: { surface: 'interaction', kind: 'approval', state: 'waiting',
+          identity: { provider: 'peri', agentId: 'peri', requestId: 'replaceable', sessionId: 'preview-session', clientGeneration: 1 },
+          questions: [{ id: 'approval', question: 'Replace me?', allowMultiple: false, allowFreeform: false, options: [] }] },
+      },
+    })]).document, { ownerKey: 'owner-preview', generation: 1 })
+
+    expect(await screen.findByText('Plugin approval surface')).toBeTruthy()
+    expect(host.querySelector('.interaction-card')).toBeNull()
   })
 
   it('Slot semantic action 穿过 Host command capability gate，不被 lifecycle 静默丢弃', async () => {

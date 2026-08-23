@@ -970,7 +970,7 @@
   width: min(100%, 960px);
   margin: var(--ui-space-2) 0;
   border: var(--line-width-1) solid var(--border);
-  border-inline-start: var(--line-width-3) solid var(--accent);
+  border-inline-start: var(--line-width-3) solid var(--interaction-status-color, var(--accent));
   padding: var(--ui-space-3);
   color: var(--text);
   background: var(--bg-panel, transparent);
@@ -1068,7 +1068,7 @@
   color: var(--text);
   background: var(--bg-panel, transparent);
 }
-.interaction-card.interaction-danger { border-inline-start-color: var(--warning, #d29922); }
+.interaction-card.interaction-danger { border-inline-start-color: var(--interaction-danger-color, var(--warning, #d29922)); }
 .interaction-head {
   display: flex;
   flex-wrap: wrap;

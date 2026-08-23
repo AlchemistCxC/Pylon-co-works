@@ -66,4 +66,20 @@ describe('Agent Workbench production commands', () => {
     await expect(commands.respondInteraction(session.id, 'missing', { optionId: 'allow_once' }))
       .resolves.toEqual({ ok: false, error: 'interaction_not_found' })
   })
+
+  it('在 transport 前拒绝与当前 canonical interaction 不一致的 stale revision', async () => {
+    const identity: InteractionResponseIdentity = {
+      provider: 'peri', agentId: 'peri', requestId: 'request-a', sessionId: 'local:a', clientGeneration: 7,
+    }
+    const respondInteraction = vi.fn(async () => undefined)
+    const commands = createAgentWorkbenchCommandFacade({
+      resolveSession: id => id === session.id ? session : undefined,
+      resolveInteraction: () => ({ identity, kind: 'approval', revision: 12 }),
+      respondInteraction,
+    })
+
+    await expect(commands.respondInteraction(session.id, 'interaction-a', { optionId: 'allow_once' }, { expectedRevision: 11 }))
+      .resolves.toEqual({ ok: false, error: 'interaction_revision_stale' })
+    expect(respondInteraction).not.toHaveBeenCalled()
+  })
 })

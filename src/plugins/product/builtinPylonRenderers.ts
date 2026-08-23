@@ -6,6 +6,7 @@ import { createBuiltinToolRendererPluginDefinition } from '../core/renderer/buil
 import { BUILTIN_TEXT_RENDER_KINDS } from '../../domains/rendererContent/textRenderKindCatalog.ts'
 import { BUILTIN_TOOL_RENDER_KINDS } from '../../domains/rendererContent/toolRenderKindCatalog.ts'
 import { BUILTIN_EXECUTION_RENDER_KINDS } from '../../domains/rendererContent/executionRenderKindCatalog.ts'
+import { BUILTIN_INTERACTION_RENDER_KINDS } from '../../domains/rendererContent/interactionRenderKindCatalog.ts'
 import { BUILTIN_PYLON_RENDERERS_ID } from './productPluginIds.ts'
 import { mountFirstPartyStyleAssets } from './firstPartyStyleRuntime.ts'
 import { loadBuiltinPylonRendererStyles } from './packages/builtin.pylon-renderers/styleAssets.ts'
@@ -33,7 +34,12 @@ export function createBuiltinPylonRenderersPlugin(): BuiltinPluginDefinition {
       // 经 shadow transaction 原子提交，message.user/assistant 的 fallback 链不出现中间态。
       // One owner-scoped shadow batch: a second batch from the same runtime
       // would correctly replace the first and accidentally drop text kinds.
-      context.renderer.registerRenderKinds([...BUILTIN_TEXT_RENDER_KINDS, ...BUILTIN_TOOL_RENDER_KINDS, ...BUILTIN_EXECUTION_RENDER_KINDS])
+      context.renderer.registerRenderKinds([
+        ...BUILTIN_TEXT_RENDER_KINDS,
+        ...BUILTIN_TOOL_RENDER_KINDS,
+        ...BUILTIN_EXECUTION_RENDER_KINDS,
+        ...BUILTIN_INTERACTION_RENDER_KINDS,
+      ])
       for (const definition of rendererDefinitions) {
         const result = definition.activate(context)
         if (result && typeof (result as PromiseLike<unknown>).then === 'function') {

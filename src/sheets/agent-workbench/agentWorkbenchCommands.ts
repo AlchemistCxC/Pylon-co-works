@@ -15,6 +15,7 @@ import type { AgentContext } from '../../agentContext.ts'
 export interface ResolvedWorkbenchInteraction {
   readonly identity: InteractionResponseIdentity
   readonly kind: string
+  readonly revision?: number
 }
 
 export interface AgentWorkbenchCommandDependencies {
@@ -114,10 +115,12 @@ export function createAgentWorkbenchCommandFacade(
     async exportSession() { return rejected('production_command_not_connected') },
     async clearSession() { return rejected('production_command_not_connected') },
     async toolAction() { return rejected('production_command_not_connected') },
-    async respondInteraction(sessionId, interactionId, response) {
+    async respondInteraction(sessionId, interactionId, response, options) {
       if (!dependencies.resolveSession(sessionId)) return rejected('session_not_found')
       const request = dependencies.resolveInteraction(sessionId, interactionId)
       if (!request) return rejected('interaction_not_found')
+      if (options?.expectedRevision !== undefined && request.revision !== undefined
+        && options.expectedRevision !== request.revision) return rejected('interaction_revision_stale')
       const answer = interactionAnswer(response)
       if (!answer) return rejected('interaction_response_invalid')
       try { await dependencies.respondInteraction(request, answer); return { ok: true } }

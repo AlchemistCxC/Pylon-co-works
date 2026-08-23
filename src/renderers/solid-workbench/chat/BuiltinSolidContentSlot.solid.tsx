@@ -36,6 +36,9 @@ import { SolidSubagentCard } from './content/SubagentCard.solid.tsx'
 import { SolidWorkflowActivityCard } from './content/WorkflowCard.solid.tsx'
 import { isBackgroundTaskActivitySnapshotInput, isProcessActivitySnapshotInput, isSubagentActivitySnapshotInput, isWorkflowActivitySnapshotInput } from '../../../domains/rendererContent/executionRenderKindCatalog.ts'
 import type { WorkbenchActivityNode } from '../../../domains/workbench/workbenchProjector.ts'
+import type { WorkbenchInteraction } from '../../../domains/workbench/workbenchProjector.ts'
+import { isInteractionSnapshotInput } from '../../../domains/rendererContent/interactionRenderKindCatalog.ts'
+import { SolidInteractionCard } from './content/InteractionCard.solid.tsx'
 
 export function BuiltinSolidContentSlot(props: {
   snapshot: RenderNodeSnapshot
@@ -288,6 +291,14 @@ export function BuiltinSolidContentSlot(props: {
           fallback={<pre class="solid-content-unknown" data-content-kind={kind()}>Invalid background task snapshot</pre>}
         >
           {activity => <SolidWorkflowActivityCard activity={activity()} appearance={props.appearance} commands={props.commands} />}
+        </Show>
+      </Match>
+      <Match when={kind().startsWith('interaction.')}>
+        <Show
+          when={isInteractionSnapshotInput(props.snapshot.payload) ? props.snapshot.payload as WorkbenchInteraction : undefined}
+          fallback={<pre class="solid-content-unknown" data-content-kind={kind()}>Invalid interaction snapshot</pre>}
+        >
+          {interaction => <SolidInteractionCard interaction={interaction()} appearance={props.appearance} commands={props.commands} />}
         </Show>
       </Match>
       <Match when={kind() === 'content.plan'}>

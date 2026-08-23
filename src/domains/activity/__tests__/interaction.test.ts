@@ -101,6 +101,39 @@ describe('InteractionRequest 规范化', () => {
     expect(result?.questions[0]).toMatchObject({ id: 'approval', question: '危险命令' })
   })
 
+  it('approval 保留危险上下文供 renderer 消费，不读取 provider raw', () => {
+    const result = normalizeInteractionRequest({
+      eventType: 'approval.request',
+      payload: {
+        requestId: 'danger-1', reason: '需要修改构建产物', scope: 'workspace',
+        command: 'rm -rf dist', path: '/workspace/dist',
+      },
+    })
+    expect(result).toMatchObject({
+      reason: '需要修改构建产物', scope: 'workspace', command: 'rm -rf dist', path: '/workspace/dist',
+    })
+  })
+
+  it('approval 保留 capability、danger 和 expiry 的 normalized gate 字段', () => {
+    const result = normalizeInteractionRequest({
+      eventType: 'approval.request',
+      payload: { requestId: 'danger-2', capability: 'fs.write', danger: true, expiry: '2026-08-23T09:00:00.000Z', prompt: '允许？' },
+    })
+    expect(result).toMatchObject({ capability: 'fs.write', danger: true, expiry: '2026-08-23T09:00:00.000Z' })
+  })
+
+  it('保留选项级 danger，供安全排序与焦点降级使用', () => {
+    const result = normalizeInteractionRequest({
+      eventType: 'approval.request',
+      payload: { requestId: 'danger-option', prompt: '允许？', choices: [
+        { id: 'deny', label: '拒绝', danger: true }, { id: 'allow', label: '允许' },
+      ] },
+    })
+    expect(result?.questions[0]?.options).toEqual([
+      { id: 'deny', label: '拒绝', danger: true }, { id: 'allow', label: '允许' },
+    ])
+  })
+
   it('保留显式 unknown interaction，普通 tool 返回 null', () => {
     expect(normalizeInteractionRequest({ eventType: 'vendor.request', payload: { surface: 'interaction', requestId: 'x', prompt: '输入' } })).toMatchObject({ kind: 'unknown' })
     expect(normalizeInteractionRequest({ name: 'terminal', payload: { command: 'ls' } })).toBeNull()

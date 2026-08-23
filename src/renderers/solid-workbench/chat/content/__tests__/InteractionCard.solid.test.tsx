@@ -1,7 +1,8 @@
 // @vitest-environment jsdom
-import { render } from '@solidjs/testing-library'
+import { fireEvent, render } from '@solidjs/testing-library'
 import { describe, expect, it, vi } from 'vitest'
 import { SolidInteractionCard } from '../InteractionCard.solid.tsx'
+import { BuiltinSolidContentSlot } from '../../BuiltinSolidContentSlot.solid.tsx'
 import type { WorkbenchInteraction } from '../../../../../domains/workbench/workbenchProjector.ts'
 
 /**
@@ -42,6 +43,49 @@ describe('C11 SolidInteractionCard', () => {
     })
   })
 
+  it('shows normalized danger reason, scope, command, and path context before action', () => {
+    const result = render(() => <SolidInteractionCard
+      interaction={{ ...permissionPending, request: {
+        ...permissionPending.request as Record<string, unknown>,
+        reason: '需要修改构建产物', scope: 'workspace', command: 'rm -rf dist', path: '/workspace/dist',
+      } } as unknown as WorkbenchInteraction}
+      commands={{ execute: vi.fn(), canExecute: () => true }}
+    />)
+    expect(result.container.textContent).toContain('需要修改构建产物')
+    expect(result.container.textContent).toContain('workspace')
+    expect(result.container.textContent).toContain('rm -rf dist')
+    expect(result.container.textContent).toContain('/workspace/dist')
+  })
+
+  it('orders confirmation options according to the resolved confirmOrder setting', () => {
+    const interaction = { ...permissionPending, request: {
+      ...permissionPending.request as Record<string, unknown>,
+      options: [{ id: 'deny', label: '拒绝', danger: true }, { id: 'allow', label: '允许' }],
+    } } as unknown as WorkbenchInteraction
+    const safeFirst = render(() => <SolidInteractionCard interaction={interaction}
+      appearance={{ confirmOrder: 'safe-first' }} commands={{ execute: vi.fn(), canExecute: () => true }} />)
+    expect([...safeFirst.container.querySelectorAll('button')].map(button => button.textContent)).toEqual(['允许', '拒绝'])
+
+    const source = render(() => <SolidInteractionCard interaction={interaction}
+      appearance={{ confirmOrder: 'source' }} commands={{ execute: vi.fn(), canExecute: () => true }} />)
+    expect([...source.container.querySelectorAll('button')].map(button => button.textContent)).toEqual(['拒绝', '允许'])
+  })
+
+  it('traps keyboard focus inside modal presentation without focusing the dangerous action first', () => {
+    const result = render(() => <SolidInteractionCard interaction={permissionPending}
+      appearance={{ presentation: 'modal', confirmOrder: 'safe-first' }}
+      commands={{ execute: vi.fn(), canExecute: () => true }} />)
+    const dialog = result.getByRole('dialog')
+    const buttons = [...dialog.querySelectorAll('button')]
+    expect(dialog).toHaveAttribute('aria-modal', 'true')
+    buttons.at(-1)!.focus()
+    fireEvent.keyDown(dialog, { key: 'Tab' })
+    expect(document.activeElement).toBe(buttons[0])
+    expect(buttons[0]).toHaveTextContent('允许')
+    fireEvent.keyDown(dialog, { key: 'Tab', shiftKey: true })
+    expect(document.activeElement).toBe(buttons.at(-1))
+  })
+
   it('disables actions when the command capability is absent, explaining why', () => {
     const result = render(() => <SolidInteractionCard interaction={permissionPending} />)
     for (const button of result.container.querySelectorAll('button')) {
@@ -61,6 +105,18 @@ describe('C11 SolidInteractionCard', () => {
     const expiredView = render(() => <SolidInteractionCard interaction={expired} />)
     expect(expiredView.container.textContent).toContain('已过期')
     expect(expiredView.container.textContent).toContain('ttl elapsed')
+  })
+
+  it('consumes resolved and expired status colors on terminal interaction cards', () => {
+    const resolved = render(() => <SolidInteractionCard
+      interaction={{ ...permissionPending, status: 'resolved' } as unknown as WorkbenchInteraction}
+      appearance={{ pendingColor: '#111', resolvedColor: '#222', expiredColor: '#333' }} />)
+    expect(resolved.container.querySelector('.interaction-card')?.getAttribute('style')).toContain('--interaction-status-color: #222')
+
+    const expired = render(() => <SolidInteractionCard
+      interaction={{ ...permissionPending, status: 'expired' } as unknown as WorkbenchInteraction}
+      appearance={{ pendingColor: '#111', resolvedColor: '#222', expiredColor: '#333' }} />)
+    expect(expired.container.querySelector('.interaction-card')?.getAttribute('style')).toContain('--interaction-status-color: #333')
   })
 
   it('renders secret prompts as password inputs that clear after submit (C12)', async () => {
@@ -127,5 +183,128 @@ describe('C11 SolidInteractionCard', () => {
     expect(execute).toHaveBeenCalledWith({
       type: 'interaction.respond', targetId: 'int-2', payload: { text: 'Pylon', expectedRevision: 2 },
     })
+  })
+
+  it('submits normalized multi-question answers as one batch response', async () => {
+    const execute = vi.fn()
+    const result = render(() => <SolidInteractionCard
+      interaction={{
+        id: 'batch-1', status: 'requested', sequence: 8,
+        request: {
+          surface: 'interaction', kind: 'questions', state: 'waiting',
+          identity: { provider: 'peri', agentId: 'agent', requestId: 'req', sessionId: 'session', clientGeneration: 1 },
+          questions: [
+            { id: 'mode', question: '运行模式？', allowMultiple: false, allowFreeform: false,
+              options: [{ id: 'safe', label: '安全' }, { id: 'fast', label: '快速' }] },
+            { id: 'scope', question: '影响范围？', allowMultiple: true, allowFreeform: true,
+              options: [{ id: 'repo', label: '仓库' }, { id: 'docs', label: '文档' }], placeholder: '补充范围' },
+          ],
+        },
+      } as unknown as WorkbenchInteraction}
+      commands={{ execute, canExecute: () => true }}
+    />)
+
+    expect(result.container.textContent).toContain('运行模式？')
+    expect(result.container.textContent).toContain('影响范围？')
+    await (result.container.querySelector('input[value="safe"]') as HTMLInputElement).click()
+    await (result.container.querySelector('input[value="repo"]') as HTMLInputElement).click()
+    await (result.container.querySelector('input[value="docs"]') as HTMLInputElement).click()
+    const freeform = result.container.querySelector('input[placeholder="补充范围"]') as HTMLInputElement
+    fireEvent.input(freeform, { target: { value: '配置文件' } })
+    const submit = [...result.container.querySelectorAll('button')].find(button => button.textContent === '提交回答')!
+    await submit.click()
+
+    expect(execute).toHaveBeenCalledWith({
+      type: 'interaction.respond', targetId: 'batch-1',
+      payload: {
+        values: { mode: 'safe', scope: ['repo', 'docs', '配置文件'] },
+        expectedRevision: 8,
+      },
+    })
+  })
+
+  it('renders a single normalized multi-select question as a checklist with freeform', async () => {
+    const execute = vi.fn()
+    const result = render(() => <SolidInteractionCard
+      interaction={{
+        id: 'multi-1', status: 'requested', sequence: 9,
+        request: {
+          surface: 'interaction', kind: 'questions', state: 'waiting',
+          identity: { provider: 'peri', agentId: 'agent', requestId: 'req-multi', sessionId: 'session', clientGeneration: 1 },
+          questions: [{ id: 'scope', question: '影响范围？', allowMultiple: true, allowFreeform: true,
+            options: [{ id: 'repo', label: '仓库' }, { id: 'docs', label: '文档' }] }],
+        },
+      } as unknown as WorkbenchInteraction}
+      commands={{ execute, canExecute: () => true }}
+    />)
+    expect(result.container.querySelectorAll('input[type="checkbox"]')).toHaveLength(2)
+    expect(result.container.querySelector('button[type="submit"]')).not.toBeNull()
+  })
+
+  it('ignores a second submit while the first interaction response is pending', async () => {
+    let resolve: (() => void) | undefined
+    const execute = vi.fn(() => new Promise<void>(done => { resolve = done }))
+    const result = render(() => <SolidInteractionCard
+      interaction={permissionPending}
+      commands={{ execute, canExecute: () => true }}
+    />)
+    const allow = [...result.container.querySelectorAll('button')].find(button => button.textContent === '允许')!
+
+    allow.click()
+    allow.click()
+
+    expect(execute).toHaveBeenCalledTimes(1)
+    resolve?.()
+    await Promise.resolve()
+  })
+
+  it('consumes resolved C11 appearance settings in the production base Slot', () => {
+    const interaction = {
+      id: 'settings-1', status: 'requested', sequence: 4,
+      request: {
+        surface: 'interaction', kind: 'approval', state: 'waiting',
+        identity: { provider: 'peri', agentId: 'agent-a', requestId: 'request-a', sessionId: 'session-a', toolCallId: null, clientGeneration: 2 },
+        questions: [{ id: 'approval', question: '允许修改？', allowMultiple: false, allowFreeform: false,
+          options: [{ id: 'allow', label: '允许', description: '只允许本次修改' }, { id: 'deny', label: '拒绝' }] }],
+      },
+    } as unknown as WorkbenchInteraction
+    const result = render(() => <BuiltinSolidContentSlot
+      snapshot={{ nodeId: 'settings-1', kind: 'interaction.approval', revision: 4, payload: interaction }}
+      appearance={{
+        presentation: 'modal', maxWidth: 560, optionDensity: 'compact', confirmOrder: 'safe-first',
+        dangerColor: '#aa1122', pendingColor: '#2277aa', descriptionsExpanded: false, showTechnicalMetadata: true,
+      }}
+      commands={{ execute: vi.fn(), canExecute: () => true }}
+    />)
+
+    const card = result.getByRole('dialog', { name: /交互：允许修改？/ })
+    expect(card).toHaveAttribute('data-presentation', 'modal')
+    expect(card).toHaveAttribute('data-option-density', 'compact')
+    expect(card).toHaveStyle({ maxWidth: '560px' })
+    expect(card.style.getPropertyValue('--interaction-danger-color')).toBe('#aa1122')
+    expect(card.style.getPropertyValue('--interaction-status-color')).toBe('#2277aa')
+    expect(card).toHaveTextContent('request-a')
+    expect(result.container.querySelector('details.interaction-option-description')).not.toHaveAttribute('open')
+  })
+
+  it('fails closed to a visible unknown fallback for malformed request identity', () => {
+    const result = render(() => <BuiltinSolidContentSlot
+      snapshot={{ nodeId: 'malformed-interaction', kind: 'interaction.permission', revision: 1, payload: {
+        id: 'malformed-interaction', status: 'requested', sequence: 1,
+        request: { surface: 'interaction', kind: 'permission', state: 'waiting', identity: { provider: 'peri' },
+          questions: [{ id: 'approval', question: '不可提交的请求', options: [], allowMultiple: false, allowFreeform: true }] },
+      } }} appearance={{}} commands={{ execute: vi.fn(), canExecute: () => true }} />)
+
+    expect(result.container.querySelector('.solid-content-unknown')).toHaveTextContent('Invalid interaction snapshot')
+    expect(result.container.querySelector('.interaction-card')).toBeNull()
+
+    const malformedOption = render(() => <BuiltinSolidContentSlot
+      snapshot={{ nodeId: 'malformed-option', kind: 'interaction.questions', revision: 1, payload: {
+        id: 'malformed-option', status: 'requested', sequence: 1,
+        request: { surface: 'interaction', kind: 'questions', state: 'waiting',
+          identity: { provider: null, agentId: null, requestId: null, sessionId: null, toolCallId: null, clientGeneration: null },
+          questions: [{ id: 'q', question: '坏选项', options: [{ id: 1, label: '坏' }], allowMultiple: false, allowFreeform: false }] },
+      } }} appearance={{}} commands={{ execute: vi.fn(), canExecute: () => true }} />)
+    expect(malformedOption.container.querySelector('.solid-content-unknown')).toHaveTextContent('Invalid interaction snapshot')
   })
 })

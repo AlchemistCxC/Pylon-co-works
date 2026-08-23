@@ -130,6 +130,10 @@ export default function ReactWorkbenchFatalFallback(props: {
 
 function fallbackInteractionRequest(value: unknown): {
   title?: string
+  reason?: string
+  scope?: string
+  command?: string
+  path?: string
   questions: Array<{
     id: string; question: string; options: Array<{ id: string; label: string }>
     allowMultiple: boolean; allowFreeform: boolean; placeholder?: string
@@ -142,12 +146,12 @@ function fallbackInteractionRequest(value: unknown): {
     id: string; question: string; options: Array<{ id: string; label: string }>
     allowMultiple: boolean; allowFreeform: boolean; placeholder?: string
   }
-  const questions = request.questions.flatMap((item): ParsedQuestion[] => {
+  const questions = request.questions.flatMap((item, questionIndex): ParsedQuestion[] => {
     if (!item || typeof item !== 'object' || Array.isArray(item)) return []
     const question = item as Record<string, unknown>
     if (typeof question.question !== 'string' || !Array.isArray(question.options)) return []
     return [{
-      id: typeof question.id === 'string' ? question.id : `question-${questions.length + 1}`,
+      id: typeof question.id === 'string' ? question.id : `question-${questionIndex + 1}`,
       question: question.question,
       allowMultiple: question.allowMultiple === true,
       allowFreeform: question.allowFreeform === true,
@@ -161,7 +165,14 @@ function fallbackInteractionRequest(value: unknown): {
       }),
     }]
   })
-  return { title: typeof request.title === 'string' ? request.title : undefined, questions }
+  return {
+    title: typeof request.title === 'string' ? request.title : undefined,
+    reason: typeof request.reason === 'string' ? request.reason : undefined,
+    scope: typeof request.scope === 'string' ? request.scope : undefined,
+    command: typeof request.command === 'string' ? request.command : undefined,
+    path: typeof request.path === 'string' ? request.path : undefined,
+    questions,
+  }
 }
 
 function ReactFallbackInteraction(props: {
@@ -207,6 +218,10 @@ function ReactFallbackInteraction(props: {
   return <div data-react-interaction-status={props.interaction.status}>
     <strong>{request?.title || request?.questions[0]?.question || props.interaction.id}</strong>
     <span>{props.interaction.status}</span>
+    {request?.reason && <span>原因：{request.reason}</span>}
+    {request?.scope && <span>范围：{request.scope}</span>}
+    {request?.command && <code>{request.command}</code>}
+    {request?.path && <code>{request.path}</code>}
     {props.interaction.status === 'requested' && request && (formMode
       ? <form onSubmit={event => { event.preventDefault(); submit() }}>
         {request.questions.map(question => <fieldset key={question.id}>

@@ -128,6 +128,23 @@ describe('createPreviewWorkbenchRuntime', () => {
     expect(runtime.getSnapshot().generation).toBe(1)
   })
 
+  it('session switch 保留新会话 pending interaction，且拒绝旧 owner/generation 串入', () => {
+    const runtime = createPreviewWorkbenchRuntime(initial())
+    const sessionA = { ...createWorkbenchDocument('session-a'), revision: 4, interactions: [{
+      id: 'approval-a', status: 'requested' as const, request: { prompt: 'A?' }, sequence: 4,
+    }] }
+    const sessionB = { ...createWorkbenchDocument('session-b'), revision: 7, interactions: [{
+      id: 'approval-b', status: 'requested' as const, request: { prompt: 'B?' }, sequence: 7,
+    }] }
+
+    runtime.replaceDocument(sessionA, { ownerKey: 'owner-a', generation: 4 })
+    runtime.replaceDocument(sessionB, { ownerKey: 'owner-b', generation: 7 })
+    runtime.applyDocument({ ...sessionA, revision: 8 }, { ownerKey: 'owner-a', generation: 4 })
+
+    expect(runtime.getSlice('interactions')).toEqual([expect.objectContaining({ id: 'approval-b', status: 'requested' })])
+    expect(runtime.getSnapshot()).toMatchObject({ ownerKey: 'owner-b', generation: 7, sessionId: 'session-b' })
+  })
+
   it('document selector 对 timeline/activity/interaction/session/diagnostics 保持局部通知', () => {
     const runtime = createPreviewWorkbenchRuntime(initial())
     const initialDocument = { ...createWorkbenchDocument('session-a'), session: { ...createWorkbenchDocument('session-a').session, status: 'ready' } }

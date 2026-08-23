@@ -49,10 +49,17 @@ export async function executeRendererSemanticCommand(input: {
       result = await host.commands.copy(sessionId, text)
       break
     }
-    case 'interaction.respond':
+    case 'interaction.respond': {
       if (!command.targetId) { reject('renderer_action_invalid', 'interaction.respond 缺少 targetId'); return }
-      result = await host.commands.respondInteraction(sessionId, command.targetId, payload)
+      const expectedRevision = typeof record?.expectedRevision === 'number' ? record.expectedRevision : undefined
+      const response = record && expectedRevision !== undefined
+        ? Object.fromEntries(Object.entries(record).filter(([key]) => key !== 'expectedRevision'))
+        : payload
+      result = expectedRevision === undefined
+        ? await host.commands.respondInteraction(sessionId, command.targetId, response)
+        : await host.commands.respondInteraction(sessionId, command.targetId, response, { expectedRevision })
       break
+    }
     case 'tool.action': {
       const action = record?.action
       if (!command.targetId || typeof action !== 'string') { reject('renderer_action_invalid', 'tool.action 缺少 targetId/action'); return }
@@ -82,5 +89,11 @@ export async function executeRendererSemanticCommand(input: {
       reject('renderer_action_unknown', `未知 Renderer semantic action：${command.type}`)
       return
   }
-  if (!result.ok) reject(result.error.code, result.error.message)
+  if (!result.ok) {
+    reject(result.error.code, result.error.message)
+    // Interaction surfaces use rejection to keep their local answer editable
+    // and to show an actionable retry state. Other renderer actions retain the
+    // historical diagnostic-only behavior.
+    if (command.type === 'interaction.respond') throw new Error(result.error.message)
+  }
 }

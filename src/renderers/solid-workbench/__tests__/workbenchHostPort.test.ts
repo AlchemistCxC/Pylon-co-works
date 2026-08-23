@@ -142,4 +142,22 @@ describe('WorkbenchHostPort', () => {
       code: 'command_rejected', phase: 'action', command: 'respondInteraction',
     }))
   })
+
+  it('production Solid adapter preserves interaction expectedRevision through the Host port', async () => {
+    const commands = createFakeWorkbenchCommandFacade()
+    const host = createWorkbenchHostPort({
+      runtime: runtime(), appearance: createStaticWorkbenchAppearanceStore(structuredClone(DEFAULTS)),
+      sessionUi: createSessionUiStore(), commands,
+      suiteId: 'builtin.solid', sheetId: 'sheet-a', sessionOwnerKey: 'owner-a', sessionId: 's1',
+      capabilities: { interactionResponse: true },
+    })
+
+    await createSolidWorkbenchServicesFromHostPort(host).commands.respondInteraction(
+      's1', 'interaction-a', { optionId: 'allow' }, { expectedRevision: 13 },
+    )
+    expect(commands.calls.at(-1)).toEqual({
+      command: 'respondInteraction',
+      args: ['s1', 'interaction-a', { optionId: 'allow' }, { expectedRevision: 13 }],
+    })
+  })
 })

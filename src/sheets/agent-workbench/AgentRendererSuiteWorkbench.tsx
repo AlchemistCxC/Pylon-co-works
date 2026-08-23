@@ -305,6 +305,11 @@ export default function AgentRendererSuiteWorkbench(props: AgentRendererSuiteWor
     if (!host || !input.sessionId || !host.capabilities.has('recovery')) return
     void host.commands.recover(input.sessionId, strategy)
   }
+  const respondFallbackInteraction = (interactionId: string, response: unknown, options?: { expectedRevision?: number }) => {
+    const host = hostPortRef.current
+    if (!host || !input.sessionId || !host.capabilities.has('interactionResponse')) return
+    return host.commands.respondInteraction(input.sessionId, interactionId, response, options)
+  }
 
   return <div className="main renderer-suite-workbench" data-renderer-suite-host="true" data-suite-id={activeSuiteId ?? activation?.suite.value.id}>
     <div ref={containerRef} className="renderer-suite-workbench-mount" hidden={fatal} />
@@ -315,7 +320,8 @@ export default function AgentRendererSuiteWorkbench(props: AgentRendererSuiteWor
       onOpenMedia={hostPortRef.current.capabilities.has('resourceOpen') ? openFallbackMedia : undefined}
       onDownloadMedia={hostPortRef.current.capabilities.has('resourceOpen') ? downloadFallbackMedia : undefined}
       onRetryMessage={hostPortRef.current.capabilities.has('retry') ? retryFallbackMessage : undefined}
-      onRecoverSession={hostPortRef.current.capabilities.has('recovery') ? recoverFallbackSession : undefined} />}
+      onRecoverSession={hostPortRef.current.capabilities.has('recovery') ? recoverFallbackSession : undefined}
+      onRespondInteraction={hostPortRef.current.capabilities.has('interactionResponse') ? respondFallbackInteraction : undefined} />}
     {!fatal && failure && <div className="renderer-suite-fallback-banner" role="status"
       data-failed-suite-id={failure.suiteId} data-failed-plugin-id={failure.pluginId} data-failure-phase={failure.phase}>
       {failure.retained ? 'Suite 候选未生效，继续使用健康实例' : 'Suite 已安全回退'}：{failure.suiteId} / {failure.phase} / {failure.message}
