@@ -153,8 +153,15 @@ pub(crate) fn emit_event_all<R, W>(
     R: Runtime,
     W: Emitter<R>,
 {
-    emit_event(window, event, payload.clone());
-    gateway.deliver_all(source, event, &payload);
+    // 平台源判定前置：deliver_all 需要 &payload，emit 也消费 payload——平台源
+    // 才 clone 给 emit，GUI 源直接 move 给 emit 且跳过 deliver_all（其内部对
+    // GUI source 本就早退）。is_platform_source 为一次读锁 + 前缀查。
+    if gateway.is_platform_source(source) {
+        gateway.deliver_all(source, event, &payload);
+        emit_event(window, event, payload);
+    } else {
+        emit_event(window, event, payload);
+    }
 }
 
 /// AppState：全局状态 = 全局配置 + per-agent 隔离运行时（B7a-2）+ gateway（B10.1）。
@@ -801,6 +808,7 @@ pub fn run() {
                 crate::session::retention_preview, crate::session::retention_prune,
                 crate::export::export_session,
                 crate::logs_cmds::list_runtime_logs, crate::logs_cmds::clear_runtime_logs, crate::logs_cmds::push_frontend_log,
+                crate::logs_cmds::set_runtime_log_live,
                 crate::workspace_cmds::get_workspace_root, crate::workspace_cmds::list_workspace_entries, crate::workspace_cmds::read_workspace_text,
                 crate::workspace_cmds::write_workspace_text,
                 crate::workspace_cmds::git_status, crate::workspace_cmds::git_status_with_branch,
