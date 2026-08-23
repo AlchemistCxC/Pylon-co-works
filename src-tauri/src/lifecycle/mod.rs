@@ -537,6 +537,9 @@ async fn stop_agent_runtime(agent_id: &str, inner: &AppState) {
                 handle.abort();
             }
         }
+        // A4：清空流式通道注册——旧 runtime 的 channel 随 dispatcher 一起失效，
+        // 防 kill 后残留帧投递到已被前端废弃的通道对象。
+        old.clear_update_channels();
         let mut acp = old.acp.lock().await;
         let _ = acp.kill();
         drop(acp);

@@ -4,6 +4,29 @@
 use super::*;
 use crate::acp::AcpError;
 
+/// A2/A3：向 source 已注册的流式通道发送终帧（done/error 信封）并注销注册。
+/// 未注册 → no-op（广播兼容路径）。发送失败仅告警，不阻断收尾流程。
+/// payload 为完整终态载荷（含 canonicalEvent），前端按既有 done/error 分支处理。
+/// 幂等：take 注销先行，重复调用安全（第二次 no-op）。
+fn send_channel_terminal(
+    _state: &AppState,
+    runtime: &Arc<AgentRuntime>,
+    source: &str,
+    event: &str,
+    mut payload: serde_json::Value,
+) {
+    if let Some(channel) = runtime.take_update_channel(source) {
+        if let serde_json::Value::Object(ref mut map) = payload {
+            map.entry("source".to_string())
+                .or_insert_with(|| serde_json::Value::String(source.to_string()));
+        }
+        let frame = serde_json::json!({ "event": event, "payload": payload });
+        if let Err(error) = channel.send(frame) {
+            tracing::warn!("channel 终帧发送失败 event={event} source={source}: {error}");
+        }
+    }
+}
+
 /// Prompt-generated event 与 dispatcher ACP update 共用 EventService ingest；不持有
 /// 独立 sequence/normalizer。平台会话无 GUI Profile，明确跳过本地 journal。
 async fn ingest_prompt_event(
@@ -97,9 +120,10 @@ async fn publish_prompt_failure<R: tauri::Runtime>(
             gateway,
             &ctx.source,
             crate::event_names::SESSION_ERROR,
-            error_payload,
+            error_payload.clone(),
         );
     }
+    send_channel_terminal(state, runtime, &ctx.source, crate::event_names::SESSION_ERROR, error_payload);
     Ok(())
 }
 #[tauri::command]
@@ -134,6 +158,40 @@ pub(crate) async fn send_message<R: tauri::Runtime>(
         mcp_servers,
         cwd: None,
     };
+    send_prompt_core(state.inner(), &runtime, Some(&window), &state.gateway, &ctx).await
+}
+
+/// A2：流式版本 send_message——前端携带 Channel 注册后走 Channel 推送（A3 跳过广播）。
+/// 其余语义与 send_message 完全一致；未传 on_update 时等价旧命令（兼容路径）。
+#[allow(clippy::too_many_arguments)]
+#[tauri::command]
+pub(crate) async fn send_message_streaming<R: tauri::Runtime>(
+    state: tauri::State<'_, AppState>,
+    window: tauri::Window<R>,
+    agent_id: String,
+    source: String,
+    profile_id: Option<String>,
+    content: String,
+    persona: String,
+    session_prompt: Option<String>,
+    attachments: Option<Vec<String>>,
+    mcp_servers: Option<Vec<crate::mcp::McpServerConfig>>,
+    on_update: tauri::ipc::Channel<serde_json::Value>,
+) -> Result<String, PylonError> {
+    let runtime = state.inner().resolve_agent_runtime(&agent_id)?;
+    runtime.register_update_channel(&source, on_update);
+    let ctx = PromptContext {
+        source,
+        profile_id,
+        content,
+        persona,
+        session_prompt,
+        attachments,
+        mcp_servers,
+        cwd: None,
+    };
+    // 终帧/注销由收尾两路（finalize_response → DONE 帧 / publish_prompt_failure →
+    // ERROR 帧）经 send_channel_terminal 完成，不绑本函数生命周期。
     send_prompt_core(state.inner(), &runtime, Some(&window), &state.gateway, &ctx).await
 }
 
@@ -359,9 +417,10 @@ async fn finalize_response<R: tauri::Runtime>(
             gateway,
             source,
             crate::event_names::SESSION_DONE,
-            done_payload,
+            done_payload.clone(),
         );
     }
+    send_channel_terminal(state, runtime, source, crate::event_names::SESSION_DONE, done_payload);
     let _ = state.pet.lock().map(|mut p| crate::pet::on_done(&mut p));
     // B11.2：完成持久化（gateway.inject.persist = "prism"）——把本回合
     // （用户消息 + 流式收集的回复文本）交 Prism /persist（LLM 摘要 +

@@ -36,6 +36,9 @@ impl AgentContextKey {
 }
 
 /// 单个 agent 的运行时状态（per-agent 隔离）。
+/// A3：per-source 流式更新通道注册表类型别名。
+pub type UpdateChannelMap = std::sync::Mutex<HashMap<String, tauri::ipc::Channel<serde_json::Value>>>;
+
 pub struct AgentRuntime {
     pub acp: Arc<tokio::sync::Mutex<AcpClient>>,
     pub notification_task: Arc<Mutex<Option<tokio::task::JoinHandle<()>>>>,
@@ -56,6 +59,9 @@ pub struct AgentRuntime {
     /// load_persisted_session 的 sessions 映射插入成功后 notify_waiters，dispatcher
     /// 对未知 periId 的等待由 20×5ms 轮询改为事件驱动（100ms 窗口语义不变）。
     pub mapping_ready: tokio::sync::Notify,
+    /// per-source 流式更新通道（Channel 化重构 A1）：send_message 注册、终帧/C7/generation
+    /// bump 注销。dispatcher 对已注册 source 走 Channel 推送并跳过 WebView 广播（A3）。
+    pub update_channels: Arc<UpdateChannelMap>,
 }
 
 impl AgentRuntime {
@@ -74,7 +80,39 @@ impl AgentRuntime {
             auto_reconnect_active: Arc::new(AtomicBool::new(false)),
             pending_permissions: Arc::new(Mutex::new(HashMap::new())),
             mapping_ready: tokio::sync::Notify::new(),
+            update_channels: Arc::new(Mutex::new(HashMap::new())),
         })
+    }
+
+    /// A1：注册 source 的流式更新通道（send_message 携带 Channel 时调用）。
+    /// 同 source 重复注册以新换旧（旧 channel 随前端对象废弃，无需显式关闭）。
+    /// 锁序：不得在持有 sessions 锁时调用（sessions → update_channels 单向）。
+    pub fn register_update_channel(
+        &self,
+        source: &str,
+        channel: tauri::ipc::Channel<serde_json::Value>,
+    ) {
+        if let Ok(mut map) = self.update_channels.lock() {
+            map.insert(source.to_string(), channel);
+        }
+    }
+
+    /// A1：注销并取回 source 的通道（终帧发送后 / C7 清理 / generation bump 调用）。
+    pub fn take_update_channel(
+        &self,
+        source: &str,
+    ) -> Option<tauri::ipc::Channel<serde_json::Value>> {
+        self.update_channels
+            .lock()
+            .ok()
+            .and_then(|mut map| map.remove(source))
+    }
+
+    /// A1：清空全部通道（C7 stop_agent_runtime / generation bump 批量清理）。
+    pub fn clear_update_channels(&self) {
+        if let Ok(mut map) = self.update_channels.lock() {
+            map.clear();
+        }
     }
 
     /// O1：prompt 锁表随会话生命周期收敛（单 key 移除）——映射删除 = 该 source

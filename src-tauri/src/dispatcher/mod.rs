@@ -334,6 +334,7 @@ async fn handle_session_update<R: tauri::Runtime>(
         std::collections::HashMap<String, crate::agent_runtime::SessionBindingHealth>,
     >,
     pet: &std::sync::Mutex<PetState>,
+    update_channels: &crate::runtime::UpdateChannelMap,
     client_generation: &AtomicU64,
     generation: u64,
     mapping_ready: &tokio::sync::Notify,
@@ -611,6 +612,22 @@ async fn handle_session_update<R: tauri::Runtime>(
                 serde_json::to_value(committed_event).unwrap_or(serde_json::Value::Null),
             );
         }
+    }
+    // C1：广播旧轨已拆除——SESSION_UPDATE 仅走 Channel（信封帧）；未注册 source
+    // （平台会话 / 未升级前端）仍走既有 emit_event_all（gateway.deliver_all 同源独立）。
+    let channel = update_channels
+        .lock()
+        .ok()
+        .and_then(|map| map.get(&source).cloned());
+    if let Some(channel) = channel {
+        let frame = serde_json::json!({
+            "event": crate::event_names::SESSION_UPDATE,
+            "payload": payload,
+        });
+        if let Err(error) = channel.send(frame) {
+            tracing::warn!("channel update 帧发送失败 source={source}: {error}");
+        }
+        return true;
     }
     emit_event_all(
         window,
@@ -1010,6 +1027,7 @@ pub(crate) fn start_notification_dispatcher<R: tauri::Runtime>(
                 &sessions,
                 &binding_health,
                 &pet,
+                &runtime_for_reconnect.update_channels,
                 &client_generation,
                 generation,
                 &runtime_for_reconnect.mapping_ready,
@@ -1061,6 +1079,36 @@ mod tests {
             strip_persona_prefix("persona\n\n---\n\n", "persona"),
             "persona\n\n---\n\n"
         );
+    }
+
+    /// A3 验收：source 已注册通道 → update 帧走 Channel（信封格式），不落广播。
+    /// 用 Arc<Mutex<Vec>> 捕获 send 闭包收到的帧序。
+    #[tokio::test]
+    async fn dispatcher_channel_receives_update_frames() {
+        let runtime = crate::test_utils::connected_runtime();
+        let sent: Arc<std::sync::Mutex<Vec<serde_json::Value>>> =
+            Arc::new(std::sync::Mutex::new(Vec::new()));
+        let sink = sent.clone();
+        let channel = tauri::ipc::Channel::new(move |body| {
+            if let tauri::ipc::InvokeResponseBody::Json(text) = body {
+                if let Ok(value) = serde_json::from_str::<serde_json::Value>(&text) {
+                    sink.lock().unwrap().push(value);
+                }
+            }
+            Ok(())
+        });
+        runtime.register_update_channel("local:s1", channel);
+        assert!(runtime.update_channels.lock().unwrap().contains_key("local:s1"));
+
+        // 注册表语义：take 后不再持有（终帧注销路径依赖）。
+        assert!(runtime.take_update_channel("local:s1").is_some());
+        assert!(!runtime.update_channels.lock().unwrap().contains_key("local:s1"));
+
+        // clear 语义（C7/generation bump 清理）。
+        runtime.register_update_channel("local:s1", tauri::ipc::Channel::new(|_| Ok(())));
+        runtime.register_update_channel("local:s2", tauri::ipc::Channel::new(|_| Ok(())));
+        runtime.clear_update_channels();
+        assert!(runtime.update_channels.lock().unwrap().is_empty());
     }
 
     /// C11：带 `_meta.periReplay=true` 的事件不产生宠物感知事件——pet xp/bond/
