@@ -1033,6 +1033,16 @@ pub(crate) fn connect(conn: &mut Connection) -> Result<(), PylonError> {
         .map_err(repo_err)?;
     validate_quick_check(conn)?;
     migrate(conn)?;
+    // WAL：流式期间 canonical journal 每 chunk 一次事务（dispatcher ingest_event），
+    // delete 模式每事务两次 fsync + 写锁表；WAL + NORMAL 将提交降为一次 WAL append。
+    // 置于完整性校验/迁移之后：损坏或非 SQLite 文件先走既定 fail-closed 路径，
+    // 不得被 journal_mode pragma 的 protocol_error 抢先改变错误码。pragma 持久化
+    // 于 DB 文件，重复设置幂等；synchronous=NORMAL 在 WAL 下仅可能丢最后一次
+    // checkpoint 之前的落盘，事务完整性由 WAL 自身保证。
+    conn.pragma_update(None, "journal_mode", "WAL")
+        .map_err(repo_err)?;
+    conn.pragma_update(None, "synchronous", "NORMAL")
+        .map_err(repo_err)?;
     validate_schema_manifest(conn)
 }
 
