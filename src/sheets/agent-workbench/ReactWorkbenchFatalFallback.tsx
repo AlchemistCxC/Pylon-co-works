@@ -1,4 +1,4 @@
-import { useSyncExternalStore } from 'react'
+import { useState, useSyncExternalStore } from 'react'
 import type {
   ContentPart,
   DiffContentPart,
@@ -46,6 +46,7 @@ export default function ReactWorkbenchFatalFallback(props: {
   onDownloadMedia?(part: ImageContentPart): void
   onRetryMessage?(): void
   onRecoverSession?(strategy: 'reload-plugin' | 'reimport'): void
+  onRespondInteraction?(interactionId: string, response: unknown, options?: { expectedRevision?: number }): void | Promise<unknown>
 }) {
   const document = useSyncExternalStore(
     listener => props.document.subscribe(listener),
@@ -108,14 +109,8 @@ export default function ReactWorkbenchFatalFallback(props: {
           : <ReactFallbackSubagentActivity key={activity.id} activity={activity} />
       )}
       <section className="react-workbench-fatal-interactions" aria-label="交互 fallback">
-        {document?.interactions.map(interaction => (
-          <div key={interaction.id} data-react-interaction-status={interaction.status}>
-            <strong>{(interaction.request as {prompt?: string})?.prompt ?? interaction.id}</strong>
-            <span>{interaction.status}</span>
-            {interaction.response !== undefined && <code>{JSON.stringify(interaction.response)}</code>}
-            {interaction.reason && <span>{interaction.reason}</span>}
-          </div>
-        ))}
+        {document?.interactions.map(interaction => <ReactFallbackInteraction key={interaction.id}
+          interaction={interaction} onRespond={props.onRespondInteraction} />)}
       </section>
       <div className="react-workbench-fatal-history" aria-label="会话历史">
         {document?.messages.map(message => <article key={message.id} data-message-role={message.role}>
@@ -131,6 +126,117 @@ export default function ReactWorkbenchFatalFallback(props: {
       </div>
     </section>
   )
+}
+
+function fallbackInteractionRequest(value: unknown): {
+  title?: string
+  questions: Array<{
+    id: string; question: string; options: Array<{ id: string; label: string }>
+    allowMultiple: boolean; allowFreeform: boolean; placeholder?: string
+  }>
+} | undefined {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return undefined
+  const request = value as Record<string, unknown>
+  if (request.surface !== 'interaction' || !Array.isArray(request.questions)) return undefined
+  type ParsedQuestion = {
+    id: string; question: string; options: Array<{ id: string; label: string }>
+    allowMultiple: boolean; allowFreeform: boolean; placeholder?: string
+  }
+  const questions = request.questions.flatMap((item): ParsedQuestion[] => {
+    if (!item || typeof item !== 'object' || Array.isArray(item)) return []
+    const question = item as Record<string, unknown>
+    if (typeof question.question !== 'string' || !Array.isArray(question.options)) return []
+    return [{
+      id: typeof question.id === 'string' ? question.id : `question-${questions.length + 1}`,
+      question: question.question,
+      allowMultiple: question.allowMultiple === true,
+      allowFreeform: question.allowFreeform === true,
+      placeholder: typeof question.placeholder === 'string' ? question.placeholder : undefined,
+      options: question.options.flatMap(optionValue => {
+        if (!optionValue || typeof optionValue !== 'object' || Array.isArray(optionValue)) return []
+        const option = optionValue as Record<string, unknown>
+        return typeof option.id === 'string' && typeof option.label === 'string'
+          ? [{ id: option.id, label: option.label }]
+          : []
+      }),
+    }]
+  })
+  return { title: typeof request.title === 'string' ? request.title : undefined, questions }
+}
+
+function ReactFallbackInteraction(props: {
+  interaction: NonNullable<ReturnType<WorkbenchDocumentReader['getSnapshot']>>['interactions'][number]
+  onRespond?: (interactionId: string, response: unknown, options?: { expectedRevision?: number }) => void | Promise<unknown>
+}) {
+  const request = fallbackInteractionRequest(props.interaction.request)
+  const [selected, setSelected] = useState<Record<string, string[]>>({})
+  const [freeform, setFreeform] = useState<Record<string, string>>({})
+  const [submitting, setSubmitting] = useState(false)
+  const [submitError, setSubmitError] = useState<string>()
+  const formMode = Boolean(request && (request.questions.length > 1
+    || request.questions.some(question => question.allowMultiple || question.allowFreeform)))
+  const select = (questionId: string, optionId: string, multiple: boolean) => setSelected(current => {
+    const previous = current[questionId] ?? []
+    const values = multiple
+      ? previous.includes(optionId) ? previous.filter(value => value !== optionId) : [...previous, optionId]
+      : [optionId]
+    return { ...current, [questionId]: values }
+  })
+  const respond = async (response: unknown) => {
+    if (!props.onRespond || submitting) return
+    setSubmitting(true)
+    setSubmitError(undefined)
+    try {
+      await props.onRespond(props.interaction.id, response, { expectedRevision: props.interaction.sequence })
+    } catch (error) {
+      setSubmitError(error instanceof Error ? error.message : '交互提交失败，请重试')
+    } finally {
+      setSubmitting(false)
+    }
+  }
+  const submit = () => {
+    if (!request || !props.onRespond || submitting) return
+    const values = Object.fromEntries(request.questions.flatMap(question => {
+      const optionIds = selected[question.id] ?? []
+      const text = freeform[question.id]?.trim()
+      const answers = text ? [...optionIds, text] : optionIds
+      return answers.length === 0 ? [] : [[question.id, question.allowMultiple || answers.length > 1 ? answers : answers[0]!]]
+    }))
+    if (Object.keys(values).length > 0) void respond({ values })
+  }
+  return <div data-react-interaction-status={props.interaction.status}>
+    <strong>{request?.title || request?.questions[0]?.question || props.interaction.id}</strong>
+    <span>{props.interaction.status}</span>
+    {props.interaction.status === 'requested' && request && (formMode
+      ? <form onSubmit={event => { event.preventDefault(); submit() }}>
+        {request.questions.map(question => <fieldset key={question.id}>
+          <legend>{question.question}</legend>
+          {question.options.map(option => <label key={option.id}>
+            <input type={question.allowMultiple ? 'checkbox' : 'radio'}
+              name={`fallback-${props.interaction.id}-${question.id}`} value={option.id}
+              checked={(selected[question.id] ?? []).includes(option.id)} disabled={!props.onRespond}
+              onChange={() => select(question.id, option.id, question.allowMultiple)} />
+            {option.label}
+          </label>)}
+          {question.allowFreeform && <input type="text" placeholder={question.placeholder ?? '补充回答'}
+            value={freeform[question.id] ?? ''} disabled={!props.onRespond}
+            onChange={event => {
+              const value = event.currentTarget.value
+              setFreeform(current => ({ ...current, [question.id]: value }))
+            }} />}
+        </fieldset>)}
+        <button type="submit" disabled={!props.onRespond || submitting}>提交回答</button>
+      </form>
+      : request.questions.flatMap(question => question.options).map(option => (
+        <button key={option.id} type="button" disabled={!props.onRespond || submitting}
+          onClick={() => { void respond({ optionId: option.id }) }}>
+          {option.label}
+        </button>
+      )))}
+    {submitError && <span role="alert" aria-label="交互提交失败">{submitError}</span>}
+    {props.interaction.response !== undefined && <code>{JSON.stringify(props.interaction.response)}</code>}
+    {props.interaction.reason && <span>{props.interaction.reason}</span>}
+  </div>
 }
 
 function ReactFallbackSubagentActivity({ activity }: { activity: WorkbenchActivityNode }) {
