@@ -99,4 +99,18 @@ describe('C10 background-task / workflow projection', () => {
     expect(agent!.parentId).toBe('wf-1')
     expect(agent!.role).toBe('reviewer')
   })
+
+  it('keeps live apply and restart replay deep-equal for the same C10 journal (C13 acceptance parity)', () => {
+    const events = [
+      envelope(1, { type: 'activity.started', activityId: 'wf-r',
+        activity: { kind: 'workflow', title: 'pipeline' } }),
+      envelope(2, { type: 'activity.started', activityId: 'ph-r',
+        activity: { kind: 'workflow-phase', title: 'build', parentId: 'wf-r' } }),
+      envelope(3, { type: 'activity.completed', activityId: 'ph-r', result: { summary: 'ok' } } as never),
+    ]
+    // live：顺序 apply；replay：一次性 replace 同一 journal
+    const live = projectWorkbench(events).document
+    const replay = projectWorkbench(events, { initialDocument: undefined }).document
+    expect(replay).toEqual(live)
+  })
 })

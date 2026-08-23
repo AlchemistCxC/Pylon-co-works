@@ -53,6 +53,7 @@ export function SolidSubagentCard(props: {
       class="term-subagent-card"
       data-part-kind={props.activity.semanticKind ?? `activity.${props.activity.activityKind ?? 'subagent'}`}
       data-status={props.activity.status}
+      data-palette={props.appearance?.statusPalette === 'mono' ? 'mono' : 'semantic'}
       data-depth={depth()}
       style={{ '--subagent-depth': String(depth()) }}
       data-density={compact()}

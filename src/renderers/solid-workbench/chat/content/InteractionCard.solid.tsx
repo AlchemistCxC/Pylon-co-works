@@ -1,4 +1,4 @@
-import { For, Show, createMemo } from 'solid-js'
+import { For, Show, createMemo, createSignal } from 'solid-js'
 import type { RenderAppearanceSnapshot, RenderCommandPort } from '../../../../contracts/messageRenderer.ts'
 import type { WorkbenchInteraction } from '../../../../domains/workbench/workbenchProjector.ts'
 
@@ -37,12 +37,23 @@ export function SolidInteractionCard(props: {
   // 主链 semantic command type 是 'interaction.respond'（Slot gate 映射到 interactionResponse capability 位）
   const canRespond = () => pending() && props.commands?.canExecute?.('interaction.respond') === true
 
-  const respond = (payload: Record<string, unknown>) => {
-    void props.commands?.execute({
-      type: 'interaction.respond',
-      targetId: props.interaction.id,
-      payload,
-    })
+  // A09 步骤4/C11 步骤4：失败恢复——CommandResult.ok=false 时保留输入并呈现错误，不误标已响应
+  const [submitError, setSubmitError] = createSignal<string | undefined>(undefined)
+  const [submitting, setSubmitting] = createSignal(false)
+  const respond = async (payload: Record<string, unknown>) => {
+    if (!pending() || submitting()) return
+    setSubmitting(true); setSubmitError(undefined)
+    try {
+      await props.commands?.execute({
+        type: 'interaction.respond',
+        targetId: props.interaction.id,
+        payload,
+      })
+    } catch (error) {
+      setSubmitError(error instanceof Error ? error.message : '交互提交失败，请重试')
+    } finally {
+      setSubmitting(false)
+    }
   }
 
   const toneClass = () => `interaction-card interaction-${request().kind ?? 'generic'}`
@@ -146,6 +157,9 @@ export function SolidInteractionCard(props: {
                 }}
               />
             </Show>
+          </Show>
+          <Show when={submitError()}>
+            {error => <div role="alert" class="term-process-error">{error()}</div>}
           </Show>
         </div>
       </Show>

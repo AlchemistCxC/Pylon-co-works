@@ -344,7 +344,8 @@ export function BuiltinSolidContentSlot(props: {
         'content.memory', 'content.skill', 'content.mcp-resource', 'content.artifact',
       ].includes(kind())}>
         {/* C15：安全 metadata 卡（title/source/status 摘要）；内容本体不内联，oversize/未知字段经 payload 摘要可见 */}
-        <Show when={payload() as Record<string, unknown> | undefined}>
+        <Show when={payload() as Record<string, unknown> | undefined}
+          fallback={<pre class="solid-content-unknown" data-content-kind={kind()}>Invalid {kind()} payload</pre>}>
           {data => (
             <section class="term-subagent-meta" data-content-kind={kind()} role="note"
               aria-label={`${kind()}：${String(data().title ?? data().memoryId ?? data().artifactId ?? kind())}`}>
