@@ -142,7 +142,35 @@ export const BUILTIN_EXECUTION_RENDER_KINDS: readonly RenderKindDefinition[] = O
     settings: TERMINAL_LOG_SETTINGS,
     validateInput: isProcessActivitySnapshotInput,
   } satisfies RenderKindDefinition),
+  Object.freeze({
+    id: 'activity.background-task',
+    category: 'activity',
+    fallbackKind: 'content.unknown',
+    priority: 1000,
+    fixture: {
+      id: 'fixture-background-task', kind: 'activity', activityKind: 'background-task', semanticKind: 'activity.background-task',
+      title: 'Fixture background task', status: 'running', parts: [],
+    },
+    defaultTokens: SUBAGENT_WORKFLOW_DEFAULT_TOKENS,
+    settingsSchemaVersion: 1,
+    settings: SUBAGENT_WORKFLOW_SETTINGS,
+    validateInput: isBackgroundTaskActivitySnapshotInput,
+  } satisfies RenderKindDefinition),
 ])
+
+/** C16 审计补齐：background-task 快照校验——与 process 同构但 identity 独立。 */
+export function isBackgroundTaskActivitySnapshotInput(input: unknown): boolean {
+  if (!isRecord(input)
+    || typeof input.id !== 'string' || !input.id.trim()
+    || input.kind !== 'activity'
+    || input.activityKind !== 'background-task'
+    || input.semanticKind !== 'activity.background-task'
+    || typeof input.status !== 'string' || !input.status.trim()) return false
+  for (const key of ['title', 'parentId', 'sessionId', 'reason'] as const) {
+    if (input[key] !== undefined && (typeof input[key] !== 'string' || !input[key].trim())) return false
+  }
+  return true
+}
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value)
