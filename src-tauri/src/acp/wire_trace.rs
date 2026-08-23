@@ -149,10 +149,12 @@ impl AcpWireHub {
         &self.correlation
     }
 
+    #[allow(dead_code)] // 测试开关接口：运行期 ring buffer 恒启用，开关仅供测试可见性控制
     pub fn set_enabled(&self, enabled: bool) {
         self.enabled.store(enabled, Ordering::Relaxed);
     }
 
+    #[allow(dead_code)] // 同上（lifecycle 测试断言使用）
     pub fn is_enabled(&self) -> bool {
         self.enabled.load(Ordering::Relaxed)
     }

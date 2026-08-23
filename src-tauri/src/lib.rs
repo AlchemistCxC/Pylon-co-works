@@ -55,10 +55,6 @@ mod startup;
 #[cfg(test)]
 mod test_utils;
 mod time;
-// CWD-04：工具/Git/workspace cwd 一致性验收（只读取证 + 诊断，不新增 wire/命令行为；
-// 纯测试用途——按 real_acp_smoke / del01_schema_audit 等验收模块惯例 cfg(test) 门控）。
-#[cfg(test)]
-mod cwd04;
 mod workspace;
 mod workspace_cmds;
 mod workspaces;

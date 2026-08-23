@@ -1,3 +1,4 @@
+#[cfg_attr(not(test), allow(unused_imports))] // 后三项仅测试目标消费（bin 内测试模块 + 回归测试）
 use pylon_core::agent_detection::{
     detect_agent_runtime_candidates, AgentDetectionOptions, AgentDetectionReport,
     AgentRuntimeCandidate, IdentityConfidence, ProtocolAvailability,

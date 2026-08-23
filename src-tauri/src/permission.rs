@@ -38,6 +38,7 @@ pub(crate) struct PermissionOption {
 
 impl PermissionOption {
     /// 仅携带 optionId 的选项（测试与精简构造）。
+    #[allow(dead_code)] // 测试便捷构造器（permission/protocol_adapter 测试使用）
     pub(crate) fn plain(option_id: impl Into<String>) -> Self {
         Self {
             option_id: option_id.into(),

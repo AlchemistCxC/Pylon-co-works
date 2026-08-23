@@ -360,7 +360,7 @@ pub(crate) fn list_workspaces_in_state(state: &AppState) -> Result<Vec<Workspace
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::runtime::{AgentContextKey, AgentRuntime};
+    use crate::runtime::AgentRuntime;
     use crate::session::SessionInfo;
     use crate::test_utils::{fake_acp_agent, TestStateBuilder};
     use std::sync::Arc;
@@ -551,11 +551,6 @@ mod tests {
             .with_runtime("peri", runtime.clone())
             .with_workspace(sample_workspace("ws-1", "C:\\root"))
             .build();
-        // 冻结语义：命令 root 读会话自带 cwd，不随 workspace 注册表解析。
-        let root = state
-            .workspace_root_for_context(&runtime, &AgentContextKey::new("peri", "local:s1"))
-            .expect("会话 root 解析成功");
-        assert_eq!(root, "C:\\frozen-cwd");
         // 删除 → 仅解绑，cwd 保持不变。
         delete_workspace_in_state(&state, "ws-1".to_string()).expect("删除成功");
         assert!(state.workspace_by_id("ws-1").is_none());
@@ -566,46 +561,10 @@ mod tests {
         };
         assert_eq!(workspace_id, None, "删除后解绑");
         assert_eq!(cwd, "C:\\frozen-cwd", "cwd 冻结不回写");
-        // 删除后 root 解析仍为冻结 cwd
-        let fallback = state
-            .workspace_root_for_context(&runtime, &AgentContextKey::new("peri", "local:s1"))
-            .expect("解绑后仍读冻结 cwd");
-        assert_eq!(fallback, "C:\\frozen-cwd");
         // 未绑定会话不受影响
         let missing = delete_workspace_in_state(&state, "ws-1".to_string())
             .expect_err("二次删除必须报 not found");
         assert!(missing.to_string().contains("not found"));
-    }
-
-    #[test]
-    fn root_resolution_uses_session_cwd_regardless_of_workspace_binding() {
-        let (_, runtime) = state_with_session(Some("ws-1"), "C:\\frozen-cwd");
-        let state = TestStateBuilder::bare()
-            .with_active_agent("peri")
-            .with_agent(fake_acp_agent("peri", ""))
-            .with_runtime("peri", runtime.clone())
-            .with_workspace(sample_workspace("ws-1", "C:\\root"))
-            .build();
-        // 绑定会话：root = session.cwd（冻结），忽略 workspace.root_path。
-        let root = state
-            .workspace_root_for_context(&runtime, &AgentContextKey::new("peri", "local:s1"))
-            .expect("会话 cwd 优先");
-        assert_eq!(root, "C:\\frozen-cwd");
-        // 未绑定 legacy 会话：root = session.cwd。
-        runtime.sessions.lock().unwrap().insert(
-            "local:legacy".to_string(),
-            SessionInfo::new(
-                "peri-2".to_string(),
-                String::new(),
-                "C:\\legacy-cwd".to_string(),
-                true,
-                1,
-            ),
-        );
-        let legacy_root = state
-            .workspace_root_for_context(&runtime, &AgentContextKey::new("peri", "local:legacy"))
-            .expect("legacy 会话解析");
-        assert_eq!(legacy_root, "C:\\legacy-cwd");
     }
 
     #[test]

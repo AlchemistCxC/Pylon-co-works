@@ -1221,6 +1221,7 @@ impl MsgRepo {
     /// 会话作用域 legacy owner）；state 恒为 deleted；同一 owner 重复删除 INSERT OR IGNORE 幂等，
     /// 不同 owner 的 tombstone 可并存。
     /// canonical_events 行不随 delete_session 删除（append-only 事件流独立于 sessions 行）。
+    #[allow(dead_code)] // 测试/直通车变体：生产走 DEL-03 两阶段（begin_delete_session → finalize）
     pub(crate) fn delete_session(
         &self,
         session_id: &str,

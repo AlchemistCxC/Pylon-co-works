@@ -1065,6 +1065,7 @@ fn sync_parent(_path: &Path) -> std::io::Result<()> {
     Ok(())
 }
 
+#[allow(dead_code)] // 测试便捷封装（自带 lease 获取）；生产写路径必须走 under_lease 变体（复用外层 ConfigLease）
 pub fn write_config_transaction(
     path: &Path,
     expected: &str,
