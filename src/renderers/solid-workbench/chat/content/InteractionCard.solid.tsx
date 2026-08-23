@@ -47,7 +47,7 @@ export function SolidInteractionCard(props: {
       await props.commands?.execute({
         type: 'interaction.respond',
         targetId: props.interaction.id,
-        payload,
+        payload: { ...payload, expectedRevision: props.interaction.sequence },
       })
     } catch (error) {
       setSubmitError(error instanceof Error ? error.message : '交互提交失败，请重试')

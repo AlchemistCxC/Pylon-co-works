@@ -38,7 +38,7 @@ describe('C11 SolidInteractionCard', () => {
     expect(buttons[1]!.getAttribute('tabindex')).toBe('2')
     await buttons[0]!.click()
     expect(execute).toHaveBeenCalledWith({
-      type: 'interaction.respond', targetId: 'int-1', payload: { optionId: 'allow' },
+      type: 'interaction.respond', targetId: 'int-1', payload: { optionId: 'allow', expectedRevision: 1 },
     })
   })
 
@@ -77,7 +77,7 @@ describe('C11 SolidInteractionCard', () => {
     input.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true }))
     await Promise.resolve()
     expect(execute).toHaveBeenCalledWith({
-      type: 'interaction.respond', targetId: 'sec-1', payload: { value: 'sk-secret' },
+      type: 'interaction.respond', targetId: 'sec-1', payload: { value: 'sk-secret', expectedRevision: 3 },
     })
     // 提交后本地输入立即清空
     expect(input.value).toBe('')
@@ -125,7 +125,7 @@ describe('C11 SolidInteractionCard', () => {
     input.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true }))
     await Promise.resolve()
     expect(execute).toHaveBeenCalledWith({
-      type: 'interaction.respond', targetId: 'int-2', payload: { text: 'Pylon' },
+      type: 'interaction.respond', targetId: 'int-2', payload: { text: 'Pylon', expectedRevision: 2 },
     })
   })
 })

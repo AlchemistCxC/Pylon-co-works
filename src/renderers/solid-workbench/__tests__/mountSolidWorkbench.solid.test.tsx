@@ -603,7 +603,8 @@ describe('mountSolidWorkbench', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Allow once' }))
 
     await waitFor(() => expect(services.commands.calls).toContainEqual({
-      command: 'respondInteraction', args: ['preview-session', 'interaction-1', { optionId: 'allow_once' }],
+      // A09 补全：按钮随响应携带 expectedRevision（document.sequence）供 transport 层 stale 防护
+      command: 'respondInteraction', args: ['preview-session', 'interaction-1', { optionId: 'allow_once' }, { expectedRevision: 1 }],
     }))
   })
 

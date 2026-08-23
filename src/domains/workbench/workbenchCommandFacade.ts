@@ -62,7 +62,9 @@ export interface WorkbenchCommandFacade {
   exportSession(sessionId: string, input: ExportSessionInput): Promise<CommandResult>
   clearSession(sessionId: string): Promise<CommandResult>
   toolAction(sessionId: string, toolCallId: string, action: string, payload?: unknown): Promise<CommandResult>
-  respondInteraction(sessionId: string, interactionId: string, response: unknown): Promise<CommandResult>
+  /** C11/A09 补全：expectedRevision 供 transport 层做 stale 写入防护（可省略，向后兼容）。 */
+  respondInteraction(sessionId: string, interactionId: string, response: unknown,
+    options?: { expectedRevision?: number }): Promise<CommandResult>
   openResource(sessionId: string, resource: unknown): Promise<CommandResult>
   revealResource(sessionId: string, resource: unknown): Promise<CommandResult>
   copy(sessionId: string, text: string): Promise<CommandResult>
@@ -135,7 +137,7 @@ export function createCapabilityGatedWorkbenchCommandFacade(
     send: (sessionId, command) => capabilities.prompt === false ? Promise.resolve({ status: 'rejected', error: 'command_capability_denied' }) : delegate.send(sessionId, command),
     cancel: sessionId => capabilities.cancel === false ? Promise.resolve({ status: 'rejected', error: 'command_capability_denied' }) : delegate.cancel(sessionId),
     toolAction: (sessionId, toolCallId, action, payload) => capabilities.toolAction === false ? denied() : delegate.toolAction(sessionId, toolCallId, action, payload),
-    respondInteraction: (sessionId, interactionId, response) => capabilities.interactionResponse === false ? denied() : delegate.respondInteraction(sessionId, interactionId, response),
+    respondInteraction: (sessionId, interactionId, response, options) => capabilities.interactionResponse === false ? denied() : delegate.respondInteraction(sessionId, interactionId, response, options),
     openResource: (sessionId, resource) => capabilities.resourceOpen === false ? denied() : delegate.openResource(sessionId, resource),
     revealResource: (sessionId, resource) => capabilities.resourceReveal === false ? denied() : delegate.revealResource(sessionId, resource),
     copy: (sessionId, text) => capabilities.clipboardWrite === false ? denied() : delegate.copy(sessionId, text),
@@ -174,7 +176,7 @@ export function createFakeWorkbenchCommandFacade(
     exportSession: (sessionId, input) => invoke('exportSession', [sessionId, input]),
     clearSession: sessionId => invoke('clearSession', [sessionId]),
     toolAction: (sessionId, toolCallId, action, payload) => invoke('toolAction', [sessionId, toolCallId, action, payload]),
-    respondInteraction: (sessionId, interactionId, response) => invoke('respondInteraction', [sessionId, interactionId, response]),
+    respondInteraction: (sessionId, interactionId, response, options) => invoke('respondInteraction', [sessionId, interactionId, response, options ?? undefined]),
     openResource: (sessionId, resource) => invoke('openResource', [sessionId, resource]),
     revealResource: (sessionId, resource) => invoke('revealResource', [sessionId, resource]),
     copy: (sessionId, text) => invoke('copy', [sessionId, text]),

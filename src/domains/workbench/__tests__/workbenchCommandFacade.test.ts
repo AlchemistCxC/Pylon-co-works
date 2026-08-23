@@ -63,6 +63,18 @@ describe('createFakeWorkbenchCommandFacade', () => {
     expect(facade.calls).toHaveLength(2)
   })
 
+  it('A09 补全：respondInteraction 透传 expectedRevision（C11 stale 写入防护的 facade 契约）', async () => {
+    const calls: Array<readonly unknown[]> = []
+    const delegate = createFakeWorkbenchCommandFacade()
+    delegate.setHandler('respondInteraction', async (sessionId, interactionId, response, options) => {
+      calls.push([sessionId, interactionId, response, options])
+      return { ok: true }
+    })
+    const gated = createCapabilityGatedWorkbenchCommandFacade(delegate, { interactionResponse: true })
+    await gated.respondInteraction('s1', 'int-9', { optionId: 'a' }, { expectedRevision: 7 })
+    expect(calls[0]![3]).toEqual({ expectedRevision: 7 })
+  })
+
   it('reset 只清调用记录，不清注入 handler', async () => {
     const facade = createFakeWorkbenchCommandFacade()
     facade.setHandler('cancel', async () => ({ status: 'not-generating' }))

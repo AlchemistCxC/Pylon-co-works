@@ -65,7 +65,8 @@ export interface WorkbenchCommandPort {
   exportSession(sessionId: string, input: ExportSessionInput): Promise<WorkbenchCommandResult<CommandResult>>
   clearSession(sessionId: string): Promise<WorkbenchCommandResult<CommandResult>>
   toolAction(sessionId: string, toolCallId: string, action: string, payload?: unknown): Promise<WorkbenchCommandResult<CommandResult>>
-  respondInteraction(sessionId: string, interactionId: string, response: unknown): Promise<WorkbenchCommandResult<CommandResult>>
+  respondInteraction(sessionId: string, interactionId: string, response: unknown,
+    options?: { expectedRevision?: number }): Promise<WorkbenchCommandResult<CommandResult>>
   openResource(sessionId: string, resource: unknown): Promise<WorkbenchCommandResult<CommandResult>>
   revealResource(sessionId: string, resource: unknown): Promise<WorkbenchCommandResult<CommandResult>>
   copy(sessionId: string, text: string): Promise<WorkbenchCommandResult<CommandResult>>

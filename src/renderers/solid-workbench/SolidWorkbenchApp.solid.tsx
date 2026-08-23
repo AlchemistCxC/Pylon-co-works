@@ -255,7 +255,8 @@ function WorkbenchDocumentSurface(props: {
                   <span>{interactionPrompt(interaction.request)}</span>
                   <Show when={props.sessionId}>
                     {sessionId => <For each={interactionOptions(interaction.request)}>{option => (
-                      <button type="button" onClick={() => void props.commands.respondInteraction(sessionId(), interaction.id, { optionId: option.id })}>
+                      <button type="button" onClick={() => void props.commands.respondInteraction(sessionId(), interaction.id, { optionId: option.id },
+                        { expectedRevision: interaction.sequence })}>
                         {option.label}
                       </button>
                     )}</For>}
