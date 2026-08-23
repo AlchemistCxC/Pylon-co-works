@@ -9,6 +9,7 @@ use std::sync::atomic::Ordering;
 use std::sync::Arc;
 
 use crate::acp::RequestId;
+use crate::dispatcher::resolve_agent_provider;
 use crate::error::PylonError;
 use crate::runtime::AgentRuntime;
 use crate::runtime_log;
@@ -526,6 +527,60 @@ pub(crate) async fn set_approval_mode(
     }
     *state.approval_mode.lock().map_err(|e| e.to_string())? = mode;
     Ok(())
+}
+
+/// CLI 增强（contract.bridge 前置）：读取当前全局审批模式。
+/// 此前只有 set 无 get——外部自动化无法确认模式即盲跑。
+#[tauri::command]
+pub(crate) async fn get_approval_mode(
+    state: tauri::State<'_, AppState>,
+) -> Result<String, PylonError> {
+    state
+        .approval_mode
+        .lock()
+        .map(|mode| mode.clone())
+        .map_err(|e| PylonError::Protocol(format!("approval mode lock poisoned: {e}")))
+}
+
+/// CLI 增强：遍历全部 runtime 的挂起权限请求快照（含应答所需完整 identity）。
+/// provider 由 agent_id 反查 agents 配置（与 dispatcher emit 同源）。
+#[tauri::command]
+pub(crate) async fn interaction_list(
+    state: tauri::State<'_, AppState>,
+) -> Result<serde_json::Value, PylonError> {
+    let mut items: Vec<serde_json::Value> = Vec::new();
+    for (agent_id, runtime) in state.runtimes.iter() {
+        let provider = {
+            let agents = state
+                .agents
+                .lock()
+                .map_err(|e| PylonError::Protocol(format!("agents lock poisoned: {e}")))?;
+            resolve_agent_provider(&agents, &agent_id).unwrap_or_else(|| agent_id.clone())
+        };
+        let pending = runtime.pending_permissions.lock().map_err(|e| {
+            PylonError::Protocol(format!("pending permissions lock poisoned: {e}"))
+        })?;
+        for (request_id, permission) in pending.iter() {
+            items.push(serde_json::json!({
+                "provider": provider,
+                "agentId": agent_id,
+                "requestId": request_id.to_string(),
+                "sessionId": permission.session_id,
+                "toolCallId": permission.tool_call_id,
+                "clientGeneration": permission.client_generation,
+                "title": permission.title,
+                "prompt": permission.prompt,
+                "options": permission.options.iter().map(|option| serde_json::json!({
+                    "optionId": option.option_id,
+                    "kind": option.kind,
+                    "name": option.name,
+                })).collect::<Vec<_>>(),
+                "requestedAt": permission.requested_at.to_string(),
+                "deadlineMs": permission_deadline_ms(permission.requested_at),
+            }));
+        }
+    }
+    Ok(serde_json::json!({ "items": items }))
 }
 
 /// ACP-03（§5.6）：权限请求的展示截止时刻——deadline 由后端单一来源

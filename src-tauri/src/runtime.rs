@@ -197,6 +197,14 @@ impl AgentRuntimeManager {
         self.runtimes.get(agent_id).map(|r| r.value().clone())
     }
 
+    /// CLI 增强：遍历 (agent_id, runtime) 快照——interaction_list 等聚合命令用。
+    pub fn iter(&self) -> Vec<(String, Arc<AgentRuntime>)> {
+        self.runtimes
+            .iter()
+            .map(|entry| (entry.key().clone(), entry.value().clone()))
+            .collect()
+    }
+
     /// 移除 agent 的 runtime（C6：reload 删除 agent 时清理幽灵 runtime）。
     /// 返回被移除的 runtime（未注册时返回 None）。
     pub fn remove(&self, agent_id: &str) -> Option<Arc<AgentRuntime>> {
