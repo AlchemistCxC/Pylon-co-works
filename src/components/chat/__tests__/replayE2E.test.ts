@@ -66,12 +66,10 @@ describe('回放去重端到端（验证 agent 对抗场景）', () => {
     handle.initSource(source, cached)
 
     // load 期间 agent 新 tool 调用（live,tc-99）
-    const liveUpdate = listeners.get('pylon:update')
-    expect(liveUpdate).toBeDefined()
-    liveUpdate!({
+    handle.handleStreamFrame({ event: 'pylon:update', payload: {
       source,
       update: { sessionUpdate: 'tool_call', toolCallId: 'tc-99', title: 'write', kind: 'write_file', rawInput: '{"path":"x"}' },
-    })
+    } })
     // replay 权威回放历史（含旧 tool tc-42）
     const gen = handle.beginLoadLock(source)
     handle.commitReplaySnapshot(source, gen, [

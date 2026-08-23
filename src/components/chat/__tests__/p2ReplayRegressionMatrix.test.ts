@@ -93,9 +93,7 @@ async function matrixProjections(wire: Array<Record<string, unknown>>): Promise<
   const liveHandle = attachChatEventController(refs())
   await waitListeners()
   liveHandle.initSource(source, [])
-  const liveUpdate = listeners.get('pylon:update')
-  expect(liveUpdate).toBeDefined()
-  for (const update of wire) liveUpdate!(livePayload(update))
+  for (const update of wire) liveHandle.handleStreamFrame({ event: 'pylon:update', payload: livePayload(update) })
   const liveProj = projectToolFromMessage(toolMessage(liveHandle), owner, CLIENT_GENERATION)!
   liveHandle.dispose()
 
@@ -341,9 +339,7 @@ describe('P2 replay 回归矩阵（§8.1 fixture compare：live/replay/restart �
     const liveHandle = attachChatEventController(refs())
     await waitListeners()
     liveHandle.initSource(source, [])
-    const liveUpdate = listeners.get('pylon:update')
-    expect(liveUpdate).toBeDefined()
-    for (const update of wire) liveUpdate!(livePayload(update))
+    for (const update of wire) liveHandle.handleStreamFrame({ event: 'pylon:update', payload: livePayload(update) })
     const liveProjs = projectAllTools(liveHandle)
     liveHandle.dispose()
 

@@ -38,7 +38,14 @@ function replayUpdate(update: Record<string, unknown>): unknown {
 beforeEach(() => { listeners.clear(); useIdentityStore.setState({ sessions: [], sessionsHydrated: true }); localStorage.clear() })
 
 describe('用户复现：新建→发消息→新建→来回切换不复读', () => {
+  let currentHandle: ReturnType<typeof attachChatEventController> | null = null
   const fire = (event: string, payload: unknown) => {
+    // C2：pylon:update/done/error 广播旧轨已拆，改走 Channel 帧入口；user 等保留广播。
+    if (event === 'pylon:update' || event === 'pylon:done' || event === 'pylon:error') {
+      const handle = currentHandle
+      if (!handle) throw new Error('controller 未挂载')
+      return handle.handleStreamFrame({ event: event as 'pylon:update'|'pylon:done'|'pylon:error', payload }).then(() => {})
+    }
     const handler = listeners.get(event)
     if (!handler) throw new Error(`listener ${event} 未注册`)
     handler(payload)
@@ -48,6 +55,7 @@ describe('用户复现：新建→发消息→新建→来回切换不复读', (
     const A = 'local:session-a', B = 'local:session-b'
     useIdentityStore.setState({ sessions: [makeSession('sa', A), makeSession('sb', B)] })
     const handle = attachChatEventController(makeRefs())
+    currentHandle = handle
     await waitListeners()
 
     // 进入 A（新建无缓存）→ 发消息：user + 流式回复 + done
@@ -85,6 +93,7 @@ describe('用户复现：新建→发消息→新建→来回切换不复读', (
     const A = 'local:session-a', B = 'local:session-b'
     useIdentityStore.setState({ sessions: [makeSession('sa', A), makeSession('sb', B)] })
     const handle = attachChatEventController(makeRefs())
+    currentHandle = handle
     await waitListeners()
 
     handle.initSource(A, [])
@@ -111,6 +120,7 @@ describe('用户复现：新建→发消息→新建→来回切换不复读', (
     const A = 'local:session-a'
     useIdentityStore.setState({ sessions: [makeSession('sa', A)] })
     const handle = attachChatEventController(makeRefs())
+    currentHandle = handle
     await waitListeners()
 
     handle.initSource(A, [])
@@ -129,6 +139,7 @@ describe('用户复现：新建→发消息→新建→来回切换不复读', (
     const A = 'local:session-a', B = 'local:session-b'
     useIdentityStore.setState({ sessions: [makeSession('sa', A), makeSession('sb', B)] })
     const handle = attachChatEventController(makeRefs())
+    currentHandle = handle
     await waitListeners()
 
     handle.initSource(A, [])
@@ -152,6 +163,7 @@ describe('用户复现：新建→发消息→新建→来回切换不复读', (
     const A = 'local:session-a'
     useIdentityStore.setState({ sessions: [makeSession('sa', A)] })
     const handle = attachChatEventController(makeRefs())
+    currentHandle = handle
     await waitListeners()
 
     handle.initSource(A, [])
@@ -172,6 +184,7 @@ describe('用户复现：新建→发消息→新建→来回切换不复读', (
     const A = 'local:session-a', B = 'local:session-b'
     useIdentityStore.setState({ sessions: [makeSession('sa', A), makeSession('sb', B)] })
     const handle = attachChatEventController(makeRefs())
+    currentHandle = handle
     await waitListeners()
 
     handle.initSource(A, [])

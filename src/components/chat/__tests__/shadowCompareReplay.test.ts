@@ -118,10 +118,8 @@ describe('shadow compare 新旧投影（§5.10 迁移原则 4/7）', () => {
     const handle = attachChatEventController(refs())
     await waitListeners()
     handle.initSource(source, [])
-    const liveUpdate = listeners.get('pylon:update')
-    expect(liveUpdate).toBeDefined()
-    liveUpdate!(liveRaw(toolCallWire))
-    liveUpdate!(liveRaw(toolUpdateWire))
+    handle.handleStreamFrame({ event: 'pylon:update', payload: liveRaw(toolCallWire) })
+    handle.handleStreamFrame({ event: 'pylon:update', payload: liveRaw(toolUpdateWire) })
 
     const report = shadowCompareToolProjections(
       canonicalEvents([liveRaw(toolCallWire), liveRaw(toolUpdateWire)]),

@@ -15,7 +15,12 @@ vi.mock('@tauri-apps/api/event', () => ({
     return Promise.resolve(() => { listeners.delete(event) })
   }),
 }))
-vi.mock('@tauri-apps/api/core', () => ({ invoke: (...args: unknown[]) => invokeMock(...args) }))
+vi.mock('@tauri-apps/api/core', () => ({
+  invoke: (...args: unknown[]) => invokeMock(...args),
+  // B1：chatEventController 顶部 import Channel（类型+运行时占位）；测试环境 IS_TAURI=false
+  // 时 streamChannel.openStreamChannel 直接返回 undefined，不会实例化。
+  Channel: class { id = 0; onmessage = () => {} },
+}))
 
 import {
   attachChatEventController,
@@ -88,8 +93,16 @@ afterEach(() => {
   setCanonicalEventSinkFactoryForTests(null)
 })
 
+let currentHandle: ReturnType<typeof attachChatEventController> | null = null
+
 describe('canonical 双写（A1-c P2）', () => {
   const fire = (event: string, payload: unknown) => {
+    // C2：pylon:update/done/error 广播旧轨已拆，改走 Channel 帧入口；user 保留广播。
+    if (event === 'pylon:update' || event === 'pylon:done' || event === 'pylon:error') {
+      const handle = currentHandle ?? (() => { throw new Error('controller 未挂载') })()
+      void handle.handleStreamFrame({ event: event as 'pylon:update'|'pylon:done'|'pylon:error', payload })
+      return
+    }
     const handler = listeners.get(event)
     if (!handler) throw new Error(`listener ${event} 未注册`)
     handler(payload)
@@ -99,6 +112,7 @@ describe('canonical 双写（A1-c P2）', () => {
     const source = 'local:dw-basic'
     useIdentityStore.setState({ sessions: [makeSession('s1', source)] })
     const handle = attachChatEventController(makeRefs())
+    currentHandle = handle
     await waitListeners()
     handle.initSource(source, [])
 
@@ -121,6 +135,7 @@ describe('canonical 双写（A1-c P2）', () => {
     const source = 'local:dw-tool'
     useIdentityStore.setState({ sessions: [makeSession('s2', source)] })
     const handle = attachChatEventController(makeRefs())
+    currentHandle = handle
     await waitListeners()
     handle.initSource(source, [])
 
@@ -139,6 +154,7 @@ describe('canonical 双写（A1-c P2）', () => {
     const source = 'local:kernel-committed'
     useIdentityStore.setState({ sessions: [makeSession('s-kernel', source)] })
     const handle = attachChatEventController(makeRefs())
+    currentHandle = handle
     await waitListeners()
     handle.initSource(source, [])
 
@@ -187,6 +203,7 @@ describe('canonical 双写（A1-c P2）', () => {
     const source = 'local:kernel-gap'
     useIdentityStore.setState({ sessions: [makeSession('s-gap', source)] })
     const handle = attachChatEventController(makeRefs())
+    currentHandle = handle
     await waitListeners()
     handle.initSource(source, [])
     const canonicalEvent = (sequence: number, eventType: string, rawPayload: unknown, typedPayload?: unknown) => ({
@@ -229,6 +246,7 @@ describe('canonical 双写（A1-c P2）', () => {
     const source = 'local:dw-loading'
     useIdentityStore.setState({ sessions: [makeSession('s-loading', source)] })
     const handle = attachChatEventController(makeRefs())
+    currentHandle = handle
     await waitListeners()
     handle.initSource(source, [])
 
@@ -250,6 +268,7 @@ describe('canonical 双写（A1-c P2）', () => {
     const source = 'local:dw-replay'
     useIdentityStore.setState({ sessions: [makeSession('s3', source)] })
     const handle = attachChatEventController(makeRefs())
+    currentHandle = handle
     await waitListeners()
     handle.initSource(source, [])
 
@@ -270,6 +289,7 @@ describe('canonical 双写（A1-c P2）', () => {
     const source = 'local:dw-optimistic'
     useIdentityStore.setState({ sessions: [makeSession('s4', source)] })
     const handle = attachChatEventController(makeRefs())
+    currentHandle = handle
     await waitListeners()
     handle.initSource(source, [])
 
@@ -286,6 +306,7 @@ describe('canonical 双写（A1-c P2）', () => {
     const source = 'local:dw-error'
     useIdentityStore.setState({ sessions: [makeSession('s5', source)] })
     const handle = attachChatEventController(makeRefs())
+    currentHandle = handle
     await waitListeners()
     handle.initSource(source, [])
 
@@ -301,6 +322,7 @@ describe('canonical 双写（A1-c P2）', () => {
     const A = 'local:dw-a', B = 'local:dw-b'
     useIdentityStore.setState({ sessions: [makeSession('sA', A), makeSession('sB', B)] })
     const handle = attachChatEventController(makeRefs())
+    currentHandle = handle
     await waitListeners()
     handle.initSource(A, [])
     handle.initSource(B, [])
@@ -316,6 +338,7 @@ describe('canonical 双写（A1-c P2）', () => {
     const source = 'local:dw-flush'
     useIdentityStore.setState({ sessions: [makeSession('s6', source)] })
     const handle = attachChatEventController(makeRefs())
+    currentHandle = handle
     await waitListeners()
     vi.mocked(sink.flushAll).mockClear()
     expect(sink.flushAll).not.toHaveBeenCalled()

@@ -150,11 +150,12 @@ describe('源码锁：wire 现状与证据一致（取证真实性）', () => {
     expect(read('src-tauri/src/session/model.rs')).toContain('pub(crate) workspace_id: Option<String>')
   })
 
-  it('后端 workspace_root_for_context：冻结语义——只读 session.cwd，不回查 workspace', () => {
+  it('后端 cwd 冻结语义——命令 root 只读 session.cwd，不回查 workspace（Channel 化重构时移除孤儿解析器后的现行锁）', () => {
     const source = read('src-tauri/src/session/mod.rs')
-    expect(source).toContain('workspace_root_for_context')
-    expect(source).toContain('session.cwd.clone()')
-    expect(source).not.toContain('workspace_root_path(&workspace_id)')
+    // 孤儿兼容桥已删除；冻结语义由 workspaces.rs 的显式 target resolver + session.cwd 承担。
+    expect(source).not.toContain('workspace_root_for_context')
+    const cmds = read('src-tauri/src/workspace_cmds.rs')
+    expect(cmds).toContain('workspace_root_for_target')
   })
 
   it('后端 Git 与 workspace 统一委托显式 target resolver', () => {

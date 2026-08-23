@@ -43,7 +43,14 @@ function replayUpdate(update: Record<string, unknown>): unknown {
 beforeEach(() => { listeners.clear(); useIdentityStore.setState({ sessions: [], sessionsHydrated: true }); localStorage.clear() })
 
 describe('会话重放修复回归', () => {
+  let currentHandle: ReturnType<typeof attachChatEventController> | null = null
   const fire = (event: string, payload: unknown) => {
+    // C2：pylon:update/done/error 广播旧轨已拆，改走 Channel 帧入口；user 等保留广播。
+    if (event === 'pylon:update' || event === 'pylon:done' || event === 'pylon:error') {
+      const handle = currentHandle
+      if (!handle) throw new Error('controller 未挂载')
+      return handle.handleStreamFrame({ event: event as 'pylon:update'|'pylon:done'|'pylon:error', payload }).then(() => {})
+    }
     const handler = listeners.get(event)
     if (!handler) throw new Error(`listener ${event} 未注册`)
     handler(payload)
@@ -53,6 +60,7 @@ describe('会话重放修复回归', () => {
     const A = 'local:session-a'
     useIdentityStore.setState({ sessions: [makeSession('sa', A)] })
     const handle = attachChatEventController(makeRefs())
+    currentHandle = handle
     await waitListeners()
 
     handle.initSource(A, [])
@@ -71,6 +79,7 @@ describe('会话重放修复回归', () => {
     const A = 'local:session-a'
     useIdentityStore.setState({ sessions: [makeSession('sa', A)] })
     const handle = attachChatEventController(makeRefs())
+    currentHandle = handle
     await waitListeners()
 
     const cached: Message[] = [
@@ -93,6 +102,7 @@ describe('会话重放修复回归', () => {
     const A = 'local:session-a'
     useIdentityStore.setState({ sessions: [makeSession('sa', A)] })
     const handle = attachChatEventController(makeRefs())
+    currentHandle = handle
     await waitListeners()
 
     handle.initSource(A, [])
@@ -118,6 +128,7 @@ describe('会话重放修复回归', () => {
     const A = 'local:session-a'
     useIdentityStore.setState({ sessions: [makeSession('sa', A)] })
     const handle = attachChatEventController(makeRefs())
+    currentHandle = handle
     await waitListeners()
 
     handle.initSource(A, [])
@@ -148,6 +159,7 @@ describe('会话重放修复回归', () => {
     const A = 'local:session-a'
     useIdentityStore.setState({ sessions: [makeSession('sa', A)] })
     const handle = attachChatEventController(makeRefs())
+    currentHandle = handle
     await waitListeners()
 
     const cached: Message[] = [
@@ -174,6 +186,7 @@ describe('会话重放修复回归', () => {
     const A = 'local:session-a'
     useIdentityStore.setState({ sessions: [makeSession('sa', A)] })
     const handle = attachChatEventController(makeRefs())
+    currentHandle = handle
     await waitListeners()
 
     handle.initSource(A, [])
@@ -192,6 +205,7 @@ describe('会话重放修复回归', () => {
     const A = 'local:session-a'
     useIdentityStore.setState({ sessions: [makeSession('sa', A)] })
     const handle = attachChatEventController(makeRefs())
+    currentHandle = handle
     await waitListeners()
 
     handle.initSource(A, [])
@@ -214,6 +228,7 @@ describe('会话重放修复回归', () => {
     const A = 'local:session-a'
     useIdentityStore.setState({ sessions: [makeSession('sa', A)] })
     const handle = attachChatEventController(makeRefs())
+    currentHandle = handle
     await waitListeners()
 
     // 非空 canonical 占位 = 权威
@@ -244,6 +259,7 @@ describe('会话重放修复回归', () => {
     refs.sessionRef.current = A
     refs.messageOwnerRef.current = 'sa'
     const handle = attachChatEventController(refs)
+    currentHandle = handle
     await waitListeners()
 
     const owner = { profileId: 'p1', agentId: 'peri', localSessionId: A }
@@ -317,6 +333,7 @@ describe('会话重放修复回归', () => {
     const A = 'local:session-a'
     useIdentityStore.setState({ sessions: [makeSession('sa', A)] })
     const handle = attachChatEventController(makeRefs())
+    currentHandle = handle
     await waitListeners()
 
     // 空 canonical 占位（读取失败降级 / 空会话）——不能把 replay 历史丢弃
@@ -335,6 +352,7 @@ describe('会话重放修复回归', () => {
     const A = 'local:session-a'
     useIdentityStore.setState({ sessions: [makeSession('sa', A)] })
     const handle = attachChatEventController(makeRefs())
+    currentHandle = handle
     await waitListeners()
 
     // 模拟 canonical 首屏占位：用户消息 + 已完成的工具卡都在 base 中
@@ -373,6 +391,7 @@ describe('会话重放修复回归', () => {
     const A = 'local:session-a'
     useIdentityStore.setState({ sessions: [makeSession('sa', A)] })
     const handle = attachChatEventController(makeRefs())
+    currentHandle = handle
     await waitListeners()
 
     // base（canonical 占位/内存态）持有完整工具卡：title/kind/rawInput 齐全
@@ -408,6 +427,7 @@ describe('会话重放修复回归', () => {
     const A = 'local:session-a'
     useIdentityStore.setState({ sessions: [makeSession('sa', A)] })
     const handle = attachChatEventController(makeRefs())
+    currentHandle = handle
     await waitListeners()
 
     handle.initSource(A, [])

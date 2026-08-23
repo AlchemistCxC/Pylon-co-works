@@ -187,11 +187,11 @@ describe('canonical 投影与 replay 产物 parity（A1-c P3）', () => {
     handle.initSource(source, projectMessagesFromCanonical([base]), false, true)
     handle.seedCanonicalCursor(toCanonicalOwnerKey(owner), 1)
     const generation = handle.beginLoadLock(source)
-    listeners.get('pylon:update')?.({
+    handle.handleStreamFrame({ event: 'pylon:update', payload: ({
       source,
       update: { sessionUpdate: 'agent_message_chunk', content: { text: 'late' } },
       canonicalEvent: late,
-    })
+    }) })
     await new Promise(resolve => setTimeout(resolve, 0))
 
     const committed = handle.commitCanonicalProjection(

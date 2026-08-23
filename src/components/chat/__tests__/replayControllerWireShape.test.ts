@@ -67,13 +67,10 @@ describe('真实 replay wire 工具字段兼容', () => {
     const handle = attachChatEventController(refs())
     await new Promise(resolve => setTimeout(resolve, 20))
     handle.initSource(source, [])
-
-    const liveUpdate = listeners.get('pylon:update')
-    expect(liveUpdate).toBeDefined()
-    liveUpdate!({
+    handle.handleStreamFrame({ event: 'pylon:update', payload: {
       source,
       update: { sessionUpdate: 'tool_call', toolUseId: 'legacy-live-1', title: 'Read', kind: 'read_file' },
-    })
+    } })
     await new Promise(resolve => setTimeout(resolve, 20))
 
     const tools = handle.getMessages(source).filter(message => message.role === 'tool')
@@ -90,10 +87,10 @@ describe('真实 replay wire 工具字段兼容', () => {
     await new Promise(resolve => setTimeout(resolve, 20))
     handle.initSource(source, [])
 
-    listeners.get('pylon:update')!({
+    handle.handleStreamFrame({ event: 'pylon:update', payload: ({
       source,
       update: { sessionUpdate: 'usage_update', used: 7, size: 100 },
-    })
+    }) })
     await new Promise(resolve => setTimeout(resolve, 20))
 
     const stateCall = vi.mocked(invoke).mock.calls.find(call => call[0] === 'set_session_state')
