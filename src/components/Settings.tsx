@@ -1,12 +1,6 @@
-import { useState, useEffect, useRef, useSyncExternalStore } from 'react'
+import { useState, useEffect, useSyncExternalStore } from 'react'
 import { IS_TAURI } from '../infrastructure/tauri/env'
 import { invoke } from '@tauri-apps/api/core'
-import { getCurrentWindow } from '@tauri-apps/api/window'
-import { PhysicalSize } from '@tauri-apps/api/dpi'
-import { clearWindowSize } from '../windowSizePersistence'
-import { buildExportPayloadAsync, configFileName, preflightImportPayload } from '../configExportImport'
-import { selectUserDataRepository } from '../userDataRepository'
-import { importConfigurationTransaction } from '../application/transactions/importConfigurationTransaction'
 import { createAgentClient } from '../infrastructure/acp/agentClient'
 import { ZoneGroupFields } from '../themeFieldRenderer'
 import { useStore } from '../store'
@@ -28,6 +22,8 @@ import AgentRuntimePanel from './settings/AgentRuntimePanel'
 import AgentConfigEditor from './settings/AgentConfigEditor'
 import ConfigOptionsPanel from './settings/ConfigOptionsPanel'
 import TemplateLibrary from './settings/TemplateLibrary'
+import WindowPanel from './settings/WindowPanel'
+import ConfigBackupPanel from './settings/ConfigBackupPanel'
 import HistoryRetention from './settings/HistoryRetention'
 import GatewayRiskPanel from './settings/GatewayRiskPanel'
 import PluginManager from './settings/PluginManager'
@@ -36,9 +32,6 @@ import RendererSettingsPanel from './settings/RendererSettingsPanel'
 import PluginSettingsPageHost from './settings/PluginSettingsPageHost'
 import InterfaceModePicker from './settings/InterfaceModePicker.tsx'
 import { getPluginServiceRegistry, getPluginSettingsPageRegistry } from '../plugin-runtime/runtimeServices.ts'
-import { loadRetentionPolicyPayload, syncImportedRetentionPolicy } from '../retentionPolicyRepository'
-import { resolveToolIndicatorAsset, toolIndicatorOptions } from './chat/toolIndicatorAssets'
-import Select from './ui/Select.tsx'
 // I13-W1：Settings 一级信息架构唯一真值（domain → section + 字段归属派生）
 import { SETTINGS_DOMAIN_BY_ID, SETTINGS_DOMAINS, SETTINGS_SECTION_LABELS, sectionZone, type SettingsDomainId, type SettingsSectionId } from '../settingsDomains'
 
@@ -46,41 +39,6 @@ import { SETTINGS_DOMAIN_BY_ID, SETTINGS_DOMAINS, SETTINGS_SECTION_LABELS, secti
 const agentClient = createAgentClient({ invoke: (cmd, args) => invoke(cmd, args as Record<string, unknown> | undefined) })
 
 // ── helpers ──
-
-function Row({ label, children }: { label:string; children:React.ReactNode }) {
-  return <div className="set-row"><span className="set-row-label">{label}</span>{children}</div>
-}
-
-function Sel({ value, onChange, options, ariaLabel }: { value:string; onChange:(v:string)=>void; options:(string | { value: string; label: string })[]; ariaLabel: string }) {
-  return <Select ariaLabel={ariaLabel} value={value} onChange={onChange} className="set-select" options={options.map(option => typeof option === 'string' ? { value: option, label: option } : option)} />
-}
-
-
-// 窗口尺寸：显示当前值 + 重置（记忆由 App 的 onResized 防抖持久化负责）
-function WindowSizeRow() {
-  const [size, setSize] = useState('—')
-  useEffect(() => {
-    if (!IS_TAURI) return
-    let cancelled = false
-    getCurrentWindow().outerSize().then(({ width, height }) => {
-      if (!cancelled) setSize(`${width}×${height}`)
-    }).catch(() => {})
-    return () => { cancelled = true }
-  }, [])
-  const reset = () => {
-    getCurrentWindow().setSize(new PhysicalSize(1200, 800)).catch(() => {})
-    clearWindowSize(localStorage)
-  }
-  return (
-    <Group title="窗口">
-      <Row label="当前尺寸"><span className="set-val" style={{ width: 'auto' }}>{size} px</span></Row>
-      <div className="set-hint">拖动窗口边框后自动记忆尺寸，下次启动恢复</div>
-      <div className="set-preset-row">
-        <button type="button" className="ps-btn sm" onClick={reset}>重置为默认 1200×800</button>
-      </div>
-    </Group>
-  )
-}
 
 function Group({ title, children, defaultOpen }: { title:string; children:React.ReactNode; defaultOpen?:boolean }) {
   const [open, setOpen] = useState(defaultOpen ?? true)
@@ -92,92 +50,6 @@ function Group({ title, children, defaultOpen }: { title:string; children:React.
       </button>
       {open && children}
     </div>
-  )
-}
-
-// 配置导出/导入：Tauri 对话框 + 浏览器下载/上传 fallback
-function ConfigBackupRow() {
-  const [msg, setMsg] = useState<string | null>(null)
-  const fileRef = useRef<HTMLInputElement>(null)
-  const isTauri = IS_TAURI
-  const doExport = async () => {
-    try {
-      // I14-W8：Tauri 模式导出聚合后端 versioned user store（profiles/sessions envelope
-      // 权威源）；browser 模式无后端 → 与原 buildExportPayload 等价
-      // I13-W6：保留策略后端权威 payload 聚合（Tauri；browser 走 localStorage key）
-      const repo = isTauri ? selectUserDataRepository() : null
-      const json = await buildExportPayloadAsync(localStorage, repo ? {
-        loadProfiles: async () => (await repo.load('profiles'))?.payload ?? null,
-        loadSessions: async () => (await repo.load('sessions'))?.payload ?? null,
-        loadRetention: async () => {
-          const payload = await loadRetentionPolicyPayload()
-          return payload ? { payload } : null
-        },
-      } : undefined)
-      const fileName = configFileName()
-      if (isTauri) {
-        const { save } = await import('@tauri-apps/plugin-dialog')
-        const path = await save({ defaultPath: fileName, filters: [{ name: 'Pylon 配置', extensions: ['json'] }] })
-        if (path) {
-          const { writeTextFile } = await import('@tauri-apps/plugin-fs')
-          await writeTextFile(path, json)
-          setMsg('已导出配置')
-        }
-      } else {
-        const blob = new Blob([json], { type: 'application/json' })
-        const url = URL.createObjectURL(blob)
-        const a = document.createElement('a')
-        a.href = url; a.download = fileName; a.click()
-        URL.revokeObjectURL(url)
-        setMsg('已导出配置')
-      }
-    } catch (cause) { setMsg(`导出失败：${String(cause)}`) }
-  }
-  const doImport = async (file?: File) => {
-    try {
-      let json: string | null = null
-      if (file) {
-        json = await file.text()
-      } else if (isTauri) {
-        const { open } = await import('@tauri-apps/plugin-dialog')
-        const selected = await open({ multiple: false, filters: [{ name: 'Pylon 配置', extensions: ['json'] }] })
-        if (!selected) return
-        const { readTextFile } = await import('@tauri-apps/plugin-fs')
-        json = await readTextFile(selected as string)
-      }
-      if (json === null) return
-      const result = await importConfigurationTransaction(json, {
-        storage: localStorage,
-        preflight: preflightImportPayload,
-        rehydrate: () => {
-          // I14-W6 CR-01：导入后强制本地读回（读取刚写入的 localStorage）+ 写穿后端，
-          // 避免 Tauri 模式后端权威读回覆盖导入值（导入静默失效）
-          useIdentityStore.getState().hydrateFromLocal()
-          useWorkspaceStore.getState().hydrateWorkspaceSheets()
-        },
-        reportError: (action, error) => reportRuntimeError(action, error),
-      })
-      // I13-W6 CR-001：仅当导入 payload 确含保留策略 key 时写穿后端权威（防本地残留盲写覆盖）
-      if (result.ok) {
-        syncImportedRetentionPolicy(localStorage, result.value).catch(error => {
-          reportRuntimeError('导入保留策略', error)
-        })
-      }
-      setMsg(result.ok
-        ? `已导入 ${result.value.length} 项配置`
-        : `导入失败：${result.message}`)
-    } catch (cause) { setMsg(`导入失败：${String(cause)}`) }
-  }
-  return (
-    <Group title="配置备份">
-      <div className="set-preset-row">
-        <button type="button" className="ps-btn sm" onClick={doExport}>导出配置</button>
-        <button type="button" className="ps-btn sm" onClick={() => fileRef.current?.click()}>导入配置</button>
-        <input ref={fileRef} type="file" accept="application/json,.json" style={{ display: 'none' }}
-          onChange={e => { const file = e.target.files?.[0]; if (file) void doImport(file); e.target.value = '' }} />
-      </div>
-      {msg && <div className="set-hint">{msg}</div>}
-    </Group>
   )
 }
 
@@ -406,11 +278,11 @@ export default function Settings({ onClose, activeSessionId, initialDomain, init
           </Group>
         )
       case 'window':
-        return <WindowSizeRow />
+        return <WindowPanel />
       case 'history':
         return <HistoryRetention />
       case 'backup':
-        return <ConfigBackupRow />
+        return <ConfigBackupPanel />
       case 'global':
         return (
           <>
@@ -465,9 +337,6 @@ export default function Settings({ onClose, activeSessionId, initialDomain, init
           <>
             {!isSearching && <Group title="渲染风格"><PresentationProfilePicker /></Group>}
             {!isSearching && <ZonePresetRow zone="chat" activeName={deriveZoneStatus({ appliedPreset, custom }, 'chat').appliedName} isDirty={deriveZoneStatus({ appliedPreset, custom }, 'chat').isCustom} onApply={applyLocalPreset}/>}
-            {!isSearching && <Group title="指示器形状">
-              <Row label="形状"><Sel ariaLabel="指示器形状" value={resolveToolIndicatorAsset(t.toolIndicator).id} onChange={v=>onSettingChange({toolIndicator:v})} options={toolIndicatorOptions()} /></Row>
-            </Group>}
             <ZoneGroupFields zone="chat" ctx={renderCtx} />
           </>
         )

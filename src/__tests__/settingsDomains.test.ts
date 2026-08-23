@@ -15,6 +15,9 @@ import {
   searchPathFor,
   sectionZone,
   type SettingsSectionId,
+  SECTION_OWNERS,
+  PAGE_OWNED_SECTIONS,
+  isPageOwnedSection,
 } from '../settingsDomains'
 import { ZONES } from '../themeFieldDefs'
 
@@ -117,5 +120,21 @@ describe('ISSUE-13 W1 字段归属派生', () => {
     expect(sectionZone('templates')).toBeUndefined()
     expect(sectionZone('window')).toBeUndefined()
     expect(sectionZone('gateway')).toBeUndefined()
+  })
+})
+
+describe('S5 Owner 正式化（施工书 06 §S5）', () => {
+  it('SECTION_OWNERS 主题 section 映射到组件 owner', () => {
+    expect(SECTION_OWNERS.global).toBe('app-shell')
+    expect(SECTION_OWNERS.sidebar).toBe('sidebar')
+    expect(SECTION_OWNERS.chat).toBe('message-stream')
+    expect(SECTION_OWNERS.cc).toBe('control-center')
+    expect(SECTION_OWNERS.right).toBe('context-panel')
+    expect(SECTION_OWNERS.renderers).toBe('renderer-catalog')
+  })
+  it('PAGE_OWNED_SECTIONS 四项且 isPageOwnedSection 判定正确', () => {
+    expect(PAGE_OWNED_SECTIONS).toEqual(['templates', 'window', 'history', 'backup'])
+    expect(isPageOwnedSection('templates')).toBe(true)
+    expect(isPageOwnedSection('chat')).toBe(false)
   })
 })

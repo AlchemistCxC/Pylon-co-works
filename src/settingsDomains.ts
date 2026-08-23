@@ -96,3 +96,23 @@ export function sectionZone(section: SettingsSectionId): ZoneName | undefined {
 export function searchPathFor(section: SettingsSectionId): string {
   return `${SETTINGS_DOMAIN_BY_ID[domainOfSection(section)].label} › ${SETTINGS_SECTION_LABELS[section]}`
 }
+
+/**
+ * S5 Owner 正式化（设计书 v2 §v2.1/v2.2）：section → 归属组件 id。
+ * 主题 zone 的 owner 语义升格；renderers section 由渲染器 catalog 自身充当 owner。
+ */
+export const SECTION_OWNERS = {
+  global: 'app-shell',
+  sidebar: 'sidebar',
+  chat: 'message-stream',
+  cc: 'control-center',
+  right: 'context-panel',
+  renderers: 'renderer-catalog',
+} as const satisfies Partial<Record<SettingsSectionId, string>>
+
+/** 页面自有 sections：预设编排与动作面板，归属设置页而非任何组件（设计书 v2 §v2.1）。 */
+export const PAGE_OWNED_SECTIONS = ['templates', 'window', 'history', 'backup'] as const satisfies readonly SettingsSectionId[]
+
+export function isPageOwnedSection(section: SettingsSectionId): boolean {
+  return (PAGE_OWNED_SECTIONS as readonly string[]).includes(section)
+}
