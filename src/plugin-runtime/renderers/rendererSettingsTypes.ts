@@ -44,14 +44,14 @@ interface RenderSettingFieldBase {
 
 export interface RenderChoiceSettingField extends RenderSettingFieldBase {
   readonly type: 'choice'
-  readonly presentation: ChoicePresentation
+  readonly presentation?: ChoicePresentation
   readonly options: readonly RendererSettingOption[]
   readonly optionTarget?: string
 }
 
 export interface RenderMultiChoiceSettingField extends RenderSettingFieldBase {
   readonly type: 'multi-choice'
-  readonly presentation: MultiChoicePresentation
+  readonly presentation?: MultiChoicePresentation
   readonly options: readonly RendererSettingOption[]
   readonly minSelected?: number
   readonly maxSelected?: number
@@ -60,14 +60,14 @@ export interface RenderMultiChoiceSettingField extends RenderSettingFieldBase {
 
 export interface RenderColorSettingField extends RenderSettingFieldBase {
   readonly type: 'color'
-  readonly presentation: ColorPresentation
+  readonly presentation?: ColorPresentation
   readonly alpha?: boolean
   readonly paletteTarget?: string
 }
 
 export interface RenderNumberSettingField extends RenderSettingFieldBase {
   readonly type: 'number'
-  readonly presentation: NumberPresentation
+  readonly presentation?: NumberPresentation
   readonly min?: number
   readonly max?: number
   readonly step?: number
@@ -76,12 +76,12 @@ export interface RenderNumberSettingField extends RenderSettingFieldBase {
 
 export interface RenderBooleanSettingField extends RenderSettingFieldBase {
   readonly type: 'boolean'
-  readonly presentation: 'toggle' | 'checkbox'
+  readonly presentation?: 'toggle' | 'checkbox'
 }
 
 export interface RenderTextSettingField extends RenderSettingFieldBase {
   readonly type: 'text'
-  readonly presentation: 'input' | 'textarea'
+  readonly presentation?: 'input' | 'textarea'
   readonly pattern?: string
   readonly placeholder?: string
   readonly maxLength?: number
@@ -183,7 +183,7 @@ function validateField(field: RenderSettingField, fields: ReadonlySet<string>): 
   switch (field.type) {
     case 'choice':
       validateOptions(key, field.options, field.default, field.optionTarget)
-      if (!['select', 'radio', 'segmented'].includes(field.presentation)) fail(`${key} choice presentation 非法`)
+      if (field.presentation !== undefined && !['select', 'radio', 'segmented'].includes(field.presentation)) fail(`${key} choice presentation 非法`)
       if (field.default !== undefined && typeof field.default !== 'string') fail(`${key} choice default 必须是 string`)
       return
     case 'multi-choice': {
@@ -197,12 +197,12 @@ function validateField(field: RenderSettingField, fields: ReadonlySet<string>): 
       return
     }
     case 'color':
-      if (!['palette', 'picker', 'palette+picker'].includes(field.presentation)) fail(`${key} color presentation 非法`)
+      if (field.presentation !== undefined && !['palette', 'picker', 'palette+picker'].includes(field.presentation)) fail(`${key} color presentation 非法`)
       if (field.paletteTarget !== undefined && !OPTION_TARGET_PATTERN.test(field.paletteTarget)) fail(`${key} paletteTarget 非法：${field.paletteTarget}`)
       if (field.default !== undefined && typeof field.default !== 'string') fail(`${key} color default 必须是 string`)
       return
     case 'number':
-      if (!['slider', 'input', 'slider+input'].includes(field.presentation)) fail(`${key} number presentation 非法`)
+      if (field.presentation !== undefined && !['slider', 'input', 'slider+input'].includes(field.presentation)) fail(`${key} number presentation 非法`)
       if (field.min !== undefined && !Number.isFinite(field.min)) fail(`${key} min 非法`)
       if (field.max !== undefined && !Number.isFinite(field.max)) fail(`${key} max 非法`)
       if (field.min !== undefined && field.max !== undefined && field.min > field.max) fail(`${key} min 大于 max`)
@@ -213,7 +213,7 @@ function validateField(field: RenderSettingField, fields: ReadonlySet<string>): 
       if (field.default !== undefined && typeof field.default !== 'boolean') fail(`${key} boolean default 非法`)
       return
     case 'text':
-      if (!['input', 'textarea'].includes(field.presentation)) fail(`${key} text presentation 非法`)
+      if (field.presentation !== undefined && !['input', 'textarea'].includes(field.presentation)) fail(`${key} text presentation 非法`)
       if (field.maxLength !== undefined && (!Number.isInteger(field.maxLength) || field.maxLength < 0)) fail(`${key} maxLength 非法`)
       if (field.pattern !== undefined) {
         try { new RegExp(field.pattern) } catch { fail(`${key} pattern 非法`) }
@@ -267,4 +267,20 @@ export function settingOptionTarget(fieldNamespace: 'kind' | 'suite' | 'slot', o
   const target = `${fieldNamespace}.${ownerId}.${fieldKeyValue}`
   if (!OPTION_TARGET_PATTERN.test(target)) fail(`setting option target 非法：${target}`)
   return target
+}
+/** 类型 → 默认显示形态（设置页侧的惯例真值；组件 schema 的显式 presentation 优先）。 */
+export const DISPLAY_DEFAULTS = Object.freeze({
+  choice: 'select',
+  'multi-choice': 'checklist',
+  color: 'palette+picker',
+  number: 'slider+input',
+  boolean: 'toggle',
+  text: 'input',
+} satisfies Record<RenderSettingField['type'], string>) as Readonly<Record<RenderSettingField['type'], RendererPresentation>>
+
+export type RendererPresentation = ChoicePresentation | MultiChoicePresentation | ColorPresentation | NumberPresentation | 'toggle' | 'checkbox' | 'input' | 'textarea'
+
+/** 显示方式单点解析：schema 显式声明优先，未声明走类型默认（设计书 §3.6/§3.7）。 */
+export function resolvePresentation(field: RenderSettingField): RendererPresentation {
+  return field.presentation ?? DISPLAY_DEFAULTS[field.type]
 }

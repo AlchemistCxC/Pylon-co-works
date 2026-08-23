@@ -553,3 +553,16 @@
   .app[data-interface-mode="modern-gui"] .settings { top:var(--titlebar-h, 58px); left:6px; right:6px; bottom:6px; }
   .app[data-interface-mode="modern-gui"] .settings-tabs-root { gap:6px; padding:6px; }
 }
+
+/* ── 渲染器设置组 layout 契约（S3，设计书 §3.2）── */
+.renderer-settings-group.layout-grid .renderer-settings-group-heading + div { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px 16px; }
+.renderer-settings-group.layout-inline .renderer-settings-group-heading + div { display: flex; flex-wrap: wrap; gap: 10px 16px; }
+.renderer-number-duo { display: flex; align-items: center; gap: 8px; min-width: 0; }
+.renderer-segmented { display: inline-flex; gap: 4px; flex-wrap: wrap; }
+.renderer-segmented-chip { padding: 3px 10px; border: 1px solid var(--border); border-radius: var(--ui-radius-sm); background: transparent; color: var(--text-dim); cursor: pointer; font-size: var(--font-size-xs); }
+.renderer-segmented-chip.active { background: var(--accent); border-color: var(--accent); color: #fff; }
+.renderer-segmented-chip:disabled { opacity: 0.45; cursor: default; }
+.set-toggle { position: relative; width: 34px; height: 18px; flex-shrink: 0; padding: 0; border: 1px solid var(--border); border-radius: 999px; background: var(--bg-input); cursor: pointer; transition: background 140ms ease; }
+.set-toggle::after { content: ''; position: absolute; top: 2px; left: 2px; width: 12px; height: 12px; border-radius: 50%; background: var(--text-dim); transition: transform 140ms ease, background 140ms ease; }
+.set-toggle.on { background: color-mix(in srgb, var(--accent) 30%, transparent); border-color: var(--accent); }
+.set-toggle.on::after { transform: translateX(15px); background: var(--accent); }

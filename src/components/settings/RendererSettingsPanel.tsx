@@ -82,7 +82,7 @@ export default function RendererSettingsPanel(props: RendererSettingsPanelProps)
 
   return <section className="renderer-settings-panel" aria-label="渲染器设置">
     <RendererSuitePicker />
-    {sections.map(({ entry, group, namespace, values, fields }) => <div className="renderer-settings-group" key={`${namespace}.${group.id}`}>
+    {sections.map(({ entry, group, namespace, values, fields }) => <div className={`renderer-settings-group${group.layout ? ` layout-${group.layout}` : ''}`} key={`${namespace}.${group.id}`}>
       <div className="renderer-settings-group-heading">
         <div><h3>{entry.label} · {group.label}</h3>{group.description && <p>{group.description}</p>}</div>
         <button type="button" onClick={() => store.reset(namespace)}>恢复本组默认</button>

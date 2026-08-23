@@ -27,7 +27,9 @@ describe('RendererSettingsPanel', () => {
     expect(screen.getByLabelText('字号')).toBeTruthy()
     expect(screen.getByLabelText('启用')).toBeTruthy()
     expect(screen.getByLabelText('备注')).toBeTruthy()
-    fireEvent.change(screen.getByLabelText('消息风格'), { target: { value: 'roomy' } })
+    // S4 迁移（施工书 06 §S4）：radio 声明现按语义渲染为 radio 组（设计书 §3.1 分发矩阵），
+    // change→click；值写入语义不变。
+    fireEvent.click(screen.getByRole('radio', { name: '宽松' }))
     expect(store.getSnapshot().values['kind.content.markdown.style']).toBe('roomy')
     fireEvent.click(screen.getByLabelText('启用'))
     expect(screen.queryByLabelText('备注')).toBeNull()
@@ -39,5 +41,19 @@ describe('RendererSettingsPanel', () => {
     render(<RendererSettingsPanel search="宽松" schemas={[{ id: 'content.markdown', label: 'Markdown', schema }]} store={store} />)
     expect(screen.getByText('宽松')).toBeTruthy()
     expect(screen.getByText(/kind\.content\.markdown\.legacy.*不可用/)).toBeTruthy()
+  })
+})
+
+describe('S3 组级 layout 契约', () => {
+  it('group.layout=grid 时组容器携带 layout-grid class', () => {
+    const store = createRendererSettingsStore({ storage: undefined })
+    const schemaWithLayout: RendererSettingsSchema = {
+      schemaVersion: 1,
+      groups: [{ id: 'g1', label: '网格组', layout: 'grid', fields: [
+        { key: 'n', label: '数字', type: 'number', min: 0, max: 9, default: 1 },
+      ] }],
+    }
+    render(<RendererSettingsPanel schemas={[{ id: 'x.y', label: 'X', schema: schemaWithLayout }]} store={store} />)
+    expect(document.querySelector('.renderer-settings-group.layout-grid')).toBeTruthy()
   })
 })
