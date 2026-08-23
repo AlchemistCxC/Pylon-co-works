@@ -1,0 +1,104 @@
+/* Solid 工作台壳层（过渡态）：中控区输入栏生产接线，位置正常。
+ *
+ * 证据基线：references/solid-chrome-gap-audit.md —— .main.renderer-suite-workbench
+ * 缺 main-body 等价几何，22 个壳层类零定义。本文件只覆盖布局骨架必需类；
+ * 消息流/输入栏/卡片复用 React 的 term-*/input-* 类名，由既有 ChatView.css/InputBar.css
+ * 与 .app[data-interface-mode] 分档皮肤自动生效，此处不重复。
+ *
+ * 几何规格对齐 React 同位结构：
+ * - .main-body 等价物 = flex column + min-height:0 + overflow:hidden + --right-panel-inset 联动
+ *   （App.css L207-214）
+ * - control-center 底部停靠 = margin-top:auto + flex-shrink:0（ControlCenter.css L1-7）
+ */
+
+/* ── Suite 挂载壳：main-body 等价几何 ── */
+.main.renderer-suite-workbench {
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  min-width: 0;
+  min-height: 0;
+  overflow: hidden;
+  position: relative;
+  /* App 层写入的右栏内边距在此壳层透传给子树（对齐 React main-body 的 --right-panel-inset 消费） */
+  --right-panel-inset: var(--right-panel-inset, 0px);
+}
+
+.renderer-suite-workbench-mount {
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  min-width: 0;
+  min-height: 0;
+}
+
+/* ── Solid App 根：纵向骨架 ── */
+.solid-agent-workbench {
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  min-width: 0;
+  min-height: 0;
+  /* 右栏内边距联动与 React main-body 同语义 */
+  padding-right: var(--right-panel-inset, 0px);
+}
+
+/* 消息流区已消费 .chat-view{flex:1}（ChatView.css L6），此处仅保证可收缩下限 */
+.solid-workbench-chat {
+  min-height: 0;
+}
+
+/* document surface 区块最小间距体系（过渡态：裸 div 直排 → 有节奏的分区） */
+.solid-workbench-timeline { margin: 8px 24px 0; }
+.solid-workbench-assist { margin: 8px 24px 0; }
+.solid-workbench-activities { margin: 8px 24px 0; }
+.solid-workbench-interactions { margin: 8px 24px 0; }
+.solid-workbench-usage,
+.solid-workbench-config,
+.solid-workbench-diagnostics { margin: 4px 24px 0; }
+
+/* ── 中控槽位：底部停靠 + 不被消息流挤压 ── */
+.solid-workbench-control-center-slot {
+  position: relative;
+  flex-shrink: 0;
+  margin-top: auto;
+}
+
+/* widget 条：横排、右对齐、随中控内边距（对齐 React cc-body padding 语义） */
+.solid-workbench-widget-strip {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: var(--ui-space-2);
+  padding: 4px calc(12px + var(--right-panel-inset, 0px)) 0 12px;
+}
+
+/* 过渡态：pet 实体未迁移（React PetCompanion 待 P4），文字占位不展示假 UI */
+.solid-workbench-pet-slot[data-fixture='pending'] { display: none; }
+
+/* 回放只读遮罩：覆盖消息流、不挡中控 */
+.solid-workbench-replay-overlay {
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: calc(var(--cc-height, 120px));
+  z-index: 5;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 6px 0;
+  font-size: var(--font-size-sm);
+  color: var(--text-dim);
+  background: color-mix(in srgb, var(--bg-panel) 78%, transparent);
+  border-top: 1px solid var(--border);
+}
+
+/* 空态：居中（React chat-empty 同款 flex 居中语义） */
+.solid-workbench-empty {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+}

@@ -10,6 +10,7 @@ const styleModules = typeof document === 'undefined'
   './styles/components/chat/StatusBar.css',
   './styles/components/ControlCenter.css',
   './styles/components/PetCompanion.css',
+  './styles/components/solid-workbench/WorkbenchChrome.css',
 ], { query: '?inline', import: 'default', eager: true })
 
 export function loadBuiltinPylonRendererStyles(): readonly FirstPartyStyleAsset[] {
