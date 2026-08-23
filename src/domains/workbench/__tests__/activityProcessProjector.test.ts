@@ -49,4 +49,36 @@ describe('C07 activity.process projection', () => {
       }),
     })
   })
+
+  it('narrows nested process parts and preserves malformed evidence as bounded unknown content', () => {
+    const envelope = createWorkbenchEnvelope({
+      sessionId: 'session-1', sequence: 1, recordedAt: '2026-08-23T00:00:01.000Z',
+      source: { provider: 'hermes', sourceId: 'process-malformed' },
+      identity: { taskId: 'activity-malformed' },
+      provenance: { origin: 'local-observed', trust: 'authoritative' },
+      event: {
+        type: 'activity.completed', activityId: 'activity-malformed',
+        activity: { kind: 'process', semanticKind: 'activity.process', title: 'unsafe output' },
+        result: {
+          parts: [
+            { kind: 'terminal', streams: [{ stream: 'stdout', text: 'kept' }], exitCode: 0 },
+            { kind: 'terminal', streams: [{ stream: 'stdin', text: 'malformed evidence' }] },
+          ],
+        },
+      },
+    })
+
+    const document = projectWorkbench([envelope]).document
+    const activity = document.activities[0]!
+    expect(activity.parts).toEqual([
+      { kind: 'terminal', streams: [{ stream: 'stdout', text: 'kept' }], exitCode: 0 },
+      expect.objectContaining({ kind: 'unknown', originalType: 'terminal', truncated: false }),
+    ])
+    expect(document.diagnostics).toContainEqual(expect.objectContaining({
+      code: 'activity.process.part-malformed',
+      eventId: envelope.eventId,
+      level: 'warning',
+      data: expect.objectContaining({ activityId: 'activity-malformed', partIndex: 1 }),
+    }))
+  })
 })

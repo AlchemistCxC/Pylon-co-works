@@ -56,12 +56,7 @@ export function terminalSnapshotFromPart(part: unknown): TerminalSnapshot | null
     const text = entry.text
     // C07：终态后迟到 chunk 按协议策略保留并标记，不混入正常流计数
     if (entry.lateAfterTerminal === true) {
-      lateChunks.push({
-        stream,
-        text,
-        ...(entry.ordinal !== undefined ? { ordinal: entry.ordinal } : {}),
-        lateAfterTerminal: true,
-      })
+      lateChunks.push(entry)
       continue
     }
     if (stream === 'stderr') {

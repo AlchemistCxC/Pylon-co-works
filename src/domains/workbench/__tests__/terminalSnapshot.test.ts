@@ -64,6 +64,31 @@ describe('C07 normalizer terminal/log classification', () => {
     expect(diagnostic?.path).toEqual(['streams'])
   })
 
+  it('diagnoses malformed terminal fields that are omitted from the canonical part', () => {
+    const { part, diagnostic } = normalizeContentBlock({
+      type: 'terminal',
+      streams: [{ stream: 'stdout', text: 'kept' }],
+      processId: ' ',
+      sessionId: 42,
+      status: 'done',
+      terminatedBy: 'crashed',
+      exitCode: 1.5,
+      durationMs: -1,
+      truncation: { omittedBytes: -1, capturedLines: 1 },
+      error: { message: ' ' },
+      vendorExtra: true,
+    })
+
+    expect(part).toMatchObject({ kind: 'terminal', streams: [{ stream: 'stdout', text: 'kept' }] })
+    expect(diagnostic?.code).toBe('content.terminal.fields-dropped')
+    for (const field of [
+      'processId', 'sessionId', 'status', 'terminatedBy', 'exitCode', 'durationMs',
+      'truncation.omittedBytes', 'error.message', 'vendorExtra',
+    ]) {
+      expect(diagnostic?.message).toContain(field)
+    }
+  })
+
   it('records termination reason for killed/timeout separately from non-zero exit', () => {
     for (const [reason, expected] of [['timeout', 'timeout'], ['killed', 'killed'], ['exit', 'non-zero-exit']] as const) {
       const { part } = normalizeContentBlock({
@@ -123,6 +148,57 @@ describe('C07 normalizer terminal/log classification', () => {
     })
   })
 
+  it('bounds terminal streams before canonical projection and merges upstream omission accounting', () => {
+    const sourceStreams = Array.from({ length: 20_003 }, (_, ordinal) => ({
+      stream: ordinal % 2 === 0 ? 'stdout' : 'stderr',
+      text: `line-${ordinal}`,
+      ordinal,
+    }))
+    const { part } = normalizeContentBlock({
+      type: 'terminal',
+      command: 'noisy-command',
+      streams: sourceStreams,
+      truncation: { capturedLines: 20_003, omittedLines: 7, capturedBytes: 999_999, omittedBytes: 11 },
+    })
+    const terminal = part as unknown as {
+      streams: readonly { text: string; ordinal: number }[]
+      truncation?: { capturedLines?: number; omittedLines?: number; capturedBytes?: number; omittedBytes?: number }
+    }
+
+    expect(terminal.streams).toHaveLength(20_000)
+    expect(terminal.streams[0]?.ordinal).toBe(3)
+    expect(terminal.streams.at(-1)?.ordinal).toBe(20_002)
+    expect(terminal.truncation).toEqual({
+      capturedLines: 20_000,
+      omittedLines: 10,
+      capturedBytes: terminal.streams.reduce((sum, entry) => sum + new TextEncoder().encode(entry.text).byteLength, 0),
+      omittedBytes: 11 + sourceStreams.slice(0, 3)
+        .reduce((sum, entry) => sum + new TextEncoder().encode(entry.text).byteLength, 0),
+    })
+  })
+
+  it('bounds a single oversized terminal chunk by UTF-8 bytes while preserving its tail', () => {
+    const maxCanonicalBytes = 2 * 1024 * 1024
+    const { part } = normalizeContentBlock({
+      type: 'terminal',
+      streams: [{ stream: 'stderr', text: `${'x'.repeat(maxCanonicalBytes)}TAIL`, ordinal: 8 }],
+    })
+    const terminal = part as unknown as {
+      streams: readonly { text: string; ordinal: number }[]
+      truncation?: { capturedLines?: number; omittedLines?: number; capturedBytes?: number; omittedBytes?: number }
+    }
+    const retained = terminal.streams[0]?.text ?? ''
+
+    expect(new TextEncoder().encode(retained).byteLength).toBe(maxCanonicalBytes)
+    expect(retained.endsWith('TAIL')).toBe(true)
+    expect(terminal.truncation).toEqual({
+      capturedLines: 1,
+      omittedLines: 0,
+      capturedBytes: maxCanonicalBytes,
+      omittedBytes: 4,
+    })
+  })
+
   it('normalizes structured log entries with level/timestamp confidence', () => {
     const { part } = normalizeContentBlock({
       type: 'log',
@@ -155,6 +231,77 @@ describe('C07 normalizer terminal/log classification', () => {
       { level: 'unknown', originalLevel: 'verbose', text: 'kept as unknown', ordinal: 0 },
     ])
     expect(diagnostic?.code).toBe('content.log.entries-dropped')
+  })
+
+  it('diagnoses malformed structured log fields that are omitted from the canonical part', () => {
+    const { part, diagnostic } = normalizeContentBlock({
+      type: 'log',
+      entries: [{ level: 'info', text: 'kept' }],
+      source: ' ',
+      process_id: 3,
+      sessionId: false,
+      truncation: { capturedLines: 1, omittedLines: -2, vendor: true },
+      vendorExtra: true,
+    })
+
+    expect(part).toMatchObject({ kind: 'log', entries: [{ level: 'info', text: 'kept' }] })
+    expect(diagnostic?.code).toBe('content.log.fields-dropped')
+    for (const field of ['source', 'process_id', 'sessionId', 'truncation.omittedLines', 'truncation.vendor', 'vendorExtra']) {
+      expect(diagnostic?.message).toContain(field)
+    }
+  })
+
+  it('bounds structured log entries before canonical projection and merges truncation accounting', () => {
+    const sourceEntries = Array.from({ length: 20_002 }, (_, ordinal) => ({
+      level: 'info', text: `log-${ordinal}`, ordinal,
+    }))
+    const { part } = normalizeContentBlock({
+      type: 'log',
+      entries: sourceEntries,
+      truncation: { capturedLines: 20_002, omittedLines: 5, capturedBytes: 999_999, omittedBytes: 13 },
+    })
+    const log = part as unknown as {
+      entries: readonly { text: string; ordinal: number }[]
+      truncation?: { capturedLines?: number; omittedLines?: number; capturedBytes?: number; omittedBytes?: number }
+    }
+
+    expect(log.entries).toHaveLength(20_000)
+    expect(log.entries[0]?.ordinal).toBe(2)
+    expect(log.entries.at(-1)?.ordinal).toBe(20_001)
+    expect(log.truncation).toEqual({
+      capturedLines: 20_000,
+      omittedLines: 7,
+      capturedBytes: log.entries.reduce((sum, entry) => sum + new TextEncoder().encode(entry.text).byteLength, 0),
+      omittedBytes: 13 + sourceEntries.slice(0, 2)
+        .reduce((sum, entry) => sum + new TextEncoder().encode(entry.text).byteLength, 0),
+    })
+  })
+
+  it('bounds a single oversized structured log entry by UTF-8 bytes', () => {
+    const maxCanonicalBytes = 2 * 1024 * 1024
+    const sourceText = `${'中'.repeat(700_000)}TAIL`
+    const sourceBytes = new TextEncoder().encode(sourceText).byteLength
+    const { part } = normalizeContentBlock({
+      type: 'log',
+      entries: [{ level: 'error', text: sourceText, ordinal: 4 }],
+      truncation: { omittedBytes: 2, omittedLines: 3 },
+    })
+    const log = part as unknown as {
+      entries: readonly { text: string; ordinal: number }[]
+      truncation?: { capturedLines?: number; omittedLines?: number; capturedBytes?: number; omittedBytes?: number }
+    }
+    const retained = log.entries[0]?.text ?? ''
+    const retainedBytes = new TextEncoder().encode(retained).byteLength
+
+    expect(retainedBytes).toBeLessThanOrEqual(maxCanonicalBytes)
+    expect(retained.endsWith('TAIL')).toBe(true)
+    expect(retained).not.toContain('\uFFFD')
+    expect(log.truncation).toEqual({
+      capturedLines: 1,
+      omittedLines: 3,
+      capturedBytes: retainedBytes,
+      omittedBytes: 2 + sourceBytes - retainedBytes,
+    })
   })
 })
 
@@ -211,11 +358,17 @@ describe('C07 terminalSnapshotFromPart (stream accounting)', () => {
     const snapshot = terminalSnapshotFromPart({
       kind: 'terminal',
       command: 'done',
-      streams: [{ stream: 'stdout', text: 'late arrival', ordinal: 9, lateAfterTerminal: true }],
+      streams: [{
+        stream: 'stdout', text: 'late arrival', ordinal: 9, lateAfterTerminal: true,
+        timestamp: '2026-08-23T10:20:30.000Z', timestampConfidence: 'observed',
+      }],
       status: 'completed',
     })
     expect(snapshot?.lateChunks).toHaveLength(1)
-    expect(snapshot?.lateChunks?.[0]?.text).toBe('late arrival')
+    expect(snapshot?.lateChunks?.[0]).toEqual({
+      stream: 'stdout', text: 'late arrival', ordinal: 9, lateAfterTerminal: true,
+      timestamp: '2026-08-23T10:20:30.000Z', timestampConfidence: 'observed',
+    })
     // 迟到 chunk 保留（协议策略）但被标记，不混入正常流计数
     expect(snapshot?.stdoutLines).toEqual([])
   })

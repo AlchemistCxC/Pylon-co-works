@@ -1,6 +1,6 @@
 import { For, Show, createEffect, createMemo } from 'solid-js'
 import { stripAnsiControlSequences } from '../../../../domains/rendererContent/textContentContracts.ts'
-import type { ContentPart } from '../../../../domains/workbench/content/contentPartSchema.ts'
+import type { ContentPart, UnknownContentPart } from '../../../../domains/workbench/content/contentPartSchema.ts'
 import type { RenderAppearanceSnapshot } from '../../../../contracts/messageRenderer.ts'
 import type { RenderCommandPort } from '../../../../contracts/messageRenderer.ts'
 import type { WorkbenchActivityNode } from '../../../../domains/workbench/workbenchProjector.ts'
@@ -36,7 +36,7 @@ export function SolidTerminalBlock(props: { part: ContentPart; actions?: Termina
     terminatedBy?: string
     status?: string
     durationMs?: number
-    truncation?: { capturedLines?: number; omittedLines?: number; omittedBytes?: number }
+    truncation?: { capturedLines?: number; omittedLines?: number; capturedBytes?: number; omittedBytes?: number }
   })
 
   const streams = () => parsed().streams ?? []
@@ -134,9 +134,11 @@ export function SolidTerminalBlock(props: { part: ContentPart; actions?: Termina
             </div>
           )}
         </For>
-        <Show when={(parsed().truncation?.omittedLines ?? 0) > 0}>
-          <div class="term-terminal-truncation">
-            输出已截断：保留 {parsed().truncation?.capturedLines ?? streams().length} 行，省略 {parsed().truncation?.omittedLines} 行
+        <Show when={(parsed().truncation?.omittedLines ?? 0) > 0 || (parsed().truncation?.omittedBytes ?? 0) > 0}>
+          <div class="term-terminal-truncation" role="status">
+            输出已截断：保留 {parsed().truncation?.capturedLines ?? streams().length} 行
+            {parsed().truncation?.omittedLines !== undefined && `，省略 ${parsed().truncation?.omittedLines} 行`}
+            {parsed().truncation?.omittedBytes !== undefined && `（${parsed().truncation?.omittedBytes} bytes）`}
           </div>
         </Show>
         <For each={lateStreams()}>
@@ -155,6 +157,7 @@ export function SolidLogBlock(props: { part: ContentPart; appearance?: RenderApp
   const parsed = createMemo(() => props.part as unknown as {
     source?: string
     entries?: readonly { level: string; originalLevel?: string; text: string; timestamp?: string; timestampConfidence?: string }[]
+    truncation?: { capturedLines?: number; omittedLines?: number; capturedBytes?: number; omittedBytes?: number }
   })
   const allowedLevels = () => Array.isArray(props.appearance?.logLevels)
     ? new Set(props.appearance.logLevels.filter((value): value is string => typeof value === 'string'))
@@ -200,6 +203,12 @@ export function SolidLogBlock(props: { part: ContentPart; appearance?: RenderApp
             </div>
           )}
         </For>
+        <Show when={parsed().truncation}>{truncation => <div class="term-terminal-truncation term-log-truncation" role="status">
+          日志已截断
+          {truncation().capturedLines !== undefined && `：保留 ${truncation().capturedLines} 行`}
+          {truncation().omittedLines !== undefined && `，省略 ${truncation().omittedLines} 行`}
+          {truncation().omittedBytes !== undefined && `（${truncation().omittedBytes} bytes）`}
+        </div>}</Show>
       </div>
     </div>
   )
@@ -237,12 +246,29 @@ export function SolidProcessActivity(props: {
       ? <SolidTerminalBlock part={part} appearance={props.appearance} actions={{ copy }} />
       : part.kind === 'log'
         ? <SolidLogBlock part={part} appearance={props.appearance} />
-        : <pre class="solid-content-unknown" data-content-kind={part.kind}>Unsupported process content: {part.kind}</pre>}
+        : part.kind === 'unknown'
+          ? <SolidUnknownProcessContent part={part} />
+          : <pre class="solid-content-unknown" data-content-kind={part.kind}>Unsupported process content: {part.kind}</pre>}
     </For>
     <Show when={props.activity.error}>{error => <div role="alert" class="term-process-error">{error().userSummary}</div>}</Show>
     <Show when={props.activity.reason}><small>{props.activity.reason}</small></Show>
     <Show when={props.activity.provenance?.synthetic}>
       {synthetic => <small class="term-process-provenance">合成生命周期：{synthetic().reason}</small>}
     </Show>
+  </section>
+}
+
+function SolidUnknownProcessContent(props: { part: UnknownContentPart }) {
+  const raw = () => {
+    try { return JSON.stringify(props.part.raw, null, 2) } catch { return '[unavailable]' }
+  }
+  return <section class="solid-content-unknown" data-content-kind="content.unknown"
+    aria-label={`未知进程内容：${props.part.originalType}`}>
+    <strong>未知内容：{props.part.originalType}</strong>
+    <span>{props.part.summary}</span>
+    <details><summary>Raw 审计信息</summary><pre>{raw()}</pre></details>
+    <Show when={props.part.truncation}>{truncation => <small>
+      Raw 已截断，省略 {truncation().omittedBytes} bytes
+    </small>}</Show>
   </section>
 }

@@ -9,6 +9,7 @@ import type {
   SearchResultContentPart,
   TextRange,
   TerminalContentPart,
+  UnknownContentPart,
 } from '../../domains/workbench/content/contentPartSchema.ts'
 import { stripAnsiControlSequences } from '../../domains/rendererContent/textContentContracts.ts'
 import { isValidMediaContentInput } from '../../domains/workbench/content/mediaContentValidation.ts'
@@ -24,7 +25,7 @@ import {
   readableLifecycleLines,
   type NormalizedError,
 } from '../../domains/workbench/lifecycle/lifecycleModel.ts'
-import { toolInvocationSnapshot, type ToolInvocationSnapshot } from '../../domains/workbench/workbenchProjector.ts'
+import { toolInvocationSnapshot, type ToolInvocationSnapshot, type WorkbenchActivityNode } from '../../domains/workbench/workbenchProjector.ts'
 import { normalizeToolStatus, toolStatePresentation } from '../../domains/tool/status.ts'
 
 export interface WorkbenchFatalFailure {
@@ -101,18 +102,20 @@ export default function ReactWorkbenchFatalFallback(props: {
         return snapshot && <ReactFallbackTool key={snapshot.id} snapshot={snapshot} />
       })}
 
-      {document?.activities.filter(activity => activity.kind === 'activity').map(activity => (
-        <section key={activity.id} role="status" className="react-workbench-fatal-activity"
-          data-react-activity-kind={activity.semanticKind ?? activity.activityKind ?? 'unknown'}
-          aria-label={`子代理 fallback：${activity.title || activity.id}，${activity.status}`}>
-          <strong>{activity.title || activity.id}</strong>
-          <span>{activity.status}{activity.depth !== undefined ? ` · depth ${activity.depth}` : ''}
-            {activity.parentId ? ` · parent ${activity.parentId}` : ''}</span>
-          {activity.goal && <span>目标：{activity.goal}</span>}
-          {activity.progress !== undefined && <pre>{fallbackJson(activity.progress)}</pre>}
-          {activity.error && <span>{activity.error.userSummary}</span>}
-        </section>
-      ))}
+      {document?.activities.filter(activity => activity.kind === 'activity').map(activity =>
+        activity.activityKind === 'process' || activity.semanticKind === 'activity.process'
+          ? <ReactFallbackProcessActivity key={activity.id} activity={activity} />
+          : <section key={activity.id} role="status" className="react-workbench-fatal-activity"
+            data-react-activity-kind={activity.semanticKind ?? activity.activityKind ?? 'unknown'}
+            aria-label={`子代理 fallback：${activity.title || activity.id}，${activity.status}`}>
+            <strong>{activity.title || activity.id}</strong>
+            <span>{activity.status}{activity.depth !== undefined ? ` · depth ${activity.depth}` : ''}
+              {activity.parentId ? ` · parent ${activity.parentId}` : ''}</span>
+            {activity.goal && <span>目标：{activity.goal}</span>}
+            {activity.progress !== undefined && <pre>{fallbackJson(activity.progress)}</pre>}
+            {activity.error && <span>{activity.error.userSummary}</span>}
+          </section>
+      )}
       <section className="react-workbench-fatal-interactions" aria-label="交互 fallback">
         {document?.interactions.map(interaction => (
           <div key={interaction.id} data-react-interaction-status={interaction.status}>
@@ -137,6 +140,26 @@ export default function ReactWorkbenchFatalFallback(props: {
       </div>
     </section>
   )
+}
+
+function ReactFallbackProcessActivity({ activity }: { activity: WorkbenchActivityNode }) {
+  const parts = Array.isArray(activity.parts)
+    ? activity.parts.filter((part): part is ContentPart => Boolean(part && typeof part === 'object'
+      && !Array.isArray(part) && typeof (part as { kind?: unknown }).kind === 'string'))
+    : []
+  const title = activity.title || activity.id
+  return <section role="status" className="react-workbench-fatal-activity react-workbench-fatal-process"
+    data-react-activity-kind="activity.process"
+    aria-label={`进程 fallback：${title}，${activity.status}`}>
+    <strong>{title}</strong>
+    <span>{activity.status}</span>
+    {(activity.processId || activity.sessionId) && <small>{[activity.processId, activity.sessionId].filter(Boolean).join(' · ')}</small>}
+    {activity.progress !== undefined && <pre>{fallbackJson(activity.progress)}</pre>}
+    {parts.map((part, index) => <ReactFallbackContentPart key={`${activity.id}:${index}`} part={part} />)}
+    {activity.error && <span role="alert">{activity.error.userSummary}</span>}
+    {activity.reason && <small>{activity.reason}</small>}
+    {activity.provenance?.synthetic && <small>合成生命周期：{activity.provenance.synthetic.reason}</small>}
+  </section>
 }
 
 function ReactFallbackTool({ snapshot }: { snapshot: ToolInvocationSnapshot }) {
@@ -355,6 +378,21 @@ export function ReactFallbackContentPart(props: {
         <span>{[entry.originalLevel ?? entry.level, entry.timestamp, entry.text].filter(Boolean).join(' · ')}</span>
         {entry.timestampConfidence === 'synthetic' && <small>时间戳为合成</small>}
       </div>)}
+      {value.truncation && <small>
+        日志已截断
+        {value.truncation.capturedLines !== undefined && `：保留 ${value.truncation.capturedLines} 行`}
+        {value.truncation.omittedLines !== undefined && `，省略 ${value.truncation.omittedLines} 行`}
+        {value.truncation.omittedBytes !== undefined && `（${value.truncation.omittedBytes} bytes）`}
+      </small>}
+    </section>
+  }
+  if (part.kind === 'unknown') {
+    const value = part as UnknownContentPart
+    return <section data-react-content-kind="content.unknown" aria-label={`未知内容 fallback：${value.originalType}`}>
+      <strong>未知内容：{value.originalType}</strong>
+      <span>{value.summary}</span>
+      <details><summary>Raw 审计信息</summary><pre>{fallbackJson(value.raw)}</pre></details>
+      {value.truncation && <small>Raw 已截断，省略 {value.truncation.omittedBytes} bytes</small>}
     </section>
   }
   if (part.kind === 'search-result') {

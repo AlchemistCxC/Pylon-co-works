@@ -5,7 +5,7 @@
  * 输出可丢弃的 WorkbenchDocument。它不读取时钟、store、registry 或 IO；live、
  * restart、recovery 只要喂给同一组 envelopes，就得到同一份 document。
  */
-import type { ContentPart } from './content/contentPartSchema.ts'
+import { createUnknownContentPart, parseContentPart, type ContentPart } from './content/contentPartSchema.ts'
 import { applyGoalEvents, applyPlanEvent, createEmptyGoalState, createEmptyPlanState, normalizeGoalSnapshot, type GoalSnapshot, type GoalState, type PlanState } from './plan/goalModel.ts'
 import { applyLifecycleEvent, createEmptyLifecycleState, normalizeNormalizedError, type LifecycleState, type NormalizedError } from './lifecycle/lifecycleModel.ts'
 import type {
@@ -560,7 +560,11 @@ function reduceActivity(document: WorkbenchDocument, envelope: WorkbenchEventEnv
       // C10：后台任务与工作流家族（workflow-phase/agent 经 parentId relation 挂接）
       || activityKind === 'workflow' || activityKind === 'workflow-phase' || activityKind === 'workflow-agent'
       ? `activity.${activityKind}` : undefined)
-  const parts = jsonSnapshot(result?.parts ?? patch.parts ?? activity.parts) ?? previous?.parts
+  const sourceParts = result?.parts ?? patch.parts ?? activity.parts
+  const narrowedParts = activityKind === 'process' || activityKind === 'background-task' || semanticKind === 'activity.process'
+    ? narrowProcessActivityParts(sourceParts, id, envelope)
+    : { parts: jsonSnapshot(sourceParts), diagnostics: [] }
+  const parts = narrowedParts.parts ?? previous?.parts
   const error = event.error !== undefined
     ? normalizeNormalizedError(event.error)
     : result?.error !== undefined
@@ -598,7 +602,39 @@ function reduceActivity(document: WorkbenchDocument, envelope: WorkbenchEventEnv
     provenance: envelope.provenance,
   }
   const merged = mergeActivityTerminal(previous, next)
-  return { ...document, activities: upsertActivity(document.activities, merged ?? next) }
+  const projected = { ...document, activities: upsertActivity(document.activities, merged ?? next) }
+  return narrowedParts.diagnostics.length > 0
+    ? { ...projected, diagnostics: [...projected.diagnostics, ...narrowedParts.diagnostics] }
+    : projected
+}
+
+function narrowProcessActivityParts(
+  value: unknown,
+  activityId: string,
+  envelope: WorkbenchEventEnvelope,
+): { parts?: readonly ContentPart[]; diagnostics: readonly WorkbenchProjectionDiagnostic[] } {
+  if (value === undefined) return { diagnostics: [] }
+  const sourceParts = Array.isArray(value) ? value : [value]
+  const parts: ContentPart[] = []
+  const diagnostics: WorkbenchProjectionDiagnostic[] = []
+  sourceParts.forEach((part, partIndex) => {
+    const parsed = parseContentPart(part)
+    if (parsed.ok) {
+      parts.push(parsed.value)
+      return
+    }
+    const originalType = isRecord(part) && typeof part.kind === 'string' ? part.kind : 'malformed'
+    parts.push(createUnknownContentPart(originalType, part))
+    diagnostics.push({
+      code: 'activity.process.part-malformed',
+      message: `process activity part ${partIndex} failed content schema validation`,
+      eventId: envelope.eventId,
+      sequence: envelope.sequence,
+      level: 'warning',
+      data: { activityId, partIndex, issues: parsed.issues },
+    })
+  })
+  return { parts, diagnostics }
 }
 
 /** C09：子代理/委派/团队 rich 字段收窄——只认 normalized activity/patch，缺失即 undefined（不猜）。 */

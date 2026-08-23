@@ -2,9 +2,10 @@
 import { render } from '@solidjs/testing-library'
 import { createSignal } from 'solid-js'
 import { describe, expect, it, vi } from 'vitest'
-import { SolidLogBlock, SolidTerminalBlock } from '../TerminalBlock.solid.tsx'
+import { SolidLogBlock, SolidProcessActivity, SolidTerminalBlock } from '../TerminalBlock.solid.tsx'
 import { BuiltinSolidContentSlot } from '../../BuiltinSolidContentSlot.solid.tsx'
-import type { ContentPart } from '../../../../../domains/workbench/content/contentPartSchema.ts'
+import { createUnknownContentPart, type ContentPart } from '../../../../../domains/workbench/content/contentPartSchema.ts'
+import type { WorkbenchActivityNode } from '../../../../../domains/workbench/workbenchProjector.ts'
 
 /**
  * C07 RED：终端/日志卡契约。
@@ -63,6 +64,18 @@ describe('C07 SolidTerminalBlock', () => {
     const result = render(() => <SolidTerminalBlock part={truncPart} />)
     expect(result.container.textContent).toContain('保留 3 行')
     expect(result.container.textContent).toContain('省略 9999 行')
+  })
+
+  it('shows byte-only truncation for a partially retained oversized chunk', () => {
+    const result = render(() => <SolidTerminalBlock part={{
+      ...terminalPart,
+      streams: [{ stream: 'stdout', text: 'retained tail' }],
+      truncation: { capturedLines: 1, omittedLines: 0, capturedBytes: 13, omittedBytes: 4096 },
+    } as ContentPart} />)
+
+    expect(result.container).toHaveTextContent('输出已截断')
+    expect(result.container).toHaveTextContent('保留 1 行')
+    expect(result.container).toHaveTextContent('4096 bytes')
   })
 
   it('consumes declared typography tokens (C13: 声明必须真实消费)', () => {
@@ -149,6 +162,37 @@ describe('C07 SolidLogBlock', () => {
     expect(result.container.textContent).toContain('compiling')
     expect(result.container.textContent).toContain('时间戳为合成')
     expect(result.container.querySelector('.term-log-warn')).not.toBeNull()
+  })
+
+  it('makes structured log truncation accounting visible', () => {
+    const result = render(() => <SolidLogBlock part={{
+      kind: 'log', source: 'bounded-worker',
+      entries: [{ level: 'error', text: 'retained tail' }],
+      truncation: { capturedLines: 1, omittedLines: 99, capturedBytes: 13, omittedBytes: 4096 },
+    } as ContentPart} />)
+
+    expect(result.container).toHaveTextContent('日志已截断')
+    expect(result.container).toHaveTextContent('保留 1 行')
+    expect(result.container).toHaveTextContent('省略 99 行')
+    expect(result.container).toHaveTextContent('4096 bytes')
+  })
+})
+
+describe('C07 SolidProcessActivity', () => {
+  it('keeps bounded unknown process evidence visible instead of reducing it to a kind label', () => {
+    const activity = {
+      id: 'process-unknown', kind: 'activity', activityKind: 'process', semanticKind: 'activity.process',
+      title: 'unsafe worker', status: 'failed', orphan: false, sequence: 1,
+      parts: [createUnknownContentPart('terminal', {
+        kind: 'terminal', streams: [{ stream: 'stdin', text: 'malformed evidence' }],
+      })],
+    } as WorkbenchActivityNode
+    const result = render(() => <SolidProcessActivity activity={activity} />)
+    const unknown = result.container.querySelector('[data-content-kind="content.unknown"]')
+
+    expect(unknown).toHaveTextContent('未知内容：terminal')
+    expect(unknown).toHaveTextContent('malformed evidence')
+    expect(unknown?.querySelector('details')).not.toHaveAttribute('open')
   })
 })
 

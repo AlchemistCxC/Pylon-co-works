@@ -39,6 +39,11 @@ export function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value)
 }
 
+const MAX_CANONICAL_OUTPUT_ENTRIES = 20_000
+const MAX_CANONICAL_OUTPUT_BYTES = 2 * 1024 * 1024
+const UTF8_ENCODER = new TextEncoder()
+const UTF8_DECODER = new TextDecoder()
+
 export function extractUpdate(input: unknown): Record<string, unknown> | undefined {
   if (!isRecord(input)) return undefined
   const params = isRecord(input.params) ? input.params : undefined
@@ -187,13 +192,20 @@ export function normalizeContentBlock(raw: unknown): { part: ContentPart; diagno
     // env 表 secret-like 值脱敏；缺 command 且缺 streams 进 unknown。
     case 'terminal': {
       const sourceStreams = Array.isArray(raw.streams) ? raw.streams : []
-      const streams = sourceStreams.flatMap(entry => {
+      const normalizedStreams = sourceStreams.flatMap(entry => {
         const normalized = normalizeTerminalStreamEntry(entry)
         return normalized ? [normalized] : []
       })
+      const boundedStreams = boundCanonicalTextEntries(normalizedStreams)
+      const streams = boundedStreams.entries
       const command = typeof raw.command === 'string' && raw.command.trim() ? raw.command.trim() : undefined
       const error = normalizeTerminalError(raw.error)
-      const truncation = normalizeTerminalTruncation(raw.truncation)
+      const truncation = mergeCanonicalOutputTruncation(
+        normalizeTerminalTruncation(raw.truncation),
+        boundedStreams,
+      )
+      const droppedFields = terminalDroppedFields(raw)
+      const malformedStreamCount = sourceStreams.length - normalizedStreams.length
       if (!command && streams.length === 0 && !error) {
         return { part: createUnknownContentPart(type, raw), diagnostic: { code: 'content.terminal.invalid', message: 'terminal block needs command, output, or error', path: [] } }
       }
@@ -212,23 +224,35 @@ export function normalizeContentBlock(raw: unknown): { part: ContentPart; diagno
           ...(truncation ? { truncation } : {}),
           ...(error ? { error } : {}),
         },
-        ...(streams.length < sourceStreams.length ? { diagnostic: {
+        ...(malformedStreamCount > 0 ? { diagnostic: {
           code: 'content.terminal.entries-dropped',
-          message: `${sourceStreams.length - streams.length} malformed terminal stream entries were dropped`,
+          message: `${malformedStreamCount} malformed terminal stream entries were dropped`,
           path: ['streams'],
+        } } : droppedFields.length > 0 ? { diagnostic: {
+          code: 'content.terminal.fields-dropped',
+          message: `malformed or unknown terminal fields were dropped: ${droppedFields.join(', ')}`,
+          path: [],
         } } : {}),
       }
     }
     // C07：结构化日志——source + entries（level/text/timestampConfidence）。
     case 'log': {
       const sourceEntries = Array.isArray(raw.entries) ? raw.entries : []
-      const entries = sourceEntries.flatMap(entry => {
+      const normalizedEntries = sourceEntries.flatMap(entry => {
         const normalized = normalizeLogContentEntry(entry)
         return normalized ? [normalized] : []
       })
+      const boundedEntries = boundCanonicalTextEntries(normalizedEntries)
+      const entries = boundedEntries.entries
       if (entries.length === 0) {
         return { part: createUnknownContentPart(type, raw), diagnostic: { code: 'content.log.empty', message: 'log block has no entries', path: ['entries'] } }
       }
+      const truncation = mergeCanonicalOutputTruncation(
+        normalizeTerminalTruncation(raw.truncation),
+        boundedEntries,
+      )
+      const droppedFields = logDroppedFields(raw)
+      const malformedEntryCount = sourceEntries.length - normalizedEntries.length
       return {
         part: {
           kind: 'log',
@@ -236,11 +260,16 @@ export function normalizeContentBlock(raw: unknown): { part: ContentPart; diagno
           ...nonEmptyTrimmed(raw.processId ?? raw.process_id, 'processId'),
           ...nonEmptyTrimmed(raw.sessionId ?? raw.session_id, 'sessionId'),
           entries,
+          ...(truncation ? { truncation } : {}),
         },
-        ...(entries.length < sourceEntries.length ? { diagnostic: {
+        ...(malformedEntryCount > 0 ? { diagnostic: {
           code: 'content.log.entries-dropped',
-          message: `${sourceEntries.length - entries.length} malformed log entries were dropped`,
+          message: `${malformedEntryCount} malformed log entries were dropped`,
           path: ['entries'],
+        } } : droppedFields.length > 0 ? { diagnostic: {
+          code: 'content.log.fields-dropped',
+          message: `malformed or unknown log fields were dropped: ${droppedFields.join(', ')}`,
+          path: [],
         } } : {}),
       }
     }
@@ -525,11 +554,152 @@ function normalizeTerminalTruncation(value: unknown): TerminalOutputTruncation |
   return Object.keys(truncation).length > 0 ? truncation : undefined
 }
 
+function mergeCanonicalOutputTruncation(
+  upstream: TerminalOutputTruncation | undefined,
+  bounded: CanonicalTextEntries<{ readonly text: string }>,
+): TerminalOutputTruncation | undefined {
+  if (!bounded.truncated) return upstream
+  return {
+    capturedLines: bounded.entries.length,
+    omittedLines: (upstream?.omittedLines ?? 0) + bounded.omittedLines,
+    capturedBytes: bounded.capturedBytes,
+    omittedBytes: (upstream?.omittedBytes ?? 0) + bounded.omittedBytes,
+  }
+}
+
+interface CanonicalTextEntries<Entry extends { readonly text: string }> {
+  readonly entries: readonly Entry[]
+  readonly capturedBytes: number
+  readonly omittedLines: number
+  readonly omittedBytes: number
+  readonly truncated: boolean
+}
+
+function boundCanonicalTextEntries<Entry extends { readonly text: string }>(
+  entries: readonly Entry[],
+): CanonicalTextEntries<Entry> {
+  const countOmitted = Math.max(0, entries.length - MAX_CANONICAL_OUTPUT_ENTRIES)
+  const candidates = entries.slice(-MAX_CANONICAL_OUTPUT_ENTRIES)
+  let omittedLines = countOmitted
+  let omittedBytes = textEntriesByteLength(entries.slice(0, countOmitted))
+  let remainingBytes = MAX_CANONICAL_OUTPUT_BYTES
+  const retainedReverse: Entry[] = []
+
+  for (let index = candidates.length - 1; index >= 0; index -= 1) {
+    const entry = candidates[index]!
+    const boundedText = utf8Tail(entry.text, remainingBytes)
+    omittedBytes += boundedText.omittedBytes
+    if (boundedText.text.length > 0 || entry.text.length === 0 && remainingBytes > 0) {
+      retainedReverse.push(boundedText.text === entry.text ? entry : { ...entry, text: boundedText.text })
+      remainingBytes -= boundedText.retainedBytes
+    } else {
+      omittedLines += 1
+    }
+  }
+
+  const retained = retainedReverse.reverse()
+  const capturedBytes = MAX_CANONICAL_OUTPUT_BYTES - remainingBytes
+  return {
+    entries: retained,
+    capturedBytes,
+    omittedLines,
+    omittedBytes,
+    truncated: omittedLines > 0 || omittedBytes > 0,
+  }
+}
+
+function textEntriesByteLength(entries: readonly { readonly text: string }[]): number {
+  return entries.reduce((total, entry) => total + UTF8_ENCODER.encode(entry.text).byteLength, 0)
+}
+
+function utf8Tail(value: string, maxBytes: number): { text: string; retainedBytes: number; omittedBytes: number } {
+  const encoded = UTF8_ENCODER.encode(value)
+  if (encoded.byteLength <= maxBytes) {
+    return { text: value, retainedBytes: encoded.byteLength, omittedBytes: 0 }
+  }
+  let start = Math.max(0, encoded.byteLength - maxBytes)
+  while (start < encoded.byteLength && (encoded[start]! & 0xc0) === 0x80) start += 1
+  const text = UTF8_DECODER.decode(encoded.subarray(start))
+  const retainedBytes = encoded.byteLength - start
+  return { text, retainedBytes, omittedBytes: encoded.byteLength - retainedBytes }
+}
+
 function normalizeTerminalError(value: unknown): TerminalContentPart['error'] | undefined {
   if (!isRecord(value) || typeof value.message !== 'string' || !value.message.trim()) return undefined
   return {
     message: value.message.trim(),
     ...(typeof value.code === 'string' && value.code.trim() ? { code: value.code.trim() } : {}),
+  }
+}
+
+function terminalDroppedFields(raw: Record<string, unknown>): readonly string[] {
+  const known = new Set([
+    'type', 'kind', 'command', 'processId', 'process_id', 'sessionId', 'session_id', 'streams',
+    'exitCode', 'terminatedBy', 'status', 'durationMs', 'env', 'truncation', 'error',
+  ])
+  const dropped = Object.keys(raw).filter(key => !known.has(key))
+  const nonEmptyString = (key: string): void => {
+    const value = raw[key]
+    if (value !== undefined && (typeof value !== 'string' || !value.trim())) dropped.push(key)
+  }
+  nonEmptyString('command')
+  nonEmptyString('processId')
+  nonEmptyString('process_id')
+  nonEmptyString('sessionId')
+  nonEmptyString('session_id')
+  if (raw.streams !== undefined && !Array.isArray(raw.streams)) dropped.push('streams')
+  if (raw.exitCode !== undefined && !Number.isInteger(raw.exitCode)) dropped.push('exitCode')
+  if (raw.terminatedBy !== undefined && !['timeout', 'killed', 'signal'].includes(String(raw.terminatedBy))) dropped.push('terminatedBy')
+  if (raw.status !== undefined && !['queued', 'running', 'completed', 'failed', 'cancelled'].includes(String(raw.status))) dropped.push('status')
+  if (raw.durationMs !== undefined && (typeof raw.durationMs !== 'number' || !Number.isFinite(raw.durationMs) || raw.durationMs < 0)) dropped.push('durationMs')
+  if (raw.env !== undefined && !isRecord(raw.env)) dropped.push('env')
+  collectTerminalTruncationDroppedFields(raw.truncation, dropped)
+  collectTerminalErrorDroppedFields(raw.error, dropped)
+  return [...new Set(dropped)]
+}
+
+function logDroppedFields(raw: Record<string, unknown>): readonly string[] {
+  const known = new Set([
+    'type', 'kind', 'source', 'processId', 'process_id', 'sessionId', 'session_id', 'entries', 'truncation',
+  ])
+  const dropped = Object.keys(raw).filter(key => !known.has(key))
+  for (const key of ['source', 'processId', 'process_id', 'sessionId', 'session_id']) {
+    const value = raw[key]
+    if (value !== undefined && (typeof value !== 'string' || !value.trim())) dropped.push(key)
+  }
+  if (raw.entries !== undefined && !Array.isArray(raw.entries)) dropped.push('entries')
+  collectTerminalTruncationDroppedFields(raw.truncation, dropped)
+  return [...new Set(dropped)]
+}
+
+function collectTerminalTruncationDroppedFields(value: unknown, dropped: string[]): void {
+  if (value === undefined) return
+  if (!isRecord(value)) {
+    dropped.push('truncation')
+    return
+  }
+  const fields = ['capturedLines', 'omittedLines', 'capturedBytes', 'omittedBytes'] as const
+  if (!fields.some(key => value[key] !== undefined)) dropped.push('truncation')
+  for (const key of fields) {
+    if (value[key] !== undefined && (!Number.isInteger(value[key]) || Number(value[key]) < 0)) {
+      dropped.push(`truncation.${key}`)
+    }
+  }
+  for (const key of Object.keys(value)) {
+    if (!fields.includes(key as typeof fields[number])) dropped.push(`truncation.${key}`)
+  }
+}
+
+function collectTerminalErrorDroppedFields(value: unknown, dropped: string[]): void {
+  if (value === undefined) return
+  if (!isRecord(value)) {
+    dropped.push('error')
+    return
+  }
+  if (typeof value.message !== 'string' || !value.message.trim()) dropped.push('error.message')
+  if (value.code !== undefined && (typeof value.code !== 'string' || !value.code.trim())) dropped.push('error.code')
+  for (const key of Object.keys(value)) {
+    if (key !== 'message' && key !== 'code') dropped.push(`error.${key}`)
   }
 }
 
