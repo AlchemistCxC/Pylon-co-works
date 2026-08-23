@@ -13,6 +13,8 @@ export function createRuntimeClient(transport: ClientTransport) {
     startupDiagnostics: (): Promise<unknown> => transport.invoke('startup_diagnostics').then(normalizeStartupDiagnostics),
     listRuntimeLogs: (): Promise<unknown> => transport.invoke('list_runtime_logs').then(normalizeRuntimeLogList),
     clearRuntimeLogs: (): Promise<unknown> => transport.invoke('clear_runtime_logs'),
+    /** B2：RuntimeSheet 挂载/卸载驱动后端 live 推送闸门。 */
+    setRuntimeLogLive: (enabled: boolean): Promise<unknown> => transport.invoke('set_runtime_log_live', { enabled }),
   }
 }
 

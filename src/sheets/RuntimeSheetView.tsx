@@ -35,6 +35,9 @@ export default function RuntimeSheetView({ sheet: _sheet, ctx }: { sheet: SheetR
     createRuntimeClient({ invoke: (cmd, args) => invoke(cmd, args as Record<string, unknown> | undefined) }).listRuntimeLogs().then(raw => {
       if (!disposed) setEntries(previous => mergeRuntimeLogs(previous, normalizeRuntimeLogList(raw)))
     }).catch(error => reportRuntimeError('读取运行日志', error))
+    // B2：挂载时开 live 推送、卸载时关（ringbuffer pull 兜底不受影响）
+    const runtimeClient = createRuntimeClient({ invoke: (cmd, args) => invoke(cmd, args as Record<string, unknown> | undefined) })
+    void runtimeClient.setRuntimeLogLive(true).catch(() => {})
     const unlisten = listen<unknown>('pylon:runtime-log', event => {
       if (disposed) return
       const entry = normalizeRuntimeLogEntry(event.payload)
@@ -42,6 +45,7 @@ export default function RuntimeSheetView({ sheet: _sheet, ctx }: { sheet: SheetR
     })
     return () => {
       disposed = true
+      void runtimeClient.setRuntimeLogLive(false).catch(() => {})
       unlisten.then(stop => stop()).catch(() => {})
     }
   }, [])
