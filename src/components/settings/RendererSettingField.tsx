@@ -96,7 +96,7 @@ export default function RendererSettingField(props: RendererSettingFieldProps) {
       if (presentation === 'listbox') {
         return <div className="renderer-setting-field" data-setting-key={settingFieldKey(field)}>
           <label htmlFor={fieldId}>{label}</label>
-          <select id={fieldId} multiple size={Math.min(6, options.length)} aria-label={label}
+          <select id={fieldId} multiple size={Math.max(1, Math.min(6, options.length))} aria-label={label}
             value={selected} onChange={event => props.onChange(Array.from(event.currentTarget.selectedOptions).map(option => option.value))}>
             {options.map(option => <option key={option.value} value={option.value} disabled={option.disabled}>{option.label ?? option.value}</option>)}
           </select>{reset}

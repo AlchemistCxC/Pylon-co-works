@@ -138,3 +138,12 @@ describe('S5 Owner 正式化（施工书 06 §S5）', () => {
     expect(isPageOwnedSection('chat')).toBe(false)
   })
 })
+
+describe('B3.1 Owner 表与页面自有表零交集（边界探针）', () => {
+  it('SECTION_OWNERS 与 PAGE_OWNED_SECTIONS 无交集', () => {
+    const owners = Object.keys(SECTION_OWNERS)
+    for (const s of PAGE_OWNED_SECTIONS) {
+      expect(owners, s + ' 不能同时属于 owner 与 page-owned').not.toContain(s)
+    }
+  })
+})
