@@ -1171,6 +1171,59 @@
   }
 }
 
+/* C10：后台任务／workflow 专属卡；设置由 data-* 与 inline token 消费。 */
+.term-workflow-card {
+  display: grid;
+  gap: var(--ui-space-2);
+  width: min(100%, 960px);
+  margin: var(--ui-space-2) 0;
+  border: var(--line-width-1) solid var(--border);
+  border-inline-start: var(--line-width-3) solid var(--accent);
+  padding: var(--ui-space-3);
+  color: var(--text);
+  background: var(--bg-panel, transparent);
+  margin-inline-start: calc(var(--workflow-indent, 24px) * min(var(--workflow-depth, 0), 6));
+}
+.term-workflow-card[data-layout="lanes"] { border-inline-start-color: var(--border); }
+.term-workflow-card[data-layout="list"] { width: 100%; }
+.term-workflow-card[data-connector="none"] { border-inline-start-color: transparent; }
+.term-workflow-card[data-density="compact"] { gap: var(--ui-space-1); padding: var(--ui-space-2); }
+.term-workflow-card[data-palette="mono"] { border-inline-start-color: var(--border); }
+.term-workflow-card[data-palette="semantic"][data-status="failed"],
+.term-workflow-card[data-palette="semantic"][data-status="timeout"],
+.term-workflow-card[data-palette="semantic"][data-status="cancelled"] { border-inline-start-color: var(--danger, #e5484d); }
+.term-workflow-card[data-active="true"] { box-shadow: inset 0 0 0 var(--line-width-1) color-mix(in srgb, var(--accent) 25%, transparent); }
+.term-workflow-card[data-motion="animate"] .term-workflow-stats { animation: workflow-progress-pulse 900ms ease-in-out infinite alternate; }
+.term-workflow-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: var(--ui-space-2);
+  min-width: 0;
+  cursor: pointer;
+}
+.term-workflow-head strong { min-width: 0; overflow-wrap: anywhere; }
+.term-workflow-head small,
+.term-workflow-provenance,
+.term-workflow-termination { color: var(--text-dim); font-size: var(--font-size-xs); }
+.term-workflow-stats { color: var(--text-dim); font-size: var(--font-size-xs); }
+.term-workflow-result { margin: 0; overflow-wrap: anywhere; }
+.term-workflow-error { color: var(--danger, #e5484d); }
+.term-workflow-actions { display: flex; flex-wrap: wrap; gap: var(--ui-space-2); }
+.term-workflow-card[data-motion="none"],
+.term-workflow-card[data-motion="none"] .term-workflow-stats { animation: none; transition: none; }
+@keyframes workflow-progress-pulse {
+  from { opacity: .72; }
+  to { opacity: 1; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .term-workflow-card,
+  .term-workflow-card .term-workflow-stats {
+    animation: none !important;
+    transition: none !important;
+  }
+}
+
 @media (max-width: 720px) {
   .term { padding: var(--ui-space-4); }
   .term-tool-summary { max-width: 42%; }

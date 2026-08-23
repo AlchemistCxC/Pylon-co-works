@@ -92,3 +92,32 @@ describe('C09 React fatal fallback: subagent/delegation/team activities', () => 
     expect(screen.getAllByText('requested').length).toBeGreaterThan(0)
   })
 })
+
+describe('C10 React fatal fallback: workflow activities', () => {
+  it('keeps workflow termination evidence readable when Solid is unavailable', () => {
+    const current: WorkbenchDocument = {
+      ...createWorkbenchDocument('local:c10'),
+      revision: 10,
+      activities: [{
+        id: 'workflow-1', kind: 'activity', activityKind: 'workflow', semanticKind: 'activity.workflow',
+        title: 'release pipeline', status: 'timeout', killed: true, timeout: true, orphan: false, sequence: 1,
+      } as WorkbenchDocument['activities'][number]],
+    }
+    const reader: WorkbenchDocumentReader = {
+      getSnapshot: () => current,
+      subscribe: () => () => {},
+      getSlice: () => undefined as never,
+      subscribeSlice: () => () => {},
+    }
+    render(<ReactWorkbenchFatalFallback
+      document={reader}
+      failure={{ suiteId: 'builtin.solid', phase: 'slot', message: 'solid failed' }}
+      onRetry={vi.fn()}
+      onSelectSuite={vi.fn()}
+      onOpenDiagnostics={vi.fn()}
+    />)
+    const workflow = screen.getByRole('status', { name: '工作流 fallback：release pipeline，timeout' })
+    expect(workflow).toHaveTextContent('已终止')
+    expect(workflow).toHaveTextContent('超时')
+  })
+})

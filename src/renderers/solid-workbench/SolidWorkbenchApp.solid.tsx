@@ -33,6 +33,7 @@ import { SolidSearchOrLink } from './chat/content/SearchResults.solid.tsx'
 import { SolidDiffContent, SolidLspDiagnosticContent } from './chat/content/DiffDiagnosticContent.solid.tsx'
 import { SolidLogBlock, SolidProcessActivity, SolidTerminalBlock } from './chat/content/TerminalBlock.solid.tsx'
 import { SolidSubagentCard } from './chat/content/SubagentCard.solid.tsx'
+import { SolidWorkflowActivityCard } from './chat/content/WorkflowCard.solid.tsx'
 import type { RenderCommandPort } from '../../contracts/messageRenderer.ts'
 import { canExecuteRendererSemanticCommand, executeRendererSemanticCommand } from '../../host/renderer-suite/rendererSemanticCommand.ts'
 import { normalizeWorkbenchMountInput } from './workbenchContracts.ts'
@@ -366,9 +367,12 @@ function CanonicalActivitySlot(props: {
             ? <SolidProcessActivity activity={props.activity}
                 appearance={{ ...props.context.appearanceSnapshot(), reducedMotion: props.context.input().reducedMotion }}
                 commands={fallbackRenderCommands(props.context)} />
-          : ['activity.subagent', 'activity.delegation', 'activity.team',
-             'activity.workflow', 'activity.workflow-phase', 'activity.workflow-agent'].includes(props.activity.semanticKind ?? '')
+          : ['activity.subagent', 'activity.delegation', 'activity.team'].includes(props.activity.semanticKind ?? '')
             ? <SolidSubagentCard activity={props.activity}
+                appearance={{ ...props.context.appearanceSnapshot(), reducedMotion: props.context.input().reducedMotion }}
+                commands={fallbackRenderCommands(props.context)} />
+          : ['activity.workflow', 'activity.workflow-phase', 'activity.workflow-agent', 'activity.background-task'].includes(props.activity.semanticKind ?? '')
+            ? <SolidWorkflowActivityCard activity={props.activity}
                 appearance={{ ...props.context.appearanceSnapshot(), reducedMotion: props.context.input().reducedMotion }}
                 commands={fallbackRenderCommands(props.context)} />
           : <div class="solid-workbench-activity" data-activity-id={props.activity.id} data-status={props.activity.status}>

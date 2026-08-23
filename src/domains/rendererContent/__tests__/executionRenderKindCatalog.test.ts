@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { BUILTIN_EXECUTION_RENDER_KINDS, isProcessActivitySnapshotInput, isSubagentActivitySnapshotInput, isWorkflowActivitySnapshotInput } from '../executionRenderKindCatalog.ts'
+import { BUILTIN_EXECUTION_RENDER_KINDS, isBackgroundTaskActivitySnapshotInput, isProcessActivitySnapshotInput, isSubagentActivitySnapshotInput, isWorkflowActivitySnapshotInput } from '../executionRenderKindCatalog.ts'
 import { BUILTIN_SOLID_CONTENT_KINDS } from '../../../renderers/solid-workbench/builtinSolidRendererSuite.ts'
 
 describe('C07 execution render kind catalog', () => {
@@ -86,6 +86,14 @@ describe('C07 execution render kind catalog', () => {
       expect(kind.fallbackKind).toBe('content.unknown')
       expect(BUILTIN_SOLID_CONTENT_KINDS).toContain(`activity.${family}`)
       expect(kind.validateInput?.(kind.fixture)).toBe(true)
+      const settingKeys = kind.settings?.groups.flatMap(group => group.fields.map(field => field.key)) ?? []
+      expect(settingKeys).toEqual(expect.arrayContaining([
+        'density', 'statusPalette', 'workflowLayout', 'workflowConnector', 'indent', 'collapseCompleted', 'stats', 'animateProgress',
+      ]))
+      expect(kind.defaultTokens).toMatchObject({
+        density: 'comfortable', statusPalette: 'semantic', workflowLayout: 'timeline', workflowConnector: true, indent: 24,
+        collapseCompleted: true, animateProgress: true,
+      })
     }
     // relation 挂接：phase/agent 携带 parentId；workflow 本体无 parentId
     const wf = BUILTIN_EXECUTION_RENDER_KINDS.find(k => k.id === 'activity.workflow')!
@@ -97,5 +105,58 @@ describe('C07 execution render kind catalog', () => {
       progress: { completed: 1, total: 3 },
     })).toBe(true)
     expect(isWorkflowActivitySnapshotInput({ id: 'w2', kind: 'activity', activityKind: 'mystery', status: 'running' })).toBe(false)
+    expect(isWorkflowActivitySnapshotInput({
+      id: 'w3', kind: 'activity', activityKind: 'workflow-phase', semanticKind: 'activity.workflow-agent', status: 'running',
+    })).toBe(false)
+    expect(isWorkflowActivitySnapshotInput({
+      id: 'w4', kind: 'activity', activityKind: 'workflow', semanticKind: 'activity.workflow', status: 'teleporting',
+    })).toBe(false)
+    expect(isWorkflowActivitySnapshotInput({
+      id: 'w5', kind: 'activity', activityKind: 'workflow-phase', semanticKind: 'activity.workflow-phase', status: 'running',
+      output: [{ kind: 'terminal', streams: [{ stream: 'stdin', text: 'unsafe' }] }],
+    })).toBe(false)
+    expect(isWorkflowActivitySnapshotInput({
+      id: 'w6', kind: 'activity', activityKind: 'workflow-agent', semanticKind: 'activity.workflow-agent', status: 'running',
+      killed: 'yes', timeout: 1,
+    })).toBe(false)
+    expect(isWorkflowActivitySnapshotInput({
+      id: 'w7', kind: 'activity', activityKind: 'workflow-phase', semanticKind: 'activity.workflow-phase', status: 'running',
+      depth: -1,
+    })).toBe(false)
+    expect(isWorkflowActivitySnapshotInput({
+      id: 'w8', kind: 'activity', activityKind: 'workflow', semanticKind: 'activity.workflow', status: 'running',
+      metrics: { toolCount: -1, durationMs: 'fast' },
+    })).toBe(false)
+    const richWorkflow = {
+      id: 'w9', kind: 'activity', activityKind: 'workflow-agent', semanticKind: 'activity.workflow-agent', status: 'running',
+      sourceAgentId: 'agent-parent', description: 'review release', startedAt: '2026-08-24T00:00:00.000Z',
+      execution: { mode: 'remote', background: true }, tools: [], tasks: [],
+    }
+    expect(isWorkflowActivitySnapshotInput(richWorkflow)).toBe(true)
+    for (const malformed of [
+      { sourceAgentId: 42 }, { completedAt: [] }, { execution: ['remote'] }, { tools: {} }, { tasks: 'one' },
+    ]) expect(isWorkflowActivitySnapshotInput({ ...richWorkflow, ...malformed })).toBe(false)
+  })
+
+  it('strictly validates background-task lifecycle and rich fields (C10)', () => {
+    expect(isBackgroundTaskActivitySnapshotInput({
+      id: 'bg-invalid-status', kind: 'activity', activityKind: 'background-task',
+      semanticKind: 'activity.background-task', status: 'teleporting',
+    })).toBe(false)
+    expect(isBackgroundTaskActivitySnapshotInput({
+      id: 'bg-invalid-output', kind: 'activity', activityKind: 'background-task',
+      semanticKind: 'activity.background-task', status: 'running',
+      output: [{ kind: 'terminal', streams: [{ stream: 'stdin', text: 'unsafe' }] }],
+    })).toBe(false)
+    const background = {
+      id: 'bg-rich', kind: 'activity', activityKind: 'background-task',
+      semanticKind: 'activity.background-task', status: 'running',
+    }
+    for (const malformed of [
+      { progress: () => undefined },
+      { metrics: { toolCount: -1 } },
+      { killed: 'yes' },
+      { timeout: 1 },
+    ]) expect(isBackgroundTaskActivitySnapshotInput({ ...background, ...malformed })).toBe(false)
   })
 })

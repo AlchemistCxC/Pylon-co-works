@@ -26,6 +26,58 @@ const envelope = (sequence: number, event: Parameters<typeof createWorkbenchEnve
   })
 
 describe('C10 background-task / workflow projection', () => {
+  it('preserves progress result and killed/timeout termination evidence on the activity node', () => {
+    const { document } = projectWorkbench([
+      envelope(1, {
+        type: 'activity.started', activityId: 'bg-evidence',
+        activity: { kind: 'background-task', title: 'nightly index' },
+      }),
+      envelope(2, {
+        type: 'activity.progress', activityId: 'bg-evidence',
+        patch: {
+          usage: { totalTokens: 420 },
+          metrics: { toolCount: 3, durationMs: 1500 },
+          result: { summary: 'partial output' },
+          killed: true,
+          timeout: true,
+        },
+      }),
+    ])
+    const node = selectActivities(document).find(activity => activity.id === 'bg-evidence')
+    expect(node).toMatchObject({
+      result: { summary: 'partial output' },
+      usage: { totalTokens: 420 },
+      metrics: { toolCount: 3, durationMs: 1500 },
+      killed: true,
+      timeout: true,
+    })
+    expect(document.messages).toEqual([])
+  })
+
+  it('narrows workflow progress output and preserves malformed evidence as bounded unknown content', () => {
+    const progressed = envelope(1, {
+      type: 'activity.progress', activityId: 'phase-output',
+      patch: {
+        kind: 'workflow-phase',
+        output: [
+          { kind: 'text', text: 'compiled 12 modules' },
+          { kind: 'terminal', streams: [{ stream: 'stdin', text: 'unsafe' }] },
+        ],
+      },
+    })
+    const { document } = projectWorkbench([progressed])
+    const node = selectActivities(document).find(activity => activity.id === 'phase-output')
+    expect(node?.output).toEqual([
+      { kind: 'text', text: 'compiled 12 modules' },
+      expect.objectContaining({ kind: 'unknown', originalType: 'terminal', truncated: false }),
+    ])
+    expect(document.diagnostics).toContainEqual(expect.objectContaining({
+      code: 'activity.workflow-phase.part-malformed',
+      eventId: progressed.eventId,
+      data: expect.objectContaining({ activityId: 'phase-output', partIndex: 1 }),
+    }))
+  })
+
   it('derives activity.background-task for unknown provider task families without guessing narrower kinds', () => {
     const { document } = projectWorkbench([
       envelope(1, {

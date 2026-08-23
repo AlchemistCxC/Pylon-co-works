@@ -134,6 +134,9 @@ export default function ReactWorkbenchFatalFallback(props: {
 }
 
 function ReactFallbackSubagentActivity({ activity }: { activity: WorkbenchActivityNode }) {
+  const isWorkflow = activity.activityKind === 'background-task'
+    || activity.activityKind === 'workflow' || activity.activityKind === 'workflow-phase' || activity.activityKind === 'workflow-agent'
+  const activityLabel = isWorkflow ? '工作流' : '子代理'
   const output = activity.output ?? (Array.isArray(activity.parts)
     ? activity.parts.filter((part): part is ContentPart => Boolean(part && typeof part === 'object'
       && !Array.isArray(part) && typeof (part as { kind?: unknown }).kind === 'string'))
@@ -143,13 +146,17 @@ function ReactFallbackSubagentActivity({ activity }: { activity: WorkbenchActivi
     ? (activity.result as { summary: string }).summary : undefined
   return <section role="status" className="react-workbench-fatal-activity"
     data-react-activity-kind={activity.semanticKind ?? activity.activityKind ?? 'unknown'}
-    aria-label={`子代理 fallback：${activity.title || activity.id}，${activity.status}`}>
+    aria-label={`${activityLabel} fallback：${activity.title || activity.id}，${activity.status}`}>
     <strong>{activity.title || activity.id}</strong>
     <span>{activity.status}{activity.depth !== undefined ? ` · depth ${activity.depth}` : ''}
       {activity.parentId ? ` · parent ${activity.parentId}` : ''}</span>
     {activity.goal && <span>目标：{activity.goal}</span>}
     {activity.description && <span>{activity.description}</span>}
     {activity.progress !== undefined && <pre>{fallbackJson(activity.progress)}</pre>}
+    {(activity.killed === true || activity.timeout === true) && <small>{[
+      activity.killed === true ? '已终止' : undefined,
+      activity.timeout === true ? '超时' : undefined,
+    ].filter(Boolean).join(' · ')}</small>}
     {resultSummary && <p>{resultSummary}</p>}
     {output.map((part, index) => <ReactFallbackContentPart key={`${activity.id}:output:${index}`} part={part} />)}
     {activity.usage !== undefined && <pre aria-label="子代理用量">{fallbackJson(activity.usage)}</pre>}

@@ -412,6 +412,24 @@ describe('mountSolidWorkbench', () => {
     expect(host.textContent).not.toContain('Unsupported content kind')
   })
 
+  it('C10 workflow remains readable through the built-in no-Slot fallback', async () => {
+    const { host, services } = mountPreview()
+    const projected = projectWorkbench([createWorkbenchEnvelope({
+      sessionId: 'preview-session', recordedAt: '2026-08-24T00:00:01.000Z', sequence: 1,
+      source: { provider: 'peri', sourceId: 'workflow-fallback' }, identity: { taskId: 'workflow-fallback' },
+      provenance: { origin: 'local-observed', trust: 'authoritative' },
+      event: {
+        type: 'activity.started', activityId: 'workflow-fallback',
+        activity: { kind: 'workflow', title: 'fallback workflow' },
+      },
+    })]).document
+
+    services.runtime.replaceDocument(projected, { ownerKey: 'owner-preview', generation: 1 })
+
+    await waitFor(() => expect(host.querySelector('.term-workflow-card')).toHaveTextContent('fallback workflow'))
+    expect(host.querySelector('.term-subagent-card')).toBeNull()
+  })
+
   it('C07 activity.process renders identity, output, status, and synthetic provenance outside messages', async () => {
     const { host, services } = mountPreview()
     const createActivity = (sequence: number, event: WorkbenchEventEnvelope['event']) => createWorkbenchEnvelope({

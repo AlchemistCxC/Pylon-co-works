@@ -79,13 +79,25 @@ export function isWorkflowActivitySnapshotInput(input: unknown): boolean {
     || typeof input.id !== 'string' || !input.id.trim()
     || input.kind !== 'activity'
     || !(input.activityKind === 'workflow' || input.activityKind === 'workflow-phase' || input.activityKind === 'workflow-agent')
-    || typeof input.status !== 'string' || !input.status.trim()) return false
-  for (const key of ['semanticKind', 'title', 'parentId', 'role', 'model', 'provider', 'goal'] as const) {
+    || (input.semanticKind !== undefined && input.semanticKind !== `activity.${input.activityKind}`)
+    || !isActivityStatus(input.status)) return false
+  for (const key of ['title', 'parentId', 'sourceAgentId', 'description', 'startedAt', 'completedAt', 'role', 'model', 'provider', 'goal'] as const) {
     if (input[key] !== undefined && (typeof input[key] !== 'string' || !input[key].trim())) return false
   }
-  if (input.depth !== undefined && (typeof input.depth !== 'number' || !Number.isFinite(input.depth))) return false
-  for (const key of ['progress', 'result', 'usage', 'files', 'metadata', 'capabilities', 'parts'] as const) {
+  if (input.depth !== undefined && (typeof input.depth !== 'number' || !Number.isFinite(input.depth) || input.depth < 0)) return false
+  for (const key of ['progress', 'result', 'usage', 'files', 'metadata', 'capabilities'] as const) {
     if (input[key] !== undefined && !isJsonValue(input[key])) return false
+  }
+  for (const key of ['parts', 'output'] as const) {
+    if (input[key] !== undefined && (!Array.isArray(input[key]) || !input[key].every(part => parseContentPart(part).ok))) return false
+  }
+  for (const key of ['killed', 'timeout'] as const) {
+    if (input[key] !== undefined && typeof input[key] !== 'boolean') return false
+  }
+  if (input.metrics !== undefined && !isActivityMetrics(input.metrics)) return false
+  if (input.execution !== undefined && (!isRecord(input.execution) || !isJsonValue(input.execution))) return false
+  for (const key of ['tools', 'tasks'] as const) {
+    if (input[key] !== undefined && (!Array.isArray(input[key]) || !input[key].every(isJsonValue))) return false
   }
   return true
 }
@@ -101,9 +113,9 @@ function workflowKindDefinition(family: WorkflowActivityFamily): RenderKindDefin
       title: `Fixture ${family}`, status: 'running', parentId: family === 'workflow' ? undefined : 'fixture-workflow',
       role: family === 'workflow-agent' ? 'reviewer' : undefined, parts: [],
     },
-    defaultTokens: SUBAGENT_WORKFLOW_DEFAULT_TOKENS,
+    defaultTokens: WORKFLOW_DEFAULT_TOKENS,
     settingsSchemaVersion: 1,
-    settings: SUBAGENT_WORKFLOW_SETTINGS,
+    settings: WORKFLOW_SETTINGS,
     validateInput: isWorkflowActivitySnapshotInput,
   } satisfies RenderKindDefinition)
 }
@@ -154,6 +166,41 @@ const SUBAGENT_WORKFLOW_DEFAULT_TOKENS = Object.freeze({
   stats: ['usage', 'files', 'progress', 'metrics'], statusPalette: 'semantic', defaultExpandedDepth: 2, showAggregate: true,
 })
 
+const WORKFLOW_SETTINGS = Object.freeze({
+  schemaVersion: 1,
+  groups: [
+    {
+      id: 'workflow-appearance', label: '工作流外观', layout: 'grid', fields: [
+        { key: 'density', label: '密度', type: 'choice', presentation: 'segmented', options: [
+          { value: 'comfortable', label: '舒适' }, { value: 'compact', label: '紧凑' },
+        ], default: 'comfortable' },
+        { key: 'statusPalette', label: '状态配色', type: 'choice', presentation: 'select', options: [
+          { value: 'semantic', label: '语义色' }, { value: 'mono', label: '单色' },
+        ], default: 'semantic' },
+        { key: 'workflowLayout', label: '工作流布局', type: 'choice', presentation: 'segmented', options: [
+          { value: 'timeline', label: '时间线' }, { value: 'lanes', label: '泳道' }, { value: 'list', label: '列表' },
+        ], default: 'timeline' },
+        { key: 'workflowConnector', label: '显示连接线', type: 'boolean', presentation: 'toggle', default: true },
+        { key: 'indent', label: '层级缩进', type: 'number', presentation: 'slider+input', min: 0, max: 80, step: 2, unit: 'px', default: 24 },
+        { key: 'collapseCompleted', label: '折叠已完成阶段', type: 'boolean', presentation: 'toggle', default: true },
+      ],
+    },
+    {
+      id: 'workflow-behaviour', label: '工作流信息', layout: 'grid', fields: [
+        { key: 'stats', label: '统计列', type: 'multi-choice', presentation: 'checklist', options: [
+          { value: 'usage', label: '用量' }, { value: 'tools', label: '工具' }, { value: 'duration', label: '耗时' },
+        ], default: ['usage', 'tools', 'duration'] },
+        { key: 'animateProgress', label: '进度动效', type: 'boolean', presentation: 'toggle', default: true },
+      ],
+    },
+  ],
+} satisfies RendererSettingsSchema)
+
+const WORKFLOW_DEFAULT_TOKENS = Object.freeze({
+  density: 'comfortable', statusPalette: 'semantic', workflowLayout: 'timeline', workflowConnector: true, indent: 24, collapseCompleted: true,
+  stats: ['usage', 'tools', 'duration'], animateProgress: true,
+})
+
 export const BUILTIN_EXECUTION_RENDER_KINDS: readonly RenderKindDefinition[] = Object.freeze([
   ...(['subagent', 'delegation', 'team'] as const).map(subagentKindDefinition),
   ...(['workflow', 'workflow-phase', 'workflow-agent'] as const).map(workflowKindDefinition),
@@ -180,9 +227,9 @@ export const BUILTIN_EXECUTION_RENDER_KINDS: readonly RenderKindDefinition[] = O
       id: 'fixture-background-task', kind: 'activity', activityKind: 'background-task', semanticKind: 'activity.background-task',
       title: 'Fixture background task', status: 'running', parts: [],
     },
-    defaultTokens: SUBAGENT_WORKFLOW_DEFAULT_TOKENS,
+    defaultTokens: WORKFLOW_DEFAULT_TOKENS,
     settingsSchemaVersion: 1,
-    settings: SUBAGENT_WORKFLOW_SETTINGS,
+    settings: WORKFLOW_SETTINGS,
     validateInput: isBackgroundTaskActivitySnapshotInput,
   } satisfies RenderKindDefinition),
 ])
@@ -194,9 +241,19 @@ export function isBackgroundTaskActivitySnapshotInput(input: unknown): boolean {
     || input.kind !== 'activity'
     || input.activityKind !== 'background-task'
     || input.semanticKind !== 'activity.background-task'
-    || typeof input.status !== 'string' || !input.status.trim()) return false
+    || !isActivityStatus(input.status)) return false
   for (const key of ['title', 'parentId', 'sessionId', 'reason'] as const) {
     if (input[key] !== undefined && (typeof input[key] !== 'string' || !input[key].trim())) return false
+  }
+  for (const key of ['parts', 'output'] as const) {
+    if (input[key] !== undefined && (!Array.isArray(input[key]) || !input[key].every(part => parseContentPart(part).ok))) return false
+  }
+  for (const key of ['progress', 'result', 'usage', 'files', 'metadata', 'capabilities'] as const) {
+    if (input[key] !== undefined && !isJsonValue(input[key])) return false
+  }
+  if (input.metrics !== undefined && !isActivityMetrics(input.metrics)) return false
+  for (const key of ['killed', 'timeout'] as const) {
+    if (input[key] !== undefined && typeof input[key] !== 'boolean') return false
   }
   return true
 }

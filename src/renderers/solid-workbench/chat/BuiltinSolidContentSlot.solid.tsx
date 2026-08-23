@@ -33,7 +33,8 @@ import { diffSnapshotFromPart } from '../../../domains/workbench/diffSnapshot.ts
 import { SolidDiffContent, SolidLspDiagnosticContent } from './content/DiffDiagnosticContent.solid.tsx'
 import { SolidLogBlock, SolidProcessActivity, SolidTerminalBlock } from './content/TerminalBlock.solid.tsx'
 import { SolidSubagentCard } from './content/SubagentCard.solid.tsx'
-import { isProcessActivitySnapshotInput, isSubagentActivitySnapshotInput, isWorkflowActivitySnapshotInput } from '../../../domains/rendererContent/executionRenderKindCatalog.ts'
+import { SolidWorkflowActivityCard } from './content/WorkflowCard.solid.tsx'
+import { isBackgroundTaskActivitySnapshotInput, isProcessActivitySnapshotInput, isSubagentActivitySnapshotInput, isWorkflowActivitySnapshotInput } from '../../../domains/rendererContent/executionRenderKindCatalog.ts'
 import type { WorkbenchActivityNode } from '../../../domains/workbench/workbenchProjector.ts'
 
 export function BuiltinSolidContentSlot(props: {
@@ -260,7 +261,6 @@ export function BuiltinSolidContentSlot(props: {
       </Match>
       <Match when={[
         'activity.subagent', 'activity.delegation', 'activity.team',
-        'activity.workflow', 'activity.workflow-phase', 'activity.workflow-agent',
       ].includes(kind())}>
         <Show
           when={isSubagentActivitySnapshotInput(props.snapshot.payload) || isWorkflowActivitySnapshotInput(props.snapshot.payload)
@@ -268,6 +268,26 @@ export function BuiltinSolidContentSlot(props: {
           fallback={<pre class="solid-content-unknown" data-content-kind={kind()}>Invalid subagent activity snapshot</pre>}
         >
           {activity => <SolidSubagentCard activity={activity()} appearance={props.appearance} commands={props.commands} />}
+        </Show>
+      </Match>
+      <Match when={[
+        'activity.workflow', 'activity.workflow-phase', 'activity.workflow-agent',
+      ].includes(kind())}>
+        <Show
+          when={isWorkflowActivitySnapshotInput(props.snapshot.payload)
+            ? props.snapshot.payload as WorkbenchActivityNode : undefined}
+          fallback={<pre class="solid-content-unknown" data-content-kind={kind()}>Invalid workflow activity snapshot</pre>}
+        >
+          {activity => <SolidWorkflowActivityCard activity={activity()} appearance={props.appearance} commands={props.commands} />}
+        </Show>
+      </Match>
+      <Match when={kind() === 'activity.background-task'}>
+        <Show
+          when={isBackgroundTaskActivitySnapshotInput(props.snapshot.payload)
+            ? props.snapshot.payload as WorkbenchActivityNode : undefined}
+          fallback={<pre class="solid-content-unknown" data-content-kind={kind()}>Invalid background task snapshot</pre>}
+        >
+          {activity => <SolidWorkflowActivityCard activity={activity()} appearance={props.appearance} commands={props.commands} />}
         </Show>
       </Match>
       <Match when={kind() === 'content.plan'}>

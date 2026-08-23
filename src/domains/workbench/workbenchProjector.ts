@@ -109,6 +109,9 @@ export interface WorkbenchActivityNode {
   readonly displayName?: string
   /** C07：activity terminal result and cancellation reason remain separate from message history. */
   readonly result?: unknown
+  /** C10：progress patch termination evidence; never inferred from transcript text. */
+  readonly killed?: boolean
+  readonly timeout?: boolean
   /** C09：schema-validated activity output consumed by renderers. */
   readonly output?: readonly ContentPart[]
   readonly reason?: string
@@ -610,13 +613,15 @@ function reduceActivity(document: WorkbenchDocument, envelope: WorkbenchEventEnv
       ? `activity.${activityKind}` : undefined)
   const sourceParts = result?.output ?? result?.parts ?? patch.output ?? patch.parts ?? activity.output ?? activity.parts
   const isC09Activity = activityKind === 'subagent' || activityKind === 'delegation' || activityKind === 'team'
-  const typedPartsFamily = activityKind === 'process' || activityKind === 'background-task' || isC09Activity
+  const isC10Activity = activityKind === 'background-task' || activityKind === 'workflow'
+    || activityKind === 'workflow-phase' || activityKind === 'workflow-agent'
+  const typedPartsFamily = activityKind === 'process' || isC10Activity || isC09Activity
   const strictParts = typedPartsFamily || semanticKind === 'activity.process'
     ? narrowActivityParts(sourceParts, id, envelope, activityKind ?? semanticKind?.replace(/^activity\./, '') ?? 'activity')
     : undefined
   const narrowedParts = strictParts ?? { parts: jsonSnapshot(sourceParts), diagnostics: [] }
   const parts = narrowedParts.parts ?? previous?.parts
-  const output = isC09Activity ? strictParts?.parts ?? previous?.output : previous?.output
+  const output = isC09Activity || isC10Activity ? strictParts?.parts ?? previous?.output : previous?.output
   const error = event.error !== undefined
     ? normalizeNormalizedError(event.error)
     : result?.error !== undefined
@@ -624,6 +629,8 @@ function reduceActivity(document: WorkbenchDocument, envelope: WorkbenchEventEnv
       : patch.error !== undefined
         ? normalizeNormalizedError(patch.error)
         : previous?.error
+  const killed = typeof patch.killed === 'boolean' ? patch.killed : previous?.killed
+  const timeout = typeof patch.timeout === 'boolean' ? patch.timeout : previous?.timeout
   const next: WorkbenchActivityNode = {
     id,
     kind: 'activity',
@@ -647,8 +654,14 @@ function reduceActivity(document: WorkbenchDocument, envelope: WorkbenchEventEnv
     ...(patch.progress !== undefined ? { progress: jsonSnapshot(patch.progress) } : previous?.progress !== undefined ? { progress: previous.progress } : {}),
     ...(parts !== undefined ? { parts } : {}),
     ...(output !== undefined ? { output } : {}),
-    ...(event.result !== undefined ? { result: jsonSnapshot(event.result) } : previous?.result !== undefined ? { result: previous.result } : {}),
+    ...(event.result !== undefined
+      ? { result: jsonSnapshot(event.result) }
+      : patch.result !== undefined
+        ? { result: jsonSnapshot(patch.result) }
+        : previous?.result !== undefined ? { result: previous.result } : {}),
     ...(error !== undefined ? { error } : {}),
+    ...(killed !== undefined ? { killed } : {}),
+    ...(timeout !== undefined ? { timeout } : {}),
     ...(stringValue(event.reason) ?? previous?.reason ? { reason: stringValue(event.reason) ?? previous?.reason } : {}),
     // C09：子代理/委派/团队 rich 字段——跨事件累积（当前缺失保留前值），缺失稳定降级为 undefined
     ...c09RichFields(activity, patch, result, previous),
