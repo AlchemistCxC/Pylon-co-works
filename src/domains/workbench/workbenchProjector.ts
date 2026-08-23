@@ -13,6 +13,7 @@ import type {
   ActivityEvent,
   AssistEvent,
   DiagnosticEvent,
+  ExtensionEvent,
   GoalEvent,
   InteractionEvent,
   LifecycleEvent,
@@ -38,7 +39,7 @@ import {
 
 export type WorkbenchTimelineKind =
   | 'message' | 'reasoning' | 'tool' | 'activity' | 'interaction'
-  | 'session' | 'usage' | 'plan' | 'lifecycle' | 'diagnostic' | 'unknown' | 'assist'
+  | 'session' | 'usage' | 'plan' | 'lifecycle' | 'diagnostic' | 'extension' | 'unknown' | 'assist'
 
 export interface WorkbenchTimelineEntry {
   readonly id: string
@@ -179,6 +180,19 @@ export interface WorkbenchProjectionDiagnostic {
   readonly data?: unknown
 }
 
+/** Canonical negotiated extension event projected into the disposable document. */
+export interface WorkbenchExtensionNode {
+  readonly id: string
+  readonly kind: ExtensionEvent['kind']
+  readonly payload: ExtensionEvent['payload']
+  readonly fallback: ExtensionEvent['fallback']
+  readonly identity: WorkbenchEventEnvelope['identity']
+  readonly source: WorkbenchEventEnvelope['source']
+  readonly provenance: WorkbenchEventEnvelope['provenance']
+  readonly sequence: number
+  readonly time: string
+}
+
 export interface WorkbenchDocument {
   readonly sessionId: string
   readonly revision: number
@@ -187,6 +201,7 @@ export interface WorkbenchDocument {
   readonly messages: readonly WorkbenchMessage[]
   readonly activities: readonly WorkbenchActivityNode[]
   readonly interactions: readonly WorkbenchInteraction[]
+  readonly extensions: readonly WorkbenchExtensionNode[]
   readonly session: WorkbenchSessionSurface
   readonly assist: AssistSnapshot
   readonly diagnostics: readonly WorkbenchProjectionDiagnostic[]
@@ -212,6 +227,7 @@ export function createWorkbenchDocument(sessionId: string): WorkbenchDocument {
     messages: [],
     activities: [],
     interactions: [],
+    extensions: [],
     session: { status: 'idle', commands: [], options: [] },
     assist: EMPTY_ASSIST_SNAPSHOT,
     diagnostics: [],
@@ -399,6 +415,10 @@ export function selectSystemErrors(document: WorkbenchDocument): readonly Normal
   return document.systemErrors
 }
 
+export function selectExtensions(document: WorkbenchDocument): readonly WorkbenchExtensionNode[] {
+  return document.extensions
+}
+
 function reduceSemanticEvent(document: WorkbenchDocument, envelope: WorkbenchEventEnvelope): WorkbenchDocument {
   const event = envelope.event
   switch (event.type) {
@@ -457,6 +477,8 @@ function reduceSemanticEvent(document: WorkbenchDocument, envelope: WorkbenchEve
     case 'assist.file-suggestions':
     case 'assist.queued-command':
       return reduceAssist(document, event)
+    case 'extension.event':
+      return reduceExtension(document, envelope, event)
     case 'event.unknown':
       return addDiagnostic(document, envelope, 'event.unknown', event.summary, 'warning', event)
     default:
@@ -694,6 +716,21 @@ function reduceActivity(document: WorkbenchDocument, envelope: WorkbenchEventEnv
   return narrowedParts.diagnostics.length > 0
     ? { ...projected, diagnostics: [...projected.diagnostics, ...narrowedParts.diagnostics] }
     : projected
+}
+
+function reduceExtension(document: WorkbenchDocument, envelope: WorkbenchEventEnvelope, event: ExtensionEvent): WorkbenchDocument {
+  const extension: WorkbenchExtensionNode = {
+    id: envelope.eventId,
+    kind: event.kind,
+    payload: jsonSnapshot(event.payload) as ExtensionEvent['payload'],
+    fallback: event.fallback.map(part => jsonSnapshot(part) as ContentPart),
+    identity: { ...envelope.identity },
+    source: { ...envelope.source },
+    provenance: { ...envelope.provenance },
+    sequence: envelope.sequence,
+    time: envelope.occurredAt ?? envelope.recordedAt,
+  }
+  return { ...document, extensions: insertBySequence(document.extensions, extension) }
 }
 
 /** Provider-neutral activity lifecycle: progress is an update, not a state. */
@@ -984,6 +1021,7 @@ function timelineEntry(envelope: WorkbenchEventEnvelope): WorkbenchTimelineEntry
             : event.type.startsWith('session.') ? 'session'
               : event.type.startsWith('usage.') || event.type === 'budget.warning' ? 'usage'
                 : event.type.startsWith('diagnostic.') || event.type === 'event.unknown' ? (event.type === 'event.unknown' ? 'unknown' : 'diagnostic')
+                  : event.type === 'extension.event' ? 'extension'
                   // C08/C13：plan/goal 同属 plan family；lifecycle 独立 kind（不再误判 assist）
                   : event.type.startsWith('plan.') || event.type.startsWith('goal.') ? 'plan'
                     : event.type.startsWith('lifecycle.') ? 'lifecycle' : 'assist'

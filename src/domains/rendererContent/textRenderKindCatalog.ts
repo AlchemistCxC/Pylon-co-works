@@ -14,12 +14,16 @@ import {
 } from '../workbench/content/fileContentValidation.ts'
 import { isValidMediaContentInput } from '../workbench/content/mediaContentValidation.ts'
 import {
-  parseContentPart,
+  isValidArtifactContentInput,
   isValidDiffContentInput,
+  isValidHookSurfaceInput,
   isValidLogContentInput,
   isValidLinkContentInput,
   isValidLspDiagnosticContentInput,
+  isValidMcpResourceContentInput,
+  isValidMemoryContentInput,
   isValidSearchResultContentInput,
+  isValidSkillContentInput,
   isValidTerminalContentInput,
 } from '../workbench/content/contentPartSchema.ts'
 
@@ -272,6 +276,47 @@ const SEARCH_LINK_SETTINGS = Object.freeze({
     },
   ],
 } satisfies RendererSettingsSchema)
+
+const C15_COMMON_FIELDS = Object.freeze([
+  { key: 'categoryPalette', label: '类别配色', type: 'choice', presentation: 'segmented', options: [
+    { value: 'semantic', label: '语义色' }, { value: 'accent', label: '强调色' }, { value: 'neutral', label: '中性色' },
+  ], default: 'semantic' },
+  { key: 'icon', label: '图标', type: 'choice', presentation: 'select', options: [
+    { value: 'auto', label: '自动' }, { value: 'memory', label: '记忆' }, { value: 'skill', label: '技能' },
+    { value: 'server', label: '服务器' }, { value: 'document', label: '文档' }, { value: 'hook', label: 'Hook' },
+  ], default: 'auto' },
+  { key: 'metadataFields', label: '元数据字段', type: 'multi-choice', presentation: 'checklist', options: [
+    { value: 'identity', label: '身份' }, { value: 'source', label: '来源' }, { value: 'scope', label: '范围' },
+    { value: 'version', label: '版本' }, { value: 'mime', label: 'MIME' }, { value: 'server', label: '服务器' },
+    { value: 'tool', label: '工具' }, { value: 'status', label: '状态' }, { value: 'owner', label: '所有者' },
+  ], default: ['identity', 'source', 'status', 'owner'] },
+  { key: 'unknownRawCollapsed', label: '未知字段默认折叠', type: 'boolean', presentation: 'toggle', default: true },
+] satisfies RendererSettingsSchema['groups'][number]['fields'])
+
+function c15Settings(extra: RendererSettingsSchema['groups'][number]['fields'] = []): RendererSettingsSchema {
+  return Object.freeze({
+    schemaVersion: 1,
+    groups: [{ id: 'extension-content', label: '扩展内容', layout: 'grid' as const, fields: [...C15_COMMON_FIELDS, ...extra] }],
+  })
+}
+
+const C15_CONTENT_SETTINGS = c15Settings()
+const C15_MCP_SETTINGS = c15Settings([
+  { key: 'mcpServerBadge', label: '显示 MCP 服务器徽标', type: 'boolean', presentation: 'toggle', default: true },
+])
+const C15_ARTIFACT_SETTINGS = c15Settings([
+  { key: 'artifactPreviewSize', label: '工件预览高度', type: 'number', presentation: 'slider+input', min: 80, max: 1200, step: 20, unit: 'px', default: 320 },
+])
+const C15_HOOK_SETTINGS = c15Settings([
+  { key: 'defaultCollapsed', label: 'Hook 默认折叠', type: 'boolean', presentation: 'toggle', default: true },
+  { key: 'showDuration', label: '显示 Hook 耗时', type: 'boolean', presentation: 'toggle', default: true },
+])
+
+const C15_DEFAULT_TOKENS = Object.freeze({
+  categoryPalette: 'semantic', icon: 'auto', metadataFields: ['identity', 'source', 'status', 'owner'],
+  unknownRawCollapsed: true, artifactPreviewSize: 320, mcpServerBadge: true,
+  defaultCollapsed: true, showDuration: true,
+})
 
 export const TERMINAL_LOG_SETTINGS = Object.freeze({
   schemaVersion: 1,
@@ -546,11 +591,11 @@ export const BUILTIN_TEXT_RENDER_KINDS: readonly RenderKindDefinition[] = [
     category: 'content',
     fallbackKind: 'content.unknown',
     priority: 100,
-    fixture: { kind: 'memory', title: 'Fixture memory', source: 'hermes', status: 'recalled' },
-validateInput: input => parseContentPart(input).ok,
-    defaultTokens: SEARCH_LINK_DEFAULT_TOKENS,
+    fixture: { kind: 'memory', memoryId: 'fixture-memory', title: 'Fixture memory', source: 'hermes', status: 'recalled' },
+    validateInput: isValidMemoryContentInput,
+    defaultTokens: C15_DEFAULT_TOKENS,
     settingsSchemaVersion: 1,
-    settings: SEARCH_LINK_SETTINGS,
+    settings: C15_CONTENT_SETTINGS,
     // C15：memory/skill 只承载安全 metadata/引用/摘要（validator 在 contentPartSchema）
   },
   {
@@ -558,11 +603,11 @@ validateInput: input => parseContentPart(input).ok,
     category: 'content',
     fallbackKind: 'content.unknown',
     priority: 100,
-    fixture: { kind: 'skill', title: 'Fixture skill', source: 'hermes', status: 'available' },
-validateInput: input => parseContentPart(input).ok,
-    defaultTokens: SEARCH_LINK_DEFAULT_TOKENS,
+    fixture: { kind: 'skill', skillId: 'fixture-skill', title: 'Fixture skill', source: 'hermes', status: 'available' },
+    validateInput: isValidSkillContentInput,
+    defaultTokens: C15_DEFAULT_TOKENS,
     settingsSchemaVersion: 1,
-    settings: SEARCH_LINK_SETTINGS,
+    settings: C15_CONTENT_SETTINGS,
   },
   {
     id: 'content.mcp-resource',
@@ -570,21 +615,32 @@ validateInput: input => parseContentPart(input).ok,
     fallbackKind: 'content.unknown',
     priority: 100,
     fixture: { kind: 'mcp-resource', server: 'fixture-mcp', resourceUri: 'file:///fixture.md', mimeType: 'text/markdown' },
-validateInput: input => parseContentPart(input).ok,
-    defaultTokens: SEARCH_LINK_DEFAULT_TOKENS,
+    validateInput: isValidMcpResourceContentInput,
+    defaultTokens: C15_DEFAULT_TOKENS,
     settingsSchemaVersion: 1,
-    settings: SEARCH_LINK_SETTINGS,
+    settings: C15_MCP_SETTINGS,
   },
   {
     id: 'content.artifact',
     category: 'content',
     fallbackKind: 'content.unknown',
     priority: 100,
-    fixture: { kind: 'artifact', title: 'Fixture artifact', uri: 'file:///fixture-artifact.bin', version: 1 },
-validateInput: input => parseContentPart(input).ok,
-    defaultTokens: SEARCH_LINK_DEFAULT_TOKENS,
+    fixture: { kind: 'artifact', artifactId: 'fixture-artifact', title: 'Fixture artifact', uri: 'file:///fixture-artifact.bin', version: 1 },
+    validateInput: isValidArtifactContentInput,
+    defaultTokens: C15_DEFAULT_TOKENS,
     settingsSchemaVersion: 1,
-    settings: SEARCH_LINK_SETTINGS,
+    settings: C15_ARTIFACT_SETTINGS,
+  },
+  {
+    id: 'system.hook',
+    category: 'system',
+    fallbackKind: 'content.unknown',
+    priority: 100,
+    fixture: { phase: 'turn.completed', owner: { pluginId: 'fixture.audit', handlerId: 'after-turn' }, status: 'continued', durationMs: 12 },
+    validateInput: isValidHookSurfaceInput,
+    defaultTokens: C15_DEFAULT_TOKENS,
+    settingsSchemaVersion: 1,
+    settings: C15_HOOK_SETTINGS,
   },
   {
     id: 'content.diff',

@@ -257,6 +257,73 @@ export interface LogContentPart {
   readonly truncation?: TerminalOutputTruncation
 }
 
+export interface MemoryContentPart {
+  readonly kind: 'memory'
+  readonly memoryId: string
+  readonly title: string
+  readonly source: string
+  readonly scope?: string
+  readonly summary?: string
+  readonly status?: string
+  readonly version?: string | number
+  readonly enabled?: boolean
+  readonly used?: boolean
+  readonly raw?: Readonly<Record<string, JsonValue>>
+}
+
+export interface SkillContentPart {
+  readonly kind: 'skill'
+  readonly skillId: string
+  readonly title: string
+  readonly source: string
+  readonly scope?: string
+  readonly summary?: string
+  readonly status?: string
+  readonly version?: string | number
+  readonly enabled?: boolean
+  readonly used?: boolean
+  readonly uri?: string
+  readonly raw?: Readonly<Record<string, JsonValue>>
+}
+
+export interface McpResourceContentPart {
+  readonly kind: 'mcp-resource'
+  readonly server: string
+  readonly resourceUri: string
+  readonly tool?: string
+  readonly title?: string
+  readonly mimeType?: string
+  readonly summary?: string
+  readonly connectionState?: string
+  readonly status?: string
+  readonly raw?: Readonly<Record<string, JsonValue>>
+}
+
+export interface ArtifactContentPart {
+  readonly kind: 'artifact'
+  readonly artifactId: string
+  readonly title: string
+  readonly uri: string
+  readonly version?: string | number
+  readonly mimeType?: string
+  readonly summary?: string
+  readonly status?: string
+  readonly hasBlob?: boolean
+  readonly parts?: readonly ContentPart[]
+  readonly actions?: readonly string[]
+  readonly raw?: Readonly<Record<string, JsonValue>>
+}
+
+export interface HookSurfaceSnapshot {
+  readonly phase: string
+  readonly owner: Readonly<{ pluginId: string; runtimeInstanceId?: string; handlerId: string }>
+  readonly status: string
+  readonly durationMs?: number
+  readonly decision?: string
+  readonly error?: Readonly<{ message: string; code?: string }>
+  readonly raw?: Readonly<Record<string, JsonValue>>
+}
+
 export type ContentPart =
   | TextContentPart
   | ImageContentPart
@@ -268,8 +335,12 @@ export type ContentPart =
   | LspDiagnosticContentPart
   | TerminalContentPart
   | LogContentPart
+  | MemoryContentPart
+  | SkillContentPart
+  | McpResourceContentPart
+  | ArtifactContentPart
   | UnknownContentPart
-  | { readonly kind: Exclude<ContentKind, TextContentPart['kind'] | ImageContentPart['kind'] | ResourceContentPart['kind'] | DocumentContentPart['kind'] | SearchResultContentPart['kind'] | LinkContentPart['kind'] | DiffContentPart['kind'] | LspDiagnosticContentPart['kind'] | TerminalContentPart['kind'] | LogContentPart['kind'] | 'unknown'>; readonly [key: string]: unknown }
+  | { readonly kind: Exclude<ContentKind, TextContentPart['kind'] | ImageContentPart['kind'] | ResourceContentPart['kind'] | DocumentContentPart['kind'] | SearchResultContentPart['kind'] | LinkContentPart['kind'] | DiffContentPart['kind'] | LspDiagnosticContentPart['kind'] | TerminalContentPart['kind'] | LogContentPart['kind'] | MemoryContentPart['kind'] | SkillContentPart['kind'] | McpResourceContentPart['kind'] | ArtifactContentPart['kind'] | 'unknown'>; readonly [key: string]: unknown }
 
 export interface UnknownContentOptions {
   readonly maxRawBytes?: number
@@ -379,6 +450,14 @@ export function parseContentPart(value: unknown): SchemaResult<ContentPart> {
     if (!isValidTerminalContentInput(value)) issues.push(issue([], 'content.terminal', 'normalized terminal output', value))
   } else if (kind === 'log') {
     if (!isValidLogContentInput(value)) issues.push(issue([], 'content.log', 'normalized structured log', value))
+  } else if (kind === 'memory') {
+    if (!isValidMemoryContentInput(value)) issues.push(issue([], 'content.memory', 'normalized memory metadata', value))
+  } else if (kind === 'skill') {
+    if (!isValidSkillContentInput(value)) issues.push(issue([], 'content.skill', 'normalized skill metadata', value))
+  } else if (kind === 'mcp-resource') {
+    if (!isValidMcpResourceContentInput(value)) issues.push(issue([], 'content.mcp-resource', 'normalized MCP resource metadata', value))
+  } else if (kind === 'artifact') {
+    if (!isValidArtifactContentInput(value)) issues.push(issue([], 'content.artifact', 'normalized artifact metadata and preview parts', value))
   } else if (kind === 'tool-result' && value.parts !== undefined) {
     if (!Array.isArray(value.parts)) {
       issues.push(issue(['parts'], 'type.array', 'array', value.parts))
@@ -412,6 +491,49 @@ export function isValidLinkContentInput(input: unknown): input is Omit<LinkConte
   if (!isRecord(input) || typeof input.url !== 'string' || input.url.trim().length === 0) return false
   if (input.title !== undefined && typeof input.title !== 'string') return false
   return input.status === undefined || (Number.isInteger(input.status) && Number(input.status) >= 100 && Number(input.status) <= 599)
+}
+
+export function isValidMemoryContentInput(input: unknown): input is MemoryContentPart {
+  return isRecord(input) && input.kind === 'memory'
+    && nonEmptyString(input.memoryId) && nonEmptyString(input.title) && nonEmptyString(input.source)
+    && validC15Common(input) && hasOnlyKeys(input, MEMORY_CONTENT_KEYS)
+}
+
+export function isValidSkillContentInput(input: unknown): input is SkillContentPart {
+  return isRecord(input) && input.kind === 'skill'
+    && nonEmptyString(input.skillId) && nonEmptyString(input.title) && nonEmptyString(input.source)
+    && validC15Common(input) && (input.uri === undefined || nonEmptyString(input.uri))
+    && hasOnlyKeys(input, SKILL_CONTENT_KEYS)
+}
+
+export function isValidMcpResourceContentInput(input: unknown): input is McpResourceContentPart {
+  if (!isRecord(input) || input.kind !== 'mcp-resource' || !nonEmptyString(input.server) || !nonEmptyString(input.resourceUri)) return false
+  if (!['tool', 'title', 'mimeType', 'summary', 'connectionState', 'status'].every(key => input[key] === undefined || nonEmptyString(input[key]))) return false
+  return validSafeRaw(input.raw) && hasOnlyKeys(input, MCP_RESOURCE_CONTENT_KEYS)
+}
+
+export function isValidArtifactContentInput(input: unknown): input is ArtifactContentPart {
+  if (!isRecord(input) || input.kind !== 'artifact' || !nonEmptyString(input.artifactId)
+    || !nonEmptyString(input.title) || !nonEmptyString(input.uri) || !validC15Common(input)) return false
+  if (input.mimeType !== undefined && !nonEmptyString(input.mimeType)) return false
+  if (input.hasBlob !== undefined && typeof input.hasBlob !== 'boolean') return false
+  if (input.actions !== undefined && (!Array.isArray(input.actions) || !input.actions.every(nonEmptyString))) return false
+  if (input.parts !== undefined && (!Array.isArray(input.parts) || input.parts.length > MAX_ARTIFACT_PREVIEW_PARTS
+    || !input.parts.every(part => parseContentPart(part).ok))) return false
+  return input.blob === undefined && hasOnlyKeys(input, ARTIFACT_CONTENT_KEYS)
+}
+
+export function isValidHookSurfaceInput(input: unknown): input is HookSurfaceSnapshot {
+  if (!isRecord(input) || !nonEmptyString(input.phase) || !nonEmptyString(input.status) || !isRecord(input.owner)) return false
+  if (!nonEmptyString(input.owner.pluginId) || !nonEmptyString(input.owner.handlerId)) return false
+  if (!hasOnlyKeys(input.owner, new Set(['pluginId', 'runtimeInstanceId', 'handlerId']))) return false
+  if (input.owner.runtimeInstanceId !== undefined && !nonEmptyString(input.owner.runtimeInstanceId)) return false
+  if (input.durationMs !== undefined && (typeof input.durationMs !== 'number' || !Number.isFinite(input.durationMs) || input.durationMs < 0)) return false
+  if (input.decision !== undefined && !nonEmptyString(input.decision)) return false
+  if (input.error !== undefined && (!isRecord(input.error) || !nonEmptyString(input.error.message)
+    || input.error.code !== undefined && !nonEmptyString(input.error.code)
+    || !hasOnlyKeys(input.error, new Set(['message', 'code'])))) return false
+  return validSafeRaw(input.raw) && hasOnlyKeys(input, HOOK_SURFACE_KEYS)
 }
 
 export function isValidDiffContentInput(input: unknown): input is Omit<DiffContentPart, 'kind'> | DiffContentPart {
@@ -590,6 +712,33 @@ function isTextKind(kind: string): kind is TextContentPart['kind'] {
 
 function isKnownStructuredKind(kind: string): boolean {
   return ['redacted-reasoning', 'document', 'file-reference', 'file-selection', 'diff', 'location', 'terminal', 'log', 'progress', 'list', 'key-value', 'json', 'link', 'search-result', 'diagnostic-lsp', 'tool-use', 'artifact', 'memory', 'skill', 'mcp-resource'].includes(kind)
+}
+
+function nonEmptyString(value: unknown): value is string {
+  return typeof value === 'string' && value.trim().length > 0
+}
+
+function validC15Common(value: Record<string, unknown>): boolean {
+  if (!['scope', 'summary', 'status'].every(key => value[key] === undefined || nonEmptyString(value[key]))) return false
+  if (!['enabled', 'used'].every(key => value[key] === undefined || typeof value[key] === 'boolean')) return false
+  if (value.version !== undefined && !(nonEmptyString(value.version)
+    || typeof value.version === 'number' && Number.isFinite(value.version) && value.version >= 0)) return false
+  return value.blob === undefined && validSafeRaw(value.raw)
+}
+
+function validSafeRaw(value: unknown): value is Readonly<Record<string, JsonValue>> | undefined {
+  return value === undefined || isRecord(value) && Object.values(value).every(isJsonValue)
+}
+
+const MEMORY_CONTENT_KEYS = new Set(['kind', 'memoryId', 'title', 'source', 'scope', 'summary', 'status', 'version', 'enabled', 'used', 'raw'])
+const SKILL_CONTENT_KEYS = new Set([...MEMORY_CONTENT_KEYS, 'skillId', 'uri'].filter(key => key !== 'memoryId'))
+const MCP_RESOURCE_CONTENT_KEYS = new Set(['kind', 'server', 'resourceUri', 'tool', 'title', 'mimeType', 'summary', 'connectionState', 'status', 'raw'])
+const ARTIFACT_CONTENT_KEYS = new Set(['kind', 'artifactId', 'title', 'uri', 'version', 'mimeType', 'summary', 'status', 'hasBlob', 'parts', 'actions', 'raw'])
+const HOOK_SURFACE_KEYS = new Set(['phase', 'owner', 'status', 'durationMs', 'decision', 'error', 'raw'])
+export const MAX_ARTIFACT_PREVIEW_PARTS = 256
+
+function hasOnlyKeys(value: Record<string, unknown>, allowed: ReadonlySet<string>): boolean {
+  return Object.keys(value).every(key => allowed.has(key))
 }
 
 function validateOptionalString(value: Record<string, unknown>, key: string, issues: SchemaIssue[]): void {

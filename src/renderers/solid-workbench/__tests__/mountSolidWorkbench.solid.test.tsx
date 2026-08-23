@@ -435,6 +435,30 @@ describe('mountSolidWorkbench', () => {
     expect(host.textContent).not.toContain('Unsupported content kind')
   })
 
+  it('C15 canonical content and negotiated extension events reach production Slots and missing-plugin fallback', async () => {
+    const { host, services } = mountPreview()
+    const make = (sequence: number, event: WorkbenchEventEnvelope['event']) => createWorkbenchEnvelope({
+      sessionId: 'preview-session', recordedAt: `2026-08-24T00:00:0${sequence}.000Z`, sequence,
+      source: { provider: 'peri', sourceId: `c15-${sequence}` }, identity: { messageId: sequence === 1 ? 'c15-message' : undefined },
+      provenance: { origin: 'local-observed', trust: 'authoritative' }, event,
+    })
+    const document = projectWorkbench([
+      make(1, { type: 'message.delta', role: 'assistant', parts: [{ kind: 'artifact', artifactId: 'artifact-1', title: 'Production report', uri: 'artifact://report', parts: [{ kind: 'text', text: 'preview body' }] }] }),
+      make(2, { type: 'extension.event', kind: 'system.hook', payload: { phase: 'turn.completed', owner: { pluginId: 'plugin.audit', handlerId: 'after' }, status: 'continued', durationMs: 11 }, fallback: [] }),
+      make(3, { type: 'extension.event', kind: 'plugin.removed/result', payload: { status: 'done' }, fallback: [{ kind: 'unknown', originalType: 'plugin.removed/result', summary: 'renderer unavailable', raw: { status: 'done' }, truncated: false }] }),
+    ]).document
+
+    services.runtime.replaceDocument(document, { ownerKey: 'owner-preview', generation: 1 })
+
+    expect(await screen.findByRole('article', { name: '工件：Production report' })).toHaveTextContent('preview body')
+    expect(await screen.findByRole('status', { name: 'Hook：turn.completed' })).toHaveTextContent('11 ms')
+    const missingPlugin = await screen.findByRole('note', { name: '扩展事件：plugin.removed/result' })
+    expect(missingPlugin).toHaveTextContent('renderer unavailable')
+    expect(missingPlugin).toHaveTextContent('peri · c15-3')
+    expect(missingPlugin).toHaveTextContent('local-observed · authoritative')
+    expect(host.querySelector('[data-extension-kind="plugin.removed/result"]')).not.toBeNull()
+  })
+
   it('C10 workflow remains readable through the built-in no-Slot fallback', async () => {
     const { host, services } = mountPreview()
     const projected = projectWorkbench([createWorkbenchEnvelope({

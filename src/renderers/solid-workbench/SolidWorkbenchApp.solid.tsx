@@ -3,8 +3,8 @@ import { buildChatRowDescriptors } from '../../components/chat/chatRowPipeline.t
 import { buildMessageLookups } from '../../components/chat/messageLookups.ts'
 import { prepareMessages } from '../../components/chat/messagePipeline.ts'
 import type { Message, RenderMessage } from '../../components/chat/messageTypes.ts'
-import { selectActivityDisplayOrder, toolInvocationSnapshot, type WorkbenchActivityNode, type WorkbenchDocument, type WorkbenchInteraction } from '../../domains/workbench/workbenchProjector.ts'
-import { isValidDiffContentInput, isValidLspDiagnosticContentInput, type ContentPart, type LspDiagnosticContentPart } from '../../domains/workbench/content/contentPartSchema.ts'
+import { selectActivityDisplayOrder, toolInvocationSnapshot, type WorkbenchActivityNode, type WorkbenchDocument, type WorkbenchExtensionNode, type WorkbenchInteraction } from '../../domains/workbench/workbenchProjector.ts'
+import { isValidDiffContentInput, isValidHookSurfaceInput, isValidLspDiagnosticContentInput, type ContentPart, type LspDiagnosticContentPart } from '../../domains/workbench/content/contentPartSchema.ts'
 import { diffSnapshotFromPart } from '../../domains/workbench/diffSnapshot.ts'
 import type { MessageListItem } from '../../domains/workbench/messageListPort.ts'
 import { createToolConnectorLayoutPort } from '../../domains/workbench/toolConnectorLayoutPort.ts'
@@ -35,6 +35,7 @@ import { SolidSubagentCard } from './chat/content/SubagentCard.solid.tsx'
 import { SolidWorkflowActivityCard } from './chat/content/WorkflowCard.solid.tsx'
 import { SolidInteractionCard } from './chat/content/InteractionCard.solid.tsx'
 import { SolidSessionSurfaceCard } from './chat/content/SessionSurfaceCard.solid.tsx'
+import { SolidExtensionContentCard } from './chat/content/ExtensionContentCard.solid.tsx'
 import type { RenderCommandPort } from '../../contracts/messageRenderer.ts'
 import { canExecuteRendererSemanticCommand, executeRendererSemanticCommand } from '../../host/renderer-suite/rendererSemanticCommand.ts'
 import { normalizeWorkbenchMountInput } from './workbenchContracts.ts'
@@ -298,6 +299,19 @@ function WorkbenchDocumentSurface(props: {
                     appearance={{ ...props.context.appearanceSnapshot(), reducedMotion: props.reducedMotion }}
                     commands={fallbackRenderCommands(props.context)}
                   />}
+                />
+              )}</For>
+            </div>
+          </Show>
+          <Show when={document().extensions.length > 0}>
+            <div class="solid-workbench-extensions" aria-label="扩展事件" data-extension-count={document().extensions.length}>
+              <For each={document().extensions}>{extension => (
+                <WorkbenchContentSlot
+                  nodeId={`${props.sessionId ?? 'none'}:extension:${extension.id}`}
+                  kind={extension.kind}
+                  payload={extension.payload}
+                  context={props.context}
+                  fallback={renderExtensionFallback(extension, props.context)}
                 />
               )}</For>
             </div>
@@ -742,8 +756,42 @@ function renderBuiltinContentPart(part: ContentPart, inline: boolean, context: S
   if (part.kind === 'log') {
     return <SolidLogBlock part={part} appearance={{ ...context.appearanceSnapshot(), reducedMotion: context.input().reducedMotion }} />
   }
+  if (part.kind === 'memory' || part.kind === 'skill' || part.kind === 'mcp-resource' || part.kind === 'artifact') {
+    return <SolidExtensionContentCard
+      kind={`content.${part.kind}`}
+      payload={part}
+      appearance={{ ...context.appearanceSnapshot(), reducedMotion: context.input().reducedMotion === true }}
+      commands={fallbackRenderCommands(context)}
+    />
+  }
   const summary = part.kind === 'unknown' ? part.summary : `Unsupported content kind: ${part.kind}`
   return <pre class="solid-content-unknown" data-content-kind={part.kind}>{summary}</pre>
+}
+
+function renderExtensionFallback(extension: WorkbenchExtensionNode, context: SolidWorkbenchContextValue) {
+  const provenance = <div class="solid-extension-provenance">
+    <small>{extension.source.provider} · {extension.source.sourceId}</small>
+    <small>{extension.provenance.origin} · {extension.provenance.trust}</small>
+  </div>
+  if (extension.kind === 'system.hook' && isValidHookSurfaceInput(extension.payload)) {
+    return <section class="solid-extension-fallback" data-extension-kind={extension.kind}>
+      {provenance}
+      <SolidExtensionContentCard
+        kind="system.hook"
+        payload={extension.payload}
+        appearance={{ ...context.appearanceSnapshot(), reducedMotion: context.input().reducedMotion === true }}
+        commands={fallbackRenderCommands(context)}
+      />
+    </section>
+  }
+  const fallback = extension.fallback.length > 0
+    ? extension.fallback
+    : [{ kind: 'unknown', originalType: extension.kind, summary: `Unsupported extension: ${extension.kind}`, raw: {}, truncated: false }] as const
+  return <section class="solid-extension-fallback" role="note" aria-label={`扩展事件：${extension.kind}`} data-extension-kind={extension.kind}>
+    <strong>{extension.kind}</strong>
+    {provenance}
+    <For each={fallback}>{part => renderBuiltinContentPart(part, false, context)}</For>
+  </section>
 }
 
 function fallbackRenderCommands(context: SolidWorkbenchContextValue): RenderCommandPort {

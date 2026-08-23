@@ -5,7 +5,7 @@ import type { WorkbenchDocument, WorkbenchMessage, WorkbenchActivityNode, Workbe
 import type { WorkbenchRuntime, WorkbenchRuntimeSlice } from '../../domains/workbench/workbenchRuntime.ts'
 import type { RenderAppearanceSnapshot } from '../../contracts/messageRenderer.ts'
 
-export type WorkbenchDocumentSlice = 'document' | 'timeline' | 'messages' | 'activities' | 'interactions' | 'session' | 'usage' | 'config' | 'commands' | 'assist' | 'diagnostics'
+export type WorkbenchDocumentSlice = 'document' | 'timeline' | 'messages' | 'activities' | 'interactions' | 'extensions' | 'session' | 'usage' | 'config' | 'commands' | 'assist' | 'diagnostics'
 
 export interface WorkbenchDocumentReader {
   getSnapshot(): WorkbenchDocument | undefined

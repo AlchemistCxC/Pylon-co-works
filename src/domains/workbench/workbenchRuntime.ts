@@ -13,7 +13,7 @@ export type WorkbenchTaskEntry = PlanEntry | PlanEntryV2
 
 export type WorkbenchRuntimeSlice =
   | 'document' | 'timeline' | 'messages' | 'activities' | 'interactions'
-  | 'session' | 'usage' | 'plan' | 'goal' | 'assist' | 'diagnostics'
+  | 'session' | 'usage' | 'plan' | 'goal' | 'assist' | 'diagnostics' | 'extensions'
   | 'config' | 'commands' | 'tasks' | 'streaming' | 'capabilities'
 
 export interface WorkbenchRuntimeSnapshot {
@@ -232,6 +232,19 @@ function freezeDocument(document: WorkbenchDocument, previous?: WorkbenchDocumen
       ...document.plan,
       entries: freezeItems(document.plan.entries, previous?.plan.entries),
     })
+  const extensions = document.extensions === previous?.extensions && Object.isFrozen(document.extensions)
+    ? document.extensions
+    : Object.freeze(document.extensions.map(extension => Object.freeze({
+      ...extension,
+      payload: freezeJsonValue(extension.payload),
+      fallback: Object.freeze(extension.fallback.map(part => freezeJsonValue(part as unknown as JsonValue))) as typeof extension.fallback,
+      identity: Object.freeze({ ...extension.identity }),
+      source: Object.freeze({ ...extension.source }),
+      provenance: Object.freeze({
+        ...extension.provenance,
+        ...(extension.provenance.synthetic ? { synthetic: Object.freeze({ ...extension.provenance.synthetic }) } : {}),
+      }),
+    })))
   return Object.freeze({
     ...document,
     appliedEventIds: document.appliedEventIds === previous?.appliedEventIds && Object.isFrozen(document.appliedEventIds) ? document.appliedEventIds : Object.freeze([...document.appliedEventIds]),
@@ -239,6 +252,7 @@ function freezeDocument(document: WorkbenchDocument, previous?: WorkbenchDocumen
     messages: freezeItems(document.messages, previous?.messages),
     activities: freezeItems(document.activities, previous?.activities),
     interactions: freezeItems(document.interactions, previous?.interactions),
+    extensions,
     diagnostics: freezeItems(document.diagnostics, previous?.diagnostics),
     session,
     assist: document.assist === previous?.assist && Object.isFrozen(document.assist)
@@ -308,6 +322,7 @@ function selectSlice(snapshot: WorkbenchRuntimeSnapshot, slice: WorkbenchRuntime
     case 'messages': return document?.messages ?? snapshot.messages
     case 'activities': return document?.activities ?? []
     case 'interactions': return document?.interactions ?? []
+    case 'extensions': return document?.extensions ?? []
     case 'session': return document?.session
     case 'usage': return document?.session.usage
     case 'config': return document?.session.options ?? []

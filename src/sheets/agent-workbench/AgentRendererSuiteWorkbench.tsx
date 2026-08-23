@@ -332,6 +332,8 @@ export default function AgentRendererSuiteWorkbench(props: AgentRendererSuiteWor
       onDownloadMedia={hostPortRef.current.capabilities.has('resourceOpen') ? downloadFallbackMedia : undefined}
       onOpenInteractionUrl={hostPortRef.current.capabilities.has('resourceOpen') ? openFallbackInteractionUrl : undefined}
       onCopyInteractionUrl={hostPortRef.current.capabilities.has('clipboardWrite') ? copyFallbackInteractionUrl : undefined}
+      onOpenResource={hostPortRef.current.capabilities.has('resourceOpen') ? openFallbackInteractionUrl : undefined}
+      onCopyResource={hostPortRef.current.capabilities.has('clipboardWrite') ? copyFallbackInteractionUrl : undefined}
       onRetryMessage={hostPortRef.current.capabilities.has('retry') ? retryFallbackMessage : undefined}
       onRecoverSession={hostPortRef.current.capabilities.has('recovery') ? recoverFallbackSession : undefined}
       onRespondInteraction={hostPortRef.current.capabilities.has('interactionResponse') ? respondFallbackInteraction : undefined} />}

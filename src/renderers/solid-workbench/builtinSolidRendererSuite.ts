@@ -13,7 +13,7 @@ export const BUILTIN_SOLID_SUITE_ID = 'builtin.solid'
 export const BUILTIN_SOLID_CONTENT_SLOT_ID = 'builtin.solid.content.base'
 
 export const BUILTIN_SOLID_CONTENT_KINDS = Object.freeze([
-  ...BUILTIN_TEXT_RENDER_KINDS.map(kind => kind.id).filter(kind => kind.startsWith('content.') || kind.startsWith('diagnostic.')),
+  ...BUILTIN_TEXT_RENDER_KINDS.map(kind => kind.id).filter(kind => kind.startsWith('content.') || kind.startsWith('diagnostic.') || kind === 'system.hook'),
   ...BUILTIN_TOOL_RENDER_KINDS.map(kind => kind.id),
   ...BUILTIN_EXECUTION_RENDER_KINDS.map(kind => kind.id),
   ...BUILTIN_INTERACTION_RENDER_KINDS.map(kind => kind.id),
@@ -28,6 +28,8 @@ export const BUILTIN_SOLID_CONTENT_KINDS = Object.freeze([
   'system.error',
   'content.unknown',
 ])
+
+const BUILTIN_SOLID_REQUIRED_KINDS = Object.freeze(BUILTIN_TEXT_RENDER_KINDS.map(kind => kind.id))
 
 interface BuiltinSolidContentHandle {
   destroyed: boolean
@@ -120,10 +122,10 @@ export function createBuiltinSolidRendererSuite(): RendererSuiteContribution {
     apiVersion: 1,
     runtime: Object.freeze({ framework: 'solid', version: '1.0.0' }),
     compatibility: Object.freeze({ documentSchema: 'workbench.v1', renderCatalogSchema: 1 }),
-    requiredKinds: Object.freeze(BUILTIN_TEXT_RENDER_KINDS.map(kind => kind.id)),
+    requiredKinds: BUILTIN_SOLID_REQUIRED_KINDS,
     // Canonical plan/lifecycle/diagnostic projections are registered by the
     // built-in content plugin and consumed through the same Suite-local Slot seam.
-    optionalKinds: Object.freeze(BUILTIN_SOLID_CONTENT_KINDS.filter(kind => (
+    optionalKinds: Object.freeze(BUILTIN_SOLID_CONTENT_KINDS.filter(kind => !BUILTIN_SOLID_REQUIRED_KINDS.includes(kind) && (
       kind === 'content.plan' || kind.startsWith('tool.') || kind.startsWith('activity.') || kind.startsWith('interaction.') || kind.startsWith('lifecycle.') || kind.startsWith('system.') || kind.startsWith('session.') || kind.startsWith('assist.')
     ))),
     factory,

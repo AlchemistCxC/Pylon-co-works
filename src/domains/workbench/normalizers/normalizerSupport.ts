@@ -1,5 +1,7 @@
 import {
   createUnknownContentPart,
+  MAX_ARTIFACT_PREVIEW_PARTS,
+  parseContentPart,
   type ContentPart,
   type JsonValue,
   type LspRelatedInformation,
@@ -174,6 +176,15 @@ export function normalizeContentBlock(raw: unknown): { part: ContentPart; diagno
         } } : {}),
       }
     }
+    case 'memory':
+      return normalizeC15ContentBlock(raw, 'memory')
+    case 'skill':
+      return normalizeC15ContentBlock(raw, 'skill')
+    case 'mcp-resource':
+    case 'mcp_resource':
+      return normalizeC15ContentBlock(raw, 'mcp-resource')
+    case 'artifact':
+      return normalizeC15ContentBlock(raw, 'artifact')
     // C05：链接只保留 canonical URL/title/status；scheme 白名单由 command presentation 裁决。
     case 'link': {
       if (typeof raw.url !== 'string' || !raw.url.trim()) {
@@ -386,6 +397,149 @@ export function normalizeContentBlock(raw: unknown): { part: ContentPart; diagno
     default:
       return { part: createUnknownContentPart(type, raw) }
   }
+}
+
+function normalizeC15ContentBlock(
+  raw: Record<string, unknown>,
+  kind: 'memory' | 'skill' | 'mcp-resource' | 'artifact',
+): { part: ContentPart; diagnostic?: { code: string; message: string; path: readonly (string | number)[] } } {
+  const statusSummary = {
+    ...c15OptionalString(raw.summary, 'summary'),
+    ...c15OptionalString(raw.status, 'status'),
+  }
+  const memorySkillCommon = {
+    ...statusSummary,
+    ...c15OptionalString(raw.scope, 'scope'),
+    ...c15OptionalVersion(raw.version),
+    ...(typeof raw.enabled === 'boolean' ? { enabled: raw.enabled } : {}),
+    ...(typeof raw.used === 'boolean' ? { used: raw.used } : {}),
+  }
+  const artifactCommon = { ...statusSummary, ...c15OptionalVersion(raw.version) }
+  let candidate: Record<string, unknown>
+  let known: readonly string[]
+  if (kind === 'memory') {
+    known = ['type', 'kind', 'memoryId', 'memory_id', 'id', 'title', 'source', 'scope', 'summary', 'status', 'version', 'enabled', 'used']
+    candidate = {
+      kind,
+      memoryId: c15RequiredString(raw.memoryId ?? raw.memory_id ?? raw.id),
+      title: c15RequiredString(raw.title), source: c15RequiredString(raw.source), ...memorySkillCommon,
+    }
+  } else if (kind === 'skill') {
+    known = ['type', 'kind', 'skillId', 'skill_id', 'id', 'title', 'name', 'source', 'scope', 'summary', 'status', 'version', 'enabled', 'used', 'uri']
+    candidate = {
+      kind,
+      skillId: c15RequiredString(raw.skillId ?? raw.skill_id ?? raw.id),
+      title: c15RequiredString(raw.title ?? raw.name), source: c15RequiredString(raw.source), ...memorySkillCommon,
+      ...c15OptionalString(raw.uri, 'uri'),
+    }
+  } else if (kind === 'mcp-resource') {
+    known = ['type', 'kind', 'server', 'server_name', 'resourceUri', 'resource_uri', 'uri', 'tool', 'tool_name', 'title', 'mimeType', 'mime_type', 'summary', 'connectionState', 'connection_state', 'status']
+    candidate = {
+      kind,
+      server: c15RequiredString(raw.server ?? raw.server_name),
+      resourceUri: c15RequiredString(raw.resourceUri ?? raw.resource_uri ?? raw.uri),
+      ...c15OptionalString(raw.tool ?? raw.tool_name, 'tool'),
+      ...c15OptionalString(raw.title, 'title'),
+      ...c15OptionalString(raw.mimeType ?? raw.mime_type, 'mimeType'),
+      ...c15OptionalString(raw.summary, 'summary'),
+      ...c15OptionalString(raw.connectionState ?? raw.connection_state, 'connectionState'),
+      ...c15OptionalString(raw.status, 'status'),
+    }
+  } else {
+    known = ['type', 'kind', 'artifactId', 'artifact_id', 'id', 'title', 'uri', 'version', 'mimeType', 'mime_type', 'summary', 'status', 'blob', 'hasBlob', 'has_blob', 'parts', 'content', 'actions']
+    const sourceParts = Array.isArray(raw.parts) ? raw.parts : Array.isArray(raw.content) ? raw.content : []
+    const parts = sourceParts.slice(0, MAX_ARTIFACT_PREVIEW_PARTS).map(part => normalizeContentBlock(part).part)
+    candidate = {
+      kind,
+      artifactId: c15RequiredString(raw.artifactId ?? raw.artifact_id ?? raw.id),
+      title: c15RequiredString(raw.title), uri: c15RequiredString(raw.uri), ...artifactCommon,
+      ...c15OptionalString(raw.mimeType ?? raw.mime_type, 'mimeType'),
+      ...(raw.blob !== undefined || raw.hasBlob === true || raw.has_blob === true ? { hasBlob: true } : {}),
+      ...(parts.length > 0 ? { parts } : {}),
+      ...(Array.isArray(raw.actions) ? { actions: raw.actions.filter((value): value is string => typeof value === 'string' && value.trim().length > 0) } : {}),
+    }
+  }
+  const rawFields = c15SafeUnknownFields(raw, known)
+  if (rawFields) candidate.raw = rawFields
+  const parsed = parseContentPart(candidate)
+  if (c15HasInvalidKnownField(raw, kind)) {
+    return {
+      part: c15UnknownPart(raw, kind),
+      diagnostic: { code: `content.${kind}.invalid`, message: `invalid normalized ${kind} content`, path: [] },
+    }
+  }
+  if (parsed.ok) return { part: parsed.value }
+  return {
+    part: c15UnknownPart(raw, kind),
+    diagnostic: { code: `content.${kind}.invalid`, message: `invalid normalized ${kind} content`, path: [] },
+  }
+}
+
+function c15UnknownPart(raw: Record<string, unknown>, kind: 'memory' | 'skill' | 'mcp-resource' | 'artifact'): ContentPart {
+  if (kind !== 'artifact') return createUnknownContentPart(kind, raw)
+  const malformedInlineContent = raw.content !== undefined && !Array.isArray(raw.content)
+  const safe = Object.fromEntries(Object.entries(raw).filter(([key]) => (
+    key !== 'blob' && key !== 'base64' && !(key === 'content' && malformedInlineContent)
+  )).map(([key, value]) => [key, (key === 'parts' || key === 'content') && Array.isArray(value)
+    ? value.slice(0, MAX_ARTIFACT_PREVIEW_PARTS) : value]))
+  const hasBlob = raw.blob !== undefined || raw.base64 !== undefined || malformedInlineContent
+    || raw.hasBlob === true || raw.has_blob === true
+  const omittedParts = Math.max(
+    Array.isArray(raw.parts) ? raw.parts.length - MAX_ARTIFACT_PREVIEW_PARTS : 0,
+    Array.isArray(raw.content) ? raw.content.length - MAX_ARTIFACT_PREVIEW_PARTS : 0,
+  )
+  return createUnknownContentPart(kind, { ...safe, ...(hasBlob ? { hasBlob: true } : {}), ...(omittedParts > 0 ? { omittedParts } : {}) })
+}
+
+function c15RequiredString(value: unknown): string {
+  return typeof value === 'string' ? value.trim() : ''
+}
+
+function c15OptionalString<Key extends string>(value: unknown, key: Key): Partial<Record<Key, string>> {
+  return typeof value === 'string' && value.trim() ? { [key]: value.trim() } as Partial<Record<Key, string>> : {}
+}
+
+function c15OptionalVersion(value: unknown): { version?: string | number } {
+  if (typeof value === 'string' && value.trim()) return { version: value.trim() }
+  if (typeof value === 'number' && Number.isFinite(value) && value >= 0) return { version: value }
+  return {}
+}
+
+function c15SafeUnknownFields(raw: Record<string, unknown>, known: readonly string[]): Readonly<Record<string, JsonValue>> | undefined {
+  const knownNames = new Set(known)
+  const unknown = Object.fromEntries(Object.entries(raw).filter(([key]) => !knownNames.has(key)))
+  if (Object.keys(unknown).length === 0) return undefined
+  const safe = createUnknownContentPart('c15.metadata', unknown).raw
+  return isRecord(safe) ? safe : { value: safe }
+}
+
+function c15HasInvalidKnownField(raw: Record<string, unknown>, kind: 'memory' | 'skill' | 'mcp-resource' | 'artifact'): boolean {
+  for (const key of ['summary', 'status'] as const) {
+    if (raw[key] !== undefined && (typeof raw[key] !== 'string' || !raw[key].trim())) return true
+  }
+  if ((kind === 'memory' || kind === 'skill' || kind === 'artifact') && raw.version !== undefined
+    && !(typeof raw.version === 'string' && raw.version.trim()
+      || typeof raw.version === 'number' && Number.isFinite(raw.version) && raw.version >= 0)) return true
+  if (kind === 'memory' || kind === 'skill') {
+    if (raw.scope !== undefined && (typeof raw.scope !== 'string' || !raw.scope.trim())) return true
+    for (const key of ['enabled', 'used'] as const) if (raw[key] !== undefined && typeof raw[key] !== 'boolean') return true
+  }
+  if (kind === 'skill' && raw.uri !== undefined && (typeof raw.uri !== 'string' || !raw.uri.trim())) return true
+  if (kind === 'mcp-resource') {
+    for (const key of ['tool', 'tool_name', 'title', 'mimeType', 'mime_type', 'summary', 'connectionState', 'connection_state', 'status'] as const) {
+      if (raw[key] !== undefined && (typeof raw[key] !== 'string' || !raw[key].trim())) return true
+    }
+  }
+  if (kind === 'artifact') {
+    if ((raw.mimeType !== undefined && (typeof raw.mimeType !== 'string' || !raw.mimeType.trim()))
+      || (raw.mime_type !== undefined && (typeof raw.mime_type !== 'string' || !raw.mime_type.trim()))) return true
+    if (raw.hasBlob !== undefined && typeof raw.hasBlob !== 'boolean') return true
+    if (raw.has_blob !== undefined && typeof raw.has_blob !== 'boolean') return true
+    if (raw.parts !== undefined && (!Array.isArray(raw.parts) || raw.parts.length > MAX_ARTIFACT_PREVIEW_PARTS)) return true
+    if (raw.content !== undefined && (!Array.isArray(raw.content) || raw.content.length > MAX_ARTIFACT_PREVIEW_PARTS)) return true
+    if (raw.actions !== undefined && (!Array.isArray(raw.actions) || !raw.actions.every(value => typeof value === 'string' && value.trim()))) return true
+  }
+  return false
 }
 
 function normalizeSearchResultEntry(value: unknown): SearchResultEntry | undefined {

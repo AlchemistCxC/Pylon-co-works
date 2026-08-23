@@ -70,7 +70,10 @@ describe('C09 React fatal fallback: subagent/delegation/team activities', () => 
       ...createWorkbenchDocument('local:c11'),
       revision: 3,
       interactions: [
-        { id: 'int-1', status: 'requested', request: { kind: 'permission', prompt: 'Allow deploy?' }, sequence: 1 },
+        { id: 'int-1', status: 'requested', request: {
+          surface: 'interaction', kind: 'permission', state: 'waiting',
+          questions: [{ id: 'permission', question: 'Allow deploy?', allowMultiple: false, allowFreeform: false, options: [] }],
+        }, sequence: 1 },
         { id: 'int-2', status: 'resolved', response: { optionId: 'deny' }, sequence: 2 },
       ],
     }

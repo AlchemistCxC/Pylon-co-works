@@ -362,7 +362,7 @@ function parseSemanticEvent(value: unknown): SchemaResult<WorkbenchSemanticEvent
     if (typeof value.truncated !== 'boolean') issues.push(schemaIssue(['truncated'], 'type.boolean', 'boolean', value.truncated))
     if (isJsonValue(value.raw) && jsonBytes(value.raw) > DEFAULT_RAW_MAX_BYTES && value.truncated !== true) issues.push(schemaIssue(['truncated'], 'raw.truncation-required', 'true for oversized unknown raw', value.truncated))
   } else if (value.type === 'extension.event') {
-    if (typeof value.kind !== 'string' || !value.kind.includes('.')) issues.push(schemaIssue(['kind'], 'type.namespaced', 'namespaced string', value.kind))
+    if (typeof value.kind !== 'string' || !isNamespacedKind(value.kind)) issues.push(schemaIssue(['kind'], 'type.namespaced', 'namespaced string', value.kind))
     if (!isJsonValue(value.payload)) issues.push(schemaIssue(['payload'], 'json.invalid', 'JSON value', value.payload))
     validateParts(value.fallback, ['fallback'], issues)
   } else if (MESSAGE_EVENT_TYPES.has(value.type)) {
@@ -378,6 +378,11 @@ function parseSemanticEvent(value: unknown): SchemaResult<WorkbenchSemanticEvent
   if (issues.length > 0) return failure(issues)
   if (!isSemanticEvent(value)) return failure([schemaIssue(['type'], 'event.unknown-type', 'known semantic event', value.type)])
   return { ok: true, value }
+}
+
+function isNamespacedKind(value: string): boolean {
+  const segments = value.split('.')
+  return segments.length > 1 && segments.every(segment => segment.trim().length > 0)
 }
 
 const MESSAGE_EVENT_TYPES = new Set(['message.started', 'message.delta', 'message.completed'])

@@ -6,10 +6,15 @@ import type {
 } from '../../../contracts/messageRenderer.ts'
 import {
   isValidLinkContentInput,
+  isValidArtifactContentInput,
   isValidDiffContentInput,
+  isValidHookSurfaceInput,
   isValidLogContentInput,
   isValidLspDiagnosticContentInput,
+  isValidMcpResourceContentInput,
+  isValidMemoryContentInput,
   isValidSearchResultContentInput,
+  isValidSkillContentInput,
   isValidTerminalContentInput,
   type ContentPart,
   type LspDiagnosticContentPart,
@@ -41,6 +46,7 @@ import { isInteractionSnapshotInput } from '../../../domains/rendererContent/int
 import { SolidInteractionCard } from './content/InteractionCard.solid.tsx'
 import { SolidSessionSurfaceCard } from './content/SessionSurfaceCard.solid.tsx'
 import { BUILTIN_SESSION_RENDER_KINDS } from '../../../domains/rendererContent/sessionRenderKindCatalog.ts'
+import { SolidExtensionContentCard, type ExtensionRenderKind } from './content/ExtensionContentCard.solid.tsx'
 
 export function BuiltinSolidContentSlot(props: {
   snapshot: RenderNodeSnapshot
@@ -390,21 +396,15 @@ export function BuiltinSolidContentSlot(props: {
       <Match when={[
         'content.memory', 'content.skill', 'content.mcp-resource', 'content.artifact',
       ].includes(kind())}>
-        {/* C15：安全 metadata 卡（title/source/status 摘要）；内容本体不内联，oversize/未知字段经 payload 摘要可见 */}
-        <Show when={payload() as Record<string, unknown> | undefined}
+        <Show when={isValidExtensionContent(kind(), props.snapshot.payload) ? props.snapshot.payload : undefined}
           fallback={<pre class="solid-content-unknown" data-content-kind={kind()}>Invalid {kind()} payload</pre>}>
-          {data => (
-            <section class="term-subagent-meta" data-content-kind={kind()} role="note"
-              aria-label={`${kind()}：${String(data().title ?? data().memoryId ?? data().artifactId ?? kind())}`}>
-              <strong>{String(data().title ?? kind())}</strong>
-              <span>{[data().source, data().server, data().status, data().version !== undefined ? `v${String(data().version)}` : undefined]
-                .filter(Boolean).join(' · ')}</span>
-              <Show when={data().summary}><p>{String(data().summary)}</p></Show>
-              <Show when={data().uri || data().resourceUri}>
-                <code>{String(data().uri ?? data().resourceUri)}</code>
-              </Show>
-            </section>
-          )}
+          {data => <SolidExtensionContentCard kind={kind() as ExtensionRenderKind} payload={data()} appearance={props.appearance} commands={props.commands} />}
+        </Show>
+      </Match>
+      <Match when={kind() === 'system.hook'}>
+        <Show when={isValidHookSurfaceInput(props.snapshot.payload) ? props.snapshot.payload : undefined}
+          fallback={<pre class="solid-content-unknown" data-content-kind="system.hook">Invalid system.hook payload</pre>}>
+          {hook => <SolidExtensionContentCard kind="system.hook" payload={hook()} appearance={props.appearance} commands={props.commands} />}
         </Show>
       </Match>
       <Match when={kind() === 'content.unknown'}>
@@ -413,6 +413,14 @@ export function BuiltinSolidContentSlot(props: {
       </Switch>
     </div>
   )
+}
+
+function isValidExtensionContent(kind: string, payload: unknown): boolean {
+  if (kind === 'content.memory') return isValidMemoryContentInput(payload)
+  if (kind === 'content.skill') return isValidSkillContentInput(payload)
+  if (kind === 'content.mcp-resource') return isValidMcpResourceContentInput(payload)
+  if (kind === 'content.artifact') return isValidArtifactContentInput(payload)
+  return false
 }
 
 function searchLinkAppearance(appearance: RenderAppearanceSnapshot): SearchLinkAppearance {

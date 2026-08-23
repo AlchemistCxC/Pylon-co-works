@@ -1,16 +1,21 @@
 import { useState, useSyncExternalStore } from 'react'
 import type {
   ContentPart,
+  ArtifactContentPart,
   DiffContentPart,
   ImageContentPart,
   LinkContentPart,
   LogContentPart,
   LspDiagnosticContentPart,
   SearchResultContentPart,
+  McpResourceContentPart,
+  MemoryContentPart,
+  SkillContentPart,
   TextRange,
   TerminalContentPart,
   UnknownContentPart,
 } from '../../domains/workbench/content/contentPartSchema.ts'
+import { isValidHookSurfaceInput } from '../../domains/workbench/content/contentPartSchema.ts'
 import { stripAnsiControlSequences } from '../../domains/rendererContent/textContentContracts.ts'
 import { isValidMediaContentInput } from '../../domains/workbench/content/mediaContentValidation.ts'
 import {
@@ -49,6 +54,8 @@ export default function ReactWorkbenchFatalFallback(props: {
   onRespondInteraction?(interactionId: string, response: unknown, options?: { expectedRevision?: number }): void | Promise<unknown>
   onOpenInteractionUrl?(url: string): void
   onCopyInteractionUrl?(url: string): void
+  onOpenResource?(uri: string): void
+  onCopyResource?(uri: string): void
 }) {
   const document = useSyncExternalStore(
     listener => props.document.subscribe(listener),
@@ -156,6 +163,27 @@ export default function ReactWorkbenchFatalFallback(props: {
           interaction={interaction} onRespond={props.onRespondInteraction}
           onOpenUrl={props.onOpenInteractionUrl} onCopyUrl={props.onCopyInteractionUrl} />)}
       </section>
+      <section className="react-workbench-fatal-extensions" aria-label="扩展事件 fallback">
+        {document?.extensions.map(extension => extension.kind === 'system.hook' && isValidHookSurfaceInput(extension.payload)
+          ? <section key={extension.id} role="status" aria-label={`Hook fallback：${extension.payload.phase}`} data-extension-kind="system.hook">
+              <strong>{extension.payload.phase}</strong><span>{extension.payload.status}</span>
+              <small>{extension.payload.owner.pluginId} · {extension.payload.owner.handlerId}</small>
+              <small>{extension.source.provider} · {extension.source.sourceId}</small>
+              <small>{extension.provenance.origin} · {extension.provenance.trust}</small>
+              {extension.payload.durationMs !== undefined && <span>{extension.payload.durationMs} ms</span>}
+              {extension.payload.decision && <span>{extension.payload.decision}</span>}
+              {extension.payload.error && <span role="alert">{extension.payload.error.message}</span>}
+            </section>
+          : <section key={extension.id} role="note" aria-label={`扩展事件 fallback：${extension.kind}`} data-extension-kind={extension.kind}>
+              <strong>{extension.kind}</strong>
+              <small>{extension.source.provider} · {extension.source.sourceId}</small>
+              <small>{extension.provenance.origin} · {extension.provenance.trust}</small>
+              {extension.fallback.length > 0
+                ? extension.fallback.map((part, index) => <ReactFallbackContentPart key={`${extension.id}:${index}`} part={part}
+                    onOpenResource={props.onOpenResource} onCopyResource={props.onCopyResource} />)
+                : <pre>{fallbackJson(extension.payload)}</pre>}
+            </section>)}
+      </section>
       <div className="react-workbench-fatal-history" aria-label="会话历史">
         {document?.messages.map(message => <article key={message.id} data-message-role={message.role}>
           <span>{message.role === 'user' ? 'User' : message.role === 'reasoning' ? 'Reasoning' : 'Assistant'}</span>
@@ -165,6 +193,8 @@ export default function ReactWorkbenchFatalFallback(props: {
             part={part}
             onOpenMedia={props.onOpenMedia}
             onDownloadMedia={props.onDownloadMedia}
+            onOpenResource={props.onOpenResource}
+            onCopyResource={props.onCopyResource}
           />)}
         </article>)}
       </div>
@@ -476,6 +506,8 @@ export function ReactFallbackContentPart(props: {
   part: ContentPart
   onOpenMedia?: (part: ImageContentPart) => void
   onDownloadMedia?: (part: ImageContentPart) => void
+  onOpenResource?: (uri: string) => void
+  onCopyResource?: (uri: string) => void
 }) {
   const { part } = props
   if (part.kind === 'text' || part.kind === 'markdown') {
@@ -613,6 +645,27 @@ export function ReactFallbackContentPart(props: {
         {value.truncation.omittedLines !== undefined && `，省略 ${value.truncation.omittedLines} 行`}
         {value.truncation.omittedBytes !== undefined && `（${value.truncation.omittedBytes} bytes）`}
       </small>}
+    </section>
+  }
+  if (part.kind === 'memory' || part.kind === 'skill' || part.kind === 'mcp-resource' || part.kind === 'artifact') {
+    const value = part as MemoryContentPart | SkillContentPart | McpResourceContentPart | ArtifactContentPart
+    const title = value.kind === 'mcp-resource' ? value.title ?? value.resourceUri : value.title
+    const uri = value.kind === 'mcp-resource' ? value.resourceUri : value.kind === 'artifact' ? value.uri : value.kind === 'skill' ? value.uri : undefined
+    const label = value.kind === 'memory' ? '记忆' : value.kind === 'skill' ? '技能' : value.kind === 'mcp-resource' ? 'MCP 资源' : '工件'
+    return <section data-react-content-kind={`content.${value.kind}`} aria-label={`${label} fallback：${title}`}>
+      <strong>{title}</strong>
+      {'source' in value && value.source && <span>{value.source}</span>}
+      {value.kind === 'mcp-resource' && <span>{[value.server, value.tool, value.connectionState ?? value.status].filter(Boolean).join(' · ')}</span>}
+      {'status' in value && value.status && <span>{value.status}</span>}
+      {'summary' in value && value.summary && <p>{value.summary}</p>}
+      {uri && <code>{uri}</code>}
+      {value.kind === 'artifact' && value.parts?.map((nested, index) => <ReactFallbackContentPart key={index} part={nested}
+        onOpenResource={props.onOpenResource} onCopyResource={props.onCopyResource} />)}
+      {uri && (props.onOpenResource || props.onCopyResource) && <div className="renderer-suite-fallback-actions">
+        {props.onOpenResource && <button type="button" onClick={() => props.onOpenResource?.(uri)}>{value.kind === 'mcp-resource' ? '打开 MCP 资源' : '打开工件'}</button>}
+        {props.onCopyResource && <button type="button" onClick={() => props.onCopyResource?.(uri)}>{value.kind === 'mcp-resource' ? '复制 MCP 资源地址' : '复制工件地址'}</button>}
+      </div>}
+      {'raw' in value && value.raw && <details><summary>未知元数据</summary><pre>{fallbackJson(value.raw)}</pre></details>}
     </section>
   }
   if (part.kind === 'unknown') {

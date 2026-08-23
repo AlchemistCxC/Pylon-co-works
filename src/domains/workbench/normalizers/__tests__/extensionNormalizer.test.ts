@@ -60,6 +60,25 @@ describe('generic ACP extension normalizer', () => {
     expect(later.events[0].provenance).toEqual({ origin: 'local-observed', trust: 'authoritative' })
   })
 
+  it('projects system.hook through the negotiated wire with a strict secret-free payload', () => {
+    const result = normalizeAgentEvent({
+      method: PYLON_EXTENSION_METHOD,
+      params: { extension: { version: 1, kind: 'system.hook', payload: {
+        phase: 'turn.completed', owner: { pluginId: 'plugin.audit', runtimeInstanceId: 'runtime-1', handlerId: 'after' },
+        status: 'continued', durationMs: 14, decision: 'continue', error: { message: 'safe summary', code: 'HOOK' },
+        input: { apiToken: 'never-journal-this' }, eventInput: 'private-hook-input', vendorOrdinal: 7,
+      } } },
+    }, context('peri'))
+    expect(result.events[0].event).toMatchObject({ type: 'extension.event', kind: 'system.hook', payload: {
+      phase: 'turn.completed', owner: { pluginId: 'plugin.audit', runtimeInstanceId: 'runtime-1', handlerId: 'after' },
+      status: 'continued', durationMs: 14, decision: 'continue', error: { message: 'safe summary', code: 'HOOK' }, raw: { vendorOrdinal: 7 },
+    } })
+    expect(JSON.stringify(result.events[0])).not.toContain('never-journal-this')
+    expect(JSON.stringify(result.events[0])).not.toContain('apiToken')
+    expect(JSON.stringify(result.events[0])).not.toContain('private-hook-input')
+    expect(result.diagnostics).toEqual([expect.objectContaining({ code: 'extension.hook-sanitized', recoverable: true })])
+  })
+
   it('marks synthesized lifecycle with an observed order and explicit reason', () => {
     const synthetic = makeSyntheticEnvelope(
       { type: 'tool.started', tool: { toolCallId: 'orphan-1', name: 'unknown' } },

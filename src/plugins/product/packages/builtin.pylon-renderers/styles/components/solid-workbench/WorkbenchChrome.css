@@ -53,6 +53,7 @@
 .solid-workbench-assist { margin: 8px 24px 0; }
 .solid-workbench-activities { margin: 8px 24px 0; }
 .solid-workbench-interactions { margin: 8px 24px 0; }
+.solid-workbench-extensions { margin: 8px 24px 0; }
 .solid-workbench-usage,
 .solid-workbench-config,
 .solid-workbench-diagnostics { margin: 4px 24px 0; }
@@ -99,11 +100,49 @@
   border: 1px solid var(--border);
 }
 
+/* C15 typed extension content; settings are consumed through data attributes and bounded inline preview size. */
+.solid-extension-card {
+  display: grid;
+  gap: var(--ui-space-2);
+  margin: var(--ui-space-2) 0;
+  padding: var(--ui-space-3);
+  color: var(--text);
+  background: color-mix(in srgb, var(--bg-panel) 88%, transparent);
+  border: 1px solid var(--border);
+  border-inline-start: 3px solid var(--border);
+}
+.solid-extension-card[data-category-palette='accent'] { border-inline-start-color: var(--accent); }
+.solid-extension-card[data-category-palette='semantic'][data-status='failed'] { border-inline-start-color: var(--danger, #e5484d); }
+.solid-extension-card > header,
+.solid-extension-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--ui-space-2);
+}
+.solid-extension-icon { min-width: 1em; color: var(--accent); text-align: center; }
+.solid-extension-server-badge {
+  padding: 0 var(--ui-space-1);
+  color: var(--text-dim);
+  border: 1px solid var(--border);
+}
+.solid-extension-metadata { display: grid; grid-template-columns: max-content minmax(0, 1fr); gap: var(--ui-space-1) var(--ui-space-2); margin: 0; }
+.solid-extension-metadata dt { color: var(--text-dim); }
+.solid-extension-metadata dd { margin: 0; overflow-wrap: anywhere; }
+.solid-extension-uri { overflow-wrap: anywhere; }
+.solid-extension-preview { border: 1px solid var(--border); padding: var(--ui-space-2); overscroll-behavior: contain; }
+.solid-extension-card[data-reduced-motion='true'] { animation: none; transition: none; }
+@media (prefers-reduced-motion: reduce) {
+  .solid-extension-card { animation: none !important; transition: none !important; }
+}
+
 .solid-session-command { justify-content: space-between; }
 .solid-session-commands[data-density='compact'] .solid-session-command { gap: var(--ui-space-1); padding: 0; }
 .solid-session-assist:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
 .solid-session-assist-actions button:focus-visible,
-.solid-session-config-option :is(input,button):focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.solid-session-config-option :is(input,button):focus-visible,
+.solid-extension-actions button:focus-visible,
+.solid-extension-card summary:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
 
 @media (max-width: 640px) {
   .solid-session-config[data-layout='inline'] .solid-session-config-option { grid-template-columns: 1fr; }

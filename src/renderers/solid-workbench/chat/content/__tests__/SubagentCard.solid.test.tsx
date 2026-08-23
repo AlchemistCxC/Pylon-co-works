@@ -177,9 +177,9 @@ describe('C09 SolidSubagentCard', () => {
   it('renders C15 memory/mcp-resource/artifact metadata via the slot branch, never blank', async () => {
     const { BuiltinSolidContentSlot } = await import('../../BuiltinSolidContentSlot.solid.tsx')
     const cases: Array<{ kind: string; payload: Record<string, unknown>; expectText: string }> = [
-      { kind: 'content.memory', payload: { kind: 'memory', title: 'User prefers dark', source: 'hermes', status: 'recalled' }, expectText: 'User prefers dark' },
+      { kind: 'content.memory', payload: { kind: 'memory', memoryId: 'memory-dark', title: 'User prefers dark', source: 'hermes', status: 'recalled' }, expectText: 'User prefers dark' },
       { kind: 'content.mcp-resource', payload: { kind: 'mcp-resource', server: 'fs-mcp', resourceUri: 'file:///docs/spec.md' }, expectText: 'fs-mcp' },
-      { kind: 'content.artifact', payload: { kind: 'artifact', title: 'report.pdf', uri: 'https://x/report.pdf', version: 2 }, expectText: 'report.pdf' },
+      { kind: 'content.artifact', payload: { kind: 'artifact', artifactId: 'artifact-report', title: 'report.pdf', uri: 'https://x/report.pdf', version: 2 }, expectText: 'report.pdf' },
     ]
     for (const c of cases) {
       const view = render(() => <BuiltinSolidContentSlot
