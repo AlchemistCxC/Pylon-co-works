@@ -391,15 +391,23 @@ impl AppState {
 
     pub(crate) fn start_runtime_log_dispatcher(&self, window: tauri::WebviewWindow) {
         let mut events = self.runtime_logs.subscribe();
+        let hub = Arc::clone(&self.runtime_logs);
         tokio::spawn(async move {
             loop {
                 match events.recv().await {
-                    Ok(entry) => match serde_json::to_value(entry) {
-                        Ok(payload) => {
-                            emit_event(&window, crate::event_names::RUNTIME_LOG, payload)
+                    Ok(entry) => {
+                        // B2：闸门关闭（RuntimeSheet 未挂载）时跳过 serialize + emit，
+                        // 消除无消费者时的每条日志广播开销；ringbuffer 记录不受影响。
+                        if !hub.live_enabled() {
+                            continue;
                         }
-                        Err(error) => tracing::warn!("serialize runtime log event failed: {error}"),
-                    },
+                        match serde_json::to_value(entry) {
+                            Ok(payload) => {
+                                emit_event(&window, crate::event_names::RUNTIME_LOG, payload)
+                            }
+                            Err(error) => tracing::warn!("serialize runtime log event failed: {error}"),
+                        }
+                    }
                     Err(tokio::sync::broadcast::error::RecvError::Lagged(count)) => {
                         tracing::warn!("runtime log event dispatcher lagged by {count} entries");
                     }

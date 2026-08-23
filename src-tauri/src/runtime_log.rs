@@ -3,7 +3,7 @@
 use ringbuffer::{AllocRingBuffer, RingBuffer};
 use serde::{Deserialize, Serialize};
 use serde_json::{Map, Value};
-use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::{Arc, Mutex, OnceLock};
 
 use crate::correlation::RuntimeCorrelation;
@@ -115,6 +115,10 @@ pub struct RuntimeLogHub {
     entries: Mutex<AllocRingBuffer<Arc<RuntimeLogEntry>>>,
     capacity: usize,
     events: tokio::sync::broadcast::Sender<Arc<RuntimeLogEntry>>,
+    /// B2：live 推送闸门——RuntimeSheet 打开时置 true（前端 set_runtime_log_live
+    /// 驱动），关闭时 false。ringbuffer 记录不受影响（pull 兜底不变）；
+    /// dispatcher 在闸门关闭时跳过 serialize + emit，消除无消费者时的广播开销。
+    live_enabled: AtomicBool,
 }
 
 impl RuntimeLogHub {
@@ -125,7 +129,17 @@ impl RuntimeLogHub {
             entries: Mutex::new(AllocRingBuffer::new(capacity.max(1))),
             capacity: capacity.max(1),
             events,
+            live_enabled: AtomicBool::new(false),
         })
+    }
+
+    /// B2：开/关 live 推送。默认关——启动后 RuntimeSheet 首次挂载才打开。
+    pub fn set_live(&self, enabled: bool) {
+        self.live_enabled.store(enabled, Ordering::Release);
+    }
+
+    pub fn live_enabled(&self) -> bool {
+        self.live_enabled.load(Ordering::Acquire)
     }
 
     pub fn default() -> Arc<Self> {

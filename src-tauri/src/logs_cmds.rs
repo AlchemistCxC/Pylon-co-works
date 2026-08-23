@@ -20,6 +20,17 @@ pub(crate) async fn clear_runtime_logs(
     Ok(())
 }
 
+/// B2：RuntimeSheet 挂载时开 live 推送、卸载时关。ringbuffer 记录不受影响，
+/// list_runtime_logs pull 兜底始终可用。
+#[tauri::command]
+pub(crate) async fn set_runtime_log_live(
+    state: tauri::State<'_, AppState>,
+    enabled: bool,
+) -> Result<(), PylonError> {
+    state.runtime_logs.set_live(enabled);
+    Ok(())
+}
+
 #[tauri::command]
 pub(crate) async fn push_frontend_log(
     state: tauri::State<'_, AppState>,
