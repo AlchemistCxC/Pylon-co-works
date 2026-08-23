@@ -751,10 +751,16 @@ async fn send_prompt_core_impl<R: tauri::Runtime>(
         }
         // B1（传输收敛）：已注册 Channel 的 GUI 会话走信封帧单轨；未注册
         // （平台 ingest / 未升级前端）保留广播。user echo 与 update 同构。
-        if send_channel_terminal(state, runtime, source, crate::event_names::USER_ECHO, user_payload.clone()) {
-            // Channel 已消费并注销。
-        } else if let Some(window) = window {
-            emit_event(window, crate::event_names::USER_ECHO, user_payload);
+        // 注意：必须用非破坏性 send_update_frame——此处会话尚未结束，take 注销
+        // 会让后续 update/done 流失去通道（前端 C2 已拆广播 listen → 断流）。
+        let frame = serde_json::json!({
+            "event": crate::event_names::USER_ECHO,
+            "payload": user_payload,
+        });
+        if !runtime.send_update_frame(source, frame) {
+            if let Some(window) = window {
+                emit_event(window, crate::event_names::USER_ECHO, user_payload);
+            }
         }
     }
     let rpc = {

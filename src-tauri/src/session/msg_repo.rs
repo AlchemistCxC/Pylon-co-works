@@ -1783,6 +1783,19 @@ mod tests {
     }
 
     #[test]
+    fn wal_pragmas_tolerate_in_memory_database() {
+        // 边界（A1）：in-memory 连接同样走 connect()——SQLite 规定 :memory: 上
+        // journal_mode=WAL 请求返回 "memory" 且不报错；pragma_update 对非空返回
+        // 值的 pragma 不视为失败。断言连接可用且 journal_mode 保持 memory。
+        let repo = MsgRepo::open_in_memory().expect("in-memory open with WAL pragmas");
+        let conn = repo.conn.lock().unwrap();
+        let mode: String = conn
+            .query_row("PRAGMA journal_mode", [], |row| row.get(0))
+            .expect("journal_mode readable");
+        assert_eq!(mode, "memory", ":memory: stays memory even after WAL request");
+    }
+
+    #[test]
     fn migrate_backfills_provable_legacy_messages_and_archives_all_v8_tables() {
         // 模拟 v8：唯一 owner 的基础文本角色可无损组成 history.snapshot；原表只改名归档。
         let path = unique_temp_db_path();

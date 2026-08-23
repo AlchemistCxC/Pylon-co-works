@@ -108,6 +108,30 @@ impl AgentRuntime {
             .and_then(|mut map| map.remove(source))
     }
 
+    /// B1：非破坏性向 source 的通道发一帧（不移除注册）。user echo 在 prompt
+    /// 发送前产生，会话仍在途——绝不能用 take 语义（注销后 update 流断轨）。
+    /// 返回 false = 未注册（调用方走广播兜底）。
+    pub fn send_update_frame(
+        &self,
+        source: &str,
+        frame: serde_json::Value,
+    ) -> bool {
+        match self
+            .update_channels
+            .lock()
+            .ok()
+            .and_then(|map| map.get(source).cloned())
+        {
+            Some(channel) => {
+                if let Err(error) = channel.send(frame) {
+                    tracing::warn!("channel 帧发送失败 source={source}: {error}");
+                }
+                true
+            }
+            None => false,
+        }
+    }
+
     /// A1：清空全部通道（C7 stop_agent_runtime / generation bump 批量清理）。
     pub fn clear_update_channels(&self) {
         if let Ok(mut map) = self.update_channels.lock() {
