@@ -21,7 +21,7 @@ pylon-cli [--json] [--timeout <ms>] <command> [positionals] [--key <value>] [--a
 
 所有变更操作返回 `operationId`；用 `operation inspect/logs/cancel` 查询或取消。
 
-## 2. CLI 壳命令（45 个）
+## 2. CLI 壳命令（58 个）
 
 | 命令 | 主要参数 | 说明 |
 |:--|:--|:--|
@@ -54,6 +54,19 @@ pylon-cli [--json] [--timeout <ms>] <command> [positionals] [--key <value>] [--a
 | `session send <sessionId> <content>` | 或 `--content` | 经 `message.user.beforeSend` Hook 发送 |
 | `session close <sessionId>` | — | 关闭 ACP Session |
 | `session cancel <sessionId>` | — | 调用 ACP `cancel_prompt` |
+| `session inspect <sessionId>` | — | 单会话状态 + generating 标志 + ownerKey |
+| `session messages <sessionId>` | `--after-seq`、`--limit` | journal 消息查询（增量分页，AI 驱动闭环） |
+| `session config set <agentId> <sessionId> <key> <value>` | — | 会话级配置选项（模型/思考档位等） |
+| `session export <agentId> <periId> <outputPath>` | `--format` | 会话 journal 导出 |
+| `approval get` | — | 读取当前全局审批模式（bypass/auto/edit/default） |
+| `approval set <mode>` | — | 设置全局审批模式（外部自动化总开关） |
+| `interaction list` | — | 全部挂起权限请求快照（含应答所需 identity 与 options） |
+| `interaction respond <requestId> <optionId>` | — | 应答权限请求（optionId 经合法性校验） |
+| `workspace registry list` | — | 列出注册表工作区（Workspace 实体，非打开的 Sheet） |
+| `workspace registry create <agentId> <name> <rootPath>` | — | 创建工作区实体 |
+| `workspace registry update <workspaceId>` | `--name`、`--root-path` | 更新工作区名称/根路径 |
+| `workspace registry delete <workspaceId>` | — | 删除工作区（Session 解绑，cwd 冻结保留） |
+| `workspace registry search <query>` | `--max-results` | 按名称/路径搜索工作区 |
 | `command list` | `--plugin`、`--executable true` | 动态列出全部插件命令 |
 | `command inspect <commandId>` | — | 查看命令 owner、参数提示、权限和可执行性 |
 | `command exec <commandId>` | `--args '{...}'` | 执行任意插件命令 |

@@ -1011,7 +1011,7 @@ pylon_cli
 }
 ```
 
-CLI 壳当前提供 45 个固定控制命令，完整参数见 [Pylon CLI 命令表](../Pylon-CLI-命令表.md)。主要分组：
+CLI 壳当前提供 58 个固定控制命令，完整参数见 [Pylon CLI 命令表](../Pylon-CLI-命令表.md)。主要分组：
 
 ```text
 plugin list / inspect / enable / disable / reload
@@ -1020,7 +1020,10 @@ hook list / trace
 command list / inspect / exec
 registry list
 agent list / import / set-default
-session list / create / send / close / cancel
+session list / inspect / create / send / messages / close / cancel / config / export
+approval get / set
+interaction list / respond
+workspace registry list / create / update / delete / search
 skin schema / draft create / draft patch / preview / capture / commit / rollback
 process list / logs / terminate
 workspace list / open / close
