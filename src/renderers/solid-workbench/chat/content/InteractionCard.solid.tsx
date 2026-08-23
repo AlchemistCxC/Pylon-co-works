@@ -21,6 +21,12 @@ interface NormalizedRequest {
   scope?: string
   command?: string
   path?: string
+  provider?: string
+  url?: string
+  urlRedacted?: boolean
+  stateSummary?: string
+  status?: string
+  timeoutMs?: number
   options?: { id: string; label: string; danger?: boolean; description?: string }[]
   questions?: NormalizedQuestion[]
 }
@@ -38,6 +44,12 @@ interface NormalizedQuestion {
 function parseRequest(raw: unknown): NormalizedRequest {
   if (typeof raw !== 'object' || raw === null || Array.isArray(raw)) return {}
   const record = raw as Record<string, unknown>
+  const identity = typeof record.identity === 'object' && record.identity !== null && !Array.isArray(record.identity)
+    ? record.identity as Record<string, unknown>
+    : undefined
+  const provider = typeof record.provider === 'string'
+    ? record.provider
+    : typeof identity?.provider === 'string' ? identity.provider : undefined
   const questions = Array.isArray(record.questions)
     ? record.questions.flatMap((value): NormalizedQuestion[] => {
       if (typeof value !== 'object' || value === null || Array.isArray(value)) return []
@@ -61,9 +73,10 @@ function parseRequest(raw: unknown): NormalizedRequest {
     })
     : []
   const firstQuestion = questions[0]
-  if (!firstQuestion) return record as NormalizedRequest
+  if (!firstQuestion) return { ...record, ...(provider ? { provider } : {}) } as NormalizedRequest
   return {
     ...record as NormalizedRequest,
+    ...(provider ? { provider } : {}),
     prompt: firstQuestion.question || (typeof record.title === 'string' ? record.title : undefined),
     options: firstQuestion.options,
     questions,
@@ -83,6 +96,10 @@ export function SolidInteractionCard(props: {
   const maxWidth = () => typeof appearanceValue('maxWidth') === 'number' ? `${appearanceValue('maxWidth')}px` : undefined
   const showDescriptions = () => appearanceValue('descriptionsExpanded') !== false
   const showTechnicalMetadata = () => appearanceValue('showTechnicalMetadata') === true
+  const showProviderMetadata = () => appearanceValue('showProviderMetadata') !== false
+  const countdownStyle = () => appearanceValue('countdownStyle') === 'hidden'
+    ? 'hidden'
+    : appearanceValue('countdownStyle') === 'detailed' ? 'detailed' : 'compact'
   const statusColor = () => {
     const key = props.interaction.status === 'resolved'
       ? 'resolvedColor'
@@ -98,6 +115,13 @@ export function SolidInteractionCard(props: {
       .map(entry => entry.option)
   }
   const pending = () => props.interaction.status === 'requested'
+  const terminalLabel = () => {
+    const response = props.interaction.response
+    if (response && typeof response === 'object' && !Array.isArray(response)
+      && (response as Record<string, unknown>).cancelled === true) return '已取消'
+    if (props.interaction.status === 'expired' && /timeout|超时/i.test(props.interaction.reason ?? '')) return '已超时'
+    return props.interaction.status === 'resolved' ? '已响应' : '已过期'
+  }
   // 主链 semantic command type 是 'interaction.respond'（Slot gate 映射到 interactionResponse capability 位）
   const canRespond = () => pending() && props.commands?.canExecute?.('interaction.respond') === true
 
@@ -116,7 +140,7 @@ export function SolidInteractionCard(props: {
         payload: { ...payload, expectedRevision: props.interaction.sequence },
       })
     } catch (error) {
-      setSubmitError(error instanceof Error ? error.message : '交互提交失败，请重试')
+      setSubmitError(request().kind === 'secret' ? '凭据提交失败，请重试' : error instanceof Error ? error.message : '交互提交失败，请重试')
     } finally {
       setSubmitting(false)
     }
@@ -174,10 +198,12 @@ export function SolidInteractionCard(props: {
       aria-label={`交互：${request().prompt ?? props.interaction.id}，${props.interaction.status}`}
       data-presentation={presentation()}
       data-option-density={optionDensity()}
+      data-countdown-style={countdownStyle()}
       onKeyDown={trapModalFocus}
       style={{
         'max-width': maxWidth(),
         '--interaction-danger-color': typeof appearanceValue('dangerColor') === 'string' ? appearanceValue('dangerColor') as string : undefined,
+        '--interaction-warning-color': typeof appearanceValue('warningColor') === 'string' ? appearanceValue('warningColor') as string : undefined,
         '--interaction-status-color': statusColor(),
       }}
     >
@@ -188,6 +214,9 @@ export function SolidInteractionCard(props: {
         </Show>
         <Show when={request().capability}>
           <span class="interaction-capability">能力：{request().capability}</span>
+        </Show>
+        <Show when={showProviderMetadata() && request().provider}>
+          {provider => <span class="interaction-capability">Provider：{provider()}</span>}
         </Show>
         <Show when={showTechnicalMetadata() && (request() as Record<string, unknown>).identity}>
           <small class="interaction-technical-metadata">
@@ -210,17 +239,36 @@ export function SolidInteractionCard(props: {
           <Show when={(request() as Record<string, unknown>).reason}>
             {reason => <span>原因：{String(reason())}</span>}
           </Show>
+          <Show when={request().scope}>{scope => <span>范围：{scope()}</span>}</Show>
+          <Show when={request().timeoutMs !== undefined && countdownStyle() !== 'hidden'}>
+            <span>超时：{countdownStyle() === 'detailed'
+              ? `${Math.max(0, Math.round(request().timeoutMs! / 1000))} 秒（提交后开始计时）`
+              : `${Math.max(0, Math.round(request().timeoutMs! / 1000))}s`}</span>
+          </Show>
         </div>
       </Show>
-      <Show when={request().kind === 'oauth' && (request() as Record<string, unknown>).url}>
+      <Show when={request().kind === 'oauth'}>
         {/* C12：OAuth URL 只读呈现；open 动作经 resource.open capability gate */}
         <div class="interaction-terminal-state">
-          <code>{String((request() as Record<string, unknown>).url)}</code>
-          <Show when={canRespond() && props.commands?.canExecute?.('resource.open') === true}>
+          <Show when={request().stateSummary}>{summary => <span>{summary()}</span>}</Show>
+          <Show when={request().status}>{status => <span>状态：{status()}</span>}</Show>
+          <Show when={request().url} fallback={request().urlRedacted ? <span>链接已隐藏</span> : undefined}>
+            {url => <code>{url()}</code>}
+          </Show>
+          <Show when={request().url && canRespond() && props.commands?.canExecute?.('resource.open') === true}>
             <button type="button" class="term-file-action" tabindex="0"
               onClick={() => { void props.commands?.execute({ type: 'resource.open', targetId: props.interaction.id,
-                payload: { uri: (request() as Record<string, unknown>).url } }) }}>
+                payload: { uri: request().url } }) }}>
               打开授权页
+            </button>
+          </Show>
+          <Show when={request().url && canRespond() && props.commands?.canExecute?.('clipboard.write') === true}>
+            <button type="button" class="term-file-action" tabindex="0"
+              onClick={() => { void props.commands?.execute({
+                type: 'clipboard.write', targetId: props.interaction.id,
+                payload: { text: request().url },
+              }) }}>
+              复制授权链接
             </button>
           </Show>
         </div>
@@ -230,8 +278,8 @@ export function SolidInteractionCard(props: {
       </Show>
       <Show when={pending()} fallback={
         <div class="interaction-terminal-state">
-          <span>{props.interaction.status === 'resolved' ? '已响应' : '已过期'}</span>
-          <Show when={props.interaction.response}>
+          <span>{terminalLabel()}</span>
+          <Show when={request().kind !== 'secret' ? props.interaction.response : undefined}>
             {response => <code class="interaction-response">{JSON.stringify(response())}</code>}
           </Show>
           <Show when={props.interaction.reason}>

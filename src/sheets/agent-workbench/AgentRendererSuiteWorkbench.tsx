@@ -295,6 +295,16 @@ export default function AgentRendererSuiteWorkbench(props: AgentRendererSuiteWor
     if (!host || !input.sessionId || !host.capabilities.has('resourceOpen')) return
     void host.commands.openResource(input.sessionId, { ...part, disposition: 'download' })
   }
+  const openFallbackInteractionUrl = (url: string) => {
+    const host = hostPortRef.current
+    if (!host || !input.sessionId || !host.capabilities.has('resourceOpen')) return
+    void host.commands.openResource(input.sessionId, { uri: url })
+  }
+  const copyFallbackInteractionUrl = (url: string) => {
+    const host = hostPortRef.current
+    if (!host || !input.sessionId || !host.capabilities.has('clipboardWrite')) return
+    void host.commands.copy(input.sessionId, url)
+  }
   const retryFallbackMessage = () => {
     const host = hostPortRef.current
     if (!host || !input.sessionId || !host.capabilities.has('retry')) return
@@ -319,6 +329,8 @@ export default function AgentRendererSuiteWorkbench(props: AgentRendererSuiteWor
       onOpenDiagnostics={openDiagnostics}
       onOpenMedia={hostPortRef.current.capabilities.has('resourceOpen') ? openFallbackMedia : undefined}
       onDownloadMedia={hostPortRef.current.capabilities.has('resourceOpen') ? downloadFallbackMedia : undefined}
+      onOpenInteractionUrl={hostPortRef.current.capabilities.has('resourceOpen') ? openFallbackInteractionUrl : undefined}
+      onCopyInteractionUrl={hostPortRef.current.capabilities.has('clipboardWrite') ? copyFallbackInteractionUrl : undefined}
       onRetryMessage={hostPortRef.current.capabilities.has('retry') ? retryFallbackMessage : undefined}
       onRecoverSession={hostPortRef.current.capabilities.has('recovery') ? recoverFallbackSession : undefined}
       onRespondInteraction={hostPortRef.current.capabilities.has('interactionResponse') ? respondFallbackInteraction : undefined} />}

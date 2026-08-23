@@ -92,4 +92,22 @@ describe('C12 secret-bearing interaction projection', () => {
     expect((interaction.response as { approved?: boolean }).approved).toBe(true)
     expect((interaction.response as Record<string, unknown>).password).toBeUndefined()
   })
+
+  it('recursively redacts nested credentials before timeline and renderer snapshots', () => {
+    const credential = 'nested-c12-credential'
+    const { document } = projectWorkbench([
+      envelope(1, {
+        type: 'interaction.requested', interactionId: 'nested-secret',
+        request: {
+          kind: 'secret', prompt: 'Credential', correlationId: 'nested-1',
+          metadata: { auth: { clientSecret: credential }, items: [{ password: credential }] },
+        },
+      }),
+    ])
+    const snapshot = JSON.stringify(document)
+    expect(snapshot).not.toContain(credential)
+    expect(document.interactions[0].request).toMatchObject({
+      metadata: { auth: { clientSecretRedacted: true }, items: [{ passwordRedacted: true }] },
+    })
+  })
 })

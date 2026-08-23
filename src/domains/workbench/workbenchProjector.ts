@@ -781,7 +781,7 @@ function mergeActivityTerminal(previous: WorkbenchActivityNode | undefined, next
 }
 
 /** C12：secret-bearing interaction 的脱敏键清单——命中值永不落 journal/document/diagnostic。 */
-const SENSITIVE_REQUEST_KEYS: ReadonlySet<string> = new Set(['password', 'secret', 'value', 'token', 'accessToken', 'refreshToken', 'clientSecret', 'apiKey'])
+const SENSITIVE_REQUEST_KEYS: ReadonlySet<string> = new Set(['password', 'secret', 'value', 'token', 'accesstoken', 'refreshtoken', 'clientsecret', 'apikey', 'authorization', 'credential', 'cookie'])
 /** OAuth URL scheme 白名单（C12 步骤 2）；其余 scheme 的 url 字段整体剥除。 */
 const OAUTH_URL_PATTERN = /^https:\/\/|^http:\/\/localhost/
 
@@ -795,11 +795,14 @@ function redactInteractionEvent<T extends Record<string, unknown>>(event: T): T 
 }
 
 function redactSensitiveInteractionPayload(payload: unknown): unknown {
-  if (typeof payload !== 'object' || payload === null || Array.isArray(payload)) return payload
+  if (Array.isArray(payload)) return payload.map(redactSensitiveInteractionPayload)
+  if (typeof payload !== 'object' || payload === null) return payload
   const source = payload as Record<string, unknown>
   const out: Record<string, unknown> = {}
   for (const [key, value] of Object.entries(source)) {
-    if (SENSITIVE_REQUEST_KEYS.has(key)) {
+    const normalizedKey = key.replace(/[_-]/g, '').toLowerCase()
+    if (SENSITIVE_REQUEST_KEYS.has(normalizedKey)
+      || normalizedKey.endsWith('token') || normalizedKey.endsWith('apikey') || normalizedKey.endsWith('secret')) {
       // omission metadata 替代原值（DIC-C12-01）：只留可审计的 redacted 标记
       if (value !== undefined && value !== null && value !== '') out[`${key}Redacted`] = true
       continue
@@ -808,7 +811,7 @@ function redactSensitiveInteractionPayload(payload: unknown): unknown {
       out.urlRedacted = true
       continue
     }
-    out[key] = value
+    out[key] = redactSensitiveInteractionPayload(value)
   }
   return out
 }

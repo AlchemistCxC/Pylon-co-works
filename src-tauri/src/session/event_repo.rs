@@ -127,6 +127,70 @@ struct KernelEventInput {
 
 const MAX_CANONICAL_RAW_BYTES: usize = 64 * 1024;
 
+fn is_journal_credential_key(key: &str, interaction_payload: bool) -> bool {
+    let normalized = key
+        .chars()
+        .filter(|character| character.is_ascii_alphanumeric())
+        .flat_map(char::to_lowercase)
+        .collect::<String>();
+    if normalized.ends_with("redacted") {
+        return false;
+    }
+    matches!(
+        normalized.as_str(),
+        "password" | "authorization" | "cookie" | "credential" | "credentials" | "tokenvalue"
+    ) || normalized.ends_with("token")
+        || normalized.ends_with("apikey")
+        || normalized.ends_with("secret")
+        || (interaction_payload && normalized == "value")
+}
+
+/// C12/DIC-C12-01：canonical journal 是 durable authority，credential 必须在 append
+/// 之前递归替换为 omission metadata；projector/renderer 的后置遮挡不能补救落盘泄漏。
+fn redact_journal_credentials(
+    value: serde_json::Value,
+    interaction_payload: bool,
+) -> serde_json::Value {
+    match value {
+        serde_json::Value::Object(object) => {
+            let nested_interaction = interaction_payload
+                || object
+                    .get("kind")
+                    .and_then(serde_json::Value::as_str)
+                    .is_some_and(|kind| matches!(kind, "oauth" | "secret" | "sudo"));
+            let nested_interaction = nested_interaction
+                || object
+                    .get("request")
+                    .and_then(serde_json::Value::as_object)
+                    .and_then(|request| request.get("kind"))
+                    .and_then(serde_json::Value::as_str)
+                    .is_some_and(|kind| matches!(kind, "oauth" | "secret" | "sudo"));
+            let mut safe = serde_json::Map::new();
+            for (key, child) in object {
+                if is_journal_credential_key(&key, nested_interaction) {
+                    if !child.is_null() && child != serde_json::Value::String(String::new()) {
+                        safe.insert(format!("{key}Redacted"), serde_json::Value::Bool(true));
+                    }
+                    continue;
+                }
+                let sanitized = redact_journal_credentials(child, nested_interaction);
+                safe.insert(key, sanitized);
+            }
+            serde_json::Value::Object(safe)
+        }
+        serde_json::Value::Array(values) => serde_json::Value::Array(
+            values
+                .into_iter()
+                .map(|child| redact_journal_credentials(child, interaction_payload))
+                .collect(),
+        ),
+        serde_json::Value::String(text) => {
+            serde_json::Value::String(crate::sanitize::sanitize_value_content(&text))
+        }
+        other => other,
+    }
+}
+
 fn retain_raw_payload(raw: serde_json::Value) -> (serde_json::Value, bool, i64, i64, i64) {
     let encoded = raw.to_string();
     let original = encoded.len() as i64;
@@ -376,7 +440,7 @@ fn normalize_kernel_event(
     input: KernelEventInput,
     sequence: i64,
 ) -> Result<CanonicalEventRow, EventError> {
-    let raw_for_storage = input.raw_payload.clone();
+    let raw_for_storage = redact_journal_credentials(input.raw_payload.clone(), false);
     let provenance_provider = input.owner.agent_id.clone();
     let provenance_import_id = input.owner.local_session_id.clone();
     let owner_key = input
@@ -445,7 +509,10 @@ fn normalize_kernel_event(
                 ("content", "contentBlocks"),
             ] {
                 if let Some(value) = update.get(wire) {
-                    tool.insert(canonical.to_string(), value.clone());
+                    tool.insert(
+                        canonical.to_string(),
+                        redact_journal_credentials(value.clone(), false),
+                    );
                 }
             }
             typed_payload.insert("tool".to_string(), serde_json::Value::Object(tool));
@@ -478,8 +545,10 @@ fn normalize_kernel_event(
         event_type: event_type.to_string(),
         payload_version: 1,
         identity: resolve_identity(update),
-        typed_payload: (!typed_payload.is_empty())
-            .then_some(serde_json::Value::Object(typed_payload)),
+        typed_payload: (!typed_payload.is_empty()).then_some(redact_journal_credentials(
+            serde_json::Value::Object(typed_payload),
+            false,
+        )),
         raw_payload,
         created_at: now_millis(),
         schema_version: 1,
@@ -602,8 +671,15 @@ pub(crate) fn parse_canonical_event(
         )));
     }
 
+    let event_type = event_type.expect("checked");
+    let interaction_payload = event_type.starts_with("interaction.");
     let (raw_payload, raw_truncated, raw_original_bytes, raw_retained_bytes, raw_omitted_bytes) =
-        retain_raw_payload(obj.get("rawPayload").cloned().unwrap_or(serde_json::Value::Null));
+        retain_raw_payload(redact_journal_credentials(
+            obj.get("rawPayload")
+                .cloned()
+                .unwrap_or(serde_json::Value::Null),
+            interaction_payload,
+        ));
 
     Ok(CanonicalEventRow {
         event_id,
@@ -616,10 +692,13 @@ pub(crate) fn parse_canonical_event(
         sequence: sequence.expect("checked"),
         occurred_at: occurred_at.expect("checked"),
         received_at: received_at.expect("checked"),
-        event_type: event_type.expect("checked"),
+        event_type,
         payload_version: payload_version.expect("checked"),
         identity: obj.get("identity").cloned(),
-        typed_payload: obj.get("typedPayload").cloned(),
+        typed_payload: obj
+            .get("typedPayload")
+            .cloned()
+            .map(|value| redact_journal_credentials(value, interaction_payload)),
         raw_payload,
         created_at: now_millis(),
         schema_version: obj.get("schemaVersion").and_then(|v| v.as_i64()).unwrap_or(1),
@@ -1389,6 +1468,26 @@ mod tests {
     }
 
     #[test]
+    fn kernel_ingest_redacts_secret_interaction_values_before_raw_retention() {
+        let credential = "c12-kernel-secret-value";
+        let result = repo()
+            .ingest_kernel_event(kernel_input(serde_json::json!({
+                "source": "local:s1",
+                "update": {
+                    "sessionUpdate": "future_interaction",
+                    "request": { "kind": "secret", "value": credential },
+                    "response": { "value": credential }
+                }
+            })))
+            .expect("ingest");
+        let row = &result.events[0];
+        let persisted = serde_json::to_string(row).unwrap();
+        assert!(!persisted.contains(credential));
+        assert_eq!(row.raw_payload["update"]["request"]["valueRedacted"], true);
+        assert_eq!(row.raw_payload["update"]["response"]["valueRedacted"], true);
+    }
+
+    #[test]
     fn kernel_ingest_does_not_accept_caller_provenance_spoof() {
         let repo = repo();
         let result = repo
@@ -2028,6 +2127,57 @@ mod tests {
             page.events[0].raw_payload,
             serde_json::json!({"future": "thing"})
         );
+    }
+
+    #[test]
+    fn interaction_credentials_are_redacted_before_canonical_journal_append() {
+        let repo = repo();
+        let credential = "c12-journal-credential";
+        let mut ev = event_json(
+            "peri",
+            "s1",
+            1,
+            "interaction.requested",
+            serde_json::json!({
+                "request": {
+                    "kind": "sudo",
+                    "command": "apt update",
+                    "password": credential,
+                    "nested": { "clientSecret": credential }
+                }
+            }),
+        );
+        ev["typedPayload"] = serde_json::json!({
+            "request": { "kind": "sudo", "password": credential }
+        });
+
+        let result = repo
+            .append_events(&[parse_canonical_event(&ev).unwrap()], None)
+            .unwrap();
+        let row = &result.events[0];
+        let persisted = serde_json::to_string(row).unwrap();
+        assert!(!persisted.contains(credential));
+        assert_eq!(row.raw_payload["request"]["command"], "apt update");
+        assert_eq!(row.raw_payload["request"]["passwordRedacted"], true);
+        assert_eq!(
+            row.raw_payload["request"]["nested"]["clientSecretRedacted"],
+            true
+        );
+        assert_eq!(
+            row.typed_payload.as_ref().unwrap()["request"]["passwordRedacted"],
+            true
+        );
+        let exported = repo
+            .export_raw_event(&row.event_id)
+            .expect("export")
+            .expect("row");
+        assert!(!exported.raw_payload_json.contains(credential));
+        assert!(exported.raw_payload_json.contains("passwordRedacted"));
+        assert!(!exported
+            .typed_payload_json
+            .as_deref()
+            .unwrap_or_default()
+            .contains(credential));
     }
 
     #[test]

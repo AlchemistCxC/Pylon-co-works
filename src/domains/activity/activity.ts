@@ -12,6 +12,8 @@ export type InteractionKind =
   | 'ask-question'
   | 'approval'
   | 'oauth'
+  | 'secret'
+  | 'sudo'
   | 'unknown'
 
 export type ActivityMatch = 'wire-event' | 'interaction-name' | 'fallback'
@@ -33,6 +35,8 @@ const INTERACTION_NAMES: Record<string, InteractionKind> = {
   request_permission: 'approval',
   oauth: 'oauth',
   oauth_needed: 'oauth',
+  secret: 'secret',
+  sudo: 'sudo',
 }
 
 const INTERACTION_EVENT_TYPES: Record<string, InteractionKind> = {

@@ -444,4 +444,64 @@ describe('React Workbench fatal fallback', () => {
       onRetry={vi.fn()} onSelectSuite={vi.fn()} onOpenDiagnostics={vi.fn()} />)).not.toThrow()
     expect(screen.getAllByText('仍需可见').length).toBeGreaterThan(0)
   })
+
+  it('keeps secret fallback input password-only and clears it even when submit fails', async () => {
+    const credential = 'c12-fallback-secret'
+    const current: WorkbenchDocument = {
+      ...document(13, ''), interactions: [{
+        id: 'fallback-secret', status: 'requested', sequence: 13,
+        request: {
+          surface: 'interaction', kind: 'secret', state: 'waiting',
+          identity: { provider: 'peri', agentId: 'agent', requestId: 'secret-13', sessionId: 'session', toolCallId: null, clientGeneration: 2 },
+          questions: [{ id: 'secret', question: '输入凭据', allowMultiple: false, allowFreeform: true, options: [] }],
+        },
+      }],
+    }
+    const reader: WorkbenchDocumentReader = {
+      getSnapshot: () => current, subscribe: () => () => {},
+      getSlice: () => undefined as never, subscribeSlice: () => () => {},
+    }
+    render(<ReactWorkbenchFatalFallback document={reader}
+      failure={{ suiteId: 'builtin.solid', phase: 'mount', message: 'interaction slot failed' }}
+      onRetry={vi.fn()} onSelectSuite={vi.fn()} onOpenDiagnostics={vi.fn()}
+      onRespondInteraction={vi.fn().mockRejectedValue(new Error('host rejected'))} />)
+
+    const input = screen.getByPlaceholderText('输入凭据') as HTMLInputElement
+    expect(input.type).toBe('password')
+    expect(input.autocomplete).toBe('off')
+    fireEvent.input(input, { target: { value: credential } })
+    fireEvent.click(screen.getByRole('button', { name: '提交凭据' }))
+    expect(input).toHaveValue('')
+    expect(await screen.findByRole('alert', { name: '交互提交失败' })).toHaveTextContent('凭据提交失败，请重试')
+    expect(window.document.body.textContent).not.toContain(credential)
+  })
+
+  it('routes fallback OAuth open/copy through Host-provided actions and hides rejected URLs', () => {
+    const current: WorkbenchDocument = {
+      ...document(14, ''), interactions: [{
+        id: 'fallback-oauth', status: 'requested', sequence: 14,
+        request: {
+          surface: 'interaction', kind: 'oauth', state: 'waiting',
+          identity: { provider: 'peri', agentId: 'agent', requestId: 'oauth-14', sessionId: 'session', toolCallId: null, clientGeneration: 2 },
+          url: 'https://example.com/oauth', stateSummary: '等待授权',
+          questions: [{ id: 'oauth', question: '连接账号', allowMultiple: false, allowFreeform: false, options: [] }],
+        },
+      }],
+    }
+    const reader: WorkbenchDocumentReader = {
+      getSnapshot: () => current, subscribe: () => () => {},
+      getSlice: () => undefined as never, subscribeSlice: () => () => {},
+    }
+    const onOpenInteractionUrl = vi.fn()
+    const onCopyInteractionUrl = vi.fn()
+    render(<ReactWorkbenchFatalFallback document={reader}
+      failure={{ suiteId: 'builtin.solid', phase: 'mount', message: 'interaction slot failed' }}
+      onRetry={vi.fn()} onSelectSuite={vi.fn()} onOpenDiagnostics={vi.fn()}
+      onOpenInteractionUrl={onOpenInteractionUrl} onCopyInteractionUrl={onCopyInteractionUrl} />)
+    fireEvent.click(screen.getByRole('button', { name: '打开授权页' }))
+    fireEvent.click(screen.getByRole('button', { name: '复制授权链接' }))
+    expect(onOpenInteractionUrl).toHaveBeenCalledWith('https://example.com/oauth')
+    expect(onCopyInteractionUrl).toHaveBeenCalledWith('https://example.com/oauth')
+    expect(screen.getByText('等待授权')).toBeTruthy()
+  })
 })

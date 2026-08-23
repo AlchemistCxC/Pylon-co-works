@@ -712,6 +712,60 @@ describe('mountSolidWorkbench', () => {
     expect(host.querySelector('.interaction-card')).toBeNull()
   })
 
+  it('gives a C12 plugin replacement only the redacted canonical interaction snapshot', async () => {
+    const host = document.createElement('div')
+    document.body.append(host)
+    hosts.push(host)
+    const services = createPreviewWorkbenchServices()
+    servicesList.push(services)
+    const kind = BUILTIN_INTERACTION_RENDER_KINDS.find(item => item.id === 'interaction.secret')!
+    let pluginSnapshot = ''
+    const slot: RendererSlotContribution = {
+      id: 'plugin.interaction.secret', targetSuites: ['builtin.solid'], kinds: [kind.id], priority: 20_000,
+      fallback: false, canRender: () => true,
+      createSurface: () => ({
+        rendererId: 'plugin.interaction.secret', kind: 'solid',
+        mount(container, snapshot) {
+          pluginSnapshot = JSON.stringify(snapshot)
+          const node = document.createElement('div')
+          node.textContent = 'Plugin secret surface'
+          container.append(node)
+          return node
+        },
+        update(_handle, snapshot) { pluginSnapshot = JSON.stringify(snapshot) },
+        destroy(handle) { (handle as HTMLElement).remove() }, on: () => () => {},
+      }),
+    }
+    const suite = { id: 'builtin.solid' } as RendererSuiteContribution
+    const kindEntry = { ownerPluginId: 'core.interaction', ownerRuntimeInstanceId: 'runtime', contributionId: kind.id,
+      layer: 'feature', priority: kind.priority, value: kind } as RegistryEntry<typeof kind>
+    const slotEntry = { ownerPluginId: 'plugin.interaction', ownerRuntimeInstanceId: 'runtime', contributionId: slot.id,
+      layer: 'feature', priority: slot.priority, value: slot } as RegistryEntry<RendererSlotContribution>
+    const activation: RendererActivationSnapshot = {
+      revision: 1,
+      suite: { ownerPluginId: 'builtin.pylon-renderers', ownerRuntimeInstanceId: 'runtime', contributionId: suite.id,
+        layer: 'feature', priority: 1, value: suite } as RegistryEntry<RendererSuiteContribution>,
+      kinds: new Map([[kind.id, kindEntry]]), slots: new Map([[kind.id, [slotEntry]]]), diagnostics: [],
+    }
+    mountSolidWorkbench({ host, input: { sheetId: 'sheet-a', sessionId: 'preview-session' }, services, activation })
+    const credential = 'c12-plugin-secret'
+    services.runtime.replaceDocument(projectWorkbench([createWorkbenchEnvelope({
+      sessionId: 'preview-session', recordedAt: '2026-08-21T00:00:01.000Z', sequence: 1,
+      source: { provider: 'peri', sourceId: 'replaceable-secret' }, identity: { interactionId: 'replaceable-secret' },
+      provenance: { origin: 'local-observed', trust: 'authoritative' },
+      event: {
+        type: 'interaction.requested', interactionId: 'replaceable-secret',
+        request: { surface: 'interaction', kind: 'secret', state: 'waiting', value: credential,
+          identity: { provider: 'peri', agentId: 'peri', requestId: 'secret-1', sessionId: 'preview-session', toolCallId: null, clientGeneration: 1 },
+          questions: [{ id: 'secret', question: 'Credential', allowMultiple: false, allowFreeform: true, options: [] }] },
+      },
+    })]).document, { ownerKey: 'owner-preview', generation: 1 })
+
+    expect(await screen.findByText('Plugin secret surface')).toBeTruthy()
+    expect(pluginSnapshot).not.toContain(credential)
+    expect(pluginSnapshot).toContain('valueRedacted')
+  })
+
   it('Slot semantic action 穿过 Host command capability gate，不被 lifecycle 静默丢弃', async () => {
     const host = document.createElement('div')
     document.body.append(host)

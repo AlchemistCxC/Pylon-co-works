@@ -58,6 +58,10 @@ export interface InteractionRequest {
   capability?: string
   danger?: boolean
   expiry?: string
+  /** OAuth presentation fields: URL is scheme-checked; state is summary-only. */
+  url?: string
+  urlRedacted?: boolean
+  stateSummary?: string
   questions: InteractionQuestion[]
   state: InteractionState
   /** 仅用于调试/trace 的协议来源，不保存原始 prompt 或答案。 */
@@ -223,6 +227,8 @@ function questionsFrom(payload: Record<string, unknown>, kind: InteractionKind):
   return []
 }
 
+const SAFE_OAUTH_URL = /^https:\/\/|^http:\/\/localhost(?:[:/]|$)/i
+
 /**
  * 将独立 Gateway/custom event 或工具请求转换成统一 InteractionRequest。
  * 缺失 identity 不会被本地补 UUID；这样调用方不会把一次未知请求错误地当成可提交事务。
@@ -235,8 +241,15 @@ export function normalizeInteractionRequest(input: {
 }): InteractionRequest | null {
   const payload = objectValue(input.payload)
   const metadata = objectValue(input.metadata)
-  const activity = resolveActivity({ name: input.name ?? stringValue(payload.name), eventType: input.eventType, surface: stringValue(payload.surface) })
+  const explicitSurface = stringValue(payload.surface)
+  const activity = resolveActivity({
+    name: input.name ?? stringValue(payload.name) ?? (explicitSurface === 'interaction' ? stringValue(payload.kind) : undefined),
+    eventType: input.eventType,
+    surface: explicitSurface,
+  })
   if (activity.surface !== 'interaction') return null
+  const oauthUrl = activity.interactionKind === 'oauth' ? stringValue(payload.url) : undefined
+  const safeOauthUrl = oauthUrl && SAFE_OAUTH_URL.test(oauthUrl) ? oauthUrl : undefined
   return {
     surface: 'interaction',
     kind: activity.interactionKind ?? 'unknown',
@@ -249,6 +262,13 @@ export function normalizeInteractionRequest(input: {
     capability: stringValue(payload.capability),
     danger: payload.danger === true ? true : undefined,
     expiry: firstString(payload.expiry, payload.expiresAt, payload.expires_at),
+    ...(safeOauthUrl ? { url: safeOauthUrl } : oauthUrl ? { urlRedacted: true } : {}),
+    ...(activity.interactionKind === 'oauth'
+      ? (() => {
+          const summary = firstString(payload.stateSummary, payload.state_summary)
+          return summary ? { stateSummary: summary } : {}
+        })()
+      : {}),
     questions: questionsFrom(payload, activity.interactionKind ?? 'unknown'),
     state: 'waiting',
     eventType: input.eventType,

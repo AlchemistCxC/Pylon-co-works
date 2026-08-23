@@ -47,6 +47,8 @@ export default function ReactWorkbenchFatalFallback(props: {
   onRetryMessage?(): void
   onRecoverSession?(strategy: 'reload-plugin' | 'reimport'): void
   onRespondInteraction?(interactionId: string, response: unknown, options?: { expectedRevision?: number }): void | Promise<unknown>
+  onOpenInteractionUrl?(url: string): void
+  onCopyInteractionUrl?(url: string): void
 }) {
   const document = useSyncExternalStore(
     listener => props.document.subscribe(listener),
@@ -110,7 +112,8 @@ export default function ReactWorkbenchFatalFallback(props: {
       )}
       <section className="react-workbench-fatal-interactions" aria-label="交互 fallback">
         {document?.interactions.map(interaction => <ReactFallbackInteraction key={interaction.id}
-          interaction={interaction} onRespond={props.onRespondInteraction} />)}
+          interaction={interaction} onRespond={props.onRespondInteraction}
+          onOpenUrl={props.onOpenInteractionUrl} onCopyUrl={props.onCopyInteractionUrl} />)}
       </section>
       <div className="react-workbench-fatal-history" aria-label="会话历史">
         {document?.messages.map(message => <article key={message.id} data-message-role={message.role}>
@@ -129,6 +132,10 @@ export default function ReactWorkbenchFatalFallback(props: {
 }
 
 function fallbackInteractionRequest(value: unknown): {
+  kind?: string
+  url?: string
+  urlRedacted?: boolean
+  stateSummary?: string
   title?: string
   reason?: string
   scope?: string
@@ -166,6 +173,12 @@ function fallbackInteractionRequest(value: unknown): {
     }]
   })
   return {
+    kind: typeof request.kind === 'string' ? request.kind : undefined,
+    url: typeof request.url === 'string' && (/^https:\/\//i.test(request.url) || /^http:\/\/localhost(?:[:/]|$)/i.test(request.url))
+      ? request.url : undefined,
+    urlRedacted: request.urlRedacted === true || (typeof request.url === 'string'
+      && !/^https:\/\//i.test(request.url) && !/^http:\/\/localhost(?:[:/]|$)/i.test(request.url)),
+    stateSummary: typeof request.stateSummary === 'string' ? request.stateSummary : undefined,
     title: typeof request.title === 'string' ? request.title : undefined,
     reason: typeof request.reason === 'string' ? request.reason : undefined,
     scope: typeof request.scope === 'string' ? request.scope : undefined,
@@ -178,6 +191,8 @@ function fallbackInteractionRequest(value: unknown): {
 function ReactFallbackInteraction(props: {
   interaction: NonNullable<ReturnType<WorkbenchDocumentReader['getSnapshot']>>['interactions'][number]
   onRespond?: (interactionId: string, response: unknown, options?: { expectedRevision?: number }) => void | Promise<unknown>
+  onOpenUrl?: (url: string) => void
+  onCopyUrl?: (url: string) => void
 }) {
   const request = fallbackInteractionRequest(props.interaction.request)
   const [selected, setSelected] = useState<Record<string, string[]>>({})
@@ -186,6 +201,7 @@ function ReactFallbackInteraction(props: {
   const [submitError, setSubmitError] = useState<string>()
   const formMode = Boolean(request && (request.questions.length > 1
     || request.questions.some(question => question.allowMultiple || question.allowFreeform)))
+  const secretMode = request?.kind === 'secret'
   const select = (questionId: string, optionId: string, multiple: boolean) => setSelected(current => {
     const previous = current[questionId] ?? []
     const values = multiple
@@ -200,7 +216,7 @@ function ReactFallbackInteraction(props: {
     try {
       await props.onRespond(props.interaction.id, response, { expectedRevision: props.interaction.sequence })
     } catch (error) {
-      setSubmitError(error instanceof Error ? error.message : '交互提交失败，请重试')
+      setSubmitError(secretMode ? '凭据提交失败，请重试' : error instanceof Error ? error.message : '交互提交失败，请重试')
     } finally {
       setSubmitting(false)
     }
@@ -213,7 +229,12 @@ function ReactFallbackInteraction(props: {
       const answers = text ? [...optionIds, text] : optionIds
       return answers.length === 0 ? [] : [[question.id, question.allowMultiple || answers.length > 1 ? answers : answers[0]!]]
     }))
-    if (Object.keys(values).length > 0) void respond({ values })
+    if (Object.keys(values).length > 0) {
+      if (secretMode) setFreeform({})
+      void respond(secretMode && request.questions.length === 1
+        ? { value: values[request.questions[0]!.id] }
+        : { values })
+    }
   }
   return <div data-react-interaction-status={props.interaction.status}>
     <strong>{request?.title || request?.questions[0]?.question || props.interaction.id}</strong>
@@ -222,6 +243,14 @@ function ReactFallbackInteraction(props: {
     {request?.scope && <span>范围：{request.scope}</span>}
     {request?.command && <code>{request.command}</code>}
     {request?.path && <code>{request.path}</code>}
+    {request?.kind === 'oauth' && <div>
+      {request.stateSummary && <span>{request.stateSummary}</span>}
+      {request.url ? <>
+        <code>{request.url}</code>
+        {props.onOpenUrl && <button type="button" onClick={() => props.onOpenUrl?.(request.url!)}>打开授权页</button>}
+        {props.onCopyUrl && <button type="button" onClick={() => props.onCopyUrl?.(request.url!)}>复制授权链接</button>}
+      </> : request.urlRedacted ? <span>链接已隐藏</span> : null}
+    </div>}
     {props.interaction.status === 'requested' && request && (formMode
       ? <form onSubmit={event => { event.preventDefault(); submit() }}>
         {request.questions.map(question => <fieldset key={question.id}>
@@ -233,14 +262,16 @@ function ReactFallbackInteraction(props: {
               onChange={() => select(question.id, option.id, question.allowMultiple)} />
             {option.label}
           </label>)}
-          {question.allowFreeform && <input type="text" placeholder={question.placeholder ?? '补充回答'}
+          {question.allowFreeform && <input type={secretMode ? 'password' : 'text'}
+            autoComplete={secretMode ? 'off' : undefined}
+            placeholder={question.placeholder ?? (secretMode ? question.question : '补充回答')}
             value={freeform[question.id] ?? ''} disabled={!props.onRespond}
             onChange={event => {
               const value = event.currentTarget.value
               setFreeform(current => ({ ...current, [question.id]: value }))
             }} />}
         </fieldset>)}
-        <button type="submit" disabled={!props.onRespond || submitting}>提交回答</button>
+        <button type="submit" disabled={!props.onRespond || submitting}>{secretMode ? '提交凭据' : '提交回答'}</button>
       </form>
       : request.questions.flatMap(question => question.options).map(option => (
         <button key={option.id} type="button" disabled={!props.onRespond || submitting}
@@ -249,7 +280,7 @@ function ReactFallbackInteraction(props: {
         </button>
       )))}
     {submitError && <span role="alert" aria-label="交互提交失败">{submitError}</span>}
-    {props.interaction.response !== undefined && <code>{JSON.stringify(props.interaction.response)}</code>}
+    {!secretMode && props.interaction.response !== undefined && <code>{JSON.stringify(props.interaction.response)}</code>}
     {props.interaction.reason && <span>{props.interaction.reason}</span>}
   </div>
 }

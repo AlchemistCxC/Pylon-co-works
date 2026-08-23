@@ -166,6 +166,71 @@ describe('C11 SolidInteractionCard', () => {
     expect([...denied.container.querySelectorAll('button')].map(b => b.textContent)).not.toContain('打开授权页')
   })
 
+  it('shows sudo scope/timeout and OAuth redacted URL state without exposing unsafe URL', () => {
+    const sudoView = render(() => <SolidInteractionCard interaction={{
+      id: 'sudo-2', status: 'requested', sequence: 6,
+      request: { kind: 'sudo', command: 'make install', reason: 'system change', scope: 'workspace', timeoutMs: 30_000 },
+    } as unknown as WorkbenchInteraction} />)
+    expect(sudoView.container.textContent).toContain('范围：workspace')
+    expect(sudoView.container.textContent).toContain('超时：30s')
+
+    const oauthView = render(() => <SolidInteractionCard interaction={{
+      id: 'oauth-unsafe', status: 'requested', sequence: 7,
+      request: { kind: 'oauth', provider: 'peri', urlRedacted: true, stateSummary: '授权链接已拒绝', status: 'failed' },
+    } as unknown as WorkbenchInteraction} />)
+    expect(oauthView.container.textContent).toContain('授权链接已拒绝')
+    expect(oauthView.container.textContent).toContain('链接已隐藏')
+    expect(oauthView.container.textContent).not.toContain('javascript:')
+  })
+
+  it('copies OAuth URL only through the Host semantic command port', () => {
+    const execute = vi.fn()
+    const view = render(() => <SolidInteractionCard interaction={{
+      id: 'oauth-copy', status: 'requested', sequence: 8,
+      request: { kind: 'oauth', url: 'https://example.com/oauth' },
+    } as unknown as WorkbenchInteraction} commands={{
+      execute, canExecute: type => type === 'interaction.respond' || type === 'clipboard.write',
+    }} />)
+    const button = [...view.container.querySelectorAll('button')].find(item => item.textContent === '复制授权链接')!
+    button.click()
+    expect(execute).toHaveBeenCalledWith({
+      type: 'clipboard.write', targetId: 'oauth-copy', payload: { text: 'https://example.com/oauth' },
+    })
+  })
+
+  it('consumes C12 warning/provider/countdown presentation settings', () => {
+    const interaction = {
+      id: 'sudo-settings', status: 'requested', sequence: 9,
+      request: { kind: 'sudo', command: 'make install', timeoutMs: 30_000,
+        identity: { provider: 'peri' } },
+    } as unknown as WorkbenchInteraction
+    const defaultView = render(() => <SolidInteractionCard interaction={interaction} />)
+    expect(defaultView.container.textContent).toContain('Provider：peri')
+
+    const view = render(() => <SolidInteractionCard interaction={interaction} appearance={{
+      warningColor: '#ffaa00', showProviderMetadata: false, countdownStyle: 'hidden',
+    }} />)
+    const card = view.container.querySelector('.interaction-card')!
+    expect(card.getAttribute('style')).toContain('--interaction-warning-color: #ffaa00')
+    expect(card.getAttribute('data-countdown-style')).toBe('hidden')
+    expect(view.container.textContent).not.toContain('Provider：peri')
+    expect(view.container.textContent).not.toContain('超时：')
+  })
+
+  it('distinguishes observed sudo cancellation and timeout terminal facts', () => {
+    const cancelled = render(() => <SolidInteractionCard interaction={{
+      id: 'sudo-cancelled', status: 'resolved', sequence: 10,
+      request: { kind: 'sudo', command: 'make install' }, response: { cancelled: true },
+    } as unknown as WorkbenchInteraction} />)
+    expect(cancelled.container.textContent).toContain('已取消')
+
+    const timedOut = render(() => <SolidInteractionCard interaction={{
+      id: 'sudo-timeout', status: 'expired', sequence: 11,
+      request: { kind: 'sudo', command: 'make install', timeoutMs: 30_000 }, reason: 'timeout',
+    } as unknown as WorkbenchInteraction} />)
+    expect(timedOut.container.textContent).toContain('已超时')
+  })
+
   it('falls back to a free-text answer when the request carries no options', async () => {
     const execute = vi.fn()
     const question = {

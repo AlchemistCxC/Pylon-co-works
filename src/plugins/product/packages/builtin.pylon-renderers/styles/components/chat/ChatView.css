@@ -1069,6 +1069,8 @@
   background: var(--bg-panel, transparent);
 }
 .interaction-card.interaction-danger { border-inline-start-color: var(--interaction-danger-color, var(--warning, #d29922)); }
+.interaction-card.interaction-sudo .interaction-terminal-state,
+.interaction-card.interaction-oauth .interaction-terminal-state { color: var(--interaction-warning-color, var(--text-dim)); }
 .interaction-head {
   display: flex;
   flex-wrap: wrap;

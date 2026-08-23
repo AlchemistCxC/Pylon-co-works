@@ -41,12 +41,21 @@ describe('A17 suite completeness matrix', () => {
   })
 
   it('publishes every C11 interaction kind through the replaceable base Slot', () => {
-    expect(BUILTIN_INTERACTION_RENDER_KINDS.map(kind => kind.id)).toEqual([
+    expect(BUILTIN_INTERACTION_RENDER_KINDS.map(kind => kind.id)).toEqual(expect.arrayContaining([
       'interaction.approval', 'interaction.questions', 'interaction.confirm', 'interaction.permission',
-    ])
+    ]))
     expect(createBuiltinSolidContentSlot().kinds).toEqual(expect.arrayContaining(
       BUILTIN_INTERACTION_RENDER_KINDS.map(kind => kind.id),
     ))
+  })
+
+  it('publishes every C12 interaction kind through the replaceable base Slot', () => {
+    expect(BUILTIN_INTERACTION_RENDER_KINDS.map(kind => kind.id)).toEqual(expect.arrayContaining([
+      'interaction.oauth', 'interaction.secret', 'interaction.sudo',
+    ]))
+    expect(createBuiltinSolidContentSlot().kinds).toEqual(expect.arrayContaining([
+      'interaction.oauth', 'interaction.secret', 'interaction.sudo',
+    ]))
   })
 
   it('每个 kind 的 fallback 链最终可达 content.unknown', () => {

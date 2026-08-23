@@ -398,13 +398,16 @@ function lifecycleRenderKind(state: LifecycleState): string | undefined {
   return undefined
 }
 
-function interactionRenderKind(interaction: WorkbenchInteraction): string {
+export function interactionRenderKind(interaction: WorkbenchInteraction): string {
   if (!interaction.request || typeof interaction.request !== 'object' || Array.isArray(interaction.request)) return 'interaction.questions'
   switch ((interaction.request as Record<string, unknown>).kind) {
     case 'approval': return 'interaction.approval'
     case 'confirm': return 'interaction.confirm'
     case 'permission':
-    case 'oauth': return 'interaction.permission'
+      return 'interaction.permission'
+    case 'oauth': return 'interaction.oauth'
+    case 'secret': return 'interaction.secret'
+    case 'sudo': return 'interaction.sudo'
     case 'clarify':
     case 'ask-question':
     default: return 'interaction.questions'

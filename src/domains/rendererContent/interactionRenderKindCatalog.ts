@@ -38,6 +38,34 @@ const INTERACTION_DEFAULT_TOKENS = Object.freeze({
   descriptionsExpanded: true, showTechnicalMetadata: false,
 })
 
+const SENSITIVE_INTERACTION_SETTINGS = Object.freeze({
+  schemaVersion: 1,
+  groups: [
+    {
+      id: 'layout', label: '安全交互布局', layout: 'grid', fields: [
+        { key: 'presentation', label: '呈现方式', type: 'choice', presentation: 'segmented', options: [
+          { value: 'inline', label: '内联' }, { value: 'modal', label: '模态' },
+        ], default: 'inline' },
+        { key: 'maxWidth', label: '最大宽度', type: 'number', presentation: 'slider+input', min: 320, max: 1200, step: 20, unit: 'px', default: 720 },
+        { key: 'countdownStyle', label: '倒计时样式', type: 'choice', presentation: 'segmented', options: [
+          { value: 'compact', label: '紧凑' }, { value: 'detailed', label: '详细' }, { value: 'hidden', label: '隐藏' },
+        ], default: 'compact' },
+      ],
+    },
+    {
+      id: 'appearance', label: '安全交互外观', layout: 'grid', fields: [
+        { key: 'warningColor', label: '警告色', type: 'color', presentation: 'palette+picker', alpha: true, default: 'var(--warning, #d29922)' },
+        { key: 'showProviderMetadata', label: '显示 Provider 元数据', type: 'boolean', presentation: 'toggle', default: true },
+      ],
+    },
+  ],
+} satisfies RendererSettingsSchema)
+
+const SENSITIVE_INTERACTION_DEFAULT_TOKENS = Object.freeze({
+  presentation: 'inline', maxWidth: 720, countdownStyle: 'compact',
+  warningColor: 'var(--warning, #d29922)', showProviderMetadata: true,
+})
+
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value)
 }
@@ -66,9 +94,12 @@ export function isInteractionSnapshotInput(input: unknown): boolean {
 
 const ids = Object.freeze([
   'interaction.approval', 'interaction.questions', 'interaction.confirm', 'interaction.permission',
+  'interaction.oauth', 'interaction.secret', 'interaction.sudo',
 ] as const)
 
-export const BUILTIN_INTERACTION_RENDER_KINDS: readonly RenderKindDefinition[] = Object.freeze(ids.map(id => Object.freeze({
+export const BUILTIN_INTERACTION_RENDER_KINDS: readonly RenderKindDefinition[] = Object.freeze(ids.map(id => {
+  const sensitive = id === 'interaction.oauth' || id === 'interaction.secret' || id === 'interaction.sudo'
+  return Object.freeze({
   id,
   category: 'interaction',
   fallbackKind: 'content.unknown',
@@ -81,8 +112,9 @@ export const BUILTIN_INTERACTION_RENDER_KINDS: readonly RenderKindDefinition[] =
       questions: [{ id: 'decision', question: `Fixture ${id}`, options: [], allowMultiple: false, allowFreeform: true }],
     },
   },
-  defaultTokens: INTERACTION_DEFAULT_TOKENS,
+  defaultTokens: sensitive ? SENSITIVE_INTERACTION_DEFAULT_TOKENS : INTERACTION_DEFAULT_TOKENS,
   settingsSchemaVersion: 1,
-  settings: INTERACTION_SETTINGS,
+  settings: sensitive ? SENSITIVE_INTERACTION_SETTINGS : INTERACTION_SETTINGS,
   validateInput: isInteractionSnapshotInput,
-} satisfies RenderKindDefinition)))
+  } satisfies RenderKindDefinition)
+}))

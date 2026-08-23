@@ -134,6 +134,41 @@ describe('InteractionRequest 规范化', () => {
     ])
   })
 
+  it.each([
+    'secret',
+    'sudo',
+  ])('规范化显式 %s interaction 名称为正式 C12 kind', kind => {
+    expect(normalizeInteractionRequest({
+      name: kind,
+      payload: { requestId: `${kind}-1`, prompt: `输入 ${kind}` },
+    })).toMatchObject({ kind, identity: { requestId: `${kind}-1` } })
+  })
+
+  it.each(['secret', 'sudo'])('保留显式 interaction payload kind=%s', kind => {
+    expect(normalizeInteractionRequest({
+      payload: { surface: 'interaction', kind, requestId: `${kind}-payload`, prompt: `输入 ${kind}` },
+    })).toMatchObject({ kind, identity: { requestId: `${kind}-payload` } })
+  })
+
+  it('OAuth 只保留安全 URL 与 provider/state 摘要，拒绝危险 scheme', () => {
+    const safe = normalizeInteractionRequest({
+      name: 'oauth',
+      metadata: { provider: 'peri' },
+      payload: {
+        requestId: 'oauth-1', title: '连接 GitHub',
+        url: 'https://github.com/login/oauth/authorize?state=summary',
+        stateSummary: '等待浏览器授权', expiry: '2026-08-23T09:05:00.000Z',
+      },
+    })
+    expect(safe).toMatchObject({
+      kind: 'oauth', url: 'https://github.com/login/oauth/authorize?state=summary',
+      stateSummary: '等待浏览器授权', identity: { provider: 'peri' },
+    })
+    expect(normalizeInteractionRequest({
+      name: 'oauth', payload: { requestId: 'oauth-bad', url: 'javascript:alert(1)' },
+    })).toMatchObject({ kind: 'oauth', urlRedacted: true })
+  })
+
   it('保留显式 unknown interaction，普通 tool 返回 null', () => {
     expect(normalizeInteractionRequest({ eventType: 'vendor.request', payload: { surface: 'interaction', requestId: 'x', prompt: '输入' } })).toMatchObject({ kind: 'unknown' })
     expect(normalizeInteractionRequest({ name: 'terminal', payload: { command: 'ls' } })).toBeNull()
