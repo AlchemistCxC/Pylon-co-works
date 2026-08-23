@@ -27,7 +27,7 @@ describe('C11 SolidInteractionCard', () => {
     const execute = vi.fn()
     const result = render(() => <SolidInteractionCard
       interaction={permissionPending}
-      commands={{ execute, canExecute: type => type === 'interactionResponse' }}
+      commands={{ execute, canExecute: type => type === 'interaction.respond' }}
     />)
     expect(result.container.textContent).toContain('Allow rm -rf?')
     expect(result.container.textContent).toContain('fs.write')
@@ -38,7 +38,7 @@ describe('C11 SolidInteractionCard', () => {
     expect(buttons[1]!.getAttribute('tabindex')).toBe('2')
     await buttons[0]!.click()
     expect(execute).toHaveBeenCalledWith({
-      type: 'interactionResponse', targetId: 'int-1', payload: { optionId: 'allow' },
+      type: 'interaction.respond', targetId: 'int-1', payload: { optionId: 'allow' },
     })
   })
 
@@ -63,6 +63,53 @@ describe('C11 SolidInteractionCard', () => {
     expect(expiredView.container.textContent).toContain('ttl elapsed')
   })
 
+  it('renders secret prompts as password inputs that clear after submit (C12)', async () => {
+    const execute = vi.fn()
+    const secret = {
+      id: 'sec-1', status: 'requested', sequence: 3,
+      request: { kind: 'secret', prompt: 'API token' },
+    } as unknown as WorkbenchInteraction
+    const result = render(() => <SolidInteractionCard
+      interaction={secret} commands={{ execute, canExecute: () => true }} />)
+    const input = result.container.querySelector('input') as HTMLInputElement
+    expect(input.type).toBe('password')
+    input.value = 'sk-secret'
+    input.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true }))
+    await Promise.resolve()
+    expect(execute).toHaveBeenCalledWith({
+      type: 'interaction.respond', targetId: 'sec-1', payload: { value: 'sk-secret' },
+    })
+    // 提交后本地输入立即清空
+    expect(input.value).toBe('')
+  })
+
+  it('shows sudo command context and oauth url with capability-gated open (C12)', () => {
+    const execute = vi.fn()
+    const sudo = {
+      id: 'sudo-1', status: 'requested', sequence: 4,
+      request: { kind: 'sudo', command: 'apt install build-essential', reason: 'build deps' },
+    } as unknown as WorkbenchInteraction
+    const sudoView = render(() => <SolidInteractionCard interaction={sudo}
+      commands={{ execute, canExecute: t => t === 'interaction.respond' }} />)
+    expect(sudoView.container.textContent).toContain('apt install build-essential')
+    expect(sudoView.container.textContent).toContain('原因：build deps')
+
+    const oauth = {
+      id: 'oauth-1', status: 'requested', sequence: 5,
+      request: { kind: 'oauth', url: 'https://github.com/login/oauth/authorize?state=x' },
+    } as unknown as WorkbenchInteraction
+    const oauthView = render(() => <SolidInteractionCard interaction={oauth}
+      // 打开授权页同时需要 interaction.respond（响应交互）与 resource.open（外链）两个能力位
+      commands={{ execute, canExecute: t => t === 'resource.open' || t === 'interaction.respond' }} />)
+    const openBtn = [...oauthView.container.querySelectorAll('button')].find(b => b.textContent === '打开授权页')!
+    openBtn.click()
+    expect(execute).toHaveBeenCalledWith(expect.objectContaining({ type: 'resource.open' }))
+    // 无 resource.open capability 时按钮不渲染
+    const denied = render(() => <SolidInteractionCard interaction={oauth}
+      commands={{ execute, canExecute: () => false }} />)
+    expect([...denied.container.querySelectorAll('button')].map(b => b.textContent)).not.toContain('打开授权页')
+  })
+
   it('falls back to a free-text answer when the request carries no options', async () => {
     const execute = vi.fn()
     const question = {
@@ -78,7 +125,7 @@ describe('C11 SolidInteractionCard', () => {
     input.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true }))
     await Promise.resolve()
     expect(execute).toHaveBeenCalledWith({
-      type: 'interactionResponse', targetId: 'int-2', payload: { text: 'Pylon' },
+      type: 'interaction.respond', targetId: 'int-2', payload: { text: 'Pylon' },
     })
   })
 })

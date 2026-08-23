@@ -45,6 +45,8 @@ export function SolidRendererSlotHost(props: {
         case 'resource.open': return capabilities.has('resourceOpen')
         case 'resource.reveal': return capabilities.has('resourceReveal')
         case 'message.retry': return capabilities.has('retry')
+        case 'activity.cancel': return capabilities.has('cancel')
+        case 'activity.retry': return capabilities.has('retry')
         case 'session.recover': return capabilities.has('recovery')
         default: return false
       }

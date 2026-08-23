@@ -76,4 +76,22 @@ describe('C09 SolidSubagentCard', () => {
     expect(result.container.querySelector('.term-terminal-card')).not.toBeNull()
     expect(result.container.querySelector('.term-log-card')).not.toBeNull()
   })
+
+  it('renders C15 memory/mcp-resource/artifact metadata via the slot branch, never blank', async () => {
+    const { BuiltinSolidContentSlot } = await import('../../BuiltinSolidContentSlot.solid.tsx')
+    const cases: Array<{ kind: string; payload: Record<string, unknown>; expectText: string }> = [
+      { kind: 'content.memory', payload: { kind: 'memory', title: 'User prefers dark', source: 'hermes', status: 'recalled' }, expectText: 'User prefers dark' },
+      { kind: 'content.mcp-resource', payload: { kind: 'mcp-resource', server: 'fs-mcp', resourceUri: 'file:///docs/spec.md' }, expectText: 'fs-mcp' },
+      { kind: 'content.artifact', payload: { kind: 'artifact', title: 'report.pdf', uri: 'https://x/report.pdf', version: 2 }, expectText: 'report.pdf' },
+    ]
+    for (const c of cases) {
+      const view = render(() => <BuiltinSolidContentSlot
+        snapshot={{ nodeId: `node-${c.kind}`, kind: c.kind, payload: c.payload } as never}
+        appearance={{}} commands={{ execute: () => {}, canExecute: () => false }} />)
+      // 完成定义：历史必须可读——不允许 Switch 无命中渲染空白
+      expect(view.container.textContent).toContain(c.expectText)
+      expect(view.container.querySelector(`[data-content-kind="${c.kind}"]`)).not.toBeNull()
+      view.unmount()
+    }
+  })
 })

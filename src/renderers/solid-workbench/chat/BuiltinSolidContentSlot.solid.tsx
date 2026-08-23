@@ -340,6 +340,25 @@ export function BuiltinSolidContentSlot(props: {
           />}
         </Show>
       </Match>
+      <Match when={[
+        'content.memory', 'content.skill', 'content.mcp-resource', 'content.artifact',
+      ].includes(kind())}>
+        {/* C15：安全 metadata 卡（title/source/status 摘要）；内容本体不内联，oversize/未知字段经 payload 摘要可见 */}
+        <Show when={payload() as Record<string, unknown> | undefined}>
+          {data => (
+            <section class="term-subagent-meta" data-content-kind={kind()} role="note"
+              aria-label={`${kind()}：${String(data().title ?? data().memoryId ?? data().artifactId ?? kind())}`}>
+              <strong>{String(data().title ?? kind())}</strong>
+              <span>{[data().source, data().server, data().status, data().version !== undefined ? `v${String(data().version)}` : undefined]
+                .filter(Boolean).join(' · ')}</span>
+              <Show when={data().summary}><p>{String(data().summary)}</p></Show>
+              <Show when={data().uri || data().resourceUri}>
+                <code>{String(data().uri ?? data().resourceUri)}</code>
+              </Show>
+            </section>
+          )}
+        </Show>
+      </Match>
       <Match when={kind() === 'content.unknown'}>
         <pre class="solid-content-unknown" data-content-kind={kind()}>{unknownSummary(props.snapshot.payload, kind())}</pre>
       </Match>

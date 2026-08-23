@@ -50,7 +50,18 @@ export async function executeRendererSemanticCommand(input: {
     case 'resource.reveal':
       result = await host.commands.revealResource(sessionId, payload)
       break
-    case 'message.retry':
+    case 'activity.cancel': {
+      // C09/C10：后台活动取消——复用既有 cancel 命令面（targetId=activityId 仅作审计关联）
+      if (!command.targetId) { reject('renderer_action_invalid', 'activity.cancel 缺少 targetId'); return }
+      result = await host.commands.cancel(sessionId)
+      break
+    }
+    case 'activity.retry': {
+      // C09/C10：失败/取消活动重试——复用既有 retry 命令面（messageId 可选）
+      result = await host.commands.retry(sessionId, typeof record?.messageId === 'string' ? record.messageId : undefined)
+      break
+    }
+    case 'interaction.respond':
       result = await host.commands.retry(sessionId, command.targetId)
       break
     case 'session.recover':

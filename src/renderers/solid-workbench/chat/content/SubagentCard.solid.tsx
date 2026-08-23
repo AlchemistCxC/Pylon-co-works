@@ -26,6 +26,12 @@ export function SolidSubagentCard(props: {
   const showIdentity = () => props.appearance?.showIdentity !== false
   const compact = () => props.appearance?.density === 'compact' ? 'compact' : 'comfortable'
 
+  // C09 声明设置：stats multiselect（缺省/非法值时全部启用，与 kind default 对齐）
+  const statsEnabled = (key: string) => {
+    const value = props.appearance?.stats
+    if (!Array.isArray(value)) return true
+    return value.includes(key)
+  }
   const parts = () => Array.isArray(props.activity.parts)
     ? props.activity.parts.filter((part): part is ContentPart => typeof part === 'object' && part !== null
       && !Array.isArray(part) && typeof (part as Record<string, unknown>).kind === 'string')
@@ -77,14 +83,14 @@ export function SolidSubagentCard(props: {
       </Show>
       <Show when={usage() || files().length > 0}>
         <div class="term-subagent-stats">
-          <Show when={usage()}>
+          <Show when={statsEnabled('usage') && usage()}>
             {u => <span>{[
               u().inputTokens !== undefined ? `${u().inputTokens} in` : undefined,
               u().outputTokens !== undefined ? `${u().outputTokens} out` : undefined,
               u().costUsd !== undefined ? `$${u().costUsd}` : undefined,
             ].filter(Boolean).join(' · ')}</span>}
           </Show>
-          <Show when={files().length > 0}>
+          <Show when={statsEnabled('files') && files().length > 0}>
             <span>{files().length} 个文件</span>
           </Show>
         </div>

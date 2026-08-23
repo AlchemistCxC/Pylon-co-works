@@ -34,11 +34,12 @@ export function SolidInteractionCard(props: {
 }) {
   const request = createMemo(() => parseRequest(props.interaction.request))
   const pending = () => props.interaction.status === 'requested'
-  const canRespond = () => pending() && props.commands?.canExecute?.('interactionResponse') === true
+  // 主链 semantic command type 是 'interaction.respond'（Slot gate 映射到 interactionResponse capability 位）
+  const canRespond = () => pending() && props.commands?.canExecute?.('interaction.respond') === true
 
   const respond = (payload: Record<string, unknown>) => {
     void props.commands?.execute({
-      type: 'interactionResponse',
+      type: 'interaction.respond',
       targetId: props.interaction.id,
       payload,
     })
@@ -64,6 +65,28 @@ export function SolidInteractionCard(props: {
           <span class="interaction-capability">能力：{request().capability}</span>
         </Show>
       </header>
+      <Show when={request().kind === 'sudo' && (request() as Record<string, unknown>).command}>
+        {/* C12：sudo 显示命令/原因，不记录密码 */}
+        <div class="interaction-terminal-state">
+          <code>{String((request() as Record<string, unknown>).command)}</code>
+          <Show when={(request() as Record<string, unknown>).reason}>
+            {reason => <span>原因：{String(reason())}</span>}
+          </Show>
+        </div>
+      </Show>
+      <Show when={request().kind === 'oauth' && (request() as Record<string, unknown>).url}>
+        {/* C12：OAuth URL 只读呈现；open 动作经 resource.open capability gate */}
+        <div class="interaction-terminal-state">
+          <code>{String((request() as Record<string, unknown>).url)}</code>
+          <Show when={canRespond() && props.commands?.canExecute?.('resource.open') === true}>
+            <button type="button" class="term-file-action" tabindex="0"
+              onClick={() => { void props.commands?.execute({ type: 'resource.open', targetId: props.interaction.id,
+                payload: { uri: (request() as Record<string, unknown>).url } }) }}>
+              打开授权页
+            </button>
+          </Show>
+        </div>
+      </Show>
       <Show when={request().expiry}>
         <span class="interaction-expiry">截止：{request().expiry}</span>
       </Show>
@@ -97,16 +120,32 @@ export function SolidInteractionCard(props: {
             )}
           </For>
           <Show when={canRespond() && !request().options?.length}>
-            <input
-              type="text"
-              class="interaction-free-text"
-              placeholder="输入回答后回车"
-              onKeyDown={event => {
-                if (event.key === 'Enter' && event.currentTarget.value.trim()) {
-                  respond({ text: event.currentTarget.value.trim() })
-                }
-              }}
-            />
+            <Show when={request().kind === 'secret'} fallback={
+              <input
+                type="text"
+                class="interaction-free-text"
+                placeholder="输入回答后回车"
+                onKeyDown={event => {
+                  if (event.key === 'Enter' && event.currentTarget.value.trim()) {
+                    respond({ text: event.currentTarget.value.trim() })
+                  }
+                }}
+              />
+            }>
+              {/* C12：secret 用 password input——禁止明文回显；提交后立即清空本地输入值 */}
+              <input
+                type="password"
+                class="interaction-free-text"
+                autocomplete="off"
+                placeholder="输入后回车提交（不会显示或记录）"
+                onKeyDown={event => {
+                  if (event.key === 'Enter' && event.currentTarget.value) {
+                    respond({ value: event.currentTarget.value })
+                    event.currentTarget.value = ''
+                  }
+                }}
+              />
+            </Show>
           </Show>
         </div>
       </Show>

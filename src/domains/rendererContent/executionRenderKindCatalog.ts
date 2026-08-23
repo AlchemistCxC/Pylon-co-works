@@ -1,4 +1,5 @@
 import type { RenderKindDefinition } from '../../plugin-runtime/renderers/rendererTypes.ts'
+import type { RendererSettingsSchema } from '../../plugin-runtime/renderers/rendererSettingsTypes.ts'
 import { isJsonValue, parseContentPart } from '../workbench/content/contentPartSchema.ts'
 import { TERMINAL_LOG_DEFAULT_TOKENS, TERMINAL_LOG_SETTINGS } from './textRenderKindCatalog.ts'
 
@@ -52,9 +53,9 @@ function subagentKindDefinition(family: SubagentActivityFamily): RenderKindDefin
       title: label, status: 'running', parentId: 'fixture-parent', depth: 1,
       role: 'explorer', goal: label, parts: [],
     },
-    defaultTokens: TERMINAL_LOG_DEFAULT_TOKENS,
+    defaultTokens: SUBAGENT_WORKFLOW_DEFAULT_TOKENS,
     settingsSchemaVersion: 1,
-    settings: TERMINAL_LOG_SETTINGS,
+    settings: SUBAGENT_WORKFLOW_SETTINGS,
     validateInput: isSubagentActivitySnapshotInput,
   } satisfies RenderKindDefinition)
 }
@@ -87,12 +88,42 @@ function workflowKindDefinition(family: WorkflowActivityFamily): RenderKindDefin
       title: `Fixture ${family}`, status: 'running', parentId: family === 'workflow' ? undefined : 'fixture-workflow',
       role: family === 'workflow-agent' ? 'reviewer' : undefined, parts: [],
     },
-    defaultTokens: TERMINAL_LOG_DEFAULT_TOKENS,
+    defaultTokens: SUBAGENT_WORKFLOW_DEFAULT_TOKENS,
     settingsSchemaVersion: 1,
-    settings: TERMINAL_LOG_SETTINGS,
+    settings: SUBAGENT_WORKFLOW_SETTINGS,
     validateInput: isWorkflowActivitySnapshotInput,
   } satisfies RenderKindDefinition)
 }
+
+/** C09/C10：子代理与工作流卡的声明设置（K11 token；控件由 A10 设置页生成）。 */
+const SUBAGENT_WORKFLOW_SETTINGS = Object.freeze({
+  schemaVersion: 1,
+  groups: [
+    {
+      id: 'appearance', label: '子代理外观', layout: 'grid', fields: [
+        { key: 'density', label: '密度', type: 'choice', presentation: 'segmented', options: [
+          { value: 'comfortable', label: '舒适' }, { value: 'compact', label: '紧凑' }
+        ], default: 'comfortable' },
+        { key: 'showIdentity', label: '显示身份元数据', type: 'boolean', presentation: 'toggle', default: true },
+      ],
+    },
+    {
+      id: 'behaviour', label: '子代理行为', layout: 'grid', fields: [
+        { key: 'stats', label: '统计列', type: 'multi-choice', presentation: 'checklist', options: [
+          { value: 'usage', label: '用量' }, { value: 'files', label: '文件数' }, { value: 'progress', label: '进度' }
+        ], default: ['usage', 'files', 'progress'] },
+        { key: 'statusPalette', label: '状态配色', type: 'choice', presentation: 'select', options: [
+          { value: 'semantic', label: '语义色' }, { value: 'mono', label: '单色' }
+        ], default: 'semantic' },
+      ],
+    },
+  ],
+} satisfies RendererSettingsSchema)
+
+const SUBAGENT_WORKFLOW_DEFAULT_TOKENS = Object.freeze({
+  density: 'comfortable', showIdentity: true, retainedLines: 2000,
+  stats: ['usage', 'files', 'progress'], statusPalette: 'semantic',
+})
 
 export const BUILTIN_EXECUTION_RENDER_KINDS: readonly RenderKindDefinition[] = Object.freeze([
   ...(['subagent', 'delegation', 'team'] as const).map(subagentKindDefinition),

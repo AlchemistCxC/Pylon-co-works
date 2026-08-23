@@ -669,8 +669,11 @@ function fallbackRenderCommands(context: SolidWorkbenchContextValue): RenderComm
     canExecute: type => Boolean(sessionId && (
       type === 'resource.open' ? capabilities?.has('resourceOpen')
         : type === 'clipboard.write' ? capabilities?.has('clipboardWrite')
-          : false
-    )),
+          : type === 'interaction.respond' ? capabilities?.has('interactionResponse')
+            : type === 'activity.cancel' ? capabilities?.has('cancel')
+              : type === 'activity.retry' ? capabilities?.has('retry')
+                : false
+   )),
     execute: command => {
       if (!sessionId) return
       if (command.type === 'resource.open' && command.payload && typeof command.payload === 'object') {
@@ -678,6 +681,15 @@ function fallbackRenderCommands(context: SolidWorkbenchContextValue): RenderComm
       } else if (command.type === 'clipboard.write' && command.payload && typeof command.payload === 'object') {
         const text = (command.payload as { text?: unknown }).text
         if (typeof text === 'string') void context.commands.copy(sessionId, text)
+      } else if (command.type === 'interaction.respond' && command.targetId) {
+        void context.commands.respondInteraction(sessionId, command.targetId, command.payload)
+      } else if (command.type === 'activity.cancel') {
+        void context.commands.cancel(sessionId)
+      } else if (command.type === 'activity.retry') {
+        const messageId = command.payload && typeof command.payload === 'object'
+          && typeof (command.payload as Record<string, unknown>).messageId === 'string'
+          ? (command.payload as Record<string, unknown>).messageId as string : undefined
+        void context.commands.retry(sessionId, messageId)
       }
     },
   }
