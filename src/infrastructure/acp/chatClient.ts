@@ -5,6 +5,10 @@
  * command/payload 收口；不吞业务错误。
  */
 import { ClientTransport } from './agentClient'
+import type { Channel } from '@tauri-apps/api/core'
+
+/** B1：流式帧信封（与 src/components/chat/streamChannel.ts 的 StreamFrame 同构）。 */
+export type StreamFrame = { event: 'pylon:update' | 'pylon:done' | 'pylon:error'; payload: unknown }
 
 export interface SendMessagePayload {
   /** OWNER-02：Session owner 显式 agentId（路由到 owner runtime，绝不 fallback active） */
@@ -39,6 +43,9 @@ export interface SetConfigOptionPayload {
 export function createChatClient(transport: ClientTransport) {
   return {
     sendMessage: (payload: SendMessagePayload): Promise<unknown> => transport.invoke('send_message', payload),
+    /** B1：流式发送——onUpdate 为 Channel 实例（openStreamChannel 产出），后端按注册走 Channel 推送。 */
+    sendMessageStreaming: (payload: SendMessagePayload, onUpdate: Channel<StreamFrame>): Promise<unknown> =>
+      transport.invoke('send_message_streaming', { ...payload, onUpdate }),
     cancelPrompt: (payload: CancelPromptPayload): Promise<unknown> => transport.invoke('cancel_prompt', payload),
     approveToolCall: (payload: Record<string, unknown>): Promise<unknown> => transport.invoke('approve_tool_call', payload),
     setConfigOption: (payload: SetConfigOptionPayload): Promise<unknown> => transport.invoke('set_config_option', payload),

@@ -7,7 +7,8 @@ import { useIdentityStore } from '../../identityStore'
 import { useRuntimeStore } from '../../runtimeStore'
 import { useAgentCapabilities } from '../../infrastructure/acp/useAgentCapabilities'
 import { createAgentClient } from '../../infrastructure/acp/agentClient'
-import { createChatClient } from '../../infrastructure/acp/chatClient'
+import { createChatClient, type StreamFrame } from '../../infrastructure/acp/chatClient'
+import { openStreamChannel, closeStreamChannel } from './streamChannel'
 import { createSessionClient } from '../../infrastructure/acp/sessionClient'
 import { resolveAttachGate, resolveAttachFilters } from '../../infrastructure/acp/agentContracts'
 import { createAttachment, validateAttachment, MAX_ATTACH_BYTES, type AttachmentItem } from '../../domains/attachment/attachmentItem'
@@ -18,6 +19,27 @@ import { setSessionMode } from './sessionMode'
 import { nextSessionMode } from './sessionModeState'
 import { runSendTransaction } from './sendTransaction'
 import { buildSendMessagePayload } from './sessionRuntime'
+import type { Session } from '../../identityStore'
+
+/**
+ * B1：流式发送——openStreamChannel 建 per-session Channel 并随 invoke 注册到后端；
+ * 帧经 controller.handleStreamFrame 路由（处理体与广播监听共用）。终帧后注销。
+ * 非 Tauri 环境 openStreamChannel 返回 undefined → 降级旧 send_message 广播路径。
+ */
+function sendWithStream(options: { session: Session; content: string; persona: string; attachments: string[] }): Promise<unknown> {
+  const payload = buildSendMessagePayload(options)
+  const source = options.session.source
+  const channel = openStreamChannel(source, frame => {
+    const handle = getChatController()
+    if (!handle) return
+    void handle.handleStreamFrame(frame as StreamFrame)
+    if (frame.event !== 'pylon:update') closeStreamChannel(source)
+  })
+  if (!channel) {
+    return createChatClient({ invoke: (cmd, args) => invoke(cmd, args as Record<string, unknown> | undefined) }).sendMessage(payload)
+  }
+  return createChatClient({ invoke: (cmd, args) => invoke(cmd, args as Record<string, unknown> | undefined) }).sendMessageStreaming(payload, channel)
+}
 import { resolveSessionSource } from './sessionCommandState'
 import { toAgentContextKey } from '../../agentContext'
 import { resolveSessionProfile } from './sessionProfile'
@@ -249,12 +271,12 @@ export default forwardRef<{ send: () => void; attachFile: () => void; cancel: ()
           return false
         }
         return runSendTransaction({
-          send: () => createChatClient({ invoke: (cmd, args) => invoke(cmd, args as Record<string, unknown> | undefined) }).sendMessage(buildSendMessagePayload({
+          send: () => sendWithStream({
             session: s,
             content: beforeHook.content,
             persona,
             attachments: attached.filter(file => file.status !== 'error').map(file => file.path),
-          })),
+          }),
           onSuccess: () => {
             recordHistory(beforeHook.content)
             setValue('')
@@ -351,12 +373,12 @@ export default forwardRef<{ send: () => void; attachFile: () => void; cancel: ()
     setSendError('')
 
     const sendError = await runSendTransaction({
-      send: () => createChatClient({ invoke: (cmd, args) => invoke(cmd, args as Record<string, unknown> | undefined) }).sendMessage(buildSendMessagePayload({
+      send: () => sendWithStream({
         session: s,
         content,
         persona,
         attachments: attached.filter(file => file.status !== 'error').map(file => file.path),
-      })),
+      }),
       onSuccess: () => {},
       // 失败保留乐观用户消息（已渲染），错误由后端 pylon:error 或此处可见提示呈现
       onError: error => setSendError(String(error)),

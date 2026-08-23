@@ -69,6 +69,8 @@ export interface ChatControllerHandle {
   commitReplaySnapshot: (source: string, generation: number, replay: unknown[]) => Message[]
   /** Kernel journal 已导入/对账 replay 后，以同一 journal 的有效投影原子提交。 */
   commitCanonicalProjection: (source: string, generation: number, messages: Message[], canonicalRevision: number) => Message[]
+  /** B1：Channel 流式帧入口——按 event 路由到与广播监听共用的处理体。 */
+  handleStreamFrame: (frame: { event: string; payload: unknown }) => Promise<void>
   abortSessionLoad: (source: string, generation: number) => void
   /** load 失败 fallback：清 replay 状态，后续事件按 live 处理 */
   clearReplay: (source: string) => void
@@ -1059,8 +1061,17 @@ export function attachChatEventController(refs: ChatEventControllerRefs): ChatCo
   // allSettled 保留已成功注册的 stop handle（不全丢弃），失败逐个报告（ErrorCenter），
   // dispose 只清理成功 handle，不泄漏未注册监听器
   // G1：listener 工厂数组（重试注册失败项，报告 8.5）
+  // B1：channel 帧路由表——各工厂注册时把处理函数挂到此处，handleStreamFrame
+  // 按 StreamFrame.event 分发（处理体与广播监听逐字共用，单实现双入口）。
+  const channelFrameHandlers: {
+    user?: (event: { payload: { source: string; content: string; replay?: boolean; canonicalEvent?: unknown } }) => Promise<void>
+    update?: (event: { payload: PeriUpdatePayload }) => Promise<void>
+    done?: (event: { payload: PeriDonePayload }) => Promise<void>
+    error?: (event: { payload: { source: string; error: string; cancelled?: boolean; replay?: boolean; canonicalEvent?: unknown } }) => Promise<void>
+  } = {}
   const listenerFactories: Array<() => Promise<UnlistenFn>> = [
-    () => listen<{ source: string; content: string; replay?: boolean; canonicalEvent?: unknown }>('pylon:user', async (event) => {
+    () => {
+      const handler = async (event: { payload: { source: string; content: string; replay?: boolean; canonicalEvent?: unknown } }) => {
       if (!isActiveSource(event.payload.source)) return
       const processCurrent = async (kernelCommitted: boolean) => {
       const { source, content, replay: eventReplay = false } = event.payload
@@ -1132,9 +1143,14 @@ export function attachChatEventController(refs: ChatEventControllerRefs): ChatCo
       }
       await processCommittedOrLegacy(event.payload.canonicalEvent, processCurrent)
         .catch(error => reportRuntimeError('消费 Kernel committed user event', error))
-    }),
+      }
+      channelFrameHandlers.user = handler
+      // user 为低频回显（规格 §0.1 决策 4）：保留广播。
+      return listen('pylon:user', handler)
+    },
 
-    () => listen<PeriUpdatePayload>('pylon:update', async (event) => {
+    () => {
+      const handler = async (event: { payload: PeriUpdatePayload }) => {
       if (!isActiveSource(event.payload.source)) return
       const processCurrent = async (kernelCommitted: boolean) => {
       const source = event.payload.source
@@ -1283,9 +1299,14 @@ export function attachChatEventController(refs: ChatEventControllerRefs): ChatCo
       }
       await processCommittedOrLegacy(event.payload.canonicalEvent, processCurrent)
         .catch(error => reportRuntimeError('消费 Kernel committed update event', error))
-    }),
+      }
+      channelFrameHandlers.update = handler
+      // C2：广播旧轨已拆——handler 仅由 Channel 帧入口消费。
+      return Promise.resolve(() => {})
+    },
 
-    () => listen<PeriDonePayload>('pylon:done', async (event) => {
+    () => {
+      const handler = async (event: { payload: PeriDonePayload }) => {
       if (!isActiveSource(event.payload.source)) return
       const processCurrent = async (kernelCommitted: boolean) => {
       const source = event.payload.source
@@ -1303,9 +1324,14 @@ export function attachChatEventController(refs: ChatEventControllerRefs): ChatCo
       }
       await processCommittedOrLegacy(event.payload.canonicalEvent, processCurrent)
         .catch(error => reportRuntimeError('消费 Kernel committed done event', error))
-    }),
+      }
+      channelFrameHandlers.done = handler
+      // C2：广播旧轨已拆——handler 仅由 Channel 帧入口消费。
+      return Promise.resolve(() => {})
+    },
 
-    () => listen<{ source: string; error: string; cancelled?: boolean; replay?: boolean; canonicalEvent?: unknown }>('pylon:error', async (event) => {
+    () => {
+      const handler = async (event: { payload: { source: string; error: string; cancelled?: boolean; replay?: boolean; canonicalEvent?: unknown } }) => {
       if (!isActiveSource(event.payload.source)) return
       const processCurrent = async (kernelCommitted: boolean) => {
       const { source, error } = event.payload
@@ -1332,7 +1358,11 @@ export function attachChatEventController(refs: ChatEventControllerRefs): ChatCo
       }
       await processCommittedOrLegacy(event.payload.canonicalEvent, processCurrent)
         .catch(error => reportRuntimeError('消费 Kernel committed error event', error))
-    }),
+      }
+      channelFrameHandlers.error = handler
+      // C2：广播旧轨已拆——handler 仅由 Channel 帧入口消费。
+      return Promise.resolve(() => {})
+    },
   ]
 
   let stopFns: Array<() => void> = []
@@ -1427,6 +1457,17 @@ export function attachChatEventController(refs: ChatEventControllerRefs): ChatCo
     initSource,
     commitReplaySnapshot,
     commitCanonicalProjection,
+    handleStreamFrame: async frame => {
+      // B1：channel 帧 payload 与对应广播事件载荷同构；处理体逐字共用。
+      const event = { payload: frame.payload as never }
+      if (frame.event === 'pylon:update') {
+        await channelFrameHandlers.update?.(event)
+      } else if (frame.event === 'pylon:done') {
+        await channelFrameHandlers.done?.(event)
+      } else if (frame.event === 'pylon:error') {
+        await channelFrameHandlers.error?.(event)
+      }
+    },
     abortSessionLoad,
     clearReplay,
     getFrames,
