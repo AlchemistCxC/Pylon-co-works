@@ -26,8 +26,16 @@ describe('第一方圆角语义', () => {
   })
 
   it('冻结的经典终端视图不消费壳层圆角尺度', () => {
+    // 豁免（2026-08-23 圆角契约裁决）：chat-recovery-error / chat-recovery-actions /
+    // chat-replay-warning 是恢复与警告反馈面（非终端记录流本体），允许消费壳层圆角。
+    // 记录流本体（term-*、消息行、输入区）仍维持无壳层圆角冻结。
+    const exemptSelectors = ['chat-recovery-error', 'chat-recovery-actions', 'chat-replay-warning']
     for (const source of classicRendererCss) {
-      expect(source).not.toContain('var(--ui-radius-')
+      const consumed = source
+        .split('}')
+        .filter(block => !exemptSelectors.some(name => block.includes(`.${name}`)))
+        .join('}')
+      expect(consumed).not.toContain('var(--ui-radius-')
     }
   })
 })

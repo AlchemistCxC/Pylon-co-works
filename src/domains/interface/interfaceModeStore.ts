@@ -14,6 +14,8 @@ interface InterfaceModeState {
   profileByMode: Record<string, string>
   setInterfaceMode(mode: InterfaceMode): void
   rememberProfile(mode: InterfaceMode, profileId: string): void
+  /** A17：注销插件 mode 后清掉悬挂的 per-mode profile 偏好。 */
+  forgetModeProfile(mode: InterfaceMode): void
 }
 
 function validMode(value: unknown): value is InterfaceMode {
@@ -31,6 +33,12 @@ export const useInterfaceModeStore = create<InterfaceModeState>()(persist(
         [mode]: profileId || state.profileByMode[mode] || DEFAULT_INTERFACE_PROFILES[mode] || '',
       },
     })),
+    forgetModeProfile: mode => set(state => {
+      if (!(mode in state.profileByMode)) return state
+      const next = { ...state.profileByMode }
+      delete next[mode]
+      return { profileByMode: next }
+    }),
   }),
   {
     name: 'pylon-interface-mode',

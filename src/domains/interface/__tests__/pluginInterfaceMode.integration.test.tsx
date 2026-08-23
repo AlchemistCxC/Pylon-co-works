@@ -75,7 +75,13 @@ describe('plugin Interface Mode integration', () => {
     expect(screen.getByTestId('focus-input').textContent).toContain('"activeSessionId":"session-1"')
 
     view.unmount()
+    // 生产插件卸载是原子注销（全部 contribution 一起）；测试须以同序模拟——
+    // 若只 dispose mode 而 profile/surface 残留，validateRendererSuiteReferences 会正确拒绝
+    // 激活（A17 cross-reference guard），默认模式回退被中间态卡死。
+    await registrations.pop()?.dispose() // example.focus.workbench surface
+    await registrations.pop()?.dispose() // example.presentation.focus profile
     await modeRegistration.dispose()
+    registrations.length = 0 // afterEach 不再重复 dispose 已清理项
     expect(ensureInterfaceModeProfile()).toBe(true)
     expect(useInterfaceModeStore.getState().interfaceMode).toBe('modern-gui')
   })
