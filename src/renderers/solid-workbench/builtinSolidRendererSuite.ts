@@ -7,6 +7,7 @@ import { BUILTIN_TEXT_RENDER_KINDS } from '../../domains/rendererContent/textRen
 import { BUILTIN_TOOL_RENDER_KINDS } from '../../domains/rendererContent/toolRenderKindCatalog.ts'
 import { BUILTIN_EXECUTION_RENDER_KINDS } from '../../domains/rendererContent/executionRenderKindCatalog.ts'
 import { BUILTIN_INTERACTION_RENDER_KINDS } from '../../domains/rendererContent/interactionRenderKindCatalog.ts'
+import { BUILTIN_SESSION_RENDER_KINDS } from '../../domains/rendererContent/sessionRenderKindCatalog.ts'
 
 export const BUILTIN_SOLID_SUITE_ID = 'builtin.solid'
 export const BUILTIN_SOLID_CONTENT_SLOT_ID = 'builtin.solid.content.base'
@@ -16,6 +17,7 @@ export const BUILTIN_SOLID_CONTENT_KINDS = Object.freeze([
   ...BUILTIN_TOOL_RENDER_KINDS.map(kind => kind.id),
   ...BUILTIN_EXECUTION_RENDER_KINDS.map(kind => kind.id),
   ...BUILTIN_INTERACTION_RENDER_KINDS.map(kind => kind.id),
+  ...BUILTIN_SESSION_RENDER_KINDS.map(kind => kind.id),
   'content.plan',
   'lifecycle.retry',
   'lifecycle.compact',
@@ -122,7 +124,7 @@ export function createBuiltinSolidRendererSuite(): RendererSuiteContribution {
     // Canonical plan/lifecycle/diagnostic projections are registered by the
     // built-in content plugin and consumed through the same Suite-local Slot seam.
     optionalKinds: Object.freeze(BUILTIN_SOLID_CONTENT_KINDS.filter(kind => (
-      kind === 'content.plan' || kind.startsWith('tool.') || kind.startsWith('activity.') || kind.startsWith('interaction.') || kind.startsWith('lifecycle.') || kind.startsWith('system.')
+      kind === 'content.plan' || kind.startsWith('tool.') || kind.startsWith('activity.') || kind.startsWith('interaction.') || kind.startsWith('lifecycle.') || kind.startsWith('system.') || kind.startsWith('session.') || kind.startsWith('assist.')
     ))),
     factory,
   })
@@ -132,7 +134,7 @@ export function createBuiltinSolidContentSlot(): RendererSlotContribution {
   return Object.freeze({
     id: BUILTIN_SOLID_CONTENT_SLOT_ID,
     label: 'Pylon Solid built-in content',
-    description: 'C00–C13 内置 Solid Suite base Slot',
+    description: 'C00–C15 内置 Solid Suite base Slot',
     targetSuites: Object.freeze([BUILTIN_SOLID_SUITE_ID]),
     kinds: BUILTIN_SOLID_CONTENT_KINDS,
     priority: 10_000,

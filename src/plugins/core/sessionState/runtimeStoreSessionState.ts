@@ -10,7 +10,6 @@ import {
 } from '../../../contracts/sessionStateSync.ts'
 import { useRuntimeStore } from '../../../runtimeStore.ts'
 import {
-  extractMode,
   extractModelConfig,
   extractSessionUsage,
   extractUsage,
@@ -27,13 +26,10 @@ export const BUILTIN_SESSION_STATE_SYNC_PROVIDER: SessionStateSyncProvider = {
     const ctx = context as AgentContext
     const res = response as SessionResponseObject
     const cfg = extractModelConfig(res.configOptions)
-    if (cfg.model || cfg.models) {
-      useRuntimeStore.getState().setSessionConfig(ctx, { ...cfg, raw: res.configOptions })
-    }
-    const currentMode = extractMode(res)
-    if (currentMode != null) useRuntimeStore.getState().setSessionMode(ctx, String(currentMode))
-    const usage = extractSessionUsage(res)
-    if (usage) useRuntimeStore.getState().setSessionLiveStats(ctx, usage)
+    // A new/load response may advertise choices needed by the compatibility UI,
+    // but current model/mode/usage are journal-owned facts. Restoring those here
+    // would create a second recovery authority beside canonical_events.
+    if (cfg.models) useRuntimeStore.getState().setSessionConfig(ctx, { models: cfg.models })
   },
   applyUpdate(context, update) {
     const ctx = context as AgentContext

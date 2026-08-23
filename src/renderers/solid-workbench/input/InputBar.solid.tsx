@@ -9,6 +9,7 @@ import { subscribePluginCommands } from '../../../host/commandSetResolver.ts'
 import type { WorkbenchAttachment } from '../../../domains/workbench/workbenchCommandFacade.ts'
 import { createSessionUiSignal } from '../adapters/sessionUiSignal.solid.tsx'
 import { useSolidWorkbench } from '../SolidWorkbenchContext.solid.tsx'
+import type { SessionCommand } from '../../../domains/workbench/session/sessionSurface.ts'
 
 export interface QueuedWorkbenchMessage {
   id: number
@@ -41,8 +42,13 @@ export function SolidInputBar(props: SolidInputBarProps) {
   const [commandRevision, setCommandRevision] = createSignal(0)
   const suggestions = createMemo(() => {
     commandRevision()
-    return filterCommandSuggestions(draft(), resolveFallbackCommands())
+    const sessionCommands = runtime().document?.session?.commands ?? []
+    const source = sessionCommands.length > 0
+      ? sessionCommandSuggestions(sessionCommands)
+      : resolveFallbackCommands()
+    return filterCommandSuggestions(draft(), source)
   })
+  const suggestionList = () => suggestions() ?? []
   const inputVariant = () => appearance().inputVariant || (appearance().inputMode === 'cli' ? 'cli' : 'composer')
   const externalSubmit = () => appearance().inputSubmitButtonMode === 'external'
   const inlineSubmit = () => appearance().inputSubmitButtonMode !== 'hidden' && !externalSubmit() && !props.externalSend
@@ -120,10 +126,10 @@ export function SolidInputBar(props: SolidInputBarProps) {
     const normalized = text.trim()
     if (!id || !normalized) return false
     try {
-      if (normalized.startsWith('/') && suggestions().length > 0) {
-        const handled = await runSlashCommand(normalized)
-        if (!handled) throw new Error('命令不可用')
-      } else {
+      const handled = normalized.startsWith('/') && suggestionList().length > 0
+        ? await runSlashCommand(normalized)
+        : false
+      if (!handled) {
         const result = await workbench.commands.send(id, {
           text: normalized,
           attachments: attachments(),
@@ -207,10 +213,10 @@ export function SolidInputBar(props: SolidInputBarProps) {
       void cancel()
       return
     }
-    if (suggestions().length > 0) {
+    if (suggestionList().length > 0) {
       if (event.key === 'Tab' || event.key === 'ArrowDown') {
         event.preventDefault()
-        setCommandIndex(index => (index + 1) % suggestions().length)
+        setCommandIndex(index => (index + 1) % suggestionList().length)
         return
       }
       if (event.key === 'ArrowUp') {
@@ -268,9 +274,9 @@ export function SolidInputBar(props: SolidInputBarProps) {
           )}</For>
         </div>
       </Show>
-      <Show when={suggestions().length > 0}>
+      <Show when={suggestionList().length > 0}>
         <div class="command-palette" role="listbox" aria-label="命令建议">
-          <For each={suggestions()}>{(suggestion, index) => (
+          <For each={suggestionList()}>{(suggestion, index) => (
             <button
               type="button"
               role="option"
@@ -349,4 +355,14 @@ export function SolidInputBar(props: SolidInputBarProps) {
       </div>
     </div>
   )
+}
+
+function sessionCommandSuggestions(commands: readonly SessionCommand[]): readonly CommandSuggestion[] {
+  return commands
+    .filter(command => command.availability !== false && command.availability !== 'unavailable')
+    .map(command => ({
+      cmd: command.name.startsWith('/') ? command.name : `/${command.name}`,
+      args: command.inputHint ?? '',
+      info: command.description ?? command.capability ?? '会话命令',
+    }))
 }

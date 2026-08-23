@@ -98,6 +98,10 @@ export interface UsageEvent {
   readonly limit?: number
   readonly threshold?: string
   readonly percent?: number
+  readonly remaining?: number
+  readonly budgetType?: string
+  readonly resetAt?: string
+  readonly exhausted?: boolean
 }
 
 export interface SessionEvent {

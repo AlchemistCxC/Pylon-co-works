@@ -100,6 +100,47 @@ export default function ReactWorkbenchFatalFallback(props: {
           }, null, 2)}</pre>
         </details>}
       </section>}
+      {document?.session.usage && <section aria-label="C14 用量 fallback" className="react-workbench-fatal-session-usage">
+        <strong>用量</strong>
+        {document.session.usage.inputTokens !== undefined && <span>input {document.session.usage.inputTokens}</span>}
+        {document.session.usage.outputTokens !== undefined && <span>output {document.session.usage.outputTokens}</span>}
+        {document.session.usage.reasoningTokens !== undefined && <span>reasoning {document.session.usage.reasoningTokens}</span>}
+        {document.session.usage.cacheReadTokens !== undefined && <span>cache read {document.session.usage.cacheReadTokens}</span>}
+        {document.session.usage.cacheWriteTokens !== undefined && <span>cache write {document.session.usage.cacheWriteTokens}</span>}
+        {(document.session.usage.contextUsed !== undefined || document.session.usage.contextLimit !== undefined)
+          && <span>context {document.session.usage.contextUsed ?? 'unknown'} / {document.session.usage.contextLimit ?? 'unknown'}</span>}
+        {document.session.usage.costUsd !== undefined && <span>{document.session.usage.costUsd} {document.session.usage.currency ?? ''}</span>}
+        {document.session.usage.raw && <details><summary>unknown usage fields</summary><pre>{fallbackJson(document.session.usage.raw)}</pre></details>}
+      </section>}
+      {document?.session.usage?.budget && <section role="status" aria-label="C14 预算 fallback" className="react-workbench-fatal-session-budget"
+        data-exhausted={document.session.usage.budget.exhausted === true ? 'true' : 'false'}>
+        <strong>预算{document.session.usage.budget.exhausted ? ' · exhausted' : ''}</strong>
+        <span>used {document.session.usage.budget.used ?? 'unknown'} / limit {document.session.usage.budget.limit ?? 'unknown'}</span>
+        <span>remaining {document.session.usage.budget.remaining ?? 'unknown'}</span>
+        {document.session.usage.budget.resetAt && <span>reset {document.session.usage.budget.resetAt}</span>}
+      </section>}
+      {(document?.session.options.length ?? 0) > 0 && <section aria-label="C14 配置 fallback" className="react-workbench-fatal-session-config">
+        <strong>会话配置</strong>
+        <dl>{document!.session.options.map(option => <div key={option.id}>
+          <dt>{option.label}</dt><dd>{fallbackJson(option.value)}</dd>
+          {(option.valueType || option.version !== undefined) && <small>{[option.valueType, option.version !== undefined ? `v${option.version}` : undefined].filter(Boolean).join(' · ')}</small>}
+          {option.raw && <details><summary>unknown option fields</summary><pre>{fallbackJson(option.raw)}</pre></details>}
+        </div>)}</dl>
+      </section>}
+      {(document?.session.commands.length ?? 0) > 0 && <section aria-label="C14 命令 fallback" className="react-workbench-fatal-session-commands">
+        <strong>会话命令</strong>
+        <ul>{document!.session.commands.map(command => <li key={command.id}>
+          <code>{command.name.startsWith('/') ? command.name : `/${command.name}`}{command.inputHint ?? ''}</code>
+          {command.description && <span>{command.description}</span>}
+        </li>)}</ul>
+      </section>}
+      {document?.assist && (document.assist.prediction || document.assist.files.length > 0 || document.assist.queuedCommand) && <section
+        role="status" aria-label="C14 输入辅助 fallback" className="react-workbench-fatal-assist">
+        <strong>输入辅助</strong>
+        {document.assist.prediction?.placeholder && <p>{document.assist.prediction.placeholder}</p>}
+        {document.assist.files.length > 0 && <ul>{document.assist.files.map(file => <li key={file}><code>{file}</code></li>)}</ul>}
+        {document.assist.queuedCommand && <small>queued {document.assist.queuedCommand}</small>}
+      </section>}
       {document?.activities.filter(activity => activity.kind === 'tool').map(activity => {
         const snapshot = toolInvocationSnapshot(document, activity.id)
         return snapshot && <ReactFallbackTool key={snapshot.id} snapshot={snapshot} />

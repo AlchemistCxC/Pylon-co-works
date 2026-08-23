@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest'
 import { BUILTIN_TEXT_RENDER_KINDS } from '../../../domains/rendererContent/textRenderKindCatalog.ts'
 import { BUILTIN_EXECUTION_RENDER_KINDS } from '../../../domains/rendererContent/executionRenderKindCatalog.ts'
 import { BUILTIN_INTERACTION_RENDER_KINDS } from '../../../domains/rendererContent/interactionRenderKindCatalog.ts'
+import { BUILTIN_SESSION_RENDER_KINDS } from '../../../domains/rendererContent/sessionRenderKindCatalog.ts'
 import { createBuiltinSolidRendererSuite, createBuiltinSolidContentSlot } from '../builtinSolidRendererSuite.ts'
 
 /**
@@ -17,6 +18,7 @@ const ALL_BUILTIN_KINDS = [
     .map(kind => ({ id: kind.id, fallbackKind: 'fallbackKind' in kind ? (kind as { fallbackKind?: string }).fallbackKind : undefined })),
   ...BUILTIN_EXECUTION_RENDER_KINDS.map(kind => ({ id: kind.id, fallbackKind: (kind as { fallbackKind?: string }).fallbackKind })),
   ...BUILTIN_INTERACTION_RENDER_KINDS.map(kind => ({ id: kind.id, fallbackKind: kind.fallbackKind })),
+  ...BUILTIN_SESSION_RENDER_KINDS.map(kind => ({ id: kind.id, fallbackKind: kind.fallbackKind })),
 ]
 
 describe('A17 suite completeness matrix', () => {
@@ -56,6 +58,16 @@ describe('A17 suite completeness matrix', () => {
     expect(createBuiltinSolidContentSlot().kinds).toEqual(expect.arrayContaining([
       'interaction.oauth', 'interaction.secret', 'interaction.sudo',
     ]))
+  })
+
+  it('publishes every C14 session and assist kind through the replaceable base Slot', () => {
+    const ids = BUILTIN_SESSION_RENDER_KINDS.map(kind => kind.id)
+    expect(ids).toEqual([
+      'session.usage', 'session.budget', 'session.config', 'session.commands',
+      'assist.prediction', 'assist.file-suggestions',
+    ])
+    expect(createBuiltinSolidRendererSuite().optionalKinds).toEqual(expect.arrayContaining(ids))
+    expect(createBuiltinSolidContentSlot().kinds).toEqual(expect.arrayContaining(ids))
   })
 
   it('每个 kind 的 fallback 链最终可达 content.unknown', () => {

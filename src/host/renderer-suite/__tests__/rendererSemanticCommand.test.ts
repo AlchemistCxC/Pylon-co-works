@@ -18,6 +18,7 @@ function makeHost() {
       retry: vi.fn().mockResolvedValue({ ok: true, value: null }),
       toolAction: vi.fn().mockResolvedValue({ ok: true, value: null }),
       copy: vi.fn().mockResolvedValue({ ok: true, value: null }),
+      setConfigOption: vi.fn().mockResolvedValue({ ok: true, value: null }),
     },
     diagnostics,
   }
@@ -80,6 +81,47 @@ describe('renderer semantic command routing (wiring audit regression)', () => {
     await run(host, { type: 'activity.teleport' })
     expect(diagnostics.report).toHaveBeenCalledWith(expect.objectContaining({
       code: 'renderer_action_unknown', actionType: 'activity.teleport',
+    }))
+  })
+
+  it('accepts/rejects ephemeral assist without writing a canonical command', async () => {
+    const { host, diagnostics } = makeHost()
+    const draft = { set: vi.fn() }
+    const assistHost = { ...host, sessionUi: draft }
+    expect(canExecuteRendererSemanticCommand('assist.accept', { has: () => false } as never)).toBe(true)
+    expect(canExecuteRendererSemanticCommand('assist.reject', { has: () => false } as never)).toBe(true)
+    await run(assistHost, { type: 'assist.accept', payload: { text: '建议文本' } })
+    await run(assistHost, { type: 'assist.reject' })
+    expect(draft.set).toHaveBeenCalledWith('draft', '建议文本')
+    expect(diagnostics.report).toHaveBeenCalledWith(expect.objectContaining({ code: 'assist.accepted', phase: 'action' }))
+    expect(diagnostics.report).toHaveBeenCalledWith(expect.objectContaining({ code: 'assist.rejected', phase: 'action' }))
+  })
+
+  it('routes session.config.update with expected version through the Host port', async () => {
+    const { host, diagnostics } = makeHost()
+    const configHost = { ...host, sessionUi: { set: vi.fn() } }
+    expect(canExecuteRendererSemanticCommand('session.config.update', { has: (capability: string) => capability === 'sessionConfig' } as never)).toBe(true)
+    await run(configHost, {
+      type: 'session.config.update', targetId: 'model',
+      payload: { value: 'gpt-5', expectedVersion: 7 },
+    })
+    expect(host.commands.setConfigOption).toHaveBeenCalledWith('session-1', 'model', 'gpt-5', { expectedVersion: 7 })
+    expect(diagnostics.report).not.toHaveBeenCalled()
+  })
+
+  it('rejects a stale config update so the editor can retain its draft and show the failure', async () => {
+    const { host, diagnostics } = makeHost()
+    host.commands.setConfigOption.mockResolvedValueOnce({
+      ok: false,
+      error: { code: 'config_version_stale', message: '配置版本已变化' },
+    })
+
+    await expect(run(host, {
+      type: 'session.config.update', targetId: 'model',
+      payload: { value: 'gpt-5', expectedVersion: 7 },
+    })).rejects.toThrow('配置版本已变化')
+    expect(diagnostics.report).toHaveBeenCalledWith(expect.objectContaining({
+      code: 'config_version_stale', phase: 'action', actionType: 'session.config.update',
     }))
   })
 })

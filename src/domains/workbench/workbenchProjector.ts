@@ -11,6 +11,7 @@ import { applyLifecycleEvent, createEmptyLifecycleState, normalizeNormalizedErro
 import { isActivityStatus } from './events/workbenchEventSchema.ts'
 import type {
   ActivityEvent,
+  AssistEvent,
   DiagnosticEvent,
   GoalEvent,
   InteractionEvent,
@@ -23,6 +24,17 @@ import type {
   WorkbenchEventEnvelope,
   WorkbenchSemanticEvent,
 } from './events/workbenchEventSchema.ts'
+import {
+  EMPTY_ASSIST_SNAPSHOT,
+  normalizeBudgetSnapshot,
+  normalizeSessionCommands,
+  normalizeSessionConfigOptions,
+  normalizeUsageSnapshot,
+  type AssistSnapshot,
+  type SessionCommand,
+  type SessionConfigOption,
+  type UsageSnapshot,
+} from './session/sessionSurface.ts'
 
 export type WorkbenchTimelineKind =
   | 'message' | 'reasoning' | 'tool' | 'activity' | 'interaction'
@@ -153,9 +165,9 @@ export interface WorkbenchSessionSurface {
   readonly stopReason?: string
   readonly model?: string
   readonly mode?: string
-  readonly commands: readonly unknown[]
-  readonly options: readonly unknown[]
-  readonly usage?: unknown
+  readonly commands: readonly SessionCommand[]
+  readonly options: readonly SessionConfigOption[]
+  readonly usage?: UsageSnapshot
 }
 
 export interface WorkbenchProjectionDiagnostic {
@@ -176,6 +188,7 @@ export interface WorkbenchDocument {
   readonly activities: readonly WorkbenchActivityNode[]
   readonly interactions: readonly WorkbenchInteraction[]
   readonly session: WorkbenchSessionSurface
+  readonly assist: AssistSnapshot
   readonly diagnostics: readonly WorkbenchProjectionDiagnostic[]
   readonly plan: PlanState
   readonly goal: GoalState
@@ -200,6 +213,7 @@ export function createWorkbenchDocument(sessionId: string): WorkbenchDocument {
     activities: [],
     interactions: [],
     session: { status: 'idle', commands: [], options: [] },
+    assist: EMPTY_ASSIST_SNAPSHOT,
     diagnostics: [],
     plan: createEmptyPlanState(sessionId),
     goal: createEmptyGoalState(),
@@ -363,6 +377,10 @@ export function selectSessionSurface(document: WorkbenchDocument): WorkbenchSess
   return document.session
 }
 
+export function selectAssist(document: WorkbenchDocument): AssistSnapshot {
+  return document.assist
+}
+
 /** C08：plan/goal slice 只读选择器。 */
 export function selectPlan(document: WorkbenchDocument): PlanState {
   return document.plan
@@ -435,6 +453,10 @@ function reduceSemanticEvent(document: WorkbenchDocument, envelope: WorkbenchEve
     case 'session.status-updated':
     case 'session.completed':
       return reduceSession(document, envelope, event)
+    case 'assist.prediction':
+    case 'assist.file-suggestions':
+    case 'assist.queued-command':
+      return reduceAssist(document, event)
     case 'event.unknown':
       return addDiagnostic(document, envelope, 'event.unknown', event.summary, 'warning', event)
     default:
@@ -847,20 +869,13 @@ function reduceInteraction(document: WorkbenchDocument, envelope: WorkbenchEvent
 
 function reduceUsage(document: WorkbenchDocument, _envelope: WorkbenchEventEnvelope, event: UsageEvent): WorkbenchDocument {
   if (event.type === 'budget.warning') {
-    // C14：budget 派生 exhausted 状态（used>=limit）；percent 是 wire 值或派生值，不重复写 journal
-    const used = typeof event.used === 'number' ? event.used : undefined
-    const limit = typeof event.limit === 'number' ? event.limit : undefined
-    const budget = {
-      ...(used !== undefined ? { used } : {}),
-      ...(limit !== undefined ? { limit } : {}),
-      ...(event.threshold !== undefined ? { threshold: event.threshold } : {}),
-      ...(event.percent !== undefined ? { percent: event.percent } : used !== undefined && limit ? { percent: Math.round(used / limit * 100) } : {}),
-      ...(used !== undefined && limit !== undefined ? { exhausted: used >= limit } : {}),
-    }
-    return { ...document, session: { ...document.session, usage: { ...document.session.usage as Record<string, unknown> | undefined, budget } } }
+    const budget = normalizeBudgetSnapshot(event, document.session.usage?.budget)
+    return { ...document, session: { ...document.session, usage: { ...document.session.usage, budget } } }
   }
-  // C14：usage 直通 JsonValue——缺失字段保持 undefined（unknown），不伪造 0
-  return { ...document, session: { ...document.session, usage: event.usage ?? document.session.usage } }
+  const normalized = normalizeUsageSnapshot(event.usage, document.session.usage)
+  const next = { ...document, session: { ...document.session, usage: normalized.value } }
+  return normalized.invalidFields.reduce<WorkbenchDocument>((current, field) => addDiagnostic(current, _envelope,
+    'session.usage.invalid-field', `usage field ${field} is invalid; retained in raw`, 'warning', event.usage), next)
 }
 
 /** C08：plan 事件经 domain reducer 收敛进 document.plan；malformed entries 转可见诊断。 */
@@ -894,10 +909,23 @@ function reduceSession(document: WorkbenchDocument, _envelope: WorkbenchEventEnv
       ...(event.stopReason ? { stopReason: event.stopReason } : {}),
       ...(event.model ? { model: event.model } : {}),
       ...(event.mode ? { mode: event.mode } : {}),
-      ...(event.commands ? { commands: event.commands } : {}),
-      ...(event.options ? { options: event.options } : {}),
+      ...(event.commands ? { commands: normalizeSessionCommands(event.commands) } : {}),
+      ...(event.options ? { options: normalizeSessionConfigOptions(event.options) } : {}),
     },
   }
+}
+
+function reduceAssist(document: WorkbenchDocument, event: AssistEvent): WorkbenchDocument {
+  if (event.type === 'assist.prediction') {
+    return { ...document, assist: { ...document.assist, prediction: {
+      ...(event.placeholder ? { placeholder: event.placeholder } : {}),
+      actions: Object.freeze([...(event.actions ?? [])]),
+    } } }
+  }
+  if (event.type === 'assist.file-suggestions') {
+    return { ...document, assist: { ...document.assist, files: Object.freeze([...(event.files ?? [])]) } }
+  }
+  return { ...document, assist: { ...document.assist, ...(event.command ? { queuedCommand: event.command } : {}) } }
 }
 
 /** C13：lifecycle 事件经 domain reducer 收敛；恢复成功不删除历史事实。 */

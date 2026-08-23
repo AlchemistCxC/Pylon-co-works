@@ -79,7 +79,7 @@ describe('真实 replay wire 工具字段兼容', () => {
     handle.dispose()
   })
 
-  it('live usage 状态写入完整 durable owner，不再用 source/periId 互换', async () => {
+  it('live usage 不再写 journal 外 session_state snapshot', async () => {
     vi.mocked(invoke).mockClear()
     const source = 'local:wire-state-owner'
     useIdentityStore.setState({ sessions: [session(source)] })
@@ -93,12 +93,7 @@ describe('真实 replay wire 工具字段兼容', () => {
     }) })
     await new Promise(resolve => setTimeout(resolve, 20))
 
-    const stateCall = vi.mocked(invoke).mock.calls.find(call => call[0] === 'set_session_state')
-    expect(stateCall).toEqual(['set_session_state', {
-      owner: { profileId: 'profile', agentId: 'peri', localSessionId: source },
-      remoteSessionId: 'remote-wire',
-      state: { usage: { tokensUsed: 7, tokensMax: 100, cacheReadTokens: 0 } },
-    }])
+    expect(vi.mocked(invoke).mock.calls.some(call => call[0] === 'set_session_state')).toBe(false)
     handle.dispose()
   })
 

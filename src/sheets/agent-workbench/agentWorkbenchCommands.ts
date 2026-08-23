@@ -26,6 +26,8 @@ export interface AgentWorkbenchCommandDependencies {
   nextClientMessageId(source: string): string
   setModel(context: AgentContext, modelId: string): Promise<void>
   setMode(context: AgentContext, modeId: string): Promise<void>
+  setConfigOption(context: AgentContext, key: string, value: unknown): Promise<void>
+  resolveConfigOption(sessionId: string, key: string): { readonly value?: unknown; readonly version?: number } | undefined
   resolveInteraction(sessionId: string, interactionId: string): ResolvedWorkbenchInteraction | undefined
   respondInteraction(request: ResolvedWorkbenchInteraction, answer: InteractionResponseAnswer): Promise<void>
 }
@@ -42,6 +44,11 @@ function productionDependencies(): AgentWorkbenchCommandDependencies {
     nextClientMessageId: source => `${source}:${Date.now()}:${Math.random().toString(36).slice(2, 8)}`,
     setModel: (context, modelId) => setSessionModel(context, modelId),
     setMode: (context, modeId) => setSessionMode(context, modeId),
+    setConfigOption: async (context, key, value) => {
+      await createChatClient({ invoke: (command, args) => invoke(command, args as Record<string, unknown> | undefined) })
+        .setConfigOption({ agentId: context.agentId, source: context.source, key, value })
+    },
+    resolveConfigOption: () => undefined,
     resolveInteraction: () => undefined,
     respondInteraction: (request, answer) => createInteractionResponseTransport({
       invoke: (command, args) => invoke(command, args),
@@ -110,6 +117,20 @@ export function createAgentWorkbenchCommandFacade(
       try { await dependencies.setMode({ agentId: session.agentId, source: session.source }, modeId); return { ok: true } }
       catch (error) { return rejected(error instanceof Error ? error.message : String(error)) }
     },
+    async setConfigOption(sessionId, key, value, options) {
+      const session = dependencies.resolveSession(sessionId)
+      if (!session) return rejected('session_not_found')
+      if (!key.trim()) return rejected('config_key_empty')
+      if (typeof value !== 'string' && typeof value !== 'boolean') return rejected('config_value_unsupported')
+      const current = dependencies.resolveConfigOption(sessionId, key)
+      if (options && !current) return rejected('config_option_not_found')
+      if (options && 'expectedValue' in options && !sameConfigValue(options.expectedValue, current?.value)) return rejected('config_value_stale')
+      if (options?.expectedVersion !== undefined && options.expectedVersion !== current?.version) return rejected('config_version_stale')
+      try {
+        await dependencies.setConfigOption({ agentId: session.agentId, source: session.source }, key, value)
+        return { ok: true }
+      } catch (error) { return rejected(error instanceof Error ? error.message : String(error)) }
+    },
     async createSession() { return { sessionId: '' } },
     async compact() { return rejected('production_command_not_connected') },
     async exportSession() { return rejected('production_command_not_connected') },
@@ -135,4 +156,9 @@ export function createAgentWorkbenchCommandFacade(
     async retry() { return rejected('production_command_not_connected') },
     async recover() { return rejected('production_command_not_connected') },
   }
+}
+
+function sameConfigValue(left: unknown, right: unknown): boolean {
+  if (Object.is(left, right)) return true
+  try { return JSON.stringify(left) === JSON.stringify(right) } catch { return false }
 }

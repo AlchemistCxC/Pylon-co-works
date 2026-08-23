@@ -60,6 +60,20 @@ describe('Solid 工作台壳层样式契约', () => {
     const empty = extractBlock(chromeCss, '.solid-workbench-empty')
     expect(empty).toMatch(/align-items:center|place-items:center/)
   })
+
+  it('C14 session surfaces consume layout/density/warning tokens and retain keyboard focus visibility', () => {
+    const surface = extractBlock(chromeCss, '.solid-session-surface')
+    expect(surface).toContain('display:grid')
+    expect(surface).toContain('border:')
+    const warning = extractBlock(chromeCss, ".solid-session-budget[data-warning='true'][data-palette='semantic']")
+    expect(warning).toMatch(/--warning|--danger|--accent/)
+    const inline = extractBlock(chromeCss, ".solid-session-config[data-layout='inline'] .solid-session-config-option")
+    expect(inline).toContain('grid-template-columns')
+    const compact = extractBlock(chromeCss, ".solid-session-commands[data-density='compact'] .solid-session-command")
+    expect(compact).toMatch(/padding|gap/)
+    const focus = extractBlock(chromeCss, '.solid-session-assist:focus-visible')
+    expect(focus).toContain('outline')
+  })
 })
 
 /** 从 CSS 文本提取指定选择器的声明块（取首次出现），并压缩空白便于断言。 */

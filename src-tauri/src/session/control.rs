@@ -35,7 +35,7 @@ pub(crate) async fn set_config_option(
     agent_id: String,
     source: String,
     key: String,
-    value: String,
+    value: serde_json::Value,
 ) -> Result<serde_json::Value, PylonError> {
     // OWNER-02（§5.8）：显式 agentId 正向 owner 路由（会话存在才可 set_config_option）。
     let owner = SessionOwner::new(&agent_id, &source);
@@ -56,12 +56,15 @@ pub(crate) async fn set_config_option(
             return Err(PylonError::Protocol("model switching disabled".to_string()));
         }
         crate::agent_config::ModelSwitchTarget::SetModel => {
+            let model_id = value.as_str().ok_or_else(|| {
+                PylonError::Protocol("model config value must be a string".to_string())
+            })?;
             state
                 .inner()
                 .acp_rpc(
                     &runtime,
                     acp::METHOD_SESSION_SET_MODEL,
-                    acp::session_set_model_params(&peri_id, &value)?,
+                    acp::session_set_model_params(&peri_id, model_id)?,
                 )
                 .await?
         }
@@ -85,9 +88,13 @@ pub(crate) async fn set_config_option(
             session.config_options = options.clone();
             session.apply_config_options(options);
         } else if key == "model" {
-            session.model = value.clone();
+            if let Some(value) = value.as_str() {
+                session.model = value.to_string();
+            }
         } else if key == "mode" {
-            session.mode = Some(value.clone());
+            if let Some(value) = value.as_str() {
+                session.mode = Some(value.to_string());
+            }
         }
     })?;
     Ok(response)

@@ -8,6 +8,8 @@ import { SolidWorkbenchContext, type SolidWorkbenchContextValue } from '../../So
 import { SolidInputBar } from '../InputBar.solid.tsx'
 import { getCommandRegistry } from '../../../../plugin-runtime/runtimeServices.ts'
 import { createPluginIdentity } from '../../../../plugin-runtime/pluginIdentity.ts'
+import { createWorkbenchEnvelope } from '../../../../domains/workbench/events/workbenchEventSchema.ts'
+import { projectWorkbench } from '../../../../domains/workbench/workbenchProjector.ts'
 
 const modelCommand = getCommandRegistry().register(
   createPluginIdentity('test.solid-input', 'solid-input-test'),
@@ -102,6 +104,44 @@ describe('SolidInputBar', () => {
     await waitFor(() => expect(services.commands.calls[0]?.command).toBe('setModel'))
     expect(services.commands.calls[0]?.args).toEqual(['session-a', 'deepseek-chat'])
     expect(services.commands.calls.some(call => call.command === 'send')).toBe(false)
+  })
+
+  it('实时消费 canonical session commands，且同名插件命令不覆盖会话权威', async () => {
+    const { services, textarea } = renderInput()
+    const document = projectWorkbench([createWorkbenchEnvelope({
+      sessionId: 'session-a', recordedAt: '2026-08-24T00:00:00.000Z', sequence: 1,
+      source: { provider: 'peri', sourceId: 'commands-1' },
+      provenance: { origin: 'local-observed', trust: 'authoritative' },
+      event: { type: 'session.commands-updated', commands: [
+        { id: 'model', name: '/model', description: '会话模型命令', inputHint: ' <session-model>', availability: true },
+        { id: 'review', name: '/review', description: '审查当前改动', inputHint: ' <scope>', availability: true },
+      ] },
+    })]).document
+    services.runtime.replaceDocument(document, { ownerKey: 'owner-a', generation: 1 })
+
+    fireEvent.input(textarea, { target: { value: '/model' } })
+    expect(await screen.findByText('会话模型命令')).toBeTruthy()
+    expect(screen.queryByText('切换模型')).toBeNull()
+
+    fireEvent.input(textarea, { target: { value: '/review' } })
+    expect(await screen.findByText('审查当前改动')).toBeTruthy()
+    expect(screen.getByText('/review <scope>')).toBeTruthy()
+    fireEvent.input(textarea, { target: { value: '/review src' } })
+    fireEvent.keyDown(textarea, { key: 'Enter' })
+    await waitFor(() => expect(services.commands.calls).toContainEqual({
+      command: 'send', args: ['session-a', { text: '/review src', attachments: [] }],
+    }))
+
+    services.runtime.replaceDocument(projectWorkbench([createWorkbenchEnvelope({
+      sessionId: 'session-a', recordedAt: '2026-08-24T00:00:01.000Z', sequence: 2,
+      source: { provider: 'peri', sourceId: 'commands-2' },
+      provenance: { origin: 'local-observed', trust: 'authoritative' },
+      event: { type: 'session.commands-updated', commands: [
+        { id: 'audit', name: '/audit', description: '全量审计', availability: true },
+      ] },
+    })]).document, { ownerKey: 'owner-a', generation: 2 })
+    fireEvent.input(textarea, { target: { value: '/audit' } })
+    expect(await screen.findByText('全量审计')).toBeTruthy()
   })
 
   it('附件通过 facade 注入，去重并可移除', async () => {

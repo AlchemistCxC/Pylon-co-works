@@ -63,11 +63,11 @@ function semanticEventForUpdate(update: Record<string, unknown>, context: Normal
       // id 按 显式 id > itemId > content 派生，非 object 条目丢弃。
       return { event: { type: 'plan.replaced', entries: normalizePlanEntries(update.entries) as unknown as readonly JsonValue[] }, diagnostics }
     case 'usage_update':
-      return { event: { type: 'usage.updated', usage: toJsonValue({ inputTokens: update.used ?? update.value, contextLimit: update.size, ...toJsonRecord(update.usage) }) }, diagnostics }
+      return { event: { type: 'usage.updated', usage: toJsonValue(normalizeUsageUpdate(update)) }, diagnostics }
     case 'available_commands_update':
-      return { event: { type: 'session.commands-updated', commands: Array.isArray(update.commands) ? update.commands.map(toJsonValue) : [] }, diagnostics }
+      return { event: { type: 'session.commands-updated', commands: normalizeAvailableCommands(update.commands) }, diagnostics }
     case 'config_option_update':
-      return { event: { type: 'session.config-updated', options: Array.isArray(update.configOptions) ? update.configOptions.map(toJsonValue) : [toJsonValue(update)] }, diagnostics }
+      return { event: { type: 'session.config-updated', options: normalizeConfigOptions(update) }, diagnostics }
     case 'session_info_update':
       return { event: { type: 'session.status-updated', status: typeof update.mode === 'string' ? update.mode : 'updated' }, diagnostics }
     case 'done':
@@ -135,4 +135,87 @@ function withToolNameDiagnostic(
 
 function toJsonRecord(value: unknown): Record<string, unknown> {
   return isRecord(value) ? value : {}
+}
+
+function normalizeUsageUpdate(update: Record<string, unknown>): Record<string, unknown> {
+  const meta = isRecord(update._meta) ? update._meta : {}
+  const usage = toJsonRecord(update.usage)
+  const cost = isRecord(update.cost) ? update.cost : {}
+  return {
+    ...usage,
+    ...(finiteNonNegative(meta.inputTokens) !== undefined ? { inputTokens: meta.inputTokens } : {}),
+    ...(finiteNonNegative(meta.outputTokens) !== undefined ? { outputTokens: meta.outputTokens } : {}),
+    ...(finiteNonNegative(meta.cacheReadTokens) !== undefined ? { cacheReadTokens: meta.cacheReadTokens } : {}),
+    ...(finiteNonNegative(update.used ?? update.value) !== undefined ? { contextUsed: update.used ?? update.value } : {}),
+    ...(finiteNonNegative(update.size) !== undefined ? { contextLimit: update.size } : {}),
+    ...(finiteNonNegative(cost.amount) !== undefined ? { costUsd: cost.amount } : {}),
+    ...(stringField(cost.currency) ? { currency: cost.currency } : {}),
+  }
+}
+
+function normalizeAvailableCommands(value: unknown): readonly JsonValue[] {
+  if (!Array.isArray(value)) return []
+  return value.map((item, index) => {
+    if (!isRecord(item)) return toJsonValue(item)
+    const wireName = stringField(item.name) ?? `unknown-command-${index}`
+    return toJsonValue({
+      id: stringField(item.id) ?? wireName.replace(/^\//, ''),
+      name: wireName.startsWith('/') ? wireName : `/${wireName}`,
+      ...(stringField(item.description) ? { description: item.description } : {}),
+      ...(stringField(item.inputHint ?? item.input_hint) ? { inputHint: item.inputHint ?? item.input_hint } : {}),
+      ...((typeof item.availability === 'boolean' || typeof item.availability === 'string') ? { availability: item.availability } : {}),
+      ...(stringField(item.capability) ? { capability: item.capability } : {}),
+      ...unknownWireFields(item, ['id', 'name', 'description', 'inputHint', 'input_hint', 'availability', 'capability']),
+    })
+  })
+}
+
+function normalizeConfigOptions(update: Record<string, unknown>): readonly JsonValue[] {
+  const values = Array.isArray(update.configOptions) ? update.configOptions : [update]
+  return values.map((item, index) => {
+    if (!isRecord(item)) return toJsonValue(item)
+    const id = stringField(item.id ?? item.key ?? item.name) ?? `unknown-option-${index}`
+    const choices = item.options ?? item.choices ?? item.values ?? item.available
+    const value = item.currentValue ?? item.value ?? item.current ?? item.selected ?? null
+    const valueType = stringField(item.valueType ?? item.type)
+    const editable = (typeof item.editable === 'boolean' ? item.editable : item.readOnly !== true)
+      && isAcpWritableConfigValue(valueType, value)
+    const unknown = unknownWireFields(item, ['id', 'key', 'name', 'label', 'currentValue', 'value', 'current', 'selected', 'valueType', 'type', 'editable', 'readOnly', 'options', 'choices', 'values', 'available', 'schema', 'version', 'capability', 'raw'])
+    const retainedRaw = {
+      ...(isRecord(item.raw) ? item.raw : {}),
+      ...(!isAcpWritableConfigValue(valueType, value) ? { value, ...(valueType ? { valueType } : {}) } : {}),
+      ...unknown,
+    }
+    return toJsonValue({
+      id,
+      label: stringField(item.label ?? item.name) ?? id,
+      ...(['currentValue', 'value', 'current', 'selected'].some(key => key in item)
+        ? { value } : {}),
+      ...(valueType ? { valueType } : {}),
+      editable,
+      ...(choices !== undefined ? { schema: { options: choices } } : item.schema !== undefined ? { schema: item.schema } : {}),
+      ...(finiteNonNegative(item.version) !== undefined ? { version: item.version } : {}),
+      ...(stringField(item.capability) ? { capability: item.capability } : {}),
+      ...(Object.keys(retainedRaw).length > 0 ? { raw: retainedRaw } : {}),
+    })
+  })
+}
+
+function isAcpWritableConfigValue(valueType: string | undefined, value: unknown): boolean {
+  return valueType === 'boolean' ? typeof value === 'boolean'
+    : valueType === 'select' ? typeof value === 'string'
+      : false
+}
+
+function unknownWireFields(value: Record<string, unknown>, known: readonly string[]): Record<string, unknown> {
+  const names = new Set(known)
+  return Object.fromEntries(Object.entries(value).filter(([key]) => !names.has(key)))
+}
+
+function finiteNonNegative(value: unknown): number | undefined {
+  return typeof value === 'number' && Number.isFinite(value) && value >= 0 ? value : undefined
+}
+
+function stringField(value: unknown): string | undefined {
+  return typeof value === 'string' && value.trim() ? value : undefined
 }

@@ -239,11 +239,23 @@ describe('mountSolidWorkbench', () => {
       envelope(2, { type: 'tool.started', tool: { toolCallId: 'tool-1', name: 'Read', status: 'running' } }),
       envelope(3, { type: 'usage.updated', usage: { inputTokens: 8 } }),
       envelope(4, { type: 'diagnostic.notice', level: 'warning', code: 'demo.warning', message: 'canonical warning' }),
+      envelope(5, { type: 'budget.warning', used: 90, limit: 100, remaining: 10, exhausted: false }),
+      envelope(6, { type: 'session.config-updated', options: [{ id: 'model', label: 'Model', value: 'gpt-5', version: 1 }] }),
+      envelope(7, { type: 'session.commands-updated', commands: [{ id: 'review', name: '/review', description: '审查改动' }] }),
+      envelope(8, { type: 'assist.prediction', placeholder: '继续审计', actions: [] }),
+      envelope(9, { type: 'assist.file-suggestions', files: ['src/a.ts'] }),
     ]).document
     services.runtime.replaceDocument(workbenchDocument, { ownerKey: 'owner-preview', generation: 1 })
     await waitFor(() => expect(screen.getByText('canonical answer')).toBeTruthy())
     expect(host.querySelector('[data-activity-count="1"]')).toBeTruthy()
     expect(host.querySelector('[data-has-usage="true"]')).toBeTruthy()
+    expect(screen.getByLabelText('会话用量')).toHaveTextContent('输入 8')
+    expect(screen.getByLabelText('会话预算')).toHaveTextContent('剩余 10')
+    expect(screen.getByLabelText('编辑 Model')).toHaveValue('gpt-5')
+    expect(screen.getByLabelText('会话命令')).toHaveTextContent('/review')
+    expect(screen.getByLabelText('输入预测')).toHaveTextContent('继续审计')
+    expect(screen.getByLabelText('文件建议')).toHaveTextContent('src/a.ts')
+    await waitFor(() => expect(host.textContent).toContain('↓ 8 tokens'))
     expect(screen.getByText('canonical warning')).toBeTruthy()
   })
 

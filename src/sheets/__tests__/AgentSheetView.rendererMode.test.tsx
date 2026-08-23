@@ -698,6 +698,55 @@ describe('AgentSheetView renderer mode context', () => {
     }
   })
 
+  it('targeted session.usage Slot receives the typed C14 snapshot and cleanup restores the base Slot', async () => {
+    const registration = getRendererRegistry().registerSlot(
+      createPluginIdentity('test.production-session-usage-slot', 'runtime'),
+      {
+        id: 'test.production-session-usage-slot.content', targetSuites: ['builtin.solid'],
+        kinds: ['session.usage'], priority: 1, fallback: false,
+        canRender: snapshot => snapshot.kind === 'session.usage',
+        createSurface: () => ({
+          rendererId: 'test.production-session-usage-slot', kind: 'solid',
+          mount(container, snapshot) {
+            const usage = snapshot.payload as { inputTokens?: unknown; raw?: { vendorFuture?: unknown } }
+            const node = document.createElement('div')
+            node.dataset.productionSessionUsageSlot = 'true'
+            node.textContent = `usage overlay: ${String(usage.inputTokens)} / ${String(usage.raw?.vendorFuture)}`
+            container.append(node)
+            return node
+          },
+          update(handle, snapshot) {
+            const usage = snapshot.payload as { inputTokens?: unknown; raw?: { vendorFuture?: unknown } }
+            ;(handle as HTMLElement).textContent = `usage overlay: ${String(usage.inputTokens)} / ${String(usage.raw?.vendorFuture)}`
+          },
+          destroy(handle) { (handle as HTMLElement).remove() }, on: () => () => {},
+        }),
+      },
+    )
+    try {
+      useIdentityStore.setState({ sessions: [session('session-1', 'local:a')] })
+      useWorkspaceStore.setState(state => ({ workspaceSheets: { ...state.workspaceSheets, activeSheetId: 'agent-sheet' } }))
+      const { container } = render(<AgentSheetView sheet={sheet({ sidebarMode: 'work' })} ctx={ctx} />)
+      await screen.findByLabelText('Solid Agent Workbench', {}, { timeout: 5_000 })
+      publishPluginEvent(createWorkbenchEnvelope({
+        sessionId: 'local:a', recordedAt: '2026-08-24T00:00:01.000Z', sequence: 1,
+        source: { provider: 'peri', sourceId: 'session-usage' }, identity: {},
+        provenance: { origin: 'local-observed', trust: 'authoritative' },
+        event: { type: 'usage.updated', usage: { inputTokens: 8, vendorFuture: 9 } },
+      }))
+
+      expect(await screen.findByText('usage overlay: 8 / 9')).toBeTruthy()
+      expect(container.querySelector('[data-production-session-usage-slot="true"]')).not.toBeNull()
+      await registration.dispose()
+
+      await waitFor(() => expect(container.querySelector('[data-production-session-usage-slot="true"]')).toBeNull())
+      expect(await screen.findByLabelText('会话用量')).toHaveTextContent('输入 8')
+      expect(container.querySelector('[data-renderer-slot-id="builtin.solid.content.base"]')).not.toBeNull()
+    } finally {
+      await registration.dispose()
+    }
+  })
+
   it('C01 settings update the mounted production reasoning Slot without remounting', async () => {
     const settings = getRendererSettingsStore()
     settings.reset()
@@ -1214,7 +1263,7 @@ describe('AgentSheetView renderer mode context', () => {
       },
     }) as never)
 
-    screen.getByRole('button', { name: 'Allow production action' }).click()
+    ;(await screen.findByRole('button', { name: 'Allow production action' })).click()
 
     await waitFor(() => expect(invokeMock).toHaveBeenCalledWith('respond_interaction', {
       identity: { provider: 'peri', agentId: 'peri', requestId: 'request-a', sessionId: 'local:a', clientGeneration: 1 },

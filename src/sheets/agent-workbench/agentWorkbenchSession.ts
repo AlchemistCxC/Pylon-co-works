@@ -79,6 +79,11 @@ export function createAgentWorkbenchSessionRuntime(dependencies: AgentWorkbenchS
   const sessionUi = createSessionUiStore()
   let boundSessionId: string | undefined
   const commands = createAgentWorkbenchCommandFacade({
+    resolveConfigOption(sessionId, key) {
+      if (boundSessionId !== sessionId) return undefined
+      const option = runtime.getSnapshot().document?.session.options.find(item => item.id === key)
+      return option ? { value: option.value, version: option.version } : undefined
+    },
     resolveInteraction(sessionId, interactionId): ResolvedWorkbenchInteraction | undefined {
       const snapshot = runtime.getSnapshot()
       if (boundSessionId !== sessionId) return undefined

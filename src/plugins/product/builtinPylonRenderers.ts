@@ -7,6 +7,7 @@ import { BUILTIN_TEXT_RENDER_KINDS } from '../../domains/rendererContent/textRen
 import { BUILTIN_TOOL_RENDER_KINDS } from '../../domains/rendererContent/toolRenderKindCatalog.ts'
 import { BUILTIN_EXECUTION_RENDER_KINDS } from '../../domains/rendererContent/executionRenderKindCatalog.ts'
 import { BUILTIN_INTERACTION_RENDER_KINDS } from '../../domains/rendererContent/interactionRenderKindCatalog.ts'
+import { BUILTIN_SESSION_RENDER_KINDS } from '../../domains/rendererContent/sessionRenderKindCatalog.ts'
 import { BUILTIN_PYLON_RENDERERS_ID } from './productPluginIds.ts'
 import { mountFirstPartyStyleAssets } from './firstPartyStyleRuntime.ts'
 import { loadBuiltinPylonRendererStyles } from './packages/builtin.pylon-renderers/styleAssets.ts'
@@ -39,6 +40,7 @@ export function createBuiltinPylonRenderersPlugin(): BuiltinPluginDefinition {
         ...BUILTIN_TOOL_RENDER_KINDS,
         ...BUILTIN_EXECUTION_RENDER_KINDS,
         ...BUILTIN_INTERACTION_RENDER_KINDS,
+        ...BUILTIN_SESSION_RENDER_KINDS,
       ])
       for (const definition of rendererDefinitions) {
         const result = definition.activate(context)

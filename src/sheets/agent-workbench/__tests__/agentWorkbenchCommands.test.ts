@@ -82,4 +82,34 @@ describe('Agent Workbench production commands', () => {
       .resolves.toEqual({ ok: false, error: 'interaction_revision_stale' })
     expect(respondInteraction).not.toHaveBeenCalled()
   })
+
+  it('在 config RPC 前拒绝与 canonical option 不一致的 expected value/version', async () => {
+    const setConfigOption = vi.fn(async () => undefined)
+    const commands = createAgentWorkbenchCommandFacade({
+      resolveSession: id => id === session.id ? session : undefined,
+      resolveConfigOption: (_sessionId, key) => key === 'model' ? { value: 'gpt-4', version: 4 } : undefined,
+      setConfigOption,
+    })
+    await expect(commands.setConfigOption(session.id, 'model', 'gpt-5', { expectedValue: 'gpt-3', expectedVersion: 4 }))
+      .resolves.toEqual({ ok: false, error: 'config_value_stale' })
+    await expect(commands.setConfigOption(session.id, 'model', 'gpt-5', { expectedValue: 'gpt-4', expectedVersion: 3 }))
+      .resolves.toEqual({ ok: false, error: 'config_version_stale' })
+    expect(setConfigOption).not.toHaveBeenCalled()
+
+    await expect(commands.setConfigOption(session.id, 'model', 'gpt-5', { expectedValue: 'gpt-4', expectedVersion: 4 }))
+      .resolves.toEqual({ ok: true })
+    expect(setConfigOption).toHaveBeenCalledWith({ agentId: 'peri', source: 'local:a' }, 'model', 'gpt-5')
+  })
+
+  it('在 config RPC 前拒绝 ACP 无法表达的 value', async () => {
+    const setConfigOption = vi.fn(async () => undefined)
+    const commands = createAgentWorkbenchCommandFacade({
+      resolveSession: id => id === session.id ? session : undefined,
+      setConfigOption,
+    })
+
+    await expect(commands.setConfigOption(session.id, 'temperature', 0.4))
+      .resolves.toEqual({ ok: false, error: 'config_value_unsupported' })
+    expect(setConfigOption).not.toHaveBeenCalled()
+  })
 })

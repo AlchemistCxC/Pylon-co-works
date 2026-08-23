@@ -115,6 +115,7 @@ function createCommands(host: WorkbenchHostPort): WorkbenchCommandFacade {
     compact: async id => commandResult(host, 'compact', await host.commands.compact(id)),
     exportSession: async (id, input) => commandResult(host, 'exportSession', await host.commands.exportSession(id, input)),
     clearSession: async id => commandResult(host, 'clearSession', await host.commands.clearSession(id)),
+    setConfigOption: async (id, key, value, options) => commandResult(host, 'setConfigOption', await host.commands.setConfigOption(id, key, value, options)),
     toolAction: async (id, callId, action, payload) => commandResult(host, 'toolAction', await host.commands.toolAction(id, callId, action, payload)),
     respondInteraction: async (id, interactionId, response, options) => commandResult(host, 'respondInteraction', await host.commands.respondInteraction(id, interactionId, response, options)),
     openResource: async (id, resource) => commandResult(host, 'openResource', await host.commands.openResource(id, resource)),

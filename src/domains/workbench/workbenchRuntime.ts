@@ -4,6 +4,7 @@ import { normalizePlanEntries, type PlanEntryV2 } from './plan/goalModel.ts'
 import type { GenerationPhase, GenerationSummary } from './generationFooterContracts.ts'
 import type { WorkbenchDocument, WorkbenchMessage } from './workbenchProjector.ts'
 import { createWorkbenchDocument, selectGoal, selectPlan } from './workbenchProjector.ts'
+import type { JsonValue } from './events/workbenchEventSchema.ts'
 
 export type WorkbenchRuntimeStatus = 'idle' | 'loading' | 'ready' | 'degraded' | 'error'
 
@@ -209,8 +210,21 @@ function freezeDocument(document: WorkbenchDocument, previous?: WorkbenchDocumen
     ? document.session
     : Object.freeze({
       ...document.session,
-      commands: document.session.commands === previous?.session.commands && Object.isFrozen(document.session.commands) ? document.session.commands : Object.freeze([...document.session.commands]),
-      options: document.session.options === previous?.session.options && Object.isFrozen(document.session.options) ? document.session.options : Object.freeze([...document.session.options]),
+      ...(document.session.usage ? { usage: freezeUsage(document.session.usage) } : {}),
+      commands: document.session.commands === previous?.session.commands && Object.isFrozen(document.session.commands)
+        ? document.session.commands
+        : Object.freeze(document.session.commands.map(command => Object.freeze({
+          ...command,
+          ...(command.raw ? { raw: freezeJsonRecord(command.raw) } : {}),
+        }))),
+      options: document.session.options === previous?.session.options && Object.isFrozen(document.session.options)
+        ? document.session.options
+        : Object.freeze(document.session.options.map(option => Object.freeze({
+          ...option,
+          ...(option.value !== undefined ? { value: freezeJsonValue(option.value) } : {}),
+          ...(option.schema !== undefined ? { schema: freezeJsonValue(option.schema) } : {}),
+          ...(option.raw ? { raw: freezeJsonRecord(option.raw) } : {}),
+        }))),
     })
   const plan = document.plan === previous?.plan && Object.isFrozen(document.plan)
     ? document.plan
@@ -227,8 +241,40 @@ function freezeDocument(document: WorkbenchDocument, previous?: WorkbenchDocumen
     interactions: freezeItems(document.interactions, previous?.interactions),
     diagnostics: freezeItems(document.diagnostics, previous?.diagnostics),
     session,
+    assist: document.assist === previous?.assist && Object.isFrozen(document.assist)
+      ? document.assist
+      : Object.freeze({
+        ...document.assist,
+        files: Object.freeze([...document.assist.files]),
+        ...(document.assist.prediction ? { prediction: Object.freeze({
+          ...document.assist.prediction,
+          actions: Object.freeze(document.assist.prediction.actions.map(freezeJsonValue)),
+        }) } : {}),
+      }),
     plan,
   })
+}
+
+function freezeUsage(usage: NonNullable<WorkbenchDocument['session']['usage']>): NonNullable<WorkbenchDocument['session']['usage']> {
+  return Object.freeze({
+    ...usage,
+    ...(usage.budget ? { budget: Object.freeze({ ...usage.budget }) } : {}),
+    ...(usage.raw ? { raw: freezeJsonRecord(usage.raw) } : {}),
+  })
+}
+
+function freezeJsonRecord(value: Readonly<Record<string, JsonValue>>): Readonly<Record<string, JsonValue>> {
+  return Object.freeze(Object.fromEntries(Object.entries(value).map(([key, nested]) => [key, freezeJsonValue(nested)])))
+}
+
+function freezeJsonValue(value: JsonValue): JsonValue {
+  if (Array.isArray(value)) {
+    const frozen = value.map(freezeJsonValue)
+    Object.freeze(frozen)
+    return frozen
+  }
+  if (value && typeof value === 'object') return freezeJsonRecord(value)
+  return value
 }
 
 function legacyFieldsFromDocument(document: WorkbenchDocument): Partial<WorkbenchRuntimeSnapshot> {
@@ -268,7 +314,7 @@ function selectSlice(snapshot: WorkbenchRuntimeSnapshot, slice: WorkbenchRuntime
     case 'commands': return document?.session.commands ?? []
     case 'plan': return document ? selectPlan(document) : undefined
     case 'goal': return document ? selectGoal(document) : undefined
-    case 'assist': return document?.timeline.filter(entry => entry.kind === 'assist') ?? []
+    case 'assist': return document?.assist
     case 'diagnostics': return document?.diagnostics ?? []
     case 'tasks': return snapshot.tasks
     case 'streaming': return { text: snapshot.streamingText, thinking: snapshot.streamingThinking }

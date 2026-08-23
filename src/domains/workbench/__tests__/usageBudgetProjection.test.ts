@@ -54,4 +54,16 @@ describe('C14 usage/budget/config/commands projection', () => {
     expect(budget!.used).toBe(900)
     expect(budget!.exhausted).toBe(false)
   })
+
+  it('merges partial budget updates and re-derives counters from the latest observed usage', () => {
+    const { document } = projectWorkbench([
+      envelope(1, { type: 'budget.warning', used: 80, limit: 100, budgetType: 'tokens', resetAt: '2026-09-01T00:00:00Z' }),
+      envelope(2, { type: 'budget.warning', used: 100 }),
+    ])
+
+    expect(selectSessionSurface(document).usage?.budget).toMatchObject({
+      used: 100, limit: 100, remaining: 0, percent: 100, exhausted: true,
+      type: 'tokens', resetAt: '2026-09-01T00:00:00Z',
+    })
+  })
 })

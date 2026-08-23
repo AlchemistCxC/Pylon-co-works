@@ -145,6 +145,7 @@ export default function AgentRendererSuiteWorkbench(props: AgentRendererSuiteWor
         capabilities: {
           prompt: true, cancel: true, attach: false, model: true, mode: true,
           sessionCreate: false, compact: false, sessionExport: false, sessionClear: false,
+          sessionConfig: true,
           toolAction: false, interactionResponse: true, resourceOpen: false, resourceReveal: false,
           clipboardWrite: true, retry: false, recovery: false,
         },

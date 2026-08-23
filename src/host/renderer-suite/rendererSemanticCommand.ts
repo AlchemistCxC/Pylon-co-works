@@ -17,6 +17,9 @@ export function canExecuteRendererSemanticCommand(commandType: string, capabilit
     case 'resource.reveal': return capabilities.has('resourceReveal')
     case 'message.retry': return capabilities.has('retry')
     case 'session.recover': return capabilities.has('recovery')
+    case 'session.config.update': return capabilities.has('sessionConfig')
+    case 'assist.accept':
+    case 'assist.reject': return true
     default: return false
   }
 }
@@ -39,6 +42,24 @@ export async function executeRendererSemanticCommand(input: {
     slotId: input.slotId, kind: input.kind, actionType: command.type,
   })
   if (!sessionId) { reject('renderer_action_context_missing', 'Renderer action 缺少活动 Session'); return }
+
+  if (command.type === 'assist.accept') {
+    const text = record?.text
+    if (typeof text !== 'string' || !text.trim()) { reject('renderer_action_invalid', 'assist.accept 缺少 text'); return }
+    host.sessionUi.set('draft', text)
+    host.diagnostics.report({
+      code: 'assist.accepted', message: '输入建议已接受到当前 Session 草稿', phase: 'action', recoverability: 'none',
+      slotId: input.slotId, kind: input.kind, actionType: command.type,
+    })
+    return
+  }
+  if (command.type === 'assist.reject') {
+    host.diagnostics.report({
+      code: 'assist.rejected', message: '输入建议已忽略', phase: 'action', recoverability: 'none',
+      slotId: input.slotId, kind: input.kind, actionType: command.type,
+    })
+    return
+  }
 
   let result: { readonly ok: true; readonly value: unknown }
     | { readonly ok: false; readonly error: { readonly code: string; readonly message: string } }
@@ -85,6 +106,17 @@ export async function executeRendererSemanticCommand(input: {
     case 'session.recover':
       result = await host.commands.recover(sessionId, typeof record?.strategy === 'string' ? record.strategy : undefined)
       break
+    case 'session.config.update': {
+      if (!command.targetId || !record || !('value' in record)) { reject('renderer_action_invalid', 'session.config.update 缺少 targetId/value'); return }
+      const expectedVersion = typeof record.expectedVersion === 'number' ? record.expectedVersion : undefined
+      const options = {
+        ...('expectedValue' in record ? { expectedValue: record.expectedValue } : {}),
+        ...(expectedVersion !== undefined ? { expectedVersion } : {}),
+      }
+      result = await host.commands.setConfigOption(sessionId, command.targetId, record.value,
+        Object.keys(options).length > 0 ? options : undefined)
+      break
+    }
     default:
       reject('renderer_action_unknown', `未知 Renderer semantic action：${command.type}`)
       return
@@ -94,6 +126,8 @@ export async function executeRendererSemanticCommand(input: {
     // Interaction surfaces use rejection to keep their local answer editable
     // and to show an actionable retry state. Other renderer actions retain the
     // historical diagnostic-only behavior.
-    if (command.type === 'interaction.respond') throw new Error(result.error.message)
+    if (command.type === 'interaction.respond' || command.type === 'session.config.update') {
+      throw new Error(result.error.message)
+    }
   }
 }

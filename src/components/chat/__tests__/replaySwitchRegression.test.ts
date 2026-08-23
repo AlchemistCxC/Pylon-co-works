@@ -182,7 +182,7 @@ describe('会话重放修复回归', () => {
     handle.dispose()
   })
 
-  it('commitReplaySnapshot 恢复 available_commands_update 到 sessionLiveStats', async () => {
+  it('commitReplaySnapshot 不再把 commands 恢复到 journal 外 sessionLiveStats', async () => {
     const A = 'local:session-a'
     useIdentityStore.setState({ sessions: [makeSession('sa', A)] })
     const handle = attachChatEventController(makeRefs())
@@ -196,7 +196,7 @@ describe('会话重放修复回归', () => {
       replayUpdate({ sessionUpdate: 'available_commands_update', commands }),
     ])
     const key = toAgentContextKey({ agentId: 'peri', source: A })
-    expect(useRuntimeStore.getState().sessionLiveStats[key]?.commands).toEqual(commands)
+    expect(useRuntimeStore.getState().sessionLiveStats[key]?.commands).toBeUndefined()
     handle.finishLoadLock(A, gen)
     handle.dispose()
   })

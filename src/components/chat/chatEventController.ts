@@ -5,7 +5,7 @@ import { useStore } from '../../store'
 import { useIdentityStore } from '../../identityStore'
 import { useRuntimeStore } from '../../runtimeStore'
 import { resolveSpinnerFrames } from './spinnerFrames'
-import { extractUsage, extractSessionUsage, extractPlanEntries, type ContentBlock, type PeriDonePayload, type PeriUpdatePayload, type SessionUpdate } from '../../infrastructure/acp/chatContracts'
+import { extractUsage, extractPlanEntries, type ContentBlock, type PeriDonePayload, type PeriUpdatePayload } from '../../infrastructure/acp/chatContracts'
 import { applySessionStateUpdate } from '../../domains/sessionState/sessionStateSync.ts'
 import { normalizeRawEvent, type CanonicalNormalizeResult } from '../../domains/events/canonicalNormalizer'
 import { toolFieldsFromCanonical } from '../../domains/events/toolProjection'
@@ -34,7 +34,6 @@ import type { HookContext, HookPhase } from '../../contracts/agentHook.ts'
 import { runSessionBoundaryHook } from './hookRuntime.ts'
 import { getHookRuntime } from '../../plugin-runtime/runtimeServices.ts'
 import type { HookName } from '../../plugin-runtime/hooks/hookTypes.ts'
-import type { DurableSessionOwner } from '../../domains/session/owner.ts'
 
 export interface ChatEventControllerRefs {
   sessionRef: React.RefObject<string | null>
@@ -631,25 +630,6 @@ export function attachChatEventController(refs: ChatEventControllerRefs): ChatCo
       clientGeneration: useRuntimeStore.getState().bindingGenerations[key] ?? 0,
     }
   }
-  const persistSessionState = (context: AgentContext, state: Record<string, unknown>): void => {
-    const session = useIdentityStore.getState().sessions.find(
-      candidate => candidate.source === context.source && candidate.agentId === context.agentId,
-    )
-    if (!session) {
-      reportRuntimeError(
-        '持久化会话状态',
-        new Error(`durable owner unavailable: agent=${context.agentId} source=${context.source}`),
-      )
-      return
-    }
-    const owner: DurableSessionOwner = {
-      profileId: session.profileId,
-      agentId: session.agentId,
-      localSessionId: session.source,
-    }
-    void invoke('set_session_state', { owner, remoteSessionId: session.periId, state })
-      .catch(error => reportRuntimeError(`持久化会话状态（${session.id}）`, error))
-  }
   // A1-c P2：live 会话事件 → canonical sink（replay 永不进入；终态/切会话 force）。
   const persistCanonicalEvent = (context: AgentContext, raw: unknown, force = false): void => {
     const key = toAgentContextKey(context)
@@ -797,17 +777,9 @@ export function attachChatEventController(refs: ChatEventControllerRefs): ChatCo
           // 终态由循环末统一 done 收敛（保持既有行为，不在 replay 内逐条 dispatch）
           break
         default: {
-          // wire-only 类型（usage/session_info/plan/commands...）或 malformed：
-          // canonical 归 'unknown' 且 raw 已保留（§5.10 原则 5）；usage 仍驱动会话统计（既有行为）。
-          if (normalized.sessionUpdate === 'usage_update' && upd) {
-            const usage = extractUsage(upd as unknown as Extract<SessionUpdate, { sessionUpdate: 'usage_update' }>)
-            replayDispatch({ type: 'usage-update', source, agentId: context.agentId, tokensUsed: usage.tokensUsed })
-            useRuntimeStore.getState().setSessionLiveStats(context, usage)
-          } else if (normalized.sessionUpdate === 'available_commands_update' && upd) {
-            // 重放也要恢复 commands（InputBar 斜杠命令依赖 sessionLiveStats.commands）
-            const commands = (upd as unknown as Extract<SessionUpdate, { sessionUpdate: 'available_commands_update' }>).commands ?? []
-            useRuntimeStore.getState().setSessionLiveStats(context, { commands })
-          } else if (normalized.malformed || canonical.eventType === 'unknown') {
+          // usage/config/commands 的 replay 只经 canonical journal → WorkbenchProjector
+          // 恢复；legacy controller 不再建立 journal 外第二份会话真值。
+          if (normalized.malformed || canonical.eventType === 'unknown') {
             malformedReplayEvents.push({ source, arrivalSeq: normalized.event.sequence, warning: normalized.warning, raw })
           }
           break
@@ -1266,22 +1238,17 @@ export function attachChatEventController(refs: ChatEventControllerRefs): ChatCo
           const usage = extractUsage(upd)
           const ctx = resolveContext(source)
           if (ctx) applySessionStateUpdate(ctx, 'usage_update', upd)
-          if (ctx) persistSessionState(ctx, { usage })
           dispatch({ type: 'usage-update', source, tokensUsed: usage.tokensUsed })
           break
         }
         case 'session_info_update': {
-          const info = upd as Extract<PeriUpdatePayload['update'], { sessionUpdate: 'session_info_update' }>
           const ctx = resolveContext(source)
           if (ctx) applySessionStateUpdate(ctx, 'session_info_update', upd)
-          const usage = extractSessionUsage({ usage: info.usage, sessionInfo: info.sessionInfo })
-          if (usage && ctx) persistSessionState(ctx, { usage })
           break
         }
         case 'available_commands_update': {
           const ctx = resolveContext(source)
           if (ctx) applySessionStateUpdate(ctx, 'available_commands_update', upd)
-          if (ctx) persistSessionState(ctx, { commands: upd.commands || [] })
           break
         }
         case 'config_option_update': {

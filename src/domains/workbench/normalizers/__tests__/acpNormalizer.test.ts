@@ -124,4 +124,50 @@ describe('ACP normalizer', () => {
     expect(result.events[0].event).toMatchObject({ tool: { name: 'unknown', title: 'Read file.txt', kind: 'other', action: 'unknown' } })
     expect(result.diagnostics).toEqual(expect.arrayContaining([expect.objectContaining({ code: 'tool.name.missing' })]))
   })
+
+  it('promotes only standard C14 wire fields into canonical usage/commands/config names', () => {
+    const usage = normalizeAcpEvent({ update: {
+      sessionUpdate: 'usage_update', used: 30, size: 200,
+      cost: { amount: 0.01, currency: 'USD' },
+      _meta: { inputTokens: 20, outputTokens: 10, cacheReadTokens: 4 },
+      usage: { cacheWriteTokens: 2, vendorFuture: 9 },
+    } }, context)
+    expect(usage.events[0].event).toEqual({
+      type: 'usage.updated', usage: {
+        inputTokens: 20, outputTokens: 10, cacheReadTokens: 4, cacheWriteTokens: 2,
+        contextUsed: 30, contextLimit: 200, costUsd: 0.01, currency: 'USD', vendorFuture: 9,
+      },
+    })
+
+    const commands = normalizeAcpEvent({ update: { sessionUpdate: 'available_commands_update', commands: [
+      { name: 'review', input_hint: ' <scope>', description: 'Review changes' },
+    ] } }, context)
+    expect(commands.events[0].event).toEqual({ type: 'session.commands-updated', commands: [
+      { id: 'review', name: '/review', inputHint: ' <scope>', description: 'Review changes' },
+    ] })
+
+    const config = normalizeAcpEvent({ update: { sessionUpdate: 'config_option_update', configOptions: [
+      { id: 'model', name: 'Model', currentValue: 'gpt-5', type: 'select', options: [{ value: 'gpt-5' }], version: 3 },
+    ] } }, context)
+    expect(config.events[0].event).toEqual({ type: 'session.config-updated', options: [
+      { id: 'model', label: 'Model', value: 'gpt-5', valueType: 'select', editable: true, schema: { options: [{ value: 'gpt-5' }] }, version: 3 },
+    ] })
+  })
+
+  it('defaults unknown config kinds to read-only while keeping ACP select/boolean editable', () => {
+    const result = normalizeAcpEvent({ update: { sessionUpdate: 'config_option_update', configOptions: [
+      { id: 'model', name: 'Model', currentValue: 'gpt-5', type: 'select', options: [{ value: 'gpt-5' }] },
+      { id: 'thinking', name: 'Thinking', currentValue: true, type: 'boolean' },
+      { id: 'vendor-shape', name: 'Vendor shape', currentValue: { mode: 'adaptive' }, type: 'provider.custom' },
+    ] } }, context)
+
+    expect(result.events[0].event).toMatchObject({ type: 'session.config-updated', options: [
+      { id: 'model', value: 'gpt-5', valueType: 'select', editable: true },
+      { id: 'thinking', value: true, valueType: 'boolean', editable: true },
+      {
+        id: 'vendor-shape', value: { mode: 'adaptive' }, valueType: 'provider.custom', editable: false,
+        raw: { value: { mode: 'adaptive' }, valueType: 'provider.custom' },
+      },
+    ] })
+  })
 })

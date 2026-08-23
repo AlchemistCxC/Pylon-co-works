@@ -1296,7 +1296,7 @@ for line in sys.stdin:
             "runtime-b".to_string(),
             "p4-session".to_string(),
             "model".to_string(),
-            "gpt-4".to_string(),
+            serde_json::json!("gpt-4"),
         )
         .await
         .expect("set_config_option 必须成功");

@@ -39,6 +39,8 @@ import type { WorkbenchActivityNode } from '../../../domains/workbench/workbench
 import type { WorkbenchInteraction } from '../../../domains/workbench/workbenchProjector.ts'
 import { isInteractionSnapshotInput } from '../../../domains/rendererContent/interactionRenderKindCatalog.ts'
 import { SolidInteractionCard } from './content/InteractionCard.solid.tsx'
+import { SolidSessionSurfaceCard } from './content/SessionSurfaceCard.solid.tsx'
+import { BUILTIN_SESSION_RENDER_KINDS } from '../../../domains/rendererContent/sessionRenderKindCatalog.ts'
 
 export function BuiltinSolidContentSlot(props: {
   snapshot: RenderNodeSnapshot
@@ -299,6 +301,20 @@ export function BuiltinSolidContentSlot(props: {
           fallback={<pre class="solid-content-unknown" data-content-kind={kind()}>Invalid interaction snapshot</pre>}
         >
           {interaction => <SolidInteractionCard interaction={interaction()} appearance={props.appearance} commands={props.commands} />}
+        </Show>
+      </Match>
+      <Match when={kind().startsWith('session.') || kind().startsWith('assist.')}>
+        <Show
+          when={BUILTIN_SESSION_RENDER_KINDS.find(definition => definition.id === kind())?.validateInput(props.snapshot.payload)
+            ? props.snapshot.payload : undefined}
+          fallback={<pre class="solid-content-unknown" data-content-kind={kind()}>Invalid {kind()} payload</pre>}
+        >
+          {value => <SolidSessionSurfaceCard
+            kind={kind() as 'session.usage' | 'session.budget' | 'session.config' | 'session.commands' | 'assist.prediction' | 'assist.file-suggestions'}
+            payload={value()}
+            appearance={props.appearance}
+            commands={props.commands}
+          />}
         </Show>
       </Match>
       <Match when={kind() === 'content.plan'}>

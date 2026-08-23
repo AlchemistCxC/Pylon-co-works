@@ -34,6 +34,7 @@ import { SolidLogBlock, SolidProcessActivity, SolidTerminalBlock } from './chat/
 import { SolidSubagentCard } from './chat/content/SubagentCard.solid.tsx'
 import { SolidWorkflowActivityCard } from './chat/content/WorkflowCard.solid.tsx'
 import { SolidInteractionCard } from './chat/content/InteractionCard.solid.tsx'
+import { SolidSessionSurfaceCard } from './chat/content/SessionSurfaceCard.solid.tsx'
 import type { RenderCommandPort } from '../../contracts/messageRenderer.ts'
 import { canExecuteRendererSemanticCommand, executeRendererSemanticCommand } from '../../host/renderer-suite/rendererSemanticCommand.ts'
 import { normalizeWorkbenchMountInput } from './workbenchContracts.ts'
@@ -133,7 +134,7 @@ function WorkbenchContent(props: SolidWorkbenchAppProps) {
             </Show>
             <SolidGenerationFooter
               running={snapshot().generating}
-              tokenCount={snapshot().tokenCount}
+              tokenCount={canonicalTokenCount(document()?.session.usage, snapshot().tokenCount)}
               startTime={snapshot().generationStart}
               lastTokenAt={snapshot().lastTokenAt}
               summary={snapshot().summary}
@@ -179,6 +180,24 @@ function WorkbenchContent(props: SolidWorkbenchAppProps) {
       </Show>
     </section>
   )
+}
+
+function canonicalTokenCount(
+  usage: WorkbenchDocument['session']['usage'],
+  fallback: number,
+): number {
+  if (!usage) return fallback
+  if (usage.totalTokens !== undefined) return usage.totalTokens
+
+  const known = [
+    usage.inputTokens,
+    usage.outputTokens,
+    usage.reasoningTokens,
+  ].filter((value): value is number => value !== undefined)
+
+  return known.length > 0
+    ? known.reduce((total, value) => total + value, 0)
+    : fallback
 }
 
 function WorkbenchDocumentSurface(props: {
@@ -232,12 +251,27 @@ function WorkbenchDocumentSurface(props: {
               />}
             />
           )}</For>
-          <Show when={document().timeline.some(entry => entry.kind === 'assist')}>
-            <div class="solid-workbench-assist" aria-label="辅助建议" role="status">
-              <For each={document().timeline.filter(entry => entry.kind === 'assist')}>{entry => (
-                <div class="solid-workbench-assist-entry" data-assist-id={entry.id}>{entry.summary || entry.title || '辅助信息'}</div>
-              )}</For>
-            </div>
+          <Show when={document().assist?.prediction || document().assist?.queuedCommand}>
+            <WorkbenchContentSlot
+              nodeId={`${props.sessionId ?? 'none'}:assist:prediction`}
+              kind="assist.prediction"
+              payload={document().assist}
+              context={props.context}
+              fallback={<SolidSessionSurfaceCard kind="assist.prediction" payload={document().assist}
+                appearance={sessionSurfaceAppearance(props.context, 'assist.prediction')}
+                commands={fallbackRenderCommands(props.context)} />}
+            />
+          </Show>
+          <Show when={(document().assist?.files?.length ?? 0) > 0}>
+            <WorkbenchContentSlot
+              nodeId={`${props.sessionId ?? 'none'}:assist:files`}
+              kind="assist.file-suggestions"
+              payload={document().assist}
+              context={props.context}
+              fallback={<SolidSessionSurfaceCard kind="assist.file-suggestions" payload={document().assist}
+                appearance={sessionSurfaceAppearance(props.context, 'assist.file-suggestions')}
+                commands={fallbackRenderCommands(props.context)} />}
+            />
           </Show>
           <Show when={document().activities.length > 0}>
             <div class="solid-workbench-activities" aria-label="活动" data-activity-count={document().activities.length}>
@@ -269,10 +303,54 @@ function WorkbenchDocumentSurface(props: {
             </div>
           </Show>
           <Show when={document().session.usage !== undefined}>
-            <div class="solid-workbench-usage" aria-label="Usage" data-has-usage="true" />
+            <div class="solid-workbench-usage" data-has-usage="true">
+              <WorkbenchContentSlot
+                nodeId={`${props.sessionId ?? 'none'}:session:usage`}
+                kind="session.usage"
+                payload={document().session.usage}
+                context={props.context}
+                fallback={<SolidSessionSurfaceCard kind="session.usage" payload={document().session.usage}
+                  appearance={sessionSurfaceAppearance(props.context, 'session.usage')}
+                  commands={fallbackRenderCommands(props.context)} />}
+              />
+              <Show when={document().session.usage?.budget}>
+                {budget => <WorkbenchContentSlot
+                  nodeId={`${props.sessionId ?? 'none'}:session:budget`}
+                  kind="session.budget"
+                  payload={budget()}
+                  context={props.context}
+                  fallback={<SolidSessionSurfaceCard kind="session.budget" payload={budget()}
+                    appearance={sessionSurfaceAppearance(props.context, 'session.budget')}
+                    commands={fallbackRenderCommands(props.context)} />}
+                />}
+              </Show>
+            </div>
           </Show>
-          <Show when={document().session.options.length > 0}>
-            <div class="solid-workbench-config" aria-label="会话配置" data-config-count={document().session.options.length} />
+          <Show when={(document().session.options?.length ?? 0) > 0}>
+            <div class="solid-workbench-config" data-config-count={document().session.options?.length ?? 0}>
+              <WorkbenchContentSlot
+                nodeId={`${props.sessionId ?? 'none'}:session:config`}
+                kind="session.config"
+                payload={{ options: document().session.options ?? [] }}
+                context={props.context}
+                fallback={<SolidSessionSurfaceCard kind="session.config" payload={{ options: document().session.options ?? [] }}
+                  appearance={sessionSurfaceAppearance(props.context, 'session.config')}
+                  commands={fallbackRenderCommands(props.context)} />}
+              />
+            </div>
+          </Show>
+          <Show when={(document().session.commands?.length ?? 0) > 0}>
+            <div class="solid-workbench-commands" data-command-count={document().session.commands?.length ?? 0}>
+              <WorkbenchContentSlot
+                nodeId={`${props.sessionId ?? 'none'}:session:commands`}
+                kind="session.commands"
+                payload={{ commands: document().session.commands ?? [] }}
+                context={props.context}
+                fallback={<SolidSessionSurfaceCard kind="session.commands" payload={{ commands: document().session.commands ?? [] }}
+                  appearance={sessionSurfaceAppearance(props.context, 'session.commands')}
+                  commands={fallbackRenderCommands(props.context)} />}
+              />
+            </div>
           </Show>
           <Show when={document().diagnostics.length > 0}>
             <div class="solid-workbench-diagnostics" aria-label="诊断">
@@ -684,6 +762,15 @@ function fallbackRenderCommands(context: SolidWorkbenchContextValue): RenderComm
     },
   }
 }
+
+function sessionSurfaceAppearance(context: SolidWorkbenchContextValue, kind: string) {
+  return context.hostPort?.appearance.resolve?.({
+    kind,
+    suiteId: context.activation?.suite.value.id ?? 'builtin.solid',
+    slotId: 'builtin.solid.content.base',
+  }) ?? { ...context.appearanceSnapshot(), reducedMotion: context.input().reducedMotion === true }
+}
+
 
 function normalizeToolVisualState(value: string | undefined) {
   switch (value) {

@@ -5,7 +5,7 @@ import type { WorkbenchDocument, WorkbenchMessage, WorkbenchActivityNode, Workbe
 import type { WorkbenchRuntime, WorkbenchRuntimeSlice } from '../../domains/workbench/workbenchRuntime.ts'
 import type { RenderAppearanceSnapshot } from '../../contracts/messageRenderer.ts'
 
-export type WorkbenchDocumentSlice = 'document' | 'timeline' | 'messages' | 'activities' | 'interactions' | 'session' | 'usage' | 'diagnostics'
+export type WorkbenchDocumentSlice = 'document' | 'timeline' | 'messages' | 'activities' | 'interactions' | 'session' | 'usage' | 'config' | 'commands' | 'assist' | 'diagnostics'
 
 export interface WorkbenchDocumentReader {
   getSnapshot(): WorkbenchDocument | undefined
@@ -30,6 +30,7 @@ export interface SessionUiPort {
 
 export type WorkbenchCapability = 'prompt' | 'cancel' | 'attach' | 'model' | 'mode'
   | 'sessionCreate' | 'compact' | 'sessionExport' | 'sessionClear'
+  | 'sessionConfig'
   | 'toolAction' | 'interactionResponse' | 'resourceOpen' | 'resourceReveal'
   | 'clipboardWrite' | 'retry' | 'recovery'
 export type WorkbenchCapabilitySnapshot = Readonly<Partial<Record<WorkbenchCapability, boolean>>>
@@ -64,6 +65,8 @@ export interface WorkbenchCommandPort {
   compact(sessionId: string): Promise<WorkbenchCommandResult<CommandResult>>
   exportSession(sessionId: string, input: ExportSessionInput): Promise<WorkbenchCommandResult<CommandResult>>
   clearSession(sessionId: string): Promise<WorkbenchCommandResult<CommandResult>>
+  setConfigOption(sessionId: string, key: string, value: unknown,
+    options?: { expectedValue?: unknown; expectedVersion?: number }): Promise<WorkbenchCommandResult<CommandResult>>
   toolAction(sessionId: string, toolCallId: string, action: string, payload?: unknown): Promise<WorkbenchCommandResult<CommandResult>>
   respondInteraction(sessionId: string, interactionId: string, response: unknown,
     options?: { expectedRevision?: number }): Promise<WorkbenchCommandResult<CommandResult>>
@@ -172,6 +175,7 @@ function createSessionUiPort(store: SessionUiStore, namespace: () => string): Se
 const capabilityForCommand: Readonly<Record<keyof WorkbenchCommandPort, WorkbenchCapability>> = {
   prompt: 'prompt', send: 'prompt', cancel: 'cancel', attach: 'attach', setModel: 'model', setMode: 'mode',
   createSession: 'sessionCreate', compact: 'compact', exportSession: 'sessionExport', clearSession: 'sessionClear', toolAction: 'toolAction',
+  setConfigOption: 'sessionConfig',
   respondInteraction: 'interactionResponse', openResource: 'resourceOpen', revealResource: 'resourceReveal', copy: 'clipboardWrite', retry: 'retry', recover: 'recovery',
 }
 

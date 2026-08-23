@@ -175,14 +175,42 @@ describe('createPreviewWorkbenchRuntime', () => {
       ...document,
       plan: { ...document.plan, entries: [{ id: 'p1', content: 'ship', status: 'in_progress' }] },
       goal: { current: { goalId: 'g1', objective: 'ship', status: 'active' } },
-      timeline: [{ id: 'a1', sequence: 1, eventId: 'a1', kind: 'assist', summary: 'hint' }],
+      assist: { prediction: { placeholder: 'hint', actions: [] }, files: [] },
     }, { ownerKey: 'owner-a', generation: 1 })
     expect(runtime.getSlice('plan')).toMatchObject({ entries: [{ id: 'p1' }] })
     expect(runtime.getSlice('goal')).toMatchObject({ goalId: 'g1' })
-    expect(runtime.getSlice('assist')).toMatchObject([{ id: 'a1', kind: 'assist', summary: 'hint' }])
+    expect(runtime.getSlice('assist')).toMatchObject({ prediction: { placeholder: 'hint' }, files: [] })
     expect(plan).toHaveBeenCalledTimes(1)
     expect(goal).toHaveBeenCalledTimes(1)
     expect(assist).toHaveBeenCalledTimes(1)
+  })
+
+  it('freezes every nested C14 session and assist value exposed through the runtime', () => {
+    const runtime = createPreviewWorkbenchRuntime(initial())
+    const document = createWorkbenchDocument('session-a')
+    runtime.replaceDocument({
+      ...document,
+      session: {
+        ...document.session,
+        usage: { inputTokens: 1, budget: { used: 1, limit: 2 }, raw: { future: { value: 1 } } },
+        commands: [{ id: 'review', name: '/review', raw: { future: { value: 1 } } }],
+        options: [{ id: 'model', label: 'Model', value: { id: 'gpt-5' }, schema: { options: ['gpt-5'] }, raw: { future: { value: 1 } } }],
+      },
+      assist: { prediction: { placeholder: 'hint', actions: [{ id: 'accept' }] }, files: ['src/a.ts'] },
+    }, { ownerKey: 'owner-a', generation: 1 })
+
+    const snapshot = runtime.getSnapshot().document!
+    expect(Object.isFrozen(snapshot.session.usage)).toBe(true)
+    expect(Object.isFrozen(snapshot.session.usage?.budget)).toBe(true)
+    expect(Object.isFrozen(snapshot.session.usage?.raw?.future)).toBe(true)
+    expect(Object.isFrozen(snapshot.session.commands[0])).toBe(true)
+    expect(Object.isFrozen(snapshot.session.commands[0]?.raw?.future)).toBe(true)
+    expect(Object.isFrozen(snapshot.session.options[0])).toBe(true)
+    expect(Object.isFrozen(snapshot.session.options[0]?.value)).toBe(true)
+    expect(Object.isFrozen(snapshot.session.options[0]?.schema)).toBe(true)
+    expect(Object.isFrozen(snapshot.assist.prediction)).toBe(true)
+    expect(Object.isFrozen(snapshot.assist.prediction?.actions)).toBe(true)
+    expect(Object.isFrozen(snapshot.assist.prediction?.actions[0])).toBe(true)
   })
 
   it('以同一 document 暴露 commands/config selector，并保持 session switch 后旧 generation 隔离', () => {
@@ -196,12 +224,12 @@ describe('createPreviewWorkbenchRuntime', () => {
       ...document,
       session: {
         ...document.session,
-        commands: [{ name: '/compact', description: 'Compact' }],
-        options: [{ id: 'mode', value: 'fast', editable: true }],
+        commands: [{ id: 'compact', name: '/compact', description: 'Compact' }],
+        options: [{ id: 'mode', label: 'Mode', value: 'fast', editable: true }],
       },
     }, { ownerKey: 'owner-a', generation: 4 })
-    expect(runtime.getSlice('commands')).toEqual([{ name: '/compact', description: 'Compact' }])
-    expect(runtime.getSlice('config')).toEqual([{ id: 'mode', value: 'fast', editable: true }])
+    expect(runtime.getSlice('commands')).toEqual([{ id: 'compact', name: '/compact', description: 'Compact' }])
+    expect(runtime.getSlice('config')).toEqual([{ id: 'mode', label: 'Mode', value: 'fast', editable: true }])
     expect(commands).toHaveBeenCalledTimes(1)
     expect(config).toHaveBeenCalledTimes(1)
 

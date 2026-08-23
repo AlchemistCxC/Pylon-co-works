@@ -57,6 +57,58 @@
 .solid-workbench-config,
 .solid-workbench-diagnostics { margin: 4px 24px 0; }
 
+/* C14 会话状态与输入辅助：同一 typed surface 的最小可读形态。 */
+.solid-session-surface {
+  display: grid;
+  gap: var(--ui-space-2);
+  padding: var(--ui-space-2) var(--ui-space-3);
+  color: var(--text);
+  background: color-mix(in srgb, var(--bg-panel) 82%, transparent);
+  border: 1px solid var(--border);
+}
+
+.solid-session-metrics,
+.solid-session-command,
+.solid-session-config-option,
+.solid-session-assist-actions {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: var(--ui-space-2);
+}
+
+.solid-session-budget[data-warning='true'][data-palette='semantic'] {
+  color: var(--warning, var(--accent));
+  border-color: var(--warning, var(--accent));
+}
+
+.solid-session-budget[data-exhausted='true'] {
+  color: var(--danger, var(--warning));
+  border-color: var(--danger, var(--warning));
+}
+
+.solid-session-config[data-layout='inline'] .solid-session-config-option {
+  display: grid;
+  grid-template-columns: minmax(7rem, 1fr) minmax(10rem, 2fr) auto;
+}
+
+.solid-session-config-option input {
+  min-width: 0;
+  color: var(--text);
+  background: var(--input-bg, var(--bg-panel));
+  border: 1px solid var(--border);
+}
+
+.solid-session-command { justify-content: space-between; }
+.solid-session-commands[data-density='compact'] .solid-session-command { gap: var(--ui-space-1); padding: 0; }
+.solid-session-assist:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.solid-session-assist-actions button:focus-visible,
+.solid-session-config-option :is(input,button):focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+
+@media (max-width: 640px) {
+  .solid-session-config[data-layout='inline'] .solid-session-config-option { grid-template-columns: 1fr; }
+}
+
 /* ── 中控槽位：底部停靠 + 不被消息流挤压 ── */
 .solid-workbench-control-center-slot {
   position: relative;

@@ -19,6 +19,35 @@ function document(revision: number, text: string): WorkbenchDocument {
 }
 
 describe('React Workbench fatal fallback', () => {
+  it('keeps canonical C14 usage/config/commands/assist visible after Solid failure', () => {
+    const base = document(15, '')
+    const current: WorkbenchDocument = {
+      ...base,
+      session: {
+        ...base.session,
+        usage: { inputTokens: 20, outputTokens: 5, costUsd: 0.01, currency: 'USD', budget: { used: 9, limit: 10, remaining: 1, exhausted: false } },
+        options: [{ id: 'model', label: 'Model', value: 'gpt-5', valueType: 'select', editable: true, version: 2 }],
+        commands: [{ id: 'review', name: '/review', description: '审查改动', availability: true }],
+      },
+      assist: { prediction: { placeholder: '继续审计', actions: [] }, files: ['src/a.ts'], queuedCommand: '/compact' },
+    }
+    const reader: WorkbenchDocumentReader = {
+      getSnapshot: () => current, subscribe: () => () => {},
+      getSlice: () => undefined as never, subscribeSlice: () => () => {},
+    }
+    render(<ReactWorkbenchFatalFallback document={reader}
+      failure={{ suiteId: 'builtin.solid', phase: 'mount', message: 'solid failed' }}
+      onRetry={vi.fn()} onSelectSuite={vi.fn()} onOpenDiagnostics={vi.fn()} />)
+    expect(screen.getByLabelText('C14 用量 fallback')).toHaveTextContent('input 20')
+    expect(screen.getByLabelText('C14 用量 fallback')).toHaveTextContent('0.01 USD')
+    expect(screen.getByLabelText('C14 预算 fallback')).toHaveTextContent('remaining 1')
+    expect(screen.getByLabelText('C14 配置 fallback')).toHaveTextContent('Model')
+    expect(screen.getByLabelText('C14 配置 fallback')).toHaveTextContent('gpt-5')
+    expect(screen.getByLabelText('C14 命令 fallback')).toHaveTextContent('/review')
+    expect(screen.getByLabelText('C14 输入辅助 fallback')).toHaveTextContent('继续审计')
+    expect(screen.getByLabelText('C14 输入辅助 fallback')).toHaveTextContent('src/a.ts')
+  })
+
   it('直接订阅同一 document revision，不创建 replay/message store', () => {
     let current = document(1, 'before failure')
     const listeners = new Set<() => void>()

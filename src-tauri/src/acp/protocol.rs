@@ -10,7 +10,7 @@ use std::io::Read;
 
 use agent_client_protocol_schema::v1::{
     CloseSessionRequest, ContentBlock, LoadSessionRequest, NewSessionRequest, PromptRequest,
-    SetSessionConfigOptionRequest, SetSessionModeRequest,
+    SessionConfigOptionValue, SetSessionConfigOptionRequest, SetSessionModeRequest,
 };
 
 use super::AcpError;
@@ -91,18 +91,49 @@ pub fn session_set_mode_params(session_id: &str, mode: &str) -> Result<serde_jso
     to_params(&req, "session/set_mode")
 }
 
-/// session/set_config_option 参数（ValueId 平铺：{"configId","value"}）。
+/// session/set_config_option 参数。ACP 1.4 只允许 ValueId string 或 Boolean；
+/// 其他 JSON 值必须在 Host 边界拒绝，不能 stringify 后改变 provider 配置语义。
 pub fn session_set_config_option_params(
     session_id: &str,
     key: &str,
-    value: &str,
+    value: &serde_json::Value,
 ) -> Result<serde_json::Value, String> {
-    let req = SetSessionConfigOptionRequest::new(
-        session_id.to_string(),
-        key.to_string(),
-        value, // &str → SessionConfigOptionValue via From<&str>（ValueId）
-    );
+    let value = match value {
+        serde_json::Value::String(value) => SessionConfigOptionValue::value_id(value.clone()),
+        serde_json::Value::Bool(value) => SessionConfigOptionValue::boolean(*value),
+        _ => {
+            return Err(format!(
+                "unsupported session config value for {key}: ACP accepts only string or boolean"
+            ));
+        }
+    };
+    let req = SetSessionConfigOptionRequest::new(session_id.to_string(), key.to_string(), value);
     to_params(&req, "session/set_config_option")
+}
+
+#[cfg(test)]
+mod config_option_tests {
+    use super::session_set_config_option_params;
+    use serde_json::json;
+
+    #[test]
+    fn config_option_params_preserve_boolean_and_value_id_wire_shapes() {
+        assert_eq!(
+            session_set_config_option_params("session-1", "model", &json!("gpt-5")).unwrap(),
+            json!({ "sessionId": "session-1", "configId": "model", "value": "gpt-5" }),
+        );
+        assert_eq!(
+            session_set_config_option_params("session-1", "thinking", &json!(true)).unwrap(),
+            json!({ "sessionId": "session-1", "configId": "thinking", "type": "boolean", "value": true }),
+        );
+    }
+
+    #[test]
+    fn config_option_params_reject_values_not_supported_by_acp() {
+        let error = session_set_config_option_params("session-1", "temperature", &json!(0.4))
+            .expect_err("numeric config values are not representable by ACP 1.4");
+        assert!(error.contains("unsupported session config value"));
+    }
 }
 
 /// session/prompt 参数。仅被 `AcpClient::prepare_prompt` 内部使用。
