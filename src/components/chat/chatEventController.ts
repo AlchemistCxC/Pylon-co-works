@@ -1145,7 +1145,8 @@ export function attachChatEventController(refs: ChatEventControllerRefs): ChatCo
         .catch(error => reportRuntimeError('消费 Kernel committed user event', error))
       }
       channelFrameHandlers.user = handler
-      // user 为低频回显（规格 §0.1 决策 4）：保留广播。
+      // B1：user echo 后端已 Channel 优先（send_update_frame 单轨）；本广播
+      // listen 保留为兜底——未注册 Channel（平台 ingest / 非 Tauri 测试）的来源。
       return listen('pylon:user', handler)
     },
 

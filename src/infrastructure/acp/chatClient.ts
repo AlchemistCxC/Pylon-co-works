@@ -8,7 +8,7 @@ import { ClientTransport } from './agentClient'
 import type { Channel } from '@tauri-apps/api/core'
 
 /** B1：流式帧信封（与 src/components/chat/streamChannel.ts 的 StreamFrame 同构）。 */
-export type StreamFrame = { event: 'pylon:update' | 'pylon:done' | 'pylon:error'; payload: unknown }
+export type StreamFrame = { event: 'pylon:update' | 'pylon:done' | 'pylon:error' | 'pylon:user'; payload: unknown }
 
 export interface SendMessagePayload {
   /** OWNER-02：Session owner 显式 agentId（路由到 owner runtime，绝不 fallback active） */

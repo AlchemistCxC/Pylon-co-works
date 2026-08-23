@@ -3,9 +3,10 @@
  * （Channel 化重构 B1；后端契约见 src-tauri/src/dispatcher/mod.rs A3 与
  * .hermes/plans/2026-08-23_pylon-update-channel-refactor.md）。
  *
- * 帧信封（三事件同构）：{ event: 'pylon:update'|'pylon:done'|'pylon:error', payload }
+ * 帧信封（四事件同构）：{ event: 'pylon:update'|'pylon:done'|'pylon:error'|'pylon:user', payload }
  * - update 帧：payload = 原 pylon:update 载荷（source 注入 + canonicalEvent 可选）
- * - done/error 终帧：payload = { source }（终态细节仍经广播/journal 权威路径）
+ * - done/error 终帧：payload = 完整终态载荷（source/code/error/data + canonicalEvent 可选）
+ * - user 帧：payload = { source, content, injectActivated?, canonicalEvent? }
  *
  * 单源消费由后端保证（已注册 source 跳过广播），本模块不做幂等去重。
  * 测试环境（非 Tauri / fake 总线）自动降级为 no-op 注册。
@@ -13,7 +14,7 @@
 import { Channel } from '@tauri-apps/api/core'
 import { IS_TAURI } from '../../infrastructure/tauri/env'
 
-export type StreamFrameEvent = 'pylon:update' | 'pylon:done' | 'pylon:error'
+export type StreamFrameEvent = 'pylon:update' | 'pylon:done' | 'pylon:error' | 'pylon:user'
 
 export interface StreamFrame {
   event: StreamFrameEvent

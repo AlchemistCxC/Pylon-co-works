@@ -41,10 +41,10 @@ describe('用户复现：新建→发消息→新建→来回切换不复读', (
   let currentHandle: ReturnType<typeof attachChatEventController> | null = null
   const fire = (event: string, payload: unknown) => {
     // C2：pylon:update/done/error 广播旧轨已拆，改走 Channel 帧入口；user 等保留广播。
-    if (event === 'pylon:update' || event === 'pylon:done' || event === 'pylon:error') {
+    if (event === 'pylon:update' || event === 'pylon:done' || event === 'pylon:error' || event === 'pylon:user') {
       const handle = currentHandle
       if (!handle) throw new Error('controller 未挂载')
-      return handle.handleStreamFrame({ event: event as 'pylon:update'|'pylon:done'|'pylon:error', payload }).then(() => {})
+      return handle.handleStreamFrame({ event: event as 'pylon:update'|'pylon:done'|'pylon:error'|'pylon:user', payload }).then(() => {})
     }
     const handler = listeners.get(event)
     if (!handler) throw new Error(`listener ${event} 未注册`)

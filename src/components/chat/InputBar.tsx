@@ -33,7 +33,10 @@ function sendWithStream(options: { session: Session; content: string; persona: s
     const handle = getChatController()
     if (!handle) return
     void handle.handleStreamFrame(frame as StreamFrame)
-    if (frame.event !== 'pylon:update') closeStreamChannel(source)
+    // 仅终帧关闸：user 帧在生成开始前到达（B1 单轨化），update 流仍在途——
+    // 提前 closeStreamChannel 会令后续 done 帧被静默丢弃（唯一消费入口），
+    // generating 状态将永不解除。
+    if (frame.event === 'pylon:done' || frame.event === 'pylon:error') closeStreamChannel(source)
   })
   if (!channel) {
     return createChatClient({ invoke: (cmd, args) => invoke(cmd, args as Record<string, unknown> | undefined) }).sendMessage(payload)

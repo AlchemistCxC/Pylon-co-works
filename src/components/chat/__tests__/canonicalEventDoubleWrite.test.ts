@@ -97,10 +97,11 @@ let currentHandle: ReturnType<typeof attachChatEventController> | null = null
 
 describe('canonical 双写（A1-c P2）', () => {
   const fire = (event: string, payload: unknown) => {
-    // C2：pylon:update/done/error 广播旧轨已拆，改走 Channel 帧入口；user 保留广播。
-    if (event === 'pylon:update' || event === 'pylon:done' || event === 'pylon:error') {
+    // B1：四事件全部走 Channel 帧入口（与生产注册会话路径一致——后端 user echo
+    // 已 send_update_frame 单轨化）；广播 listen 仅兜底，由 fireBroadcast 覆盖。
+    if (event === 'pylon:update' || event === 'pylon:done' || event === 'pylon:error' || event === 'pylon:user') {
       const handle = currentHandle ?? (() => { throw new Error('controller 未挂载') })()
-      void handle.handleStreamFrame({ event: event as 'pylon:update'|'pylon:done'|'pylon:error', payload })
+      void handle.handleStreamFrame({ event: event as 'pylon:update'|'pylon:done'|'pylon:error'|'pylon:user', payload })
       return
     }
     const handler = listeners.get(event)

@@ -165,8 +165,9 @@ pub(crate) async fn send_message<R: tauri::Runtime>(
     send_prompt_core(state.inner(), &runtime, Some(&window), &state.gateway, &ctx).await
 }
 
-/// A2：流式版本 send_message——前端携带 Channel 注册后走 Channel 推送（A3 跳过广播）。
-/// 其余语义与 send_message 完全一致；未传 on_update 时等价旧命令（兼容路径）。
+/// A2：流式版本 send_message——前端必携 Channel（on_update），注册后走 Channel
+/// 推送（A3 跳过广播）。其余语义与 send_message 完全一致；旧命令 send_message
+/// 保留为非流式兼容路径（无 Channel 参数）。
 #[allow(clippy::too_many_arguments)]
 #[tauri::command]
 pub(crate) async fn send_message_streaming<R: tauri::Runtime>(
