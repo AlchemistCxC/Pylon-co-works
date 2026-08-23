@@ -87,6 +87,21 @@ export interface WorkspaceControlPort {
   close(id: string): Promise<boolean>
 }
 
+/** CLI 增强：注册表工作区 CRUD（workspace_cmds 直通）。 */
+export interface WorkspaceRegistryControlPort {
+  list(): Promise<unknown>
+  create(input: { agentId: string; name: string; rootPath: string }): Promise<unknown>
+  update(input: { workspaceId: string; name?: string; rootPath?: string }): Promise<unknown>
+  remove(workspaceId: string): Promise<unknown>
+  search(query: string, maxResults?: number): Promise<unknown>
+}
+
+/** CLI 增强：会话级 config option（模型/思考档位等）与 journal 导出。 */
+export interface SessionConfigControlPort {
+  setOption(input: { agentId: string; sessionId: string; key: string; value: string }): Promise<unknown>
+  exportSession(input: { agentId: string; periId: string; format: string; outputPath: string }): Promise<void>
+}
+
 export interface AgentControlPort {
   list(): Promise<{
     agents: readonly AgentEntry[]
@@ -99,6 +114,8 @@ export interface AgentControlPort {
 
 export interface SessionControlPort {
   list(): Promise<readonly Session[]> | readonly Session[]
+  /** CLI 增强：单会话实时状态（generating/liveStats）——观测维度补全。 */
+  inspect(sessionId: string): Promise<unknown>
   create(input: {
     agentId?: string
     cwd?: string
@@ -108,6 +125,40 @@ export interface SessionControlPort {
   send(sessionId: string, content: string, options: { signal: AbortSignal }): Promise<unknown>
   close(sessionId: string, options: { signal: AbortSignal }): Promise<boolean>
   cancel(sessionId: string): Promise<boolean>
+  /** CLI 增强：journal 消息查询（ownerKey 由 sessionId 推导；afterSeq 增量分页）。 */
+  messages(sessionId: string, options: { afterSeq?: number; limit?: number; signal?: AbortSignal }): Promise<unknown>
+}
+
+export interface ApprovalControlPort {
+  get(): Promise<string>
+  set(mode: string): Promise<void>
+}
+
+/** interaction list 条目（respond 所需完整 identity + 展示字段）。 */
+export interface InteractionItem {
+  provider: string
+  agentId: string
+  requestId: string
+  sessionId: string
+  toolCallId: string
+  clientGeneration: number
+  title: string
+  prompt: string
+  options: ReadonlyArray<{ optionId: string; kind?: string | null; name?: string | null }>
+  requestedAt: string
+  deadlineMs: number
+}
+
+export interface InteractionControlPort {
+  list(): Promise<{ items: readonly InteractionItem[] }>
+  respond(identity: {
+    provider: string
+    agentId: string
+    requestId: string
+    sessionId: string
+    toolCallId?: string | null
+    clientGeneration: number
+  }, kind: string, answer: { optionId?: string; text?: string; values?: unknown }): Promise<void>
 }
 
 export interface PylonCliServicePorts {
@@ -120,6 +171,10 @@ export interface PylonCliServicePorts {
   sessions: SessionControlPort
   registries: RegistryControlPort
   packages: PackageControlPort
+  approval: ApprovalControlPort
+  interactions: InteractionControlPort
+  workspaceRegistry: WorkspaceRegistryControlPort
+  sessionConfig: SessionConfigControlPort
   now?: () => number
   createOperationId?: () => string
 }
@@ -377,6 +432,19 @@ export class PylonCliService {
         ))
       case 'session list':
         return this.ports.sessions.list()
+      case 'session inspect': {
+        const sessionId = stringArg(args, 'sessionId', 0)
+        return this.ports.sessions.inspect(sessionId)
+      }
+      case 'session messages':
+        return this.mutate(command, options.signal, async signal => this.ports.sessions.messages(
+          stringArg(args, 'sessionId', 0),
+          {
+            afterSeq: optionalString(args, 'afterSeq') ? Number(optionalString(args, 'afterSeq')) : undefined,
+            limit: optionalString(args, 'limit') ? Number(optionalString(args, 'limit')) : undefined,
+            signal,
+          },
+        ))
       case 'session create':
         return this.mutate(command, options.signal, signal => this.ports.sessions.create({
           ...(optionalString(args, 'agentId') ? { agentId: optionalString(args, 'agentId') } : {}),
@@ -403,6 +471,76 @@ export class PylonCliService {
           const cancelled = await this.ports.sessions.cancel(sessionId)
           if (!cancelled) throw new Error(`Session 不存在或无法取消：${sessionId}`)
           return { sessionId, cancelled }
+        })
+      case 'approval get':
+        return { mode: await this.ports.approval.get() }
+      case 'approval set': {
+        const mode = optionalString(args, 'mode') ?? stringArg(args, 'mode', 0)
+        await this.ports.approval.set(mode)
+        return { mode }
+      }
+      case 'interaction list':
+        return this.ports.interactions.list()
+      case 'interaction respond':
+        return this.mutate(command, options.signal, async () => {
+          const requestId = stringArg(args, 'requestId', 0)
+          const optionId = optionalString(args, 'optionId') ?? stringArg(args, 'optionId', 1)
+          const items = (await this.ports.interactions.list()).items
+          const found = items.find(item => item.requestId === requestId)
+          if (!found) throw new Error(`挂起交互不存在（已应答/超时）：${requestId}`)
+          if (!found.options.some(option => option.optionId === optionId)) {
+            throw new Error(`非法 optionId：${optionId}（可用：${found.options.map(option => option.optionId).join(', ')}）`)
+          }
+          await this.ports.interactions.respond({
+            provider: found.provider,
+            agentId: found.agentId,
+            requestId: found.requestId,
+            sessionId: found.sessionId,
+            toolCallId: found.toolCallId || null,
+            clientGeneration: found.clientGeneration,
+          }, 'permission', { optionId })
+          return { requestId, optionId, responded: true }
+        })
+      // ── 第二批：注册表工作区 CRUD / 会话配置 / 导出 ──
+      case 'workspace registry list':
+        return this.ports.workspaceRegistry.list()
+      case 'workspace registry create':
+        return this.mutate(command, options.signal, async () => this.ports.workspaceRegistry.create({
+          agentId: stringArg(args, 'agentId', 0),
+          name: stringArg(args, 'name', 1),
+          rootPath: stringArg(args, 'rootPath', 2),
+        }))
+      case 'workspace registry update':
+        return this.mutate(command, options.signal, async () => this.ports.workspaceRegistry.update({
+          workspaceId: stringArg(args, 'workspaceId', 0),
+          name: optionalString(args, 'name'),
+          rootPath: optionalString(args, 'rootPath'),
+        }))
+      case 'workspace registry delete':
+        return this.mutate(command, options.signal, async () => this.ports.workspaceRegistry.remove(
+          stringArg(args, 'workspaceId', 0),
+        ))
+      case 'workspace registry search': {
+        const query = optionalString(args, 'query') ?? stringArg(args, 'query', 0)
+        const maxResults = optionalString(args, 'maxResults') ? Number(optionalString(args, 'maxResults')) : undefined
+        return this.ports.workspaceRegistry.search(query, maxResults)
+      }
+      case 'session config set':
+        return this.mutate(command, options.signal, async () => this.ports.sessionConfig.setOption({
+          agentId: stringArg(args, 'agentId', 0),
+          sessionId: stringArg(args, 'sessionId', 1),
+          key: stringArg(args, 'key', 2),
+          value: stringArg(args, 'value', 3),
+        }))
+      case 'session export':
+        return this.mutate(command, options.signal, async () => {
+          await this.ports.sessionConfig.exportSession({
+            agentId: stringArg(args, 'agentId', 0),
+            periId: stringArg(args, 'periId', 1),
+            format: optionalString(args, 'format') ?? 'markdown',
+            outputPath: stringArg(args, 'outputPath', 2),
+          })
+          return { exported: true }
         })
       case 'event log':
         return this.eventLog(args)

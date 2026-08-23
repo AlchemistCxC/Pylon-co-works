@@ -3,7 +3,7 @@ import { getAgentSidebarRegistry, getCommandRegistry, getContextPanelRegistry, g
 import { closeWorkspace, listOpenWorkspaces, openWorkspace } from '../workspace-sheets/workspaceController.ts'
 import { getWorkspaceRegistrySnapshot } from '../workspace-sheets/workspaceRegistry.ts'
 import { PylonCliService, createPylonCliTool } from './pylonCliService.ts'
-import { createCliAgentControlPort, createCliSessionControlPort } from './pylonCliDomainPorts.ts'
+import { createCliAgentControlPort, createCliApprovalControlPort, createCliInteractionControlPort, createCliSessionConfigControlPort, createCliSessionControlPort, createCliWorkspaceRegistryControlPort } from './pylonCliDomainPorts.ts'
 
 let service: PylonCliService | undefined
 
@@ -48,6 +48,10 @@ export function getPylonCliService(): PylonCliService {
     },
     agents: createCliAgentControlPort(),
     sessions: createCliSessionControlPort(),
+    approval: createCliApprovalControlPort(),
+    interactions: createCliInteractionControlPort(),
+    workspaceRegistry: createCliWorkspaceRegistryControlPort(),
+    sessionConfig: createCliSessionConfigControlPort(),
     registries: {
       snapshot: () => {
         const renderers = getRendererRegistry().snapshot()

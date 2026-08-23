@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from 'vitest'
 import { createPluginIdentity } from '../../plugin-runtime/pluginIdentity.ts'
-import { PylonCliService, createPylonCliTool, type PylonCliServicePorts } from '../pylonCliService.ts'
+import { PylonCliService, createPylonCliTool, type InteractionItem, type PylonCliServicePorts } from '../pylonCliService.ts'
 
 function harness(overrides: Partial<PylonCliServicePorts> = {}) {
   const identity = createPluginIdentity('demo.plugin', 'run-1')
@@ -63,10 +63,28 @@ function harness(overrides: Partial<PylonCliServicePorts> = {}) {
       id: 's-1', agentId: 'peri', name: 'CLI session', source: 'local:s-1', profileId: 'p',
       createdAt: 1, lastActiveAt: 1, platform: 'local', workdir: '', sessionPrompt: '', skills: [], hooks: [], autoName: '',
     }]),
+    inspect: vi.fn(async (sessionId: string) => ({ sessionId, generating: false })),
     create: vi.fn(async (input: { agentId?: string, cwd?: string, workspaceId?: string, title?: string }) => ({ sessionId: 's-2', ...input })),
     send: vi.fn(async (sessionId: string, content: string, _options: { signal: AbortSignal }) => ({ sessionId, content, accepted: true })),
     close: vi.fn(async () => true),
     cancel: vi.fn(async () => true),
+    messages: vi.fn(async (sessionId: string) => ({ sessionId, events: [], lastSequence: 0 })),
+  }
+  const approval = { get: vi.fn(async () => 'default'), set: vi.fn(async () => {}) }
+  const interactions = {
+    list: vi.fn(async () => ({ items: [] as InteractionItem[] })),
+    respond: vi.fn(async (_identity: unknown, _kind: string, _answer: unknown) => {}),
+  }
+  const workspaceRegistry = {
+    list: vi.fn(async () => []),
+    create: vi.fn(async () => ({})),
+    update: vi.fn(async () => ({})),
+    remove: vi.fn(async () => ({})),
+    search: vi.fn(async () => []),
+  }
+  const sessionConfig = {
+    setOption: vi.fn(async () => ({})),
+    exportSession: vi.fn(async () => {}),
   }
   const registries = { snapshot: vi.fn(() => ({ commands: [{ id: 'demo.command' }], workspaces: [] })) }
   const packages = {
@@ -88,13 +106,17 @@ function harness(overrides: Partial<PylonCliServicePorts> = {}) {
     workspaces,
     agents,
     sessions,
+    approval,
+    interactions,
+    workspaceRegistry,
+    sessionConfig,
     registries,
     packages,
     now: () => 100 + operation,
     createOperationId: () => `op-${++operation}`,
     ...overrides,
   }
-  return { service: new PylonCliService(ports), plugins, hooks, commands, processes, workspaces, agents, sessions, registries, packages }
+  return { service: new PylonCliService(ports), plugins, hooks, commands, processes, workspaces, agents, sessions, approval, interactions, workspaceRegistry, sessionConfig, registries, packages }
 }
 
 describe('PylonCliService typed command surface', () => {
@@ -231,6 +253,45 @@ describe('PylonCliService typed command surface', () => {
     await expect(service.execute({ command: 'event log', args: { limit: 2 } }))
       .resolves.toMatchObject({ operations: [{ operationId: 'op-3' }, { operationId: 'op-4' }], hooks: expect.any(Array) })
     expect(sessions.send).toHaveBeenCalledWith('s-1', 'hello', expect.objectContaining({ signal: expect.any(AbortSignal) }))
+  })
+
+  it('covers CLI enhancements: session inspect/messages, approval mode, interaction list/respond', async () => {
+    const { service, approval, interactions } = harness()
+    // session inspect：实时观测维度
+    await expect(service.execute({ command: 'session inspect', args: { sessionId: 's-1' } }))
+      .resolves.toMatchObject({ sessionId: 's-1' })
+    await expect(service.execute({ command: 'session messages', args: { sessionId: 's-1', afterSeq: 3 } }))
+      .resolves.toMatchObject({ operationId: 'op-1', result: { sessionId: 's-1', lastSequence: 0 } })
+    // approval get/set
+    await expect(service.execute({ command: 'approval get' })).resolves.toEqual({ mode: 'default' })
+    await expect(service.execute({ command: 'approval set', args: { mode: 'auto' } })).resolves.toEqual({ mode: 'auto' })
+    expect(approval.set).toHaveBeenCalledWith('auto')
+    // interaction respond：requestId 解析 + optionId 校验 + identity 透传
+    interactions.list.mockResolvedValueOnce({
+      items: [{
+        provider: 'peri', agentId: 'a1', requestId: 'req-9', sessionId: 's-1',
+        toolCallId: 'tc-1', clientGeneration: 2, title: '写文件', prompt: 'path=x',
+        options: [{ optionId: 'allow_once' }, { optionId: 'reject_once' }],
+        requestedAt: '2026-08-23T00:00:00Z', deadlineMs: 300000,
+      }],
+    })
+    await expect(service.execute({ command: 'interaction respond', args: { positionals: ['req-9', 'allow_once'] } }))
+      .resolves.toMatchObject({ operationId: 'op-2', result: { requestId: 'req-9', responded: true } })
+    expect(interactions.respond).toHaveBeenCalledWith(
+      expect.objectContaining({ provider: 'peri', requestId: 'req-9', clientGeneration: 2 }),
+      'permission',
+      { optionId: 'allow_once' },
+    )
+    // 非法 optionId 拒绝
+    interactions.list.mockResolvedValueOnce({
+      items: [{
+        provider: 'peri', agentId: 'a1', requestId: 'req-9', sessionId: 's-1',
+        toolCallId: 'tc-1', clientGeneration: 2, title: '', prompt: '',
+        options: [{ optionId: 'allow_once' }], requestedAt: '', deadlineMs: 0,
+      }],
+    })
+    await expect(service.execute({ command: 'interaction respond', args: { positionals: ['req-9', 'bogus'] } }))
+      .rejects.toThrow(/非法 optionId/)
   })
 
   it('aborts an in-flight session send through operation cancel', async () => {

@@ -1,5 +1,6 @@
 import { invoke } from '@tauri-apps/api/core'
 import { useIdentityStore, type Session } from '../identityStore.ts'
+import { useRuntimeStore } from '../runtimeStore.ts'
 import {
   createAgentClient,
   type AgentCreateConfig,
@@ -17,7 +18,7 @@ import { getHookRuntime, getPluginServiceRegistry } from '../plugin-runtime/runt
 import { runUserMessageBeforeHook, runSessionBoundaryHook } from '../application/transactions/sessionHookTransactions.ts'
 import { buildSendMessagePayload } from '../components/chat/sessionRuntime.ts'
 import { stripHiddenUnicode } from '../utils/unicodeSanitizer.ts'
-import type { AgentControlPort, SessionControlPort } from './pylonCliService.ts'
+import type { AgentControlPort, ApprovalControlPort, InteractionControlPort, InteractionItem, SessionConfigControlPort, SessionControlPort, WorkspaceRegistryControlPort } from './pylonCliService.ts'
 import { runSessionPreflight } from '../plugins/core/sessionCreation/sessionPreflight.ts'
 import { collectProfilePersona } from '../plugins/core/sessionCreation/builtinSessionCreation.ts'
 
@@ -225,6 +226,109 @@ export function createCliSessionControlPort(): SessionControlPort {
       if (!session) return false
       await chatClient.cancelPrompt({ agentId: session.agentId, source: session.source })
       return true
+    },
+    async inspect(sessionId) {
+      const session = resolveSession(sessionId)
+      if (!session) throw new Error(`Session 不存在：${sessionId}`)
+      // CLI 增强：实时状态并入——runtimeStore 的 generating/liveStats 是观测维度，
+      // 静态元数据不含。ownerKey 供外部进一步调 evt_list。
+      const runtime = useRuntimeStore.getState()
+      const generating = (runtime.liveGeneratingSources ?? []).includes(session.source)
+      return {
+        ...session,
+        generating,
+        liveStats: session.source ? undefined : undefined,
+        ownerKey: JSON.stringify([session.profileId, session.agentId, session.source]),
+      }
+    },
+    async messages(sessionId, options) {
+      const session = resolveSession(sessionId)
+      if (!session) throw new Error(`Session 不存在：${sessionId}`)
+      throwIfAborted(options.signal ?? new AbortController().signal)
+      const ownerKey = JSON.stringify([session.profileId, session.agentId, session.source])
+      // evt_list 升序分页（before_sequence=null 取最新页）。AI 轮询场景：
+      // afterSeq 给定 → 取该序列之后的增量；未给定 → 最新 limit 条。
+      const page = await invoke('evt_list', {
+        ownerKey,
+        beforeSequence: null,
+        limit: options.limit ?? 100,
+      }) as { events: Array<Record<string, unknown>>, nextBeforeSequence: number | null }
+      const afterSeq = options.afterSeq
+      const events = page.events
+        .filter(event => afterSeq === undefined || Number(event.sequence) > afterSeq)
+        .map(event => ({
+          sequence: Number(event.sequence),
+          eventId: event.eventId,
+          eventType: event.eventType,
+          occurredAt: event.occurredAt,
+          receivedAt: event.receivedAt,
+          clientGeneration: event.clientGeneration,
+          typedPayload: event.typedPayload,
+          rawPayload: event.rawPayload,
+        }))
+      return {
+        sessionId,
+        ownerKey,
+        events,
+        lastSequence: events.length > 0 ? Number(events[events.length - 1]!.sequence) : (afterSeq ?? 0),
+      }
+    },
+  }
+}
+
+/** CLI 增强：全局审批模式 port（get 此前缺失，外部自动化无法确认模式）。 */
+export function createCliApprovalControlPort(): ApprovalControlPort {
+  return {
+    async get() {
+      return await invoke<string>('get_approval_mode')
+    },
+    async set(mode) {
+      await invoke('set_approval_mode', { mode })
+    },
+  }
+}
+
+/** CLI 增强：挂起权限交互 port——list 快照 + respond 应答（桥牌等外部自动化前置）。 */
+export function createCliInteractionControlPort(): InteractionControlPort {
+  return {
+    async list() {
+      return await invoke<{ items: InteractionItem[] }>('interaction_list')
+    },
+    async respond(identity, kind, answer) {
+      await invoke('respond_interaction', { identity, kind, answer })
+    },
+  }
+}
+
+/** CLI 增强：注册表工作区 CRUD port（workspace_cmds 直通）。 */
+export function createCliWorkspaceRegistryControlPort(): WorkspaceRegistryControlPort {
+  return {
+    async list() {
+      return await invoke('workspace_list')
+    },
+    async create({ agentId, name, rootPath }) {
+      return await invoke('workspace_create', { agentId, name, rootPath })
+    },
+    async update({ workspaceId, name, rootPath }) {
+      return await invoke('workspace_update', { workspaceId, name, rootPath })
+    },
+    async remove(workspaceId) {
+      return await invoke('workspace_delete', { workspaceId })
+    },
+    async search(query, maxResults) {
+      return await invoke('workspace_search', { query, maxResults })
+    },
+  }
+}
+
+/** CLI 增强：会话级 config option + journal 导出 port。 */
+export function createCliSessionConfigControlPort(): SessionConfigControlPort {
+  return {
+    async setOption({ agentId, sessionId, key, value }) {
+      return await invoke('set_config_option', { agentId, source: sessionId, key, value })
+    },
+    async exportSession({ agentId, periId, format, outputPath }) {
+      await invoke('export_session', { agentId, periId, format, outputPath })
     },
   }
 }
