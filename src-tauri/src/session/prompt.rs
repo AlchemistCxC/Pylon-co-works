@@ -5,16 +5,17 @@ use super::*;
 use crate::acp::AcpError;
 
 /// A2/A3：向 source 已注册的流式通道发送终帧（done/error 信封）并注销注册。
-/// 未注册 → no-op（广播兼容路径）。发送失败仅告警，不阻断收尾流程。
+/// B1 扩展：user echo 也经此单轨化。未注册 → 返回 false（调用方走广播兜底）。
+/// 发送失败仅告警，返回 true（注册已 take，广播会双投递——失败视为连接已断）。
 /// payload 为完整终态载荷（含 canonicalEvent），前端按既有 done/error 分支处理。
-/// 幂等：take 注销先行，重复调用安全（第二次 no-op）。
+/// 幂等：take 注销先行，重复调用安全（第二次返回 false）。
 fn send_channel_terminal(
     _state: &AppState,
     runtime: &Arc<AgentRuntime>,
     source: &str,
     event: &str,
     mut payload: serde_json::Value,
-) {
+) -> bool {
     if let Some(channel) = runtime.take_update_channel(source) {
         if let serde_json::Value::Object(ref mut map) = payload {
             map.entry("source".to_string())
@@ -24,6 +25,9 @@ fn send_channel_terminal(
         if let Err(error) = channel.send(frame) {
             tracing::warn!("channel 终帧发送失败 event={event} source={source}: {error}");
         }
+        true
+    } else {
+        false
     }
 }
 
@@ -732,7 +736,7 @@ async fn send_prompt_core_impl<R: tauri::Runtime>(
         .lock()
         .map(|mut p| crate::pet::on_user_sent(&mut p))
         .ok();
-    if let Some(window) = window {
+    {
         let mut user_payload = serde_json::json!({ "source": source, "content": content });
         if !flow.inject_activated.is_empty() {
             user_payload["injectActivated"] = serde_json::Value::Array(
@@ -745,7 +749,13 @@ async fn send_prompt_core_impl<R: tauri::Runtime>(
         if let Some(committed_event) = committed_user_event {
             user_payload["canonicalEvent"] = serde_json::to_value(committed_event)?;
         }
-        emit_event(window, crate::event_names::USER_ECHO, user_payload);
+        // B1（传输收敛）：已注册 Channel 的 GUI 会话走信封帧单轨；未注册
+        // （平台 ingest / 未升级前端）保留广播。user echo 与 update 同构。
+        if send_channel_terminal(state, runtime, source, crate::event_names::USER_ECHO, user_payload.clone()) {
+            // Channel 已消费并注销。
+        } else if let Some(window) = window {
+            emit_event(window, crate::event_names::USER_ECHO, user_payload);
+        }
     }
     let rpc = {
         let acp = runtime.acp.lock().await;

@@ -1462,6 +1462,8 @@ export function attachChatEventController(refs: ChatEventControllerRefs): ChatCo
       const event = { payload: frame.payload as never }
       if (frame.event === 'pylon:update') {
         await channelFrameHandlers.update?.(event)
+      } else if (frame.event === 'pylon:user') {
+        await channelFrameHandlers.user?.(event)
       } else if (frame.event === 'pylon:done') {
         await channelFrameHandlers.done?.(event)
       } else if (frame.event === 'pylon:error') {
