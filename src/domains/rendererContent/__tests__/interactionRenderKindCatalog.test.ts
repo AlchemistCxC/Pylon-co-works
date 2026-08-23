@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { BUILTIN_INTERACTION_RENDER_KINDS } from '../interactionRenderKindCatalog.ts'
+import { BUILTIN_INTERACTION_RENDER_KINDS, isInteractionSnapshotInput } from '../interactionRenderKindCatalog.ts'
 
 describe('C12 interaction render settings contract', () => {
   it('declares only non-sensitive OAuth/Secret/Sudo presentation settings', () => {
@@ -10,5 +10,22 @@ describe('C12 interaction render settings contract', () => {
       'presentation', 'maxWidth', 'warningColor', 'showProviderMetadata', 'countdownStyle',
     ]))
     expect(keys.some(key => /remember|secret|credential|password/i.test(key))).toBe(false)
+  })
+
+  it('accepts a canonical interaction identity when optional toolCallId is omitted', () => {
+    expect(isInteractionSnapshotInput({
+      id: 'interaction-a', status: 'requested', sequence: 1,
+      request: {
+        surface: 'interaction', kind: 'approval', state: 'waiting',
+        identity: {
+          provider: 'peri', agentId: 'peri', requestId: 'request-a',
+          sessionId: 'local:a', clientGeneration: 1,
+        },
+        questions: [{
+          id: 'approval', question: 'Allow?', allowMultiple: false, allowFreeform: false,
+          options: [{ id: 'allow_once', label: 'Allow production action' }],
+        }],
+      },
+    })).toBe(true)
   })
 })

@@ -76,8 +76,9 @@ export function isInteractionSnapshotInput(input: unknown): boolean {
   if (!isRecord(input.request) || input.request.surface !== 'interaction' || !Array.isArray(input.request.questions)) return false
   if (!isRecord(input.request.identity)) return false
   const identity = input.request.identity
-  if (![identity.provider, identity.agentId, identity.requestId, identity.sessionId, identity.toolCallId]
+  if (![identity.provider, identity.agentId, identity.requestId, identity.sessionId]
     .every(value => value === null || typeof value === 'string')) return false
+  if (identity.toolCallId !== undefined && identity.toolCallId !== null && typeof identity.toolCallId !== 'string') return false
   if (identity.clientGeneration !== null && typeof identity.clientGeneration !== 'number') return false
   return input.request.questions.every(question => isRecord(question)
     && typeof question.id === 'string'
