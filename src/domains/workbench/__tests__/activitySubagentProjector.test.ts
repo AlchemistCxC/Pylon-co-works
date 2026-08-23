@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import { createWorkbenchEnvelope } from '../events/workbenchEventSchema.ts'
-import { projectWorkbench, selectActivities } from '../workbenchProjector.ts'
+import { createWorkbenchDocument, projectWorkbench, selectActivities, selectActivityDisplayOrder } from '../workbenchProjector.ts'
 
 /**
  * C09 RED：activity.subagent / activity.delegation / activity.team 投影契约。
@@ -23,6 +23,140 @@ const envelope = (sequence: number, event: Parameters<typeof createWorkbenchEnve
   })
 
 describe('C09 subagent/delegation/team projection', () => {
+  it('keeps a started subagent running when progress arrives', () => {
+    const started = projectWorkbench([
+      envelope(1, {
+        type: 'activity.started', activityId: 'sub-running',
+        activity: { kind: 'subagent', title: 'Inspect renderer seams' },
+      }),
+    ]).document
+    expect(selectActivities(started).find(activity => activity.id === 'sub-running')?.status).toBe('running')
+
+    const progressed = projectWorkbench([
+      envelope(1, {
+        type: 'activity.started', activityId: 'sub-running',
+        activity: { kind: 'subagent', title: 'Inspect renderer seams' },
+      }),
+      envelope(2, {
+        type: 'activity.progress', activityId: 'sub-running',
+        patch: { progress: { completed: 1, total: 3 } },
+      }),
+    ]).document
+    expect(selectActivities(progressed).find(activity => activity.id === 'sub-running')?.status).toBe('running')
+  })
+
+  it('preserves normalized activity statuses and degrades unknown values safely', () => {
+    for (const status of ['paused', 'blocked', 'timeout'] as const) {
+      const { document } = projectWorkbench([
+        envelope(1, {
+          type: 'activity.progress', activityId: `sub-${status}`,
+          patch: { kind: 'subagent', status },
+        }),
+      ])
+      expect(selectActivities(document).find(activity => activity.id === `sub-${status}`)?.status).toBe(status)
+    }
+
+    const { document } = projectWorkbench([
+      envelope(1, {
+        type: 'activity.progress', activityId: 'sub-invalid-status',
+        patch: { kind: 'subagent', status: 'teleporting' },
+      }),
+    ])
+    expect(selectActivities(document).find(activity => activity.id === 'sub-invalid-status')?.status).toBe('unknown')
+  })
+
+  it('does not revive timeout or interrupted activities with late running progress', () => {
+    for (const terminalStatus of ['timeout', 'interrupted'] as const) {
+      const { document } = projectWorkbench([
+        envelope(1, {
+          type: 'activity.progress', activityId: `sub-${terminalStatus}-terminal`,
+          patch: { kind: 'subagent', status: terminalStatus },
+        }),
+        envelope(2, {
+          type: 'activity.progress', activityId: `sub-${terminalStatus}-terminal`,
+          patch: { status: 'running', description: 'late evidence may fill missing fields' },
+        }),
+      ])
+      const node = selectActivities(document).find(activity => activity.id === `sub-${terminalStatus}-terminal`)
+      expect(node?.status).toBe(terminalStatus)
+      expect(node?.description).toBe('late evidence may fill missing fields')
+    }
+  })
+
+  it('accumulates normalized identity, timing, metrics and execution metadata', () => {
+    const { document } = projectWorkbench([
+      envelope(1, {
+        type: 'activity.started', activityId: 'sub-rich-lifecycle',
+        activity: {
+          kind: 'subagent', sourceAgentId: 'agent-parent', description: 'Inspect the renderer registry',
+          startedAt: '2026-08-23T06:00:01.000Z',
+        },
+      }),
+      envelope(2, {
+        type: 'activity.progress', activityId: 'sub-rich-lifecycle',
+        patch: {
+          metrics: { toolCount: 4, taskCount: 2, durationMs: 900, costUsd: 0.03 },
+          execution: { mode: 'remote', background: true, worktree: 'review/c09', team: 'renderer' },
+          tools: [{ id: 'tool-4', status: 'completed' }],
+          tasks: [{ id: 'task-2', status: 'running' }],
+        },
+      }),
+      envelope(3, {
+        type: 'activity.completed', activityId: 'sub-rich-lifecycle',
+        result: { completedAt: '2026-08-23T06:00:03.000Z' },
+      }),
+    ])
+    const node = selectActivities(document).find(activity => activity.id === 'sub-rich-lifecycle')
+    expect(node).toMatchObject({
+      sourceAgentId: 'agent-parent',
+      description: 'Inspect the renderer registry',
+      startedAt: '2026-08-23T06:00:01.000Z',
+      completedAt: '2026-08-23T06:00:03.000Z',
+      metrics: { toolCount: 4, taskCount: 2, durationMs: 900, costUsd: 0.03 },
+      execution: { mode: 'remote', background: true, worktree: 'review/c09', team: 'renderer' },
+      tools: [{ id: 'tool-4', status: 'completed' }],
+      tasks: [{ id: 'task-2', status: 'running' }],
+    })
+  })
+
+  it('narrows nested subagent parts and preserves malformed evidence as bounded unknown content', () => {
+    const completed = envelope(1, {
+      type: 'activity.completed', activityId: 'sub-malformed-output',
+      activity: { kind: 'subagent', title: 'Unsafe worker output' },
+      result: {
+        parts: [
+          { kind: 'terminal', streams: [{ stream: 'stdout', text: 'kept' }], exitCode: 0 },
+          { kind: 'terminal', streams: [{ stream: 'stdin', text: 'malformed evidence' }] },
+        ],
+      },
+    })
+    const { document } = projectWorkbench([completed])
+    const node = selectActivities(document).find(activity => activity.id === 'sub-malformed-output')
+    expect(node?.parts).toEqual([
+      { kind: 'terminal', streams: [{ stream: 'stdout', text: 'kept' }], exitCode: 0 },
+      expect.objectContaining({ kind: 'unknown', originalType: 'terminal', truncated: false }),
+    ])
+    expect(document.diagnostics).toContainEqual(expect.objectContaining({
+      code: 'activity.subagent.part-malformed',
+      eventId: completed.eventId,
+      level: 'warning',
+      data: expect.objectContaining({ activityId: 'sub-malformed-output', partIndex: 1 }),
+    }))
+  })
+
+  it('projects normalized result output as typed renderer content', () => {
+    const { document } = projectWorkbench([
+      envelope(1, {
+        type: 'activity.completed', activityId: 'sub-output',
+        activity: { kind: 'subagent', title: 'Review complete' },
+        result: { output: [{ kind: 'text', text: 'No blocking issues found.' }] },
+      }),
+    ])
+    const node = selectActivities(document).find(activity => activity.id === 'sub-output')
+    expect(node?.output).toEqual([{ kind: 'text', text: 'No blocking issues found.' }])
+    expect(node?.parts).toEqual(node?.output)
+  })
+
   it('projects a rich subagent with accumulated lifecycle fields and terminal idempotence', () => {
     const events = [
       envelope(1, {
@@ -93,6 +227,47 @@ describe('C09 subagent/delegation/team projection', () => {
     ]).document
     expect(selectActivities(linked).find(a => a.id === 'sub-orphan')!.orphan).toBe(false)
     expect(selectActivities(linked).find(a => a.id === 'team-9')).toBeDefined()
+  })
+
+  it('derives a stable parent-before-child display order without rewriting the journal projection', () => {
+    const { document } = projectWorkbench([
+      envelope(1, {
+        type: 'activity.started', activityId: 'sub-child',
+        activity: { kind: 'subagent', parentId: 'team-parent', title: 'Child' },
+      }),
+      envelope(2, {
+        type: 'activity.started', activityId: 'team-parent',
+        activity: { kind: 'team', title: 'Parent' },
+      }),
+      envelope(3, {
+        type: 'activity.started', activityId: 'sub-orphan-stable',
+        activity: { kind: 'subagent', parentId: 'missing-parent', title: 'Orphan' },
+      }),
+    ])
+    expect(selectActivities(document).map(activity => activity.id)).toEqual([
+      'sub-child', 'team-parent', 'sub-orphan-stable',
+    ])
+    expect(selectActivityDisplayOrder(document).map(activity => activity.id)).toEqual([
+      'team-parent', 'sub-child', 'sub-orphan-stable',
+    ])
+  })
+
+  it('orders a large activity chain iteratively without dropping nodes', () => {
+    const activities = Array.from({ length: 5_000 }, (_, index) => ({
+      id: `activity-${index}`,
+      kind: 'activity' as const,
+      activityKind: 'subagent',
+      semanticKind: 'activity.subagent',
+      status: 'running',
+      ...(index > 0 ? { parentId: `activity-${index - 1}` } : {}),
+      orphan: false,
+      sequence: index,
+    }))
+    const document = { ...createWorkbenchDocument('session-large-c09'), activities }
+    const ordered = selectActivityDisplayOrder(document)
+    expect(ordered).toHaveLength(5_000)
+    expect(ordered[0]?.id).toBe('activity-0')
+    expect(ordered.at(-1)?.id).toBe('activity-4999')
   })
 
   it('degrades a minimal delegation without guessing hierarchy or identity fields', () => {

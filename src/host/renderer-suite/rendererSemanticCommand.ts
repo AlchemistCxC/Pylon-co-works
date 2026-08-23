@@ -1,9 +1,24 @@
 import type { RenderSemanticCommand } from '../../contracts/messageRenderer.ts'
-import type { WorkbenchHostPort, WorkbenchMountInput } from '../../renderers/solid-workbench/workbenchContracts.ts'
+import type { WorkbenchCapabilityReader, WorkbenchHostPort, WorkbenchMountInput } from '../../renderers/solid-workbench/workbenchContracts.ts'
 
 export function isRenderSemanticCommand(value: unknown): value is RenderSemanticCommand {
   return Boolean(value && typeof value === 'object' && !Array.isArray(value)
     && typeof (value as Record<string, unknown>).type === 'string')
+}
+
+export function canExecuteRendererSemanticCommand(commandType: string, capabilities: WorkbenchCapabilityReader): boolean {
+  switch (commandType) {
+    case 'clipboard.write': return capabilities.has('clipboardWrite')
+    case 'interaction.respond': return capabilities.has('interactionResponse')
+    case 'tool.action':
+    case 'activity.cancel':
+    case 'activity.retry': return capabilities.has('toolAction')
+    case 'resource.open': return capabilities.has('resourceOpen')
+    case 'resource.reveal': return capabilities.has('resourceReveal')
+    case 'message.retry': return capabilities.has('retry')
+    case 'session.recover': return capabilities.has('recovery')
+    default: return false
+  }
 }
 
 export async function executeRendererSemanticCommand(input: {
@@ -51,19 +66,15 @@ export async function executeRendererSemanticCommand(input: {
       result = await host.commands.revealResource(sessionId, payload)
       break
     case 'activity.cancel': {
-      // C09/C10：后台活动取消——复用既有 cancel 命令面（targetId=activityId 仅作审计关联）
       if (!command.targetId) { reject('renderer_action_invalid', 'activity.cancel 缺少 targetId'); return }
-      result = await host.commands.cancel(sessionId)
+      result = await host.commands.toolAction(sessionId, command.targetId, 'cancel', payload)
       break
     }
     case 'activity.retry': {
-      // C09/C10：失败/取消活动重试——复用既有 retry 命令面（messageId 可选）
-      result = await host.commands.retry(sessionId, typeof record?.messageId === 'string' ? record.messageId : undefined)
+      if (!command.targetId) { reject('renderer_action_invalid', 'activity.retry 缺少 targetId'); return }
+      result = await host.commands.toolAction(sessionId, command.targetId, 'retry', payload)
       break
     }
-    case 'interaction.respond':
-      result = await host.commands.retry(sessionId, command.targetId)
-      break
     case 'session.recover':
       result = await host.commands.recover(sessionId, typeof record?.strategy === 'string' ? record.strategy : undefined)
       break

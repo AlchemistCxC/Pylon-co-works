@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from 'vitest'
-import { executeRendererSemanticCommand } from '../rendererSemanticCommand.ts'
+import { canExecuteRendererSemanticCommand, executeRendererSemanticCommand } from '../rendererSemanticCommand.ts'
 import type { RenderSemanticCommand } from '../../../contracts/messageRenderer.ts'
 
 /**
@@ -16,6 +16,7 @@ function makeHost() {
       respondInteraction: vi.fn().mockResolvedValue({ ok: true, value: null }),
       cancel: vi.fn().mockResolvedValue({ ok: true, value: { status: 'cancelled' } }),
       retry: vi.fn().mockResolvedValue({ ok: true, value: null }),
+      toolAction: vi.fn().mockResolvedValue({ ok: true, value: null }),
       copy: vi.fn().mockResolvedValue({ ok: true, value: null }),
     },
     diagnostics,
@@ -32,6 +33,16 @@ const run = (host: unknown, command: RenderSemanticCommand) => executeRendererSe
 })
 
 describe('renderer semantic command routing (wiring audit regression)', () => {
+  it('exposes activity actions only through the target-preserving toolAction capability', () => {
+    const sessionOnly = { has: (capability: string) => capability === 'cancel' || capability === 'retry' }
+    expect(canExecuteRendererSemanticCommand('activity.cancel', sessionOnly as never)).toBe(false)
+    expect(canExecuteRendererSemanticCommand('activity.retry', sessionOnly as never)).toBe(false)
+
+    const childActions = { has: (capability: string) => capability === 'toolAction' }
+    expect(canExecuteRendererSemanticCommand('activity.cancel', childActions as never)).toBe(true)
+    expect(canExecuteRendererSemanticCommand('activity.retry', childActions as never)).toBe(true)
+  })
+
   it('routes interaction.respond with targetId to respondInteraction', async () => {
     const { host, diagnostics } = makeHost()
     await run(host, { type: 'interaction.respond', targetId: 'int-1', payload: { optionId: 'deny' } })
@@ -48,17 +59,19 @@ describe('renderer semantic command routing (wiring audit regression)', () => {
     }))
   })
 
-  it('routes activity.cancel to the port cancel command (C09)', async () => {
+  it('routes activity.cancel through target-preserving toolAction instead of cancelling the session', async () => {
     const { host, diagnostics } = makeHost()
     await run(host, { type: 'activity.cancel', targetId: 'sub-1' })
-    expect(host.commands.cancel).toHaveBeenCalledWith('session-1')
+    expect(host.commands.toolAction).toHaveBeenCalledWith('session-1', 'sub-1', 'cancel', undefined)
+    expect(host.commands.cancel).not.toHaveBeenCalled()
     expect(diagnostics.report).not.toHaveBeenCalled()
   })
 
-  it('routes activity.retry to the port retry command with optional messageId (C10)', async () => {
+  it('routes activity.retry through target-preserving toolAction instead of retrying the session', async () => {
     const { host, diagnostics } = makeHost()
-    await run(host, { type: 'activity.retry', targetId: 'sub-2', payload: { messageId: 'msg-9' } })
-    expect(host.commands.retry).toHaveBeenCalledWith('session-1', 'msg-9')
+    await run(host, { type: 'activity.retry', targetId: 'sub-2', payload: { reason: 'manual' } })
+    expect(host.commands.toolAction).toHaveBeenCalledWith('session-1', 'sub-2', 'retry', { reason: 'manual' })
+    expect(host.commands.retry).not.toHaveBeenCalled()
     expect(diagnostics.report).not.toHaveBeenCalled()
   })
 

@@ -105,16 +105,7 @@ export default function ReactWorkbenchFatalFallback(props: {
       {document?.activities.filter(activity => activity.kind === 'activity').map(activity =>
         activity.activityKind === 'process' || activity.semanticKind === 'activity.process'
           ? <ReactFallbackProcessActivity key={activity.id} activity={activity} />
-          : <section key={activity.id} role="status" className="react-workbench-fatal-activity"
-            data-react-activity-kind={activity.semanticKind ?? activity.activityKind ?? 'unknown'}
-            aria-label={`子代理 fallback：${activity.title || activity.id}，${activity.status}`}>
-            <strong>{activity.title || activity.id}</strong>
-            <span>{activity.status}{activity.depth !== undefined ? ` · depth ${activity.depth}` : ''}
-              {activity.parentId ? ` · parent ${activity.parentId}` : ''}</span>
-            {activity.goal && <span>目标：{activity.goal}</span>}
-            {activity.progress !== undefined && <pre>{fallbackJson(activity.progress)}</pre>}
-            {activity.error && <span>{activity.error.userSummary}</span>}
-          </section>
+          : <ReactFallbackSubagentActivity key={activity.id} activity={activity} />
       )}
       <section className="react-workbench-fatal-interactions" aria-label="交互 fallback">
         {document?.interactions.map(interaction => (
@@ -140,6 +131,38 @@ export default function ReactWorkbenchFatalFallback(props: {
       </div>
     </section>
   )
+}
+
+function ReactFallbackSubagentActivity({ activity }: { activity: WorkbenchActivityNode }) {
+  const output = activity.output ?? (Array.isArray(activity.parts)
+    ? activity.parts.filter((part): part is ContentPart => Boolean(part && typeof part === 'object'
+      && !Array.isArray(part) && typeof (part as { kind?: unknown }).kind === 'string'))
+    : [])
+  const resultSummary = activity.result && typeof activity.result === 'object' && !Array.isArray(activity.result)
+    && typeof (activity.result as { summary?: unknown }).summary === 'string'
+    ? (activity.result as { summary: string }).summary : undefined
+  return <section role="status" className="react-workbench-fatal-activity"
+    data-react-activity-kind={activity.semanticKind ?? activity.activityKind ?? 'unknown'}
+    aria-label={`子代理 fallback：${activity.title || activity.id}，${activity.status}`}>
+    <strong>{activity.title || activity.id}</strong>
+    <span>{activity.status}{activity.depth !== undefined ? ` · depth ${activity.depth}` : ''}
+      {activity.parentId ? ` · parent ${activity.parentId}` : ''}</span>
+    {activity.goal && <span>目标：{activity.goal}</span>}
+    {activity.description && <span>{activity.description}</span>}
+    {activity.progress !== undefined && <pre>{fallbackJson(activity.progress)}</pre>}
+    {resultSummary && <p>{resultSummary}</p>}
+    {output.map((part, index) => <ReactFallbackContentPart key={`${activity.id}:output:${index}`} part={part} />)}
+    {activity.usage !== undefined && <pre aria-label="子代理用量">{fallbackJson(activity.usage)}</pre>}
+    {activity.metrics !== undefined && <pre aria-label="子代理指标">{fallbackJson(activity.metrics)}</pre>}
+    {activity.files !== undefined && <pre aria-label="子代理文件">{fallbackJson(activity.files)}</pre>}
+    {activity.execution !== undefined && <pre aria-label="子代理执行元数据">{fallbackJson(activity.execution)}</pre>}
+    {activity.error && <span role="alert">{activity.error.userSummary}</span>}
+    {activity.reason && <small>{activity.reason}</small>}
+    {activity.provenance && <small>来源：{[
+      activity.provenance.origin, activity.provenance.trust, activity.provenance.orderConfidence,
+    ].filter(Boolean).join(' · ')}</small>}
+    {activity.provenance?.synthetic && <small>合成生命周期：{activity.provenance.synthetic.reason}</small>}
+  </section>
 }
 
 function ReactFallbackProcessActivity({ activity }: { activity: WorkbenchActivityNode }) {
@@ -255,6 +278,12 @@ export function ReactFallbackContentPart(props: {
   onDownloadMedia?: (part: ImageContentPart) => void
 }) {
   const { part } = props
+  if (part.kind === 'text' || part.kind === 'markdown') {
+    return <p data-react-content-kind={`content.${part.kind}`} style={{ whiteSpace: 'pre-wrap' }}>{part.text}</p>
+  }
+  if (part.kind === 'code') {
+    return <pre data-react-content-kind="content.code"><code>{part.text}</code></pre>
+  }
   if (part.kind === 'file-reference' || part.kind === 'file-selection') {
     const value = part as unknown as {
       path: string; displayName?: string; mime?: string; size?: number; language?: string; previewText?: string

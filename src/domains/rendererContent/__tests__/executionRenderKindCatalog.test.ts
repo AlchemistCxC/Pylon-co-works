@@ -32,6 +32,15 @@ describe('C07 execution render kind catalog', () => {
       expect(BUILTIN_SOLID_CONTENT_KINDS).toContain(`activity.${family}`)
       // fixture 必须通过自身 validator（C13 教训：fixture 自校验）
       expect(kind.validateInput?.(kind.fixture)).toBe(true)
+      const settingKeys = kind.settings?.groups.flatMap(group => group.fields.map(field => field.key)) ?? []
+      expect(settingKeys).toEqual(expect.arrayContaining([
+        'identityMarker', 'cardWidth', 'viewMode', 'treeLineStyle', 'treeLineColor', 'indent',
+        'defaultExpandedDepth', 'showAggregate',
+      ]))
+      expect(kind.defaultTokens).toMatchObject({
+        identityMarker: 'glyph', cardWidth: 960, viewMode: 'tree', treeLineStyle: 'solid',
+        indent: 24, defaultExpandedDepth: 2, showAggregate: true,
+      })
     }
 
     // rich 输入通过；层级/身份字段类型错误拒绝；缺 family 拒绝
@@ -43,6 +52,31 @@ describe('C07 execution render kind catalog', () => {
       id: 's2', kind: 'activity', activityKind: 'subagent', status: 'running', depth: -1,
     })).toBe(false)
     expect(isSubagentActivitySnapshotInput({ id: 's3', status: 'running' })).toBe(false)
+    expect(isSubagentActivitySnapshotInput({
+      id: 's4', kind: 'activity', activityKind: 'subagent', semanticKind: 'activity.team', status: 'running',
+    })).toBe(false)
+    expect(isSubagentActivitySnapshotInput({
+      id: 's5', kind: 'activity', activityKind: 'team', semanticKind: 'activity.team', status: 'teleporting',
+    })).toBe(false)
+    expect(isSubagentActivitySnapshotInput({
+      id: 's6', kind: 'activity', activityKind: 'delegation', semanticKind: 'activity.delegation', status: 'running',
+      parts: [{ kind: 'terminal', streams: [{ stream: 'stdin', text: 'not renderer-safe' }] }],
+    })).toBe(false)
+    expect(isSubagentActivitySnapshotInput({
+      id: 's7', kind: 'activity', activityKind: 'subagent', semanticKind: 'activity.subagent', status: 'running',
+      metrics: { toolCount: -1, durationMs: 'fast' },
+    })).toBe(false)
+    const richBase = {
+      id: 's8', kind: 'activity', activityKind: 'subagent', semanticKind: 'activity.subagent', status: 'running',
+      sourceAgentId: 'agent-parent', description: 'Inspect registry', startedAt: '2026-08-23T06:00:00.000Z',
+      execution: { mode: 'remote', background: true }, tools: [], tasks: [],
+    }
+    expect(isSubagentActivitySnapshotInput(richBase)).toBe(true)
+    for (const malformed of [
+      { sourceAgentId: ' ' }, { startedAt: 42 }, { execution: ['remote'] }, { tools: {} }, { tasks: 'one' },
+    ]) {
+      expect(isSubagentActivitySnapshotInput({ ...richBase, ...malformed })).toBe(false)
+    }
   })
 
   it('registers workflow/workflow-phase/workflow-agent kinds with valid fixtures (C10)', () => {

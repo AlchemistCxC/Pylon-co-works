@@ -1,5 +1,5 @@
 // @vitest-environment jsdom
-import { render } from '@solidjs/testing-library'
+import { fireEvent, render } from '@solidjs/testing-library'
 import { describe, expect, it, vi } from 'vitest'
 import { SolidSubagentCard } from '../SubagentCard.solid.tsx'
 import type { WorkbenchActivityNode } from '../../../../../domains/workbench/workbenchProjector.ts'
@@ -36,6 +36,61 @@ describe('C09 SolidSubagentCard', () => {
     expect(card.getAttribute('role')).toBe('status')
   })
 
+  it('renders normalized result, metrics, structured files, execution metadata and provenance', () => {
+    const activity = {
+      ...richNode,
+      description: 'Inspect the renderer registry',
+      metrics: { toolCount: 4, taskCount: 2, durationMs: 900, costUsd: 0.03 },
+      files: { read: ['src/a.ts', 'src/b.ts'], written: ['src/c.ts'], touched: ['src/d.ts'] },
+      execution: { mode: 'remote', background: true, worktree: 'review/c09', team: 'renderer' },
+      result: { summary: 'Found 12 call sites' },
+      output: [{ kind: 'text', text: 'No blocking issues found.' }],
+      parts: [{ kind: 'text', text: 'No blocking issues found.' }],
+      provenance: { origin: 'recovery-import', trust: 'unverified', orderConfidence: 'observed' },
+    } as unknown as WorkbenchActivityNode
+    const result = render(() => <SolidSubagentCard activity={activity} />)
+    expect(result.container).toHaveTextContent('Inspect the renderer registry')
+    expect(result.container).toHaveTextContent('4 tools · 2 tasks · 900 ms · $0.03')
+    expect(result.container).toHaveTextContent('读取 2 · 写入 1 · 触及 1')
+    expect(result.container).toHaveTextContent('remote · background · worktree review/c09 · team renderer')
+    expect(result.container).toHaveTextContent('Found 12 call sites')
+    expect(result.container).toHaveTextContent('No blocking issues found.')
+    expect(result.container).toHaveTextContent('来源：recovery-import · unverified · observed')
+  })
+
+  it('derives aggregate counts from normalized tool and task children without requiring stored metrics', () => {
+    const activity = {
+      ...richNode,
+      tools: [{ id: 'tool-1' }, { id: 'tool-2' }],
+      tasks: [{ id: 'task-1' }],
+    } as unknown as WorkbenchActivityNode
+    const result = render(() => <SolidSubagentCard activity={activity} />)
+    expect(result.container).toHaveTextContent('2 tools · 1 tasks')
+  })
+
+  it('consumes card, tree, marker, aggregate and expansion appearance settings', () => {
+    const activity = {
+      ...richNode,
+      metrics: { toolCount: 4 },
+      parts: [{ kind: 'text', text: 'Nested output' }],
+      output: [{ kind: 'text', text: 'Nested output' }],
+    } as unknown as WorkbenchActivityNode
+    const result = render(() => <SolidSubagentCard activity={activity} appearance={{
+      viewMode: 'cards', cardWidth: 420, treeLineStyle: 'dashed', treeLineColor: '#112233', indent: 12,
+      identityMarker: 'none', defaultExpandedDepth: 1, showAggregate: false,
+    }} />)
+    const card = result.container.querySelector('.term-subagent-card') as HTMLElement
+    expect(card).toHaveAttribute('data-view-mode', 'cards')
+    expect(card).toHaveAttribute('data-tree-line', 'dashed')
+    expect(card.style.maxWidth).toBe('420px')
+    expect(card.style.getPropertyValue('--subagent-card-width')).toBe('420px')
+    expect(card.style.getPropertyValue('--subagent-indent')).toBe('12px')
+    expect(card.style.getPropertyValue('--subagent-tree-color')).toBe('#112233')
+    expect(result.container.querySelector('.term-subagent-marker')).toBeNull()
+    expect(result.container).not.toHaveTextContent('4 tools')
+    expect(result.container.querySelector('details.term-subagent-output')).not.toHaveAttribute('open')
+  })
+
   it('degrades a minimal node without fabricating fields', () => {
     const minimal = { id: 'sub-2', kind: 'activity', activityKind: 'team', status: 'failed' } as unknown as WorkbenchActivityNode
     const result = render(() => <SolidSubagentCard activity={minimal} />)
@@ -47,7 +102,11 @@ describe('C09 SolidSubagentCard', () => {
   it('gates cancel/retry actions behind command capabilities and status', async () => {
     const execute = vi.fn()
     const canExecute = (type: string) => type === 'activity.cancel'
-    const running = render(() => <SolidSubagentCard activity={richNode} commands={{ execute, canExecute }} />)
+    const withoutNodeCapability = render(() => <SolidSubagentCard activity={richNode} commands={{ execute, canExecute }} />)
+    expect(withoutNodeCapability.container.querySelectorAll('button')).toHaveLength(0)
+
+    const cancellable = { ...richNode, capabilities: ['cancel'] } as unknown as WorkbenchActivityNode
+    const running = render(() => <SolidSubagentCard activity={cancellable} commands={{ execute, canExecute }} />)
     expect([...running.container.querySelectorAll('button')].map(b => b.title)).toEqual(['取消此子代理'])
     await running.container.querySelector('button')!.click()
     expect(execute).toHaveBeenCalledWith({ type: 'activity.cancel', targetId: 'sub-1' })
@@ -60,6 +119,44 @@ describe('C09 SolidSubagentCard', () => {
     // 无 commands → 无动作
     const bare = render(() => <SolidSubagentCard activity={richNode} />)
     expect(bare.container.querySelectorAll('button').length).toBe(0)
+  })
+
+  it('dispatches focus, open and reconnect only through target-preserving tool actions', async () => {
+    const execute = vi.fn()
+    const activity = {
+      ...richNode, status: 'interrupted', capabilities: ['focus', 'open', 'reconnect'],
+    } as unknown as WorkbenchActivityNode
+    const result = render(() => <SolidSubagentCard activity={activity} commands={{
+      execute, canExecute: type => type === 'tool.action',
+    }} />)
+    expect([...result.container.querySelectorAll('button')].map(button => button.title)).toEqual([
+      '聚焦此子代理', '打开此子代理', '重新连接此子代理',
+    ])
+    for (const button of result.container.querySelectorAll('button')) await button.click()
+    expect(execute.mock.calls.map(call => call[0])).toEqual([
+      { type: 'tool.action', targetId: 'sub-1', payload: { action: 'focus' } },
+      { type: 'tool.action', targetId: 'sub-1', payload: { action: 'open' } },
+      { type: 'tool.action', targetId: 'sub-1', payload: { action: 'reconnect' } },
+    ])
+  })
+
+  it('supports keyboard navigation across sibling activity cards', async () => {
+    const first = { ...richNode, id: 'sub-first', title: 'First' } as unknown as WorkbenchActivityNode
+    const second = { ...richNode, id: 'sub-second', title: 'Second' } as unknown as WorkbenchActivityNode
+    const result = render(() => <div class="solid-workbench-activities">
+      <SolidSubagentCard activity={first} />
+      <SolidSubagentCard activity={second} />
+    </div>)
+    const cards = result.container.querySelectorAll<HTMLElement>('.term-subagent-card')
+    cards[0].focus()
+    await fireEvent.keyDown(cards[0], { key: 'ArrowDown' })
+    expect(document.activeElement).toBe(cards[1])
+    await fireEvent.keyDown(cards[1], { key: 'Home' })
+    expect(document.activeElement).toBe(cards[0])
+    await fireEvent.keyDown(cards[0], { key: 'End' })
+    expect(document.activeElement).toBe(cards[1])
+    await fireEvent.keyDown(cards[1], { key: 'ArrowUp' })
+    expect(document.activeElement).toBe(cards[0])
   })
 
   it('surfaces synthetic provenance and reuses terminal/log part rendering', () => {

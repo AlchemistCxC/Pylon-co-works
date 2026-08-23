@@ -8,6 +8,7 @@
 import { createUnknownContentPart, parseContentPart, type ContentPart } from './content/contentPartSchema.ts'
 import { applyGoalEvents, applyPlanEvent, createEmptyGoalState, createEmptyPlanState, normalizeGoalSnapshot, type GoalSnapshot, type GoalState, type PlanState } from './plan/goalModel.ts'
 import { applyLifecycleEvent, createEmptyLifecycleState, normalizeNormalizedError, type LifecycleState, type NormalizedError } from './lifecycle/lifecycleModel.ts'
+import { isActivityStatus } from './events/workbenchEventSchema.ts'
 import type {
   ActivityEvent,
   DiagnosticEvent,
@@ -68,6 +69,11 @@ export interface WorkbenchActivityNode {
   readonly title?: string
   readonly status: string
   readonly parentId?: string
+  /** C09：创建该节点的 normalized agent identity；不从 parent/title 推断。 */
+  readonly sourceAgentId?: string
+  readonly description?: string
+  readonly startedAt?: string
+  readonly completedAt?: string
   /** C07：后台执行身份；仅来自 normalized activity payload/patch。 */
   readonly processId?: string
   readonly sessionId?: string
@@ -103,6 +109,8 @@ export interface WorkbenchActivityNode {
   readonly displayName?: string
   /** C07：activity terminal result and cancellation reason remain separate from message history. */
   readonly result?: unknown
+  /** C09：schema-validated activity output consumed by renderers. */
+  readonly output?: readonly ContentPart[]
   readonly reason?: string
   readonly provenance?: WorkbenchEventEnvelope['provenance']
   /** C09：子代理层级深度（来自 normalized payload，不从文本猜）。 */
@@ -116,7 +124,12 @@ export interface WorkbenchActivityNode {
   readonly goal?: string
   /** C09：usage/cost 与文件清单等聚合指标（JsonValue 宽容）。 */
   readonly usage?: unknown
+  readonly metrics?: unknown
   readonly files?: unknown
+  /** C09：local/remote/background/worktree/team 等 provider-neutral execution metadata。 */
+  readonly execution?: unknown
+  readonly tools?: unknown
+  readonly tasks?: unknown
   readonly metadata?: unknown
   readonly orphan: boolean
   readonly data?: unknown
@@ -229,6 +242,41 @@ export function selectTimeline(document: WorkbenchDocument): readonly WorkbenchT
 
 export function selectActivities(document: WorkbenchDocument): readonly WorkbenchActivityNode[] {
   return document.activities
+}
+
+/** C09：按 identity parent edge 派生稳定展示顺序；journal/document 本身保持原序。 */
+export function selectActivityDisplayOrder(document: WorkbenchDocument): readonly WorkbenchActivityNode[] {
+  const nodes = document.activities
+  if (nodes.length < 2) return nodes
+  const byId = new Map(nodes.map(node => [node.id, node]))
+  const children = new Map<string, WorkbenchActivityNode[]>()
+  const roots: WorkbenchActivityNode[] = []
+  for (const node of nodes) {
+    if (!node.parentId || node.parentId === node.id || !byId.has(node.parentId)) {
+      roots.push(node)
+      continue
+    }
+    const siblings = children.get(node.parentId) ?? []
+    siblings.push(node)
+    children.set(node.parentId, siblings)
+  }
+  const ordered: WorkbenchActivityNode[] = []
+  const visited = new Set<string>()
+  const appendTree = (root: WorkbenchActivityNode) => {
+    const stack = [root]
+    while (stack.length > 0) {
+      const node = stack.pop()!
+      if (visited.has(node.id)) continue
+      visited.add(node.id)
+      ordered.push(node)
+      const descendants = children.get(node.id)
+      if (descendants) for (let index = descendants.length - 1; index >= 0; index -= 1) stack.push(descendants[index])
+    }
+  }
+  for (const root of roots) appendTree(root)
+  // Cycles have no root; append them deterministically without losing evidence.
+  for (const node of nodes) appendTree(node)
+  return ordered
 }
 
 /** C11：全部 interaction 列表（requested/resolved/expired 均可见，供历史审计与 fallback）。 */
@@ -551,7 +599,7 @@ function reduceActivity(document: WorkbenchDocument, envelope: WorkbenchEventEnv
   const patch = isRecord(event.patch) ? event.patch : {}
   const result = isRecord(event.result) ? event.result : undefined
   const previous = document.activities.find(item => item.id === id && item.kind === 'activity')
-  const status = event.type.replace('activity.', '')
+  const status = activityLifecycleStatus(event.type, patch, previous)
   const activityKind = stringValue(activity.kind) ?? stringValue(patch.kind) ?? previous?.activityKind
   const semanticKind = stringValue(activity.semanticKind) ?? stringValue(patch.semanticKind) ?? previous?.semanticKind
     ?? (activityKind === 'process' || activityKind === 'background-task'
@@ -560,11 +608,15 @@ function reduceActivity(document: WorkbenchDocument, envelope: WorkbenchEventEnv
       // C10：后台任务与工作流家族（workflow-phase/agent 经 parentId relation 挂接）
       || activityKind === 'workflow' || activityKind === 'workflow-phase' || activityKind === 'workflow-agent'
       ? `activity.${activityKind}` : undefined)
-  const sourceParts = result?.parts ?? patch.parts ?? activity.parts
-  const narrowedParts = activityKind === 'process' || activityKind === 'background-task' || semanticKind === 'activity.process'
-    ? narrowProcessActivityParts(sourceParts, id, envelope)
-    : { parts: jsonSnapshot(sourceParts), diagnostics: [] }
+  const sourceParts = result?.output ?? result?.parts ?? patch.output ?? patch.parts ?? activity.output ?? activity.parts
+  const isC09Activity = activityKind === 'subagent' || activityKind === 'delegation' || activityKind === 'team'
+  const typedPartsFamily = activityKind === 'process' || activityKind === 'background-task' || isC09Activity
+  const strictParts = typedPartsFamily || semanticKind === 'activity.process'
+    ? narrowActivityParts(sourceParts, id, envelope, activityKind ?? semanticKind?.replace(/^activity\./, '') ?? 'activity')
+    : undefined
+  const narrowedParts = strictParts ?? { parts: jsonSnapshot(sourceParts), diagnostics: [] }
   const parts = narrowedParts.parts ?? previous?.parts
+  const output = isC09Activity ? strictParts?.parts ?? previous?.output : previous?.output
   const error = event.error !== undefined
     ? normalizeNormalizedError(event.error)
     : result?.error !== undefined
@@ -594,11 +646,12 @@ function reduceActivity(document: WorkbenchDocument, envelope: WorkbenchEventEnv
       : {}),
     ...(patch.progress !== undefined ? { progress: jsonSnapshot(patch.progress) } : previous?.progress !== undefined ? { progress: previous.progress } : {}),
     ...(parts !== undefined ? { parts } : {}),
+    ...(output !== undefined ? { output } : {}),
     ...(event.result !== undefined ? { result: jsonSnapshot(event.result) } : previous?.result !== undefined ? { result: previous.result } : {}),
     ...(error !== undefined ? { error } : {}),
     ...(stringValue(event.reason) ?? previous?.reason ? { reason: stringValue(event.reason) ?? previous?.reason } : {}),
     // C09：子代理/委派/团队 rich 字段——跨事件累积（当前缺失保留前值），缺失稳定降级为 undefined
-    ...c09RichFields(activity, patch, previous),
+    ...c09RichFields(activity, patch, result, previous),
     provenance: envelope.provenance,
   }
   const merged = mergeActivityTerminal(previous, next)
@@ -608,10 +661,26 @@ function reduceActivity(document: WorkbenchDocument, envelope: WorkbenchEventEnv
     : projected
 }
 
-function narrowProcessActivityParts(
+/** Provider-neutral activity lifecycle: progress is an update, not a state. */
+function activityLifecycleStatus(
+  eventType: ActivityEvent['type'],
+  patch: Record<string, unknown>,
+  previous: WorkbenchActivityNode | undefined,
+): string {
+  if (eventType === 'activity.started') return 'running'
+  if (eventType === 'activity.progress') {
+    const patchStatus = stringValue(patch.status)
+    if (patchStatus !== undefined) return isActivityStatus(patchStatus) ? patchStatus : 'unknown'
+    return previous?.status ?? 'running'
+  }
+  return eventType.replace('activity.', '')
+}
+
+function narrowActivityParts(
   value: unknown,
   activityId: string,
   envelope: WorkbenchEventEnvelope,
+  activityFamily: string,
 ): { parts?: readonly ContentPart[]; diagnostics: readonly WorkbenchProjectionDiagnostic[] } {
   if (value === undefined) return { diagnostics: [] }
   const sourceParts = Array.isArray(value) ? value : [value]
@@ -626,8 +695,8 @@ function narrowProcessActivityParts(
     const originalType = isRecord(part) && typeof part.kind === 'string' ? part.kind : 'malformed'
     parts.push(createUnknownContentPart(originalType, part))
     diagnostics.push({
-      code: 'activity.process.part-malformed',
-      message: `process activity part ${partIndex} failed content schema validation`,
+      code: `activity.${activityFamily}.part-malformed`,
+      message: `${activityFamily} activity part ${partIndex} failed content schema validation`,
       eventId: envelope.eventId,
       sequence: envelope.sequence,
       level: 'warning',
@@ -638,24 +707,39 @@ function narrowProcessActivityParts(
 }
 
 /** C09：子代理/委派/团队 rich 字段收窄——只认 normalized activity/patch，缺失即 undefined（不猜）。 */
-function c09RichFields(activity: Record<string, unknown>, patch: Record<string, unknown>, previous: WorkbenchActivityNode | undefined): Partial<WorkbenchActivityNode> {
+function c09RichFields(
+  activity: Record<string, unknown>,
+  patch: Record<string, unknown>,
+  result: Record<string, unknown> | undefined,
+  previous: WorkbenchActivityNode | undefined,
+): Partial<WorkbenchActivityNode> {
   const pickString = (key: string): string | undefined =>
-    stringValue(activity[key]) ?? stringValue(patch[key]) ?? previous?.[key as keyof WorkbenchActivityNode] as string | undefined
+    stringValue(activity[key]) ?? stringValue(patch[key]) ?? stringValue(result?.[key])
+    ?? previous?.[key as keyof WorkbenchActivityNode] as string | undefined
   const pickNumber = (key: string): number | undefined => {
     const value = activity[key] ?? patch[key]
     return (typeof value === 'number' && Number.isFinite(value)) ? value : undefined
   }
   const pickValue = (key: string): unknown | undefined =>
-    jsonSnapshot(activity[key] ?? patch[key]) ?? (previous?.[key as keyof WorkbenchActivityNode] as unknown | undefined)
+    jsonSnapshot(activity[key] ?? patch[key] ?? result?.[key])
+    ?? (previous?.[key as keyof WorkbenchActivityNode] as unknown | undefined)
   const fields: Partial<Record<keyof WorkbenchActivityNode, unknown>> = {
+    sourceAgentId: pickString('sourceAgentId'),
+    description: pickString('description'),
+    startedAt: pickString('startedAt'),
+    completedAt: pickString('completedAt'),
     depth: pickNumber('depth'),
     role: pickString('role'),
     model: pickString('model'),
     provider: pickString('provider'),
     goal: pickString('goal'),
     usage: pickValue('usage'),
+    metrics: pickValue('metrics'),
     capabilities: pickValue('capabilities'),
     files: pickValue('files'),
+    execution: pickValue('execution'),
+    tools: pickValue('tools'),
+    tasks: pickValue('tasks'),
     metadata: pickValue('metadata'),
   }
   const out: Record<string, unknown> = {}
@@ -666,8 +750,12 @@ function c09RichFields(activity: Record<string, unknown>, patch: Record<string, 
 }
 
 /** C09 活动终态幂等：与 mergeToolActivity 同构——终态后迟到事件仅补缺字段，不回退状态。 */
+const ACTIVITY_TERMINAL_STATUSES: ReadonlySet<string> = new Set([
+  'completed', 'failed', 'interrupted', 'cancelled', 'timeout',
+])
+
 function mergeActivityTerminal(previous: WorkbenchActivityNode | undefined, next: WorkbenchActivityNode): WorkbenchActivityNode | null {
-  if (!previous || !TERMINAL_TOOL_STATUSES.has(previous.status)) return null
+  if (!previous || !ACTIVITY_TERMINAL_STATUSES.has(previous.status)) return null
   const filled: Record<string, unknown> = { ...previous }
   for (const [key, value] of Object.entries(next)) {
     if (value === undefined) continue

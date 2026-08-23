@@ -23,9 +23,14 @@ describe('C09 React fatal fallback: subagent/delegation/team activities', () => 
         {
           id: 'sub-1', kind: 'activity', activityKind: 'subagent', semanticKind: 'activity.subagent',
           title: 'Explore repo', status: 'failed', parentId: 'team-1', depth: 2,
-          goal: 'find call sites', orphan: true,
-          error: { userSummary: '子代理连接丢失' },
-          provenance: { origin: 'local-observed', trust: 'authoritative' },
+          goal: 'find call sites', description: 'Inspect renderer seams', orphan: true,
+          usage: { inputTokens: 1200, outputTokens: 340 },
+          metrics: { toolCount: 4, taskCount: 2, durationMs: 900, costUsd: 0.03 },
+          files: { read: ['src/a.ts'], written: ['src/b.ts'] },
+          execution: { mode: 'remote', background: true, team: 'renderer' },
+          output: [{ kind: 'text', text: 'Found 12 call sites' }],
+          error: { userSummary: '子代理连接丢失', recoverability: 'retry' },
+          provenance: { origin: 'recovery-import', trust: 'unverified', orderConfidence: 'observed' },
           sequence: 2,
         } as WorkbenchDocument['activities'][number],
       ],
@@ -51,6 +56,12 @@ describe('C09 React fatal fallback: subagent/delegation/team activities', () => 
     expect(child).toHaveTextContent('depth 2')
     expect(child).toHaveTextContent('parent team-1')
     expect(child).toHaveTextContent('目标：find call sites')
+    expect(child).toHaveTextContent('Inspect renderer seams')
+    expect(child).toHaveTextContent('Found 12 call sites')
+    expect(child).toHaveTextContent('1200')
+    expect(child).toHaveTextContent('src/a.ts')
+    expect(child).toHaveTextContent('remote')
+    expect(child).toHaveTextContent('recovery-import')
     expect(child).toHaveTextContent('子代理连接丢失')
   })
 

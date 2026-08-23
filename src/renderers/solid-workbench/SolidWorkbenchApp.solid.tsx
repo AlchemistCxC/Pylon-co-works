@@ -3,7 +3,7 @@ import { buildChatRowDescriptors } from '../../components/chat/chatRowPipeline.t
 import { buildMessageLookups } from '../../components/chat/messageLookups.ts'
 import { prepareMessages } from '../../components/chat/messagePipeline.ts'
 import type { Message, RenderMessage } from '../../components/chat/messageTypes.ts'
-import { toolInvocationSnapshot, type WorkbenchActivityNode, type WorkbenchDocument } from '../../domains/workbench/workbenchProjector.ts'
+import { selectActivityDisplayOrder, toolInvocationSnapshot, type WorkbenchActivityNode, type WorkbenchDocument } from '../../domains/workbench/workbenchProjector.ts'
 import { isValidDiffContentInput, isValidLspDiagnosticContentInput, type ContentPart, type LspDiagnosticContentPart } from '../../domains/workbench/content/contentPartSchema.ts'
 import { diffSnapshotFromPart } from '../../domains/workbench/diffSnapshot.ts'
 import type { InteractionRequest } from '../../domains/activity/interaction.ts'
@@ -34,6 +34,8 @@ import { SolidDiffContent, SolidLspDiagnosticContent } from './chat/content/Diff
 import { SolidLogBlock, SolidProcessActivity, SolidTerminalBlock } from './chat/content/TerminalBlock.solid.tsx'
 import { SolidSubagentCard } from './chat/content/SubagentCard.solid.tsx'
 import type { RenderCommandPort } from '../../contracts/messageRenderer.ts'
+import { canExecuteRendererSemanticCommand, executeRendererSemanticCommand } from '../../host/renderer-suite/rendererSemanticCommand.ts'
+import { normalizeWorkbenchMountInput } from './workbenchContracts.ts'
 
 export interface SolidWorkbenchAppProps {
   context: SolidWorkbenchContextValue
@@ -238,7 +240,7 @@ function WorkbenchDocumentSurface(props: {
           </Show>
           <Show when={document().activities.length > 0}>
             <div class="solid-workbench-activities" aria-label="活动" data-activity-count={document().activities.length}>
-              <Index each={document().activities}>{activity => (
+              <Index each={selectActivityDisplayOrder(document())}>{activity => (
                 <CanonicalActivitySlot
                   activity={activity()}
                   document={document()}
@@ -667,31 +669,15 @@ function fallbackRenderCommands(context: SolidWorkbenchContextValue): RenderComm
   const sessionId = context.input().sessionId
   const capabilities = context.hostPort?.capabilities
   return {
-    canExecute: type => Boolean(sessionId && (
-      type === 'resource.open' ? capabilities?.has('resourceOpen')
-        : type === 'clipboard.write' ? capabilities?.has('clipboardWrite')
-          : type === 'interaction.respond' ? capabilities?.has('interactionResponse')
-            : type === 'activity.cancel' ? capabilities?.has('cancel')
-              : type === 'activity.retry' ? capabilities?.has('retry')
-                : false
-   )),
+    canExecute: type => Boolean(sessionId && capabilities && canExecuteRendererSemanticCommand(type, capabilities)),
     execute: command => {
-      if (!sessionId) return
-      if (command.type === 'resource.open' && command.payload && typeof command.payload === 'object') {
-        void context.commands.openResource(sessionId, command.payload)
-      } else if (command.type === 'clipboard.write' && command.payload && typeof command.payload === 'object') {
-        const text = (command.payload as { text?: unknown }).text
-        if (typeof text === 'string') void context.commands.copy(sessionId, text)
-      } else if (command.type === 'interaction.respond' && command.targetId) {
-        void context.commands.respondInteraction(sessionId, command.targetId, command.payload)
-      } else if (command.type === 'activity.cancel') {
-        void context.commands.cancel(sessionId)
-      } else if (command.type === 'activity.retry') {
-        const messageId = command.payload && typeof command.payload === 'object'
-          && typeof (command.payload as Record<string, unknown>).messageId === 'string'
-          ? (command.payload as Record<string, unknown>).messageId as string : undefined
-        void context.commands.retry(sessionId, messageId)
-      }
+      const host = context.hostPort
+      if (!host) return
+      void executeRendererSemanticCommand({
+        command,
+        host,
+        mountInput: normalizeWorkbenchMountInput(context.input()),
+      })
     },
   }
 }

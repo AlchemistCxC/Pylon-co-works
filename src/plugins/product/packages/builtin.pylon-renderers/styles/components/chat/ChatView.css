@@ -1110,10 +1110,10 @@
 .term-subagent-card {
   display: grid;
   gap: var(--ui-space-2);
-  width: min(100%, 960px);
+  width: min(100%, var(--subagent-card-width, 960px));
   margin: var(--ui-space-2) 0;
   border: var(--line-width-1) solid var(--border);
-  border-inline-start: var(--line-width-3) solid var(--accent);
+  border-inline-start: var(--line-width-3) solid var(--subagent-tree-color, var(--accent));
   padding: var(--ui-space-3);
   color: var(--text);
   background: var(--bg-panel, transparent);
@@ -1154,7 +1154,10 @@
   color: var(--warning, #d29922);
 }
 /* 树模式：depth 决定缩进（identity 边派生，不从文本猜） */
-.term-subagent-card[data-depth] { margin-inline-start: calc(var(--ui-space-4) * min(var(--subagent-depth, 0), 6)); }
+.term-subagent-card[data-view-mode="tree"][data-depth] { margin-inline-start: calc(var(--subagent-indent, var(--ui-space-4)) * min(var(--subagent-depth, 0), 6)); }
+.term-subagent-card[data-view-mode="cards"] { margin-inline-start: 0; border-inline-start-color: var(--border); }
+.term-subagent-card[data-tree-line="dashed"] { border-inline-start-style: dashed; }
+.term-subagent-card[data-tree-line="none"] { border-inline-start-color: transparent; }
 .term-subagent-card[data-status="failed"] { border-inline-start-color: var(--danger, #e5484d); }
 .term-subagent-card[data-density="compact"] { gap: var(--ui-space-1); padding: var(--ui-space-2); }
 .term-subagent-card[data-reduced-motion="true"] {

@@ -1,6 +1,6 @@
 import { Show, createEffect, createSignal, onCleanup, onMount, type JSX } from 'solid-js'
 import type { RenderAppearanceSnapshot, RenderCommandPort, RenderNodeSnapshot, RenderSurface } from '../../../contracts/messageRenderer.ts'
-import { executeRendererSemanticCommand, isRenderSemanticCommand } from '../../../host/renderer-suite/rendererSemanticCommand.ts'
+import { canExecuteRendererSemanticCommand, executeRendererSemanticCommand, isRenderSemanticCommand } from '../../../host/renderer-suite/rendererSemanticCommand.ts'
 import type { RendererSlotContribution } from '../../../plugin-runtime/renderers/rendererSuiteTypes.ts'
 import type { RegistryEntry } from '../../../plugin-runtime/registry/types.ts'
 import type { SolidWorkbenchContextValue } from '../SolidWorkbenchContext.solid.tsx'
@@ -37,19 +37,7 @@ export function SolidRendererSlotHost(props: {
     execute: executeSemanticCommand,
     canExecute: commandType => {
       const capabilities = props.context.hostPort?.capabilities
-      if (!capabilities) return false
-      switch (commandType) {
-        case 'clipboard.write': return capabilities.has('clipboardWrite')
-        case 'interaction.respond': return capabilities.has('interactionResponse')
-        case 'tool.action': return capabilities.has('toolAction')
-        case 'resource.open': return capabilities.has('resourceOpen')
-        case 'resource.reveal': return capabilities.has('resourceReveal')
-        case 'message.retry': return capabilities.has('retry')
-        case 'activity.cancel': return capabilities.has('cancel')
-        case 'activity.retry': return capabilities.has('retry')
-        case 'session.recover': return capabilities.has('recovery')
-        default: return false
-      }
+      return capabilities ? canExecuteRendererSemanticCommand(commandType, capabilities) : false
     },
   }
 

@@ -1,6 +1,7 @@
 import type { RenderKindDefinition } from '../../plugin-runtime/renderers/rendererTypes.ts'
 import type { RendererSettingsSchema } from '../../plugin-runtime/renderers/rendererSettingsTypes.ts'
 import { isJsonValue, parseContentPart } from '../workbench/content/contentPartSchema.ts'
+import { isActivityStatus } from '../workbench/events/workbenchEventSchema.ts'
 import { TERMINAL_LOG_DEFAULT_TOKENS, TERMINAL_LOG_SETTINGS } from './textRenderKindCatalog.ts'
 
 export function isProcessActivitySnapshotInput(input: unknown): boolean {
@@ -29,13 +30,25 @@ export function isSubagentActivitySnapshotInput(input: unknown): boolean {
     || typeof input.id !== 'string' || !input.id.trim()
     || input.kind !== 'activity'
     || !(input.activityKind === 'subagent' || input.activityKind === 'delegation' || input.activityKind === 'team')
-    || typeof input.status !== 'string' || !input.status.trim()) return false
-  for (const key of ['semanticKind', 'title', 'parentId', 'role', 'model', 'provider', 'goal'] as const) {
+    || input.semanticKind !== `activity.${input.activityKind}`
+    || !isActivityStatus(input.status)) return false
+  for (const key of [
+    'title', 'parentId', 'sourceAgentId', 'description', 'startedAt', 'completedAt',
+    'role', 'model', 'provider', 'goal',
+  ] as const) {
     if (input[key] !== undefined && (typeof input[key] !== 'string' || !input[key].trim())) return false
   }
   if (input.depth !== undefined && (typeof input.depth !== 'number' || !Number.isFinite(input.depth) || input.depth < 0)) return false
-  for (const key of ['progress', 'result', 'usage', 'files', 'metadata', 'capabilities', 'parts'] as const) {
+  for (const key of ['progress', 'result', 'usage', 'files', 'metadata', 'capabilities'] as const) {
     if (input[key] !== undefined && !isJsonValue(input[key])) return false
+  }
+  for (const key of ['parts', 'output'] as const) {
+    if (input[key] !== undefined && (!Array.isArray(input[key]) || !input[key].every(part => parseContentPart(part).ok))) return false
+  }
+  if (input.metrics !== undefined && !isActivityMetrics(input.metrics)) return false
+  if (input.execution !== undefined && (!isRecord(input.execution) || !isJsonValue(input.execution))) return false
+  for (const key of ['tools', 'tasks'] as const) {
+    if (input[key] !== undefined && (!Array.isArray(input[key]) || !input[key].every(isJsonValue))) return false
   }
   return true
 }
@@ -105,16 +118,31 @@ const SUBAGENT_WORKFLOW_SETTINGS = Object.freeze({
           { value: 'comfortable', label: '舒适' }, { value: 'compact', label: '紧凑' }
         ], default: 'comfortable' },
         { key: 'showIdentity', label: '显示身份元数据', type: 'boolean', presentation: 'toggle', default: true },
+        { key: 'identityMarker', label: '身份标记', type: 'choice', presentation: 'segmented', options: [
+          { value: 'glyph', label: '图标' }, { value: 'avatar', label: '头像' }, { value: 'none', label: '隐藏' },
+        ], default: 'glyph' },
+        { key: 'cardWidth', label: '卡片宽度', type: 'number', presentation: 'slider+input', min: 240, max: 1600, step: 20, unit: 'px', default: 960 },
+        { key: 'viewMode', label: '布局', type: 'choice', presentation: 'segmented', options: [
+          { value: 'tree', label: '树' }, { value: 'cards', label: '卡片' },
+        ], default: 'tree' },
+        { key: 'treeLineStyle', label: '树线样式', type: 'choice', presentation: 'segmented', options: [
+          { value: 'solid', label: '实线' }, { value: 'dashed', label: '虚线' }, { value: 'none', label: '隐藏' },
+        ], default: 'solid' },
+        { key: 'treeLineColor', label: '树线颜色', type: 'color', presentation: 'palette+picker', alpha: true, default: 'var(--accent)' },
+        { key: 'indent', label: '层级缩进', type: 'number', presentation: 'slider+input', min: 0, max: 80, step: 2, unit: 'px', default: 24 },
       ],
     },
     {
       id: 'behaviour', label: '子代理行为', layout: 'grid', fields: [
         { key: 'stats', label: '统计列', type: 'multi-choice', presentation: 'checklist', options: [
-          { value: 'usage', label: '用量' }, { value: 'files', label: '文件数' }, { value: 'progress', label: '进度' }
-        ], default: ['usage', 'files', 'progress'] },
+          { value: 'usage', label: '用量' }, { value: 'files', label: '文件数' }, { value: 'progress', label: '进度' },
+          { value: 'metrics', label: '工具/任务/耗时' },
+        ], default: ['usage', 'files', 'progress', 'metrics'] },
         { key: 'statusPalette', label: '状态配色', type: 'choice', presentation: 'select', options: [
           { value: 'semantic', label: '语义色' }, { value: 'mono', label: '单色' }
         ], default: 'semantic' },
+        { key: 'defaultExpandedDepth', label: '默认展开深度', type: 'number', presentation: 'slider+input', min: 0, max: 12, step: 1, default: 2 },
+        { key: 'showAggregate', label: '显示聚合统计', type: 'boolean', presentation: 'toggle', default: true },
       ],
     },
   ],
@@ -122,7 +150,8 @@ const SUBAGENT_WORKFLOW_SETTINGS = Object.freeze({
 
 const SUBAGENT_WORKFLOW_DEFAULT_TOKENS = Object.freeze({
   density: 'comfortable', showIdentity: true, retainedLines: 2000,
-  stats: ['usage', 'files', 'progress'], statusPalette: 'semantic',
+  identityMarker: 'glyph', cardWidth: 960, viewMode: 'tree', treeLineStyle: 'solid', treeLineColor: 'var(--accent)', indent: 24,
+  stats: ['usage', 'files', 'progress', 'metrics'], statusPalette: 'semantic', defaultExpandedDepth: 2, showAggregate: true,
 })
 
 export const BUILTIN_EXECUTION_RENDER_KINDS: readonly RenderKindDefinition[] = Object.freeze([
@@ -174,4 +203,19 @@ export function isBackgroundTaskActivitySnapshotInput(input: unknown): boolean {
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value)
+}
+
+const ACTIVITY_METRIC_KEYS: ReadonlySet<string> = new Set(['toolCount', 'taskCount', 'durationMs', 'costUsd'])
+
+function isActivityMetrics(value: unknown): boolean {
+  if (!isRecord(value) || !Object.keys(value).every(key => ACTIVITY_METRIC_KEYS.has(key))) return false
+  for (const key of ['toolCount', 'taskCount'] as const) {
+    const metric = value[key]
+    if (metric !== undefined && (typeof metric !== 'number' || !Number.isInteger(metric) || metric < 0)) return false
+  }
+  for (const key of ['durationMs', 'costUsd'] as const) {
+    const metric = value[key]
+    if (metric !== undefined && (typeof metric !== 'number' || !Number.isFinite(metric) || metric < 0)) return false
+  }
+  return true
 }

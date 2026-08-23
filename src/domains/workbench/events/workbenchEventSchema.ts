@@ -62,6 +62,17 @@ export interface GoalEvent {
   readonly goalId?: string
 }
 
+export const ACTIVITY_STATUSES = Object.freeze([
+  'pending', 'starting', 'running', 'paused', 'completed', 'failed', 'interrupted',
+  'cancel-requested', 'cancelled', 'timeout', 'blocked', 'unknown',
+] as const)
+export type ActivityStatus = (typeof ACTIVITY_STATUSES)[number]
+const ACTIVITY_STATUS_SET: ReadonlySet<string> = new Set(ACTIVITY_STATUSES)
+
+export function isActivityStatus(value: unknown): value is ActivityStatus {
+  return typeof value === 'string' && ACTIVITY_STATUS_SET.has(value)
+}
+
 export interface ActivityEvent {
   readonly type: 'activity.started' | 'activity.progress' | 'activity.completed' | 'activity.failed' | 'activity.cancelled'
   readonly activity?: JsonValue
