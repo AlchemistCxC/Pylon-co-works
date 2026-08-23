@@ -615,10 +615,16 @@ async fn handle_session_update<R: tauri::Runtime>(
     }
     // C1：广播旧轨已拆除——SESSION_UPDATE 仅走 Channel（信封帧）；未注册 source
     // （平台会话 / 未升级前端）仍走既有 emit_event_all（gateway.deliver_all 同源独立）。
-    let channel = update_channels
-        .lock()
-        .ok()
-        .and_then(|map| map.get(&source).cloned());
+    // 平台源（qq:* 等）永远走广播路径：deliver_all 是其唯一出站通道，Channel 只服务
+    // GUI 流式回显。即使未来误为平台源注册 channel 也不得截胡平台投递（防御深度）。
+    let channel = if gateway.is_platform_source(&source) {
+        None
+    } else {
+        update_channels
+            .lock()
+            .ok()
+            .and_then(|map| map.get(&source).cloned())
+    };
     if let Some(channel) = channel {
         let frame = serde_json::json!({
             "event": crate::event_names::SESSION_UPDATE,
