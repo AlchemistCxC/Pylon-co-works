@@ -41,9 +41,9 @@ describe('ISSUE-13 W2 左侧 domain 导航', () => {
     expect(nav().queryByRole('button', { name: '专家' })).toBeNull()
   })
 
-  it('默认显示外观域分区（模板库/全局/左栏/终端/中控区/右栏）', () => {
+  it('默认显示外观域分区（模板库/全局/侧栏/消息流/中控台/右栏）——K-2 重命名', () => {
     render(<Settings />)
-    for (const section of ['模板库', '全局', '左栏', '终端', '中控区', '右栏']) {
+    for (const section of ['模板库', '全局', '侧栏', '消息流', '中控台', '右栏']) {
       expect(navButton(section)).toBeInTheDocument()
     }
   })
@@ -73,8 +73,40 @@ describe('ISSUE-13 W2 左侧 domain 导航', () => {
     render(<Settings />)
     fireEvent.click(navButton('工作区'))
     fireEvent.click(navButton('外观'))
-    for (const section of ['模板库', '全局', '左栏', '终端', '中控区', '右栏']) {
+    for (const section of ['模板库', '全局', '侧栏', '消息流', '中控台', '右栏']) {
       expect(navButton(section)).toBeInTheDocument()
     }
+  })
+})
+
+describe('K-2 左栏二级折叠导航（施工书 09）', () => {
+  beforeEach(() => {
+    localStorage.clear()
+    resetStores()
+    invoke.mockReset()
+    Element.prototype.scrollIntoView = vi.fn()
+  })
+
+  it('有 ≥2 组的 section 显示折叠箭头，点击展开二级项', () => {
+    render(<Settings />)
+    const navEl = document.querySelector('.settings-nav') as HTMLElement
+    const w = within(navEl)
+    // 消息流（chat zone，12 组）应有展开控件
+    const chatBtn = w.getByRole('button', { name: /消息流/ })
+    expect(chatBtn.getAttribute('aria-expanded')).not.toBeNull()
+    // 默认收起：二级项不可见
+    expect(w.queryByRole('button', { name: '语法高亮' })).toBeNull()
+    fireEvent.click(chatBtn)
+    // 展开后二级项可见（组锚点）
+    expect(w.getByRole('button', { name: '背景' })).toBeInTheDocument()
+    expect(w.getByRole('button', { name: '语法高亮' })).toBeInTheDocument()
+  })
+
+  it('页面自有 section（无 zone/组）不显示折叠箭头', () => {
+    render(<Settings />)
+    const navEl = document.querySelector('.settings-nav') as HTMLElement
+    // 模板库是外观 domain 的 page-owned section（无 zone → 无二级）
+    const tpl = within(navEl).getByRole('button', { name: '模板库' })
+    expect(tpl.getAttribute('aria-expanded')).toBeNull()
   })
 })

@@ -2,6 +2,7 @@ import { useState, useEffect, useSyncExternalStore } from 'react'
 import { IS_TAURI } from '../infrastructure/tauri/env'
 import { invoke } from '@tauri-apps/api/core'
 import { createAgentClient } from '../infrastructure/acp/agentClient'
+import { GROUP_ORDER } from '../themeFieldDefs'
 import { ZoneGroupFields } from '../themeFieldRenderer'
 import { useStore } from '../store'
 import { useIdentityStore } from '../identityStore'
@@ -268,6 +269,24 @@ export default function Settings({ onClose, activeSessionId, initialDomain, init
     writeDensity(d, (key, v) => window.localStorage.setItem(key, v))
   }
 
+  // K-2：左栏二级折叠导航展开态（session 内 UI 态；打开设置默认收起）
+  const [navExpanded, setNavExpanded] = useState<ReadonlySet<string>>(new Set())
+  const toggleNavSection = (section: string) => {
+    setNavExpanded(prev => {
+      const next = new Set(prev)
+      if (next.has(section)) next.delete(section)
+      else next.add(section)
+      return next
+    })
+  }
+  // section → 二级项（组标题）。链A 从 GROUP_ORDER[zone] 派生；无 zone 或 <2 组返回空（不显示箭头）
+  const navGroupsFor = (section: SettingsSectionId): readonly string[] => {
+    const zone = sectionZone(section)
+    if (!zone) return []
+    const groups = (GROUP_ORDER[zone] ?? []).flatMap(block => [...block.groups.map(g => g.title)])
+    return groups.length >= 2 ? groups : []
+  }
+
   // I13-W1：section → 内容（复用既有块/组件，视觉 token 与字段行为不变）
   const renderSection = (section: SettingsSectionId) => {
     switch (section) {
@@ -485,13 +504,43 @@ export default function Settings({ onClose, activeSessionId, initialDomain, init
             <div className="settings-nav-label">{activeDomainConfig.label} 分区</div>
             {activeDomainConfig.sections.map(section => {
               const zone = sectionZone(section)
+              const subGroups = navGroupsFor(section)
+              const expanded = navExpanded.has(section)
+              const label = SETTINGS_SECTION_LABELS[section]
+              const hasSub = subGroups.length > 0
               return (
-                <button type="button" key={section}
-                  className={`set-nav-btn ${!activePluginPageId && activeSection === section ? 'active' : ''}${zone && custom[zone] ? ' custom' : ''}`}
-                  onClick={() => { setActivePluginPageId(null); setActiveSection(section) }}
-                  title={zone && custom[zone] ? '该区有未保存的自定义改动' : undefined}>
-                  {SETTINGS_SECTION_LABELS[section]}
-                </button>
+                <div key={section} className="settings-nav-section-block">
+                  <button type="button"
+                    className={`set-nav-btn ${!activePluginPageId && activeSection === section ? 'active' : ''}${zone && custom[zone] ? ' custom' : ''}`}
+                    aria-expanded={hasSub ? expanded : undefined}
+                    onClick={() => {
+                      setActivePluginPageId(null)
+                      setActiveSection(section)
+                      if (hasSub) toggleNavSection(section)
+                    }}
+                    title={zone && custom[zone] ? '该区有未保存的自定义改动' : undefined}>
+                    {hasSub && <span className="settings-nav-caret" aria-hidden="true">{expanded ? '▾' : '▸'}</span>}
+                    {label}
+                  </button>
+                  {hasSub && expanded && (
+                    <div className="settings-nav-subgroups">
+                      {subGroups.map(title => (
+                        <button type="button" key={title} className="set-nav-btn subgroup"
+                          onClick={e => {
+                            e.stopPropagation()
+                            setActivePluginPageId(null)
+                            setActiveSection(section)
+                            // 锚点滚动：等 section 渲染后按组标题定位（下一帧）
+                            requestAnimationFrame(() => {
+                              document.querySelector(`[data-group-anchor="${CSS.escape(title)}"]`)?.scrollIntoView({ block: 'start', behavior: 'smooth' })
+                            })
+                          }}>
+                          {title}
+                        </button>
+                      ))}
+                    </div>
+                  )}
+                </div>
               )
             })}
             {activeDomain === 'plugins' && pluginSettingsPages.map(entry => (

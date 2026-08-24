@@ -56,10 +56,10 @@ export const SETTINGS_DOMAIN_BY_ID: Record<SettingsDomainId, SettingsDomain> = O
 export const SETTINGS_SECTION_LABELS: Record<SettingsSectionId, string> = {
   templates: '模板库',
   global: '全局',
-  sidebar: '左栏',
-  chat: '终端',
+  sidebar: '侧栏',
+  chat: '消息流',
   renderers: '渲染器',
-  cc: '中控区',
+  cc: '中控台',
   right: '右栏',
   window: '窗口',
   pet: '宠物',

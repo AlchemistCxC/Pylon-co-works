@@ -64,7 +64,7 @@ function Group({ title, children, defaultOpen, forceOpen }: { title: string; chi
   const [open, setOpen] = useState(defaultOpen ?? true)
   const visible = open || forceOpen === true
   return (
-    <div className="set-group">
+    <div className="set-group" data-group-anchor={title}>
       <button type="button" className="set-group-title" aria-expanded={visible} onClick={() => setOpen(!visible)}>
         <span className="set-group-arrow">{visible ? '▾' : '▸'}</span>
         {title}
