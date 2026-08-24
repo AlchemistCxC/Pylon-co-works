@@ -34,7 +34,7 @@ import PluginSettingsPageHost from './settings/PluginSettingsPageHost'
 import InterfaceModePicker from './settings/InterfaceModePicker.tsx'
 import SettingsSectionHeader from './settings/SettingsSectionHeader.tsx'
 import { readDensity, writeDensity, readPinned, writePinned, PINNED_LIMIT, safeStorage, type SettingsDensity } from './settings/settingsChromeState.ts'
-import { getPluginServiceRegistry, getPluginSettingsPageRegistry } from '../plugin-runtime/runtimeServices.ts'
+import { getPluginServiceRegistry, getPluginSettingsPageRegistry, getRendererRegistry } from '../plugin-runtime/runtimeServices.ts'
 // I13-W1：Settings 一级信息架构唯一真值（domain → section + 字段归属派生）
 import { SETTINGS_DOMAIN_BY_ID, SETTINGS_DOMAINS, SETTINGS_SECTION_LABELS, sectionZone, type SettingsDomainId, type SettingsSectionId } from '../settingsDomains'
 
@@ -293,6 +293,18 @@ const activeDomainConfig = SETTINGS_DOMAIN_BY_ID[activeDomain]
   }
   // section → 二级项（组标题）。链A 从 GROUP_ORDER[zone] 派生；无 zone 或 <2 组返回空（不显示箭头）
   const navGroupsFor = (section: SettingsSectionId): readonly string[] => {
+    // K-2 补遗：渲染器 section 的二级项 = 链B schema entries（suite/slot/kind），与 Panel 渲染序一致
+    if (section === 'renderers') {
+      try {
+        const labels = getRendererRegistry().snapshot()
+          .rendererSuites.filter(entry => entry.value.settings).map(entry => entry.value.label)
+          .concat(getRendererRegistry().snapshot().rendererSlots
+            .filter(entry => entry.value.settings).map(entry => entry.value.label ?? entry.value.id))
+          .concat(getRendererRegistry().snapshot().renderKinds
+            .filter(entry => entry.value.settings).map(entry => entry.value.id))
+        return labels.length >= 2 ? [...new Set(labels)] : []
+      } catch { return [] }
+    }
     const zone = sectionZone(section)
     if (!zone) return []
     const groups = (GROUP_ORDER[zone] ?? []).flatMap(block => [...block.groups.map(g => g.title)])
