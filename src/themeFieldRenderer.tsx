@@ -20,7 +20,7 @@ import type { RegistryEntry } from './plugin-runtime/registry/types.ts'
  * compact 紧凑行、h3 分区。
  */
 
-interface RenderCtx {
+export interface RenderCtx {
   t: ThemeSettings & { ccEditMode: boolean }
   onChange: (partial: Partial<ThemeSettings>) => void
   /** 设置搜索：按字段 label 过滤；非空时强制展开全部匹配组 */
