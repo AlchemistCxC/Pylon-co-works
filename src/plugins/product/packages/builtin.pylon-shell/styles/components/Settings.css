@@ -630,6 +630,14 @@
 }
 
 /* ── K-2：左栏二级折叠导航 ── */
+.settings-nav-section-row {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  min-width: 0;
+  width: 100%;
+}
+
 .settings-nav-section-block {
   display: flex;
   flex-direction: column;
@@ -708,4 +716,50 @@
 .renderer-slider-thumb:focus-visible {
   outline: 2px solid var(--accent, #6ea8fe);
   outline-offset: 2px;
+}
+
+/* ── K-4：收藏置顶星标（hover 显示，拍板 D4-A）── */
+.settings-nav-pin {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 16px;
+  height: 16px;
+  margin-left: auto;
+  flex-shrink: 0;
+  border: none;
+  background: none;
+  font-size: 10px;
+  color: var(--text-dim, var(--text-secondary, #999));
+  opacity: 0;
+  transition: opacity 120ms ease;
+}
+
+.set-nav-btn:hover .settings-nav-pin,
+.settings-nav-section-row:hover .settings-nav-pin,
+.settings-nav-pin:focus-visible,
+.settings-nav-pin.pinned {
+  opacity: 1;
+}
+
+.settings-nav-pin.pinned {
+  color: var(--accent, #6ea8fe);
+}
+
+.set-nav-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  text-align: start;
+}
+
+.settings-nav-label-text {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.settings-nav-subgroups .settings-nav-label-text {
+  display: inline;
 }

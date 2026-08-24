@@ -33,7 +33,7 @@ import RendererSettingsPanel from './settings/RendererSettingsPanel'
 import PluginSettingsPageHost from './settings/PluginSettingsPageHost'
 import InterfaceModePicker from './settings/InterfaceModePicker.tsx'
 import SettingsSectionHeader from './settings/SettingsSectionHeader.tsx'
-import { readDensity, writeDensity, type SettingsDensity } from './settings/settingsChromeState.ts'
+import { readDensity, writeDensity, readPinned, writePinned, PINNED_LIMIT, type SettingsDensity } from './settings/settingsChromeState.ts'
 import { getPluginServiceRegistry, getPluginSettingsPageRegistry } from '../plugin-runtime/runtimeServices.ts'
 // I13-W1：Settings 一级信息架构唯一真值（domain → section + 字段归属派生）
 import { SETTINGS_DOMAIN_BY_ID, SETTINGS_DOMAINS, SETTINGS_SECTION_LABELS, sectionZone, type SettingsDomainId, type SettingsSectionId } from '../settingsDomains'
@@ -279,6 +279,16 @@ export default function Settings({ onClose, activeSessionId, initialDomain, init
       return next
     })
   }
+  // K-4：收藏置顶（拍板 D4-A hover 星标；上限 PINNED_LIMIT=3）
+  const [pinned, setPinned] = useState<readonly string[]>(() =>
+    readPinned(key => window.localStorage.getItem(key)))
+  const togglePinned = (section: string) => {
+    const next = pinned.includes(section)
+      ? pinned.filter(id => id !== section)
+      : [...pinned, section].slice(-PINNED_LIMIT)
+    setPinned(next)
+    writePinned(next, (key, v) => window.localStorage.setItem(key, v))
+  }
   // section → 二级项（组标题）。链A 从 GROUP_ORDER[zone] 派生；无 zone 或 <2 组返回空（不显示箭头）
   const navGroupsFor = (section: SettingsSectionId): readonly string[] => {
     const zone = sectionZone(section)
@@ -350,7 +360,7 @@ export default function Settings({ onClose, activeSessionId, initialDomain, init
               </div>}
             </Group>}
             {/* 个人信息/强调色/布局骨架/玻璃效果/字体 已声明式化（defs 组），自动获得搜索/custom/恢复默认 */}
-            <ZoneGroupFields zone="global" ctx={renderCtx} />
+            <ZoneGroupFields zone="global" ctx={renderCtx} density={density} />
           </>
         )
       case 'sidebar':
@@ -358,7 +368,7 @@ export default function Settings({ onClose, activeSessionId, initialDomain, init
           <>
             {!isSearching && <h3>左侧栏</h3>}
             {!isSearching && <ZonePresetRow zone="sidebar" activeName={deriveZoneStatus({ appliedPreset, custom }, 'sidebar').appliedName} isDirty={deriveZoneStatus({ appliedPreset, custom }, 'sidebar').isCustom} onApply={applyLocalPreset}/>}
-            <ZoneGroupFields zone="sidebar" ctx={renderCtx} />
+            <ZoneGroupFields zone="sidebar" ctx={renderCtx} density={density} />
           </>
         )
       case 'chat':
@@ -366,7 +376,7 @@ export default function Settings({ onClose, activeSessionId, initialDomain, init
           <>
             {!isSearching && <Group title="渲染风格"><PresentationProfilePicker /></Group>}
             {!isSearching && <ZonePresetRow zone="chat" activeName={deriveZoneStatus({ appliedPreset, custom }, 'chat').appliedName} isDirty={deriveZoneStatus({ appliedPreset, custom }, 'chat').isCustom} onApply={applyLocalPreset}/>}
-            <ZoneGroupFields zone="chat" ctx={renderCtx} />
+            <ZoneGroupFields zone="chat" ctx={renderCtx} density={density} />
           </>
         )
       case 'renderers':
@@ -376,7 +386,7 @@ export default function Settings({ onClose, activeSessionId, initialDomain, init
           <>
             {!isSearching && <h3>中控区</h3>}
             {!isSearching && <ZonePresetRow zone="cc" activeName={deriveZoneStatus({ appliedPreset, custom }, 'cc').appliedName} isDirty={deriveZoneStatus({ appliedPreset, custom }, 'cc').isCustom} onApply={applyLocalPreset}/>}
-            <ZoneGroupFields zone="cc" ctx={renderCtx} />
+            <ZoneGroupFields zone="cc" ctx={renderCtx} density={density} />
             {!isSearching && (
               <Group title="助手头像">
                 <div className="set-preset-row">
@@ -405,7 +415,7 @@ export default function Settings({ onClose, activeSessionId, initialDomain, init
           <>
             {!isSearching && <h3>右侧栏</h3>}
             {!isSearching && <ZonePresetRow zone="right" activeName={deriveZoneStatus({ appliedPreset, custom }, 'right').appliedName} isDirty={deriveZoneStatus({ appliedPreset, custom }, 'right').isCustom} onApply={applyLocalPreset}/>}
-            <ZoneGroupFields zone="right" ctx={renderCtx} />
+            <ZoneGroupFields zone="right" ctx={renderCtx} density={density} />
           </>
         )
       case 'agent':
@@ -501,6 +511,18 @@ export default function Settings({ onClose, activeSessionId, initialDomain, init
             ))}
           </div>
           <div className="settings-nav-group settings-nav-sections">
+            {pinned.length > 0 && (
+              <>
+                <div className="settings-nav-label">常用</div>
+                {pinned.map(section => (
+                  <button type="button" key={`pin-${section}`} className="set-nav-btn pinned"
+                    onClick={() => { setActivePluginPageId(null); setActiveSection(section as SettingsSectionId) }}>
+                    <span className="settings-nav-pin-star" aria-hidden="true">★</span>
+                    {SETTINGS_SECTION_LABELS[section as SettingsSectionId]}
+                  </button>
+                ))}
+              </>
+            )}
             <div className="settings-nav-label">{activeDomainConfig.label} 分区</div>
             {activeDomainConfig.sections.map(section => {
               const zone = sectionZone(section)
@@ -510,18 +532,24 @@ export default function Settings({ onClose, activeSessionId, initialDomain, init
               const hasSub = subGroups.length > 0
               return (
                 <div key={section} className="settings-nav-section-block">
-                  <button type="button"
-                    className={`set-nav-btn ${!activePluginPageId && activeSection === section ? 'active' : ''}${zone && custom[zone] ? ' custom' : ''}`}
-                    aria-expanded={hasSub ? expanded : undefined}
-                    onClick={() => {
-                      setActivePluginPageId(null)
-                      setActiveSection(section)
-                      if (hasSub) toggleNavSection(section)
-                    }}
-                    title={zone && custom[zone] ? '该区有未保存的自定义改动' : undefined}>
-                    {hasSub && <span className="settings-nav-caret" aria-hidden="true">{expanded ? '▾' : '▸'}</span>}
-                    {label}
-                  </button>
+                  <div className="settings-nav-section-row">
+                    <button type="button"
+                      className={`set-nav-btn ${!activePluginPageId && activeSection === section ? 'active' : ''}${zone && custom[zone] ? ' custom' : ''}`}
+                      aria-expanded={hasSub ? expanded : undefined}
+                      onClick={() => {
+                        setActivePluginPageId(null)
+                        setActiveSection(section)
+                        if (hasSub) toggleNavSection(section)
+                      }}
+                      title={zone && custom[zone] ? '该区有未保存的自定义改动' : undefined}>
+                      {hasSub && <span className="settings-nav-caret" aria-hidden="true">{expanded ? '▾' : '▸'}</span>}
+                      {label}
+                    </button>
+                    <button type="button" className={`settings-nav-pin${pinned.includes(section) ? ' pinned' : ''}`}
+                      aria-label={pinned.includes(section) ? `取消置顶 ${label}` : `置顶 ${label}`}
+                      aria-pressed={pinned.includes(section)}
+                      onClick={e => { e.stopPropagation(); togglePinned(section) }}>★</button>
+                  </div>
                   {hasSub && expanded && (
                     <div className="settings-nav-subgroups">
                       {subGroups.map(title => (

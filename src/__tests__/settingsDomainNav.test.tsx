@@ -92,7 +92,8 @@ describe('K-2 左栏二级折叠导航（施工书 09）', () => {
     const navEl = document.querySelector('.settings-nav') as HTMLElement
     const w = within(navEl)
     // 消息流（chat zone，12 组）应有展开控件
-    const chatBtn = w.getByRole('button', { name: /消息流/ })
+    const chatBtns = w.getAllByRole('button', { name: /消息流/ })
+    const chatBtn = chatBtns.find(b => b.getAttribute('aria-expanded') !== null) ?? chatBtns[0]
     expect(chatBtn.getAttribute('aria-expanded')).not.toBeNull()
     // 默认收起：二级项不可见
     expect(w.queryByRole('button', { name: '语法高亮' })).toBeNull()

@@ -289,7 +289,7 @@ function renderCompactGroup(fields: ThemeFieldKey[], ctx: RenderCtx) {
  * 渲染某 zone 的字段区：GROUP_ORDER 提供 分区（h3）→ 组（可 compact）两级。
  * 字段从 defs 按 group 自动收集；hidden 跳过、showIf 条件过滤。
  */
-export function ZoneGroupFields({ zone, ctx, basicOnly }: { zone: ZoneName; ctx: RenderCtx; basicOnly?: boolean }) {
+export function ZoneGroupFields({ zone, ctx, density = 'standard' }: { zone: ZoneName; ctx: RenderCtx; density?: 'basic' | 'standard' | 'all' }) {
   const optionRegistry = getPluginSettingOptionsRegistry()
   const settingOptionEntries = useSyncExternalStore(
     listener => optionRegistry.subscribe(listener),
@@ -309,7 +309,7 @@ export function ZoneGroupFields({ zone, ctx, basicOnly }: { zone: ZoneName; ctx:
             const fields = THEME_FIELD_KEYS.filter(key => {
               const def = THEME_FIELD_DEFS[key] as ThemeFieldDef
               return def.zone === zone && def.group === group.title && !def.hidden
-                && (!basicOnly || def.tier === 'basic')
+                && (density !== 'basic' || def.tier === 'basic')
                 && (!def.showIf || def.showIf(ctx.t as ThemeSettings))
                 && (!searching || def.label.toLowerCase().includes(query))
             })
