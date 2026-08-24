@@ -162,6 +162,7 @@ export default function AgentRendererSuiteWorkbench(props: AgentRendererSuiteWor
           sessionConfig: true,
           toolAction: false, interactionResponse: true, resourceOpen: false, resourceReveal: false,
           clipboardWrite: true, retry: false, recovery: false,
+          appearanceEdit: suiteId === 'builtin.solid',
         },
         // Suite identity is fixed for the lifetime of this port. Session binding
         // may advance, but a preparing candidate cannot retarget the old instance.

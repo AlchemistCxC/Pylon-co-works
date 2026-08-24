@@ -1,5 +1,6 @@
-import { cloneCcLayout, DEFAULT_CC_LAYOUT, setCcHiddenState, setCcScaleState } from '../../ccLayoutState.ts'
+import { cloneCcLayout, DEFAULT_CC_LAYOUT, setCcHiddenState, setCcScaleState, updateCcPlacementState } from '../../ccLayoutState.ts'
 import type { ThemeSettings } from '../../store.ts'
+import { clampCcHeight, resolveVisibleStatusWidgetCount } from '../../ccHeightState.ts'
 import {
   areWorkbenchAppearancesEqual,
   selectWorkbenchAppearance,
@@ -105,6 +106,27 @@ export function reduceAppearanceCommand(
       return { ...theme, ccHidden: setCcHiddenState(theme.ccHidden, command.id, command.hidden) }
     case 'set-cc-scale':
       return { ...theme, ccScale: setCcScaleState(theme.ccScale, command.id, command.scale) }
+    case 'set-cc-height': {
+      const ccHeight = clampCcHeight(command.height, {
+        inputMode: theme.inputMode,
+        footerLayout: theme.footerLayout,
+        hintMode: theme.cliHintMode,
+        visibleStatusWidgets: resolveVisibleStatusWidgetCount({
+          hiddenIds: theme.ccHidden,
+          inputMode: theme.inputMode,
+          ccStyle: theme.ccStyle,
+          submitButtonMode: theme.inputSubmitButtonMode,
+        }),
+        cliOverflowMode: theme.cliOverflowMode,
+      })
+      return { ...theme, ccHeight, ccBgHeight: Math.max(theme.ccBgHeight, ccHeight) }
+    }
+    case 'update-cc-placement':
+      return { ...theme, ccLayout: updateCcPlacementState(theme.ccLayout, command.id, command.placement) }
+    case 'set-cc-property':
+      return typeof command.value === 'number' && !Number.isFinite(command.value)
+        ? theme
+        : { ...theme, [command.key]: command.value }
     case 'reset-cc-layout':
       return { ...theme, ccLayout: cloneCcLayout(DEFAULT_CC_LAYOUT) }
   }

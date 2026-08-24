@@ -42,6 +42,7 @@ describe('selectWorkbenchAppearance', () => {
     expect(Object.isFrozen(snapshot.ccLayout.placements.input)).toBe(true)
     expect(Object.isFrozen(snapshot.ccHidden)).toBe(true)
     expect(Object.isFrozen(snapshot.ccScale)).toBe(true)
+    expect(Object.isFrozen(snapshot.ccProperties)).toBe(true)
     expect(Object.isFrozen(snapshot.spinner)).toBe(true)
   })
 
@@ -114,6 +115,19 @@ describe('createStaticWorkbenchAppearanceStore', () => {
     store.dispatch({ type: 'set-cc-edit-mode', enabled: false })
     expect(listener).toHaveBeenCalledTimes(3)
     expect(store.getSnapshot().ccEditMode).toBe(true)
+  })
+
+  it('编辑命令更新高度、placement 与 schema 属性，并维持约束', () => {
+    const store = createStaticWorkbenchAppearanceStore(theme())
+
+    store.dispatch({ type: 'set-cc-height', height: 160 })
+    store.dispatch({ type: 'update-cc-placement', id: 'model', placement: { offsetX: 99, offsetY: -99 } })
+    store.dispatch({ type: 'set-cc-property', key: 'modelVariant', value: 'minimal' })
+
+    expect(store.getSnapshot()).toMatchObject({ ccHeight: 160, ccBgHeight: 160, modelVariant: 'minimal' })
+    expect(store.getSnapshot().ccProperties.modelVariant).toBe('minimal')
+    expect(store.getSnapshot().ccLayout.placements.model).toMatchObject({ offsetX: 48, offsetY: -16 })
+    store.destroy()
   })
 })
 

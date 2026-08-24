@@ -17,21 +17,34 @@ export const STATUS_WIDGET_IDS: readonly CcWidgetId[] = CC_WIDGET_IDS.filter(id 
 
 // ── C4：属性表单 schema（PropertyPanel 由 registry 派生，消灭硬编码）──
 
+export type CcColorPropertyKey = 'inputBg' | 'inputTextColor' | 'cliLineColor' | 'ekgGreen' | 'ekgYellow' | 'ekgRed' | 'barTrackColor' | 'barFillColor'
+export type CcNumberPropertyKey = 'inputFontSize' | 'inputMinHeight' | 'cliLineWidth' | 'cliLinePadding' | 'ekgWidth' | 'barHeight'
+export type CcStringPropertyKey = 'inputMode' | 'inputVariant' | 'ccStyle' | 'modelVariant' | 'modeVariant' | 'sendVariant' | 'attachVariant'
+export type CcBooleanPropertyKey = 'barFillFollow'
+export type CcEditablePropertyKey = CcColorPropertyKey | CcNumberPropertyKey | CcStringPropertyKey | CcBooleanPropertyKey
+
 export type WidgetPropertyField =
   | { kind: 'section'; title: string }
-  | { kind: 'color'; key: keyof ThemeSettings; label: string }
-  | { kind: 'number'; key: keyof ThemeSettings; label: string; min: number; max: number; step?: number; suffix?: string }
+  | { kind: 'color'; key: CcColorPropertyKey; label: string }
+  | { kind: 'number'; key: CcNumberPropertyKey; label: string; min: number; max: number; step?: number; suffix?: string }
   | {
       kind: 'chips'
-      key: keyof ThemeSettings
+      key: CcStringPropertyKey
       label: string
-      options: { value: string; label: string; sync?: { key: keyof ThemeSettings; value: string } }[]
+      options: { value: string; label: string; sync?: { key: CcStringPropertyKey; value: string } }[]
     }
-  | { kind: 'chipsBool'; key: keyof ThemeSettings; label: string; trueLabel: string; falseLabel: string }
+  | { kind: 'chipsBool'; key: CcBooleanPropertyKey; label: string; trueLabel: string; falseLabel: string }
+
+export type CcPropertyCommand =
+  | { readonly type: 'set-cc-property'; readonly key: CcColorPropertyKey | CcStringPropertyKey; readonly value: string }
+  | { readonly type: 'set-cc-property'; readonly key: CcNumberPropertyKey; readonly value: number }
+  | { readonly type: 'set-cc-property'; readonly key: CcBooleanPropertyKey; readonly value: boolean }
+
+export type WidgetPropertyVisibilityContext = Pick<ThemeSettings, 'inputMode' | 'ccStyle' | 'barFillFollow'>
 
 export interface WidgetPropertyDef {
   /** 条件显示（cli 字段只在 inputMode==='cli'、ekg 三色只在 wave 等） */
-  showIf?: (theme: ThemeSettings) => boolean
+  showIf?: (theme: WidgetPropertyVisibilityContext) => boolean
 }
 
 /**

@@ -101,6 +101,59 @@ describe('WorkbenchHostPort', () => {
     await expect(host.commands.createSession()).resolves.toMatchObject({ ok: false, error: { code: 'command_capability_denied' } })
   })
 
+  it('gates appearance mutation behind the explicit appearanceEdit capability', () => {
+    const authorizedAppearance = createStaticWorkbenchAppearanceStore(structuredClone(DEFAULTS))
+    const authorized = createWorkbenchHostPort({
+      runtime: runtime(), appearance: authorizedAppearance,
+      sessionUi: createSessionUiStore(), commands: createFakeWorkbenchCommandFacade(),
+      suiteId: 'builtin.solid', sheetId: 'sheet-a', sessionOwnerKey: 'owner-a', sessionId: 's1',
+      capabilities: { appearanceEdit: true },
+    })
+    const deniedAppearance = createStaticWorkbenchAppearanceStore(structuredClone(DEFAULTS))
+    const denied = createWorkbenchHostPort({
+      runtime: runtime(), appearance: deniedAppearance,
+      sessionUi: createSessionUiStore(), commands: createFakeWorkbenchCommandFacade(),
+      suiteId: 'suite.third-party', sheetId: 'sheet-a', sessionOwnerKey: 'owner-a', sessionId: 's1',
+    })
+
+    expect(authorized.appearance.dispatch?.({ type: 'set-cc-property', key: 'modelVariant', value: 'minimal' })).toBe(true)
+    expect(authorizedAppearance.getSnapshot().modelVariant).toBe('minimal')
+    expect(denied.appearance.dispatch?.({ type: 'set-cc-property', key: 'modelVariant', value: 'minimal' })).toBe(false)
+    expect(deniedAppearance.getSnapshot().modelVariant).toBe(DEFAULTS.modelVariant)
+  })
+
+  it('production Solid appearance adapter writes through HostPort or reports a denied diagnostic', () => {
+    const authorizedAppearance = createStaticWorkbenchAppearanceStore(structuredClone(DEFAULTS))
+    const authorized = createWorkbenchHostPort({
+      runtime: runtime(), appearance: authorizedAppearance,
+      sessionUi: createSessionUiStore(), commands: createFakeWorkbenchCommandFacade(),
+      suiteId: 'builtin.solid', sheetId: 'sheet-a', sessionOwnerKey: 'owner-a', sessionId: 's1',
+      capabilities: { appearanceEdit: true },
+    })
+    const diagnostics = vi.fn()
+    const deniedAppearance = createStaticWorkbenchAppearanceStore(structuredClone(DEFAULTS))
+    const denied = createWorkbenchHostPort({
+      runtime: runtime(), appearance: deniedAppearance,
+      sessionUi: createSessionUiStore(), commands: createFakeWorkbenchCommandFacade(),
+      suiteId: 'suite.third-party', sheetId: 'sheet-a', sessionOwnerKey: 'owner-a', sessionId: 's1',
+      diagnostics,
+    })
+
+    createSolidWorkbenchServicesFromHostPort(authorized).appearance.dispatch({
+      type: 'set-cc-property', key: 'modelVariant', value: 'minimal',
+    })
+    createSolidWorkbenchServicesFromHostPort(denied).appearance.dispatch({
+      type: 'set-cc-property', key: 'modelVariant', value: 'minimal',
+    })
+
+    expect(authorizedAppearance.getSnapshot().modelVariant).toBe('minimal')
+    expect(deniedAppearance.getSnapshot().modelVariant).toBe(DEFAULTS.modelVariant)
+    expect(diagnostics).toHaveBeenCalledWith(expect.objectContaining({
+      code: 'renderer.appearance.command.denied', phase: 'action', recoverability: 'none',
+      suiteId: 'suite.third-party',
+    }))
+  })
+
   it('production Solid adapter exposes canonical plan entries without dropping blocked metadata', () => {
     const source = runtime()
     const document = projectWorkbench([createWorkbenchEnvelope({

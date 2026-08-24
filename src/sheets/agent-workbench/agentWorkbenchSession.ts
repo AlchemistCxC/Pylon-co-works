@@ -5,8 +5,7 @@ import { normalizeAgentEvent } from '../../domains/workbench/normalizers/agentEv
 import { createWorkbenchDocument, projectWorkbench, reduceWorkbenchEvent, type WorkbenchDocument } from '../../domains/workbench/workbenchProjector.ts'
 import { createWorkbenchRuntime } from '../../domains/workbench/workbenchRuntime.ts'
 import { createSessionUiStore } from '../../domains/workbench/sessionUiStore.ts'
-import { createVanillaWorkbenchAppearanceStore } from '../../domains/workbench/workbenchAppearanceStore.ts'
-import { useStore } from '../../store.ts'
+import { createZustandWorkbenchAppearanceStore } from '../../domains/workbench/zustandWorkbenchAppearanceStore.ts'
 import { IS_TAURI } from '../../infrastructure/tauri/env.ts'
 import { tauriCanonicalEventRepository } from '../../infrastructure/events/canonicalEventRepository.ts'
 import { subscribePluginEvents } from '../../infrastructure/events/pluginEventBus.ts'
@@ -75,7 +74,7 @@ export function createAgentWorkbenchSessionRuntime(dependencies: AgentWorkbenchS
     availableModels: [], activeModel: '', availableModes: [], activeMode: '', canAttach: false,
     promptImage: false, error: null, document: createWorkbenchDocument(''),
   })
-  const appearance = createVanillaWorkbenchAppearanceStore(useStore)
+  const appearance = createZustandWorkbenchAppearanceStore()
   const sessionUi = createSessionUiStore()
   let boundSessionId: string | undefined
   const commands = createAgentWorkbenchCommandFacade({

@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 import { cleanup, fireEvent, screen, waitFor } from '@solidjs/testing-library'
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import { mountSolidWorkbench } from '../mountSolidWorkbench.solid.tsx'
+import { mountSolidWorkbench, mountSolidWorkbenchFromHostPort } from '../mountSolidWorkbench.solid.tsx'
 import { createPreviewWorkbenchServices } from '../__fixtures__/previewWorkbenchServices.ts'
 import { createWorkbenchEnvelope, type WorkbenchEventEnvelope } from '../../../domains/workbench/events/workbenchEventSchema.ts'
 import { projectWorkbench, reduceWorkbenchEvent } from '../../../domains/workbench/workbenchProjector.ts'
@@ -146,6 +146,132 @@ describe('mountSolidWorkbench', () => {
     await waitFor(() => expect(host.querySelector('[data-widget-id="session"]')).toBeNull())
     expect(host.querySelector('[data-widget-id="workspace"]')).toBeNull()
     expect(host.querySelector('[data-widget-id="activity"]')).toBeNull()
+  })
+
+  it('中控编辑模式可选择并拖动 widget，布局写回 appearance 权威', async () => {
+    const { host, services } = mountPreview()
+    services.appearance.dispatch({ type: 'set-cc-edit-mode', enabled: true })
+
+    const model = await waitFor(() => {
+      const value = host.querySelector<HTMLElement>('[data-widget-id="model"]')
+      expect(value).not.toBeNull()
+      return value!
+    })
+    fireEvent.pointerDown(model, { clientX: 10, clientY: 20, pointerId: 1 })
+
+    expect(screen.getByRole('dialog', { name: '模型 属性' })).toBeTruthy()
+    fireEvent.pointerMove(window, { clientX: 34, clientY: 12, pointerId: 1 })
+    fireEvent.pointerUp(window, { pointerId: 1 })
+
+    await waitFor(() => expect(services.appearance.getSnapshot().ccLayout.placements.model).toMatchObject({ offsetX: 24, offsetY: -8 }))
+  })
+
+  it('中控编辑工具栏可隐藏、恢复、重置并退出', async () => {
+    const { host, services } = mountPreview()
+    services.appearance.dispatch({ type: 'set-cc-edit-mode', enabled: true })
+
+    expect(await screen.findByRole('toolbar', { name: '中控控件工具栏' })).toBeTruthy()
+    fireEvent.click(screen.getByRole('button', { name: '隐藏 模型' }))
+    await waitFor(() => expect(services.appearance.getSnapshot().ccHidden).toContain('model'))
+    expect(host.querySelector('[data-widget-id="model"]')).toHaveClass('cc-hidden')
+
+    fireEvent.click(screen.getByRole('button', { name: '显示 模型' }))
+    await waitFor(() => expect(services.appearance.getSnapshot().ccHidden).not.toContain('model'))
+
+    services.appearance.dispatch({ type: 'update-cc-placement', id: 'model', placement: { offsetX: 20 } })
+    fireEvent.click(screen.getByRole('button', { name: '重置控件位置' }))
+    await waitFor(() => expect(services.appearance.getSnapshot().ccLayout.placements.model.offsetX).toBe(0))
+
+    fireEvent.click(screen.getByRole('button', { name: '退出中控编辑' }))
+    await waitFor(() => expect(services.appearance.getSnapshot().ccEditMode).toBe(false))
+    expect(screen.queryByRole('toolbar', { name: '中控控件工具栏' })).toBeNull()
+  })
+
+  it('属性面板可编辑槽位、顺序、偏移、缩放和 schema 外观字段', async () => {
+    const { host, services } = mountPreview()
+    services.appearance.dispatch({ type: 'set-cc-edit-mode', enabled: true })
+    fireEvent.click(await screen.findByRole('button', { name: '模型 属性' }))
+
+    fireEvent.change(screen.getByLabelText('控件槽位'), { target: { value: 'actions' } })
+    fireEvent.input(screen.getByLabelText('控件顺序'), { target: { value: '7' } })
+    fireEvent.input(screen.getByLabelText('水平微调'), { target: { value: '12' } })
+    fireEvent.input(screen.getByLabelText('控件缩放'), { target: { value: '125' } })
+    fireEvent.click(screen.getByRole('button', { name: '简洁' }))
+
+    await waitFor(() => expect(services.appearance.getSnapshot().ccLayout.placements.model).toMatchObject({ slot: 'actions', order: 7, offsetX: 12 }))
+    expect(services.appearance.getSnapshot().ccScale.model).toBe(125)
+    expect(services.appearance.getSnapshot().modelVariant).toBe('minimal')
+    expect(host.querySelector('[data-widget-id="model"] .cc-model-minimal')).toBeTruthy()
+  })
+
+  it('属性 schema 的联动字段和条件字段在 Solid 面板中保持响应式', async () => {
+    const { services } = mountPreview()
+    services.appearance.dispatch({ type: 'set-cc-edit-mode', enabled: true })
+    fireEvent.click(await screen.findByRole('button', { name: '输入栏 属性' }))
+    fireEvent.click(screen.getByRole('button', { name: '命令行' }))
+
+    await waitFor(() => expect(services.appearance.getSnapshot()).toMatchObject({ inputMode: 'cli', inputVariant: 'cli' }))
+    const lineColor = screen.getByLabelText('边框颜色')
+    fireEvent.change(lineColor, { target: { value: '#123456' } })
+    await waitFor(() => expect(services.appearance.getSnapshot().ccProperties.cliLineColor).toBe('#123456'))
+  })
+
+  it('生产 HostPort 挂载路径可将属性面板修改写回 appearance 权威', async () => {
+    const host = document.createElement('div')
+    document.body.append(host)
+    hosts.push(host)
+    const services = createPreviewWorkbenchServices()
+    servicesList.push(services)
+    const hostPort = createWorkbenchHostPort({
+      ...services,
+      suiteId: 'builtin.solid', sheetId: 'sheet-a', sessionOwnerKey: 'owner-preview', sessionId: 'preview-session',
+      capabilities: { appearanceEdit: true },
+    })
+    const lifecycle = mountSolidWorkbenchFromHostPort({
+      host,
+      input: {
+        sheetId: 'sheet-a', sessionOwnerKey: 'owner-preview', sessionId: 'preview-session',
+        workspaceMode: 'work', replayReadonly: false, reducedMotion: true,
+        visibility: 'active', rightInset: 0, preview: true,
+      },
+      hostPort,
+    })
+    services.appearance.dispatch({ type: 'set-cc-edit-mode', enabled: true })
+
+    fireEvent.click(await screen.findByRole('button', { name: '模型 属性' }))
+    fireEvent.click(screen.getByRole('button', { name: '简洁' }))
+
+    await waitFor(() => expect(services.appearance.getSnapshot().modelVariant).toBe('minimal'))
+    lifecycle.destroy()
+  })
+
+  it('编辑器可拖动整体高度，destroy 会清理窗口级拖拽监听', async () => {
+    const { services, lifecycle } = mountPreview()
+    services.appearance.dispatch({ type: 'set-cc-edit-mode', enabled: true })
+    const initial = services.appearance.getSnapshot().ccHeight
+    const handle = await screen.findByRole('separator', { name: '调整中控高度' })
+
+    fireEvent.pointerDown(handle, { clientY: 100, pointerId: 2 })
+    fireEvent.pointerMove(window, { clientY: 80, pointerId: 2 })
+    await waitFor(() => expect(services.appearance.getSnapshot().ccHeight).toBe(initial + 20))
+
+    lifecycle.destroy()
+    fireEvent.pointerMove(window, { clientY: 40, pointerId: 2 })
+    expect(services.appearance.getSnapshot().ccHeight).toBe(initial + 20)
+  })
+
+  it('Escape 先关闭属性面板，再退出中控编辑模式', async () => {
+    const { services } = mountPreview()
+    services.appearance.dispatch({ type: 'set-cc-edit-mode', enabled: true })
+    fireEvent.click(await screen.findByRole('button', { name: '模型 属性' }))
+    expect(screen.getByRole('dialog', { name: '模型 属性' })).toBeTruthy()
+
+    fireEvent.keyDown(window, { key: 'Escape' })
+    expect(screen.queryByRole('dialog', { name: '模型 属性' })).toBeNull()
+    expect(services.appearance.getSnapshot().ccEditMode).toBe(true)
+
+    fireEvent.keyDown(window, { key: 'Escape' })
+    await waitFor(() => expect(services.appearance.getSnapshot().ccEditMode).toBe(false))
   })
 
   it('exposes ready lifecycle event and removes listeners on destroy', () => {

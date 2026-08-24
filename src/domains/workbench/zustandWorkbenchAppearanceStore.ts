@@ -24,6 +24,17 @@ function dispatchAppearanceCommand(command: AppearanceCommand): void {
     case 'set-cc-scale':
       state.setCcScale(command.id, command.scale)
       break
+    case 'set-cc-height':
+      state.setCcHeight(command.height)
+      break
+    case 'update-cc-placement':
+      state.updateCcPlacement(command.id, command.placement)
+      break
+    case 'set-cc-property':
+      if (typeof command.value !== 'number' || Number.isFinite(command.value)) {
+        state.setZoneField('cc', { [command.key]: command.value })
+      }
+      break
     case 'reset-cc-layout':
       state.resetCcLayout()
       break

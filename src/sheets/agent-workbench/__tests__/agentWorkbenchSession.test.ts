@@ -3,6 +3,7 @@ import { createWorkbenchEnvelope, type WorkbenchEventEnvelope } from '../../../d
 import type { Session } from '../../../identityStore.ts'
 import { createAgentWorkbenchSessionRuntime } from '../agentWorkbenchSession.ts'
 import { toCanonicalOwnerKey } from '../../../domains/events/eventSchema.ts'
+import { useStore } from '../../../store.ts'
 
 function session(id = 'session-a', source = 'local:a'): Session {
   return {
@@ -40,6 +41,21 @@ function canonicalRow(sequence: number, sessionUpdate: string, fields: Record<st
 }
 
 describe('Agent Workbench canonical session runtime', () => {
+  it('生产 appearance 命令经 Zustand adapter 写回主题权威', () => {
+    const service = createAgentWorkbenchSessionRuntime({ loadAll: async () => [], subscribe: () => () => {} })
+    try {
+      service.appearance.dispatch({ type: 'set-cc-property', key: 'modelVariant', value: 'minimal' })
+      service.appearance.dispatch({ type: 'update-cc-placement', id: 'model', placement: { offsetX: 18 } })
+
+      expect(useStore.getState().modelVariant).toBe('minimal')
+      expect(useStore.getState().ccLayout.placements.model.offsetX).toBe(18)
+      expect(service.appearance.getSnapshot()).toMatchObject({ modelVariant: 'minimal' })
+    } finally {
+      service.destroy()
+      useStore.setState(useStore.getInitialState(), true)
+    }
+  })
+
   it('SQLite load 与 durable live event 归入同一个 WorkbenchDocument', async () => {
     let live: ((event: WorkbenchEventEnvelope) => void) | undefined
     const service = createAgentWorkbenchSessionRuntime({

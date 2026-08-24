@@ -1,4 +1,4 @@
-import type { WorkbenchAppearanceSnapshot, WorkbenchAppearanceStore } from '../../domains/workbench/appearance.ts'
+import type { AppearanceCommand, WorkbenchAppearanceSnapshot, WorkbenchAppearanceStore } from '../../domains/workbench/appearance.ts'
 import type { SessionUiKey, SessionUiStore } from '../../domains/workbench/sessionUiStore.ts'
 import type { WorkbenchCommandFacade, SendCommand, SendResult, CancelResult, WorkbenchAttachment, SessionCreateInput, ExportSessionInput, CommandResult } from '../../domains/workbench/workbenchCommandFacade.ts'
 import type { WorkbenchDocument, WorkbenchMessage, WorkbenchActivityNode, WorkbenchInteraction, WorkbenchTimelineEntry } from '../../domains/workbench/workbenchProjector.ts'
@@ -17,6 +17,8 @@ export interface WorkbenchDocumentReader {
 export interface ResolvedAppearanceReader {
   getSnapshot(): WorkbenchAppearanceSnapshot
   subscribe(listener: () => void): () => void
+  /** Host-gated mutation seam; absent/false means the Suite is read-only. */
+  dispatch?(command: AppearanceCommand): boolean
   resolve?(request: { readonly kind: string; readonly suiteId: string; readonly slotId: string }): RenderAppearanceSnapshot
 }
 
@@ -32,7 +34,7 @@ export type WorkbenchCapability = 'prompt' | 'cancel' | 'attach' | 'model' | 'mo
   | 'sessionCreate' | 'compact' | 'sessionExport' | 'sessionClear'
   | 'sessionConfig'
   | 'toolAction' | 'interactionResponse' | 'resourceOpen' | 'resourceReveal'
-  | 'clipboardWrite' | 'retry' | 'recovery'
+  | 'clipboardWrite' | 'retry' | 'recovery' | 'appearanceEdit'
 export type WorkbenchCapabilitySnapshot = Readonly<Partial<Record<WorkbenchCapability, boolean>>>
 
 export interface WorkbenchCapabilityReader {
@@ -145,7 +147,7 @@ function createDocumentReader(runtime: WorkbenchRuntime): WorkbenchDocumentReade
   }
 }
 
-function createAppearanceReader(input: WorkbenchHostPortInput): ResolvedAppearanceReader {
+function createAppearanceReader(input: WorkbenchHostPortInput, capabilities: WorkbenchCapabilityReader): ResolvedAppearanceReader {
   let revision = 0
   const getSnapshot = () => Object.freeze({ ...input.appearance.getSnapshot(), rendererSettingsRevision: revision })
   return {
@@ -155,6 +157,11 @@ function createAppearanceReader(input: WorkbenchHostPortInput): ResolvedAppearan
       const unsubscribeHost = input.appearance.subscribe(notify)
       const unsubscribeRenderer = input.renderAppearance?.subscribe(notify) ?? (() => {})
       return () => { unsubscribeHost(); unsubscribeRenderer() }
+    },
+    dispatch(command) {
+      if (!capabilities.has('appearanceEdit')) return false
+      input.appearance.dispatch(command)
+      return true
     },
     resolve: input.renderAppearance
       ? request => input.renderAppearance!.resolve(request, getSnapshot())
@@ -255,7 +262,7 @@ export function createWorkbenchHostPort(input: WorkbenchHostPortInput): Workbenc
   }
   return Object.freeze({
     document: createDocumentReader(input.runtime),
-    appearance: createAppearanceReader(input),
+    appearance: createAppearanceReader(input, capabilities),
     sessionUi: createSessionUiPort(input.sessionUi, namespace),
     commands: createCommandPort(input.commands, capabilities),
     capabilities,

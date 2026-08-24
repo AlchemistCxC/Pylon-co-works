@@ -55,10 +55,13 @@ function createAppearance(host: WorkbenchHostPort): WorkbenchAppearanceStore {
   return {
     getSnapshot: () => host.appearance.getSnapshot(),
     subscribe: listener => host.appearance.subscribe(listener),
-    dispatch: command => host.diagnostics.report({
-      code: 'renderer.appearance.command.unsupported', message: `Suite 不能直接修改宿主外观：${command.type}`,
-      phase: 'action', recoverability: 'none',
-    }),
+    dispatch(command) {
+      if (host.appearance.dispatch?.(command) === true) return
+      host.diagnostics.report({
+        code: 'renderer.appearance.command.denied', message: `Suite 无权修改宿主外观：${command.type}`,
+        phase: 'action', recoverability: 'none',
+      })
+    },
     destroy() {},
   }
 }
