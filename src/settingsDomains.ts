@@ -15,6 +15,7 @@
  *   所属路径（T13-1）。
  */
 
+import { THEME_FIELD_DEFS, THEME_FIELD_KEYS } from './themeFieldDefs'
 import type { ZoneName } from './themeFieldDefs'
 
 export type SettingsDomainId = 'appearance' | 'workspace' | 'agents-connections' | 'plugins'
@@ -145,4 +146,46 @@ export const RENDERER_KIND_LABELS: Readonly<Record<string, string>> = {
   'diagnostic.lsp': 'LSP 诊断',
   decision: '决策请求',
   'system.hook': '钩子事件',
+}
+/**
+ * O-3 速搜定位态：全量字段索引（链A defs + 链B schema entries 派生）。
+ * 路径格式与二级导航一致：域 › 区 › 组 › 字段。
+ */
+export interface SettingsSearchItem {
+  readonly path: string          // 「外观 › 消息流 › 字体」
+  readonly label: string         // 字段名
+  readonly section: SettingsSectionId
+  readonly advanced: boolean     // D2-A：advanced 命中带徽标
+  readonly kind?: 'chain-a' | 'chain-b' | 'renderer-entry'
+}
+
+export function buildSettingsSearchIndex(rendererEntries?: readonly { value: { id: string; label?: string; settings?: unknown } }[]): readonly SettingsSearchItem[] {
+  const items: SettingsSearchItem[] = []
+  // 链A：THEME_FIELD_DEFS 按 zone 过滤
+  for (const key of THEME_FIELD_KEYS) {
+    const def: { zone: string; label: string; group?: string; hidden?: boolean; meta?: boolean; advanced?: boolean } = THEME_FIELD_DEFS[key as keyof typeof THEME_FIELD_DEFS] as never
+      if (def.hidden || def.meta) continue
+      const section = (SECTION_ZONES as Record<string, SettingsSectionId | undefined>)[def.zone]
+      if (!section) continue
+      const domain = domainOfSection(section)
+      items.push({
+        path: `${SETTINGS_DOMAIN_BY_ID[domain].label} › ${SETTINGS_SECTION_LABELS[section]}${def.group ? ` › ${def.group}` : ''}`,
+        label: def.label,
+        section,
+        advanced: def.advanced === true,
+        kind: 'chain-a',
+      })
+  }
+  // 链B：调用方注入的 renderer entries（避免本模块依赖 runtimeServices）
+  for (const entry of rendererEntries ?? []) {
+    if (!entry.value.settings) continue
+    items.push({
+      path: '外观 › 渲染器',
+      label: entry.value.label ?? entry.value.id,
+      section: 'renderers',
+      advanced: false,
+      kind: 'renderer-entry',
+    })
+  }
+  return items
 }

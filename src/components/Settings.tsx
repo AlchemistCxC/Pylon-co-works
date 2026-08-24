@@ -1,4 +1,4 @@
-import { useState, useEffect, useSyncExternalStore } from 'react'
+import { useMemo, useState, useEffect, useSyncExternalStore } from 'react'
 import { IS_TAURI } from '../infrastructure/tauri/env'
 import { invoke } from '@tauri-apps/api/core'
 import { createAgentClient } from '../infrastructure/acp/agentClient'
@@ -34,6 +34,8 @@ import RendererSettingsPanel from './settings/RendererSettingsPanel'
 import PluginSettingsPageHost from './settings/PluginSettingsPageHost'
 import InterfaceModePicker from './settings/InterfaceModePicker.tsx'
 import SettingsSectionHeader from './settings/SettingsSectionHeader.tsx'
+import SettingsQuickSearch from './settings/SettingsQuickSearch.tsx'
+import { buildSettingsSearchIndex } from '../settingsDomains'
 import { readDensity, writeDensity, readPinned, writePinned, PINNED_LIMIT, safeStorage, type SettingsDensity } from './settings/settingsChromeState.ts'
 import { getPluginServiceRegistry, getPluginSettingsPageRegistry, getRendererRegistry } from '../plugin-runtime/runtimeServices.ts'
 // I13-W1：Settings 一级信息架构唯一真值（domain → section + 字段归属派生）
@@ -313,6 +315,30 @@ const activeDomainConfig = SETTINGS_DOMAIN_BY_ID[activeDomain]
     return groups.length >= 2 ? groups : []
   }
 
+  // O-3：速搜定位态
+  const [quickSearchOpen, setQuickSearchOpen] = useState(false)
+  const quickSearchItems = useMemo(() => {
+    try {
+      const snapshot = getRendererRegistry().snapshot()
+      const entries = [...snapshot.rendererSuites, ...snapshot.rendererSlots, ...snapshot.renderKinds]
+        .map(e => ({ value: { id: e.value.id, label: ('label' in e.value ? e.value.label : undefined) as string | undefined, settings: e.value.settings } }))
+      return buildSettingsSearchIndex(entries)
+    } catch { return buildSettingsSearchIndex() }
+  }, [])
+  const navigateToField = (section: SettingsSectionId, label: string) => {
+    jumpToSection(section)
+    if (density !== 'all') changeDensity('all')  // D2-A：advanced 命中自动切全部档
+    requestAnimationFrame(() => {
+      const target = [...document.querySelectorAll('.set-group-title, .renderer-settings-group-heading h3')]
+        .find(el => el.textContent?.includes(label))
+      target?.scrollIntoView({ block: 'center', behavior: 'smooth' })
+      const group = target?.closest('[data-group-anchor], .renderer-settings-group')
+      if (group instanceof HTMLElement) {
+        group.classList.add('settings-anchor-pulse')
+        setTimeout(() => group.classList.remove('settings-anchor-pulse'), 1200)
+      }
+    })
+  }
   // F1 边界修复：section → 所属 domain 反查（SETTINGS_DOMAINS 单一真值派生）
   const domainOfSection = (section: string): SettingsDomainId | undefined =>
     SETTINGS_DOMAINS.find(d => (d.sections as readonly string[]).includes(section))?.id
@@ -590,7 +616,11 @@ const activeDomainConfig = SETTINGS_DOMAIN_BY_ID[activeDomain]
                             setActiveSection(section)
                             // 锚点滚动：等 section 渲染后按组标题定位（下一帧）
                             requestAnimationFrame(() => {
-                              document.querySelector(`[data-group-anchor="${CSS.escape(title)}"]`)?.scrollIntoView({ block: 'start', behavior: 'smooth' })
+                              const target = document.querySelector(`[data-group-anchor="${CSS.escape(title)}"]`)
+                              target?.scrollIntoView({ block: 'start', behavior: 'smooth' })
+                              // O-2：高亮脉冲 1.2s（prefers-reduced-motion 时 CSS 端自动禁用动画）
+                              target?.classList.add('settings-anchor-pulse')
+                              setTimeout(() => target?.classList.remove('settings-anchor-pulse'), 1200)
                             })
                           }}>
                           {title}
@@ -635,6 +665,12 @@ const activeDomainConfig = SETTINGS_DOMAIN_BY_ID[activeDomain]
           {activePluginPageId ? <PluginSettingsPageHost pageId={activePluginPageId} /> : renderSection(activeSection)}
         </div>
 
+        <SettingsQuickSearch
+          open={quickSearchOpen}
+          items={quickSearchItems}
+          onNavigate={navigateToField}
+          onOpenChange={setQuickSearchOpen}
+        />
         {!activePluginPageId && previewZone && (
           <div className="settings-preview-pane">
             <div className="settings-preview-label">实时预览</div>

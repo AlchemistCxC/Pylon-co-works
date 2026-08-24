@@ -763,3 +763,68 @@
 .settings-nav-subgroups .settings-nav-label-text {
   display: inline;
 }
+
+/* ── O-2：二级导航定位高亮脉冲 ── */
+@keyframes settingsAnchorPulse {
+  0% { background: color-mix(in srgb, var(--accent, #6ea8fe) 22%, transparent); }
+  100% { background: transparent; }
+}
+
+.settings-anchor-pulse {
+  animation: settingsAnchorPulse 1.2s ease-out;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .settings-anchor-pulse { animation: none; }
+}
+
+/* ── O-3：速搜定位态面板 ── */
+.settings-quicksearch-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 60;
+  background: rgba(0, 0, 0, 0.35);
+}
+
+.settings-quicksearch-dialog {
+  position: absolute;
+  top: 12%;
+  left: 50%;
+  transform: translateX(-50%);
+  width: min(560px, 90vw);
+  max-height: 70vh;
+  overflow: hidden;
+  border-radius: var(--ui-radius-lg, 12px);
+  border: 1px solid var(--ui-border, rgba(128, 128, 128, 0.3));
+  background: var(--bg-panel, #fff);
+  box-shadow: 0 18px 48px rgba(0, 0, 0, 0.25);
+}
+
+.settings-quicksearch-dialog [cmdk-input] {
+  width: 100%;
+  padding: 10px 12px;
+  border: none;
+  outline: none;
+  background: transparent;
+  color: var(--text, inherit);
+  font-size: 14px;
+}
+
+.settings-quicksearch-path {
+  font-size: 11px;
+  color: var(--text-dim, var(--text-secondary, #888));
+}
+
+.settings-quicksearch-dialog strong {
+  font-size: 13px;
+}
+
+.settings-quicksearch-adv {
+  margin-left: auto;
+  font-style: normal;
+  font-size: 10px;
+  padding: 1px 6px;
+  border-radius: var(--ui-radius-sm, 4px);
+  border: 1px solid var(--ui-border, rgba(128, 128, 128, 0.4));
+  color: var(--text-dim, var(--text-secondary, #888));
+}

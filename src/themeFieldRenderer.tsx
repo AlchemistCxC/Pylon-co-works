@@ -60,12 +60,38 @@ export function Txt({ value, onChange }: { value: string; onChange: (v: string) 
   return <input type="text" value={value} onChange={e => onChange(e.target.value)} className="set-input" />
 }
 
-function Group({ title, children, defaultOpen, forceOpen }: { title: string; children: React.ReactNode; defaultOpen?: boolean; forceOpen?: boolean }) {
-  const [open, setOpen] = useState(defaultOpen ?? true)
+// O-1（施工书 09 §K-4 遗留项）：组折叠记忆——开合态持久化到 localStorage（pylon-settings-collapse）。
+// 模块级缓存避免每次渲染都读 storage；写穿到持久层。
+let collapseMemory: Record<string, boolean> | null = null
+function readCollapseMemory(zone: string, title: string): boolean | undefined {
+  try {
+    if (collapseMemory === null) {
+      const raw = window.localStorage.getItem('pylon-settings-collapse')
+      collapseMemory = raw ? (JSON.parse(raw) as Record<string, boolean>) : {}
+    }
+    return collapseMemory[`${zone}.${title}`]
+  } catch { return undefined }
+}
+function writeCollapseMemory(zone: string, title: string, collapsed: boolean): void {
+  try {
+    if (collapseMemory === null) collapseMemory = {}
+    collapseMemory[`${zone}.${title}`] = collapsed
+    window.localStorage.setItem('pylon-settings-collapse', JSON.stringify(collapseMemory))
+  } catch { /* 禁储环境静默 */ }
+}
+
+function Group({ zone, title, children, defaultOpen, forceOpen }: { zone?: string; title: string; children: React.ReactNode; defaultOpen?: boolean; forceOpen?: boolean }) {
+  const rememberedCollapsed = zone ? readCollapseMemory(zone, title) : undefined
+  const [open, setOpen] = useState(rememberedCollapsed === undefined ? (defaultOpen ?? true) : !rememberedCollapsed)
   const visible = open || forceOpen === true
   return (
     <div className="set-group" data-group-anchor={title}>
-      <button type="button" className="set-group-title" aria-expanded={visible} onClick={() => setOpen(!visible)}>
+      <button type="button" className="set-group-title" aria-expanded={visible}
+        onClick={() => {
+          const next = !visible
+          setOpen(next)
+          if (zone) writeCollapseMemory(zone, title, !next)
+        }}>
         <span className="set-group-arrow">{visible ? '▾' : '▸'}</span>
         {title}
       </button>
@@ -321,7 +347,7 @@ export function ZoneGroupFields({ zone, ctx, density = 'standard' }: { zone: Zon
           <Fragment key={section.heading ?? si}>
             {section.heading && <h3>{section.heading}</h3>}
             {groups.map(group => (
-              <Group key={group.title} title={group.title} defaultOpen={group.defaultOpen} forceOpen={searching}>
+              <Group key={group.title} zone={zone} title={group.title} defaultOpen={group.defaultOpen} forceOpen={searching}>
                 {group.compact
                   ? renderCompactGroup(group.fields, resolvedCtx)
                   : renderGroupFields(group.fields, resolvedCtx)}
