@@ -42,7 +42,6 @@ describe('Workspace type v2 UI 生命周期', () => {
         onSelectSession={() => {}}
         onProfileEdit={() => {}}
         onSessionSettings={() => {}}
-        rightInset={0}
       />,
     )
     expect(screen.getByTestId('dynamic-workspace')).toHaveTextContent('active')

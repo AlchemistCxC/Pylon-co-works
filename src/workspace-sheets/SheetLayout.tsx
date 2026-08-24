@@ -27,7 +27,6 @@ interface SheetLayoutProps {
   onSelectSession: (id: string | null) => void
   onProfileEdit: () => void
   onSessionSettings: (id: string) => void
-  rightInset: number
 }
 
 function buildSheetContext(props: SheetLayoutProps, sidebarCollapsed: boolean): SheetContext {
@@ -42,7 +41,9 @@ function buildSheetContext(props: SheetLayoutProps, sidebarCollapsed: boolean): 
     openSessionSettings: props.onSessionSettings,
     // I09-A-FE-01（L1）：响应式订阅——原 getState() 快照在折叠变化后不触发重渲染（ctx 陈旧）
     sidebarCollapsed,
-    rightInset: props.rightInset,
+    // 右栏由 SheetRightSlot 作为 .layout 的 flex sibling 占位，主区宽度已天然扣除；
+    // renderer 再消费 rightInset 会二次挤压内容，并在折叠切换时产生异常跳宽。
+    rightInset: 0,
     ccEditMode: useStore.getState().ccEditMode,
     sessionSource: sessionId => resolveSessionSource(sessionId, useIdentityStore.getState().sessions),
     sessionBySource: source => useIdentityStore.getState().sessions.find(session => session.source === source),

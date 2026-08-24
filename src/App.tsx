@@ -280,7 +280,6 @@ export default function App() {
     })
   }, [])
 
-  const rightWidth = useStore(s => s.rightWidth)
   const themeBaseline = useStore(useShallow(s => pickThemeBaseline(s as unknown as Record<string, unknown>)))
   const skinRuntime = getSkinRuntime()
 
@@ -333,9 +332,6 @@ export default function App() {
     }).then(fn => { unlisten = fn }).catch(error => console.error('注册窗口关闭 flush 失败', error))
     return () => { unlisten?.() }
   }, [])
-  // FE-AUD-017：窄 selector 订阅折叠状态（原 getState 不响应式，rightInset 会陈旧）
-  const rightPanelCollapsed = useWorkspaceStore(state => state.rightPanelCollapsed)
-  const rightPanelInset = !rightPanelEnabled || rightPanelCollapsed ? 0 : rightWidth
   // FE-AUD-005：bootstrap 降级提示（报告阶段 2.4：Agent 列表失败可重试，不清空本地工作区）
   const hydrationStatus = useHydrationStore(state => state.status)
   const hydrationError = useHydrationStore(state => state.error)
@@ -413,7 +409,6 @@ export default function App() {
         onSelectSession={setActiveSession}
         onProfileEdit={() => setShowProfileEdit(true)}
         onSessionSettings={setSessionSettingsId}
-        rightInset={rightPanelInset}
       />
       {interfaceModeContribution.shellSurface?.placement === 'overlay' && (
         <IsolatedPluginSurface

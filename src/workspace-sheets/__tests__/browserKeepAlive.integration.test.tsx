@@ -17,7 +17,6 @@ function renderLayout() {
       onSelectSession={() => {}}
       onProfileEdit={() => {}}
       onSessionSettings={() => {}}
-      rightInset={0}
     />,
   )
 }

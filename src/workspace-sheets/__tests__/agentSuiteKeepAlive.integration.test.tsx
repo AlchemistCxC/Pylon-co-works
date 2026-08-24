@@ -48,7 +48,7 @@ describe('Agent Renderer Suite tab lifecycle', () => {
       const agentId = useWorkspaceStore.getState().openSheet({ kind: 'agent', agentId: 'peri', title: 'Peri' })!
       const overviewId = useWorkspaceStore.getState().openSheet({ kind: 'overview', title: 'Overview' })!
       useWorkspaceStore.getState().focusSheet(agentId)
-      render(<SheetLayout activeSession={null} onSelectSession={() => {}} onProfileEdit={() => {}} onSessionSettings={() => {}} rightInset={0} />)
+      render(<SheetLayout activeSession={null} onSelectSession={() => {}} onProfileEdit={() => {}} onSessionSettings={() => {}} />)
       await screen.findByText('keep-alive-suite', {}, { timeout: 5_000 })
 
       act(() => useWorkspaceStore.getState().focusSheet(overviewId))
@@ -58,6 +58,44 @@ describe('Agent Renderer Suite tab lifecycle', () => {
       act(() => useWorkspaceStore.getState().focusSheet(agentId))
       await waitFor(() => expect(resume).toHaveBeenCalledOnce())
       expect(mount).toHaveBeenCalledOnce()
+    } finally {
+      await registration.dispose()
+    }
+  })
+
+  it('右栏作为 flex sibling 时不会再给 Agent renderer 叠加右侧 inset', async () => {
+    const mount = vi.fn()
+    const registration = getRendererRegistry().registerSuite(
+      createPluginIdentity('test.right-panel-inset-suite', 'runtime'),
+      {
+        id: 'test.right-panel-inset-suite', label: 'Right Panel Inset Suite', apiVersion: 1,
+        runtime: { framework: 'solid', version: '1.0.0' },
+        compatibility: { documentSchema: 'workbench.v1', renderCatalogSchema: 1 },
+        requiredKinds: ['content.unknown'],
+        factory: {
+          async prepare() {
+            return {
+              mount(container, input) {
+                mount(input)
+                container.replaceChildren(Object.assign(document.createElement('div'), { textContent: 'right-panel-inset-suite' }))
+                return {
+                  update() {}, pause() {}, resume() {}, destroy() {},
+                  on(event, listener) { if (event === 'ready') listener({}); return () => {} },
+                }
+              },
+            }
+          },
+        },
+      },
+    )
+    try {
+      usePresentationPreferenceStore.getState().setRendererSuiteId('modern-gui', 'test.right-panel-inset-suite')
+      useWorkspaceStore.getState().openSheet({ kind: 'agent', agentId: 'peri', title: 'Peri' })
+
+      render(<SheetLayout activeSession={null} onSelectSession={() => {}} onProfileEdit={() => {}} onSessionSettings={() => {}} />)
+      await screen.findByText('right-panel-inset-suite', {}, { timeout: 5_000 })
+
+      expect(mount).toHaveBeenCalledWith(expect.objectContaining({ rightInset: 0 }))
     } finally {
       await registration.dispose()
     }
