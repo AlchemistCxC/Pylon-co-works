@@ -111,3 +111,29 @@ describe('K-2 左栏二级折叠导航（施工书 09）', () => {
     expect(tpl.getAttribute('aria-expanded')).toBeNull()
   })
 })
+
+describe('K-4 边界修复：pinned 跳转与 domain 同步', () => {
+  beforeEach(() => {
+    localStorage.clear()
+    resetStores()
+    invoke.mockReset()
+  })
+
+  it('F1 常用区点击其他 domain 的 section 时，domain 跟随切换', () => {
+    render(<Settings />)
+    const navEl = document.querySelector('.settings-nav') as HTMLElement
+    const w = within(navEl)
+    // 在外观域置顶「消息流」
+    const chatRow = w.getByRole('button', { name: '消息流' })
+    fireEvent.click(within(chatRow.parentElement as HTMLElement).getByRole('button', { name: '置顶 消息流' }))
+    // 切到工作区域
+    fireEvent.click(w.getByRole('button', { name: '工作区' }))
+    // 常用区出现置顶项（★ 为 aria-hidden 装饰，accessible name 即「消息流」）——点它
+    const pinnedBtn = w.getByRole('button', { name: '消息流' })
+    expect(pinnedBtn.closest('.settings-nav-section-block')).toBeNull()
+    fireEvent.click(pinnedBtn)
+    // 断言：domain 回到外观（分区列表含「全局」）且内容区是消息流的 Owner 头
+    expect(w.getByRole('button', { name: '全局' })).toBeInTheDocument()
+    expect(screen.getByTestId('settings-owner-badge').textContent).toContain('message-stream')
+  })
+})

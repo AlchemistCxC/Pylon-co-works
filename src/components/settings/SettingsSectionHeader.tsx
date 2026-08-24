@@ -42,16 +42,19 @@ export default function SettingsSectionHeader(props: {
           ? <em className="settings-owner-id settings-owner-page">设置页</em>
           : <em className="settings-owner-id">· {owner}</em>}
       </span>
-      <label className="settings-density-label" htmlFor={selectId}>
-        显示详细度
-        <select id={selectId} className="set-input settings-density-select"
-          aria-label="显示详细度" value={density}
-          onChange={e => onDensity(e.target.value as SettingsDensity)}>
-          {(Object.keys(DENSITY_LABELS) as SettingsDensity[]).map(d => (
-            <option key={d} value={d}>{DENSITY_LABELS[d]}</option>
-          ))}
-        </select>
-      </label>
+      {/* F3 边界修复：密度档只对含字段的组件 section 有意义，pageOwned 动作面板不显示 */}
+      {!pageOwned && (
+        <label className="settings-density-label" htmlFor={selectId}>
+          显示详细度
+          <select id={selectId} className="set-input settings-density-select"
+            aria-label="显示详细度" value={density}
+            onChange={e => onDensity(e.target.value as SettingsDensity)}>
+            {(Object.keys(DENSITY_LABELS) as SettingsDensity[]).map(d => (
+              <option key={d} value={d}>{DENSITY_LABELS[d]}</option>
+            ))}
+          </select>
+        </label>
+      )}
     </div>
   )
 }

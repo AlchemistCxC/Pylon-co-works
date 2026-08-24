@@ -33,7 +33,7 @@ import RendererSettingsPanel from './settings/RendererSettingsPanel'
 import PluginSettingsPageHost from './settings/PluginSettingsPageHost'
 import InterfaceModePicker from './settings/InterfaceModePicker.tsx'
 import SettingsSectionHeader from './settings/SettingsSectionHeader.tsx'
-import { readDensity, writeDensity, readPinned, writePinned, PINNED_LIMIT, type SettingsDensity } from './settings/settingsChromeState.ts'
+import { readDensity, writeDensity, readPinned, writePinned, PINNED_LIMIT, safeStorage, type SettingsDensity } from './settings/settingsChromeState.ts'
 import { getPluginServiceRegistry, getPluginSettingsPageRegistry } from '../plugin-runtime/runtimeServices.ts'
 // I13-W1：Settings 一级信息架构唯一真值（domain → section + 字段归属派生）
 import { SETTINGS_DOMAIN_BY_ID, SETTINGS_DOMAINS, SETTINGS_SECTION_LABELS, sectionZone, type SettingsDomainId, type SettingsSectionId } from '../settingsDomains'
@@ -259,14 +259,16 @@ export default function Settings({ onClose, activeSessionId, initialDomain, init
     } finally { setReloading(false) }
   }
 
-  const activeDomainConfig = SETTINGS_DOMAIN_BY_ID[activeDomain]
+  // F2：禁储环境安全存储（内存兜底，会话内可用）
+  const storage = safeStorage()
+const activeDomainConfig = SETTINGS_DOMAIN_BY_ID[activeDomain]
 
   // K-1：密度档 chrome 态（localStorage 持久化；拍板 D3-A 全局一档）
   const [density, setDensity] = useState<SettingsDensity>(() =>
-    readDensity(key => window.localStorage.getItem(key)))
+    readDensity((k) => storage.get(k)))
   const changeDensity = (d: SettingsDensity) => {
     setDensity(d)
-    writeDensity(d, (key, v) => window.localStorage.setItem(key, v))
+    writeDensity(d, (key, v) => storage.set(key, v))
   }
 
   // K-2：左栏二级折叠导航展开态（session 内 UI 态；打开设置默认收起）
@@ -281,13 +283,13 @@ export default function Settings({ onClose, activeSessionId, initialDomain, init
   }
   // K-4：收藏置顶（拍板 D4-A hover 星标；上限 PINNED_LIMIT=3）
   const [pinned, setPinned] = useState<readonly string[]>(() =>
-    readPinned(key => window.localStorage.getItem(key)))
+    readPinned((k) => storage.get(k)))
   const togglePinned = (section: string) => {
     const next = pinned.includes(section)
       ? pinned.filter(id => id !== section)
       : [...pinned, section].slice(-PINNED_LIMIT)
     setPinned(next)
-    writePinned(next, (key, v) => window.localStorage.setItem(key, v))
+    writePinned(next, (key, v) => storage.set(key, v))
   }
   // section → 二级项（组标题）。链A 从 GROUP_ORDER[zone] 派生；无 zone 或 <2 组返回空（不显示箭头）
   const navGroupsFor = (section: SettingsSectionId): readonly string[] => {
@@ -295,6 +297,20 @@ export default function Settings({ onClose, activeSessionId, initialDomain, init
     if (!zone) return []
     const groups = (GROUP_ORDER[zone] ?? []).flatMap(block => [...block.groups.map(g => g.title)])
     return groups.length >= 2 ? groups : []
+  }
+
+  // F1 边界修复：section → 所属 domain 反查（SETTINGS_DOMAINS 单一真值派生）
+  const domainOfSection = (section: string): SettingsDomainId | undefined =>
+    SETTINGS_DOMAINS.find(d => (d.sections as readonly string[]).includes(section))?.id
+  const jumpToSection = (section: SettingsSectionId) => {
+    setActivePluginPageId(null)
+    const domain = domainOfSection(section)
+    if (domain && domain !== activeDomain) {
+      // 跨域跳转：先设 section 再切 domain——switchDomain 会重置 section，故直接组合设置
+      setActiveDomain(domain)
+      setNavExpanded(new Set())
+    }
+    setActiveSection(section)
   }
 
   // I13-W1：section → 内容（复用既有块/组件，视觉 token 与字段行为不变）
@@ -516,7 +532,7 @@ export default function Settings({ onClose, activeSessionId, initialDomain, init
                 <div className="settings-nav-label">常用</div>
                 {pinned.map(section => (
                   <button type="button" key={`pin-${section}`} className="set-nav-btn pinned"
-                    onClick={() => { setActivePluginPageId(null); setActiveSection(section as SettingsSectionId) }}>
+                    onClick={() => jumpToSection(section as SettingsSectionId)}>
                     <span className="settings-nav-pin-star" aria-hidden="true">★</span>
                     {SETTINGS_SECTION_LABELS[section as SettingsSectionId]}
                   </button>

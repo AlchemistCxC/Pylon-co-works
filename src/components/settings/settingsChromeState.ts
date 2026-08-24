@@ -91,3 +91,20 @@ export function writePinned(ids: readonly string[], set: Setter): void {
   }
   writeJson(set, PINNED_KEY, uniq)
 }
+/** F2 边界加固：禁储/隐私模式下 localStorage 访问可能直接抛异常——安全包装。 */
+export function safeStorage() {
+  try {
+    const s = window.localStorage
+    const probe = '__pylon_probe__'
+    s.setItem(probe, '1')
+    s.removeItem(probe)
+    return { get: (k: string) => s.getItem(k), set: (k: string, v: string) => s.setItem(k, v) }
+  } catch {
+    // 内存兜底：会话内仍可用，只是不持久化
+    const mem = new Map<string, string>()
+    return {
+      get: (k: string) => mem.get(k) ?? null,
+      set: (k: string, v: string) => { mem.set(k, v) },
+    }
+  }
+}
