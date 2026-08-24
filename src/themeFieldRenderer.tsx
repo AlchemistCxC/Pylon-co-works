@@ -3,6 +3,7 @@ import * as ToggleGroup from '@radix-ui/react-toggle-group'
 import type { ThemeSettings } from './store'
 import { GROUP_ORDER, THEME_FIELD_DEFS, THEME_FIELD_KEYS, type ThemeFieldDef, type ThemeFieldKey, type ZoneName } from './themeFieldDefs'
 import ColorPopover from './components/ColorPopover'
+import { readCollapsed, writeCollapsed } from './components/settings/settingsChromeState.ts'
 import { resolveBackgroundImage } from './backgroundImage'
 import { resolveSpinnerFrames } from './components/chat/spinnerFrames'
 import FontContributionPicker from './components/settings/FontContributionPicker.tsx'
@@ -29,8 +30,8 @@ export interface RenderCtx {
   settingOptionEntries?: readonly RegistryEntry<PluginSettingOptionsContribution>[]
 }
 
-export function Row({ label, children, className = '' }: { label: string; children: React.ReactNode; className?: string }) {
-  return <div className={`set-row${className ? ` ${className}` : ''}`}><span className="set-row-label">{label}</span>{children}</div>
+export function Row({ label, children, className = '', anchor }: { label: string; children: React.ReactNode; className?: string; anchor?: string }) {
+  return <div className={`set-row${className ? ` ${className}` : ''}`} data-search-anchor={anchor}><span className="set-row-label">{label}</span>{children}</div>
 }
 
 export function Slider({ value, onChange, min, max, step }: { value: number; onChange: (v: number) => void; min: number; max: number; step?: number }) {
@@ -61,28 +62,15 @@ export function Txt({ value, onChange }: { value: string; onChange: (v: string) 
   return <input type="text" value={value} onChange={e => onChange(e.target.value)} className="set-input" />
 }
 
-// O-1（施工书 09 §K-4 遗留项）：组折叠记忆——开合态持久化到 localStorage（pylon-settings-collapse）。
-// 模块级缓存避免每次渲染都读 storage；写穿到持久层。
-let collapseMemory: Record<string, boolean> | null = null
-function readCollapseMemory(zone: string, title: string): boolean | undefined {
-  try {
-    if (collapseMemory === null) {
-      const raw = window.localStorage.getItem('pylon-settings-collapse')
-      collapseMemory = raw ? (JSON.parse(raw) as Record<string, boolean>) : {}
-    }
-    return collapseMemory[`${zone}.${title}`]
-  } catch { return undefined }
-}
-function writeCollapseMemory(zone: string, title: string, collapsed: boolean): void {
-  try {
-    if (collapseMemory === null) collapseMemory = {}
-    collapseMemory[`${zone}.${title}`] = collapsed
-    window.localStorage.setItem('pylon-settings-collapse', JSON.stringify(collapseMemory))
-  } catch { /* 禁储环境静默 */ }
+// B1 边界修复：折叠记忆统一走 settingsChromeState（消除双读写器漂移）
+const collapseStorage: { get(k: string): string | null; set(k: string, v: string): void } = {
+  get: k => { try { return window.localStorage.getItem(k) } catch { return null } },
+  set: (k, v) => { try { window.localStorage.setItem(k, v) } catch { /* 禁储静默 */ } },
 }
 
 function Group({ zone, title, children, defaultOpen, forceOpen }: { zone?: string; title: string; children: React.ReactNode; defaultOpen?: boolean; forceOpen?: boolean }) {
-  const rememberedCollapsed = zone ? readCollapseMemory(zone, title) : undefined
+  const collapseKey = zone ? `${zone}.${title}` : undefined
+  const rememberedCollapsed = collapseKey ? readCollapsed(collapseStorage.get)[collapseKey] : undefined
   const [open, setOpen] = useState(rememberedCollapsed === undefined ? (defaultOpen ?? true) : !rememberedCollapsed)
   const visible = open || forceOpen === true
   return (
@@ -91,7 +79,10 @@ function Group({ zone, title, children, defaultOpen, forceOpen }: { zone?: strin
         onClick={() => {
           const next = !visible
           setOpen(next)
-          if (zone) writeCollapseMemory(zone, title, !next)
+          if (collapseKey) {
+            const map = { ...readCollapsed(collapseStorage.get), [collapseKey]: !next }
+            writeCollapsed(map, collapseStorage.set)
+          }
         }}>
         <span className="set-group-arrow">{visible ? '▾' : '▸'}</span>
         {title}
@@ -264,7 +255,7 @@ function FieldRow({ def, ctx, keyName }: { def: ThemeFieldDef; ctx: RenderCtx; k
   const value = ctx.t[keyName]
   const atDefault = def.default !== undefined && Object.is(value, def.default)
   return (
-    <Row label={def.label} className={def.control === 'fontPicker' ? 'font-setting-row' : ''}>
+    <Row label={def.label} anchor={`field:${keyName}`} className={def.control === 'fontPicker' ? 'font-setting-row' : ''}>
       <FieldControl def={def} ctx={ctx} keyName={keyName} />
       {def.default !== undefined && !atDefault && (
         <button type="button" className="set-field-reset" aria-label="恢复默认"

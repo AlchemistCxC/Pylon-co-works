@@ -159,8 +159,6 @@ export default function Settings({ onClose, activeSessionId, initialDomain, init
     window.addEventListener('pylon:open-settings', onOpenSettings)
     return () => window.removeEventListener('pylon:open-settings', onOpenSettings)
   }, [])
-  void initialAgentId
-
   // 应用全局预设
   const applyGlobalPreset = (name: string) => {
     const preset = GLOBAL_PRESETS.find(p => p.name === name)
@@ -317,22 +315,30 @@ const activeDomainConfig = SETTINGS_DOMAIN_BY_ID[activeDomain]
 
   // O-3：速搜定位态
   const [quickSearchOpen, setQuickSearchOpen] = useState(false)
+  // B2 边界修复：依赖 quickSearchOpen——面板打开时重建索引（插件装卸后的新 kind 立即可搜）
   const quickSearchItems = useMemo(() => {
+    void quickSearchOpen
     try {
       const snapshot = getRendererRegistry().snapshot()
       const entries = [...snapshot.rendererSuites, ...snapshot.rendererSlots, ...snapshot.renderKinds]
         .map(e => ({ value: { id: e.value.id, label: ('label' in e.value ? e.value.label : undefined) as string | undefined, settings: e.value.settings } }))
       return buildSettingsSearchIndex(entries)
     } catch { return buildSettingsSearchIndex() }
-  }, [])
-  const navigateToField = (section: SettingsSectionId, label: string) => {
+  }, [quickSearchOpen])
+  const navigateToField = (section: SettingsSectionId, label: string, anchor?: string) => {
     jumpToSection(section)
     if (density !== 'all') changeDensity('all')  // D2-A：advanced 命中自动切全部档
     requestAnimationFrame(() => {
-      const target = [...document.querySelectorAll('.set-group-title, .renderer-settings-group-heading h3')]
-        .find(el => el.textContent?.includes(label))
+      // B3 边界修复：优先唯一锚定位（重名字段如多个「背景图」不再误跳第一处）
+      let target: Element | null = null
+      if (anchor) target = document.querySelector(`[data-search-anchor="${CSS.escape(anchor)}"]`)
+      if (!target) {
+        // 链B entry 无字段级锚——回退到组标题文本匹配
+        target = [...document.querySelectorAll('.set-group-title, .renderer-settings-group-heading h3')]
+          .find(el => el.textContent?.includes(label)) ?? null
+      }
       target?.scrollIntoView({ block: 'center', behavior: 'smooth' })
-      const group = target?.closest('[data-group-anchor], .renderer-settings-group')
+      const group = target?.closest('[data-group-anchor], .renderer-settings-group, .set-group')
       if (group instanceof HTMLElement) {
         group.classList.add('settings-anchor-pulse')
         setTimeout(() => group.classList.remove('settings-anchor-pulse'), 1200)
@@ -478,7 +484,7 @@ const activeDomainConfig = SETTINGS_DOMAIN_BY_ID[activeDomain]
         return (
           <>
             <div className="agent-settings-heading">
-              <div><h3>Agent</h3><p>先处理连接和切换；运行时、YAML 与动态配置收在高级区域。</p></div>
+              <div><h3>Agent</h3><p>连接、发现与导入集中在这里；YAML 和动态配置保留在高级区域。</p></div>
             </div>
             <section className="agent-settings-overview" aria-label="当前 Agent 概况">
               <div className="agent-settings-overview-main">
@@ -516,8 +522,8 @@ const activeDomainConfig = SETTINGS_DOMAIN_BY_ID[activeDomain]
               </div>
               <div className="set-hint">切换会立即重置当前会话的运行时状态。</div>
             </Group>
-            <Group title="管理 Agent 与本机运行时" defaultOpen={false}>
-              <AgentRuntimePanel />
+            <Group title="发现与管理 Agent">
+              <AgentRuntimePanel initialAgentId={initialAgentId} />
             </Group>
             <Group title="高级：YAML 配置" defaultOpen={false}>
               <AgentConfigEditor agentId={activeAgent} />
@@ -668,7 +674,7 @@ const activeDomainConfig = SETTINGS_DOMAIN_BY_ID[activeDomain]
         <SettingsQuickSearch
           open={quickSearchOpen}
           items={quickSearchItems}
-          onNavigate={navigateToField}
+          onNavigate={(section, label, anchor) => navigateToField(section, label, anchor)}
           onOpenChange={setQuickSearchOpen}
         />
         {!activePluginPageId && previewZone && (

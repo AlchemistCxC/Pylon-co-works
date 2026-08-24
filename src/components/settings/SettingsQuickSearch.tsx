@@ -11,7 +11,7 @@ import type { SettingsSearchItem, SettingsSectionId } from '../../settingsDomain
 export default function SettingsQuickSearch(props: {
   open: boolean
   items: readonly SettingsSearchItem[]
-  onNavigate: (section: SettingsSectionId, label: string) => void
+  onNavigate: (section: SettingsSectionId, label: string, anchor?: string) => void
   onOpenChange: (open: boolean) => void
 }) {
   const { open, items, onNavigate, onOpenChange } = props
@@ -55,7 +55,7 @@ export default function SettingsQuickSearch(props: {
                 key={`${item.path}.${item.label}`}
                 value={`${item.path} ${item.label}`}
                 onSelect={() => {
-                  onNavigate(item.section, item.label)
+                  onNavigate(item.section, item.label, item.anchor)
                   onOpenChange(false)
                 }}
               >

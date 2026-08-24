@@ -157,6 +157,8 @@ export interface SettingsSearchItem {
   readonly section: SettingsSectionId
   readonly advanced: boolean     // D2-A：advanced 命中带徽标
   readonly kind?: 'chain-a' | 'chain-b' | 'renderer-entry'
+  /** B3：唯一 DOM 锚（链A=`field:${key}`；链B entry 无唯一锚时回退文本匹配） */
+  readonly anchor?: string
 }
 
 export function buildSettingsSearchIndex(rendererEntries?: readonly { value: { id: string; label?: string; settings?: unknown } }[]): readonly SettingsSearchItem[] {
@@ -174,6 +176,7 @@ export function buildSettingsSearchIndex(rendererEntries?: readonly { value: { i
         section,
         advanced: def.advanced === true,
         kind: 'chain-a',
+        anchor: `field:${key}`,
       })
   }
   // 链B：调用方注入的 renderer entries（避免本模块依赖 runtimeServices）
