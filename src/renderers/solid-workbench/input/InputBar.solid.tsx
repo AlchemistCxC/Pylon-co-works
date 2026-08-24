@@ -1,4 +1,4 @@
-import { For, Show, createEffect, createMemo, createSignal, onCleanup, onMount } from 'solid-js'
+import { For, Index, Show, createEffect, createMemo, createSignal, onCleanup, onMount } from 'solid-js'
 import {
   resolveFallbackCommands,
   filterCommandSuggestions,
@@ -204,7 +204,7 @@ export function SolidInputBar(props: SolidInputBarProps) {
       autoQueueArmed = true
       return
     }
-    if (!id || !autoQueueArmed || sending || !first) return
+    if (!id || !autoQueueArmed || sending || !first || first.editing) return
     autoQueueArmed = false
     void sendQueued(first)
   })
@@ -380,25 +380,36 @@ export function SolidInputBar(props: SolidInputBarProps) {
       <Show when={queue().length > 0}>
         <div class="queued-message-list" aria-label="待发送消息">
           <div class="queued-message-title">待发送 · {queue().length}</div>
-          <For each={queue()}>{item => (
-            <div class="queued-message" data-queue-id={item.id}>
-              <Show when={item.editing} fallback={<span class="queued-message-text">{item.text}</span>}>
+          <Index each={queue()}>{item => (
+            <div class="queued-message" data-queue-id={item().id}>
+              <Show when={item().editing} fallback={<span class="queued-message-text">{item().text}</span>}>
                 <textarea
+                  ref={element => queueMicrotask(() => element.focus())}
                   class="queued-message-editor"
-                  value={item.text}
-                  onInput={event => setQueue(previous => previous.map(current => current.id === item.id
+                  value={item().text}
+                  onInput={event => setQueue(previous => previous.map(current => current.id === item().id
                     ? { ...current, text: event.currentTarget.value }
                     : current))}
+                  onKeyDown={event => {
+                    if (event.key !== 'Escape') return
+                    event.preventDefault()
+                    const editButton = event.currentTarget.closest('.queued-message')
+                      ?.querySelector<HTMLButtonElement>('.queued-message-actions button')
+                    setQueue(previous => previous.map(current => current.id === item().id
+                      ? { ...current, editing: false }
+                      : current))
+                    queueMicrotask(() => editButton?.focus())
+                  }}
                   aria-label="编辑待发送消息"
                 />
               </Show>
               <div class="queued-message-actions">
-                <button type="button" onClick={() => setQueue(previous => previous.map(current => current.id === item.id ? { ...current, editing: !current.editing } : current))} aria-label="编辑待发送消息">编辑</button>
-                <button type="button" disabled={runtime().generating || queueSendingSessions().has(sessionId() ?? '') || !item.text.trim()} onClick={() => void sendQueued(item)} aria-label="发送待发送消息">发送</button>
-                <button type="button" onClick={() => setQueue(previous => previous.filter(current => current.id !== item.id))} aria-label="取消待发送消息">取消</button>
+                <button type="button" onClick={() => setQueue(previous => previous.map(current => current.id === item().id ? { ...current, editing: !current.editing } : current))} aria-label={item().editing ? '完成编辑待发送消息' : '编辑待发送消息'}>{item().editing ? '完成' : '编辑'}</button>
+                <button type="button" disabled={runtime().generating || item().editing || queueSendingSessions().has(sessionId() ?? '') || !item().text.trim()} onClick={() => void sendQueued(item())} aria-label="发送待发送消息">发送</button>
+                <button type="button" onClick={() => setQueue(previous => previous.filter(current => current.id !== item().id))} aria-label="取消待发送消息">取消</button>
               </div>
             </div>
-          )}</For>
+          )}</Index>
           <button type="button" class="queued-message-clear" onClick={() => setQueue([])}>清空队列</button>
         </div>
       </Show>

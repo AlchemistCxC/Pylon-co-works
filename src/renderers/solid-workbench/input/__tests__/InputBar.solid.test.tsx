@@ -213,6 +213,54 @@ describe('SolidInputBar', () => {
     await waitFor(() => expect(screen.queryByText('只能发送一次')).toBeNull())
   })
 
+  it('待发消息进入编辑态后聚焦编辑框，并明确提供完成操作', async () => {
+    const { services, textarea } = renderInput()
+    services.runtime.update({ generating: true })
+    fireEvent.input(textarea, { target: { value: '需要修改的消息' } })
+    fireEvent.keyDown(textarea, { key: 'Enter' })
+
+    fireEvent.click(await screen.findByRole('button', { name: '编辑待发送消息' }))
+
+    await waitFor(() => expect(screen.getByRole('textbox', { name: '编辑待发送消息' })).toHaveFocus())
+    expect(screen.getByRole('button', { name: '完成编辑待发送消息' })).toBeTruthy()
+  })
+
+  it('待发消息编辑时按 Esc 保留修改并把焦点返回编辑按钮', async () => {
+    const { services, textarea } = renderInput()
+    services.runtime.update({ generating: true })
+    fireEvent.input(textarea, { target: { value: '原始待发消息' } })
+    fireEvent.keyDown(textarea, { key: 'Enter' })
+    fireEvent.click(await screen.findByRole('button', { name: '编辑待发送消息' }))
+    const editor = screen.getByRole('textbox', { name: '编辑待发送消息' })
+    fireEvent.input(editor, { target: { value: '修改后的待发消息' } })
+    expect(screen.getByRole('textbox', { name: '编辑待发送消息' })).toBe(editor)
+
+    fireEvent.keyDown(screen.getByRole('textbox', { name: '编辑待发送消息' }), { key: 'Escape' })
+
+    expect(await screen.findByText('修改后的待发消息')).toBeTruthy()
+    const edit = screen.getByRole('button', { name: '编辑待发送消息' })
+    await waitFor(() => expect(edit).toHaveFocus())
+  })
+
+  it('队首编辑期间暂停自动续发，完成后发送最新文本', async () => {
+    const { services, textarea } = renderInput()
+    services.runtime.update({ generating: true })
+    fireEvent.input(textarea, { target: { value: '尚未修改' } })
+    fireEvent.keyDown(textarea, { key: 'Enter' })
+    fireEvent.click(await screen.findByRole('button', { name: '编辑待发送消息' }))
+    fireEvent.input(screen.getByRole('textbox', { name: '编辑待发送消息' }), { target: { value: '最终待发内容' } })
+
+    services.runtime.update({ generating: false })
+    await Promise.resolve()
+    expect(services.commands.calls).toHaveLength(0)
+    expect(screen.getByRole('button', { name: '发送待发送消息' })).toBeDisabled()
+
+    fireEvent.click(screen.getByRole('button', { name: '完成编辑待发送消息' }))
+    await waitFor(() => expect(services.commands.calls).toContainEqual({
+      command: 'send', args: ['session-a', { text: '最终待发内容', attachments: [] }],
+    }))
+  })
+
   it('生成在后台结束后，返回原会话会继续发送其队列', async () => {
     const { services, textarea, switchSession } = renderInput()
     services.runtime.update({ generating: true })
