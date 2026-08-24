@@ -1,5 +1,7 @@
 export type SessionUiKey =
   | 'draft'
+  | 'attachments'
+  | 'input-error'
   | 'queued-messages'
   | 'search-open'
   | 'search-query'
@@ -17,9 +19,18 @@ export interface SessionUiStore {
   set<T>(sessionId: string, key: SessionUiKey, value: T): void
   update<T>(sessionId: string, key: SessionUiKey, fallback: T, updater: (previous: T) => T): T
   subscribe(sessionId: string, key: SessionUiKey, listener: () => void): () => void
+  capture(sessionId: string): SessionUiScope
   clear(sessionId: string): void
   clearAll(): void
   destroy(): void
+}
+
+export interface SessionUiScope {
+  get<T>(key: SessionUiKey, fallback: T): T
+  set<T>(key: SessionUiKey, value: T): void
+  update<T>(key: SessionUiKey, fallback: T, updater: (previous: T) => T): T
+  subscribe(key: SessionUiKey, listener: () => void): () => void
+  clear(): void
 }
 
 function entryKey(sessionId: string, key: SessionUiKey): string {
@@ -72,6 +83,36 @@ export function createSessionUiStore(): SessionUiStore {
         current.delete(listener)
         if (current.size === 0) listeners.delete(id)
       }
+    },
+    capture(sessionId) {
+      return Object.freeze({
+        get: <T>(key: SessionUiKey, fallback: T) => get(sessionId, key, fallback),
+        set: <T>(key: SessionUiKey, value: T) => set(sessionId, key, value),
+        update: <T>(key: SessionUiKey, fallback: T, updater: (previous: T) => T) => {
+          const next = updater(get(sessionId, key, fallback))
+          set(sessionId, key, next)
+          return next
+        },
+        subscribe: (key: SessionUiKey, listener: () => void) => {
+          if (destroyed) return () => {}
+          const id = entryKey(sessionId, key)
+          const current = listeners.get(id) ?? new Set<() => void>()
+          current.add(listener)
+          listeners.set(id, current)
+          return () => {
+            current.delete(listener)
+            if (current.size === 0) listeners.delete(id)
+          }
+        },
+        clear: () => {
+          if (destroyed) return
+          const session = registry.get(sessionId)
+          if (!session) return
+          const keys = [...session.keys()]
+          registry.delete(sessionId)
+          for (const key of keys) publish(sessionId, key)
+        },
+      })
     },
     clear(sessionId) {
       if (destroyed) return

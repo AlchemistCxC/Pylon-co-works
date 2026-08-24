@@ -63,15 +63,17 @@ describe('WorkbenchHostPort', () => {
       binding: () => binding,
     })
     host.sessionUi.set('draft', 'owner-a draft')
+    const capturedOwnerA = host.sessionUi.capture()
 
     binding.suiteId = 'suite.b'
     binding.sessionOwnerKey = 'owner-b'
 
     expect(host.sessionUi.get('draft', 'missing')).toBe('missing')
     host.sessionUi.set('draft', 'owner-b draft')
+    capturedOwnerA.set('draft', 'owner-a completed asynchronously')
     binding.suiteId = 'suite.a'
     binding.sessionOwnerKey = 'owner-a'
-    expect(host.sessionUi.get('draft', 'missing')).toBe('owner-a draft')
+    expect(host.sessionUi.get('draft', 'missing')).toBe('owner-a completed asynchronously')
   })
 
   it('returns structured capability-denied command errors and contextual diagnostics', async () => {

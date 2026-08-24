@@ -15,6 +15,7 @@ export interface QueuedWorkbenchMessage {
   id: number
   text: string
   editing: boolean
+  attachments?: readonly WorkbenchAttachment[]
 }
 
 export interface SolidInputBarProps {
@@ -30,15 +31,14 @@ export function SolidInputBar(props: SolidInputBarProps) {
   const runtime = () => workbench.runtimeSnapshot()
   const [draft, setDraft] = createSessionUiSignal(workbench.sessionUi, sessionId, 'draft', '')
   const [queue, setQueue] = createSessionUiSignal<QueuedWorkbenchMessage[]>(workbench.sessionUi, sessionId, 'queued-messages', [])
-  const [history, setHistory] = createSessionUiSignal<string[]>(workbench.sessionUi, sessionId, 'input-history', [])
+  const [history] = createSessionUiSignal<string[]>(workbench.sessionUi, sessionId, 'input-history', [])
   const [historyIndex, setHistoryIndex] = createSessionUiSignal(workbench.sessionUi, sessionId, 'input-history-index', -1)
-  const [attachments, setAttachments] = createSignal<readonly WorkbenchAttachment[]>([])
-  const [sendError, setSendError] = createSignal('')
+  const [attachments, setAttachments] = createSessionUiSignal<readonly WorkbenchAttachment[]>(workbench.sessionUi, sessionId, 'attachments', [])
+  const [sendError, setSendError] = createSessionUiSignal(workbench.sessionUi, sessionId, 'input-error', '')
   const [commandIndex, setCommandIndex] = createSignal(0)
   let textarea: HTMLTextAreaElement | undefined
   let composing = false
   let historyDraft = ''
-  let nextQueueId = 1
 
   const [commandRevision, setCommandRevision] = createSignal(0)
   const suggestions = createMemo(() => {
@@ -75,11 +75,9 @@ export function SolidInputBar(props: SolidInputBarProps) {
     })
   })
 
-  const recordHistory = (text: string) => {
-    const next = [...history().filter(item => item !== text), text].slice(-50)
-    setHistory(next)
-    setHistoryIndex(-1)
-    historyDraft = ''
+  const recordHistory = (text: string, ui: ReturnType<typeof workbench.sessionUi.capture>) => {
+    ui.update<string[]>('input-history', [], previous => [...previous.filter(item => item !== text), text].slice(-50))
+    ui.set('input-history-index', -1)
   }
 
   const runSlashCommand = async (text: string): Promise<boolean> => {
@@ -123,11 +121,16 @@ export function SolidInputBar(props: SolidInputBarProps) {
     }
   }
 
-  const sendText = async (text: string): Promise<boolean> => {
+  const sendText = async (
+    text: string,
+    messageAttachments: readonly WorkbenchAttachment[] = attachments(),
+    clearComposer = true,
+  ): Promise<boolean> => {
     if (props.disabled) return false
     const id = sessionId()
     const normalized = text.trim()
     if (!id || !normalized) return false
+    const ui = workbench.sessionUi.capture(id)
     try {
       const handled = normalized.startsWith('/') && suggestionList().length > 0
         ? await runSlashCommand(normalized)
@@ -135,18 +138,20 @@ export function SolidInputBar(props: SolidInputBarProps) {
       if (!handled) {
         const result = await workbench.commands.send(id, {
           text: normalized,
-          attachments: attachments(),
+          attachments: messageAttachments,
         })
         if (result.status === 'rejected') throw new Error(result.error || '发送失败')
       }
-      recordHistory(normalized)
-      setDraft('')
-      setAttachments([])
-      setSendError('')
-      setCommandIndex(0)
+      recordHistory(normalized, ui)
+      if (clearComposer) {
+        ui.update('draft', '', current => current === text ? '' : current)
+        ui.update<readonly WorkbenchAttachment[]>('attachments', [], current => sameAttachments(current, messageAttachments) ? [] : current)
+      }
+      ui.set('input-error', '')
+      if (sessionId() === id) setCommandIndex(0)
       return true
     } catch (error) {
-      setSendError(error instanceof Error ? error.message : String(error))
+      ui.set('input-error', error instanceof Error ? error.message : String(error))
       return false
     }
   }
@@ -154,10 +159,25 @@ export function SolidInputBar(props: SolidInputBarProps) {
   const enqueue = (text: string) => {
     const normalized = text.trim()
     if (!normalized) return
-    setQueue(previous => [...previous, { id: nextQueueId++, text: normalized, editing: false }])
+    const queuedAttachments = attachments()
+    setQueue(previous => [...previous, {
+      id: Math.max(0, ...previous.map(item => item.id)) + 1,
+      text: normalized,
+      editing: false,
+      attachments: queuedAttachments,
+    }])
     setDraft('')
     setAttachments([])
     setSendError('')
+  }
+
+  const sendQueued = async (item: QueuedWorkbenchMessage) => {
+    const id = sessionId()
+    if (!id) return
+    const ui = workbench.sessionUi.capture(id)
+    if (await sendText(item.text, item.attachments ?? [], false)) {
+      ui.update<QueuedWorkbenchMessage[]>('queued-messages', [], previous => previous.filter(current => current.id !== item.id))
+    }
   }
 
   const send = async () => {
@@ -173,17 +193,19 @@ export function SolidInputBar(props: SolidInputBarProps) {
     if (props.disabled) return
     const id = sessionId()
     if (!id) return
+    const ui = workbench.sessionUi.capture(id)
     const result = await workbench.commands.cancel(id)
-    if (result.status === 'rejected') setSendError(result.error || '取消失败')
+    if (result.status === 'rejected') ui.set('input-error', result.error || '取消失败')
   }
 
   const attach = async () => {
     if (props.disabled) return
     const id = sessionId()
     if (!id) return
+    const ui = workbench.sessionUi.capture(id)
     try {
       const selected = await workbench.commands.attach(id)
-      setAttachments(previous => {
+      ui.update<readonly WorkbenchAttachment[]>('attachments', [], previous => {
         const seen = new Set(previous.map(item => item.path))
         const additions = selected.filter(item => {
           if (seen.has(item.path)) return false
@@ -193,7 +215,7 @@ export function SolidInputBar(props: SolidInputBarProps) {
         return [...previous, ...additions]
       })
     } catch (error) {
-      setSendError(error instanceof Error ? error.message : String(error))
+      ui.set('input-error', error instanceof Error ? error.message : String(error))
     }
   }
 
@@ -318,9 +340,7 @@ export function SolidInputBar(props: SolidInputBarProps) {
               </Show>
               <div class="queued-message-actions">
                 <button type="button" onClick={() => setQueue(previous => previous.map(current => current.id === item.id ? { ...current, editing: !current.editing } : current))} aria-label="编辑待发送消息">编辑</button>
-                <button type="button" disabled={runtime().generating || !item.text.trim()} onClick={() => void sendText(item.text).then(sent => {
-                  if (sent) setQueue(previous => previous.filter(current => current.id !== item.id))
-                })} aria-label="发送待发送消息">发送</button>
+                <button type="button" disabled={runtime().generating || !item.text.trim()} onClick={() => void sendQueued(item)} aria-label="发送待发送消息">发送</button>
                 <button type="button" onClick={() => setQueue(previous => previous.filter(current => current.id !== item.id))} aria-label="取消待发送消息">取消</button>
               </div>
             </div>
@@ -373,4 +393,8 @@ function sessionCommandSuggestions(commands: readonly SessionCommand[]): readonl
       args: command.inputHint ?? '',
       info: command.description ?? command.capability ?? '会话命令',
     }))
+}
+
+function sameAttachments(left: readonly WorkbenchAttachment[], right: readonly WorkbenchAttachment[]): boolean {
+  return left.length === right.length && left.every((item, index) => item.id === right[index]?.id && item.path === right[index]?.path)
 }

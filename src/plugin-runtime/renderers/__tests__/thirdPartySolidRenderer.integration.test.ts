@@ -35,10 +35,15 @@ const input: WorkbenchMountInput = {
 }
 
 function hostPort(): WorkbenchHostPort {
+  const sessionUi: WorkbenchHostPort['sessionUi'] = {
+    get: (_, fallback) => fallback, set: () => {}, update: (_, fallback, updater) => updater(fallback), subscribe: () => () => {},
+    capture: () => ({ get: sessionUi.get, set: sessionUi.set, update: sessionUi.update, subscribe: sessionUi.subscribe, clear: sessionUi.clear }),
+    clear: () => {},
+  }
   return {
     document: { getSnapshot: () => undefined, subscribe: () => () => {}, getSlice: <T>() => undefined as T, subscribeSlice: () => () => {} },
     appearance: { getSnapshot: () => ({} as WorkbenchAppearanceSnapshot), subscribe: () => () => {} },
-    sessionUi: { get: (_, fallback) => fallback, set: () => {}, update: (_, fallback, updater) => updater(fallback), subscribe: () => () => {}, clear: () => {} },
+    sessionUi,
     commands: new Proxy({} as WorkbenchHostPort['commands'], { get: () => async () => ({ ok: true, value: undefined }) }),
     capabilities: { getSnapshot: () => ({}), has: () => true, subscribe: () => () => {} },
     diagnostics: { report: () => {}, getRecent: () => [], subscribe: () => () => {} },

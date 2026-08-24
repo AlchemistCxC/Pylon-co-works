@@ -12,10 +12,15 @@ const input: WorkbenchMountInput = {
 
 function fakeHost(): WorkbenchHostPort {
   const denied = async () => ({ ok: false as const, error: { code: 'renderer_not_active', message: 'inactive', recoverability: 'fallback' as const } })
+  const sessionUi: WorkbenchHostPort['sessionUi'] = {
+    get: (_, fallback) => fallback, set: () => {}, update: (_, fallback, updater) => updater(fallback), subscribe: () => () => {},
+    capture: () => ({ get: sessionUi.get, set: sessionUi.set, update: sessionUi.update, subscribe: sessionUi.subscribe, clear: sessionUi.clear }),
+    clear: () => {},
+  }
   return {
     document: { getSnapshot: () => ({ revision: 5 } as never), subscribe: () => () => {}, getSlice: <T>() => undefined as T, subscribeSlice: () => () => {} },
     appearance: { getSnapshot: () => ({}) as never, subscribe: () => () => {} },
-    sessionUi: { get: (_, fallback) => fallback, set: () => {}, update: (_, fallback, updater) => updater(fallback), subscribe: () => () => {}, clear: () => {} },
+    sessionUi,
     commands: new Proxy({} as WorkbenchHostPort['commands'], { get: () => denied }),
     capabilities: { getSnapshot: () => ({}), has: () => true, subscribe: () => () => {} },
     diagnostics: { report: () => {}, getRecent: () => [], subscribe: () => () => {} },

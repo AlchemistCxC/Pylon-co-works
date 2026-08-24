@@ -1,5 +1,5 @@
 import type { AppearanceCommand, WorkbenchAppearanceSnapshot, WorkbenchAppearanceStore } from '../../domains/workbench/appearance.ts'
-import type { SessionUiKey, SessionUiStore } from '../../domains/workbench/sessionUiStore.ts'
+import type { SessionUiKey, SessionUiScope, SessionUiStore } from '../../domains/workbench/sessionUiStore.ts'
 import type { WorkbenchCommandFacade, SendCommand, SendResult, CancelResult, WorkbenchAttachment, SessionCreateInput, ExportSessionInput, CommandResult } from '../../domains/workbench/workbenchCommandFacade.ts'
 import type { WorkbenchDocument, WorkbenchMessage, WorkbenchActivityNode, WorkbenchInteraction, WorkbenchTimelineEntry } from '../../domains/workbench/workbenchProjector.ts'
 import type { WorkbenchRuntime, WorkbenchRuntimeSlice } from '../../domains/workbench/workbenchRuntime.ts'
@@ -27,6 +27,7 @@ export interface SessionUiPort {
   set<T>(key: SessionUiKey, value: T): void
   update<T>(key: SessionUiKey, fallback: T, updater: (previous: T) => T): T
   subscribe(key: SessionUiKey, listener: () => void): () => void
+  capture(): SessionUiScope
   clear(): void
 }
 
@@ -175,6 +176,7 @@ function createSessionUiPort(store: SessionUiStore, namespace: () => string): Se
     set: (key, value) => store.set(namespace(), key, value),
     update: (key, fallback, updater) => store.update(namespace(), key, fallback, updater),
     subscribe: (key, listener) => store.subscribe(namespace(), key, listener),
+    capture: () => store.capture(namespace()),
     clear: () => store.clear(namespace()),
   }
 }

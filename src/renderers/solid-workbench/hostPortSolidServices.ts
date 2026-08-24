@@ -72,6 +72,7 @@ function createSessionUi(host: WorkbenchHostPort): SessionUiStore {
     set: (_namespace, key, value) => host.sessionUi.set(key, value),
     update: (_namespace, key, fallback, updater) => host.sessionUi.update(key, fallback, updater),
     subscribe: (_namespace, key, listener) => host.sessionUi.subscribe(key, listener),
+    capture: () => host.sessionUi.capture(),
     clear: () => host.sessionUi.clear(), clearAll: () => host.sessionUi.clear(), destroy() {},
   }
 }
