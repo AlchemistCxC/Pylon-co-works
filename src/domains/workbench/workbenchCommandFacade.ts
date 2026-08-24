@@ -43,6 +43,8 @@ export interface WorkbenchCommandCapabilities {
 export interface SessionCreateInput {
   title?: string
   profileId?: string
+  workspaceId?: string
+  initialPrompt?: SendCommand
 }
 
 export interface ExportSessionInput {

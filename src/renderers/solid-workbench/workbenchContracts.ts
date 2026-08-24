@@ -39,6 +39,13 @@ export interface WorkbenchMountInput {
   readonly sessionLabel?: string
   readonly workspaceLabel?: string
   readonly workspacePath?: string
+  readonly availableWorkspaces?: readonly WorkbenchWorkspaceOption[]
+}
+
+export interface WorkbenchWorkspaceOption {
+  readonly id: string
+  readonly label: string
+  readonly path: string
 }
 
 export interface RendererPrepareContext {
@@ -81,6 +88,7 @@ export interface SolidWorkbenchInput {
   sessionLabel?: string
   workspaceLabel?: string
   workspacePath?: string
+  availableWorkspaces?: readonly WorkbenchWorkspaceOption[]
 }
 
 export function normalizeWorkbenchMountInput(input: SolidWorkbenchInput): WorkbenchMountInput {
@@ -98,6 +106,7 @@ export function normalizeWorkbenchMountInput(input: SolidWorkbenchInput): Workbe
     ...(input.sessionLabel ? { sessionLabel: input.sessionLabel } : {}),
     ...(input.workspaceLabel ? { workspaceLabel: input.workspaceLabel } : {}),
     ...(input.workspacePath ? { workspacePath: input.workspacePath } : {}),
+    ...(input.availableWorkspaces ? { availableWorkspaces: Object.freeze(input.availableWorkspaces.map(item => Object.freeze({ ...item }))) } : {}),
   })
 }
 

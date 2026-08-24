@@ -19,6 +19,7 @@ import { toCanonicalOwnerKey } from '../../domains/events/eventSchema.ts'
 import { resolveRendererSuiteFallback } from '../../host/renderer-suite/rendererSuiteFallbackPolicy.ts'
 import { useWorkspaceEntityStore } from '../../workspaceEntityStore.ts'
 import { publishActiveWorkbenchHostPort } from './activeWorkbenchHostPort.ts'
+import { createAgentWorkbenchSession, discardAgentWorkbenchSession } from './agentWorkbenchSessionCreation.ts'
 
 export interface AgentRendererSuiteWorkbenchProps {
   sheet: SheetRecord
@@ -41,8 +42,22 @@ const workspaceLabel = (workdir: string | undefined) => workdir
 
 export default function AgentRendererSuiteWorkbench(props: AgentRendererSuiteWorkbenchProps) {
   const containerRef = useRef<HTMLDivElement>(null)
+  const currentPropsRef = useRef(props)
+  currentPropsRef.current = props
   const sessionRuntimeRef = useRef<ReturnType<typeof createAgentWorkbenchSessionRuntime> | null>(null)
-  if (!sessionRuntimeRef.current) sessionRuntimeRef.current = createAgentWorkbenchSessionRuntime()
+  if (!sessionRuntimeRef.current) sessionRuntimeRef.current = createAgentWorkbenchSessionRuntime({
+    commands: {
+      createSession: request => {
+        const current = currentPropsRef.current
+        return createAgentWorkbenchSession(request, {
+          agentId: current.sheet.agentId || useIdentityStore.getState().activeAgent,
+          workspaceMode: current.workspaceMode,
+        })
+      },
+      selectSession: id => currentPropsRef.current.ctx.selectSession(id),
+      discardSession: discardAgentWorkbenchSession,
+    },
+  })
   const sessionRuntime = sessionRuntimeRef.current
   const sessions = useIdentityStore(state => state.sessions)
   const workspaces = useWorkspaceEntityStore(state => state.workspaces)
@@ -65,7 +80,8 @@ export default function AgentRendererSuiteWorkbench(props: AgentRendererSuiteWor
     sessionLabel: session?.name,
     workspaceLabel: workspace?.name ?? workspaceLabel(session?.workdir),
     workspacePath: workspace?.rootPath ?? session?.workdir,
-  }), [props.sheet.id, props.ctx.activeSession, props.ctx.rightInset, props.workspaceMode, props.isReplay, session, workspace, activeProfileId, isActiveSheet])
+    availableWorkspaces: workspaces.map(item => ({ id: item.id, label: item.name, path: item.rootPath })),
+  }), [props.sheet.id, props.ctx.activeSession, props.ctx.rightInset, props.workspaceMode, props.isReplay, session, workspace, workspaces, activeProfileId, isActiveSheet])
   const activation = useMemo(() => {
     try {
       return resolveRendererActivation(catalog, {
@@ -160,7 +176,7 @@ export default function AgentRendererSuiteWorkbench(props: AgentRendererSuiteWor
         sessionOwnerKey: inputRef.current.sessionOwnerKey, sessionId: inputRef.current.sessionId,
         capabilities: {
           prompt: true, cancel: true, attach: false, model: true, mode: true,
-          sessionCreate: false, compact: false, sessionExport: false, sessionClear: false,
+          sessionCreate: suiteId === 'builtin.solid', compact: false, sessionExport: false, sessionClear: false,
           sessionConfig: true,
           toolAction: false, interactionResponse: true, resourceOpen: false, resourceReveal: false,
           clipboardWrite: true, retry: false, recovery: false,

@@ -10,6 +10,22 @@ const session: Session = {
 }
 
 describe('Agent Workbench production commands', () => {
+  it('首条请求失败时回滚新会话，不选中半成品', async () => {
+    const discardSession = vi.fn(async () => undefined)
+    const selectSession = vi.fn()
+    const commands = createAgentWorkbenchCommandFacade({
+      createSession: vi.fn(async () => ({ sessionId: session.id })),
+      resolveSession: id => id === session.id ? session : undefined,
+      sendMessage: vi.fn(async () => { throw new Error('transport failed') }),
+      discardSession,
+      selectSession,
+    })
+
+    await expect(commands.createSession({ initialPrompt: { text: 'hello' } })).rejects.toThrow('transport failed')
+    expect(discardSession).toHaveBeenCalledWith(session.id)
+    expect(selectSession).not.toHaveBeenCalled()
+  })
+
   it('send 以本地 Session 解析 durable owner，并在 ACP 调用前写入 optimistic user', async () => {
     const optimistic = vi.fn()
     const sendMessage = vi.fn(async () => undefined)

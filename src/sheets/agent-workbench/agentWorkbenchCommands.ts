@@ -30,6 +30,9 @@ export interface AgentWorkbenchCommandDependencies {
   resolveConfigOption(sessionId: string, key: string): { readonly value?: unknown; readonly version?: number } | undefined
   resolveInteraction(sessionId: string, interactionId: string): ResolvedWorkbenchInteraction | undefined
   respondInteraction(request: ResolvedWorkbenchInteraction, answer: InteractionResponseAnswer): Promise<void>
+  createSession(input?: Parameters<WorkbenchCommandFacade['createSession']>[0]): Promise<{ sessionId: string }>
+  selectSession(sessionId: string): void
+  discardSession(sessionId: string): Promise<void>
 }
 
 function productionDependencies(): AgentWorkbenchCommandDependencies {
@@ -53,6 +56,9 @@ function productionDependencies(): AgentWorkbenchCommandDependencies {
     respondInteraction: (request, answer) => createInteractionResponseTransport({
       invoke: (command, args) => invoke(command, args),
     }).respond(request, answer),
+    async createSession() { throw new Error('production_command_not_connected') },
+    selectSession() {},
+    async discardSession() {},
   }
 }
 
@@ -131,7 +137,20 @@ export function createAgentWorkbenchCommandFacade(
         return { ok: true }
       } catch (error) { return rejected(error instanceof Error ? error.message : String(error)) }
     },
-    async createSession() { return { sessionId: '' } },
+    async createSession(input) {
+      const created = await dependencies.createSession(input)
+      if (input?.initialPrompt) {
+        const result = await send(created.sessionId, input.initialPrompt)
+        if (result.status === 'rejected') {
+          await dependencies.discardSession(created.sessionId)
+          throw new Error(result.error || '首条请求发送失败')
+        }
+        dependencies.selectSession(created.sessionId)
+        return created
+      }
+      dependencies.selectSession(created.sessionId)
+      return created
+    },
     async compact() { return rejected('production_command_not_connected') },
     async exportSession() { return rejected('production_command_not_connected') },
     async clearSession() { return rejected('production_command_not_connected') },

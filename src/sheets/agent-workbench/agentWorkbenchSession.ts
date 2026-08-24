@@ -14,6 +14,7 @@ import { createAgentWorkbenchCommandFacade, type ResolvedWorkbenchInteraction } 
 export interface AgentWorkbenchSessionRuntimeDependencies {
   loadAll(ownerKey: string): Promise<readonly unknown[]>
   subscribe(listener: (event: unknown) => void): () => void
+  commands?: Partial<import('./agentWorkbenchCommands.ts').AgentWorkbenchCommandDependencies>
 }
 
 function canonicalRowToWorkbench(row: unknown): readonly WorkbenchEventEnvelope[] | undefined {
@@ -67,7 +68,10 @@ function defaultDependencies(): AgentWorkbenchSessionRuntimeDependencies {
   }
 }
 
-export function createAgentWorkbenchSessionRuntime(dependencies: AgentWorkbenchSessionRuntimeDependencies = defaultDependencies()) {
+export function createAgentWorkbenchSessionRuntime(dependencies: Partial<AgentWorkbenchSessionRuntimeDependencies> = {}) {
+  const defaults = defaultDependencies()
+  const loadAll = dependencies.loadAll ?? defaults.loadAll
+  const subscribe = dependencies.subscribe ?? defaults.subscribe
   const runtime = createWorkbenchRuntime({
     sessionId: null, status: 'idle', messages: [], streamingText: '', streamingThinking: '',
     generating: false, generationStart: 0, tokenCount: 0, summary: null, tasks: [],
@@ -78,6 +82,7 @@ export function createAgentWorkbenchSessionRuntime(dependencies: AgentWorkbenchS
   const sessionUi = createSessionUiStore()
   let boundSessionId: string | undefined
   const commands = createAgentWorkbenchCommandFacade({
+    ...dependencies.commands,
     resolveConfigOption(sessionId, key) {
       if (boundSessionId !== sessionId) return undefined
       const option = runtime.getSnapshot().document?.session.options.find(item => item.id === key)
@@ -126,7 +131,7 @@ export function createAgentWorkbenchSessionRuntime(dependencies: AgentWorkbenchS
     const current = runtime.getSnapshot().document ?? createWorkbenchDocument(envelope.sessionId)
     runtime.applyDocument(reduceWorkbenchEvent(current, envelope), { ownerKey, generation })
   }
-  const unsubscribeEvents = dependencies.subscribe(event => {
+  const unsubscribeEvents = subscribe(event => {
     if (destroyed || !ownerKey || !source || !event || typeof event !== 'object') return
     const candidate = event as { owner?: Parameters<typeof toCanonicalOwnerKey>[0]; sessionId?: unknown }
     const matchesOwner = candidate.owner ? toCanonicalOwnerKey(candidate.owner) === ownerKey : candidate.sessionId === source
@@ -161,7 +166,7 @@ export function createAgentWorkbenchSessionRuntime(dependencies: AgentWorkbenchS
       updateRuntimeState({ status: loading ? 'loading' : 'idle', error: null })
       if (!session || !ownerKey) return
       const loadingOwnerKey = ownerKey
-      await dependencies.loadAll(loadingOwnerKey).then(rows => {
+      await loadAll(loadingOwnerKey).then(rows => {
         if (destroyed || generation !== nextGeneration || ownerKey !== loadingOwnerKey) return
         const envelopes = rows.flatMap(row => {
           const migrated = toWorkbenchEnvelopes(row)

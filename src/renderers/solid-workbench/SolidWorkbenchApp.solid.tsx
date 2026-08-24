@@ -137,6 +137,7 @@ function WorkbenchContent(props: SolidWorkbenchAppProps) {
         fallback={<WorkbenchEmptyState
           status={snapshot().status}
           workspaceMode={props.context.input().workspaceMode ?? 'work'}
+          context={props.context}
         />}
       >
         <div class="chat-view solid-workbench-chat">
@@ -544,8 +545,35 @@ function toSolidMessage(message: WorkbenchDocument['messages'][number]): Message
   } as Message & { semanticParts: readonly ContentPart[] }
 }
 
-function WorkbenchEmptyState(props: { status: string; workspaceMode: 'work' | 'chat' }) {
+function WorkbenchEmptyState(props: { status: string; workspaceMode: 'work' | 'chat'; context: SolidWorkbenchContextValue }) {
   const model = () => selectAgentEmptyState(props.workspaceMode)
+  const workspaces = () => props.context.input().availableWorkspaces ?? []
+  const [workspaceId, setWorkspaceId] = createSignal('')
+  const [prompt, setPrompt] = createSignal('')
+  const [submitting, setSubmitting] = createSignal(false)
+  const [submitError, setSubmitError] = createSignal('')
+  const submit = async () => {
+    const text = prompt().trim()
+    if (!text || submitting()) return
+    if (props.workspaceMode === 'work' && !workspaceId()) {
+      setSubmitError('请先选择工作区')
+      return
+    }
+    setSubmitting(true)
+    setSubmitError('')
+    try {
+      const created = await props.context.commands.createSession({
+        ...(workspaceId() ? { workspaceId: workspaceId() } : {}),
+        initialPrompt: { text },
+      })
+      if (!created.sessionId) throw new Error('会话创建未返回有效标识')
+      setPrompt('')
+    } catch (error) {
+      setSubmitError(error instanceof Error ? error.message : String(error))
+    } finally {
+      setSubmitting(false)
+    }
+  }
   return (
     <div class="solid-workbench-empty agent-empty-state" data-status={props.status} data-workspace-mode={props.workspaceMode} role="region" aria-label="Agent 工作台空态">
       <div class="agent-empty-brand" aria-hidden="true">
@@ -559,10 +587,39 @@ function WorkbenchEmptyState(props: { status: string; workspaceMode: 'work' | 'c
       </div>
       <div class="agent-empty-eyebrow">{model().eyebrow}</div>
       <h2 class="agent-empty-title">{model().title}</h2>
-      <p class="agent-empty-description">{model().description}</p>
-      <ol class="agent-empty-steps" aria-label="开始步骤">
-        {model().steps.map((step, index) => <li><span aria-hidden="true">{index + 1}</span>{step}</li>)}
-      </ol>
+      <p class="agent-empty-description">{props.workspaceMode === 'work'
+        ? '选择项目并描述任务，Pylon 会创建带工作上下文的会话。'
+        : '直接输入第一条消息，Pylon 会创建会话并让 Agent 立即开始回应。'}</p>
+      <form class="solid-agent-empty-composer" onSubmit={event => { event.preventDefault(); void submit() }}>
+        <Show when={props.workspaceMode === 'work'}>
+          <label class="solid-agent-empty-workspace">
+            <span>工作区</span>
+            <select aria-label="新会话工作区" value={workspaceId()} onChange={event => { setWorkspaceId(event.currentTarget.value); setSubmitError('') }}>
+              <option value="">{workspaces().length > 0 ? '选择工作区…' : '暂无工作区，请先在左栏创建'}</option>
+              {workspaces().map(item => <option value={item.id}>{item.label} · {item.path}</option>)}
+            </select>
+          </label>
+        </Show>
+        <textarea
+          aria-label="首条请求"
+          value={prompt()}
+          placeholder={props.workspaceMode === 'work' ? '描述你想让 Agent 在这个项目中完成什么…' : '向 Agent 发送第一条消息…'}
+          disabled={submitting()}
+          onInput={event => { setPrompt(event.currentTarget.value); setSubmitError('') }}
+          onKeyDown={event => {
+            if (event.key !== 'Enter' || event.shiftKey || event.isComposing) return
+            event.preventDefault()
+            void submit()
+          }}
+        />
+        <div class="solid-agent-empty-composer-footer">
+          <span>Enter 发送 · Shift+Enter 换行</span>
+          <button type="submit" disabled={!prompt().trim() || submitting() || (props.workspaceMode === 'work' && !workspaceId())}>
+            {submitting() ? '正在创建…' : '开始新会话'}
+          </button>
+        </div>
+        <Show when={submitError()}>{message => <div class="solid-agent-empty-error" role="alert">{message()}</div>}</Show>
+      </form>
     </div>
   )
 }

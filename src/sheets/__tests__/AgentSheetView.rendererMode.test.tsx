@@ -1,5 +1,5 @@
 // @vitest-environment jsdom
-import { render, screen, waitFor } from '@testing-library/react'
+import { fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest'
 import type { SheetContext, SheetRecord } from '../../workspace-sheets/sheetTypes.ts'
 import { resetStores } from '../../test/resetStores.ts'
@@ -15,6 +15,7 @@ import type { BuiltinPluginDefinition } from '../../plugin-runtime/pluginRuntime
 import { normalizeRawEvent } from '../../domains/events/canonicalNormalizer.ts'
 import { publishPluginEvent as publishCanonicalPluginEvent } from '../../infrastructure/events/pluginEventBus.ts'
 import { useWorkspaceStore } from '../../workspaceStore.ts'
+import { useWorkspaceEntityStore } from '../../workspaceEntityStore.ts'
 import { createWorkbenchEnvelope, type WorkbenchEventEnvelope } from '../../domains/workbench/events/workbenchEventSchema.ts'
 import { invoke } from '@tauri-apps/api/core'
 
@@ -1510,6 +1511,71 @@ describe('AgentSheetView renderer mode context', () => {
 
     rerender(<AgentSheetView sheet={sheet({ sidebarMode: 'broken' })} ctx={ctx} />)
     await waitFor(() => expect(screen.getByLabelText('Solid Agent Workbench')).toHaveAttribute('data-workspace-mode', 'work'))
+  })
+
+  it('Solid 空态提交首条请求后创建并选中会话，再向同一 owner 发送消息', async () => {
+    const selectSession = vi.fn()
+    vi.mocked(invoke).mockImplementation(async command => {
+      if (command === 'new_session') return { sessionId: 'remote-created' }
+      return undefined
+    })
+
+    render(<AgentSheetView
+      sheet={sheet({ sidebarMode: 'chat' })}
+      ctx={{ ...ctx, activeSession: null, selectSession }}
+    />)
+
+    const prompt = await screen.findByRole('textbox', { name: '首条请求' }, { timeout: 5_000 })
+    fireEvent.input(prompt, { target: { value: '检查当前项目的测试状态' } })
+    fireEvent.click(screen.getByRole('button', { name: '开始新会话' }))
+
+    await waitFor(() => expect(selectSession).toHaveBeenCalledTimes(1))
+    const sessionId = selectSession.mock.calls[0]?.[0]
+    const created = useIdentityStore.getState().sessions.find(item => item.id === sessionId)
+    expect(created).toMatchObject({ agentId: 'peri', periId: 'remote-created' })
+    expect(vi.mocked(invoke)).toHaveBeenCalledWith('new_session', expect.objectContaining({
+      agentId: 'peri', source: created?.source,
+    }))
+    expect(vi.mocked(invoke)).toHaveBeenCalledWith('send_message', expect.objectContaining({
+      agentId: 'peri', source: created?.source, content: '检查当前项目的测试状态',
+    }))
+    const sendCall = vi.mocked(invoke).mock.calls.find(call => call[0] === 'send_message')
+    expect(sendCall).toBeTruthy()
+    expect(vi.mocked(invoke).mock.invocationCallOrder[vi.mocked(invoke).mock.calls.indexOf(sendCall!)]).toBeLessThan(
+      selectSession.mock.invocationCallOrder[0]!,
+    )
+  })
+
+  it('Solid 工作空态只在选择工作区后创建带 cwd 绑定的会话', async () => {
+    const selectSession = vi.fn()
+    useWorkspaceEntityStore.setState({
+      workspaces: [{
+        id: 'workspace-a', agentId: 'peri', name: 'Pylon', rootPath: 'G:/Project/Pylon',
+        createdAt: 1, lastActiveAt: 1, skills: ['tdd'], mcpServerIds: [], hookPluginIds: ['hook-a'],
+      }],
+      hydrated: true,
+    })
+    vi.mocked(invoke).mockImplementation(async command => command === 'new_session' ? { sessionId: 'remote-work' } : undefined)
+
+    render(<AgentSheetView
+      sheet={sheet({ sidebarMode: 'work' })}
+      ctx={{ ...ctx, activeSession: null, selectSession }}
+    />)
+
+    const submit = await screen.findByRole('button', { name: '开始新会话' }, { timeout: 5_000 })
+    fireEvent.input(screen.getByRole('textbox', { name: '首条请求' }), { target: { value: '修复构建' } })
+    expect(submit).toBeDisabled()
+    fireEvent.change(screen.getByRole('combobox', { name: '新会话工作区' }), { target: { value: 'workspace-a' } })
+    fireEvent.click(submit)
+
+    await waitFor(() => expect(selectSession).toHaveBeenCalledTimes(1))
+    const created = useIdentityStore.getState().sessions.find(item => item.id === selectSession.mock.calls[0]?.[0])
+    expect(created).toMatchObject({
+      workspaceId: 'workspace-a', workdir: 'G:/Project/Pylon', skills: ['tdd'], hooks: ['hook-a'],
+    })
+    expect(vi.mocked(invoke)).toHaveBeenCalledWith('new_session', expect.objectContaining({
+      workspaceId: 'workspace-a', cwd: 'G:/Project/Pylon', source: created?.source,
+    }))
   })
 
   it('Interface Mode 切换仍复用 Renderer Suite Host，不回到硬编码 React 工作台', async () => {
