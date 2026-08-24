@@ -444,6 +444,11 @@
 .agent-runtime-card .set-hint {
   margin: 2px 0;
 }
+.agent-runtime-empty {
+  display:flex; align-items:center; justify-content:space-between; gap:10px; margin:8px 0; padding:10px;
+  border:1px dashed var(--border); border-radius:var(--ui-radius-lg); color:var(--text-dim); font-size:var(--font-size-sm);
+}
+.agent-runtime-empty .ps-btn { flex:0 0 auto; }
 .agent-candidate-validation {
   display:flex; flex-direction:column; gap:3px; margin-top:8px; padding:8px 10px;
   border-left:2px solid var(--accent); background:color-mix(in srgb,var(--accent) 7%,transparent);

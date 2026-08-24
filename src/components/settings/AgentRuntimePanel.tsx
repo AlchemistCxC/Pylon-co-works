@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import { invoke } from '@tauri-apps/api/core'
 import { IS_TAURI } from '../../infrastructure/tauri/env'
 import {
@@ -73,6 +73,15 @@ function detectedAgentConfig(draft: CandidateDraft, isFirst: boolean): AgentCrea
 
 function agentsDocument(id: string, config: AgentCreateConfig): AgentsConfigDocument {
   return { agents: { [id]: config } }
+}
+
+function executableIdentity(path: string): { id: string; name: string } {
+  const fileName = path.trim().split(/[\\/]/).pop()?.replace(/\.(?:exe|cmd|bat)$/i, '').trim() ?? ''
+  const id = fileName
+    .toLowerCase()
+    .replace(/[^a-z0-9._-]+/g, '-')
+    .replace(/^[^a-z0-9]+|[^a-z0-9]+$/g, '') || 'agent'
+  return { id, name: fileName || 'Agent' }
 }
 
 function wireErrorCode(error: unknown): string | undefined {
@@ -158,6 +167,7 @@ export default function AgentRuntimePanel() {
   const [detectionDiagnostics, setDetectionDiagnostics] = useState<AgentDetectionDiagnostic[]>([])
   const [detectionElapsedMs, setDetectionElapsedMs] = useState(0)
   const [detectionTruncated, setDetectionTruncated] = useState(false)
+  const [detectionCompleted, setDetectionCompleted] = useState(false)
   const [detecting, setDetecting] = useState(false)
   const [candidateValidation, setCandidateValidation] = useState<Record<string, AgentCandidateValidationState>>({})
   const [candidateDrafts, setCandidateDrafts] = useState<Record<string, CandidateDraft>>({})
@@ -188,6 +198,7 @@ export default function AgentRuntimePanel() {
   const detectRuntimes = async () => {
     if (detecting) return
     setDetecting(true)
+    setDetectionCompleted(false)
     try {
       const detectors = getPluginServiceRegistry().list<AgentRuntimeDetectorMetadata>('agent-detector')
       const report = await agentClient.detectAgentRuntimes(selectAcpRuntimeDetectorIds(detectors))
@@ -195,16 +206,23 @@ export default function AgentRuntimePanel() {
       setDetectionDiagnostics(report.diagnostics)
       setDetectionElapsedMs(report.elapsedMs)
       setDetectionTruncated(report.truncated)
+      setDetectionCompleted(true)
     } catch (error) {
       reportRuntimeError('探测本机 Agent', error)
       setFeedback(`探测失败：${error instanceof Error ? error.message : String(error)}`)
     } finally { setDetecting(false) }
   }
 
-  const validateCandidate = async (candidate: AgentRuntimeCandidate) => {
+  useEffect(() => {
+    void detectRuntimes()
+    // 首次进入 Agent 配置即扫描一次；后续扫描仍由“重新探测”显式触发。
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
+
+  const validateCandidate = async (candidate: AgentRuntimeCandidate): Promise<AgentCandidateValidationState | null> => {
     const draft = candidateDrafts[candidate.candidateId] ?? candidateDraft(candidate)
     const invalid = invocationError(draft.executable, draft.args)
-    if (invalid) { setFeedback(invalid); return }
+    if (invalid) { setFeedback(invalid); return null }
     setFeedback(null)
     setCandidateValidation(current => ({ ...current, [candidate.candidateId]: { status: 'testing' } }))
     const result = await agentClient.testAgentCandidate(draft.id, {
@@ -218,13 +236,16 @@ export default function AgentRuntimePanel() {
         error: { code: detail.code ?? 'agent_validation_transport_failed', message: detail.message, action: 'open-runtime-log', stage: 'unknown' as const, exitCode: null, stderr: null },
       }
     })
-    setCandidateValidation(current => ({ ...current, [candidate.candidateId]: { status: result.ok ? 'ok' : 'failed', result } }))
+    const validation: AgentCandidateValidationState = { status: result.ok ? 'ok' : 'failed', result }
+    setCandidateValidation(current => ({ ...current, [candidate.candidateId]: validation }))
+    return validation
   }
 
-  const importCandidate = async (candidate: AgentRuntimeCandidate) => {
-    const importMode = candidateImportMode(candidate, candidateValidation[candidate.candidateId])
+  const importCandidate = async (candidate: AgentRuntimeCandidate, validationOverride?: AgentCandidateValidationState) => {
+    const validation = validationOverride ?? candidateValidation[candidate.candidateId]
+    const importMode = candidateImportMode(candidate, validation)
     if (importMode === 'blocked') {
-      setFeedback(candidateValidation[candidate.candidateId]?.status === 'failed'
+      setFeedback(validation?.status === 'failed'
         ? '该候选置信度不足，必须通过 ACP 验证后才能导入'
         : '请先验证候选，再执行导入')
       return
@@ -252,6 +273,11 @@ export default function AgentRuntimePanel() {
     } catch (error) {
       reportConfigMutationError('导入 Agent 候选', error, id)
     }
+  }
+
+  const validateAndImportCandidate = async (candidate: AgentRuntimeCandidate) => {
+    const validation = await validateCandidate(candidate)
+    if (validation?.status === 'ok') await importCandidate(candidate, validation)
   }
 
   const updateCandidateDraft = (candidate: AgentRuntimeCandidate, patch: Partial<CandidateDraft>) => {
@@ -491,6 +517,12 @@ export default function AgentRuntimePanel() {
             {diagnostic.code}（{diagnostic.stage}）：{diagnostic.message}
           </div>
         ))}
+        {detectionCompleted && candidates.length === 0 && (
+          <div className="agent-runtime-empty" role="status">
+            <span>未发现可自动配置的 ACP Agent。若 Agent 已安装但不在 PATH 中，可以手动选择其可执行文件。</span>
+            <button className="ps-btn sm" type="button" onClick={() => setShowCreate(true)}>手动添加</button>
+          </div>
+        )}
         {candidates.map(candidate => {
           const discoveredDraft = candidateDrafts[candidate.candidateId] ?? candidateDraft(candidate)
           const validation = candidateValidation[candidate.candidateId]
@@ -509,8 +541,10 @@ export default function AgentRuntimePanel() {
           {candidate.evidence.map((evidence, index) => <div className="set-hint" key={`${evidence.kind}:${index}`}>{evidence.kind}：{evidence.detail}</div>)}
           {candidate.warnings.map(warning => <div className="set-hint" role="alert" key={warning}>{warning}</div>)}
           <div className="set-preset-row">
-            <button className="ps-btn sm" type="button" disabled={validation?.status === 'testing'} onClick={() => void validateCandidate(candidate)}>{validation?.status === 'testing' ? '验证中…' : '验证'}</button>
-            <button className="ps-btn sm primary" type="button" disabled={candidate.alreadyImportedAgentId !== undefined || importMode === 'blocked'} onClick={() => void importCandidate(candidate)}>{importMode === 'unverified' ? '导入（未验证）' : '导入'}</button>
+            <button className="ps-btn sm primary" type="button" disabled={candidate.alreadyImportedAgentId !== undefined || validation?.status === 'testing'} onClick={() => void validateAndImportCandidate(candidate)}>{validation?.status === 'testing' ? '验证中…' : '验证并导入'}</button>
+            {importMode === 'unverified' && (
+              <button className="ps-btn sm" type="button" disabled={candidate.alreadyImportedAgentId !== undefined} onClick={() => void importCandidate(candidate)}>仍然导入（未验证）</button>
+            )}
             {validation?.status === 'testing' && <span className="set-hint">ACP 验证中，最长 15 秒</span>}
           </div>
           {validationDetails && <div className={`agent-candidate-validation ${validation?.status === 'failed' ? 'failed' : 'ok'}`} role="status">
@@ -535,6 +569,18 @@ export default function AgentRuntimePanel() {
           <input className="set-input" value={createDraft.id} onChange={event => setCreateDraft({ ...createDraft, id: event.target.value })} placeholder="id（字母开头，可含 . _ -）" aria-label="新建 Agent id" />
           <input className="set-input" value={createDraft.name} onChange={event => setCreateDraft({ ...createDraft, name: event.target.value })} placeholder="name" aria-label="新建 Agent name" />
           <input className="set-input" value={createDraft.exe} onChange={event => setCreateDraft({ ...createDraft, exe: event.target.value })} placeholder="exe 绝对路径或命令名" aria-label="新建 Agent exe" />
+          <button className="ps-btn sm" type="button" onClick={() => {
+            void pickExecutable().then(path => {
+              if (!path) return
+              const suggested = executableIdentity(path)
+              setCreateDraft(current => ({
+                ...current,
+                exe: path,
+                id: current.id || suggested.id,
+                name: current.name || suggested.name,
+              }))
+            })
+          }}>选择可执行文件</button>
           <ArgumentListEditor args={createDraft.args} label="新建 Agent" onChange={args => setCreateDraft({ ...createDraft, args })} />
           <InvocationPreview executable={createDraft.exe} args={createDraft.args} />
           <div className="set-hint" role="note">{pathHintForProvider(null)}</div>
