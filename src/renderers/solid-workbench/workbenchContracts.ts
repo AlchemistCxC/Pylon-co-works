@@ -46,6 +46,7 @@ export interface WorkbenchWorkspaceOption {
   readonly id: string
   readonly label: string
   readonly path: string
+  readonly lastActiveAt?: number
 }
 
 export interface RendererPrepareContext {

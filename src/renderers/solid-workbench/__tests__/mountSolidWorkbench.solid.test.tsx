@@ -161,11 +161,94 @@ describe('mountSolidWorkbench', () => {
     })
     const emptyState = await screen.findByRole('region', { name: 'Agent 工作台空态' })
     expect(emptyState).toHaveTextContent('准备开始')
-    expect(screen.getByRole('combobox', { name: '新会话工作区' })).toBeTruthy()
+    expect(screen.getByRole('combobox', { name: '新会话工作区' })).toBeDisabled()
     expect(screen.getByRole('textbox', { name: '首条请求' })).toBeTruthy()
     expect(screen.getByRole('button', { name: '开始新会话' })).toBeDisabled()
     expect(host.querySelector('.control-center')).toBeNull()
     expect(host.firstElementChild).toBe(root)
+  })
+
+  it('空态只有一个工作区时自动选中，并随首条请求创建会话', async () => {
+    const { services, lifecycle } = mountPreview()
+    lifecycle.update({
+      sheetId: 'sheet-a', sessionId: null, preview: true, workspaceMode: 'work',
+      availableWorkspaces: [{ id: 'workspace-a', label: 'Prism', path: 'G:/Project/prism' }],
+    })
+
+    const workspace = await screen.findByRole('combobox', { name: '新会话工作区' })
+    expect(workspace).toHaveValue('workspace-a')
+    fireEvent.input(screen.getByRole('textbox', { name: '首条请求' }), { target: { value: '检查当前项目' } })
+    fireEvent.click(screen.getByRole('button', { name: '开始新会话' }))
+
+    await waitFor(() => expect(services.commands.calls).toContainEqual({
+      command: 'createSession',
+      args: [{ workspaceId: 'workspace-a', initialPrompt: { text: '检查当前项目' } }],
+    }))
+  })
+
+  it('空态有多个工作区时按 host 提供的最近活跃时间预选', async () => {
+    const { lifecycle } = mountPreview()
+    lifecycle.update({
+      sheetId: 'sheet-a', sessionId: null, preview: true, workspaceMode: 'work',
+      availableWorkspaces: [
+        { id: 'workspace-old', label: '旧项目', path: 'G:/old', lastActiveAt: 10 },
+        { id: 'workspace-recent', label: '最近项目', path: 'G:/recent', lastActiveAt: 30 },
+      ],
+    })
+
+    const workspace = await screen.findByRole('combobox', { name: '新会话工作区' })
+    expect(workspace).toHaveValue('workspace-recent')
+
+    lifecycle.update({
+      sheetId: 'sheet-a', sessionId: null, preview: true, workspaceMode: 'work',
+      availableWorkspaces: [
+        { id: 'workspace-unknown-a', label: '未知 A', path: 'G:/unknown-a' },
+        { id: 'workspace-unknown-b', label: '未知 B', path: 'G:/unknown-b' },
+      ],
+    })
+    await waitFor(() => expect(workspace).toHaveValue(''))
+  })
+
+  it('空态创建期间冻结事务输入并暴露忙碌状态', async () => {
+    let finishCreation: ((value: { sessionId: string }) => void) | undefined
+    const { services, lifecycle } = mountPreview()
+    services.commands.setHandler('createSession', vi.fn(() => new Promise<{ sessionId: string }>(resolve => { finishCreation = resolve })))
+    lifecycle.update({
+      sheetId: 'sheet-a', sessionId: null, preview: true, workspaceMode: 'work',
+      availableWorkspaces: [{ id: 'workspace-a', label: 'Prism', path: 'G:/Project/prism' }],
+    })
+    const prompt = await screen.findByRole('textbox', { name: '首条请求' })
+    fireEvent.input(prompt, { target: { value: '执行耗时任务' } })
+    fireEvent.click(screen.getByRole('button', { name: '开始新会话' }))
+
+    const emptyState = screen.getByRole('region', { name: 'Agent 工作台空态' })
+    expect(emptyState).toHaveAttribute('aria-busy', 'true')
+    expect(screen.getByRole('combobox', { name: '新会话工作区' })).toBeDisabled()
+    expect(prompt).toBeDisabled()
+    expect(screen.getByRole('button', { name: '正在创建…' })).toBeDisabled()
+
+    finishCreation?.({ sessionId: 'created-session' })
+    await waitFor(() => expect(emptyState).toHaveAttribute('aria-busy', 'false'))
+  })
+
+  it('空态创建失败后保留草稿与工作区，并把焦点交还输入框', async () => {
+    const { services, lifecycle } = mountPreview()
+    services.commands.setHandler('createSession', vi.fn(async () => { throw new Error('Agent 暂时不可用') }))
+    lifecycle.update({
+      sheetId: 'sheet-a', sessionId: null, preview: true, workspaceMode: 'work',
+      availableWorkspaces: [{ id: 'workspace-a', label: 'Prism', path: 'G:/Project/prism' }],
+    })
+    const prompt = await screen.findByRole('textbox', { name: '首条请求' })
+    fireEvent.input(prompt, { target: { value: '保留这份任务描述' } })
+    const submit = screen.getByRole('button', { name: '开始新会话' })
+    submit.focus()
+    fireEvent.click(submit)
+
+    expect(await screen.findByRole('alert')).toHaveTextContent('Agent 暂时不可用')
+    expect(prompt).toHaveValue('保留这份任务描述')
+    expect(screen.getByRole('combobox', { name: '新会话工作区' })).toHaveValue('workspace-a')
+    expect(prompt).toBeEnabled()
+    expect(prompt).toHaveFocus()
   })
 
   it('pause 冻结 runtime/appearance 推送，resume 一次收敛最新快照', async () => {

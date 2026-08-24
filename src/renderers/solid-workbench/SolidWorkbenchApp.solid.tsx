@@ -588,6 +588,20 @@ function WorkbenchEmptyState(props: { status: string; workspaceMode: 'work' | 'c
   const [prompt, setPrompt] = createSignal('')
   const [submitting, setSubmitting] = createSignal(false)
   const [submitError, setSubmitError] = createSignal('')
+  let promptInput: HTMLTextAreaElement | undefined
+  createEffect(() => {
+    const options = workspaces()
+    const current = workspaceId()
+    if (props.workspaceMode !== 'work') {
+      if (current) setWorkspaceId('')
+      return
+    }
+    if (current && options.some(item => item.id === current)) return
+    const recent = options.length > 1 && options.every(item => Number.isFinite(item.lastActiveAt))
+      ? options.reduce((latest, item) => (item.lastActiveAt ?? 0) > (latest.lastActiveAt ?? 0) ? item : latest)
+      : undefined
+    setWorkspaceId(options.length === 1 ? options[0]!.id : recent?.id ?? '')
+  })
   const submit = async () => {
     const text = prompt().trim()
     if (!text || submitting()) return
@@ -606,12 +620,13 @@ function WorkbenchEmptyState(props: { status: string; workspaceMode: 'work' | 'c
       setPrompt('')
     } catch (error) {
       setSubmitError(error instanceof Error ? error.message : String(error))
+      queueMicrotask(() => promptInput?.focus())
     } finally {
       setSubmitting(false)
     }
   }
   return (
-    <div class="solid-workbench-empty agent-empty-state" data-status={props.status} data-workspace-mode={props.workspaceMode} role="region" aria-label="Agent 工作台空态">
+    <div class="solid-workbench-empty agent-empty-state" data-status={props.status} data-workspace-mode={props.workspaceMode} role="region" aria-label="Agent 工作台空态" aria-busy={submitting()}>
       <div class="agent-empty-brand" aria-hidden="true">
         <svg class="pylon-mark" width="52" height="52" viewBox="0 0 64 64">
           <path class="pylon-mark-frame" d="M32 7 53 19v26L32 57 11 45V19Z" />
@@ -630,13 +645,14 @@ function WorkbenchEmptyState(props: { status: string; workspaceMode: 'work' | 'c
         <Show when={props.workspaceMode === 'work'}>
           <label class="solid-agent-empty-workspace">
             <span>工作区</span>
-            <select aria-label="新会话工作区" value={workspaceId()} onChange={event => { setWorkspaceId(event.currentTarget.value); setSubmitError('') }}>
+            <select aria-label="新会话工作区" value={workspaceId()} disabled={submitting() || workspaces().length === 0} onChange={event => { setWorkspaceId(event.currentTarget.value); setSubmitError('') }}>
               <option value="">{workspaces().length > 0 ? '选择工作区…' : '暂无工作区，请先在左栏创建'}</option>
               {workspaces().map(item => <option value={item.id}>{item.label} · {item.path}</option>)}
             </select>
           </label>
         </Show>
         <textarea
+          ref={promptInput}
           aria-label="首条请求"
           value={prompt()}
           placeholder={props.workspaceMode === 'work' ? '描述你想让 Agent 在这个项目中完成什么…' : '向 Agent 发送第一条消息…'}

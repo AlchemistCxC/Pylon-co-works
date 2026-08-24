@@ -80,7 +80,7 @@ export default function AgentRendererSuiteWorkbench(props: AgentRendererSuiteWor
     sessionLabel: session?.name,
     workspaceLabel: workspace?.name ?? workspaceLabel(session?.workdir),
     workspacePath: workspace?.rootPath ?? session?.workdir,
-    availableWorkspaces: workspaces.map(item => ({ id: item.id, label: item.name, path: item.rootPath })),
+    availableWorkspaces: workspaces.map(item => ({ id: item.id, label: item.name, path: item.rootPath, lastActiveAt: item.lastActiveAt })),
   }), [props.sheet.id, props.ctx.activeSession, props.ctx.rightInset, props.workspaceMode, props.isReplay, session, workspace, workspaces, activeProfileId, isActiveSheet])
   const activation = useMemo(() => {
     try {
