@@ -74,6 +74,37 @@ describe('mountSolidWorkbench', () => {
     expect(scrollIntoView).toHaveBeenCalledWith({ block: 'center' })
   })
 
+  it('用户离开底部后不抢滚动，并可一键恢复自动跟随', async () => {
+    const scrollIntoView = vi.fn()
+    Object.defineProperty(HTMLElement.prototype, 'scrollIntoView', {
+      configurable: true,
+      value: scrollIntoView,
+    })
+    const { host, services } = mountPreview()
+    const viewport = host.querySelector('.solid-workbench-chat') as HTMLDivElement
+    Object.defineProperties(viewport, {
+      scrollTop: { value: 100, writable: true, configurable: true },
+      scrollHeight: { value: 1_000, configurable: true },
+      clientHeight: { value: 300, configurable: true },
+    })
+
+    fireEvent.scroll(viewport)
+    expect(await screen.findByRole('button', { name: '回到底部' })).toBeTruthy()
+    scrollIntoView.mockClear()
+
+    services.runtime.update({ streamingText: '用户上滚后的新输出' })
+    await Promise.resolve()
+    expect(scrollIntoView).not.toHaveBeenCalled()
+
+    fireEvent.click(screen.getByRole('button', { name: '回到底部' }))
+    expect(scrollIntoView).toHaveBeenCalledWith({ behavior: 'auto', block: 'end' })
+    expect(screen.queryByRole('button', { name: '回到底部' })).toBeNull()
+
+    scrollIntoView.mockClear()
+    services.runtime.update({ streamingText: '恢复跟随后继续输出' })
+    await waitFor(() => expect(scrollIntoView).toHaveBeenCalledWith({ behavior: 'auto', block: 'end' }))
+  })
+
   it('右栏与 Solid 对 canonical semantic parts 使用同一搜索文本口径', async () => {
     Object.defineProperty(HTMLElement.prototype, 'scrollIntoView', {
       configurable: true,

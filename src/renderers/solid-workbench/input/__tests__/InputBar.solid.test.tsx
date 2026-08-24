@@ -141,20 +141,33 @@ describe('SolidInputBar', () => {
     expect(await screen.findByRole('alert')).toHaveTextContent('A send failed')
   })
 
-  it('生成期间 Enter 入队，停止后可手动发送并删除队列项', async () => {
+  it('生成结束后自动发送队首，并等待下一轮结束后再发下一条', async () => {
     const { services, textarea } = renderInput()
     services.runtime.update({ generating: true })
-    fireEvent.input(textarea, { target: { value: '稍后发送' } })
+    fireEvent.input(textarea, { target: { value: '第一条待发' } })
+    fireEvent.keyDown(textarea, { key: 'Enter' })
+    fireEvent.input(textarea, { target: { value: '第二条待发' } })
     fireEvent.keyDown(textarea, { key: 'Enter' })
 
-    expect(await screen.findByText('稍后发送')).toBeTruthy()
+    expect(await screen.findByText('第一条待发')).toBeTruthy()
+    expect(screen.getByText('第二条待发')).toBeTruthy()
     expect(services.commands.calls).toHaveLength(0)
 
     services.runtime.update({ generating: false })
-    await waitFor(() => expect(screen.getByRole('button', { name: '发送待发送消息' })).not.toBeDisabled())
-    fireEvent.click(screen.getByRole('button', { name: '发送待发送消息' }))
-    await waitFor(() => expect(services.commands.calls[0]?.command).toBe('send'))
-    await waitFor(() => expect(screen.queryByText('稍后发送')).toBeNull())
+    await waitFor(() => expect(services.commands.calls).toHaveLength(1))
+    expect(services.commands.calls[0]).toEqual({
+      command: 'send', args: ['session-a', { text: '第一条待发', attachments: [] }],
+    })
+    expect(screen.queryByText('第一条待发')).toBeNull()
+    expect(screen.getByText('第二条待发')).toBeTruthy()
+
+    services.runtime.update({ generating: true })
+    services.runtime.update({ generating: false })
+    await waitFor(() => expect(services.commands.calls).toHaveLength(2))
+    expect(services.commands.calls[1]).toEqual({
+      command: 'send', args: ['session-a', { text: '第二条待发', attachments: [] }],
+    })
+    await waitFor(() => expect(screen.queryByText('第二条待发')).toBeNull())
   })
 
   it('生成期间排队的消息保留当时选择的附件', async () => {
@@ -178,6 +191,41 @@ describe('SolidInputBar', () => {
         text: '稍后读取附件',
         attachments: [{ id: 'a', path: 'C:/a.txt', name: 'a.txt' }],
       }],
+    }))
+  })
+
+  it('待发消息发送未完成时禁用队列按钮，避免重复提交', async () => {
+    let resolveSend: ((value: { status: 'sent'; messageId: string }) => void) | undefined
+    const { services, textarea } = renderInput()
+    services.commands.setHandler('send', vi.fn(() => new Promise<{ status: 'sent'; messageId: string }>(resolve => { resolveSend = resolve })))
+    services.runtime.update({ generating: true })
+    fireEvent.input(textarea, { target: { value: '只能发送一次' } })
+    fireEvent.keyDown(textarea, { key: 'Enter' })
+    services.runtime.update({ generating: false })
+
+    await waitFor(() => expect(services.commands.calls).toHaveLength(1))
+    const sendQueuedButton = screen.getByRole('button', { name: '发送待发送消息' })
+    expect(sendQueuedButton).toBeDisabled()
+    fireEvent.click(sendQueuedButton)
+    expect(services.commands.calls).toHaveLength(1)
+
+    resolveSend?.({ status: 'sent', messageId: 'queued-message' })
+    await waitFor(() => expect(screen.queryByText('只能发送一次')).toBeNull())
+  })
+
+  it('生成在后台结束后，返回原会话会继续发送其队列', async () => {
+    const { services, textarea, switchSession } = renderInput()
+    services.runtime.update({ generating: true })
+    fireEvent.input(textarea, { target: { value: 'A 后台待发' } })
+    fireEvent.keyDown(textarea, { key: 'Enter' })
+
+    switchSession('session-b')
+    services.runtime.update({ generating: false })
+    expect(services.commands.calls).toHaveLength(0)
+    switchSession('session-a')
+
+    await waitFor(() => expect(services.commands.calls).toContainEqual({
+      command: 'send', args: ['session-a', { text: 'A 后台待发', attachments: [] }],
     }))
   })
 

@@ -1,4 +1,4 @@
-import { For, Show, createMemo, createSignal, onCleanup, onMount } from 'solid-js'
+import { For, Show, createEffect, createMemo, createSignal, onCleanup, onMount } from 'solid-js'
 import {
   resolveFallbackCommands,
   filterCommandSuggestions,
@@ -36,9 +36,12 @@ export function SolidInputBar(props: SolidInputBarProps) {
   const [attachments, setAttachments] = createSessionUiSignal<readonly WorkbenchAttachment[]>(workbench.sessionUi, sessionId, 'attachments', [])
   const [sendError, setSendError] = createSessionUiSignal(workbench.sessionUi, sessionId, 'input-error', '')
   const [commandIndex, setCommandIndex] = createSignal(0)
+  const [queueSendingSessions, setQueueSendingSessions] = createSignal<ReadonlySet<string>>(new Set())
   let textarea: HTMLTextAreaElement | undefined
   let composing = false
   let historyDraft = ''
+  let autoQueueSessionId: string | null | undefined
+  let autoQueueArmed = false
 
   const [commandRevision, setCommandRevision] = createSignal(0)
   const suggestions = createMemo(() => {
@@ -171,14 +174,40 @@ export function SolidInputBar(props: SolidInputBarProps) {
     setSendError('')
   }
 
-  const sendQueued = async (item: QueuedWorkbenchMessage) => {
+  const sendQueued = async (item: QueuedWorkbenchMessage): Promise<boolean> => {
     const id = sessionId()
-    if (!id) return
+    if (!id) return false
+    if (queueSendingSessions().has(id)) return false
+    setQueueSendingSessions(previous => new Set([...previous, id]))
     const ui = workbench.sessionUi.capture(id)
-    if (await sendText(item.text, item.attachments ?? [], false)) {
-      ui.update<QueuedWorkbenchMessage[]>('queued-messages', [], previous => previous.filter(current => current.id !== item.id))
+    try {
+      if (await sendText(item.text, item.attachments ?? [], false)) {
+        ui.update<QueuedWorkbenchMessage[]>('queued-messages', [], previous => previous.filter(current => current.id !== item.id))
+        return true
+      }
+      return false
+    } finally {
+      setQueueSendingSessions(previous => new Set([...previous].filter(session => session !== id)))
     }
   }
+
+  createEffect(() => {
+    const id = sessionId()
+    const generating = runtime().generating
+    const first = queue()[0]
+    const sending = id ? queueSendingSessions().has(id) : false
+    if (id !== autoQueueSessionId) {
+      autoQueueSessionId = id
+      autoQueueArmed = generating || Boolean(first)
+    }
+    if (generating) {
+      autoQueueArmed = true
+      return
+    }
+    if (!id || !autoQueueArmed || sending || !first) return
+    autoQueueArmed = false
+    void sendQueued(first)
+  })
 
   const send = async () => {
     if (props.disabled) return
@@ -340,7 +369,7 @@ export function SolidInputBar(props: SolidInputBarProps) {
               </Show>
               <div class="queued-message-actions">
                 <button type="button" onClick={() => setQueue(previous => previous.map(current => current.id === item.id ? { ...current, editing: !current.editing } : current))} aria-label="编辑待发送消息">编辑</button>
-                <button type="button" disabled={runtime().generating || !item.text.trim()} onClick={() => void sendQueued(item)} aria-label="发送待发送消息">发送</button>
+                <button type="button" disabled={runtime().generating || queueSendingSessions().has(sessionId() ?? '') || !item.text.trim()} onClick={() => void sendQueued(item)} aria-label="发送待发送消息">发送</button>
                 <button type="button" onClick={() => setQueue(previous => previous.filter(current => current.id !== item.id))} aria-label="取消待发送消息">取消</button>
               </div>
             </div>

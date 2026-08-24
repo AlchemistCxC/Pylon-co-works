@@ -7,6 +7,7 @@ import { selectActivityDisplayOrder, toolInvocationSnapshot, type WorkbenchActiv
 import { isValidDiffContentInput, isValidHookSurfaceInput, isValidLspDiagnosticContentInput, type ContentPart, type LspDiagnosticContentPart } from '../../domains/workbench/content/contentPartSchema.ts'
 import { diffSnapshotFromPart } from '../../domains/workbench/diffSnapshot.ts'
 import type { MessageListItem } from '../../domains/workbench/messageListPort.ts'
+import { MESSAGE_LIST_BOTTOM_THRESHOLD_PX } from '../../domains/workbench/messageViewportState.ts'
 import { createToolConnectorLayoutPort } from '../../domains/workbench/toolConnectorLayoutPort.ts'
 import { AssistantContent, ReasoningBlock, SolidMessageRow } from './chat/MessageRow.solid.tsx'
 import { PlainMessageList } from './chat/PlainMessageList.solid.tsx'
@@ -66,10 +67,16 @@ function WorkbenchContent(props: SolidWorkbenchAppProps) {
   const appearance = () => props.context.appearanceSnapshot()
   const connectorPort = createToolConnectorLayoutPort()
   const [messageListPort, setMessageListPort] = createSignal<import('../../domains/workbench/messageListPort.ts').MessageListPort>()
+  const [followBottom, setFollowBottom] = createSignal(true)
   const sessionId = () => props.context.input().sessionId
   const [searchQuery] = createSessionUiSignal(props.context.sessionUi, sessionId, 'search-query', '')
   const [searchIndex, setSearchIndex] = createSessionUiSignal(props.context.sessionUi, sessionId, 'search-index', 0)
-  onCleanup(() => connectorPort.destroy())
+  let bottomAnchor: HTMLDivElement | undefined
+  let followedSessionId: string | null | undefined
+  onCleanup(() => {
+    bottomAnchor = undefined
+    connectorPort.destroy()
+  })
   const document = () => snapshot().document
   const viewMessages = createMemo<readonly Message[]>(() => {
     const legacy = snapshot().messages
@@ -116,6 +123,31 @@ function WorkbenchContent(props: SolidWorkbenchAppProps) {
     const messageId = activeSearchMessageId()
     if (port && messageId) void port.scrollTo({ messageId, align: 'center' })
   })
+  createEffect(() => {
+    const id = sessionId()
+    if (id === followedSessionId) return
+    followedSessionId = id
+    setFollowBottom(true)
+  })
+  createEffect(() => {
+    sessionId()
+    snapshot()
+    if (!followBottom()) return
+    queueMicrotask(() => bottomAnchor?.scrollIntoView?.({ behavior: 'auto', block: 'end' }))
+  })
+
+  const updateBottomFollow = (viewport: HTMLDivElement) => {
+    const distance = Math.max(0, viewport.scrollHeight - viewport.scrollTop - viewport.clientHeight)
+    setFollowBottom(distance <= MESSAGE_LIST_BOTTOM_THRESHOLD_PX)
+  }
+
+  const resumeBottomFollow = () => {
+    setFollowBottom(true)
+    bottomAnchor?.scrollIntoView?.({
+      behavior: props.context.input().reducedMotion ? 'auto' : 'smooth',
+      block: 'end',
+    })
+  }
 
   return (
     <section
@@ -140,7 +172,7 @@ function WorkbenchContent(props: SolidWorkbenchAppProps) {
           context={props.context}
         />}
       >
-        <div class="chat-view solid-workbench-chat">
+        <div class="chat-view solid-workbench-chat" onScroll={event => updateBottomFollow(event.currentTarget)}>
           <div class="term">
             <PlainMessageList
               initialItems={items()}
@@ -191,7 +223,11 @@ function WorkbenchContent(props: SolidWorkbenchAppProps) {
             context={props.context}
             fallback={<SolidPlanGoalContent payload={{ entries: document()?.plan.entries ?? [], goal: document()?.goal.current }} />}
           />
+          <div ref={bottomAnchor} class="solid-workbench-bottom-anchor" aria-hidden="true" />
         </div>
+        <Show when={!followBottom()}>
+          <button type="button" class="scroll-bottom-btn" aria-label="回到底部" title="回到底部" onClick={resumeBottomFollow}>▼</button>
+        </Show>
         <Show when={appearance().showPet}>
           <div class="solid-workbench-pet-slot pet-companion" data-fixture="pending">Pet fixture slot</div>
         </Show>

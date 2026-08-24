@@ -34,6 +34,7 @@
 
 /* ── Solid App 根：纵向骨架 ── */
 .solid-agent-workbench {
+  position: relative;
   display: flex;
   flex-direction: column;
   flex: 1;
@@ -175,9 +176,10 @@
   border-top: 1px solid var(--border);
 }
 
-/* 空态：让用户明确知道下一步在左栏，不在 Renderer 内复制会话创建事务。 */
+/* 空态：居中承载 Solid 首条请求创建入口。 */
 .solid-workbench-empty {
   flex: 1;
+  align-items: center;
   align-self: center;
   width: min(560px, calc(100% - 48px));
   margin: auto;
