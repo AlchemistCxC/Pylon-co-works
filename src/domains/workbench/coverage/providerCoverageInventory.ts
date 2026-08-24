@@ -22,6 +22,47 @@ export type CoverageStatus =
 
 export type ProviderName = 'claude-code' | 'peri' | 'hermes'
 
+export type TransportStatus =
+  | 'WIRE-STANDARD'
+  | 'WIRE-EXTENSION'
+  | 'SYNTHETIC'
+  | 'SOURCE-ONLY/BACKLOG'
+
+export interface VerifiedCoverageEvidence {
+  readonly state: 'verified'
+  readonly refs: readonly string[]
+  readonly note: string
+}
+
+export interface UnavailableCoverageEvidence {
+  readonly state: 'unavailable'
+  readonly reason: string
+}
+
+export interface NotApplicableCoverageEvidence {
+  readonly state: 'not-applicable'
+  readonly reason: string
+}
+
+export type CoverageEvidenceClaim =
+  | VerifiedCoverageEvidence
+  | UnavailableCoverageEvidence
+  | NotApplicableCoverageEvidence
+
+export interface CoverageEvidence {
+  readonly source: VerifiedCoverageEvidence
+  readonly wireFixture: CoverageEvidenceClaim
+  readonly identity: CoverageEvidenceClaim
+  readonly provenance: CoverageEvidenceClaim
+  readonly normalizer: CoverageEvidenceClaim
+  readonly projector: CoverageEvidenceClaim
+  readonly solidRenderer: CoverageEvidenceClaim
+  readonly reactFallback: CoverageEvidenceClaim
+  readonly settingsSchema: CoverageEvidenceClaim
+  readonly pluginLifecycle: CoverageEvidenceClaim
+  readonly tests: CoverageEvidenceClaim
+}
+
 export interface CoverageItem {
   readonly id: string
   readonly provider: ProviderName
@@ -34,6 +75,10 @@ export interface CoverageItem {
   /** renderer semanticKind；未注册为渲染 kind 时为空串 */
   readonly renderKind: string
   readonly status: CoverageStatus
+  /** 字典 D02 transport gate；SOURCE-ONLY 绝不能伪装成已到达 wire 的 unknown。 */
+  readonly transportStatus: TransportStatus
+  /** C16 卡要求的逐项 source→wire→projection→双 fallback→settings/cleanup/test 证据。 */
+  readonly evidence: CoverageEvidence
   /** first-class：已进入 projector/runtime selector 的结构化字段 */
   readonly firstClassFields: readonly string[]
   /** retained-only：仅 raw/metadata 可审计、无 selector/renderer contract 的字段 */
@@ -45,6 +90,9 @@ export interface CoverageItem {
   /** not-transported/flattened 必填：上游任务编号或扁平化原因 */
   readonly followUp: string
 }
+
+/** Provider inventory 源行；transport status 在统一 gate 中按覆盖结论收敛。 */
+export type CoverageItemDraft = Omit<CoverageItem, 'transportStatus' | 'evidence'>
 
 export interface ProviderCoverageSummary {
   readonly provider: ProviderName
