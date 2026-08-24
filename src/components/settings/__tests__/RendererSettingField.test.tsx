@@ -16,9 +16,12 @@ function mount(field: RenderSettingField, value?: unknown) {
 }
 
 describe('S4 分发矩阵', () => {
-  it('choice 未声明 presentation → select（DISPLAY_DEFAULTS）', () => {
+  it('choice 未声明 presentation → ui/Select 弹层下拉（DISPLAY_DEFAULTS，K-3 优化）', () => {
     mount({ key: 'f', label: '单选', type: 'choice', options: opts(['a', 'b']) })
-    expect(screen.getByLabelText('单选').tagName).toBe('SELECT')
+    // ui/Select trigger 是 combobox button
+    expect(screen.getByRole('combobox', { name: '单选' })).toBeTruthy()
+    fireEvent.click(screen.getByRole('combobox', { name: '单选' }))
+    expect(screen.getByRole('option', { name: 'b' })).toBeTruthy()
   })
 
   it('choice segmented → radiogroup（K-3 Radix ToggleGroup），click 写入 string', () => {

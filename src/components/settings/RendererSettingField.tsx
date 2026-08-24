@@ -5,6 +5,7 @@ import * as ToggleGroup from '@radix-ui/react-toggle-group'
 import type { RenderSettingField, RendererSettingOption, RendererPresentation, RendererSettingValue } from '../../plugin-runtime/renderers/rendererSettingsTypes.ts'
 import { resolvePresentation, settingFieldKey } from '../../plugin-runtime/renderers/rendererSettingsTypes.ts'
 import ColorPopover from '../ColorPopover.tsx'
+import Select from '../ui/Select.tsx'
 
 export interface RendererSettingFieldProps {
   readonly field: RenderSettingField
@@ -99,10 +100,14 @@ export default function RendererSettingField(props: RendererSettingFieldProps) {
         </div>
       }
       return <div className="renderer-setting-field" data-setting-key={settingFieldKey(field)}>
-        <label htmlFor={fieldId}>{label}</label>
-        <select id={fieldId} aria-label={label} value={typeof value === 'string' ? value : ''} onChange={event => changeText(event, props.onChange)}>
-          {options.map(option => <option key={option.value} value={option.value} disabled={option.disabled}>{option.label ?? option.value}</option>)}
-        </select>{reset}
+        <label id={`${fieldId}-label`}>{label}</label>
+        {/* K-3 优化：原生 select → ui/Select 弹层组件（键盘导航/portal 定位内建） */}
+        <Select
+          value={typeof value === 'string' ? value : ''}
+          options={options.map(o => ({ value: o.value, label: o.label ?? o.value, disabled: o.disabled }))}
+          onChange={props.onChange}
+          ariaLabel={label}
+        />{reset}
         {field.description && <small>{field.description}</small>}
       </div>
     }

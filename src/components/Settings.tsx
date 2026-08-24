@@ -3,6 +3,7 @@ import { IS_TAURI } from '../infrastructure/tauri/env'
 import { invoke } from '@tauri-apps/api/core'
 import { createAgentClient } from '../infrastructure/acp/agentClient'
 import { GROUP_ORDER } from '../themeFieldDefs'
+import { RENDERER_KIND_LABELS } from '../settingsDomains'
 import { ZoneGroupFields } from '../themeFieldRenderer'
 import { useStore } from '../store'
 import { useIdentityStore } from '../identityStore'
@@ -301,7 +302,8 @@ const activeDomainConfig = SETTINGS_DOMAIN_BY_ID[activeDomain]
           .concat(getRendererRegistry().snapshot().rendererSlots
             .filter(entry => entry.value.settings).map(entry => entry.value.label ?? entry.value.id))
           .concat(getRendererRegistry().snapshot().renderKinds
-            .filter(entry => entry.value.settings).map(entry => entry.value.id))
+            .filter(entry => entry.value.settings)
+            .map(entry => RENDERER_KIND_LABELS[entry.value.id] ?? entry.value.id))
         return labels.length >= 2 ? [...new Set(labels)] : []
       } catch { return [] }
     }

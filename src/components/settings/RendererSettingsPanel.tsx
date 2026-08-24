@@ -4,6 +4,7 @@ import { resolvePluginSettingOptions } from '../../plugin-runtime/settings/plugi
 import type { PluginSettingOption } from '../../plugin-runtime/settings/pluginSettingsTypes.ts'
 import type { RendererSettingsStore } from '../../plugin-runtime/renderers/rendererSettingsStore.ts'
 import { settingFieldKey, type RenderSettingField, type RendererSettingValue, type RendererSettingsSchema } from '../../plugin-runtime/renderers/rendererSettingsTypes.ts'
+import { RENDERER_KIND_LABELS } from '../../settingsDomains.ts'
 import { evaluateRenderSettingCondition, default as RendererSettingField } from './RendererSettingField.tsx'
 import RendererSuitePicker from './RendererSuitePicker.tsx'
 import { useInterfaceModeStore } from '../../domains/interface/interfaceModeStore.ts'
@@ -27,7 +28,7 @@ export interface RendererSettingsPanelProps {
 
 function catalogSchemas(activeSuiteId?: string): readonly RendererSettingsSchemaEntry[] {
   const snapshot = getRendererRegistry().snapshot()
-  const kinds = snapshot.renderKinds.flatMap(entry => entry.value.settings ? [{ id: entry.value.id, label: entry.value.id, schema: entry.value.settings, namespace: 'kind' as const }] : [])
+  const kinds = snapshot.renderKinds.flatMap(entry => entry.value.settings ? [{ id: entry.value.id, label: RENDERER_KIND_LABELS[entry.value.id] ?? entry.value.id, schema: entry.value.settings, namespace: 'kind' as const }] : [])
   const suite = activeSuiteId ? snapshot.rendererSuites.find(entry => entry.value.id === activeSuiteId)?.value : undefined
   const suiteSettings = suite?.settings ? [{ id: suite.id, label: suite.label, schema: suite.settings, namespace: 'suite' as const }] : []
   const slots = snapshot.rendererSlots.filter(entry => activeSuiteId && (entry.value.targetSuites.includes('*') || entry.value.targetSuites.includes(activeSuiteId)))

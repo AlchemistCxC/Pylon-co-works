@@ -1,10 +1,10 @@
-import { useId } from 'react'
 import {
   isPageOwnedSection,
   SECTION_OWNERS,
   SETTINGS_SECTION_LABELS,
   type SettingsSectionId,
 } from '../../settingsDomains.ts'
+import Select from '../ui/Select.tsx'
 import type { SettingsDensity } from './settingsChromeState.ts'
 
 const DENSITY_LABELS: Readonly<Record<SettingsDensity, string>> = {
@@ -29,7 +29,6 @@ export default function SettingsSectionHeader(props: {
     ? SECTION_OWNERS[section as keyof typeof SECTION_OWNERS]
     : undefined
   const pageOwned = owner === undefined || isPageOwnedSection(section)
-  const selectId = useId()
 
   return (
     <div className="settings-section-header">
@@ -44,15 +43,18 @@ export default function SettingsSectionHeader(props: {
       </span>
       {/* F3 边界修复：密度档只对含字段的组件 section 有意义，pageOwned 动作面板不显示 */}
       {!pageOwned && (
-        <label className="settings-density-label" htmlFor={selectId}>
+        <label className="settings-density-label">
           显示详细度
-          <select id={selectId} className="set-input settings-density-select"
-            aria-label="显示详细度" value={density}
-            onChange={e => onDensity(e.target.value as SettingsDensity)}>
-            {(Object.keys(DENSITY_LABELS) as SettingsDensity[]).map(d => (
-              <option key={d} value={d}>{DENSITY_LABELS[d]}</option>
-            ))}
-          </select>
+          {/* K-3 优化：原生 select → ui/Select */}
+          <span className="settings-density-select">
+            <Select
+              value={density}
+              options={(Object.keys(DENSITY_LABELS) as SettingsDensity[])
+                .map(d => ({ value: d, label: DENSITY_LABELS[d] }))}
+              onChange={onDensity}
+              ariaLabel="显示详细度"
+            />
+          </span>
         </label>
       )}
     </div>

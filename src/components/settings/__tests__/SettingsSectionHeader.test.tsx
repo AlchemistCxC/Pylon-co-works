@@ -25,14 +25,15 @@ describe('SettingsSectionHeader', () => {
   it('密度档三选项，点击回调新档位', () => {
     const seen: string[] = []
     render(<SettingsSectionHeader section="chat" density="standard" onDensity={d => seen.push(d)} />)
-    expect(screen.getByRole('combobox', { name: '显示详细度' })).toBeTruthy()
-    fireEvent.change(screen.getByRole('combobox', { name: '显示详细度' }), { target: { value: 'all' } })
+    // K-3 优化：密度档换 ui/Select（combobox trigger + listbox 弹层）
+    fireEvent.click(screen.getByRole('combobox', { name: '显示详细度' }))
+    // ui/Select 的 option 在 mousedown 选择（防 blur 竞态）
+    fireEvent.mouseDown(screen.getByRole('option', { name: '全部' }))
     expect(seen).toEqual(['all'])
   })
 
-  it('当前密度档为选中值', () => {
+  it('当前密度档为选中值（trigger 文本反映当前档）', () => {
     render(<SettingsSectionHeader section="chat" density="basic" onDensity={() => {}} />)
-    const select = screen.getByRole('combobox', { name: '显示详细度' }) as HTMLSelectElement
-    expect(select.value).toBe('basic')
+    expect(screen.getByRole('combobox', { name: '显示详细度' }).textContent).toContain('基础')
   })
 })

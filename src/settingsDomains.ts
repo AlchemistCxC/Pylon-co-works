@@ -116,3 +116,33 @@ export const PAGE_OWNED_SECTIONS = ['templates', 'window', 'history', 'backup'] 
 export function isPageOwnedSection(section: SettingsSectionId): boolean {
   return (PAGE_OWNED_SECTIONS as readonly string[]).includes(section)
 }
+/**
+ * K-2 优化：渲染器 kind id → 中文名（二级导航与设置面板共用）。
+ * 只列带 settings 的 kind；未收录的 id 回退显示原 id。
+ */
+export const RENDERER_KIND_LABELS: Readonly<Record<string, string>> = {
+  'content.markdown': 'Markdown 文本',
+  'content.text': '纯文本',
+  'content.code': '代码块',
+  'content.ansi': '终端输出',
+  'content.log': '日志',
+  'content.terminal': '终端记录',
+  'content.diff': '代码差异',
+  'content.reasoning': '思考过程',
+  'content.redacted-reasoning': '隐藏思考',
+  'content.file-reference': '文件引用',
+  'content.file-selection': '文件选择',
+  'content.document': '文档',
+  'content.resource': '资源',
+  'content.mcp-resource': 'MCP 资源',
+  'content.memory': '记忆条目',
+  'content.skill': '技能卡',
+  'content.artifact': '产物卡',
+  'content.link': '链接',
+  'content.search-result': '搜索结果',
+  'activity.background-task': '后台任务',
+  'activity.process': '进程活动',
+  'diagnostic.lsp': 'LSP 诊断',
+  decision: '决策请求',
+  'system.hook': '钩子事件',
+}
