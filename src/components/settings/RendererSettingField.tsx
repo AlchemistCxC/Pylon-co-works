@@ -1,4 +1,7 @@
 import type { ChangeEvent } from 'react'
+import * as Switch from '@radix-ui/react-switch'
+import * as Slider from '@radix-ui/react-slider'
+import * as ToggleGroup from '@radix-ui/react-toggle-group'
 import type { RenderSettingField, RendererSettingOption, RendererPresentation, RendererSettingValue } from '../../plugin-runtime/renderers/rendererSettingsTypes.ts'
 import { resolvePresentation, settingFieldKey } from '../../plugin-runtime/renderers/rendererSettingsTypes.ts'
 import ColorPopover from '../ColorPopover.tsx'
@@ -35,21 +38,33 @@ function SegmentedControl({ options, value, onChange, ariaLabel }: {
   onChange(value: string): void
   ariaLabel?: string
 }) {
-  return <div role="group" className="renderer-segmented" aria-label={ariaLabel}>
-    {options.map(option => (
-      <button key={option.value} type="button" disabled={option.disabled}
-        aria-pressed={option.value === value}
-        className={`renderer-segmented-chip${option.value === value ? ' active' : ''}`}
-        onClick={() => onChange(option.value)}>{option.label ?? option.value}</button>
-    ))}
-  </div>
+  return (
+    // K-3：底座升级 Radix ToggleGroup——键盘导航/roving focus 由 Radix 承担，外观类名沿用
+    <ToggleGroup.Root
+      type="single"
+      className="renderer-segmented"
+      aria-label={ariaLabel}
+      value={value}
+      onValueChange={next => { if (next !== '') onChange(next) }}
+    >
+      {options.map(option => (
+        <ToggleGroup.Item key={option.value} value={option.value} disabled={option.disabled}
+          data-state={option.value === value ? 'on' : 'off'}
+          className={`renderer-segmented-chip${option.value === value ? ' active' : ''}`}>
+          {option.label ?? option.value}
+        </ToggleGroup.Item>
+      ))}
+    </ToggleGroup.Root>
+  )
 }
 
 /** S2：toggle 开关（role=switch）。 */
 function ToggleSwitch({ checked, onChange, ariaLabel }: { checked: boolean; onChange(checked: boolean): void; ariaLabel: string }) {
-  return <button type="button" role="switch" aria-checked={checked} aria-label={ariaLabel}
-    className={`set-toggle${checked ? ' on' : ''}`}
-    onClick={() => onChange(!checked)} />
+  // K-3：Radix Switch——role=switch/键盘/焦点由 Radix 提供，data-state 驱动样式
+  return (
+    <Switch.Root checked={checked} onCheckedChange={onChange} aria-label={ariaLabel}
+      className={`set-toggle${checked ? ' on' : ''}`} data-state={checked ? 'on' : 'off'} />
+  )
 }
 
 export default function RendererSettingField(props: RendererSettingFieldProps) {
@@ -126,8 +141,15 @@ export default function RendererSettingField(props: RendererSettingFieldProps) {
       if (presentation === 'slider+input') {
         return <div className="renderer-setting-field renderer-number-duo" data-setting-key={settingFieldKey(field)}>
           <label htmlFor={fieldId}>{label}</label>
-          <input id={fieldId} aria-label={label} type="range" min={field.min ?? 0} max={field.max ?? 100} step={field.step}
-            value={numericValue ?? 0} onChange={event => props.onChange(Number(event.currentTarget.value))} />
+          {/* K-3：range 半边升级 Radix Slider（键盘/焦点管理内建）；数值半边保留原生 */}
+          <Slider.Root id={fieldId} className="renderer-slider" aria-label={label}
+            min={field.min ?? 0} max={field.max ?? 100} step={field.step}
+            value={[numericValue ?? 0]} onValueChange={values => props.onChange(Number(values[0]))}>
+            <Slider.Track className="renderer-slider-track">
+              <Slider.Range className="renderer-slider-range" />
+            </Slider.Track>
+            <Slider.Thumb className="renderer-slider-thumb" aria-label={`${label}滑块`} />
+          </Slider.Root>
           <input type="number" aria-label={`${label}数值`} min={field.min ?? 0} max={field.max ?? 100} value={numericValue ?? 0}
             onChange={event => props.onChange(Number(event.currentTarget.value))} />
           {field.unit && <span>{field.unit}</span>}{reset}

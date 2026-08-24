@@ -655,3 +655,57 @@
   flex-direction: column;
   margin: 1px 0 3px;
 }
+
+/* ── K-3：Radix 底座样式（Switch/Slider/ToggleGroup，data-state 驱动）── */
+.set-toggle[data-state='on'] {
+  background: var(--accent, #6ea8fe);
+}
+
+.set-toggle[data-state='off'] {
+  background: var(--ui-border, rgba(128, 128, 128, 0.4));
+}
+
+.renderer-slider {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  flex: 1 1 auto;
+  min-width: 120px;
+  height: 16px;
+  touch-action: none;
+}
+
+.renderer-slider-track {
+  position: relative;
+  height: 3px;
+  width: 100%;
+  border-radius: 999px;
+  background: var(--ui-border, rgba(128, 128, 128, 0.35));
+}
+
+.renderer-slider-range {
+  position: absolute;
+  inset-inline-start: 0;
+  height: 100%;
+  border-radius: inherit;
+  background: var(--accent, #6ea8fe);
+}
+
+.renderer-slider-thumb {
+  display: block;
+  width: 12px;
+  height: 12px;
+  border-radius: 50%;
+  background: var(--accent, #6ea8fe);
+  border: 2px solid var(--bg-panel, #fff);
+  box-shadow: 0 0 0 1px rgba(0, 0, 0, 0.15);
+}
+
+.renderer-slider-thumb:hover {
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent, #6ea8fe) 25%, transparent);
+}
+
+.renderer-slider-thumb:focus-visible {
+  outline: 2px solid var(--accent, #6ea8fe);
+  outline-offset: 2px;
+}

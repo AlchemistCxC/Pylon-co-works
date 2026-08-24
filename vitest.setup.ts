@@ -82,3 +82,13 @@ if (typeof Range !== 'undefined' && typeof Range.prototype.getBoundingClientRect
     toJSON: () => ({}),
   })
 }
+// K-3（施工书 09）：Radix Slider 的 use-size 依赖 ResizeObserver；jsdom 未实现。
+// 测试环境垫片：立即回调 size 0 即可满足布局观察协议。
+if (typeof globalThis.ResizeObserver === 'undefined') {
+  class ResizeObserverShim {
+    observe() {}
+    unobserve() {}
+    disconnect() {}
+  }
+  globalThis.ResizeObserver = ResizeObserverShim as unknown as typeof ResizeObserver
+}

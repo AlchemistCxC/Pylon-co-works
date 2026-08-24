@@ -25,7 +25,9 @@ export default function SettingsSectionHeader(props: {
   onDensity: (density: SettingsDensity) => void
 }) {
   const { section, density, onDensity } = props
-  const owner = SECTION_OWNERS[section]
+  const owner = (section in SECTION_OWNERS)
+    ? SECTION_OWNERS[section as keyof typeof SECTION_OWNERS]
+    : undefined
   const pageOwned = owner === undefined || isPageOwnedSection(section)
   const selectId = useId()
 

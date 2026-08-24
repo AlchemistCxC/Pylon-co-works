@@ -21,11 +21,11 @@ describe('S4 分发矩阵', () => {
     expect(screen.getByLabelText('单选').tagName).toBe('SELECT')
   })
 
-  it('choice segmented → role=group 按钮组，click 写入 string', () => {
+  it('choice segmented → radiogroup（K-3 Radix ToggleGroup），click 写入 string', () => {
     const received = mount({ key: 'f', label: '视图', type: 'choice', presentation: 'segmented', options: opts(['a', 'b']) }, 'a')
-    const group = screen.getByRole('group', { name: '视图' })
-    expect(group).toBeTruthy()
-    fireEvent.click(screen.getByRole('button', { name: 'b' }))
+    // K-3 底座切换：Radix single ToggleGroup 的容器语义是 radiogroup（施工书 09 §K-3 预告的迁移点）
+    expect(screen.getByRole('radiogroup', { name: '视图' })).toBeTruthy()
+    fireEvent.click(screen.getByRole('radio', { name: 'b' }))
     expect(received.at(-1)).toBe('b')
   })
 
@@ -42,7 +42,15 @@ describe('S4 分发矩阵', () => {
 
   it('number 未声明 → slider+input 双输入联动，载荷 number', () => {
     const received = mount({ key: 'f', label: '大小', type: 'number', min: 0, max: 100, default: 10 })
-    fireEvent.change(screen.getByLabelText('大小'), { target: { value: '42' } })
+    // K-3：range 半边升级 Radix Slider——Thumb 键盘交互（ArrowRight 按 step 步进）
+    const thumb = screen.getByRole('slider', { name: '大小滑块' })
+    fireEvent.focus(thumb)
+    fireEvent.keyDown(thumb, { key: 'ArrowRight' })
+    const stepped = received.at(-1)
+    expect(typeof stepped).toBe('number')
+    expect(stepped).toBeGreaterThan(10)
+    // 数值半边（原生 number input）直接改写
+    fireEvent.change(screen.getByLabelText('大小数值'), { target: { value: '42' } })
     expect(received.at(-1)).toBe(42)
   })
 

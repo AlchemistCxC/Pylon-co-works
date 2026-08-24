@@ -1,5 +1,5 @@
 // @vitest-environment jsdom
-import { render, screen } from '@testing-library/react'
+import { fireEvent, render, screen } from '@testing-library/react'
 import { describe, expect, it } from 'vitest'
 import RendererSettingField from '../RendererSettingField.tsx'
 import { validateRendererSettingsSchema, resolvePresentation,
@@ -50,7 +50,8 @@ describe('B1.6 number 全缺省', () => {
     const received: unknown[] = []
     const field = { key: 'n', label: '自由数', type: 'number' } as unknown as RenderSettingField
     render(<RendererSettingField field={field} value={undefined} onChange={v => received.push(v)} />)
-    fireEvent_change(screen.getByLabelText('自由数'), '3')
+    // K-3：slider+input 的 range 半边已是 Radix Slider；数值半边仍是原生 number input
+    fireEvent.change(screen.getByLabelText('自由数数值'), { target: { value: '3' } })
     expect(received.at(-1)).toBe(3)
     expect(Number.isNaN(received.at(-1) as number)).toBe(false)
   })
@@ -67,12 +68,6 @@ describe('B1.8 color 非规范值', () => {
   })
 })
 
-// helpers
-function fireEvent_change(el: HTMLElement, value: string) {
-  const setter = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')?.set
-  setter?.call(el, value)
-  el.dispatchEvent(new Event('change', { bubbles: true }))
-}
 
 describe('B1.7 min>max 运行时直构造', () => {
   it('validate 拒绝 min>max 的 schema（契约层防线确认）', () => {

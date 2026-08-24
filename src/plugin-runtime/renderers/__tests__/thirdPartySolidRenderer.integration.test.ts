@@ -166,7 +166,8 @@ describe('third-party Solid renderer package', () => {
     expect(screen.getByLabelText('字号缩放')).toBeTruthy()
     expect(screen.getByLabelText('启用 Suite 装饰')).toBeTruthy()
     // S4 同类迁移（施工书 06 §S4）：density 声明 segmented → 按钮组 click 写入
-    fireEvent.click(screen.getByRole('button', { name: '宽松' }))
+    // K-3：segmented 底座 Radix ToggleGroup——Item 语义为 radio
+    fireEvent.click(screen.getByRole('radio', { name: '宽松' }))
     expect(store.getSnapshot().values[`${'suite'}.${SUITE_ID}.density`]).toBe('roomy')
     expect(screen.getByRole('status')).toHaveTextContent(PLUGIN_ID)
   })
