@@ -38,6 +38,8 @@ import { SolidExtensionContentCard } from './chat/content/ExtensionContentCard.s
 import type { RenderCommandPort } from '../../contracts/messageRenderer.ts'
 import { canExecuteRendererSemanticCommand, executeRendererSemanticCommand } from '../../host/renderer-suite/rendererSemanticCommand.ts'
 import { normalizeWorkbenchMountInput } from './workbenchContracts.ts'
+import { messageMatchesQuery, searchValuesMatchQuery } from '../../components/chat/messageSearchIndex.ts'
+import { createSessionUiSignal } from './adapters/sessionUiSignal.solid.tsx'
 
 export interface SolidWorkbenchAppProps {
   context: SolidWorkbenchContextValue
@@ -63,6 +65,9 @@ function WorkbenchContent(props: SolidWorkbenchAppProps) {
   const appearance = () => props.context.appearanceSnapshot()
   const connectorPort = createToolConnectorLayoutPort()
   const [messageListPort, setMessageListPort] = createSignal<import('../../domains/workbench/messageListPort.ts').MessageListPort>()
+  const sessionId = () => props.context.input().sessionId
+  const [searchQuery] = createSessionUiSignal(props.context.sessionUi, sessionId, 'search-query', '')
+  const [searchIndex, setSearchIndex] = createSessionUiSignal(props.context.sessionUi, sessionId, 'search-index', 0)
   onCleanup(() => connectorPort.destroy())
   const document = () => snapshot().document
   const viewMessages = createMemo<readonly Message[]>(() => {
@@ -75,16 +80,41 @@ function WorkbenchContent(props: SolidWorkbenchAppProps) {
     return projected?.map(toSolidMessage) ?? legacy
   })
   const renderMessages = createMemo(() => prepareMessages([...viewMessages()]))
+  const searchMatches = createMemo(() => {
+    if (!searchQuery().trim()) return []
+    if (!snapshot().messages.some(message => message.role === 'tool') && document()) {
+      return document()!.messages.filter(message => searchValuesMatchQuery([
+        message.source.provider,
+        message.content,
+        message.parts,
+      ], searchQuery()))
+    }
+    return viewMessages().filter(message => messageMatchesQuery(message, searchQuery()))
+  })
+  const activeSearchMessageId = createMemo(() => searchMatches()[searchIndex()]?.id)
   const descriptors = createMemo(() => buildChatRowDescriptors(
     renderMessages(),
     buildMessageLookups(viewMessages()),
-    undefined,
+    activeSearchMessageId(),
   ))
   const items = createMemo<readonly MessageListItem[]>(() => descriptors().map(descriptor => ({
     key: descriptor.key,
     descriptor,
   })))
   createEffect(() => messageListPort()?.setItems(items()))
+  createEffect(() => {
+    const matchCount = searchMatches().length
+    const currentIndex = searchIndex()
+    const clampedIndex = matchCount === 0 || !Number.isSafeInteger(currentIndex)
+      ? 0
+      : Math.max(0, Math.min(currentIndex, matchCount - 1))
+    if (clampedIndex !== currentIndex) setSearchIndex(clampedIndex)
+  })
+  createEffect(() => {
+    const port = messageListPort()
+    const messageId = activeSearchMessageId()
+    if (port && messageId) void port.scrollTo({ messageId, align: 'center' })
+  })
 
   return (
     <section

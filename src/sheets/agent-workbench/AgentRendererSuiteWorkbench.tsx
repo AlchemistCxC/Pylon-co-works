@@ -18,6 +18,7 @@ import { useWorkspaceStore } from '../../workspaceStore.ts'
 import { toCanonicalOwnerKey } from '../../domains/events/eventSchema.ts'
 import { resolveRendererSuiteFallback } from '../../host/renderer-suite/rendererSuiteFallbackPolicy.ts'
 import { useWorkspaceEntityStore } from '../../workspaceEntityStore.ts'
+import { publishActiveWorkbenchHostPort } from './activeWorkbenchHostPort.ts'
 
 export interface AgentRendererSuiteWorkbenchProps {
   sheet: SheetRecord
@@ -81,6 +82,7 @@ export default function AgentRendererSuiteWorkbench(props: AgentRendererSuiteWor
   const hostPortRef = useRef<WorkbenchHostPort | null>(null)
   const hostPortsRef = useRef<Map<string, WorkbenchHostPort>>(new Map())
   const hostListenerRef = useRef<(() => void) | null>(null)
+  const activePortReleaseRef = useRef<(() => void) | null>(null)
   const inputRef = useRef(input)
   const targetActivationRef = useRef<RendererActivationSnapshot | undefined>(activation)
   const activeActivationRef = useRef<RendererActivationSnapshot | undefined>(undefined)
@@ -239,6 +241,13 @@ export default function AgentRendererSuiteWorkbench(props: AgentRendererSuiteWor
           return
         }
         if (retained) targetActivationRef.current = retained
+        const retainedSuiteId = state.suiteId ?? retained?.suite.value.id
+        const retainedPort = retainedSuiteId ? hostPortsRef.current.get(retainedSuiteId) : undefined
+        if (retainedPort && hostPortRef.current !== retainedPort) {
+          activePortReleaseRef.current?.()
+          activePortReleaseRef.current = publishActiveWorkbenchHostPort(props.sheet.id, retainedPort)
+          hostPortRef.current = retainedPort
+        }
         setActiveSuiteId(state.suiteId)
         setFailure({
           suiteId: failedTarget?.suite.value.id ?? state.previousSuiteId ?? 'unknown',
@@ -251,6 +260,14 @@ export default function AgentRendererSuiteWorkbench(props: AgentRendererSuiteWor
       }
       if (state.phase === 'active') {
         activeActivationRef.current = targetActivationRef.current
+        const activePort = state.suiteId ? hostPortsRef.current.get(state.suiteId) : undefined
+        if (activePort && hostPortRef.current !== activePort) {
+          activePortReleaseRef.current?.()
+          activePortReleaseRef.current = publishActiveWorkbenchHostPort(props.sheet.id, activePort)
+          hostPortRef.current = activePort
+        } else if (activePort && !activePortReleaseRef.current) {
+          activePortReleaseRef.current = publishActiveWorkbenchHostPort(props.sheet.id, activePort)
+        }
         setActiveSuiteId(state.suiteId)
         setFatal(false)
         if (inputRef.current.visibility === 'background') host.pause()
@@ -271,6 +288,7 @@ export default function AgentRendererSuiteWorkbench(props: AgentRendererSuiteWor
     if (automaticRetryTimerRef.current) clearTimeout(automaticRetryTimerRef.current)
     automaticRetryTimerRef.current = null
     hostRef.current = null; hostPortRef.current = null; activeActivationKeyRef.current = undefined
+    activePortReleaseRef.current?.(); activePortReleaseRef.current = null
     hostListenerRef.current?.(); hostListenerRef.current = null
     if (host) void host.destroy()
     for (const port of hostPortsRef.current.values()) port.diagnostics.destroy?.()

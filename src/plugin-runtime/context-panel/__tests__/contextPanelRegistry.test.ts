@@ -3,6 +3,7 @@ import { createPluginIdentity } from '../../pluginIdentity.ts'
 import { PluginScope } from '../../pluginScope.ts'
 import { ContextPanelRegistry } from '../contextPanelRegistry.ts'
 import { createPluginContextPanelApi } from '../pluginContextPanelApi.ts'
+import { selectAvailableContextPanels } from '../contextPanelSelection.ts'
 
 const Panel = () => null
 
@@ -11,6 +12,36 @@ function contribution(id: string, workspaceKind: string, order: number) {
 }
 
 describe('ContextPanelRegistry', () => {
+  it('统一按 workspace 与 when 选择当前可用贡献', () => {
+    const registry = new ContextPanelRegistry()
+    const identity = createPluginIdentity('test.context.when', 'run-1')
+    registry.register(identity, {
+      ...contribution('session-only', 'agent', 100),
+      when: context => context.activeSessionId !== null,
+    })
+
+    expect(selectAvailableContextPanels(registry.getSnapshot().entries, {
+      workspaceKind: 'agent', sheetId: 'sheet-a', activeSessionId: null,
+    })).toEqual([])
+    expect(selectAvailableContextPanels(registry.getSnapshot().entries, {
+      workspaceKind: 'agent', sheetId: 'sheet-a', activeSessionId: 'session-a',
+    }).map(entry => entry.contributionId)).toEqual(['session-only'])
+  })
+
+  it('when 异常时隔离贡献并留下可诊断错误', () => {
+    const report = vi.spyOn(console, 'error').mockImplementation(() => undefined)
+    const registry = new ContextPanelRegistry()
+    registry.register(createPluginIdentity('test.context.bad-when', 'run-1'), {
+      ...contribution('bad-when', 'agent', 100),
+      when: () => { throw new Error('bad availability predicate') },
+    })
+
+    expect(selectAvailableContextPanels(registry.getSnapshot().entries, {
+      workspaceKind: 'agent', sheetId: 'sheet-a', activeSessionId: null,
+    })).toEqual([])
+    expect(report).toHaveBeenCalledWith('右栏贡献 bad-when 判断可用性失败', expect.any(Error))
+  })
+
   it('按 order 发布并随插件 scope 回收', async () => {
     const registry = new ContextPanelRegistry()
     const identity = createPluginIdentity('test.context', 'run-1')

@@ -13,6 +13,17 @@ function stringifySearchValue(value: unknown): string {
   }
 }
 
+export function searchValuesMatchQuery(values: readonly unknown[], query: string): boolean {
+  const normalizedQuery = query.trim().toLocaleLowerCase()
+  if (!normalizedQuery) return true
+  return values
+    .map(stringifySearchValue)
+    .filter(Boolean)
+    .join('\n')
+    .toLocaleLowerCase()
+    .includes(normalizedQuery)
+}
+
 export function getMessageSearchText(message: Message): string {
   const cached = searchTextCache.get(message)
   if (cached !== undefined) return cached

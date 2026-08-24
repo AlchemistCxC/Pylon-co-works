@@ -8,6 +8,7 @@ import { useWorkspaceStore } from '../../workspaceStore.ts'
 import { getRendererRegistry } from '../../plugin-runtime/runtimeServices.ts'
 import { createPluginIdentity } from '../../plugin-runtime/pluginIdentity.ts'
 import { usePresentationPreferenceStore } from '../../domains/presentation/presentationPreferenceStore.ts'
+import { getActiveWorkbenchHostPort } from '../../sheets/agent-workbench/activeWorkbenchHostPort.ts'
 
 describe('Agent Renderer Suite tab lifecycle', () => {
   beforeEach(() => {
@@ -48,8 +49,9 @@ describe('Agent Renderer Suite tab lifecycle', () => {
       const agentId = useWorkspaceStore.getState().openSheet({ kind: 'agent', agentId: 'peri', title: 'Peri' })!
       const overviewId = useWorkspaceStore.getState().openSheet({ kind: 'overview', title: 'Overview' })!
       useWorkspaceStore.getState().focusSheet(agentId)
-      render(<SheetLayout activeSession={null} onSelectSession={() => {}} onProfileEdit={() => {}} onSessionSettings={() => {}} />)
+      const view = render(<SheetLayout activeSession={null} onSelectSession={() => {}} onProfileEdit={() => {}} onSessionSettings={() => {}} />)
       await screen.findByText('keep-alive-suite', {}, { timeout: 5_000 })
+      expect(getActiveWorkbenchHostPort(agentId)).toBeDefined()
 
       act(() => useWorkspaceStore.getState().focusSheet(overviewId))
       await waitFor(() => expect(pause).toHaveBeenCalledOnce())
@@ -58,6 +60,8 @@ describe('Agent Renderer Suite tab lifecycle', () => {
       act(() => useWorkspaceStore.getState().focusSheet(agentId))
       await waitFor(() => expect(resume).toHaveBeenCalledOnce())
       expect(mount).toHaveBeenCalledOnce()
+      view.unmount()
+      expect(getActiveWorkbenchHostPort(agentId)).toBeUndefined()
     } finally {
       await registration.dispose()
     }

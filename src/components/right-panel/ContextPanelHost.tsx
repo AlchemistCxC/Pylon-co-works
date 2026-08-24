@@ -1,22 +1,26 @@
-import { Suspense, useMemo, useState, useSyncExternalStore } from 'react'
+import { Suspense, useMemo, useState, useSyncExternalStore, type CSSProperties } from 'react'
 import { useWorkspaceStore } from '../../workspaceStore.ts'
 import { getContextPanelRegistry } from '../../plugin-runtime/runtimeServices.ts'
 import { IsolatedPluginSurface } from '../../plugin-runtime/ui/IsolatedPluginSurface.tsx'
 import { PluginContributionBoundary } from '../../plugin-runtime/ui/PluginContributionBoundary.tsx'
 import type { ContextPanelContributionProps } from '../../plugin-runtime/context-panel/contextPanelTypes.ts'
 import type { SheetContext, SheetRecord } from '../../workspace-sheets/sheetTypes.ts'
+import { useStore } from '../../store.ts'
+import { selectAvailableContextPanels } from '../../plugin-runtime/context-panel/contextPanelSelection.ts'
 
 export default function ContextPanelHost({ sheet, ctx }: { sheet: SheetRecord; ctx: SheetContext }) {
+  const rightWidth = useStore(state => state.rightWidth)
   const registry = getContextPanelRegistry()
   const snapshot = useSyncExternalStore(
     listener => registry.subscribe(listener),
     () => registry.getSnapshot(),
     () => registry.getSnapshot(),
   )
-  const entries = useMemo(() => snapshot.entries.filter(entry => (
-    entry.value.workspaceKind === sheet.kind
-    && (entry.value.when?.({ workspaceKind: sheet.kind, sheetId: sheet.id, activeSessionId: ctx.activeSession }) ?? true)
-  )), [ctx.activeSession, sheet.id, sheet.kind, snapshot])
+  const entries = useMemo(() => selectAvailableContextPanels(snapshot.entries, {
+    workspaceKind: sheet.kind,
+    sheetId: sheet.id,
+    activeSessionId: ctx.activeSession,
+  }), [ctx.activeSession, sheet.id, sheet.kind, snapshot])
   const [activeId, setActiveId] = useState<string>('')
   const active = entries.find(entry => entry.contributionId === activeId) ?? entries[0]
 
@@ -44,7 +48,7 @@ export default function ContextPanelHost({ sheet, ctx }: { sheet: SheetRecord; c
   }
 
   return (
-    <aside className="context-panel" aria-label={`${sheet.title} 右栏`}>
+    <aside className="context-panel" aria-label={`${sheet.title} 右栏`} style={{ '--right-width': `${rightWidth}px` } as CSSProperties}>
       <div className="context-panel-head">
         <div className="context-panel-tabs" role="tablist" aria-label="右栏面板">
           {entries.map(entry => (
@@ -54,7 +58,7 @@ export default function ContextPanelHost({ sheet, ctx }: { sheet: SheetRecord; c
         <button type="button" className="context-panel-collapse" onClick={() => useWorkspaceStore.getState().setRightPanelCollapsed(true)} aria-label="收起右栏">»</button>
       </div>
       <div className="context-panel-body">
-        <PluginContributionBoundary key={active.contributionId} contributionId={active.contributionId}>{renderActive()}</PluginContributionBoundary>
+        <PluginContributionBoundary key={`${active.ownerRuntimeInstanceId}:${active.contributionId}`} contributionId={active.contributionId}>{renderActive()}</PluginContributionBoundary>
       </div>
     </aside>
   )

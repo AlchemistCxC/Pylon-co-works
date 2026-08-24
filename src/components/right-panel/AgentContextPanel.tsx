@@ -1,38 +1,115 @@
-import { useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react'
 import { useIdentityStore } from '../../identityStore'
 import { useWorkspaceStore } from '../../workspaceStore'
 import { toAgentContextKey } from '../../agentContext'
 import { useSessionUiState} from '../chat/sessionUiState'
 import { useChatRuntimeSnapshot } from '../chat/useChatRuntimeSnapshot'
-import { messageMatchesQuery } from '../chat/messageSearchIndex'
+import { messageMatchesQuery, searchValuesMatchQuery } from '../chat/messageSearchIndex'
 import { getChatController } from '../chat/chatEventController'
 import MessageSearchBar from '../chat/MessageSearchBar'
 import type { SheetContext } from '../../workspace-sheets/sheetTypes'
+import type { SheetRecord } from '../../workspace-sheets/sheetTypes'
+import type { SessionUiKey } from '../../domains/workbench/sessionUiStore.ts'
+import type { WorkbenchHostPort } from '../../renderers/solid-workbench/workbenchHostPort.ts'
+import {
+  getActiveWorkbenchHostPort,
+  subscribeActiveWorkbenchHostPort,
+} from '../../sheets/agent-workbench/activeWorkbenchHostPort.ts'
+
+function useActiveWorkbenchHostPort(sheetId: string): WorkbenchHostPort | undefined {
+  return useSyncExternalStore(
+    useCallback(listener => subscribeActiveWorkbenchHostPort(sheetId, listener), [sheetId]),
+    useCallback(() => getActiveWorkbenchHostPort(sheetId), [sheetId]),
+    () => undefined,
+  )
+}
+
+function useHostSessionUiState<T>(hostPort: WorkbenchHostPort | undefined, bindingKey: string | null, key: SessionUiKey, fallback: T): T {
+  return useSyncExternalStore(
+    useCallback(listener => bindingKey === null
+      ? () => {}
+      : hostPort?.sessionUi.subscribe(key, listener) ?? (() => {}), [bindingKey, hostPort, key]),
+    useCallback(() => bindingKey === null
+      ? fallback
+      : hostPort?.sessionUi.get(key, fallback) ?? fallback, [bindingKey, fallback, hostPort, key]),
+    () => fallback,
+  )
+}
+
+function useHostDocument(hostPort: WorkbenchHostPort | undefined) {
+  return useSyncExternalStore(
+    useCallback(listener => hostPort?.document.subscribe(listener) ?? (() => {}), [hostPort]),
+    useCallback(() => hostPort?.document.getSnapshot(), [hostPort]),
+    () => undefined,
+  )
+}
 
 /**
  * AgentContextPanel — agent 右栏（W2-12，F2-F）。
  *
- * 搜索模式：驱动 ChatView 的 useMessageSearch 共享状态（sessionUiState 同 key——
- * hook 行为不变，匹配/滚动定位仍在 ChatView），本栏展示输入/计数/前后导航；
- * 消息快照经 handle.getMessages 读（W2-12 访问器）。关联模式：touchedFiles
- * 正向（会话→文件）。
+ * 搜索模式：Renderer Suite 存在时消费当前 Sheet 发布的 Workbench Host Port，
+ * 从 canonical document 计算命中并写 namespaced SessionUiPort；legacy ChatView
+ * 仍通过原 sessionUiState/controller 回退，切换渲染模式不丢现有搜索能力。
+ * 关联模式：touchedFiles 正向（会话→文件）。
  */
-export default function AgentContextPanel({ ctx }: { ctx: SheetContext }) {
+export default function AgentContextPanel({ sheet, ctx }: { sheet: SheetRecord; ctx: SheetContext }) {
   const sessionId = ctx.activeSession
   const source = ctx.sessionSource(sessionId)
-  const [searchQuery, setSearchQuery] = useSessionUiState(sessionId, 'search-query', '')
-  const [searchIndex, setSearchIndex] = useSessionUiState(sessionId, 'search-index', 0)
+  const hostPort = useActiveWorkbenchHostPort(sheet.id)
+  const hostDocument = useHostDocument(hostPort)
+  const [legacySearchQuery, setLegacySearchQuery] = useSessionUiState(sessionId, 'search-query', '')
+  const [legacySearchIndex, setLegacySearchIndex] = useSessionUiState(sessionId, 'search-index', 0)
+  const searchQuery = useHostSessionUiState(hostPort, sessionId, 'search-query', legacySearchQuery)
+  const searchIndex = useHostSessionUiState(hostPort, sessionId, 'search-index', legacySearchIndex)
   const [mode, setMode] = useState<'search' | 'relations'>('search')
+  const initializedHostBinding = useRef(false)
+  const previousHostPort = useRef(hostPort)
+  const previousSessionId = useRef(sessionId)
+
+  useEffect(() => {
+    const firstBinding = !initializedHostBinding.current
+    initializedHostBinding.current = true
+    const hostChanged = previousHostPort.current !== hostPort
+    const sessionChanged = previousSessionId.current !== sessionId
+    previousHostPort.current = hostPort
+    previousSessionId.current = sessionId
+    // Only bridge legacy state when a renderer Host appears for the same
+    // session. A session switch must start from the new owner namespace.
+    if (hostPort && sessionId && (firstBinding || hostChanged) && !sessionChanged) {
+      if (hostPort.sessionUi.get<string | undefined>('search-query', undefined) === undefined) {
+        hostPort.sessionUi.set('search-query', legacySearchQuery)
+      }
+      if (hostPort.sessionUi.get<number | undefined>('search-index', undefined) === undefined) {
+        hostPort.sessionUi.set('search-index', legacySearchIndex)
+      }
+    }
+  }, [hostPort, legacySearchIndex, legacySearchQuery, sessionId])
 
   // FE-AUD-012：横向订阅消息版本戳——消息 append 立即进入右栏搜索计数（不再只读一次）。
   // version 是必要依赖（变化时重读消息），eslint 误判为多余（组件已因 version 重渲染）
   const { version } = useChatRuntimeSnapshot(source)
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  const messages = useMemo(() => (source ? getChatController()?.getMessages(source) ?? [] : []), [source, version])
+  const legacyMessages = useMemo(() => (source ? getChatController()?.getMessages(source) ?? [] : []), [source, version])
   const matches = useMemo(() => {
     if (!searchQuery.trim()) return []
-    return messages.filter(message => messageMatchesQuery(message, searchQuery))
-  }, [messages, searchQuery])
+    if (hostPort) {
+      return (hostDocument?.messages ?? []).filter(message => searchValuesMatchQuery([
+        message.source.provider,
+        message.content,
+        message.parts,
+      ], searchQuery))
+    }
+    return legacyMessages.filter(message => messageMatchesQuery(message, searchQuery))
+  }, [hostDocument, hostPort, legacyMessages, searchQuery])
+  const setSearchQuery = (value: string) => {
+    setLegacySearchQuery(value)
+    hostPort?.sessionUi.set('search-query', value)
+  }
+  const setSearchIndex = (valueOrUpdater: number | ((previous: number) => number)) => {
+    const next = typeof valueOrUpdater === 'function' ? valueOrUpdater(searchIndex) : valueOrUpdater
+    setLegacySearchIndex(next)
+    hostPort?.sessionUi.set('search-index', next)
+  }
   const moveSearch = (direction: 1 | -1) => {
     if (matches.length === 0) return
     setSearchIndex(index => (index + direction + matches.length) % matches.length)

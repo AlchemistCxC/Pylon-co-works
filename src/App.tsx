@@ -48,6 +48,7 @@ import { projectFontContributions } from './infrastructure/fonts/fontProjection.
 import { getWorkspaceRegistrySnapshot, subscribeWorkspaceRegistry } from './workspace-sheets/workspaceRegistry.ts'
 import { activateInterfaceMode, ensureInterfaceModeProfile, interfaceModeQuickTarget } from './application/transactions/activateInterfaceMode.ts'
 import { useInterfaceModeStore } from './domains/interface/interfaceModeStore.ts'
+import { selectAvailableContextPanels } from './plugin-runtime/context-panel/contextPanelSelection.ts'
 import { usePresentationPreferenceStore } from './domains/presentation/presentationPreferenceStore.ts'
 import { IsolatedPluginSurface } from './plugin-runtime/ui/IsolatedPluginSurface.tsx'
 import { BUILTIN_INTERFACE_MODES } from './plugins/core/interfaceMode/builtinInterfaceModes.ts'
@@ -128,7 +129,11 @@ export default function App() {
   // Sheet 共用 TitleBar 最左端入口；none 才禁用。
   const sidebarEnabled = activeSidebarMode === 'workspace' || activeSidebarMode === 'sheet'
   const rightPanelEnabled = activeSheet
-    ? contextPanelSnapshot.entries.some(entry => entry.value.workspaceKind === activeSheet.kind)
+    ? selectAvailableContextPanels(contextPanelSnapshot.entries, {
+      workspaceKind: activeSheet.kind,
+      sheetId: activeSheet.id,
+      activeSessionId: activeSession,
+    }).length > 0
     : false
   // 所有带左栏的 Sheet 使用同一几何契约：展开宽度与左栏一致，折叠后统一为 42px。
   const sidebarExpandedTrack = sidebarEnabled

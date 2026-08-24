@@ -56,6 +56,44 @@ function mountPreview(capabilities?: WorkbenchCapabilitySnapshot) {
 }
 
 describe('mountSolidWorkbench', () => {
+  it('消费会话搜索状态，高亮并定位当前匹配消息', async () => {
+    const scrollIntoView = vi.fn()
+    Object.defineProperty(HTMLElement.prototype, 'scrollIntoView', {
+      configurable: true,
+      value: scrollIntoView,
+    })
+    const { host, services } = mountPreview()
+
+    services.sessionUi.set('preview-session', 'search-query', 'runtime 保持')
+    services.sessionUi.set('preview-session', 'search-index', -7)
+
+    await waitFor(() => expect(
+      host.querySelector('[data-message-id="fixture-assistant-markdown"] .term-row-search-active'),
+    ).not.toBeNull())
+    expect(services.sessionUi.get('preview-session', 'search-index', -1)).toBe(0)
+    expect(scrollIntoView).toHaveBeenCalledWith({ block: 'center' })
+  })
+
+  it('右栏与 Solid 对 canonical semantic parts 使用同一搜索文本口径', async () => {
+    Object.defineProperty(HTMLElement.prototype, 'scrollIntoView', {
+      configurable: true,
+      value: vi.fn(),
+    })
+    const { host, services } = mountPreview()
+    const current = services.runtime.getSnapshot().document!
+    const target = current.messages.find(message => message.id === 'fixture-assistant-markdown')!
+    services.runtime.replaceDocument({
+      ...current,
+      messages: [{ ...target, content: '', parts: [{ kind: 'text', text: 'canonical semantic needle' }] }],
+    }, { ownerKey: 'owner-preview', generation: 1 })
+
+    services.sessionUi.set('preview-session', 'search-query', 'semantic needle')
+
+    await waitFor(() => expect(
+      host.querySelector('[data-message-id="fixture-assistant-markdown"] .term-row-search-active'),
+    ).not.toBeNull())
+  })
+
   it('挂载完整 fixture shell，复用 Message/Tool/Task/Generation renderer', async () => {
     const { host } = mountPreview()
 

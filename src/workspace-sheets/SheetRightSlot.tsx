@@ -3,6 +3,7 @@ import type { SheetContext, SheetRecord } from './sheetTypes'
 import ContextPanelHost from '../components/right-panel/ContextPanelHost.tsx'
 import { getContextPanelRegistry } from '../plugin-runtime/runtimeServices.ts'
 import { useSyncExternalStore } from 'react'
+import { selectAvailableContextPanels } from '../plugin-runtime/context-panel/contextPanelSelection.ts'
 
 /**
  * SheetRightSlot — 右栏壳（W1-03 预留，W1-04 接 ContextPanel）。
@@ -19,7 +20,11 @@ export default function SheetRightSlot({ sheet, ctx }: { sheet: SheetRecord; ctx
     () => registry.getSnapshot(),
     () => registry.getSnapshot(),
   )
-  const enabled = snapshot.entries.some(entry => entry.value.workspaceKind === sheet.kind)
+  const enabled = selectAvailableContextPanels(snapshot.entries, {
+    workspaceKind: sheet.kind,
+    sheetId: sheet.id,
+    activeSessionId: ctx.activeSession,
+  }).length > 0
   if (!enabled || rightPanelCollapsed) return null
   return <ContextPanelHost sheet={sheet} ctx={ctx} />
 }
