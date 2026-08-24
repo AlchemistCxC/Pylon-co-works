@@ -27,7 +27,7 @@ export interface ThemeFieldDef {
   /** Settings 分组标题（声明式 UI 按 group 渲染） */
   group?: string
   /** 特殊控件标识（渲染器分发到专用组件） */
-  control?: 'default' | 'bgImage' | 'spinnerMarker' | 'schemeChip' | 'fontPicker'
+  control?: 'default' | 'bgImage' | 'spinnerMarker' | 'schemeChip' | 'fontPicker' | 'segmented'
   /** Dynamic font registries may add stable ids beyond the built-in options. */
   allowCustomOptions?: boolean
   fontRole?: FontRole
@@ -181,14 +181,14 @@ export const THEME_FIELD_DEFS = {
   spinnerIntervalMs: { ...N('chat', '动画帧间隔', 40, 1000, 10), default: 120, group: "等待动画", suffix: 'ms', noCssVar: true },
   spinnerColor: { ...C('chat', '等待动画颜色'), tier: 'basic', default: '', group: "等待动画", },
   spinnerSize: { ...N('chat', '等待动画大小', 10, 32), default: 14, group: "等待动画", unit: 'px' },
-  msgStyle: { ...S('chat', '消息风格', ['terminal', 'bubble']), optionLabels: { terminal: '终端记录流', bubble: '对话气泡' }, default: 'terminal', group: "风格", },
+  msgStyle: { ...S('chat', '消息风格', ['terminal', 'bubble']), optionLabels: { terminal: '终端记录流', bubble: '对话气泡' }, default: 'terminal', control: 'segmented', group: "风格", },
   msgFont: { ...S('chat', '正文渲染字体', ['mono', 'system', 'serif']), optionLabels: {
     mono: '跟随终端等宽体', system: '系统无衬线', serif: '阅读衬线',
   }, default: 'mono', group: "风格", control: 'fontPicker', fontRole: 'content', allowCustomOptions: true, hint: 'Markdown 正文的渲染字体，不影响内联代码与代码块' },
   // 经 App.tsx 手写 --msg-text 注入，自动派生 --msg-text-color 冗余 → 不注入
   msgTextColor: { ...C('chat', '消息文字'), tier: 'basic', default: '', group: "风格", noCssVar: true },
   msgLineHeight: { ...N('chat', '消息行距', 1.2, 2.5, 0.1), default: 1.8, group: "风格", },
-  messageLayout: { ...S('chat', '消息布局', ['classic', 'claude', 'bubble']), optionLabels: { classic: '经典紧凑', claude: '阅读记录', bubble: '对话气泡' }, default: 'classic', group: "风格", },
+  messageLayout: { ...S('chat', '消息布局', ['classic', 'claude', 'bubble']), optionLabels: { classic: '经典紧凑', claude: '阅读记录', bubble: '对话气泡' }, default: 'classic', control: 'segmented', group: "风格", },
   messageUserBg: { ...C('chat', '用户消息背景'), default: '', group: "消息外观", },
   messageAssistantBg: { ...C('chat', '助手消息背景'), default: '', group: "消息外观", },
   messageReasoningBg: { ...C('chat', '思考过程背景'), default: '', group: "消息外观", },
@@ -198,7 +198,7 @@ export const THEME_FIELD_DEFS = {
   assistantDot: { ...B('chat', '显示助手消息标记'), default: false, group: "助手标记" },
   assistantDotGlyph: { ...S('chat', '标记图案', ['●', '■', '✦', '◆', '▶', '❯']), default: '●', group: "助手标记" },
   assistantDotColor: { ...C('chat', '标记颜色'), default: '', group: "助手标记" },
-  assistantDotImage: { ...T('chat', '自定义头像或图标'), default: '', group: "助手标记", hint: '留空时使用上方图案；也可填写本地图片路径或网络图片地址' },
+  assistantDotImage: { ...T('chat', '自定义头像或图标'), default: '', control: 'bgImage', group: "助手标记", hint: '留空时使用上方图案；也可填写本地图片路径或网络图片地址' },
 
   // ── cc ──
   ccHeight: {
@@ -238,7 +238,7 @@ export const THEME_FIELD_DEFS = {
   inputFocusRingWidth: { ...N('cc', '焦点光环', 0, 8), default: 0, group: "输入与状态", unit: 'px', suffix: 'px', advanced: true },
   inputFontSize: { ...N('cc', '输入字号', 12, 22), tier: 'basic', default: 17, group: "输入与状态", unit: 'px' },
   inputMinHeight: { ...N('cc', '输入栏最小高度', 32, 120), default: 56, group: "输入与状态", unit: 'px', advanced: true },
-  inputMode: { ...S('cc', '输入交互模式', ['cli', 'default']), optionLabels: { cli: '命令行交互', default: '标准输入' }, default: 'cli', group: "输入与状态", },
+  inputMode: { ...S('cc', '输入交互模式', ['cli', 'default']), optionLabels: { cli: '命令行交互', default: '标准输入' }, default: 'cli', control: 'segmented', group: "输入与状态", },
   inputVariant: { ...S('cc', '输入栏外观', ['cli', 'composer', 'compact', 'command']), optionLabels: { cli: '命令行', composer: '标准编辑器', compact: '紧凑输入', command: '命令面板' }, default: 'cli', syncOnChange: ['inputMode'], group: "控件样式", },
   inputShowPlaceholder: { ...S('cc', '显示输入提示', ['shown', 'hidden']), optionLabels: { shown: '显示', hidden: '隐藏' }, default: true, group: "控件样式", },
   inputShowHistoryHint: { ...S('cc', '显示历史快捷提示', ['shown', 'hidden']), optionLabels: { shown: '显示', hidden: '隐藏' }, default: true, group: "控件样式", },

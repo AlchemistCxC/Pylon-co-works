@@ -1,4 +1,5 @@
 import { Fragment, useState, useSyncExternalStore } from 'react'
+import * as ToggleGroup from '@radix-ui/react-toggle-group'
 import type { ThemeSettings } from './store'
 import { GROUP_ORDER, THEME_FIELD_DEFS, THEME_FIELD_KEYS, type ThemeFieldDef, type ThemeFieldKey, type ZoneName } from './themeFieldDefs'
 import ColorPopover from './components/ColorPopover'
@@ -222,6 +223,28 @@ function FieldControl({ def, ctx, keyName }: { def: ThemeFieldDef; ctx: RenderCt
       )
     }
     case 'select':
+      if (def.control === 'segmented') {
+        // T1-B：segmented 覆盖——2~3 值互斥选项用按钮组（Radix ToggleGroup 底座，链B 同款样式）
+        const current = String(value ?? '')
+        const options = settingOptions(keyName, (def.options ?? []).map(option => ({ value: option, label: def.optionLabels?.[option] ?? option })), ctx)
+        return (
+          <ToggleGroup.Root
+            type="single"
+            className="renderer-segmented"
+            aria-label={def.label}
+            value={current}
+            onValueChange={next => { if (next !== '') emit({ [keyName]: next } as Partial<ThemeSettings>) }}
+          >
+            {withUnavailableCurrent(options, current).map(option => (
+              <ToggleGroup.Item key={option.value} value={option.value} disabled={option.disabled}
+                data-state={option.value === current ? 'on' : 'off'}
+                className={`renderer-segmented-chip${option.value === current ? ' active' : ''}`}>
+                {option.label}
+              </ToggleGroup.Item>
+            ))}
+          </ToggleGroup.Root>
+        )
+      }
       { const current = String(value ?? '')
         const options = settingOptions(keyName, (def.options ?? []).map(option => ({ value: option, label: def.optionLabels?.[option] ?? option })), ctx)
         return <Sel
