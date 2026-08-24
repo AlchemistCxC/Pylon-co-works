@@ -89,7 +89,7 @@ export default function RendererSettingsPanel(props: RendererSettingsPanelProps)
       {...(sections.findIndex(s => s.entry === entry) === index ? { 'data-group-anchor': entry.label } : {})}>
       <div className="renderer-settings-group-heading">
         <div><h3>{entry.label} · {group.label}</h3>{group.description && <p>{group.description}</p>}</div>
-        <button type="button" onClick={() => store.reset(namespace)}>恢复本组默认</button>
+        <button type="button" className="ps-btn sm" onClick={() => store.reset(namespace)} title="将本组全部设置恢复为默认值">↺ 默认</button>
       </div>
       {fields.map(field => {
         const key = settingFieldKey(field)

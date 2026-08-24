@@ -346,9 +346,9 @@ export const TERMINAL_LOG_SETTINGS = Object.freeze({
         { key: 'timestamps', label: '显示时间戳', type: 'boolean', presentation: 'toggle', default: false },
         { key: 'followTail', label: '自动跟随末尾', description: '仅为当前视图状态，不写入 journal。', type: 'boolean', presentation: 'toggle', default: true },
         { key: 'logLevels', label: '日志级别', type: 'multi-choice', presentation: 'checklist', options: [
-          { value: 'trace', label: 'Trace' }, { value: 'debug', label: 'Debug' }, { value: 'info', label: 'Info' },
-          { value: 'warn', label: 'Warn' }, { value: 'error', label: 'Error' }, { value: 'fatal', label: 'Fatal' },
-          { value: 'unknown', label: 'Unknown' },
+          { value: 'trace', label: 'Trace 追踪' }, { value: 'debug', label: 'Debug 调试' }, { value: 'info', label: 'Info 信息' },
+          { value: 'warn', label: 'Warn 警告' }, { value: 'error', label: 'Error 错误' }, { value: 'fatal', label: 'Fatal 致命' },
+          { value: 'unknown', label: 'Unknown 未知' },
         ], default: ['trace', 'debug', 'info', 'warn', 'error', 'fatal', 'unknown'] },
         { key: 'showCopy', label: '显示复制按钮', type: 'boolean', presentation: 'toggle', default: true },
         { key: 'showIdentity', label: '显示进程标识', type: 'boolean', presentation: 'toggle', default: true },
