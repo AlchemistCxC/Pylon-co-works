@@ -159,10 +159,27 @@ export const useStore = create<ThemeState>()(persist(
     ccLayout: cloneCcLayout(DEFAULT_CC_LAYOUT),
     ...markZoneCustom(state, 'cc'),
   })),
-  setCcHidden: (id, hidden) => set(state => ({
-    ccHidden: setCcHiddenState(state.ccHidden, id, hidden),
-    ...markZoneCustom(state, 'cc'),
-  })),
+  setCcHidden: (id, hidden) => set(state => {
+    const ccHidden = setCcHiddenState(state.ccHidden, id, hidden)
+    const ccHeight = clampCcHeight(state.ccHeight, {
+      inputMode: state.inputMode,
+      footerLayout: state.footerLayout,
+      hintMode: state.cliHintMode,
+      visibleStatusWidgets: resolveVisibleStatusWidgetCount({
+        hiddenIds: ccHidden,
+        inputMode: state.inputMode,
+        ccStyle: state.ccStyle,
+        submitButtonMode: state.inputSubmitButtonMode,
+      }),
+      cliOverflowMode: state.cliOverflowMode,
+    })
+    return {
+      ccHidden,
+      ccHeight,
+      ccBgHeight: Math.max(state.ccBgHeight, ccHeight),
+      ...markZoneCustom(state, 'cc'),
+    }
+  }),
   setCcScale: (id, scale) => set(state => ({
     ccScale: setCcScaleState(state.ccScale, id, scale),
     ...markZoneCustom(state, 'cc'),

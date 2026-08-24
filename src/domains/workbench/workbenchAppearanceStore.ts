@@ -103,7 +103,7 @@ export function reduceAppearanceCommand(
     case 'set-cc-edit-mode':
       return { ...theme, ccEditMode: command.enabled }
     case 'set-cc-hidden':
-      return { ...theme, ccHidden: setCcHiddenState(theme.ccHidden, command.id, command.hidden) }
+      return settleCcHeight({ ...theme, ccHidden: setCcHiddenState(theme.ccHidden, command.id, command.hidden) })
     case 'set-cc-scale':
       return { ...theme, ccScale: setCcScaleState(theme.ccScale, command.id, command.scale) }
     case 'set-cc-height': {
@@ -126,10 +126,26 @@ export function reduceAppearanceCommand(
     case 'set-cc-property':
       return typeof command.value === 'number' && !Number.isFinite(command.value)
         ? theme
-        : { ...theme, [command.key]: command.value }
+        : settleCcHeight({ ...theme, [command.key]: command.value })
     case 'reset-cc-layout':
       return { ...theme, ccLayout: cloneCcLayout(DEFAULT_CC_LAYOUT) }
   }
+}
+
+function settleCcHeight(theme: ThemeSettings): ThemeSettings {
+  const ccHeight = clampCcHeight(theme.ccHeight, {
+    inputMode: theme.inputMode,
+    footerLayout: theme.footerLayout,
+    hintMode: theme.cliHintMode,
+    visibleStatusWidgets: resolveVisibleStatusWidgetCount({
+      hiddenIds: theme.ccHidden,
+      inputMode: theme.inputMode,
+      ccStyle: theme.ccStyle,
+      submitButtonMode: theme.inputSubmitButtonMode,
+    }),
+    cliOverflowMode: theme.cliOverflowMode,
+  })
+  return { ...theme, ccHeight, ccBgHeight: Math.max(theme.ccBgHeight, ccHeight) }
 }
 
 export function snapshotRevision(snapshot: WorkbenchAppearanceSnapshot): number {

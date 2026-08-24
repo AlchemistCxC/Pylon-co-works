@@ -51,8 +51,9 @@ export function SolidInputBar(props: SolidInputBarProps) {
   })
   const suggestionList = () => suggestions() ?? []
   const inputVariant = () => appearance().inputVariant || (appearance().inputMode === 'cli' ? 'cli' : 'composer')
-  const externalSubmit = () => appearance().inputSubmitButtonMode === 'external'
-  const inlineSubmit = () => appearance().inputSubmitButtonMode !== 'hidden' && !externalSubmit() && !props.externalSend
+  // 与 React 中控一致：external 表示布局偏好；只有对应外置 send 实际可见时，
+  // ControlCenter 才传 externalSend=true。外置 send 被隐藏时必须恢复内置发送按钮。
+  const inlineSubmit = () => appearance().inputSubmitButtonMode !== 'hidden' && !props.externalSend
   const placeholder = () => {
     if (!appearance().inputShowPlaceholder) return ''
     if (inputVariant() === 'cli') return ''

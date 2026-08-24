@@ -8,11 +8,12 @@
  * forceStoreRerender 无限循环。修复后 selector 只返回 store 内稳定引用。
  */
 import { beforeEach, describe, expect, it, vi } from 'vitest'
-import { render } from '@testing-library/react'
+import { fireEvent, render } from '@testing-library/react'
 import ControlCenter from '../ControlCenter'
 import { useIdentityStore } from '../../identityStore'
 import { resetStores } from '../../test/resetStores'
 import { usePresentationPreferenceStore } from '../../domains/presentation/presentationPreferenceStore.ts'
+import { useStore } from '../../store.ts'
 
 const { invokeMock } = vi.hoisted(() => ({ invokeMock: vi.fn() }))
 vi.mock('@tauri-apps/api/core', () => ({
@@ -69,5 +70,65 @@ describe('ControlCenter 带会话挂载（#185 回归）', () => {
     expect(container.querySelector('[data-widget-id="session"]')).toBeNull()
     expect(container.querySelector('[data-widget-id="workspace"]')).toBeNull()
     expect(container.querySelector('[data-widget-id="activity"]')).toBeNull()
+  })
+
+  it('兼容中控属性面板清空数字输入时保留上次有效值', () => {
+    useStore.getState().updateCcPlacement('model', { order: 7, offsetX: 12 })
+    useStore.getState().setCcScale('model', 125)
+    useStore.getState().setCcEditMode(true)
+    const { container, getByRole } = render(<ControlCenter sessionId="s1" />)
+    fireEvent.click(getByRole('button', { name: '● 模型' }))
+
+    const numberInput = (label: string) => {
+      const field = Array.from(container.querySelectorAll('.cc-prop-field'))
+        .find(element => element.querySelector('label')?.textContent === label)
+      return field?.querySelector<HTMLInputElement>('input[type="number"]')
+    }
+    fireEvent.change(numberInput('顺序')!, { target: { value: '' } })
+    fireEvent.change(numberInput('水平微调')!, { target: { value: '' } })
+    fireEvent.change(numberInput('缩放')!, { target: { value: '' } })
+
+    expect(useStore.getState().ccLayout.placements.model).toMatchObject({ order: 7, offsetX: 12 })
+    expect(useStore.getState().ccScale.model).toBe(125)
+  })
+
+  it('兼容中控恢复控件后同步抬高持久化高度', () => {
+    useStore.setState({
+      inputMode: 'cli', inputVariant: 'cli', footerLayout: 'peri', cliHintMode: 'full',
+      ccHeight: 84, ccBgHeight: 84,
+      ccHidden: ['session', 'workspace', 'activity', 'pct', 'tokens', 'send', 'attach', 'tasks'],
+    })
+
+    useStore.getState().setCcHidden('pct', false)
+    useStore.getState().setCcHidden('tokens', false)
+
+    expect(useStore.getState()).toMatchObject({ ccHeight: 109, ccBgHeight: 109 })
+  })
+
+  it('兼容中控切换 CLI 布局后同步抬高持久化高度', () => {
+    useStore.setState({
+      inputMode: 'default', inputVariant: 'composer', footerLayout: 'peri', cliHintMode: 'full',
+      ccHeight: 64, ccBgHeight: 64, ccEditMode: true,
+    })
+    const { getByRole } = render(<ControlCenter sessionId="s1" />)
+    fireEvent.click(getByRole('button', { name: '● 输入栏' }))
+    fireEvent.click(getByRole('button', { name: '命令行' }))
+
+    expect(useStore.getState()).toMatchObject({ inputMode: 'cli', inputVariant: 'cli', ccHeight: 109, ccBgHeight: 109 })
+  })
+
+  it('兼容中控控件拖拽只响应发起拖拽的 pointer', () => {
+    useStore.getState().setCcEditMode(true)
+    const { container } = render(<ControlCenter sessionId="s1" />)
+    const model = container.querySelector<HTMLElement>('[data-widget-id="model"]')!
+
+    fireEvent.pointerDown(model, { clientX: 10, clientY: 20, pointerId: 1 })
+    fireEvent.pointerMove(window, { clientX: 40, clientY: 40, pointerId: 2 })
+    fireEvent.pointerUp(window, { pointerId: 2 })
+    expect(useStore.getState().ccLayout.placements.model).toMatchObject({ offsetX: 0, offsetY: 0 })
+
+    fireEvent.pointerMove(window, { clientX: 34, clientY: 12, pointerId: 1 })
+    fireEvent.pointerUp(window, { pointerId: 1 })
+    expect(useStore.getState().ccLayout.placements.model).toMatchObject({ offsetX: 24, offsetY: -8 })
   })
 })

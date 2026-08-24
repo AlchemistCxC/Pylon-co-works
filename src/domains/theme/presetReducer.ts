@@ -135,23 +135,22 @@ export function setZoneFieldReducer(state: ThemePresetState, zone: string, parti
   // 联动：先于 cc 高度 clamp（clamp 需要同步后的 inputMode）
   const patch = applyInputVariantInvariant(partial, state)
 
-  // cc 高度不变量：任一高度字段被写即整组收敛
-  if ('ccHeight' in patch || 'ccBgHeight' in patch) {
+  // cc 高度不变量：高度或影响最小高的结构字段被写时整组收敛。
+  // 属性面板/设置页恢复控件或切换 CLI 布局后，状态高度必须与 CSS 实际最小高一致。
+  if (zone === 'cc' || 'ccHeight' in patch || 'ccBgHeight' in patch) {
     const merged = { ...state, ...patch } as ThemePresetState
-    const clamped = 'ccHeight' in patch
-      ? clampCcHeight(Number(patch.ccHeight), {
-          inputMode: String(merged.inputMode),
-          footerLayout: String(merged.footerLayout),
-          hintMode: String(merged.cliHintMode),
-          visibleStatusWidgets: resolveVisibleStatusWidgetCount({
-            hiddenIds: merged.ccHidden ?? [],
-            inputMode: String(merged.inputMode),
-            ccStyle: String(merged.ccStyle),
-            submitButtonMode: String(merged.inputSubmitButtonMode ?? 'inline'),
-          }),
-          cliOverflowMode: String(merged.cliOverflowMode),
-        })
-      : Number(merged.ccHeight)
+    const clamped = clampCcHeight(Number(merged.ccHeight), {
+      inputMode: String(merged.inputMode),
+      footerLayout: String(merged.footerLayout),
+      hintMode: String(merged.cliHintMode),
+      visibleStatusWidgets: resolveVisibleStatusWidgetCount({
+        hiddenIds: merged.ccHidden ?? [],
+        inputMode: String(merged.inputMode),
+        ccStyle: String(merged.ccStyle),
+        submitButtonMode: String(merged.inputSubmitButtonMode ?? 'inline'),
+      }),
+      cliOverflowMode: String(merged.cliOverflowMode),
+    })
     const bg = Number('ccBgHeight' in patch ? patch.ccBgHeight : merged.ccBgHeight)
     patch.ccHeight = clamped
     patch.ccBgHeight = Math.max(Number.isFinite(bg) ? bg : 0, clamped)

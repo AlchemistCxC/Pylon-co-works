@@ -129,6 +129,45 @@ describe('createStaticWorkbenchAppearanceStore', () => {
     expect(store.getSnapshot().ccLayout.placements.model).toMatchObject({ offsetX: 48, offsetY: -16 })
     store.destroy()
   })
+
+  it('非法数字编辑命令保留最后有效的中控布局与缩放', () => {
+    const store = createStaticWorkbenchAppearanceStore(theme())
+    store.dispatch({ type: 'update-cc-placement', id: 'model', placement: { order: 7, offsetX: 12 } })
+    store.dispatch({ type: 'set-cc-scale', id: 'model', scale: 125 })
+
+    store.dispatch({ type: 'update-cc-placement', id: 'model', placement: { order: Number.NaN, offsetX: Number.NaN } })
+    store.dispatch({ type: 'set-cc-scale', id: 'model', scale: Number.NaN })
+
+    expect(store.getSnapshot().ccLayout.placements.model).toMatchObject({ order: 7, offsetX: 12 })
+    expect(store.getSnapshot().ccScale.model).toBe(125)
+    store.destroy()
+  })
+
+  it('恢复隐藏控件后同步抬高中控高度与背景高度', () => {
+    const store = createStaticWorkbenchAppearanceStore(theme({
+      inputMode: 'cli', inputVariant: 'cli', footerLayout: 'peri', cliHintMode: 'full',
+      ccHeight: 84, ccBgHeight: 84,
+      ccHidden: ['session', 'workspace', 'activity', 'pct', 'tokens', 'send', 'attach', 'tasks'],
+    }))
+
+    store.dispatch({ type: 'set-cc-hidden', id: 'pct', hidden: false })
+    store.dispatch({ type: 'set-cc-hidden', id: 'tokens', hidden: false })
+
+    expect(store.getSnapshot()).toMatchObject({ ccHeight: 109, ccBgHeight: 109 })
+    store.destroy()
+  })
+
+  it('属性命令切换 CLI 后同步抬高中控高度与背景高度', () => {
+    const store = createStaticWorkbenchAppearanceStore(theme({
+      inputMode: 'default', inputVariant: 'composer', footerLayout: 'peri', cliHintMode: 'full',
+      ccHeight: 64, ccBgHeight: 64,
+    }))
+
+    store.dispatch({ type: 'set-cc-property', key: 'inputMode', value: 'cli' })
+
+    expect(store.getSnapshot()).toMatchObject({ inputMode: 'cli', ccHeight: 109, ccBgHeight: 109 })
+    store.destroy()
+  })
 })
 
 describe('createVanillaWorkbenchAppearanceStore', () => {

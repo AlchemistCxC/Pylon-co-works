@@ -244,22 +244,27 @@ function EditableWidget({ id, placement, editMode, isHidden, children, bodyRef, 
     onSelect()
     const body = bodyRef.current; if (!body) return
     const startX = e.clientX, startY = e.clientY
+    const pointerId = e.pointerId
     const currentLayout = useStore.getState().ccLayout
     const start = currentLayout.placements[id as keyof typeof currentLayout.placements] || placement
     const onMove = (ev: PointerEvent) => {
+      if (ev.pointerId !== pointerId) return
       useStore.getState().updateCcPlacement(id, {
         offsetX: start.offsetX + ev.clientX - startX,
         offsetY: start.offsetY + ev.clientY - startY,
       })
     }
-    const onUp = () => {
+    const onUp = (ev?: PointerEvent) => {
+      if (ev && ev.pointerId !== pointerId) return
       pointerCleanupRef.current = null
       window.removeEventListener('pointermove', onMove)
       window.removeEventListener('pointerup', onUp)
+      window.removeEventListener('pointercancel', onUp)
     }
     pointerCleanupRef.current = onUp
     window.addEventListener('pointermove', onMove)
     window.addEventListener('pointerup', onUp)
+    window.addEventListener('pointercancel', onUp)
   }
 
   return (
@@ -384,13 +389,13 @@ function PropertyPanel({ id, sessionId, onClose, onExit }: { id: string; session
             { value: 'actions', label: '操作区' },
           ]} />
         </div>
-        <div className="cc-prop-field"><label>顺序</label><input type="number" value={placement?.order ?? 0} onChange={event => updateCcPlacement(id, { order: +event.target.value })} step={1} className="set-num" min={0} max={99} /></div>
-        <div className="cc-prop-field"><label>水平微调</label><input type="number" value={placement?.offsetX ?? 0} onChange={event => upOffset('offsetX', +event.target.value)} step={1} className="set-num" min={-48} max={48} /><span>px</span></div>
-        <div className="cc-prop-field"><label>垂直微调</label><input type="number" value={placement?.offsetY ?? 0} onChange={event => upOffset('offsetY', +event.target.value)} step={1} className="set-num" min={-16} max={16} /><span>px</span></div>
+        <div className="cc-prop-field"><label>顺序</label><input type="number" value={placement?.order ?? 0} onChange={event => { const value = event.currentTarget.valueAsNumber; if (Number.isFinite(value)) updateCcPlacement(id, { order: value }) }} step={1} className="set-num" min={0} max={99} /></div>
+        <div className="cc-prop-field"><label>水平微调</label><input type="number" value={placement?.offsetX ?? 0} onChange={event => { const value = event.currentTarget.valueAsNumber; if (Number.isFinite(value)) upOffset('offsetX', value) }} step={1} className="set-num" min={-48} max={48} /><span>px</span></div>
+        <div className="cc-prop-field"><label>垂直微调</label><input type="number" value={placement?.offsetY ?? 0} onChange={event => { const value = event.currentTarget.valueAsNumber; if (Number.isFinite(value)) upOffset('offsetY', value) }} step={1} className="set-num" min={-16} max={16} /><span>px</span></div>
         {id !== 'input' && (
           <div className="cc-prop-field"><label>缩放</label>
             <input type="number" value={(theme.ccScale || {})[id] ?? 100}
-              onChange={v => setCcScale(id, +v.target.value)}
+              onChange={event => { const value = event.currentTarget.valueAsNumber; if (Number.isFinite(value)) setCcScale(id, value) }}
               step={5} className="set-num" min={50} max={200} /><span>%</span>
           </div>
         )}
@@ -405,7 +410,7 @@ function PropertyPanel({ id, sessionId, onClose, onExit }: { id: string; session
             case 'color':
               return <div key={index} className="cc-prop-field"><label>{field.label}</label><ColorPopover value={String(val ?? '')} onChange={v => up(key, v)} /></div>
             case 'number':
-              return <div key={index} className="cc-prop-field"><label>{field.label}</label><input type="number" value={Number(val) || 0} onChange={e => up(key, +e.target.value)} step={field.step ?? 1} className="set-num" min={field.min} max={field.max} />{field.suffix && <span>{field.suffix}</span>}</div>
+              return <div key={index} className="cc-prop-field"><label>{field.label}</label><input type="number" value={Number(val) || 0} onChange={event => { const value = event.currentTarget.valueAsNumber; if (Number.isFinite(value)) up(key, value) }} step={field.step ?? 1} className="set-num" min={field.min} max={field.max} />{field.suffix && <span>{field.suffix}</span>}</div>
             case 'chips':
               return (
                 <div key={index} className="cc-prop-field"><label>{field.label}</label>

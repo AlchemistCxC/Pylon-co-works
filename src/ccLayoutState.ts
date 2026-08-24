@@ -88,9 +88,9 @@ export function updateCcPlacementState(
     : requestedSlot === 'input' ? current.slot : (requestedSlot ?? current.slot)
   const next: CcWidgetPlacement = {
     slot,
-    order: partial.order == null ? current.order : Math.round(clamp(partial.order, 0, 99)),
-    offsetX: partial.offsetX == null ? current.offsetX : clamp(partial.offsetX, -48, 48),
-    offsetY: partial.offsetY == null ? current.offsetY : clamp(partial.offsetY, -16, 16),
+    order: partial.order == null || !Number.isFinite(partial.order) ? current.order : Math.round(clamp(partial.order, 0, 99)),
+    offsetX: partial.offsetX == null || !Number.isFinite(partial.offsetX) ? current.offsetX : clamp(partial.offsetX, -48, 48),
+    offsetY: partial.offsetY == null || !Number.isFinite(partial.offsetY) ? current.offsetY : clamp(partial.offsetY, -16, 16),
   }
   return {
     version: CC_LAYOUT_SCHEMA_VERSION,
@@ -105,6 +105,6 @@ export function setCcHiddenState(hiddenIds: string[], id: string, hidden: boolea
 }
 
 export function setCcScaleState(scales: Record<string, number>, id: string, scale: number): Record<string, number> {
-  const safeScale = Number.isFinite(scale) ? scale : 100
-  return { ...scales, [id]: Math.max(50, Math.min(200, safeScale)) }
+  if (!Number.isFinite(scale)) return scales
+  return { ...scales, [id]: Math.max(50, Math.min(200, scale)) }
 }

@@ -148,6 +148,28 @@ describe('mountSolidWorkbench', () => {
     expect(host.querySelector('[data-widget-id="activity"]')).toBeNull()
   })
 
+  it('外置按钮模式下单独隐藏发送或附件不会误吞掉输入栏另一按钮', async () => {
+    const { host, services } = mountPreview()
+    const theme = structuredClone(DEFAULTS)
+    theme.inputMode = 'default'
+    theme.inputVariant = 'composer'
+    theme.inputSubmitButtonMode = 'external'
+    theme.ccHidden = ['send']
+    services.appearance.setTheme(theme)
+
+    await waitFor(() => expect(host.querySelector('[data-widget-id="attach"]')).toBeTruthy())
+    expect(host.querySelector('[data-widget-id="send"]')).toBeNull()
+    expect(host.querySelector('.input-btn.send, .input-btn.stop')).toHaveAttribute('aria-label', '停止生成')
+    expect(host.querySelector('.input-btn.attach')).toBeNull()
+
+    theme.ccHidden = ['attach']
+    services.appearance.setTheme(theme)
+    await waitFor(() => expect(host.querySelector('[data-widget-id="send"]')).toBeTruthy())
+    expect(host.querySelector('[data-widget-id="attach"]')).toBeNull()
+    expect(host.querySelector('.input-btn.send, .input-btn.stop')).toBeNull()
+    expect(host.querySelector('.input-btn.attach')).toHaveAttribute('aria-label', '添加附件')
+  })
+
   it('中控编辑模式可选择并拖动 widget，布局写回 appearance 权威', async () => {
     const { host, services } = mountPreview()
     services.appearance.dispatch({ type: 'set-cc-edit-mode', enabled: true })
@@ -164,6 +186,25 @@ describe('mountSolidWorkbench', () => {
     fireEvent.pointerUp(window, { pointerId: 1 })
 
     await waitFor(() => expect(services.appearance.getSnapshot().ccLayout.placements.model).toMatchObject({ offsetX: 24, offsetY: -8 }))
+  })
+
+  it('控件拖拽只响应发起拖拽的 pointer', async () => {
+    const { host, services } = mountPreview()
+    services.appearance.dispatch({ type: 'set-cc-edit-mode', enabled: true })
+    const model = await waitFor(() => {
+      const value = host.querySelector<HTMLElement>('[data-widget-id="model"]')
+      expect(value).not.toBeNull()
+      return value!
+    })
+
+    fireEvent.pointerDown(model, { clientX: 10, clientY: 20, pointerId: 1 })
+    fireEvent.pointerMove(window, { clientX: 40, clientY: 40, pointerId: 2 })
+    fireEvent.pointerUp(window, { pointerId: 2 })
+    expect(services.appearance.getSnapshot().ccLayout.placements.model).toMatchObject({ offsetX: 0, offsetY: 0 })
+
+    fireEvent.pointerMove(window, { clientX: 34, clientY: 12, pointerId: 1 })
+    fireEvent.pointerUp(window, { pointerId: 1 })
+    expect(services.appearance.getSnapshot().ccLayout.placements.model).toMatchObject({ offsetX: 24, offsetY: -8 })
   })
 
   it('中控编辑工具栏可隐藏、恢复、重置并退出', async () => {
@@ -202,6 +243,21 @@ describe('mountSolidWorkbench', () => {
     expect(services.appearance.getSnapshot().ccScale.model).toBe(125)
     expect(services.appearance.getSnapshot().modelVariant).toBe('minimal')
     expect(host.querySelector('[data-widget-id="model"] .cc-model-minimal')).toBeTruthy()
+  })
+
+  it('属性面板数字输入清空时保留上次有效值', async () => {
+    const { services } = mountPreview()
+    services.appearance.dispatch({ type: 'update-cc-placement', id: 'model', placement: { order: 7, offsetX: 12 } })
+    services.appearance.dispatch({ type: 'set-cc-scale', id: 'model', scale: 125 })
+    services.appearance.dispatch({ type: 'set-cc-edit-mode', enabled: true })
+    fireEvent.click(await screen.findByRole('button', { name: '模型 属性' }))
+
+    fireEvent.input(screen.getByLabelText('控件顺序'), { target: { value: '' } })
+    fireEvent.input(screen.getByLabelText('水平微调'), { target: { value: '' } })
+    fireEvent.input(screen.getByLabelText('控件缩放'), { target: { value: '' } })
+
+    expect(services.appearance.getSnapshot().ccLayout.placements.model).toMatchObject({ order: 7, offsetX: 12 })
+    expect(services.appearance.getSnapshot().ccScale.model).toBe(125)
   })
 
   it('属性 schema 的联动字段和条件字段在 Solid 面板中保持响应式', async () => {
@@ -257,6 +313,22 @@ describe('mountSolidWorkbench', () => {
 
     lifecycle.destroy()
     fireEvent.pointerMove(window, { clientY: 40, pointerId: 2 })
+    expect(services.appearance.getSnapshot().ccHeight).toBe(initial + 20)
+  })
+
+  it('高度拖拽只响应发起拖拽的 pointer', async () => {
+    const { services } = mountPreview()
+    services.appearance.dispatch({ type: 'set-cc-edit-mode', enabled: true })
+    const initial = services.appearance.getSnapshot().ccHeight
+    const handle = await screen.findByRole('separator', { name: '调整中控高度' })
+
+    fireEvent.pointerDown(handle, { clientY: 100, pointerId: 1 })
+    fireEvent.pointerMove(window, { clientY: 40, pointerId: 2 })
+    fireEvent.pointerUp(window, { pointerId: 2 })
+    expect(services.appearance.getSnapshot().ccHeight).toBe(initial)
+
+    fireEvent.pointerMove(window, { clientY: 80, pointerId: 1 })
+    fireEvent.pointerUp(window, { pointerId: 1 })
     expect(services.appearance.getSnapshot().ccHeight).toBe(initial + 20)
   })
 

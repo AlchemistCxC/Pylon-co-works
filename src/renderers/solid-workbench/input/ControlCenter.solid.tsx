@@ -41,10 +41,12 @@ export function SolidControlCenter() {
     onCleanup(() => window.removeEventListener('keydown', onKeyDown))
   })
   const readonly = () => input().preview === true || input().replayReadonly === true
-  const externalButtons = () => isExternalSubmitMode({
+  const externalButtonMode = () => isExternalSubmitMode({
     inputMode: appearance().inputMode,
     submitButtonMode: appearance().inputSubmitButtonMode,
   })
+  const externalSend = () => externalButtonMode() && !appearance().ccHidden.includes('send')
+  const externalAttach = () => externalButtonMode() && !appearance().ccHidden.includes('attach')
   const visibilityContext = () => ({
     hidden: appearance().ccHidden,
     inputMode: appearance().inputMode,
@@ -74,7 +76,7 @@ export function SolidControlCenter() {
   const renderBody = (id: CcWidgetId): JSX.Element | null => {
     switch (id) {
       case 'input':
-        return <SolidInputBar externalSend={externalButtons()} externalAttach={externalButtons()} disabled={readonly()} />
+        return <SolidInputBar externalSend={externalSend()} externalAttach={externalAttach()} disabled={readonly()} />
       case 'session':
         return <span class="cc-info-chip cc-session-chip" title={input().sessionLabel ?? input().sessionId ?? '未选择会话'}>
           <span aria-hidden="true">●</span><span>{input().sessionLabel ?? input().sessionId ?? '未选择会话'}</span>
@@ -135,15 +137,20 @@ export function SolidControlCenter() {
     stopDragging?.()
     const startX = event.clientX
     const startY = event.clientY
+    const pointerId = event.pointerId
     const start = appearance().ccLayout.placements[id]
-    const move = (next: PointerEvent) => workbench.appearance.dispatch({
-      type: 'update-cc-placement', id,
-      placement: {
-        offsetX: start.offsetX + next.clientX - startX,
-        offsetY: start.offsetY + next.clientY - startY,
-      },
-    })
-    const stop = () => {
+    const move = (next: PointerEvent) => {
+      if (next.pointerId !== pointerId) return
+      workbench.appearance.dispatch({
+        type: 'update-cc-placement', id,
+        placement: {
+          offsetX: start.offsetX + next.clientX - startX,
+          offsetY: start.offsetY + next.clientY - startY,
+        },
+      })
+    }
+    const stop = (next?: PointerEvent) => {
+      if (next && next.pointerId !== pointerId) return
       window.removeEventListener('pointermove', move)
       window.removeEventListener('pointerup', stop)
       window.removeEventListener('pointercancel', stop)
@@ -161,10 +168,15 @@ export function SolidControlCenter() {
   const beginHeightDrag = (event: PointerEvent) => {
     event.preventDefault()
     const startY = event.clientY
+    const pointerId = event.pointerId
     const startHeight = appearance().ccHeight
     stopDragging?.()
-    const move = (next: PointerEvent) => workbench.appearance.dispatch({ type: 'set-cc-height', height: startHeight + startY - next.clientY })
-    const stop = () => {
+    const move = (next: PointerEvent) => {
+      if (next.pointerId !== pointerId) return
+      workbench.appearance.dispatch({ type: 'set-cc-height', height: startHeight + startY - next.clientY })
+    }
+    const stop = (next?: PointerEvent) => {
+      if (next && next.pointerId !== pointerId) return
       window.removeEventListener('pointermove', move)
       window.removeEventListener('pointerup', stop)
       window.removeEventListener('pointercancel', stop)
@@ -261,10 +273,22 @@ export function SolidControlCenter() {
           <div class="cc-prop-field"><label>槽位</label><select class="set-select" aria-label="控件槽位" value={appearance().ccLayout.placements[id()].slot} onChange={event => updatePlacement(id(), { slot: event.currentTarget.value as CcSlot })}>
             <option value="input">输入栏</option><option value="status-primary">状态左</option><option value="status-secondary">状态右</option><option value="actions">操作区</option>
           </select></div>
-          <div class="cc-prop-field"><label>顺序</label><input type="number" class="set-num" aria-label="控件顺序" min="0" max="99" step="1" value={appearance().ccLayout.placements[id()].order} onInput={event => updatePlacement(id(), { order: event.currentTarget.valueAsNumber })} /></div>
-          <div class="cc-prop-field"><label>水平微调</label><input type="number" class="set-num" aria-label="水平微调" min="-48" max="48" step="1" value={appearance().ccLayout.placements[id()].offsetX} onInput={event => updatePlacement(id(), { offsetX: event.currentTarget.valueAsNumber })} /><span>px</span></div>
-          <div class="cc-prop-field"><label>垂直微调</label><input type="number" class="set-num" aria-label="垂直微调" min="-16" max="16" step="1" value={appearance().ccLayout.placements[id()].offsetY} onInput={event => updatePlacement(id(), { offsetY: event.currentTarget.valueAsNumber })} /><span>px</span></div>
-          <Show when={id() !== 'input'}><div class="cc-prop-field"><label>缩放</label><input type="number" class="set-num" aria-label="控件缩放" min="50" max="200" step="5" value={appearance().ccScale[id()] ?? 100} onInput={event => workbench.appearance.dispatch({ type: 'set-cc-scale', id: id(), scale: event.currentTarget.valueAsNumber })} /><span>%</span></div></Show>
+          <div class="cc-prop-field"><label>顺序</label><input type="number" class="set-num" aria-label="控件顺序" min="0" max="99" step="1" value={appearance().ccLayout.placements[id()].order} onInput={event => {
+            const value = event.currentTarget.valueAsNumber
+            if (Number.isFinite(value)) updatePlacement(id(), { order: value })
+          }} /></div>
+          <div class="cc-prop-field"><label>水平微调</label><input type="number" class="set-num" aria-label="水平微调" min="-48" max="48" step="1" value={appearance().ccLayout.placements[id()].offsetX} onInput={event => {
+            const value = event.currentTarget.valueAsNumber
+            if (Number.isFinite(value)) updatePlacement(id(), { offsetX: value })
+          }} /><span>px</span></div>
+          <div class="cc-prop-field"><label>垂直微调</label><input type="number" class="set-num" aria-label="垂直微调" min="-16" max="16" step="1" value={appearance().ccLayout.placements[id()].offsetY} onInput={event => {
+            const value = event.currentTarget.valueAsNumber
+            if (Number.isFinite(value)) updatePlacement(id(), { offsetY: value })
+          }} /><span>px</span></div>
+          <Show when={id() !== 'input'}><div class="cc-prop-field"><label>缩放</label><input type="number" class="set-num" aria-label="控件缩放" min="50" max="200" step="5" value={appearance().ccScale[id()] ?? 100} onInput={event => {
+            const value = event.currentTarget.valueAsNumber
+            if (Number.isFinite(value)) workbench.appearance.dispatch({ type: 'set-cc-scale', id: id(), scale: value })
+          }} /><span>%</span></div></Show>
           <For each={propertyFields(id())}>{(field, index) => renderPropertyField(field, index())}</For>
         </div>
         <div class="cc-prop-footer"><button type="button" class="ps-btn sm" onClick={() => {
