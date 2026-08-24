@@ -240,6 +240,26 @@ describe('SolidInputBar', () => {
     expect(services.commands.calls.some(call => call.command === 'send')).toBe(false)
   })
 
+  it('Tab 确认当前命令建议并把参数提示带入草稿', () => {
+    const { textarea } = renderInput()
+    fireEvent.input(textarea, { target: { value: '/mod' } })
+
+    fireEvent.keyDown(textarea, { key: 'Tab' })
+
+    expect(textarea.value).toBe('/model <name> ')
+    expect(screen.getByRole('listbox', { name: '命令建议' })).toBeTruthy()
+  })
+
+  it('Enter 补全尚未输入完整的命令名，不误发为普通消息', () => {
+    const { services, textarea } = renderInput()
+    fireEvent.input(textarea, { target: { value: '/mo' } })
+
+    fireEvent.keyDown(textarea, { key: 'Enter' })
+
+    expect(textarea.value).toBe('/model <name> ')
+    expect(services.commands.calls).toHaveLength(0)
+  })
+
   it('实时消费 canonical session commands，且同名插件命令不覆盖会话权威', async () => {
     const { services, textarea } = renderInput()
     const document = projectWorkbench([createWorkbenchEnvelope({
@@ -335,6 +355,30 @@ describe('SolidInputBar', () => {
     expect(textarea.value).toBe('第一条')
     expect(services.sessionUi.get('session-a', 'input-history', [])).toEqual(['第一条'])
     fireEvent.keyDown(textarea, { key: 'ArrowDown' })
+    expect(textarea.value).toBe('当前草稿')
+  })
+
+  it('多行草稿中非首末行的方向键保留给原生光标移动', async () => {
+    const { services, textarea } = renderInput()
+    fireEvent.input(textarea, { target: { value: '历史消息' } })
+    fireEvent.keyDown(textarea, { key: 'Enter' })
+    await waitFor(() => expect(textarea.value).toBe(''))
+    fireEvent.input(textarea, { target: { value: '第一行\n第二行\n第三行' } })
+    textarea.setSelectionRange(7, 7)
+
+    expect(fireEvent.keyDown(textarea, { key: 'ArrowUp' })).toBe(true)
+    expect(textarea.value).toBe('第一行\n第二行\n第三行')
+    expect(fireEvent.keyDown(textarea, { key: 'ArrowDown' })).toBe(true)
+    expect(textarea.value).toBe('第一行\n第二行\n第三行')
+    expect(services.sessionUi.get('session-a', 'input-history-index', -1)).toBe(-1)
+  })
+
+  it('没有历史记录时不拦截方向键', () => {
+    const { textarea } = renderInput()
+    fireEvent.input(textarea, { target: { value: '当前草稿' } })
+
+    expect(fireEvent.keyDown(textarea, { key: 'ArrowUp' })).toBe(true)
+    expect(fireEvent.keyDown(textarea, { key: 'ArrowDown' })).toBe(true)
     expect(textarea.value).toBe('当前草稿')
   })
 })

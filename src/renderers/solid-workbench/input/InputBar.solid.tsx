@@ -259,6 +259,13 @@ export function SolidInputBar(props: SolidInputBarProps) {
     setDraft(next < 0 ? historyDraft : entries[entries.length - 1 - next] ?? '')
   }
 
+  const canBrowseHistory = (direction: 'up' | 'down') => {
+    if (history().length === 0 || !textarea || textarea.selectionStart !== textarea.selectionEnd) return false
+    return direction === 'up'
+      ? !textarea.value.slice(0, textarea.selectionStart).includes('\n')
+      : !textarea.value.slice(textarea.selectionEnd).includes('\n')
+  }
+
   const onKeyDown = (event: KeyboardEvent) => {
     if (event.key === 'Escape' && runtime().generating) {
       event.preventDefault()
@@ -271,7 +278,22 @@ export function SolidInputBar(props: SolidInputBarProps) {
       return
     }
     if (suggestionList().length > 0) {
-      if (event.key === 'Tab' || event.key === 'ArrowDown') {
+      if (event.key === 'Enter' && !event.shiftKey && !composing) {
+        const suggestion = suggestionList()[commandIndex()]
+        const parsed = parseSlashCommand(draft())
+        if (suggestion && parsed?.name.toLowerCase() !== suggestion.cmd.toLowerCase()) {
+          event.preventDefault()
+          applySuggestion(suggestion)
+          return
+        }
+      }
+      if (event.key === 'Tab') {
+        event.preventDefault()
+        const suggestion = suggestionList()[commandIndex()]
+        if (suggestion) applySuggestion(suggestion)
+        return
+      }
+      if (event.key === 'ArrowDown') {
         event.preventDefault()
         setCommandIndex(index => (index + 1) % suggestionList().length)
         return
@@ -283,8 +305,10 @@ export function SolidInputBar(props: SolidInputBarProps) {
       }
     }
     if (event.key === 'ArrowUp' || event.key === 'ArrowDown') {
+      const direction = event.key === 'ArrowUp' ? 'up' : 'down'
+      if (!canBrowseHistory(direction)) return
       event.preventDefault()
-      browseHistory(event.key === 'ArrowUp' ? 'up' : 'down')
+      browseHistory(direction)
       return
     }
     if (event.key === 'Escape' && historyIndex() >= 0) {
@@ -300,7 +324,8 @@ export function SolidInputBar(props: SolidInputBarProps) {
   }
 
   const applySuggestion = (suggestion: CommandSuggestion) => {
-    setDraft(`${suggestion.cmd}${suggestion.args} `)
+    const args = suggestion.args.trim()
+    setDraft(`${suggestion.cmd}${args ? ` ${args}` : ''} `)
     setCommandIndex(0)
     textarea?.focus()
   }
