@@ -566,3 +566,65 @@
 .set-toggle::after { content: ''; position: absolute; top: 2px; left: 2px; width: 12px; height: 12px; border-radius: 50%; background: var(--text-dim); transition: transform 140ms ease, background 140ms ease; }
 .set-toggle.on { background: color-mix(in srgb, var(--accent) 30%, transparent); border-color: var(--accent); }
 .set-toggle.on::after { transform: translateX(15px); background: var(--accent); }
+
+/* ── K-1：Owner 头（施工书 09 §K-1，设计书 07 §4.2）── */
+.settings-section-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-3, 12px);
+  padding: 8px 10px;
+  margin-bottom: 8px;
+  border: 1px solid var(--ui-border, rgba(128, 128, 128, 0.25));
+  border-radius: var(--ui-radius-md, 8px);
+  background: color-mix(in srgb, var(--bg-panel, transparent) 60%, transparent);
+}
+
+.settings-owner-badge {
+  display: inline-flex;
+  align-items: baseline;
+  gap: 6px;
+  min-width: 0;
+}
+
+.settings-owner-diamond {
+  color: var(--accent, #6ea8fe);
+}
+
+.settings-owner-badge strong {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--text, inherit);
+}
+
+.settings-owner-id {
+  font-style: normal;
+  font-size: 11px;
+  color: var(--text-dim, var(--text-secondary, #888));
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.settings-owner-page {
+  padding: 0 6px;
+  border-radius: var(--ui-radius-sm, 4px);
+  border: 1px dashed var(--ui-border, rgba(128, 128, 128, 0.35));
+}
+
+.settings-density-label {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  flex-shrink: 0;
+  font-size: 11px;
+  color: var(--text-dim, var(--text-secondary, #888));
+}
+
+.settings-density-select {
+  width: auto;
+  min-width: 72px;
+  height: auto;
+  padding: 2px 6px;
+  font-size: 12px;
+}

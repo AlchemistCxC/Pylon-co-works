@@ -31,6 +31,8 @@ import PresentationProfilePicker from './settings/PresentationProfilePicker'
 import RendererSettingsPanel from './settings/RendererSettingsPanel'
 import PluginSettingsPageHost from './settings/PluginSettingsPageHost'
 import InterfaceModePicker from './settings/InterfaceModePicker.tsx'
+import SettingsSectionHeader from './settings/SettingsSectionHeader.tsx'
+import { readDensity, writeDensity, type SettingsDensity } from './settings/settingsChromeState.ts'
 import { getPluginServiceRegistry, getPluginSettingsPageRegistry } from '../plugin-runtime/runtimeServices.ts'
 // I13-W1：Settings 一级信息架构唯一真值（domain → section + 字段归属派生）
 import { SETTINGS_DOMAIN_BY_ID, SETTINGS_DOMAINS, SETTINGS_SECTION_LABELS, sectionZone, type SettingsDomainId, type SettingsSectionId } from '../settingsDomains'
@@ -257,6 +259,14 @@ export default function Settings({ onClose, activeSessionId, initialDomain, init
   }
 
   const activeDomainConfig = SETTINGS_DOMAIN_BY_ID[activeDomain]
+
+  // K-1：密度档 chrome 态（localStorage 持久化；拍板 D3-A 全局一档）
+  const [density, setDensity] = useState<SettingsDensity>(() =>
+    readDensity(key => window.localStorage.getItem(key)))
+  const changeDensity = (d: SettingsDensity) => {
+    setDensity(d)
+    writeDensity(d, (key, v) => window.localStorage.setItem(key, v))
+  }
 
   // I13-W1：section → 内容（复用既有块/组件，视觉 token 与字段行为不变）
   const renderSection = (section: SettingsSectionId) => {
@@ -500,6 +510,9 @@ export default function Settings({ onClose, activeSessionId, initialDomain, init
         </div>
 
         <div className="settings-body">
+          {!activePluginPageId && (
+            <SettingsSectionHeader section={activeSection} density={density} onDensity={changeDensity} />
+          )}
           {!activePluginPageId && (previewZone || activeSection === 'renderers') && (
             <div className="set-toolbar">
               <div className="set-search-wrap">
