@@ -22,7 +22,7 @@ import { resolveToolIndicatorAsset } from './toolIndicatorAssets'
 import { isPlainTextContent } from './markdownFastPath'
 import { useMessageLocation } from './useMessageLocation'
 import { MarkdownRenderer } from './markdownLazy'
-import PylonMark from '../PylonMark'
+import AgentEmptyState from './AgentEmptyState.tsx'
 import { MessageRenderBoundary } from './MessageRenderBoundary'
 import { createMockMessages } from './chatMockData'
 import { messageStorageKey, parseMessageSnapshot } from './messagePersistence'
@@ -59,6 +59,8 @@ interface Props {
   workspaceMode?: 'work' | 'chat'
   agentId?: string
   onSelectSession: (id: string) => void
+  sidebarCollapsed?: boolean
+  onExpandSidebar?: () => void
 }
 
 type Message = PipelineMessage
@@ -96,7 +98,7 @@ function resolveInitialBrowserMessages(): Message[] {
   return createMockMessages()
 }
 
-const ChatView = React.memo(function ChatView({ sessionId, workspaceKind = 'agent', workspaceMode, agentId, onSelectSession }: Props) {
+const ChatView = React.memo(function ChatView({ sessionId, workspaceKind = 'agent', workspaceMode, agentId, onSelectSession, sidebarCollapsed, onExpandSidebar }: Props) {
   recordRender('ChatView.render')
   const reduceMotion = useReducedMotion()
   const sessions = useIdentityStore(state => state.sessions)
@@ -180,13 +182,11 @@ const ChatView = React.memo(function ChatView({ sessionId, workspaceKind = 'agen
   }) : undefined, [workspaceKind, workspaceMode, agentId, sessionOwner, sessionId])
 
   // 无会话（含切换 Profile 未指定会话）→ 品牌空态；有会话才渲染消息
-  if (!sessionId) return (
-    <div className="chat-empty">
-      <PylonMark size={48} title="Pylon" />
-      <div className="empty-title">Pylon</div>
-      <div className="empty-sub">选择一个会话开始</div>
-    </div>
-  )
+  if (!sessionId) return <AgentEmptyState
+    workspaceMode={workspaceMode ?? 'work'}
+    sidebarCollapsed={sidebarCollapsed}
+    onExpandSidebar={onExpandSidebar}
+  />
 
   return (
     <div className="chat-view" ref={chatViewRef} data-message-renderer={messageRendererIds.join(',')} data-pylon-component="message-list">

@@ -6,6 +6,7 @@ import { useIdentityStore } from '../../identityStore.ts'
 import { useRuntimeStore } from '../../runtimeStore.ts'
 import { selectAgentStatus } from '../../components/settings/agentTypes.ts'
 import type { SheetContext, SheetRecord } from '../../workspace-sheets/sheetTypes.ts'
+import { useWorkspaceStore } from '../../workspaceStore.ts'
 
 interface ModernAgentWorkbenchProps {
   sheet: SheetRecord
@@ -35,7 +36,15 @@ export default function ModernAgentWorkbench({ sheet, ctx, workspaceMode, showPe
       </header>
       <div className={`main-body modern-workbench-body ${ctx.ccEditMode ? 'blur-bg' : ''}`} style={{ '--right-panel-inset': '0px' } as React.CSSProperties}>
         <div className="modern-conversation-canvas">
-          <ChatView sessionId={ctx.activeSession} workspaceKind="agent" workspaceMode={workspaceMode} agentId={sheet.agentId} onSelectSession={ctx.selectSession} />
+          <ChatView
+            sessionId={ctx.activeSession}
+            workspaceKind="agent"
+            workspaceMode={workspaceMode}
+            agentId={sheet.agentId}
+            onSelectSession={ctx.selectSession}
+            sidebarCollapsed={ctx.sidebarCollapsed}
+            onExpandSidebar={() => useWorkspaceStore.getState().setSidebarCollapsed(false)}
+          />
         </div>
         {ctx.activeSession !== null && (
           <>

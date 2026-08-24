@@ -40,6 +40,7 @@ import { canExecuteRendererSemanticCommand, executeRendererSemanticCommand } fro
 import { normalizeWorkbenchMountInput } from './workbenchContracts.ts'
 import { messageMatchesQuery, searchValuesMatchQuery } from '../../components/chat/messageSearchIndex.ts'
 import { createSessionUiSignal } from './adapters/sessionUiSignal.solid.tsx'
+import { selectAgentEmptyState } from '../../domains/workbench/agentEmptyState.ts'
 
 export interface SolidWorkbenchAppProps {
   context: SolidWorkbenchContextValue
@@ -133,7 +134,10 @@ function WorkbenchContent(props: SolidWorkbenchAppProps) {
       </Show>
       <Show
         when={props.context.input().sessionId}
-        fallback={<WorkbenchEmptyState status={snapshot().status} />}
+        fallback={<WorkbenchEmptyState
+          status={snapshot().status}
+          workspaceMode={props.context.input().workspaceMode ?? 'work'}
+        />}
       >
         <div class="chat-view solid-workbench-chat">
           <div class="term">
@@ -540,11 +544,25 @@ function toSolidMessage(message: WorkbenchDocument['messages'][number]): Message
   } as Message & { semanticParts: readonly ContentPart[] }
 }
 
-function WorkbenchEmptyState(props: { status: string }) {
+function WorkbenchEmptyState(props: { status: string; workspaceMode: 'work' | 'chat' }) {
+  const model = () => selectAgentEmptyState(props.workspaceMode)
   return (
-    <div class="solid-workbench-empty" data-status={props.status}>
-      <strong>Pylon</strong>
-      <span>{props.status === 'loading' ? '正在加载会话…' : '选择或创建一个 Session'}</span>
+    <div class="solid-workbench-empty agent-empty-state" data-status={props.status} data-workspace-mode={props.workspaceMode} role="region" aria-label="Agent 工作台空态">
+      <div class="agent-empty-brand" aria-hidden="true">
+        <svg class="pylon-mark" width="52" height="52" viewBox="0 0 64 64">
+          <path class="pylon-mark-frame" d="M32 7 53 19v26L32 57 11 45V19Z" />
+          <circle class="pylon-mark-node" cx="32" cy="21.215" r="4" />
+          <circle class="pylon-mark-node" cx="20" cy="42" r="4" />
+          <circle class="pylon-mark-node" cx="44" cy="42" r="4" />
+          <path class="pylon-mark-links" d="m30 24.679-8 13.857m20 0-8-13.857M24 42h16" />
+        </svg>
+      </div>
+      <div class="agent-empty-eyebrow">{model().eyebrow}</div>
+      <h2 class="agent-empty-title">{model().title}</h2>
+      <p class="agent-empty-description">{model().description}</p>
+      <ol class="agent-empty-steps" aria-label="开始步骤">
+        {model().steps.map((step, index) => <li><span aria-hidden="true">{index + 1}</span>{step}</li>)}
+      </ol>
     </div>
   )
 }

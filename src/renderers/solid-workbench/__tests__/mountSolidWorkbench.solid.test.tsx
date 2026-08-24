@@ -125,8 +125,14 @@ describe('mountSolidWorkbench', () => {
     expect(host.querySelector('.control-center')).toBeNull()
     expect(host.firstElementChild?.getAttribute('style')).toContain('--right-panel-inset: 80px')
 
-    lifecycle.update({ sheetId: 'sheet-a', sessionId: null, preview: true })
-    await waitFor(() => expect(screen.getByText('选择或创建一个 Session')).toBeTruthy())
+    lifecycle.update({
+      sheetId: 'sheet-a', sessionId: null, preview: true, workspaceMode: 'work',
+    })
+    const emptyState = await screen.findByRole('region', { name: 'Agent 工作台空态' })
+    expect(emptyState).toHaveTextContent('准备开始')
+    expect(emptyState).toHaveTextContent('选择或创建工作区')
+    expect(emptyState).toHaveTextContent('创建或选择会话')
+    expect(host.querySelector('.control-center')).toBeNull()
     expect(host.firstElementChild).toBe(root)
   })
 

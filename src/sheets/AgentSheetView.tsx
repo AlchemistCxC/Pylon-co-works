@@ -111,6 +111,8 @@ export default function AgentSheetView({ sheet, ctx }: { sheet: SheetRecord; ctx
           workspaceMode={workspaceMode}
           agentId={sheet.agentId}
           onSelectSession={ctx.selectSession}
+          sidebarCollapsed={ctx.sidebarCollapsed}
+          onExpandSidebar={() => useWorkspaceStore.getState().setSidebarCollapsed(false)}
         />
         {/* 无会话（品牌空态）时不显示中控与宠物 */}
         {ctx.activeSession !== null && (
