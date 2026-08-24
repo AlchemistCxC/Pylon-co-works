@@ -35,6 +35,10 @@ export interface WorkbenchMountInput {
   readonly visibility: 'active' | 'background'
   readonly rightInset: number
   readonly preview: boolean
+  readonly presentationProfileId?: string
+  readonly sessionLabel?: string
+  readonly workspaceLabel?: string
+  readonly workspacePath?: string
 }
 
 export interface RendererPrepareContext {
@@ -73,6 +77,10 @@ export interface SolidWorkbenchInput {
   sessionOwnerKey?: string | null
   workspaceMode?: 'work' | 'chat'
   visibility?: 'active' | 'background'
+  presentationProfileId?: string
+  sessionLabel?: string
+  workspaceLabel?: string
+  workspacePath?: string
 }
 
 export function normalizeWorkbenchMountInput(input: SolidWorkbenchInput): WorkbenchMountInput {
@@ -86,6 +94,10 @@ export function normalizeWorkbenchMountInput(input: SolidWorkbenchInput): Workbe
     visibility: input.visibility ?? 'active',
     rightInset: Math.max(0, input.rightInset ?? 0),
     preview: input.preview === true,
+    ...(input.presentationProfileId ? { presentationProfileId: input.presentationProfileId } : {}),
+    ...(input.sessionLabel ? { sessionLabel: input.sessionLabel } : {}),
+    ...(input.workspaceLabel ? { workspaceLabel: input.workspaceLabel } : {}),
+    ...(input.workspacePath ? { workspacePath: input.workspacePath } : {}),
   })
 }
 

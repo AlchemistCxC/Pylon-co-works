@@ -34,14 +34,10 @@ describe('Solid 工作台壳层样式契约', () => {
     expect(block).toContain('min-height:0')
   })
 
-  it('中控槽位复用 control-center 几何：底部停靠、不参与消息流伸缩、右内边距联动', () => {
+  it('生产中控槽位复用 control-center 几何：底部停靠且不参与消息流伸缩', () => {
     const cc = extractBlock(chromeCss, '.solid-workbench-control-center-slot')
     expect(cc, '中控槽缺 margin-top:auto 底部停靠').toContain('margin-top:auto')
     expect(cc, '中控槽缺 flex-shrink:0（会被消息流挤压）').toContain('flex-shrink:0')
-    // widget-strip 横排
-    const strip = extractBlock(chromeCss, '.solid-workbench-widget-strip')
-    expect(strip).toContain('display:flex')
-    expect(strip).toContain('align-items:center')
   })
 
   it('pet 占位与裸 surface 区块在过渡态受控（pet 隐藏假 UI；document surface 有最小间距体系）', () => {

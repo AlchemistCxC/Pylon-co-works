@@ -20,6 +20,6 @@ assert.match(statusRow, /font-size:\s*max\(/)
 // C2：可见性规则收敛到 domains/cc/widgetDefinitions.ts 的 isWidgetVisible 单一谓词
 const widgetDefs = readFileSync(new URL('../src/domains/cc/widgetDefinitions.ts', import.meta.url), 'utf8')
 assert.equal(widgetDefs.includes("ccStyle === 'numeric' && id === 'ekg' && !ctx.hidden.includes('pct')"), true, 'numeric 模式不得同时显示两份百分比')
-assert.equal(source.includes('isWidgetVisible(id, { hidden, inputMode, submitButtonMode, ccStyle, editMode })'), true, 'renderWidget 必须消费单一可见性谓词')
+assert.equal(source.includes('isWidgetVisible(id, { hidden, inputMode, submitButtonMode, ccStyle, editMode, presentationProfileId })'), true, 'renderWidget 必须消费单一可见性谓词及 Profile 约束')
 
 console.log('controlCenterPeriStyle 回归测试通过')

@@ -11,7 +11,7 @@ import {
   updateCcPlacementState,
 } from '../src/ccLayoutState.ts'
 
-assert.equal(CC_LAYOUT_SCHEMA_VERSION, 6)
+assert.equal(CC_LAYOUT_SCHEMA_VERSION, 7)
 
 const migrated = normalizeCcLayout(undefined)
 assert.deepEqual(migrated.placements.input, DEFAULT_CC_LAYOUT.placements.input)

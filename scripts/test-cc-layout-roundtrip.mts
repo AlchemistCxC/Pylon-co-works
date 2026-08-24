@@ -20,7 +20,7 @@ const presets = source('../src/themeFieldDefs.ts')
 // Missing persisted layout falls back to the current placement schema.
 const legacy = normalizeCcLayout(undefined)
 assert.equal(legacy.version, CC_LAYOUT_SCHEMA_VERSION)
-assert.equal(legacy.version, 6)
+assert.equal(legacy.version, 7)
 assert.deepEqual(legacy.placements, DEFAULT_CC_LAYOUT.placements)
 assert.equal('x' in (legacy.placements.input as object), false)
 assert.equal('y' in (legacy.placements.input as object), false)

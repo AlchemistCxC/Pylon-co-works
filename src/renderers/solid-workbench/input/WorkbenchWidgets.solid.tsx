@@ -109,7 +109,7 @@ export function SolidModeWidget() {
   )
 }
 
-export function SolidSendWidget() {
+export function SolidSendWidget(props: { disabled?: boolean } = {}) {
   const workbench = useSolidWorkbench()
   const appearance = () => workbench.appearanceSnapshot()
   const runtime = () => workbench.runtimeSnapshot()
@@ -125,6 +125,7 @@ export function SolidSendWidget() {
   return (
     <button
       type="button"
+      disabled={props.disabled}
       class={className()}
       style={{ 'font-size': `${scale()}%` }}
       title={runtime().generating ? '停止生成' : 'Send (Enter)'}
@@ -134,7 +135,7 @@ export function SolidSendWidget() {
   )
 }
 
-export function SolidAttachWidget() {
+export function SolidAttachWidget(props: { disabled?: boolean } = {}) {
   const workbench = useSolidWorkbench()
   const appearance = () => workbench.appearanceSnapshot()
   const runtime = () => workbench.runtimeSnapshot()
@@ -152,7 +153,7 @@ export function SolidAttachWidget() {
       type="button"
       class={className()}
       style={{ 'font-size': `${scale()}%` }}
-      disabled={!runtime().canAttach}
+      disabled={props.disabled || !runtime().canAttach}
       title={title()}
       aria-label={runtime().promptImage ? '添加附件' : '附件（当前 Agent 不支持图片）'}
       onClick={() => window.dispatchEvent(new CustomEvent('pylon:solid-input-attach'))}

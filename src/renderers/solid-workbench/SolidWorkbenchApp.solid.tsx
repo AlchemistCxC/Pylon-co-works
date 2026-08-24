@@ -13,8 +13,7 @@ import { PlainMessageList } from './chat/PlainMessageList.solid.tsx'
 import { SolidToolCard } from './chat/ToolCard.solid.tsx'
 import { SolidToolConnector } from './chat/ToolConnector.solid.tsx'
 import { SolidGenerationFooter } from './chat/GenerationFooter.solid.tsx'
-import { SolidInputBar } from './input/InputBar.solid.tsx'
-import { SolidAttachWidget, SolidModeWidget, SolidModelWidget, SolidSendWidget } from './input/WorkbenchWidgets.solid.tsx'
+import { SolidControlCenter } from './input/ControlCenter.solid.tsx'
 import { SolidWorkbenchContext, type SolidWorkbenchContextValue } from './SolidWorkbenchContext.solid.tsx'
 import { SolidRendererSlotHost } from './chat/RendererSlotHost.solid.tsx'
 import { MarkdownContent } from './chat/MarkdownContent.solid.tsx'
@@ -96,7 +95,7 @@ function WorkbenchContent(props: SolidWorkbenchAppProps) {
       data-session-id={props.context.input().sessionId ?? undefined}
       data-workspace-mode={props.context.input().workspaceMode}
       data-status={snapshot().status}
-      style={{ '--right-inset': `${Math.max(0, props.context.input().rightInset ?? 0)}px` }}
+      style={{ '--right-panel-inset': `${Math.max(0, props.context.input().rightInset ?? 0)}px` }}
       aria-label="Solid Agent Workbench"
     >
       <Show when={snapshot().status === 'error'}>
@@ -162,18 +161,7 @@ function WorkbenchContent(props: SolidWorkbenchAppProps) {
           <div class="solid-workbench-pet-slot pet-companion" data-fixture="pending">Pet fixture slot</div>
         </Show>
         <Show when={!props.context.input().replayReadonly}>
-          <div class="solid-workbench-control-center-slot control-center" data-fixture="widgets">
-            <div class="solid-workbench-widget-strip">
-              <SolidModelWidget />
-              <SolidModeWidget />
-              <SolidAttachWidget />
-              <SolidSendWidget />
-            </div>
-            <SolidInputBar
-              externalSend={appearance().inputSubmitButtonMode === 'external'}
-              externalAttach={appearance().inputSubmitButtonMode === 'external'}
-            />
-          </div>
+          <SolidControlCenter />
         </Show>
         <Show when={props.context.input().replayReadonly}>
           <div class="solid-workbench-replay-overlay" role="status">历史回放 · 只读</div>

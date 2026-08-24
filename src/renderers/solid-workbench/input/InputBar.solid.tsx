@@ -20,6 +20,7 @@ export interface QueuedWorkbenchMessage {
 export interface SolidInputBarProps {
   externalSend?: boolean
   externalAttach?: boolean
+  disabled?: boolean
 }
 
 export function SolidInputBar(props: SolidInputBarProps) {
@@ -122,6 +123,7 @@ export function SolidInputBar(props: SolidInputBarProps) {
   }
 
   const sendText = async (text: string): Promise<boolean> => {
+    if (props.disabled) return false
     const id = sessionId()
     const normalized = text.trim()
     if (!id || !normalized) return false
@@ -158,6 +160,7 @@ export function SolidInputBar(props: SolidInputBarProps) {
   }
 
   const send = async () => {
+    if (props.disabled) return
     if (runtime().generating) {
       enqueue(draft())
       return
@@ -166,6 +169,7 @@ export function SolidInputBar(props: SolidInputBarProps) {
   }
 
   const cancel = async () => {
+    if (props.disabled) return
     const id = sessionId()
     if (!id) return
     const result = await workbench.commands.cancel(id)
@@ -173,6 +177,7 @@ export function SolidInputBar(props: SolidInputBarProps) {
   }
 
   const attach = async () => {
+    if (props.disabled) return
     const id = sessionId()
     if (!id) return
     try {
@@ -325,7 +330,7 @@ export function SolidInputBar(props: SolidInputBarProps) {
       <div class="input-row">
         <Show when={inputVariant() === 'cli'}><span class="cli-prefix">❯</span></Show>
         <Show when={inputVariant() !== 'cli' && !props.externalAttach}>
-          <button type="button" class="input-btn attach" onClick={() => void attach()} aria-label="添加附件">＋</button>
+          <button type="button" class="input-btn attach" disabled={props.disabled} onClick={() => void attach()} aria-label="添加附件">＋</button>
         </Show>
         <textarea
           ref={textarea}
@@ -341,10 +346,12 @@ export function SolidInputBar(props: SolidInputBarProps) {
           onCompositionEnd={() => { composing = false }}
           placeholder={placeholder()}
           rows={1}
+          disabled={props.disabled}
         />
         <Show when={inputVariant() !== 'cli' && inlineSubmit()}>
           <button
             type="button"
+            disabled={props.disabled}
             class={`input-btn ${runtime().generating ? 'stop' : 'send'}`}
             onClick={() => void (runtime().generating ? cancel() : send())}
             aria-label={runtime().generating ? '停止生成' : '发送消息'}

@@ -78,7 +78,7 @@ export const FIRST_PARTY_STYLE_OWNERSHIP: readonly FirstPartyStyleOwnershipEntry
   entry('src/plugins/product/packages/builtin.pylon-renderers/styles/components/chat/StatusBar.css', 'builtin.pylon-renderers', 'plugin-scope', [RENDERER_STYLE_ASSETS]),
   entry('src/plugins/product/packages/builtin.pylon-renderers/styles/components/ControlCenter.css', 'builtin.pylon-renderers', 'plugin-scope', [RENDERER_STYLE_ASSETS]),
   entry('src/plugins/product/packages/builtin.pylon-renderers/styles/components/PetCompanion.css', 'builtin.pylon-renderers', 'plugin-scope', [RENDERER_STYLE_ASSETS]),
-  entry('src/plugins/product/packages/builtin.pylon-renderers/styles/components/solid-workbench/WorkbenchChrome.css', 'builtin.pylon-renderers', 'plugin-scope', [RENDERER_STYLE_ASSETS], 'Solid 工作台壳层（过渡态）：suite 挂载几何 + 中控槽位'),
+  entry('src/plugins/product/packages/builtin.pylon-renderers/styles/components/solid-workbench/WorkbenchChrome.css', 'builtin.pylon-renderers', 'plugin-scope', [RENDERER_STYLE_ASSETS], 'Solid 工作台壳层：suite 挂载几何 + 生产中控槽位'),
 
   entry('src/renderers/solid-workbench/smoke/solidWorkbenchSmoke.css', 'solid-smoke', 'smoke-only', [
     'src/renderers/solid-workbench/smoke/browserSmoke.solid.tsx',

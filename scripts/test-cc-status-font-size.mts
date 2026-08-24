@@ -56,6 +56,6 @@ assert.match(css, /\.cc-status-row\s*\{[\s\S]*?font-size:\s*max\(14px,\s*var\(--
 // I13-W1：TAB_ZONE_MAP 随 tier 导航退役，section→zone 归属收敛到 settingsDomains 单一真值）
 const settingsDomains = read('../src/settingsDomains.ts')
 assert.match(settingsDomains, /cc:\s*'cc'/)
-assert.match(customPresets, /\bccStatusFontSize:\s*\{\s*\.\.\.N\('cc', '信息字号', 14, 20\)/)
+assert.match(customPresets, /\bccStatusFontSize:\s*\{\s*\.\.\.N\('cc', '状态信息字号', 14, 20\)[\s\S]*?unit: 'px'/)
 
 console.log('ccStatusFontSize 闭环契约测试通过')

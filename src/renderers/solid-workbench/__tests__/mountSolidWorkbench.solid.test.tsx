@@ -15,6 +15,7 @@ import { BUILTIN_TOOL_RENDER_KINDS } from '../../../domains/rendererContent/tool
 import { BUILTIN_EXECUTION_RENDER_KINDS } from '../../../domains/rendererContent/executionRenderKindCatalog.ts'
 import { BUILTIN_INTERACTION_RENDER_KINDS } from '../../../domains/rendererContent/interactionRenderKindCatalog.ts'
 import { createBuiltinSolidContentSlot } from '../builtinSolidRendererSuite.ts'
+import { DEFAULTS } from '../../../domains/theme/themeDefaults.ts'
 
 const hosts: HTMLElement[] = []
 const servicesList: ReturnType<typeof createPreviewWorkbenchServices>[] = []
@@ -64,7 +65,7 @@ describe('mountSolidWorkbench', () => {
     expect(screen.getByText('Read')).toBeTruthy()
     expect(host.querySelector('.task-tree')).toBeTruthy()
     expect(host.querySelector('.term-spinner')).toBeTruthy()
-    expect(host.querySelector('.control-center')?.getAttribute('data-fixture')).toBe('widgets')
+    expect(host.querySelector('.control-center')?.getAttribute('data-control-center')).toBe('production')
     expect(host.querySelector('.pet-companion')?.getAttribute('data-fixture')).toBe('pending')
     await waitFor(() => expect(host.querySelectorAll('.plain-message-list__row').length).toBeGreaterThan(0))
   })
@@ -84,7 +85,7 @@ describe('mountSolidWorkbench', () => {
     await waitFor(() => expect(screen.getByText('历史回放 · 只读')).toBeTruthy())
     expect(host.firstElementChild).toBe(root)
     expect(host.querySelector('.control-center')).toBeNull()
-    expect(host.firstElementChild?.getAttribute('style')).toContain('80px')
+    expect(host.firstElementChild?.getAttribute('style')).toContain('--right-panel-inset: 80px')
 
     lifecycle.update({ sheetId: 'sheet-a', sessionId: null, preview: true })
     await waitFor(() => expect(screen.getByText('选择或创建一个 Session')).toBeTruthy())
@@ -112,6 +113,39 @@ describe('mountSolidWorkbench', () => {
     lifecycle.destroy()
     lifecycle.destroy()
     expect(host.childElementCount).toBe(0)
+  })
+
+  it('生产中控消费提交模式、隐藏项与布局槽位权威', async () => {
+    const { host, services, lifecycle } = mountPreview()
+    const theme = structuredClone(DEFAULTS)
+    theme.inputMode = 'default'
+    theme.inputVariant = 'composer'
+    theme.inputSubmitButtonMode = 'inline'
+    services.appearance.setTheme(theme)
+
+    await waitFor(() => expect(screen.getByRole('button', { name: '停止生成' })).toBeTruthy())
+    expect(host.querySelector('.cc-send-icon, .cc-send-square, .cc-send-minimal')).toBeNull()
+    expect(host.querySelector('.cc-attach-icon, .cc-attach-square, .cc-attach-minimal')).toBeNull()
+    expect(screen.getAllByRole('button', { name: '停止生成' })).toHaveLength(1)
+
+    theme.inputSubmitButtonMode = 'external'
+    theme.ccHidden = ['attach']
+    theme.ccLayout.placements.send = { slot: 'actions', order: 0, offsetX: 0, offsetY: 0 }
+    theme.ccLayout.placements.model = { slot: 'actions', order: 1, offsetX: 0, offsetY: 0 }
+    services.appearance.setTheme(theme)
+
+    await waitFor(() => expect(host.querySelector('.cc-actions [data-widget-id="send"]')).toBeTruthy())
+    expect(host.querySelector('[data-widget-id="attach"]')).toBeNull()
+    expect(Array.from(host.querySelectorAll('.cc-actions [data-widget-id]')).map(node => node.getAttribute('data-widget-id')))
+      .toEqual(['send', 'model'])
+
+    lifecycle.update({
+      sheetId: 'sheet-a', sessionId: 'preview-session', preview: true,
+      presentationProfileId: 'builtin.presentation.terminal-classic',
+    })
+    await waitFor(() => expect(host.querySelector('[data-widget-id="session"]')).toBeNull())
+    expect(host.querySelector('[data-widget-id="workspace"]')).toBeNull()
+    expect(host.querySelector('[data-widget-id="activity"]')).toBeNull()
   })
 
   it('exposes ready lifecycle event and removes listeners on destroy', () => {
@@ -256,6 +290,7 @@ describe('mountSolidWorkbench', () => {
     expect(screen.getByLabelText('输入预测')).toHaveTextContent('继续审计')
     expect(screen.getByLabelText('文件建议')).toHaveTextContent('src/a.ts')
     await waitFor(() => expect(host.textContent).toContain('↓ 8 tokens'))
+    expect(host.querySelector('[data-widget-id="tokens"]')).toHaveTextContent('8/—')
     expect(screen.getByText('canonical warning')).toBeTruthy()
   })
 

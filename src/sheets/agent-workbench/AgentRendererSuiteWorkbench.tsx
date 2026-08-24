@@ -17,6 +17,7 @@ import type { ImageContentPart } from '../../domains/workbench/content/contentPa
 import { useWorkspaceStore } from '../../workspaceStore.ts'
 import { toCanonicalOwnerKey } from '../../domains/events/eventSchema.ts'
 import { resolveRendererSuiteFallback } from '../../host/renderer-suite/rendererSuiteFallbackPolicy.ts'
+import { useWorkspaceEntityStore } from '../../workspaceEntityStore.ts'
 
 export interface AgentRendererSuiteWorkbenchProps {
   sheet: SheetRecord
@@ -31,14 +32,23 @@ const ownerKey = (session: Session | undefined) => session
   ? toCanonicalOwnerKey({ profileId: session.profileId, agentId: session.agentId, localSessionId: session.source })
   : null
 
+const workspaceLabel = (workdir: string | undefined) => workdir
+  ?.replace(/[\\/]+$/, '')
+  .split(/[\\/]/)
+  .filter(Boolean)
+  .pop()
+
 export default function AgentRendererSuiteWorkbench(props: AgentRendererSuiteWorkbenchProps) {
   const containerRef = useRef<HTMLDivElement>(null)
   const sessionRuntimeRef = useRef<ReturnType<typeof createAgentWorkbenchSessionRuntime> | null>(null)
   if (!sessionRuntimeRef.current) sessionRuntimeRef.current = createAgentWorkbenchSessionRuntime()
   const sessionRuntime = sessionRuntimeRef.current
   const sessions = useIdentityStore(state => state.sessions)
+  const workspaces = useWorkspaceEntityStore(state => state.workspaces)
   const isActiveSheet = useWorkspaceStore(state => state.workspaceSheets.activeSheetId === props.sheet.id)
   const session = sessions.find(item => item.id === props.ctx.activeSession)
+  const workspace = session?.workspaceId ? workspaces.find(item => item.id === session.workspaceId) : undefined
+  const activeProfileId = usePresentationPreferenceStore(state => state.activeProfileId)
   const selectedSuiteId = usePresentationPreferenceStore(state => state.rendererSuiteIdByMode[props.modeId])
   const registry = getRendererRegistry()
   const rendererSettings = getRendererSettingsStore()
@@ -50,7 +60,11 @@ export default function AgentRendererSuiteWorkbench(props: AgentRendererSuiteWor
     workspaceMode: props.workspaceMode, replayReadonly: props.isReplay,
     reducedMotion: window.matchMedia?.('(prefers-reduced-motion: reduce)').matches ?? false,
     visibility: isActiveSheet ? 'active' : 'background', rightInset: props.ctx.rightInset, preview: false,
-  }), [props.sheet.id, props.ctx.activeSession, props.ctx.rightInset, props.workspaceMode, props.isReplay, session, isActiveSheet])
+    presentationProfileId: activeProfileId,
+    sessionLabel: session?.name,
+    workspaceLabel: workspace?.name ?? workspaceLabel(session?.workdir),
+    workspacePath: workspace?.rootPath ?? session?.workdir,
+  }), [props.sheet.id, props.ctx.activeSession, props.ctx.rightInset, props.workspaceMode, props.isReplay, session, workspace, activeProfileId, isActiveSheet])
   const activation = useMemo(() => {
     try {
       return resolveRendererActivation(catalog, {
