@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 import { cleanup, render } from '@solidjs/testing-library'
 import { afterEach, describe, expect, it } from 'vitest'
-import { SolidLifecycleCard } from '../LifecycleCard.solid.tsx'
+import { SolidLifecycleCard, SolidSystemErrorCard, SolidSystemNoticeCard } from '../LifecycleCard.solid.tsx'
 import type { LifecycleState } from '../../../../domains/workbench/lifecycle/lifecycleModel.ts'
 
 afterEach(() => cleanup())
@@ -90,5 +90,31 @@ describe('SolidLifecycleCard (C13)', () => {
     expect(rewind.getByRole('status', { name: '生命周期：回退完成' })).toHaveAttribute('data-phase', 'rewind')
     expect(rewind.container).toHaveTextContent('已还原 1 个文件、1 条消息')
     expect(rewind.container).toHaveTextContent('恢复到检查点')
+  })
+
+  it('renders notice and error metadata as structured fields instead of JSON blobs', () => {
+    const notice = render(() => <SolidSystemNoticeCard notice={{
+      code: 'provider.event', message: 'Provider 状态更新', eventId: 'event-1', sequence: 1, level: 'info',
+      data: { phase: 'warming', retry: 2 },
+    }} appearance={{ technicalDetailsExpanded: true }} />)
+    expect(notice.container.querySelector('.system-notice-data .tool-object-inspector')).toHaveTextContent('warming')
+    expect(notice.container.querySelector('.system-notice-data pre')).toBeNull()
+    notice.unmount()
+
+    const error = render(() => <SolidSystemErrorCard error={{
+      userSummary: '渲染失败', recoverability: 'none', metadata: { renderer: 'solid', attempts: 3 },
+    }} />)
+    expect(error.container.querySelector('.lifecycle-metadata .tool-object-inspector')).toHaveTextContent('solid')
+    expect(error.container.querySelector('.lifecycle-metadata pre')).toBeNull()
+  })
+
+  it('does not repeat notice title fields inside technical details', () => {
+    const notice = render(() => <SolidSystemNoticeCard notice={{
+      code: 'demo.warning', message: 'canonical warning', eventId: 'event-2', sequence: 2, level: 'warning',
+      data: { type: 'diagnostic.notice', code: 'demo.warning', message: 'canonical warning', level: 'warning' },
+    }} />)
+
+    expect(notice.getAllByText('canonical warning')).toHaveLength(1)
+    expect(notice.container.querySelector('.system-notice-data')).toBeNull()
   })
 })

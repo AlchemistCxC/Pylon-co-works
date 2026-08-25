@@ -32,7 +32,7 @@ import { isValidLifecycleStateInput, isValidNormalizedErrorInput, isValidSystemN
 import { SolidLifecycleCard, SolidSystemErrorCard, SolidSystemNoticeCard } from './LifecycleCard.solid.tsx'
 import { isToolInvocationSnapshotInput } from '../../../domains/rendererContent/toolRenderKindCatalog.ts'
 import type { ToolInvocationSnapshot } from '../../../domains/workbench/workbenchProjector.ts'
-import { SolidToolInvocationCard } from './ToolInvocationCard.solid.tsx'
+import { SolidToolInvocationCard, ToolContentPart } from './ToolInvocationCard.solid.tsx'
 import { SolidSearchOrLink, type SearchLinkAppearance } from './content/SearchResults.solid.tsx'
 import { diffSnapshotFromPart } from '../../../domains/workbench/diffSnapshot.ts'
 import { SolidDiffContent, SolidLspDiagnosticContent } from './content/DiffDiagnosticContent.solid.tsx'
@@ -47,6 +47,8 @@ import { SolidInteractionCard } from './content/InteractionCard.solid.tsx'
 import { SolidSessionSurfaceCard } from './content/SessionSurfaceCard.solid.tsx'
 import { BUILTIN_SESSION_RENDER_KINDS } from '../../../domains/rendererContent/sessionRenderKindCatalog.ts'
 import { SolidExtensionContentCard, type ExtensionRenderKind } from './content/ExtensionContentCard.solid.tsx'
+import { isUnknownContentPart, SolidUnknownContent } from './content/UnknownContent.solid.tsx'
+import { isStructuredContentKind, SolidStructuredContent, type StructuredContentKind } from './content/StructuredContent.solid.tsx'
 
 export function BuiltinSolidContentSlot(props: {
   snapshot: RenderNodeSnapshot
@@ -418,7 +420,16 @@ export function BuiltinSolidContentSlot(props: {
         </Show>
       </Match>
       <Match when={kind() === 'content.unknown'}>
-        <pre class="solid-content-unknown" data-content-kind={kind()}>{unknownSummary(props.snapshot.payload, kind())}</pre>
+        <Show when={isUnknownContentPart(props.snapshot.payload) ? props.snapshot.payload : undefined}
+          fallback={<pre class="solid-content-unknown" data-content-kind={kind()}>{unknownSummary(props.snapshot.payload, kind())}</pre>}>
+          {part => <SolidUnknownContent part={part()} commands={props.commands} />}
+        </Show>
+      </Match>
+      <Match when={isStructuredContentKind(kind())}>
+        <SolidStructuredContent kind={kind() as StructuredContentKind}
+          payload={props.snapshot.payload} commands={props.commands}
+          renderPart={(part, index) => <ToolContentPart part={part} appearance={props.appearance} commands={props.commands}
+            nodeId={`${props.snapshot.nodeId}:structured:${index}`} />} />
       </Match>
       </Switch>
     </div>

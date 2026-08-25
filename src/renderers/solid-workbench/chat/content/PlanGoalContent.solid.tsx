@@ -2,7 +2,9 @@ import { For, Show, createEffect, createMemo, createSignal, type JSX } from 'sol
 import type { PlanContentPayload, PlanEntryV2 } from '../../../../domains/workbench/plan/goalModel.ts'
 import { selectPlanProgress } from '../../../../domains/workbench/plan/goalModel.ts'
 import { SolidCollapsibleRegion } from '../CollapsibleRegion.solid.tsx'
+import { createCollapsiblePresenter } from '../CollapsiblePresenter.solid.tsx'
 import { SolidGoalCard } from '../GoalCard.solid.tsx'
+import { ToolObjectInspector } from '../tool/ToolObjectInspector.solid.tsx'
 
 export interface SolidPlanAppearance {
   foreground: string
@@ -46,9 +48,12 @@ export function SolidPlanGoalContent(props: SolidPlanGoalContentProps) {
   const appearance = createMemo<SolidPlanAppearance>(() => ({ ...DEFAULT_APPEARANCE, ...props.appearance }))
   const configuredExpanded = createMemo(() => appearance().defaultExpanded)
   const configuredCollapseCompleted = createMemo(() => appearance().collapseCompleted)
-  const [expanded, setExpanded] = createSignal(configuredExpanded())
+  const collapse = createCollapsiblePresenter({
+    defaultOpen: configuredExpanded,
+    resetOnDefaultChange: true,
+    idPrefix: 'solid-plan',
+  })
   const [completedVisible, setCompletedVisible] = createSignal(!configuredCollapseCompleted())
-  createEffect(() => setExpanded(configuredExpanded()))
   createEffect(() => setCompletedVisible(!configuredCollapseCompleted()))
 
   const progress = createMemo(() => selectPlanProgress(props.payload.entries))
@@ -86,14 +91,14 @@ export function SolidPlanGoalContent(props: SolidPlanGoalContentProps) {
           background={appearance().background}
         />
         <Show when={props.payload.entries.length > 0}>
-          <div class="task-tree" data-expanded={expanded()} data-count={props.payload.entries.length}>
-            <button type="button" class="task-tree-summary" onClick={() => setExpanded(value => !value)} aria-expanded={expanded()}>
+          <div class="task-tree" data-expanded={collapse.open()} data-count={props.payload.entries.length}>
+            <button type="button" class="task-tree-summary" onClick={collapse.toggle} aria-expanded={collapse.open()} aria-controls={collapse.bodyId}>
               <span class="task-tree-summary-label">{planSummary(progress())}</span>
               <span class="task-tree-summary-ratio" aria-hidden="true">{progress().completed}/{progress().total}</span>
             </button>
             <progress class="task-tree-overall-progress" aria-label="计划总体进度"
               value={progress().completed} max={Math.max(1, progress().total)} />
-            <SolidCollapsibleRegion open={expanded()}>
+            <SolidCollapsibleRegion open={collapse.open()} id={collapse.bodyId}>
               <ul class="task-tree-list" role="tree" aria-label="任务列表">
                 <For each={visibleEntries()}>{entry => <PlanTreeItem entry={entry} appearance={appearance()} />}</For>
               </ul>
@@ -143,7 +148,7 @@ function PlanTreeItem(props: { entry: PlanEntryV2; appearance: SolidPlanAppearan
         <span class="task-tree-priority">P{entry().priority}</span>
       </Show>
       <Show when={entry().metadata !== undefined}>
-        <details class="task-tree-metadata"><summary>未知字段</summary><pre>{JSON.stringify(entry().metadata, null, 2)}</pre></details>
+        <details class="task-tree-metadata"><summary>未知字段</summary><ToolObjectInspector value={entry().metadata} /></details>
       </Show>
     </li>
   )

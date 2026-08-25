@@ -36,6 +36,8 @@ import { SolidWorkflowActivityCard } from './chat/content/WorkflowCard.solid.tsx
 import { SolidInteractionCard } from './chat/content/InteractionCard.solid.tsx'
 import { SolidSessionSurfaceCard } from './chat/content/SessionSurfaceCard.solid.tsx'
 import { SolidExtensionContentCard } from './chat/content/ExtensionContentCard.solid.tsx'
+import { SolidUnknownContent } from './chat/content/UnknownContent.solid.tsx'
+import { isStructuredContentKind, SolidStructuredContent } from './chat/content/StructuredContent.solid.tsx'
 import type { RenderCommandPort } from '../../contracts/messageRenderer.ts'
 import { canExecuteRendererSemanticCommand, executeRendererSemanticCommand } from '../../host/renderer-suite/rendererSemanticCommand.ts'
 import { normalizeWorkbenchMountInput } from './workbenchContracts.ts'
@@ -1050,7 +1052,15 @@ function renderBuiltinContentPart(
       commands={fallbackRenderCommands(context)}
     />
   }
-  const summary = part.kind === 'unknown' ? part.summary : `Unsupported content kind: ${part.kind}`
+  const structuredKind = part.kind.includes('.') ? part.kind : `content.${part.kind}`
+  if (isStructuredContentKind(structuredKind)) {
+    return <SolidStructuredContent kind={structuredKind} payload={part} commands={fallbackRenderCommands(context)}
+      renderPart={nested => renderBuiltinContentPart(nested, inline, context, false)} />
+  }
+  if (part.kind === 'unknown') {
+    return <SolidUnknownContent part={part} commands={fallbackRenderCommands(context)} />
+  }
+  const summary = `Unsupported content kind: ${part.kind}`
   return <pre class="solid-content-unknown" data-content-kind={part.kind}>{summary}</pre>
 }
 

@@ -1,10 +1,11 @@
-import { Show, createEffect, createMemo, createSignal, type JSX } from 'solid-js'
+import { Show, createMemo, createSignal, type JSX } from 'solid-js'
 import type { ContentPart, ImageContentPart } from '../../../../domains/workbench/content/contentPartSchema.ts'
 import {
   isAllowedMediaPosterUrl,
   resolveMediaSource,
   type MediaSourceResolverOptions,
 } from '../../../../domains/rendererContent/mediaSourceResolver.ts'
+import { createCollapsiblePresenter } from '../CollapsiblePresenter.solid.tsx'
 
 /**
  * C03：image/audio/video 媒体卡（Solid）。
@@ -75,8 +76,11 @@ export function SolidMediaBlock(props: SolidMediaBlockProps) {
     ...props.appearance,
   }))
   const configuredDefaultExpanded = createMemo(() => appearance().defaultExpanded)
-  const [expanded, setExpanded] = createSignal(configuredDefaultExpanded())
-  createEffect(() => setExpanded(configuredDefaultExpanded()))
+  const collapse = createCollapsiblePresenter({
+    defaultOpen: configuredDefaultExpanded,
+    resetOnDefaultChange: true,
+    idPrefix: 'solid-media',
+  })
 
   const parsed = createMemo<ImageContentPart | undefined>(() => {
     const part = props.part
@@ -145,7 +149,7 @@ export function SolidMediaBlock(props: SolidMediaBlockProps) {
         data-media-kind={kind()}
         data-status={status()}
         data-fit={appearance().fit}
-        data-expanded={expanded() ? 'true' : 'false'}
+        data-expanded={collapse.open() ? 'true' : 'false'}
         data-transcript-style={appearance().transcriptStyle}
         data-reduced-motion={appearance().reducedMotion ? 'true' : 'false'}
         style={{
@@ -159,14 +163,14 @@ export function SolidMediaBlock(props: SolidMediaBlockProps) {
         <button
           class="term-media-disclosure"
           type="button"
-          aria-expanded={expanded()}
-          aria-label={`${expanded() ? '折叠' : '展开'}媒体：${altText()}`}
-          onClick={() => setExpanded(value => !value)}
+          aria-expanded={collapse.open()}
+          aria-label={`${collapse.open() ? '折叠' : '展开'}媒体：${altText()}`}
+          onClick={collapse.toggle}
         >
-          <span aria-hidden="true">{expanded() ? '▾' : '▸'}</span>
+          <span aria-hidden="true">{collapse.open() ? '▾' : '▸'}</span>
           <span>{mediaLabel()}</span>
         </button>
-        <Show when={expanded()}>
+        <Show when={collapse.open()}>
           <Show
             when={resolved().ok}
             fallback={

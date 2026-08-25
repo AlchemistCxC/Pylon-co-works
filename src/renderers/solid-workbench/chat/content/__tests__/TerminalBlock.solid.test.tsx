@@ -1,5 +1,5 @@
 // @vitest-environment jsdom
-import { render } from '@solidjs/testing-library'
+import { fireEvent, render } from '@solidjs/testing-library'
 import { createSignal } from 'solid-js'
 import { describe, expect, it, vi } from 'vitest'
 import { SolidLogBlock, SolidProcessActivity, SolidTerminalBlock } from '../TerminalBlock.solid.tsx'
@@ -191,8 +191,24 @@ describe('C07 SolidProcessActivity', () => {
     const unknown = result.container.querySelector('[data-content-kind="content.unknown"]')
 
     expect(unknown).toHaveTextContent('未知内容：terminal')
+    expect(unknown?.querySelector('.tool-object-inspector')).not.toBeNull()
+    const nested = unknown!.querySelector<HTMLDetailsElement>('.tool-object-branch .tool-object-branch')!
+    nested.open = true
+    fireEvent(nested, new Event('toggle'))
     expect(unknown).toHaveTextContent('malformed evidence')
     expect(unknown?.querySelector('details')).not.toHaveAttribute('open')
+  })
+
+  it('renders process progress as structured fields rather than serialized JSON', () => {
+    const activity = {
+      id: 'process-progress', kind: 'activity', activityKind: 'process', semanticKind: 'activity.process',
+      title: 'test worker', status: 'running', orphan: false, sequence: 1,
+      progress: { completed: 2, total: 5, phase: 'testing' },
+    } as WorkbenchActivityNode
+    const result = render(() => <SolidProcessActivity activity={activity} />)
+
+    expect(result.container.querySelector('.term-process-progress .tool-object-inspector')).toHaveTextContent('testing')
+    expect(result.container.querySelector('.term-process-progress pre')).toBeNull()
   })
 })
 

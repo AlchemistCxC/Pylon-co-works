@@ -1,9 +1,10 @@
-import { ErrorBoundary, Show, createEffect, createSignal, onCleanup, type JSX } from 'solid-js'
+import { ErrorBoundary, Show, createSignal, onCleanup, type JSX } from 'solid-js'
 import type { RenderMessage } from '../../../components/chat/messageTypes.ts'
 import { formatThoughtDuration } from '../../../domains/rendererContent/reasoningPresentation.ts'
 import type { WorkbenchAppearanceSnapshot } from '../../../domains/workbench/appearance.ts'
 import { MarkdownContent } from './MarkdownContent.solid.tsx'
 import { SolidCollapsibleRegion } from './CollapsibleRegion.solid.tsx'
+import { createCollapsiblePresenter } from './CollapsiblePresenter.solid.tsx'
 
 export interface SolidMessageRowProps {
   renderMessage: RenderMessage
@@ -151,15 +152,10 @@ export function ReasoningBlock(props: {
   reducedMotion?: boolean
 }) {
   const collapsedByDefault = () => props.defaultCollapsed !== false
-  const [open, setOpen] = createSignal(!collapsedByDefault())
-  const bodyId = `solid-reasoning-${Math.random().toString(36).slice(2)}`
-  let previousDefaultCollapsed = collapsedByDefault()
-  createEffect(() => {
-    const defaultCollapsed = collapsedByDefault()
-    if (defaultCollapsed !== previousDefaultCollapsed) {
-      setOpen(!defaultCollapsed)
-    }
-    previousDefaultCollapsed = defaultCollapsed
+  const collapse = createCollapsiblePresenter({
+    defaultOpen: () => !collapsedByDefault(),
+    resetOnDefaultChange: true,
+    idPrefix: 'solid-reasoning',
   })
   // C01 四态：running / complete(duration) / redacted(reason) / missing(无内容且非 running)
   const label = () => {
@@ -201,11 +197,11 @@ export function ReasoningBlock(props: {
           </Show>
         </div>
       }>
-        <button class="term-reasoning-head" type="button" onClick={() => setOpen(value => !value)} aria-expanded={open()} aria-controls={bodyId}>
+        <button class="term-reasoning-head" type="button" onClick={collapse.toggle} aria-expanded={collapse.open()} aria-controls={collapse.bodyId}>
           <span class="term-reasoning-label" aria-live={props.running ? 'polite' : undefined}>{label()}</span>
-          <span class="term-reasoning-toggle" aria-hidden="true">{open() ? '−' : '+'}</span>
+          <span class="term-reasoning-toggle" aria-hidden="true">{collapse.open() ? '−' : '+'}</span>
         </button>
-        <SolidCollapsibleRegion open={open()} id={bodyId}>
+        <SolidCollapsibleRegion open={collapse.open()} id={collapse.bodyId}>
           {/* C01 步骤4：正文复用 C00 markdown 管线，不建第二套渲染 */}
           <div class="term-reasoning-body" style={bodyStyle()}>
             <MarkdownContent text={props.text} streaming={props.running} />

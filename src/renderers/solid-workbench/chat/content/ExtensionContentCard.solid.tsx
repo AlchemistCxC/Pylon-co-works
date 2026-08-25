@@ -14,6 +14,8 @@ import {
   type MemoryContentPart,
   type SkillContentPart,
 } from '../../../../domains/workbench/content/contentPartSchema.ts'
+import { ToolContentPart } from '../ToolInvocationCard.solid.tsx'
+import { ToolObjectInspector } from '../tool/ToolObjectInspector.solid.tsx'
 
 export type ExtensionRenderKind =
   | 'content.memory'
@@ -65,6 +67,7 @@ function TypedExtensionCard(props: {
       class="solid-extension-card"
       aria-label={`${categoryLabel(props.content.kind)}：${title()}`}
       data-content-kind={`content.${props.content.kind}`}
+      data-status={props.content.status ?? (props.content.kind === 'mcp-resource' ? props.content.connectionState : undefined)}
       data-category-palette={stringSetting(props.appearance, 'categoryPalette', 'semantic')}
       data-icon={stringSetting(props.appearance, 'icon', 'auto')}
       data-reduced-motion={props.appearance.reducedMotion === true ? 'true' : 'false'}
@@ -73,9 +76,15 @@ function TypedExtensionCard(props: {
         <span class="solid-extension-icon" data-icon={stringSetting(props.appearance, 'icon', 'auto')} aria-hidden="true">
           {extensionIconGlyph(stringSetting(props.appearance, 'icon', 'auto'), props.content.kind)}
         </span>
-        <strong>{title()}</strong>
+        <div class="solid-extension-title">
+          <span class="solid-extension-kind">{categoryLabel(props.content.kind)}</span>
+          <strong>{title()}</strong>
+        </div>
         <Show when={props.content.kind === 'mcp-resource' && booleanSetting(props.appearance, 'mcpServerBadge', true)}>
           <span class="solid-extension-server-badge">{(props.content as McpResourceContentPart).server}</span>
+        </Show>
+        <Show when={props.content.status ?? (props.content.kind === 'mcp-resource' ? props.content.connectionState : undefined)}>
+          {status => <span class="solid-extension-status">{status()}</span>}
         </Show>
       </header>
       <Metadata content={props.content} fields={props.content.kind === 'mcp-resource' && booleanSetting(props.appearance, 'mcpServerBadge', true)
@@ -84,7 +93,10 @@ function TypedExtensionCard(props: {
       <Show when={props.content.summary}><p>{props.content.summary}</p></Show>
       <Show when={props.content.kind === 'artifact' && props.content.parts?.length}>
         <div class="solid-extension-preview" style={{ 'max-height': `${boundedNumber(props.appearance, 'artifactPreviewSize', 320, 80, 1200)}px`, overflow: 'auto' }}>
-          <For each={coalesceAdjacentDisplayTextParts((props.content as ArtifactContentPart).parts ?? [])}>{part => <NestedPart part={part} />}</For>
+          <For each={coalesceAdjacentDisplayTextParts((props.content as ArtifactContentPart).parts ?? [])}>{(part, index) => <ToolContentPart
+            part={part} appearance={props.appearance} commands={props.commands}
+            nodeId={`${(props.content as ArtifactContentPart).artifactId}:part:${index()}`}
+          />}</For>
         </div>
       </Show>
       <Show when={uri()}>
@@ -110,7 +122,7 @@ function TypedExtensionCard(props: {
       <Show when={props.content.raw && Object.keys(props.content.raw).length > 0}>
         <details open={!booleanSetting(props.appearance, 'unknownRawCollapsed', true)}>
           <summary>未知元数据</summary>
-          <pre>{JSON.stringify(props.content.raw, null, 2)}</pre>
+          <ToolObjectInspector value={props.content.raw} commands={props.commands} />
         </details>
       </Show>
     </article>
@@ -149,7 +161,7 @@ function HookCard(props: {
         </dl>
         <Show when={props.hook.error}>{error => <p role="alert">{error().code ? `${error().code}：` : ''}{error().message}</p>}</Show>
         <Show when={props.hook.raw && Object.keys(props.hook.raw).length > 0}>
-          <details open={!booleanSetting(props.appearance, 'unknownRawCollapsed', true)}><summary>未知元数据</summary><pre>{JSON.stringify(props.hook.raw, null, 2)}</pre></details>
+          <details open={!booleanSetting(props.appearance, 'unknownRawCollapsed', true)}><summary>未知元数据</summary><ToolObjectInspector value={props.hook.raw} /></details>
         </Show>
       </details>
     </section>
@@ -172,12 +184,6 @@ function metadataRows(content: MemoryContentPart | SkillContentPart | McpResourc
   add('version', '版本', 'version' in content ? content.version : undefined)
   add('mime', 'MIME', 'mimeType' in content ? content.mimeType : undefined)
   return rows
-}
-
-function NestedPart(props: { part: ContentPart }) {
-  if ('text' in props.part && typeof props.part.text === 'string') return <p>{props.part.text}</p>
-  if (props.part.kind === 'unknown') return <pre>{props.part.summary}</pre>
-  return <pre>{JSON.stringify(props.part, null, 2)}</pre>
 }
 
 function InvalidExtension(props: { kind: string }) {

@@ -25,6 +25,7 @@ import {
   isValidSearchResultContentInput,
   isValidSkillContentInput,
   isValidTerminalContentInput,
+  isJsonValue,
 } from '../workbench/content/contentPartSchema.ts'
 
 const FONT_OPTIONS = Object.freeze([
@@ -438,6 +439,28 @@ function textPayload(input: unknown): input is { readonly text: string } {
     && typeof (input as Record<string, unknown>).text === 'string'
 }
 
+const STRUCTURED_CONTENT_KIND_IDS = Object.freeze([
+  'content.location', 'content.progress', 'content.list', 'content.key-value',
+  'content.json', 'content.tool-use', 'content.tool-result',
+] as const)
+
+function structuredContentFixture(id: (typeof STRUCTURED_CONTENT_KIND_IDS)[number]): Readonly<Record<string, unknown>> {
+  const kind = id.slice('content.'.length)
+  if (id === 'content.location') return Object.freeze({ kind, path: '/fixture/src/app.ts', line: 12, column: 4 })
+  if (id === 'content.progress') return Object.freeze({ kind, current: 2, total: 5, message: 'fixture progress' })
+  if (id === 'content.list') return Object.freeze({ kind, title: 'Fixture list', items: ['one', 'two'] })
+  if (id === 'content.key-value') return Object.freeze({ kind, entries: { model: 'fixture', retries: 2 } })
+  if (id === 'content.json') return Object.freeze({ kind, value: { ok: true } })
+  if (id === 'content.tool-use') return Object.freeze({ kind, name: 'FixtureTool', input: { path: '/fixture/input' } })
+  return Object.freeze({ kind, status: 'completed', parts: [{ kind: 'text', text: 'fixture result' }] })
+}
+
+function structuredContentInput(id: (typeof STRUCTURED_CONTENT_KIND_IDS)[number], input: unknown): boolean {
+  if (!input || typeof input !== 'object' || Array.isArray(input) || !isJsonValue(input)) return false
+  const kind = (input as Record<string, unknown>).kind
+  return kind === undefined || kind === id || kind === id.slice('content.'.length)
+}
+
 const messageRoleKind = (id: 'message.user' | 'message.assistant'): RenderKindDefinition => ({
   id,
   category: 'message',
@@ -686,6 +709,16 @@ export const BUILTIN_TEXT_RENDER_KINDS: readonly RenderKindDefinition[] = [
     settings: SEARCH_LINK_SETTINGS,
     validateInput: isValidLinkContentInput,
   },
+  ...STRUCTURED_CONTENT_KIND_IDS.map(id => ({
+    id,
+    category: 'content' as const,
+    fallbackKind: 'content.unknown',
+    priority: 100,
+    fixture: structuredContentFixture(id),
+    defaultTokens: { maxHeight: 420, defaultCollapsed: false },
+    settingsSchemaVersion: 1,
+    validateInput: (input: unknown) => structuredContentInput(id, input),
+  } satisfies RenderKindDefinition)),
   ...(['image', 'audio', 'video'] as const).map(kind => ({
     id: `content.${kind}`,
     category: 'content',

@@ -1,4 +1,7 @@
 import type { Message } from './messageTypes'
+import type { ContentPart } from '../../domains/workbench/content/contentPartSchema.ts'
+
+type VisualQaMessage = Message & { semanticParts?: readonly ContentPart[] }
 
 const LONG_TOOL_OUTPUT = Array.from({ length: 36 }, (_, index) =>
   `src/components/chat/ChatView.tsx:${index + 1}: matched display path`,
@@ -16,7 +19,7 @@ const TEST_OUTPUT = [
 ].join('\n')
 
 /** 浏览器预览使用的完整消息样本，覆盖当前 renderer 的主要分支。 */
-export const MOCK_MESSAGES: Message[] = [
+export const MOCK_MESSAGES: VisualQaMessage[] = [
   {
     id: 'mock-user-markdown',
     role: 'user',
@@ -235,6 +238,29 @@ export const MOCK_MESSAGES: Message[] = [
     role: 'assistant',
     sender: 'peri',
     content: '纯文本 fast path 仍然保留换行和原始文本节奏。\n第二行用于观察长消息之间的垂直节奏。',
+    time: '10:26',
+  },
+  {
+    id: 'mock-assistant-structured',
+    role: 'assistant',
+    sender: 'peri',
+    content: '结构化内容富渲染验收',
+    semanticParts: [
+      { kind: 'location', path: '/workspace/src/renderers/solid-workbench/SolidWorkbenchApp.solid.tsx', line: 1056, column: 3 },
+      { kind: 'progress', current: 3, total: 4, message: '索引 renderer kinds' },
+      { kind: 'list', title: '富内容边界', items: [
+        { kind: 'markdown', text: '**Markdown** 保持语义渲染' },
+        { kind: 'code', text: 'const renderer = "solid"', language: 'ts' },
+        { source_path: '/workspace/report.md', score: 0.98 },
+      ] },
+      { kind: 'key-value', entries: { provider: 'ACP', replaySafe: true, revision: 7 } },
+      { kind: 'json', value: { nested: { expanded: false, streaming: true }, tags: ['typed', 'bounded'] } },
+      { kind: 'tool-use', name: 'Fetch', status: 'running', input: { url: 'https://example.test/api', method: 'GET' }, requestId: 'request-42' },
+      { kind: 'tool-result', name: 'Search', status: 'completed', latencyMs: 42, parts: [
+        { kind: 'markdown', text: '找到 **2** 项结果' },
+        { kind: 'location', path: '/workspace/src/app.ts', line: 7 },
+      ] },
+    ],
     time: '10:26',
   },
   {

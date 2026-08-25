@@ -1,6 +1,7 @@
 import { For, Show, createMemo, createSignal } from 'solid-js'
 import type { RenderAppearanceSnapshot, RenderCommandPort } from '../../../../contracts/messageRenderer.ts'
 import type { WorkbenchInteraction } from '../../../../domains/workbench/workbenchProjector.ts'
+import { ToolObjectInspector } from '../tool/ToolObjectInspector.solid.tsx'
 
 /**
  * C11：审批 / 问题 / 确认 / 权限交互卡（Solid）。
@@ -280,7 +281,7 @@ export function SolidInteractionCard(props: {
         <div class="interaction-terminal-state">
           <span>{terminalLabel()}</span>
           <Show when={request().kind !== 'secret' ? props.interaction.response : undefined}>
-            {response => <code class="interaction-response">{JSON.stringify(response())}</code>}
+            {response => <div class="interaction-response"><ToolObjectInspector value={response()} commands={props.commands} /></div>}
           </Show>
           <Show when={props.interaction.reason}>
             {reason => <span>{reason()}</span>}

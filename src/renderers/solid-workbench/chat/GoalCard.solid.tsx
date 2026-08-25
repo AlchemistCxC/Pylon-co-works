@@ -1,5 +1,6 @@
 import { Show } from 'solid-js'
 import type { GoalSnapshot } from '../../../domains/workbench/plan/goalModel.ts'
+import { ToolObjectInspector } from './tool/ToolObjectInspector.solid.tsx'
 
 export interface SolidGoalCardProps {
   goal: GoalSnapshot | undefined
@@ -76,13 +77,13 @@ export function SolidGoalCard(props: SolidGoalCardProps) {
           <Show when={goal().metadata !== undefined}>
             <details class="goal-card-metadata">
               <summary>未知字段</summary>
-              <pre>{JSON.stringify(goal().metadata, null, 2)}</pre>
+              <ToolObjectInspector value={goal().metadata} />
             </details>
           </Show>
           <Show when={goal().accounting?.metadata !== undefined}>
             <details class="goal-card-metadata goal-card-accounting-metadata">
               <summary>Accounting 未知字段</summary>
-              <pre>{JSON.stringify(goal().accounting!.metadata, null, 2)}</pre>
+              <ToolObjectInspector value={goal().accounting!.metadata} />
             </details>
           </Show>
         </div>

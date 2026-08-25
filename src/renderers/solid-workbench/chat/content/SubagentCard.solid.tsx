@@ -1,9 +1,8 @@
 import { For, Show } from 'solid-js'
-import { stripAnsiControlSequences } from '../../../../domains/rendererContent/textContentContracts.ts'
-import { coalesceAdjacentDisplayTextParts, type ContentPart, type UnknownContentPart } from '../../../../domains/workbench/content/contentPartSchema.ts'
+import { coalesceAdjacentDisplayTextParts, type ContentPart } from '../../../../domains/workbench/content/contentPartSchema.ts'
 import type { RenderAppearanceSnapshot, RenderCommandPort, RenderSemanticCommand } from '../../../../contracts/messageRenderer.ts'
-import { SolidLogBlock, SolidTerminalBlock } from './TerminalBlock.solid.tsx'
 import type { WorkbenchActivityNode } from '../../../../domains/workbench/workbenchProjector.ts'
+import { ToolContentPart } from '../ToolInvocationCard.solid.tsx'
 
 /**
  * C09：子代理/委派/团队活动卡（Solid）。
@@ -181,18 +180,8 @@ export function SolidSubagentCard(props: {
         <details class="term-subagent-output" open={depth() <= defaultExpandedDepth()}>
           <summary>输出</summary>
           <Show when={resultSummary()}>{summary => <p class="term-subagent-goal">{summary()}</p>}</Show>
-          <For each={parts()}>{part => part.kind === 'terminal'
-            ? <SolidTerminalBlock part={part} appearance={props.appearance} />
-            : part.kind === 'log'
-              ? <SolidLogBlock part={part} appearance={props.appearance} />
-              : part.kind === 'text' || part.kind === 'markdown'
-                ? <p class="term-subagent-goal" style={{ 'white-space': 'pre-wrap' }}>{part.text}</p>
-                : part.kind === 'code'
-                  ? <pre class="solid-content-unknown" data-content-kind="content.code"><code>{part.text}</code></pre>
-                  : part.kind === 'unknown'
-                    ? <SolidUnknownSubagentContent part={part} />
-                    : <pre class="solid-content-unknown" data-content-kind={part.kind}>Unsupported subagent content: {stripAnsiControlSequences(String((part as Record<string, unknown>).summary ?? part.kind)).map(span => span.text).join('')}</pre>}
-          </For>
+          <For each={parts()}>{(part, index) => <ToolContentPart part={part} appearance={props.appearance}
+            commands={props.commands} class="term-subagent-goal" nodeId={`${props.activity.id}:output:${index()}`} />}</For>
         </details>
       </Show>
       <Show when={props.activity.error}>
@@ -225,19 +214,6 @@ export function SolidSubagentCard(props: {
       </Show>
     </section>
   )
-}
-
-function SolidUnknownSubagentContent(props: { part: UnknownContentPart }) {
-  const raw = () => {
-    try { return JSON.stringify(props.part.raw, null, 2) } catch { return '[unavailable]' }
-  }
-  return <section class="solid-content-unknown" data-content-kind="content.unknown"
-    aria-label={`未知子代理内容：${props.part.originalType}`}>
-    <strong>未知内容：{props.part.originalType}</strong>
-    <span>{props.part.summary}</span>
-    <details><summary>Raw 审计信息</summary><pre>{raw()}</pre></details>
-    <Show when={props.part.truncation}>{truncation => <small>Raw 已截断，省略 {truncation().omittedBytes} bytes</small>}</Show>
-  </section>
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {

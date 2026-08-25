@@ -1,4 +1,4 @@
-import { For, Show, createMemo, createSignal } from 'solid-js'
+import { For, Show, createMemo } from 'solid-js'
 import {
   normalizeDiffPayload,
   wordDiff,
@@ -7,6 +7,7 @@ import {
   type DiffWordSegment,
 } from '../../../domains/tool/diffPresentation.ts'
 import { SolidCollapsibleRegion } from './CollapsibleRegion.solid.tsx'
+import { createCollapsiblePresenter } from './CollapsiblePresenter.solid.tsx'
 
 export interface SolidDiffCardProps {
   output: string
@@ -17,8 +18,7 @@ export function SolidDiffCard(props: SolidDiffCardProps) {
   const payload = createMemo(() => props.payload ?? normalizeDiffPayload(props.output))
   const addedCount = createMemo(() => payload()?.lines.filter(line => line.kind === 'added').length ?? 0)
   const removedCount = createMemo(() => payload()?.lines.filter(line => line.kind === 'removed').length ?? 0)
-  const [open, setOpen] = createSignal(true)
-  const bodyId = `solid-diff-${Math.random().toString(36).slice(2)}`
+  const collapse = createCollapsiblePresenter({ defaultOpen: () => true, idPrefix: 'solid-diff' })
 
   return (
     <Show when={payload()}>
@@ -27,14 +27,14 @@ export function SolidDiffCard(props: SolidDiffCardProps) {
           <button
             type="button"
             class="term-diff-head"
-            onClick={() => setOpen(value => !value)}
-            aria-expanded={open()}
-            aria-controls={bodyId}
+            onClick={collapse.toggle}
+            aria-expanded={collapse.open()}
+            aria-controls={collapse.bodyId}
           >
             <span>变更预览</span>
             <span class="term-diff-count">{addedCount()} additions · {removedCount()} deletions</span>
           </button>
-          <SolidCollapsibleRegion open={open()} id={bodyId}>
+          <SolidCollapsibleRegion open={collapse.open()} id={collapse.bodyId}>
             <div class="term-diff-body">
               <For each={buildDiffRows(resolved().lines)}>{row => <DiffRow row={row} />}</For>
             </div>

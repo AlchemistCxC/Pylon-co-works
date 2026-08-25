@@ -45,5 +45,7 @@ describe('SolidGoalCard (C08)', () => {
     expect(result.container.querySelector('.goal-card')?.getAttribute('data-status')).toBe('unknown')
     expect(result.container.querySelector('.goal-card')?.getAttribute('data-reduced-motion')).toBe('true')
     expect(result.container.textContent).toContain('未知')
+    expect(result.container.querySelector('.goal-card-metadata .tool-object-inspector')).toHaveTextContent('phase')
+    expect(result.container.querySelector('.goal-card-metadata pre')).toBeNull()
   })
 })

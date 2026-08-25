@@ -1,9 +1,10 @@
-import { For, Show, createEffect, createSignal } from 'solid-js'
+import { For, Show } from 'solid-js'
 import type { RenderAppearanceSnapshot, RenderCommandPort } from '../../../../contracts/messageRenderer.ts'
 import type { DiffSnapshot } from '../../../../domains/workbench/diffSnapshot.ts'
 import type { LspDiagnosticContentPart, LspRelatedInformation, TextRange } from '../../../../domains/workbench/content/contentPartSchema.ts'
 import { wordDiff, type DiffWordSegment } from '../../../../domains/tool/diffPresentation.ts'
 import { SolidCollapsibleRegion } from '../CollapsibleRegion.solid.tsx'
+import { createCollapsiblePresenter } from '../CollapsiblePresenter.solid.tsx'
 
 export function SolidDiffContent(props: {
   snapshot: DiffSnapshot
@@ -23,15 +24,11 @@ export function SolidDiffContent(props: {
   const useWordDiff = () => booleanSetting(props.appearance, 'wordDiff', true)
   const wrap = () => choiceSetting(props.appearance, 'wrap', ['none', 'soft'], 'none')
   const contextLines = () => Math.max(0, Math.floor(numberSetting(props.appearance, 'contextLines', 3)))
-  let appliedDefaultExpanded = booleanSetting(props.appearance, 'defaultExpanded', true)
-  const [open, setOpen] = createSignal(appliedDefaultExpanded)
-  createEffect(() => {
-    const next = booleanSetting(props.appearance, 'defaultExpanded', true)
-    if (next === appliedDefaultExpanded) return
-    appliedDefaultExpanded = next
-    setOpen(next)
+  const collapse = createCollapsiblePresenter({
+    defaultOpen: () => booleanSetting(props.appearance, 'defaultExpanded', true),
+    resetOnDefaultChange: true,
+    bodyId: () => `solid-diff-${safeDomId(props.nodeId)}`,
   })
-  const bodyId = () => `solid-diff-${safeDomId(props.nodeId)}`
 
   return <section class="term-diff-card solid-diff-content" role="region" aria-label={`Diff：${label()}`} data-content-kind="content.diff"
     data-view={view()} data-line-numbers={String(showLineNumbers())} data-word-diff={String(useWordDiff())}
@@ -43,8 +40,8 @@ export function SolidDiffContent(props: {
       background: stringSetting(props.appearance, 'background', 'var(--chat-code-bg, rgba(0,0,0,0.02))'),
       color: stringSetting(props.appearance, 'foreground', 'var(--text)'),
     }}>
-    <button type="button" class="term-diff-head" aria-expanded={open()} aria-controls={bodyId()}
-      onClick={() => setOpen(value => !value)}>
+    <button type="button" class="term-diff-head" aria-expanded={collapse.open()} aria-controls={collapse.bodyId}
+      onClick={collapse.toggle}>
       <strong>{label()}</strong>
       <Show when={props.snapshot.status}><span>{props.snapshot.status}</span></Show>
       <span class="term-diff-count">{additions()} additions · {deletions()} deletions</span>
@@ -56,7 +53,7 @@ export function SolidDiffContent(props: {
       title={props.commands.canExecute?.('resource.open') === true ? undefined : '宿主未提供打开能力'}
       onClick={() => void props.commands.execute({ type: 'resource.open', payload: { path: path() } })}
     >打开文件</button>}</Show>
-    <SolidCollapsibleRegion open={open()} id={bodyId()}>
+    <SolidCollapsibleRegion open={collapse.open()} id={collapse.bodyId}>
       <div class="term-diff-body" style={{
         'max-height': `${numberSetting(props.appearance, 'maxHeight', 320)}px`,
         'font-size': `${numberSetting(props.appearance, 'fontSize', 13)}px`,

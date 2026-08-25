@@ -1,9 +1,11 @@
 import { For, Show, createEffect, createMemo } from 'solid-js'
 import { stripAnsiControlSequences } from '../../../../domains/rendererContent/textContentContracts.ts'
-import type { ContentPart, UnknownContentPart } from '../../../../domains/workbench/content/contentPartSchema.ts'
+import type { ContentPart } from '../../../../domains/workbench/content/contentPartSchema.ts'
 import type { RenderAppearanceSnapshot } from '../../../../contracts/messageRenderer.ts'
 import type { RenderCommandPort } from '../../../../contracts/messageRenderer.ts'
 import type { WorkbenchActivityNode } from '../../../../domains/workbench/workbenchProjector.ts'
+import { ToolObjectInspector } from '../tool/ToolObjectInspector.solid.tsx'
+import { SolidUnknownContent } from './UnknownContent.solid.tsx'
 
 /**
  * C07：终端/日志卡（Solid）。
@@ -223,10 +225,6 @@ export function SolidProcessActivity(props: {
     ? props.activity.parts.filter((part): part is ContentPart => typeof part === 'object' && part !== null
       && !Array.isArray(part) && typeof (part as Record<string, unknown>).kind === 'string')
     : []
-  const progress = () => {
-    if (props.activity.progress === undefined) return undefined
-    try { return JSON.stringify(props.activity.progress) } catch { return '[unavailable]' }
-  }
   const copy = props.commands?.canExecute?.('clipboard.write') === true
     ? (text: string) => { void props.commands?.execute({ type: 'clipboard.write', payload: { text } }) }
     : undefined
@@ -241,34 +239,24 @@ export function SolidProcessActivity(props: {
         <small>{[props.activity.processId, props.activity.sessionId].filter(Boolean).join(' · ')}</small>
       </Show>
     </header>
-    <Show when={progress()}>{value => <pre class="term-process-progress">{value()}</pre>}</Show>
+    <Show when={props.activity.progress !== undefined}>
+      <div class="term-process-progress"><ToolObjectInspector value={props.activity.progress} commands={props.commands} /></div>
+    </Show>
     <For each={parts()}>{part => part.kind === 'terminal'
       ? <SolidTerminalBlock part={part} appearance={props.appearance} actions={{ copy }} />
       : part.kind === 'log'
         ? <SolidLogBlock part={part} appearance={props.appearance} />
         : part.kind === 'unknown'
-          ? <SolidUnknownProcessContent part={part} />
-          : <pre class="solid-content-unknown" data-content-kind={part.kind}>Unsupported process content: {part.kind}</pre>}
+          ? <SolidUnknownContent part={part} commands={props.commands} />
+          : <section class="solid-content-unknown" data-content-kind={part.kind}>
+              <strong>未支持的进程内容：{part.kind}</strong>
+              <ToolObjectInspector value={part} commands={props.commands} />
+            </section>}
     </For>
     <Show when={props.activity.error}>{error => <div role="alert" class="term-process-error">{error().userSummary}</div>}</Show>
     <Show when={props.activity.reason}><small>{props.activity.reason}</small></Show>
     <Show when={props.activity.provenance?.synthetic}>
       {synthetic => <small class="term-process-provenance">合成生命周期：{synthetic().reason}</small>}
     </Show>
-  </section>
-}
-
-function SolidUnknownProcessContent(props: { part: UnknownContentPart }) {
-  const raw = () => {
-    try { return JSON.stringify(props.part.raw, null, 2) } catch { return '[unavailable]' }
-  }
-  return <section class="solid-content-unknown" data-content-kind="content.unknown"
-    aria-label={`未知进程内容：${props.part.originalType}`}>
-    <strong>未知内容：{props.part.originalType}</strong>
-    <span>{props.part.summary}</span>
-    <details><summary>Raw 审计信息</summary><pre>{raw()}</pre></details>
-    <Show when={props.part.truncation}>{truncation => <small>
-      Raw 已截断，省略 {truncation().omittedBytes} bytes
-    </small>}</Show>
   </section>
 }

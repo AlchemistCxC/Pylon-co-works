@@ -391,13 +391,89 @@ export function normalizeContentBlock(raw: unknown): { part: ContentPart; diagno
         } } : {}),
       }
     }
+    case 'content.location':
     case 'location':
-      return { part: { kind: 'location', ...toJsonRecord(raw) } }
+      return normalizeStructuredContentBlock(raw, 'location')
+    case 'content.progress':
+    case 'progress':
+      return normalizeStructuredContentBlock(raw, 'progress')
+    case 'content.list':
+    case 'list':
+      return normalizeStructuredContentBlock(raw, 'list')
+    case 'content.key-value':
+    case 'key_value':
+    case 'key-value':
+      return normalizeStructuredContentBlock(raw, 'key-value')
+    case 'content.json':
+    case 'json':
+      return normalizeStructuredContentBlock(raw, 'json')
+    case 'content.tool-use':
+    case 'tool_use':
+    case 'tool-use':
+      return normalizeStructuredContentBlock(raw, 'tool-use')
+    case 'content.tool-result':
+    case 'tool_result':
+    case 'tool-result':
+      return normalizeStructuredContentBlock(raw, 'tool-result')
     case 'code':
       return typeof raw.text === 'string' ? { part: { kind: 'code', text: raw.text, ...(typeof raw.language === 'string' ? { language: raw.language } : {}) } } : { part: createUnknownContentPart(type, raw), diagnostic: { code: 'content.code.invalid', message: 'code block has no string text', path: ['text'] } }
     default:
       return { part: createUnknownContentPart(type, raw) }
   }
+}
+
+const STRUCTURED_CONTENT_MAX_BYTES = 32 * 1024
+
+function normalizeStructuredContentBlock(
+  raw: Record<string, unknown>,
+  kind: 'location' | 'progress' | 'list' | 'key-value' | 'json' | 'tool-use' | 'tool-result',
+): { part: ContentPart; diagnostic?: { code: string; message: string; path: readonly (string | number)[] } } {
+  const providerFields = Object.fromEntries(Object.entries(raw).filter(([key]) => key !== 'type' && key !== 'kind'))
+  const safe = createUnknownContentPart(kind, providerFields, { maxRawBytes: STRUCTURED_CONTENT_MAX_BYTES })
+  if (safe.truncated || !isRecord(safe.raw)) {
+    return {
+      part: safe,
+      diagnostic: {
+        code: 'content.structured.too-large',
+        message: `${kind} content exceeded the bounded structured-content envelope`,
+        path: [],
+      },
+    }
+  }
+
+  let fields = safe.raw as Record<string, JsonValue>
+  if (kind === 'list') fields = normalizeStructuredArrayFields(fields, ['items', 'values', 'entries', 'results'])
+  if (kind === 'tool-result') fields = normalizeStructuredArrayFields(fields, ['parts', 'content'])
+  const candidate = { kind, ...fields }
+  const parsed = parseContentPart(candidate)
+  if (parsed.ok) return { part: parsed.value }
+  return {
+    part: createUnknownContentPart(kind, candidate),
+    diagnostic: {
+      code: 'content.structured.invalid',
+      message: `${kind} content could not be normalized into a valid structured part`,
+      path: parsed.issues[0]?.path ?? [],
+    },
+  }
+}
+
+function normalizeStructuredArrayFields(
+  fields: Record<string, JsonValue>,
+  keys: readonly string[],
+): Record<string, JsonValue> {
+  let normalized = fields
+  for (const key of keys) {
+    const value = normalized[key]
+    if (!Array.isArray(value)) continue
+    normalized = { ...normalized, [key]: value.map(normalizeNestedStructuredValue) }
+  }
+  return normalized
+}
+
+function normalizeNestedStructuredValue(value: JsonValue): JsonValue {
+  if (!isRecord(value)) return value
+  if (typeof value.type !== 'string' && typeof value.kind !== 'string') return value
+  return normalizeContentBlock(value).part as JsonValue
 }
 
 function normalizeC15ContentBlock(
@@ -1000,8 +1076,4 @@ function redactSecretEnv(env: Record<string, unknown>): Record<string, string> {
       : String(value)
   }
   return out
-}
-
-function toJsonRecord(value: Record<string, unknown>): Record<string, JsonValue> {
-  return toJsonValue(value) as Record<string, JsonValue>
 }

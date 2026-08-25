@@ -1,5 +1,6 @@
 import { Show } from 'solid-js'
 import type { LifecycleState, NormalizedError } from '../../../domains/workbench/lifecycle/lifecycleModel.ts'
+import { ToolObjectInspector } from './tool/ToolObjectInspector.solid.tsx'
 
 export interface SolidLifecycleAppearance {
   foreground: string
@@ -195,6 +196,7 @@ export function SolidSystemNoticeCard(props: {
     ? appearance().errorColor
     : props.notice.level === 'warning' ? appearance().warningColor : appearance().infoColor
   const motion = () => props.reducedMotion ? 'none' : appearance().motion
+  const details = () => noticeDetails(props.notice.data)
   return (
     <section
       class="system-notice-card"
@@ -216,14 +218,21 @@ export function SolidSystemNoticeCard(props: {
       <strong>{props.notice.message}</strong>
       <code>{props.notice.code}</code>
       <Show when={appearance().showEventIds}><small class="lifecycle-identifiers">{props.notice.eventId}</small></Show>
-      <Show when={props.notice.data !== undefined}>
+      <Show when={details()}>
         <details class="system-notice-data" open={appearance().technicalDetailsExpanded}>
           <summary>事件详情</summary>
-          <pre>{JSON.stringify(props.notice.data, null, 2)}</pre>
+          <ToolObjectInspector value={details()} />
         </details>
       </Show>
     </section>
   )
+}
+
+function noticeDetails(value: unknown): Record<string, unknown> | undefined {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return value === undefined ? undefined : { value }
+  const redundant = new Set(['type', 'level', 'message', 'code'])
+  const details = Object.fromEntries(Object.entries(value).filter(([key]) => !redundant.has(key)))
+  return Object.keys(details).length > 0 ? details : undefined
 }
 
 function ErrorDetails(props: { error: NormalizedError; appearance: SolidLifecycleAppearance }) {
@@ -242,7 +251,7 @@ function ErrorDetails(props: { error: NormalizedError; appearance: SolidLifecycl
         {cause => <div class="lifecycle-cause"><span>原因</span><ErrorDetails error={cause()} appearance={props.appearance} /></div>}
       </Show>
       <Show when={props.error.metadata !== undefined}>
-        <pre class="lifecycle-metadata">{JSON.stringify(props.error.metadata, null, 2)}</pre>
+        <div class="lifecycle-metadata"><ToolObjectInspector value={props.error.metadata} /></div>
       </Show>
     </details>
   )

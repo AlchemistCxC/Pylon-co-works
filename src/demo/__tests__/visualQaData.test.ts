@@ -34,6 +34,10 @@ describe('browser visual QA dataset', () => {
     const toolStates = new Set(swarm.map(message => message.toolStatus).filter(Boolean))
     expect(toolStates.size).toBe(7)
     expect([...toolStates]).toEqual(expect.arrayContaining(['completed', 'in_progress', 'waiting', 'failed']))
+    const structured = matrix.find(message => message.id === 'mock-assistant-structured') as MessageWithSemanticParts | undefined
+    expect(structured?.semanticParts?.map(part => part.kind)).toEqual(expect.arrayContaining([
+      'location', 'progress', 'list', 'key-value', 'json', 'tool-use', 'tool-result',
+    ]))
     expect(i18n.map(message => message.content).join('\n')).toMatch(/日本語/)
     expect(i18n.map(message => message.content).join('\n')).toMatch(/العربية/)
     expect(buildVisualQaMessages('demo-empty')).toEqual([])
@@ -62,3 +66,7 @@ describe('browser visual QA dataset', () => {
     await mockInvokeCommand('git_unstage', { paths: ['src/sheets/AgentSheetView.tsx'] })
   })
 })
+
+interface MessageWithSemanticParts {
+  readonly semanticParts?: readonly { readonly kind: string }[]
+}

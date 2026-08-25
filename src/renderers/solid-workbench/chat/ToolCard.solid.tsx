@@ -1,5 +1,5 @@
 import Anser from 'anser'
-import { Show, createMemo, createSignal, onCleanup, onMount } from 'solid-js'
+import { Show, createMemo, onCleanup, onMount } from 'solid-js'
 import { sanitizeHtml } from '../../../components/chat/htmlSanitizer.ts'
 import { resolveToolIndicatorAsset } from '../../../components/chat/toolIndicatorAssets.ts'
 import { toolIndicatorMotionClass } from '../../../components/chat/toolIndicatorMotion.ts'
@@ -15,6 +15,7 @@ import type { ToolConnectorLayoutPort } from '../../../domains/workbench/toolCon
 import { measureToolAnchor } from './domToolConnectorMeasurement.ts'
 import { SolidDiffCard } from './DiffCard.solid.tsx'
 import { SolidCollapsibleRegion } from './CollapsibleRegion.solid.tsx'
+import { createCollapsiblePresenter } from './CollapsiblePresenter.solid.tsx'
 
 export type ToolCardAppearance = Pick<WorkbenchAppearanceSnapshot,
   'toolIndicator' | 'toolIndicatorGlow' | 'toolIndicatorGlowColor'>
@@ -35,8 +36,7 @@ export function SolidToolCard(props: SolidToolCardProps) {
   const model = createMemo(() => props.model ?? (props.message
     ? buildToolPresentationModel(props.message, props.visualState)
     : null))
-  const [open, setOpen] = createSignal(false)
-  const bodyId = `solid-tool-${Math.random().toString(36).slice(2)}`
+  const collapse = createCollapsiblePresenter({ defaultOpen: () => false, idPrefix: 'solid-tool' })
 
   onMount(() => {
     if (!props.layoutPort || !props.messageId) return
@@ -82,9 +82,9 @@ export function SolidToolCard(props: SolidToolCardProps) {
               ref={head}
               class="term-tool-head"
               type="button"
-              onClick={() => setOpen(value => !value)}
-              aria-expanded={open()}
-              aria-controls={bodyId}
+              onClick={collapse.toggle}
+              aria-expanded={collapse.open()}
+              aria-controls={collapse.bodyId}
             >
               <span
                 ref={indicatorElement}
@@ -98,7 +98,7 @@ export function SolidToolCard(props: SolidToolCardProps) {
               <Show when={suffix()}>{text => <span class="term-tool-suffix">{text()}</span>}</Show>
             </button>
             <Show when={resolved().hasOutput}>
-              <SolidCollapsibleRegion open={open()} id={bodyId}>
+              <SolidCollapsibleRegion open={collapse.open()} id={collapse.bodyId}>
                 <div class="term-tool-body">
                 <span class={`term-tool-label${resolved().errorText ? ' term-tool-label-error' : ''}`}>
                   {resolved().errorText ? '错误' : '输出'}{resolved().outputLabel ? ` · ${resolved().outputLabel}` : ''}

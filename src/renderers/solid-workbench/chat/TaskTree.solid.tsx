@@ -1,6 +1,7 @@
-import { For, Show, createEffect, createMemo, createSignal, onCleanup } from 'solid-js'
+import { For, Show, createMemo, onCleanup } from 'solid-js'
 import type { WorkbenchTaskEntry } from '../../../domains/workbench/workbenchRuntime.ts'
 import { SolidCollapsibleRegion } from './CollapsibleRegion.solid.tsx'
+import { createCollapsiblePresenter } from './CollapsiblePresenter.solid.tsx'
 
 export interface SolidTaskTreeProps {
   sessionId: string | null
@@ -9,34 +10,34 @@ export interface SolidTaskTreeProps {
 }
 
 export function SolidTaskTree(props: SolidTaskTreeProps) {
-  const [expanded, setExpanded] = createSignal(false)
+  const collapse = createCollapsiblePresenter({
+    defaultOpen: () => false,
+    resetKey: () => props.sessionId,
+    idPrefix: 'solid-tasks',
+  })
   const completed = createMemo(() => props.tasks.filter(task => task.status === 'completed').length)
 
-  createEffect(() => {
-    const activeSessionId = props.sessionId
-    if (activeSessionId !== undefined) setExpanded(false)
-  })
-
   const target = props.toggleEventTarget ?? window
-  const onToggle = () => setExpanded(value => !value)
+  const onToggle = collapse.toggle
   target.addEventListener('pylon:tasks-toggle', onToggle)
   onCleanup(() => target.removeEventListener('pylon:tasks-toggle', onToggle))
 
   return (
     <Show when={props.sessionId && props.tasks.length > 0}>
-      <div class="task-tree" data-expanded={expanded()} data-count={props.tasks.length}>
+      <div class="task-tree" data-expanded={collapse.open()} data-count={props.tasks.length}>
         <button
           type="button"
           class="task-tree-summary"
-          onClick={() => setExpanded(value => !value)}
-          aria-expanded={expanded()}
+          onClick={collapse.toggle}
+          aria-expanded={collapse.open()}
+          aria-controls={collapse.bodyId}
         >
           <span class="task-tree-summary-label">{taskSummary([...props.tasks])}</span>
           <span class="task-tree-summary-ratio" aria-hidden="true">{completed()}/{props.tasks.length}</span>
         </button>
         <progress class="task-tree-overall-progress" aria-label="任务总体进度"
           value={completed()} max={Math.max(1, props.tasks.length)} />
-        <SolidCollapsibleRegion open={expanded()}>
+        <SolidCollapsibleRegion open={collapse.open()} id={collapse.bodyId}>
           <ul class="task-tree-list" aria-label="任务列表">
             <For each={props.tasks}>{task => (
               <li class="task-tree-item" data-status={task.status}

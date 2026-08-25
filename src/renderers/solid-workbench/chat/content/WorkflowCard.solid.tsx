@@ -1,8 +1,8 @@
 import { For, Show } from 'solid-js'
 import type { RenderAppearanceSnapshot, RenderCommandPort } from '../../../../contracts/messageRenderer.ts'
-import { coalesceAdjacentDisplayTextParts, type ContentPart, type UnknownContentPart } from '../../../../domains/workbench/content/contentPartSchema.ts'
+import { coalesceAdjacentDisplayTextParts } from '../../../../domains/workbench/content/contentPartSchema.ts'
 import type { WorkbenchActivityNode } from '../../../../domains/workbench/workbenchProjector.ts'
-import { SolidLogBlock, SolidTerminalBlock } from './TerminalBlock.solid.tsx'
+import { ToolContentPart } from '../ToolInvocationCard.solid.tsx'
 
 export function SolidWorkflowActivityCard(props: {
   activity: WorkbenchActivityNode
@@ -84,7 +84,8 @@ export function SolidWorkflowActivityCard(props: {
       </Show>
       <Show when={terminationSummary()}>{summary => <small class="term-workflow-termination">{summary()}</small>}</Show>
       <Show when={resultSummary()}>{summary => <p class="term-workflow-result">{summary()}</p>}</Show>
-      <For each={output()}>{part => <WorkflowOutputPart part={part} appearance={props.appearance} />}</For>
+      <For each={output()}>{(part, index) => <ToolContentPart part={part} appearance={props.appearance}
+        commands={props.commands} class="term-workflow-result" nodeId={`${props.activity.id}:output:${index()}`} />}</For>
       <Show when={props.activity.error}>
         {error => <div class="term-workflow-error" role="alert">{error().userSummary}</div>}
       </Show>
@@ -109,39 +110,8 @@ export function SolidWorkflowActivityCard(props: {
   </section>
 }
 
-function WorkflowOutputPart(props: { part: ContentPart; appearance?: RenderAppearanceSnapshot }) {
-  const part = () => props.part
-  return part().kind === 'terminal'
-    ? <SolidTerminalBlock part={part() as Extract<ContentPart, { kind: 'terminal' }>} appearance={props.appearance} />
-    : part().kind === 'log'
-      ? <SolidLogBlock part={part() as Extract<ContentPart, { kind: 'log' }>} appearance={props.appearance} />
-      : part().kind === 'text' || part().kind === 'markdown'
-        ? <p class="term-workflow-result" style={{ 'white-space': 'pre-wrap' }}>{textOf(part())}</p>
-        : part().kind === 'code'
-          ? <pre class="solid-content-unknown" data-content-kind="content.code"><code>{textOf(part())}</code></pre>
-          : part().kind === 'unknown'
-            ? <WorkflowUnknownOutput part={part() as UnknownContentPart} />
-            : <pre class="solid-content-unknown" data-content-kind={part().kind}>Unsupported workflow content: {part().kind}</pre>
-}
-
-function WorkflowUnknownOutput(props: { part: UnknownContentPart }) {
-  const raw = () => {
-    try { return JSON.stringify(props.part.raw, null, 2) } catch { return '[unavailable]' }
-  }
-  return <section class="solid-content-unknown" data-content-kind="content.unknown"
-    aria-label={`未知工作流内容：${props.part.originalType}`}>
-    <strong>未知内容：{props.part.originalType}</strong>
-    <span>{props.part.summary}</span>
-    <details><summary>Raw 审计信息</summary><pre>{raw()}</pre></details>
-  </section>
-}
-
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value)
-}
-
-function textOf(part: ContentPart): string {
-  return 'text' in part && typeof part.text === 'string' ? part.text : ''
 }
 
 function boundedNumber(value: unknown, min: number, max: number, fallback: number): number {

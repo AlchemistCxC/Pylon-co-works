@@ -115,7 +115,9 @@ describe('C10 workflow activity rendering', () => {
     const result = render(() => <SolidWorkflowActivityCard activity={task} />)
     expect(result.container).toHaveTextContent('indexed 12 files')
     expect(result.container).toHaveTextContent('未知内容：vendor-step')
-    expect(result.container).toHaveTextContent('"state": "odd"')
+    expect(result.container.querySelector('.tool-object-inspector')).toHaveTextContent('state')
+    expect(result.container.querySelector('.tool-object-inspector')).toHaveTextContent('odd')
+    expect(result.container.textContent).not.toContain('"state": "odd"')
     expect(result.getByRole('alert')).toHaveTextContent('index failed')
   })
 

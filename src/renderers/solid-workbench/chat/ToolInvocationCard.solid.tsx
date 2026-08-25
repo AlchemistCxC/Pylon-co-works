@@ -1,4 +1,4 @@
-import { For, Show, createEffect, createMemo, createSignal } from 'solid-js'
+import { Show, createMemo } from 'solid-js'
 import type { RenderAppearanceSnapshot, RenderCommandPort } from '../../../contracts/messageRenderer.ts'
 import { coalesceAdjacentDisplayTextParts, createUnknownContentPart, isValidDiffContentInput, isValidLspDiagnosticContentInput, type ContentPart, type LspDiagnosticContentPart } from '../../../domains/workbench/content/contentPartSchema.ts'
 import { diffSnapshotFromPart } from '../../../domains/workbench/diffSnapshot.ts'
@@ -13,6 +13,11 @@ import { BUILTIN_MEDIA_RESOLVER_OPTIONS } from '../mediaAssetAdapter.ts'
 import { SolidSearchOrLink } from './content/SearchResults.solid.tsx'
 import { SolidDiffContent, SolidLspDiagnosticContent } from './content/DiffDiagnosticContent.solid.tsx'
 import { SolidLogBlock, SolidTerminalBlock } from './content/TerminalBlock.solid.tsx'
+import { ToolBody } from './tool/ToolBody.solid.tsx'
+import { ToolObjectInspector } from './tool/ToolObjectInspector.solid.tsx'
+import { SolidUnknownContent } from './content/UnknownContent.solid.tsx'
+import { isStructuredContentKind, SolidStructuredContent } from './content/StructuredContent.solid.tsx'
+import { createCollapsiblePresenter } from './CollapsiblePresenter.solid.tsx'
 
 const NO_COMMANDS: RenderCommandPort = { execute: () => {}, canExecute: () => false }
 
@@ -33,20 +38,17 @@ export function SolidToolInvocationCard(props: {
     || props.snapshot.canonicalName
     || props.snapshot.name
     || '未知工具'
-  const [open, setOpen] = createSignal(!booleanSetting(props.appearance, 'defaultCollapsed', true))
-  const bodyId = () => `solid-tool-snapshot-${safeDomId(props.snapshot.id)}`
-  let currentSnapshotId = props.snapshot.id
-  createEffect(() => {
-    const nextSnapshotId = props.snapshot.id
-    if (nextSnapshotId === currentSnapshotId) return
-    currentSnapshotId = nextSnapshotId
-    setOpen(!booleanSetting(props.appearance, 'defaultCollapsed', true))
+  const collapse = createCollapsiblePresenter({
+    defaultOpen: () => !booleanSetting(props.appearance, 'defaultCollapsed', true),
+    resetKey: () => props.snapshot.id,
+    bodyId: () => `solid-tool-snapshot-${safeDomId(props.snapshot.id)}`,
   })
   const parts = createMemo<readonly ContentPart[]>(() => coalesceAdjacentDisplayTextParts(
     Array.isArray(props.snapshot.result?.parts)
       ? props.snapshot.result!.parts!.filter(isContentPart) as readonly ContentPart[]
       : [],
   ))
+  const inputParts = createMemo<readonly ContentPart[] | undefined>(() => contentParts(props.snapshot.input))
   const duration = () => booleanSetting(props.appearance, 'showDuration', true)
     ? formatDuration(props.snapshot.result?.durationMs)
     : ''
@@ -69,8 +71,8 @@ export function SolidToolInvocationCard(props: {
       'max-width': `${numberSetting(props.appearance, 'maxWidth', 960)}px`,
     }}
   >
-    <button class="term-tool-head" type="button" aria-expanded={open()} aria-controls={bodyId()}
-      onClick={() => setOpen(value => !value)}>
+    <button class="term-tool-head" type="button" aria-expanded={collapse.open()} aria-controls={collapse.bodyId}
+      onClick={collapse.toggle}>
       <Show when={stringSetting(props.appearance, 'indicator', 'glyph') !== 'none'}>
         <span class={`term-tool-indicator ${presentation().tone}`} aria-hidden="true">
           {indicatorGlyph(stringSetting(props.appearance, 'indicator', 'glyph'), presentation().tone)}
@@ -83,26 +85,19 @@ export function SolidToolInvocationCard(props: {
       <span class="term-tool-suffix"> — {presentation().label}</span>
       <Show when={duration()}>{value => <span class="term-tool-duration"> · {value()}</span>}</Show>
     </button>
-    <Show when={open()}>
-      <div id={bodyId()} class="term-tool-body" style={{ 'max-height': `${numberSetting(props.appearance, 'maxHeight', 420)}px`, overflow: 'auto' }}>
-        <Show when={props.snapshot.input !== undefined}>
-          <ToolField label="输入" value={props.snapshot.input} contentParts />
-        </Show>
-        <Show when={props.snapshot.progress !== undefined}>
-          <ToolField label="进度" value={props.snapshot.progress} />
-        </Show>
-        <Show when={props.snapshot.locations !== undefined}>
-          <ToolField label="位置" value={props.snapshot.locations} class="solid-tool-locations" />
-        </Show>
-        <Show when={parts().length > 0}>
-          <section class="solid-tool-parts" aria-label="工具输出">
-            <span class="term-tool-label">输出</span>
-            <For each={parts()}>{(part, index) => <ToolContentPart
-              part={part} appearance={props.appearance} commands={props.commands}
-              nodeId={`${props.snapshot.id}:part:${index()}`}
-            />}</For>
-          </section>
-        </Show>
+    <Show when={collapse.open()}>
+      <div id={collapse.bodyId} class="term-tool-body" style={{ 'max-height': `${numberSetting(props.appearance, 'maxHeight', 420)}px`, overflow: 'auto' }}>
+        <ToolBody
+          snapshot={props.snapshot}
+          renderKind={props.renderKind}
+          parts={parts()}
+          inputParts={inputParts()}
+          commands={props.commands}
+          renderPart={(part, index, source) => <ToolContentPart
+            part={part} appearance={props.appearance} commands={props.commands}
+            nodeId={`${props.snapshot.id}:${source}:${index}`}
+          />}
+        />
         <Show when={props.snapshot.result?.error}>
           {error => <ToolError error={error()} />}
         </Show>
@@ -122,17 +117,7 @@ export function SolidToolInvocationCard(props: {
   </article>
 }
 
-function ToolField(props: { label: string; value: unknown; class?: string; contentParts?: boolean }) {
-  const parts = () => props.contentParts ? contentParts(props.value) : undefined
-  return <section class={`solid-tool-field${props.class ? ` ${props.class}` : ''}`}>
-    <span class="term-tool-label">{props.label}</span>
-    <Show when={parts()} fallback={<pre>{safeJson(props.value)}</pre>}>
-      {items => <div data-tool-input-parts><For each={items()}>{part => <ToolContentPart part={part} />}</For></div>}
-    </Show>
-  </section>
-}
-
-function ToolContentPart(props: { part: ContentPart; appearance?: RenderAppearanceSnapshot; commands?: RenderCommandPort; nodeId?: string }) {
+export function ToolContentPart(props: { part: ContentPart; appearance?: RenderAppearanceSnapshot; commands?: RenderCommandPort; nodeId?: string; class?: string }) {
   if (props.part.kind === 'code' && 'text' in props.part && typeof props.part.text === 'string') {
     return <SolidCodeBlock code={props.part.text} language={props.part.language} />
   }
@@ -140,10 +125,18 @@ function ToolContentPart(props: { part: ContentPart; appearance?: RenderAppearan
     return <SolidAnsiBlock text={props.part.text} />
   }
   if ((props.part.kind === 'text' || props.part.kind === 'markdown') && 'text' in props.part && typeof props.part.text === 'string') {
-    return <div data-tool-part-kind={props.part.kind}><MarkdownContent text={props.part.text} /></div>
+    return <div class={props.class} data-tool-part-kind={props.part.kind}><MarkdownContent text={props.part.text} /></div>
   }
   if (props.part.kind === 'file-reference' || props.part.kind === 'file-selection' || props.part.kind === 'document' || props.part.kind === 'resource') {
-    return <SolidFileReferenceCard part={props.part} />
+    const canOpen = props.commands?.canExecute?.('resource.open') === true
+    const canReveal = props.commands?.canExecute?.('resource.reveal') === true
+    const canCopy = props.commands?.canExecute?.('clipboard.write') === true
+    return <SolidFileReferenceCard part={props.part} actions={{
+      canOpen, canReveal, canCopy,
+      open: canOpen ? target => { void props.commands?.execute({ type: 'resource.open', payload: target }) } : undefined,
+      reveal: canReveal ? target => { void props.commands?.execute({ type: 'resource.reveal', payload: target }) } : undefined,
+      copyPath: canCopy ? text => { void props.commands?.execute({ type: 'clipboard.write', payload: { text } }) } : undefined,
+    }} />
   }
   if (props.part.kind === 'image' || props.part.kind === 'audio' || props.part.kind === 'video') {
     return <SolidMediaBlock part={props.part} resolverOptions={BUILTIN_MEDIA_RESOLVER_OPTIONS} />
@@ -188,10 +181,16 @@ function ToolContentPart(props: { part: ContentPart; appearance?: RenderAppearan
   if (props.part.kind === 'log') {
     return <SolidLogBlock part={props.part} appearance={props.appearance} />
   }
-  if (props.part.kind === 'unknown') {
-    return <details data-tool-part-kind="unknown"><summary>{props.part.summary}</summary><pre>{safeJson(props.part.raw)}</pre></details>
+  const structuredKind = props.part.kind.includes('.') ? props.part.kind : `content.${props.part.kind}`
+  if (isStructuredContentKind(structuredKind)) {
+    return <SolidStructuredContent kind={structuredKind} payload={props.part} commands={props.commands}
+      renderPart={(part, index) => <ToolContentPart part={part} appearance={props.appearance} commands={props.commands}
+        nodeId={`${props.nodeId ?? 'tool-structured'}:${index}`} />} />
   }
-  return <pre data-tool-part-kind={props.part.kind}>{safeJson(props.part)}</pre>
+  if (props.part.kind === 'unknown') {
+    return <div data-tool-part-kind="unknown"><SolidUnknownContent part={props.part} commands={props.commands} /></div>
+  }
+  return <div data-tool-part-kind={props.part.kind}><ToolObjectInspector value={props.part} commands={props.commands} /></div>
 }
 
 function ToolError(props: { error: NonNullable<NonNullable<ToolInvocationSnapshot['result']>['error']> }) {

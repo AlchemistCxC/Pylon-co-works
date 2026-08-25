@@ -107,4 +107,22 @@ describe('C14 Solid session surface', () => {
     fireEvent.keyDown(card, { key: 'Enter' })
     expect(execute).toHaveBeenCalledWith({ type: 'assist.accept', payload: { text: '继续审计' } })
   })
+
+  it('uses the structured inspector for provider-specific usage and config fields', () => {
+    const { container } = render(() => <>
+      <SolidSessionSurfaceCard kind="session.usage" payload={{
+        inputTokens: 4, raw: { providerTier: 'priority', cache: { hits: 3 } },
+      }} appearance={{ showRaw: true }} commands={{ execute() {} }} />
+      <SolidSessionSurfaceCard kind="session.config" payload={{ options: [{
+        id: 'vendor', label: 'Vendor', value: 'stable', editable: false, raw: { source: 'provider', revision: 2 },
+      }] }} appearance={{ showUnknown: true }} commands={{ execute() {} }} />
+    </>)
+
+    expect(container.querySelector('.solid-session-usage > details > .tool-object-inspector')).not.toBeNull()
+    expect(container.querySelector('.solid-session-config-option > details > .tool-object-inspector')).not.toBeNull()
+    expect(container).toHaveTextContent('priority')
+    expect(container).toHaveTextContent('revision')
+    expect(container.querySelector('.solid-session-usage details pre')).toBeNull()
+    expect(container.querySelector('.solid-session-config-option details pre')).toBeNull()
+  })
 })

@@ -2,6 +2,7 @@ import { For, Show, createEffect, createSignal } from 'solid-js'
 import type { RenderAppearanceSnapshot, RenderCommandPort } from '../../../../contracts/messageRenderer.ts'
 import type { AssistSnapshot, BudgetSnapshot, SessionCommand, SessionConfigOption, UsageSnapshot } from '../../../../domains/workbench/session/sessionSurface.ts'
 import type { JsonValue } from '../../../../domains/workbench/events/workbenchEventSchema.ts'
+import { ToolObjectInspector } from '../tool/ToolObjectInspector.solid.tsx'
 
 export function SolidSessionSurfaceCard(props: {
   kind: 'session.usage' | 'session.budget' | 'session.config' | 'session.commands' | 'assist.prediction' | 'assist.file-suggestions'
@@ -42,7 +43,7 @@ function UsageCard(props: { usage: UsageSnapshot; appearance: RenderAppearanceSn
       </Show>
     </div>
     <Show when={showRaw() && usage().raw}>
-      <details><summary>未知字段</summary><pre>{JSON.stringify(usage().raw, null, 2)}</pre></details>
+      <details><summary>未知字段</summary><ToolObjectInspector value={usage().raw} /></details>
     </Show>
   </section>
 }
@@ -122,7 +123,7 @@ function ConfigOptionEditor(props: { option: SessionConfigOption; commands?: Ren
     <Show when={props.option.editable === true && !protocolWritable()}><small>协议不支持编辑</small></Show>
     <Show when={props.option.editable === false}><small>只读</small></Show>
     <Show when={error()}>{message => <small role="alert">{message()}</small>}</Show>
-    <Show when={props.showRaw && props.option.raw}><details><summary>未知字段</summary><pre>{JSON.stringify(props.option.raw, null, 2)}</pre></details></Show>
+    <Show when={props.showRaw && props.option.raw}><details><summary>未知字段</summary><ToolObjectInspector value={props.option.raw} commands={props.commands} /></details></Show>
   </div>
 }
 

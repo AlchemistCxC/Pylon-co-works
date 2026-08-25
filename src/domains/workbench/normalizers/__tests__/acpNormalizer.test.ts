@@ -87,6 +87,31 @@ describe('ACP normalizer', () => {
     ]))
   })
 
+  it('keeps structured blocks typed from ACP wire through the semantic event seam', () => {
+    const result = normalizeAcpEvent({
+      source: 'peri',
+      update: {
+        sessionUpdate: 'agent_message_chunk',
+        content: [
+          { type: 'progress', current: 2, total: 4, message: 'working' },
+          { type: 'list', title: 'results', items: [{ type: 'code', text: 'const ok = true', language: 'ts' }] },
+          { type: 'tool_result', name: 'Search', status: 'completed', content: [{ type: 'location', path: '/workspace/a.ts', line: 7 }] },
+        ],
+      },
+    }, context)
+
+    expect(result.events[0].event).toMatchObject({
+      type: 'message.delta',
+      role: 'assistant',
+      parts: [
+        { kind: 'progress', current: 2, total: 4, message: 'working' },
+        { kind: 'list', items: [{ kind: 'code', text: 'const ok = true', language: 'ts' }] },
+        { kind: 'tool-result', content: [{ kind: 'location', path: '/workspace/a.ts', line: 7 }] },
+      ],
+    })
+    expect(result.diagnostics).toEqual([])
+  })
+
   it('preserves unknown wire events and changes only provenance between live and replay', () => {
     const live = normalizeAcpEvent({ source: 'peri', update: { sessionUpdate: 'future_event', payload: { x: 1 } } }, context)
     const replay = normalizeAcpEvent({ source: 'peri', update: { sessionUpdate: 'future_event', payload: { x: 1 } } }, {

@@ -98,8 +98,9 @@ describe('C11 SolidInteractionCard', () => {
     const resolved = { ...permissionPending, status: 'resolved', response: { optionId: 'deny' } } as unknown as WorkbenchInteraction
     const resolvedView = render(() => <SolidInteractionCard interaction={resolved} commands={{ execute: vi.fn(), canExecute: () => true }} />)
     expect(resolvedView.container.textContent).toContain('已响应')
-    expect(resolvedView.container.textContent).toContain('"optionId":"deny"')
-    expect(resolvedView.container.querySelectorAll('button')).toHaveLength(0)
+    expect(resolvedView.container.querySelector('.interaction-response .tool-object-inspector')).toHaveTextContent('optionId')
+    expect(resolvedView.container.querySelector('.interaction-response .tool-object-inspector')).toHaveTextContent('deny')
+    expect(resolvedView.container.querySelectorAll('.interaction-options button')).toHaveLength(0)
 
     const expired = { ...permissionPending, status: 'expired', reason: 'ttl elapsed' } as unknown as WorkbenchInteraction
     const expiredView = render(() => <SolidInteractionCard interaction={expired} />)

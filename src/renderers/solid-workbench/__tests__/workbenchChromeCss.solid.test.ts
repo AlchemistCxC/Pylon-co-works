@@ -40,13 +40,14 @@ describe('Solid 工作台壳层样式契约', () => {
     expect(cc, '中控槽缺 flex-shrink:0（会被消息流挤压）').toContain('flex-shrink:0')
   })
 
-  it('pet 占位与裸 surface 区块在过渡态受控（pet 隐藏假 UI；document surface 有最小间距体系）', () => {
+  it('pet 占位与裸 surface 区块在过渡态受控（activity 行不得偏离消息指示列）', () => {
     const pet = extractBlock(chromeCss, ".solid-workbench-pet-slot[data-fixture='pending']")
     expect(pet, 'pet 文字占位必须隐藏（data-fixture=pending 过渡态不展示假 UI）').toContain('display:none')
     const timeline = extractBlock(chromeCss, '.solid-workbench-timeline')
     expect(timeline, 'timeline 裸区块缺最小间距').toMatch(/margin|padding/)
     const activities = extractBlock(chromeCss, '.solid-workbench-activities')
     expect(activities).toMatch(/margin|padding/)
+    expect(activities, 'activity 列表嵌入消息流后不得增加水平外边距，否则工具指示器会偏离助手圆点').toContain('margin:8px00')
   })
 
   it('回放只读遮罩有可见形态（position+层级），空态居中', () => {

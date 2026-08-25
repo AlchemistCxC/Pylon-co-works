@@ -1,6 +1,8 @@
 // @vitest-environment jsdom
-import { cleanup, render, screen } from '@solidjs/testing-library'
+import { cleanup, fireEvent, render, screen } from '@solidjs/testing-library'
+import { createSignal } from 'solid-js'
 import { afterEach, describe, expect, it, vi } from 'vitest'
+import type { ToolInvocationSnapshot } from '../../../../domains/workbench/workbenchProjector.ts'
 import { SolidToolInvocationCard } from '../ToolInvocationCard.solid.tsx'
 
 afterEach(cleanup)
@@ -147,9 +149,193 @@ describe('C04 SolidToolInvocationCard', () => {
     screen.getByRole('button', { name: '打开' }).click()
     expect(execute).toHaveBeenCalledWith({ type: 'resource.open', payload: { uri: 'https://example.com/a' } })
   })
+
+  it('presents generic input as a typed tree instead of one JSON pre block', () => {
+    const execute = vi.fn()
+    const { container } = render(() => <SolidToolInvocationCard
+      renderKind="tool.generic"
+      appearance={{ defaultCollapsed: false }}
+      commands={{ execute, canExecute: type => type === 'clipboard.write' || type === 'resource.open' }}
+      snapshot={{
+        id: 'tool-object', name: 'CustomTool', status: 'running',
+        input: { enabled: true, retries: 3, source_path: '/workspace/source.ts', options: { mode: 'safe' } },
+      }}
+    />)
+
+    expect(container.querySelector('.tool-object-inspector')).not.toBeNull()
+    expect(container.querySelector('.solid-tool-field > pre')).toBeNull()
+    expect(container.querySelector('[data-primitive-type="boolean"]')).toHaveTextContent('true')
+    expect(container.querySelector('[data-primitive-type="number"]')).toHaveTextContent('3')
+    const resource = screen.getByRole('button', { name: '/workspace/source.ts' })
+    resource.click()
+    expect(execute).toHaveBeenCalledWith({ type: 'resource.open', payload: { path: '/workspace/source.ts' } })
+  })
+
+  it('keeps an expanded tool mounted while a streaming snapshot is updated', () => {
+    const [snapshot, setSnapshot] = createSignal<ToolInvocationSnapshot>({
+      id: 'stream-stable', name: 'Bash', semanticKind: 'tool.execute', status: 'running',
+      input: { command: 'npm test' }, progress: { completed: 1, total: 2, message: 'running' },
+    })
+    const { container } = render(() => <SolidToolInvocationCard
+      renderKind="tool.execute" appearance={{}} snapshot={snapshot()} />)
+
+    screen.getByRole('button', { name: /Bash/ }).click()
+    const card = container.querySelector('.term-tool')
+    expect(container.querySelector('.tool-progress-track')).toHaveAttribute('aria-valuenow', '50')
+
+    setSnapshot(previous => ({ ...previous, status: 'completed', progress: { completed: 2, total: 2, message: 'done' }, result: { rawOutput: 'passed' } }))
+
+    expect(container.querySelector('.term-tool')).toBe(card)
+    expect(container.querySelector('.term-tool-head')).toHaveAttribute('aria-expanded', 'true')
+    expect(container.querySelector('.tool-progress-track')).toHaveAttribute('aria-valuenow', '100')
+    expect(container.querySelector('.tool-plain-output')).toHaveTextContent('passed')
+  })
+
+  it('preserves a deep object branch while streamed input fields update', () => {
+    const [snapshot, setSnapshot] = createSignal<ToolInvocationSnapshot>({
+      id: 'stream-object', name: 'mcp__repo__search', capabilities: ['mcp'], status: 'running',
+      input: { server_name: 'repo', arguments: { filters: { language: 'ts' } } },
+    })
+    const { container } = render(() => <SolidToolInvocationCard
+      renderKind="tool.generic" appearance={{ defaultCollapsed: false }} snapshot={snapshot()} />)
+    const nested = container.querySelector<HTMLDetailsElement>('.tool-object-branch .tool-object-branch')!
+    nested.open = true
+    fireEvent(nested, new Event('toggle'))
+    expect(nested).toHaveAttribute('open')
+
+    setSnapshot(previous => ({
+      ...previous,
+      progress: { completed: 1, total: 2 },
+      input: { server_name: 'repo', arguments: { page: 2, filters: { language: 'ts', generated: false } } },
+    }))
+
+    expect(container.querySelector('.tool-object-branch .tool-object-branch')).toBe(nested)
+    expect(nested).toHaveAttribute('open')
+    expect(nested).toHaveTextContent('generated')
+  })
+})
+
+describe('tool-kind presenters', () => {
+  it('shows a read target, range and FileSheet deep link', () => {
+    const execute = vi.fn()
+    render(() => <SolidToolInvocationCard
+      renderKind="tool.read" appearance={{ defaultCollapsed: false }}
+      commands={{ execute, canExecute: type => type === 'resource.open' }}
+      snapshot={{
+        id: 'read-rich', name: 'Read', status: 'completed',
+        input: { file_path: '/workspace/readme.md', start_line: 4, end_line: 12, encoding: 'utf-8' },
+        result: { parts: [{ kind: 'text', text: 'preview' }] },
+      }}
+    />)
+
+    expect(screen.getByRole('region', { name: '读取目标' })).toHaveTextContent('行 4–12')
+    expect(screen.getByRole('region', { name: '读取目标' })).toHaveTextContent('编码 · utf-8')
+    screen.getByRole('button', { name: '在 FileSheet 打开' }).click()
+    expect(execute).toHaveBeenCalledWith({ type: 'resource.open', payload: { path: '/workspace/readme.md' } })
+  })
+
+  it('preserves URI semantics for read targets and generic inspector fields', () => {
+    const execute = vi.fn()
+    render(() => <SolidToolInvocationCard
+      renderKind="tool.read" appearance={{ defaultCollapsed: false }}
+      commands={{ execute, canExecute: type => type === 'resource.open' }}
+      snapshot={{
+        id: 'read-uri-rich', name: 'ReadResource', status: 'completed',
+        input: { uri: 'acp-resource://server/readme', mirror_uri: 'git://example.test/repo' },
+      }}
+    />)
+
+    screen.getByRole('button', { name: '在 FileSheet 打开' }).click()
+    expect(execute).toHaveBeenNthCalledWith(1, {
+      type: 'resource.open', payload: { uri: 'acp-resource://server/readme' },
+    })
+    screen.getByRole('button', { name: 'git://example.test/repo' }).click()
+    expect(execute).toHaveBeenNthCalledWith(2, {
+      type: 'resource.open', payload: { uri: 'git://example.test/repo' },
+    })
+  })
+
+  it('shows command context and a safe plain output fallback', () => {
+    const execute = vi.fn()
+    const { container } = render(() => <SolidToolInvocationCard
+      renderKind="tool.execute" appearance={{ defaultCollapsed: false }}
+      commands={{ execute, canExecute: type => type === 'clipboard.write' }}
+      snapshot={{
+        id: 'exec-rich', name: 'Bash', status: 'completed',
+        input: { command: 'npm test', cwd: '/workspace', env: { CI: '1' } },
+        result: { rawOutput: '10 tests passed' },
+      }}
+    />)
+
+    expect(screen.getByRole('region', { name: '执行命令' })).toHaveTextContent('npm test')
+    expect(screen.getByRole('region', { name: '执行命令' })).toHaveTextContent('cwd · /workspace')
+    expect(container.querySelector('.tool-plain-output')).toHaveTextContent('10 tests passed')
+    expect(container.querySelector('.tool-output-fallback > pre')).not.toHaveTextContent('"10 tests passed"')
+  })
+
+  it('deepens generic agent, plan, skill, MCP, browser and artifact tools without changing catalog identity', () => {
+    const { container } = render(() => <>
+      <SolidToolInvocationCard renderKind="tool.execute" appearance={{ defaultCollapsed: false }} snapshot={{
+        id: 'delegate-rich', name: 'Agent', semanticKind: 'tool.execute', action: 'delegate', status: 'running',
+        input: { prompt: '审计消息重放边界', subagent_type: 'reviewer', model: 'sonnet', run_in_background: true },
+      }} />
+      <SolidToolInvocationCard renderKind="tool.generic" appearance={{ defaultCollapsed: false }} snapshot={{
+        id: 'plan-rich', name: 'TodoWrite', action: 'plan', status: 'completed',
+        input: { objective: '完成富渲染接线', todos: [{ content: '工具卡' }, { content: '生命周期卡' }] },
+      }} />
+      <SolidToolInvocationCard renderKind="tool.read" appearance={{ defaultCollapsed: false }} snapshot={{
+        id: 'skill-rich', name: 'Skill', semanticKind: 'tool.read', action: 'skill', status: 'completed',
+        input: { skill: 'diagnose', path: '/workspace/skills/diagnose/SKILL.md' },
+      }} />
+      <SolidToolInvocationCard renderKind="tool.generic" appearance={{ defaultCollapsed: false }} snapshot={{
+        id: 'mcp-rich', name: 'mcp__github__search_code', capabilities: ['mcp', 'dynamic-schema'], status: 'completed',
+        input: { server_name: 'github', arguments: { query: 'SolidToolInvocationCard' } },
+      }} />
+      <SolidToolInvocationCard renderKind="tool.execute" appearance={{ defaultCollapsed: false }} snapshot={{
+        id: 'browser-rich', name: 'BrowserClick', semanticKind: 'tool.execute', action: 'click', status: 'completed',
+        input: { url: 'https://example.com', selector: '#submit', tabId: 'tab-7' },
+      }} />
+      <SolidToolInvocationCard renderKind="tool.generic" appearance={{ defaultCollapsed: false }} snapshot={{
+        id: 'artifact-rich', name: 'artifact_tool', status: 'completed',
+        input: { title: '发布报告', path: '/workspace/report.md', format: 'markdown' },
+      }} />
+    </>)
+
+    expect(screen.getByRole('region', { name: '代理委派' })).toHaveTextContent('审计消息重放边界')
+    expect(screen.getByRole('region', { name: '代理委派' })).toHaveTextContent('后台运行')
+    expect(screen.getByRole('region', { name: '计划与任务' })).toHaveTextContent('2 项')
+    expect(screen.getByRole('region', { name: 'Skill 调用' })).toHaveTextContent('diagnose')
+    expect(screen.getByRole('region', { name: 'MCP 调用' })).toHaveTextContent('github')
+    expect(screen.getByRole('region', { name: 'MCP 调用' })).toHaveTextContent('search_code')
+    expect(screen.getByRole('region', { name: '浏览器操作' })).toHaveTextContent('#submit')
+    expect(screen.getByRole('region', { name: '产物操作' })).toHaveTextContent('发布报告')
+    expect(container.querySelector('[data-tool-call-id="delegate-rich"] [data-tool-body-kind="tool.delegate"]')).not.toBeNull()
+    expect(container.querySelector('[data-tool-call-id="mcp-rich"] .tool-object-inspector')).toHaveTextContent('SolidToolInvocationCard')
+  })
 })
 
 describe('C06 edit/write nested content', () => {
+  it('preserves custom URI semantics in edit summaries', () => {
+    const execute = vi.fn()
+    render(() => <SolidToolInvocationCard
+      renderKind="tool.edit"
+      appearance={{ defaultCollapsed: false }}
+      snapshot={{
+        id: 'edit-uri', name: 'EditResource', status: 'completed',
+        input: { uri: 'acp-resource://workspace/document/7' },
+        result: { parts: [{ kind: 'diff', path: 'acp-resource://workspace/document/7', lines: [] }] },
+      }}
+      commands={{ execute, canExecute: type => type === 'resource.open' }}
+    />)
+
+    const resources = screen.getAllByRole('button', { name: 'acp-resource://workspace/document/7' })
+    expect(resources).toHaveLength(1)
+    resources[0].click()
+    expect(execute).toHaveBeenCalledWith({
+      type: 'resource.open', payload: { uri: 'acp-resource://workspace/document/7' },
+    })
+  })
+
   it('renders normalized diff result parts without falling back to JSON', () => {
     const { container } = render(() => <SolidToolInvocationCard
       renderKind="tool.edit"
@@ -168,6 +354,8 @@ describe('C06 edit/write nested content', () => {
     />)
 
     expect(screen.getByRole('region', { name: 'Diff：/src/tool.ts' })).toBeTruthy()
+    expect(screen.getByRole('region', { name: '编辑摘要' })).toHaveTextContent('+1')
+    expect(screen.getByRole('region', { name: '编辑摘要' })).toHaveTextContent('−1')
     expect(container.querySelector('[data-tool-part-kind="diff"]')).toBeNull()
     expect(container.textContent).not.toContain('"kind": "diff"')
   })

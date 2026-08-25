@@ -1,0 +1,18 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Solid Rich Content QA</title>
+  </head>
+  <body>
+    <main class="app" data-interface-mode="terminal-like" data-ui-scheme="light"
+      data-presentation-profile="solid-rich-qa.terminal-claude"
+      data-msg-style="terminal" data-message-layout="claude">
+      <section class="main renderer-suite-workbench" data-renderer-suite-host="true">
+        <div id="root" class="renderer-suite-workbench-mount"></div>
+      </section>
+    </main>
+    <script type="module" src="/src/renderers/solid-workbench/smoke/mountSolidRichQa.solid.tsx"></script>
+  </body>
+</html>

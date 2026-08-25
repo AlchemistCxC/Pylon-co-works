@@ -741,7 +741,7 @@ function isTextKind(kind: string): kind is TextContentPart['kind'] {
 }
 
 function isKnownStructuredKind(kind: string): boolean {
-  return ['redacted-reasoning', 'document', 'file-reference', 'file-selection', 'diff', 'location', 'terminal', 'log', 'progress', 'list', 'key-value', 'json', 'link', 'search-result', 'diagnostic-lsp', 'tool-use', 'artifact', 'memory', 'skill', 'mcp-resource'].includes(kind)
+  return ['redacted-reasoning', 'document', 'file-reference', 'file-selection', 'diff', 'location', 'terminal', 'log', 'progress', 'list', 'key-value', 'json', 'link', 'search-result', 'diagnostic-lsp', 'tool-use', 'tool-result', 'artifact', 'memory', 'skill', 'mcp-resource'].includes(kind)
 }
 
 function nonEmptyString(value: unknown): value is string {
