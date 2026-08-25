@@ -14,7 +14,7 @@ afterEach(async () => {
 })
 
 describe('Settings option contribution rendering', () => {
-  it('在宿主 Select 中反映删除、修改和新增，且保留已失效当前值', () => {
+  it('在宿主候选控件中反映删除、修改和新增，且保留已失效当前值', () => {
     registrations.push(getPluginSettingOptionsRegistry().register(createPluginIdentity('test.settings', 'select'), {
       id: 'test.settings.msg-style', target: 'theme.msgStyle',
       remove: ['terminal'],
@@ -22,12 +22,11 @@ describe('Settings option contribution rendering', () => {
     }))
     render(<ZoneGroupFields zone="chat" ctx={{ t: { ...DEFAULTS }, onChange: () => {} }} />)
 
-    const trigger = screen.getByRole('combobox', { name: '消息风格' })
-    expect(trigger).toHaveTextContent('terminal（已不可用）')
-    fireEvent.click(trigger)
-    expect(screen.getByRole('option', { name: '插件气泡' })).toBeInTheDocument()
-    expect(screen.getByRole('option', { name: '插件卡片' })).toBeInTheDocument()
-    expect(screen.queryByRole('option', { name: '终端记录流' })).not.toBeInTheDocument()
+    expect(screen.getByRole('radiogroup', { name: '消息风格' })).toBeInTheDocument()
+    expect(screen.getByRole('radio', { name: 'terminal（已不可用）' })).toBeDisabled()
+    expect(screen.getByRole('radio', { name: '插件气泡' })).toBeInTheDocument()
+    expect(screen.getByRole('radio', { name: '插件卡片' })).toBeInTheDocument()
+    expect(screen.queryByRole('radio', { name: '终端记录流' })).not.toBeInTheDocument()
   })
 
   it('仅在目标颜色字段中展示插件色板', () => {

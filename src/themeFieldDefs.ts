@@ -27,7 +27,7 @@ export interface ThemeFieldDef {
   /** Settings 分组标题（声明式 UI 按 group 渲染） */
   group?: string
   /** 特殊控件标识（渲染器分发到专用组件） */
-  control?: 'default' | 'bgImage' | 'spinnerMarker' | 'schemeChip' | 'fontPicker' | 'segmented'
+  control?: 'default' | 'bgImage' | 'spinnerMarker' | 'schemeChip' | 'fontPicker' | 'segmented' | 'toolIndicator'
   /** Dynamic font registries may add stable ids beyond the built-in options. */
   allowCustomOptions?: boolean
   fontRole?: FontRole
@@ -154,8 +154,8 @@ export const THEME_FIELD_DEFS = {
   editorActiveLine: { ...C('chat', '当前行高亮'), default: 'rgba(0,0,0,0.04)', group: "文件编辑器", },
   editorTabActive: { ...C('chat', '活动文件标签'), default: '#3b82f6', group: "文件编辑器", },
   editorModifiedMark: { ...C('chat', '改动标记'), default: '#b47814', group: "文件编辑器", },
-  // toolIndicator 走 widgetRegistry 动态选项（toolIndicatorOptions），不进声明式 UI
-  toolIndicator: { ...S('chat', '指示器形状', ['●', '■', '◆', '▶', '✦']), default: '●',  },
+  // toolIndicator 候选由 toolIndicatorOptions 单一真值提供；静态 options 仅供 schema/旧值归一化参考。
+  toolIndicator: { ...S('chat', '指示器形状', ['●', '■', '◆', '▶', '✦']), default: '●', control: 'toolIndicator', group: "指示器与连接线" },
   // CSS 变量走 --pv-connector-*（ChatView 内联计算），字段不注入独立 var
   toolIndicatorGlow: { ...N('chat', '指示器光晕', 0, 20, 1), default: 0, group: "指示器与连接线", suffix: 'px', noCssVar: true },
   toolIndicatorGlowColor: { ...C('chat', '光晕颜色'), default: '', group: "指示器与连接线", noCssVar: true },

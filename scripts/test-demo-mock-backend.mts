@@ -82,9 +82,10 @@ import { mockInvokeCommand } from '../src/demo/mockTauri.ts'
 }
 
 // 3. ack 类命令不 reject（防错误噪音）
-for (const cmd of ['send_message', 'switch_agent', 'update_agents_config', 'set_approval_mode', 'close_session', 'export_session', 'clear_runtime_logs']) {
+for (const cmd of ['send_message', 'switch_agent', 'set_approval_mode', 'close_session', 'export_session', 'clear_runtime_logs']) {
   await mockInvokeCommand(cmd, {}).catch(() => assert.fail(`${cmd} 不应 reject`))
 }
+await mockInvokeCommand('update_agents_config', { expectedRevision: 'demo-config-1', config: {} })
 
 // 4. 诚实保留：browser_start（CDP 组）与未知命令 reject，message 含 not found
 await assert.rejects(mockInvokeCommand('browser_start', { lazy: true }), /not found/i, 'browser_start 不得 mock（待后端）')

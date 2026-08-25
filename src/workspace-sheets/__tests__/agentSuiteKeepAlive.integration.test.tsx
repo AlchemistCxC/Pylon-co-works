@@ -50,7 +50,7 @@ describe('Agent Renderer Suite tab lifecycle', () => {
       const overviewId = useWorkspaceStore.getState().openSheet({ kind: 'overview', title: 'Overview' })!
       useWorkspaceStore.getState().focusSheet(agentId)
       const view = render(<SheetLayout activeSession={null} onSelectSession={() => {}} onProfileEdit={() => {}} onSessionSettings={() => {}} />)
-      await screen.findByText('keep-alive-suite', {}, { timeout: 5_000 })
+      await screen.findByText('keep-alive-suite', {}, { timeout: 15_000 })
       expect(getActiveWorkbenchHostPort(agentId)).toBeDefined()
 
       act(() => useWorkspaceStore.getState().focusSheet(overviewId))

@@ -51,7 +51,7 @@ const state: PersistedSheetState = {
   activeSheetId: 'file-a',
   recentlyClosed: [],
   agentStates: {
-    profile-a: { activeProfileId: 'default', activeSessionId: 'session-a' },
+    'profile-a': { activeProfileId: 'default', activeSessionId: 'session-a' },
     obsolete: { activeSessionId: 'must-drop' },
   },
 }
@@ -60,11 +60,11 @@ const serialized = serializeSheetStateV1(state)
 assert.equal(JSON.parse(serialized).version, 1)
 assert.deepEqual(parseSheetStateV1(serialized, ['profile-a']), {
   ...state,
-  agentStates: { profile-a: state.agentStates.profile-a },
+  agentStates: { 'profile-a': state.agentStates['profile-a'] },
 })
 assert.equal(parseSheetStateV1(serialized, ['profile-a']).sheets.find(sheet => sheet.id === 'agent-a')?.pinned, true)
 assert.deepEqual(parseSheetStateV1(serialized, ['other']).sheets.map(sheet => sheet.agentId), [undefined])
-assert.deepEqual(parseSheetStateV1(serialized, ['profile-a']).agentStates, { profile-a: state.agentStates.profile-a })
+assert.deepEqual(parseSheetStateV1(serialized, ['profile-a']).agentStates, { 'profile-a': state.agentStates['profile-a'] })
 assert.deepEqual(parseSheetStateV1(JSON.stringify({ version: 999, state })), EMPTY_PERSISTED_SHEET_STATE)
 assert.deepEqual(parseSheetStateV1('{not-json'), EMPTY_PERSISTED_SHEET_STATE)
 
@@ -80,7 +80,7 @@ const storage = new MemoryStorage()
 storage.setItem('pylon-workspace-sheets', serialized)
 const migrated = loadSheetStateV2(storage, ['profile-a'])
 assert.equal(migrated.migrated, true, 'v1 输入必须标记 migrated')
-assert.deepEqual(migrated.state, { ...state, agentStates: { profile-a: state.agentStates.profile-a } })
+assert.deepEqual(migrated.state, { ...state, agentStates: { 'profile-a': state.agentStates['profile-a'] } })
 assert.equal(migrated.layout.sidebarWidth, 250, 'v1 迁移 layout 取默认 250（主题值由 workspaceStore hydrate 搬家）')
 
 console.log('F0.2 Sheet 持久化 v1 迁移源回归测试通过')

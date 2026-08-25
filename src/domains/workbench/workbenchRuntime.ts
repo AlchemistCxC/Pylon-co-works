@@ -202,9 +202,15 @@ function freezeSnapshot(snapshot: WorkbenchRuntimeSnapshot): WorkbenchRuntimeSna
 }
 
 function freezeDocument(document: WorkbenchDocument, previous?: WorkbenchDocument): WorkbenchDocument {
-  const freezeItems = <T extends object>(items: readonly T[], previousItems?: readonly T[]): readonly T[] => {
+  const freezeItems = <T extends object>(
+    items: readonly T[],
+    previousItems?: readonly T[],
+    freezeItem: (item: T) => T = item => Object.freeze({ ...item }) as T,
+  ): readonly T[] => {
     if (items === previousItems && Object.isFrozen(items)) return items
-    return Object.freeze(items.map(item => Object.freeze({ ...item })))
+    return Object.freeze(items.map((item, index) => item === previousItems?.[index] && Object.isFrozen(item)
+      ? item
+      : freezeItem(item)))
   }
   const session = document.session === previous?.session && Object.isFrozen(document.session)
     ? document.session
@@ -249,11 +255,11 @@ function freezeDocument(document: WorkbenchDocument, previous?: WorkbenchDocumen
     ...document,
     appliedEventIds: document.appliedEventIds === previous?.appliedEventIds && Object.isFrozen(document.appliedEventIds) ? document.appliedEventIds : Object.freeze([...document.appliedEventIds]),
     timeline: freezeItems(document.timeline, previous?.timeline),
-    messages: freezeItems(document.messages, previous?.messages),
-    activities: freezeItems(document.activities, previous?.activities),
-    interactions: freezeItems(document.interactions, previous?.interactions),
+    messages: freezeItems(document.messages, previous?.messages, freezeDeepSnapshot),
+    activities: freezeItems(document.activities, previous?.activities, freezeDeepSnapshot),
+    interactions: freezeItems(document.interactions, previous?.interactions, freezeDeepSnapshot),
     extensions,
-    diagnostics: freezeItems(document.diagnostics, previous?.diagnostics),
+    diagnostics: freezeItems(document.diagnostics, previous?.diagnostics, freezeDeepSnapshot),
     session,
     assist: document.assist === previous?.assist && Object.isFrozen(document.assist)
       ? document.assist
@@ -267,6 +273,18 @@ function freezeDocument(document: WorkbenchDocument, previous?: WorkbenchDocumen
       }),
     plan,
   })
+}
+
+function freezeDeepSnapshot<T extends object>(value: T): T {
+  return freezeDeepValue(value) as T
+}
+
+function freezeDeepValue(value: unknown): unknown {
+  if (Array.isArray(value)) return Object.freeze(value.map(freezeDeepValue))
+  if (value && typeof value === 'object') {
+    return Object.freeze(Object.fromEntries(Object.entries(value).map(([key, nested]) => [key, freezeDeepValue(nested)])))
+  }
+  return value
 }
 
 function freezeUsage(usage: NonNullable<WorkbenchDocument['session']['usage']>): NonNullable<WorkbenchDocument['session']['usage']> {
@@ -347,6 +365,7 @@ function documentFromLegacy(snapshot: Omit<WorkbenchRuntimeSnapshot, 'revision'>
   const base = createWorkbenchDocument(snapshot.sessionId ?? '')
   const messages: WorkbenchMessage[] = snapshot.messages.map(message => ({
     id: message.id,
+    segmentId: message.id,
     role: message.role === 'reasoning' ? 'reasoning' : message.role === 'user' ? 'user' : 'assistant',
     content: message.content,
     parts: [],

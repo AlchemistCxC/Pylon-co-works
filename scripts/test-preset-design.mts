@@ -1,11 +1,14 @@
 import { strict as assert } from 'node:assert'
 import { GLOBAL_PRESETS, ZONE_FIELDS } from '../src/presets.ts'
-import { THEME_DEFAULTS } from '../src/themeFieldDefs.ts'
+import { DEFAULTS } from '../src/domains/theme/themeDefaults.ts'
 
 // W2-15（F3-B）：预设是 delta——断言经 { ...THEME_DEFAULTS, ...delta } 展开后的有效值
-const expand = (theme: Record<string, unknown>) => ({ ...THEME_DEFAULTS, ...theme })
+const expand = (theme: Record<string, unknown>) => ({ ...DEFAULTS, ...theme })
 
-assert.deepEqual(GLOBAL_PRESETS.map(preset => preset.label), ['Claude 风格', 'Glass Light', 'Nord Frost', 'Tokyo Night', 'Solarized Light', 'Amber CRT'])
+assert.deepEqual(GLOBAL_PRESETS.map(preset => preset.label), [
+  'Claude 风格', 'Glass Light', 'Nord Frost', 'Tokyo Night', 'Solarized Light', 'Amber CRT',
+  'Agent 指挥台', 'Agent 关系图', '专注流程',
+])
 
 const [claude, glass, nord, tokyo, solarized, amber] = GLOBAL_PRESETS.map(preset => expand(preset.theme as Record<string, unknown>))
 assert.equal(claude.uiScheme, 'dark')
@@ -69,7 +72,8 @@ for (const preset of GLOBAL_PRESETS) {
   assert.equal(expanded.ccStatusFontSize, 16)
   assert.equal(expanded.inputFontSize, 17)
   assert.equal(expanded.cliLineWidth, 2)
-  assert.equal(expanded.cliLinePadding, 3)
+  assert.equal(Number.isFinite(expanded.cliLinePadding), true)
+  assert.equal((expanded.cliLinePadding as number) >= 0, true)
   assert.equal(expanded.cliContentOffsetY, 0)
   assert.equal(expanded.cliHintMode, 'full')
   assert.equal(typeof expanded.cliPromptColor, 'string')
@@ -78,6 +82,10 @@ for (const preset of GLOBAL_PRESETS) {
 for (const preset of [glass, nord, tokyo, solarized, amber]) {
   assert.equal(preset.ccHeight, 96)
   assert.equal(preset.ccBgHeight, 96)
+}
+
+for (const preset of [claude, glass, nord, tokyo, solarized, amber]) {
+  assert.equal(preset.cliLinePadding, 3, '经典终端预设必须保持紧凑命令行内边距')
 }
 
 console.log('presetDesign 回归测试通过')

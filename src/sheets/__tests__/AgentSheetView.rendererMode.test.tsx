@@ -1119,7 +1119,7 @@ describe('AgentSheetView renderer mode context', () => {
       expect(region.style.getPropertyValue('--plan-indent')).toBe('28px')
       expect(screen.getByRole('treeitem', { name: /Stable plan state/ })).toBeTruthy()
       expect(container.querySelector('.task-tree-priority')).toBeNull()
-      expect(screen.queryByRole('progressbar')).toBeNull()
+      expect(container.querySelector('.goal-card-budget')).toBeNull()
 
       settings.setOverride('kind.content.plan.showPriority', true)
       settings.setOverride('kind.content.plan.showBudget', true)
@@ -1133,7 +1133,7 @@ describe('AgentSheetView renderer mode context', () => {
         expect(region).toHaveAttribute('data-connector-style', 'solid')
         expect(region.style.getPropertyValue('--plan-indent')).toBe('36px')
         expect(container.querySelector('.task-tree-priority')?.textContent).toBe('P2')
-        expect(screen.getByRole('progressbar')).toHaveAttribute('aria-valuenow', '25')
+        expect(container.querySelector('.goal-card-budget')).toHaveAttribute('aria-valuenow', '25')
       })
       expect(screen.getByRole('region', { name: '计划与目标' })).toBe(region)
       expect(screen.getByText('Stable plan state')).toBeTruthy()
@@ -1569,10 +1569,11 @@ describe('AgentSheetView renderer mode context', () => {
       ctx={{ ...ctx, activeSession: null, selectSession }}
     />)
 
-    const submit = await screen.findByRole('button', { name: '开始新会话' }, { timeout: 5_000 })
+    const workspace = await screen.findByRole('combobox', { name: '新会话工作区' }, { timeout: 5_000 })
+    const submit = screen.getByRole('button', { name: '开始新会话' })
+    expect(workspace).toHaveValue('workspace-a')
     fireEvent.input(screen.getByRole('textbox', { name: '首条请求' }), { target: { value: '修复构建' } })
-    expect(submit).toBeDisabled()
-    fireEvent.change(screen.getByRole('combobox', { name: '新会话工作区' }), { target: { value: 'workspace-a' } })
+    expect(submit).toBeEnabled()
     fireEvent.click(submit)
 
     await waitFor(() => expect(selectSession).toHaveBeenCalledTimes(1))

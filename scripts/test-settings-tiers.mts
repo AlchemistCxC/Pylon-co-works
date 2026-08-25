@@ -41,9 +41,8 @@ assert.doesNotMatch(settings, /const TABS\s*=/, 'Settings 不得再自持 tab �
 assert.doesNotMatch(settings, /const TAB_LABELS/, 'Settings 不得再自持 tab 标签')
 assert.match(settings, /settings-tabs-root/, '现状两栏布局保留')
 
-// 4. ZoneGroupFields basicOnly 过滤（defs 派生）
+// 4. ZoneGroupFields 不再保留已退役的快速层过滤入口
 const renderer = readFileSync(new URL('../src/themeFieldRenderer.tsx', import.meta.url), 'utf8')
-assert.match(renderer, /basicOnly\?: boolean/, 'ZoneGroupFields 必须支持 basicOnly')
-assert.match(renderer, /!basicOnly \|\| def\.tier === 'basic'/, 'basicOnly 必须过滤 tier:basic')
+assert.doesNotMatch(renderer, /basicOnly/, 'ZoneGroupFields 不得保留 basicOnly 第二条渲染路径')
 
 console.log('settings domains 守卫通过')

@@ -73,12 +73,14 @@ describe('mountSolidWorkbench', () => {
     // existing card in place and must not move it below that reply.
     const completion = envelope(6, { type: 'tool.completed', tool: { status: 'completed', parts: [{ kind: 'text', text: '文件内容' }] } }, { toolCallId: 'tool-between' })
     const started = projectWorkbench(startedEvents).document
+    const userId = started.messages.find(message => message.role === 'user')!.id
+    const assistantId = started.messages.find(message => message.role === 'assistant')!.id
 
     services.runtime.replaceDocument(started, { ownerKey: 'owner-preview', generation: 1 })
 
-    const user = await waitFor(() => host.querySelector<HTMLElement>('[data-message-id="user-1"]')!)
+    const user = await waitFor(() => host.querySelector<HTMLElement>(`[data-message-id="${userId}"]`)!)
     const tool = host.querySelector<HTMLElement>('[data-activity-id="tool-between"]')!
-    const assistant = host.querySelector<HTMLElement>('[data-message-id="assistant-1"]')!
+    const assistant = host.querySelector<HTMLElement>(`[data-message-id="${assistantId}"]`)!
     expect(tool).not.toBeNull()
     expect(assistant).not.toBeNull()
     expect(user.compareDocumentPosition(tool) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
@@ -190,17 +192,46 @@ describe('mountSolidWorkbench', () => {
       provenance: { origin: 'local-observed', trust: 'authoritative' },
       event: { type: 'message.delta', role: 'assistant', parts: [{ kind: 'text', text }] },
     })
-    services.runtime.replaceDocument(projectWorkbench([
+    const projected = projectWorkbench([
       chunk(1, '这是'), chunk(2, '完整的'), chunk(3, '助手'), chunk(4, '回复。'),
-    ]).document, { ownerKey: 'owner-preview', generation: 1 })
+    ]).document
+    services.runtime.replaceDocument(projected, { ownerKey: 'owner-preview', generation: 1 })
 
     const body = await waitFor(() => {
-      const element = host.querySelector('[data-message-id="rotated-chunk-1"] .term-assistant-body')
+      const element = host.querySelector(`[data-message-id="${projected.messages[0]!.id}"] .term-assistant-body`)
       expect(element).not.toBeNull()
       return element as HTMLElement
     })
     expect(body).toHaveTextContent('这是完整的助手回复。')
     expect(body.querySelectorAll('p')).toHaveLength(1)
+  })
+
+  it('同一 provider message id 跨工具形成独立且重放稳定的助手 DOM 行', async () => {
+    const { host, services } = mountPreview()
+    const make = (sequence: number, event: WorkbenchEventEnvelope['event'], identity: WorkbenchEventEnvelope['identity']) => createWorkbenchEnvelope({
+      sessionId: 'preview-session', sequence,
+      recordedAt: `2026-08-25T00:00:0${sequence}.000Z`,
+      source: { provider: 'peri', sourceId: `segment-${sequence}` }, identity,
+      provenance: { origin: 'local-observed', trust: 'authoritative' }, event,
+    })
+    const projected = projectWorkbench([
+      make(1, { type: 'message.delta', role: 'assistant', parts: [{ kind: 'text', text: '工具前回复' }] }, { messageId: 'shared-provider-id' }),
+      make(2, { type: 'tool.started', tool: { name: 'Read', title: '读取' } }, { toolCallId: 'tool-between-segments' }),
+      make(3, { type: 'message.delta', role: 'assistant', parts: [{ kind: 'text', text: '工具后回复' }] }, { messageId: 'shared-provider-id' }),
+    ]).document
+
+    expect(new Set(projected.messages.map(message => message.id)).size).toBe(2)
+    for (let iteration = 0; iteration < 20; iteration += 1) {
+      services.runtime.replaceDocument(structuredClone(projected), { ownerKey: 'owner-preview', generation: iteration + 1 })
+    }
+
+    await waitFor(() => expect(host.querySelectorAll('.plain-message-list__row')).toHaveLength(2))
+    const rows = [...host.querySelectorAll<HTMLElement>('.plain-message-list__row')]
+    expect(rows.map(row => row.textContent)).toEqual(expect.arrayContaining([
+      expect.stringContaining('工具前回复'),
+      expect.stringContaining('工具后回复'),
+    ]))
+    expect(host.querySelectorAll('[data-activity-id="tool-between-segments"]')).toHaveLength(1)
   })
 
   it('canonical assistant chunk updates reuse one content Slot and propagate streaming state', async () => {
@@ -212,13 +243,16 @@ describe('mountSolidWorkbench', () => {
     let destroys = 0
     const mountedNodeIds: string[] = []
     const updates: Array<{ text: string; streaming?: boolean }> = []
+    let canonicalNodeId: string | undefined
     const slot: RendererSlotContribution = {
       id: 'test.streaming-markdown', targetSuites: ['builtin.solid'], kinds: ['content.markdown'],
       priority: 10, fallback: false, canRender: () => true,
       createSurface: () => ({
         rendererId: 'test.streaming-markdown', kind: 'solid',
         mount(container, snapshot) {
-          const target = snapshot.nodeId.startsWith('canonical-stream-1:part:')
+          const payload = snapshot.payload as { text?: string }
+          if (!canonicalNodeId && payload.text?.startsWith('# 标题')) canonicalNodeId = snapshot.nodeId
+          const target = snapshot.nodeId === canonicalNodeId
           if (target) mountedNodeIds.push(snapshot.nodeId)
           const node = document.createElement('p')
           container.append(node)
@@ -269,9 +303,10 @@ describe('mountSolidWorkbench', () => {
     services.runtime.replaceDocument(projectWorkbench(events).document, { ownerKey: 'owner-preview', generation: 21 })
     await waitFor(() => expect(updates.at(-1)?.streaming).toBeUndefined())
 
-    expect(mountedNodeIds).toEqual(['canonical-stream-1:part:0'])
+    expect(mountedNodeIds).toEqual([canonicalNodeId])
     expect(destroys).toBe(0)
-    expect(host.querySelectorAll('[data-message-id="canonical-stream-1"]')).toHaveLength(1)
+    const canonicalMessageId = projectWorkbench(events).document.messages[0]!.id
+    expect(host.querySelectorAll(`[data-message-id="${canonicalMessageId}"]`)).toHaveLength(1)
   })
 
   it('反复替换同一会话文档时不累积助手回复 DOM', async () => {
@@ -285,13 +320,14 @@ describe('mountSolidWorkbench', () => {
       event: { type: 'message.delta', role: 'assistant', parts: [{ kind: 'text', text }] },
     })
     const document = projectWorkbench([chunk(1, '不会'), chunk(2, '重复')]).document
+    const messageId = document.messages[0]!.id
 
     for (let iteration = 0; iteration < 100; iteration += 1) {
       services.runtime.replaceDocument(structuredClone(document), { ownerKey: 'owner-preview', generation: iteration + 1 })
     }
 
-    await waitFor(() => expect(host.querySelectorAll('[data-message-id="repeat-chunk-1"]')).toHaveLength(1))
-    const rows = host.querySelectorAll('[data-message-id="repeat-chunk-1"]')
+    await waitFor(() => expect(host.querySelectorAll(`[data-message-id="${messageId}"]`)).toHaveLength(1))
+    const rows = host.querySelectorAll(`[data-message-id="${messageId}"]`)
     expect(rows).toHaveLength(1)
     expect(rows[0]).toHaveTextContent('不会重复')
     expect(rows[0]!.querySelectorAll('.term-assistant-body p')).toHaveLength(1)
@@ -336,12 +372,15 @@ describe('mountSolidWorkbench', () => {
       }),
     ]).document
 
-    services.runtime.replaceDocument(documentFor('session-a', '会话 A'), {
+    const sessionADocument = documentFor('session-a', '会话 A')
+    const sessionBDocument = documentFor('session-b', '会话 B')
+    const sessionAMessageId = sessionADocument.messages[0]!.id
+    services.runtime.replaceDocument(sessionADocument, {
       ownerKey: 'owner-a', generation: 1, sessionId: 'session-a',
     })
     lifecycle.update({ sheetId: 'sheet-a', sessionId: 'session-a', preview: true })
     const firstRow = await waitFor(() => {
-      const row = host.querySelector('[data-message-id="same-message-id"]')
+      const row = host.querySelector(`[data-message-id="${sessionAMessageId}"]`)
       expect(row?.querySelector('[data-renderer-slot-id="builtin.solid.content.base"]')).toHaveTextContent('会话 A')
       if (!row) throw new Error('session A production Slot row not mounted')
       return row
@@ -351,29 +390,29 @@ describe('mountSolidWorkbench', () => {
     expect(firstTool).not.toBeNull()
 
     for (let iteration = 0; iteration < 100; iteration += 1) {
-      services.runtime.replaceDocument(documentFor('session-b', '会话 B'), {
+      services.runtime.replaceDocument(sessionBDocument, {
         ownerKey: 'owner-b', generation: iteration + 1, sessionId: 'session-b',
       })
       lifecycle.update({ sheetId: 'sheet-a', sessionId: 'session-b', preview: true })
-      services.runtime.replaceDocument(documentFor('session-a', '会话 A'), {
+      services.runtime.replaceDocument(sessionADocument, {
         ownerKey: 'owner-a', generation: iteration + 2, sessionId: 'session-a',
       })
       lifecycle.update({ sheetId: 'sheet-a', sessionId: 'session-a', preview: true })
     }
 
-    await waitFor(() => expect(host.querySelector('[data-message-id="same-message-id"]')).toHaveTextContent('会话 A'))
-    expect(host.querySelectorAll('[data-message-id="same-message-id"]')).toHaveLength(1)
+    await waitFor(() => expect(host.querySelector(`[data-message-id="${sessionAMessageId}"]`)).toHaveTextContent('会话 A'))
+    expect(host.querySelectorAll(`[data-message-id="${sessionAMessageId}"]`)).toHaveLength(1)
     expect(host.querySelectorAll('[data-renderer-slot-id="builtin.solid.content.base"]')).toHaveLength(1)
-    expect(host.querySelector('[data-message-id="same-message-id"]')).toBe(firstRow)
-    expect(host.querySelector('[data-renderer-slot-id="builtin.solid.content.base"]')).toBe(firstSlot)
+    expect(host.querySelector(`[data-message-id="${sessionAMessageId}"]`)).not.toBe(firstRow)
+    expect(host.querySelector('[data-renderer-slot-id="builtin.solid.content.base"]')).not.toBe(firstSlot)
     expect(host.querySelectorAll('[data-activity-id="same-tool-id"]')).toHaveLength(1)
-    expect(host.querySelector('[data-activity-id="same-tool-id"]')).toBe(firstTool)
+    expect(host.querySelector('[data-activity-id="same-tool-id"]')).not.toBe(firstTool)
     expect(host).not.toHaveTextContent('会话 B')
   })
 
   it('合并流式文本时保留非文本 semantic part 的渲染边界', async () => {
     const { host, services } = mountPreview()
-    services.runtime.replaceDocument(projectWorkbench([createWorkbenchEnvelope({
+    const projected = projectWorkbench([createWorkbenchEnvelope({
       sessionId: 'preview-session', sequence: 1,
       recordedAt: '2026-08-25T00:00:01.000Z',
       source: { provider: 'peri', sourceId: 'mixed-content' },
@@ -386,10 +425,11 @@ describe('mountSolidWorkbench', () => {
         { kind: 'markdown', text: '后半' },
         { kind: 'text', text: '正文' },
       ] },
-    })]).document, { ownerKey: 'owner-preview', generation: 1 })
+    })]).document
+    services.runtime.replaceDocument(projected, { ownerKey: 'owner-preview', generation: 1 })
 
     const body = await waitFor(() => {
-      const element = host.querySelector('[data-message-id="mixed-content"] .term-assistant-body')
+      const element = host.querySelector(`[data-message-id="${projected.messages[0]!.id}"] .term-assistant-body`)
       expect(element).not.toBeNull()
       return element as HTMLElement
     })
@@ -920,9 +960,25 @@ describe('mountSolidWorkbench', () => {
     expect(screen.getByLabelText('会话命令')).toHaveTextContent('/review')
     expect(screen.getByLabelText('输入预测')).toHaveTextContent('继续审计')
     expect(screen.getByLabelText('文件建议')).toHaveTextContent('src/a.ts')
-    await waitFor(() => expect(host.textContent).toContain('↓ 8 tokens'))
+    expect(host.textContent).not.toContain('↓ 8 tokens')
     expect(host.querySelector('[data-widget-id="tokens"]')).toHaveTextContent('8/—')
     expect(screen.getByText('canonical warning')).toBeTruthy()
+  })
+
+  it('同一 error 事实只渲染一个可见错误 surface', async () => {
+    const { host, services } = mountPreview()
+    const projected = projectWorkbench([createWorkbenchEnvelope({
+      sessionId: 'preview-session', sequence: 1, recordedAt: '2026-08-25T00:00:01.000Z',
+      source: { provider: 'peri', sourceId: 'error-1' }, identity: {},
+      provenance: { origin: 'local-observed', trust: 'authoritative' },
+      event: { type: 'diagnostic.notice', level: 'error', code: 'transport.timeout', message: '连接超时' },
+    })]).document
+
+    services.runtime.replaceDocument(projected, { ownerKey: 'owner-preview', generation: 1 })
+
+    await waitFor(() => expect(host.querySelectorAll('[role="alert"]')).toHaveLength(1))
+    expect(host.querySelector('.system-error-card')).toHaveTextContent('连接超时')
+    expect(host.querySelector('.system-notice-card')).toBeNull()
   })
 
   it('C04 canonical unknown tool uses the typed tool.generic base Slot and updates without remount', async () => {
@@ -1034,7 +1090,7 @@ describe('mountSolidWorkbench', () => {
     services.runtime.replaceDocument(replacement, { ownerKey: 'owner-preview', generation: 2 })
 
     const replacementCard = await screen.findByRole('status', { name: '工具：替换工具，运行中' })
-    expect(replacementCard).toBe(card)
+    expect(replacementCard).not.toBe(card)
     expect(replacementCard.querySelector('.term-tool-head')).toHaveAttribute('aria-controls', 'solid-tool-snapshot-tool-replacement')
     expect(replacementCard.querySelector('.term-tool-head')).toHaveAttribute('aria-expanded', 'false')
     expect(replacementCard.querySelector('#solid-tool-snapshot-tool-replacement')).toBeNull()

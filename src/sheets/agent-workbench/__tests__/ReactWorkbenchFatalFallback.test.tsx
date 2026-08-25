@@ -11,7 +11,7 @@ function document(revision: number, text: string): WorkbenchDocument {
     ...empty,
     revision,
     messages: [{
-      id: `message-${revision}`, role: 'assistant', content: text, parts: [], identity: {},
+      id: `message-${revision}`, segmentId: `message-${revision}`, role: 'assistant', content: text, parts: [], identity: {},
       source: { provider: 'peri', sourceId: `source-${revision}` }, sequence: revision,
       running: false, time: '2026-08-22T00:00:00.000Z',
     }],

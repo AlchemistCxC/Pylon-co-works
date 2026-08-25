@@ -361,7 +361,7 @@
 .app[data-interface-mode="modern-gui"] .modern-workbench-body { position:relative; min-height:0; padding:0; background:radial-gradient(circle at 72% 12%,color-mix(in srgb,var(--accent) 7%,transparent),transparent 30%); }
 .app[data-interface-mode="modern-gui"] .modern-conversation-canvas { min-height:0; flex:1; display:flex; }
 .app[data-interface-mode="modern-gui"] .chat-view { scrollbar-gutter:stable; }
-.app[data-interface-mode="modern-gui"] .term { width:min(900px,100%); margin:0 auto; padding:24px clamp(20px,4vw,48px) 150px; font-family:var(--font); font-size:14px; line-height:1.58; }
+.app[data-interface-mode="modern-gui"] .term { width:min(900px,100%); margin:0 auto; padding:24px clamp(20px,4vw,48px) 150px; font-family:var(--font); font-size:var(--chat-font-size,14px); line-height:1.58; }
 .app[data-interface-mode="modern-gui"] .term-row { position:relative; margin:0 0 12px; }
 .app[data-interface-mode="modern-gui"] .term-row-user,
 .app[data-interface-mode="modern-gui"] .term-row-assistant,
@@ -503,7 +503,7 @@
 }
 
 .chat-recovery-error > div:first-child { display: grid; gap: 3px; }
-.chat-recovery-error span { color: var(--text-muted); font-size: 12px; overflow-wrap: anywhere; }
+.chat-recovery-error span { color: var(--text-dim); font-size: 12px; overflow-wrap: anywhere; }
 .chat-recovery-actions { display: flex; flex: 0 0 auto; gap: 8px; }
 .chat-recovery-actions button {
   border: 1px solid var(--border);
@@ -524,7 +524,7 @@
   background: color-mix(in srgb, var(--warning, #f59e0b) 10%, var(--bg, #111));
   color: var(--text);
 }
-.chat-replay-warning span { color: var(--text-muted); font-size: 12px; overflow-wrap: anywhere; }
+.chat-replay-warning span { color: var(--text-dim); font-size: 12px; overflow-wrap: anywhere; }
 
 /* ── 滚动条增强 ── */
 .chat-view::-webkit-scrollbar { width:6px; }
@@ -1160,7 +1160,7 @@
   border-inline-start: var(--line-width-3) solid var(--subagent-tree-color, var(--accent));
   padding: var(--ui-space-3);
   color: var(--text);
-  border-radius:var(--ui-radius-lg,10px);
+  border-radius:var(--message-radius,0);
   background:linear-gradient(135deg,color-mix(in srgb,var(--accent) 5%,var(--bg-panel,transparent)),var(--bg-panel,transparent) 52%);
   box-shadow:0 8px 24px color-mix(in srgb,var(--global-bg,#000) 14%,transparent);
 }
@@ -1303,7 +1303,7 @@
   border-inline-start: var(--line-width-3) solid var(--accent);
   padding: var(--ui-space-3);
   color: var(--text);
-  border-radius:var(--ui-radius-lg,10px);
+  border-radius:var(--message-radius,0);
   background:linear-gradient(135deg,color-mix(in srgb,var(--accent) 4%,var(--bg-panel,transparent)),var(--bg-panel,transparent) 60%);
   margin-inline-start: calc(var(--workflow-indent, 24px) * min(var(--workflow-depth, 0), 6));
 }

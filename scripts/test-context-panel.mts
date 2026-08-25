@@ -21,7 +21,7 @@ assert.match(host, /event === 'host:collapse'/, '隔离 surface 只能通过受�
 assert.match(productWorkspace, /workspaceKind: 'agent'/, 'Agent 右栏必须注册贡献')
 assert.match(productWorkspace, /workspaceKind: 'file'/, 'File 右栏必须注册贡献')
 assert.match(activation, /contextPanel: createPluginContextPanelApi/, '激活上下文必须暴露右栏贡献 API')
-assert.match(shadow, /contextPanel: getContextPanelRegistry\(\)\.beginShadowTransaction/, '右栏贡献必须参与 shadow hot-swap')
+assert.match(shadow, /contextPanel: registries\.contextPanelRegistry\.beginShadowTransaction/, '右栏贡献必须参与 shadow hot-swap')
 
 const agentPanel = readFileSync(new URL('../src/components/right-panel/AgentContextPanel.tsx', import.meta.url), 'utf8')
 assert.match(agentPanel, /useSessionUiState\(sessionId, 'search-query'/, 'Agent 搜索必须复用 sessionUiState')

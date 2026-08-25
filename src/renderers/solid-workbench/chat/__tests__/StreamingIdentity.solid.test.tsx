@@ -64,5 +64,29 @@ describe('C00 streaming root identity (1000 chunks)', () => {
     expect(result.container.querySelectorAll('.term-plain-text')).toHaveLength(1)
     expect(result.container.querySelector('.term-plain-text')).toHaveTextContent('首个流式片段')
   })
-})
 
+  it('promotes a completed tail block and terminal update without remounting prior block DOM', async () => {
+    const [state, setState] = createSignal({ text: '# 标题\n\n尾段', streaming: true })
+    const result = render(() => <MarkdownContent text={state().text} streaming={state().streaming} />)
+    const heading = await waitFor(() => {
+      const node = result.container.querySelector('h1')
+      if (!node) throw new Error('heading not ready')
+      return node
+    })
+    const tail = await waitFor(() => {
+      const node = [...result.container.querySelectorAll('p')].find(item => item.textContent?.trim() === '尾段')
+      if (!node) throw new Error('tail not ready')
+      return node
+    })
+
+    setState({ text: '# 标题\n\n尾段\n\n新尾段', streaming: true })
+    await waitFor(() => expect(result.container).toHaveTextContent('新尾段'))
+    expect(result.container.querySelector('h1')).toBe(heading)
+    expect([...result.container.querySelectorAll('p')].find(item => item.textContent?.trim() === '尾段')).toBe(tail)
+
+    setState({ text: '# 标题\n\n尾段\n\n新尾段', streaming: false })
+    await waitFor(() => expect(result.container).toHaveTextContent('新尾段'))
+    expect(result.container.querySelector('h1')).toBe(heading)
+    expect([...result.container.querySelectorAll('p')].find(item => item.textContent?.trim() === '尾段')).toBe(tail)
+  })
+})

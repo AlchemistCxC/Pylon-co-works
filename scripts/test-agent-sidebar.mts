@@ -61,7 +61,9 @@ assert.match(statusLight, /agentLightDisplay\(status: string\)/, '必须提供�
 assert.match(appCss, /data-mode="cascade"/, 'ok 必须 cascade 辉光（左→右传播）')
 assert.match(appCss, /data-mode="sync"/, 'error 必须 sync 辉光')
 assert.match(appCss, /data-mode="steady"/, 'warn 必须 steady 辉光（黄常亮）')
-assert.match(appCss, /--tool-ok/, '灯色必须沿现有变量')
+assert.match(appCss, /--brand-node-ready/, '灯色必须沿品牌节点状态变量')
+assert.match(appCss, /--brand-node-warn/, '警告灯必须沿品牌节点状态变量')
+assert.match(appCss, /--brand-node-error/, '错误灯必须沿品牌节点状态变量')
 assert.equal(appCss.includes('--sidebar-status-ok-color'), false, '零新主题字段')
 
 // 8. showPet toggle 写 workspaceStore（非主题）；换主题后不变

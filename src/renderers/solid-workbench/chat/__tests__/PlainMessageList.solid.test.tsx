@@ -30,7 +30,7 @@ class ResizeObserverMock {
   emit() {
     this.callback([], this as unknown as ResizeObserver)
   }
-  unobserve() {}
+  unobserve = vi.fn()
 }
 
 beforeEach(() => {
@@ -158,8 +158,9 @@ describe('PlainMessageList', () => {
 
   it('invalidation 与 ResizeObserver 更新 revision；destroy 幂等并清理 observer/DOM', () => {
     let port: MessageListPort | undefined
+    const onContentResize = vi.fn()
     const result = render(() => (
-      <PlainMessageList initialItems={ITEMS} onPortReady={value => { port = value }} renderItem={item => item.key} />
+      <PlainMessageList initialItems={ITEMS} onPortReady={value => { port = value }} onContentResize={onContentResize} renderItem={item => item.key} />
     ))
     const container = result.container.querySelector('[data-message-list="plain"]') as HTMLDivElement
     const observer = ResizeObserverMock.instances[0]!
@@ -171,6 +172,8 @@ describe('PlainMessageList', () => {
     observer.emit()
     expect(container.dataset.measurementRevision).toBe('2')
     expect(container.dataset.measurementReason).toBe('container-resized')
+    expect(observer.observe).toHaveBeenCalledTimes(3)
+    expect(onContentResize).toHaveBeenCalledTimes(1)
 
     port!.destroy()
     port!.destroy()

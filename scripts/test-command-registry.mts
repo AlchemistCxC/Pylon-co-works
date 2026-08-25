@@ -1,9 +1,9 @@
 import { strict as assert } from 'node:assert'
 import '../src/plugin-runtime/pluginCompositionRoot.ts'
 import {
-  FALLBACK_COMMANDS,
   filterCommandSuggestions,
   parseSlashCommand,
+  resolveFallbackCommands,
   resolveCommandSuggestions,
 } from '../src/components/chat/commandRegistry.ts'
 
@@ -12,8 +12,8 @@ assert.equal(parseSlashCommand('/model deepseek').args, 'deepseek')
 assert.equal(parseSlashCommand('普通文本'), null)
 assert.equal(parseSlashCommand('/'), null)
 
-const fallback = resolveCommandSuggestions([])
-assert.equal(fallback.length, FALLBACK_COMMANDS.length)
+const fallback = resolveFallbackCommands()
+assert.equal(fallback.length > 0, true, '激活后的内置命令集必须提供 fallback suggestions')
 assert.equal(filterCommandSuggestions('/mo', fallback)[0]?.cmd, '/model')
 assert.equal(filterCommandSuggestions('普通文本', fallback).length, 0)
 

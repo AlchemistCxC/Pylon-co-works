@@ -9,7 +9,8 @@ describe('C13 built-in Solid Suite declaration', () => {
   it('declares every lifecycle and system kind supported by its base Slot', () => {
     const suite = createBuiltinSolidRendererSuite()
     const lifecycleKinds = BUILTIN_SOLID_CONTENT_KINDS.filter(kind => kind.startsWith('lifecycle.') || kind.startsWith('system.'))
-    expect(suite.optionalKinds).toEqual(expect.arrayContaining(lifecycleKinds))
+    const declaredKinds = [...suite.requiredKinds, ...(suite.optionalKinds ?? [])]
+    expect(declaredKinds).toEqual(expect.arrayContaining(lifecycleKinds))
   })
 })
 

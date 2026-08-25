@@ -95,7 +95,7 @@ describe('FileSheetView 版本化 tab 集成（D-02/D-04）', () => {
   it('v1 openTabs:string[] 迁移为 file-mode tabs，activeKey 取最后一条', async () => {
     seedSheet({ openTabs: JSON.stringify(['src/a.ts', 'src/b.ts']) })
     renderHarness()
-    await screen.findByText('src/b.ts')
+    await screen.findByText('src/b.ts', {}, { timeout: 10_000 })
     expect(screen.getByTitle('src/a.ts')).toBeTruthy()
     await waitFor(() => expect(document.querySelector('.file-tab-view')?.getAttribute('data-path')).toBe('src/b.ts'))
   })

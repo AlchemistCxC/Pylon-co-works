@@ -12,7 +12,7 @@ describe('React Workbench fatal fallback C15', () => {
       ...empty,
       revision: 3,
       messages: [{
-        id: 'message-c15', role: 'assistant', content: '', identity: {}, source: { provider: 'peri', sourceId: 'wire-1' },
+        id: 'message-c15', segmentId: 'message-c15', role: 'assistant', content: '', identity: {}, source: { provider: 'peri', sourceId: 'wire-1' },
         sequence: 1, running: false, time: '2026-08-24T00:00:00.000Z', parts: [
           { kind: 'memory', memoryId: 'mem-1', title: 'Dark preference', source: 'hermes', status: 'recalled' },
           { kind: 'mcp-resource', server: 'fs-mcp', resourceUri: 'file:///spec.md', connectionState: 'connected' },

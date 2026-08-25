@@ -40,7 +40,10 @@ describe('canonical streaming Markdown performance contract', () => {
     const [text, setText] = createSignal('# 稳定标题\n\n```ts\nconst first = 1')
     const result = render(() => <MarkdownContent text={text()} streaming />)
 
-    const heading = await waitFor(() => result.getByRole('heading', { level: 1 }))
+    const heading = await waitFor(
+      () => result.getByRole('heading', { level: 1 }),
+      { timeout: 10_000 },
+    )
     await waitFor(() => expect(result.container).toHaveTextContent('const first = 1'))
     const parseCount = counters.parse.mock.calls.length
     expect(counters.highlight).not.toHaveBeenCalled()

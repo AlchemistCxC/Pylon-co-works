@@ -1,5 +1,5 @@
 import { Dynamic } from 'solid-js/web'
-import { For, Index, Show, createMemo, createResource, type JSX } from 'solid-js'
+import { For, Index, Show, createEffect, createMemo, createResource, createSignal, untrack, type JSX } from 'solid-js'
 import { highlightCode } from '../../../components/chat/codeHighlight.ts'
 import { sanitizeHtml } from '../../../components/chat/htmlSanitizer.ts'
 import { isPlainTextContent } from '../../../components/chat/markdownFastPath.ts'
@@ -8,7 +8,7 @@ import {
   type MarkdownElement,
   type MarkdownRenderNode,
 } from './markdownRenderModel.ts'
-import { splitOpenCodeFenceTail, splitStreamingMarkdown } from './streamingMarkdownSplit.ts'
+import { splitOpenCodeFenceTail, splitStreamingMarkdownBlocks } from './streamingMarkdownSplit.ts'
 
 export interface MarkdownContentProps {
   text: string
@@ -25,34 +25,93 @@ export function MarkdownContent(props: MarkdownContentProps) {
   // C00 修复：不得用 <Show keyed> 包 split() 结果——每个 chunk 都是新对象引用，
   // keyed 会把整棵子树（含 stable 段）逐 chunk 重建。改为细粒度 accessor：
   // MarkdownSegment 只在自身 text 变化时重新解析/渲染，stable 恒定时 DOM 身份不变。
-  const split = createMemo(() => props.streaming === true
-    ? splitStreamingMarkdown(props.text)
-    : null)
-  const openCodeTail = createMemo(() => splitOpenCodeFenceTail(split()?.unstable ?? ''))
+  // A Slot that started streaming remains on the incremental path when the
+  // terminal update arrives. This promotes its last tail row instead of
+  // replacing the complete Markdown subtree.
+  const incremental = props.streaming === true
 
   return (
-    <Show when={props.streaming === true} fallback={<MarkdownSegment text={props.text} inline={props.inline} />}>
-      <Show when={split()?.stable}>
-        {stable => <MarkdownSegment text={stable()} inline={props.inline} />}
-      </Show>
-      <Show when={split()?.unstable}>
-        {tail => <Show
-          when={openCodeTail() !== null}
-          fallback={<MarkdownSegment text={tail()} inline={props.inline} />}
-        >
-          <>
-            <Show when={openCodeTail()?.prefix}>
-              {prefix => <MarkdownSegment text={prefix()} inline={props.inline} />}
-            </Show>
-            <StreamingCodeBlock
-              code={() => openCodeTail()?.code ?? ''}
-              language={() => openCodeTail()?.language}
-            />
-          </>
-        </Show>}
-      </Show>
+    <Show when={incremental} fallback={<MarkdownSegment text={props.text} inline={props.inline} />}>
+      <StreamingMarkdownBlocks text={() => props.text} streaming={() => props.streaming === true} inline={props.inline} />
     </Show>
   )
+}
+
+interface StreamingBlockRow {
+  readonly id: number
+  readonly text: string
+  update(text: string): void
+}
+
+function StreamingMarkdownBlocks(props: { text: () => string; streaming: () => boolean; inline?: boolean }) {
+  let nextId = 1
+  let committedText = ''
+  let stableRows: StreamingBlockRow[] = []
+  let tailRow = createStreamingBlockRow(nextId++, '')
+  const [rows, setRows] = createSignal<readonly StreamingBlockRow[]>([])
+
+  const reset = (text: string, final: boolean) => {
+    committedText = ''
+    stableRows = []
+    tailRow = createStreamingBlockRow(nextId++, '')
+    reconcile(text, final)
+  }
+
+  const reconcile = (text: string, final: boolean) => {
+    if (!text.startsWith(committedText)) {
+      reset(text, final)
+      return
+    }
+    const pending = text.slice(committedText.length)
+    const split = splitStreamingMarkdownBlocks(pending)
+    for (const block of split.stableBlocks) {
+      tailRow.update(block)
+      stableRows.push(tailRow)
+      committedText += block
+      tailRow = createStreamingBlockRow(nextId++, '')
+    }
+    tailRow.update(split.unstable)
+    if (final && split.unstable.length > 0) {
+      stableRows.push(tailRow)
+      committedText += split.unstable
+      tailRow = createStreamingBlockRow(nextId++, '')
+    }
+    setRows(split.unstable.length > 0 && !final ? [...stableRows, tailRow] : [...stableRows])
+  }
+
+  createEffect(() => {
+    const text = props.text()
+    const final = !props.streaming()
+    untrack(() => reconcile(text, final))
+  })
+
+  return <For each={rows()}>{row => <StreamingMarkdownBlock
+    row={row}
+    streaming={props.streaming}
+    inline={props.inline}
+  />}</For>
+}
+
+function createStreamingBlockRow(id: number, initialText: string): StreamingBlockRow {
+  const [text, setText] = createSignal(initialText)
+  return { id, get text() { return text() }, update: setText }
+}
+
+function StreamingMarkdownBlock(props: { row: StreamingBlockRow; streaming: () => boolean; inline?: boolean }) {
+  const text = () => props.row.text
+  const openCodeTail = createMemo(() => props.streaming() ? splitOpenCodeFenceTail(text()) : null)
+  return <Show
+    when={openCodeTail() !== null}
+    fallback={<MarkdownSegment text={text} inline={props.inline} />}
+  >
+    <Show when={openCodeTail()?.prefix}>
+      {prefix => <MarkdownSegment text={prefix()} inline={props.inline} />}
+    </Show>
+    <StreamingCodeBlock
+      code={() => openCodeTail()?.code ?? ''}
+      language={() => openCodeTail()?.language}
+    />
+  </Show>
 }
 
 function StreamingCodeBlock(props: { language: () => string | undefined; code: () => string }) {
@@ -115,6 +174,13 @@ function MarkdownNode(props: { node: MarkdownRenderNode }): JSX.Element {
       ? <a href={href} target="_blank" rel="noopener noreferrer" class="term-link"><MarkdownChildren children={node.children} /></a>
       : <span><MarkdownChildren children={node.children} /></span>
   }
+  if (node.tagName === 'img') {
+    const src = safeImageSource(node.properties.src)
+    const alt = typeof node.properties.alt === 'string' ? node.properties.alt : ''
+    return src
+      ? <img class="term-markdown-image" src={src} alt={alt} loading="lazy" />
+      : <span class="term-markdown-image-alt">{alt}</span>
+  }
   if (node.tagName === 'blockquote') {
     return <blockquote class="term-blockquote"><MarkdownChildren children={node.children} /></blockquote>
   }
@@ -135,16 +201,14 @@ function MarkdownChildren(props: { children: readonly MarkdownRenderNode[] }) {
 
 function CodeBlock(props: { language?: string; code: string }) {
   const lines = () => props.code.split('\n')
-  const isMultiLine = () => lines().length > 1
   const [highlighted] = createResource(
-    () => isMultiLine() ? { language: props.language || 'text', code: props.code } : undefined,
+    () => ({ language: props.language || 'text', code: props.code }),
     input => highlightCode(input.language, input.code).catch(() => null),
   )
   const highlightedLines = () => highlighted()?.split('\n').map(line => sanitizeHtml(line || '&nbsp;'))
 
   return (
-    <Show when={isMultiLine()} fallback={<code class="term-inline-code">{props.code}</code>}>
-      <div class="term-code-block">
+    <div class="term-code-block">
         <For each={lines()}>{(line, index) => (
           <div class="term-code-line">
             <span class="term-code-gutter">│ </span>
@@ -156,8 +220,7 @@ function CodeBlock(props: { language?: string; code: string }) {
             </Show>
           </div>
         )}</For>
-      </div>
-    </Show>
+    </div>
   )
 }
 
@@ -188,6 +251,15 @@ function safeHref(value: unknown): string | null {
   if (!href) return null
   if (/^(?:https?:|mailto:)/i.test(href)) return href
   if (/^(?:\/|\.\/|\.\.\/|#)/.test(href)) return href
+  return null
+}
+
+function safeImageSource(value: unknown): string | null {
+  if (typeof value !== 'string') return null
+  const source = value.trim()
+  if (/^https?:/i.test(source)) return source
+  if (/^data:image\/(?:png|gif|jpe?g|webp|avif);base64,/i.test(source)) return source
+  if (/^(?:\/|\.\/|\.\.\/)/.test(source)) return source
   return null
 }
 

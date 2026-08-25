@@ -12,6 +12,7 @@ import { getPluginSettingOptionsRegistry } from './plugin-runtime/runtimeService
 import { resolvePluginSettingOptions } from './plugin-runtime/settings/pluginSettingOptionsRegistry.ts'
 import type { PluginSettingOption, PluginSettingOptionsContribution } from './plugin-runtime/settings/pluginSettingsTypes.ts'
 import type { RegistryEntry } from './plugin-runtime/registry/types.ts'
+import { resolveToolIndicatorAsset, toolIndicatorOptions } from './components/chat/toolIndicatorAssets.ts'
 
 /**
  * themeFieldRenderer — 声明式字段渲染器（自定义系统骨架）。
@@ -183,6 +184,17 @@ function FieldControl({ def, ctx, keyName }: { def: ThemeFieldDef; ctx: RenderCt
 
   if (def.control === 'fontPicker' && def.fontRole) {
     return <FontContributionPicker ariaLabel={def.label} value={String(value ?? '')} role={def.fontRole} settingTarget={`theme.${keyName}`} optionContributions={ctx.settingOptionEntries} onChange={v => onChange({ [keyName]: v } as Partial<ThemeSettings>)} />
+  }
+
+  if (def.control === 'toolIndicator') {
+    const current = resolveToolIndicatorAsset(String(value ?? '')).id
+    const options = settingOptions(keyName, toolIndicatorOptions(), ctx)
+    return <Sel
+      ariaLabel={def.label}
+      value={current}
+      onChange={next => onChange({ [keyName]: next } as Partial<ThemeSettings>)}
+      options={withUnavailableCurrent(options, current)}
+    />
   }
 
   const emit = (partial: Partial<ThemeSettings>) => {

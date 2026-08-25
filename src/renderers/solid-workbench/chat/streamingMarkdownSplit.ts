@@ -61,8 +61,52 @@ export function findLastStableBlockBoundary(text: string): number {
 
 /** 把流式文本切成 { stable, unstable }。stable 是已完成块；unstable 是仍增长的尾块。 */
 export function splitStreamingMarkdown(text: string): { stable: string; unstable: string } {
-  const boundary = findLastStableBlockBoundary(text)
-  return { stable: text.slice(0, boundary), unstable: text.slice(boundary) }
+  const split = splitStreamingMarkdownBlocks(text)
+  return { stable: split.stableBlocks.join(''), unstable: split.unstable }
+}
+
+/** Stable top-level blocks, kept separate so already parsed blocks never grow. */
+export function splitStreamingMarkdownBlocks(text: string): { stableBlocks: readonly string[]; unstable: string } {
+  const stableBlocks: string[] = []
+  let blockStart = 0
+  let inFence = false
+  let fenceChar = ''
+  let fenceLength = 0
+  let position = 0
+
+  while (position < text.length) {
+    const newline = text.indexOf('\n', position)
+    const nextPosition = newline === -1 ? text.length : newline + 1
+    const rawLine = text.slice(position, newline === -1 ? text.length : newline)
+    const line = rawLine.endsWith('\r') ? rawLine.slice(0, -1) : rawLine
+
+    if (inFence) {
+      const close = line.match(/^ {0,3}(`+|~+)[\t ]*$/)
+      if (close && close[1]![0] === fenceChar && close[1]!.length >= fenceLength) {
+        inFence = false
+        fenceChar = ''
+        fenceLength = 0
+      }
+    } else {
+      const open = line.match(/^ {0,3}(`{3,}|~{3,})(.*)$/)
+      if (open && (open[1]![0] === '~' || !open[2]!.includes('`'))) {
+        inFence = true
+        fenceChar = open[1]![0]!
+        fenceLength = open[1]!.length
+      } else if (/^[\t ]*$/.test(line) && newline !== -1) {
+        const candidate = text.slice(blockStart, nextPosition)
+        // Consecutive blank lines belong to the next meaningful block rather
+        // than creating empty renderer rows.
+        if (candidate.trim().length > 0) {
+          stableBlocks.push(candidate)
+          blockStart = nextPosition
+        }
+      }
+    }
+    position = nextPosition
+  }
+
+  return { stableBlocks, unstable: text.slice(blockStart) }
 }
 
 export interface OpenCodeFenceTail {

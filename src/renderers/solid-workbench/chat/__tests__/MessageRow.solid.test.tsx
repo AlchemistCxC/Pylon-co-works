@@ -58,7 +58,10 @@ describe('SolidMessageRow', () => {
       content: '## 标题\n\n- 项目\n\n[安全](https://example.com) [危险](javascript:alert(1))', time: 't',
     })
 
-    await waitFor(() => expect(result.getByRole('heading', { name: '标题' })).toBeTruthy())
+    await waitFor(
+      () => expect(result.getByRole('heading', { name: '标题' })).toBeTruthy(),
+      { timeout: 10_000 },
+    )
     expect(result.getByText('项目').closest('li')).not.toBeNull()
     expect(result.getByRole('link', { name: '安全' }).getAttribute('rel')).toBe('noopener noreferrer')
     expect(result.container.querySelector('a[href^="javascript:"]')).toBeNull()

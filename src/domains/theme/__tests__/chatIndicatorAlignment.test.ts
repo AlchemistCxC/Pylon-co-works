@@ -1,10 +1,14 @@
 import { readFileSync } from 'node:fs'
 import { describe, expect, it } from 'vitest'
 
-const chatCss = readFileSync(
-  new URL('../../../plugins/product/packages/builtin.pylon-renderers/styles/components/chat/ChatView.css', import.meta.url),
-  'utf8',
-)
+// 与同目录 radiusContract/streamingWrapContract 同款：URL→pathname 手工转换，
+// 规避 readFileSync(URL) 在当前 tsconfig lib 下的类型不兼容（TS2769）。
+const chatCss = (() => {
+  const pathname = decodeURIComponent(
+    new URL('../../../plugins/product/packages/builtin.pylon-renderers/styles/components/chat/ChatView.css', import.meta.url).pathname,
+  ).replace(/^\/([A-Za-z]:)/, '$1')
+  return readFileSync(pathname, 'utf8')
+})()
 
 describe('chat indicator alignment contract', () => {
   it('keeps modern tool and assistant indicators on the same left edge', () => {

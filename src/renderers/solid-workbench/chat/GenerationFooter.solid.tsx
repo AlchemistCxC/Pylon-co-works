@@ -17,6 +17,8 @@ const SLOW_TICK_MS = 1000
 const MIN_VERB_DISPLAY_MS = 1200
 
 export interface SolidGenerationFooterProps extends GenerationFooterInput {
+  /** ChatView usage is intentionally hidden until the product surface is redesigned. */
+  showTokenCount?: boolean
   clock?: WorkbenchClock
   random?: () => number
   onLifecycleReady?: (lifecycle: GenerationFooterLifecycle) => void
@@ -33,6 +35,8 @@ export function SolidGenerationFooter(props: SolidGenerationFooterProps) {
   let verbTimer: unknown | null = null
   let destroyed = false
   let lastVerbShownAt = 0
+  let observedStartTime = props.startTime
+  let effectiveStartTime = normalizeGenerationStart(props.startTime, clock().now())
 
   const clearHotTimer = () => {
     if (hotTimer !== null) clock().clearInterval(hotTimer)
@@ -93,6 +97,13 @@ export function SolidGenerationFooter(props: SolidGenerationFooterProps) {
   })
 
   createEffect(() => {
+    const nextStartTime = props.startTime
+    if (nextStartTime === observedStartTime) return
+    observedStartTime = nextStartTime
+    effectiveStartTime = normalizeGenerationStart(nextStartTime, clock().now())
+  })
+
+  createEffect(() => {
     const real = Math.max(0, props.tokenCount)
     if (!props.running) setDisplayedTokens(real)
     else if (displayedTokens() > real) setDisplayedTokens(real)
@@ -140,7 +151,7 @@ export function SolidGenerationFooter(props: SolidGenerationFooterProps) {
     }, MIN_VERB_DISPLAY_MS - elapsed)
   })
 
-  const elapsedMs = () => Math.max(0, now() - props.startTime)
+  const elapsedMs = () => Math.max(0, now() - effectiveStartTime)
   const frame = () => resolveFrame(
     [...props.appearance.frames],
     elapsedMs(),
@@ -190,7 +201,7 @@ export function SolidGenerationFooter(props: SolidGenerationFooterProps) {
             <Show when={props.phase?.kind === 'thinking' && props.thinkingStart != null}>
               <span> · </span><span>思考 {formatElapsed(Math.max(0, now() - (props.thinkingStart ?? now())))}</span>
             </Show>
-            <Show when={props.tokenCount > 0}>
+            <Show when={props.showTokenCount === true && props.tokenCount > 0}>
               <span> · </span><span>↓ {formatTokens(shownTokens())} tokens</span>
             </Show>
           )</span>
@@ -263,4 +274,13 @@ export function formatTokens(value: number): string {
     return thousands >= 10 ? `${Math.round(thousands)}k` : `${thousands.toFixed(1)}k`
   }
   return `${Math.floor(n)}`
+}
+
+function normalizeGenerationStart(startTime: number, now: number): number {
+  if (Number.isFinite(startTime) && startTime >= 0) {
+    // Epoch zero is valid for deterministic tests, but never for a real 2020+
+    // browser clock. Treat missing/legacy zero as "started now".
+    if (startTime > 0 || now < 86_400_000) return Math.min(startTime, now)
+  }
+  return now
 }

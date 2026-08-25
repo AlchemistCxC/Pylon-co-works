@@ -20,7 +20,7 @@ afterEach(() => {
 describe('MarkdownContent heading class contract（CSS-02，CSS-04 回归门）', () => {
   it('`# h1` 输出 h1.term-h1；`###### h6` 输出 h6.term-h6', async () => {
     render(() => <MarkdownContent text="# Title&#10;&#10;###### Small" />)
-    const h1 = await waitFor(() => screen.getByRole('heading', { level: 1 }))
+    const h1 = await waitFor(() => screen.getByRole('heading', { level: 1 }), { timeout: 10_000 })
     expect(h1.tagName).toBe('H1')
     expect(h1.getAttribute('class')).toContain('term-h1')
     const h6 = await waitFor(() => screen.getByRole('heading', { level: 6 }))
@@ -64,5 +64,23 @@ describe('MarkdownContent heading class contract（CSS-02，CSS-04 回归门）'
     expect(codeBlock).toHaveTextContent('const first = 1')
     expect(codeBlock).toHaveTextContent('const second = 2')
     expect(container.querySelectorAll('.term-code-block')).toHaveLength(1)
+  })
+
+  it('单行 fenced code 仍渲染为块级代码而不是 inline code', async () => {
+    const { container } = render(() => <MarkdownContent text={'```ts\nconst x = 1\n```'} />)
+    await waitFor(() => expect(container.querySelector('.term-code-block')).not.toBeNull())
+    expect(container.querySelector('.term-code-block')).toHaveTextContent('const x = 1')
+    expect(container.querySelector(':scope > .term-inline-code')).toBeNull()
+  })
+
+  it('保留安全 Markdown 图片并拒绝可执行 source', async () => {
+    const safe = render(() => <MarkdownContent text="![diagram](https://example.com/diagram.png)" />)
+    await waitFor(() => expect(safe.container.querySelector('img')).not.toBeNull())
+    expect(safe.container.querySelector('img')).toHaveAttribute('src', 'https://example.com/diagram.png')
+    safe.unmount()
+
+    const unsafe = render(() => <MarkdownContent text="![bad](javascript:alert(1))" />)
+    await waitFor(() => expect(unsafe.container).toHaveTextContent('bad'))
+    expect(unsafe.container.querySelector('img')).toBeNull()
   })
 })

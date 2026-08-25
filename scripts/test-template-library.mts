@@ -22,9 +22,9 @@ import { GLOBAL_PRESETS } from '../src/presets.ts'
   assert.equal(themeToCssVars({}).hasOwnProperty('--accent'), false, '缺省字段不注入')
 }
 
-// 2. 组件接线：官方 6 + 自定义两区；预览不写 store（局部 style）；点击才应用
+// 2. 组件接线：官方模板 + 自定义两区；预览不写 store（局部 style）；点击才应用
 const library = readFileSync(new URL('../src/components/settings/TemplateLibrary.tsx', import.meta.url), 'utf8')
-assert.match(library, /GLOBAL_PRESETS\.map/, '官方模板必须来自 6 预设')
+assert.match(library, /GLOBAL_PRESETS\.map/, '官方模板必须来自预设 catalog')
 assert.match(library, /customPresets\.map/, '必须有自定义模板区')
 assert.match(library, /themeToCssVars\(template\.theme\)/, '预览必须经局部 cssVars')
 assert.equal(library.includes('setZoneField'), false, '预览路径不得写全局 store（局部 cssVars）')
@@ -36,10 +36,10 @@ assert.match(library, /onRestore\(template\.name\)/, '恢复模板必须重应�
 const settings = readFileSync(new URL('../src/components/Settings.tsx', import.meta.url), 'utf8')
 assert.match(settings, /<TemplateLibrary onApply=\{applyGlobalPreset\} onRestore=\{applyGlobalPreset\} \/>/, '恢复 = 重应用当前预设（清手调字段）')
 
-// 4. 官方区 6 个模板展开后 theme 完整（delta 展开到全量）
+// 4. 官方区模板展开后 theme 完整（delta 展开到全量）
 {
   const official = GLOBAL_PRESETS.map(preset => ({ ...THEME_DEFAULTS, ...preset.theme }))
-  assert.equal(official.length, 6)
+  assert.equal(official.length, 9)
   for (const theme of official) {
     assert.equal(theme.accent !== undefined, true, '展开后 accent 必有值')
     assert.equal(theme.ccHeight !== undefined, true)

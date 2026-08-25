@@ -7,7 +7,7 @@ import { readFileSync } from 'node:fs'
 import { TOOL_INDICATOR_ASSETS, resolveToolIndicatorAsset, toolIndicatorOptions } from '../src/components/chat/toolIndicatorAssets.ts'
 
 const chatView = readFileSync(new URL('../src/components/chat/ChatView.tsx', import.meta.url), 'utf8')
-const settings = readFileSync(new URL('../src/components/Settings.tsx', import.meta.url), 'utf8')
+const settings = readFileSync(new URL('../src/themeFieldRenderer.tsx', import.meta.url), 'utf8')
 const preview = readFileSync(new URL('../src/components/SettingsPreview.tsx', import.meta.url), 'utf8')
 const presets = readFileSync(new URL('../src/presets.ts', import.meta.url), 'utf8')
 const customPresets = readFileSync(new URL('../src/themeFieldDefs.ts', import.meta.url), 'utf8')
@@ -27,7 +27,7 @@ assert.match(toolIndicatorOptions()[0].label, /^● 圆点$/)
 assert.match(chatView, /resolveToolIndicatorAsset\(useStore\(s => s\.toolIndicator\)\)/, '真实 Chat 必须从 registry 解析指示器')
 assert.match(chatView, /aria-label=\{indicatorAsset\.ariaLabel\[model\.state\]\}/, '真实 Chat 必须消费 registry a11y label')
 assert.match(settings, /toolIndicatorOptions\(\)/, 'Settings 必须枚举 registry 选项')
-assert.match(settings, /resolveToolIndicatorAsset\(t\.toolIndicator\)\.id/, 'Settings 必须兼容旧 glyph 当前值')
+assert.match(settings, /resolveToolIndicatorAsset\(String\(value \?\? ''\)\)\.id/, 'Settings 必须兼容旧 glyph 当前值')
 assert.match(preview, /resolveToolIndicatorAsset\(useStore\(s => s\.toolIndicator\)\)/, 'Preview 必须复用 registry')
 assert.match(preview, /indicatorAsset\.glyph/, 'Preview 必须渲染 registry glyph')
 assert.match(presets, /toolIndicator:/, '内建预设必须保留 toolIndicator 字段')

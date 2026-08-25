@@ -87,7 +87,7 @@ const PERI_HINT: OwnerHints = { activeSessionByAgent: { peri: 's1' } }
   const broken = parseSessions('{broken', profiles)
   assert.equal(broken.kind, 'corrupt', '损坏 JSON 不得抛出')
 
-  const future = parseSessions('{"version":3,"sessions":[]}', profiles)
+  const future = parseSessions(JSON.stringify({ version: SESSION_SCHEMA_VERSION + 1, sessions: [] }), profiles)
   assert.equal(future.kind, 'corrupt', '未知未来版本不得误解析')
 }
 

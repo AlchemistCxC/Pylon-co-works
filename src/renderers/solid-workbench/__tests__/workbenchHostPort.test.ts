@@ -36,7 +36,7 @@ describe('WorkbenchHostPort', () => {
     source.update({ streamingText: 'unrelated' })
     expect(changed).not.toHaveBeenCalled()
     const message: WorkbenchMessage = {
-      id: 'new', role: 'assistant', content: 'hello', parts: [], identity: {},
+      id: 'new', segmentId: 'new', role: 'assistant', content: 'hello', parts: [], identity: {},
       source: { provider: 'test', sourceId: 'test' }, sequence: 1, running: false, time: '2026-01-01T00:00:00.000Z',
     }
     source.replaceDocument({ ...before!, messages: [message] }, { ownerKey: 'owner-a', generation: 1 })

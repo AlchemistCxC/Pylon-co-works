@@ -49,11 +49,16 @@ export interface WorkbenchTimelineEntry {
   readonly status?: string
   readonly title?: string
   readonly summary?: string
+  /** First semantic occurrence of an activity that splits adjacent text streams. */
+  readonly streamBoundary?: boolean
   readonly data?: unknown
 }
 
 export interface WorkbenchMessage {
+  /** Session-scoped render key. Never reuse a provider message/turn id as a row key. */
   readonly id: string
+  /** Replay-stable identity of this projected text segment (the opening canonical event id). */
+  readonly segmentId: string
   readonly role: 'user' | 'assistant' | 'reasoning'
   readonly content: string
   readonly parts: readonly ContentPart[]
@@ -491,26 +496,28 @@ function reduceSemanticEvent(document: WorkbenchDocument, envelope: WorkbenchEve
 
 function reduceMessage(document: WorkbenchDocument, envelope: WorkbenchEventEnvelope, event: MessageEvent): WorkbenchDocument {
   const role = event.role === 'reasoning' ? 'assistant' : event.role === 'user' ? 'user' : 'assistant'
+  document = settleSupersededRunningMessages(document, role)
   const parts = event.parts ?? []
   const content = textFromParts(parts)
-  const identityKey = identityKeyOf(envelope)
   const previous = document.messages.at(-1)
-  const previousIdentityKey = previous ? identityKeyOf(previous) : ''
+  const terminal = event.type === 'message.completed'
+  if (terminal && content.length === 0) {
+    return settleTextSegment(document, envelope, role)
+  }
   // ACP providers are allowed to omit message identity. Adjacent chunks of the
   // same role still belong to one stream; some providers also rotate messageId
   // for every delta. Assistant boundaries therefore come from the canonical
-  // timeline (user/tool/reasoning/session), not from per-chunk identity.
-  const append = Boolean(previous && previous.role === role && (
+  // timeline's semantic text/tool/session events, not from side-channel events
+  // or per-chunk identity.
+  const append = Boolean(previous && previous.role === role && textStreamContinues(document, previous, envelope) && (
     role === 'assistant'
-      ? immediatelyPrecedingMessageHasRole(document, envelope.eventId, role)
-      : (identityKey !== '' && identityKey === previousIdentityKey)
-        || ((!identityKey || !previousIdentityKey) && immediatelyPrecedingMessageHasRole(document, envelope.eventId, role))
+      ? true
+      : providerIdentityKey(envelope.identity) !== ''
+        && providerIdentityKey(envelope.identity) === providerIdentityKey(previous.identity)
   ))
   const incomingOptimistic = envelope.provenance.origin === 'optimistic-local'
   const duplicateIndex = role === 'user'
-    ? findLastMessageIndex(document.messages, message => message.role === 'user'
-      && message.content === content
-      && message.optimistic !== incomingOptimistic)
+    ? findCorrelatedUserEcho(document.messages, envelope, content, incomingOptimistic)
     : -1
   if (duplicateIndex >= 0) {
     // Prefer the Kernel-committed row regardless of whether it arrives before
@@ -520,37 +527,41 @@ function reduceMessage(document: WorkbenchDocument, envelope: WorkbenchEventEnve
     return {
       ...document,
       messages: document.messages.map((message, index) => index === duplicateIndex ? {
-        id: identityKey || envelope.eventId, role: 'user', content, parts,
+        ...messageIdentityFor(envelope), role: 'user', content, parts,
         identity: envelope.identity, source: envelope.source,
-        sequence: envelope.sequence, running: event.type !== 'message.completed',
+        sequence: envelope.sequence, running: !terminal,
         time: envelope.occurredAt ?? envelope.recordedAt,
       } : message),
     }
   }
   const messages = append
-    ? [...document.messages.slice(0, -1), { ...previous!, content: previous!.content + content, parts: coalesceAdjacentDisplayTextParts([...previous!.parts, ...parts]), identity: Object.keys(envelope.identity).length > 0 ? envelope.identity : previous!.identity, sequence: envelope.sequence, running: event.type !== 'message.completed' }]
-    : [...document.messages, { id: identityKey || envelope.eventId, role: role as WorkbenchMessage['role'], content, parts: coalesceAdjacentDisplayTextParts(parts), identity: envelope.identity, source: envelope.source, sequence: envelope.sequence, running: event.type !== 'message.completed', time: envelope.occurredAt ?? envelope.recordedAt, ...(incomingOptimistic ? { optimistic: true } : {}) }]
+    ? [...document.messages.slice(0, -1), { ...previous!, content: previous!.content + content, parts: coalesceAdjacentDisplayTextParts([...previous!.parts, ...parts]), identity: Object.keys(envelope.identity).length > 0 ? envelope.identity : previous!.identity, sequence: envelope.sequence, running: !terminal }]
+    : [...document.messages, { ...messageIdentityFor(envelope), role: role as WorkbenchMessage['role'], content, parts: coalesceAdjacentDisplayTextParts(parts), identity: envelope.identity, source: envelope.source, sequence: envelope.sequence, running: !terminal, time: envelope.occurredAt ?? envelope.recordedAt, ...(incomingOptimistic ? { optimistic: true } : {}) }]
   return { ...document, messages }
 }
 
 function reduceReasoning(document: WorkbenchDocument, envelope: WorkbenchEventEnvelope, event: WorkbenchSemanticEvent & { type: 'reasoning.delta' | 'reasoning.completed' | 'reasoning.redacted' }): WorkbenchDocument {
+  document = settleSupersededRunningMessages(document, 'reasoning')
   const parts = event.parts ?? []
   // C01：redacted 时正文不保留原文（D06——raw 不进入 projection），只保留安全占位。
   const redacted = event.type === 'reasoning.redacted'
   const content = redacted ? '' : textFromParts(parts)
+  if (event.type === 'reasoning.completed' && content.length === 0) {
+    return settleReasoningSegment(document, envelope)
+  }
   const previous = document.messages.at(-1)
-  const identityKey = identityKeyOf(envelope)
   // Keep replay/live/restart projection aligned with chunkMerge: provider messageId is
   // metadata, not a reliable stream boundary (some providers rotate it per delta and on
   // completion). The canonical timeline supplies boundaries. A delta after a terminal
   // reasoning event starts a new segment, while repeated/stricter terminal events still
   // target the immediately preceding segment only when their stable identity agrees. A
   // distinct redacted segment after a completed visible segment must not erase that segment.
-  const previousIdentityKey = previous ? identityKeyOf(previous) : ''
-  const sameTerminalIdentity = identityKey !== '' && identityKey === previousIdentityKey
+  const incomingProviderIdentity = providerIdentityKey(envelope.identity)
+  const previousProviderIdentity = previous ? providerIdentityKey(previous.identity) : ''
+  const sameTerminalIdentity = incomingProviderIdentity !== '' && incomingProviderIdentity === previousProviderIdentity
   const append = previous !== undefined
     && previous.role === 'reasoning'
-    && immediatelyPrecedingTimelineKind(document, envelope.eventId) === 'reasoning'
+    && textStreamContinues(document, previous, envelope)
     && (previous.running || (event.type !== 'reasoning.delta' && sameTerminalIdentity))
   // C01：terminal 是吸收态——迟到 delta/重复 completion 不得复活或改写首次终态。
   // redaction 是唯一可继续收紧的迁移：即使 completed 已到，也必须清除可见正文与历史 parts。
@@ -589,7 +600,7 @@ function reduceReasoning(document: WorkbenchDocument, envelope: WorkbenchEventEn
         ...(event.reason !== undefined ? { redactedReason: event.reason } : {}),
       }
     : {
-        id: identityKey || envelope.eventId,
+        ...messageIdentityFor(envelope),
         role: 'reasoning',
         content,
         parts,
@@ -613,6 +624,10 @@ function reduceTool(document: WorkbenchDocument, envelope: WorkbenchEventEnvelop
   // C04 DIC-C04-01/架构补全：canonical 字段自 normalized payload 收窄进 activity node，
   // renderer 经 toolInvocationSnapshot 消费，不再读 provider raw。
   const previous = document.activities.find(node => node.id === id && node.kind === 'tool')
+  if (!previous) {
+    document = settleSupersededRunningMessages(document)
+    document = { ...document, timeline: updateTimeline(document.timeline, envelope.eventId, { streamBoundary: true }) }
+  }
   const node: WorkbenchActivityNode = {
     // C04/DIC：node.title 是工具身份（machine name，_meta.pylon.toolName 优先）；
     // 本地化 title 只进 snapshot.title 供显示，不作为身份。
@@ -1085,9 +1100,16 @@ function timelineEntry(envelope: WorkbenchEventEnvelope): WorkbenchTimelineEntry
 }
 
 function insertBySequence<T extends { sequence: number }>(items: readonly T[], item: T): T[] {
-  const next = [...items, item]
-  next.sort((left, right) => left.sequence - right.sequence)
-  return next
+  const last = items.at(-1)
+  if (!last || last.sequence <= item.sequence) return [...items, item]
+  let low = 0
+  let high = items.length
+  while (low < high) {
+    const middle = (low + high) >>> 1
+    if (items[middle]!.sequence <= item.sequence) low = middle + 1
+    else high = middle
+  }
+  return [...items.slice(0, low), item, ...items.slice(low)]
 }
 
 function updateTimeline(items: readonly WorkbenchTimelineEntry[], eventId: string, patch: Partial<WorkbenchTimelineEntry>): WorkbenchTimelineEntry[] {
@@ -1104,14 +1126,120 @@ function textFromParts(parts: readonly ContentPart[]): string {
   return parts.map(part => 'text' in part && typeof part.text === 'string' ? part.text : part.kind === 'unknown' ? part.summary : '').join('')
 }
 
-function identityKeyOf(value: WorkbenchEventEnvelope | WorkbenchMessage): string {
-  const identity = value.identity
+function providerIdentityKey(identity: WorkbenchEventEnvelope['identity']): string {
   return identity.messageId || identity.turnId || identity.toolCallId || identity.taskId || identity.interactionId || ''
 }
 
-function immediatelyPrecedingTimelineEntry(document: WorkbenchDocument, eventId: string): WorkbenchTimelineEntry | undefined {
-  const index = document.timeline.findIndex(item => item.eventId === eventId)
-  return index > 0 ? document.timeline[index - 1] : undefined
+function settleSupersededRunningMessages(
+  document: WorkbenchDocument,
+  continuingRole?: WorkbenchMessage['role'],
+): WorkbenchDocument {
+  if (!document.messages.some(message => message.running && message.role !== continuingRole)) return document
+  return {
+    ...document,
+    messages: document.messages.map(message => message.running && message.role !== continuingRole
+      ? { ...message, running: false }
+      : message),
+  }
+}
+
+function messageIdentityFor(envelope: WorkbenchEventEnvelope): Pick<WorkbenchMessage, 'id' | 'segmentId'> {
+  const segmentId = envelope.eventId
+  return { id: `${envelope.sessionId}:${segmentId}`, segmentId }
+}
+
+function textStreamContinues(
+  document: WorkbenchDocument,
+  previous: WorkbenchMessage,
+  envelope: WorkbenchEventEnvelope,
+): boolean {
+  return !document.timeline.some(entry => entry.sequence > previous.sequence
+    && entry.sequence < envelope.sequence
+    && isTextStreamBoundary(entry))
+}
+
+function isTextStreamBoundary(entry: WorkbenchTimelineEntry): boolean {
+  return entry.kind === 'message'
+    || entry.kind === 'reasoning'
+    || (entry.kind === 'tool' && entry.streamBoundary === true)
+    || entry.kind === 'session'
+    || entry.kind === 'interaction'
+}
+
+function settleTextSegment(
+  document: WorkbenchDocument,
+  envelope: WorkbenchEventEnvelope,
+  role: WorkbenchMessage['role'],
+): WorkbenchDocument {
+  const index = findTerminalTargetIndex(document.messages, envelope.identity, role)
+  if (index < 0) return document
+  const target = document.messages[index]!
+  if (!target.running) return document
+  return {
+    ...document,
+    messages: document.messages.map((message, messageIndex) => messageIndex === index
+      ? { ...message, running: false, sequence: envelope.sequence }
+      : message),
+  }
+}
+
+function settleReasoningSegment(document: WorkbenchDocument, envelope: WorkbenchEventEnvelope): WorkbenchDocument {
+  const index = findTerminalTargetIndex(document.messages, envelope.identity, 'reasoning')
+  if (index < 0) return document
+  const target = document.messages[index]!
+  const terminalAt = Date.parse(envelope.occurredAt ?? envelope.recordedAt)
+  const startedAt = target.thoughtStartedAtMs ?? Date.parse(target.time)
+  const durationMs = Number.isFinite(terminalAt) && Number.isFinite(startedAt)
+    ? Math.max(0, terminalAt - startedAt)
+    : undefined
+  if (!target.running && (target.thoughtDurationMs !== undefined || durationMs === undefined)) return document
+  return {
+    ...document,
+    messages: document.messages.map((message, messageIndex) => messageIndex === index
+      ? {
+          ...message,
+          running: false,
+          sequence: envelope.sequence,
+          ...(durationMs !== undefined ? { thoughtDurationMs: durationMs } : {}),
+        }
+      : message),
+  }
+}
+
+function findTerminalTargetIndex(
+  messages: readonly WorkbenchMessage[],
+  identity: WorkbenchEventEnvelope['identity'],
+  role: WorkbenchMessage['role'],
+): number {
+  const incomingIdentity = providerIdentityKey(identity)
+  if (incomingIdentity) {
+    const exact = findLastMessageIndex(messages, message => message.role === role
+      && providerIdentityKey(message.identity) === incomingIdentity)
+    if (exact >= 0) return exact
+  }
+  return findLastMessageIndex(messages, message => message.role === role && message.running)
+}
+
+function findCorrelatedUserEcho(
+  messages: readonly WorkbenchMessage[],
+  envelope: WorkbenchEventEnvelope,
+  content: string,
+  incomingOptimistic: boolean,
+): number {
+  const requestIdentity = envelope.identity.interactionId
+  if (requestIdentity) {
+    const correlated = findLastMessageIndex(messages, message => message.role === 'user'
+      && message.optimistic !== incomingOptimistic
+      && message.identity.interactionId === requestIdentity)
+    if (correlated >= 0) return correlated
+  }
+  const adjacentIndex = messages.length - 1
+  const adjacent = messages[adjacentIndex]
+  return adjacent?.role === 'user'
+    && adjacent.content === content
+    && adjacent.optimistic !== incomingOptimistic
+    ? adjacentIndex
+    : -1
 }
 
 function findLastMessageIndex(
@@ -1122,22 +1250,6 @@ function findLastMessageIndex(
     if (predicate(messages[index]!)) return index
   }
   return -1
-}
-
-function immediatelyPrecedingTimelineKind(document: WorkbenchDocument, eventId: string): WorkbenchTimelineKind | undefined {
-  return immediatelyPrecedingTimelineEntry(document, eventId)?.kind
-}
-
-function immediatelyPrecedingMessageHasRole(
-  document: WorkbenchDocument,
-  eventId: string,
-  role: WorkbenchMessage['role'],
-): boolean {
-  const event = immediatelyPrecedingTimelineEntry(document, eventId)?.data
-  return Boolean(event && typeof event === 'object' && 'type' in event
-    && typeof event.type === 'string' && event.type.startsWith('message.')
-    && 'role' in event
-    && (event.role === 'reasoning' ? 'assistant' : event.role === 'user' ? 'user' : 'assistant') === role)
 }
 
 /** C04：把 normalized 字段冻结为可安全持有的 Json 快照（非 JSON 值降级为 undefined）。 */

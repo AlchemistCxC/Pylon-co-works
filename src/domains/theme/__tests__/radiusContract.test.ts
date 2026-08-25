@@ -29,7 +29,11 @@ describe('第一方圆角语义', () => {
     // 豁免（2026-08-23 圆角契约裁决）：chat-recovery-error / chat-recovery-actions /
     // chat-replay-warning 是恢复与警告反馈面（非终端记录流本体），允许消费壳层圆角。
     // 记录流本体（term-*、消息行、输入区）仍维持无壳层圆角冻结。
-    const exemptSelectors = ['chat-recovery-error', 'chat-recovery-actions', 'chat-replay-warning']
+    const exemptSelectors = [
+      'chat-recovery-error', 'chat-recovery-actions', 'chat-replay-warning',
+      // Onboarding belongs to the empty shell, not the frozen terminal record stream.
+      'agent-empty-steps', 'agent-empty-sidebar-action',
+    ]
     for (const source of classicRendererCss) {
       const consumed = source
         .split('}')

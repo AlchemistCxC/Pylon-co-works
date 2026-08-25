@@ -1,4 +1,4 @@
-import { ErrorBoundary, For, Index, Match, Show, Switch, createEffect, createMemo, createSignal, onCleanup, onMount } from 'solid-js'
+import { ErrorBoundary, For, Index, Match, Show, Switch, createEffect, createMemo, createSignal, onCleanup, onMount, untrack } from 'solid-js'
 import { buildChatRowDescriptors } from '../../components/chat/chatRowPipeline.ts'
 import { buildMessageLookups } from '../../components/chat/messageLookups.ts'
 import { prepareMessages } from '../../components/chat/messagePipeline.ts'
@@ -206,6 +206,10 @@ function WorkbenchContent(props: SolidWorkbenchAppProps) {
                 setMessageListPort(() => port)
                 port.setItems(items())
               }}
+              onContentResize={() => {
+                if (!followBottom()) return
+                queueMicrotask(() => bottomAnchor?.scrollIntoView?.({ behavior: 'auto', block: 'end' }))
+              }}
             />
             <Show when={snapshot().streamingThinking}>
               {text => <div class="term-row term-row-reasoning" data-render-type="reasoning">
@@ -407,9 +411,9 @@ function WorkbenchDocumentSurface(props: {
               />
             </div>
           </Show>
-          <Show when={document().diagnostics.length > 0}>
+          <Show when={visibleDiagnostics(document()).length > 0}>
             <div class="solid-workbench-diagnostics" aria-label="诊断">
-              <For each={document().diagnostics}>{diagnostic => (
+              <For each={visibleDiagnostics(document())}>{diagnostic => (
                 <WorkbenchContentSlot
                   nodeId={`${props.sessionId ?? 'none'}:notice:${diagnostic.eventId}`}
                   kind="system.notice"
@@ -424,6 +428,11 @@ function WorkbenchDocumentSurface(props: {
       )}
     </Show>
   )
+}
+
+function visibleDiagnostics(document: WorkbenchDocument) {
+  const errorEventIds = new Set(document.systemErrors.flatMap(error => error.eventId ? [error.eventId] : []))
+  return document.diagnostics.filter(diagnostic => !errorEventIds.has(diagnostic.eventId))
 }
 
 function CanonicalActivitySlot(props: {
@@ -494,7 +503,7 @@ function CanonicalActivitySlot(props: {
       data-activity-id={props.activity.id}
     >
       <WorkbenchContentSlot
-        nodeId={props.activity.id}
+        nodeId={`${props.document.sessionId}:${props.activity.id}`}
         kind={kind()}
         payload={toolSnapshot() ?? props.activity}
         context={props.context}
@@ -532,16 +541,48 @@ function CanonicalActivityList(props: {
   context: SolidWorkbenchContextValue
   connectorPort: ReturnType<typeof createToolConnectorLayoutPort>
 }) {
-  return <Show when={props.activities.length > 0 ? props.document : undefined}>
-    {document => <div class="solid-workbench-activities" aria-label="活动" data-activity-count={props.activities.length}>
-      <Index each={props.activities}>{activity => <CanonicalActivitySlot
-        activity={activity()}
+  const [rows, setRows] = createSignal<readonly StableActivityRow[]>([])
+  createEffect(() => {
+    const document = props.document
+    const activities = props.activities
+    if (!document) {
+      setRows([])
+      return
+    }
+    const previous = new Map(untrack(rows).map(row => [row.key, row]))
+    setRows(activities.map(activity => {
+      const key = `${document.sessionId}:${activity.id}`
+      const existing = previous.get(key)
+      if (!existing) return createStableActivityRow(key, activity)
+      existing.update(activity)
+      return existing
+    }))
+  })
+  return <Show when={rows().length > 0 ? props.document : undefined}>
+    {document => <div class="solid-workbench-activities" aria-label="活动" data-activity-count={rows().length}>
+      <For each={rows()}>{row => <CanonicalActivitySlot
+        activity={row.activity}
         document={document()}
         context={props.context}
         connectorPort={props.connectorPort}
-      />}</Index>
+      />}</For>
     </div>}
   </Show>
+}
+
+interface StableActivityRow {
+  readonly key: string
+  readonly activity: WorkbenchActivityNode
+  update(activity: WorkbenchActivityNode): void
+}
+
+function createStableActivityRow(key: string, initialActivity: WorkbenchActivityNode): StableActivityRow {
+  const [current, setCurrent] = createSignal(initialActivity)
+  return {
+    key,
+    get activity() { return current() },
+    update: setCurrent,
+  }
 }
 
 interface ActivityTimelinePlacement {

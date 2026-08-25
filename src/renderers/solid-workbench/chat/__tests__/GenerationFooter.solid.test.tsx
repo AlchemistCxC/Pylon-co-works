@@ -41,6 +41,7 @@ describe('SolidGenerationFooter', () => {
       phase={{ kind: 'thinking' }}
       thinkingStart={9_000}
       appearance={APPEARANCE}
+      showTokenCount
       clock={clock}
       random={() => 0}
     />)
@@ -79,6 +80,23 @@ describe('SolidGenerationFooter', () => {
     expect(Number(spinner.style.getPropertyValue('--stall-progress'))).toBeCloseTo(0.4, 2)
     clock.advance(1_200)
     await waitFor(() => expect(result.container.textContent).toContain('仍在等待后端响应'))
+  })
+
+  it('默认隐藏 ChatView token 用量', () => {
+    const result = render(() => <SolidGenerationFooter
+      running tokenCount={1234} startTime={10_000} lastTokenAt={10_000} summary={null}
+      appearance={APPEARANCE} clock={createFakeWorkbenchClock(10_000)}
+    />)
+    expect(result.container.textContent).not.toContain('tokens')
+  })
+
+  it('legacy startTime=0 在真实 epoch 时从当前时刻计时', () => {
+    const clock = createFakeWorkbenchClock(1_800_000_000_000)
+    const result = render(() => <SolidGenerationFooter
+      running tokenCount={0} startTime={0} lastTokenAt={1_800_000_000_000} summary={null}
+      appearance={APPEARANCE} clock={clock}
+    />)
+    expect(result.container.querySelector('.spinner-meta')).toHaveTextContent('(0s)')
   })
 
   it('tool phase 抑制 stalled，并使用工具标题；active task 覆盖 phase', () => {
@@ -141,7 +159,7 @@ describe('SolidGenerationFooter', () => {
     const clock = createFakeWorkbenchClock(0)
     let lifecycle: GenerationFooterLifecycle | undefined
     const result = render(() => <SolidGenerationFooter
-      running tokenCount={100} startTime={0} summary={null}
+      running tokenCount={100} startTime={0} summary={null} showTokenCount
       appearance={APPEARANCE} clock={clock}
       onLifecycleReady={value => { lifecycle = value }}
     />)

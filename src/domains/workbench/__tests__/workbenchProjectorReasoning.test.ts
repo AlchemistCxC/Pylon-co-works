@@ -63,6 +63,18 @@ describe('C01 reasoning projector aggregation', () => {
     expect(thoughts[0]!.running).toBe(false)
   })
 
+  it('settles an existing reasoning segment when its empty completion arrives after a tool', () => {
+    const document = reduce([
+      delta(1, 'thought-a', 'inspect first', '1970-01-01T00:00:01.000Z'),
+      envelope(2, { type: 'tool.started', tool: { toolCallId: 'tool-1', name: 'read' } }, 'tool-1', '1970-01-01T00:00:02.000Z'),
+      envelope(3, { type: 'reasoning.completed', parts: [] }, 'thought-a', '1970-01-01T00:00:03.000Z'),
+    ])
+
+    const thoughts = document.messages.filter(message => message.role === 'reasoning')
+    expect(thoughts).toHaveLength(1)
+    expect(thoughts[0]).toMatchObject({ content: 'inspect first', running: false, thoughtDurationMs: 2_000 })
+  })
+
   it('keeps the first terminal duration when completion is repeated with a distinct event id', () => {
     const document = reduce([
       delta(1, 'thought-terminal', '稳定正文', '1970-01-01T00:00:01.000Z'),
@@ -70,7 +82,7 @@ describe('C01 reasoning projector aggregation', () => {
       envelope(3, { type: 'reasoning.completed', parts: [] }, 'thought-terminal', '1970-01-01T00:00:09.000Z'),
     ])
 
-    const thought = document.messages.find(message => message.id === 'thought-terminal')!
+    const thought = document.messages.find(message => message.identity.messageId === 'thought-terminal')!
     expect(thought.content).toBe('稳定正文')
     expect(thought.running).toBe(false)
     expect(thought.thoughtDurationMs).toBe(2_000)

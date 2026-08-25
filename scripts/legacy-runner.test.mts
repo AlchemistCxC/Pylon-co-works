@@ -2,6 +2,7 @@ import { test } from 'vitest'
 import { execFileSync } from 'node:child_process'
 import { readdirSync } from 'node:fs'
 import { resolve } from 'node:path'
+import { pathToFileURL } from 'node:url'
 
 // 迁移兼容层：原 scripts/test-*.mts 是"顶层 assert + console.log"脚本形态，
 // 不含 vitest suite。本文件在 vitest 内 spawn 原脚本（node --experimental-strip-types），
@@ -9,6 +10,7 @@ import { resolve } from 'node:path'
 // 排除项与原 run-frontend-tests.mts 一致：直接读取 src-tauri 的跨端脚本。
 
 const scriptsDir = resolve(process.cwd(), 'scripts')
+const legacyLoader = pathToFileURL(resolve(scriptsDir, 'legacy-ts-loader.mjs')).href
 const EXCLUDED = new Set([
   'test-profile-prompt-visibility.mts',
   // 已迁入 Vitest 直跑（*.test.mts 由 vitest 自身收集，legacy-runner 不再 spawn）：
@@ -19,6 +21,19 @@ const EXCLUDED = new Set([
   'test-replay-tool-settlement.test.mts',
   'test-chat-regression-contract.test.mts',
   'test-settings-layout.test.mts',
+  'test-sheet-persistence.mts',
+  'test-sheet-persistence.test.mts',
+  // 这些脚本会经过包含 parameter property 的产品模块；Node strip-only 无法转译，
+  // 由 legacy-plugin-runtime-compat.test.mts 在 Vitest 中保留原断言执行。
+  'test-command-registry.mts',
+  'test-normalizer.mts',
+  'test-session-runtime.mts',
+  'test-compact-transaction.mts',
+  'test-sheet-persistence-v2.mts',
+  'test-tool-presentation-model.mts',
+  'test-sheet-registry.mts',
+  'test-tool-renderer-registry.mts',
+  'test-sheet-state.mts',
 ])
 
 const files = readdirSync(scriptsDir)
@@ -34,7 +49,7 @@ function runGroup(group: string[]) {
   const failures: string[] = []
   for (const f of group) {
     try {
-      execFileSync(process.execPath, ['--experimental-strip-types', resolve(scriptsDir, f)], {
+      execFileSync(process.execPath, ['--no-warnings', '--experimental-strip-types', '--experimental-loader', legacyLoader, resolve(scriptsDir, f)], {
         encoding: 'utf8',
         stdio: ['ignore', 'pipe', 'pipe'],
       })

@@ -25,7 +25,11 @@ assert.equal(payload.agentId, 'test-agent')
 assert.equal(payload.source, 'source-session')
 assert.equal(payload.content, '/compact')
 assert.equal(payload.persona, 'coder')
-assert.equal(payload.sessionPrompt.startsWith('保持简洁\n\n可用 CLI 命令：'), true, 'compact 必须复用普通发送 payload 并注入 commandSet')
+assert.equal(
+  payload.sessionPrompt.startsWith('coder\n\n保持简洁\n\n可用 CLI 命令：'),
+  true,
+  'compact 必须复用普通发送 payload 的 Profile persona、用户提示词与 commandSet 组合',
+)
 assert.deepEqual(payload.attachments, ['C:/tmp/a.txt'], 'compact 必须复用普通发送 payload 的附件字段')
 
 const calls: unknown[] = []
@@ -54,7 +58,8 @@ assert.equal(success, 0, 'compact 失败不得执行清空输入/附件')
 assert.equal(errors, 1)
 
 const inputBar = readFileSync(new URL('../src/components/chat/InputBar.tsx', import.meta.url), 'utf8')
-assert.match(inputBar, /case '\/compact': \{[\s\S]*?buildSendMessagePayload\(/, 'compact 必须使用统一发送 payload helper')
+assert.match(inputBar, /function sendWithStream\([\s\S]*?buildSendMessagePayload\(options\)/, '统一流式发送 helper 必须构造标准 payload')
+assert.match(inputBar, /case '\/compact': \{[\s\S]*?send: \(\) => sendWithStream\(/, 'compact 必须复用统一流式发送 helper')
 assert.match(inputBar, /case '\/compact': \{[\s\S]*?runSendTransaction\(/, 'compact 必须使用统一发送事务')
 assert.match(inputBar, /case '\/compact': \{[\s\S]*?onError: error => setSendError\(String\(error\)\)/, 'compact 必须复用统一错误显示路径')
 assert.match(inputBar, /case '\/compact': \{[\s\S]*?attachments: attached\.filter\(file => file\.status !== 'error'\)\.map\(file => file\.path\)/, 'compact 必须保留附件 payload 语义（过滤 error）')

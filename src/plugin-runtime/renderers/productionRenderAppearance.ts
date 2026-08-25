@@ -48,7 +48,10 @@ function resolveScope(input: {
   readonly profile?: Readonly<Record<string, RendererSettingValue>>
   readonly optionEntries?: readonly RegistryEntry<PluginSettingOptionsContribution>[]
 }) {
-  if (!input.schema) return Object.freeze({})
+  if (!input.schema) return {
+    values: Object.freeze({}),
+    sources: Object.freeze({}),
+  }
   const availableOptions = Object.fromEntries(input.schema.groups.flatMap(group => group.fields.flatMap(field => {
     if (field.type !== 'choice' && field.type !== 'multi-choice') return []
     const key = field.key ?? field.id ?? ''
@@ -56,7 +59,7 @@ function resolveScope(input: {
     const options = resolvePluginSettingOptions(target, field.options, input.optionEntries ?? [])
     return [[key, options.map(option => option.value)] as const]
   })))
-  return resolveRenderAppearance({
+  const resolution = resolveRenderAppearance({
     schema: input.schema,
     hostDefaults: hostDefaults(input.host, input.schema),
     kindDefaults: input.defaults,
@@ -64,7 +67,8 @@ function resolveScope(input: {
     userOverrides: scopedValues(input.settings.values, input.namespace, input.id),
     sessionPreview: scopedValues(input.settings.sessionPreview, input.namespace, input.id),
     availableOptions,
-  }).values
+  })
+  return { values: resolution.values, sources: resolution.sources }
 }
 
 /**
@@ -75,9 +79,9 @@ export function resolveProductionRenderAppearance(input: ProductionRenderAppeara
   const suite = input.catalog.rendererSuites.find(entry => entry.value.id === input.suiteId)?.value
   const slot = input.catalog.rendererSlots.find(entry => entry.value.id === input.slotId)?.value
   const kind = input.catalog.renderKinds.find(entry => entry.value.id === input.kind)?.value
-  const suiteValues = resolveScope({ schema: suite?.settings, namespace: 'suite', id: input.suiteId, host: input.hostAppearance, settings: input.settings, optionEntries: input.optionEntries })
-  const slotValues = resolveScope({ schema: slot?.settings, namespace: 'slot', id: input.slotId, host: input.hostAppearance, settings: input.settings, optionEntries: input.optionEntries })
-  const kindValues = resolveScope({
+  const suiteResolution = resolveScope({ schema: suite?.settings, namespace: 'suite', id: input.suiteId, host: input.hostAppearance, settings: input.settings, optionEntries: input.optionEntries })
+  const slotResolution = resolveScope({ schema: slot?.settings, namespace: 'slot', id: input.slotId, host: input.hostAppearance, settings: input.settings, optionEntries: input.optionEntries })
+  const kindResolution = resolveScope({
     schema: kind?.settings,
     namespace: 'kind',
     id: input.kind,
@@ -87,11 +91,23 @@ export function resolveProductionRenderAppearance(input: ProductionRenderAppeara
     profile: input.profileKindTokens,
     optionEntries: input.optionEntries,
   })
+  const suiteValues = suiteResolution.values
+  const slotValues = slotResolution.values
+  const kindValues = kindResolution.values
   return Object.freeze({
     ...input.hostAppearance,
     ...suiteValues,
     ...slotValues,
     ...kindValues,
-    renderSettings: Object.freeze({ suite: suiteValues, slot: slotValues, kind: kindValues }),
+    renderSettings: Object.freeze({
+      suite: suiteValues,
+      slot: slotValues,
+      kind: kindValues,
+      sources: Object.freeze({
+        suite: suiteResolution.sources,
+        slot: slotResolution.sources,
+        kind: kindResolution.sources,
+      }),
+    }),
   })
 }

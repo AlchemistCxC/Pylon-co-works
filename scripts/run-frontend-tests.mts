@@ -1,8 +1,10 @@
 import { readdirSync } from 'node:fs'
 import { resolve } from 'node:path'
 import { spawnSync } from 'node:child_process'
+import { pathToFileURL } from 'node:url'
 
 const scriptsDir = resolve(process.cwd(), 'scripts')
+const legacyLoader = pathToFileURL(resolve(scriptsDir, 'legacy-ts-loader.mjs')).href
 const excludedScripts = new Map([
   ['test-profile-prompt-visibility.mts', '直接读取 src-tauri 后端源码'],
   // 已迁入 Vitest 直跑（*.test.mts），不再作为 standalone 脚本 spawn：
@@ -13,6 +15,17 @@ const excludedScripts = new Map([
   ['test-replay-tool-settlement.test.mts', '已迁入 Vitest'],
   ['test-chat-regression-contract.test.mts', '已迁入 Vitest'],
   ['test-settings-layout.test.mts', '已迁入 Vitest'],
+  ['test-sheet-persistence.mts', '已由 test-sheet-persistence.test.mts 在 Vitest 中执行'],
+  ['test-sheet-persistence.test.mts', '已迁入 Vitest'],
+  ['test-command-registry.mts', '依赖完整 TypeScript 转译，已迁入 Vitest 兼容套件'],
+  ['test-normalizer.mts', '依赖完整 TypeScript 转译，已迁入 Vitest 兼容套件'],
+  ['test-session-runtime.mts', '依赖完整 TypeScript 转译，已迁入 Vitest 兼容套件'],
+  ['test-compact-transaction.mts', '依赖完整 TypeScript 转译，已迁入 Vitest 兼容套件'],
+  ['test-sheet-persistence-v2.mts', '依赖完整 TypeScript 转译，已迁入 Vitest 兼容套件'],
+  ['test-tool-presentation-model.mts', '依赖完整 TypeScript 转译，已迁入 Vitest 兼容套件'],
+  ['test-sheet-registry.mts', '依赖完整 TypeScript 转译，已迁入 Vitest 兼容套件'],
+  ['test-tool-renderer-registry.mts', '依赖完整 TypeScript 转译，已迁入 Vitest 兼容套件'],
+  ['test-sheet-state.mts', '依赖完整 TypeScript 转译，已迁入 Vitest 兼容套件'],
 ])
 
 const allowedFailures = new Map([])
@@ -31,7 +44,7 @@ const summarize = (value: unknown) => {
 let failed = false
 for (const name of scripts) {
   const scriptPath = resolve(scriptsDir, name)
-  const result = spawnSync(process.execPath, [...process.execArgv, scriptPath], {
+  const result = spawnSync(process.execPath, [...process.execArgv, '--no-warnings', '--experimental-loader', legacyLoader, scriptPath], {
     cwd: process.cwd(),
     encoding: 'utf8',
   })

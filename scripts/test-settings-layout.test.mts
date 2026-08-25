@@ -37,7 +37,7 @@ assert.doesNotMatch(chatOrder, /玻璃效果/, 'chat 区不得再有独立"玻�
 
 // ── 渲染器：search 过滤 + defaultOpen/forceOpen + 搜索时 advanced 内联 ──
 assert.match(renderer, /search\?: string/, 'RenderCtx 必须支持 search')
-assert.match(renderer, /function Group\(\{ title, children, defaultOpen, forceOpen \}/, 'Group 必须支持 defaultOpen/forceOpen')
+assert.match(renderer, /function Group\(\{[^}]*\bdefaultOpen\b[^}]*\bforceOpen\b[^}]*\}/, 'Group 必须支持 defaultOpen/forceOpen')
 assert.match(renderer, /def\.label\.toLowerCase\(\)\.includes\(query\)/, '字段必须按 label 过滤')
 assert.match(renderer, /defaultOpen=\{group\.defaultOpen\} forceOpen=\{searching\}/, '搜索时强制展开折叠组')
 assert.match(renderer, /const searching = \(ctx\.search\?\.trim\(\) \?\? ''\)\.length > 0[\s\S]*?searching[\s\S]*?\? advancedRows/, '搜索时 advanced 字段内联展开')

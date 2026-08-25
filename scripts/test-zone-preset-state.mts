@@ -202,6 +202,6 @@ console.log('预设路由纯 reducer 行为回归测试通过（5 zones，确定
 // ── MEDIUM 5：UI 层 chips sync 必须满足同一联动不变量（cli→cli / default→composer）──
 {
   const ccDefs = readFileSync(new URL('../src/domains/cc/widgetDefinitions.ts', import.meta.url), 'utf8')
-  assert.match(ccDefs, /value: 'cli', label: 'CLI', sync: \{ key: 'inputVariant', value: 'cli' \}/, 'CLI chip 必须同步 inputVariant=cli')
-  assert.match(ccDefs, /value: 'default', label: '默认', sync: \{ key: 'inputVariant', value: 'composer' \}/, '默认 chip 必须同步 inputVariant=composer')
+  assert.match(ccDefs, /value: 'cli', label: '命令行', sync: \{ key: 'inputVariant', value: 'cli' \}/, '命令行 chip 必须同步 inputVariant=cli')
+  assert.match(ccDefs, /value: 'default', label: '标准输入', sync: \{ key: 'inputVariant', value: 'composer' \}/, '标准输入 chip 必须同步 inputVariant=composer')
 }

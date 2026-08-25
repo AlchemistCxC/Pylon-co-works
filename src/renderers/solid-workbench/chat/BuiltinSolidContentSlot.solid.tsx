@@ -80,10 +80,20 @@ export function BuiltinSolidContentSlot(props: {
   }
   const contentStyle = () => ({
     'font-family': fontFamily(),
-    'font-size': `${numberSetting('fontSize', 14)}px`,
+    'font-size': explicitKindSetting('fontSize') ? `${numberSetting('fontSize', 14)}px` : 'inherit',
     'line-height': String(numberSetting('lineHeight', 1.6)),
     'max-width': `${numberSetting('maxWidth', 1600)}px`,
   })
+  const explicitKindSetting = (key: string) => {
+    const renderSettings = props.appearance.renderSettings
+    if (!renderSettings || typeof renderSettings !== 'object' || Array.isArray(renderSettings)) return false
+    const sources = (renderSettings as Record<string, unknown>).sources
+    if (!sources || typeof sources !== 'object' || Array.isArray(sources)) return false
+    const kindSources = (sources as Record<string, unknown>).kind
+    if (!kindSources || typeof kindSources !== 'object' || Array.isArray(kindSources)) return false
+    const source = (kindSources as Record<string, unknown>)[key]
+    return source === 'profile' || source === 'user-override' || source === 'session-preview'
+  }
 
   return (
     <div

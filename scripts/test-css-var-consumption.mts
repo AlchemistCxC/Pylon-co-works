@@ -19,7 +19,11 @@ const tsxFiles: string[] = []
 function walk(dir: string) {
   for (const name of readdirSync(dir)) {
     const p = join(dir, name)
-    if (statSync(p).isDirectory()) { walk(p); continue }
+    if (statSync(p).isDirectory()) {
+      if (name !== '__tests__' && name !== '__fixtures__') walk(p)
+      continue
+    }
+    if (name.includes('.test.') || name.includes('.spec.')) continue
     if (name.endsWith('.css')) cssFiles.push(p)
     else if (name.endsWith('.tsx') || name.endsWith('.ts')) tsxFiles.push(p)
   }

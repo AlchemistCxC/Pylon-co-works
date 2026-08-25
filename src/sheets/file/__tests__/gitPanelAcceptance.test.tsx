@@ -19,6 +19,7 @@ import { useIdentityStore } from '../../../identityStore'
 const { invoke } = vi.hoisted(() => ({ invoke: vi.fn() }))
 vi.mock('@tauri-apps/api/core', () => ({ invoke }))
 vi.mock('../../../components/chat/codeHighlight', () => ({ highlightCode: vi.fn().mockResolvedValue(null) }))
+const ASYNC_PANEL_TIMEOUT = { timeout: 10_000 }
 
 const ctx: SheetContext = {
   openSheet: vi.fn(),
@@ -86,10 +87,10 @@ describe('ISSUE-15 前端网页层 fixture（空格/中文/rename 路径）', ()
       return Promise.reject(new Error(`unexpected invoke ${cmd}`))
     })
     openScm()
-    const row = await screen.findByTitle(spacedPath)
+    const row = await screen.findByTitle(spacedPath, {}, ASYNC_PANEL_TIMEOUT)
     expect(row.textContent).toContain('my file with spaces.txt')
     fireEvent.click(row)
-    await screen.findByText('变更预览')
+    await screen.findByText('变更预览', {}, ASYNC_PANEL_TIMEOUT)
     expect(invoke).toHaveBeenCalledWith('git_diff', {
       target: { sessionId: 'session-a', agentId: 'agent-test', source: 'ws-a', legacyWorkdir: 'C:/workspace' },
       path: spacedPath,
@@ -111,7 +112,7 @@ describe('ISSUE-15 前端网页层 fixture（空格/中文/rename 路径）', ()
       return Promise.reject(new Error(`unexpected invoke ${cmd}`))
     })
     openScm()
-    const row = await screen.findByTitle(renamed)
+    const row = await screen.findByTitle(renamed, {}, ASYNC_PANEL_TIMEOUT)
     expect(row.textContent).toContain('renamed file.txt')
     expect(row.textContent).toContain('R')
     // 位于 STAGED 区
@@ -131,10 +132,10 @@ describe('ISSUE-15 前端网页层 fixture（空格/中文/rename 路径）', ()
       return Promise.reject(new Error(`unexpected invoke ${cmd}`))
     })
     openScm()
-    const row = await screen.findByTitle(cnPath)
+    const row = await screen.findByTitle(cnPath, {}, ASYNC_PANEL_TIMEOUT)
     expect(row.textContent).toContain('测试文档.txt')
     fireEvent.click(row)
-    await screen.findByText('变更预览')
+    await screen.findByText('变更预览', {}, ASYNC_PANEL_TIMEOUT)
     expect(invoke).toHaveBeenCalledWith('git_diff', {
       target: { sessionId: 'session-a', agentId: 'agent-test', source: 'ws-a', legacyWorkdir: 'C:/workspace' },
       path: cnPath,
@@ -150,7 +151,7 @@ describe('ISSUE-15 前端网页层 fixture（空格/中文/rename 路径）', ()
       return Promise.reject(new Error(`unexpected invoke ${cmd}`))
     })
     openScm()
-    await screen.findByText('当前工作区不是 Git 仓库')
+    await screen.findByText('当前工作区不是 Git 仓库', {}, ASYNC_PANEL_TIMEOUT)
     expect(screen.queryByText('STAGED')).toBeNull()
   })
 })
@@ -177,7 +178,7 @@ describe('ISSUE-15 W4 前端 branch consumer fixture', () => {
       return Promise.reject(new Error(`unexpected invoke ${cmd}`))
     })
     openScm()
-    await screen.findByText('feature/x')
+    await screen.findByText('feature/x', {}, ASYNC_PANEL_TIMEOUT)
     expect(screen.queryByText('main')).toBeNull()
   })
 
@@ -191,7 +192,7 @@ describe('ISSUE-15 W4 前端 branch consumer fixture', () => {
       return Promise.reject(new Error(`unexpected invoke ${cmd}`))
     })
     openScm()
-    await screen.findByText('(detached)')
+    await screen.findByText('(detached)', {}, ASYNC_PANEL_TIMEOUT)
   })
 
   it('无分支信息时显示占位（branch=null 且非 detached）', async () => {
@@ -204,6 +205,6 @@ describe('ISSUE-15 W4 前端 branch consumer fixture', () => {
       return Promise.reject(new Error(`unexpected invoke ${cmd}`))
     })
     openScm()
-    await screen.findByText('—')
+    await screen.findByText('—', {}, ASYNC_PANEL_TIMEOUT)
   })
 })

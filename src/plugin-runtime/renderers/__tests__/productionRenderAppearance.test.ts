@@ -39,4 +39,26 @@ describe('production render appearance', () => {
     })
     expect(appearance.palette).toBe('solarized')
   })
+
+  it('exposes setting provenance so message text only applies explicit font overrides', () => {
+    const markdown = BUILTIN_TEXT_RENDER_KINDS.find(kind => kind.id === 'content.markdown')!
+    const catalog: RenderCatalogSnapshot = {
+      revision: 1,
+      renderKinds: [entry(markdown.id, markdown)],
+      messageRenderers: [], contentRenderers: [], toolRenderers: [], codeHighlighters: [],
+      rendererSuites: [], rendererSlots: [],
+    }
+    const appearance = resolveProductionRenderAppearance({
+      hostAppearance: selectWorkbenchAppearance(DEFAULTS, 1), catalog,
+      settings: {
+        schemaVersion: 1,
+        values: { 'kind.content.markdown.fontSize': 18 },
+        unavailable: {}, sessionPreview: {}, diagnostics: [],
+      },
+      suiteId: 'builtin.solid', slotId: 'builtin.solid.content.base', kind: 'content.markdown',
+    })
+
+    expect((appearance.renderSettings as { sources: { kind: { fontSize: string } } }).sources.kind.fontSize)
+      .toBe('user-override')
+  })
 })

@@ -36,7 +36,11 @@ assert.equal(payload.agentId, 'agent-a')
 assert.equal(payload.source, 'source-a')
 assert.equal(payload.content, '测试消息')
 assert.equal(payload.persona, '测试人格')
-assert.equal(payload.sessionPrompt.startsWith('只用于当前会话\n\n可用 CLI 命令：'), true, '用户提示词 + commandSet 注入组合')
+assert.equal(
+  payload.sessionPrompt.startsWith('测试人格\n\n只用于当前会话\n\n可用 CLI 命令：'),
+  true,
+  'Profile persona + 用户提示词 + commandSet 按当前首轮提示词契约组合',
+)
 assert.deepEqual(payload.attachments, ['G:/tmp/a.txt'])
 assert.equal('skills' in payload, false, '未接入的 Skills 不得进入运行时 payload')
 assert.equal('hooks' in payload, false, '未接入的 Hooks 不得进入运行时 payload')

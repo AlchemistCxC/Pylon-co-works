@@ -11,6 +11,7 @@ export interface PlainMessageListProps {
   initialItems?: readonly MessageListItem[]
   renderItem: (item: MessageListItem) => JSX.Element
   onPortReady?: (port: MessageListPort) => void
+  onContentResize?: () => void
 }
 
 export function PlainMessageList(props: PlainMessageListProps) {
@@ -91,8 +92,12 @@ export function PlainMessageList(props: PlainMessageListProps) {
 
   onMount(() => {
     if (typeof ResizeObserver !== 'undefined' && container) {
-      resizeObserver = new ResizeObserver(() => port.invalidateMeasurements('container-resized'))
+      resizeObserver = new ResizeObserver(() => {
+        port.invalidateMeasurements('container-resized')
+        props.onContentResize?.()
+      })
       resizeObserver.observe(container)
+      for (const node of rowElements.values()) resizeObserver.observe(node)
     }
     props.onPortReady?.(port)
   })
@@ -102,7 +107,11 @@ export function PlainMessageList(props: PlainMessageListProps) {
   const bindRow = (item: MessageListItem, node: HTMLElement) => {
     const messageId = item.descriptor.renderMessage.message.id
     rowElements.set(messageId, node)
-    onCleanup(() => { if (rowElements.get(messageId) === node) rowElements.delete(messageId) })
+    resizeObserver?.observe(node)
+    onCleanup(() => {
+      resizeObserver?.unobserve(node)
+      if (rowElements.get(messageId) === node) rowElements.delete(messageId)
+    })
   }
 
   return (

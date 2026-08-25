@@ -1,6 +1,7 @@
 import { describe, expect, it, vi } from 'vitest'
 import { createPreviewWorkbenchRuntime, type WorkbenchRuntimeSnapshot } from '../workbenchRuntime.ts'
-import { createWorkbenchDocument } from '../workbenchProjector.ts'
+import { createWorkbenchDocument, projectWorkbench } from '../workbenchProjector.ts'
+import { createWorkbenchEnvelope } from '../events/workbenchEventSchema.ts'
 import type { Message } from '../../../components/chat/messageTypes.ts'
 
 function initial() {
@@ -58,6 +59,24 @@ describe('createPreviewWorkbenchRuntime', () => {
     expect(Object.isFrozen(runtime.getSnapshot())).toBe(true)
     expect(Object.isFrozen(runtime.getSnapshot().messages)).toBe(true)
     expect(listener).toHaveBeenCalledTimes(1)
+  })
+
+  it('deep-freezes renderer-facing canonical message payloads', () => {
+    const runtime = createPreviewWorkbenchRuntime(initial())
+    const document = projectWorkbench([createWorkbenchEnvelope({
+      sessionId: 'session-a', sequence: 1, recordedAt: '2026-08-25T00:00:00.000Z',
+      source: { provider: 'peri', sourceId: 'deep-freeze' }, identity: { messageId: 'm-1' },
+      provenance: { origin: 'local-observed', trust: 'authoritative' },
+      event: { type: 'message.delta', role: 'assistant', parts: [{ kind: 'text', text: 'immutable' }] },
+    })]).document
+
+    runtime.replaceDocument(document, { ownerKey: 'owner-a', generation: 1 })
+    const message = runtime.getSnapshot().document!.messages[0]!
+    expect(Object.isFrozen(message)).toBe(true)
+    expect(Object.isFrozen(message.parts)).toBe(true)
+    expect(Object.isFrozen(message.parts[0])).toBe(true)
+    expect(Object.isFrozen(message.identity)).toBe(true)
+    expect(Object.isFrozen(message.source)).toBe(true)
   })
 
   it('destroy 幂等并停止后续通知', () => {

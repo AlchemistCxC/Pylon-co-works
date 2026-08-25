@@ -98,6 +98,22 @@ describe('ACP normalizer', () => {
     expect(live.events[0].event.type).toBe('event.unknown')
   })
 
+  it('normalizes ACP error as a provider.error semantic event so projection can settle the stream', () => {
+    const result = normalizeAcpEvent({
+      update: { sessionUpdate: 'error', errorCode: 'protocol_error', error: 'transport failed' },
+    }, context)
+
+    expect(result.events[0].event).toEqual({
+      type: 'diagnostic.notice',
+      level: 'error',
+      message: 'transport failed',
+      code: 'provider.error',
+    })
+    expect(result.diagnostics).toEqual(expect.arrayContaining([
+      expect.objectContaining({ code: 'provider.error', message: 'transport failed' }),
+    ]))
+  })
+
   it.each([
     ['tool_call', undefined],
     ['tool_call_update', 'completed'],

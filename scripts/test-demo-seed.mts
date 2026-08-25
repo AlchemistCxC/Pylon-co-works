@@ -18,7 +18,7 @@ import { persistMessageSnapshot, parseMessageSnapshot } from '../src/components/
     assert.ok(session.id.length > 0)
     assert.ok(session.source.startsWith('local:demo-'), `source 必须 local:demo-*（${session.source}）`)
     assert.ok(session.periId, '演示会话必须带 periId（load_persisted_session 走恢复路径）')
-    assert.ok(['profile-a', 'profile-b'].includes(session.profileId))
+    assert.ok(['default', 'local'].includes(session.profileId))
     assert.equal(typeof session.workdir, 'string')
   }
 }

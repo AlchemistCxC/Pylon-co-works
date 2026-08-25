@@ -74,7 +74,9 @@ function semanticEventForUpdate(update: Record<string, unknown>, context: Normal
       return { event: { type: 'session.completed', stopReason: typeof update.stopReason === 'string' ? update.stopReason : undefined }, diagnostics }
     case 'error': {
       const message = typeof update.error === 'string' ? update.error : typeof update.message === 'string' ? update.message : 'provider reported an error'
-      return { event: { type: 'diagnostic.notice', level: 'error', message, ...(typeof update.errorCode === 'string' ? { code: update.errorCode } : {}) }, diagnostics: [...diagnostics, createDiagnostic(context, update, 'provider.error', message, ['error'], true)] }
+      // The semantic code drives projector convergence. Provider-specific error
+      // detail remains available in raw/normalizer diagnostics.
+      return { event: { type: 'diagnostic.notice', level: 'error', message, code: 'provider.error' }, diagnostics: [...diagnostics, createDiagnostic(context, update, 'provider.error', message, ['error'], true)] }
     }
     default:
       diagnostics.push(createDiagnostic(context, update, 'wire.unknown', `unknown ACP session update: ${wireKind(update)}`, ['sessionUpdate'], true))
