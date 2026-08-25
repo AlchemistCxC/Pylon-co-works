@@ -242,6 +242,45 @@ describe('mountSolidWorkbench', () => {
     expect(rows[0]!.querySelectorAll('.term-assistant-body p')).toHaveLength(1)
   })
 
+  it('切换会话时即使 message id 相同也只保留当前会话的一行', async () => {
+    const { host, services, lifecycle } = mountPreview()
+    const documentFor = (sessionId: string, text: string) => projectWorkbench([createWorkbenchEnvelope({
+      sessionId,
+      sequence: 1,
+      recordedAt: `2026-08-25T00:00:0${sessionId === 'session-a' ? '1' : '2'}.000Z`,
+      source: { provider: 'peri', sourceId: `${sessionId}-source` },
+      identity: { messageId: 'same-message-id' },
+      provenance: { origin: 'local-observed', trust: 'authoritative' },
+      event: { type: 'message.delta', role: 'assistant', parts: [{ kind: 'markdown', text }] },
+    })]).document
+
+    services.runtime.replaceDocument(documentFor('session-a', '会话 A'), {
+      ownerKey: 'owner-a', generation: 1, sessionId: 'session-a',
+    })
+    lifecycle.update({ sheetId: 'sheet-a', sessionId: 'session-a', preview: true })
+    const firstRow = await waitFor(() => {
+      const row = host.querySelector('[data-message-id="same-message-id"]')
+      if (!row) throw new Error('session A row not mounted')
+      return row
+    })
+
+    for (let iteration = 0; iteration < 100; iteration += 1) {
+      services.runtime.replaceDocument(documentFor('session-b', '会话 B'), {
+        ownerKey: 'owner-b', generation: iteration + 1, sessionId: 'session-b',
+      })
+      lifecycle.update({ sheetId: 'sheet-a', sessionId: 'session-b', preview: true })
+      services.runtime.replaceDocument(documentFor('session-a', '会话 A'), {
+        ownerKey: 'owner-a', generation: iteration + 2, sessionId: 'session-a',
+      })
+      lifecycle.update({ sheetId: 'sheet-a', sessionId: 'session-a', preview: true })
+    }
+
+    await waitFor(() => expect(host.querySelector('[data-message-id="same-message-id"]')).toHaveTextContent('会话 A'))
+    expect(host.querySelectorAll('[data-message-id="same-message-id"]')).toHaveLength(1)
+    expect(host.querySelector('[data-message-id="same-message-id"]')).toBe(firstRow)
+    expect(host).not.toHaveTextContent('会话 B')
+  })
+
   it('合并流式文本时保留非文本 semantic part 的渲染边界', async () => {
     const { host, services } = mountPreview()
     services.runtime.replaceDocument(projectWorkbench([createWorkbenchEnvelope({
