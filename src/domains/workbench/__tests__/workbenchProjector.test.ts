@@ -130,8 +130,10 @@ describe('WorkbenchProjector', () => {
       envelope(4, { type: 'message.delta', role: 'assistant', parts: [{ kind: 'text', text: ' answer' }] }, { messageId: 'chunk-4' }),
     ]
 
-    expect(selectLegacyMessages(projectWorkbench(chunks).document).map(message => message.content))
+    const document = projectWorkbench(chunks).document
+    expect(selectLegacyMessages(document).map(message => message.content))
       .toEqual(['这是 complete answer'])
+    expect(document.messages[0].parts).toEqual([{ kind: 'text', text: '这是 complete answer' }])
   })
 
   it('keeps assistant streams separated across a tool boundary even when identity is reused', () => {

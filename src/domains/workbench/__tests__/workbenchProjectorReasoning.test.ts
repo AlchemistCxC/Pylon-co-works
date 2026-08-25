@@ -10,8 +10,8 @@ import { createWorkbenchEnvelope, type WorkbenchEventEnvelope, type WorkbenchSem
  * C01 RED：reasoning 聚合契约。
  *
  * 卡面要求：
- * - projector 按 reasoning identity 聚合 delta，完成时记录 duration；
- * - turn/message 边界明确（identity 变化即新段），不依赖最后 role；
+ * - projector 按 canonical timeline 边界聚合 delta，完成时记录 duration；
+ * - provider 逐 chunk 轮换 message identity 时仍保持一整段 reasoning；
  * - redacted 是独立状态：内容不可见、原因可见，与普通 completed 区分。
  */
 
@@ -76,17 +76,42 @@ describe('C01 reasoning projector aggregation', () => {
     expect(thought.thoughtDurationMs).toBe(2_000)
   })
 
-  it('starts a new segment when identity changes even if last message is reasoning', () => {
+  it('aggregates one reasoning stream when the provider rotates identity on every chunk', () => {
     const document = reduce([
       delta(1, 'thought-a', '第一段思考', '1970-01-01T00:00:01.000Z'),
-      delta(2, 'thought-b', '第二段独立思考', '1970-01-01T00:00:02.000Z'),
+      delta(2, 'thought-b', '继续思考', '1970-01-01T00:00:02.000Z'),
+      envelope(3, { type: 'reasoning.completed', parts: [] }, 'thought-terminal', '1970-01-01T00:00:03.000Z'),
     ])
 
     const thoughts = document.messages.filter(message => message.role === 'reasoning')
-    expect(thoughts).toHaveLength(2)
-    expect(thoughts[0]!.content).toBe('第一段思考')
-    expect(thoughts[1]!.content).toBe('第二段独立思考')
-    expect(thoughts.every(thought => thought.running)).toBe(true)
+    expect(thoughts).toHaveLength(1)
+    expect(thoughts[0]!.content).toBe('第一段思考继续思考')
+    expect(thoughts[0]!.running).toBe(false)
+    expect(thoughts[0]!.thoughtDurationMs).toBe(2_000)
+  })
+
+  it('starts a new reasoning segment after the previous segment completed', () => {
+    const document = reduce([
+      delta(1, 'thought-a', '第一段', '1970-01-01T00:00:01.000Z'),
+      envelope(2, { type: 'reasoning.completed', parts: [] }, 'thought-a-terminal', '1970-01-01T00:00:02.000Z'),
+      delta(3, 'thought-b', '第二段', '1970-01-01T00:00:03.000Z'),
+    ])
+
+    const thoughts = document.messages.filter(message => message.role === 'reasoning')
+    expect(thoughts.map(thought => thought.content)).toEqual(['第一段', '第二段'])
+    expect(thoughts.map(thought => thought.running)).toEqual([false, true])
+  })
+
+  it('preserves a completed visible segment when a distinct redacted segment follows', () => {
+    const document = reduce([
+      delta(1, 'thought-visible', '可见思考', '1970-01-01T00:00:01.000Z'),
+      envelope(2, { type: 'reasoning.completed', parts: [] }, 'thought-visible', '1970-01-01T00:00:02.000Z'),
+      envelope(3, { type: 'reasoning.redacted', parts: [], reason: 'provider_policy' }, 'thought-redacted', '1970-01-01T00:00:03.000Z'),
+    ])
+
+    const thoughts = document.messages.filter(message => message.role === 'reasoning')
+    expect(thoughts.map(thought => thought.content)).toEqual(['可见思考', ''])
+    expect(thoughts.map(thought => thought.redacted ?? false)).toEqual([false, true])
   })
 
   it('marks redacted segments distinctly with reason and never exposes raw content', () => {

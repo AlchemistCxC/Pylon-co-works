@@ -4,7 +4,7 @@ import { buildMessageLookups } from '../../components/chat/messageLookups.ts'
 import { prepareMessages } from '../../components/chat/messagePipeline.ts'
 import type { Message, RenderMessage } from '../../components/chat/messageTypes.ts'
 import { selectActivityDisplayOrder, toolInvocationSnapshot, type WorkbenchActivityNode, type WorkbenchDocument, type WorkbenchExtensionNode, type WorkbenchInteraction } from '../../domains/workbench/workbenchProjector.ts'
-import { isValidDiffContentInput, isValidHookSurfaceInput, isValidLspDiagnosticContentInput, type ContentPart, type LspDiagnosticContentPart } from '../../domains/workbench/content/contentPartSchema.ts'
+import { coalesceAdjacentDisplayTextParts, isValidDiffContentInput, isValidHookSurfaceInput, isValidLspDiagnosticContentInput, type ContentPart, type LspDiagnosticContentPart } from '../../domains/workbench/content/contentPartSchema.ts'
 import { diffSnapshotFromPart } from '../../domains/workbench/diffSnapshot.ts'
 import type { MessageListItem } from '../../domains/workbench/messageListPort.ts'
 import { MESSAGE_LIST_BOTTOM_THRESHOLD_PX } from '../../domains/workbench/messageViewportState.ts'
@@ -758,7 +758,12 @@ function WorkbenchMessageContent(props: {
     />
   }
   const inline = props.renderMessage.type === 'user'
-  return <For each={parts()}>{(part, index) => (
+  // A provider stream commonly emits one semantic text part per delta. Each
+  // part used to be parsed as an independent Markdown document, which made
+  // every few-token chunk become its own block/line. Merge adjacent textual
+  // parts before dispatching to the renderer; non-text parts stay boundaries.
+  const renderParts = createMemo(() => coalesceAdjacentDisplayTextParts(parts()))
+  return <For each={renderParts()}>{(part, index) => (
     <WorkbenchContentSlot
       nodeId={`${message().id}:part:${index()}`}
       kind={contentRenderKind(part)}

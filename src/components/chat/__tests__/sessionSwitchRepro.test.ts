@@ -51,7 +51,7 @@ describe('用户复现：新建→发消息→新建→来回切换不复读', (
     handler(payload)
   }
 
-  it('A 发消息完成后切 B 再切回 A（replay 权威）3 轮不叠加', async () => {
+  it('A 发消息完成后切 B 再切回 A（replay 权威）100 轮不叠加', async () => {
     const A = 'local:session-a', B = 'local:session-b'
     useIdentityStore.setState({ sessions: [makeSession('sa', A), makeSession('sb', B)] })
     const handle = attachChatEventController(makeRefs())
@@ -71,8 +71,8 @@ describe('用户复现：新建→发消息→新建→来回切换不复读', (
     // 新建 B → 切到 B
     handle.initSource(B, [])
 
-    // 来回切换 3 轮（切回 A 走 replay 权威）
-    for (let i = 0; i < 3; i++) {
+    // 高频来回切换（切回 A 走 replay 权威）：消息数量不得随 bind 次数增长。
+    for (let i = 0; i < 100; i++) {
       handle.initSource(A, readCached('sa'))
       const gen = handle.beginLoadLock(A)
       handle.commitReplaySnapshot(A, gen, [
@@ -86,6 +86,78 @@ describe('用户复现：新建→发消息→新建→来回切换不复读', (
     expect(final.filter(c => c === '你好').length).toBe(1)
     expect(final.filter(c => c === '回复').length).toBe(1)
     expect(final).toEqual(['你好', '回复'])
+    handle.dispose()
+  })
+
+  it('100 轮复杂 replay：轮换 identity、reasoning/tool/assistant 边界稳定且不复读', async () => {
+    const A = 'local:session-a', B = 'local:session-b'
+    useIdentityStore.setState({ sessions: [makeSession('sa', A), makeSession('sb', B)] })
+    const handle = attachChatEventController(makeRefs())
+    currentHandle = handle
+    await waitListeners()
+
+    const snapshot = [
+      replayUpdate({ sessionUpdate: 'user_message_chunk', content: { text: '问题', messageId: 'user-1' } }),
+      replayUpdate({ sessionUpdate: 'agent_thought_chunk', content: { text: '思', messageId: 'thought-chunk-1' } }),
+      replayUpdate({ sessionUpdate: 'agent_thought_chunk', content: { text: '考', messageId: 'thought-chunk-2' } }),
+      replayUpdate({ sessionUpdate: 'tool_call', toolCallId: 'tool-1', title: 'Read', kind: 'read_file', rawInput: { path: 'a.txt' } }),
+      replayUpdate({ sessionUpdate: 'tool_call_update', toolCallId: 'tool-1', status: 'completed', rawOutput: 'ok' }),
+      replayUpdate({ sessionUpdate: 'agent_thought_chunk', content: { text: '完成', messageId: 'thought-chunk-3' } }),
+      replayUpdate({ sessionUpdate: 'agent_message_chunk', content: { text: '答', messageId: 'answer-chunk-1' } }),
+      replayUpdate({ sessionUpdate: 'agent_message_chunk', content: { text: '案', messageId: 'answer-chunk-2' } }),
+    ]
+
+    handle.initSource(A, [])
+    for (let i = 0; i < 100; i++) {
+      const stale = handle.beginLoadLock(A)
+      const current = handle.beginLoadLock(A)
+      expect(handle.commitReplaySnapshot(A, stale, snapshot)).toEqual([])
+      const resolved = handle.commitReplaySnapshot(A, current, snapshot)
+      handle.finishLoadLock(A, stale)
+      handle.finishLoadLock(A, current)
+      expect(resolved.map(message => [message.role, message.content])).toEqual([
+        ['user', '问题'],
+        ['reasoning', '思考'],
+        ['tool', ''],
+        ['reasoning', '完成'],
+        ['assistant', '答案'],
+      ])
+      handle.initSource(B, [])
+      handle.initSource(A, [])
+    }
+
+    expect(handle.getMessages(A)).toHaveLength(5)
+    handle.dispose()
+  })
+
+  it('跨 load 轮次 generation 不发生 ABA，上一轮迟到 snapshot 不能覆盖当前轮', async () => {
+    const A = 'local:session-a'
+    useIdentityStore.setState({ sessions: [makeSession('sa', A)] })
+    const handle = attachChatEventController(makeRefs())
+    currentHandle = handle
+    await waitListeners()
+
+    handle.initSource(A, [])
+    const previousGeneration = handle.beginLoadLock(A)
+    handle.commitReplaySnapshot(A, previousGeneration, [
+      replayUpdate({ sessionUpdate: 'agent_message_chunk', content: { text: '旧快照' } }),
+    ])
+    handle.finishLoadLock(A, previousGeneration)
+
+    // 新一轮会话恢复会先重新初始化 source，再开启新的 load transaction。
+    handle.initSource(A, [])
+    const currentGeneration = handle.beginLoadLock(A)
+    expect(currentGeneration).not.toBe(previousGeneration)
+    expect(handle.commitReplaySnapshot(A, previousGeneration, [
+      replayUpdate({ sessionUpdate: 'agent_message_chunk', content: { text: '迟到旧快照' } }),
+    ])).toEqual([])
+    const resolved = handle.commitReplaySnapshot(A, currentGeneration, [
+      replayUpdate({ sessionUpdate: 'agent_message_chunk', content: { text: '当前快照' } }),
+    ])
+    handle.finishLoadLock(A, currentGeneration)
+
+    expect(resolved.map(message => message.content)).toEqual(['当前快照'])
+    expect(handle.getMessages(A).map(message => message.content)).toEqual(['当前快照'])
     handle.dispose()
   })
 

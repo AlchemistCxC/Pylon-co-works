@@ -342,6 +342,36 @@ export type ContentPart =
   | UnknownContentPart
   | { readonly kind: Exclude<ContentKind, TextContentPart['kind'] | ImageContentPart['kind'] | ResourceContentPart['kind'] | DocumentContentPart['kind'] | SearchResultContentPart['kind'] | LinkContentPart['kind'] | DiffContentPart['kind'] | LspDiagnosticContentPart['kind'] | TerminalContentPart['kind'] | LogContentPart['kind'] | MemoryContentPart['kind'] | SkillContentPart['kind'] | McpResourceContentPart['kind'] | ArtifactContentPart['kind'] | 'unknown'>; readonly [key: string]: unknown }
 
+function isDisplayTextPart(part: ContentPart): part is TextContentPart {
+  return part.kind === 'text' || part.kind === 'markdown'
+}
+
+/**
+ * Streaming transports commonly emit one text part per delta. Those are wire
+ * fragments, not semantic block boundaries: parsing each fragment as its own
+ * Markdown document produces one paragraph per token. Preserve rich-content
+ * boundaries while folding adjacent display-text fragments into one part.
+ */
+export function coalesceAdjacentDisplayTextParts(parts: readonly ContentPart[]): readonly ContentPart[] {
+  if (parts.length < 2) return parts
+  const merged: ContentPart[] = []
+  let changed = false
+  for (const part of parts) {
+    const previous = merged.at(-1)
+    if (previous && isDisplayTextPart(previous) && isDisplayTextPart(part)) {
+      merged[merged.length - 1] = {
+        ...previous,
+        kind: previous.kind === 'markdown' || part.kind === 'markdown' ? 'markdown' : 'text',
+        text: previous.text + part.text,
+      }
+      changed = true
+    } else {
+      merged.push(part)
+    }
+  }
+  return changed ? merged : parts
+}
+
 export interface UnknownContentOptions {
   readonly maxRawBytes?: number
 }

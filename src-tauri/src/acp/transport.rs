@@ -676,6 +676,111 @@ mod tests {
     }
 
     #[test]
+    fn unrelated_response_does_not_close_an_active_replay_boundary() {
+        let active = Arc::new(Mutex::new(std::collections::HashMap::from([(
+            7,
+            "remote-session".to_string(),
+        )])));
+        let mut unrelated = RawMessage {
+            id: Some(RequestId::Number(99)),
+            method: None,
+            kind: AcpKind::Response,
+            result: Some(serde_json::json!({})),
+            params: None,
+            error: None,
+        };
+
+        classify_active_replay_message(&mut unrelated, &active);
+
+        assert_eq!(
+            active.lock().unwrap().get(&7).map(String::as_str),
+            Some("remote-session")
+        );
+    }
+
+    #[test]
+    fn one_of_two_same_session_responses_does_not_close_the_other_replay_boundary() {
+        let active = Arc::new(Mutex::new(std::collections::HashMap::from([
+            (7, "remote-session".to_string()),
+            (8, "remote-session".to_string()),
+        ])));
+        let mut first_response = RawMessage {
+            id: Some(RequestId::Number(7)),
+            method: None,
+            kind: AcpKind::Response,
+            result: Some(serde_json::json!({})),
+            params: None,
+            error: None,
+        };
+        classify_active_replay_message(&mut first_response, &active);
+
+        let mut between_responses = RawMessage {
+            id: None,
+            method: Some(super::super::NOTIF_SESSION_UPDATE.to_string()),
+            kind: AcpKind::SessionUpdate,
+            result: None,
+            params: Some(serde_json::json!({
+                "sessionId": "remote-session",
+                "update": {"sessionUpdate": "agent_message_chunk", "content": {"text": "still replay"}}
+            })),
+            error: None,
+        };
+        classify_active_replay_message(&mut between_responses, &active);
+
+        assert_eq!(active.lock().unwrap().len(), 1);
+        assert_eq!(
+            between_responses.params.as_ref().unwrap()["update"]["_meta"]["periReplay"],
+            true
+        );
+    }
+
+    #[test]
+    fn active_replay_for_one_session_does_not_reclassify_another_session() {
+        let active = Arc::new(Mutex::new(std::collections::HashMap::from([(
+            7,
+            "session-a".to_string(),
+        )])));
+        let mut other_session = RawMessage {
+            id: None,
+            method: Some(super::super::NOTIF_SESSION_UPDATE.to_string()),
+            kind: AcpKind::SessionUpdate,
+            result: None,
+            params: Some(serde_json::json!({
+                "sessionId": "session-b",
+                "update": {"sessionUpdate": "agent_message_chunk", "content": {"text": "live"}}
+            })),
+            error: None,
+        };
+
+        classify_active_replay_message(&mut other_session, &active);
+
+        assert!(other_session.params.as_ref().unwrap()["update"]
+            .get("_meta")
+            .is_none());
+        assert_eq!(active.lock().unwrap().len(), 1);
+    }
+
+    #[test]
+    fn rpc_error_response_also_closes_the_matching_replay_boundary() {
+        let active = Arc::new(Mutex::new(std::collections::HashMap::from([(
+            7,
+            "remote-session".to_string(),
+        )])));
+        let mut response = RawMessage {
+            id: Some(RequestId::Number(7)),
+            method: None,
+            kind: AcpKind::Response,
+            result: None,
+            params: None,
+            error: Some(serde_json::json!({"code": -32000, "message": "load failed"})),
+        };
+
+        classify_active_replay_message(&mut response, &active);
+
+        assert!(active.lock().unwrap().is_empty());
+    }
+
+    #[test]
     fn crash_reason_wire_codes_are_stable() {
         // ISSUE-17 W1（LR2-WI06）：稳定 code 契约——writer 失败/超时/EOF 必须区分，
         // 禁止用文本正则猜测（old: 写超时误发 "writer_failed" → RED）。

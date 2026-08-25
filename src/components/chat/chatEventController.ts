@@ -365,6 +365,10 @@ export function attachChatEventController(refs: ChatEventControllerRefs): ChatCo
     toolCall: 'supported',
   }
   const loadGenerations = new Map<string, number>()
+  // Transaction tokens must never be reused within a controller lifetime. Reusing `1` after
+  // finishLoadLock creates an ABA window where a previous load's late result can satisfy the
+  // next load's source+generation check and overwrite the current snapshot.
+  let loadGenerationSequence = 0
   const loadTransactions = new Map<string, {
     generation: number
     bufferedLiveEvents: ChatEvent[]
@@ -468,7 +472,7 @@ export function attachChatEventController(refs: ChatEventControllerRefs): ChatCo
 
   const beginLoadLock = (source: string): number => {
     detachedSources.delete(source)
-    const generation = (loadGenerations.get(source) ?? 0) + 1
+    const generation = ++loadGenerationSequence
     loadGenerations.set(source, generation)
     loadTransactions.set(source, { generation, bufferedLiveEvents: [], bufferedCanonicalEvents: [] })
     return generation

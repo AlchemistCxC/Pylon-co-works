@@ -5,7 +5,7 @@
  * 输出可丢弃的 WorkbenchDocument。它不读取时钟、store、registry 或 IO；live、
  * restart、recovery 只要喂给同一组 envelopes，就得到同一份 document。
  */
-import { createUnknownContentPart, parseContentPart, type ContentPart } from './content/contentPartSchema.ts'
+import { coalesceAdjacentDisplayTextParts, createUnknownContentPart, parseContentPart, type ContentPart } from './content/contentPartSchema.ts'
 import { applyGoalEvents, applyPlanEvent, createEmptyGoalState, createEmptyPlanState, normalizeGoalSnapshot, type GoalSnapshot, type GoalState, type PlanState } from './plan/goalModel.ts'
 import { applyLifecycleEvent, createEmptyLifecycleState, normalizeNormalizedError, type LifecycleState, type NormalizedError } from './lifecycle/lifecycleModel.ts'
 import { isActivityStatus } from './events/workbenchEventSchema.ts'
@@ -528,8 +528,8 @@ function reduceMessage(document: WorkbenchDocument, envelope: WorkbenchEventEnve
     }
   }
   const messages = append
-    ? [...document.messages.slice(0, -1), { ...previous!, content: previous!.content + content, parts: [...previous!.parts, ...parts], identity: Object.keys(envelope.identity).length > 0 ? envelope.identity : previous!.identity, sequence: envelope.sequence, running: event.type !== 'message.completed' }]
-    : [...document.messages, { id: identityKey || envelope.eventId, role: role as WorkbenchMessage['role'], content, parts, identity: envelope.identity, source: envelope.source, sequence: envelope.sequence, running: event.type !== 'message.completed', time: envelope.occurredAt ?? envelope.recordedAt, ...(incomingOptimistic ? { optimistic: true } : {}) }]
+    ? [...document.messages.slice(0, -1), { ...previous!, content: previous!.content + content, parts: coalesceAdjacentDisplayTextParts([...previous!.parts, ...parts]), identity: Object.keys(envelope.identity).length > 0 ? envelope.identity : previous!.identity, sequence: envelope.sequence, running: event.type !== 'message.completed' }]
+    : [...document.messages, { id: identityKey || envelope.eventId, role: role as WorkbenchMessage['role'], content, parts: coalesceAdjacentDisplayTextParts(parts), identity: envelope.identity, source: envelope.source, sequence: envelope.sequence, running: event.type !== 'message.completed', time: envelope.occurredAt ?? envelope.recordedAt, ...(incomingOptimistic ? { optimistic: true } : {}) }]
   return { ...document, messages }
 }
 
@@ -540,11 +540,18 @@ function reduceReasoning(document: WorkbenchDocument, envelope: WorkbenchEventEn
   const content = redacted ? '' : textFromParts(parts)
   const previous = document.messages.at(-1)
   const identityKey = identityKeyOf(envelope)
+  // Keep replay/live/restart projection aligned with chunkMerge: provider messageId is
+  // metadata, not a reliable stream boundary (some providers rotate it per delta and on
+  // completion). The canonical timeline supplies boundaries. A delta after a terminal
+  // reasoning event starts a new segment, while repeated/stricter terminal events still
+  // target the immediately preceding segment only when their stable identity agrees. A
+  // distinct redacted segment after a completed visible segment must not erase that segment.
   const previousIdentityKey = previous ? identityKeyOf(previous) : ''
-  const append = previous?.role === 'reasoning' && (
-    (identityKey !== '' && identityKey === previousIdentityKey)
-    || ((!identityKey || !previousIdentityKey) && immediatelyPrecedingTimelineKind(document, envelope.eventId) === 'reasoning')
-  )
+  const sameTerminalIdentity = identityKey !== '' && identityKey === previousIdentityKey
+  const append = previous !== undefined
+    && previous.role === 'reasoning'
+    && immediatelyPrecedingTimelineKind(document, envelope.eventId) === 'reasoning'
+    && (previous.running || (event.type !== 'reasoning.delta' && sameTerminalIdentity))
   // C01：terminal 是吸收态——迟到 delta/重复 completion 不得复活或改写首次终态。
   // redaction 是唯一可继续收紧的迁移：即使 completed 已到，也必须清除可见正文与历史 parts。
   if (append && previous && !previous.running) {

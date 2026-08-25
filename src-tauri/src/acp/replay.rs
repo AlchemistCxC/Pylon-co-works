@@ -207,19 +207,70 @@ mod tests {
     use super::*;
     use crate::acp::AcpKind;
 
+    fn test_handles(
+        rpc_timeout: std::time::Duration,
+        replay_max: usize,
+    ) -> (
+        ReplayHandles,
+        mpsc::Receiver<String>,
+        broadcast::Sender<RawMessage>,
+        Arc<Mutex<HashMap<u64, String>>>,
+    ) {
+        let (write_tx, write_rx) = mpsc::channel(1);
+        let (events_tx, events_rx) = broadcast::channel(64);
+        let active = Arc::new(Mutex::new(HashMap::new()));
+        (
+            ReplayHandles {
+                write_tx,
+                next_id: Arc::new(AtomicU64::new(1)),
+                crashed: Arc::new(AtomicBool::new(false)),
+                rx: events_rx,
+                rpc_timeout,
+                replay_max,
+                active_replay_requests: active.clone(),
+            },
+            write_rx,
+            events_tx,
+            active,
+        )
+    }
+
+    fn response(id: u64, error: Option<serde_json::Value>) -> RawMessage {
+        RawMessage {
+            id: Some(super::super::RequestId::Number(id)),
+            method: None,
+            kind: AcpKind::Response,
+            result: error
+                .is_none()
+                .then(|| serde_json::json!({"sessionId": "target-session"})),
+            params: None,
+            error,
+        }
+    }
+
+    fn session_update(session_id: Option<&str>, text: &str) -> RawMessage {
+        RawMessage {
+            id: None,
+            method: Some(super::super::NOTIF_SESSION_UPDATE.to_string()),
+            kind: AcpKind::SessionUpdate,
+            result: None,
+            params: Some(match session_id {
+                Some(session_id) => serde_json::json!({
+                    "sessionId": session_id,
+                    "update": {"sessionUpdate": "agent_message_chunk", "content": {"text": text}}
+                }),
+                None => serde_json::json!({
+                    "update": {"sessionUpdate": "agent_message_chunk", "content": {"text": text}}
+                }),
+            }),
+            error: None,
+        }
+    }
+
     #[tokio::test]
     async fn unrelated_broadcasts_cannot_extend_total_replay_deadline() {
-        let (write_tx, mut write_rx) = mpsc::channel(1);
-        let (events_tx, events_rx) = broadcast::channel(64);
-        let handles = ReplayHandles {
-            write_tx,
-            next_id: Arc::new(AtomicU64::new(1)),
-            crashed: Arc::new(AtomicBool::new(false)),
-            rx: events_rx,
-            rpc_timeout: std::time::Duration::from_millis(40),
-            replay_max: 100,
-            active_replay_requests: Arc::new(Mutex::new(HashMap::new())),
-        };
+        let (handles, mut write_rx, events_tx, active) =
+            test_handles(std::time::Duration::from_millis(40), 100);
 
         let loading = tokio::spawn(load_session_with_replay(
             handles,
@@ -253,5 +304,152 @@ mod tests {
             "预期绝对 deadline timeout，实际: {result:?}"
         );
         flooding.abort();
+        assert!(
+            active.lock().unwrap().is_empty(),
+            "timeout 后不得残留 replay 登记"
+        );
+    }
+
+    #[tokio::test]
+    async fn send_failure_drops_active_replay_registration() {
+        let (handles, write_rx, _events_tx, active) =
+            test_handles(std::time::Duration::from_secs(1), 100);
+        drop(write_rx);
+
+        let result = load_session_with_replay(
+            handles,
+            "target-session",
+            ".",
+            Vec::new(),
+            McpServersMode::Always,
+        )
+        .await;
+
+        assert!(matches!(result, Err(AcpError::ConnectionClosed)));
+        assert!(
+            active.lock().unwrap().is_empty(),
+            "send failure 后不得残留 replay 登记"
+        );
+    }
+
+    #[tokio::test]
+    async fn cancelling_load_task_drops_active_replay_registration() {
+        let (handles, mut write_rx, _events_tx, active) =
+            test_handles(std::time::Duration::from_secs(1), 100);
+        let loading = tokio::spawn(load_session_with_replay(
+            handles,
+            "target-session",
+            ".",
+            Vec::new(),
+            McpServersMode::Always,
+        ));
+        write_rx.recv().await.expect("session/load request line");
+        assert_eq!(active.lock().unwrap().len(), 1);
+
+        loading.abort();
+        let _ = loading.await;
+
+        assert!(
+            active.lock().unwrap().is_empty(),
+            "aborted future 后 RAII 必须清理 replay 登记"
+        );
+    }
+
+    #[tokio::test]
+    async fn rpc_error_drops_registration_and_does_not_wait_for_timeout() {
+        let (handles, mut write_rx, events_tx, active) =
+            test_handles(std::time::Duration::from_secs(1), 100);
+        let loading = tokio::spawn(load_session_with_replay(
+            handles,
+            "target-session",
+            ".",
+            Vec::new(),
+            McpServersMode::Always,
+        ));
+        write_rx.recv().await.expect("session/load request line");
+        events_tx
+            .send(response(
+                1,
+                Some(serde_json::json!({"code": -32000, "message": "load failed"})),
+            ))
+            .unwrap();
+
+        let result = loading.await.expect("replay task join");
+
+        assert!(
+            matches!(result, Err(AcpError::Rpc(ref message)) if message.contains("load failed"))
+        );
+        assert!(
+            active.lock().unwrap().is_empty(),
+            "RPC error 后不得残留 replay 登记"
+        );
+    }
+
+    #[tokio::test]
+    async fn unrelated_response_and_mismatched_updates_do_not_end_or_enter_replay() {
+        let (handles, mut write_rx, events_tx, active) =
+            test_handles(std::time::Duration::from_secs(1), 100);
+        let loading = tokio::spawn(load_session_with_replay(
+            handles,
+            "target-session",
+            ".",
+            Vec::new(),
+            McpServersMode::Always,
+        ));
+        write_rx.recv().await.expect("session/load request line");
+        events_tx.send(response(99, None)).unwrap();
+        events_tx
+            .send(session_update(Some("other-session"), "other"))
+            .unwrap();
+        events_tx.send(session_update(None, "missing-id")).unwrap();
+        events_tx
+            .send(session_update(Some("target-session"), "kept"))
+            .unwrap();
+        events_tx.send(response(1, None)).unwrap();
+
+        let (_result, batch) = loading
+            .await
+            .expect("replay task join")
+            .expect("load result");
+
+        assert_eq!(batch.events.len(), 1);
+        assert_eq!(batch.events[0]["update"]["content"]["text"], "kept");
+        assert_eq!(batch.metadata.boundary.observed_count, 1);
+        assert!(active.lock().unwrap().is_empty());
+    }
+
+    #[tokio::test]
+    async fn zero_replay_limit_reports_every_observed_event_as_dropped() {
+        let (handles, mut write_rx, events_tx, active) =
+            test_handles(std::time::Duration::from_secs(1), 0);
+        let loading = tokio::spawn(load_session_with_replay(
+            handles,
+            "target-session",
+            ".",
+            Vec::new(),
+            McpServersMode::Always,
+        ));
+        write_rx.recv().await.expect("session/load request line");
+        events_tx
+            .send(session_update(Some("target-session"), "one"))
+            .unwrap();
+        events_tx
+            .send(session_update(Some("target-session"), "two"))
+            .unwrap();
+        events_tx.send(response(1, None)).unwrap();
+
+        let (_result, batch) = loading
+            .await
+            .expect("replay task join")
+            .expect("load result");
+
+        assert!(batch.events.is_empty());
+        assert_eq!(batch.metadata.boundary.observed_count, 2);
+        assert_eq!(batch.metadata.dropped_count, 2);
+        assert!(batch.metadata.truncated);
+        assert!(!batch.metadata.complete);
+        assert_eq!(batch.metadata.boundary.retained_start_ordinal, None);
+        assert_eq!(batch.metadata.boundary.retained_end_ordinal, None);
+        assert!(active.lock().unwrap().is_empty());
     }
 }

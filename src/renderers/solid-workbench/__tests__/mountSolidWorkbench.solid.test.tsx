@@ -125,6 +125,57 @@ describe('mountSolidWorkbench', () => {
     ).not.toBeNull())
   })
 
+  it('把同一助手消息的流式文本 parts 渲染为一个连续 Markdown 块', async () => {
+    const { host, services } = mountPreview()
+    const chunk = (sequence: number, text: string) => createWorkbenchEnvelope({
+      sessionId: 'preview-session', sequence,
+      recordedAt: `2026-08-25T00:00:0${sequence}.000Z`,
+      source: { provider: 'peri', sourceId: `assistant-chunk-${sequence}` },
+      identity: { messageId: `rotated-chunk-${sequence}` },
+      provenance: { origin: 'local-observed', trust: 'authoritative' },
+      event: { type: 'message.delta', role: 'assistant', parts: [{ kind: 'text', text }] },
+    })
+    services.runtime.replaceDocument(projectWorkbench([
+      chunk(1, '这是'), chunk(2, '完整的'), chunk(3, '助手'), chunk(4, '回复。'),
+    ]).document, { ownerKey: 'owner-preview', generation: 1 })
+
+    const body = await waitFor(() => {
+      const element = host.querySelector('[data-message-id="rotated-chunk-1"] .term-assistant-body')
+      expect(element).not.toBeNull()
+      return element as HTMLElement
+    })
+    expect(body).toHaveTextContent('这是完整的助手回复。')
+    expect(body.querySelectorAll('p')).toHaveLength(1)
+  })
+
+  it('合并流式文本时保留非文本 semantic part 的渲染边界', async () => {
+    const { host, services } = mountPreview()
+    services.runtime.replaceDocument(projectWorkbench([createWorkbenchEnvelope({
+      sessionId: 'preview-session', sequence: 1,
+      recordedAt: '2026-08-25T00:00:01.000Z',
+      source: { provider: 'peri', sourceId: 'mixed-content' },
+      identity: { messageId: 'mixed-content' },
+      provenance: { origin: 'local-observed', trust: 'authoritative' },
+      event: { type: 'message.delta', role: 'assistant', parts: [
+        { kind: 'text', text: '前半' },
+        { kind: 'text', text: '正文' },
+        { kind: 'code', text: 'const answer = 42', language: 'ts' },
+        { kind: 'markdown', text: '后半' },
+        { kind: 'text', text: '正文' },
+      ] },
+    })]).document, { ownerKey: 'owner-preview', generation: 1 })
+
+    const body = await waitFor(() => {
+      const element = host.querySelector('[data-message-id="mixed-content"] .term-assistant-body')
+      expect(element).not.toBeNull()
+      return element as HTMLElement
+    })
+    expect(body.querySelectorAll('p')).toHaveLength(2)
+    expect(body.querySelector('.term-code-block')).not.toBeNull()
+    expect(body.textContent).toContain('前半正文')
+    expect(body.textContent).toContain('后半正文')
+  })
+
   it('挂载完整 fixture shell，复用 Message/Tool/Task/Generation renderer', async () => {
     const { host } = mountPreview()
 
