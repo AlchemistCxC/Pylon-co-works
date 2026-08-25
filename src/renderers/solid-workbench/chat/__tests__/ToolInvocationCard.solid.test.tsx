@@ -6,6 +6,21 @@ import { SolidToolInvocationCard } from '../ToolInvocationCard.solid.tsx'
 afterEach(cleanup)
 
 describe('C04 SolidToolInvocationCard', () => {
+  it('renders adjacent streamed text output as one semantic block', () => {
+    const { container } = render(() => <SolidToolInvocationCard
+      renderKind="tool.generic"
+      appearance={{ defaultCollapsed: false }}
+      snapshot={{
+        id: 'tool-streamed-text', name: 'FutureTool', status: 'completed',
+        result: { parts: [{ kind: 'text', text: '连续' }, { kind: 'text', text: '输出' }] },
+      }}
+    />)
+
+    const output = container.querySelector('.solid-tool-parts')!
+    expect(output).toHaveTextContent('连续输出')
+    expect(output.querySelectorAll('[data-tool-part-kind]')).toHaveLength(1)
+  })
+
   it('renders nested canonical parts with an accessible lifecycle status', () => {
     const { container } = render(() => <SolidToolInvocationCard
       renderKind="tool.generic"
@@ -72,6 +87,21 @@ describe('C04 SolidToolInvocationCard', () => {
     expect(container.querySelector('[data-tool-input-parts] .term-code-block')).not.toBeNull()
     expect(screen.getByText('位置')).toBeTruthy()
     expect(container.querySelector('.solid-tool-locations')).toHaveTextContent('/workspace/a.ts')
+  })
+
+  it('renders adjacent streamed input text parts as one semantic block', () => {
+    const { container } = render(() => <SolidToolInvocationCard
+      renderKind="tool.input"
+      appearance={{ defaultCollapsed: false }}
+      snapshot={{
+        id: 'tool-streamed-input', name: 'FutureTool', status: 'running',
+        input: [{ kind: 'text', text: '连续' }, { kind: 'markdown', text: '参数' }],
+      }}
+    />)
+
+    const input = container.querySelector('[data-tool-input-parts]')!
+    expect(input).toHaveTextContent('连续参数')
+    expect(input.querySelectorAll('[data-tool-part-kind]')).toHaveLength(1)
   })
 
   it('keeps aria-controls unique for distinct provider tool ids', () => {

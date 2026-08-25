@@ -818,7 +818,7 @@ function narrowActivityParts(
       data: { activityId, partIndex, issues: parsed.issues },
     })
   })
-  return { parts, diagnostics }
+  return { parts: coalesceAdjacentDisplayTextParts(parts), diagnostics }
 }
 
 /** C09：子代理/委派/团队 rich 字段收窄——只认 normalized activity/patch，缺失即 undefined（不猜）。 */

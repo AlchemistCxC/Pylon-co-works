@@ -31,7 +31,9 @@ export function MarkdownContent(props: MarkdownContentProps) {
 
   return (
     <Show when={props.streaming === true} fallback={<MarkdownSegment text={props.text} inline={props.inline} />}>
-      <MarkdownSegment text={() => split()?.stable ?? ''} inline={props.inline} />
+      <Show when={split()?.stable}>
+        {stable => <MarkdownSegment text={stable()} inline={props.inline} />}
+      </Show>
       <Show when={split()?.unstable}>
         {tail => <MarkdownSegment text={tail()} inline={props.inline} />}
       </Show>

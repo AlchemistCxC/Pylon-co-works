@@ -1,6 +1,6 @@
 import { For, Show } from 'solid-js'
 import { stripAnsiControlSequences } from '../../../../domains/rendererContent/textContentContracts.ts'
-import type { ContentPart, UnknownContentPart } from '../../../../domains/workbench/content/contentPartSchema.ts'
+import { coalesceAdjacentDisplayTextParts, type ContentPart, type UnknownContentPart } from '../../../../domains/workbench/content/contentPartSchema.ts'
 import type { RenderAppearanceSnapshot, RenderCommandPort, RenderSemanticCommand } from '../../../../contracts/messageRenderer.ts'
 import { SolidLogBlock, SolidTerminalBlock } from './TerminalBlock.solid.tsx'
 import type { WorkbenchActivityNode } from '../../../../domains/workbench/workbenchProjector.ts'
@@ -43,10 +43,10 @@ export function SolidSubagentCard(props: {
     if (!Array.isArray(value)) return true
     return value.includes(key)
   }
-  const parts = () => Array.isArray(props.activity.parts)
+  const parts = () => coalesceAdjacentDisplayTextParts(Array.isArray(props.activity.parts)
     ? props.activity.parts.filter((part): part is ContentPart => typeof part === 'object' && part !== null
       && !Array.isArray(part) && typeof (part as Record<string, unknown>).kind === 'string')
-    : []
+    : [])
 
   const usage = () => props.activity.usage as { inputTokens?: number; outputTokens?: number; costUsd?: number } | undefined
   const fileSummary = () => {

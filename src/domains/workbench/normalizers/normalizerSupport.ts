@@ -1,4 +1,5 @@
 import {
+  coalesceAdjacentDisplayTextParts,
   createUnknownContentPart,
   MAX_ARTIFACT_PREVIEW_PARTS,
   parseContentPart,
@@ -122,7 +123,7 @@ export function normalizeContentBlocks(
       recoverable: true,
     })
   })
-  return { parts, diagnostics }
+  return { parts: [...coalesceAdjacentDisplayTextParts(parts)], diagnostics }
 }
 
 export function normalizeContentBlock(raw: unknown): { part: ContentPart; diagnostic?: { code: string; message: string; path: readonly (string | number)[] } } {
@@ -448,7 +449,9 @@ function normalizeC15ContentBlock(
   } else {
     known = ['type', 'kind', 'artifactId', 'artifact_id', 'id', 'title', 'uri', 'version', 'mimeType', 'mime_type', 'summary', 'status', 'blob', 'hasBlob', 'has_blob', 'parts', 'content', 'actions']
     const sourceParts = Array.isArray(raw.parts) ? raw.parts : Array.isArray(raw.content) ? raw.content : []
-    const parts = sourceParts.slice(0, MAX_ARTIFACT_PREVIEW_PARTS).map(part => normalizeContentBlock(part).part)
+    const parts = coalesceAdjacentDisplayTextParts(
+      sourceParts.slice(0, MAX_ARTIFACT_PREVIEW_PARTS).map(part => normalizeContentBlock(part).part),
+    )
     candidate = {
       kind,
       artifactId: c15RequiredString(raw.artifactId ?? raw.artifact_id ?? raw.id),

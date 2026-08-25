@@ -51,4 +51,18 @@ describe('MarkdownContent heading class contract（CSS-02，CSS-04 回归门）'
     expect(screen.getByText(/const x = 1/)).toBeTruthy()
     expect(screen.getByText('正在增长的新段落')).toBeTruthy()
   })
+
+  it('streaming 不在带缩进的未闭合代码围栏内部拆块', async () => {
+    const { container } = render(() => <MarkdownContent
+      text={'前置段落\n\n   ```js\nconst first = 1\n\nconst second = 2'}
+      streaming
+    />)
+
+    await waitFor(() => expect(container.textContent).toContain('const second = 2'))
+    const codeBlock = container.querySelector('.term-code-block')
+    expect(codeBlock).not.toBeNull()
+    expect(codeBlock).toHaveTextContent('const first = 1')
+    expect(codeBlock).toHaveTextContent('const second = 2')
+    expect(container.querySelectorAll('.term-code-block')).toHaveLength(1)
+  })
 })

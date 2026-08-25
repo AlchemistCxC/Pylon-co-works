@@ -46,6 +46,21 @@ describe('findLastStableBlockBoundary / splitStreamingMarkdown', () => {
     expect(unstable).toBe('新段落开始')
   })
 
+  it('识别带缩进的围栏，且较短或带尾随文本的 marker 不能伪闭合', () => {
+    const text = '前文\n\n  ````js\nconst a = 1\n```\n```still-code\n\nconst b = 2'
+    const { stable, unstable } = splitStreamingMarkdown(text)
+    expect(stable).toBe('前文\n\n')
+    expect(unstable).toContain('const a = 1')
+    expect(unstable).toContain('const b = 2')
+  })
+
+  it('CRLF 空行边界不会把回车留在 unstable', () => {
+    expect(splitStreamingMarkdown('第一段\r\n\r\n第二段')).toEqual({
+      stable: '第一段\r\n\r\n',
+      unstable: '第二段',
+    })
+  })
+
   it('空字符串边界为 0', () => {
     expect(findLastStableBlockBoundary('')).toBe(0)
     expect(splitStreamingMarkdown('')).toEqual({ stable: '', unstable: '' })

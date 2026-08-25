@@ -55,6 +55,14 @@ describe('C00 streaming root identity (1000 chunks)', () => {
     const paragraphAfter = result.container.querySelector('.term-plain-text')!
     expect(paragraphAfter).toBe(paragraphBefore)
   })
-})
 
+  it('does not mount an empty paragraph before the first streaming chunk', async () => {
+    const result = render(() => <MarkdownContent text="首个流式片段" streaming />)
+    await waitFor(() => {
+      if (!result.container.textContent?.includes('首个流式片段')) throw new Error('tail not flushed')
+    })
+    expect(result.container.querySelectorAll('.term-plain-text')).toHaveLength(1)
+    expect(result.container.querySelector('.term-plain-text')).toHaveTextContent('首个流式片段')
+  })
+})
 

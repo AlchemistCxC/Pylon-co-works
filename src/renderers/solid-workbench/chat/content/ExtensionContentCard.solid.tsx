@@ -1,6 +1,7 @@
 import { For, Show } from 'solid-js'
 import type { RenderAppearanceSnapshot, RenderCommandPort } from '../../../../contracts/messageRenderer.ts'
 import {
+  coalesceAdjacentDisplayTextParts,
   isValidArtifactContentInput,
   isValidHookSurfaceInput,
   isValidMcpResourceContentInput,
@@ -83,7 +84,7 @@ function TypedExtensionCard(props: {
       <Show when={props.content.summary}><p>{props.content.summary}</p></Show>
       <Show when={props.content.kind === 'artifact' && props.content.parts?.length}>
         <div class="solid-extension-preview" style={{ 'max-height': `${boundedNumber(props.appearance, 'artifactPreviewSize', 320, 80, 1200)}px`, overflow: 'auto' }}>
-          <For each={(props.content as ArtifactContentPart).parts}>{part => <NestedPart part={part} />}</For>
+          <For each={coalesceAdjacentDisplayTextParts((props.content as ArtifactContentPart).parts ?? [])}>{part => <NestedPart part={part} />}</For>
         </div>
       </Show>
       <Show when={uri()}>

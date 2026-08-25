@@ -11,6 +11,18 @@ import type { WorkbenchActivityNode } from '../../../../../domains/workbench/wor
  */
 
 describe('C10 workflow activity rendering', () => {
+  it('renders adjacent streamed text output as one semantic paragraph', () => {
+    const workflow = {
+      id: 'workflow-streamed-output', kind: 'activity', activityKind: 'workflow', semanticKind: 'activity.workflow',
+      title: 'streamed workflow', status: 'running',
+      output: [{ kind: 'text', text: '连续' }, { kind: 'markdown', text: '输出' }],
+    } as unknown as WorkbenchActivityNode
+    const result = render(() => <SolidWorkflowActivityCard activity={workflow} />)
+
+    expect(result.container).toHaveTextContent('连续输出')
+    expect(result.container.querySelectorAll('.term-workflow-result')).toHaveLength(1)
+  })
+
   it('renders a workflow phase with parent relation and progress', () => {
     const phase = {
       id: 'phase-1', kind: 'activity', activityKind: 'workflow-phase', semanticKind: 'activity.workflow-phase',

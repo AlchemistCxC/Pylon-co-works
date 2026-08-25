@@ -64,6 +64,29 @@ describe('PlainMessageList', () => {
     expect(result.container.textContent).not.toContain('one')
   })
 
+  it('反复用新对象替换同一消息列表时不累积 DOM 行', () => {
+    let port: MessageListPort | undefined
+    const result = render(() => (
+      <PlainMessageList
+        initialItems={ITEMS}
+        onPortReady={value => { port = value }}
+        renderItem={item => <span>{item.descriptor.renderMessage.message.content}</span>}
+      />
+    ))
+
+    for (let iteration = 0; iteration < 100; iteration += 1) {
+      port!.setItems(createMessageListItems(ITEMS.map(item => ({
+        ...item.descriptor,
+        renderMessage: toRenderMessage({ ...item.descriptor.renderMessage.message }),
+      }))))
+    }
+
+    const rows = result.container.querySelectorAll('[data-message-id]')
+    expect(rows).toHaveLength(2)
+    expect(result.container.querySelectorAll('[data-message-id="m1"]')).toHaveLength(1)
+    expect(result.container.querySelectorAll('[data-message-id="m2"]')).toHaveLength(1)
+  })
+
   it('scrollTo 只通过 messageId 定位内部行，不暴露 DOM', async () => {
     let port: MessageListPort | undefined
     const result = render(() => (

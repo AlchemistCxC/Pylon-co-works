@@ -916,7 +916,7 @@ function renderExtensionFallback(extension: WorkbenchExtensionNode, context: Sol
   return <section class="solid-extension-fallback" role="note" aria-label={`扩展事件：${extension.kind}`} data-extension-kind={extension.kind}>
     <strong>{extension.kind}</strong>
     {provenance}
-    <For each={fallback}>{part => renderBuiltinContentPart(part, false, context)}</For>
+    <For each={coalesceAdjacentDisplayTextParts(fallback)}>{part => renderBuiltinContentPart(part, false, context)}</For>
   </section>
 }
 

@@ -1,6 +1,6 @@
 import { For, Show } from 'solid-js'
 import type { RenderAppearanceSnapshot, RenderCommandPort } from '../../../../contracts/messageRenderer.ts'
-import type { ContentPart, UnknownContentPart } from '../../../../domains/workbench/content/contentPartSchema.ts'
+import { coalesceAdjacentDisplayTextParts, type ContentPart, type UnknownContentPart } from '../../../../domains/workbench/content/contentPartSchema.ts'
 import type { WorkbenchActivityNode } from '../../../../domains/workbench/workbenchProjector.ts'
 import { SolidLogBlock, SolidTerminalBlock } from './TerminalBlock.solid.tsx'
 
@@ -27,7 +27,7 @@ export function SolidWorkflowActivityCard(props: {
     selectedStats().includes('tools') && toolCount() !== undefined ? `${toolCount()} tools` : undefined,
     selectedStats().includes('duration') && durationMs() !== undefined ? formatDuration(durationMs()!) : undefined,
   ].filter((item): item is string => Boolean(item))
-  const output = () => props.activity.output ?? []
+  const output = () => coalesceAdjacentDisplayTextParts(props.activity.output ?? [])
   const resultSummary = () => isRecord(props.activity.result) && typeof props.activity.result.summary === 'string'
     ? props.activity.result.summary : undefined
   const terminationSummary = () => [

@@ -1,11 +1,30 @@
 import { describe, expect, it } from 'vitest'
 import {
+  coalesceAdjacentDisplayTextParts,
   createUnknownContentPart,
   parseContentPart,
   type ContentPart,
 } from '../contentPartSchema.ts'
 
 describe('ContentPart schema', () => {
+  it('coalesces only adjacent display text and preserves rich-content boundaries', () => {
+    const code = { kind: 'code', text: 'const answer = 42', language: 'ts' } as const
+    const parts = coalesceAdjacentDisplayTextParts([
+      { kind: 'text', text: '连续' },
+      { kind: 'markdown', text: '正文' },
+      code,
+      { kind: 'markdown', text: '尾部' },
+      { kind: 'text', text: '正文' },
+    ])
+
+    expect(parts).toEqual([
+      { kind: 'markdown', text: '连续正文' },
+      code,
+      { kind: 'markdown', text: '尾部正文' },
+    ])
+    expect(parts[1]).toBe(code)
+  })
+
   it('accepts only normalized terminal streams and lifecycle metadata', () => {
     expect(parseContentPart({
       kind: 'terminal',

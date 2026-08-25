@@ -1,6 +1,6 @@
 import { For, Show, createEffect, createMemo, createSignal } from 'solid-js'
 import type { RenderAppearanceSnapshot, RenderCommandPort } from '../../../contracts/messageRenderer.ts'
-import { createUnknownContentPart, isValidDiffContentInput, isValidLspDiagnosticContentInput, type ContentPart, type LspDiagnosticContentPart } from '../../../domains/workbench/content/contentPartSchema.ts'
+import { coalesceAdjacentDisplayTextParts, createUnknownContentPart, isValidDiffContentInput, isValidLspDiagnosticContentInput, type ContentPart, type LspDiagnosticContentPart } from '../../../domains/workbench/content/contentPartSchema.ts'
 import { diffSnapshotFromPart } from '../../../domains/workbench/diffSnapshot.ts'
 import type { ToolInvocationSnapshot } from '../../../domains/workbench/workbenchProjector.ts'
 import { normalizeToolStatus, toolStatePresentation } from '../../../domains/tool/status.ts'
@@ -42,9 +42,11 @@ export function SolidToolInvocationCard(props: {
     currentSnapshotId = nextSnapshotId
     setOpen(!booleanSetting(props.appearance, 'defaultCollapsed', false))
   })
-  const parts = createMemo<readonly ContentPart[]>(() => Array.isArray(props.snapshot.result?.parts)
-    ? props.snapshot.result!.parts!.filter(isContentPart) as readonly ContentPart[]
-    : [])
+  const parts = createMemo<readonly ContentPart[]>(() => coalesceAdjacentDisplayTextParts(
+    Array.isArray(props.snapshot.result?.parts)
+      ? props.snapshot.result!.parts!.filter(isContentPart) as readonly ContentPart[]
+      : [],
+  ))
   const duration = () => booleanSetting(props.appearance, 'showDuration', true)
     ? formatDuration(props.snapshot.result?.durationMs)
     : ''
@@ -212,7 +214,7 @@ function isContentPart(value: unknown): value is ContentPart {
 function contentParts(value: unknown): readonly ContentPart[] | undefined {
   if (isContentPart(value)) return [value]
   if (!Array.isArray(value) || value.length === 0 || !value.every(isContentPart)) return undefined
-  return value
+  return coalesceAdjacentDisplayTextParts(value)
 }
 
 function metadata(snapshot: ToolInvocationSnapshot): string {

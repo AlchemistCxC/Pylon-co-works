@@ -148,6 +148,29 @@ describe('mountSolidWorkbench', () => {
     expect(body.querySelectorAll('p')).toHaveLength(1)
   })
 
+  it('反复替换同一会话文档时不累积助手回复 DOM', async () => {
+    const { host, services } = mountPreview()
+    const chunk = (sequence: number, text: string) => createWorkbenchEnvelope({
+      sessionId: 'preview-session', sequence,
+      recordedAt: `2026-08-25T00:00:0${sequence}.000Z`,
+      source: { provider: 'peri', sourceId: `repeat-chunk-${sequence}` },
+      identity: { messageId: `repeat-chunk-${sequence}` },
+      provenance: { origin: 'local-observed', trust: 'authoritative' },
+      event: { type: 'message.delta', role: 'assistant', parts: [{ kind: 'text', text }] },
+    })
+    const document = projectWorkbench([chunk(1, '不会'), chunk(2, '重复')]).document
+
+    for (let iteration = 0; iteration < 100; iteration += 1) {
+      services.runtime.replaceDocument(structuredClone(document), { ownerKey: 'owner-preview', generation: iteration + 1 })
+    }
+
+    await waitFor(() => expect(host.querySelectorAll('[data-message-id="repeat-chunk-1"]')).toHaveLength(1))
+    const rows = host.querySelectorAll('[data-message-id="repeat-chunk-1"]')
+    expect(rows).toHaveLength(1)
+    expect(rows[0]).toHaveTextContent('不会重复')
+    expect(rows[0]!.querySelectorAll('.term-assistant-body p')).toHaveLength(1)
+  })
+
   it('合并流式文本时保留非文本 semantic part 的渲染边界', async () => {
     const { host, services } = mountPreview()
     services.runtime.replaceDocument(projectWorkbench([createWorkbenchEnvelope({
@@ -900,6 +923,26 @@ describe('mountSolidWorkbench', () => {
     expect(missingPlugin).toHaveTextContent('peri · c15-3')
     expect(missingPlugin).toHaveTextContent('local-observed · authoritative')
     expect(host.querySelector('[data-extension-kind="plugin.removed/result"]')).not.toBeNull()
+  })
+
+  it('coalesces adjacent streamed text in a missing-plugin extension fallback', async () => {
+    const { host, services } = mountPreview()
+    const document = projectWorkbench([createWorkbenchEnvelope({
+      sessionId: 'preview-session', recordedAt: '2026-08-24T00:00:04.000Z', sequence: 1,
+      source: { provider: 'peri', sourceId: 'extension-streamed-fallback' }, identity: {},
+      provenance: { origin: 'local-observed', trust: 'authoritative' },
+      event: {
+        type: 'extension.event', kind: 'plugin.removed/streamed', payload: { status: 'done' },
+        fallback: [{ kind: 'text', text: '连续' }, { kind: 'markdown', text: '降级内容' }],
+      },
+    })]).document
+
+    services.runtime.replaceDocument(document, { ownerKey: 'owner-preview', generation: 1 })
+
+    const fallback = await screen.findByRole('note', { name: '扩展事件：plugin.removed/streamed' })
+    expect(fallback).toHaveTextContent('连续降级内容')
+    expect(fallback.querySelectorAll('p')).toHaveLength(1)
+    expect(host.querySelectorAll('[data-extension-kind="plugin.removed/streamed"]')).toHaveLength(1)
   })
 
   it('C10 workflow remains readable through the built-in no-Slot fallback', async () => {

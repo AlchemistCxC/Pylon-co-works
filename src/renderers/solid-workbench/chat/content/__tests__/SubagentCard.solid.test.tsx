@@ -20,6 +20,18 @@ const richNode = {
 } as unknown as WorkbenchActivityNode
 
 describe('C09 SolidSubagentCard', () => {
+  it('renders adjacent streamed text output as one semantic paragraph', () => {
+    const activity = {
+      ...richNode,
+      parts: [{ kind: 'text', text: '连续' }, { kind: 'markdown', text: '输出' }],
+    } as unknown as WorkbenchActivityNode
+    const result = render(() => <SolidSubagentCard activity={activity} />)
+
+    const output = result.container.querySelector('.term-subagent-output')!
+    expect(output).toHaveTextContent('连续输出')
+    expect(output.querySelectorAll('.term-subagent-goal')).toHaveLength(1)
+  })
+
   it('renders rich metadata and hierarchy from node columns only', () => {
     const result = render(() => <SolidSubagentCard activity={richNode} />)
     expect(result.container.textContent).toContain('Explore repo')

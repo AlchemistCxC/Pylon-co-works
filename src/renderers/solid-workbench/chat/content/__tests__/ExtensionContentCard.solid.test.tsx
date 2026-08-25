@@ -7,6 +7,17 @@ import { SolidExtensionContentCard } from '../ExtensionContentCard.solid.tsx'
 afterEach(cleanup)
 
 describe('C15 extension content card', () => {
+  it('renders adjacent artifact text parts as one preview paragraph', () => {
+    const { container } = render(() => <SolidExtensionContentCard kind="content.artifact" payload={{
+      kind: 'artifact', artifactId: 'streamed-artifact', title: 'Streamed artifact', uri: 'artifact://streamed',
+      parts: [{ kind: 'text', text: '连续' }, { kind: 'markdown', text: '预览' }],
+    }} />)
+
+    const preview = container.querySelector('.solid-extension-preview')!
+    expect(preview).toHaveTextContent('连续预览')
+    expect(preview.querySelectorAll('p')).toHaveLength(1)
+  })
+
   it('renders typed metadata, recursive preview and consumes declared settings', () => {
     const { container } = render(() => <SolidExtensionContentCard kind="content.artifact" payload={{
       kind: 'artifact', artifactId: 'a', title: 'Audit report', uri: 'artifact://audit', version: 2,

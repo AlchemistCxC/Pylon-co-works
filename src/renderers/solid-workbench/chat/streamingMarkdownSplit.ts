@@ -20,41 +20,41 @@ export function findLastStableBlockBoundary(text: string): number {
   if (n === 0) return 0
   let inFence = false
   let fenceChar = ''
+  let fenceLength = 0
   let lastBoundary = 0
   let pos = 0
   while (pos < n) {
-    const lineStart = pos === 0 || text[pos - 1] === '\n'
-    if (!inFence) {
-      // 顶层块边界：连续双换行（段落/块之间的空行）
-      if (text.startsWith('\n\n', pos)) {
-        while (pos < n && text[pos] === '\n') pos += 1
-        lastBoundary = pos
-        continue
+    const newline = text.indexOf('\n', pos)
+    const nextPos = newline === -1 ? n : newline + 1
+    const rawLine = text.slice(pos, newline === -1 ? n : newline)
+    const line = rawLine.endsWith('\r') ? rawLine.slice(0, -1) : rawLine
+
+    if (inFence) {
+      const close = line.match(/^ {0,3}(`+|~+)[\t ]*$/)
+      if (close && close[1]![0] === fenceChar && close[1]!.length >= fenceLength) {
+        inFence = false
+        fenceChar = ''
+        fenceLength = 0
       }
-      // 代码围栏开（须在行首）
-      if (lineStart && (text.startsWith('```', pos) || text.startsWith('~~~', pos))) {
-        inFence = true
-        fenceChar = text[pos]
-        const nl = text.indexOf('\n', pos)
-        pos = nl === -1 ? n : nl + 1
-        continue
-      }
-      pos += 1
+      pos = nextPos
       continue
     }
-    // 围栏内：行首检测闭合（同字符 ≥3 个）
-    if (lineStart && text[pos] === fenceChar && text.startsWith(fenceChar.repeat(3), pos)) {
-      inFence = false
-      const nl = text.indexOf('\n', pos)
-      pos = nl === -1 ? n : nl + 1
-      // 闭合行之后若紧接换行，这个围栏块在此收尾成稳定边界
-      if (pos < n && text[pos] === '\n') {
-        while (pos < n && text[pos] === '\n') pos += 1
-        lastBoundary = pos
-      }
+
+    // CommonMark fenced code allows up to three leading spaces. A backtick
+    // info string may not itself contain a backtick; otherwise this is text.
+    const open = line.match(/^ {0,3}(`{3,}|~{3,})(.*)$/)
+    if (open && (open[1]![0] === '~' || !open[2]!.includes('`'))) {
+      inFence = true
+      fenceChar = open[1]![0]!
+      fenceLength = open[1]!.length
+      pos = nextPos
       continue
     }
-    pos += 1
+
+    // An empty/whitespace-only line completes the preceding top-level block.
+    // Line-based scanning handles LF and CRLF without slicing through \r.
+    if (/^[\t ]*$/.test(line) && newline !== -1) lastBoundary = nextPos
+    pos = nextPos
   }
   return lastBoundary
 }
