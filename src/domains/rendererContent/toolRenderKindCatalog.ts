@@ -35,7 +35,7 @@ function toolSettings(kindId: string): RendererSettingsSchema {
     },
     {
       id: 'behaviour', label: '工具卡内容', layout: 'grid', fields: [
-        { key: 'defaultCollapsed', label: '默认折叠', type: 'boolean', presentation: 'toggle', default: false },
+        { key: 'defaultCollapsed', label: '默认折叠', type: 'boolean', presentation: 'toggle', default: true },
         { key: 'showRaw', label: '显示 raw 审计信息', type: 'boolean', presentation: 'toggle', default: false },
         { key: 'showMetadata', label: '显示 metadata', type: 'boolean', presentation: 'toggle', default: true },
         { key: 'showDuration', label: '显示耗时', type: 'boolean', presentation: 'toggle', default: true },
@@ -56,7 +56,7 @@ function toolSettings(kindId: string): RendererSettingsSchema {
 const TOOL_DEFAULT_TOKENS = Object.freeze({
   foreground: 'var(--text)', mutedForeground: 'var(--text-dim)', background: 'transparent', borderColor: 'var(--border)',
   statusPalette: 'semantic', indicator: 'glyph', density: 'comfortable', maxWidth: 960, maxHeight: 420,
-  defaultCollapsed: false, showRaw: false, showMetadata: true, showDuration: true,
+  defaultCollapsed: true, showRaw: false, showMetadata: true, showDuration: true,
   connectorMode: 'semantic', connectorStyle: 'solid', connectorWidth: 1, connectorOpacity: 0.6,
 })
 

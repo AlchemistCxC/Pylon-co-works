@@ -638,7 +638,9 @@ function reduceTool(document: WorkbenchDocument, envelope: WorkbenchEventEnvelop
     ...(tool.rawInput !== undefined ? { rawInput: jsonSnapshot(tool.rawInput) } : previous?.rawInput !== undefined ? { rawInput: previous.rawInput } : {}),
     orphan: false,
     // C04 终态幂等：终态一旦写入，迟到的 progress 不回退状态
-    data: event, sequence: envelope.sequence,
+    // Activity placement is a creation-time fact. Progress/completion updates
+    // must not move an existing card to the bottom of the conversation.
+    data: event, sequence: previous?.sequence ?? envelope.sequence,
   }
   const merged = mergeToolActivity(previous, node)
   const activities = upsertActivity(document.activities, merged ?? node)
@@ -723,7 +725,8 @@ function reduceActivity(document: WorkbenchDocument, envelope: WorkbenchEventEnv
     kind: 'activity',
     status,
     orphan: false,
-    sequence: envelope.sequence,
+    // Keep the first observed position stable across lifecycle patches.
+    sequence: previous?.sequence ?? envelope.sequence,
     ...(semanticKind ? { semanticKind } : {}),
     ...(activityKind ? { activityKind } : {}),
     ...(stringValue(activity.title) ?? stringValue(activity.name) ?? stringValue(patch.title) ?? previous?.title

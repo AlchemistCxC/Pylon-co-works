@@ -56,6 +56,61 @@ function mountPreview(capabilities?: WorkbenchCapabilitySnapshot) {
 }
 
 describe('mountSolidWorkbench', () => {
+  it('按 canonical sequence 把工具活动插入用户消息与助手回复之间', async () => {
+    const { host, services } = mountPreview()
+    const envelope = (sequence: number, event: WorkbenchEventEnvelope['event'], identity: WorkbenchEventEnvelope['identity'] = {}) => createWorkbenchEnvelope({
+      sessionId: 'preview-session', recordedAt: `2026-08-25T00:00:0${sequence}.000Z`, sequence,
+      source: { provider: 'acp', sourceId: `timeline-${sequence}` }, identity,
+      provenance: { origin: 'local-observed', trust: 'authoritative' }, event,
+    })
+    const startedEvents = [
+      envelope(1, { type: 'message.completed', role: 'user', parts: [{ kind: 'text', text: '读取文件' }] }, { messageId: 'user-1' }),
+      envelope(2, { type: 'tool.started', tool: { name: 'Read', title: '读取文件' } }, { toolCallId: 'tool-between' }),
+      envelope(4, { type: 'message.delta', role: 'assistant', parts: [{ kind: 'text', text: '读取完成' }] }, { messageId: 'assistant-1' }),
+      envelope(5, { type: 'message.completed', role: 'assistant', parts: [] }, { messageId: 'assistant-1' }),
+    ]
+    // A late terminal event arrives after the assistant row. It updates the
+    // existing card in place and must not move it below that reply.
+    const completion = envelope(6, { type: 'tool.completed', tool: { status: 'completed', parts: [{ kind: 'text', text: '文件内容' }] } }, { toolCallId: 'tool-between' })
+    const started = projectWorkbench(startedEvents).document
+
+    services.runtime.replaceDocument(started, { ownerKey: 'owner-preview', generation: 1 })
+
+    const user = await waitFor(() => host.querySelector<HTMLElement>('[data-message-id="user-1"]')!)
+    const tool = host.querySelector<HTMLElement>('[data-activity-id="tool-between"]')!
+    const assistant = host.querySelector<HTMLElement>('[data-message-id="assistant-1"]')!
+    expect(tool).not.toBeNull()
+    expect(assistant).not.toBeNull()
+    expect(user.compareDocumentPosition(tool) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
+    expect(tool.compareDocumentPosition(assistant) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
+    expect(host.querySelectorAll('[data-activity-id="tool-between"]')).toHaveLength(1)
+
+    services.runtime.replaceDocument(projectWorkbench([...startedEvents, completion]).document, {
+      ownerKey: 'owner-preview', generation: 1,
+    })
+    await waitFor(() => expect(screen.getByRole('status', { name: '工具：读取文件，已完成' })).toBeTruthy())
+    expect(host.querySelector('[data-activity-id="tool-between"]')).toBe(tool)
+    expect(tool.compareDocumentPosition(assistant) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
+    expect(host.querySelectorAll('[data-activity-id="tool-between"]')).toHaveLength(1)
+  })
+
+  it('让输入字号继承聊天字号，并保持助手正文与圆点处于同一布局行', async () => {
+    const { host, services } = mountPreview()
+    const theme = structuredClone(DEFAULTS)
+    theme.assistantDot = true
+    services.appearance.setTheme(theme)
+    const workbench = host.querySelector<HTMLElement>('.solid-agent-workbench')!
+    const assistant = await waitFor(() => {
+      const value = host.querySelector<HTMLElement>('.term-assistant.has-dot')
+      expect(value).not.toBeNull()
+      return value!
+    })
+
+    expect(workbench.style.getPropertyValue('--input-font-size')).toBe('var(--chat-font-size)')
+    expect(assistant.querySelector(':scope > .term-assistant-dot, :scope > .term-assistant-dot-img')).not.toBeNull()
+    expect(assistant.querySelector(':scope > .term-assistant-body')).not.toBeNull()
+  })
+
   it('消费会话搜索状态，高亮并定位当前匹配消息', async () => {
     const scrollIntoView = vi.fn()
     Object.defineProperty(HTMLElement.prototype, 'scrollIntoView', {
@@ -262,15 +317,24 @@ describe('mountSolidWorkbench', () => {
     const lifecycle = mountSolidWorkbench({
       host, input: { sheetId: 'sheet-a', sessionId: 'preview-session', preview: true }, services, activation,
     })
-    const documentFor = (sessionId: string, text: string) => projectWorkbench([createWorkbenchEnvelope({
-      sessionId,
-      sequence: 1,
-      recordedAt: `2026-08-25T00:00:0${sessionId === 'session-a' ? '1' : '2'}.000Z`,
-      source: { provider: 'peri', sourceId: `${sessionId}-source` },
-      identity: { messageId: 'same-message-id' },
-      provenance: { origin: 'local-observed', trust: 'authoritative' },
-      event: { type: 'message.delta', role: 'assistant', parts: [{ kind: 'markdown', text }] },
-    })]).document
+    const documentFor = (sessionId: string, text: string) => projectWorkbench([
+      createWorkbenchEnvelope({
+        sessionId, sequence: 1,
+        recordedAt: `2026-08-25T00:00:0${sessionId === 'session-a' ? '1' : '2'}.000Z`,
+        source: { provider: 'peri', sourceId: `${sessionId}-tool` },
+        identity: { toolCallId: 'same-tool-id' },
+        provenance: { origin: 'local-observed', trust: 'authoritative' },
+        event: { type: 'tool.started', tool: { name: `Read ${text}` } },
+      }),
+      createWorkbenchEnvelope({
+        sessionId, sequence: 2,
+        recordedAt: `2026-08-25T00:00:0${sessionId === 'session-a' ? '1' : '2'}.500Z`,
+        source: { provider: 'peri', sourceId: `${sessionId}-source` },
+        identity: { messageId: 'same-message-id' },
+        provenance: { origin: 'local-observed', trust: 'authoritative' },
+        event: { type: 'message.delta', role: 'assistant', parts: [{ kind: 'markdown', text }] },
+      }),
+    ]).document
 
     services.runtime.replaceDocument(documentFor('session-a', '会话 A'), {
       ownerKey: 'owner-a', generation: 1, sessionId: 'session-a',
@@ -283,6 +347,8 @@ describe('mountSolidWorkbench', () => {
       return row
     })
     const firstSlot = firstRow.querySelector('[data-renderer-slot-id="builtin.solid.content.base"]')
+    const firstTool = host.querySelector('[data-activity-id="same-tool-id"]')
+    expect(firstTool).not.toBeNull()
 
     for (let iteration = 0; iteration < 100; iteration += 1) {
       services.runtime.replaceDocument(documentFor('session-b', '会话 B'), {
@@ -300,6 +366,8 @@ describe('mountSolidWorkbench', () => {
     expect(host.querySelectorAll('[data-renderer-slot-id="builtin.solid.content.base"]')).toHaveLength(1)
     expect(host.querySelector('[data-message-id="same-message-id"]')).toBe(firstRow)
     expect(host.querySelector('[data-renderer-slot-id="builtin.solid.content.base"]')).toBe(firstSlot)
+    expect(host.querySelectorAll('[data-activity-id="same-tool-id"]')).toHaveLength(1)
+    expect(host.querySelector('[data-activity-id="same-tool-id"]')).toBe(firstTool)
     expect(host).not.toHaveTextContent('会话 B')
   })
 
@@ -916,6 +984,9 @@ describe('mountSolidWorkbench', () => {
     const card = await screen.findByRole('status', { name: '工具：读取文件，运行中' })
     expect(card).toHaveAttribute('data-content-kind', 'tool.generic')
     expect(card).toHaveTextContent('ProviderRead')
+    expect(card.querySelector('.term-tool-head')).toHaveAttribute('aria-expanded', 'false')
+    expect(card).not.toHaveTextContent('/normalized.txt')
+    fireEvent.click(card.querySelector<HTMLButtonElement>('.term-tool-head')!)
     expect(card).toHaveTextContent('/normalized.txt')
     expect(host.querySelector('.solid-workbench-activity')).toBeNull()
     expect(card.closest('[data-renderer-slot-id="builtin.solid.content.base"]')).not.toBeNull()
@@ -965,8 +1036,8 @@ describe('mountSolidWorkbench', () => {
     const replacementCard = await screen.findByRole('status', { name: '工具：替换工具，运行中' })
     expect(replacementCard).toBe(card)
     expect(replacementCard.querySelector('.term-tool-head')).toHaveAttribute('aria-controls', 'solid-tool-snapshot-tool-replacement')
-    expect(replacementCard.querySelector('.term-tool-head')).toHaveAttribute('aria-expanded', 'true')
-    expect(replacementCard.querySelector('#solid-tool-snapshot-tool-replacement')).not.toBeNull()
+    expect(replacementCard.querySelector('.term-tool-head')).toHaveAttribute('aria-expanded', 'false')
+    expect(replacementCard.querySelector('#solid-tool-snapshot-tool-replacement')).toBeNull()
     expect(host.querySelector('[data-from-message-id="tool-c04"]')).toBeNull()
   })
 

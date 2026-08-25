@@ -33,14 +33,14 @@ export function SolidToolInvocationCard(props: {
     || props.snapshot.canonicalName
     || props.snapshot.name
     || '未知工具'
-  const [open, setOpen] = createSignal(!booleanSetting(props.appearance, 'defaultCollapsed', false))
+  const [open, setOpen] = createSignal(!booleanSetting(props.appearance, 'defaultCollapsed', true))
   const bodyId = () => `solid-tool-snapshot-${safeDomId(props.snapshot.id)}`
   let currentSnapshotId = props.snapshot.id
   createEffect(() => {
     const nextSnapshotId = props.snapshot.id
     if (nextSnapshotId === currentSnapshotId) return
     currentSnapshotId = nextSnapshotId
-    setOpen(!booleanSetting(props.appearance, 'defaultCollapsed', false))
+    setOpen(!booleanSetting(props.appearance, 'defaultCollapsed', true))
   })
   const parts = createMemo<readonly ContentPart[]>(() => coalesceAdjacentDisplayTextParts(
     Array.isArray(props.snapshot.result?.parts)
@@ -162,7 +162,7 @@ function ToolContentPart(props: { part: ContentPart; appearance?: RenderAppearan
       maxWidth: numberSetting(props.appearance ?? {}, 'maxWidth', 960),
       maxHeight: numberSetting(props.appearance ?? {}, 'maxHeight', 420),
       density: props.appearance?.density === 'compact' ? 'compact' : 'comfortable',
-      defaultExpanded: !booleanSetting(props.appearance ?? {}, 'defaultCollapsed', false),
+      defaultExpanded: !booleanSetting(props.appearance ?? {}, 'defaultCollapsed', true),
       reducedMotion: props.appearance?.reducedMotion === true,
     }} />
   }

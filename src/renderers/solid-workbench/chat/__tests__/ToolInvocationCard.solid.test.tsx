@@ -6,6 +6,20 @@ import { SolidToolInvocationCard } from '../ToolInvocationCard.solid.tsx'
 afterEach(cleanup)
 
 describe('C04 SolidToolInvocationCard', () => {
+  it('defaults to collapsed when no appearance override is supplied', () => {
+    const { container } = render(() => <SolidToolInvocationCard
+      renderKind="tool.generic"
+      appearance={{}}
+      snapshot={{
+        id: 'tool-default-collapsed', name: 'Read', status: 'completed',
+        result: { parts: [{ kind: 'text', text: 'hidden until requested' }] },
+      }}
+    />)
+
+    expect(container.querySelector('.term-tool-head')).toHaveAttribute('aria-expanded', 'false')
+    expect(container.querySelector('.term-tool-body')).toBeNull()
+  })
+
   it('renders adjacent streamed text output as one semantic block', () => {
     const { container } = render(() => <SolidToolInvocationCard
       renderKind="tool.generic"

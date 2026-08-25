@@ -109,6 +109,9 @@ function WorkbenchContent(props: SolidWorkbenchAppProps) {
     key: descriptor.key,
     descriptor,
   })))
+  const activityPlacement = createMemo(() => selectActivityTimelinePlacement(
+    snapshot().messages.some(message => message.role === 'tool') ? undefined : document(),
+  ))
   createEffect(() => messageListPort()?.setItems(items()))
   createEffect(() => {
     const matchCount = searchMatches().length
@@ -158,7 +161,10 @@ function WorkbenchContent(props: SolidWorkbenchAppProps) {
       data-session-id={props.context.input().sessionId ?? undefined}
       data-workspace-mode={props.context.input().workspaceMode}
       data-status={snapshot().status}
-      style={{ '--right-panel-inset': `${Math.max(0, props.context.input().rightInset ?? 0)}px` }}
+      style={{
+        '--right-panel-inset': `${Math.max(0, props.context.input().rightInset ?? 0)}px`,
+        '--input-font-size': 'var(--chat-font-size)',
+      }}
       aria-label="Solid Agent Workbench"
     >
       <Show when={snapshot().status === 'error'}>
@@ -174,6 +180,12 @@ function WorkbenchContent(props: SolidWorkbenchAppProps) {
       >
         <div class="chat-view solid-workbench-chat" onScroll={event => updateBottomFollow(event.currentTarget)}>
           <div class="term">
+            <CanonicalActivityList
+              activities={activityPlacement().leading}
+              document={document()}
+              context={props.context}
+              connectorPort={connectorPort}
+            />
             <PlainMessageList
               initialItems={items()}
               renderItem={item => <WorkbenchRow
@@ -182,7 +194,14 @@ function WorkbenchContent(props: SolidWorkbenchAppProps) {
                 appearance={appearance()}
                 connectorPort={connectorPort}
                 context={props.context}
-              />}
+              >
+                <CanonicalActivityList
+                  activities={activityPlacement().afterMessage.get(item.descriptor.renderMessage.message.id) ?? []}
+                  document={document()}
+                  context={props.context}
+                  connectorPort={connectorPort}
+                />
+              </WorkbenchRow>}
               onPortReady={port => {
                 setMessageListPort(() => port)
                 port.setItems(items())
@@ -193,7 +212,7 @@ function WorkbenchContent(props: SolidWorkbenchAppProps) {
                 <div class="term-reasoning" data-state="running">{text()}</div>
               </div>}
             </Show>
-            <WorkbenchDocumentSurface document={document()} context={props.context} commands={props.context.commands} sessionId={props.context.input().sessionId} reducedMotion={props.context.input().reducedMotion ?? false} connectorPort={connectorPort} />
+            <WorkbenchDocumentSurface document={document()} context={props.context} commands={props.context.commands} sessionId={props.context.input().sessionId} reducedMotion={props.context.input().reducedMotion ?? false} />
             <Show when={snapshot().streamingText}>
               {text => <div class="term-row term-row-assistant" data-render-type="assistant">
                 <AssistantContent text={text()} appearance={appearance()} streaming />
@@ -266,7 +285,6 @@ function WorkbenchDocumentSurface(props: {
   commands: SolidWorkbenchContextValue['commands']
   sessionId: string | null
   reducedMotion: boolean
-  connectorPort: ReturnType<typeof createToolConnectorLayoutPort>
 }) {
   return (
     <Show when={props.document}>
@@ -332,18 +350,6 @@ function WorkbenchDocumentSurface(props: {
                 appearance={sessionSurfaceAppearance(props.context, 'assist.file-suggestions')}
                 commands={fallbackRenderCommands(props.context)} />}
             />
-          </Show>
-          <Show when={document().activities.length > 0}>
-            <div class="solid-workbench-activities" aria-label="活动" data-activity-count={document().activities.length}>
-              <Index each={selectActivityDisplayOrder(document())}>{activity => (
-                <CanonicalActivitySlot
-                  activity={activity()}
-                  document={document()}
-                  context={props.context}
-                  connectorPort={props.connectorPort}
-                />
-              )}</Index>
-            </div>
           </Show>
           <Show when={document().interactions.length > 0}>
             <div class="solid-workbench-interactions" aria-label="交互">
@@ -482,7 +488,11 @@ function CanonicalActivitySlot(props: {
         layoutPort={props.connectorPort}
       />}
     </Show>
-    <div ref={root} class="solid-workbench-activity-slot" data-activity-id={props.activity.id}>
+    <div
+      ref={root}
+      class={`solid-workbench-activity-slot term-row ${props.activity.kind === 'tool' ? 'term-row-tool' : 'term-row-activity'}`}
+      data-activity-id={props.activity.id}
+    >
       <WorkbenchContentSlot
         nodeId={props.activity.id}
         kind={kind()}
@@ -514,6 +524,52 @@ function toolConnectorTone(status: string): 'ok' | 'err' | 'run' {
   if (status === 'completed' || status === 'success') return 'ok'
   if (status === 'failed' || status === 'error' || status === 'cancelled') return 'err'
   return 'run'
+}
+
+function CanonicalActivityList(props: {
+  activities: readonly WorkbenchActivityNode[]
+  document: WorkbenchDocument | undefined
+  context: SolidWorkbenchContextValue
+  connectorPort: ReturnType<typeof createToolConnectorLayoutPort>
+}) {
+  return <Show when={props.activities.length > 0 ? props.document : undefined}>
+    {document => <div class="solid-workbench-activities" aria-label="活动" data-activity-count={props.activities.length}>
+      <Index each={props.activities}>{activity => <CanonicalActivitySlot
+        activity={activity()}
+        document={document()}
+        context={props.context}
+        connectorPort={props.connectorPort}
+      />}</Index>
+    </div>}
+  </Show>
+}
+
+interface ActivityTimelinePlacement {
+  readonly leading: readonly WorkbenchActivityNode[]
+  readonly afterMessage: ReadonlyMap<string, readonly WorkbenchActivityNode[]>
+}
+
+function selectActivityTimelinePlacement(document: WorkbenchDocument | undefined): ActivityTimelinePlacement {
+  if (!document || document.activities.length === 0) {
+    return { leading: [], afterMessage: new Map() }
+  }
+  const leading: WorkbenchActivityNode[] = []
+  const afterMessage = new Map<string, WorkbenchActivityNode[]>()
+  for (const activity of selectActivityDisplayOrder(document)) {
+    let anchor: WorkbenchDocument['messages'][number] | undefined
+    for (const message of document.messages) {
+      if (message.sequence >= activity.sequence) continue
+      if (!anchor || message.sequence > anchor.sequence) anchor = message
+    }
+    if (!anchor) {
+      leading.push(activity)
+      continue
+    }
+    const anchored = afterMessage.get(anchor.id) ?? []
+    anchored.push(activity)
+    afterMessage.set(anchor.id, anchored)
+  }
+  return { leading, afterMessage }
 }
 
 function lifecycleRenderKind(state: LifecycleState): string | undefined {
@@ -658,6 +714,7 @@ function WorkbenchRow(props: {
   appearance: SolidWorkbenchContextValue['appearanceSnapshot'] extends () => infer T ? T : never
   connectorPort: ReturnType<typeof createToolConnectorLayoutPort>
   context: SolidWorkbenchContextValue
+  children?: import('solid-js').JSX.Element
 }) {
   const current = () => props.descriptor.renderMessage
   const previousTool = () => {
@@ -726,6 +783,7 @@ function WorkbenchRow(props: {
           />
         </Match>
       </Switch>
+      {props.children}
     </>
   )
 }

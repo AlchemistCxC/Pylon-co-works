@@ -122,6 +122,37 @@ describe('SolidInputBar', () => {
     expect(textarea.value).toBe('发送期间写下的下一条')
   })
 
+  it('提交开始时立即清空输入框，发送失败且期间没有新输入时恢复原草稿', async () => {
+    let resolveSend: ((value: { status: 'rejected'; error: string }) => void) | undefined
+    const { services, textarea } = renderInput()
+    services.commands.setHandler('send', vi.fn(() => new Promise<{ status: 'rejected'; error: string }>(resolve => { resolveSend = resolve })))
+
+    fireEvent.input(textarea, { target: { value: '立即离开输入框' } })
+    fireEvent.keyDown(textarea, { key: 'Enter' })
+
+    await waitFor(() => expect(services.commands.calls[0]?.command).toBe('send'))
+    expect(textarea.value).toBe('')
+
+    resolveSend?.({ status: 'rejected', error: '网络暂时不可用' })
+    await waitFor(() => expect(textarea.value).toBe('立即离开输入框'))
+    expect(screen.getByRole('alert')).toHaveTextContent('网络暂时不可用')
+  })
+
+  it('发送失败时不以旧消息覆盖等待期间输入的新草稿', async () => {
+    let resolveSend: ((value: { status: 'rejected'; error: string }) => void) | undefined
+    const { services, textarea } = renderInput()
+    services.commands.setHandler('send', vi.fn(() => new Promise<{ status: 'rejected'; error: string }>(resolve => { resolveSend = resolve })))
+
+    fireEvent.input(textarea, { target: { value: '失败的消息' } })
+    fireEvent.keyDown(textarea, { key: 'Enter' })
+    await waitFor(() => expect(textarea.value).toBe(''))
+    fireEvent.input(textarea, { target: { value: '发送期间的新草稿' } })
+    resolveSend?.({ status: 'rejected', error: '发送失败' })
+
+    await waitFor(() => expect(screen.getByRole('alert')).toHaveTextContent('发送失败'))
+    expect(textarea.value).toBe('发送期间的新草稿')
+  })
+
   it('发送失败提示只显示在发起会话', async () => {
     let resolveSend: ((value: { status: 'rejected'; error: string }) => void) | undefined
     const sendPromise = new Promise<{ status: 'rejected'; error: string }>(resolve => { resolveSend = resolve })

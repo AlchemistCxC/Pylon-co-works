@@ -25,6 +25,10 @@ describe('C04 tool render kind catalog', () => {
       expect(kinds.get(id)?.fallbackKind).toBe('tool.generic')
     }
     expect(kinds.get('tool.generic')?.settings).toBeDefined()
+    expect(kinds.get('tool.generic')?.defaultTokens).toEqual(expect.objectContaining({ defaultCollapsed: true }))
+    expect(kinds.get('tool.generic')?.settings?.groups
+      .flatMap(group => group.fields)
+      .find(field => field.key === 'defaultCollapsed')?.default).toBe(true)
     expect(kinds.get('tool.generic')?.fixture).toEqual(expect.objectContaining({
       id: expect.any(String),
       status: 'running',

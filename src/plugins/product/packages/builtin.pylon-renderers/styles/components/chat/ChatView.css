@@ -382,9 +382,9 @@
 .app[data-interface-mode="modern-gui"] .term-reasoning-head { align-items:center; font-style:normal; }
 .app[data-interface-mode="modern-gui"] .term-reasoning-icon { color:var(--accent); }
 .app[data-interface-mode="modern-gui"] .term-reasoning-body { margin:10px 0 0 6px; padding-left:18px; }
-.app[data-interface-mode="modern-gui"] .term-row-tool { margin-left:38px; }
+.app[data-interface-mode="modern-gui"] .term-row-tool { margin-left:0; }
 .app[data-interface-mode="modern-gui"] .term-tool { padding:0; overflow:hidden; border:1px solid color-mix(in srgb,var(--border) 88%,transparent); border-radius:12px; background:color-mix(in srgb,var(--surface-panel) 70%,transparent); }
-.app[data-interface-mode="modern-gui"] .term-tool-head { min-height:42px; align-items:center; gap:8px; padding:0 12px; }
+.app[data-interface-mode="modern-gui"] .term-tool-head { min-height:42px; align-items:center; gap:8px; padding:0 16px; }
 .app[data-interface-mode="modern-gui"] .term-tool-indicator { display:grid; place-items:center; width:25px; height:25px; flex:0 0 25px; border-radius:8px; background:color-mix(in srgb,currentColor 10%,transparent); }
 .app[data-interface-mode="modern-gui"] .term-tool-name { font:650 12px var(--font); }
 .app[data-interface-mode="modern-gui"] .term-tool-summary { font-size:11px; }
@@ -585,6 +585,8 @@
 }
 .term-assistant.has-dot > .term-assistant-body { flex:1; min-width:0; }
 .term-assistant.has-dot > .term-assistant-body > :first-child { margin-top:0; }
+.term-assistant.has-dot > .term-assistant-body > :first-child > :first-child,
+.term-assistant.has-dot > .term-assistant-body > :first-child > :first-child > :first-child { margin-top:0; }
 /* 工具指示与助手圆点同列：指示占圆点列宽（margin 归零），工具名从第 3 列起 */
 .app[data-message-layout="claude"] .term-tool-head .term-tool-indicator {
   flex:0 0 var(--dot-col-width, 1.6em);
@@ -722,7 +724,6 @@
   width: var(--dot-col-width, 1.6em);
   text-align: left;
   margin: 0;
-  margin-top: .16em;
 }
 .term-tool-name { flex: 0 0 auto; white-space: nowrap; }
 .term-tool-summary {

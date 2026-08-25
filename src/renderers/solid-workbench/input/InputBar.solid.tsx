@@ -134,8 +134,23 @@ export function SolidInputBar(props: SolidInputBarProps) {
     const normalized = text.trim()
     if (!id || !normalized) return false
     const ui = workbench.sessionUi.capture(id)
+    const shouldRunSlashCommand = normalized.startsWith('/') && suggestionList().length > 0
+    let clearedDraft = false
+    let clearedAttachments = false
+    if (clearComposer) {
+      ui.update('draft', '', current => {
+        if (current !== text) return current
+        clearedDraft = true
+        return ''
+      })
+      ui.update<readonly WorkbenchAttachment[]>('attachments', [], current => {
+        if (!sameAttachments(current, messageAttachments)) return current
+        clearedAttachments = true
+        return []
+      })
+    }
     try {
-      const handled = normalized.startsWith('/') && suggestionList().length > 0
+      const handled = shouldRunSlashCommand
         ? await runSlashCommand(normalized)
         : false
       if (!handled) {
@@ -146,14 +161,16 @@ export function SolidInputBar(props: SolidInputBarProps) {
         if (result.status === 'rejected') throw new Error(result.error || '发送失败')
       }
       recordHistory(normalized, ui)
-      if (clearComposer) {
-        ui.update('draft', '', current => current === text ? '' : current)
-        ui.update<readonly WorkbenchAttachment[]>('attachments', [], current => sameAttachments(current, messageAttachments) ? [] : current)
-      }
       ui.set('input-error', '')
       if (sessionId() === id) setCommandIndex(0)
       return true
     } catch (error) {
+      if (clearComposer && clearedDraft && ui.get('draft', '') === '') {
+        ui.set('draft', text)
+        if (clearedAttachments && ui.get<readonly WorkbenchAttachment[]>('attachments', []).length === 0) {
+          ui.set('attachments', messageAttachments)
+        }
+      }
       ui.set('input-error', error instanceof Error ? error.message : String(error))
       return false
     }

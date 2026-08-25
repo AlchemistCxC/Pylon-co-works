@@ -238,7 +238,12 @@ describe('AgentSheetView renderer mode context', () => {
       await registration.dispose()
 
       await waitFor(() => expect(container.querySelector('[data-production-tool-slot="true"]')).toBeNull())
-      expect(await screen.findByRole('status', { name: '工具：未来工具，运行中' })).toHaveTextContent('/workspace/future.data')
+      const fallbackCard = await screen.findByRole('status', { name: '工具：未来工具，运行中' })
+      const fallbackHead = fallbackCard.querySelector<HTMLButtonElement>('.term-tool-head')!
+      expect(fallbackHead).toHaveAttribute('aria-expanded', 'false')
+      expect(fallbackCard).not.toHaveTextContent('/workspace/future.data')
+      fireEvent.click(fallbackHead)
+      expect(fallbackCard).toHaveTextContent('/workspace/future.data')
       expect(container.querySelector('[data-renderer-slot-id="builtin.solid.content.base"]')).not.toBeNull()
       expect(destroyed).toHaveBeenCalled()
       const handles = destroyed.mock.calls.map(call => call[0])
