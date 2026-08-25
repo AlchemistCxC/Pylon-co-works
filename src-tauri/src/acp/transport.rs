@@ -2,6 +2,7 @@
 //! 行为零变化）。writer 超时置位 crashed、stdout EOF 经 watch 信号 + drain pending、
 //! stderr 持续 drain 防管道缓冲死锁。
 
+use std::collections::HashMap;
 use std::io::{BufRead, BufReader, BufWriter, Write};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
@@ -110,6 +111,62 @@ fn fanout_inbound(
         let _ = notification_tx.blocking_send(raw.clone());
     }
     let _ = tx.send(raw);
+}
+
+/// Tag notifications observed inside an active `session/load` request before they enter either
+/// the Kernel inbox or the replay observer. ACP itself defines the matching response as the replay
+/// boundary; provider-private `_meta.periReplay` is optional and cannot be the authority.
+fn classify_active_replay_message(
+    raw: &mut RawMessage,
+    active_replay_requests: &Arc<Mutex<HashMap<u64, String>>>,
+) {
+    if raw.kind == AcpKind::Response {
+        if let Some(RequestId::Number(request_id)) = raw.id {
+            if let Ok(mut requests) = active_replay_requests.lock() {
+                requests.remove(&request_id);
+            }
+        }
+        return;
+    }
+    if raw.kind != AcpKind::SessionUpdate {
+        return;
+    }
+    let Some(params) = raw
+        .params
+        .as_mut()
+        .and_then(serde_json::Value::as_object_mut)
+    else {
+        return;
+    };
+    let Some(session_id) = params
+        .get("sessionId")
+        .and_then(serde_json::Value::as_str)
+        .map(str::to_owned)
+    else {
+        return;
+    };
+    let is_active = active_replay_requests
+        .lock()
+        .map(|requests| requests.values().any(|active| active == &session_id))
+        .unwrap_or(false);
+    if !is_active {
+        return;
+    }
+    let Some(update) = params
+        .get_mut("update")
+        .and_then(serde_json::Value::as_object_mut)
+    else {
+        return;
+    };
+    let meta = update
+        .entry("_meta")
+        .or_insert_with(|| serde_json::Value::Object(serde_json::Map::new()));
+    if !meta.is_object() {
+        *meta = serde_json::Value::Object(serde_json::Map::new());
+    }
+    if let Some(meta) = meta.as_object_mut() {
+        meta.insert("periReplay".to_string(), serde_json::Value::Bool(true));
+    }
 }
 
 /// G1-05：writer 任务启动（S3 拆分；R4 自 std 线程改 tokio 任务：
@@ -377,6 +434,7 @@ pub(crate) fn spawn_stdout_reader(
     crashed_watch: &watch::Sender<bool>,
     runtime_logs: &Option<Arc<crate::runtime_log::RuntimeLogHub>>,
     wire_trace: Option<Arc<AcpWireHub>>,
+    active_replay_requests: Arc<Mutex<HashMap<u64, String>>>,
 ) {
     let pending_clone = pending.clone();
     let tx_clone = tx.clone();
@@ -427,7 +485,7 @@ pub(crate) fn spawn_stdout_reader(
                 .get("method")
                 .and_then(|v| v.as_str())
                 .map(|s| s.to_string());
-            let raw = RawMessage {
+            let mut raw = RawMessage {
                 // ACP-01：保留原始 variant（number/string；null/absent → None 不静默当 0）。
                 // OBS-01 的 wire trace 已在本行之前记录原始 msg_val——此处收窄不影响取证。
                 id: msg_val.get("id").and_then(RequestId::from_json_value),
@@ -437,6 +495,7 @@ pub(crate) fn spawn_stdout_reader(
                 params: msg_val.get("params").cloned(),
                 error: msg_val.get("error").cloned(),
             };
+            classify_active_replay_message(&mut raw, &active_replay_requests);
             // This reader is a dedicated OS thread, so a full Kernel inbox applies
             // transport backpressure without blocking Tokio.
             fanout_inbound(&notification_tx_reader, &tx_clone, raw.clone());
@@ -525,6 +584,96 @@ pub(crate) fn spawn_stdout_reader(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn active_session_load_marks_unlabelled_updates_as_replay_before_fanout() {
+        let active = Arc::new(Mutex::new(std::collections::HashMap::from([(
+            7,
+            "remote-session".to_string(),
+        )])));
+        let mut raw = RawMessage {
+            id: None,
+            method: Some(super::super::NOTIF_SESSION_UPDATE.to_string()),
+            kind: AcpKind::SessionUpdate,
+            result: None,
+            params: Some(serde_json::json!({
+                "sessionId": "remote-session",
+                "update": {
+                    "sessionUpdate": "agent_message_chunk",
+                    "content": { "text": "replayed answer" }
+                }
+            })),
+            error: None,
+        };
+
+        classify_active_replay_message(&mut raw, &active);
+
+        assert_eq!(
+            raw.params.as_ref().unwrap()["update"]["_meta"]["periReplay"],
+            true,
+            "session/load boundary, not provider-private metadata, must classify replay",
+        );
+    }
+
+    #[test]
+    fn inactive_session_update_is_not_reclassified_as_replay() {
+        let active = Arc::new(Mutex::new(std::collections::HashMap::new()));
+        let mut raw = RawMessage {
+            id: None,
+            method: Some(super::super::NOTIF_SESSION_UPDATE.to_string()),
+            kind: AcpKind::SessionUpdate,
+            result: None,
+            params: Some(serde_json::json!({
+                "sessionId": "remote-session",
+                "update": {
+                    "sessionUpdate": "agent_message_chunk",
+                    "content": { "text": "live answer" }
+                }
+            })),
+            error: None,
+        };
+
+        classify_active_replay_message(&mut raw, &active);
+
+        assert!(raw.params.as_ref().unwrap()["update"]
+            .get("_meta")
+            .is_none());
+    }
+
+    #[test]
+    fn matching_load_response_closes_replay_boundary_before_the_next_update() {
+        let active = Arc::new(Mutex::new(std::collections::HashMap::from([(
+            7,
+            "remote-session".to_string(),
+        )])));
+        let mut response = RawMessage {
+            id: Some(RequestId::Number(7)),
+            method: None,
+            kind: AcpKind::Response,
+            result: Some(serde_json::json!({"sessionId": "remote-session"})),
+            params: None,
+            error: None,
+        };
+        classify_active_replay_message(&mut response, &active);
+
+        let mut live = RawMessage {
+            id: None,
+            method: Some(super::super::NOTIF_SESSION_UPDATE.to_string()),
+            kind: AcpKind::SessionUpdate,
+            result: None,
+            params: Some(serde_json::json!({
+                "sessionId": "remote-session",
+                "update": {"sessionUpdate": "agent_message_chunk", "content": {"text": "live"}}
+            })),
+            error: None,
+        };
+        classify_active_replay_message(&mut live, &active);
+
+        assert!(active.lock().unwrap().is_empty());
+        assert!(live.params.as_ref().unwrap()["update"]
+            .get("_meta")
+            .is_none());
+    }
 
     #[test]
     fn crash_reason_wire_codes_are_stable() {

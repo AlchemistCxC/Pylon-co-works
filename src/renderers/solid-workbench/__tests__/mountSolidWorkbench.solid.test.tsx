@@ -619,7 +619,7 @@ describe('mountSolidWorkbench', () => {
     expect(destroyDiagnostics).not.toHaveBeenCalled()
   })
 
-  it('document apply 驱动消息、活动、usage 与 diagnostics surface', async () => {
+  it('document apply 驱动消息、活动与 diagnostics，并暂不展示 ChatView usage surface', async () => {
     const { host, services } = mountPreview()
     const envelope = (sequence: number, event: WorkbenchEventEnvelope['event']): WorkbenchEventEnvelope => createWorkbenchEnvelope({
       sessionId: 'preview-session', recordedAt: `2026-08-21T00:00:0${sequence}.000Z`, sequence,
@@ -639,9 +639,9 @@ describe('mountSolidWorkbench', () => {
     services.runtime.replaceDocument(workbenchDocument, { ownerKey: 'owner-preview', generation: 1 })
     await waitFor(() => expect(screen.getByText('canonical answer')).toBeTruthy())
     expect(host.querySelector('[data-activity-count="1"]')).toBeTruthy()
-    expect(host.querySelector('[data-has-usage="true"]')).toBeTruthy()
-    expect(screen.getByLabelText('会话用量')).toHaveTextContent('输入 8')
-    expect(screen.getByLabelText('会话预算')).toHaveTextContent('剩余 10')
+    expect(host.querySelector('[data-has-usage="true"]')).toBeNull()
+    expect(screen.queryByLabelText('会话用量')).toBeNull()
+    expect(screen.queryByLabelText('会话预算')).toBeNull()
     expect(screen.getByLabelText('编辑 Model')).toHaveValue('gpt-5')
     expect(screen.getByLabelText('会话命令')).toHaveTextContent('/review')
     expect(screen.getByLabelText('输入预测')).toHaveTextContent('继续审计')

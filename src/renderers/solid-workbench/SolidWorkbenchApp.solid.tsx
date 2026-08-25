@@ -375,30 +375,6 @@ function WorkbenchDocumentSurface(props: {
               )}</For>
             </div>
           </Show>
-          <Show when={document().session.usage !== undefined}>
-            <div class="solid-workbench-usage" data-has-usage="true">
-              <WorkbenchContentSlot
-                nodeId={`${props.sessionId ?? 'none'}:session:usage`}
-                kind="session.usage"
-                payload={document().session.usage}
-                context={props.context}
-                fallback={<SolidSessionSurfaceCard kind="session.usage" payload={document().session.usage}
-                  appearance={sessionSurfaceAppearance(props.context, 'session.usage')}
-                  commands={fallbackRenderCommands(props.context)} />}
-              />
-              <Show when={document().session.usage?.budget}>
-                {budget => <WorkbenchContentSlot
-                  nodeId={`${props.sessionId ?? 'none'}:session:budget`}
-                  kind="session.budget"
-                  payload={budget()}
-                  context={props.context}
-                  fallback={<SolidSessionSurfaceCard kind="session.budget" payload={budget()}
-                    appearance={sessionSurfaceAppearance(props.context, 'session.budget')}
-                    commands={fallbackRenderCommands(props.context)} />}
-                />}
-              </Show>
-            </div>
-          </Show>
           <Show when={(document().session.options?.length ?? 0) > 0}>
             <div class="solid-workbench-config" data-config-count={document().session.options?.length ?? 0}>
               <WorkbenchContentSlot

@@ -4,9 +4,9 @@
 //! `AcpClient::replay_handles` 一次性提取句柄后释放锁，锁外交给
 //! [`load_session_with_replay`] 等待回放完成（超时/EOF/lag 均有界）。
 
-use std::collections::VecDeque;
+use std::collections::{HashMap, VecDeque};
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
 use tokio::sync::{broadcast, mpsc};
 
 use super::transport::send_line;
@@ -25,6 +25,39 @@ pub struct ReplayHandles {
     pub(crate) rpc_timeout: std::time::Duration,
     /// G1-02：回放收集上限（缺省 10_000，替代 H12 字面量）。
     pub(crate) replay_max: usize,
+    /// Transport-level replay classification. The reader stamps every matching update while this
+    /// set contains the remote session id, independently of provider-private metadata.
+    pub(crate) active_replay_requests: Arc<Mutex<HashMap<u64, String>>>,
+}
+
+struct ActiveReplayRegistration {
+    request_id: u64,
+    requests: Arc<Mutex<HashMap<u64, String>>>,
+}
+
+impl ActiveReplayRegistration {
+    fn register(
+        requests: Arc<Mutex<HashMap<u64, String>>>,
+        request_id: u64,
+        session_id: &str,
+    ) -> Result<Self, AcpError> {
+        requests
+            .lock()
+            .map_err(|_| AcpError::Child("active replay session registry poisoned".to_string()))?
+            .insert(request_id, session_id.to_string());
+        Ok(Self {
+            request_id,
+            requests,
+        })
+    }
+}
+
+impl Drop for ActiveReplayRegistration {
+    fn drop(&mut self) {
+        if let Ok(mut requests) = self.requests.lock() {
+            requests.remove(&self.request_id);
+        }
+    }
 }
 
 /// D6：session/load replay 的完整性契约。ACP update 本身没有可靠的全局 sequence，
@@ -75,6 +108,8 @@ pub(crate) async fn load_session_with_replay(
     let params = super::protocol::load_params(session_id, cwd, mcp_servers, mode)?;
     let (id, line) =
         super::AcpClient::register_line(&handles.next_id, METHOD_SESSION_LOAD, &params)?;
+    let _active_replay =
+        ActiveReplayRegistration::register(handles.active_replay_requests.clone(), id, session_id)?;
     send_line(handles.write_tx, line, &handles.crashed).await?;
 
     let mut replay = VecDeque::with_capacity(handles.replay_max.min(10_000));
@@ -183,6 +218,7 @@ mod tests {
             rx: events_rx,
             rpc_timeout: std::time::Duration::from_millis(40),
             replay_max: 100,
+            active_replay_requests: Arc::new(Mutex::new(HashMap::new())),
         };
 
         let loading = tokio::spawn(load_session_with_replay(

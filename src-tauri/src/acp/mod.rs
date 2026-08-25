@@ -406,6 +406,9 @@ pub struct AcpClient {
     /// The broadcast receiver remains a replay/observation fan-out and is not a
     /// durable-ingest source.
     notification_inbox: NotificationInbox,
+    /// Remote session ids whose `session/load` response boundary has not been observed yet.
+    /// The stdout reader uses this to classify replay before queueing notifications.
+    active_replay_requests: Arc<Mutex<HashMap<u64, String>>>,
     /// Set when the child process exits unexpectedly.
     pub crashed: Arc<AtomicBool>,
     /// A7：EOF 崩溃信号独立 watch 通道（保留最新值，broadcast 洪泛 Lagged 丢消息
@@ -498,6 +501,7 @@ impl AcpClient {
             pending: Arc::new(std::array::from_fn(|_| Mutex::new(HashMap::new()))),
             rx,
             notification_inbox: NotificationInbox::new(notification_rx),
+            active_replay_requests: Arc::new(Mutex::new(HashMap::new())),
             crashed: Arc::new(AtomicBool::new(false)),
             crashed_watch,
             _crashed_watch_rx: crashed_watch_rx,
@@ -775,6 +779,7 @@ impl AcpClient {
                     Arc::new(std::array::from_fn(|_| Mutex::new(HashMap::new())));
                 let (tx, rx) = broadcast::channel(BROADCAST_CAP);
                 let (notification_tx, notification_rx) = mpsc::channel(NOTIFICATION_CHAN_CAP);
+                let active_replay_requests = Arc::new(Mutex::new(HashMap::new()));
                 let (crashed_watch, crashed_watch_rx) = watch::channel(false);
                 // G1-05：三线程启动收敛为私有函数（S3 卫生，行为零变化）。
                 // 方案 2A：writer 持有结算句柄（watch/pending/tx），写失败统一结算。
@@ -818,6 +823,7 @@ impl AcpClient {
                     &crashed_watch,
                     &runtime_logs,
                     Some(wire_trace.clone()),
+                    active_replay_requests.clone(),
                 );
 
                 let mut client = AcpClient {
@@ -830,6 +836,7 @@ impl AcpClient {
                     pending,
                     rx,
                     notification_inbox: NotificationInbox::new(notification_rx),
+                    active_replay_requests,
                     crashed,
                     crashed_watch,
                     _crashed_watch_rx: crashed_watch_rx,
@@ -896,6 +903,7 @@ impl AcpClient {
             rx: self.rx.resubscribe(),
             rpc_timeout: std::time::Duration::from_secs(self.protocol.rpc_timeout()),
             replay_max: self.protocol.replay_max(),
+            active_replay_requests: self.active_replay_requests.clone(),
         }
     }
 

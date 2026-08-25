@@ -699,7 +699,7 @@ describe('AgentSheetView renderer mode context', () => {
     }
   })
 
-  it('targeted session.usage Slot receives the typed C14 snapshot and cleanup restores the base Slot', async () => {
+  it('keeps the session.usage Slot registered without mounting usage in ChatView', async () => {
     const registration = getRendererRegistry().registerSlot(
       createPluginIdentity('test.production-session-usage-slot', 'runtime'),
       {
@@ -736,12 +736,14 @@ describe('AgentSheetView renderer mode context', () => {
         event: { type: 'usage.updated', usage: { inputTokens: 8, vendorFuture: 9 } },
       }))
 
-      expect(await screen.findByText('usage overlay: 8 / 9')).toBeTruthy()
-      expect(container.querySelector('[data-production-session-usage-slot="true"]')).not.toBeNull()
+      await waitFor(() => {
+        expect(container.querySelector('[data-production-session-usage-slot="true"]')).toBeNull()
+        expect(screen.queryByLabelText('会话用量')).toBeNull()
+      })
       await registration.dispose()
 
-      await waitFor(() => expect(container.querySelector('[data-production-session-usage-slot="true"]')).toBeNull())
-      expect(await screen.findByLabelText('会话用量')).toHaveTextContent('输入 8')
+      expect(container.querySelector('[data-production-session-usage-slot="true"]')).toBeNull()
+      expect(screen.queryByLabelText('会话用量')).toBeNull()
       expect(container.querySelector('[data-renderer-slot-id="builtin.solid.content.base"]')).not.toBeNull()
     } finally {
       await registration.dispose()
