@@ -59,6 +59,8 @@ export interface WorkbenchMessage {
   readonly parts: readonly ContentPart[]
   readonly identity: WorkbenchEventEnvelope['identity']
   readonly source: WorkbenchEventEnvelope['source']
+  /** Temporary local echo marker used only until the authoritative user row arrives. */
+  readonly optimistic?: boolean
   readonly sequence: number
   readonly running: boolean
   readonly time: string
@@ -493,12 +495,39 @@ function reduceMessage(document: WorkbenchDocument, envelope: WorkbenchEventEnve
   const content = textFromParts(parts)
   const identityKey = identityKeyOf(envelope)
   const previous = document.messages.at(-1)
-  // No identity means no safe message boundary guess. Keep deltas as separate
-  // timeline messages; providers must supply messageId/turnId for aggregation.
-  const append = previous && previous.role === role && identityKey !== '' && identityKey === identityKeyOf(previous)
+  const previousIdentityKey = previous ? identityKeyOf(previous) : ''
+  // ACP providers are allowed to omit message identity. Adjacent chunks of the
+  // same role still belong to one stream; a tool/reasoning/session event in the
+  // canonical timeline is an explicit boundary. If both sides provide different
+  // identities, the identity remains the stronger boundary.
+  const append = Boolean(previous && previous.role === role && (
+    (identityKey !== '' && identityKey === previousIdentityKey)
+    || ((!identityKey || !previousIdentityKey) && immediatelyPrecedingMessageHasRole(document, envelope.eventId, role))
+  ))
+  const incomingOptimistic = envelope.provenance.origin === 'optimistic-local'
+  const duplicateIndex = role === 'user'
+    ? findLastMessageIndex(document.messages, message => message.role === 'user'
+      && message.content === content
+      && message.optimistic !== incomingOptimistic)
+    : -1
+  if (duplicateIndex >= 0) {
+    // Prefer the Kernel-committed row regardless of whether it arrives before
+    // or after the debounced optimistic append. Replacement at the optimistic
+    // position also repairs journals where assistant chunks won that race.
+    if (incomingOptimistic) return document
+    return {
+      ...document,
+      messages: document.messages.map((message, index) => index === duplicateIndex ? {
+        id: identityKey || envelope.eventId, role: 'user', content, parts,
+        identity: envelope.identity, source: envelope.source,
+        sequence: envelope.sequence, running: event.type !== 'message.completed',
+        time: envelope.occurredAt ?? envelope.recordedAt,
+      } : message),
+    }
+  }
   const messages = append
-    ? [...document.messages.slice(0, -1), { ...previous, content: previous.content + content, parts: [...previous.parts, ...parts], sequence: envelope.sequence, running: event.type !== 'message.completed' }]
-    : [...document.messages, { id: identityKey || envelope.eventId, role: role as WorkbenchMessage['role'], content, parts, identity: envelope.identity, source: envelope.source, sequence: envelope.sequence, running: event.type !== 'message.completed', time: envelope.occurredAt ?? envelope.recordedAt }]
+    ? [...document.messages.slice(0, -1), { ...previous!, content: previous!.content + content, parts: [...previous!.parts, ...parts], identity: Object.keys(envelope.identity).length > 0 ? envelope.identity : previous!.identity, sequence: envelope.sequence, running: event.type !== 'message.completed' }]
+    : [...document.messages, { id: identityKey || envelope.eventId, role: role as WorkbenchMessage['role'], content, parts, identity: envelope.identity, source: envelope.source, sequence: envelope.sequence, running: event.type !== 'message.completed', time: envelope.occurredAt ?? envelope.recordedAt, ...(incomingOptimistic ? { optimistic: true } : {}) }]
   return { ...document, messages }
 }
 
@@ -509,7 +538,11 @@ function reduceReasoning(document: WorkbenchDocument, envelope: WorkbenchEventEn
   const content = redacted ? '' : textFromParts(parts)
   const previous = document.messages.at(-1)
   const identityKey = identityKeyOf(envelope)
-  const append = previous?.role === 'reasoning' && identityKey !== '' && identityKey === identityKeyOf(previous)
+  const previousIdentityKey = previous ? identityKeyOf(previous) : ''
+  const append = previous?.role === 'reasoning' && (
+    (identityKey !== '' && identityKey === previousIdentityKey)
+    || ((!identityKey || !previousIdentityKey) && immediatelyPrecedingTimelineKind(document, envelope.eventId) === 'reasoning')
+  )
   // C01：terminal 是吸收态——迟到 delta/重复 completion 不得复活或改写首次终态。
   // redaction 是唯一可继续收紧的迁移：即使 completed 已到，也必须清除可见正文与历史 parts。
   if (append && previous && !previous.running) {
@@ -539,6 +572,7 @@ function reduceReasoning(document: WorkbenchDocument, envelope: WorkbenchEventEn
         ...previous,
         content: redacted ? content : previous.content + content,
         parts: redacted ? parts : [...previous.parts, ...parts],
+        identity: Object.keys(envelope.identity).length > 0 ? envelope.identity : previous.identity,
         sequence: envelope.sequence,
         running: event.type === 'reasoning.delta',
         ...(durationMs !== undefined ? { thoughtDurationMs: durationMs } : {}),
@@ -937,9 +971,19 @@ function reduceGoal(document: WorkbenchDocument, envelope: WorkbenchEventEnvelop
   return { ...document, goal: next }
 }
 
-function reduceSession(document: WorkbenchDocument, _envelope: WorkbenchEventEnvelope, event: SessionEvent): WorkbenchDocument {
+function reduceSession(document: WorkbenchDocument, envelope: WorkbenchEventEnvelope, event: SessionEvent): WorkbenchDocument {
+  const completedAt = Date.parse(envelope.occurredAt ?? envelope.recordedAt)
   return {
     ...document,
+    ...(event.type === 'session.completed' ? {
+      messages: document.messages.map(message => message.running ? {
+        ...message,
+        running: false,
+        ...(message.role === 'reasoning' && message.thoughtStartedAtMs !== undefined && Number.isFinite(completedAt)
+          ? { thoughtDurationMs: Math.max(0, completedAt - message.thoughtStartedAtMs) }
+          : {}),
+      } : message),
+    } : {}),
     session: {
       ...document.session,
       status: event.type === 'session.completed' ? 'completed' : event.status ?? document.session.status,
@@ -1051,6 +1095,37 @@ function textFromParts(parts: readonly ContentPart[]): string {
 function identityKeyOf(value: WorkbenchEventEnvelope | WorkbenchMessage): string {
   const identity = value.identity
   return identity.messageId || identity.turnId || identity.toolCallId || identity.taskId || identity.interactionId || ''
+}
+
+function immediatelyPrecedingTimelineEntry(document: WorkbenchDocument, eventId: string): WorkbenchTimelineEntry | undefined {
+  const index = document.timeline.findIndex(item => item.eventId === eventId)
+  return index > 0 ? document.timeline[index - 1] : undefined
+}
+
+function findLastMessageIndex(
+  messages: readonly WorkbenchMessage[],
+  predicate: (message: WorkbenchMessage) => boolean,
+): number {
+  for (let index = messages.length - 1; index >= 0; index -= 1) {
+    if (predicate(messages[index]!)) return index
+  }
+  return -1
+}
+
+function immediatelyPrecedingTimelineKind(document: WorkbenchDocument, eventId: string): WorkbenchTimelineKind | undefined {
+  return immediatelyPrecedingTimelineEntry(document, eventId)?.kind
+}
+
+function immediatelyPrecedingMessageHasRole(
+  document: WorkbenchDocument,
+  eventId: string,
+  role: WorkbenchMessage['role'],
+): boolean {
+  const event = immediatelyPrecedingTimelineEntry(document, eventId)?.data
+  return Boolean(event && typeof event === 'object' && 'type' in event
+    && typeof event.type === 'string' && event.type.startsWith('message.')
+    && 'role' in event
+    && (event.role === 'reasoning' ? 'assistant' : event.role === 'user' ? 'user' : 'assistant') === role)
 }
 
 /** C04：把 normalized 字段冻结为可安全持有的 Json 快照（非 JSON 值降级为 undefined）。 */

@@ -1,6 +1,5 @@
 import { invoke } from '@tauri-apps/api/core'
-import type { SendMessagePayload } from '../../infrastructure/acp/chatClient.ts'
-import { createChatClient } from '../../infrastructure/acp/chatClient.ts'
+import { createChatClient, type SendMessagePayload } from '../../infrastructure/acp/chatClient.ts'
 import { useIdentityStore, type Session } from '../../identityStore.ts'
 import { getChatController } from '../../components/chat/chatEventController.ts'
 import { buildSendMessagePayload } from '../../components/chat/sessionRuntime.ts'
@@ -11,6 +10,7 @@ import { setSessionMode } from '../../components/chat/sessionMode.ts'
 import { createInteractionResponseTransport } from '../../infrastructure/acp/interactionTransport.ts'
 import type { InteractionResponseAnswer, InteractionResponseIdentity } from '../../domains/agent/agentContracts.ts'
 import type { AgentContext } from '../../agentContext.ts'
+import { sendMessageWithStream } from '../../components/chat/streamingSend.ts'
 
 export interface ResolvedWorkbenchInteraction {
   readonly identity: InteractionResponseIdentity
@@ -22,7 +22,7 @@ export interface AgentWorkbenchCommandDependencies {
   resolveSession(sessionId: string): Session | undefined
   resolvePersona(session: Session): string
   sendMessage(payload: SendMessagePayload): Promise<unknown>
-  optimisticUser(source: string, content: string, clientMessageId: string): void
+  optimisticUser(source: string, content: string, clientMessageId: string, options?: { persistCanonical?: boolean }): void
   nextClientMessageId(source: string): string
   setModel(context: AgentContext, modelId: string): Promise<void>
   setMode(context: AgentContext, modeId: string): Promise<void>
@@ -42,8 +42,8 @@ function productionDependencies(): AgentWorkbenchCommandDependencies {
       const profile = useIdentityStore.getState().profiles.find(item => item.id === session.profileId)
       return collectProfilePersona(session.creationSnapshot) || profile?.persona || ''
     },
-    sendMessage: payload => createChatClient({ invoke: (command, args) => invoke(command, args as Record<string, unknown> | undefined) }).sendMessage(payload),
-    optimisticUser: (source, content, clientMessageId) => getChatController()?.sendOptimisticUser(source, content, clientMessageId),
+    sendMessage: payload => sendMessageWithStream(payload),
+    optimisticUser: (source, content, clientMessageId, options) => getChatController()?.sendOptimisticUser(source, content, clientMessageId, options),
     nextClientMessageId: source => `${source}:${Date.now()}:${Math.random().toString(36).slice(2, 8)}`,
     setModel: (context, modelId) => setSessionModel(context, modelId),
     setMode: (context, modeId) => setSessionMode(context, modeId),
@@ -89,7 +89,10 @@ export function createAgentWorkbenchCommandFacade(
     if (!session) return { status: 'rejected', error: 'session_not_found' }
     if (!content) return { status: 'rejected', error: 'message_empty' }
     const clientMessageId = dependencies.nextClientMessageId(session.source)
-    dependencies.optimisticUser(session.source, content, clientMessageId)
+    // Solid renders the Kernel-committed WorkbenchDocument, not the legacy chat
+    // runtime. Persisting this temporary echo would race the Kernel user row and
+    // create a second durable user event; keep it runtime-local on this path.
+    dependencies.optimisticUser(session.source, content, clientMessageId, { persistCanonical: false })
     try {
       await dependencies.sendMessage(buildSendMessagePayload({
         session, content, persona: dependencies.resolvePersona(session),

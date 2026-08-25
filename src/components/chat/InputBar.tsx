@@ -7,8 +7,7 @@ import { useIdentityStore } from '../../identityStore'
 import { useRuntimeStore } from '../../runtimeStore'
 import { useAgentCapabilities } from '../../infrastructure/acp/useAgentCapabilities'
 import { createAgentClient } from '../../infrastructure/acp/agentClient'
-import { createChatClient, type StreamFrame } from '../../infrastructure/acp/chatClient'
-import { openStreamChannel, closeStreamChannel } from './streamChannel'
+import { sendMessageWithStream } from './streamingSend.ts'
 import { createSessionClient } from '../../infrastructure/acp/sessionClient'
 import { resolveAttachGate, resolveAttachFilters } from '../../infrastructure/acp/agentContracts'
 import { createAttachment, validateAttachment, MAX_ATTACH_BYTES, type AttachmentItem } from '../../domains/attachment/attachmentItem'
@@ -21,27 +20,9 @@ import { runSendTransaction } from './sendTransaction'
 import { buildSendMessagePayload } from './sessionRuntime'
 import type { Session } from '../../identityStore'
 
-/**
- * B1：流式发送——openStreamChannel 建 per-session Channel 并随 invoke 注册到后端；
- * 帧经 controller.handleStreamFrame 路由（处理体与广播监听共用）。终帧后注销。
- * 非 Tauri 环境 openStreamChannel 返回 undefined → 降级旧 send_message 广播路径。
- */
 function sendWithStream(options: { session: Session; content: string; persona: string; attachments: string[] }): Promise<unknown> {
   const payload = buildSendMessagePayload(options)
-  const source = options.session.source
-  const channel = openStreamChannel(source, frame => {
-    const handle = getChatController()
-    if (!handle) return
-    void handle.handleStreamFrame(frame as StreamFrame)
-    // 仅终帧关闸：user 帧在生成开始前到达（B1 单轨化），update 流仍在途——
-    // 提前 closeStreamChannel 会令后续 done 帧被静默丢弃（唯一消费入口），
-    // generating 状态将永不解除。
-    if (frame.event === 'pylon:done' || frame.event === 'pylon:error') closeStreamChannel(source)
-  })
-  if (!channel) {
-    return createChatClient({ invoke: (cmd, args) => invoke(cmd, args as Record<string, unknown> | undefined) }).sendMessage(payload)
-  }
-  return createChatClient({ invoke: (cmd, args) => invoke(cmd, args as Record<string, unknown> | undefined) }).sendMessageStreaming(payload, channel)
+  return sendMessageWithStream(payload)
 }
 import { resolveSessionSource } from './sessionCommandState'
 import { toAgentContextKey } from '../../agentContext'

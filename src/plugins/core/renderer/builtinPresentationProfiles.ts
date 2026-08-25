@@ -1,5 +1,48 @@
 import type { PresentationProfileContribution } from '../../../plugin-runtime/presentation/presentationProfileTypes.ts'
 
+const EXECUTION_SURFACE_TOKENS = Object.freeze({
+  msgStyle: 'bubble', messageLayout: 'bubble', chatFont: 'system', msgFont: 'system', msgLineHeight: 1.62,
+  messageUserBg: 'rgba(59,130,246,0.12)', messageAssistantBg: 'rgba(148,163,184,0.08)',
+  messageReasoningBg: 'rgba(99,102,241,0.06)', messageBorderColor: 'rgba(99,102,241,0.20)', messageRadius: 12,
+  inputMode: 'default', inputVariant: 'composer', inputBg: 'rgba(148,163,184,0.09)',
+  inputBorderColor: 'rgba(148,163,184,0.24)', inputFocusBorder: 'rgba(99,102,241,0.72)',
+  inputRadius: 12, inputFocusRingWidth: 3, ccVariant: 'glass', assistantDot: true,
+  toolConnectorMode: 'follow', toolConnectorStyle: 'solid', footerLayout: 'peri', cliHintMode: 'hidden',
+})
+
+const AGENT_COMMAND_KIND_TOKENS = Object.freeze({
+  'content.plan': { density: 'compact', defaultExpanded: true, collapseCompleted: false, nodeGlyph: 'status', connectorStyle: 'solid', indent: 18 },
+  'activity.subagent': { density: 'compact', viewMode: 'cards', identityMarker: 'avatar', showIdentity: true, showAggregate: true, defaultExpandedDepth: 1, cardWidth: 1200, indent: 0 },
+  'activity.delegation': { density: 'compact', viewMode: 'cards', identityMarker: 'glyph', showIdentity: true, showAggregate: true, defaultExpandedDepth: 1, cardWidth: 1200, indent: 0 },
+  'activity.team': { density: 'compact', viewMode: 'cards', identityMarker: 'avatar', showIdentity: true, showAggregate: true, defaultExpandedDepth: 1, cardWidth: 1200, indent: 0 },
+  'activity.workflow': { density: 'compact', workflowLayout: 'lanes', workflowConnector: true, collapseCompleted: false, indent: 14 },
+  'activity.workflow-phase': { density: 'compact', workflowLayout: 'lanes', workflowConnector: true, collapseCompleted: false, indent: 14 },
+  'activity.workflow-agent': { density: 'compact', workflowLayout: 'lanes', workflowConnector: true, collapseCompleted: false, indent: 14 },
+  'activity.background-task': { density: 'compact', workflowLayout: 'lanes', workflowConnector: true, collapseCompleted: false, indent: 14 },
+})
+
+const AGENT_MAP_KIND_TOKENS = Object.freeze({
+  'content.plan': { density: 'comfortable', defaultExpanded: true, collapseCompleted: true, nodeGlyph: 'dot', connectorStyle: 'dashed', indent: 24 },
+  'activity.subagent': { density: 'comfortable', viewMode: 'tree', identityMarker: 'avatar', treeLineStyle: 'solid', showIdentity: true, showAggregate: true, defaultExpandedDepth: 2, indent: 28 },
+  'activity.delegation': { density: 'comfortable', viewMode: 'tree', identityMarker: 'glyph', treeLineStyle: 'dashed', showIdentity: true, showAggregate: true, defaultExpandedDepth: 2, indent: 28 },
+  'activity.team': { density: 'comfortable', viewMode: 'tree', identityMarker: 'avatar', treeLineStyle: 'solid', showIdentity: true, showAggregate: true, defaultExpandedDepth: 2, indent: 28 },
+  'activity.workflow': { density: 'comfortable', workflowLayout: 'timeline', workflowConnector: true, collapseCompleted: true, indent: 24 },
+  'activity.workflow-phase': { density: 'comfortable', workflowLayout: 'timeline', workflowConnector: true, collapseCompleted: true, indent: 24 },
+  'activity.workflow-agent': { density: 'comfortable', workflowLayout: 'timeline', workflowConnector: true, collapseCompleted: true, indent: 24 },
+  'activity.background-task': { density: 'comfortable', workflowLayout: 'timeline', workflowConnector: true, collapseCompleted: true, indent: 24 },
+})
+
+const FOCUS_FLOW_KIND_TOKENS = Object.freeze({
+  'content.plan': { density: 'compact', defaultExpanded: false, collapseCompleted: true, nodeGlyph: 'none', connectorStyle: 'none', showPriority: false, indent: 12 },
+  'activity.subagent': { density: 'compact', viewMode: 'cards', identityMarker: 'none', showIdentity: false, showAggregate: false, defaultExpandedDepth: 0, cardWidth: 980, indent: 0 },
+  'activity.delegation': { density: 'compact', viewMode: 'cards', identityMarker: 'none', showIdentity: false, showAggregate: false, defaultExpandedDepth: 0, cardWidth: 980, indent: 0 },
+  'activity.team': { density: 'compact', viewMode: 'cards', identityMarker: 'none', showIdentity: false, showAggregate: false, defaultExpandedDepth: 0, cardWidth: 980, indent: 0 },
+  'activity.workflow': { density: 'compact', workflowLayout: 'list', workflowConnector: false, collapseCompleted: true, animateProgress: false, indent: 0 },
+  'activity.workflow-phase': { density: 'compact', workflowLayout: 'list', workflowConnector: false, collapseCompleted: true, animateProgress: false, indent: 0 },
+  'activity.workflow-agent': { density: 'compact', workflowLayout: 'list', workflowConnector: false, collapseCompleted: true, animateProgress: false, indent: 0 },
+  'activity.background-task': { density: 'compact', workflowLayout: 'list', workflowConnector: false, collapseCompleted: true, animateProgress: false, indent: 0 },
+})
+
 export const BUILTIN_PRESENTATION_PROFILES: readonly PresentationProfileContribution[] = Object.freeze([
   {
     id: 'builtin.presentation.modern-gui',
@@ -90,5 +133,32 @@ export const BUILTIN_PRESENTATION_PROFILES: readonly PresentationProfileContribu
       spinnerVerbSet: 'zh', cliHintMode: 'hidden', footerLayout: 'peri',
     },
     assets: { assistantGlyph: '✦', runningGlyph: '✦', completedGlyph: '✓', failedGlyph: '!' },
+  },
+  {
+    id: 'builtin.presentation.agent-command',
+    label: 'Agent 指挥台',
+    description: '展开计划与执行统计，用紧凑卡片同时观察多代理协作。',
+    family: 'gui', interfaceMode: 'modern-gui', order: 60,
+    tokens: { ...EXECUTION_SURFACE_TOKENS, assistantDotGlyph: '◆', toolIndicator: '◆', toolIndicatorGlow: 3, spinnerFramePreset: 'scan', spinnerVerbSet: 'engineering' },
+    kindTokens: AGENT_COMMAND_KIND_TOKENS,
+    assets: { assistantGlyph: '◈', runningGlyph: '●', completedGlyph: '✓', failedGlyph: '!' },
+  },
+  {
+    id: 'builtin.presentation.agent-map',
+    label: 'Agent 关系图',
+    description: '强调父子缩进、连接线和身份头像，适合追踪委派链。',
+    family: 'gui', interfaceMode: 'modern-gui', order: 70,
+    tokens: { ...EXECUTION_SURFACE_TOKENS, assistantDotGlyph: '✦', toolIndicator: '✦', toolIndicatorGlow: 2, spinnerFramePreset: 'orbit', spinnerVerbSet: 'analysis' },
+    kindTokens: AGENT_MAP_KIND_TOKENS,
+    assets: { assistantGlyph: '◇', runningGlyph: '◐', completedGlyph: '✓', failedGlyph: '×' },
+  },
+  {
+    id: 'builtin.presentation.focus-flow',
+    label: '专注流程',
+    description: '收起已完成内容与次要统计，只保留当前任务和关键输出。',
+    family: 'reading', interfaceMode: 'modern-gui', order: 80,
+    tokens: { ...EXECUTION_SURFACE_TOKENS, messageLayout: 'claude', messageRadius: 6, assistantDotGlyph: '●', toolIndicator: '▶', toolIndicatorGlow: 0, spinnerFramePreset: 'braille', spinnerVerbSet: 'zh' },
+    kindTokens: FOCUS_FLOW_KIND_TOKENS,
+    assets: { assistantGlyph: '•', runningGlyph: '›', completedGlyph: '✓', failedGlyph: '!' },
   },
 ])

@@ -9,7 +9,7 @@ import { themeToCssVars } from './templateThemeVars.ts'
 /**
  * TemplateLibrary — 官方/自定义模板库（W2-14，F3-C/T2）。
  *
- * 官方 6 预设 + 用户自定义两分区；预览 = 对 delta 计算 { ...THEME_DEFAULTS, ...delta }
+ * 官方预设 + 用户自定义两分区；预览 = 对 delta 计算 { ...THEME_DEFAULTS, ...delta }
  * 的内存态 cssVars 注入预览容器局部 style（复用 SettingsPreview 渲染——不触全局 store，
  * hover 不写 store）；点击才应用（setGlobalPreset / applyCustomPreset）；「恢复此模板
  * 默认」重应用当前模板 delta（清手调字段）。

@@ -34,7 +34,10 @@ function canonicalRow(sequence: number, sessionUpdate: string, fields: Record<st
     sequence,
     occurredAt: `2026-08-22T00:00:0${sequence}.000Z`,
     receivedAt: `2026-08-22T00:00:0${sequence}.000Z`,
-    eventType: sessionUpdate === 'user_message_chunk' ? 'user.message' : 'unknown',
+    eventType: sessionUpdate === 'user_message_chunk' ? 'user.message'
+      : sessionUpdate === 'agent_message_chunk' ? 'assistant.text.delta'
+        : sessionUpdate === 'agent_thought_chunk' ? 'assistant.thinking.delta'
+          : sessionUpdate === 'done' ? 'turn.completed' : 'unknown',
     payloadVersion: 1,
     rawPayload: { update: { sessionUpdate, ...fields } },
   }
@@ -89,6 +92,43 @@ describe('Agent Workbench canonical session runtime', () => {
     expect(service.runtime.getSnapshot().document?.plan.entries).toEqual([
       expect.objectContaining({ id: 'task-1', content: '接通生产计划', status: 'blocked', blockedReason: '等待输入' }),
     ])
+    service.destroy()
+  })
+
+  it('生产 journal 重建会折叠用户双写、聚合 chunk、settle 终态，重复 bind 不累积', async () => {
+    const rows = [
+      {
+        ...canonicalRow(1, 'user_message_chunk', {
+          content: { type: 'text', text: 'one prompt' },
+          _meta: { pylonOptimisticUser: true, requestId: 'client-1' },
+        }),
+        provenance: { origin: 'migration', trust: 'unverified', provider: 'peri' },
+      },
+      {
+        ...canonicalRow(2, 'user_message_chunk', { content: { type: 'text', text: 'one prompt' } }),
+        provenance: { origin: 'local-observed', trust: 'authoritative', provider: 'peri' },
+      },
+      canonicalRow(3, 'agent_thought_chunk', { content: { type: 'text', text: 'think-' } }),
+      canonicalRow(4, 'agent_thought_chunk', { content: { type: 'text', text: 'together' } }),
+      canonicalRow(5, 'agent_message_chunk', { content: { type: 'text', text: 'answer-' } }),
+      canonicalRow(6, 'agent_message_chunk', { content: { type: 'text', text: 'together' } }),
+      canonicalRow(7, 'done'),
+    ]
+    const service = createAgentWorkbenchSessionRuntime({
+      loadAll: async () => rows,
+      subscribe: () => () => {},
+    })
+
+    for (let index = 0; index < 3; index += 1) {
+      await service.bind(session())
+      expect(service.runtime.getSnapshot().document?.messages.map(message => ({
+        role: message.role, content: message.content, running: message.running,
+      }))).toEqual([
+        { role: 'user', content: 'one prompt', running: false },
+        { role: 'reasoning', content: 'think-together', running: false },
+        { role: 'assistant', content: 'answer-together', running: false },
+      ])
+    }
     service.destroy()
   })
 

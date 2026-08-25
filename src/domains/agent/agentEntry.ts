@@ -20,3 +20,9 @@ export interface AgentEntry {
   toolOverlay?: unknown
   tools?: unknown
 }
+
+/** Embedded 示例中的 `<...>` 仅是安装占位符，不能被当作可启动命令。 */
+export function isAgentInvocationConfigured(agent: Pick<AgentEntry, 'exe'> | undefined): boolean {
+  const executable = agent?.exe?.trim() ?? ''
+  return executable.length > 0 && !/^<[^>]+>$/.test(executable)
+}

@@ -41,7 +41,7 @@ describe('Agent Workbench production commands', () => {
       text: 'hello',
       attachments: [{ id: 'a', path: 'G:/note.md' }],
     })).resolves.toEqual({ status: 'sent', messageId: 'client-1' })
-    expect(optimistic).toHaveBeenCalledWith('local:a', 'hello', 'client-1')
+    expect(optimistic).toHaveBeenCalledWith('local:a', 'hello', 'client-1', { persistCanonical: false })
     expect(sendMessage).toHaveBeenCalledWith({
       agentId: 'peri', profileId: 'profile-a', source: 'local:a', content: 'hello',
       persona: 'profile persona', sessionPrompt: 'profile persona\n\nsession rules', attachments: ['G:/note.md'],

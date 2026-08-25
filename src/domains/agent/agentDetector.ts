@@ -25,9 +25,6 @@ export interface AgentRuntimeCandidate {
   name: string
   executable: string
   args: string[]
-  cwd?: string
-  env?: Record<string, string>
-  configHints?: Record<string, string>
   evidence: AgentDetectionEvidence[]
   identityConfidence: AgentIdentityConfidence
   protocolAvailability: AgentProtocolAvailability

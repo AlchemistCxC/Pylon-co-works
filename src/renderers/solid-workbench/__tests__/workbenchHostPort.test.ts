@@ -45,6 +45,31 @@ describe('WorkbenchHostPort', () => {
     source.destroy()
   })
 
+  it('derives a wall-clock generation start from the running document instead of epoch zero', () => {
+    const source = runtime()
+    const occurredAt = '2026-08-25T02:00:00.000Z'
+    source.applyDocument(projectWorkbench([
+      createWorkbenchEnvelope({
+        sessionId: 's1', sequence: 1, recordedAt: occurredAt, occurredAt,
+        source: { provider: 'peri', sourceId: 'wire-1' }, identity: {},
+        provenance: { origin: 'local-observed', trust: 'authoritative' },
+        event: { type: 'message.delta', role: 'user', parts: [{ kind: 'text', text: 'hello' }] },
+      }),
+    ]).document)
+    const host = createWorkbenchHostPort({
+      runtime: source,
+      appearance: createStaticWorkbenchAppearanceStore(structuredClone(DEFAULTS)),
+      sessionUi: createSessionUiStore(), commands: createFakeWorkbenchCommandFacade(),
+      suiteId: 'builtin.solid', sheetId: 'sheet-1', sessionOwnerKey: 'owner-1', sessionId: 's1',
+    })
+    const services = createSolidWorkbenchServicesFromHostPort(host)
+    expect(services.runtime.getSnapshot()).toMatchObject({
+      generating: true,
+      generationStart: Date.parse(occurredAt),
+      lastTokenAt: Date.parse(occurredAt),
+    })
+  })
+
   it('namespaces session UI by suite, sheet and session owner', () => {
     const store = createSessionUiStore()
     const base = { runtime: runtime(), appearance: createStaticWorkbenchAppearanceStore(structuredClone(DEFAULTS)), sessionUi: store, commands: createFakeWorkbenchCommandFacade(), sessionId: 's1' }

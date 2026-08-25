@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import { BUILTIN_PRESENTATION_PROFILES } from '../builtinPresentationProfiles.ts'
+import { validatePresentationProfile } from '../../../../plugin-runtime/presentation/presentationProfileRegistry.ts'
 
 const TERMINAL_CLASSIC_SNAPSHOT = {
   id: 'builtin.presentation.terminal-classic',
@@ -24,6 +25,12 @@ const COMPLETE_SURFACE_TOKENS = [
 ] as const
 
 describe('built-in terminal-like presentation profiles', () => {
+  it('所有内置预设均可通过生产 PresentationProfileRegistry 校验', () => {
+    for (const profile of BUILTIN_PRESENTATION_PROFILES) {
+      expect(() => validatePresentationProfile(profile), profile.id).not.toThrow()
+    }
+  })
+
   it('冻结 terminal-classic 的完整定义，防止其他 Profile 施工改变经典终端', () => {
     expect(BUILTIN_PRESENTATION_PROFILES.find(profile => profile.id === 'builtin.presentation.terminal-classic')).toEqual(TERMINAL_CLASSIC_SNAPSHOT)
   })
@@ -43,5 +50,15 @@ describe('built-in terminal-like presentation profiles', () => {
     const profile = BUILTIN_PRESENTATION_PROFILES.find(candidate => candidate.id === profileId)
     expect(profile).toBeDefined()
     for (const token of COMPLETE_SURFACE_TOKENS) expect(profile?.tokens).toHaveProperty(token)
+  })
+
+  it.each([
+    ['builtin.presentation.agent-command', 'content.plan', { density: 'compact', defaultExpanded: true }],
+    ['builtin.presentation.agent-map', 'activity.subagent', { viewMode: 'tree', identityMarker: 'avatar' }],
+    ['builtin.presentation.focus-flow', 'activity.workflow', { workflowLayout: 'list', collapseCompleted: true }],
+  ])('%s 提供可由 Solid renderer 消费的执行视图预设', (profileId, kind, expected) => {
+    const profile = BUILTIN_PRESENTATION_PROFILES.find(candidate => candidate.id === profileId)
+    expect(profile).toBeDefined()
+    expect(profile?.kindTokens?.[kind]).toMatchObject(expected)
   })
 })

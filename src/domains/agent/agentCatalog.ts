@@ -176,4 +176,13 @@ export const builtinAgentCatalog = Object.freeze({
   providers(): readonly string[] {
     return catalog.providers.map(entry => entry.provider)
   },
+  matchExecutable(path: string): { provider: string; displayName: string; args: string[] } | null {
+    const command = path.trim().split(/[\\/]/).pop()?.replace(/\.(?:exe|cmd|bat)$/i, '').toLowerCase()
+    if (!command) return null
+    for (const entry of catalog.providers) {
+      const invocation = entry.detection.invocations.find(candidate => candidate.command.toLowerCase() === command)
+      if (invocation) return { provider: entry.provider, displayName: entry.displayName, args: [...invocation.args] }
+    }
+    return null
+  },
 })

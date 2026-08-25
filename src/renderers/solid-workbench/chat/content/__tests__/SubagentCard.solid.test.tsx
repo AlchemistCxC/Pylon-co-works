@@ -28,6 +28,10 @@ describe('C09 SolidSubagentCard', () => {
     expect(result.container.textContent).toContain('parent: tool-1')
     expect(result.container.textContent).toContain('find call sites')
     expect(result.container.textContent).toContain('进度 3/5')
+    expect(result.getByRole('progressbar', { name: 'Explore repo 进度' })).toHaveAttribute('value', '3')
+    expect(result.getByRole('progressbar', { name: 'Explore repo 进度' })).toHaveAttribute('max', '5')
+    expect(result.container.querySelector('.term-subagent-kind')).toHaveTextContent('子代理')
+    expect(result.container.querySelector('.term-activity-status')).toHaveAttribute('data-status', 'running')
     expect(result.container.textContent).toContain('1200 in · 340 out')
     expect(result.container.textContent).toContain('1 个文件')
     const card = result.container.querySelector('.term-subagent-card') as HTMLElement

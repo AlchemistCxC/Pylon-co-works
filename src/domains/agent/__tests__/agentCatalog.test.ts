@@ -17,6 +17,16 @@ describe('Shared Agent Catalog', () => {
     ])
   })
 
+  it('manual executable selection reuses catalog provider and ACP arguments', () => {
+    expect(builtinAgentCatalog.matchExecutable('C:\\Agents\\peri.exe')).toEqual({
+      provider: 'peri', displayName: 'Peri', args: ['acp'],
+    })
+    expect(builtinAgentCatalog.matchExecutable('C:\\Users\\me\\bin\\hermes-acp.cmd')).toEqual({
+      provider: 'hermes', displayName: 'Hermes', args: [],
+    })
+    expect(builtinAgentCatalog.matchExecutable('C:\\Agents\\unknown.exe')).toBeNull()
+  })
+
   it('covers Claude canonical task/goal/MCP/skill/memory tools with aliases and capabilities', () => {
     const claudeTools = new Map(
       builtinAgentCatalog.tools()

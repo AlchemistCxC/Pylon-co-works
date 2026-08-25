@@ -11,7 +11,6 @@ use std::process::Stdio;
 use std::time::{Duration, Instant};
 use tokio::io::{AsyncRead, AsyncReadExt};
 
-const MAX_SEARCH_ROOTS_PER_DETECTOR: usize = 16;
 const MAX_PACKAGE_MANAGER_CHILDREN: usize = 64;
 
 #[derive(Debug, Clone, Serialize, PartialEq, Eq)]
@@ -324,10 +323,8 @@ struct LocatedRuntime {
 fn find_rule(
     rule: &AgentDetectionProfile,
     search_roots: Option<&[PathBuf]>,
-) -> (Vec<LocatedRuntime>, bool) {
-    let mut path_roots = controlled_roots(search_roots);
-    let truncated = path_roots.len() > MAX_SEARCH_ROOTS_PER_DETECTOR;
-    path_roots.truncate(MAX_SEARCH_ROOTS_PER_DETECTOR);
+) -> Vec<LocatedRuntime> {
+    let path_roots = controlled_roots(search_roots);
     let include_platform_roots = search_roots.is_none();
     let mut found = Vec::new();
     let mut seen = HashSet::new();
@@ -395,7 +392,7 @@ fn find_rule(
             });
         }
     }
-    (found, truncated)
+    found
 }
 
 pub fn configured_executable_key(executable: &str) -> String {
@@ -840,20 +837,8 @@ pub async fn detect_agent_runtime_candidates_inner(
         scan_budget,
         tokio::task::spawn_blocking(move || {
             let mut discovered = Vec::new();
-            let mut scan_diagnostics = Vec::new();
             for rule in selected_rules {
-                let (located, roots_truncated) = find_rule(&rule, search_roots.as_deref());
-                if roots_truncated {
-                    scan_diagnostics.push(AgentDetectionDiagnostic {
-                        code: "scan_root_limit_reached".into(),
-                        stage: "scan".into(),
-                        detector_id: Some(rule.detector_id.clone()),
-                        message: format!(
-                            "Agent detector 搜索根目录超过上限 {MAX_SEARCH_ROOTS_PER_DETECTOR}，已截断"
-                        ),
-                        retryable: false,
-                    });
-                }
+                let located = find_rule(&rule, search_roots.as_deref());
                 let config = config_evidence(&rule, home_dir.as_deref());
                 discovered.extend(
                     located
@@ -861,11 +846,11 @@ pub async fn detect_agent_runtime_candidates_inner(
                         .map(|located| (rule.clone(), located, config.clone())),
                 );
             }
-            (discovered, scan_diagnostics)
+            discovered
         }),
     )
     .await;
-    let (mut discovered, scan_diagnostics) = match scanned {
+    let mut discovered = match scanned {
         Ok(Ok(result)) => result,
         Ok(Err(error)) => return Err(format!("Agent detection scan task failed: {error}")),
         Err(_) => {
@@ -884,10 +869,6 @@ pub async fn detect_agent_runtime_candidates_inner(
             });
         }
     };
-    let scan_truncated = scan_diagnostics
-        .iter()
-        .any(|diagnostic| diagnostic.code == "scan_root_limit_reached");
-    diagnostics.extend(scan_diagnostics);
     discovered.sort_by(|left, right| {
         let left_config = left
             .2
@@ -1053,7 +1034,7 @@ pub async fn detect_agent_runtime_candidates_inner(
         candidates,
         diagnostics,
         elapsed_ms: started.elapsed().as_millis().min(u128::from(u64::MAX)) as u64,
-        truncated: scan_truncated || discovered_truncated || candidates_truncated,
+        truncated: discovered_truncated || candidates_truncated,
     })
 }
 
@@ -1203,9 +1184,8 @@ mod tests {
             .find(|rule| rule.provider == "hermes")
             .unwrap();
 
-        let (found, truncated) = find_rule(&rule, Some(std::slice::from_ref(&root)));
+        let found = find_rule(&rule, Some(std::slice::from_ref(&root)));
 
-        assert!(!truncated);
         assert_eq!(found.len(), 2, "首个 alias 不得遮蔽后续已安装 alias");
         assert_eq!(found[0].args, ["acp"]);
         assert!(found[1].args.is_empty());
@@ -1327,7 +1307,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn excessive_search_roots_are_capped_with_a_visible_diagnostic() {
+    async fn exact_name_lookup_reaches_search_roots_after_the_sixteenth_entry() {
         let root = fixture_root("root-limit");
         let roots = (0..17)
             .map(|index| root.join(format!("bin-{index}")))
@@ -1335,12 +1315,12 @@ mod tests {
         for path in &roots {
             std::fs::create_dir_all(path).unwrap();
         }
-        std::fs::write(roots[0].join(&executable_names("peri")[0]), b"fixture").unwrap();
+        std::fs::write(roots[16].join(&executable_names("peri")[0]), b"fixture").unwrap();
 
         let report = detect_agent_runtime_candidates(AgentDetectionOptions {
             detector_ids: Some(vec!["builtin.detector.peri".into()]),
             home_dir: Some(root.join("home")),
-            search_roots: Some(roots),
+            search_roots: Some(roots.clone()),
             limits: AgentDetectionLimits {
                 version_probe_budget: Duration::from_millis(50),
                 ..AgentDetectionLimits::default()
@@ -1349,11 +1329,12 @@ mod tests {
         .await
         .unwrap();
 
-        assert!(report
-            .diagnostics
-            .iter()
-            .any(|diagnostic| diagnostic.code == "scan_root_limit_reached"));
-        assert!(report.truncated, "扫描范围被截断时 report 必须声明不完整");
+        assert_eq!(report.candidates.len(), 1, "PATH 后段的精确命令名也必须被发现");
+        assert_eq!(
+            Path::new(&report.candidates[0].executable),
+            roots[16].join(&executable_names("peri")[0]),
+        );
+        assert!(!report.truncated, "精确文件名检查不应被搜索目录数量截断");
         std::fs::remove_dir_all(root).unwrap();
     }
 

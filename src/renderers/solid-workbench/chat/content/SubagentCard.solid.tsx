@@ -62,6 +62,8 @@ export function SolidSubagentCard(props: {
       .filter(Boolean).join(' · ')
   }
   const progress = () => props.activity.progress as { completed?: number; total?: number } | undefined
+  const progressCompleted = () => nonNegativeNumber(progress()?.completed) ?? 0
+  const progressTotal = () => Math.max(1, nonNegativeNumber(progress()?.total) ?? 1)
   const metricsSummary = () => {
     const metrics = isRecord(props.activity.metrics) ? props.activity.metrics : undefined
     const toolCount = finiteNumber(metrics?.toolCount)
@@ -121,6 +123,7 @@ export function SolidSubagentCard(props: {
       }}
       data-density={compact()}
       data-reduced-motion={props.appearance?.reducedMotion === true ? 'true' : 'false'}
+      data-active={['starting', 'running'].includes(props.activity.status) ? 'true' : 'false'}
       tabIndex={0}
       onKeyDown={handleActivityCardKeyDown}
       role="status"
@@ -128,8 +131,9 @@ export function SolidSubagentCard(props: {
     >
       <header class="term-subagent-head">
         <Show when={marker()}>{value => <span class="term-subagent-marker" aria-hidden="true">{value()}</span>}</Show>
+        <span class="term-subagent-kind">{subagentKindLabel(props.activity.activityKind)}</span>
         <strong class="term-subagent-title">{props.activity.title ?? props.activity.id}</strong>
-        <span>{props.activity.status}</span>
+        <span class="term-activity-status" data-status={props.activity.status}>{props.activity.status}</span>
         <Show when={showIdentity() && props.activity.role}>
           <span class="term-subagent-meta">{props.activity.role}</span>
         </Show>
@@ -150,8 +154,10 @@ export function SolidSubagentCard(props: {
         {execution => <small class="term-subagent-meta">{execution()}</small>}
       </Show>
       <Show when={statsEnabled('progress') && (progress()?.total !== undefined || progress()?.completed !== undefined)}>
-        <div class="term-subagent-stats">
-          进度 {progress()?.completed ?? 0}/{progress()?.total ?? '?'}
+        <div class="term-subagent-progress-row">
+          <progress aria-label={`${props.activity.title ?? props.activity.id} 进度`}
+            value={progressCompleted()} max={progressTotal()} />
+          <span>进度 {progress()?.completed ?? 0}/{progress()?.total ?? '?'}</span>
         </div>
       </Show>
       <Show when={showAggregate() && (usage() || fileSummary() || metricsSummary())}>
@@ -244,6 +250,14 @@ function nonEmptyString(value: unknown): string | undefined {
 
 function finiteNumber(value: unknown): number | undefined {
   return typeof value === 'number' && Number.isFinite(value) ? value : undefined
+}
+
+function nonNegativeNumber(value: unknown): number | undefined {
+  return typeof value === 'number' && Number.isFinite(value) && value >= 0 ? value : undefined
+}
+
+function subagentKindLabel(kind: WorkbenchActivityNode['activityKind']): string {
+  return kind === 'delegation' ? '委派' : kind === 'team' ? '团队' : '子代理'
 }
 
 function boundedNumber(value: unknown, min: number, max: number, fallback: number): number {

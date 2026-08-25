@@ -26,6 +26,8 @@ describe('C10 workflow activity rendering', () => {
     expect(card.getAttribute('role')).toBe('status')
     expect(result.getByRole('progressbar', { name: 'build 进度' })).toHaveAttribute('value', '2')
     expect(result.getByRole('progressbar', { name: 'build 进度' })).toHaveAttribute('max', '4')
+    expect(result.container.querySelector('.term-workflow-kind')).toHaveTextContent('阶段')
+    expect(result.container.querySelector('.term-activity-status')).toHaveAttribute('data-status', 'running')
   })
 
   it('marks synthetic terminal provenance on a workflow agent', () => {

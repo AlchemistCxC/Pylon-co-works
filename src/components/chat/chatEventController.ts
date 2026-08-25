@@ -52,7 +52,7 @@ export interface ChatControllerHandle {
   requestCancel: (source: string) => void
   /** 乐观渲染（方案 B）：发送即把用户消息写入 Chat runtime 并启动生成态；
    * 返回 clientMsgId 供去重。InputBar 发送时先调本方法再发 IPC。 */
-  sendOptimisticUser: (source: string, content: string, clientMsgId: string) => void
+  sendOptimisticUser: (source: string, content: string, clientMsgId: string, options?: { persistCanonical?: boolean }) => void
   /** 后端 pylon:user 到达：按 clientMsgId 确认乐观消息（去重）。 */
   confirmUser: (source: string, clientMsgId: string) => void
   /** 开始 source-scoped load，返回单调 generation。 */
@@ -1376,7 +1376,7 @@ export function attachChatEventController(refs: ChatEventControllerRefs): ChatCo
   const handle: ChatControllerHandle = {
     retryListeners,
     requestCancel,
-    sendOptimisticUser: (source, content, clientMsgId) => {
+    sendOptimisticUser: (source, content, clientMsgId, options) => {
       if (!isActiveSource(source)) return
       // 乐观渲染也立即自动命名（与 pylon:user 确认点一致），首条消息即命名
       const store = useIdentityStore.getState()
@@ -1389,7 +1389,7 @@ export function attachChatEventController(refs: ChatEventControllerRefs): ChatCo
       const alreadyOptimistic = runtimeAt(source)?.messages.some(
         m => m.role === 'user' && m.clientMsgId === clientMsgId,
       ) ?? false
-      if (!alreadyOptimistic) {
+      if (!alreadyOptimistic && options?.persistCanonical !== false) {
         const optimisticContext = resolveContext(source)
         // The optimistic row is durable even in Tauri.  The kernel may commit its own user echo
         // later; projection removes the temporary marker when that canonical row arrives.

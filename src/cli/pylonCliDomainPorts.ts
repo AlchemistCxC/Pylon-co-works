@@ -21,6 +21,7 @@ import { stripHiddenUnicode } from '../utils/unicodeSanitizer.ts'
 import type { AgentControlPort, ApprovalControlPort, InteractionControlPort, InteractionItem, SessionConfigControlPort, SessionControlPort, WorkspaceRegistryControlPort } from './pylonCliService.ts'
 import { runSessionPreflight } from '../plugins/core/sessionCreation/sessionPreflight.ts'
 import { collectProfilePersona } from '../plugins/core/sessionCreation/builtinSessionCreation.ts'
+import { provisionAgentTransaction } from '../application/transactions/provisionAgentTransaction.ts'
 
 const transport = { invoke: (command: string, args?: unknown) => invoke(command, args as Record<string, unknown> | undefined) }
 const agentClient = createAgentClient(transport)
@@ -96,28 +97,51 @@ export function createCliAgentControlPort(): AgentControlPort {
       const candidate = matches[0]
       const requestedId = input.agentId?.trim()
       const agentId = requestedId || uniqueAgentId(candidate.suggestedAgentId, agents)
-      if (!/^[A-Za-z0-9._-]+$/.test(agentId)) throw new Error(`Agent id 仅允许字母、数字、点、下划线和连字符：${agentId}`)
+      if (!/^[A-Za-z0-9][A-Za-z0-9._-]*$/.test(agentId)) throw new Error(`Agent id 必须以字母或数字开头，且仅允许字母、数字、点、下划线和连字符：${agentId}`)
       if (agents.some(agent => agent.id === agentId)) throw new Error(`Agent id 已存在：${agentId}`)
-      const validation = await agentClient.testAgentCandidate(agentId, {
+      const config = candidateConfig(candidate, agents.length === 0)
+      const provisioned = await provisionAgentTransaction({
+        candidateId: candidate.candidateId,
+        agentId,
         name: candidate.name,
         provider: candidate.provider,
-        transport: 'subprocess',
-        exe: candidate.executable,
-        args: candidate.args,
-      })
-      if (!validation.ok) throw new Error(validation.error?.message || `Agent 候选验证失败：${candidate.candidateId}`)
-      throwIfAborted(signal)
-      const config = candidateConfig(candidate, agents.length === 0)
-      try {
-        await agentClient.createAgent(agentId, config)
-      } catch (error) {
-        if (wireErrorCode(error) !== 'config_read_only') throw error
-        await agentClient.initializeAgentsConfig(agentId, agentsDocument(agentId, config))
+        executable: candidate.executable,
+        args: [...candidate.args],
+      }, {
+        validate: async () => {
+          throwIfAborted(signal)
+          const validation = await agentClient.testAgentCandidate(agentId, {
+            name: candidate.name,
+            provider: candidate.provider,
+            transport: 'subprocess',
+            exe: candidate.executable,
+            args: candidate.args,
+          })
+          throwIfAborted(signal)
+          return validation
+        },
+        persist: async () => {
+          throwIfAborted(signal)
+          try {
+            await agentClient.createAgent(agentId, config)
+          } catch (error) {
+            if (wireErrorCode(error) !== 'config_read_only') throw error
+            await agentClient.initializeAgentsConfig(agentId, agentsDocument(agentId, config))
+          }
+          throwIfAborted(signal)
+        },
+        refreshAgents: async () => {
+          const refreshed = await agentClient.listAgents()
+          throwIfAborted(signal)
+          return refreshed
+        },
+        applyAgents: refreshed => useIdentityStore.getState().setAgents(refreshed),
+        activate: async () => true,
+      }, { activate: false })
+      if (provisioned.kind === 'validation-failed') {
+        throw new Error(provisioned.validation.error?.message || `Agent 候选验证失败：${candidate.candidateId}`)
       }
-      throwIfAborted(signal)
-      const refreshed = await agentClient.listAgents()
-      useIdentityStore.getState().setAgents(refreshed)
-      return { agentId, candidateId: candidate.candidateId, validation }
+      return { agentId, candidateId: candidate.candidateId, validation: provisioned.validation }
     },
     async setDefault(agentId, { signal }) {
       throwIfAborted(signal)

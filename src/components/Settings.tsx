@@ -18,6 +18,7 @@ import { deriveGlobalStatus, deriveZoneStatus } from '../domains/theme/presetRed
 import SettingsPreview from './SettingsPreview'
 import { reportRuntimeError } from '../runtimeError'
 import { switchAgentTransaction } from '../application/transactions/switchAgentTransaction'
+import { applyGlobalPreset as applyGlobalPresetTransaction } from '../application/transactions/applyGlobalPreset.ts'
 import { normalizeAgentStatus, selectAgentStatus, statusLabel } from './settings/agentTypes'
 import { runReconnectCommand } from './settings/reconnectCommand'
 import AgentRuntimePanel from './settings/AgentRuntimePanel'
@@ -92,7 +93,6 @@ export default function Settings({ onClose, activeSessionId, initialDomain, init
   } as ThemeSettings & { ccEditMode: boolean })))
   const reset = useStore(s => s.resetTheme)
   const resetZone = useStore(s => s.resetZone)
-  const setGlobalPreset = useStore(s => s.setGlobalPreset)
   const setZoneField = useStore(s => s.setZoneField)
   const setCcEditMode = useStore(s => s.setCcEditMode)
   const applyZonePreset = useStore(s => s.applyZonePreset)
@@ -161,9 +161,7 @@ export default function Settings({ onClose, activeSessionId, initialDomain, init
   }, [])
   // 应用全局预设
   const applyGlobalPreset = (name: string) => {
-    const preset = GLOBAL_PRESETS.find(p => p.name === name)
-    if (!preset) return
-    setGlobalPreset(name, preset.theme)
+    applyGlobalPresetTransaction(name)
   }
 
   // 改单个字段 — 标记当前 section 对应的 zone 为 custom（非主题 section 回退 global）

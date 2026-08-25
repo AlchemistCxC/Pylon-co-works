@@ -16,6 +16,7 @@ import { statusLabel } from '../components/settings/agentTypes.ts'
 import { recentPersistedSessions, type PersistedSessionSummary } from '../domains/overview/persistedSessions.ts'
 import type { SheetContext, SheetRecord } from '../workspace-sheets/sheetTypes'
 import { useWorkspaceEntityStore } from '../workspaceEntityStore.ts'
+import { isAgentInvocationConfigured } from '../domains/agent/agentEntry.ts'
 
 function relativeTime(timestamp: number): string {
   const elapsed = Math.max(0, Date.now() - timestamp)
@@ -148,6 +149,7 @@ export default function OverviewSheetView({ ctx }: { sheet: SheetRecord; ctx: Sh
   )
   const connectedCount = agents.filter(agent => agentStatuses[agent.id]?.status === 'connected').length
   const activeAgentEntry = agents.find(agent => agent.id === activeAgent)
+  const activeAgentConfigured = isAgentInvocationConfigured(activeAgentEntry)
 
   const openAgentSettings = () => window.dispatchEvent(new CustomEvent('pylon:open-settings', {
     detail: { domain: 'agents-connections', section: 'agent', agentId: activeAgent },
@@ -200,11 +202,15 @@ export default function OverviewSheetView({ ctx }: { sheet: SheetRecord; ctx: Sh
                   <button type="button" className="overview-primary-action" onClick={() => void openKnownSession(localRecent[0])}>
                     继续「{localRecent[0].name}」 <ArrowUpRight size={15} aria-hidden="true" />
                   </button>
-                ) : activeAgentEntry ? (
+                ) : activeAgentEntry && activeAgentConfigured ? (
                   <button type="button" className="overview-primary-action" onClick={() => void selectAgent(activeAgentEntry)}>
                     打开 {activeAgentEntry.name} <ArrowUpRight size={15} aria-hidden="true" />
                   </button>
-                ) : null}
+                ) : (
+                  <button type="button" className="overview-primary-action" onClick={openAgentSettings}>
+                    配置 Agent <ArrowUpRight size={15} aria-hidden="true" />
+                  </button>
+                )}
                 <button type="button" className="overview-secondary-action" onClick={openAgentSettings}>
                   <Settings2 size={14} aria-hidden="true" /> Agent 设置
                 </button>

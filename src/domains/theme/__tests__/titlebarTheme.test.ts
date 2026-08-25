@@ -25,8 +25,8 @@ describe('TitleBar 主题契约', () => {
     expect(fallback['--titlebar-text']).toBeUndefined()
   })
 
-  it('六套全局预设都显式定义协调的 TitleBar 背景与文字颜色', () => {
-    expect(GLOBAL_PRESETS).toHaveLength(6)
+  it('所有全局预设都显式定义协调的 TitleBar 背景与文字颜色', () => {
+    expect(GLOBAL_PRESETS).toHaveLength(9)
     for (const preset of GLOBAL_PRESETS) {
       expect(preset.theme.titlebarBg, `${preset.name}.titlebarBg`).toBeTruthy()
       expect(preset.theme.titlebarTextColor, `${preset.name}.titlebarTextColor`).toBeTruthy()

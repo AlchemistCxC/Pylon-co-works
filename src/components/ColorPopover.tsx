@@ -12,9 +12,11 @@ interface Props {
   chips?: boolean
   /** 字段级候选色；插件设置选项贡献不修改全局色板。 */
   palette?: readonly { value: string; label?: string; disabled?: boolean }[]
+  /** 字段语义标签（渲染器设置按字段命名触发按钮，供 label 关联与读屏）。 */
+  ariaLabel?: string
 }
 
-export default function ColorPopover({ value, onChange, chips = true, palette }: Props) {
+export default function ColorPopover({ value, onChange, chips = true, palette, ariaLabel }: Props) {
   const [open, setOpen] = useState(false)
   const pickerRef = useRef<HTMLInputElement>(null)
   const choices: readonly { value: string; label?: string; disabled?: boolean }[] = palette
@@ -23,7 +25,7 @@ export default function ColorPopover({ value, onChange, chips = true, palette }:
   if (!chips) {
     return (
       <>
-        <button type="button" className="set-swatch" aria-label="选择颜色" style={{ background: value || 'transparent' }} onClick={() => pickerRef.current?.click()} />
+        <button type="button" className="set-swatch" aria-label={ariaLabel ?? "选择颜色"} style={{ background: value || 'transparent' }} onClick={() => pickerRef.current?.click()} />
         <input ref={pickerRef} type="color" value={value || '#000000'} onChange={e => onChange(e.target.value)} className="set-swatch-input" />
       </>
     )
@@ -31,7 +33,7 @@ export default function ColorPopover({ value, onChange, chips = true, palette }:
 
   return (
     <div className="set-color-wrap">
-      <button type="button" className="set-swatch" aria-label="打开颜色选择器" aria-expanded={open} style={{ background: value || 'transparent' }} onClick={() => setOpen(!open)} />
+      <button type="button" className="set-swatch" aria-label={ariaLabel ?? "打开颜色选择器"} aria-expanded={open} style={{ background: value || 'transparent' }} onClick={() => setOpen(!open)} />
       {open && <>
         <div className="set-color-popover">
           <div className="set-color-row">

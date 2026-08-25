@@ -22,6 +22,7 @@ function canonicalRowToWorkbench(row: unknown): readonly WorkbenchEventEnvelope[
   if (validateCanonicalEvent(row).length > 0) return []
   const event = row as CanonicalConversationEvent
   const provider = event.provenance?.provider ?? event.owner.agentId
+  const optimistic = isOptimisticUserEvent(event.rawPayload)
   const normalized = normalizeAgentEvent(event.rawPayload, {
     provider,
     sessionId: event.owner.localSessionId,
@@ -30,13 +31,26 @@ function canonicalRowToWorkbench(row: unknown): readonly WorkbenchEventEnvelope[
     recordedAt: event.receivedAt,
     occurredAt: event.occurredAt,
     agentId: event.owner.agentId,
-    provenance: event.provenance ?? { origin: 'migration', trust: 'unverified', provider },
+    provenance: optimistic
+      ? { origin: 'optimistic-local', trust: 'unverified', provider }
+      : event.provenance ?? { origin: 'migration', trust: 'unverified', provider },
   })
   return normalized.events.map(envelope => Object.freeze({
     ...envelope,
     eventId: normalized.events.length === 1 ? event.eventId : envelope.eventId,
     identity: Object.freeze({ ...event.identity, ...envelope.identity }),
   }))
+}
+
+function isOptimisticUserEvent(raw: unknown): boolean {
+  if (!raw || typeof raw !== 'object') return false
+  const envelope = raw as Record<string, unknown>
+  const params = envelope.params && typeof envelope.params === 'object' ? envelope.params as Record<string, unknown> : undefined
+  const updateValue = envelope.update ?? params?.update
+  if (!updateValue || typeof updateValue !== 'object') return false
+  const update = updateValue as Record<string, unknown>
+  const meta = update._meta && typeof update._meta === 'object' ? update._meta as Record<string, unknown> : undefined
+  return update.sessionUpdate === 'user_message_chunk' && meta?.pylonOptimisticUser === true
 }
 
 function toWorkbenchEnvelopes(value: unknown): readonly WorkbenchEventEnvelope[] {

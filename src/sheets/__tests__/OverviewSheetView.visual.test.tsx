@@ -62,4 +62,19 @@ describe('Overview visual workbench', () => {
     })
     window.removeEventListener('pylon:open-settings', listener)
   })
+
+  it('内置占位路径不冒充可用 Agent，空工作台优先进入配置', () => {
+    useIdentityStore.setState({
+      sessions: [],
+      agents: [{ id: 'peri', name: 'Peri', provider: 'peri', exe: '<PERI_EXE_PATH>', default: true }],
+    })
+    const listener = vi.fn()
+    window.addEventListener('pylon:open-settings', listener)
+    render(<OverviewSheetView sheet={sheet} ctx={{} as SheetContext} />)
+
+    expect(screen.queryByRole('button', { name: /打开 Peri/ })).not.toBeInTheDocument()
+    fireEvent.click(screen.getByRole('button', { name: /配置 Agent/ }))
+    expect(listener).toHaveBeenCalledOnce()
+    window.removeEventListener('pylon:open-settings', listener)
+  })
 })

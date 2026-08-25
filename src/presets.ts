@@ -19,12 +19,23 @@ export { ZONE_FIELDS }
 
 // ── 预设定义 ─────────────────────────────────────────────────────
 
-export type PresetName = 'claude' | 'glass' | 'nord' | 'tokyo' | 'solarized' | 'amber'
+export type PresetName =
+  | 'claude'
+  | 'glass'
+  | 'nord'
+  | 'tokyo'
+  | 'solarized'
+  | 'amber'
+  | 'agent-command'
+  | 'agent-map'
+  | 'focus-flow'
 
 export interface GlobalPreset {
   name: PresetName
   label: string
   theme: Partial<ThemeSettings>
+  /** 可选的聊天呈现方案；应用全局预设时与主题一起激活。 */
+  presentationProfileId?: string
 }
 
 export const GLOBAL_PRESETS: GlobalPreset[] = [
@@ -541,6 +552,141 @@ export const GLOBAL_PRESETS: GlobalPreset[] = [
       userPrefix: ">",
       userTagBg: "#2b1900",
       userTagText: "#ffcc55",
+    },
+  },
+  {
+    name: 'agent-command',
+    label: 'Agent 指挥台',
+    presentationProfileId: 'builtin.presentation.agent-command',
+    theme: {
+      accent: '#38bdf8',
+      globalBgColor: '#08111f',
+      globalFont: 'system',
+      globalFontSize: 15,
+      titlebarBg: '#0b1424',
+      titlebarTextColor: '#dbeafe',
+      sidebarBg: '#0b1424',
+      sidebarTextColor: '#a8bdd6',
+      sidebarNameSize: 13,
+      chatBg: '#08111f',
+      chatTextColor: '#dbeafe',
+      chatCodeBg: 'rgba(56,189,248,0.07)',
+      chatCodeColor: '#7dd3fc',
+      messageLayout: 'bubble',
+      msgLineHeight: 1.62,
+      ccBg: '#0d192b',
+      ccHeight: 96,
+      ccBgHeight: 96,
+      ccStyle: 'bar',
+      inputBg: 'rgba(148,163,184,0.09)',
+      inputTextColor: '#e0f2fe',
+      inputPlaceholder: '#647d99',
+      inputFocusBorder: 'rgba(56,189,248,0.72)',
+      rightBg: '#0b1424',
+      userColor: '#38bdf8',
+      userTagBg: 'rgba(56,189,248,0.12)',
+      userTagText: '#7dd3fc',
+      spinnerColor: '#38bdf8',
+      toolOk: '#4ade80',
+      toolRun: '#38bdf8',
+      toolErr: '#fb7185',
+      toolConnectorColor: '#294764',
+      diffAdded: '#4ade80',
+      diffRemoved: '#fb7185',
+      diffAddedWord: '#86efac',
+      diffRemovedWord: '#fda4af',
+      uiScheme: 'dark',
+      transparency: 1,
+    },
+  },
+  {
+    name: 'agent-map',
+    label: 'Agent 关系图',
+    presentationProfileId: 'builtin.presentation.agent-map',
+    theme: {
+      accent: '#a78bfa',
+      globalBgColor: '#11101d',
+      globalFont: 'system',
+      globalFontSize: 15,
+      titlebarBg: '#171526',
+      titlebarTextColor: '#ede9fe',
+      sidebarBg: '#171526',
+      sidebarTextColor: '#c4b5d9',
+      sidebarNameSize: 13,
+      chatBg: '#11101d',
+      chatTextColor: '#ede9fe',
+      chatCodeBg: 'rgba(167,139,250,0.08)',
+      chatCodeColor: '#c4b5fd',
+      messageLayout: 'bubble',
+      msgLineHeight: 1.68,
+      ccBg: '#1a172b',
+      ccHeight: 96,
+      ccBgHeight: 96,
+      ccStyle: 'bar',
+      inputBg: 'rgba(167,139,250,0.08)',
+      inputTextColor: '#f5f3ff',
+      inputPlaceholder: '#766c91',
+      inputFocusBorder: 'rgba(167,139,250,0.72)',
+      rightBg: '#171526',
+      userColor: '#a78bfa',
+      userTagBg: 'rgba(167,139,250,0.13)',
+      userTagText: '#c4b5fd',
+      spinnerColor: '#a78bfa',
+      toolOk: '#5eead4',
+      toolRun: '#a78bfa',
+      toolErr: '#fb7185',
+      toolConnectorColor: '#494064',
+      diffAdded: '#5eead4',
+      diffRemoved: '#fb7185',
+      diffAddedWord: '#99f6e4',
+      diffRemovedWord: '#fda4af',
+      uiScheme: 'dark',
+      transparency: 1,
+    },
+  },
+  {
+    name: 'focus-flow',
+    label: '专注流程',
+    presentationProfileId: 'builtin.presentation.focus-flow',
+    theme: {
+      accent: '#d6a85f',
+      globalBgColor: '#181713',
+      globalFont: 'system',
+      globalFontSize: 15,
+      titlebarBg: '#1d1b17',
+      titlebarTextColor: '#eee8dc',
+      sidebarBg: '#1d1b17',
+      sidebarTextColor: '#b8afa0',
+      sidebarNameSize: 13,
+      chatBg: '#181713',
+      chatTextColor: '#e7e0d5',
+      chatCodeBg: 'rgba(214,168,95,0.06)',
+      chatCodeColor: '#dfbd83',
+      messageLayout: 'claude',
+      msgLineHeight: 1.72,
+      ccBg: '#201e19',
+      ccHeight: 88,
+      ccBgHeight: 88,
+      ccStyle: 'numeric',
+      inputBg: 'rgba(214,168,95,0.05)',
+      inputTextColor: '#eee8dc',
+      inputPlaceholder: '#81796d',
+      inputFocusBorder: 'rgba(214,168,95,0.55)',
+      rightBg: '#1d1b17',
+      userColor: '#d6a85f',
+      userTagBg: 'rgba(214,168,95,0.10)',
+      userTagText: '#dfbd83',
+      spinnerColor: '#d6a85f',
+      toolOk: '#a3b18a',
+      toolRun: '#d6a85f',
+      toolErr: '#cf7b73',
+      toolConnectorColor: '#4b463d',
+      diffAdded: '#a3b18a',
+      diffRemoved: '#cf7b73',
+      diffAddedWord: '#c3ceb2',
+      diffRemovedWord: '#e3aaa4',
+      uiScheme: 'dark',
+      transparency: 1,
     },
   }
 ]

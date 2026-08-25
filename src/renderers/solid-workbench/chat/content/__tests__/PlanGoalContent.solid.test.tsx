@@ -32,7 +32,8 @@ describe('C08 content.plan Solid base Slot', () => {
     expect(result.getByText('依赖 C07')).toBeTruthy()
     expect(result.getByText('paused-by-provider')).toBeTruthy()
     expect(result.getByRole('status', { name: /目标：闭环 C08.*已阻塞.*预算 25%/ })).toBeTruthy()
-    expect(result.getByRole('progressbar')).toHaveAttribute('aria-valuenow', '25')
+    expect(result.container.querySelector('.goal-card-budget')).toHaveAttribute('aria-valuenow', '25')
+    expect(result.getByRole('progressbar', { name: '计划总体进度' })).toHaveAttribute('value', '1')
     expect(result.container.textContent).toContain('30 秒')
   })
 

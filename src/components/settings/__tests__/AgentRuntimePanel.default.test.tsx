@@ -3,6 +3,7 @@ import { fireEvent, render, screen, waitFor, within } from '@testing-library/rea
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import AgentRuntimePanel from '../AgentRuntimePanel'
 import { useIdentityStore } from '../../../identityStore'
+import { useWorkspaceStore } from '../../../workspaceStore'
 import { resetStores } from '../../../test/resetStores'
 
 const { invoke } = vi.hoisted(() => ({ invoke: vi.fn() }))
@@ -42,7 +43,9 @@ describe('AgentRuntimePanel 默认 Agent', () => {
   it('首次打开配置页会自动探测本机 Agent，不要求用户先理解重新探测入口', async () => {
     render(<AgentRuntimePanel />)
 
-    await waitFor(() => expect(invoke).toHaveBeenCalledWith('detect_agent_runtimes', { detectorIds: [] }))
+    await waitFor(() => expect(invoke).toHaveBeenCalledWith('detect_agent_runtimes', {
+      detectorIds: ['builtin.detector.claude-code', 'builtin.detector.hermes', 'builtin.detector.peri'],
+    }))
   })
 
   it('自动探测没有结果时解释下一步，并可直接进入手动添加', async () => {
@@ -133,6 +136,31 @@ describe('AgentRuntimePanel 默认 Agent', () => {
     })
   })
 
+  it('手动创建写盘期间禁用主动作，避免重复 CAS 请求', async () => {
+    let finishWrite: (() => void) | undefined
+    const writePending = new Promise<void>(resolve => { finishWrite = resolve })
+    invoke.mockImplementation((command: string) => {
+      if (command === 'detect_agent_runtimes') return Promise.resolve({ candidates: [], diagnostics: [], elapsedMs: 0, truncated: false })
+      if (command === 'agent_config_snapshot') return Promise.resolve({ revision: 'rev-1', agents: [] })
+      if (command === 'update_agents_config') return writePending.then(() => ({ applied: true, revision: 'rev-2' }))
+      if (command === 'list_agents') return Promise.resolve([])
+      return Promise.resolve(null)
+    })
+    render(<AgentRuntimePanel />)
+    fireEvent.click(screen.getByRole('button', { name: '新建 Agent' }))
+    fireEvent.change(screen.getByLabelText('新建 Agent id'), { target: { value: 'manual' } })
+    fireEvent.change(screen.getByLabelText('新建 Agent name'), { target: { value: 'Manual' } })
+    fireEvent.change(screen.getByLabelText('新建 Agent exe'), { target: { value: 'manual.exe' } })
+
+    const create = screen.getByRole('button', { name: '创建' })
+    fireEvent.click(create)
+    await waitFor(() => expect(invoke).toHaveBeenCalledWith('update_agents_config', expect.anything()))
+    expect(create).toBeDisabled()
+    fireEvent.click(create)
+    expect(invoke.mock.calls.filter(([command]) => command === 'update_agents_config')).toHaveLength(1)
+    finishWrite?.()
+  })
+
   it('手动选择可执行文件时会预填首个 Agent 的路径、id 和名称', async () => {
     const prompt = vi.spyOn(window, 'prompt').mockReturnValue('C:\\Agent Files\\My ACP Agent.exe')
     render(<AgentRuntimePanel />)
@@ -144,6 +172,20 @@ describe('AgentRuntimePanel 默认 Agent', () => {
     await waitFor(() => expect(screen.getByLabelText('新建 Agent exe')).toHaveValue('C:\\Agent Files\\My ACP Agent.exe'))
     expect(screen.getByLabelText('新建 Agent id')).toHaveValue('my-acp-agent')
     expect(screen.getByLabelText('新建 Agent name')).toHaveValue('My ACP Agent')
+    prompt.mockRestore()
+  })
+
+  it('手动选择已知可执行文件时复用 Catalog provider 与 ACP 参数', async () => {
+    const prompt = vi.spyOn(window, 'prompt').mockReturnValue('C:\\Agents\\peri.exe')
+    render(<AgentRuntimePanel />)
+    fireEvent.click(screen.getByRole('button', { name: '新建 Agent' }))
+    fireEvent.click(within(screen.getByLabelText('新建 Agent 配置')).getByRole('button', { name: '选择可执行文件' }))
+
+    await waitFor(() => expect(screen.getByLabelText('新建 Agent exe')).toHaveValue('C:\\Agents\\peri.exe'))
+    expect(screen.getByLabelText('新建 Agent id')).toHaveValue('peri')
+    expect(screen.getByLabelText('新建 Agent name')).toHaveValue('Peri')
+    expect(screen.getByLabelText('新建 Agent provider')).toHaveValue('peri')
+    expect(screen.getByLabelText('新建 Agent 参数 1')).toHaveValue('acp')
     prompt.mockRestore()
   })
 
@@ -206,7 +248,7 @@ describe('AgentRuntimePanel 默认 Agent', () => {
     })
     render(<AgentRuntimePanel />)
 
-    const candidateCard = (await screen.findByText('Detected')).closest('.agent-runtime-card') as HTMLElement
+    const candidateCard = (await screen.findByLabelText('Detected executable')).closest('.agent-runtime-card') as HTMLElement
     expect(within(candidateCard).getByText(/ACP：未验证/)).toBeInTheDocument()
     expect(screen.getByText(/version_probe_timeout.*version timeout/)).toBeInTheDocument()
     fireEvent.click(within(candidateCard).getByRole('button', { name: '添加参数' }))
@@ -241,6 +283,48 @@ describe('AgentRuntimePanel 默认 Agent', () => {
     }))
   })
 
+  it('多个候选使用紧凑选择列表，仅展开当前候选的高级参数', async () => {
+    const makeCandidate = (id: string, name: string) => ({
+      candidateId: `detected:${id}`, detectorId: 'detector.test', provider: id,
+      suggestedAgentId: id, name, executable: `C:\\Agents\\${id}.exe`, args: ['acp'],
+      evidence: [], identityConfidence: 'high', protocolAvailability: 'not_tested', warnings: [],
+    })
+    invoke.mockImplementation((command: string) => command === 'detect_agent_runtimes'
+      ? Promise.resolve({ candidates: [makeCandidate('first', 'First Agent'), makeCandidate('second', 'Second Agent')], diagnostics: [], elapsedMs: 2, truncated: false })
+      : Promise.resolve(null))
+    render(<AgentRuntimePanel />)
+
+    expect(await screen.findByRole('button', { name: /First Agent.*first/ })).toBeInTheDocument()
+    expect(screen.getByLabelText('First Agent executable')).toBeInTheDocument()
+    expect(screen.queryByLabelText('Second Agent executable')).not.toBeInTheDocument()
+
+    fireEvent.click(screen.getByRole('button', { name: /Second Agent.*second/ }))
+    expect(screen.queryByLabelText('First Agent executable')).not.toBeInTheDocument()
+    expect(screen.getByLabelText('Second Agent executable')).toBeInTheDocument()
+  })
+
+  it('已导入候选提供立即使用动作，而不是只显示禁用的导入按钮', async () => {
+    const openSheet = vi.fn(() => 'agent-hermes')
+    useWorkspaceStore.setState({ openSheet })
+    const candidate = {
+      candidateId: 'detected:hermes', detectorId: 'detector.test', provider: 'hermes',
+      suggestedAgentId: 'hermes', name: 'Hermes Detected', executable: 'hermes', args: ['acp'], evidence: [],
+      identityConfidence: 'exact', protocolAvailability: 'verified', alreadyImportedAgentId: 'hermes', warnings: [],
+    }
+    invoke.mockImplementation((command: string) => {
+      if (command === 'detect_agent_runtimes') return Promise.resolve({ candidates: [candidate], diagnostics: [], elapsedMs: 2, truncated: false })
+      if (command === 'switch_agent') return Promise.resolve(null)
+      if (command === 'agent_status') return Promise.resolve({ agent: 'hermes', status: 'connected', generation: 2 })
+      return Promise.resolve(null)
+    })
+    render(<AgentRuntimePanel />)
+
+    fireEvent.click(await screen.findByRole('button', { name: '使用此 Agent' }))
+
+    await waitFor(() => expect(openSheet).toHaveBeenCalledWith({ kind: 'agent', title: 'Hermes', agentId: 'hermes' }))
+    expect(useIdentityStore.getState().activeAgent).toBe('hermes')
+  })
+
   it('验证成功后可由一个主动作直接导入候选', async () => {
     const candidate = {
       candidateId: 'detected:quick-start',
@@ -265,7 +349,7 @@ describe('AgentRuntimePanel 默认 Agent', () => {
     })
     render(<AgentRuntimePanel />)
 
-    const candidateCard = (await screen.findByText('Quick Start')).closest('.agent-runtime-card') as HTMLElement
+    const candidateCard = (await screen.findByLabelText('Quick Start executable')).closest('.agent-runtime-card') as HTMLElement
     fireEvent.click(within(candidateCard).getByRole('button', { name: '验证并导入' }))
 
     await waitFor(() => expect(invoke).toHaveBeenCalledWith('test_agent_candidate', {
@@ -291,6 +375,37 @@ describe('AgentRuntimePanel 默认 Agent', () => {
       },
       expectedRevision: 'rev-1',
     }))
+  })
+
+  it('导入成功后切换到新 Agent、对账状态并打开 Agent Sheet', async () => {
+    const openSheet = vi.fn(() => 'agent-ready')
+    useWorkspaceStore.setState({ openSheet })
+    const candidate = {
+      candidateId: 'detected:ready', detectorId: 'detector.test', provider: 'peri',
+      suggestedAgentId: 'ready-agent', name: 'Ready Agent', executable: 'C:\\Agents\\ready.exe',
+      args: ['acp'], evidence: [], identityConfidence: 'exact', protocolAvailability: 'not_tested', warnings: [],
+    }
+    invoke.mockImplementation((command: string) => {
+      if (command === 'detect_agent_runtimes') return Promise.resolve({ candidates: [candidate], diagnostics: [], elapsedMs: 4, truncated: false })
+      if (command === 'test_agent_candidate') return Promise.resolve({ ok: true, agentId: 'ready-agent', durationMs: 8 })
+      if (command === 'agent_config_snapshot') return Promise.resolve({ revision: 'rev-1', agents: [] })
+      if (command === 'update_agents_config') return Promise.resolve({ applied: true, revision: 'rev-2' })
+      if (command === 'list_agents') return Promise.resolve([{ id: 'ready-agent', name: 'Ready Agent', exe: candidate.executable, default: true }])
+      if (command === 'switch_agent') return Promise.resolve(null)
+      if (command === 'agent_status') return Promise.resolve({ agent: 'ready-agent', status: 'connected', generation: 1 })
+      return Promise.resolve(null)
+    })
+    render(<AgentRuntimePanel />)
+
+    const candidateCard = (await screen.findByLabelText('Ready Agent executable')).closest('.agent-runtime-card') as HTMLElement
+    fireEvent.click(within(candidateCard).getByRole('button', { name: '验证并导入' }))
+
+    await waitFor(() => expect(invoke).toHaveBeenCalledWith('switch_agent', { name: 'ready-agent' }))
+    await waitFor(() => {
+      expect(invoke).toHaveBeenCalledWith('agent_status', undefined)
+      expect(useIdentityStore.getState().activeAgent).toBe('ready-agent')
+      expect(openSheet).toHaveBeenCalledWith({ kind: 'agent', title: 'Ready Agent', agentId: 'ready-agent' })
+    })
   })
 
   it('CAS 冲突保留编辑草稿，并允许显式重新载入 revision', async () => {

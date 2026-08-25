@@ -1,4 +1,4 @@
-import { For, Show, createEffect, createSignal, onCleanup } from 'solid-js'
+import { For, Show, createEffect, createMemo, createSignal, onCleanup } from 'solid-js'
 import type { WorkbenchTaskEntry } from '../../../domains/workbench/workbenchRuntime.ts'
 import { SolidCollapsibleRegion } from './CollapsibleRegion.solid.tsx'
 
@@ -10,6 +10,7 @@ export interface SolidTaskTreeProps {
 
 export function SolidTaskTree(props: SolidTaskTreeProps) {
   const [expanded, setExpanded] = createSignal(false)
+  const completed = createMemo(() => props.tasks.filter(task => task.status === 'completed').length)
 
   createEffect(() => {
     const activeSessionId = props.sessionId
@@ -30,12 +31,16 @@ export function SolidTaskTree(props: SolidTaskTreeProps) {
           onClick={() => setExpanded(value => !value)}
           aria-expanded={expanded()}
         >
-          {taskSummary([...props.tasks])}
+          <span class="task-tree-summary-label">{taskSummary([...props.tasks])}</span>
+          <span class="task-tree-summary-ratio" aria-hidden="true">{completed()}/{props.tasks.length}</span>
         </button>
+        <progress class="task-tree-overall-progress" aria-label="任务总体进度"
+          value={completed()} max={Math.max(1, props.tasks.length)} />
         <SolidCollapsibleRegion open={expanded()}>
           <ul class="task-tree-list" aria-label="任务列表">
             <For each={props.tasks}>{task => (
-              <li class="task-tree-item" data-status={task.status}>
+              <li class="task-tree-item" data-status={task.status}
+                aria-current={task.status === 'in_progress' ? 'step' : undefined}>
                 <span class="task-tree-status" aria-hidden="true">{statusGlyph(task.status)}</span>
                 <span class="task-tree-content">{task.content}</span>
               </li>

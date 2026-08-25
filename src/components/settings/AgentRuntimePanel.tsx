@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { invoke } from '@tauri-apps/api/core'
 import { IS_TAURI } from '../../infrastructure/tauri/env'
 import {
@@ -19,6 +19,10 @@ import {
 } from '../../domains/agent/candidateValidation.ts'
 import ArgumentListEditor from './ArgumentListEditor.tsx'
 import { describeInvocation, validateInvocation } from '../../domains/agent/invocationDraft.ts'
+import { builtinAgentCatalog } from '../../domains/agent/agentCatalog.ts'
+import { provisionAgentTransaction } from '../../application/transactions/provisionAgentTransaction.ts'
+import { activateAgentSheet } from '../../workspace-sheets/activateAgentSheet.ts'
+import { useWorkspaceStore } from '../../workspaceStore.ts'
 
 interface Draft {
   name: string
@@ -45,10 +49,10 @@ function emptyDraft(agent?: AgentEntry): Draft {
   }
 }
 
-function agentConfig(name: string, exe: string, args: readonly string[], isFirst: boolean): AgentCreateConfig {
+function agentConfig(name: string, exe: string, args: readonly string[], provider: string, isFirst: boolean): AgentCreateConfig {
   return {
     name: name.trim(),
-    provider: 'custom',
+    provider: provider.trim() || 'custom',
     transport: 'subprocess',
     exe: exe.trim(),
     args: [...args],
@@ -140,7 +144,7 @@ function pathHintForProvider(provider: string | null | undefined): string {
  * 复用既有 Settings agent section 边界；结构化操作（exe/name/provider/default/新建/测试）
  * 全部走 typed client，不重建整块 YAML。
  */
-export default function AgentRuntimePanel() {
+export default function AgentRuntimePanel({ initialAgentId }: { initialAgentId?: string }) {
   const [agentClient] = useState(() => createAgentClient({
     invoke: (cmd, args) => invoke(cmd, args as Record<string, unknown> | undefined),
   }))
@@ -153,7 +157,7 @@ export default function AgentRuntimePanel() {
   const [testingId, setTestingId] = useState<string | null>(null)
   const [testResult, setTestResult] = useState<Record<string, string>>({})
   const [showCreate, setShowCreate] = useState(false)
-  const [createDraft, setCreateDraft] = useState({ id: '', name: '', exe: '', args: ['acp'] })
+  const [createDraft, setCreateDraft] = useState({ id: '', name: '', exe: '', provider: 'custom', args: ['acp'] })
   const [feedback, setFeedback] = useState<string | null>(null)
   const [configConflict, setConfigConflict] = useState(false)
   const [toast, setToast] = useState<string | null>(null)
@@ -164,6 +168,7 @@ export default function AgentRuntimePanel() {
     window.setTimeout(() => setToast(null), 2500)
   }
   const [candidates, setCandidates] = useState<AgentRuntimeCandidate[]>([])
+  const [selectedCandidateId, setSelectedCandidateId] = useState<string | null>(null)
   const [detectionDiagnostics, setDetectionDiagnostics] = useState<AgentDetectionDiagnostic[]>([])
   const [detectionElapsedMs, setDetectionElapsedMs] = useState(0)
   const [detectionTruncated, setDetectionTruncated] = useState(false)
@@ -171,6 +176,9 @@ export default function AgentRuntimePanel() {
   const [detecting, setDetecting] = useState(false)
   const [candidateValidation, setCandidateValidation] = useState<Record<string, AgentCandidateValidationState>>({})
   const [candidateDrafts, setCandidateDrafts] = useState<Record<string, CandidateDraft>>({})
+  const [provisioningCandidateId, setProvisioningCandidateId] = useState<string | null>(null)
+  const provisioningCandidateRef = useRef<string | null>(null)
+  const focusedInitialAgentRef = useRef<string | null>(null)
 
   const reportConfigMutationError = (operation: string, error: unknown, agentId?: string) => {
     const detail = reportRuntimeError(operation, error, agentId)
@@ -200,9 +208,13 @@ export default function AgentRuntimePanel() {
     setDetecting(true)
     setDetectionCompleted(false)
     try {
-      const detectors = getPluginServiceRegistry().list<AgentRuntimeDetectorMetadata>('agent-detector')
+      const registered = getPluginServiceRegistry().list<AgentRuntimeDetectorMetadata>('agent-detector')
+      const detectors = registered.length > 0 ? registered : builtinAgentCatalog.detectors()
       const report = await agentClient.detectAgentRuntimes(selectAcpRuntimeDetectorIds(detectors))
       setCandidates(report.candidates)
+      setSelectedCandidateId(current => report.candidates.some(candidate => candidate.candidateId === current)
+        ? current
+        : report.candidates.find(candidate => !candidate.alreadyImportedAgentId)?.candidateId ?? report.candidates[0]?.candidateId ?? null)
       setDetectionDiagnostics(report.diagnostics)
       setDetectionElapsedMs(report.elapsedMs)
       setDetectionTruncated(report.truncated)
@@ -259,16 +271,45 @@ export default function AgentRuntimePanel() {
     while (agents.some(agent => agent.id === id)) id = `${base}-${suffix++}`
     const config = detectedAgentConfig(draft, agents.length === 0)
     try {
-      try {
-        await agentClient.createAgent(id, config)
-      } catch (error) {
-        if (wireErrorCode(error) !== 'config_read_only') throw error
-        await agentClient.initializeAgentsConfig(id, agentsDocument(id, config))
-      }
-      await refreshAgents()
+      const result = await provisionAgentTransaction({
+        candidateId: candidate.candidateId,
+        agentId: id,
+        name: draft.name.trim(),
+        provider: draft.provider.trim(),
+        executable: draft.executable.trim(),
+        args: [...draft.args],
+      }, {
+        validate: () => agentClient.testAgentCandidate(id, {
+          name: draft.name.trim(), provider: draft.provider.trim(), transport: 'subprocess', exe: draft.executable.trim(), args: [...draft.args],
+        }),
+        persist: async () => {
+          try {
+            await agentClient.createAgent(id, config)
+          } catch (error) {
+            if (wireErrorCode(error) !== 'config_read_only') throw error
+            await agentClient.initializeAgentsConfig(id, agentsDocument(id, config))
+          }
+        },
+        refreshAgents: () => agentClient.listAgents(),
+        applyAgents: list => useIdentityStore.getState().setAgents(list),
+        activate: (agentId, agentName) => activateAgentSheet(agentId, agentName, () => {
+          useWorkspaceStore.getState().openSheet({ kind: 'agent', title: agentName, agentId })
+        }),
+      }, {
+        validation: validation?.status === 'ok' || validation?.status === 'failed' ? validation.result : undefined,
+        acceptUnverified: importMode === 'unverified',
+      })
       setConfigConflict(false)
-      setFeedback(null)
-      notify(`已导入 ${draft.name}（${id}）${importMode === 'unverified' ? '；状态：未验证' : ''}`)
+      if (result.kind === 'validation-failed') {
+        setFeedback(result.validation.error?.message ?? 'Agent 候选验证失败')
+        return
+      }
+      if (result.kind === 'stored-not-active') {
+        setFeedback(`已保存 ${draft.name}（${id}），但尚未连接。请检查运行时日志后重试。`)
+      } else {
+        setFeedback(null)
+        notify(`已导入并打开 ${draft.name}（${id}）${importMode === 'unverified' ? '；状态：未验证' : ''}`)
+      }
       await detectRuntimes()
     } catch (error) {
       reportConfigMutationError('导入 Agent 候选', error, id)
@@ -276,8 +317,50 @@ export default function AgentRuntimePanel() {
   }
 
   const validateAndImportCandidate = async (candidate: AgentRuntimeCandidate) => {
-    const validation = await validateCandidate(candidate)
-    if (validation?.status === 'ok') await importCandidate(candidate, validation)
+    if (provisioningCandidateRef.current) return
+    provisioningCandidateRef.current = candidate.candidateId
+    setProvisioningCandidateId(candidate.candidateId)
+    try {
+      const validation = await validateCandidate(candidate)
+      if (validation?.status === 'ok') await importCandidate(candidate, validation)
+    } finally {
+      provisioningCandidateRef.current = null
+      setProvisioningCandidateId(null)
+    }
+  }
+
+  const importUnverifiedCandidate = async (candidate: AgentRuntimeCandidate) => {
+    if (provisioningCandidateRef.current) return
+    provisioningCandidateRef.current = candidate.candidateId
+    setProvisioningCandidateId(candidate.candidateId)
+    try {
+      await importCandidate(candidate)
+    } finally {
+      provisioningCandidateRef.current = null
+      setProvisioningCandidateId(null)
+    }
+  }
+
+  const activateImportedCandidate = async (candidate: AgentRuntimeCandidate) => {
+    const agentId = candidate.alreadyImportedAgentId
+    if (!agentId || provisioningCandidateRef.current) return
+    provisioningCandidateRef.current = candidate.candidateId
+    setProvisioningCandidateId(candidate.candidateId)
+    const agentName = agents.find(agent => agent.id === agentId)?.name ?? candidate.name
+    try {
+      const activated = await activateAgentSheet(agentId, agentName, () => {
+        useWorkspaceStore.getState().openSheet({ kind: 'agent', title: agentName, agentId })
+      })
+      if (activated) {
+        setFeedback(null)
+        notify(`已打开 ${agentName}`)
+      } else {
+        setFeedback(`${agentName} 尚未连接，请检查可执行文件或运行时日志。`)
+      }
+    } finally {
+      provisioningCandidateRef.current = null
+      setProvisioningCandidateId(null)
+    }
   }
 
   const updateCandidateDraft = (candidate: AgentRuntimeCandidate, patch: Partial<CandidateDraft>) => {
@@ -299,6 +382,16 @@ export default function AgentRuntimePanel() {
     setDraft(emptyDraft(agent))
     setFeedback(null)
   }
+
+  useEffect(() => {
+    if (!initialAgentId || focusedInitialAgentRef.current === initialAgentId) return
+    const target = agents.find(agent => agent.id === initialAgentId)
+    if (!target) return
+    focusedInitialAgentRef.current = initialAgentId
+    setEditingId(target.id)
+    setDraft(emptyDraft(target))
+    setFeedback('请重新选择或修正该 Agent 的可执行文件。')
+  }, [agents, initialAgentId])
 
   const pickExecutable = async (): Promise<string | null> => {
     if (IS_TAURI) {
@@ -400,6 +493,7 @@ export default function AgentRuntimePanel() {
   }
 
   const createAgent = async () => {
+    if (savingId) return
     const id = createDraft.id.trim()
     if (!id || !createDraft.name.trim() || !createDraft.exe.trim()) {
       setFeedback('新建 Agent 必须填写 id / name / exe')
@@ -407,15 +501,16 @@ export default function AgentRuntimePanel() {
     }
     const invalid = invocationError(createDraft.exe, createDraft.args)
     if (invalid) { setFeedback(invalid); return }
+    setSavingId(id)
     setFeedback(null)
-    const config = agentConfig(createDraft.name, createDraft.exe, createDraft.args, agents.length === 0)
+    const config = agentConfig(createDraft.name, createDraft.exe, createDraft.args, createDraft.provider, agents.length === 0)
     try {
       await agentClient.ensureConfigRevision()
       await agentClient.createAgent(id, config)
       await refreshAgents()
       setShowCreate(false)
       setConfigConflict(false)
-      setCreateDraft({ id: '', name: '', exe: '', args: ['acp'] })
+      setCreateDraft({ id: '', name: '', exe: '', provider: 'custom', args: ['acp'] })
       setFeedback(null)
       notify(`已新建 Agent ${id}`)
     } catch (error) {
@@ -426,7 +521,7 @@ export default function AgentRuntimePanel() {
           await agentClient.initializeAgentsConfig(id, agentsDocument(id, config))
           await refreshAgents()
           setShowCreate(false)
-          setCreateDraft({ id: '', name: '', exe: '', args: ['acp'] })
+          setCreateDraft({ id: '', name: '', exe: '', provider: 'custom', args: ['acp'] })
           setFeedback(`已初始化外部配置并新建 Agent ${id}`)
         } catch (initError) {
           reportConfigMutationError('初始化 Agent 配置', initError, id)
@@ -434,6 +529,8 @@ export default function AgentRuntimePanel() {
         return
       }
       reportConfigMutationError('新建 Agent', error, id)
+    } finally {
+      setSavingId(null)
     }
   }
 
@@ -528,7 +625,13 @@ export default function AgentRuntimePanel() {
           const validation = candidateValidation[candidate.candidateId]
           const importMode = candidateImportMode(candidate, validation)
           const validationDetails = validation ? candidateValidationDetails(validation) : null
-          return <div className="agent-runtime-card" key={candidate.candidateId}>
+          const selected = candidate.candidateId === selectedCandidateId
+          return <div className="agent-candidate-option" key={candidate.candidateId}>
+          <button type="button" className={`agent-candidate-row ${selected ? 'active' : ''}`} aria-expanded={selected} onClick={() => setSelectedCandidateId(candidate.candidateId)}>
+            <span><strong>{candidate.name}</strong><small>{candidate.provider}</small></span>
+            <span>{candidate.alreadyImportedAgentId ? `已导入 · ${candidate.alreadyImportedAgentId}` : `${candidate.identityConfidence} · ${candidateProtocolLabel(validation)}`}</span>
+          </button>
+          {selected && <div className="agent-runtime-card">
           <div className="set-hint"><strong>{candidate.name}</strong> · 身份可信度：{candidate.identityConfidence} · ACP：{candidateProtocolLabel(validation)} · {candidate.alreadyImportedAgentId ? `已导入为 ${candidate.alreadyImportedAgentId}` : '尚未导入'}</div>
           <div className="agent-runtime-edit">
             <input className="set-input" value={discoveredDraft.id} onChange={event => updateCandidateDraft(candidate, { id: event.target.value })} aria-label={`${candidate.name} Agent id`} />
@@ -541,10 +644,14 @@ export default function AgentRuntimePanel() {
           {candidate.evidence.map((evidence, index) => <div className="set-hint" key={`${evidence.kind}:${index}`}>{evidence.kind}：{evidence.detail}</div>)}
           {candidate.warnings.map(warning => <div className="set-hint" role="alert" key={warning}>{warning}</div>)}
           <div className="set-preset-row">
-            <button className="ps-btn sm primary" type="button" disabled={candidate.alreadyImportedAgentId !== undefined || validation?.status === 'testing'} onClick={() => void validateAndImportCandidate(candidate)}>{validation?.status === 'testing' ? '验证中…' : '验证并导入'}</button>
-            {importMode === 'unverified' && (
-              <button className="ps-btn sm" type="button" disabled={candidate.alreadyImportedAgentId !== undefined} onClick={() => void importCandidate(candidate)}>仍然导入（未验证）</button>
-            )}
+            {candidate.alreadyImportedAgentId ? (
+              <button className="ps-btn sm primary" type="button" aria-busy={provisioningCandidateId === candidate.candidateId} disabled={provisioningCandidateId !== null} onClick={() => void activateImportedCandidate(candidate)}>{provisioningCandidateId === candidate.candidateId ? '连接中…' : '使用此 Agent'}</button>
+            ) : (<>
+              <button className="ps-btn sm primary" type="button" aria-busy={provisioningCandidateId === candidate.candidateId} disabled={provisioningCandidateId !== null} onClick={() => void validateAndImportCandidate(candidate)}>{validation?.status === 'testing' ? '验证中…' : provisioningCandidateId === candidate.candidateId ? '正在配置…' : '验证并导入'}</button>
+              {importMode === 'unverified' && (
+                <button className="ps-btn sm" type="button" disabled={provisioningCandidateId !== null} onClick={() => void importUnverifiedCandidate(candidate)}>仍然导入（未验证）</button>
+              )}
+            </>)}
             {validation?.status === 'testing' && <span className="set-hint">ACP 验证中，最长 15 秒</span>}
           </div>
           {validationDetails && <div className={`agent-candidate-validation ${validation?.status === 'failed' ? 'failed' : 'ok'}`} role="status">
@@ -555,6 +662,7 @@ export default function AgentRuntimePanel() {
             {importMode === 'unverified' && <span>高置信候选可继续导入，导入后标记为未验证。</span>}
             {validation?.status === 'failed' && importMode === 'blocked' && <span>当前置信度必须通过验证后才能导入。</span>}
           </div>}
+        </div>}
         </div>})}
       </section>
 
@@ -569,22 +677,26 @@ export default function AgentRuntimePanel() {
           <input className="set-input" value={createDraft.id} onChange={event => setCreateDraft({ ...createDraft, id: event.target.value })} placeholder="id（字母开头，可含 . _ -）" aria-label="新建 Agent id" />
           <input className="set-input" value={createDraft.name} onChange={event => setCreateDraft({ ...createDraft, name: event.target.value })} placeholder="name" aria-label="新建 Agent name" />
           <input className="set-input" value={createDraft.exe} onChange={event => setCreateDraft({ ...createDraft, exe: event.target.value })} placeholder="exe 绝对路径或命令名" aria-label="新建 Agent exe" />
+          <input className="set-input" value={createDraft.provider} onChange={event => setCreateDraft({ ...createDraft, provider: event.target.value })} placeholder="provider" aria-label="新建 Agent provider" />
           <button className="ps-btn sm" type="button" onClick={() => {
             void pickExecutable().then(path => {
               if (!path) return
               const suggested = executableIdentity(path)
+              const catalogMatch = builtinAgentCatalog.matchExecutable(path)
               setCreateDraft(current => ({
                 ...current,
                 exe: path,
-                id: current.id || suggested.id,
-                name: current.name || suggested.name,
+                id: current.id || catalogMatch?.provider || suggested.id,
+                name: current.name || catalogMatch?.displayName || suggested.name,
+                provider: catalogMatch?.provider ?? current.provider,
+                args: catalogMatch?.args ?? current.args,
               }))
             })
           }}>选择可执行文件</button>
           <ArgumentListEditor args={createDraft.args} label="新建 Agent" onChange={args => setCreateDraft({ ...createDraft, args })} />
           <InvocationPreview executable={createDraft.exe} args={createDraft.args} />
           <div className="set-hint" role="note">{pathHintForProvider(null)}</div>
-          <button className="ps-btn sm primary" type="button" disabled={savingId !== null} onClick={createAgent}>创建</button>
+          <button className="ps-btn sm primary" type="button" disabled={savingId !== null} onClick={createAgent}>{savingId ? '创建中…' : '创建'}</button>
         </div>
       )}
     </div>

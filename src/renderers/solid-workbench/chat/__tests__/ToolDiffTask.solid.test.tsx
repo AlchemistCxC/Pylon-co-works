@@ -101,11 +101,15 @@ describe('SolidTaskTree', () => {
       { content: '失败项', status: 'failed' },
     ]} />)
     expect(result.getByRole('button').textContent).toContain('3 任务 · 1 完成')
+    expect(result.getByRole('progressbar', { name: '任务总体进度' })).toHaveAttribute('value', '1')
+    expect(result.getByRole('progressbar', { name: '任务总体进度' })).toHaveAttribute('max', '3')
+    expect(result.container.querySelector('.task-tree-summary-ratio')).toHaveTextContent('1/3')
     await fireEvent.click(result.getByRole('button'))
     expect(result.getByRole('list', { name: '任务列表' })).toBeTruthy()
     expect(result.container.querySelector('[data-status="completed"] .task-tree-status')?.textContent).toBe('✓')
     expect(result.container.querySelector('[data-status="in_progress"] .task-tree-status')?.textContent).toBe('◐')
     expect(result.container.querySelector('[data-status="failed"] .task-tree-status')?.textContent).toBe('✕')
+    expect(result.container.querySelector('[data-status="in_progress"]')).toHaveAttribute('aria-current', 'step')
   })
 
   it('响应 pylon:tasks-toggle，并在 session 切换时收起', () => {

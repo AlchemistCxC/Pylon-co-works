@@ -729,11 +729,21 @@ export const useIdentityStore = create<IdentityStoreState>()((set, get) => ({
     }
   },
   getUser: (source) => get().users.find(u => u.id === source),
-  setAgents: (a) => set(() => {
+  setAgents: (a) => set((state) => {
     // FE-AUD-005：agents 到达后仅 prune 无效 agent sheet，不重复全量 hydrate
     //（hydrate 已由 bootstrap hydrateDomains 完成；全量替换会覆盖启动期用户操作）
     useWorkspaceStore.getState().pruneAgentSheets(a.map(agent => agent.id))
-    return { agents: a }
+    // Agent lifecycle 是 live active authority；list_agents 的 active=true 用于配置
+    // 初始化/重载后的前后端对账。列表未提供 active 时保留当前值，兼容 browser fixture。
+    const backendActive = a.find(agent => agent.active === true)?.id
+    const agentState = backendActive ? useWorkspaceStore.getState().sheetAgentStates[backendActive] : undefined
+    return {
+      agents: a,
+      ...(backendActive && backendActive !== state.activeAgent ? {
+        activeAgent: backendActive,
+        ...(agentState?.activeProfileId ? { activeProfileId: agentState.activeProfileId } : {}),
+      } : {}),
+    }
   }),
   setActiveAgent: (id) => set(() => {
     const agentState = useWorkspaceStore.getState().sheetAgentStates[id]

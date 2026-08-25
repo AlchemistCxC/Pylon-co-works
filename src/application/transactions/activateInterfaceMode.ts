@@ -51,9 +51,9 @@ function applyModeProfile(mode: InterfaceMode, profile: PresentationProfileContr
   useInterfaceModeStore.getState().rememberProfile(mode, profile.id)
 }
 
-export function activateInterfaceMode(mode: InterfaceMode): boolean {
+function resolveActivatableMode(mode: InterfaceMode): InterfaceModeContribution | undefined {
   const modeContribution = resolveInterfaceMode(mode)
-  if (!modeContribution || !interfaceModeIsUsable(modeContribution)) return false
+  if (!modeContribution || !interfaceModeIsUsable(modeContribution)) return undefined
   try {
     const services = {
       suites: getRendererRegistry().snapshot().rendererSuites.map(entry => entry.value),
@@ -62,18 +62,30 @@ export function activateInterfaceMode(mode: InterfaceMode): boolean {
     }
     validateRendererSuiteReferences(services)
   } catch {
-    // Invalid cross-registry references make this activation unavailable;
-    // persisted preferences remain untouched for a later plugin reload.
-    return false
+    return undefined
   }
-  const state = useInterfaceModeStore.getState()
   if (modeContribution.workbench.renderKind === 'renderer-suite') {
-    // Suite activation is resolved by the Suite Host. Keep this transaction
-    // side-effect free when the catalog is still loading or a preference is
-    // unavailable; the persisted id remains recoverable for plugin reload.
     const selectedSuiteId = usePresentationPreferenceStore.getState().rendererSuiteIdByMode[mode]
     resolveInterfaceModeSuite(modeContribution, selectedSuiteId, getRendererRegistry().snapshot().rendererSuites.map(entry => entry.value.id))
   }
+  return modeContribution
+}
+
+/** 激活一个明确的 Profile；注册表引用未通过校验时保持偏好与主题不变。 */
+export function activatePresentationProfile(profileId: string): boolean {
+  const profile = getPresentationProfileRegistry().resolve(profileId)?.value
+  if (!profile) return false
+  const mode = presentationProfileInterfaceMode(profile)
+  if (!resolveActivatableMode(mode)) return false
+  applyModeProfile(mode, profile)
+  useInterfaceModeStore.getState().setInterfaceMode(mode)
+  return true
+}
+
+export function activateInterfaceMode(mode: InterfaceMode): boolean {
+  const modeContribution = resolveActivatableMode(mode)
+  if (!modeContribution) return false
+  const state = useInterfaceModeStore.getState()
   const profileId = state.profileByMode[mode] || modeContribution.defaultPresentationProfileId
   const registry = getPresentationProfileRegistry()
   const profile = registry.resolve(profileId)?.value

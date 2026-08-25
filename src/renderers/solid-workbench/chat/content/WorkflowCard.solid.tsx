@@ -66,8 +66,9 @@ export function SolidWorkflowActivityCard(props: {
     aria-label={`工作流活动：${props.activity.title ?? props.activity.id}，${props.activity.status}`}>
     <details class="term-workflow-details" open={!shouldCollapse()}>
       <summary class="term-workflow-head">
+        <span class="term-workflow-kind">{workflowKindLabel(props.activity.activityKind)}</span>
         <strong>{props.activity.title ?? props.activity.id}</strong>
-        <span>{props.activity.status}</span>
+        <span class="term-activity-status" data-status={props.activity.status}>{props.activity.status}</span>
         <Show when={props.activity.parentId}>{parentId => <small>parent: {parentId()}</small>}</Show>
       </summary>
       <Show when={progress()?.total !== undefined || progress()?.completed !== undefined}>
@@ -153,6 +154,15 @@ function nonNegativeNumber(value: unknown): number | undefined {
 
 function formatDuration(durationMs: number): string {
   return durationMs < 1000 ? `${durationMs}ms` : `${Number((durationMs / 1000).toFixed(1))}s`
+}
+
+function workflowKindLabel(kind: WorkbenchActivityNode['activityKind']): string {
+  switch (kind) {
+    case 'workflow-phase': return '阶段'
+    case 'workflow-agent': return '代理'
+    case 'background-task': return '后台任务'
+    default: return '工作流'
+  }
 }
 
 export default SolidWorkflowActivityCard

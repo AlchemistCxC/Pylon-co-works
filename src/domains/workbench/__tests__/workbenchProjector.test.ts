@@ -116,9 +116,56 @@ describe('WorkbenchProjector', () => {
     expect(projectWorkbench([second, first]).document).toEqual(projectWorkbench([first, second]).document)
   })
 
-  it('does not guess a message boundary from role when identity is missing', () => {
+  it('aggregates contiguous same-role chunks when the provider omits message identity', () => {
     const first = envelope(1, { type: 'message.delta', role: 'assistant', parts: [{ kind: 'text', text: 'first' }] })
     const second = envelope(2, { type: 'message.delta', role: 'assistant', parts: [{ kind: 'text', text: 'second' }] })
-    expect(selectLegacyMessages(projectWorkbench([first, second]).document).map(message => message.content)).toEqual(['first', 'second'])
+    expect(selectLegacyMessages(projectWorkbench([first, second]).document).map(message => message.content)).toEqual(['firstsecond'])
+  })
+
+  it('keeps identity-less chunks separated across a tool boundary', () => {
+    const document = reduce([
+      envelope(1, { type: 'reasoning.delta', parts: [{ kind: 'text', text: 'before tool' }] }),
+      envelope(2, { type: 'tool.started', tool: { toolCallId: 'tool-1', name: 'read' } }, { toolCallId: 'tool-1' }),
+      envelope(3, { type: 'reasoning.delta', parts: [{ kind: 'text', text: 'after tool' }] }),
+    ])
+    expect(document.messages.filter(message => message.role === 'reasoning').map(message => message.content))
+      .toEqual(['before tool', 'after tool'])
+  })
+
+  it('settles every running message when the session completes', () => {
+    const document = reduce([
+      envelope(1, { type: 'reasoning.delta', parts: [{ kind: 'text', text: 'thinking' }] }),
+      envelope(2, { type: 'message.delta', role: 'assistant', parts: [{ kind: 'text', text: 'answer' }] }),
+      envelope(3, { type: 'session.completed', stopReason: 'end_turn' }),
+    ])
+    expect(document.messages.map(message => message.running)).toEqual([false, false])
+  })
+
+  it('folds adjacent optimistic and authoritative copies of the same user message', () => {
+    const optimistic = envelope(
+      1,
+      { type: 'message.delta', role: 'user', parts: [{ kind: 'text', text: 'one prompt' }] },
+      { interactionId: 'client-1' },
+      { origin: 'optimistic-local', trust: 'unverified' },
+    )
+    const authoritative = envelope(
+      2,
+      { type: 'message.delta', role: 'user', parts: [{ kind: 'text', text: 'one prompt' }] },
+      {},
+      { origin: 'local-observed', trust: 'authoritative' },
+    )
+    const messages = projectWorkbench([optimistic, authoritative]).document.messages
+    expect(messages).toHaveLength(1)
+    expect(messages[0]).toMatchObject({ id: authoritative.eventId, content: 'one prompt', identity: {} })
+  })
+
+  it('folds a late optimistic append even after assistant chunks won the persistence race', () => {
+    const authoritative = envelope(1, { type: 'message.delta', role: 'user', parts: [{ kind: 'text', text: 'prompt' }] })
+    const assistant = envelope(2, { type: 'message.delta', role: 'assistant', parts: [{ kind: 'text', text: 'answer' }] })
+    const optimistic = envelope(3,
+      { type: 'message.delta', role: 'user', parts: [{ kind: 'text', text: 'prompt' }] },
+      { interactionId: 'client-late' }, { origin: 'optimistic-local', trust: 'unverified' })
+    expect(projectWorkbench([authoritative, assistant, optimistic]).document.messages.map(message => message.content))
+      .toEqual(['prompt', 'answer'])
   })
 })

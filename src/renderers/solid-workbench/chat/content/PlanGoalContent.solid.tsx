@@ -88,8 +88,11 @@ export function SolidPlanGoalContent(props: SolidPlanGoalContentProps) {
         <Show when={props.payload.entries.length > 0}>
           <div class="task-tree" data-expanded={expanded()} data-count={props.payload.entries.length}>
             <button type="button" class="task-tree-summary" onClick={() => setExpanded(value => !value)} aria-expanded={expanded()}>
-              {planSummary(progress())}
+              <span class="task-tree-summary-label">{planSummary(progress())}</span>
+              <span class="task-tree-summary-ratio" aria-hidden="true">{progress().completed}/{progress().total}</span>
             </button>
+            <progress class="task-tree-overall-progress" aria-label="计划总体进度"
+              value={progress().completed} max={Math.max(1, progress().total)} />
             <SolidCollapsibleRegion open={expanded()}>
               <ul class="task-tree-list" role="tree" aria-label="任务列表">
                 <For each={visibleEntries()}>{entry => <PlanTreeItem entry={entry} appearance={appearance()} />}</For>
