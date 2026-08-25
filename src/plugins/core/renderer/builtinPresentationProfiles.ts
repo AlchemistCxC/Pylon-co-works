@@ -70,7 +70,9 @@ export const BUILTIN_PRESENTATION_PROFILES: readonly PresentationProfileContribu
     order: 100,
     tokens: {
       msgStyle: 'terminal', messageLayout: 'classic', chatFont: 'mono', msgFont: 'mono',
-      msgLineHeight: 1.55, inputMode: 'cli', inputVariant: 'cli', ccVariant: 'terminal',
+      msgLineHeight: 1.55, inputMode: 'cli', inputVariant: 'cli', inputBg: 'rgba(0,0,0,0.02)',
+      inputBorderColor: '', inputFocusBorder: 'rgba(0,0,0,0.22)', inputRadius: 0, inputFocusRingWidth: 0,
+      ccVariant: 'terminal',
       assistantDot: false, toolIndicator: '●', toolIndicatorGlow: 0,
       toolConnectorMode: 'none', spinnerFramePreset: 'ascii-line', spinnerVerbSet: 'engineering',
       cliHintMode: 'compact', footerLayout: 'free',

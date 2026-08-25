@@ -41,6 +41,7 @@ import { readDensity, writeDensity, readPinned, writePinned, PINNED_LIMIT, safeS
 import { getPluginServiceRegistry, getPluginSettingsPageRegistry, getRendererRegistry } from '../plugin-runtime/runtimeServices.ts'
 // I13-W1：Settings 一级信息架构唯一真值（domain → section + 字段归属派生）
 import { SETTINGS_DOMAIN_BY_ID, SETTINGS_DOMAINS, SETTINGS_SECTION_LABELS, sectionZone, type SettingsDomainId, type SettingsSectionId } from '../settingsDomains'
+import { resetThemeForActiveInterfaceMode } from '../application/transactions/activateInterfaceMode.ts'
 
 // FE-AUD-008：typed client 收口 agent 域 command literal
 const agentClient = createAgentClient({ invoke: (cmd, args) => invoke(cmd, args as Record<string, unknown> | undefined) })
@@ -91,7 +92,7 @@ export default function Settings({ onClose, activeSessionId, initialDomain, init
     ...pickCustomPresetTheme(s),
     ccEditMode: s.ccEditMode,
   } as ThemeSettings & { ccEditMode: boolean })))
-  const reset = useStore(s => s.resetTheme)
+  const reset = () => { resetThemeForActiveInterfaceMode() }
   const resetZone = useStore(s => s.resetZone)
   const setZoneField = useStore(s => s.setZoneField)
   const setCcEditMode = useStore(s => s.setCcEditMode)

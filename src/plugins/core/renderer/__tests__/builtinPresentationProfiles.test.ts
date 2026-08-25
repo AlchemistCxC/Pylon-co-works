@@ -10,7 +10,9 @@ const TERMINAL_CLASSIC_SNAPSHOT = {
   order: 100,
   tokens: {
     msgStyle: 'terminal', messageLayout: 'classic', chatFont: 'mono', msgFont: 'mono',
-    msgLineHeight: 1.55, inputMode: 'cli', inputVariant: 'cli', ccVariant: 'terminal',
+    msgLineHeight: 1.55, inputMode: 'cli', inputVariant: 'cli', inputBg: 'rgba(0,0,0,0.02)',
+    inputBorderColor: '', inputFocusBorder: 'rgba(0,0,0,0.22)', inputRadius: 0, inputFocusRingWidth: 0,
+    ccVariant: 'terminal',
     assistantDot: false, toolIndicator: '●', toolIndicatorGlow: 0,
     toolConnectorMode: 'none', spinnerFramePreset: 'ascii-line', spinnerVerbSet: 'engineering',
     cliHintMode: 'compact', footerLayout: 'free',
@@ -22,6 +24,11 @@ const COMPLETE_SURFACE_TOKENS = [
   'msgStyle', 'messageLayout', 'messageUserBg', 'messageAssistantBg', 'messageReasoningBg',
   'messageBorderColor', 'messageRadius', 'inputMode', 'inputVariant', 'inputBg',
   'inputBorderColor', 'inputFocusBorder', 'inputRadius', 'inputFocusRingWidth',
+] as const
+
+const COMPLETE_CC_INPUT_TOKENS = [
+  'inputMode', 'inputVariant', 'inputBg', 'inputBorderColor', 'inputFocusBorder',
+  'inputRadius', 'inputFocusRingWidth', 'ccVariant', 'cliHintMode', 'footerLayout',
 ] as const
 
 describe('built-in terminal-like presentation profiles', () => {
@@ -52,7 +59,7 @@ describe('built-in terminal-like presentation profiles', () => {
     for (const token of COMPLETE_SURFACE_TOKENS) expect(profile?.tokens).toHaveProperty(token)
   })
 
-  it.each([
+it.each([
     ['builtin.presentation.agent-command', 'content.plan', { density: 'compact', defaultExpanded: true }],
     ['builtin.presentation.agent-map', 'activity.subagent', { viewMode: 'tree', identityMarker: 'avatar' }],
     ['builtin.presentation.focus-flow', 'activity.workflow', { workflowLayout: 'list', collapseCompleted: true }],
@@ -60,5 +67,11 @@ describe('built-in terminal-like presentation profiles', () => {
     const profile = BUILTIN_PRESENTATION_PROFILES.find(candidate => candidate.id === profileId)
     expect(profile).toBeDefined()
     expect(profile?.kindTokens?.[kind]).toMatchObject(expected)
+  })
+
+  it.each(BUILTIN_PRESENTATION_PROFILES.map(profile => profile.id))('%s 显式覆盖中控与输入的必需 token', profileId => {
+    const profile = BUILTIN_PRESENTATION_PROFILES.find(candidate => candidate.id === profileId)
+    expect(profile).toBeDefined()
+    for (const token of COMPLETE_CC_INPUT_TOKENS) expect(profile?.tokens).toHaveProperty(token)
   })
 })
