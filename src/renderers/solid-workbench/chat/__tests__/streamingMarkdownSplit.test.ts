@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { findLastStableBlockBoundary, splitStreamingMarkdown } from '../streamingMarkdownSplit.ts'
+import { findLastStableBlockBoundary, splitOpenCodeFenceTail, splitStreamingMarkdown } from '../streamingMarkdownSplit.ts'
 
 describe('findLastStableBlockBoundary / splitStreamingMarkdown', () => {
   it('单段文本：尾部即不稳定区，stable 为空', () => {
@@ -59,6 +59,36 @@ describe('findLastStableBlockBoundary / splitStreamingMarkdown', () => {
       stable: '第一段\r\n\r\n',
       unstable: '第二段',
     })
+  })
+
+  it('extracts an open fenced-code tail without treating shorter markers as a close', () => {
+    expect(splitOpenCodeFenceTail('前缀\n  ````ts title\nconst a = 1\n```\nconst b = 2')).toEqual({
+      prefix: '前缀\n',
+      language: 'ts',
+      code: 'const a = 1\n```\nconst b = 2',
+    })
+  })
+
+  it('does not extract a closed fence or a backtick info string containing a backtick', () => {
+    expect(splitOpenCodeFenceTail('```ts\nconst a = 1\n```')).toBeNull()
+    expect(splitOpenCodeFenceTail('```bad`info\nconst a = 1')).toBeNull()
+  })
+
+  it.each([
+    ['different marker', '```ts\nconst a = 1\n~~~'],
+    ['trailing close text', '```ts\nconst a = 1\n``` trailing'],
+    ['four-space indentation', '    ```ts\nconst a = 1'],
+  ])('keeps %s from falsely closing or opening the fence', (_case, text) => {
+    const split = splitOpenCodeFenceTail(text)
+    if (_case === 'four-space indentation') expect(split).toBeNull()
+    else expect(split?.code).toContain(text.split('\n').at(-1))
+  })
+
+  it('normalizes CRLF inside an open tilde fence and accepts a longer close marker', () => {
+    expect(splitOpenCodeFenceTail('前缀\r\n~~~ ts\r\nconst a = 1\r\n')).toEqual({
+      prefix: '前缀\r\n', language: 'ts', code: 'const a = 1\n',
+    })
+    expect(splitOpenCodeFenceTail('~~~ts\nconst a = 1\n~~~~')).toBeNull()
   })
 
   it('空字符串边界为 0', () => {

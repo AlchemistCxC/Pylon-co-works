@@ -1,5 +1,5 @@
 import { Dynamic } from 'solid-js/web'
-import { For, Show, createMemo, createResource, type JSX } from 'solid-js'
+import { For, Index, Show, createMemo, createResource, type JSX } from 'solid-js'
 import { highlightCode } from '../../../components/chat/codeHighlight.ts'
 import { sanitizeHtml } from '../../../components/chat/htmlSanitizer.ts'
 import { isPlainTextContent } from '../../../components/chat/markdownFastPath.ts'
@@ -8,7 +8,7 @@ import {
   type MarkdownElement,
   type MarkdownRenderNode,
 } from './markdownRenderModel.ts'
-import { splitStreamingMarkdown } from './streamingMarkdownSplit.ts'
+import { splitOpenCodeFenceTail, splitStreamingMarkdown } from './streamingMarkdownSplit.ts'
 
 export interface MarkdownContentProps {
   text: string
@@ -28,6 +28,7 @@ export function MarkdownContent(props: MarkdownContentProps) {
   const split = createMemo(() => props.streaming === true
     ? splitStreamingMarkdown(props.text)
     : null)
+  const openCodeTail = createMemo(() => splitOpenCodeFenceTail(split()?.unstable ?? ''))
 
   return (
     <Show when={props.streaming === true} fallback={<MarkdownSegment text={props.text} inline={props.inline} />}>
@@ -35,9 +36,40 @@ export function MarkdownContent(props: MarkdownContentProps) {
         {stable => <MarkdownSegment text={stable()} inline={props.inline} />}
       </Show>
       <Show when={split()?.unstable}>
-        {tail => <MarkdownSegment text={tail()} inline={props.inline} />}
+        {tail => <Show
+          when={openCodeTail() !== null}
+          fallback={<MarkdownSegment text={tail()} inline={props.inline} />}
+        >
+          <>
+            <Show when={openCodeTail()?.prefix}>
+              {prefix => <MarkdownSegment text={prefix()} inline={props.inline} />}
+            </Show>
+            <StreamingCodeBlock
+              code={() => openCodeTail()?.code ?? ''}
+              language={() => openCodeTail()?.language}
+            />
+          </>
+        </Show>}
       </Show>
     </Show>
+  )
+}
+
+function StreamingCodeBlock(props: { language: () => string | undefined; code: () => string }) {
+  const lines = () => props.code().split('\n')
+  return (
+    <div
+      class="term-code-block"
+      data-streaming-code="true"
+      data-language={props.language()}
+    >
+      <Index each={lines()}>{line => (
+        <div class="term-code-line">
+          <span class="term-code-gutter">│ </span>
+          <span>{line() || '\u00a0'}</span>
+        </div>
+      )}</Index>
+    </div>
   )
 }
 

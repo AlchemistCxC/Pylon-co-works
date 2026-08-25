@@ -87,6 +87,27 @@ describe('PlainMessageList', () => {
     expect(result.container.querySelectorAll('[data-message-id="m2"]')).toHaveLength(1)
   })
 
+  it('同一 key 更新 descriptor 时保持行 DOM 身份并显示最新内容', () => {
+    let port: MessageListPort | undefined
+    const result = render(() => (
+      <PlainMessageList
+        initialItems={ITEMS}
+        onPortReady={value => { port = value }}
+        renderItem={item => <span>{item.descriptor.renderMessage.message.content}</span>}
+      />
+    ))
+    const row = result.container.querySelector('[data-message-id="m2"]')
+    const updated = descriptor({
+      ...ITEMS[1]!.descriptor.renderMessage.message,
+      content: 'two updated incrementally',
+    })
+
+    port!.setItems(createMessageListItems([ITEMS[0]!.descriptor, updated]))
+
+    expect(result.container.querySelector('[data-message-id="m2"]')).toBe(row)
+    expect(row).toHaveTextContent('two updated incrementally')
+  })
+
   it('scrollTo 只通过 messageId 定位内部行，不暴露 DOM', async () => {
     let port: MessageListPort | undefined
     const result = render(() => (

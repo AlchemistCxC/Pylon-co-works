@@ -64,3 +64,59 @@ export function splitStreamingMarkdown(text: string): { stable: string; unstable
   const boundary = findLastStableBlockBoundary(text)
   return { stable: text.slice(0, boundary), unstable: text.slice(boundary) }
 }
+
+export interface OpenCodeFenceTail {
+  readonly prefix: string
+  readonly language?: string
+  readonly code: string
+}
+
+/**
+ * Extracts a final, still-open fenced code block before Markdown parsing.
+ * The returned code is safe to render as plain text until the closing fence
+ * arrives, avoiding a full parser and syntax-highlighter pass per chunk.
+ */
+export function splitOpenCodeFenceTail(text: string): OpenCodeFenceTail | null {
+  let open: {
+    start: number
+    contentStart: number
+    marker: string
+    language?: string
+  } | null = null
+  let position = 0
+
+  while (position < text.length) {
+    const newline = text.indexOf('\n', position)
+    const lineEnd = newline === -1 ? text.length : newline
+    const rawLine = text.slice(position, lineEnd)
+    const line = rawLine.endsWith('\r') ? rawLine.slice(0, -1) : rawLine
+
+    if (open) {
+      const close = line.match(/^ {0,3}(`+|~+)[\t ]*$/)
+      if (close && close[1]![0] === open.marker[0] && close[1]!.length >= open.marker.length) {
+        open = null
+      }
+    } else {
+      const opening = line.match(/^ {0,3}(`{3,}|~{3,})(.*)$/)
+      if (opening && (opening[1]![0] === '~' || !opening[2]!.includes('`'))) {
+        const language = opening[2]!.trim().split(/\s+/, 1)[0] || undefined
+        open = {
+          start: position,
+          contentStart: newline === -1 ? text.length : newline + 1,
+          marker: opening[1]!,
+          ...(language ? { language } : {}),
+        }
+      }
+    }
+
+    if (newline === -1) break
+    position = newline + 1
+  }
+
+  if (!open) return null
+  return {
+    prefix: text.slice(0, open.start),
+    ...(open.language ? { language: open.language } : {}),
+    code: text.slice(open.contentStart).replace(/\r\n/g, '\n'),
+  }
+}

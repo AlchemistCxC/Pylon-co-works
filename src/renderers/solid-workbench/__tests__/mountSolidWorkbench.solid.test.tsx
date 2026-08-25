@@ -148,6 +148,77 @@ describe('mountSolidWorkbench', () => {
     expect(body.querySelectorAll('p')).toHaveLength(1)
   })
 
+  it('canonical assistant chunk updates reuse one content Slot and propagate streaming state', async () => {
+    const host = document.createElement('div')
+    document.body.append(host)
+    hosts.push(host)
+    const services = createPreviewWorkbenchServices()
+    servicesList.push(services)
+    let destroys = 0
+    const mountedNodeIds: string[] = []
+    const updates: Array<{ text: string; streaming?: boolean }> = []
+    const slot: RendererSlotContribution = {
+      id: 'test.streaming-markdown', targetSuites: ['builtin.solid'], kinds: ['content.markdown'],
+      priority: 10, fallback: false, canRender: () => true,
+      createSurface: () => ({
+        rendererId: 'test.streaming-markdown', kind: 'solid',
+        mount(container, snapshot) {
+          const target = snapshot.nodeId.startsWith('canonical-stream-1:part:')
+          if (target) mountedNodeIds.push(snapshot.nodeId)
+          const node = document.createElement('p')
+          container.append(node)
+          const apply = (value: typeof snapshot) => {
+            const payload = value.payload as { text?: string }
+            node.textContent = payload.text ?? ''
+            if (target) updates.push({ text: payload.text ?? '', streaming: (value as typeof value & { streaming?: boolean }).streaming })
+          }
+          apply(snapshot)
+          return { node, apply, target }
+        },
+        update(handle, snapshot) { (handle as { apply(value: typeof snapshot): void }).apply(snapshot) },
+        destroy(handle) {
+          if ((handle as { target: boolean }).target) destroys += 1
+          ;(handle as { node: HTMLElement }).node.remove()
+        },
+        on: () => () => {},
+      }),
+    }
+    const entry = {
+      ownerPluginId: 'test.streaming-markdown', ownerRuntimeInstanceId: 'runtime', contributionId: slot.id,
+      layer: 'feature', priority: slot.priority, value: slot,
+    } as RegistryEntry<RendererSlotContribution>
+    const suite = { id: 'builtin.solid' } as RendererSuiteContribution
+    const activation = {
+      revision: 1,
+      suite: { ownerPluginId: 'builtin.pylon-renderers', ownerRuntimeInstanceId: 'runtime', contributionId: suite.id, layer: 'feature', priority: 1, value: suite },
+      kinds: new Map(), slots: new Map([['content.markdown', [entry]]]), diagnostics: [],
+    } as RendererActivationSnapshot
+    mountSolidWorkbench({ host, input: { sheetId: 'sheet-a', sessionId: 'preview-session' }, services, activation })
+
+    const events: WorkbenchEventEnvelope[] = []
+    const chunk = (sequence: number, text: string, type: 'message.delta' | 'message.completed' = 'message.delta') => createWorkbenchEnvelope({
+      sessionId: 'preview-session', sequence, recordedAt: `2026-08-25T00:00:${String(sequence).padStart(2, '0')}.000Z`,
+      source: { provider: 'peri', sourceId: `canonical-stream-${sequence}` }, identity: { messageId: `canonical-stream-${sequence}` },
+      provenance: { origin: 'local-observed', trust: 'authoritative' },
+      event: { type, role: 'assistant', parts: [{ kind: 'markdown', text }] },
+    })
+    for (let sequence = 1; sequence <= 20; sequence += 1) {
+      events.push(chunk(sequence, sequence === 1 ? '# 标题\n\n' : `片段${sequence} `))
+      services.runtime.replaceDocument(projectWorkbench(events).document, { ownerKey: 'owner-preview', generation: sequence })
+    }
+
+    await waitFor(() => expect(updates.at(-1)?.text).toContain('片段20'))
+    expect(updates.at(-1)?.streaming).toBe(true)
+
+    events.push(chunk(21, '', 'message.completed'))
+    services.runtime.replaceDocument(projectWorkbench(events).document, { ownerKey: 'owner-preview', generation: 21 })
+    await waitFor(() => expect(updates.at(-1)?.streaming).toBeUndefined())
+
+    expect(mountedNodeIds).toEqual(['canonical-stream-1:part:0'])
+    expect(destroys).toBe(0)
+    expect(host.querySelectorAll('[data-message-id="canonical-stream-1"]')).toHaveLength(1)
+  })
+
   it('反复替换同一会话文档时不累积助手回复 DOM', async () => {
     const { host, services } = mountPreview()
     const chunk = (sequence: number, text: string) => createWorkbenchEnvelope({

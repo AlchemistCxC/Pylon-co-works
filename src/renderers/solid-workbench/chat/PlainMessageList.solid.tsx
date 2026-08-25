@@ -1,4 +1,4 @@
-import { For, createSignal, onCleanup, onMount, type JSX } from 'solid-js'
+import { For, createSignal, onCleanup, onMount, untrack, type JSX } from 'solid-js'
 import type {
   MeasurementInvalidationReason,
   MessageListAnchor,
@@ -15,6 +15,9 @@ export interface PlainMessageListProps {
 
 export function PlainMessageList(props: PlainMessageListProps) {
   const [items, setItems] = createSignal<readonly MessageListItem[]>(props.initialItems ?? [])
+  const [rows, setRows] = createSignal<readonly StableMessageListRow[]>(
+    (props.initialItems ?? []).map(createStableMessageListRow),
+  )
   const rowElements = new Map<string, HTMLElement>()
   let container: HTMLDivElement | undefined // Solid ref 会在 mount 时赋值
   let bottomAnchor: HTMLDivElement | undefined // Solid ref 会在 mount 时赋值
@@ -24,7 +27,15 @@ export function PlainMessageList(props: PlainMessageListProps) {
   const port: MessageListPort = {
     setItems(nextItems) {
       if (destroyed) return
+      const previousRows = new Map(untrack(rows).map(row => [row.key, row]))
+      const nextRows = nextItems.map(item => {
+        const existing = previousRows.get(item.key)
+        if (!existing) return createStableMessageListRow(item)
+        existing.update(item)
+        return existing
+      })
       setItems([...nextItems])
+      setRows(nextRows)
       queueMicrotask(() => port.invalidateMeasurements('items-changed'))
     },
     async scrollTo(anchor) {
@@ -73,6 +84,7 @@ export function PlainMessageList(props: PlainMessageListProps) {
       resizeObserver = undefined
       rowElements.clear()
       setItems([])
+      setRows([])
       container?.replaceChildren()
     },
   }
@@ -87,9 +99,10 @@ export function PlainMessageList(props: PlainMessageListProps) {
 
   onCleanup(() => port.destroy())
 
-  const bindRow = (messageId: string, node: HTMLElement) => {
+  const bindRow = (item: MessageListItem, node: HTMLElement) => {
+    const messageId = item.descriptor.renderMessage.message.id
     rowElements.set(messageId, node)
-    onCleanup(() => rowElements.delete(messageId))
+    onCleanup(() => { if (rowElements.get(messageId) === node) rowElements.delete(messageId) })
   }
 
   return (
@@ -99,14 +112,14 @@ export function PlainMessageList(props: PlainMessageListProps) {
       data-message-list="plain"
       data-measurement-revision="0"
     >
-      <For each={items()}>{item => {
-        const messageId = item.descriptor.renderMessage.message.id
+      <For each={rows()}>{row => {
+        const item = row.item
         return (
           <div
-            ref={node => bindRow(messageId, node)}
+            ref={node => bindRow(item, node)}
             class="plain-message-list__row"
-            data-message-id={messageId}
-            data-message-key={item.key}
+            data-message-id={item.descriptor.renderMessage.message.id}
+            data-message-key={row.key}
           >
             {props.renderItem(item)}
           </div>
@@ -115,6 +128,26 @@ export function PlainMessageList(props: PlainMessageListProps) {
       <div ref={bottomAnchor} class="plain-message-list__bottom" aria-hidden="true" />
     </div>
   )
+}
+
+interface StableMessageListRow {
+  readonly key: string
+  readonly item: MessageListItem
+  update(item: MessageListItem): void
+}
+
+function createStableMessageListRow(initialItem: MessageListItem): StableMessageListRow {
+  const [current, setCurrent] = createSignal(initialItem)
+  const item: MessageListItem = {
+    get key() { return current().key },
+    get descriptor() { return current().descriptor },
+    get estimatedHeight() { return current().estimatedHeight },
+  }
+  return {
+    key: initialItem.key,
+    item,
+    update: setCurrent,
+  }
 }
 
 export function resolveMessageScrollIntoViewOptions(anchor: MessageListAnchor): ScrollIntoViewOptions {

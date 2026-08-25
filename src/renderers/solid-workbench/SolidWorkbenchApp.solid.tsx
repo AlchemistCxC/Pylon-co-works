@@ -1,4 +1,4 @@
-import { ErrorBoundary, For, Index, Show, createEffect, createMemo, createSignal, onCleanup, onMount } from 'solid-js'
+import { ErrorBoundary, For, Index, Match, Show, Switch, createEffect, createMemo, createSignal, onCleanup, onMount } from 'solid-js'
 import { buildChatRowDescriptors } from '../../components/chat/chatRowPipeline.ts'
 import { buildMessageLookups } from '../../components/chat/messageLookups.ts'
 import { prepareMessages } from '../../components/chat/messagePipeline.ts'
@@ -679,16 +679,6 @@ function WorkbenchRow(props: {
       ? (props.context.activation?.slots.get(kind) ?? []).filter(entry => entry.value.kinds.includes(kind))
       : []
   }
-  const renderDefaultMessage = () => <SolidMessageRow
-    renderMessage={current()}
-    appearance={props.appearance}
-    highlighted={props.descriptor.isSearchMatch}
-    semanticContent={<WorkbenchMessageContent
-      renderMessage={current()}
-      context={props.context}
-    />}
-  />
-
   return (
     <>
       <Show when={props.descriptor.showConnector && previousTool()}>
@@ -702,29 +692,60 @@ function WorkbenchRow(props: {
           layoutPort={props.connectorPort}
         />}
       </Show>
-      <Show
-        when={current().type === 'tool_call' || current().type === 'tool_result'}
-        fallback={<Show when={slotCandidates().length > 0} fallback={renderDefaultMessage()}>
+      <Switch>
+        <Match when={current().type === 'tool_call' || current().type === 'tool_result'}>
+          <div class="term-row term-row-tool" data-render-type={current().type}>
+            <SolidToolCard
+              message={current().message}
+              visualState={visualState()}
+              appearance={props.appearance}
+              messageId={current().message.id}
+              layoutPort={props.connectorPort}
+            />
+          </div>
+        </Match>
+        <Match when={slotCandidates().length > 0}>
           <SolidRendererSlotHost
             candidates={slotCandidates()}
             node={{ nodeId: current().message.id, kind: messageFrameKind() ?? 'content.unknown', revision: props.context.runtimeSnapshot().revision, payload: current() }}
             context={props.context}
-            fallback={renderDefaultMessage()}
+            fallback={<WorkbenchDefaultMessage
+              renderMessage={current()}
+              appearance={props.appearance}
+              highlighted={props.descriptor.isSearchMatch}
+              context={props.context}
+            />}
           />
-        </Show>}
-      >
-        <div class="term-row term-row-tool" data-render-type={current().type}>
-          <SolidToolCard
-            message={current().message}
-            visualState={visualState()}
+        </Match>
+        <Match when={true}>
+          <WorkbenchDefaultMessage
+            renderMessage={current()}
             appearance={props.appearance}
-            messageId={current().message.id}
-            layoutPort={props.connectorPort}
+            highlighted={props.descriptor.isSearchMatch}
+            context={props.context}
           />
-        </div>
-      </Show>
+        </Match>
+      </Switch>
     </>
   )
+}
+
+function WorkbenchDefaultMessage(props: {
+  renderMessage: RenderMessage
+  appearance: SolidWorkbenchContextValue['appearanceSnapshot'] extends () => infer T ? T : never
+  highlighted: boolean
+  context: SolidWorkbenchContextValue
+}) {
+  // Materialise the semantic subtree once. Passing the component expression
+  // directly as a JSX prop makes every semanticContent read construct another
+  // Slot host before Solid's role branch selects its visible child.
+  const semanticContent = <WorkbenchMessageContent renderMessage={props.renderMessage} context={props.context} />
+  return <SolidMessageRow
+    renderMessage={props.renderMessage}
+    appearance={props.appearance}
+    highlighted={props.highlighted}
+    semanticContent={semanticContent}
+  />
 }
 
 function WorkbenchMessageContent(props: {
@@ -763,21 +784,48 @@ function WorkbenchMessageContent(props: {
   // every few-token chunk become its own block/line. Merge adjacent textual
   // parts before dispatching to the renderer; non-text parts stay boundaries.
   const renderParts = createMemo(() => coalesceAdjacentDisplayTextParts(parts()))
-  return <For each={renderParts()}>{(part, index) => (
-    <WorkbenchContentSlot
-      nodeId={`${message().id}:part:${index()}`}
-      kind={contentRenderKind(part)}
-      payload={part}
+  return <Index each={renderParts()}>{(part, index) => (
+    <WorkbenchMessagePart
+      part={part}
+      index={index}
+      renderMessage={props.renderMessage}
+      inline={inline}
       context={props.context}
-      fallback={renderBuiltinContentPart(part, inline, props.context)}
     />
-  )}</For>
+  )}</Index>
+}
+
+function WorkbenchMessagePart(props: {
+  part: () => ContentPart
+  index: number
+  renderMessage: RenderMessage
+  inline: boolean
+  context: SolidWorkbenchContextValue
+}) {
+  const message = () => props.renderMessage.message
+  const kind = () => contentRenderKind(props.part())
+  const streaming = () => props.renderMessage.type === 'assistant'
+    && message().running === true
+    && (props.part().kind === 'text' || props.part().kind === 'markdown')
+  // A payload update keeps the Slot instance. A semantic kind change is a real
+  // boundary and must remount so candidate selection cannot retain the old kind.
+  return <Show keyed when={kind()}>{renderKind => (
+    <WorkbenchContentSlot
+      nodeId={`${message().id}:part:${props.index}`}
+      kind={renderKind}
+      payload={props.part()}
+      streaming={streaming()}
+      context={props.context}
+      fallback={renderBuiltinContentPart(props.part(), props.inline, props.context, streaming())}
+    />
+  )}</Show>
 }
 
 function WorkbenchContentSlot(props: {
   nodeId: string
   kind: string
   payload: unknown
+  streaming?: boolean
   context: SolidWorkbenchContextValue
   fallback: import('solid-js').JSX.Element
 }) {
@@ -799,7 +847,13 @@ function WorkbenchContentSlot(props: {
   return <Show when={hasCandidate()} fallback={props.fallback}>
     <SolidRendererSlotHost
       candidates={candidates()}
-      node={{ nodeId: props.nodeId, kind: props.kind, revision: props.context.runtimeSnapshot().revision, payload: props.payload }}
+      node={{
+        nodeId: props.nodeId,
+        kind: props.kind,
+        revision: props.context.runtimeSnapshot().revision,
+        payload: props.payload,
+        ...(props.streaming === true ? { streaming: true } : {}),
+      }}
       context={props.context}
       fallback={props.fallback}
     />
@@ -818,8 +872,15 @@ function contentRenderKind(part: ContentPart): string {
   return part.kind.includes('.') ? part.kind : `content.${part.kind}`
 }
 
-function renderBuiltinContentPart(part: ContentPart, inline: boolean, context: SolidWorkbenchContextValue) {
-  if (part.kind === 'text' || part.kind === 'markdown') return <MarkdownContent text={part.text} inline={inline} />
+function renderBuiltinContentPart(
+  part: ContentPart,
+  inline: boolean,
+  context: SolidWorkbenchContextValue,
+  streaming = false,
+) {
+  if (part.kind === 'text' || part.kind === 'markdown') {
+    return <MarkdownContent text={part.text} inline={inline} streaming={streaming} />
+  }
   if (part.kind === 'code') return <SolidCodeBlock code={part.text} language={part.language} />
   if (part.kind === 'ansi') return <SolidAnsiBlock text={part.text} reducedMotion={context.input().reducedMotion} />
   if (part.kind === 'file-reference' || part.kind === 'file-selection' || part.kind === 'document' || part.kind === 'resource') {

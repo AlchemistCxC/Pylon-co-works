@@ -22,6 +22,8 @@ export interface RenderNodeSnapshot {
   readonly kind: string
   readonly revision: number
   readonly payload: unknown
+  /** Transient presentation state; never persisted into canonical payloads. */
+  readonly streaming?: boolean
 }
 
 export type RenderAppearanceSnapshot = Readonly<Record<string, unknown>>

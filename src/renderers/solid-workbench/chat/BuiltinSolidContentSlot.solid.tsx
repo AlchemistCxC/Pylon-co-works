@@ -96,7 +96,7 @@ export function BuiltinSolidContentSlot(props: {
         <pre class="solid-content-unknown">{unknownSummary(props.snapshot.payload, kind())}</pre>
       }>
       <Match when={kind() === 'content.text' || kind() === 'content.markdown'}>
-        <MarkdownContent text={text()} />
+        <MarkdownContent text={text()} streaming={props.snapshot.streaming === true} />
       </Match>
       <Match when={kind() === 'content.code'}>
         <SolidCodeBlock
