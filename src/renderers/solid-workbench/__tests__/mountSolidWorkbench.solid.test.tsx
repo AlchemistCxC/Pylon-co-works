@@ -243,7 +243,25 @@ describe('mountSolidWorkbench', () => {
   })
 
   it('切换会话时即使 message id 相同也只保留当前会话的一行', async () => {
-    const { host, services, lifecycle } = mountPreview()
+    const host = document.createElement('div')
+    document.body.append(host)
+    hosts.push(host)
+    const services = createPreviewWorkbenchServices()
+    servicesList.push(services)
+    const slot = createBuiltinSolidContentSlot()
+    const slotEntry = {
+      ownerPluginId: 'builtin.pylon-renderers', ownerRuntimeInstanceId: 'runtime',
+      contributionId: slot.id, layer: 'feature', priority: slot.priority, value: slot,
+    } as RegistryEntry<RendererSlotContribution>
+    const suite = { id: 'builtin.solid' } as RendererSuiteContribution
+    const activation = {
+      revision: 1,
+      suite: { ownerPluginId: 'builtin.pylon-renderers', ownerRuntimeInstanceId: 'runtime', contributionId: suite.id, layer: 'feature', priority: 1, value: suite },
+      kinds: new Map(), slots: new Map([['content.markdown', [slotEntry]]]), diagnostics: [],
+    } as RendererActivationSnapshot
+    const lifecycle = mountSolidWorkbench({
+      host, input: { sheetId: 'sheet-a', sessionId: 'preview-session', preview: true }, services, activation,
+    })
     const documentFor = (sessionId: string, text: string) => projectWorkbench([createWorkbenchEnvelope({
       sessionId,
       sequence: 1,
@@ -260,9 +278,11 @@ describe('mountSolidWorkbench', () => {
     lifecycle.update({ sheetId: 'sheet-a', sessionId: 'session-a', preview: true })
     const firstRow = await waitFor(() => {
       const row = host.querySelector('[data-message-id="same-message-id"]')
-      if (!row) throw new Error('session A row not mounted')
+      expect(row?.querySelector('[data-renderer-slot-id="builtin.solid.content.base"]')).toHaveTextContent('会话 A')
+      if (!row) throw new Error('session A production Slot row not mounted')
       return row
     })
+    const firstSlot = firstRow.querySelector('[data-renderer-slot-id="builtin.solid.content.base"]')
 
     for (let iteration = 0; iteration < 100; iteration += 1) {
       services.runtime.replaceDocument(documentFor('session-b', '会话 B'), {
@@ -277,7 +297,9 @@ describe('mountSolidWorkbench', () => {
 
     await waitFor(() => expect(host.querySelector('[data-message-id="same-message-id"]')).toHaveTextContent('会话 A'))
     expect(host.querySelectorAll('[data-message-id="same-message-id"]')).toHaveLength(1)
+    expect(host.querySelectorAll('[data-renderer-slot-id="builtin.solid.content.base"]')).toHaveLength(1)
     expect(host.querySelector('[data-message-id="same-message-id"]')).toBe(firstRow)
+    expect(host.querySelector('[data-renderer-slot-id="builtin.solid.content.base"]')).toBe(firstSlot)
     expect(host).not.toHaveTextContent('会话 B')
   })
 
