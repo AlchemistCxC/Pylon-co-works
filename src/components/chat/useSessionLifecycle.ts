@@ -173,6 +173,9 @@ export function useSessionLifecycle(
       setStreamingText(streaming?.text ?? '')
       setStreamingThinking(streaming?.thinking ?? '')
       setSummary(controllerHandleRef.current?.getSummary(s.source) ?? null)
+      setGenerationPhase(controllerHandleRef.current?.getGenerationPhase(s.source) ?? null)
+      const lastActivityAt = controllerHandleRef.current?.getLastActivityAt(s.source)
+      if (lastActivityAt !== undefined) setLastTokenAt(lastActivityAt)
       const sourceGenerating = (useRuntimeStore.getState().liveGeneratingSources || []).includes(s.source)
       setGenerating(sourceGenerating)
       return messages

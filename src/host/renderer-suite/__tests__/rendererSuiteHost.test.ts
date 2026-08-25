@@ -19,6 +19,7 @@ function fakeHost(): WorkbenchHostPort {
   }
   return {
     document: { getSnapshot: () => ({ revision: 5 } as never), subscribe: () => () => {}, getSlice: <T>() => undefined as T, subscribeSlice: () => () => {} },
+    generation: { getSnapshot: () => ({}) as never, subscribe: () => () => {} },
     appearance: { getSnapshot: () => ({}) as never, subscribe: () => () => {} },
     sessionUi,
     commands: new Proxy({} as WorkbenchHostPort['commands'], { get: () => denied }),

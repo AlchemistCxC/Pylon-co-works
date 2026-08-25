@@ -11,8 +11,8 @@ import { resolveFrameIndex, type SpinnerMotionKind } from './spinnerMotion.ts'
 
 export type SpinnerActivity = 'active' | 'waiting' | 'stalled'
 
-/** CC 对齐阈值：3s stalled（渐变红）、1.2s waiting（Pylon 两级） */
-export const ACTIVITY_THRESHOLDS = { waitingMs: 1200, stalledMs: 3000 } as const
+/** 给远端 ACP/provider 留出正常首包与工具调度时间，避免短暂抖动过早显示为迟滞。 */
+export const ACTIVITY_THRESHOLDS = { waitingMs: 3000, stalledMs: 10000 } as const
 
 /** stalled 渐变红斜坡：超过 stalledMs 后 3s 内从 0 渐进到 1（P1-08 强度递增） */
 export const STALL_RAMP_MS = 3000

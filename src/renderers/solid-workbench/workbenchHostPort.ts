@@ -2,7 +2,7 @@ import type { AppearanceCommand, WorkbenchAppearanceSnapshot, WorkbenchAppearanc
 import type { SessionUiKey, SessionUiScope, SessionUiStore } from '../../domains/workbench/sessionUiStore.ts'
 import type { WorkbenchCommandFacade, SendCommand, SendResult, CancelResult, WorkbenchAttachment, SessionCreateInput, ExportSessionInput, CommandResult } from '../../domains/workbench/workbenchCommandFacade.ts'
 import type { WorkbenchDocument, WorkbenchMessage, WorkbenchActivityNode, WorkbenchInteraction, WorkbenchTimelineEntry } from '../../domains/workbench/workbenchProjector.ts'
-import type { WorkbenchRuntime, WorkbenchRuntimeSlice } from '../../domains/workbench/workbenchRuntime.ts'
+import type { WorkbenchRuntime, WorkbenchRuntimeSlice, WorkbenchRuntimeSnapshot } from '../../domains/workbench/workbenchRuntime.ts'
 import type { RenderAppearanceSnapshot } from '../../contracts/messageRenderer.ts'
 
 export type WorkbenchDocumentSlice = 'document' | 'timeline' | 'messages' | 'activities' | 'interactions' | 'extensions' | 'session' | 'usage' | 'config' | 'commands' | 'assist' | 'diagnostics'
@@ -12,6 +12,15 @@ export interface WorkbenchDocumentReader {
   subscribe(listener: () => void): () => void
   getSlice<T = unknown>(slice: WorkbenchDocumentSlice): T
   subscribeSlice(slice: WorkbenchDocumentSlice, listener: () => void): () => void
+}
+
+export type WorkbenchGenerationSnapshot = Readonly<Pick<WorkbenchRuntimeSnapshot,
+  'generating' | 'generationStart' | 'lastTokenAt' | 'generationPhase' | 'thinkingStart' | 'tokenCount' | 'summary'>>
+
+/** Session-scoped ephemeral state that cannot be reconstructed from persisted transcript rows. */
+export interface WorkbenchGenerationReader {
+  getSnapshot(): WorkbenchGenerationSnapshot
+  subscribe(listener: () => void): () => void
 }
 
 export interface ResolvedAppearanceReader {
@@ -104,6 +113,7 @@ export interface RendererDiagnosticPort {
 
 export interface WorkbenchHostPort {
   readonly document: WorkbenchDocumentReader
+  readonly generation: WorkbenchGenerationReader
   readonly appearance: ResolvedAppearanceReader
   readonly sessionUi: SessionUiPort
   readonly commands: WorkbenchCommandPort
@@ -146,6 +156,22 @@ function createDocumentReader(runtime: WorkbenchRuntime): WorkbenchDocumentReade
     getSlice: slice => runtime.getSlice(mapDocumentSlice(slice)),
     subscribeSlice: (slice, listener) => runtime.subscribeSlice(mapDocumentSlice(slice), listener),
   }
+}
+
+function createGenerationReader(runtime: WorkbenchRuntime): WorkbenchGenerationReader {
+  const getSnapshot = (): WorkbenchGenerationSnapshot => {
+    const snapshot = runtime.getSnapshot()
+    return Object.freeze({
+      generating: snapshot.generating,
+      generationStart: snapshot.generationStart,
+      lastTokenAt: snapshot.lastTokenAt,
+      generationPhase: snapshot.generationPhase,
+      thinkingStart: snapshot.thinkingStart,
+      tokenCount: snapshot.tokenCount,
+      summary: snapshot.summary,
+    })
+  }
+  return { getSnapshot, subscribe: listener => runtime.subscribe(listener) }
 }
 
 function createAppearanceReader(input: WorkbenchHostPortInput, capabilities: WorkbenchCapabilityReader): ResolvedAppearanceReader {
@@ -264,6 +290,7 @@ export function createWorkbenchHostPort(input: WorkbenchHostPortInput): Workbenc
   }
   return Object.freeze({
     document: createDocumentReader(input.runtime),
+    generation: createGenerationReader(input.runtime),
     appearance: createAppearanceReader(input, capabilities),
     sessionUi: createSessionUiPort(input.sessionUi, namespace),
     commands: createCommandPort(input.commands, capabilities),

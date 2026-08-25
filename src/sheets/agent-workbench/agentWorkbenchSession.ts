@@ -1,6 +1,6 @@
 import type { Session } from '../../identityStore.ts'
 import { toCanonicalOwnerKey, validateCanonicalEvent, type CanonicalConversationEvent } from '../../domains/events/eventSchema.ts'
-import { migrateWorkbenchEnvelope, type WorkbenchEventEnvelope } from '../../domains/workbench/events/workbenchEventSchema.ts'
+import { createWorkbenchEnvelope, migrateWorkbenchEnvelope, type WorkbenchEventEnvelope } from '../../domains/workbench/events/workbenchEventSchema.ts'
 import { normalizeAgentEvent } from '../../domains/workbench/normalizers/agentEventNormalizer.ts'
 import { createWorkbenchDocument, projectWorkbench, reduceWorkbenchEvent, type WorkbenchDocument } from '../../domains/workbench/workbenchProjector.ts'
 import { createWorkbenchRuntime } from '../../domains/workbench/workbenchRuntime.ts'
@@ -9,12 +9,16 @@ import { createZustandWorkbenchAppearanceStore } from '../../domains/workbench/z
 import { IS_TAURI } from '../../infrastructure/tauri/env.ts'
 import { tauriCanonicalEventRepository } from '../../infrastructure/events/canonicalEventRepository.ts'
 import { subscribePluginEvents } from '../../infrastructure/events/pluginEventBus.ts'
+import { getChatController, type ChatControllerHandle } from '../../components/chat/chatEventController.ts'
 import { createAgentWorkbenchCommandFacade, type ResolvedWorkbenchInteraction } from './agentWorkbenchCommands.ts'
 
 export interface AgentWorkbenchSessionRuntimeDependencies {
   loadAll(ownerKey: string): Promise<readonly unknown[]>
   subscribe(listener: (event: unknown) => void): () => void
   commands?: Partial<import('./agentWorkbenchCommands.ts').AgentWorkbenchCommandDependencies>
+  chatController?: () => Pick<ChatControllerHandle,
+    'subscribe' | 'getGenerating' | 'getStartTime' | 'getLastActivityAt' | 'getGenerationPhase' | 'rejectOptimisticUser'
+    | 'getThinkingStart' | 'getTokenCount' | 'getSummary'> | null
 }
 
 function canonicalRowToWorkbench(row: unknown): readonly WorkbenchEventEnvelope[] | undefined {
@@ -86,6 +90,7 @@ export function createAgentWorkbenchSessionRuntime(dependencies: Partial<AgentWo
   const defaults = defaultDependencies()
   const loadAll = dependencies.loadAll ?? defaults.loadAll
   const subscribe = dependencies.subscribe ?? defaults.subscribe
+  const chatController = () => dependencies.chatController?.() ?? getChatController()
   const runtime = createWorkbenchRuntime({
     sessionId: null, status: 'idle', messages: [], streamingText: '', streamingThinking: '',
     generating: false, generationStart: 0, tokenCount: 0, summary: null, tasks: [],
@@ -97,6 +102,9 @@ export function createAgentWorkbenchSessionRuntime(dependencies: Partial<AgentWo
   let boundSessionId: string | undefined
   const commands = createAgentWorkbenchCommandFacade({
     ...dependencies.commands,
+    rejectOptimisticUser: (targetSource, clientMessageId) => chatController()?.rejectOptimisticUser(targetSource, clientMessageId),
+    optimisticDocument: projectOptimisticUser,
+    rejectOptimisticDocument: rejectOptimisticUser,
     resolveConfigOption(sessionId, key) {
       if (boundSessionId !== sessionId) return undefined
       const option = runtime.getSnapshot().document?.session.options.find(item => item.id === key)
@@ -135,12 +143,145 @@ export function createAgentWorkbenchSessionRuntime(dependencies: Partial<AgentWo
   let buffered: WorkbenchEventEnvelope[] = []
   let malformedCount = 0
   let destroyed = false
+  let unsubscribeSourceRuntime = () => {}
+  const pendingOptimisticBySource = new Map<string, Array<{
+    clientMessageId: string
+    content: string
+    priorCanonicalMatches: number
+    envelope: WorkbenchEventEnvelope
+  }>>()
 
   const updateRuntimeState = (patch: Parameters<typeof runtime.update>[0]) => {
     runtime.update({ ...patch, document: runtime.getSnapshot().document })
   }
 
-  const applyLive = (envelope: WorkbenchEventEnvelope) => {
+  const syncSourceRuntime = (targetSource: string) => {
+    if (destroyed || source !== targetSource) return
+    const controller = chatController()
+    if (!controller) return
+    const generating = controller.getGenerating(targetSource)
+    updateRuntimeState({
+      generating,
+      generationStart: generating ? controller.getStartTime(targetSource) : 0,
+      lastTokenAt: controller.getLastActivityAt(targetSource),
+      generationPhase: controller.getGenerationPhase(targetSource),
+      thinkingStart: controller.getThinkingStart(targetSource),
+      tokenCount: controller.getTokenCount(targetSource),
+      summary: controller.getSummary(targetSource) ?? null,
+    })
+  }
+
+  const followSourceRuntime = (targetSource: string | undefined) => {
+    unsubscribeSourceRuntime()
+    unsubscribeSourceRuntime = () => {}
+    if (!targetSource) return
+    const controller = chatController()
+    if (!controller) return
+    syncSourceRuntime(targetSource)
+    unsubscribeSourceRuntime = controller.subscribe(targetSource, () => syncSourceRuntime(targetSource))
+  }
+
+  function projectOptimisticUser(targetSource: string, content: string, clientMessageId: string): void {
+    if (destroyed || source !== targetSource || !boundSessionId) return
+    const current = runtime.getSnapshot().document ?? createWorkbenchDocument(targetSource)
+    const existing = pendingOptimisticBySource.get(targetSource) ?? []
+    if (existing.some(item => item.clientMessageId === clientMessageId)) return
+    const now = Date.now()
+    const envelope = createWorkbenchEnvelope({
+      eventId: `optimistic:${targetSource}:${clientMessageId}`,
+      sessionId: targetSource,
+      sequence: current.revision + existing.length + 1,
+      recordedAt: new Date(now).toISOString(),
+      source: { provider: 'local-user', sourceId: clientMessageId },
+      identity: { interactionId: clientMessageId },
+      provenance: { origin: 'optimistic-local', trust: 'unverified' },
+      event: { type: 'message.delta', role: 'user', parts: [{ kind: 'text', text: content }] },
+    })
+    existing.push({
+      clientMessageId,
+      content,
+      priorCanonicalMatches: current.messages.filter(message => message.role === 'user'
+        && message.content === content && message.optimistic !== true).length
+        + existing.filter(item => item.content === content).length,
+      envelope,
+    })
+    pendingOptimisticBySource.set(targetSource, existing)
+    runtime.applyDocument(reduceWorkbenchEvent(current, envelope), { ownerKey, generation })
+    updateRuntimeState({
+      generating: true,
+      generationStart: now,
+      lastTokenAt: now,
+      generationPhase: { kind: 'thinking' },
+      summary: null,
+    })
+  }
+
+  function rejectOptimisticUser(targetSource: string, clientMessageId: string): void {
+    const pending = pendingOptimisticBySource.get(targetSource) ?? []
+    const rejected = pending.find(item => item.clientMessageId === clientMessageId)
+    if (!rejected) return
+    const remaining = pending.filter(item => item !== rejected)
+    if (remaining.length > 0) pendingOptimisticBySource.set(targetSource, remaining)
+    else pendingOptimisticBySource.delete(targetSource)
+    if (source !== targetSource) return
+    const current = runtime.getSnapshot().document
+    if (!current) return
+    const document = {
+      ...current,
+      appliedEventIds: current.appliedEventIds.filter(id => id !== rejected.envelope.eventId),
+      timeline: current.timeline.filter(entry => entry.eventId !== rejected.envelope.eventId),
+      messages: current.messages.filter(message => !(message.optimistic
+        && message.identity.interactionId === clientMessageId)),
+    }
+    runtime.replaceDocument(document, { ownerKey, generation, sessionId: boundSessionId ?? null })
+    updateRuntimeState({
+      generating: remaining.length > 0 || document.messages.some(message => message.running),
+      generationPhase: remaining.length > 0 ? { kind: 'thinking' } : undefined,
+    })
+  }
+
+  const withPendingOptimistic = (targetSource: string, base: WorkbenchDocument): WorkbenchDocument => {
+    const pending = pendingOptimisticBySource.get(targetSource) ?? []
+    if (pending.length === 0) return base
+    let document = base
+    const remaining = [] as typeof pending
+    for (const item of pending) {
+      const canonicalMatches = document.messages.filter(message => message.role === 'user'
+        && message.content === item.content && message.optimistic !== true).length
+      if (canonicalMatches > item.priorCanonicalMatches) continue
+      const next = reduceWorkbenchEvent(document, item.envelope)
+      if (next.messages.some(message => message.optimistic
+        && message.identity.interactionId === item.clientMessageId)) remaining.push(item)
+      document = next
+    }
+    if (remaining.length > 0) pendingOptimisticBySource.set(targetSource, remaining)
+    else pendingOptimisticBySource.delete(targetSource)
+    return document
+  }
+
+  const confirmPendingFromEnvelope = (envelope: WorkbenchEventEnvelope): WorkbenchEventEnvelope => {
+    if (envelope.provenance.origin === 'optimistic-local') return envelope
+    if ((envelope.event.type !== 'message.delta' && envelope.event.type !== 'message.completed')
+      || envelope.event.role !== 'user') return envelope
+    const content = (envelope.event.parts ?? []).map(part => 'text' in part ? part.text : '').join('')
+    const targetSource = envelope.sessionId
+    const pending = pendingOptimisticBySource.get(targetSource) ?? []
+    const requestId = envelope.identity.interactionId
+    const matched = (requestId ? pending.find(item => item.clientMessageId === requestId) : undefined)
+      ?? pending.find(item => item.content === content)
+    if (!matched) return envelope
+    const remaining = pending.filter(item => item !== matched)
+    if (remaining.length > 0) pendingOptimisticBySource.set(targetSource, remaining)
+    else pendingOptimisticBySource.delete(targetSource)
+    if (requestId === matched.clientMessageId) return envelope
+    return Object.freeze({
+      ...envelope,
+      identity: Object.freeze({ ...envelope.identity, interactionId: matched.clientMessageId }),
+    })
+  }
+
+  const applyLive = (incoming: WorkbenchEventEnvelope) => {
+    const envelope = confirmPendingFromEnvelope(incoming)
     if (loading) { buffered.push(envelope); return }
     const current = runtime.getSnapshot().document ?? createWorkbenchDocument(envelope.sessionId)
     runtime.applyDocument(reduceWorkbenchEvent(current, envelope), { ownerKey, generation })
@@ -170,6 +311,7 @@ export function createAgentWorkbenchSessionRuntime(dependencies: Partial<AgentWo
       const nextGeneration = ++generation
       boundSessionId = session?.id
       source = session?.source
+      followSourceRuntime(source)
       ownerKey = session ? toCanonicalOwnerKey({ profileId: session.profileId, agentId: session.agentId, localSessionId: session.source }) : undefined
       buffered = []
       malformedCount = 0
@@ -177,7 +319,13 @@ export function createAgentWorkbenchSessionRuntime(dependencies: Partial<AgentWo
       runtime.replaceDocument(createWorkbenchDocument(session?.source ?? ''), {
         ownerKey: ownerKey ?? `unbound:${nextGeneration}`, generation: nextGeneration, sessionId: session?.id ?? null,
       })
-      updateRuntimeState({ status: loading ? 'loading' : 'idle', error: null })
+      updateRuntimeState({
+        status: loading ? 'loading' : 'idle', error: null,
+        ...(source && chatController()?.getGenerating(source)
+          ? {}
+          : { generating: false, generationStart: 0, lastTokenAt: undefined, generationPhase: undefined, thinkingStart: undefined, summary: null }),
+      })
+      if (source) syncSourceRuntime(source)
       if (!session || !ownerKey) return
       const loadingOwnerKey = ownerKey
       await loadAll(loadingOwnerKey).then(rows => {
@@ -189,12 +337,14 @@ export function createAgentWorkbenchSessionRuntime(dependencies: Partial<AgentWo
           return []
         })
         const projected = projectWorkbench([...envelopes, ...buffered], { initialDocument: createWorkbenchDocument(session.source) }).document
-        const document = malformedCount > 0 ? withJournalDiagnostic(projected, malformedCount) : projected
+        const reconciled = withPendingOptimistic(session.source, projected)
+        const document = malformedCount > 0 ? withJournalDiagnostic(reconciled, malformedCount) : reconciled
         buffered = []; loading = false
         runtime.replaceDocument(document, { ownerKey: loadingOwnerKey, generation: nextGeneration, sessionId: session.id })
         updateRuntimeState(malformedCount > 0
           ? { status: 'degraded', error: `canonical journal 有 ${malformedCount} 条事件无法迁移` }
           : { status: 'ready', error: null })
+        syncSourceRuntime(session.source)
       }).catch(error => {
         if (destroyed || generation !== nextGeneration || ownerKey !== loadingOwnerKey) return
         loading = false; buffered = []
@@ -203,7 +353,7 @@ export function createAgentWorkbenchSessionRuntime(dependencies: Partial<AgentWo
     },
     destroy() {
       if (destroyed) return
-      destroyed = true; unsubscribeEvents(); runtime.destroy(); appearance.destroy(); sessionUi.destroy()
+      destroyed = true; unsubscribeSourceRuntime(); unsubscribeEvents(); runtime.destroy(); appearance.destroy(); sessionUi.destroy()
     },
   }
 }

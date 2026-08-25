@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import { describe, expect, it, vi, beforeEach } from 'vitest'
-import { render, screen, fireEvent, waitFor } from '@testing-library/react'
+import { act, render, screen, fireEvent, waitFor } from '@testing-library/react'
 import FileViewHost from '../FileViewHost'
 import type { FileTabRecord } from '../fileSheetState'
 import { resetStores } from '../../../test/resetStores'
@@ -18,6 +18,12 @@ const otherTab: FileTabRecord = { path: 'src/b.ts', mode: 'file' }
 
 function readTextResult(content: string, truncated = false) {
   return { relativePath: 'src/a.ts', content, bytesRead: content.length, totalBytes: content.length, truncated }
+}
+
+function deferred<T>() {
+  let resolve!: (value: T) => void
+  const promise = new Promise<T>(done => { resolve = done })
+  return { promise, resolve }
 }
 
 async function editAndType(value = 'const x = 2') {
@@ -181,5 +187,67 @@ describe('FileViewHost 真实编辑/save/working-diff（I08-A-FE-02）', () => {
     await screen.findByText('const x = 1')
     expect(screen.queryByText(/未保存/)).toBeNull()
     expect(screen.queryByText('已保存')).toBeNull()
+  })
+
+  it('workspace identity 切换会立即退出旧 workspace 的编辑态，不等待新文件读取完成', async () => {
+    const nextRead = deferred<ReturnType<typeof readTextResult>>()
+    invoke.mockImplementation((cmd: string, args: { source?: string } | undefined) => {
+      if (cmd === 'read_workspace_text' && args?.source === 'ws-a') return Promise.resolve(readTextResult('const x = 1'))
+      if (cmd === 'read_workspace_text' && args?.source === 'ws-b') return nextRead.promise
+      return Promise.reject(new Error(`unexpected invoke ${cmd}`))
+    })
+    const { rerender } = render(<FileViewHost source="ws-a" tab={fileTab} onCloseTab={vi.fn()} />)
+    await screen.findByText('const x = 1')
+    await editAndType('unsaved from workspace a')
+
+    rerender(<FileViewHost source="ws-b" tab={fileTab} onCloseTab={vi.fn()} />)
+
+    await waitFor(() => expect(document.querySelector('.file-code-editor')).toBeNull())
+    expect(screen.queryByText(/未保存/)).toBeNull()
+    expect(screen.getByRole('button', { name: '编辑' })).toBeTruthy()
+  })
+
+  it('旧 workspace 的迟到保存结果不能污染新 workspace 的保存状态', async () => {
+    const write = deferred<ReturnType<typeof readTextResult>>()
+    invoke.mockImplementation((cmd: string, args: { source?: string } | undefined) => {
+      if (cmd === 'read_workspace_text') {
+        return Promise.resolve(readTextResult(args?.source === 'ws-b' ? 'workspace b' : 'const x = 1'))
+      }
+      if (cmd === 'write_workspace_text') return write.promise
+      return Promise.reject(new Error(`unexpected invoke ${cmd}`))
+    })
+    const { rerender } = render(<FileViewHost source="ws-a" tab={fileTab} onCloseTab={vi.fn()} />)
+    await screen.findByText('const x = 1')
+    await editAndType('workspace a edit')
+    fireEvent.click(screen.getByRole('button', { name: '保存' }))
+    await screen.findByText('保存中…')
+
+    rerender(<FileViewHost source="ws-b" tab={fileTab} onCloseTab={vi.fn()} />)
+    await screen.findByText('workspace b')
+    await act(async () => { write.resolve(readTextResult('workspace a saved')); await write.promise })
+
+    expect(screen.queryByText('已保存')).toBeNull()
+    expect(screen.getByText('workspace b')).toBeTruthy()
+  })
+
+  it('保存进行中继续输入时，保存回执只推进磁盘基线且不覆盖后续编辑', async () => {
+    const write = deferred<ReturnType<typeof readTextResult>>()
+    invoke.mockImplementation((cmd: string) => {
+      if (cmd === 'read_workspace_text') return Promise.resolve(readTextResult('const x = 1'))
+      if (cmd === 'write_workspace_text') return write.promise
+      return Promise.reject(new Error(`unexpected invoke ${cmd}`))
+    })
+    render(<FileViewHost source="ws-a" tab={fileTab} onCloseTab={vi.fn()} />)
+    await screen.findByText('const x = 1')
+    const editor = await editAndType('const x = 2')
+    fireEvent.click(screen.getByRole('button', { name: '保存' }))
+    await screen.findByText('保存中…')
+
+    replaceFileEditorValue(editor, 'const x = 3')
+    await act(async () => { write.resolve(readTextResult('const x = 2')); await write.promise })
+
+    expect(editor.state.doc.toString()).toBe('const x = 3')
+    expect(screen.getByText(/未保存/)).toBeTruthy()
+    expect(screen.getByText('+1 −1 未保存')).toBeTruthy()
   })
 })

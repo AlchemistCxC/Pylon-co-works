@@ -174,7 +174,7 @@ export default function GenerationFooter({ running, frames, tokenCount, startTim
     now,
     fallbackVerb: randomVerb,
   })
-  // CC 对齐状态机：3s stalled（渐变红）、1.2s waiting（Pylon 两级）；D29 tool 阶段抑制 stall
+  // ACP 远端调用容忍窗口：3s waiting、10s stalled；tool 阶段抑制 stall。
   const activity = line.stallSuppressed ? 'active' : resolveActivity(idleMs)
   // CC 风格（cc 动词集）：显示幽默随机动词而非阶段文案（plan activeTask 覆盖仍最高优先）
   const ccVerbs = spinnerVerbSet === 'cc'

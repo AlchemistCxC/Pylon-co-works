@@ -30,6 +30,7 @@ describe('C01 ReasoningBlock states', () => {
     const result = row({ content: '思考中内容', running: true })
     const label = result.getByText('正在思考…')
     expect(label).toBeTruthy()
+    expect(result.getByRole('button').getAttribute('aria-expanded')).toBe('false')
     // running 指示物是纯 CSS（reduced-motion 由样式层 media query 关闭），DOM 无自动动画元素
     expect(result.container.querySelector('[data-state="running"]')).not.toBeNull()
   })
@@ -117,7 +118,7 @@ describe('C01 ReasoningBlock states', () => {
     expect(reasoning.querySelector('.term-reasoning-body')?.getAttribute('aria-live')).toBeNull()
   })
 
-  it('applies the configured collapse policy on running-to-complete and settings updates', async () => {
+  it('keeps the user expansion while content and running state update in place', async () => {
     const [snapshot, setSnapshot] = createSignal({
       nodeId: 'reasoning-transition', kind: 'content.reasoning', revision: 1,
       payload: { text: '流式推理', state: 'running' },
@@ -128,18 +129,30 @@ describe('C01 ReasoningBlock states', () => {
       appearance={appearance()}
       commands={{ execute: () => {} }}
     />)
+    const button = result.getByRole('button')
     const reasoning = result.container.querySelector('.term-reasoning')!
-    expect(result.getByRole('button').getAttribute('aria-expanded')).toBe('true')
+    expect(button.getAttribute('aria-expanded')).toBe('false')
+    await fireEvent.click(button)
+    expect(button.getAttribute('aria-expanded')).toBe('true')
 
     setSnapshot({
       nodeId: 'reasoning-transition', kind: 'content.reasoning', revision: 2,
-      payload: { text: '流式推理', state: 'complete' },
+      payload: { text: '流式推理，新增正文', state: 'running' },
     })
-    await waitFor(() => expect(result.getByRole('button').getAttribute('aria-expanded')).toBe('false'))
+    await waitFor(() => expect(result.container).toHaveTextContent('流式推理，新增正文'))
     expect(result.container.querySelector('.term-reasoning')).toBe(reasoning)
+    expect(button.getAttribute('aria-expanded')).toBe('true')
+
+    setSnapshot({
+      nodeId: 'reasoning-transition', kind: 'content.reasoning', revision: 3,
+      payload: { text: '流式推理，新增正文', state: 'complete' },
+    })
+    await waitFor(() => expect(result.container.querySelector('.term-reasoning')).toHaveAttribute('data-state', 'complete'))
+    expect(result.container.querySelector('.term-reasoning')).toBe(reasoning)
+    expect(button.getAttribute('aria-expanded')).toBe('true')
 
     setAppearance({ defaultCollapsed: false })
-    await waitFor(() => expect(result.getByRole('button').getAttribute('aria-expanded')).toBe('true'))
+    await waitFor(() => expect(button.getAttribute('aria-expanded')).toBe('true'))
     expect(result.container.querySelector('.term-reasoning')).toBe(reasoning)
   })
 })

@@ -213,7 +213,7 @@ function WorkbenchContent(props: SolidWorkbenchAppProps) {
             />
             <Show when={snapshot().streamingThinking}>
               {text => <div class="term-row term-row-reasoning" data-render-type="reasoning">
-                <div class="term-reasoning" data-state="running">{text()}</div>
+                <ReasoningBlock text={text()} running />
               </div>}
             </Show>
             <WorkbenchDocumentSurface document={document()} context={props.context} commands={props.context.commands} sessionId={props.context.input().sessionId} reducedMotion={props.context.input().reducedMotion ?? false} />
@@ -858,24 +858,24 @@ function WorkbenchMessageContent(props: {
     return [{ kind: 'markdown', text: message().content }] as const satisfies readonly ContentPart[]
   }
   if (props.renderMessage.type === 'reasoning') {
-    const redacted = message().redacted === true
-    const kind = redacted ? 'content.redacted-reasoning' : 'content.reasoning'
-    const payload = redacted
+    const redacted = () => message().redacted === true
+    const kind = () => redacted() ? 'content.redacted-reasoning' : 'content.reasoning'
+    const payload = () => redacted()
       ? { reason: message().redactedReason ?? 'provider_redacted' }
       : {
           text: message().content,
           state: message().running ? 'running' : message().content.trim() ? 'complete' : 'missing',
           ...(message().thoughtDurationMs !== undefined ? { durationMs: message().thoughtDurationMs } : {}),
         }
-    return <WorkbenchContentSlot
-      nodeId={`${message().id}:reasoning`} kind={kind} payload={payload}
-      context={props.context}
-      fallback={<ReasoningBlock
-        text={message().content} running={message().running === true}
-        startedAt={message().thoughtStartedAt} durationMs={message().thoughtDurationMs}
-        redacted={redacted} redactedReason={message().redactedReason}
-      />}
-    />
+    return <Show keyed when={kind()}>{renderKind => <WorkbenchContentSlot
+        nodeId={`${message().id}:reasoning`} kind={renderKind} payload={payload()}
+        context={props.context}
+        fallback={<ReasoningBlock
+          text={message().content} running={message().running === true}
+          startedAt={message().thoughtStartedAt} durationMs={message().thoughtDurationMs}
+          redacted={redacted()} redactedReason={message().redactedReason}
+        />}
+      />}</Show>
   }
   const inline = props.renderMessage.type === 'user'
   // A provider stream commonly emits one semantic text part per delta. Each

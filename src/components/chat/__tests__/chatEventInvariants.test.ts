@@ -75,6 +75,8 @@ describe('事件不变量（报告 6B）', () => {
     expect(source.cancelState?.status).toBe('generating')
     expect(source.cancelState?.error).toBe('down')
     expect(source.generating).toBe(true)
+    expect(source.generationPhase).toEqual({ kind: 'thinking' })
+    expect(source.lastActivityAt).toBe(1000)
   })
 
   it('tool-call-update 占位新建路径携带 agentId（WI-02 CR-001）', () => {
@@ -160,16 +162,39 @@ describe('乐观渲染（方案 B）', () => {
     expect(state[key('local:a')]!.messages.filter(m => m.role === 'user').length).toBe(1)
   })
 
+  it('reject-optimistic-user 撤销对应行并收敛无响应的生成态', () => {
+    let state = reduce({}, { type: 'optimistic-user', source: 'local:a', agentId: AGENT, content: 'hello', clientMsgId: 'id-1' })
+    state = reduce(state, { type: 'reject-optimistic-user', source: 'local:a', agentId: AGENT, clientMsgId: 'id-1' })
+    const source = state[key('local:a')]!
+    expect(source.messages).toEqual([])
+    expect(source.generating).toBe(false)
+    expect(source.generationPhase).toBeUndefined()
+    expect(source.cancelState.status).toBe('idle')
+  })
+
+  it('撤销一条发送失败的 optimistic row 时保留其他 pending 生成态', () => {
+    let state = reduce({}, { type: 'optimistic-user', source: 'local:a', agentId: AGENT, content: 'one', clientMsgId: 'id-1' })
+    state = reduce(state, { type: 'optimistic-user', source: 'local:a', agentId: AGENT, content: 'two', clientMsgId: 'id-2' })
+    state = reduce(state, { type: 'reject-optimistic-user', source: 'local:a', agentId: AGENT, clientMsgId: 'id-1' })
+    const source = state[key('local:a')]!
+    expect(source.messages.map(message => message.content)).toEqual(['two'])
+    expect(source.generating).toBe(true)
+    expect(source.generationPhase).toEqual({ kind: 'thinking' })
+    expect(source.cancelState.status).toBe('generating')
+  })
+
   it('乐观消息后流式渲染正常（user→chunk→done 完整回合）', () => {
     let state = reduce({}, { type: 'optimistic-user', source: 'local:a', agentId: AGENT, content: 'hello', clientMsgId: 'id-1' })
     // rendered source：chunk 进 streamingText
     state = reduce(state, { type: 'message-chunk', source: 'local:a', agentId: AGENT, text: '你' })
+    expect(state[key('local:a')]!.generationPhase).toEqual({ kind: 'responding' })
     state = reduce(state, { type: 'message-chunk', source: 'local:a', agentId: AGENT, text: '好' })
     expect(state[key('local:a')]!.streamingText).toBe('你好')
     // done：流式落盘 + 生成复位 + summary
     state = reduce(state, { type: 'done', source: 'local:a', agentId: AGENT })
     const source = state[key('local:a')]!
     expect(source.generating).toBe(false)
+    expect(source.generationPhase).toBeUndefined()
     expect(source.streamingText).toBe('')
     const roles = source.messages.map(m => m.role)
     expect(roles).toEqual(['user', 'assistant'])

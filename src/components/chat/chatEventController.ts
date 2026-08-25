@@ -55,6 +55,8 @@ export interface ChatControllerHandle {
   sendOptimisticUser: (source: string, content: string, clientMsgId: string, options?: { persistCanonical?: boolean }) => void
   /** 后端 pylon:user 到达：按 clientMsgId 确认乐观消息（去重）。 */
   confirmUser: (source: string, clientMsgId: string) => void
+  /** 发送命令被 transport 拒绝：撤销 runtime-local 乐观行及其生成态。 */
+  rejectOptimisticUser: (source: string, clientMsgId: string) => void
   /** 开始 source-scoped load，返回单调 generation。 */
   beginLoadLock: (source: string) => number
   /** 仅当前 generation 可以释放 source-scoped load lock。 */
@@ -93,6 +95,11 @@ export interface ChatControllerHandle {
   getReplayMalformedEvents: () => Array<{ source: string; arrivalSeq: number; warning?: string; raw: unknown }>
   /** 横向读取：思考开始时间戳（thinking 时长显示用） */
   getThinkingStart: (source: string) => number | undefined
+  getGenerating: (source: string) => boolean
+  /** source-scoped 最近一次真实活动时间；切换会话后恢复迟滞计时基准。 */
+  getLastActivityAt: (source: string) => number | undefined
+  /** source-scoped 生成阶段；避免工具/思考阶段在切换后退化。 */
+  getGenerationPhase: (source: string) => GenerationPhase | undefined
   /** 会话切换时恢复该 source 的完成态 footer。 */
   getSummary: (source: string) => GenerationSummary | undefined
   /** G1：重试注册失败的 listener，返回是否有新成功项（报告 8.5） */
@@ -507,6 +514,8 @@ export function attachChatEventController(refs: ChatEventControllerRefs): ChatCo
     if ((prev?.streamingText ?? '') !== next.streamingText) currentRefs!.setStreamingText(next.streamingText)
     if ((prev?.streamingThinking ?? '') !== next.streamingThinking) currentRefs!.setStreamingThinking(next.streamingThinking)
     if ((prev?.generating ?? false) !== next.generating) currentRefs!.setGenerating(next.generating)
+    if (prev?.lastActivityAt !== next.lastActivityAt && next.lastActivityAt !== undefined) currentRefs!.setLastTokenAt(next.lastActivityAt)
+    if (prev?.generationPhase !== next.generationPhase) currentRefs!.setGenerationPhase(next.generationPhase ?? null)
     const prevSummary = prev?.lastSummary
     const nextSummary = next.lastSummary
     if (prevSummary !== nextSummary) {
@@ -1423,6 +1432,10 @@ export function attachChatEventController(refs: ChatEventControllerRefs): ChatCo
       if (!isActiveSource(source)) return
       dispatch({ type: 'confirm-user', source, clientMsgId })
     },
+    rejectOptimisticUser: (source, clientMsgId) => {
+      if (!isActiveSource(source)) return
+      dispatch({ type: 'reject-optimistic-user', source, clientMsgId })
+    },
     beginLoadLock,
     finishLoadLock,
     isSendBlockedDuringLoad,
@@ -1457,6 +1470,9 @@ export function attachChatEventController(refs: ChatEventControllerRefs): ChatCo
     },
     getReplayMalformedEvents: () => malformedReplayEvents,
     getThinkingStart: (source) => runtimeAt(source)?.thinkingStart,
+    getGenerating: (source) => runtimeAt(source)?.generating ?? false,
+    getLastActivityAt: (source) => runtimeAt(source)?.lastActivityAt,
+    getGenerationPhase: (source) => runtimeAt(source)?.generationPhase,
     getSummary: (source) => {
       const summary = runtimeAt(source)?.lastSummary
       return summary ? { ...summary, completedFrame: '' } : undefined

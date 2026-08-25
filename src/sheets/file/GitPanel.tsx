@@ -86,19 +86,37 @@ export default function GitPanel({ target, provider, onOpenDiff }: { target: Wor
   const [feedback, setFeedback] = useState<{ kind: 'success' | 'error'; message: string } | null>(null)
   const [refreshRevision, setRefreshRevision] = useState(0)
   const requestContext = useRef<SourceRequestContext>({ source: null, generation: 0 })
+  const previousTargetKey = useRef<string | null | undefined>(undefined)
   const targetKey = workspaceTargetKey(target)
 
   useEffect(() => {
+    const targetChanged = previousTargetKey.current !== targetKey
+    previousTargetKey.current = targetKey
     requestContext.current = advanceSourceContext(requestContext.current, targetKey)
     const token = targetKey ? beginSourceRequest(requestContext.current, targetKey) : null
     let disposed = false
+    if (targetChanged) {
+      // Status rows and write drafts are workspace-bound. Leaving them visible while
+      // the next target loads can execute an A path/message against workspace B.
+      setStaged([])
+      setUnstaged([])
+      setHistory([])
+      setExpandedCommit(null)
+      setBranchName(null)
+      setCommitMessage('')
+      setBranchDraft('')
+      setBranchEditorOpen(false)
+    }
     if (!target || !provider) {
       setStaged([])
       setUnstaged([])
       setHistory([])
-      setError(null)
       setExpandedCommit(null)
       setBranchName(null)
+      setCommitMessage('')
+      setBranchDraft('')
+      setBranchEditorOpen(false)
+      setError(null)
       return () => { disposed = true }
     }
     setError(null)
@@ -151,6 +169,7 @@ export default function GitPanel({ target, provider, onOpenDiff }: { target: Wor
         setBranchEditorOpen(false)
       }
     } catch (cause) {
+      if (requestContext.current.source !== sourceAtStart) return
       setFeedback({ kind: 'error', message: classifyGitError(cause).message })
       reportRuntimeError(action, cause)
     } finally {

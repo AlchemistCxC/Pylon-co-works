@@ -27,9 +27,10 @@ const fileEditorHighlightStyle = HighlightStyle.define([
  * Workspace 宿主只接触 value/change/selection，不持有 EditorView；语言包按路径异步
  * 装入，未知扩展名保持纯文本。这样编辑器实现可以替换而不改插件或 Sheet 契约。
  */
-export default function FileCodeEditor({ path, value, onChange, onSelectionChange }: {
+export default function FileCodeEditor({ path, value, revealLine, onChange, onSelectionChange }: {
   path: string
   value: string
+  revealLine?: number
   onChange?: (value: string) => void
   onSelectionChange?: (selection: DispatchSelection | null) => void
 }) {
@@ -105,6 +106,16 @@ export default function FileCodeEditor({ path, value, onChange, onSelectionChang
       applyingExternalValue.current = false
     }
   }, [value])
+
+  useEffect(() => {
+    const view = viewRef.current
+    if (!view || !revealLine || revealLine > view.state.doc.lines) return
+    const line = view.state.doc.line(revealLine)
+    view.dispatch({
+      selection: { anchor: line.from },
+      effects: EditorView.scrollIntoView(line.from, { y: 'center' }),
+    })
+  }, [revealLine])
 
   return <div ref={hostRef} className="file-code-editor" data-path={path} />
 }

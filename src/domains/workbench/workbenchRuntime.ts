@@ -322,14 +322,65 @@ function legacyFieldsFromDocument(document: WorkbenchDocument): Partial<Workbenc
   const status = document.session.status === 'error' || document.session.status === 'degraded' || document.session.status === 'loading' || document.session.status === 'ready' || document.session.status === 'idle'
     ? document.session.status
     : document.session.status === 'completed' ? 'ready' : 'ready'
+  const runningMessages = document.messages.filter(message => message.running)
+  const runningActivity = [...document.activities].reverse().find(activity => !isTerminalActivityStatus(activity.status))
+  const generating = runningMessages.length > 0 || runningActivity !== undefined || isActiveSessionStatus(document.session.status)
+  const runningReasoning = [...runningMessages].reverse().find(message => message.role === 'reasoning')
+  const lastRunningMessage = runningMessages.at(-1)
+  const generationStart = generating
+    ? firstTimestamp([
+        runningMessages[0]?.time,
+        runningActivity?.startedAt,
+      ]) ?? Date.now()
+    : 0
+  const lastTokenAt = generating
+    ? lastTimestamp([
+        lastRunningMessage?.time,
+        runningActivity?.startedAt,
+      ]) ?? generationStart
+    : undefined
   return {
     messages,
     status,
     activeModel: document.session.model ?? '',
     activeMode: document.session.mode ?? 'default',
-    generating: messages.some(message => message.running),
+    generating,
+    generationStart,
+    lastTokenAt,
+    generationPhase: runningReasoning
+      ? { kind: 'thinking' }
+      : runningActivity
+        ? { kind: 'tool', name: runningActivity.title || runningActivity.providerName || '?' }
+        : lastRunningMessage?.role === 'assistant'
+          ? { kind: 'responding' }
+          : generating ? { kind: 'thinking' } : undefined,
+    thinkingStart: timestampOf(runningReasoning?.time),
     error,
   }
+}
+
+function isTerminalActivityStatus(status: string): boolean {
+  return ['completed', 'failed', 'error', 'cancelled', 'killed', 'timeout'].includes(status.toLowerCase())
+}
+
+function isActiveSessionStatus(status: string): boolean {
+  return ['running', 'generating', 'thinking', 'responding', 'working'].includes(status.toLowerCase())
+}
+
+function timestampOf(value: string | undefined): number | undefined {
+  if (!value) return undefined
+  const parsed = Date.parse(value)
+  return Number.isFinite(parsed) ? parsed : undefined
+}
+
+function firstTimestamp(values: readonly (string | undefined)[]): number | undefined {
+  const timestamps = values.map(timestampOf).filter((value): value is number => value !== undefined)
+  return timestamps.length > 0 ? Math.min(...timestamps) : undefined
+}
+
+function lastTimestamp(values: readonly (string | undefined)[]): number | undefined {
+  const timestamps = values.map(timestampOf).filter((value): value is number => value !== undefined)
+  return timestamps.length > 0 ? Math.max(...timestamps) : undefined
 }
 
 function selectSlice(snapshot: WorkbenchRuntimeSnapshot, slice: WorkbenchRuntimeSlice): unknown {

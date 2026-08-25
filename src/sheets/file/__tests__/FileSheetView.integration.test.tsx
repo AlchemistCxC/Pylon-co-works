@@ -1,15 +1,16 @@
 // @vitest-environment jsdom
 import { describe, expect, it, vi, beforeEach } from 'vitest'
 import '../../../plugin-runtime/testing/productPluginTestBootstrap.ts'
-import { render, screen, fireEvent, waitFor } from '@testing-library/react'
+import { act, render, screen, fireEvent, waitFor } from '@testing-library/react'
 import FileSheetView from '../FileSheetView'
 import { useWorkspaceStore } from '../../../workspaceStore'
 import { toAgentContextKey } from '../../../agentContext'
 import { resetStores } from '../../../test/resetStores'
 import { createSheetState } from '../../../workspace-sheets/sheetState'
-import { fileTabKey, serializeFileTabs, type FileTabRecord, type FileTabState } from '../fileSheetState'
+import { fileTabKey, parseFileTabs, serializeFileTabs, type FileTabRecord, type FileTabState } from '../fileSheetState'
 import type { SheetContext, SheetRecord } from '../../../workspace-sheets/sheetTypes'
 import { useIdentityStore } from '../../../identityStore'
+import { replaceFileEditorValue, waitForFileEditor } from './codeMirrorTestUtils.ts'
 
 const { invoke } = vi.hoisted(() => ({ invoke: vi.fn() }))
 vi.mock('@tauri-apps/api/core', () => ({ invoke }))
@@ -77,6 +78,7 @@ describe('FileSheetView 版本化 tab 集成（D-02/D-04）', () => {
     useIdentityStore.setState({ sessions: [{ id: 'session-a', agentId: 'agent-test', source: 'ws-a', name: 'Workspace A', profileId: 'p', createdAt: 1, lastActiveAt: 1, platform: 'local', workdir: 'C:/workspace', sessionPrompt: '', skills: [], hooks: [], autoName: '' }] })
     localStorage.clear()
     invoke.mockReset()
+    vi.spyOn(window, 'confirm').mockReturnValue(true)
     invoke.mockImplementation((cmd: string, args: { source?: string; relativePath?: string } | undefined) => {
       if (cmd === 'list_workspace_entries') return Promise.resolve([])
       if (cmd === 'read_workspace_text') {
@@ -149,6 +151,116 @@ describe('FileSheetView 版本化 tab 集成（D-02/D-04）', () => {
     expect(screen.queryByText('工作区为空')).toBeNull()
   })
 
+  it('从文件树打开文件只由活动 tab 发起一次读取', async () => {
+    invoke.mockImplementation((cmd: string, args: { relativePath?: string } | undefined) => {
+      if (cmd === 'list_workspace_entries') return Promise.resolve([
+        { name: 'a.ts', relativePath: 'src/a.ts', kind: 'file' },
+      ])
+      if (cmd === 'read_workspace_text') return Promise.resolve(readTextResult(args?.relativePath ?? '', 'single read'))
+      return Promise.reject(new Error(`unexpected invoke ${cmd}`))
+    })
+    seedSheet({})
+    renderHarness()
+    fireEvent.click(await screen.findByTitle('src/a.ts'))
+    await screen.findByText('single read')
+
+    expect(invoke.mock.calls.filter(([command]) => command === 'read_workspace_text')).toHaveLength(1)
+  })
+
+  it('文件树支持显式刷新并替换陈旧目录快照', async () => {
+    let reads = 0
+    invoke.mockImplementation((cmd: string) => {
+      if (cmd === 'list_workspace_entries') {
+        reads += 1
+        return Promise.resolve(reads === 1
+          ? [{ name: 'old.ts', relativePath: 'old.ts', kind: 'file' }]
+          : [{ name: 'new.ts', relativePath: 'new.ts', kind: 'file' }])
+      }
+      return Promise.reject(new Error(`unexpected invoke ${cmd}`))
+    })
+    seedSheet({})
+    renderHarness()
+    await screen.findByTitle('old.ts')
+
+    fireEvent.click(screen.getByRole('button', { name: '刷新文件树' }))
+
+    expect(await screen.findByTitle('new.ts')).toBeTruthy()
+    expect(screen.queryByTitle('old.ts')).toBeNull()
+  })
+
+  it('快速连续打开两个文件不会因 render 快照丢失第一个 tab', async () => {
+    invoke.mockImplementation((cmd: string, args: { relativePath?: string } | undefined) => {
+      if (cmd === 'list_workspace_entries') return Promise.resolve([
+        { name: 'a.ts', relativePath: 'src/a.ts', kind: 'file' },
+        { name: 'b.ts', relativePath: 'src/b.ts', kind: 'file' },
+      ])
+      if (cmd === 'read_workspace_text') return Promise.resolve(readTextResult(args?.relativePath ?? '', 'content'))
+      return Promise.reject(new Error(`unexpected invoke ${cmd}`))
+    })
+    seedSheet({})
+    renderHarness()
+
+    const first = await screen.findByTitle('src/a.ts')
+    const second = screen.getByTitle('src/b.ts')
+    act(() => {
+      fireEvent.click(first)
+      fireEvent.click(second)
+    })
+
+    await waitFor(() => {
+      expect(screen.getAllByTitle('src/a.ts').length).toBeGreaterThan(0)
+      expect(screen.getAllByTitle('src/b.ts').length).toBeGreaterThan(0)
+    })
+  })
+
+  it('切换目标 Session 会清空旧 workspace 的 tab，且不在新 workspace 读取旧路径', async () => {
+    useIdentityStore.setState({ sessions: [
+      { id: 'session-a', agentId: 'agent-test', source: 'ws-a', name: 'Workspace A', profileId: 'p', createdAt: 1, lastActiveAt: 1, platform: 'local', workdir: 'C:/workspace-a', sessionPrompt: '', skills: [], hooks: [], autoName: '' },
+      { id: 'session-b', agentId: 'agent-test', source: 'ws-b', name: 'Workspace B', profileId: 'p', createdAt: 1, lastActiveAt: 1, platform: 'local', workdir: 'C:/workspace-b', sessionPrompt: '', skills: [], hooks: [], autoName: '' },
+    ] })
+    const tab: FileTabRecord = { path: 'src/a.ts', viewType: 'file.text' }
+    seedSheet({
+      targetSessionId: 'session-a',
+      openTabs: serializeFileTabs({ version: 3, tabs: [tab], activeKey: fileTabKey(tab) }),
+    })
+    renderHarness()
+    await screen.findByText('const x = 1')
+
+    fireEvent.click(screen.getByLabelText('会话：切换工作区会话'))
+    fireEvent.click(await screen.findByText('Workspace B'))
+
+    await screen.findByText('打开一个文件开始阅读')
+    expect(screen.queryByTitle('src/a.ts')).toBeNull()
+    expect(invoke).not.toHaveBeenCalledWith('read_workspace_text', expect.objectContaining({
+      target: expect.objectContaining({ sessionId: 'session-b' }),
+      relativePath: 'src/a.ts',
+    }))
+  })
+
+  it('未保存编辑会阻止 tab 切换，用户确认放弃后才允许离开', async () => {
+    const tabs: FileTabRecord[] = [
+      { path: 'src/a.ts', viewType: 'file.text' },
+      { path: 'src/b.ts', viewType: 'file.text' },
+    ]
+    seedSheet({ openTabs: serializeFileTabs({ version: 3, tabs, activeKey: fileTabKey(tabs[0]) }) })
+    renderHarness()
+    await screen.findByText('const x = 1')
+    fireEvent.click(screen.getByRole('button', { name: '编辑' }))
+    const editor = await waitForFileEditor('const x = 1')
+    replaceFileEditorValue(editor, 'unsaved edit')
+    await screen.findByText(/未保存/)
+
+    vi.mocked(window.confirm).mockReturnValueOnce(false)
+    fireEvent.click(screen.getByTitle('src/b.ts'))
+    expect(document.querySelector('.file-tab-view')?.getAttribute('data-path')).toBe('src/a.ts')
+    expect(editor.state.doc.toString()).toBe('unsaved edit')
+
+    vi.mocked(window.confirm).mockReturnValueOnce(true)
+    fireEvent.click(screen.getByTitle('src/b.ts'))
+    await waitFor(() => expect(document.querySelector('.file-tab-view')?.getAttribute('data-path')).toBe('src/b.ts'))
+    expect(window.confirm).toHaveBeenCalledWith(expect.stringContaining('未保存'))
+  })
+
   it('SCM 点击变更 → 打开 diff-mode tab（tab 条保留，主区显示 diff，git_diff 带 staged）', async () => {
     seedSheet({})
     renderHarness()
@@ -194,5 +306,25 @@ describe('FileSheetView 版本化 tab 集成（D-02/D-04）', () => {
     fireEvent.click(await screen.findByText('src/touched.ts'))
     await waitFor(() => expect(document.querySelector('.file-tab-view')?.getAttribute('data-path')).toBe('src/touched.ts'))
     expect(screen.getAllByTitle('src/touched.ts').length).toBeGreaterThan(0)
+  })
+
+  it('搜索结果会把行号传入文件 tab，并定位到对应代码行', async () => {
+    const content = Array.from({ length: 50 }, (_, index) => `line ${index + 1}`).join('\n')
+    invoke.mockImplementation((cmd: string, args: { relativePath?: string } | undefined) => {
+      if (cmd === 'list_workspace_entries') return Promise.resolve([])
+      if (cmd === 'workspace_search') return Promise.resolve([{ path: 'src/result.ts', line: 42, lineText: 'line 42' }])
+      if (cmd === 'read_workspace_text') return Promise.resolve(readTextResult(args?.relativePath ?? '', content))
+      return Promise.reject(new Error(`unexpected invoke ${cmd}`))
+    })
+    seedSheet({})
+    renderHarness()
+    fireEvent.click(screen.getByLabelText('搜索：搜索工作区内容'))
+    fireEvent.change(await screen.findByLabelText('工作区搜索'), { target: { value: 'line 42' } })
+    fireEvent.click(screen.getByLabelText('搜索'))
+    fireEvent.click(await screen.findByTitle('src/result.ts:42'))
+
+    await waitFor(() => expect(document.querySelector('[data-line="42"]')?.getAttribute('data-revealed')).toBe('true'))
+    const persisted = parseFileTabs(useWorkspaceStore.getState().workspaceSheets.sheets[0]?.metadata?.openTabs)
+    expect(persisted.tabs[0]).toEqual(expect.objectContaining({ path: 'src/result.ts', line: 42 }))
   })
 })

@@ -39,7 +39,7 @@ export interface FileActivityProps {
   fileProvider: FileProvider | null
   gitProvider: GitProvider | null
   onSelectTarget: (sessionId: string | null) => void
-  onOpenFile: (path: string) => void
+  onOpenFile: (path: string, line?: number) => void
   onOpenDiff: (path: string, staged: boolean) => void
 }
 
@@ -65,6 +65,8 @@ export interface FileViewRendererProps {
   fileProvider: FileProvider | null
   gitProvider: GitProvider | null
   onCloseTab: (key: string) => void
+  /** Reports unsaved editor state so the host can guard destructive navigation. */
+  onDirtyChange?: (key: string, dirty: boolean) => void
 }
 
 interface FileViewRendererBase {

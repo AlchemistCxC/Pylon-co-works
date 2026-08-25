@@ -42,6 +42,7 @@ function hostPort(): WorkbenchHostPort {
   }
   return {
     document: { getSnapshot: () => undefined, subscribe: () => () => {}, getSlice: <T>() => undefined as T, subscribeSlice: () => () => {} },
+    generation: { getSnapshot: () => ({}) as never, subscribe: () => () => {} },
     appearance: { getSnapshot: () => ({} as WorkbenchAppearanceSnapshot), subscribe: () => () => {} },
     sessionUi,
     commands: new Proxy({} as WorkbenchHostPort['commands'], { get: () => async () => ({ ok: true, value: undefined }) }),

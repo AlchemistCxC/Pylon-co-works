@@ -42,7 +42,9 @@ assert.equal(stripHiddenUnicode('ＡＢＣ'), 'ＡＢＣ', '不做 NFKC，全角
 const footer = readFileSync(new URL('../src/components/chat/GenerationFooter.tsx', import.meta.url), 'utf8')
 assert.equal(footer.includes("useMinDisplayTime(verb, 1200)"), true, 'Footer 文案必须使用最小展示时长')
 assert.match(footer, /const activity = line\.stallSuppressed \? 'active' : resolveActivity\(idleMs\)/, 'Footer 使用状态机 activity（D29 tool 抑制 stall）')
-assert.match(readFileSync(new URL('../src/components/chat/spinnerMachine.ts', import.meta.url), 'utf8'), /stalledMs: 3000/, 'stalled 阈值对齐 CC 3s')
+const spinnerMachine = readFileSync(new URL('../src/components/chat/spinnerMachine.ts', import.meta.url), 'utf8')
+assert.match(spinnerMachine, /waitingMs: 3000/, '3s 后进入等待态')
+assert.match(spinnerMachine, /stalledMs: 10000/, '10s 后才进入迟滞态，避免正常首包过早变红')
 
 // ── D4 Pet polling 接线断言（normal 不 setState、无变化不写盘） ──
 const pet = readFileSync(new URL('../src/components/PetCompanion.tsx', import.meta.url), 'utf8')

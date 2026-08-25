@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
-import { ChevronDown, ChevronRight, Folder, FolderOpen } from 'lucide-react'
+import { ChevronDown, ChevronRight, Folder, FolderOpen, RefreshCw } from 'lucide-react'
 import { reportRuntimeError } from '../../runtimeError'
 import { classifyWorkspaceError, mergeWorkspaceEntries } from '../../infrastructure/tauri/workspaceContracts.ts'
 import type { WorkspaceEntry, WorkspaceTree } from '../../components/right-panel/rightPanelTypes'
@@ -65,6 +65,16 @@ export default function FileTree({ target, provider, activeFile, onOpen }: {
     }
   }, [load, targetKey])
 
+  const refresh = () => {
+    if (!target || !provider || loading.has('')) return
+    requestContext.current = advanceSourceContext(requestContext.current, targetKey)
+    setTree({ entries: [], selectedPath: null })
+    setExpanded(new Set())
+    setLoading(new Set())
+    setError('')
+    void load()
+  }
+
   const toggleFolder = async (entry: WorkspaceEntry) => {
     if (expanded.has(entry.path)) {
       setExpanded(previous => {
@@ -81,9 +91,8 @@ export default function FileTree({ target, provider, activeFile, onOpen }: {
   const openFile = (path: string) => {
     if (!target || !provider) return
     setTree(previous => ({ ...previous, selectedPath: path }))
-    void provider.readText(target, path).catch(err => {
-      reportRuntimeError('读取文件', err)
-    })
+    // FileTabView is the single owner of file reads, request guarding and errors.
+    // Pre-reading here doubled IPC and could surface a stale error after target switch.
     onOpen(path)
   }
 
@@ -124,6 +133,9 @@ export default function FileTree({ target, provider, activeFile, onOpen }: {
       <div className="file-panel-heading">
         <span>EXPLORER</span>
         <span className="file-panel-count">{tree.entries.length}</span>
+        <button type="button" className="file-tree-refresh" aria-label="刷新文件树" title="刷新文件树" disabled={!target || !provider || loading.has('')} onClick={refresh}>
+          <RefreshCw size={13} />
+        </button>
       </div>
       {error && <div className="file-tree-error" role="alert">{error}</div>}
       {(!target || !provider) && (

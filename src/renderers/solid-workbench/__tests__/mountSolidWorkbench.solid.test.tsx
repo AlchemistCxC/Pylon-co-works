@@ -309,6 +309,59 @@ describe('mountSolidWorkbench', () => {
     expect(host.querySelectorAll(`[data-message-id="${canonicalMessageId}"]`)).toHaveLength(1)
   })
 
+  it('canonical reasoning updates keep one expanded Slot live until completion', async () => {
+    const host = document.createElement('div')
+    document.body.append(host)
+    hosts.push(host)
+    const services = createPreviewWorkbenchServices()
+    servicesList.push(services)
+    const slot = createBuiltinSolidContentSlot()
+    const slotEntry = {
+      ownerPluginId: 'builtin.pylon-renderers', ownerRuntimeInstanceId: 'runtime',
+      contributionId: slot.id, layer: 'feature', priority: slot.priority, value: slot,
+    } as RegistryEntry<RendererSlotContribution>
+    const suite = { id: 'builtin.solid' } as RendererSuiteContribution
+    const activation = {
+      revision: 1,
+      suite: { ownerPluginId: 'builtin.pylon-renderers', ownerRuntimeInstanceId: 'runtime', contributionId: suite.id, layer: 'feature', priority: 1, value: suite },
+      kinds: new Map(), slots: new Map([['content.reasoning', [slotEntry]]]), diagnostics: [],
+    } as RendererActivationSnapshot
+    mountSolidWorkbench({ host, input: { sheetId: 'sheet-a', sessionId: 'preview-session' }, services, activation })
+
+    const envelope = (sequence: number, text: string, type: 'reasoning.delta' | 'reasoning.completed' = 'reasoning.delta') => createWorkbenchEnvelope({
+      sessionId: 'preview-session', sequence, recordedAt: `2026-08-25T00:00:0${sequence}.000Z`,
+      source: { provider: 'peri', sourceId: `reasoning-${sequence}` }, identity: { messageId: 'reasoning-stream' },
+      provenance: { origin: 'local-observed', trust: 'authoritative' },
+      event: { type, parts: text ? [{ kind: 'markdown', text }] : [] },
+    })
+    const events = [envelope(1, '1. 我应该先检查')]
+    services.runtime.replaceDocument(projectWorkbench(events).document, { ownerKey: 'owner-preview', generation: 1 })
+
+    const canonicalMessageId = projectWorkbench(events).document.messages[0]!.id
+    const button = await waitFor(() => {
+      const node = host.querySelector<HTMLButtonElement>(`[data-message-id="${canonicalMessageId}"] .term-reasoning-head`)
+      expect(node).not.toBeNull()
+      return node!
+    })
+    expect(button).toHaveAttribute('aria-expanded', 'false')
+    fireEvent.click(button)
+    const reasoning = host.querySelector('.term-reasoning')
+    expect(reasoning).not.toBeNull()
+
+    events.push(envelope(2, '，然后继续验证。'))
+    services.runtime.replaceDocument(projectWorkbench(events).document, { ownerKey: 'owner-preview', generation: 2 })
+    await waitFor(() => expect(reasoning).toHaveTextContent('我应该先检查，然后继续验证。'))
+    expect(reasoning?.querySelector('ol > li')).toHaveTextContent('我应该先检查，然后继续验证。')
+    expect(host.querySelector('.term-reasoning')).toBe(reasoning)
+    expect(button).toHaveAttribute('aria-expanded', 'true')
+
+    events.push(envelope(3, '', 'reasoning.completed'))
+    services.runtime.replaceDocument(projectWorkbench(events).document, { ownerKey: 'owner-preview', generation: 3 })
+    await waitFor(() => expect(reasoning).toHaveAttribute('data-state', 'complete'))
+    expect(button).toHaveAttribute('aria-expanded', 'true')
+    expect(host.querySelector('.term-reasoning')).toBe(reasoning)
+  })
+
   it('反复替换同一会话文档时不累积助手回复 DOM', async () => {
     const { host, services } = mountPreview()
     const chunk = (sequence: number, text: string) => createWorkbenchEnvelope({

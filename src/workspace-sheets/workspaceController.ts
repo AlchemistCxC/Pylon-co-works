@@ -1,6 +1,7 @@
 import { useWorkspaceStore } from '../workspaceStore.ts'
 import { resolveWorkspace } from './workspaceRegistry.ts'
 import type { SheetId, SheetRecord } from './sheetTypes.ts'
+import { canCloseWorkspaceLiveState } from './workspaceLiveCloseGuards.ts'
 
 export interface WorkspaceOpenInput {
   type: string
@@ -42,6 +43,7 @@ export async function closeWorkspace(id: SheetId): Promise<boolean> {
 }
 
 async function canCloseSheet(sheet: SheetRecord): Promise<boolean> {
+  if (!await canCloseWorkspaceLiveState(sheet.id)) return false
   const definition = resolveWorkspace(sheet.kind)
   if (definition?.canClose) {
     try {

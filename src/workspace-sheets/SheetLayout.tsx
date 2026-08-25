@@ -153,13 +153,24 @@ export default function SheetLayout(props: SheetLayoutProps) {
     <div className={`layout ${ccEditMode ? 'cc-editing-app' : ''}`} data-pylon-surface="workspace" data-agent-id={activeAgent}>
       {persistWarning}
       <SheetSidebarSlot sheet={activeSheet} ctx={ctx} />
-      {activeSheet.kind !== 'agent' && <SheetHost sheet={activeSheet} ctx={ctx} />}
+      {activeSheet.kind !== 'agent' && activeSheet.kind !== 'file' && <SheetHost sheet={activeSheet} ctx={ctx} />}
       {sheets.filter(sheet => sheet.kind === 'agent').map(sheet => {
         const active = sheet.id === activeSheetId
         return (
           <div key={sheet.id} className="agent-sheet-keep-alive" data-sheet-id={sheet.id}
             aria-hidden={active ? undefined : true} style={{ display: active ? 'contents' : 'none' }}>
             <SheetHost sheet={sheet} ctx={contextForAgentSheet(sheet)} />
+          </div>
+        )
+      })}
+      {/* FileSheet owns in-memory editor drafts. Keep every open FileSheet at one stable
+          React position so ordinary Sheet navigation cannot unmount and discard them. */}
+      {sheets.filter(sheet => sheet.kind === 'file').map(sheet => {
+        const active = sheet.id === activeSheetId
+        return (
+          <div key={sheet.id} className="file-sheet-keep-alive" data-file-sheet-id={sheet.id}
+            aria-hidden={active ? undefined : true} style={{ display: active ? 'contents' : 'none' }}>
+            <SheetHost sheet={sheet} ctx={ctx} />
           </div>
         )
       })}

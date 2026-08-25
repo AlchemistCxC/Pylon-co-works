@@ -11,9 +11,11 @@ const chatCss = (() => {
 })()
 
 describe('chat indicator alignment contract', () => {
-  it('keeps modern tool and assistant indicators on the same left edge', () => {
-    expect(chatCss).toMatch(/\.app\[data-interface-mode="modern-gui"\] \.term-row-tool\s*\{[^}]*margin-left\s*:\s*0\s*;/s)
-    expect(chatCss).toMatch(/\.app\[data-interface-mode="modern-gui"\] \.term-tool-head\s*\{[^}]*padding\s*:\s*0 16px\s*;/s)
+  it('centres terminal-like assistant and tool markers in the same fixed column', () => {
+    expect(chatCss).toContain('.app[data-interface-mode="terminal-like"] :is(')
+    expect(chatCss).toContain('.term-assistant.has-dot > .term-assistant-dot,')
+    expect(chatCss).toContain('.term-tool-head > .term-tool-indicator')
+    expect(chatCss).toMatch(/\.app\[data-interface-mode="terminal-like"\] :is\([\s\S]*?\)\s*\{[^}]*width\s*:\s*var\(--dot-col-width, 1\.6em\)\s*;[^}]*flex\s*:\s*0 0 var\(--dot-col-width, 1\.6em\)\s*;[^}]*justify-content\s*:\s*center\s*;/s)
   })
 
   it('removes first-block top spacing through renderer slot wrappers', () => {
@@ -24,5 +26,9 @@ describe('chat indicator alignment contract', () => {
 
   it('does not vertically offset the tool indicator from the assistant marker', () => {
     expect(chatCss).not.toMatch(/\.term-tool-indicator\s*\{[^}]*margin-top\s*:\s*\.16em\s*;/s)
+  })
+
+  it('keeps ordered-list markers inside the reasoning scroll port', () => {
+    expect(chatCss).toMatch(/\.term-reasoning-body\s+:is\(ol,ul\)\s*\{[^}]*padding-inline-start\s*:\s*2em\s*;/s)
   })
 })

@@ -14,6 +14,12 @@ import type { FileProvider } from '../../plugin-runtime/file-workbench/fileWorkb
 import { legacyFileProvider, legacyTarget } from './legacyFileProvider.ts'
 import FileCodeEditor from './FileCodeEditor.tsx'
 
+export interface FileSaveReceipt {
+  version: number
+  expectedContent: string
+  persistedContent: string
+}
+
 /**
  * FileTabView — 文件视图（W2-04 只读 + I08-A-FE-02 编辑模式）。
  *
@@ -24,11 +30,12 @@ import FileCodeEditor from './FileCodeEditor.tsx'
  * 时若用户有未保存编辑 → onExternalChange 上报冲突（绝不静默覆盖）；无编辑 → 安全
  * 刷新到磁盘。saveAnchorToken 递增（保存成功/覆盖/重新加载后）→ 重拉磁盘对齐锚点。
  */
-export default function FileTabView({ target: explicitTarget, source, provider: explicitProvider, path, context, editing, onTruncated, onContentReady, onContentChange, onExternalChange, onSelectionChange, onSelectionInvalidated, saveAnchorToken }: {
+export default function FileTabView({ target: explicitTarget, source, provider: explicitProvider, path, revealLine, context, editing, onTruncated, onContentReady, onContentChange, onExternalChange, onSelectionChange, onSelectionInvalidated, saveAnchorToken, saveReceipt }: {
   target?: WorkspaceTarget | null
   /** @deprecated direct component compatibility. */ source?: string | null
   provider?: FileProvider | null
   path: string
+  revealLine?: number
   context?: AgentContext | null
   editing?: boolean
   onTruncated: (truncated: boolean) => void
@@ -38,18 +45,22 @@ export default function FileTabView({ target: explicitTarget, source, provider: 
   onSelectionChange?: (selection: DispatchSelection | null) => void
   onSelectionInvalidated?: () => void
   saveAnchorToken?: number
+  saveReceipt?: FileSaveReceipt | null
 }) {
   const target = explicitTarget === undefined ? legacyTarget(source) : explicitTarget
   const provider = explicitProvider === undefined && source ? legacyFileProvider : explicitProvider ?? null
   const [content, setContent] = useState('')
   const [highlighted, setHighlighted] = useState<{ html: string; lang: string } | null>(null)
   const [error, setError] = useState('')
+  const [loading, setLoading] = useState(false)
   const [changedLines, setChangedLines] = useState<number[]>([])
   const requestContext = useRef<SourceRequestContext>({ source: null, generation: 0 })
   // I08-A-FE-02：编辑器内容 ref（探针/选区用）+ 磁盘锚点 ref（区分"用户编辑"与"陈旧显示"）
   const contentRef = useRef('')
   const diskRef = useRef<string | null>(null)
   const saveAnchorRef = useRef<number>(0)
+  const saveReceiptRef = useRef<number>(0)
+  const readViewRef = useRef<HTMLDivElement>(null)
   // 编辑模式 ref：touchVersion 重载 effect 不依赖 editing（否则切编辑模式重跑 effect，
   // 退出编辑会 300ms 后 loadContent 静默覆盖未保存修改、重进编辑会误报冲突）
   const editingRef = useRef(false)
@@ -68,11 +79,19 @@ export default function FileTabView({ target: explicitTarget, source, provider: 
 
   const loadContent = (showChanged: boolean) => {
     if (!target || !targetKey || !provider || !path) return
+    setLoading(true)
+    setError('')
     requestContext.current = { source: targetKey, generation: requestContext.current.generation + 1 }
     const token = beginSourceRequest(requestContext.current, targetKey)
     const requestPath = path
     fetchText(target, path).then(loaded => {
-      if (!loaded || !isCurrentSourceRequest(requestContext.current, token) || requestPath !== path) return
+      if (!isCurrentSourceRequest(requestContext.current, token) || requestPath !== path) return
+      if (!loaded) {
+        setLoading(false)
+        setError('文件读取响应异常，请重试')
+        return
+      }
+      setLoading(false)
       setContent(previous => {
         if (showChanged && previous && previous !== loaded.text) {
           setChangedLines(previous.split('\n').length <= 5000 ? changedLineNumbers(previous, loaded.text) : [])
@@ -89,7 +108,10 @@ export default function FileTabView({ target: explicitTarget, source, provider: 
         if (html && isCurrentSourceRequest(requestContext.current, token) && requestPath === path) setHighlighted({ html, lang })
       }).catch(() => {})
     }).catch(err => {
-      if (isCurrentSourceRequest(requestContext.current, token) && requestPath === path) setError(err instanceof Error ? err.message : String(err))
+      if (isCurrentSourceRequest(requestContext.current, token) && requestPath === path) {
+        setLoading(false)
+        setError(err instanceof Error ? err.message : String(err))
+      }
     })
   }
 
@@ -122,6 +144,7 @@ export default function FileTabView({ target: explicitTarget, source, provider: 
     setContent('')
     setHighlighted(null)
     setError('')
+    setLoading(false)
     setChangedLines([])
     contentRef.current = ''
     diskRef.current = null
@@ -131,7 +154,7 @@ export default function FileTabView({ target: explicitTarget, source, provider: 
       requestContext.current = advanceSourceContext(requestContext.current, null)
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [targetKey, path])
+  }, [targetKey, path, provider])
 
   // W2-09：版本戳变化 → 300ms debounce；编辑中改走探测（不静默覆盖），只读保持重拉。
   // 依赖不含 editing（否则切编辑模式重跑 effect → 退出编辑静默覆盖未保存修改、重进编辑误报冲突）；
@@ -154,12 +177,36 @@ export default function FileTabView({ target: explicitTarget, source, provider: 
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [saveAnchorToken, targetKey, path])
 
+  // A successful save advances the disk anchor without blindly re-reading. If the
+  // user typed while the write was in flight, preserve that newer editor content.
+  useEffect(() => {
+    if (!saveReceipt || saveReceipt.version === saveReceiptRef.current) return
+    saveReceiptRef.current = saveReceipt.version
+    const hasNewerEdits = contentRef.current !== saveReceipt.expectedContent
+    diskRef.current = saveReceipt.persistedContent
+    setChangedLines([])
+    if (hasNewerEdits) return
+    contentRef.current = saveReceipt.persistedContent
+    setContent(saveReceipt.persistedContent)
+    setHighlighted(null)
+  }, [saveReceipt])
+
   const isMarkdown = useMemo(() => /\.(md|markdown)$/i.test(path), [path])
   const codeLines = content.split('\n')
   const highlightedLines = highlighted?.html.split('\n') ?? null
 
+  useEffect(() => {
+    if (!revealLine || content.length === 0) return
+    const frame = window.requestAnimationFrame(() => {
+      const line = readViewRef.current?.querySelector<HTMLElement>(`[data-line="${revealLine}"]`)
+      line?.scrollIntoView?.({ block: 'center' })
+    })
+    return () => window.cancelAnimationFrame(frame)
+  }, [content, path, revealLine])
+
   if (!target || !provider) return <div className="file-tab-view file-tab-empty">未安装可用的文件 provider</div>
   if (error) return <div className="file-tab-view file-tab-error" role="alert">{error}</div>
+  if (loading) return <div className="file-tab-view file-tab-loading" role="status">正在读取文件…</div>
 
   if (editing) {
     return (
@@ -168,6 +215,7 @@ export default function FileTabView({ target: explicitTarget, source, provider: 
           key={`${targetKey ?? 'unknown'}:${path}`}
           path={path}
           value={content}
+          revealLine={revealLine}
           onChange={value => {
             setContent(value)
             setHighlighted(null)
@@ -180,7 +228,7 @@ export default function FileTabView({ target: explicitTarget, source, provider: 
   }
 
   return (
-    <div className="file-tab-view" data-path={path}>
+    <div ref={readViewRef} className="file-tab-view" data-path={path}>
       {isMarkdown ? (
         <div className="file-tab-md">
           <Suspense fallback={<p className="file-tab-hint">加载 Markdown…</p>}>
@@ -194,9 +242,9 @@ export default function FileTabView({ target: explicitTarget, source, provider: 
           </div>
           <pre className="file-tab-pre">
             {codeLines.map((line, index) => highlightedLines ? (
-              <code key={index} className="file-tab-line" data-line={index + 1} data-changed={changedLines.includes(index + 1) ? 'true' : undefined} dangerouslySetInnerHTML={{ __html: sanitizeHtml(highlightedLines[index] || '&nbsp;') }} />
+              <code key={index} className="file-tab-line" data-line={index + 1} data-revealed={revealLine === index + 1 ? 'true' : undefined} data-changed={changedLines.includes(index + 1) ? 'true' : undefined} dangerouslySetInnerHTML={{ __html: sanitizeHtml(highlightedLines[index] || '&nbsp;') }} />
             ) : (
-              <code key={index} className="file-tab-line" data-line={index + 1} data-changed={changedLines.includes(index + 1) ? 'true' : undefined}>{line}</code>
+              <code key={index} className="file-tab-line" data-line={index + 1} data-revealed={revealLine === index + 1 ? 'true' : undefined} data-changed={changedLines.includes(index + 1) ? 'true' : undefined}>{line}</code>
             ))}
           </pre>
         </div>

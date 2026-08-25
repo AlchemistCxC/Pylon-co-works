@@ -70,6 +70,29 @@ describe('WorkbenchHostPort', () => {
     })
   })
 
+  it('preserves source-scoped live generation state when the document has no running text row', () => {
+    const source = runtime()
+    source.update({
+      generating: true,
+      generationStart: 1_700_000_000_000,
+      lastTokenAt: 1_700_000_004_000,
+      generationPhase: { kind: 'tool', name: 'Read' },
+    })
+    const host = createWorkbenchHostPort({
+      runtime: source,
+      appearance: createStaticWorkbenchAppearanceStore(structuredClone(DEFAULTS)),
+      sessionUi: createSessionUiStore(), commands: createFakeWorkbenchCommandFacade(),
+      suiteId: 'builtin.solid', sheetId: 'sheet-1', sessionOwnerKey: 'owner-1', sessionId: 's1',
+    })
+
+    expect(createSolidWorkbenchServicesFromHostPort(host).runtime.getSnapshot()).toMatchObject({
+      generating: true,
+      generationStart: 1_700_000_000_000,
+      lastTokenAt: 1_700_000_004_000,
+      generationPhase: { kind: 'tool', name: 'Read' },
+    })
+  })
+
   it('namespaces session UI by suite, sheet and session owner', () => {
     const store = createSessionUiStore()
     const base = { runtime: runtime(), appearance: createStaticWorkbenchAppearanceStore(structuredClone(DEFAULTS)), sessionUi: store, commands: createFakeWorkbenchCommandFacade(), sessionId: 's1' }

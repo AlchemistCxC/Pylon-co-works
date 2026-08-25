@@ -51,12 +51,13 @@ requireToken(footer, '<StallProbe ', 'stalled 强度叶子')
 requireToken(css, '--stall-progress', 'stalled 渐变红插值必须消费 --stall-progress')
 requireToken(footer, 'function StallProbe', 'StallProbe 持 tick 写 --stall-progress')
 
-// 纯断言：4s 无 tool stalled 强度递增（resolveStallProgress）
+// 纯断言：10s 前不变红；超过 stalled 阈值后按 3s 斜坡递增。
 assert.equal(resolveStallProgress(0), 0)
 assert.equal(resolveStallProgress(ACTIVITY_THRESHOLDS.stalledMs), 0, 'stalledMs 边界仍为 0')
-const p4s = resolveStallProgress(4000)
-assert.ok(p4s > 0 && p4s < 1, `4s 无 tool 必须进入渐变红斜坡（${p4s}）`)
-assert.ok(resolveStallProgress(6000) > p4s, 'stalled 强度必须随 idleMs 递增')
+assert.equal(resolveStallProgress(4000), 0, '4s 仅为等待态，不得过早变红')
+const rampMidpoint = resolveStallProgress(ACTIVITY_THRESHOLDS.stalledMs + STALL_RAMP_MS / 2)
+assert.ok(rampMidpoint > 0 && rampMidpoint < 1, `超过 stalled 阈值后必须进入渐变红斜坡（${rampMidpoint}）`)
+assert.ok(resolveStallProgress(ACTIVITY_THRESHOLDS.stalledMs + STALL_RAMP_MS * 0.75) > rampMidpoint, 'stalled 强度必须随 idleMs 递增')
 assert.equal(resolveStallProgress(ACTIVITY_THRESHOLDS.stalledMs + STALL_RAMP_MS * 2), 1, '封顶 1')
 
 // 纯断言：token 追赶（几何步进）不超真实值

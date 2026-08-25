@@ -5,6 +5,7 @@ import type { GitOperationResult, GitStatusWithBranch } from '../../../infrastru
 import type { GitProvider } from '../../../plugin-runtime/file-workbench/fileWorkbenchTypes.ts'
 import type { WorkspaceTarget } from '../../../domains/workspace/workspaceTarget.ts'
 import GitPanel from '../GitPanel.tsx'
+import { reportRuntimeError } from '../../../runtimeError.ts'
 
 vi.mock('../../../runtimeError', () => ({ reportRuntimeError: vi.fn() }))
 
@@ -31,6 +32,13 @@ function provider(overrides: Partial<GitProvider> = {}): GitProvider {
     diff: vi.fn().mockResolvedValue('diff'),
     ...overrides,
   }
+}
+
+function deferred<T>() {
+  let resolve!: (value: T) => void
+  let reject!: (cause: unknown) => void
+  const promise = new Promise<T>((done, fail) => { resolve = done; reject = fail })
+  return { promise, resolve, reject }
 }
 
 describe('GitPanel 写操作', () => {
@@ -96,5 +104,40 @@ describe('GitPanel 写操作', () => {
     expect(onOpenDiff).toHaveBeenCalledWith('src/a.ts', false)
     expect(screen.queryByLabelText('提交说明')).toBeNull()
     expect(screen.queryByRole('button', { name: '推送' })).toBeNull()
+  })
+
+  it('切换 workspace 后忽略旧 Git 写操作的迟到失败', async () => {
+    const operation = deferred<GitOperationResult>()
+    const stage = vi.fn(() => operation.promise)
+    const git = provider({ stage })
+    const { rerender } = render(<GitPanel target={target} provider={git} onOpenDiff={vi.fn()} />)
+    fireEvent.click(await screen.findByRole('button', { name: '暂存 src/a.ts' }))
+
+    const nextTarget = { ...target, sessionId: 'session-b', source: 'source-b', legacyWorkdir: 'C:/repo-b' }
+    rerender(<GitPanel target={nextTarget} provider={git} onOpenDiff={vi.fn()} />)
+    operation.reject(new Error('stale workspace failure'))
+    await waitFor(() => expect(screen.getByText('WORKING TREE')).toBeTruthy())
+
+    expect(screen.queryByText('stale workspace failure')).toBeNull()
+    expect(reportRuntimeError).not.toHaveBeenCalledWith('暂存', expect.anything())
+  })
+
+  it('切换 workspace 会清空提交与分支草稿，避免把 A 的写入意图带到 B', async () => {
+    const git = provider({
+      status: vi.fn().mockResolvedValue(status([{ path: 'a.ts', status: 'M ', staged: true }])),
+      commit: vi.fn().mockResolvedValue(result(status([]), 'ok')),
+      createBranch: vi.fn().mockResolvedValue(result(status([]), 'ok')),
+    })
+    const { rerender } = render(<GitPanel target={target} provider={git} onOpenDiff={vi.fn()} />)
+    await screen.findByRole('button', { name: '提交 1 项变更' })
+    fireEvent.change(screen.getByLabelText('提交说明'), { target: { value: 'workspace a commit' } })
+    fireEvent.click(screen.getByRole('button', { name: '分支' }))
+    fireEvent.change(screen.getByLabelText('分支名称'), { target: { value: 'workspace-a-branch' } })
+
+    const nextTarget = { ...target, sessionId: 'session-b', source: 'source-b', legacyWorkdir: 'C:/repo-b' }
+    rerender(<GitPanel target={nextTarget} provider={git} onOpenDiff={vi.fn()} />)
+
+    await waitFor(() => expect(screen.getByLabelText('提交说明')).toHaveValue(''))
+    expect(screen.queryByDisplayValue('workspace-a-branch')).toBeNull()
   })
 })

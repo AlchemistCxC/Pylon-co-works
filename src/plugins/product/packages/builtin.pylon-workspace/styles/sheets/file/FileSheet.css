@@ -231,6 +231,9 @@
   letter-spacing: .1em;
 }
 .file-panel-count { min-width: 20px; padding: 3px 6px; border-radius: 0; color: var(--text-dim); background: var(--bg-active); font-size: 10px; text-align: center; }
+.file-tree-refresh { display: grid; width: 24px; height: 24px; place-items: center; border: 0; color: var(--text-dim); background: transparent; cursor: pointer; }
+.file-tree-refresh:hover:not(:disabled) { color: var(--accent); background: var(--bg-hover); }
+.file-tree-refresh:disabled { opacity: .45; cursor: default; }
 .file-tree-error { margin: 4px; padding: 8px; border: 1px solid color-mix(in srgb, var(--state-danger) 34%, var(--stroke-default)); border-radius: var(--ui-radius-sm); font-size: 12px; color: var(--state-danger); background: var(--state-danger-surface); }
 .file-tree-hint { padding: 8px; font-size: 12px; color: var(--text-dim); }
 .file-tree-empty-state {
@@ -354,6 +357,7 @@
 
 /* W2-09：刷新跟随改动行高亮（agent 工具改动标记，F3-D editorModifiedMark） */
 .file-tab-line[data-changed="true"] { background: var(--editor-active-line, rgba(0,0,0,0.04)); }
+.file-tab-line[data-revealed="true"] { background: color-mix(in srgb, var(--accent) 14%, transparent); }
 /* A4-03：编辑器工作面精致化——只覆盖视觉层，不改变 FileSheet 行为与数据契约 */
 .file-sheet {
   background: var(--bg-panel);

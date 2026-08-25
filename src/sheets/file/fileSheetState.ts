@@ -52,6 +52,8 @@ export interface FileTabRecord {
   mode?: FileTabMode
   /** diff-mode tab 的 SCM 范围：true = staged（HEAD ↔ Index） */
   staged?: boolean
+  /** Optional 1-based reveal line, e.g. from workspace search. */
+  line?: number
 }
 
 export interface FileTabState {
@@ -94,7 +96,8 @@ function normalizeFileTabState(parsed: { tabs?: unknown; activeKey?: unknown }):
   const tabs = Array.isArray(parsed.tabs) ? dedupeTabs(parsed.tabs.filter(isFileTabRecord).map(tab => ({
     path: tab.path,
     viewType: fileTabViewType(tab),
-    ...(tab.staged === undefined ? {} : { staged: tab.staged }),
+    ...(typeof tab.staged === 'boolean' ? { staged: tab.staged } : {}),
+    ...(Number.isInteger(tab.line) && (tab.line ?? 0) > 0 ? { line: tab.line } : {}),
   }))) : []
   const lastKey = tabs.length > 0 ? fileTabKey(tabs[tabs.length - 1]) : null
   const migratedActiveKey = typeof parsed.activeKey === 'string'

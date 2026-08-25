@@ -93,6 +93,7 @@
 @keyframes pylon-reasoning-pulse { 50% { opacity:0.48; } }
 @keyframes pylon-reasoning-shimmer { to { background-position:-200% 0; } }
 .term-reasoning-body { padding:var(--ui-space-1) 0 var(--ui-space-1) var(--ui-space-4); border-left:var(--line-width-1) solid color-mix(in srgb, var(--border) 72%, transparent); margin:var(--ui-space-1) 0 var(--ui-space-1) var(--ui-space-1); max-height:320px; overflow-y:auto; overscroll-behavior:contain; }
+.term-reasoning-body :is(ol,ul) { box-sizing:border-box; margin-inline:0; padding-inline-start:2em; }
 .term-reasoning-line { color:var(--text-dim); font-style:italic; font-size:0.93em; line-height:1.6; white-space:pre-wrap; }
 
 .term-file-card { display:grid; grid-template-columns:auto minmax(0,1fr); align-items:start; gap:var(--ui-space-2); width:min(100%,960px); padding:var(--ui-space-2); border:var(--line-width-1) solid var(--border); border-radius:var(--message-radius,0); }
@@ -724,6 +725,17 @@
   width: var(--dot-col-width, 1.6em);
   text-align: left;
   margin: 0;
+}
+/* Terminal-like 的 marker 以固定列中心对齐；不同字宽的 ●/◆/▶ 不再产生光学偏移。 */
+.app[data-interface-mode="terminal-like"] :is(
+  .term-assistant.has-dot > .term-assistant-dot,
+  .term-tool-head > .term-tool-indicator
+) {
+  display: inline-flex;
+  width: var(--dot-col-width, 1.6em);
+  flex: 0 0 var(--dot-col-width, 1.6em);
+  justify-content: center;
+  text-align: center;
 }
 .term-tool-name { flex: 0 0 auto; white-space: nowrap; }
 .term-tool-summary {

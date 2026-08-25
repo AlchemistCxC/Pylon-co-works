@@ -8,6 +8,8 @@ const mocks = vi.hoisted(() => {
     initSource: vi.fn((_source: string, cached: unknown[]) => cached),
     getStreamingState: vi.fn(() => ({ text: '', thinking: '' })),
     getSummary: vi.fn(() => null),
+    getGenerationPhase: vi.fn(() => undefined),
+    getLastActivityAt: vi.fn(() => undefined),
     beginLoadLock: vi.fn(() => ++lockGeneration),
     finishLoadLock: vi.fn(),
     abortSessionLoad: vi.fn(),

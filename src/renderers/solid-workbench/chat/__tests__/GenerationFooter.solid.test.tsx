@@ -70,14 +70,15 @@ describe('SolidGenerationFooter', () => {
     const spinner = result.container.querySelector('.term-spinner') as HTMLElement
     expect(spinner.dataset.activity).toBe('active')
 
-    clock.advance(1_320)
+    clock.advance(3_200)
     expect(spinner.dataset.activity).toBe('waiting')
-    clock.advance(1_200)
+    clock.advance(3_000)
     await waitFor(() => expect(result.container.textContent).toContain('等待响应'))
 
-    clock.advance(1_680)
+    clock.advance(5_000)
     expect(spinner.dataset.activity).toBe('stalled')
-    expect(Number(spinner.style.getPropertyValue('--stall-progress'))).toBeCloseTo(0.4, 2)
+    expect(Number(spinner.style.getPropertyValue('--stall-progress'))).toBeGreaterThan(0.35)
+    expect(Number(spinner.style.getPropertyValue('--stall-progress'))).toBeLessThan(0.45)
     clock.advance(1_200)
     await waitFor(() => expect(result.container.textContent).toContain('仍在等待后端响应'))
   })

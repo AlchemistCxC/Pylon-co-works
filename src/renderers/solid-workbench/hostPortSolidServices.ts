@@ -21,32 +21,20 @@ function documentMessages(document: WorkbenchDocument | undefined): readonly Mes
 function runtimeSnapshot(host: WorkbenchHostPort): WorkbenchRuntimeSnapshot {
   const document = host.document.getSnapshot()
   const messages = documentMessages(document)
-  const runningMessages = document?.messages.filter(message => message.running) ?? []
-  const running = runningMessages.length > 0
-  const generationStart = timestampOf(runningMessages[0]?.time) ?? (running ? Date.now() : 0)
-  const lastTokenAt = timestampOf(runningMessages.at(-1)?.time) ?? (running ? generationStart : undefined)
-  const runningReasoning = [...runningMessages].reverse().find(message => message.role === 'reasoning')
-  const thinkingStart = timestampOf(runningReasoning?.time)
-  const lastRunningRole = runningMessages.at(-1)?.role
+  const generation = host.generation.getSnapshot()
   const error = [...(document?.diagnostics ?? [])].reverse().find(item => item.level === 'error')?.message ?? null
   return Object.freeze({
     revision: document?.revision ?? 0, sessionId: document?.sessionId || null,
     status: error ? 'degraded' : document ? 'ready' : 'idle', messages,
-    streamingText: '', streamingThinking: '', generating: running,
-    generationStart, lastTokenAt, tokenCount: 0, summary: null,
-    generationPhase: runningReasoning ? { kind: 'thinking' as const }
-      : lastRunningRole === 'assistant' ? { kind: 'responding' as const } : undefined,
-    thinkingStart, tasks: document?.plan.entries ?? Object.freeze([]),
+    streamingText: '', streamingThinking: '', generating: generation.generating,
+    generationStart: generation.generationStart, lastTokenAt: generation.lastTokenAt,
+    tokenCount: generation.tokenCount, summary: generation.summary,
+    generationPhase: generation.generationPhase,
+    thinkingStart: generation.thinkingStart, tasks: document?.plan.entries ?? Object.freeze([]),
     availableModels: Object.freeze([]), activeModel: document?.session.model ?? '',
     availableModes: Object.freeze([]), activeMode: document?.session.mode ?? '',
     canAttach: host.capabilities.has('attach'), promptImage: false, error, document,
   })
-}
-
-function timestampOf(value: string | undefined): number | undefined {
-  if (!value) return undefined
-  const parsed = Date.parse(value)
-  return Number.isFinite(parsed) ? parsed : undefined
 }
 
 function createRuntime(host: WorkbenchHostPort): WorkbenchRuntime {

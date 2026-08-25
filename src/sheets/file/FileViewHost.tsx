@@ -1,7 +1,7 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import type { DispatchSelection } from '../../domains/fileDispatch/dispatchMessage.ts'
 import { fileTabKey, fileTabViewType, resetFileSheetTransientState, type FileTabRecord } from './fileSheetState.ts'
-import FileTabView from './FileTabView'
+import FileTabView, { type FileSaveReceipt } from './FileTabView'
 import DiffView from './DiffView'
 import DispatchBar from './DispatchBar'
 import DiffCard from '../../components/chat/DiffCard'
@@ -11,6 +11,7 @@ import type { AgentContext } from '../../agentContext'
 import type { WorkspaceTarget } from '../../domains/workspace/workspaceTarget.ts'
 import type { FileProvider, GitProvider } from '../../plugin-runtime/file-workbench/fileWorkbenchTypes.ts'
 import { legacyFileProvider, legacyGitProvider, legacyTarget } from './legacyFileProvider.ts'
+import { workspaceTargetKey } from '../../domains/workspace/workspaceTarget.ts'
 
 /**
  * FileViewHost — 主区统一 file/diff 宿主（ISSUE-08 D-03/D-04 + I08-A-FE-02 保存）。
@@ -22,7 +23,7 @@ import { legacyFileProvider, legacyGitProvider, legacyTarget } from './legacyFil
  * 内容 ≠ 基线；保存带 expectedBaseline 走后端冲突检测（AC-1：外部修改不静默覆盖），
  * conflict → 覆盖保存（force）或重新加载；working-diff = 基线 vs 未保存编辑。
  */
-export default function FileViewHost({ target: explicitTarget, source, fileProvider: explicitFileProvider, gitProvider: explicitGitProvider, tab, context, onCloseTab }: {
+export default function FileViewHost({ target: explicitTarget, source, fileProvider: explicitFileProvider, gitProvider: explicitGitProvider, tab, context, onCloseTab, onDirtyChange }: {
   target?: WorkspaceTarget | null
   /** @deprecated direct component compatibility. */ source?: string | null
   fileProvider?: FileProvider | null
@@ -30,10 +31,14 @@ export default function FileViewHost({ target: explicitTarget, source, fileProvi
   context?: AgentContext | null
   tab: FileTabRecord | null
   onCloseTab: (key: string) => void
+  onDirtyChange?: (key: string, dirty: boolean) => void
 }) {
   const target = explicitTarget === undefined ? legacyTarget(source) : explicitTarget
   const fileProvider = explicitFileProvider === undefined && source ? legacyFileProvider : explicitFileProvider ?? null
   const gitProvider = explicitGitProvider === undefined && source ? legacyGitProvider : explicitGitProvider ?? null
+  const viewIdentity = `${workspaceTargetKey(target) ?? 'unbound'}:${tab ? fileTabKey(tab) : 'empty'}`
+  const currentViewIdentity = useRef(viewIdentity)
+  currentViewIdentity.current = viewIdentity
   const [truncated, setTruncated] = useState(false)
   const [instruction, setInstruction] = useState('')
   const [selection, setSelection] = useState<DispatchSelection | null>(null)
@@ -42,7 +47,11 @@ export default function FileViewHost({ target: explicitTarget, source, fileProvi
   const [baseline, setBaseline] = useState<string | null>(null)
   const [saveState, setSaveState] = useState<'idle' | 'saving' | 'saved' | 'error' | 'conflict'>('idle')
   const [saveError, setSaveError] = useState('')
-  const [saveAnchor, setSaveAnchor] = useState(0)
+  const [reloadToken, setReloadToken] = useState(0)
+  const [saveReceipt, setSaveReceipt] = useState<FileSaveReceipt | null>(null)
+  const saveReceiptVersion = useRef(0)
+  const fileContentRef = useRef(fileContent)
+  fileContentRef.current = fileContent
   const lineCount = fileContent ? fileContent.split('\n').length : 0
   const selectionLabel = selection
     ? selection.startLine === selection.endLine
@@ -50,6 +59,7 @@ export default function FileViewHost({ target: explicitTarget, source, fileProvi
       : `L${selection.startLine}–L${selection.endLine}`
     : null
   const dirty = baseline !== null && fileContent !== baseline
+  const tabKey = tab ? fileTabKey(tab) : null
   const workingPayload = useMemo(() => {
     if (baseline === null || !dirty) return null
     return { oldText: baseline, newText: fileContent, lines: workingDiffLines(baseline, fileContent) }
@@ -57,26 +67,28 @@ export default function FileViewHost({ target: explicitTarget, source, fileProvi
   const workingStats = useMemo(() => workingDiffStats(workingPayload?.lines ?? []), [workingPayload])
 
   useEffect(() => {
-    if (target !== null) return
+    if (!tabKey) return
+    onDirtyChange?.(tabKey, dirty)
+    return () => onDirtyChange?.(tabKey, false)
+  }, [dirty, onDirtyChange, tabKey])
+
+  useEffect(() => {
     const cleared = resetFileSheetTransientState()
     setTruncated(cleared.truncated)
     setInstruction(cleared.instruction)
     setFileContent(cleared.fileContent)
-    setSelection(null)
-    setEditing(false)
-  }, [target])
-
-  useEffect(() => {
-    setTruncated(false)
     setEditing(false)
     setBaseline(null)
     setSaveState('idle')
     setSaveError('')
+    setSaveReceipt(null)
     setSelection(null)
-  }, [tab?.path, tab?.viewType, tab?.mode])
+  }, [viewIdentity])
 
   const handleSave = async (force: boolean) => {
     if (!target || !fileProvider?.writeText || !tab || fileTabViewType(tab) !== 'file.text' || baseline === null) return
+    const operationIdentity = viewIdentity
+    const contentAtStart = fileContent
     setSaveState('saving')
     setSaveError('')
     try {
@@ -86,18 +98,25 @@ export default function FileViewHost({ target: explicitTarget, source, fileProvi
         expectedBaseline: force ? null : baseline,
         force,
       })
+      if (currentViewIdentity.current !== operationIdentity) return
       if (result) {
-        setFileContent(result.content)
+        const hasNewerEdits = fileContentRef.current !== contentAtStart
+        if (!hasNewerEdits) setFileContent(result.content)
         setBaseline(result.content)
-        setSaveState('saved')
-        setSaveAnchor(anchor => anchor + 1)
-        setSelection(null)
+        setSaveState(hasNewerEdits ? 'idle' : 'saved')
+        setSaveReceipt({
+          version: ++saveReceiptVersion.current,
+          expectedContent: contentAtStart,
+          persistedContent: result.content,
+        })
+        if (!hasNewerEdits) setSelection(null)
       } else {
         // 响应损坏（normalize 为 null）：不卡 saving，置 error 态并可重试
         setSaveError('保存响应异常，请重试')
         setSaveState('error')
       }
     } catch (err) {
+      if (currentViewIdentity.current !== operationIdentity) return
       const detail = classifySaveError(err)
       setSaveError(detail.message)
       setSaveState(detail.code === 'conflict' ? 'conflict' : 'error')
@@ -109,7 +128,7 @@ export default function FileViewHost({ target: explicitTarget, source, fileProvi
     setSaveState('idle')
     setSaveError('')
     setSelection(null)
-    setSaveAnchor(anchor => anchor + 1)
+    setReloadToken(token => token + 1)
   }
 
   if (!tab) {
@@ -190,6 +209,7 @@ export default function FileViewHost({ target: explicitTarget, source, fileProvi
         provider={fileProvider}
         context={context}
         path={tab.path}
+        revealLine={tab.line}
         editing={editing}
         onTruncated={setTruncated}
         onContentReady={content => { setFileContent(content); setBaseline(content) }}
@@ -202,7 +222,8 @@ export default function FileViewHost({ target: explicitTarget, source, fileProvi
         }}
         onSelectionChange={setSelection}
         onSelectionInvalidated={() => setSelection(null)}
-        saveAnchorToken={saveAnchor}
+        saveAnchorToken={reloadToken}
+        saveReceipt={saveReceipt}
       />
       {editing && workingPayload && (
         <div className="file-working-diff">

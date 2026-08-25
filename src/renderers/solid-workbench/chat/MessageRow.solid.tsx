@@ -151,17 +151,14 @@ export function ReasoningBlock(props: {
   reducedMotion?: boolean
 }) {
   const collapsedByDefault = () => props.defaultCollapsed !== false
-  const [open, setOpen] = createSignal(props.running || !collapsedByDefault())
+  const [open, setOpen] = createSignal(!collapsedByDefault())
   const bodyId = `solid-reasoning-${Math.random().toString(36).slice(2)}`
-  let previousRunning = props.running
   let previousDefaultCollapsed = collapsedByDefault()
   createEffect(() => {
-    const running = props.running
     const defaultCollapsed = collapsedByDefault()
-    if ((previousRunning && !running) || (!running && defaultCollapsed !== previousDefaultCollapsed)) {
+    if (defaultCollapsed !== previousDefaultCollapsed) {
       setOpen(!defaultCollapsed)
     }
-    previousRunning = running
     previousDefaultCollapsed = defaultCollapsed
   })
   // C01 四态：running / complete(duration) / redacted(reason) / missing(无内容且非 running)
@@ -211,7 +208,7 @@ export function ReasoningBlock(props: {
         <SolidCollapsibleRegion open={open()} id={bodyId}>
           {/* C01 步骤4：正文复用 C00 markdown 管线，不建第二套渲染 */}
           <div class="term-reasoning-body" style={bodyStyle()}>
-            <MarkdownContent text={props.text} />
+            <MarkdownContent text={props.text} streaming={props.running} />
           </div>
         </SolidCollapsibleRegion>
       </Show>

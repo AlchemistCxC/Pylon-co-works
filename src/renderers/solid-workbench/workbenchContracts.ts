@@ -10,6 +10,7 @@ export type {
   WorkbenchCommandResult,
   WorkbenchCommandError,
   WorkbenchDocumentReader,
+  WorkbenchGenerationReader,
   ResolvedAppearanceReader,
   SessionUiPort,
   WorkbenchCapabilityReader,

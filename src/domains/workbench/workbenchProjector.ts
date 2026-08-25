@@ -1232,6 +1232,11 @@ function findCorrelatedUserEcho(
       && message.optimistic !== incomingOptimistic
       && message.identity.interactionId === requestIdentity)
     if (correlated >= 0) return correlated
+    // A local optimistic row with an explicit client identity is a distinct
+    // command unless that identity correlates. Falling back to adjacent text
+    // here drops legitimate repeated prompts (for example two consecutive
+    // "继续" sends while the first authoritative echo is loading).
+    if (incomingOptimistic) return -1
   }
   const adjacentIndex = messages.length - 1
   const adjacent = messages[adjacentIndex]

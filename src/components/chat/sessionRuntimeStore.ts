@@ -11,6 +11,7 @@ import type { PlanEntry } from '../../domains/tasks/planTypes.ts'
 import type { ContentBlock, OptionalChatEventIdentity } from '../../infrastructure/acp/chatContracts.ts'
 import type { AgentContextKey } from '../../agentContext.ts'
 import { toAgentContextKey } from '../../agentContext.ts'
+import type { GenerationPhase } from '../../domains/workbench/generationFooterContracts.ts'
 
 /**
  * sessionRuntimeStore — Chat 会话运行时状态（阶段 2：Chat 状态收敛）。
@@ -43,6 +44,8 @@ export interface SourceChatRuntime {
   thinkingStart?: number
   generating: boolean
   generationStart?: number
+  lastActivityAt?: number
+  generationPhase?: GenerationPhase
   /** 接线层在 user 事件后写入（依赖主题域 spinner 预设） */
   generationFrames: string[]
   cancelState: CancelState
@@ -76,6 +79,7 @@ export type ChatEvent =
   | { type: 'user'; source: string; agentId?: string; content: string; eventReplay?: boolean; externalIdentity?: OptionalChatEventIdentity }
   | { type: 'optimistic-user'; source: string; agentId?: string; content: string; clientMsgId: string }
   | { type: 'confirm-user'; source: string; agentId?: string; clientMsgId: string }
+  | { type: 'reject-optimistic-user'; source: string; agentId?: string; clientMsgId: string }
   | { type: 'message-chunk'; source: string; agentId?: string; text: string; replay?: boolean; externalIdentity?: OptionalChatEventIdentity }
   | { type: 'thought-chunk'; source: string; agentId?: string; text: string; replay?: boolean; externalIdentity?: OptionalChatEventIdentity }
   | { type: 'tool-call'; source: string; agentId?: string; toolCallId?: string; title?: string; toolKind?: string; contentBlocks?: ContentBlock[]; rawInput?: unknown; clientGeneration?: number; replay?: boolean }
@@ -98,6 +102,8 @@ export function createSourceChatRuntime(source: string): SourceChatRuntime {
     thinkingStart: undefined,
     generating: false,
     generationStart: undefined,
+    lastActivityAt: undefined,
+    generationPhase: undefined,
     generationFrames: [],
     cancelState: createCancelState(source),
     replayToolIds: [],
@@ -243,6 +249,9 @@ export function applyChatEvent(
   }
 
   const current = state[key] ?? createSourceChatRuntime(source)
+  const touch = (runtime: SourceChatRuntime, phase: GenerationPhase, replay = false): SourceChatRuntime => replay
+    ? runtime
+    : { ...runtime, lastActivityAt: now, generationPhase: phase }
 
   switch (event.type) {
     case 'user':
@@ -281,6 +290,8 @@ export function applyChatEvent(
           ...runtime,
           generating: true,
           generationStart: now,
+          lastActivityAt: now,
+          generationPhase: { kind: 'thinking' },
           cancelState: { source, status: 'generating' },
         }
       }
@@ -304,11 +315,35 @@ export function applyChatEvent(
       }
     }
 
+    case 'reject-optimistic-user': {
+      const matched = current.messages.some(
+        message => message.role === 'user' && message.clientMsgId === event.clientMsgId,
+      )
+      if (!matched) return state
+      const messages = current.messages.filter(
+        message => !(message.role === 'user' && message.clientMsgId === event.clientMsgId),
+      )
+      const hasInFlight = messages.some(message => message.clientMsgId !== undefined || message.running)
+        || current.streamingText.length > 0
+        || current.streamingThinking.length > 0
+      return {
+        ...state,
+        [key]: {
+          ...current,
+          messages,
+          generating: hasInFlight,
+          generationStart: hasInFlight ? current.generationStart : undefined,
+          generationPhase: hasInFlight ? current.generationPhase ?? { kind: 'thinking' } : undefined,
+          cancelState: hasInFlight ? current.cancelState : createCancelState(source),
+        },
+      }
+    }
+
     case 'message-chunk': {
       const text = event.text
       if (!text) return state
       if (!event.replay && isRenderedSource(source, renderedSource)) {
-        return { ...state, [key]: { ...current, streamingText: current.streamingText + text, streamingIdentity: event.externalIdentity ?? current.streamingIdentity } }
+        return { ...state, [key]: touch({ ...current, streamingText: current.streamingText + text, streamingIdentity: event.externalIdentity ?? current.streamingIdentity }, { kind: 'responding' }) }
       }
       const replay = event.replay === true
       const messages = current.messages
@@ -325,13 +360,13 @@ export function applyChatEvent(
       if (last?.role === 'assistant' && (last.running || replayAppend)) {
         return {
           ...state,
-          [key]: mapMessages(current, (m, i, arr) => i === arr.length - 1
+          [key]: touch(mapMessages(current, (m, i, arr) => i === arr.length - 1
             ? { ...m, content: m.content + text, ...(append.identity ? { externalIdentity: append.identity } : {}) }
-            : m),
+            : m), { kind: 'responding' }, replay),
         }
       }
       const seq = current.seq + 1
-      return { ...state, [key]: appendMessage(current, {
+      return { ...state, [key]: touch(appendMessage(current, {
         id: `msg-${seq}`,
         role: 'assistant',
         sender: 'peri',
@@ -340,7 +375,7 @@ export function applyChatEvent(
         running: !replay,
         externalIdentity: event.externalIdentity,
         agentId,
-      }, seq) }
+      }, seq), { kind: 'responding' }, replay) }
     }
 
     case 'thought-chunk': {
@@ -352,7 +387,7 @@ export function applyChatEvent(
       if (!event.replay && isRenderedSource(source, renderedSource)) {
         return {
           ...state,
-          [key]: { ...withStart, streamingThinking: current.streamingThinking + text, streamingIdentity: event.externalIdentity ?? current.streamingIdentity },
+          [key]: touch({ ...withStart, streamingThinking: current.streamingThinking + text, streamingIdentity: event.externalIdentity ?? current.streamingIdentity }, { kind: 'thinking' }),
         }
       }
       const replay = event.replay === true
@@ -369,13 +404,13 @@ export function applyChatEvent(
       if (last?.role === 'reasoning' && (last.running || replayAppend)) {
         return {
           ...state,
-          [key]: mapMessages(withStart, (m, i, arr) => i === arr.length - 1
+          [key]: touch(mapMessages(withStart, (m, i, arr) => i === arr.length - 1
             ? { ...m, content: m.content + text, ...(append.identity ? { externalIdentity: append.identity } : {}) }
-            : m),
+            : m), { kind: 'thinking' }, replay),
         }
       }
       const seq = withStart.seq + 1
-      return { ...state, [key]: appendMessage(withStart, {
+      return { ...state, [key]: touch(appendMessage(withStart, {
         id: `thought-${seq}`,
         role: 'reasoning',
         sender: 'peri',
@@ -385,7 +420,7 @@ export function applyChatEvent(
         thoughtStartedAt,
         externalIdentity: event.externalIdentity,
         agentId,
-      }, seq) }
+      }, seq), { kind: 'thinking' }, replay) }
     }
 
     case 'tool-call': {
@@ -396,7 +431,7 @@ export function applyChatEvent(
       if (existingTool) {
         return {
           ...state,
-          [key]: mapMessages(current, message => message.id === existingTool.id
+          [key]: touch(mapMessages(current, message => message.id === existingTool.id
             ? {
                 ...message,
                 toolName: event.title || message.toolName,
@@ -410,7 +445,7 @@ export function applyChatEvent(
                 rawInput: event.rawInput !== undefined ? event.rawInput : message.rawInput,
                 clientGeneration: event.clientGeneration ?? message.clientGeneration,
               }
-            : message),
+            : message), { kind: 'tool', name: event.title || existingTool.toolName || '?' }, replay),
         }
       }
       if (replay) {
@@ -440,7 +475,7 @@ export function applyChatEvent(
         running: true,
         externalIdentity: toolId ? { toolCallId: toolId } : undefined,
       }, seq)
-      return { ...state, [key]: runtime }
+      return { ...state, [key]: touch(runtime, { kind: 'tool', name: title }, replay) }
     }
 
     case 'tool-call-update': {
@@ -456,7 +491,7 @@ export function applyChatEvent(
         const seq = current.seq + 1
         return {
           ...state,
-          [key]: appendMessage({
+          [key]: touch(appendMessage({
             ...current,
             replayToolIds: replay && !current.replayToolIds.includes(toolId)
               ? [...current.replayToolIds, toolId]
@@ -479,12 +514,12 @@ export function applyChatEvent(
             clientGeneration: event.clientGeneration,
             running: false,
             externalIdentity: { toolCallId: toolId },
-          }, seq),
+          }, seq), { kind: 'tool', name: '?' }, replay),
         }
       }
       return {
         ...state,
-        [key]: mapMessages(current, m => m.id === 'tool-' + toolId
+        [key]: touch(mapMessages(current, m => m.id === 'tool-' + toolId
           ? {
               ...m,
               toolOutput: outputStr,
@@ -497,7 +532,7 @@ export function applyChatEvent(
               clientGeneration: event.clientGeneration ?? m.clientGeneration,
               running: false,
             }
-          : m),
+          : m), { kind: 'tool', name: target.find(message => message.id === 'tool-' + toolId)?.toolName || '?' }, replay),
       }
     }
 
@@ -530,6 +565,7 @@ export function applyChatEvent(
         ...runtime,
         generating: false,
         generationStart: undefined,
+        generationPhase: undefined,
         cancelState: terminationScope === 'live' && current.cancelState.status === 'canceling'
           ? { ...current.cancelState, status: 'cancelled' }
           : current.cancelState,
@@ -578,6 +614,7 @@ export function applyChatEvent(
         ...runtime,
         generating: false,
         generationStart: undefined,
+        generationPhase: undefined,
         ...(terminationScope === 'live' ? {
           lastSummary: {
             elapsedMs: now - (current.generationStart ?? now),
@@ -603,6 +640,7 @@ export function applyChatEvent(
         cancelState: applyCancelEvent(source, { kind: 'success' }, current.cancelState),
         generating: false,
         generationStart: undefined,
+        generationPhase: undefined,
         lastSummary: {
           elapsedMs: now - (current.generationStart ?? now),
           tokenCount: current.tokenCount,

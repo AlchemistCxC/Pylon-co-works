@@ -124,4 +124,13 @@ describe('file/diff tab identity 版本化 schema', () => {
   it('v2 tabs 为空 → activeKey 为 null', () => {
     expect(parseFileTabs('{"version":2,"tabs":[],"activeKey":"file:a.ts"}').activeKey).toBeNull()
   })
+
+  it('损坏 staged 字段不会以 truthy 字符串进入 Git diff 请求', () => {
+    const parsed = parseFileTabs(JSON.stringify({
+      version: 3,
+      tabs: [{ path: 'a.ts', viewType: 'git.diff', staged: 'false' }],
+      activeKey: 'git.diff:a.ts',
+    }))
+    expect(parsed.tabs).toEqual([{ path: 'a.ts', viewType: 'git.diff' }])
+  })
 })

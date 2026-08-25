@@ -23,6 +23,9 @@ export interface AgentWorkbenchCommandDependencies {
   resolvePersona(session: Session): string
   sendMessage(payload: SendMessagePayload): Promise<unknown>
   optimisticUser(source: string, content: string, clientMessageId: string, options?: { persistCanonical?: boolean }): void
+  rejectOptimisticUser(source: string, clientMessageId: string): void
+  optimisticDocument(source: string, content: string, clientMessageId: string): void
+  rejectOptimisticDocument(source: string, clientMessageId: string): void
   nextClientMessageId(source: string): string
   setModel(context: AgentContext, modelId: string): Promise<void>
   setMode(context: AgentContext, modeId: string): Promise<void>
@@ -44,6 +47,9 @@ function productionDependencies(): AgentWorkbenchCommandDependencies {
     },
     sendMessage: payload => sendMessageWithStream(payload),
     optimisticUser: (source, content, clientMessageId, options) => getChatController()?.sendOptimisticUser(source, content, clientMessageId, options),
+    rejectOptimisticUser: (source, clientMessageId) => getChatController()?.rejectOptimisticUser(source, clientMessageId),
+    optimisticDocument: () => {},
+    rejectOptimisticDocument: () => {},
     nextClientMessageId: source => `${source}:${Date.now()}:${Math.random().toString(36).slice(2, 8)}`,
     setModel: (context, modelId) => setSessionModel(context, modelId),
     setMode: (context, modeId) => setSessionMode(context, modeId),
@@ -92,6 +98,7 @@ export function createAgentWorkbenchCommandFacade(
     // Solid renders the Kernel-committed WorkbenchDocument, not the legacy chat
     // runtime. Persisting this temporary echo would race the Kernel user row and
     // create a second durable user event; keep it runtime-local on this path.
+    dependencies.optimisticDocument(session.source, content, clientMessageId)
     dependencies.optimisticUser(session.source, content, clientMessageId, { persistCanonical: false })
     try {
       await dependencies.sendMessage(buildSendMessagePayload({
@@ -100,6 +107,8 @@ export function createAgentWorkbenchCommandFacade(
       }))
       return { status: 'sent', messageId: clientMessageId }
     } catch (error) {
+      dependencies.rejectOptimisticUser(session.source, clientMessageId)
+      dependencies.rejectOptimisticDocument(session.source, clientMessageId)
       return { status: 'rejected', messageId: clientMessageId, error: error instanceof Error ? error.message : String(error) }
     }
   }
