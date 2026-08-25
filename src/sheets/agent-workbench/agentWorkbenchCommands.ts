@@ -33,6 +33,8 @@ export interface AgentWorkbenchCommandDependencies {
   resolveConfigOption(sessionId: string, key: string): { readonly value?: unknown; readonly version?: number } | undefined
   resolveInteraction(sessionId: string, interactionId: string): ResolvedWorkbenchInteraction | undefined
   respondInteraction(request: ResolvedWorkbenchInteraction, answer: InteractionResponseAnswer): Promise<void>
+  openResource(session: Session, resource: unknown): Promise<void>
+  revealResource(session: Session, resource: unknown): Promise<void>
   createSession(input?: Parameters<WorkbenchCommandFacade['createSession']>[0]): Promise<{ sessionId: string }>
   selectSession(sessionId: string): void
   discardSession(sessionId: string): Promise<void>
@@ -62,6 +64,8 @@ function productionDependencies(): AgentWorkbenchCommandDependencies {
     respondInteraction: (request, answer) => createInteractionResponseTransport({
       invoke: (command, args) => invoke(command, args),
     }).respond(request, answer),
+    async openResource() { throw new Error('production_command_not_connected') },
+    async revealResource() { throw new Error('production_command_not_connected') },
     async createSession() { throw new Error('production_command_not_connected') },
     selectSession() {},
     async discardSession() {},
@@ -178,8 +182,18 @@ export function createAgentWorkbenchCommandFacade(
       try { await dependencies.respondInteraction(request, answer); return { ok: true } }
       catch (error) { return rejected(error instanceof Error ? error.message : String(error)) }
     },
-    async openResource() { return rejected('production_command_not_connected') },
-    async revealResource() { return rejected('production_command_not_connected') },
+    async openResource(sessionId, resource) {
+      const session = dependencies.resolveSession(sessionId)
+      if (!session) return rejected('session_not_found')
+      try { await dependencies.openResource(session, resource); return { ok: true } }
+      catch (error) { return rejected(error instanceof Error ? error.message : String(error)) }
+    },
+    async revealResource(sessionId, resource) {
+      const session = dependencies.resolveSession(sessionId)
+      if (!session) return rejected('session_not_found')
+      try { await dependencies.revealResource(session, resource); return { ok: true } }
+      catch (error) { return rejected(error instanceof Error ? error.message : String(error)) }
+    },
     async copy(_sessionId, text) {
       try { await navigator.clipboard.writeText(text); return { ok: true } }
       catch (error) { return rejected(error instanceof Error ? error.message : String(error)) }

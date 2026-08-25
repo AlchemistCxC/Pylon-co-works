@@ -20,6 +20,7 @@ import { resolveRendererSuiteFallback } from '../../host/renderer-suite/renderer
 import { useWorkspaceEntityStore } from '../../workspaceEntityStore.ts'
 import { publishActiveWorkbenchHostPort } from './activeWorkbenchHostPort.ts'
 import { createAgentWorkbenchSession, discardAgentWorkbenchSession } from './agentWorkbenchSessionCreation.ts'
+import { openFileLinkFromEvent, openResourceInFileSheet } from '../file/fileSheetNavigation.ts'
 
 export interface AgentRendererSuiteWorkbenchProps {
   sheet: SheetRecord
@@ -56,6 +57,20 @@ export default function AgentRendererSuiteWorkbench(props: AgentRendererSuiteWor
       },
       selectSession: id => currentPropsRef.current.ctx.selectSession(id),
       discardSession: discardAgentWorkbenchSession,
+      async openResource(session, resource) {
+        if (openResourceInFileSheet(session.id, resource)) return
+        const uri = resource && typeof resource === 'object' && !Array.isArray(resource) && 'uri' in resource
+          ? (resource as { uri?: unknown }).uri
+          : undefined
+        if (typeof uri === 'string' && /^(?:https?:|mailto:)/i.test(uri)) {
+          window.open(uri, '_blank', 'noopener,noreferrer')
+          return
+        }
+        throw new Error('resource_not_openable')
+      },
+      async revealResource(session, resource) {
+        if (!openResourceInFileSheet(session.id, resource)) throw new Error('resource_not_revealable')
+      },
     },
   })
   const sessionRuntime = sessionRuntimeRef.current
@@ -178,7 +193,7 @@ export default function AgentRendererSuiteWorkbench(props: AgentRendererSuiteWor
           prompt: true, cancel: true, attach: false, model: true, mode: true,
           sessionCreate: suiteId === 'builtin.solid', compact: false, sessionExport: false, sessionClear: false,
           sessionConfig: true,
-          toolAction: false, interactionResponse: true, resourceOpen: false, resourceReveal: false,
+          toolAction: false, interactionResponse: true, resourceOpen: true, resourceReveal: true,
           clipboardWrite: true, retry: false, recovery: false,
           appearanceEdit: suiteId === 'builtin.solid',
         },
@@ -371,7 +386,8 @@ export default function AgentRendererSuiteWorkbench(props: AgentRendererSuiteWor
     return host.commands.respondInteraction(input.sessionId, interactionId, response, options)
   }
 
-  return <div className="main renderer-suite-workbench" data-renderer-suite-host="true" data-suite-id={activeSuiteId ?? activation?.suite.value.id}>
+  return <div className="main renderer-suite-workbench" data-renderer-suite-host="true" data-suite-id={activeSuiteId ?? activation?.suite.value.id}
+    onClickCapture={event => { openFileLinkFromEvent(event, props.ctx.activeSession) }}>
     <div ref={containerRef} className="renderer-suite-workbench-mount" hidden={fatal} />
     {fatal && failure && hostPortRef.current && <ReactWorkbenchFatalFallback document={hostPortRef.current.document} failure={failure}
       onRetry={retrySolid}

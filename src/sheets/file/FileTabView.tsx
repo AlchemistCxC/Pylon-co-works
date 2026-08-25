@@ -30,7 +30,7 @@ export interface FileSaveReceipt {
  * 时若用户有未保存编辑 → onExternalChange 上报冲突（绝不静默覆盖）；无编辑 → 安全
  * 刷新到磁盘。saveAnchorToken 递增（保存成功/覆盖/重新加载后）→ 重拉磁盘对齐锚点。
  */
-export default function FileTabView({ target: explicitTarget, source, provider: explicitProvider, path, revealLine, context, editing, onTruncated, onContentReady, onContentChange, onExternalChange, onSelectionChange, onSelectionInvalidated, saveAnchorToken, saveReceipt }: {
+export default function FileTabView({ target: explicitTarget, source, provider: explicitProvider, path, revealLine, context, editing, onTruncated, onContentReady, onContentChange, onExternalChange, onSelectionChange, onSelectionInvalidated, onSave, saveAnchorToken, saveReceipt }: {
   target?: WorkspaceTarget | null
   /** @deprecated direct component compatibility. */ source?: string | null
   provider?: FileProvider | null
@@ -44,6 +44,7 @@ export default function FileTabView({ target: explicitTarget, source, provider: 
   onExternalChange?: () => void
   onSelectionChange?: (selection: DispatchSelection | null) => void
   onSelectionInvalidated?: () => void
+  onSave?: () => void
   saveAnchorToken?: number
   saveReceipt?: FileSaveReceipt | null
 }) {
@@ -222,6 +223,7 @@ export default function FileTabView({ target: explicitTarget, source, provider: 
             onContentChange?.(value)
           }}
           onSelectionChange={onSelectionChange}
+          onSave={onSave}
         />
       </div>
     )

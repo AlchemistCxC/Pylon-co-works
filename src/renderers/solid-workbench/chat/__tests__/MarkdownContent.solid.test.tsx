@@ -83,4 +83,10 @@ describe('MarkdownContent heading class contract（CSS-02，CSS-04 回归门）'
     await waitFor(() => expect(unsafe.container).toHaveTextContent('bad'))
     expect(unsafe.container.querySelector('img')).toBeNull()
   })
+
+  it('保留无 scheme 的工作区相对文件链接，供 AgentSheet 捕获并转入 FileSheet', async () => {
+    const { container } = render(() => <MarkdownContent text="[main](src/main.ts#L12)" />)
+    await waitFor(() => expect(container.querySelector('a')).not.toBeNull())
+    expect(container.querySelector('a')).toHaveAttribute('href', 'src/main.ts#L12')
+  })
 })

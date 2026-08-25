@@ -12,6 +12,7 @@ import { getInterfaceModeRegistry } from '../plugin-runtime/runtimeServices.ts'
 import { IsolatedPluginSurface } from '../plugin-runtime/ui/IsolatedPluginSurface.tsx'
 import { BUILTIN_INTERFACE_MODES } from '../plugins/core/interfaceMode/builtinInterfaceModes.ts'
 import AgentRendererSuiteWorkbench from './agent-workbench/AgentRendererSuiteWorkbench.tsx'
+import { openFileLinkFromEvent, openResourceInFileSheet } from './file/fileSheetNavigation.ts'
 
 /**
  * AgentSheetView — agent 主工作台（W1-03 侧栏上移后只留主区）。
@@ -65,6 +66,9 @@ export default function AgentSheetView({ sheet, ctx }: { sheet: SheetRecord; ctx
         else if (event === 'workbench:select-session' && typeof detail === 'string') ctx.selectSession(detail)
         else if (event === 'workbench:open-profile') ctx.openProfileEdit()
         else if (event === 'workbench:open-session-settings' && typeof detail === 'string') ctx.openSessionSettings(detail)
+        else if ((event === 'workbench:open-resource' || event === 'workbench:reveal-resource') && ctx.activeSession) {
+          openResourceInFileSheet(ctx.activeSession, detail)
+        }
         else if (event === 'workbench:open-sheet' && detail && typeof detail === 'object') {
           const input = detail as { kind?: unknown, title?: unknown, agentId?: unknown }
           if (typeof input.kind === 'string' && typeof input.title === 'string') {
@@ -96,10 +100,11 @@ export default function AgentSheetView({ sheet, ctx }: { sheet: SheetRecord; ctx
       showPet={showPet}
       isReplay={isReplay}
       onContinueReplay={() => useReplayPostureStore.getState().clear()}
+      onOpenFileLink={event => { openFileLinkFromEvent(event, ctx.activeSession) }}
     />
   }
   return (
-    <div className="main" data-pylon-workbench="terminal-like">
+    <div className="main" data-pylon-workbench="terminal-like" onClickCapture={event => { openFileLinkFromEvent(event, ctx.activeSession) }}>
       <div className={`main-body ${ctx.ccEditMode ? 'blur-bg' : ''}`} style={{
         // 右栏已是 .layout 的 flex sibling，主区宽度天然扣除右栏；此处不得再次预留，
         // 否则首次启动时中控输入栏会被重复挤压。

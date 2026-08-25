@@ -15,15 +15,16 @@ interface ModernAgentWorkbenchProps {
   showPet: boolean
   isReplay: boolean
   onContinueReplay(): void
+  onOpenFileLink(event: React.MouseEvent<HTMLElement>): void
 }
 
-export default function ModernAgentWorkbench({ sheet, ctx, workspaceMode, showPet, isReplay, onContinueReplay }: ModernAgentWorkbenchProps) {
+export default function ModernAgentWorkbench({ sheet, ctx, workspaceMode, showPet, isReplay, onContinueReplay, onOpenFileLink }: ModernAgentWorkbenchProps) {
   const sessions = useIdentityStore(state => state.sessions)
   const statuses = useRuntimeStore(state => state.agentStatuses)
   const session = sessions.find(candidate => candidate.id === ctx.activeSession)
   const status = selectAgentStatus(sheet.agentId ?? '', sheet.agentId ?? '', statuses)
   return (
-    <div className="main modern-agent-workbench" data-pylon-workbench="modern-gui">
+    <div className="main modern-agent-workbench" data-pylon-workbench="modern-gui" onClickCapture={onOpenFileLink}>
       <header className="modern-workbench-header">
         <span className="modern-workbench-mark" aria-hidden="true"><Sparkles size={16} /></span>
         <span className="modern-workbench-heading">

@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import { beforeEach, describe, expect, it, vi } from 'vitest'
-import { render, waitFor } from '@testing-library/react'
+import { fireEvent, render, waitFor } from '@testing-library/react'
 import { EditorView } from '@codemirror/view'
 import FileCodeEditor from '../FileCodeEditor'
 
@@ -45,5 +45,15 @@ describe('FileCodeEditor', () => {
     rerender(<FileCodeEditor path="src/a.ts" value={'external\ncontent'} onChange={onChange} onSelectionChange={onSelectionChange} />)
     await waitFor(() => expect(view.state.doc.toString()).toBe('external\ncontent'))
     expect(onChange).not.toHaveBeenCalled()
+  })
+
+  it('在编辑器内拦截 Mod-S 并交给宿主保存事务', async () => {
+    const onSave = vi.fn()
+    render(<FileCodeEditor path="src/a.ts" value="content" onSave={onSave} />)
+    const view = await waitFor(() => viewOf())
+
+    fireEvent.keyDown(view.contentDOM, { key: 's', ctrlKey: true })
+
+    expect(onSave).toHaveBeenCalledTimes(1)
   })
 })

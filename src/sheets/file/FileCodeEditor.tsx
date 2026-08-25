@@ -1,6 +1,7 @@
 import { useEffect, useRef } from 'react'
 import { basicSetup, EditorView } from 'codemirror'
 import { Compartment } from '@codemirror/state'
+import { keymap } from '@codemirror/view'
 import { HighlightStyle, LanguageDescription, syntaxHighlighting } from '@codemirror/language'
 import { languages } from '@codemirror/language-data'
 import { tags } from '@lezer/highlight'
@@ -27,18 +28,19 @@ const fileEditorHighlightStyle = HighlightStyle.define([
  * Workspace 宿主只接触 value/change/selection，不持有 EditorView；语言包按路径异步
  * 装入，未知扩展名保持纯文本。这样编辑器实现可以替换而不改插件或 Sheet 契约。
  */
-export default function FileCodeEditor({ path, value, revealLine, onChange, onSelectionChange }: {
+export default function FileCodeEditor({ path, value, revealLine, onChange, onSelectionChange, onSave }: {
   path: string
   value: string
   revealLine?: number
   onChange?: (value: string) => void
   onSelectionChange?: (selection: DispatchSelection | null) => void
+  onSave?: () => void
 }) {
   const hostRef = useRef<HTMLDivElement>(null)
   const viewRef = useRef<EditorView | null>(null)
   const applyingExternalValue = useRef(false)
-  const callbacksRef = useRef({ onChange, onSelectionChange })
-  callbacksRef.current = { onChange, onSelectionChange }
+  const callbacksRef = useRef({ onChange, onSelectionChange, onSave })
+  callbacksRef.current = { onChange, onSelectionChange, onSave }
 
   useEffect(() => {
     const parent = hostRef.current
@@ -51,6 +53,14 @@ export default function FileCodeEditor({ path, value, revealLine, onChange, onSe
       parent,
       extensions: [
         basicSetup,
+        keymap.of([{
+          key: 'Mod-s',
+          preventDefault: true,
+          run: () => {
+            callbacksRef.current.onSave?.()
+            return true
+          },
+        }]),
         syntaxHighlighting(fileEditorHighlightStyle),
         language.of([]),
         EditorView.contentAttributes.of({ 'aria-label': `编辑 ${path}`, spellcheck: 'false' }),

@@ -84,6 +84,21 @@ describe('FileViewHost 真实编辑/save/working-diff（I08-A-FE-02）', () => {
     expect(screen.queryByText('变更预览')).toBeNull()
   })
 
+  it('CodeMirror 内 Ctrl/Cmd+S 复用保存按钮的基线校验事务', async () => {
+    render(<FileViewHost source="ws-a" tab={fileTab} onCloseTab={vi.fn()} />)
+    await screen.findByText('const x = 1')
+    const editor = await editAndType()
+
+    fireEvent.keyDown(editor.contentDOM, { key: 's', ctrlKey: true })
+
+    await screen.findByText('已保存')
+    expect(invoke).toHaveBeenCalledWith('write_workspace_text', expect.objectContaining({
+      content: 'const x = 2',
+      expectedBaseline: 'const x = 1',
+      force: false,
+    }))
+  })
+
   it('保存冲突：外部修改 → 拒绝且保留 dirty（不静默覆盖），出覆盖/重新加载冲突条', async () => {
     invoke.mockImplementation((cmd: string) => {
       if (cmd === 'read_workspace_text') return Promise.resolve(readTextResult('const x = 1'))

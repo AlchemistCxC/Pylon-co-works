@@ -39,6 +39,21 @@ describe('FileTabBar 版本化 tab（D-04：file/diff 统一 identity）', () =>
     expect(onSelect).toHaveBeenCalledTimes(1)
   })
 
+  it('显示未保存/保存中状态，并在保存中禁用关闭按钮', () => {
+    render(<FileTabBar
+      tabs={tabs}
+      activeKey={fileTabKey(tabs[0])}
+      dirtyKeys={new Set([fileTabKey(tabs[0])])}
+      savingKeys={new Set([fileTabKey(tabs[2])])}
+      onSelect={() => {}}
+      onClose={() => {}}
+    />)
+
+    expect(screen.getByLabelText('未保存 src/a.ts')).toBeTruthy()
+    expect(screen.getByLabelText('正在保存 src/b.ts')).toBeTruthy()
+    expect(screen.getByRole('button', { name: '关闭 src/b.ts' })).toBeDisabled()
+  })
+
   it('无 tab 时渲染 null', () => {
     const { container } = render(<FileTabBar tabs={[]} activeKey={null} onSelect={() => {}} onClose={() => {}} />)
     expect(container.firstChild).toBeNull()

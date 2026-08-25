@@ -23,7 +23,7 @@ import { workspaceTargetKey } from '../../domains/workspace/workspaceTarget.ts'
  * 内容 ≠ 基线；保存带 expectedBaseline 走后端冲突检测（AC-1：外部修改不静默覆盖），
  * conflict → 覆盖保存（force）或重新加载；working-diff = 基线 vs 未保存编辑。
  */
-export default function FileViewHost({ target: explicitTarget, source, fileProvider: explicitFileProvider, gitProvider: explicitGitProvider, tab, context, onCloseTab, onDirtyChange }: {
+export default function FileViewHost({ target: explicitTarget, source, fileProvider: explicitFileProvider, gitProvider: explicitGitProvider, tab, context, onCloseTab, onDirtyChange, onSavingChange }: {
   target?: WorkspaceTarget | null
   /** @deprecated direct component compatibility. */ source?: string | null
   fileProvider?: FileProvider | null
@@ -32,6 +32,7 @@ export default function FileViewHost({ target: explicitTarget, source, fileProvi
   tab: FileTabRecord | null
   onCloseTab: (key: string) => void
   onDirtyChange?: (key: string, dirty: boolean) => void
+  onSavingChange?: (key: string, saving: boolean) => void
 }) {
   const target = explicitTarget === undefined ? legacyTarget(source) : explicitTarget
   const fileProvider = explicitFileProvider === undefined && source ? legacyFileProvider : explicitFileProvider ?? null
@@ -71,6 +72,12 @@ export default function FileViewHost({ target: explicitTarget, source, fileProvi
     onDirtyChange?.(tabKey, dirty)
     return () => onDirtyChange?.(tabKey, false)
   }, [dirty, onDirtyChange, tabKey])
+
+  useEffect(() => {
+    if (!tabKey) return
+    onSavingChange?.(tabKey, saveState === 'saving')
+    return () => onSavingChange?.(tabKey, false)
+  }, [onSavingChange, saveState, tabKey])
 
   useEffect(() => {
     const cleared = resetFileSheetTransientState()
@@ -186,6 +193,7 @@ export default function FileViewHost({ target: explicitTarget, source, fileProvi
               className="file-save-btn"
               onClick={() => void handleSave(false)}
               disabled={!dirty || saveState === 'saving'}
+              title="保存（Ctrl/⌘+S）"
             >
               {saveState === 'saving' ? '保存中…' : '保存'}
             </button>
@@ -222,6 +230,9 @@ export default function FileViewHost({ target: explicitTarget, source, fileProvi
         }}
         onSelectionChange={setSelection}
         onSelectionInvalidated={() => setSelection(null)}
+        onSave={() => {
+          if (dirty && saveState !== 'saving') void handleSave(false)
+        }}
         saveAnchorToken={reloadToken}
         saveReceipt={saveReceipt}
       />

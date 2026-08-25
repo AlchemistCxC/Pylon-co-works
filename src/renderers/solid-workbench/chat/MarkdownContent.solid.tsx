@@ -251,6 +251,10 @@ function safeHref(value: unknown): string | null {
   if (!href) return null
   if (/^(?:https?:|mailto:)/i.test(href)) return href
   if (/^(?:\/|\.\/|\.\.\/|#)/.test(href)) return href
+  // A scheme-less Markdown href is a workspace-relative resource. The
+  // AgentSheet host decides whether it is contained by the active workspace
+  // before preventing browser navigation and opening FileSheet.
+  if (!/^[a-z][a-z\d+.-]*:/i.test(href) && ![...href].some(char => char.charCodeAt(0) <= 0x20)) return href
   return null
 }
 

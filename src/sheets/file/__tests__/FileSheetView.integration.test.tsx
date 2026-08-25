@@ -11,6 +11,8 @@ import { fileTabKey, parseFileTabs, serializeFileTabs, type FileTabRecord, type 
 import type { SheetContext, SheetRecord } from '../../../workspace-sheets/sheetTypes'
 import { useIdentityStore } from '../../../identityStore'
 import { replaceFileEditorValue, waitForFileEditor } from './codeMirrorTestUtils.ts'
+import { closeWorkspace } from '../../../workspace-sheets/workspaceController.ts'
+import { FILE_NAVIGATION_METADATA_KEY } from '../fileSheetNavigation.ts'
 
 const { invoke } = vi.hoisted(() => ({ invoke: vi.fn() }))
 vi.mock('@tauri-apps/api/core', () => ({ invoke }))
@@ -70,6 +72,12 @@ function renderHarness() {
 
 function readTextResult(relativePath: string, content: string) {
   return { relativePath, content, bytesRead: content.length, totalBytes: content.length, truncated: false }
+}
+
+function deferred<T>() {
+  let resolve!: (value: T) => void
+  const promise = new Promise<T>(done => { resolve = done })
+  return { promise, resolve }
 }
 
 describe('FileSheetView 版本化 tab 集成（D-02/D-04）', () => {
@@ -237,6 +245,27 @@ describe('FileSheetView 版本化 tab 集成（D-02/D-04）', () => {
     }))
   })
 
+  it('AgentSheet 导航回原 Session 时先清空被重定向工作区的 tab，再打开目标文件', async () => {
+    useIdentityStore.setState({ sessions: [
+      { id: 'session-a', agentId: 'agent-test', source: 'ws-a', name: 'Workspace A', profileId: 'p', createdAt: 1, lastActiveAt: 1, platform: 'local', workdir: 'C:/workspace-a', sessionPrompt: '', skills: [], hooks: [], autoName: '' },
+      { id: 'session-b', agentId: 'agent-test', source: 'ws-b', name: 'Workspace B', profileId: 'p', createdAt: 1, lastActiveAt: 1, platform: 'local', workdir: 'C:/workspace-b', sessionPrompt: '', skills: [], hooks: [], autoName: '' },
+    ] })
+    const oldTab: FileTabRecord = { path: 'src/only-in-b.ts', viewType: 'file.text' }
+    seedSheet({
+      targetSessionId: 'session-b',
+      openTabs: serializeFileTabs({ version: 3, tabs: [oldTab], activeKey: fileTabKey(oldTab) }),
+      [FILE_NAVIGATION_METADATA_KEY]: JSON.stringify({ version: 1, requestId: 'return-to-a', sessionId: 'session-a', path: 'src/a.ts' }),
+    })
+    renderHarness()
+
+    await waitFor(() => expect(document.querySelector('.file-tab-view')?.getAttribute('data-path')).toBe('src/a.ts'))
+    expect(useWorkspaceStore.getState().workspaceSheets.sheets[0]?.metadata?.targetSessionId).toBe('session-a')
+    expect(invoke).not.toHaveBeenCalledWith('read_workspace_text', expect.objectContaining({
+      target: expect.objectContaining({ sessionId: 'session-a' }),
+      relativePath: 'src/only-in-b.ts',
+    }))
+  })
+
   it('未保存编辑会阻止 tab 切换，用户确认放弃后才允许离开', async () => {
     const tabs: FileTabRecord[] = [
       { path: 'src/a.ts', viewType: 'file.text' },
@@ -259,6 +288,79 @@ describe('FileSheetView 版本化 tab 集成（D-02/D-04）', () => {
     fireEvent.click(screen.getByTitle('src/b.ts'))
     await waitFor(() => expect(document.querySelector('.file-tab-view')?.getAttribute('data-path')).toBe('src/b.ts'))
     expect(window.confirm).toHaveBeenCalledWith(expect.stringContaining('未保存'))
+  })
+
+  it('消费 AgentSheet 文件导航意图，并让未保存保护决定是否切换', async () => {
+    const tab: FileTabRecord = { path: 'src/a.ts', viewType: 'file.text' }
+    seedSheet({
+      targetSessionId: 'session-a',
+      openTabs: serializeFileTabs({ version: 3, tabs: [tab], activeKey: fileTabKey(tab) }),
+    })
+    renderHarness()
+    await screen.findByText('const x = 1')
+    fireEvent.click(screen.getByRole('button', { name: '编辑' }))
+    replaceFileEditorValue(await waitForFileEditor('const x = 1'), 'unsaved edit')
+    await screen.findByText(/未保存/)
+
+    vi.mocked(window.confirm).mockReturnValueOnce(false)
+    act(() => useWorkspaceStore.getState().patchSheetMetadata('file-1', {
+      [FILE_NAVIGATION_METADATA_KEY]: JSON.stringify({ version: 1, requestId: 'request-1', sessionId: 'session-a', path: 'src/b.ts', line: 5 }),
+    }))
+    await waitFor(() => expect(useWorkspaceStore.getState().workspaceSheets.sheets[0]?.metadata?.[FILE_NAVIGATION_METADATA_KEY]).toBe(''))
+    expect(document.querySelector('.file-tab-view')?.getAttribute('data-path')).toBe('src/a.ts')
+
+    vi.mocked(window.confirm).mockReturnValueOnce(true)
+    act(() => useWorkspaceStore.getState().patchSheetMetadata('file-1', {
+      [FILE_NAVIGATION_METADATA_KEY]: JSON.stringify({ version: 1, requestId: 'request-2', sessionId: 'session-a', path: 'src/b.ts', line: 5 }),
+    }))
+    await waitFor(() => expect(document.querySelector('.file-tab-view')?.getAttribute('data-path')).toBe('src/b.ts'))
+    expect(parseFileTabs(useWorkspaceStore.getState().workspaceSheets.sheets[0]?.metadata?.openTabs).tabs)
+      .toContainEqual(expect.objectContaining({ path: 'src/b.ts', line: 5 }))
+  })
+
+  it('保存请求在途时阻止 tab 切换、关闭 tab 与关闭 FileSheet', async () => {
+    const write = deferred<ReturnType<typeof readTextResult>>()
+    invoke.mockImplementation((cmd: string, args: { relativePath?: string } | undefined) => {
+      if (cmd === 'read_workspace_text') return Promise.resolve(readTextResult(args?.relativePath ?? '', 'const x = 1'))
+      if (cmd === 'write_workspace_text') return write.promise
+      if (cmd === 'list_workspace_entries') return Promise.resolve([])
+      return Promise.reject(new Error(`unexpected invoke ${cmd}`))
+    })
+    const tabs: FileTabRecord[] = [
+      { path: 'src/a.ts', viewType: 'file.text' },
+      { path: 'src/b.ts', viewType: 'file.text' },
+    ]
+    seedSheet({ openTabs: serializeFileTabs({ version: 3, tabs, activeKey: fileTabKey(tabs[0]) }) })
+    renderHarness()
+    await screen.findByText('const x = 1')
+    fireEvent.click(screen.getByRole('button', { name: '编辑' }))
+    replaceFileEditorValue(await waitForFileEditor('const x = 1'), 'const x = 2')
+    fireEvent.click(screen.getByRole('button', { name: '保存' }))
+    await screen.findByText('保存中…')
+    vi.mocked(window.confirm).mockClear()
+
+    act(() => useWorkspaceStore.getState().patchSheetMetadata('file-1', {
+      [FILE_NAVIGATION_METADATA_KEY]: JSON.stringify({ version: 1, requestId: 'saving-request', sessionId: 'session-a', path: 'src/b.ts' }),
+    }))
+
+    fireEvent.click(screen.getByTitle('src/b.ts'))
+    fireEvent.click(screen.getByRole('button', { name: '关闭 src/a.ts' }))
+    expect(document.querySelector('.file-tab-view')?.getAttribute('data-path')).toBe('src/a.ts')
+    expect(screen.getAllByTitle('src/a.ts').length).toBeGreaterThan(0)
+    expect(window.confirm).not.toHaveBeenCalled()
+    expect(useWorkspaceStore.getState().workspaceSheets.sheets[0]?.metadata?.[FILE_NAVIGATION_METADATA_KEY]).not.toBe('')
+
+    let closed = true
+    await act(async () => { closed = await closeWorkspace('file-1') })
+    expect(closed).toBe(false)
+    expect(useWorkspaceStore.getState().workspaceSheets.sheets.some(sheet => sheet.id === 'file-1')).toBe(true)
+
+    await act(async () => {
+      write.resolve(readTextResult('src/a.ts', 'const x = 2'))
+      await write.promise
+    })
+    await waitFor(() => expect(document.querySelector('.file-tab-view')?.getAttribute('data-path')).toBe('src/b.ts'))
+    expect(useWorkspaceStore.getState().workspaceSheets.sheets[0]?.metadata?.[FILE_NAVIGATION_METADATA_KEY]).toBe('')
   })
 
   it('SCM 点击变更 → 打开 diff-mode tab（tab 条保留，主区显示 diff，git_diff 带 staged）', async () => {

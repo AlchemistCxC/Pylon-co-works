@@ -543,6 +543,17 @@
   text-overflow: ellipsis;
 }
 
+.file-tab-state {
+  flex: 0 0 auto;
+  min-width: 12px;
+  color: var(--text-dim);
+  font: 700 10px/1 var(--mono);
+  text-align: center;
+}
+.file-tab-state.dirty { color: var(--accent); }
+.file-tab-state.saving { animation: file-tab-saving-pulse 900ms ease-in-out infinite alternate; }
+@keyframes file-tab-saving-pulse { to { opacity: .35; } }
+
 .file-tab-close {
   width: 24px;
   height: 24px;
@@ -561,6 +572,7 @@
   color: var(--text);
   background: var(--bg-hover);
 }
+.file-tab-close:disabled { cursor: wait; opacity: .25; }
 
 .file-tab-view {
   background: var(--bg-panel);

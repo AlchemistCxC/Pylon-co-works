@@ -7,9 +7,11 @@ import { fileTabKey, fileTabViewType, type FileTabRecord } from './fileSheetStat
  * 可序列化、重启恢复）。tab 单例 key = `${mode}:${path}`：同路径 file/diff 并存为
  * 两个 tab 且不互相覆盖；关闭/切换均以 key 回调 FileSheetView 的 patchSheetMetadata。
  */
-export default function FileTabBar({ tabs, activeKey, onSelect, onClose }: {
+export default function FileTabBar({ tabs, activeKey, dirtyKeys, savingKeys, onSelect, onClose }: {
   tabs: readonly FileTabRecord[]
   activeKey: string | null
+  dirtyKeys?: ReadonlySet<string>
+  savingKeys?: ReadonlySet<string>
   onSelect: (key: string) => void
   onClose: (key: string) => void
 }) {
@@ -20,21 +22,31 @@ export default function FileTabBar({ tabs, activeKey, onSelect, onClose }: {
         const key = fileTabKey(tab)
         const isDiff = fileTabViewType(tab) === 'git.diff'
         const label = isDiff ? `${tab.path}（diff）` : tab.path
+        const dirty = dirtyKeys?.has(key) === true
+        const saving = savingKeys?.has(key) === true
         return (
           <span
             key={key}
             role="tab"
             aria-selected={activeKey === key}
-            className={`file-tab ${activeKey === key ? 'active' : ''} ${isDiff ? 'file-tab-diff' : ''}`}
+            className={`file-tab ${activeKey === key ? 'active' : ''} ${isDiff ? 'file-tab-diff' : ''} ${dirty ? 'dirty' : ''} ${saving ? 'saving' : ''}`}
+            data-dirty={dirty ? 'true' : undefined}
+            data-saving={saving ? 'true' : undefined}
             onClick={() => onSelect(key)}
             title={label}
           >
             <span className="file-tab-name">{tab.path.split('/').pop()}</span>
             {isDiff && <span className="file-tab-mode">{tab.staged ? 'staged' : 'unstaged'}</span>}
+            {saving
+              ? <span className="file-tab-state saving" role="status" aria-label={`正在保存 ${label}`}>…</span>
+              : dirty
+                ? <span className="file-tab-state dirty" role="status" aria-label={`未保存 ${label}`}>●</span>
+                : null}
             <button
               type="button"
               className="file-tab-close"
               aria-label={`关闭 ${label}`}
+              disabled={saving}
               onClick={event => { event.stopPropagation(); onClose(key) }}
             >
               ✕

@@ -67,6 +67,8 @@ export interface FileViewRendererProps {
   onCloseTab: (key: string) => void
   /** Reports unsaved editor state so the host can guard destructive navigation. */
   onDirtyChange?: (key: string, dirty: boolean) => void
+  /** Reports an in-flight write; hosts must not discard/unmount the editor mid-save. */
+  onSavingChange?: (key: string, saving: boolean) => void
 }
 
 interface FileViewRendererBase {

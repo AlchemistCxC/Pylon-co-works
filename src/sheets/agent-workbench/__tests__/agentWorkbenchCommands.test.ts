@@ -128,4 +128,21 @@ describe('Agent Workbench production commands', () => {
       .resolves.toEqual({ ok: false, error: 'config_value_unsupported' })
     expect(setConfigOption).not.toHaveBeenCalled()
   })
+
+  it('resource commands resolve the bound Session before delegating FileSheet navigation', async () => {
+    const openResource = vi.fn(async () => undefined)
+    const revealResource = vi.fn(async () => undefined)
+    const commands = createAgentWorkbenchCommandFacade({
+      resolveSession: id => id === session.id ? session : undefined,
+      openResource,
+      revealResource,
+    })
+    const resource = { path: 'src/main.ts', selection: { start: { line: 12 } } }
+
+    await expect(commands.openResource(session.id, resource)).resolves.toEqual({ ok: true })
+    await expect(commands.revealResource(session.id, resource)).resolves.toEqual({ ok: true })
+    expect(openResource).toHaveBeenCalledWith(session, resource)
+    expect(revealResource).toHaveBeenCalledWith(session, resource)
+    await expect(commands.openResource('missing', resource)).resolves.toEqual({ ok: false, error: 'session_not_found' })
+  })
 })

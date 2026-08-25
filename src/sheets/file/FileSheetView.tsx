@@ -12,6 +12,7 @@ import type { FileActivityProps, FileViewRendererProps } from '../../plugin-runt
 import { IsolatedPluginSurface } from '../../plugin-runtime/ui/IsolatedPluginSurface.tsx'
 import FileViewRenderBoundary from './FileViewRenderBoundary.tsx'
 import { registerWorkspaceLiveCloseGuard } from '../../workspace-sheets/workspaceLiveCloseGuards.ts'
+import { FILE_NAVIGATION_METADATA_KEY, parsePendingFileNavigation } from './fileSheetNavigation.ts'
 
 /**
  * FileSheetView — FileSheet 主视图（W2-03/04，D-08 VS Code 风格改造；ISSUE-08 D-02/D-04）。
@@ -76,14 +77,27 @@ export default function FileSheetView({ sheet, ctx }: { sheet: SheetRecord; ctx:
     return tabsState.tabs[tabsState.tabs.length - 1] ?? null
   }, [tabsState])
   const [dirtyTabKeys, setDirtyTabKeys] = useState<ReadonlySet<string>>(() => new Set())
+  const [savingTabKeys, setSavingTabKeys] = useState<ReadonlySet<string>>(() => new Set())
   const dirtyTabKeysRef = useRef(dirtyTabKeys)
+  const savingTabKeysRef = useRef(savingTabKeys)
   dirtyTabKeysRef.current = dirtyTabKeys
+  savingTabKeysRef.current = savingTabKeys
   const onDirtyChange = useCallback((key: string, dirty: boolean) => {
     setDirtyTabKeys(current => {
       const hasKey = current.has(key)
       if (hasKey === dirty) return current
       const next = new Set(current)
       if (dirty) next.add(key)
+      else next.delete(key)
+      return next
+    })
+  }, [])
+  const onSavingChange = useCallback((key: string, saving: boolean) => {
+    setSavingTabKeys(current => {
+      const hasKey = current.has(key)
+      if (hasKey === saving) return current
+      const next = new Set(current)
+      if (saving) next.add(key)
       else next.delete(key)
       return next
     })
@@ -96,25 +110,29 @@ export default function FileSheetView({ sheet, ctx }: { sheet: SheetRecord; ctx:
   })
   const canLeaveActiveTab = (nextKey: string | null) => {
     const currentKey = activeTab ? fileTabKey(activeTab) : null
-    if (!currentKey || currentKey === nextKey || !dirtyTabKeys.has(currentKey)) return true
+    if (!currentKey || currentKey === nextKey) return true
+    if (savingTabKeys.has(currentKey)) return false
+    if (!dirtyTabKeys.has(currentKey)) return true
     if (!window.confirm('当前文件有未保存修改。放弃修改并继续吗？')) return false
     discardDirty(currentKey)
     return true
   }
   useEffect(() => {
-    if (dirtyTabKeys.size === 0) return
+    if (dirtyTabKeys.size === 0 && savingTabKeys.size === 0) return
     const warnBeforeUnload = (event: BeforeUnloadEvent) => {
       event.preventDefault()
       event.returnValue = ''
     }
     window.addEventListener('beforeunload', warnBeforeUnload)
     return () => window.removeEventListener('beforeunload', warnBeforeUnload)
-  }, [dirtyTabKeys.size])
+  }, [dirtyTabKeys.size, savingTabKeys.size])
   useEffect(() => registerWorkspaceLiveCloseGuard(sheet.id, () => {
+    if (savingTabKeysRef.current.size > 0) return false
     if (dirtyTabKeysRef.current.size === 0) return true
     return window.confirm('此 File Sheet 有未保存修改。放弃修改并关闭吗？')
   }), [sheet.id])
   const [failedRendererIds, setFailedRendererIds] = useState<ReadonlySet<string>>(() => new Set())
+  const handledNavigationRef = useRef<string | null>(null)
   useEffect(() => setFailedRendererIds(new Set()), [target?.sessionId, tabsState.activeKey])
   const viewRenderer = resolveFileViewRenderer(target, activeTab, failedRendererIds)
   const ActivityComponent = selectedActivity?.renderKind === 'first-party-react' ? selectedActivity.component as ComponentType<FileActivityProps> : null
@@ -148,6 +166,80 @@ export default function FileSheetView({ sheet, ctx }: { sheet: SheetRecord; ctx:
     persistTabs(next, nextKey)
   }
 
+  // Cross-Sheet navigation is queued in metadata, but only this mounted FileSheet
+  // may apply it. This preserves the same dirty/saving guard as Explorer/search
+  // navigation and avoids an AgentSheet mutating editor tabs behind the host.
+  useEffect(() => {
+    const raw = sheet.metadata?.[FILE_NAVIGATION_METADATA_KEY]
+    if (!raw) {
+      handledNavigationRef.current = null
+      return
+    }
+    const pending = parsePendingFileNavigation(raw)
+    if (!pending) {
+      patchSheetMetadata(sheet.id, { [FILE_NAVIGATION_METADATA_KEY]: '' })
+      return
+    }
+    if (handledNavigationRef.current === pending.requestId) return
+
+    // A session-scoped FileSheet can be manually retargeted. Returning to its
+    // owning AgentSheet must clear the old workspace tabs before changing target,
+    // otherwise an identical relative path could be read/written in the wrong root.
+    if (pending.sessionId !== state.targetSessionId) {
+      if (savingTabKeys.size > 0) return
+      if (dirtyTabKeys.size > 0 && !window.confirm('当前工作区有未保存修改。放弃修改并打开链接文件吗？')) {
+        handledNavigationRef.current = pending.requestId
+        patchSheetMetadata(sheet.id, { [FILE_NAVIGATION_METADATA_KEY]: '' })
+        return
+      }
+      setDirtyTabKeys(new Set())
+      patchSheetMetadata(sheet.id, {
+        openTabs: serializeFileTabs({ version: 3, tabs: [], activeKey: null }),
+        activeFile: '',
+        targetSessionId: pending.sessionId,
+        // Keep the intent for the next render. The target-sync effect advances
+        // local ownership first; only then may the target file tab mount.
+        [FILE_NAVIGATION_METADATA_KEY]: raw,
+      })
+      return
+    }
+
+    const nextTab: FileTabRecord = {
+      path: pending.path,
+      viewType: 'file.text',
+      ...(pending.line === undefined ? {} : { line: pending.line }),
+    }
+    const nextKey = fileTabKey(nextTab)
+    const currentKey = activeTab ? fileTabKey(activeTab) : null
+    // Saving is transient and cannot be cancelled safely. Keep the intent queued;
+    // this effect retries as soon as the saving key set changes.
+    if (currentKey && currentKey !== nextKey && savingTabKeys.has(currentKey)) return
+    handledNavigationRef.current = pending.requestId
+    if (currentKey && currentKey !== nextKey && dirtyTabKeys.has(currentKey)) {
+      if (!window.confirm('当前文件有未保存修改。放弃修改并打开链接文件吗？')) {
+        patchSheetMetadata(sheet.id, { [FILE_NAVIGATION_METADATA_KEY]: '' })
+        return
+      }
+      setDirtyTabKeys(current => {
+        const next = new Set(current)
+        next.delete(currentKey)
+        return next
+      })
+    }
+
+    const current = readCurrentTabs()
+    const existingIndex = current.tabs.findIndex(tab => fileTabViewType(tab) === 'file.text' && tab.path === pending.path)
+    const tabs = existingIndex >= 0
+      ? current.tabs.map((tab, index) => index === existingIndex ? { ...tab, ...(pending.line === undefined ? {} : { line: pending.line }) } : tab)
+      : [...current.tabs, nextTab]
+    patchSheetMetadata(sheet.id, {
+      openTabs: serializeFileTabs({ version: 3, tabs, activeKey: nextKey }),
+      activeFile: pending.path,
+      targetSessionId: state.targetSessionId ?? '',
+      [FILE_NAVIGATION_METADATA_KEY]: '',
+    })
+  }, [activeTab, dirtyTabKeys, patchSheetMetadata, savingTabKeys, sheet.id, sheet.metadata, state.targetSessionId])
+
   const openDiffTab = (path: string, staged: boolean) => {
     const nextKey = fileTabKey({ path, viewType: 'git.diff' })
     if (!canLeaveActiveTab(nextKey)) return
@@ -167,6 +259,7 @@ export default function FileSheetView({ sheet, ctx }: { sheet: SheetRecord; ctx:
   }
 
   const closeTab = (key: string) => {
+    if (savingTabKeys.has(key)) return
     if (dirtyTabKeys.has(key)) {
       if (!window.confirm('当前文件有未保存修改。放弃修改并关闭吗？')) return
       discardDirty(key)
@@ -182,6 +275,7 @@ export default function FileSheetView({ sheet, ctx }: { sheet: SheetRecord; ctx:
   const selectSection = (section: string) => dispatch({ type: 'set-section', section })
   const selectSource = (sessionId: string | null) => {
     if (sessionId === state.targetSessionId) return
+    if (savingTabKeys.size > 0) return
     if (dirtyTabKeys.size > 0 && !window.confirm('当前工作区有未保存修改。放弃修改并切换工作区吗？')) return
     setDirtyTabKeys(new Set())
     dispatch({ type: 'set-target-session', sessionId })
@@ -235,7 +329,7 @@ export default function FileSheetView({ sheet, ctx }: { sheet: SheetRecord; ctx:
         </Suspense>
       </FileSheetSidebar>
       <main className="file-editor">
-        <FileTabBar tabs={tabsState.tabs} activeKey={tabsState.activeKey} onSelect={selectTab} onClose={closeTab} />
+        <FileTabBar tabs={tabsState.tabs} activeKey={tabsState.activeKey} dirtyKeys={dirtyTabKeys} savingKeys={savingTabKeys} onSelect={selectTab} onClose={closeTab} />
         <Suspense fallback={<div className="file-tab-empty">加载文件视图…</div>}>
           {activeTab && viewRenderer
             ? <FileViewRenderBoundary
@@ -244,11 +338,12 @@ export default function FileSheetView({ sheet, ctx }: { sheet: SheetRecord; ctx:
                 onFallback={rendererId => setFailedRendererIds(current => new Set([...current, rendererId]))}
               >
                 {ViewComponent
-                  ? <ViewComponent key={viewInstanceKey} target={target} context={sheetContext} tab={activeTab} fileProvider={fileProvider} gitProvider={gitProvider} onCloseTab={closeTab} onDirtyChange={onDirtyChange} />
+                  ? <ViewComponent key={viewInstanceKey} target={target} context={sheetContext} tab={activeTab} fileProvider={fileProvider} gitProvider={gitProvider} onCloseTab={closeTab} onDirtyChange={onDirtyChange} onSavingChange={onSavingChange} />
                   : viewRenderer.renderKind === 'isolated-surface'
                     ? <IsolatedPluginSurface key={viewInstanceKey} surfaceId={viewRenderer.surfaceId} className="file-view-isolated" input={{ target, context: sheetContext, tab: activeTab }} onEvent={(event, detail) => {
                         if (event === 'close-tab' && typeof detail === 'string') closeTab(detail)
                         else if (event === 'dirty-state' && typeof detail === 'boolean') onDirtyChange(fileTabKey(activeTab), detail)
+                        else if (event === 'saving-state' && typeof detail === 'boolean') onSavingChange(fileTabKey(activeTab), detail)
                       }} />
                     : null}
               </FileViewRenderBoundary>
