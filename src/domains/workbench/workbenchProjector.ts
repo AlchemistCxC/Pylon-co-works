@@ -497,12 +497,14 @@ function reduceMessage(document: WorkbenchDocument, envelope: WorkbenchEventEnve
   const previous = document.messages.at(-1)
   const previousIdentityKey = previous ? identityKeyOf(previous) : ''
   // ACP providers are allowed to omit message identity. Adjacent chunks of the
-  // same role still belong to one stream; a tool/reasoning/session event in the
-  // canonical timeline is an explicit boundary. If both sides provide different
-  // identities, the identity remains the stronger boundary.
+  // same role still belong to one stream; some providers also rotate messageId
+  // for every delta. Assistant boundaries therefore come from the canonical
+  // timeline (user/tool/reasoning/session), not from per-chunk identity.
   const append = Boolean(previous && previous.role === role && (
-    (identityKey !== '' && identityKey === previousIdentityKey)
-    || ((!identityKey || !previousIdentityKey) && immediatelyPrecedingMessageHasRole(document, envelope.eventId, role))
+    role === 'assistant'
+      ? immediatelyPrecedingMessageHasRole(document, envelope.eventId, role)
+      : (identityKey !== '' && identityKey === previousIdentityKey)
+        || ((!identityKey || !previousIdentityKey) && immediatelyPrecedingMessageHasRole(document, envelope.eventId, role))
   ))
   const incomingOptimistic = envelope.provenance.origin === 'optimistic-local'
   const duplicateIndex = role === 'user'

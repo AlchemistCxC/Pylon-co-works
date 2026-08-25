@@ -122,6 +122,29 @@ describe('WorkbenchProjector', () => {
     expect(selectLegacyMessages(projectWorkbench([first, second]).document).map(message => message.content)).toEqual(['firstsecond'])
   })
 
+  it('aggregates one assistant stream when the provider rotates identity on every chunk', () => {
+    const chunks = [
+      envelope(1, { type: 'message.delta', role: 'assistant', parts: [{ kind: 'text', text: '这' }] }, { messageId: 'chunk-1' }),
+      envelope(2, { type: 'message.delta', role: 'assistant', parts: [{ kind: 'text', text: '是' }] }, { messageId: 'chunk-2' }),
+      envelope(3, { type: 'message.delta', role: 'assistant', parts: [{ kind: 'text', text: ' complete' }] }, { messageId: 'chunk-3' }),
+      envelope(4, { type: 'message.delta', role: 'assistant', parts: [{ kind: 'text', text: ' answer' }] }, { messageId: 'chunk-4' }),
+    ]
+
+    expect(selectLegacyMessages(projectWorkbench(chunks).document).map(message => message.content))
+      .toEqual(['这是 complete answer'])
+  })
+
+  it('keeps assistant streams separated across a tool boundary even when identity is reused', () => {
+    const document = reduce([
+      envelope(1, { type: 'message.delta', role: 'assistant', parts: [{ kind: 'text', text: 'before tool' }] }, { messageId: 'turn-message' }),
+      envelope(2, { type: 'tool.started', tool: { toolCallId: 'tool-1', name: 'read' } }, { toolCallId: 'tool-1' }),
+      envelope(3, { type: 'message.delta', role: 'assistant', parts: [{ kind: 'text', text: 'after tool' }] }, { messageId: 'turn-message' }),
+    ])
+
+    expect(document.messages.filter(message => message.role === 'assistant').map(message => message.content))
+      .toEqual(['before tool', 'after tool'])
+  })
+
   it('keeps identity-less chunks separated across a tool boundary', () => {
     const document = reduce([
       envelope(1, { type: 'reasoning.delta', parts: [{ kind: 'text', text: 'before tool' }] }),
