@@ -92,8 +92,15 @@ function seedVisualQaDemo(setActiveSession: (id: string | null) => void, options
   const visualWorkspaces = buildVisualQaWorkspaces()
   localStorage.setItem(WORKSPACE_STORAGE_KEY, serializeWorkspaces(visualWorkspaces))
   useWorkspaceEntityStore.setState({ workspaces: visualWorkspaces, hydrated: true })
+  const visualSessionIds = new Set(visualSessions.map(session => session.id))
   for (const session of [...visualSessions, ...demoSessions]) {
-    if (!options.reset && localStorage.getItem(messageStorageKey(session.id))) continue
+    // Visual QA is a deterministic fixture, not user-owned history. Always
+    // refresh it so a stale/empty snapshot left by an earlier build cannot
+    // mask the current mock dataset (the exact failure seen in Edge).
+    // Standard demo sessions remain user-persistent unless an explicit reset
+    // was requested.
+    if (!options.reset && !visualSessionIds.has(session.id)
+      && localStorage.getItem(messageStorageKey(session.id))) continue
     const messages = session.id.startsWith('demo-visual')
       || visualSessions.some(candidate => candidate.id === session.id)
       ? buildVisualQaMessages(session.id)

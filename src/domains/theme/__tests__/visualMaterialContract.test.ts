@@ -37,7 +37,7 @@ describe('Pylon visual material contract', () => {
   })
 
   it('expresses the persistent brand tag as connected status nodes', () => {
-    expect(shellStyles).toContain('.agent-status-lights::before')
+    expect(shellStyles).not.toContain('.agent-status-lights::before')
     expect(shellStyles).toContain('var(--brand-node-ready)')
     expect(shellStyles).toContain('var(--brand-node-warn)')
     expect(shellStyles).toContain('var(--brand-node-error)')

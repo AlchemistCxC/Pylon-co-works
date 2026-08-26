@@ -8,7 +8,7 @@ import { clearSessionUiState } from './components/chat/sessionUiState'
 import { reportRuntimeError } from './runtimeError'
 import { selectUserDataRepository, type UserDataRepository } from './userDataRepository'
 import { resolveUnresolvedSessionTransaction } from './app/bootstrap/resolveUnresolvedSessionTransaction'
-import { IS_TAURI } from './infrastructure/tauri/env'
+import { IS_TAURI, isBrowserMockRuntime } from './infrastructure/tauri/env'
 import {
   mergePluginNamespace,
   type PluginDataPlane,
@@ -21,6 +21,8 @@ import type { SessionCreationSnapshot } from './plugin-runtime/session-creation/
 import type { AgentEntry } from './domains/agent/agentEntry.ts'
 
 export type { AgentEntry } from './domains/agent/agentEntry.ts'
+
+const hasBackend = () => IS_TAURI && !isBrowserMockRuntime()
 
 /**
  * identityStore — 身份与会话状态域（阶段 1：store 按域拆分）。
@@ -49,6 +51,8 @@ export interface Session {
   profileId: string
   createdAt: number
   lastActiveAt: number
+  /** Timestamp of the most recent assistant reply (display semantics). */
+  lastReplyAt?: number
   platform: string
   workdir: string
   /** CWD-03：Workspace 实体绑定（方案 C）。有值 = 绑定 Workspace（root 单一来源，
@@ -132,7 +136,7 @@ function canMutateIdentityDomain(
   persistence: IdentityPersistenceState,
   ...domains: Array<keyof IdentityPersistenceState>
 ): boolean {
-  return !IS_TAURI || domains.every(domain => persistence[domain] !== 'degraded-readonly')
+  return !hasBackend() || domains.every(domain => persistence[domain] !== 'degraded-readonly')
 }
 
 /**
@@ -320,7 +324,7 @@ export const useIdentityStore = create<IdentityStoreState>()((set, get) => ({
     // I14-W6：Tauri 模式以后端 versioned store 读回为权威源；后端明确无行时才从
     // 本地缓存做 CAS=0 冷启动导入，读取失败则只读降级。seq 守卫：hydrate 期间发生 mutation →
     // 读回丢弃（旧 response 不覆盖新 mutation）。
-    if (IS_TAURI && userDataRepository) {
+    if (hasBackend() && userDataRepository) {
       const startSeq = identityMutationSeq
       try {
         const envelope = await userDataRepository.load('profiles')
@@ -353,7 +357,7 @@ export const useIdentityStore = create<IdentityStoreState>()((set, get) => ({
       }
     }
     get().hydrateProfilesLocal(legacy)
-    if (IS_TAURI && userDataRepository) {
+    if (hasBackend() && userDataRepository) {
       set(state => ({
         lastPersistError: state.identityPersistence.sessions === 'degraded-readonly' ? state.lastPersistError : null,
         identityPersistence: { ...state.identityPersistence, profiles: 'ready' },
@@ -640,7 +644,7 @@ export const useIdentityStore = create<IdentityStoreState>()((set, get) => ({
   },
   hydrateSessions: async () => {
     // I14-W6：Tauri 模式后端读回优先；无行才冷启动导入，失败时缓存只读；seq 守卫防旧读回覆盖 mutation。
-    if (IS_TAURI && userDataRepository) {
+    if (hasBackend() && userDataRepository) {
       const startSeq = identityMutationSeq
       try {
         const envelope = await userDataRepository.load('sessions')
@@ -691,7 +695,7 @@ export const useIdentityStore = create<IdentityStoreState>()((set, get) => ({
       }
     }
     get().hydrateSessionsLocal()
-    if (IS_TAURI && userDataRepository) {
+    if (hasBackend() && userDataRepository) {
       set(state => ({
         lastPersistError: state.identityPersistence.profiles === 'degraded-readonly' ? state.lastPersistError : null,
         identityPersistence: { ...state.identityPersistence, sessions: 'ready' },

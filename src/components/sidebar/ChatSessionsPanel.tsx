@@ -34,7 +34,7 @@ export default function ChatSessionsPanel(props: AgentSidebarContributionProps) 
                   }}
                   onBlur={() => setRenaming(null)} onClick={event => event.stopPropagation()} />
               ) : <div className="session-name">{session.name}</div>}
-              <div className="session-meta">{formatTime(session.lastActiveAt || session.createdAt)}</div>
+              <div className="session-meta">{formatTime(session.lastReplyAt || session.lastActiveAt || session.createdAt)}</div>
             </div>
             <button className="session-gear" onClick={event => { event.stopPropagation(); props.onOpenSessionSettings(session.id) }} title="会话设置">⚙</button>
             <button className="session-del" onClick={event => { event.stopPropagation(); void props.onDeleteSession(session.id) }}>✕</button>

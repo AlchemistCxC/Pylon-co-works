@@ -30,6 +30,7 @@ function qaSession(
     profileId: agentId === 'gm' ? 'local' : 'default',
     createdAt: QA_NOW - (ageHours + 24) * HOUR,
     lastActiveAt: QA_NOW - ageHours * HOUR,
+    lastReplyAt: QA_NOW - Math.max(0.01, ageHours * 0.35) * HOUR,
     platform: agentId === 'hermes' ? 'webhook' : agentId === 'gm' ? 'web' : 'local',
     workdir,
     workspaceId,

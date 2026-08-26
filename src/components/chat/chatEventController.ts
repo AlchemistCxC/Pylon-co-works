@@ -1299,6 +1299,8 @@ export function attachChatEventController(refs: ChatEventControllerRefs): ChatCo
       if (doneContext && !isSourceLoading(source) && !kernelCommitted) {
         persistCanonicalEvent(doneContext, { source, update: { sessionUpdate: 'done' } }, true)
       }
+      const repliedSession = useIdentityStore.getState().sessions.find(session => session.source === source)
+      if (repliedSession) useIdentityStore.getState().updateSession(repliedSession.id, { lastReplyAt: Date.now() })
       dispatch({ type: 'done', source, replay: false })
       notifyHook('message.agent.committed', source, { source, payload: event.payload })
       notifyHook('turn.completed', source, { source, status: 'completed', payload: event.payload })

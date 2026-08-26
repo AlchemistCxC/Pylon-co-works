@@ -5,7 +5,7 @@ import { useStore } from './store'
 import { flushIdentityBackend, useIdentityStore } from './identityStore'
 import { useRuntimeStore } from './runtimeStore'
 import { useWorkspaceStore } from './workspaceStore'
-import { IS_TAURI } from './infrastructure/tauri/env'
+import { IS_TAURI, isBrowserMockRuntime } from './infrastructure/tauri/env'
 import { useShallow } from 'zustand/react/shallow'
 
 import { getCurrentWindow } from '@tauri-apps/api/window'
@@ -173,7 +173,7 @@ export default function App() {
   const [bootstrapRetry, setBootstrapRetry] = useState(0)
   useEffect(() => {
     const bootstrapRun = startApplicationBootstrap({
-      isTauri: IS_TAURI,
+      isTauri: IS_TAURI && !isBrowserMockRuntime(),
       // I14-W6：bootstrap 等待 identity hydration（Tauri 后端读回 / browser 本地）
       // 完成后，再恢复 workspace 与 Agent（ISSUE-14 目标行为 #5）。
       hydrateDomains: async () => {
@@ -274,7 +274,7 @@ export default function App() {
   // 幂等=seedDemo 内部（sessions 空才种会话）+ seededRef（StrictMode 双跑）。
   const demoSeededRef = useRef(false)
   useEffect(() => {
-    if (IS_TAURI) return
+    if (IS_TAURI && !isBrowserMockRuntime()) return
     if (demoSeededRef.current) return
     demoSeededRef.current = true
     const demoParams = new URLSearchParams(window.location.search)

@@ -7,7 +7,9 @@
  */
 import { create } from 'zustand'
 import { invoke } from '@tauri-apps/api/core'
-import { IS_TAURI } from './infrastructure/tauri/env'
+import { IS_TAURI, isBrowserMockRuntime } from './infrastructure/tauri/env'
+
+const hasBackend = () => IS_TAURI && !isBrowserMockRuntime()
 import { useIdentityStore } from './identityStore'
 import {
   isAbsolutePath,
@@ -53,7 +55,7 @@ export const useWorkspaceEntityStore = create<WorkspaceEntityStore>((set, get) =
 
   hydrate: async () => {
     if (get().hydrated) return
-    if (IS_TAURI) {
+    if (hasBackend()) {
       try {
         let raw = await invoke('workspace_list')
         let workspaces = Array.isArray(raw)
@@ -85,7 +87,7 @@ export const useWorkspaceEntityStore = create<WorkspaceEntityStore>((set, get) =
       throw new Error('工作目录必须是绝对路径')
     }
     let created: Workspace
-    if (IS_TAURI) {
+    if (hasBackend()) {
       const agentId = useIdentityStore.getState().activeAgent || ''
       const raw = await invoke('workspace_create', { agentId, name, rootPath })
       const normalized = normalizeWorkspaceShape(raw)
@@ -115,7 +117,7 @@ export const useWorkspaceEntityStore = create<WorkspaceEntityStore>((set, get) =
       throw new Error('工作目录必须是绝对路径')
     }
     let updated: Workspace
-    if (IS_TAURI) {
+    if (hasBackend()) {
       const raw = await invoke('workspace_update', { workspaceId: id, ...patch })
       const normalized = normalizeWorkspaceShape(raw)
       if (!normalized) throw new Error('workspace_update 返回无效形状')
@@ -140,7 +142,7 @@ export const useWorkspaceEntityStore = create<WorkspaceEntityStore>((set, get) =
   },
 
   deleteWorkspace: async id => {
-    if (IS_TAURI) {
+    if (hasBackend()) {
       await invoke('workspace_delete', { workspaceId: id })
     }
     const workspaces = get().workspaces.filter(w => w.id !== id)

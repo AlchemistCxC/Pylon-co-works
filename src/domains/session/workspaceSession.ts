@@ -8,6 +8,7 @@ export interface WorkspaceSession {
   profileId: string
   createdAt: number
   lastActiveAt: number
+  lastReplyAt?: number
   platform: string
   workdir: string
   workspaceId?: string

@@ -11,6 +11,13 @@ export type TauriWindow = { __TAURI_INTERNALS__?: unknown; __TAURI__?: unknown }
 export const IS_TAURI = typeof window !== 'undefined'
   && (typeof (window as any).__TAURI_INTERNALS__ !== 'undefined' || typeof (window as any).__TAURI__ !== 'undefined')
 
+/** Browser demo installs a transport-compatible fake Tauri global after this
+ * module is evaluated. Keep callers able to distinguish that mock at runtime. */
+export function isBrowserMockRuntime(): boolean {
+  return typeof window !== 'undefined'
+    && (window as unknown as { __PYLON_BROWSER_MOCK__?: unknown }).__PYLON_BROWSER_MOCK__ === true
+}
+
 /** 参数化变体：对任意 window-like 对象探测（backgroundImage 本地路径转换用） */
 export function hasTauriRuntime(target: TauriWindow): boolean {
   return Boolean(target.__TAURI_INTERNALS__ || target.__TAURI__)

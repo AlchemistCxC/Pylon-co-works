@@ -132,7 +132,21 @@ export default function AgentRendererSuiteWorkbench(props: AgentRendererSuiteWor
   }, [])
 
   useEffect(() => { void sessionRuntime.bind(session) }, [sessionRuntime, session])
-  useEffect(() => () => sessionRuntime.destroy(), [sessionRuntime])
+  // React.StrictMode intentionally runs effect cleanup/setup once during the
+  // initial dev mount. Destroying the mutable Workbench runtime in that probe
+  // leaves the second (real) setup with a permanently inert runtime, which
+  // presents as an empty chat even though the snapshot bridge loaded data.
+  // Defer destruction by one microtask and cancel it when setup runs again;
+  // genuine unmounts still destroy the runtime deterministically.
+  const runtimeLifecycleToken = useRef(0)
+  useEffect(() => {
+    const token = ++runtimeLifecycleToken.current
+    return () => {
+      queueMicrotask(() => {
+        if (runtimeLifecycleToken.current === token) sessionRuntime.destroy()
+      })
+    }
+  }, [sessionRuntime])
 
   useEffect(() => {
     const container = containerRef.current

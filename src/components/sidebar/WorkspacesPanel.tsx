@@ -182,7 +182,7 @@ export default function WorkspacesPanel(props: AgentSidebarContributionProps) {
                           }}
                           onBlur={() => setRenaming(null)} onClick={event => event.stopPropagation()} />
                       ) : <div className="session-name">{session.name}</div>}
-                      <div className="session-meta">{formatTime(session.lastActiveAt || session.createdAt)}</div>
+                      <div className="session-meta">{formatTime(session.lastReplyAt || session.lastActiveAt || session.createdAt)}</div>
                     </div>
                     <button className="session-gear" onClick={event => { event.stopPropagation(); props.onOpenSessionSettings(session.id) }} title="会话设置" aria-label={`${session.name} 会话设置`}><Settings size={13} aria-hidden="true" /></button>
                     <button className="session-del" onClick={event => { event.stopPropagation(); void props.onDeleteSession(session.id) }} title="删除会话" aria-label={`删除 ${session.name}`}><X size={13} aria-hidden="true" /></button>

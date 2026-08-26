@@ -6,10 +6,12 @@ import { createWorkbenchDocument, projectWorkbench, reduceWorkbenchEvent, type W
 import { createWorkbenchRuntime } from '../../domains/workbench/workbenchRuntime.ts'
 import { createSessionUiStore } from '../../domains/workbench/sessionUiStore.ts'
 import { createZustandWorkbenchAppearanceStore } from '../../domains/workbench/zustandWorkbenchAppearanceStore.ts'
-import { IS_TAURI } from '../../infrastructure/tauri/env.ts'
+import { IS_TAURI, isBrowserMockRuntime } from '../../infrastructure/tauri/env.ts'
 import { tauriCanonicalEventRepository } from '../../infrastructure/events/canonicalEventRepository.ts'
 import { subscribePluginEvents } from '../../infrastructure/events/pluginEventBus.ts'
 import { getChatController, type ChatControllerHandle } from '../../components/chat/chatEventController.ts'
+import { messageStorageKey, parseMessageSnapshot } from '../../components/chat/messagePersistence.ts'
+import type { Message } from '../../components/chat/messageTypes.ts'
 import { createAgentWorkbenchCommandFacade, type ResolvedWorkbenchInteraction } from './agentWorkbenchCommands.ts'
 
 export interface AgentWorkbenchSessionRuntimeDependencies {
@@ -64,6 +66,67 @@ function toWorkbenchEnvelopes(value: unknown): readonly WorkbenchEventEnvelope[]
   return migrated.ok ? [migrated.value] : []
 }
 
+/** Browser/demo compatibility bridge. The visual seed predates the Workbench
+ * journal and stores Message[] snapshots; terminal-like renders only the
+ * Workbench projection, so hydrate those snapshots into provider-neutral events.
+ */
+export function messageSnapshotToWorkbenchEnvelopes(sessionId: string, messages: readonly Message[]): readonly WorkbenchEventEnvelope[] {
+  const recordedBase = Date.now() - Math.max(0, messages.length - 1) * 1000
+  const envelopes: WorkbenchEventEnvelope[] = []
+  let sequence = 0
+  messages.forEach((message, index) => {
+    const messageId = message.id || `snapshot-message-${index + 1}`
+    const recordedAt = new Date(recordedBase + index * 1000).toISOString()
+    const identity = { messageId }
+    const source = { provider: 'browser-demo', sourceId: messageId }
+    const provenance = { origin: 'migration' as const, trust: 'unverified' as const, provider: 'browser-demo', orderConfidence: 'observed' as const, synthetic: { reason: 'message-snapshot-bridge' } }
+    const text = message.content || ''
+    const parts: Array<{ kind: 'text' | 'markdown'; text: string }> = text
+      ? [{ kind: message.role === 'assistant' ? 'markdown' : 'text', text }]
+      : []
+    const push = (event: WorkbenchEventEnvelope['event'], suffix: string) => {
+      sequence += 1
+      envelopes.push(createWorkbenchEnvelope({
+        eventId: `snapshot:${sessionId}:${messageId}:${suffix}`,
+        sessionId, sequence, recordedAt, occurredAt: recordedAt,
+        source, identity, provenance, event,
+      }))
+    }
+    if (message.role === 'tool') {
+      const toolCallId = messageId
+      const tool: Record<string, string | Array<{ kind: 'text' | 'markdown'; text: string }>> = {
+        toolCallId, name: message.toolName || 'Tool',
+      }
+      if (message.toolKind) tool.kind = message.toolKind
+      if (message.toolInput) tool.input = message.toolInput
+      if (message.toolStatus) tool.status = message.toolStatus
+      if (message.toolOutput) tool.progress = message.toolOutput
+      push({ type: 'tool.started', tool }, 'tool-start')
+      if (message.running || (message.toolStatus && !['completed', 'failed', 'cancelled'].includes(message.toolStatus))) {
+        push({ type: 'tool.progress', tool }, 'tool-progress')
+      } else {
+        const terminalType = message.toolStatus === 'failed' ? 'tool.failed' : 'tool.completed'
+        const terminalTool = { ...tool, ...(parts.length > 0 ? { parts } : {}), ...(message.toolOutput ? { rawOutput: message.toolOutput } : {}) }
+        push({ type: terminalType, tool: terminalTool, result: message.toolOutput }, 'tool-end')
+      }
+      return
+    }
+    if (message.role === 'reasoning') {
+      push({ type: 'reasoning.delta', parts }, 'reasoning-delta')
+      push({ type: 'reasoning.completed', parts: [], durationMs: message.thoughtDurationMs }, 'reasoning-end')
+      return
+    }
+    if (message.role === 'assistant') {
+      push({ type: 'message.started', role: 'assistant', parts: [] }, 'message-start')
+      push({ type: 'message.delta', role: 'assistant', parts }, 'message-delta')
+      push({ type: 'message.completed', role: 'assistant', parts: [] }, 'message-end')
+      return
+    }
+    push({ type: 'message.completed', role: 'user', parts }, 'message-end')
+  })
+  return envelopes
+}
+
 function withJournalDiagnostic(document: WorkbenchDocument, count: number): WorkbenchDocument {
   const message = `canonical journal 有 ${count} 条事件无法迁移`
   return {
@@ -81,7 +144,12 @@ function withJournalDiagnostic(document: WorkbenchDocument, count: number): Work
 
 function defaultDependencies(): AgentWorkbenchSessionRuntimeDependencies {
   return {
-    loadAll: ownerKey => IS_TAURI ? tauriCanonicalEventRepository().loadAll(ownerKey) : Promise.resolve([]),
+    loadAll: ownerKey => {
+      if (IS_TAURI && !isBrowserMockRuntime()) return tauriCanonicalEventRepository().loadAll(ownerKey)
+      // Browser snapshots are keyed by local Session.id, not the JSON owner key.
+      // bind() adds that compatibility source once it has the concrete Session.
+      return Promise.resolve([])
+    },
     subscribe: listener => subscribePluginEvents(listener),
   }
 }
@@ -330,7 +398,17 @@ export function createAgentWorkbenchSessionRuntime(dependencies: Partial<AgentWo
       const loadingOwnerKey = ownerKey
       await loadAll(loadingOwnerKey).then(rows => {
         if (destroyed || generation !== nextGeneration || ownerKey !== loadingOwnerKey) return
-        const envelopes = rows.flatMap(row => {
+        const browserSnapshot = (isBrowserMockRuntime() || !IS_TAURI) && rows.length === 0 && typeof localStorage !== 'undefined'
+          ? (() => {
+            // Session snapshots historically used both the stable Session.id
+            // and the provider source as keys. Prefer the stable id, then
+            // recover a source-keyed snapshot left by older browser builds.
+            const byId = parseMessageSnapshot<Message>(localStorage.getItem(messageStorageKey(session.id)))
+            const bySource = parseMessageSnapshot<Message>(localStorage.getItem(messageStorageKey(session.source)))
+            return messageSnapshotToWorkbenchEnvelopes(session.source, byId && byId.length > 0 ? byId : bySource ?? [])
+          })()
+          : []
+        const envelopes = [...rows, ...browserSnapshot].flatMap(row => {
           const migrated = toWorkbenchEnvelopes(row)
           if (migrated.length > 0) return migrated
           malformedCount += 1

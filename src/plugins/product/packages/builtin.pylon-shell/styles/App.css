@@ -286,20 +286,20 @@
   background: color-mix(in srgb, var(--tool-err, var(--danger)) 8%, transparent);
 }
 
-/* ── Agent 状态三灯（左上角品牌区，视觉调整）── */
+/* ── Agent 状态三灯（左上角品牌区）：保留原状态语义，移除连接线 ── */
 .agent-status-lights { position:relative; display:flex; align-items:center; padding:2px 1px; }
-.agent-status-lights::before {
-  content:''; position:absolute; left:5px; right:5px; top:50%; height:1px; transform:translateY(-50%);
-  background:color-mix(in srgb,var(--text-dim) 34%,transparent);
-}
 .agent-status-light { position:relative; z-index:1; border:1px solid color-mix(in srgb,currentColor 64%,transparent); border-radius:50%; background:var(--text-dim); color:var(--text-dim); opacity:0.3; }
 .agent-light-ok { background:var(--brand-node-ready); color:var(--brand-node-ready); }
 .agent-light-warn { background:var(--brand-node-warn); color:var(--brand-node-warn); }
-.agent-light-error { background:var(--brand-node-error); color:var(--brand-node-error); }
+.agent-light-error { background:var(--brand-node-error); color:var(--brand-node-error); filter:saturate(1.2) brightness(1.06); }
 /* 连接良好：三灯（绿黄红）正常色常亮，辉光左→右传播（周期长、启动间隔小） */
 .agent-status-lights[data-mode="cascade"] .agent-status-light {
   opacity:1; animation:agent-glow 3s ease-in-out infinite;
   animation-delay:calc(var(--light-i) * 0.25s);
+}
+.agent-status-lights[data-mode="cascade"] .agent-light-error {
+  /* Keep the red node legible even when reduced-motion collapses the animation. */
+  filter:saturate(1.2) brightness(1.06) drop-shadow(0 0 6px var(--brand-node-error));
 }
 /* error：三灯全红，统一周期辉光 */
 .agent-status-lights[data-mode="sync"] .agent-status-light {

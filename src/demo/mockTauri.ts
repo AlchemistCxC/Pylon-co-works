@@ -207,6 +207,7 @@ export function installMockTauri(): void {
   if (typeof window === 'undefined') return
   const target = window as unknown as Record<string, unknown>
   if (target.__TAURI_INTERNALS__) return
+  target.__PYLON_BROWSER_MOCK__ = true
   let callbackId = 0
   target.__TAURI_INTERNALS__ = {
     invoke: (cmd: string, args?: Record<string, unknown>) => mockInvokeCommand(cmd, args ?? {}),
