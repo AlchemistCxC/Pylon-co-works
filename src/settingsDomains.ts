@@ -54,6 +54,14 @@ export const SETTINGS_DOMAIN_BY_ID: Record<SettingsDomainId, SettingsDomain> = O
   SETTINGS_DOMAINS.map(domain => [domain.id, domain]),
 ) as Record<SettingsDomainId, SettingsDomain>
 
+/** Index Ledger 的窄一级栏使用短标签；完整名称仍用于 title 与无障碍名称。 */
+export const SETTINGS_DOMAIN_SHORT_LABELS: Readonly<Record<SettingsDomainId, string>> = {
+  appearance: '外观',
+  workspace: '工作',
+  'agents-connections': 'Agent',
+  plugins: '插件',
+}
+
 export const SETTINGS_SECTION_LABELS: Record<SettingsSectionId, string> = {
   templates: '模板库',
   global: '全局',
@@ -159,6 +167,13 @@ export interface SettingsSearchItem {
   readonly kind?: 'chain-a' | 'chain-b' | 'renderer-entry'
   /** B3：唯一 DOM 锚（链A=`field:${key}`；链B entry 无唯一锚时回退文本匹配） */
   readonly anchor?: string
+  /** Renderer catalog route; kept optional so theme/plugin search stays stable. */
+  readonly rendererRoute?: {
+    readonly categoryId: string
+    readonly objectKey: string
+    readonly groupId: string
+    readonly fieldKey: string
+  }
 }
 
 export function buildSettingsSearchIndex(rendererEntries?: readonly { value: { id: string; label?: string; settings?: unknown } }[]): readonly SettingsSearchItem[] {

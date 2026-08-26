@@ -1,5 +1,6 @@
 import type { ThemeSettings } from './store'
 import { THEME_SETTING_KEYS } from './themeFieldDefs.ts'
+import { adaptLegacyThemePreset, normalizePresetBundle, type PresetBundleV2, type PresetJsonValue } from './domains/theme/presetBundle.ts'
 
 export interface CustomPreset {
   id: string
@@ -7,6 +8,8 @@ export interface CustomPreset {
   theme: Partial<ThemeSettings>
   createdAt: number
   updatedAt: number
+  /** v2 owner contributions; absent on legacy Theme-only presets. */
+  bundle?: PresetBundleV2
 }
 
 // 白名单由 themeFields.ts 单一真值表生成（各 zone 字段并集）；本文件仅消费。
@@ -65,6 +68,8 @@ export function normalizeCustomPresets(value: unknown): CustomPreset[] {
     if (typeof candidate.id !== 'string' || !candidate.id || typeof candidate.name !== 'string' || !candidate.name.trim() || !candidate.theme || typeof candidate.theme !== 'object') return []
     const createdAt = typeof candidate.createdAt === 'number' ? candidate.createdAt : Date.now()
     const updatedAt = typeof candidate.updatedAt === 'number' ? candidate.updatedAt : createdAt
+    const normalizedBundle = normalizePresetBundle(candidate.bundle)
+      ?? adaptLegacyThemePreset({ id: candidate.id, name: candidate.name, theme: candidate.theme as unknown as PresetJsonValue, createdAt, updatedAt })
     return [{
       // A1：id 命名空间强制——配置导入/旧数据可带任意 id（如 'claude' 撞内置预设名），
       // 非 custom- 前缀的重新前缀，保证 appliedPreset 值与内置预设名永不冲突。
@@ -73,6 +78,7 @@ export function normalizeCustomPresets(value: unknown): CustomPreset[] {
       theme: candidate.theme as Partial<ThemeSettings>,
       createdAt,
       updatedAt,
+      bundle: normalizedBundle,
     }]
   })
 }

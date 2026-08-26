@@ -22,7 +22,9 @@ export interface RendererSettingsStore {
   removeOverride(key: string): void
   markUnavailable(key: string, value: RendererSettingValue): void
   restoreUnavailable(key: string): void
+  replaceOverrides(values: Readonly<Record<string, RendererSettingValue>>, unavailable?: Readonly<Record<string, RendererSettingValue>>): void
   setSessionPreview(values: Readonly<Record<string, RendererSettingValue>>): void
+  clearSessionPreview(key?: string): void
   reset(scope?: string): void
   clearDiagnostics(): void
 }
@@ -119,6 +121,13 @@ export function createRendererSettingsStore(options: RendererSettingsStoreOption
       unavailable = next
       publish()
     },
+    replaceOverrides(nextValues, nextUnavailable = {}) {
+      for (const key of Object.keys(nextValues)) assertKey(key)
+      for (const key of Object.keys(nextUnavailable)) assertKey(key)
+      values = { ...nextValues }
+      unavailable = { ...nextUnavailable }
+      publish()
+    },
     setSessionPreview(next) {
       for (const key of Object.keys(next)) assertKey(key)
       sessionPreview = { ...next }
@@ -126,9 +135,32 @@ export function createRendererSettingsStore(options: RendererSettingsStoreOption
       snapshot = freezeSnapshot({ schemaVersion: snapshot.schemaVersion, values, unavailable, sessionPreview, diagnostics })
       for (const listener of [...listeners]) listener()
     },
+    clearSessionPreview(key) {
+      if (key !== undefined) assertKey(key)
+      if (key === undefined) {
+        if (Object.keys(sessionPreview).length === 0) return
+        sessionPreview = {}
+      } else {
+        if (!(key in sessionPreview)) return
+        const next = { ...sessionPreview }
+        delete next[key]
+        sessionPreview = next
+      }
+      // Preview values are intentionally ephemeral and never persisted.
+      snapshot = freezeSnapshot({ schemaVersion: snapshot.schemaVersion, values, unavailable, sessionPreview, diagnostics })
+      for (const listener of [...listeners]) listener()
+    },
     reset(scope) {
-      if (!scope) values = {}
-      else values = Object.fromEntries(Object.entries(values).filter(([key]) => !key.startsWith(`${scope}.`)))
+      if (!scope) {
+        values = {}
+        // Reset is a user-visible scope operation: an in-flight slider/color
+        // preview must not survive it and continue masking owner defaults.
+        sessionPreview = {}
+      } else {
+        const prefix = `${scope}.`
+        values = Object.fromEntries(Object.entries(values).filter(([key]) => !key.startsWith(prefix)))
+        sessionPreview = Object.fromEntries(Object.entries(sessionPreview).filter(([key]) => !key.startsWith(prefix)))
+      }
       publish()
     },
     clearDiagnostics() {

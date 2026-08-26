@@ -10,8 +10,9 @@ import type { RendererSettingsSchema } from '../../plugin-runtime/renderers/rend
 import { isJsonValue } from '../workbench/content/contentPartSchema.ts'
 import { isValidNormalizedErrorInput } from '../workbench/lifecycle/lifecycleModel.ts'
 
-function toolSettings(kindId: string): RendererSettingsSchema {
-  return {
+/** Canonical shared tool presentation schema. The legacy Kind schemas below
+ * remain addressable so existing `kind.tool.*` overrides are not discarded. */
+export const SHARED_TOOL_SETTINGS_SCHEMA: RendererSettingsSchema = {
   schemaVersion: 1,
   groups: [
     {
@@ -22,10 +23,10 @@ function toolSettings(kindId: string): RendererSettingsSchema {
         { key: 'borderColor', label: '边框颜色', type: 'color', presentation: 'palette+picker', alpha: true, default: 'var(--border)' },
         { key: 'statusPalette', label: '状态配色', type: 'choice', presentation: 'select', options: [
           { value: 'semantic', label: '语义色' }, { value: 'neutral', label: '中性色' }, { value: 'accent', label: '强调色' },
-        ], optionTarget: `kind.${kindId}.statusPalette`, default: 'semantic' },
+        ], optionTarget: 'slot.builtin.solid.content.base.statusPalette', default: 'semantic' },
         { key: 'indicator', label: '状态指示器', type: 'choice', presentation: 'segmented', options: [
           { value: 'glyph', label: '图标' }, { value: 'dot', label: '圆点' }, { value: 'none', label: '隐藏' },
-        ], optionTarget: `kind.${kindId}.indicator`, default: 'glyph' },
+        ], optionTarget: 'slot.builtin.solid.content.base.indicator', default: 'glyph' },
         { key: 'density', label: '密度', type: 'choice', presentation: 'segmented', options: [
           { value: 'comfortable', label: '舒适' }, { value: 'compact', label: '紧凑' },
         ], default: 'comfortable' },
@@ -50,7 +51,20 @@ function toolSettings(kindId: string): RendererSettingsSchema {
       ],
     },
   ],
-  } satisfies RendererSettingsSchema
+} satisfies RendererSettingsSchema
+
+function toolSettings(_kindId: string): RendererSettingsSchema {
+  const kindId = _kindId
+  return {
+    ...SHARED_TOOL_SETTINGS_SCHEMA,
+    groups: SHARED_TOOL_SETTINGS_SCHEMA.groups.map(group => ({
+      ...group,
+      fields: group.fields.map(field => {
+        if (field.key !== 'statusPalette' && field.key !== 'indicator') return field
+        return { ...field, optionTarget: `kind.${kindId}.${field.key}` }
+      }),
+    })),
+  }
 }
 
 const TOOL_DEFAULT_TOKENS = Object.freeze({

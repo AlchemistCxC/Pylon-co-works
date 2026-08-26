@@ -16,7 +16,7 @@ import type {
   RenderResolveContext,
 } from './rendererTypes.ts'
 import { notifyRegistryListener } from '../registry/registryBatch.ts'
-import { normalizeRendererSettingsSchema } from './rendererSettingsTypes.ts'
+import { normalizeRendererSettingsPlacement, normalizeRendererSettingsSchema } from './rendererSettingsTypes.ts'
 import type { RendererSlotContribution, RendererSuiteContribution } from './rendererSuiteTypes.ts'
 import { validateRenderKindSettingsNamespace, validateRendererContributionGraph, validateRendererSlotContribution, validateRendererSuiteContribution } from './rendererSuiteValidation.ts'
 export type { RendererActivationSnapshot, RendererDiagnostic, RendererSlotContribution, RendererSuiteContribution } from './rendererSuiteTypes.ts'
@@ -92,6 +92,7 @@ function freezeRenderKind(definition: RenderKindDefinition): RenderKindDefinitio
     fixture: freeze(definition.fixture),
     defaultTokens: freeze(definition.defaultTokens),
     ...(definition.settings ? { settings: normalizeRendererSettingsSchema(definition.settings) } : {}),
+    ...(definition.settingsPlacement ? { settingsPlacement: normalizeRendererSettingsPlacement(definition.settingsPlacement) } : {}),
     ...(definition.compatibility ? { compatibility: freeze({ ...definition.compatibility }) as Readonly<Record<string, string>> } : {}),
   })
 }

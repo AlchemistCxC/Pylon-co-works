@@ -7,7 +7,7 @@ import type {
   SpinnerProvider,
 } from '../../contracts/rendererContentPoints.ts'
 import type { ToolKind } from '../../domains/tool/toolKinds.ts'
-import type { RendererSettingsSchema } from './rendererSettingsTypes.ts'
+import type { RendererSettingsPlacement, RendererSettingsSchema } from './rendererSettingsTypes.ts'
 
 export type RendererFailureDecision = 'fallback' | 'rethrow'
 
@@ -22,6 +22,7 @@ export interface RenderKindDefinition {
   readonly defaultTokens: unknown
   readonly settingsSchemaVersion: number
   readonly settings?: RendererSettingsSchema
+  readonly settingsPlacement?: RendererSettingsPlacement
   readonly validateInput: (input: unknown) => boolean
   readonly compatibility?: Readonly<Record<string, string>>
 }

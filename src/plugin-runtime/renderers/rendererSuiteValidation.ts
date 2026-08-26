@@ -1,5 +1,5 @@
 import type { RegistryEntry } from '../registry/types.ts'
-import { normalizeRendererSettingsSchema, settingFieldKey } from './rendererSettingsTypes.ts'
+import { normalizeRendererSettingsPlacement, normalizeRendererSettingsSchema, settingFieldKey } from './rendererSettingsTypes.ts'
 import type { RenderKindDefinition } from './rendererTypes.ts'
 import type { RendererSlotContribution, RendererSuiteContribution } from './rendererSuiteTypes.ts'
 
@@ -72,6 +72,7 @@ export function validateRendererSuiteContribution(
     if (!allowMissingFallback && !suites.some(entry => entry.value.id === suite.fallbackSuiteId)) fail(`Suite fallback 未注册：${suite.id} -> ${suite.fallbackSuiteId}`)
   }
   validateSettingsNamespace(suite.settings, 'suite', suite.id)
+  if (suite.settingsPlacement) normalizeRendererSettingsPlacement(suite.settingsPlacement)
   if (typeof suite.factory !== 'function' && (!suite.factory || typeof suite.factory.prepare !== 'function')) fail(`Suite factory 缺失：${suite.id}`)
   return Object.freeze({
     ...suite,
@@ -80,6 +81,7 @@ export function validateRendererSuiteContribution(
     runtime: Object.freeze({ ...suite.runtime }),
     compatibility: Object.freeze({ ...suite.compatibility }),
     ...(suite.settings ? { settings: normalizeRendererSettingsSchema(suite.settings) } : {}),
+    ...(suite.settingsPlacement ? { settingsPlacement: normalizeRendererSettingsPlacement(suite.settingsPlacement) } : {}),
   })
 }
 
@@ -103,11 +105,13 @@ export function validateRendererSlotContribution(
   if (typeof slot.fallback !== 'boolean') fail(`Slot fallback 必须显式声明：${slot.id}`)
   if (typeof slot.canRender !== 'function' || typeof slot.createSurface !== 'function') fail(`Slot implementation 缺失：${slot.id}`)
   validateSettingsNamespace(slot.settings, 'slot', slot.id)
+  if (slot.settingsPlacement) normalizeRendererSettingsPlacement(slot.settingsPlacement)
   return Object.freeze({
     ...slot,
     targetSuites: Object.freeze([...slot.targetSuites]),
     kinds: Object.freeze([...slot.kinds]),
     ...(slot.settings ? { settings: normalizeRendererSettingsSchema(slot.settings) } : {}),
+    ...(slot.settingsPlacement ? { settingsPlacement: normalizeRendererSettingsPlacement(slot.settingsPlacement) } : {}),
   })
 }
 

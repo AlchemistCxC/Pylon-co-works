@@ -1,7 +1,7 @@
 import type { RenderAppearanceSnapshot } from '../../contracts/messageRenderer.ts'
 import type { WorkbenchAppearanceSnapshot } from '../../domains/workbench/appearance.ts'
 import type { RenderCatalogSnapshot } from './rendererRegistry.ts'
-import { resolveRenderAppearance } from './renderAppearanceResolver.ts'
+import { resolveRenderAppearance, type RenderAppearanceResolution } from './renderAppearanceResolver.ts'
 import type { RendererSettingValue, RendererSettingsSchema } from './rendererSettingsTypes.ts'
 import type { RendererSettingsStoreSnapshot } from './rendererSettingsStore.ts'
 import type { RegistryEntry } from '../registry/types.ts'
@@ -71,38 +71,76 @@ function resolveScope(input: {
   return { values: resolution.values, sources: resolution.sources }
 }
 
+export interface ProductionRendererSettingsScopeInput {
+  readonly hostAppearance: WorkbenchAppearanceSnapshot
+  readonly catalog: RenderCatalogSnapshot
+  readonly settings: RendererSettingsStoreSnapshot
+  readonly namespace: 'kind' | 'suite' | 'slot'
+  readonly id: string
+  readonly profileKindTokens?: Readonly<Record<string, RendererSettingValue>>
+  readonly optionEntries?: readonly RegistryEntry<PluginSettingOptionsContribution>[]
+}
+
+/**
+ * Settings Inspector 与 production renderer 共用的单 owner 解析入口。
+ * UI 不得自行拼接 schema default / profile / override / preview。
+ */
+export function resolveProductionRendererSettingsScope(
+  input: ProductionRendererSettingsScopeInput,
+): Pick<RenderAppearanceResolution, 'values' | 'sources'> {
+  const contribution = input.namespace === 'kind'
+    ? input.catalog.renderKinds.find(entry => entry.value.id === input.id)?.value
+    : input.namespace === 'suite'
+      ? input.catalog.rendererSuites.find(entry => entry.value.id === input.id)?.value
+      : input.catalog.rendererSlots.find(entry => entry.value.id === input.id)?.value
+  const defaults = input.namespace === 'kind' && contribution && 'defaultTokens' in contribution
+    ? contribution.defaultTokens as Readonly<Record<string, RendererSettingValue>>
+    : undefined
+  return resolveScope({
+    schema: contribution?.settings,
+    namespace: input.namespace,
+    id: input.id,
+    host: input.hostAppearance,
+    settings: input.settings,
+    defaults,
+    profile: input.namespace === 'kind' ? input.profileKindTokens : undefined,
+    optionEntries: input.optionEntries,
+  })
+}
+
 /**
  * Composition-root resolver for a concrete Suite/Slot/Kind tuple.
  * Renderers receive only the resolved immutable snapshot and never see stores.
  */
 export function resolveProductionRenderAppearance(input: ProductionRenderAppearanceInput): RenderAppearanceSnapshot {
-  const suite = input.catalog.rendererSuites.find(entry => entry.value.id === input.suiteId)?.value
-  const slot = input.catalog.rendererSlots.find(entry => entry.value.id === input.slotId)?.value
-  const kind = input.catalog.renderKinds.find(entry => entry.value.id === input.kind)?.value
-  const suiteResolution = resolveScope({ schema: suite?.settings, namespace: 'suite', id: input.suiteId, host: input.hostAppearance, settings: input.settings, optionEntries: input.optionEntries })
-  const slotResolution = resolveScope({ schema: slot?.settings, namespace: 'slot', id: input.slotId, host: input.hostAppearance, settings: input.settings, optionEntries: input.optionEntries })
-  const kindResolution = resolveScope({
-    schema: kind?.settings,
-    namespace: 'kind',
-    id: input.kind,
-    host: input.hostAppearance,
-    settings: input.settings,
-    defaults: kind?.defaultTokens as Readonly<Record<string, RendererSettingValue>> | undefined,
-    profile: input.profileKindTokens,
-    optionEntries: input.optionEntries,
-  })
+  const shared = { hostAppearance: input.hostAppearance, catalog: input.catalog, settings: input.settings, optionEntries: input.optionEntries }
+  const suiteResolution = resolveProductionRendererSettingsScope({ ...shared, namespace: 'suite', id: input.suiteId })
+  const slotResolution = resolveProductionRendererSettingsScope({ ...shared, namespace: 'slot', id: input.slotId })
+  const kindResolution = resolveProductionRendererSettingsScope({ ...shared, namespace: 'kind', id: input.kind, profileKindTokens: input.profileKindTokens })
   const suiteValues = suiteResolution.values
   const slotValues = slotResolution.values
-  const kindValues = kindResolution.values
+  const slotContribution = input.catalog.rendererSlots.find(entry => entry.value.id === input.slotId)?.value
+  const sharedKeys = new Set(slotContribution?.settings?.groups.flatMap(group => group.fields.map(field => field.key ?? field.id ?? '')) ?? [])
+  const kindValues = Object.fromEntries(Object.entries(kindResolution.values).filter(([key]) => {
+    if (!sharedKeys.has(key)) return true
+    // A legacy Kind override remains a deliberate per-kind exception. Schema
+    // and host/profile defaults for shared keys defer to the Slot owner.
+    const source = kindResolution.sources[key]
+    return source === 'user-override' || source === 'session-preview'
+  }))
+  const effectiveKindValues = { ...kindValues }
+  for (const key of sharedKeys) {
+    if (kindValues[key] === undefined && slotValues[key] !== undefined) effectiveKindValues[key] = slotValues[key]
+  }
   return Object.freeze({
     ...input.hostAppearance,
     ...suiteValues,
     ...slotValues,
-    ...kindValues,
+    ...effectiveKindValues,
     renderSettings: Object.freeze({
       suite: suiteValues,
       slot: slotValues,
-      kind: kindValues,
+      kind: Object.freeze(effectiveKindValues),
       sources: Object.freeze({
         suite: suiteResolution.sources,
         slot: slotResolution.sources,

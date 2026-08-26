@@ -3,7 +3,6 @@ import { IS_TAURI } from '../infrastructure/tauri/env'
 import { invoke } from '@tauri-apps/api/core'
 import { createAgentClient } from '../infrastructure/acp/agentClient'
 import { GROUP_ORDER } from '../themeFieldDefs'
-import { RENDERER_KIND_LABELS } from '../settingsDomains'
 import { ZoneGroupFields } from '../themeFieldRenderer'
 import { useStore } from '../store'
 import { useIdentityStore } from '../identityStore'
@@ -32,6 +31,9 @@ import GatewayRiskPanel from './settings/GatewayRiskPanel'
 import PluginManager from './settings/PluginManager'
 import PresentationProfilePicker from './settings/PresentationProfilePicker'
 import RendererSettingsPanel from './settings/RendererSettingsPanel'
+import { projectRendererSettingsCatalog } from './settings/rendererSettingsCatalog.ts'
+import RendererSettingsPreview from './settings/RendererSettingsPreview.tsx'
+import type { RendererSettingsCatalogEntry } from './settings/rendererSettingsCatalog.ts'
 import PluginSettingsPageHost from './settings/PluginSettingsPageHost'
 import InterfaceModePicker from './settings/InterfaceModePicker.tsx'
 import SettingsSectionHeader from './settings/SettingsSectionHeader.tsx'
@@ -40,8 +42,13 @@ import { buildSettingsSearchIndex } from '../settingsDomains'
 import { readDensity, writeDensity, readPinned, writePinned, PINNED_LIMIT, safeStorage, type SettingsDensity } from './settings/settingsChromeState.ts'
 import { getPluginServiceRegistry, getPluginSettingsPageRegistry, getRendererRegistry } from '../plugin-runtime/runtimeServices.ts'
 // I13-W1：Settings 一级信息架构唯一真值（domain → section + 字段归属派生）
-import { SETTINGS_DOMAIN_BY_ID, SETTINGS_DOMAINS, SETTINGS_SECTION_LABELS, sectionZone, type SettingsDomainId, type SettingsSectionId } from '../settingsDomains'
+import { SETTINGS_DOMAIN_BY_ID, SETTINGS_DOMAINS, SETTINGS_DOMAIN_SHORT_LABELS, SETTINGS_SECTION_LABELS, sectionZone, type SettingsDomainId, type SettingsSectionId } from '../settingsDomains'
 import { resetThemeForActiveInterfaceMode } from '../application/transactions/activateInterfaceMode.ts'
+import { useInterfaceModeStore } from '../domains/interface/interfaceModeStore.ts'
+import { usePresentationPreferenceStore } from '../domains/presentation/presentationPreferenceStore.ts'
+import { BUILTIN_INTERFACE_MODES } from '../plugins/core/interfaceMode/builtinInterfaceModes.ts'
+import { getInterfaceModeRegistry } from '../plugin-runtime/runtimeServices.ts'
+import { resolveInterfaceModeSuite } from '../application/transactions/activateInterfaceMode.ts'
 
 // FE-AUD-008：typed client 收口 agent 域 command literal
 const agentClient = createAgentClient({ invoke: (cmd, args) => invoke(cmd, args as Record<string, unknown> | undefined) })
@@ -129,12 +136,21 @@ export default function Settings({ onClose, activeSessionId, initialDomain, init
     () => settingsPageRegistry.getSnapshot(),
     () => settingsPageRegistry.getSnapshot(),
   ).entries
+  const rendererRegistry = getRendererRegistry()
+  const rendererRegistrySnapshot = useSyncExternalStore(
+    listener => rendererRegistry.subscribe(listener),
+    () => rendererRegistry.snapshot(),
+    () => rendererRegistry.snapshot(),
+  )
   const [activePluginPageId, setActivePluginPageId] = useState<string | null>(
     initialSection && !(initialSection in SETTINGS_SECTION_LABELS) ? initialSection : null,
   )
   const showPet = useWorkspaceStore(s => s.showPet)
   const setShowPet = useWorkspaceStore(s => s.setShowPet)
   const [searchQuery, setSearchQuery] = useState('')
+  const [rendererCategoryId, setRendererCategoryId] = useState('markdown-text')
+  const [rendererObjectKey, setRendererObjectKey] = useState<string | undefined>()
+  const [rendererPreviewEntry, setRendererPreviewEntry] = useState<RendererSettingsCatalogEntry>()
   const [customPresetName, setCustomPresetName] = useState('')
   const [switchingAgentId, setSwitchingAgentId] = useState<string | null>(null)
   const [reconnectPending, setReconnectPending] = useState(false)
@@ -292,49 +308,51 @@ const activeDomainConfig = SETTINGS_DOMAIN_BY_ID[activeDomain]
     writePinned(next, (key, v) => storage.set(key, v))
   }
   // section → 二级项（组标题）。链A 从 GROUP_ORDER[zone] 派生；无 zone 或 <2 组返回空（不显示箭头）
-  const navGroupsFor = (section: SettingsSectionId): readonly string[] => {
-    // K-2 补遗：渲染器 section 的二级项 = 链B schema entries（suite/slot/kind），与 Panel 渲染序一致
+  const navGroupsFor = (section: SettingsSectionId): readonly { readonly id: string; readonly label: string }[] => {
+    // Renderer 的三级项由 owner placement 投影成稳定语义类别；完整 object graph 留在高级目录。
     if (section === 'renderers') {
-      try {
-        const labels = getRendererRegistry().snapshot()
-          .rendererSuites.filter(entry => entry.value.settings).map(entry => entry.value.label)
-          .concat(getRendererRegistry().snapshot().rendererSlots
-            .filter(entry => entry.value.settings).map(entry => entry.value.label ?? entry.value.id))
-          .concat(getRendererRegistry().snapshot().renderKinds
-            .filter(entry => entry.value.settings)
-            .map(entry => RENDERER_KIND_LABELS[entry.value.id] ?? entry.value.id))
-        return labels.length >= 2 ? [...new Set(labels)] : []
-      } catch { return [] }
+      const mode = getInterfaceModeRegistry().resolve(useInterfaceModeStore.getState().interfaceMode)?.value
+        ?? BUILTIN_INTERFACE_MODES.find(item => item.id === useInterfaceModeStore.getState().interfaceMode)
+      const activeSuiteId = mode?.workbench.renderKind === 'renderer-suite'
+        ? resolveInterfaceModeSuite(mode, usePresentationPreferenceStore.getState().rendererSuiteIdByMode[mode.id], rendererRegistrySnapshot.rendererSuites.map(item => item.value.id)).activeSuiteId
+        : undefined
+      const projection = projectRendererSettingsCatalog(rendererRegistrySnapshot, activeSuiteId)
+      return projection.categories.map(category => ({ id: category.id, label: category.label }))
     }
     const zone = sectionZone(section)
     if (!zone) return []
     const groups = (GROUP_ORDER[zone] ?? []).flatMap(block => [...block.groups.map(g => g.title)])
-    return groups.length >= 2 ? groups : []
+    return groups.length >= 2 ? groups.map(title => ({ id: title, label: title })) : []
   }
 
   // O-3：速搜定位态
   const [quickSearchOpen, setQuickSearchOpen] = useState(false)
-  // B2 边界修复：依赖 quickSearchOpen——面板打开时重建索引（插件装卸后的新 kind 立即可搜）
+  // B2 边界修复：面板打开或 Renderer catalog 热更新时重建索引。
+  // 不能只依赖 quickSearchOpen，否则插件热装卸后的字段要重新打开命令面板才可搜。
   const quickSearchItems = useMemo(() => {
     void quickSearchOpen
+      void rendererRegistrySnapshot.revision
     try {
       const snapshot = getRendererRegistry().snapshot()
-      const entries = [...snapshot.rendererSuites, ...snapshot.rendererSlots, ...snapshot.renderKinds]
-        .map(e => ({ value: { id: e.value.id, label: ('label' in e.value ? e.value.label : undefined) as string | undefined, settings: e.value.settings } }))
-      return buildSettingsSearchIndex(entries)
+      return [...buildSettingsSearchIndex(), ...projectRendererSettingsCatalog(snapshot).searchItems]
     } catch { return buildSettingsSearchIndex() }
-  }, [quickSearchOpen])
-  const navigateToField = (section: SettingsSectionId, label: string, anchor?: string) => {
-    jumpToSection(section)
+  }, [quickSearchOpen, rendererRegistrySnapshot.revision])
+  const navigateToField = (item: import('../settingsDomains').SettingsSearchItem) => {
+    if (item.rendererRoute) {
+      setRendererCategoryId(item.rendererRoute.categoryId)
+      setRendererObjectKey(item.rendererRoute.objectKey)
+      setSearchQuery(item.label)
+    }
+    jumpToSection(item.section)
     if (density !== 'all') changeDensity('all')  // D2-A：advanced 命中自动切全部档
     requestAnimationFrame(() => {
       // B3 边界修复：优先唯一锚定位（重名字段如多个「背景图」不再误跳第一处）
       let target: Element | null = null
-      if (anchor) target = document.querySelector(`[data-search-anchor="${CSS.escape(anchor)}"]`)
+      if (item.anchor) target = document.querySelector(`[data-search-anchor="${CSS.escape(item.anchor)}"]`)
       if (!target) {
         // 链B entry 无字段级锚——回退到组标题文本匹配
         target = [...document.querySelectorAll('.set-group-title, .renderer-settings-group-heading h3')]
-          .find(el => el.textContent?.includes(label)) ?? null
+          .find(el => el.textContent?.includes(item.label)) ?? null
       }
       target?.scrollIntoView({ block: 'center', behavior: 'smooth' })
       const group = target?.closest('[data-group-anchor], .renderer-settings-group, .set-group')
@@ -441,7 +459,7 @@ const activeDomainConfig = SETTINGS_DOMAIN_BY_ID[activeDomain]
           </>
         )
       case 'renderers':
-        return <RendererSettingsPanel search={searchQuery} />
+        return <RendererSettingsPanel search={searchQuery} categoryId={rendererCategoryId} objectKey={rendererObjectKey} density={density} onSelectionChange={setRendererPreviewEntry} />
       case 'cc':
         return (
           <>
@@ -560,16 +578,23 @@ const activeDomainConfig = SETTINGS_DOMAIN_BY_ID[activeDomain]
         <button type="button" className="settings-close" onClick={onClose} aria-label="关闭设置">✕</button>
       </header>
       <div className="settings-tabs-root">
+        {/* Index Ledger：一级 domain 独立为窄栏；设置值与事务仍归各 owner。 */}
+        <nav className="settings-domain-rail" aria-label="设置域">
+          {SETTINGS_DOMAINS.map((domain, index) => (
+            <button key={domain.id} type="button"
+              className={`settings-domain-btn${activeDomain === domain.id ? ' active' : ''}`}
+              aria-current={activeDomain === domain.id ? 'page' : undefined}
+              title={domain.label}
+              onClick={() => switchDomain(domain.id)}>
+              <span className="settings-domain-index" aria-hidden="true">{String(index + 1).padStart(2, '0')}</span>
+              <span>{SETTINGS_DOMAIN_SHORT_LABELS[domain.id]}</span>
+            </button>
+          ))}
+        </nav>
         <div className="settings-nav">
-          {/* I13-W2：左侧 domain 导航（一级 = 稳定设置域，settingsDomains 驱动） */}
-          <div className="settings-nav-group">
-            <div className="settings-nav-label">设置域</div>
-            {SETTINGS_DOMAINS.map(domain => (
-              <button key={domain.id} type="button" className={`set-nav-btn ${activeDomain === domain.id ? 'active' : ''}`}
-                onClick={() => switchDomain(domain.id)}>
-                {domain.label}
-              </button>
-            ))}
+          <div className="settings-nav-context">
+            <span>DOMAIN / {activeDomain}</span>
+            <strong>{activeDomainConfig.label}</strong>
           </div>
           <div className="settings-nav-group settings-nav-sections">
             {pinned.length > 0 && (
@@ -613,22 +638,27 @@ const activeDomainConfig = SETTINGS_DOMAIN_BY_ID[activeDomain]
                   </div>
                   {hasSub && expanded && (
                     <div className="settings-nav-subgroups">
-                      {subGroups.map(title => (
-                        <button type="button" key={title} className="set-nav-btn subgroup"
+                      {subGroups.map(group => (
+                        <button type="button" key={group.id}
+                          className={`set-nav-btn subgroup${section === 'renderers' && rendererCategoryId === group.id ? ' active' : ''}`}
                           onClick={e => {
                             e.stopPropagation()
                             setActivePluginPageId(null)
                             setActiveSection(section)
+                            if (section === 'renderers') {
+                              setRendererCategoryId(group.id)
+                              return
+                            }
                             // 锚点滚动：等 section 渲染后按组标题定位（下一帧）
                             requestAnimationFrame(() => {
-                              const target = document.querySelector(`[data-group-anchor="${CSS.escape(title)}"]`)
+                              const target = document.querySelector(`[data-group-anchor="${CSS.escape(group.label)}"]`)
                               target?.scrollIntoView({ block: 'start', behavior: 'smooth' })
                               // O-2：高亮脉冲 1.2s（prefers-reduced-motion 时 CSS 端自动禁用动画）
                               target?.classList.add('settings-anchor-pulse')
                               setTimeout(() => target?.classList.remove('settings-anchor-pulse'), 1200)
                             })
                           }}>
-                          {title}
+                          {group.label}
                         </button>
                       ))}
                     </div>
@@ -673,13 +703,18 @@ const activeDomainConfig = SETTINGS_DOMAIN_BY_ID[activeDomain]
         <SettingsQuickSearch
           open={quickSearchOpen}
           items={quickSearchItems}
-          onNavigate={(section, label, anchor) => navigateToField(section, label, anchor)}
+          onNavigate={navigateToField}
           onOpenChange={setQuickSearchOpen}
         />
-        {!activePluginPageId && previewZone && (
+        {!activePluginPageId && (previewZone || activeSection === 'renderers') && (
           <div className="settings-preview-pane">
-            <div className="settings-preview-label">实时预览</div>
-            <SettingsPreview zone={previewZone} />
+            <div className="settings-preview-label">{activeSection === 'renderers' ? 'Renderer fixture' : '实时预览'}</div>
+            {activeSection === 'renderers'
+              ? <RendererSettingsPreview entry={rendererPreviewEntry} catalog={rendererRegistrySnapshot} activeSuiteId={(() => {
+                const mode = getInterfaceModeRegistry().resolve(useInterfaceModeStore.getState().interfaceMode)?.value ?? BUILTIN_INTERFACE_MODES.find(item => item.id === useInterfaceModeStore.getState().interfaceMode)
+                return mode?.workbench.renderKind === 'renderer-suite' ? resolveInterfaceModeSuite(mode, usePresentationPreferenceStore.getState().rendererSuiteIdByMode[mode.id], rendererRegistrySnapshot.rendererSuites.map(item => item.value.id)).activeSuiteId : undefined
+              })()} />
+              : <SettingsPreview zone={previewZone!} />}
           </div>
         )}
       </div>

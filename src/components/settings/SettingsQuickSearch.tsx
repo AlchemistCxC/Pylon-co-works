@@ -1,6 +1,6 @@
 import { useEffect } from 'react'
 import { Command } from 'cmdk'
-import type { SettingsSearchItem, SettingsSectionId } from '../../settingsDomains.ts'
+import type { SettingsSearchItem } from '../../settingsDomains.ts'
 
 /**
  * O-3 速搜定位态（设计书 07 §4.3，拍板 D2-A）：
@@ -11,7 +11,7 @@ import type { SettingsSearchItem, SettingsSectionId } from '../../settingsDomain
 export default function SettingsQuickSearch(props: {
   open: boolean
   items: readonly SettingsSearchItem[]
-  onNavigate: (section: SettingsSectionId, label: string, anchor?: string) => void
+  onNavigate: (item: SettingsSearchItem) => void
   onOpenChange: (open: boolean) => void
 }) {
   const { open, items, onNavigate, onOpenChange } = props
@@ -55,7 +55,7 @@ export default function SettingsQuickSearch(props: {
                 key={`${item.path}.${item.label}`}
                 value={`${item.path} ${item.label}`}
                 onSelect={() => {
-                  onNavigate(item.section, item.label, item.anchor)
+                  onNavigate(item)
                   onOpenChange(false)
                 }}
               >

@@ -49,7 +49,13 @@ const RENDERER_STYLE_ASSETS = 'src/plugins/product/packages/builtin.pylon-render
  * 只由 styleAssets `?inline` 读取，并在插件激活时交给 PluginScope 挂载和回收。
  */
 export const FIRST_PARTY_STYLE_OWNERSHIP: readonly FirstPartyStyleOwnershipEntry[] = Object.freeze([
-  entry('src/index.css', 'kernel', 'kernel-static', ['src/main.tsx'], 'React Root、基础 token、跨 Application scheme 与 Recovery 基线'),
+  entry(
+    'src/index.css',
+    'kernel',
+    'kernel-static',
+    ['src/main.tsx', 'src/renderers/solid-workbench/smoke/mountSolidRichQa.solid.tsx'],
+    'React Root、基础 token、跨 Application scheme、Recovery 与 Rich QA 基线',
+  ),
   entry('src/components/kernel/SkinPreviewBar.css', 'kernel', 'kernel-static', ['src/components/kernel/SkinPreviewBar.tsx']),
 
   entry('src/plugins/product/packages/builtin.pylon-shell/styles/App.css', 'builtin.pylon-shell', 'plugin-scope', [SHELL_STYLE_ASSETS]),

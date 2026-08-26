@@ -1,10 +1,9 @@
-import { useMemo, useSyncExternalStore } from 'react'
-import { getPluginSettingOptionsRegistry, getRendererRegistry, getRendererSettingsStore } from '../../plugin-runtime/runtimeServices.ts'
+import { useEffect, useMemo, useState, useSyncExternalStore } from 'react'
+import { getPluginSettingOptionsRegistry, getPresentationProfileRegistry, getRendererRegistry, getRendererSettingsStore } from '../../plugin-runtime/runtimeServices.ts'
 import { resolvePluginSettingOptions } from '../../plugin-runtime/settings/pluginSettingOptionsRegistry.ts'
 import type { PluginSettingOption } from '../../plugin-runtime/settings/pluginSettingsTypes.ts'
 import type { RendererSettingsStore } from '../../plugin-runtime/renderers/rendererSettingsStore.ts'
-import { settingFieldKey, type RenderSettingField, type RendererSettingValue, type RendererSettingsSchema } from '../../plugin-runtime/renderers/rendererSettingsTypes.ts'
-import { RENDERER_KIND_LABELS } from '../../settingsDomains.ts'
+import { settingFieldKey, type RenderSettingField, type RendererSettingValue, type RendererSettingsPlacement, type RendererSettingsSchema } from '../../plugin-runtime/renderers/rendererSettingsTypes.ts'
 import { evaluateRenderSettingCondition, default as RendererSettingField } from './RendererSettingField.tsx'
 import RendererSuitePicker from './RendererSuitePicker.tsx'
 import { useInterfaceModeStore } from '../../domains/interface/interfaceModeStore.ts'
@@ -12,110 +11,329 @@ import { usePresentationPreferenceStore } from '../../domains/presentation/prese
 import { getInterfaceModeRegistry } from '../../plugin-runtime/runtimeServices.ts'
 import { BUILTIN_INTERFACE_MODES } from '../../plugins/core/interfaceMode/builtinInterfaceModes.ts'
 import { resolveInterfaceModeSuite } from '../../application/transactions/activateInterfaceMode.ts'
+import type { SettingsDensity } from './settingsChromeState.ts'
+import { selectWorkbenchAppearance } from '../../domains/workbench/appearance.ts'
+import { useStore } from '../../store.ts'
+import { resolveProductionRendererSettingsScope } from '../../plugin-runtime/renderers/productionRenderAppearance.ts'
+import { resolveRenderAppearance, type RenderAppearanceSource } from '../../plugin-runtime/renderers/renderAppearanceResolver.ts'
+import {
+  projectRendererSettingsCatalog,
+  rendererSettingsEntryKey,
+  type RendererSettingsCatalogEntry,
+} from './rendererSettingsCatalog.ts'
 
 export interface RendererSettingsSchemaEntry {
   readonly id: string
   readonly label: string
   readonly schema: RendererSettingsSchema
   readonly namespace?: 'kind' | 'suite' | 'slot'
+  readonly ownerPluginId?: string
+  readonly placement?: RendererSettingsPlacement
 }
 
 export interface RendererSettingsPanelProps {
   readonly schemas?: readonly RendererSettingsSchemaEntry[]
   readonly store?: RendererSettingsStore
   readonly search?: string
-}
-
-function catalogSchemas(activeSuiteId?: string): readonly RendererSettingsSchemaEntry[] {
-  const snapshot = getRendererRegistry().snapshot()
-  const kinds = snapshot.renderKinds.flatMap(entry => entry.value.settings ? [{ id: entry.value.id, label: RENDERER_KIND_LABELS[entry.value.id] ?? entry.value.id, schema: entry.value.settings, namespace: 'kind' as const }] : [])
-  const suite = activeSuiteId ? snapshot.rendererSuites.find(entry => entry.value.id === activeSuiteId)?.value : undefined
-  const suiteSettings = suite?.settings ? [{ id: suite.id, label: suite.label, schema: suite.settings, namespace: 'suite' as const }] : []
-  const slots = snapshot.rendererSlots.filter(entry => activeSuiteId && (entry.value.targetSuites.includes('*') || entry.value.targetSuites.includes(activeSuiteId)))
-    .flatMap(entry => entry.value.settings ? [{ id: entry.value.id, label: entry.value.label ?? entry.value.id, schema: entry.value.settings, namespace: 'slot' as const }] : [])
-  return [...suiteSettings, ...slots, ...kinds]
+  readonly categoryId?: string
+  readonly objectKey?: string
+  readonly density?: SettingsDensity
+  readonly onSelectionChange?: (entry: RendererSettingsCatalogEntry | undefined) => void
 }
 
 function fieldMatches(field: RenderSettingField, query: string, options: readonly PluginSettingOption[]): boolean {
   if (!query) return true
-  const haystack = [settingFieldKey(field), field.label, field.description, ...options.flatMap(option => [option.value, option.label, option.description])].filter(Boolean).join(' ').toLowerCase()
+  const haystack = [settingFieldKey(field), field.label, field.description, ...options.flatMap(option => [option.value, option.label, option.description])]
+    .filter(Boolean).join(' ').toLowerCase()
   return haystack.includes(query)
 }
 
-function effectiveValues(entry: RendererSettingsSchemaEntry, snapshot: ReturnType<RendererSettingsStore['getSnapshot']>): Record<string, RendererSettingValue> {
-  const namespace = `${entry.namespace ?? 'kind'}.${entry.id}`
-  return Object.fromEntries(entry.schema.groups.flatMap(group => group.fields.flatMap(field => {
-    const key = settingFieldKey(field)
-    const value = snapshot.sessionPreview[`${namespace}.${key}`] ?? snapshot.values[`${namespace}.${key}`] ?? field.default
-    return value === undefined ? [] : [[key, value] as const]
-  })))
+function entryMatches(
+  entry: RendererSettingsCatalogEntry,
+  query: string,
+  optionEntries: Parameters<typeof resolvePluginSettingOptions>[2],
+): boolean {
+  if (!query) return true
+  if ([entry.id, entry.label, entry.description, entry.ownerPluginId, entry.placement.categoryLabel]
+    .filter(Boolean).join(' ').toLowerCase().includes(query)) return true
+  const namespace = entry.namespace + '.' + entry.id
+  return entry.schema.groups.some(group => group.fields.some(field => {
+    const target = namespace + '.' + settingFieldKey(field)
+    const optionTarget = 'optionTarget' in field ? field.optionTarget ?? target : target
+    const options = 'options' in field ? resolvePluginSettingOptions(optionTarget, field.options, optionEntries) : []
+    return fieldMatches(field, query, options)
+  }))
+}
+
+function fixtureValues(
+  entry: RendererSettingsCatalogEntry,
+  snapshot: ReturnType<RendererSettingsStore['getSnapshot']>,
+): { readonly values: Readonly<Record<string, RendererSettingValue>>; readonly sources: Readonly<Record<string, RenderAppearanceSource>> } {
+  const namespace = entry.namespace + '.' + entry.id
+  const scoped = (source: Readonly<Record<string, RendererSettingValue>>) => Object.fromEntries(Object.entries(source).flatMap(([key, value]) =>
+    key.startsWith(namespace + '.') ? [[key.slice(namespace.length + 1), value] as const] : []))
+  return resolveRenderAppearance({
+    schema: entry.schema,
+    userOverrides: scoped(snapshot.values),
+    sessionPreview: scoped(snapshot.sessionPreview),
+  })
+}
+
+const SOURCE_LABELS: Readonly<Record<RenderAppearanceSource, string>> = Object.freeze({
+  'schema-default': 'OWNER DEFAULT',
+  'host-default': 'HOST TOKEN',
+  'kind-default': 'KIND DEFAULT',
+  profile: 'PROFILE',
+  'user-override': 'YOUR OVERRIDE',
+  'session-preview': 'LIVE PREVIEW',
+})
+
+function fixtureCatalog(entries: readonly RendererSettingsSchemaEntry[]): readonly RendererSettingsCatalogEntry[] {
+  return entries.map((entry, index) => ({
+    id: entry.id,
+    label: entry.label,
+    ownerPluginId: entry.ownerPluginId ?? 'fixture',
+    namespace: entry.namespace ?? 'kind',
+    schema: entry.schema,
+    placement: entry.placement ?? {
+      categoryId: 'fixture',
+      categoryLabel: 'Fixture',
+      categoryOrder: 0,
+      objectOrder: index,
+      disclosure: 'essential',
+    },
+    active: true,
+    fieldCount: entry.schema.groups.reduce((count, group) => count + group.fields.length, 0),
+  }))
+}
+
+function RendererSettingsGroup(props: {
+  entry: RendererSettingsCatalogEntry
+  group: RendererSettingsSchema['groups'][number]
+  namespace: string
+  values: Readonly<Record<string, RendererSettingValue>>
+  sources: Readonly<Record<string, RenderAppearanceSource>>
+  query: string
+  density: SettingsDensity
+  store: RendererSettingsStore
+  storeSnapshot: ReturnType<RendererSettingsStore['getSnapshot']>
+  optionEntries: Parameters<typeof resolvePluginSettingOptions>[2]
+}) {
+  const { entry, group, namespace, values, sources, query, density, store, storeSnapshot, optionEntries } = props
+  const [open, setOpen] = useState(!group.collapsedByDefault)
+  useEffect(() => {
+    if (query) setOpen(true)
+  }, [query])
+  const fields = group.fields.filter(field => {
+    if (density !== 'all' && field.advanced) return false
+    const target = namespace + '.' + settingFieldKey(field)
+    const optionTarget = 'optionTarget' in field ? field.optionTarget ?? target : target
+    const options = 'options' in field ? resolvePluginSettingOptions(optionTarget, field.options, optionEntries) : []
+    const matches = fieldMatches(field, query, options)
+    return matches && (!field.showIf || evaluateRenderSettingCondition(field.showIf, values) || Boolean(query && matches))
+  })
+  if (query && fields.length === 0) return null
+  const advancedCount = group.fields.filter(field => field.advanced).length
+  const resetGroup = () => {
+    for (const field of group.fields) {
+      const target = namespace + '.' + settingFieldKey(field)
+      store.removeOverride(target)
+      store.clearSessionPreview(target)
+    }
+  }
+
+  return <section
+    className={'renderer-settings-group' + (group.layout ? ' layout-' + group.layout : '')}
+    data-group-anchor={entry.label + ' · ' + group.label}
+  >
+    <button type="button" className="renderer-settings-group-heading" aria-expanded={open} onClick={() => setOpen(value => !value)}>
+      <span className="renderer-settings-group-caret" aria-hidden="true">{open ? '−' : '+'}</span>
+      <span className="renderer-settings-group-copy">
+        <strong>{group.label}</strong>
+        {group.description && <small>{group.description}</small>}
+      </span>
+      {!open && advancedCount > 0 && <span className="renderer-settings-group-meta">含 {advancedCount} 项高级设置</span>}
+      <span className="renderer-settings-group-count">{fields.length}</span>
+    </button>
+    {open && <div className="renderer-settings-fields">
+      <div className="renderer-settings-group-actions">
+        <span>{namespace}</span>
+        <button type="button" onClick={event => { event.stopPropagation(); resetGroup() }}>恢复本组</button>
+      </div>
+      {fields.map(field => {
+        const key = settingFieldKey(field)
+        const target = namespace + '.' + key
+        const optionTarget = 'optionTarget' in field ? field.optionTarget ?? target : target
+        const options = 'options' in field ? resolvePluginSettingOptions(optionTarget, field.options, optionEntries) : []
+        const hiddenByCondition = field.showIf && !evaluateRenderSettingCondition(field.showIf, values)
+        const storedValue = storeSnapshot.values[target]
+        const unavailableValues = 'options' in field
+          ? (typeof storedValue === 'string'
+            ? (options.some(option => option.value === storedValue) ? [] : [storedValue])
+            : Array.isArray(storedValue)
+              ? storedValue.filter((item): item is string => typeof item === 'string' && !options.some(option => option.value === item))
+              : [])
+          : []
+        const unavailableCurrent = unavailableValues.length > 0
+        const displayOptions = unavailableCurrent
+          ? [...options, ...unavailableValues.map(value => ({ value, label: `不可用：${value}`, disabled: true }))]
+          : options
+        const displayValue = unavailableCurrent ? storedValue : values[key]
+        return <div key={key}
+          className={'renderer-settings-field-row' + (hiddenByCondition ? ' renderer-settings-field-match' : '')}
+          data-search-anchor={`renderer:${rendererSettingsEntryKey(entry)}:${group.id}:${key}`}>
+          {hiddenByCondition && <div className="set-hint">条件尚未满足；搜索临时揭示此字段</div>}
+          {unavailableCurrent && <div className="set-hint" role="status">当前值“{String(storedValue)}”已不可用；保留原值等待插件恢复。</div>}
+          <RendererSettingField
+            field={field}
+            value={displayValue}
+            options={displayOptions}
+            onChange={value => {
+              store.setOverride(target, value)
+              store.clearSessionPreview(target)
+            }}
+            onPreviewChange={value => store.setSessionPreview({ ...store.getSnapshot().sessionPreview, [target]: value })}
+            onPreviewCommit={() => store.clearSessionPreview(target)}
+            onReset={() => {
+              store.removeOverride(target)
+              store.clearSessionPreview(target)
+            }}
+          />
+          <div className="renderer-setting-provenance">
+            <span>{SOURCE_LABELS[sources[key] ?? 'schema-default']}</span>
+            <code>{target}</code>
+          </div>
+        </div>
+      })}
+    </div>}
+  </section>
 }
 
 export default function RendererSettingsPanel(props: RendererSettingsPanelProps) {
+  const { onSelectionChange } = props
   const store = props.store ?? getRendererSettingsStore()
   const storeSnapshot = useSyncExternalStore(store.subscribe, store.getSnapshot, store.getSnapshot)
-  const registrySnapshot = useSyncExternalStore(listener => getRendererRegistry().subscribe(listener), () => getRendererRegistry().snapshot(), () => getRendererRegistry().snapshot())
-  const optionSnapshot = useSyncExternalStore(listener => getPluginSettingOptionsRegistry().subscribe(listener), () => getPluginSettingOptionsRegistry().getSnapshot(), () => getPluginSettingOptionsRegistry().getSnapshot())
+  const registrySnapshot = useSyncExternalStore(
+    listener => getRendererRegistry().subscribe(listener),
+    () => getRendererRegistry().snapshot(),
+    () => getRendererRegistry().snapshot(),
+  )
+  const optionSnapshot = useSyncExternalStore(
+    listener => getPluginSettingOptionsRegistry().subscribe(listener),
+    () => getPluginSettingOptionsRegistry().getSnapshot(),
+    () => getPluginSettingOptionsRegistry().getSnapshot(),
+  )
+  const presentationProfileRegistry = getPresentationProfileRegistry()
+  const presentationProfiles = useSyncExternalStore(
+    listener => presentationProfileRegistry.subscribe(listener),
+    () => presentationProfileRegistry.getSnapshot(),
+    () => presentationProfileRegistry.getSnapshot(),
+  )
   const interfaceMode = useInterfaceModeStore(state => state.interfaceMode)
   const suitePreference = usePresentationPreferenceStore(state => state.rendererSuiteIdByMode[interfaceMode])
+  const activeProfileId = usePresentationPreferenceStore(state => state.activeProfileId)
   const mode = getInterfaceModeRegistry().resolve(interfaceMode)?.value ?? BUILTIN_INTERFACE_MODES.find(entry => entry.id === interfaceMode)
   const activeSuiteId = mode?.workbench.renderKind === 'renderer-suite'
     ? resolveInterfaceModeSuite(mode, suitePreference, registrySnapshot.rendererSuites.map(entry => entry.value.id)).activeSuiteId
     : undefined
-  const entries = props.schemas ?? catalogSchemas(activeSuiteId)
+  const entries = useMemo(() => props.schemas
+    ? fixtureCatalog(props.schemas)
+    : projectRendererSettingsCatalog(registrySnapshot, activeSuiteId).entries,
+  [activeSuiteId, props.schemas, registrySnapshot])
   const query = props.search?.trim().toLowerCase() ?? ''
-  // Keep subscriptions alive even when caller supplies fixture schemas.
-  void registrySnapshot
-  const sections = useMemo(() => entries.flatMap(entry => {
-    const namespace = `${entry.namespace ?? 'kind'}.${entry.id}`
-    const values = effectiveValues(entry, storeSnapshot)
-    return entry.schema.groups.flatMap(group => {
-      const fields = group.fields.filter(field => {
-        const target = `${namespace}.${settingFieldKey(field)}`
-        const optionTarget = 'optionTarget' in field ? field.optionTarget ?? target : target
-        const options = 'options' in field ? resolvePluginSettingOptions(optionTarget, field.options, optionSnapshot.entries) : []
-        const matches = fieldMatches(field, query, options)
-        return matches && (!field.showIf || evaluateRenderSettingCondition(field.showIf, values) || Boolean(query && matches))
-      })
-      return fields.length > 0 || !query ? [{ entry, group, namespace, values, fields }] : []
+  const categoryId = props.categoryId ?? (props.schemas ? 'fixture' : 'foundation')
+  const density = props.density ?? 'standard'
+  const candidates = useMemo(() => entries.filter(entry => {
+    if (query) return entryMatches(entry, query, optionSnapshot.entries)
+    if (categoryId === 'advanced-catalog') return true
+    return entry.active && entry.placement.categoryId === categoryId
+  }), [categoryId, entries, optionSnapshot.entries, query])
+  const [selectedKey, setSelectedKey] = useState('')
+  const selected = candidates.find(entry => rendererSettingsEntryKey(entry) === selectedKey) ?? candidates[0]
+  const activeObjectKey = selected ? rendererSettingsEntryKey(selected) : ''
+  const selectedResolution = useMemo(() => {
+    if (!selected) return { values: {}, sources: {} }
+    if (props.schemas) return fixtureValues(selected, storeSnapshot)
+    const profile = presentationProfiles.entries.find(entry => entry.contributionId === activeProfileId)?.value
+    return resolveProductionRendererSettingsScope({
+      hostAppearance: selectWorkbenchAppearance(useStore.getState(), 0),
+      catalog: registrySnapshot,
+      settings: storeSnapshot,
+      namespace: selected.namespace,
+      id: selected.id,
+      profileKindTokens: profile?.kindTokens?.[selected.id],
+      optionEntries: optionSnapshot.entries,
     })
-  }), [entries, optionSnapshot.entries, query, storeSnapshot])
+  }, [activeProfileId, optionSnapshot.entries, presentationProfiles.entries, props.schemas, registrySnapshot, selected, storeSnapshot])
+
+  useEffect(() => {
+    if (props.objectKey && candidates.some(entry => rendererSettingsEntryKey(entry) === props.objectKey)) {
+      setSelectedKey(props.objectKey)
+      return
+    }
+    const nextKey = candidates[0] ? rendererSettingsEntryKey(candidates[0]) : ''
+    if (!candidates.some(entry => rendererSettingsEntryKey(entry) === selectedKey)) setSelectedKey(nextKey)
+  }, [candidates, props.objectKey, selectedKey])
+  useEffect(() => {
+    onSelectionChange?.(selected)
+  }, [activeObjectKey, onSelectionChange, selected])
 
   return <section className="renderer-settings-panel" aria-label="渲染器设置">
-    <RendererSuitePicker />
-    {sections.map(({ entry, group, namespace, values, fields }, index) => <div
-      className={`renderer-settings-group${group.layout ? ` layout-${group.layout}` : ''}`}
-      key={`${namespace}.${group.id}`}
-      {...(sections.findIndex(s => s.entry === entry) === index ? { 'data-group-anchor': entry.label } : {})}>
-      <div className="renderer-settings-group-heading">
-        <div><h3>{entry.label} · {group.label}</h3>{group.description && <p>{group.description}</p>}</div>
-        <button type="button" className="ps-btn sm" onClick={() => store.reset(namespace)} title="将本组全部设置恢复为默认值">↺ 默认</button>
-      </div>
-      {fields.map(field => {
-        const key = settingFieldKey(field)
-        const target = `${namespace}.${key}`
-        const optionTarget = 'optionTarget' in field ? field.optionTarget ?? target : target
-        const options = 'options' in field ? resolvePluginSettingOptions(optionTarget, field.options, optionSnapshot.entries) : []
-        const hiddenByCondition = field.showIf && !evaluateRenderSettingCondition(field.showIf, values)
-        const storedValue = storeSnapshot.values[target]
-        const unavailableCurrent = 'options' in field && typeof storedValue === 'string' && !options.some(option => option.value === storedValue)
-        return <div key={key} className={hiddenByCondition ? 'renderer-settings-field-match' : undefined}>
-          {hiddenByCondition && <div className="set-hint">条件字段：当前条件未满足，但搜索命中了此字段</div>}
-          {unavailableCurrent && <div className="set-hint" role="status">当前值“{String(storedValue)}”已不可用；可恢复默认或等待插件重新加载。</div>}
-          <RendererSettingField
-            field={field}
-            value={unavailableCurrent ? field.default : values[key]}
-            options={options}
-            onChange={value => store.setOverride(target, value)}
-            onReset={() => store.removeOverride(target)}
-          />
+    {!props.schemas && <RendererSuitePicker />}
+    {candidates.length > 0 && <div className="renderer-settings-ledger">
+      <nav className="renderer-settings-object-index" aria-label="Renderer 设置对象">
+        <div className="renderer-settings-object-index-head">
+          <span>{query ? 'SEARCH RESULTS' : selected?.placement.categoryLabel}</span>
+          <strong>{candidates.length} objects</strong>
         </div>
-      })}
-    </div>)}
+        {candidates.map(entry => {
+          const key = rendererSettingsEntryKey(entry)
+          return <button type="button" key={key}
+            className={'renderer-settings-object' + (key === activeObjectKey ? ' active' : '')}
+            onClick={() => setSelectedKey(key)}>
+            <span>{entry.label}</span>
+            <small>{entry.namespace} · {entry.fieldCount}</small>
+          </button>
+        })}
+      </nav>
+      {selected && <div className="renderer-settings-inspector">
+        <header className="renderer-settings-object-header">
+          <div>
+            <span>{selected.namespace.toUpperCase()} / {selected.id}</span>
+            <h3>{selected.label}</h3>
+            {selected.description && <p>{selected.description}</p>}
+          </div>
+          <div className="renderer-settings-owner">
+            <span>{selected.active ? 'ACTIVE' : 'AVAILABLE'}</span>
+            <small>{selected.ownerPluginId}</small>
+            <button type="button" onClick={() => store.reset(selected.namespace + '.' + selected.id)}>恢复当前对象</button>
+          </div>
+        </header>
+        {selected.schema.groups.map(group => <RendererSettingsGroup
+          key={group.id}
+          entry={selected}
+          group={group}
+          namespace={selected.namespace + '.' + selected.id}
+          values={selectedResolution.values}
+          sources={selectedResolution.sources}
+          query={query}
+          density={density}
+          store={store}
+          storeSnapshot={storeSnapshot}
+          optionEntries={optionSnapshot.entries}
+        />)}
+      </div>}
+    </div>}
     {Object.entries(storeSnapshot.unavailable).map(([key, value]) => <div className="renderer-setting-unavailable" key={key}>
       <span>{key}：{String(value)}（不可用，等待插件恢复）</span>
       <button type="button" onClick={() => store.restoreUnavailable(key)}>恢复</button>
     </div>)}
-    {sections.length === 0 && Object.keys(storeSnapshot.unavailable).length === 0 && <div className="set-hint">暂无可配置的渲染器设置</div>}
+    {candidates.length === 0 && Object.keys(storeSnapshot.unavailable).length === 0 && (
+      <div className="settings-empty-state renderer-settings-empty">
+        <span className="settings-empty-kicker">Renderer catalog</span>
+        <h3>{query ? '没有匹配的 Renderer 设置' : '当前类别暂无可配置对象'}</h3>
+        <p>{query ? '换一个关键词，或进入高级目录查看完整 Suite / Slot / Kind。' : '参数所有者尚未为此类别贡献 schema。'}</p>
+      </div>
+    )}
   </section>
 }

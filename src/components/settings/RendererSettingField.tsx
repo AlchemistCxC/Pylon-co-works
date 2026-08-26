@@ -7,11 +7,23 @@ import { resolvePresentation, settingFieldKey } from '../../plugin-runtime/rende
 import ColorPopover from '../ColorPopover.tsx'
 import Select from '../ui/Select.tsx'
 
+const RENDERER_SEMANTIC_COLORS = Object.freeze([
+  { value: 'var(--text)', label: '主文字' },
+  { value: 'var(--text-dim)', label: '次要文字' },
+  { value: 'var(--surface-raised)', label: '抬升表面' },
+  { value: 'var(--border)', label: '普通边界' },
+  { value: 'var(--accent)', label: '强调色' },
+  { value: 'transparent', label: '透明' },
+])
+
 export interface RendererSettingFieldProps {
   readonly field: RenderSettingField
   readonly value: RendererSettingValue | undefined
   readonly options?: readonly RendererSettingOption[]
   onChange(value: RendererSettingValue): void
+  /** High-frequency controls may update an ephemeral preview while dragging. */
+  onPreviewChange?(value: RendererSettingValue): void
+  onPreviewCommit?(): void
   onReset?(): void
 }
 
@@ -104,7 +116,7 @@ export default function RendererSettingField(props: RendererSettingFieldProps) {
         {/* K-3 优化：原生 select → ui/Select 弹层组件（键盘导航/portal 定位内建） */}
         <Select
           value={typeof value === 'string' ? value : ''}
-          options={options.map(o => ({ value: o.value, label: o.label ?? o.value, disabled: o.disabled }))}
+          options={options.map(o => ({ value: o.value, label: o.label ?? o.value, description: o.description, disabled: o.disabled }))}
           onChange={props.onChange}
           ariaLabel={label}
         />{reset}
@@ -131,14 +143,17 @@ export default function RendererSettingField(props: RendererSettingFieldProps) {
       </fieldset>
     }
     case 'color': {
-      const color = typeof value === 'string' && /^#[0-9a-f]{6}$/i.test(value) ? value : '#000000'
+      const color = typeof value === 'string' ? value : typeof field.default === 'string' ? field.default : 'transparent'
       // palette→色板为主；picker→直接原生取色；palette+picker→默认（chips+自定义入口）
       const chips = presentation !== 'picker'
       return <div className="renderer-setting-field" data-setting-key={settingFieldKey(field)}>
         <span className="renderer-setting-label">{label}</span>
         <ColorPopover value={color} chips={chips} ariaLabel={label}
+          allowAlpha={field.alpha}
+          semanticTokens={RENDERER_SEMANTIC_COLORS}
           palette={options.length > 0 ? options.map(option => ({ value: option.value, label: option.label, disabled: option.disabled })) : undefined}
           onChange={v => props.onChange(v)} />{reset}
+        {field.description && <small>{field.description}</small>}
       </div>
     }
     case 'number': {
@@ -149,20 +164,33 @@ export default function RendererSettingField(props: RendererSettingFieldProps) {
           {/* K-3：range 半边升级 Radix Slider（键盘/焦点管理内建）；数值半边保留原生 */}
           <Slider.Root id={fieldId} className="renderer-slider" aria-label={label}
             min={field.min ?? 0} max={field.max ?? 100} step={field.step}
-            value={[numericValue ?? 0]} onValueChange={values => props.onChange(Number(values[0]))}>
+            value={[numericValue ?? 0]}
+            onValueChange={values => {
+              const next = Number(values[0])
+              if (props.onPreviewChange) props.onPreviewChange(next)
+              else props.onChange(next)
+            }}
+            onValueCommit={values => {
+              props.onChange(Number(values[0]))
+              props.onPreviewCommit?.()
+            }}>
             <Slider.Track className="renderer-slider-track">
               <Slider.Range className="renderer-slider-range" />
             </Slider.Track>
             <Slider.Thumb className="renderer-slider-thumb" aria-label={`${label}滑块`} />
           </Slider.Root>
           <input type="number" aria-label={`${label}数值`} min={field.min ?? 0} max={field.max ?? 100} value={numericValue ?? 0}
-            onChange={event => props.onChange(Number(event.currentTarget.value))} />
+            onChange={event => {
+              props.onPreviewCommit?.()
+              props.onChange(Number(event.currentTarget.value))
+            }} />
           {field.unit && <span>{field.unit}</span>}{reset}
         </div>
       }
       return <div className="renderer-setting-field" data-setting-key={settingFieldKey(field)}>
         <label htmlFor={fieldId}>{label}</label>
-        <input id={fieldId} aria-label={label} type={presentation === 'slider' ? 'range' : 'number'} min={field.min} max={field.max} step={field.step} value={numericValue ?? ''} onChange={event => props.onChange(Number(event.currentTarget.value))} />{reset}
+        <input id={fieldId} aria-label={label} type={presentation === 'slider' ? 'range' : 'number'} min={field.min} max={field.max} step={field.step} value={numericValue ?? ''}
+          onChange={event => props.onChange(Number(event.currentTarget.value))} />{reset}
         {field.unit && <span>{field.unit}</span>}
       </div>
     }

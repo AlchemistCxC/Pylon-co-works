@@ -4,13 +4,15 @@ import type { RendererPrepareContext, WorkbenchHostPort, WorkbenchMountInput, Wo
 import { loadSolidWorkbench } from './loadSolidWorkbench.ts'
 import { loadBuiltinSolidContentSlot } from './loadBuiltinSolidContentSlot.ts'
 import { BUILTIN_TEXT_RENDER_KINDS } from '../../domains/rendererContent/textRenderKindCatalog.ts'
-import { BUILTIN_TOOL_RENDER_KINDS } from '../../domains/rendererContent/toolRenderKindCatalog.ts'
+import { BUILTIN_TOOL_RENDER_KINDS, SHARED_TOOL_SETTINGS_SCHEMA } from '../../domains/rendererContent/toolRenderKindCatalog.ts'
+import { normalizeRendererSettingsPlacement } from '../../plugin-runtime/renderers/rendererSettingsTypes.ts'
 import { BUILTIN_EXECUTION_RENDER_KINDS } from '../../domains/rendererContent/executionRenderKindCatalog.ts'
 import { BUILTIN_INTERACTION_RENDER_KINDS } from '../../domains/rendererContent/interactionRenderKindCatalog.ts'
 import { BUILTIN_SESSION_RENDER_KINDS } from '../../domains/rendererContent/sessionRenderKindCatalog.ts'
 
 export const BUILTIN_SOLID_SUITE_ID = 'builtin.solid'
 export const BUILTIN_SOLID_CONTENT_SLOT_ID = 'builtin.solid.content.base'
+export const BUILTIN_SOLID_TOOL_SETTINGS_SLOT_ID = BUILTIN_SOLID_CONTENT_SLOT_ID
 
 export const BUILTIN_SOLID_CONTENT_KINDS = Object.freeze([
   ...BUILTIN_TEXT_RENDER_KINDS.map(kind => kind.id).filter(kind => kind.startsWith('content.') || kind.startsWith('diagnostic.') || kind === 'system.hook'),
@@ -143,5 +145,15 @@ export function createBuiltinSolidContentSlot(): RendererSlotContribution {
     fallback: true,
     canRender: (input: RenderNodeSnapshot) => BUILTIN_SOLID_CONTENT_KINDS.includes(input.kind),
     createSurface: () => createBuiltinSolidContentSurface(),
+    // Shared tool appearance is owned by the content Slot. Legacy Kind
+    // namespaces remain readable as per-kind exceptions in the resolver.
+    settings: SHARED_TOOL_SETTINGS_SCHEMA,
+    settingsPlacement: normalizeRendererSettingsPlacement({
+      categoryId: 'tool-activity',
+      categoryLabel: '工具活动',
+      categoryOrder: 50,
+      objectOrder: 0,
+      disclosure: 'essential',
+    }),
   })
 }

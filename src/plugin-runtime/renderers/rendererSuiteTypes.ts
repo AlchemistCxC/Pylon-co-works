@@ -1,6 +1,6 @@
 import type { RenderNodeSnapshot, RenderSurface } from '../../contracts/messageRenderer.ts'
 import type { RegistryEntry } from '../registry/types.ts'
-import type { RendererSettingsSchema } from './rendererSettingsTypes.ts'
+import type { RendererSettingsPlacement, RendererSettingsSchema } from './rendererSettingsTypes.ts'
 import type { RenderKindDefinition } from './rendererTypes.ts'
 import type { WorkbenchRendererFactory as PreparedWorkbenchRendererFactory } from '../../renderers/solid-workbench/workbenchContracts.ts'
 
@@ -31,6 +31,7 @@ export interface RendererSuiteContribution {
   readonly optionalKinds?: readonly string[]
   readonly fallbackSuiteId?: RendererSuiteId
   readonly settings?: RendererSettingsSchema
+  readonly settingsPlacement?: RendererSettingsPlacement
   readonly factory: WorkbenchRendererFactory
 }
 
@@ -43,6 +44,7 @@ export interface RendererSlotContribution {
   readonly priority: number
   readonly fallback: boolean
   readonly settings?: RendererSettingsSchema
+  readonly settingsPlacement?: RendererSettingsPlacement
   canRender(input: RenderNodeSnapshot): boolean
   createSurface(input: RenderNodeSnapshot): RenderSurface
 }

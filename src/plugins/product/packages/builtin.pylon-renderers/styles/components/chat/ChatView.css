@@ -740,6 +740,9 @@
   flex: 0 0 var(--dot-col-width, 1.6em);
   justify-content: center;
   text-align: center;
+  /* 只缩小 marker 本身；固定 gutter 与 connector 的测量盒保持不变。独立
+     scale 属性会与 tool 状态动画使用的 transform 组合，不会覆盖呼吸/收敛动画。 */
+  scale: .86;
 }
 .term-tool-name { flex: 0 0 auto; white-space: nowrap; }
 .term-tool-summary {

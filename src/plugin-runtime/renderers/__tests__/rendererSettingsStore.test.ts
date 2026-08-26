@@ -23,6 +23,34 @@ describe('renderer settings override store', () => {
     expect(restored.getSnapshot().sessionPreview).toEqual({})
   })
 
+  it('只清理当前字段的 session preview，不影响同一拖动会话中的其他字段', () => {
+    const store = createRendererSettingsStore()
+    store.setSessionPreview({
+      'slot.tools.maxWidth': 720,
+      'slot.tools.maxHeight': 360,
+    })
+    store.clearSessionPreview('slot.tools.maxWidth')
+    expect(store.getSnapshot().sessionPreview).toEqual({ 'slot.tools.maxHeight': 360 })
+    store.clearSessionPreview()
+    expect(store.getSnapshot().sessionPreview).toEqual({})
+  })
+
+  it('reset scope 同时清理对应 session preview，避免临时值继续遮蔽默认值', () => {
+    const store = createRendererSettingsStore()
+    store.setOverride('slot.tools.maxWidth', 720)
+    store.setOverride('slot.tools.maxHeight', 360)
+    store.setSessionPreview({
+      'slot.tools.maxWidth': 840,
+      'slot.tools.maxHeight': 420,
+      'kind.content.markdown.fontSize': 16,
+    })
+    store.reset('slot.tools')
+    expect(store.getSnapshot().values).not.toHaveProperty('slot.tools.maxWidth')
+    expect(store.getSnapshot().sessionPreview).toEqual({ 'kind.content.markdown.fontSize': 16 })
+    store.reset()
+    expect(store.getSnapshot().sessionPreview).toEqual({})
+  })
+
   it('remove/reset 保留 unavailable 原值供插件重装恢复', () => {
     const store = createRendererSettingsStore({ storage: undefined })
     store.setOverride('suite.missing.density', 'roomy')

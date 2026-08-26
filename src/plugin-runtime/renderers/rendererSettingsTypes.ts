@@ -15,6 +15,28 @@ export type RendererSettingValue = null | boolean | number | string | readonly R
   readonly [key: string]: RendererSettingValue
 }
 
+/**
+ * Owner-provided placement metadata consumed by the Settings compositor.
+ * It describes where a schema is presented, never the value/default/consumer.
+ */
+export interface RendererSettingsPlacement {
+  readonly categoryId: string
+  readonly categoryLabel: string
+  readonly categoryOrder?: number
+  readonly objectOrder?: number
+  readonly disclosure?: 'essential' | 'detail' | 'technical'
+}
+
+export function normalizeRendererSettingsPlacement(placement: RendererSettingsPlacement): RendererSettingsPlacement {
+  if (!placement || typeof placement !== 'object') fail('settingsPlacement 必须是对象')
+  if (!/^[a-z0-9]+(?:[._-][a-z0-9]+)*$/.test(placement.categoryId)) fail(`settingsPlacement categoryId 非法：${placement.categoryId}`)
+  if (!placement.categoryLabel?.trim()) fail('settingsPlacement categoryLabel 不能为空')
+  if (placement.categoryOrder !== undefined && !Number.isFinite(placement.categoryOrder)) fail('settingsPlacement categoryOrder 非法')
+  if (placement.objectOrder !== undefined && !Number.isFinite(placement.objectOrder)) fail('settingsPlacement objectOrder 非法')
+  if (placement.disclosure !== undefined && !['essential', 'detail', 'technical'].includes(placement.disclosure)) fail('settingsPlacement disclosure 非法')
+  return Object.freeze({ ...placement })
+}
+
 export interface RendererSettingOption {
   readonly value: string
   readonly label?: string

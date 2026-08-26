@@ -1,0 +1,71 @@
+import { describe, expect, it } from 'vitest'
+import { createPresetBundle, markUnavailablePresetProviders, normalizePresetBundle, preparePresetBundle, presetCoverage, PresetProviderRegistry } from '../presetBundle.ts'
+
+describe('PresetBundle v2', () => {
+  it('keeps owner contributions and reports legacy coverage gaps', () => {
+    const bundle = createPresetBundle({ id: 'custom-1', name: 'Terminal', now: 1, theme: { accent: '#fff' } })
+    expect(bundle.manifestVersion).toBe(2)
+    expect(bundle.contributions['builtin.theme']).toBeTruthy()
+    expect(presetCoverage(bundle).find(item => item.id === 'builtin.theme')?.state).toBe('explicit')
+    expect(presetCoverage(bundle).find(item => item.id === 'builtin.theme')?.defaulted).toBeGreaterThan(0)
+    expect(presetCoverage(undefined).every(item => item.state === 'missing')).toBe(true)
+  })
+
+  it('drops malformed contribution entries without dropping the envelope', () => {
+    const bundle = normalizePresetBundle({
+      manifestVersion: 2,
+      id: 'legacy',
+      name: 'Legacy',
+      source: 'user',
+      contributions: {
+        'builtin.theme': { ownerPluginId: 'builtin.pylon-shell', providerVersion: 1, policy: 'complete', payload: { accent: '#fff' } },
+        bad: { ownerPluginId: 'x', providerVersion: 1, policy: 'unknown', payload: {} },
+      },
+    })
+    expect(Object.keys(bundle?.contributions ?? {})).toEqual(['builtin.theme'])
+  })
+
+  it('keeps provider ownership outside the Settings compositor', () => {
+    const registry = new PresetProviderRegistry()
+    const provider = { id: 'builtin.theme', ownerPluginId: 'builtin.pylon-shell', schemaVersion: 1, label: 'Theme', capture: () => ({}), prepareApply: () => ({ summary: [], commit() {}, rollback() {} }), defaults: () => ({}) }
+    const unregister = registry.register(provider)
+    expect(registry.resolve('builtin.theme')).toBe(provider)
+    unregister()
+    expect(registry.resolve('builtin.theme')).toBeUndefined()
+  })
+
+  it('prepares all providers before commit and rolls back an earlier commit on failure', async () => {
+    const registry = new PresetProviderRegistry()
+    let value = 'before'
+    registry.register({
+      id: 'one', ownerPluginId: 'test', schemaVersion: 1, label: 'One',
+      capture: () => ({}), defaults: () => ({}),
+      prepareApply: () => ({ summary: [], commit() { value = 'one' }, rollback() { value = 'before' } }),
+    })
+    registry.register({
+      id: 'two', ownerPluginId: 'test', schemaVersion: 1, label: 'Two',
+      capture: () => ({}), defaults: () => ({}),
+      prepareApply: () => ({ summary: [], commit() { throw new Error('commit failed') }, rollback() {} }),
+    })
+    const prepared = preparePresetBundle({
+      manifestVersion: 2, id: 'bundle', name: 'Bundle', source: 'user',
+      contributions: {
+        one: { ownerPluginId: 'test', providerVersion: 1, policy: 'partial', payload: {} },
+        two: { ownerPluginId: 'test', providerVersion: 1, policy: 'partial', payload: {} },
+      },
+    }, registry)
+    await expect(prepared.commit()).rejects.toThrow('commit failed')
+    expect(value).toBe('before')
+  })
+
+  it('preserves a missing plugin contribution in unavailable without rewriting its payload', () => {
+    const registry = new PresetProviderRegistry()
+    const bundle = normalizePresetBundle({
+      manifestVersion: 2, id: 'plugin-bundle', name: 'Plugin', source: 'plugin',
+      contributions: { 'plugin.remote': { ownerPluginId: 'plugin.remote', providerVersion: 3, policy: 'partial', payload: { tone: 'amber' } } },
+    })!
+    const classified = markUnavailablePresetProviders(bundle, registry)
+    expect(classified.unavailable?.['plugin.remote']).toEqual({ tone: 'amber' })
+    expect(classified.contributions['plugin.remote']?.payload).toEqual({ tone: 'amber' })
+  })
+})

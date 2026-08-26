@@ -31,6 +31,7 @@ import {
 import { normalizeThemeState, THEME_DEFAULTS } from '../../themeFieldDefs.ts'
 import { markZoneCustom } from '../../themePresetState.ts'
 import type { ThemeSettings } from '../../store.ts'
+import type { PresetBundleV2 } from './presetBundle.ts'
 
 const DEFAULTS = THEME_DEFAULTS as Record<string, string | number | boolean>
 
@@ -197,6 +198,8 @@ export interface SavePresetCommand {
   name: string
   /** 由 store shell 注入，reducer 保持确定性 */
   now: number
+  /** Optional v2 owner contributions captured by the shell. */
+  bundle?: PresetBundleV2
 }
 
 /** 保存自定义预设：命名强制；捕获当前全主题；upsert；返回 savedId */
@@ -209,8 +212,8 @@ export function saveCustomPresetReducer(
   if (!cleanName) throw new Error('预设名称不能为空')
   const existing = state.customPresets.find(preset => preset.id === id)
   const preset = existing
-    ? { ...existing, name: cleanName.slice(0, 40), theme: toThemeDelta(pickCustomPresetTheme(state)), updatedAt: now }
-    : { id, name: cleanName.slice(0, 40), theme: structuredClone(toThemeDelta(pickCustomPresetTheme(state))), createdAt: now, updatedAt: now }
+    ? { ...existing, name: cleanName.slice(0, 40), theme: toThemeDelta(pickCustomPresetTheme(state)), updatedAt: now, ...(command.bundle ? { bundle: command.bundle } : {}) }
+    : { id, name: cleanName.slice(0, 40), theme: structuredClone(toThemeDelta(pickCustomPresetTheme(state))), createdAt: now, updatedAt: now, ...(command.bundle ? { bundle: command.bundle } : {}) }
   return { patch: { customPresets: upsertCustomPreset(state.customPresets, preset) }, savedId: preset.id }
 }
 

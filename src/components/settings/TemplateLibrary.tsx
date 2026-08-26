@@ -5,6 +5,7 @@ import { THEME_DEFAULTS } from '../../themeFieldDefs'
 import SettingsPreview from '../SettingsPreview'
 import type { ThemeSettings } from '../../store'
 import { themeToCssVars } from './templateThemeVars.ts'
+import { createPresetBundle, presetCoverage } from '../../domains/theme/presetBundle.ts'
 
 /**
  * TemplateLibrary — 官方/自定义模板库（W2-14，F3-C/T2）。
@@ -26,6 +27,7 @@ export default function TemplateLibrary({ onApply, onRestore }: {
     name: preset.name,
     label: preset.label,
     theme: { ...THEME_DEFAULTS, ...preset.theme } as Partial<ThemeSettings>,
+    bundle: createPresetBundle({ id: `official:${preset.name}`, name: preset.label, now: 0, theme: preset.theme as unknown as import('../../domains/theme/presetBundle.ts').PresetJsonValue }),
   })), [])
 
   const custom = useMemo(() => customPresets.map(preset => ({
@@ -33,9 +35,10 @@ export default function TemplateLibrary({ onApply, onRestore }: {
     name: preset.id,
     label: preset.name,
     theme: { ...THEME_DEFAULTS, ...preset.theme } as Partial<ThemeSettings>,
+    bundle: preset.bundle,
   })), [customPresets])
 
-  const renderCard = (template: { id: string; name: string; label: string; theme: Partial<ThemeSettings> }) => (
+  const renderCard = (template: { id: string; name: string; label: string; theme: Partial<ThemeSettings>; bundle?: import('../../domains/theme/presetBundle.ts').PresetBundleV2 }) => (
     <div
       key={template.id}
       className="template-card"
@@ -53,6 +56,19 @@ export default function TemplateLibrary({ onApply, onRestore }: {
         )}
       </div>
       <div className="template-label">{template.label}</div>
+      <div className="template-coverage" aria-label="预设覆盖范围">
+        {presetCoverage(template.bundle).map(item => <span key={item.id}
+          className={`is-${item.state}`}
+          title={item.policy ? `${item.policy === 'complete' ? '完整' : '局部'}覆盖：显式 ${item.explicit}，默认 ${item.defaulted}，不可用 ${item.unavailable}` : undefined}>
+          <i aria-hidden="true" />{item.label}{item.state === 'missing'
+            ? ' · 未记录'
+            : item.state === 'unavailable'
+              ? ` · 不可用 ${item.unavailable}`
+              : item.defaulted > 0
+                ? ` · ${item.explicit} 显式 / ${item.defaulted} 默认`
+                : ` · ${item.explicit} 显式`}{item.policy === 'partial' ? ' · 局部' : ''}
+        </span>)}
+      </div>
     </div>
   )
 

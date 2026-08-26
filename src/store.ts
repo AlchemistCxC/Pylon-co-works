@@ -3,7 +3,7 @@ import { createJSONStorage, persist } from 'zustand/middleware'
 import { reportRuntimeError } from './runtimeError'
 import { DEFAULT_CC_LAYOUT, cloneCcLayout, setCcHiddenState, setCcScaleState, updateCcPlacementState } from './ccLayoutState'
 import type { CcLayoutV3, CcWidgetPlacement } from './ccLayoutState'
-import { createCustomPresetId } from './customPresets'
+import { createCustomPresetId, pickCustomPresetTheme } from './customPresets'
 import { markZoneCustom } from './themePresetState'
 import { ZONE_FIELDS } from './themeFieldDefs'
 import { clampCcHeight, resolveVisibleStatusWidgetCount } from './ccHeightState'
@@ -19,8 +19,13 @@ import {
   saveCustomPresetReducer,
   setGlobalPresetReducer,
   setZoneFieldReducer,
+  toThemeDelta,
 } from './domains/theme/presetReducer'
 import type { Profile } from './identityStore'
+import { getRendererSettingsStore } from './plugin-runtime/runtimeServices.ts'
+import { usePresentationPreferenceStore } from './domains/presentation/presentationPreferenceStore.ts'
+import { adaptLegacyThemePreset, createPresetBundle, markUnavailablePresetProviders, normalizePresetBundle, preparePresetBundle, type PresentationPresetPayload, type PresetJsonValue, type RendererPresetPayload } from './domains/theme/presetBundle.ts'
+import { createFirstPartyPresetProviderRegistry } from './domains/theme/firstPartyPresetProviders.ts'
 
 export type { Profile, Session, UserMapping, AgentEntry } from './identityStore'
 export type { SessionConfig } from './runtimeStore'
@@ -215,11 +220,92 @@ export const useStore = create<ThemeState>()(persist(
     const resolvedId = id && state.customPresets.some(preset => preset.id === id)
       ? id
       : createCustomPresetId(now, Object.keys(state.customPresets))
-    const { patch, savedId } = saveCustomPresetReducer(state, { id: resolvedId, name, now })
+    const rendererStore = getRendererSettingsStore()
+    const captureProviders = createFirstPartyPresetProviderRegistry({
+      captureTheme: () => toPresetJson(toThemeDelta(pickCustomPresetTheme(get()))) as PresetJsonValue,
+      applyTheme: () => {}, restoreTheme: () => {},
+      capturePresentation: () => ({
+        activeProfileId: usePresentationPreferenceStore.getState().activeProfileId,
+        rendererSuiteIdByMode: usePresentationPreferenceStore.getState().rendererSuiteIdByMode,
+      }),
+      applyPresentation: () => {}, restorePresentation: () => {},
+      captureRenderer: () => {
+        const snapshot = rendererStore.getSnapshot()
+        return { values: snapshot.values, unavailable: snapshot.unavailable }
+      },
+      applyRenderer: () => {}, restoreRenderer: () => {},
+    })
+    const bundle = createPresetBundle({
+      id: resolvedId,
+      name: name.trim().slice(0, 40),
+      now,
+      theme: captureProviders.resolve('builtin.theme')!.capture(),
+      renderer: captureProviders.resolve('builtin.renderer-settings')!.capture() as unknown as RendererPresetPayload,
+      presentation: captureProviders.resolve('builtin.presentation')!.capture() as unknown as PresentationPresetPayload,
+    })
+    const { patch, savedId } = saveCustomPresetReducer(state, { id: resolvedId, name, now, bundle })
     set(patch)
     return savedId
   },
-  applyCustomPreset: (id) => set(state => applyCustomPresetReducer(state, id) ?? {}),
+  applyCustomPreset: (id) => {
+    const preset = get().customPresets.find(item => item.id === id)
+    if (!preset) return
+    const bundle = normalizePresetBundle(preset.bundle) ?? adaptLegacyThemePreset({
+      id: preset.id,
+      name: preset.name,
+      theme: toPresetJson(preset.theme),
+      createdAt: preset.createdAt,
+      updatedAt: preset.updatedAt,
+    })
+    const beforeTheme = Object.fromEntries([
+      ...THEME_SETTING_KEYS.map(key => [key, get()[key]] as const),
+      ['appliedPreset', get().appliedPreset],
+      ['custom', get().custom],
+      ['customPresets', get().customPresets],
+    ])
+    const beforePresentation = usePresentationPreferenceStore.getState()
+    const rendererStore = getRendererSettingsStore()
+    const beforeRenderer = rendererStore.getSnapshot()
+    const registry = createFirstPartyPresetProviderRegistry({
+      captureTheme: () => toPresetJson(toThemeDelta(pickCustomPresetTheme(get()))) as PresetJsonValue,
+      applyTheme: () => set(state => applyCustomPresetReducer(state, id) ?? {}),
+      restoreTheme: () => set(beforeTheme),
+      capturePresentation: () => ({
+        activeProfileId: usePresentationPreferenceStore.getState().activeProfileId,
+        rendererSuiteIdByMode: usePresentationPreferenceStore.getState().rendererSuiteIdByMode,
+      }),
+      applyPresentation: payload => {
+        if (typeof payload.activeProfileId === 'string') usePresentationPreferenceStore.getState().setActiveProfileId(payload.activeProfileId)
+        if (payload.rendererSuiteIdByMode) for (const [mode, suiteId] of Object.entries(payload.rendererSuiteIdByMode)) {
+          if (typeof suiteId === 'string') usePresentationPreferenceStore.getState().setRendererSuiteId(mode, suiteId)
+        }
+      },
+      restorePresentation: () => usePresentationPreferenceStore.setState({
+        activeProfileId: beforePresentation.activeProfileId,
+        rendererSuiteIdByMode: beforePresentation.rendererSuiteIdByMode,
+      }),
+      captureRenderer: () => ({ values: beforeRenderer.values, unavailable: beforeRenderer.unavailable }),
+      applyRenderer: (payload, context) => {
+        const current = rendererStore.getSnapshot()
+        rendererStore.replaceOverrides(
+          context.policy === 'complete' ? (payload.values ?? {}) : (payload.values ?? current.values),
+          context.policy === 'complete' ? (payload.unavailable ?? {}) : (payload.unavailable ?? current.unavailable),
+        )
+      },
+      restoreRenderer: () => rendererStore.replaceOverrides(beforeRenderer.values, beforeRenderer.unavailable),
+    })
+    let prepared
+    try {
+      prepared = preparePresetBundle(markUnavailablePresetProviders(bundle, registry), registry)
+    } catch (error) {
+      reportRuntimeError('准备应用预设', error)
+      return
+    }
+    const commitResult = prepared.commit()
+    if (commitResult && typeof (commitResult as Promise<void>).then === 'function') {
+      void Promise.resolve(commitResult).catch((error: unknown) => reportRuntimeError('应用预设', error))
+    }
+  },
   removeCustomPreset: (id) => set(state => removeCustomPresetReducer(state, id)),
 }),
 { name: 'pylon-theme', version: THEME_SCHEMA_VERSION,
@@ -265,6 +351,14 @@ export const useStore = create<ThemeState>()(persist(
   // 依赖 get().profiles，未水合 profiles 会改写会话 profileId 并落盘（归属错误固化）
   void hydrateIdentityAndWorkspace(legacyArg)
 }}))
+
+function toPresetJson(value: unknown): import('./domains/theme/presetBundle.ts').PresetJsonValue {
+  if (value === null || typeof value === 'string' || typeof value === 'boolean') return value
+  if (typeof value === 'number') return Number.isFinite(value) ? value : null
+  if (Array.isArray(value)) return value.map(item => toPresetJson(item))
+  if (value && typeof value === 'object') return Object.fromEntries(Object.entries(value).map(([key, item]) => [key, toPresetJson(item)]))
+  return null
+}
 
 // ── 组合出口：按域导入点 ──
 export { useIdentityStore } from './identityStore'
