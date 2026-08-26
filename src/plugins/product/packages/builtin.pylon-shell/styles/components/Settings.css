@@ -111,7 +111,7 @@
 .set-row:last-child { border-bottom:none; }
 .set-row-label { width:96px; font-size:var(--font-size-md); color:var(--text); flex-shrink:0; }
 
-.set-swatch { width:22px; height:22px; border-radius:var(--ui-radius-xs); border:1px solid var(--stroke-strong); cursor:pointer; flex-shrink:0; box-shadow:inset 0 0 0 1px color-mix(in srgb,var(--text) 8%,transparent); }
+.set-swatch { width:22px; height:22px; border-radius:50%; border:1px solid var(--stroke-strong); cursor:pointer; flex-shrink:0; box-shadow:inset 0 0 0 1px color-mix(in srgb,var(--text) 8%,transparent); }
 .set-swatch:hover { border-color:var(--accent); transition:border-color var(--motion-fast) var(--ease-standard); }
 .set-swatch-input { display:none; }
 
@@ -133,7 +133,7 @@
 .set-color-value-input input { min-height:30px; padding:4px 7px; border:1px solid var(--stroke-default); border-radius:var(--ui-radius-xs); outline:none; color:var(--text); background:var(--surface-sunken); font:var(--font-size-xs)/1.2 var(--mono); }
 .set-color-value-input input:focus { border-color:var(--accent); box-shadow:0 0 0 2px var(--state-focus-ring); }
 .set-color-row { display:flex; gap:5px; flex-wrap:wrap; }
-.set-color-chip { width:23px; height:23px; border-radius:var(--ui-radius-xs); cursor:pointer; border:1px solid var(--stroke-default); transition:border-color var(--motion-fast) var(--ease-standard),box-shadow var(--motion-fast) var(--ease-standard); flex-shrink:0; }
+.set-color-chip { width:23px; height:23px; border-radius:50%; cursor:pointer; border:1px solid var(--stroke-default); transition:border-color var(--motion-fast) var(--ease-standard),box-shadow var(--motion-fast) var(--ease-standard); flex-shrink:0; }
 .set-color-chip:hover { border-color:var(--stroke-strong); box-shadow:0 0 0 2px var(--state-focus-ring); }
 .set-color-chip.active { border-color:var(--accent); box-shadow:inset 0 0 0 2px var(--surface-overlay),0 0 0 1px var(--accent); }
 .set-color-alpha { display:grid; grid-template-columns:40px minmax(0,1fr) 36px; align-items:center; gap:7px; }
@@ -1190,7 +1190,9 @@
   background:var(--surface-overlay);
   box-shadow:var(--shadow-raised);
 }
-.app[data-interface-mode="terminal-like"] :is(.set-swatch,.set-color-chip) { border-radius:1px; }
+/* Color controls are semantic dots, not structural surfaces: the terminal
+   radius contract does not square them. */
+.app[data-interface-mode="terminal-like"] :is(.set-swatch,.set-color-chip) { border-radius:50%; }
 .app[data-interface-mode="terminal-like"] .renderer-settings-group {
   border-top:1px solid var(--stroke-strong);
 }

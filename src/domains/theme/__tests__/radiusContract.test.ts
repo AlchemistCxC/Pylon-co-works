@@ -7,6 +7,7 @@ const css = (relativePath: string) => {
 }
 const rootCss = css('../../../index.css')
 const settingsCss = css('../../../plugins/product/packages/builtin.pylon-shell/styles/components/SettingsCommon.css')
+const settingsComponentCss = css('../../../plugins/product/packages/builtin.pylon-shell/styles/components/Settings.css')
 const classicRendererCss = [
   'ChatView.css',
   'DiffCard.css',
@@ -41,5 +42,11 @@ describe('第一方圆角语义', () => {
         .join('}')
       expect(consumed).not.toContain('var(--ui-radius-')
     }
+  })
+
+  it('取色语义控件保持圆形，不被 Terminal-like 平直控件契约压成方格', () => {
+    expect(settingsComponentCss).toMatch(/\.set-swatch\s*\{[^}]*border-radius:\s*50%/)
+    expect(settingsComponentCss).toMatch(/\.set-color-chip\s*\{[^}]*border-radius:\s*50%/)
+    expect(settingsComponentCss).toMatch(/data-interface-mode="terminal-like"[^}]*:is\(\.set-swatch,\.set-color-chip\)\s*\{\s*border-radius:\s*50%/)
   })
 })
