@@ -233,3 +233,15 @@
   .solid-agent-empty-composer-footer { align-items: stretch; flex-direction: column; }
   .solid-agent-empty-composer-footer button { width: 100%; }
 }
+
+/* Terminal-like empty state: square controls and a compact, quiet surface.
+   Modern GUI keeps its card treatment in its own presentation rules. */
+.app[data-interface-mode="terminal-like"] .solid-agent-empty-composer,
+.app[data-interface-mode="terminal-like"] .solid-agent-empty-workspace select,
+.app[data-interface-mode="terminal-like"] .solid-agent-empty-composer-footer button {
+  border-radius: 0;
+}
+.app[data-interface-mode="terminal-like"] .solid-agent-empty-composer {
+  box-shadow: none;
+  background: transparent;
+}

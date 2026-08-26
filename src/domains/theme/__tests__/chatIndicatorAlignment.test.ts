@@ -11,12 +11,13 @@ const chatCss = (() => {
 })()
 
 describe('chat indicator alignment contract', () => {
-  it('centres terminal-like assistant and tool markers in the same fixed column', () => {
+  it('keeps terminal-like assistant and tool markers in the same fixed left column', () => {
     expect(chatCss).toContain('.app[data-interface-mode="terminal-like"] :is(')
     expect(chatCss).toContain('.term-assistant.has-dot > .term-assistant-dot')
     expect(chatCss).toContain('.term-tool-head > .term-tool-indicator')
-    expect(chatCss).toMatch(/\.app\[data-interface-mode="terminal-like"\] :is\([\s\S]*?\)\s*\{[^}]*font-family\s*:\s*var\(--chat-font,var\(--mono\)\)\s*;[^}]*font-size\s*:\s*var\(--chat-font-size,var\(--font-size-lg\)\)\s*;[^}]*line-height\s*:\s*var\(--chat-line-height,1\.35\)\s*;[^}]*width\s*:\s*var\(--dot-col-width, 1\.6em\)\s*;[^}]*flex\s*:\s*0 0 var\(--dot-col-width, 1\.6em\)\s*;[^}]*justify-content\s*:\s*center\s*;[^}]*scale\s*:\s*\.72\s*;/s)
-    expect(chatCss).toMatch(/\.app\[data-interface-mode="terminal-like"\] \.term-tool-head > \.term-tool-indicator\s*\{[^}]*scale\s*:\s*1\s*;/s)
+    expect(chatCss).toMatch(/\.app\[data-interface-mode="terminal-like"\] :is\([\s\S]*?\)\s*\{[^}]*font-family\s*:\s*var\(--chat-font,var\(--mono\)\)\s*;[^}]*font-size\s*:\s*var\(--chat-font-size,var\(--font-size-lg\)\)\s*;[^}]*line-height\s*:\s*var\(--chat-line-height,1\.35\)\s*;[^}]*width\s*:\s*var\(--dot-col-width, 1\.6em\)\s*;[^}]*flex\s*:\s*0 0 var\(--dot-col-width, 1\.6em\)\s*;[^}]*justify-content\s*:\s*flex-start\s*;[^}]*text-align\s*:\s*left\s*;/s)
+    expect(chatCss).toMatch(/\.app\[data-interface-mode="terminal-like"\] \.term-tool-head > \.term-tool-indicator\s*\{[^}]*justify-content\s*:\s*flex-start\s*;[^}]*text-align\s*:\s*left\s*;/s)
+    expect(chatCss).not.toMatch(/\.app\[data-interface-mode="terminal-like"\][^{}]*\{[^}]*scale\s*:/s)
   })
 
   it('removes first-block top spacing through renderer slot wrappers', () => {
