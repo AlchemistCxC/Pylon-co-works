@@ -6,11 +6,11 @@ import { DEFAULTS } from '../src/domains/theme/themeDefaults.ts'
 const expand = (theme: Record<string, unknown>) => ({ ...DEFAULTS, ...theme })
 
 assert.deepEqual(GLOBAL_PRESETS.map(preset => preset.label), [
-  'Claude 风格', 'Glass Light', 'Nord Frost', 'Tokyo Night', 'Solarized Light', 'Amber CRT',
+  'Claude 风格', 'Glass Light', 'Nord Frost', 'Tokyo Night', 'Solarized Light', 'Amber CRT', 'Matrix 磷绿',
   'Agent 指挥台', 'Agent 关系图', '专注流程',
 ])
 
-const [claude, glass, nord, tokyo, solarized, amber] = GLOBAL_PRESETS.map(preset => expand(preset.theme as Record<string, unknown>))
+const [claude, glass, nord, tokyo, solarized, amber, matrix] = GLOBAL_PRESETS.map(preset => expand(preset.theme as Record<string, unknown>))
 assert.equal(claude.uiScheme, 'dark')
 assert.equal(claude.globalFont, 'system')
 assert.equal(claude.inputMode, 'cli')
@@ -75,16 +75,17 @@ for (const preset of GLOBAL_PRESETS) {
   assert.equal(Number.isFinite(expanded.cliLinePadding), true)
   assert.equal((expanded.cliLinePadding as number) >= 0, true)
   assert.equal(expanded.cliContentOffsetY, 0)
-  assert.equal(expanded.cliHintMode, 'full')
+  const expectedCliHintMode = ['nord', 'tokyo', 'amber', 'matrix'].includes(preset.name) ? 'compact' : 'full'
+  assert.equal(expanded.cliHintMode, expectedCliHintMode)
   assert.equal(typeof expanded.cliPromptColor, 'string')
 }
 
-for (const preset of [glass, nord, tokyo, solarized, amber]) {
+for (const preset of [glass, nord, tokyo, solarized, amber, matrix]) {
   assert.equal(preset.ccHeight, 96)
   assert.equal(preset.ccBgHeight, 96)
 }
 
-for (const preset of [claude, glass, nord, tokyo, solarized, amber]) {
+for (const preset of [claude, glass, nord, tokyo, solarized, amber, matrix]) {
   assert.equal(preset.cliLinePadding, 3, '经典终端预设必须保持紧凑命令行内边距')
 }
 

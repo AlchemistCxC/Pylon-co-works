@@ -39,7 +39,7 @@ assert.match(settings, /<TemplateLibrary onApply=\{applyGlobalPreset\} onRestore
 // 4. 官方区模板展开后 theme 完整（delta 展开到全量）
 {
   const official = GLOBAL_PRESETS.map(preset => ({ ...THEME_DEFAULTS, ...preset.theme }))
-  assert.equal(official.length, 9)
+  assert.equal(official.length, 10)
   for (const theme of official) {
     assert.equal(theme.accent !== undefined, true, '展开后 accent 必有值')
     assert.equal(theme.ccHeight !== undefined, true)

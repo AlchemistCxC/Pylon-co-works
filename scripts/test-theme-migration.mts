@@ -42,9 +42,30 @@ assert.equal(typeof migrated.appliedPreset.global, 'string')
 assert.equal(typeof migrated.custom.global, 'boolean')
 assert.deepEqual(migrated.ccLayout, DEFAULT_CC_LAYOUT)
 // A1 命名空间：非 custom- 前缀 id 重前缀
-assert.deepEqual(migrated.customPresets, [
-  { id: 'custom-ok', name: 'Valid', theme: { transparency: 0.7 }, createdAt: 10, updatedAt: 11 },
-])
+assert.equal(migrated.customPresets.length, 1)
+assert.deepEqual(migrated.customPresets[0], {
+  id: 'custom-ok',
+  name: 'Valid',
+  theme: { transparency: 0.7 },
+  createdAt: 10,
+  updatedAt: 11,
+  bundle: {
+    manifestVersion: 2,
+    id: 'ok',
+    name: ' Valid ',
+    source: 'user',
+    createdAt: 10,
+    updatedAt: 11,
+    contributions: {
+      'builtin.theme': {
+        ownerPluginId: 'builtin.pylon-shell',
+        providerVersion: 1,
+        policy: 'complete',
+        payload: { transparency: 0.7 },
+      },
+    },
+  },
+})
 assert.deepEqual(migrated.sessions, [{ id: 'must remain outside theme conclusion' }])
 
 const empty = normalizeThemeMigrationState({}, defaults)

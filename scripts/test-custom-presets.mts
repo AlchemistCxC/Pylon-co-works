@@ -21,7 +21,24 @@ assert.equal(overwritten[0].theme.globalBgColor, '#000000')
 assert.equal(overwritten[0].updatedAt, 200)
 
 assert.deepEqual(deleteCustomPreset(overwritten, first.id), [])
-assert.deepEqual(normalizeCustomPresets([{ id: '', name: '', theme: null }, first] as never), [first])
+const normalized = normalizeCustomPresets([{ id: '', name: '', theme: null }, first] as never)
+assert.equal(normalized.length, 1)
+assert.deepEqual(normalized[0], { ...first, bundle: {
+  manifestVersion: 2,
+  id: 'custom-100',
+  name: '夜航',
+  source: 'user',
+  createdAt: 100,
+  updatedAt: 100,
+  contributions: {
+    'builtin.theme': {
+      ownerPluginId: 'builtin.pylon-shell',
+      providerVersion: 1,
+      policy: 'complete',
+      payload: theme,
+    },
+  },
+} })
 assert.throws(() => createCustomPreset('   ', theme, 100), /名称/)
 
 const runtimeFunction = () => 'transient'
