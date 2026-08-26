@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react'
+import * as Dialog from '@radix-ui/react-dialog'
 import { open } from '@tauri-apps/plugin-dialog'
-import { ChevronDown, ChevronLeft, ChevronRight, Folder, FolderOpen, Plus, Settings, X } from 'lucide-react'
+import { ChevronDown, ChevronRight, Folder, FolderOpen, Plus, Settings, X } from 'lucide-react'
 import { formatTime } from '../../utils'
 import { isAbsolutePath } from '../../workspaceEntities'
 import CwdSettingsPanel from '../settings/CwdSettingsPanel'
@@ -95,29 +96,8 @@ export default function WorkspacesPanel(props: AgentSidebarContributionProps) {
 
   const editingWorkspace = props.workspaces.find(workspace => workspace.id === editingCwdId)
 
-  if (editingWorkspace) {
-    return (
-      <section className="sidebar-section sidebar-mode-panel" aria-label={`${editingWorkspace.name} 工作区设置`}>
-        <div className="sidebar-section-head cwd-settings-page-head">
-          <button className="cwd-settings-back" type="button" onClick={() => setEditingCwdId(null)} aria-label="返回工作区列表">
-            <ChevronLeft size={15} aria-hidden="true" />
-            <span>工作区</span>
-          </button>
-          <span className="sidebar-section-title">设置</span>
-        </div>
-        <div className="cwd-settings-page">
-          <div className="cwd-settings-identity">
-            <span className="cwd-settings-folder" aria-hidden="true"><FolderOpen size={18} /></span>
-            <span className="cwd-group-name">{editingWorkspace.name}</span>
-            <span className="cwd-group-root" title={editingWorkspace.rootPath}>{editingWorkspace.rootPath}</span>
-          </div>
-          <CwdSettingsPanel workspace={editingWorkspace} onClose={() => setEditingCwdId(null)} showHeader={false} />
-        </div>
-      </section>
-    )
-  }
-
   return (
+    <>
     <section className="sidebar-section sidebar-mode-panel" aria-label="工作会话">
       <div className="sidebar-section-head">
         <div className="sidebar-section-title"><span>工作</span><span className="sidebar-section-count">{props.sessions.length}</span></div>
@@ -162,7 +142,8 @@ export default function WorkspacesPanel(props: AgentSidebarContributionProps) {
                   <button className="cwd-group-add cwd-group-settings" onClick={event => { event.stopPropagation(); setEditingCwdId(workspace.id) }} title={`${workspace.name} 工作区设置`} aria-label={`${workspace.name} 工作区设置`}><Settings size={14} aria-hidden="true" /></button>
                 </div>
               </div>
-              {!folded && <div className="cwd-group-sessions" role="group">
+              <div className={`cwd-group-sessions${folded ? ' is-collapsed' : ''}`} role="group" aria-hidden={folded}>
+                <div className="cwd-group-sessions-inner">
                 {bound.map(session => (
                   <div key={session.id} role="treeitem" tabIndex={0} className={`session-item cwd-session-item ${props.activeSessionId === session.id ? 'active' : ''}`}
                     onClick={() => props.onSelectSession(session.id)}
@@ -189,7 +170,8 @@ export default function WorkspacesPanel(props: AgentSidebarContributionProps) {
                   </div>
                 ))}
                 {bound.length === 0 && <div className="session-empty cwd-session-empty">暂无会话，点击上方＋开始</div>}
-              </div>}
+                </div>
+              </div>
             </div>
           )
         })}
@@ -203,5 +185,28 @@ export default function WorkspacesPanel(props: AgentSidebarContributionProps) {
         )}
       </div>
     </section>
+    <Dialog.Root open={Boolean(editingWorkspace)} onOpenChange={open => { if (!open) setEditingCwdId(null) }}>
+      <Dialog.Portal>
+        <Dialog.Overlay className="dialog-overlay" />
+        {editingWorkspace && <Dialog.Content className="dialog-content settings-surface cwd-settings-dialog" aria-describedby="cwd-settings-description">
+          <Dialog.Title asChild>
+            <header className="session-settings-header settings-dialog-header">
+              <div>
+                <h3 className="settings-dialog-title">工作区设置</h3>
+                <p id="cwd-settings-description" className="settings-dialog-description">管理工作区目录、能力与默认上下文。</p>
+              </div>
+              <Dialog.Close className="modal-close settings-dialog-close" aria-label="关闭工作区设置">✕</Dialog.Close>
+            </header>
+          </Dialog.Title>
+          <div className="cwd-settings-dialog-identity">
+            <FolderOpen size={16} aria-hidden="true" />
+            <strong>{editingWorkspace.name}</strong>
+            <span title={editingWorkspace.rootPath}>{editingWorkspace.rootPath}</span>
+          </div>
+          <CwdSettingsPanel workspace={editingWorkspace} onClose={() => setEditingCwdId(null)} showHeader={false} />
+        </Dialog.Content>}
+      </Dialog.Portal>
+    </Dialog.Root>
+    </>
   )
 }

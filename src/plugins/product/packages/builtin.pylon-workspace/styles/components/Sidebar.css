@@ -182,26 +182,28 @@
 .cwd-new-directory { display:flex; align-items:center; gap:var(--ui-space-2); min-width:0; }
 .cwd-new-directory-path { flex:1; min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; color:var(--text-dim); font:11px/1.4 var(--mono); }
 .cwd-new-actions { display:flex; gap:var(--ui-space-2); }
-.cwd-group { position:relative; margin-bottom:4px; border:1px solid transparent; border-radius:var(--ui-radius-sm); background:transparent; transition:background var(--motion-standard) var(--ease-standard),border-color var(--motion-standard) var(--ease-standard); }
+.cwd-group { position:relative; margin-bottom:2px; border:1px solid transparent; border-radius:var(--ui-radius-sm); background:transparent; transition:background var(--motion-standard) var(--ease-standard),border-color var(--motion-standard) var(--ease-standard); }
 .cwd-group:hover, .cwd-group:focus-within { border-color:var(--stroke-subtle); background:var(--surface-panel); }
-.cwd-group-head { position:relative; display:flex; align-items:stretch; min-height:52px; padding:4px; user-select:none; }
-.cwd-group-toggle { display:grid; width:100%; min-width:0; grid-template-columns:12px 18px minmax(0,1fr); align-items:center; gap:var(--ui-space-2); padding:5px 62px 5px 4px; border:0; border-radius:var(--ui-radius-xs); background:transparent; color:inherit; text-align:left; cursor:pointer; }
+.cwd-group-head { position:relative; display:flex; align-items:stretch; min-height:46px; padding:2px; user-select:none; }
+.cwd-group-toggle { display:grid; width:100%; min-width:0; grid-template-columns:12px 16px minmax(0,1fr); align-items:center; gap:6px; padding:4px 62px 4px 3px; border:0; border-radius:var(--ui-radius-xs); background:transparent; color:inherit; text-align:left; cursor:pointer; }
 .cwd-group-toggle:hover { background:var(--state-hover-bg); }
 .cwd-group-toggle:focus-visible { outline:2px solid var(--accent); outline-offset:-2px; }
 .cwd-group-arrow { width:12px; color:var(--text-secondary, var(--text)); }
-.cwd-group-folder { width:18px; flex:0 0 18px; display:grid; place-items:center; color:color-mix(in srgb,var(--accent) 72%,var(--text)); }
-.cwd-group-identity { flex:1; min-width:0; display:flex; flex-direction:column; gap:2px; }
-.cwd-group-name { font-size:13px; font-weight:600; color:var(--text); }
-.cwd-group-root { min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; font-size:10px; color:var(--text-placeholder); }
+.cwd-group-folder { width:16px; flex:0 0 16px; display:grid; place-items:center; color:color-mix(in srgb,var(--accent) 72%,var(--text)); }
+.cwd-group-identity { flex:1; min-width:0; display:flex; flex-direction:column; gap:1px; }
+.cwd-group-name { font-size:12.5px; font-weight:600; color:var(--text); }
+.cwd-group-root { min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; font-size:9.5px; color:var(--text-placeholder); }
 .cwd-group-count { position:absolute; z-index:1; top:50%; right:10px; min-width:19px; padding:1px 5px; transform:translateY(-50%); border-radius:var(--ui-radius-pill); color:var(--text-dim); background:color-mix(in srgb,var(--bg-active) 68%,transparent); font:10px/1.5 var(--font); text-align:center; pointer-events:none; transition:opacity var(--motion-fast) var(--ease-standard); }
 .cwd-group-actions { position:absolute; z-index:2; top:50%; right:4px; display:flex; opacity:0; transform:translate(2px,-50%); transition:opacity var(--motion-fast) var(--ease-standard),transform var(--motion-fast) var(--ease-emphasized); }
 .cwd-group:hover .cwd-group-count, .cwd-group:focus-within .cwd-group-count { opacity:0; }
 .cwd-group:hover .cwd-group-actions, .cwd-group:focus-within .cwd-group-actions { opacity:1; transform:translate(0,-50%); }
 .cwd-group-add { width:26px; height:26px; display:grid; place-items:center; padding:0; border:1px solid transparent; border-radius:var(--ui-radius-sm); background:transparent; color:var(--text-dim); cursor:pointer; font-size:13px; }
 .cwd-group-add:hover { color:var(--accent); background:var(--bg-hover); border-color:var(--border); }
-.cwd-group-sessions { position:relative; margin-left:20px; padding:0 var(--ui-space-2) var(--ui-space-2) 12px; border-left:1px solid color-mix(in srgb,var(--border) 76%,transparent); }
-.cwd-session-item { min-height:40px; margin-top:2px; }
-.cwd-session-item::after { content:''; position:absolute; left:-13px; top:19px; width:10px; border-top:1px solid color-mix(in srgb,var(--border) 76%,transparent); }
+.cwd-group-sessions { position:relative; display:grid; grid-template-rows:1fr; min-height:0; margin-left:20px; padding:0 6px 6px 10px; border-left:1px dashed color-mix(in srgb,var(--border) 76%,transparent); opacity:1; overflow:hidden; transition:grid-template-rows 180ms var(--ease-standard),opacity 140ms var(--ease-standard),padding-bottom 180ms var(--ease-standard); }
+.cwd-group-sessions-inner { min-height:0; overflow:hidden; }
+.cwd-group-sessions.is-collapsed { grid-template-rows:0fr; padding-bottom:0; opacity:0; pointer-events:none; }
+.cwd-session-item { min-height:38px; margin-top:2px; }
+.cwd-session-item::after { content:''; position:absolute; left:-11px; top:18px; width:8px; border-top:1px solid color-mix(in srgb,var(--border) 76%,transparent); }
 .cwd-root-input { font-family:var(--mono); font-size:11px; }
 .cwd-settings-error { color:var(--state-danger); }
 
@@ -242,6 +244,11 @@
 .workspace-empty span { font-size:11px; line-height:1.5; }
 .workspace-empty .settings-action { margin-top:4px; }
 .cwd-session-empty { padding:12px 8px 8px; text-align:left; font-size:11px; }
+.cwd-settings-dialog { width:min(620px,calc(100vw - 32px)); max-height:min(760px,calc(100vh - 48px)); overflow:auto; }
+.cwd-settings-dialog-identity { display:grid; grid-template-columns:18px minmax(0,auto) minmax(0,1fr); align-items:center; gap:8px; margin:0 20px; padding:10px 0; border-bottom:1px solid var(--border); color:var(--accent); }
+.cwd-settings-dialog-identity strong { min-width:0; overflow:hidden; color:var(--text); text-overflow:ellipsis; white-space:nowrap; }
+.cwd-settings-dialog-identity span { min-width:0; overflow:hidden; color:var(--text-dim); font:11px var(--mono); text-overflow:ellipsis; white-space:nowrap; }
+.cwd-settings-dialog > .cwd-settings { margin:0 20px 16px; }
 @media (hover:none) { .cwd-group-count { opacity:0; } .cwd-group-actions { opacity:1; transform:translate(0,-50%); } }
 
 /* Modern GUI workspace rail. Local values intentionally stay in this package. */

@@ -295,7 +295,7 @@
 /* 连接良好：三灯（绿黄红）正常色常亮，辉光左→右传播（周期长、启动间隔小） */
 .agent-status-lights[data-mode="cascade"] .agent-status-light {
   opacity:1; animation:agent-glow 3s ease-in-out infinite;
-  animation-delay:calc(var(--light-i) * 0.25s);
+  animation-delay:calc(var(--light-i) * 0.35s);
 }
 .agent-status-lights[data-mode="cascade"] .agent-light-error {
   /* Keep the red node legible even when reduced-motion collapses the animation. */

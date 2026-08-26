@@ -75,18 +75,18 @@ describe('WorkspacesPanel', () => {
     expect(screen.queryByRole('textbox', { name: '工作区名称' })).not.toBeInTheDocument()
   })
 
-  it('将工作区设置作为可返回的二级页面呈现', async () => {
+  it('将工作区设置作为弹出式对话框呈现', async () => {
     render(<WorkspacesPanel {...createProps()} />)
 
     const list = screen.getByRole('region', { name: '工作会话' })
     fireEvent.click(within(list).getByRole('button', { name: 'Pylon 工作区设置' }))
 
-    const settings = screen.getByRole('region', { name: 'Pylon 工作区设置' })
+    const settings = screen.getByRole('dialog')
     expect(within(settings).getByText('G:/Project/Pylon')).toBeInTheDocument()
     expect(within(settings).getByText('Skills（逗号分隔）')).toBeInTheDocument()
     expect(within(settings).queryByRole('button', { name: '在 Pylon 中新建会话' })).not.toBeInTheDocument()
 
-    fireEvent.click(within(settings).getByRole('button', { name: '返回工作区列表' }))
+    fireEvent.click(within(settings).getByRole('button', { name: '关闭工作区设置' }))
     expect(screen.getByRole('region', { name: '工作会话' })).toBeInTheDocument()
     expect(screen.getByRole('button', { name: '在 Pylon 中新建会话' })).toBeInTheDocument()
   })
@@ -127,7 +127,8 @@ describe('WorkspacesPanel', () => {
     view.unmount()
     render(<WorkspacesPanel {...createProps({ sessions: [session] })} />)
     expect(screen.getByRole('button', { name: '展开 Pylon' })).toBeInTheDocument()
-    expect(screen.queryByText('实现界面')).not.toBeInTheDocument()
+    const collapsedSessions = document.querySelector('.cwd-group-sessions.is-collapsed')
+    expect(collapsedSessions).toHaveAttribute('aria-hidden', 'true')
   })
 
   it('将工作区身份与计数/操作分成稳定几何层', () => {
