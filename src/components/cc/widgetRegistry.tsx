@@ -10,7 +10,8 @@ import { resolveTaskPill } from '../../domains/activity/taskPill.ts'
 import { formatCacheReadTokens, formatTokenCount } from '../../tokenFormat'
 import { emptySessionLiveStats } from '../chat/sessionRuntime'
 import type { SessionLiveStats } from '../chat/sessionRuntime'
-import type { CcSlot, CcWidgetId, CcWidgetPlacement } from '../../ccLayoutState'
+import type { CcWidgetId } from '../../domains/cc/widgetCatalog.ts'
+import { BUILTIN_CC_WIDGET_CONTRIBUTIONS } from '../../domains/cc/widgetCatalog.ts'
 import { Bot, FolderKanban, LoaderCircle, Radio } from 'lucide-react'
 import { useWorkspaceEntityStore } from '../../workspaceEntityStore.ts'
 
@@ -22,12 +23,8 @@ export interface CcWidgetDef {
   id: CcWidgetId
   label: string
   category: 'input' | 'status' | 'context' | 'runtime' | 'action'
-  defaultPlacement: CcWidgetPlacement
   naturalSize: boolean
-  minWidth?: number
-  minHeight?: number
   render?: (props: CcWidgetRenderProps) => ReactNode
-  renderPreview?: (props: CcWidgetRenderProps) => ReactNode
 }
 
 const EMPTY_SESSION_LIVE_STATS = emptySessionLiveStats()
@@ -175,20 +172,25 @@ function ActivityWidgetRenderer({ sessionId }: CcWidgetRenderProps) {
   )
 }
 
-const placement = (slot: CcSlot, order: number): CcWidgetPlacement => ({ slot, order, offsetX: 0, offsetY: 0 })
+const HOST_RENDERERS: Record<string, (props: CcWidgetRenderProps) => ReactNode> = {
+  session: props => <SessionWidgetRenderer {...props} />,
+  workspace: props => <WorkspaceWidgetRenderer {...props} />,
+  activity: props => <ActivityWidgetRenderer {...props} />,
+  ekg: props => <EkgWidget {...props} />,
+  pct: props => <PctWidget {...props} />,
+  tokens: props => <TokensWidget {...props} />,
+  model: props => <ModelWidgetRenderer {...props} />,
+  mode: () => <ModeWidgetRenderer />,
+  tasks: props => <TasksWidgetRenderer {...props} />,
+}
 
-export const CC_WIDGET_REGISTRY: readonly CcWidgetDef[] = [
-  // input/send/attach 由 ControlCenter 特判渲染（InputBar 需 ref/split 等参数），注册表不持 render
-  { id: 'input', label: '输入栏', category: 'input', defaultPlacement: placement('input', 0), naturalSize: false },
-  { id: 'session', label: '当前会话', category: 'runtime', defaultPlacement: placement('status-secondary', 0), naturalSize: true, render: props => <SessionWidgetRenderer {...props} /> },
-  { id: 'workspace', label: '工作区', category: 'runtime', defaultPlacement: placement('status-secondary', 1), naturalSize: true, render: props => <WorkspaceWidgetRenderer {...props} /> },
-  { id: 'activity', label: '运行状态', category: 'status', defaultPlacement: placement('status-primary', 0), naturalSize: true, render: props => <ActivityWidgetRenderer {...props} /> },
-  { id: 'ekg', label: '用量条', category: 'context', defaultPlacement: placement('status-primary', 1), naturalSize: true, render: props => <EkgWidget {...props} /> },
-  { id: 'pct', label: '百分比', category: 'context', defaultPlacement: placement('status-primary', 2), naturalSize: true, render: props => <PctWidget {...props} /> },
-  { id: 'tokens', label: 'Token数', category: 'context', defaultPlacement: placement('status-primary', 3), naturalSize: true, render: props => <TokensWidget {...props} /> },
-  { id: 'model', label: '模型', category: 'runtime', defaultPlacement: placement('status-secondary', 2), naturalSize: true, render: props => <ModelWidgetRenderer {...props} /> },
-  { id: 'mode', label: '权限模式', category: 'runtime', defaultPlacement: placement('status-secondary', 3), naturalSize: true, render: () => <ModeWidgetRenderer /> },
-  { id: 'send', label: '发送按钮', category: 'action', defaultPlacement: placement('actions', 0), naturalSize: true },
-  { id: 'attach', label: '附件按钮', category: 'action', defaultPlacement: placement('actions', 1), naturalSize: true },
-  { id: 'tasks', label: '任务', category: 'status', defaultPlacement: placement('status-primary', 4), naturalSize: true, render: props => <TasksWidgetRenderer {...props} /> },
-]
+export const CC_WIDGET_REGISTRY: readonly CcWidgetDef[] = BUILTIN_CC_WIDGET_CONTRIBUTIONS.map(entry => ({
+  id: entry.id,
+  label: entry.label,
+  category: entry.category,
+  naturalSize: entry.naturalSize,
+  // input/send/attach 由 ControlCenter 特判渲染，贡献包只声明宿主 renderer 绑定。
+  ...('render' in entry && entry.render?.kind === 'host-renderer' && HOST_RENDERERS[entry.render.rendererKey]
+    ? { render: HOST_RENDERERS[entry.render.rendererKey] }
+    : {}),
+}))

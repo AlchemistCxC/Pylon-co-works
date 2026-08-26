@@ -5,32 +5,36 @@
 import { strict as assert } from 'node:assert'
 import { readFileSync } from 'node:fs'
 import { DEFAULT_CC_LAYOUT, normalizeCcLayout } from '../src/ccLayoutState.ts'
-import { CC_WIDGET_IDS } from '../src/domains/cc/widgetDefinitions.ts'
+import { BUILTIN_CC_WIDGET_CONTRIBUTIONS, CC_WIDGET_IDS } from '../src/domains/cc/widgetCatalog.ts'
 
 const registry = readFileSync(new URL('../src/components/cc/widgetRegistry.tsx', import.meta.url), 'utf8')
+const catalog = readFileSync(new URL('../src/domains/cc/widgetCatalog.ts', import.meta.url), 'utf8')
 const controlCenter = readFileSync(new URL('../src/components/ControlCenter.tsx', import.meta.url), 'utf8')
 
 // 守门：registry 注册的 id 集合必须精确等于 CC_WIDGET_IDS 单一真值
 // （新增 widget 到 domain 漏注册、或 registry 多余 id 均红）
-const registryIds = [...registry.matchAll(/id: '([a-z-]+)'/g)].map(m => m[1]).sort()
-assert.deepEqual(registryIds, [...CC_WIDGET_IDS].sort(), 'registry id 集合必须精确等于 CC_WIDGET_IDS')
+const catalogIds = BUILTIN_CC_WIDGET_CONTRIBUTIONS.map(item => item.id).sort()
+const sourceCatalogIds = [...catalog.matchAll(/id: '([a-z-]+)'/g)].map(m => m[1]).sort()
+assert.deepEqual(sourceCatalogIds, catalogIds, 'catalog 源码 ID 集合必须完整')
+assert.match(registry, /BUILTIN_CC_WIDGET_CONTRIBUTIONS\.map/, 'registry 必须由 catalog 派生')
+assert.match(registry, /id: entry\.id/, 'registry 必须透传 catalog id')
+assert.deepEqual([...CC_WIDGET_IDS].sort(), catalogIds, 'CC_WIDGET_IDS 必须来自 catalog')
 
 for (const id of CC_WIDGET_IDS) {
-  assert.match(registry, new RegExp(`id: '${id}'`), `${id} 必须注册`)
+  assert.ok(catalogIds.includes(id), `${id} 必须注册`)
   assert.ok(DEFAULT_CC_LAYOUT.placements[id as keyof typeof DEFAULT_CC_LAYOUT.placements], `${id} 必须有默认布局`)
 }
-assert.match(registry, /category: 'input'/)
-assert.match(registry, /category: 'context'/)
-assert.match(registry, /category: 'runtime'/)
-assert.match(registry, /category: 'action'/)
-assert.match(registry, /id: 'input'[\s\S]*?naturalSize: false/, 'input 不应使用自然尺寸')
-assert.match(registry, /id: 'tokens'[\s\S]*?naturalSize: true/, 'tokens 应使用自然尺寸')
+for (const category of ['input', 'context', 'runtime', 'action'] as const) {
+  assert.match(catalog, new RegExp(`category: '${category}'`), `${category} category 必须存在`)
+}
+assert.match(catalog, /id: 'input'[\s\S]*?naturalSize: false/, 'input 不应使用自然尺寸')
+assert.match(catalog, /id: 'tokens'[\s\S]*?naturalSize: true/, 'tokens 应使用自然尺寸')
 assert.match(registry, /ccStyle === 'ring'/, 'ring 必须是用量条的一个渲染类型')
 assert.match(registry, /cc-context-ring/, 'ring 类型必须复用环形视觉')
 assert.equal(registry.includes("id: 'context-ring'"), false, '不得保留独立 context-ring 控件')
 assert.equal(registry.includes("id: 'runtime-status'"), false, '不得保留常态 runtime-status 控件')
-assert.match(registry, /defaultPlacement: placement\('status-primary', 0\)/, 'registry 必须声明默认位置')
-assert.match(registry, /renderPreview\?:/, 'registry 必须预留 Preview renderer')
+assert.equal(registry.includes('defaultPlacement'), false, 'registry 不应包含 defaultPlacement')
+assert.equal(registry.includes('renderPreview'), false, 'registry 不应包含 renderPreview')
 
 const normalized = normalizeCcLayout({ version: 3, placements: {
   input: { slot: 'input', order: 0, offsetX: 6, offsetY: -3 },

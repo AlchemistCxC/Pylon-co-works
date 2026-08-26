@@ -1,6 +1,6 @@
-import { type CcWidgetId } from './domains/cc/widgetDefinitions.ts'
+import { BUILTIN_CC_WIDGET_CONTRIBUTIONS, type CcWidgetId, type CcWidgetRuntimeId } from './domains/cc/widgetCatalog.ts'
 
-export type { CcWidgetId } from './domains/cc/widgetDefinitions.ts'
+export type { CcWidgetId, CcWidgetRuntimeId } from './domains/cc/widgetCatalog.ts'
 export type CcSlot = 'input' | 'status-primary' | 'status-secondary' | 'actions'
 
 export interface CcWidgetPlacement {
@@ -12,7 +12,7 @@ export interface CcWidgetPlacement {
 
 export interface CcLayoutV3 {
   version: number
-  placements: Record<CcWidgetId, CcWidgetPlacement>
+  placements: Record<CcWidgetRuntimeId, CcWidgetPlacement>
 }
 
 // v7：新增会话、工作区与运行状态控件；旧布局按 ID 保留并补入新增默认位置。
@@ -20,20 +20,9 @@ export const CC_LAYOUT_SCHEMA_VERSION = 7
 
 export const DEFAULT_CC_LAYOUT: CcLayoutV3 = {
   version: CC_LAYOUT_SCHEMA_VERSION,
-  placements: {
-    input: { slot: 'input', order: 0, offsetX: 0, offsetY: 0 },
-    session: { slot: 'status-secondary', order: 0, offsetX: 0, offsetY: 0 },
-    workspace: { slot: 'status-secondary', order: 1, offsetX: 0, offsetY: 0 },
-    model: { slot: 'status-secondary', order: 2, offsetX: 0, offsetY: 0 },
-    mode: { slot: 'status-secondary', order: 3, offsetX: 0, offsetY: 0 },
-    activity: { slot: 'status-primary', order: 0, offsetX: 0, offsetY: 0 },
-    ekg: { slot: 'status-primary', order: 1, offsetX: 0, offsetY: 0 },
-    pct: { slot: 'status-primary', order: 2, offsetX: 0, offsetY: 0 },
-    tokens: { slot: 'status-primary', order: 3, offsetX: 0, offsetY: 0 },
-    send: { slot: 'actions', order: 0, offsetX: 0, offsetY: 0 },
-    attach: { slot: 'actions', order: 1, offsetX: 0, offsetY: 0 },
-    tasks: { slot: 'status-primary', order: 4, offsetX: 0, offsetY: 0 },
-  },
+  placements: Object.fromEntries(
+    BUILTIN_CC_WIDGET_CONTRIBUTIONS.map(item => [item.id, { ...item.defaultPlacement }]),
+  ) as Record<CcWidgetRuntimeId, CcWidgetPlacement>,
 }
 
 const SLOT_SET = new Set<CcSlot>(['input', 'status-primary', 'status-secondary', 'actions'])
@@ -44,7 +33,7 @@ export function cloneCcLayout(layout: CcLayoutV3): CcLayoutV3 {
     version: CC_LAYOUT_SCHEMA_VERSION,
     placements: Object.fromEntries(
       Object.entries(layout.placements).map(([id, placement]) => [id, { ...placement }]),
-    ) as Record<CcWidgetId, CcWidgetPlacement>,
+    ) as Record<CcWidgetRuntimeId, CcWidgetPlacement>,
   }
 }
 

@@ -1,6 +1,7 @@
 import { For, Match, Show, Switch, createEffect, createMemo, createSignal, onCleanup, onMount, type JSX } from 'solid-js'
 import { formatTokenCount } from '../../../tokenFormat.ts'
 import { CC_WIDGET_IDS, WIDGET_PROPERTY_FIELDS, isExternalSubmitMode, isWidgetVisible, type CcPropertyCommand, type CcWidgetId, type WidgetPropertyField } from '../../../domains/cc/widgetDefinitions.ts'
+import { CC_WIDGET_LABELS } from '../../../domains/cc/widgetCatalog.ts'
 import type { CcSlot, CcWidgetPlacement } from '../../../ccLayoutState.ts'
 import { resolveCcMinHeight, resolveVisibleStatusWidgetCount } from '../../../ccHeightState.ts'
 import type { UsageSnapshot } from '../../../domains/workbench/session/sessionSurface.ts'
@@ -9,12 +10,6 @@ import { SolidInputBar } from './InputBar.solid.tsx'
 import { SolidAttachWidget, SolidModeWidget, SolidModelWidget, SolidSendWidget } from './WorkbenchWidgets.solid.tsx'
 
 const STATUS_SLOTS: readonly Exclude<CcSlot, 'input'>[] = ['status-secondary', 'status-primary', 'actions']
-const WIDGET_LABELS: Readonly<Record<CcWidgetId, string>> = {
-  input: '输入栏', session: '当前会话', workspace: '工作区', activity: '运行状态',
-  ekg: '用量条', pct: '百分比', tokens: 'Token数', model: '模型', mode: '权限模式',
-  send: '发送按钮', attach: '附件按钮', tasks: '任务',
-}
-
 export function SolidControlCenter() {
   const workbench = useSolidWorkbench()
   const appearance = () => workbench.appearanceSnapshot()
@@ -266,8 +261,8 @@ export function SolidControlCenter() {
       </>}
     </div>
     <Show when={appearance().ccEditMode && selected()}>{id => (
-      <div class="cc-prop-panel" role="dialog" aria-label={`${WIDGET_LABELS[id()]} 属性`}>
-        <div class="cc-prop-header"><span>{WIDGET_LABELS[id()]}</span><button type="button" aria-label="关闭属性面板" onClick={() => setSelected(undefined)}>✕</button></div>
+      <div class="cc-prop-panel" role="dialog" aria-label={`${CC_WIDGET_LABELS[id()]} 属性`}>
+        <div class="cc-prop-header"><span>{CC_WIDGET_LABELS[id()]}</span><button type="button" aria-label="关闭属性面板" onClick={() => setSelected(undefined)}>✕</button></div>
         <div class="cc-prop-body">
           <div class="cc-prop-sec">布局</div>
           <div class="cc-prop-field"><label>槽位</label><select class="set-select" aria-label="控件槽位" value={appearance().ccLayout.placements[id()].slot} onChange={event => updatePlacement(id(), { slot: event.currentTarget.value as CcSlot })}>
@@ -303,8 +298,8 @@ export function SolidControlCenter() {
         <For each={CC_WIDGET_IDS}>{id => {
           const hidden = () => appearance().ccHidden.includes(id)
           return <span class={`cc-edit-toolbar-chip-wrap${selected() === id ? ' active' : ''}${hidden() ? ' dim' : ''}`}>
-            <button type="button" class="cc-edit-toolbar-chip" aria-label={`${WIDGET_LABELS[id]} 属性`} onClick={() => setSelected(id)}>{hidden() ? '＋' : '●'} {WIDGET_LABELS[id]}</button>
-            <button type="button" class="cc-chip-toggle" aria-label={`${hidden() ? '显示' : '隐藏'} ${WIDGET_LABELS[id]}`} onClick={() => workbench.appearance.dispatch({ type: 'set-cc-hidden', id, hidden: !hidden() })}>{hidden() ? '显示' : '隐藏'}</button>
+            <button type="button" class="cc-edit-toolbar-chip" aria-label={`${CC_WIDGET_LABELS[id]} 属性`} onClick={() => setSelected(id)}>{hidden() ? '＋' : '●'} {CC_WIDGET_LABELS[id]}</button>
+            <button type="button" class="cc-chip-toggle" aria-label={`${hidden() ? '显示' : '隐藏'} ${CC_WIDGET_LABELS[id]}`} onClick={() => workbench.appearance.dispatch({ type: 'set-cc-hidden', id, hidden: !hidden() })}>{hidden() ? '显示' : '隐藏'}</button>
           </span>
         }}</For>
         <button type="button" class="cc-edit-toolbar-btn" aria-label="重置控件位置" onClick={() => workbench.appearance.dispatch({ type: 'reset-cc-layout' })}>↺ 重置位置</button>

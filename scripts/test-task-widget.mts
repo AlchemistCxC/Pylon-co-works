@@ -5,6 +5,7 @@
 import { strict as assert } from 'node:assert'
 import { readFileSync } from 'node:fs'
 import { CC_WIDGET_IDS, WIDGET_PROPERTY_FIELDS } from '../src/domains/cc/widgetDefinitions.ts'
+import { BUILTIN_CC_WIDGET_CONTRIBUTIONS } from '../src/domains/cc/widgetCatalog.ts'
 import { DEFAULT_CC_LAYOUT } from '../src/ccLayoutState.ts'
 import { resolveTaskPill } from '../src/domains/activity/taskPill.ts'
 
@@ -17,7 +18,9 @@ assert.deepEqual(DEFAULT_CC_LAYOUT.placements.tasks, { slot: 'status-primary', o
 
 // 2. registry 登记项 + 渲染器接线
 const registry = readFileSync(new URL('../src/components/cc/widgetRegistry.tsx', import.meta.url), 'utf8')
-assert.match(registry, /id: 'tasks', label: '任务', category: 'status', defaultPlacement: placement\('status-primary', 4\)/, 'registry 必须登记 tasks 到 status-primary')
+assert.deepEqual(BUILTIN_CC_WIDGET_CONTRIBUTIONS.find(item => item.id === 'tasks')?.defaultPlacement, { slot: 'status-primary', order: 4, offsetX: 0, offsetY: 0 }, 'catalog 必须登记 tasks 到 status-primary')
+assert.equal(DEFAULT_CC_LAYOUT.placements.tasks.order, 4, '默认布局必须登记 tasks 顺序')
+assert.doesNotMatch(registry, /defaultPlacement|renderPreview/, 'registry 不应持有布局字段')
 assert.match(registry, /resolveTaskPill\(tasks\)/, 'pill 必须经 taskPill 纯函数')
 assert.match(registry, /pylon:tasks-toggle/, '点击必须 dispatch 跨区桥事件')
 assert.match(registry, /if \(!pill\.visible\) return null/, '无任务必须返回 null')
@@ -27,8 +30,8 @@ assert.deepEqual(resolveTaskPill([]), { visible: false, label: '' })
 assert.deepEqual(resolveTaskPill([{ content: 'a', status: 'pending' }, { content: 'b', status: 'completed' }]), { visible: true, label: '⇅ 2 任务 · 1 完成' })
 
 // 4. ccLayout/hidden/scale 仍由现有机制自动覆盖（widget 机制零新增）
-const widgetDefinitions = readFileSync(new URL('../src/domains/cc/widgetDefinitions.ts', import.meta.url), 'utf8')
-assert.match(widgetDefinitions, /'tasks'/, 'defs 单一真值必须含 tasks')
+const widgetCatalog = readFileSync(new URL('../src/domains/cc/widgetCatalog.ts', import.meta.url), 'utf8')
+assert.match(widgetCatalog, /id: 'tasks'/, 'catalog 单一真值必须含 tasks')
 // isWidgetVisible 不特判 tasks（走通用 hidden/排布/缩放机制）
 const controlCenter = readFileSync(new URL('../src/components/ControlCenter.tsx', import.meta.url), 'utf8')
 assert.equal(controlCenter.includes("id === 'tasks'"), false, 'ControlCenter 不得特判 tasks（白拿机制）')
