@@ -222,9 +222,9 @@ export default function RendererSettingsPreview(props: {
     }
   }, [effectivePreviewState, previewKind, previewSuiteId, props.catalog, props.entry, profileId])
 
-  if (!props.entry) return <div className="renderer-settings-preview-empty">选择一个 Renderer 对象查看真实 fixture。</div>
+  if (!props.entry) return <div className="renderer-settings-preview-empty">选择一个渲染对象查看真实示例。</div>
   return <div className="renderer-settings-preview">
-    <div className="renderer-settings-preview-head"><span>LIVE FIXTURE / {props.entry.namespace}</span><strong>{props.entry.label}</strong></div>
+    <div className="renderer-settings-preview-head"><span>实时示例 / {props.entry.namespace}</span><strong>{props.entry.label}</strong></div>
     {previewStateOptions.length > 0 && <div className="renderer-settings-preview-states" aria-label="预览状态">
       {previewStateOptions.map(option => <button key={option.id} type="button"
         className={effectivePreviewState === option.id ? 'active' : ''}
@@ -232,7 +232,7 @@ export default function RendererSettingsPreview(props: {
         onClick={() => setPreviewState(option.id)}>{option.label}</button>)}
     </div>}
     <div className="renderer-settings-preview-surface" ref={hostRef} aria-label={`${props.entry.label}真实预览`} />
-    {error && <div className="renderer-settings-preview-error" role="alert">预览 fallback：{error}</div>}
-    <small className="renderer-settings-preview-note">预览使用真实 Workbench fixture 与 production appearance resolver；只读，不写入会话。</small>
+    {error && <div className="renderer-settings-preview-error" role="alert">预览回退：{error}</div>}
+    <small className="renderer-settings-preview-note">预览使用真实工作台示例与生产外观解析器；只读，不写入会话。</small>
   </div>
 }

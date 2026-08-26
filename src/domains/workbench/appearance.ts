@@ -37,6 +37,9 @@ export interface WorkbenchAppearanceSnapshot {
   assistantDotColor: string
   assistantDotImage: string
   toolIndicator: string
+  toolIndicatorRun: string
+  toolIndicatorOk: string
+  toolIndicatorErr: string
   toolIndicatorGlow: number
   toolIndicatorGlowColor: string
   toolConnectorMode: string
@@ -110,6 +113,9 @@ export function selectWorkbenchAppearance(
     assistantDotColor: theme.assistantDotColor,
     assistantDotImage: theme.assistantDotImage,
     toolIndicator: theme.toolIndicator,
+    toolIndicatorRun: theme.toolIndicatorRun || theme.toolIndicator,
+    toolIndicatorOk: theme.toolIndicatorOk || theme.toolIndicator,
+    toolIndicatorErr: theme.toolIndicatorErr || theme.toolIndicator,
     toolIndicatorGlow: theme.toolIndicatorGlow,
     toolIndicatorGlowColor: theme.toolIndicatorGlowColor,
     toolConnectorMode: theme.toolConnectorMode,

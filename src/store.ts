@@ -64,6 +64,8 @@ export interface ThemeSettings {
   sidebarTransparency: number; sidebarBlur: number; chatTransparency: number; chatBlur: number; rightTransparency: number; rightBlur: number
   userName: string; userPrefix: string; userColor: string
   toolIndicator: string
+  /** Terminal tool glyphs by semantic state; toolIndicator remains legacy fallback. */
+  toolIndicatorRun: string; toolIndicatorOk: string; toolIndicatorErr: string
   spinnerFramePreset: 'sparkles' | 'ascii-line' | 'braille' | 'dots' | 'orbit' | 'clock' | 'wave' | 'blocks' | 'scan' | 'cc' | 'custom'
   spinnerCustomFrames: string
   spinnerVerbSet: 'zh' | 'en' | 'analysis' | 'engineering' | 'cc' | 'custom'

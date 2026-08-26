@@ -1,7 +1,7 @@
 import Anser from 'anser'
 import { Show, createMemo, onCleanup, onMount } from 'solid-js'
 import { sanitizeHtml } from '../../../components/chat/htmlSanitizer.ts'
-import { resolveToolIndicatorAsset } from '../../../components/chat/toolIndicatorAssets.ts'
+import { resolveToolIndicatorAssetForTone } from '../../../components/chat/toolIndicatorAssets.ts'
 import { toolIndicatorMotionClass } from '../../../components/chat/toolIndicatorMotion.ts'
 import {
   buildToolPresentationModel,
@@ -19,6 +19,7 @@ import { createCollapsiblePresenter } from './CollapsiblePresenter.solid.tsx'
 
 export type ToolCardAppearance = Pick<WorkbenchAppearanceSnapshot,
   'toolIndicator' | 'toolIndicatorGlow' | 'toolIndicatorGlowColor'>
+  & Partial<Pick<WorkbenchAppearanceSnapshot, 'toolIndicatorRun' | 'toolIndicatorOk' | 'toolIndicatorErr'>>
 
 export interface SolidToolCardProps {
   message?: Message
@@ -58,7 +59,7 @@ export function SolidToolCard(props: SolidToolCardProps) {
     <Show when={model()}>
       {resolved => {
         const status = () => toolStatePresentation(resolved().state, resolved().hasOutput).tone
-        const indicator = () => resolveToolIndicatorAsset(props.appearance.toolIndicator)
+        const indicator = () => resolveToolIndicatorAssetForTone(status(), props.appearance)
         const displaySummary = () => truncateToolSummary(resolved().summary)
         const suffix = () => resolved().state === 'completed' && resolved().outputLines > 0
           ? ` — ${resolved().outputLabel}`

@@ -76,6 +76,16 @@ const B = (zone: ZoneName, label: string): ThemeFieldDef => ({ type: 'boolean', 
 const T = (zone: ZoneName, label: string): ThemeFieldDef => ({ type: 'text', label, zone })
 const H = (def: ThemeFieldDef): ThemeFieldDef => ({ ...def, hidden: true })
 
+const TOOL_INDICATOR_OPTION_IDS = [
+  'circle', 'dot-small', 'ring', 'double-ring', 'diamond', 'square', 'triangle', 'play',
+  'chevron', 'branch', 'node', 'hex', 'asterisk', 'star', 'check', 'cross', 'warning', 'plus', 'slash', 'hourglass',
+] as const
+const TOOL_INDICATOR_OPTION_LABELS: Readonly<Record<string, string>> = {
+  circle: '● 圆点', 'dot-small': '· 小圆点', ring: '○ 圆环', 'double-ring': '◎ 双环', diamond: '◆ 菱形', square: '■ 方块',
+  triangle: '▲ 三角', play: '▶ 播放', chevron: '› 尖括号', branch: '├ 分支', node: '◇ 节点', hex: '⬡ 六边形',
+  asterisk: '✱ 星号', star: '★ 星标', check: '✓ 对勾', cross: '× 叉号', warning: '! 警告', plus: '+ 加号', slash: '╱ 斜杠', hourglass: '⧗ 沙漏',
+}
+
 export const THEME_FIELD_DEFS = {
   // ── global ──
   accent: { ...C('global', '强调色'), tier: 'basic', default: '#3b82f6', cssVar: '--accent', group: "强调色", hint: '链接、用户前缀、选中与焦点，以及等待动画光扫的统一取色' },
@@ -155,7 +165,12 @@ export const THEME_FIELD_DEFS = {
   editorTabActive: { ...C('chat', '活动文件标签'), default: '#3b82f6', group: "文件编辑器", },
   editorModifiedMark: { ...C('chat', '改动标记'), default: '#b47814', group: "文件编辑器", },
   // toolIndicator 候选由 toolIndicatorOptions 单一真值提供；静态 options 仅供 schema/旧值归一化参考。
-  toolIndicator: { ...S('chat', '指示器形状', ['●', '■', '◆', '▶', '✦']), default: '●', control: 'toolIndicator', group: "指示器与连接线" },
+  toolIndicator: { ...S('chat', '兼容回退指示器', ['●', '■', '◆', '▶', '✦']), default: '●', control: 'toolIndicator', group: "指示器与连接线", hidden: true },
+  // 三态独立字形：运行/完成/失败不再共享一个 glyph。值使用
+  // toolIndicatorAssets 的稳定 id，旧的 toolIndicator 仍作为回退。
+  toolIndicatorRun: { ...S('chat', '运行中指示器', TOOL_INDICATOR_OPTION_IDS), optionLabels: TOOL_INDICATOR_OPTION_LABELS, default: 'circle', control: 'toolIndicator', group: "指示器与连接线" },
+  toolIndicatorOk: { ...S('chat', '完成时指示器', TOOL_INDICATOR_OPTION_IDS), optionLabels: TOOL_INDICATOR_OPTION_LABELS, default: 'check', control: 'toolIndicator', group: "指示器与连接线" },
+  toolIndicatorErr: { ...S('chat', '失败时指示器', TOOL_INDICATOR_OPTION_IDS), optionLabels: TOOL_INDICATOR_OPTION_LABELS, default: 'cross', control: 'toolIndicator', group: "指示器与连接线" },
   // CSS 变量走 --pv-connector-*（ChatView 内联计算），字段不注入独立 var
   toolIndicatorGlow: { ...N('chat', '指示器光晕', 0, 20, 1), default: 0, group: "指示器与连接线", suffix: 'px', noCssVar: true },
   toolIndicatorGlowColor: { ...C('chat', '光晕颜色'), default: '', group: "指示器与连接线", noCssVar: true },

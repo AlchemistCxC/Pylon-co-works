@@ -57,11 +57,11 @@ function withAlpha(value: string, alphaPercent: number): string | undefined {
 }
 
 function colorKind(value: string): string {
-  if (value.trim() === 'transparent') return 'TRANSPARENT'
-  if (/^var\(--[A-Za-z0-9_-]+\)$/.test(value.trim())) return 'SEMANTIC TOKEN'
-  if (/^#/.test(value.trim())) return 'HEX'
-  if (/^(?:rgb|hsl|oklch|color)\(/i.test(value.trim())) return 'CSS COLOR'
-  return 'RAW CSS'
+  if (value.trim() === 'transparent') return '透明'
+  if (/^var\(--[A-Za-z0-9_-]+\)$/.test(value.trim())) return '语义令牌'
+  if (/^#/.test(value.trim())) return '十六进制'
+  if (/^(?:rgb|hsl|oklch|color)\(/i.test(value.trim())) return 'CSS 颜色'
+  return '原始 CSS'
 }
 
 export default function ColorPopover({ value, onChange, chips = true, palette, semanticTokens, allowAlpha = false, ariaLabel }: Props) {
@@ -121,17 +121,17 @@ export default function ColorPopover({ value, onChange, chips = true, palette, s
         <div className="set-color-popover" role="dialog" aria-label={`${ariaLabel ?? '颜色'}设置`}>
           <div className="set-color-current">
             <span className="set-color-current-sample" style={{ background: value || 'transparent' }} />
-            <div><small>CURRENT VALUE</small><strong>{colorKind(value)}</strong></div>
+            <div><small>当前值</small><strong>{colorKind(value)}</strong></div>
           </div>
           <label className="set-color-value-input">
             <span>CSS / HEX / RGBA</span>
             <input value={draft} spellCheck={false} onChange={event => setDraft(event.currentTarget.value)} onBlur={commitDraft} onKeyDown={handleDraftKey} />
           </label>
-          {semanticTokens && semanticTokens.length > 0 && <ColorChoiceRow label="FOLLOW SEMANTIC" choices={semanticTokens} value={value} onChoose={choose} />}
-          <ColorChoiceRow label="PALETTE" choices={choices} value={value} onChoose={choose} />
-          {recent.length > 0 && <ColorChoiceRow label="RECENT" choices={recent.map(item => ({ value: item }))} value={value} onChoose={choose} />}
+          {semanticTokens && semanticTokens.length > 0 && <ColorChoiceRow label="跟随语义色" choices={semanticTokens} value={value} onChoose={choose} />}
+          <ColorChoiceRow label="调色板" choices={choices} value={value} onChoose={choose} />
+          {recent.length > 0 && <ColorChoiceRow label="最近使用" choices={recent.map(item => ({ value: item }))} value={value} onChoose={choose} />}
           {allowAlpha && <label className="set-color-alpha">
-            <span>ALPHA</span>
+            <span>透明度</span>
             {alpha === undefined
               ? <small>语义 token 的透明度由其 owner 控制</small>
               : <><input type="range" min="0" max="100" step="1" value={alpha} onChange={event => {

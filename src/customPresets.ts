@@ -70,12 +70,20 @@ export function normalizeCustomPresets(value: unknown): CustomPreset[] {
     const updatedAt = typeof candidate.updatedAt === 'number' ? candidate.updatedAt : createdAt
     const normalizedBundle = normalizePresetBundle(candidate.bundle)
       ?? adaptLegacyThemePreset({ id: candidate.id, name: candidate.name, theme: candidate.theme as unknown as PresetJsonValue, createdAt, updatedAt })
+    const theme = { ...(candidate.theme as Partial<ThemeSettings>) }
+    // Legacy custom presets stored one toolIndicator glyph. Fan it out once so
+    // applying an old preset keeps its visual identity across all three tones.
+    if (typeof theme.toolIndicator === 'string') {
+      for (const key of ['toolIndicatorRun', 'toolIndicatorOk', 'toolIndicatorErr'] as const) {
+        if (theme[key] === undefined) theme[key] = theme.toolIndicator
+      }
+    }
     return [{
       // A1：id 命名空间强制——配置导入/旧数据可带任意 id（如 'claude' 撞内置预设名），
       // 非 custom- 前缀的重新前缀，保证 appliedPreset 值与内置预设名永不冲突。
       id: /^custom-/.test(candidate.id) ? candidate.id : `custom-${candidate.id}`,
       name: candidate.name.trim().slice(0, 40),
-      theme: candidate.theme as Partial<ThemeSettings>,
+      theme,
       createdAt,
       updatedAt,
       bundle: normalizedBundle,

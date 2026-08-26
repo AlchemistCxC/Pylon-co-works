@@ -4,7 +4,7 @@ import { useStore } from '../store'
 import GenerationFooter from './chat/GenerationFooter'
 import { resolveSpinnerFrames } from './chat/spinnerFrames'
 import { resolveConnectorColor, type ToolConnectorStatus } from '../domains/tool/toolPresentation'
-import { resolveToolIndicatorAsset } from './chat/toolIndicatorAssets'
+import { resolveToolIndicatorAssetForTone } from './chat/toolIndicatorAssets'
 import { toCssBackgroundImage } from '../backgroundImage'
 
 interface Props { zone: string }
@@ -200,7 +200,11 @@ function PvTool({ name, input, status }: { name: string; input: string; status: 
   const toolOk = useStore(s => s.toolOk)
   const toolRun = useStore(s => s.toolRun)
   const toolErr = useStore(s => s.toolErr)
-  const indicatorAsset = resolveToolIndicatorAsset(useStore(s => s.toolIndicator))
+  const toolIndicator = useStore(s => s.toolIndicator)
+  const toolIndicatorRun = useStore(s => s.toolIndicatorRun)
+  const toolIndicatorOk = useStore(s => s.toolIndicatorOk)
+  const toolIndicatorErr = useStore(s => s.toolIndicatorErr)
+  const indicatorAsset = resolveToolIndicatorAssetForTone(status, { toolIndicator, toolIndicatorRun, toolIndicatorOk, toolIndicatorErr })
   const glow = useStore(s => s.toolIndicatorGlow) || 0
   const glowColor = useStore(s => s.toolIndicatorGlowColor) || ''
   const statusColor = status === 'ok' ? toolOk : status === 'err' ? toolErr : toolRun

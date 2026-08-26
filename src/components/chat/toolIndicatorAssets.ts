@@ -28,6 +28,7 @@ const createAsset = (id: string, label: string, glyph: string): ToolIndicatorAss
 
 export const TOOL_INDICATOR_ASSETS = Object.freeze([
   createAsset('circle', '圆点', '●'),
+  createAsset('dot-small', '小圆点', '·'),
   createAsset('diamond', '菱形', '◆'),
   createAsset('square', '方块', '■'),
   createAsset('triangle', '三角', '▲'),
@@ -38,6 +39,14 @@ export const TOOL_INDICATOR_ASSETS = Object.freeze([
   createAsset('branch', '分支', '├'),
   createAsset('node', '节点', '◇'),
   createAsset('hex', '六边形', '⬡'),
+  createAsset('asterisk', '星号', '✱'),
+  createAsset('star', '星标', '★'),
+  createAsset('check', '完成勾', '✓'),
+  createAsset('cross', '失败叉', '×'),
+  createAsset('warning', '警告', '!'),
+  createAsset('plus', '加号', '+'),
+  createAsset('slash', '斜杠', '╱'),
+  createAsset('hourglass', '沙漏', '⧗'),
 ] as const)
 
 export type ToolIndicatorId = typeof TOOL_INDICATOR_ASSETS[number]['id']
@@ -51,6 +60,19 @@ export function resolveToolIndicatorAsset(value?: string): ToolIndicatorAsset {
   if (!value) return DEFAULT_ASSET
   return TOOL_INDICATOR_ASSETS.find(asset => asset.id === value || asset.glyph === value)
     || { ...DEFAULT_ASSET, glyph: value, label: '自定义指示器', ariaLabel: ariaLabel('自定义指示器') }
+}
+
+/** Resolve a state-specific glyph while accepting old themes with one field. */
+export function resolveToolIndicatorAssetForTone(
+  tone: 'run' | 'ok' | 'err',
+  values: { toolIndicator?: string; toolIndicatorRun?: string; toolIndicatorOk?: string; toolIndicatorErr?: string },
+): ToolIndicatorAsset {
+  const value = tone === 'ok'
+    ? values.toolIndicatorOk || values.toolIndicator
+    : tone === 'err'
+      ? values.toolIndicatorErr || values.toolIndicator
+      : values.toolIndicatorRun || values.toolIndicator
+  return resolveToolIndicatorAsset(value)
 }
 
 export function toolIndicatorOptions(): { value: string; label: string }[] {

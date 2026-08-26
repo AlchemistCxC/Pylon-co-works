@@ -80,12 +80,12 @@ function fixtureValues(
 }
 
 const SOURCE_LABELS: Readonly<Record<RenderAppearanceSource, string>> = Object.freeze({
-  'schema-default': 'OWNER DEFAULT',
-  'host-default': 'HOST TOKEN',
-  'kind-default': 'KIND DEFAULT',
-  profile: 'PROFILE',
-  'user-override': 'YOUR OVERRIDE',
-  'session-preview': 'LIVE PREVIEW',
+  'schema-default': '组件默认',
+  'host-default': '宿主主题',
+  'kind-default': '类型默认',
+  profile: '呈现方案',
+  'user-override': '你的覆盖',
+  'session-preview': '临时预览',
 })
 
 function fixtureCatalog(entries: readonly RendererSettingsSchemaEntry[]): readonly RendererSettingsCatalogEntry[] {
@@ -97,7 +97,7 @@ function fixtureCatalog(entries: readonly RendererSettingsSchemaEntry[]): readon
     schema: entry.schema,
     placement: entry.placement ?? {
       categoryId: 'fixture',
-      categoryLabel: 'Fixture',
+      categoryLabel: '示例',
       categoryOrder: 0,
       objectOrder: index,
       disclosure: 'essential',

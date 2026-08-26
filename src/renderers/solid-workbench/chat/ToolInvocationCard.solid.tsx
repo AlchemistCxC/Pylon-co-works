@@ -18,6 +18,7 @@ import { ToolObjectInspector } from './tool/ToolObjectInspector.solid.tsx'
 import { SolidUnknownContent } from './content/UnknownContent.solid.tsx'
 import { isStructuredContentKind, SolidStructuredContent } from './content/StructuredContent.solid.tsx'
 import { createCollapsiblePresenter } from './CollapsiblePresenter.solid.tsx'
+import { resolveToolIndicatorAssetForTone } from '../../../components/chat/toolIndicatorAssets.ts'
 
 const NO_COMMANDS: RenderCommandPort = { execute: () => {}, canExecute: () => false }
 
@@ -75,7 +76,7 @@ export function SolidToolInvocationCard(props: {
       onClick={collapse.toggle}>
       <Show when={stringSetting(props.appearance, 'indicator', 'glyph') !== 'none'}>
         <span class={`term-tool-indicator ${presentation().tone}`} aria-hidden="true">
-          {indicatorGlyph(stringSetting(props.appearance, 'indicator', 'glyph'), presentation().tone)}
+          {indicatorGlyph(stringSetting(props.appearance, 'indicator', 'glyph'), presentation().tone, props.appearance)}
         </span>
       </Show>
       <span class="term-tool-name">{displayName()}</span>
@@ -242,9 +243,15 @@ function formatDuration(value: number | undefined): string {
   return `${Number.isInteger(seconds) ? seconds : seconds.toFixed(1)}s`
 }
 
-function indicatorGlyph(indicator: string, tone: 'run' | 'ok' | 'err'): string {
+function indicatorGlyph(indicator: string, tone: 'run' | 'ok' | 'err', appearance: RenderAppearanceSnapshot): string {
   if (indicator === 'dot') return '•'
-  return tone === 'ok' ? '✓' : tone === 'err' ? '×' : '◌'
+  if (indicator !== 'glyph') return indicator
+  return resolveToolIndicatorAssetForTone(tone, {
+    toolIndicator: stringSetting(appearance, 'toolIndicator', 'circle'),
+    toolIndicatorRun: stringSetting(appearance, 'toolIndicatorRun', ''),
+    toolIndicatorOk: stringSetting(appearance, 'toolIndicatorOk', ''),
+    toolIndicatorErr: stringSetting(appearance, 'toolIndicatorErr', ''),
+  }).glyph
 }
 
 function safeDomId(value: string): string {

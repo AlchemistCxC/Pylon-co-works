@@ -66,7 +66,7 @@ const TERMINAL_VISUAL_COMPLETION: Record<TerminalPresetName, Partial<ThemeSettin
   claude: {
     uiScheme: 'dark', codeFont: 'mono', chatFont: 'mono', msgFont: 'mono',
     toolOk: '#4ade80', toolRun: '#D77757', toolErr: '#f87171',
-    toolIndicator: '●', toolIndicatorGlow: 0, toolConnectorMode: 'none',
+    toolIndicator: '●', toolIndicatorRun: 'circle', toolIndicatorOk: 'check', toolIndicatorErr: 'cross', toolIndicatorGlow: 0, toolConnectorMode: 'none',
     spinnerStalledColor: '#B8755A', spinnerDoneMarker: '✓', spinnerCancelledMarker: '■', spinnerErrorMarker: '!',
     assistantDotGlyph: '●', assistantDotColor: '#D77757', messageRadius: 0,
     editorFontSize: 13, editorLineHeight: 1.5, editorGutterColor: '#8a9199', editorGutterBg: 'transparent',
@@ -76,7 +76,7 @@ const TERMINAL_VISUAL_COMPLETION: Record<TerminalPresetName, Partial<ThemeSettin
   solarized: {
     uiScheme: 'light', codeFont: 'mono', chatFont: 'mono', msgFont: 'mono',
     toolOk: '#859900', toolRun: '#268bd2', toolErr: '#dc322f',
-    toolIndicator: '●', toolIndicatorGlow: 0, toolConnectorMode: 'none',
+    toolIndicator: '●', toolIndicatorRun: 'circle', toolIndicatorOk: 'check', toolIndicatorErr: 'cross', toolIndicatorGlow: 0, toolConnectorMode: 'none',
     spinnerStalledColor: '#dc322f', spinnerDoneMarker: '✓', spinnerCancelledMarker: '■', spinnerErrorMarker: '!',
     assistantDotGlyph: '●', assistantDotColor: '#268bd2', messageRadius: 0,
     editorFontSize: 13, editorLineHeight: 1.5, editorGutterColor: '#93a1a1', editorGutterBg: 'transparent',
@@ -88,7 +88,7 @@ const TERMINAL_VISUAL_COMPLETION: Record<TerminalPresetName, Partial<ThemeSettin
   // command/input contract so switching presets is visually deterministic.
   nord: {
     uiScheme: 'dark', codeFont: 'mono', chatFont: 'mono', msgFont: 'mono', msgStyle: 'terminal', messageLayout: 'classic',
-    toolIndicator: '◆', toolIndicatorGlow: 1, toolConnectorMode: 'follow', toolConnectorStyle: 'solid', toolConnectorWidth: 1, toolConnectorOpacity: 0.72,
+    toolIndicator: '◆', toolIndicatorRun: 'diamond', toolIndicatorOk: 'check', toolIndicatorErr: 'cross', toolIndicatorGlow: 1, toolConnectorMode: 'follow', toolConnectorStyle: 'solid', toolConnectorWidth: 1, toolConnectorOpacity: 0.72,
     assistantDot: true, assistantDotGlyph: '●', assistantDotColor: '#88c0d0',
     messageAssistantBg: 'rgba(136,192,208,0.035)', messageReasoningBg: 'rgba(129,161,193,0.05)', messageBorderColor: 'rgba(136,192,208,0.16)', messageRadius: 0,
     spinnerFramePreset: 'braille', spinnerVerbSet: 'engineering', spinnerStalledColor: '#d08770',
@@ -97,7 +97,7 @@ const TERMINAL_VISUAL_COMPLETION: Record<TerminalPresetName, Partial<ThemeSettin
   },
   tokyo: {
     uiScheme: 'dark', codeFont: 'mono', chatFont: 'mono', msgFont: 'mono', msgStyle: 'terminal', messageLayout: 'classic',
-    toolIndicator: '▶', toolIndicatorGlow: 2, toolConnectorMode: 'follow', toolConnectorStyle: 'pulse', toolConnectorWidth: 1, toolConnectorOpacity: 0.8,
+    toolIndicator: '▶', toolIndicatorRun: 'play', toolIndicatorOk: 'star', toolIndicatorErr: 'cross', toolIndicatorGlow: 2, toolConnectorMode: 'follow', toolConnectorStyle: 'pulse', toolConnectorWidth: 1, toolConnectorOpacity: 0.8,
     assistantDot: true, assistantDotGlyph: '◆', assistantDotColor: '#bb9af7',
     messageAssistantBg: 'rgba(122,162,247,0.035)', messageReasoningBg: 'rgba(187,154,247,0.055)', messageBorderColor: 'rgba(122,162,247,0.18)', messageRadius: 0,
     spinnerFramePreset: 'scan', spinnerVerbSet: 'analysis', spinnerStalledColor: '#f7768e',
@@ -106,7 +106,7 @@ const TERMINAL_VISUAL_COMPLETION: Record<TerminalPresetName, Partial<ThemeSettin
   },
   amber: {
     uiScheme: 'dark', codeFont: 'mono', chatFont: 'mono', msgFont: 'mono', msgStyle: 'terminal', messageLayout: 'classic',
-    toolIndicator: '■', toolIndicatorGlow: 1, toolConnectorMode: 'follow', toolConnectorStyle: 'solid', toolConnectorWidth: 1, toolConnectorOpacity: 0.86,
+    toolIndicator: '■', toolIndicatorRun: 'square', toolIndicatorOk: 'check', toolIndicatorErr: 'warning', toolIndicatorGlow: 1, toolConnectorMode: 'follow', toolConnectorStyle: 'solid', toolConnectorWidth: 1, toolConnectorOpacity: 0.86,
     assistantDot: true, assistantDotGlyph: '●', assistantDotColor: '#ffb000',
     messageAssistantBg: 'rgba(255,176,0,0.035)', messageReasoningBg: 'rgba(255,107,53,0.045)', messageBorderColor: 'rgba(255,176,0,0.18)', messageRadius: 0,
     spinnerStalledColor: '#ff6b35', spinnerDoneMarker: '✓', spinnerCancelledMarker: '■', spinnerErrorMarker: '!',

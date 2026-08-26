@@ -729,8 +729,7 @@
 /* Terminal-like 的 marker 以 ChatView 字号解析固定列；隔离 content kind 的字号/字体覆盖，
    避免 canonical Tool 的 1.6em 与助手 marker 在不同上下文中换算成不同像素宽度。 */
 .app[data-interface-mode="terminal-like"] :is(
-  .term-assistant.has-dot > .term-assistant-dot,
-  .term-tool-head > .term-tool-indicator
+  .term-assistant.has-dot > .term-assistant-dot
 ) {
   display: inline-flex;
   font-family: var(--chat-font,var(--mono));
@@ -740,9 +739,12 @@
   flex: 0 0 var(--dot-col-width, 1.6em);
   justify-content: center;
   text-align: center;
-  /* 只缩小 marker 本身；固定 gutter 与 connector 的测量盒保持不变。独立
-     scale 属性会与 tool 状态动画使用的 transform 组合，不会覆盖呼吸/收敛动画。 */
-  scale: .86;
+  /* 助手标记只作轻量注释；固定 gutter 与 connector 的测量盒保持不变。 */
+  scale: .72;
+}
+.app[data-interface-mode="terminal-like"] .term-tool-head > .term-tool-indicator {
+  /* 工具状态是主交互信号，恢复正常字形大小；gutter 宽度仍与助手列一致。 */
+  scale: 1;
 }
 .term-tool-name { flex: 0 0 auto; white-space: nowrap; }
 .term-tool-summary {

@@ -58,6 +58,14 @@ export function normalizeThemeMigrationState(
   delete state.ccCliCustomized
   delete state.ccLayoutVersion
   const normalized: Record<string, unknown> = { ...defaults.base, ...state }
+  // Older themes had one toolIndicator glyph. Preserve that choice when the
+  // three state-specific fields are introduced instead of silently replacing
+  // it with the new defaults.
+  if (typeof state.toolIndicator === 'string') {
+    for (const key of ['toolIndicatorRun', 'toolIndicatorOk', 'toolIndicatorErr']) {
+      if (state[key] === undefined) normalized[key] = state.toolIndicator
+    }
+  }
   normalized.ccLayout = normalizeCcLayout(
     state.ccLayout as Partial<CcLayoutV3> | undefined,
   )

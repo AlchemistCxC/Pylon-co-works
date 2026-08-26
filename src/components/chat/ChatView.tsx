@@ -18,7 +18,7 @@ import { resolveConnectorColor } from '../../domains/tool/toolPresentation'
 import { buildToolPresentationModel, truncateToolSummary } from './toolPresentationModel'
 import { normalizeToolStatus, toolStatePresentation } from '../../domains/tool/status.ts'
 import { toolIndicatorMotionClass } from './toolIndicatorMotion'
-import { resolveToolIndicatorAsset } from './toolIndicatorAssets'
+import { resolveToolIndicatorAssetForTone } from './toolIndicatorAssets'
 import { isPlainTextContent } from './markdownFastPath'
 import { useMessageLocation } from './useMessageLocation'
 import { MarkdownRenderer } from './markdownLazy'
@@ -170,6 +170,9 @@ const ChatView = React.memo(function ChatView({ sessionId, workspaceKind = 'agen
     assistantDotGlyph: state.assistantDotGlyph,
     assistantDotImage: state.assistantDotImage,
     toolIndicator: state.toolIndicator,
+    toolIndicatorRun: state.toolIndicatorRun,
+    toolIndicatorOk: state.toolIndicatorOk,
+    toolIndicatorErr: state.toolIndicatorErr,
     toolIndicatorGlow: state.toolIndicatorGlow,
     toolIndicatorGlowColor: state.toolIndicatorGlowColor,
   })))
@@ -628,7 +631,6 @@ function ToolCard({ model }: { model: ReturnType<typeof buildToolPresentationMod
   recordRender('ToolCard.render')
   const [open, setOpen] = useState(false)
   const bodyId = useId()
-  const indicatorAsset = resolveToolIndicatorAsset(useStore(s => s.toolIndicator))
   const glow = useStore(s => s.toolIndicatorGlow) || 0
   const glowColor = useStore(s => s.toolIndicatorGlowColor) || ''
   const toolOk = useStore(s => s.toolOk)
@@ -638,6 +640,12 @@ function ToolCard({ model }: { model: ReturnType<typeof buildToolPresentationMod
   const connectorColor = useStore(s => s.toolConnectorColor) || 'rgba(0,0,0,0.12)'
   const modernGui = useInterfaceModeStore(state => state.interfaceMode === 'modern-gui')
   const status = toolStatePresentation(model.state, model.hasOutput).tone
+  const indicatorAsset = resolveToolIndicatorAssetForTone(status, {
+    toolIndicator: useStore(s => s.toolIndicator),
+    toolIndicatorRun: useStore(s => s.toolIndicatorRun),
+    toolIndicatorOk: useStore(s => s.toolIndicatorOk),
+    toolIndicatorErr: useStore(s => s.toolIndicatorErr),
+  })
   const displaySummary = truncateToolSummary(model.summary)
   const glowCss = glow > 0
     ? { textShadow: `0 0 ${glow}px ${glowColor || (status === 'ok' ? toolOk : status === 'err' ? toolErr : toolRun) || 'currentColor'}` }
