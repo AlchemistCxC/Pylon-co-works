@@ -106,6 +106,7 @@ for (const entry of buildGitStatus()) {
   assert.match(seed, /focusSheet\(agentSheetId\)/, '必须聚焦 agent sheet')
   assert.match(seed, /setActiveSession\(sessions\[0\]\.id\)/, 'setActiveSession 必须随会话种入（写回 effect 持久化）')
   assert.match(seed, /runtime\.setAgentStatus\('peri'/, '状态灯必须每次补（非持久化）')
+  assert.match(seed, /setInterfaceMode\('terminal-like'\)/, '视觉验收场景必须以 terminal-like 为基线')
 }
 
 console.log('demo seed 守卫通过')

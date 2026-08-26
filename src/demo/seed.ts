@@ -20,6 +20,7 @@ import { createSheetState } from '../workspace-sheets/sheetState.ts'
 import type { AgentStatus } from '../components/settings/agentTypes.ts'
 import { useWorkspaceEntityStore } from '../workspaceEntityStore.ts'
 import { serializeWorkspaces, WORKSPACE_STORAGE_KEY } from '../workspaceEntities.ts'
+import { useInterfaceModeStore } from '../domains/interface/interfaceModeStore.ts'
 
 export interface DemoSeedOptions {
   /** ?demo-permission=1 时种一条待审权限请求（弹窗无关闭路径，仅 opt-in 展示） */
@@ -37,6 +38,9 @@ export function seedDemo(setActiveSession: (id: string | null) => void, options:
   identity.setAgents(buildDemoAgents())
 
   if (scenario === 'visual') {
+    // 浏览器视觉验收默认锁定任务契约要求的 terminal-like；用户仍可在设置中切换，
+    // 但刷新后再次进入视觉场景会回到同一验收基线，避免误验 modern GUI。
+    useInterfaceModeStore.getState().setInterfaceMode('terminal-like')
     seedVisualQaDemo(setActiveSession, options)
     return
   }
