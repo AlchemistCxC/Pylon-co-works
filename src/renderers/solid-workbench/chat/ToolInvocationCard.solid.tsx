@@ -19,6 +19,7 @@ import { SolidUnknownContent } from './content/UnknownContent.solid.tsx'
 import { isStructuredContentKind, SolidStructuredContent } from './content/StructuredContent.solid.tsx'
 import { createCollapsiblePresenter } from './CollapsiblePresenter.solid.tsx'
 import { resolveToolIndicatorAssetForTone } from '../../../components/chat/toolIndicatorAssets.ts'
+import { capitalizeToolName } from '../../../components/chat/toolPresentationModel.ts'
 
 const NO_COMMANDS: RenderCommandPort = { execute: () => {}, canExecute: () => false }
 
@@ -35,10 +36,10 @@ export function SolidToolInvocationCard(props: {
     || props.snapshot.result.error !== undefined
   ))
   const presentation = () => toolStatePresentation(state(), hasOutput())
-  const displayName = () => props.snapshot.title
+  const displayName = () => capitalizeToolName(props.snapshot.title
     || props.snapshot.canonicalName
     || props.snapshot.name
-    || '未知工具'
+    || '未知工具')
   const collapse = createCollapsiblePresenter({
     defaultOpen: () => !booleanSetting(props.appearance, 'defaultCollapsed', true),
     resetKey: () => props.snapshot.id,

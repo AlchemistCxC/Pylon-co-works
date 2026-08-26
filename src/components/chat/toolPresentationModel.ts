@@ -34,6 +34,17 @@ export interface ToolPresentationModel {
   diffPayload: DiffPayload | null
 }
 
+/** Human-facing tool labels use sentence case while preserving the rest of
+ * provider-specific spelling (for example `mcp__repo__search` →
+ * `Mcp__repo__search`). Empty/whitespace-only names stay empty so callers can
+ * continue applying their own fallback label. */
+export function capitalizeToolName(value: string): string {
+  const name = value.trim()
+  if (!name) return name
+  const first = name[0]!
+  return first.toLocaleUpperCase() + name.slice(first.length)
+}
+
 const COLLAPSIBLE_OUTPUT_CHAR_LIMIT = 1200
 const COLLAPSIBLE_OUTPUT_LINE_LIMIT = 30
 
@@ -124,7 +135,7 @@ export function buildToolPresentationModel(
 
   return {
     toolId: toolIdFromMessage(message),
-    name: display.name,
+    name: capitalizeToolName(display.name),
     summary: display.summary,
     inputText,
     outputText,

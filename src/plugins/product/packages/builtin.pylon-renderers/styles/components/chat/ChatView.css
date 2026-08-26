@@ -1604,7 +1604,45 @@
   border-left:var(--line-width-1) solid color-mix(in srgb,var(--border-focus) 70%,transparent);
   background:transparent;
 }
+.app[data-interface-mode="terminal-like"] .term-tool-head[aria-expanded]::after {
+  content:'›';
+  margin-left:auto;
+  color:var(--text-dim);
+  transform:rotate(0deg);
+  transform-origin:center;
+  transition:transform 150ms ease,color 120ms ease;
+}
+.app[data-interface-mode="terminal-like"] .term-tool-head[aria-expanded="true"]::after {
+  color:var(--accent);
+  transform:rotate(90deg);
+}
 .app[data-interface-mode="terminal-like"] .tool-rich-body { gap:.4em; }
+.app[data-interface-mode="terminal-like"] .tool-rich-section {
+  padding:.22em 0;
+}
+.app[data-interface-mode="terminal-like"] .tool-rich-section + .tool-rich-section {
+  border-top:var(--line-width-1) solid color-mix(in srgb,var(--border) 42%,transparent);
+  padding-top:.45em;
+}
+.app[data-interface-mode="terminal-like"] .tool-section-heading .term-tool-label {
+  color:color-mix(in srgb,var(--accent) 76%,var(--text-dim));
+  letter-spacing:.08em;
+}
+.app[data-interface-mode="terminal-like"] .tool-summary-copy {
+  line-height:1.55;
+}
+.app[data-interface-mode="terminal-like"] .tool-command-line code {
+  border-left:2px solid color-mix(in srgb,var(--accent) 62%,var(--border));
+  background:color-mix(in srgb,var(--bg-input) 42%,transparent);
+}
+.app[data-interface-mode="terminal-like"] .tool-plain-output {
+  line-height:1.5;
+  white-space:pre-wrap;
+}
+.app[data-interface-mode="terminal-like"] .solid-tool-metadata {
+  font-size:.9em;
+  opacity:.82;
+}
 .app[data-interface-mode="terminal-like"] .tool-kind-summary {
   grid-template-columns:1.25em minmax(0,1fr) auto;
   gap:.45em;

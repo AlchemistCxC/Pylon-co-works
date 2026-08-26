@@ -102,8 +102,13 @@ describe('Tool render 带真实 agent context（P0-2）', () => {
       toolName: 'run_shell(x)',
       toolInput: '',
     }))
-    expect(model.name).toBe('run_shell')
+    expect(model.name).toBe('Run_shell')
     expect(model.summary).toBe('x')
+  })
+
+  it('工具展示名统一首字母大写，保留 provider 的其余拼写', () => {
+    const model = buildToolPresentationModel(toolMessage({ toolName: 'read_file' }))
+    expect(model.name).toBe('Read File')
   })
 
   it('仅含 tool_diff_content 无 text/output 时仍可展开（hasOutput=true）', () => {

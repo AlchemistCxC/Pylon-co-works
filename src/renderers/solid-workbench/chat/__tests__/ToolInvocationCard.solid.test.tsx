@@ -22,6 +22,16 @@ describe('C04 SolidToolInvocationCard', () => {
     expect(container.querySelector('.term-tool-body')).toBeNull()
   })
 
+  it('capitalizes provider tool names in the visible header', () => {
+    const { container } = render(() => <SolidToolInvocationCard
+      renderKind="tool.generic"
+      appearance={{}}
+      snapshot={{ id: 'tool-lowercase', name: 'read_file', status: 'completed' }}
+    />)
+
+    expect(container.querySelector('.term-tool-name')).toHaveTextContent('Read_file')
+  })
+
   it('renders adjacent streamed text output as one semantic block', () => {
     const { container } = render(() => <SolidToolInvocationCard
       renderKind="tool.generic"

@@ -99,6 +99,42 @@
 
 .session-empty { padding:20px 14px; text-align:center; color:var(--text-dim); font-size:13px; }
 
+/* Terminal-like session rail: keep rows compact, but give every session its
+   own hard boundary so adjacent transcripts read as separate records. The
+   active row is a command-line selection marker rather than a filled pill. */
+.app[data-interface-mode="terminal-like"] .session-list {
+  display:flex;
+  flex-direction:column;
+  gap:4px;
+  padding:6px 8px 10px;
+}
+.app[data-interface-mode="terminal-like"] .session-item {
+  min-height:40px;
+  padding:5px 8px 5px 9px;
+  border-color:color-mix(in srgb,var(--border) 78%,transparent);
+  border-radius:0;
+  background:color-mix(in srgb,var(--bg-panel) 28%,transparent);
+}
+.app[data-interface-mode="terminal-like"] .session-item:hover {
+  border-color:color-mix(in srgb,var(--accent) 42%,var(--border));
+  background:color-mix(in srgb,var(--accent) 5%,var(--bg-hover));
+}
+.app[data-interface-mode="terminal-like"] .session-item.active {
+  border-color:color-mix(in srgb,var(--accent) 68%,var(--border));
+  background:color-mix(in srgb,var(--accent) 11%,var(--bg-panel));
+  box-shadow:inset 3px 0 0 var(--accent),0 0 0 1px color-mix(in srgb,var(--accent) 12%,transparent);
+}
+.app[data-interface-mode="terminal-like"] .session-item.active::before {
+  display:none;
+}
+.app[data-interface-mode="terminal-like"] .session-item.active .session-name {
+  color:var(--text);
+  font-weight:650;
+}
+.app[data-interface-mode="terminal-like"] .session-item.active .session-meta {
+  color:color-mix(in srgb,var(--accent) 66%,var(--text-dim));
+}
+
 /* collapsed */
 .sidebar.collapsed {
   overflow:hidden;
