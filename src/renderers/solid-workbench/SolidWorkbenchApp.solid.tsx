@@ -44,6 +44,7 @@ import { normalizeWorkbenchMountInput } from './workbenchContracts.ts'
 import { messageMatchesQuery, searchValuesMatchQuery } from '../../components/chat/messageSearchIndex.ts'
 import { createSessionUiSignal } from './adapters/sessionUiSignal.solid.tsx'
 import { selectAgentEmptyState } from '../../domains/workbench/agentEmptyState.ts'
+import { capitalizeToolName } from '../../components/chat/toolPresentationModel.ts'
 
 export interface SolidWorkbenchAppProps {
   context: SolidWorkbenchContextValue
@@ -524,7 +525,7 @@ function CanonicalActivitySlot(props: {
                 appearance={{ ...props.context.appearanceSnapshot(), reducedMotion: props.context.input().reducedMotion }}
                 commands={fallbackRenderCommands(props.context)} />
           : <div class="solid-workbench-activity" data-activity-id={props.activity.id} data-status={props.activity.status}>
-              {props.activity.title || props.activity.kind} · {props.activity.status}
+              {capitalizeToolName(props.activity.title || props.activity.kind)} · {props.activity.status}
             </div>}
       />
     </div>

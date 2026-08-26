@@ -5,6 +5,7 @@ import { resolveToolIndicatorAssetForTone } from '../../../components/chat/toolI
 import { toolIndicatorMotionClass } from '../../../components/chat/toolIndicatorMotion.ts'
 import {
   buildToolPresentationModel,
+  capitalizeToolName,
   truncateToolSummary,
   type ToolPresentationModel,
 } from '../../../components/chat/toolPresentationModel.ts'
@@ -94,7 +95,7 @@ export function SolidToolCard(props: SolidToolCardProps) {
                 aria-label={indicator().ariaLabel[resolved().state]}
                 role="img"
               >{indicator().glyph}</span>
-              <span class="term-tool-name">{resolved().name}</span>
+              <span class="term-tool-name">{capitalizeToolName(resolved().name)}</span>
               <Show when={displaySummary()}>{summary => <span class="term-tool-summary"> ({summary()})</span>}</Show>
               <Show when={suffix()}>{text => <span class="term-tool-suffix">{text()}</span>}</Show>
             </button>
