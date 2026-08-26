@@ -27,6 +27,7 @@ export type PresetName =
   | 'tokyo'
   | 'solarized'
   | 'amber'
+  | 'matrix'
   | 'agent-command'
   | 'agent-map'
   | 'focus-flow'
@@ -58,7 +59,7 @@ const TERMINAL_COMPLETION: Partial<ThemeSettings> = {
   ccLayout: DEFAULT_CC_LAYOUT,
 }
 
-type TerminalPresetName = Extract<PresetName, 'claude' | 'nord' | 'tokyo' | 'solarized' | 'amber'>
+type TerminalPresetName = Extract<PresetName, 'claude' | 'nord' | 'tokyo' | 'solarized' | 'amber' | 'matrix'>
 
 const TERMINAL_VISUAL_COMPLETION: Record<TerminalPresetName, Partial<ThemeSettings>> = {
   // Claude and Solarized retain their original palette and typography.  These
@@ -111,6 +112,18 @@ const TERMINAL_VISUAL_COMPLETION: Record<TerminalPresetName, Partial<ThemeSettin
     messageAssistantBg: 'rgba(255,176,0,0.035)', messageReasoningBg: 'rgba(255,107,53,0.045)', messageBorderColor: 'rgba(255,176,0,0.18)', messageRadius: 0,
     spinnerStalledColor: '#ff6b35', spinnerDoneMarker: '✓', spinnerCancelledMarker: '■', spinnerErrorMarker: '!',
     editorSelection: 'rgba(255,176,0,0.2)', editorActiveLine: 'rgba(255,204,85,0.05)', editorTabActive: '#ffb000', editorModifiedMark: '#ff6b35',
+    inputMode: 'cli', inputVariant: 'cli', ccVariant: 'terminal', cliHintMode: 'compact', footerLayout: 'free',
+  },
+  // Matrix phosphor-green CRT — deep void background, electric green palette,
+  // subtle scan-line feel via spacing and glow. Distinct from Nord/Tokyo in
+  // having a unified green palette rather than accent-neutral-surface separation.
+  matrix: {
+    uiScheme: 'dark', codeFont: 'mono', chatFont: 'mono', msgFont: 'mono', msgStyle: 'terminal', messageLayout: 'classic',
+    toolIndicator: '»', toolIndicatorRun: 'triangle', toolIndicatorOk: 'check', toolIndicatorErr: 'cross', toolIndicatorGlow: 2, toolIndicatorGlowColor: '#39ff14', toolConnectorMode: 'follow', toolConnectorStyle: 'pulse', toolConnectorWidth: 1, toolConnectorOpacity: 0.75,
+    assistantDot: true, assistantDotGlyph: '►', assistantDotColor: '#39ff14',
+    messageAssistantBg: 'rgba(57,255,20,0.028)', messageReasoningBg: 'rgba(57,255,20,0.045)', messageBorderColor: 'rgba(57,255,20,0.14)', messageRadius: 0,
+    spinnerFramePreset: 'scan', spinnerVerbSet: 'engineering', spinnerStalledColor: '#ff3c3c', spinnerDoneMarker: '✓', spinnerCancelledMarker: '■', spinnerErrorMarker: '!',
+    editorSelection: 'rgba(57,255,20,0.18)', editorActiveLine: 'rgba(57,255,20,0.05)', editorTabActive: '#39ff14', editorModifiedMark: '#ff3c3c',
     inputMode: 'cli', inputVariant: 'cli', ccVariant: 'terminal', cliHintMode: 'compact', footerLayout: 'free',
   },
 }
@@ -648,6 +661,96 @@ const RAW_GLOBAL_PRESETS: GlobalPreset[] = [
       userPrefix: ">",
       userTagBg: "#2b1900",
       userTagText: "#ffcc55",
+    },
+  },
+  {
+    name: 'matrix',
+    label: 'Matrix 磷绿',
+    // W2-15（F3-B）：delta（相对 THEME_DEFAULTS）——应用时 { ...THEME_DEFAULTS, ...delta } 干净全量换装
+    theme: {
+      accent: "#39ff14",
+      attachVariant: "minimal",
+      barFillColor: "#39ff14",
+      barHeight: 8,
+      barTrackColor: "#0a1a0a",
+      bgBlur: 0,
+      ccBg: "#050f05",
+      ccBgHeight: 96,
+      ccHeight: 96,
+      ccHidden: ["send","attach"],
+      ccScale: {"pct":95,"tokens":95,"model":95,"mode":95},
+      ccStyle: "numeric",
+      chatBg: "#050f05",
+      chatCodeBg: "rgba(57,255,20,0.06)",
+      chatCodeColor: "#8effa0",
+      chatFontSize: 15,
+      chatLineHeight: 1.55,
+      chatTextColor: "#b8ffb8",
+      cliLineColor: "#1a5c1a",
+      cliLinePadding: 3,
+      cliLineWidth: 2,
+      cliPromptColor: "#39ff14",
+      cliTextColor: "#b8ffb8",
+      diffAdded: "#39ff14",
+      diffAddedWord: "#8effa0",
+      diffRemoved: "#ff3c3c",
+      diffRemovedWord: "#ff7070",
+      ekgGreen: "#39ff14",
+      ekgRed: "#ff3c3c",
+      ekgWidth: 140,
+      ekgYellow: "#ffd700",
+      globalBgColor: "#050f05",
+      globalFont: "system",
+      globalFontSize: 15,
+      titlebarBg: "#050f05",
+      titlebarTextColor: "#39ff14",
+      inputBg: "transparent",
+      inputFocusBorder: "#39ff14",
+      inputFontSize: 17,
+      inputPlaceholder: "#1a5c1a",
+      inputSendBg: "transparent",
+      inputTextColor: "#b8ffb8",
+      modeAutoColor: "#39ff14",
+      modeEditColor: "#7fff00",
+      modeVariant: "minimal",
+      modelVariant: "minimal",
+      msgLineHeight: 1.55,
+      msgTextColor: "#b8ffb8",
+      pillBg: "#0a1a0a",
+      pillText: "#39ff14",
+      prismOnColor: "#39ff14",
+      rightBg: "#050f05",
+      sendVariant: "minimal",
+      sidebarBg: "#050f05",
+      sidebarGroupSize: 11,
+      sidebarNameSize: 13,
+      sidebarTextColor: "#39ff14",
+      spinnerColor: "#39ff14",
+      spinnerFramePreset: "scan",
+      spinnerStalledColor: "#ff3c3c",
+      synComment: "#2d5a2d",
+      synEntity: "#39ff14",
+      synFunction: "#7fff00",
+      synKeyword: "#39ff14",
+      synLiteral: "#ffd700",
+      synMarkupHeading: "#7fff00",
+      synProperty: "#b8ffb8",
+      synRegex: "#ffd700",
+      synString: "#8effa0",
+      synSupport: "#7fff00",
+      synVariable: "#b8ffb8",
+      toolConnectorColor: "#1a5c1a",
+      toolErr: "#ff3c3c",
+      toolIndicator: "»",
+      toolIndicatorGlow: 3,
+      toolIndicatorGlowColor: "#39ff14",
+      toolOk: "#39ff14",
+      toolRun: "#7fff00",
+      transparency: 1,
+      uiScheme: "dark",
+      userColor: "#7fff00",
+      userTagBg: "#0a1a0a",
+      userTagText: "#7fff00",
     },
   },
   {
