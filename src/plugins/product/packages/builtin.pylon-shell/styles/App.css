@@ -447,3 +447,35 @@
   position: relative;
   z-index: 100; /* 宿主层级最高：确保窗口按钮始终可点。 */
 }
+
+/* Mode-scoped GUI chrome is declared above the shared breakpoint rules; keep
+   the emergency titlebar budget authoritative for modern-gui as well. */
+@media (max-width:760px) {
+  .app[data-interface-mode="modern-gui"] .workspace-titlebar {
+    grid-template-columns:var(--workspace-sidebar-collapsed-width,42px) minmax(0,1fr) auto;
+  }
+  .app[data-interface-mode="modern-gui"] .workspace-titlebar-sidebar {
+    width:var(--workspace-sidebar-collapsed-width,42px);
+    min-width:var(--workspace-sidebar-collapsed-width,42px);
+    padding:0;
+  }
+  .app[data-interface-mode="modern-gui"] .workspace-titlebar-workspace { min-width:0; }
+}
+
+/* Keep touch hit targets without allowing the left rail to consume the tab
+   track at emergency widths. */
+@media (hover:none), (pointer:coarse) {
+  .app[data-interface-mode="modern-gui"] .workspace-titlebar {
+    grid-template-columns:0 minmax(var(--ui-space-6),1fr) auto;
+  }
+  .app[data-interface-mode="modern-gui"] .workspace-titlebar-sidebar {
+    position:absolute;
+    inset:0 auto 0 0;
+    z-index:2;
+    width:var(--pylon-terminal-touch-target,44px);
+    min-width:var(--pylon-terminal-touch-target,44px);
+    padding:0;
+    background:var(--titlebar-bg,var(--surface-panel));
+  }
+  .app[data-interface-mode="modern-gui"] .workspace-titlebar-workspace { padding-left:var(--pylon-terminal-touch-target,44px); }
+}
