@@ -20,6 +20,8 @@ export interface AgentSidebarContributionProps {
   readonly liveGeneratingSources: readonly string[]
   readonly onSelectSession: (id: string) => void
   readonly onDeleteSession: (id: string) => Promise<void>
+  readonly onExportSession?: (id: string) => Promise<void>
+  readonly onArchiveSession?: (id: string) => Promise<void> | void
   readonly onOpenSessionSettings: (id: string) => void
   readonly onRenameSession: (id: string, name: string) => void
   readonly onCreateChatSession: () => void

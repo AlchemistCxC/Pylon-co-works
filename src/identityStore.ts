@@ -53,6 +53,8 @@ export interface Session {
   lastActiveAt: number
   /** Timestamp of the most recent assistant reply (display semantics). */
   lastReplyAt?: number
+  /** 归档时间；归档会话不显示在 Agentsheet 活动列表。 */
+  archivedAt?: number
   platform: string
   workdir: string
   /** CWD-03：Workspace 实体绑定（方案 C）。有值 = 绑定 Workspace（root 单一来源，
@@ -175,7 +177,7 @@ interface IdentityStoreState {
   hydrateProfilesLocal: (legacy?: ProfilePersistenceState) => void
   /** I14-W6 CR-01：导入等"本地已写入"场景——本地读回 + 写穿后端（Tauri 权威源同步） */
   hydrateFromLocal: (legacy?: ProfilePersistenceState) => void | Promise<void>
-  addSession: (name: string, agentId?: string, cwd?: { workdir?: string; workspaceId?: string; skills?: string[]; hooks?: string[] }) => string
+  addSession: (name: string, agentId?: string, cwd?: { workdir?: string; workspaceId?: string; skills?: string[]; hooks?: string[]; mcpServerIds?: string[]; hookPluginIds?: string[] }) => string
   /** D5：从恢复失败的会话显式创建独立本地分叉；原 Session/remote binding 保持不变。 */
   forkSession: (id: string) => string
   removeSession: (id: string) => void
@@ -421,6 +423,9 @@ export const useIdentityStore = create<IdentityStoreState>()((set, get) => ({
         platform: 'local',
         workdir: cwd?.workdir ?? '',
         ...(cwd?.workspaceId ? { workspaceId: cwd.workspaceId } : {}),
+        ...(cwd?.skills ? { workspaceSkills: [...cwd.skills] } : {}),
+        ...(cwd?.mcpServerIds ? { workspaceMcpServerIds: [...cwd.mcpServerIds] } : {}),
+        ...(cwd?.hookPluginIds ? { workspaceHookPluginIds: [...cwd.hookPluginIds] } : {}),
       }, now)
     } catch (error) {
       reportRuntimeError('准备会话插件贡献', error)

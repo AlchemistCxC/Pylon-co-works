@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react'
 import * as Dialog from '@radix-ui/react-dialog'
 import { open } from '@tauri-apps/plugin-dialog'
-import { ChevronDown, ChevronRight, Folder, FolderOpen, Plus, Settings, X } from 'lucide-react'
+import { Archive, ChevronDown, ChevronRight, Download, Folder, FolderOpen, Plus, Settings, Trash2 } from 'lucide-react'
 import { formatTime } from '../../utils'
 import { isAbsolutePath } from '../../workspaceEntities'
 import CwdSettingsPanel from '../settings/CwdSettingsPanel'
@@ -165,8 +165,11 @@ export default function WorkspacesPanel(props: AgentSidebarContributionProps) {
                       ) : <div className="session-name">{session.name}</div>}
                       <div className="session-meta">{formatTime(session.lastReplyAt || session.lastActiveAt || session.createdAt)}</div>
                     </div>
-                    <button className="session-gear" onClick={event => { event.stopPropagation(); props.onOpenSessionSettings(session.id) }} title="会话设置" aria-label={`${session.name} 会话设置`}><Settings size={13} aria-hidden="true" /></button>
-                    <button className="session-del" onClick={event => { event.stopPropagation(); void props.onDeleteSession(session.id) }} title="删除会话" aria-label={`删除 ${session.name}`}><X size={13} aria-hidden="true" /></button>
+
+                    <button className="session-action" onClick={event => { event.stopPropagation(); props.onOpenSessionSettings(session.id) }} title="会话设置" aria-label={session.name + " 会话设置"}><Settings size={13} aria-hidden="true" /></button>
+                    <button className="session-action" onClick={event => { event.stopPropagation(); void props.onExportSession?.(session.id) }} title="导出会话" aria-label={session.name + " 导出"}><Download size={13} aria-hidden="true" /></button>
+                    <button className="session-action" onClick={event => { event.stopPropagation(); void props.onArchiveSession?.(session.id) }} title="归档会话" aria-label={session.name + " 归档"}><Archive size={13} aria-hidden="true" /></button>
+                    <button className="session-action danger" onClick={event => { event.stopPropagation(); void props.onDeleteSession(session.id) }} title="删除会话" aria-label={"删除 " + session.name}><Trash2 size={13} aria-hidden="true" /></button>
                   </div>
                 ))}
                 {bound.length === 0 && <div className="session-empty cwd-session-empty">暂无会话，点击上方＋开始</div>}

@@ -30,10 +30,10 @@ export async function createAgentWorkbenchSession(
   const creating = await getHookRuntime().invoke('session.creating', {
     agentId: context.agentId,
     title,
-    ...(workspace ? { workspaceId: workspace.id, cwd: workspace.rootPath } : {}),
-  })
+    ...(workspace ? { workspaceId: workspace.id, cwd: workspace.rootPath, skills: workspace.skills, mcpServerIds: workspace.mcpServerIds, hookPluginIds: workspace.hookPluginIds } : {}),
+  }, workspace?.hookPluginIds)
   if (creating.action === 'cancel') throw new Error(creating.reason || 'Session 创建已被插件拦截')
-  const effective = creating.event as { agentId?: unknown; title?: unknown }
+  const effective = creating.event as { agentId?: unknown; title?: unknown; workspaceSkills?: unknown; workspaceMcpServerIds?: unknown; workspaceHookPluginIds?: unknown; skills?: unknown; mcpServerIds?: unknown; hookPluginIds?: unknown }
   const effectiveAgentId = typeof effective.agentId === 'string' ? effective.agentId.trim() : ''
   const effectiveTitle = typeof effective.title === 'string' ? effective.title.trim() : ''
   if (!effectiveAgentId || !effectiveTitle) throw new Error('Session hook 返回的 agentId / title 无效')
@@ -44,6 +44,8 @@ export async function createAgentWorkbenchSession(
     workspaceId: workspace.id,
     skills: [...workspace.skills],
     hooks: [...workspace.hookPluginIds],
+    mcpServerIds: [...workspace.mcpServerIds],
+    hookPluginIds: [...workspace.hookPluginIds],
   } : undefined)
   if (!sessionId) throw new Error('Session 创建被本地持久化状态拒绝')
   const session = useIdentityStore.getState().sessions.find(item => item.id === sessionId)
@@ -61,7 +63,8 @@ export async function createAgentWorkbenchSession(
       persona: collectProfilePersona(session.creationSnapshot) || profile?.persona,
       cwd: session.workdir || undefined,
       workspaceId: session.workspaceId,
-      model: profile?.model,
+      model: request?.model || profile?.model,
+      ...(request?.reasoningLevel ? { reasoningLevel: request.reasoningLevel } : {}),
       ...(preflight.mcpServers.length > 0 ? { mcpServers: preflight.mcpServers } : {}),
     })
     const normalized = sessionResponseObject(response)

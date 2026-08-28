@@ -1,3 +1,4 @@
+import { open } from '@tauri-apps/plugin-dialog'
 import { useEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react'
 import type { Session } from '../../identityStore.ts'
 import { useIdentityStore } from '../../identityStore.ts'
@@ -132,6 +133,14 @@ export default function AgentRendererSuiteWorkbench(props: AgentRendererSuiteWor
   }, [])
 
   useEffect(() => { void sessionRuntime.bind(session) }, [sessionRuntime, session])
+  useEffect(() => {
+    const pickWorkspaceFolder = async () => {
+      const selected = await open({ directory: true, multiple: false, title: '选择工作区文件夹' })
+      if (typeof selected === 'string') window.dispatchEvent(new CustomEvent('pylon:workspace-folder-picked', { detail: { path: selected } }))
+    }
+    window.addEventListener('pylon:pick-workspace-folder', pickWorkspaceFolder)
+    return () => window.removeEventListener('pylon:pick-workspace-folder', pickWorkspaceFolder)
+  }, [])
   // React.StrictMode intentionally runs effect cleanup/setup once during the
   // initial dev mount. Destroying the mutable Workbench runtime in that probe
   // leaves the second (real) setup with a permanently inert runtime, which

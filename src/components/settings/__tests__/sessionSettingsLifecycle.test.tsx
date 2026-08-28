@@ -24,9 +24,6 @@ function makeSession(id: string, name: string, sessionPrompt: string): Session {
 function nameInput(): HTMLInputElement {
   return document.getElementById('session-name') as HTMLInputElement
 }
-function promptArea(): HTMLTextAreaElement {
-  return document.getElementById('session-prompt') as HTMLTextAreaElement
-}
 
 beforeEach(() => {
   invokeMock.mockReset()
@@ -37,16 +34,14 @@ beforeEach(() => {
 afterEach(() => { cleanup() })
 
 describe('SessionSettings 表单同步（session-settings-lifecycle 契约）', () => {
-  it('会话切换时全部表单字段重置为新会话值', async () => {
+  it('会话切换时名称字段重置为新会话值', async () => {
     useIdentityStore.setState({ sessions: [makeSession('sa', '会话A', '提示A'), makeSession('sb', '会话B', '提示B')], sessionsHydrated: true })
 
     const { rerender } = render(<SessionSettings sessionId="sa" open onClose={() => {}} />)
     await waitFor(() => expect(nameInput().value).toBe('会话A'))
-    expect(promptArea().value).toBe('提示A')
 
     rerender(<SessionSettings sessionId="sb" open onClose={() => {}} />)
     await waitFor(() => expect(nameInput().value).toBe('会话B'))
-    expect(promptArea().value).toBe('提示B')
   })
 
   it('会话不存在时不渲染表单（保守返回 null）', () => {
@@ -57,7 +52,7 @@ describe('SessionSettings 表单同步（session-settings-lifecycle 契约）', 
     expect(container.querySelector('.session-settings-section')).toBeNull()
   })
 
-  it('会话源字段变化（同 id 改名）→ 表单跟随', async () => {
+  it('会话名称变化（同 id 改名）→ 表单跟随', async () => {
     const a = makeSession('sa', '旧名', '旧提示')
     useIdentityStore.setState({ sessions: [a], sessionsHydrated: true })
     render(<SessionSettings sessionId="sa" open onClose={() => {}} />)
@@ -65,6 +60,5 @@ describe('SessionSettings 表单同步（session-settings-lifecycle 契约）', 
 
     useIdentityStore.setState({ sessions: [{ ...a, name: '新名', sessionPrompt: '新提示' }], sessionsHydrated: true })
     await waitFor(() => expect(nameInput().value).toBe('新名'))
-    expect(promptArea().value).toBe('新提示')
   })
 })

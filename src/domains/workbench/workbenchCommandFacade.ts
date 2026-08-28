@@ -44,6 +44,8 @@ export interface SessionCreateInput {
   title?: string
   profileId?: string
   workspaceId?: string
+  model?: string
+  reasoningLevel?: string
   initialPrompt?: SendCommand
 }
 

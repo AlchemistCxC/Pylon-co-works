@@ -22,6 +22,7 @@ export interface NewSessionPayload {
   workspaceId?: string
   /** FE-AUD-018：Profile 默认模型（仅新会话默认，不覆盖已存在会话） */
   model?: string
+  reasoningLevel?: string
   /** 插件会话 preflight 解析出的 ACP MCP servers；必须在 session/new 前完成。 */
   mcpServers?: readonly unknown[]
 }

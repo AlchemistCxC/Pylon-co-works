@@ -23,6 +23,7 @@ export interface LegacySession {
   createdAt: number
   lastActiveAt: number
   lastReplyAt?: number
+  archivedAt?: number
   platform: string
   workdir: string
   /** CWD-03：Workspace 实体绑定（可选；legacy 会话无此字段） */
@@ -99,6 +100,7 @@ function normalizeLegacySession(value: unknown, profiles: PersistedProfile[]): L
     createdAt,
     lastActiveAt: timestamp(raw.lastActiveAt, createdAt),
     ...(typeof raw.lastReplyAt === 'number' && Number.isFinite(raw.lastReplyAt) ? { lastReplyAt: raw.lastReplyAt } : {}),
+    ...(typeof raw.archivedAt === 'number' && Number.isFinite(raw.archivedAt) ? { archivedAt: raw.archivedAt } : {}),
     platform: text(raw.platform, 'local'),
     workdir: text(raw.workdir),
     ...(workspaceId ? { workspaceId } : {}),

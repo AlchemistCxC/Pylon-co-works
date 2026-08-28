@@ -23,6 +23,10 @@ export interface SessionCreationContext {
   readonly platform: string
   readonly workdir: string
   readonly workspaceId?: string
+  /** Workspace capabilities frozen for this session; only apply on new sessions. */
+  readonly workspaceSkills?: readonly string[]
+  readonly workspaceMcpServerIds?: readonly string[]
+  readonly workspaceHookPluginIds?: readonly string[]
 }
 
 export type SessionCreationPayloadResolver = (
@@ -103,6 +107,10 @@ export interface SessionCreationRuntimeSession {
   readonly profileId: string
   readonly workdir: string
   readonly workspaceId?: string
+  /** Workspace capabilities frozen for this session; only apply on new sessions. */
+  readonly workspaceSkills?: readonly string[]
+  readonly workspaceMcpServerIds?: readonly string[]
+  readonly workspaceHookPluginIds?: readonly string[]
 }
 
 export interface SessionCreationPhaseContext {

@@ -2,11 +2,9 @@ import { useEffect, useMemo, useState } from 'react'
 import * as Dialog from '@radix-ui/react-dialog'
 import { invoke } from '@tauri-apps/api/core'
 import { refreshSessionsBackend, useIdentityStore } from '../identityStore'
-import { useWorkspaceEntityStore } from '../workspaceEntityStore'
 import { reportRuntimeError } from '../runtimeError'
 import { createSessionClient } from '../infrastructure/acp/sessionClient'
 import { removeSessionTransaction, sessionDurableOwnerKey } from '../application/transactions/removeSessionTransaction'
-import Select from './ui/Select.tsx'
 
 import { getChatController } from './chat/chatEventController'
 import { clearMessageStorage } from './chat/messagePersistence'
@@ -16,7 +14,6 @@ interface Props { sessionId: string; open: boolean; onClose: () => void; onDelet
 
 export default function SessionSettings({ sessionId, open, onClose, onDeleted }: Props) {
   const updateSession = useIdentityStore(state => state.updateSession)
-  const activeAgent = useIdentityStore(state => state.activeAgent)
   // 只订阅目标会话对象：其他会话的更新（消息/改名/活跃时间）不再重渲染本对话框
   const session = useIdentityStore(state => sessionId ? state.sessions.find(item => item.id === sessionId) : undefined)
   // createSessionSettingsValues 只读 name/platform/workdir/sessionPrompt，均已入 deps；
@@ -34,10 +31,6 @@ export default function SessionSettings({ sessionId, open, onClose, onDeleted }:
   const [workdir, setWorkdir] = useState(initialValues.workdir)
   const [sessionPrompt, setSessionPrompt] = useState(initialValues.sessionPrompt)
   // CWD-03：Workspace 实体绑定（方案 C）
-  const workspaces = useWorkspaceEntityStore(state => state.workspaces)
-  const boundWorkspace = session?.workspaceId
-    ? workspaces.find(workspace => workspace.id === session.workspaceId)
-    : undefined
 
   useEffect(() => {
     setName(session?.name || '')
@@ -50,7 +43,6 @@ export default function SessionSettings({ sessionId, open, onClose, onDeleted }:
 
   const currentValues = { name, platform, workdir, sessionPrompt }
   const dirty = isSessionSettingsDirty(currentValues, initialValues)
-  const promptLines = sessionPrompt ? sessionPrompt.split(/\r?\n/).length : 0
 
   const closeWithoutSaving = () => {
     setName(initialValues.name)
@@ -121,7 +113,7 @@ export default function SessionSettings({ sessionId, open, onClose, onDeleted }:
             <header className="session-settings-header settings-dialog-header">
               <div>
                 <h3 className="settings-dialog-title">会话设置</h3>
-                <p id="session-settings-description" className="settings-dialog-description">管理当前会话的身份、运行环境与专属 Prompt。</p>
+                <p id="session-settings-description" className="settings-dialog-description">管理当前会话的名称与基础操作。</p>
               </div>
               <Dialog.Close className="modal-close settings-dialog-close" onClick={event => {
                 event.preventDefault()
@@ -135,7 +127,7 @@ export default function SessionSettings({ sessionId, open, onClose, onDeleted }:
               <div className="session-settings-section-heading">
                 <div>
                   <h4 id="session-basic-title" className="settings-section-title">基本信息</h4>
-                  <p className="session-settings-section-description settings-section-description">用于侧栏识别和来源分类。</p>
+                  <p className="session-settings-section-description settings-section-description">用于侧栏识别。</p>
                 </div>
               </div>
               <div className="session-settings-grid">
@@ -143,74 +135,8 @@ export default function SessionSettings({ sessionId, open, onClose, onDeleted }:
                   <label htmlFor="session-name">名称</label>
                   <input id="session-name" className="settings-control" value={name} onChange={event => setName(event.target.value)} />
                 </div>
-                <div className="sess-field">
-                  <label htmlFor="session-platform">平台</label>
-                  <Select id="session-platform" className="settings-control" value={platform} onChange={setPlatform} options={[
-                    { value: 'local', label: '本地' },
-                    { value: 'qq-group', label: 'QQ 群聊' },
-                    { value: 'qq-dm', label: 'QQ 私聊' },
-                    { value: 'terminal', label: '终端' },
-                  ]} />
-                </div>
               </div>
             </section>
-
-            <section className="session-settings-section" aria-labelledby="session-agent-title">
-              <div className="session-settings-section-heading">
-                <div>
-                  <h4 id="session-agent-title" className="settings-section-title">Agent 运行环境</h4>
-                  <p className="settings-section-description">cwd 由创建分区决定（聊天 / 工作区），会话创建后不再变更。</p>
-                </div>
-                <span className="session-settings-agent">{activeAgent || 'peri'}</span>
-              </div>
-              <div className="sess-field">
-                <label>工作目录</label>
-                <div className="sess-field-value" role="status">
-                  {boundWorkspace ? (
-                    <>
-                      <span className="sess-workspace-name">{boundWorkspace.name}</span>
-                      <code className="sess-workspace-root">{boundWorkspace.rootPath}</code>
-                    </>
-                  ) : (
-                    <code className="sess-workspace-root">{workdir || '聊天分区（未绑定工作区）'}</code>
-                  )}
-                </div>
-                <div className="set-hint" role="status">
-                  来源：{boundWorkspace ? `工作区 ${boundWorkspace.name}` : '聊天分区；未继承工作区 Skills/Hooks'}
-                </div>
-                {boundWorkspace && (
-                  <div className="set-hint" role="status">
-                    创建时继承：{session.skills.length} Skills · {session.hooks.length} Hook
-                    {' · '}当前工作区：{boundWorkspace.skills.length} Skills · {boundWorkspace.hookPluginIds.length} Hook · {boundWorkspace.mcpServerIds.length} MCP
-                  </div>
-                )}
-              </div>
-            </section>
-
-            <section className="session-settings-section" aria-labelledby="session-prompt-title">
-              <div className="session-settings-section-heading">
-                <div>
-                  <h4 id="session-prompt-title" className="settings-section-title">Session Prompt</h4>
-                  <p className="settings-section-description">内容会叠加在创建会话时冻结的 Profile Persona 之后。</p>
-                </div>
-                <span className="session-settings-counter">{sessionPrompt.length} 字 · {promptLines} 行</span>
-              </div>
-              <div className="sess-field sess-field-prompt">
-                <label htmlFor="session-prompt">会话专属 Prompt</label>
-                <textarea id="session-prompt" className="settings-control" value={sessionPrompt} onChange={event => setSessionPrompt(event.target.value)} placeholder="可选：追加此会话专属指令..." rows={8} />
-              </div>
-            </section>
-
-            <details className="session-settings-advanced">
-              <summary>
-                <span>高级能力</span>
-                <span className="session-settings-status">未接入运行时</span>
-              </summary>
-              <div className="session-settings-advanced-body" role="status">
-                <strong>MCP / Skills / Hooks</strong>
-                <p>当前后端尚未提供会话级配置链路，因此这里仅说明状态，不提供编辑，也不会向 Agent 发送历史字段。</p>
-              </div>
-            </details>
 
             <section className="session-settings-danger" aria-labelledby="session-danger-title">
               <div>

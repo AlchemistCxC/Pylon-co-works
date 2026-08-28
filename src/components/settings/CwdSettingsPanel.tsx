@@ -135,7 +135,7 @@ export default function CwdSettingsPanel({ workspace, onClose, showHeader = true
 
       <section className="cwd-settings-section" aria-labelledby="cwd-capabilities-title">
         <div className="cwd-settings-section-head">
-          <div><h3 id="cwd-capabilities-title">工作区能力</h3><p>这些能力会作为创建会话时的默认上下文。</p></div>
+          <div><h3 id="cwd-capabilities-title">新会话能力</h3><p>由插件系统在创建会话时注入 Tool、MCP、Skill 等能力提示。</p><p><strong>仅在新建会话时生效；已有会话保持不变。</strong></p></div>
         </div>
         <label className="sess-field">
           <span>Skills（逗号分隔）</span>

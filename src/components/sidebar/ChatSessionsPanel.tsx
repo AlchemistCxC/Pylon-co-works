@@ -1,4 +1,5 @@
 import { useState } from 'react'
+import { Archive, Download, Settings, Trash2 } from 'lucide-react'
 import { formatTime } from '../../utils'
 import type { AgentSidebarContributionProps } from '../../plugin-runtime/sidebar/sidebarTypes.ts'
 
@@ -36,8 +37,12 @@ export default function ChatSessionsPanel(props: AgentSidebarContributionProps) 
               ) : <div className="session-name">{session.name}</div>}
               <div className="session-meta">{formatTime(session.lastReplyAt || session.lastActiveAt || session.createdAt)}</div>
             </div>
-            <button className="session-gear" onClick={event => { event.stopPropagation(); props.onOpenSessionSettings(session.id) }} title="会话设置">⚙</button>
-            <button className="session-del" onClick={event => { event.stopPropagation(); void props.onDeleteSession(session.id) }}>✕</button>
+            <div className="session-actions">
+              <button className="session-action" onClick={event => { event.stopPropagation(); props.onOpenSessionSettings(session.id) }} title="会话设置" aria-label={session.name + " 会话设置"}><Settings size={13} /></button>
+              <button className="session-action" onClick={event => { event.stopPropagation(); void props.onExportSession?.(session.id) }} title="导出会话" aria-label={session.name + " 导出"}><Download size={13} /></button>
+              <button className="session-action" onClick={event => { event.stopPropagation(); void props.onArchiveSession?.(session.id) }} title="归档会话" aria-label={session.name + " 归档"}><Archive size={13} /></button>
+              <button className="session-action danger" onClick={event => { event.stopPropagation(); void props.onDeleteSession(session.id) }} title="删除会话" aria-label={"删除 " + session.name}><Trash2 size={13} /></button>
+            </div>
           </div>
         ))}
         {sessions.length === 0 && <div className="session-empty">暂无聊天会话</div>}
