@@ -62,6 +62,7 @@ export function SolidToolInvocationCard(props: {
     data-content-kind={props.renderKind}
     data-tool-call-id={props.snapshot.id}
     data-tool-state={state()}
+    data-status-label={presentation().label}
     data-status={presentation().tone}
     data-status-palette={stringSetting(props.appearance, 'statusPalette', 'semantic')}
     data-density={props.appearance.density === 'compact' ? 'compact' : 'comfortable'}
