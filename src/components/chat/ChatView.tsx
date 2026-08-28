@@ -216,6 +216,12 @@ const ChatView = React.memo(function ChatView({ sessionId, workspaceKind = 'agen
         </div>
       )}
       <div className="term">
+        {messages.length === 0 && !streamingText && !streamingThinking && !generating && (
+          <div className="chat-empty agent-empty-state" data-empty-state="session" role="status" aria-label="会话为空">
+            <h2 className="agent-empty-title">暂无消息</h2>
+            <p className="agent-empty-description">发送一条消息开始当前会话。</p>
+          </div>
+        )}
         <AnimatePresence initial={false}>
           {rowDescriptors.map(desc => (
             <React.Fragment key={desc.key}>
@@ -662,12 +668,14 @@ function ToolCard({ model }: { model: ReturnType<typeof buildToolPresentationMod
   }, [model.outputText, model.kind]) // eslint-disable-line react-hooks/exhaustive-deps
   return (
     <div className="term-tool" data-status={status} data-tool-state={model.state} data-kind={model.kind}
+      data-status-label={model.statusLabel}
       data-pylon-component="tool-call"
       data-output-collapsible={model.canCollapseOutput ? 'true' : 'false'} style={connCss}>
       <button className="term-tool-head" type="button" onClick={() => setOpen(!open)} aria-expanded={open} aria-controls={bodyId}>
         <span className={`term-tool-indicator ${status} ${toolIndicatorMotionClass(model.state)}`} style={glowCss} aria-label={indicatorAsset.ariaLabel[model.state]} role="img">{modernGui ? <ModernToolIcon name={model.name} /> : indicatorAsset.glyph}</span>
         <span className="term-tool-name">{model.name}</span>
         {displaySummary && <span className="term-tool-summary">({displaySummary})</span>}
+        <span className="term-tool-state-label">— {model.statusLabel}</span>
       </button>
       {model.hasOutput && <CollapsibleRegion open={open} id={bodyId}>
         <div className="term-tool-body">
