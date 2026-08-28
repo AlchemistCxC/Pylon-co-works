@@ -1,10 +1,10 @@
 # Pylon 外观设计施工书
 
-> **状态：基线已确认｜设计冻结｜并行施工中**  
+> **状态：三线已完成｜已合并｜集成复核通过（2026-08-29）**  
 > 更新时间：2026-08-28  
 > 本文是 Pylon 外观设计探讨的独立文档，不并入渲染引擎施工台账体系。
 
-> **并行施工指针（AUTONOMY-OPEN）**：B-01～B-26 基线归类、重点/实现级设计决策和 B-18 根复核均已确认。三条线路在隔离 Git worktree 中按冻结契约自治施工。见 [并行施工总契约](./Pylon-外观并行施工-总契约.md)、[派发 Prompt 与工作流](./Pylon-外观并行施工-派发Prompt与工作流.md)、[自治冻结清单](./Pylon-外观并行施工-自治冻结清单.md)、[线路 A：terminal-like 宿主](./Pylon-外观并行施工-线路A-terminal-like宿主.md)、[线路 B：共享语义与状态](./Pylon-外观并行施工-线路B-共享语义与状态.md)、[线路 C：modern-gui 与插件表面](./Pylon-外观并行施工-线路C-modern-gui与插件表面.md)。
+> **并行施工指针（INTEGRATED）**：B-01～B-26 基线归类、设计决策、A/B/C 三线施工及 C-04 集成复测均已完成，并合并到当前分支。见 [并行施工总契约](./Pylon-外观并行施工-总契约.md)、[派发 Prompt 与工作流](./Pylon-外观并行施工-派发Prompt与工作流.md)、[自治冻结清单](./Pylon-外观并行施工-自治冻结清单.md)、三份线路文档。
 
 ## 0. 总览
 
@@ -46,19 +46,19 @@
 
 | 卡号 | 主题 | 归属模式 | 优先级 | 状态 |
 |---|---|---|---|---|
-| A-01 | 宿主壳与标题栏 terminal-like 基线 | terminal-like | P0 | 已授权 |
-| A-02 | CLI focus、队列与窄屏表现 | terminal-like | P0 | 已授权 |
-| A-03 | 消息、工具与连接线表面 | terminal-like | P0 | 已授权 |
-| A-04 | 侧栏与宿主收缩顺序 | terminal-like | P0 | 已授权 |
-| A-05 | 线路 A 视觉回归证据 | terminal-like | P1 | 已授权 |
-| B-01 | 语义 token、scheme 与 palette 投影 | 共享 | P0 | 已授权 |
-| B-02 | 状态、ARIA 与纯展示映射 | 共享 | P0 | B-18 子项已验收，其余已授权 |
-| B-03 | Settings dialog 与焦点路径 | 共享 | P0 | 已授权 |
-| B-04 | focus、reduced-motion 与 conformance | 共享 | P1 | 已授权 |
-| C-01 | modern-gui 与 Settings 表面层级 | modern-gui | P0 | 已授权 |
-| C-02 | PrismSheet 壳与 surface contract | 共享/modern-gui | P0 | 已授权 |
-| C-03 | 内置 Sheet 响应式与内容预算 | modern-gui | P0 | 已授权 |
-| C-04 | modern-gui/Sheet 回归与 conformance | modern-gui | P1 | 已授权 |
+| A-01 | 宿主壳与标题栏 terminal-like 基线 | terminal-like | P0 | 已合并 |
+| A-02 | CLI focus、队列与窄屏表现 | terminal-like | P0 | 已合并 |
+| A-03 | 消息、工具与连接线表面 | terminal-like | P0 | 已合并 |
+| A-04 | 侧栏与宿主收缩顺序 | terminal-like | P0 | 已合并 |
+| A-05 | 线路 A 视觉回归证据 | terminal-like | P1 | 已合并 |
+| B-01 | 语义 token、scheme 与 palette 投影 | 共享 | P0 | 已合并 |
+| B-02 | 状态、ARIA 与纯展示映射 | 共享 | P0 | 已合并（含 B-18） |
+| B-03 | Settings dialog 与焦点路径 | 共享 | P0 | 已合并 |
+| B-04 | focus、reduced-motion 与 conformance | 共享 | P1 | 已合并 |
+| C-01 | modern-gui 与 Settings 表面层级 | modern-gui | P0 | 已合并 |
+| C-02 | PrismSheet 壳与 surface contract | 共享/modern-gui | P0 | 已合并 |
+| C-03 | 内置 Sheet 响应式与内容预算 | modern-gui | P0 | 已合并 |
+| C-04 | modern-gui/Sheet 回归与 conformance | modern-gui | P1 | 已合并 |
 
 每张卡的文件白名单、改动描述、可判定验收、依赖和工作量以对应线路文件为执行真值；本文只维护总表，避免复制后产生两套施工真值。
 
@@ -70,18 +70,24 @@
 | 证据采集 | 完成静态扫描及动态批次 A～N：标准视口、窄屏、字号放大、两种模式/两种 scheme、工具/推理状态、空会话、Settings 焦点、Sheet 断点、reduced-motion 规则、CLI 焦点和 mode 切换对照。 |
 | 当前诊断 | B-01～B-26 共 26 条可复现问题已按 1.7.1 定稿；每条均带文件/组件/现象证据和插件化边界。 |
 | 重点模式 | 用户已确认 `terminal-like` 为重点开发模式；后续施工、示例、回归与验收均先覆盖 terminal-like，再覆盖 modern-gui。 |
-| 范围执行 | 已验收 B-18 的纯展示映射修正；业务逻辑、数据流、接口契约、持久化和功能行为仍为禁区。 |
-| 当前阶段门槛 | 阶段 0 基线和阶段 1/实现级默认均已冻结；三线代码闸门已开放。 |
+| 范围执行 | A/B/C 三线已合并；仅修改样式、DOM/ARIA 表现、布局和展示映射，业务逻辑、数据流、接口契约、持久化和功能行为未改。 |
+| 当前阶段门槛 | 三线代码闸门已关闭；进入根集成维护阶段。 |
 
-### 0.5.1 并行施工拆线状态（AUTONOMY-OPEN）
+### 0.5.1 并行施工拆线状态（INTEGRATED）
 
 | 线路 | 主责范围 | 独立文件 | 当前状态 |
 |---|---|---|---|
-| A | terminal-like 宿主壳、标题栏、侧栏、消息/工具/CLI CSS | `docs/Pylon-外观并行施工-线路A-terminal-like宿主.md` | 隔离 worktree 自治施工 |
-| B | 共享 token、palette 投影、状态/ARIA、Settings DOM 语义 | `docs/Pylon-外观并行施工-线路B-共享语义与状态.md` | B-18 已验收；隔离 worktree 自治施工 |
-| C | modern-gui 表面、Settings CSS、Sheet shell 与内置 Sheet CSS | `docs/Pylon-外观并行施工-线路C-modern-gui与插件表面.md` | 隔离 worktree 自治施工 |
+| A | terminal-like 宿主壳、标题栏、侧栏、消息/工具/CLI CSS | `docs/Pylon-外观并行施工-线路A-terminal-like宿主.md` | LINE_DONE；已合并 |
+| B | 共享 token、palette 投影、状态/ARIA、Settings DOM 语义 | `docs/Pylon-外观并行施工-线路B-共享语义与状态.md` | LINE_DONE；已合并 |
+| C | modern-gui 表面、Settings CSS、Sheet shell 与内置 Sheet CSS | `docs/Pylon-外观并行施工-线路C-modern-gui与插件表面.md` | LINE_DONE；已合并 |
 
 三条线路的可写文件没有重叠；根 agent 独占本文、并行总契约和派发工作流。公共 token、palette、布局槽位、状态/ARIA 和 Q2/Q4 验收规则在派发前冻结，任何跨线请求必须先回到总契约。
+
+### 0.5.2 根集成结果
+
+三线提交已按 A → B → C 顺序合并到当前 `ACh/dev`：`d581c802`、`3b657716`、`af8b8155`，并补充构建类型修正 `6a7dba96`。A/B/C 隔离 worktree 与分支引用已删除；保留所有功能提交历史。
+
+根集成验证：`check:first-party-styles` 通过（28 files）；本次变更相关定向测试 11 files / 49 tests 通过；`check:solid` 通过；ESLint 与 `git diff --check` 通过；`npm run build` 通过并产出本地 `onig.wasm` asset。另有一个未触碰的既有 `Sidebar.sections.test.tsx` 因主分支先前 session 改动失败，未纳入本次外观变更结论。
 
 ### 0.6 插件化边界（已确认）
 

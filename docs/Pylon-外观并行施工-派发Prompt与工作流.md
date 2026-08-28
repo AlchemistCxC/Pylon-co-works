@@ -1,7 +1,7 @@
 # Pylon 外观并行施工：派发 Prompt 与一致性工作流
 
-> **状态：AUTONOMY-OPEN**  
-> 版本：0.3｜更新时间：2026-08-28  
+> **状态：ARCHIVED（已完成并合并）**  
+> 版本：0.4｜更新时间：2026-08-29  
 > 本文是可复制的子 agent 启动指令、状态机、质询格式和根 agent 复核流程。它依赖并服从 [Pylon-外观并行施工-总契约](./Pylon-外观并行施工-总契约.md)。
 
 ## 0. 先说清楚“保证”是什么
@@ -371,9 +371,9 @@ scrollWidth/clientWidth 或其他几何结果：
 
 | 线路 | agent | 派发时间 | 契约版本 | 首卡 | PREFLIGHT | 当前状态 | 根复核结果 |
 |---|---|---|---|---|---|---|---|
-| A | 已派发 | 2026-08-28 | 0.8 | A-02 → A-01 → A-04 → A-03 → A-05 | 通过 | AUTONOMY-OPEN / 隔离 worktree | 待逐卡本地 commit；terminal-like 优先 |
-| B | 已派发 | 2026-08-28 | 0.8 | B-18（已验收）→ B-01 → B-02 → B-03 → B-04 | 通过 | AUTONOMY-OPEN / 隔离 worktree | B-18 纳入基线；后续逐卡本地 commit |
-| C | 已派发 | 2026-08-28 | 0.8 | C-02 → C-01 → C-03 → C-04 | 通过 | AUTONOMY-OPEN / 隔离 worktree | 待逐卡本地 commit；消费 B 公共 ABI |
+| A | 已派发 | 2026-08-28 | 0.8 | A-02 → A-01 → A-04 → A-03 → A-05 | 通过 | LINE_DONE / 已合并 | 7 commits；targeted QA 通过；保留集成环境复测项 |
+| B | 已派发 | 2026-08-28 | 0.8 | B-18（已验收）→ B-01 → B-02 → B-03 → B-04 | 通过 | LINE_DONE / 已合并 | 5 commits；targeted QA/conformance 通过 |
+| C | 已派发 | 2026-08-28 | 0.8 | C-02 → C-01 → C-03 → C-04 | 通过 | LINE_DONE / 已合并 | 6 C commits + B QA merge；C-04 集成复测通过 |
 
 ## 8. 变更记录
 
@@ -381,3 +381,4 @@ scrollWidth/clientWidth 或其他几何结果：
 |---|---|---|
 | 2026-08-28 | 初版 Prompt 与一致性工作流 | 把“不要违约”改造成版本握手、状态机、契约请求、白名单 diff 和五道合并闸门；当前仍不派发。 |
 | 2026-08-28 | 自治与提交纪律更新 | 基线已确认；每个完整功能/卡片要求一个本地 commit，agent 无例行汇报，仅 BLOCKED/LINE_DONE 升级；总契约 0.8。 |
+| 2026-08-29 | 执行归档 | A/B/C 已完成并合并；分支/worktree 已删除；后续回归由根 agent 负责。 |
