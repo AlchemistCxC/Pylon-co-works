@@ -22,7 +22,8 @@
     "check:all": "npm run check:frontend && npm run check:rust && npm run check:solid",
     "check:bundle": "node scripts/check-bundle-size.mjs",
     "check:first-party-styles": "node --experimental-strip-types scripts/check-first-party-style-ownership.mts",
-    "lint": "eslint src/"
+    "lint": "eslint src/",
+    "build:release": "node node_modules/@tauri-apps/cli/tauri.js build"
   },
   "dependencies": {
     "@codemirror/language": "^6.12.4",
@@ -60,7 +61,8 @@
     "remark-rehype": "^11.1.2",
     "solid-js": "^1.9.14",
     "unified": "^11.0.5",
-    "zustand": "^5"
+    "zustand": "^5",
+    "vscode-oniguruma": "^2.0.1"
   },
   "devDependencies": {
     "@eslint/js": "^10.0.1",

@@ -1,0 +1,7 @@
+allowBuilds:
+  esbuild: true
+# pnpm 11 设置（config home 从 package.json pnpm 字段移至本文件）
+onlyBuiltDependencies:
+  - esbuild
+publicHoistPattern:
+  - '*'
