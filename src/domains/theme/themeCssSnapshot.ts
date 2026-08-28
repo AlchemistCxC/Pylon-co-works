@@ -44,7 +44,7 @@ function isExplicitRoleValue(
   // Theme defaults predate the mode/scheme palette. Once a scheme is present,
   // treat an unchanged generic default as absent so the role gets its
   // mode/scheme fallback. Calls without a scheme preserve legacy snapshots.
-  if (scheme && definition.default !== undefined && value === definition.default) return false
+  if (scheme && 'default' in definition && definition.default !== undefined && value === definition.default) return false
   if (scheme && roleContrastFails(value, role, scheme)) return false
   return true
 }
@@ -101,7 +101,7 @@ function resolveRoleValues(state: Readonly<Record<string, unknown>>): Record<Vis
   for (const role of Object.keys(VISUAL_SEMANTIC_ROLE_TOKENS) as VisualSemanticRole[]) {
     let value: string | undefined
     for (const [key, definition] of Object.entries(THEME_FIELD_DEFS)) {
-      if (definition.semanticRole !== role || definition.semanticSource !== true) continue
+      if (!('semanticRole' in definition) || definition.semanticRole !== role || !('semanticSource' in definition) || definition.semanticSource !== true) continue
       const candidate = state[key]
       if (isExplicitRoleValue(candidate, definition, scheme, role)) {
         value = candidate

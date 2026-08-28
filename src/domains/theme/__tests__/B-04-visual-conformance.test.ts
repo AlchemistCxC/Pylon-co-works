@@ -2,7 +2,8 @@ import { readFileSync } from 'node:fs'
 import { describe, expect, it } from 'vitest'
 import { VISUAL_SEMANTIC_ROLE_TOKENS } from '../visualSemantics.ts'
 
-const INDEX_CSS = readFileSync(new URL('../../../index.css', import.meta.url), 'utf8')
+const INDEX_CSS_PATH = new URL('../../../index.css', import.meta.url).pathname.replace(/^\/([A-Za-z]:)/, '$1')
+const INDEX_CSS = readFileSync(INDEX_CSS_PATH, 'utf8')
 
 type Rgb = readonly [number, number, number]
 

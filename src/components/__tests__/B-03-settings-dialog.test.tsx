@@ -19,9 +19,10 @@ describe('B-03 Settings dialog semantics', () => {
 
     const { container } = render(<Settings />)
     const dialog = screen.getByRole('dialog', { name: '设置' })
+    const activeElement = document.activeElement instanceof HTMLElement ? document.activeElement : null
     expect(dialog).toHaveAttribute('aria-modal', 'true')
     expect(document.activeElement).not.toBe(opener)
-    expect(dialog).toContainElement(document.activeElement)
+    expect(dialog).toContainElement(activeElement)
     expect(container.querySelector('.settings-header h2')).toHaveAttribute('id', dialog.getAttribute('aria-labelledby'))
   })
 
