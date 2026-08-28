@@ -192,7 +192,16 @@ function MarkdownNode(props: { node: MarkdownRenderNode }): JSX.Element {
   // CSS-02：Markdown heading 显式 class contract（§5.15 step 3）——h1-h6 输出 term-h1~term-h6，
   // 配合 ChatView.css 限定 .term-assistant 内的层级规则（与 React renderer 同 contract）。
   const headingClass = tagName.match(/^h[1-6]$/) ? `term-${tagName}` : undefined
-  return <Dynamic component={tagName} class={headingClass}><MarkdownChildren children={node.children} /></Dynamic>
+  // Keep the block contract shared with the legacy React renderer.  The
+  // global stylesheet intentionally resets native element margins, so relying
+  // on the browser's bare `<p>`/`<li>` defaults makes a completed stream look
+  // materially tighter than its plain-text streaming counterpart.
+  const blockClass = tagName === 'p'
+    ? 'term-p'
+    : tagName === 'li'
+      ? 'term-li'
+      : headingClass
+  return <Dynamic component={tagName} class={blockClass}><MarkdownChildren children={node.children} /></Dynamic>
 }
 
 function MarkdownChildren(props: { children: readonly MarkdownRenderNode[] }) {

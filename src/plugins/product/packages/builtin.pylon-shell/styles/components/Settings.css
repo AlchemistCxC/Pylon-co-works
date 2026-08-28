@@ -1,5 +1,7 @@
 .set-custom-preset-save { display:flex; align-items:center; gap:6px; margin-top:10px; }
 .set-custom-preset-save .set-input { width:180px; }
+.custom-preset-feedback.is-success { color:var(--tool-ok,var(--accent)); }
+.custom-preset-feedback.is-error { color:var(--danger,var(--tool-err)); }
 .set-custom-presets { display:flex; flex-direction:column; gap:5px; margin-top:8px; }
 .set-custom-preset { display:flex; align-items:center; gap:5px; }
 .set-custom-preset .set-preset-chip { min-width:120px; text-align:left; }

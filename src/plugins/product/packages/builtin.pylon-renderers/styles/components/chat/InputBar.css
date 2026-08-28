@@ -73,14 +73,14 @@
   font-family:var(--font); font-size:var(--input-font-size,17px); line-height:1.6;
   resize:none; outline:none; min-height:var(--input-min-height,56px); max-height:240px;
 }
-.input-textarea:focus { border-color:var(--input-focus-border,var(--border-focus)); box-shadow:0 0 0 var(--input-focus-ring-width,0) color-mix(in srgb, var(--input-focus-border,var(--border-focus)) 24%, transparent); }
+/* 输入焦点由插入光标表达；不要因为输入而改变整栏边框或投射焦点光环。 */
+.input-textarea:focus { border-color:var(--input-border-color,var(--border)); box-shadow:none; }
 .input-textarea::placeholder { color:var(--input-placeholder,var(--text-placeholder)); }
 
 .input-bar.input-variant-compact .input-row { gap:5px; }
 .input-bar.input-variant-compact .input-textarea { min-height:36px; max-height:120px; padding:7px 10px; border-radius:var(--input-radius,0); line-height:1.4; }
 .input-bar.input-variant-compact .input-btn { width:36px; height:36px; border-radius:var(--input-radius,0); }
 .input-bar.input-variant-command .input-row { border:1px solid var(--input-border-color,var(--border)); border-radius:var(--input-radius,0); padding:2px 6px; background:color-mix(in srgb, var(--input-bg,var(--bg-input)) 88%, var(--accent) 12%); }
-.input-bar.input-variant-command .input-row:focus-within { border-color:var(--input-focus-border,var(--border-focus)); box-shadow:0 0 0 var(--input-focus-ring-width,0) color-mix(in srgb, var(--input-focus-border,var(--border-focus)) 24%, transparent); }
 .input-bar.input-variant-command .input-textarea { border:0; background:transparent; min-height:42px; padding:9px 8px; }
 .input-command-kicker { position:absolute; bottom:calc(100% + 5px); left:0; color:var(--accent); font:600 10px var(--mono); letter-spacing:0.12em; }
 
@@ -97,11 +97,7 @@
   box-shadow:0 9px 28px rgba(15,23,42,.08), inset 0 1px 0 color-mix(in srgb,#fff 32%,transparent);
   transition:border-color 160ms ease, box-shadow 180ms ease, transform 180ms ease;
 }
-.app:not([data-presentation-profile="builtin.presentation.terminal-classic"]) .input-bar:not(.cli-mode):focus-within {
-  border-color:var(--input-focus-border,var(--border-focus));
-  box-shadow:0 12px 34px rgba(15,23,42,.11), 0 0 0 var(--input-focus-ring-width,0) color-mix(in srgb,var(--input-focus-border,var(--border-focus)) 18%,transparent);
-  transform:translateY(-1px);
-}
+/* Composer 也保持静态外框；键盘焦点仍在 textarea 内，可见的是 caret。 */
 .app:not([data-presentation-profile="builtin.presentation.terminal-classic"]) .input-bar:not(.cli-mode) .input-composer-meta {
   display:flex;
   align-items:center;
@@ -210,13 +206,8 @@
   border-bottom:var(--cli-line-width,1px) solid var(--cli-line-color,#D77757);
   box-sizing:border-box;
 }
-.input-bar.cli-mode .input-row:focus-within {
-  border-top-color:var(--input-focus-border,var(--accent));
-  border-bottom-color:var(--input-focus-border,var(--accent));
-  outline:var(--line-width-2) solid var(--accent);
-  outline-offset:var(--line-width-2);
-  box-shadow:0 0 0 var(--line-width-2) var(--state-focus-ring);
-}
+/* CLI 输入保持稳定的边界；焦点由 textarea 的插入光标表达，
+   不再让整个输入行出现额外的 outline / 光环。 */
 .input-bar.cli-mode .input-textarea {
   background:transparent; border:none; resize:none; height:auto; min-height:auto;
   color:var(--cli-text-color,var(--text)); font-family:var(--mono);

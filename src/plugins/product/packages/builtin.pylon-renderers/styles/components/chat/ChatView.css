@@ -311,6 +311,19 @@
 .term-li { margin:1px 0 1px 16px; }
 .term-li::before { content:'- '; color:var(--text-dim); }
 .term-p { margin:2px 0; }
+/* Markdown soft breaks are meaningful for assistant prose (poems, lists of
+   steps, and provider text that is not fenced code).  The streaming fast path
+   already uses pre-wrap; keep the terminal Markdown tree on the same contract
+   after the final chunk is parsed. */
+.term-assistant p,
+.term-assistant .term-p { white-space:pre-wrap; }
+/* A blank source line becomes a sibling paragraph separator in Markdown.
+   The parser's inter-element newline is ordinary HTML whitespace and is
+   collapsed by `.term-assistant`, so give adjacent prose blocks an explicit
+   line-height-sized gap after the final streaming chunk is committed. */
+.term-assistant .term-p + .term-p {
+  margin-top: calc(var(--msg-line-height, var(--chat-line-height, 1.35)) * 1em);
+}
 /* ReactMarkdown 列表缩进 */
 .term-assistant ol { padding-left:2em; margin:0; }
 .term-assistant ul { padding-left:1.5em; margin:0; }
@@ -1775,6 +1788,12 @@
 .term-row-tool + .term-row-tool { margin-top: var(--chat-tool-gap, 5px); }
 .app[data-message-layout="claude"] .term-row + .term-row { margin-top: var(--chat-row-gap, 10px); }
 .app[data-message-layout="claude"] .term-row-tool + .term-row-tool { margin-top: var(--chat-tool-gap, 5px); }
+/* Keep the stanza gap in presentation profiles that set a more specific
+   paragraph margin (notably Claude).  The row qualifier also scopes this to
+   assistant message content, including Solid slot wrappers. */
+.term-row-assistant .term-assistant .term-p + .term-p {
+  margin-top: calc(var(--msg-line-height, var(--chat-line-height, 1.35)) * 1em);
+}
 .chat-empty,
 .agent-empty-state,
 .agent-empty-state > * { border-radius: 0; }

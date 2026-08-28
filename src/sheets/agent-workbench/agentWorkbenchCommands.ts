@@ -36,7 +36,7 @@ export interface AgentWorkbenchCommandDependencies {
   openResource(session: Session, resource: unknown): Promise<void>
   revealResource(session: Session, resource: unknown): Promise<void>
   createSession(input?: Parameters<WorkbenchCommandFacade['createSession']>[0]): Promise<{ sessionId: string }>
-  selectSession(sessionId: string): void
+  selectSession(sessionId: string | null): void
   discardSession(sessionId: string): Promise<void>
 }
 
@@ -155,16 +155,26 @@ export function createAgentWorkbenchCommandFacade(
     },
     async createSession(input) {
       const created = await dependencies.createSession(input)
+      // Select the newly-created session before dispatching its first prompt.
+      // A streamed ACP response can take an arbitrary amount of time; waiting
+      // for `send` here leaves the empty-state workbench visible until the
+      // whole generation finishes.
+      dependencies.selectSession(created.sessionId)
       if (input?.initialPrompt) {
         const result = await send(created.sessionId, input.initialPrompt)
         if (result.status === 'rejected') {
-          await dependencies.discardSession(created.sessionId)
+          try {
+            await dependencies.discardSession(created.sessionId)
+          } finally {
+            // Do not leave the shell pointing at a session that was removed
+            // after a failed first request. SheetLayout will persist the
+            // cleared selection for the owning agent.
+            dependencies.selectSession(null)
+          }
           throw new Error(result.error || '首条请求发送失败')
         }
-        dependencies.selectSession(created.sessionId)
         return created
       }
-      dependencies.selectSession(created.sessionId)
       return created
     },
     async compact() { return rejected('production_command_not_connected') },

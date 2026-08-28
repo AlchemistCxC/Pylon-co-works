@@ -31,6 +31,17 @@ export function createCustomPresetId(now: number, existingIds: readonly string[]
   return id
 }
 
+/**
+ * Custom preset ids have their own namespace.  Persisted data predating the
+ * namespace migration may contain a bare id; keeping this conversion in one
+ * helper prevents the list item, appliedPreset and bundle envelope from
+ * drifting apart.
+ */
+export function normalizeCustomPresetId(value: string): string {
+  const id = value.trim()
+  return /^custom-/.test(id) ? id : `custom-${id}`
+}
+
 export function pickCustomPresetTheme(state: object): Partial<ThemeSettings> {
   return Object.fromEntries(Object.entries(state).filter(([key, value]) =>
     THEME_SETTINGS_KEY_SET.has(key) && typeof value !== 'function',
@@ -66,10 +77,25 @@ export function normalizeCustomPresets(value: unknown): CustomPreset[] {
     if (!item || typeof item !== 'object') return []
     const candidate = item as Partial<CustomPreset>
     if (typeof candidate.id !== 'string' || !candidate.id || typeof candidate.name !== 'string' || !candidate.name.trim() || !candidate.theme || typeof candidate.theme !== 'object') return []
+    const id = normalizeCustomPresetId(candidate.id)
+    const name = candidate.name.trim().slice(0, 40)
     const createdAt = typeof candidate.createdAt === 'number' ? candidate.createdAt : Date.now()
     const updatedAt = typeof candidate.updatedAt === 'number' ? candidate.updatedAt : createdAt
-    const normalizedBundle = normalizePresetBundle(candidate.bundle)
-      ?? adaptLegacyThemePreset({ id: candidate.id, name: candidate.name, theme: candidate.theme as unknown as PresetJsonValue, createdAt, updatedAt })
+    const parsedBundle = normalizePresetBundle(candidate.bundle)
+    // The outer CustomPreset record is the canonical owner of identity and
+    // timestamps.  Older v2 bundles can retain a bare/mismatched id (or stale
+    // name) after migration; rewrite only this metadata while preserving all
+    // provider contributions.
+    const normalizedBundle = parsedBundle
+      ? Object.freeze({
+          ...parsedBundle,
+          id,
+          name,
+          source: 'user' as const,
+          createdAt,
+          updatedAt,
+        })
+      : adaptLegacyThemePreset({ id, name, theme: candidate.theme as unknown as PresetJsonValue, createdAt, updatedAt })
     const theme = { ...(candidate.theme as Partial<ThemeSettings>) }
     // Legacy custom presets stored one toolIndicator glyph. Fan it out once so
     // applying an old preset keeps its visual identity across all three tones.
@@ -81,8 +107,8 @@ export function normalizeCustomPresets(value: unknown): CustomPreset[] {
     return [{
       // A1：id 命名空间强制——配置导入/旧数据可带任意 id（如 'claude' 撞内置预设名），
       // 非 custom- 前缀的重新前缀，保证 appliedPreset 值与内置预设名永不冲突。
-      id: /^custom-/.test(candidate.id) ? candidate.id : `custom-${candidate.id}`,
-      name: candidate.name.trim().slice(0, 40),
+      id,
+      name,
       theme,
       createdAt,
       updatedAt,

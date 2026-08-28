@@ -89,7 +89,7 @@ function ZonePresetRow({ zone, activeName, isDirty, onApply }: {
     <Group title="局部预设">
       <div className="set-preset-row">
         {GLOBAL_PRESETS.map(p => (
-          <button key={p.name} className={`set-preset-chip ${activeName === p.name && !isDirty ? 'active' : ''}`}
+          <button type="button" key={p.name} className={`set-preset-chip ${activeName === p.name && !isDirty ? 'active' : ''}`}
             onClick={() => onApply(zone, p.name)}>{p.label}</button>
         ))}
         {isDirty && <span className="set-preset-chip active">自定义</span>}
@@ -205,6 +205,7 @@ export default function Settings({ onClose, activeSessionId, initialDomain, init
   const [rendererObjectKey, setRendererObjectKey] = useState<string | undefined>()
   const [rendererPreviewEntry, setRendererPreviewEntry] = useState<RendererSettingsCatalogEntry>()
   const [customPresetName, setCustomPresetName] = useState('')
+  const [customPresetFeedback, setCustomPresetFeedback] = useState<{ kind: 'success' | 'error'; message: string } | null>(null)
   const [switchingAgentId, setSwitchingAgentId] = useState<string | null>(null)
   const [reconnectPending, setReconnectPending] = useState(false)
   const [reconnectCommandError, setReconnectCommandError] = useState<string | null>(null)
@@ -257,6 +258,28 @@ export default function Settings({ onClose, activeSessionId, initialDomain, init
     if (!preset) return
     const sub = pickZoneFields(preset.theme, zone)
     applyZonePreset(zone, presetName, sub)
+  }
+
+  /**
+   * Custom preset persistence is a user action, so failures must stay visible
+   * in this dialog. Previously an exception from provider capture (or a stale
+   * overwrite id) escaped the click handler and looked like a dead button.
+   */
+  const saveCustomPresetFromSettings = (name: string, id?: string): string | undefined => {
+    const isOverwrite = Boolean(id)
+    try {
+      const savedId = saveCustomPreset(name, id)
+      setCustomPresetFeedback({
+        kind: 'success',
+        message: isOverwrite ? '自定义预设已覆盖' : '自定义预设已保存',
+      })
+      return savedId
+    } catch (error) {
+      const action = isOverwrite ? '覆盖自定义预设' : '保存自定义预设'
+      const detail = reportRuntimeError(action, error)
+      setCustomPresetFeedback({ kind: 'error', message: `${action}失败：${detail.message}` })
+      return undefined
+    }
   }
 
   const previewZone = sectionZone(activeSection)
@@ -442,7 +465,7 @@ const activeDomainConfig = SETTINGS_DOMAIN_BY_ID[activeDomain]
         return (
           <Group title="宠物">
             <div className="set-preset-row">
-              <button className="set-preset-chip" onClick={() => setShowPet(!showPet)}>
+              <button type="button" className="set-preset-chip" onClick={() => setShowPet(!showPet)}>
                 {showPet ? '宠物显示中 — 点击隐藏' : '宠物已隐藏 — 点击显示'}
               </button>
             </div>
@@ -461,11 +484,11 @@ const activeDomainConfig = SETTINGS_DOMAIN_BY_ID[activeDomain]
             {!isSearching && <Group title="全局预设">
               <div className="set-preset-row">
                 {GLOBAL_PRESETS.map(p => (
-                  <button key={p.name} className={`set-preset-chip ${globalStatus === p.name ? 'active' : ''}`}
+                  <button type="button" key={p.name} className={`set-preset-chip ${globalStatus === p.name ? 'active' : ''}`}
                     onClick={() => applyGlobalPreset(p.name)}>{p.label}</button>
                 ))}
                 {globalStatus && !GLOBAL_PRESETS.some(p => p.name === globalStatus) && (
-                  <button className="set-preset-chip active">{globalStatus}</button>
+                  <button type="button" className="set-preset-chip active">{globalStatus}</button>
                 )}
               </div>
               <div className="set-hint">
@@ -476,18 +499,26 @@ const activeDomainConfig = SETTINGS_DOMAIN_BY_ID[activeDomain]
               <div className="set-custom-preset-save">
                 <input className="set-input" value={customPresetName} onChange={event => setCustomPresetName(event.target.value)} placeholder="自定义预设名称" />
                 {/* A3：保存必须命名——空名禁用按钮（数据层 saveCustomPresetReducer 抛错兜底），不再静默 return */}
-                <button className="ps-btn sm" disabled={!customPresetName.trim()} title={customPresetName.trim() ? undefined : '保存必须命名'}
+                <button type="button" className="ps-btn sm" disabled={!customPresetName.trim()} title={customPresetName.trim() ? undefined : '保存必须命名'}
                   onClick={() => {
-                    const id = saveCustomPreset(customPresetName)
-                    applyCustomPreset(id)
-                    setCustomPresetName('')
+                    const id = saveCustomPresetFromSettings(customPresetName)
+                    if (id) {
+                      applyCustomPreset(id)
+                      setCustomPresetName('')
+                    }
                   }}>保存当前</button>
               </div>
+              {customPresetFeedback && (
+                <div className={`set-hint custom-preset-feedback ${customPresetFeedback.kind === 'error' ? 'is-error' : 'is-success'}`}
+                  role={customPresetFeedback.kind === 'error' ? 'alert' : 'status'} aria-live="polite">
+                  {customPresetFeedback.message}
+                </div>
+              )}
               {customPresets.length > 0 && <div className="set-custom-presets">
                 {customPresets.map(preset => <div className="set-custom-preset" key={preset.id}>
-                  <button className={`set-preset-chip ${globalStatus === preset.id ? 'active' : ''}`} onClick={() => applyCustomPreset(preset.id)}>{preset.name}</button>
-                  <button className="ps-btn sm" onClick={() => saveCustomPreset(preset.name, preset.id)}>覆盖</button>
-                  <button className="ps-btn sm danger" onClick={() => removeCustomPreset(preset.id)}>删除</button>
+                  <button type="button" className={`set-preset-chip ${globalStatus === preset.id ? 'active' : ''}`} onClick={() => applyCustomPreset(preset.id)}>{preset.name}</button>
+                  <button type="button" className="ps-btn sm" onClick={() => { void saveCustomPresetFromSettings(preset.name, preset.id) }}>覆盖</button>
+                  <button type="button" className="ps-btn sm danger" onClick={() => removeCustomPreset(preset.id)}>删除</button>
                 </div>)}
               </div>}
             </Group>}
@@ -530,7 +561,7 @@ const activeDomainConfig = SETTINGS_DOMAIN_BY_ID[activeDomain]
               </Group>
             )}
             {!isSearching && <Group title="布局编辑">
-              <button className="ps-btn primary"
+              <button type="button" className="ps-btn primary"
                 onClick={() => {
                   const cur = useStore.getState().ccEditMode
                   setCcEditMode(!cur)
@@ -567,8 +598,8 @@ const activeDomainConfig = SETTINGS_DOMAIN_BY_ID[activeDomain]
                 </div>
               </div>
               <div className="agent-settings-actions">
-                <button className="ps-btn sm primary" disabled={reconnectPending} onClick={reconnectAgent}>{reconnectPending ? '重连中…' : '重新连接'}</button>
-                <button className="ps-btn sm" disabled={reloading} onClick={reloadAgents}>{reloading ? '重载中…' : '重载配置'}</button>
+                <button type="button" className="ps-btn sm primary" disabled={reconnectPending} onClick={reconnectAgent}>{reconnectPending ? '重连中…' : '重新连接'}</button>
+                <button type="button" className="ps-btn sm" disabled={reloading} onClick={reloadAgents}>{reloading ? '重载中…' : '重载配置'}</button>
               </div>
               <dl className="agent-settings-facts">
                 <div><dt>传输方式</dt><dd>{currentStatus.transport || '未报告'}</dd></div>
@@ -730,7 +761,7 @@ const activeDomainConfig = SETTINGS_DOMAIN_BY_ID[activeDomain]
             ))}
           </div>
           <div className="settings-nav-footer">
-            <button className="set-nav-btn reset" onClick={reset}>重置主题</button>
+            <button type="button" className="set-nav-btn reset" onClick={reset}>重置主题</button>
           </div>
         </div>
 

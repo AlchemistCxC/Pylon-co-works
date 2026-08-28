@@ -10,6 +10,7 @@
  */
 
 import { cleanup, render, screen, waitFor } from '@solidjs/testing-library'
+import { createSignal } from 'solid-js'
 import { afterEach, describe, expect, it } from 'vitest'
 import { MarkdownContent } from '../MarkdownContent.solid.tsx'
 
@@ -64,6 +65,24 @@ describe('MarkdownContent heading class contract（CSS-02，CSS-04 回归门）'
     expect(codeBlock).toHaveTextContent('const first = 1')
     expect(codeBlock).toHaveTextContent('const second = 2')
     expect(container.querySelectorAll('.term-code-block')).toHaveLength(1)
+  })
+
+  it('流式结束后仍保留 Markdown 诗歌的段落与软换行', async () => {
+    const [state, setState] = createSignal({
+      text: '**星河**\n\n春风拂过山岗\n月光落在窗\n\n我把远方写进诗行\n让星河在梦里流淌',
+      streaming: true,
+    })
+    const result = render(() => <MarkdownContent text={state().text} streaming={state().streaming} />)
+
+    await waitFor(() => expect(result.container).toHaveTextContent('让星河在梦里流淌'))
+    setState(current => ({ ...current, streaming: false }))
+
+    await waitFor(() => {
+      const paragraphs = [...result.container.querySelectorAll('p')]
+      if (paragraphs.length < 2) throw new Error('final Markdown paragraphs not mounted')
+      expect(paragraphs.every(paragraph => paragraph.classList.contains('term-p'))).toBe(true)
+      expect(paragraphs.some(paragraph => paragraph.textContent?.includes('春风拂过山岗\n月光落在窗'))).toBe(true)
+    })
   })
 
   it('单行 fenced code 仍渲染为块级代码而不是 inline code', async () => {

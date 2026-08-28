@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import { describe, expect, test } from 'vitest'
-import { render, screen } from '@testing-library/react'
+import { render, screen, within } from '@testing-library/react'
 import { AssistantContent, MessageRow } from '../ChatView'
 import { useStore } from '../../../store'
 import type { Message } from '../messageTypes'
@@ -26,6 +26,17 @@ describe('MessageRow', () => {
     const content = '\n第一行\n\n第二行\n'
     const { container } = render(<AssistantContent text={content} />)
     expect(container.querySelector('.term-plain-text')?.textContent).toBe(content)
+  })
+
+  test('assistant Markdown 诗歌在异步解析后保留段落和软换行', async () => {
+    const content = '**星河**\n\n春风拂过山岗\n月光落在窗\n\n我把远方写进诗行'
+    const { container } = render(<AssistantContent text={content} />)
+    const { findByText } = within(container)
+    await findByText('星河')
+    const paragraphs = [...container.querySelectorAll('.term-assistant p')]
+    expect(paragraphs.length).toBeGreaterThanOrEqual(2)
+    expect(paragraphs.every(paragraph => paragraph.classList.contains('term-p'))).toBe(true)
+    expect(paragraphs.some(paragraph => paragraph.textContent?.includes('春风拂过山岗\n月光落在窗'))).toBe(true)
   })
 
   test('assistantDot 开启时渲染圆点', () => {

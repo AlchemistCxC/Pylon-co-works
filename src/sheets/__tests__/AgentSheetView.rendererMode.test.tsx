@@ -1548,8 +1548,8 @@ describe('AgentSheetView renderer mode context', () => {
     }))
     const sendCall = vi.mocked(invoke).mock.calls.find(call => call[0] === 'send_message')
     expect(sendCall).toBeTruthy()
-    expect(vi.mocked(invoke).mock.invocationCallOrder[vi.mocked(invoke).mock.calls.indexOf(sendCall!)]).toBeLessThan(
-      selectSession.mock.invocationCallOrder[0]!,
+    expect(selectSession.mock.invocationCallOrder[0]!).toBeLessThan(
+      vi.mocked(invoke).mock.invocationCallOrder[vi.mocked(invoke).mock.calls.indexOf(sendCall!)]!,
     )
   })
 

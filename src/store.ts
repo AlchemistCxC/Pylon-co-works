@@ -219,9 +219,18 @@ export const useStore = create<ThemeState>()(persist(
     const state = get()
     const now = Date.now()
     // id/now 由 shell 注入：reducer 保持确定性（A0 起，预设逻辑可做确定性行为测试）
-    const resolvedId = id && state.customPresets.some(preset => preset.id === id)
-      ? id
-      : createCustomPresetId(now, Object.keys(state.customPresets))
+    const requestedId = typeof id === 'string' && id.trim() ? id.trim() : undefined
+    const existing = requestedId
+      ? state.customPresets.find(preset => preset.id === requestedId)
+      : undefined
+    // An explicit id means “overwrite this preset”.  Silently falling back to
+    // a new id makes a stale row look like a no-op (and can create duplicates)
+    // after persisted data has been migrated or a mode switch rebuilt the UI.
+    if (requestedId && !existing) throw new Error('要覆盖的自定义预设不存在')
+    const resolvedId = existing?.id
+      ?? createCustomPresetId(now, state.customPresets.map(preset => preset.id))
+    const cleanName = name.trim()
+    if (!cleanName) throw new Error('预设名称不能为空')
     const rendererStore = getRendererSettingsStore()
     const captureProviders = createFirstPartyPresetProviderRegistry({
       captureTheme: () => toPresetJson(toThemeDelta(pickCustomPresetTheme(get()))) as PresetJsonValue,
@@ -239,8 +248,9 @@ export const useStore = create<ThemeState>()(persist(
     })
     const bundle = createPresetBundle({
       id: resolvedId,
-      name: name.trim().slice(0, 40),
+      name: cleanName.slice(0, 40),
       now,
+      ...(existing ? { createdAt: existing.createdAt } : {}),
       theme: captureProviders.resolve('builtin.theme')!.capture(),
       renderer: captureProviders.resolve('builtin.renderer-settings')!.capture() as unknown as RendererPresetPayload,
       presentation: captureProviders.resolve('builtin.presentation')!.capture() as unknown as PresentationPresetPayload,

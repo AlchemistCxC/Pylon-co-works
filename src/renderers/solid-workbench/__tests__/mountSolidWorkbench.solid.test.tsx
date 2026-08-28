@@ -4,7 +4,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest'
 import { mountSolidWorkbench, mountSolidWorkbenchFromHostPort } from '../mountSolidWorkbench.solid.tsx'
 import { createPreviewWorkbenchServices } from '../__fixtures__/previewWorkbenchServices.ts'
 import { createWorkbenchEnvelope, type WorkbenchEventEnvelope } from '../../../domains/workbench/events/workbenchEventSchema.ts'
-import { projectWorkbench, reduceWorkbenchEvent } from '../../../domains/workbench/workbenchProjector.ts'
+import { createWorkbenchDocument, projectWorkbench, reduceWorkbenchEvent } from '../../../domains/workbench/workbenchProjector.ts'
 import { createWorkbenchHostPort } from '../workbenchHostPort.ts'
 import type { WorkbenchCapabilitySnapshot } from '../workbenchHostPort.ts'
 import { RendererSuiteHost } from '../../../host/renderer-suite/rendererSuiteHost.ts'
@@ -307,6 +307,57 @@ describe('mountSolidWorkbench', () => {
     expect(destroys).toBe(0)
     const canonicalMessageId = projectWorkbench(events).document.messages[0]!.id
     expect(host.querySelectorAll(`[data-message-id="${canonicalMessageId}"]`)).toHaveLength(1)
+  })
+
+  it('诊断：诗歌流式旁路切到 canonical 后保留段落结构', async () => {
+    const { host, services } = mountPreview()
+    const poem = '**星河**\n\n春风拂过山岗\n月光落在窗\n\n我把远方写进诗行\n让星河在梦里流淌'
+    services.runtime.replaceDocument(createWorkbenchDocument('preview-session'), {
+      ownerKey: 'owner-preview', generation: 1, sessionId: 'preview-session',
+    })
+    services.runtime.update({ streamingText: poem, generating: true })
+    const streamingBody = await waitFor(() => {
+      const body = host.querySelector('.term-row-assistant .term-assistant-body')
+      expect(body).not.toBeNull()
+      return body as HTMLElement
+    })
+    const streamingMarkup = streamingBody.innerHTML
+
+    const events = [
+      createWorkbenchEnvelope({
+        sessionId: 'preview-session', sequence: 1,
+        recordedAt: '2026-08-25T00:00:01.000Z',
+        source: { provider: 'peri', sourceId: 'poem-delta' },
+        identity: { messageId: 'poem-message' },
+        provenance: { origin: 'local-observed', trust: 'authoritative' },
+        event: { type: 'message.delta', role: 'assistant', parts: [{ kind: 'markdown', text: poem }] },
+      }),
+      createWorkbenchEnvelope({
+        sessionId: 'preview-session', sequence: 2,
+        recordedAt: '2026-08-25T00:00:02.000Z',
+        source: { provider: 'peri', sourceId: 'poem-complete' },
+        identity: { messageId: 'poem-message' },
+        provenance: { origin: 'local-observed', trust: 'authoritative' },
+        event: { type: 'message.completed', role: 'assistant', parts: [] },
+      }),
+    ]
+    const finalDocument = projectWorkbench(events).document
+    services.runtime.replaceDocument(finalDocument, {
+      ownerKey: 'owner-preview', generation: 2, sessionId: 'preview-session',
+    })
+    services.runtime.update({ streamingText: '', generating: false })
+
+    const finalBody = await waitFor(() => {
+      const body = host.querySelector(`[data-message-id="${finalDocument.messages[0]!.id}"] .term-assistant-body`)
+      expect(body).not.toBeNull()
+      return body as HTMLElement
+    })
+    await waitFor(() => expect(finalBody.querySelector('strong')).not.toBeNull())
+    // Keep this seam explicit: the final renderer must expose all three blocks
+    // and preserve the soft line break inside each verse.
+    expect(streamingMarkup).toContain('春风拂过山岗')
+    expect(finalBody.textContent).toContain('春风拂过山岗\n月光落在窗')
+    expect(finalBody.querySelectorAll('p')).toHaveLength(3)
   })
 
   it('canonical reasoning updates keep one expanded Slot live until completion', async () => {

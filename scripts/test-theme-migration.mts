@@ -51,8 +51,8 @@ assert.deepEqual(migrated.customPresets[0], {
   updatedAt: 11,
   bundle: {
     manifestVersion: 2,
-    id: 'ok',
-    name: ' Valid ',
+    id: 'custom-ok',
+    name: 'Valid',
     source: 'user',
     createdAt: 10,
     updatedAt: 11,

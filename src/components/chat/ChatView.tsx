@@ -533,6 +533,12 @@ export function AssistantContent({ text }: { text: string; isStreaming?: boolean
         {!isPlainTextContent(text) ? (
         <Suspense fallback={<p className="term-p term-plain-text">{text}</p>}>
           <MarkdownRenderer components={{
+            // Keep the React fallback on the same block/whitespace contract as
+            // the Solid Workbench renderer.  Without an explicit class the
+            // global margin reset and HTML whitespace collapsing eat the blank
+            // lines as soon as a stream becomes a committed Markdown message.
+            p: props => <p className="term-p" {...props} />,
+            li: props => <li className="term-li" {...props} />,
             // CSS-02：Markdown heading 显式 class contract（§5.15 step 3）——h1-h6 输出
             // term-h1~term-h6，配合 ChatView.css 限定 .term-assistant 内的层级规则。
             h1: props => <h1 className="term-h1" {...props} />,
