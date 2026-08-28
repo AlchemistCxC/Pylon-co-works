@@ -8,8 +8,6 @@
   font-family: var(--font);
   overflow: hidden;
 }
-.app[data-interface-mode="modern-gui"] .browser-sheet{overflow:hidden;border:1px solid var(--border);border-radius:16px;background:color-mix(in srgb,var(--surface-canvas) 80%,transparent);box-shadow:0 16px 44px color-mix(in srgb,var(--text) 5%,transparent)}
-.app[data-interface-mode="modern-gui"] .browser-sidebar{margin:8px;border:1px solid var(--border);border-radius:13px;background:color-mix(in srgb,var(--surface-panel) 74%,transparent)}
 .app[data-interface-mode="modern-gui"] .browser-main{gap:10px;padding:14px}.app[data-interface-mode="modern-gui"] .browser-toolbar{border:1px solid var(--border);border-radius:13px;background:color-mix(in srgb,var(--surface-panel) 74%,transparent);box-shadow:0 8px 24px color-mix(in srgb,var(--text) 5%,transparent)}
 .app[data-interface-mode="modern-gui"] .browser-toolbar-button,.app[data-interface-mode="modern-gui"] .browser-zoom-toggle,.app[data-interface-mode="modern-gui"] .browser-tab-new,.app[data-interface-mode="modern-gui"] .browser-tab-close{border-radius:8px}.app[data-interface-mode="modern-gui"] .browser-address-wrap{border-radius:10px}.app[data-interface-mode="modern-gui"] .browser-tab{border-radius:9px 9px 0 0}.app[data-interface-mode="modern-gui"] .browser-viewport{overflow:hidden;border-radius:13px;box-shadow:0 8px 26px color-mix(in srgb,var(--text) 6%,transparent)}
 

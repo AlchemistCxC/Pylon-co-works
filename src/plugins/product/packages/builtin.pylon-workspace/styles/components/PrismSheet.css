@@ -8,7 +8,19 @@
   color: var(--text);
   font-family: var(--font);
 }
-.app[data-interface-mode="modern-gui"] .sheet-tool-view {
+.app[data-interface-mode="modern-gui"] :is(
+  .sheet-tool-view,
+  .overview-sheet,
+  .runtime-sheet,
+  .browser-sheet,
+  .file-sheet,
+  .gateway-sheet,
+  .history-sheet,
+  .search-sheet
+) {
+  min-width: 0;
+  min-height: 0;
+  max-width: 100%;
   overflow: hidden;
   border: 1px solid var(--stroke-default);
   border-radius: var(--ui-radius-lg);
@@ -16,11 +28,22 @@
   box-shadow: var(--shadow-raised);
 }
 .app[data-interface-mode="modern-gui"] .prism-sheet,.app[data-interface-mode="modern-gui"] .prism-main{background:transparent}
-.app[data-interface-mode="modern-gui"] .prism-sidebar {
+.app[data-interface-mode="modern-gui"] :is(
+  .ps-nav,
+  .overview-sidebar,
+  .runtime-sidebar,
+  .browser-sidebar,
+  .file-sidebar,
+  .gateway-sidebar,
+  .history-sidebar,
+  .search-sidebar
+) {
+  box-sizing: border-box;
   margin: var(--ui-space-2);
   border: 1px solid var(--stroke-default);
   border-radius: var(--ui-radius-lg);
   background: var(--surface-panel);
+  max-width: min(var(--sheet-sidebar-width, 250px), calc(100% - 320px - var(--ui-space-4)));
 }
 .app[data-interface-mode="modern-gui"] .prism-card,.app[data-interface-mode="modern-gui"] .prism-section,.app[data-interface-mode="modern-gui"] .prism-form{border-radius:12px;box-shadow:0 6px 18px color-mix(in srgb,var(--text) 4%,transparent)}
 
@@ -254,4 +277,21 @@
   .ps-body { padding: var(--ui-space-5) var(--ui-space-4); }
   .ps-split, .ps-split3 { flex-direction: column; }
   .ps-list { flex-basis: auto; width: 100% !important; }
+}
+
+@media (max-width: 520px) {
+  .app[data-interface-mode="modern-gui"] :is(
+    .ps-nav,
+    .overview-sidebar,
+    .runtime-sidebar,
+    .browser-sidebar,
+    .file-sidebar,
+    .gateway-sidebar,
+    .history-sidebar,
+    .search-sidebar
+  ) {
+    max-width: calc(100% - 280px - var(--ui-space-4));
+  }
+
+  .ps-body { padding: var(--ui-space-4); }
 }
