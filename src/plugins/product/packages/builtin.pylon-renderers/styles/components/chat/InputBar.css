@@ -4,7 +4,7 @@
   position:absolute; bottom:100%; left:0; right:0; margin-bottom:6px;
   color:var(--danger,#FF6B80); font-size:13px; padding:6px 10px;
   background:rgba(255,107,128,0.1); border:1px solid rgba(255,107,128,0.3);
-  border-radius: 0; backdrop-filter:blur(8px); z-index:11;
+  border-radius: 0; backdrop-filter:blur(8px); z-index:11; overflow-wrap:anywhere;
 }
 /* OWNER-03：Binding 状态浮层——与错误浮层同布局位（不占流），信息语义中性色；
    restore_error 用 --error 变体（恢复失败也是错误，必须醒目） */
@@ -13,6 +13,7 @@
   color:var(--text-dim); font-size:13px; padding:6px 10px;
   background:color-mix(in srgb, var(--bg-panel) 92%, var(--accent) 8%);
   border:1px solid var(--border); border-radius: 0; backdrop-filter:blur(8px); z-index:11;
+  display:flex; flex-wrap:wrap; align-items:center; gap:var(--ui-space-2); overflow-wrap:anywhere;
 }
 .input-binding-status--error {
   color:var(--danger,#FF6B80); background:rgba(255,107,128,0.1); border:1px solid rgba(255,107,128,0.3);
@@ -27,10 +28,16 @@
 .attached-chip { display:inline-flex; align-items:center; gap:4px; padding:2px 10px; background:var(--bg-panel); border:1px solid var(--border); border-radius: 0; font-size:12px; color:var(--text); cursor:pointer; }
 .attached-chip:hover { background:var(--bg-hover); }
 .command-palette { position:absolute; bottom:100%; left:0; right:0; background:var(--command-bg,#fff); color:var(--text); border:1px solid var(--border); border-radius: 0; margin-bottom:8px; overflow:hidden; backdrop-filter:blur(12px); box-shadow:0 4px 16px rgba(0,0,0,0.18); z-index:10; }
-.cmd-item { display:flex; justify-content:space-between; align-items:center; padding:7px 14px; cursor:pointer; font-size:14px; }
+.cmd-item {
+  display:flex; min-width:0; width:100%; justify-content:space-between; align-items:center;
+  gap:var(--ui-space-2); padding:var(--ui-space-2) var(--ui-space-3);
+  border:0; border-radius:0; background:transparent; color:inherit; text-align:left; font:inherit;
+  cursor:pointer;
+}
 .cmd-item:hover, .cmd-item.active { background:var(--bg-hover); }
-.cmd-name { font-weight:600; color:var(--text); font-family:var(--mono); }
-.cmd-info { color:var(--text-dim); font-size:13px; }
+.cmd-item:focus-visible { outline:var(--line-width-2) solid var(--accent); outline-offset:calc(var(--line-width-2) * -1); background:var(--bg-hover); }
+.cmd-name { min-width:0; flex:1 1 auto; overflow:hidden; font-weight:600; color:var(--text); font-family:var(--mono); text-overflow:ellipsis; white-space:nowrap; }
+.cmd-info { min-width:0; flex:0 1 auto; overflow:hidden; color:var(--text-dim); font-size:13px; text-overflow:ellipsis; white-space:nowrap; }
 .input-history-hint { position:absolute; bottom:100%; left:0; margin-bottom:8px; padding:5px 10px; color:var(--text-dim); background:var(--bg-panel); border:1px solid var(--border); border-radius: 0; font-size:12px; z-index:9; box-shadow:0 4px 12px rgba(0,0,0,0.12); }
 .queued-message-list { position:absolute; bottom:100%; left:0; right:0; margin-bottom:8px; padding:8px; background:var(--bg-panel); border:1px solid var(--border); border-radius: 0; z-index:9; box-shadow:0 4px 16px rgba(0,0,0,0.14); }
 .queued-message-title { margin-bottom:5px; color:var(--text-dim); font-size:12px; }
@@ -44,7 +51,7 @@
 .queued-message-clear { margin-top:5px; font-size:12px; }
 .app[data-ui-scheme="dark"] .command-palette { --command-bg:#1e1e2e; }
 
-.input-row { display:flex; align-items:flex-end; gap:8px; }
+.input-row { display:flex; min-width:0; align-items:flex-end; gap:var(--ui-space-2); }
 
 .input-btn {
   background:var(--bg-panel); border:1px solid var(--input-border-color,var(--border));
@@ -60,7 +67,7 @@
 .input-btn.stop svg { opacity:0.7; }
 
 .input-textarea {
-  flex:1; background:var(--input-bg,var(--bg-input)); border:1px solid var(--input-border-color,var(--border));
+  flex:1; min-width:0; background:var(--input-bg,var(--bg-input)); border:1px solid var(--input-border-color,var(--border));
   background-image:var(--input-bg-image,none); background-size:cover; background-position:center;
   border-radius:var(--input-radius,0); padding:12px 16px; color:var(--input-text-color,var(--text));
   font-family:var(--font); font-size:var(--input-font-size,17px); line-height:1.6;
@@ -203,6 +210,13 @@
   border-bottom:var(--cli-line-width,1px) solid var(--cli-line-color,#D77757);
   box-sizing:border-box;
 }
+.input-bar.cli-mode .input-row:focus-within {
+  border-top-color:var(--input-focus-border,var(--accent));
+  border-bottom-color:var(--input-focus-border,var(--accent));
+  outline:var(--line-width-2) solid var(--accent);
+  outline-offset:var(--line-width-2);
+  box-shadow:0 0 0 var(--line-width-2) var(--state-focus-ring);
+}
 .input-bar.cli-mode .input-textarea {
   background:transparent; border:none; resize:none; height:auto; min-height:auto;
   color:var(--cli-text-color,var(--text)); font-family:var(--mono);
@@ -236,3 +250,11 @@
 .app[data-interface-mode="modern-gui"] .modern-command-dock .input-history-hint,
 .app[data-interface-mode="modern-gui"] .modern-command-dock .input-error,
 .app[data-interface-mode="modern-gui"] .modern-command-dock .input-binding-status { border-radius:12px; box-shadow:0 16px 40px rgba(0,0,0,.18); }
+
+@media (prefers-reduced-motion:reduce) {
+  .input-bar,
+  .input-bar * {
+    animation:none !important;
+    transition:none !important;
+  }
+}
