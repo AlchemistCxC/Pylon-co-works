@@ -1289,17 +1289,17 @@
 
 /* Modern GUI 沿用同一双栏结构，但可使用较柔和的壳层。 */
 .app[data-interface-mode="modern-gui"] .settings-domain-rail {
-  margin:10px 0 10px 10px;
-  border:1px solid var(--border);
-  border-radius:16px 0 0 16px;
-  background:color-mix(in srgb,var(--surface-panel) 82%,transparent);
+  margin:var(--ui-space-2) 0 var(--ui-space-2) var(--ui-space-2);
+  border:1px solid var(--stroke-default);
+  border-radius:var(--ui-radius-lg) 0 0 var(--ui-radius-lg);
+  background:var(--surface-panel);
 }
-.app[data-interface-mode="modern-gui"] .settings-domain-btn { border-radius:10px; }
+.app[data-interface-mode="modern-gui"] .settings-domain-btn { border-radius:var(--ui-radius-md); }
 .app[data-interface-mode="modern-gui"] .settings-nav {
-  margin:10px 10px 10px 0;
-  border-radius:0 16px 16px 0;
+  margin:var(--ui-space-2) var(--ui-space-2) var(--ui-space-2) 0;
+  border-radius:0 var(--ui-radius-lg) var(--ui-radius-lg) 0;
 }
-.app[data-interface-mode="modern-gui"] .settings-nav-context { margin:0 -10px 12px; border-radius:0 16px 0 0; }
+.app[data-interface-mode="modern-gui"] .settings-nav-context { margin:0 -10px 12px; border-radius:0 var(--ui-radius-lg) 0 0; }
 
 @media(max-width:1080px) {
   .settings-domain-rail { width:68px; flex-basis:68px; }
