@@ -1,4 +1,4 @@
-import { useMemo, useState, useEffect, useSyncExternalStore } from 'react'
+import { useMemo, useState, useEffect, useSyncExternalStore, useId, useLayoutEffect, useRef } from 'react'
 import { IS_TAURI } from '../infrastructure/tauri/env'
 import { invoke } from '@tauri-apps/api/core'
 import { createAgentClient } from '../infrastructure/acp/agentClient'
@@ -53,6 +53,20 @@ import { resolveInterfaceModeSuite } from '../application/transactions/activateI
 // FE-AUD-008：typed client 收口 agent 域 command literal
 const agentClient = createAgentClient({ invoke: (cmd, args) => invoke(cmd, args as Record<string, unknown> | undefined) })
 
+const SETTINGS_FOCUSABLE_SELECTOR = [
+  'button:not([disabled])',
+  '[href]',
+  'input:not([disabled])',
+  'select:not([disabled])',
+  'textarea:not([disabled])',
+  '[tabindex]:not([tabindex="-1"])',
+].join(',')
+
+function settingsFocusable(root: HTMLElement): HTMLElement[] {
+  return [...root.querySelectorAll<HTMLElement>(SETTINGS_FOCUSABLE_SELECTOR)]
+    .filter(element => element.getAttribute('aria-hidden') !== 'true' && !element.hidden)
+}
+
 // ── helpers ──
 
 function Group({ title, children, defaultOpen }: { title:string; children:React.ReactNode; defaultOpen?:boolean }) {
@@ -93,6 +107,45 @@ export default function Settings({ onClose, activeSessionId, initialDomain, init
   initialSection?: string
   initialAgentId?: string
 }) {
+  const settingsRef = useRef<HTMLDivElement>(null)
+  const titleId = useId()
+  const restoreFocusRef = useRef<HTMLElement | null>(null)
+  if (restoreFocusRef.current === null && typeof document !== 'undefined') {
+    const active = document.activeElement
+    restoreFocusRef.current = active instanceof HTMLElement ? active : null
+  }
+
+  useLayoutEffect(() => {
+    const root = settingsRef.current
+    if (!root) return
+    const focusables = settingsFocusable(root)
+    focusables[0]?.focus()
+    return () => {
+      const previous = restoreFocusRef.current
+      if (previous && previous.isConnected && !root.contains(previous)) previous.focus()
+    }
+  }, [])
+
+  const handleDialogKeyDown = (event: React.KeyboardEvent<HTMLDivElement>) => {
+    if (event.key !== 'Tab') return
+    const root = settingsRef.current
+    if (!root) return
+    const focusables = settingsFocusable(root)
+    if (focusables.length === 0) {
+      event.preventDefault()
+      root.focus()
+      return
+    }
+    const currentIndex = focusables.indexOf(document.activeElement as HTMLElement)
+    const nextIndex = event.shiftKey
+      ? (currentIndex <= 0 ? focusables.length - 1 : currentIndex - 1)
+      : (currentIndex < 0 || currentIndex >= focusables.length - 1 ? 0 : currentIndex + 1)
+    if (currentIndex < 0 || (event.shiftKey && currentIndex === 0) || (!event.shiftKey && currentIndex === focusables.length - 1)) {
+      event.preventDefault()
+      focusables[nextIndex]?.focus()
+    }
+  }
+
   // 只订阅主题字段 + ccEditMode：后台生成时的 live 状态（token/生成源）不再穿透整棵设置树。
   // pickCustomPresetTheme 白名单覆盖 Settings 全部 t.xxx 访问（已核对），ccEditMode 单独补。
   const t = useStore(useShallow(s => ({
@@ -569,10 +622,10 @@ const activeDomainConfig = SETTINGS_DOMAIN_BY_ID[activeDomain]
   }
 
   return (
-    <div className="settings">
+    <div ref={settingsRef} className="settings" role="dialog" aria-modal="true" aria-labelledby={titleId} onKeyDown={handleDialogKeyDown}>
       <header className="settings-header">
         <div>
-          <h2>设置</h2>
+          <h2 id={titleId}>设置</h2>
           <p>调整 Pylon 的外观、工作区和 Agent 运行方式。</p>
         </div>
         <button type="button" className="settings-close" onClick={onClose} aria-label="关闭设置">✕</button>
