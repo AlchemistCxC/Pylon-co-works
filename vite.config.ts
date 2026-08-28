@@ -25,8 +25,12 @@ export default defineConfig({
             return 'first-party-pylon-shared'
           }
           // 首屏必需的大依赖拆独立 vendor chunk，让应用主 chunk 保持轻量（< 600 kB）
-          if (/node_modules\/(react|react-dom|scheduler)\//.test(id)) return 'vendor-react'
-          if (/node_modules\/(motion|motion-dom|framer-motion)\//.test(id)) return 'vendor-motion'
+          // Match the normalized path as well as first-party packages.  Vite
+          // can hand Rollup Windows-style ids; testing the raw `id` made the
+          // vendor split platform-dependent and silently inflated the app
+          // chunk on Windows builds.
+          if (/node_modules\/(react|react-dom|scheduler)\//.test(normalizedId)) return 'vendor-react'
+          if (/node_modules\/(motion|motion-dom|framer-motion)\//.test(normalizedId)) return 'vendor-motion'
         },
       },
     },

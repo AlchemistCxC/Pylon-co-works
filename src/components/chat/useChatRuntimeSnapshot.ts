@@ -1,4 +1,4 @@
-import { useSyncExternalStore } from 'react'
+import { useCallback, useSyncExternalStore } from 'react'
 import { getChatController } from './chatEventController'
 import type { PlanEntry } from '../../domains/tasks/planTypes.ts'
 
@@ -17,17 +17,19 @@ export interface ChatHorizontalSnapshot {
 }
 
 export function useChatRuntimeSnapshot(source: string | null): ChatHorizontalSnapshot {
-  const version = useSyncExternalStore(
-    callback => {
+  // Keep the external-store seam stable while spinner ticks re-render the
+  // footer.  Recreating these closures on every tick made React tear down and
+  // recreate the source subscription even though `source` was unchanged.
+  const subscribe = useCallback((callback: () => void) => {
       const handle = getChatController()
       if (!source || !handle) return () => {}
       return handle.subscribe(source, callback)
-    },
-    () => {
+    }, [source])
+  const getSnapshot = useCallback(() => {
       const handle = getChatController()
       return source && handle ? handle.getSnapshot(source) : 0
-    },
-  )
+    }, [source])
+  const version = useSyncExternalStore(subscribe, getSnapshot, getSnapshot)
   const handle = getChatController()
   return {
     version,

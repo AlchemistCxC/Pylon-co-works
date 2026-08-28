@@ -103,7 +103,13 @@ const ChatView = React.memo(function ChatView({ sessionId, workspaceKind = 'agen
   const reduceMotion = useReducedMotion()
   const sessions = useIdentityStore(state => state.sessions)
   const chatViewRef = useRef<HTMLDivElement>(null)
-  const [messages, setMessages] = useState<Message[]>(!IS_TAURI ? resolveInitialBrowserMessages() : [])
+  // Resolve the browser/demo snapshot only on mount.  The benchmark mode can
+  // materialise up to 5,000 messages; evaluating it as a normal `useState`
+  // argument rebuilt that array on every parent render even though React only
+  // uses the value during the initial mount.
+  const [messages, setMessages] = useState<Message[]>(() => (
+    !IS_TAURI ? resolveInitialBrowserMessages() : []
+  ))
   // 浏览器 demo：按会话恢复真实快照消息（搜索定位依赖快照内容；demo seed 已写 pylon-msgs-*）
   useEffect(() => {
     if (IS_TAURI || !sessionId) return
@@ -294,13 +300,23 @@ const MESSAGE_RENDER_COMMANDS: RenderCommandPort = Object.freeze({
   execute: () => undefined,
 })
 
-export function MessageRendererHost(props: MessageRowProps & {
+type MessageRendererHostProps = MessageRowProps & {
   rendererContext?: MessageRenderContext
   rendererRevision: number
   rendererId?: string
   rendererAppearance?: unknown
   rendererCommands?: RenderCommandPort
-}) {
+}
+
+/**
+ * Renderer hosts sit on the message-list hot path.  The parent renders again
+ * for spinner ticks and streaming text, but those updates do not change a
+ * settled message.  In particular, `rowRef` is intentionally ignored here:
+ * ChatView creates the registration closure while mapping rows, and treating
+ * that closure as semantic data would force every external surface to receive
+ * a needless `update` on each parent render.
+ */
+export const MessageRendererHost = React.memo(function MessageRendererHost(props: MessageRendererHostProps) {
   const { rendererContext, rendererRevision, rendererId, rendererAppearance, rendererCommands, ...rowProps } = props
   const containerRef = useRef<HTMLDivElement>(null)
   const mountedRef = useRef<{ surface: RenderSurface; handle: unknown; unsubscribeError: () => void } | null>(null)
@@ -401,6 +417,23 @@ export function MessageRendererHost(props: MessageRowProps & {
 
   if (!selected) return <MemoMessageRow {...rowProps} />
   return <div className="message-renderer-host" data-message-renderer={selected.value.renderer.rendererId} ref={containerRef} />
+}, areMessageRendererHostPropsEqual)
+
+function areMessageRendererHostPropsEqual(
+  previous: MessageRendererHostProps,
+  next: MessageRendererHostProps,
+): boolean {
+  return previous.renderMessage.message === next.renderMessage.message
+    && previous.renderMessage.type === next.renderMessage.type
+    && previous.reduceMotion === next.reduceMotion
+    && previous.toolVisualState === next.toolVisualState
+    && previous.highlighted === next.highlighted
+    && previous.isStatic === next.isStatic
+    && previous.rendererContext === next.rendererContext
+    && previous.rendererRevision === next.rendererRevision
+    && previous.rendererId === next.rendererId
+    && previous.rendererAppearance === next.rendererAppearance
+    && previous.rendererCommands === next.rendererCommands
 }
 
 
@@ -484,9 +517,11 @@ export function AssistantContent({ text }: { text: string; isStreaming?: boolean
   // 结构同 CC AssistantTextMessage：flex row 圆点列 + 内容列，圆点与首行共享 line box 基线对齐；
   // 圆点列宽 --dot-col-width 与工具指示共列；颜色随消息文字（--msg-text 链，claude 预设为纯白）。
   // 单条消息一个圆点（多段落 markdown 共用一个，首块无上边距，圆点贴首行）。
-  const assistantDot = useStore(s => s.assistantDot)
-  const assistantDotGlyph = useStore(s => s.assistantDotGlyph)
-  const assistantDotImage = useStore(s => s.assistantDotImage)
+  const { assistantDot, assistantDotGlyph, assistantDotImage } = useStore(useShallow(s => ({
+    assistantDot: s.assistantDot,
+    assistantDotGlyph: s.assistantDotGlyph,
+    assistantDotImage: s.assistantDotImage,
+  })))
   const modernGui = useInterfaceModeStore(state => state.interfaceMode === 'modern-gui')
   return (
     <div className={`term-assistant${assistantDot ? ' has-dot' : ''}`}>
@@ -637,20 +672,42 @@ function ToolCard({ model }: { model: ReturnType<typeof buildToolPresentationMod
   recordRender('ToolCard.render')
   const [open, setOpen] = useState(false)
   const bodyId = useId()
-  const glow = useStore(s => s.toolIndicatorGlow) || 0
-  const glowColor = useStore(s => s.toolIndicatorGlowColor) || ''
-  const toolOk = useStore(s => s.toolOk)
-  const toolRun = useStore(s => s.toolRun)
-  const toolErr = useStore(s => s.toolErr)
-  const connectorMode = useStore(s => s.toolConnectorMode) || 'none'
-  const connectorColor = useStore(s => s.toolConnectorColor) || 'rgba(0,0,0,0.12)'
+  const {
+    glow: rawGlow,
+    glowColor: rawGlowColor,
+    toolOk,
+    toolRun,
+    toolErr,
+    connectorMode: rawConnectorMode,
+    connectorColor: rawConnectorColor,
+    toolIndicator,
+    toolIndicatorRun,
+    toolIndicatorOk,
+    toolIndicatorErr,
+  } = useStore(useShallow(s => ({
+    glow: s.toolIndicatorGlow,
+    glowColor: s.toolIndicatorGlowColor,
+    toolOk: s.toolOk,
+    toolRun: s.toolRun,
+    toolErr: s.toolErr,
+    connectorMode: s.toolConnectorMode,
+    connectorColor: s.toolConnectorColor,
+    toolIndicator: s.toolIndicator,
+    toolIndicatorRun: s.toolIndicatorRun,
+    toolIndicatorOk: s.toolIndicatorOk,
+    toolIndicatorErr: s.toolIndicatorErr,
+  })))
+  const glow = rawGlow || 0
+  const glowColor = rawGlowColor || ''
+  const connectorMode = rawConnectorMode || 'none'
+  const connectorColor = rawConnectorColor || 'rgba(0,0,0,0.12)'
   const modernGui = useInterfaceModeStore(state => state.interfaceMode === 'modern-gui')
   const status = toolStatePresentation(model.state, model.hasOutput).tone
   const indicatorAsset = resolveToolIndicatorAssetForTone(status, {
-    toolIndicator: useStore(s => s.toolIndicator),
-    toolIndicatorRun: useStore(s => s.toolIndicatorRun),
-    toolIndicatorOk: useStore(s => s.toolIndicatorOk),
-    toolIndicatorErr: useStore(s => s.toolIndicatorErr),
+    toolIndicator,
+    toolIndicatorRun,
+    toolIndicatorOk,
+    toolIndicatorErr,
   })
   const displaySummary = truncateToolSummary(model.summary)
   const glowCss = glow > 0
@@ -702,9 +759,12 @@ function ModernToolIcon({ name }: { name: string }) {
 
 function UserLine({ sender, content }: { sender: string; content: string }) {
   const getUser = useIdentityStore(s => s.getUser)
-  const storeUser = useStore(s => s.userName)
-  const prefix = useStore(s => s.userPrefix) || '❯'
-  const userColor = useStore(s => s.userColor)
+  const { storeUser, rawPrefix, userColor } = useStore(useShallow(s => ({
+    storeUser: s.userName,
+    rawPrefix: s.userPrefix,
+    userColor: s.userColor,
+  })))
+  const prefix = rawPrefix || '❯'
   const user = getUser(sender)
   const modernGui = useInterfaceModeStore(state => state.interfaceMode === 'modern-gui')
   const name = storeUser || user?.name || sender.replace(/^.*:/, '')

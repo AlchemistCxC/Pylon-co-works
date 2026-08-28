@@ -14,6 +14,13 @@ import FileViewRenderBoundary from './FileViewRenderBoundary.tsx'
 import { registerWorkspaceLiveCloseGuard } from '../../workspace-sheets/workspaceLiveCloseGuards.ts'
 import { FILE_NAVIGATION_METADATA_KEY, parsePendingFileNavigation } from './fileSheetNavigation.ts'
 
+// The registry is a process singleton.  Keep the external-store adapters at
+// module scope so navigating between sheets does not create a fresh `bind`
+// closure (and force useSyncExternalStore to unsubscribe/resubscribe on every
+// render).
+const subscribeFileWorkbench = (listener: () => void) => getFileWorkbenchRegistry().subscribe(listener)
+const getFileWorkbenchSnapshot = () => getFileWorkbenchRegistry().getSnapshot()
+
 /**
  * FileSheetView — FileSheet 主视图（W2-03/04，D-08 VS Code 风格改造；ISSUE-08 D-02/D-04）。
  *
@@ -57,7 +64,7 @@ export default function FileSheetView({ sheet, ctx }: { sheet: SheetRecord; ctx:
   }, [persistedSessionId, state.targetSessionId])
   const targetSession = sessions.find(session => session.id === state.targetSessionId)
   const target = useMemo(() => workspaceTargetFromSession(targetSession), [targetSession])
-  useSyncExternalStore(getFileWorkbenchRegistry().subscribe.bind(getFileWorkbenchRegistry()), getFileWorkbenchRegistry().getSnapshot.bind(getFileWorkbenchRegistry()))
+  useSyncExternalStore(subscribeFileWorkbench, getFileWorkbenchSnapshot, getFileWorkbenchSnapshot)
   const activities = listFileActivities(target)
   const selectedActivity = activities.find(activity => activity.id === state.activeSection) ?? activities[0] ?? null
   const fileProvider = resolveFileProvider(target)
@@ -139,10 +146,10 @@ export default function FileSheetView({ sheet, ctx }: { sheet: SheetRecord; ctx:
   const ViewComponent = viewRenderer?.renderKind === 'first-party-react' ? viewRenderer.component as ComponentType<FileViewRendererProps> : null
   const viewInstanceKey = `${workspaceTargetKey(target) ?? 'unbound'}:${activeTab ? fileTabKey(activeTab) : 'empty'}`
 
-  const readCurrentTabs = () => {
+  const readCurrentTabs = useCallback(() => {
     const currentSheet = useWorkspaceStore.getState().workspaceSheets.sheets.find(item => item.id === sheet.id)
     return parseFileTabs(currentSheet?.metadata?.openTabs)
-  }
+  }, [sheet.id])
 
   const persistTabs = (tabs: FileTabRecord[], activeKey: string | null, targetSessionId = state.targetSessionId) => {
     const activeFile = tabs.find(tab => fileTabKey(tab) === activeKey)?.path
@@ -238,7 +245,7 @@ export default function FileSheetView({ sheet, ctx }: { sheet: SheetRecord; ctx:
       targetSessionId: state.targetSessionId ?? '',
       [FILE_NAVIGATION_METADATA_KEY]: '',
     })
-  }, [activeTab, dirtyTabKeys, patchSheetMetadata, savingTabKeys, sheet.id, sheet.metadata, state.targetSessionId])
+  }, [activeTab, dirtyTabKeys, patchSheetMetadata, readCurrentTabs, savingTabKeys, sheet.id, sheet.metadata, state.targetSessionId])
 
   const openDiffTab = (path: string, staged: boolean) => {
     const nextKey = fileTabKey({ path, viewType: 'git.diff' })

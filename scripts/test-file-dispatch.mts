@@ -129,7 +129,11 @@ import { readFileSync } from 'node:fs'
   assert.match(tabView, /window\.setTimeout\(\(\) => \{/, '版本戳变化必须 debounce 重拉/探针')
   assert.match(tabView, /}, 300\)/, '必须 300ms debounce')
   assert.match(tabView, /if \(editingRef\.current \|\| contentRef\.current !== diskRef\.current\) probeDisk\(\)\s+else loadContent\(true\)/, 'I08-A-FE-02：编辑中或有未保存编辑走探针不静默覆盖，只读保持重拉')
-  assert.match(tabView, /data-changed=\{changedLines\.includes\(index \+ 1\)/, '改动行必须挂 data-changed 高亮')
+  assert.ok(
+    /data-changed=\{changedLines\.includes\(index \+ 1\)/.test(tabView)
+    || /data-changed=\{changedLineSet\.has\(index \+ 1\)/.test(tabView),
+    '改动行必须挂 data-changed 高亮',
+  )
   assert.match(tabView, /changedLineNumbers\(previous, loaded\.text\)/, '重拉必须行级 diff')
 }
 

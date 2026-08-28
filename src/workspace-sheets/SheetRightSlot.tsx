@@ -5,6 +5,10 @@ import { getContextPanelRegistry } from '../plugin-runtime/runtimeServices.ts'
 import { useSyncExternalStore } from 'react'
 import { selectAvailableContextPanels } from '../plugin-runtime/context-panel/contextPanelSelection.ts'
 
+const contextPanelRegistry = getContextPanelRegistry()
+const subscribeContextPanels = (listener: () => void) => contextPanelRegistry.subscribe(listener)
+const getContextPanelSnapshot = () => contextPanelRegistry.getSnapshot()
+
 /**
  * SheetRightSlot — 右栏壳（W1-03 预留，W1-04 接 ContextPanel）。
  *
@@ -14,11 +18,10 @@ import { selectAvailableContextPanels } from '../plugin-runtime/context-panel/co
  */
 export default function SheetRightSlot({ sheet, ctx }: { sheet: SheetRecord; ctx: SheetContext }) {
   const rightPanelCollapsed = useWorkspaceStore(s => s.rightPanelCollapsed)
-  const registry = getContextPanelRegistry()
   const snapshot = useSyncExternalStore(
-    listener => registry.subscribe(listener),
-    () => registry.getSnapshot(),
-    () => registry.getSnapshot(),
+    subscribeContextPanels,
+    getContextPanelSnapshot,
+    getContextPanelSnapshot,
   )
   const enabled = selectAvailableContextPanels(snapshot.entries, {
     workspaceKind: sheet.kind,

@@ -6,6 +6,7 @@ import { resolveSpinnerFrames } from './chat/spinnerFrames'
 import { resolveConnectorColor, type ToolConnectorStatus } from '../domains/tool/toolPresentation'
 import { resolveToolIndicatorAssetForTone } from './chat/toolIndicatorAssets'
 import { toCssBackgroundImage } from '../backgroundImage'
+import { useShallow } from 'zustand/react/shallow'
 
 interface Props { zone: string }
 
@@ -58,19 +59,37 @@ export default function SettingsPreview({ zone }: Props) {
 }
 
 function PreviewApp({ zone }: { zone: string }) {
-  const rightBg = useStore(s => s.rightBg)
-  const rightBgImage = useStore(s => s.rightBgImage)
-  const rightWidth = useStore(s => s.rightWidth)
-  const rightTransparency = useStore(s => s.rightTransparency)
-  const rightBlur = useStore(s => s.rightBlur)
-  const connectorMode = useStore(s => s.toolConnectorMode) || 'none'
-  const connectorColor = useStore(s => s.toolConnectorColor) || 'rgba(0,0,0,0.12)'
-  const connectorStyle = useStore(s => s.toolConnectorStyle)
-  const connectorWidth = useStore(s => s.toolConnectorWidth)
-  const connectorOpacity = useStore(s => s.toolConnectorOpacity)
-  const toolOk = useStore(s => s.toolOk)
-  const toolRun = useStore(s => s.toolRun)
-  const toolErr = useStore(s => s.toolErr)
+  const {
+    rightBg,
+    rightBgImage,
+    rightWidth,
+    rightTransparency,
+    rightBlur,
+    rawConnectorMode,
+    rawConnectorColor,
+    connectorStyle,
+    connectorWidth,
+    connectorOpacity,
+    toolOk,
+    toolRun,
+    toolErr,
+  } = useStore(useShallow(s => ({
+    rightBg: s.rightBg,
+    rightBgImage: s.rightBgImage,
+    rightWidth: s.rightWidth,
+    rightTransparency: s.rightTransparency,
+    rightBlur: s.rightBlur,
+    rawConnectorMode: s.toolConnectorMode,
+    rawConnectorColor: s.toolConnectorColor,
+    connectorStyle: s.toolConnectorStyle,
+    connectorWidth: s.toolConnectorWidth,
+    connectorOpacity: s.toolConnectorOpacity,
+    toolOk: s.toolOk,
+    toolRun: s.toolRun,
+    toolErr: s.toolErr,
+  })))
+  const connectorMode = rawConnectorMode || 'none'
+  const connectorColor = rawConnectorColor || 'rgba(0,0,0,0.12)'
   const previewConnectorColor = (status: ToolConnectorStatus) => resolveConnectorColor(
     connectorMode,
     status,
@@ -162,22 +181,37 @@ function PreviewApp({ zone }: { zone: string }) {
 }
 
 function PvUser() {
-  const userName = useStore(s => s.userName) || 'user'
-  const prefix = useStore(s => s.userPrefix) || '❯'
-  const userColor = useStore(s => s.userColor)
+  const { rawUserName, rawPrefix, userColor } = useStore(useShallow(s => ({
+    rawUserName: s.userName,
+    rawPrefix: s.userPrefix,
+    userColor: s.userColor,
+  })))
+  const userName = rawUserName || 'user'
+  const prefix = rawPrefix || '❯'
   const cs = userColor ? { color: userColor } : undefined
   return <><span className="term-user-prefix" style={cs}>{prefix}</span><span className="term-user-name" style={cs}>{userName}</span><span>帮我检查一下这段代码</span></>
 }
 
 function PvSpinner() {
-  const preset = useStore(s => s.spinnerFramePreset)
-  const customFrames = useStore(s => s.spinnerCustomFrames)
-  const doneMarker = useStore(s => s.spinnerDoneMarker)
-  const cancelledMarker = useStore(s => s.spinnerCancelledMarker)
-  const errorMarker = useStore(s => s.spinnerErrorMarker)
-  const doneMode = useStore(s => s.spinnerDoneMarkerMode)
-  const cancelledMode = useStore(s => s.spinnerCancelledMarkerMode)
-  const errorMode = useStore(s => s.spinnerErrorMarkerMode)
+  const {
+    preset,
+    customFrames,
+    doneMarker,
+    cancelledMarker,
+    errorMarker,
+    doneMode,
+    cancelledMode,
+    errorMode,
+  } = useStore(useShallow(s => ({
+    preset: s.spinnerFramePreset,
+    customFrames: s.spinnerCustomFrames,
+    doneMarker: s.spinnerDoneMarker,
+    cancelledMarker: s.spinnerCancelledMarker,
+    errorMarker: s.spinnerErrorMarker,
+    doneMode: s.spinnerDoneMarkerMode,
+    cancelledMode: s.spinnerCancelledMarkerMode,
+    errorMode: s.spinnerErrorMarkerMode,
+  })))
   const frames = resolveSpinnerFrames(preset, customFrames)
   const previewSummary = (reason: 'done' | 'cancelled' | 'error', completedFrame = '') => ({
     elapsedMs: 3000,
@@ -197,17 +231,31 @@ function PvSpinner() {
 }
 
 function PvTool({ name, input, status }: { name: string; input: string; status: ToolConnectorStatus }) {
-  const toolOk = useStore(s => s.toolOk)
-  const toolRun = useStore(s => s.toolRun)
-  const toolErr = useStore(s => s.toolErr)
-  const toolIndicator = useStore(s => s.toolIndicator)
-  const toolIndicatorRun = useStore(s => s.toolIndicatorRun)
-  const toolIndicatorOk = useStore(s => s.toolIndicatorOk)
-  const toolIndicatorErr = useStore(s => s.toolIndicatorErr)
+  const {
+    toolOk,
+    toolRun,
+    toolErr,
+    toolIndicator,
+    toolIndicatorRun,
+    toolIndicatorOk,
+    toolIndicatorErr,
+    glow,
+    glowColor,
+  } = useStore(useShallow(s => ({
+    toolOk: s.toolOk,
+    toolRun: s.toolRun,
+    toolErr: s.toolErr,
+    toolIndicator: s.toolIndicator,
+    toolIndicatorRun: s.toolIndicatorRun,
+    toolIndicatorOk: s.toolIndicatorOk,
+    toolIndicatorErr: s.toolIndicatorErr,
+    glow: s.toolIndicatorGlow,
+    glowColor: s.toolIndicatorGlowColor,
+  })))
   const indicatorAsset = resolveToolIndicatorAssetForTone(status, { toolIndicator, toolIndicatorRun, toolIndicatorOk, toolIndicatorErr })
-  const glow = useStore(s => s.toolIndicatorGlow) || 0
-  const glowColor = useStore(s => s.toolIndicatorGlowColor) || ''
+  const safeGlow = glow || 0
+  const safeGlowColor = glowColor || ''
   const statusColor = status === 'ok' ? toolOk : status === 'err' ? toolErr : toolRun
-  const glowCss = glow > 0 ? { textShadow: `0 0 ${glow}px ${glowColor || statusColor || 'currentColor'}` } : undefined
+  const glowCss = safeGlow > 0 ? { textShadow: `0 0 ${safeGlow}px ${safeGlowColor || statusColor || 'currentColor'}` } : undefined
   return <div className="term-tool" data-status={status}><div className="term-tool-head"><span className={`term-tool-indicator ${status}`} aria-label={indicatorAsset.ariaLabel[status === 'ok' ? 'completed' : status === 'err' ? 'failed' : 'running']} role="img" style={glowCss}>{indicatorAsset.glyph}</span><span className="term-tool-name">{name}</span><span className="term-tool-summary"> ({input})</span>{status === 'ok' && <span className="term-tool-suffix"> — 12 lines</span>}</div></div>
 }

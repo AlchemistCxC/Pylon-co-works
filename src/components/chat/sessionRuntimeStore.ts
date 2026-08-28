@@ -133,6 +133,31 @@ function mapMessages(runtime: SourceChatRuntime, mapper: (m: Message, index: num
 }
 
 /**
+ * Copy-on-write update for a known message position.  Streaming chunks and
+ * tool updates already locate their target (the tail or a unique tool id), so
+ * mapping the whole history needlessly invokes a callback for every message
+ * on each event.  The array is still copied to preserve reducer immutability,
+ * but untouched message references remain stable for memoized rows.
+ */
+function updateMessageAt(
+  runtime: SourceChatRuntime,
+  index: number,
+  mapper: (message: Message) => Message,
+): SourceChatRuntime {
+  if (index < 0 || index >= runtime.messages.length) return runtime
+  const messages = runtime.messages.slice()
+  messages[index] = mapper(messages[index])
+  return { ...runtime, messages }
+}
+
+function updateLastMessage(
+  runtime: SourceChatRuntime,
+  mapper: (message: Message) => Message,
+): SourceChatRuntime {
+  return updateMessageAt(runtime, runtime.messages.length - 1, mapper)
+}
+
+/**
  * settle：running 消息收敛（reasoning 补 thoughtDurationMs；tool 补 completed），
  * 语义同 chatEventController::settleMessages（tool/reasoning 终态收敛）。
  * U2-C：live/replay 统一 settle `messages`。
@@ -186,9 +211,9 @@ function flushStreaming(runtime: SourceChatRuntime, now: number, agentId: string
     // 只可能来自当前生成的直写续段（完成态 assistant 的缓冲必为空）
     const last = next.messages.at(-1)
     if (last?.role === 'assistant') {
-      next = mapMessages(next, (m, i, arr) => i === arr.length - 1 && m.role === 'assistant'
-        ? { ...m, content: m.content + text, running: false }
-        : m)
+      next = updateLastMessage(next, message => message.role === 'assistant'
+        ? { ...message, content: message.content + text, running: false }
+        : message)
     } else {
       seq += 1
       next = appendMessage(next, {
@@ -360,9 +385,11 @@ export function applyChatEvent(
       if (last?.role === 'assistant' && (last.running || replayAppend)) {
         return {
           ...state,
-          [key]: touch(mapMessages(current, (m, i, arr) => i === arr.length - 1
-            ? { ...m, content: m.content + text, ...(append.identity ? { externalIdentity: append.identity } : {}) }
-            : m), { kind: 'responding' }, replay),
+          [key]: touch(updateLastMessage(current, message => ({
+            ...message,
+            content: message.content + text,
+            ...(append.identity ? { externalIdentity: append.identity } : {}),
+          })), { kind: 'responding' }, replay),
         }
       }
       const seq = current.seq + 1
@@ -404,9 +431,11 @@ export function applyChatEvent(
       if (last?.role === 'reasoning' && (last.running || replayAppend)) {
         return {
           ...state,
-          [key]: touch(mapMessages(withStart, (m, i, arr) => i === arr.length - 1
-            ? { ...m, content: m.content + text, ...(append.identity ? { externalIdentity: append.identity } : {}) }
-            : m), { kind: 'thinking' }, replay),
+          [key]: touch(updateLastMessage(withStart, message => ({
+            ...message,
+            content: message.content + text,
+            ...(append.identity ? { externalIdentity: append.identity } : {}),
+          })), { kind: 'thinking' }, replay),
         }
       }
       const seq = withStart.seq + 1
@@ -427,25 +456,26 @@ export function applyChatEvent(
       const replay = event.replay === true
       const toolId = normalizeToolId(event.toolCallId)
       const target = current.messages
-      const existingTool = toolId ? target.find(message => message.id === 'tool-' + toolId) : undefined
+      const existingToolIndex = toolId
+        ? target.findIndex(message => message.id === 'tool-' + toolId)
+        : -1
+      const existingTool = existingToolIndex >= 0 ? target[existingToolIndex] : undefined
       if (existingTool) {
         return {
           ...state,
-          [key]: touch(mapMessages(current, message => message.id === existingTool.id
-            ? {
-                ...message,
-                toolName: event.title || message.toolName,
-                sender: event.title ? 'tool:' + event.title : message.sender,
-                toolKind: event.toolKind ?? message.toolKind,
-                toolInput: event.rawInput === undefined
-                  ? message.toolInput
-                  : getToolSummary(event.title || message.toolName || '?', event.rawInput) || (typeof event.rawInput === 'string' ? event.rawInput.slice(0, 80) : message.toolInput),
-                contentBlocks: event.contentBlocks ?? message.contentBlocks,
-                // EVT-04：raw 字段不丢——re-dispatch 以新 rawInput 覆盖，缺失保留旧值
-                rawInput: event.rawInput !== undefined ? event.rawInput : message.rawInput,
-                clientGeneration: event.clientGeneration ?? message.clientGeneration,
-              }
-            : message), { kind: 'tool', name: event.title || existingTool.toolName || '?' }, replay),
+          [key]: touch(updateMessageAt(current, existingToolIndex, message => ({
+            ...message,
+            toolName: event.title || message.toolName,
+            sender: event.title ? 'tool:' + event.title : message.sender,
+            toolKind: event.toolKind ?? message.toolKind,
+            toolInput: event.rawInput === undefined
+              ? message.toolInput
+              : getToolSummary(event.title || message.toolName || '?', event.rawInput) || (typeof event.rawInput === 'string' ? event.rawInput.slice(0, 80) : message.toolInput),
+            contentBlocks: event.contentBlocks ?? message.contentBlocks,
+            // EVT-04：raw 字段不丢——re-dispatch 以新 rawInput 覆盖，缺失保留旧值
+            rawInput: event.rawInput !== undefined ? event.rawInput : message.rawInput,
+            clientGeneration: event.clientGeneration ?? message.clientGeneration,
+          })), { kind: 'tool', name: event.title || existingTool.toolName || '?' }, replay),
         }
       }
       if (replay) {
@@ -486,8 +516,8 @@ export function applyChatEvent(
       const lines = outputStr ? outputStr.split(/\n/).filter((l: string) => l.trim()).length : 0
       const replay = event.replay === true
       const target = current.messages
-      const hasTool = target.some(message => message.id === 'tool-' + toolId)
-      if (!hasTool) {
+      const toolIndex = target.findIndex(message => message.id === 'tool-' + toolId)
+      if (toolIndex < 0) {
         const seq = current.seq + 1
         return {
           ...state,
@@ -517,22 +547,21 @@ export function applyChatEvent(
           }, seq), { kind: 'tool', name: '?' }, replay),
         }
       }
+      const existingTool = target[toolIndex]
       return {
         ...state,
-        [key]: touch(mapMessages(current, m => m.id === 'tool-' + toolId
-          ? {
-              ...m,
-              toolOutput: outputStr,
-              toolOutputLines: lines,
-              toolStatus: event.status,
-              toolKind: event.toolKind ?? m.toolKind,
-              contentBlocks: event.contentBlocks ?? m.contentBlocks,
-              // EVT-04：raw 字段不丢——缺失保留旧值，避免以 undefined 覆盖已完成调用
-              rawOutput: event.rawOutput !== undefined ? event.rawOutput : m.rawOutput,
-              clientGeneration: event.clientGeneration ?? m.clientGeneration,
-              running: false,
-            }
-          : m), { kind: 'tool', name: target.find(message => message.id === 'tool-' + toolId)?.toolName || '?' }, replay),
+        [key]: touch(updateMessageAt(current, toolIndex, message => ({
+          ...message,
+          toolOutput: outputStr,
+          toolOutputLines: lines,
+          toolStatus: event.status,
+          toolKind: event.toolKind ?? message.toolKind,
+          contentBlocks: event.contentBlocks ?? message.contentBlocks,
+          // EVT-04：raw 字段不丢——缺失保留旧值，避免以 undefined 覆盖已完成调用
+          rawOutput: event.rawOutput !== undefined ? event.rawOutput : message.rawOutput,
+          clientGeneration: event.clientGeneration ?? message.clientGeneration,
+          running: false,
+        })), { kind: 'tool', name: existingTool.toolName || '?' }, replay),
       }
     }
 

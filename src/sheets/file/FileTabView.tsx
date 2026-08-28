@@ -193,8 +193,14 @@ export default function FileTabView({ target: explicitTarget, source, provider: 
   }, [saveReceipt])
 
   const isMarkdown = useMemo(() => /\.(md|markdown)$/i.test(path), [path])
-  const codeLines = content.split('\n')
-  const highlightedLines = highlighted?.html.split('\n') ?? null
+  // The editor branch does not consume line arrays.  Avoid splitting a large
+  // buffer while CodeMirror owns the edit surface; materialise rows only for
+  // the read-only projection.
+  const codeLines = useMemo(() => editing ? [] : content.split('\n'), [content, editing])
+  const highlightedLines = useMemo(() => editing ? null : highlighted?.html.split('\n') ?? null, [highlighted, editing])
+  // Rendering a large file used to scan `changedLines` for every source line.
+  // Keep the same line-level contract while making membership O(1).
+  const changedLineSet = useMemo(() => new Set(changedLines), [changedLines])
 
   useEffect(() => {
     if (!revealLine || content.length === 0) return
@@ -244,9 +250,9 @@ export default function FileTabView({ target: explicitTarget, source, provider: 
           </div>
           <pre className="file-tab-pre">
             {codeLines.map((line, index) => highlightedLines ? (
-              <code key={index} className="file-tab-line" data-line={index + 1} data-revealed={revealLine === index + 1 ? 'true' : undefined} data-changed={changedLines.includes(index + 1) ? 'true' : undefined} dangerouslySetInnerHTML={{ __html: sanitizeHtml(highlightedLines[index] || '&nbsp;') }} />
+              <code key={index} className="file-tab-line" data-line={index + 1} data-revealed={revealLine === index + 1 ? 'true' : undefined} data-changed={changedLineSet.has(index + 1) ? 'true' : undefined} dangerouslySetInnerHTML={{ __html: sanitizeHtml(highlightedLines[index] || '&nbsp;') }} />
             ) : (
-              <code key={index} className="file-tab-line" data-line={index + 1} data-revealed={revealLine === index + 1 ? 'true' : undefined} data-changed={changedLines.includes(index + 1) ? 'true' : undefined}>{line}</code>
+              <code key={index} className="file-tab-line" data-line={index + 1} data-revealed={revealLine === index + 1 ? 'true' : undefined} data-changed={changedLineSet.has(index + 1) ? 'true' : undefined}>{line}</code>
             ))}
           </pre>
         </div>

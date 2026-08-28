@@ -3,9 +3,19 @@ import { basicSetup, EditorView } from 'codemirror'
 import { Compartment } from '@codemirror/state'
 import { keymap } from '@codemirror/view'
 import { HighlightStyle, LanguageDescription, syntaxHighlighting } from '@codemirror/language'
-import { languages } from '@codemirror/language-data'
 import { tags } from '@lezer/highlight'
 import type { DispatchSelection } from '../../domains/fileDispatch/dispatchMessage.ts'
+
+// Language metadata is sizeable (it enumerates every CodeMirror language) and
+// is only needed once an editor is opened.  Keep it out of the initial shell
+// chunk while preserving the existing filename-based language selection.
+let languageDataPromise: Promise<readonly LanguageDescription[]> | null = null
+function loadLanguageData(): Promise<readonly LanguageDescription[]> {
+  if (!languageDataPromise) {
+    languageDataPromise = import('@codemirror/language-data').then(({ languages }) => languages)
+  }
+  return languageDataPromise
+}
 
 const fileEditorHighlightStyle = HighlightStyle.define([
   { tag: [tags.keyword, tags.modifier], color: 'var(--syn-kw, #b48ead)' },
@@ -84,16 +94,18 @@ export default function FileCodeEditor({ path, value, revealLine, onChange, onSe
     })
     viewRef.current = view
 
-    const description = LanguageDescription.matchFilename(languages, path)
-    if (description) {
-      void description.load().then(support => {
+    void loadLanguageData().then(languages => {
+      if (disposed || viewRef.current !== view) return
+      const description = LanguageDescription.matchFilename(languages, path)
+      if (!description) return
+      return description.load().then(support => {
         if (!disposed && viewRef.current === view) {
           view.dispatch({ effects: language.reconfigure(support) })
         }
-      }).catch(() => {
-        // 未安装/加载失败的语言按 CodeMirror 纯文本模式继续编辑。
       })
-    }
+    }).catch(() => {
+      // 未安装/加载失败的语言按 CodeMirror 纯文本模式继续编辑。
+    })
 
     return () => {
       disposed = true

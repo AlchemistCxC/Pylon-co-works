@@ -42,6 +42,16 @@ const workspaceLabel = (workdir: string | undefined) => workdir
   .filter(Boolean)
   .pop()
 
+// Keep the mutable-ref read outside the effect cleanup so the hooks linter can
+// verify the lifecycle contract without weakening the StrictMode deferral.
+function isCurrentLifecycleToken(ref: { current: number }, token: number): boolean {
+  return ref.current === token
+}
+
+const rendererRegistry = getRendererRegistry()
+const subscribeRendererCatalog = (listener: () => void) => rendererRegistry.subscribe(listener)
+const getRendererCatalogSnapshot = () => rendererRegistry.snapshot()
+
 export default function AgentRendererSuiteWorkbench(props: AgentRendererSuiteWorkbenchProps) {
   const containerRef = useRef<HTMLDivElement>(null)
   const currentPropsRef = useRef(props)
@@ -82,11 +92,10 @@ export default function AgentRendererSuiteWorkbench(props: AgentRendererSuiteWor
   const workspace = session?.workspaceId ? workspaces.find(item => item.id === session.workspaceId) : undefined
   const activeProfileId = usePresentationPreferenceStore(state => state.activeProfileId)
   const selectedSuiteId = usePresentationPreferenceStore(state => state.rendererSuiteIdByMode[props.modeId])
-  const registry = getRendererRegistry()
   const rendererSettings = getRendererSettingsStore()
   const presentationProfiles = getPresentationProfileRegistry()
   const rendererSettingOptions = getPluginSettingOptionsRegistry()
-  const catalog = useSyncExternalStore(listener => registry.subscribe(listener), () => registry.snapshot(), () => registry.snapshot())
+  const catalog = useSyncExternalStore(subscribeRendererCatalog, getRendererCatalogSnapshot, getRendererCatalogSnapshot)
   const input = useMemo<WorkbenchMountInput>(() => Object.freeze({
     sheetId: props.sheet.id, sessionOwnerKey: ownerKey(session), sessionId: props.ctx.activeSession,
     workspaceMode: props.workspaceMode, replayReadonly: props.isReplay,
@@ -152,7 +161,7 @@ export default function AgentRendererSuiteWorkbench(props: AgentRendererSuiteWor
     const token = ++runtimeLifecycleToken.current
     return () => {
       queueMicrotask(() => {
-        if (runtimeLifecycleToken.current === token) sessionRuntime.destroy()
+        if (isCurrentLifecycleToken(runtimeLifecycleToken, token)) sessionRuntime.destroy()
       })
     }
   }, [sessionRuntime])

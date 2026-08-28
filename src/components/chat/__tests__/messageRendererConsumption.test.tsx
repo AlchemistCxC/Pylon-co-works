@@ -167,4 +167,51 @@ describe('ChatView message renderer consumption', () => {
     ])
     expect(Object.isFrozen(seen[0][0])).toBe(true)
   })
+
+  it('父级仅更换行 ref 回调时不重复更新静态 renderer surface', async () => {
+    let updates = 0
+    const surface: RenderSurface = {
+      rendererId: 'test.renderer.memo', kind: 'unknown',
+      mount(container) {
+        container.textContent = 'memo surface'
+        return container
+      },
+      update() { updates += 1 },
+      destroy() {},
+      on: () => () => {},
+    }
+    registration = getRendererRegistry().registerMessageRenderer(
+      createPluginIdentity('test.renderer.memo', 'runtime-memo'),
+      {
+        id: 'test.renderer.memo.contribution', priority: 1, fallback: false,
+        canRender: () => true, renderer: {
+          rendererId: 'test.renderer.memo', kind: 'unknown',
+          renderMessage: () => surface, renderTool: () => surface, renderReasoning: () => surface,
+        },
+      },
+    )
+    const renderMessage = {
+      type: 'assistant' as const,
+      message: { id: 'm-memo', role: 'assistant' as const, sender: 'peri', content: 'memo', time: '10:03' },
+    }
+    const { rerender } = render(
+      <MessageRendererHost
+        renderMessage={renderMessage}
+        reduceMotion
+        rowRef={() => {}}
+        rendererRevision={getRendererRegistry().snapshot().revision}
+      />,
+    )
+    expect(await screen.findByText('memo surface')).toBeVisible()
+    const before = updates
+    rerender(
+      <MessageRendererHost
+        renderMessage={renderMessage}
+        reduceMotion
+        rowRef={() => {}}
+        rendererRevision={getRendererRegistry().snapshot().revision}
+      />,
+    )
+    expect(updates).toBe(before)
+  })
 })

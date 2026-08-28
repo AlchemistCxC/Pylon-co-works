@@ -60,6 +60,19 @@ const ProfileEditor = lazy(() => import('./components/ProfileEditor'))
 const SessionSettings = lazy(() => import('./components/SessionSettings'))
 const SheetLauncher = lazy(() => import('./workspace-sheets/SheetLauncher'))
 
+// Runtime registries are process singletons.  Stable adapters keep
+// useSyncExternalStore subscriptions intact across unrelated App renders
+// (streaming, window resize, and dialog state changes).
+const contextPanelRegistry = getContextPanelRegistry()
+const subscribeContextPanels = (listener: () => void) => contextPanelRegistry.subscribe(listener)
+const getContextPanelSnapshot = () => contextPanelRegistry.getSnapshot()
+const fontContributionRegistry = getFontContributionRegistry()
+const subscribeFontContributions = (listener: () => void) => fontContributionRegistry.subscribe(listener)
+const getFontContributionSnapshot = () => fontContributionRegistry.getSnapshot()
+const interfaceModeRegistry = getInterfaceModeRegistry()
+const subscribeInterfaceModes = (listener: () => void) => interfaceModeRegistry.subscribe(listener)
+const getInterfaceModeSnapshot = () => interfaceModeRegistry.getSnapshot()
+
 function LazyDialogFallback() {
   return (
     <div className="sheet-empty-host">
@@ -80,24 +93,21 @@ export default function App() {
   const interfaceMode = useInterfaceModeStore(state => state.interfaceMode)
   const presentationProfileId = usePresentationPreferenceStore(state => state.activeProfileId)
   useSyncExternalStore(subscribeWorkspaceRegistry, getWorkspaceRegistrySnapshot, getWorkspaceRegistrySnapshot)
-  const contextPanelRegistry = getContextPanelRegistry()
   const contextPanelSnapshot = useSyncExternalStore(
-    listener => contextPanelRegistry.subscribe(listener),
-    () => contextPanelRegistry.getSnapshot(),
-    () => contextPanelRegistry.getSnapshot(),
+    subscribeContextPanels,
+    getContextPanelSnapshot,
+    getContextPanelSnapshot,
   )
-  const fontRegistry = getFontContributionRegistry()
   const fontSnapshot = useSyncExternalStore(
-    listener => fontRegistry.subscribe(listener),
-    () => fontRegistry.getSnapshot(),
-    () => fontRegistry.getSnapshot(),
+    subscribeFontContributions,
+    getFontContributionSnapshot,
+    getFontContributionSnapshot,
   )
   useEffect(() => projectFontContributions(document.documentElement, fontSnapshot.entries), [fontSnapshot])
-  const interfaceModeRegistry = getInterfaceModeRegistry()
   const interfaceModeSnapshot = useSyncExternalStore(
-    listener => interfaceModeRegistry.subscribe(listener),
-    () => interfaceModeRegistry.getSnapshot(),
-    () => interfaceModeRegistry.getSnapshot(),
+    subscribeInterfaceModes,
+    getInterfaceModeSnapshot,
+    getInterfaceModeSnapshot,
   )
   const interfaceModeContribution = interfaceModeSnapshot.entries.find(entry => entry.value.id === interfaceMode)?.value
     ?? BUILTIN_INTERFACE_MODES.find(entry => entry.id === 'modern-gui')!

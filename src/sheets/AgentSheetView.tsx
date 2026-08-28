@@ -10,6 +10,10 @@ import { BUILTIN_INTERFACE_MODES } from '../plugins/core/interfaceMode/builtinIn
 import AgentRendererSuiteWorkbench from './agent-workbench/AgentRendererSuiteWorkbench.tsx'
 import { openResourceInFileSheet } from './file/fileSheetNavigation.ts'
 
+const interfaceModeRegistry = getInterfaceModeRegistry()
+const subscribeInterfaceModes = (listener: () => void) => interfaceModeRegistry.subscribe(listener)
+const getInterfaceModeSnapshot = () => interfaceModeRegistry.getSnapshot()
+
 /**
  * AgentSheetView — agent 主工作台（W1-03 侧栏上移后只留主区）。
  *
@@ -29,11 +33,10 @@ export default function AgentSheetView({ sheet, ctx }: { sheet: SheetRecord; ctx
   const isReplay = ctx.activeSession !== null && postureSession === ctx.activeSession
   const workspaceMode = deserializeAgentWorkspaceState(sheet.state).sidebarMode
   const interfaceMode = useInterfaceModeStore(state => state.interfaceMode)
-  const modeRegistry = getInterfaceModeRegistry()
   const modeSnapshot = useSyncExternalStore(
-    listener => modeRegistry.subscribe(listener),
-    () => modeRegistry.getSnapshot(),
-    () => modeRegistry.getSnapshot(),
+    subscribeInterfaceModes,
+    getInterfaceModeSnapshot,
+    getInterfaceModeSnapshot,
   )
   const mode = modeSnapshot.entries.find(entry => entry.value.id === interfaceMode)?.value
     ?? BUILTIN_INTERFACE_MODES.find(entry => entry.id === interfaceMode)
