@@ -46,6 +46,7 @@
   --line-width-2: 2px;
   --line-width-3: 3px;
   --ui-radius-xs: 2px;
+  --ui-radius-none: 0px;
   --ui-radius-sm: 4px;
   --ui-radius-md: 6px;
   --ui-radius-lg: 8px;
@@ -74,6 +75,7 @@
   --state-selected-bg: color-mix(in srgb, var(--accent) 13%, var(--surface-raised));
   --state-selected-stroke: color-mix(in srgb, var(--accent) 48%, var(--stroke-default));
   --state-focus-ring: color-mix(in srgb, var(--accent) 34%, transparent);
+  --state-disabled-opacity: .42;
   --state-danger: var(--danger);
   --state-danger-surface: color-mix(in srgb, var(--danger) 11%, var(--surface-raised));
   --state-warning-surface: color-mix(in srgb, var(--warning) 11%, var(--surface-raised));
@@ -110,6 +112,55 @@
   --serif: var(--font-serif-default);
   /* 终端等宽栈：西文等宽 + CJK 等宽 fallback（Sarasa/更纱 → 微软雅黑 → 系统） */
   --mono: var(--font-mono-default);
+  --type-interface-font: var(--global-font, var(--font-system));
+  --type-interface-xs: var(--font-size-xs);
+  --type-interface-sm: var(--font-size-sm);
+  --type-interface-md: var(--font-size-base);
+  --type-interface-lg: var(--font-size-md);
+  --type-interface-line-height: 1.25;
+  --type-content-font: var(--chat-font, var(--font-mono-default));
+  --type-content-xs: var(--font-size-sm);
+  --type-content-sm: var(--font-size-base);
+  --type-content-md: var(--font-size-lg);
+  --type-content-lg: var(--font-size-xl);
+  --type-content-line-height: 1.5;
+  --type-code-font: var(--mono, var(--font-mono-default));
+  --type-code-xs: var(--font-size-2xs);
+  --type-code-sm: var(--font-size-xs);
+  --type-code-md: var(--font-size-sm);
+  --type-code-lg: var(--font-size-base);
+  --type-code-line-height: 1.55;
+
+  /* DF-03a：12 个宿主角色的 terminal-like/light fallback。
+     其余 mode/scheme 只覆盖这组 fallback；显式 preset 角色由
+     themeCssSnapshot 在同一投影链路中写入并优先保留。 */
+  --pylon-palette-surface-canvas: #F3F1EC;
+  --pylon-palette-surface-panel: #FAF9F5;
+  --pylon-palette-surface-raised: #FFFFFF;
+  --pylon-palette-content-text: #1C211E;
+  --pylon-palette-content-muted: #59635D;
+  --pylon-palette-stroke-default: #7A847E;
+  --pylon-palette-accent: #A94D35;
+  --pylon-palette-state-success: #237A47;
+  --pylon-palette-state-warning: #8A5A00;
+  --pylon-palette-state-danger: #B83B46;
+  --pylon-palette-state-focus-ring: #8C3C27;
+  --pylon-palette-connector-default: #69746D;
+
+  /* Public semantic aliases. Component CSS consumes these names; palette
+     fallback values above remain private to the host stylesheet. */
+  --surface-canvas: var(--pylon-palette-surface-canvas);
+  --surface-panel: var(--pylon-palette-surface-panel);
+  --surface-raised: var(--pylon-palette-surface-raised);
+  --content-text: var(--pylon-palette-content-text);
+  --content-muted: var(--pylon-palette-content-muted);
+  --stroke-default: var(--pylon-palette-stroke-default);
+  --accent: var(--pylon-palette-accent);
+  --state-success: var(--pylon-palette-state-success);
+  --state-warning: var(--pylon-palette-state-warning);
+  --state-danger: var(--pylon-palette-state-danger);
+  --state-focus-ring: var(--pylon-palette-state-focus-ring);
+  --connector-default: var(--pylon-palette-connector-default);
 }
 
 /* ── 暗色 UI scheme ── */
@@ -139,6 +190,103 @@ body[data-ui-scheme="light"] {
   --surface-overlay: color-mix(in srgb, #fbfbfd 96%, var(--global-bg-color) 4%);
   --surface-sunken: color-mix(in srgb, #e9ebf1 90%, var(--global-bg-color) 10%);
   --surface-glass: color-mix(in srgb, #f7f8fc 74%, transparent);
+}
+
+/* DF-03a：mode/scheme fallback palette。显式 preset 角色通过
+   themeCssSnapshot 写入同名公开角色变量，不受这些默认值覆盖。 */
+:where(html, body, .app)[data-interface-mode="terminal-like"][data-ui-scheme="dark"] {
+  --pylon-palette-surface-canvas: #141916;
+  --pylon-palette-surface-panel: #1B211D;
+  --pylon-palette-surface-raised: #232B26;
+  --pylon-palette-content-text: #F1F4F2;
+  --pylon-palette-content-muted: #A7B0AA;
+  --pylon-palette-stroke-default: #718178;
+  --pylon-palette-accent: #D77757;
+  --pylon-palette-state-success: #69D08F;
+  --pylon-palette-state-warning: #E7B85C;
+  --pylon-palette-state-danger: #F27D82;
+  --pylon-palette-state-focus-ring: #F0A080;
+  --pylon-palette-connector-default: #718178;
+}
+:where(html, body, .app)[data-interface-mode="terminal-like"][data-ui-scheme="light"] {
+  --pylon-palette-surface-canvas: #F3F1EC;
+  --pylon-palette-surface-panel: #FAF9F5;
+  --pylon-palette-surface-raised: #FFFFFF;
+  --pylon-palette-content-text: #1C211E;
+  --pylon-palette-content-muted: #59635D;
+  --pylon-palette-stroke-default: #7A847E;
+  --pylon-palette-accent: #A94D35;
+  --pylon-palette-state-success: #237A47;
+  --pylon-palette-state-warning: #8A5A00;
+  --pylon-palette-state-danger: #B83B46;
+  --pylon-palette-state-focus-ring: #8C3C27;
+  --pylon-palette-connector-default: #69746D;
+}
+:where(html, body, .app)[data-interface-mode="modern-gui"][data-ui-scheme="dark"] {
+  --pylon-palette-surface-canvas: #181C27;
+  --pylon-palette-surface-panel: #202636;
+  --pylon-palette-surface-raised: #2A3143;
+  --pylon-palette-content-text: #F7F8FC;
+  --pylon-palette-content-muted: #B7BED0;
+  --pylon-palette-stroke-default: #6F7A95;
+  --pylon-palette-accent: #8B9EFF;
+  --pylon-palette-state-success: #61D095;
+  --pylon-palette-state-warning: #F1BD68;
+  --pylon-palette-state-danger: #FF7F91;
+  --pylon-palette-state-focus-ring: #A7B5FF;
+  --pylon-palette-connector-default: #6F7A95;
+}
+:where(html, body, .app)[data-interface-mode="modern-gui"][data-ui-scheme="light"] {
+  --pylon-palette-surface-canvas: #F5F7FC;
+  --pylon-palette-surface-panel: #EEF2FA;
+  --pylon-palette-surface-raised: #FFFFFF;
+  --pylon-palette-content-text: #1B2030;
+  --pylon-palette-content-muted: #56627A;
+  --pylon-palette-stroke-default: #7986A1;
+  --pylon-palette-accent: #465FD1;
+  --pylon-palette-state-success: #1D7A50;
+  --pylon-palette-state-warning: #8A5900;
+  --pylon-palette-state-danger: #B9344D;
+  --pylon-palette-state-focus-ring: #344BB8;
+  --pylon-palette-connector-default: #6B7892;
+}
+
+:where(html, body, .app)[data-interface-mode][data-ui-scheme] {
+  --surface-canvas: var(--pylon-palette-surface-canvas);
+  --surface-panel: var(--pylon-palette-surface-panel);
+  --surface-raised: var(--pylon-palette-surface-raised);
+  --content-text: var(--pylon-palette-content-text);
+  --content-muted: var(--pylon-palette-content-muted);
+  --stroke-default: var(--pylon-palette-stroke-default);
+  --accent: var(--pylon-palette-accent);
+  --state-success: var(--pylon-palette-state-success);
+  --state-warning: var(--pylon-palette-state-warning);
+  --state-danger: var(--pylon-palette-state-danger);
+  --state-focus-ring: var(--pylon-palette-state-focus-ring);
+  --connector-default: var(--pylon-palette-connector-default);
+}
+:where(html, body, .app)[data-interface-mode="terminal-like"] {
+  --type-content-font: var(--chat-font, var(--font-mono-default));
+}
+:where(html, body, .app)[data-interface-mode="modern-gui"] {
+  --type-content-font: var(--chat-font, var(--font-system));
+}
+
+/* Keep legacy variable consumers on the same role chain. These aliases are
+   replaced by explicit role values in themeCssSnapshot when a preset/zone
+   supplies a valid override. */
+:root {
+  --global-bg-color: var(--surface-canvas);
+  --text: var(--content-text);
+  --text-dim: var(--content-muted);
+  --border: var(--stroke-default);
+  --border-focus: var(--state-focus-ring);
+  --success: var(--state-success);
+  --warning: var(--state-warning);
+  --danger: var(--state-danger);
+  --tool-ok: var(--state-success);
+  --tool-run: var(--accent);
+  --tool-err: var(--state-danger);
 }
 body[data-ui-scheme="dark"] .dialog-content {
   background:#17191f;
@@ -190,7 +338,7 @@ body::before {
 
 :where(button, input, textarea, select):disabled,
 :where([role="button"], [role="tab"], [role="option"], [role="treeitem"])[aria-disabled="true"] {
-  opacity: .42;
+  opacity: var(--state-disabled-opacity);
   cursor: not-allowed;
 }
 

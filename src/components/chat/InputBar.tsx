@@ -551,11 +551,13 @@ export default forwardRef<{ send: () => void; attachFile: () => void; cancel: ()
       {isCmd && filtered.length > 0 && (
         <div className="command-palette">
           {filtered.map((c: CommandSuggestion, i: number) => (
-            <div key={c.cmd} className={`cmd-item ${i === cmdIdx ? 'active' : ''}`}
+            <button type="button" key={c.cmd} className={`cmd-item ${i === cmdIdx ? 'active' : ''}`}
+              aria-current={i === cmdIdx ? 'true' : undefined}
+              aria-label={`${c.cmd}${c.args}: ${c.info}`}
               onClick={() => { setValue(c.cmd + c.args + ' '); textareaRef.current?.focus() }}>
               <span className="cmd-name">{c.cmd}{c.args}</span>
               <span className="cmd-info">{c.info}</span>
-            </div>
+            </button>
           ))}
         </div>
       )}

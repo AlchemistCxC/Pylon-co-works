@@ -77,6 +77,7 @@ export function SolidToolCard(props: SolidToolCardProps) {
             class="term-tool"
             data-status={status()}
             data-tool-state={resolved().state}
+            data-status-label={toolStatePresentation(resolved().state, resolved().hasOutput).label}
             data-kind={resolved().kind}
             data-output-collapsible={resolved().canCollapseOutput ? 'true' : 'false'}
           >
@@ -97,6 +98,7 @@ export function SolidToolCard(props: SolidToolCardProps) {
               >{indicator().glyph}</span>
               <span class="term-tool-name">{capitalizeToolName(resolved().name)}</span>
               <Show when={displaySummary()}>{summary => <span class="term-tool-summary"> ({summary()})</span>}</Show>
+              <span class="term-tool-state-label"> — {toolStatePresentation(resolved().state, resolved().hasOutput).label}</span>
               <Show when={suffix()}>{text => <span class="term-tool-suffix">{text()}</span>}</Show>
             </button>
             <Show when={resolved().hasOutput}>
