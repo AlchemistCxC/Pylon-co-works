@@ -136,6 +136,20 @@ mod config_option_tests {
     }
 }
 
+#[cfg(test)]
+mod session_mode_tests {
+    use super::session_set_mode_params;
+    use serde_json::json;
+
+    #[test]
+    fn session_mode_params_use_acp_mode_id_wire_shape() {
+        assert_eq!(
+            session_set_mode_params("remote-1", "auto").unwrap(),
+            json!({ "sessionId": "remote-1", "modeId": "auto" }),
+        );
+    }
+}
+
 /// session/prompt 参数。仅被 `AcpClient::prepare_prompt` 内部使用。
 pub(crate) fn session_prompt_params(
     session_id: &str,

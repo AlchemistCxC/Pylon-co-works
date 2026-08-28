@@ -51,6 +51,7 @@ async fn create_session_slot(
     session_cwd: &str,
     workspace_id: Option<String>,
     wire_mcp_servers: &[serde_json::Value],
+    initial_mode: Option<&str>,
     close_replaced: bool,
 ) -> Result<SessionMapping, PylonError> {
     {
@@ -85,6 +86,17 @@ async fn create_session_slot(
     };
     state.ensure_generation(runtime, generation)?;
     let peri_id = crate::acp::session_id_from(&response)?;
+    if let Some(mode) = initial_mode {
+        let mode = mode.trim();
+        if mode.is_empty() {
+            return Err(PylonError::Protocol("initial mode must not be empty".to_string()));
+        }
+        let params = acp::session_set_mode_params(&peri_id, mode).map_err(PylonError::Protocol)?;
+        if let Err(error) = state.acp_rpc_generation_checked(runtime, acp::METHOD_SESSION_SET_MODE, params, generation).await {
+            let _ = close_session_rpc(state, runtime, &peri_id, generation, false).await;
+            return Err(error.into());
+        }
+    }
     let mut session = SessionInfo::new(
         peri_id.clone(),
         persona.to_string(),
@@ -188,6 +200,7 @@ pub(crate) async fn ensure_session_mapping(
         session_cwd,
         None,
         wire_mcp_servers,
+        None,
         true,
     )
     .await
@@ -231,6 +244,7 @@ pub(crate) async fn new_session(
     cwd: Option<String>,
     workspace_id: Option<String>,
     mcp_servers: Option<Vec<crate::mcp::McpServerConfig>>,
+    mode: Option<String>,
 ) -> Result<serde_json::Value, PylonError> {
     DurableSessionOwner::new(&profile_id, &agent_id, &source).validate()?;
     // OWNER-02（§5.8）：显式 agentId 路由到 owner runtime——建会话前本地映射必不存在，
@@ -269,6 +283,7 @@ pub(crate) async fn new_session(
         &session_cwd,
         workspace_id,
         &mcp_servers,
+        mode.as_deref(),
         true,
     )
     .await?;

@@ -65,6 +65,7 @@ export async function createAgentWorkbenchSession(
       workspaceId: session.workspaceId,
       model: request?.model || profile?.model,
       ...(request?.reasoningLevel ? { reasoningLevel: request.reasoningLevel } : {}),
+      ...(request?.mode ? { mode: request.mode } : {}),
       ...(preflight.mcpServers.length > 0 ? { mcpServers: preflight.mcpServers } : {}),
     })
     const normalized = sessionResponseObject(response)

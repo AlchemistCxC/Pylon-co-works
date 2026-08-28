@@ -182,6 +182,8 @@ function WorkbenchContent(props: SolidWorkbenchAppProps) {
           status={snapshot().status}
           availableModels={snapshot().availableModels}
           activeModel={snapshot().activeModel}
+          availableModes={snapshot().availableModes}
+          activeMode={snapshot().activeMode}
           workspaceMode={props.context.input().workspaceMode ?? 'work'}
           context={props.context}
         />}
@@ -662,7 +664,7 @@ function toSolidMessage(message: WorkbenchDocument['messages'][number]): Message
   } as Message & { semanticParts: readonly ContentPart[] }
 }
 
-function WorkbenchEmptyState(props: { status: string; availableModels: readonly string[]; activeModel: string; workspaceMode: 'work' | 'chat'; context: SolidWorkbenchContextValue }) {
+function WorkbenchEmptyState(props: { status: string; availableModels: readonly string[]; activeModel: string; availableModes: readonly string[]; activeMode: string; workspaceMode: 'work' | 'chat'; context: SolidWorkbenchContextValue }) {
   const model = () => selectAgentEmptyState(props.workspaceMode)
   const workspaces = () => props.context.input().availableWorkspaces ?? []
   const profileModel = props.activeModel || useIdentityStore.getState().profiles.find(item => item.id === useIdentityStore.getState().activeProfileId)?.model || ''
@@ -670,6 +672,8 @@ function WorkbenchEmptyState(props: { status: string; availableModels: readonly 
   const [prompt, setPrompt] = createSignal('')
   const [modelId, setModelId] = createSignal(profileModel)
   const [reasoningLevel, setReasoningLevel] = createSignal('balanced')
+  const modeOptions = () => props.availableModes.length > 0 ? props.availableModes : ['default', 'edit', 'auto', 'bypass']
+  const [mode, setMode] = createSignal(props.activeMode || modeOptions()[0] || 'default')
   const [attachments, setAttachments] = createSignal<readonly WorkbenchAttachment[]>([])
   const [submitting, setSubmitting] = createSignal(false)
   const [submitError, setSubmitError] = createSignal('')
@@ -712,7 +716,7 @@ function WorkbenchEmptyState(props: { status: string; availableModels: readonly 
     try {
       const created = await props.context.commands.createSession({
         ...(workspaceId() ? { workspaceId: workspaceId() } : {}),
-        ...(modelId().trim() ? { model: modelId().trim() } : {}), reasoningLevel: reasoningLevel(),
+        ...(modelId().trim() ? { model: modelId().trim() } : {}), reasoningLevel: reasoningLevel(), mode: mode(),
         initialPrompt: { text, attachments: attachments() },
       })
       if (!created.sessionId) throw new Error('会话创建未返回有效标识')
@@ -727,7 +731,7 @@ function WorkbenchEmptyState(props: { status: string; availableModels: readonly 
     <form class="solid-agent-empty-composer" onSubmit={event => { event.preventDefault(); void submit() }}>
       <Show when={props.workspaceMode === 'work'}><label class="solid-agent-empty-workspace"><span>工作区</span><select aria-label="新会话工作区" value={workspaceId()} onChange={event => setWorkspaceId(event.currentTarget.value)}><option value="">选择工作区…</option>{workspaces().map(item => <option value={item.id}>{item.label} · {item.path}</option>)}</select><button type="button" onClick={() => void pickFolder()}>新建…</button></label></Show>
       <Show when={workspaceDraft()}>{draft => <div class="solid-agent-empty-new-workspace"><input aria-label="新工作区名称" value={draft().name} onInput={event => setWorkspaceDraft({ ...draft(), name: event.currentTarget.value })} /><code>{draft().path}</code><button type="button" onClick={() => void createWorkspace()}>创建工作区</button></div>}</Show>
-      <div class="solid-agent-empty-options"><label>模型<select aria-label="新会话模型" value={modelId()} onChange={event => setModelId(event.currentTarget.value)}><option value="">Profile 默认</option><For each={props.availableModels}>{model => <option value={model}>{model}</option>}</For></select></label><label>思考强度<select aria-label="新会话思考强度" value={reasoningLevel()} onChange={event => setReasoningLevel(event.currentTarget.value)}><option value="fast">快速</option><option value="balanced">平衡</option><option value="deep">深入</option></select></label></div>
+      <div class="solid-agent-empty-options"><label>模型<select aria-label="新会话模型" value={modelId()} onChange={event => setModelId(event.currentTarget.value)}><option value="">Profile 默认</option><For each={props.availableModels}>{model => <option value={model}>{model}</option>}</For></select></label><label>权限模式<select aria-label="新会话权限模式" value={mode()} onChange={event => setMode(event.currentTarget.value)}><For each={modeOptions()}>{item => <option value={item}>{item}</option>}</For></select></label><label>思考强度<select aria-label="新会话思考强度" value={reasoningLevel()} onChange={event => setReasoningLevel(event.currentTarget.value)}><option value="fast">快速</option><option value="balanced">平衡</option><option value="deep">深入</option></select></label></div>
       <textarea ref={promptInput} aria-label="首条请求" value={prompt()} placeholder="描述你想让 Agent 完成什么…" disabled={submitting()} onInput={event => setPrompt(event.currentTarget.value)} onKeyDown={event => { if (event.key === 'Enter' && !event.shiftKey && !event.isComposing) { event.preventDefault(); void submit() } }} />
       <Show when={attachments().length}><div class="attached-files" aria-label="附件"><For each={attachments()}>{item => <button type="button" class="attached-chip" onClick={() => setAttachments(items => items.filter(value => value.id !== item.id))}>{item.name || item.path} ×</button>}</For></div></Show>
       <input ref={fileInput} type="file" multiple hidden onChange={event => { const files = event.currentTarget.files; if (files) setAttachments(items => [...items, ...Array.from(files).map(file => ({ id: `${file.name}:${file.size}:${file.lastModified}`, name: file.name, path: (file as File & { path?: string }).path || file.name, mediaType: file.type || undefined }))]); event.currentTarget.value = '' }} />
