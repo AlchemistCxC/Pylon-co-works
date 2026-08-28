@@ -120,7 +120,8 @@ export function selectThemeCssSnapshot(
   const { sidebarWidth, sidebarEnabled, sidebarExpandedTrack = sidebarEnabled } = layout
   const globalFontToken = fontToken(s.globalFont)
   const roleValues = resolveRoleValues(s)
-  const hasScheme = s.uiScheme === 'dark' || s.uiScheme === 'light'
+  const scheme = s.uiScheme === 'dark' || s.uiScheme === 'light' ? s.uiScheme : undefined
+  const hasScheme = scheme !== undefined
   const vars: Record<string, string> = {
     '--global-bg-image': toCssBackgroundImage(s.globalBgImage as string | undefined),
     '--sidebar-bg-image': toCssBackgroundImage(s.sidebarBgImage as string | undefined),
@@ -171,6 +172,16 @@ export function selectThemeCssSnapshot(
     vars['--tool-run'] = roleValues.accent
     vars['--tool-err'] = roleValues['state.danger']
     vars['--msg-text'] = roleValues['content.text']
+
+    const applyRoleFallbackAlias = (cssVar: string, key: keyof typeof THEME_FIELD_DEFS, role: VisualSemanticRole) => {
+      const definition = THEME_FIELD_DEFS[key]
+      if (!isExplicitRoleValue(s[key], definition, scheme, role)) vars[cssVar] = roleValues[role]
+    }
+    applyRoleFallbackAlias('--chat-text-color', 'chatTextColor', 'content.text')
+    applyRoleFallbackAlias('--cli-text-color', 'cliTextColor', 'content.text')
+    applyRoleFallbackAlias('--cli-prompt-color', 'cliPromptColor', 'accent')
+    applyRoleFallbackAlias('--cli-line-color', 'cliLineColor', 'connector.default')
+    applyRoleFallbackAlias('--input-focus-border', 'inputFocusBorder', 'state.focusRing')
   }
   return vars
 }
