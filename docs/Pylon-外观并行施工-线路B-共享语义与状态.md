@@ -155,7 +155,12 @@
 | token 名 | 语义角色 | dark/light 规则 | terminal-like 消费点 | modern-gui/Sheet 消费点 | 状态 |
 |---|---|---|---|---|---|
 | 现有 `--ui-space-*` / `--ui-radius-*` / `--shadow-*` / `--motion-*` | 宿主尺度/层级/动效 | DF-02 已冻结：spacing 4/8/12/16/24/32/48px；radius 0/2/4/6/8/999px；motion 120/180/260ms | A | C | 已冻结 |
-| 现有 `--surface-*` / `--state-*` / `--text` / `--border` | 语义表面/状态/文字/边界 | DF-03/03a/03p 已冻结：扩展现有 visualSemantics，四套值为宿主 fallback，preset/plugin 合格贡献优先 | A | C | 已冻结 |
+| `--surface-canvas` / `--surface-panel` / `--surface-raised` | `surface.canvas` / `surface.panel` / `surface.raised` | DF-03a 四套 mode/scheme fallback；preset 显式角色合格时优先，空值/低对比度仅回退对应角色 | A | C | 已冻结 |
+| `--content-text` / `--content-muted` | `content.text` / `content.muted` | 同套件 text/muted fallback；普通文本 `>=4.5:1` | A | C | 已冻结 |
+| `--stroke-default` / `--connector-default` | `stroke.default` / `connector.default` | 同套件边界 fallback；非文本边界 `>=3:1` | A | C | 已冻结 |
+| `--accent` | `accent` | 同套件 accent fallback；显式主题字段合格时优先 | A | C | 已冻结 |
+| `--state-success` / `--state-warning` / `--state-danger` / `--state-focus-ring` | `state.success` / `state.warning` / `state.danger` / `state.focusRing` | 同套件状态/焦点 fallback；状态保留 label/ARIA/非颜色线索 | A | C | 已冻结 |
+| `--ui-radius-none` / `--state-disabled-opacity` / `--type-interface-*` / `--type-content-*` / `--type-code-*` | DF-02/02d/04 宿主尺度、禁用与三角色字体别名 | 继续消费现有 spacing/radius/motion/type fallback；插件通过 Font Registry/Profile/renderer settings 覆盖 | A | C | 已冻结 |
 
 ## 6. 例外与契约请求
 
