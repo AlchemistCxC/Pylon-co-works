@@ -153,13 +153,22 @@
 
 | selector/文件:行 | 直接值 | 允许原因 | 替代 token/不适用原因 | 验收证据 | 状态 |
 |---|---|---|---|---|---|
-| 待填写 | 待填写 | 例如终端发丝线/系统按钮/硬边语义 | 待填写 | 待填写 | 待审 |
+| `App.css` `.sheet-tab` / `@media(max-width:1100px)` | `160px` / `120px` tab 宽度 | terminal-like 标签密度与长标题 ellipsis；保留 tab 操作 | 无等价语义尺度 token；属于宿主标签轨道例外 | A-01 viewport matrix：tab region 在 1738/1280/900/680/480 均 `>0` | 已验收 |
+| `Sidebar.css` `@media(max-width:1100px)` | `min-width:200px` | DF-05a 中等视口左栏可收缩范围下限 | 布局预算数值，非 spacing token | A-04 matrix：900 请求（inner 818）左栏约 `229px`，主区 `360px` | 已验收 |
+| `Sidebar.css` `@media(max-width:760px)` / `max-width:520px` | 左栏 `42px`、主区 `360px`/`280px` 最小 | DF-05a emergency 内容预算与现有折叠控制轨道 | `--workspace-sidebar-collapsed-width` 提供 42px；主区最小值为宿主布局硬底线 | A-04 matrix：680 inner 618 主区 `447px`；480 inner 436 主区 `306px` | 已验收 |
+| `App.css` touch media `--pylon-terminal-touch-target` | `44px` 命中区 | DF-02d 粗指针/无 hover 可操作目标命中下限 | 无公共 touch token；线路局部 namespaced 变量，不改变视觉尺寸语义 | CSS media 静态核验；默认 Edge 指针为 fine，需设备级 coarse 复测 | 待设备复测 |
+| `App.css` host layer selectors | z-index `50/70/71/90/100` | DF-07a 宿主 shell overlay、modal、error、titlebar 层级 | 层级 ABI 直接值，无 spacing/radius 替代 | computed titlebar z-index `100`；窄屏/现代 GUI 冒烟无遮挡 | 已验收 |
 
 ## 7. 交接记录（执行时填写）
 
 | 卡片 | 改动文件 | 未改动的越界文件 | 验证命令/结果 | 截图或 computed 证据 | 遗留风险/契约请求 |
 |---|---|---|---|---|---|
 | AUTONOMY-OPEN | — | 本线路白名单 | targeted 审计已完成；仅按卡片运行定向检查 | — | 按 A-02 → A-01 → A-04 → A-03 → A-05 自治施工；一功能一 commit |
+| A-02 | `builtin.pylon-renderers/styles/components/chat/InputBar.css` | TSX/TS、B/C、store/preset/runtime/backend | `vitest InputBarBindingGate.test.tsx` 8/8；`check:first-party-styles` 28 files；`git diff --check` 通过 | terminal-like CLI blur→focus：父行 border `rgb(127,142,163)` → `rgba(0,0,0,.22)`，outline `1.818px solid rgb(136,192,208)`，box-shadow `0 0 0 2px`；480 inner 436 textarea `239px` | scheme/preset 显式值仍由 B 线路 DF-03p 回退；设备级 coarse hit-area 需复测 |
+| A-01 | `builtin.pylon-shell/styles/App.css` | TSX/TS、B/C、store/preset/runtime/backend | titlebar targeted tests 3 files/11 tests；ownership check 通过；独立 commits `ac8b24b3`, `d30d44ab` | terminal-like titlebar/region client widths（inner）：1738→`1580/515`、1280→`1164/306`、900→`818/146`、680→`618/150`、480→`436/85`；modern-gui rework 后 680→`118`、480→`27`；layout scrollWidth=clientWidth | touch media 需真实 coarse 设备复测；GUI 窄屏修复追加 commit `eff8ef1d` |
+| A-04 | `builtin.pylon-workspace/styles/components/Sidebar.css` | TSX/TS、B/C、store/preset/runtime/backend | Sidebar/Sheet collapse tests 2 files/3 tests；ownership check 通过；commit `296870d4` | terminal-like inner 818：sidebar `229px`、main `360px`、right `229px`；inner 618：sidebar `42px`、main `447px`；inner 436：sidebar `42px`、main `306px`、textarea `261px`；layout scrollWidth=clientWidth | 42px 视觉轨道下 Sidebar 内容密度依赖现有 DOM；Q4 右栏收缩仍由 flex/host state 协同 |
+| A-03 | `builtin.pylon-renderers/styles/components/chat/ChatView.css` | TSX/TS、B/C、store/preset/runtime/backend | `ToolConnector/AgentEmptyState/spinnerPreviewTerminal` 3 files/8 tests；ownership check、diff check 通过；commit `2b71e6ed` | status label/ARIA 保留（completed/failed/running/waiting/queued/unknown）；copy button focus-visible computed opacity `1`、outline `1.818px solid rgb(136,192,208)`；terminal tool body connector border consumes `--connector-default` fallback | MessageRow/messageRendererConsumption tests在隔离 junction 环境因 `vscode-oniguruma/onig.wasm?url` denied，需根 agent 集成环境复跑；最终 palette 对比度依赖 B DF-03a/03p |
+| A-05 | 线路 A 白名单 + 本线路文档 | 其他线路/高风险文件 | 聚合 targeted 命令共 9 files/30 tests 通过；`check:first-party-styles` 通过；`git diff --check` 通过；提交序列：`b82dd4de`, `ac8b24b3`, `d30d44ab`, `296870d4`, `2b71e6ed`, `eff8ef1d` | terminal-like dark/light 及 modern-gui viewport/computed 证据见上；reduced-motion 规则静态存在（运行环境 `prefers-reduced-motion=false`）；scheme light/dark focus delta 已测 | 需根 agent 合并 B palette 后重跑 Q2 contrast、预设切换和真实 reduced-motion/coarse 设备；MessageRow wasm 环境问题见 A-03 |
 
 ## 8. 不确定事项处理
 
