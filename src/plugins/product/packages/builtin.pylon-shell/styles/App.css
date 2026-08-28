@@ -8,8 +8,8 @@
 .interface-mode-shell-before-workspace { flex:0 0 auto; }
 .interface-mode-shell-overlay {
   position:absolute;
-  inset:44px 0 0;
-  z-index:40;
+  inset:var(--titlebar-h,44px) 0 0;
+  z-index:50;
   pointer-events:none;
 }
 .interface-mode-shell-overlay > * { pointer-events:auto; }
@@ -17,12 +17,13 @@
 .workspace-titlebar {
   --titlebar-text-resolved:var(--titlebar-text,var(--text));
   --titlebar-text-muted:color-mix(in srgb,var(--titlebar-text-resolved) 68%,transparent);
-  height:44px; min-height:44px; display:grid;
+  position:relative; z-index:100;
+  height:var(--titlebar-h,44px); min-height:var(--titlebar-h,44px); display:grid;
   grid-template-columns:minmax(0,var(--titlebar-sidebar-width,var(--sidebar-width,250px))) minmax(0,1fr) auto;
   align-items:stretch; background:var(--titlebar-bg,var(--surface-panel));
   border-bottom:1px solid var(--border); color:var(--titlebar-text-resolved);
-  box-shadow:0 1px 0 color-mix(in srgb,var(--text) 3%,transparent);
-  backdrop-filter:blur(18px) saturate(1.08); -webkit-backdrop-filter:blur(18px) saturate(1.08);
+  box-shadow:none;
+  backdrop-filter:blur(var(--glass-blur-md,16px)) saturate(1.08); -webkit-backdrop-filter:blur(var(--glass-blur-md,16px)) saturate(1.08);
   font-family:var(--font); font-size:var(--font-size-sm); -webkit-app-region:drag;
 }
 .workspace-titlebar button { font-family:inherit; }
@@ -66,14 +67,14 @@
 .workspace-titlebar-icon:disabled { cursor:default; opacity:0.25; background:transparent; color:var(--titlebar-text-muted); }
 .workspace-titlebar-icon:focus-visible,
 .workspace-window-controls button:focus-visible,
-.sheet-tab button:focus-visible { box-shadow:inset 0 0 0 2px var(--accent); color:var(--titlebar-text-resolved); }
+.sheet-tab button:focus-visible { box-shadow:inset 0 0 0 var(--line-width-2) var(--accent); color:var(--titlebar-text-resolved); }
 /* Sheet Launcher 与恢复关闭项是 Workspace 导航入口，图标使用主题强调色。 */
-.workspace-window-controls { height:43px; }
-.workspace-window-controls button { width:38px; margin:4px 0; height:35px; font-size:var(--font-size-md); }
+.workspace-window-controls { height:calc(var(--titlebar-h,44px) - var(--line-width-1)); }
+.workspace-window-controls button { width:38px; margin:var(--ui-space-1) 0; height:calc(var(--titlebar-h,44px) - var(--ui-space-2)); font-size:var(--font-size-md); }
 .workspace-window-controls .close:hover { background:rgba(190,40,40,0.72); color:#fff; }
 
 .sheet-tab-region { position:relative; min-width:0; flex:1; display:flex; align-items:stretch; overflow:hidden; -webkit-app-region:no-drag; }
-.sheet-tab-region::before, .sheet-tab-region::after { content:''; position:absolute; z-index:3; top:0; bottom:0; width:24px; pointer-events:none; opacity:0; transition:opacity 100ms ease; }
+.sheet-tab-region::before, .sheet-tab-region::after { content:''; position:absolute; z-index:3; top:0; bottom:0; width:var(--ui-space-5); pointer-events:none; opacity:0; transition:opacity var(--motion-fast) var(--ease-standard); }
 .sheet-tab-region::before { left:0; background:linear-gradient(90deg,var(--titlebar-bg,var(--surface-panel)),transparent); }
 .sheet-tab-region::after { right:var(--sheet-overflow-reserve,0px); background:linear-gradient(270deg,var(--titlebar-bg,var(--surface-panel)),transparent); }
 .sheet-tab-region.can-scroll-left::before, .sheet-tab-region.can-scroll-right::after { opacity:1; }
@@ -116,10 +117,10 @@
 .sheet-tab.active .sheet-tab-close,
 .sheet-tab:focus-within .sheet-tab-close { visibility:visible; opacity:1; }
 .sheet-tab-close:hover { background:var(--bg-active); color:var(--titlebar-text-resolved); }
-.sheet-tab-overflow-trigger { position:relative; z-index:4; width:32px; flex:0 0 32px; border:0; border-left:1px solid var(--border); border-radius:0; outline:none; color:var(--titlebar-text-muted); background:var(--titlebar-bg,var(--surface-panel)); cursor:pointer; -webkit-app-region:no-drag; }
+.sheet-tab-overflow-trigger { position:relative; z-index:4; width:var(--ui-space-6); flex:0 0 var(--ui-space-6); border:0; border-left:1px solid var(--border); border-radius:0; outline:none; color:var(--titlebar-text-muted); background:var(--titlebar-bg,var(--surface-panel)); cursor:pointer; -webkit-app-region:no-drag; }
 .sheet-tab-overflow-trigger:hover, .sheet-tab-overflow-trigger[aria-expanded="true"] { color:var(--titlebar-text-resolved); background:var(--bg-hover); }
 .sheet-tab-overflow-trigger:focus-visible { box-shadow:inset 0 0 0 2px var(--accent); }
-.sheet-tab-overflow-menu { position:fixed; z-index:260; display:grid; width:min(280px,calc(100vw - 16px)); max-height:min(420px,calc(100vh - 56px)); padding:4px; overflow:auto; border:1px solid var(--stroke-strong); border-radius:var(--ui-radius-md); color:var(--text); background:var(--surface-overlay); box-shadow:var(--shadow-float); backdrop-filter:blur(20px) saturate(1.08); font:12px var(--font); }
+.sheet-tab-overflow-menu { position:fixed; z-index:90; display:grid; width:min(280px,calc(100vw - 16px)); max-height:min(420px,calc(100vh - 56px)); padding:4px; overflow:auto; border:1px solid var(--stroke-strong); border-radius:var(--ui-radius-md); color:var(--text); background:var(--surface-overlay); box-shadow:var(--shadow-float); backdrop-filter:blur(20px) saturate(1.08); font:12px var(--font); }
 .sheet-tab-overflow-menu button { display:grid; grid-template-columns:8px minmax(0,1fr); align-items:center; gap:8px; min-height:32px; padding:5px 8px; border:0; border-radius:var(--ui-radius-sm); color:inherit; background:transparent; text-align:left; cursor:pointer; }
 .sheet-tab-overflow-menu button > span:last-child { overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
 .sheet-tab-overflow-menu button:hover, .sheet-tab-overflow-menu button.active { background:var(--bg-hover); }
@@ -141,12 +142,65 @@
   .workspace-window-controls button { width:34px; }
 }
 
+/* Q4/DF-05a：窄屏先释放标题栏左轨道，保留活动 tab、恢复入口和窗口控制。 */
+@media (max-width:760px) {
+  .workspace-titlebar,
+  .app[data-interface-mode="modern-gui"] .workspace-titlebar {
+    grid-template-columns:var(--workspace-sidebar-collapsed-width,42px) minmax(0,1fr) auto;
+  }
+  .workspace-titlebar-sidebar { width:var(--workspace-sidebar-collapsed-width,42px); }
+  .workspace-titlebar-brand { display:none; }
+  .workspace-titlebar-workspace { min-width:0; }
+  .workspace-titlebar-drag { min-width:var(--ui-space-1); }
+  .sheet-tab-focus { padding-inline:var(--ui-space-2); }
+}
+
+/* Q2/DF-02d：无 hover 或粗指针仍可发现 Sheet 关闭操作。 */
+@media (hover:none), (pointer:coarse) {
+  .workspace-titlebar,
+  .app[data-interface-mode="modern-gui"] .workspace-titlebar {
+    --pylon-terminal-touch-target:44px;
+    grid-template-columns:0 minmax(var(--ui-space-6),1fr) auto;
+  }
+  .workspace-titlebar-sidebar,
+  .app[data-interface-mode="modern-gui"] .workspace-titlebar-sidebar {
+    position:absolute;
+    inset:0 auto 0 0;
+    z-index:2;
+    width:var(--pylon-terminal-touch-target);
+    min-width:var(--pylon-terminal-touch-target);
+    padding:0;
+    background:var(--titlebar-bg,var(--surface-panel));
+  }
+  .workspace-titlebar-workspace,
+  .app[data-interface-mode="modern-gui"] .workspace-titlebar-workspace {
+    padding-left:var(--pylon-terminal-touch-target);
+  }
+  .sheet-tab-close { visibility:visible; opacity:1; }
+  .workspace-titlebar-icon,
+  .workspace-window-controls button,
+  .sheet-tab-close,
+  .sheet-tab-overflow-trigger { min-width:var(--pylon-terminal-touch-target); min-height:var(--pylon-terminal-touch-target); }
+}
+
+@media (max-width:520px) {
+  .workspace-titlebar-icon,
+  .workspace-window-controls button,
+  .app[data-interface-mode="modern-gui"] .workspace-titlebar-icon,
+  .app[data-interface-mode="modern-gui"] .workspace-window-controls button {
+    width:var(--ui-control-compact);
+    margin-inline:0;
+  }
+  .workspace-window-controls,
+  .app[data-interface-mode="modern-gui"] .workspace-window-controls { padding-inline:0; }
+}
+
 .sheet-launcher-overlay {
-  position:fixed; inset:0; z-index:210; background:color-mix(in srgb,var(--text) 42%,transparent);
+  position:fixed; inset:0; z-index:70; background:color-mix(in srgb,var(--text) 42%,transparent);
   backdrop-filter:blur(4px); animation:sheet-launcher-in 100ms ease-out;
 }
 .sheet-launcher-dialog {
-  position:fixed; z-index:211; top:9%; left:50%; width:min(780px,calc(100vw - 32px));
+  position:fixed; z-index:71; top:9%; left:50%; width:min(780px,calc(100vw - 32px));
   transform:translateX(-50%); overflow:hidden; border:1px solid var(--border-focus);
   border-radius:var(--ui-radius-lg); background:var(--surface-overlay);
   color:var(--text); box-shadow:var(--shadow-float); backdrop-filter:blur(24px) saturate(1.08); font-family:var(--font);
@@ -213,7 +267,7 @@
   position: relative;
 }
 .runtime-error-banner {
-  position:fixed; top:42px; left:50%; transform:translateX(-50%); z-index:200;
+  position:fixed; top:var(--titlebar-h,44px); left:50%; transform:translateX(-50%); z-index:90;
   display:flex; align-items:center; gap:10px; max-width:min(720px,calc(100vw - 32px));
   padding:9px 12px; border:1px solid color-mix(in srgb,var(--danger) 55%,transparent);
   border-radius: 0; background:color-mix(in srgb,var(--danger) 16%,var(--bg-panel));
@@ -253,13 +307,13 @@
 
 /* ── 全局运行错误中心 ── */
 .error-center-badge {
-  position: fixed; top: 44px; right: 12px; z-index: 998;
+  position: fixed; top: var(--titlebar-h,44px); right: 12px; z-index: 90;
   padding: 3px 10px; border-radius: 0; border: 1px solid var(--tool-err, #be2828);
   background: color-mix(in srgb, var(--tool-err, #be2828) 12%, transparent);
   color: var(--tool-err, #be2828); font-size: var(--font-size-sm); font-weight: 700; cursor: pointer;
 }
 .error-center {
-  position: fixed; top: 76px; right: 12px; z-index: 998;
+  position: fixed; top: calc(var(--titlebar-h,44px) + var(--ui-space-6)); right: 12px; z-index: 90;
   width: 380px; max-height: 60vh; overflow: auto;
   padding: 10px 12px; border: 1px solid var(--border); border-radius: 0;
   background: var(--bg-panel); box-shadow: 0 8px 24px rgba(0,0,0,0.2);
@@ -391,5 +445,37 @@
 /* 设置打开时标题栏整体层级保持在设置页之上（Settings 从 44px/58px 下开始，露出标题栏） */
 .workspace-titlebar.titlebar-settings-open {
   position: relative;
-  z-index: 60; /* 高于 Settings 的 z-index:50，确保标题栏（含窗口按钮）在最上可点 */
+  z-index: 100; /* 宿主层级最高：确保窗口按钮始终可点。 */
+}
+
+/* Mode-scoped GUI chrome is declared above the shared breakpoint rules; keep
+   the emergency titlebar budget authoritative for modern-gui as well. */
+@media (max-width:760px) {
+  .app[data-interface-mode="modern-gui"] .workspace-titlebar {
+    grid-template-columns:var(--workspace-sidebar-collapsed-width,42px) minmax(0,1fr) auto;
+  }
+  .app[data-interface-mode="modern-gui"] .workspace-titlebar-sidebar {
+    width:var(--workspace-sidebar-collapsed-width,42px);
+    min-width:var(--workspace-sidebar-collapsed-width,42px);
+    padding:0;
+  }
+  .app[data-interface-mode="modern-gui"] .workspace-titlebar-workspace { min-width:0; }
+}
+
+/* Keep touch hit targets without allowing the left rail to consume the tab
+   track at emergency widths. */
+@media (hover:none), (pointer:coarse) {
+  .app[data-interface-mode="modern-gui"] .workspace-titlebar {
+    grid-template-columns:0 minmax(var(--ui-space-6),1fr) auto;
+  }
+  .app[data-interface-mode="modern-gui"] .workspace-titlebar-sidebar {
+    position:absolute;
+    inset:0 auto 0 0;
+    z-index:2;
+    width:var(--pylon-terminal-touch-target,44px);
+    min-width:var(--pylon-terminal-touch-target,44px);
+    padding:0;
+    background:var(--titlebar-bg,var(--surface-panel));
+  }
+  .app[data-interface-mode="modern-gui"] .workspace-titlebar-workspace { padding-left:var(--pylon-terminal-touch-target,44px); }
 }

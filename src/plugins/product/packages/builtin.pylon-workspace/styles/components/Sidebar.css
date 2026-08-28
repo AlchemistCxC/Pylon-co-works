@@ -283,3 +283,46 @@
 .app[data-interface-mode="modern-gui"] .cwd-settings-section,
 .app[data-interface-mode="modern-gui"] .workspace-empty { border-radius:12px; }
 .app[data-interface-mode="modern-gui"] .sidebar.collapsed { border-radius:14px; }
+
+/* Q4/DF-05a：中心 workbench 先保留内容预算，再让宿主侧栏弹性收缩。 */
+.layout .agent-sheet-keep-alive > .main {
+  min-width:0;
+  flex:1 1 auto;
+}
+.layout > .context-panel {
+  min-width:0;
+  flex:0 1 var(--right-width,260px);
+}
+@media (max-width:1100px) {
+  .layout .agent-sheet-keep-alive > .main { min-width:360px; }
+  .sidebar {
+    flex:0 1 var(--workspace-sidebar-track-width, var(--sheet-sidebar-width, var(--sidebar-width, 250px)));
+    min-width:200px;
+  }
+}
+@media (max-width:760px) {
+  .layout .agent-sheet-keep-alive > .main { min-width:360px; }
+  .sidebar {
+    flex:0 1 var(--workspace-sidebar-collapsed-width,42px);
+    width:var(--workspace-sidebar-collapsed-width,42px);
+    min-width:var(--workspace-sidebar-collapsed-width,42px);
+    max-width:var(--workspace-sidebar-collapsed-width,42px);
+  }
+  .sidebar > * { min-width:0; }
+  .session-item,
+  .sidebar-section-head,
+  .profile-bar { min-width:0; }
+}
+@media (max-width:520px) {
+  .layout .agent-sheet-keep-alive > .main { min-width:280px; }
+}
+
+/* Q2/DF-02d：无 hover 环境下保留会话操作；粗指针扩大命中区而不改业务。 */
+@media (hover:none), (pointer:coarse) {
+  .session-del,
+  .session-gear { opacity:1; }
+  .session-del,
+  .session-gear,
+  .sidebar-action,
+  .profile-edit { min-width:44px; min-height:44px; }
+}
