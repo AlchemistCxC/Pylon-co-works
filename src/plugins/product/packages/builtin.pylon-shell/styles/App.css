@@ -284,12 +284,12 @@
 
 /* ── dev-only 渲染指标悬浮面板 ── */
 .dev-metrics-toggle {
-  position: fixed; right: 12px; bottom: 12px; z-index: 90;
+  position: fixed; right: 12px; bottom: 12px; z-index: 999;
   width: 30px; height: 30px; border-radius: 0; border: 1px solid var(--border);
   background: var(--bg-panel); cursor: pointer; font-size: var(--font-size-md);
 }
 .dev-metrics {
-  position: fixed; right: 12px; bottom: 12px; z-index: 90;
+  position: fixed; right: 12px; bottom: 12px; z-index: 999;
   min-width: 320px; max-height: 60vh; overflow: auto;
   padding: 10px 12px; border: 1px solid var(--border); border-radius: 0;
   background: var(--bg-panel); box-shadow: 0 8px 24px rgba(0,0,0,0.2);
@@ -446,15 +446,4 @@
 .workspace-titlebar.titlebar-settings-open {
   position: relative;
   z-index: 100; /* 宿主层级最高：确保窗口按钮始终可点。 */
-}
-
-/* Keep the emergency titlebar budget authoritative after mode-scoped skins. */
-@media (max-width:760px) {
-  .app[data-interface-mode="modern-gui"] .workspace-titlebar {
-    grid-template-columns:var(--workspace-sidebar-collapsed-width,42px) minmax(0,1fr) auto;
-  }
-  .app[data-interface-mode="modern-gui"] .workspace-titlebar-sidebar {
-    width:var(--workspace-sidebar-collapsed-width,42px);
-    padding:0;
-  }
 }
