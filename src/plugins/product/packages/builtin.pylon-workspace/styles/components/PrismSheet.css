@@ -8,9 +8,20 @@
   color: var(--text);
   font-family: var(--font);
 }
-.app[data-interface-mode="modern-gui"] .sheet-tool-view{overflow:hidden;border:1px solid var(--border);border-radius:16px;background:color-mix(in srgb,var(--surface-canvas) 80%,transparent);box-shadow:0 16px 44px color-mix(in srgb,var(--text) 5%,transparent)}
+.app[data-interface-mode="modern-gui"] .sheet-tool-view {
+  overflow: hidden;
+  border: 1px solid var(--stroke-default);
+  border-radius: var(--ui-radius-lg);
+  background: var(--surface-canvas);
+  box-shadow: var(--shadow-raised);
+}
 .app[data-interface-mode="modern-gui"] .prism-sheet,.app[data-interface-mode="modern-gui"] .prism-main{background:transparent}
-.app[data-interface-mode="modern-gui"] .prism-sidebar{margin:8px;border:1px solid var(--border);border-radius:13px;background:color-mix(in srgb,var(--surface-panel) 74%,transparent)}
+.app[data-interface-mode="modern-gui"] .prism-sidebar {
+  margin: var(--ui-space-2);
+  border: 1px solid var(--stroke-default);
+  border-radius: var(--ui-radius-lg);
+  background: var(--surface-panel);
+}
 .app[data-interface-mode="modern-gui"] .prism-card,.app[data-interface-mode="modern-gui"] .prism-section,.app[data-interface-mode="modern-gui"] .prism-form{border-radius:12px;box-shadow:0 6px 18px color-mix(in srgb,var(--text) 4%,transparent)}
 
 .ps-nav {
