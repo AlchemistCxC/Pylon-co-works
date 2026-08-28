@@ -193,6 +193,7 @@
   background: var(--bg-input);
   font-size: 11px;
   color: var(--text-dim);
+  overflow-wrap: anywhere;
 }
 
 .gateway-route-detail .runtime-log-field,
@@ -282,6 +283,8 @@
   .gateway-edit-row { flex-wrap: wrap; }
   .gateway-edit-row .runtime-filter-input { flex-basis: calc(50% - var(--ui-space-2)); }
   .gateway-edit-row .template-apply { flex-basis: 100%; }
+  .gateway-route-head { flex-wrap: wrap; }
+  .gateway-route-head .search-result-text { white-space: normal; overflow-wrap: anywhere; }
 }
 
 /* I12-W5：实例卡片 */
@@ -301,7 +304,5 @@
 .gateway-instance-status-error { background: var(--color-danger-bg, #fdecea); color: var(--color-danger, #c62828); }
 .gateway-instance-status-starting { background: var(--color-warning-bg, #fff8e1); color: var(--color-warning, #f57f17); }
 .gateway-instance-status-stopped { background: var(--bg-muted, #f0f0f0); color: var(--text-dim, #666); }
-.app[data-interface-mode="modern-gui"] .gateway-sheet{overflow:hidden;border:1px solid var(--border);border-radius:16px;background:color-mix(in srgb,var(--surface-canvas) 80%,transparent);box-shadow:0 16px 44px color-mix(in srgb,var(--text) 5%,transparent)}
-.app[data-interface-mode="modern-gui"] .gateway-sidebar{margin:8px;border:1px solid var(--border);border-radius:13px;background:color-mix(in srgb,var(--surface-panel) 74%,transparent)}
 .app[data-interface-mode="modern-gui"] .gateway-route,.app[data-interface-mode="modern-gui"] .gateway-route-edit,.app[data-interface-mode="modern-gui"] .gateway-instance-card,.app[data-interface-mode="modern-gui"] .gateway-inject{border-radius:12px;box-shadow:0 6px 18px color-mix(in srgb,var(--text) 4%,transparent)}
 .app[data-interface-mode="modern-gui"] .gateway-route-head,.app[data-interface-mode="modern-gui"] .runtime-filter-input,.app[data-interface-mode="modern-gui"] .template-apply{border-radius:9px}

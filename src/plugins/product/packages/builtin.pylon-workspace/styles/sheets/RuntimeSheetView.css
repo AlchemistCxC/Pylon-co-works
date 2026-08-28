@@ -82,6 +82,7 @@
   min-width: 0;
   display: flex;
   flex-direction: column;
+  overflow: hidden;
 }
 
 .runtime-count {
@@ -248,7 +249,10 @@
 .runtime-marker-status { color: var(--danger, #e5484d); }
 .runtime-marker-agent { color: var(--accent); }
 .runtime-marker-detail { color: var(--text-dim); }
-.app[data-interface-mode="modern-gui"] .runtime-sheet{overflow:hidden;border:1px solid var(--border);border-radius:16px;background:color-mix(in srgb,var(--surface-canvas) 80%,transparent);box-shadow:0 16px 44px color-mix(in srgb,var(--text) 5%,transparent)}
-.app[data-interface-mode="modern-gui"] .runtime-sidebar{margin:8px;border:1px solid var(--border);border-radius:13px;background:color-mix(in srgb,var(--surface-panel) 74%,transparent)}
+@media (max-width: 760px) {
+  .runtime-log-row { flex-wrap: wrap; }
+  .runtime-log-message { flex-basis: 100%; overflow-wrap: anywhere; }
+  .runtime-log-detail { overflow-wrap: anywhere; }
+}
 .app[data-interface-mode="modern-gui"] .runtime-filter-select,.app[data-interface-mode="modern-gui"] .runtime-filter-input,.app[data-interface-mode="modern-gui"] .runtime-clear{border-radius:9px}
 .app[data-interface-mode="modern-gui"] .runtime-diagnostics,.app[data-interface-mode="modern-gui"] .runtime-markers,.app[data-interface-mode="modern-gui"] .runtime-log-item{border-radius:12px}

@@ -8,8 +8,6 @@
   color: var(--text);
   font-family: var(--font);
 }
-.app[data-interface-mode="modern-gui"] .history-sheet{overflow:hidden;border:1px solid var(--border);border-radius:16px;background:color-mix(in srgb,var(--surface-canvas) 80%,transparent);box-shadow:0 16px 44px color-mix(in srgb,var(--text) 5%,transparent)}
-.app[data-interface-mode="modern-gui"] .history-sidebar{margin:8px;border:1px solid var(--border);border-radius:13px;background:color-mix(in srgb,var(--surface-panel) 74%,transparent)}
 .app[data-interface-mode="modern-gui"] .history-sidebar-total,.app[data-interface-mode="modern-gui"] .history-sidebar nav button,.app[data-interface-mode="modern-gui"] .history-row,.app[data-interface-mode="modern-gui"] .history-sheet .template-apply{border-radius:10px}
 .app[data-interface-mode="modern-gui"] .history-row{margin-bottom:7px;border:1px solid var(--border);background:color-mix(in srgb,var(--surface-panel) 72%,transparent);box-shadow:0 5px 16px color-mix(in srgb,var(--text) 4%,transparent)}
 
@@ -153,4 +151,5 @@
   .history-row { flex-wrap: wrap; }
   .history-row .search-result-path { flex-basis: calc(100% - var(--ui-space-3)); }
   .history-row .search-result-text { margin-right: auto; }
+  .history-row .search-result-path { overflow-wrap: anywhere; white-space: normal; }
 }

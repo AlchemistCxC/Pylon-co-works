@@ -1092,7 +1092,5 @@
   min-height: 0;
   overflow: hidden;
 }
-.app[data-interface-mode="modern-gui"] .file-sheet{overflow:hidden;border:1px solid var(--border);border-radius:16px;background:color-mix(in srgb,var(--surface-canvas) 80%,transparent);box-shadow:0 16px 44px color-mix(in srgb,var(--text) 5%,transparent)}
-.app[data-interface-mode="modern-gui"] .file-sidebar{margin:8px;border:1px solid var(--border);border-radius:13px;background:color-mix(in srgb,var(--surface-panel) 74%,transparent)}
 .app[data-interface-mode="modern-gui"] .file-activity-button,.app[data-interface-mode="modern-gui"] .file-tree-row,.app[data-interface-mode="modern-gui"] .file-tab,.app[data-interface-mode="modern-gui"] .file-tab-close{border-radius:8px}
 .app[data-interface-mode="modern-gui"] .file-editor{margin:8px 8px 8px 0;overflow:hidden;border:1px solid var(--border);border-radius:13px;background:color-mix(in srgb,var(--surface-panel) 58%,transparent)}

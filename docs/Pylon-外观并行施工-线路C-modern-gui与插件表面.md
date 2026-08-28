@@ -131,19 +131,34 @@
 
 | 文件/selector | 直接值或断点 | 属于宿主 shell 还是插件内部 | 保留原因 | Q2/Q4 证据 | 状态 |
 |---|---|---|---|---|---|
-| 待填写 | 待填写 | 待填写 | 待填写 | 待填写 | 待审 |
+| `PrismSheet.css` `.prism-card/.prism-section/.prism-form` | `radius:12px`、`shadow:0 6px 18px …` | Prism 插件内部 | Q1/Q5 允许插件/领域自有几何；共享 shell 已改用语义 token | 由 C-04 visual QA 检查对比度、溢出与焦点，不比较内部几何 | 保留，待集成回归 |
+| 内置 Sheet 内容区（Overview/Runtime/Browser/File/Gateway/History/Search） | 各自断点/列表行几何 | 内置插件内部 | Q4 允许内部断点；共享根壳和侧栏预算由 PrismSheet.css 统一提供 | C-03 已记录 480/680/900 实际 viewport 下 root `scrollWidth=clientWidth`；侧栏按既有折叠入口收缩 | 已通过结构检查 |
 
 ## 6. 契约请求（执行时填写）
 
 | 请求 | 影响文件 | 为什么现有 CSS/slot 无法表达 | 最小替代方案 | 根 agent 决定 | 状态 |
 |---|---|---|---|---|---|
-| 待填写 | 待填写 | 不得直接修改 plugin runtime/interface mode | 待填写 | 待填写 | 待审 |
+| C-04 dark `--stroke-default` alias 观测 | B 线路 `index.css`/`themeCssSnapshot.ts`（C 只读） | dark scheme 下 C worktree 基线 alias 仍解析浅色边框；C 无权修改公共投影 | 等 B-01/B-04 合并后重新采集 computed token 与对比度；C 不局部改 `--border` | B-01/B-04 合入 C 临时集成树后，dark modern-gui computed `--stroke-default=#6F7A95`，Sheet/Settings 边界跟随公共角色；C 无越权改动 | **已通过集成复测** |
 
 ## 7. 交接记录（执行时填写）
 
 | 卡片 | 改动文件 | 未改动的越界文件 | 验证命令/结果 | 公共契约变更 | 遗留风险/待根 agent 决策 |
 |---|---|---|---|---|---|
 | AUTONOMY-OPEN | — | 本线路白名单 | PREFLIGHT/只读审计已完成 | 无 | 按 C-02 → C-01 → C-03 → C-04 自治施工；一功能一 commit |
+| C-02 | `styles/components/PrismSheet.css` | Settings/Sheet TSX、A/B、runtime/store/preset 未改 | `check:first-party-styles` 通过；`git diff --check` 通过 | 共享 Prism Sheet 壳改消费 `--surface-*`/`--stroke-*`/`--ui-*`/`--shadow-*`，无新增 token | commit `75463e1d`；待根集成审阅 |
+| C-01 | `styles/components/Settings.css` | Settings.tsx、公共 token/ARIA、A/B 文件未改 | `radiusContract.test.ts` 3/3；`check:first-party-styles`、`git diff --check` 通过；浏览器 light/dark 与 480px overflow 采样 | modern Settings root/header/nav/body/preview 改用语义 surface/radius/shadow；窄屏 set-row wrap、mode grid 单列 | commits `659a3e39`, `bf3af466`, `48e5162b`；dark 对比度依赖 B token 集成 |
+| C-03 | 7 个内置 Sheet CSS + PrismSheet.css | Sheet/Settings TSX、A/B、runtime/store/preset 未改 | targeted Sheet sidebar tests 16/16；`check:first-party-styles`、`git diff --check` 通过；浏览器 480/680/900/desktop root geometry 采样 | 共享根壳集中到 PrismSheet.css；各 Sheet 保留内部断点并加 Q4 内容换行/预算保护 | commit `7dd15abe`；File/B-13 titlebar narrow 依赖宿主 A 线 |
+| C-04 | 仅视觉 QA，不新增脆弱单测 | 全部越界文件未改 | B-01/B-04 合入后的浏览器采样：modern-gui dark/light 7 个内置 Sheet 在 1280 请求视口均 `layout scrollWidth=clientWidth`；dark `--stroke-default=#6F7A95`，light `#7986A1`；480 请求视口 Settings dialog `scrollWidth=clientWidth`；既有 light 818/618/436 窄屏证据保持通过 | 无公共契约变更；消费 DF-03/DF-05/DF-07/DF-08/DF-09 | **已完成；待根分支合并 A/B/C 后做一次最终矩阵复跑** |
+
+### 7.1 C-04 集成复测证据（2026-08-28）
+
+| mode/scheme | 请求视口→实际 innerWidth | 宿主结果 | 公共角色/对比度证据 |
+|---|---:|---|---|
+| modern-gui/light | `1280×720 → 1164×655` | Overview、Runtime、Browser、File、Gateway、History、Search 的可见根节点均未超出 `.layout`；根 `scrollWidth=1164`、`clientWidth=1164` | `--surface-canvas=#F5F7FC`、`--content-text=#1B2030`、`--stroke-default=#7986A1`、`--connector-default=#6B7892`；B-04 角色计算满足 text/muted `≥4.5:1`、非文本边界 `≥3:1` |
+| modern-gui/dark | `1280×720 → 1164×655` | 同一 7 个 Sheet 的可见根节点均未超出 `.layout`；根 `scrollWidth=1164`、`clientWidth=1164` | `--surface-canvas=#181C27`、`--content-text=#F7F8FC`、`--stroke-default=#6F7A95`、`--connector-default=#6F7A95`；B-04 角色计算满足 text/muted `≥4.5:1`、非文本边界 `≥3:1` |
+| modern-gui/dark Settings | `480×720 → 436×655` | `dialog width=428`；Settings body `scrollWidth=188`、`clientWidth=188`，无横向溢出；宿主边界消费 `--stroke-default` | dialog computed surface 为 dark overlay，文字 `rgb(247,248,252)`；Settings domain rail/body border `rgb(111,122,149)`，对应 `#6F7A95` |
+
+复测说明：C worktree 通过 merge commit `fb52baca` 临时消费 B-01～B-04 的公共 ABI；最终根分支应分别合并 A/B/C 原线路提交。标题栏在 480/680 的 modern-gui 规则由 A-01 rework 负责，C 不复制或局部覆盖该 CSS。
 
 ## 8. 不确定事项处理
 
