@@ -563,37 +563,46 @@
 
 /* Modern GUI settings shell: a floating three-pane studio rather than a full-screen terminal panel. */
 .app[data-interface-mode="modern-gui"] .settings {
-  top:var(--titlebar-h, 58px); left:8px; right:8px; bottom:8px; overflow:hidden;
-  border:1px solid color-mix(in srgb,var(--accent) 20%,var(--border)); border-radius:18px;
-  background:color-mix(in srgb,var(--surface-overlay) 92%,transparent); box-shadow:0 34px 100px rgba(0,0,0,.3);
+  top:var(--titlebar-h, 58px); left:var(--ui-space-2); right:var(--ui-space-2); bottom:var(--ui-space-2); overflow:hidden;
+  border:1px solid var(--stroke-strong); border-radius:var(--ui-radius-lg);
+  /* Elevated recipe: one opaque overlay surface + one semantic shadow; no blur. */
+  background:var(--surface-overlay); box-shadow:var(--shadow-float); backdrop-filter:none;
 }
 .app[data-interface-mode="modern-gui"] .settings-header {
   height:78px; flex-basis:78px; padding:0 28px; border-bottom-color:color-mix(in srgb,var(--border) 72%,transparent);
-  background:linear-gradient(110deg,color-mix(in srgb,var(--accent) 8%,var(--surface-panel)),var(--surface-panel));
+  background:var(--surface-panel);
 }
-.app[data-interface-mode="modern-gui"] .settings-header h2 { font-size:22px; }
-.app[data-interface-mode="modern-gui"] .settings-close { width:38px; height:38px; border-radius:12px; }
-.app[data-interface-mode="modern-gui"] .settings-tabs-root { gap:10px; padding:10px; }
+.app[data-interface-mode="modern-gui"] .settings-header h2 { font-size:var(--font-size-2xl); }
+.app[data-interface-mode="modern-gui"] .settings-close { width:var(--ui-control-standard); height:var(--ui-control-standard); border-radius:var(--ui-radius-lg); }
+.app[data-interface-mode="modern-gui"] .settings-tabs-root { gap:var(--ui-space-2); padding:var(--ui-space-2); }
 .app[data-interface-mode="modern-gui"] .settings-nav {
-  width:224px; padding:14px 10px; border:1px solid var(--border); border-radius:16px; background:color-mix(in srgb,var(--surface-panel) 82%,transparent);
+  width:224px; padding:14px 10px; border:1px solid var(--stroke-default); border-radius:var(--ui-radius-lg); background:var(--surface-panel);
 }
-.app[data-interface-mode="modern-gui"] .set-nav-btn { padding:10px 12px; border-radius:10px; }
-.app[data-interface-mode="modern-gui"] .set-nav-btn.active { box-shadow:0 5px 16px color-mix(in srgb,var(--accent) 9%,transparent); }
+.app[data-interface-mode="modern-gui"] .set-nav-btn { padding:10px 12px; border-radius:var(--ui-radius-md); }
+.app[data-interface-mode="modern-gui"] .set-nav-btn.active { box-shadow:none; }
 .app[data-interface-mode="modern-gui"] .set-nav-btn.active::before { width:6px; height:6px; margin-right:9px; border-radius:50%; }
-.app[data-interface-mode="modern-gui"] .settings-body { padding:22px clamp(20px,3vw,38px) 42px; border:1px solid var(--border); border-radius:16px; background:color-mix(in srgb,var(--surface-canvas) 62%,transparent); }
-.app[data-interface-mode="modern-gui"] .settings-body h3 { font-size:19px; border-bottom:0; }
-.app[data-interface-mode="modern-gui"] .set-toolbar { position:sticky; top:-22px; z-index:4; padding:14px 0; background:color-mix(in srgb,var(--surface-canvas) 92%,transparent); backdrop-filter:blur(18px); }
+.app[data-interface-mode="modern-gui"] .settings-body { padding:22px clamp(20px,3vw,38px) 42px; border:1px solid var(--stroke-default); border-radius:var(--ui-radius-lg); background:var(--surface-canvas); }
+.app[data-interface-mode="modern-gui"] .settings-body h3 { font-size:var(--font-size-2xl); border-bottom:0; }
+.app[data-interface-mode="modern-gui"] .set-toolbar { position:sticky; top:-22px; z-index:4; padding:14px 0; background:var(--surface-glass); backdrop-filter:blur(var(--glass-blur-sm)); }
 .app[data-interface-mode="modern-gui"] .set-search,
 .app[data-interface-mode="modern-gui"] .pylon-select-trigger,
 .app[data-interface-mode="modern-gui"] .set-input,
 .app[data-interface-mode="modern-gui"] .set-num,
-.app[data-interface-mode="modern-gui"] .set-textarea { border-radius:10px; }
-.app[data-interface-mode="modern-gui"] .set-group { margin-bottom:14px; padding:16px 18px; border-radius:14px; box-shadow:0 8px 22px color-mix(in srgb,var(--text) 4%,transparent); }
-.app[data-interface-mode="modern-gui"] .settings-preview-pane { border:1px solid var(--border); border-radius:16px; background:color-mix(in srgb,var(--surface-panel) 66%,transparent); }
-.app[data-interface-mode="modern-gui"] .set-preview-frame { border-radius:14px; }
+.app[data-interface-mode="modern-gui"] .set-textarea { border-radius:var(--ui-radius-lg); }
+.app[data-interface-mode="modern-gui"] .set-group { margin-bottom:14px; padding:16px 18px; border-radius:var(--ui-radius-lg); box-shadow:var(--shadow-soft); }
+.app[data-interface-mode="modern-gui"] .settings-preview-pane { border:1px solid var(--stroke-default); border-radius:var(--ui-radius-lg); background:var(--surface-panel); }
+.app[data-interface-mode="modern-gui"] .set-preview-frame { border-radius:var(--ui-radius-lg); }
 @media (max-width:900px) {
-  .app[data-interface-mode="modern-gui"] .settings { top:var(--titlebar-h, 58px); left:6px; right:6px; bottom:6px; }
-  .app[data-interface-mode="modern-gui"] .settings-tabs-root { gap:6px; padding:6px; }
+  .app[data-interface-mode="modern-gui"] .settings { top:var(--titlebar-h, 58px); left:var(--ui-space-1); right:var(--ui-space-1); bottom:var(--ui-space-1); }
+  .app[data-interface-mode="modern-gui"] .settings-tabs-root { gap:var(--ui-space-1); padding:var(--ui-space-1); }
+}
+@media (max-width:680px) {
+  /* Keep both navigation and content reachable when the settings overlay is narrow. */
+  .app[data-interface-mode="modern-gui"] .settings-nav {
+    width:min(224px, 32vw);
+    flex-basis:min(224px, 32vw);
+  }
+  .app[data-interface-mode="modern-gui"] .settings-body { min-width:0; }
 }
 
 /* ── 渲染器设置组 layout 契约（S3，设计书 §3.2）── */
