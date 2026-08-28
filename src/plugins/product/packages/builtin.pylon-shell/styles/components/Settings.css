@@ -603,6 +603,24 @@
     flex-basis:min(224px, 32vw);
   }
   .app[data-interface-mode="modern-gui"] .settings-body { min-width:0; }
+  .app[data-interface-mode="modern-gui"] .set-row {
+    flex-wrap: wrap;
+    align-items: flex-start;
+  }
+  .app[data-interface-mode="modern-gui"] .set-row-label {
+    width: 100%;
+  }
+  .app[data-interface-mode="modern-gui"] .set-row > :not(.set-row-label),
+  .app[data-interface-mode="modern-gui"] :is(.set-color-direct, .set-color-trigger, .set-input, .set-num, .set-select, .pylon-select, .pylon-select-trigger, .renderer-segmented) {
+    max-width: 100%;
+    min-width: 0;
+  }
+  .app[data-interface-mode="modern-gui"] .settings-section-header { flex-wrap: wrap; }
+  .app[data-interface-mode="modern-gui"] .interface-mode-grid { grid-template-columns: 1fr; }
+  .app[data-interface-mode="modern-gui"] .font-contribution-sample {
+    white-space: normal;
+    overflow-wrap: anywhere;
+  }
 }
 
 /* ── 渲染器设置组 layout 契约（S3，设计书 §3.2）── */
