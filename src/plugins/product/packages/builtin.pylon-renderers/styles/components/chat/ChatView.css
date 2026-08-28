@@ -223,10 +223,10 @@
   transform-origin:top center;
 }
 .term-tool-connector-style--dotted {
-  background:repeating-linear-gradient(to bottom, var(--tool-connector-color,currentColor) 0 3px, transparent 3px 6px) !important;
+  background:repeating-linear-gradient(to bottom, var(--tool-connector-color,var(--connector-default,var(--border))) 0 3px, transparent 3px 6px) !important;
 }
 .term-tool-connector-style--dashed {
-  background:repeating-linear-gradient(to bottom, var(--tool-connector-color,currentColor) 0 8px, transparent 8px 14px) !important;
+  background:repeating-linear-gradient(to bottom, var(--tool-connector-color,var(--connector-default,var(--border))) 0 8px, transparent 8px 14px) !important;
 }
 .term-tool-connector-style--pulse { animation:tool-connector-style-pulse 1.3s ease-in-out infinite; }
 @keyframes tool-connector-style-pulse { 0%,100% { opacity:calc(var(--tool-connector-opacity,1) * 0.48); } 50% { opacity:var(--tool-connector-opacity,1); } }
@@ -1778,3 +1778,66 @@
 .chat-empty,
 .agent-empty-state,
 .agent-empty-state > * { border-radius: 0; }
+
+/* A-03 terminal-like semantic projection: consume the shared palette roles
+   while preserving renderer/plugin tone choices in their own variables. */
+.app[data-interface-mode="terminal-like"] .term {
+  color:var(--content-text,var(--chat-text,var(--text)));
+}
+.app[data-interface-mode="terminal-like"] :is(
+  .term-row-user,
+  .term-row-assistant,
+  .term-row-reasoning
+) {
+  color:var(--content-text,var(--msg-text,var(--chat-text-color,var(--text))));
+}
+.app[data-interface-mode="terminal-like"] :is(
+  .term-tool-summary,
+  .term-tool-suffix,
+  .term-tool-label,
+  .term-reasoning-elapsed,
+  .term-reasoning-line,
+  .term-row-error-detail,
+  .term-code-gutter
+) {
+  color:var(--content-muted,var(--text-dim));
+}
+.app[data-interface-mode="terminal-like"] .term-code-gutter { opacity:1; }
+.app[data-interface-mode="terminal-like"] .term-tool-indicator.ok,
+.app[data-interface-mode="terminal-like"] .term-tool[data-status="ok"] .term-tool-name {
+  color:var(--state-success,var(--tool-ok,var(--accent)));
+}
+.app[data-interface-mode="terminal-like"] .term-tool-indicator.err,
+.app[data-interface-mode="terminal-like"] .term-tool[data-status="err"] .term-tool-name,
+.app[data-interface-mode="terminal-like"] .term-tool-label-error {
+  color:var(--state-danger,var(--tool-err,var(--danger)));
+}
+.app[data-interface-mode="terminal-like"] .term-tool-indicator.run,
+.app[data-interface-mode="terminal-like"] .term-tool[data-status="run"] .term-tool-name {
+  color:var(--accent,var(--tool-run));
+}
+.app[data-interface-mode="terminal-like"] :is(.term-tool-connector,.term-reasoning-body,.term-tool-body) {
+  border-left-color:var(--connector-default,var(--border));
+}
+.app[data-interface-mode="terminal-like"] .tool-rich-section + .tool-rich-section {
+  border-top-color:var(--stroke-default,var(--border));
+}
+.app[data-interface-mode="terminal-like"] .term-link { color:var(--accent); }
+
+/* Q2/DF-06：hover 移除后，键盘与触屏仍可发现已有操作。 */
+@media (hover:none), (pointer:coarse) {
+  .app[data-interface-mode="terminal-like"] .term-assistant .copy-btn,
+  .app[data-interface-mode="terminal-like"] .tool-object-actions,
+  .app[data-interface-mode="terminal-like"] .tool-object-row:focus-within .tool-object-actions {
+    opacity:1 !important;
+  }
+  .app[data-interface-mode="terminal-like"] .term-assistant .copy-btn {
+    right:var(--ui-space-1);
+  }
+}
+
+/* Keyboard focus must override the default hover-only opacity even when a
+   renderer contributes an inline visual state. */
+.app[data-interface-mode="terminal-like"] .term-assistant .copy-btn:focus-visible {
+  opacity:1 !important;
+}
