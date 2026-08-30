@@ -1,6 +1,6 @@
 # Pylon MCP、Skill、插件设置管理施工书
 
-> 状态：施工中（调查完成，Slice A/B 完成）
+> 状态：施工中（调查完成，Slice A/B/C 完成）
 > 对应问题：[P5 · MCP、Skill、插件设置管理](Pylon-问题台账.md#p5)
 > 范围：Workspace 能力选择、Agent 级 MCP 配置、API 1.0 插件包与插件设置命名空间
 
@@ -51,11 +51,17 @@
 - Skills、Hook 使用结构化标签预览和单项移除入口，保留旧逗号输入作为兼容编辑方式并显示已选数量。
 - MCP 选择展示 transport、来源和 unavailable 诊断；悬挂引用仍可取消，不会被读取过程静默删除。
 
-### Slice C：贡献与权限契约（下一步）
+### Slice C：贡献与权限契约
 
 - 评估 API 1.1 manifest 的 Skill/MCP contribution schema、版本/来源和用户授权边界；API 1.0 不接受未定义字段。
 - 明确 MCP 凭据引用/secret store 方案，继续禁止日志、诊断和 renderer 读取明文值。
 - 增加插件停用、卸载、scope 清理和 workspace 引用的回归矩阵。
+
+### Slice C（已完成评审）
+
+- API 1.0 manifest 已拒绝未定义的 `trust/capabilities/contributes/signature/entry` 字段；Skill/MCP 贡献保持在后续 API 版本评审，不向 1.0 偷渡 schema。
+- MCP 明文 env/header 仅作为本地配置持久化，现有日志/诊断路径不读取；凭据引用/secret store 留作后续 API 1.1 议题。
+- `PluginScope`、包启停/卸载清理和按 pluginId 隔离的 `PluginSettingsStore` 已有回归覆盖；本轮未发现越权或应删除的过时测试。
 
 ## 5. 兼容性、性能与回滚
 

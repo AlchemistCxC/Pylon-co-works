@@ -18,7 +18,7 @@
 | [P2](#p2) | terminal-like 块间距统一 | **待验收** | 2026-08-31 | [terminal-like 块间距施工书](Pylon-terminal-like块间距施工书.md)；[spacing contract test](../src/domains/theme/__tests__/terminalLikeSpacingContract.test.ts)；`mountSolidWorkbench` 混排回归 | 在真实窗口完成一次最终视觉验收 |
 | [P3](#p3-本机-acp-agent-运行时探测) | 本机 ACP Agent 运行时探测 | **施工中** | 2026-08-31 | [本机 ACP Agent 运行时探测施工书](Pylon-本机ACP-Agent运行时探测施工书.md)；`cargo test --manifest-path src-tauri/pylon-core/Cargo.toml`；`npm.cmd run check:solid` | 进入验收（用户要求暂跳过），转查 P4 |
 | [P4](#p4-连续同种工具调用聚合) | 连续同种工具调用聚合 | **施工中** | 2026-08-31 | [连续同种工具调用聚合施工书](Pylon-连续同种工具调用聚合施工书.md)；`activityGrouping.ts`；`activityGrouping.test.ts`；`SolidWorkbenchApp.solid.tsx`；`WorkbenchChrome.css`；`npm.cmd run check:solid` | 验收暂跳过；转入 P5 schema、存储和权限边界盘点 |
-| [P5](#p5-mcpskill插件设置管理) | MCP、Skill、插件设置管理 | **施工中** | 2026-08-31 | [MCP、Skill、插件设置管理施工书](Pylon-MCP-Skill-插件设置管理施工书.md)；`CapabilityOption`；`buildCapabilityOptions`；`CwdSettingsPanel.tsx`；7 项相关测试；`npm.cmd run check:solid` | 评审 Slice C 贡献 schema、凭据引用和权限回归 |
+| [P5](#p5-mcpskill插件设置管理) | MCP、Skill、插件设置管理 | **施工中** | 2026-08-31 | [MCP、Skill、插件设置管理施工书](Pylon-MCP-Skill-插件设置管理施工书.md)；`CapabilityOption`；`buildCapabilityOptions`；`CwdSettingsPanel.tsx`；7 项相关测试；`npm.cmd run check:solid` | 验收暂跳过；转入 P6 设置注册表与旧键迁移盘点 |
 | [P6](#p6-全局设置页面重组) | 全局设置页面重组 | **待调查** | — | [问题清单第 6 项](Pylon-下一阶段问题清单.md#6-全局设置页面重组) | 盘点注册表、旧键迁移和搜索索引 |
 | [P7](#p7-agentsheet-空态与创建会话形态) | Agentsheet 空态与创建会话形态 | **待调查** | — | [问题清单第 7 项](Pylon-下一阶段问题清单.md#7-agentsheet-空态与创建会话形态) | 确认空态创建命令边界 |
 | [P8](#p8-filesheet-语言插件与-git) | Filesheet 语言插件与 Git | **待调查** | — | [问题清单第 8 项](Pylon-下一阶段问题清单.md#8-filesheet-语言插件与-git) | 盘点语言插件和 Git facade seam |
@@ -82,12 +82,12 @@
 - 状态：`施工中`
 - 证据：`src-tauri/src/mcp.rs`（transport/数量/敏感字段校验）；`src-tauri/src/lifecycle/mcp.rs`（写序锁与原子持久化）；`src/components/settings/CwdSettingsPanel.tsx`（逗号输入与 MCP 勾选）；`src/workspaceEntities.ts`（Workspace 数组字段）；`src/plugin-runtime/packageManifest.ts`、`PackageInstallationService`、`PluginScope`、`PluginSettingsStore`。
 - 结论：未发现应删除的过时测试；现有 MCP 持久化、schema、插件生命周期和 namespace 安全测试仍覆盖真实边界。当前体验缺口集中在逗号文本、悬挂引用不可见和 Skill 无 registry。
-- 下一步：评审 Slice C 贡献 schema、凭据引用和权限回归，保持旧存储字段和新会话快照语义。
+- 下一步：P5 验收暂按用户指示跳过，转入 P6 设置注册表与旧键迁移盘点，保持旧存储字段和新会话快照语义。
 
 <a id="p6"></a>
 ### P6 · 全局设置页面重组
 
-当前未完成注册表、旧键迁移和搜索索引盘点，保持 `待调查`。
+已进入调查：下一步盘点设置注册表、旧键迁移和搜索索引。
 
 <a id="p7"></a>
 ### P7 · Agentsheet 空态与创建会话形态
