@@ -62,8 +62,8 @@
     "remark-rehype": "^11.1.2",
     "solid-js": "^1.9.14",
     "unified": "^11.0.5",
-    "zustand": "^5",
-    "vscode-oniguruma": "^2.0.1"
+    "vscode-oniguruma": "^2.0.1",
+    "zustand": "^5"
   },
   "devDependencies": {
     "@eslint/js": "^10.0.1",

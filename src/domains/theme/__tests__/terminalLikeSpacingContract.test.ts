@@ -3,7 +3,7 @@ import { readFileSync } from 'node:fs'
 import { presentationProfileInterfaceMode } from '../../../application/transactions/activateInterfaceMode.ts'
 import { BUILTIN_PRESENTATION_PROFILES } from '../../../plugins/core/renderer/builtinPresentationProfiles.ts'
 
-const chatCss = readFileSync(new URL('../../../plugins/product/packages/builtin.pylon-renderers/styles/components/chat/ChatView.css', import.meta.url), 'utf8')
+const chatCss = readFileSync('src/plugins/product/packages/builtin.pylon-renderers/styles/components/chat/ChatView.css', 'utf8')
 
 describe('terminal-like 块间距 contract', () => {
   it('uses one explicit cadence token set at the terminal-like boundary', () => {
