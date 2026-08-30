@@ -186,7 +186,11 @@
 <a id="p16"></a>
 ### P16 · Hermes terminal 类型与参数外漏
 
-现有 `toolResolution` 已按 wire kind 优先、provider 字典、标题内嵌参数和 alias 兜底解析 Hermes `terminal`/`terminal: command`，并有 74 项工具渲染回归通过。本轮未发现可复现缺陷，继续补齐真实 provider wire fixture 后再决定是否改变类型映射。
+Hermes ACP 的 `terminal: command`、`execute_code: code` 标题与 `args`/`arguments`/`preview` 参数已在 provider adapter seam 统一收窄为机器工具名、展示标题和结构化输入；原始 wire 仍保留在 envelope raw 供审计。工具卡按机器名查询 provider 字典，因此 terminal/execute_code 的类型与摘要不会再外漏到工具名。另修正 `splitToolTitle`：冒号优先于参数括号，`print(1)`、`echo (hi)` 不会被误切。
+
+证据：`hermesNormalizer.test.ts` 与 `ToolInvocationCard.solid.test.tsx` 覆盖 terminal、execute_code、process 及 preview 参数；工具/归一化/Workbench 定向回归 80 项通过，`npm.cmd run check:solid` 通过，`git diff --check` 通过。
+
+状态：首片完成。后续仅需用真实 Hermes trace 复核未登记工具的 provider overlay，不再改变已稳定的 terminal/execute 解析路径。
 
 ## 状态变更模板
 

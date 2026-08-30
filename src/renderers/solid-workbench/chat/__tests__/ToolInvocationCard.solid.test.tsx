@@ -32,6 +32,32 @@ describe('C04 SolidToolInvocationCard', () => {
     expect(container.querySelector('.term-tool-name')).toHaveTextContent('Read_file')
   })
 
+  it('renders Hermes terminal/execute_code titles without leaking command text into the tool name', () => {
+    const { container } = render(() => <>
+      <SolidToolInvocationCard
+        renderKind="tool.execute"
+        appearance={{ defaultCollapsed: false }}
+        snapshot={{
+          id: 'hermes-terminal', title: 'Terminal', name: 'terminal', kind: 'execute', status: 'running',
+          input: { command: 'git status --short' },
+        }}
+      />
+      <SolidToolInvocationCard
+        renderKind="tool.execute"
+        appearance={{ defaultCollapsed: false }}
+        snapshot={{
+          id: 'hermes-code', title: 'Execute Code', name: 'execute_code', kind: 'execute', status: 'running',
+          input: { code: 'print(1)' },
+        }}
+      />
+    </>)
+
+    const names = [...container.querySelectorAll('.term-tool-name')].map(node => node.textContent)
+    expect(names).toEqual(['Terminal', 'Execute Code'])
+    const summaries = [...container.querySelectorAll('.term-tool-summary')].map(node => node.textContent)
+    expect(summaries).toEqual([' (git status --short)', ' (print(1))'])
+  })
+
   it('renders adjacent streamed text output as one semantic block', () => {
     const { container } = render(() => <SolidToolInvocationCard
       renderKind="tool.generic"
