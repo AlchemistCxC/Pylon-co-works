@@ -17,7 +17,7 @@
 | [P1](#p1-流式输出节奏) | 流式输出节奏 | **首片完成** | 2026-08-31 | [流式渲染节奏施工书](Pylon-流式渲染节奏施工书.md)；`npm.cmd run check:solid` | 用真实 trace 校准速率参数 |
 | [P2](#p2) | terminal-like 块间距统一 | **待验收** | 2026-08-31 | [terminal-like 块间距施工书](Pylon-terminal-like块间距施工书.md)；[spacing contract test](../src/domains/theme/__tests__/terminalLikeSpacingContract.test.ts)；`mountSolidWorkbench` 混排回归 | 在真实窗口完成一次最终视觉验收 |
 | [P3](#p3-本机-acp-agent-运行时探测) | 本机 ACP Agent 运行时探测 | **施工中** | 2026-08-31 | [本机 ACP Agent 运行时探测施工书](Pylon-本机ACP-Agent运行时探测施工书.md)；`cargo test --manifest-path src-tauri/pylon-core/Cargo.toml`；`npm.cmd run check:solid` | 进入验收（用户要求暂跳过），转查 P4 |
-| [P4](#p4-连续同种工具调用聚合) | 连续同种工具调用聚合 | **施工中** | 2026-08-31 | [连续同种工具调用聚合施工书](Pylon-连续同种工具调用聚合施工书.md)；`activityGrouping.ts`；`activityGrouping.test.ts`；`workbenchProjector.ts`；`SolidWorkbenchApp.solid.tsx` | 实现 Slice B 组级展示，保持单次卡片与连接线 identity |
+| [P4](#p4-连续同种工具调用聚合) | 连续同种工具调用聚合 | **施工中** | 2026-08-31 | [连续同种工具调用聚合施工书](Pylon-连续同种工具调用聚合施工书.md)；`activityGrouping.ts`；`activityGrouping.test.ts`；`SolidWorkbenchApp.solid.tsx`；`WorkbenchChrome.css` | 实现 Slice C 展开状态隔离与回放回归 |
 | [P5](#p5-mcpskill插件设置管理) | MCP、Skill、插件设置管理 | **待调查** | — | [问题清单第 5 项](Pylon-下一阶段问题清单.md#5-mcpskill插件设置管理) | 盘点 schema、存储和权限边界 |
 | [P6](#p6-全局设置页面重组) | 全局设置页面重组 | **待调查** | — | [问题清单第 6 项](Pylon-下一阶段问题清单.md#6-全局设置页面重组) | 盘点注册表、旧键迁移和搜索索引 |
 | [P7](#p7-agentsheet-空态与创建会话形态) | Agentsheet 空态与创建会话形态 | **待调查** | — | [问题清单第 7 项](Pylon-下一阶段问题清单.md#7-agentsheet-空态与创建会话形态) | 确认空态创建命令边界 |
@@ -70,7 +70,7 @@
 - 状态：`施工中`
 - 证据：`workbenchProjector.ts` 的 `reduceTool` / `selectActivityDisplayOrder` / `toolInvocationSnapshot`；`SolidWorkbenchApp.solid.tsx` 的 `CanonicalActivityList`；`SolidToolInvocationCard` 单次折叠 presenter；activity/tool projection 回归测试。
 - 结论：未发现应删除的过时测试；现有测试锁定 identity、终态幂等、父子关系和三路径 parity，不能用“数组相邻”替代展示序列。
-- 下一步：实现组级展示，保持单次卡片、连接线和 activity identity 不变。
+- 下一步：实现 Slice C 展开状态隔离与 live/replay/restart 回归。
 
 <a id="p5"></a>
 ### P5 · MCP、Skill、插件设置管理

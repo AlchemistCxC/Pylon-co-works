@@ -5,6 +5,7 @@ import { prepareMessages } from '../../components/chat/messagePipeline.ts'
 import type { Message, RenderMessage } from '../../components/chat/messageTypes.ts'
 import type { WorkbenchAppearanceSnapshot } from '../../domains/workbench/appearance.ts'
 import { selectActivityDisplayOrder, toolInvocationSnapshot, type WorkbenchActivityNode, type WorkbenchDocument, type WorkbenchExtensionNode, type WorkbenchInteraction } from '../../domains/workbench/workbenchProjector.ts'
+import { groupAdjacentToolActivities, type AdjacentToolActivityGroup } from '../../domains/workbench/activityGrouping.ts'
 import { coalesceAdjacentDisplayTextParts, isValidDiffContentInput, isValidHookSurfaceInput, isValidLspDiagnosticContentInput, type ContentPart, type LspDiagnosticContentPart } from '../../domains/workbench/content/contentPartSchema.ts'
 import { diffSnapshotFromPart } from '../../domains/workbench/diffSnapshot.ts'
 import type { MessageListItem } from '../../domains/workbench/messageListPort.ts'
@@ -918,16 +919,76 @@ function CanonicalActivityList(props: {
       return existing
     }))
   })
+  const groupedRows = createMemo(() => {
+    const currentRows = rows()
+    const groups = groupAdjacentToolActivities(currentRows.map(row => row.activity))
+    const firstById = new Map(groups.map(group => [group.items[0]!.id, group]))
+    const consumed = new Set<string>()
+    const units: Array<StableActivityRow | AdjacentToolActivityGroup> = []
+    for (const row of currentRows) {
+      if (consumed.has(row.activity.id)) continue
+      const group = firstById.get(row.activity.id)
+      if (!group || group.count === 1) {
+        units.push(row)
+        continue
+      }
+      units.push(group)
+      // Skip the remaining members; they are rendered inside the group row.
+      for (const member of group.items) consumed.add(member.id)
+    }
+    return units
+  })
   return <Show when={rows().length > 0 ? props.document : undefined}>
     {document => <div class="solid-workbench-activities" aria-label="活动" data-activity-count={rows().length}>
-      <For each={rows()}>{row => <CanonicalActivitySlot
-        activity={row.activity}
-        document={document()}
-        context={props.context}
-        connectorPort={props.connectorPort}
-      />}</For>
+      <For each={groupedRows()}>{unit => {
+        if ('items' in unit) {
+          return <CanonicalActivityGroup
+            group={unit}
+            document={document()}
+            context={props.context}
+            connectorPort={props.connectorPort}
+          />
+        }
+        return <CanonicalActivitySlot
+          activity={unit.activity}
+          document={document()}
+          context={props.context}
+          connectorPort={props.connectorPort}
+        />
+      }}</For>
     </div>}
   </Show>
+}
+
+function CanonicalActivityGroup(props: {
+  group: AdjacentToolActivityGroup
+  document: WorkbenchDocument
+  context: SolidWorkbenchContextValue
+  connectorPort: ReturnType<typeof createToolConnectorLayoutPort>
+}) {
+  const [open, setOpen] = createSignal(false)
+  const label = () => props.group.items[0]?.title || props.group.toolKey
+  return <section class="solid-workbench-activity-group" data-activity-group={props.group.groupId} data-count={props.group.count}>
+    <button
+      class="solid-workbench-activity-group-head"
+      type="button"
+      aria-expanded={open()}
+      onClick={() => setOpen(value => !value)}
+    >
+      <span>{capitalizeToolName(label())}</span>
+      <span> · {props.group.count} 次调用 · {props.group.status === 'mixed' ? '状态混合' : props.group.status}</span>
+    </button>
+    <Show when={open()}>
+      <div class="solid-workbench-activity-group-items" role="group" aria-label={`${label()} 的单次调用`}>
+        <For each={props.group.items}>{activity => <CanonicalActivitySlot
+          activity={activity}
+          document={props.document}
+          context={props.context}
+          connectorPort={props.connectorPort}
+        />}</For>
+      </div>
+    </Show>
+  </section>
 }
 
 /**

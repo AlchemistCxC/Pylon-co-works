@@ -1,6 +1,6 @@
 # Pylon 连续同种工具调用聚合施工书
 
-> 状态：施工中（调查完成，Slice A 完成）
+> 状态：施工中（调查完成，Slice A/B 完成）
 > 对应问题：[P4 · 连续同种工具调用聚合](Pylon-问题台账.md#p4)
 > 范围：Workbench activity projection、工具卡展示、活动排序与展开状态
 
@@ -38,12 +38,17 @@
 - 新增 `src/domains/workbench/activityGrouping.ts` 纯函数：按 normalized identity（canonicalName → toolKindWire → providerName → title）分组，仅处理已排序 segment；非 tool、key 或 parent 变化均断组。
 - 分组只引用原始 activity 节点，保留每次调用的输入、输出、错误和生命周期；测试覆盖同类合组、硬边界、身份优先级及 mixed 状态。
 
-### Slice B：组级展示（下一步）
+### Slice B：组级展示
 
 - 在 `CanonicalActivityList` 增加组行；组行显示工具名、调用次数和状态摘要。
 - 组展开显示既有 `SolidToolInvocationCard`，单次折叠逻辑保持不变；连接线仍以单次节点 id 注册。
 
-### Slice C：展开状态与回归
+### Slice B（已完成）
+
+- `CanonicalActivityList` 按消息锚点 segment 调用分组 seam；多次相邻同类工具默认收敛为组行，展开后逐次复用既有卡片。
+- 组行不改 activity 节点和 connector key；样式沿用 terminal-like 间距 token，单次工具仍由原卡片负责折叠。
+
+### Slice C：展开状态与回归（下一步）
 
 - 组级状态按 `sessionId:groupId` 隔离，session 切换/回放重建时清理；不修改 canonical/journal schema。
 - 覆盖 live/replay/restart 顺序、终态幂等、父子活动、未知工具名及缺失 identity；过时的“按数组相邻即连续”测试应删除或改为展示序列契约。
