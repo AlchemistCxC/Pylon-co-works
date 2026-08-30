@@ -1,6 +1,6 @@
 # Pylon 连续同种工具调用聚合施工书
 
-> 状态：施工中（调查完成，Slice A/B 完成）
+> 状态：施工中（调查完成，Slice A/B/C 完成）
 > 对应问题：[P4 · 连续同种工具调用聚合](Pylon-问题台账.md#p4)
 > 范围：Workbench activity projection、工具卡展示、活动排序与展开状态
 
@@ -48,10 +48,15 @@
 - `CanonicalActivityList` 按消息锚点 segment 调用分组 seam；多次相邻同类工具默认收敛为组行，展开后逐次复用既有卡片。
 - 组行不改 activity 节点和 connector key；样式沿用 terminal-like 间距 token，单次工具仍由原卡片负责折叠。
 
-### Slice C：展开状态与回归（下一步）
+### Slice C：展开状态与回归
 
 - 组级状态按 `sessionId:groupId` 隔离，session 切换/回放重建时清理；不修改 canonical/journal schema。
 - 覆盖 live/replay/restart 顺序、终态幂等、父子活动、未知工具名及缺失 identity；过时的“按数组相邻即连续”测试应删除或改为展示序列契约。
+
+### Slice C（已完成）
+
+- 组级展开状态由 `CanonicalActivityList` 按 `sessionId:groupId` 管理；切换 session 时清空，活动事实和 journal 不受影响。
+- 组内单次卡片继续使用各自 activity id 注册 connector；目标 renderer、分组 seam 与 Solid 架构门禁回归通过。
 
 ## 5. 兼容性、性能与回滚
 

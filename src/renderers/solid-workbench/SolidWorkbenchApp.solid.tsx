@@ -903,12 +903,18 @@ function CanonicalActivityList(props: {
   connectorPort: ReturnType<typeof createToolConnectorLayoutPort>
 }) {
   const [rows, setRows] = createSignal<readonly StableActivityRow[]>([])
+  const [expandedGroups, setExpandedGroups] = createSignal<Record<string, boolean>>({})
+  let expandedSessionId: string | undefined
   createEffect(() => {
     const document = props.document
     const activities = props.activities
     if (!document) {
       setRows([])
       return
+    }
+    if (expandedSessionId !== document.sessionId) {
+      expandedSessionId = document.sessionId
+      setExpandedGroups({})
     }
     const previous = new Map(untrack(rows).map(row => [row.key, row]))
     setRows(activities.map(activity => {
@@ -947,6 +953,8 @@ function CanonicalActivityList(props: {
             document={document()}
             context={props.context}
             connectorPort={props.connectorPort}
+            open={expandedGroups()[unit.groupId] === true}
+            onToggle={() => setExpandedGroups(previous => ({ ...previous, [unit.groupId]: !previous[unit.groupId] }))}
           />
         }
         return <CanonicalActivitySlot
@@ -965,20 +973,21 @@ function CanonicalActivityGroup(props: {
   document: WorkbenchDocument
   context: SolidWorkbenchContextValue
   connectorPort: ReturnType<typeof createToolConnectorLayoutPort>
+  open: boolean
+  onToggle: () => void
 }) {
-  const [open, setOpen] = createSignal(false)
   const label = () => props.group.items[0]?.title || props.group.toolKey
   return <section class="solid-workbench-activity-group" data-activity-group={props.group.groupId} data-count={props.group.count}>
     <button
       class="solid-workbench-activity-group-head"
       type="button"
-      aria-expanded={open()}
-      onClick={() => setOpen(value => !value)}
+      aria-expanded={props.open}
+      onClick={props.onToggle}
     >
       <span>{capitalizeToolName(label())}</span>
       <span> · {props.group.count} 次调用 · {props.group.status === 'mixed' ? '状态混合' : props.group.status}</span>
     </button>
-    <Show when={open()}>
+    <Show when={props.open}>
       <div class="solid-workbench-activity-group-items" role="group" aria-label={`${label()} 的单次调用`}>
         <For each={props.group.items}>{activity => <CanonicalActivitySlot
           activity={activity}
