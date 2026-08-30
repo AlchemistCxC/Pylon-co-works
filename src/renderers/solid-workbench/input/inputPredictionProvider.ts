@@ -12,6 +12,99 @@ export interface InputPredictionProvider {
   predict(request: InputPredictionRequest): Promise<string | null>
 }
 
+export interface HttpPredictionProviderOptions {
+  /** Local or remote endpoint that accepts a JSON prediction request. */
+  readonly endpoint: string | URL
+  /** Injectable for tests; defaults to the browser/host fetch implementation. */
+  readonly fetch?: typeof globalThis.fetch
+  readonly headers?: HeadersInit
+  /** Bound the durable history sent to the model (newest entries win). */
+  readonly maxHistoryItems?: number
+  readonly maxHistoryChars?: number
+}
+
+export interface PredictionHttpPayload {
+  readonly sessionId: string
+  readonly generation?: number
+  readonly draft: string
+  readonly history: readonly string[]
+}
+
+/**
+ * Keep prediction context bounded even when the SQLite transcript is large.
+ * Ordering is retained; the newest messages are preferred when truncating.
+ */
+export function boundPredictionHistory(
+  history: readonly string[],
+  options: Pick<HttpPredictionProviderOptions, 'maxHistoryItems' | 'maxHistoryChars'> = {},
+): readonly string[] {
+  const maxItems = Math.max(0, Math.floor(options.maxHistoryItems ?? 24))
+  const maxChars = Math.max(0, Math.floor(options.maxHistoryChars ?? 6_000))
+  if (maxItems === 0 || maxChars === 0) return []
+  const selected: string[] = []
+  let chars = 0
+  for (let index = history.length - 1; index >= 0 && selected.length < maxItems; index -= 1) {
+    const value = history[index]?.trim()
+    if (!value) continue
+    const nextChars = chars + value.length
+    if (nextChars > maxChars) continue
+    selected.push(value)
+    chars = nextChars
+  }
+  selected.reverse()
+  return selected
+}
+
+function extractPredictionPayload(value: unknown): string | null {
+  if (typeof value === 'string') return value
+  if (!value || typeof value !== 'object') return null
+  const record = value as Record<string, unknown>
+  for (const key of ['suggestion', 'prediction', 'text']) {
+    if (typeof record[key] === 'string') return record[key]
+  }
+  const nested = record.data
+  return nested && typeof nested === 'object'
+    ? extractPredictionPayload(nested)
+    : null
+}
+
+/**
+ * Concrete provider seam for a local sidecar or remote prediction service.
+ * The scheduler owns debounce, cancellation and cooldown; this adapter only
+ * performs one bounded request and deliberately returns null for malformed or
+ * non-2xx responses so the UI can fall back to history completion.
+ */
+export function createHttpPredictionProvider(options: HttpPredictionProviderOptions): InputPredictionProvider {
+  const endpoint = String(options.endpoint).trim()
+  if (!endpoint) throw new Error('预测 provider endpoint 不能为空')
+  const request = options.fetch ?? globalThis.fetch
+  return {
+    async predict(input): Promise<string | null> {
+      if (input.signal.aborted) return null
+      const payload: PredictionHttpPayload = {
+        sessionId: input.sessionId,
+        ...(input.generation === undefined ? {} : { generation: input.generation }),
+        draft: input.draft,
+        history: boundPredictionHistory(input.history, options),
+      }
+      const response = await request(endpoint, {
+        method: 'POST',
+        headers: { accept: 'application/json', 'content-type': 'application/json', ...options.headers },
+        body: JSON.stringify(payload),
+        signal: input.signal,
+      })
+      if (!response.ok) return null
+      let body: unknown
+      try {
+        body = await response.json()
+      } catch {
+        return null
+      }
+      return extractPredictionPayload(body)
+    },
+  }
+}
+
 export interface PredictionScheduler {
   schedule(request: Omit<InputPredictionRequest, 'signal'>, onResult: (value: string | null) => void): void
   cancel(): void

@@ -19,6 +19,20 @@ function runtime() {
 }
 
 describe('WorkbenchHostPort', () => {
+  it('carries an optional prediction provider into Solid services', () => {
+    const predictionProvider = { predict: vi.fn(async () => '继续做') }
+    const host = createWorkbenchHostPort({
+      runtime: runtime(),
+      appearance: createStaticWorkbenchAppearanceStore(structuredClone(DEFAULTS)),
+      sessionUi: createSessionUiStore(),
+      commands: createFakeWorkbenchCommandFacade(),
+      suiteId: 'suite.test', sheetId: 'sheet-a', sessionOwnerKey: 'owner-a', sessionId: 's1',
+      predictionProvider,
+    })
+    expect(host.predictionProvider).toBe(predictionProvider)
+    expect(createSolidWorkbenchServicesFromHostPort(host).predictionProvider).toBe(predictionProvider)
+  })
+
   it('exposes an immutable document reader and slice subscriptions', () => {
     const source = runtime()
     const host = createWorkbenchHostPort({

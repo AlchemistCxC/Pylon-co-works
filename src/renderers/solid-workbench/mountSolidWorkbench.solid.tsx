@@ -75,6 +75,7 @@ export function mountSolidWorkbench({ host, input: initialInput, services, hostP
     sessionUi: services.sessionUi,
     commands: services.commands,
     hostPort,
+    predictionProvider: services.predictionProvider ?? hostPort.predictionProvider,
     paused: pausedSignal,
     reportRendererError(error) {
       const payload = {

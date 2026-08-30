@@ -5,6 +5,7 @@ import type { WorkbenchDocument, WorkbenchMessage, WorkbenchActivityNode, Workbe
 import type { WorkbenchRuntime, WorkbenchRuntimeSlice, WorkbenchRuntimeSnapshot } from '../../domains/workbench/workbenchRuntime.ts'
 import type { RenderAppearanceSnapshot } from '../../contracts/messageRenderer.ts'
 import type { GenerationActivitySnapshot } from '../../domains/workbench/generationFooterContracts.ts'
+import type { InputPredictionProvider } from './input/inputPredictionProvider.ts'
 
 export type WorkbenchDocumentSlice = 'document' | 'timeline' | 'messages' | 'activities' | 'interactions' | 'extensions' | 'session' | 'usage' | 'config' | 'commands' | 'assist' | 'diagnostics'
 
@@ -122,6 +123,8 @@ export interface WorkbenchHostPort {
   readonly commands: WorkbenchCommandPort
   readonly capabilities: WorkbenchCapabilityReader
   readonly diagnostics: RendererDiagnosticPort
+  /** Optional host-owned local/remote provider for input prediction. */
+  readonly predictionProvider?: InputPredictionProvider
 }
 
 export interface WorkbenchHostPortInput {
@@ -135,6 +138,7 @@ export interface WorkbenchHostPortInput {
   readonly sessionId: string | null
   readonly capabilities?: WorkbenchCapabilitySnapshot
   readonly diagnostics?: ((diagnostic: RendererDiagnosticContext) => void) | Pick<RendererDiagnosticPort, 'report'>
+  readonly predictionProvider?: InputPredictionProvider
   readonly renderAppearance?: {
     resolve(request: { readonly kind: string; readonly suiteId: string; readonly slotId: string }, host: WorkbenchAppearanceSnapshot): RenderAppearanceSnapshot
     subscribe(listener: () => void): () => void
@@ -300,6 +304,7 @@ export function createWorkbenchHostPort(input: WorkbenchHostPortInput): Workbenc
     commands: createCommandPort(input.commands, capabilities),
     capabilities,
     diagnostics: createDiagnosticPort(input),
+    predictionProvider: input.predictionProvider,
   })
 }
 

@@ -4,6 +4,7 @@ import type { WorkbenchCommandFacade } from '../../domains/workbench/workbenchCo
 import type { WorkbenchRuntime } from '../../domains/workbench/workbenchRuntime.ts'
 import type { WorkbenchHostPort } from './workbenchHostPort.ts'
 import type { RendererActivationSnapshot } from '../../plugin-runtime/renderers/rendererSuiteTypes.ts'
+import type { InputPredictionProvider } from './input/inputPredictionProvider.ts'
 export type {
   WorkbenchHostPort,
   WorkbenchCommandPort,
@@ -24,6 +25,8 @@ export interface SolidWorkbenchServices {
   commands: WorkbenchCommandFacade
   /** Stable framework-neutral seam consumed by Suite adapters. */
   hostPort?: WorkbenchHostPort
+  /** Optional host-owned local/remote provider for low-frequency input prediction. */
+  predictionProvider?: InputPredictionProvider
 }
 
 export interface WorkbenchMountInput {

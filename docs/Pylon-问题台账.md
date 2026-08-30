@@ -22,14 +22,14 @@
 | [P6](#p6-全局设置页面重组) | 全局设置页面重组 | **首片完成** | 2026-08-31 | [全局设置页面重组施工书](Pylon-全局设置页面重组施工书.md)；设置域导航/标签/贡献搜索回归；`npm.cmd run check:solid` | 进入 Slice D：失效入口清理与注册表完整性探针 |
 | [P7](#p7-agentsheet-空态与创建会话形态) | Agentsheet 空态与创建会话形态 | **首片完成** | 2026-08-31 | [Agentsheet 空态与创建会话形态施工书](Pylon-Agentsheet空态与创建会话形态施工书.md)；`mountSolidWorkbench.solid.test.tsx`；空态 CSS contract | 暂跳过真实窗口验收；转查 P8 Filesheet 语言插件与 Git |
 | [P8](#p8-filesheet-语言插件与-git) | Filesheet 语言插件与 Git | **首片完成** | 2026-08-31 | [Filesheet 语言插件与 Git 施工书](Pylon-Filesheet语言插件与Git施工书.md)；`FileLanguageProvider`；`FileCodeEditor`；`FileWorkbenchRegistry`；19 项 Filesheet/Git 回归；`npm.cmd run check:solid` | 暂跳过真实窗口验收；后续再转查 P9 输入内容预测 |
-| [P9](#p9-输入内容预测) | 输入内容预测 | **首片完成** | 2026-08-31 | [输入内容预测施工书](Pylon-输入内容预测施工书.md)；`inputPredictionState.ts`；`inputPredictionProvider.ts`；`InputBar.solid.tsx`；32 项输入预测测试；`npm.cmd run check:solid` | Slice C：接入真实模型 provider 并验证大库性能 |
+| [P9](#p9-输入内容预测) | 输入内容预测 | **首片完成** | 2026-08-31 | [输入内容预测施工书](Pylon-输入内容预测施工书.md)；`inputPredictionState.ts`；`inputPredictionProvider.ts`；`InputBar.solid.tsx`；36 项输入预测/宿主接线测试；`npm.cmd run check:solid` | 用真实 endpoint 做端到端与大库性能验证；ACP 独立 RPC 就绪后再接入 |
 | [P11](#p11-思考块折叠态与助手消息间距) | 思考块折叠态与助手消息间距 | **首片完成** | 2026-08-31 | `ChatView.css` terminal-like collapsed reasoning cadence；主题 contract | 暂跳过真实窗口验收 |
 | [P12](#p12-filesheet-发送指令) | FileSheet 发送指令不可用 | **首片完成** | 2026-08-31 | `prompt.rs` camelCase IPC 注解；`DispatchBar` owner resolver；2 项 owner 测试；typed client 回归 | 实机 invoke 验收后置 |
 | [P13](#p13-生成指示器时间与星芒停滞) | 生成指示器时间与星芒停滞 | **首片完成** | 2026-08-31 | `GenerationFooter.solid.tsx` 120ms repaint cap；高间隔配置测试 | 真实窗口检查 reduced-motion 体验 |
 | [P13.1](#p131-生成指示器文案疯狂刷新) | 生成指示器文案疯狂刷新 | **首片完成** | 2026-08-31 | `generationIndicatorCopyMachine` 最短驻留保护；copy machine 回归 | 真实 trace 校准 waiting 阈值 |
 | [P14](#p14-展开思考块自动滚动) | 展开思考块不自动滚动 | **首片完成** | 2026-08-31 | `ReasoningBlock` 内部 follow-bottom；展开态流式状态回归 | 真实窗口检查用户上滚后的跟随边界 |
 | [P15](#p15-流式结束闪动) | 流式结束闪动 | **首片完成** | 2026-08-31 | `useScrollFollow` 流式更新改 auto scroll，避免 smooth 动画叠加 | 真实窗口检查终态切换观感 |
-| [P16](#p16-hermes-terminal-类型与参数外漏) | Hermes terminal 类型/参数解析 | **施工中** | 2026-08-31 | `toolResolution.ts`；`toolPresentation.test.ts` Hermes terminal/嵌入参数覆盖 | 继续补齐 provider wire fixture 与其他 execute 类型核验 |
+| [P16](#p16-hermes-terminal-类型与参数外漏) | Hermes terminal 类型/参数解析 | **首片完成** | 2026-08-31 | `toolResolution.ts`；`toolPresentation.test.ts` Hermes terminal/嵌入参数覆盖 | 用真实 Hermes trace 复核未登记工具的 provider overlay |
 
 ## 核验记录
 
@@ -150,8 +150,10 @@
 - 状态：`首片完成`
 - 证据：`src/renderers/solid-workbench/input/inputPredictionState.ts`；`InputBar.solid.tsx`；`InputBar.solid.test.tsx`；`inputPredictionState.test.ts`
 - 命令：`npm.cmd exec vitest run src/renderers/solid-workbench/input/__tests__/InputBar.solid.test.tsx src/renderers/solid-workbench/input/__tests__/inputPredictionState.test.ts`（28 项通过）；`npm.cmd run check:solid`
-- 未确认：真实模型 provider 的端到端请求/取消和生产 SQLite 大库性能；按当前工作节奏留到 Slice B。
-- Slice B 已完成：`inputPredictionProvider.ts` 提供可选 provider、400ms 防抖、15 秒冷却、AbortController、输出过滤和 session/generation 迟到结果丢弃；provider 失败回退本地历史。下一步进入 Slice C 的真实模型适配与性能验证（当前 ACP facade 尚无独立预测 RPC）。
+- 未确认：真实模型 provider 的端到端请求/取消和生产 SQLite 大库性能；按当前工作节奏留到 Slice C 验证。
+- Slice B 已完成：`inputPredictionProvider.ts` 提供可选 provider、400ms 防抖、15 秒冷却、AbortController、输出过滤和 session/generation 迟到结果丢弃；provider 失败回退本地历史。
+- Slice C 首片已完成：新增 `createHttpPredictionProvider`，支持本地 sidecar 或远端 HTTP endpoint，统一解析 `suggestion`/`prediction`/`text` 响应；请求上下文按 24 条、6000 字符上限裁剪，避免 SQLite 大库放大网络负载；provider 已从 `WorkbenchHostPort`/`SolidWorkbenchServices` 传递到 `SolidInputBar`。当前 ACP facade 尚无独立预测 RPC，因此没有伪造 `assist.prediction` 事件作为 provider 请求。
+- 核验：`inputPredictionProvider.test.ts` 覆盖历史裁剪、HTTP 请求/响应、异常回退和取消；`workbenchHostPort.test.ts` 覆盖宿主接线；`npm.cmd run check:solid` 通过。下一步用真实 endpoint 做端到端与大库性能验证，ACP 独立 RPC 就绪后再接入。
 
 <a id="p11"></a>
 ### P11 · 思考块折叠态与助手消息间距

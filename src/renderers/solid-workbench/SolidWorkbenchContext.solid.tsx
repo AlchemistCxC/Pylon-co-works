@@ -6,6 +6,7 @@ import type { WorkbenchRuntime, WorkbenchRuntimeSnapshot } from '../../domains/w
 import type { SolidWorkbenchInput } from './workbenchContracts.ts'
 import type { WorkbenchHostPort } from './workbenchHostPort.ts'
 import type { RendererActivationSnapshot } from '../../plugin-runtime/renderers/rendererSuiteTypes.ts'
+import type { InputPredictionProvider } from './input/inputPredictionProvider.ts'
 
 export interface SolidWorkbenchContextValue {
   input: Accessor<SolidWorkbenchInput>
@@ -21,6 +22,8 @@ export interface SolidWorkbenchContextValue {
   reportRendererError?(error: unknown): void
   reportRendererAction?(action: unknown): void
   activation?: RendererActivationSnapshot
+  /** Optional host-owned local/remote provider for low-frequency input prediction. */
+  predictionProvider?: InputPredictionProvider
 }
 
 export const SolidWorkbenchContext = createContext<SolidWorkbenchContextValue>()
